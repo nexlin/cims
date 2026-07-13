@@ -4,7 +4,7 @@ CIMS Server Agent (P10)
 
 Usage:
   cims_agent.py \
-      --csc-url https://csc.example.com:4420 \
+      --oam-url https://oam.example.com:4419 \
       --state-dir ~/.local/state/cims-agent
 
 On first start (no state):
@@ -611,6 +611,77 @@ def _pgrep_module(name: str):
     return None
 
 
+_HA_NOTIFY_LOG_DIR = os.environ.get("HA_LOG_DIR", "/var/log/cims-ha")
+_HA_FLAP_WINDOW_SEC = 600
+
+
+def _ha_transitions_10m() -> dict:
+    """{svc: 최근 10분 keepalived 상태 전이 수} — cims-notify 로그
+    (notify_<svc>.log, '<ISO8601> TYPE NAME -> STATE ...') tail 파싱.
+    OAM 의 ha_flap 알람(threshold_crossed) 입력. 전이 개별 건은 알람이 아니라
+    이벤트(로그)로만 남긴다(alarm_standardization §3.6). 미가독/부재는 조용히 생략."""
+    out = {}
+    try:
+        names = os.listdir(_HA_NOTIFY_LOG_DIR)
+    except OSError:
+        return out
+    now = time.time()
+    for fn in names:
+        if not (fn.startswith("notify_") and fn.endswith(".log")):
+            continue
+        svc = fn[len("notify_"):-len(".log")]
+        try:
+            with open(os.path.join(_HA_NOTIFY_LOG_DIR, fn), "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 32768))
+                lines = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        n = 0
+        for ln in lines[-200:]:
+            if " -> " not in ln:
+                continue
+            try:
+                t = datetime.fromisoformat(ln.split(" ", 1)[0]).timestamp()
+            except ValueError:
+                continue
+            if now - t <= _HA_FLAP_WINDOW_SEC:
+                n += 1
+        if n:
+            out[svc] = n
+    return out
+
+
+_CFG_HASH_CACHE: dict = {}   # config.json path → (mtime, hash) — 2초 주기 재해시 방지
+
+
+def _cfg_hash_for_module(name: str):
+    """modules/<name>/current/<name>/config.json (legacy 는 current/config.json) 의
+    canonical hash 12hex — OAM 이 배포기록 실체화본 hash 와 비교해 config_out_of_sync
+    알람을 판정. parse→canonical dump(sort_keys) 해시라 들여쓰기·키순서에 불변.
+    파일 없음/파싱 실패는 None (보고 생략 → OAM 평가 제외)."""
+    base = os.path.join(DEFAULT_INSTALL_ROOT, name, "current")
+    for rel in (os.path.join(name, "config.json"), "config.json"):
+        p = os.path.join(base, rel)
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        cached = _CFG_HASH_CACHE.get(p)
+        if cached and cached[0] == st.st_mtime:
+            return cached[1]
+        try:
+            with open(p) as f:
+                obj = json.load(f)
+            h = hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False,
+                                          separators=(",", ":")).encode("utf-8")).hexdigest()[:12]
+        except Exception:
+            return None
+        _CFG_HASH_CACHE[p] = (st.st_mtime, h)
+        return h
+    return None
+
+
 def collect_metrics() -> dict:
     """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
@@ -664,6 +735,25 @@ def collect_metrics() -> dict:
     for stale_pid in list(_PROC_CPU_CACHE.keys()):
         if stale_pid not in live:
             _PROC_CPU_CACHE.pop(stale_pid, None)
+    # 설치 모듈별 배포 config.json canonical hash — modules[](실행 중만) 와 별개
+    # top-level 키: 중지 모듈의 드리프트도 OAM 이 평가할 수 있게.
+    try:
+        hashes = {}
+        for name in _metric_module_names():
+            h = _cfg_hash_for_module(name)
+            if h:
+                hashes[name] = h
+        if hashes:
+            m["cfg_hashes"] = hashes
+    except Exception:
+        pass
+    # keepalived 전이 카운트 (최근 10분) — OAM ha_flap 알람 입력.
+    try:
+        ht = _ha_transitions_10m()
+        if ht:
+            m["ha_transitions"] = ht
+    except Exception:
+        pass
     return m
 
 
@@ -2199,7 +2289,7 @@ def job_health_check(params: dict) -> tuple:
     probes_default = {
         "csp":     [("udp", 5060)],
         "cmp":     [("udp", 9000)],
-        "csc":     [("tcp", 4420)],
+        "csc":     [("tcp", 4421)],
         "cwrtc":   [("tcp", 8080)],
         "console": [("tcp", 3001)],
         "phone":   [("tcp", 3000)],

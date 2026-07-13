@@ -682,7 +682,7 @@ if __name__ == '__main__':
 
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
                              deps: list, proc_down_targets: set,
-                             cold_skip: set) -> list:
+                             cold_skip: set, expected_cfg: dict | None = None) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
             반환: (mo_instance, is_open, msg_open, msg_close) 목록."""
             chk = rule.get('check')
@@ -720,6 +720,40 @@ if __name__ == '__main__':
                     mo = f"{host}/{proc}"
                     kw = dict(mo=mo, host=host, module=proc)
                     res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+            elif chk == 'config_drift':
+                # 노드 실파일 hash (agent 보고) vs 배포기록 실체화본 hash — 불일치 = 드리프트.
+                # 구 agent(cfg_hashes 미보고)는 평가 자체를 건너뜀 (오알람 없음).
+                reported = metric.get('cfg_hashes')
+                if not isinstance(reported, dict) or not reported:
+                    return res
+                for dep in deps:
+                    if dep.get('agent_id') != agent.get('id'):
+                        continue
+                    if dep.get('status') not in ('running', 'stopped'):
+                        continue
+                    proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    got = reported.get(proc)
+                    exp = (expected_cfg or {}).get((agent.get('id'), proc))
+                    if not proc or not got or not exp:
+                        continue        # 미보고 모듈/기대값 산출 실패 — 판정 보류
+                    mo = f"{host}/{proc}/config"
+                    kw = dict(mo=mo, host=host, module=proc, expected=exp, actual=got)
+                    res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+            elif chk == 'ha_flap':
+                # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
+                # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.
+                trans = metric.get('ha_transitions')
+                if not isinstance(trans, dict) or not trans:
+                    return res
+                thr = int(rule.get('threshold', 6))
+                for svc, cnt in trans.items():
+                    try:
+                        cnt = int(cnt)
+                    except (TypeError, ValueError):
+                        continue
+                    mo = f"{host}/ha/{svc}"
+                    kw = dict(mo=mo, host=host, svc=svc, count=cnt, threshold=thr)
+                    res.append((mo, cnt >= thr, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
             return res
 
         def _sweep_agent_alerts(agent_rules: list, proc_down_targets: set):
@@ -730,6 +764,28 @@ if __name__ == '__main__':
             deps = _deploy_load_all(config)
             mroot = _metric_root(config)
             cold_skip = _cold_standby_skip_set()
+            # config_drift 기대 hash — 배포별 실체화본을 스윕당 1회만 계산 (pkg 캐시).
+            expected_cfg: dict = {}
+            if any(r.get('check') == 'config_drift' for r in agent_rules):
+                from handlers.agents import _pkg_load, deploy_config_hash
+                _pkgs: dict = {}
+                for dep in deps:
+                    if dep.get('status') not in ('running', 'stopped'):
+                        continue
+                    proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    pid = dep.get('package_id')
+                    if not proc or pid is None:
+                        continue
+                    if pid not in _pkgs:
+                        try:
+                            _pkgs[pid] = _pkg_load(config, pid)
+                        except Exception:
+                            _pkgs[pid] = None
+                    try:
+                        expected_cfg[(dep.get('agent_id'), proc)] = \
+                            deploy_config_hash(config, _pkgs[pid], dep.get('config'))
+                    except Exception:
+                        pass
             active = set()
             for ag in agents:
                 if ag.get('status') != 'online':
@@ -739,7 +795,7 @@ if __name__ == '__main__':
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip):
+                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, expected_cfg):
                         active.add(f"{r.get('code')}@{mo}")
                         _transition(r, mo, f"agent:{host}", is_open, msg_open, msg_close)
             # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.

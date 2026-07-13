@@ -39,7 +39,7 @@
 
 | # | 컴포넌트 | 모드 | 포트 | 같은 인스턴스에 hosting |
 |---|---|---|---|---|
-| 1 | CSC (mgmt-server) | Active/Standby | 4420 admin + 4430 mcptt | (없음) |
+| 1 | CSC (mgmt-server) | Active/Standby | 4421 admin + 4430 mcptt | (없음) |
 | 2 | VoLTE SIP (CSP) | Active/Standby | 5060/UDP, 25061/TCP, 5061/TLS | ISP (IBCF SIP) 공존 |
 | 3 | PTT SIP (PSP) | Active/Standby | 5060/UDP | (단일) |
 | 4 | VoLTE Media (CMP) | **All Active** | 9000/UDP (control), 50000~ RTP | IMP (IBCF Media) 공존 |
@@ -366,10 +366,23 @@ systemd `cims@` instance 는 enable 하지 않는다.
 - `agent/bin/cims-health <svc>` — ha.json `services.<svc>.{port, proto, bind_ip}`
   lookup 후 `ss -ln{t,u}` 로 binding 확인. rc=0 / rc=1.
 - **port/proto 유도**: OAM 렌더(`ha_groups._infer_health_port_proto`)가 그룹 멤버 배포의
-  대표 daemon 모듈로 결정. csc 는 배포 실효 설정(config_template default + overlay)의
-  `Server.Port` 를 정본으로 유도 — 콘솔에서 포트를 바꿔도 다음 render 가 자동 추종.
+  대표 daemon 모듈로 결정. csc 는 실효 admin 포트를 게이트웨이 self-register 와 동일한
+  단일 해석(`handlers.agents.effective_server_port`: materialize `Server.Port` →
+  pkg `gateway.default_port`)으로 유도 — 콘솔에서 포트를 바꾸면 배포 설정 저장 경로가
+  게이트웨이 라우트 재등록 + `update_ha` 재렌더를 함께 큐잉해 자동 추종.
   그 외 모듈은 service descriptor 기본값. 그룹 `failover_options.health.{port,proto}`
   수동 오버라이드가 최우선.
+- **진실 기반 검사 (csc)**: 렌더가 `services.<svc>.health_module/health_config_key`
+  힌트를 내리면 (csc 이고 수동 health.port 오버라이드가 없을 때), cims-health 는
+  검사 시점에 노드 로컬 배포 설정
+  `${cims_home}/modules/<mod>/current/<mod>/config.json` 의 그 키(flat `"Server.Port"`
+  우선, nested 수용)에서 포트를 직접 읽어 검사한다. 배포기록과 노드 실파일의 포트가
+  드리프트해도 헬스는 모듈이 실제 bind 하는 포트를 보므로 HA 는 흔들리지 않고,
+  드리프트 자체는 `CIMS-CFG-001 config_out_of_sync` 알람이 노출한다. 읽기 실패 시
+  ha.json port → 내장 default 순 fallback.
+- **flap 가시화**: agent 가 notify 로그를 집계한 `metric.ha_transitions`(최근 10분
+  전이 수)로 OAM 이 `CIMS-QOS-001`(check=ha_flap, 기본 6회/10분) 알람을 올린다 —
+  VIP 가 반복 이동하는 상태가 조용히 지속되지 않게 하는 방어선.
 - keepalived `rise=2, fall=2, interval=2s` → 4초 fault 감지, advert 1s + dead 3s
   와 합쳐 ~7초 fail-over.
 - vrrp_instance 는 전 노드 `state BACKUP` 시작 — MASTER 는 priority 차등으로 선출

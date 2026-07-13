@@ -108,14 +108,21 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 ### 3.3 현재 CIMS 알람 → 표준 매핑 (확정)
 
-기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스 3개**로 정규화.
+기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스**로 정규화.
 어느 프로세스/리소스/호스트인지는 `source.mo_instance`, 심각도/임계/원인은 **rule 속성**(클래스 정체성 아님).
 
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
 | `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) · `<host>/<module>` | critical | oam / agent:<host> |
 | `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (향후 `cims/trunk/<id>`·peer) | critical | oam |
-| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` (향후 `<host>/cpu`·`mem`·`<iface>`) | warning(minor/major 승격) | oam / agent:<host> |
+| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | warning(minor/major 승격) | oam / agent:<host> |
+| `CIMS-CFG-001` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` | warning | agent:<host> |
+
+`CIMS-CFG-001` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
+agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.
+`ha_flap`(QOS-001 rule) 은 agent 가 cims-notify 로그에서 집계한 `metric.ha_transitions`
+(최근 10분 keepalived 전이 수, 기본 임계 6회)로 VIP flap 을 노출한다 — 전이 개별 건은
+§3.6 대로 이벤트(로그)일 뿐이며, 알람은 빈도 임계 초과라는 *조건*이다.
 
 > **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `csp_down`+`cmp_down`+`module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`threshold_crossed` / `db_down`→`connection_lost`. 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
 > 같은 클래스라도 rule 별로 probableCause/severity 가 다를 수 있음(disk→storageCapacityProblem/warning, rtp→resourceAtOrNearingCapacity/warning, 단계별 minor→major).

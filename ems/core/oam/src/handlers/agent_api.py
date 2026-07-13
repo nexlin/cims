@@ -719,6 +719,8 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     per_iface = body.get("per_iface") or []
     modules = body.get("modules") or []
     mounts = body.get("mounts") or []
+    cfg_hashes = body.get("cfg_hashes") or {}          # {module: 배포 config.json canonical hash}
+    ha_transitions = body.get("ha_transitions") or {}  # {svc: 최근 10분 keepalived 전이 수}
     record = {
         'cpu_pct': body.get("cpu_pct"),
         'mem_pct': body.get("mem_pct"),
@@ -728,6 +730,8 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
         'per_iface': per_iface if isinstance(per_iface, list) else [],
         'modules':   modules if isinstance(modules, list) else [],
         'mounts':    mounts if isinstance(mounts, list) else [],
+        'cfg_hashes': cfg_hashes if isinstance(cfg_hashes, dict) else {},
+        'ha_transitions': ha_transitions if isinstance(ha_transitions, dict) else {},
     }
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
     await asyncio.to_thread(_agent_update, config, agent['id'], {

@@ -11,6 +11,12 @@
 #      영구 FAULT 로 승격 자격을 잃는 데드락이 된다 (헬스는 VIP 보유자만 검사).
 #   1) VIP 보유 노드: ha.json services.<svc>.{port, proto, bind_ip} lookup 후
 #      `ss -ln{t,u}` 로 binding 확인 (listen 중이면 PASS)
+#      — services.<svc>.health_module/health_config_key 가 렌더돼 있으면(csc 등
+#        설정 단일키 모듈) 검사 시점에 노드 로컬 배포 config.json
+#        (${cims_home}/modules/<mod>/current/<mod>/config.json) 의 그 키에서 포트를
+#        직접 읽는다 — 배포기록↔실파일 포트 드리프트가 나도 헬스는 모듈이 실제
+#        bind 하는 포트를 본다 (드리프트 노출은 config_out_of_sync 알람 몫).
+#        읽기 실패 시 ha.json port → 내장 default 순 fallback.
 #   2) tracked_modules 가 지정되면 `pgrep -x <mod>` 도 모두 PASS 해야 rc=0
 #   실패 시 rc=1 → keepalived FAULT → VIP 이양 → 피어가 승격.
 #
@@ -53,6 +59,31 @@ if os.path.isfile(ha_json):
             vips.append(str(s["vip"]).strip())
         fo = s.get("failover_options") or {}
         tracked = [str(m).strip() for m in (fo.get("tracked_modules") or []) if str(m).strip()]
+        # 진실 기반 포트 — 모듈이 실제 읽는 배포 config.json 의 키에서 유도.
+        # (OAM 이 수동 health.port 오버라이드 시 health_module 을 렌더하지 않음.)
+        mod, key = s.get("health_module"), s.get("health_config_key")
+        if mod and key:
+            try:
+                home = cfg.get("cims_home") or "/opt/cims"
+                base = os.path.join(home, "modules", mod, "current")
+                for rel in (os.path.join(mod, "config.json"), "config.json"):
+                    p = os.path.join(base, rel)
+                    if not os.path.isfile(p):
+                        continue
+                    mc = json.load(open(p))
+                    v = mc.get(key)                      # flat dot-key (배포 표준)
+                    if v is None:
+                        cur = mc                         # nested fallback
+                        for part in key.split("."):
+                            cur = cur.get(part) if isinstance(cur, dict) else None
+                            if cur is None:
+                                break
+                        v = cur
+                    if v and 0 < int(v) < 65536:
+                        port = int(v)
+                    break
+            except Exception:
+                pass                                     # ha.json port 그대로
     except Exception:
         pass
 print(f"{port}|{proto}|{bind_ip}|{','.join(vips)}|{','.join(tracked)}")
