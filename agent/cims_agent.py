@@ -1507,6 +1507,7 @@ def job_update_ha(params: dict) -> tuple:
     msgs = [f"ha.json updated: {ha_path}"]
     cims_ha = _resolve_cims_ha()
     ha_dir = os.path.dirname(ha_path)
+    failed = ""      # 실패 사유 — dev graceful skip(sudo 미등록)과 구분해 정직하게 보고
     if cims_ha:
         try:
             r0 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "install"],
@@ -1522,17 +1523,33 @@ def job_update_ha(params: dict) -> tuple:
                                 capture_output=True, text=True, timeout=30)
             msgs.append(f"cims-ha config rc={r1.returncode}"
                        + (f" err={(r1.stderr or r1.stdout).strip()[-200:]}" if r1.returncode != 0 else ""))
+            if r1.returncode != 0:
+                failed = "cims-ha config failed"     # render 실패는 환경 무관 진짜 오류
         except Exception as e:
             msgs.append(f"cims-ha config exception: {e}")
+            failed = f"cims-ha config exception: {e}"
         try:
             r2 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "apply"],
                                 capture_output=True, text=True, timeout=60)
-            msgs.append(f"cims-ha apply rc={r2.returncode}"
-                       + (f" err={(r2.stderr or r2.stdout).strip()[-200:]}" if r2.returncode != 0 else ""))
+            if r2.returncode != 0:
+                err_txt = (r2.stderr or r2.stdout).strip()
+                msgs.append(f"cims-ha apply rc={r2.returncode} err={err_txt[-200:]}")
+                # sudo 미등록(dev)만 graceful — 그 외 rc!=0 은 실제 적용 실패.
+                if "password is required" not in err_txt and "sudo:" not in err_txt:
+                    failed = f"cims-ha apply rc={r2.returncode}"
+            else:
+                msgs.append("cims-ha apply rc=0")
+        except subprocess.TimeoutExpired as e:
+            # 적용이 hang — keepalived 가 기동/정지 완료를 못 알린 것. 성공으로 위장하면
+            # 콘솔이 정상 반영으로 오판하므로 job 실패로 보고한다.
+            msgs.append(f"cims-ha apply timeout: {e}")
+            failed = "cims-ha apply timeout (keepalived hang 의심)"
         except Exception as e:
             msgs.append(f"cims-ha apply exception (likely no keepalived / no sudo): {e}")
     else:
         msgs.append("cims-ha not found in candidate paths — ha.json only (no apply)")
+    if failed:
+        return 5, "\n".join(msgs), failed
     return 0, "\n".join(msgs), ""
 
 

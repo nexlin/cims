@@ -1,12 +1,16 @@
 """API 게이트웨이 — base OAM 단일 오리진(4419) 뒤 독립 서비스 모듈로의 경로 세그먼트 프록시.
 
 oam_base_service_split P1 (§5). base OAM 이 `/api/v1/<service>/*` 를 라우트 테이블(file_store
-control/gateway_routes)에 따라 loopback 업스트림(127.0.0.1:포트)으로 프록시한다. 서비스 모듈은
-설치 시 자기 라우트를 self-register(POST /api/v1/gateway/routes)하며, base 코어 수정 없이 새
-서비스가 테이블 한 줄로 추가된다. 미등록/disabled/업스트림 부재 → 503 (I3 장애격리).
+control/gateway_routes)에 따라 업스트림으로 프록시한다. upstream host 는 기본 loopback
+(127.0.0.1 — base 와 모듈 동거 배치)이고, 모듈이 base 와 다른 호스트에 배치되면(분리
+토폴로지) 운영자가 배포 설정 `Server.GatewayHost` 에 그룹 VIP(권장)/노드 IP 를 명시해
+그 주소로 등록된다. 서비스 모듈은 설치 시 자기 라우트를 self-register(POST
+/api/v1/gateway/routes)하며, base 코어 수정 없이 새 서비스가 테이블 한 줄로 추가된다.
+미등록/disabled/업스트림 부재 → 503 (I3 장애격리).
 
 불변식:
-  - I1 단일 공개 오리진: 브라우저는 4419 만 본다. 업스트림은 loopback 비공개.
+  - I1 단일 공개 오리진: 브라우저는 4419 만 본다. 업스트림은 게이트웨이만 접근하는
+    비공개 주소 (loopback 또는 운영자 명시 관리망 주소).
   - I3 단방향: base → service 프록시만. 업스트림 부재 시 base 정상, 해당 라우트만 503.
   - 인증 공유(§5): 게이트웨이는 Authorization 헤더를 전달만 하고, 각 모듈이 동일 JwtSecret 로
     토큰을 독립 검증한다(base 에 되묻지 않음).
@@ -112,7 +116,12 @@ def _normalize_segment(seg: str) -> str:
 
 
 def _normalize_upstream(up: str) -> str:
-    """업스트림 base URL 정규화. loopback 강제(I1) — 외부 호스트 거부."""
+    """업스트림 base URL 정규화 — http(s) + 호스트 필수.
+
+    호스트는 loopback(동거 배치 기본) 외에 운영자가 배포 설정 `Server.GatewayHost`
+    로 명시한 원격 호스트(분리 배치의 그룹 VIP/노드 IP)도 허용한다. I1(단일 공개
+    오리진)은 유지 — 브라우저는 여전히 4419 만 보고, 업스트림은 게이트웨이만
+    접근하는 비공개 주소다. 0.0.0.0/빈 호스트 등 무효 주소만 거부."""
     up = (up or '').strip().rstrip('/')
     if not up:
         return ''
@@ -120,8 +129,8 @@ def _normalize_upstream(up: str) -> str:
     if p.scheme not in ('http', 'https'):
         return ''
     host = (p.hostname or '').lower()
-    if host not in ('127.0.0.1', 'localhost', '::1'):
-        return ''   # I1: 업스트림은 loopback 비공개 포트만 허용
+    if not host or host in ('0.0.0.0', '::'):
+        return ''   # bind-any 주소는 도달 불능 — upstream 으로 무효
     return up
 
 
@@ -142,7 +151,7 @@ def upsert_route(config: dict, route: dict) -> dict:
     if not seg.startswith('/api/v1/'):
         raise ValueError(f'segment must start with /api/v1/ : {route.get("segment")!r}')
     if not up:
-        raise ValueError(f'upstream must be a loopback http(s) URL : {route.get("upstream")!r}')
+        raise ValueError(f'upstream must be a reachable http(s) URL : {route.get("upstream")!r}')
     d = _dir(config)
     existing = file_store.find_by(d, lambda r: _normalize_segment(r.get('segment')) == seg)
     now = datetime.now().isoformat(timespec='seconds')
@@ -212,10 +221,11 @@ def _filter_resp_headers(headers) -> dict:
 
 
 def _ssl_param(upstream: str):
-    """loopback https 업스트림은 TLS 검증 비활성(I1: loopback 신뢰, self-signed 검증 무의미).
+    """https 업스트림은 TLS 검증 비활성 — 모듈들이 self-signed cert 라 검증 무의미
+    (loopback 은 물론, 운영자가 명시한 관리망 내 원격 upstream 도 동일 전제).
     http 업스트림은 None(무시). aiohttp 의 request(ssl=...) 인자로 전달."""
     p = urlparse(upstream or '')
-    if p.scheme == 'https' and (p.hostname or '').lower() in ('127.0.0.1', 'localhost', '::1'):
+    if p.scheme == 'https':
         return False
     return None
 
@@ -315,6 +325,9 @@ def register_gateway(admin_server, config: dict) -> int:
         admin_server.add_dynamic_rules([(seg, proxy, {'config': config, '_route': r})])
         _logger.log_info(f"[gateway] mount {seg} → {r.get('upstream')} (module={r.get('module')})")
         n += 1
+    # self-heal — 배포는 있는데 라우트가 빠진 모듈 복구 (register_module_routes 가
+    # hot-mount 까지 수행하므로 여기서 바로 서비스 가능 상태가 된다).
+    n += reconcile_routes_from_deployments(config)
     return n
 
 
@@ -349,8 +362,9 @@ def unmount_route(segment: str) -> bool:
 
 def register_module_routes(config: dict, module: str, ip: str, port, segments) -> int:
     """서비스 모듈 배포 시 self-register: 모듈이 선언한 세그먼트들을 그 모듈의 실제
-    (ip, port=배포 config 의 Server.Port=SoT) loopback https upstream 으로 등록+hot-mount.
-    멱등(segment upsert). base 가 서비스 모듈을 미리 알 필요 없음(시드 하드코딩 대체)."""
+    (ip=배포 config 의 Server.GatewayHost, 미지정 시 loopback / port=Server.Port=SoT)
+    https upstream 으로 등록+hot-mount. 멱등(segment upsert). base 가 서비스 모듈을
+    미리 알 필요 없음(시드 하드코딩 대체)."""
     ip = ip or '127.0.0.1'
     base = f"https://{ip}:{port}"
     n = 0
@@ -363,6 +377,42 @@ def register_module_routes(config: dict, module: str, ip: str, port, segments) -
             _logger.log_warning(f"[gateway] self-register {module} {seg} skip: {e}")
     if n:
         _logger.log_info(f"[gateway] self-register {module}: {n} route(s) → {base}")
+    return n
+
+
+def reconcile_routes_from_deployments(config: dict) -> int:
+    """라우트 테이블 self-heal — gateway.routes 를 선언한 패키지의 배포가 있는데
+    그 세그먼트가 테이블에 없으면 실효 upstream(Server.GatewayHost/Port)으로 재등록.
+    과거 삭제·드리프트로 빠진 라우트를 기동 시 복구한다. 존재하는 레코드는 건드리지
+    않음 — upstream 값 정정은 설정 저장 전파가 담당. 반환=복구한 라우트 수."""
+    try:
+        from handlers.agents import (_deploy_load_all, _pkg_load,
+                                     effective_server_port, effective_gateway_host)
+    except Exception:
+        return 0
+    existing = {_normalize_segment(r.get('segment')) for r in load_routes(config)}
+    n = 0
+    for d in _deploy_load_all(config):
+        try:
+            pkg = _pkg_load(config, d.get('package_id')) or {}
+            meta = pkg.get('meta') if isinstance(pkg, dict) else None
+            segs = ((meta or {}).get('gateway') or {}).get('routes') or []
+            missing = [s for s in segs if _normalize_segment(s) not in existing]
+            if not missing:
+                continue
+            port = effective_server_port(config, pkg, d.get('config'))
+            if not port:
+                continue
+            host = effective_gateway_host(config, pkg, d.get('config')) or '127.0.0.1'
+            proc = d.get('process_name') or (pkg.get('name') if isinstance(pkg, dict) else None)
+            if not proc:
+                continue
+            n += register_module_routes(config, proc, host, int(port), missing)
+            existing.update(_normalize_segment(s) for s in missing)
+        except Exception as e:
+            _logger.log_warning(f"[gateway] route reconcile skip (dep={d.get('id')}): {e}")
+    if n:
+        _logger.log_info(f"[gateway] route reconcile: {n} route(s) 복구")
     return n
 
 

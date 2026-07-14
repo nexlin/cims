@@ -32,7 +32,11 @@
 
 ### 불변식 (보존)
 - **I1. 단일 공개 오리진** — 브라우저/관제는 오직 **base OAM 4419(HTTPS)** 만 본다. 서비스 모듈은
-  **loopback(127.0.0.1) 비공개 포트**. CORS·방화벽 포트 추가 없음, nginx 재도입 없음.
+  게이트웨이만 접근하는 **비공개 upstream** — 동거 배치는 loopback(127.0.0.1, 기본),
+  모듈이 base 와 다른 호스트에 배치되면(분리 토폴로지) 운영자가 그 모듈 배포 설정
+  `Server.GatewayHost` 에 그룹 VIP(권장)/노드 IP 를 명시해 게이트웨이가 그 주소로 프록시
+  (self-register/설정 저장 시 자동 재등록, HA 절체는 VIP 가 추종). CORS·방화벽 공개 포트
+  추가 없음, nginx 재도입 없음.
 - **I2. 콘솔 정적 자산은 base 가 전부 서빙** — 셸 + 전 위젯 청크. 서비스 모듈은 API 만 담당.
 - **I3. 의존 방향 단방향** — service → base(인증/형상 조회) 허용, **base → service 의존 금지**.
   서비스 모듈 부재 시 base 정상 동작(해당 서비스 라우트만 503/404).
@@ -371,7 +375,7 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 | 구성 | 내용 |
 |---|---|
 | 역할 플래그 | `oam_app.py --role {base\|all}`(기본 `all`). `all`=단일프로세스(하위호환), `base`=게이트웨이 프록시 마운트. stats 함수 단위 분리(`handle_stats_service`/`/api/v1/stats/service`). |
-| 게이트웨이 | `handlers/gateway.py`: file_store `control/gateway_routes` 라우트 테이블 + aiohttp 프록시(method/body/query/header 화이트리스트 passthrough·ETag/304·Content-Disposition 보존·RFC8594 Deprecation/Sunset·loopback 업스트림 강제 I1) + self-register API `/api/v1/gateway/routes`. |
+| 게이트웨이 | `handlers/gateway.py`: file_store `control/gateway_routes` 라우트 테이블 + aiohttp 프록시(method/body/query/header 화이트리스트 passthrough·ETag/304·Content-Disposition 보존·RFC8594 Deprecation/Sunset) + self-register API `/api/v1/gateway/routes`. upstream host = 배포 설정 `Server.GatewayHost`(운영자 명시, 분리 배치 시 그룹 VIP/노드 IP) → 미지정 시 loopback. https upstream 은 TLS 검증 스킵(self-signed 전제). 라우트 lifecycle: 배포 생성 시 등록, **같은 process 의 마지막 배포 삭제 시에만 deregister**(AS 피어 잔존 시 유지), 개별 배포/그룹 공통 설정 저장으로 실효 host/port 가 바뀌면 재등록, 기동 시 배포↔테이블 정합 self-heal(`reconcile_routes_from_deployments` — 빠진 세그먼트 복구). |
 | 설정 분리 | `common.json`/`base.json`(`load_config` 비파괴 fallback, `.sample` 동봉). |
 | csc 프록시 | csc 가입자 API 는 게이트웨이 프록시(D3). `--role base` 에서 D8 `/me` 분리(base 가 `/api/v1/users/me` 직접, 나머지 `/users/*`·`/users/import`·`/ptt/groups`·`/organizations` 는 csc 프록시, admin 4421/TCP). loopback-https 업스트림 TLS 검증 스킵(self-signed). **분리 배포는 모듈간 JwtSecret 통일 필수**(common.json §5). |
 | svc-mgmt | 독립 모듈 `svc-mgmt/src/svc_mgmt_app.py`(stats/service·recording·flow·verification, loopback 4480, `--preflight`, common.json+services/svc-mgmt.json 로드) + 게이트웨이 svc-mgmt 라우트 + agent `lifecycle.sh start_svc_mgmt/stop_svc_mgmt`(`all` 미포함, 명시 기동만). |

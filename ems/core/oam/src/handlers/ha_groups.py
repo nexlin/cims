@@ -23,6 +23,9 @@ import json
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services import file_store, service_registry
+from util.log_util import Logger
+
+logger = Logger()
 
 
 _HA_GROUPS_BASE = '/api/v1/ha-groups'
@@ -1019,6 +1022,7 @@ async def _put_group_pkg_config(gid: int, pkg_name: str, handler_args, config):
     # 키 검증 — 각 target 의 템플릿 기준 유효 scope=service 만 허용
     saved = []
     applied_keys: set = set()
+    first_pkg, first_old, first_new = None, None, None   # upstream 전파 비교용
     for t in targets:
         pkg = await asyncio.to_thread(_pkg_load, config, t.get('package_id')) or {}
         template = pkg.get('config_template') if isinstance(pkg, dict) else None
@@ -1038,6 +1042,37 @@ async def _put_group_pkg_config(gid: int, pkg_name: str, handler_args, config):
         if updated:
             saved.append(updated)
             applied_keys.update(vals.keys())
+            if first_pkg is None:
+                first_pkg, first_old, first_new = pkg, cur, new_overlay
+
+    # 실효 upstream(Server.Port/Server.GatewayHost) 변경 전파 — 개별 배포 설정 저장
+    # (_put_deployment_config)과 동일 규칙. GatewayHost/Port 는 scope=service 라 주로
+    # 이 그룹 공통 경로로 저장되는데, 여기서 재등록을 안 태우면 게이트웨이가 구
+    # upstream 을 계속 본다. service 키는 멤버 간 동일하므로 첫 target 기준 1회 비교.
+    if first_pkg is not None:
+        try:
+            from handlers.agents import effective_server_port, effective_gateway_host
+            old_port = effective_server_port(config, first_pkg, first_old)
+            new_port = effective_server_port(config, first_pkg, first_new)
+            old_host = effective_gateway_host(config, first_pkg, first_old) or '127.0.0.1'
+            new_host = effective_gateway_host(config, first_pkg, first_new) or '127.0.0.1'
+            if new_port and (new_port != old_port or new_host != old_host):
+                _meta = first_pkg.get('meta') if isinstance(first_pkg, dict) else None
+                gw_routes = ((_meta or {}).get('gateway') or {}).get('routes') or []
+                proc = saved[0].get('process_name')
+                if gw_routes and proc:
+                    import handlers.gateway as _gw
+                    await asyncio.to_thread(_gw.register_module_routes, config,
+                                            proc, new_host, int(new_port), gw_routes)
+                n = 0
+                if new_port != old_port:
+                    for aid in {d.get('agent_id') for d in saved if d.get('agent_id') is not None}:
+                        n += await asyncio.to_thread(enqueue_update_ha_for_agent, aid, config)
+                logger.log_info(f"[group-config] group#{gid} pkg={pkg_name} 실효 upstream "
+                                f"{old_host}:{old_port}->{new_host}:{new_port}: gateway 재등록"
+                                f"={'O' if gw_routes else 'X'}, update_ha {n}건")
+        except Exception as e:
+            logger.log_warning(f"[group-config] upstream 변경 전파 실패(group#{gid} pkg={pkg_name}): {e}")
 
     members, sync_id = [], None
     if queue_update and saved:

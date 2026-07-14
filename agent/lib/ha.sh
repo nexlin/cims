@@ -323,8 +323,18 @@ cmd_ha() {
             info "net.ipv4.ip_nonlocal_bind=1 설정 (VIP backup bind 전제)"
             echo 'net.ipv4.ip_nonlocal_bind = 1' | sudo tee /etc/sysctl.d/99-cims-ha.conf >/dev/null
             sudo sysctl -w net.ipv4.ip_nonlocal_bind=1 >/dev/null 2>&1 || true
-            sudo systemctl restart keepalived
-            ok "keepalived + ip_nonlocal_bind 적용 완료 (cold_modules 절체는 cims-notify → cims-svc)"
+            # enabled 인스턴스 0개 (전 서비스 disabled — 예: 배포 없는 멤버 렌더) 이면
+            # restart 하지 않고 정지 — vrrp_instance 없는 conf 로 systemctl restart 하면
+            # keepalived 가 기동 완료를 알리지 못해 60초+ hang (agent job timeout → 노드가
+            # heartbeat 를 못 보내 offline 오판). 이후 인스턴스가 생기는 재렌더가 오면
+            # 그때 restart 경로로 복귀.
+            if ! grep -q '^vrrp_instance' /etc/keepalived/keepalived.conf; then
+                sudo systemctl stop keepalived 2>/dev/null || true
+                ok "vrrp_instance 없음 — keepalived 정지 상태 유지 (인스턴스 렌더 시 자동 기동)"
+            else
+                sudo systemctl restart keepalived
+                ok "keepalived + ip_nonlocal_bind 적용 완료 (cold_modules 절체는 cims-notify → cims-svc)"
+            fi
             ;;
         start)  sudo systemctl start  keepalived ;;
         stop)   sudo systemctl stop   keepalived ;;

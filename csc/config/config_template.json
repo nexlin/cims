@@ -26,6 +26,13 @@
           "required": true,
           "restart": true,
           "help": "CSC admin API 포트 — 전 환경 4421 (verify 배포본만 4445, OAM 4419 와 충돌 회피)."
+        },
+        {
+          "key": "Server.GatewayHost",
+          "label": "게이트웨이 접근 주소",
+          "type": "string",
+          "default": "",
+          "help": "base OAM 게이트웨이가 CSC API 를 프록시할 때 접속하는 주소. CSC 가 OAM 과 다른 서버에 배치되면(분리 토폴로지) 그룹 VIP(권장) 또는 노드 IP 를 입력. 비우면 127.0.0.1 (동거 배치)."
         }
       ],
       "scope": "service"

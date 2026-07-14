@@ -166,6 +166,25 @@ def effective_server_port(config, pkg_file, overlay):
     return _valid(((meta or {}).get("gateway") or {}).get("default_port"))
 
 
+def effective_gateway_host(config, pkg_file, overlay):
+    """배포의 게이트웨이 upstream host — 운영자가 배포 설정 `Server.GatewayHost` 로
+    명시한 도달 주소. base OAM 과 모듈이 다른 호스트에 배치되는 분리 토폴로지에서
+    그룹 VIP(권장) 또는 노드 IP 를 넣는다. 비우면 None — caller 가 127.0.0.1
+    (동거 배치 기본) 사용. 해석 규칙은 effective_server_port 와 동일 (flat 우선,
+    nested 수용)."""
+    try:
+        eff = _materialize_deploy_config(config, pkg_file, overlay)
+        host = eff.get("Server.GatewayHost")
+        if not host and isinstance(eff.get("Server"), dict):
+            host = eff["Server"].get("GatewayHost")
+        host = str(host or "").strip()
+        if host:
+            return host
+    except Exception:
+        pass
+    return None
+
+
 def deploy_config_hash(config, pkg_file, overlay) -> str:
     """배포 config 실체화본의 canonical hash 12hex — agent 가 metric.cfg_hashes 로
     보고하는 노드 실파일 hash (cims_agent._cfg_hash_for_module) 와 동일 규칙
@@ -1998,29 +2017,34 @@ async def _put_deployment_config(handler_args, did: int, config):
         members_resp.append({"deployment_id": updated["id"],
                              "agent_id": updated.get("agent_id"), "job_id": job_id})
 
-        # ── 실효 포트 변경 전파 — 게이트웨이 라우트 재등록 + HA ha.json 재렌더.
-        #   라우트는 배포 생성 시 1회 등록이라 Server.Port 변경 시 여기서 재등록하지
-        #   않으면 프록시가 구 포트를 계속 본다. ha.json 헬스포트도 그룹 변경 시에만
-        #   재렌더되므로 동일하게 추종시킨다. (전파 실패는 저장 성공에 영향 없음.)
+        # ── 실효 포트/게이트웨이 host 변경 전파 — 게이트웨이 라우트 재등록 + HA 재렌더.
+        #   라우트는 배포 생성 시 1회 등록이라 Server.Port/Server.GatewayHost 변경 시
+        #   여기서 재등록하지 않으면 프록시가 구 upstream 을 계속 본다. ha.json
+        #   헬스포트는 포트 변경일 때만 재렌더 (host 는 HA 무관).
+        #   (전파 실패는 저장 성공에 영향 없음.)
         try:
             old_port = effective_server_port(config, _pkg, dep.get("config"))
             new_port = effective_server_port(config, _pkg, updated.get("config"))
-            if new_port and new_port != old_port:
+            old_host = effective_gateway_host(config, _pkg, dep.get("config")) or "127.0.0.1"
+            new_host = effective_gateway_host(config, _pkg, updated.get("config")) or "127.0.0.1"
+            if new_port and (new_port != old_port or new_host != old_host):
                 _meta = (_pkg or {}).get("meta") if isinstance(_pkg, dict) else None
                 gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
                 if gw_routes and updated.get("process_name"):
                     import handlers.gateway as _gw
                     await asyncio.to_thread(_gw.register_module_routes, config,
-                                            updated["process_name"], "127.0.0.1",
+                                            updated["process_name"], new_host,
                                             int(new_port), gw_routes)
-                from handlers.ha_groups import enqueue_update_ha_for_agent
-                n = await asyncio.to_thread(enqueue_update_ha_for_agent,
-                                            updated.get("agent_id"), config)
-                logger.log_info(f"[deploy-config] dep={updated['id']} 실효포트 "
-                                f"{old_port}->{new_port}: gateway 재등록"
+                n = 0
+                if new_port != old_port:
+                    from handlers.ha_groups import enqueue_update_ha_for_agent
+                    n = await asyncio.to_thread(enqueue_update_ha_for_agent,
+                                                updated.get("agent_id"), config)
+                logger.log_info(f"[deploy-config] dep={updated['id']} 실효 upstream "
+                                f"{old_host}:{old_port}->{new_host}:{new_port}: gateway 재등록"
                                 f"={'O' if gw_routes else 'X'}, update_ha {n}건")
         except Exception as e:
-            logger.log_warning(f"[deploy-config] 포트 변경 전파 실패(dep={did}): {e}")
+            logger.log_warning(f"[deploy-config] upstream 변경 전파 실패(dep={did}): {e}")
 
     return HandlerResult(status=200,
         body={
@@ -2623,9 +2647,10 @@ async def _create_deployment(handler_args: HandlerArgs, config):
             # 포트 = effective_server_port (materialize Server.Port → gateway.default_port).
             #   HA 헬스포트 유도와 같은 해석 — 프록시/헬스가 다른 포트를 보는 드리프트 차단.
             _port = effective_server_port(config, pkg_file, cfg_overlay)
-            # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관하게
-            #   게이트웨이·모듈이 같은 호스트라 127.0.0.1 로 도달. (0.0.0.0 upstream 은 무효)
-            _ip = "127.0.0.1"
+            # 게이트웨이 upstream host = 배포 설정 Server.GatewayHost (운영자 명시 —
+            #   base 와 모듈이 다른 호스트인 분리 배치에서 그룹 VIP/노드 IP).
+            #   비우면 127.0.0.1 (동거 배치 기본 — 모듈 bind Ip 0.0.0.0 과 무관하게 도달).
+            _ip = effective_gateway_host(config, pkg_file, cfg_overlay) or "127.0.0.1"
             if _port:
                 import handlers.gateway as _gw
                 await asyncio.to_thread(_gw.register_module_routes, config,
@@ -2711,8 +2736,9 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
                 gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
                 if gw_routes and r.get("process_name"):
                     import handlers.gateway as _gw
+                    _host = effective_gateway_host(config, newp, r.get("config")) or "127.0.0.1"
                     await asyncio.to_thread(_gw.register_module_routes, config,
-                                            r["process_name"], "127.0.0.1",
+                                            r["process_name"], _host,
                                             int(new_port), gw_routes)
                 from handlers.ha_groups import enqueue_update_ha_for_agent
                 n = await asyncio.to_thread(enqueue_update_ha_for_agent, r.get("agent_id"), config)
@@ -2728,15 +2754,22 @@ async def _delete_deployment(did: int, config):
     # runtime store v2 P4 — 모듈의 마지막 deployment 제거 시 그 모듈 컬렉션 SoT prune.
     dep = await asyncio.to_thread(_deploy_load, config, did)
     pkg = (dep or {}).get("package_name") or (dep or {}).get("package")
-    # self-register 해제: 이 deployment 의 모듈 라우트를 게이트웨이에서 deregister+unmount.
     _proc = (dep or {}).get("process_name") or pkg
+    await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
+    # self-register 해제: 라우트는 모듈(process) 단위 공유라, 같은 process 의 다른
+    # 배포(AS 그룹 피어 등)가 남아 있으면 유지 — 한쪽 멤버 제거/재설치가 모듈 라우트를
+    # 전멸시키던 것 방지. 마지막 배포일 때만 deregister+unmount.
     if _proc:
         try:
-            import handlers.gateway as _gw
-            await asyncio.to_thread(_gw.deregister_module_routes, config, _proc)
+            siblings = [d for d in await asyncio.to_thread(_deploy_load_all, config)
+                        if (d.get("process_name") or d.get("package_name")) == _proc]
+            if not siblings:
+                import handlers.gateway as _gw
+                await asyncio.to_thread(_gw.deregister_module_routes, config, _proc)
+            else:
+                logger.log_info(f"[deploy] dep={did} 제거 — '{_proc}' 배포 {len(siblings)}개 잔존, 라우트 유지")
         except Exception as e:
             logger.log_warning(f"[deploy] deregister routes 실패({_proc}): {e}")
-    await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
     if pkg:
         try:
             remaining = [d for d in await asyncio.to_thread(_deploy_load_all, config)

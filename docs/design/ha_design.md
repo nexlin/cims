@@ -387,7 +387,12 @@ systemd `cims@` instance 는 enable 하지 않는다.
   수동 오버라이드가 최우선. **배포 생성/제거도 재렌더를 큐잉**하므로 정본 워크플로
   (그룹 구성 → 설치)에서 ha.json 이 배포 상태를 자동 추종한다. daemon 배포가 전무하고
   헬스포트도 (유도/수동) 없는 멤버는 entry 가 `enabled:false` 로 렌더되어
-  vrrp_instance 자체가 생성되지 않는다 (빈 서버 VIP 인수 원천 차단).
+  vrrp_instance 자체가 생성되지 않는다 (빈 서버 VIP 인수 원천 차단). 렌더 결과
+  인스턴스가 0개면 `cims-ha apply` 는 keepalived 를 restart 하지 않고 **정지 상태로
+  유지**한다 — 인스턴스 없는 conf 로 restart 하면 keepalived 기동 완료 신호가 없어
+  60초+ hang → agent heartbeat 가 막혀 노드가 offline 로 오판되기 때문. apply
+  timeout/실패는 update_ha job 실패로 정직하게 보고된다 (sudo 미등록 dev 환경의
+  graceful skip 만 예외).
 - **진실 기반 검사 (csc)**: 렌더가 `services.<svc>.health_module/health_config_key`
   힌트를 내리면 (csc 이고 수동 health.port 오버라이드가 없을 때), cims-health 는
   검사 시점에 노드 로컬 배포 설정
