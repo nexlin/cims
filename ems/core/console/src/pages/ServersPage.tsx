@@ -64,6 +64,15 @@ export default function ServersPage() {
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [haGroups, setHaGroups]       = useState<HaGroup[]>([])
   const [loading, setLoading]         = useState(true)
+  // 패키지 목록 "도착함" 래치 — 설정 탭 key 의 remount 트리거용. 최초 로드 시
+  // 패키지가 도착하면 1회 remount(스냅샷 재캡처)가 의도인데, 원시 packages.length>0
+  // 를 key 에 그대로 쓰면 폴링 응답이 일시적으로 비는 순간 true→false→true 로
+  // 뒤집혀 편집 중인 설정 화면 전체가 주기적으로 remount 된다 (스크롤 리셋 +
+  // 컬렉션 추가행 닫힘). 한 번 true 가 되면 되돌리지 않는다.
+  const [pkgsReady, setPkgsReady]     = useState(false)
+  useEffect(() => {
+    if (packages.length > 0) setPkgsReady(true)
+  }, [packages])
   const [selection, setSelection]     = useState<Selection>(initialSelection)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
@@ -376,7 +385,7 @@ export default function ServersPage() {
         }}>
           {selectedAgent ? (
             pageTab === 'config' ? (
-              <AgentConfigTab key={`${selectedAgent.id}:${packages.length > 0}`}
+              <AgentConfigTab key={`${selectedAgent.id}:${pkgsReady}`}
                 agent={selectedAgent}
                 deployments={depsByAgent.get(selectedAgent.id) || []}
                 onDone={load} />
@@ -405,7 +414,7 @@ export default function ServersPage() {
             pageTab === 'config' ? (
               // 그룹 = 멤버별 설정 비교 + 명시적 [동기화] (기준 서버 → 나머지 복사).
               // 편집은 멤버 서버 선택 → 패키지 설정 탭 (항상 그 서버에만 저장).
-              <GroupConfigCompareView key={`${selectedGroup.id}:${packages.length > 0}`}
+              <GroupConfigCompareView key={`${selectedGroup.id}:${pkgsReady}`}
                 group={selectedGroup}
                 members={selectedGroup.members.map(m => ({
                   id: m.agent_id,
