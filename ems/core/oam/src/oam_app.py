@@ -667,20 +667,24 @@ if __name__ == '__main__':
             VIP 관측 None(판정 불가) 멤버는 종전대로 기록 기준 평가."""
             skip, must_run = set(), set()
             try:
-                from handlers.ha_groups import _agent_daemon_modules
+                from handlers.ha_groups import _agent_daemon_modules, _group_started_modules
                 from services import ha_lookup
                 for g in ha_lookup.ha_groups_all(config):
                     if g.get('mode') != 'active_standby':
                         continue
                     fo = g.get('failover_options') if isinstance(g.get('failover_options'), dict) else {}
                     modes = fo.get('module_modes') if isinstance(fo.get('module_modes'), dict) else {}
+                    members = ha_lookup.members_of(g)
+                    # 서비스 개시 게이트와 동일 기준 — 개시된 모듈만 HA 평가 대상
+                    # (설치만 된 모듈을 must-run 으로 오판하지 않게).
+                    started = _group_started_modules(members, config)
                     observed = ha_lookup.vip_observation(config, g)['observed']
-                    for m in ha_lookup.members_of(g):
+                    for m in members:
                         aid = m.get('agent_id')
                         if observed.get(aid) is None:
                             continue
                         for mod in _agent_daemon_modules(aid, config):
-                            if modes.get(mod, 'cold') != 'hot':
+                            if mod in started and modes.get(mod, 'cold') != 'hot':
                                 (must_run if observed.get(aid) else skip).add((aid, mod))
             except Exception as e:
                 logger.log_error(f"[alarm-sweep] cold 모듈 HA 집합 계산 실패: {e}")

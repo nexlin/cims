@@ -105,9 +105,19 @@ export function GroupConfigCompareView({ group, members: liveMembers,
 
   // 편집 기준 멤버 — ON: ACTIVE(배포됨) 우선, 없으면 첫 배포 멤버.
   //                 OFF: 선택 멤버 (기본 첫 배포 멤버).
+  // ON 모드 기준은 최초 판정값으로 **고정** — group.active_agent_id 는 절체/플랩으로
+  // 요동하는 live 값이라 그대로 따라가면 편집 중 컬렉션 편집기(editorSource 의
+  // deploymentId)가 다른 멤버 배포로 갈아타며 리로드된다 (추가 행 닫힘 + 스피너로
+  // 내용 붕괴 → 스크롤 맨 위 리셋). 저장은 그룹 전체 적용이라 기준이 낡아도 무해
+  // (비교/드리프트 표시용). 패키지 전환 시 재판정.
+  const autoBaseRef = useRef<number | null>(null)
+  {
+    const cand = activeAid != null && depByAgent.has(activeAid) ? activeAid : (deployedIds[0] ?? null)
+    if (autoBaseRef.current == null || !depByAgent.has(autoBaseRef.current)) autoBaseRef.current = cand
+  }
   const baseAgentId = !isAS ? null
     : autoSyncOn
-      ? (activeAid != null && depByAgent.has(activeAid) ? activeAid : deployedIds[0] ?? null)
+      ? autoBaseRef.current
       : (offTarget != null && depByAgent.has(offTarget) ? offTarget : deployedIds[0] ?? null)
   const baseDep = baseAgentId != null ? depByAgent.get(baseAgentId) : undefined
   const basePkg = baseDep ? packages.find(p => p.id === baseDep.package_id) : undefined
@@ -158,6 +168,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     setOffTarget(null)
     setFormValues({})
     setFormInitial({})
+    autoBaseRef.current = null   // ON 모드 기준 멤버 재판정
   }, [effectivePkgName, isAS])
 
   // 멤버별 실효값 — overlay 값 없으면 template default (fromDefault 표시용)

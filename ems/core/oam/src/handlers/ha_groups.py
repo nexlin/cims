@@ -241,11 +241,30 @@ def _csc_effective_health_port(dep: dict, config: dict):
     return None
 
 
-def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
+def _group_started_modules(members: list, config: dict) -> set:
+    """그룹에서 "서비스가 개시된" daemon 모듈 집합 — 멤버 배포 중 record
+    status=='running' 이 하나라도 있는 모듈 (그룹 레벨 OR: 절체로 standby 기록이
+    stopped 인 채 notify 기동되는 비대칭 흡수).
+
+    HA 무장(armed)의 게이트 — 설치만 되고 운영자가 start 하지 않은 모듈은
+    keepalived 가 관리(승격 기동/헬스 검사) 대상이 아니다. 미개시 그룹은
+    vrrp_instance 자체가 생성되지 않아 Active/Standby 상태도 존재하지 않는다."""
+    try:
+        from handlers.agents import _deploy_load_all
+        aids = {m.get('agent_id') for m in (members or [])}
+        return {(d.get('process_name') or d.get('package_name') or '').lower().strip()
+                for d in _deploy_load_all(config)
+                if d.get('agent_id') in aids and d.get('status') == 'running'}
+    except Exception:
+        return set()
+
+
+def _infer_health_port_proto(agent_id: int, config: dict, allowed: set | None = None) -> tuple:
     """agent 의 daemon deployment 들 중 가장 적합한 module 로 (port, proto, module) 추정.
 
-    찾지 못하면 (None, None, None) 반환 — 이 경우 services entry 에 port/proto 미기재
-    (cims-health 가 csp default 5060/udp 로 fallback).
+    allowed 가 주어지면 그 집합(서비스 개시 모듈)에 속한 모듈만 후보 —
+    설치만 된 모듈로 헬스포트를 유도하면 미기동 포트를 검사해 FAULT 가 된다.
+    찾지 못하면 (None, None, None) 반환 — 이 경우 services entry 에 port/proto 미기재.
     """
     try:
         from handlers.agents import _deploy_load_all
@@ -260,7 +279,7 @@ def _infer_health_port_proto(agent_id: int, config: dict) -> tuple:
     daemon_modules: dict = {}
     for d in deps:
         mod = (d.get('process_name') or '').lower().strip()
-        if mod in defaults:
+        if mod in defaults and (allowed is None or mod in allowed):
             daemon_modules.setdefault(mod, d)
     # descriptor 모듈 순서 + 기존 우선순위 휴리스틱 병합 (priority 우선, 그 외 descriptor 순).
     order = _HEALTH_MODULE_PRIORITY + [m for m in defaults if m not in _HEALTH_MODULE_PRIORITY]
@@ -326,8 +345,14 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     vip_bindings = vip_bindings or []
     default_iface = _pick_default_iface(vip_bindings, agent_id, agent_row) or "eth0"
 
-    # cims-health 가 lookup 하는 port/proto — agent 의 deployment 로 추정.
-    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config) if config else (None, None, None)
+    # 서비스 개시 게이트 — HA 는 운영자가 start 한 모듈만 관리한다. 설치만 된
+    # 모듈로 헬스포트를 유도하거나 cold 절체 대상에 넣으면, 아무 서비스도 개시되지
+    # 않은 그룹이 무장되어 미기동 포트 검사로 flap 하고 콘솔에 Active/Standby 가
+    # 표시된다 (상태는 서비스가 개시된 그룹에만 존재해야 한다).
+    started = _group_started_modules(members, config) if config else set()
+
+    # cims-health 가 lookup 하는 port/proto — agent 의 개시된 deployment 로 추정.
+    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config, allowed=started) if config else (None, None, None)
 
     failover_options = _normalize_failover_options(group.get('failover_options'))
     # 그룹 옵션의 수동 오버라이드가 최우선 (운영자 명시 > 배포 실효설정 유도 > descriptor 기본).
@@ -350,16 +375,18 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     # cold-spare 절체 대상 — AS 그룹의 daemon 모듈 중 module_modes 가 hot 이 아닌 전부
     # (기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
     # hot 모듈과 oam(descriptor 비데몬 — 관리 평면 자신)은 양쪽 상시 기동 유지.
-    daemon_mods = _agent_daemon_modules(agent_id, config) if config else []
+    # armed = 이 agent 의 daemon 배포 중 "개시된" 모듈만 — cold 절체 대상도 여기서만.
+    daemon_mods = [m for m in (_agent_daemon_modules(agent_id, config) if config else [])
+                   if m in started]
     cold_modules: list = []
     if group.get('mode') == 'active_standby':
         modes = failover_options.get('module_modes') or {}
         cold_modules = [m for m in daemon_mods if modes.get(m, 'cold') != 'hot']
 
-    # daemon 배포가 전무하고 헬스포트도 (유도/수동 지정) 없는 멤버 = 빈 서버 —
-    # vrrp_instance 자체를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵).
-    # 서비스가 전혀 없는 노드가 VIP 를 인수해 ACTIVE 로 보이는 것을 원천 차단.
-    # 이후 모듈 설치가 재렌더(enqueue_update_ha_for_agent)를 태워 자동 활성화.
+    # 개시된 daemon 모듈이 없고 헬스포트도 (유도/수동 지정) 없는 멤버 — 빈 서버
+    # 또는 설치만 된(미개시) 그룹 — vrrp_instance 를 내리지 않는다 (enabled=false →
+    # cims-ha 렌더 스킵 + keepalived 정지 유지). VIP/Active 상태 자체가 생기지 않음.
+    # 이후 모듈 설치·start/stop job 완료가 재렌더를 태워 자동 무장/해제된다.
     ha_enabled = bool(h_port or daemon_mods)
 
     services: dict = {}

@@ -296,6 +296,19 @@ cmd_ha() {
             local unit="$HA_OUT/cims@.service"
             [[ ! -f $out ]] && { err "config 미생성: $out — 먼저 'cims-ha config' 실행"; return 1; }
             [[ ! -f $unit ]] && { err "unit 미생성: $unit"; return 1; }
+            # 변경 감지 — 스테이징 대상 5종이 기존 적용본과 전부 동일하면 keepalived
+            # 무접촉. 배포/서비스(start/stop) 이벤트마다 재렌더가 전파되므로 apply 가
+            # 멱등이어야 잦은 호출이 VRRP 상태(MASTER/VIP)를 흔들지 않는다.
+            local _hachanged=0 _pair _src _dst
+            for _pair in "$out:/etc/keepalived/keepalived.conf" \
+                         "$HA_JSON:/etc/keepalived/ha.json" \
+                         "$SCRIPT_DIR/cims-health:$HA_STAGE_BIN/cims-health" \
+                         "$SCRIPT_DIR/cims-notify:$HA_STAGE_BIN/cims-notify" \
+                         "$unit:/etc/systemd/system/cims@.service"; do
+                _src="${_pair%%:*}"; _dst="${_pair#*:}"
+                cmp -s "$_src" "$_dst" 2>/dev/null || { _hachanged=1; break; }
+            done
+
             # health/notify 스크립트 + ha.json 스테이징 — root:root 고정 경로.
             #   · conf 의 script/notify 가 ${HA_STAGE_BIN} 을 참조 (버전 트리 비의존)
             #   · root 소유 + group-write 없음 → enable_script_security 통과
@@ -323,17 +336,23 @@ cmd_ha() {
             info "net.ipv4.ip_nonlocal_bind=1 설정 (VIP backup bind 전제)"
             echo 'net.ipv4.ip_nonlocal_bind = 1' | sudo tee /etc/sysctl.d/99-cims-ha.conf >/dev/null
             sudo sysctl -w net.ipv4.ip_nonlocal_bind=1 >/dev/null 2>&1 || true
-            # enabled 인스턴스 0개 (전 서비스 disabled — 예: 배포 없는 멤버 렌더) 이면
-            # restart 하지 않고 정지 — vrrp_instance 없는 conf 로 systemctl restart 하면
-            # keepalived 가 기동 완료를 알리지 못해 60초+ hang (agent job timeout → 노드가
-            # heartbeat 를 못 보내 offline 오판). 이후 인스턴스가 생기는 재렌더가 오면
-            # 그때 restart 경로로 복귀.
+            # enabled 인스턴스 0개 (전 서비스 disabled — 미개시 그룹/배포 없는 멤버) 이면
+            # 정지 유지 — vrrp_instance 없는 conf 로 systemctl restart 하면 keepalived 가
+            # 기동 완료를 알리지 못해 60초+ hang (agent job timeout → heartbeat 끊겨
+            # offline 오판). 인스턴스가 있으면: 변경 없음 → 무접촉 / 변경 → 가동 중이면
+            # reload (VRRP 상태 유지 — restart 는 MASTER 를 내렸다 올려 무의미한 절체 유발)
+            # / 정지 상태면 start.
             if ! grep -q '^vrrp_instance' /etc/keepalived/keepalived.conf; then
                 sudo systemctl stop keepalived 2>/dev/null || true
-                ok "vrrp_instance 없음 — keepalived 정지 상태 유지 (인스턴스 렌더 시 자동 기동)"
+                ok "vrrp_instance 없음 — keepalived 정지 상태 유지 (서비스 개시/인스턴스 렌더 시 자동 기동)"
+            elif [[ $_hachanged -eq 0 ]] && systemctl is-active --quiet keepalived; then
+                ok "변경 없음 — keepalived 무접촉 (이미 적용된 구성)"
+            elif systemctl is-active --quiet keepalived; then
+                sudo systemctl reload keepalived
+                ok "keepalived reload — 구성 변경 반영 (VRRP 상태 유지, cold_modules 절체는 cims-notify → cims-svc)"
             else
-                sudo systemctl restart keepalived
-                ok "keepalived + ip_nonlocal_bind 적용 완료 (cold_modules 절체는 cims-notify → cims-svc)"
+                sudo systemctl start keepalived
+                ok "keepalived 기동 + ip_nonlocal_bind 적용 완료 (cold_modules 절체는 cims-notify → cims-svc)"
             fi
             ;;
         start)  sudo systemctl start  keepalived ;;

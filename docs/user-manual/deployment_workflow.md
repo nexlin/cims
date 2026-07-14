@@ -153,5 +153,6 @@ Console 에서 새 서버에 모듈을 배포하고 서비스 시작까지의 �
 | 설정 저장 시 `not_installed` | 설치 버튼 먼저 눌러 deployment.install_path 생성 |
 | 그룹 [멤버 비교]에서 ⚠ 드리프트 경고 | 동기화 스위치 ON 이면 자동 교정이 곧 해소(ACTIVE 판정·버전 일치 필요). 계속 남으면 상태줄의 보류 사유 확인. 의도적으로 서버마다 달라야 하는 값이면 템플릿의 해당 필드 scope 를 system 으로 조정 (개발 문의) |
 | 가입자/조직 등 CSC 화면이 ApiError (502) | CSC 가 OAM(base)과 **다른 서버**에 배치된 경우, CSC 그룹 공통 설정의 `게이트웨이 접근 주소(Server.GatewayHost)` 에 그룹 VIP 를 입력 후 저장 (비우면 127.0.0.1 = 동거 배치 전용) |
+| A/S 그룹에 Active/Standby 상태가 안 뜸 | **서비스 시작 전이면 정상** — HA 상태는 [서비스 제어]에서 모듈을 시작한 그룹에만 생긴다 (설치·VIP 구성만 한 상태에서는 keepalived 가 무장되지 않음) |
 | Collection 탭에서 `agent_proxy_failed` | Agent 가 heartbeat 보내 `sync_port` 가 기록됐는지, 방화벽 9900 포트 |
 | `signaled:[]` 로 반환 (빈 배열) | `install_path/run/*.pid` 파일이 없음. CSP 가 pid 를 쓰도록 실행 중이어야 함 |

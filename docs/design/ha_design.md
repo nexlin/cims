@@ -387,15 +387,25 @@ systemd `cims@` instance 는 enable 하지 않는다.
   pkg `gateway.default_port`)으로 유도 — 콘솔에서 포트를 바꾸면 배포 설정 저장 경로가
   게이트웨이 라우트 재등록 + `update_ha` 재렌더를 함께 큐잉해 자동 추종.
   그 외 모듈은 service descriptor 기본값. 그룹 `failover_options.health.{port,proto}`
-  수동 오버라이드가 최우선. **배포 생성/제거도 재렌더를 큐잉**하므로 정본 워크플로
-  (그룹 구성 → 설치)에서 ha.json 이 배포 상태를 자동 추종한다. daemon 배포가 전무하고
-  헬스포트도 (유도/수동) 없는 멤버는 entry 가 `enabled:false` 로 렌더되어
-  vrrp_instance 자체가 생성되지 않는다 (빈 서버 VIP 인수 원천 차단). 렌더 결과
-  인스턴스가 0개면 `cims-ha apply` 는 keepalived 를 restart 하지 않고 **정지 상태로
-  유지**한다 — 인스턴스 없는 conf 로 restart 하면 keepalived 기동 완료 신호가 없어
-  60초+ hang → agent heartbeat 가 막혀 노드가 offline 로 오판되기 때문. apply
-  timeout/실패는 update_ha job 실패로 정직하게 보고된다 (sudo 미등록 dev 환경의
-  graceful skip 만 예외).
+  수동 오버라이드가 최우선.
+- **서비스 개시 게이트**: HA 는 **운영자가 start 한 모듈만** 관리한다. 렌더는 그룹
+  멤버 배포 중 record status=`running` 이 하나라도 있는 모듈(그룹 레벨 OR — 절체로
+  standby 기록이 stopped 인 채 notify 기동되는 비대칭 흡수)만 헬스포트 유도·
+  `cold_modules` 에 반영한다. 개시된 모듈이 없는 멤버(빈 서버, 설치만 된 그룹)는
+  entry 가 `enabled:false` 로 렌더되어 vrrp_instance 자체가 생성되지 않는다 —
+  **Active/Standby 상태는 서비스가 개시된 그룹에만 존재**하고, 설치만 한 상태에서
+  VIP 인수·미기동 포트 검사 flap·"start 하려면 VIP 필요, VIP 는 모듈 필요" 순환이
+  원천적으로 생기지 않는다. 렌더 재전파 트리거 = 그룹 변이 / 배포 생성·제거 /
+  실효 upstream 변경 / **start·stop·restart·upgrade·uninstall job 완료**
+  (record status 변화 = armed 집합 변화).
+- **apply 멱등·무접촉**: `cims-ha apply` 는 스테이징 대상 5종(conf/ha.json/
+  cims-health/cims-notify/unit)이 기존 적용본과 동일하면 keepalived 를 건드리지
+  않는다. 변경 시에도 가동 중이면 restart 대신 **reload** (VRRP 상태 유지 —
+  restart 는 MASTER 를 내렸다 올려 무의미한 절체 유발), 정지 상태면 start. 렌더
+  결과 인스턴스가 0개면 **정지 상태 유지** — 인스턴스 없는 conf 로 restart 하면
+  keepalived 기동 완료 신호가 없어 60초+ hang → agent heartbeat 가 막혀 offline
+  오판되기 때문. apply timeout/실패는 update_ha job 실패로 정직하게 보고된다
+  (sudo 미등록 dev 환경의 graceful skip 만 예외).
 - **진실 기반 검사 (csc)**: 렌더가 `services.<svc>.health_module/health_config_key`
   힌트를 내리면 (csc 이고 수동 health.port 오버라이드가 없을 때), cims-health 는
   검사 시점에 노드 로컬 배포 설정
@@ -499,10 +509,12 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
 - `standalone` 모듈은 어느 그룹/그룹 없음 OK
 
 자동 분배 (ems/core/oam/src/handlers/ha_groups.py + agent/cims_agent.py:job_update_ha):
-1. 렌더 트리거 — 그룹 생성 / 멤버 추가·제거 / 그룹 수정 / [▶ 적용], **배포 생성·제거**
-   (`enqueue_update_ha_for_agent`), 배포 설정 저장으로 실효포트가 바뀐 경우.
-   헬스포트/cold_modules 가 배포 목록에서 유도되는 파생값이라, 렌더 입력을 바꾸는
-   변이는 전부 재렌더를 태운다 (그룹 구성 → 설치 순서에서도 자동 추종)
+1. 렌더 트리거 — 그룹 생성 / 멤버 추가·제거 / 그룹 수정 / [▶ 적용], **배포 생성·제거**,
+   **start·stop·restart·upgrade·uninstall job 완료** (`enqueue_update_ha_for_agent`),
+   배포 설정 저장으로 실효포트가 바뀐 경우. 헬스포트/cold_modules/무장(enabled) 이
+   배포 목록·record status 에서 유도되는 파생값이라, 렌더 입력을 바꾸는 변이는 전부
+   재렌더를 태운다 (그룹 구성 → 설치 → 서비스 시작 순서 전체에서 자동 추종;
+   apply 가 멱등이라 렌더 결과가 같으면 keepalived 무접촉)
 2. OAM `_enqueue_update_ha_for_members` 가 멤버별 ha.json render → `update_ha` job
    큐잉 (params.ha_json — install_path 는 구 agent 호환 잔재, 신 agent 는 무시)
 3. cims_agent heartbeat 시 job 회수 → `job_update_ha`:
