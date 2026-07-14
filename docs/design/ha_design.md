@@ -427,10 +427,15 @@ keepalived 는 기본적으로 **VIP 만 옮기고 서비스는 건드리지 않
 | FAULT   | BACKUP 과 동일 — health probe fail 시 자기 정지 |
 | STOP    | 변경 없음 — keepalived 자체 종료 시 서비스 그대로 유지 |
 
-모듈 제어는 systemd `cims@` 유닛을 경유하지 않고 `runuser -u <cims_user> --
-<cims_home>/agent/current/bin/cims-svc` 직접 호출 — pid/health-gate/supervised 와
-단일 lifecycle 경로. `cims_home`/`cims_user` 는 agent 가 ha.json 기록 시 자기 설치
-루트/실행 계정으로 채운다 (OAM 렌더 값은 placeholder).
+모듈 제어는 systemd `cims@` 유닛을 경유하지 않고 `runuser -u <cims_user> -- env
+CIMS_DIST_DIR=<모듈 배포 루트> <cims_home>/agent/current/bin/cims-svc` 직접 호출 —
+pid/health-gate/supervised 와 단일 lifecycle 경로. 모듈 배포 루트는
+`modules/<mod>/current` 우선, 없으면(설치만 되고 기동 이력 없는 cold standby) 최신
+버전 디렉토리 fallback (`CIMS_DIST_DIR` 미지정 시 cims-svc 가 agent 트리 기준으로
+DIST_DIR 를 잡아 versioned 모듈을 못 찾는다). `cims_home`/`cims_user` 는 agent 가
+ha.json 기록 시 자기 설치 루트/실행 계정으로 채운다 (OAM 렌더 값은 placeholder).
+install 은 완료 시 current 를 방금 설치한 버전으로 flip 하므로 cold standby 도
+설치 직후부터 절체 기동 통로가 존재한다.
 
 모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록.
 

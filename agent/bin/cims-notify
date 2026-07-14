@@ -73,16 +73,32 @@ for cand in "$CIMS_HOME/agent/current/bin/cims-svc" "$CIMS_HOME/agent/bin/cims-s
     if [[ -x "$cand" ]]; then CIMS_SVC="$cand"; break; fi
 done
 
+# 모듈 배포 루트 해석 — cims-svc 는 CIMS_DIST_DIR 미지정 시 자기 위치(agent 트리)
+# 기준으로 DIST_DIR 를 잡아 versioned 모듈(modules/<mod>/<ver>)을 못 찾는다.
+# current 심볼릭 우선, 없으면(설치만 되고 한 번도 기동 안 된 cold standby) 최신
+# 버전 디렉토리 fallback — 승격 시 기동이 여기 걸려 실패하면 절체가 반쪽이 된다.
+_mod_dist() {  # <module> → stdout: dist dir (실패 시 rc=1)
+    local root="$CIMS_HOME/modules/$1" d
+    if [[ -e "$root/current" ]]; then echo "$root/current"; return 0; fi
+    d=$(ls -1dt "$root"/*/ 2>/dev/null | head -1)
+    [[ -n "$d" ]] && { echo "${d%/}"; return 0; }
+    return 1
+}
+
 _svc_ctl() {  # <start|stop> <module>
-    local act="$1" mod="$2"
+    local act="$1" mod="$2" dist
     if [[ -z "$CIMS_SVC" ]]; then
         log "FAIL: cims-svc 미발견 (CIMS_HOME=$CIMS_HOME) — $act $mod 스킵"
         return 0
     fi
-    if runuser -u "$CIMS_USER" -- "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1; then
-        log "$act $mod OK"
+    if ! dist=$(_mod_dist "$mod"); then
+        log "FAIL: 모듈 배포 루트 미발견 ($CIMS_HOME/modules/$mod) — $act $mod 스킵"
+        return 0
+    fi
+    if runuser -u "$CIMS_USER" -- env CIMS_DIST_DIR="$dist" "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1; then
+        log "$act $mod OK (dist=$dist)"
     else
-        log "FAIL: cims-svc $act $mod rc=$?"
+        log "FAIL: cims-svc $act $mod rc=$? (dist=$dist)"
     fi
 }
 

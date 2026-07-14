@@ -655,11 +655,17 @@ if __name__ == '__main__':
             alarm_sweeper.transition(_alert_open, _service_log, rule, mo_instance,
                                      detected_by, is_open, msg_open, msg_close, log=logger)
 
-        def _cold_standby_skip_set() -> set:
-            """{(agent_id, module)} — cold-spare standby(VIP 미보유 확정) 멤버의 cold
-            모듈. module_down 평가에서 제외 — 정지가 정상 상태라 알람이 아니다.
-            VIP 관측 True(active)/None(판정 불가) 멤버는 종전대로 평가."""
-            skip = set()
+        def _cold_module_ha_sets() -> tuple:
+            """AS 그룹 cold 모듈의 HA 상태별 module_down 평가 보정 집합 2개.
+            반환: (skip, must_run) — 각각 {(agent_id, module)}.
+            - skip: VIP 미보유 확정(standby) 멤버의 cold 모듈 — 정지가 정상 상태라
+              평가 제외 (오탐 방지).
+            - must_run: VIP 보유 확정(active) 멤버의 cold 모듈 — 배포기록 status 가
+              stopped 여도 실제로는 떠 있어야 정상 (절체 시 notify 가 기동하는 모듈이라
+              기록은 stopped 인 채 남는다). 기록 기준 평가에서 빠져 죽어도 무알람이던
+              것을 잡는다.
+            VIP 관측 None(판정 불가) 멤버는 종전대로 기록 기준 평가."""
+            skip, must_run = set(), set()
             try:
                 from handlers.ha_groups import _agent_daemon_modules
                 from services import ha_lookup
@@ -671,18 +677,19 @@ if __name__ == '__main__':
                     observed = ha_lookup.vip_observation(config, g)['observed']
                     for m in ha_lookup.members_of(g):
                         aid = m.get('agent_id')
-                        if observed.get(aid) is not False:
+                        if observed.get(aid) is None:
                             continue
                         for mod in _agent_daemon_modules(aid, config):
                             if modes.get(mod, 'cold') != 'hot':
-                                skip.add((aid, mod))
+                                (must_run if observed.get(aid) else skip).add((aid, mod))
             except Exception as e:
-                logger.log_error(f"[alarm-sweep] cold-standby skip 계산 실패: {e}")
-            return skip
+                logger.log_error(f"[alarm-sweep] cold 모듈 HA 집합 계산 실패: {e}")
+            return skip, must_run
 
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
                              deps: list, proc_down_targets: set,
-                             cold_skip: set, expected_cfg: dict | None = None) -> list:
+                             cold_skip: set, cold_must_run: set = frozenset(),
+                             expected_cfg: dict | None = None) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
             반환: (mo_instance, is_open, msg_open, msg_close) 목록."""
             chk = rule.get('check')
@@ -703,9 +710,13 @@ if __name__ == '__main__':
                 for dep in deps:
                     if dep.get('agent_id') != agent.get('id'):
                         continue
-                    if dep.get('status') != 'running':
-                        continue
                     proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    # 기록 running 이 평가 기본. 예외: VIP 보유 멤버의 cold 모듈은 절체
+                    # notify 가 기동해 기록이 stopped 인 채 실행되는 게 정상 상태라,
+                    # 기록 stopped 여도 must-run 으로 평가 (죽어 있으면 알람).
+                    must = (agent.get('id'), proc) in cold_must_run
+                    if dep.get('status') != 'running' and not (must and dep.get('status') == 'stopped'):
+                        continue
                     # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alarm 방지.
                     if not proc or proc in proc_down_targets:
                         continue
@@ -763,7 +774,7 @@ if __name__ == '__main__':
             agents = _agent_load_all(config)
             deps = _deploy_load_all(config)
             mroot = _metric_root(config)
-            cold_skip = _cold_standby_skip_set()
+            cold_skip, cold_must_run = _cold_module_ha_sets()
             # config_drift 기대 hash — 배포별 실체화본을 스윕당 1회만 계산 (pkg 캐시).
             expected_cfg: dict = {}
             if any(r.get('check') == 'config_drift' for r in agent_rules):
@@ -795,7 +806,7 @@ if __name__ == '__main__':
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, expected_cfg):
+                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, cold_must_run, expected_cfg):
                         active.add(f"{r.get('code')}@{mo}")
                         _transition(r, mo, f"agent:{host}", is_open, msg_open, msg_close)
             # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.

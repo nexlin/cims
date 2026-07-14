@@ -1278,10 +1278,12 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
 
     # 오래된 버전 디렉토리 prune (최신 3개 유지; 방금 설치본이 mtime 최신이므로
     # 직전 버전 2개까지 롤백 가능). legacy 평탄 잔재는 비대상.
-    # current 심볼릭을 방금 설치한 버전으로 flip — 활성 버전 통로(start/restart 가 이 경로로 기동).
-    # (flip 후 prune: current 타겟은 prune 보호 대상이라 안전)
+    # current 심볼릭을 방금 설치한 버전으로 flip — 활성 버전 통로. start/restart 외에
+    # cims-health 진실 검사(current/<mod>/config.json)와 cims-notify 절체 기동이 이
+    # 경로를 본다. cold standby 는 승격 전까지 start 가 없어 install 이 current 를
+    # 만들어 두지 않으면 절체 시점에 통로가 없다. (flip 후 prune: current 타겟은 보호)
     flipped = ""
-    if module_root and install_path != legacy_path:
+    if module_root:
         if _flip_current(module_root, install_path):
             flipped = " current->" + os.path.basename(install_path)
 
