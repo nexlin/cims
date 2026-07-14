@@ -1817,6 +1817,7 @@ def _deployment_to_json(r: dict) -> dict:
         "process_name": r.get("process_name"),
         "service_functions": sf_list,
         "status":       r.get("status"),
+        "live_state":   r.get("live_state"),
         "install_path": r.get("install_path"),
         "prev_install_path": r.get("prev_install_path"),
         "prev_package_version": r.get("prev_package_version"),
@@ -2518,7 +2519,17 @@ def _enrich_deploy(rows, config):
         if aid is not None:
             if aid not in agent_cache:
                 agent_cache[aid] = _agent_load(config, aid=aid) or {}
-            r['agent_name'] = agent_cache[aid].get('name')
+            ag = agent_cache[aid]
+            r['agent_name'] = ag.get('name')
+            # 실측 프로세스 상태 — agent metric 의 live_modules 스냅샷과 대조.
+            # status(배포기록=의도)와 달리 실제 프로세스 생존을 반영 (metric 주기 지연).
+            # online + 보고 있음 + 설치됨(비 pending) 일 때만 판정, 그 외 None(모름).
+            lm = ag.get('live_modules')
+            if (ag.get('status') == 'online' and isinstance(lm, list)
+                    and r.get('status') in ('running', 'stopped')):
+                names = {str(x.get('name', '')).lower() for x in lm if isinstance(x, dict)}
+                proc = (r.get('process_name') or r.get('package_name') or '').lower()
+                r['live_state'] = ('up' if proc in names else 'down') if proc else None
     return rows
 
 

@@ -1725,12 +1725,31 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
               <span className="tag" style={{
                 background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
               }}>{d.status}</span>
+              <LiveMismatchBadge dep={d} />
             </td>
             <td><ProcessControlButtons dep={d} agent={a} onJob={onJob} /></td>
           </tr>
         ))}
       </tbody>
     </table>
+  )
+}
+
+// 실측 불일치 배지 — 배포기록 status(의도)와 agent metric 실측(live_state)이 어긋날
+// 때만 표시. running↔실측 down = 프로세스 죽음(빨강), stopped↔실측 up = 외부 기동
+// (HA 절체 notify 등, 주황). metric 주기(30s)만큼 판정이 지연될 수 있다.
+function LiveMismatchBadge({ dep: d }: { dep: Deployment }) {
+  const down = d.status === 'running' && d.live_state === 'down'
+  const up   = d.status === 'stopped' && d.live_state === 'up'
+  if (!down && !up) return null
+  return (
+    <span className="tag" title={down
+        ? '실측: 프로세스 미검출 — 기록상 running 이지만 실제로는 죽어 있음 (metric 주기상 최대 30초 지연)'
+        : '실측: 프로세스 검출 — 기록상 stopped 이지만 실제로는 떠 있음 (HA 절체로 기동됐을 수 있음)'}
+      style={{ background: down ? '#e74c3c' : '#f39c12', color: '#fff',
+               fontSize: 10, padding: '1px 6px', borderRadius: 3, marginLeft: 4 }}>
+      {down ? '⚠ 실측 다운' : '⚠ 실측 실행중'}
+    </span>
   )
 }
 
@@ -1824,6 +1843,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember 
                   <span className="tag" style={{
                     background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
                   }}>{d.status}</span>
+                  <LiveMismatchBadge dep={d} />
                 </td>
                 <td><ProcessControlButtons dep={d} agent={ag} onJob={onJob} /></td>
               </tr>

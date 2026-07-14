@@ -388,6 +388,9 @@ export interface Deployment {
   process_name: string | null
   service_functions: string[]     // machine names
   status: 'pending' | 'deploying' | 'running' | 'stopped' | 'failed' | 'removed'
+  // 실측 프로세스 상태 — agent metric(live_modules) 대조. status(의도)와 어긋나면
+  // 콘솔이 배지로 노출 (예: running 인데 down = 프로세스 죽음). null = 판정 불가.
+  live_state?: 'up' | 'down' | null
   install_path: string | null
   prev_install_path?: string | null
   prev_package_version?: string | null

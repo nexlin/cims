@@ -734,8 +734,15 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
         'ha_transitions': ha_transitions if isinstance(ha_transitions, dict) else {},
     }
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
+    # live_modules — 실행 중 모듈 스냅샷을 agent row 에 캐시. deployments 조회가
+    # 배포기록 status(의도)와 별개로 실측 프로세스 상태(live_state)를 enrich 하는 원천
+    # (jsonl tail 재파싱 없이 row 1회 read). metric 주기(기본 30s)만큼 지연될 수 있음.
+    live = [{'name': str(m.get('name', '')), 'pid': m.get('pid')}
+            for m in (modules if isinstance(modules, list) else [])
+            if isinstance(m, dict) and m.get('name')]
     await asyncio.to_thread(_agent_update, config, agent['id'], {
         'last_metric': datetime.now().isoformat(timespec='seconds'),
+        'live_modules': live,
     })
     return HandlerResult(status=200, body={"ok": True}, media_type="application/json")
 

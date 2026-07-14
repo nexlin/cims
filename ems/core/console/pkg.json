@@ -1,6 +1,6 @@
 {
   "name": "console",
   "description": "관리자 웹 콘솔 (svc — base + 서비스 메뉴 전부)",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "ha_capability": "standalone"
 }
