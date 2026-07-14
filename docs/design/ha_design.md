@@ -365,9 +365,12 @@ systemd `cims@` instance 는 enable 하지 않는다.
 
 - `agent/bin/cims-health <svc>` — VIP 보유 여부에 따른 2-모드 검사. rc=0 / rc=1.
   - **VIP 미보유(standby) = 승격 자격 검사**: 실행 상태 대신, 절체 시 기동할 모듈
-    (`health_module ∪ cold_modules ∪ tracked_modules`)이
-    `${cims_home}/modules/<mod>/current` 에 **설치돼 있는지**만 검사 (cold 정지는
-    정상이므로 PASS). 필수 모듈 정보가 없으면 설치 모듈이 하나라도 있어야 PASS —
+    (`health_module ∪ cold_modules ∪ tracked_modules`)이 **설치돼 있는지**만 검사
+    (cold 정지는 정상이므로 PASS). 설치 판정 = `${cims_home}/modules/<mod>/` 에
+    **버전 디렉토리 또는 current 심볼릭 존재** — current 는 start 시에만 생성되므로
+    (`_flip_current`), 승격 전까지 기동 이력이 없는 cold standby 를 current 기준으로
+    판정하면 "MASTER 가 돼야 current 가 생기는데 current 가 있어야 승격 자격" 순환으로
+    영구 FAULT 가 된다. 필수 모듈 정보가 없으면 설치 모듈이 하나라도 있어야 PASS —
     모듈이 전무한 빈 서버는 승격 자격이 없어 VIP 를 인수하지 못한다.
   - **VIP 보유(active) = 서비스 검사**: ha.json `services.<svc>.{port, proto,
     bind_ip}` lookup 후 `ss -ln{t,u}` 로 binding 확인. 포트를 어떤 경로로도 알 수

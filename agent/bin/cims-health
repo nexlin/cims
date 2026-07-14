@@ -130,13 +130,24 @@ if [[ -n "${VIPS:-}" ]]; then
     done
 fi
 
+# 설치 판정 — current 심볼릭(기동 이력) 또는 버전 디렉토리 존재.
+# current 는 _flip_current 가 start/restart 시에만 만들므로, 승격 전까지 한 번도
+# 기동하지 않는 cold standby 에는 없다 — current 만 보면 "MASTER 가 돼야 current 가
+# 생기는데 current 가 있어야 승격 자격" 부트스트랩 순환으로 영구 FAULT 가 된다.
+# 설치(버전 디렉토리)만 있으면 승격 자격 인정.
+_mod_installed() {  # <mod>
+    local root="$CIMS_HOME/modules/$1"
+    [[ -e "$root/current" ]] && return 0
+    compgen -G "$root/*/" >/dev/null 2>&1
+}
+
 if [[ $HOLD -eq 0 ]]; then
     # standby — cold 모듈 정지는 정상. 절체 시 기동할 모듈이 설치돼 있는지만 검사.
     if [[ -n "${REQ:-}" ]]; then
         IFS=',' read -r -a REQARR <<< "$REQ"
         for m in "${REQARR[@]}"; do
             [[ -z "$m" ]] && continue
-            if [[ ! -e "$CIMS_HOME/modules/$m/current" ]]; then
+            if ! _mod_installed "$m"; then
                 echo "cims-health: $SVC standby — module '$m' not installed (승격 자격 없음)" >&2
                 exit 1
             fi
@@ -144,7 +155,7 @@ if [[ $HOLD -eq 0 ]]; then
         exit 0
     fi
     # 필수 모듈 정보 없음 — 설치 모듈이 하나라도 있으면 PASS, 전무(빈 서버)면 FAIL.
-    if compgen -G "$CIMS_HOME/modules/*/current" >/dev/null 2>&1; then
+    if compgen -G "$CIMS_HOME/modules/*/" >/dev/null 2>&1; then
         exit 0
     fi
     echo "cims-health: $SVC standby — no modules installed (승격 자격 없음)" >&2
