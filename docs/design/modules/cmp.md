@@ -4,6 +4,12 @@
 
 CMP는 CIMS 시스템의 미디어 서버로, CSP의 제어 하에 RTP relay, PTT 오디오 믹싱, MCPTT Floor Control을 수행한다.
 
+**서비스 표준 코덱**: VoLTE/PTT 음성 = **AMR-WB** (PT=99, `AMR-WB/16000/1`), 영상 = **H.264**
+(PT=96, `H264/90000`). CMP 는 트랜스코딩 없이 SDP 협상 결과를 릴레이하지만, 녹취 변환
+파이프라인([../features/recording.md](../features/recording.md))은 AMR-WB/H.264 를 전제한다.
+시험(cspsim) 시에도 AMR-WB 미디어 파일 지정이 필수 —
+[../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록 "기본 호시험" 참조.
+
 ### 1.1 핵심 기능
 
 | 기능 | 설명 |
@@ -119,7 +125,7 @@ CmpServer(name, configFile)
 {
   "trans_id": 1001,
   "payload": {
-    "cmd": "ADD",
+    "cmd": "ADD_SESSION",
     "session_id": "sess_001",
     "remote_ip": "192.168.1.100",
     "remote_port": 30000,
@@ -128,22 +134,24 @@ CmpServer(name, configFile)
 }
 ```
 
-응답 형식:
+`cmd` 는 수신 시 대문자로 정규화해 비교하며, 명령마다 별칭을 허용한다(각 명령 제목의
+`A / B` 표기). CSP(CCmpClient)가 실제 송신하는 값은 각 제목의 첫 번째(긴) 형태다.
+
+응답 형식 — `response` 값은 단순 결과면 `"OK"`/`"ERROR ..."` 문자열, 구조화 응답이면
+JSON 객체를 **문자열화한 값**이다 (CSP 가 파싱해 사용). 세션/그룹 계열 명령은 요청 payload 의
+`sesid`/`service` 를 응답 envelope 에 함께 실어 돌려준다:
 ```json
 {
   "trans_id": 1001,
-  "response": {
-    "status": "OK",
-    "local_ip": "192.168.1.10",
-    "local_port": 50000,
-    "local_video_port": 50002
-  }
+  "sesid": "caller::csp::...",
+  "service": "volte",
+  "response": "{\"status\":\"OK\",\"local_ip\":\"192.168.1.10\",\"local_port\":50000,\"local_video_port\":50002}"
 }
 ```
 
 ### 3.2 명령 상세
 
-#### ADD / ADD_SESSION — VoIP 세션 생성
+#### ADD_SESSION / ADD — VoIP 세션 생성
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -163,7 +171,7 @@ CmpServer(name, configFile)
 3. record_dir 있으면 녹취 시작
 4. log_dir 있으면 `_logDirs`에 저장, SESSION_START 로그
 
-#### REMOVE / REMOVE_SESSION — VoIP 세션 해제
+#### REMOVE_SESSION / REMOVE — VoIP 세션 해제
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -171,18 +179,21 @@ CmpServer(name, configFile)
 
 **동작:** 녹취 중지 → reset() → freeResource() → 세션/로그 맵 삭제
 
-#### MODIFY / MODIFY_SESSION — VoIP 세션 수정
+#### MODIFY_SESSION / MODIFY — VoIP 세션 수정
 
 processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 
-#### ADD_GROUP / ADDGROUP — PTT 그룹 생성
+#### ADD_PTT_GROUP / ADD_GROUP / ADDGROUP — PTT 그룹 생성
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
 | group_id | O | 그룹 식별자 |
+| count | - | 멤버 수 |
 | members | - | "sid1:prio1:role,sid2:prio2:role" CSV (role=chair/participant) |
+| subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
 | log_dir | - | CMP flow 로그 경로 |
+| video_enabled | - | 1 이면 video 포트 활성 |
 | group_type | - | `prearranged`/`chat`/`broadcast` (broadcast floor 정책용) |
 | initiator_id | - | broadcast 개시자 sessionId(=userId) — floor 독점 판정 |
 
@@ -197,7 +208,12 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 6. members CSV 파싱 → 우선순위/role 설정
 7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`) — TS 24.380 §10.3.
 
-#### JOIN_GROUP / JOINGROUP — 멤버 참가
+#### MODIFY_GROUP / MODIFY_PTT_GROUP — 그룹 멤버/우선순위 갱신
+
+processAddGroup()으로 위임 — 기존 그룹이면 재할당 없이 members 만 갱신하고 동일
+`ip/port/floor_port/video_port` 를 응답한다.
+
+#### JOIN_PTT_GROUP / JOIN_GROUP / JOINGROUP — 멤버 참가
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -207,10 +223,12 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 | user_port | O | 멤버 Audio RTP 포트 |
 | user_floor_port | - | 멤버 Floor Control 포트 |
 | user_video_port | - | 멤버 Video RTP 포트 |
+| role | - | `chair`/`participant` (floor 선점 판정용, 기본 participant) |
+| tier | - | `emergency`/`imminent`/`normal` — 긴급 멤버 join 시 동반 |
 
 **동작:** McpttGroup::addMember() 호출. Floor taken 상태면 신규 멤버에게 FLOOR_TAKEN 통지.
 
-#### LEAVE_GROUP / LEAVEGROUP — 멤버 퇴장
+#### LEAVE_PTT_GROUP / LEAVE_GROUP / LEAVEGROUP — 멤버 퇴장
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -219,7 +237,7 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 
 **동작:** McpttGroup::removeMember(). Floor 소유자 퇴장 시 FLOOR_IDLE 브로드캐스트.
 
-#### REMOVE_GROUP / REMOVEGROUP — 그룹 해제
+#### REMOVE_PTT_GROUP / REMOVE_GROUP / REMOVEGROUP — 그룹 해제
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
@@ -227,7 +245,23 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 
 **동작:** PPttTrans 리소스 반환 → McpttGroup delete → 맵 삭제
 
-#### STATS / STATS_REQUEST — 통계 조회
+#### SET_FLOOR_TIER — 멤버 floor tier 런타임 변경
+
+| 파라미터 | 필수 | 설명 |
+|----------|------|------|
+| group_id | O | 그룹 식별자 |
+| session_id | O | 대상 멤버 세션 ID |
+| tier | O | `emergency` / `imminent` / `normal` |
+
+**응답:** `OK` (그룹 없음/세션 미지정 시 `ERROR Group Not Found`)
+
+**동작:** McpttGroup::setTier() 호출 — 긴급/임박 업그레이드·취소 시 미디어 재협상 없이
+floor 선점 우선순위만 갱신한다 (TS 24.380 tier 판정, [../features/mcptt_emergency_modes.md](../features/mcptt_emergency_modes.md)).
+CSP 는 re-INVITE(`emergency-ind`/`imminentperil-ind`) 처리 경로(GroupCallService)에서 송신한다.
+
+#### STATS_REQUEST / STATS — 통계 조회
+
+CSP 는 이 명령을 보내지 않는다 — OAM stats 핸들러와 검증 파이프라인(stage6)이 직접 조회한다.
 
 **응답:**
 ```json
@@ -254,9 +288,9 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 
 - `rtp_ports_*` = VoIP 풀(`_freeResources`/`PRtpTrans`), `ptt_rtp_ports_*` = PTT 전용 풀(`_freePttResources`/`PPttTrans`). OAM `/stats/health` 가 `cmp.rtp_ports` + `cmp.rtp_ports_ptt` 로 분리 전달.
 
-#### ALIVE / HEARTBEAT — 연결 확인
+#### HEARTBEAT / ALIVE — 연결 확인
 
-**응답:** `{"trans_id": N, "response": "OK"}`
+CSP 가 3초 주기로 송신. **응답:** `{"trans_id": N, "response": "OK"}`
 
 ---
 

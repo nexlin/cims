@@ -342,13 +342,59 @@ grep LocalIp build/dist/csp/config/csp.json
 `cspsim` 은 SIP/RTP 단말 시뮬레이터로, S3 스모크·S6 통합 검증의 호 발생기다. 빌드 산출물은
 `build/bin/cspsim`. 단독 수동 시험에도 사용한다.
 
-```bash
-# VoIP 호 (2 세션)
-./bin/cspsim -server_ip 127.0.0.1 -count 2 -user 1001 -domain csp -password 1234 -mode volte -scenario call -call_duration 5
+### 서비스 표준 코덱 — 시험 전 필독
 
-# PTT 그룹콜 (4 세션)
-./bin/cspsim -server_ip 127.0.0.1 -count 4 -user 1001 -domain csp -password 1234 -mode ptt -group 1000 -scenario group_call -call_duration 10
+**CIMS 의 VoLTE/PTT 음성 코덱은 AMR-WB (PT=99, `AMR-WB/16000/1`), 영상은 H.264 (PT=96,
+`H264/90000`) 다.** 녹취 변환 파이프라인(OAM ffmpeg)도 AMR-WB/H.264 를 전제한다
+([design/features/recording.md](design/features/recording.md)).
+
+cspsim 은 **미디어 파일(`-media_file`/`-media_dir`)을 지정하지 않으면 SDP 를 PCMU (PT=0) 로
+만든다** — 이 fallback 은 표준 시험이 아니며, 녹취 변환·코덱 경로가 검증되지 않는다.
+**기본 호시험은 반드시 AMR-WB 미디어 파일과 함께 실행한다.** 샘플 미디어는
+`tests/media/*_audio.amrwb`(음성) / `tests/media/*_video.h264`(영상).
+
+### 기본 호시험 (표준 명령)
+
+권장 진입점은 `./cims.sh sim` — DB 가입자 로드(`-db`), domain 자동 감지(access_services),
+**AMR-WB 미디어 자동 주입**(`build/dist/cspsim/media/` 존재 시)을 알아서 처리한다.
+
+```bash
+# VoLTE 음성 2자 (AMR-WB) — 기본 호시험
+./cims.sh sim -mode volte -scenario call -count 2 -call_duration 8 -no_video
+
+# VoLTE 영상 2자 (AMR-WB + H.264)
+./cims.sh sim -mode volte -scenario call -count 2 -call_duration 8
+
+# PTT 그룹콜 (그룹은 DB 첫 그룹 자동 감지, -group 으로 지정 가능)
+./cims.sh sim -mode ptt -scenario group_call -count 4 -call_duration 10
 ```
+
+> `cims.sh sim` 의 미디어 자동 주입은 `build/dist/cspsim/media/` (·`media/audio_only/`) 가
+> 있을 때만 동작한다. 없으면 **경고 없이 PCMU 로 진행**되므로, 최초 1회
+> `mkdir -p build/dist/cspsim/media/audio_only &&
+> cp tests/media/*_audio.amrwb tests/media/*_video.h264 build/dist/cspsim/media/ &&
+> cp tests/media/*_audio.amrwb build/dist/cspsim/media/audio_only/` 로 시드한다.
+
+`build/bin/cspsim` 직접 실행 시엔 미디어를 **명시적으로** 지정한다 (repo 루트 기준):
+
+```bash
+# VoLTE 음성 2자 (AMR-WB) — server_ip 는 local_nodes.jsonl 의 primary bind_ip (127.0.0.1 아님)
+./build/bin/cspsim -server_ip <primary_bind_ip> -count 2 -mode volte -scenario call \
+  -call_duration 8 -no_video -db build/dist/csp/config/csp.json -media_dir tests/media
+
+# VoLTE 영상 2자 (AMR-WB + H.264)
+./build/bin/cspsim -server_ip <primary_bind_ip> -count 2 -mode volte -scenario call \
+  -call_duration 8 -db build/dist/csp/config/csp.json -media_dir tests/media
+
+# PTT 그룹콜 4자
+./build/bin/cspsim -server_ip <primary_bind_ip> -count 4 -mode ptt -scenario group_call \
+  -call_duration 10 -db build/dist/csp/config/csp.json -media_dir tests/media
+```
+
+- `-db build/dist/csp/config/csp.json`: DB 가입자(imsi 기반 IMPI) 자동 로드. 수동 계정 지정
+  (`-user/-password/-domain`) 시엔 가입자의 imsi/service_ref 와 일치해야 REGISTER 가 통과한다.
+- 시험 성공 판정: stdout `Registered N/N`·`Call OK`, SIP 원문 로그(`*_sip.msg.*.jsonl`)의
+  SDP 가 `m=audio ... RTP/AVP 99` (AMR-WB) 인지 확인. `RTP/AVP 0`(PCMU) 이면 미디어 미주입.
 
 인터랙티브 명령: `s`(stats) · `c`(call) · `g`(group call) · `t`/`r`(PTT push/release) · `sub`(subscribe) · `q`(quit).
 

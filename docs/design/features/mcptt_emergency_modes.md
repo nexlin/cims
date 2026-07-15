@@ -86,7 +86,7 @@ else                              bPreempt = (reqPrio < ownPrio); // 동tier·�
 ### 3.2 tier 설정 경로
 
 - `ADD_PTT_GROUP`/`MODIFY_PTT_GROUP` payload에 그룹 condition: `"emergency":0/1`, `"imminent":0/1`(세션 전체 in-progress)와, 필요 시 **개시자(또는 특정 멤버) tier**.
-- 멤버 tier 갱신: `JOIN_PTT_GROUP`에 `"tier":"normal|imminent|emergency"` 추가, 또는 신규 경량 명령 `SET_FLOOR_TIER {group_id, session_id, tier}`(업그레이드/취소 시 floor만 갱신, 미디어 재협상 불필요).
+- 멤버 tier 갱신: `JOIN_PTT_GROUP`의 `"tier":"normal|imminent|emergency"` 필드, 또는 경량 명령 `SET_FLOOR_TIER {group_id, session_id, tier}`(업그레이드/취소 시 floor만 갱신, 미디어 재협상 불필요 — [../modules/cmp.md](../modules/cmp.md) §3.2).
 - members 문자열 확장은 **하위호환 유지**: `id:prio:role[:tier]` (4번째 토큰 옵션, 미존재 시 normal).
 
 ### 3.3 wire 포맷(floor 패킷)

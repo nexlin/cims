@@ -201,18 +201,26 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 ```json
 {
   "trans_id": <요청과 동일>,
-  "response": "<문자열 또는 JSON 객체>"
+  "response": "<문자열, 또는 JSON 객체를 문자열화한 값>"
 }
 ```
 
-#### `add` — 1:1 RTP 세션 생성
+CSP 는 `trans_id` 로 응답을 매칭하며, 무응답 시 동일 `trans_id`+payload 를 100ms 간격으로
+최대 3회 재전송한다 (명령이 session_id/group_id 기준 멱등이라 안전 —
+[modules/csp.md](modules/csp.md) §3.6).
+
+CMP 는 수신 `cmd` 를 대문자 정규화해 비교하고 명령별 별칭(`ADD`, `ADD_GROUP`, `JOINGROUP` 등)을
+허용한다. 아래 예시의 `cmd` 값은 CSP 가 실제 송신하는 wire 문자열이다. 별칭 전체 목록은
+[modules/cmp.md](modules/cmp.md) §3.2 참고.
+
+#### `ADD_SESSION` — 1:1 RTP 세션 생성
 
 **요청:**
 ```json
 {
   "trans_id": 1,
   "payload": {
-    "cmd": "add",
+    "cmd": "ADD_SESSION",
     "session_id": "inv-20260331-001@192.168.0.2",
     "remote_ip": "0.0.0.0",
     "remote_port": 0,
@@ -242,16 +250,18 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 }
 ```
 
-> `add` 명령을 동일 session_id로 다시 보내면 기존 세션의 remote 정보를 업데이트합니다 (modify 역할).
+> `ADD_SESSION` 을 동일 session_id로 다시 보내면 기존 세션의 remote 정보를 업데이트합니다.
+> remote 주소 갱신 전용으로는 `MODIFY_SESSION` (별칭 `MODIFY`) 을 사용하며, 필드는 동일하고
+> CMP 내부에서 같은 경로로 처리됩니다.
 
-#### `remove` — RTP 세션 삭제
+#### `REMOVE_SESSION` — RTP 세션 삭제
 
 **요청:**
 ```json
 {
   "trans_id": 2,
   "payload": {
-    "cmd": "remove",
+    "cmd": "REMOVE_SESSION",
     "session_id": "inv-20260331-001@192.168.0.2",
     "csp_id": "CSP_MAIN",
     "csp_sess_id": "inv-20260331-001@192.168.0.2",
@@ -269,17 +279,17 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 }
 ```
 
-#### `addgroup` — PTT 그룹 생성 및 공유 RTP 세션 할당
+#### `ADD_PTT_GROUP` — PTT 그룹 생성 및 공유 RTP 세션 할당
 
 **요청:**
 ```json
 {
   "trans_id": 3,
   "payload": {
-    "cmd": "addgroup",
+    "cmd": "ADD_PTT_GROUP",
     "group_id": "+82571910001",
     "count": 3,
-    "members": "+82571900001:0,+821030432632:0,+82571900002:1",
+    "members": "+82571900001:0:chair,+821030432632:0:participant,+82571900002:1:participant",
     "csp_id": "CSP_MAIN",
     "csp_sess_id": "0",
     "cmp_id": "CMP_MAIN",
@@ -292,31 +302,33 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 |------|------|
 | `group_id` | 그룹 MSISDN |
 | `count` | 멤버 수 |
-| `members` | `"id1:priority1,id2:priority2,..."` 형식 문자열 |
+| `members` | `"id1:priority1:role1,id2:priority2:role2,..."` 형식 문자열 (role=chair/participant) |
 
 **성공 응답:**
 ```json
 {
   "trans_id": 3,
-  "response": "{\"status\":\"OK\",\"ip\":\"192.168.0.2\",\"port\":50000,\"video_port\":50002}"
+  "response": "{\"status\":\"OK\",\"ip\":\"192.168.0.2\",\"port\":50000,\"floor_port\":50001,\"video_port\":50002}"
 }
 ```
 
-> 동일 group_id로 다시 `addgroup`을 보내면 기존 그룹의 우선순위를 업데이트합니다 (`modifygroup`과 동일 동작).
+> 동일 group_id로 다시 `ADD_PTT_GROUP`을 보내면 기존 그룹의 우선순위를 업데이트합니다 (`MODIFY_GROUP`과 동일 동작).
 
-#### `joingroup` — 멤버를 그룹에 추가
+#### `JOIN_PTT_GROUP` — 멤버를 그룹에 추가
 
 **요청:**
 ```json
 {
   "trans_id": 4,
   "payload": {
-    "cmd": "joingroup",
+    "cmd": "JOIN_PTT_GROUP",
     "group_id": "+82571910001",
     "session_id": "+82571900001",
     "user_ip": "192.168.0.100",
     "user_port": 40000,
+    "user_floor_port": 40001,
     "user_video_port": 40002,
+    "role": "participant",
     "csp_id": "CSP_MAIN",
     "csp_sess_id": "+82571900001",
     "cmp_id": "CMP_MAIN",
@@ -330,7 +342,9 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 | `session_id` | 멤버 식별자 (PTT MSISDN) |
 | `user_ip` | 멤버의 RTP 수신 IP |
 | `user_port` | 멤버의 Audio RTP 포트 |
+| `user_floor_port` | 멤버의 Floor Control 포트 |
 | `user_video_port` | 멤버의 Video RTP 포트 (0이면 음성만) |
+| `role` | `chair`/`participant` (기본 participant) |
 
 **성공 응답:**
 ```json
@@ -348,14 +362,14 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 }
 ```
 
-#### `leavegroup` — 멤버를 그룹에서 제거
+#### `LEAVE_PTT_GROUP` — 멤버를 그룹에서 제거
 
 **요청:**
 ```json
 {
   "trans_id": 5,
   "payload": {
-    "cmd": "leavegroup",
+    "cmd": "LEAVE_PTT_GROUP",
     "group_id": "+82571910001",
     "session_id": "+82571900001",
     "csp_id": "CSP_MAIN",
@@ -376,14 +390,14 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 
 > 현재 발언권 소유자가 나가면 자동으로 FLOOR_IDLE이 모든 멤버에게 브로드캐스트됩니다.
 
-#### `removegroup` — 그룹 삭제
+#### `REMOVE_PTT_GROUP` — 그룹 삭제
 
 **요청:**
 ```json
 {
   "trans_id": 6,
   "payload": {
-    "cmd": "removegroup",
+    "cmd": "REMOVE_PTT_GROUP",
     "group_id": "+82571910001",
     "csp_id": "CSP_MAIN",
     "csp_sess_id": "0",
@@ -401,18 +415,18 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 }
 ```
 
-#### `modifygroup` — 그룹 멤버/우선순위 변경
+#### `MODIFY_GROUP` — 그룹 멤버/우선순위 변경
 
-내부적으로 `addgroup`과 동일하게 처리됩니다.
+내부적으로 `ADD_PTT_GROUP`과 동일하게 처리됩니다.
 
 **요청:**
 ```json
 {
   "trans_id": 7,
   "payload": {
-    "cmd": "modifygroup",
+    "cmd": "MODIFY_GROUP",
     "group_id": "+82571910001",
-    "members": "+82571900001:0,+821030432632:1,+82571900002:2",
+    "members": "+82571900001:0:chair,+821030432632:1:participant,+82571900002:2:participant",
     "csp_id": "CSP_MAIN",
     "csp_sess_id": "0",
     "cmp_id": "CMP_MAIN",
@@ -425,11 +439,36 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 ```json
 {
   "trans_id": 7,
-  "response": "{\"status\":\"OK\",\"ip\":\"192.168.0.2\",\"port\":50000,\"video_port\":50002}"
+  "response": "{\"status\":\"OK\",\"ip\":\"192.168.0.2\",\"port\":50000,\"floor_port\":50001,\"video_port\":50002}"
 }
 ```
 
-#### `alive` — 연결 확인 (Keep-Alive)
+#### `SET_FLOOR_TIER` — 멤버 floor tier 런타임 변경
+
+긴급/임박(emergency/imminent) 업그레이드·취소 시 미디어 재협상 없이 floor 선점 우선순위만
+갱신합니다 ([features/mcptt_emergency_modes.md](features/mcptt_emergency_modes.md)).
+
+**요청:**
+```json
+{
+  "trans_id": 8,
+  "payload": {
+    "cmd": "SET_FLOOR_TIER",
+    "group_id": "+82571910001",
+    "session_id": "+82571900001",
+    "tier": "emergency"
+  }
+}
+```
+
+| 필드 | 설명 |
+|------|------|
+| `session_id` | 대상 멤버 식별자 |
+| `tier` | `emergency` / `imminent` / `normal` |
+
+**응답:** `"OK"` (그룹 없으면 `"ERROR Group Not Found"`)
+
+#### `HEARTBEAT` — 연결 확인 (Keep-Alive)
 
 CSP가 3초 간격으로 전송합니다.
 
@@ -438,7 +477,7 @@ CSP가 3초 간격으로 전송합니다.
 {
   "trans_id": 100,
   "payload": {
-    "cmd": "alive",
+    "cmd": "HEARTBEAT",
     "csp_id": "CSP_MAIN",
     "csp_sess_id": "0",
     "cmp_id": "CMP_MAIN",
@@ -455,12 +494,13 @@ CSP가 3초 간격으로 전송합니다.
 }
 ```
 
-> CSP는 alive 응답 실패 시 CMP 연결 끊김으로 판단하고, 재연결 시 `m_fnConnectionCallback`을 호출합니다.
+> CSP는 HEARTBEAT 가 연속 3회 실패하면 (≈9초 무응답) CMP 연결 끊김으로 판단하고,
+> 재연결 시 `m_fnConnectionCallback`을 호출합니다.
 
 ### 2.3 McpttGroup 상세 동작
 
 **SSRC 할당:**
-- CMP는 `joingroup` 시 각 멤버에게 순차적 SSRC를 할당합니다 (시작값 1000부터).
+- CMP는 `JOIN_PTT_GROUP` 시 각 멤버에게 순차적 SSRC를 할당합니다 (시작값 1000부터).
 - 멤버의 `audioSsrcOut` = 1000 + 할당 카운터 (수신자에게 보내는 고정 SSRC)
 - 멤버의 `videoSsrcOut` = 2000 + 할당 카운터
 - 이렇게 하면 수신자는 항상 동일한 SSRC로 RTP를 받아 디코더 초기화가 안정적입니다.
@@ -495,7 +535,7 @@ CSP가 3초 간격으로 전송합니다.
 ```
 
 **Port Latching:**
-- CMP는 멤버의 실제 RTP 소스 포트가 `joingroup`에서 등록한 포트와 다를 수 있음을 고려합니다.
+- CMP는 멤버의 실제 RTP 소스 포트가 `JOIN_PTT_GROUP`에서 등록한 포트와 다를 수 있음을 고려합니다.
 - IP가 일치하고 해당 IP를 가진 멤버가 1명뿐이면 포트를 자동 업데이트합니다.
 - 이 동작은 NAT 뒤에 있는 클라이언트를 지원합니다.
 
@@ -841,7 +881,7 @@ cd csc/src && python3 csc_app.py
 ```
 
 **기동 순서가 중요한 이유:**
-- CSP는 기동 시 CMP에 `alive` 명령을 3초 간격으로 전송합니다.
+- CSP는 기동 시 CMP에 `HEARTBEAT` 명령을 3초 간격으로 전송합니다.
 - CMP가 먼저 실행되지 않으면 CSP는 "CMP Disconnected" 상태로 유지되어 통화가 불가능합니다.
 - cwrtc는 CSP에 SIP REGISTER를 보내므로 CSP가 먼저 실행되어야 합니다.
 

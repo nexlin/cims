@@ -167,7 +167,7 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
 양쪽이 **동일한 공유 스토리지(NFS)** 를 같은 절대경로로 마운트해야 녹취가 한 곳에 모인다.
 
 - 마운트: `NAS:/export → /mnt/cims` (4서버 공통, 동일 절대경로 필수)
-- `ServiceLogDir = /mnt/cims/service_log` (csp/cmp/oam 공통). CSP가 `add`/`addGroup` JSON에
+- `ServiceLogDir = /mnt/cims/service_log` (csp/cmp/oam 공통). CSP가 `ADD_SESSION`/`ADD_PTT_GROUP` JSON에
   **절대경로 record_dir**(세션 `.d`)을 실어 보내고, 원격 CMP가 그 경로(=NAS)에 seg를 기록 →
   OAM이 같은 NAS 경로를 스캔해 조회·변환.
 - 녹취 파일은 한 세션 `.d` 디렉토리에 공존:

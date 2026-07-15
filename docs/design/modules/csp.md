@@ -352,23 +352,28 @@ CMP(미디어 서버)와 JSON-over-UDP 통신.
 
 ```
 CCmpClient
-  ├─ KeepAliveLoop (30초 주기 heartbeat)
+  ├─ KeepAliveLoop (3초 주기 HEARTBEAT, 연속 3회 실패 시 Disconnected 판정)
   ├─ RecvLoop (CMP 응답 수신, transId 매칭)
-  └─ SendRequestAndWait() (동기 요청, 2초 타임아웃)
+  └─ SendRequestAndWait() (동기 요청, 100ms 대기 × 3회 재전송)
 ```
 
-**주요 명령:**
+**주요 명령** (cmd 값은 CSP 가 실제 송신하는 wire 문자열, CMP 는 별칭도 허용 — [cmp.md](cmp.md) §3.2):
 
 | 명령 | 용도 | 응답 |
 |------|------|------|
 | `ADD_SESSION` | VoIP RTP relay 세션 생성 | local_ip, local_port, local_video_port |
+| `MODIFY_SESSION` | 세션 remote 주소 갱신 (re-INVITE 등) | local_ip, local_port, local_video_port |
 | `REMOVE_SESSION` | 세션 해제 | OK |
-| `ADD_GROUP` | PTT 그룹 RTP 생성 | ip, port, floor_port, video_port |
-| `JOIN_GROUP` | 멤버 그룹 참가 (user_floor_port 포함) | OK |
-| `LEAVE_GROUP` | 멤버 그룹 퇴장 | OK |
-| `REMOVE_GROUP` | 그룹 해제 | OK |
-| `ALIVE` | 연결 상태 확인 | OK |
-| `STATS` | CMP 통계 조회 | sessions, groups, rtp_ports 등 |
+| `ADD_PTT_GROUP` | PTT 그룹 RTP 생성 | ip, port, floor_port, video_port |
+| `MODIFY_GROUP` | 그룹 멤버/우선순위 갱신 | ip, port, floor_port, video_port |
+| `JOIN_PTT_GROUP` | 멤버 그룹 참가 (user_floor_port, role 포함) | OK |
+| `LEAVE_PTT_GROUP` | 멤버 그룹 퇴장 | OK |
+| `REMOVE_PTT_GROUP` | 그룹 해제 | OK |
+| `SET_FLOOR_TIER` | 멤버 floor tier 런타임 변경 (emergency/imminent/normal) | OK |
+| `HEARTBEAT` | 연결 상태 확인 (3초 주기) | OK |
+
+> `STATS_REQUEST` 는 CMP 가 처리하는 통계 조회 명령이지만 CSP(CCmpClient)는 송신하지 않는다 —
+> OAM(`ems/core/oam` stats 핸들러)과 검증 파이프라인(stage6)이 CMP 9000/UDP 로 직접 조회한다.
 
 **Flow 메타 필드 (모든 Session/Group API 파라미터):**
 
@@ -383,7 +388,7 @@ bool AddSession(const std::string& sesid,
                 const std::string& remoteIp, int remotePort, ...);
 ```
 
-- `service` 는 cmd 이름을 기준으로 자동 결정 (ADD_GROUP/JOIN_GROUP/... → mcptt, ADD_SESSION → volte 등) 되지만 명시 인자가 우선.
+- `service` 는 cmd 이름을 기준으로 자동 결정 (cmd 에 `PTT` 포함 → mcptt, `SESSION` 포함 → volte, 그 외 → system) 되지만 명시 인자가 우선.
 - 응답 Flow 엔트리는 `Transaction` 에 저장된 caller/callee/sesid/service 를 그대로 상속.
 
 **트랜잭션 처리:**
@@ -391,25 +396,32 @@ bool AddSession(const std::string& sesid,
 ```
 SendRequestAndWait(payload)
   ├─ transId 할당 (m_iNextTransId++)
-  ├─ m_mapTransactions[transId] = Transaction
-  ├─ UDP 전송
-  ├─ condition_variable.wait(2초 타임아웃)
-  └─ RecvLoop에서 transId 매칭 → notify
+  ├─ m_mapTransactions[transId] = Transaction (shared_ptr)
+  ├─ 최대 3회 시도: UDP 전송 → condition_variable.wait_for(100ms, 술어=bCompleted)
+  │   └─ 무응답이면 동일 trans_id+payload 재전송 (명령이 session_id 기준 멱등이라 안전)
+  └─ RecvLoop에서 transId 매칭 → notify (총 대기 ceiling ≈ 300ms)
 ```
+
+멀티 CMP endpoint(HA) 시 session_id/group_id 기반 consistent hash ring 으로 endpoint 를
+sticky 선택하고, 단일 endpoint 환경에서는 primary 를 사용한다.
 
 **연결 상태 관리:**
 
 ```
 m_bConnected = false
   │
-  ├─ KeepAliveLoop → ALIVE 전송
-  │   ├─ 응답 수신 → m_bConnected = true
-  │   └─ 타임아웃 → m_bConnected = false
-  │       └─ m_fnConnectionCallback(false) → GroupCallService 통보
+  ├─ KeepAliveLoop (3초 주기) → HEARTBEAT 전송
+  │   ├─ 응답 수신 → m_bConnected = true, 실패 카운터 리셋
+  │   └─ 타임아웃 → 실패 카운터 증가
+  │       └─ 연속 3회 실패 (≈9초 무응답) → m_bConnected = false
+  │           └─ m_fnConnectionCallback(false) → GroupCallService 통보
   │
   └─ 재연결 시 → m_fnConnectionCallback(true)
       └─ GroupCallService::OnCmpStatusChanged() → 그룹 재생성
 ```
+
+단발 HEARTBEAT 타임아웃(부하 시 간헐 발생)으로는 끊김 판정하지 않는다 — 연속 3회 실패에서만
+Disconnected 로 전환해 과민 teardown 을 방지한다.
 
 ### 3.7 CCallDir
 
