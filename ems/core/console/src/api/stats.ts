@@ -209,7 +209,7 @@ export const statsApi = {
   serviceLive: () => api.get<ServiceLive>('/stats/service/live'),
   serviceTrend: (window: string = '8h') => api.get<ServiceTrend>(`/stats/service/trend?window=${window}`),
   serviceEvents: (limit = 60) => api.get<{ events: ServiceEvent[] }>(`/stats/service/events?limit=${limit}`),
-  serviceOrg: () => api.get<{ orgs: OrgStat[] }>('/stats/service/org'),
+  serviceOrg: () => api.get<{ orgs: OrgStat[]; db_degraded?: boolean }>('/stats/service/org'),
   pttMembers: (group: string, page = 1, limit = 50) => api.get<PttMembersResponse>(`/stats/service/ptt-members?group=${encodeURIComponent(group)}&page=${page}&limit=${limit}`),
 
   messages: (params: { date?: string; granularity?: string; proto?: string }) => {

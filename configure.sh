@@ -436,18 +436,32 @@ apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIS
 # 콘솔(4419) 로그인 토큰은 base OAM 이 발급하고, 게이트웨이 프록시 뒤의 csc 가
 # 같은 시크릿으로 독립 검증한다. csc.json 은 @CIMS_JWT_SECRET@ 로 렌더되므로
 # dist oam.json 의 CimsAuth.JwtSecret 을 같은 값으로 패치해 정렬한다.
+# ServiceLogging.Dir 도 SERVICE_LOG_DIR 로 정렬 — oam.json 소스에는 플레이스홀더가
+# 없어 여기서 패치하지 않으면 flow/alert 조회가 타 모듈과 다른 경로를 본다.
 # (배포 흐름은 deploy 가 JwtSecret 자동 공유 — 이 패치는 dev/build/dist 용.)
 if [[ -f "$DIST_DIR/oam/config/oam.json" ]]; then
-    OAM_CFG="$DIST_DIR/oam/config/oam.json" SECRET="$CIMS_JWT_SECRET" python3 - <<'PY'
+    OAM_CFG="$DIST_DIR/oam/config/oam.json" SECRET="$CIMS_JWT_SECRET" \
+        SVC_LOG_DIR="$SERVICE_LOG_DIR" \
+        DBH="$DB_HOST" DBP="${DB_PORT:-3306}" DBU="$DB_USER" DBW="$DB_PASSWORD" DBN="${DB_NAME:-cims}" \
+        python3 - <<'PY'
 import json, os
 p = os.environ["OAM_CFG"]
 with open(p) as f:
     c = json.load(f)
 c.setdefault("CimsAuth", {})["JwtSecret"] = os.environ["SECRET"]
+c.setdefault("ServiceLogging", {})["Dir"] = os.environ["SVC_LOG_DIR"]
+# stats 핸들러(_get_db)가 읽는 CimsDatabase — 미주입 시 기본 127.0.0.1 로 접속을 시도해
+# 외부 DB 구성에서 통계 API 가 MySQL 에러(500)를 반환한다.
+c["CimsDatabase"] = {
+    "Host": os.environ["DBH"], "Port": int(os.environ["DBP"]),
+    "User": os.environ["DBU"], "Password": os.environ["DBW"], "Db": os.environ["DBN"],
+}
 with open(p, "w") as f:
     json.dump(c, f, indent=4, ensure_ascii=False)
     f.write("\n")
 print("  oam.json CimsAuth.JwtSecret ← csc 와 동일 값 정렬")
+print("  oam.json ServiceLogging.Dir ← " + os.environ["SVC_LOG_DIR"])
+print("  oam.json CimsDatabase ← %s@%s" % (os.environ["DBU"], os.environ["DBH"]))
 PY
 fi
 

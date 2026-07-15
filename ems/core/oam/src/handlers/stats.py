@@ -16,6 +16,7 @@ import json
 import socket
 import time
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs, unquote
 from pathlib import PurePath
@@ -24,6 +25,12 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
+
+logger = logging.getLogger(__name__)
+
+# 클라이언트 응답용 공통 에러 바디 — 원인 상세(호스트/계정 힌트가 실리는 DB 예외 문자열 등)는
+# 화면에 노출하지 않고 oam 로그에만 남긴다.
+_ERR_INTERNAL = {'error': 'stats query failed (oam 로그 참조)'}
 
 
 def _get_db(config: dict):
@@ -276,7 +283,8 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
         return HandlerResult(status=404, body={'error': 'Not Found'})
     except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+        logger.exception('stats handler error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
 
 
 _STATS_SERVICE_BASE = '/api/v1/stats/service'
@@ -317,7 +325,8 @@ async def handle_stats_service(handler_args: HandlerArgs, kwargs: dict) -> Handl
         date = qp('date')
         return await _service_stats(config, svc, gran, from_dt, to_dt, date)
     except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+        logger.exception('stats handler error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
 
 
 # ──────────────────────────────────────────────────────────────
@@ -768,7 +777,8 @@ async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResu
 
         return HandlerResult(status=200, body=result)
     except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+        logger.exception('stats handler error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
 
 
 def _calc_voip_stats(config, from_dt, to_dt, gran):
@@ -1093,7 +1103,8 @@ async def _subscribers_status(config: dict, status: str = 'active',
                     subscribers.append(sub)
 
     except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+        logger.exception('stats handler error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
 
     return HandlerResult(status=200, body={
         'total': total,
@@ -1853,6 +1864,7 @@ async def _service_org(config: dict) -> HandlerResult:
     UNSET = '(미지정)'
     KEYS = ('members', 'volte_reg', 'ptt_reg', 'active_volte', 'active_ptt', 'ptt_talking')
     leaf = {}   # org_id(leaf 팀코드) → stats
+    db_degraded = False  # DB 집계 실패 시 true — 구성원/등록 컬럼만 0 강등
 
     def L(code):
         return leaf.setdefault(code, {k: 0 for k in KEYS})
@@ -1882,7 +1894,11 @@ async def _service_org(config: dict) -> HandlerResult:
                     for r in cur.fetchall():
                         m2o[r['m']] = r['o']
     except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+        # DB 순단 시 페이지 전체를 죽이지 않는다 — 구성원/등록 수만 0 으로 강등하고
+        # 파일(state)·CMP 기반 지표(활성 세션/발언자)는 그대로 서빙. 활성 가입자의
+        # 조직 매핑(m2o)도 비므로 활성 카운트는 '(미지정)' 으로 묶인다.
+        logger.warning('service/org DB aggregation failed (degraded): %s', e)
+        db_degraded = True
 
     for ms in av:
         L(m2o.get(ms, UNSET))['active_volte'] += 1
@@ -1924,7 +1940,10 @@ async def _service_org(config: dict) -> HandlerResult:
         if code not in nodes:
             out.append({'code': code, 'name': code, 'parent': None, 'depth': 0,
                         **{k: leaf[code][k] for k in KEYS}})
-    return HandlerResult(status=200, body={'orgs': out})
+    body = {'orgs': out}
+    if db_degraded:
+        body['db_degraded'] = True  # 콘솔이 "DB 조회 실패 — 일부 컬럼 제외" 안내 표시용
+    return HandlerResult(status=200, body=body)
 
 
 async def _ptt_members(config: dict, group: str, page='1', limit='50') -> HandlerResult:
@@ -1972,7 +1991,8 @@ async def _ptt_members(config: dict, group: str, page='1', limit='50') -> Handle
                                     'active': r['msisdn'] in active_in_group,
                                     'talking': r['msisdn'] == floor_holder})
     except Exception as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+        logger.exception('stats handler error: %s', e)
+        return HandlerResult(status=500, body=_ERR_INTERNAL)
     return HandlerResult(status=200, body={
         'group': group, 'total': total, 'page': page, 'limit': limit,
         'active_count': len(active_in_group), 'floor_holder': floor_holder,

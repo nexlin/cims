@@ -460,6 +460,7 @@ const PAGE_SIZES = [5, 10, 20, 50, 100]
 export function OrgStatsCard() {
   const { show } = useToast()
   const [orgs, setOrgs] = useState<OrgStat[]>([])
+  const [dbDegraded, setDbDegraded] = useState(false) // DB 집계 실패 강등 (구성원/등록 수 0)
   const [sel, setSel] = useState<string>('')          // 선택 부서 코드
   const [searchInput, setSearchInput] = useState('')
   const [q, setQ] = useState('')
@@ -473,6 +474,7 @@ export function OrgStatsCard() {
     const load = () => statsApi.serviceOrg().then(r => {
       if (!alive) return
       setOrgs(r.orgs)
+      setDbDegraded(!!r.db_degraded)
       setSel(s => s || r.orgs[0]?.code || '')   // 기본=최상위
     }).catch(e => show(String(e), 'err'))
     load(); const iv = setInterval(load, 10000); return () => { alive = false; clearInterval(iv) }
@@ -496,6 +498,12 @@ export function OrgStatsCard() {
 
   return (
     <div className="panel" style={{ padding: 10 }}>
+      {dbDegraded && (
+        <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 4, fontSize: 12,
+          background: 'rgba(233,150,102,.12)', color: '#c96', border: '1px solid rgba(233,150,102,.4)' }}>
+          DB 조회 실패 — 구성원/등록 수는 표시되지 않습니다 (활성 세션·발언자는 정상). 상세는 OAM 로그 참조.
+        </div>
+      )}
       <div className="toolbar" style={{ marginBottom: 8 }}>
         <input className="search-input" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
