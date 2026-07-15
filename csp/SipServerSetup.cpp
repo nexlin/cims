@@ -92,6 +92,7 @@ CSipServerSetup::CSipServerSetup()
       m_iDbPort( 3306 ),
       m_iRedisPort( 0 ),
       m_strServiceMode( "both" ),
+      m_bTestEnvOpenTermination( false ),  // ⚠️ 상용 기본 false — 테스트망에서만 true
       m_iLogLevel( 0 ),
       m_iLogMaxSize( 20000000 ),
       m_iMonitorPort( 6000 ),
@@ -354,6 +355,11 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
 
             if ( setup.Has( "ServiceMode" ) ) {
                 m_strServiceMode = setup.GetString( "ServiceMode" );
+            }
+
+            // ⚠️ 테스트 환경 전용 개방형 착신 스위치 — 상용은 미지정(false) 유지.
+            if ( setup.Has( "TestEnvOpenTermination" ) ) {
+                m_bTestEnvOpenTermination = ( setup.GetString( "TestEnvOpenTermination" ) == "true" );
             }
 
             // IMS 역할 설정 (미지정 시 모두 활성화)

@@ -366,7 +366,10 @@ bool CSipStack::Send( CSipMessage * pclsMessage, bool bCheckMessage )
 		bRes = UdpSend( hSendSocket, pclsMessage->m_strPacket.c_str(), (int)pclsMessage->m_strPacket.length(), pszIp, iPort );
 		m_clsUdpSendMutex.release();
 
-		CLog::Print( LOG_NETWORK, "UdpSend(%s:%d) \n[%s]", pszIp, iPort, pclsMessage->m_strPacket.c_str() );
+		// 억제 소스(drop 확정 IP)로 나가는 응답(트랜잭션 계층 자동 100 Trying 등)의
+		//   원본 덤프를 생략 — 인바운드 억제와 대칭. 전송 자체는 수행(로깅만 건너뜀).
+		if( !CLog::IsNetworkSourceSuppressed( pszIp ) )
+			CLog::Print( LOG_NETWORK, "UdpSend(%s:%d) \n[%s]", pszIp, iPort, pclsMessage->m_strPacket.c_str() );
 	}
 	else if( eTransport == E_SIP_TCP )
 	{

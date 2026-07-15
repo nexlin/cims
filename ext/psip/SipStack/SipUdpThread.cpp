@@ -10,7 +10,10 @@ thread_local int t_iCurrentListenerId = 0;
 
 static bool SipMessageProcess( CSipStack * pclsSipStack, int iThreadId, const char * pszBuf, int iBufLen, const char * pszIp, unsigned short iPort )
 {
-	CLog::Print( LOG_NETWORK, "UdpRecv(%s:%d) \n[%s]", pszIp, iPort, pszBuf );
+	// 억제 소스(toll-fraud 스캐너 등 상위가 drop 확정한 IP)는 원본 패킷 덤프를 생략.
+	//   처리(RecvSipMessage)는 그대로 수행 — 로깅만 건너뛴다.
+	if( !CLog::IsNetworkSourceSuppressed( pszIp ) )
+		CLog::Print( LOG_NETWORK, "UdpRecv(%s:%d) \n[%s]", pszIp, iPort, pszBuf );
 
 	return pclsSipStack->RecvSipMessage( iThreadId, pszBuf, iBufLen, pszIp, iPort, E_SIP_UDP );
 }

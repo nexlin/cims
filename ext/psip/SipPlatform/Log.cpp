@@ -17,7 +17,17 @@
 #include <unistd.h>
 #endif
 
+#include <map>
+#include <string>
+#include <mutex>
+#include <time.h>
+
 #include "MemoryDebug.h"
+
+// LOG_NETWORK 소스별 억제 리스트 (IP → 만료 epoch). 파일 스코프 정적 —
+//   CLog 정적 초기화 순서에 영향받지 않도록 함수 밖 지역 정적으로 관리.
+static std::map<std::string, time_t> g_mapSuppressSrc;
+static std::mutex g_mtxSuppressSrc;
 
 // CLog 클래스의 정적 변수를 초기화 한다.
 char * CLog::m_pszDirName = NULL;
@@ -524,4 +534,23 @@ void CLog::PrintCallStack( EnumLogLevel iLevel )
 #endif
 
 #endif
+}
+
+void CLog::SuppressNetworkSource( const char * pszIp, int iTtlSec )
+{
+	if( pszIp == NULL || pszIp[0] == '\0' ) return;
+	time_t tExp = time( NULL ) + iTtlSec;
+	std::lock_guard<std::mutex> lk( g_mtxSuppressSrc );
+	g_mapSuppressSrc[pszIp] = tExp;
+}
+
+bool CLog::IsNetworkSourceSuppressed( const char * pszIp )
+{
+	if( pszIp == NULL || pszIp[0] == '\0' ) return false;
+	time_t tNow = time( NULL );
+	std::lock_guard<std::mutex> lk( g_mtxSuppressSrc );
+	std::map<std::string, time_t>::iterator it = g_mapSuppressSrc.find( pszIp );
+	if( it == g_mapSuppressSrc.end() ) return false;
+	if( it->second < tNow ) { g_mapSuppressSrc.erase( it ); return false; }
+	return true;
 }

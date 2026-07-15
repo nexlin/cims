@@ -364,7 +364,10 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             const int iListenerId = GetCurrentInboundListenerId();
             const std::string strSipAddr = CspAddressing::GetLocalSipAddress( iListenerId );
             const int iSipPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
-            snprintf( szServiceRoute, sizeof( szServiceRoute ), "<sip:%s@%s:%d;lr>", strRegDomain.c_str(),
+            // Service-Route = S-CSCF(자기) 주소. host:port 만 사용 — 도메인을 user 파트에
+            //   넣으면(sip:도메인@IP) 비표준이라 엄격한 UA 가 이 route 로 요청 생성 시
+            //   오라우팅/거부할 수 있다 (RFC 3608 / TS 24.229).
+            snprintf( szServiceRoute, sizeof( szServiceRoute ), "<sip:%s:%d;lr>",
                       strSipAddr.c_str(), iSipPort );
             pclsResponse->AddHeader( "Service-Route", szServiceRoute );
         }

@@ -53,49 +53,6 @@ CModuleDispatcher gclsDispatcher;
 extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 extern void SendInitialNotify( const SubscriptionInfo &sub );
 
-// ── 비정상(스캔/사기) 수신 분류 헬퍼 ───────────────────────────────
-// 공개 SIP 포트로 유입되는 인터넷발 스캔/사기 INVITE 를 수신 시점에 탐지·기록하기 위함.
-namespace {
-// 공인(글로벌) IPv4 여부 — 사설/루프백/링크로컬은 내부로 간주(false).
-bool SecIsPublicIp( const std::string &ip ) {
-    unsigned int a = 0, b = 0, c = 0, d = 0;
-    if ( sscanf( ip.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d ) != 4 ) return false;
-    if ( a == 10 ) return false;
-    if ( a == 172 && b >= 16 && b <= 31 ) return false;
-    if ( a == 192 && b == 168 ) return false;
-    if ( a == 127 || a == 0 || a >= 224 ) return false;
-    if ( a == 169 && b == 254 ) return false;
-    return true;
-}
-// 알려진 SIP 스캐너/공격툴 UA (부분일치, 소문자). pplsip(psip 기본 UA)은 미등록 발신일 때만 의미.
-bool SecIsScannerUa( const std::string &ua ) {
-    std::string l;
-    l.reserve( ua.size() );
-    for ( char ch : ua ) l += (char)tolower( (unsigned char)ch );
-    static const char *kUa[] = { "pplsip", "friendly-scanner", "sipvicious", "sipcli", "sundayddr",
-                                 "vaxsipuseragent", "sip-scan", "sipsak", "sippts", "sundayddr", 0 };
-    for ( int i = 0; kUa[i]; ++i )
-        if ( l.find( kUa[i] ) != std::string::npos ) return true;
-    return false;
-}
-// 사기성 번호: E.164 최대(15) 초과, 또는 0/9 의 9자리+ 비정상 반복(스캐너 enumeration).
-bool SecIsFraudNumber( const std::string &num ) {
-    std::string digits;
-    for ( char ch : num )
-        if ( isdigit( (unsigned char)ch ) ) digits += ch;
-    if ( digits.size() > 15 ) return true;
-    int run = 1;
-    for ( size_t i = 1; i < digits.size(); ++i ) {
-        if ( digits[i] == digits[i - 1] && ( digits[i] == '0' || digits[i] == '9' ) ) {
-            if ( ++run >= 9 ) return true;
-        } else {
-            run = 1;
-        }
-    }
-    return false;
-}
-}  // namespace
-
 // ──────────────────────────────────────────────────────────────
 //  Constructor / Destructor
 // ──────────────────────────────────────────────────────────────
@@ -291,32 +248,29 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
             }
         }
 
-        // 비정상(스캔/사기) INVITE 탐지·기록 — 미등록 발신 + (공인IP|사기번호|스캐너UA).
-        //   정상 가입자(REGISTER 인증완료) 발신은 등록캐시에 있어 제외 → 오탐 없음.
-        //   기록만 수행(차단/응답은 기존 ACL/Routing/CSCF 로직에 위임).
-        {
+        // ⚠️ 테스트 환경 전용 (Setup.TestEnvOpenTermination=true) — 상용 원복 대상.
+        //   미등록 발신 INVITE 종단 정책 — 착신(To) 기준.
+        //   ① 착신이 로컬 가입자/그룹 → 통과(하단 라우팅/B2BUA). 발신자 401 챌린지도
+        //      생략한다(EventIncomingRequestAuth). NAT 뒤 정상 단말·협력업체·외부 수신
+        //      통화 허용.
+        //   ② 착신이 비가입자(toll-fraud 스캐너의 외부 PSTN 번호 등) → 603 Decline 응답
+        //      후 종료. 로그는 남기지 않으며, 소스 IP 를 억제 등록해 원본 패킷 덤프
+        //      (psip 수신/송신 게이트)도 생략 → 로그 무발생.
+        //   정상 등록 발신자(isAlive)는 이 분기에 들어오지 않아 기존 흐름 그대로.
+        //   상용(내부망)은 이 문제가 없어 플래그 off → 표준 인증 흐름 사용.
+        if ( gclsSetup.m_bTestEnvOpenTermination ) {
             CspUser clsSecUser;
             if ( !gclsCspUserMap.isAlive( strFrom, clsSecUser ) ) {
-                bool bPub = SecIsPublicIp( pclsMessage->m_strClientIp );
-                bool bFraud = SecIsFraudNumber( strFrom ) || SecIsFraudNumber( strTo );
-                bool bScan = SecIsScannerUa( pclsMessage->m_strUserAgent );
-                if ( bPub || bFraud || bScan ) {
-                    std::string strReasons;
-                    if ( bPub ) strReasons += "external_ip,";
-                    if ( bScan ) strReasons += "scanner_ua,";
-                    if ( bFraud ) strReasons += "fraud_number,";
-                    if ( !strReasons.empty() ) strReasons.pop_back();
-                    char szPeer[80];
-                    snprintf( szPeer, sizeof( szPeer ), "%s:%d",
-                              pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
-                    gclsSipLogger.LogSecurity( szPeer, "INVITE", strFrom.c_str(), strTo.c_str(),
-                                               pclsMessage->m_strUserAgent.c_str(), strCallId.c_str(),
-                                               strReasons.c_str(), false );
-                    CLog::Print( LOG_INFO,
-                                 "SECURITY abnormal INVITE src=%s from=%s to=%s ua=%s reasons=%s",
-                                 pclsMessage->m_strClientIp.c_str(), strFrom.c_str(), strTo.c_str(),
-                                 pclsMessage->m_strUserAgent.c_str(), strReasons.c_str() );
+                CspUser clsToProv;
+                bool bLocalTarget = gclsGroupMap.Contains( strTo.c_str() ) ||
+                                    gclsCspUserMap.isAlive( strTo.c_str(), clsToProv ) ||
+                                    gclsDbManager.SelectUser( strTo, clsToProv );
+                if ( !bLocalTarget ) {
+                    CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), 300 );
+                    SendResponse( pclsMessage, SIP_DECLINE );  // 603
+                    return true;
                 }
+                // 착신 로컬 → 통과 (401 skip 은 EventIncomingRequestAuth 에서)
             }
         }
 
@@ -479,6 +433,20 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
         if ( gclsPendingRouteMap.Has( strCallId ) ) return true;
     }
 
+    // ⚠️ 테스트 환경 전용 (Setup.TestEnvOpenTermination=true) — 상용 원복 대상.
+    //   착신(To)이 로컬 가입자/그룹인 INVITE 는 발신자 401 챌린지를 생략하고 통과시킨다
+    //   (수신 통화 허용). 비가입자 착신 INVITE 는 RecvRequest 에서 이미 603 처리되어
+    //   여기 도달하지 않는다. 상용(내부망)은 플래그 off → 표준 챌린지 흐름 사용.
+    if ( gclsSetup.m_bTestEnvOpenTermination && pclsMessage->IsMethod( SIP_METHOD_INVITE ) ) {
+        const std::string &strToUser = pclsMessage->m_clsTo.m_clsUri.m_strUser;
+        CspUser clsToProv;
+        if ( gclsGroupMap.Contains( strToUser.c_str() ) ||
+             gclsCspUserMap.isAlive( strToUser.c_str(), clsToProv ) ||
+             gclsDbManager.SelectUser( strToUser, clsToProv ) ) {
+            return true;
+        }
+    }
+
     CspUser clsCspUser;
     bool bCspUserFound = gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsCspUser );
 
@@ -513,6 +481,23 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     CUserInfo clsUserInfo;
     bool bRoutePrefix = false;
     std::string strTo;
+
+    // tel: URI 착신 정규화 — HM-TRCP 등 MMTEL 단말은 착신을 tel:+82..(userinfo 없음)로
+    //   보낸다. psip 는 '@' 부재로 번호를 host 에 파싱 → To user 가 비어 pszTo 가 빈 문자열.
+    //   이 경우 To/Request-URI 가 tel: 이면 host(전화번호)를 착신으로 채택한다. (sip: 는 무변)
+    std::string strTelCallee;
+    if ( ( pszTo == NULL || pszTo[0] == '\0' ) && pclsMessage ) {
+        if ( strcasecmp( pclsMessage->m_clsTo.m_clsUri.m_strProtocol.c_str(), "tel" ) == 0 &&
+             !pclsMessage->m_clsTo.m_clsUri.m_strHost.empty() )
+            strTelCallee = pclsMessage->m_clsTo.m_clsUri.m_strHost;
+        else if ( strcasecmp( pclsMessage->m_clsReqUri.m_strProtocol.c_str(), "tel" ) == 0 &&
+                  !pclsMessage->m_clsReqUri.m_strHost.empty() )
+            strTelCallee = pclsMessage->m_clsReqUri.m_strHost;
+        if ( !strTelCallee.empty() ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: tel: URI 착신 정규화 → %s", strTelCallee.c_str() );
+            pszTo = strTelCallee.c_str();  // 이후 라우팅(가입자/그룹 조회)이 sip: 와 동일하게 동작
+        }
+    }
 
     if ( strlen( pszTo ) == 0 ) return StopCall( pszCallId, SIP_DECLINE );
 
@@ -776,13 +761,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
     }
 
-    // P-Asserted-Identity: B2BUA 발신 leg에 인증된 발신자 신원 전달 (3GPP TS 24.229)
-    if ( pclsInvite ) {
-        std::string strDomain = gclsServiceMap.GetDomainByKind( "volte" );
-        char szPAI[512];
-        snprintf( szPAI, sizeof( szPAI ), "<sip:%s@%s>", pszFrom ? pszFrom : "", strDomain.c_str() );
-        pclsInvite->AddHeader( "P-Asserted-Identity", szPAI );
-    }
+    // P-Asserted-Identity 는 psip(CSipDialog::CreateMessage)가 발신 leg 도메인 기준으로
+    //   이미 1개 삽입한다(동일 값). 여기서 재삽입하면 동일 PAID 가 2개 되어 RFC 3325
+    //   위반(scheme 당 1개) → 중복 삽입 제거.
 
     gclsCallMap.Insert( pszCallId, strCallId.c_str(), iStartPort );
     SetCallOwner( strCallId.c_str(), GetCallOwner( pszCallId ) );

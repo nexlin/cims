@@ -88,9 +88,6 @@ bool PRtpRelay::setRemote(const std::string& ip, unsigned int port, unsigned int
 
     PeerInfo& p = _peers[idx];
     p.ip = ip; p.port = port; p.videoPort = videoPort; p.active = true;
-    p.declaredIp = ip;   // SDP 선언 주소 보존 — latch 자격(사설 IP) 판정용
-    p.natLatchedRtp = p.natLatchedVideo = false;
-    p.natLatchedRtcp = p.natLatchedVideoRtcp = false;   // 재-INVITE 로 주소 갱신 시 재latch 허용
     makeAddr(p.addrRtp, ip, port);
     makeAddr(p.addrRtcp, ip, port + 1);
     if (videoPort > 0) {
@@ -126,25 +123,7 @@ void PRtpRelay::sendVideoTo(const std::string& ip, int port, char* data, int len
 //  Peer 식별 (포트 매칭 + IP 학습)
 // ═══════════════════════════════════════════════════════════════
 
-// RFC1918/링크로컬 — SDP 선언 주소가 사설이면 NAT 뒤 단말로 보고 latch 자격을 준다.
-static bool _isPrivateIp(const std::string& ip) {
-    unsigned a = 0, b = 0;
-    if (sscanf(ip.c_str(), "%u.%u", &a, &b) != 2) return false;
-    if (a == 10) return true;
-    if (a == 172 && b >= 16 && b <= 31) return true;
-    if (a == 192 && b == 168) return true;
-    if (a == 169 && b == 254) return true;
-    return false;
-}
-
 int PRtpRelay::_findPeerIndex(const std::string& ip, int port, bool isVideo) {
-    // 1) 관측 소스 정확 일치 (latch 완료된 peer 포함)
-    for (int i = 0; i < 2; ++i) {
-        if (!_peers[i].active) continue;
-        int peerPort = isVideo ? (int)_peers[i].videoPort : (int)_peers[i].port;
-        if (peerPort == port && _peers[i].ip == ip) return i;
-    }
-    // 2) 선언 포트 일치 — IP 만 학습 (포트 보존형 NAT / 멀티홈, 기존 동작)
     for (int i = 0; i < 2; ++i) {
         if (!_peers[i].active) continue;
         int peerPort = isVideo ? (int)_peers[i].videoPort : (int)_peers[i].port;
@@ -160,72 +139,6 @@ int PRtpRelay::_findPeerIndex(const std::string& ip, int port, bool isVideo) {
             }
             return i;
         }
-    }
-    // 3) symmetric-RTP latch — 포트변환 NAT. 선언 주소가 사설(그대로는 도달 불가)이고
-    //    아직 latch 안 된 슬롯에 관측 소스를 latch. 미지 소스 유입은 사설 선언 슬롯에만
-    //    허용해 제3자 스푸핑 표면을 줄인다. 두 flow 의 슬롯 배정은 도착 순서라 발/착
-    //    라벨(녹취 a/b)이 뒤바뀔 수 있으나 relay 동작(상호 전달)에는 영향이 없다.
-    for (int i = 0; i < 2; ++i) {
-        PeerInfo& p = _peers[i];
-        if (!p.active || !_isPrivateIp(p.declaredIp)) continue;
-        bool& latched = isVideo ? p.natLatchedVideo : p.natLatchedRtp;
-        if (latched) continue;
-        p.ip = ip;
-        if (isVideo) {
-            p.videoPort = port;
-            p.addrVideoRtp.sin_addr.s_addr = inet_addr(ip.c_str());
-            p.addrVideoRtp.sin_port = htons(port);
-            // RTCP 는 실제 소스 관측 전까지 port+1 로 추정 (RTCP latch 시 교정)
-            if (!p.natLatchedVideoRtcp) {
-                p.addrVideoRtcp.sin_addr.s_addr = inet_addr(ip.c_str());
-                p.addrVideoRtcp.sin_port = htons(port + 1);
-            }
-        } else {
-            p.port = port;
-            p.addrRtp.sin_addr.s_addr = inet_addr(ip.c_str());
-            p.addrRtp.sin_port = htons(port);
-            if (!p.natLatchedRtcp) {
-                p.addrRtcp.sin_addr.s_addr = inet_addr(ip.c_str());
-                p.addrRtcp.sin_port = htons(port + 1);
-            }
-        }
-        latched = true;
-        LOG_INFO("PRtpRelay", "%s addr latched (NAT) peer[%d] %s:%d session=%s",
-                 isVideo ? "Video RTP" : "RTP", i, ip.c_str(), port, _sessionId.c_str());
-        return i;
-    }
-    return -1;
-}
-
-// RTCP 전용 매칭 — RTP latch 를 오염시키지 않도록 분리. port 는 관측 RTCP 소스 포트 원본.
-int PRtpRelay::_findPeerIndexRtcp(const std::string& ip, int port, bool isVideo) {
-    // 1) 현재 RTCP 목적지와 정확 일치 (선언 port+1 또는 latch 된 소스)
-    for (int i = 0; i < 2; ++i) {
-        if (!_peers[i].active) continue;
-        const struct sockaddr_in& a = isVideo ? _peers[i].addrVideoRtcp : _peers[i].addrRtcp;
-        if (_peers[i].ip == ip && ntohs(a.sin_port) == (unsigned short)port) return i;
-    }
-    // 2) 선언 RTP 포트+1 규칙 (기존 동작: port-1 == RTP 포트)
-    for (int i = 0; i < 2; ++i) {
-        if (!_peers[i].active) continue;
-        int peerPort = isVideo ? (int)_peers[i].videoPort : (int)_peers[i].port;
-        if (peerPort == port - 1) return i;
-    }
-    // 3) RTCP latch — RTP 가 이미 latch 된 peer 와 같은 소스 IP 의 미지 RTCP 포트를 교정.
-    //    (같은 공인 IP 뒤 두 단말이면 도착 순서 배정 — RTCP 오배달은 리포트 수준 영향)
-    for (int i = 0; i < 2; ++i) {
-        PeerInfo& p = _peers[i];
-        if (!p.active || p.ip != ip) continue;
-        bool rtpLatched = isVideo ? p.natLatchedVideo : p.natLatchedRtp;
-        bool& rtcpLatched = isVideo ? p.natLatchedVideoRtcp : p.natLatchedRtcp;
-        if (!rtpLatched || rtcpLatched) continue;
-        struct sockaddr_in& a = isVideo ? p.addrVideoRtcp : p.addrRtcp;
-        a.sin_addr.s_addr = inet_addr(ip.c_str());
-        a.sin_port = htons(port);
-        rtcpLatched = true;
-        LOG_INFO("PRtpRelay", "%s addr latched (NAT) peer[%d] %s:%d session=%s",
-                 isVideo ? "Video RTCP" : "RTCP", i, ip.c_str(), port, _sessionId.c_str());
-        return i;
     }
     return -1;
 }
@@ -259,7 +172,7 @@ bool PRtpRelay::proc() {
             pGroup->onRtcpPacket(ip, port, pkt, len);
         } else {
             PAutoLock lock(_mutex);
-            int srcIdx = _findPeerIndexRtcp(ip, port, false);
+            int srcIdx = _findPeerIndex(ip, port - 1, false);
             if (srcIdx >= 0) {
                 int dst = 1 - srcIdx;
                 if (_peers[dst].active)
@@ -275,7 +188,7 @@ bool PRtpRelay::proc() {
             PAutoLock lock(_mutex);
             len = _videoRtcpSock.recv(pkt, sizeof(pkt), ip, port);
             if (len > 0) {
-                int srcIdx = _findPeerIndexRtcp(ip, port, true);
+                int srcIdx = _findPeerIndex(ip, port - 1, true);
                 if (srcIdx >= 0) {
                     int dst = 1 - srcIdx;
                     if (_peers[dst].active && _peers[dst].videoPort > 0)

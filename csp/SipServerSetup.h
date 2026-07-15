@@ -146,6 +146,15 @@ public:
     /** 서비스 모드 */
     std::string m_strServiceMode;
 
+    // ⚠️ 테스트 환경 전용 — 상용 배포 시 반드시 false(기본값) 유지/원복.
+    //   공인 IP 노출 테스트망에서 NAT 뒤 정상 단말이 미등록/외부발신으로 보이는 문제를
+    //   우회하기 위한 "개방형 착신(open termination)" 정책 스위치.
+    //   true 이면: INVITE 착신이 로컬 가입자/그룹이면 발신자 401 챌린지 생략 통과,
+    //             비가입자 착신이면 603 Decline + 무로그 처리.
+    //   상용은 내부망이라 이 문제가 없으므로 false 로 두어 표준 인증 흐름을 사용한다.
+    //   설정 키: Setup.TestEnvOpenTermination = "true" (미지정 시 false).
+    bool m_bTestEnvOpenTermination;
+
     // ================================================================
     // IMS 역할 활성화 (기본값: 모두 true)
 

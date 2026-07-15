@@ -92,6 +92,14 @@ public:
 
 	static void SortFileList( FILE_LIST & clsFileList );
 	static void PrintCallStack( EnumLogLevel iLevel );
+
+	// LOG_NETWORK 소스별 억제 — toll-fraud 스캐너 등 폐기 대상 소스의 원본 패킷
+	//   덤프가 로그를 폭주시키는 것을 막는다. 상위(예: CSP 비정상 INVITE drop)가
+	//   SuppressNetworkSource() 로 소스 IP 를 TTL 동안 등록하면, 수신 스레드가
+	//   IsNetworkSourceSuppressed() 로 확인해 해당 소스의 NETWORK 로그를 건너뛴다.
+	//   (패킷 처리 자체는 그대로 — 로깅만 억제.)
+	static void SuppressNetworkSource( const char * pszIp, int iTtlSec );
+	static bool IsNetworkSourceSuppressed( const char * pszIp );
 };
 
 #endif

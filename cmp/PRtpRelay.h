@@ -38,8 +38,8 @@ public:
     void setWorkerName(const std::string& n) { _workerName = n; }
     std::string getWorkerName() const { return _workerName; }
     void touchActivity() { time(&_lastActivityTime); _everReceivedRtp = true; }
-    // 세션 바인딩 시점 초기화 — 풀에서 재사용되는 relay 의 잔존 활동시각/수신이력을 제거.
-    // 없으면 idle = (now - 풀 생성시각) 로 계산되어 새 세션이 다음 sweep 에 즉시 orphan 회수된다.
+    // 세션 바인딩 시점 초기화 — 풀에서 재사용되는 relay 의 잔존 활동시각/수신이력 제거
+    //   (없으면 idle=풀 생성시각 기준으로 계산돼 신규 세션이 즉시 orphan 회수됨). NAT 무관 일반 수정.
     void resetActivity() { time(&_lastActivityTime); _everReceivedRtp = false; }
     time_t getLastActivityTime() const { return _lastActivityTime; }
     // RTP 를 한 번이라도 받았는가 — 고아(setup 실패) relay 빠른 회수 vs 활성/홀드 호 보존 구분용.
@@ -72,16 +72,9 @@ private:
         struct sockaddr_in addrVideoRtp{};
         struct sockaddr_in addrVideoRtcp{};
         bool active = false;
-        // symmetric-RTP latch (NAT 포트변환 단말) — 선언 주소가 사설이면 관측 소스로 latch.
-        std::string declaredIp;       // SDP 선언 주소 (latch 자격 판정: 사설 IP 만)
-        bool natLatchedRtp = false;
-        bool natLatchedVideo = false;
-        bool natLatchedRtcp = false;
-        bool natLatchedVideoRtcp = false;
     };
 
     int _findPeerIndex(const std::string& ip, int port, bool isVideo = false);
-    int _findPeerIndexRtcp(const std::string& ip, int port, bool isVideo = false);
 
     PRtpSocket _rtpSock;
     PRtpSocket _rtcpSock;

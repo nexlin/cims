@@ -651,6 +651,24 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
 
         // 4-1. Add PTT group info XML to INVITE (multipart/mixed: mcptt-info+xml + SDP)
         if ( pclsInvite != NULL ) {
+            // Request-URI = 등록된 Contact URI (proxy target refresh, RFC 3261 §16.5 —
+            // S-CSCF→UE 라우팅과 동일 모델). 사설 주소여도 실제 전송 목적지는 아래
+            // SendDest 오버라이드(latch 된 NAT 주소)가 담당하므로 무방하다.
+            // Contact 미보관 등록이면 포트 없는 AOR fallback. (dialog 기본 생성은
+            // override 도메인 + Contact 포트가 섞인 "sip:user@domain:5080" 형태가 되어
+            // AOR 도 Contact 도 아닌 URI 로 실단말이 거부할 수 있다.)
+            if ( !clsUserInfo.m_strContactUri.empty() ) {
+                pclsInvite->m_clsReqUri.Parse( clsUserInfo.m_strContactUri.c_str(),
+                                               (int)clsUserInfo.m_strContactUri.length() );
+            } else {
+                pclsInvite->m_clsReqUri.Set( SIP_PROTOCOL, pszUserId, strMcpttDomain.c_str(), 0 );
+            }
+            // 선탑재 Route 제거 — NAT 도달 주소는 SendDest 오버라이드로 헤더 노출 없이
+            // 라우팅한다 (reg-event NOTIFY 의 Route 제거와 동일 원칙).
+            pclsInvite->m_clsRouteList.clear();
+            pclsInvite->m_strSendDestIp = clsRoute.m_strDestIp;
+            pclsInvite->m_iSendDestPort = clsRoute.m_iDestPort;
+
             // To: 는 개인 AOR 유지 (cwrtc가 WS 클라이언트를 찾는 데 필요)
             // 그룹 식별은 Contact(isfocus), P-Called-Party-ID, XML body로 전달
 
@@ -701,10 +719,26 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             char szPCalledParty[256];
             snprintf( szPCalledParty, sizeof( szPCalledParty ), "<sip:%s@%s>", pszUserId, strMcpttDomain.c_str() );
             pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
-            // isfocus: indicate server is conference focus for this group call (domain-based URI)
-            char szContact[256];
-            snprintf( szContact, sizeof( szContact ), "<sip:%s@%s>;isfocus", pszGroupId, strMcpttDomain.c_str() );
-            pclsInvite->AddHeader( "Contact", szContact );
+            // isfocus: indicate server is conference focus (TS 24.379).
+            // INVITE 의 Contact 는 정확히 1개여야 한다(RFC 3261 §8.1.1.8). 스택은 전송 직전
+            // m_clsContactList 가 비어 있을 때만 자동 Contact 를 넣으므로(SipStackComm),
+            // 라우팅 가능한 자기 주소 Contact 를 구조화 리스트에 직접 1개 채운다.
+            // (기존: AddHeader 원문 헤더로 도메인형 Contact 를 추가 → 리스트는 비어 있어
+            //  스택 자동 Contact 와 중복 2개가 되고, 실단말이 INVITE 를 폐기하는 원인)
+            {
+                CSipFrom clsContact;
+                clsContact.m_clsUri.m_strProtocol = "sip";
+                clsContact.m_clsUri.m_strUser = pszGroupId;
+                clsContact.m_clsUri.m_strHost = !clsRoute.m_strOutboundLocalIp.empty()
+                                                    ? clsRoute.m_strOutboundLocalIp
+                                                    : gclsSetup.m_strLocalIp;
+                clsContact.m_clsUri.m_iPort = clsRoute.m_iOutboundLocalPort > 0
+                                                    ? clsRoute.m_iOutboundLocalPort
+                                                    : gclsSetup.m_iUdpPort;
+                clsContact.InsertParam( "isfocus", "" );
+                pclsInvite->m_clsContactList.clear();
+                pclsInvite->m_clsContactList.push_back( clsContact );
+            }
             // Session timer (RFC 4028) — required by many MCPTT implementations
             pclsInvite->AddHeader( "Session-Expires", "7200;refresher=uac" );
             pclsInvite->AddHeader( "Min-SE", "180" );
