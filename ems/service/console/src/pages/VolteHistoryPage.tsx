@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { callsApi, type CallLog } from '@core/api/calls'
 import { statsApi, type OrgStat } from '@core/api/stats'
 import { recordingsApi, type RecordingSegment } from '@core/api/recordings'
@@ -18,14 +18,21 @@ const callKey = (l: CallLog) => l.call_id || l.dir_name || String(l.id)
 
 // flow body 조회용 헬퍼 (FlowPage 와 동일 규약)
 const hourFromTs = (ts: string) => (ts || '').slice(0, 2) || undefined
-const inferDir = (m: FlowMessage) => (m.from === 'csp' ? 'TX' : m.to === 'csp' ? 'RX' : '')
+// 기록 주체(nodeId, 예: cmp_01) 관점의 TX/RX — 같은 메시지라도 CSP 기록분은 TX, CMP 기록분은 RX.
+// msg 원문 파일의 dir 필드와 동일 관점 (원문 역조회 dir 매칭에도 사용).
+const inferDir = (m: FlowMessage) => {
+  const nid = (m.nodeId || m.node || '').replace(/_\d+$/, '') || 'csp'
+  if (m.from === nid) return m.to === nid ? '' : 'TX'
+  if (m.to === nid) return 'RX'
+  return 'TX'
+}
 
 const CALLER_C = '#2563eb', CALLEE_C = '#16a34a'
 const ACTOR_LABEL: Record<string, string> = { ue: 'UE', ue_o: 'UEᴼ', ue_t: 'UEᵀ', cwrtc: 'CWRTC', csc: 'CSC', csp: 'CSP', cmp: 'CMP' }
 const actorLbl = (a: string) => ACTOR_LABEL[a] || (a ? a.toUpperCase() : '—')
 const PROTO_COLOR: Record<string, string> = { SIP: '#2563eb', JSON: '#d97706', CSC: '#9333ea', RTP: '#16a34a', INT: '#0891b2', MCPTT: '#db2777' }
 const protoColor = (p: string) => PROTO_COLOR[p] || 'var(--text-muted)'
-const nodeOf = (m: FlowMessage) => (m.node || m.iface || '').replace(/_\d+$/, '')
+const nodeOf = (m: FlowMessage) => (m.nodeId || m.node || m.iface || '').replace(/_\d+$/, '')
 
 function callState(s: string) {
   return s === 'ended' ? { label: '종료', cls: 'badge--gray' }
@@ -39,24 +46,30 @@ type RecPlayer = { id: string; segments: RecordingSegment[]; callType: 'volte' |
 
 const PAGE_SIZES = [10, 20, 50, 100]
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
+const curHourStr = () => String(new Date().getHours()).padStart(2, '0')
 
-// 시간대 히트맵 — 선택 날짜의 24시간 호 건수(색 농도+숫자), 클릭 시 해당 시간 필터
-function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>; selHour: string | null; onPick: (h: string | null) => void }) {
+// 시간대 히트맵 — 선택 날짜의 24시간 호 건수(색 농도+숫자), 클릭 시 해당 시간으로 이동.
+// 호 이력은 항상 시간 단위 조회이므로 선택 해제(전체) 상태는 없다 — 선택 셀은 항상 하나.
+function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>; selHour: string; onPick: (h: string) => void }) {
   const cells = Array.from({ length: 24 }, (_, h) => ({ h: String(h).padStart(2, '0'), v: hours[String(h).padStart(2, '0')] || 0 }))
   const max = Math.max(1, ...cells.map(c => c.v))
   return (
-    <div style={{ display: 'flex', gap: 2, marginBottom: 10 }}>
+    <div style={{ display: 'flex', gap: 2, marginBottom: 10, paddingTop: 2 }}>
       {cells.map(c => {
         const ratio = c.v > 0 ? 0.18 + 0.82 * (c.v / max) : 0
         const on = selHour === c.h
         return (
-          <div key={c.h} onClick={() => c.v > 0 && onPick(on ? null : c.h)}
+          <div key={c.h} onClick={() => c.v > 0 && !on && onPick(c.h)}
             title={`${c.h}시 · ${c.v}건`}
             style={{
-              flex: 1, cursor: c.v > 0 ? 'pointer' : 'default', textAlign: 'center',
+              flex: 1, cursor: c.v > 0 && !on ? 'pointer' : 'default', textAlign: 'center',
               borderRadius: 4, padding: '3px 0',
               border: on ? '2px solid var(--primary)' : '1px solid var(--border)',
-              background: c.v > 0 ? `rgba(37,99,235,${ratio.toFixed(3)})` : 'var(--surface-alt, #f7f9fc)',
+              boxShadow: on ? '0 0 0 2px rgba(37,99,235,.30)' : undefined,
+              transform: on ? 'translateY(-2px)' : undefined,
+              fontWeight: on ? 700 : undefined,
+              background: on && c.v === 0 ? 'rgba(37,99,235,.10)'
+                : c.v > 0 ? `rgba(37,99,235,${ratio.toFixed(3)})` : 'var(--surface-alt, #f7f9fc)',
               color: ratio > 0.55 ? '#fff' : 'var(--text)',
             }}>
             <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, height: 16 }}>{c.v > 0 ? c.v : ' '}</div>
@@ -81,7 +94,10 @@ export default function VolteHistoryPage() {
   const [searchInput, setSearchInput] = useState('')
   const [q, setQ] = useState('')
   const [selOrg, setSelOrg] = useState('')      // 선택 부서 코드 ('' = 전체)
-  const [selHour, setSelHour] = useState<string | null>(null)
+  // 호 이력은 항상 시간 단위 조회 (하루 전체 모드 없음) — 기본 = 현재 시간대,
+  // 히트맵 셀 클릭으로 시간대 이동. 과거 날짜는 첫 응답 히트맵으로 최신 시간대 자동 선택.
+  const [selHour, setSelHour] = useState<string>(curHourStr())
+  const autoPickHour = useRef(false)  // 날짜 변경 직후 1회 — 호 있는 최신 시간대로 보정
   const [autoRefresh, setAR] = useState(false)
 
   const [orgs, setOrgs] = useState<OrgStat[]>([])
@@ -106,10 +122,19 @@ export default function VolteHistoryPage() {
       const r = await callsApi.list({
         call_type: 'volte', date: fDate || undefined,
         org: selOrg || undefined, q: q || undefined,
-        hour: selHour || undefined,
+        hour: selHour,
         limit: ps, offset: p * ps,
       })
       setLogs(r.logs); setTotal(r.total); setHours(r.hours || {})
+      // 날짜 변경 직후: 선택 시간대에 호가 없으면 히트맵 기준 호가 있는 최신 시간대로 1회 보정
+      if (autoPickHour.current) {
+        autoPickHour.current = false
+        const hh = r.hours || {}
+        if (!(hh[selHour] > 0)) {
+          const withCalls = Object.keys(hh).filter(h => hh[h] > 0).sort()
+          if (withCalls.length) setSelHour(withCalls[withCalls.length - 1])
+        }
+      }
     } catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }
   }, [show, fDate, selOrg, q, selHour, ps])
@@ -118,8 +143,12 @@ export default function VolteHistoryPage() {
   useEffect(() => { setPage(0); setExpandedCall(null); load(0) }, [load])
   useEffect(() => { if (!autoRefresh) return; const iv = setInterval(() => load(page), 10000); return () => clearInterval(iv) }, [autoRefresh, load, page])
 
-  // 날짜/부서/검색 변경 시 시간 선택 해제 (히트맵 재구성)
-  useEffect(() => { setSelHour(null) }, [fDate, selOrg, q])
+  // 날짜 변경 시 시간 재설정 — 오늘이면 현재 시간대, 과거 날짜는 일단 현재 시간대로 조회 후
+  // 응답 히트맵에서 호가 있는 최신 시간대로 자동 보정(autoPickHour). 부서/검색 변경은 시간 유지.
+  useEffect(() => {
+    autoPickHour.current = fDate !== todayStr()
+    setSelHour(curHourStr())
+  }, [fDate])
 
   // ── 호 펼침 시: 메시지 이력(flow) + 녹취(있으면) lazy 로드 ──
   const loadCallFlow = useCallback(async (l: CallLog) => {
@@ -215,7 +244,11 @@ export default function VolteHistoryPage() {
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>시간대별 호 분포</span>
               <span className="ts" style={{ color: 'var(--text-muted)' }}>{fDate} · 총 {dayTotal}건</span>
-              {selHour && <button className="btn btn--sm btn--ghost" onClick={() => setSelHour(null)} style={{ marginLeft: 'auto' }}>{selHour}시 해제</button>}
+              <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--primary)',
+                background: 'rgba(37,99,235,.10)', border: '1px solid rgba(37,99,235,.35)',
+                borderRadius: 10, padding: '1px 10px' }}>
+                {selHour}:00 ~ {selHour}:59 조회 중 · {hours[selHour] || 0}건
+              </span>
             </div>
             <HourHeatmap hours={hours} selHour={selHour} onPick={h => { setSelHour(h); setPage(0) }} />
           </div>
@@ -347,8 +380,11 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
   const allMsgs = useMemo(() => flow?.messages || [], [flow])
   const date = l.invite_time?.substring(0, 10) || ''
 
-  // 노드별 뱃지 토글 — 메시지에 부여된 _node(없으면 node/iface 유도)로 그룹. 기본 전체 표시.
-  const nodeKey = (m: FlowMessage) => m._node || (m.node || m.iface || '').replace(/_\d+$/, '') || 'csp'
+  // 노드별 뱃지 토글 — **기록 주체(nodeId)** 기준. CSP 가 기록한 CMP 제어 TX 는 CSP 배지,
+  // CMP 가 기록한 RX 는 CMP 배지에 속한다 (구: 표시 그룹 _node 기준이라 CSP 송신 기록이
+  // CMP 배지로 묶여 CSP 단독 선택 시 사라지는 문제). nodeId 없으면 기존 유도 폴백.
+  const nodeKey = (m: FlowMessage) => (m.nodeId || '').replace(/_\d+$/, '')
+    || m._node || (m.node || m.iface || '').replace(/_\d+$/, '') || 'csp'
   const availNodes = useMemo(() => Array.from(new Set(allMsgs.map(nodeKey))).sort(), [allMsgs])
   const [offNodes, setOffNodes] = useState<Set<string>>(new Set())
   const msgs = useMemo(() => allMsgs.filter(m => !offNodes.has(nodeKey(m))), [allMsgs, offNodes])
@@ -418,9 +454,11 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                       <thead>
                         <tr style={{ background: 'var(--surface-alt, #f7f9fc)', position: 'sticky', top: 0 }}>
                           <th style={{ ...hS, width: 28, textAlign: 'right' }}>#</th>
-                          <th style={hS}>시각</th>
-                          <th style={hS}>From → To</th>
-                          <th style={hS}>Proto</th>
+                          <th style={hS}>시간</th>
+                          <th style={hS}>From→To</th>
+                          <th style={hS}>모듈</th>
+                          <th style={hS}>TX/RX</th>
+                          <th style={hS}>프로토콜</th>
                           <th style={hS}>Method</th>
                         </tr>
                       </thead>
@@ -433,7 +471,13 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                               style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--hover, #eef5ff)' : undefined }}>
                               <td style={{ ...dS, textAlign: 'right', color: 'var(--text-muted)' }}>{i + 1}</td>
                               <td style={dS} className="ts">{fmtClock(m.ts)}</td>
-                              <td style={dS}>{actorLbl(m.from)} <span style={{ color: 'var(--text-muted)' }}>→</span> {actorLbl(m.to)}</td>
+                              <td style={dS}>{actorLbl(m.from)}<span style={{ color: 'var(--text-muted)' }}>→</span>{actorLbl(m.to)}</td>
+                              <td style={{ ...dS, color: 'var(--text-muted)', fontSize: 10 }}>{(m.nodeId || m.node || '').toUpperCase()}</td>
+                              <td style={dS}>{(() => {
+                                const d = inferDir(m)
+                                return d ? <span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
+                                  : <span style={{ color: 'var(--text-muted)' }}>—</span>
+                              })()}</td>
                               <td style={dS}><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></td>
                               <td style={{ ...dS, fontWeight: 600, color: protoColor(proto) }}>{m.label || ''}</td>
                             </tr>

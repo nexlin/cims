@@ -8,11 +8,13 @@ function hourFromTs(ts: string): string | undefined {
   return undefined
 }
 
-/** dir 추론: from=csp이면 TX, 아니면 RX (flow.jsonl의 원래 dir 복원) */
-function inferDir(msg: FlowMessage): string {
-  // csp에서 나가면 TX, csp로 들어오면 RX
-  if (msg.from === 'csp') return 'TX'
-  if (msg.to === 'csp') return 'RX'
+/** dir 추론 — 기록 주체(nodeId, 예: cmp_01) 관점의 TX/RX.
+ *  같은 메시지라도 CSP 기록분은 TX(송신), CMP 기록분은 RX(수신)로 갈린다 —
+ *  msg 원문 파일의 dir 필드와 동일 관점이라 원문 역조회 dir 매칭에도 그대로 쓴다. */
+export function inferDir(msg: FlowMessage): string {
+  const nid = (msg.nodeId || msg.node || '').replace(/_\d+$/, '') || 'csp'
+  if (msg.from === nid) return msg.to === nid ? '' : 'TX'   // from==to==자기 = 내부(INT) 이벤트
+  if (msg.to === nid) return 'RX'
   return 'TX'
 }
 
@@ -278,7 +280,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
   )
 }
 
-// ── SequenceDiagram (legacy, unused but kept) ──
+// ── SequenceDiagram (VoLTE 호 이력 인라인 패널 등 임베드용) ──
 
 interface SequenceDiagramProps {
   messages: FlowMessage[]
@@ -290,16 +292,36 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
   // ue(+번호) actor들을 'ue' 하나로 통합 (다이어그램 표시용)
   const messages = normalizeMessages(rawMessages)
   const ACTORS = deriveActors(messages)
-  // actor 수에 따라 열 간격 동적 조정
-  const colW = ACTORS.length > 6 ? 130 : ACTORS.length > 4 ? 150 : COL_W
+
+  // 컨테이너 폭 측정 — 노드(actor)를 좌우 가득 고르게 배치 (FlowDiagram 과 동일 방식).
+  // 폭이 좁으면 최소 간격을 지키고 가로 스크롤로 넘긴다.
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerW, setContainerW] = useState(0)
+  const measure = useCallback(() => {
+    if (containerRef.current) setContainerW(containerRef.current.clientWidth)
+  }, [])
+  useEffect(() => {
+    measure()
+    const obs = new ResizeObserver(measure)
+    if (containerRef.current) obs.observe(containerRef.current)
+    return () => obs.disconnect()
+  }, [measure])
+
+  const minColW = 100
+  const colW = containerW > 0 && ACTORS.length > 1
+    ? Math.max(minColW, Math.floor((containerW - MARGIN_L * 2) / (ACTORS.length - 1)))
+    : (ACTORS.length > 6 ? 130 : ACTORS.length > 4 ? 150 : COL_W)
   const height = HEAD_H + messages.length * ROW_H + 20
-  const width  = MARGIN_L * 2 + (ACTORS.length - 1) * colW
+  const width = containerW > 0
+    ? Math.max(containerW, MARGIN_L * 2 + (ACTORS.length - 1) * colW)
+    : MARGIN_L * 2 + (ACTORS.length - 1) * colW
 
   return (
+    <div ref={containerRef} style={{ width: '100%', overflowX: 'auto' }}>
     <svg
       width={width}
       height={height}
-      style={{ fontFamily: 'monospace', fontSize: 12, userSelect: 'none', cursor: 'default' }}
+      style={{ fontFamily: 'monospace', fontSize: 12, userSelect: 'none', cursor: 'default', display: 'block' }}
     >
       {/* ── 헤더: actor 이름 + 수직선 ── */}
       {ACTORS.map(a => {
@@ -361,6 +383,7 @@ export function SequenceDiagram({ messages: rawMessages, onSelect, selectedIdx }
         )
       })}
     </svg>
+    </div>
   )
 }
 
@@ -385,12 +408,11 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
         <thead>
           <tr style={{ position: 'sticky', top: 0, background: '#f0f1f3', zIndex: 1 }}>
             <th style={thStyle}>#</th>
-            <th style={thStyle}>시각</th>
+            <th style={thStyle}>시간</th>
+            <th style={thStyle}>From→To</th>
             <th style={thStyle}>모듈</th>
-            <th style={thStyle}>From</th>
-            <th style={thStyle}></th>
-            <th style={thStyle}>To</th>
-            <th style={thStyle}>Proto</th>
+            <th style={thStyle}>TX/RX</th>
+            <th style={thStyle}>프로토콜</th>
             <th style={thStyle}>Method</th>
           </tr>
         </thead>
@@ -408,10 +430,23 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
               >
                 <td style={tdStyle}>{i + 1}</td>
                 <td style={tdStyle}>{msg.ts.slice(0, 12)}</td>
-                <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 10 }}>{(msg.node || '').replace(/_\d+$/, '').toUpperCase()}</td>
-                <td style={{ ...tdStyle, color: '#1a1d2e' }}>{actorLabel(msg.from)}</td>
-                <td style={{ ...tdStyle, color: '#7a8fa8' }}>{'\u2192'}</td>
-                <td style={{ ...tdStyle, color: '#1a1d2e' }}>{actorLabel(msg.to)}</td>
+                <td style={{ ...tdStyle, color: '#1a1d2e' }}>
+                  {actorLabel(msg.from)}<span style={{ color: '#7a8fa8' }}>{'\u2192'}</span>{actorLabel(msg.to)}
+                </td>
+                <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 10 }}>
+                  {/* \uae30\ub85d \uc8fc\uccb4 \ud504\ub85c\uc138\uc2a4\uba85+ID (flow \ud30c\uc77c \uc18c\uc720\uc790, \uc608: CSP_01) \u2014 nodeId \uc5c6\uc73c\uba74(\uad6c \uc751\ub2f5) node \ub85c \ud3f4\ubc31 */}
+                  {(msg.nodeId || msg.node || '').toUpperCase()}
+                </td>
+                <td style={tdStyle}>
+                  {(() => {
+                    const d = inferDir(msg)
+                    return d ? (
+                      <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: 3,
+                        fontSize: 9, fontWeight: 700, color: '#fff',
+                        background: d === 'TX' ? '#2563eb' : '#16a34a' }}>{d}</span>
+                    ) : <span style={{ color: 'var(--text-muted)' }}>\u2014</span>
+                  })()}
+                </td>
                 <td style={tdStyle}>
                   <span style={{
                     display: 'inline-block',
@@ -478,10 +513,19 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
   // nodes 구조 또는 messages 배열을 allNodes로 변환
   const applyResponse = useCallback((r: { nodes?: Record<string, FlowMessage[]>; messages?: FlowMessage[] }) => {
     if (r.nodes) {
-      // 각 메시지에 node 필드 보장
+      // 기록 주체(nodeId) 기준 재그룹 — 백엔드 표시 그룹(_flow_node_of)은 CSP 가 기록한
+      // CMP 제어 TX 도 'cmp' 로 묶는다. 노드 토글은 "누가 기록했나"가 기준이어야
+      // CSP 단독 선택 시 CSP 송신 기록이 보인다. nodeId 없으면(구 응답) 백엔드 그룹 유지.
       const processed: Record<string, FlowMessage[]> = {}
       for (const [node, msgs] of Object.entries(r.nodes)) {
-        processed[node] = msgs.map(m => ({ ...m, node }))
+        for (const m of msgs) {
+          const key = (m.nodeId || '').replace(/_\d+$/, '') || node
+          if (!processed[key]) processed[key] = []
+          processed[key].push({ ...m, node: m.node || key })
+        }
+      }
+      for (const k of Object.keys(processed)) {
+        processed[k].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
       }
       setAllNodes(processed)
       setEnabledNodes(new Set(Object.keys(processed)))
@@ -539,11 +583,11 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
       const proto = detailProto(msg)
       const iface = msg.iface
 
-      // node: flow 엔트리의 node 필드에서 접미사 제거 (cmp_01 → cmp)
-      const nodeStr = (msg.node || '').replace(/_\d+$/, '')
+      // node: 기록 주체(nodeId) 우선 — 원문은 기록 주체의 msg 파일에 있다 (cmp_01 → cmp)
+      const nodeStr = (msg.nodeId || msg.node || '').replace(/_\d+$/, '')
 
       setBodyLoading(true)
-      flowApi.getBody(d, hour, seq, msg.ts, dir, proto, iface, nodeStr)
+      flowApi.getBody(d, hour, seq, msg.ts, dir, proto, iface, nodeStr, msg.sesid, msg.mid)
         .then(r => setBodyText(r.body || ''))
         .catch(() => setBodyText('(body 조회 실패)'))
         .finally(() => setBodyLoading(false))

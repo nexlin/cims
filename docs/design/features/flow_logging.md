@@ -31,6 +31,25 @@
 `{node}.flow[.{mm5}].jsonl` — 경량 flow 이벤트 인덱스. `{node}_{iface}.msg[.{mm5}].jsonl` — 원문 메시지.
 Flow 엔트리의 `seq`+`iface`로 원문을 역조회한다(`seq`=msg 파일 줄번호).
 
+**원문 역조회 = seq 빠른 경로 + sesid 검증/내용 폴백** (`flow_logger.py _lookup_body_by_seq`):
+리더는 seq번째 줄을 읽되 **그 줄의 `sesid` 가 flow 엔트리의 `sesid` 와 일치할 때만 신뢰**한다.
+불일치하면 같은 버킷 후보 파일들에서 `sesid`(1차키) + `mid`(trans_id, JSON 원문 본문 매칭) +
+`dir`(TX/RX — 같은 trans_id 의 요청/응답 구분) + `ts`(CSP 는 flow/msg 에 동일 타임스탬프 문자열
+기록 → 정확 일치 우선)로 재검색해 복원한다. `seq` 는 기록 프로세스의 in-memory 카운터라,
+system_id 가 겹치는 노드 둘이 공유 스토리지의 같은 파일에 기록하면 줄번호와 어긋난다 —
+이때도 sesid 는 노드별 µs 타임스탬프+카운터라 충돌하지 않으므로 내용 매칭이 정답을 찾는다.
+콘솔(`flow.ts getBody`)은 seq 조회 시 `sesid`/`mid`/`dir` 를 함께 전달한다.
+
+**nodeId (기록 주체)** — flow 라인의 `node` 필드는 인스턴스 접미사가 없으므로(`csp`),
+리더는 flow **파일명**에서 소유자 system_id 를 파생해(`csp_01.flow.* → csp_01`) 각 메시지에
+`nodeId` 로 실어준다. 콘솔은 이것으로 모듈 컬럼(`CSP_01`)·노드 필터·TX/RX(`from/to` 와
+nodeId 비교 — msg 파일 `dir` 과 동일 관점)를 구분하고, 원문 역조회의 msg 파일 선택에도 쓴다.
+같은 CSP↔CMP 메시지는 CSP 기록분(TX)과 CMP 기록분(RX) 두 줄로 존재하는 것이 정상이다.
+
+> **system_id 는 공유 스토리지(NFS) 전역에서 유일해야 한다.** 두 노드가 같은 system_id 로 같은
+> 경로에 기록하면 flow/msg 파일이 인터리브되어 seq 정합이 깨지고(위 폴백으로 원문 조회는 복원되지만),
+> security 로그·통계·버킷 seq 재계수도 오염된다. 노드 추가 시 `csp_02` 처럼 id 를 분리한다.
+
 **CSP 5분 버킷·open-per-write** (`SipMessageLogger`): 매 줄 `fopen(append)`→write→`fclose`, 파일명에 5분 접미사.
 이로써 `.nfs` 고아·운영중 로그삭제 데이터유실·대용량 검색 부담을 피한다.
 `seq` 는 5분 버킷별로 리셋되므로 **원문 역조회 시 flow 엔트리 `ts`(HH:MM:SS)로 버킷(mm5)을 도출**해 해당 파일을 연다.

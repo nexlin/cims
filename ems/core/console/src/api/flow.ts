@@ -10,6 +10,7 @@ export interface FlowMessage {
   detail?: string // 메서드 부가 정보 (UI: method(detail))
   mid?: string    // 메시지 식별 ID (동일 메시지 cross-node 상관)
   sesid?: string  // 세션 식별 (PTT: 그룹ID, VoLTE: 세션ID)
+  nodeId?: string // 기록 주체 system_id (flow 파일 소유자, 예: csp_01) — '모듈' 컬럼 표기
   subid?: string  // 하위 식별 (PTT: 세션seq, VoLTE: Call-ID)
   body?: string   // 원문 (lazy loading — 선택 시 별도 조회)
   seq?: number    // interface jsonl line number (for body lookup)
@@ -82,7 +83,7 @@ export const flowApi = {
     if (sesid) params.set('sesid', sesid)
     return api.get(`/flow/user?${params.toString()}`)
   },
-  getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string, node?: string): Promise<FlowBodyResponse> {
+  getBody(date: string, hour: string | undefined, seq?: number, ts?: string, dir?: string, proto?: string, iface?: string, node?: string, sesid?: string, mid?: string): Promise<FlowBodyResponse> {
     const params = new URLSearchParams({ date })
     if (hour) params.set('hour', hour)
     if (seq && seq > 0) {
@@ -92,6 +93,11 @@ export const flowApi = {
       // 5분 버킷(open-per-write) 파일에서 seq 는 버킷별로 리셋되므로, 메시지 ts(HH:MM:SS)를 함께 전달해
       // 서버가 정확한 5분 파일을 선택하게 한다. (구 단일 시간당 파일은 ts 무시 → 호환)
       if (ts) params.set('ts', ts)
+      // seq 는 기록 프로세스의 in-memory 카운터라 파일 줄번호와 어긋날 수 있다 —
+      // 서버가 sesid 로 seq 줄을 검증하고, 불일치 시 sesid+mid(trans_id)+dir 로 원문을 재검색한다.
+      if (sesid) params.set('sesid', sesid)
+      if (mid) params.set('mid', mid)
+      if (dir) params.set('dir', dir)
     } else {
       if (ts) params.set('ts', ts)
       if (dir) params.set('dir', dir)

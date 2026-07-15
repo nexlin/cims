@@ -894,8 +894,18 @@ def _resolve_detail_path(date_str: str, hh: str, service: str, proto: str) -> st
 
 
 def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
-                         node: str = "", minute=None) -> str:
-    """인터페이스별 jsonl의 seq번째 줄에서 msg 필드 반환
+                         node: str = "", minute=None, sesid: str = "",
+                         mid: str = "", direction: str = "", ts: str = "") -> str:
+    """인터페이스별 jsonl에서 flow 엔트리의 원문(msg 필드) 반환
+
+    1) seq번째 줄을 읽되, flow 의 sesid 와 그 줄의 sesid 가 일치할 때만 신뢰 (빠른 경로).
+    2) 불일치(또는 seq 줄에 sesid 없음)면 sesid 를 1차키로 내용 재검색:
+       - mid(trans_id) — CMP/CMDP JSON 원문 본문의 "trans_id" 매칭
+       - direction(TX/RX) — 요청/응답 구분 (같은 trans_id 가 두 줄)
+       - ts — CSP 는 flow/msg 줄에 동일 타임스탬프 문자열을 기록하므로 정확 일치 우선
+       seq 는 프로세스별 in-memory 카운터라, 같은 system_id 노드 둘이 공유 스토리지의
+       한 파일에 기록하면 실제 줄번호와 어긋난다 — 이때 내용 매칭이 정답을 복원한다.
+    3) sesid 미제공/미발견이면 기존처럼 seq 줄을 반환 (하위호환).
 
     node가 지정되면 {node}_*_{iface}.msg.jsonl 로 명확히 선택.
     예: node="cmp", iface="csp" → cmp_01_csp.msg.jsonl
@@ -904,16 +914,20 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
     New: {MsgLogDir}/YYYY/MM/DD/HH/{node}_{iface}.msg.jsonl
     Legacy: {sip_log_dir}/YYYY/MM/DD/HH/raw.jsonl
     """
-    if seq <= 0:
+    if seq <= 0 and not sesid:
         return ""
     if not _sip_log_dir and not _msg_log_dir:
         return ""
     yyyy, mm, dd = _date_parts(date_str)
     hh = hour.zfill(2)
 
-    # Determine interface file path
-    # 1) 통합: {Dir}/YYYY/MM/DD/HH/{node}_{iface}.msg.jsonl
-    path = ""
+    # Determine interface file paths (우선순위순, 중복 제거 — 내용 재검색은 전체 후보를 순회)
+    paths: list = []
+
+    def _add(p):
+        if p and p not in paths:
+            paths.append(p)
+
     if _msg_log_dir:
         import glob
         base = os.path.join(_msg_log_dir, yyyy, mm, dd, hh)
@@ -936,42 +950,75 @@ def _lookup_body_by_seq(date_str: str, hour: str, seq: int, iface: str = "sip",
                           f"{_system_id}_{iface}.msg.jsonl",
                           f"{_system_id}_{iface}.jsonl"])
         for pattern in patterns:
-            matches = sorted(glob.glob(os.path.join(base, pattern)))
-            if matches:
-                path = matches[0]
-                break
-        if not path:
-            # 레거시: {Dir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
-            legacy = os.path.join(base, _system_id, f"{_system_id}_{iface}.jsonl")
-            if os.path.exists(legacy):
-                path = legacy
+            for m in sorted(glob.glob(os.path.join(base, pattern))):
+                _add(m)
+        # 레거시: {Dir}/YYYY/MM/DD/HH/{system_id}/{system_id}_{iface}.jsonl
+        legacy = os.path.join(base, _system_id, f"{_system_id}_{iface}.jsonl")
+        if os.path.exists(legacy):
+            _add(legacy)
 
     # 2) New structure under sip_log_dir
-    if not path and _sip_log_dir:
+    if _sip_log_dir:
         new_path2 = os.path.join(_sip_log_dir, yyyy, mm, dd, hh, _system_id,
                                  f"{_system_id}_{iface}.jsonl")
         if os.path.exists(new_path2):
-            path = new_path2
+            _add(new_path2)
 
     # 3) Legacy: raw.jsonl
-    if not path and _sip_log_dir:
+    if _sip_log_dir:
         legacy = os.path.join(_sip_log_dir, yyyy, mm, dd, hh, "raw.jsonl")
         if os.path.exists(legacy):
-            path = legacy
+            _add(legacy)
 
-    if not path:
+    if not paths:
         return ""
-    try:
-        with open(path, 'r') as f:
-            for i, line in enumerate(f, 1):
-                if i == seq:
-                    try:
-                        return json.loads(line.strip()).get("msg", "")
-                    except Exception:
-                        return ""
-    except Exception as e:
-        logger.error("_lookup_body_by_seq: %s", e)
-    return ""
+
+    # 1) 빠른 경로: 첫 후보 파일의 seq번째 줄 + sesid 검증
+    seq_obj = None
+    if seq > 0:
+        try:
+            with open(paths[0], 'r') as f:
+                for i, line in enumerate(f, 1):
+                    if i == seq:
+                        try:
+                            seq_obj = json.loads(line.strip())
+                        except Exception:
+                            seq_obj = None
+                        break
+        except Exception as e:
+            logger.error("_lookup_body_by_seq: %s", e)
+    if seq_obj is not None and (not sesid or seq_obj.get("sesid") == sesid):
+        return seq_obj.get("msg", "")
+
+    # 2) 내용 재검색: sesid(+mid/direction/ts)
+    if sesid:
+        mid_re = re.compile(r'"trans_id"\s*:\s*%s\b' % re.escape(mid)) if mid else None
+        best = None
+        for path in paths:
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        try:
+                            obj = json.loads(line.strip())
+                        except Exception:
+                            continue
+                        if obj.get("sesid") != sesid:
+                            continue
+                        if direction and obj.get("dir") and obj.get("dir") != direction:
+                            continue
+                        if mid_re and not mid_re.search(obj.get("msg", "")):
+                            continue
+                        if ts and obj.get("ts") == ts:
+                            return obj.get("msg", "")  # 정확 일치 — 즉시 반환
+                        if best is None:
+                            best = obj
+            except Exception as e:
+                logger.error("_lookup_body_by_seq(fallback): %s", e)
+        if best is not None:
+            return best.get("msg", "")
+
+    # 3) 최후: 검증 실패했어도 seq 줄 반환 (구 로그 등 sesid 미기록 파일 하위호환)
+    return seq_obj.get("msg", "") if seq_obj is not None else ""
 
 
 def _msg_globs_for(base: str, buckets=None) -> list:
@@ -1053,6 +1100,7 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None,
     flow_paths = _resolve_flow_paths(date_str, hour, service, scope=scope)
 
     for jsonl_path in flow_paths:
+        src_id = _flow_node_id_of_path(jsonl_path)
         try:
             with open(jsonl_path, 'r') as f:
                 for line in f:
@@ -1063,6 +1111,7 @@ def _search_sip_messages(call_ids: list, date_str: str, hour: str = None,
                         obj = json.loads(line)
                     except Exception:
                         continue
+                    obj["_src"] = src_id
                     if obj.get("proto", "SIP") != "SIP":
                         continue
                     # 1차: sesid 정확 매칭 (flow.jsonl 의 sesid 필드)
@@ -1107,6 +1156,7 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
     flow_paths = _resolve_flow_paths(date_str, hour, service, scope=scope)
 
     for jsonl_path in flow_paths:
+        src_id = _flow_node_id_of_path(jsonl_path)
         try:
             with open(jsonl_path, 'r') as f:
                 for line in f:
@@ -1121,6 +1171,7 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
                         obj = json.loads(line)
                     except Exception:
                         continue
+                    obj["_src"] = src_id
                     if obj.get("proto") not in ("JSON", "CSC"):
                         continue
 
@@ -1142,6 +1193,14 @@ def _search_cmp_messages(call_ids: list, date_str: str, hour: str = None,
             logger.error("_search_cmp_messages: %s", e)
 
     return results
+
+
+def _flow_node_id_of_path(path: str) -> str:
+    """flow 파일명에서 기록 주체 system_id 추출 — csp_01.flow.20.jsonl → csp_01.
+    flow 라인의 node 필드는 인스턴스 접미사가 없어서(csp), 프로세스명+ID 는
+    파일 소유자(system_id)에서만 얻을 수 있다. 콘솔 '모듈' 컬럼 표기용."""
+    base = os.path.basename(path or "")
+    return base.split(".flow", 1)[0] if ".flow" in base else ""
 
 
 def _flow_msg_from_log(obj: dict, call_ids: list = None) -> dict:
@@ -1188,6 +1247,9 @@ def _flow_msg_from_log(obj: dict, call_ids: list = None) -> dict:
         result["sesid"] = obj["sesid"]
     if obj.get("subid"):
         result["subid"] = obj["subid"]
+    if obj.get("_src"):
+        # 기록 주체 system_id (읽기 시 flow 파일명에서 주입) — 콘솔 '모듈' 컬럼
+        result["nodeId"] = obj["_src"]
     return result
 
 
@@ -1354,22 +1416,44 @@ async def _handle_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 # O(1) 해소(구: index 항목마다 전체 트리 재-glob → O(N²)), (2) participants/has_recording 는
 # 목록 단계에서 생략하고 paged 슬라이스에만 부착, (3) 경량 목록(call.json 코어 필드)을 짧은 TTL 로
 # 캐시 → 페이지/필터 재요청을 즉시 응답. 프론트 store 캐시와 함께 백엔드 연산 최소화.
-_calllog_cache: dict = {}     # (date_str, call_type) → (mono_ts, [lightweight call.json + dir_name])
+_calllog_cache: dict = {}     # (date_str, call_type, hour) → (mono_ts, [lightweight call.json + dir_name])
 _CALLLOG_TTL = 4.0            # 초 — 라이브 갱신성과 재스캔 비용의 절충(과거 날짜도 동일; 충분히 신선)
 
 
-def _calllog_list(date_str: str, call_type: str) -> list:
-    """하루치 경량 호이력 목록(call.json 코어 + dir_name). participants/has_recording 미포함.
-    .d 디렉터리 glob 1회 + 캐시. 호출자는 반환 리스트를 변형하지 말 것(캐시 공유) — 슬라이스 후 copy."""
+_dircount_cache: dict = {}    # (date_str, call_type) → (mono_ts, {HH: count})
+
+
+def _dircount_hours(date_str: str, call_type: str) -> dict:
+    """시간대별 호 수 = .d 디렉터리 카운트 (call.json 읽기 없음, readdir 만).
+    hour-스코프 목록 조회 시의 하루 전체 히트맵용. TTL 캐시는 목록과 동일."""
     key = (date_str, call_type or "")
+    now = _time.monotonic()
+    hit = _dircount_cache.get(key)
+    if hit and (now - hit[0]) < _CALLLOG_TTL:
+        return hit[1]
+    hist: dict = {}
+    # {calls_dir}/{ct}/YYYY/MM/DD/HH/... → relpath parts[4] = HH
+    for d in _find_all_d_dirs(date_str, None, call_type):
+        parts = os.path.relpath(d, _calls_dir).split(os.sep)
+        if len(parts) >= 5:
+            hist[parts[4]] = hist.get(parts[4], 0) + 1
+    _dircount_cache[key] = (now, hist)
+    return hist
+
+
+def _calllog_list(date_str: str, call_type: str, hour: str = None) -> list:
+    """경량 호이력 목록(call.json 코어 + dir_name). participants/has_recording 미포함.
+    hour 지정 시 해당 시간대 .d 만 스캔 (콘솔 기본 진입 = 현재 시간대 — call.json 읽기 최소화).
+    .d 디렉터리 glob 1회 + 캐시. 호출자는 반환 리스트를 변형하지 말 것(캐시 공유) — 슬라이스 후 copy."""
+    key = (date_str, call_type or "", hour or "")
     now = _time.monotonic()
     hit = _calllog_cache.get(key)
     if hit and (now - hit[0]) < _CALLLOG_TTL:
         return hit[1]
 
-    index_entries = _load_index(date_str, None)
+    index_entries = _load_index(date_str, hour)
     # glob 1회 → basename → fullpath 맵 (index 항목 O(1) 해소, 구 per-call 전체-트리 glob 제거)
-    all_dirs = _find_all_d_dirs(date_str, None, call_type)
+    all_dirs = _find_all_d_dirs(date_str, hour, call_type)
     by_base = {os.path.basename(d): d for d in all_dirs}
 
     # 로드할 .d 경로 확정
@@ -1433,12 +1517,16 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     limit = min(int(_q("limit", "200")), 1000)
     offset = int(_q("offset", "0"))
 
-    # 시간대 히트맵(hours)은 hour 필터와 무관하게 하루 전체를 집계해야 하므로,
-    # 스캔은 항상 하루 전체로 하고 hour 필터는 집계 이후 paged 목록에만 적용한다.
+    # 스캔 범위: hour 지정 + 내용 필터(msisdn/org/q) 없음 = 콘솔 기본 진입(현재 시간대) —
+    #   해당 시간대 .d 만 call.json 로드한다(하루 전체 읽기 회피). 이때 히트맵은 .d 디렉터리
+    #   카운트(readdir 만)로 하루 전체를 집계 — call.json 을 읽지 않아 저비용.
+    # 내용 필터가 있으면 히트맵도 필터 반영이 필요하므로 기존대로 하루 전체를 로드하고
+    #   hour 필터는 집계 이후 목록에만 적용한다.
     # 경량 목록(캐시·glob 1회) — participants/has_recording 는 무겁고 표시(paged)에만 필요하므로
     #   목록 단계에서 생략하고 paged 슬라이스에서만 부착(수백 호 × 파일I/O 회피).
     #   (캐시 dict 는 공유되므로 항목별 dict copy 후 변형.)
-    logs = [dict(l) for l in _calllog_list(date_str, call_type)]
+    hour_scoped = bool(hour) and not (msisdn or org or q_search)
+    logs = [dict(l) for l in _calllog_list(date_str, call_type, hour if hour_scoped else None)]
 
     # msisdn/org/q 필터는 participants 매칭이 필요 → 해당 필터가 있을 때만 일괄 로드.
     need_participants = bool(msisdn or org or q_search)
@@ -1501,15 +1589,18 @@ async def _handle_call_logs(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                 if not l.get('end_reason'):
                     l['end_reason'] = 'incomplete'
 
-    # 시간대 히트맵(hour 필터 적용 전, 하루 전체 집계)
+    # 시간대 히트맵 — 항상 하루 전체 기준 (hour 선택 상태에서도 다른 시간대로 이동 가능해야 함)
     hours_hist = {}
-    for l in logs:
-        h = (l.get('invite_time') or '')[11:13]
-        if h:
-            hours_hist[h] = hours_hist.get(h, 0) + 1
+    if hour_scoped:
+        hours_hist = _dircount_hours(date_str, call_type)
+    else:
+        for l in logs:
+            h = (l.get('invite_time') or '')[11:13]
+            if h:
+                hours_hist[h] = hours_hist.get(h, 0) + 1
 
-    # hour 필터 (집계 이후 — 목록에만 적용)
-    if hour:
+    # hour 필터 (집계 이후 — 목록에만 적용; hour_scoped 면 스캔 자체가 이미 해당 시간대)
+    if hour and not hour_scoped:
         hh = str(hour).zfill(2)
         logs = [l for l in logs if (l.get('invite_time') or '')[11:13] == hh]
 
@@ -2133,6 +2224,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         #    호출자(console)가 결정.
         all_ptt_msgs = []
         for jsonl_path in flow_paths:
+            src_id = _flow_node_id_of_path(jsonl_path)
             try:
                 with open(jsonl_path, 'r') as f:
                     for line in f:
@@ -2142,6 +2234,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                         except: continue
                         svc = obj.get("service", "")
                         if svc not in ("mcptt", "ptt", ""): continue
+                        obj["_src"] = src_id
                         all_ptt_msgs.append(obj)
             except Exception as e:
                 logger.error("flow read error: %s", e)
@@ -2354,13 +2447,16 @@ async def _handle_flow_body(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                 minute = int(parts[1])
 
     # New: seq-based lookup ({node}_*_{iface}.msg.jsonl)
+    #   sesid/mid/dir 이 오면 seq 줄을 sesid 로 검증하고, 불일치 시 내용 재검색으로 복원.
     if seq_str and hour:
         try:
             seq = int(seq_str)
         except ValueError:
             seq = 0
         if seq > 0:
-            body = _lookup_body_by_seq(date_str, hour, seq, iface=iface, node=node, minute=minute)
+            body = _lookup_body_by_seq(date_str, hour, seq, iface=iface, node=node, minute=minute,
+                                       sesid=_qval("sesid", ""), mid=_qval("mid", ""),
+                                       direction=_qval("dir", ""), ts=_qval("ts", ""))
             return HandlerResult(status=200, body=json.dumps({"body": body}),
                                  media_type="application/json")
 
@@ -2689,6 +2785,7 @@ async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
         all_msgs.append(obj)
 
     for jsonl_path in flow_paths:
+        src_id = _flow_node_id_of_path(jsonl_path)
         try:
             with open(jsonl_path, 'r') as fh:
                 for line in fh:
@@ -2699,6 +2796,7 @@ async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                         obj = json.loads(line)
                     except Exception:
                         continue
+                    obj["_src"] = src_id
                     if obj.get("proto") == "HTTPS":
                         continue  # CSC HTTPS 는 아래 3단계에서 별도 수집 (caller 형식 상이)
                     if obj.get("iface") == "cmp" and obj.get("detail") == user:
@@ -2717,6 +2815,7 @@ async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     #    없어 1단계 프리필터(user in line)에 걸리지 않으므로 별도 패스로 수집한다.
     if cmp_mid_keys:
         for jsonl_path in flow_paths:
+            src_id = _flow_node_id_of_path(jsonl_path)
             try:
                 with open(jsonl_path, 'r') as fh:
                     for line in fh:
@@ -2731,6 +2830,7 @@ async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                             continue
                         if (obj.get("sesid", ""), obj.get("mid", "")) not in cmp_mid_keys:
                             continue
+                        obj["_src"] = src_id
                         _collect(obj)
             except Exception as e:
                 logger.error("user_flow cmp collect: %s", e)
@@ -2738,6 +2838,7 @@ async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
     # 3. CSC HTTPS 트래픽 별도 수집 (caller가 "tel:+1001" 형식 → 번호만 추출 후 매칭)
     #    SIP flow의 caller는 "1001"이지만 CSC는 "tel:+1001"로 기록 → sesid 수집 단계에서 누락됨.
     for jsonl_path in flow_paths:
+        src_id = _flow_node_id_of_path(jsonl_path)
         try:
             with open(jsonl_path, 'r') as fh:
                 for line in fh:
@@ -2748,6 +2849,7 @@ async def _handle_user_flow(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                         obj = json.loads(line)
                     except Exception:
                         continue
+                    obj["_src"] = src_id
                     if obj.get("proto") != "HTTPS":
                         continue
                     # HTTP post_hook 항목만 수집 (method 에 슬래시 포함: "GMS/GET ...", "IdMS/POST ...")

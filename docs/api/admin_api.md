@@ -1125,58 +1125,102 @@ CIMS agent/HA 밖의 외부 시스템(외부 DB / 모니터링 / 스토리지 / 
 ### 11.1 통화 이력 조회
 
 ```
-GET /api/v1/call/logs?type=voip&date_from=2026-04-13&page=1&limit=20
+GET /api/v1/call/logs?call_type=volte&date=2026-07-15&hour=20&limit=20&offset=0
 Authorization: Bearer <token>
 ```
+
+| 파라미터 | 설명 |
+|---|---|
+| `date` | YYYY-MM-DD (기본: 오늘) |
+| `hour` | HH — 지정 시 목록을 해당 시간대로 한정. 내용 필터(msisdn/org/q) 미지정이면 스캔 자체를 해당 시간대 `.d` 로 좁힘 (콘솔 기본 진입 고속 경로) |
+| `call_type` | `volte` (volte* 전체) / `ptt` 등 |
+| `msisdn` / `org` / `q` | 번호 부분일치 / 부서(하위 포함) / 이름·번호 검색. 지정 시 하루 전체 스캔 (히트맵에 필터 반영) |
+| `limit` / `offset` | 기본 200, 최대 1000 |
 
 **응답 200:**
 ```json
 {
   "total": 150,
-  "page": 1,
-  "items": [
+  "limit": 20,
+  "offset": 0,
+  "hours": { "09": 12, "20": 3 },
+  "logs": [
     {
       "call_id": "abc123",
-      "call_type": "voip",
-      "caller": "+821001",
+      "call_type": "volte_audio",
+      "initiator": "+821001",
       "callee": "+821002",
       "state": "ended",
-      "invite_time": "2026-04-13T14:30:00",
-      "answer_time": "2026-04-13T14:30:02",
-      "end_time": "2026-04-13T14:31:15",
-      "duration": 73,
-      "end_reason": "normal"
+      "invite_time": "2026-07-15T14:30:00",
+      "answer_time": "2026-07-15T14:30:02",
+      "end_time": "2026-07-15T14:31:15",
+      "end_reason": "normal",
+      "end_reason_ko": "정상종료",
+      "dir_name": "volte/2026/07/15/14/+8210000/+821001/S20260715143000123.d",
+      "participants": [],
+      "has_recording": true
     }
   ]
 }
 ```
 
-### 11.2 SIP 메시지 Flow 조회
+- `hours` = 시간대별 호 수 히트맵. **항상 하루 전체 기준** — hour 스코프 조회 시에는
+  `.d` 디렉터리 카운트(readdir 만)로 집계해 call.json 읽기 없이 유지된다.
+- `participants`/`has_recording` 은 페이지 슬라이스에만 부착 (파일 I/O 최소화).
+
+### 11.2 호별 메시지 Flow 조회
 
 ```
-GET /api/v1/flow/{session_id}
+GET /api/v1/flow/{call_id}?date=YYYY-MM-DD&call_type=volte
 ```
 
-**응답 200:**
+**응답 200:** 노드 그룹별 FlowMessage 배열.
 ```json
 {
-  "session_id": "S20260413143000123",
-  "call_ids": ["abc123", "def456"],
-  "messages": [
-    {
-      "ts": "14:30:00.123",
-      "seq": 1,
-      "from": "ue",
-      "to": "csp",
-      "proto": "SIP",
-      "method": "INVITE",
-      "call_id": "abc123",
-      "from_uri": "sip:1001@csp",
-      "to_uri": "sip:1002@csp"
-    }
-  ]
+  "call_id": "abc123",
+  "date": "2026-07-15",
+  "nodes": {
+    "csp": [
+      {
+        "ts": "14:30:00.123456",
+        "from": "ue_o", "to": "csp",
+        "proto": "SIP", "label": "INVITE",
+        "node": "csp", "nodeId": "csp_01",
+        "mid": "1", "seq": 42, "iface": "sip",
+        "sesid": "+821001::csp::20260715143000123::1", "subid": "abc123"
+      }
+    ],
+    "cmp": [ ]
+  }
 }
 ```
+
+- `nodeId` = **기록 주체 system_id** (flow 파일 소유자, 읽기 시 파일명에서 파생).
+  같은 CSP↔CMP 제어 메시지가 CSP 기록분(TX)·CMP 기록분(RX) 두 줄로 나타나며,
+  콘솔은 nodeId 로 모듈 컬럼·노드 필터·TX/RX 를 구분한다.
+- `mid` = trans_id(JSON)/CSeq(SIP), `seq`+`iface` = 원문 역조회 키 (11.3).
+
+### 11.3 메시지 원문(body) 조회
+
+```
+GET /api/v1/flow/body?date=YYYY-MM-DD&hour=HH&seq=42&iface=cmp&node=csp&ts=14:30:00.123456&sesid=...&mid=3052&dir=TX
+```
+
+- `seq` 줄을 읽되 `sesid` 로 검증하고, 불일치 시 같은 5분 버킷에서
+  `sesid`+`mid`(trans_id)+`dir`(TX/RX)+`ts` 로 재검색해 복원한다
+  ([flow_logging.md](../design/features/flow_logging.md) 원문 역조회 규칙).
+- legacy: `ts`+`dir`(+`proto`) 만으로도 조회 가능.
+
+**응답 200:** `{"body": "<원문 전체>"}`
+
+### 11.4 사용자별 메시지 이력
+
+```
+GET /api/v1/flow/user?user=+821001&date=YYYY-MM-DD
+```
+
+해당 날짜에 사용자가 관여한 전 메시지 흐름 (REGISTER/SUBSCRIBE/호 처리/CSC HTTPS 포함).
+응답 형식은 11.2 와 동일한 `nodes` 구조.
 
 ---
 
