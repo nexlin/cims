@@ -214,6 +214,9 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       }
       if (onDone) await onDone()
       if (source.type === 'deployment') {
+        // 저장 성공 = 현재 값이 새 기준값 — inline 임베드(패키지 설정 탭)는 onClose 가
+        // no-op 이라 여기서 리셋하지 않으면 changed 가 남아 저장 버튼이 계속 활성.
+        setInitial(values)
         onClose()
       } else {
         await load()

@@ -23,6 +23,11 @@
 
 set -euo pipefail
 
+# keepalived(v2.3.x) 는 umask 0177 로 돌아 이 스크립트와 그 자식(cims-svc)까지
+# 상속된다 — 로그 디렉토리/모듈 run·log 가 탐색비트 없는 0600 으로 생성돼 비-root
+# 모듈 기동이 영구 실패하므로 진입 즉시 고정한다.
+umask 0022
+
 SVC="${1:-}"
 TYPE="${2:-}"
 NAME="${3:-}"
@@ -45,6 +50,10 @@ fi
 
 LOG="${HA_LOG_DIR:-/var/log/cims-ha}/notify_${SVC}.log"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
+# 과거 umask 전파로 0600 이 된 기존 디렉토리/로그 자가 교정 — 운영자(비-root)가
+# notify 로그를 읽을 수 있어야 절체 진단이 된다.
+chmod 755 "$(dirname "$LOG")" 2>/dev/null || true
+[[ -f "$LOG" ]] && chmod 644 "$LOG" 2>/dev/null || true
 
 log() { echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: $*" >> "$LOG"; }
 
@@ -86,7 +95,7 @@ _mod_dist() {  # <module> → stdout: dist dir (실패 시 rc=1)
 }
 
 _svc_ctl() {  # <start|stop> <module>
-    local act="$1" mod="$2" dist
+    local act="$1" mod="$2" dist rc
     if [[ -z "$CIMS_SVC" ]]; then
         log "FAIL: cims-svc 미발견 (CIMS_HOME=$CIMS_HOME) — $act $mod 스킵"
         return 0
@@ -95,10 +104,21 @@ _svc_ctl() {  # <start|stop> <module>
         log "FAIL: 모듈 배포 루트 미발견 ($CIMS_HOME/modules/$mod) — $act $mod 스킵"
         return 0
     fi
-    if runuser -u "$CIMS_USER" -- env CIMS_DIST_DIR="$dist" "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1; then
+    # start 는 systemd-run --scope 로 keepalived cgroup 밖에서 기동 — 이 스크립트는
+    # keepalived 의 자식이라 직접 띄운 데몬은 keepalived.service cgroup 에 귀속되고,
+    # systemctl stop/restart keepalived (KillMode=control-group) 가 STOP 핸들러의
+    # "서비스 유지" 의도와 무관하게 모듈을 함께 죽인다. stop 은 단명 호출이라 무관.
+    rc=0
+    if [[ "$act" == "start" ]] && command -v systemd-run >/dev/null 2>&1; then
+        systemd-run --quiet --collect --scope --description="cims $mod (HA notify start)" \
+            runuser -u "$CIMS_USER" -- env CIMS_DIST_DIR="$dist" "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1 || rc=$?
+    else
+        runuser -u "$CIMS_USER" -- env CIMS_DIST_DIR="$dist" "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1 || rc=$?
+    fi
+    if [[ $rc -eq 0 ]]; then
         log "$act $mod OK (dist=$dist)"
     else
-        log "FAIL: cims-svc $act $mod rc=$? (dist=$dist)"
+        log "FAIL: cims-svc $act $mod rc=$rc (dist=$dist)"
     fi
 }
 

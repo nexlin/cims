@@ -1721,7 +1721,7 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
         {deployments.map(d => (
           <tr key={d.id}>
             <td style={{ padding: 0 }}>
-              <div style={{ width: 4, background: depStatusColor(d.status), height: 32 }} />
+              <div style={{ width: 4, background: depStatusColor(depEffectiveStatus(d)), height: 32 }} />
             </td>
             <td><b>{d.process_name || '—'}</b></td>
             <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -1731,10 +1731,7 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
               {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
             </td>
             <td>
-              <span className="tag" style={{
-                background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-              }}>{d.status}</span>
-              <LiveMismatchBadge dep={d} />
+              <DepStatusCell dep={d} />
             </td>
             <td><ProcessControlButtons dep={d} agent={a} onJob={onJob} /></td>
           </tr>
@@ -1744,21 +1741,24 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
   )
 }
 
-// 실측 불일치 배지 — 배포기록 status(의도)와 agent metric 실측(live_state)이 어긋날
-// 때만 표시. running↔실측 down = 프로세스 죽음(빨강), stopped↔실측 up = 외부 기동
-// (HA 절체 notify 등, 주황). metric 주기(30s)만큼 판정이 지연될 수 있다.
-function LiveMismatchBadge({ dep: d }: { dep: Deployment }) {
-  const down = d.status === 'running' && d.live_state === 'down'
-  const up   = d.status === 'stopped' && d.live_state === 'up'
-  if (!down && !up) return null
+// 실측 우선 유효 상태 — running/stopped 구간에서는 실측(live_state)이 정본.
+// 기록(status)은 운영자 지시 이력일 뿐, HA 절체(notify)가 로컬에서 모듈을 켜고
+// 끄면 현실과 어긋난다. pending/deploying/failed/removed 는 lifecycle 상태라 기록 유지.
+function depEffectiveStatus(d: Deployment): Deployment['status'] {
+  if (d.status !== 'running' && d.status !== 'stopped') return d.status
+  if (d.live_state === 'up') return 'running'
+  if (d.live_state === 'down') return 'stopped'
+  return d.status
+}
+
+// 모듈 상태 셀 — 실측(depEffectiveStatus) 단일 표시. running/stopped 는 실제
+// 프로세스 상태 그 자체다 (metric 주기상 최대 30초 지연만 존재).
+function DepStatusCell({ dep: d }: { dep: Deployment }) {
+  const shown = depEffectiveStatus(d)
   return (
-    <span className="tag" title={down
-        ? '실측: 프로세스 미검출 — 기록상 running 이지만 실제로는 죽어 있음 (metric 주기상 최대 30초 지연)'
-        : '실측: 프로세스 검출 — 기록상 stopped 이지만 실제로는 떠 있음 (HA 절체로 기동됐을 수 있음)'}
-      style={{ background: down ? '#e74c3c' : '#f39c12', color: '#fff',
-               fontSize: 10, padding: '1px 6px', borderRadius: 3, marginLeft: 4 }}>
-      {down ? '⚠ 실측 다운' : '⚠ 실측 실행중'}
-    </span>
+    <span className="tag" style={{
+      background: depStatusColor(shown), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
+    }}>{shown}</span>
   )
 }
 
@@ -1849,10 +1849,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember 
                   <span style={{ color: 'var(--text-muted)' }}>{d.package_name} v{d.package_version}</span>
                 </td>
                 <td>
-                  <span className="tag" style={{
-                    background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-                  }}>{d.status}</span>
-                  <LiveMismatchBadge dep={d} />
+                  <DepStatusCell dep={d} />
                 </td>
                 <td><ProcessControlButtons dep={d} agent={ag} onJob={onJob} /></td>
               </tr>

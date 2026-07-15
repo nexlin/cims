@@ -1,6 +1,6 @@
 {
   "name": "agent",
   "description": "CIMS Agent — 배포/프로세스 제어 데몬",
-  "version": "0.2.17",
+  "version": "0.2.21",
   "ha_capability": "standalone"
 }

@@ -474,8 +474,34 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     }
 
 
+def _agents_with_started_modules(members: list, config: dict) -> set:
+    """record status=='running' 배포를 가진 멤버 agent_id 집합 — "운영자가 start 한
+    서버" 판별 (개시 국면 선행 대상)."""
+    try:
+        from handlers.agents import _deploy_load_all
+        aids = {m.get('agent_id') for m in (members or [])}
+        return {d.get('agent_id') for d in _deploy_load_all(config)
+                if d.get('agent_id') in aids and d.get('status') == 'running'}
+    except Exception:
+        return set()
+
+
+# 개시 국면에서 나머지 멤버 update_ha 를 미루는 시간 — 선행 멤버의 job 회수(heartbeat
+# ≤30s) + apply + MASTER 승격(~4s)을 덮고도 여유가 남는 값.
+_STAGGER_DELAY_SEC = 75
+
+
 def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
-    """그룹 멤버들에게 update_ha job 큐잉. 큐잉된 job 수 반환."""
+    """그룹 멤버들에게 update_ha job 큐잉. 큐잉된 job 수 반환.
+
+    개시 국면 선착 방지 — AS 그룹이 무장 상태로 렌더되는데 아직 아무도 VIP 를
+    보유하지 않았다면(최초 개시·전면 재기동), **운영자가 start 한(record running)
+    멤버에게 먼저** 내리고 나머지 멤버는 not_before 로 지연시킨다. 동시에 뿌리면
+    양쪽 keepalived 가 함께 콜드스타트해 선거 레이스가 되는데, start 를 실행한
+    노드는 그 job 처리 탓에 자기 update_ha 를 한 heartbeat 늦게 가져가므로 놀고
+    있던 standby 가 구조적으로 선착한다 — Active 가 start 하지 않은 서버로 가고
+    notify 가 운영자가 켠 모듈을 끄는 역전. VIP 보유자가 이미 있으면(운영 중
+    재렌더) 지연 없음 — apply 는 멱등이라 순서 무관."""
     group = _ha_load(config, group_id)
     if not group:
         return 0
@@ -493,7 +519,8 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
                                      'ip_address': a.get('ip_address'),
                                      'interfaces': a.get('interfaces') or []}
 
-    enqueued = 0
+    # 멤버별 렌더를 먼저 완성 — 지연 대상 판단(무장 여부)에 렌더 결과가 필요하다.
+    renders = []   # [(agent_id, ha_json)]
     for m in members:
         agent = agents.get(m['agent_id'])
         if not agent:
@@ -503,16 +530,86 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
             if other['agent_id'] != m['agent_id']:
                 peer = agents.get(other['agent_id'])
                 break
-        ha_json = _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings, config)
+        renders.append((m['agent_id'],
+                        _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings, config)))
+
+    # 선행 멤버 결정 — start 된 멤버 우선, 없으면 지정 마스터(priority 최대).
+    # 전원 start 상태면 순서가 무의미하므로 지연 없음.
+    stagger_first: set = set()
+    if group.get('mode') == 'active_standby' and len(renders) >= 2:
+        armed = any(((hj.get('services') or {}).get(group.get('name')) or {}).get('enabled')
+                    for _, hj in renders)
+        if armed:
+            from services import ha_lookup
+            obs = ha_lookup.vip_observation(config, group)
+            nobody_holds = not any(v is True for v in (obs.get('observed') or {}).values())
+            if nobody_holds:
+                started = _agents_with_started_modules(members, config)
+                firsts = [aid for aid, _ in renders if aid in started]
+                if not firsts:
+                    ma = _compute_master_aid(members)
+                    firsts = [ma] if ma is not None else []
+                if firsts and len(firsts) < len(renders):
+                    stagger_first = set(firsts)
+
+    not_before = None
+    if stagger_first:
+        from datetime import datetime, timedelta
+        not_before = (datetime.now() + timedelta(seconds=_STAGGER_DELAY_SEC)) \
+            .isoformat(timespec='seconds')
+        logger.log_info(
+            f"[ha-group] group#{group_id} 개시 국면 — start 멤버 {sorted(stagger_first)} 선행, "
+            f"나머지 update_ha {_STAGGER_DELAY_SEC}s 지연 (선거 선점 방지)")
+
+    enqueued = 0
+    for aid, ha_json in renders:
+        agent = agents.get(aid) or {}
         params = {
             # install_path 는 구 agent(flat 레이아웃) 호환용 잔재 — 신 agent 는 무시하고
             # <prefix>/run/keepalived/ 에 기록한다 (agent job_update_ha 참조).
             "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
         }
-        _job_create(config, m['agent_id'], 'update_ha', params)
+        delayed = bool(stagger_first) and aid not in stagger_first
+        _job_create(config, aid, 'update_ha', params,
+                    not_before=not_before if delayed else None)
         enqueued += 1
     return enqueued
+
+
+def _enqueue_disarm_for_agent(agent_id: int, config: dict) -> int:
+    """그룹 이탈(멤버 제거·그룹 삭제) agent 에 빈 services ha.json 을 푸시 — keepalived 해제.
+
+    그룹 렌더는 현 멤버 기준이라 이탈한 agent 는 재렌더 대상에서 빠지고, 노드에는
+    구 vrid/VIP 로 무장된 keepalived 가 영구 잔존한다 (유령 VIP·vrid 충돌 경로).
+    agent 의 job_update_ha 는 services 가 비면 cims-ha uninstall 로 정리한다.
+    다른 그룹 소속이 남아 있으면 (1 agent = 1 group 이라 정상 흐름에선 없음)
+    그 그룹의 정상 재렌더로 대신한다. 큐잉된 job 수 반환."""
+    for g in _ha_load_all(config):
+        if any(m.get('agent_id') == agent_id for m in (g.get('members') or [])):
+            return _enqueue_update_ha_for_members(g.get('id'), config)
+    from handlers.agents import _agent_load, _job_create
+    a = _agent_load(config, aid=agent_id)
+    if not a:
+        return 0
+    ha_json = {
+        "node_name":     a.get('name') or f"agent-{agent_id}",
+        "interface":     "",
+        "local_ip":      a.get('ip_address') or "",
+        "peer_ip":       "",
+        "initial_state": "BACKUP",
+        "vip_mask":      24,
+        "auth_pass":     "",
+        "ha_log_dir":    "/var/log/cims-ha",
+        "cims_home":     "/opt/cims",
+        "cims_user":     "cims",
+        "services":      {},
+    }
+    _job_create(config, agent_id, 'update_ha', {
+        "install_path": f"/opt/cims/{a.get('name', 'agent')}",
+        "ha_json": ha_json,
+    })
+    return 1
 
 
 def enqueue_update_ha_for_agent(agent_id: int, config: dict) -> int:
@@ -775,20 +872,50 @@ async def _update_group(gid: int, body, config):
             return HandlerResult(status=400, body={'error': 'auth_pass max 8 chars'})
     if 'vip_bindings' in body:
         v = body.get('vip_bindings')
-        existing['vip_bindings'] = v if isinstance(v, list) else []
+        v = v if isinstance(v, list) else []
+        # VIP 적용 게이트 — 서비스 개시(모듈 start) 전에는 VIP 를 받지 않는다.
+        # 모듈 없는 무장은 미기동 포트 헬스 실패 → FAULT flap 만 만들고, "VIP 적용
+        # 했는데 아무 일도 안 일어남"(비무장 렌더 no-op) 혼란의 원천. 워크플로 =
+        # 설치 → start → VIP 적용. (바인딩 제거/비우기는 disarm 이므로 항상 허용.)
+        has_vip = any((b or {}).get('ip') for b in v if isinstance(b, dict))
+        if has_vip and existing.get('mode') == 'active_standby':
+            started = _group_started_modules(existing.get('members') or [], config)
+            if not started:
+                return HandlerResult(status=409, body={
+                    'error': 'VIP 적용 불가 — 그룹 멤버에서 실행 중인 모듈이 없습니다. '
+                             '모듈을 먼저 start 한 뒤 VIP 를 적용하세요.',
+                    'code': 'no_started_modules',
+                })
+        existing['vip_bindings'] = v
     if 'failover_options' in body:
         existing['failover_options'] = _normalize_failover_options(body.get('failover_options'))
+    dropped_aids: list = []
     if 'members' in body:
+        old_aids = {m.get('agent_id') for m in (existing.get('members') or [])
+                    if m.get('agent_id') is not None}
         existing['members'] = [_normalize_member(m, i) for i, m in enumerate(body['members'])]
+        new_aids = {m['agent_id'] for m in existing['members']}
+        dropped_aids = sorted(old_aids - new_aids)
 
     file_store.save(_ha_dir(config), gid, existing)
     _enqueue_update_ha_for_members(gid, config)
+    # 멤버 교체로 이탈한 agent 는 재렌더 대상에서 빠진다 — 빈 services 로 keepalived 해제.
+    for aid in dropped_aids:
+        _enqueue_disarm_for_agent(aid, config)
     return HandlerResult(status=200, body={'id': gid})
 
 
 async def _delete_group(gid: int, config):
+    # 삭제 전 멤버 확보 — 삭제 후에는 렌더 대상에서 빠져 disarm 을 보낼 수 없다.
+    g = _ha_load(config, gid)
     if not file_store.delete(_ha_dir(config), gid):
         return HandlerResult(status=404, body={'error': 'Group not found'})
+    disarmed = 0
+    for m in (g.get('members') or []) if g else []:
+        if m.get('agent_id') is not None:
+            disarmed += _enqueue_disarm_for_agent(m['agent_id'], config)
+    if disarmed:
+        logger.log_info(f"[ha-group] group#{gid} 삭제 → 이탈 멤버 disarm {disarmed}건 큐잉")
     return HandlerResult(status=200, body={'id': gid, 'deleted': True})
 
 
@@ -833,8 +960,19 @@ async def _add_member(gid: int, body, config):
 
 async def _apply_group(gid: int, config):
     """그룹의 모든 멤버에 update_ha job 큐잉 — VipPanel [적용] 진입점."""
-    if not _ha_load(config, gid):
+    g = _ha_load(config, gid)
+    if not g:
         return HandlerResult(status=404, body={'error': 'Group not found'})
+    # VIP 적용 게이트 — _update_group 의 vip_bindings 게이트와 동일 정책 (legacy 단일 vip 포함).
+    _has_vip = any((b or {}).get('ip') for b in (g.get('vip_bindings') or []) if isinstance(b, dict)) \
+               or (g.get('vip') and g['vip'] != '0.0.0.0')
+    if g.get('mode') == 'active_standby' and _has_vip \
+            and not _group_started_modules(g.get('members') or [], config):
+        return HandlerResult(status=409, body={
+            'error': 'VIP 적용 불가 — 그룹 멤버에서 실행 중인 모듈이 없습니다. '
+                     '모듈을 먼저 start 한 뒤 VIP 를 적용하세요.',
+            'code': 'no_started_modules',
+        })
     count = _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=202, body={'group_id': gid, 'jobs_queued': count})
 
@@ -850,6 +988,8 @@ async def _remove_member(gid: int, aid: int, config):
     g['members'] = new_members
     file_store.save(_ha_dir(config), gid, g)
     _enqueue_update_ha_for_members(gid, config)
+    # 이탈한 멤버는 위 재렌더 대상에서 빠진다 — 빈 services 로 keepalived 해제.
+    _enqueue_disarm_for_agent(aid, config)
     return HandlerResult(status=200, body={'group_id': gid, 'agent_id': aid, 'removed': True})
 
 

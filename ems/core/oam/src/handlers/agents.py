@@ -308,8 +308,12 @@ def _job_load_all(config) -> list:
 
 
 def _job_create(config, agent_id: int, job_type: str, params: dict,
-                status: str = 'queued') -> int:
-    """agent_job 1건 생성. lastrowid 호환을 위해 id 반환."""
+                status: str = 'queued', not_before: str | None = None) -> int:
+    """agent_job 1건 생성. lastrowid 호환을 위해 id 반환.
+
+    not_before (ISO, 선택): 그 시각 전에는 agent 가 job 을 가져가지 않는다 —
+    HA 개시 국면에서 start 된 멤버가 VIP 를 먼저 잡도록 나머지 멤버의 update_ha
+    를 지연시키는 용도 (_job_pick_pending 이 필터)."""
     from datetime import datetime as _dt
     d = _job_dir(config)
     new_id = file_store.next_id(d)
@@ -328,6 +332,8 @@ def _job_create(config, agent_id: int, job_type: str, params: dict,
         'create_time': now,
         'update_time': now,
     }
+    if not_before:
+        obj['not_before'] = not_before
     file_store.save(d, new_id, obj)
     return new_id
 
@@ -347,8 +353,11 @@ def _job_pick_pending(config, agent_id: int, limit: int = 10) -> list:
     파일 잠금 없이 동시성 호출 가능하지만 단일 CSC 환경 기준 충돌 가능성 낮음.
     """
     from datetime import datetime as _dt
+    now_iso = _dt.now().isoformat(timespec='seconds')
     all_jobs = _job_load_all(config)
-    pending = [j for j in all_jobs if j.get('agent_id') == agent_id and j.get('status') == 'queued']
+    pending = [j for j in all_jobs
+               if j.get('agent_id') == agent_id and j.get('status') == 'queued'
+               and (not j.get('not_before') or str(j['not_before']) <= now_iso)]
     pending.sort(key=lambda j: j.get('id', 0))
     picked = pending[:limit]
     if picked:

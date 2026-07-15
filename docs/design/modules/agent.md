@@ -23,6 +23,7 @@
 | die 시 자동 재기동 | systemd `Restart=always`, `RestartSec=10` |
 | host 재기동 시 자동 기동 | `loginctl enable-linger $USER` + unit `WantedBy=default.target` |
 | 1 user = 1 agent | unit 이름 단일 (`cims-agent.service`). 같은 호스트에 여러 agent 필요 시 별도 user (`cims2` 등) 로 install |
+| agent 재기동이 모듈에 무영향 | unit `KillMode=process` — agent 가 기동한 모듈(cims-svc & 백그라운드)은 unit cgroup 에 있지만 main process 만 kill. 모듈 lifecycle 은 pidfile 기반 cims-svc + watchdog 이 관리 (agent 는 감독자, 소유자 아님). update.sh 는 unit 을 유지하므로 기존 설치본은 agent 가 기동 시 drop-in(`cims-agent.service.d/10-cims-killmode.conf`)으로 자가 적용 |
 
 install 시점부터 systemd 로 운영한다.
 

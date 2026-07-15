@@ -530,6 +530,11 @@ Environment=CIMS_AGENT_PREFIX=$INSTALL_DIR
 ExecStart=/usr/bin/python3 $BIN_FILE --oam-url $OAM_URL --state-dir $STATE_DIR --name $AGENT_NAME
 Restart=always
 RestartSec=10
+# agent 가 기동한 모듈(csc/csp 등, cims-svc & 백그라운드)은 이 유닛 cgroup 에 귀속된다.
+# 기본 KillMode=control-group 이면 agent 재기동(업그레이드 포함)마다 모듈이 동반
+# 사망한다 — agent 는 감독자일 뿐 모듈 소유자가 아니므로 main process 만 죽인다.
+# (모듈 lifecycle 은 pidfile 기반 cims-svc + watchdog 이 관리.)
+KillMode=process
 
 [Install]
 WantedBy=default.target

@@ -395,7 +395,10 @@ systemd `cims@` instance 는 enable 하지 않는다.
   entry 가 `enabled:false` 로 렌더되어 vrrp_instance 자체가 생성되지 않는다 —
   **Active/Standby 상태는 서비스가 개시된 그룹에만 존재**하고, 설치만 한 상태에서
   VIP 인수·미기동 포트 검사 flap·"start 하려면 VIP 필요, VIP 는 모듈 필요" 순환이
-  원천적으로 생기지 않는다. 렌더 재전파 트리거 = 그룹 변이 / 배포 생성·제거 /
+  원천적으로 생기지 않는다. 같은 정책이 API 입구에서도 강제된다 — **VIP 적용
+  (vip_bindings 저장·그룹 [▶ 적용])은 그룹 멤버에 실행 중 모듈이 없으면 409 로
+  거부** ("모듈 먼저 start" 안내). 조용한 비무장 no-op 보다 명시적 거부가 워크플로
+  (설치 → start → VIP 적용)를 드러낸다. 바인딩 제거(disarm)는 항상 허용. 렌더 재전파 트리거 = 그룹 변이 / 배포 생성·제거 /
   실효 upstream 변경 / **start·stop·restart·upgrade·uninstall job 완료**
   (record status 변화 = armed 집합 변화).
 - **apply 멱등·무접촉**: `cims-ha apply` 는 스테이징 대상 5종(conf/ha.json/
@@ -447,7 +450,32 @@ ha.json 기록 시 자기 설치 루트/실행 계정으로 채운다 (OAM 렌�
 install 은 완료 시 current 를 방금 설치한 버전으로 flip 하므로 cold standby 도
 설치 직후부터 절체 기동 통로가 존재한다.
 
-모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록.
+**실행 컨텍스트 격리** — notify 는 keepalived 의 자식이라 두 가지를 끊어야
+절체 기동이 keepalived 수명에 종속되지 않는다:
+- **cgroup**: start 는 `systemd-run --scope` 로 keepalived.service cgroup 밖에서
+  수행 (systemd-run 부재 시 직접 호출 fallback). 직접 자식으로 띄우면
+  KillMode=control-group 인 `systemctl stop/restart keepalived` 가 STOP 정책
+  ("서비스 유지")과 무관하게 모듈을 함께 죽인다. stop 은 단명 호출이라 무관.
+- **umask**: keepalived(v2.3.x)는 umask 0177 로 돌아 자식에 상속된다 —
+  cims-notify/cims-svc 는 진입 시 `umask 0022` 고정 + 기존 run/·log/ 모드 자가
+  교정. 이 차단이 없으면 cold standby 의 최초 mkdir(run/·log/)가 탐색비트 없는
+  0600 으로 생성돼 모듈 기동(로그 리다이렉트·pidfile)이 EACCES 로 영구 실패한다.
+
+**VIP 선행 bind (`ip_nonlocal_bind`)** — VIP 를 설정값으로 bind 하는 모듈(csp
+`LocalIp=VIP` 등)은 VIP 취득 전에도 기동 가능해야 한다 (워크플로: start → VIP
+적용). agent 가 기동 시 `cims-priv net-sysctl net.ipv4.ip_nonlocal_bind 1` 로
+선행 보장 (idempotent, `/etc/sysctl.d/99-cims-net-tuning.conf` 영속). `cims-ha
+apply` 도 동일 값을 설정하지만 그건 VIP 적용 시점이라 최초 start 에는 늦다 —
+agent 선행이 없으면 bind EADDRNOTAVAIL → watchdog crash-loop.
+
+agent watchdog 의 cold-spare 게이트(standby 재기동 억제)는 **keepalived 가 로컬에서
+실행 중일 때만** 유효 — keepalived 정지(STOP=서비스 유지) 상태에서는 게이트가 풀려
+watchdog 이 crash 백스톱으로 동작한다 (정지+VIP 부재 조합에서 죽은 모듈을 아무도 못
+살리는 사각 차단). watchdog tick 은 heartbeat 대기와 분리된 고정 주기(10s)로 돌아
+OAM 장애 backoff(최대 60s)가 로컬 복구를 지연시키지 않는다.
+
+모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록 (디렉토리 755·로그 644 —
+비-root 운영자 열람 가능).
 
 ### 11.5 cims.sh 와의 관계
 
@@ -514,7 +542,20 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
    배포 설정 저장으로 실효포트가 바뀐 경우. 헬스포트/cold_modules/무장(enabled) 이
    배포 목록·record status 에서 유도되는 파생값이라, 렌더 입력을 바꾸는 변이는 전부
    재렌더를 태운다 (그룹 구성 → 설치 → 서비스 시작 순서 전체에서 자동 추종;
-   apply 가 멱등이라 렌더 결과가 같으면 keepalived 무접촉)
+   apply 가 멱등이라 렌더 결과가 같으면 keepalived 무접촉).
+   **그룹 이탈 disarm** — 그룹 삭제·멤버 제거(교체 포함)로 그룹에서 빠진 agent 에는
+   빈 `services` 의 ha.json 이 푸시되고(`_enqueue_disarm_for_agent`), agent 가
+   `cims-ha uninstall` 로 keepalived 를 해제한다 — 이탈 노드에 구 vrid/VIP 무장이
+   잔존하지 않는다 (유령 VIP 차단).
+   **개시 국면 선착 방지** — AS 그룹이 무장 렌더로 전환되는데 아직 아무 멤버도
+   VIP 를 보유하지 않았으면(최초 개시·전면 재기동), **운영자가 start 한(record
+   running) 멤버**의 update_ha 를 먼저 큐잉하고 나머지 멤버는 job `not_before`
+   (75s)로 지연한다 — start 한 서버가 VIP 를 잡아 그대로 서비스하고, 상대 멤버는
+   그 뒤 BACKUP 으로 합류한다. 동시 전파하면 양쪽 keepalived 콜드스타트 선거에서
+   유휴 standby 가 구조적으로 선착해(start 실행 노드는 자기 job 을 한 heartbeat
+   늦게 회수) Active 를 선점하고 notify 가 운영자가 켠 모듈을 끄는 역전이 난다.
+   start 멤버가 없으면 지정 마스터(priority 최대)를 선행. VIP 보유자가 관측되는
+   운영 중 재렌더는 지연 없이 동시 전파 (apply 멱등 — 순서 무관)
 2. OAM `_enqueue_update_ha_for_members` 가 멤버별 ha.json render → `update_ha` job
    큐잉 (params.ha_json — install_path 는 구 agent 호환 잔재, 신 agent 는 무시)
 3. cims_agent heartbeat 시 job 회수 → `job_update_ha`:

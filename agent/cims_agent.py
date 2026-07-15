@@ -1945,6 +1945,16 @@ def _cold_standby_module(svc: str) -> bool:
         break
     if not vips:
         return False
+    # keepalived 가 로컬에서 죽어 있으면 HA 는 이 노드를 관리하지 않는 상태
+    # (STOP 정책 = 서비스 유지, 운영자 직접 제어) — 게이트를 풀어 watchdog 이
+    # crash 백스톱으로 동작한다. 게이트를 유지하면 keepalived 정지 + VIP 부재
+    # 조합에서 죽은 모듈을 아무도 못 살리는 사각이 된다.
+    try:
+        if subprocess.run(["pgrep", "-x", "keepalived"], capture_output=True,
+                          timeout=2).returncode != 0:
+            return False
+    except Exception:
+        pass
     local = {r.get("ip") for r in collect_interfaces() if r.get("ip")}
     return not any(v in local for v in vips)
 
@@ -2784,6 +2794,77 @@ def rotate_mtls_cert(oam_url: str, state: AgentState) -> bool:
         return False
 
 
+def _ensure_nonlocal_bind() -> None:
+    """net.ipv4.ip_nonlocal_bind=1 선행 보장 (idempotent, 1회).
+
+    VIP 를 설정값으로 bind 하는 모듈(csp LocalIp=VIP 등)은 VIP 취득 전에도 기동
+    가능해야 한다 — 워크플로가 "start → VIP 적용" 순서라 cims-ha apply 의 설정
+    (VIP 적용 시점)만으로는 늦다: 최초 start 가 bind EADDRNOTAVAIL 로 실패해
+    watchdog crash-loop 가 된다. sudoers 미등록(dev) 환경은 로그만 남기고 무시."""
+    try:
+        with open("/proc/sys/net/ipv4/ip_nonlocal_bind") as f:
+            if f.read().strip() == "1":
+                return
+    except Exception:
+        pass
+    priv = _resolve_cims_priv()
+    if not priv:
+        print("[agent] cims-priv 미발견 — ip_nonlocal_bind 설정 스킵", flush=True)
+        return
+    try:
+        r = subprocess.run(["sudo", "-n", priv, "net-sysctl",
+                            "net.ipv4.ip_nonlocal_bind", "1"],
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            print("[agent] net.ipv4.ip_nonlocal_bind=1 적용 (VIP 선행 bind 보장)", flush=True)
+        else:
+            print(f"[agent] ip_nonlocal_bind 설정 실패(무시): rc={r.returncode} "
+                  f"{(r.stderr or r.stdout).strip()[-120:]}", flush=True)
+    except Exception as e:
+        print(f"[agent] ip_nonlocal_bind 설정 예외(무시): {e}", flush=True)
+
+
+def _ensure_unit_killmode() -> None:
+    """user unit 에 KillMode=process drop-in 보장 — agent 재기동(업그레이드 포함)이
+    자기 cgroup 의 모듈(cims-svc & 백그라운드 데몬)까지 동반 종료시키지 않게 한다.
+    fresh install 의 unit 에는 포함되지만 update.sh(--update-only)는 unit 을 유지
+    하므로, 기존 설치본은 agent 가 기동 시 스스로 drop-in 으로 교정한다 (idempotent,
+    systemd 미사용(nohup) 환경은 daemon-reload 실패를 무시)."""
+    dropin_dir = os.path.join(os.path.expanduser("~"), ".config", "systemd", "user",
+                              "cims-agent.service.d")
+    dropin = os.path.join(dropin_dir, "10-cims-killmode.conf")
+    content = "[Service]\nKillMode=process\n"
+    try:
+        if os.path.isfile(dropin):
+            with open(dropin) as f:
+                if f.read() == content:
+                    return
+        os.makedirs(dropin_dir, exist_ok=True)
+        with open(dropin, "w") as f:
+            f.write(content)
+        subprocess.run(["systemctl", "--user", "daemon-reload"],
+                       capture_output=True, timeout=10)
+        print("[agent] systemd drop-in 적용: KillMode=process (agent 재기동 시 모듈 동반종료 차단)", flush=True)
+    except Exception as e:
+        print(f"[agent] KillMode drop-in 적용 실패(무시): {e}", flush=True)
+
+
+def _sleep_with_supervision(total_sec: float) -> None:
+    """total_sec 대기하되 SUPERVISE_INTERVAL_SEC 간격으로 watchdog tick 을 돌린다 —
+    heartbeat 대기(정상 heartbeat_sec, OAM 장애 backoff 최대 60s)와 죽은 모듈 감지
+    주기를 분리 (OAM 불통이 로컬 복구를 지연시키지 않게)."""
+    deadline = time.time() + total_sec
+    while True:
+        remain = deadline - time.time()
+        if remain <= 0:
+            return
+        time.sleep(min(remain, SUPERVISE_INTERVAL_SEC))
+        try:
+            supervise_tick()
+        except Exception as e:
+            print(f"[agent][watchdog] tick error: {e}", flush=True)
+
+
 def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: int,
              sync_port: int = 0):
     """
@@ -2798,12 +2879,13 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
+    _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
+    _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)
     ensure_base_deps()                 # vendor deb 균일 설치(keepalived/nfs/lib) — 실행은 config 제어. ip/네트워크 수집 전제, idempotent
     reapply_managed_ips()              # 재부팅으로 소실된 cims-managed service IP 자력 복원 (1회, OAM 무관)
     reapply_net_tuning()               # 재부팅으로 소실된 RPS(rps_cpus) 자력 복원 (1회, sysctl 은 sysctl.d 가 처리)
 
     next_metric = 0
-    next_supervise = 0
     fail_count = 0
     max_backoff = max(heartbeat_sec, 60)
     while True:
@@ -2874,20 +2956,14 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
             fail_count += 1
             print(f"[agent] loop error (fail_count={fail_count}): {e}")
 
-        # 모듈 감독 — OAM 연결과 무관하게 로컬에서 죽은 supervised 모듈 재시작
-        if time.time() >= next_supervise:
-            try:
-                supervise_tick()
-            except Exception as e:
-                print(f"[agent][watchdog] tick error: {e}", flush=True)
-            next_supervise = time.time() + SUPERVISE_INTERVAL_SEC
-
         if fail_count == 0:
             sleep_sec = heartbeat_sec
         else:
             sleep_sec = min(5 * (2 ** (fail_count - 1)), max_backoff)
             print(f"[agent] HA backoff sleep {sleep_sec}s (fail_count={fail_count})", flush=True)
-        time.sleep(sleep_sec)
+        # 모듈 감독은 heartbeat 대기와 무관하게 SUPERVISE_INTERVAL_SEC 주기 유지 —
+        # OAM 장애 backoff(최대 60s)가 죽은 모듈 복구까지 함께 지연시키지 않는다.
+        _sleep_with_supervision(sleep_sec)
 
 
 def main():
