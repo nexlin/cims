@@ -82,7 +82,16 @@ cmd_sync() {
         #   운영자가 production 노드에서 .sample→실파일 rename 으로 --role base 전환할 수 있게.
         if [[ -d "$SCRIPT_DIR/ems/core/oam/config" ]]; then
             mkdir -p "$DIST_DIR/oam/config"
-            cp -f "$SCRIPT_DIR/ems/core/oam/config/"*.json "$DIST_DIR/oam/config/" 2>/dev/null || true
+            # oam.json 은 configure 가 JwtSecret/ServiceLogging.Dir/CimsDatabase 를 패치한
+            # 산출물 — dist 에 이미 있으면 보존(non-clobber). 소스본으로 덮어쓰면 csc 와
+            # JWT 시크릿이 어긋나 gateway 401, 통계 API 는 DB 기본값(127.0.0.1)으로 500.
+            for _f in "$SCRIPT_DIR/ems/core/oam/config/"*.json; do
+                [[ -e "$_f" ]] || continue
+                if [[ "$(basename "$_f")" == "oam.json" && -f "$DIST_DIR/oam/config/oam.json" ]]; then
+                    continue
+                fi
+                cp -f "$_f" "$DIST_DIR/oam/config/" 2>/dev/null || true
+            done
             cp -f "$SCRIPT_DIR/ems/core/oam/config/"*.sample "$DIST_DIR/oam/config/" 2>/dev/null || true
             if [[ -d "$SCRIPT_DIR/ems/core/oam/config/services" ]]; then
                 mkdir -p "$DIST_DIR/oam/config/services"
