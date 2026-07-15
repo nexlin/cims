@@ -93,3 +93,6 @@ ems/core/oam/packages/
 
 # 콘솔 svc 팩 node_modules 심링크(빌드시 cims.sh 가 생성, core 공유)
 ems/service/console/node_modules
+
+# HA 절체 조사 리포트 — 로컬 전용 (커밋 금지)
+/HA_report*.md
