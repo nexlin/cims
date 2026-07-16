@@ -2050,6 +2050,191 @@ def _ha_flags() -> dict:
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  Health Checker (ha_service_model.md §6) — liveness / readiness / preflight
+#  검사별 독립 주기·타임아웃으로 실행해 결과를 run/ha/health/<mod>.json 에 캐시한다.
+#  HA Evaluator(P3)가 캐시만 읽어 verdict 를 합성한다. 스케줄러 스레드는 flag
+#  (verdict_source=supervisor 또는 CIMS_HA_HEALTH=1)일 때만 기동 — legacy 기본에선
+#  dormant 라 동작 무변경. 검사 대상·힌트는 ha.json(services)에서 유도(OAM 렌더 재사용).
+# ══════════════════════════════════════════════════════════════════════════
+
+_HEALTH_DIR = os.path.join(_HA_RUN_DIR, "health")
+_HEALTH_DEFAULTS = {
+    "liveness":  {"interval": 2,  "timeout": 2},
+    "readiness": {"interval": 3,  "timeout": 2},
+    "preflight": {"interval": 10, "timeout": 2},
+}
+_HEALTH_NEXT: dict = {}     # (module, check) -> next_run epoch
+
+
+def _read_ha_json() -> dict:
+    try:
+        with open(_HA_JSON_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _health_targets() -> list:
+    """ha.json services → 검사 대상 모듈 목록. 모듈 = relevant ∪ cold ∪ health_module.
+    port/proto 는 service 레벨 힌트(단일 데몬 또는 health_module 에 적용), config_key 는
+    health_module 에만(csc 실효포트 유도)."""
+    cfg = _read_ha_json()
+    home = cfg.get("cims_home") or _PREFIX
+    out, seen = [], set()
+    for svc, s in (cfg.get("services") or {}).items():
+        hmod = str(s.get("health_module") or "").lower().strip()
+        mods = set()
+        if hmod:
+            mods.add(hmod)
+        mods |= {str(m).lower().strip() for m in (s.get("relevant_modules") or []) if str(m).strip()}
+        mods |= {str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+        port = s.get("port")
+        proto = (s.get("proto") or "tcp").lower()
+        ckey = s.get("health_config_key")
+        for m in mods:
+            if not m or m in seen:
+                continue
+            seen.add(m)
+            out.append({"module": m, "service": svc, "home": home, "proto": proto,
+                        "port": port if (m == hmod or len(mods) == 1) else None,
+                        "config_key": ckey if m == hmod else None})
+    return out
+
+
+def _module_config_port(mod: str, home: str, key: str) -> "int | None":
+    """모듈 배포 config.json 의 key(flat 우선, nested 수용)에서 실효 포트 — cims-health 와 동일."""
+    base = os.path.join(home, "modules", mod, "current")
+    for rel in (os.path.join(mod, "config.json"), "config.json"):
+        p = os.path.join(base, rel)
+        if not os.path.isfile(p):
+            continue
+        try:
+            mc = json.load(open(p))
+            v = mc.get(key)
+            if v is None:
+                cur = mc
+                for part in key.split("."):
+                    cur = cur.get(part) if isinstance(cur, dict) else None
+                    if cur is None:
+                        break
+                v = cur
+            if v and 0 < int(v) < 65536:
+                return int(v)
+        except Exception:
+            pass
+        break
+    return None
+
+
+def _port_listening(port: int, proto: str) -> bool:
+    flag = "-lnt" if proto == "tcp" else "-lnu"
+    try:
+        r = subprocess.run(["ss", flag, f"sport = :{port}"],
+                           capture_output=True, text=True, timeout=2)
+        return any(line.strip() for line in r.stdout.splitlines()[1:])
+    except Exception:
+        return False
+
+
+def _mod_installed_local(root: str) -> bool:
+    if os.path.exists(os.path.join(root, "current")):
+        return True
+    try:
+        return any(os.path.isdir(os.path.join(root, d)) for d in os.listdir(root))
+    except Exception:
+        return False
+
+
+def _run_health_check(mod: str, check: str, t: dict) -> dict:
+    st = time.time()
+    if check == "liveness":
+        up = _pgrep_module(mod) is not None
+        r = {"status": "SUCCESS" if up else "FAIL",
+             "detail": "process " + ("up" if up else "down")}
+    elif check == "readiness":
+        port = t.get("port")
+        if t.get("config_key"):
+            p = _module_config_port(mod, t.get("home") or _PREFIX, t["config_key"])
+            if p:
+                port = p
+        proto = (t.get("proto") or "tcp").lower()
+        if not port:
+            up = _pgrep_module(mod) is not None      # 포트 미상 → 프로세스 대체 (cims-health 동일)
+            r = {"status": "SUCCESS" if up else "FAIL",
+                 "detail": "port unknown; process " + ("up" if up else "down")}
+        else:
+            listening = _port_listening(int(port), proto)
+            r = {"status": "SUCCESS" if listening else "FAIL",
+                 "detail": f":{port}/{proto} " + ("listening" if listening else "not listening")}
+    else:  # preflight
+        root = os.path.join(t.get("home") or _PREFIX, "modules", mod)
+        if not _mod_installed_local(root):
+            r = {"status": "FAIL", "detail": "not installed"}
+        else:
+            cur = os.path.join(root, "current")
+            cfg_ok = any(os.path.isfile(os.path.join(cur, rel))
+                         for rel in (os.path.join(mod, "config.json"), "config.json"))
+            r = {"status": "SUCCESS", "detail": "installed" + ("" if cfg_ok else "; config?")}
+    r["duration_ms"] = int((time.time() - st) * 1000)
+    return r
+
+
+def _health_merge_write(mod: str, updated: dict) -> None:
+    path = os.path.join(_HEALTH_DIR, f"{mod}.json")
+    data = {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    checks.update(updated)
+    data = {"module": mod, "checks": checks, "updated_at": int(time.time())}
+    try:
+        os.makedirs(_HEALTH_DIR, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"[agent][health] cache write 실패({mod}): {e}", flush=True)
+
+
+def health_scheduler_tick() -> None:
+    """due 검사만 실행해 캐시 갱신. 각 검사는 자체 timeout 을 갖고, expires_at 은
+    interval×3(3회 연속 미갱신이면 stale)."""
+    now = time.time()
+    for t in _health_targets():
+        mod = t["module"]
+        updated = {}
+        for check in ("liveness", "readiness", "preflight"):
+            key = (mod, check)
+            if now < _HEALTH_NEXT.get(key, 0):
+                continue
+            prof = _HEALTH_DEFAULTS[check]
+            _HEALTH_NEXT[key] = now + prof["interval"]
+            res = _run_health_check(mod, check, t)
+            res["checked_at"] = int(now)
+            res["expires_at"] = int(now + prof["interval"] * 3)
+            updated[check] = res
+        if updated:
+            _health_merge_write(mod, updated)
+
+
+def _start_health_scheduler() -> None:
+    """Health Scheduler 스레드 — OAM 루프·watchdog 과 독립. flag 활성 시에만 기동."""
+    def _loop():
+        while True:
+            try:
+                health_scheduler_tick()
+            except Exception as e:
+                print(f"[agent][health] tick error: {e}", flush=True)
+            time.sleep(1)
+    threading.Thread(target=_loop, daemon=True, name="agent-health").start()
+    print("[agent][health] Health Scheduler 기동 (liveness/readiness/preflight)", flush=True)
+
+
 def _load_desired() -> dict:
     try:
         with open(_DESIRED_FILE) as f:
@@ -3196,6 +3381,10 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
     _ensure_ha_dirs()                  # HA 상태 디렉토리 골격(run/ha·state/ha) 보장 (1회)
+    # Health Scheduler — flag 활성(verdict_source=supervisor 또는 CIMS_HA_HEALTH=1)일 때만.
+    # legacy 기본에선 미기동 → 동작 무변경. (P3 HA Evaluator 가 이 캐시를 소비.)
+    if _ha_flags()["verdict_source"] == "supervisor" or os.environ.get("CIMS_HA_HEALTH"):
+        _start_health_scheduler()
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
     _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
     _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)
