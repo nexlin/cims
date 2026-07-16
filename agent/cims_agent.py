@@ -2000,6 +2000,56 @@ def _ha_state_dir() -> str:
     return _HA_STATE_DIR
 
 
+# ── HA 상태 디렉토리 레이아웃 (ha_service_model.md §5) ────────────────────────
+# run/ha/   = 휘발(재부팅 시 초기화 대상) — verdict/role/health/promotion/recovery/
+#             operations. (legacy 447fa27d: desired.json·fail_*·op_grace_* 는 run/ha
+#             루트에 잔존 — verdict-driven 전환 시 desired 는 state/ha 로 이관.)
+# state/ha/ = 영속 — desired/latch (운영자 의도·failover 래치, 재부팅 생존).
+# agent(cims)가 소유·생성한다. user systemd 유닛이라 RuntimeDirectory/StateDirectory 를
+# 쓸 수 없어(→ /run/user·~/.local/state, root keepalived 와 경로 어긋남) 직접 만든다.
+# 교차 사용자 접근은 읽기 전용 방향뿐: role(root 쓰기→cims 읽기), verdict(cims 쓰기→
+# root 읽기). _PREFIX 는 tmpfs 가 아니므로 휘발 의미는 기동 시 초기화 + verdict boot_id.
+_HA_RUN_DIR = _HA_STATE_DIR                       # _PREFIX/run/ha (기존 상수 재사용)
+_HA_PERSIST_DIR = os.path.join(_PREFIX, "state", "ha")
+_HA_RUN_SUBDIRS = ("verdict", "role", "health", "promotion", "recovery", "operations")
+_HA_PERSIST_SUBDIRS = ("desired", "latch")
+
+
+def _ensure_ha_dirs() -> None:
+    """HA 상태 디렉토리 골격 생성 (idempotent, 기동 1회). 비-systemd·기존 설치본에서도
+    경로가 보장되도록 agent 가 자체 생성한다."""
+    try:
+        for sub in _HA_RUN_SUBDIRS:
+            os.makedirs(os.path.join(_HA_RUN_DIR, sub), exist_ok=True)
+        for sub in _HA_PERSIST_SUBDIRS:
+            os.makedirs(os.path.join(_HA_PERSIST_DIR, sub), exist_ok=True)
+    except Exception as e:
+        print(f"[agent][ha] 상태 디렉토리 생성 실패(무시): {e}", flush=True)
+
+
+def _boot_id() -> str:
+    """현재 부팅 식별자 — verdict/role 이 재부팅 전 값 재사용을 막는 데 쓴다(§13).
+    읽기 실패 시 빈 문자열 (비교 측이 mismatch 로 처리)."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+# ── HA feature flag (단계적 이행 §18) — env 우선, 기본 legacy(동작 무변경) ──────
+#   CIMS_HA_VERDICT_SOURCE = legacy | supervisor   (track_script/판정 주체)
+#   CIMS_HA_NOTIFY_MODE    = legacy | role_writer  (cims-notify 동작)
+#   CIMS_HA_STAGGER        = 1 | 0                 (개시국면 스태거 유지 여부)
+# 현재 단계는 리더만 두고 소비하지 않는다(dormant) — 이후 단계가 게이트로 사용.
+def _ha_flags() -> dict:
+    return {
+        "verdict_source": (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "legacy").lower(),
+        "notify_mode":    (os.environ.get("CIMS_HA_NOTIFY_MODE") or "legacy").lower(),
+        "stagger":        os.environ.get("CIMS_HA_STAGGER", "1") != "0",
+    }
+
+
 def _load_desired() -> dict:
     try:
         with open(_DESIRED_FILE) as f:
@@ -3145,6 +3195,7 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     global _MGMT_IP
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
+    _ensure_ha_dirs()                  # HA 상태 디렉토리 골격(run/ha·state/ha) 보장 (1회)
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
     _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
     _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)
