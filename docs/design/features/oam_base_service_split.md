@@ -503,12 +503,13 @@ AS 그룹의 공통 설정 정합은 **그룹×패키지 단위 동기화 스위
 데몬**이 담당한다. 저장 API 자체에는 HA 전파가 없다.
 
 **실측 ACTIVE 판정** (`ha_lookup.vip_observation`):
-- agent 가 매 30s heartbeat 로 보고하는 `interfaces[]`(secondary IP 포함)에 그룹
+- agent 가 heartbeat(기본 2s 주기)로 보고하는 `interfaces[]`(secondary IP 포함)에 그룹
   VIP(`vip_bindings[].ip ∪ vip`)가 붙은 멤버를 찾는다 — agent 수정 없이 기존 데이터 소비.
 - **비-stale**(heartbeat ≤90s) 멤버 중 **정확히 1명**이 보유할 때만 ACTIVE 확정.
   0명(VIP 이동 중)·2명(절체 직후 관측 창)·전원 stale → 판정 불가(None).
 - `GET /ha-groups` 응답에 `active_agent_id` + 멤버별 `vip_observed`(true/false/null) —
-  콘솔 뱃지(`● ACT`/`○ SBY`)가 정적 role 과 별개로 실제 절체를 ≤30s 지연으로 표시.
+  콘솔 뱃지(`● ACT`/`○ SBY`)가 정적 role 과 별개로 실제 절체를 표시 — 지연은
+  agent heartbeat(2s) + 콘솔 폴링(10s) ≈ 최대 12초.
   ServersPage 의 [🔄 실측](sync health-check)은 즉시 재확인용으로 존치.
 
 **동기화 스위치** (`PUT /ha-groups/{gid}/packages/{pkg}/auto-sync {enabled}`, operator):
@@ -557,7 +558,7 @@ _put_group_pkg_config`, operator):
 1. 그룹 탭에서 동기화 스위치 **OFF**
 2. S2 를 V2 로 업그레이드 — 설정은 overlay 승계, 새 키는 템플릿 기본값
 3. 그룹 탭 [공통 설정]에서 **멤버=S2 선택** 후 새/변경 항목 수정 (S2 개별 값은 S2 서버
-   화면에서) → S2 기동 → 절체(S2 가 VIP 획득 — 콘솔 뱃지가 ≤30s 내 반영)
+   화면에서) → S2 기동 → 절체(S2 가 VIP 획득 — 콘솔 뱃지가 십수 초 내 반영)
 4. 스위치 **ON** — S1 은 아직 V1 이라 정합 보류(버전 가드)
 5. S1 을 V2 로 업그레이드 → upgrade 성공 훅 + 스위퍼가 버전 일치 확인 →
    **ACTIVE(S2) 설정이 S1 로 자동 복사** — 수동 동기화 없이 완료

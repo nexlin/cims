@@ -13,7 +13,8 @@ On first start (no state):
 
 On subsequent starts:
   - reads session_token from state
-  - POST /api/agent/heartbeat every 30s → receives pending jobs → executes
+  - POST /api/agent/heartbeat every 2s (DEFAULT_HEARTBEAT_SEC, --heartbeat-sec;
+    OAM 불통 시 5→10→…→60s 지수 backoff) → receives pending jobs → executes
 
 Job types (minimal P10 implementation):
   - install: download pkg → untar → save to install_path

@@ -3,7 +3,7 @@ CSC Agent API — 배포 에이전트용 엔드포인트 (P10).
 
 Agent 와 CSC 간 통신 프로토콜:
   POST /api/agent/enroll     — 최초 등록 (enrollment token → session token + agent_id)
-  POST /api/agent/heartbeat  — 주기 heartbeat (30s) — pending job 수신
+  POST /api/agent/heartbeat  — 주기 heartbeat (agent 기본 2s, 불통 시 backoff 최대 60s) — pending job 수신
   POST /api/agent/report     — 작업 결과 보고
   GET  /api/agent/package/{id} — 패키지 다운로드
 
@@ -400,7 +400,9 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         "name": row["name"],
         "session_token": session_token,
         "status": row.get("status"),
-        "heartbeat_interval_sec": 30,
+        # 정보성 필드 — agent 는 이 값을 소비하지 않고 자체 기본(DEFAULT_HEARTBEAT_SEC=2,
+        # --heartbeat-sec)을 쓴다. 실제 주기와 일치하도록 유지.
+        "heartbeat_interval_sec": 2,
     }
     # mTLS 활성화 시 agent 서버용 cert 발급해 함께 전달 + 레코드에 플래그/만료 기록
     if _mtls_enabled(config):
@@ -750,7 +752,7 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
     # live_modules — 실행 중 모듈 스냅샷을 agent row 에 캐시. deployments 조회가
     # 배포기록 status(의도)와 별개로 실측 프로세스 상태(live_state)를 enrich 하는 원천
-    # (jsonl tail 재파싱 없이 row 1회 read). metric 주기(기본 30s)만큼 지연될 수 있음.
+    # (jsonl tail 재파싱 없이 row 1회 read). metric 주기(기본 2s, DEFAULT_METRIC_SEC)만큼 지연될 수 있음.
     live = [{'name': str(m.get('name', '')), 'pid': m.get('pid')}
             for m in (modules if isinstance(modules, list) else [])
             if isinstance(m, dict) and m.get('name')]

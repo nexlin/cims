@@ -352,9 +352,9 @@ CMP(미디어 서버)와 JSON-over-UDP 통신.
 
 ```
 CCmpClient
-  ├─ KeepAliveLoop (30초 주기 heartbeat)
+  ├─ KeepAliveLoop (3초 주기 Alive — 연속 3회 실패(~9초) 시 Disconnected 판정)
   ├─ RecvLoop (CMP 응답 수신, transId 매칭)
-  └─ SendRequestAndWait() (동기 요청, 2초 타임아웃)
+  └─ SendRequestAndWait() (동기 요청, 100ms × 3회 재시도 ≈ 최대 300ms)
 ```
 
 **주요 명령:**

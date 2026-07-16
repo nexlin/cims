@@ -193,7 +193,7 @@ Agent ── job 실행 ── install/start/stop/restart/update_config/upgrade_
 Agent ── POST /api/agent/report ──> CSC
 ```
 
-- 30초 주기 heartbeat 에 pending job 최대 10개 pickup
+- 2초 주기(기본, `--heartbeat-sec`; OAM 불통 시 지수 backoff 최대 60초) heartbeat 에 pending job 최대 10개 pickup
 - 결과는 report 로 보고 → CSC 가 `agent_deployment.status`, `install_path` 등 업데이트
 
 ### 3.2 동기 조회/편집 — CSC → Agent (Push 모델)

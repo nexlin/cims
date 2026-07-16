@@ -5,7 +5,7 @@
 ## 1. 역할
 
 1. **Enroll**: 최초 기동 시 enrollment 토큰으로 CSC 에 등록 → session 토큰 수령
-2. **Heartbeat**: 30초 주기로 CSC 에 상태 보고 + pending job 수령
+2. **Heartbeat**: 2초 주기(기본, `--heartbeat-sec`)로 CSC 에 상태 보고 + pending job 수령. OAM 불통 시 5→10→…→60초 지수 backoff 후 재시도
 3. **Job 실행**:
    - `install` / `upgrade`: 패키지 다운로드 + tar 풀기 + config 이관
    - `start` / `stop` / `restart`: `install_path/cims.sh` 호출

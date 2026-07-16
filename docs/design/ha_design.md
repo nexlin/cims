@@ -122,10 +122,11 @@
 2. Node B 가 `VIP_csc` 인수 → notify 가 cold 모듈(csc)을 `cims-svc start` 로 기동
    (hot 선택 시 이미 기동 상태 — binding 만 인수). §11.4 참조
 3. `Console` 의 다음 API 호출 → 새 ARP 로 Node B 로 라우팅
-4. `cims_agent` 의 heartbeat (30s 주기) 가 다음 회차에서 자동 재연결
-   (`session_token` 은 동일 DB share 라 양쪽 유효)
+4. `cims_agent` 의 heartbeat (기본 2s 주기, 실패 시 5→10→…→60s 지수 backoff)
+   가 다음 회차에서 자동 재연결 (`session_token` 은 동일 DB share 라 양쪽 유효)
 5. **체감 영향**: Console 의 in-flight HTTP 1개 정도 실패 (재시도로 복구),
-   cims_agent 는 최대 30초 사이 unsynced. cold 모듈 기동 수초 추가.
+   cims_agent 는 절체 창 동안 실패한 회차의 backoff (수 초 ~ 최대 60초) 만큼
+   unsynced. cold 모듈 기동 수초 추가.
 
 ### 5.2 CSP active 장애 (VoLTE/IBCF)
 
@@ -245,12 +246,19 @@ class CmpRing:
 
 ### 7.2 healthcheck 정책
 
-- **active timeout** — `addSession` (UDP JSON request) 5초 응답 없음 →
-  unhealthy 마크 + 다음 ring entry 로 재시도 (같은 세션 ID, 같은 hash
-  지만 unhealthy 스킵)
-- **passive heartbeat** — CSP 가 매 30초 각 CMP 로 `ping` (lightweight
-  JSON command) 송신, 응답 있으면 healthy 유지
-- **재진입** — `unhealthy_until` 만료 후 첫 ping success 시 ring 복귀
+구현된 동작 (`CmpClient.cpp KeepAliveLoop`):
+
+- **연결 단위 heartbeat** — CSP 가 3초 주기로 각 CMP 에 `Alive` (JSON-over-UDP)
+  송신. **연속 3회 실패 (≈9초)** 에서만 Disconnected 판정 — 일시적 UDP 타임아웃
+  1회로 끊으면 그룹 재수립 + 재INVITE 로 진행 중 PTT 콜이 끊기므로 (부하 시
+  간헐 타임아웃 흡수). 복구는 다음 Alive 성공 즉시 (`OnCmpStatusChanged`).
+- **동기 요청 타임아웃** — `SendRequestAndWait` 는 100ms × 3회 재시도
+  (총 ≈300ms) 후 실패 반환.
+
+미구현 (향후 과제): ring 단위 healthcheck — `ConsistentHashRing` 은
+`MarkUnhealthy(node, 30s)`/`unhealthy_until` 스킵·재진입을 지원하지만 CSP 에
+호출부가 없다. `addSession` 실패 시 unhealthy 마크 + 다음 ring entry 재시도는
+설계만 존재.
 
 ### 7.3 가상노드 수 (vnode=128) 선택 근거
 

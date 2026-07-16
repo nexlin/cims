@@ -486,8 +486,9 @@ def _agents_with_started_modules(members: list, config: dict) -> set:
         return set()
 
 
-# 개시 국면에서 나머지 멤버 update_ha 를 미루는 시간 — 선행 멤버의 job 회수(heartbeat
-# ≤30s) + apply + MASTER 승격(~4s)을 덮고도 여유가 남는 값.
+# 개시 국면에서 나머지 멤버 update_ha 를 미루는 시간 — 선행 멤버의 job 회수
+# (heartbeat 정상 2s 주기지만 OAM 불통 직후엔 backoff 로 최대 60s 벌어질 수 있음)
+# + apply + MASTER 승격(~4s)을 worst case 로 덮고도 여유가 남는 값.
 _STAGGER_DELAY_SEC = 75
 
 

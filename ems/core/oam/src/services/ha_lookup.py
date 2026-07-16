@@ -77,8 +77,9 @@ def group_vip_set(group: dict) -> set:
 
 
 def vip_observation(config, group: dict, stale_sec: int = 90) -> dict:
-    """AS 그룹의 실측 ACTIVE 판정 — agent heartbeat 가 매 30s 보고하는
-    interfaces[](secondary IP 포함 — VIP 추적용)에 그룹 VIP 가 붙은 멤버 찾기.
+    """AS 그룹의 실측 ACTIVE 판정 — agent heartbeat(기본 2s 주기, OAM 불통 시
+    backoff 최대 60s)가 보고하는 interfaces[](secondary IP 포함 — VIP 추적용)에
+    그룹 VIP 가 붙은 멤버 찾기.
     agent 수정·재배포 없이 동작 (데이터는 이미 heartbeat 로 도착, 계산만 추가).
 
     반환 {'active_agent_id': int|None, 'observed': {agent_id: True|False|None}}:
