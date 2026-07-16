@@ -27,6 +27,7 @@ docs/
 │       ├── flow_logging.md          Flow 로깅/상관관계 (sesid)
 │       ├── sip_runtime_config.md    SIP 런타임 설정 (jsonl + SIGUSR1)
 │       ├── sip_service_model.md     SIP 서비스 모델 (Service/Trunk/Listener)
+│       ├── ha_service_model.md      HA 서비스 운영 모델 (선언적 의도·모듈 운영 명세·절체 판정 — 설계 확정, 구현 전)
 │       ├── package_and_template.md  패키지 포맷 + config_template.json 스키마
 │       └── build_and_packaging.md   빌드/패키징 워크플로우 (콘솔 /release/package) · manifest.json SSOT
 ├── api/                  REST API 명세

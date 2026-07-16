@@ -2,6 +2,11 @@
 
 > CIMS 운영 환경의 가용성을 위한 이중화 토폴로지 설계. SIP 서버군 (CSP/PSP)
 > 과 관리 서버 (CSC) 는 Active/Standby, Media 서버군 (CMP/PMP) 은 All Active.
+>
+> 운영 모델(무장 판정·절체 조건·모듈 운영 명세·일괄 제어·수동 절체)의 재설계가
+> 확정되어 있다 — 정본:
+> [features/ha_service_model.md](features/ha_service_model.md) (구현 전.
+> 본 문서 §11 은 현행 구현을 기술하며, 구현 완료 시 현행화된다).
 
 ## 1. 개요
 
