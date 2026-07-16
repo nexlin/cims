@@ -106,3 +106,14 @@ export const flowApi = {
     return api.get(`/flow/body?${params.toString()}`)
   },
 }
+
+/** msg 원문 상세 표시용 포맷 — JSON 이면 2-space indent 로 재직렬화해 줄바꿈/들여쓰기 적용.
+ *  SIP 등 텍스트 원문은 그대로 반환 (CRLF 는 <pre> 의 pre-wrap 이 처리). */
+export function formatMsgBody(text: string | null | undefined): string {
+  const b = text ?? ''
+  const t = b.trimStart()
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try { return JSON.stringify(JSON.parse(t), null, 2) } catch { /* JSON 아님 — 원문 유지 */ }
+  }
+  return b
+}

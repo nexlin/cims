@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { flowApi, type FlowMessage } from '../api/flow'
+import { flowApi, formatMsgBody, type FlowMessage } from '../api/flow'
 import Modal from '../components/Modal'
 
 /** ts "HH:MM:SS.uuuuuu" 에서 hour 추출 */
@@ -675,14 +675,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                       color: '#1a1d2e', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                       minHeight: 0,
                     }}>
-                      {bodyLoading ? '...' : (() => {
-                        // JSON이면 indent 2로 포맷팅
-                        const b = bodyText ?? ''
-                        if (b && (b.startsWith('{') || b.startsWith('['))) {
-                          try { return JSON.stringify(JSON.parse(b), null, 2) } catch {}
-                        }
-                        return b || '(body 없음)'
-                      })()}
+                      {bodyLoading ? '...' : (formatMsgBody(bodyText) || '(body 없음)')}
                     </pre>
                   </>
                 ) : (

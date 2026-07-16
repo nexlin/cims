@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties }
 import { callsApi, type CallLog } from '@core/api/calls'
 import { statsApi, type OrgStat } from '@core/api/stats'
 import { recordingsApi, type RecordingSegment } from '@core/api/recordings'
-import { flowApi, type FlowMessage } from '@core/api/flow'
+import { flowApi, formatMsgBody, type FlowMessage } from '@core/api/flow'
 import FlowPage, { SequenceDiagram } from '@core/pages/FlowPage'
 import SegmentPlayer from '@core/components/SegmentPlayer'
 import { useToast } from '@core/components/Toast'
@@ -498,7 +498,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
           <div style={{ flex: 1, overflow: 'auto', minHeight: 200, maxHeight: 508 }}>
             {selIdx == null ? <div className="empty" style={{ padding: 16, fontSize: 12 }}>왼쪽에서 메시지를 선택하세요</div>
               : bodyLoading ? <div className="empty" style={{ padding: 16 }}>본문 로딩 중...</div>
-                : <pre style={{ margin: 0, padding: 10, fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}>{body}</pre>}
+                : <pre style={{ margin: 0, padding: 10, fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}>{formatMsgBody(body)}</pre>}
           </div>
         </div>
       </div>
