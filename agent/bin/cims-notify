@@ -101,14 +101,19 @@ with open(tmp, "w") as f:
 os.replace(tmp, path)
 PY
 
-# 현재 HA 모드 — run/ha/flags.json(agent 기록). role_writer 면 모듈 직접 제어는
-# Supervisor reconcile 이 담당하므로 여기선 role 기록만 하고 종료한다.
-NOTIFY_MODE=$(python3 - "$RUN_HA/flags.json" <<'PY' 2>/dev/null || echo legacy
+# 현재 HA 모드 — 노드 flags.json(verdict_source/notify_mode) 또는 서비스별 ha.json
+# ha_mode(per-service 컷오버) 중 하나라도 supervisor 면 role_writer. role_writer 면 모듈
+# 직접 제어는 Supervisor reconcile 이 담당하므로 role 기록만 하고 종료한다.
+NOTIFY_MODE=$(python3 - "$RUN_HA/flags.json" "$HA_JSON" "$SVC" <<'PY' 2>/dev/null || echo legacy
 import json, sys
-try:
-    print(json.load(open(sys.argv[1])).get("notify_mode", "legacy"))
-except Exception:
-    print("legacy")
+flags_p, ha_p, svc = sys.argv[1], sys.argv[2], sys.argv[3]
+def rd(p):
+    try: return json.load(open(p))
+    except Exception: return {}
+fl = rd(flags_p)
+node_sup = fl.get("verdict_source") == "supervisor" or fl.get("notify_mode") == "role_writer"
+svc_mode = str(((rd(ha_p).get("services") or {}).get(svc) or {}).get("ha_mode", "legacy")).lower()
+print("role_writer" if (node_sup or svc_mode == "supervisor") else "legacy")
 PY
 )
 

@@ -54,7 +54,17 @@ STATE_DIR="${HA_LOG_DIR:-/var/log/cims-ha}"
 # 계산한 verdict 만 판독하고(raw health 검사 없음), 그 결과로 rc 0/1 을 낸다. 판정 로직은
 # Recovery Supervisor(agent)가 소유 — track_script 는 남의 상태를 넘겨짚지 않는다.
 _CIMS_HOME_Q=$(python3 -c "import json;print(json.load(open('$HA_JSON')).get('cims_home','/opt/cims'))" 2>/dev/null || echo /opt/cims)
-_HA_MODE=$(python3 -c "import json;print(json.load(open('$_CIMS_HOME_Q/run/ha/flags.json')).get('verdict_source','legacy'))" 2>/dev/null || echo legacy)
+# supervisor 모드 판정 — 노드 flags.json(verdict_source) 또는 서비스별 ha.json ha_mode.
+_HA_MODE=$(python3 - "$_CIMS_HOME_Q/run/ha/flags.json" "$HA_JSON" "$SVC" <<'PY' 2>/dev/null || echo legacy
+import json, sys
+def rd(p):
+    try: return json.load(open(p))
+    except Exception: return {}
+node = rd(sys.argv[1]).get("verdict_source", "legacy")
+svc_mode = str(((rd(sys.argv[2]).get("services") or {}).get(sys.argv[3]) or {}).get("ha_mode", "legacy")).lower()
+print("supervisor" if (node == "supervisor" or svc_mode == "supervisor") else "legacy")
+PY
+)
 if [[ "$_HA_MODE" == "supervisor" ]]; then
     python3 - "$_CIMS_HOME_Q/run/ha" "$SVC" <<'PY'
 import json, sys, time

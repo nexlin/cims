@@ -1612,6 +1612,12 @@ def job_update_ha(params: dict) -> tuple:
             msgs.append(f"cims-ha apply exception (likely no keepalived / no sudo): {e}")
     else:
         msgs.append("cims-ha not found in candidate paths — ha.json only (no apply)")
+    # 런타임 컷오버 — 새 ha.json 에 supervisor 서비스가 생겼는데 Supervisor 스레드가 아직
+    # 안 떴으면 지금 기동한다(agent 재기동 없이 legacy→supervisor 전환 반영).
+    try:
+        _maybe_start_supervisor()
+    except Exception:
+        pass
     if failed:
         return 5, "\n".join(msgs), failed
     return 0, "\n".join(msgs), ""
@@ -2085,6 +2091,29 @@ _HEALTH_DEFAULTS = {
 _HEALTH_NEXT: dict = {}     # (module, check) -> next_run epoch
 
 
+def _svc_is_supervisor(s: dict) -> bool:
+    """서비스가 supervisor 모드인가 — 노드 env(전체 강제) 또는 ha.json services.<svc>.ha_mode.
+    per-service 컷오버(P6): OAM 이 그룹별 ha_mode 를 렌더, 노드 env 는 전체 override."""
+    if _ha_flags()["verdict_source"] == "supervisor":
+        return True
+    return str((s or {}).get("ha_mode") or "legacy").lower() == "supervisor"
+
+
+def _any_supervisor_service() -> bool:
+    if _ha_flags()["verdict_source"] == "supervisor":
+        return True
+    cfg = _read_ha_json_nofail()
+    return any(_svc_is_supervisor(s) for s in (cfg.get("services") or {}).values())
+
+
+def _read_ha_json_nofail() -> dict:
+    try:
+        with open(_HA_JSON_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def _read_ha_json() -> dict:
     try:
         with open(_HA_JSON_PATH) as f:
@@ -2093,14 +2122,16 @@ def _read_ha_json() -> dict:
         return {}
 
 
-def _health_targets() -> list:
+def _health_targets(shadow_all: bool = False) -> list:
     """ha.json services → 검사 대상 모듈 목록. 모듈 = relevant ∪ cold ∪ health_module.
     port/proto 는 service 레벨 힌트(단일 데몬 또는 health_module 에 적용), config_key 는
-    health_module 에만(csc 실효포트 유도)."""
+    health_module 에만(csc 실효포트 유도). supervisor 서비스만(shadow 는 전체)."""
     cfg = _read_ha_json()
     home = cfg.get("cims_home") or _PREFIX
     out, seen = [], set()
     for svc, s in (cfg.get("services") or {}).items():
+        if not (shadow_all or _svc_is_supervisor(s)):
+            continue
         hmod = str(s.get("health_module") or "").lower().strip()
         mods = set()
         if hmod:
@@ -2223,7 +2254,7 @@ def health_scheduler_tick() -> None:
     """due 검사만 실행해 캐시 갱신. 각 검사는 자체 timeout 을 갖고, expires_at 은
     interval×3(3회 연속 미갱신이면 stale)."""
     now = time.time()
-    for t in _health_targets():
+    for t in _health_targets(_HA_SHADOW_ALL):
         mod = t["module"]
         updated = {}
         for check in ("liveness", "readiness", "preflight"):
@@ -2268,6 +2299,8 @@ _EVAL_SEQ: dict = {}          # svc -> 단조 sequence
 _EVAL_PREV_ROLE: dict = {}    # svc -> 직전 role (승격 전이 감지)
 _EVAL_PREV_ELIG: dict = {}    # svc -> 직전 eligible (전이 로그)
 _EVAL_LATCH: dict = {}        # svc -> bool (shadow: in-memory, 미영속 — 영속 래치는 P5)
+_HA_SHADOW_ALL = False        # 노드 shadow(CIMS_HA_SHADOW) — 전 서비스 verdict 계산(관측)
+_SUP_STARTED = False          # supervisor 스레드 기동 여부 (idempotent 가드)
 
 
 def _fail_count_read(mod: str) -> int:
@@ -2463,6 +2496,8 @@ def _verdict_write(svc: str, v: dict) -> None:
 def ha_evaluator_tick() -> None:
     cfg = _read_ha_json()
     for svc, s in (cfg.get("services") or {}).items():
+        if not (_HA_SHADOW_ALL or _svc_is_supervisor(s)):
+            continue                          # legacy 서비스는 verdict 계산 안 함
         try:
             v = _eval_service(svc, s)
         except Exception as e:
@@ -2501,11 +2536,14 @@ def _module_dist_dir(module: str) -> "str | None":
 
 
 def _ha_managed_modules() -> set:
-    """ha.json 전 서비스의 relevant ∪ cold 모듈 — Supervisor 가 lifecycle 을 소유하는
-    집합. supervisor 모드에서 legacy watchdog 은 이 집합을 건드리지 않는다(이중 제어 방지)."""
+    """supervisor 서비스의 relevant ∪ cold 모듈 — Supervisor reconcile 이 lifecycle 을
+    소유하는 집합. legacy watchdog 은 이 집합을 건드리지 않는다(이중 제어 방지). legacy
+    서비스 모듈은 계속 watchdog 관할."""
     cfg = _read_ha_json()
     out = set()
     for s in (cfg.get("services") or {}).values():
+        if not _svc_is_supervisor(s):
+            continue
         out |= set(_service_relevant(s))
         out |= {str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
     return {m for m in out if m}
@@ -2526,6 +2564,8 @@ def ha_reconcile_tick() -> None:
     desired = _load_desired()
     now = time.time()
     for svc, s in (cfg.get("services") or {}).items():
+        if not _svc_is_supervisor(s):
+            continue                          # 컷오버된 서비스만 Supervisor 가 소유
         role = _current_role(svc, s)
         cold = {str(m).lower().strip() for m in (s.get("cold_modules") or [])}
         managed = set(_service_relevant(s)) | cold
@@ -2569,13 +2609,34 @@ def _start_ha_evaluator(reconcile: bool = False) -> None:
             try:
                 ha_evaluator_tick()
                 if reconcile:
-                    ha_reconcile_tick()
+                    ha_reconcile_tick()          # supervisor 서비스만 내부 필터
             except Exception as e:
                 print(f"[agent][ha] evaluator error: {e}", flush=True)
             time.sleep(_EVAL_INTERVAL)
     threading.Thread(target=_loop, daemon=True, name="agent-ha-eval").start()
-    print(f"[agent][ha] HA Evaluator 기동 (verdict 계산{', reconcile 활성' if reconcile else ', shadow'})",
+    print(f"[agent][ha] HA Evaluator 기동 (verdict{'+reconcile' if reconcile else '(shadow)'})",
           flush=True)
+
+
+def _maybe_start_supervisor() -> None:
+    """supervisor 스레드(Health Scheduler + Evaluator[+reconcile]) 기동 — idempotent.
+    노드 env supervisor / 서비스별 ha_mode=supervisor(런타임 컷오버) / CIMS_HA_SHADOW /
+    CIMS_HA_HEALTH 일 때. legacy 전용 노드에선 미기동 → 동작 무변경. job_update_ha 후에도
+    호출돼 ha.json 이 supervisor 로 바뀌면 그 시점에 기동한다(런타임 컷오버)."""
+    global _SUP_STARTED, _HA_SHADOW_ALL
+    if _SUP_STARTED:
+        return
+    if _any_supervisor_service():
+        _SUP_STARTED = True
+        _start_health_scheduler()
+        _start_ha_evaluator(reconcile=True)     # reconcile 은 supervisor 서비스만 내부 필터
+    elif os.environ.get("CIMS_HA_SHADOW"):
+        _SUP_STARTED = True; _HA_SHADOW_ALL = True
+        _start_health_scheduler()
+        _start_ha_evaluator(reconcile=False)
+    elif os.environ.get("CIMS_HA_HEALTH"):
+        _SUP_STARTED = True
+        _start_health_scheduler()
 
 
 def _load_desired() -> dict:
@@ -3730,19 +3791,9 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
 
     _ensure_ha_dirs()                  # HA 상태 디렉토리 골격(run/ha·state/ha) 보장 (1회)
     _write_ha_flags_file()             # run/ha/flags.json — root(cims-notify/health) 가 모드 판독
-    # HA Supervisor(Health Scheduler + Evaluator [+ reconcile]) — flag 활성 시에만.
-    #   verdict_source=supervisor : 실소비 — reconcile 활성(모듈 lifecycle 주체가 Supervisor)
-    #   CIMS_HA_SHADOW=1          : shadow — verdict 계산·로그만(재기동/keepalived 무영향)
-    #   CIMS_HA_HEALTH=1          : health 캐시만. legacy 기본에선 전부 미기동 → 동작 무변경.
-    _ha_f = _ha_flags()
-    if _ha_f["verdict_source"] == "supervisor":
-        _start_health_scheduler()
-        _start_ha_evaluator(reconcile=True)
-    elif os.environ.get("CIMS_HA_SHADOW"):
-        _start_health_scheduler()
-        _start_ha_evaluator(reconcile=False)
-    elif os.environ.get("CIMS_HA_HEALTH"):
-        _start_health_scheduler()
+    # HA Supervisor 스레드 — 노드 env(전체) 또는 서비스별 ha_mode=supervisor 일 때 기동.
+    # legacy 전용 노드는 미기동 → 동작 무변경. 런타임 컷오버는 job_update_ha 후 재확인.
+    _maybe_start_supervisor()
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
     _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
     _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)

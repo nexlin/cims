@@ -164,19 +164,22 @@ def _normalize_failover_options(raw) -> dict:
 # 모듈 스코프 운영 설정의 SoT — agent 가 modules/<mod>/service.json 으로 받아
 # watchdog·제어 게이팅에 쓰고, OAM 렌더가 cold_modules/relevant_modules/헬스 힌트를
 # 여기서 유도한다. 앱 config.json 과 물리 분리. 상세: ha_service_model.md §3.
+_SAFETY_CLASSES = ('stateless', 'read_only', 'shared_writer', 'unknown')
 _MODULE_SPEC_DEFAULT = {
     'supervision': {'watchdog': True},
-    'ha':          {'failover_mode': 'cold', 'failover_relevant': True},
+    'ha':          {'failover_mode': 'cold', 'failover_relevant': True, 'run_on_fault': False},
     'health':      {},   # {port,proto,config_key} 오버라이드 — 미지정 시 배포 유도
+    'safety':      {'class': 'unknown', 'latch_clear_mode': 'manual'},
 }
 
 
 def _normalize_module_spec(raw) -> dict:
-    """입력 dict → 검증된 모듈 운영 명세. 잘못된 값은 default."""
+    """입력 dict → 검증된 모듈 운영 명세. 잘못된 값은 default. (ha_service_model.md §5·§14)"""
     raw = raw if isinstance(raw, dict) else {}
     sup = raw.get('supervision') if isinstance(raw.get('supervision'), dict) else {}
     ha  = raw.get('ha') if isinstance(raw.get('ha'), dict) else {}
     hl  = raw.get('health') if isinstance(raw.get('health'), dict) else {}
+    sf  = raw.get('safety') if isinstance(raw.get('safety'), dict) else {}
     health = {}
     try:
         hp = int(hl.get('port', 0) or 0)
@@ -188,13 +191,24 @@ def _normalize_module_spec(raw) -> dict:
         health['proto'] = hl['proto']
     if isinstance(hl.get('config_key'), str) and hl['config_key'].strip():
         health['config_key'] = hl['config_key'].strip()
+    if isinstance(hl.get('profile'), str) and hl['profile'].strip():
+        health['profile'] = hl['profile'].strip()
+    # 안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동). stateless/read_only 만 auto 허용.
+    sclass = str(sf.get('class') or 'unknown').lower()
+    if sclass not in _SAFETY_CLASSES:
+        sclass = 'unknown'
+    lcm = str(sf.get('latch_clear_mode') or '').lower()
+    if lcm not in ('auto', 'manual'):
+        lcm = 'auto' if sclass in ('stateless', 'read_only') else 'manual'
     return {
         'supervision': {'watchdog': bool(sup.get('watchdog', True))},
         'ha': {
             'failover_mode':     'hot' if ha.get('failover_mode') == 'hot' else 'cold',
             'failover_relevant': bool(ha.get('failover_relevant', True)),
+            'run_on_fault':      bool(ha.get('run_on_fault', False)),
         },
         'health': health,
+        'safety': {'class': sclass, 'latch_clear_mode': lcm},
     }
 
 
@@ -511,17 +525,26 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     # relevant_modules = 실패가 절체 사유가 되는 모듈 (cims-health 가 재기동 임계 판정).
     cold_modules: list = []
     relevant_modules: list = []
+    hot_fault_modules: list = []          # FAULT 강등에도 유지할 hot 모듈 (run_on_fault)
     if group.get('mode') == 'active_standby':
         cold_modules = [m for m in daemon_mods
                         if _module_spec(group, m)['ha']['failover_mode'] != 'hot']
         relevant_modules = [m for m in daemon_mods
                             if _module_spec(group, m)['ha']['failover_relevant']]
+        hot_fault_modules = [m for m in daemon_mods
+                             if _module_spec(group, m)['ha']['failover_mode'] == 'hot'
+                             and _module_spec(group, m)['ha']['run_on_fault']]
 
     # running 의도 daemon 모듈이 없고 헬스포트도 없으면 미개시/빈 서버 — vrrp_instance
     # 를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵 + keepalived 정지 유지).
     # 이후 서비스 의도 변경(일괄/서버별 start)이 재렌더를 태워 자동 무장/해제된다.
     ha_enabled = bool(h_port or daemon_mods)
     restart_limit = failover_options.get('restart_limit') or {}
+    # per-service 컷오버 — 그룹 ha_mode(legacy|supervisor). agent/cims-notify/cims-health 가
+    # 이 값으로 서비스별 legacy↔supervisor 를 판정(노드 env 는 전체 강제 override).
+    ha_mode = 'supervisor' if str(group.get('ha_mode') or 'legacy').lower() == 'supervisor' else 'legacy'
+    # 모듈 안전 등급 — 자동 래치 해제 가능 여부(shared_writer/unknown=manual). 콘솔/래치 판정용.
+    safety_map = {m: _module_spec(group, m)['safety'] for m in daemon_mods}
 
     services: dict = {}
     if vip_bindings:
@@ -566,6 +589,9 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             if cold_modules: entry['cold_modules'] = cold_modules
             if relevant_modules: entry['relevant_modules'] = relevant_modules
             if restart_limit: entry['restart_limit'] = restart_limit
+            if hot_fault_modules: entry['hot_fault_modules'] = hot_fault_modules
+            if safety_map: entry['module_safety'] = safety_map
+            entry['ha_mode'] = ha_mode
             services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
@@ -585,6 +611,9 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         if cold_modules: entry['cold_modules'] = cold_modules
         if relevant_modules: entry['relevant_modules'] = relevant_modules
         if restart_limit: entry['restart_limit'] = restart_limit
+        if hot_fault_modules: entry['hot_fault_modules'] = hot_fault_modules
+        if safety_map: entry['module_safety'] = safety_map
+        entry['ha_mode'] = ha_mode
         services[group['name']] = entry
 
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
@@ -680,8 +709,11 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
 
     # 선행 멤버 결정 — start 된 멤버 우선, 없으면 지정 마스터(priority 최대).
     # 전원 start 상태면 순서가 무의미하므로 지연 없음.
+    # supervisor 모드 그룹은 stagger 은퇴 — 선출은 priority + verdict(eligible)이 결정하고,
+    # 승격 grace 가 콜드 기동 창을 흡수하므로 개시 국면 선착 방지 지연이 불필요하다.
     stagger_first: set = set()
-    if group.get('mode') == 'active_standby' and len(renders) >= 2:
+    _supervisor = str(group.get('ha_mode') or 'legacy').lower() == 'supervisor'
+    if not _supervisor and group.get('mode') == 'active_standby' and len(renders) >= 2:
         armed = any(((hj.get('services') or {}).get(group.get('name')) or {}).get('enabled')
                     for _, hj in renders)
         if armed:
@@ -960,6 +992,7 @@ def _serialize_group(g: dict, config: dict) -> dict:
     out.setdefault('vip_bindings', [])
     out['service_intent'] = dict(out.get('service_intent') or {})
     out['module_specs'] = dict(out.get('module_specs') or {})
+    out['ha_mode'] = 'supervisor' if str(out.get('ha_mode') or 'legacy').lower() == 'supervisor' else 'legacy'
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
     out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
     # 실측 ACTIVE (R4) — heartbeat interfaces[] 의 VIP 보유 관측. 정적 role 과 별개로
@@ -1051,6 +1084,8 @@ async def _create_group(body, config):
         'note': note,
         'vip_bindings': vip_bindings or [],
         'failover_options': failover_options,
+        # per-service HA 모드 — legacy(기본) | supervisor. 서비스별 컷오버 스위치.
+        'ha_mode': 'supervisor' if str(body.get('ha_mode') or '').lower() == 'supervisor' else 'legacy',
         # 신규 그룹은 미개시(빈 의도) — 서비스 시작 시 무장. 모듈 명세는 default.
         'service_intent': _normalize_service_intent(body.get('service_intent')),
         'module_specs': {
@@ -1083,6 +1118,8 @@ async def _update_group(gid: int, body, config):
     for k in ('name', 'vip', 'auth_pass', 'note'):
         if k in body:
             existing[k] = body[k]
+    if 'ha_mode' in body:
+        existing['ha_mode'] = 'supervisor' if str(body.get('ha_mode') or '').lower() == 'supervisor' else 'legacy'
     if 'vip_mask' in body:
         existing['vip_mask'] = int(body['vip_mask'])
     # auth_pass — active_standby 만 1~8자 required, 그 외 mode 는 (빈값 포함) 8자 이하 OK.
