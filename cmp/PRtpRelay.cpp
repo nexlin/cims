@@ -120,25 +120,17 @@ void PRtpRelay::sendVideoTo(const std::string& ip, int port, char* data, int len
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Peer 식별 (포트 매칭 + IP 학습)
+//  Peer 식별 — SDP 선언 IP:포트 정확 일치만.
+//    (NAT 대응 IP 학습·symmetric latch 제거 — 2026-07-16) 상용은 내부망(no-NAT)
+//    이라 도착 소스가 SDP 선언 주소와 동일 → 정확 일치로 충분. 공인 노출 테스트망의
+//    포트변환 NAT 는 미디어 미지원(호 연결만 검증, 미디어는 현장 확인).
 // ═══════════════════════════════════════════════════════════════
 
 int PRtpRelay::_findPeerIndex(const std::string& ip, int port, bool isVideo) {
     for (int i = 0; i < 2; ++i) {
         if (!_peers[i].active) continue;
         int peerPort = isVideo ? (int)_peers[i].videoPort : (int)_peers[i].port;
-        if (peerPort == port) {
-            if (_peers[i].ip != ip) {
-                LOG_INFO("PRtpRelay", "IP learned peer[%d] %s->%s (port %d)",
-                         i, _peers[i].ip.c_str(), ip.c_str(), port);
-                _peers[i].ip = ip;
-                _peers[i].addrRtp.sin_addr.s_addr = inet_addr(ip.c_str());
-                _peers[i].addrRtcp.sin_addr.s_addr = inet_addr(ip.c_str());
-                _peers[i].addrVideoRtp.sin_addr.s_addr = inet_addr(ip.c_str());
-                _peers[i].addrVideoRtcp.sin_addr.s_addr = inet_addr(ip.c_str());
-            }
-            return i;
-        }
+        if (peerPort == port && _peers[i].ip == ip) return i;
     }
     return -1;
 }
