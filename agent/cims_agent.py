@@ -2235,6 +2235,241 @@ def _start_health_scheduler() -> None:
     print("[agent][health] Health Scheduler 기동 (liveness/readiness/preflight)", flush=True)
 
 
+# ══════════════════════════════════════════════════════════════════════════
+#  Recovery Supervisor — HA Evaluator (ha_service_model.md §7·§8·§10)
+#  role/desired/latch/health 캐시 + ha.json 명세 → 다축 verdict 합성해 run/ha/
+#  verdict/<svc>.json 에 기록. shadow 단계: keepalived 미소비(legacy cims-health 유지),
+#  모듈 재기동 안 함(legacy watchdog 유지) — verdict 계산·기록·전이 로그만. OAM 루프와
+#  독립된 전용 스레드(2초). flag(verdict_source=supervisor 또는 CIMS_HA_SHADOW)일 때만 기동.
+# ══════════════════════════════════════════════════════════════════════════
+
+_EVAL_INTERVAL = 2
+_VERDICT_TTL = 6
+_PROMOTION_GRACE_SEC = 20
+_EVAL_SEQ: dict = {}          # svc -> 단조 sequence
+_EVAL_PREV_ROLE: dict = {}    # svc -> 직전 role (승격 전이 감지)
+_EVAL_PREV_ELIG: dict = {}    # svc -> 직전 eligible (전이 로그)
+_EVAL_LATCH: dict = {}        # svc -> bool (shadow: in-memory, 미영속 — 영속 래치는 P5)
+
+
+def _fail_count_read(mod: str) -> int:
+    try:
+        with open(_fail_path(mod)) as f:
+            return int(f.read().split()[0])
+    except Exception:
+        return 0
+
+
+def _local_ips() -> set:
+    return {r.get("ip") for r in collect_interfaces() if r.get("ip")}
+
+
+def _service_vips(s: dict) -> list:
+    vips = [str(v.get("ip")).strip() for v in (s.get("vips") or [])
+            if isinstance(v, dict) and v.get("ip")]
+    if s.get("vip"):
+        vips.append(str(s["vip"]).strip())
+    return [v for v in vips if v]
+
+
+def _service_relevant(s: dict) -> list:
+    rel = [str(m).lower().strip() for m in (s.get("relevant_modules") or []) if str(m).strip()]
+    if rel:
+        return rel
+    out = []
+    if s.get("health_module"):
+        out.append(str(s["health_module"]).lower().strip())
+    out += [str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()]
+    return list(dict.fromkeys([m for m in out if m]))
+
+
+def _current_role(svc: str, s: dict) -> str:
+    """role 파일(P4+) 우선, 없으면 VIP 보유로 유도. keepalived 상태 MASTER/BACKUP/FAULT."""
+    rf = os.path.join(_HA_RUN_DIR, "role", f"{svc}.json")
+    try:
+        with open(rf) as f:
+            d = json.load(f)
+        if d.get("boot_id") == _boot_id():
+            return str(d.get("role") or "UNKNOWN").upper()
+    except Exception:
+        pass
+    vips = _service_vips(s)
+    if not vips:
+        return "UNKNOWN"
+    local = _local_ips()
+    return "MASTER" if any(v in local for v in vips) else "BACKUP"
+
+
+def _module_health(mod: str, check: str):
+    """health 캐시 판독 → True/False/None(미상·stale). 신선도(expires_at) 확인."""
+    try:
+        with open(os.path.join(_HEALTH_DIR, f"{mod}.json")) as f:
+            d = json.load(f)
+        c = (d.get("checks") or {}).get(check)
+        if not c or c.get("expires_at", 0) < time.time():
+            return None
+        return c.get("status") == "SUCCESS"
+    except Exception:
+        return None
+
+
+def _restart_limit_for(s: dict) -> dict:
+    rl = s.get("restart_limit") if isinstance(s.get("restart_limit"), dict) else {}
+    return {"max_fails": int(rl.get("max_fails", 3) or 3),
+            "window_sec": int(rl.get("window_sec", 300) or 300)}
+
+
+def _update_promotion_grace(svc: str, role: str, now: float) -> bool:
+    """역할 전이 감지 — MASTER 진입 시 grace 설정(start 전에). grace 활성이면 True."""
+    prev = _EVAL_PREV_ROLE.get(svc)
+    _EVAL_PREV_ROLE[svc] = role
+    pf = os.path.join(_HA_RUN_DIR, "promotion", f"{svc}.json")
+    if role == "MASTER" and prev != "MASTER":
+        try:
+            os.makedirs(os.path.dirname(pf), exist_ok=True)
+            tmp = pf + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"service": svc, "state": "PROMOTING", "started_at": int(now),
+                           "grace_until": int(now + _PROMOTION_GRACE_SEC),
+                           "boot_id": _boot_id()}, f)
+            os.replace(tmp, pf)
+        except Exception:
+            pass
+        return True
+    if role != "MASTER":
+        return False
+    try:
+        with open(pf) as f:
+            d = json.load(f)
+        return d.get("boot_id") == _boot_id() and now < d.get("grace_until", 0)
+    except Exception:
+        return False
+
+
+def _eval_service(svc: str, s: dict) -> dict:
+    now = time.time()
+    role = _current_role(svc, s)
+    relevant = _service_relevant(s)
+    cold = {str(m).lower().strip() for m in (s.get("cold_modules") or [])}
+    desired = _load_desired()                       # legacy {mod: 'stopped'} 노드 오버라이드
+    rl = _restart_limit_for(s)
+    reasons: list = []
+
+    def op_stopped(m):
+        return desired.get(m) == "stopped"
+
+    in_grace = _update_promotion_grace(svc, role, now)
+    hot = [m for m in relevant if m not in cold]
+    cold_rel = [m for m in relevant if m in cold]
+
+    def all_ready(mods, check, label):
+        ok = True
+        for m in mods:
+            if op_stopped(m):
+                continue
+            v = _module_health(m, check)
+            if v is not True:
+                reasons.append(f"{label}:{m}:{'unknown' if v is None else 'fail'}")
+                ok = False
+        return ok
+
+    eligible, state, svc_avail, standby_ready = False, "STARTING", False, False
+
+    if _EVAL_LATCH.get(svc):
+        eligible, state = False, "FAILOVER_LATCHED"
+        reasons.append("latched")
+    elif role in ("BACKUP", "UNKNOWN", "FAULT"):
+        # 승격 자격 = hot readiness + cold preflight (cold runtime 정지는 정상)
+        eligible = all_ready(hot, "readiness", "hot_readiness") \
+            and all_ready(cold_rel, "preflight", "cold_preflight")
+        state = "STANDBY_READY" if eligible else "STANDBY_INELIGIBLE"
+        standby_ready = eligible
+    elif role == "MASTER":
+        if in_grace:
+            # 승격 grace — cold runtime readiness 제외, hot readiness + cold preflight 만
+            eligible = all_ready(hot, "readiness", "hot_readiness") \
+                and all_ready(cold_rel, "preflight", "cold_preflight")
+            state = "PROMOTING"
+        else:
+            ok, any_down, any_intent = True, False, False
+            for m in relevant:
+                if op_stopped(m):
+                    any_intent = True
+                    continue                             # 의도적 정지 — 절체 사유 아님
+                v = _module_health(m, "readiness")
+                if v is True:
+                    continue
+                any_down = True
+                fc = _fail_count_read(m)
+                if fc >= rl["max_fails"]:
+                    ok = False
+                    reasons.append(f"exhausted:{m}:{fc}/{rl['max_fails']}")
+                else:
+                    reasons.append(f"recovering:{m}:{fc}/{rl['max_fails']}")
+            eligible = ok
+            if not ok:
+                state = "FAILOVER_REQUIRED"
+                _EVAL_LATCH[svc] = True                   # shadow: in-memory 래치(미영속)
+            elif any_intent and not any_down:
+                state = "INTENTIONALLY_DOWN"
+            elif any_down:
+                state = "RECOVERING"
+            else:
+                state = "ACTIVE_HEALTHY"
+            svc_avail = (not any_down) and (not any_intent)
+    return {
+        "service": svc, "role": role,
+        "service_state": state, "vrrp_eligible": bool(eligible),
+        "service_available": bool(svc_avail), "standby_ready": bool(standby_ready),
+        "in_promotion_grace": bool(in_grace),
+        "reason_codes": reasons[:12],
+    }
+
+
+def _verdict_write(svc: str, v: dict) -> None:
+    _EVAL_SEQ[svc] = _EVAL_SEQ.get(svc, 0) + 1
+    now = time.time()
+    v.update({"sequence": _EVAL_SEQ[svc], "boot_id": _boot_id(),
+              "updated_at": int(now), "expires_at": int(now + _VERDICT_TTL)})
+    p = os.path.join(_HA_RUN_DIR, "verdict", f"{svc}.json")
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(v, f)
+        os.replace(tmp, p)
+    except Exception as e:
+        print(f"[agent][ha] verdict write 실패({svc}): {e}", flush=True)
+
+
+def ha_evaluator_tick() -> None:
+    cfg = _read_ha_json()
+    for svc, s in (cfg.get("services") or {}).items():
+        try:
+            v = _eval_service(svc, s)
+        except Exception as e:
+            print(f"[agent][ha] eval error({svc}): {e}", flush=True)
+            continue
+        _verdict_write(svc, v)
+        if _EVAL_PREV_ELIG.get(svc) != v["vrrp_eligible"]:
+            _EVAL_PREV_ELIG[svc] = v["vrrp_eligible"]
+            print(f"[agent][ha] verdict {svc}: eligible={v['vrrp_eligible']} "
+                  f"state={v['service_state']} role={v['role']} "
+                  f"reasons={v['reason_codes']}", flush=True)
+
+
+def _start_ha_evaluator() -> None:
+    def _loop():
+        while True:
+            try:
+                ha_evaluator_tick()
+            except Exception as e:
+                print(f"[agent][ha] evaluator error: {e}", flush=True)
+            time.sleep(_EVAL_INTERVAL)
+    threading.Thread(target=_loop, daemon=True, name="agent-ha-eval").start()
+    print("[agent][ha] HA Evaluator 기동 (shadow verdict 계산)", flush=True)
+
+
 def _load_desired() -> dict:
     try:
         with open(_DESIRED_FILE) as f:
@@ -3381,9 +3616,14 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
     _ensure_ha_dirs()                  # HA 상태 디렉토리 골격(run/ha·state/ha) 보장 (1회)
-    # Health Scheduler — flag 활성(verdict_source=supervisor 또는 CIMS_HA_HEALTH=1)일 때만.
-    # legacy 기본에선 미기동 → 동작 무변경. (P3 HA Evaluator 가 이 캐시를 소비.)
-    if _ha_flags()["verdict_source"] == "supervisor" or os.environ.get("CIMS_HA_HEALTH"):
+    # HA Supervisor(Health Scheduler + Evaluator) — flag 활성 시에만 기동.
+    #   verdict_source=supervisor : 실제 소비(P5 이후) / CIMS_HA_SHADOW=1 : shadow(계산·로그만)
+    #   CIMS_HA_HEALTH=1 : health 캐시만. legacy 기본에선 전부 미기동 → 동작 무변경.
+    _ha_f = _ha_flags()
+    if _ha_f["verdict_source"] == "supervisor" or os.environ.get("CIMS_HA_SHADOW"):
+        _start_health_scheduler()
+        _start_ha_evaluator()
+    elif os.environ.get("CIMS_HA_HEALTH"):
         _start_health_scheduler()
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
     _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
