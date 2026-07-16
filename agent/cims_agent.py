@@ -2304,6 +2304,7 @@ def _start_health_scheduler() -> None:
         while True:
             try:
                 health_scheduler_tick()
+                _hb("health")                    # watchdog coordinator heartbeat
             except Exception as e:
                 print(f"[agent][health] tick error: {e}", flush=True)
             time.sleep(1)
@@ -2649,12 +2650,56 @@ def _start_ha_evaluator(reconcile: bool = False) -> None:
                 ha_evaluator_tick()
                 if reconcile:
                     ha_reconcile_tick()          # supervisor 서비스만 내부 필터
+                _hb("eval")                      # watchdog coordinator heartbeat
             except Exception as e:
                 print(f"[agent][ha] evaluator error: {e}", flush=True)
             time.sleep(_EVAL_INTERVAL)
     threading.Thread(target=_loop, daemon=True, name="agent-ha-eval").start()
     print(f"[agent][ha] HA Evaluator 기동 (verdict{'+reconcile' if reconcile else '(shadow)'})",
           flush=True)
+
+
+# ── systemd watchdog coordinator (ha_service_model.md §9) ────────────────────
+# 핵심 스레드(Evaluator·Health)의 heartbeat 가 모두 신선할 때만 sd_notify(WATCHDOG=1).
+# OAM 연결/job 완료는 조건에서 제외 — OAM 불통·장시간 job 이 agent 재기동을 유발하지
+# 않게 한다. Type=notify + WatchdogSec 유닛 + CIMS_HA_WATCHDOG=1 에서만 활성(opt-in).
+_HB: dict = {}                    # 스레드명 -> 마지막 tick epoch
+_WATCHDOG_STALE_SEC = 10
+
+
+def _hb(name: str) -> None:
+    _HB[name] = time.time()
+
+
+def _sd_notify(msg: str) -> None:
+    """systemd sd_notify — $NOTIFY_SOCKET 없으면 no-op(Type=simple 기본)."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    try:
+        if addr.startswith("@"):
+            addr = "\0" + addr[1:]        # abstract namespace
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        s.sendto(msg.encode(), addr)
+        s.close()
+    except Exception:
+        pass
+
+
+def _start_watchdog_coordinator() -> None:
+    """WATCHDOG=1 ping 루프 — 핵심 스레드 heartbeat 종합 게이트. CIMS_HA_WATCHDOG=1 에서만."""
+    if not os.environ.get("NOTIFY_SOCKET"):
+        print("[agent][wd] NOTIFY_SOCKET 없음 (Type=notify 아님) — watchdog coordinator 스킵", flush=True)
+        return
+    def _loop():
+        while True:
+            now = time.time()
+            fresh = all(now - _HB.get(k, 0) < _WATCHDOG_STALE_SEC for k in ("eval", "health"))
+            if fresh:
+                _sd_notify("WATCHDOG=1")
+            time.sleep(5)
+    threading.Thread(target=_loop, daemon=True, name="agent-ha-wd").start()
+    print("[agent][wd] Watchdog Coordinator 기동 (eval+health heartbeat 게이트)", flush=True)
 
 
 def _maybe_start_supervisor() -> None:
@@ -3835,6 +3880,9 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     # HA Supervisor 스레드 — 노드 env(전체) 또는 서비스별 ha_mode=supervisor 일 때 기동.
     # legacy 전용 노드는 미기동 → 동작 무변경. 런타임 컷오버는 job_update_ha 후 재확인.
     _maybe_start_supervisor()
+    _sd_notify("READY=1")              # Type=notify 유닛에서 기동 완료 통지(아니면 no-op)
+    if os.environ.get("CIMS_HA_WATCHDOG"):
+        _start_watchdog_coordinator()
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
     _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
     _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)

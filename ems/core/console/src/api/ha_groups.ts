@@ -59,18 +59,35 @@ export const FAILOVER_DEFAULTS: FailoverOptions = {
 
 // 모듈 운영 명세 (그룹×모듈 스코프) — agent 가 modules/<mod>/service.json 으로 받아
 // watchdog·절체 게이팅에 사용. 앱 config.json 과 물리 분리. ha_service_model.md §3.
+export type SafetyClass = 'stateless' | 'read_only' | 'shared_writer' | 'unknown'
+
 export interface ModuleSpec {
   supervision: { watchdog: boolean }            // 프로세스 감시 on/off (default on)
   ha: {
     failover_mode: 'cold' | 'hot'               // cold: standby 정지+승격 시 기동 / hot: 양쪽 상시
     failover_relevant: boolean                  // 이 모듈 실패가 절체 사유인가 (default true)
+    run_on_fault?: boolean                      // hot 모듈을 FAULT 강등에도 유지할지 (default false)
   }
-  health?: { port?: number; proto?: 'tcp' | 'udp'; config_key?: string }
+  health?: { port?: number; proto?: 'tcp' | 'udp'; config_key?: string; profile?: string }
+  // 안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동). ha_service_model.md §14.
+  safety?: { class: SafetyClass; latch_clear_mode?: 'auto' | 'manual' }
 }
 
 export const MODULE_SPEC_DEFAULT: ModuleSpec = {
   supervision: { watchdog: true },
-  ha: { failover_mode: 'cold', failover_relevant: true },
+  ha: { failover_mode: 'cold', failover_relevant: true, run_on_fault: false },
+  safety: { class: 'unknown', latch_clear_mode: 'manual' },
+}
+
+// 진행 중/최근 계획 절체 operation (그룹 응답의 failover_op)
+export interface FailoverOp {
+  id: number
+  state: string                                 // RELEASING / WAIT_VIP_MOVE / VERIFYING / COMMITTED / ROLLED_BACK / FAILED …
+  source_agent_id: number
+  target_agent_id: number
+  note?: string | null
+  error?: string | null
+  updated_at?: string
 }
 
 export interface HaGroup {
@@ -88,6 +105,10 @@ export interface HaGroup {
   service_intent?: Record<string, 'running' | 'stopped'>
   // 모듈 운영 명세 (그룹×모듈) — {module: ModuleSpec}. 부재 모듈은 default.
   module_specs?: Record<string, ModuleSpec>
+  // per-service HA 컷오버 모드 — legacy(기본) | supervisor
+  ha_mode?: 'legacy' | 'supervisor'
+  // 진행 중/최근 계획 절체 operation (AS 만, 없으면 부재)
+  failover_op?: FailoverOp
   // 실측 ACTIVE (R4, AS 만) — 비-stale 멤버 중 정확히 1명이 VIP 보유일 때만 확정
   active_agent_id?: number | null
   // 패키지별 자동 동기화 스위치 — 부재 시 기본 ON (auto_sync[pkg] ?? true)
@@ -108,6 +129,7 @@ export interface HaGroupInput {
   failover_options?: FailoverOptions
   service_intent?: Record<string, 'running' | 'stopped'>
   module_specs?: Record<string, ModuleSpec>
+  ha_mode?: 'legacy' | 'supervisor'
   members?: { agent_id: number; role?: HaRole; priority?: number }[]
 }
 
@@ -135,9 +157,11 @@ export const haGroupsApi = {
     api.post<{ action: string; group_id: number; modules: string[]; jobs: number }>(
       `/ha-groups/${id}/control`, { action }),
 
-  // 수동 절체 (스위치오버) — AS 전용. 현 Active → Standby.
+  // 수동 계획 절체 (스위치오버) — AS 전용. operation 생성 후 sweep 이 구동(진행상태는
+  // group.failover_op 로 폴링). 현 Active → Standby.
   failover: (id: number) =>
-    api.post<{ group_id: number; from_agent_id: number; to_agent_id: number; note: string }>(
+    api.post<{ group_id: number; operation_id: number; from_agent_id: number
+               to_agent_id: number; state: string }>(
       `/ha-groups/${id}/failover`, {}),
 
   // ── 그룹×패키지 공통 설정 (R4) ──

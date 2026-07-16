@@ -6,7 +6,7 @@ import {
 } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type VipBinding,
          type FailoverOptions, FAILOVER_DEFAULTS,
-         type ModuleSpec, MODULE_SPEC_DEFAULT } from '../api/ha_groups'
+         type ModuleSpec, MODULE_SPEC_DEFAULT, type SafetyClass } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { MountPanel } from './ha/MountPanel'
 import { NetTuningPanel } from './ha/NetTuningPanel'
@@ -891,6 +891,10 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {/* HA 모드 컷오버 (AS 만) — legacy ↔ supervisor 서비스 단위 전환. */}
+        {group.mode === 'active_standby' && (
+          <HaModeToggle group={group} onReload={onReload} />
+        )}
         {/* 절체 조건 — 그룹 단위 설정. 자체 [▶ 적용] 으로 그 영역만 backend push. AS 만. */}
         {group.mode === 'active_standby' && (
           <div style={{ marginBottom: 20 }}>
@@ -1126,6 +1130,44 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
   )
 }
 
+// HA 모드 컷오버 토글 — legacy(keepalived 직접 판정) ↔ supervisor(선언적 verdict/
+// Supervisor 소유). 서비스(그룹) 단위 점진 전환. ha_service_model.md §18.
+function HaModeToggle({ group, onReload }: { group: HaGroup; onReload: () => Promise<void> | void }) {
+  const { show } = useToast()
+  const [busy, setBusy] = useState(false)
+  const mode = group.ha_mode === 'supervisor' ? 'supervisor' : 'legacy'
+  async function flip(next: 'legacy' | 'supervisor') {
+    if (next === mode || busy) return
+    if (next === 'supervisor' && !window.confirm(
+        `[${group.name}] 를 supervisor 모드로 전환합니다.\n` +
+        `절체 판정·복구를 노드 Supervisor(선언적 verdict)가 담당하게 됩니다. 계속할까요?`))
+      return
+    setBusy(true)
+    try {
+      await haGroupsApi.update(group.id, { ha_mode: next })
+      show(`HA 모드 → ${next}`, 'ok')
+      await onReload()
+    } catch (e) {
+      show(`전환 실패: ${e instanceof Error ? e.message : e}`, 'err')
+    } finally { setBusy(false) }
+  }
+  return (
+    <div style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #e0e0e0',
+                  borderRadius: 4, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+      <span style={{ fontWeight: 600 }}>HA 모드</span>
+      <span style={{ padding: '1px 8px', borderRadius: 3, fontSize: 11,
+                     background: mode === 'supervisor' ? '#e8f5e9' : '#eceff1',
+                     color: mode === 'supervisor' ? '#2e7d32' : '#546e7a' }}>
+        {mode === 'supervisor' ? '● supervisor (선언적 verdict)' : '○ legacy (keepalived 직접)'}
+      </span>
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <button className="btn btn--sm" disabled={busy || mode === 'legacy'} onClick={() => flip('legacy')}>legacy</button>
+        <button className="btn btn--sm btn--primary" disabled={busy || mode === 'supervisor'} onClick={() => flip('supervisor')}>supervisor</button>
+      </div>
+    </div>
+  )
+}
+
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
 // preempt / track_interface / restart_limit. 모듈별 값(프로세스 감시·절체 모드)은
 // 패키지 설정의 모듈 운영 명세(ModuleSpecSection)로 이관됨.
@@ -1304,7 +1346,10 @@ function _seedSpecs(group: HaGroup, modules: string[]): Record<string, ModuleSpe
       ha: {
         failover_mode:     s?.ha?.failover_mode ?? MODULE_SPEC_DEFAULT.ha.failover_mode,
         failover_relevant: s?.ha?.failover_relevant ?? MODULE_SPEC_DEFAULT.ha.failover_relevant,
+        run_on_fault:      s?.ha?.run_on_fault ?? false,
       },
+      safety: { class: s?.safety?.class ?? 'unknown',
+                latch_clear_mode: s?.safety?.latch_clear_mode },
       ...(s?.health ? { health: s.health } : {}),
     }
   }
@@ -1341,6 +1386,8 @@ function ModuleSpecSection({ group, deployments, onReload }: {
     setSpecs(s => ({ ...s, [m]: { ...s[m], ha: { ...s[m].ha, failover_mode: mode } } }))
   const setRelevant = (m: string, v: boolean) =>
     setSpecs(s => ({ ...s, [m]: { ...s[m], ha: { ...s[m].ha, failover_relevant: v } } }))
+  const setSafety = (m: string, cls: SafetyClass) =>
+    setSpecs(s => ({ ...s, [m]: { ...s[m], safety: { class: cls } } }))
 
   async function save() {
     if (!dirty) return
@@ -1383,6 +1430,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
                 <th title="프로세스 감시(watchdog) — 죽으면 자동 재기동. 끄면 재기동 안 함(장애 시 즉시 절체 판정).">프로세스 감시</th>
                 <th title="Cold(기본): standby 정지 + 승격 시 기동 / Hot: 양쪽 상시 기동(VIP-only). AS 만 적용.">절체 모드</th>
                 <th title="이 모듈 실패가 절체 사유가 되는지. 끄면 이 모듈이 죽어도 절체하지 않음(부가 모듈).">절체 관여</th>
+                <th title="안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동 확인 필요). VIP 없이 DB/파일에 쓰는 모듈은 fencing/lease 전제.">안전 등급</th>
               </tr>
             </thead>
             <tbody>
@@ -1408,6 +1456,16 @@ function ModuleSpecSection({ group, deployments, onReload }: {
                       <input type="checkbox" checked={sp.ha.failover_relevant}
                              onChange={e => setRelevant(m, e.target.checked)} />
                     </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <select value={sp.safety?.class ?? 'unknown'}
+                              onChange={e => setSafety(m, e.target.value as SafetyClass)}
+                              className="form-input" style={{ fontSize: 11, height: 22 }}>
+                        <option value="stateless">stateless</option>
+                        <option value="read_only">read_only</option>
+                        <option value="shared_writer">shared_writer</option>
+                        <option value="unknown">unknown</option>
+                      </select>
+                    </td>
                   </tr>
                 )
               })}
@@ -1415,6 +1473,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
           </table>
           <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
             이 설정은 앱 설정(config.json)과 별개 파일(service.json)로 각 노드에 저장되며 agent 가 감시·절체 판정에 사용합니다.
+            안전 등급 shared_writer/unknown 은 절체 후 자동 복귀(래치 해제)를 하지 않고 운영자 확인을 요구합니다.
           </div>
         </div>
       )}
@@ -1994,6 +2053,17 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           </button>
         )}
       </div>
+      {group.failover_op && (
+        <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
+                      border: '1px solid ' + (group.failover_op.error ? '#e57373' : '#90caf9'),
+                      background: group.failover_op.error ? '#ffebee' : '#e3f2fd' }}>
+          <b>계획 절체 진행</b> — 상태 <code>{group.failover_op.state}</code>
+          {` (${agentDisplayName(agents.find(a => a.id === group.failover_op!.source_agent_id)?.name || '?')}`}
+          {` → ${agentDisplayName(agents.find(a => a.id === group.failover_op!.target_agent_id)?.name || '?')})`}
+          {group.failover_op.note && <span style={{ color: 'var(--text-muted)' }}> · {group.failover_op.note}</span>}
+          {group.failover_op.error && <span style={{ color: '#c62828' }}> · 오류: {group.failover_op.error}</span>}
+        </div>
+      )}
       <table className="data-table">
         <thead>
           <tr><th>서버</th><th>서버 상태</th><th>모듈 · 버전</th><th>모듈 상태</th><th style={{ width: 220 }}>제어</th></tr>
