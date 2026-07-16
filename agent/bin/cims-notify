@@ -76,6 +76,51 @@ print(f"{home}|{user}|{','.join(cold)}")
 PY
 )
 
+# ── role 파일 기록 (ha_service_model.md §9) — 두 모드 공통 ──────────────────
+# keepalived 역할 전이를 run/ha/role/<svc>.json 에 원자적으로 기록한다. Supervisor 가
+# 이걸 관측해 role reconcile(모듈 기동/정지)을 수행한다(role_writer 모드). legacy 모드에서도
+# 기록해 두면 P3 Evaluator 의 _current_role 이 VIP 유도 대신 이 값을 쓸 수 있다.
+RUN_HA="$CIMS_HOME/run/ha"
+mkdir -p "$RUN_HA/role" 2>/dev/null || true
+python3 - "$RUN_HA/role/${SVC}.json" "$SVC" "$STATE" <<'PY' 2>/dev/null || true
+import json, os, sys, time
+path, svc, state = sys.argv[1], sys.argv[2], sys.argv[3]
+seq = 0
+try:
+    seq = int(json.load(open(path)).get("sequence", 0))
+except Exception:
+    seq = 0
+try:
+    bid = open("/proc/sys/kernel/random/boot_id").read().strip()
+except Exception:
+    bid = ""
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump({"service": svc, "role": state, "sequence": seq + 1,
+               "updated_at": int(time.time()), "boot_id": bid}, f)
+os.replace(tmp, path)
+PY
+
+# 현재 HA 모드 — run/ha/flags.json(agent 기록). role_writer 면 모듈 직접 제어는
+# Supervisor reconcile 이 담당하므로 여기선 role 기록만 하고 종료한다.
+NOTIFY_MODE=$(python3 - "$RUN_HA/flags.json" <<'PY' 2>/dev/null || echo legacy
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("notify_mode", "legacy"))
+except Exception:
+    print("legacy")
+PY
+)
+
+if [[ "$NOTIFY_MODE" == "role_writer" ]]; then
+    log "role_writer — role=${STATE} 기록, 모듈 제어는 Supervisor(reconcile) 담당"
+    # MASTER 승격 시각은 계속 기록 — 아직 legacy cims-health(verdict_source!=supervisor)
+    # 를 쓰는 서비스의 승격 grace 안전망. verdict reader 전환(P5) 후엔 무해한 잔재.
+    [[ "$STATE" == "MASTER" ]] && date -Iseconds > "$(dirname "$LOG")/master_at_${SVC}" 2>/dev/null || true
+    exit 0
+fi
+
+# ── 이하 legacy 모드 — cims-notify 가 직접 cold 모듈 start/stop ────────────────
 # cims-svc 위치 — 버전화 레이아웃(agent/current) 우선, flat legacy fallback.
 CIMS_SVC=""
 for cand in "$CIMS_HOME/agent/current/bin/cims-svc" "$CIMS_HOME/agent/bin/cims-svc"; do

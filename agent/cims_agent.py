@@ -2043,11 +2043,29 @@ def _boot_id() -> str:
 #   CIMS_HA_STAGGER        = 1 | 0                 (개시국면 스태거 유지 여부)
 # 현재 단계는 리더만 두고 소비하지 않는다(dormant) — 이후 단계가 게이트로 사용.
 def _ha_flags() -> dict:
-    return {
-        "verdict_source": (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "legacy").lower(),
-        "notify_mode":    (os.environ.get("CIMS_HA_NOTIFY_MODE") or "legacy").lower(),
-        "stagger":        os.environ.get("CIMS_HA_STAGGER", "1") != "0",
-    }
+    vs = (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "legacy").lower()
+    # notify_mode 는 명시 override 없으면 verdict_source 를 따른다 — role_writer(notify)
+    # 와 reconcile(Supervisor)은 한 세트라, 한 스위치(verdict_source=supervisor)로 함께
+    # 켜져야 승격 시 cold 모듈 기동 주체가 끊기지 않는다.
+    nm = os.environ.get("CIMS_HA_NOTIFY_MODE")
+    if not nm:
+        nm = "role_writer" if vs == "supervisor" else "legacy"
+    return {"verdict_source": vs, "notify_mode": nm.lower(),
+            "stagger": os.environ.get("CIMS_HA_STAGGER", "1") != "0"}
+
+
+def _write_ha_flags_file() -> None:
+    """run/ha/flags.json — cims-notify/cims-health(root bash)가 현재 모드를 읽는 통로.
+    agent(cims)가 기동 시 기록. root 컴포넌트는 이 파일로 legacy↔supervisor 를 안다."""
+    try:
+        os.makedirs(_HA_RUN_DIR, exist_ok=True)
+        p = os.path.join(_HA_RUN_DIR, "flags.json")
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(_ha_flags(), f)
+        os.replace(tmp, p)
+    except Exception as e:
+        print(f"[agent][ha] flags.json 기록 실패(무시): {e}", flush=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2458,16 +2476,106 @@ def ha_evaluator_tick() -> None:
                   f"reasons={v['reason_codes']}", flush=True)
 
 
-def _start_ha_evaluator() -> None:
+# ── Recovery Supervisor — role reconcile (ha_service_model.md §7.1) ──────────
+# 매 주기 "역할에서 기대되는 모듈 상태 vs 실제"를 비교해 Process Manager 로 start/stop.
+# supervisor 모드(verdict_source=supervisor)에서만 활성 — cims-notify(role_writer)가
+# 모듈을 직접 안 띄우는 대신 여기서 role 전이를 reconcile 해 cold 모듈을 기동/정지한다.
+# 이벤트가 아니라 목표상태 수렴이라 notify/전이 이벤트를 놓쳐도 다음 주기에 복구된다.
+_RECONCILE_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int}
+
+
+def _module_dist_dir(module: str) -> "str | None":
+    """모듈 배포 루트(CIMS_DIST_DIR) — current 우선, 없으면 최신 버전 디렉토리
+    (cims-notify _mod_dist 와 동일: 한 번도 기동 안 한 cold standby 도 승격 기동 가능)."""
+    root = os.path.join(_PREFIX, "modules", (module or "").lower().strip())
+    cur = os.path.join(root, "current")
+    if os.path.exists(cur):
+        return cur
+    try:
+        subs = [os.path.join(root, d) for d in os.listdir(root)
+                if os.path.isdir(os.path.join(root, d))]
+        subs.sort(key=os.path.getmtime, reverse=True)
+        return subs[0] if subs else None
+    except Exception:
+        return None
+
+
+def _ha_managed_modules() -> set:
+    """ha.json 전 서비스의 relevant ∪ cold 모듈 — Supervisor 가 lifecycle 을 소유하는
+    집합. supervisor 모드에서 legacy watchdog 은 이 집합을 건드리지 않는다(이중 제어 방지)."""
+    cfg = _read_ha_json()
+    out = set()
+    for s in (cfg.get("services") or {}).values():
+        out |= set(_service_relevant(s))
+        out |= {str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+    return {m for m in out if m}
+
+
+def _expected_running(m: str, role: str, cold: set, desired: dict) -> bool:
+    """역할·정책 기반 기대 실행 상태 (§7.1)."""
+    if desired.get(m) == "stopped":
+        return False                       # 운영자 정지 — 기동 안 함
+    if role == "MASTER":
+        return True                        # hot·cold 모두 실행
+    # BACKUP/FAULT/UNKNOWN: hot 만 실행, cold 는 정지가 정상
+    return m not in cold
+
+
+def ha_reconcile_tick() -> None:
+    cfg = _read_ha_json()
+    desired = _load_desired()
+    now = time.time()
+    for svc, s in (cfg.get("services") or {}).items():
+        role = _current_role(svc, s)
+        cold = {str(m).lower().strip() for m in (s.get("cold_modules") or [])}
+        managed = set(_service_relevant(s)) | cold
+        rl = _restart_limit_for(s)
+        for m in managed:
+            if not m or m in _NON_DAEMON_MODULES:
+                continue
+            exp = _expected_running(m, role, cold, desired)
+            running = _pgrep_module(m) is not None
+            if exp and not running:
+                if _in_op_grace(m):
+                    continue               # 운영자 제어 job 진행 중 — 손대지 않음
+                fc = _fail_count_read(m)
+                if fc >= rl["max_fails"]:
+                    continue               # 재기동 소진 — Evaluator 가 latch/verdict 처리
+                st = _RECONCILE_BACKOFF.setdefault(m, {"ts": 0.0, "fails": 0})
+                backoff = min(300, 5 * (2 ** st["fails"]))
+                if now - st["ts"] < backoff:
+                    continue
+                st["ts"] = now; st["fails"] += 1
+                _fail_bump(m, rl["window_sec"])
+                dist = _module_dist_dir(m)
+                if dist:
+                    rc, out, err = _run_cims_svc(dist, "start", m)
+                    print(f"[agent][ha] reconcile start {m} (role={role}) rc={rc}", flush=True)
+            elif (not exp) and running:
+                dist = _module_dist_dir(m)
+                if dist:
+                    _run_cims_svc(dist, "stop", m)
+                    print(f"[agent][ha] reconcile stop {m} (role={role})", flush=True)
+                _RECONCILE_BACKOFF.pop(m, None)
+                _fail_reset(m)
+            elif exp and running:
+                _RECONCILE_BACKOFF.pop(m, None)     # 정상 — backoff·카운터 리셋
+                _fail_reset(m)
+
+
+def _start_ha_evaluator(reconcile: bool = False) -> None:
     def _loop():
         while True:
             try:
                 ha_evaluator_tick()
+                if reconcile:
+                    ha_reconcile_tick()
             except Exception as e:
                 print(f"[agent][ha] evaluator error: {e}", flush=True)
             time.sleep(_EVAL_INTERVAL)
     threading.Thread(target=_loop, daemon=True, name="agent-ha-eval").start()
-    print("[agent][ha] HA Evaluator 기동 (shadow verdict 계산)", flush=True)
+    print(f"[agent][ha] HA Evaluator 기동 (verdict 계산{', reconcile 활성' if reconcile else ', shadow'})",
+          flush=True)
 
 
 def _load_desired() -> dict:
@@ -2780,10 +2888,15 @@ def supervise_tick() -> None:
     sup = _load_supervised()
     if not sup:
         return
+    # supervisor 모드에선 HA 관리 모듈(relevant∪cold)의 lifecycle 은 Supervisor reconcile
+    # 이 소유한다 — legacy watchdog 은 이중 제어를 피하려 그 집합을 건드리지 않는다.
+    ha_managed = _ha_managed_modules() if _ha_flags()["verdict_source"] == "supervisor" else set()
     now = time.time()
     for svc, install_path in list(sup.items()):
         if svc in _NON_DAEMON_MODULES:
             continue
+        if svc in ha_managed:
+            continue     # Supervisor reconcile 소관
         if _pgrep_module(svc):
             _WATCHDOG_BACKOFF.pop(svc, None)     # 정상 — backoff 리셋
             _fail_reset(svc)                     # 실패 카운터 리셋 (연속성 판정 기준)
@@ -3616,13 +3729,18 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
     _ensure_ha_dirs()                  # HA 상태 디렉토리 골격(run/ha·state/ha) 보장 (1회)
-    # HA Supervisor(Health Scheduler + Evaluator) — flag 활성 시에만 기동.
-    #   verdict_source=supervisor : 실제 소비(P5 이후) / CIMS_HA_SHADOW=1 : shadow(계산·로그만)
-    #   CIMS_HA_HEALTH=1 : health 캐시만. legacy 기본에선 전부 미기동 → 동작 무변경.
+    _write_ha_flags_file()             # run/ha/flags.json — root(cims-notify/health) 가 모드 판독
+    # HA Supervisor(Health Scheduler + Evaluator [+ reconcile]) — flag 활성 시에만.
+    #   verdict_source=supervisor : 실소비 — reconcile 활성(모듈 lifecycle 주체가 Supervisor)
+    #   CIMS_HA_SHADOW=1          : shadow — verdict 계산·로그만(재기동/keepalived 무영향)
+    #   CIMS_HA_HEALTH=1          : health 캐시만. legacy 기본에선 전부 미기동 → 동작 무변경.
     _ha_f = _ha_flags()
-    if _ha_f["verdict_source"] == "supervisor" or os.environ.get("CIMS_HA_SHADOW"):
+    if _ha_f["verdict_source"] == "supervisor":
         _start_health_scheduler()
-        _start_ha_evaluator()
+        _start_ha_evaluator(reconcile=True)
+    elif os.environ.get("CIMS_HA_SHADOW"):
+        _start_health_scheduler()
+        _start_ha_evaluator(reconcile=False)
     elif os.environ.get("CIMS_HA_HEALTH"):
         _start_health_scheduler()
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
