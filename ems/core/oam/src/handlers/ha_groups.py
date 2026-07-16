@@ -1005,6 +1005,15 @@ def _serialize_group(g: dict, config: dict) -> dict:
             m['vip_observed'] = obs['observed'].get(m.get('agent_id'))
         # 패키지별 자동 동기화 스위치 (부재 = 기본 ON — 콘솔은 auto_sync[pkg] ?? true)
         out['auto_sync'] = dict(out.get('auto_sync') or {})
+        # 진행 중/최근 계획 절체 operation (콘솔 진행표시). 없으면 None.
+        try:
+            op = _op_active_for_group(config, g.get('id'))
+            if op:
+                out['failover_op'] = {k: op.get(k) for k in
+                                      ('id', 'state', 'source_agent_id', 'target_agent_id',
+                                       'note', 'error', 'updated_at')}
+        except Exception:
+            pass
     return out
 
 
@@ -1329,12 +1338,32 @@ async def _control_group(gid: int, body, config):
                                            'modules': daemon_mods, 'jobs': n_job})
 
 
-async def _failover_group(gid: int, body, config):
-    """수동 절체(스위치오버) — AS 전용. body 무시(옵션).
+# ── 계획 절체(스위치오버) v2 — OAM operation 상태머신 (ha_service_model.md §12) ──
+# POST /failover 는 operation 을 생성하고 즉시 202 반환. 실제 절체는 sweep 루프
+# (_sweep_ha_operations)가 RELEASING→WAIT_VIP_MOVE→VERIFYING→COMMITTED / ROLLING_BACK
+# / FAILED 로 구동한다. 영속 record 라 OAM 재시작에도 이어서 처리(resume). keepalived
+# 프로세스를 직접 stop/start 하지 않고 agent 의 planned_release(verdict eligible=false)로
+# VIP 를 반납시킨다 — 실제 role/VIP 이동을 관측하며 진행(고정 sleep 없음).
+_HA_OP_DOMAIN = 'ha_operations'
+_OP_RELEASE_TIMEOUT = 30      # VIP 가 target 으로 이동하기까지 최대 대기(초)
+_OP_VERIFY_SEC = 15          # target 이 VIP 를 안정 보유해야 하는 검증 창(초)
 
-    현 Active 의 keepalived 를 정지(priority-0 → peer 즉시 승격)한 뒤, 지연 후
-    재기동(nopreempt → BACKUP 복귀). 두 개의 ha_keepalived job 으로 오케스트레이션.
-    상세: ha_service_model.md §7."""
+
+def _op_dir(config):
+    return file_store.domain_dir(config, _HA_OP_DOMAIN)
+
+
+def _op_active_for_group(config, gid: int):
+    """그룹의 진행 중(비종결) operation — 중복 절체 방지."""
+    _TERMINAL = {'COMMITTED', 'ROLLED_BACK', 'FAILED'}
+    for op in file_store.load_all(_op_dir(config)):
+        if op.get('group_id') == gid and op.get('state') not in _TERMINAL:
+            return op
+    return None
+
+
+async def _failover_group(gid: int, body, config):
+    """수동 계획 절체 — AS 전용. operation 을 생성하고 sweep 루프가 구동한다."""
     g = _ha_load(config, gid)
     if not g:
         return HandlerResult(status=404, body={'error': 'Group not found'})
@@ -1346,9 +1375,12 @@ async def _failover_group(gid: int, body, config):
     if not intent_running:
         return HandlerResult(status=409, body={'error': 'not_armed',
             'hint': '미개시 그룹 — 서비스 시작(무장) 후 절체 가능'})
+    if _op_active_for_group(config, gid):
+        return HandlerResult(status=409, body={'error': 'failover_in_progress',
+            'hint': '이미 진행 중인 절체 operation 이 있습니다'})
 
     from services import ha_lookup
-    from handlers.agents import _agent_load, _job_create
+    from handlers.agents import _agent_load
     obs = ha_lookup.vip_observation(config, g) or {}
     active_aid = obs.get('active_agent_id')
     members = g.get('members') or []
@@ -1359,23 +1391,138 @@ async def _failover_group(gid: int, body, config):
     if not targets:
         return HandlerResult(status=409, body={'error': 'no_standby_target'})
     target_aid = targets[0]
-    # 대상 standby 승격 자격 — online + 이탈 오버라이드 없음(간이 검사: agent online).
     ta = _agent_load(config, aid=target_aid) or {}
     if ta.get('status') != 'online':
         return HandlerResult(status=409, body={'error': 'target_offline',
             'hint': f'standby agent#{target_aid} 오프라인 — 절체 불가'})
 
-    # 1) 현 Active keepalived 정지 (즉시) → peer 승격.
-    _job_create(config, active_aid, 'ha_keepalived', {'action': 'stop'})
-    # 2) 구 Active keepalived 재기동 (지연) → nopreempt BACKUP 복귀 + cold 모듈 정지.
-    from datetime import datetime, timedelta
-    nb = (datetime.now() + timedelta(seconds=20)).isoformat(timespec='seconds')
-    _job_create(config, active_aid, 'ha_keepalived', {'action': 'start'}, not_before=nb)
-    logger.log_info(f"[ha-group] group#{gid} 수동 절체 — active#{active_aid} keepalived "
-                    f"stop→(20s)start, standby#{target_aid} 승격")
-    return HandlerResult(status=202, body={'group_id': gid, 'from_agent_id': active_aid,
-                                           'to_agent_id': target_aid,
-                                           'note': 'switchover queued (stop→start)'})
+    from datetime import datetime
+    now_iso = datetime.now().isoformat(timespec='seconds')
+    oid = file_store.next_id(_op_dir(config))
+    op = {
+        'id': oid, 'group_id': gid, 'service': g.get('name'),
+        'source_agent_id': active_aid, 'target_agent_id': target_aid,
+        'state': 'RELEASING', 'release_sent': False, 'clear_sent': False,
+        'created_at': now_iso, 'updated_at': now_iso, 'note': None, 'error': None,
+    }
+    file_store.save(_op_dir(config), oid, op)
+    logger.log_info(f"[ha-op] group#{gid} 계획 절체 operation#{oid} 생성 "
+                    f"— source#{active_aid} → target#{target_aid}")
+    # 즉시 첫 스텝 구동(202 응답 전 release job 큐잉 — 이후는 sweep 이 이어감).
+    try:
+        _advance_ha_operation(config, op)
+    except Exception as e:
+        logger.log_warning(f"[ha-op] operation#{oid} 초기 구동 실패(sweep 이 재시도): {e}")
+    return HandlerResult(status=202, body={'group_id': gid, 'operation_id': oid,
+                                           'from_agent_id': active_aid, 'to_agent_id': target_aid,
+                                           'state': op['state']})
+
+
+def _op_planned_release(config, agent_id: int, service: str, release: bool):
+    from handlers.agents import _job_create
+    _job_create(config, agent_id, 'ha_planned_release',
+                {'service': service, 'release': bool(release)})
+
+
+def _advance_ha_operation(config, op: dict) -> bool:
+    """operation 을 현재 상태 + VIP 관측에 따라 한 스텝 전진. 변경 시 True(저장은 caller).
+    sweep 루프와 생성 시점 양쪽에서 호출된다(멱등적 스텝)."""
+    from datetime import datetime
+    from services import ha_lookup
+    gid = op.get('group_id')
+    g = _ha_load(config, gid)
+    if not g:
+        op['state'] = 'FAILED'; op['error'] = 'group_deleted'; return True
+    svc = op.get('service') or g.get('name')
+    src, tgt = op.get('source_agent_id'), op.get('target_agent_id')
+    now = datetime.now()
+    def _age(field):
+        try:
+            return (now - datetime.fromisoformat(op.get(field))).total_seconds()
+        except Exception:
+            return 0.0
+    obs = ha_lookup.vip_observation(config, g) or {}
+    active = obs.get('active_agent_id')
+    state = op.get('state')
+
+    if state == 'RELEASING':
+        if not op.get('release_sent'):
+            _op_planned_release(config, src, svc, True)      # source verdict eligible=false
+            op['release_sent'] = True
+            op['note'] = 'planned_release 전송 — VIP 이동 대기'
+        op['state'] = 'WAIT_VIP_MOVE'
+        op['release_at'] = now.isoformat(timespec='seconds')
+        return True
+
+    if state == 'WAIT_VIP_MOVE':
+        if active == tgt:
+            op['state'] = 'VERIFYING'
+            op['verify_since'] = now.isoformat(timespec='seconds')
+            op['note'] = 'target VIP 인수 — 안정 검증 중'
+            return True
+        if _age('release_at') > _OP_RELEASE_TIMEOUT:
+            # target 이 VIP 를 못 잡음 → 롤백(source planned_release 해제 → source 재인수)
+            op['state'] = 'ROLLING_BACK'
+            op['error'] = 'target_not_promoted'
+            return True
+        return False
+
+    if state == 'VERIFYING':
+        if active != tgt:
+            # 검증 중 target 이 VIP 를 놓침 → 실패(수동 개입). source 해제는 종결 처리.
+            op['state'] = 'FAILED'
+            op['error'] = 'target_unstable'
+            return True
+        if _age('verify_since') >= _OP_VERIFY_SEC:
+            op['state'] = 'COMMITTED'
+            op['note'] = 'switchover 완료'
+            return True
+        return False
+
+    if state in ('COMMITTED', 'ROLLING_BACK', 'FAILED'):
+        # 종결 처리 — source planned_release 해제(1회). ROLLING_BACK 은 해제로 source 가
+        # eligible 복귀(VIP 가 비어 있으면 재인수, target 이 잡았으면 nopreempt 로 유지).
+        if not op.get('clear_sent'):
+            _op_planned_release(config, src, svc, False)
+            op['clear_sent'] = True
+        if state == 'ROLLING_BACK':
+            op['state'] = 'ROLLED_BACK'
+        return True
+    return False
+
+
+# 종결 operation 을 이 시간(초) 뒤 정리 — 콘솔에서 결과 확인할 여유.
+_OP_RETENTION_SEC = 600
+
+
+def sweep_ha_operations(config) -> int:
+    """진행 중 계획 절체 operation 을 한 스텝씩 전진(OAM sweep 루프가 주기 호출).
+    OAM 재시작 후에도 영속 record 를 읽어 이어서 처리한다. 처리 건수 반환."""
+    from datetime import datetime
+    _TERMINAL = {'COMMITTED', 'ROLLED_BACK', 'FAILED'}
+    n = 0
+    for op in file_store.load_all(_op_dir(config)):
+        state = op.get('state')
+        if state in _TERMINAL:
+            # 오래된 종결 record 정리
+            try:
+                age = (datetime.now() - datetime.fromisoformat(op.get('updated_at'))).total_seconds()
+                if age > _OP_RETENTION_SEC:
+                    file_store.delete(_op_dir(config), op.get('id'))
+            except Exception:
+                pass
+            continue
+        try:
+            changed = _advance_ha_operation(config, op)
+        except Exception as e:
+            op['state'] = 'FAILED'; op['error'] = f'sweep_exc: {e}'; changed = True
+        if changed:
+            op['updated_at'] = datetime.now().isoformat(timespec='seconds')
+            file_store.save(_op_dir(config), op.get('id'), op)
+            logger.log_info(f"[ha-op] operation#{op.get('id')} → {op.get('state')}"
+                            + (f" ({op.get('error')})" if op.get('error') else ""))
+            n += 1
+    return n
 
 
 async def _list_members(gid: int, config):

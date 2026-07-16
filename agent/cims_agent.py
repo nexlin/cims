@@ -1481,6 +1481,33 @@ def job_ha_keepalived(params: dict) -> tuple:
         return 5, "", f"cims-ha {action} exception: {e}"
 
 
+def job_ha_planned_release(params: dict) -> tuple:
+    """계획 절체(스위치오버) — 이 노드의 service VIP 반납 의도를 set/clear.
+    Params: { service: str, release: bool }. release=true → state/ha/planned_release/<svc>
+    마커 생성 → Evaluator 가 eligible=false → track_script fail → VIP 반납 → peer 승격.
+    release=false → 마커 제거(COMMIT/ROLLBACK). 상세: ha_service_model.md §12."""
+    svc = (params.get("service") or "").strip()
+    if not svc:
+        return 1, "", "service missing"
+    d = os.path.join(_HA_PERSIST_DIR, "planned_release")
+    p = os.path.join(d, svc)
+    try:
+        os.makedirs(d, exist_ok=True)
+        if params.get("release"):
+            tmp = p + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(str(int(time.time())))
+            os.replace(tmp, p)
+            return 0, f"planned_release set: {svc}", ""
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+        return 0, f"planned_release cleared: {svc}", ""
+    except Exception as e:
+        return 2, "", f"planned_release {svc} failed: {e}"
+
+
 def job_update_module_spec(params: dict) -> tuple:
     """modules/<mod>/service.json 갱신 — 모듈 운영 명세 (감시·절체모드·헬스).
 
@@ -2018,7 +2045,7 @@ def _ha_state_dir() -> str:
 _HA_RUN_DIR = _HA_STATE_DIR                       # _PREFIX/run/ha (기존 상수 재사용)
 _HA_PERSIST_DIR = os.path.join(_PREFIX, "state", "ha")
 _HA_RUN_SUBDIRS = ("verdict", "role", "health", "promotion", "recovery", "operations")
-_HA_PERSIST_SUBDIRS = ("desired", "latch")
+_HA_PERSIST_SUBDIRS = ("desired", "latch", "planned_release")
 
 
 def _ensure_ha_dirs() -> None:
@@ -2370,6 +2397,12 @@ def _restart_limit_for(s: dict) -> dict:
             "window_sec": int(rl.get("window_sec", 300) or 300)}
 
 
+def _planned_released(svc: str) -> bool:
+    """계획 절체(스위치오버) 중 이 노드가 이 서비스의 VIP 를 의도적으로 반납 중인가.
+    OAM 이 ha_planned_release job 으로 set/clear. 존재 시 Evaluator 가 eligible=false."""
+    return os.path.exists(os.path.join(_HA_PERSIST_DIR, "planned_release", svc))
+
+
 def _update_promotion_grace(svc: str, role: str, now: float) -> bool:
     """역할 전이 감지 — MASTER 진입 시 grace 설정(start 전에). grace 활성이면 True."""
     prev = _EVAL_PREV_ROLE.get(svc)
@@ -2426,7 +2459,13 @@ def _eval_service(svc: str, s: dict) -> dict:
 
     eligible, state, svc_avail, standby_ready = False, "STARTING", False, False
 
-    if _EVAL_LATCH.get(svc):
+    if _planned_released(svc):
+        # 계획 절체 — 운영자/OAM 이 이 노드에서 VIP 를 의도적으로 넘기는 중.
+        # eligible=false → track_script fail → VIP 반납 → peer 승격. 모듈은 role 전이
+        # (MASTER→BACKUP/FAULT) 에 따라 reconcile 이 정지(서비스는 target 이 인수).
+        eligible, state = False, "PLANNED_RELEASE"
+        reasons.append("planned_release")
+    elif _EVAL_LATCH.get(svc):
         eligible, state = False, "FAILOVER_LATCHED"
         reasons.append("latched")
     elif role in ("BACKUP", "UNKNOWN", "FAULT"):
@@ -3574,6 +3613,8 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_update_module_spec(params)
         elif jt == "ha_keepalived":
             rc, out, err = job_ha_keepalived(params)
+        elif jt == "ha_planned_release":
+            rc, out, err = job_ha_planned_release(params)
         elif jt == "apply_ip_config":
             rc, out, err = job_apply_ip_config(params)
         elif jt == "apply_mounts":

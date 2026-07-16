@@ -973,6 +973,15 @@ if __name__ == '__main__':
         logger.log_info(f"[auto-sync] interval={AUTO_SYNC_SWEEP_INTERVAL}s, "
                         f"collections_every={AUTO_SYNC_COLL_EVERY} round(s)")
         logger.log_info(f"[metric-purge] retain={METRIC_RETAIN_DAYS}d, interval={METRIC_PURGE_INTERVAL}s")
+        # 계획 절체 operation 구동 — 짧은 주기(VIP 이동 관측이 필요하므로).
+        HA_OP_SWEEP_INTERVAL = int(config.get('HaOpSweepSec', 2))
+        def _sweep_ha_ops():
+            try:
+                from handlers.ha_groups import sweep_ha_operations
+                sweep_ha_operations(config)
+            except Exception as e:
+                logger.log_warning(f"[ha-op] sweep 실패: {e}")
+
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
@@ -980,6 +989,7 @@ if __name__ == '__main__':
         _last_drift_sweep = 0
         _last_auto_sync_sweep = 0
         _last_metric_purge = 0
+        _last_ha_op_sweep = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -1001,6 +1011,9 @@ if __name__ == '__main__':
             if _now - _last_auto_sync_sweep >= AUTO_SYNC_SWEEP_INTERVAL:
                 _sweep_auto_sync()
                 _last_auto_sync_sweep = _now
+            if _now - _last_ha_op_sweep >= HA_OP_SWEEP_INTERVAL:
+                _sweep_ha_ops()
+                _last_ha_op_sweep = _now
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now
