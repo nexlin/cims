@@ -152,13 +152,13 @@ private:
     /** condition 을 마지막으로 올린 멤버(actor) — 취소(하향) 권한 판정용(개시자만 취소). */
     std::map<std::string, std::string> m_mapGroupCondActor;
 
-    /** 그룹 세션 단위 통일 sesid: ADD_PTT_GROUP ~ JOIN/LEAVE ~ INVITE ~ REMOVE_PTT_GROUP 모두 동일 sesid 사용.
+    /** 그룹 세션 단위 통일 sesid: PTT_GROUP_ADD ~ JOIN/LEAVE ~ INVITE ~ PTT_GROUP_REMOVE 모두 동일 sesid 사용.
      *  key = group_id, value = sesid (형식: `{group_id}::csp::{us_ts}::{counter}`).
      *  GetOrIssueGroupSesId() 로 조회/발행, RemoveGroupSesId() 로 세션 종료 시 정리. */
     std::map<std::string, std::string> m_mapGroupSesId;
     /** 그룹 세션 sesid 조회. 없으면 새로 발행하여 저장. */
     std::string GetOrIssueGroupSesId( const std::string &strGroupId );
-    /** 그룹 세션 종료 시 캐시 제거 (REMOVE_PTT_GROUP 호출 시점) */
+    /** 그룹 세션 종료 시 캐시 제거 (PTT_GROUP_REMOVE 호출 시점) */
     void RemoveGroupSesId( const std::string &strGroupId );
 
     struct CallSessionInfo {

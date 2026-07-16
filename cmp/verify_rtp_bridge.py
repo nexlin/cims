@@ -41,11 +41,11 @@ def test_cmp_bridge():
     
     cmp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
-    # Add Session A
+    # Add Session A (envelope v2 — docs/api/cmp_media_api.md)
     req_a = {
-        "trans_id": 1,
+        "hdr": {"ver": 2, "trans_id": 1, "node": "verify", "cmd": "RELAY_ADD",
+                "type": "request", "service": "volte"},
         "payload": {
-            "cmd": "add",
             "session_id": "sess_a",
             "remote_ip": "127.0.0.1",
             "remote_port": CLIENT_A_RTP_PORT,
@@ -57,13 +57,13 @@ def test_cmp_bridge():
     data, _ = cmp_sock.recvfrom(4096)
     resp_a = json.loads(data)
     print("Session A Resp:", resp_a)
-    port_a_loc = int(json.loads(resp_a['response'])['local_port'])
-    
+    port_a_loc = int(resp_a['payload']['local_port'])
+
     # Add Session B
     req_b = {
-        "trans_id": 2,
+        "hdr": {"ver": 2, "trans_id": 2, "node": "verify", "cmd": "RELAY_ADD",
+                "type": "request", "service": "volte"},
         "payload": {
-            "cmd": "add",
             "session_id": "sess_b",
             "remote_ip": "127.0.0.1",
             "remote_port": CLIENT_B_RTP_PORT,
@@ -75,7 +75,7 @@ def test_cmp_bridge():
     data, _ = cmp_sock.recvfrom(4096)
     resp_b = json.loads(data)
     print("Session B Resp:", resp_b)
-    port_b_loc = int(json.loads(resp_b['response'])['local_port'])
+    port_b_loc = int(resp_b['payload']['local_port'])
     
     # Setup Sockets
     sock_a = create_rtp_socket(CLIENT_A_RTP_PORT)

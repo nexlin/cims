@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MCPTT emergency/imminent floor-tier 라이브 검증 도구 (Phase 1 CMP 선점).
 
-CSP 가 긴급 개시 시 CMP 로 보내는 SET_FLOOR_TIER 와 동일한 명령을 직접 주입한다.
+CSP 가 긴급 개시 시 CMP 로 보내는 PTT_FLOOR_TIER 와 동일한 명령을 직접 주입한다.
 정상 PTT 그룹콜(cspsim 변경 불필요) 위에서 한 멤버의 floor tier 를 emergency 로 올린 뒤
 그 멤버가 floor REQUEST(PTT push) 하면, 하위 tier 점유자를 선점(REVOKE→GRANT)하는지
 floor.jsonl("reason":"emergency_preempt")·오디오로 확인한다.
@@ -11,7 +11,7 @@ floor.jsonl("reason":"emergency_preempt")·오디오로 확인한다.
       --group g001 --session +821012345678 --tier emergency
   (취소: --tier normal)
 
-session = CMP 멤버 식별자 = 그 멤버의 PTT MSISDN(JOIN_PTT_GROUP 의 session_id).
+session = CMP 멤버 식별자 = 그 멤버의 PTT MSISDN(PTT_JOIN 의 session_id).
 """
 import argparse
 import json
@@ -32,9 +32,15 @@ def main():
     args = ap.parse_args()
 
     pkt = {
-        "trans_id": int(time.time()) % 100000,
+        "hdr": {
+            "ver": 2,
+            "trans_id": int(time.time()) % 100000,
+            "node": "script",
+            "cmd": "PTT_FLOOR_TIER",
+            "type": "request",
+            "service": "mcptt",
+        },
         "payload": {
-            "cmd": "SET_FLOOR_TIER",
             "group_id": args.group,
             "session_id": args.session,
             "tier": args.tier,

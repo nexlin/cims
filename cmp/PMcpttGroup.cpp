@@ -511,7 +511,7 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
 
     // 수신 Floor Indicator(emergency/imminent) → tier 승격(단말 개시 긴급/임박).
-    // CSP SET_FLOOR_TIER 로 설정된 tier 와 max 결합(영속 → 무활동 자동회수 제외 등에 반영).
+    // CSP PTT_FLOOR_TIER 로 설정된 tier 와 max 결합(영속 → 무활동 자동회수 제외 등에 반영).
     if (indicatorBits > 0) {
         int indTier = (indicatorBits & FI_EMERGENCY)      ? TIER_EMERGENCY
                     : (indicatorBits & FI_IMMINENT_PERIL) ? TIER_IMMINENT

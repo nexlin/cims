@@ -4,7 +4,7 @@
   1. 배포본 csc(target=verify→4445, prod→4420) admin login.
   2. 임시 PTT 그룹 (gid="verify-cmp-<ms>") POST /api/v1/ptt/groups.
      csc → notify_csp(UDP) → CSP → CMP `addGroup` 전파.
-  3. 1~5 초 폴링: CMP 9000/UDP `STATS_REQUEST` 응답의
+  3. 1~5 초 폴링: CMP 9000/UDP `STATS` 응답의
      `response.group_details[].group_id` 에 신규 gid 등장 확인.
   4. cleanup: DELETE 임시 그룹.
 
@@ -20,7 +20,7 @@ import time
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common import csc_http
-from ...common.cmp_client import cmp_request
+from ...common.cmp_client import cmp_stats
 from ._helpers import target_ip
 
 
@@ -33,13 +33,10 @@ def _deployed_csc_base(ctx: VerifyContext) -> str:
     return f"https://127.0.0.1:{port}"
 
 
-def _stats_has_gid(resp: dict, gid: str) -> bool:
-    if not isinstance(resp, dict):
+def _stats_has_gid(stats: dict | None, gid: str) -> bool:
+    if not isinstance(stats, dict):
         return False
-    inner = resp.get("response")
-    if not isinstance(inner, dict):
-        return False
-    details = inner.get("group_details") or []
+    details = stats.get("group_details") or []
     if not isinstance(details, list):
         return False
     for g in details:
@@ -75,12 +72,11 @@ def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
     notes.append(f"- login: {base} OK")
 
     # CMP 사전 reachability — 응답 못 받으면 SKIP
-    pre = cmp_request({"cmd": "STATS_REQUEST", "sesid": "verify-precheck"},
-                      ip=cmp_ip, port=cmp_port, timeout=1.0)
+    pre = cmp_stats(ip=cmp_ip, port=cmp_port, timeout=1.0)
     if pre is None:
         return _skip(ctx, f"CMP {cmp_ip}:{cmp_port} STATS 응답 없음 — 미기동/방화벽?")
     notes.append(f"- CMP {cmp_ip}:{cmp_port} STATS 응답 OK "
-                 f"(groups_before={(pre.get('response') or {}).get('groups')})")
+                 f"(groups_before={pre.get('groups')})")
 
     # 멤버는 빈 list — CMP roster 생성/등록 검증이 목적이고,
     # csc admin POST 의 members 형식은 dict-list 라 단순 string-list 는 거부.
@@ -105,16 +101,13 @@ def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
     try:
         for i in range(poll_max):
             time.sleep(1)
-            last_resp = cmp_request(
-                {"cmd": "STATS_REQUEST", "sesid": f"verify-poll-{i}"},
-                ip=cmp_ip, port=cmp_port, timeout=1.0,
-            )
-            if _stats_has_gid(last_resp or {}, gid):
+            last_resp = cmp_stats(ip=cmp_ip, port=cmp_port, timeout=1.0)
+            if _stats_has_gid(last_resp, gid):
                 found = True
                 notes.append(f"- CMP STATS 매칭: poll #{i+1} ({i+1}s 경과)")
                 break
         if not found:
-            inner = (last_resp or {}).get("response") or {}
+            inner = last_resp or {}
             notes.append(
                 f"- CMP STATS 미매칭 ({poll_max}s) — groups={inner.get('groups')} "
                 f"detail_len={len(inner.get('group_details') or [])}"

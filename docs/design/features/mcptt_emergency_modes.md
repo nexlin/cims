@@ -85,8 +85,8 @@ else                              bPreempt = (reqPrio < ownPrio); // 동tier·�
 
 ### 3.2 tier 설정 경로
 
-- `ADD_PTT_GROUP`/`MODIFY_PTT_GROUP` payload에 그룹 condition: `"emergency":0/1`, `"imminent":0/1`(세션 전체 in-progress)와, 필요 시 **개시자(또는 특정 멤버) tier**.
-- 멤버 tier 갱신: `JOIN_PTT_GROUP`의 `"tier":"normal|imminent|emergency"` 필드, 또는 경량 명령 `SET_FLOOR_TIER {group_id, session_id, tier}`(업그레이드/취소 시 floor만 갱신, 미디어 재협상 불필요 — [../modules/cmp.md](../modules/cmp.md) §3.2).
+- `PTT_GROUP_ADD`/`PTT_GROUP_MODIFY` payload에 그룹 condition: `"emergency":0/1`, `"imminent":0/1`(세션 전체 in-progress)와, 필요 시 **개시자(또는 특정 멤버) tier**.
+- 멤버 tier 갱신: `PTT_JOIN`의 `"tier":"normal|imminent|emergency"` 필드, 또는 경량 명령 `PTT_FLOOR_TIER {group_id, session_id, tier}`(업그레이드/취소 시 floor만 갱신, 미디어 재협상 불필요 — [../modules/cmp.md](../modules/cmp.md) §3.2).
 - members 문자열 확장은 **하위호환 유지**: `id:prio:role[:tier]` (4번째 토큰 옵션, 미존재 시 normal).
 
 ### 3.3 wire 포맷(floor 패킷)
@@ -120,10 +120,10 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **개시**: 그룹 INVITE에 `emergency-ind=true` → `ProcessGroupCall(condition=EMERGENCY)`:
   1. 그룹 capability `emergency_call` + 개시자 `allow_emergency_init` 게이트(불허 시 SIP 4xx 또는 강등).
   2. in-progress emergency 설정(메모리 + DB 미러), 개시자에 MCPTT emergency state.
-  3. CMP `ADD/MODIFY_PTT_GROUP`에 `emergency=1`(+개시자 tier=emergency) → floor 선점 보장.
+  3. CMP `ADD/PTT_GROUP_MODIFY`에 `emergency=1`(+개시자 tier=emergency) → floor 선점 보장.
   4. fan-out INVITE의 `mcptt-info`에 `<emergency-ind>true` 광고(`BuildGroupInfoXml` 확장).
   5. 자원 우선순위: 송출 INVITE에 `Resource-Priority` 헤더(RFC 4412, namespace `mcpttp.x`) 부가.
-- **업그레이드**: 진행 중 그룹콜에 re-INVITE(`emergency-ind=true`) → `EventReInvite`의 **PTT 인지 분기** → `SET_FLOOR_TIER`/`MODIFY_PTT_GROUP`로 floor만 격상, 멤버에 re-INVITE/UPDATE 전파.
+- **업그레이드**: 진행 중 그룹콜에 re-INVITE(`emergency-ind=true`) → `EventReInvite`의 **PTT 인지 분기** → `PTT_FLOOR_TIER`/`PTT_GROUP_MODIFY`로 floor만 격상, 멤버에 re-INVITE/UPDATE 전파.
 - **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀, 상태 클리어. 비권한자 취소 무시(규격).
 - **imminent peril**: 동일 경로의 `imminentperil-ind`, tier=IMMINENT.
 
@@ -156,7 +156,7 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 사전 프로비저닝 없이 개시 시점에 멤버를 동적 구성:
 
 - **개시 입력**: INVITE의 `resource-lists+xml`(멤버 URI 목록) + `mcptt-info`(adhoc 표식). 또는 콘솔/Admin이 ad-hoc 그룹을 즉석 생성.
-- **CSP 처리**: 영속 그룹 없이 **임시 CspPttGroup** 구성(temp group-id 발급, `is_adhoc=1`로 DB에 단명 레코드 + `adhoc_expires_at`), 멤버 fan-out, CMP `ADD_PTT_GROUP`. broadcast/emergency 조건도 ad-hoc 위에 얹힘.
+- **CSP 처리**: 영속 그룹 없이 **임시 CspPttGroup** 구성(temp group-id 발급, `is_adhoc=1`로 DB에 단명 레코드 + `adhoc_expires_at`), 멤버 fan-out, CMP `PTT_GROUP_ADD`. broadcast/emergency 조건도 ad-hoc 위에 얹힘.
 - **수명**: 마지막 멤버 이탈 시 즉시 teardown(on-demand와 동일) + DB 레코드 sweep(만료/빈 ad-hoc). chat형 ad-hoc은 비범위.
 - **권한**: 개시자/그룹 정책 `adhoc_enabled`.
 
@@ -176,11 +176,11 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 ```
 UE(개시자) ──INVITE(mcptt-info: session-type=prearranged, emergency-ind=true)──▶ CSP
   CSP: capability/권한 게이트 → in-progress emergency 설정
-  CSP ──ADD/MODIFY_PTT_GROUP{emergency=1, initiator tier=emergency}──▶ CMP
+  CSP ──ADD/PTT_GROUP_MODIFY{emergency=1, initiator tier=emergency}──▶ CMP
   CSP ──fan-out INVITE(mcptt-info: emergency-ind=true)──▶ 멤버들
   CMP: 개시자 FLOOR_REQUEST → tier=emergency → 기존 발언자 REVOKE(reason=emergency_preempt) → GRANT
   ... 통화 ...
-UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → SET_FLOOR_TIER normal → 상태 해제
+UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TIER normal → 상태 해제
 ```
 
 ---

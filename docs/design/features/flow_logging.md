@@ -121,7 +121,7 @@ PTT 그룹 INVITE는 전역 도메인(보통 volte) 대신 mcptt 도메인을 �
 - **CSP → CMP**: JSON payload의 `"sesid"` 필드. CMP의 `_sesidMap[sessionId]` 에 저장 후 내부 이벤트(SESSION_START, GROUP_TIMEOUT 등)에서 계승
 - **CMP 응답**: 같은 sesid를 response payload에도 포함
 - **CSC → CSP notify**: JSON payload의 `"sesid"` 필드
-- **PTT 그룹 단위 통일 sesid**: `GroupCallService::GetOrIssueGroupSesId(group_id)` — 한 그룹 세션이 존재하는 동안 ADD/JOIN/LEAVE/REMOVE_PTT_GROUP + 모든 그룹 INVITE가 같은 sesid 사용. caller 자리에 group_id 포함시켜 Flow 검색에서 `group_id in sesid` 로 매칭 가능
+- **PTT 그룹 단위 통일 sesid**: `GroupCallService::GetOrIssueGroupSesId(group_id)` — 한 그룹 세션이 존재하는 동안 그룹 명령(PTT_GROUP_ADD/PTT_JOIN/PTT_LEAVE/PTT_GROUP_REMOVE) + 모든 그룹 INVITE가 같은 sesid 사용. caller 자리에 group_id 포함시켜 Flow 검색에서 `group_id in sesid` 로 매칭 가능
 
 ## 5. Flow 엔트리 포맷
 
@@ -141,7 +141,7 @@ ts, service, caller, callee, sesid, subid, node, from, to, proto, method, detail
 | `node` | `csp` / `cmp` / `csc` |
 | `from` / `to` | `ue`, `csp`, `cmp`, `csc`, `ue_o` (caller leg), `ue_t` (callee leg) |
 | `proto` | `SIP`, `JSON`, `CSC`, `INT`, `MCPTT`, `DTMF`, `RTCP` |
-| `method` | INVITE, 200, ADD_SESSION, FLOOR_GRANT, DTMF 등 |
+| `method` | INVITE, 200, RELAY_ADD, FLOOR_GRANT, DTMF 등 |
 | `detail` | 사람 읽기용 요약. MCPTT/DTMF/RTCP는 **JSON 문자열** 사용 |
 | `mid` | trans_id (CMP JSON), CSeq (SIP) — cross-node 상관 |
 | `seq` | 해당 iface의 msg.jsonl 라인 번호 (원문 역조회 키) |
@@ -164,19 +164,18 @@ ts, dir, peer, caller, callee, proto, msg
 
 ## 7. Inter-module 프로토콜
 
-### 7.1 CSP → CMP JSON payload 공통 필드
+### 7.1 CSP → CMP 상관 메타 필드 (envelope v2 — 정본: [../../api/cmp_media_api.md](../../api/cmp_media_api.md))
 ```json
 {
-  "cmd": "ADD_SESSION",
-  "service": "volte",
-  "sesid": "+82...::csp::ts::1",
-  "caller": "+82...",
-  "callee": "+82...",
-  "session_id": "cmp_sess_N",
-  ...
+  "hdr": {
+    "ver": 2, "trans_id": 1024, "node": "csp_01",
+    "cmd": "RELAY_ADD", "type": "request",
+    "sesid": "+82...::csp::ts::1", "service": "volte"
+  },
+  "payload": { "session_id": "cmp_sess_N", "caller": "+82...", "callee": "+82...", "...": "..." }
 }
 ```
-CMP는 `payload.service` 로 `_serviceMap[key]` 채움, `payload.sesid` 로 `_sesidMap[key]` 채움. 응답(OK/ERROR)에도 같은 값 계승.
+CMP는 `hdr.service` 로 `_serviceMap[key]` 채움, `hdr.sesid` 로 `_sesidMap[key]` 채움. 응답 hdr 에도 같은 값 계승.
 
 ### 7.2 CSC → CSP notify (UDP JSON)
 ```json
@@ -252,7 +251,7 @@ GET /api/v1/ptt/history/{group_id}/{session}/flow?date=YYYY-MM-DD
 
 내부 동작:
 1. session 시간 범위 내 group_id 매칭 메시지에서 sesid 모음
-2. **sesid 매칭으로 전체 메시지 필터** — startup-time `ADD_PTT_GROUP`, 종료 후 `REMOVE_PTT_GROUP`, member join/leave 등 라이프사이클이 시간 범위와 무관하게 자연 포함됨
+2. **sesid 매칭으로 전체 메시지 필터** — startup-time `PTT_GROUP_ADD`, 종료 후 `PTT_GROUP_REMOVE`, member join/leave 등 라이프사이클이 시간 범위와 무관하게 자연 포함됨
 3. sesid 매칭 0 건 시 fallback: legacy substring 매칭 (`detail` | `sesid` | `subid` 중 하나에 `group_id` 포함)
 4. **HEARTBEAT 만 제외**. cross-service method 필터 등 UX 결정은 console 책임.
 

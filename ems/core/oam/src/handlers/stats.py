@@ -136,6 +136,40 @@ def _load_active_states(config: dict, kind: str) -> list:
     return items
 
 
+def _cmp_stats_request(ip: str, port: int, timeout: float = 1.0) -> dict:
+    """CMP STATS 조회 (envelope v2 — docs/api/cmp_media_api.md).
+       응답 payload {resource, detail} 를 대시보드가 쓰는 flat 키로 정규화해 반환."""
+    resp = _udp_request(ip, port, {
+        "hdr": {"ver": 2, "trans_id": int(time.time()) % 100000,
+                "node": "oam", "cmd": "STATS", "type": "request"}
+    }, timeout=timeout)
+    hdr = resp.get('hdr') or {}
+    if hdr.get('status') != 'OK':
+        return {}
+    p = resp.get('payload') or {}
+    res = p.get('resource') or {}
+    relay = res.get('relay') or {}
+    ptt = res.get('ptt') or {}
+    det = p.get('detail') or {}
+    leak = det.get('leak_reclaim') or {}
+    return {
+        'sessions': relay.get('sessions', 0),
+        'groups': ptt.get('groups', 0),
+        'rtp_ports_total': relay.get('total', 0),
+        'rtp_ports_used': relay.get('used', 0),
+        'rtp_ports_free': relay.get('total', 0) - relay.get('used', 0),
+        'ptt_rtp_ports_total': ptt.get('total', 0),
+        'ptt_rtp_ports_used': ptt.get('used', 0),
+        'ptt_rtp_ports_free': ptt.get('total', 0) - ptt.get('used', 0),
+        'session_timeout': det.get('session_timeout', 0),
+        'orphan_reclaim_sec': det.get('orphan_reclaim_sec', 0),
+        'leak_reclaim_total': leak.get('total', 0),
+        'leak_reclaim_orphan': leak.get('orphan', 0),
+        'leak_reclaim_hold': leak.get('hold', 0),
+        'group_details': det.get('groups', []),
+    }
+
+
 def _get_cmp_stats(config: dict) -> dict:
     """CMP에 stats 요청 (3s 캐시)."""
     def probe():
@@ -145,13 +179,7 @@ def _get_cmp_stats(config: dict) -> dict:
         else:
             # CmpIp 미설정(콘솔 관리 oam-svc 설정) — MediaServer.Endpoints 첫 노드를 대표 probe.
             cmp_ip, cmp_port = _media_endpoints(config)[0]
-        resp = _udp_request(cmp_ip, cmp_port, {
-            "trans_id": int(time.time()) % 100000,
-            "payload": {"cmd": "STATS_REQUEST"}
-        })
-        if isinstance(resp.get('response'), dict):
-            return resp['response']
-        return {}
+        return _cmp_stats_request(cmp_ip, cmp_port)
     return _cached('cmp', probe)
 
 
@@ -193,9 +221,7 @@ def _probe_cmp(ip: str, port: int) -> dict:
     key = f'{ip}:{port}'
 
     def probe():
-        resp = _udp_request(ip, port, {"trans_id": int(time.time()) % 100000,
-                                       "payload": {"cmd": "STATS_REQUEST"}}, timeout=2.5)
-        r = resp.get('response') if isinstance(resp.get('response'), dict) else None
+        r = _cmp_stats_request(ip, port, timeout=2.5) or None
         now = time.time()
         if r:
             _CMP_LAST_GOOD[key] = (now, r)

@@ -10,8 +10,8 @@
 >
 > - **REGISTER 는 호에 무영향**. 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
 > - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다.
-> - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `JOIN_PTT_GROUP`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
-> - **broadcast**: `ADD_PTT_GROUP` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
+> - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `PTT_JOIN`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
+> - **broadcast**: `PTT_GROUP_ADD` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
 > - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
 > - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
 >
@@ -314,7 +314,7 @@ UE                      CSP (CCscfModule)
   │  (그룹 URI, SDP)     │ [EventIncomingCall]
   │                      │  그룹 캐시 미스면 LoadFromDb() (lazy-load 안전망)
   │                      │ [ProcessGroupCall]
-  │                      │  ── ADD_PTT_GROUP ───────► │  공유 RTP/Floor 할당
+  │                      │  ── PTT_GROUP_ADD ───────► │  공유 RTP/Floor 할당
   │                      │     {group_id, members,    │  (group_type=broadcast 면
   │                      │      group_type,           │   initiator_id 동봉)
   │                      │      initiator_id}         │
@@ -322,13 +322,13 @@ UE                      CSP (CCscfModule)
   │ ◄── 200 OK ────────── │  SDP: m=audio {SharedPort} │
   │                      │       m=application {Floor} │  ← 개시자가 floor dest 학습
   │ ── ACK ────────────► │                            │
-  │                      │  ── JOIN_PTT_GROUP(caller)► │  개시자도 floor/RTP 멤버
+  │                      │  ── PTT_JOIN(caller)► │  개시자도 floor/RTP 멤버
   │                      │     {audio, floor=audio+1} │     (음성 릴레이 + floor 참여)
   │                      │                            │
   │                      │  [fan-out] affiliate+등록 멤버에게 multipart INVITE
   │                      │  ── INVITE ──────────────► 멤버 UE … (B 흐름: 200→JOIN)
   │                      │                            │
-  │  ※ 마지막 멤버 이탈 시 prearranged/broadcast 는 REMOVE_PTT_GROUP + 세션 종료.
+  │  ※ 마지막 멤버 이탈 시 prearranged/broadcast 는 PTT_GROUP_REMOVE + 세션 종료.
   │     chat 은 상시 유지.
 ```
 
@@ -336,7 +336,7 @@ UE                      CSP (CCscfModule)
 
 ```
 prearranged / broadcast (on-demand):
-  세션 없음 ──(개시자 키업 INVITE: B5)──► ADD_PTT_GROUP + 세션 ──(마지막 멤버 이탈)──► REMOVE_PTT_GROUP
+  세션 없음 ──(개시자 키업 INVITE: B5)──► PTT_GROUP_ADD + 세션 ──(마지막 멤버 이탈)──► PTT_GROUP_REMOVE
 
 chat (상시):
   CheckGroupIntegrity 가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
@@ -446,7 +446,7 @@ UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선
   │                      │ ── FLOOR_REJECT ─────────► │  floor.jsonl reason=broadcast
   │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  개시자 음성만 릴레이
 ```
-> `initiator_id` 는 `ADD_PTT_GROUP` 으로 CSP→CMP 전달(개시자 = `ProcessGroupCall` 의 caller). 개시자는 JOIN_PTT_GROUP 으로 CMP floor 멤버 등록되어 GRANT 가능.
+> `initiator_id` 는 `PTT_GROUP_ADD` 으로 CSP→CMP 전달(개시자 = `ProcessGroupCall` 의 caller). 개시자는 PTT_JOIN 으로 CMP floor 멤버 등록되어 GRANT 가능.
 
 ### C4. 멤버 퇴장 (정상 BYE)
 
@@ -634,7 +634,7 @@ CSP                                    CMP
 |-----------|----------|------|--------|
 | UE ↔ CSP | SIP/UDP | 5060 | REGISTER, INVITE, BYE, SUBSCRIBE, NOTIFY, **PUBLISH**(affiliation) |
 | UE ↔ CSC (XCAP/IdMS) | **HTTPS** | **4430** | CSC-1 토큰(/idms/*) + GMS/CMS 문서 GET (McpttServer) |
-| CSP → CMP | UDP JSON | 9000 | ADD_PTT_GROUP(+group_type/initiator_id), modify, remove, JOIN_PTT_GROUP, leave |
+| CSP → CMP | UDP JSON | 9000 | PTT_GROUP_ADD(+group_type/initiator_id)/MODIFY/REMOVE, PTT_JOIN/LEAVE, PTT_FLOOR_TIER |
 | CSC → CSP/PSP | UDP JSON | 4421 | group_change(CSP+PSP broadcast), user_change, stats |
 | UE ↔ CMP (Audio) | RTP/UDP | 52000-52018 | PTT 음성 데이터 (PPttTrans._rtpSock) |
 | UE ↔ CMP (Floor) | RTCP APP/UDP | 54000-54018 | MCPTT Floor Control (PPttTrans._floorSock) |

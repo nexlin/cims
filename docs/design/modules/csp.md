@@ -237,7 +237,7 @@ CMP AddGroup 응답 → {port, floor_port, video_port}
 
 **그룹 단위 통일 sesid:**
 
-PTT 그룹 세션에 대한 모든 모듈간 메시지(`ADD_PTT_GROUP`, `JOIN_PTT_GROUP`, `LEAVE_PTT_GROUP`, `REMOVE_PTT_GROUP`)와 SIP INVITE leg 들이 동일 sesid 를 공유하도록 per-group 매핑 유지:
+PTT 그룹 세션에 대한 모든 모듈간 메시지(`PTT_GROUP_ADD`, `PTT_JOIN`, `PTT_LEAVE`, `PTT_GROUP_REMOVE`)와 SIP INVITE leg 들이 동일 sesid 를 공유하도록 per-group 매핑 유지:
 
 ```cpp
 class CGroupCallService {
@@ -248,7 +248,7 @@ class CGroupCallService {
 ```
 
 - sesid 형식: `{group_id}::csp::{us_ts}::{counter}` (caller 자리에 group_id)
-- 그룹 해체(`REMOVE_PTT_GROUP` 완료) 시 매핑 제거
+- 그룹 해체(`PTT_GROUP_REMOVE` 완료) 시 매핑 제거
 - Console UI 의 PTT Flow 보기는 이 sesid 로 CSP/CMP 양쪽 로그를 하나의 세션으로 병합
 
 **MCPTT 도메인 per-dialog override:**
@@ -292,7 +292,7 @@ INVITE to group@domain
       │   ├─ Part 1: application/vnd.3gpp.mcptt-info+xml
       │   ├─ Part 2: application/resource-lists+xml (멤버 로스터 role/priority; INVITE>8192B 시 생략)
       │   └─ Part 3: SDP (공유 RTP + m=application floor)
-      ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP JOIN_PTT_GROUP(role 포함)
+      ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP PTT_JOIN(role 포함)
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
 ```
 
@@ -357,27 +357,29 @@ CCmpClient
   └─ SendRequestAndWait() (동기 요청, 100ms 대기 × 3회 재전송)
 ```
 
-**주요 명령** (cmd 값은 CSP 가 실제 송신하는 wire 문자열, CMP 는 별칭도 허용 — [cmp.md](cmp.md) §3.2):
+**주요 명령** (wire 는 envelope v2 `{hdr, payload}` — 정본
+[../../api/cmp_media_api.md](../../api/cmp_media_api.md), payload 필드는 [cmp.md](cmp.md) §3.2):
 
-| 명령 | 용도 | 응답 |
+| 명령 | 용도 | 응답 payload |
 |------|------|------|
-| `ADD_SESSION` | VoIP RTP relay 세션 생성 | local_ip, local_port, local_video_port |
-| `MODIFY_SESSION` | 세션 remote 주소 갱신 (re-INVITE 등) | local_ip, local_port, local_video_port |
-| `REMOVE_SESSION` | 세션 해제 | OK |
-| `ADD_PTT_GROUP` | PTT 그룹 RTP 생성 | ip, port, floor_port, video_port |
-| `MODIFY_GROUP` | 그룹 멤버/우선순위 갱신 | ip, port, floor_port, video_port |
-| `JOIN_PTT_GROUP` | 멤버 그룹 참가 (user_floor_port, role 포함) | OK |
-| `LEAVE_PTT_GROUP` | 멤버 그룹 퇴장 | OK |
-| `REMOVE_PTT_GROUP` | 그룹 해제 | OK |
-| `SET_FLOOR_TIER` | 멤버 floor tier 런타임 변경 (emergency/imminent/normal) | OK |
-| `HEARTBEAT` | 연결 상태 확인 (3초 주기) | OK |
+| `RELAY_ADD` | VoIP RTP relay 세션 생성 | local_ip, local_port, local_video_port |
+| `RELAY_MODIFY` | 세션 remote 주소 갱신 (re-INVITE 등) | local_ip, local_port, local_video_port |
+| `RELAY_REMOVE` | 세션 해제 | — (hdr.status 만) |
+| `PTT_GROUP_ADD` | PTT 그룹 RTP 생성 | ip, port, floor_port, video_port |
+| `PTT_GROUP_MODIFY` | 그룹 멤버/우선순위 갱신 | ip, port, floor_port, video_port |
+| `PTT_JOIN` | 멤버 그룹 참가 (user_floor_port, role 포함) | — |
+| `PTT_LEAVE` | 멤버 그룹 퇴장 | — |
+| `PTT_GROUP_REMOVE` | 그룹 해제 | — |
+| `PTT_FLOOR_TIER` | 멤버 floor tier 런타임 변경 (emergency/imminent/normal) | — |
+| `HEARTBEAT` | 연결 상태 확인 (3초 주기, hdr-only) | resource 요약 (relay/ptt total·used 등) |
 
-> `STATS_REQUEST` 는 CMP 가 처리하는 통계 조회 명령이지만 CSP(CCmpClient)는 송신하지 않는다 —
+> `STATS` 는 CMP 가 처리하는 통계 조회 명령이지만 CSP(CCmpClient)는 송신하지 않는다 —
 > OAM(`ems/core/oam` stats 핸들러)과 검증 파이프라인(stage6)이 CMP 9000/UDP 로 직접 조회한다.
 
 **Flow 메타 필드 (모든 Session/Group API 파라미터):**
 
-`CCmpClient` 의 Session/Group 메서드는 공통으로 다음 파라미터를 받아 payload 에 `service/sesid/caller/callee` 로 주입:
+`CCmpClient` 의 Session/Group 메서드는 공통으로 다음 파라미터를 받고, `_SendOnEndpoint` 가
+envelope 조립 시 `sesid/service` 는 hdr 로, `caller/callee` 는 payload 로 배치한다:
 
 ```cpp
 bool AddSession(const std::string& sesid,
@@ -388,7 +390,7 @@ bool AddSession(const std::string& sesid,
                 const std::string& remoteIp, int remotePort, ...);
 ```
 
-- `service` 는 cmd 이름을 기준으로 자동 결정 (cmd 에 `PTT` 포함 → mcptt, `SESSION` 포함 → volte, 그 외 → system) 되지만 명시 인자가 우선.
+- `service` 는 cmd 이름을 기준으로 자동 결정 (cmd 에 `PTT` 포함 → mcptt, `RELAY` 포함 → volte, 그 외 → system) 되지만 명시 인자가 우선.
 - 응답 Flow 엔트리는 `Transaction` 에 저장된 caller/callee/sesid/service 를 그대로 상속.
 
 **트랜잭션 처리:**

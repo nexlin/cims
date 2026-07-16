@@ -386,7 +386,7 @@ cmd_stats() {
 
     echo "=== CMP STATS ($SERVER_IP:$CMP_CONTROL_PORT) ==="
     local resp
-    resp=$(echo '{"payload":{"cmd":"STATS_REQUEST"},"trans_id":1}' \
+    resp=$(echo '{"hdr":{"ver":2,"trans_id":1,"node":"ptt-test","cmd":"STATS","type":"request"}}' \
         | nc -u -w2 "$SERVER_IP" "$CMP_CONTROL_PORT" 2>/dev/null)
 
     if [[ -z "$resp" ]]; then
@@ -397,7 +397,27 @@ cmd_stats() {
     echo "$resp" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-p = d.get('response', d.get('payload', d))
+# envelope v2: payload {resource:{relay,ptt}, detail:{...}} → flat 표시용 정규화
+pl = d.get('payload') or {}
+res = pl.get('resource') or {}
+relay = res.get('relay') or {}
+ptt = res.get('ptt') or {}
+det = pl.get('detail') or {}
+leak = det.get('leak_reclaim') or {}
+p = {
+    'sessions': relay.get('sessions'),
+    'groups': ptt.get('groups'),
+    'rtp_ports_total': relay.get('total'),
+    'rtp_ports_used': relay.get('used'),
+    'rtp_ports_free': (relay.get('total') or 0) - (relay.get('used') or 0),
+    'ptt_rtp_ports_total': ptt.get('total'),
+    'ptt_rtp_ports_used': ptt.get('used'),
+    'ptt_rtp_ports_free': (ptt.get('total') or 0) - (ptt.get('used') or 0),
+    'session_timeout': det.get('session_timeout'),
+    'orphan_reclaim_sec': det.get('orphan_reclaim_sec'),
+    'leak_reclaim_total': leak.get('total'),
+}
+p = {k: v for k, v in p.items() if v is not None}
 
 fields = [
     ('sessions',              'RTP 세션 수'),

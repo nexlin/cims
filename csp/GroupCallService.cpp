@@ -51,7 +51,7 @@ CGroupCallService::CGroupCallService() : m_bMonitorRunning( false ) {
 
 // ── PTT 그룹 세션 통일 sesid ─────────────────────────────────────
 // 그룹 세션이 존재하는 동안 발급된 동일한 sesid 를
-// ADD_PTT_GROUP / JOIN_PTT_GROUP / LEAVE_PTT_GROUP / REMOVE_PTT_GROUP
+// PTT_GROUP_ADD / PTT_JOIN / PTT_LEAVE / PTT_GROUP_REMOVE
 // + PTT SIP INVITE/ACK/BYE/NOTIFY 모두에 전달.
 std::string CGroupCallService::GetOrIssueGroupSesId( const std::string &strGroupId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
@@ -560,7 +560,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     //   세션 시작 판정: 이 그룹에 이미 활성 호(멤버)가 있으면 CMP 그룹은 유효
     //   (멤버>0 이라 CMP 의 유휴 timeout 회수 대상이 아님) → 캐시 사용.
     //   활성 멤버가 없으면(=세션 시작) CMP 가 유휴 그룹을 timeout 제거했을 수 있으므로
-    //   캐시를 믿지 말고 ADD_PTT_GROUP 으로 재확보한다 (멱등: 살아있으면 기존 port,
+    //   캐시를 믿지 말고 PTT_GROUP_ADD 으로 재확보한다 (멱등: 살아있으면 기존 port,
     //   회수됐으면 신규 생성). stale 캐시로 JOIN → 'Group Not Found' → 멤버 무더기
     //   drop 되던 문제(상용 PTT 영구그룹/장기 유휴 후 재통화)를 방지.
     int iSharedVideoPort = 0;

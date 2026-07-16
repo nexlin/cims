@@ -153,54 +153,138 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     if (len <= 0) return;
     std::string strPacket(buf, len);
     
-    // Parse JSON Wrapper
+    // Parse JSON Wrapper (envelope v2: {hdr, payload} — docs/api/cmp_media_api.md)
     SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse(strPacket);
-    
-    // Check trans_id and payload
+
     if (root.type != SimpleJson::JSON_OBJECT) {
         LOG_ERROR("PCmpServer", "Invalid JSON Packet from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
         return;
     }
-
-    int transId = (int)root.GetInt("trans_id", 0);
-    SimpleJson::JsonNode payload = root.Get("payload");
-    
-    if (payload.type != SimpleJson::JSON_OBJECT) {
-        LOG_ERROR("PCmpServer", "Missing Payload from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
-        return;
-    }
-
-    // Extract CMD
-    std::string cmd = payload.GetString("cmd");
-    // Normalize to uppercase for matching
-    std::string cmdUpper = cmd;
-    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
 
     // 원문 기록 (수신)
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string ts = getTimestamp();
     _lastRxSeq = writeMsgLine(ts.c_str(), "RX", peerStr.c_str(), "JSON", strPacket.c_str());
 
-    // Dispatch
-    LOG_DEBUG("PCmpServer", "Dispatching cmd=%s transId=%d from %s:%d", cmd.c_str(), transId, ip.c_str(), port);
-    if (cmdUpper == "ADD_SESSION" || cmdUpper == "ADD") processAdd(payload, ip, port, transId);
-    else if (cmdUpper == "REMOVE_SESSION" || cmdUpper == "REMOVE") processRemove(payload, ip, port, transId);
-    else if (cmdUpper == "HEARTBEAT" || cmdUpper == "ALIVE") processAlive(payload, ip, port, transId);
-    else if (cmdUpper == "ADD_PTT_GROUP" || cmdUpper == "ADD_GROUP" || cmdUpper == "ADDGROUP") processAddGroup(payload, ip, port, transId);
-    else if (cmdUpper == "JOIN_PTT_GROUP" || cmdUpper == "JOIN_GROUP" || cmdUpper == "JOINGROUP") processJoinGroup(payload, ip, port, transId);
-    else if (cmdUpper == "LEAVE_PTT_GROUP" || cmdUpper == "LEAVE_GROUP" || cmdUpper == "LEAVEGROUP") processLeaveGroup(payload, ip, port, transId);
-    else if (cmdUpper == "REMOVE_PTT_GROUP" || cmdUpper == "REMOVE_GROUP" || cmdUpper == "REMOVEGROUP") processRemoveGroup(payload, ip, port, transId);
-    else if (cmdUpper == "MODIFY_PTT_GROUP" || cmdUpper == "MODIFY_GROUP") processModifyGroup(payload, ip, port, transId);
-    else if (cmdUpper == "SET_FLOOR_TIER") processSetFloorTier(payload, ip, port, transId);
-    else if (cmdUpper == "MODIFY_SESSION" || cmdUpper == "MODIFY") processModify(payload, ip, port, transId);
-    else if (cmdUpper == "STATS_REQUEST" || cmdUpper == "STATS") processStats(payload, ip, port, transId);
-    else {
-        LOG_WARN("PCmpServer", "Unknown CMD: %s from %s:%d", cmd.c_str(), ip.c_str(), port);
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("response", "ERROR Unknown Command");
-        sendResponse(ip, port, resp.ToString());
+    SimpleJson::JsonNode hdr = root.Get("hdr");
+    if (hdr.type != SimpleJson::JSON_OBJECT) {
+        LOG_ERROR("PCmpServer", "Missing hdr from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
+        sendErr(ip, port, (int)root.GetInt("trans_id", 0), "", "", "",
+                "BAD_REQUEST", "hdr required (protocol v2)");
+        return;
     }
+
+    int ver = (int)hdr.GetInt("ver", 0);
+    int transId = (int)hdr.GetInt("trans_id", 0);
+    std::string type = hdr.GetString("type");
+    std::string cmdUpper = hdr.GetString("cmd");
+    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
+
+    if (ver != 2) {
+        sendErr(ip, port, transId, cmdUpper, hdr.GetString("sesid"), hdr.GetString("service"),
+                "UNSUPPORTED_VER", "protocol ver 2 required");
+        return;
+    }
+    if (type != "request") {
+        // 응답/이벤트 방향 오수신 — 응답하면 루프가 되므로 기록만 하고 버린다
+        LOG_WARN("PCmpServer", "Drop non-request type=%s cmd=%s from %s:%d", type.c_str(), cmdUpper.c_str(), ip.c_str(), port);
+        return;
+    }
+
+    // payload 준비 — hdr 의 상관 필드(sesid/service)와 cmd 를 계승해 핸들러 공통 로직에 전달
+    SimpleJson::JsonNode payload = root.Get("payload");
+    if (payload.type != SimpleJson::JSON_OBJECT) {
+        payload = SimpleJson::JsonNode();
+        payload.type = SimpleJson::JSON_OBJECT;
+    }
+    if (hdr.Has("sesid")) payload.Set("sesid", hdr.GetString("sesid"));
+    if (hdr.Has("service")) payload.Set("service", hdr.GetString("service"));
+    payload.Set("cmd", cmdUpper);
+
+    // Dispatch
+    LOG_DEBUG("PCmpServer", "Dispatching cmd=%s transId=%d from %s:%d", cmdUpper.c_str(), transId, ip.c_str(), port);
+    if (cmdUpper == "RELAY_ADD") processAdd(payload, ip, port, transId);
+    else if (cmdUpper == "RELAY_MODIFY") processModify(payload, ip, port, transId);
+    else if (cmdUpper == "RELAY_REMOVE") processRemove(payload, ip, port, transId);
+    else if (cmdUpper == "HEARTBEAT") processAlive(payload, ip, port, transId);
+    else if (cmdUpper == "PTT_GROUP_ADD") processAddGroup(payload, ip, port, transId);
+    else if (cmdUpper == "PTT_GROUP_MODIFY") processModifyGroup(payload, ip, port, transId);
+    else if (cmdUpper == "PTT_GROUP_REMOVE") processRemoveGroup(payload, ip, port, transId);
+    else if (cmdUpper == "PTT_JOIN") processJoinGroup(payload, ip, port, transId);
+    else if (cmdUpper == "PTT_LEAVE") processLeaveGroup(payload, ip, port, transId);
+    else if (cmdUpper == "PTT_FLOOR_TIER") processSetFloorTier(payload, ip, port, transId);
+    else if (cmdUpper == "STATS") processStats(payload, ip, port, transId);
+    else {
+        LOG_WARN("PCmpServer", "Unknown CMD: %s from %s:%d", cmdUpper.c_str(), ip.c_str(), port);
+        sendErr(ip, port, transId, cmdUpper, payload.GetString("sesid"), payload.GetString("service"),
+                "UNKNOWN_CMD", ("unknown cmd: " + cmdUpper).c_str());
+    }
+}
+
+// ── v2 응답 빌더 ────────────────────────────────────────────────────────────
+// 응답 = {hdr:{ver,trans_id,node,cmd,type,status[,code,reason][,sesid,service]}[,payload]}
+// sesid/service 는 호 문맥 명령에서만(빈 값이면 생략), CORE(HEARTBEAT/STATS)는 빈 값 전달.
+int PCmpServer::sendOk(const std::string& ip, int port, int transId, const std::string& cmd,
+                       const std::string& sesid, const std::string& svc,
+                       const SimpleJson::JsonNode* body,
+                       const char* caller, const char* callee) {
+    SimpleJson::JsonNode hdr;
+    hdr.Set("ver", 2);
+    hdr.Set("trans_id", transId);
+    hdr.Set("node", _systemId);
+    hdr.Set("cmd", cmd);
+    hdr.Set("type", "response");
+    hdr.Set("status", "OK");
+    if (!sesid.empty()) hdr.Set("sesid", sesid);
+    if (!svc.empty()) hdr.Set("service", svc);
+    SimpleJson::JsonNode env;
+    env.Set("hdr", hdr);
+    if (body) env.Set("payload", *body);
+    return sendResponse(ip, port, env.ToString(), caller, callee);
+}
+
+int PCmpServer::sendErr(const std::string& ip, int port, int transId, const std::string& cmd,
+                        const std::string& sesid, const std::string& svc,
+                        const char* code, const char* reason) {
+    SimpleJson::JsonNode hdr;
+    hdr.Set("ver", 2);
+    hdr.Set("trans_id", transId);
+    hdr.Set("node", _systemId);
+    hdr.Set("cmd", cmd);
+    hdr.Set("type", "response");
+    hdr.Set("status", "ERROR");
+    hdr.Set("code", code);
+    hdr.Set("reason", reason);
+    if (!sesid.empty()) hdr.Set("sesid", sesid);
+    if (!svc.empty()) hdr.Set("service", svc);
+    SimpleJson::JsonNode env;
+    env.Set("hdr", hdr);
+    return sendResponse(ip, port, env.ToString());
+}
+
+// HEARTBEAT/STATS 공통 자원 요약 — resource 키 목록이 곧 기능 광고 (호출측이 _mutex 보유)
+SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
+    int freeCount = (int)_freeResources.size();
+    int pttFreeCount = (int)_freePttResources.size();
+    int pttTotalPorts = (int)_pttPool.size();
+    int joined = 0;
+    for (auto const& [gid, group] : _groups) joined += group->getMemberCount();
+
+    SimpleJson::JsonNode relay;
+    relay.Set("total", _rtpPoolSize);
+    relay.Set("used", _rtpPoolSize - freeCount);
+    relay.Set("sessions", (int)_sessions.size());
+
+    SimpleJson::JsonNode ptt;
+    ptt.Set("total", pttTotalPorts);
+    ptt.Set("used", pttTotalPorts - pttFreeCount);
+    ptt.Set("groups", (int)_groups.size());
+    ptt.Set("joined", joined);
+
+    SimpleJson::JsonNode resource;
+    resource.Set("relay", relay);
+    resource.Set("ptt", ptt);
+    return resource;
 }
 
 int PCmpServer::sendResponse(const std::string& ip, int port, const std::string& msg,
@@ -266,99 +350,76 @@ std::string PCmpServer::getOrIssueSesid(const std::string& key, const std::strin
 }
 
 void PCmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
-    // payload.sesid 없으면 자체 발행 (CSP가 안 보낸 경우)
-    std::string sesid = payload.GetString("sesid");
-    if (sesid.empty()) sesid = issueSesid("");
-    std::string svc = payload.GetString("service");
-    if (svc.empty()) svc = "system";
+    // CORE 명령 — wire 에는 sesid/service 미포함. flow 로그 분류용 sesid 만 내부 발행.
+    std::string sesid = issueSesid("");
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string txIdStr = std::to_string(transId);
 
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     logFlow("heartbeat", "csp", "cmp", "JSON", "HEARTBEAT", "",
-            txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
+            txIdStr.c_str(), "system", sesid.c_str(), "", _lastRxSeq, "csp");
 
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-    resp.Set("sesid", sesid);
-    resp.Set("service", svc);
-    resp.Set("response", "OK");
-
-    int txSeq = sendResponse(ip, port, resp.ToString());
+    SimpleJson::JsonNode body;
+    {
+        PAutoLock lock(_mutex);
+        body.Set("resource", buildResourceSummary());
+    }
+    int txSeq = sendOk(ip, port, transId, "HEARTBEAT", "", "", &body);
     logFlow("heartbeat", "cmp", "csp", "JSON", "OK", "",
-            txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-    logBody("TX", peerStr.c_str(), "JSON", "OK");
+            txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
+    logBody("TX", peerStr.c_str(), "JSON", body.ToString().c_str());
 }
 
 void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
-    std::string sesid = payload.GetString("sesid");
-    if (sesid.empty()) sesid = issueSesid("");
-    std::string svc = payload.GetString("service");
-    if (svc.empty()) svc = "system";
+    // CORE 명령 — wire 에는 sesid/service 미포함. flow 로그 분류용 sesid 만 내부 발행.
+    std::string sesid = issueSesid("");
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string txIdStr = std::to_string(transId);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
-    logFlow("stats", "csp", "cmp", "JSON", "STATS_REQUEST", "",
-            txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
+    logFlow("stats", "csp", "cmp", "JSON", "STATS", "",
+            txIdStr.c_str(), "system", sesid.c_str(), "", _lastRxSeq, "csp");
 
     PAutoLock lock(_mutex);
 
-    int sessionCount = (int)_sessions.size();
-    int groupCount = (int)_groups.size();
-    int freeCount = (int)_freeResources.size();
-    int totalPorts = _rtpPoolSize;
-    int usedPorts = totalPorts - freeCount;
-    // PTT(그룹통화) 전용 풀 — VoIP 풀(_resourcePool)과 분리. 대시보드 RTP 리소스 분리 표시용.
-    int pttFreeCount  = (int)_freePttResources.size();
-    int pttTotalPorts = (int)_pttPool.size();
-    int pttUsedPorts  = pttTotalPorts - pttFreeCount;
+    // 요약(resource) + 상세(detail) — HEARTBEAT 요약과 동일 구조에 진단 정보를 더한다
+    SimpleJson::JsonNode body;
+    body.Set("resource", buildResourceSummary());
+
+    SimpleJson::JsonNode leak;
+    leak.Set("total", (long long)_leakReclaimTotal);
+    leak.Set("orphan", (long long)_leakReclaimOrphan);
+    leak.Set("hold", (long long)_leakReclaimHold);
 
     // 그룹별 상세 (멤버수, floor 화자)
-    std::string groupsJson = "[";
-    bool first = true;
+    SimpleJson::JsonNode groupsArr;
+    groupsArr.type = SimpleJson::JSON_ARRAY;
     for (auto const& [gid, group] : _groups) {
-        if (!first) groupsJson += ",";
-        first = false;
-        groupsJson += "{\"group_id\":\"" + gid + "\"";
-        groupsJson += ",\"members\":" + std::to_string(group->getMemberCount());
+        SimpleJson::JsonNode g;
+        g.Set("group_id", gid);
+        g.Set("members", group->getMemberCount());
         std::string holder = group->getFloorHolder();
-        if (!holder.empty()) {
-            groupsJson += ",\"floor_holder\":\"" + holder + "\"";
-        }
-        groupsJson += "}";
+        if (!holder.empty()) g.Set("floor_holder", holder);
+        groupsArr.Add(g);
     }
-    groupsJson += "]";
 
-    std::string body = "{\"trans_id\":" + std::to_string(transId)
-        + ",\"sesid\":\"" + sesid + "\""
-        + ",\"service\":\"" + svc + "\""
-        + ",\"response\":{\"status\":\"OK\""
-        + ",\"sessions\":" + std::to_string(sessionCount)
-        + ",\"groups\":" + std::to_string(groupCount)
-        + ",\"rtp_ports_total\":" + std::to_string(totalPorts)
-        + ",\"rtp_ports_used\":" + std::to_string(usedPorts)
-        + ",\"rtp_ports_free\":" + std::to_string(freeCount)
-        + ",\"ptt_rtp_ports_total\":" + std::to_string(pttTotalPorts)
-        + ",\"ptt_rtp_ports_used\":" + std::to_string(pttUsedPorts)
-        + ",\"ptt_rtp_ports_free\":" + std::to_string(pttFreeCount)
-        + ",\"session_timeout\":" + std::to_string(_sessionTimeout)
-        + ",\"orphan_reclaim_sec\":" + std::to_string(_orphanReclaimSec)
-        + ",\"leak_reclaim_total\":" + std::to_string(_leakReclaimTotal)
-        + ",\"leak_reclaim_orphan\":" + std::to_string(_leakReclaimOrphan)
-        + ",\"leak_reclaim_hold\":" + std::to_string(_leakReclaimHold)
-        + ",\"group_details\":" + groupsJson
-        + "}}";
+    SimpleJson::JsonNode detail;
+    detail.Set("session_timeout", _sessionTimeout);
+    detail.Set("orphan_reclaim_sec", _orphanReclaimSec);
+    detail.Set("leak_reclaim", leak);
+    detail.Set("groups", groupsArr);
+    body.Set("detail", detail);
 
-    int txSeq = sendResponse(ip, port, body);
+    int txSeq = sendOk(ip, port, transId, "STATS", "", "", &body);
     logFlow("stats", "cmp", "csp", "JSON", "OK", "",
-            txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-    logBody("TX", peerStr.c_str(), "JSON", body.c_str());
-    LOG_INFO("PCmpServer", "STATS: sessions=%d groups=%d ports=%d/%d", sessionCount, groupCount, usedPorts, totalPorts);
+            txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
+    logBody("TX", peerStr.c_str(), "JSON", body.ToString().c_str());
+    LOG_INFO("PCmpServer", "STATS: sessions=%d groups=%d ports_free=%d/%d", (int)_sessions.size(),
+             (int)_groups.size(), (int)_freeResources.size(), _rtpPoolSize);
 }
 
 void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string cmdName = payload.GetString("cmd");
-    if (cmdName.empty()) cmdName = "ADD_SESSION";
+    if (cmdName.empty()) cmdName = "RELAY_ADD";
     std::string sessionId = payload.GetString("session_id");
     std::string rmtIp = payload.GetString("remote_ip");
     int rmtPort = (int)payload.GetInt("remote_port");
@@ -379,13 +440,13 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
 
     // detail: 명령어별로 CSP 기록과 동일 포맷
     std::string detail;
-    if (cmdName == "MODIFY_SESSION") {
+    if (cmdName == "RELAY_MODIFY") {
         // MODIFY는 peer_index가 가리키는 한 쪽만 표기 (발/착 구분)
         if (peerIdx == 1 && !callee.empty()) detail = callee;
         else if (peerIdx == 0 && !caller.empty()) detail = caller;
         else if (!caller.empty() && !callee.empty()) detail = caller + "\xe2\x86\x92" + callee;
     } else {
-        // ADD_SESSION: caller→callee
+        // RELAY_ADD: caller→callee
         if (!caller.empty() && !callee.empty()) detail = caller + "\xe2\x86\x92" + callee;
         else if (!caller.empty()) detail = caller;
         else detail = sessionId;
@@ -437,38 +498,35 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                 detail.c_str(), txIdStr.c_str(),
                 svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp",
                 caller.c_str(), callee.c_str());
-        if (cmdName == "ADD_SESSION") {
+        if (cmdName == "RELAY_ADD") {
             logFlow(sessionId, "cmp", "cmp", "INT", "SESSION_START",
                     ("port=" + std::to_string(rtpPort)).c_str(),
                     "", svc.c_str(), sesid.c_str(), "", 0, "",
                     caller.c_str(), callee.c_str());
         }
 
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);  // 응답에도 service 포함 (계승)
         SimpleJson::JsonNode respBody;
-        respBody.Set("status", "OK");
         respBody.Set("local_ip", rtpIp);
         respBody.Set("local_port", rtpPort);
         respBody.Set("local_video_port", videoPort);
-        resp.Set("response", respBody.ToString());
 
-        int txSeq = sendResponse(ip, port, resp.ToString(), caller.c_str(), callee.c_str());
+        int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody,
+                           caller.c_str(), callee.c_str());
         // OK 응답은 detail 불필요 (요청 detail 과 중복 방지)
         logFlow(sessionId, "cmp", "csp", "JSON", "OK", "",
                 txIdStr.c_str(),
                 svc.c_str(), sesid.c_str(), "", txSeq, "csp",
                 caller.c_str(), callee.c_str());
         logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
-        LOG_INFO("PCmpServer", "ADD_SESSION session=%s remote=%s:%d -> local=%s:%d", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
+        LOG_INFO("PCmpServer", "RELAY_ADD session=%s remote=%s:%d -> local=%s:%d", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
     } else {
-         SimpleJson::JsonNode resp;
-         resp.Set("trans_id", transId);
-         resp.Set("response", "ERROR No Resource");
-         sendResponse(ip, port, resp.ToString());
-         LOG_WARN("PCmpServer", "ADD_SESSION session=%s FAILED: no available resource", sessionId.c_str());
+         std::string txIdStr2 = std::to_string(transId);
+         int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
+                             "NO_RESOURCE", "rtp pool exhausted");
+         logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", "No Resource",
+                 txIdStr2.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp",
+                 caller.c_str(), callee.c_str());
+         LOG_WARN("PCmpServer", "RELAY_ADD session=%s FAILED: no available resource", sessionId.c_str());
     }
 }
 
@@ -501,7 +559,7 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
-    logFlow(sessionId, "csp", "cmp", "JSON", "REMOVE_SESSION",
+    logFlow(sessionId, "csp", "cmp", "JSON", "RELAY_REMOVE",
             detail.c_str(), txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp",
             caller.c_str(), callee.c_str());
@@ -514,17 +572,13 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
         rtp->reset();
         freeResource(rtp);
         _sessions.erase(sessionId);
-        LOG_INFO("PCmpServer", "REMOVE_SESSION session=%s", sessionId.c_str());
+        LOG_INFO("PCmpServer", "RELAY_REMOVE session=%s", sessionId.c_str());
     } else {
-        LOG_WARN("PCmpServer", "REMOVE_SESSION session=%s not found", sessionId.c_str());
+        LOG_WARN("PCmpServer", "RELAY_REMOVE session=%s not found", sessionId.c_str());
     }
 
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-    resp.Set("sesid", sesid);
-    resp.Set("service", svc);
-    resp.Set("response", "OK");
-    int txSeq = sendResponse(ip, port, resp.ToString(), caller.c_str(), callee.c_str());
+    int txSeq = sendOk(ip, port, transId, "RELAY_REMOVE", sesid, svc, NULL,
+                       caller.c_str(), callee.c_str());
     logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), "", txSeq, "csp",
             caller.c_str(), callee.c_str());
@@ -553,10 +607,13 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     _serviceMap[groupId] = svc;
     std::string subid = payload.GetString("subid");
     if (!subid.empty()) _groupSubId[groupId] = subid;
+    // PTT_GROUP_MODIFY 위임 경로 포함 — flow 라벨은 실제 수신 cmd 를 따른다
+    std::string cmdName = payload.GetString("cmd");
+    if (cmdName.empty()) cmdName = "PTT_GROUP_ADD";
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
-    logFlow(groupId, "csp", "cmp", "JSON", "ADD_PTT_GROUP", groupId.c_str(), txIdStr.c_str(),
+    logFlow(groupId, "csp", "cmp", "JSON", cmdName.c_str(), groupId.c_str(), txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), subid.c_str(), _lastRxSeq, "csp");
 
     std::string sharedIp = _rtpIp;
@@ -666,29 +723,19 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
                          groupId.c_str(), initiator.c_str());
         }
 
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
         SimpleJson::JsonNode respBody;
-        respBody.Set("status", "OK");
         respBody.Set("ip", sharedIp);
         respBody.Set("port", sharedPort);
         respBody.Set("floor_port", sharedFloorPort);
         respBody.Set("video_port", sharedVideoPort);
 
-        resp.Set("response", respBody.ToString());
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), subid.c_str(), txSeq, "csp");
         logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
     } else {
-         SimpleJson::JsonNode resp;
-         resp.Set("trans_id", transId);
-         resp.Set("sesid", sesid);
-         resp.Set("service", svc);
-         resp.Set("response", "ERROR Allocation Fail");
-         int txSeq = sendResponse(ip, port, resp.ToString());
-         logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Allocation Fail", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+         int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
+                             "NO_RESOURCE", "ptt pool exhausted");
+         logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "No Resource", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
     }
 }
 
@@ -722,7 +769,7 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
-    logFlow(groupId, "csp", "cmp", "JSON", "JOIN_PTT_GROUP", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
+    logFlow(groupId, "csp", "cmp", "JSON", "PTT_JOIN", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
@@ -732,24 +779,15 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
         std::string tierStr = payload.GetString("tier");
         if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
 
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
-        resp.Set("response", "OK");
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendOk(ip, port, transId, "PTT_JOIN", sesid, svc);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
         logBody("TX", peerStr.c_str(), "JSON", "OK");
-        LOG_INFO("PCmpServer", "JOIN_GROUP group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
+        LOG_INFO("PCmpServer", "PTT_JOIN group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
     } else {
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
-        resp.Set("response", "ERROR Group Not Found");
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc,
+                            "NOT_FOUND", "group not found");
         logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        LOG_WARN("PCmpServer", "JOIN_GROUP group=%s not found", groupId.c_str());
+        LOG_WARN("PCmpServer", "PTT_JOIN group=%s not found", groupId.c_str());
     }
 }
 
@@ -773,31 +811,22 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
-    logFlow(groupId, "csp", "cmp", "JSON", "LEAVE_PTT_GROUP", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
+    logFlow(groupId, "csp", "cmp", "JSON", "PTT_LEAVE", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->removeMember(sessionId);
 
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
-        resp.Set("response", "OK");
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendOk(ip, port, transId, "PTT_LEAVE", sesid, svc);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
         logBody("TX", peerStr.c_str(), "JSON", "OK");
-        LOG_INFO("PCmpServer", "LEAVE_GROUP group=%s session=%s", groupId.c_str(), sessionId.c_str());
+        LOG_INFO("PCmpServer", "PTT_LEAVE group=%s session=%s", groupId.c_str(), sessionId.c_str());
     } else {
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
-        resp.Set("response", "ERROR Group Not Found");
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendErr(ip, port, transId, "PTT_LEAVE", sesid, svc,
+                            "NOT_FOUND", "group not found");
         logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        LOG_WARN("PCmpServer", "LEAVE_GROUP group=%s not found", groupId.c_str());
+        LOG_WARN("PCmpServer", "PTT_LEAVE group=%s not found", groupId.c_str());
     }
 }
 
@@ -820,7 +849,7 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
-    logFlow(groupId, "csp", "cmp", "JSON", "REMOVE_PTT_GROUP", groupId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
+    logFlow(groupId, "csp", "cmp", "JSON", "PTT_GROUP_REMOVE", groupId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
@@ -832,24 +861,15 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
         delete group;
         _groups.erase(groupId);
 
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
-        resp.Set("response", "OK");
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendOk(ip, port, transId, "PTT_GROUP_REMOVE", sesid, svc);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
         logBody("TX", peerStr.c_str(), "JSON", "OK");
-        LOG_INFO("PCmpServer", "REMOVE_GROUP group=%s", groupId.c_str());
+        LOG_INFO("PCmpServer", "PTT_GROUP_REMOVE group=%s", groupId.c_str());
     } else {
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("sesid", sesid);
-        resp.Set("service", svc);
-        resp.Set("response", "ERROR Group Not Found");
-        int txSeq = sendResponse(ip, port, resp.ToString());
+        int txSeq = sendErr(ip, port, transId, "PTT_GROUP_REMOVE", sesid, svc,
+                            "NOT_FOUND", "group not found");
         logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        LOG_WARN("PCmpServer", "REMOVE_GROUP group=%s not found", groupId.c_str());
+        LOG_WARN("PCmpServer", "PTT_GROUP_REMOVE group=%s not found", groupId.c_str());
     }
 
     // 그룹 종료 후 캐시 정리
@@ -859,11 +879,11 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
 }
 
 void PCmpServer::processModifyGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
-     LOG_DEBUG("PCmpServer", "MODIFY_GROUP -> delegating to processAddGroup");
+     LOG_DEBUG("PCmpServer", "PTT_GROUP_MODIFY -> delegating to processAddGroup");
      processAddGroup(payload, ip, port, transId);
 }
 
-// SET_FLOOR_TIER {group_id, session_id, tier} — 멤버의 condition tier(emergency/imminent/normal)
+// PTT_FLOOR_TIER {group_id, session_id, tier} — 멤버의 condition tier(emergency/imminent/normal)
 // 런타임 갱신. Phase 2 CSP 가 긴급 개시/업그레이드/취소 시 호출. 미디어 재협상 불필요(floor 만).
 void PCmpServer::processSetFloorTier(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string groupId   = payload.GetString("group_id");
@@ -871,23 +891,38 @@ void PCmpServer::processSetFloorTier(const SimpleJson::JsonNode& payload, const 
     std::string tierStr   = payload.GetString("tier");
     std::string txIdStr   = std::to_string(transId);
     std::string peerStr   = ip + ":" + std::to_string(port);
+
+    // sesid/service: payload > 그룹 캐시 > 발행/mcptt (다른 그룹 명령과 동일 규칙)
+    std::string sesid = payload.GetString("sesid");
+    if (sesid.empty()) {
+        auto its = _sesidMap.find(groupId);
+        if (its != _sesidMap.end()) sesid = its->second;
+    }
+    if (sesid.empty()) sesid = issueSesid("");
+    std::string svc = payload.GetString("service");
+    if (svc.empty()) {
+        auto itv = _serviceMap.find(groupId);
+        if (itv != _serviceMap.end()) svc = itv->second;
+    }
+    if (svc.empty()) svc = "mcptt";
+
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
+    logFlow(groupId, "csp", "cmp", "JSON", "PTT_FLOOR_TIER",
+            (sessionId + " tier=" + tierStr).c_str(), txIdStr.c_str(),
+            svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
     PAutoLock lock(_mutex);
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
     auto it = _groups.find(groupId);
     if (it != _groups.end() && !sessionId.empty()) {
         it->second->setTier(sessionId, ParseFloorTier(tierStr));
-        resp.Set("response", "OK");
-        int txSeq = sendResponse(ip, port, resp.ToString());
-        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), "mcptt", "", "", txSeq, "csp");
-        LOG_INFO("PCmpServer", "SET_FLOOR_TIER group=%s session=%s tier=%s", groupId.c_str(), sessionId.c_str(), tierStr.c_str());
+        int txSeq = sendOk(ip, port, transId, "PTT_FLOOR_TIER", sesid, svc);
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+        LOG_INFO("PCmpServer", "PTT_FLOOR_TIER group=%s session=%s tier=%s", groupId.c_str(), sessionId.c_str(), tierStr.c_str());
     } else {
-        resp.Set("response", "ERROR Group Not Found");
-        int txSeq = sendResponse(ip, port, resp.ToString());
-        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), "mcptt", "", "", txSeq, "csp");
-        LOG_WARN("PCmpServer", "SET_FLOOR_TIER group=%s not found", groupId.c_str());
+        int txSeq = sendErr(ip, port, transId, "PTT_FLOOR_TIER", sesid, svc,
+                            "NOT_FOUND", "group not found");
+        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+        LOG_WARN("PCmpServer", "PTT_FLOOR_TIER group=%s not found", groupId.c_str());
     }
 }
 

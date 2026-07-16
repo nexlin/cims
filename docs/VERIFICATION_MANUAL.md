@@ -217,7 +217,7 @@ cat build/dist/.deployed-manifest.json    # manifest_sha + ts
 | 3 | PTT 그룹 음성 5인 (`-mode ptt -scenario group_call -count 5 -no_video`) | ptt-sip (127.0.0.2) | seg_*.rtp +1 |
 | 4 | PTT 그룹 영상 5인 (`-mode ptt -scenario group_call -count 5`) | ptt-sip | seg_*.rtp +1 |
 | 5 | L7-NOTIFY (SUBSCRIBE/NOTIFY xcap-diff/resource-lists/conference-info XML well-formed) | csp | NOTIFY body XML namespace 매칭 |
-| 6 | CMP-GROUP-SYNC (admin POST → CMP STATS_REQUEST 응답의 group_details 매칭) | pmp 9000/udp | 5s polling group_id 매칭 |
+| 6 | CMP-GROUP-SYNC (admin POST → CMP STATS 응답의 group_details 매칭) | pmp 9000/udp | 5s polling group_id 매칭 |
 | 7 | MCPTT-FLOOR-GRANT (cmp_*.flow.jsonl 의 FLOOR_GRANT/TAKEN/IDLE) | pmp | flow.jsonl 매칭 |
 | 8 | DB-SYNC (admin → CSP 의 USER_CHANGED/GROUP_CHANGED notify 로그 매칭) | csp + psp | log glob 매칭 |
 | 9 | CERT-ROTATE (mTLS 토글 시 cert 발급 + agent reload) — `--enable-mtls` 시만 | mgmt csc + agent | cert_issued_at 갱신 또는 agent_mtls.crt mtime 60s 이내 |

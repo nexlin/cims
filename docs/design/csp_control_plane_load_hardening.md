@@ -9,7 +9,7 @@ ctrl01 단일 4코어 box 에 **cspsim(부하생성기) + csp + csc + oam + cons
 - **1 cps / HT20**: 완전 정상 (30/30 200, setup ~1.1s, 누수 0).
 - **4 cps / HT20**: **10~19 콜이 `status=500`**, setup p50 5~9초로 폭증.
 
-500 의 정체 = CSP 가 SIP `INVITE` 처리 중 CMP 에 보낸 제어요청(`ADD_SESSION` 등)의 응답을 제때 못 받아
+500 의 정체 = CSP 가 SIP `INVITE` 처리 중 CMP 에 보낸 제어요청(`RELAY_ADD` 등)의 응답을 제때 못 받아
 `SendRequestAndWait` 가 타임아웃 → CSP 가 `500 Internal Server Error` 생성.
 
 핵심 관찰: **CMP 는 항상 5~25ms 안에 정상 응답**(NFS 의 CMP 측 flow 로그로 확인)했는데 **CSP 만 2초 타임아웃**.

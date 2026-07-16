@@ -2,8 +2,8 @@
 """CMP Phase 1 긴급 floor 선점 라이브 점검 (cspsim 불필요).
 
 CSP 가 하는 일을 그대로 CMP UDP 제어/floor 로 재현:
-  ADD_PTT_GROUP(A,B) → JOIN A,B(floor 포트) → A floor REQUEST(GRANT)
-  → SET_FLOOR_TIER B emergency → B floor REQUEST → 선점(REVOKE A, GRANT B) 확인 → REMOVE.
+  PTT_GROUP_ADD(A,B) → JOIN A,B(floor 포트) → A floor REQUEST(GRANT)
+  → PTT_FLOOR_TIER B emergency → B floor REQUEST → 선점(REVOKE A, GRANT B) 확인 → REMOVE.
 
 floor REQUEST 는 RTCP-APP("MCPT") 패킷을 멤버 floorPort(=source port)에서 CMP shared floor port 로 송신.
 CMP 가 source 포트로 멤버를 식별(onFloorPacket: floorPort 매칭 + IP 학습).
@@ -33,13 +33,31 @@ def parse_floor(buf):
 
 
 def ctl(sock, ip, port, payload, tid):
-    pkt = {"trans_id": tid, "payload": payload}
+    # envelope v2 (docs/api/cmp_media_api.md) — payload 의 cmd 는 hdr 로 승격
+    p = dict(payload)
+    pkt = {"hdr": {"ver": 2, "trans_id": tid, "node": "script",
+                   "cmd": p.pop("cmd", ""), "type": "request", "service": "mcptt"}}
+    if p:
+        pkt["payload"] = p
     sock.sendto(json.dumps(pkt).encode(), (ip, port))
     try:
         data, _ = sock.recvfrom(8192)
         return json.loads(data.decode())
     except socket.timeout:
         return None
+
+
+def ctl_result(r):
+    """응답 표시용 — hdr.status (+ payload)"""
+    if not r:
+        return "(no resp)"
+    hdr = r.get("hdr") or {}
+    out = hdr.get("status", "?")
+    if hdr.get("code"):
+        out += f" {hdr['code']}"
+    if r.get("payload"):
+        out += f" {r['payload']}"
+    return out
 
 
 def main():
@@ -65,27 +83,22 @@ def main():
         nonlocal tid
         tid += 1
         r = ctl(ctlsock, a.cmp, a.port, payload, tid)
-        print(f"  {label}: {r.get('response') if r else '(no resp)'}")
+        print(f"  {label}: {ctl_result(r)}")
         return r
 
-    print(f"[1] ADD_PTT_GROUP {a.group} (A,B)")
-    r = step("ADD", {"cmd": "ADD_PTT_GROUP", "group_id": a.group,
+    print(f"[1] PTT_GROUP_ADD {a.group} (A,B)")
+    r = step("ADD", {"cmd": "PTT_GROUP_ADD", "group_id": a.group,
                      "members": "A:5:participant,B:5:participant", "count": 2,
                      "record_dir": a.record_dir, "log_dir": a.record_dir})
-    floor_port = None
-    if r and r.get("response"):
-        try:
-            floor_port = json.loads(r["response"]).get("floor_port")
-        except Exception:
-            pass
+    floor_port = (r.get("payload") or {}).get("floor_port") if r else None
     if not floor_port:
         print("  ✗ floor_port 미확보 — 중단"); return
     print(f"    shared floor_port = {floor_port}")
 
     print("[2] JOIN A,B")
-    step("JOIN A", {"cmd": "JOIN_PTT_GROUP", "group_id": a.group, "session_id": "A",
+    step("JOIN A", {"cmd": "PTT_JOIN", "group_id": a.group, "session_id": "A",
                     "user_ip": myip, "user_port": a.fport_a - 1, "user_floor_port": a.fport_a, "role": "participant"})
-    step("JOIN B", {"cmd": "JOIN_PTT_GROUP", "group_id": a.group, "session_id": "B",
+    step("JOIN B", {"cmd": "PTT_JOIN", "group_id": a.group, "session_id": "B",
                     "user_ip": myip, "user_port": a.fport_b - 1, "user_floor_port": a.fport_b, "role": "participant"})
 
     def drain(s, who):
@@ -106,8 +119,8 @@ def main():
     sa.sendto(floor_pkt(REQUEST), (a.cmp, floor_port))
     time.sleep(0.4); drain(sa, "A"); drain(sb, "B")
 
-    print("[4] SET_FLOOR_TIER B = emergency")
-    step("TIER", {"cmd": "SET_FLOOR_TIER", "group_id": a.group, "session_id": "B", "tier": "emergency"})
+    print("[4] PTT_FLOOR_TIER B = emergency")
+    step("TIER", {"cmd": "PTT_FLOOR_TIER", "group_id": a.group, "session_id": "B", "tier": "emergency"})
 
     print("[5] B floor REQUEST (긴급 — A 선점 기대: A REVOKE, B GRANT)")
     sb.sendto(floor_pkt(REQUEST), (a.cmp, floor_port))
@@ -117,8 +130,8 @@ def main():
     print(f"\n  ▶ 판정: A에 REVOKE={'O' if 'REVOKE' in ga else 'X'} / B에 GRANT={'O' if 'GRANT' in gb else 'X'}  → "
           + ("✅ 긴급 선점 확인" if verdict else "⚠ 패킷 수신으로는 미확정 — floor.jsonl 확인"))
 
-    print("[6] REMOVE_PTT_GROUP (정리)")
-    step("REMOVE", {"cmd": "REMOVE_PTT_GROUP", "group_id": a.group})
+    print("[6] PTT_GROUP_REMOVE (정리)")
+    step("REMOVE", {"cmd": "PTT_GROUP_REMOVE", "group_id": a.group})
     print(f"\nfloor.jsonl 확인: {a.record_dir}/<YYYY/MM/DD/HH>/floor.jsonl  (reason:emergency_preempt 기대)")
 
 

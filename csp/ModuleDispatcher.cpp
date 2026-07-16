@@ -711,7 +711,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             strRecordDir = gclsCallDir.GetVoipDir( pszCallId, pszFrom, pszTo );
             strLogDir = strRecordDir;
         }
-        // 발신측 RTP 주소를 ADD_SESSION에 포함 (생성 + peer[0] 한번에)
+        // 발신측 RTP 주소를 RELAY_ADD에 포함 (생성 + peer[0] 한번에)
         int iAudioPort = pclsRtp->GetAudioPort();
         if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
         int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
@@ -719,7 +719,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         // sesid: 수신 INVITE의 Call-ID로 이미 발행되어 있으면 재사용, 없으면 발행
         strRelaySesId = gclsSipLogger.GetOrIssueSesId( pszCallId, pszFrom ? pszFrom : "" );
 
-        // CMP relay 생성: session_id(전역 유일) 발행 후 ADD_SESSION 직접 전송.
+        // CMP relay 생성: session_id(전역 유일) 발행 후 RELAY_ADD 직접 전송.
         //   (구 gclsRtpMap.CreatePort 대체 — 포트단독키 bookkeeping 제거. 멀티 미디어노드에서 포트가
         //    노드별 비유일이라 포트키 충돌로 teardown 이 엉뚱한 세션을 회수→relay 누수하던 근본버그 제거.)
         strRelaySessionId = CCmpClient::IssueSessionId();
@@ -950,7 +950,7 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     } else {
         // PTT 개시자(originator) BYE: AcceptCall 경로라 gclsCallMap 미등록.
         // OnCallTerminated 미호출 시 m_mapCallSession에 1001 엔트리가 잔존 →
-        // 마지막 fan-out BYE 처리 시 bStillActive=true → REMOVE_PTT_GROUP 누락 →
+        // 마지막 fan-out BYE 처리 시 bStillActive=true → PTT_GROUP_REMOVE 누락 →
         // CheckGroupIntegrity 재-INVITE 폭주. 여기서 처리해야 정상 종료.
         gclsGroupCallService.OnCallTerminated( pszCallId );
 

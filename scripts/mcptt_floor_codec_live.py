@@ -7,7 +7,7 @@ CSP 가 하는 일을 CMP UDP 제어로 재현하고, **TS 24.380 subtype+TLV** 
   2) B REQUEST(동prio, 비선점) → B QUEUE_POS_INFO (큐잉; Deny 아님)
   3) A RELEASE → 대기자 B 자동 GRANTED + TAKEN
   4) B RELEASE → IDLE
-  5) (신규 그룹) SET_FLOOR_TIER B=emergency → A GRANT 후 B REQUEST → A REVOKE(cause) + B GRANTED
+  5) (신규 그룹) PTT_FLOOR_TIER B=emergency → A GRANT 후 B REQUEST → A REVOKE(cause) + B GRANTED
 
 subtype: Request=0 Granted=1 Taken=2 Deny=3 Release=4 Idle=5 Revoke=6 QueuePosReq=8 QueuePosInfo=9 Ack=10
 """
@@ -65,7 +65,13 @@ def check(cond, msg):
     print(f"    {'✅' if cond else '❌'} {msg}")
 
 def ctl(sock, ip, port, payload, tid):
-    sock.sendto(json.dumps({"trans_id": tid, "payload": payload}).encode(), (ip, port))
+    # envelope v2 (docs/api/cmp_media_api.md) — payload 의 cmd 는 hdr 로 승격
+    p = dict(payload)
+    pkt = {"hdr": {"ver": 2, "trans_id": tid, "node": "script",
+                   "cmd": p.pop("cmd", ""), "type": "request", "service": "mcptt"}}
+    if p:
+        pkt["payload"] = p
+    sock.sendto(json.dumps(pkt).encode(), (ip, port))
     try:
         return json.loads(sock.recvfrom(8192)[0].decode())
     except socket.timeout:
@@ -84,21 +90,22 @@ def main():
     def step(label, payload):
         nonlocal tid; tid += 1
         r = ctl(ctlsock, a.cmp, a.port, payload, tid)
-        print(f"  · {label}: {r.get('response') if r else '(no resp)'}")
+        st = (r.get("hdr") or {}).get("status") if r else None
+        print(f"  · {label}: {st or '(no resp)'}{' ' + str(r.get('payload')) if r and r.get('payload') else ''}")
         return r
 
     def run_group(group, fpa, fpb):
         sa = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sa.bind(("0.0.0.0", fpa)); sa.settimeout(1.5)
         sb = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sb.bind(("0.0.0.0", fpb)); sb.settimeout(1.5)
-        r = step(f"ADD_PTT_GROUP {group}", {"cmd":"ADD_PTT_GROUP","group_id":group,
+        r = step(f"PTT_GROUP_ADD {group}", {"cmd":"PTT_GROUP_ADD","group_id":group,
                  "members":"A:5:participant,B:5:participant","count":2,
                  "record_dir":f"{a.rec}/{group}","log_dir":f"{a.rec}/{group}"})
-        fport = json.loads(r["response"]).get("floor_port") if r and r.get("response") else None
+        fport = (r.get("payload") or {}).get("floor_port") if r else None
         if not fport:
             check(False, f"{group}: floor_port 확보"); return None, None, None, None
-        step("JOIN A", {"cmd":"JOIN_PTT_GROUP","group_id":group,"session_id":"A","user_ip":myip,
+        step("JOIN A", {"cmd":"PTT_JOIN","group_id":group,"session_id":"A","user_ip":myip,
                         "user_port":fpa-1,"user_floor_port":fpa,"role":"participant"})
-        step("JOIN B", {"cmd":"JOIN_PTT_GROUP","group_id":group,"session_id":"B","user_ip":myip,
+        step("JOIN B", {"cmd":"PTT_JOIN","group_id":group,"session_id":"B","user_ip":myip,
                         "user_port":fpb-1,"user_floor_port":fpb,"role":"participant"})
         return sa, sb, fport, group
 
@@ -145,7 +152,7 @@ def main():
         sb.sendto(rel(0xB1, "tel:+8210000002"), (a.cmp, fport)); time.sleep(0.5)
         ma, mb = drain(sa), drain(sb)
         check(find(ma, IDLE) or find(mb, IDLE), "IDLE(5) 브로드캐스트 수신")
-        step("REMOVE", {"cmd":"REMOVE_PTT_GROUP","group_id":g})
+        step("REMOVE", {"cmd":"PTT_GROUP_REMOVE","group_id":g})
         sa.close(); sb.close()
 
     print("\n=== 시나리오 B: emergency 선점 (REVOKE cause + GRANTED) ===")
@@ -154,8 +161,8 @@ def main():
         print("[1] A REQUEST → GRANTED")
         sa.sendto(req(0xA2, "tel:+8210000001"), (a.cmp, fport)); time.sleep(0.4)
         drain(sa); drain(sb)
-        print("[2] SET_FLOOR_TIER B = emergency")
-        step("TIER", {"cmd":"SET_FLOOR_TIER","group_id":g,"session_id":"B","tier":"emergency"})
+        print("[2] PTT_FLOOR_TIER B = emergency")
+        step("TIER", {"cmd":"PTT_FLOOR_TIER","group_id":g,"session_id":"B","tier":"emergency"})
         print("[3] B REQUEST (긴급) → A REVOKE + B GRANTED")
         sb.sendto(req(0xB2, "tel:+8210000002"), (a.cmp, fport)); time.sleep(0.5)
         ma, mb = drain(sa), drain(sb)
@@ -168,7 +175,7 @@ def main():
         if gb:
             ind = u16(gb["fields"], F_INDIC) or 0
             check((ind & 0x1000) != 0, f"B GRANTED Floor Indicator=emergency 비트(0x1000) (=0x{ind:04x})")
-        step("REMOVE", {"cmd":"REMOVE_PTT_GROUP","group_id":g})
+        step("REMOVE", {"cmd":"PTT_GROUP_REMOVE","group_id":g})
         sa.close(); sb.close()
 
     print(f"\n{'='*48}\n결과: {len(PASS)} PASS / {len(FAIL)} FAIL")

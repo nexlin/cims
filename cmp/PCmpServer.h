@@ -42,12 +42,22 @@ protected:
     void processRemoveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processJoinGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processLeaveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
-    // SET_FLOOR_TIER {group_id, session_id, tier} — 긴급/임박 floor tier 런타임 갱신(업그레이드/취소)
+    // PTT_FLOOR_TIER {group_id, session_id, tier} — 긴급/임박 floor tier 런타임 갱신(업그레이드/취소)
     void processSetFloorTier(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
     int sendResponse(const std::string& ip, int port, const std::string& msg,
                      const char* caller = "", const char* callee = "");
+    // v2 응답 빌더 (envelope: docs/api/cmp_media_api.md). sesid/svc 빈 값이면 hdr 에서 생략.
+    int sendOk(const std::string& ip, int port, int transId, const std::string& cmd,
+               const std::string& sesid, const std::string& svc,
+               const SimpleJson::JsonNode* body = NULL,
+               const char* caller = "", const char* callee = "");
+    int sendErr(const std::string& ip, int port, int transId, const std::string& cmd,
+                const std::string& sesid, const std::string& svc,
+                const char* code, const char* reason);
+    // HEARTBEAT/STATS 공통 자원 요약 (호출측이 _mutex 보유)
+    SimpleJson::JsonNode buildResourceSummary();
 
     // Resource Management
     void loadConfig();

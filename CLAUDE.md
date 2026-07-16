@@ -151,7 +151,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [android_ue_provisioning.md](docs/design/features/android_ue_provisioning.md) — UE 로그인·자동 프로비저닝(서비스별 프로파일, CSC `/provisioning/me`)
 
 **api/**
-- [admin_api.md](docs/api/admin_api.md) · [collection_api.md](docs/api/collection_api.md) · [agent_api.md](docs/api/agent_api.md) · [mcptt_api.md](docs/api/mcptt_api.md)
+- [admin_api.md](docs/api/admin_api.md) · [collection_api.md](docs/api/collection_api.md) · [agent_api.md](docs/api/agent_api.md) · [mcptt_api.md](docs/api/mcptt_api.md) · [cmp_media_api.md](docs/api/cmp_media_api.md) — CMP 미디어 서비스 제어 API (UDP JSON envelope v2)
 
 **user-manual/**
 - [deployment_workflow.md](docs/user-manual/deployment_workflow.md) · [ue_interface.md](docs/user-manual/ue_interface.md) · [volte_ue.md](docs/user-manual/volte_ue.md) · [ptt_ue.md](docs/user-manual/ptt_ue.md)

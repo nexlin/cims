@@ -52,6 +52,10 @@ public:
     bool IsRawLogEnabled() const {
         return m_bRawLogEnabled;
     }
+    /** 논리 노드 ID (e.g. "csp_01") — CMP 제어 envelope hdr.node 등 발신 주체 표기용 */
+    const std::string &GetSystemId() const {
+        return m_strSystemId;
+    }
 
     /** ILogCallBack::Print — SIP 스택 콜백 (from/to = ue↔csp 기본) */
     void Print( EnumLogLevel eLevel, const char *fmt, ... ) override;

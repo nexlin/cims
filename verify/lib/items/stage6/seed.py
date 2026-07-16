@@ -16,7 +16,7 @@ from ...common.subscribers import (
 )
 from ...common.access_services import seed_access_services, signal_csp_reload
 from ...common.csp_notify import trigger_group_resync
-from ...common.cmp_client import cmp_request
+from ...common.cmp_client import cmp_stats
 from ...common.ibcf_routing import seed_ibcf_routing, IBCF_PEER_DOMAIN
 
 # Mock 외부 peer (cspsim peer 프로세스) 의 listen endpoint.
@@ -28,13 +28,11 @@ from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
 
 def _wait_cmp_ready(ip: str = "127.0.0.1", port: int = 9000,
                     timeout_sec: int = 60) -> bool:
-    """cmp 가 STATS_REQUEST 에 응답할 때까지 polling. 응답 시 True."""
+    """cmp 가 STATS 에 응답할 때까지 polling. 응답 시 True."""
     import time as _t
     deadline = _t.time() + timeout_sec
     while _t.time() < deadline:
-        resp = cmp_request({"cmd": "STATS_REQUEST", "sesid": "verify-seed-wait"},
-                           ip=ip, port=port, timeout=1.0)
-        if resp and isinstance(resp.get("response"), dict):
+        if cmp_stats(ip=ip, port=port, timeout=1.0) is not None:
             return True
         _t.sleep(2)
     return False
@@ -51,9 +49,7 @@ def _wait_group_in_cmp(target_gid: str, ip: str = "127.0.0.1",
     while _t.time() < deadline:
         trigger_group_resync(f"tel:{target_gid}")
         _t.sleep(2)
-        resp = cmp_request({"cmd": "STATS_REQUEST", "sesid": "verify-seed-poll"},
-                           ip=ip, port=port, timeout=1.0)
-        details = ((resp or {}).get("response") or {}).get("group_details", []) or []
+        details = (cmp_stats(ip=ip, port=port, timeout=1.0) or {}).get("group_details", []) or []
         if any(isinstance(g, dict) and g.get("group_id") == target_gid
                for g in details):
             return True

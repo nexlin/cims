@@ -185,322 +185,39 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 
 > 그룹 통화는 공유 세션 1개를 사용합니다. 즉 5개 멤버 그룹 통화도 리소스 풀에서 1개만 할당됩니다.
 
-**CSP→CMP JSON 프로토콜 상세:**
+**CSP→CMP JSON 프로토콜 (envelope v2):**
 
-모든 요청은 JSON 래퍼로 감싸집니다:
+wire 규격 정본은 [../api/cmp_media_api.md](../api/cmp_media_api.md) 다. 요약:
+
 ```json
 {
-  "trans_id": <순차 정수>,
-  "payload": { <명령별 JSON + service + sesid + caller + callee> }
+  "hdr": {
+    "ver": 2, "trans_id": 1024, "node": "csp_01",
+    "cmd": "RELAY_ADD", "type": "request",
+    "sesid": "+8210...::csp::...::1", "service": "volte"
+  },
+  "payload": { "session_id": "...", "remote_ip": "...", "remote_port": 40000 }
 }
 ```
 
-> **Flow/sesid 메타 필드**: 모든 CSP↔CMP payload 는 `service` (volte/mcptt/system/console), `sesid` (`{caller}::{module}::{ts}::{counter}`), `caller`, `callee` 를 포함합니다. CMP 는 이 값을 저장해 응답 Flow 로그에 상속하여 세션 상관관계를 유지합니다. 전체 규격은 [../features/flow_logging.md](./../features/flow_logging.md) 참고.
+- **envelope**: `hdr`(ver/trans_id/node/cmd/type + 응답 status/code/reason) + `payload`(업무 필드).
+  `sesid`/`service` 는 호 문맥 명령에서만 hdr 에 실리고, CORE(HEARTBEAT/STATS)는 생략한다.
+- **명령**: function prefix 체계 — RELAY_ADD/MODIFY/REMOVE (1:1 relay),
+  PTT_GROUP_ADD/MODIFY/REMOVE·PTT_JOIN/LEAVE·PTT_FLOOR_TIER (그룹/floor),
+  HEARTBEAT·STATS (CORE). 필드 정의는 API 문서 참조.
+- **응답**: `hdr.status` OK/ERROR (+ ERROR 시 `code`/`reason` 구조화), 결과 데이터는 `payload` 로.
+- **HEARTBEAT**: CSP 가 3초 주기 송신, 연속 3회 실패 시 Disconnected 판정. CMP 응답에
+  자원 요약(`resource.relay/ptt` — total/used/sessions/groups/joined)이 동봉되어 client 가
+  부하 기반 선택·조기 호 거절에 쓸 수 있다. `resource` 키 목록이 곧 CMP 기능 광고다.
+- **신뢰성**: CSP 는 `trans_id` 로 응답을 매칭하며, 무응답 시 동일 trans_id+payload 를 100ms
+  간격 최대 3회 재전송한다. 자원 생성 명령은 자원 키(session_id/group_id) 기준 멱등이라 안전
+  ([modules/csp.md](modules/csp.md) §3.6).
 
-모든 응답:
-```json
-{
-  "trans_id": <요청과 동일>,
-  "response": "<문자열, 또는 JSON 객체를 문자열화한 값>"
-}
-```
-
-CSP 는 `trans_id` 로 응답을 매칭하며, 무응답 시 동일 `trans_id`+payload 를 100ms 간격으로
-최대 3회 재전송한다 (명령이 session_id/group_id 기준 멱등이라 안전 —
-[modules/csp.md](modules/csp.md) §3.6).
-
-CMP 는 수신 `cmd` 를 대문자 정규화해 비교하고 명령별 별칭(`ADD`, `ADD_GROUP`, `JOINGROUP` 등)을
-허용한다. 아래 예시의 `cmd` 값은 CSP 가 실제 송신하는 wire 문자열이다. 별칭 전체 목록은
-[modules/cmp.md](modules/cmp.md) §3.2 참고.
-
-#### `ADD_SESSION` — 1:1 RTP 세션 생성
-
-**요청:**
-```json
-{
-  "trans_id": 1,
-  "payload": {
-    "cmd": "ADD_SESSION",
-    "session_id": "inv-20260331-001@192.168.0.2",
-    "remote_ip": "0.0.0.0",
-    "remote_port": 0,
-    "remote_video_port": 0,
-    "peer_index": 0,
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "inv-20260331-001@192.168.0.2",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-**성공 응답:**
-```json
-{
-  "trans_id": 1,
-  "response": "{\"status\":\"OK\",\"local_ip\":\"192.168.0.2\",\"local_port\":50000,\"local_video_port\":50002}"
-}
-```
-
-**실패 응답 (리소스 부족):**
-```json
-{
-  "trans_id": 1,
-  "response": "ERROR No Resource"
-}
-```
-
-> `ADD_SESSION` 을 동일 session_id로 다시 보내면 기존 세션의 remote 정보를 업데이트합니다.
-> remote 주소 갱신 전용으로는 `MODIFY_SESSION` (별칭 `MODIFY`) 을 사용하며, 필드는 동일하고
-> CMP 내부에서 같은 경로로 처리됩니다.
-
-#### `REMOVE_SESSION` — RTP 세션 삭제
-
-**요청:**
-```json
-{
-  "trans_id": 2,
-  "payload": {
-    "cmd": "REMOVE_SESSION",
-    "session_id": "inv-20260331-001@192.168.0.2",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "inv-20260331-001@192.168.0.2",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-**응답:**
-```json
-{
-  "trans_id": 2,
-  "response": "OK"
-}
-```
-
-#### `ADD_PTT_GROUP` — PTT 그룹 생성 및 공유 RTP 세션 할당
-
-**요청:**
-```json
-{
-  "trans_id": 3,
-  "payload": {
-    "cmd": "ADD_PTT_GROUP",
-    "group_id": "+82571910001",
-    "count": 3,
-    "members": "+82571900001:0:chair,+821030432632:0:participant,+82571900002:1:participant",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "0",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-| 필드 | 설명 |
-|------|------|
-| `group_id` | 그룹 MSISDN |
-| `count` | 멤버 수 |
-| `members` | `"id1:priority1:role1,id2:priority2:role2,..."` 형식 문자열 (role=chair/participant) |
-
-**성공 응답:**
-```json
-{
-  "trans_id": 3,
-  "response": "{\"status\":\"OK\",\"ip\":\"192.168.0.2\",\"port\":50000,\"floor_port\":50001,\"video_port\":50002}"
-}
-```
-
-> 동일 group_id로 다시 `ADD_PTT_GROUP`을 보내면 기존 그룹의 우선순위를 업데이트합니다 (`MODIFY_GROUP`과 동일 동작).
-
-#### `JOIN_PTT_GROUP` — 멤버를 그룹에 추가
-
-**요청:**
-```json
-{
-  "trans_id": 4,
-  "payload": {
-    "cmd": "JOIN_PTT_GROUP",
-    "group_id": "+82571910001",
-    "session_id": "+82571900001",
-    "user_ip": "192.168.0.100",
-    "user_port": 40000,
-    "user_floor_port": 40001,
-    "user_video_port": 40002,
-    "role": "participant",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "+82571900001",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-| 필드 | 설명 |
-|------|------|
-| `session_id` | 멤버 식별자 (PTT MSISDN) |
-| `user_ip` | 멤버의 RTP 수신 IP |
-| `user_port` | 멤버의 Audio RTP 포트 |
-| `user_floor_port` | 멤버의 Floor Control 포트 |
-| `user_video_port` | 멤버의 Video RTP 포트 (0이면 음성만) |
-| `role` | `chair`/`participant` (기본 participant) |
-
-**성공 응답:**
-```json
-{
-  "trans_id": 4,
-  "response": "OK"
-}
-```
-
-**실패 응답:**
-```json
-{
-  "trans_id": 4,
-  "response": "ERROR Group Not Found"
-}
-```
-
-#### `LEAVE_PTT_GROUP` — 멤버를 그룹에서 제거
-
-**요청:**
-```json
-{
-  "trans_id": 5,
-  "payload": {
-    "cmd": "LEAVE_PTT_GROUP",
-    "group_id": "+82571910001",
-    "session_id": "+82571900001",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "+82571900001",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-**응답:**
-```json
-{
-  "trans_id": 5,
-  "response": "OK"
-}
-```
-
-> 현재 발언권 소유자가 나가면 자동으로 FLOOR_IDLE이 모든 멤버에게 브로드캐스트됩니다.
-
-#### `REMOVE_PTT_GROUP` — 그룹 삭제
-
-**요청:**
-```json
-{
-  "trans_id": 6,
-  "payload": {
-    "cmd": "REMOVE_PTT_GROUP",
-    "group_id": "+82571910001",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "0",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-**응답:**
-```json
-{
-  "trans_id": 6,
-  "response": "OK"
-}
-```
-
-#### `MODIFY_GROUP` — 그룹 멤버/우선순위 변경
-
-내부적으로 `ADD_PTT_GROUP`과 동일하게 처리됩니다.
-
-**요청:**
-```json
-{
-  "trans_id": 7,
-  "payload": {
-    "cmd": "MODIFY_GROUP",
-    "group_id": "+82571910001",
-    "members": "+82571900001:0:chair,+821030432632:1:participant,+82571900002:2:participant",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "0",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-**응답:**
-```json
-{
-  "trans_id": 7,
-  "response": "{\"status\":\"OK\",\"ip\":\"192.168.0.2\",\"port\":50000,\"floor_port\":50001,\"video_port\":50002}"
-}
-```
-
-#### `SET_FLOOR_TIER` — 멤버 floor tier 런타임 변경
-
-긴급/임박(emergency/imminent) 업그레이드·취소 시 미디어 재협상 없이 floor 선점 우선순위만
-갱신합니다 ([features/mcptt_emergency_modes.md](features/mcptt_emergency_modes.md)).
-
-**요청:**
-```json
-{
-  "trans_id": 8,
-  "payload": {
-    "cmd": "SET_FLOOR_TIER",
-    "group_id": "+82571910001",
-    "session_id": "+82571900001",
-    "tier": "emergency"
-  }
-}
-```
-
-| 필드 | 설명 |
-|------|------|
-| `session_id` | 대상 멤버 식별자 |
-| `tier` | `emergency` / `imminent` / `normal` |
-
-**응답:** `"OK"` (그룹 없으면 `"ERROR Group Not Found"`)
-
-#### `HEARTBEAT` — 연결 확인 (Keep-Alive)
-
-CSP가 3초 간격으로 전송합니다.
-
-**요청:**
-```json
-{
-  "trans_id": 100,
-  "payload": {
-    "cmd": "HEARTBEAT",
-    "csp_id": "CSP_MAIN",
-    "csp_sess_id": "0",
-    "cmp_id": "CMP_MAIN",
-    "cmp_sess_id": "0"
-  }
-}
-```
-
-**응답:**
-```json
-{
-  "trans_id": 100,
-  "response": "OK"
-}
-```
-
-> CSP는 HEARTBEAT 가 연속 3회 실패하면 (≈9초 무응답) CMP 연결 끊김으로 판단하고,
-> 재연결 시 `m_fnConnectionCallback`을 호출합니다.
 
 ### 2.3 McpttGroup 상세 동작
 
 **SSRC 할당:**
-- CMP는 `JOIN_PTT_GROUP` 시 각 멤버에게 순차적 SSRC를 할당합니다 (시작값 1000부터).
+- CMP는 `PTT_JOIN` 시 각 멤버에게 순차적 SSRC를 할당합니다 (시작값 1000부터).
 - 멤버의 `audioSsrcOut` = 1000 + 할당 카운터 (수신자에게 보내는 고정 SSRC)
 - 멤버의 `videoSsrcOut` = 2000 + 할당 카운터
 - 이렇게 하면 수신자는 항상 동일한 SSRC로 RTP를 받아 디코더 초기화가 안정적입니다.
@@ -535,7 +252,7 @@ CSP가 3초 간격으로 전송합니다.
 ```
 
 **Port Latching:**
-- CMP는 멤버의 실제 RTP 소스 포트가 `JOIN_PTT_GROUP`에서 등록한 포트와 다를 수 있음을 고려합니다.
+- CMP는 멤버의 실제 RTP 소스 포트가 `PTT_JOIN`에서 등록한 포트와 다를 수 있음을 고려합니다.
 - IP가 일치하고 해당 IP를 가진 멤버가 1명뿐이면 포트를 자동 업데이트합니다.
 - 이 동작은 NAT 뒤에 있는 클라이언트를 지원합니다.
 

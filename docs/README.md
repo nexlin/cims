@@ -33,6 +33,7 @@ docs/
 │   ├── admin_api.md                 관리자 API (가입자/그룹/검증/빌드/패키지/서버/배포)
 │   ├── agent_api.md                 Agent ↔ CSC (enroll/heartbeat/report)
 │   ├── collection_api.md            Collection 프록시 (/deployments/{id}/collection)
+│   ├── cmp_media_api.md             CMP 미디어 서비스 제어 API (UDP JSON envelope v2)
 │   └── mcptt_api.md                 3GPP MCPTT (IdMS/GMS/CMS/KMS)
 └── user-manual/          사용자 매뉴얼
     ├── ue_interface.md              단말 연동 개요
