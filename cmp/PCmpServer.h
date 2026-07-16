@@ -16,6 +16,7 @@
 #include "pmodule.h"
 #include "PRtpRelay.h"
 #include "PRtpMulticast.h"
+#include "PPttMemberPort.h"
 #include "PMcpttGroup.h"
 #include "SimpleJson.h"
 
@@ -63,10 +64,15 @@ protected:
     void loadConfig();
     void initResourcePool();
     void initPttResourcePool();
+    void initPttMemberPool();
     PRtpRelay* allocResource(std::string& rtpIp, int& rtpPort, int& videoPort);
     void freeResource(PRtpRelay* rtp);
-    PRtpMulticast* allocPttResource(std::string& rtpIp, int& rtpPort, int& floorPort, int& videoPort);
+    PRtpMulticast* allocPttResource(std::string& rtpIp, int& floorPort);
     void freePttResource(PRtpMulticast* ptt);
+    // 멤버 전용 포트 유닛 — (groupId, sessionId) 키로 할당/재사용 (멱등). 호출자가 _mutex 보유.
+    PPttMemberPort* ensureMemberUnit(const std::string& groupId, const std::string& sessionId, PMcpttGroup* group);
+    void freeMemberUnit(const std::string& groupId, const std::string& sessionId);
+    void freeGroupMemberUnits(const std::string& groupId);
 
 private:
     int _udpFd;
@@ -148,10 +154,11 @@ private:
     std::string _rtpIp;
 
     // PTT Resource Pool
-    int _pttRtpStartPort;
-    int _pttRtpPoolSize;
-    int _pttFloorStartPort;
-    int _pttVideoStartPort;
+    int _pttRtpStartPort;     // 멤버 유닛 audio RTP 대역 시작 (stride 2)
+    int _pttRtpPoolSize;      // 그룹(floor) 풀 크기
+    int _pttFloorStartPort;   // 그룹 floor 대역 시작 (stride 2)
+    int _pttVideoStartPort;   // 멤버 유닛 video RTP 대역 시작 (stride 2)
+    int _pttMemberPoolSize;   // 멤버 유닛 풀 크기 (동시 참가 멤버 수)
 
     // Server Config
     std::string _serverIp;
@@ -168,9 +175,14 @@ private:
     std::vector<PRtpRelay*> _resourcePool;
     std::vector<PRtpRelay*> _freeResources;
 
-    // PTT 리소스 (PRtpMulticast, audio RTP + floor control)
+    // PTT 그룹 리소스 (PRtpMulticast, 그룹 공유 floor control)
     std::vector<PRtpMulticast*> _pttPool;
     std::vector<PRtpMulticast*> _freePttResources;
+
+    // PTT 멤버 전용 포트 유닛 (PPttMemberPort, audio+video RTP)
+    std::vector<PPttMemberPort*> _pttMemberPool;
+    std::vector<PPttMemberPort*> _freePttMembers;
+    std::map<std::string, PPttMemberPort*> _memberUnits;  // "groupId|sessionId" → unit
 
     // Worker config
     int _rtpWorkerCount;

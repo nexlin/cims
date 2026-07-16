@@ -77,6 +77,8 @@ public:
     ~CCallMap();
 
     bool Insert( const char *pszRecvCallId, const char *pszSendCallId, int iStartRtpPort );
+    // leg 별 포트: entry 별로 다른 relay 포트 저장 — m_iPeerRtpPort = 그 leg 의 peer 에게 광고할 포트.
+    bool Insert( const char *pszRecvCallId, const char *pszSendCallId, int iRecvRtpPort, int iSendRtpPort );
     bool Insert( const char *pszCallId, CCallInfo &clsCallInfo );
 
     /** CMP relay descriptor 를 해당 Call-ID 와 그 peer leg 양쪽에 기록 (B2BUA 양 leg 동일 relay 공유).

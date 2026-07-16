@@ -43,7 +43,7 @@
     {
       "key": "voip_rtp",
       "title": "VoIP RTP 포트 풀",
-      "description": "VoLTE B2BUA 통화용. 4 포트 블록 (Audio RTP/RTCP + Video RTP/RTCP) 단위로 할당.",
+      "description": "VoLTE B2BUA 통화용. 호당 8 포트 — peer(leg) 별 4 포트 블록 (Audio RTP/RTCP + Video RTP/RTCP) × 2. 수신 포트가 곧 peer 신원 (ue_nat_traversal.md).",
       "fields": [
         {
           "key": "RtpStartPort",
@@ -62,7 +62,7 @@
           "min": 1,
           "max": 10000,
           "restart": true,
-          "help": "동시 처리 가능한 VoIP 호 수 (블록 단위)."
+          "help": "동시 처리 가능한 VoIP 호 수 (호당 8 포트 블록)."
         }
       ],
       "scope": "service"
@@ -70,11 +70,11 @@
     {
       "key": "ptt_rtp",
       "title": "PTT RTP 포트 풀",
-      "description": "PTT 그룹콜 전용. RTP + Floor(m=application) + Video 포트를 독립 소켓으로 할당.",
+      "description": "PTT 그룹콜 전용. 그룹당 공유 Floor(m=application) 포트 + 멤버당 전용 Audio/Video RTP 포트 (leg 별 포트셋).",
       "fields": [
         {
           "key": "PttRtpStartPort",
-          "label": "PTT RTP 시작 포트",
+          "label": "PTT 멤버 Audio RTP 시작 포트",
           "type": "int",
           "default": 52000,
           "min": 1024,
@@ -89,7 +89,7 @@
           "min": 1,
           "max": 10000,
           "restart": true,
-          "help": "동시 활성 그룹콜 수."
+          "help": "동시 활성 그룹콜 수 (그룹 공유 floor 포트 풀)."
         },
         {
           "key": "PttFloorStartPort",
@@ -103,12 +103,22 @@
         },
         {
           "key": "PttVideoStartPort",
-          "label": "PTT Video 시작 포트",
+          "label": "PTT 멤버 Video RTP 시작 포트",
           "type": "int",
           "default": 56000,
           "min": 1024,
           "max": 65000,
           "restart": true
+        },
+        {
+          "key": "PttMemberPoolSize",
+          "label": "PTT 멤버 포트 유닛 풀 크기",
+          "type": "int",
+          "default": 40,
+          "min": 1,
+          "max": 10000,
+          "restart": true,
+          "help": "동시 참가 가능한 PTT 멤버 총수 (멤버당 Audio/Video RTP 각 1 포트, stride 2)."
         }
       ],
       "scope": "service"

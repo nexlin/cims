@@ -27,7 +27,7 @@ static const int kCmpLogFlushIntervalMs = 100;        // 주기 flush (버퍼 �
 
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _floorIdleSec(10), _rtpWorkerCount(4),
-      _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _segmentIntervalSec(60),
+      _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _pttMemberPoolSize(40), _segmentIntervalSec(60),
       _msgSeq(-1), _lastRxSeq(0),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
       _leakReclaimTotal(0), _leakReclaimOrphan(0), _leakReclaimHold(0)
@@ -45,6 +45,7 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
 
     initResourcePool();
     initPttResourcePool();
+    initPttMemberPool();
 }
 
 PCmpServer::~PCmpServer() {
@@ -65,6 +66,13 @@ PCmpServer::~PCmpServer() {
     }
     _pttPool.clear();
     _freePttResources.clear();
+
+    for(auto* mu : _pttMemberPool) {
+        delete mu;
+    }
+    _pttMemberPool.clear();
+    _freePttMembers.clear();
+    _memberUnits.clear();
 
     // epoll fd 정리 (스레드는 stopServer 에서 이미 join 됨)
     for (auto& r : _reactors) {
@@ -280,6 +288,8 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
     ptt.Set("used", pttTotalPorts - pttFreeCount);
     ptt.Set("groups", (int)_groups.size());
     ptt.Set("joined", joined);
+    ptt.Set("member_total", (int)_pttMemberPool.size());
+    ptt.Set("member_used", (int)(_pttMemberPool.size() - _freePttMembers.size()));
 
     SimpleJson::JsonNode resource;
     resource.Set("relay", relay);
@@ -402,10 +412,48 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         groupsArr.Add(g);
     }
 
+    // 미협상 소스 드롭 누적 (활성 세션/그룹 합산 — 진단용)
+    long srcDrop = 0;
+    for (auto const& [sid, rtp] : _sessions) if (rtp) srcDrop += rtp->getSrcDrop();
+    for (auto const& [gid, group] : _groups) if (group) srcDrop += group->getSrcDrop();
+
+    // NAT latch 완료 leg 목록 — 학습된 실주소 노출 (ue_nat_traversal.md §5 관측)
+    SimpleJson::JsonNode natArr;
+    natArr.type = SimpleJson::JSON_ARRAY;
+    for (auto const& [sid, rtp] : _sessions) {
+        if (!rtp) continue;
+        for (int i = 0; i < 2; ++i) {
+            std::string learnedIp; int learnedPort = 0;
+            if (rtp->getNatLatched(i, learnedIp, learnedPort)) {
+                SimpleJson::JsonNode n;
+                n.Set("key", sid);
+                n.Set("leg", i == 0 ? "a" : "b");
+                n.Set("learned_ip", learnedIp);
+                n.Set("learned_port", learnedPort);
+                natArr.Add(n);
+            }
+        }
+    }
+    for (auto const& [gid, group] : _groups) {
+        if (!group) continue;
+        std::vector<std::tuple<std::string, std::string, int>> latched;
+        group->collectNatLatched(latched);
+        for (auto const& [sid, learnedIp, learnedPort] : latched) {
+            SimpleJson::JsonNode n;
+            n.Set("key", gid + ":" + sid);
+            n.Set("leg", sid);
+            n.Set("learned_ip", learnedIp);
+            n.Set("learned_port", learnedPort);
+            natArr.Add(n);
+        }
+    }
+
     SimpleJson::JsonNode detail;
     detail.Set("session_timeout", _sessionTimeout);
     detail.Set("orphan_reclaim_sec", _orphanReclaimSec);
     detail.Set("leak_reclaim", leak);
+    detail.Set("rtp_src_drop", (long long)srcDrop);
+    detail.Set("nat", natArr);
     detail.Set("groups", groupsArr);
     body.Set("detail", detail);
 
@@ -425,6 +473,9 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
     int rmtPort = (int)payload.GetInt("remote_port");
     int rmtVideoPort = (int)payload.GetInt("remote_video_port");
     int peerIdx = (int)payload.GetInt("peer_index", -1);
+    // NAT 목적지 latch 허용 지시 (제어평면 승인형 — ue_nat_traversal.md §4-5)
+    int rmtNat = (int)payload.GetInt("remote_nat", 0);
+    std::string rmtSigIp = payload.GetString("remote_sig_ip");
     std::string caller = payload.GetString("caller");
     std::string callee = payload.GetString("callee");
 
@@ -471,13 +522,13 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
     } else {
         rtp = _sessions[sessionId];
         rtpIp = _rtpIp;  // RTP IP는 항상 설정값 사용
-        rtpPort = rtp->getLocalPort(); // reuse existing
-        videoPort = rtp->getLocalVideoPort();
+        rtpPort = rtp->getLocalPort(0); // reuse existing
+        videoPort = rtp->getLocalVideoPort(0);
     }
 
     if (rtp) {
         if (rmtPort > 0) {
-             rtp->setRemote(rmtIp, rmtPort, rmtVideoPort, peerIdx);
+             rtp->setRemote(rmtIp, rmtPort, rmtVideoPort, peerIdx, rmtNat != 0, rmtSigIp);
         }
 
         // Worker thread는 initResourcePool()에서 영구 등록됨 — 여기서 추가 불필요
@@ -505,10 +556,13 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                     caller.c_str(), callee.c_str());
         }
 
+        // leg 별 전용 포트: peer0(발신 A) = local_port*, peer1(착신 B) = local_port_b*
         SimpleJson::JsonNode respBody;
         respBody.Set("local_ip", rtpIp);
         respBody.Set("local_port", rtpPort);
         respBody.Set("local_video_port", videoPort);
+        respBody.Set("local_port_b", (int)rtp->getLocalPort(1));
+        respBody.Set("local_video_port_b", (int)rtp->getLocalVideoPort(1));
 
         int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody,
                            caller.c_str(), callee.c_str());
@@ -617,9 +671,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             svc.c_str(), sesid.c_str(), subid.c_str(), _lastRxSeq, "csp");
 
     std::string sharedIp = _rtpIp;
-    int sharedPort = 0;
     int sharedFloorPort = 0;
-    int sharedVideoPort = 0;
 
     PAutoLock lock(_mutex);
     PRtpMulticast* pttSession = NULL;
@@ -637,7 +689,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             logFlow(key, from, to, proto, label, body);
         });
         group->setRtcpLogEnable(_logFlowRtcp);
-        pttSession = allocPttResource(sharedIp, sharedPort, sharedFloorPort, sharedVideoPort);
+        pttSession = allocPttResource(sharedIp, sharedFloorPort);
         if (pttSession) {
              pttSession->setGroup(group);
              group->setDtmfConfig(_dtmfPttEnable, _dtmfPushDigit, _dtmfReleaseDigit);
@@ -651,10 +703,9 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
              _groups[groupId] = group;
 
              logFlow(groupId, "cmp", "cmp", "INT", "GROUP_START",
-                     ("rtp=" + std::to_string(sharedPort) + " floor=" + std::to_string(sharedFloorPort) +
-                      " video=" + std::to_string(sharedVideoPort)).c_str(),
+                     ("floor=" + std::to_string(sharedFloorPort)).c_str(),
                      "", svc.c_str(), sesid.c_str(), subid.c_str());
-             LOG_INFO("PCmpServer", "ADD_GROUP group=%s rtp=%d floor=%d video=%d (new)", groupId.c_str(), sharedPort, sharedFloorPort, sharedVideoPort);
+             LOG_INFO("PCmpServer", "ADD_GROUP group=%s floor=%d (new)", groupId.c_str(), sharedFloorPort);
         } else {
              delete group;
              group = NULL;
@@ -664,23 +715,18 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
         group = _groups[groupId];
         pttSession = group->getPttSession();
         if (pttSession) {
-            sharedPort = pttSession->getLocalRtpPort();
             sharedFloorPort = pttSession->getLocalFloorPort();
             sharedIp = _rtpIp;
-        }
-        // 기존 그룹의 비디오 포트 조회
-        PRtpMulticast* pttSess = group->getPttSession();
-        if (pttSess) {
-            sharedVideoPort = pttSess->getLocalVideoPort();
         }
         // 기존 그룹이더라도 record_dir이 새로 전달되면 갱신
         std::string recordDir = payload.GetString("record_dir");
         if (!recordDir.empty() && !group->isRecordEnabled()) {
             group->setRecording(true, recordDir);
         }
-        LOG_DEBUG("PCmpServer", "ADD_GROUP group=%s rtp=%d floor=%d video=%d (existing)", groupId.c_str(), sharedPort, sharedFloorPort, sharedVideoPort);
+        LOG_DEBUG("PCmpServer", "ADD_GROUP group=%s floor=%d (existing)", groupId.c_str(), sharedFloorPort);
     }
 
+    std::vector<std::string> memberIds;
     if (group) {
         if (!membersStr.empty()) {
             std::stringstream ss(membersStr);
@@ -707,6 +753,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
                 }
                 priorities[sid] = prio;
                 roles[sid] = role;
+                memberIds.push_back(sid);
             }
             group->updatePriorities(priorities);
             group->updateRoles(roles);
@@ -723,11 +770,30 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
                          groupId.c_str(), initiator.c_str());
         }
 
+        // 초기 로스터의 멤버별 전용 포트 할당 (멱등 — 기존 유닛 재사용).
+        //   client 는 각 멤버의 SDP offer 에 이 포트를 광고한다.
+        SimpleJson::JsonNode memberPorts;
+        memberPorts.type = SimpleJson::JSON_OBJECT;
+        bool memberAllocFail = false;
+        for (const auto& sid : memberIds) {
+            PPttMemberPort* mu = ensureMemberUnit(groupId, sid, group);
+            if (!mu) { memberAllocFail = true; break; }
+            SimpleJson::JsonNode mp;
+            mp.Set("port", (int)mu->getAudioPort());
+            mp.Set("video_port", (int)mu->getVideoPort());
+            memberPorts.Set(sid, mp);
+        }
+        if (memberAllocFail) {
+            int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
+                                "NO_RESOURCE", "ptt member pool exhausted");
+            logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "No Resource", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+            return;
+        }
+
         SimpleJson::JsonNode respBody;
         respBody.Set("ip", sharedIp);
-        respBody.Set("port", sharedPort);
         respBody.Set("floor_port", sharedFloorPort);
-        respBody.Set("video_port", sharedVideoPort);
+        respBody.Set("member_ports", memberPorts);
 
         int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), subid.c_str(), txSeq, "csp");
@@ -774,15 +840,34 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
-        group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role);
-        // condition tier(emergency/imminent) 동반 시 반영 (Phase 2 CSP 가 긴급 멤버 join 시 전달)
-        std::string tierStr = payload.GetString("tier");
-        if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
+        // 멤버 전용 포트 유닛 (멱등) — ① user_ip 없는 선할당 호출은 포트만 응답,
+        //   ② SDP answer 후 user_ip/port 동반 호출로 멤버 등록/주소 갱신.
+        PPttMemberPort* mu = ensureMemberUnit(groupId, sessionId, group);
+        if (!mu) {
+            int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc,
+                                "NO_RESOURCE", "ptt member pool exhausted");
+            logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "No Resource", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+            return;
+        }
+        if (!userIp.empty() && userPort > 0) {
+            int userNat = (int)payload.GetInt("user_nat", 0);
+            std::string userSigIp = payload.GetString("user_sig_ip");
+            group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role, mu,
+                             userNat != 0, userSigIp);
+            // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
+            std::string tierStr = payload.GetString("tier");
+            if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
+        }
 
-        int txSeq = sendOk(ip, port, transId, "PTT_JOIN", sesid, svc);
+        SimpleJson::JsonNode respBody;
+        respBody.Set("ip", _rtpIp);
+        respBody.Set("port", (int)mu->getAudioPort());
+        respBody.Set("video_port", (int)mu->getVideoPort());
+
+        int txSeq = sendOk(ip, port, transId, "PTT_JOIN", sesid, svc, &respBody);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        logBody("TX", peerStr.c_str(), "JSON", "OK");
-        LOG_INFO("PCmpServer", "PTT_JOIN group=%s session=%s %s:%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort);
+        logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
+        LOG_INFO("PCmpServer", "PTT_JOIN group=%s session=%s %s:%d local=%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort, mu->getAudioPort());
     } else {
         int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc,
                             "NOT_FOUND", "group not found");
@@ -817,6 +902,7 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->removeMember(sessionId);
+        freeMemberUnit(groupId, sessionId);
 
         int txSeq = sendOk(ip, port, transId, "PTT_LEAVE", sesid, svc);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
@@ -855,9 +941,10 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         logFlow(groupId, "cmp", "cmp", "INT", "GROUP_END", "", "", svc.c_str(), sesid.c_str());
-        // PTT 리소스 반환
+        // PTT 리소스 반환 (그룹 floor + 멤버 유닛 전체)
         PRtpMulticast* ptt = group->getPttSession();
         if (ptt) { ptt->reset(); freePttResource(ptt); }
+        freeGroupMemberUnits(groupId);
         delete group;
         _groups.erase(groupId);
 
@@ -1020,6 +1107,7 @@ void PCmpServer::loadConfig() {
         if (root.Has("PttRtpPoolSize")) _pttRtpPoolSize = (int)root.GetInt("PttRtpPoolSize");
         if (root.Has("PttFloorStartPort")) _pttFloorStartPort = (int)root.GetInt("PttFloorStartPort");
         if (root.Has("PttVideoStartPort")) _pttVideoStartPort = (int)root.GetInt("PttVideoStartPort");
+        if (root.Has("PttMemberPoolSize")) _pttMemberPoolSize = (int)root.GetInt("PttMemberPoolSize");
         
         // Log configuration
         std::string logDir = root.Has("LogDir") ? root.GetString("LogDir") : "";
@@ -1105,8 +1193,9 @@ void PCmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d) PTT(rtp=%d floor=%d video=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d FloorIdleSec=%d",
-           _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttFloorStartPort, _pttVideoStartPort, _pttRtpPoolSize,
+    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d FloorIdleSec=%d",
+           _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttVideoStartPort, _pttMemberPoolSize,
+           _pttFloorStartPort, _pttRtpPoolSize,
            _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
            _dtmfPttEnable, _sessionTimeout, _floorIdleSec);
 }
@@ -1155,12 +1244,13 @@ void PCmpServer::reactorLoop(int widx) {
 }
 
 void PCmpServer::initResourcePool() {
+    // leg 별 포트셋: 호당 8포트 (peer 별 audio/video RTP+RTCP 블록 × 2) — ue_nat_traversal.md §3.1
     int currentPort = _rtpStartPort;
     for (int i = 0; i < _rtpPoolSize; ++i) {
         std::string name = formatStr("InActiveRtp_%d", i);
         PRtpRelay* rtp = new PRtpRelay(name);
-        
-        if (rtp->init(_rtpIp, currentPort, currentPort + 2)) {
+
+        if (rtp->init(_rtpIp, currentPort)) {
              // epoll 리액터에 소켓 fd 영구 등록 (소켓은 프로세스 종료까지 유지 → 1회 등록).
              int widx = i % _rtpWorkerCount;
              rtp->setWorkerName(formatStr("RtpWorker_%d", widx));
@@ -1172,20 +1262,19 @@ void PCmpServer::initResourcePool() {
              LOG_ERROR("PCmpServer", "Failed to init resource on port %d", currentPort);
              delete rtp;
         }
-        currentPort += 4;
+        currentPort += 8;
     }
-    LOG_INFO("PCmpServer", "VoIP pool: %lu resources (port %d-%d)", _resourcePool.size(), _rtpStartPort, currentPort - 4);
+    LOG_INFO("PCmpServer", "VoIP pool: %lu resources (port %d-%d, 8/call)", _resourcePool.size(), _rtpStartPort, currentPort - 1);
 }
 
 void PCmpServer::initPttResourcePool() {
-    int rtpPort = _pttRtpStartPort;
+    // 그룹 자원 = 공유 floor 포트만. audio/video 는 멤버 유닛(initPttMemberPool)이 담당.
     int floorPort = _pttFloorStartPort;
-    int videoPort = _pttVideoStartPort;
     for (int i = 0; i < _pttRtpPoolSize; ++i) {
-        std::string name = formatStr("PttRtp_%d", i);
+        std::string name = formatStr("PttFloor_%d", i);
         PRtpMulticast* ptt = new PRtpMulticast(name);
 
-        if (ptt->init(_rtpIp, rtpPort, floorPort, videoPort)) {
+        if (ptt->init(_rtpIp, floorPort)) {
             int widx = i % _rtpWorkerCount;
             ptt->setWorkerName(formatStr("RtpWorker_%d", widx));
             std::vector<int> fds; ptt->collectFds(fds);
@@ -1193,15 +1282,38 @@ void PCmpServer::initPttResourcePool() {
             _pttPool.push_back(ptt);
             _freePttResources.push_back(ptt);
         } else {
-            LOG_ERROR("PCmpServer", "Failed to init PTT resource rtp=%d floor=%d video=%d", rtpPort, floorPort, videoPort);
+            LOG_ERROR("PCmpServer", "Failed to init PTT group resource floor=%d", floorPort);
             delete ptt;
         }
-        rtpPort += 2;
         floorPort += 2;
+    }
+    LOG_INFO("PCmpServer", "PTT group pool: %lu resources (floor %d-%d)",
+             _pttPool.size(), _pttFloorStartPort, floorPort - 2);
+}
+
+void PCmpServer::initPttMemberPool() {
+    int audioPort = _pttRtpStartPort;
+    int videoPort = _pttVideoStartPort;
+    for (int i = 0; i < _pttMemberPoolSize; ++i) {
+        std::string name = formatStr("PttMember_%d", i);
+        PPttMemberPort* mu = new PPttMemberPort(name);
+
+        if (mu->init(_rtpIp, audioPort, videoPort)) {
+            int widx = i % _rtpWorkerCount;
+            mu->setWorkerName(formatStr("RtpWorker_%d", widx));
+            std::vector<int> fds; mu->collectFds(fds);
+            epollAddHandler(widx, mu, fds);
+            _pttMemberPool.push_back(mu);
+            _freePttMembers.push_back(mu);
+        } else {
+            LOG_ERROR("PCmpServer", "Failed to init PTT member unit audio=%d video=%d", audioPort, videoPort);
+            delete mu;
+        }
+        audioPort += 2;
         videoPort += 2;
     }
-    LOG_INFO("PCmpServer", "PTT pool: %lu resources (rtp %d-%d, floor %d-%d, video %d-%d)",
-             _pttPool.size(), _pttRtpStartPort, rtpPort - 2, _pttFloorStartPort, floorPort - 2, _pttVideoStartPort, videoPort - 2);
+    LOG_INFO("PCmpServer", "PTT member pool: %lu units (audio %d-%d, video %d-%d)",
+             _pttMemberPool.size(), _pttRtpStartPort, audioPort - 2, _pttVideoStartPort, videoPort - 2);
 }
 
 PRtpRelay* PCmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& videoPort) {
@@ -1209,26 +1321,26 @@ PRtpRelay* PCmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& vide
         LOG_WARN("PCmpServer", "allocResource: no free resources");
         return NULL;
     }
-    
+
     PRtpRelay* rtp = _freeResources.back();
     _freeResources.pop_back();
-    
-    rtpIp = _rtpIp; 
-    rtpPort = rtp->getLocalPort(); 
-    videoPort = rtp->getLocalVideoPort();
-    
-    LOG_INFO("PCmpServer", "allocResource: port=%d (remaining %lu)", rtpPort, _freeResources.size());
+
+    rtpIp = _rtpIp;
+    rtpPort = rtp->getLocalPort(0);
+    videoPort = rtp->getLocalVideoPort(0);
+
+    LOG_INFO("PCmpServer", "allocResource: peer0=%d peer1=%d (remaining %lu)", rtpPort, rtp->getLocalPort(1), _freeResources.size());
     return rtp;
 }
 
 void PCmpServer::freeResource(PRtpRelay* rtp) {
     if (rtp) {
-        LOG_INFO("PCmpServer", "freeResource: port=%d", rtp->getLocalPort());
+        LOG_INFO("PCmpServer", "freeResource: port=%d", rtp->getLocalPort(0));
         _freeResources.push_back(rtp);
     }
 }
 
-PRtpMulticast* PCmpServer::allocPttResource(std::string& rtpIp, int& rtpPort, int& floorPort, int& videoPort) {
+PRtpMulticast* PCmpServer::allocPttResource(std::string& rtpIp, int& floorPort) {
     if (_freePttResources.empty()) {
         LOG_WARN("PCmpServer", "allocPttResource: no free PTT resources");
         return NULL;
@@ -1236,17 +1348,54 @@ PRtpMulticast* PCmpServer::allocPttResource(std::string& rtpIp, int& rtpPort, in
     PRtpMulticast* ptt = _freePttResources.back();
     _freePttResources.pop_back();
     rtpIp = _rtpIp;
-    rtpPort = ptt->getLocalRtpPort();
     floorPort = ptt->getLocalFloorPort();
-    videoPort = ptt->getLocalVideoPort();
-    LOG_INFO("PCmpServer", "allocPttResource: rtp=%d floor=%d video=%d (remaining %lu)", rtpPort, floorPort, videoPort, _freePttResources.size());
+    LOG_INFO("PCmpServer", "allocPttResource: floor=%d (remaining %lu)", floorPort, _freePttResources.size());
     return ptt;
 }
 
 void PCmpServer::freePttResource(PRtpMulticast* ptt) {
     if (ptt) {
-        LOG_INFO("PCmpServer", "freePttResource: rtp=%d floor=%d", ptt->getLocalRtpPort(), ptt->getLocalFloorPort());
+        LOG_INFO("PCmpServer", "freePttResource: floor=%d", ptt->getLocalFloorPort());
         _freePttResources.push_back(ptt);
+    }
+}
+
+// 멤버 유닛 할당/해제 — (groupId, sessionId) 멱등 키. 호출자가 _mutex 보유.
+PPttMemberPort* PCmpServer::ensureMemberUnit(const std::string& groupId, const std::string& sessionId, PMcpttGroup* group) {
+    std::string key = groupId + "|" + sessionId;
+    auto it = _memberUnits.find(key);
+    if (it != _memberUnits.end()) return it->second;
+    if (_freePttMembers.empty()) {
+        LOG_WARN("PCmpServer", "ensureMemberUnit: member pool exhausted (group=%s session=%s)", groupId.c_str(), sessionId.c_str());
+        return NULL;
+    }
+    PPttMemberPort* mu = _freePttMembers.back();
+    _freePttMembers.pop_back();
+    mu->bind(group, sessionId);
+    _memberUnits[key] = mu;
+    LOG_INFO("PCmpServer", "ensureMemberUnit: group=%s session=%s audio=%d video=%d (remaining %lu)",
+             groupId.c_str(), sessionId.c_str(), mu->getAudioPort(), mu->getVideoPort(), _freePttMembers.size());
+    return mu;
+}
+
+void PCmpServer::freeMemberUnit(const std::string& groupId, const std::string& sessionId) {
+    auto it = _memberUnits.find(groupId + "|" + sessionId);
+    if (it == _memberUnits.end()) return;
+    it->second->reset();
+    _freePttMembers.push_back(it->second);
+    _memberUnits.erase(it);
+}
+
+void PCmpServer::freeGroupMemberUnits(const std::string& groupId) {
+    std::string prefix = groupId + "|";
+    for (auto it = _memberUnits.begin(); it != _memberUnits.end(); ) {
+        if (it->first.compare(0, prefix.size(), prefix) == 0) {
+            it->second->reset();
+            _freePttMembers.push_back(it->second);
+            it = _memberUnits.erase(it);
+        } else {
+            ++it;
+        }
     }
 }
 
@@ -1338,6 +1487,7 @@ void PCmpServer::timeoutLoop() {
                 // PTT 리소스 free pool 반환 (removeGroup 와 동일 패턴) — 누락 시 누적 leak
                 PRtpMulticast* ptt = it->second->getPttSession();
                 if (ptt) { ptt->reset(); freePttResource(ptt); }
+                freeGroupMemberUnits(gid);
                 delete it->second;
                 _groups.erase(it);
                 _sesidMap.erase(gid);

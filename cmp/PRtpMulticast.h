@@ -11,11 +11,11 @@
 class PMcpttGroup;
 
 /**
- * PTT 1:N RTP 분배 (PMcpttGroup 연동)
+ * PTT 그룹 floor control 유닛 (PMcpttGroup 연동)
  *
- * 3소켓: audio RTP + floor control + video RTP
- * 패킷 수신 → PMcpttGroup 콜백 → McpttGroup이 멤버에게 분배
- * 녹취는 McpttGroup이 floor 단위로 직접 관리.
+ * 그룹 공유 floor 소켓 1개. floor 메시지(RTCP APP "MCPT")는 TS 24.380 User ID 가
+ * in-band 신원이라 그룹 공유 포트로 충분하다. 멤버별 audio/video RTP 는
+ * PPttMemberPort(멤버 전용 포트 유닛)가 담당한다 — ue_nat_traversal.md §3.2.
  */
 class PRtpMulticast : public PHandler
 {
@@ -24,23 +24,19 @@ public:
     virtual ~PRtpMulticast();
 
     // ── Lifecycle ──
-    bool init(const std::string& ip, unsigned int rtpPort, unsigned int floorPort, unsigned int videoPort = 0);
+    bool init(const std::string& ip, unsigned int floorPort);
     bool final();
     void reset();
 
     // ── 포트 조회 ──
-    unsigned int getLocalRtpPort() const { return _localRtpPort; }
     unsigned int getLocalFloorPort() const { return _localFloorPort; }
-    unsigned int getLocalVideoPort() const { return _localVideoPort; }
 
     // ── PMcpttGroup 연동 ──
     void setGroup(PMcpttGroup* g);
     PMcpttGroup* getGroup() const { return _group; }
 
     // ── 전송 (McpttGroup에서 호출) ──
-    void sendAudioTo(const std::string& ip, int port, char* data, int len);
     void sendFloorTo(const std::string& ip, int port, char* data, int len);
-    void sendVideoTo(const std::string& ip, int port, char* data, int len);
 
     // ── 식별 ──
     void setSessionId(const std::string& id) { _sessionId = id; }
@@ -48,7 +44,7 @@ public:
     void setWorkerName(const std::string& n) { _workerName = n; }
     std::string getWorkerName() const { return _workerName; }
 
-    // ── 활성도 ──
+    // ── 활성도 (멤버 유닛 RTP 수신도 그룹 활성으로 계상 — PMcpttGroup 이 호출) ──
     void touchActivity() { time(&_lastActivityTime); }
     time_t getLastActivityTime() const { return _lastActivityTime; }
 
@@ -56,26 +52,18 @@ public:
     bool proc();
     bool proc(int, const std::string&, PEvent::Ptr) { return false; }
 
-    // epoll 리액터 등록용: 유효 소켓 fd 수집(audio RTP + floor + video RTP). 소켓은 프로세스 내내 유지.
+    // epoll 리액터 등록용: floor 소켓 fd. 소켓은 프로세스 내내 유지.
     void collectFds(std::vector<int>& out) const;
 
 private:
-    // 소켓별 수신 → 콜백 헬퍼
-    template<typename Callback>
-    void _drainSocket(PRtpSocket& sock, Callback cb);
-
-    PRtpSocket  _rtpSock;
     PRtpSocket  _floorSock;
-    PRtpSocket  _videoRtpSock;
 
     PMutex      _mutex;
     PMcpttGroup* _group = nullptr;
     std::string _sessionId;
     std::string _workerName;
     time_t      _lastActivityTime = 0;
-    unsigned int _localRtpPort = 0;
     unsigned int _localFloorPort = 0;
-    unsigned int _localVideoPort = 0;
 };
 
 #endif // __PRTP_MULTICAST_H__

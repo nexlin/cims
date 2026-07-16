@@ -5,12 +5,13 @@
 #include <map>
 #include <vector>
 #include <set>
+#include <tuple>
 #include <cstdint>
 #include <functional>
 #include "pbase.h"
 
-class PRtpRelay;
 class PRtpMulticast;
+class PPttMemberPort;
 class PSyncRtpRecorder;
 
 // RTCP APP Packet for Floor Control — 3GPP TS 24.380 §8 (Media Plane Control).
@@ -139,8 +140,11 @@ public:
 
     void setPttSession(PRtpMulticast* session) { _pttSession = session; }
     PRtpMulticast* getPttSession() const { return _pttSession; }
+    // unit: 멤버 전용 RTP 포트 유닛 (PCmpServer 가 할당·소유, 그룹은 참조만)
+    // nat/sigIp: NAT 목적지 latch 허용 + latch IP guard (ue_nat_traversal.md §4-5)
     void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
-                   const std::string& role = "participant");
+                   const std::string& role = "participant", PPttMemberPort* unit = nullptr,
+                   bool nat = false, const std::string& sigIp = "");
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -149,17 +153,12 @@ public:
     void handleFloorRequest(const std::string& sessionId, unsigned int userId, int indicatorBits = -1);
     void handleFloorRelease(const std::string& sessionId, unsigned int userId);
 
-    // Called by PRtpRelay when an RTCP packet is received (legacy)
-    void onRtcpPacket(const std::string& ip, int port, char* buf, int len);
     // Called by PRtpMulticast when a floor control packet is received (m=application)
     void onFloorPacket(const std::string& ip, int port, char* buf, int len);
 
-    // Called by PRtpRelay when an RTP packet is received
-    void onRtpPacket(const std::string& ip, int port, char* buf, int len);
-
-    // Called by PRtpRelay when a Video RTP packet is received
-    // Called by PRtpRelay when a Video RTP packet is received
-    void onVideoRtpPacket(const std::string& ip, int port, char* buf, int len);
+    // Called by PPttMemberPort — 멤버 전용 포트 수신 (수신 소켓이 곧 멤버 신원)
+    void onMemberRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len);
+    void onMemberVideoRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len);
 
     void updatePriorities(const std::map<std::string, int>& priorities);
     void updateRoles(const std::map<std::string, std::string>& roles);
@@ -183,6 +182,10 @@ public:
 
     int getMemberCount() const { return (int)_members.size(); }
     std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
+    // 미협상 소스/미등록 멤버 드롭 누적 (STATS rtp_src_drop)
+    long getSrcDrop() const { return _srcDrop; }
+    // NAT latch 관측 (STATS detail.nat) — latch 완료 멤버의 (sessionId, learnedIp, learnedPort)
+    void collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out);
 
     // Floor 무활동(inactivity) 자동 회수 — owner 가 RELEASE 없이 RTP 송출을 멈춘 경우
     // (예: 검증 마지막 발언자가 RELEASE 없이 호 종료). 마지막 RTP 수신 후 idleSec 초가
@@ -203,12 +206,12 @@ private:
     void _logFloorLocal(const char* op, const std::string& user, unsigned int ssrc, int prio,
                         const char* extraJson = nullptr);
 
-    void sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
-    void sendFloorToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
-    // Video functions for future use
-    void sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
-    void sendVideoRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort);
+    void sendAudioToAll(const char* data, int len, const std::string& excludeSessionId);
+    void sendFloorToAll(const char* data, int len);
+    void sendVideoToAll(const char* data, int len, const std::string& excludeSessionId);
     void sendToMember(const std::string& sessionId, const char* data, int len);
+    // 미협상 소스/미등록 멤버 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
+    void _dropSrc(const char* what, const std::string& memberId, const std::string& ip, int port);
     void broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId);
 
     // ── Floor 송신 헬퍼 (TS 24.380 TLV) — 호출자는 _mutex 보유 ──
@@ -256,8 +259,20 @@ private:
         uint16_t videoSeqOut;   // 수신자별 비디오 시퀀스 카운터
         uint32_t audioSsrcOut;  // 수신자에게 보내는 고정 오디오 SSRC
         uint32_t videoSsrcOut;  // 수신자에게 보내는 고정 비디오 SSRC
-        bool floorNatLatched = false;  // floor User ID latch 이력 — NAT 단말 판정(KA RTP latch 자격)
+        bool floorNatLatched = false;  // floor User ID latch 이력 — NAT 단말 표식
+        PPttMemberPort* unit = nullptr;  // 멤버 전용 RTP 포트 유닛 (PCmpServer 소유)
+
+        // NAT 목적지 latch (제어평면이 nat 지정한 멤버만 — ue_nat_traversal.md §5)
+        bool natEnabled = false;
+        std::string sigIp;             // latch IP guard 기준 (빈 값 = guard 없음)
+        bool natLatched = false;       // audio 소스 latch 완료
+        uint32_t natLatchSsrc = 0;     // latch 시 고정 — 재-latch 는 동일 SSRC(NAT rebind)만
+        bool natLatchedVideo = false;
+        uint32_t natLatchVideoSsrc = 0;
     };
+
+    // nat 멤버의 RTP 수신 판정+latch (호출자가 _mutex 보유). 수락 시 true.
+    bool _acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip, int port, const char* buf, int len);
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority
     std::map<std::string, std::string> _roles; // SessionID (UserId) -> role (chair/participant)
@@ -289,6 +304,8 @@ private:
     PMutex _mutex;
     LogFlowFunc _logFlow;  // floor event log callback
     bool _rtcpLogEnable = false; // 일반 RTCP 로깅 활성화 플래그
+    long _srcDrop = 0;           // 미협상 소스/미등록 멤버 드롭 누적
+    time_t _lastDropWarn = 0;    // 드롭 WARN rate-limit
 
     // 녹취 (Floor 단위 세그먼트 — 화자 교대 시 파일 분할)
     bool _recordEnable;

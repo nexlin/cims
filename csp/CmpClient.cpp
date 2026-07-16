@@ -325,8 +325,7 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonN
             bSendFail = true;
             break;
         }
-        if ( attempt > 0 )
-            CLog::Print( LOG_INFO, "CmpClient retransmit (TransId=%d attempt=%d)", transId, attempt );
+        if ( attempt > 0 ) CLog::Print( LOG_INFO, "CmpClient retransmit (TransId=%d attempt=%d)", transId, attempt );
 
         std::unique_lock<std::mutex> lock( pTrans->mutex );
         // ★ 술어(predicate) 있는 wait_for 필수 — CMP 응답(~25ms)이 sendto 직후 sender 가
@@ -404,9 +403,11 @@ CmpEndpoint CCmpClient::SelectEndpointForSession( const std::string &strSessionI
 }
 
 bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort,
-                             int &iLocalVideoPort, const std::string &strRecordDir, const std::string &strLogDir,
+                             int &iLocalVideoPort, int &iLocalPortB, int &iLocalVideoPortB,
+                             const std::string &strRecordDir, const std::string &strLogDir,
                              const std::string &strCaller, const std::string &strCallee, const std::string &strRmtIp,
-                             int iRmtPort, int iRmtVideoPort, const std::string &strSesId ) {
+                             int iRmtPort, int iRmtVideoPort, const std::string &strSesId, int iRemoteNat,
+                             const std::string &strRemoteSigIp ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_ADD" );
     req.Set( "session_id", strSessionId );
@@ -414,6 +415,10 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
     req.Set( "remote_port", iRmtPort );
     req.Set( "remote_video_port", iRmtVideoPort );
     req.Set( "peer_index", 0 );
+    if ( iRemoteNat ) {
+        req.Set( "remote_nat", 1 );
+        if ( !strRemoteSigIp.empty() ) req.Set( "remote_sig_ip", strRemoteSigIp );
+    }
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
     if ( !strLogDir.empty() ) req.Set( "log_dir", strLogDir );
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
@@ -426,7 +431,6 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
         std::lock_guard<std::mutex> lock( m_mutexSesid );
         m_mapKeyToSesid[strSessionId] = strFinalSesId;
     }
-
 
     std::string strResp;
 
@@ -446,6 +450,8 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
         strLocalIp = respNode.Get( "local_ip" ).AsString();
         iLocalPort = respNode.Get( "local_port" ).AsInt();
         iLocalVideoPort = respNode.Get( "local_video_port" ).AsInt();
+        iLocalPortB = respNode.Get( "local_port_b" ).AsInt();
+        iLocalVideoPortB = respNode.Get( "local_video_port_b" ).AsInt();
         return true;
     }
 
@@ -454,7 +460,8 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
 
 bool CCmpClient::ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort,
                                 int iRmtVideoPort, int iPeerIdx, const std::string &strCaller,
-                                const std::string &strCallee, const std::string &strSesId ) {
+                                const std::string &strCallee, const std::string &strSesId, int iRemoteNat,
+                                const std::string &strRemoteSigIp ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_MODIFY" );
     req.Set( "session_id", strSessionId );
@@ -462,6 +469,10 @@ bool CCmpClient::ModifySession( const std::string &strSessionId, const std::stri
     req.Set( "remote_port", iRmtPort );
     req.Set( "remote_video_port", iRmtVideoPort );
     req.Set( "peer_index", iPeerIdx );
+    if ( iRemoteNat ) {
+        req.Set( "remote_nat", 1 );
+        if ( !strRemoteSigIp.empty() ) req.Set( "remote_sig_ip", strRemoteSigIp );
+    }
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
     if ( !strCallee.empty() ) req.Set( "callee", strCallee );
 
@@ -474,7 +485,6 @@ bool CCmpClient::ModifySession( const std::string &strSessionId, const std::stri
         std::lock_guard<std::mutex> lock( m_mutexSesid );
         m_mapKeyToSesid[strSessionId] = strFinalSesId;
     }
-
 
     std::string strResp;
     std::string strReqBody = req.ToString();
@@ -507,7 +517,6 @@ bool CCmpClient::UpdateSession( const std::string &strSessionId, const std::stri
         std::lock_guard<std::mutex> lock( m_mutexSesid );
         m_mapKeyToSesid[strSessionId] = strFinalSesId;
     }
-
 
     std::string strResp;
 
@@ -550,7 +559,6 @@ bool CCmpClient::RemoveSession( const std::string &strSessionId, const std::stri
         m_mapKeyToSesid.erase( strSessionId );
     }
 
-
     std::string strResp;
     CLog::Print( LOG_DEBUG, "CmpClient::RemoveSession: %s", req.ToString().c_str() );
     std::string strReqBody = req.ToString();
@@ -560,9 +568,10 @@ bool CCmpClient::RemoveSession( const std::string &strSessionId, const std::stri
 }
 
 bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                           std::string &strIp, int &iPort, int &iFloorPort, int &iVideoPort,
-                           const std::string &strRecordDir, const std::string &strLogDir, bool bVideoEnabled,
-                           int iSessionSeq, const std::string &strSesId, const std::string &strGroupType,
+                           std::string &strIp, int &iFloorPort,
+                           std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
+                           const std::string &strLogDir, bool bVideoEnabled, int iSessionSeq,
+                           const std::string &strSesId, const std::string &strGroupType,
                            const std::string &strInitiator ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_ADD" );
@@ -597,7 +606,6 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     }
     req.Set( "members", ssMembers.str() );
 
-
     std::string strResp;
     std::string strReqBody = req.ToString();
 
@@ -610,11 +618,19 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
 
         if ( respNode.Has( "status" ) && respNode.Get( "status" ).AsString() == "OK" ) {
             strIp = respNode.Get( "ip" ).AsString();
-            iPort = respNode.Get( "port" ).AsInt();
             iFloorPort = respNode.Has( "floor_port" ) ? respNode.Get( "floor_port" ).AsInt() : 0;
-            iVideoPort = respNode.Has( "video_port" ) ? respNode.Get( "video_port" ).AsInt() : 0;
-            CLog::Print( LOG_INFO, "CmpClient::AddGroup Success: %s:%d floor=%d video=%d Members: %d", strIp.c_str(),
-                         iPort, iFloorPort, iVideoPort, (int)vecMembers.size() );
+            // member_ports: { "<sid>": { "port": N, "video_port": N }, ... } — 멤버별 전용 포트
+            mapMemberPorts.clear();
+            if ( respNode.Has( "member_ports" ) ) {
+                SimpleJson::JsonNode mp = respNode.Get( "member_ports" );
+                for ( const auto &kv : mp.objects ) {
+                    int iAudio = (int)kv.second.GetInt( "port" );
+                    int iVideo = (int)kv.second.GetInt( "video_port" );
+                    if ( iAudio > 0 ) mapMemberPorts[kv.first] = { iAudio, iVideo };
+                }
+            }
+            CLog::Print( LOG_INFO, "CmpClient::AddGroup Success: %s floor=%d member_ports=%d Members: %d",
+                         strIp.c_str(), iFloorPort, (int)mapMemberPorts.size(), (int)vecMembers.size() );
             return true;
         }
         CLog::Print( LOG_ERROR, "CmpClient::AddGroup Fail: Status not OK. Resp: %s", strResp.c_str() );
@@ -642,7 +658,6 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
     }
     req.Set( "members", ssMembers.str() );
 
-
     std::string strResp;
     return SendRequestAndWait( strGroupId, req, strResp );
 }
@@ -662,7 +677,8 @@ bool CCmpClient::SetFloorTier( const std::string &strGroupId, const std::string 
 
 bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &strSessionId,
                             const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
-                            const std::string &strSesId, const std::string &strRole ) {
+                            const std::string &strSesId, const std::string &strRole, int *piLocalPort,
+                            int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -672,17 +688,29 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
     req.Set( "sesid", strFinalSesId );
 
     req.Set( "session_id", strSessionId );
-    req.Set( "user_ip", strUserIp );
-    req.Set( "user_port", iUserPort );
-    if ( iFloorPort > 0 ) req.Set( "user_floor_port", iFloorPort );
-    if ( iVideoPort > 0 ) req.Set( "user_video_port", iVideoPort );
-    req.Set( "role", strRole.empty() ? "participant" : strRole );
-
+    // 2단 멱등: 주소 없이 호출(①)이면 user_ip/port 를 싣지 않는다 — CMP 는 멤버 전용 포트만 선할당.
+    if ( !strUserIp.empty() && iUserPort > 0 ) {
+        req.Set( "user_ip", strUserIp );
+        req.Set( "user_port", iUserPort );
+        if ( iFloorPort > 0 ) req.Set( "user_floor_port", iFloorPort );
+        if ( iVideoPort > 0 ) req.Set( "user_video_port", iVideoPort );
+        req.Set( "role", strRole.empty() ? "participant" : strRole );
+        if ( iUserNat ) {
+            req.Set( "user_nat", 1 );
+            if ( !strUserSigIp.empty() ) req.Set( "user_sig_ip", strUserSigIp );
+        }
+    }
 
     std::string resp;
     std::string strReqBody = req.ToString();
-    bool bRet = SendRequestAndWait( strGroupId, req, resp );
-    return bRet;
+    if ( !SendRequestAndWait( strGroupId, req, resp ) ) return false;
+
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( resp );
+    if ( respNode.type != SimpleJson::JSON_OBJECT ) return false;
+    if ( !respNode.Has( "status" ) || respNode.Get( "status" ).AsString() != "OK" ) return false;
+    if ( piLocalPort ) *piLocalPort = respNode.Has( "port" ) ? respNode.Get( "port" ).AsInt() : 0;
+    if ( piLocalVideoPort ) *piLocalVideoPort = respNode.Has( "video_port" ) ? respNode.Get( "video_port" ).AsInt() : 0;
+    return true;
 }
 
 bool CCmpClient::LeaveGroup( const std::string &strGroupId, const std::string &strSessionId,
@@ -696,7 +724,6 @@ bool CCmpClient::LeaveGroup( const std::string &strGroupId, const std::string &s
     req.Set( "sesid", strFinalSesId );
 
     req.Set( "session_id", strSessionId );
-
 
     std::string resp;
     std::string strReqBody = req.ToString();
@@ -716,7 +743,6 @@ bool CCmpClient::RemoveGroup( const std::string &strGroupId, const std::string &
         std::lock_guard<std::mutex> lock( m_mutexSesid );
         m_mapKeyToSesid.erase( strGroupId );
     }
-
 
     std::string strResp;
     bool bRet = SendRequestAndWait( strGroupId, req, strResp );

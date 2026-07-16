@@ -134,17 +134,22 @@ private:
     std::thread m_threadMonitor;
 
     struct GroupRtpInfo {
-        int iPort;
-        int iFloorPort;
-        int iVideoPort;
+        int iFloorPort;  // 그룹 공유 floor control 포트 (>0 = CMP 그룹 유효)
         std::string strIp;
         size_t nMemberHash;
         std::string strSessionCallId;
         std::string strCallerId;
         bool bVideoEnabled;
         int iConfVersion;  // RFC 4575 conference-info version counter
+        // 멤버별 CMP 전용 RTP 포트 (sid → {audio, video}) — 각 멤버의 SDP 에 이 포트를 광고.
+        std::map<std::string, std::pair<int, int>> memberPorts;
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
+
+    /** 멤버 전용 CMP 포트 조회 — 캐시(memberPorts) 우선, 없으면 PTT_JOIN ①(선할당)으로 확보.
+     *  (늦은 참가자/로스터 외 멤버의 SDP offer 생성 전 호출.) 실패 시 false. */
+    bool GetOrAllocMemberPort( const std::string &strGroupId, const std::string &strMemberId, int &iAudioPort,
+                               int &iVideoPort );
 
     /** 그룹 세션의 현재 condition(0=normal/1=imminent/2=emergency). 진행 중 emergency/imminent 상태.
      *  ProcessGroupCall(개시) 시 설정, fan-out INVITE(mcptt-info emergency-ind 광고)·업그레이드에서 참조. */

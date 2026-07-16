@@ -4,9 +4,11 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "ConsistentHashRing.h"
@@ -38,15 +40,19 @@ public:
 
     bool Init( const std::string &strCmpIp, int iCmpPort, int iLocalPort );
 
-    // Returns assigned local IP/Port from CMP
+    // Returns assigned local IP/Port from CMP — leg 별 전용 포트:
+    //   iLocalPort/iLocalVideoPort = peer0(발신 A) leg, iLocalPortB/iLocalVideoPortB = peer1(착신 B) leg.
+    //   iRemoteNat/strRemoteSigIp: 해당 peer 의 NAT 목적지 latch 허용 + latch IP guard 기준
+    //   (ue_nat_traversal.md §4-5. sig ip 빈 값 = IP guard 없이 latch).
     bool AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
-                     const std::string &strRecordDir = "", const std::string &strLogDir = "",
-                     const std::string &strCaller = "", const std::string &strCallee = "",
-                     const std::string &strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
-                     const std::string &strSesId = "" );
+                     int &iLocalPortB, int &iLocalVideoPortB, const std::string &strRecordDir = "",
+                     const std::string &strLogDir = "", const std::string &strCaller = "",
+                     const std::string &strCallee = "", const std::string &strRmtIp = "", int iRmtPort = 0,
+                     int iRmtVideoPort = 0, const std::string &strSesId = "", int iRemoteNat = 0,
+                     const std::string &strRemoteSigIp = "" );
     bool ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                         int iPeerIdx, const std::string &strCaller = "", const std::string &strCallee = "",
-                        const std::string &strSesId = "" );
+                        const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "" );
     bool UpdateSession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                         int iPeerIdx, const std::string &strCaller, const std::string &strCallee,
                         std::string &strLocalIp, int &iLocalPort, const std::string &strSesId = "" );
@@ -58,16 +64,20 @@ public:
     // iSeq 발행을 이관. teardown/MODIFY 가 포트가 아닌 이 유일 키로 CMP 세션을 지목한다.
     static std::string IssueSessionId();
 
+    // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                   std::string &strIp, int &iPort, int &iFloorPort, int &iVideoPort,
+                   std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
                    const std::string &strRecordDir = "", const std::string &strLogDir = "", bool bVideoEnabled = false,
                    int iSessionSeq = 0, const std::string &strSesId = "", const std::string &strGroupType = "",
                    const std::string &strInitiator = "" );
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "" );
+    // 2단 멱등 (docs/api/cmp_media_api.md §7.4): strIp 가 비면 ① 선할당(멤버 포트만 확보),
+    //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort/piLocalVideoPort 에 멤버 전용 포트 응답.
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
                     int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
-                    const std::string &strRole = "participant" );
+                    const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
+                    int iUserNat = 0, const std::string &strUserSigIp = "" );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

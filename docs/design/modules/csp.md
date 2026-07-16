@@ -362,12 +362,12 @@ CCmpClient
 
 | 명령 | 용도 | 응답 payload |
 |------|------|------|
-| `RELAY_ADD` | VoIP RTP relay 세션 생성 | local_ip, local_port, local_video_port |
-| `RELAY_MODIFY` | 세션 remote 주소 갱신 (re-INVITE 등) | local_ip, local_port, local_video_port |
+| `RELAY_ADD` | VoIP RTP relay 세션 생성 (+`remote_nat`/`remote_sig_ip` — leg NAT 지시) | local_ip, local_port(_b), local_video_port(_b) — leg 별 전용 포트 |
+| `RELAY_MODIFY` | 세션 remote 주소 갱신 (re-INVITE 등) | 동일 |
 | `RELAY_REMOVE` | 세션 해제 | — (hdr.status 만) |
-| `PTT_GROUP_ADD` | PTT 그룹 RTP 생성 | ip, port, floor_port, video_port |
-| `PTT_GROUP_MODIFY` | 그룹 멤버/우선순위 갱신 | ip, port, floor_port, video_port |
-| `PTT_JOIN` | 멤버 그룹 참가 (user_floor_port, role 포함) | — |
+| `PTT_GROUP_ADD` | PTT 그룹 RTP 생성 | ip, floor_port, member_ports(멤버별 전용 포트 맵) |
+| `PTT_GROUP_MODIFY` | 그룹 멤버/우선순위 갱신 | 동일 |
+| `PTT_JOIN` | 멤버 그룹 참가 — 2단 멱등: user_ip 없이 선할당 → 주소 갱신 (+`user_nat`/`user_sig_ip`) | ip, port, video_port (멤버 전용) |
 | `PTT_LEAVE` | 멤버 그룹 퇴장 | — |
 | `PTT_GROUP_REMOVE` | 그룹 해제 | — |
 | `PTT_FLOOR_TIER` | 멤버 floor tier 런타임 변경 (emergency/imminent/normal) | — |
@@ -659,7 +659,8 @@ CSC(관리 서버)로부터 설정 변경 이벤트를 UDP로 수신.
 ```cpp
 class CCallInfo {                  // CallMap value (key = Call-ID)
     std::string m_strPeerCallId;   // 상대 leg Call-ID (B2BUA)
-    int  m_iPeerRtpPort;           // CMP relay local 포트 (SDP 광고용)
+    int  m_iPeerRtpPort;           // 이 leg 의 peer 에게 광고할 CMP relay 포트 (leg 별 전용 —
+                                   //   A entry=peer1 포트, B entry=peer0 포트)
     // ── relay descriptor: teardown/MODIFY 가 session_id 로 CMP 세션 직접 지목 ──
     std::string m_strRelaySessionId;  // cmp_sess_N (전역 유일) ← CmpClient::IssueSessionId
     std::string m_strRelaySesId;      // flow 상관 sesid
@@ -671,6 +672,9 @@ class CCallInfo {                  // CallMap value (key = Call-ID)
 
 - **teardown**: `CCallMap::Delete(callId)` 가 entry 의 `m_strRelaySessionId` 로 `gclsCmpClient.RemoveSession(session_id)` 직접 호출.
 - **answer(200 OK)**: callee 주소를 `gclsCmpClient.ModifySession(session_id, …, peerIdx=1)` 로 CMP 에 MODIFY.
+  이때 leg 별 NAT 판정(`CCspServiceMap::EvalMediaNat` — access_services 의
+  `media_nat_mode`/`latch_ip_guard`, [ue_nat_traversal.md](../features/ue_nat_traversal.md))을
+  동반한다. 발신 leg 는 `EventIncomingCall`(RELAY_ADD)에서 동일 판정.
 - **stale 호 정리**: `DeleteTimeout` → `Delete`(bStopPort) → 동일 session_id RemoveSession.
 
 relay bookkeeping 의 키는 **session_id**(`cmp_sess_N`, 전역 유일)다. 멀티 미디어노드(`MediaServer.Endpoints`) 환경에서 같은 포트가 노드별로 유일하지 않으므로, 포트가 아니라 session_id 로 CMP 세션을 지목한다. CSP 비정상 종료 시의 고아 relay 는 CMP sweeper 가 회수(cmp.md §5). (`RtpMap.h` 는 `SOCKET_COUNT_PER_MEDIA` 상수만 잔존.)

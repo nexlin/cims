@@ -17,7 +17,7 @@ message(" ***> ${PMPROC_LIB_PATH}")
 
 #add_executable(pmpagent pmpagent.cpp)
 #add_executable(prtpsim prtpsim.cpp)
-add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PRtpRelay.cpp PRtpMulticast.cpp PSyncRtpRecorder.cpp)
+add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PRtpRelay.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp)
 
 set(TEST_SRCS
    #pmpagent 

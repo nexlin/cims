@@ -24,8 +24,8 @@ CMP 가 제공하는 미디어 서비스 기능(function)의 제어 API 정본�
 | Function | 제공 기능 | 자원 | 자원 키 (멱등성·격리 범위) |
 |---|---|---|---|
 | **CORE** | 생존 확인·자원 요약, 상세 상태 조회 | client 레지스트리 | `hdr.node` |
-| **RELAY** | 1:1 RTP relay (VoLTE 등) | relay session | `(node, session_id)` — 생성 client 전속 |
-| **PTT** | 그룹통화 공유포트 + MCPTT floor control | group / member | group: `(service, group_id)` — 동일 service 의 AS 들이 공유<br>member: `(node, session_id)` |
+| **RELAY** | 1:1 RTP relay (VoLTE 등) — peer 별 전용 포트 블록 | relay session | `(node, session_id)` — 생성 client 전속 |
+| **PTT** | 그룹통화(멤버별 전용 RTP 포트) + MCPTT floor control(그룹 공유 포트) | group / member | group: `(service, group_id)` — 동일 service 의 AS 들이 공유<br>member: `(node, session_id)` |
 | **MIX** *(예약)* | VoLTE 그룹통화 mixing/conference | mixer / participant | `(service, conf_id)` — PTT 와 동형 |
 
 ### 1.2 전송
@@ -124,7 +124,8 @@ client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 
   "payload": {
     "resource": {
       "relay": { "total": 500, "used": 8, "sessions": 4 },
-      "ptt":   { "total": 100, "used": 2, "groups": 2, "joined": 5 }
+      "ptt":   { "total": 100, "used": 2, "groups": 2, "joined": 5,
+                 "member_total": 200, "member_used": 5 }
     }
   }
 }
@@ -132,10 +133,11 @@ client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 
 
 | resource 필드 | 의미 |
 |---|---|
-| `relay.total` / `relay.used` | VoIP RTP 포트 풀 크기 / 사용 중 |
+| `relay.total` / `relay.used` | VoIP relay 블록(호당 peer 별 포트셋) 풀 크기 / 사용 중 |
 | `relay.sessions` | 활성 relay 세션 수 |
-| `ptt.total` / `ptt.used` | PTT 전용 포트 풀 크기 / 사용 중 |
+| `ptt.total` / `ptt.used` | PTT 그룹(floor) 풀 크기 / 사용 중 |
 | `ptt.groups` / `ptt.joined` | 활성 그룹 수 / 참가 멤버 총수 |
+| `ptt.member_total` / `ptt.member_used` | PTT 멤버 포트 유닛 풀 크기 / 사용 중 |
 
 client 는 이 요약으로 부하 기반 CMP 선택, 조기 호 거절(admission control)을 할 수 있다.
 
@@ -159,11 +161,19 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
       "session_timeout": 7200,
       "orphan_reclaim_sec": 60,
       "leak_reclaim": { "total": 3, "orphan": 2, "hold": 1 },
+      "rtp_src_drop": 0,
+      "nat": [ { "key": "a84b4c76e66710", "leg": "b",
+                 "learned_ip": "203.0.113.7", "learned_port": 41022 } ],
       "groups": [ { "group_id": "grp-fire-01", "members": 5, "floor_holder": "01011112222" } ]
     }
   }
 }
 ```
+
+| detail 필드 | 의미 |
+|---|---|
+| `rtp_src_drop` | 미협상 소스 드롭 누적 카운터 (no-NAT leg 의 선언 주소 불일치 패킷) |
+| `nat` | NAT latch 완료 leg 목록 — `key`(session_id 또는 `group_id:member`), `leg`(`a`/`b`/멤버 sid), 학습된 실주소 |
 
 ## 6. RELAY — 1:1 RTP relay
 
@@ -174,14 +184,20 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `session_id` | O | 세션 식별자 (client 명명) |
-| `remote_ip` / `remote_port` | O | 상대방 RTP 주소 |
+| `remote_ip` / `remote_port` | O | 상대방 RTP 주소 (SDP 선언) |
 | `remote_video_port` | - | 상대방 Video RTP 포트 |
-| `peer_index` | - | 피어 인덱스 (0 또는 1) |
+| `peer_index` | - | 피어 인덱스 (0=발신 A / 1=착신 B) |
+| `remote_nat` | - | 1 이면 해당 peer 가 NAT 뒤 — 그 peer 전용 포트에 목적지 latch 허용 (생략=0). [ue_nat_traversal.md §5](../design/features/ue_nat_traversal.md) |
+| `remote_sig_ip` | - | 해당 peer 의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
 | `caller` / `callee` | - | 발/착신자 (flow 로깅용) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 | `log_dir` | - | CMP flow 로그 경로 |
 
 같은 `(node, session_id)` 재요청 시 재할당 없이 기존 포트를 반환한다 (재전송 안전).
+
+relay 세션은 **peer 별 전용 포트 블록**(audio RTP/RTCP + video RTP/RTCP × 2 peer)을
+소유한다. client 는 peer0(발신) leg 의 SDP 에 `local_port*` 를, peer1(착신) leg 의 SDP 에
+`local_port_b*` 를 광고해야 한다 — 수신 포트가 곧 peer 신원이다.
 
 ```json
 {
@@ -189,6 +205,7 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
            "type": "request", "sesid": "01011112222::csp::1768531200123456::7", "service": "volte" },
   "payload": { "session_id": "a84b4c76e66710", "caller": "01011112222", "callee": "01033334444",
                "remote_ip": "192.168.10.21", "remote_port": 40000,
+               "remote_nat": 1, "remote_sig_ip": "203.0.113.7",
                "record_dir": "/data/record/2026/07/16" }
 }
 ```
@@ -197,9 +214,19 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
   "hdr": { "ver": 2, "trans_id": 1024, "node": "cmp01", "cmd": "RELAY_ADD",
            "type": "response", "sesid": "01011112222::csp::1768531200123456::7",
            "service": "volte", "status": "OK" },
-  "payload": { "local_ip": "192.168.10.11", "local_port": 30000, "local_video_port": 30002 }
+  "payload": { "local_ip": "192.168.10.11",
+               "local_port": 30000, "local_video_port": 30002,
+               "local_port_b": 30004, "local_video_port_b": 30006 }
 }
 ```
+
+| 응답 필드 | 설명 |
+|---|---|
+| `local_ip` | relay 미디어 IP |
+| `local_port` / `local_video_port` | peer0(발신 A) 전용 audio/video RTP 포트 |
+| `local_port_b` / `local_video_port_b` | peer1(착신 B) 전용 audio/video RTP 포트 |
+
+각 포트의 RTCP 는 +1 이다.
 
 실패 응답 (payload 생략):
 ```json
@@ -214,7 +241,8 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 ### 6.2 RELAY_MODIFY — 피어 주소 재협상
 
 payload 는 RELAY_ADD 와 동일. 기존 세션의 원격 피어 주소만 갱신하고 동일 로컬 포트를
-응답한다 (내부적으로 RELAY_ADD 와 같은 멱등 경로).
+응답한다 (내부적으로 RELAY_ADD 와 같은 멱등 경로). 주소가 갱신된 peer 의 NAT latch
+상태는 리셋되어 재-latch 가 허용된다.
 
 ### 6.3 RELAY_REMOVE — relay 해제
 
@@ -243,8 +271,26 @@ member 키 `(node, session_id)`.
 | `initiator_id` | - | broadcast 개시자 sessionId |
 | `record_dir` / `log_dir` | - | 녹취 / flow 로그 경로 |
 
-응답 payload: `ip`, `port`(Audio RTP 공유포트), `floor_port`, `video_port`.
+응답 payload: `ip`, `floor_port`(그룹 공유 floor control 포트), `member_ports`
+(멤버별 전용 RTP 포트 맵 — members 로 전달된 초기 로스터에 대해 할당).
 기존 그룹 재요청 시 재할당 없이 members 만 갱신하고 동일 포트를 응답한다.
+
+```json
+{
+  "payload": {
+    "ip": "192.168.10.11",
+    "floor_port": 54000,
+    "member_ports": {
+      "01011112222": { "port": 52000, "video_port": 56000 },
+      "01033334444": { "port": 52002, "video_port": 56002 }
+    }
+  }
+}
+```
+
+audio RTP 는 그룹 공유 포트가 아니라 **멤버별 전용 포트**다 — client 는 각 멤버의 SDP 에
+그 멤버의 `port`/`video_port` 를 광고한다 (floor 는 그룹 공유 `floor_port`).
+멤버 신원은 수신 포트로 확정되며, floor control 은 TS 24.380 User ID(in-band)로 식별한다.
 
 ### 7.2 PTT_GROUP_MODIFY — 멤버/우선순위 갱신
 
@@ -256,22 +302,34 @@ PTT_GROUP_ADD 와 동일 payload·경로 (멱등 갱신).
 |---|---|---|
 | `group_id` | O | 그룹 식별자 |
 
-### 7.4 PTT_JOIN — 멤버 참가
+### 7.4 PTT_JOIN — 멤버 참가 (2단 멱등)
 
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `group_id` / `session_id` | O | 대상 그룹 / 멤버 세션 ID |
-| `user_ip` / `user_port` | O | 멤버 RTP 주소 |
+| `user_ip` / `user_port` | - | 멤버 RTP 주소 (SDP answer 수신 후 전달 — ①단계 선할당 호출은 생략) |
 | `user_floor_port` | - | 멤버 floor control 포트 |
 | `user_video_port` | - | 멤버 Video RTP 포트 |
+| `user_nat` | - | 1 이면 NAT 뒤 멤버 — 멤버 전용 포트에 목적지 latch 허용 (생략=0) |
+| `user_sig_ip` | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
 | `role` | - | `chair`/`participant` (기본 participant) |
 | `tier` | - | 긴급 멤버 join 시 condition tier 동반 |
+
+응답 payload: `ip`, `port`, `video_port` — **멤버 전용 RTP 포트** (client 는 이 포트를
+그 멤버의 SDP 에 광고). 같은 `(group, session_id)` 재요청은 재할당 없이 동일 포트 반환.
+
+늦은 참가자(초기 로스터 외 멤버)는 2단으로 호출한다:
+① SDP offer 생성 전 `user_ip` 없이 JOIN → 멤버 포트 할당·응답,
+② SDP answer 수신 후 동일 JOIN 으로 `user_ip`/`user_port` 등 주소 갱신 (멱등 갱신 경로).
+초기 로스터 멤버는 PTT_GROUP_ADD 응답의 `member_ports` 가 ①을 대신하므로 ②만 호출한다.
 
 ### 7.5 PTT_LEAVE — 멤버 이탈
 
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `group_id` / `session_id` | O | 대상 그룹 / 멤버 세션 ID |
+
+멤버 전용 포트 유닛을 풀로 반환한다.
 
 ### 7.6 PTT_FLOOR_TIER — 멤버 condition tier 런타임 갱신
 
@@ -295,6 +353,7 @@ CMP → client 비동기 push. `trans_id` 는 CMP 가 발행하고, 수신 clien
 |---|---|---|
 | `RELAY_ABORTED` | 소유 node | `session_id`, `reason`(`orphan_no_rtp`/`hold_timeout`/...), `held_sec` |
 | `PTT_GROUP_ABORTED` | 참여 node 전체 | `group_id`, `reason` |
+| `RELAY_NAT_LATCHED` | 소유 node | `session_id`, `peer_index`, `learned_ip`, `learned_port` — NAT 목적지 latch 통지 (현행은 STATS/로그로 관측) |
 
 ```json
 {

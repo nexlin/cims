@@ -239,6 +239,8 @@ UE 가 직접 REGISTER 하는 서비스 도메인.
 | `inbound_policy` | `any` / `restricted` |
 | `allowed_local_node_refs[]` | restricted 일 때 허용 LocalNode 목록 |
 | `server_identity_uri` | (optional) OPTIONS/keepalive 등에서 서버 From identity 를 IMS 규격(`sip:cspserver@<domain>`)으로 조립할 때 사용. 미지정 시 service.domain 기반 자동 조립. 저장 위치는 `access_services.jsonl` file-store (SQL 테이블 아님). |
+| `media_nat_mode` | `off`(기본) / `auto` / `force` — 단말 NAT 미디어 정책. leg 별 판정 결과를 CMP 자원할당 명령에 전달 ([ue_nat_traversal.md](ue_nat_traversal.md) §4) |
+| `latch_ip_guard` | `strict`(기본) / `off` — NAT latch 소스 IP 를 그 leg 의 SIP 실소스로 제한 (스푸핑 방어) |
 | `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
 
 ---

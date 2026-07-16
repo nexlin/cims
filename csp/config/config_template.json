@@ -1627,6 +1627,29 @@
             "default": "any"
           },
           {
+            "key": "media_nat_mode",
+            "label": "단말 NAT 미디어 모드",
+            "type": "enum",
+            "options": [
+              "off",
+              "auto",
+              "force"
+            ],
+            "default": "off",
+            "help": "off=NAT 미디어 비활성 / auto=leg 별 판정(SDP IP 가 SIP 실소스와 다르거나 사설이면 CMP 목적지 latch 허용) / force=모든 leg latch 허용. docs/design/features/ue_nat_traversal.md"
+          },
+          {
+            "key": "latch_ip_guard",
+            "label": "NAT latch IP guard",
+            "type": "enum",
+            "options": [
+              "strict",
+              "off"
+            ],
+            "default": "strict",
+            "help": "strict=latch 소스 IP 가 그 leg 의 SIP 시그널링 실소스 IP 와 일치할 때만 허용(스푸핑 방어). CGN 등 시그널링/미디어 공인 IP 상이 환경만 off."
+          },
+          {
             "key": "allowed_local_node_refs",
             "label": "허용 Local Node",
             "type": "ref_list",

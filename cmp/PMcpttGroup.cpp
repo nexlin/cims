@@ -1,6 +1,7 @@
 #include "PMcpttGroup.h"
 #include "PLog.h"
 #include "PRtpMulticast.h"
+#include "PPttMemberPort.h"
 #include "PSyncRtpRecorder.h"
 #include <cstring>
 #include <arpa/inet.h>
@@ -65,9 +66,26 @@ PMcpttGroup::~PMcpttGroup() {
 }
 
 void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort,
-                            const std::string& role) {
-    LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str());
+                            const std::string& role, PPttMemberPort* unit, bool nat, const std::string& sigIp) {
+    LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(), nat ? 1 : 0);
     PAutoLock lock(_mutex);
+    // 재-JOIN(주소 갱신) 시 기존 SSRC/seq 카운터 보존 — 주소·역할만 갱신 + NAT latch 리셋.
+    auto itExist = _members.find(sessionId);
+    if (itExist != _members.end()) {
+        Peer& peer = itExist->second;
+        peer.ip = ip;
+        peer.port = port;
+        if (floorPort > 0) peer.floorPort = floorPort;
+        peer.videoPort = videoPort;
+        if (!role.empty()) { peer.role = role; _roles[sessionId] = role; }
+        if (unit) peer.unit = unit;
+        peer.natEnabled = nat;
+        peer.sigIp = sigIp;
+        peer.natLatched = peer.natLatchedVideo = false;
+        peer.natLatchSsrc = peer.natLatchVideoSsrc = 0;
+        LOG_INFO("PMcpttGroup", "[%s] Member updated session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
+        return;
+    }
     Peer peer;
     peer.id = sessionId;
     peer.ip = ip;
@@ -76,11 +94,14 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.videoPort = videoPort;
     peer.role = role.empty() ? "participant" : role;
     if (!role.empty()) _roles[sessionId] = role;
+    peer.natEnabled = nat;
+    peer.sigIp = sigIp;
     peer.ssrc = _nextSsrc++;
     peer.audioSeqOut = 0;
     peer.videoSeqOut = 0;
     peer.audioSsrcOut = 1000 + _nextSsrc;  // 수신자별 고정 SSRC
     peer.videoSsrcOut = 2000 + _nextSsrc;
+    peer.unit = unit;
     _members[sessionId] = peer;
     LOG_INFO("PMcpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
     if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_JOIN", sessionId.c_str());
@@ -292,110 +313,9 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
     }
 }
 
-void PMcpttGroup::onRtcpPacket(const std::string& ip, int port, char* buf, int len) {
-    if (len < RTCP_APP_HDR) {
-        LOG_DEBUG("PMcpttGroup", "[%s] RTCP too short len=%d from %s:%d", _groupId.c_str(), len, ip.c_str(), port);
-        return;
-    }
-
-    // Check sender — peer.port는 RTP 포트, RTCP source port = peer.port + 1
-    std::string sessionId = "";
-    unsigned int senderSsrc = 0;
-    {
-        PAutoLock lock(_mutex);
-        for(auto const& [sid, peer] : _members) {
-            if (peer.ip == ip && peer.port + 1 == port) {
-                sessionId = sid;
-                senderSsrc = peer.ssrc;
-                break;
-            }
-        }
-    }
-
-    if (sessionId == "") {
-        LOG_INFO("PMcpttGroup", "[%s] RTCP from unknown sender %s:%d (members=%lu)",
-                  _groupId.c_str(), ip.c_str(), port, _members.size());
-        return;
-    }
-
-    unsigned char pt = (unsigned char)buf[1];
-
-    // RTCP SR(200)/RR(201)/SDES(202)/BYE(203) 선택적 Flow 기록
-    if (pt != RTCP_PT_APP) {
-        if (_logFlow && _rtcpLogEnable) {
-            unsigned short rtcpLen = (((unsigned char)buf[2]) << 8) | ((unsigned char)buf[3]);
-            unsigned int rtcpSsrc = 0;
-            if (len >= 8) {
-                rtcpSsrc = (((unsigned char)buf[4]) << 24) | (((unsigned char)buf[5]) << 16) |
-                           (((unsigned char)buf[6]) << 8)  |  ((unsigned char)buf[7]);
-            }
-            const char* rtcpName = "RTCP";
-            switch (pt) {
-                case 200: rtcpName = "SR";   break;
-                case 201: rtcpName = "RR";   break;
-                case 202: rtcpName = "SDES"; break;
-                case 203: rtcpName = "BYE";  break;
-            }
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "{\"type\":%u,\"pt\":\"%s\",\"ssrc\":%u,\"len\":%u,\"user\":\"%s\"}",
-                     (unsigned)pt, rtcpName, rtcpSsrc, (unsigned)(rtcpLen * 4 + 4), sessionId.c_str());
-            _logFlow(_groupId, "ue", "cmp", "RTCP", rtcpName, detail);
-        }
-        LOG_DEBUG("PMcpttGroup", "[%s] RTCP pt=%d (not APP=204), skip", _groupId.c_str(), pt);
-        return;
-    }
-
-    ParsedFloor msg;
-    if (!ParseFloorMessage(buf, len, msg)) {
-        LOG_DEBUG("PMcpttGroup", "[%s] RTCP APP name mismatch / parse fail, skip", _groupId.c_str());
-        return;
-    }
-
-    const char* opName = _floorOpName(msg.subtype);
-    LOG_INFO("PMcpttGroup", "[%s] Floor RTCP subtype=%d(%s) ssrc=%u session=%s from %s:%d",
-             _groupId.c_str(), msg.subtype, opName, msg.ssrc, sessionId.c_str(), ip.c_str(), port);
-
-    // 수신한 모든 Floor 메시지를 Flow 에 기록 (JSON detail)
-    //   direction: UE → CMP (RTCP APP 수신)
-    //   detail JSON: {"op":"REQUEST","user":"+82...","ssrc":N,"prio":P}
-    if (_logFlow) {
-        int prio = 0;
-        {
-            PAutoLock lock(_mutex);
-            auto itP = _priorities.find(sessionId);
-            if (itP != _priorities.end()) prio = itP->second;
-        }
-        char detail[256];
-        snprintf(detail, sizeof(detail),
-                 "{\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d}",
-                 opName, sessionId.c_str(), msg.ssrc, prio);
-        std::string label = std::string("FLOOR_") + opName;
-        _logFlow(_groupId, "ue", "cmp", "MCPTT", label.c_str(), detail);
-    }
-
-    // Dispatch — senderSsrc는 CMP가 할당한 SSRC
-    switch(msg.subtype) {
-        case FLOOR_REQUEST:
-            handleFloorRequest(sessionId, senderSsrc, msg.indicator());
-            break;
-        case FLOOR_RELEASE:
-            handleFloorRelease(sessionId, senderSsrc);
-            break;
-        case FLOOR_QUEUE_POS_REQ: {
-            PAutoLock lock(_mutex);
-            _sendQueuePos(sessionId, senderSsrc);
-            break;
-        }
-        case FLOOR_ACK:
-            LOG_DEBUG("PMcpttGroup", "[%s] Floor ACK from %s", _groupId.c_str(), sessionId.c_str());
-            break;
-        default:
-            break;
-    }
-}
-
-void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int len) {
+// 멤버 전용 포트 유닛(PPttMemberPort) 수신 — 수신 소켓이 곧 멤버 신원.
+// 소스 주소는 신원 판정이 아니라 검증용이다 (선언 주소 불일치 = 드롭 + 카운터).
+void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len) {
     std::string action = "NONE";
     std::string actionSenderId = "";
     unsigned int actionSsrc = 0;
@@ -403,30 +323,29 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
     {
         PAutoLock lock(_mutex);
 
-        // Find sender session
-        std::string senderId = "";
-        unsigned int senderSsrc = 0;
-        for(auto const& [sid, peer] : _members) {
-            if (peer.ip == ip && peer.port == port) {
-                senderId = sid;
-                senderSsrc = peer.ssrc;
-                break;
-            }
-        }
-
-        // (NAT RTP talker-latch / KA-latch 제거 — 2026-07-15) 테스트망 공인IP+포트변환
-        //   대응이었으나 같은 NAT 뒤 2단말+다중 스트림에서 포트 진동을 유발. 상용은
-        //   내부망이라 RTP 가 SDP 선언 IP:port 로 도착 → 위 1차 매칭으로 충분(이 로직 no-op).
-
-        // 협상된 Peer의 IP:port 매칭 안 되면 drop
-        if (senderId.empty()) {
+        auto itM = _members.find(memberId);
+        if (itM == _members.end()) {
+            // JOIN(주소 전달) 전에 UE 가 먼저 송신 시작한 경우 — 정상 과도 상태
+            _dropSrc("rtp(pre-join)", memberId, ip, port);
             return;
         }
-        
+        Peer& sender = itM->second;
+        if (sender.ip != ip || sender.port != port) {
+            if (!sender.natEnabled || !_acceptNatRtp(sender, false, ip, port, buf, len)) {
+                _dropSrc("rtp", memberId, ip, port);
+                return;
+            }
+        }
+        const std::string& senderId = memberId;
+        unsigned int senderSsrc = sender.ssrc;
+
+        // 그룹 세션 활성 갱신 (그룹 timeout sweep 기준)
+        if (_pttSession) _pttSession->touchActivity();
+
         unsigned char pt = (unsigned char)(buf[1] & 0x7F);
         LOG_DEBUG("PMcpttGroup", "[%s] RTP ip=%s port=%d len=%d pt=%d sender=%s", _groupId.c_str(), ip.c_str(), port, len, pt, senderId.c_str());
 
-        if (senderId != "") {
+        {
             // [DTMF Check] — RFC 2833/4733 telephone-event (PT 101)
             if (len > 12 && pt == 101) {
                 unsigned char digitCode = (unsigned char)buf[12];
@@ -464,8 +383,8 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
 
             if (_floorTaken && _floorOwnerSessionId == senderId) {
                 _lastRtpUsec = _nowUsec();
-                sendAudioToAll(buf, len, ip, port);
-                // 녹취: 세그먼트 파일에 기록
+                sendAudioToAll(buf, len, senderId);
+                // 녹취: 세그먼트 파일에 기록 — 귀속은 floor 소유자(세그먼트) 기준
                 if (_recordEnable && _recorder && _recorder->isActive()) {
                     _recorder->writePacket("audio", buf, len);
                 }
@@ -480,28 +399,73 @@ void PMcpttGroup::onRtpPacket(const std::string& ip, int port, char* buf, int le
     }
 }
 
-void PMcpttGroup::onVideoRtpPacket(const std::string& ip, int port, char* buf, int len) {
+void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len) {
     PAutoLock lock(_mutex);
 
-    if (!_floorTaken) return;
-
-    // 협상된 Peer의 IP:videoPort 정확 매칭만 허용
-    std::string senderId = "";
-    for (auto const& [sid, peer] : _members) {
-        if (peer.ip == ip && peer.videoPort == port) {
-            senderId = sid;
-            break;
+    auto itM = _members.find(memberId);
+    if (itM == _members.end()) {
+        _dropSrc("video rtp(pre-join)", memberId, ip, port);
+        return;
+    }
+    Peer& sender = itM->second;
+    if (sender.ip != ip || sender.videoPort != port) {
+        if (!sender.natEnabled || !_acceptNatRtp(sender, true, ip, port, buf, len)) {
+            _dropSrc("video rtp", memberId, ip, port);
+            return;
         }
     }
 
-    if (senderId.empty() || _floorOwnerSessionId != senderId) return;
+    if (_pttSession) _pttSession->touchActivity();
+
+    if (!_floorTaken || _floorOwnerSessionId != memberId) return;
 
     _lastRtpUsec = _nowUsec();
-    sendVideoToAll(buf, len, ip, port);
+    sendVideoToAll(buf, len, memberId);
 
     // 녹취: 비디오 세그먼트 파일에 기록
     if (_recordEnable && _recorder && _recorder->isActive()) {
         _recorder->writePacket("video", buf, len);
+    }
+}
+
+// nat 멤버의 RTP 수신 판정 — 유닛 포트가 곧 멤버 신원이므로 latch 는 신원 판정이 아니라
+//   송신 목적지 학습이다. 안전 조건: RTP v2 + 최소 길이 + (guard) 소스 IP == sigIp +
+//   SSRC 고정(재-latch 는 동일 SSRC = NAT rebind 추종만). 호출자가 _mutex 보유.
+bool PMcpttGroup::_acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip, int port, const char* buf, int len) {
+    if (len < 12 || (((unsigned char)buf[0]) >> 6) != 2) return false;
+    if (!peer.sigIp.empty() && peer.sigIp != ip) return false;
+
+    uint32_t ssrc = ((uint32_t)(unsigned char)buf[8] << 24) | ((uint32_t)(unsigned char)buf[9] << 16) |
+                    ((uint32_t)(unsigned char)buf[10] << 8) | (uint32_t)(unsigned char)buf[11];
+    bool& latched = isVideo ? peer.natLatchedVideo : peer.natLatched;
+    uint32_t& latchSsrc = isVideo ? peer.natLatchVideoSsrc : peer.natLatchSsrc;
+    if (latched && ssrc != latchSsrc) return false;   // 제3자 주입 차단 (rebind 는 동일 SSRC)
+
+    if (isVideo) peer.videoPort = port;
+    else         peer.port = port;
+    peer.ip = ip;
+    latched = true;
+    latchSsrc = ssrc;
+    LOG_INFO("PMcpttGroup", "[%s] %s dest latched (NAT) member=%s %s:%d ssrc=%u",
+             _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port, ssrc);
+    return true;
+}
+
+void PMcpttGroup::collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out) {
+    PAutoLock lock(_mutex);
+    for (auto const& [sid, peer] : _members) {
+        if (peer.natEnabled && peer.natLatched)
+            out.emplace_back(sid, peer.ip, peer.port);
+    }
+}
+
+void PMcpttGroup::_dropSrc(const char* what, const std::string& memberId, const std::string& ip, int port) {
+    ++_srcDrop;
+    time_t now; time(&now);
+    if (now - _lastDropWarn >= 5) {
+        _lastDropWarn = now;
+        LOG_WARN("PMcpttGroup", "[%s] drop %s member=%s src=%s:%d (total=%ld)",
+                 _groupId.c_str(), what, memberId.c_str(), ip.c_str(), port, _srcDrop);
     }
 }
 
@@ -862,7 +826,7 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
     char pktBuf[256];
     int pktLen = BuildFloorMessage(pktBuf, sizeof(pktBuf), opcode, ssrc, fields);
     if (pktLen > 0)
-        sendFloorToAll(pktBuf, pktLen, "", 0);
+        sendFloorToAll(pktBuf, pktLen);
 
     // CMP → UE 전체 브로드캐스트 Flow 기록 (TAKEN/IDLE/REVOKE 등)
     if (_logFlow) {
@@ -878,10 +842,13 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
         _logFloorLocal("IDLE", speakerId, ssrc, -1);
 }
 
-void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
-    if (!_pttSession || len < 12) return;
+// 하향 분배는 각 멤버의 전용 유닛 소켓에서 송신한다 — 멤버가 보는 소스 포트 =
+// SDP 에 광고한 포트 (symmetric RTP 정합).
+void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeSessionId) {
+    if (len < 12) return;
     for (auto& [sid, peer] : _members) {
-        if (peer.ip == excludeIp && peer.port == excludePort) continue;
+        if (sid == excludeSessionId) continue;
+        if (!peer.unit || peer.port <= 0) continue;
         // 수신자별 SSRC + 시퀀스 번호 재작성
         char pkt[4096];
         if (len > (int)sizeof(pkt)) continue;
@@ -891,46 +858,33 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
         memcpy(pkt + 2, &netSeq, 2);
         uint32_t netSsrc = htonl(peer.audioSsrcOut);
         memcpy(pkt + 8, &netSsrc, 4);
-        _pttSession->sendAudioTo(peer.ip, peer.port, pkt, len);
+        peer.unit->sendAudioTo(peer.ip, peer.port, pkt, len);
     }
 }
 
-void PMcpttGroup::sendFloorToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
+void PMcpttGroup::sendFloorToAll(const char* data, int len) {
     if (_pttSession) {
         for (auto const& [sid, peer] : _members) {
-            if (peer.ip == excludeIp && peer.port == excludePort) continue;
             if (peer.floorPort > 0)
                 _pttSession->sendFloorTo(peer.ip, peer.floorPort, (char*)data, len);
         }
     }
 }
 
-void PMcpttGroup::sendVideoToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
-    if (!_pttSession || len < 12) return;
+void PMcpttGroup::sendVideoToAll(const char* data, int len, const std::string& excludeSessionId) {
+    if (len < 12) return;
     for (auto& [sid, peer] : _members) {
-        if (peer.ip == excludeIp && peer.videoPort == excludePort) continue;
-        if (peer.videoPort > 0) {
-            char pkt[4096];
-            if (len > (int)sizeof(pkt)) continue;
-            memcpy(pkt, data, len);
-            peer.videoSeqOut++;
-            uint16_t netSeq = htons(peer.videoSeqOut);
-            memcpy(pkt + 2, &netSeq, 2);
-            uint32_t netSsrc = htonl(peer.videoSsrcOut);
-            memcpy(pkt + 8, &netSsrc, 4);
-            _pttSession->sendVideoTo(peer.ip, peer.videoPort, pkt, len);
-        }
-    }
-}
-
-void PMcpttGroup::sendVideoRtcpToAll(const char* data, int len, const std::string& excludeIp, int excludePort) {
-    if (_pttSession) {
-        for (auto const& [sid, peer] : _members) {
-            if (peer.ip == excludeIp && peer.videoPort + 1 == excludePort) continue;
-            if (peer.videoPort > 0) {
-                _pttSession->sendVideoTo(peer.ip, peer.videoPort + 1, (char*)data, len);
-            }
-        }
+        if (sid == excludeSessionId) continue;
+        if (!peer.unit || peer.videoPort <= 0) continue;
+        char pkt[4096];
+        if (len > (int)sizeof(pkt)) continue;
+        memcpy(pkt, data, len);
+        peer.videoSeqOut++;
+        uint16_t netSeq = htons(peer.videoSeqOut);
+        memcpy(pkt + 2, &netSeq, 2);
+        uint32_t netSsrc = htonl(peer.videoSsrcOut);
+        memcpy(pkt + 8, &netSsrc, 4);
+        peer.unit->sendVideoTo(peer.ip, peer.videoPort, pkt, len);
     }
 }
 

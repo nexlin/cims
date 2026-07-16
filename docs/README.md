@@ -22,6 +22,7 @@ docs/
 │   └── features/                    기능별 설계
 │       ├── volte_flows.md           VoLTE 호처리 Flow
 │       ├── ptt_flows.md             PTT 그룹콜 Flow
+│       ├── ue_nat_traversal.md      단말 NAT traversal (leg 포트 · 목적지 latch · 정책)
 │       ├── recording.md             녹취
 │       ├── monitoring.md            모니터링·이력·통계
 │       ├── flow_logging.md          Flow 로깅/상관관계 (sesid)

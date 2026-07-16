@@ -4,6 +4,7 @@
 
 #include "CspConfigCache.h"
 #include "CspLocalNodeMap.h"
+#include "CspUser.h"
 #include "Log.h"
 #include "SimpleJson.h"
 
@@ -33,6 +34,8 @@ bool CCspServiceMap::Sync() {
             s.auth_realm = row.GetString( "auth_realm" );
             s.server_identity_uri = row.GetString( "server_identity_uri" );
             s.inbound_policy = row.GetString( "inbound_policy", "any" );
+            s.media_nat_mode = row.GetString( "media_nat_mode", "off" );
+            s.latch_ip_guard = row.GetString( "latch_ip_guard", "strict" );
             s.priority = (int)row.GetInt( "priority", 100 );
             std::string en = row.GetString( "enabled" );
             s.enabled = ( en != "false" && en != "0" );
@@ -151,4 +154,39 @@ std::map<std::string, std::string> CCspServiceMap::BuildDomainToKindMap() const 
         out[s.domain] = s.kind;
     }
     return out;
+}
+
+ServiceInfo CCspServiceMap::GetForUser( const std::string &userId, const std::string &fallbackKind ) const {
+    if ( !userId.empty() ) {
+        CspUser clsUser;
+        if ( gclsCspUserMap.Select( userId.c_str(), clsUser ) && !clsUser.m_strServiceRef.empty() ) {
+            ServiceInfo svc = GetByName( clsUser.m_strServiceRef );
+            if ( svc.id > 0 ) return svc;
+        }
+    }
+    return GetByKind( fallbackKind );
+}
+
+// RFC1918/링크로컬 — SDP 선언 미디어 주소가 사설이면 NAT 뒤 단말 신호.
+static bool _IsPrivateIp( const std::string &ip ) {
+    unsigned a = 0, b = 0;
+    if ( sscanf( ip.c_str(), "%u.%u", &a, &b ) != 2 ) return false;
+    if ( a == 10 ) return true;
+    if ( a == 172 && b >= 16 && b <= 31 ) return true;
+    if ( a == 192 && b == 168 ) return true;
+    if ( a == 169 && b == 254 ) return true;
+    return false;
+}
+
+bool CCspServiceMap::EvalMediaNat( const ServiceInfo &svc, const std::string &sdpIp, const std::string &sigIp,
+                                   std::string &outGuardIp ) {
+    outGuardIp.clear();
+    bool bNat = false;
+    if ( svc.media_nat_mode == "force" ) {
+        bNat = true;
+    } else if ( svc.media_nat_mode == "auto" ) {
+        bNat = _IsPrivateIp( sdpIp ) || ( !sigIp.empty() && !sdpIp.empty() && sdpIp != sigIp );
+    }
+    if ( bNat && svc.latch_ip_guard != "off" ) outGuardIp = sigIp;
+    return bNat;
 }

@@ -40,7 +40,7 @@ CSP ──(JSON/UDP 9000)──→ CmpServer
                    ┌────────┼────────┐
                    │        │        │
               VoIP Pool  PTT Pool  Group Map
-              (PRtpTrans) (PPttTrans) (McpttGroup)
+              (PRtpRelay) (PRtpMulticast/PPttMemberPort) (PMcpttGroup)
                    │        │        │
                    └────────┼────────┘
                             │
@@ -54,8 +54,8 @@ VoIP와 PTT는 용도별로 핸들러를 분리한다:
 
 | 구분 | 핸들러 | 소켓 구성 | 포트 블록 |
 |------|--------|-----------|-----------|
-| VoIP | PRtpTrans | Audio RTP + RTCP + Video RTP + RTCP | 4포트 (연속) |
-| PTT | PPttTrans | Audio RTP + Floor Control | 2포트 (독립 대역) |
+| VoIP | PRtpRelay | peer 별 Audio RTP/RTCP + Video RTP/RTCP | 8포트 (leg 별 4포트 블록 × 2) |
+| PTT | PRtpMulticast (그룹 공유 Floor) + PPttMemberPort (멤버 Audio/Video RTP) | Floor 그룹당 1 + 멤버당 Audio/Video 각 1 | 독립 대역 |
 
 **분리 이유:**
 - PTT는 RTCP 불필요 (Floor를 m=application 전용 소켓으로 처리)
@@ -80,7 +80,7 @@ UDP 제어 채널 리스너. CSP로부터 JSON 명령을 수신하여 디스패�
 ```cpp
 class CmpServer : public PModule {
     // 세션/그룹 관리
-    std::map<std::string, PRtpTrans*> _sessions;   // VoIP 세션
+    std::map<std::string, PRtpRelay*> _sessions;   // VoIP 세션
     std::map<std::string, McpttGroup*> _groups;     // PTT 그룹
     std::map<std::string, std::string> _logDirs;    // key → log 경로
     std::map<std::string, std::string> _sesidMap;   // key → sesid (CSP 발급 상속)
@@ -92,12 +92,15 @@ class CmpServer : public PModule {
     bool _logFlowRtcp;    // RTCP SR/RR/SDES/BYE
 
     // VoIP 리소스 풀
-    std::vector<PRtpTrans*> _resourcePool;
-    std::vector<PRtpTrans*> _freeResources;
+    std::vector<PRtpRelay*> _resourcePool;
+    std::vector<PRtpRelay*> _freeResources;
 
     // PTT 리소스 풀
-    std::vector<PPttTrans*> _pttPool;
-    std::vector<PPttTrans*> _freePttResources;
+    std::vector<PRtpMulticast*> _pttPool;          // 그룹 공유 floor
+    std::vector<PRtpMulticast*> _freePttResources;
+    std::vector<PPttMemberPort*> _pttMemberPool;   // 멤버 전용 포트 유닛
+    std::vector<PPttMemberPort*> _freePttMembers;
+    std::map<std::string, PPttMemberPort*> _memberUnits;  // "groupId|sessionId" → unit
 };
 ```
 
@@ -114,8 +117,9 @@ class CmpServer : public PModule {
 CmpServer(name, configFile)
   1. loadConfig()  ── 설정 파일 파싱
   2. Worker 스레드 생성 (RtpWorker_0 ~ RtpWorker_N)
-  3. initResourcePool()    ── VoIP PRtpTrans 풀 생성
-  4. initPttResourcePool() ── PTT PPttTrans 풀 생성
+  3. initResourcePool()    ── VoIP PRtpRelay 풀 생성 (호당 8포트)
+  4. initPttResourcePool() ── PTT 그룹 floor(PRtpMulticast) 풀 생성
+  4'. initPttMemberPool()  ── PTT 멤버 포트 유닛(PPttMemberPort) 풀 생성
 ```
 
 **UDP JSON 프로토콜 (envelope v2):**
@@ -153,18 +157,21 @@ wire 규격 정본은 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) �
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
 | session_id | O | 세션 식별자 |
-| remote_ip | O | 상대방 RTP IP |
+| remote_ip | O | 상대방 RTP IP (SDP 선언) |
 | remote_port | O | 상대방 RTP 포트 |
 | remote_video_port | - | 상대방 Video RTP 포트 |
-| peer_index | - | 피어 인덱스 (0 또는 1) |
+| peer_index | - | 피어 인덱스 (0=발신 A / 1=착신 B) |
+| remote_nat | - | 1 이면 해당 peer 전용 포트에 NAT 목적지 latch 허용 ([ue_nat_traversal.md](../features/ue_nat_traversal.md)) |
+| remote_sig_ip | - | 해당 peer 의 SIP 시그널링 실소스 IP — latch IP guard |
 | record_dir | - | 녹취 디렉토리 경로 |
 | log_dir | - | CMP flow 로그 경로 |
 
-**응답:** `local_ip`, `local_port`, `local_video_port`
+**응답:** `local_ip`, `local_port`/`local_video_port` (peer0 전용),
+`local_port_b`/`local_video_port_b` (peer1 전용). 각 포트의 RTCP 는 +1.
 
 **동작:**
-1. `_freeResources`에서 PRtpTrans 할당
-2. 원격 피어 주소 설정 (`setRmt`)
+1. `_freeResources`에서 PRtpRelay(8포트 블록) 할당
+2. 원격 피어 주소·NAT 정책 설정 (`setRemote`)
 3. record_dir 있으면 녹취 시작
 4. log_dir 있으면 `_logDirs`에 저장, SESSION_START 로그
 
@@ -194,21 +201,22 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 | group_type | - | `prearranged`/`chat`/`broadcast` (broadcast floor 정책용) |
 | initiator_id | - | broadcast 개시자 sessionId(=userId) — floor 독점 판정 |
 
-**응답:** `ip`, `port` (Audio RTP), `floor_port` (Floor Control), `video_port`
+**응답:** `ip`, `floor_port` (그룹 공유 Floor Control),
+`member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port, video_port}`)
 
 **동작:**
-1. McpttGroup 생성
-2. `_freePttResources`에서 PPttTrans 할당
-3. PPttTrans ↔ McpttGroup 연결 (`setGroup`, `setPttSession`)
+1. PMcpttGroup 생성
+2. `_freePttResources`에서 PRtpMulticast(그룹 공유 floor 포트) 할당
+3. PRtpMulticast ↔ PMcpttGroup 연결 (`setGroup`, `setPttSession`)
 4. DTMF 설정 전달
 5. 녹취/로그 설정
-6. members CSV 파싱 → 우선순위/role 설정
+6. members CSV 파싱 → 우선순위/role 설정 + 멤버별 전용 포트 유닛(PPttMemberPort) 선할당
 7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`) — TS 24.380 §10.3.
 
 #### PTT_GROUP_MODIFY — 그룹 멤버/우선순위 갱신
 
 processAddGroup()으로 위임 — 기존 그룹이면 재할당 없이 members 만 갱신하고 동일
-`ip/port/floor_port/video_port` 를 응답한다.
+`ip/floor_port/member_ports` 를 응답한다.
 
 #### PTT_JOIN — 멤버 참가
 
@@ -216,14 +224,19 @@ processAddGroup()으로 위임 — 기존 그룹이면 재할당 없이 members 
 |----------|------|------|
 | group_id | O | 그룹 식별자 |
 | session_id | O | 멤버 세션 ID |
-| user_ip | O | 멤버 RTP IP |
-| user_port | O | 멤버 Audio RTP 포트 |
+| user_ip | - | 멤버 RTP IP (①선할당 호출은 생략 — 2단 멱등, [api/cmp_media_api.md §7.4](../../api/cmp_media_api.md)) |
+| user_port | - | 멤버 Audio RTP 포트 |
 | user_floor_port | - | 멤버 Floor Control 포트 |
 | user_video_port | - | 멤버 Video RTP 포트 |
+| user_nat | - | 1 이면 멤버 전용 포트에 NAT 목적지 latch 허용 |
+| user_sig_ip | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard |
 | role | - | `chair`/`participant` (floor 선점 판정용, 기본 participant) |
 | tier | - | `emergency`/`imminent`/`normal` — 긴급 멤버 join 시 동반 |
 
-**동작:** McpttGroup::addMember() 호출. Floor taken 상태면 신규 멤버에게 FLOOR_TAKEN 통지.
+**응답:** `ip`, `port`, `video_port` — 멤버 전용 RTP 포트 (같은 멤버 재요청 시 동일 포트).
+
+**동작:** 멤버 포트 유닛(PPttMemberPort) 확보(멱등) 후, 주소 동반 시
+PMcpttGroup::addMember(). Floor taken 상태면 신규 멤버에게 FLOOR_TAKEN 통지.
 
 #### PTT_LEAVE — 멤버 퇴장
 
@@ -232,7 +245,7 @@ processAddGroup()으로 위임 — 기존 그룹이면 재할당 없이 members 
 | group_id | O | 그룹 식별자 |
 | session_id | O | 멤버 세션 ID |
 
-**동작:** McpttGroup::removeMember(). Floor 소유자 퇴장 시 FLOOR_IDLE 브로드캐스트.
+**동작:** PMcpttGroup::removeMember() + 멤버 포트 유닛 반환. Floor 소유자 퇴장 시 FLOOR_IDLE 브로드캐스트.
 
 #### PTT_GROUP_REMOVE — 그룹 해제
 
@@ -240,7 +253,7 @@ processAddGroup()으로 위임 — 기존 그룹이면 재할당 없이 members 
 |----------|------|------|
 | group_id | O | 그룹 식별자 |
 
-**동작:** PPttTrans 리소스 반환 → McpttGroup delete → 맵 삭제
+**동작:** PRtpMulticast(floor) + 멤버 포트 유닛 전체 반환 → PMcpttGroup delete → 맵 삭제
 
 #### PTT_FLOOR_TIER — 멤버 floor tier 런타임 변경
 
@@ -276,7 +289,7 @@ CSP 는 이 명령을 보내지 않는다 — OAM stats 핸들러와 검증 파�
 }
 ```
 
-- `relay` = VoIP 풀(`_freeResources`/`PRtpTrans`), `ptt` = PTT 전용 풀(`_freePttResources`/`PPttTrans`).
+- `relay` = VoIP 풀(`_freeResources`/`PRtpRelay`), `ptt` = 그룹(floor) 풀 + 멤버 유닛 풀(`member_total`/`member_used`).
   OAM stats 핸들러가 이를 flat 키(`rtp_ports_*`/`ptt_rtp_ports_*`)로 정규화해 대시보드에 전달.
 
 #### HEARTBEAT — 연결 확인 + 자원 요약
@@ -287,145 +300,116 @@ CSP 가 3초 주기로 송신 (hdr-only, sesid/service 없음). **응답 payload
 
 ---
 
-### 3.3 PRtpTrans (VoIP 핸들러)
+### 3.3 PRtpRelay (VoIP 핸들러)
 
-**파일:** `PRtpHandler.h/.cpp`
+**파일:** `PRtpRelay.h/.cpp`
 
 **상속:** `PHandler` (pasf 프레임워크의 핸들러 베이스)
 
-**소켓 구성 (4포트 블록):**
+**소켓 구성 (leg 별 4포트 블록 × 2 = 8포트,
+[ue_nat_traversal.md §3.1](../features/ue_nat_traversal.md)):**
 
 ```
-basePort+0 : Audio RTP     (_rtpSock)
-basePort+1 : Audio RTCP    (_rtcpSock)
-basePort+2 : Video RTP     (_videoRtpSock)
-basePort+3 : Video RTCP    (_videoRtcpSock)
+peer0 (발신 A)                     peer1 (착신 B)
+basePort+0 : Audio RTP             basePort+4 : Audio RTP
+basePort+1 : Audio RTCP            basePort+5 : Audio RTCP
+basePort+2 : Video RTP             basePort+6 : Video RTP
+basePort+3 : Video RTCP            basePort+7 : Video RTCP
 ```
 
-**듀얼 피어 구조:**
+각 peer 는 자기 전용 포트로만 송신한다 — **수신 소켓이 곧 peer 신원**이며, 소스 주소는
+검증용이다(선언 주소 불일치 = 드롭 + `rtp_src_drop` 카운터, nat leg 는 목적지 latch).
+하향 송신도 그 peer 의 소켓에서 나가 소스 포트 = 광고 포트(symmetric RTP 정합).
+
+**듀얼 leg 구조:**
 
 ```cpp
-struct PeerInfo {
-    std::string ip;
-    unsigned int port;
-    unsigned int videoPort;
-    struct sockaddr_in addrRtp, addrRtcp, addrVideoRtp, addrVideoRtcp;
-    bool active;
+struct Leg {
+    PRtpSocket rtp, rtcp, videoRtp, videoRtcp;   // 전용 소켓
+    std::string ip;                              // 상대 주소 (SDP 선언 → latch 시 학습 주소)
+    unsigned int port, videoPort;
+    sockaddr_in addrRtp, addrRtcp, addrVideoRtp, addrVideoRtcp;   // 송신 목적지
+    bool nat;              // 제어평면(RELAY_ADD remote_nat)이 지정한 leg 만 latch 허용
+    std::string sigIp;     // latch IP guard 기준
+    bool latched; uint32_t latchSsrc;   // latch 후 SSRC 고정 (재-latch 는 동일 SSRC 만)
 };
-PeerInfo _peers[2];  // B2BUA 양 leg
+Leg _legs[2];  // B2BUA 양 leg
 ```
 
-**RTP Relay 로직 (proc()):**
+**RTP Relay 로직 (proc()) — epoll 리액터가 패킷 도착 시 호출:**
 
 ```
-proc() — Worker 스레드에서 주기 호출
-  │
-  ├─ RTCP 수신 (Audio)
-  │   ├─ 그룹 모드 → McpttGroup::onRtcpPacket() (legacy floor)
-  │   └─ 1:1 모드 → 반대편 피어로 relay
-  │
-  ├─ RTP 수신 (Audio)
-  │   ├─ touchActivity() (세션 타임아웃 갱신)
-  │   ├─ 그룹 모드 → McpttGroup::onRtpPacket()
-  │   ├─ 브릿지 모드 → bridgePeer로 전달
-  │   └─ 1:1 모드 → 반대편 피어로 relay
-  │   └─ 녹취 활성 시 → RtpRecorder::WritePacket()
-  │
-  ├─ Video RTP 수신
-  │   ├─ 그룹 모드 → McpttGroup::onVideoRtpPacket()
-  │   └─ 1:1 모드 → 반대편 피어로 relay
-  │
-  └─ Video RTCP 수신
-      └─ 반대편 피어로 relay
+proc()
+  └─ 각 leg i 에 대해:
+      ├─ Audio RTCP 수신 (leg[i].rtcp)
+      │   ├─ 소스 검증 (선언 IP + RTP포트+1) — nat leg 는 관측 소스로 목적지 교정
+      │   └─ leg[1-i].rtcp 소켓에서 반대편 목적지로 relay
+      ├─ Audio RTP 수신 (leg[i].rtp)
+      │   ├─ 소스 검증 — nat leg 는 목적지 latch(아래) / 불일치 드롭+카운터
+      │   ├─ touchActivity() (유효 수신만 — 무효 트래픽 세션은 orphan 조기 회수)
+      │   ├─ leg[1-i].rtp 소켓에서 반대편 목적지로 relay
+      │   └─ 녹취: track a/b = 수신 소켓 기준 (발/착 귀속 항상 정확)
+      ├─ Video RTP / Video RTCP — 동일 원리
 ```
 
-**Symmetric RTP (IP Learning):**
+**NAT 목적지 latch (nat leg 전용, [ue_nat_traversal.md §5](../features/ue_nat_traversal.md)):**
 
-NAT 환경에서 최초 패킷 수신 시 IP를 학습하여 피어 주소 갱신:
-```cpp
-if (rmtIp == _peers[i].ip && rmtPort != _peers[i].port) {
-    // 포트 latching
-    _peers[i].port = rmtPort;
-}
-```
+leg 전용 포트가 신원을 확정하므로 latch 는 신원 판정이 아니라 **송신 목적지 학습**이다.
+`RELAY_ADD`/`RELAY_MODIFY` 의 `remote_nat=1` leg 에서만:
 
-**MCPTT 그룹의 NAT latch (PMcpttGroup):**
-
-포트 변환 NAT 뒤 단말은 SDP 에 사설 주소가 실려 (ip,port) 매칭이 모두 실패한다. 3단 latch:
-
-1. **Floor**: 주소 매칭((ip,port) → port-only) 실패 시 **TS 24.380 User ID 필드(§8.2.3.6)** 로
-   멤버를 식별하고 관측 소스 주소(ip+floorPort)를 latch(+`floorNatLatched` 마킹) →
-   GRANT/TAKEN/IDLE 회신 도달. 단말은 참여 직후 Floor Ack(User ID 포함) 1회로 이 latch 를 유도.
-2. **발언자 RTP**: 미매칭 RTP 가 현재 발언권 소유자의 floor-latch 된 공인 IP 에서 오면
-   소유자의 RTP 주소로 latch(제3자 스푸핑 방지 조건).
-3. **수신단 RTP keepalive**: 단말(PJSIP `PJMEDIA_STREAM_ENABLE_KA`)이 보내는 empty-RTP KA 를,
-   `floorNatLatched` 멤버 중 공인 IP 일치 후보가 **유일**할 때만 latch — 발언한 적 없는
-   청취 전용 참가자의 하향 오디오 경로 개방(동일 호스트 멤버 오-latch 방지 조건).
+1. 첫 유효 RTP(version 2 + 최소 길이 + `remote_sig_ip` 있으면 소스 IP 일치) 소스를
+   그 leg 의 송신 목적지로 latch + SSRC 고정.
+2. 이후 소스 갱신(재-latch)은 **동일 SSRC** 일 때만 — NAT rebind 추종 + 제3자 주입 차단.
+3. RTCP 목적지는 latch 된 IP 의 관측 RTCP 소스로 교정(관측 전에는 선언 포트+1 추정).
+4. 주소 갱신(re-INVITE, `setRemote`) 시 latch 리셋 → 재-latch 허용.
+5. latch 발생 INFO 로그 + `STATS detail.nat` 에 학습 주소 노출.
 
 **녹취:**
 
 ```cpp
 void startRecording(const std::string& rawDir, const std::string& sessionId);
-// rawDir/raw_a.rtp  — peer[0]→peer[1] 오디오
-// rawDir/raw_b.rtp  — peer[1]→peer[0] 오디오
-// rawDir/raw_va.rtp — peer[0] 비디오
-// rawDir/raw_vb.rtp — peer[1] 비디오
+// rawDir/seg_NNNN_a.rtp  — peer[0](발신) 수신 오디오
+// rawDir/seg_NNNN_b.rtp  — peer[1](착신) 수신 오디오
+// rawDir/seg_NNNN_va.rtp — peer[0] 비디오
+// rawDir/seg_NNNN_vb.rtp — peer[1] 비디오
 ```
 
-### 3.4 PPttTrans (PTT 핸들러)
+### 3.4 PRtpMulticast (그룹 floor 유닛) + PPttMemberPort (멤버 포트 유닛)
 
-**파일:** `PRtpHandler.h/.cpp`
+**파일:** `PRtpMulticast.h/.cpp`, `PPttMemberPort.h/.cpp`
 
 **상속:** `PHandler`
 
-**소켓 구성 (2포트, 독립 대역):**
+PTT 미디어는 leg 별 포트셋을 따른다 ([ue_nat_traversal.md §3.2](../features/ue_nat_traversal.md)):
+
+- **PRtpMulticast** — 그룹당 공유 **floor control 소켓 1개** (`PttFloorStartPort + N*2`).
+  floor 메시지(RTCP APP "MCPT")는 TS 24.380 User ID 가 in-band 신원이라 공유 포트로 충분.
+  proc(): floor 수신 → `PMcpttGroup::onFloorPacket()`.
+- **PPttMemberPort** — 멤버당 전용 **audio RTP**(`PttRtpStartPort + N*2`) +
+  **video RTP**(`PttVideoStartPort + N*2`) 소켓. 유닛의 포트가 그 멤버의 SDP 에 광고되어
+  **수신 소켓이 곧 멤버 신원**이고, 하향 송신도 이 소켓에서 나간다(symmetric RTP 정합).
+  proc(): 수신 → `PMcpttGroup::onMemberRtpPacket(memberId, ...)` /
+  `onMemberVideoRtpPacket(memberId, ...)`.
 
 ```
-PttRtpStartPort + N*2    : Audio RTP   (_rtpSock)
-PttFloorStartPort + N*2  : Floor Ctrl  (_floorSock)
+멤버 유닛 audio 수신 → onMemberRtpPacket(memberId, ip, port, buf, len)
+  ├─ 소스 검증 (선언 주소) — nat 멤버는 목적지 latch / 불일치 드롭+카운터
+  ├─ DTMF 감지 (PT=101, end bit)
+  └─ Floor 소유자 오디오만 전체 송출 (각 멤버 유닛 소켓에서 하향 분배)
 ```
 
-**주요 메서드:**
+### 3.5 PMcpttGroup
 
-| 메서드 | 역할 |
-|--------|------|
-| `init(ip, rtpPort, floorPort)` | 오디오 RTP + Floor 소켓 바인드 |
-| `setGroup(McpttGroup*)` | 그룹 연결 |
-| `sendFloorTo(ip, port, data, len)` | Floor 소켓으로 패킷 전송 |
-| `proc()` | Floor 수신 → onFloorPacket(), Audio 수신 → onRtpPacket() |
-| `reset()` | 세션 초기화 (그룹 해제) |
+**파일:** `PMcpttGroup.h/.cpp`
 
-**proc() 처리 순서:**
-
-```
-proc() — Worker 스레드에서 주기 호출
-  │
-  ├─ 1. Floor Control 패킷 수신 (_floorSock)
-  │   └─ McpttGroup::onFloorPacket(ip, port, buf, len)
-  │       ├─ 멤버 floorPort로 매칭
-  │       ├─ Symmetric floor (포트 매칭 + IP 학습)
-  │       └─ opcode 디스패치 → handleFloorRequest/Release
-  │
-  └─ 2. Audio RTP 수신 (_rtpSock)
-      ├─ touchActivity()
-      └─ McpttGroup::onRtpPacket(ip, port, buf, len)
-          ├─ 발신자 매칭 (IP:port → sessionId)
-          ├─ DTMF 감지 (PT=101, end bit)
-          └─ Floor 소유자 오디오만 전체 송출
-```
-
-### 3.5 McpttGroup
-
-**파일:** `McpttGroup.h/.cpp`
-
-PTT 그룹 오디오 믹싱 및 MCPTT Floor Control.
+PTT 그룹 오디오 분배 및 MCPTT Floor Control.
 
 **멤버 구조:**
 
 ```cpp
 struct Peer {
     std::string id;           // 세션 ID
-    std::string ip;           // 멤버 IP
+    std::string ip;           // 멤버 주소 (SDP 선언 → NAT latch 시 학습 주소)
     int port;                 // Audio RTP 포트
     int floorPort;            // Floor Control 포트 (m=application)
     int videoPort;            // Video RTP 포트
@@ -434,23 +418,24 @@ struct Peer {
     uint16_t videoSeqOut;     // 수신자별 비디오 시퀀스 카운터
     uint32_t audioSsrcOut;    // 수신자에게 보내는 고정 오디오 SSRC
     uint32_t videoSsrcOut;    // 수신자에게 보내는 고정 비디오 SSRC
+    PPttMemberPort* unit;     // 멤버 전용 RTP 포트 유닛 (수신 신원 + 하향 송신 소켓)
+    bool natEnabled;          // PTT_JOIN user_nat — 목적지 latch 허용
 };
 ```
 
 **수신자별 SSRC/시퀀스 재작성:**
 
 ```cpp
-void sendAudioToAll(data, len, excludeIp, excludePort) {
+void sendAudioToAll(data, len, excludeSessionId) {
     for (auto& [sid, peer] : _members) {
-        // 발신자 제외
-        if (peer.ip == excludeIp && peer.port == excludePort) continue;
+        if (sid == excludeSessionId) continue;   // 발신자 제외
         // 패킷 복제 후 수신자별 SSRC + 시퀀스 재작성
         char pkt[4096];
         memcpy(pkt, data, len);
         peer.audioSeqOut++;
         // RTP 헤더 seq(offset 2-3) = peer.audioSeqOut
         // RTP 헤더 ssrc(offset 8-11) = peer.audioSsrcOut
-        _sharedSession->sendTo(peer.ip, peer.port, pkt, len);
+        peer.unit->sendAudioTo(peer.ip, peer.port, pkt, len);   // 멤버 전용 유닛 소켓에서 송신
     }
 }
 ```
@@ -537,18 +522,15 @@ handleFloorRequest(sessionId, ssrc)
 
 ```
 Floor 요청 수신 (UE → CMP):
-  PPttTrans._floorSock 수신
+  PRtpMulticast._floorSock 수신
   → McpttGroup::onFloorPacket()
   → handleFloorRequest/Release()
 
 Floor 응답 전송 (CMP → UE):
   McpttGroup::sendToMember(sessionId, data, len)
-  → PPttTrans::sendFloorTo(peer.ip, peer.floorPort, data, len)
+  → PRtpMulticast::sendFloorTo(peer.ip, peer.floorPort, data, len)
   → _floorSock.sendTo()
 
-Floor Fallback (legacy RTCP):
-  _pttSession 없거나 floorPort == 0인 경우
-  → _sharedSession->sendTo(peer.ip, peer.port + 1, data, len)
 ```
 
 #### DTMF 기반 Floor Control
@@ -568,20 +550,14 @@ RTP 패킷 수신 (PT=101, telephone-event)
       └─ handleFloorRelease()
 ```
 
-#### 오디오 포트 Latching
+#### NAT 멤버의 목적지 latch
 
-NAT 환경에서 멤버 IP/포트를 동적으로 학습:
-
-```
-onRtpPacket(ip, port, ...)
-  │
-  ├─ 1차: IP:port 정확 매칭 → 성공
-  │
-  ├─ 2차: IP 매칭 + port 불일치 (후보 1명)
-  │   └─ 포트 latching: peer.port = port
-  │
-  └─ 실패: "RTP from unknown sender" 로그
-```
+멤버 신원은 전용 포트 유닛이 확정하므로 소스 매칭이 없다. `PTT_JOIN` 의 `user_nat=1`
+멤버에서만, 유닛 포트로 도착한 첫 유효 RTP(v2 + `user_sig_ip` guard) 소스를 그 멤버의
+**송신 목적지**로 latch 하고 SSRC 를 고정한다 (재-latch 는 동일 SSRC = NAT rebind 추종만).
+청취 전용 NAT 멤버도 자기 유닛 포트로 보내는 RTP keepalive 로 하향 경로가 열린다 —
+같은 NAT 뒤 다중 멤버도 유닛 포트가 구분하므로 모호성이 없다.
+Floor 채널은 별도로 TS 24.380 User ID 기반 주소 latch(`onFloorPacket`)를 유지한다.
 
 ---
 
@@ -589,16 +565,16 @@ onRtpPacket(ip, port, ...)
 
 ### 4.1 VoIP 리소스 풀
 
-**초기화 (initResourcePool):**
+**초기화 (initResourcePool) — 호당 8포트 (leg 별 4포트 블록 × 2):**
 
 ```
 RtpStartPort = 50000, RtpPoolSize = 20
 
 포트 할당:
-  PRtpTrans[0] : 50000 (RTP), 50001 (RTCP), 50002 (VRtp), 50003 (VRtcp)
-  PRtpTrans[1] : 50004, 50005, 50006, 50007
+  PRtpRelay[0] : peer0 50000-50003 (RTP/RTCP/VRtp/VRtcp), peer1 50004-50007
+  PRtpRelay[1] : 50008-50015
   ...
-  PRtpTrans[19]: 50076, 50077, 50078, 50079
+  PRtpRelay[19]: 50152-50159
 
 Worker 배정: RtpWorker_{i % RtpWorkerCount}
 ```
@@ -606,22 +582,22 @@ Worker 배정: RtpWorker_{i % RtpWorkerCount}
 **할당/반환:**
 
 ```cpp
-PRtpTrans* allocResource(rtpIp, rtpPort, videoPort);  // _freeResources.pop_back()
-void freeResource(PRtpTrans* rtp);                     // _freeResources.push_back()
+PRtpRelay* allocResource(rtpIp, rtpPort, videoPort);  // _freeResources.pop_back()
+void freeResource(PRtpRelay* rtp);                     // _freeResources.push_back()
 ```
 
 ### 4.2 PTT 리소스 풀
 
-**초기화 (initPttResourcePool):**
+**초기화 (initPttResourcePool + initPttMemberPool):**
 
 ```
-PttRtpStartPort = 52000, PttFloorStartPort = 54000, PttRtpPoolSize = 10
+PttFloorStartPort = 54000, PttRtpPoolSize = 10          — 그룹(공유 floor) 풀
+PttRtpStartPort = 52000, PttVideoStartPort = 56000,
+PttMemberPoolSize = 40                                  — 멤버 포트 유닛 풀
 
 포트 할당:
-  PPttTrans[0] : RTP 52000, Floor 54000
-  PPttTrans[1] : RTP 52002, Floor 54002
-  ...
-  PPttTrans[9] : RTP 52018, Floor 54018
+  PRtpMulticast[0..9]  : Floor 54000, 54002, ... 54018        (그룹당 1)
+  PPttMemberPort[0..39]: Audio 52000+N*2, Video 56000+N*2     (참가 멤버당 1)
 
 Worker 배정: RtpWorker_{i % RtpWorkerCount}
 ```
@@ -629,31 +605,32 @@ Worker 배정: RtpWorker_{i % RtpWorkerCount}
 **할당/반환:**
 
 ```cpp
-PPttTrans* allocPttResource(rtpIp, rtpPort, floorPort);  // _freePttResources.pop_back()
-void freePttResource(PPttTrans* ptt);                     // _freePttResources.push_back()
+PRtpMulticast* allocPttResource(rtpIp, floorPort);     // 그룹 생성/해제
+PPttMemberPort* ensureMemberUnit(groupId, sessionId);  // (group, member) 멱등 키
+void freeMemberUnit(groupId, sessionId);               // PTT_LEAVE / 그룹 해제
 ```
 
 ### 4.3 포트 대역 정리
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ VoIP RTP Pool (PRtpTrans)                                   │
-│ 50000 ─────────────────────────── 50079                     │
-│ [RTP][RTCP][VRtp][VRtcp] × 20 블록                          │
+│ VoIP RTP Pool (PRtpRelay) — 호당 8포트                       │
+│ 50000 ─────────────────────────── 50159                     │
+│ [peer0: RTP/RTCP/VRtp/VRtcp][peer1: 동일] × 20 블록          │
 ├─────────────────────────────────────────────────────────────┤
-│ (gap: 50080 ~ 51999)                                        │
+│ PTT 멤버 Audio RTP (PPttMemberPort)                          │
+│ 52000 ──────────── 52078   [RTP] × 40 유닛 (2포트 간격)      │
 ├─────────────────────────────────────────────────────────────┤
-│ PTT Audio RTP Pool (PPttTrans._rtpSock)                     │
-│ 52000 ──────────── 52018                                    │
-│ [RTP] × 10 블록 (2포트 간격)                                 │
+│ PTT Floor Control (PRtpMulticast, 그룹 공유)                 │
+│ 54000 ──────────── 54018   [Floor] × 10 그룹 (2포트 간격)    │
 ├─────────────────────────────────────────────────────────────┤
-│ (gap: 52020 ~ 53999)                                        │
-├─────────────────────────────────────────────────────────────┤
-│ PTT Floor Control Pool (PPttTrans._floorSock)               │
-│ 54000 ──────────── 54018                                    │
-│ [Floor] × 10 블록 (2포트 간격)                               │
+│ PTT 멤버 Video RTP (PPttMemberPort)                          │
+│ 56000 ──────────── 56078   [VRtp] × 40 유닛 (2포트 간격)     │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+방화벽/배포 포트 대역은 이 표 기준으로 개방한다 (풀 크기 변경 시 대역 재산정 —
+[ue_nat_traversal.md §7](../features/ue_nat_traversal.md)).
 
 ---
 
@@ -695,7 +672,7 @@ OAM `GET /api/v1/stats/leak-reclaims?date=` → reclaim.jsonl 목록 + reason/no
 
 ## 6. 녹취
 
-### 6.1 VoIP 녹취 (PRtpTrans)
+### 6.1 VoIP 녹취 (PRtpRelay)
 
 ```
 startRecording(rawDir, sessionId)
@@ -784,7 +761,7 @@ setRecording(enable, dir)
 ### 7.4 Floor/DTMF 기록 경로
 
 ```
-onRtcpPacket/onFloorPacket → _dtmfFlowLog / logFlow(proto=MCPTT)
+onFloorPacket/onMemberRtpPacket(DTMF) → _dtmfFlowLog / logFlow(proto=MCPTT)
 broadcastFloorStatus(TAKEN/IDLE/REVOKE) → logFlow(from=cmp, to=ue, proto=MCPTT)
 ```
 
@@ -797,10 +774,10 @@ broadcastFloorStatus(TAKEN/IDLE/REVOKE) → logFlow(from=cmp, to=ue, proto=MCPTT
 ```
 CmpServer (PModule)
   │
-  ├─ RtpWorker_0 ──→ [PRtpTrans_0, PRtpTrans_4, PPttTrans_0, PPttTrans_4, ...]
-  ├─ RtpWorker_1 ──→ [PRtpTrans_1, PRtpTrans_5, PPttTrans_1, PPttTrans_5, ...]
-  ├─ RtpWorker_2 ──→ [PRtpTrans_2, PRtpTrans_6, PPttTrans_2, PPttTrans_6, ...]
-  └─ RtpWorker_3 ──→ [PRtpTrans_3, PRtpTrans_7, PPttTrans_3, PPttTrans_7, ...]
+  ├─ RtpWorker_0 ──→ [PRtpRelay_0, PRtpRelay_4, PttFloor_0, PttMember_0, ...]
+  ├─ RtpWorker_1 ──→ [PRtpRelay_1, PRtpRelay_5, PttFloor_1, PttMember_1, ...]
+  ├─ RtpWorker_2 ──→ [PRtpRelay_2, PRtpRelay_6, PttFloor_2, PttMember_2, ...]
+  └─ RtpWorker_3 ──→ [PRtpRelay_3, PRtpRelay_7, PttFloor_3, PttMember_3, ...]
 ```
 
 - 각 Worker는 배정된 모든 핸들러의 `proc()`을 순환 호출

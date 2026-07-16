@@ -31,10 +31,10 @@
 #include "DbManager.h"
 #include "Directory.h"
 #include "GroupCallService.h"
-#include "McDataMediaService.h"
 #include "GroupMap.h"
-#include "McpttInfo.h"
 #include "Log.h"
+#include "McDataMediaService.h"
+#include "McpttInfo.h"
 #include "MemoryDebug.h"
 #include "NonceMap.h"
 #include "RtpMap.h"
@@ -440,8 +440,7 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
     if ( gclsSetup.m_bTestEnvOpenTermination && pclsMessage->IsMethod( SIP_METHOD_INVITE ) ) {
         const std::string &strToUser = pclsMessage->m_clsTo.m_clsUri.m_strUser;
         CspUser clsToProv;
-        if ( gclsGroupMap.Contains( strToUser.c_str() ) ||
-             gclsCspUserMap.isAlive( strToUser.c_str(), clsToProv ) ||
+        if ( gclsGroupMap.Contains( strToUser.c_str() ) || gclsCspUserMap.isAlive( strToUser.c_str(), clsToProv ) ||
              gclsDbManager.SelectUser( strToUser, clsToProv ) ) {
             return true;
         }
@@ -642,7 +641,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Select( pszTo, clsGroup ) ) {
             CSipCallRoute clsRouteTemp;
             clsUserInfo.GetCallRoute( clsRouteTemp );
-            if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp, iMcpttCond ) ) {
+            if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsRouteTemp,
+                                                        iMcpttCond ) ) {
                 SetCallOwner( pszCallId, &m_clsPttAs );
                 return;
             }
@@ -689,6 +689,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     int iStartPort = -1;
+    int iStartPortB = -1;
     std::string strMediaNode;  // 이 호를 처리하는 미디어(CMP) 노드 relay IP — state 기록용
     std::string strCallId;
     CSipCallRoute clsRoute;
@@ -719,18 +720,42 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         // sesid: 수신 INVITE의 Call-ID로 이미 발행되어 있으면 재사용, 없으면 발행
         strRelaySesId = gclsSipLogger.GetOrIssueSesId( pszCallId, pszFrom ? pszFrom : "" );
 
+        // 발신(caller) leg NAT 판정 — SDP 선언 미디어 IP vs INVITE 실소스(received/rport).
+        //   nat 면 CMP 가 peer0 전용 포트에서 목적지 latch 를 허용한다 (ue_nat_traversal.md §4-5).
+        int iCallerNat = 0;
+        std::string strCallerGuardIp;
+        {
+            ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( pszFrom ? pszFrom : "", "volte" );
+            std::string strSigIp;
+            int iSigPort = 0;
+            if ( pclsMessage ) pclsMessage->GetTopViaIpPort( strSigIp, iSigPort );
+            if ( strSigIp.empty() ) {
+                CUserInfo clsFromInfo;
+                if ( pszFrom && gclsUserMap.Select( pszFrom, clsFromInfo ) ) strSigIp = clsFromInfo.m_strIp;
+            }
+            if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strCallerGuardIp ) ) {
+                iCallerNat = 1;
+                CLog::Print( LOG_INFO, "EventIncomingCall: caller leg NAT (svc=%s sdp=%s sig=%s guard=%s)",
+                             clsNatSvc.name.c_str(), pclsRtp->m_strIp.c_str(), strSigIp.c_str(),
+                             strCallerGuardIp.c_str() );
+            }
+        }
+
         // CMP relay 생성: session_id(전역 유일) 발행 후 RELAY_ADD 직접 전송.
         //   (구 gclsRtpMap.CreatePort 대체 — 포트단독키 bookkeeping 제거. 멀티 미디어노드에서 포트가
         //    노드별 비유일이라 포트키 충돌로 teardown 이 엉뚱한 세션을 회수→relay 누수하던 근본버그 제거.)
         strRelaySessionId = CCmpClient::IssueSessionId();
         std::string strAllocatedIp;
-        int iLocalPort = 0, iLocalVideoPort = 0;
-        if ( !gclsCmpClient.AddSession( strRelaySessionId, strAllocatedIp, iLocalPort, iLocalVideoPort, strRecordDir,
-                                        strLogDir, pszFrom ? pszFrom : "", pszTo ? pszTo : "", pclsRtp->m_strIp,
-                                        iAudioPort, iVideoPort, strRelaySesId ) ) {
+        int iLocalPort = 0, iLocalVideoPort = 0, iLocalPortB = 0, iLocalVideoPortB = 0;
+        if ( !gclsCmpClient.AddSession( strRelaySessionId, strAllocatedIp, iLocalPort, iLocalVideoPort, iLocalPortB,
+                                        iLocalVideoPortB, strRecordDir, strLogDir, pszFrom ? pszFrom : "",
+                                        pszTo ? pszTo : "", pclsRtp->m_strIp, iAudioPort, iVideoPort, strRelaySesId,
+                                        iCallerNat, strCallerGuardIp ) ) {
             return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
         }
+        // leg 별 전용 포트: A(발신) leg SDP = iLocalPort(peer0), B(착신) leg SDP = iLocalPortB(peer1)
         iStartPort = iLocalPort;
+        iStartPortB = iLocalPortB;
         strRelayLocalIp = strAllocatedIp;
 
         std::string strRelayIp = CspAddressing::GetLocalRtpAddress();
@@ -738,7 +763,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             strRelayIp = strAllocatedIp;
             strMediaNode = strAllocatedIp;  // CMP 노드 relay IP = 처리 미디어 노드
         }
-        pclsRtp->SetIpPort( strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA );
+        pclsRtp->SetIpPort( strRelayIp.c_str(), iStartPortB, SOCKET_COUNT_PER_MEDIA );
     }
 
     clsUserInfo.GetCallRoute( clsRoute );
@@ -765,7 +790,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   이미 1개 삽입한다(동일 값). 여기서 재삽입하면 동일 PAID 가 2개 되어 RFC 3325
     //   위반(scheme 당 1개) → 중복 삽입 제거.
 
-    gclsCallMap.Insert( pszCallId, strCallId.c_str(), iStartPort );
+    // leg 별 포트: 각 entry 의 m_iPeerRtpPort = "그 leg 의 peer 에게 광고하는 relay 포트".
+    //   A(수신) entry = peer1 포트(B leg SDP 용), B(발신) entry = peer0 포트(A leg SDP 용).
+    gclsCallMap.Insert( pszCallId, strCallId.c_str(), iStartPortB, iStartPort );
     SetCallOwner( strCallId.c_str(), GetCallOwner( pszCallId ) );
 
     // CMP relay descriptor 를 양 leg(수신/발신 Call-ID)에 기록 → teardown(BYE)·answer MODIFY 가
@@ -857,9 +884,28 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
                 if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
                 int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
                 if ( iAudioPort > 0 ) {
+                    // 착신(callee) leg NAT 판정 — answer SDP IP vs 착신 등록 바인딩(received/rport latch).
+                    int iCalleeNat = 0;
+                    std::string strCalleeGuardIp;
+                    {
+                        std::string strCalleeId;
+                        gclsUserAgent.GetToId( pszCallId, strCalleeId );
+                        ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strCalleeId, "volte" );
+                        std::string strSigIp;
+                        CUserInfo clsToInfo;
+                        if ( !strCalleeId.empty() && gclsUserMap.Select( strCalleeId.c_str(), clsToInfo ) )
+                            strSigIp = clsToInfo.m_strIp;
+                        if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strCalleeGuardIp ) ) {
+                            iCalleeNat = 1;
+                            CLog::Print( LOG_INFO, "EventCallStart: callee leg NAT (svc=%s sdp=%s sig=%s guard=%s)",
+                                         clsNatSvc.name.c_str(), pclsRtp->m_strIp.c_str(), strSigIp.c_str(),
+                                         strCalleeGuardIp.c_str() );
+                        }
+                    }
                     gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
                                                  iVideoPort > 0 ? iVideoPort : 0, 1, clsCallInfo.m_strRelayCaller,
-                                                 clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId );
+                                                 clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iCalleeNat,
+                                                 strCalleeGuardIp );
                 }
             }
 
@@ -895,12 +941,13 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
             gclsCallMap.Delete( clsCallInfo.m_strPeerCallId.c_str() );
         }
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
-            iStartPort = clsCallInfo.m_iPeerRtpPort - 2;
+            // m_iPeerRtpPort = 전환 leg(peer1, base+4) 포트 → 반대 leg(peer0) = -4 (leg 블록 배치)
+            iStartPort = clsCallInfo.m_iPeerRtpPort - 4;
             pclsRtp->SetIpPort( CspAddressing::GetLocalRtpAddress().c_str(), clsCallInfo.m_iPeerRtpPort,
                                 SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendReInvite( strReferToCallId.c_str(), pclsRtp );
-        gclsCallMap.Insert( strReferToCallId.c_str(), pszCallId, iStartPort );
+        gclsCallMap.Insert( strReferToCallId.c_str(), pszCallId, iStartPort, clsCallInfo.m_iPeerRtpPort );
         gclsTransCallMap.Delete( pszCallId, false );
     } else {
         gclsUserAgent.StopCall( pszCallId );
@@ -999,11 +1046,12 @@ bool CModuleDispatcher::EventTransfer( const char *pszCallId, const char *pszRef
     clsRtp.SetDirection( E_RTP_SEND_RECV );
 
     if ( gclsSetup.m_bUseRtpRelay ) {
+        // 전환 시 relay 반대 leg 참조는 leg 블록 간격(+4) — legacy best-effort (구 +2 는 old 배치)
         const std::string strRtpAddr = CspAddressing::GetLocalRtpAddress();
         if ( bScreenedTransfer )
             clsRtp.SetIpPort( strRtpAddr.c_str(), clsReferToCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         else
-            clsRtp.SetIpPort( strRtpAddr.c_str(), clsReferToCallInfo.m_iPeerRtpPort + 2, SOCKET_COUNT_PER_MEDIA );
+            clsRtp.SetIpPort( strRtpAddr.c_str(), clsReferToCallInfo.m_iPeerRtpPort + 4, SOCKET_COUNT_PER_MEDIA );
     }
 
     if ( bScreenedTransfer ) {
@@ -1012,7 +1060,7 @@ bool CModuleDispatcher::EventTransfer( const char *pszCallId, const char *pszRef
             return false;
         clsReferToRtp.SetDirection( E_RTP_SEND_RECV );
         if ( gclsSetup.m_bUseRtpRelay )
-            clsReferToRtp.SetIpPort( CspAddressing::GetLocalRtpAddress().c_str(), clsReferToCallInfo.m_iPeerRtpPort + 2,
+            clsReferToRtp.SetIpPort( CspAddressing::GetLocalRtpAddress().c_str(), clsReferToCallInfo.m_iPeerRtpPort + 4,
                                      SOCKET_COUNT_PER_MEDIA );
         gclsCallMap.Insert( clsCallInfo.m_strPeerCallId.c_str(), clsReferToCallInfo.m_strPeerCallId.c_str(),
                             clsReferToCallInfo.m_iPeerRtpPort );
@@ -1063,14 +1111,15 @@ bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *p
         // 전환(blind transfer) relay 생성 — 구 gclsRtpMap.CreatePort 대체 (session_id 직접 AddSession).
         strRelaySesId = gclsSipLogger.GetOrIssueSesId( pszCallId, "" );
         strRelaySessionId = CCmpClient::IssueSessionId();
-        int iLocalPort = 0, iLocalVideoPort = 0;
+        int iLocalPort = 0, iLocalVideoPort = 0, iLocalPortB = 0, iLocalVideoPortB = 0;
         int iVideoPort = ( clsRtp.GetMediaCount() >= 2 ) ? clsRtp.GetVideoPort() : 0;
-        if ( !gclsCmpClient.AddSession( strRelaySessionId, strRelayLocalIp, iLocalPort, iLocalVideoPort, "", "", "",
-                                        pszReferToId ? pszReferToId : "", clsRtp.m_strIp, clsRtp.GetAudioPort(),
-                                        iVideoPort, strRelaySesId ) ) {
+        if ( !gclsCmpClient.AddSession( strRelaySessionId, strRelayLocalIp, iLocalPort, iLocalVideoPort, iLocalPortB,
+                                        iLocalVideoPortB, "", "", "", pszReferToId ? pszReferToId : "", clsRtp.m_strIp,
+                                        clsRtp.GetAudioPort(), iVideoPort, strRelaySesId ) ) {
             return false;
         }
-        iStartPort = iLocalPort;
+        // 전환 대상(신규 leg = peer1)에게는 peer1 전용 포트를 광고
+        iStartPort = iLocalPortB;
         std::string strRelayIp = strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : strRelayLocalIp;
         clsRtp.SetIpPort( strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA );
     }
@@ -1103,8 +1152,8 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
         int iFanout = 0;
         if ( bAllowed && bHaveGroup ) {
             if ( gclsCallDir.IsEnabled() )
-                gclsCallDir.PttLogEvent( pszTo, pszEvt,
-                                         std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
+                gclsCallDir.PttLogEvent(
+                    pszTo, pszEvt, std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
             // Phase 3b — 그룹 등록 멤버에게 alert MESSAGE fan-out (발신자 제외). affiliation 요구 그룹은
             //   affiliate 된 멤버만. 취소(alert-ind=false)도 동일 본문 전파로 멤버에 반영.
             {

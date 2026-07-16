@@ -23,6 +23,9 @@ struct ServiceInfo {
     std::string auth_realm;           // 비어있으면 domain 상속
     std::string server_identity_uri;  // R6: CSP 발신 From URI. 비면 sip:cspserver@{domain} 자동.
     std::string inbound_policy;       // any | restricted
+    // 단말 NAT 미디어 정책 (docs/design/features/ue_nat_traversal.md §4)
+    std::string media_nat_mode;  // off(기본) | auto | force
+    std::string latch_ip_guard;  // strict(기본) | off
     int priority = 100;
     bool enabled = true;
     std::vector<std::string> allowed_local_node_refs;  // v3: LocalNode name 참조 (SOT)
@@ -68,6 +71,19 @@ public:
 
     /** 효과적 realm 계산: service.auth_realm 이 비면 service.domain 을 반환. */
     static std::string EffectiveRealm( const ServiceInfo &svc );
+
+    /** 가입자의 access service 조회 — subscribers.service_ref 우선, 실패 시 kind 대표 서비스.
+     *  leg 별 NAT 정책 해석에 사용 (ue_nat_traversal.md §4). */
+    ServiceInfo GetForUser( const std::string &userId, const std::string &fallbackKind ) const;
+
+    /** 단말 NAT 미디어 판정 — svc.media_nat_mode 에 따라 leg 의 nat 여부 결정.
+     *  auto: SDP 선언 IP 가 SIP 시그널링 실소스와 다르거나 사설(RFC1918)이면 nat.
+     *  @param sdpIp      leg 의 SDP 선언 미디어 IP
+     *  @param sigIp      leg 의 SIP 시그널링 실소스 IP (received/rport latch)
+     *  @param outGuardIp latch_ip_guard=strict 면 sigIp (CMP 가 latch 소스 검증), off 면 빈 값
+     *  @return true = CMP 에 목적지 latch 허용 지시 */
+    static bool EvalMediaNat( const ServiceInfo &svc, const std::string &sdpIp, const std::string &sigIp,
+                              std::string &outGuardIp );
 
 private:
     mutable std::mutex m_mutex;

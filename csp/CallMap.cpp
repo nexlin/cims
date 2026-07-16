@@ -47,6 +47,15 @@ CCallMap::~CCallMap() {
  * @returns true 를 리턴한다.
  */
 bool CCallMap::Insert( const char *pszRecvCallId, const char *pszSendCallId, int iStartRtpPort ) {
+    return Insert( pszRecvCallId, pszSendCallId, iStartRtpPort, iStartRtpPort );
+}
+
+/**
+ * @ingroup CspServer
+ * @brief leg 별 relay 포트 저장 — 각 entry 의 m_iPeerRtpPort 는 그 leg 의 peer 에게
+ *        광고할 relay 포트다 (수신 leg entry = 발신 leg SDP 포트, 발신 leg entry = 수신 leg SDP 포트).
+ */
+bool CCallMap::Insert( const char *pszRecvCallId, const char *pszSendCallId, int iRecvRtpPort, int iSendRtpPort ) {
     CALL_MAP::iterator itMap;
     m_clsMutex.acquire();
     // INVITE 메시지를 수신한 Dialog 를 저장한다.
@@ -55,8 +64,8 @@ bool CCallMap::Insert( const char *pszRecvCallId, const char *pszSendCallId, int
         CCallInfo clsCallInfo;
         clsCallInfo.m_strPeerCallId = pszSendCallId;
         clsCallInfo.m_bRecv = true;
-        if ( iStartRtpPort > 0 ) {
-            clsCallInfo.m_iPeerRtpPort = iStartRtpPort;
+        if ( iRecvRtpPort > 0 ) {
+            clsCallInfo.m_iPeerRtpPort = iRecvRtpPort;
         }
         m_clsMap.insert( CALL_MAP::value_type( pszRecvCallId, clsCallInfo ) );
     }
@@ -66,8 +75,8 @@ bool CCallMap::Insert( const char *pszRecvCallId, const char *pszSendCallId, int
         CCallInfo clsCallInfo;
         clsCallInfo.m_strPeerCallId = pszRecvCallId;
         clsCallInfo.m_bRecv = false;
-        if ( iStartRtpPort > 0 ) {
-            clsCallInfo.m_iPeerRtpPort = iStartRtpPort;
+        if ( iSendRtpPort > 0 ) {
+            clsCallInfo.m_iPeerRtpPort = iSendRtpPort;
         }
         m_clsMap.insert( CALL_MAP::value_type( pszSendCallId, clsCallInfo ) );
     }
