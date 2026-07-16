@@ -126,7 +126,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [flow_logging.md](docs/design/features/flow_logging.md) — SIP/Flow 로깅 (sesid 규칙·5분 버킷)
 - [monitoring.md](docs/design/features/monitoring.md) — 모니터링
 - [sip_service_model.md](docs/design/features/sip_service_model.md) / [sip_runtime_config.md](docs/design/features/sip_runtime_config.md) — SIP 서비스 모델·런타임 설정
-- [ha_service_model.md](docs/design/features/ha_service_model.md) — HA 서비스 운영 모델 (선언적 의도·모듈 운영 명세·절체 판정 — 구현 완료, 실서버 검증 대기)
+- [ha_service_model.md](docs/design/features/ha_service_model.md) — HA 서비스 운영 모델 (책임 분리·선언적 verdict·절체 판정 — 설계 정본, 단계적 이행)
 - [oam_base_service_split.md](docs/design/features/oam_base_service_split.md) / [oam_self_upgrade.md](docs/design/features/oam_self_upgrade.md) — OAM base/service 분리·self-upgrade
 - [csc_standalone_module.md](docs/design/features/csc_standalone_module.md) — CSC 독립 모듈화
 - [build_and_packaging.md](docs/design/features/build_and_packaging.md) / [package_and_template.md](docs/design/features/package_and_template.md) — 빌드·패키징·템플릿

@@ -15,6 +15,10 @@
    - `rollback_agent`: `current` 를 직전(또는 지정) 버전 디렉토리로 flip → execv (다운로드 불요)
    - `health_check`: 포트 probe
 4. **Sync REST 서버** (HTTPS): CSC 가 collection(jsonl) 을 즉시 read/write 할 수 있게 REST 엔드포인트 노출
+5. **HA 로컬 판정**: Health Checker(모듈 생존·readiness·preflight) + Recovery Supervisor
+   (로컬 복구·재기동 정책·verdict 생성·역할 reconcile). keepalived 는 이 verdict 만 입력으로
+   받아 절체한다. 책임 분리·상태 모델·파일 레이아웃의 정본은
+   [../features/ha_service_model.md](../features/ha_service_model.md).
 
 ## 2. 운영 정책 (단일 systemd + linger)
 
