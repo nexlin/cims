@@ -2089,8 +2089,11 @@ def _fail_bump(module: str, window_sec: int) -> int:
     count += 1
     try:
         _ha_state_dir()
-        with open(_fail_path(module), "w") as f:
+        # 원자적 쓰기 — cims-health(root)가 동시에 읽으므로 torn read 방지.
+        p = _fail_path(module); tmp = p + ".tmp"
+        with open(tmp, "w") as f:
             f.write(f"{count} {first_ts}")
+        os.replace(tmp, p)
     except Exception as e:
         print(f"[agent][ha] fail 카운터 저장 실패({module}): {e}", flush=True)
     return count
