@@ -3,10 +3,9 @@
 > CIMS 운영 환경의 가용성을 위한 이중화 토폴로지 설계. SIP 서버군 (CSP/PSP)
 > 과 관리 서버 (CSC) 는 Active/Standby, Media 서버군 (CMP/PMP) 은 All Active.
 >
-> 운영 모델(무장 판정·절체 조건·모듈 운영 명세·일괄 제어·수동 절체)의 재설계가
-> 확정되어 있다 — 정본:
-> [features/ha_service_model.md](features/ha_service_model.md) (구현 전.
-> 본 문서 §11 은 현행 구현을 기술하며, 구현 완료 시 현행화된다).
+> 운영 모델(무장 판정·절체 조건·모듈 운영 명세·일괄 제어·수동 절체)의 정본은
+> [features/ha_service_model.md](features/ha_service_model.md) 이다. §11 은 keepalived
+> 인프라·렌더의 현행 동작을 요약하며, 무장/절체 판정의 상세는 그 문서를 따른다.
 
 ## 1. 개요
 
@@ -401,19 +400,28 @@ systemd `cims@` instance 는 enable 하지 않는다.
   게이트웨이 라우트 재등록 + `update_ha` 재렌더를 함께 큐잉해 자동 추종.
   그 외 모듈은 service descriptor 기본값. 그룹 `failover_options.health.{port,proto}`
   수동 오버라이드가 최우선.
-- **서비스 개시 게이트**: HA 는 **운영자가 start 한 모듈만** 관리한다. 렌더는 그룹
-  멤버 배포 중 record status=`running` 이 하나라도 있는 모듈(그룹 레벨 OR — 절체로
-  standby 기록이 stopped 인 채 notify 기동되는 비대칭 흡수)만 헬스포트 유도·
-  `cold_modules` 에 반영한다. 개시된 모듈이 없는 멤버(빈 서버, 설치만 된 그룹)는
-  entry 가 `enabled:false` 로 렌더되어 vrrp_instance 자체가 생성되지 않는다 —
-  **Active/Standby 상태는 서비스가 개시된 그룹에만 존재**하고, 설치만 한 상태에서
-  VIP 인수·미기동 포트 검사 flap·"start 하려면 VIP 필요, VIP 는 모듈 필요" 순환이
-  원천적으로 생기지 않는다. 같은 정책이 API 입구에서도 강제된다 — **VIP 적용
-  (vip_bindings 저장·그룹 [▶ 적용])은 그룹 멤버에 실행 중 모듈이 없으면 409 로
-  거부** ("모듈 먼저 start" 안내). 조용한 비무장 no-op 보다 명시적 거부가 워크플로
-  (설치 → start → VIP 적용)를 드러낸다. 바인딩 제거(disarm)는 항상 허용. 렌더 재전파 트리거 = 그룹 변이 / 배포 생성·제거 /
-  실효 upstream 변경 / **start·stop·restart·upgrade·uninstall job 완료**
-  (record status 변화 = armed 집합 변화).
+- **무장 게이트 = 서비스 의도(선언적)**: HA 는 **운영자가 의도적으로 running 으로 둔
+  모듈만** 관리한다 — record status 유추가 아니라 그룹 record 의 `service_intent`
+  (`{module: running|stopped}`) 명시값이 정본이다. 렌더는 `service_intent[m]==running`
+  인 모듈만 헬스포트 유도·`cold_modules`·`relevant_modules` 에 반영한다. running 의도
+  모듈이 없는 멤버는 entry 가 `enabled:false` 로 렌더되어 vrrp_instance 가 생성되지
+  않는다(미개시 — keepalived 정지 유지). 재설치·runtime store 유실·예외로 record 가
+  어떻게 되든 의도가 running 이면 무장 유지 → 장애 시 승격이 cold 모듈을 재기동
+  (자가 회복). **VIP 적용 시점은 자유** — VIP 와 의도는 독립 축이라 설치/기동 순서와
+  무관하게 저장·적용 가능(구 `no_started_modules` 409 게이트 폐지). 의도 전이:
+  **일괄 시작/서버별 start → running 승격**, **일괄 중지 → stopped**, **서버별 stop 은
+  노드 오버라이드(그룹 의도 불변)라 disarm 하지 않는다.** 구 record 는 최초 로드 시
+  record-running 으로 service_intent 를 1회 시드(마이그레이션)한다. 렌더 재전파 트리거
+  = 그룹 변이 / 배포 생성·제거 / 실효 upstream 변경 / **start·restart·upgrade job 완료
+  (→ 의도 running 승격)·stop·uninstall job 완료**. 선언적 상태 모델·절체 판정 체계의
+  정본은 [features/ha_service_model.md](features/ha_service_model.md).
+- **절체 판정 (로컬 복구 우선)**: 운영자 조작은 장애가 아니다. 서버별 stop 은 노드
+  로컬 `run/ha/desired.json` 에 stopped 오버라이드로 기록되어 cims-health 가 검사에서
+  제외(active 노드여도 절체 안 함)하고 watchdog 도 재기동하지 않는다. 모듈 crash 는
+  watchdog 이 먼저 재기동하고, `failover_options.restart_limit`(기본 3회/300초) 를
+  초과해야 cims-health 가 FAULT → 절체(로컬 복구 소진 후에만 VIP 이양). 프로세스는
+  살아있는데 포트만 죽은 좀비·watchdog 비활성 모듈은 즉시 FAULT. restart/제어 job
+  진행 중은 `run/ha/op_grace_<mod>` 마커로 유예. 판정 순서 상세: ha_service_model.md §4.2.
 - **apply 멱등·무접촉**: `cims-ha apply` 는 스테이징 대상 5종(conf/ha.json/
   cims-health/cims-notify/unit)이 기존 적용본과 동일하면 keepalived 를 건드리지
   않는다. 변경 시에도 가동 중이면 restart 대신 **reload** (VRRP 상태 유지 —

@@ -48,10 +48,15 @@ _FAILOVER_DEFAULTS = {
         'grace_sec':   30,   # MASTER 승격 후 헬스 유예 — cold 모듈 기동 시간 흡수
     },
     'track_interface': False,
-    'tracked_modules': [],
-    'module_modes':    {},   # {module: 'cold'|'hot'} — 미지정 = cold (기본 cold-spare)
+    # 재기동 임계 (그룹/시스템 스코프) — watchdog 이 연속 max_fails 회 재기동 실패
+    # (window_sec 윈도우 내) 하면 cims-health 가 FAULT → 절체. 로컬 복구 소진 후에만
+    # VIP 를 옮긴다 (Pacemaker migration-threshold 계열). 상세: ha_service_model.md §5.
+    'restart_limit':   {'max_fails': 3, 'window_sec': 300},
     'preempt':         'nopreempt',
     'preempt_delay':   0,
+    # module_modes/tracked_modules 는 모듈 운영 명세(group.module_specs)로 이관됨.
+    # 구 record 읽기 호환을 위해 normalize 는 여전히 수용하되(마이그레이션 입력),
+    # 신규 저장 경로는 module_specs 를 쓴다.
 }
 
 
@@ -112,20 +117,36 @@ def _normalize_failover_options(raw) -> dict:
 
     out['track_interface'] = bool(raw.get('track_interface', False))
 
+    # 재기동 임계 — max_fails 1~20, window_sec 10~3600.
+    rl_in = raw.get('restart_limit') if isinstance(raw.get('restart_limit'), dict) else {}
+    rl = {}
+    try:
+        mf = int(rl_in.get('max_fails', _FAILOVER_DEFAULTS['restart_limit']['max_fails']))
+        rl['max_fails'] = mf if 1 <= mf <= 20 else _FAILOVER_DEFAULTS['restart_limit']['max_fails']
+    except (TypeError, ValueError):
+        rl['max_fails'] = _FAILOVER_DEFAULTS['restart_limit']['max_fails']
+    try:
+        ws = int(rl_in.get('window_sec', _FAILOVER_DEFAULTS['restart_limit']['window_sec']))
+        rl['window_sec'] = ws if 10 <= ws <= 3600 else _FAILOVER_DEFAULTS['restart_limit']['window_sec']
+    except (TypeError, ValueError):
+        rl['window_sec'] = _FAILOVER_DEFAULTS['restart_limit']['window_sec']
+    out['restart_limit'] = rl
+
+    # module_modes/tracked_modules — 구 record 마이그레이션 입력으로만 수용(보존).
+    # 최종 SoT 는 group.module_specs (_migrate_module_specs 가 1회 변환). 이미
+    # module_specs 로 넘어간 그룹은 이 필드가 비어 있어 무해.
     tm = raw.get('tracked_modules') or []
     if isinstance(tm, list):
-        out['tracked_modules'] = [str(x).strip().lower() for x in tm if str(x).strip()]
-    else:
-        out['tracked_modules'] = []
-
-    # 모듈별 절체 모드 — cold(기본): standby 정지, MASTER 승격 시 notify 가 기동.
-    # hot: 양쪽 상시 기동(VIP-only 절체). 미지정 모듈은 cold. 실제 daemon 모듈과의
-    # 교차는 render(_render_ha_for_agent)에서 수행 — 여기선 값 정규화만.
+        _tm = [str(x).strip().lower() for x in tm if str(x).strip()]
+        if _tm:
+            out['tracked_modules'] = _tm
     mm = raw.get('module_modes') if isinstance(raw.get('module_modes'), dict) else {}
-    out['module_modes'] = {
+    _mm = {
         str(k).strip().lower(): ('hot' if str(v).strip().lower() == 'hot' else 'cold')
         for k, v in mm.items() if str(k).strip()
     }
+    if _mm:
+        out['module_modes'] = _mm
 
     pe = raw.get('preempt') or _FAILOVER_DEFAULTS['preempt']
     out['preempt'] = pe if pe in ('preempt', 'nopreempt') else _FAILOVER_DEFAULTS['preempt']
@@ -136,6 +157,110 @@ def _normalize_failover_options(raw) -> dict:
     except (TypeError, ValueError):
         out['preempt_delay'] = 0
 
+    return out
+
+
+# ── 모듈 운영 명세 (group.module_specs) ────────────────────────────────
+# 모듈 스코프 운영 설정의 SoT — agent 가 modules/<mod>/service.json 으로 받아
+# watchdog·제어 게이팅에 쓰고, OAM 렌더가 cold_modules/relevant_modules/헬스 힌트를
+# 여기서 유도한다. 앱 config.json 과 물리 분리. 상세: ha_service_model.md §3.
+_MODULE_SPEC_DEFAULT = {
+    'supervision': {'watchdog': True},
+    'ha':          {'failover_mode': 'cold', 'failover_relevant': True},
+    'health':      {},   # {port,proto,config_key} 오버라이드 — 미지정 시 배포 유도
+}
+
+
+def _normalize_module_spec(raw) -> dict:
+    """입력 dict → 검증된 모듈 운영 명세. 잘못된 값은 default."""
+    raw = raw if isinstance(raw, dict) else {}
+    sup = raw.get('supervision') if isinstance(raw.get('supervision'), dict) else {}
+    ha  = raw.get('ha') if isinstance(raw.get('ha'), dict) else {}
+    hl  = raw.get('health') if isinstance(raw.get('health'), dict) else {}
+    health = {}
+    try:
+        hp = int(hl.get('port', 0) or 0)
+        if 0 < hp < 65536:
+            health['port'] = hp
+    except (TypeError, ValueError):
+        pass
+    if hl.get('proto') in ('tcp', 'udp'):
+        health['proto'] = hl['proto']
+    if isinstance(hl.get('config_key'), str) and hl['config_key'].strip():
+        health['config_key'] = hl['config_key'].strip()
+    return {
+        'supervision': {'watchdog': bool(sup.get('watchdog', True))},
+        'ha': {
+            'failover_mode':     'hot' if ha.get('failover_mode') == 'hot' else 'cold',
+            'failover_relevant': bool(ha.get('failover_relevant', True)),
+        },
+        'health': health,
+    }
+
+
+def _module_spec(group: dict, mod: str) -> dict:
+    """group.module_specs[mod] 의 실효 명세 (미지정 모듈은 default)."""
+    specs = group.get('module_specs') if isinstance(group.get('module_specs'), dict) else {}
+    return _normalize_module_spec(specs.get(mod))
+
+
+def _migrate_module_specs(group: dict) -> bool:
+    """failover_options.module_modes/tracked_modules → module_specs (1회). 변경 시 True.
+
+    이미 module_specs 가 있으면 no-op. 구 그룹은 module_modes(hot 여부)와
+    tracked_modules(절체 관여)를 명세로 승계 — 렌더 결과 동일."""
+    if isinstance(group.get('module_specs'), dict):
+        return False
+    fo = group.get('failover_options') or {}
+    modes = fo.get('module_modes') if isinstance(fo.get('module_modes'), dict) else {}
+    tracked = {str(m).strip().lower() for m in (fo.get('tracked_modules') or []) if str(m).strip()}
+    specs = {}
+    for m in (set(modes.keys()) | tracked):
+        specs[m] = {
+            'supervision': {'watchdog': True},
+            'ha': {
+                'failover_mode':     'hot' if modes.get(m) == 'hot' else 'cold',
+                # 구 tracked = pgrep 검사 대상 = 절체 관여. 그 외는 default(관여).
+                'failover_relevant': True,
+            },
+        }
+    group['module_specs'] = specs
+    return True
+
+
+def _migrate_service_intent(group: dict, config: dict) -> bool:
+    """service_intent 부재(구 record) → 현재 record running 모듈로 1회 시드. 변경 시 True.
+
+    이것이 유일한 record→의도 유추 지점이며 마이그레이션 전용이다. 시드 후엔
+    의도가 명시 SoT — 운영 중이던 그룹은 무장 유지, 설치만 된 그룹은 미개시."""
+    if isinstance(group.get('service_intent'), dict):
+        return False
+    started = _group_started_modules(group.get('members') or [], config)
+    group['service_intent'] = {m: 'running' for m in started}
+    return True
+
+
+def _ensure_group_migrated(group: dict, config: dict) -> bool:
+    """구 record 를 신 스키마(service_intent + module_specs)로 승격. 변경 시 True.
+    호출부가 True 면 file_store.save 로 영속화한다 (1회성 — 이후 no-op)."""
+    changed = False
+    if _migrate_service_intent(group, config):
+        changed = True
+    if _migrate_module_specs(group):
+        changed = True
+    return changed
+
+
+def _normalize_service_intent(raw) -> dict:
+    """service_intent 입력 정규화 — {module(lower): 'running'|'stopped'}."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k, v in raw.items():
+        mk = str(k).strip().lower()
+        if not mk:
+            continue
+        out[mk] = 'running' if str(v).strip().lower() == 'running' else 'stopped'
     return out
 
 
@@ -345,14 +470,15 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     vip_bindings = vip_bindings or []
     default_iface = _pick_default_iface(vip_bindings, agent_id, agent_row) or "eth0"
 
-    # 서비스 개시 게이트 — HA 는 운영자가 start 한 모듈만 관리한다. 설치만 된
-    # 모듈로 헬스포트를 유도하거나 cold 절체 대상에 넣으면, 아무 서비스도 개시되지
-    # 않은 그룹이 무장되어 미기동 포트 검사로 flap 하고 콘솔에 Active/Standby 가
-    # 표시된다 (상태는 서비스가 개시된 그룹에만 존재해야 한다).
-    started = _group_started_modules(members, config) if config else set()
+    # 무장 게이트 = 서비스 의도 (선언적). HA 는 운영자가 의도적으로 running 으로
+    # 둔 모듈만 관리한다 — record status 유추가 아니라 group.service_intent 명시값.
+    # 재설치·스토어유실·예외로 record 가 어떻게 되든 의도가 running 이면 무장 유지
+    # (장애 시 승격이 cold 모듈 재기동 = 자가 회복). 상세: ha_service_model.md §2.
+    intent = group.get('service_intent') if isinstance(group.get('service_intent'), dict) else {}
+    intent_running = {m for m, s in intent.items() if s == 'running'}
 
-    # cims-health 가 lookup 하는 port/proto — agent 의 개시된 deployment 로 추정.
-    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config, allowed=started) if config else (None, None, None)
+    # cims-health 가 lookup 하는 port/proto — running 의도 모듈의 배포로 유도.
+    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config, allowed=intent_running) if config else (None, None, None)
 
     failover_options = _normalize_failover_options(group.get('failover_options'))
     # 그룹 옵션의 수동 오버라이드가 최우선 (운영자 명시 > 배포 실효설정 유도 > descriptor 기본).
@@ -371,23 +497,31 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     h_cfg_key = None
     if h_module == 'csc' and not fo_health.get('port'):
         h_cfg_key = 'Server.Port'
+    # 모듈 운영 명세의 health.config_key 오버라이드 (있으면 우선 — 수동 그룹 override 제외).
+    if h_module and not fo_health.get('port'):
+        _mh = _module_spec(group, h_module).get('health') or {}
+        if _mh.get('config_key'):
+            h_cfg_key = _mh['config_key']
 
-    # cold-spare 절체 대상 — AS 그룹의 daemon 모듈 중 module_modes 가 hot 이 아닌 전부
-    # (기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
-    # hot 모듈과 oam(descriptor 비데몬 — 관리 평면 자신)은 양쪽 상시 기동 유지.
-    # armed = 이 agent 의 daemon 배포 중 "개시된" 모듈만 — cold 절체 대상도 여기서만.
+    # armed daemon 모듈 = 이 agent 에 배포된 daemon 모듈 ∩ running 의도.
     daemon_mods = [m for m in (_agent_daemon_modules(agent_id, config) if config else [])
-                   if m in started]
+                   if m in intent_running]
+    # cold-spare 절체 대상 — AS 그룹의 armed daemon 중 명세 failover_mode 가 hot 이 아닌
+    # 전부(기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
+    # relevant_modules = 실패가 절체 사유가 되는 모듈 (cims-health 가 재기동 임계 판정).
     cold_modules: list = []
+    relevant_modules: list = []
     if group.get('mode') == 'active_standby':
-        modes = failover_options.get('module_modes') or {}
-        cold_modules = [m for m in daemon_mods if modes.get(m, 'cold') != 'hot']
+        cold_modules = [m for m in daemon_mods
+                        if _module_spec(group, m)['ha']['failover_mode'] != 'hot']
+        relevant_modules = [m for m in daemon_mods
+                            if _module_spec(group, m)['ha']['failover_relevant']]
 
-    # 개시된 daemon 모듈이 없고 헬스포트도 (유도/수동 지정) 없는 멤버 — 빈 서버
-    # 또는 설치만 된(미개시) 그룹 — vrrp_instance 를 내리지 않는다 (enabled=false →
-    # cims-ha 렌더 스킵 + keepalived 정지 유지). VIP/Active 상태 자체가 생기지 않음.
-    # 이후 모듈 설치·start/stop job 완료가 재렌더를 태워 자동 무장/해제된다.
+    # running 의도 daemon 모듈이 없고 헬스포트도 없으면 미개시/빈 서버 — vrrp_instance
+    # 를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵 + keepalived 정지 유지).
+    # 이후 서비스 의도 변경(일괄/서버별 start)이 재렌더를 태워 자동 무장/해제된다.
     ha_enabled = bool(h_port or daemon_mods)
+    restart_limit = failover_options.get('restart_limit') or {}
 
     services: dict = {}
     if vip_bindings:
@@ -430,6 +564,8 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                 entry['health_module'] = h_module
                 entry['health_config_key'] = h_cfg_key
             if cold_modules: entry['cold_modules'] = cold_modules
+            if relevant_modules: entry['relevant_modules'] = relevant_modules
+            if restart_limit: entry['restart_limit'] = restart_limit
             services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
@@ -447,6 +583,8 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             entry['health_module'] = h_module
             entry['health_config_key'] = h_cfg_key
         if cold_modules: entry['cold_modules'] = cold_modules
+        if relevant_modules: entry['relevant_modules'] = relevant_modules
+        if restart_limit: entry['restart_limit'] = restart_limit
         services[group['name']] = entry
 
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
@@ -492,20 +630,26 @@ def _agents_with_started_modules(members: list, config: dict) -> set:
 _STAGGER_DELAY_SEC = 75
 
 
-def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
+def _enqueue_update_ha_for_members(group_id: int, config: dict,
+                                   prefer_first: set | None = None) -> int:
     """그룹 멤버들에게 update_ha job 큐잉. 큐잉된 job 수 반환.
 
     개시 국면 선착 방지 — AS 그룹이 무장 상태로 렌더되는데 아직 아무도 VIP 를
-    보유하지 않았다면(최초 개시·전면 재기동), **운영자가 start 한(record running)
-    멤버에게 먼저** 내리고 나머지 멤버는 not_before 로 지연시킨다. 동시에 뿌리면
-    양쪽 keepalived 가 함께 콜드스타트해 선거 레이스가 되는데, start 를 실행한
-    노드는 그 job 처리 탓에 자기 update_ha 를 한 heartbeat 늦게 가져가므로 놀고
-    있던 standby 가 구조적으로 선착한다 — Active 가 start 하지 않은 서버로 가고
-    notify 가 운영자가 켠 모듈을 끄는 역전. VIP 보유자가 이미 있으면(운영 중
-    재렌더) 지연 없음 — apply 는 멱등이라 순서 무관."""
+    보유하지 않았다면(최초 개시·전면 재기동), **기준 멤버에게 먼저** 내리고 나머지
+    멤버는 not_before 로 지연시킨다. 동시에 뿌리면 양쪽 keepalived 가 함께
+    콜드스타트해 선거 레이스가 되는데, start 를 실행한 노드가 그 job 처리 탓에
+    자기 update_ha 를 늦게 가져가면 놀고 있던 standby 가 구조적으로 선착한다.
+    기준 멤버 = prefer_first(호출부 명시 — 서버별 start 시 그 노드) > record running
+    멤버 > 지정 마스터(priority 최대). VIP 보유자가 이미 있으면(운영 중 재렌더)
+    지연 없음 — apply 는 멱등이라 순서 무관.
+
+    호출 시 구 record 를 신 스키마(service_intent/module_specs)로 1회 마이그레이션·
+    영속화한다 (렌더 단일 관문)."""
     group = _ha_load(config, group_id)
     if not group:
         return 0
+    if _ensure_group_migrated(group, config):
+        file_store.save(_ha_dir(config), group_id, group)
     members = list(group.get('members') or [])
     if not members:
         return 0
@@ -545,8 +689,11 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict) -> int:
             obs = ha_lookup.vip_observation(config, group)
             nobody_holds = not any(v is True for v in (obs.get('observed') or {}).values())
             if nobody_holds:
-                started = _agents_with_started_modules(members, config)
-                firsts = [aid for aid, _ in renders if aid in started]
+                if prefer_first:
+                    firsts = [aid for aid, _ in renders if aid in prefer_first]
+                else:
+                    started = _agents_with_started_modules(members, config)
+                    firsts = [aid for aid, _ in renders if aid in started]
                 if not firsts:
                     ma = _compute_master_aid(members)
                     firsts = [ma] if ma is not None else []
@@ -624,6 +771,58 @@ def enqueue_update_ha_for_agent(agent_id: int, config: dict) -> int:
     return enqueued
 
 
+def note_module_started(config: dict, agent_id: int, module: str) -> "int | None":
+    """서버별/모듈 start 성공 → 그 모듈의 그룹 서비스 의도를 running 으로 승격.
+
+    운영자의 명시적 start 는 "이 모듈은 떠 있어야 한다"는 의도 선언이다. 그룹이
+    미개시(의도 stopped)였으면 running 으로 승격해 keepalived 를 무장시킨다. 이미
+    running 이면 no-op. agent 가 어느 그룹에도 없으면(standalone) None.
+    반환: 승격된 그룹 id (변경 없으면 None). 상세: ha_service_model.md §6."""
+    module = (module or '').strip().lower()
+    if not module:
+        return None
+    for g in _ha_load_all(config):
+        if not any(m.get('agent_id') == agent_id for m in (g.get('members') or [])):
+            continue
+        _ensure_group_migrated(g, config)   # 구 record 승격 (intent 시드)
+        intent = g.get('service_intent') if isinstance(g.get('service_intent'), dict) else {}
+        if intent.get(module) == 'running':
+            file_store.save(_ha_dir(config), g['id'], g)   # 마이그레이션 결과 영속
+            return None
+        intent[module] = 'running'
+        g['service_intent'] = intent
+        file_store.save(_ha_dir(config), g['id'], g)
+        logger.log_info(f"[ha-group] group#{g['id']} 서비스 의도 승격: {module}=running "
+                        f"(agent#{agent_id} start)")
+        return g['id']
+    return None
+
+
+def _enqueue_module_spec_for_members(group_id: int, config: dict) -> int:
+    """그룹의 각 멤버에게 배포된 daemon 모듈의 운영 명세(service.json)를 push.
+
+    agent 는 update_module_spec job 을 받아 modules/<mod>/service.json 을 기록한다.
+    service.json 이 conveying 하는 유일한 신 값은 supervision.watchdog (모듈별 감시
+    on/off) — cold/hot·relevant·health 는 ha.json 으로도 전달되지만, service.json
+    을 daemon 모듈의 권위 파일로 함께 유지해 노드 로컬 판단(watchdog)이 일관되게
+    한다. 명세 변경(_update_group module_specs) 시에만 호출 — 부재 시 agent 는
+    watchdog=on default 로 종전과 동일 동작. 큐잉된 job 수 반환."""
+    group = _ha_load(config, group_id)
+    if not group:
+        return 0
+    from handlers.agents import _job_create
+    enqueued = 0
+    for m in (group.get('members') or []):
+        aid = m.get('agent_id')
+        if aid is None:
+            continue
+        for mod in _agent_daemon_modules(aid, config):
+            _job_create(config, aid, 'update_module_spec',
+                        {'module': mod, 'spec': _module_spec(group, mod)})
+            enqueued += 1
+    return enqueued
+
+
 async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     """Dispatch /api/v1/ha-groups/* routes."""
     config = kwargs.get('config', {})
@@ -681,6 +880,14 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         if sub == 'apply' and method == 'POST':
             return await _apply_group(gid, config)
 
+        # 그룹 일괄 제어 (서비스 시작/중지/재시작) — admin.
+        if sub == 'control' and method == 'POST':
+            return await _control_group(gid, handler_args.body, config)
+
+        # 수동 절체 (스위치오버, AS 전용) — admin.
+        if sub == 'failover' and method == 'POST':
+            return await _failover_group(gid, handler_args.body, config)
+
         if sub == 'collections':
             if not member:
                 return HandlerResult(status=400, body={'error': 'collection name required'})
@@ -735,7 +942,15 @@ def _attach_derived_role(members: list) -> list:
 
 
 def _serialize_group(g: dict, config: dict) -> dict:
-    """file_store group dict → 응답용 (멤버 정렬 + agent_name enrich + role derive)."""
+    """file_store group dict → 응답용 (멤버 정렬 + agent_name enrich + role derive).
+
+    구 record 는 여기서(GET 경로) 신 스키마로 1회 마이그레이션·영속화한다 — 렌더
+    관문(_enqueue_update_ha_for_members)과 동일 시드라 결과 일관."""
+    if _ensure_group_migrated(g, config):
+        try:
+            file_store.save(_ha_dir(config), g.get('id'), g)
+        except Exception as e:
+            logger.log_warning(f"[ha-group] group#{g.get('id')} 마이그레이션 저장 실패: {e}")
     out = dict(g)
     members = list(out.get('members') or [])
     # priority 우선 정렬, 동률 시 agent_id 오름 (UI 일관 표시)
@@ -743,6 +958,8 @@ def _serialize_group(g: dict, config: dict) -> dict:
     members = _attach_derived_role(members)
     out['members'] = _attach_member_names(members, config)
     out.setdefault('vip_bindings', [])
+    out['service_intent'] = dict(out.get('service_intent') or {})
+    out['module_specs'] = dict(out.get('module_specs') or {})
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
     out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
     # 실측 ACTIVE (R4) — heartbeat interfaces[] 의 VIP 보유 관측. 정적 role 과 별개로
@@ -834,6 +1051,12 @@ async def _create_group(body, config):
         'note': note,
         'vip_bindings': vip_bindings or [],
         'failover_options': failover_options,
+        # 신규 그룹은 미개시(빈 의도) — 서비스 시작 시 무장. 모듈 명세는 default.
+        'service_intent': _normalize_service_intent(body.get('service_intent')),
+        'module_specs': {
+            str(k).strip().lower(): _normalize_module_spec(v)
+            for k, v in (body.get('module_specs') or {}).items() if str(k).strip()
+        } if isinstance(body.get('module_specs'), dict) else {},
         'members': members,
     }
     file_store.save(_ha_dir(config), gid, group)
@@ -872,24 +1095,38 @@ async def _update_group(gid: int, body, config):
         if len(auth_eff) > 8:
             return HandlerResult(status=400, body={'error': 'auth_pass max 8 chars'})
     if 'vip_bindings' in body:
+        # VIP 적용 시점 자유 — 서비스 의도와 VIP 는 독립 축이다 (구 no_started_modules
+        # 409 게이트 폐지). 미개시(의도 stopped) 그룹은 VIP 가 저장돼 있어도 비무장
+        # 렌더라 아무 일도 일어나지 않고, 서비스 시작(의도 running) 시 자동 무장한다.
+        # 상세: ha_service_model.md §2.
         v = body.get('vip_bindings')
-        v = v if isinstance(v, list) else []
-        # VIP 적용 게이트 — 서비스 개시(모듈 start) 전에는 VIP 를 받지 않는다.
-        # 모듈 없는 무장은 미기동 포트 헬스 실패 → FAULT flap 만 만들고, "VIP 적용
-        # 했는데 아무 일도 안 일어남"(비무장 렌더 no-op) 혼란의 원천. 워크플로 =
-        # 설치 → start → VIP 적용. (바인딩 제거/비우기는 disarm 이므로 항상 허용.)
-        has_vip = any((b or {}).get('ip') for b in v if isinstance(b, dict))
-        if has_vip and existing.get('mode') == 'active_standby':
-            started = _group_started_modules(existing.get('members') or [], config)
-            if not started:
-                return HandlerResult(status=409, body={
-                    'error': 'VIP 적용 불가 — 그룹 멤버에서 실행 중인 모듈이 없습니다. '
-                             '모듈을 먼저 start 한 뒤 VIP 를 적용하세요.',
-                    'code': 'no_started_modules',
-                })
-        existing['vip_bindings'] = v
+        existing['vip_bindings'] = v if isinstance(v, list) else []
+    if 'service_intent' in body:
+        existing['service_intent'] = _normalize_service_intent(body.get('service_intent'))
+    module_specs_changed = False
+    if 'module_specs' in body and isinstance(body.get('module_specs'), dict):
+        existing['module_specs'] = {
+            str(k).strip().lower(): _normalize_module_spec(v)
+            for k, v in body['module_specs'].items() if str(k).strip()
+        }
+        module_specs_changed = True
     if 'failover_options' in body:
         existing['failover_options'] = _normalize_failover_options(body.get('failover_options'))
+        # 전환기 호환 — 구 콘솔이 module_specs 없이 module_modes/tracked_modules 만
+        # 보내면 명세로 폴딩(그렇지 않으면 render 가 module_specs SoT 만 보므로 무시됨).
+        # 신 콘솔은 module_specs 를 직접 보내 이 경로를 타지 않는다.
+        if 'module_specs' not in body:
+            fo = existing['failover_options']
+            modes = fo.get('module_modes') or {}
+            tracked = {str(m).strip().lower() for m in (fo.get('tracked_modules') or [])}
+            if modes or tracked:
+                specs = dict(existing.get('module_specs') or {})
+                for m in (set(modes.keys()) | tracked):
+                    sp = _normalize_module_spec(specs.get(m))
+                    sp['ha']['failover_mode'] = 'hot' if modes.get(m) == 'hot' else 'cold'
+                    specs[m] = sp
+                existing['module_specs'] = specs
+                module_specs_changed = True
     dropped_aids: list = []
     if 'members' in body:
         old_aids = {m.get('agent_id') for m in (existing.get('members') or [])
@@ -900,6 +1137,11 @@ async def _update_group(gid: int, body, config):
 
     file_store.save(_ha_dir(config), gid, existing)
     _enqueue_update_ha_for_members(gid, config)
+    # 모듈 운영 명세 변경 시 service.json 을 멤버에 push (watchdog on/off 등).
+    if module_specs_changed:
+        n = _enqueue_module_spec_for_members(gid, config)
+        if n:
+            logger.log_info(f"[ha-group] group#{gid} module_specs 변경 → update_module_spec {n}건 큐잉")
     # 멤버 교체로 이탈한 agent 는 재렌더 대상에서 빠진다 — 빈 services 로 keepalived 해제.
     for aid in dropped_aids:
         _enqueue_disarm_for_agent(aid, config)
@@ -918,6 +1160,185 @@ async def _delete_group(gid: int, config):
     if disarmed:
         logger.log_info(f"[ha-group] group#{gid} 삭제 → 이탈 멤버 disarm {disarmed}건 큐잉")
     return HandlerResult(status=200, body={'id': gid, 'deleted': True})
+
+
+# ════════════════════════════════════════════════════════════
+#  그룹 일괄 제어 + 수동 절체 (ha_service_model.md §6·§7)
+# ════════════════════════════════════════════════════════════
+
+def _group_member_daemon_deps(group: dict, config: dict) -> list:
+    """그룹 멤버들의 daemon 배포(status != removed) 목록 — 일괄 제어 대상.
+    (process_name 이 health defaults 에 있는 리슨 데몬만; cspsim/console 등 제외.)"""
+    from handlers.agents import _deploy_load_all
+    defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
+    aids = {m.get('agent_id') for m in (group.get('members') or [])}
+    out = []
+    for d in _deploy_load_all(config):
+        if d.get('agent_id') not in aids or d.get('status') == 'removed':
+            continue
+        mod = (d.get('process_name') or '').lower().strip()
+        if mod in defaults:
+            out.append(d)
+    return out
+
+
+def _queue_lifecycle_job(config, dep: dict, job_type: str, not_before: str | None = None) -> int:
+    """단일 배포에 start/stop/restart job 큐잉 — agents._queue_job 과 동일 params 형태.
+    일괄 제어용 (handler_args 없이 배포 레코드에서 직접 구성)."""
+    from handlers.agents import (_job_create, _deploy_update, _enrich_deploy,
+                                 _pkg_load, _materialize_deploy_config, _safe_json,
+                                 _split_csv)
+    _enrich_deploy([dep], config)
+    cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
+          else _safe_json(dep.get("config_json"))
+    if isinstance(cfg, dict) or cfg is None:
+        try:
+            pkg = _pkg_load(config, dep.get("package_id"))
+            cfg = _materialize_deploy_config(config, pkg, cfg)
+        except Exception:
+            pass
+    sf = dep.get("service_functions")
+    if isinstance(sf, str):
+        sf = _split_csv(sf)
+    params = {
+        "deployment_id":   dep.get("id"),
+        "package_id":      dep.get("package_id"),
+        "package_name":    dep.get("package_name"),
+        "package_version": dep.get("package_version"),
+        "process_name":    dep.get("process_name"),
+        "service_functions": sf or [],
+        "install_path":    dep.get("install_path"),
+        "config":          cfg,
+    }
+    jid = _job_create(config, dep["agent_id"], job_type, params, not_before=not_before)
+    _deploy_update(config, dep["id"], {'status': 'deploying', 'last_job_id': jid})
+    return jid
+
+
+async def _control_group(gid: int, body, config):
+    """그룹 일괄 제어 — body = {"action": "start"|"stop"|"restart"}.
+
+    start   : 서비스 의도 running (전 daemon 모듈) → 무장 재렌더(기준 멤버 선행) +
+              각 멤버 daemon 배포 start job.
+    stop    : 서비스 의도 stopped → 비무장 재렌더(update_ha 먼저) + stop job (뒤). agent
+              큐 순서 처리라 노드별 마지막 말이 stop — 절체 레이스가 살려도 최종 정지.
+    restart : 의도 불변. AS 는 standby 먼저·active 지연(op_grace 로 절체 억제). 순단 1회.
+    상세: ha_service_model.md §6."""
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+    action = (body.get('action') or '').strip().lower()
+    if action not in ('start', 'stop', 'restart'):
+        return HandlerResult(status=400, body={'error': "action must be start|stop|restart"})
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    _ensure_group_migrated(g, config)
+
+    deps = await asyncio.to_thread(_group_member_daemon_deps, g, config)
+    daemon_mods = sorted({(d.get('process_name') or '').lower().strip() for d in deps
+                          if d.get('process_name')})
+
+    if action == 'start':
+        intent = dict(g.get('service_intent') or {})
+        for m in daemon_mods:
+            intent[m] = 'running'
+        g['service_intent'] = intent
+        file_store.save(_ha_dir(config), gid, g)
+        base = _compute_master_aid(g.get('members') or [])
+        prefer = {base} if base is not None else None
+        n_ha = await asyncio.to_thread(_enqueue_update_ha_for_members, gid, config, prefer)
+        n_job = 0
+        for d in deps:
+            await asyncio.to_thread(_queue_lifecycle_job, config, d, 'start')
+            n_job += 1
+        logger.log_info(f"[ha-group] group#{gid} 일괄 시작 — 의도 running {daemon_mods}, "
+                        f"update_ha {n_ha}, start job {n_job}")
+        return HandlerResult(status=202, body={'action': 'start', 'group_id': gid,
+                                               'modules': daemon_mods, 'jobs': n_job})
+
+    if action == 'stop':
+        g['service_intent'] = {m: 'stopped' for m in (g.get('service_intent') or {})}
+        for m in daemon_mods:
+            g['service_intent'][m] = 'stopped'
+        file_store.save(_ha_dir(config), gid, g)
+        # update_ha(비무장) 먼저 큐잉 → 낮은 job id → agent 가 먼저 처리(keepalived 정지).
+        n_ha = await asyncio.to_thread(_enqueue_update_ha_for_members, gid, config)
+        n_job = 0
+        for d in deps:
+            await asyncio.to_thread(_queue_lifecycle_job, config, d, 'stop')
+            n_job += 1
+        logger.log_info(f"[ha-group] group#{gid} 일괄 중지 — 의도 stopped, "
+                        f"update_ha(disarm) {n_ha}, stop job {n_job}")
+        return HandlerResult(status=202, body={'action': 'stop', 'group_id': gid,
+                                               'modules': daemon_mods, 'jobs': n_job})
+
+    # restart — 의도 불변. AS 는 active 를 지연시켜 standby 준비 후 재기동(op_grace 억제).
+    active_aid = None
+    if g.get('mode') == 'active_standby':
+        from services import ha_lookup
+        active_aid = (ha_lookup.vip_observation(config, g) or {}).get('active_agent_id')
+    not_before_active = None
+    if active_aid is not None:
+        from datetime import datetime, timedelta
+        not_before_active = (datetime.now() + timedelta(seconds=15)).isoformat(timespec='seconds')
+    n_job = 0
+    for d in deps:
+        nb = not_before_active if (active_aid is not None and d.get('agent_id') == active_aid) else None
+        await asyncio.to_thread(_queue_lifecycle_job, config, d, 'restart', nb)
+        n_job += 1
+    logger.log_info(f"[ha-group] group#{gid} 일괄 재시작 — restart job {n_job} "
+                    f"(active#{active_aid} 15s 지연)")
+    return HandlerResult(status=202, body={'action': 'restart', 'group_id': gid,
+                                           'modules': daemon_mods, 'jobs': n_job})
+
+
+async def _failover_group(gid: int, body, config):
+    """수동 절체(스위치오버) — AS 전용. body 무시(옵션).
+
+    현 Active 의 keepalived 를 정지(priority-0 → peer 즉시 승격)한 뒤, 지연 후
+    재기동(nopreempt → BACKUP 복귀). 두 개의 ha_keepalived job 으로 오케스트레이션.
+    상세: ha_service_model.md §7."""
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if g.get('mode') != 'active_standby':
+        return HandlerResult(status=409, body={'error': 'not_active_standby',
+                                               'hint': '수동 절체는 Active/Standby 그룹만'})
+    _ensure_group_migrated(g, config)
+    intent_running = {m for m, s in (g.get('service_intent') or {}).items() if s == 'running'}
+    if not intent_running:
+        return HandlerResult(status=409, body={'error': 'not_armed',
+            'hint': '미개시 그룹 — 서비스 시작(무장) 후 절체 가능'})
+
+    from services import ha_lookup
+    from handlers.agents import _agent_load, _job_create
+    obs = ha_lookup.vip_observation(config, g) or {}
+    active_aid = obs.get('active_agent_id')
+    members = g.get('members') or []
+    if active_aid is None:
+        return HandlerResult(status=409, body={'error': 'active_unresolved',
+            'hint': 'Active 판정 불가(관측 창/전원 stale) — 잠시 후 재시도'})
+    targets = [m.get('agent_id') for m in members if m.get('agent_id') != active_aid]
+    if not targets:
+        return HandlerResult(status=409, body={'error': 'no_standby_target'})
+    target_aid = targets[0]
+    # 대상 standby 승격 자격 — online + 이탈 오버라이드 없음(간이 검사: agent online).
+    ta = _agent_load(config, aid=target_aid) or {}
+    if ta.get('status') != 'online':
+        return HandlerResult(status=409, body={'error': 'target_offline',
+            'hint': f'standby agent#{target_aid} 오프라인 — 절체 불가'})
+
+    # 1) 현 Active keepalived 정지 (즉시) → peer 승격.
+    _job_create(config, active_aid, 'ha_keepalived', {'action': 'stop'})
+    # 2) 구 Active keepalived 재기동 (지연) → nopreempt BACKUP 복귀 + cold 모듈 정지.
+    from datetime import datetime, timedelta
+    nb = (datetime.now() + timedelta(seconds=20)).isoformat(timespec='seconds')
+    _job_create(config, active_aid, 'ha_keepalived', {'action': 'start'}, not_before=nb)
+    logger.log_info(f"[ha-group] group#{gid} 수동 절체 — active#{active_aid} keepalived "
+                    f"stop→(20s)start, standby#{target_aid} 승격")
+    return HandlerResult(status=202, body={'group_id': gid, 'from_agent_id': active_aid,
+                                           'to_agent_id': target_aid,
+                                           'note': 'switchover queued (stop→start)'})
 
 
 async def _list_members(gid: int, config):
@@ -960,20 +1381,13 @@ async def _add_member(gid: int, body, config):
 
 
 async def _apply_group(gid: int, config):
-    """그룹의 모든 멤버에 update_ha job 큐잉 — VipPanel [적용] 진입점."""
+    """그룹의 모든 멤버에 update_ha job 큐잉 — VipPanel [적용] 진입점.
+
+    VIP 적용 시점 자유 — 게이트 없음 (ha_service_model.md §2). 미개시 그룹은
+    비무장 렌더라 apply 해도 keepalived 정지 유지, 서비스 시작 시 자동 무장."""
     g = _ha_load(config, gid)
     if not g:
         return HandlerResult(status=404, body={'error': 'Group not found'})
-    # VIP 적용 게이트 — _update_group 의 vip_bindings 게이트와 동일 정책 (legacy 단일 vip 포함).
-    _has_vip = any((b or {}).get('ip') for b in (g.get('vip_bindings') or []) if isinstance(b, dict)) \
-               or (g.get('vip') and g['vip'] != '0.0.0.0')
-    if g.get('mode') == 'active_standby' and _has_vip \
-            and not _group_started_modules(g.get('members') or [], config):
-        return HandlerResult(status=409, body={
-            'error': 'VIP 적용 불가 — 그룹 멤버에서 실행 중인 모듈이 없습니다. '
-                     '모듈을 먼저 start 한 뒤 VIP 를 적용하세요.',
-            'code': 'no_started_modules',
-        })
     count = _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=202, body={'group_id': gid, 'jobs_queued': count})
 

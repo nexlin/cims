@@ -23,8 +23,13 @@ export interface VipBinding {
   memberIfaces?: { [serverId: number]: string } // 멤버 agent_id → iface name
 }
 
-// AS 절체 조건 — keepalived vrrp_instance / vrrp_script 가 사용. AS 만 의미.
-// default = 현재 hardcoded 동작과 동일 (호환성).
+// AS 절체 조건 (그룹/시스템 스코프) — keepalived vrrp_instance / vrrp_script 가 사용.
+// 모듈별 값(프로세스 감시·절체 모드)은 ModuleSpec(패키지 설정)으로 이관됨.
+export interface RestartLimit {
+  max_fails: number                             // 연속 재기동 실패 임계 (default 3)
+  window_sec: number                            // 카운트 윈도우 (default 300)
+}
+
 export interface FailoverOptions {
   advert_int: number                            // VRRP 주기 (sec, 0.5~5, default 1)
   health: {
@@ -32,25 +37,40 @@ export interface FailoverOptions {
     fall: number                                // default 2 (회)
     rise: number                                // default 2 (회)
     timeout: number                             // default 3 (sec)
+    grace_sec?: number                          // 승격 후 헬스 유예 (default 30)
     port?: number                               // 수동 오버라이드 — 미지정 시 배포 실효설정/descriptor 유도
     proto?: 'tcp' | 'udp'
   }
   track_interface: boolean                      // service NIC link down 즉시 감지 (default false)
-  tracked_modules: string[]                     // pgrep 검사 모듈 (default [] = port only)
-  // 모듈별 절체 모드 — cold(기본): standby 정지 + MASTER 승격 시 기동 / hot: 양쪽 상시 기동.
-  module_modes?: Record<string, 'cold' | 'hot'>
+  // 재기동 임계 (로컬 복구 소진 후 절체) — watchdog N회 실패 시 cims-health 가 FAULT.
+  restart_limit?: RestartLimit
   preempt: 'preempt' | 'nopreempt'              // default nopreempt
   preempt_delay: number                         // preempt 모드만 적용 (sec, default 0)
 }
 
 export const FAILOVER_DEFAULTS: FailoverOptions = {
   advert_int: 1,
-  health: { interval: 2, fall: 2, rise: 2, timeout: 3 },
+  health: { interval: 2, fall: 2, rise: 2, timeout: 3, grace_sec: 30 },
   track_interface: false,
-  tracked_modules: [],
-  module_modes: {},
+  restart_limit: { max_fails: 3, window_sec: 300 },
   preempt: 'nopreempt',
   preempt_delay: 0,
+}
+
+// 모듈 운영 명세 (그룹×모듈 스코프) — agent 가 modules/<mod>/service.json 으로 받아
+// watchdog·절체 게이팅에 사용. 앱 config.json 과 물리 분리. ha_service_model.md §3.
+export interface ModuleSpec {
+  supervision: { watchdog: boolean }            // 프로세스 감시 on/off (default on)
+  ha: {
+    failover_mode: 'cold' | 'hot'               // cold: standby 정지+승격 시 기동 / hot: 양쪽 상시
+    failover_relevant: boolean                  // 이 모듈 실패가 절체 사유인가 (default true)
+  }
+  health?: { port?: number; proto?: 'tcp' | 'udp'; config_key?: string }
+}
+
+export const MODULE_SPEC_DEFAULT: ModuleSpec = {
+  supervision: { watchdog: true },
+  ha: { failover_mode: 'cold', failover_relevant: true },
 }
 
 export interface HaGroup {
@@ -64,6 +84,10 @@ export interface HaGroup {
   note?: string
   vip_bindings?: VipBinding[]
   failover_options?: FailoverOptions
+  // 서비스 의도 (선언적 무장) — {module: 'running'|'stopped'}. 무장 = running 모듈 존재.
+  service_intent?: Record<string, 'running' | 'stopped'>
+  // 모듈 운영 명세 (그룹×모듈) — {module: ModuleSpec}. 부재 모듈은 default.
+  module_specs?: Record<string, ModuleSpec>
   // 실측 ACTIVE (R4, AS 만) — 비-stale 멤버 중 정확히 1명이 VIP 보유일 때만 확정
   active_agent_id?: number | null
   // 패키지별 자동 동기화 스위치 — 부재 시 기본 ON (auto_sync[pkg] ?? true)
@@ -82,6 +106,8 @@ export interface HaGroupInput {
   note?: string
   vip_bindings?: VipBinding[]
   failover_options?: FailoverOptions
+  service_intent?: Record<string, 'running' | 'stopped'>
+  module_specs?: Record<string, ModuleSpec>
   members?: { agent_id: number; role?: HaRole; priority?: number }[]
 }
 
@@ -103,6 +129,16 @@ export const haGroupsApi = {
   // VipPanel "[적용]" 진입점 — 데이터 변경 없이 멤버들에게 update_ha job 강제 큐잉
   apply: (id: number) =>
     api.post<{ group_id: number; jobs_queued: number }>(`/ha-groups/${id}/apply`, {}),
+
+  // 그룹 일괄 제어 — 서비스 시작/중지/재시작 (의도 전환 + 순서 보장 job).
+  control: (id: number, action: 'start' | 'stop' | 'restart') =>
+    api.post<{ action: string; group_id: number; modules: string[]; jobs: number }>(
+      `/ha-groups/${id}/control`, { action }),
+
+  // 수동 절체 (스위치오버) — AS 전용. 현 Active → Standby.
+  failover: (id: number) =>
+    api.post<{ group_id: number; from_agent_id: number; to_agent_id: number; note: string }>(
+      `/ha-groups/${id}/failover`, {}),
 
   // ── 그룹×패키지 공통 설정 (R4) ──
   // 스위치 ON: target 없이 — 전 멤버 적용. OFF: target_deployment_id 필수(멤버 선택 편집).

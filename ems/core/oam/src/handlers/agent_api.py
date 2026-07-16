@@ -706,15 +706,30 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
             await asyncio.to_thread(_deploy_update, config, dep_id,
                                     {'status': new_status, 'last_job_id': job_id})
 
-        # 서비스 개시/중지 = HA 렌더 입력(armed 모듈 집합) 변화 — ha.json 자동 추종.
-        # record status 가 running↔stopped 로 바뀌면 그룹의 무장 상태(cold_modules/
-        # 헬스포트/enabled)가 달라진다. (배포 생성/제거는 deployments 핸들러가 전파;
-        # 여기선 status 를 바꾸는 job 완료만. 렌더 결과가 같으면 agent 쪽 apply 가
-        # 멱등이라 keepalived 무접촉.)
+        # HA 재렌더 전파 — 서비스 의도/배포 존재 변화가 무장 상태에 반영되게 한다.
+        #  · start/restart/upgrade 성공 = 운영자 명시 start → 그룹 서비스 의도를
+        #    running 으로 승격(note_module_started) → 무장. 승격 시 그 노드를
+        #    prefer_first 로 두어 개시 국면 선착(standby 선점)을 방지.
+        #  · stop 성공 = 노드 오버라이드는 agent(desired.json)가 기록. 그룹 의도는
+        #    불변이라 재렌더해도 무장 유지 (서버별 stop 이 그룹을 disarm 하지 않는다 —
+        #    구 record 유추 모델의 disarm-on-stop 제거).
+        #  · uninstall = 모듈 제거 → 재렌더가 daemon 집합에서 빠뜨려 자연 비무장.
+        # 렌더 결과가 같으면 agent apply 가 멱등이라 keepalived 무접촉.
         if dep_id and jt in ("start", "restart", "upgrade", "stop", "uninstall"):
             try:
-                from handlers.ha_groups import enqueue_update_ha_for_agent
-                n = await asyncio.to_thread(enqueue_update_ha_for_agent, agent['id'], config)
+                from handlers.ha_groups import (enqueue_update_ha_for_agent,
+                                                _enqueue_update_ha_for_members,
+                                                note_module_started)
+                proc = (params.get("process_name") if isinstance(params, dict) else None) or ""
+                promoted_gid = None
+                if jt in ("start", "restart", "upgrade") and proc:
+                    promoted_gid = await asyncio.to_thread(
+                        note_module_started, config, agent['id'], proc)
+                if promoted_gid is not None:
+                    n = await asyncio.to_thread(
+                        _enqueue_update_ha_for_members, promoted_gid, config, {agent['id']})
+                else:
+                    n = await asyncio.to_thread(enqueue_update_ha_for_agent, agent['id'], config)
                 if n:
                     logger.log_info(f"[report] job#{job_id}({jt}) → update_ha {n}건 재렌더 큐잉")
             except Exception as e:

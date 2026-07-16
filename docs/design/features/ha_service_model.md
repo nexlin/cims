@@ -1,9 +1,9 @@
 # HA 서비스 운영 모델 — 선언적 의도 · 모듈 운영 명세 · 절체 판정
 
-> **상태: 설계 확정, 구현 전.** 본 문서가 이 재설계의 정본이다. 현행 구현(record
-> status 유추 기반 무장, `failover_options.module_modes/tracked_modules`, VIP 적용
-> 게이트)은 [ha_design.md](../ha_design.md) §11 이 기술하며, 본 설계 구현이 완료되면
-> ha_design.md 를 최종 동작으로 현행화하고 본 문서의 "현행 대비 변경점" 절을 제거한다.
+> **상태: 구현 완료(실서버 절체 검증 대기).** 본 문서가 이 모델의 정본이다.
+> OAM 렌더/제어(`ha_groups.py`), agent 상태·watchdog(`cims_agent.py`), 판정
+> (`cims-health`), 콘솔(`ServersPage.tsx`)에 반영됨. keepalived·cims-notify 계약은
+> 불변. §9 "현행 대비 변경점"은 이전 record-유추 모델과의 대조로 유지한다.
 
 ## 1. 목적과 원칙
 
@@ -211,11 +211,15 @@ A 는 nonlocal_bind 로 유휴). 4단계 BACKUP notify 가 정리한다.
 | 개시 국면 스태거 (start 멤버 선행) | 유지 — 입력만 record 유추 → 의도/기준멤버로 교체 |
 | agent watchdog backoff 리셋 결함 (수 초 생존 후 사망 시 시도 1 로 리셋) | 카운터 윈도우 도입으로 함께 해소 |
 
-구현 순서(안): (1) 데이터 모델·렌더 (intent/명세/ha.json 확장 + 마이그레이션) →
-(2) agent (desired/카운터/유예 마커, watchdog 협조, update_module_spec job) →
-(3) cims-health 판정 재작성 → (4) 일괄 제어·수동 절체 API → (5) 콘솔 재배치 →
-(6) ha_design.md 현행화. 각 단계는 하위 호환 렌더(기존 ha.json 소비자가 신 필드
-무시)로 독립 배포 가능하게 한다.
+구현 매핑 (완료): (1) 데이터 모델·렌더 — `ha_groups.py` (service_intent/module_specs
+마이그레이션·정규화, 렌더가 intent 기반 무장 + restart_limit/relevant_modules 출력,
+VIP 409 삭제) → (2) agent — `cims_agent.py` (`run/ha/desired.json`·`fail_<mod>`·
+`op_grace_<mod>`, watchdog 협조, `update_module_spec`·`ha_keepalived` job) →
+(3) `cims-health` 판정 재작성 → (4) 일괄 제어·수동 절체 API (`_control_group`/
+`_failover_group`) → (5) 콘솔 `ServersPage.tsx` (절체조건 슬림화+재기동임계,
+ModuleSpecSection, GroupControlMatrix 일괄 바+수동절체) → (6) 본 문서·ha_design 현행화.
+하위 호환: 신 ha.json 필드를 구 cims-health 는 무시(REQ/tracked fallback), 구 ha.json
+을 신 cims-health 는 relevant fallback·restart_limit default 로 수용 — 롤링 안전.
 
 ## 10. 미결 · 후속 과제
 

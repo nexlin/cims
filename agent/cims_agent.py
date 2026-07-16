@@ -1449,6 +1449,67 @@ def _sync_ack_and_return(oam_url: str, session_token: str, sync_id,
     return rc, out, err + ack_note
 
 
+def job_ha_keepalived(params: dict) -> tuple:
+    """keepalived 프로세스 제어 — 수동 절체(스위치오버) 오케스트레이션용.
+
+    Params: { action: 'stop' | 'start' }.
+      · stop  = 이 노드 keepalived 정지 → priority-0 advert 로 peer 즉시 승격
+                (STOP notify 는 서비스 유지 — 이 노드 모듈은 안 내림).
+      · start = keepalived 재기동 → nopreempt 라 BACKUP 복귀 → BACKUP notify 가
+                이 노드 cold 모듈 정지.
+    상세: ha_service_model.md §7. sudo 미등록(dev)은 graceful skip."""
+    action = (params.get("action") or "").strip().lower()
+    if action not in ("stop", "start"):
+        return 1, "", f"invalid action: {action} (stop|start)"
+    cims_ha = _resolve_cims_ha()
+    if not cims_ha:
+        return 0, "cims-ha not found — skip (no keepalived)", ""
+    try:
+        r = subprocess.run(["sudo", "-n", cims_ha, action],
+                           capture_output=True, text=True, timeout=60)
+        out = (r.stdout or "").strip()[-400:]
+        if r.returncode == 0:
+            return 0, f"cims-ha {action} rc=0 {out}", ""
+        err = (r.stderr or r.stdout or "").strip()
+        # sudo 미등록(dev)만 graceful — 그 외는 실패.
+        if "password is required" in err or "sudo:" in err:
+            return 0, f"cims-ha {action} skipped (no sudo, dev): {err[-160:]}", ""
+        return 3, out, f"cims-ha {action} rc={r.returncode}: {err[-200:]}"
+    except subprocess.TimeoutExpired as e:
+        return 4, "", f"cims-ha {action} timeout: {e}"
+    except Exception as e:
+        return 5, "", f"cims-ha {action} exception: {e}"
+
+
+def job_update_module_spec(params: dict) -> tuple:
+    """modules/<mod>/service.json 갱신 — 모듈 운영 명세 (감시·절체모드·헬스).
+
+    Params: { module: str, spec: dict }. 앱 config.json 과 물리 분리된 별도 파일로,
+    agent watchdog(supervision.watchdog)과 제어 게이팅이 참조한다. 버전 트리 밖
+    모듈 루트에 두어 업그레이드에 안전(uninstall 시 모듈과 함께 철거).
+    상세: ha_service_model.md §3.2."""
+    module = (params.get("module") or "").lower().strip()
+    spec = params.get("spec")
+    if not module:
+        return 1, "", "module missing"
+    if not isinstance(spec, dict):
+        return 1, "", "spec must be dict"
+    mod_root = os.path.join(_PREFIX, "modules", module)
+    if not os.path.isdir(mod_root):
+        # 아직 설치 안 된 모듈 — 디렉토리 없으면 생성해 두면 uninstall 대칭이 깨지므로
+        # 스킵(설치 시 재푸시). 성공 반환 (no-op).
+        return 0, f"module '{module}' not installed — service.json skip", ""
+    path = os.path.join(mod_root, "service.json")
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(spec, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        return 2, "", f"write service.json failed: {e}"
+    return 0, f"service.json updated: {path}", ""
+
+
 def job_update_ha(params: dict) -> tuple:
     """<prefix>/run/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
 
@@ -1920,6 +1981,171 @@ SUPERVISE_INTERVAL_SEC = 10
 # cold-spare 게이트 — update_ha 가 기록한 ha.json 의 services.*.cold_modules 기준.
 _HA_JSON_PATH = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
 
+# ── HA 런타임 상태 (ha_service_model.md §3.2) ─────────────────────────────
+#   run/ha/desired.json      노드 오버라이드 {module: 'stopped'} — 서버별 stop 기록
+#   run/ha/fail_<mod>        재기동 실패 카운터 (watchdog 기록, cims-health 판독)
+#   run/ha/op_grace_<mod>    조작 유예 마커 (제어 job 진입 시 touch — mtime 만 사용)
+# agent(cims user)가 쓰고 cims-health(root)가 읽는다. CIMS_HOME(ha.json)==_PREFIX 라
+# cims-health 는 <CIMS_HOME>/run/ha/ 로 동일 경로를 유도한다.
+_HA_STATE_DIR = os.path.join(_PREFIX, "run", "ha")
+_DESIRED_FILE = os.path.join(_HA_STATE_DIR, "desired.json")
+_OP_GRACE_SEC = 30               # 조작 유예 창 (restart 순단 흡수 — cims-health 도 동일 상수)
+
+
+def _ha_state_dir() -> str:
+    try:
+        os.makedirs(_HA_STATE_DIR, exist_ok=True)
+    except Exception:
+        pass
+    return _HA_STATE_DIR
+
+
+def _load_desired() -> dict:
+    try:
+        with open(_DESIRED_FILE) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_desired(d: dict) -> None:
+    try:
+        _ha_state_dir()
+        tmp = _DESIRED_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, _DESIRED_FILE)
+    except Exception as e:
+        print(f"[agent][ha] desired.json 저장 실패: {e}", flush=True)
+
+
+def _set_desired(module: str, state: "str | None") -> None:
+    """노드 오버라이드 설정. state='stopped' → 기록, None/'running' → 오버라이드 해제.
+    서버별 stop = stopped 기록(watchdog·health 제외), 서버별 start = 해제."""
+    module = (module or "").lower().strip()
+    if not module:
+        return
+    d = _load_desired()
+    if state == 'stopped':
+        if d.get(module) != 'stopped':
+            d[module] = 'stopped'
+            _save_desired(d)
+            print(f"[agent][ha] 노드 오버라이드: {module}=stopped (서버별 정지 — 절체 안 함)", flush=True)
+    else:
+        if module in d:
+            d.pop(module, None)
+            _save_desired(d)
+            print(f"[agent][ha] 노드 오버라이드 해제: {module}", flush=True)
+
+
+def _desired_stopped(module: str) -> bool:
+    return _load_desired().get((module or "").lower().strip()) == 'stopped'
+
+
+def _touch_op_grace(module: str) -> None:
+    """제어 job 진입 시 조작 유예 마커 갱신 — cims-health/watchdog 가 mtime 으로 유예."""
+    module = (module or "").lower().strip()
+    if not module:
+        return
+    try:
+        _ha_state_dir()
+        p = os.path.join(_HA_STATE_DIR, f"op_grace_{module}")
+        with open(p, "w") as f:
+            f.write(str(int(time.time())))
+    except Exception as e:
+        print(f"[agent][ha] op_grace 마커 실패({module}): {e}", flush=True)
+
+
+def _in_op_grace(module: str) -> bool:
+    """조작 유예 창 이내인가 — 제어 job 진입 후 _OP_GRACE_SEC 초."""
+    module = (module or "").lower().strip()
+    if not module:
+        return False
+    try:
+        at = os.path.getmtime(os.path.join(_HA_STATE_DIR, f"op_grace_{module}"))
+        return (time.time() - at) < _OP_GRACE_SEC
+    except Exception:
+        return False
+
+
+def _fail_path(module: str) -> str:
+    return os.path.join(_HA_STATE_DIR, f"fail_{(module or '').lower().strip()}")
+
+
+def _fail_bump(module: str, window_sec: int) -> int:
+    """재기동 실패 카운터 증가 (window_sec 밖이면 리셋). 갱신된 count 반환.
+    파일 형식: 'count first_ts' (공백 구분) — cims-health 가 첫 필드를 읽는다."""
+    now = int(time.time())
+    count, first_ts = 0, now
+    try:
+        with open(_fail_path(module)) as f:
+            parts = f.read().split()
+            count = int(parts[0]); first_ts = int(parts[1]) if len(parts) > 1 else now
+    except Exception:
+        pass
+    if now - first_ts > max(1, int(window_sec or 300)):
+        count, first_ts = 0, now        # 윈도우 만료 — 리셋
+    count += 1
+    try:
+        _ha_state_dir()
+        with open(_fail_path(module), "w") as f:
+            f.write(f"{count} {first_ts}")
+    except Exception as e:
+        print(f"[agent][ha] fail 카운터 저장 실패({module}): {e}", flush=True)
+    return count
+
+
+def _fail_reset(module: str) -> None:
+    try:
+        os.remove(_fail_path(module))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
+def _module_spec_path(module: str) -> str:
+    return os.path.join(_PREFIX, "modules", (module or "").lower().strip(), "service.json")
+
+
+def _load_module_spec(module: str) -> dict:
+    """modules/<mod>/service.json — 부재/파싱실패 시 default(watchdog on)."""
+    try:
+        with open(_module_spec_path(module)) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _watchdog_enabled(module: str) -> bool:
+    """service.json supervision.watchdog (부재 시 True — 종전 동작 유지)."""
+    spec = _load_module_spec(module)
+    sup = spec.get("supervision") if isinstance(spec.get("supervision"), dict) else {}
+    return bool(sup.get("watchdog", True))
+
+
+def _ha_restart_limit(svc_cold_module: str) -> dict:
+    """ha.json services.* 중 svc_cold_module 을 cold_modules 로 갖는 항목의 restart_limit.
+    미상 시 default {max_fails:3, window_sec:300}."""
+    default = {"max_fails": 3, "window_sec": 300}
+    try:
+        with open(_HA_JSON_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return default
+    m = (svc_cold_module or "").lower()
+    for s in (cfg.get("services") or {}).values():
+        cold = [str(x).lower() for x in (s.get("cold_modules") or [])]
+        if m in cold:
+            rl = s.get("restart_limit") if isinstance(s.get("restart_limit"), dict) else {}
+            return {
+                "max_fails": int(rl.get("max_fails", default["max_fails"]) or default["max_fails"]),
+                "window_sec": int(rl.get("window_sec", default["window_sec"]) or default["window_sec"]),
+            }
+    return default
+
 
 def _cold_standby_module(svc: str) -> bool:
     """svc 가 cold-spare 모듈이고 이 노드가 해당 서비스 VIP 를 보유하지 않으면 True.
@@ -2087,12 +2313,26 @@ def supervise_tick() -> None:
             continue
         if _pgrep_module(svc):
             _WATCHDOG_BACKOFF.pop(svc, None)     # 정상 — backoff 리셋
+            _fail_reset(svc)                     # 실패 카운터 리셋 (연속성 판정 기준)
+            continue
+        # 모듈 감시 비활성 (service.json supervision.watchdog=false) — 운영자가 감시를
+        # 끈 모듈은 재기동하지 않는다.
+        if not _watchdog_enabled(svc):
+            continue
+        # 서버별 정지 오버라이드 — 운영자가 이 노드에서 내린 모듈은 재기동하지 않는다
+        # (의도적 정지 ≠ 장애). desired 해제(서버별 start) 시 백스톱 복귀.
+        if _desired_stopped(svc):
+            _WATCHDOG_BACKOFF.pop(svc, None)
+            continue
+        # 조작 유예 — 제어 job(restart 등) 진행 중이면 잠시 손대지 않는다.
+        if _in_op_grace(svc):
             continue
         # cold-spare standby — 정지가 desired state (notify 가 강등 시 내림).
         # 여기서 재기동하면 keepalived 와 엎치락뒤치락한다. VIP 취득 후엔 게이트가
         # 풀려 crash 재기동 백스톱으로 복귀.
         if _cold_standby_module(svc):
             _WATCHDOG_BACKOFF.pop(svc, None)
+            _fail_reset(svc)                     # standby 진입 — 카운터 초기화 (승격 시 신선)
             continue
         st = _WATCHDOG_BACKOFF.setdefault(svc, {"ts": 0.0, "fails": 0})
         backoff = min(300, 5 * (2 ** st["fails"]))
@@ -2100,8 +2340,13 @@ def supervise_tick() -> None:
             continue
         st["ts"] = now
         st["fails"] += 1
+        # 재기동 실패 카운터 — cims-health 가 max_fails 초과 시 FAULT(절체) 판정.
+        # 로컬 복구를 먼저 시도하고 소진되면 keepalived 가 VIP 를 넘긴다.
+        rl = _ha_restart_limit(svc)
+        fails = _fail_bump(svc, rl["window_sec"])
         nxt = min(300, 5 * (2 ** st["fails"]))
-        print(f"[agent][watchdog] '{svc}' 다운 감지 — 재시작 (시도 {st['fails']}, 다음 backoff {nxt}s)", flush=True)
+        print(f"[agent][watchdog] '{svc}' 다운 감지 — 재시작 (시도 {st['fails']}, "
+              f"연속실패 {fails}/{rl['max_fails']}, 다음 backoff {nxt}s)", flush=True)
         rc, out, err = _run_cims_svc(install_path, "start", svc)
         tail = (err or out or "").strip().replace("\n", " ")[-160:]
         print(f"[agent][watchdog] '{svc}' start rc={rc} {tail}", flush=True)
@@ -2193,6 +2438,17 @@ def job_process_control(params: dict, job_type: str) -> tuple:
             "process_name 누락 — deployment.process_name 필드 필수 "
             f"(install_path={install_path}, job_type={job_type})"
         )
+
+    # 조작 유예 마커 — restart 순단·start 기동 시간 동안 cims-health/watchdog 가
+    # 이 노드에서 절체/재기동 경쟁을 하지 않도록 (운영자 조작 ≠ 장애).
+    _touch_op_grace(svc)
+    # 노드 오버라이드 — 서버별 stop = 이 노드에서 의도적 정지(절체 안 함), start/restart
+    # = 오버라이드 해제(HA 관리로 복귀). 절체 판정(cims-health)과 watchdog 이 참조.
+    if job_type in ("start", "restart"):
+        _set_desired(svc, None)
+    elif job_type == "stop":
+        _set_desired(svc, 'stopped')
+        _fail_reset(svc)
 
     # ── current 심볼릭 모델: 활성 버전 통로 ────────────────────────────────
     #   install_path(버전 디렉토리)가 버전 패턴이면 module_root/current 로 통로화한다.
@@ -2667,6 +2923,10 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_sync_config(params, oam_url, session_token)
         elif jt == "update_ha":
             rc, out, err = job_update_ha(params)
+        elif jt == "update_module_spec":
+            rc, out, err = job_update_module_spec(params)
+        elif jt == "ha_keepalived":
+            rc, out, err = job_ha_keepalived(params)
         elif jt == "apply_ip_config":
             rc, out, err = job_apply_ip_config(params)
         elif jt == "apply_mounts":
@@ -2675,8 +2935,11 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_apply_net_tuning(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
-            # 감독 해제 (watchdog 가 재시작하지 않도록)
-            _unmark_supervised((params.get("process_name") or params.get("service_kind") or "").lower())
+            # 감독 해제 (watchdog 가 재시작하지 않도록) + HA 노드 상태 정리
+            _mod = (params.get("process_name") or params.get("service_kind") or "").lower()
+            _unmark_supervised(_mod)
+            _set_desired(_mod, None)   # 오버라이드 잔재 제거 (service.json 은 모듈 트리와 함께 rmtree)
+            _fail_reset(_mod)
             # 버전 디렉토리(…/<module>/<version>) 면 모듈 루트 전체 제거 —
             # uninstall 은 모듈 deployment 자체의 철거이므로 병렬 버전도 함께.
             module = (params.get("package_name") or "").strip()
