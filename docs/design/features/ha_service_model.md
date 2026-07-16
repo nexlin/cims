@@ -104,7 +104,7 @@ AA 노드의 유일한 HA 관련 동작은 Supervisor 의 **로컬 복구**(죽�
 **verdict 입도**: 그룹 1개 = vrrp_instance 1개 = verdict 1개이며, 그 그룹의 데몬
 모듈 N개를 §7 규칙으로 집계한 결과다(모듈별 verdict 아님).
 
-verdict 스키마 (`/run/cims-ha/verdict/<service>.json`):
+verdict 스키마 (`run/ha/verdict/<service>.json`):
 
 ```json
 {
@@ -137,40 +137,39 @@ verdict 스키마 (`/run/cims-ha/verdict/<service>.json`):
 
 ## 5. 데이터 · 파일 레이아웃
 
-앱 설정과 운영 설정을 분리하고, 영속 상태와 휘발 상태를 분리한다.
+앱 설정과 운영 설정을 분리하고, 영속 상태와 휘발 상태를 분리한다. 모든 HA 상태는
+agent 설치 루트(`_PREFIX`) 아래에 둔다 — agent 는 **user systemd 유닛**(cims 계정)이라
+`RuntimeDirectory`/`StateDirectory`(→ `/run/user/<uid>`·`~/.local/state`)를 쓰면 root 로
+도는 keepalived track_script·cims-notify 와 경로가 어긋난다. root 컴포넌트는 ha.json 의
+`cims_home`(=_PREFIX)으로 경로를 유도해 cims 가 쓴 파일을 읽는다(이미 cims-health 가
+쓰는 방식). 경로는 `_PREFIX` 상대로 표기한다.
 
 | 파일 | 성격 | 쓰는 쪽 | 읽는 쪽 |
 |---|---|---|---|
 | `modules/<mod>/<ver>/…/config.json` | 앱 설정 | OAM 패키지 설정 | 모듈 프로세스 |
 | `modules/<mod>/service.json` | **모듈 운영 명세** (감시·hot/cold·relevant·health 프로파일·safety) | OAM `update_module_spec` job | Supervisor |
 | `run/keepalived/ha.json` | 그룹 정책 노드 복제본 (VRRP 파라미터·cold_modules·restart_limit) | OAM `update_ha` job | Supervisor, cims-ha 렌더 |
-| `/run/cims-ha/verdict/<svc>.json` | verdict (휘발) | Supervisor | keepalived track_script |
-| `/run/cims-ha/role/<svc>.json` | 현재 VRRP 역할 (휘발) | cims-notify | Supervisor, track_script |
-| `/run/cims-ha/health/<check>.json` | health 검사 결과 캐시 (휘발) | Health Scheduler | Supervisor |
-| `/run/cims-ha/promotion/<svc>.json` | 승격 grace 상태 (휘발) | Supervisor | Supervisor |
-| `/run/cims-ha/recovery/<mod>` | 재기동 카운터·deadline (휘발) | Supervisor | Supervisor |
-| `/run/cims-ha/operations/<id>` | 계획 절체 operation·prepare token (휘발) | OAM/Agent | OAM/Agent |
-| `/var/lib/cims-ha/desired/<svc>.json` | **운영자 의도** (영속) | OAM/Agent | Supervisor |
-| `/var/lib/cims-ha/latch/<svc>.json` | **failover 래치·유지보수** (영속) | Supervisor/운영자 | Supervisor |
+| `run/ha/verdict/<svc>.json` | verdict (휘발) | Supervisor (cims) | track_script (root) |
+| `run/ha/role/<svc>.json` | 현재 VRRP 역할 (휘발) | cims-notify (root) | Supervisor (cims), track_script (root) |
+| `run/ha/health/<check>.json` | health 검사 결과 캐시 (휘발) | Health Scheduler | Supervisor |
+| `run/ha/promotion/<svc>.json` | 승격 grace 상태 (휘발) | Supervisor | Supervisor |
+| `run/ha/recovery/<mod>` | 재기동 카운터·deadline (휘발) | Supervisor | Supervisor |
+| `run/ha/operations/<id>` | 계획 절체 operation·prepare token (휘발) | OAM/Agent | OAM/Agent |
+| `state/ha/desired/<svc>.json` | **운영자 의도** (영속) | OAM/Agent | Supervisor |
+| `state/ha/latch/<svc>.json` | **failover 래치·유지보수** (영속) | Supervisor/운영자 | Supervisor |
 
-**영속 vs 휘발 근거**: 래치·운영자 의도는 재부팅 후에도 남아야 안전(절체당한 노드가
-재부팅으로 자동 승격 자격을 되찾으면 안 됨). verdict·카운터·역할은 재부팅 시 초기화돼야
-한다(§13 부트스트랩).
+**영속 vs 휘발**: 래치·운영자 의도는 재부팅 후에도 남아야 안전(절체당한 노드가 재부팅으로
+자동 승격 자격을 되찾으면 안 됨) → `state/ha/`. verdict·카운터·역할은 재부팅 시 초기화돼야
+한다 → `run/ha/`. `_PREFIX` 는 tmpfs 가 아니라 재부팅에도 파일이 남으므로, 휘발 의미는
+(a) **agent 기동 시 `run/ha/` 하위를 초기화**하고 (b) verdict 의 `boot_id`(§13) 로 재부팅
+전 값 재사용을 차단해 달성한다.
 
-디렉토리는 systemd 가 생성·권한 설정한다 (설치 스크립트의 mkdir/chown 대신):
-
-```ini
-[Service]
-User=cims
-Group=cims
-RuntimeDirectory=cims-ha
-RuntimeDirectoryMode=0750
-StateDirectory=cims-ha
-StateDirectoryMode=0750
-```
-
-keepalived track_script 는 root 로 실행되어 cims 소유 0640 파일을 읽을 수 있다.
-cims-notify 도 root(keepalived script_user)로 실행되어 role 파일을 기록한다.
+**소유권**: agent(cims)가 `run/ha/`·`state/ha/` 를 생성·소유한다. 교차 사용자 파일은
+읽기 전용 방향뿐이라 충돌이 없다 — `role`(root 쓰기 → cims 읽기), `verdict`(cims 쓰기 →
+root 읽기). root 는 DAC 를 우회해 cims 소유 파일을 읽고, cims-notify(root)가 cims 소유
+`run/ha/role/` 에 쓰는 것도 가능하다. desired/latch/health/promotion/recovery 는 cims
+전용. 디렉토리는 설치 스크립트(setup-sudoers 단계, root)가 선생성·chown 하고, agent 도
+기동 시 없으면 생성(비-systemd·기존 설치본 대비 self-heal)한다.
 
 ### 모듈 운영 명세 (`service.json`)
 
@@ -388,7 +387,7 @@ grace 중에도 즉시 실패로 처리하는 것: 래치 존재, `EXCLUDE_NODE`
 stale, 필수 hot 모듈 장애, cold 모듈 **preflight** 자체 불가, 시스템 오류(실행 파일 없음·
 권한·잘못된 unit — 단 첫 실패로 즉시 반납하지 않고 Recovery Policy 적용).
 
-상태(`/run/cims-ha/promotion/<svc>.json`):
+상태(`run/ha/promotion/<svc>.json`):
 
 ```json
 { "service": "csp", "state": "PROMOTING", "role_sequence": 1042,
@@ -477,7 +476,7 @@ cold `readiness_timeout` + 허용 restart 시간. grace 중 readiness 실패를 
 `nopreempt` 는 "복구된 옛 MASTER 가 VIP 를 도로 안 가져감"까지이고, **노드를 승격 불가로
 만드는 것은 별도 상태**(`FAILOVER_LATCHED`)다. 래치 설정 조건: 재기동 한도 초과, 프로세스
 종료 실패, health 지속 실패, Supervisor 내부 오류, 절체 후 옛 Active 뒤늦은 정상화,
-split-brain 가능성 감지. 래치는 `/var/lib/cims-ha/latch/` 에 영속.
+split-brain 가능성 감지. 래치는 `state/ha/latch/` 에 영속.
 
 래치 중: `vrrp_eligible=false`, 자동 Active 전환 금지, track_script 실패, OAM 에
 `FAILOVER_LATCHED` 표시.
@@ -498,7 +497,7 @@ verdict 없음/파싱 실패/boot_id 불일치/만료 → track_script 실패(fa
 `eligible=false`). Agent 기동 순서:
 
 ```text
-1. cims-agent 시작 → /run/cims-ha 준비
+1. cims-agent 시작 → run/ha·state/ha 준비
 2. 보수적 verdict=false(STARTING) 즉시 기록
 3. desired·latch·module_specs 로드
 4. hot readiness / cold preflight 평가
@@ -544,7 +543,7 @@ cache·verdict·expires_at·track_script·promotion grace·restart deadline). �
 
 ## 16. 운영자 의도
 
-의도는 상태가 아니라 별도 입력 두 축으로 저장한다(`/var/lib/cims-ha/desired/<svc>.json`):
+의도는 상태가 아니라 별도 입력 두 축으로 저장한다(`state/ha/desired/<svc>.json`):
 
 ```json
 { "desired_runtime": "STOPPED", "ha_intent": "HOLD_VIP",
@@ -593,7 +592,7 @@ ha:
   systemd_watchdog: false                # 전제 충족 후 마지막에 활성
 ```
 
-이행 순서: (1) `/run·/var/lib/cims-ha` 디렉토리 + 보수적 verdict 스켈레톤 →
+이행 순서: (1) `run/ha`·`state/ha` 디렉토리 + 보수적 verdict 스켈레톤 →
 (2) desired 를 영속 경로로 migration(구 `run/ha/` 는 호환 전용) → (3) Supervisor shadow
 모드(신 verdict 계산·로그 비교, keepalived 미사용) → (4) cims-notify role_writer 전환 +
 Supervisor role reconcile → (5) cims-health → track_script verdict reader 축소 →
