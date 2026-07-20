@@ -7,6 +7,7 @@
 #include <set>
 #include <tuple>
 #include <cstdint>
+#include <ctime>
 #include <functional>
 #include "pbase.h"
 
@@ -182,6 +183,8 @@ public:
 
     int getMemberCount() const { return (int)_members.size(); }
     std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
+    // 그룹 생성 시각 — audit SESSION_LIST 의 grace(min_age) 판정 기준(now-created, 단조 증가).
+    time_t getCreatedTime() const { return _createdTime; }
     // 미협상 소스/미등록 멤버 드롭 누적 (STATS rtp_src_drop)
     long getSrcDrop() const { return _srcDrop; }
     // NAT latch 관측 (STATS detail.nat) — latch 완료 멤버의 (sessionId, learnedIp, learnedPort)
@@ -309,6 +312,7 @@ private:
     bool _rtcpLogEnable = false; // 일반 RTCP 로깅 활성화 플래그
     long _srcDrop = 0;           // 미협상 소스/미등록 멤버 드롭 누적
     time_t _lastDropWarn = 0;    // 드롭 WARN rate-limit
+    time_t _createdTime = time(nullptr);  // 그룹 생성 시각 (audit grace) — 구성 시점 고정
 
     // 녹취 (Floor 단위 세그먼트 — 화자 교대 시 파일 분할)
     bool _recordEnable;

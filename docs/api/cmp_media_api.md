@@ -134,6 +134,10 @@ client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 
       "relay": { "total": 500, "used": 8, "sessions": 4 },
       "ptt":   { "total": 100, "used": 2, "groups": 2, "joined": 5,
                  "member_total": 200, "member_used": 5 }
+    },
+    "session_digest": {
+      "relay": { "count": 4, "hash": "61799bd4b6b64b3f" },
+      "group": { "count": 2, "hash": "0b7712cf9a3d5521" }
     }
   }
 }
@@ -148,6 +152,14 @@ client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 
 | `ptt.member_total` / `ptt.member_used` | PTT 멤버 포트 유닛 풀 크기 / 사용 중 |
 
 client 는 이 요약으로 부하 기반 CMP 선택, 조기 호 거절(admission control)을 할 수 있다.
+
+**`session_digest`** — 세션 재조정(audit 수준2, [ha_design.md](../design/ha_design.md)) 용 세션집합 지문.
+`relay`/`group` 각각 `{count, hash}` 로, `hash = XOR(fnv1a64(id))` (전 세션ID의 FNV-1a 64bit XOR
+누적 — **순서무관** 16진 문자열, JSON number 정밀도 한계로 문자열 표기). client(CSP)는 자기
+소유 세션집합의 동일 지문을 유지해 **매 HEARTBEAT(3초)마다 대조**한다. `count`+`hash` 가 같으면
+정합(고확률)이라 아무 것도 하지 않고, 다르면 그 때만 [SESSION_LIST](#53-session_list)로 상세
+diff 하여 고아 자원을 회수한다. 비정상 원인(메시지 유실·프로세스 재기동·이중화 절체)으로 생긴
+CSP↔CMP 자원 불일치를 sweeper 타임아웃(분 단위)보다 빠르게(초 단위) 수렴시킨다.
 
 ### 5.2 STATS
 
@@ -185,6 +197,52 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 | `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_holder`). 최대 20개 (전체 수는 `groups_total`) |
 
 `nat`/`groups` 배열 상한은 응답 datagram 4KB 계약([§1.2](#12-전송)) 내 안전 상한이다.
+STATS 응답도 HEARTBEAT 와 동일하게 [`session_digest`](#51-heartbeat)를 함께 싣는다.
+
+### 5.3 SESSION_LIST
+
+세션 재조정(audit 수준2)용 세션 열거. [`session_digest`](#51-heartbeat) 대조에서 **불일치가
+감지됐을 때만** client(CSP)가 호출해 CMP 보유 세션의 전체 집합을 당겨(pull) 자기 소유 집합과
+diff 한다. push(이벤트)로는 절체 후 새 active 가 옛 세션을 기억하지 못해 상관지을 수 없으므로,
+재조정은 pull 로만 성립한다.
+
+```json
+{
+  "hdr": { "ver": 2, "trans_id": 71, "node": "csp01", "cmd": "SESSION_LIST", "type": "request" },
+  "payload": { "kind": "relay", "offset": 0, "limit": 40, "min_age_sec": 0 }
+}
+```
+```json
+{
+  "hdr": { "ver": 2, "trans_id": 71, "node": "cmp01", "cmd": "SESSION_LIST",
+           "type": "response", "status": "OK" },
+  "payload": {
+    "kind": "relay", "total": 128, "next_offset": 40,
+    "entries": [
+      { "session_id": "csp_20260720170500999_1", "age_sec": 812 },
+      { "session_id": "csp_20260720170501004_1", "age_sec": 806 }
+    ]
+  }
+}
+```
+
+| 요청 필드 | 의미 |
+|---|---|
+| `kind` | `relay`(1:1 RTP 세션) 또는 `group`(PTT 그룹). 기본 `relay` |
+| `offset` / `limit` | 페이지. `limit` 는 4KB datagram 계약 내 상한 **40**으로 clamp |
+| `min_age_sec` | 이 초 이상 존재한 세션만 반환(grace) — 설정 중인 신규 세션의 오회수 방지. client 는 보통 `0`(전량)으로 받아 age 를 client-side 에서 판정 |
+
+| 응답 필드 | 의미 |
+|---|---|
+| `total` | grace 필터 적용 후 전체 세션 수 |
+| `next_offset` | 다음 페이지 offset. 마지막 페이지면 `-1` |
+| `entries[].session_id` | 세션(relay) 또는 그룹 식별자 |
+| `entries[].age_sec` | CMP 에서 세션이 존재한 기간(초) — client 가 grace 판정에 사용 |
+
+**재조정 규칙(client=CSP)**: `orphan`(CMP有 CSP無, `age_sec ≥ GraceSec`) → [RELAY_REMOVE](#63-relay_remove)
+로 회수. `zombie`(CSP有 CMP無, 미디어 소실) → 호 종료(opt-in). 회수는 **active 역할일 때만**
+실행하고 standby 는 탐지·로그만 한다(hot-standby 가 active 세션을 오회수하지 않도록). 자세한
+수준·정책은 [ha_design.md](../design/ha_design.md) 수준2 참조.
 
 ## 6. RELAY — 1:1 RTP relay
 

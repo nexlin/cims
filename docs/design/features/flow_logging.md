@@ -161,7 +161,7 @@ ts, dir, peer, caller, callee, proto, msg
 |---|---|---|
 | `volte` | VoLTE 호 (SIP + CSP↔CMP SESSION 계열) | SIP 도메인이 volte 항목과 매치 |
 | `mcptt` | PTT 그룹호 (SIP + CSP↔CMP PTT_GROUP 계열 + CSC IdMS/GMS/CMS) | 도메인 mcptt 매치 또는 MCPTT 엔드포인트 경로 |
-| `system` | HEARTBEAT, CSC_RESTART, STATS 등 세션 개념 없는 이벤트 | |
+| `system` | HEARTBEAT, CSC_RESTART, STATS, SESSION_LIST(audit 재조정) 등 세션 개념 없는 이벤트 | |
 | `console` | CSC admin API 트리거 이벤트 (/api/v1/* HTTP, USER_CHANGED/GROUP_CHANGED notify) | pi_http post_hook 로 자동 분류 |
 | `""` | 미매칭 (Realm에 등록 안 된 도메인) | key 자체 생략 |
 

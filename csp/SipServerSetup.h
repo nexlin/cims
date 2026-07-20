@@ -204,6 +204,18 @@ public:
     //   Session-ID 기준으로 다중 CMP(AA) 에 relay 세션을 분배한다. 비어있으면 단일 운영.
     std::vector< std::pair< std::string, int > > m_vecCmpEndpoints;
 
+    // CSP↔CMP 세션 재조정(audit 수준2) — Setup.MediaServer.Audit.*
+    //   비정상(메시지 유실·재기동·절체)으로 생긴 CMP 고아 relay 를 HEARTBEAT digest 불일치로
+    //   감지해 SESSION_LIST diff 후 RemoveSession 회수(sweeper 타임아웃보다 빠른 능동 수렴).
+    //   ha_design.md 수준2. 상세: docs/api/cmp_media_api.md.
+    bool m_bAuditEnable = true;        // digest 대조+orphan 회수 (기본 on)
+    int  m_iAuditGraceSec = 30;        // SESSION_LIST min_age — 신규 setup 세션 오회수 방지
+    int  m_iAuditMaxPerCycle = 20;     // 한 cycle 회수 상한(회수 폭풍 방지, 초과분 다음 cycle)
+    bool m_bAuditZombieTeardown = false;  // CSP有-CMP無(zombie) 호 강제 종료 opt-in(기본 detect+log)
+    // HA 역할 — active 만 회수 실행(standby 는 탐지·로그만; hot-standby 오회수 방지).
+    //   "active"|"standby"|"auto"(기본, HA 미배치=active 취급). 절체 시 승격 노드가 active.
+    std::string m_strHaRole = "auto";
+
     // ================================================================
     // CMDP(MCData Media Plane, MSRP) 연동 설정 — Setup.McDataMedia.*
     bool m_bUseMcDataMedia;     // Enable (기본 false — cmdp 미배치 환경 무영향)

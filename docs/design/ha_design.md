@@ -156,6 +156,67 @@
 5.4 와 동일 흐름. 그룹 세션의 경우 active 통화 시 floor 호환 RTP 가 mid-
 session 손실되나, 그룹 재진입으로 복구.
 
+### 5.6 세션 재조정 (audit 수준2) — CSP↔CMP 자원 정합
+
+비정상 원인(메시지 유실·프로세스 재기동·**이중화 절체**)으로 CSP 와 CMP 의
+세션 자원이 불일치할 수 있다. 절체는 특히 cold dialog 정책상 새 active CSP 가
+진행중 호를 기억하지 못하므로, 옛 active 가 CMP 에 만든 relay 세션이 **주인 없는
+고아**로 남는다.
+
+**수렴 수준**:
+
+| 수준 | 의미 | 수렴 창 | 메커니즘 |
+|---|---|---|---|
+| 1. 최종수렴 | 고아가 언젠가 회수(무한 누적 없음) | 분 단위 | 양측 독립 타임아웃 — CMP sweeper(`timeoutLoop`) + CSP `StaleCallTimeout` |
+| **2. 능동 재조정** | 승격/불일치 직후 고아를 능동 정리 | **초 단위** | **본 절 — digest 대조 + SESSION_LIST diff** |
+| 3. 무손실 인계 | 진행중 호 자체 보존 | 무중단 | dialog hot 복제 — **비목표**(cold dialog 정책, §1.2) |
+
+수준 1(양측 sweeper)은 이미 최종수렴을 보장한다. 본 절의 수준 2는 그 위에 **능동
+수렴**을 얹어 불일치 창을 초 단위로 줄인다.
+
+**동작** (정본: [cmp_media_api.md](../api/cmp_media_api.md) §5.1/§5.3):
+
+1. CMP 는 HEARTBEAT/STATS 응답에 세션집합 지문 `session_digest`(relay/group
+   각 `{count, hash=XOR(fnv1a64(id))}`)를 싣는다.
+2. CSP 는 자기 `CallMap` 의 동일 지문을 유지해 **매 HEARTBEAT(3초)마다 대조**한다.
+   같으면 무동작(상시 부하 = XOR 1회 + 16B).
+3. 불일치 시에만 `SESSION_LIST`(pull, 페이지)로 CMP 전체 세션을 받아 diff:
+   - **orphan**(CMP有 CSP無, `age ≥ GraceSec`) → `RELAY_REMOVE` 회수.
+   - **zombie**(CSP有 CMP無, 미디어 소실) → 호 종료(opt-in).
+4. **절체 발동**: 승격한 active CSP 는 dialog CallMap 이 비어(cold) 첫 HEARTBEAT
+   에서 CMP 지문과 자동 불일치 → 옛 relay 를 초 단위로 일괄 회수. 별도 VRRP 훅
+   불필요.
+
+**안전** — 회수는 **active 역할일 때만** 실행한다(`MediaServer.Audit.HaRole`;
+standby 는 탐지·로그만). hot-standby 가 빈 CallMap 으로 active 의 live 세션을
+오회수하는 것을 차단하는 핵심 게이트다. `GraceSec`(기본 30s)는 설정 중인 신규
+세션의 오회수를 막는다.
+
+**역할 전환 주의** — 현재 `HaRole` 은 정적 설정이다:
+- **cold-spare**(standby 미기동, keepalived notify 가 승격 시 기동): 기동된 프로세스가
+  곧 active 이므로 `auto`(=active)면 승격 즉시 회수가 발동한다.
+- **hot-standby**(standby 상시 기동): 반드시 `HaRole=standby` 로 두어 오회수를
+  막되, **승격 시 active 로 전환**돼야 회수가 발동한다. 정적 설정만으로는 전환이
+  안 되므로, keepalived `notify_master` 가 CSP 를 `active` 로 재설정(reload)하거나
+  런타임 VIP 소유 감지로 역할을 판정하는 연동이 **후속 과제**다.
+
+**push 가 아닌 pull 인 이유**: 절체 후 새 active 는 옛 세션ID·CallMap 이 없어
+CMP 가 event 를 push 해도 상관지을 대상이 없다(ack 후 폐기). CMP 의 현재 사실을
+당겨 상태를 재구성하는 pull 만 절체 정합을 만든다.
+
+**설정** (`Setup.MediaServer.Audit`, csp.json):
+
+| 키 | 기본 | 의미 |
+|---|---|---|
+| `Enable` | `true` | digest 대조 + orphan 회수 |
+| `GraceSec` | `30` | SESSION_LIST grace — 신규 setup 세션 보호 |
+| `MaxPerCycle` | `20` | 한 cycle 회수 상한(회수 폭풍 방지, 초과분 다음 cycle) |
+| `ZombieTeardown` | `false` | zombie 호 강제 종료 opt-in(기본 탐지+로그, StaleCallTimeout 백스톱) |
+| `HaRole` | `auto` | `active`/`auto`=회수 실행, `standby`=탐지·로그만 |
+
+> **다중 endpoint(CMP All Active) per-shard audit** 는 multi-endpoint dispatch
+> 활성화와 함께 후속. 현재는 primary endpoint 기준으로 재조정한다.
+
 ## 6. State replication 설계 (Redis)
 
 ### 6.1 적용 범위

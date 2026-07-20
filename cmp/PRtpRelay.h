@@ -50,8 +50,12 @@ public:
     void touchActivity() { time(&_lastActivityTime); _everReceivedRtp = true; }
     // 세션 바인딩 시점 초기화 — 풀에서 재사용되는 relay 의 잔존 활동시각/수신이력/카운터 제거
     //   (없으면 idle=풀 생성시각 기준으로 계산돼 신규 세션이 즉시 orphan 회수됨).
-    void resetActivity() { time(&_lastActivityTime); _everReceivedRtp = false; _srcDrop = 0; }
+    //   _createdTime 도 여기서 세션 바인딩 시각으로 고정한다(RTP 수신과 무관하게 단조) — audit
+    //   SESSION_LIST 의 grace(min_age) 판정 기준. 재사용 relay 는 새 바인딩마다 갱신된다.
+    void resetActivity() { time(&_lastActivityTime); time(&_createdTime); _everReceivedRtp = false; _srcDrop = 0; }
     time_t getLastActivityTime() const { return _lastActivityTime; }
+    // 세션 바인딩(생성) 시각 — audit grace 필터용(now-created = 세션 존재기간, RTP 무관 단조 증가).
+    time_t getCreatedTime() const { return _createdTime; }
     // RTP 를 한 번이라도 받았는가 — 고아(setup 실패) relay 빠른 회수 vs 활성/홀드 호 보존 구분용.
     bool everReceivedRtp() const { return _everReceivedRtp; }
     // 미협상 소스 드롭 누적 (STATS rtp_src_drop)
@@ -113,6 +117,7 @@ private:
     std::string _sessionId;
     std::string _workerName;
     time_t      _lastActivityTime = 0;
+    time_t      _createdTime = 0;       // 세션 바인딩 시각 (audit grace) — resetActivity 에서 고정
     bool        _everReceivedRtp = false;
     long        _srcDrop = 0;
     time_t      _lastDropWarn = 0;

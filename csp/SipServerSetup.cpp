@@ -248,6 +248,16 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                         }
                     }
                 }
+                // 세션 재조정(audit 수준2) — MediaServer.Audit.*
+                if ( ms.Has( "Audit" ) ) {
+                    SimpleJson::JsonNode au = ms.Get( "Audit" );
+                    if ( au.Has( "Enable" ) ) m_bAuditEnable = ( au.Get( "Enable" ).AsString() == "true" );
+                    if ( au.Has( "GraceSec" ) ) m_iAuditGraceSec = (int)au.GetInt( "GraceSec" );
+                    if ( au.Has( "MaxPerCycle" ) ) m_iAuditMaxPerCycle = (int)au.GetInt( "MaxPerCycle" );
+                    if ( au.Has( "ZombieTeardown" ) )
+                        m_bAuditZombieTeardown = ( au.Get( "ZombieTeardown" ).AsString() == "true" );
+                    if ( au.Has( "HaRole" ) ) m_strHaRole = au.GetString( "HaRole" );
+                }
             } else if ( setup.Has( "RtpRelay" ) ) {
                 SimpleJson::JsonNode rtp = setup.Get( "RtpRelay" );
                 if ( rtp.Has( "UseRtpRelay" ) ) m_bUseRtpRelay = ( rtp.Get( "UseRtpRelay" ).AsString() == "true" );

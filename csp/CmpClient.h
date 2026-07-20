@@ -3,9 +3,11 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -93,6 +95,11 @@ public:
     /** Session-ID → 선택된 endpoint (consistent hash). 미등록 endpoint 면 primary 반환. */
     CmpEndpoint SelectEndpointForSession( const std::string &strSessionId );
 
+    /** audit 수준2 설정 주입 (CspServer init 에서 gclsSetup 값 전달).
+     *  strHaRole: "active"|"auto"→회수 실행, "standby"→탐지·로그만(오회수 방지). */
+    void SetAuditConfig( bool bEnable, int iGraceSec, int iMaxPerCycle, bool bZombieTeardown,
+                         const std::string &strHaRole );
+
 private:
     CCmpClient();
     ~CCmpClient();
@@ -136,6 +143,15 @@ private:
     void KeepAliveLoop();
     void RecvLoop();
     void OnTransactionComplete( unsigned int transId, bool success, const std::string &response );
+
+    // ── audit 수준2 (CSP↔CMP 세션 재조정) ──────────────────────────────────
+    //   KeepAliveLoop 이 매 HEARTBEAT(3s) 성공 후 호출. CMP digest(Alive 가 stash)와 CSP CallMap
+    //   지문을 대조해 불일치 시에만 SESSION_LIST 로 상세 diff → orphan RemoveSession(회수),
+    //   zombie 는 opt-in teardown. active 역할일 때만 회수(standby 는 탐지·로그만).
+    void RunAuditCycle();
+    // SESSION_LIST 전량 수집(페이지) → id→age_sec (grace 는 회수 시 client-side 적용). primary endpoint.
+    bool FetchSessionList( const std::string &strKind, std::map<std::string, int> &mapOut );
+    static uint64_t Fnv1a64( const std::string &s );
     // void OnPacketReceived(const std::string& strPacket, const std::string& strIp, int iPort); // Deprecated
 
     std::string m_strCmpIp;
@@ -181,6 +197,19 @@ private:
     // 그룹콜 전체 teardown 되던 과민 동작을 막기 위해, 임계(kMaxAliveFail) 연속 실패에서만 disconnect.
     int m_iAliveFailCount;
     std::function<void( bool )> m_fnConnectionCallback;
+
+    // ── audit 수준2 설정/상태 ──
+    bool m_bAuditEnable = false;
+    int m_iAuditGraceSec = 30;
+    int m_iAuditMaxPerCycle = 20;
+    bool m_bAuditZombieTeardown = false;
+    bool m_bAuditActiveRole = true;        // HaRole 해석 (standby 만 false)
+    bool m_bAuditStandbyLogged = false;    // standby 불일치 로그 1회 억제
+    // 최근 primary HEARTBEAT 응답의 CMP relay 세션집합 지문 (Alive 가 갱신, RunAuditCycle 이 소비)
+    std::mutex m_mutexDigest;
+    bool m_bCmpDigestValid = false;
+    int m_iCmpRelayCount = 0;
+    uint64_t m_uCmpRelayHash = 0;
 
 public:
     void SetConnectionCallback( std::function<void( bool )> fnCallback ) {

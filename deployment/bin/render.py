@@ -644,6 +644,16 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             ("ControlPort", media.get("control_port", 9000)),
             ("LocalPort",   media.get("local_port", 9001)),
             ("LocalIp",     media.get("local_ip", self_svc_ip)),
+            # 세션 재조정(audit 수준2) — CSP↔CMP 자원 정합 (ha_design.md §5.6 / cmp_media_api.md §5.3).
+            #   HaRole=auto(단일노드/cold-mode=active 취급). hot-standby 는 promotion 시 active 로
+            #   전환 필요 — 현재는 auto 기본, 노드 역할 연동은 후속.
+            ("Audit", OrderedDict([
+                ("Enable",         bool((media.get("audit") or {}).get("enable", True))),
+                ("GraceSec",       int((media.get("audit") or {}).get("grace_sec", 30))),
+                ("MaxPerCycle",    int((media.get("audit") or {}).get("max_per_cycle", 20))),
+                ("ZombieTeardown", bool((media.get("audit") or {}).get("zombie_teardown", False))),
+                ("HaRole",         (media.get("audit") or {}).get("ha_role", "auto")),
+            ])),
         ])),
         ("Log", OrderedDict([
             ("Folder",  log.get("folder", "log")),

@@ -46,6 +46,9 @@ protected:
     // PTT_FLOOR_TIER {group_id, session_id, tier} — 긴급/임박 floor tier 런타임 갱신(업그레이드/취소)
     void processSetFloorTier(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    // SESSION_LIST {kind:"relay"|"group", offset, limit, min_age_sec} — audit 재조정용 세션 열거(페이지).
+    //   min_age_sec 이상 존재한 세션만 반환(신규 setup 중 세션 오회수 방지 = grace). CORE 명령.
+    void processSessionList(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
     int sendResponse(const std::string& ip, int port, const std::string& msg,
                      const char* caller = "", const char* callee = "");
@@ -59,6 +62,10 @@ protected:
                 const char* code, const char* reason);
     // HEARTBEAT/STATS 공통 자원 요약 (호출측이 _mutex 보유)
     SimpleJson::JsonNode buildResourceSummary();
+    // 세션집합 지문(audit 수준2) — {relay:{count,hash}, group:{count,hash}}. hash=XOR(fnv1a64(id))
+    //   (순서무관). CSP 가 자기 CallMap 지문과 3초마다 대조해 불일치 시에만 SESSION_LIST 로 상세 diff.
+    //   호출측이 _mutex 보유.
+    SimpleJson::JsonNode buildSessionDigest();
 
     // Resource Management
     void loadConfig();

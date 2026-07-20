@@ -20,6 +20,7 @@
 #define _CALL_MAP_H_
 
 #include <map>
+#include <set>
 #include <string>
 
 #include "SipMutex.h"
@@ -99,6 +100,13 @@ public:
     void DeleteTimeout( int iTimeoutSec );
     void StopCallAll();
     int GetCount();
+
+    /** audit 수준2 — 현재 보유 중인 CMP relay 세션 식별자 집합 수집(비어있지 않은 것만).
+     *  CSP 측 세션집합 지문/ diff 의 원천. (CmpClient AuditCycle 이 CMP digest 와 대조) */
+    void CollectRelaySessionIds( std::set<std::string> &setOut );
+    /** audit zombie teardown — relay 세션ID 로 호를 지목해 StopCall+Delete(호 강제 종료).
+     *  CMP 에 해당 relay 가 소실(재기동 등)돼 미디어가 죽은 좀비 호 정리. 회수 건수 반환. */
+    int ReclaimZombieBySessionId( const std::set<std::string> &setLiveOnCmp, int iMaxCount );
 
     void GetString( CMonitorString &strBuf );
 

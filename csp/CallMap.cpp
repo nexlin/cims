@@ -342,6 +342,42 @@ void CCallMap::DeleteTimeout( int iTimeoutSec ) {
     }
 }
 
+// audit 수준2 — 보유 중인 relay 세션ID 집합 수집. B2BUA 양 leg 가 동일 relay 를 공유해
+//   중복 등장하나 set 이 dedup 한다. PTT(그룹) 호는 relay 세션ID 가 비어 제외된다.
+void CCallMap::CollectRelaySessionIds( std::set<std::string> &setOut ) {
+    m_clsMutex.acquire();
+    for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
+        if ( !itMap->second.m_strRelaySessionId.empty() )
+            setOut.insert( itMap->second.m_strRelaySessionId );
+    }
+    m_clsMutex.release();
+}
+
+// audit zombie teardown — CMP 에 없는(=미디어 소실) relay 를 가진 호를 StopCall+Delete.
+//   setLiveOnCmp = CMP 가 실제 보유한 relay 세션ID. 그에 없으면 좀비. 회수 상한 iMaxCount.
+int CCallMap::ReclaimZombieBySessionId( const std::set<std::string> &setLiveOnCmp, int iMaxCount ) {
+    std::list<std::pair<std::string, std::string>> clsZombie;  // (callId, sessionId)
+    m_clsMutex.acquire();
+    for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
+        const std::string &sid = itMap->second.m_strRelaySessionId;
+        if ( sid.empty() ) continue;
+        if ( setLiveOnCmp.find( sid ) == setLiveOnCmp.end() )
+            clsZombie.push_back( std::make_pair( itMap->first, sid ) );
+    }
+    m_clsMutex.release();
+
+    int iDone = 0;
+    for ( const auto &z : clsZombie ) {
+        if ( iDone >= iMaxCount ) break;
+        CLog::Print( LOG_INFO, "Audit zombie teardown: CallId(%s) relay=%s (CMP 미보유 — 미디어 소실)",
+                     z.first.c_str(), z.second.c_str() );
+        gclsUserAgent.StopCall( z.first.c_str() );
+        Delete( z.first.c_str() );  // bStopPort=true → RemoveSession (이미 CMP 소실이라 no-op 멱등)
+        ++iDone;
+    }
+    return iDone;
+}
+
 /**
  * @ingroup CspServer
  * @brief 모든 통화를 종료시킨다.

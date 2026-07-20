@@ -230,6 +230,7 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     else if (cmdUpper == "PTT_LEAVE") processLeaveGroup(payload, ip, port, transId);
     else if (cmdUpper == "PTT_FLOOR_TIER") processSetFloorTier(payload, ip, port, transId);
     else if (cmdUpper == "STATS") processStats(payload, ip, port, transId);
+    else if (cmdUpper == "SESSION_LIST") processSessionList(payload, ip, port, transId);
     else {
         LOG_WARN("PCmpServer", "Unknown CMD: %s from %s:%d", cmdUpper.c_str(), ip.c_str(), port);
         sendErr(ip, port, transId, cmdUpper, payload.GetString("sesid"), payload.GetString("service"),
@@ -305,6 +306,38 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
     return resource;
 }
 
+// FNV-1a 64bit — 세션ID 문자열의 안정 해시. XOR 누적이 순서무관이라 지문 대조에 적합.
+static uint64_t fnv1a64(const std::string& s) {
+    uint64_t h = 1469598103934665603ULL;
+    for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
+    return h;
+}
+static std::string hex64(uint64_t v) {
+    char b[17];
+    snprintf(b, sizeof(b), "%016llx", (unsigned long long)v);
+    return std::string(b);
+}
+
+// 세션집합 지문 — audit 수준2 (호출측이 _mutex 보유). CSP 가 자기 CallMap 지문과 대조.
+SimpleJson::JsonNode PCmpServer::buildSessionDigest() {
+    uint64_t relayHash = 0;
+    for (auto const& [sid, rtp] : _sessions) relayHash ^= fnv1a64(sid);
+    uint64_t groupHash = 0;
+    for (auto const& [gid, group] : _groups) groupHash ^= fnv1a64(gid);
+
+    SimpleJson::JsonNode relay;
+    relay.Set("count", (int)_sessions.size());
+    relay.Set("hash", hex64(relayHash));
+    SimpleJson::JsonNode group;
+    group.Set("count", (int)_groups.size());
+    group.Set("hash", hex64(groupHash));
+
+    SimpleJson::JsonNode digest;
+    digest.Set("relay", relay);
+    digest.Set("group", group);
+    return digest;
+}
+
 int PCmpServer::sendResponse(const std::string& ip, int port, const std::string& msg,
                               const char* caller, const char* callee) {
     // 원문 기록 (송신) — 샘플링 제외된 HEARTBEAT 응답은 미기록 (handlePacket 의 per-packet 플래그)
@@ -373,6 +406,7 @@ void PCmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::st
     {
         PAutoLock lock(_mutex);
         body.Set("resource", buildResourceSummary());
+        body.Set("session_digest", buildSessionDigest());  // audit 수준2 — 세션집합 지문
     }
     int txSeq = sendOk(ip, port, transId, "HEARTBEAT", "", "", &body);
     if (!_hbLogSuppress)
@@ -393,6 +427,7 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     // 요약(resource) + 상세(detail) — HEARTBEAT 요약과 동일 구조에 진단 정보를 더한다
     SimpleJson::JsonNode body;
     body.Set("resource", buildResourceSummary());
+    body.Set("session_digest", buildSessionDigest());  // audit 수준2 — 세션집합 지문
 
     SimpleJson::JsonNode leak;
     leak.Set("total", (long long)_leakReclaimTotal);
@@ -474,6 +509,79 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
             txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
     LOG_INFO("PCmpServer", "STATS: sessions=%d groups=%d ports_free=%d/%d", (int)_sessions.size(),
              (int)_groups.size(), (int)_freeResources.size(), _rtpPoolSize);
+}
+
+// SESSION_LIST — audit 재조정용 세션 열거(페이지). 응답 datagram 4KB 계약 내에서 페이지당 제한.
+//   kind=relay|group, offset/limit 페이지, min_age_sec grace(신규 setup 세션 오회수 방지).
+//   CORE 명령이라 hdr 에 sesid/service 미포함(내부 flow sesid 만 발행). std::map 은 key 정렬이라
+//   페이지 offset 이 안정적(스냅샷: 매 호출 lock 하에 필터+슬라이스).
+void PCmpServer::processSessionList(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    std::string sesid = issueSesid("");
+    std::string txIdStr = std::to_string(transId);
+    logFlow("session_list", "csp", "cmp", "JSON", "SESSION_LIST", "",
+            txIdStr.c_str(), "system", sesid.c_str(), "", _lastRxSeq, "csp");
+
+    std::string kind = payload.GetString("kind");
+    if (kind.empty()) kind = "relay";
+    int offset = (int)payload.GetInt("offset", 0);
+    if (offset < 0) offset = 0;
+    int limit = (int)payload.GetInt("limit", 40);
+    const int kMaxPage = 40;  // 항목당 ~70B → 4KB 계약 내 안전 상한
+    if (limit <= 0 || limit > kMaxPage) limit = kMaxPage;
+    int minAge = (int)payload.GetInt("min_age_sec", 0);
+    if (minAge < 0) minAge = 0;
+
+    time_t now;
+    time(&now);
+
+    SimpleJson::JsonNode entries;
+    entries.type = SimpleJson::JSON_ARRAY;
+    int total = 0;
+
+    {
+        PAutoLock lock(_mutex);
+        if (kind == "group") {
+            for (auto const& [gid, group] : _groups) {
+                if (!group) continue;
+                int age = (int)(now - group->getCreatedTime());
+                if (age < minAge) continue;               // grace — 신규 그룹 보호
+                if (total >= offset && (int)entries.array.size() < limit) {
+                    // 4KB datagram 계약 — 항목은 id+age 만(sesid 제외)로 최소화해 페이지당 상한 확보.
+                    SimpleJson::JsonNode e;
+                    e.Set("session_id", gid);
+                    e.Set("age_sec", age);
+                    entries.Add(e);
+                }
+                ++total;
+            }
+        } else {  // relay
+            for (auto const& [sid, rtp] : _sessions) {
+                if (!rtp) continue;
+                int age = (int)(now - rtp->getCreatedTime());
+                if (age < minAge) continue;               // grace — 신규 세션 보호
+                if (total >= offset && (int)entries.array.size() < limit) {
+                    // 4KB datagram 계약 — 항목은 id+age 만(sesid 제외)로 최소화해 페이지당 상한 확보.
+                    SimpleJson::JsonNode e;
+                    e.Set("session_id", sid);
+                    e.Set("age_sec", age);
+                    entries.Add(e);
+                }
+                ++total;
+            }
+        }
+    }
+
+    SimpleJson::JsonNode body;
+    body.Set("kind", kind);
+    body.Set("total", total);
+    int returned = (int)entries.array.size();
+    int nextOffset = offset + returned;
+    body.Set("next_offset", (nextOffset < total) ? nextOffset : -1);  // -1 = 마지막 페이지
+    body.Set("entries", entries);
+
+    int txSeq = sendOk(ip, port, transId, "SESSION_LIST", "", "", &body);
+    logFlow("session_list", "cmp", "csp", "JSON", "OK", "",
+            txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
 }
 
 void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
