@@ -1052,6 +1052,18 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
             pclsRemoteRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendReInvite( clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp );
+    } else if ( pclsRemoteRtp ) {
+        // PTT 멤버 leg (CallMap 밖 — CSP 가 종단, 스택이 기존 로컬 SDP 로 자동 200 OK) — 재협상된
+        //   멤버 주소를 JOIN ②(멱등)로 CMP 에 재전달 + NAT 재판정. PTT 세션이 아니면 내부에서
+        //   조기 return 이라 안전.
+        int iAudioPort = pclsRemoteRtp->GetAudioPort();
+        if ( iAudioPort <= 0 && pclsRemoteRtp->m_iPort > 0 ) iAudioPort = pclsRemoteRtp->m_iPort;
+        if ( iAudioPort > 0 ) {
+            int iRemoteVideo = pclsRemoteRtp->GetVideoPort();
+            int iRemoteFloor = pclsRemoteRtp->GetApplicationPort();
+            gclsGroupCallService.OnCallStarted( pszCallId, pclsRemoteRtp->m_strIp, iAudioPort,
+                                                iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo );
+        }
     }
 }
 

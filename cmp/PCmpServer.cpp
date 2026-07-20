@@ -954,10 +954,11 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
         logBody("TX", peerStr.c_str(), "JSON", "OK");
         LOG_INFO("PCmpServer", "PTT_LEAVE group=%s session=%s", groupId.c_str(), sessionId.c_str());
     } else {
-        int txSeq = sendErr(ip, port, transId, "PTT_LEAVE", sesid, svc,
-                            "NOT_FOUND", "group not found");
-        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        LOG_WARN("PCmpServer", "PTT_LEAVE group=%s not found", groupId.c_str());
+        // 자연 멱등 (§3) — 이미 없는 그룹이면 목표 상태(미참가)로 수렴된 것. 성공 응답 유실 후
+        //   재전송이 ERROR 를 받지 않도록 OK (RELAY_REMOVE 와 동일 규칙).
+        int txSeq = sendOk(ip, port, transId, "PTT_LEAVE", sesid, svc);
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+        LOG_WARN("PCmpServer", "PTT_LEAVE group=%s not found (idempotent OK)", groupId.c_str());
     }
 }
 
@@ -1000,10 +1001,11 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
         logBody("TX", peerStr.c_str(), "JSON", "OK");
         LOG_INFO("PCmpServer", "PTT_GROUP_REMOVE group=%s", groupId.c_str());
     } else {
-        int txSeq = sendErr(ip, port, transId, "PTT_GROUP_REMOVE", sesid, svc,
-                            "NOT_FOUND", "group not found");
-        logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        LOG_WARN("PCmpServer", "PTT_GROUP_REMOVE group=%s not found", groupId.c_str());
+        // 자연 멱등 (§3) — 이미 없는 그룹이면 목표 상태(해제)로 수렴된 것. 성공 응답 유실 후
+        //   재전송이 ERROR 를 받지 않도록 OK (RELAY_REMOVE 와 동일 규칙).
+        int txSeq = sendOk(ip, port, transId, "PTT_GROUP_REMOVE", sesid, svc);
+        logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+        LOG_WARN("PCmpServer", "PTT_GROUP_REMOVE group=%s not found (idempotent OK)", groupId.c_str());
     }
 
     // 그룹 종료 후 캐시 정리

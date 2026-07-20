@@ -261,6 +261,9 @@ private:
         uint32_t videoSsrcOut;  // 수신자에게 보내는 고정 비디오 SSRC
         bool floorNatLatched = false;  // floor User ID latch 이력 — NAT 단말 표식
         PPttMemberPort* unit = nullptr;  // 멤버 전용 RTP 포트 유닛 (PCmpServer 소유)
+        std::string declIp;   // 마지막 SDP 선언 주소 원본 (latch 와 무관하게 보존 —
+        int declPort = 0;     //   재-JOIN 시 선언 불변 여부 비교용, PRtpRelay::Leg.decl* 와 동형)
+        int declVideoPort = 0;
 
         // NAT 목적지 latch (제어평면이 nat 지정한 멤버만 — ue_nat_traversal.md §5)
         bool natEnabled = false;

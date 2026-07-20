@@ -1152,7 +1152,9 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     }
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     int iFloorPort = iRemoteFloorPort > 0 ? iRemoteFloorPort : ( iRemotePort + 1 );
-    int iVideoPort = iRemoteVideoPort > 0 ? iRemoteVideoPort : ( iRemotePort + 2 );
+    // video 는 협상된 경우만 전달 — 비협상 멤버에 audio+2 유령 포트를 광고하면 CMP 가
+    //   무효 목적지로 video 를 송신한다 (cspsim 0.2.5 의 비협상 video 미송신 정합과 대칭).
+    int iVideoPort = iRemoteVideoPort > 0 ? iRemoteVideoPort : 0;
     // 멤버 role 조회 (chair/participant) — CMP floor 선점 판정에 사용
     std::string strRole = "participant";
     {

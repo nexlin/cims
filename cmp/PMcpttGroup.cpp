@@ -73,12 +73,25 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     auto itExist = _members.find(sessionId);
     if (itExist != _members.end()) {
         Peer& peer = itExist->second;
-        peer.ip = ip;
-        peer.port = port;
+        // 동일 선언 재수신(주소·nat·guard 불변) — latch/학습 목적지 유지 (JOIN ② 재전송·refresh 가
+        //   활성 latch 를 풀지 않도록). 비교는 선언 원본(decl*) 기준 — peer.ip/port 는 latch 시
+        //   학습 주소로 덮인다 (PRtpRelay::setRemote 와 동일 규칙).
+        bool sameDecl = (peer.declIp == ip && peer.declPort == port && peer.declVideoPort == videoPort &&
+                         peer.natEnabled == nat && peer.sigIp == sigIp);
+        peer.declIp = ip;
+        peer.declPort = port;
+        peer.declVideoPort = videoPort;
         if (floorPort > 0) peer.floorPort = floorPort;
-        peer.videoPort = videoPort;
         if (!role.empty()) { peer.role = role; _roles[sessionId] = role; }
         if (unit) peer.unit = unit;
+        if (sameDecl) {
+            LOG_INFO("PMcpttGroup", "[%s] Member unchanged session=%s — keep latch (total=%lu)", _groupId.c_str(),
+                     sessionId.c_str(), _members.size());
+            return;
+        }
+        peer.ip = ip;
+        peer.port = port;
+        peer.videoPort = videoPort;
         peer.natEnabled = nat;
         peer.sigIp = sigIp;
         peer.natLatched = peer.natLatchedVideo = false;
@@ -88,6 +101,9 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     }
     Peer peer;
     peer.id = sessionId;
+    peer.declIp = ip;
+    peer.declPort = port;
+    peer.declVideoPort = videoPort;
     peer.ip = ip;
     peer.port = port;
     peer.floorPort = floorPort;

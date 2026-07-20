@@ -310,6 +310,9 @@ PTT_GROUP_ADD 로 재수립하고 응답 포트로 캐시를 갱신한다.
 |---|---|---|
 | `group_id` | O | 그룹 식별자 |
 
+그룹 floor 포트와 멤버 유닛 전체를 풀로 반환한다. 이미 없는 그룹이면 `OK` (자연 멱등 —
+RELAY_REMOVE 와 동일 규칙).
+
 ### 7.4 PTT_JOIN — 멤버 참가 (2단 멱등)
 
 | payload 필드 | 필수 | 설명 |
@@ -331,13 +334,18 @@ PTT_GROUP_ADD 로 재수립하고 응답 포트로 캐시를 갱신한다.
 ② SDP answer 수신 후 동일 JOIN 으로 `user_ip`/`user_port` 등 주소 갱신 (멱등 갱신 경로).
 초기 로스터 멤버는 PTT_GROUP_ADD 응답의 `member_ports` 가 ①을 대신하므로 ②만 호출한다.
 
+주소가 갱신된 멤버의 NAT latch 상태는 리셋되어 재-latch 가 허용되며, 선언 주소·NAT
+속성이 직전과 동일한 재요청(재전송, 세션 refresh)은 latch 를 유지한다 (RELAY_MODIFY 와
+동일 규칙). 멤버가 re-INVITE 로 주소를 재협상하면 client 는 ② 를 다시 호출해 전달한다.
+`user_video_port` 는 video 를 협상한 멤버만 싣는다 (비협상 멤버에 유령 포트 광고 금지).
+
 ### 7.5 PTT_LEAVE — 멤버 이탈
 
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `group_id` / `session_id` | O | 대상 그룹 / 멤버 세션 ID |
 
-멤버 전용 포트 유닛을 풀로 반환한다.
+멤버 전용 포트 유닛을 풀로 반환한다. 이미 없는 그룹/멤버면 `OK` (자연 멱등).
 
 ### 7.6 PTT_FLOOR_TIER — 멤버 condition tier 런타임 갱신
 

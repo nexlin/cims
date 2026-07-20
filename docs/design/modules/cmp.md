@@ -82,7 +82,6 @@ class CmpServer : public PModule {
     // 세션/그룹 관리
     std::map<std::string, PRtpRelay*> _sessions;   // VoIP 세션
     std::map<std::string, McpttGroup*> _groups;     // PTT 그룹
-    std::map<std::string, std::string> _logDirs;    // key → log 경로
     std::map<std::string, std::string> _sesidMap;   // key → sesid (CSP 발급 상속)
     std::map<std::string, std::string> _serviceMap; // key → service (volte/mcptt/...)
 
@@ -247,6 +246,7 @@ PMcpttGroup::addMember(). Floor taken 상태면 신규 멤버에게 FLOOR_TAKEN 
 | session_id | O | 멤버 세션 ID |
 
 **동작:** PMcpttGroup::removeMember() + 멤버 포트 유닛 반환. Floor 소유자 퇴장 시 FLOOR_IDLE 브로드캐스트.
+이미 없는 그룹이면 `OK` (자연 멱등).
 
 #### PTT_GROUP_REMOVE — 그룹 해제
 
@@ -254,7 +254,8 @@ PMcpttGroup::addMember(). Floor taken 상태면 신규 멤버에게 FLOOR_TAKEN 
 |----------|------|------|
 | group_id | O | 그룹 식별자 |
 
-**동작:** PRtpMulticast(floor) + 멤버 포트 유닛 전체 반환 → PMcpttGroup delete → 맵 삭제
+**동작:** PRtpMulticast(floor) + 멤버 포트 유닛 전체 반환 → PMcpttGroup delete → 맵 삭제.
+이미 없는 그룹이면 `OK` (자연 멱등).
 
 #### PTT_FLOOR_TIER — 멤버 floor tier 런타임 변경
 
