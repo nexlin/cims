@@ -175,7 +175,7 @@ ts, dir, peer, caller, callee, proto, msg
     "cmd": "RELAY_ADD", "type": "request",
     "sesid": "+82...::csp::ts::1", "service": "volte"
   },
-  "payload": { "session_id": "cmp_sess_N", "caller": "+82...", "callee": "+82...", "...": "..." }
+  "payload": { "session_id": "csp_20260720143012345_1", "caller": "+82...", "callee": "+82...", "...": "..." }
 }
 ```
 CMP는 `hdr.service` 로 `_serviceMap[key]` 채움, `hdr.sesid` 로 `_sesidMap[key]` 채움. 응답 hdr 에도 같은 값 계승.

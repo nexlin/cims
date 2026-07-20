@@ -662,7 +662,7 @@ class CCallInfo {                  // CallMap value (key = Call-ID)
     int  m_iPeerRtpPort;           // 이 leg 의 peer 에게 광고할 CMP relay 포트 (leg 별 전용 —
                                    //   A entry=peer1 포트, B entry=peer0 포트)
     // ── relay descriptor: teardown/MODIFY 가 session_id 로 CMP 세션 직접 지목 ──
-    std::string m_strRelaySessionId;  // cmp_sess_N (전역 유일) ← CmpClient::IssueSessionId
+    std::string m_strRelaySessionId;  // csp_{yyyymmddHHMMSSmmm}_{n} (재시작 포함 전역 유일) ← CmpClient::IssueSessionId
     std::string m_strRelaySesId;      // flow 상관 sesid
     std::string m_strRelayLocalIp;    // CMP relay IP (answer MODIFY/SDP)
     std::string m_strRelayCaller, m_strRelayCallee;
@@ -677,7 +677,7 @@ class CCallInfo {                  // CallMap value (key = Call-ID)
   동반한다. 발신 leg 는 `EventIncomingCall`(RELAY_ADD)에서 동일 판정.
 - **stale 호 정리**: `DeleteTimeout` → `Delete`(bStopPort) → 동일 session_id RemoveSession.
 
-relay bookkeeping 의 키는 **session_id**(`cmp_sess_N`, 전역 유일)다. 멀티 미디어노드(`MediaServer.Endpoints`) 환경에서 같은 포트가 노드별로 유일하지 않으므로, 포트가 아니라 session_id 로 CMP 세션을 지목한다. CSP 비정상 종료 시의 고아 relay 는 CMP sweeper 가 회수(cmp.md §5). (`RtpMap.h` 는 `SOCKET_COUNT_PER_MEDIA` 상수만 잔존.)
+relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재시작 경계 포함 전역 유일 — ms 타임스탬프+순번이라 재기동 후에도 CMP 잔존 고아와 충돌하지 않는다)다. 멀티 미디어노드(`MediaServer.Endpoints`) 환경에서 같은 포트가 노드별로 유일하지 않으므로, 포트가 아니라 session_id 로 CMP 세션을 지목한다. CSP 비정상 종료 시의 고아 relay 는 CMP sweeper 가 회수(cmp.md §5). (`RtpMap.h` 는 `SOCKET_COUNT_PER_MEDIA` 상수만 잔존.)
 
 ### 4.4 DB 스키마 (CDbManager)
 

@@ -79,6 +79,11 @@ public:
      *  caller가 비어있으면 leading "::"로 시작 */
     static std::string IssueSesId( const std::string &strCaller, const char *pszModule = "csp" );
 
+    /** 원격 프로세스(CMP/CMDP)에 상태로 남는 식별자 발행 — 포맷: {issuer}_{yyyymmddHHMMSSmmm}_{index}.
+     *  ms 타임스탬프 + 동일-ms 순번이라 프로세스 재시작 경계에서도 유일 — 재기동 후 첫 발행이
+     *  상대 노드의 잔존 고아 세션과 충돌하지 않는다. 영숫자+밑줄만 사용 (MSRP URI 세션부 안전). */
+    static std::string IssueUniqueId( const char *pszIssuer );
+
     /** Call-ID에 매핑된 sesid 반환. 없으면 신규 발행하여 저장. */
     std::string GetOrIssueSesId( const std::string &strCallId, const std::string &strCaller );
 

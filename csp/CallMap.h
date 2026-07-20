@@ -44,7 +44,7 @@ public:
      *  RTP relay 기능을 사용하지 않으면 -1 이 저장된다. */
     int m_iPeerRtpPort;
 
-    /** CMP relay 세션 식별자(cmp_sess_N, 전역 유일). teardown/MODIFY 가 포트가 아닌 이 키로 CMP 세션을
+    /** CMP relay 세션 식별자(csp_{yyyymmddHHMMSSmmm}_{n}, 재시작 경계 포함 전역 유일). teardown/MODIFY 가 포트가 아닌 이 키로 CMP 세션을
      *  지목한다 — 멀티 미디어노드에서 포트는 노드별 비유일이라 포트키로는 오지목/누수가 발생했다(구 CRtpMap 버그).
      *  PTT(그룹) 호는 group teardown(LeaveGroup)을 쓰므로 비어 있다. */
     std::string m_strRelaySessionId;

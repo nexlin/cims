@@ -112,11 +112,13 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     if (!role.empty()) _roles[sessionId] = role;
     peer.natEnabled = nat;
     peer.sigIp = sigIp;
+    // SSRC 배정 공간 분리 — 한 카운터의 근접 오프셋(+1000/+2000)이면 누적 발행 시
+    //   멤버 ssrc 와 송출 SSRC 범위가 겹치므로 상위 비트로 격리한다.
     peer.ssrc = _nextSsrc++;
     peer.audioSeqOut = 0;
     peer.videoSeqOut = 0;
-    peer.audioSsrcOut = 1000 + _nextSsrc;  // 수신자별 고정 SSRC
-    peer.videoSsrcOut = 2000 + _nextSsrc;
+    peer.audioSsrcOut = 0x10000000 + peer.ssrc;  // 수신자별 고정 audio SSRC
+    peer.videoSsrcOut = 0x20000000 + peer.ssrc;  // 수신자별 고정 video SSRC
     peer.unit = unit;
     _members[sessionId] = peer;
     LOG_INFO("PMcpttGroup", "[%s] Member added session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());

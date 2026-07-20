@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -12,16 +13,23 @@
 #include "Log.h"
 #include "SipMessageLogger.h"
 
+// MSRP 세션 식별자 발행 (재시작 경계 포함 전역 유일 — CMDP 잔존 고아와 충돌 불가).
 std::string CCmdpClient::IssueSessionId() {
-    static std::atomic<unsigned long> s_seq{ 0 };
-    return "cmdp_sess_" + std::to_string( ++s_seq );
+    return CSipMessageLogger::IssueUniqueId( "csp" );
+}
+
+// trans_id 초기값 — 부팅 시각(ms) 하위 비트 시드 (CmpClient::SeedTransId 와 동일 근거).
+static unsigned int SeedTransId() {
+    struct timeval tv;
+    gettimeofday( &tv, NULL );
+    return (unsigned int)( ( (unsigned long long)tv.tv_sec * 1000ULL + tv.tv_usec / 1000 ) & 0x3FFFFFFF ) | 1;
 }
 
 CCmdpClient::CCmdpClient()
     : m_iCmdpPort( 0 ),
       m_iLocalPort( 0 ),
       m_hSocket( -1 ),
-      m_iNextTransId( 1 ),
+      m_iNextTransId( SeedTransId() ),
       m_bKeepAliveRunning( false ),
       m_bRecvRunning( false ),
       m_bEventRunning( false ),

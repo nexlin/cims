@@ -56,8 +56,8 @@ public:
                         const std::string &strCallee = "", const std::string &strSesId = "" );
     bool Alive();
 
-    // VoIP relay 세션 식별자(cmp_sess_N) 발행 — 전역 유일(프로세스 내 증가). 구 CRtpMap::CreatePort 의
-    // iSeq 발행을 이관. teardown/MODIFY 가 포트가 아닌 이 유일 키로 CMP 세션을 지목한다.
+    // VoIP relay 세션 식별자(csp_{yyyymmddHHMMSSmmm}_{n}) 발행 — 재시작 경계 포함 전역 유일.
+    // teardown/MODIFY 가 포트가 아닌 이 유일 키로 CMP 세션을 지목한다.
     static std::string IssueSessionId();
 
     // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).

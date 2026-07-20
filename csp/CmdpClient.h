@@ -39,7 +39,8 @@ public:
         return m_bConnected;
     }
 
-    /** MSRP 세션 식별자(cmdp_sess_N) 발행 — 전역 유일. MSRP URI 세션부로도 쓰인다 */
+    /** MSRP 세션 식별자(csp_{yyyymmddHHMMSSmmm}_{n}) 발행 — 재시작 경계 포함 전역 유일.
+     *  MSRP URI 세션부로도 쓰인다 (영숫자+밑줄) */
     static std::string IssueSessionId();
 
     /** 수신(발신 단말→서버) 세션 할당. 성공 시 cmdp 의 a=path 용 msrp_path 반환 */

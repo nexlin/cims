@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <atomic>
@@ -15,16 +16,23 @@
 #include "SimpleJson.h"
 #include "SipMessageLogger.h"
 
-// VoIP relay 세션 식별자 발행 (전역 유일). 구 CRtpMap::CreatePort 의 static iSeq 이관.
+// VoIP relay 세션 식별자 발행 (재시작 경계 포함 전역 유일 — CMP 잔존 고아와 충돌 불가).
 std::string CCmpClient::IssueSessionId() {
-    static std::atomic<unsigned long> s_seq{ 0 };
-    return "cmp_sess_" + std::to_string( ++s_seq );
+    return CSipMessageLogger::IssueUniqueId( "csp" );
+}
+
+// trans_id 초기값 — 부팅 시각(ms) 하위 비트 시드. 고정 로컬포트 bind 라 재기동 직후
+//   구 프로세스 앞으로 온 지연 응답 datagram 이 새 트랜잭션과 오매칭되는 창을 제거 (TCP ISN 관례).
+static unsigned int SeedTransId() {
+    struct timeval tv;
+    gettimeofday( &tv, NULL );
+    return (unsigned int)( ( (unsigned long long)tv.tv_sec * 1000ULL + tv.tv_usec / 1000 ) & 0x3FFFFFFF ) | 1;
 }
 
 CCmpClient::CCmpClient()
     : m_iCmpPort( 0 ),
       m_hSocket( -1 ),
-      m_iNextTransId( 1 ),
+      m_iNextTransId( SeedTransId() ),
       m_bKeepAliveRunning( false ),
       m_bRecvRunning( false ),
       m_bConnected( false ),

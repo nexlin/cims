@@ -154,6 +154,44 @@ std::string CSipMessageLogger::IssueSesId( const std::string &strCaller, const c
     return r;
 }
 
+std::string CSipMessageLogger::IssueUniqueId( const char *pszIssuer ) {
+    // 포맷: {issuer}_{yyyymmddHHMMSSmmm}_{index} — 원격 프로세스에 상태로 남는 ID 전용.
+    // index: 동일 ms 타임스탬프가 연속될 때 1씩 증가
+    static std::mutex sMtx;
+    static std::string sLastTs;
+    static unsigned int sCounter = 0;
+
+    struct timeval tv;
+    gettimeofday( &tv, NULL );
+    struct tm t;
+    localtime_r( &tv.tv_sec, &t );
+    char tsBuf[32];
+    snprintf( tsBuf, sizeof( tsBuf ), "%04d%02d%02d%02d%02d%02d%03ld", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+              t.tm_hour, t.tm_min, t.tm_sec, (long)( tv.tv_usec / 1000 ) );
+
+    unsigned int counter;
+    std::string ts( tsBuf );
+    {
+        std::lock_guard<std::mutex> lock( sMtx );
+        if ( ts == sLastTs ) {
+            ++sCounter;
+        } else {
+            sLastTs = ts;
+            sCounter = 1;
+        }
+        counter = sCounter;
+    }
+
+    std::string r;
+    r.reserve( ts.size() + 24 );
+    r.append( pszIssuer && pszIssuer[0] ? pszIssuer : "csp" );
+    r.append( "_" );
+    r.append( ts );
+    r.append( "_" );
+    r.append( std::to_string( counter ) );
+    return r;
+}
+
 std::string CSipMessageLogger::GetOrIssueSesId( const std::string &strCallId, const std::string &strCaller ) {
     std::lock_guard<std::mutex> lock( m_mtx );
     if ( !strCallId.empty() ) {

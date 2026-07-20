@@ -186,7 +186,10 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 
 ## 6. RELAY — 1:1 RTP relay
 
-자원 키 `(node, session_id)`. `session_id` 는 client 가 명명한다(CSP 는 SIP Call-ID 사용).
+자원 키 `(node, session_id)`. `session_id` 는 client 가 명명한다 — CMP 는 불투명 문자열로만
+취급한다. CSP 는 `csp_{yyyymmddHHMMSSmmm}_{n}` (발행자 prefix + ms 타임스탬프 + 동일-ms 순번)
+을 발행해 **재시작 경계 포함 전역 유일**을 보장한다 — 재기동 후 첫 발행이 CMP 잔존 고아
+세션과 멱등 충돌하지 않는다.
 
 ### 6.1 RELAY_ADD — relay 생성 (멱등)
 
