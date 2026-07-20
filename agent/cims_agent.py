@@ -2491,12 +2491,22 @@ def _eval_service(svc: str, s: dict) -> dict:
                 if v is True:
                     continue
                 any_down = True
-                fc = _fail_count_read(m)
-                if fc >= rl["max_fails"]:
+                proc_up = _pgrep_module(m) is not None
+                if proc_up and not _in_op_grace(m):
+                    # 좀비 — 프로세스는 살아있는데 readiness 실패(포트 미리슨 등). 재기동
+                    # 유예(op_grace, reconcile 이 start 시 touch)도 지났다 → watchdog 재기동
+                    # 이 못 고치는 상태이므로 절체 사유. (기동 직후 바인딩 대기는 grace 가 흡수.)
                     ok = False
-                    reasons.append(f"exhausted:{m}:{fc}/{rl['max_fails']}")
+                    reasons.append(f"zombie:{m}")
+                elif proc_up:
+                    reasons.append(f"starting:{m}")       # op_grace 이내 — 기동/바인딩 대기
                 else:
-                    reasons.append(f"recovering:{m}:{fc}/{rl['max_fails']}")
+                    fc = _fail_count_read(m)
+                    if fc >= rl["max_fails"]:
+                        ok = False
+                        reasons.append(f"exhausted:{m}:{fc}/{rl['max_fails']}")
+                    else:
+                        reasons.append(f"recovering:{m}:{fc}/{rl['max_fails']}")
             eligible = ok
             if not ok:
                 state = "FAILOVER_REQUIRED"
@@ -2627,6 +2637,7 @@ def ha_reconcile_tick() -> None:
                     continue
                 st["ts"] = now; st["fails"] += 1
                 _fail_bump(m, rl["window_sec"])
+                _touch_op_grace(m)                  # 기동 직후 readiness/바인딩 대기 유예 (좀비 오판 방지)
                 dist = _module_dist_dir(m)
                 if dist:
                     rc, out, err = _run_cims_svc(dist, "start", m)
