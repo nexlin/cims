@@ -404,9 +404,9 @@ CmpEndpoint CCmpClient::SelectEndpointForSession( const std::string &strSessionI
 
 bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort,
                              int &iLocalVideoPort, int &iLocalPortB, int &iLocalVideoPortB,
-                             const std::string &strRecordDir, const std::string &strLogDir,
-                             const std::string &strCaller, const std::string &strCallee, const std::string &strRmtIp,
-                             int iRmtPort, int iRmtVideoPort, const std::string &strSesId, int iRemoteNat,
+                             const std::string &strRecordDir, const std::string &strCaller,
+                             const std::string &strCallee, const std::string &strRmtIp, int iRmtPort,
+                             int iRmtVideoPort, const std::string &strSesId, int iRemoteNat,
                              const std::string &strRemoteSigIp ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_ADD" );
@@ -420,7 +420,6 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
         if ( !strRemoteSigIp.empty() ) req.Set( "remote_sig_ip", strRemoteSigIp );
     }
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
-    if ( !strLogDir.empty() ) req.Set( "log_dir", strLogDir );
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
     if ( !strCallee.empty() ) req.Set( "callee", strCallee );
 
@@ -491,53 +490,19 @@ bool CCmpClient::ModifySession( const std::string &strSessionId, const std::stri
 
     if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
 
-    return true;
-}
-
-bool CCmpClient::UpdateSession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort,
-                                int iRmtVideoPort, int iPeerIdx, const std::string &strCaller,
-                                const std::string &strCallee, std::string &strLocalIp, int &iLocalPort,
-                                const std::string &strSesId ) {
-    SimpleJson::JsonNode req;
-    req.Set( "cmd", "RELAY_MODIFY" );
-    req.Set( "session_id", strSessionId );
-    req.Set( "remote_ip", strRmtIp );
-    req.Set( "remote_port", iRmtPort );
-    req.Set( "remote_video_port", iRmtVideoPort );
-    req.Set( "peer_index", iPeerIdx );
-    if ( !strCaller.empty() ) req.Set( "caller", strCaller );
-    if ( !strCallee.empty() ) req.Set( "callee", strCallee );
-
-    // sesid: 파라미터 > 캐시 > 발행
-    std::string strFinalSesId = strSesId;
-    if ( strFinalSesId.empty() ) strFinalSesId = GetSesIdByKey( strSessionId );
-    if ( strFinalSesId.empty() ) strFinalSesId = CSipMessageLogger::IssueSesId( strCaller, "csp" );
-    req.Set( "sesid", strFinalSesId );
-    {
-        std::lock_guard<std::mutex> lock( m_mutexSesid );
-        m_mapKeyToSesid[strSessionId] = strFinalSesId;
-    }
-
-    std::string strResp;
-
-    CLog::Print( LOG_DEBUG, "CmpClient::UpdateSession: %s", req.ToString().c_str() );
-
-    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
-
+    // 응답 도착 != 성공 (RecvLoop 는 status 를 payload 에 병합만 한다) — ERROR(NOT_FOUND 등)를
+    //   성공으로 오인하면 CMP 원격 주소가 갱신되지 않은 채 호가 진행된다.
     SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
     if ( respNode.type != SimpleJson::JSON_OBJECT ) {
-        CLog::Print( LOG_ERROR, "CmpClient::UpdateSession: Failed to parse JSON response: %s", strResp.c_str() );
+        CLog::Print( LOG_ERROR, "CmpClient::ModifySession: Failed to parse JSON response: %s", strResp.c_str() );
         return false;
     }
-
-    if ( respNode.Has( "status" ) && respNode.Get( "status" ).AsString() == "OK" ) {
-        strLocalIp = respNode.Get( "local_ip" ).AsString();
-        iLocalPort = respNode.Get( "local_port" ).AsInt();
-        // iLocalVideoPort is not returned by UpdateSession in the original code, but it's in AddSession.
-        // Assuming it's not needed here or would be part of the response if the protocol changed.
-        return true;
+    if ( !respNode.Has( "status" ) || respNode.Get( "status" ).AsString() != "OK" ) {
+        CLog::Print( LOG_ERROR, "CmpClient::ModifySession: session=%s peer=%d ERROR: %s", strSessionId.c_str(),
+                     iPeerIdx, strResp.c_str() );
+        return false;
     }
-    return false;
+    return true;
 }
 
 bool CCmpClient::RemoveSession( const std::string &strSessionId, const std::string &strCaller,
@@ -570,9 +535,8 @@ bool CCmpClient::RemoveSession( const std::string &strSessionId, const std::stri
 bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                            std::string &strIp, int &iFloorPort,
                            std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
-                           const std::string &strLogDir, bool bVideoEnabled, int iSessionSeq,
-                           const std::string &strSesId, const std::string &strGroupType,
-                           const std::string &strInitiator ) {
+                           bool bVideoEnabled, int iSessionSeq, const std::string &strSesId,
+                           const std::string &strGroupType, const std::string &strInitiator ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_ADD" );
     req.Set( "group_id", strGroupId );
@@ -590,7 +554,6 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     req.Set( "subid", std::to_string( iSessionSeq > 0 ? iSessionSeq : 1 ) );
     req.Set( "count", (int)vecMembers.size() );
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
-    if ( !strLogDir.empty() ) req.Set( "log_dir", strLogDir );
     if ( bVideoEnabled ) req.Set( "video_enabled", 1 );
     // group_type / initiator — broadcast 그룹 floor 독점(TS 24.380 §10.3) 판정용.
     //   broadcast: 개시자(initiator)만 floor 보유, 타 멤버 REQUEST 는 CMP 가 REJECT.

@@ -349,16 +349,6 @@ std::string PCmpServer::issueSesid(const std::string& caller) {
     return r;
 }
 
-std::string PCmpServer::getOrIssueSesid(const std::string& key, const std::string& caller) {
-    if (!key.empty()) {
-        auto it = _sesidMap.find(key);
-        if (it != _sesidMap.end() && !it->second.empty()) return it->second;
-    }
-    std::string sid = issueSesid(caller);
-    if (!key.empty()) _sesidMap[key] = sid;
-    return sid;
-}
-
 void PCmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     // CORE 명령 — wire 에는 sesid/service 미포함. flow 로그 분류용 sesid 만 내부 발행.
     std::string sesid = issueSesid("");
@@ -482,12 +472,10 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
     // sesid: payload에서 받아 저장. 없으면 CMP 자체 발행 (방어적)
     std::string sesid = payload.GetString("sesid");
     if (sesid.empty()) sesid = issueSesid(caller);
-    _sesidMap[sessionId] = sesid;
 
     // service: payload에서 받아 저장 (CSP 설정 기반), 없으면 "volte" fallback (VoLTE processAdd 특성)
     std::string svc = payload.GetString("service");
     if (svc.empty()) svc = "volte";
-    _serviceMap[sessionId] = svc;
 
     // detail: 명령어별로 CSP 기록과 동일 포맷
     std::string detail;
@@ -508,9 +496,30 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
     int videoPort = 0;
 
     PRtpRelay* rtp = NULL;
+    // _sesidMap/_serviceMap 은 sweeper(timeoutLoop)가 _mutex 하에 erase 하므로 쓰기도 lock 안에서.
     PAutoLock lock(_mutex);
-    
+    _sesidMap[sessionId] = sesid;
+    _serviceMap[sessionId] = svc;
+
     if (_sessions.find(sessionId) == _sessions.end()) {
+        // MODIFY 는 기존 세션 전제 (cmp_media_api.md §6.2) — 소실 세션을 부활시키지 않는다.
+        //   부활 시 포트가 재할당·녹취 미개시인데 client 는 구 포트를 이미 광고 중이라 정합 불가.
+        if (cmdName == "RELAY_MODIFY") {
+            std::string peerStr = ip + ":" + std::to_string(port);
+            logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
+            std::string txIdStr = std::to_string(transId);
+            logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(),
+                    svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp", caller.c_str(), callee.c_str());
+            int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
+                                "NOT_FOUND", "session not found");
+            logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", "Session Not Found",
+                    txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp",
+                    caller.c_str(), callee.c_str());
+            LOG_WARN("PCmpServer", "RELAY_MODIFY session=%s not found", sessionId.c_str());
+            _sesidMap.erase(sessionId);  // 세션 미존재 — 캐시 잔존 방지
+            _serviceMap.erase(sessionId);
+            return;
+        }
         rtp = allocResource(rtpIp, rtpPort, videoPort);
         if (rtp) {
             rtp->setSessionId(sessionId);
@@ -536,8 +545,6 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취 (없으면 녹취 안 함)
         std::string recordDir = payload.GetString("record_dir");
         if (!recordDir.empty() && !rtp->isRecording()) {
-            std::string caller = payload.GetString("caller");
-            std::string callee = payload.GetString("callee");
             rtp->startRecording(recordDir, sessionId, caller, callee, _segmentIntervalSec);
         }
 
@@ -572,7 +579,8 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                 svc.c_str(), sesid.c_str(), "", txSeq, "csp",
                 caller.c_str(), callee.c_str());
         logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
-        LOG_INFO("PCmpServer", "RELAY_ADD session=%s remote=%s:%d -> local=%s:%d", sessionId.c_str(), rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
+        LOG_INFO("PCmpServer", "%s session=%s remote=%s:%d -> local=%s:%d", cmdName.c_str(), sessionId.c_str(),
+                 rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
     } else {
          std::string txIdStr2 = std::to_string(transId);
          int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
@@ -580,7 +588,9 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
          logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", "No Resource",
                  txIdStr2.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp",
                  caller.c_str(), callee.c_str());
-         LOG_WARN("PCmpServer", "RELAY_ADD session=%s FAILED: no available resource", sessionId.c_str());
+         LOG_WARN("PCmpServer", "%s session=%s FAILED: no available resource", cmdName.c_str(), sessionId.c_str());
+         _sesidMap.erase(sessionId);  // 할당 실패 — 캐시 잔존 방지
+         _serviceMap.erase(sessionId);
     }
 }
 
@@ -591,6 +601,9 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
     std::string detail;
     if (!caller.empty() && !callee.empty()) detail = caller + "\xe2\x86\x92" + callee;
     else detail = sessionId;
+
+    // sweeper 와의 _sesidMap/_serviceMap 동시 접근 방지 — map 읽기 전에 lock
+    PAutoLock lock(_mutex);
 
     // sesid: payload > 기존 저장된 값 > 발행
     std::string sesid = payload.GetString("sesid");
@@ -607,8 +620,6 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
         if (it != _serviceMap.end()) svc = it->second;
     }
     if (svc.empty()) svc = "volte";
-
-    PAutoLock lock(_mutex);
 
     std::string peerStr = ip + ":" + std::to_string(port);
     logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
@@ -651,6 +662,8 @@ void PCmpServer::processModify(const SimpleJson::JsonNode& payload, const std::s
 void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string groupId = payload.GetString("group_id");
     std::string membersStr = payload.GetString("members");
+    // sweeper 와의 _sesidMap/_serviceMap/_groupSubId 동시 접근 방지 — map 쓰기 전에 lock
+    PAutoLock lock(_mutex);
     // sesid: payload 수신 값 > 자체 발행 (CSP가 안 보낸 경우 방어)
     std::string sesid = payload.GetString("sesid");
     if (sesid.empty()) sesid = issueSesid("");
@@ -673,7 +686,6 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     std::string sharedIp = _rtpIp;
     int sharedFloorPort = 0;
 
-    PAutoLock lock(_mutex);
     PRtpMulticast* pttSession = NULL;
     PMcpttGroup* group = NULL;
 
@@ -815,6 +827,9 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     std::string role = payload.GetString("role");
     if (role.empty()) role = "participant";
 
+    // sweeper 와의 _sesidMap/_serviceMap 동시 접근 방지 — map 접근 전에 lock
+    PAutoLock lock(_mutex);
+
     // sesid: payload > 캐시 > 신규 발행
     std::string sesid = payload.GetString("sesid");
     if (sesid.empty()) {
@@ -837,7 +852,6 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_JOIN", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
-    PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         // 멤버 전용 포트 유닛 (멱등) — ① user_ip 없는 선할당 호출은 포트만 응답,
@@ -880,6 +894,9 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
     std::string groupId = payload.GetString("group_id");
     std::string sessionId = payload.GetString("session_id");
 
+    // sweeper 와의 _sesidMap/_serviceMap 동시 접근 방지 — map 접근 전에 lock
+    PAutoLock lock(_mutex);
+
     std::string sesid = payload.GetString("sesid");
     if (sesid.empty()) {
         auto it = _sesidMap.find(groupId);
@@ -898,7 +915,6 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_LEAVE", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
-    PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->removeMember(sessionId);
@@ -919,6 +935,9 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
 void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string groupId = payload.GetString("group_id");
 
+    // sweeper 와의 _sesidMap/_serviceMap 동시 접근 방지 — map 접근 전에 lock
+    PAutoLock lock(_mutex);
+
     std::string sesid = payload.GetString("sesid");
     if (sesid.empty()) {
         auto it = _sesidMap.find(groupId);
@@ -937,7 +956,6 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_GROUP_REMOVE", groupId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
-    PAutoLock lock(_mutex);
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         logFlow(groupId, "cmp", "cmp", "INT", "GROUP_END", "", "", svc.c_str(), sesid.c_str());
@@ -979,6 +997,9 @@ void PCmpServer::processSetFloorTier(const SimpleJson::JsonNode& payload, const 
     std::string txIdStr   = std::to_string(transId);
     std::string peerStr   = ip + ":" + std::to_string(port);
 
+    // sweeper 와의 _sesidMap/_serviceMap 동시 접근 방지 — map 접근 전에 lock
+    PAutoLock lock(_mutex);
+
     // sesid/service: payload > 그룹 캐시 > 발행/mcptt (다른 그룹 명령과 동일 규칙)
     std::string sesid = payload.GetString("sesid");
     if (sesid.empty()) {
@@ -998,7 +1019,6 @@ void PCmpServer::processSetFloorTier(const SimpleJson::JsonNode& payload, const 
             (sessionId + " tier=" + tierStr).c_str(), txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
-    PAutoLock lock(_mutex);
     auto it = _groups.find(groupId);
     if (it != _groups.end() && !sessionId.empty()) {
         it->second->setTier(sessionId, ParseFloorTier(tierStr));

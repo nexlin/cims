@@ -281,7 +281,7 @@ INVITE to group@domain
   │
   ├─ 그룹 존재/세션 시간 유효성 확인
   ├─ CMP addGroup → 공유 RTP 포트 + Floor 포트 할당
-  │   (record_dir, log_dir 전달)
+  │   (record_dir 전달)
   ├─ 발신자에게 200 OK (공유 RTP 주소)
   ├─ 매핑: callerId → groupId (m_mapUserCall)
   │

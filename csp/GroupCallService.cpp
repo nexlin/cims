@@ -181,7 +181,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         std::map<std::string, std::pair<int, int>> mapMemberPorts;
         if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedFloorPort, mapMemberPorts,
-                                     strRecordDir, strRecordDir, clsGroup._videoEnabled, iSessionSeq, strGroupSesId,
+                                     strRecordDir, clsGroup._videoEnabled, iSessionSeq, strGroupSesId,
                                      clsGroup._groupType, pszCallerInfo ) ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             // nMemberHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
@@ -190,14 +190,14 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 mapMemberPorts };
         }
     } else if ( !strRecordDir.empty() ) {
-        // 그룹이 이미 CMP에 있지만 log_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지, log_dir만 갱신)
+        // 그룹이 이미 CMP에 있지만 record_dir 전달이 필요 → addgroup 재호출 (기존 그룹 유지 — 멱등 경로,
+        //   미녹취 그룹이면 이 record_dir 로 녹취 개시)
         std::string tmpIp;
         int tmpFPort = 0;
         std::map<std::string, std::pair<int, int>> tmpMemberPorts;
         std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpFPort, tmpMemberPorts, strRecordDir,
-                                strRecordDir, clsGroup._videoEnabled, 0, strGroupSesId, clsGroup._groupType,
-                                pszCallerInfo );
+                                clsGroup._videoEnabled, 0, strGroupSesId, clsGroup._groupType, pszCallerInfo );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -636,7 +636,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             std::map<std::string, std::pair<int, int>> mapMemberPorts;
             int iNewFloorPort = 0;
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iNewFloorPort, mapMemberPorts,
-                                         strRecordDir, strRecordDir, false, 0, GetOrIssueGroupSesId( pszGroupId ),
+                                         strRecordDir, false, 0, GetOrIssueGroupSesId( pszGroupId ),
                                          clsGroup._groupType, strInitiator ) ) {
                 bVideoEnabled = clsGroup._videoEnabled;
                 iSharedFloorPortIM = iNewFloorPort;
@@ -1045,12 +1045,12 @@ void CGroupCallService::CheckGroupIntegrity() {
             std::string ip;
             int floorPort = 0;
             std::map<std::string, std::pair<int, int>> mapMemberPorts;
-            std::string strLogDir;
+            std::string strRecordDir;
             if ( gclsCallDir.IsEnabled() )
-                strLogDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
-                                                          std::to_string( group._dbId ) );
+                strRecordDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
+                                                             std::to_string( group._dbId ) );
             std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
-            if ( !gclsCmpClient.AddGroup( group._id, group._pusers, ip, floorPort, mapMemberPorts, strLogDir, strLogDir,
+            if ( !gclsCmpClient.AddGroup( group._id, group._pusers, ip, floorPort, mapMemberPorts, strRecordDir,
                                           group._videoEnabled, group._sessionSeq, strGroupSesId, group._groupType,
                                           "" ) )
                 return;

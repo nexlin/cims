@@ -100,6 +100,10 @@ CSP 는 판정 결과를 자원할당 명령에 leg 단위로 전달한다
 nat 필드 생략 = 0 (no-NAT). CMP 에는 NAT 전역 설정이 없다 — **latch 자격은 오로지
 제어평면이 leg 단위로 부여**하며, no-NAT leg 는 latch 코드 경로 자체가 비활성이다.
 
+판정·전달은 최초 협상뿐 아니라 재협상에도 적용된다 — CSP 는 re-INVITE 수신 시 재협상
+leg(1:1 은 수신 A leg=peer0 / 발신 B leg=peer1)의 새 SDP 주소로 NAT 를 재판정해
+`RELAY_MODIFY` 를 송신한다. 망 전환 등으로 주소가 바뀐 leg 는 이 경로로 재-latch 된다.
+
 ## 5. 목적지 latch (CMP)
 
 nat=true leg 의 전용 포트에서:
@@ -111,7 +115,8 @@ nat=true leg 의 전용 포트에서:
    — NAT rebind(매핑 변경) 추종과 제3자 주입 차단을 겸한다.
 3. RTCP 목적지는 latch 소스 IP + RTCP 포트 관측으로 교정한다 (관측 전에는 선언 포트+1 추정).
 4. `RELAY_MODIFY`/`PTT_JOIN` 으로 leg 주소가 갱신되면(re-INVITE) latch 상태를 리셋하고
-   재-latch 를 허용한다.
+   재-latch 를 허용한다. 선언 주소·nat·guard 가 직전과 동일한 재요청(세션 refresh 성
+   re-INVITE, 재전송)은 latch 를 유지한다.
 5. latch 전까지 송신 목적지는 선언 주소다 (사설이면 도달하지 않지만 무해).
 
 관측: latch 발생 시 INFO 로그. `STATS` detail 에 nat leg 의 `learned_ip/learned_port`

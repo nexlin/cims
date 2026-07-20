@@ -83,6 +83,9 @@ private:
         std::string ip;                 // 상대 주소 (SDP 선언 → latch 시 학습 주소로 갱신)
         unsigned int port = 0;
         unsigned int videoPort = 0;
+        std::string declIp;             // 마지막 SDP 선언 주소 원본 (latch 와 무관하게 보존 —
+        unsigned int declPort = 0;      //   setRemote 재수신 시 선언 불변 여부 비교용)
+        unsigned int declVideoPort = 0;
         struct sockaddr_in addrRtp{};   // 송신 목적지
         struct sockaddr_in addrRtcp{};
         struct sockaddr_in addrVideoRtp{};

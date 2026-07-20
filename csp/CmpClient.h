@@ -46,16 +46,12 @@ public:
     //   (ue_nat_traversal.md §4-5. sig ip 빈 값 = IP guard 없이 latch).
     bool AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
                      int &iLocalPortB, int &iLocalVideoPortB, const std::string &strRecordDir = "",
-                     const std::string &strLogDir = "", const std::string &strCaller = "",
-                     const std::string &strCallee = "", const std::string &strRmtIp = "", int iRmtPort = 0,
-                     int iRmtVideoPort = 0, const std::string &strSesId = "", int iRemoteNat = 0,
-                     const std::string &strRemoteSigIp = "" );
+                     const std::string &strCaller = "", const std::string &strCallee = "",
+                     const std::string &strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
+                     const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "" );
     bool ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                         int iPeerIdx, const std::string &strCaller = "", const std::string &strCallee = "",
                         const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "" );
-    bool UpdateSession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
-                        int iPeerIdx, const std::string &strCaller, const std::string &strCallee,
-                        std::string &strLocalIp, int &iLocalPort, const std::string &strSesId = "" );
     bool RemoveSession( const std::string &strSessionId, const std::string &strCaller = "",
                         const std::string &strCallee = "", const std::string &strSesId = "" );
     bool Alive();
@@ -67,8 +63,8 @@ public:
     // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                    std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
-                   const std::string &strRecordDir = "", const std::string &strLogDir = "", bool bVideoEnabled = false,
-                   int iSessionSeq = 0, const std::string &strSesId = "", const std::string &strGroupType = "",
+                   const std::string &strRecordDir = "", bool bVideoEnabled = false, int iSessionSeq = 0,
+                   const std::string &strSesId = "", const std::string &strGroupType = "",
                    const std::string &strInitiator = "" );
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "" );

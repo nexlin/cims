@@ -707,10 +707,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     std::string strRelaySessionId, strRelaySesId, strRelayLocalIp;
     if ( gclsSetup.m_bUseRtpRelay ) {
         // 녹취 경로: Recording 활성화 시 세션 디렉터리 사용
-        std::string strRecordDir, strLogDir;
+        std::string strRecordDir;
         if ( gclsSetup.m_bRecordEnable && gclsCallDir.IsEnabled() ) {
             strRecordDir = gclsCallDir.GetVoipDir( pszCallId, pszFrom, pszTo );
-            strLogDir = strRecordDir;
         }
         // 발신측 RTP 주소를 RELAY_ADD에 포함 (생성 + peer[0] 한번에)
         int iAudioPort = pclsRtp->GetAudioPort();
@@ -748,9 +747,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         std::string strAllocatedIp;
         int iLocalPort = 0, iLocalVideoPort = 0, iLocalPortB = 0, iLocalVideoPortB = 0;
         if ( !gclsCmpClient.AddSession( strRelaySessionId, strAllocatedIp, iLocalPort, iLocalVideoPort, iLocalPortB,
-                                        iLocalVideoPortB, strRecordDir, strLogDir, pszFrom ? pszFrom : "",
-                                        pszTo ? pszTo : "", pclsRtp->m_strIp, iAudioPort, iVideoPort, strRelaySesId,
-                                        iCallerNat, strCallerGuardIp ) ) {
+                                        iLocalVideoPortB, strRecordDir, pszFrom ? pszFrom : "", pszTo ? pszTo : "",
+                                        pclsRtp->m_strIp, iAudioPort, iVideoPort, strRelaySesId, iCallerNat,
+                                        strCallerGuardIp ) ) {
             return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
         }
         // leg 별 전용 포트: A(발신) leg SDP = iLocalPort(peer0), B(착신) leg SDP = iLocalPortB(peer1)
@@ -877,8 +876,7 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
         }
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
             std::string strAllocatedIp = clsCallInfo.m_strRelayLocalIp;  // 구 gclsRtpMap.GetLocalIp 대체
-            // 착신(callee) RTP 주소를 CMP 에 MODIFY (peer_index=1). 구 RtpMap.SetIpPort→CRtpInfo→UpdateSession
-            //   경로를 session_id 직접 호출로 대체 (포트키 제거).
+            // 착신(callee) RTP 주소를 CMP 에 MODIFY (peer_index=1) — session_id 로 직접 지목.
             if ( !clsCallInfo.m_strRelaySessionId.empty() ) {
                 int iAudioPort = pclsRtp->GetAudioPort();
                 if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
@@ -1013,9 +1011,45 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
 void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) {
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // 재협상 leg 의 새 원격 RTP 주소를 CMP 에 MODIFY — 수신(A) leg=peer0, 발신(B) leg=peer1.
+        //   미갱신 시 CMP 는 초기 ADD 주소로 계속 송신: no-NAT leg 의 포트 변경은 rtp_src_drop
+        //   전량 드롭, NAT leg 의 망 전환(re-INVITE)은 구 sig_ip guard 에 막혀 재-latch 불가였다.
+        //   반드시 아래 SetIpPort(relay 주소 덮어쓰기) 전에 UE 선언 주소를 읽어 보낸다.
+        if ( pclsRemoteRtp && !clsCallInfo.m_strRelaySessionId.empty() ) {
+            int iAudioPort = pclsRemoteRtp->GetAudioPort();
+            if ( iAudioPort <= 0 && pclsRemoteRtp->m_iPort > 0 ) iAudioPort = pclsRemoteRtp->m_iPort;
+            if ( iAudioPort > 0 ) {
+                int iVideoPort = ( pclsRemoteRtp->GetMediaCount() >= 2 ) ? pclsRemoteRtp->GetVideoPort() : 0;
+                int iPeerIdx = clsCallInfo.m_bRecv ? 0 : 1;
+                const std::string &strUserId =
+                    clsCallInfo.m_bRecv ? clsCallInfo.m_strRelayCaller : clsCallInfo.m_strRelayCallee;
+                // 재협상 leg NAT 판정 — re-INVITE SDP IP vs 등록 바인딩(received/rport latch)
+                int iLegNat = 0;
+                std::string strLegGuardIp;
+                {
+                    ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strUserId, "volte" );
+                    std::string strSigIp;
+                    CUserInfo clsLegUserInfo;
+                    if ( !strUserId.empty() && gclsUserMap.Select( strUserId.c_str(), clsLegUserInfo ) )
+                        strSigIp = clsLegUserInfo.m_strIp;
+                    if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRemoteRtp->m_strIp, strSigIp, strLegGuardIp ) ) {
+                        iLegNat = 1;
+                        CLog::Print( LOG_INFO, "EventReInvite: peer%d leg NAT (svc=%s sdp=%s sig=%s guard=%s)",
+                                     iPeerIdx, clsNatSvc.name.c_str(), pclsRemoteRtp->m_strIp.c_str(),
+                                     strSigIp.c_str(), strLegGuardIp.c_str() );
+                    }
+                }
+                gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRemoteRtp->m_strIp, iAudioPort,
+                                             iVideoPort, iPeerIdx, clsCallInfo.m_strRelayCaller,
+                                             clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iLegNat,
+                                             strLegGuardIp );
+            }
+        }
         if ( pclsRemoteRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
-            pclsRemoteRtp->SetIpPort( CspAddressing::GetLocalRtpAddress().c_str(), clsCallInfo.m_iPeerRtpPort,
-                                      SOCKET_COUNT_PER_MEDIA );
+            // 재협상 SDP 에도 CMP relay IP 를 광고 (멀티 미디어노드에서 CSP 로컬 주소 오광고 방지)
+            std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
+                                                                          : clsCallInfo.m_strRelayLocalIp;
+            pclsRemoteRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendReInvite( clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp );
     }
@@ -1025,8 +1059,9 @@ void CModuleDispatcher::EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp 
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
-            pclsRtp->SetIpPort( CspAddressing::GetLocalRtpAddress().c_str(), clsCallInfo.m_iPeerRtpPort,
-                                SOCKET_COUNT_PER_MEDIA );
+            std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
+                                                                          : clsCallInfo.m_strRelayLocalIp;
+            pclsRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendPrack( clsCallInfo.m_strPeerCallId.c_str(), pclsRtp );
     }
@@ -1114,7 +1149,7 @@ bool CModuleDispatcher::EventBlindTransfer( const char *pszCallId, const char *p
         int iLocalPort = 0, iLocalVideoPort = 0, iLocalPortB = 0, iLocalVideoPortB = 0;
         int iVideoPort = ( clsRtp.GetMediaCount() >= 2 ) ? clsRtp.GetVideoPort() : 0;
         if ( !gclsCmpClient.AddSession( strRelaySessionId, strRelayLocalIp, iLocalPort, iLocalVideoPort, iLocalPortB,
-                                        iLocalVideoPortB, "", "", "", pszReferToId ? pszReferToId : "", clsRtp.m_strIp,
+                                        iLocalVideoPortB, "", "", pszReferToId ? pszReferToId : "", clsRtp.m_strIp,
                                         clsRtp.GetAudioPort(), iVideoPort, strRelaySesId ) ) {
             return false;
         }

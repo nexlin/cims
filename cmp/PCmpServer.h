@@ -87,8 +87,6 @@ private:
 
     // sesid 발행 유틸: {caller}::cmp::{us_ts}::{counter}
     static std::string issueSesid(const std::string& caller);
-    // key에 매핑된 sesid 조회, 없으면 발행하여 저장
-    std::string getOrIssueSesid(const std::string& key, const std::string& caller);
 
     // CMP flow 로그 (통합 디렉터리: {ServiceLogDir}/YYYY/MM/DD/HH/cmp_01_{service}.flow.jsonl)
     std::string _serviceLogDir;

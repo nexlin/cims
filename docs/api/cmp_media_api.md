@@ -184,14 +184,13 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `session_id` | O | 세션 식별자 (client 명명) |
-| `remote_ip` / `remote_port` | O | 상대방 RTP 주소 (SDP 선언) |
+| `remote_ip` / `remote_port` | O | 상대방 RTP 주소 (SDP 선언). IP `0.0.0.0` 또는 port `0` = 해당 peer 주소 미확정 — CMP 는 송신 목적지를 설정하지 않고, 이후 RELAY_MODIFY 로 확정한다 |
 | `remote_video_port` | - | 상대방 Video RTP 포트 |
 | `peer_index` | - | 피어 인덱스 (0=발신 A / 1=착신 B) |
 | `remote_nat` | - | 1 이면 해당 peer 가 NAT 뒤 — 그 peer 전용 포트에 목적지 latch 허용 (생략=0). [ue_nat_traversal.md §5](../design/features/ue_nat_traversal.md) |
 | `remote_sig_ip` | - | 해당 peer 의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
-| `caller` / `callee` | - | 발/착신자 (flow 로깅용) |
+| `caller` / `callee` | - | 발/착신자 (flow 로깅·녹취 메타용) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
-| `log_dir` | - | CMP flow 로그 경로 |
 
 같은 `(node, session_id)` 재요청 시 재할당 없이 기존 포트를 반환한다 (재전송 안전).
 
@@ -241,8 +240,11 @@ relay 세션은 **peer 별 전용 포트 블록**(audio RTP/RTCP + video RTP/RTC
 ### 6.2 RELAY_MODIFY — 피어 주소 재협상
 
 payload 는 RELAY_ADD 와 동일. 기존 세션의 원격 피어 주소만 갱신하고 동일 로컬 포트를
-응답한다 (내부적으로 RELAY_ADD 와 같은 멱등 경로). 주소가 갱신된 peer 의 NAT latch
-상태는 리셋되어 재-latch 가 허용된다.
+응답한다 (내부적으로 RELAY_ADD 와 같은 멱등 경로). 없는 세션이면 `NOT_FOUND` 에러 —
+소실 세션을 부활시키지 않는다 (부활 시 포트가 재할당되어 client 가 이미 광고한 포트와
+어긋난다). 주소가 갱신된 peer 의 NAT latch 상태는 리셋되어 재-latch 가 허용되며,
+선언 주소·NAT 속성이 직전과 동일한 재요청(세션 refresh 성 re-INVITE, 재전송)은
+latch 를 유지한다.
 
 ### 6.3 RELAY_REMOVE — relay 해제
 
@@ -269,7 +271,7 @@ member 키 `(node, session_id)`.
 | `video_enabled` | - | 1 이면 video 포트 활성 |
 | `group_type` | - | `prearranged`/`chat`/`broadcast` (broadcast floor 독점 정책 — TS 24.380 §10.3) |
 | `initiator_id` | - | broadcast 개시자 sessionId |
-| `record_dir` / `log_dir` | - | 녹취 / flow 로그 경로 |
+| `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
 응답 payload: `ip`, `floor_port`(그룹 공유 floor control 포트), `member_ports`
 (멤버별 전용 RTP 포트 맵 — members 로 전달된 초기 로스터에 대해 할당).

@@ -157,14 +157,13 @@ wire 규격 정본은 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) �
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
 | session_id | O | 세션 식별자 |
-| remote_ip | O | 상대방 RTP IP (SDP 선언) |
+| remote_ip | O | 상대방 RTP IP (SDP 선언). `0.0.0.0`(또는 port 0) = 주소 미확정 — 목적지 미설정, 이후 MODIFY 로 확정 |
 | remote_port | O | 상대방 RTP 포트 |
 | remote_video_port | - | 상대방 Video RTP 포트 |
 | peer_index | - | 피어 인덱스 (0=발신 A / 1=착신 B) |
 | remote_nat | - | 1 이면 해당 peer 전용 포트에 NAT 목적지 latch 허용 ([ue_nat_traversal.md](../features/ue_nat_traversal.md)) |
 | remote_sig_ip | - | 해당 peer 의 SIP 시그널링 실소스 IP — latch IP guard |
 | record_dir | - | 녹취 디렉토리 경로 |
-| log_dir | - | CMP flow 로그 경로 |
 
 **응답:** `local_ip`, `local_port`/`local_video_port` (peer0 전용),
 `local_port_b`/`local_video_port_b` (peer1 전용). 각 포트의 RTCP 는 +1.
@@ -173,7 +172,7 @@ wire 규격 정본은 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) �
 1. `_freeResources`에서 PRtpRelay(8포트 블록) 할당
 2. 원격 피어 주소·NAT 정책 설정 (`setRemote`)
 3. record_dir 있으면 녹취 시작
-4. log_dir 있으면 `_logDirs`에 저장, SESSION_START 로그
+4. SESSION_START flow 로그 기록 (통합 ServiceLogDir)
 
 #### RELAY_REMOVE — VoIP 세션 해제
 
@@ -185,7 +184,8 @@ wire 규격 정본은 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) �
 
 #### RELAY_MODIFY — VoIP 세션 수정
 
-processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
+processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세션이 없으면 `NOT_FOUND`
+에러 (소실 세션을 부활시키지 않는다).
 
 #### PTT_GROUP_ADD — PTT 그룹 생성
 
@@ -196,7 +196,6 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 | members | - | "sid1:prio1:role,sid2:prio2:role" CSV (role=chair/participant) |
 | subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
-| log_dir | - | CMP flow 로그 경로 |
 | video_enabled | - | 1 이면 video 포트 활성 |
 | group_type | - | `prearranged`/`chat`/`broadcast` (broadcast floor 정책용) |
 | initiator_id | - | broadcast 개시자 sessionId(=userId) — floor 독점 판정 |
@@ -361,7 +360,8 @@ leg 전용 포트가 신원을 확정하므로 latch 는 신원 판정이 아니
    그 leg 의 송신 목적지로 latch + SSRC 고정.
 2. 이후 소스 갱신(재-latch)은 **동일 SSRC** 일 때만 — NAT rebind 추종 + 제3자 주입 차단.
 3. RTCP 목적지는 latch 된 IP 의 관측 RTCP 소스로 교정(관측 전에는 선언 포트+1 추정).
-4. 주소 갱신(re-INVITE, `setRemote`) 시 latch 리셋 → 재-latch 허용.
+4. 주소 갱신(re-INVITE, `setRemote`) 시 latch 리셋 → 재-latch 허용. 선언이 직전과
+   동일한 재요청(refresh/재전송)은 latch 유지.
 5. latch 발생 INFO 로그 + `STATS detail.nat` 에 학습 주소 노출.
 
 **녹취:**

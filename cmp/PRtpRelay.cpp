@@ -55,6 +55,8 @@ void PRtpRelay::reset() {
         Leg& leg = _legs[i];
         leg.ip.clear();
         leg.port = leg.videoPort = 0;
+        leg.declIp.clear();
+        leg.declPort = leg.declVideoPort = 0;
         leg.active = false;
         memset(&leg.addrRtp, 0, sizeof(leg.addrRtp));
         memset(&leg.addrRtcp, 0, sizeof(leg.addrRtcp));
@@ -80,6 +82,13 @@ static void _makeAddr(struct sockaddr_in& addr, const std::string& ip, int port)
 
 bool PRtpRelay::setRemote(const std::string& ip, unsigned int port, unsigned int videoPort, int peerIdx,
                           bool nat, const std::string& sigIp) {
+    // 미확정 주소(빈 IP / 0.0.0.0 / port 0) — 목적지 미설정 유지 (0.0.0.0 sendto = 자기 자신 오송신 방지).
+    //   해당 peer 주소는 이후 RELAY_MODIFY 로 확정된다 (cmp_media_api.md §6.1).
+    if (ip.empty() || ip == "0.0.0.0" || port == 0) {
+        LOG_INFO("PRtpRelay", "setRemote peer[%d] skip — undetermined remote (%s:%u) session=%s",
+                 peerIdx, ip.c_str(), port, _sessionId.c_str());
+        return false;
+    }
     PAutoLock lock(_mutex);
 
     int idx = peerIdx;
@@ -93,6 +102,16 @@ bool PRtpRelay::setRemote(const std::string& ip, unsigned int port, unsigned int
     if (idx < 0 || idx > 1) return false;
 
     Leg& leg = _legs[idx];
+    // 동일 선언 재수신(주소·nat·guard 불변) — latch/학습 목적지 유지. refresh 성 re-INVITE 나
+    //   MODIFY 재전송이 활성 latch 를 풀어 선언(사설) 주소로 역행하는 것을 방지한다.
+    //   비교는 선언 원본(decl*) 기준 — leg.ip/port 는 latch 시 학습 주소로 덮인다.
+    if (leg.active && leg.declIp == ip && leg.declPort == port && leg.declVideoPort == videoPort &&
+        leg.nat == nat && leg.sigIp == sigIp) {
+        LOG_INFO("PRtpRelay", "setRemote peer[%d]=%s:%d unchanged — keep latch session=%s",
+                 idx, ip.c_str(), port, _sessionId.c_str());
+        return true;
+    }
+    leg.declIp = ip; leg.declPort = port; leg.declVideoPort = videoPort;
     leg.ip = ip; leg.port = port; leg.videoPort = videoPort; leg.active = true;
     _makeAddr(leg.addrRtp, ip, port);
     _makeAddr(leg.addrRtcp, ip, port + 1);
