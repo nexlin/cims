@@ -15,21 +15,24 @@
 
 ```
 {ServiceLogDir}/{YYYY}/{MM}/{DD}/{HH}/
-    # CSP: open-per-write + 5분 버킷 (mm5 = (분/5)*5 = 00/05/.../55)
+    # 전 노드 공통: open-per-write + 5분 버킷 (mm5 = (분/5)*5 = 00/05/.../55)
     csp_01.flow.{mm5}.jsonl         ← CSP flow 이벤트 (SIP/JSON/CSC, compact, body 없음)
     csp_01_sip.msg.{mm5}.jsonl      ← CSP-UE SIP 원문
     csp_01_cmp.msg.{mm5}.jsonl      ← CSP→CMP JSON 원문
     csp_01_csc.msg.{mm5}.jsonl      ← CSP←CSC notify 원문
-    # CMP/CSC: 시간당 단일 파일 (핸들 유지)
-    cmp_01.flow.jsonl           ← CMP flow (JSON/INT/MCPTT/DTMF/RTCP)
-    cmp_01_csp.msg.jsonl        ← CMP↔CSP JSON 원문
-    csc_01.flow.jsonl           ← CSC flow (MCPTT/console/system)
-    csc_01_csp.msg.jsonl        ← CSC→CSP notify 원문
-    csc_01_ue.msg.jsonl         ← UE↔CSC HTTPS(IdMS/GMS/CMS) 원문
+    cmp_01.flow.{mm5}.jsonl         ← CMP flow (JSON/INT/MCPTT/DTMF/RTCP)
+    cmp_01_csp.msg.{mm5}.jsonl      ← CMP↔CSP JSON 원문
+    csc_01.flow.{mm5}.jsonl         ← CSC flow (MCPTT/console/system)
+    csc_01_csp.msg.{mm5}.jsonl      ← CSC→CSP notify 원문
+    csc_01_ue.msg.{mm5}.jsonl       ← UE↔CSC HTTPS(IdMS/GMS/CMS) 원문
 ```
 
-`{node}.flow[.{mm5}].jsonl` — 경량 flow 이벤트 인덱스. `{node}_{iface}.msg[.{mm5}].jsonl` — 원문 메시지.
+`{node}.flow.{mm5}.jsonl` — 경량 flow 이벤트 인덱스. `{node}_{iface}.msg.{mm5}.jsonl` — 원문 메시지.
 Flow 엔트리의 `seq`+`iface`로 원문을 역조회한다(`seq`=msg 파일 줄번호).
+
+**HEARTBEAT 샘플링**: CSP↔CMP HEARTBEAT(3초 주기)는 양측 모두 msg/flow 에 **100회당
+1회**(≈5분당 1건)만 기록한다 — 생존 신호가 로그를 지배(하루 ~5.7만 줄)하는 것을 방지.
+요청을 기록한 교환의 응답만 함께 기록해 쌍 정합을 유지한다. 나머지 명령은 전량 기록.
 
 **원문 역조회 = seq 빠른 경로 + sesid 검증/내용 폴백** (`flow_logger.py _lookup_body_by_seq`):
 리더는 seq번째 줄을 읽되 **그 줄의 `sesid` 가 flow 엔트리의 `sesid` 와 일치할 때만 신뢰**한다.

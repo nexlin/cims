@@ -169,12 +169,22 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
         return;
     }
 
-    // 원문 기록 (수신)
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string ts = getTimestamp();
-    _lastRxSeq = writeMsgLine(ts.c_str(), "RX", peerStr.c_str(), "JSON", strPacket.c_str());
 
     SimpleJson::JsonNode hdr = root.Get("hdr");
+    std::string cmdUpper = hdr.GetString("cmd");
+    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
+
+    // HEARTBEAT 로그 샘플링 — 3초 주기 생존 신호가 msg/flow 로그를 지배(하루 ~5.7만 줄)하므로
+    //   N 회당 1회만 기록한다 (요청/응답 msg 원문 + flow 라인 동일 적용, 나머지 명령은 전량 기록).
+    //   단일 control 스레드 전제의 per-packet 플래그 — sendResponse(TX 원문)도 이 플래그를 본다.
+    _hbLogSuppress = (cmdUpper == "HEARTBEAT") && ((_hbCount++ % kHbLogSampleN) != 0);
+
+    // 원문 기록 (수신)
+    if (!_hbLogSuppress)
+        _lastRxSeq = writeMsgLine(ts.c_str(), "RX", peerStr.c_str(), "JSON", strPacket.c_str());
+
     if (hdr.type != SimpleJson::JSON_OBJECT) {
         LOG_ERROR("PCmpServer", "Missing hdr from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
         sendErr(ip, port, (int)root.GetInt("trans_id", 0), "", "", "",
@@ -185,8 +195,6 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     int ver = (int)hdr.GetInt("ver", 0);
     int transId = (int)hdr.GetInt("trans_id", 0);
     std::string type = hdr.GetString("type");
-    std::string cmdUpper = hdr.GetString("cmd");
-    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
 
     if (ver != 2) {
         sendErr(ip, port, transId, cmdUpper, hdr.GetString("sesid"), hdr.GetString("service"),
@@ -299,11 +307,13 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
 
 int PCmpServer::sendResponse(const std::string& ip, int port, const std::string& msg,
                               const char* caller, const char* callee) {
-    // 원문 기록 (송신)
+    // 원문 기록 (송신) — 샘플링 제외된 HEARTBEAT 응답은 미기록 (handlePacket 의 per-packet 플래그)
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string ts = getTimestamp();
-    int txSeq = writeMsgLine(ts.c_str(), "TX", peerStr.c_str(), "JSON", msg.c_str(),
-                              caller, callee);
+    int txSeq = 0;
+    if (!_hbLogSuppress)
+        txSeq = writeMsgLine(ts.c_str(), "TX", peerStr.c_str(), "JSON", msg.c_str(),
+                             caller, callee);
     LOG_DEBUG("PCmpServer", "Sending %lu bytes to %s:%d", msg.length(), ip.c_str(), port);
     if (_udpFd != -1) {
         struct sockaddr_in cliaddr;
@@ -355,9 +365,9 @@ void PCmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::st
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string txIdStr = std::to_string(transId);
 
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
-    logFlow("heartbeat", "csp", "cmp", "JSON", "HEARTBEAT", "",
-            txIdStr.c_str(), "system", sesid.c_str(), "", _lastRxSeq, "csp");
+    if (!_hbLogSuppress)
+        logFlow("heartbeat", "csp", "cmp", "JSON", "HEARTBEAT", "",
+                txIdStr.c_str(), "system", sesid.c_str(), "", _lastRxSeq, "csp");
 
     SimpleJson::JsonNode body;
     {
@@ -365,9 +375,9 @@ void PCmpServer::processAlive(const SimpleJson::JsonNode& payload, const std::st
         body.Set("resource", buildResourceSummary());
     }
     int txSeq = sendOk(ip, port, transId, "HEARTBEAT", "", "", &body);
-    logFlow("heartbeat", "cmp", "csp", "JSON", "OK", "",
-            txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
-    logBody("TX", peerStr.c_str(), "JSON", body.ToString().c_str());
+    if (!_hbLogSuppress)
+        logFlow("heartbeat", "cmp", "csp", "JSON", "OK", "",
+                txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
 }
 
 void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
@@ -375,7 +385,6 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     std::string sesid = issueSesid("");
     std::string peerStr = ip + ":" + std::to_string(port);
     std::string txIdStr = std::to_string(transId);
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     logFlow("stats", "csp", "cmp", "JSON", "STATS", "",
             txIdStr.c_str(), "system", sesid.c_str(), "", _lastRxSeq, "csp");
 
@@ -463,7 +472,6 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     int txSeq = sendOk(ip, port, transId, "STATS", "", "", &body);
     logFlow("stats", "cmp", "csp", "JSON", "OK", "",
             txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
-    logBody("TX", peerStr.c_str(), "JSON", body.ToString().c_str());
     LOG_INFO("PCmpServer", "STATS: sessions=%d groups=%d ports_free=%d/%d", (int)_sessions.size(),
              (int)_groups.size(), (int)_freeResources.size(), _rtpPoolSize);
 }
@@ -519,7 +527,6 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         //   부활 시 포트가 재할당·녹취 미개시인데 client 는 구 포트를 이미 광고 중이라 정합 불가.
         if (cmdName == "RELAY_MODIFY") {
             std::string peerStr = ip + ":" + std::to_string(port);
-            logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
             std::string txIdStr = std::to_string(transId);
             logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(),
                     svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp", caller.c_str(), callee.c_str());
@@ -563,7 +570,6 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
 
         // CMP flow + body 로그 (sesid 적용)
         std::string peerStr = ip + ":" + std::to_string(port);
-        logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
         std::string txIdStr = std::to_string(transId);
         logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(),
                 detail.c_str(), txIdStr.c_str(),
@@ -591,7 +597,6 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                 txIdStr.c_str(),
                 svc.c_str(), sesid.c_str(), "", txSeq, "csp",
                 caller.c_str(), callee.c_str());
-        logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
         LOG_INFO("PCmpServer", "%s session=%s remote=%s:%d -> local=%s:%d", cmdName.c_str(), sessionId.c_str(),
                  rmtIp.c_str(), rmtPort, rtpIp.c_str(), rtpPort);
     } else {
@@ -635,7 +640,6 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
     if (svc.empty()) svc = "volte";
 
     std::string peerStr = ip + ":" + std::to_string(port);
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
     logFlow(sessionId, "csp", "cmp", "JSON", "RELAY_REMOVE",
             detail.c_str(), txIdStr.c_str(),
@@ -660,7 +664,6 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
     logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), "", txSeq, "csp",
             caller.c_str(), callee.c_str());
-    logBody("TX", peerStr.c_str(), "JSON", "OK");
 
     // 세션 종료 후 캐시 정리
     _sesidMap.erase(sessionId);
@@ -691,7 +694,6 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     std::string cmdName = payload.GetString("cmd");
     if (cmdName.empty()) cmdName = "PTT_GROUP_ADD";
     std::string peerStr = ip + ":" + std::to_string(port);
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", cmdName.c_str(), groupId.c_str(), txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), subid.c_str(), _lastRxSeq, "csp");
@@ -851,7 +853,6 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
 
         int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), subid.c_str(), txSeq, "csp");
-        logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
     } else {
          int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
                              "NO_RESOURCE", "ptt pool exhausted");
@@ -890,7 +891,6 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     _serviceMap[groupId] = svc;
 
     std::string peerStr = ip + ":" + std::to_string(port);
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_JOIN", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
@@ -922,7 +922,6 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
 
         int txSeq = sendOk(ip, port, transId, "PTT_JOIN", sesid, svc, &respBody);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        logBody("TX", peerStr.c_str(), "JSON", respBody.ToString().c_str());
         LOG_INFO("PCmpServer", "PTT_JOIN group=%s session=%s %s:%d local=%d", groupId.c_str(), sessionId.c_str(), userIp.c_str(), userPort, mu->getAudioPort());
     } else {
         int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc,
@@ -953,7 +952,6 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
     if (svc.empty()) svc = "mcptt";
 
     std::string peerStr = ip + ":" + std::to_string(port);
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_LEAVE", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
@@ -964,7 +962,6 @@ void PCmpServer::processLeaveGroup(const SimpleJson::JsonNode& payload, const st
 
         int txSeq = sendOk(ip, port, transId, "PTT_LEAVE", sesid, svc);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        logBody("TX", peerStr.c_str(), "JSON", "OK");
         LOG_INFO("PCmpServer", "PTT_LEAVE group=%s session=%s", groupId.c_str(), sessionId.c_str());
     } else {
         // 자연 멱등 (§3) — 이미 없는 그룹이면 목표 상태(미참가)로 수렴된 것. 성공 응답 유실 후
@@ -995,7 +992,6 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
     if (svc.empty()) svc = "mcptt";
 
     std::string peerStr = ip + ":" + std::to_string(port);
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_GROUP_REMOVE", groupId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
@@ -1012,7 +1008,6 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
 
         int txSeq = sendOk(ip, port, transId, "PTT_GROUP_REMOVE", sesid, svc);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
-        logBody("TX", peerStr.c_str(), "JSON", "OK");
         LOG_INFO("PCmpServer", "PTT_GROUP_REMOVE group=%s", groupId.c_str());
     } else {
         // 자연 멱등 (§3) — 이미 없는 그룹이면 목표 상태(해제)로 수렴된 것. 성공 응답 유실 후
@@ -1059,7 +1054,6 @@ void PCmpServer::processSetFloorTier(const SimpleJson::JsonNode& payload, const 
     }
     if (svc.empty()) svc = "mcptt";
 
-    logBody("RX", peerStr.c_str(), "JSON", payload.ToString().c_str());
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_FLOOR_TIER",
             (sessionId + " tier=" + tierStr).c_str(), txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
@@ -1618,11 +1612,6 @@ std::string PCmpServer::msgFilePath() {
     return _currentMsgHourDir + "/" + _systemId + "_csp.msg." + bucketSuffix() + ".jsonl";
 }
 
-std::string PCmpServer::bodyFilePath() {
-    if (_currentMsgHourDir.empty()) return "";
-    return _currentMsgHourDir + "/" + _systemId + "_csp." + bucketSuffix() + ".jsonl";
-}
-
 int PCmpServer::countFileLines(const std::string& path) {
     FILE* f = fopen(path.c_str(), "r");
     if (!f) return 0;
@@ -1800,34 +1789,9 @@ std::string PCmpServer::getMsgHourDir() {
     return buf;
 }
 
-void PCmpServer::logBody(const char* dir, const char* peer, const char* proto, const char* msg) {
-    if (_msgLogDir.empty()) return;
-
-    std::lock_guard<std::mutex> lk(_logMtx);  // ensureBucket+format+enqueue 직렬화
-    ensureBucket();
-    std::string path = bodyFilePath();   // {systemId}_csp.{mm5}.jsonl
-    if (path.empty()) return;
-
-    std::string ts = getTimestamp();
-    std::string escaped = _jsonEsc(msg);
-
-    std::string line = "{\"ts\":\"";
-    line += ts;
-    line += "\",\"dir\":\"";
-    line += dir ? dir : "";
-    line += "\",\"peer\":\"";
-    line += peer ? peer : "";
-    line += "\",\"proto\":\"";
-    line += proto ? proto : "";
-    line += "\",\"msg\":\"";
-    line += escaped;
-    line += "\"}\n";
-    enqueueLine(path, std::move(line));  // NFS I/O 없이 즉시 반환
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 비동기 배치 writer (CSP SipMessageLogger 와 동일 패턴)
-//   생산자(writeMsgLine/logFlow/logBody/writeLeakReclaim)는 _logMtx 보유 중 포맷한 한 줄을
+//   생산자(writeMsgLine/logFlow/writeLeakReclaim)는 _logMtx 보유 중 포맷한 한 줄을
 //   enqueueLine 으로 적재만 하고 즉시 반환(NFS I/O 없음). 단일 control 스레드가 매 control
 //   패킷마다 NFS open/append/close 로 막히던 HOL 블로킹 제거. 단일 writer 스레드가 주기/임계마다
 //   큐를 비워 파일경로별로 라인을 합쳐 경로당 1회 open→append→close. 단일 writer + FIFO 라

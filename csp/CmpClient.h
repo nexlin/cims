@@ -105,11 +105,12 @@ private:
         std::string strService;  // flow service (응답 기록용)
         std::string strCaller;   // 발신 MSISDN (응답 기록용)
         std::string strCallee;   // 착신 MSISDN (응답 기록용)
+        bool bLogMsg;            // 요청을 msg/flow 에 기록했는가 — 응답 기록 여부 동기화 (HB 샘플링)
         std::condition_variable cv;
         std::mutex mutex;
         bool bCompleted;
         bool bSuccess;
-        Transaction() : id( 0 ), bCompleted( false ), bSuccess( false ) {
+        Transaction() : id( 0 ), bLogMsg( true ), bCompleted( false ), bSuccess( false ) {
         }
     };
 
@@ -148,6 +149,11 @@ private:
     std::mutex m_mutexTrans;
     std::map<unsigned int, std::shared_ptr<Transaction>> m_mapTransactions;
     unsigned int m_iNextTransId;
+
+    // HEARTBEAT 로그 샘플링 — 3초 주기 생존 신호의 msg/flow 노이즈 억제 (CMP 측과 동일 규칙).
+    //   N 회당 1회만 기록. 응답 기록 여부는 Transaction.bLogMsg 로 요청과 동기화.
+    static const unsigned int kHbLogSampleN = 100;  // 3s × 100 ≈ 5분당 1건
+    unsigned int m_iHbLogCount = 0;
 
     // session_id/group_id → sesid 캐시 (Modify/Remove 시 재사용)
     std::mutex m_mutexSesid;

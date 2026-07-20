@@ -234,6 +234,9 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonN
     //   CORE 명령(HEARTBEAT/STATS)은 sesid/service 를 싣지 않는다.
     std::string strCmdName = payload.GetString( "cmd" );
     bool bCore = ( strCmdName == "HEARTBEAT" || strCmdName == "STATS" );
+    // HEARTBEAT 로그 샘플링 — N 회당 1회만 msg/flow 기록 (응답은 Transaction.bLogMsg 로 동기화).
+    //   KeepAliveLoop 단일 스레드가 유일한 HEARTBEAT 송신자라 카운터 lock 불필요.
+    if ( strCmdName == "HEARTBEAT" ) pTrans->bLogMsg = ( m_iHbLogCount++ % kHbLogSampleN ) == 0;
     SimpleJson::JsonNode hdr;
     hdr.Set( "ver", 2 );
     hdr.Set( "trans_id", (int)transId );
@@ -267,7 +270,7 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonN
         return false;
     }
     CLog::Print( LOG_DEBUG, "CmpClient TX → %s:%d : %s", ep.strIp.c_str(), ep.iPort, strPacket.c_str() );
-    if ( gclsSipLogger.IsEnabled() ) {
+    if ( gclsSipLogger.IsEnabled() && pTrans->bLogMsg ) {
         std::string strCmd = payload.GetString( "cmd" );
         // service: Transaction 에 저장된 값 (payload.service 기반)
         const char *pszSvc = pTrans->strService.empty() ? "system" : pTrans->strService.c_str();
@@ -780,6 +783,7 @@ void CCmpClient::RecvLoop() {
                 if ( gclsSipLogger.IsEnabled() ) {
                     // Transaction에서 sesid/service/caller/callee 조회
                     std::string strRxSesId, strRxSvc, strRxCaller, strRxCallee;
+                    bool bRxLog = true;  // HB 샘플링 — 요청을 기록한 경우에만 응답도 기록
                     {
                         std::lock_guard<std::mutex> lk2( m_mutexTrans );
                         auto itT = m_mapTransactions.find( transId );
@@ -788,7 +792,12 @@ void CCmpClient::RecvLoop() {
                             strRxSvc = itT->second->strService;
                             strRxCaller = itT->second->strCaller;
                             strRxCallee = itT->second->strCallee;
+                            bRxLog = itT->second->bLogMsg;
                         }
+                    }
+                    if ( !bRxLog ) {
+                        OnTransactionComplete( transId, true, respBody );
+                        continue;
                     }
                     const char *pszSvc = strRxSvc.empty() ? "system" : strRxSvc.c_str();
                     std::string strRxTxId = std::to_string( transId );

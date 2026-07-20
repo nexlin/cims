@@ -101,6 +101,12 @@ private:
     int _msgSeq;          // 현재 버킷 _csp.msg 줄 수 (버킷 전환 시 -1 → 다음 write 가 lazy 계수)
     int _lastRxSeq;       // 현재 요청의 원문 seq (logFlow에서 사용)
 
+    // HEARTBEAT 로그 샘플링 (3초 주기 노이즈 억제 — N 회당 1회만 msg/flow 기록).
+    //   단일 control 스레드 전제의 per-packet 플래그 (handlePacket 이 설정, sendResponse 가 참조).
+    static const int kHbLogSampleN = 100;  // 3s × 100 ≈ 5분당 1건
+    unsigned long _hbCount = 0;
+    bool _hbLogSuppress = false;
+
     void logFlow(const std::string& key, const char* from, const char* to,
                  const char* proto, const char* label, const char* detail = "",
                  const char* txId = "", const char* service = "",
@@ -109,12 +115,10 @@ private:
                  const char* caller = "", const char* callee = "");
     int writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg,
                      const char* caller = "", const char* callee = "");
-    void logBody(const char* dir, const char* peer, const char* proto, const char* msg);
     void ensureBucket();             // 디렉터리 보장 + 버킷 전환 시 seq 리셋 (핸들 미유지)
     std::string bucketSuffix();      // (tm_min/5)*5 → "00".."55"
     std::string flowFilePath();      // {hourDir}/{systemId}.flow.{mm5}.jsonl
     std::string msgFilePath();       // {hourDir}/{systemId}_csp.msg.{mm5}.jsonl
-    std::string bodyFilePath();      // {hourDir}/{systemId}_csp.{mm5}.jsonl
     static int countFileLines(const std::string& path);
     std::string getFlowHourDir();
     std::string getMsgHourDir();
@@ -122,7 +126,7 @@ private:
     static bool mkdirP(const std::string& path);
 
     // ── 비동기 배치 로그 writer (CSP SipMessageLogger 와 동일 패턴) ──────────────
-    //   생산자(writeMsgLine/logFlow/logBody/writeLeakReclaim)는 _logMtx 보유 중 한 줄을
+    //   생산자(writeMsgLine/logFlow/writeLeakReclaim)는 _logMtx 보유 중 한 줄을
     //   포맷·seq 부여까지만 하고 enqueueLine 으로 큐에 적재 후 즉시 반환(NFS I/O 없음).
     //   단일 control 스레드가 NFS open-per-write 동기 I/O 로 막히던 HOL 블로킹 제거.
     //   단일 writer 스레드가 flush 주기/큐 임계마다 큐를 비워 파일경로별로 라인을 합쳐
