@@ -256,6 +256,16 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonN
     if ( !body.objects.empty() ) packet.Set( "payload", body );
 
     std::string strPacket = packet.ToString();
+    // UDP JSON 계약 최대 4KB (cmp_media_api.md §1.2) — 초과 datagram 은 CMP 수신 버퍼(4096)에서
+    //   절단되어 파싱 실패가 확정이므로 조기 실패한다 (재전송 낭비 방지). 주 원인은 대형 PTT
+    //   로스터 — 초기 로스터를 줄이고 나머지는 PTT_JOIN 2단으로 합류시킨다 (§7.4).
+    if ( strPacket.length() > 4096 ) {
+        CLog::Print( LOG_ERROR, "CmpClient: packet too large (%zu > 4096) cmd=%s — 송신 중단 (로스터 축소 필요)",
+                     strPacket.length(), strCmdName.c_str() );
+        std::lock_guard<std::mutex> mapLock( m_mutexTrans );
+        m_mapTransactions.erase( transId );
+        return false;
+    }
     CLog::Print( LOG_DEBUG, "CmpClient TX → %s:%d : %s", ep.strIp.c_str(), ep.iPort, strPacket.c_str() );
     if ( gclsSipLogger.IsEnabled() ) {
         std::string strCmd = payload.GetString( "cmd" );
@@ -552,7 +562,6 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     }
 
     req.Set( "subid", std::to_string( iSessionSeq > 0 ? iSessionSeq : 1 ) );
-    req.Set( "count", (int)vecMembers.size() );
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
     if ( bVideoEnabled ) req.Set( "video_enabled", 1 );
     // group_type / initiator — broadcast 그룹 floor 독점(TS 24.380 §10.3) 판정용.
@@ -622,7 +631,20 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
     req.Set( "members", ssMembers.str() );
 
     std::string strResp;
-    return SendRequestAndWait( strGroupId, req, strResp );
+    if ( !SendRequestAndWait( strGroupId, req, strResp ) ) return false;
+
+    // NOT_FOUND(그룹 소실 — CMP 는 MODIFY 로 그룹을 재생성하지 않음)·NO_RESOURCE(멤버 pool 고갈)를
+    //   성공으로 오인하지 않는다. 호출자(SyncGroupsState)는 실패 시 AddGroup 으로 재수립한다.
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    if ( respNode.type != SimpleJson::JSON_OBJECT ) {
+        CLog::Print( LOG_ERROR, "CmpClient::ModifyGroup: Failed to parse JSON response: %s", strResp.c_str() );
+        return false;
+    }
+    if ( !respNode.Has( "status" ) || respNode.Get( "status" ).AsString() != "OK" ) {
+        CLog::Print( LOG_ERROR, "CmpClient::ModifyGroup: group=%s ERROR: %s", strGroupId.c_str(), strResp.c_str() );
+        return false;
+    }
+    return true;
 }
 
 bool CCmpClient::SetFloorTier( const std::string &strGroupId, const std::string &strSessionId, int iTier,

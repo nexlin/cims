@@ -688,9 +688,25 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
 
     PRtpMulticast* pttSession = NULL;
     PMcpttGroup* group = NULL;
+    bool createdNow = false;
 
     if (_groups.find(groupId) == _groups.end()) {
+        // MODIFY 는 기존 그룹 전제 (cmp_media_api.md §7.2) — 소실 그룹을 재생성하지 않는다.
+        //   재생성 시 floor/멤버 포트가 재할당되는데 client 는 구 포트를 캐시/광고 중이라 정합 불가.
+        //   client 는 NOT_FOUND 수신 시 PTT_GROUP_ADD 로 재수립한다.
+        if (cmdName == "PTT_GROUP_MODIFY") {
+            int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
+                                "NOT_FOUND", "group not found");
+            logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "Group Not Found",
+                    txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+            LOG_WARN("PCmpServer", "PTT_GROUP_MODIFY group=%s not found", groupId.c_str());
+            _sesidMap.erase(groupId);  // 그룹 미존재 — 캐시 잔존 방지
+            _serviceMap.erase(groupId);
+            _groupSubId.erase(groupId);
+            return;
+        }
         group = new PMcpttGroup(groupId);
+        createdNow = true;
         // Floor/DTMF 콜백: Flow enable flag 적용하여 조건부 기록
         bool logFloor = _logFlowFloor;
         bool logDtmf  = _logFlowDtmf;
@@ -796,6 +812,19 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             memberPorts.Set(sid, mp);
         }
         if (memberAllocFail) {
+            // 신규 생성 그룹이면 즉시 롤백 — 실패 응답 후 sweeper(세션 타임아웃)까지 floor/멤버
+            //   유닛이 점유되는 것을 방지 (RELAY 실패 경로와 대칭). 기존 그룹의 선할당 유닛은
+            //   유지한다 (멱등 재시도 시 재사용, LEAVE/그룹 해제로 회수).
+            if (createdNow) {
+                freeGroupMemberUnits(groupId);
+                PRtpMulticast* ptt = group->getPttSession();
+                if (ptt) { ptt->reset(); freePttResource(ptt); }
+                delete group;
+                _groups.erase(groupId);
+                _sesidMap.erase(groupId);
+                _serviceMap.erase(groupId);
+                _groupSubId.erase(groupId);
+            }
             int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc,
                                 "NO_RESOURCE", "ptt member pool exhausted");
             logFlow(groupId, "cmp", "csp", "JSON", "ERROR", "No Resource", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");

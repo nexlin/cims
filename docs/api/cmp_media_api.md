@@ -30,7 +30,11 @@ CMP 가 제공하는 미디어 서비스 기능(function)의 제어 API 정본�
 
 ### 1.2 전송
 
-- UDP JSON, 메시지 = datagram 1개 = 한 줄 JSON(UTF-8). 최대 크기 4KB.
+- UDP JSON, 메시지 = datagram 1개 = 한 줄 JSON(UTF-8). 최대 크기 4KB — 초과 메시지는
+  송신 측에서 거부한다 (수신 버퍼 절단으로 파싱 실패가 확정되므로). 실질 상한은 PTT
+  로스터 크기: 요청 `members` ≈ 110명, 응답 `member_ports` ≈ 75명. 대형 그룹은 초기
+  로스터를 줄이고 나머지 멤버를 PTT_JOIN 2단([§7.4](#74-ptt_join--멤버-참가-2단-멱등))으로
+  합류시킨다.
 - 요청-응답 매칭은 `hdr.trans_id`. 신뢰성(재전송·멱등성)은 [§3](#3-신뢰성-모델).
 
 ## 2. 메시지 envelope
@@ -266,7 +270,6 @@ member 키 `(node, session_id)`.
 |---|---|---|
 | `group_id` | O | 그룹 식별자 |
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
-| `count` | - | 멤버 수 |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
 | `group_type` | - | `prearranged`/`chat`/`broadcast` (broadcast floor 독점 정책 — TS 24.380 §10.3) |
@@ -296,7 +299,10 @@ audio RTP 는 그룹 공유 포트가 아니라 **멤버별 전용 포트**다 �
 
 ### 7.2 PTT_GROUP_MODIFY — 멤버/우선순위 갱신
 
-PTT_GROUP_ADD 와 동일 payload·경로 (멱등 갱신).
+PTT_GROUP_ADD 와 동일 payload·응답 (기존 그룹의 멱등 갱신 — floor·기존 멤버 포트 유지,
+신규 멤버 포트 추가 할당). 없는 그룹이면 `NOT_FOUND` 에러 — 소실 그룹을 재생성하지
+않는다 (재생성 시 포트가 재할당되어 client 캐시와 어긋난다). client 는 NOT_FOUND 수신 시
+PTT_GROUP_ADD 로 재수립하고 응답 포트로 캐시를 갱신한다.
 
 ### 7.3 PTT_GROUP_REMOVE — 그룹 해제
 

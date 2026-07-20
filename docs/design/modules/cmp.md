@@ -192,7 +192,6 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
 | group_id | O | 그룹 식별자 |
-| count | - | 멤버 수 |
 | members | - | "sid1:prio1:role,sid2:prio2:role" CSV (role=chair/participant) |
 | subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
@@ -209,13 +208,16 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 3. PRtpMulticast ↔ PMcpttGroup 연결 (`setGroup`, `setPttSession`)
 4. DTMF 설정 전달
 5. 녹취/로그 설정
-6. members CSV 파싱 → 우선순위/role 설정 + 멤버별 전용 포트 유닛(PPttMemberPort) 선할당
+6. members CSV 파싱 → 우선순위/role 설정 + 멤버별 전용 포트 유닛(PPttMemberPort) 선할당.
+   멤버 pool 고갈 시 `NO_RESOURCE` — 이번 호출로 생성된 그룹이면 floor/유닛을 즉시 롤백
+   (기존 그룹의 선할당 유닛은 유지 — 멱등 재시도 시 재사용)
 7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`) — TS 24.380 §10.3.
 
 #### PTT_GROUP_MODIFY — 그룹 멤버/우선순위 갱신
 
-processAddGroup()으로 위임 — 기존 그룹이면 재할당 없이 members 만 갱신하고 동일
-`ip/floor_port/member_ports` 를 응답한다.
+processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이 갱신하고 동일
+`ip/floor_port/member_ports` 를 응답한다 (신규 멤버는 포트 추가 할당). 그룹이 없으면
+`NOT_FOUND` (소실 그룹을 재생성하지 않는다 — CSP 는 PTT_GROUP_ADD 로 재수립).
 
 #### PTT_JOIN — 멤버 참가
 

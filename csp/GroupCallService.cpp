@@ -915,6 +915,32 @@ void CGroupCallService::SyncGroupsState() {
                 if ( gclsCmpClient.ModifyGroup( group._id, group._pusers, GetOrIssueGroupSesId( group._id ) ) ) {
                     std::unique_lock<std::recursive_mutex> lock2( m_mutex );
                     m_mapGroupRtp[group._id].nMemberHash = nHash;
+                } else {
+                    // MODIFY 실패 (NOT_FOUND: CMP 그룹 소실 등) — AddGroup 멱등 재수립.
+                    //   재생성이면 floor/멤버 포트가 새로 할당되므로 캐시를 응답값으로 갱신한다.
+                    std::string strIp, strRecordDir;
+                    int iFloorPort = 0;
+                    std::map<std::string, std::pair<int, int>> mapMemberPorts;
+                    if ( gclsCallDir.IsEnabled() )
+                        strRecordDir = gclsCallDir.GetPttSessionDir( group._id, TimeToIso( group._sessionStart ),
+                                                                     std::to_string( group._dbId ) );
+                    if ( gclsCmpClient.AddGroup( group._id, group._pusers, strIp, iFloorPort, mapMemberPorts,
+                                                 strRecordDir, group._videoEnabled, group._sessionSeq,
+                                                 GetOrIssueGroupSesId( group._id ), group._groupType, "" ) ) {
+                        std::unique_lock<std::recursive_mutex> lock2( m_mutex );
+                        auto it2 = m_mapGroupRtp.find( group._id );
+                        if ( it2 != m_mapGroupRtp.end() ) {
+                            it2->second.iFloorPort = iFloorPort;
+                            it2->second.strIp = strIp;
+                            it2->second.memberPorts = mapMemberPorts;
+                            it2->second.nMemberHash = nHash;
+                        }
+                        CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) re-established on CMP (floor=%d)",
+                                     group._id.c_str(), iFloorPort );
+                    } else {
+                        CLog::Print( LOG_ERROR, "SyncGroupsState: Group(%s) ModifyGroup/AddGroup 재수립 실패",
+                                     group._id.c_str() );
+                    }
                 }
                 // Notify GMS subscribers that group config changed
                 SendSipNotify( "tel:" + group._id, "change_" + std::to_string( time( NULL ) ), "PUT" );
