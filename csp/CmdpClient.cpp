@@ -161,17 +161,38 @@ bool CCmdpClient::SendRequestAndWait( const SimpleJson::JsonNode &payload, std::
         m_mapTransactions[transId] = pTrans;
     }
 
+    // envelope v2 {hdr, payload} — CmpClient 와 동일 (cmp_media_api.md §2).
+    //   상관 메타(sesid)와 cmd 는 hdr 로, payload 에는 업무 필드만 남긴다.
+    //   CORE 명령(HEARTBEAT/STATS)은 sesid/service 를 싣지 않는다.
+    std::string strCmdName = payload.GetString( "cmd" );
+    bool bCore = ( strCmdName == "HEARTBEAT" || strCmdName == "STATS" );
+    SimpleJson::JsonNode hdr;
+    hdr.Set( "ver", 2 );
+    hdr.Set( "trans_id", (int)transId );
+    hdr.Set( "node", gclsSipLogger.GetSystemId().empty() ? "csp_01" : gclsSipLogger.GetSystemId() );
+    hdr.Set( "cmd", strCmdName );
+    hdr.Set( "type", "request" );
+    if ( !bCore ) {
+        std::string strHdrSesId = payload.GetString( "sesid" );
+        if ( !strHdrSesId.empty() ) hdr.Set( "sesid", strHdrSesId );
+        hdr.Set( "service", "mcdata" );
+    }
+
+    SimpleJson::JsonNode body = payload;
+    body.objects.erase( "cmd" );
+    body.objects.erase( "sesid" );
+    body.objects.erase( "service" );
+
     SimpleJson::JsonNode packet;
-    packet.Set( "trans_id", (int)transId );
-    packet.Set( "payload", payload );
+    packet.Set( "hdr", hdr );
+    if ( !body.objects.empty() ) packet.Set( "payload", body );
     std::string strPacket = packet.ToString();
 
     if ( gclsSipLogger.IsEnabled() ) {
-        std::string strCmd = payload.GetString( "cmd" );
         std::string strTxId = std::to_string( transId );
         std::string strSesId = payload.GetString( "sesid" );
         if ( strSesId.empty() ) strSesId = payload.GetString( "session_id" );
-        gclsSipLogger.LogMessage( "csp", "cmdp", "JSON", strCmd.c_str(),
+        gclsSipLogger.LogMessage( "csp", "cmdp", "JSON", strCmdName.c_str(),
                                   ( m_strCmdpIp + ":" + std::to_string( m_iCmdpPort ) ).c_str(), strPacket.c_str(),
                                   "mcdata", strTxId.c_str(), strSesId.c_str(),
                                   payload.GetString( "session_id" ).c_str(), payload.GetString( "caller" ).c_str(),
@@ -219,13 +240,13 @@ bool CCmdpClient::AddRecvSession( const std::string &strSessionId, const std::st
                                   const std::string &strGroupId, const std::string &strRemotePath,
                                   long long llMaxSize, std::string &strMsrpPath, const std::string &strSesId ) {
     SimpleJson::JsonNode req;
-    req.Set( "cmd", "ADD_MSRP_RECV_SESSION" );
+    req.Set( "cmd", "MSRP_ADD" );
+    req.Set( "mode", "recv" );
     req.Set( "session_id", strSessionId );
     req.Set( "caller", strCaller );
     req.Set( "group_id", strGroupId );
     req.Set( "remote_path", strRemotePath );
     req.Set( "max_size", (long long)llMaxSize );
-    req.Set( "service", "mcdata" );
     std::string strFinalSesId = strSesId.empty() ? CSipMessageLogger::IssueSesId( strCaller, "csp" ) : strSesId;
     req.Set( "sesid", strFinalSesId );
 
@@ -246,13 +267,13 @@ bool CCmdpClient::AddSendSession( const std::string &strSessionId, const std::st
                                   const std::string &strContentType, std::string &strMsrpPath,
                                   const std::string &strSesId ) {
     SimpleJson::JsonNode req;
-    req.Set( "cmd", "ADD_MSRP_SEND_SESSION" );
+    req.Set( "cmd", "MSRP_ADD" );
+    req.Set( "mode", "send" );
     req.Set( "session_id", strSessionId );
     req.Set( "file_id", strFileId );
     req.Set( "caller", strCaller );
     req.Set( "callee", strCallee );
     if ( !strContentType.empty() ) req.Set( "content_type", strContentType );
-    req.Set( "service", "mcdata" );
     std::string strFinalSesId = strSesId.empty() ? CSipMessageLogger::IssueSesId( strCaller, "csp" ) : strSesId;
     req.Set( "sesid", strFinalSesId );
 
@@ -270,30 +291,31 @@ bool CCmdpClient::AddSendSession( const std::string &strSessionId, const std::st
 
 bool CCmdpClient::SetRemotePath( const std::string &strSessionId, const std::string &strRemotePath ) {
     SimpleJson::JsonNode req;
-    req.Set( "cmd", "SET_REMOTE_PATH" );
+    req.Set( "cmd", "MSRP_MODIFY" );
     req.Set( "session_id", strSessionId );
     req.Set( "remote_path", strRemotePath );
-    req.Set( "service", "mcdata" );
 
+    // 소실 세션은 NOT_FOUND — 소비자(McDataMediaService)가 실패 시 레그 정리 판단.
     std::string strResp;
-    return SendRequestAndWait( req, strResp );
+    if ( !SendRequestAndWait( req, strResp ) ) return false;
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    return respNode.type == SimpleJson::JSON_OBJECT && respNode.GetString( "status" ) == "OK";
 }
 
 bool CCmdpClient::RemoveSession( const std::string &strSessionId ) {
     SimpleJson::JsonNode req;
-    req.Set( "cmd", "REMOVE_MSRP_SESSION" );
+    req.Set( "cmd", "MSRP_REMOVE" );
     req.Set( "session_id", strSessionId );
-    req.Set( "service", "mcdata" );
 
     std::string strResp;
-    return SendRequestAndWait( req, strResp );
+    if ( !SendRequestAndWait( req, strResp ) ) return false;
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    return respNode.type == SimpleJson::JSON_OBJECT && respNode.GetString( "status" ) == "OK";
 }
 
 bool CCmdpClient::Alive() {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "HEARTBEAT" );
-    req.Set( "sesid", CSipMessageLogger::IssueSesId( "", "csp" ) );
-    req.Set( "service", "mcdata" );
 
     std::string resp;
     return SendRequestAndWait( req, resp );
@@ -311,25 +333,34 @@ void CCmdpClient::RecvLoop() {
         buffer[n] = '\0';
         std::string strPacket = buffer;
 
+        // envelope v2 — {hdr:{trans_id,cmd,type,...}[,payload]} (응답/이벤트 공통)
         SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse( strPacket );
-        if ( root.type != SimpleJson::JSON_OBJECT ) {
-            CLog::Print( LOG_INFO, "CmdpClient Non-JSON RX: %s", strPacket.c_str() );
+        if ( root.type != SimpleJson::JSON_OBJECT || root.Get( "hdr" ).type != SimpleJson::JSON_OBJECT ) {
+            CLog::Print( LOG_INFO, "CmdpClient non-v2 RX: %s", strPacket.c_str() );
             continue;
         }
+        SimpleJson::JsonNode hdr = root.Get( "hdr" );
+        int transId = (int)hdr.GetInt( "trans_id", 0 );
 
-        // cmdp 비동기 이벤트 — ack 회신 후 콜백 dispatch (CmpClient 와의 차이점)
-        if ( root.Has( "event" ) ) {
-            long long llEventId = root.GetInt( "event_id", 0 );
+        // cmdp 비동기 이벤트 — 동일 trans_id 의 v2 response 로 ack 후 콜백 dispatch
+        if ( hdr.GetString( "type" ) == "event" ) {
+            SimpleJson::JsonNode ackHdr;
+            ackHdr.Set( "ver", 2 );
+            ackHdr.Set( "trans_id", transId );
+            ackHdr.Set( "node", gclsSipLogger.GetSystemId().empty() ? "csp_01" : gclsSipLogger.GetSystemId() );
+            ackHdr.Set( "cmd", hdr.GetString( "cmd" ) );
+            ackHdr.Set( "type", "response" );
+            ackHdr.Set( "status", "OK" );
             SimpleJson::JsonNode ack;
-            ack.Set( "event_ack", llEventId );
+            ack.Set( "hdr", ackHdr );
             std::string strAck = ack.ToString();
             sendto( m_hSocket, strAck.c_str(), strAck.length(), 0, (struct sockaddr *)&cliaddr, len );
 
             if ( gclsSipLogger.IsEnabled() ) {
-                gclsSipLogger.LogMessage( "cmdp", "csp", "JSON", root.GetString( "event" ).c_str(),
+                gclsSipLogger.LogMessage( "cmdp", "csp", "JSON", hdr.GetString( "cmd" ).c_str(),
                                           ( m_strCmdpIp + ":" + std::to_string( m_iCmdpPort ) ).c_str(),
-                                          strPacket.c_str(), "mcdata", std::to_string( llEventId ).c_str(),
-                                          root.Get( "payload" ).GetString( "sesid" ).c_str(), "", "", "" );
+                                          strPacket.c_str(), "mcdata", std::to_string( transId ).c_str(),
+                                          hdr.GetString( "sesid" ).c_str(), "", "", "" );
             }
             {
                 std::lock_guard<std::mutex> lock( m_mutexEvents );
@@ -339,16 +370,16 @@ void CCmdpClient::RecvLoop() {
             continue;
         }
 
-        int transId = (int)root.GetInt( "trans_id", 0 );
-        std::string respBody;
-        if ( root.Has( "response" ) ) {
-            SimpleJson::JsonNode r = root.Get( "response" );
-            if ( r.type == SimpleJson::JSON_STRING )
-                respBody = r.strValue;
-            else
-                respBody = r.ToString();
+        // 응답 — 소비자 파싱 호환을 위해 hdr 의 status/code/reason 을 payload 에 병합 (CmpClient 와 동일)
+        SimpleJson::JsonNode body = root.Get( "payload" );
+        if ( body.type != SimpleJson::JSON_OBJECT ) {
+            body = SimpleJson::JsonNode();
+            body.type = SimpleJson::JSON_OBJECT;
         }
-        OnTransactionComplete( transId, true, respBody );
+        body.Set( "status", hdr.GetString( "status", "ERROR" ) );
+        if ( hdr.Has( "code" ) ) body.Set( "code", hdr.GetString( "code" ) );
+        if ( hdr.Has( "reason" ) ) body.Set( "reason", hdr.GetString( "reason" ) );
+        OnTransactionComplete( transId, true, body.ToString() );
     }
 }
 

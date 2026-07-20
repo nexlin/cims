@@ -2,15 +2,16 @@
  * PCmdpServer — CIMS MCData Media Plane 서버 본체.
  *
  * cmp(PCmpServer) 골격을 따른다:
- *  - UDP JSON 제어채널 (CSP CmdpClient ↔ cmdp, {"trans_id":N,"payload":{...}} envelope)
+ *  - UDP JSON 제어채널 — cmp 와 동일한 envelope v2 {hdr,payload}
+ *    (docs/api/cmp_media_api.md §2, 명령 정본은 mcdata_messaging.md §4.7)
  *  - epoll 리액터 (단, cmp 와 달리 TCP 동적 fd: accept/close 시 등록/해제 + 지연 삭제)
  *  - 비동기 배치 jsonl 로거 (5분 버킷, open-per-batch — NFS HOL 회피)
  *  - deployment overlay config (install_path/config.json dot-path merge)
  *  - 스위퍼 (orphan/idle 세션 회수 + 이벤트 재전송)
  *
- * cmp 와 다른 점 — 비동기 이벤트 채널: 수신 완료(MSG_RECEIVED)·전송 결과(SEND_RESULT)·
- * 세션 중단(SESSION_ABORTED)을 CSP 로 datagram push 하고 {"event_ack":id} 로 확인될
- * 때까지 재전송한다 (1s × 5회).
+ * cmp 와 다른 점 — 비동기 이벤트 채널(type:"event")이 실구현: 수신 완료(MSRP_MSG_RECEIVED)·
+ * 전송 결과(MSRP_SEND_RESULT)·세션 중단(MSRP_ABORTED)을 CSP 로 push 하고, 동일 trans_id 의
+ * type:"response" ack 가 확인될 때까지 재전송한다 (1s × 5회).
  */
 
 #ifndef __CMDP_SERVER_H__
@@ -49,12 +50,24 @@ public:
 
 protected:
     void handlePacket(char* buf, int len, const std::string& ip, int port);
-    void processAddRecvSession(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
-    void processAddSendSession(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
-    void processSetRemotePath(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
-    void processRemoveSession(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    // MSRP_ADD (payload.mode="recv"|"send") — sesid 는 hdr 계승 값
+    void processAddRecvSession(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId,
+                               const std::string& sesid);
+    void processAddSendSession(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId,
+                               const std::string& sesid);
+    void processModify(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId,
+                       const std::string& sesid);
+    void processRemoveSession(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId,
+                              const std::string& sesid);
     void processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+
+    // v2 응답 빌더 (envelope: cmp_media_api.md §2). sesid 빈 값이면 hdr 에서 생략.
+    int sendOk(const std::string& ip, int port, int transId, const std::string& cmd,
+               const std::string& sesid, const SimpleJson::JsonNode* body = nullptr,
+               const char* caller = "", const char* callee = "");
+    int sendErr(const std::string& ip, int port, int transId, const std::string& cmd,
+                const std::string& sesid, const char* code, const char* reason);
 
     int sendResponse(const std::string& ip, int port, const std::string& msg,
                      const char* caller = "", const char* callee = "");
@@ -101,9 +114,10 @@ private:
         int attempts = 0;
         time_t nextAt = 0;
     };
-    std::map<long, PendingEvent> _pendingEvents;  // event_id → 재전송 상태
-    long _eventSeq = 0;
-    void emitEvent(const char* name, const SimpleJson::JsonNode& payload);  // 락 보유 중
+    std::map<long, PendingEvent> _pendingEvents;  // event trans_id → 재전송 상태
+    long _eventSeq = 0;  // 이벤트 trans_id 발행 카운터 — 기동 시 ms 시드 (재시작 ack 오매칭 방지)
+    void emitEvent(const char* name, const SimpleJson::JsonNode& payload,
+                   const std::string& sesid);  // 락 보유 중 — v2 type:"event" envelope
     void retransmitEvents();  // 스위퍼에서
 
     // ── MSRP epoll 리액터 (동적 fd) ────────────────────────────────────

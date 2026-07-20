@@ -296,26 +296,27 @@ bool CMcDataMediaService::OnCallTerminated( const char *pszCallId ) {
 }
 
 void CMcDataMediaService::OnCmdpEvent( const SimpleJson::JsonNode &clsEvent ) {
-    std::string strName = clsEvent.GetString( "event" );
+    // envelope v2 이벤트 — {hdr:{cmd,type:"event",...},payload}
+    std::string strName = clsEvent.Get( "hdr" ).GetString( "cmd" );
     SimpleJson::JsonNode clsPayload = clsEvent.Get( "payload" );
     if ( clsPayload.type != SimpleJson::JSON_OBJECT ) return;
     std::string strSessionId = clsPayload.GetString( "session_id" );
 
-    if ( strName == "MSG_RECEIVED" ) {
+    if ( strName == "MSRP_MSG_RECEIVED" ) {
         // 이벤트 재전송 중복 방어 — 세션이 이미 정리됐으면 무시
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             if ( m_mapSessionToCall.find( strSessionId ) == m_mapSessionToCall.end() ) {
-                CLog::Print( LOG_INFO, "McDataMedia: MSG_RECEIVED for unknown session(%s) — dup/late, ignore",
+                CLog::Print( LOG_INFO, "McDataMedia: MSRP_MSG_RECEIVED for unknown session(%s) — dup/late, ignore",
                              strSessionId.c_str() );
                 return;
             }
         }
         HandleMsgReceived( clsPayload );
-    } else if ( strName == "SEND_RESULT" ) {
+    } else if ( strName == "MSRP_SEND_RESULT" ) {
         HandleSessionClosed( strSessionId, clsPayload.GetString( "status" ) == "ok",
                              clsPayload.GetString( "reason" ).c_str() );
-    } else if ( strName == "SESSION_ABORTED" ) {
+    } else if ( strName == "MSRP_ABORTED" ) {
         HandleSessionClosed( strSessionId, false, clsPayload.GetString( "reason" ).c_str() );
     }
 }

@@ -33,6 +33,14 @@ PCmdpServer::PCmdpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _configFile(configFile) {
     loadConfig();
 
+    // 이벤트 trans_id 시드 — 부팅 시각(ms) 하위 비트. 재시작 직후 발행 ID 가 구세대와
+    //   겹쳐 지연 ack datagram 이 새 이벤트를 오소거하는 창을 제거 (CmpClient trans_id 와 동일 근거).
+    {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        _eventSeq = (long)(((unsigned long long)tv.tv_sec * 1000ULL + tv.tv_usec / 1000) & 0x3FFFFFFF);
+    }
+
     _reactors.resize(_msrpWorkerCount);
     for (int i = 0; i < _msrpWorkerCount; ++i) {
         _reactors[i].epfd = epoll_create1(0);
@@ -167,28 +175,47 @@ void PCmdpServer::handlePacket(char* buf, int len, const std::string& ip, int po
         return;
     }
 
-    // 이벤트 ack: {"event_ack": N}
-    if (root.Has("event_ack")) {
-        long id = (long)root.GetInt("event_ack", 0);
-        PAutoLock lock(_mutex);
-        _pendingEvents.erase(id);
-        return;
-    }
-
-    int transId = (int)root.GetInt("trans_id", 0);
-    SimpleJson::JsonNode payload = root.Get("payload");
-    if (payload.type != SimpleJson::JSON_OBJECT) {
-        LOG_ERROR("PCmdpServer", "Missing Payload from %s:%d: %s", ip.c_str(), port,
-                  strPacket.c_str());
-        return;
-    }
-
-    std::string cmd = payload.GetString("cmd");
-    std::string cmdUpper = cmd;
-    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
-
     std::string peerStr = ip + ":" + std::to_string(port);
     _lastRxSeq = writeMsgLine("RX", peerStr.c_str(), "JSON", strPacket.c_str());
+
+    // envelope v2 강제 — hdr 없는 패킷(구 v1 포함)은 BAD_REQUEST (cmp 와 동일 계약)
+    SimpleJson::JsonNode hdr = root.Get("hdr");
+    if (hdr.type != SimpleJson::JSON_OBJECT) {
+        LOG_ERROR("PCmdpServer", "Missing hdr from %s:%d: %s", ip.c_str(), port, strPacket.c_str());
+        sendErr(ip, port, (int)root.GetInt("trans_id", 0), "", "", "BAD_REQUEST", "missing hdr");
+        return;
+    }
+
+    int ver = (int)hdr.GetInt("ver", 0);
+    int transId = (int)hdr.GetInt("trans_id", 0);
+    std::string type = hdr.GetString("type");
+    std::string cmdUpper = hdr.GetString("cmd");
+    std::transform(cmdUpper.begin(), cmdUpper.end(), cmdUpper.begin(), ::toupper);
+
+    // 이벤트 ack — 동일 trans_id 의 type:"response" (cmdp 는 요청을 이벤트로만 발신)
+    if (type == "response") {
+        PAutoLock lock(_mutex);
+        _pendingEvents.erase((long)transId);
+        return;
+    }
+
+    if (ver != 2) {
+        sendErr(ip, port, transId, cmdUpper, hdr.GetString("sesid"),
+                "UNSUPPORTED_VER", "supported ver: 2");
+        return;
+    }
+    if (type != "request") {
+        sendErr(ip, port, transId, cmdUpper, hdr.GetString("sesid"),
+                "BAD_REQUEST", "type must be request");
+        return;
+    }
+
+    std::string sesid = hdr.GetString("sesid");
+    SimpleJson::JsonNode payload = root.Get("payload");
+    if (payload.type != SimpleJson::JSON_OBJECT) {
+        payload = SimpleJson::JsonNode();
+        payload.type = SimpleJson::JSON_OBJECT;
+    }
 
     // 이벤트 회신처 학습 — CSP CmdpClient 소켓 주소
     {
@@ -197,25 +224,68 @@ void PCmdpServer::handlePacket(char* buf, int len, const std::string& ip, int po
         _cspPort = port;
     }
 
-    if (cmdUpper == "ADD_MSRP_RECV_SESSION" || cmdUpper == "ADD_RECV")
-        processAddRecvSession(payload, ip, port, transId);
-    else if (cmdUpper == "ADD_MSRP_SEND_SESSION" || cmdUpper == "ADD_SEND")
-        processAddSendSession(payload, ip, port, transId);
-    else if (cmdUpper == "SET_REMOTE_PATH")
-        processSetRemotePath(payload, ip, port, transId);
-    else if (cmdUpper == "REMOVE_MSRP_SESSION" || cmdUpper == "REMOVE_SESSION" || cmdUpper == "REMOVE")
-        processRemoveSession(payload, ip, port, transId);
-    else if (cmdUpper == "HEARTBEAT" || cmdUpper == "ALIVE")
+    if (cmdUpper == "MSRP_ADD") {
+        std::string mode = payload.GetString("mode");
+        if (mode == "recv")
+            processAddRecvSession(payload, ip, port, transId, sesid);
+        else if (mode == "send")
+            processAddSendSession(payload, ip, port, transId, sesid);
+        else
+            sendErr(ip, port, transId, cmdUpper, sesid, "BAD_REQUEST", "mode must be recv|send");
+    } else if (cmdUpper == "MSRP_MODIFY")
+        processModify(payload, ip, port, transId, sesid);
+    else if (cmdUpper == "MSRP_REMOVE")
+        processRemoveSession(payload, ip, port, transId, sesid);
+    else if (cmdUpper == "HEARTBEAT")
         processAlive(payload, ip, port, transId);
-    else if (cmdUpper == "STATS_REQUEST" || cmdUpper == "STATS")
+    else if (cmdUpper == "STATS")
         processStats(payload, ip, port, transId);
     else {
-        LOG_WARN("PCmdpServer", "Unknown CMD: %s from %s:%d", cmd.c_str(), ip.c_str(), port);
-        SimpleJson::JsonNode resp;
-        resp.Set("trans_id", transId);
-        resp.Set("response", "ERROR Unknown Command");
-        sendResponse(ip, port, resp.ToString());
+        LOG_WARN("PCmdpServer", "Unknown CMD: %s from %s:%d", cmdUpper.c_str(), ip.c_str(), port);
+        sendErr(ip, port, transId, cmdUpper, sesid, "UNKNOWN_CMD", "unknown command");
     }
+}
+
+// v2 응답 빌더 — {hdr:{ver,trans_id,node,cmd,type,status[,code,reason][,sesid,service]}[,payload]}
+// sesid 는 호 문맥 명령에서만(빈 값이면 생략), CORE(HEARTBEAT/STATS)는 빈 값 전달.
+int PCmdpServer::sendOk(const std::string& ip, int port, int transId, const std::string& cmd,
+                        const std::string& sesid, const SimpleJson::JsonNode* body,
+                        const char* caller, const char* callee) {
+    SimpleJson::JsonNode hdr;
+    hdr.Set("ver", 2);
+    hdr.Set("trans_id", transId);
+    hdr.Set("node", _systemId);
+    hdr.Set("cmd", cmd);
+    hdr.Set("type", "response");
+    hdr.Set("status", "OK");
+    if (!sesid.empty()) {
+        hdr.Set("sesid", sesid);
+        hdr.Set("service", "mcdata");
+    }
+    SimpleJson::JsonNode env;
+    env.Set("hdr", hdr);
+    if (body) env.Set("payload", *body);
+    return sendResponse(ip, port, env.ToString(), caller, callee);
+}
+
+int PCmdpServer::sendErr(const std::string& ip, int port, int transId, const std::string& cmd,
+                         const std::string& sesid, const char* code, const char* reason) {
+    SimpleJson::JsonNode hdr;
+    hdr.Set("ver", 2);
+    hdr.Set("trans_id", transId);
+    hdr.Set("node", _systemId);
+    hdr.Set("cmd", cmd);
+    hdr.Set("type", "response");
+    hdr.Set("status", "ERROR");
+    hdr.Set("code", code);
+    hdr.Set("reason", reason);
+    if (!sesid.empty()) {
+        hdr.Set("sesid", sesid);
+        hdr.Set("service", "mcdata");
+    }
+    SimpleJson::JsonNode env;
+    env.Set("hdr", hdr);
+    return sendResponse(ip, port, env.ToString());
 }
 
 int PCmdpServer::sendResponse(const std::string& ip, int port, const std::string& msg,
@@ -241,22 +311,15 @@ std::string PCmdpServer::localMsrpPath(const std::string& sessionId) const {
 }
 
 void PCmdpServer::processAddRecvSession(const SimpleJson::JsonNode& payload, const std::string& ip,
-                                        int port, int transId) {
+                                        int port, int transId, const std::string& sesid) {
     std::string sessionId = payload.GetString("session_id");
     std::string caller = payload.GetString("caller");
     std::string groupId = payload.GetString("group_id");
     std::string remotePath = payload.GetString("remote_path");
-    std::string sesid = payload.GetString("sesid");
     long long maxSize = payload.GetInt("max_size", 0);
 
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-    resp.Set("sesid", sesid);
-    resp.Set("service", "mcdata");
-
     if (sessionId.empty()) {
-        resp.Set("response", "ERROR session_id required");
-        sendResponse(ip, port, resp.ToString());
+        sendErr(ip, port, transId, "MSRP_ADD", sesid, "BAD_REQUEST", "session_id required");
         return;
     }
 
@@ -281,43 +344,33 @@ void PCmdpServer::processAddRecvSession(const SimpleJson::JsonNode& payload, con
     }
 
     SimpleJson::JsonNode body;
-    body.Set("status", "OK");
     body.Set("msrp_path", s->_localPath);
     body.Set("local_ip", _msrpIp);
     body.Set("local_port", _msrpPort);
-    resp.Set("response", body.ToString());
-    int txSeq = sendResponse(ip, port, resp.ToString(), caller.c_str(), groupId.c_str());
-    logFlow(sessionId, "cmdp", "csp", "JSON", "ADD_RECV OK", s->_localPath.c_str(),
+    int txSeq = sendOk(ip, port, transId, "MSRP_ADD", sesid, &body, caller.c_str(), groupId.c_str());
+    logFlow(sessionId, "cmdp", "csp", "JSON", "MSRP_ADD recv OK", s->_localPath.c_str(),
             std::to_string(transId).c_str(), sesid.c_str(), txSeq, caller.c_str(), groupId.c_str());
-    LOG_INFO("PCmdpServer", "ADD_RECV session=%s caller=%s group=%s max=%lld", sessionId.c_str(),
+    LOG_INFO("PCmdpServer", "MSRP_ADD recv session=%s caller=%s group=%s max=%lld", sessionId.c_str(),
              caller.c_str(), groupId.c_str(), s->_maxSize);
 }
 
 void PCmdpServer::processAddSendSession(const SimpleJson::JsonNode& payload, const std::string& ip,
-                                        int port, int transId) {
+                                        int port, int transId, const std::string& sesid) {
     std::string sessionId = payload.GetString("session_id");
     std::string fileId = payload.GetString("file_id");
     std::string caller = payload.GetString("caller");
     std::string callee = payload.GetString("callee");
     std::string contentType = payload.GetString("content_type");
-    std::string sesid = payload.GetString("sesid");
-
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-    resp.Set("sesid", sesid);
-    resp.Set("service", "mcdata");
 
     if (sessionId.empty() || fileId.empty()) {
-        resp.Set("response", "ERROR session_id/file_id required");
-        sendResponse(ip, port, resp.ToString());
+        sendErr(ip, port, transId, "MSRP_ADD", sesid, "BAD_REQUEST", "session_id/file_id required");
         return;
     }
 
     std::string body, storedCt;
     if (!_fdStore.LoadRaw(fileId, body, storedCt)) {
-        resp.Set("response", "ERROR file not found");
-        sendResponse(ip, port, resp.ToString());
-        LOG_WARN("PCmdpServer", "ADD_SEND session=%s file=%s not found", sessionId.c_str(),
+        sendErr(ip, port, transId, "MSRP_ADD", sesid, "NOT_FOUND", "file not found");
+        LOG_WARN("PCmdpServer", "MSRP_ADD send session=%s file=%s not found", sessionId.c_str(),
                  fileId.c_str());
         return;
     }
@@ -342,63 +395,62 @@ void PCmdpServer::processAddSendSession(const SimpleJson::JsonNode& payload, con
     }
 
     SimpleJson::JsonNode respBody;
-    respBody.Set("status", "OK");
     respBody.Set("msrp_path", s->_localPath);
     respBody.Set("local_ip", _msrpIp);
     respBody.Set("local_port", _msrpPort);
-    resp.Set("response", respBody.ToString());
-    int txSeq = sendResponse(ip, port, resp.ToString(), caller.c_str(), callee.c_str());
-    logFlow(sessionId, "cmdp", "csp", "JSON", "ADD_SEND OK", fileId.c_str(),
+    int txSeq = sendOk(ip, port, transId, "MSRP_ADD", sesid, &respBody, caller.c_str(), callee.c_str());
+    logFlow(sessionId, "cmdp", "csp", "JSON", "MSRP_ADD send OK", fileId.c_str(),
             std::to_string(transId).c_str(), sesid.c_str(), txSeq, caller.c_str(), callee.c_str());
-    LOG_INFO("PCmdpServer", "ADD_SEND session=%s file=%s bytes=%zu callee=%s", sessionId.c_str(),
+    LOG_INFO("PCmdpServer", "MSRP_ADD send session=%s file=%s bytes=%zu callee=%s", sessionId.c_str(),
              fileId.c_str(), s->_sendBody.size(), callee.c_str());
 }
 
-void PCmdpServer::processSetRemotePath(const SimpleJson::JsonNode& payload, const std::string& ip,
-                                       int port, int transId) {
+// MSRP_MODIFY — 수신자 answer 후 remote_path 확정. 소실 세션 부활 금지 → NOT_FOUND
+// (RELAY_MODIFY 와 동일 계약 — 부활 시 UE 가 이미 구 경로를 광고 중이라 정합 불가).
+void PCmdpServer::processModify(const SimpleJson::JsonNode& payload, const std::string& ip,
+                                int port, int transId, const std::string& sesid) {
     std::string sessionId = payload.GetString("session_id");
     std::string remotePath = payload.GetString("remote_path");
-
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
 
     PAutoLock lock(_mutex);
     auto it = _sessions.find(sessionId);
     if (it == _sessions.end()) {
-        resp.Set("response", "ERROR Session Not Found");
-        sendResponse(ip, port, resp.ToString());
+        sendErr(ip, port, transId, "MSRP_MODIFY", sesid, "NOT_FOUND", "session not found");
         return;
     }
     it->second->_remotePath = remotePath;
-    resp.Set("response", "OK");
-    sendResponse(ip, port, resp.ToString());
-    LOG_INFO("PCmdpServer", "SET_REMOTE_PATH session=%s path=%s", sessionId.c_str(),
+    sendOk(ip, port, transId, "MSRP_MODIFY", sesid);
+    LOG_INFO("PCmdpServer", "MSRP_MODIFY session=%s path=%s", sessionId.c_str(),
              remotePath.c_str());
     // 수신자 연결이 이미 바인딩돼 있으면 즉시 송신 개시
     if (it->second->_mode == PMsrpSession::MODE_SEND) pumpSendSession(it->second);
 }
 
 void PCmdpServer::processRemoveSession(const SimpleJson::JsonNode& payload, const std::string& ip,
-                                       int port, int transId) {
+                                       int port, int transId, const std::string& sesid) {
     std::string sessionId = payload.GetString("session_id");
 
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-
     PAutoLock lock(_mutex);
-    removeSessionLocked(sessionId);  // 멱등
-    resp.Set("response", "OK");
-    sendResponse(ip, port, resp.ToString());
-    LOG_INFO("PCmdpServer", "REMOVE session=%s", sessionId.c_str());
+    removeSessionLocked(sessionId);  // 자연 멱등 — 소실 세션 재전송도 OK (RELAY_REMOVE 와 동일)
+    sendOk(ip, port, transId, "MSRP_REMOVE", sesid);
+    LOG_INFO("PCmdpServer", "MSRP_REMOVE session=%s", sessionId.c_str());
 }
 
+// CORE — sesid/service 미포함. 응답 payload.resource 키 목록이 곧 기능 광고 (msrp).
 void PCmdpServer::processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port,
                                int transId) {
     (void)payload;
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-    resp.Set("response", "OK");
-    sendResponse(ip, port, resp.ToString());
+    SimpleJson::JsonNode msrp;
+    {
+        PAutoLock lock(_mutex);
+        msrp.Set("sessions", (int)_sessions.size());
+        msrp.Set("connections", (int)_connections.size());
+    }
+    SimpleJson::JsonNode resource;
+    resource.Set("msrp", msrp);
+    SimpleJson::JsonNode body;
+    body.Set("resource", resource);
+    sendOk(ip, port, transId, "HEARTBEAT", "", &body);
 }
 
 void PCmdpServer::processStats(const SimpleJson::JsonNode& payload, const std::string& ip, int port,
@@ -406,7 +458,6 @@ void PCmdpServer::processStats(const SimpleJson::JsonNode& payload, const std::s
     (void)payload;
     PAutoLock lock(_mutex);
     SimpleJson::JsonNode body;
-    body.Set("status", "OK");
     body.Set("sessions", (int)_sessions.size());
     body.Set("connections", (int)_connections.size());
     body.Set("recv_messages", (long long)_statRecvMessages);
@@ -415,10 +466,7 @@ void PCmdpServer::processStats(const SimpleJson::JsonNode& payload, const std::s
     body.Set("orphan_reclaim", (long long)_statOrphanReclaim);
     body.Set("pending_events", (int)_pendingEvents.size());
     body.Set("log_dropped", (long long)_logDropped.load());
-    SimpleJson::JsonNode resp;
-    resp.Set("trans_id", transId);
-    resp.Set("response", body.ToString());
-    sendResponse(ip, port, resp.ToString());
+    sendOk(ip, port, transId, "STATS", "", &body);
 }
 
 // 세션 제거 공통 — 연결 소켓은 shutdown 만 한다. 삭제는 리액터가 RDHUP 이벤트로
@@ -440,15 +488,27 @@ void PCmdpServer::removeSessionLocked(const std::string& sessionId) {
 //  cmdp → CSP 이벤트 (ack + 재전송)
 // ═══════════════════════════════════════════════════════════════
 
-void PCmdpServer::emitEvent(const char* name, const SimpleJson::JsonNode& payload) {
+// v2 이벤트 — {hdr:{ver,trans_id,node,cmd,type:"event",sesid,service},payload}.
+// ack = 동일 trans_id 의 type:"response" (cmp_media_api.md §8 과 동형).
+void PCmdpServer::emitEvent(const char* name, const SimpleJson::JsonNode& payload,
+                            const std::string& sesid) {
     if (_cspIp.empty() || _cspPort <= 0) {
         LOG_WARN("PCmdpServer", "event %s dropped — CSP endpoint unknown", name);
         return;
     }
     long id = ++_eventSeq;
+    SimpleJson::JsonNode hdr;
+    hdr.Set("ver", 2);
+    hdr.Set("trans_id", (long long)id);
+    hdr.Set("node", _systemId);
+    hdr.Set("cmd", name);
+    hdr.Set("type", "event");
+    if (!sesid.empty()) {
+        hdr.Set("sesid", sesid);
+        hdr.Set("service", "mcdata");
+    }
     SimpleJson::JsonNode env;
-    env.Set("event", name);
-    env.Set("event_id", (long long)id);
+    env.Set("hdr", hdr);
     env.Set("payload", payload);
     std::string json = env.ToString();
 
@@ -536,8 +596,7 @@ bool PCmdpServer::onMsrpFrame(PMsrpConnection* conn, const PMsrpMessage& msg) {
             p.Set("status", "failed");
             p.Set("reason", s->_abortReason);
             p.Set("bytes", (long long)s->_sendOffset);
-            p.Set("sesid", s->_sesid);
-            emitEvent("SEND_RESULT", p);
+            emitEvent("MSRP_SEND_RESULT", p, s->_sesid);
             return false;  // 연결 종료
         }
         if (s->_completed) {
@@ -546,8 +605,7 @@ bool PCmdpServer::onMsrpFrame(PMsrpConnection* conn, const PMsrpMessage& msg) {
             p.Set("session_id", s->_sessionId);
             p.Set("status", "ok");
             p.Set("bytes", (long long)s->_sendOffset);
-            p.Set("sesid", s->_sesid);
-            emitEvent("SEND_RESULT", p);
+            emitEvent("MSRP_SEND_RESULT", p, s->_sesid);
             logFlow(s->_sessionId, "cmdp", "ue", "MSRP", "SEND complete",
                     std::to_string(s->_sendOffset).c_str(), "", s->_sesid.c_str(), 0,
                     s->_caller.c_str(), s->_callee.c_str());
@@ -617,8 +675,7 @@ bool PCmdpServer::onMsrpFrame(PMsrpConnection* conn, const PMsrpMessage& msg) {
         SimpleJson::JsonNode p;
         p.Set("session_id", s->_sessionId);
         p.Set("reason", rc == 413 ? "size_exceeded" : "unsupported_media");
-        p.Set("sesid", s->_sesid);
-        emitEvent("SESSION_ABORTED", p);
+        emitEvent("MSRP_ABORTED", p, s->_sesid);
         return false;  // 연결 종료
     }
 
@@ -647,8 +704,7 @@ void PCmdpServer::finishRecvSession(PMsrpSession* s) {
         SimpleJson::JsonNode p;
         p.Set("session_id", s->_sessionId);
         p.Set("reason", "parse_error");
-        p.Set("sesid", s->_sesid);
-        emitEvent("SESSION_ABORTED", p);
+        emitEvent("MSRP_ABORTED", p, s->_sesid);
         return;
     }
 
@@ -666,8 +722,7 @@ void PCmdpServer::finishRecvSession(PMsrpSession* s) {
         SimpleJson::JsonNode p;
         p.Set("session_id", s->_sessionId);
         p.Set("reason", "store_error");
-        p.Set("sesid", s->_sesid);
-        emitEvent("SESSION_ABORTED", p);
+        emitEvent("MSRP_ABORTED", p, s->_sesid);
         return;
     }
 
@@ -687,8 +742,7 @@ void PCmdpServer::finishRecvSession(PMsrpSession* s) {
     p.Set("file_type", mime);
     p.Set("caller", s->_caller);
     p.Set("group_id", s->_groupId);
-    p.Set("sesid", s->_sesid);
-    emitEvent("MSG_RECEIVED", p);
+    emitEvent("MSRP_MSG_RECEIVED", p, s->_sesid);
     logFlow(s->_sessionId, "ue", "cmdp", "MSRP", "message received",
             (name + " " + std::to_string(binContent.size()) + "B").c_str(), "",
             s->_sesid.c_str(), 0, s->_caller.c_str(), s->_groupId.c_str());
@@ -722,15 +776,14 @@ void PCmdpServer::onConnectionClosed(PMsrpConnection* conn) {
             _statAborted++;
             SimpleJson::JsonNode p;
             p.Set("session_id", s->_sessionId);
-            p.Set("sesid", s->_sesid);
             if (s->_mode == PMsrpSession::MODE_SEND && s->_sendStarted) {
                 p.Set("status", "failed");
                 p.Set("reason", "conn_reset");
                 p.Set("bytes", (long long)s->_sendOffset);
-                emitEvent("SEND_RESULT", p);
+                emitEvent("MSRP_SEND_RESULT", p, s->_sesid);
             } else {
                 p.Set("reason", "conn_reset");
-                emitEvent("SESSION_ABORTED", p);
+                emitEvent("MSRP_ABORTED", p, s->_sesid);
             }
         }
     }
@@ -810,8 +863,7 @@ void PCmdpServer::timeoutLoop() {
                 SimpleJson::JsonNode p;
                 p.Set("session_id", s->_sessionId);
                 p.Set("reason", reason);
-                p.Set("sesid", s->_sesid);
-                emitEvent("SESSION_ABORTED", p);
+                emitEvent("MSRP_ABORTED", p, s->_sesid);
             }
             if (s->_conn) {
                 s->_conn->_session = nullptr;

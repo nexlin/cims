@@ -8,8 +8,10 @@ CMP 가 제공하는 미디어 서비스 기능(function)의 제어 API 정본�
 > `BAD_REQUEST` 로 거절). 명령별 payload 필드·내부 동작은
 > [modules/cmp.md](../design/modules/cmp.md) §3.2 참조. **규격만 예약되고 미구현인 것**:
 > ① 이벤트 채널([§8](#8-이벤트-type-event)), ② 자원 복합 키(멀티 client 격리 —
-> [§4](#4-자원-모델과-이벤트-라우팅)), ③ MIX function. CMDP(MCData 미디어평면)는 별도
-> 프로토콜이나, 차기 개정에서 동일 envelope 을 따르도록 정리한다.
+> [§4](#4-자원-모델과-이벤트-라우팅)), ③ MIX function. CMDP(MCData 미디어평면)도 동일
+> envelope v2 를 따른다 — 명령(`MSRP_*`)·이벤트 정본은
+> [mcdata_messaging.md](../design/features/mcdata_messaging.md) §4.7. CMDP 이벤트 채널은
+> §8 규격(ack=동일 trans_id 의 response, 1s×5 재전송)의 실구현 선례다.
 
 ## 1. 개요
 

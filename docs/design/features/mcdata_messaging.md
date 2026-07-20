@@ -150,12 +150,23 @@ CSP fan-out (하이브리드):
   - MSRP 스코프: SEND 청킹(Byte-Range·end-line `$/+/#`)·응답·REPORT(Success-Report)·
     To-Path 세션 바인딩. 릴레이(RFC 4976)·MSRPS(TLS) 미지원(후속).
   - 소스 공유: `csp/McDataCodec.cpp`(TLV 파서)·`Base64.cpp` 를 직접 컴파일.
-- **제어 프로토콜** (CSP `CmdpClient` ↔ cmdp, cmp envelope 동일): `ADD_MSRP_RECV_SESSION` /
-  `ADD_MSRP_SEND_SESSION`(file_id 재전달) / `SET_REMOTE_PATH`(수신자 answer 후) /
-  `REMOVE_MSRP_SESSION` / `HEARTBEAT` / `STATS`. 명령은 session_id 멱등.
-  **비동기 이벤트**(cmdp→CSP, ack `{"event_ack":id}` + 1s×5 재전송): `MSG_RECEIVED`
-  (file_id·conv/msg id·disposition·text 요약) / `SEND_RESULT` / `SESSION_ABORTED`
-  (size_exceeded·orphan·idle·conn_reset·parse_error).
+- **제어 프로토콜** (CSP `CmdpClient` ↔ cmdp) — cmp 와 동일한 **envelope v2** `{hdr,payload}`
+  ([cmp_media_api.md](../../api/cmp_media_api.md) §2·§9 의 hdr 필드·에러 코드 준용,
+  `hdr` 없는 패킷은 `BAD_REQUEST` 거절). function prefix 는 `MSRP`, `hdr.service` 는
+  `mcdata` 고정. 명령 정본:
+
+  | cmd | payload | 비고 |
+  |---|---|---|
+  | `MSRP_ADD` | `mode`(`recv`\|`send`) + `session_id`, recv: `caller`/`group_id`/`remote_path`/`max_size`, send: `file_id`/`caller`/`callee`/`content_type` | 멱등 (동일 session_id 재요청 = 기존 경로 반환). 응답 `msrp_path`/`local_ip`/`local_port`. send 의 file_id 부재는 `NOT_FOUND` |
+  | `MSRP_MODIFY` | `session_id`, `remote_path` (수신자 answer 후 확정) | 소실 세션 부활 금지 → `NOT_FOUND` (RELAY_MODIFY 와 동일 계약) |
+  | `MSRP_REMOVE` | `session_id` | 자연 멱등 — 소실 세션 재전송도 OK |
+  | `HEARTBEAT` / `STATS` | CORE — sesid/service 미포함. HEARTBEAT 응답 `resource.msrp` = 기능 광고 | |
+
+  **비동기 이벤트**(cmdp→CSP, `type:"event"` — cmp_media_api.md §8 과 동형. ack 는 동일
+  trans_id 의 `type:"response"`, 미ack 시 1s×5 재전송 후 폐기): `MSRP_MSG_RECEIVED`
+  (file_id·conv/msg id·disposition·text 요약) / `MSRP_SEND_RESULT`(status ok/failed·bytes) /
+  `MSRP_ABORTED` (size_exceeded·orphan·idle·conn_reset·parse_error·store_error).
+  이벤트 trans_id 는 cmdp 가 발행(부팅 ms 시드 — 재시작 ack 오매칭 방지).
 - **CSP `McDataMediaService`** (`csp/McDataMediaService.{h,cpp}`) — INVITE 의 m=message 감지
   (`ModuleDispatcher::EventIncomingCall` 훅, PTT-AS 그룹 분기보다 선행)·SDP answer/offer 생성
   (psip 무수정: `CSipCallRtp::m_clsMediaList` → `CSipDialog::AddSdp`)·레그 수명

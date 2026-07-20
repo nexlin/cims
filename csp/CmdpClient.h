@@ -1,11 +1,11 @@
 /*
  * CmdpClient — CSP ↔ cmdp(MCData Media Plane) UDP JSON 제어 클라이언트.
  *
- * CmpClient 와 동일한 envelope({"trans_id":N,"payload":{...}})·trans_id 상관·재전송
- * 패턴의 축소 클론 (단일 endpoint — 멀티 endpoint ring 은 후속). 차이점:
- * cmdp 가 비동기 이벤트(MSG_RECEIVED/SEND_RESULT/SESSION_ABORTED)를 이 소켓으로
- * push 하므로, RecvLoop 가 "event" 키 패킷을 콜백으로 라우팅하고 {"event_ack":id} 를
- * 회신한다.
+ * CmpClient 와 동일한 envelope v2({hdr,payload} — cmp_media_api.md §2)·trans_id 상관·
+ * 재전송 패턴의 축소 클론 (단일 endpoint — 멀티 endpoint ring 은 후속). 차이점:
+ * cmdp 가 비동기 이벤트(MSRP_MSG_RECEIVED/MSRP_SEND_RESULT/MSRP_ABORTED, type:"event")를
+ * 이 소켓으로 push 하므로, RecvLoop 가 event 패킷을 콜백으로 라우팅하고 동일 trans_id 의
+ * type:"response" 를 ack 로 회신한다. 명령 정본: mcdata_messaging.md §4.7.
  */
 
 #ifndef __CMDP_CLIENT_H__
