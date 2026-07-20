@@ -54,7 +54,8 @@ public:
 	std::string	m_strDestIp;
 	int		m_iDestPort;
 	int		m_iDestFloorPort;    // 서버 floor 포트 (m=application, 0이면 미학습)
-	int		m_iDestVideoPort;    // 서버 비디오 포트
+	int		m_iDestVideoPort;    // 서버 비디오 포트 (0=미협상 — 비디오 미송신)
+	std::string m_strUserId;     // floor 메시지 FF_USER_ID (TS 24.380 §8.2.3.6 — NAT 에서 멤버 식별)
     std::string m_strMediaFile;
     std::atomic<int>  m_iLastFloorOp;   // 마지막 수신 floor subtype (TS 24.380: 1=GRANTED,2=TAKEN,5=IDLE,...)
     std::atomic<bool> m_bGrantReceived; // GRANTED(subtype=1) 수신 여부 — TAKEN이 덮어써도 보존

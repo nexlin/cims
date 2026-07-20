@@ -319,6 +319,8 @@ bool SimSession::Start() {
         printf("[%d] RTP thread create error\n", m_iId);
         return false;
     }
+    // floor 메시지 FF_USER_ID — CMP 가 NAT(포트변환) 환경에서 멤버를 식별하는 근거
+    m_clsRtpThread.m_strUserId = m_strUser;
 
     printf("[%d] User=%s started on %s:%d\n",
            m_iId, m_strUser.c_str(), m_strLocalIp.c_str(), m_iLocalPort);

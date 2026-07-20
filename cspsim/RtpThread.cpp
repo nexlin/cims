@@ -189,21 +189,20 @@ bool CRtpThread::SendFloorControl(int iOpCode) {
     if (hSock == INVALID_SOCKET) return false;
 
     // Construct RTCP APP Packet
-    // Header (4 bytes) + SSRC (4 bytes) + Name (4 bytes) + Data (variable)
-    // RTCP Header: V=2, P=0, Subtype=1 (Floor), PT=204 (APP), Len
-    
+    // Header (4 bytes) + SSRC (4 bytes) + Name (4 bytes) + TLV (variable)
+    // RTCP Header: V=2, P=0, Subtype=opcode, PT=204 (APP)
+
     uint8_t buffer[1024];
     uint8_t *ptr = buffer;
-    
+
     // 1. RTCP Header — TS 24.380 §8.2: opcode goes in Subtype(5bits), not app-data
     // V=2(10), P=0, Subtype=opcode
     *ptr++ = 0x80 | ((uint8_t)iOpCode & 0x1F);
     *ptr++ = 204; // PT=APP
 
-    // Length: (total_bytes / 4) - 1.  Header(4)+SSRC(4)+Name(4)+Data(4) = 16 bytes = 3
-    uint16_t len = 3;
-    *ptr++ = (len >> 8) & 0xFF;
-    *ptr++ = len & 0xFF;
+    // Length 는 TLV 확정 후 채움 (아래)
+    uint8_t *pLen = ptr;
+    *ptr++ = 0; *ptr++ = 0;
 
     // 2. SSRC
     uint32_t ssrc = 0x12345678;
@@ -215,10 +214,25 @@ bool CRtpThread::SendFloorControl(int iOpCode) {
     // 3. Name "MCPT"
     *ptr++ = 'M'; *ptr++ = 'C'; *ptr++ = 'P'; *ptr++ = 'T';
 
-    // 4. App-data (opcode field cleared, id_len=0, reserved=0)
-    *ptr++ = 0; *ptr++ = 0; *ptr++ = 0; *ptr++ = 0;
-    
+    // 4. User ID TLV (FF_USER_ID=6, 값 4B 정렬 — TS 24.380 §8.2.3.6).
+    //    NAT(포트변환) 환경에서 CMP 가 floor 발신 멤버를 소스 주소가 아닌 User ID 로
+    //    식별(주소 latch)하는 근거 — 실단말과 동일 동작.
+    if (!m_strUserId.empty() && m_strUserId.size() <= 255) {
+        size_t uidLen = m_strUserId.size();
+        *ptr++ = 6;                    // Field ID: User ID
+        *ptr++ = (uint8_t)uidLen;      // Length (패딩 제외)
+        memcpy(ptr, m_strUserId.c_str(), uidLen);
+        ptr += uidLen;
+        while ((ptr - buffer) % 4) *ptr++ = 0;   // 4B 정렬 패딩
+    } else {
+        // User ID 미설정 시 기존 zero word 유지 (하위호환)
+        *ptr++ = 0; *ptr++ = 0; *ptr++ = 0; *ptr++ = 0;
+    }
+
     int packetLen = ptr - buffer;
+    uint16_t len = (uint16_t)(packetLen / 4 - 1);
+    pLen[0] = (len >> 8) & 0xFF;
+    pLen[1] = len & 0xFF;
     
     // Send to Dest IP/Port (RTCP port is RTP + 1 usually)
     // But verify_ptt.py uses specific server port. 

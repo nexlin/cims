@@ -218,7 +218,14 @@ THREAD_API RtpThreadVideoSend(LPVOID lpParameter) {
     int iNalIdx = 0;
     int iTotalNals = (int)vecNals.size();
     const int MAX_RTP_PAYLOAD = 1200;
-    int iVideoDestPort = (pRtpThread->m_iDestVideoPort > 0) ? pRtpThread->m_iDestVideoPort : pRtpThread->m_iDestPort + 2;
+    // 협상된 video 포트가 없으면 송신하지 않는다 — 구 "audio+2" 관례는 leg 별 포트셋에서
+    // 이웃 leg 의 audio 포트를 침범한다 (NAT 모드에선 오-latch 유발).
+    if (pRtpThread->m_iDestVideoPort <= 0) {
+        printf("[VIDEO-RTP] No negotiated video port — video send disabled\n");
+        pRtpThread->m_bVideoSendThreadRun = false;
+        return 0;
+    }
+    int iVideoDestPort = pRtpThread->m_iDestVideoPort;
 
     while (pRtpThread->m_bStopEvent == false) {
         const std::vector<uint8_t>& nal = vecNals[iNalIdx];

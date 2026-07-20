@@ -398,6 +398,36 @@ cspsim 은 **미디어 파일(`-media_file`/`-media_dir`)을 지정하지 않으
 
 인터랙티브 명령: `s`(stats) · `c`(call) · `g`(group call) · `t`/`r`(PTT push/release) · `sub`(subscribe) · `q`(quit).
 
+### NAT 호시험 (단말 NAT traversal — [design/features/ue_nat_traversal.md](design/features/ue_nat_traversal.md))
+
+NAT 미디어(leg 별 전용 포트 + 목적지 latch)의 검증은 3단계다:
+
+1. **CMP 직접 모사 (루트 불필요)** — 제어 API 로 포트변환 NAT 를 모사해 latch·하향
+   실주소 도달·제3자 주입(타 SSRC) 차단·`STATS detail.nat` 를 확인한다.
+   1:1 relay 스모크는 `python3 cmp/verify_rtp_bridge.py <CMP_IP>` (leg 포트 브리지).
+2. **SIP E2E 판정·전달 (루트 불필요)** — 대상 access service 의 `media_nat_mode=force`
+   + SIGUSR1 후 기본 호시험 실행. CSP 로그의 `caller/callee/member leg NAT` 와 CMP 의
+   `setRemote ... nat=1` / `addMember ... nat=1` 로 판정→전달을 확인한다
+   (no-NAT 환경이라 latch 는 미발동 — 선언=관측 정확 일치 경로로 미디어 무영향).
+3. **풀 NAT E2E (sudo 필요)** — `scripts/nat_netns_sim.sh` 로 cspsim 을 사설
+   네임스페이스(10.99.0.2) 뒤 SNAT NAT 로 보낸다. UE 가 SDP 에 사설 주소를 선언하고
+   관측 소스가 달라지므로 `media_nat_mode=auto` 판정과 CMP latch 가 실호에서 발동한다.
+
+```bash
+# 풀 NAT E2E (③) — access service 는 media_nat_mode=auto 상태에서
+sudo bash scripts/nat_netns_sim.sh setup
+sudo ip netns exec uenat sudo -u cims bash -c \
+  'cd /home/cims/work/cims && ./cims.sh sim -mode ptt -scenario group_call -group g001 -count 4 -call_duration 10'
+sudo bash scripts/nat_netns_sim.sh teardown
+```
+
+성공 판정: CSP `leg NAT (svc=... sdp=10.99.0.2 sig=10.99.0.1)` 로그, CMP
+`dest latched (NAT)` 로그, `STATS detail.nat` 의 `learned_ip/learned_port`, 발언자별
+녹취 세그먼트 정상. 미협상 소스는 `rtp_src_drop` 카운터로 관측된다.
+
+> cspsim `-local_ip <사설IP>` 단독으로는 NAT 모사가 안 된다 — SIP 스택이 그 주소로
+> bind 를 시도해 기동 실패한다. 반드시 netns 방식(③)을 쓴다.
+
 > S6 통합 검증이 cspsim 에 넘기는 시나리오별 인자(`-mode`/`-scenario`/`-count`/`-no_video` 등)는
 > 위 「2.6 S6 — 통합 검증」 표를 참조한다.
 
