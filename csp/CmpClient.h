@@ -4,6 +4,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -96,9 +97,11 @@ public:
     CmpEndpoint SelectEndpointForSession( const std::string &strSessionId );
 
     /** audit 수준2 설정 주입 (CspServer init 에서 gclsSetup 값 전달).
-     *  strHaRole: "active"|"auto"→회수 실행, "standby"→탐지·로그만(오회수 방지). */
+     *  strHaRole: "active"|"auto"→회수 실행, "standby"→탐지·로그만(오회수 방지).
+     *  strHaVip: HaRole=auto 에서 이 VIP 를 로컬 소유하면 active, 아니면 standby 로 동적 판정
+     *  (빈 값이면 auto=active — 단일노드/cold-spare). hot-standby 승격(VIP 이전) 자동 반영. */
     void SetAuditConfig( bool bEnable, int iGraceSec, int iMaxPerCycle, bool bZombieTeardown,
-                         const std::string &strHaRole );
+                         const std::string &strHaRole, const std::string &strHaVip = "" );
 
 private:
     CCmpClient();
@@ -144,14 +147,33 @@ private:
     void RecvLoop();
     void OnTransactionComplete( unsigned int transId, bool success, const std::string &response );
 
+    // ── cmp → CSP 이벤트 (RELAY_ABORTED/PTT_GROUP_ABORTED, type:"event") ──────────
+    //   CMP sweeper 가 유휴 자원을 자체 회수할 때 push. RecvLoop 가 event 를 ack(동일 trans_id
+    //   response)한 뒤 큐에 넣고, 별도 EventDispatchLoop 스레드가 콜백을 처리한다 — RELAY_ABORTED
+    //   핸들러가 RemoveSession(→SendRequestAndWait)을 부르면 RecvLoop 스레드에서 직접 처리 시
+    //   자기 응답을 자기가 기다려 데드락되므로 반드시 분리한다(CmdpClient 와 동일 근거).
+    //   audit(pull)과 상보적 — 이벤트는 회수 즉시 특정 세션을 지목해 수렴 지연을 단축한다.
+    void EventDispatchLoop();
+    void HandleEvent( const SimpleJson::JsonNode &event );
+
     // ── audit 수준2 (CSP↔CMP 세션 재조정) ──────────────────────────────────
-    //   KeepAliveLoop 이 매 HEARTBEAT(3s) 성공 후 호출. CMP digest(Alive 가 stash)와 CSP CallMap
-    //   지문을 대조해 불일치 시에만 SESSION_LIST 로 상세 diff → orphan RemoveSession(회수),
-    //   zombie 는 opt-in teardown. active 역할일 때만 회수(standby 는 탐지·로그만).
+    //   KeepAliveLoop 이 매 HEARTBEAT(3s) 성공 후 호출. Alive 가 endpoint 별 digest 를 stash 하면
+    //   RunAuditCycle 이 CSP CallMap 세션을 담당 endpoint(consistent hash)로 분할해 샤드별로 CMP
+    //   digest 와 대조 → 불일치 샤드만 SESSION_LIST diff → orphan RemoveSession(회수), zombie 는
+    //   opt-in teardown. active 역할일 때만 회수(standby 는 탐지·로그만).
     void RunAuditCycle();
-    // SESSION_LIST 전량 수집(페이지) → id→age_sec (grace 는 회수 시 client-side 적용). primary endpoint.
-    bool FetchSessionList( const std::string &strKind, std::map<std::string, int> &mapOut );
+    // 한 CMP endpoint(샤드) 재조정 — 해당 endpoint 에서 SESSION_LIST diff 후 orphan 회수/zombie 판정.
+    //   setShardCsp = 그 endpoint 로 해시되는 CSP 세션집합.
+    void ReconcileShard( const CmpEndpoint &ep, const std::set<std::string> &setShardCsp );
+    // SESSION_LIST 전량 수집(페이지) → id→age_sec (grace 는 회수 시 client-side 적용). 지정 endpoint.
+    bool FetchSessionList( const CmpEndpoint &ep, const std::string &strKind, std::map<std::string, int> &mapOut );
     static uint64_t Fnv1a64( const std::string &s );
+
+    // ── HaRole 동적 판정 (task 2a) — HaRole=auto + HaVip 설정 시 VIP 소유로 active/standby 결정 ──
+    //   매 audit cycle 재평가 → hot-standby 승격(VIP 이전) 시 별도 훅 없이 3s 내 active 로 전환.
+    //   HaVip 미설정(단일노드/cold-spare)이면 auto=active. 정적 active/standby 는 그대로 override.
+    void ResolveActiveRole();
+    static bool OwnsLocalIp( const std::string &strIp );  // getifaddrs 로 로컬 인터페이스 소유 확인
     // void OnPacketReceived(const std::string& strPacket, const std::string& strIp, int iPort); // Deprecated
 
     std::string m_strCmpIp;
@@ -191,6 +213,14 @@ private:
     //   단일 스레드로 충분(다중 스레드는 단일 소켓 수신큐를 공유해 실질 병렬 이득 없음).
     std::thread m_threadRecv;
 
+    // 이벤트 dispatch 전용 스레드 — RecvLoop 가 큐에 넣고 여기서 콜백(HandleEvent)을 부른다.
+    //   응답(RemoveSession 등)은 RecvLoop 가 정상 수신하므로 데드락이 없다.
+    std::deque<SimpleJson::JsonNode> m_eventQueue;
+    std::mutex m_mutexEvents;
+    std::condition_variable m_cvEvents;
+    std::atomic<bool> m_bEventRunning;
+    std::thread m_threadEventDispatch;
+
     // Connection State
     bool m_bConnected;
     // 연속 HEARTBEAT 실패 횟수. 일시적 UDP 타임아웃 1회에 Disconnected 판정 → 활성 PTT
@@ -203,13 +233,19 @@ private:
     int m_iAuditGraceSec = 30;
     int m_iAuditMaxPerCycle = 20;
     bool m_bAuditZombieTeardown = false;
-    bool m_bAuditActiveRole = true;        // HaRole 해석 (standby 만 false)
+    std::string m_strHaRole = "auto";      // active|standby|auto (auto+HaVip 시 VIP 소유로 동적 판정)
+    std::string m_strHaVip;                // 감시할 VIP(예: VIP_csp). 소유 시 active — HaRole=auto 에서만 사용
+    std::atomic<bool> m_bAuditActiveRole{ true };  // 매 cycle ResolveActiveRole 이 갱신 (event 핸들러도 참조)
+    bool m_bLastActiveRole = true;         // 역할 전환 로그용 직전값
     bool m_bAuditStandbyLogged = false;    // standby 불일치 로그 1회 억제
-    // 최근 primary HEARTBEAT 응답의 CMP relay 세션집합 지문 (Alive 가 갱신, RunAuditCycle 이 소비)
+    // endpoint 별 CMP relay 세션집합 지문 (Alive 가 endpoint 마다 stash, RunAuditCycle 이 샤드별 소비)
+    struct CmpDigest {
+        bool bValid = false;
+        int iCount = 0;
+        uint64_t uHash = 0;
+    };
     std::mutex m_mutexDigest;
-    bool m_bCmpDigestValid = false;
-    int m_iCmpRelayCount = 0;
-    uint64_t m_uCmpRelayHash = 0;
+    std::map<std::string, CmpDigest> m_mapEndpointDigest;  // endpoint key("ip:port") → relay digest
 
 public:
     void SetConnectionCallback( std::function<void( bool )> fnCallback ) {

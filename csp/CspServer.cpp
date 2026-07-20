@@ -228,7 +228,7 @@ int ServiceMain() {
     // audit 수준2 — CSP↔CMP 세션 재조정 설정 주입 (ha_design.md 수준2 / cmp_media_api.md)
     gclsCmpClient.SetAuditConfig( gclsSetup.m_bAuditEnable, gclsSetup.m_iAuditGraceSec,
                                   gclsSetup.m_iAuditMaxPerCycle, gclsSetup.m_bAuditZombieTeardown,
-                                  gclsSetup.m_strHaRole );
+                                  gclsSetup.m_strHaRole, gclsSetup.m_strHaVip );
 
     // Phase 1.D-2 — Redis register state replication (optional, cold-mode if not configured)
     if ( !gclsSetup.m_strRedisHost.empty() && gclsSetup.m_iRedisPort > 0 ) {

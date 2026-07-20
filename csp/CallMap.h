@@ -107,6 +107,9 @@ public:
     /** audit zombie teardown — relay 세션ID 로 호를 지목해 StopCall+Delete(호 강제 종료).
      *  CMP 에 해당 relay 가 소실(재기동 등)돼 미디어가 죽은 좀비 호 정리. 회수 건수 반환. */
     int ReclaimZombieBySessionId( const std::set<std::string> &setLiveOnCmp, int iMaxCount );
+    /** RELAY_ABORTED 이벤트 처리 — 단일 relay 세션ID 를 가진 호를 즉시 종료(StopCall+Delete).
+     *  CMP sweeper 가 이미 relay 를 회수했으므로 미디어가 죽은 호. 찾아 종료했으면 true(멱등). */
+    bool TeardownByRelaySessionId( const std::string &strSessionId );
 
     void GetString( CMonitorString &strBuf );
 

@@ -1,6 +1,7 @@
 #include "CmpClient.h"
 
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "CallMap.h"
+#include "GroupCallService.h"
 #include "Log.h"
 #include "SimpleJson.h"
 #include "SipMessageLogger.h"
@@ -39,6 +41,7 @@ CCmpClient::CCmpClient()
       m_iNextTransId( SeedTransId() ),
       m_bKeepAliveRunning( false ),
       m_bRecvRunning( false ),
+      m_bEventRunning( false ),
       m_bConnected( false ),
       m_iAliveFailCount( 0 ),
       m_ring( 128 ) {
@@ -48,6 +51,12 @@ CCmpClient::~CCmpClient() {
     m_bKeepAliveRunning = false;
     if ( m_threadKeepAlive.joinable() ) {
         m_threadKeepAlive.join();
+    }
+
+    m_bEventRunning = false;
+    m_cvEvents.notify_all();
+    if ( m_threadEventDispatch.joinable() ) {
+        m_threadEventDispatch.join();
     }
 
     m_bRecvRunning = false;
@@ -130,6 +139,11 @@ bool CCmpClient::Init( const std::string &strCmpIp, int iCmpPort, int iLocalPort
         // Start Recv Thread — 단일 수신 스레드(trans_id demux). 비동기 로깅 후 µs 급 처리라 충분.
         m_bRecvRunning = true;
         m_threadRecv = std::thread( &CCmpClient::RecvLoop, this );
+
+        // 이벤트 dispatch 스레드 — RELAY_ABORTED/PTT_GROUP_ABORTED 핸들러가 RemoveSession 을
+        //   부를 수 있으므로 RecvLoop 와 분리 (데드락 회피).
+        m_bEventRunning = true;
+        m_threadEventDispatch = std::thread( &CCmpClient::EventDispatchLoop, this );
     }
 
     if ( !m_bKeepAliveRunning ) {
@@ -751,26 +765,42 @@ bool CCmpClient::RemoveGroup( const std::string &strGroupId, const std::string &
 }
 
 bool CCmpClient::Alive() {
-    SimpleJson::JsonNode req;
-    req.Set( "cmd", "HEARTBEAT" );
-    // CORE 명령 — wire(hdr)에는 sesid 미포함. CSP 내부 flow 로그 쌍 맞춤용으로만 발행.
-    req.Set( "sesid", CSipMessageLogger::IssueSesId( "", "csp" ) );
+    // 모든 endpoint 에 HEARTBEAT — endpoint 별 세션집합 지문(relay)을 stash 한다(per-shard audit).
+    //   각 CMP 는 이 HEARTBEAT 소스로 이벤트 push 대상(CSP 소켓)을 학습한다(RELAY_ABORTED 라우팅).
+    std::vector<CmpEndpoint> eps;
+    {
+        std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+        eps = m_endpoints;
+    }
+    if ( eps.empty() ) return false;
 
-    std::string resp;
-    bool bOk = SendRequestAndWait( req, resp );
-    if ( bOk ) {
-        // audit 수준2 — 응답의 CMP 세션집합 지문(relay)을 stash. RunAuditCycle 이 CSP 지문과 대조.
-        SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse( resp );
-        SimpleJson::JsonNode sd = root.Get( "session_digest" );
-        if ( sd.type == SimpleJson::JSON_OBJECT ) {
-            SimpleJson::JsonNode r = sd.Get( "relay" );
-            std::lock_guard<std::mutex> lock( m_mutexDigest );
-            m_iCmpRelayCount = (int)r.GetInt( "count", 0 );
-            m_uCmpRelayHash = strtoull( r.GetString( "hash" ).c_str(), NULL, 16 );
-            m_bCmpDigestValid = true;
+    bool bPrimaryOk = false;
+    for ( size_t i = 0; i < eps.size(); ++i ) {
+        SimpleJson::JsonNode req;
+        req.Set( "cmd", "HEARTBEAT" );
+        // CORE 명령 — wire(hdr)에는 sesid 미포함. CSP 내부 flow 로그 쌍 맞춤용으로만 발행.
+        req.Set( "sesid", CSipMessageLogger::IssueSesId( "", "csp" ) );
+
+        std::string resp;
+        bool bOk = _SendOnEndpoint( eps[i], req, resp );
+        if ( i == 0 ) bPrimaryOk = bOk;  // primary = Init 가 먼저 등록한 endpoints[0]
+
+        std::lock_guard<std::mutex> lock( m_mutexDigest );
+        CmpDigest &dg = m_mapEndpointDigest[eps[i].strKey];
+        if ( bOk ) {
+            SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse( resp );
+            SimpleJson::JsonNode sd = root.Get( "session_digest" );
+            if ( sd.type == SimpleJson::JSON_OBJECT ) {
+                SimpleJson::JsonNode r = sd.Get( "relay" );
+                dg.iCount = (int)r.GetInt( "count", 0 );
+                dg.uHash = strtoull( r.GetString( "hash" ).c_str(), NULL, 16 );
+                dg.bValid = true;
+            }
+        } else {
+            dg.bValid = false;  // 무응답 endpoint 는 이번 cycle audit 제외
         }
     }
-    return bOk;
+    return bPrimaryOk;
 }
 
 uint64_t CCmpClient::Fnv1a64( const std::string &s ) {
@@ -783,23 +813,67 @@ uint64_t CCmpClient::Fnv1a64( const std::string &s ) {
 }
 
 void CCmpClient::SetAuditConfig( bool bEnable, int iGraceSec, int iMaxPerCycle, bool bZombieTeardown,
-                                 const std::string &strHaRole ) {
+                                 const std::string &strHaRole, const std::string &strHaVip ) {
     m_bAuditEnable = bEnable;
     m_iAuditGraceSec = ( iGraceSec >= 0 ) ? iGraceSec : 30;
     m_iAuditMaxPerCycle = ( iMaxPerCycle > 0 ) ? iMaxPerCycle : 20;
     m_bAuditZombieTeardown = bZombieTeardown;
-    // "standby" 만 회수 비활성(탐지·로그만). "active"/"auto"/기타 = active 취급(HA 미배치 단일노드 포함).
-    m_bAuditActiveRole = ( strHaRole != "standby" );
+    m_strHaRole = strHaRole.empty() ? "auto" : strHaRole;
+    m_strHaVip = strHaVip;
+    ResolveActiveRole();  // 초기 역할 확정 (이후 매 audit cycle 재평가)
     CLog::Print( LOG_INFO,
-                 "CmpClient audit: enable=%d grace=%ds max=%d zombie_teardown=%d role=%s(active=%d)",
+                 "CmpClient audit: enable=%d grace=%ds max=%d zombie_teardown=%d role=%s vip=%s(active=%d)",
                  m_bAuditEnable, m_iAuditGraceSec, m_iAuditMaxPerCycle, m_bAuditZombieTeardown,
-                 strHaRole.c_str(), m_bAuditActiveRole );
+                 m_strHaRole.c_str(), m_strHaVip.empty() ? "-" : m_strHaVip.c_str(), m_bAuditActiveRole.load() );
 }
 
-// SESSION_LIST 전량 페이지 수집 (primary endpoint). id→age_sec. grace 는 회수 시 client-side 적용
+// 로컬 인터페이스 중 strIp 를 소유한 게 있는지 (getifaddrs). VIP 소유 = 이 노드가 active.
+bool CCmpClient::OwnsLocalIp( const std::string &strIp ) {
+    if ( strIp.empty() ) return false;
+    struct ifaddrs *pIfAddr = NULL;
+    if ( getifaddrs( &pIfAddr ) != 0 ) return false;
+    bool bOwned = false;
+    for ( struct ifaddrs *ifa = pIfAddr; ifa != NULL; ifa = ifa->ifa_next ) {
+        if ( ifa->ifa_addr == NULL || ifa->ifa_addr->sa_family != AF_INET ) continue;
+        char buf[INET_ADDRSTRLEN] = { 0 };
+        struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+        if ( inet_ntop( AF_INET, &sin->sin_addr, buf, sizeof( buf ) ) && strIp == buf ) {
+            bOwned = true;
+            break;
+        }
+    }
+    freeifaddrs( pIfAddr );
+    return bOwned;
+}
+
+// HaRole 동적 판정 — 매 audit cycle 및 설정 시 호출. auto+HaVip 이면 VIP 소유로 active/standby 결정.
+//   hot-standby 가 승격(VIP 인수)하면 별도 훅 없이 다음 cycle(≤3s)에 active 로 전환된다.
+void CCmpClient::ResolveActiveRole() {
+    bool bActive;
+    if ( m_strHaRole == "active" ) {
+        bActive = true;
+    } else if ( m_strHaRole == "standby" ) {
+        bActive = false;
+    } else {  // "auto"
+        // HaVip 설정 시 VIP 소유로 판정(hot-standby 동적 전환). 미설정 시 active(단일노드/cold-spare — 부팅=active).
+        bActive = m_strHaVip.empty() ? true : OwnsLocalIp( m_strHaVip );
+    }
+    m_bAuditActiveRole = bActive;
+    if ( bActive != m_bLastActiveRole ) {
+        CLog::Print( LOG_INFO, "Audit HaRole 전환: %s → %s (role=%s vip=%s%s)",
+                     m_bLastActiveRole ? "active" : "standby", bActive ? "active" : "standby",
+                     m_strHaRole.c_str(), m_strHaVip.empty() ? "-" : m_strHaVip.c_str(),
+                     ( m_strHaRole == "auto" && !m_strHaVip.empty() ) ? ( bActive ? " 소유" : " 미소유" ) : "" );
+        m_bLastActiveRole = bActive;
+        m_bAuditStandbyLogged = false;  // 전환 시 재로그 허용
+    }
+}
+
+// SESSION_LIST 전량 페이지 수집 (지정 endpoint). id→age_sec. grace 는 회수 시 client-side 적용
 //   (min_age_sec=0 로 전량 받아 zombie 판정을 정확히 — grace 필터를 서버서 걸면 신규 세션이
-//   zombie 로 오판된다). 다중 endpoint per-shard audit 은 multi-endpoint dispatch 활성 시 후속.
-bool CCmpClient::FetchSessionList( const std::string &strKind, std::map<std::string, int> &mapOut ) {
+//   zombie 로 오판된다).
+bool CCmpClient::FetchSessionList( const CmpEndpoint &ep, const std::string &strKind,
+                                   std::map<std::string, int> &mapOut ) {
     int offset = 0;
     for ( int guard = 0; guard < 256; ++guard ) {  // 256*40 = 10240 상한 (무한 페이지 방지)
         SimpleJson::JsonNode req;
@@ -811,7 +885,7 @@ bool CCmpClient::FetchSessionList( const std::string &strKind, std::map<std::str
         req.Set( "sesid", CSipMessageLogger::IssueSesId( "", "csp" ) );
 
         std::string resp;
-        if ( !SendRequestAndWait( req, resp ) ) return false;
+        if ( !_SendOnEndpoint( ep, req, resp ) ) return false;
         SimpleJson::JsonNode root = SimpleJson::JsonNode::Parse( resp );
         if ( root.GetString( "status" ) != "OK" ) return false;
 
@@ -831,51 +905,80 @@ bool CCmpClient::FetchSessionList( const std::string &strKind, std::map<std::str
 }
 
 // audit 수준2 재조정 — KeepAliveLoop 이 HEARTBEAT 성공 후 매 cycle(3s) 호출.
+//   per-shard: CSP relay 세션을 담당 CMP endpoint(consistent hash)로 분할해 endpoint 별 digest 와
+//   대조 → 불일치 샤드만 그 CMP 에서 SESSION_LIST 를 당겨 회수. 단일 CMP 면 샤드 1개 = 종전 동작.
 void CCmpClient::RunAuditCycle() {
     if ( !m_bAuditEnable ) return;
 
-    // CMP digest stash (Alive 갱신) 읽기
-    bool bValid;
-    int iCmpCount;
-    uint64_t uCmpHash;
+    ResolveActiveRole();  // 매 cycle 역할 재평가 — HaRole=auto+HaVip 시 VIP 소유로 active/standby 갱신(hot-standby 승격 반영)
+
+    std::vector<CmpEndpoint> eps;
     {
-        std::lock_guard<std::mutex> lock( m_mutexDigest );
-        bValid = m_bCmpDigestValid;
-        iCmpCount = m_iCmpRelayCount;
-        uCmpHash = m_uCmpRelayHash;
+        std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+        eps = m_endpoints;
     }
-    if ( !bValid ) return;
+    if ( eps.empty() ) return;
 
     // CSP 측 relay 세션집합 (dialog + 트랜잭션 양쪽 — 설정중 세션 오판 방지)
     std::set<std::string> setCsp;
     gclsCallMap.CollectRelaySessionIds( setCsp );
     gclsTransCallMap.CollectRelaySessionIds( setCsp );
 
-    uint64_t uCspHash = 0;
-    for ( const auto &sid : setCsp ) uCspHash ^= Fnv1a64( sid );
-    int iCspCount = (int)setCsp.size();
-
-    if ( iCspCount == iCmpCount && uCspHash == uCmpHash ) return;  // 정합 — 상시 경로는 여기서 종료
-
-    // 불일치 — standby 는 탐지·로그만(오회수 방지), active 만 회수 진행.
-    if ( !m_bAuditActiveRole ) {
-        if ( !m_bAuditStandbyLogged ) {
-            CLog::Print( LOG_INFO,
-                         "Audit: digest mismatch observed (standby role — no reclaim). csp[%d,%016llx] cmp[%d,%016llx]",
-                         iCspCount, (unsigned long long)uCspHash, iCmpCount, (unsigned long long)uCmpHash );
-            m_bAuditStandbyLogged = true;
-        }
-        return;
+    // 세션을 담당 endpoint(consistent hash)로 분할
+    std::map<std::string, std::set<std::string>> mapShard;  // endpoint key → CSP 세션집합
+    for ( const auto &sid : setCsp ) {
+        CmpEndpoint ep = SelectEndpointForSession( sid );
+        mapShard[ep.strKey].insert( sid );
     }
-    m_bAuditStandbyLogged = false;
 
-    CLog::Print( LOG_INFO, "Audit: session digest mismatch — reconciling. csp[%d,%016llx] cmp[%d,%016llx]",
-                 iCspCount, (unsigned long long)uCspHash, iCmpCount, (unsigned long long)uCmpHash );
+    // endpoint(샤드)별로 지문 대조 — 불일치 샤드만 재조정
+    static const std::set<std::string> kEmpty;
+    for ( const auto &ep : eps ) {
+        CmpDigest dg;
+        {
+            std::lock_guard<std::mutex> lock( m_mutexDigest );
+            auto it = m_mapEndpointDigest.find( ep.strKey );
+            if ( it != m_mapEndpointDigest.end() ) dg = it->second;
+        }
+        if ( !dg.bValid ) continue;  // 이 endpoint 는 이번 cycle HEARTBEAT 무응답 — 재조정 보류
 
-    // 상세 diff — CMP 전량(min_age=0) 수집
+        auto itShard = mapShard.find( ep.strKey );
+        const std::set<std::string> &shard = ( itShard != mapShard.end() ) ? itShard->second : kEmpty;
+        uint64_t uCspHash = 0;
+        for ( const auto &sid : shard ) uCspHash ^= Fnv1a64( sid );
+        int iCspCount = (int)shard.size();
+
+        if ( iCspCount == dg.iCount && uCspHash == dg.uHash ) continue;  // 이 샤드 정합 — 무동작
+
+        // 불일치 — standby 는 탐지·로그만(오회수 방지), active 만 회수.
+        if ( !m_bAuditActiveRole ) {
+            if ( !m_bAuditStandbyLogged ) {
+                CLog::Print(
+                    LOG_INFO,
+                    "Audit: shard(%s) digest mismatch observed (standby role — no reclaim). csp[%d,%016llx] cmp[%d,%016llx]",
+                    ep.strKey.c_str(), iCspCount, (unsigned long long)uCspHash, dg.iCount,
+                    (unsigned long long)dg.uHash );
+                m_bAuditStandbyLogged = true;
+            }
+            continue;
+        }
+        m_bAuditStandbyLogged = false;
+
+        CLog::Print( LOG_INFO,
+                     "Audit: shard(%s) digest mismatch — reconciling. csp[%d,%016llx] cmp[%d,%016llx]",
+                     ep.strKey.c_str(), iCspCount, (unsigned long long)uCspHash, dg.iCount,
+                     (unsigned long long)dg.uHash );
+        ReconcileShard( ep, shard );
+    }
+}
+
+// 한 CMP endpoint(샤드) 재조정 — 그 CMP 에서 SESSION_LIST 전량을 당겨 diff.
+//   orphan(CMP有 shard-CSP無, grace 충족) → RemoveSession 회수. zombie(shard-CSP有 CMP無, 미디어
+//   소실) → 지정 세션 teardown(opt-in). 세션 재라우팅 없이 지정 sid 로 처리(다른 샤드 오회수 방지).
+void CCmpClient::ReconcileShard( const CmpEndpoint &ep, const std::set<std::string> &setShardCsp ) {
     std::map<std::string, int> mapCmp;
-    if ( !FetchSessionList( "relay", mapCmp ) ) {
-        CLog::Print( LOG_ERROR, "Audit: SESSION_LIST fetch failed — 이번 cycle skip" );
+    if ( !FetchSessionList( ep, "relay", mapCmp ) ) {
+        CLog::Print( LOG_ERROR, "Audit: SESSION_LIST(%s) fetch failed — 이 샤드 skip", ep.strKey.c_str() );
         return;
     }
 
@@ -884,40 +987,47 @@ void CCmpClient::RunAuditCycle() {
     for ( const auto &kv : mapCmp ) {
         const std::string &sid = kv.first;
         int age = kv.second;
-        if ( setCsp.count( sid ) ) continue;
+        if ( setShardCsp.count( sid ) ) continue;
         if ( age < m_iAuditGraceSec ) continue;  // 신규 setup 세션 보호(grace)
         if ( iReclaimed >= m_iAuditMaxPerCycle ) {
             ++iDeferred;
             continue;
         }
-        RemoveSession( sid );  // 기존 경로 — 멱등
-        CLog::Print( LOG_INFO, "Audit orphan reclaim: relay=%s age=%ds (CMP有 CSP無 → RemoveSession)",
-                     sid.c_str(), age );
+        RemoveSession( sid );  // 기존 경로 — 멱등(sid sticky/ring 으로 이 endpoint 에 라우팅)
+        CLog::Print( LOG_INFO, "Audit orphan reclaim: relay=%s age=%ds shard=%s (CMP有 CSP無 → RemoveSession)",
+                     sid.c_str(), age, ep.strKey.c_str() );
         ++iReclaimed;
     }
     if ( iDeferred > 0 )
-        CLog::Print( LOG_INFO, "Audit: orphan reclaim %d건 다음 cycle 이월 (max=%d)", iDeferred,
-                     m_iAuditMaxPerCycle );
+        CLog::Print( LOG_INFO, "Audit: orphan reclaim %d건 다음 cycle 이월 (shard=%s max=%d)", iDeferred,
+                     ep.strKey.c_str(), m_iAuditMaxPerCycle );
 
-    // zombie (CSP有 CMP無) — cmp 전량(mapCmp)에 없으면 미디어 소실.
+    // zombie (shard-CSP有 CMP無) — 이 endpoint 목록에 없으면 미디어 소실. 지정 sid teardown(opt-in).
     std::set<std::string> setCmpKeys;
     for ( const auto &kv : mapCmp ) setCmpKeys.insert( kv.first );
-    int iZombie = 0;
-    for ( const auto &sid : setCsp )
-        if ( !setCmpKeys.count( sid ) ) ++iZombie;
-    if ( iZombie > 0 ) {
-        if ( m_bAuditZombieTeardown ) {
-            int z = gclsCallMap.ReclaimZombieBySessionId( setCmpKeys, m_iAuditMaxPerCycle );
-            CLog::Print( LOG_INFO, "Audit zombie teardown: %d/%d call(s) 종료 (CSP有 CMP無)", z, iZombie );
-        } else {
-            CLog::Print( LOG_INFO,
-                         "Audit: zombie relay %d건 감지 (CSP有 CMP無 — 미디어 소실). teardown 비활성(탐지만); "
-                         "StaleCallTimeout 백스톱에 위임 (활성화: MediaServer.Audit.ZombieTeardown)",
-                         iZombie );
+    int iZombie = 0, iTorn = 0;
+    for ( const auto &sid : setShardCsp ) {
+        if ( setCmpKeys.count( sid ) ) continue;
+        ++iZombie;
+        if ( m_bAuditZombieTeardown && iTorn < m_iAuditMaxPerCycle ) {
+            bool bDone = gclsCallMap.TeardownByRelaySessionId( sid );
+            if ( !bDone ) bDone = gclsTransCallMap.TeardownByRelaySessionId( sid );
+            if ( bDone ) ++iTorn;
         }
     }
+    if ( iZombie > 0 ) {
+        if ( m_bAuditZombieTeardown )
+            CLog::Print( LOG_INFO, "Audit zombie teardown: %d/%d call(s) 종료 (shard=%s CSP有 CMP無)", iTorn,
+                         iZombie, ep.strKey.c_str() );
+        else
+            CLog::Print( LOG_INFO,
+                         "Audit: zombie relay %d건 감지 (shard=%s CSP有 CMP無 — 미디어 소실). teardown 비활성(탐지만); "
+                         "StaleCallTimeout 백스톱에 위임 (활성화: MediaServer.Audit.ZombieTeardown)",
+                         iZombie, ep.strKey.c_str() );
+    }
 
-    CLog::Print( LOG_INFO, "Audit cycle done: orphan_reclaimed=%d zombie_detected=%d", iReclaimed, iZombie );
+    CLog::Print( LOG_INFO, "Audit shard(%s) done: orphan_reclaimed=%d zombie_detected=%d", ep.strKey.c_str(),
+                 iReclaimed, iZombie );
 }
 
 void CCmpClient::RecvLoop() {
@@ -938,6 +1048,38 @@ void CCmpClient::RecvLoop() {
             if ( root.type == SimpleJson::JSON_OBJECT && root.Get( "hdr" ).type == SimpleJson::JSON_OBJECT ) {
                 SimpleJson::JsonNode hdr = root.Get( "hdr" );
                 int transId = (int)hdr.GetInt( "trans_id", 0 );
+
+                // CMP 비동기 이벤트(RELAY_ABORTED/PTT_GROUP_ABORTED) — 동일 trans_id 의 v2 response 로
+                //   ack 회신 후 이벤트 큐에 넣어 dispatch 스레드로 넘긴다 (핸들러가 RemoveSession 을
+                //   부를 수 있어 RecvLoop 에서 직접 처리 금지 — 데드락 회피). cmp_media_api.md §8.
+                if ( hdr.GetString( "type" ) == "event" ) {
+                    SimpleJson::JsonNode ackHdr;
+                    ackHdr.Set( "ver", 2 );
+                    ackHdr.Set( "trans_id", transId );
+                    ackHdr.Set( "node", gclsSipLogger.GetSystemId().empty() ? "csp_01" : gclsSipLogger.GetSystemId() );
+                    ackHdr.Set( "cmd", hdr.GetString( "cmd" ) );
+                    ackHdr.Set( "type", "response" );
+                    ackHdr.Set( "status", "OK" );
+                    SimpleJson::JsonNode ack;
+                    ack.Set( "hdr", ackHdr );
+                    std::string strAck = ack.ToString();
+                    sendto( m_hSocket, strAck.c_str(), strAck.length(), 0, (struct sockaddr *)&cliaddr, len );
+
+                    if ( gclsSipLogger.IsEnabled() ) {
+                        gclsSipLogger.LogMessage( "cmp", "csp", "JSON", hdr.GetString( "cmd" ).c_str(),
+                                                  ( m_strCmpIp + ":" + std::to_string( m_iCmpPort ) ).c_str(),
+                                                  strPacket.c_str(), hdr.GetString( "service", "system" ).c_str(),
+                                                  std::to_string( transId ).c_str(), hdr.GetString( "sesid" ).c_str(),
+                                                  "", "", "" );
+                    }
+                    {
+                        std::lock_guard<std::mutex> lock( m_mutexEvents );
+                        m_eventQueue.push_back( root );
+                    }
+                    m_cvEvents.notify_one();
+                    continue;
+                }
+
                 std::string strStatus = hdr.GetString( "status", "ERROR" );
 
                 // 소비자(AddSession 등) 파싱 호환 — payload 에 hdr 의 status/code/reason 을
@@ -988,6 +1130,76 @@ void CCmpClient::RecvLoop() {
 }
 
 // OnPacketReceived is deprecated/unused with new RecvLoop logic.
+
+// 이벤트 dispatch 전용 스레드 — RecvLoop 가 큐에 넣으면 여기서 HandleEvent 를 부른다.
+//   (핸들러의 RemoveSession 응답은 RecvLoop 가 수신하므로 데드락 없음.)
+void CCmpClient::EventDispatchLoop() {
+    while ( m_bEventRunning ) {
+        SimpleJson::JsonNode clsEvent;
+        {
+            std::unique_lock<std::mutex> lock( m_mutexEvents );
+            m_cvEvents.wait( lock, [this] { return !m_eventQueue.empty() || !m_bEventRunning; } );
+            if ( !m_bEventRunning && m_eventQueue.empty() ) break;
+            clsEvent = m_eventQueue.front();
+            m_eventQueue.pop_front();
+        }
+        try {
+            HandleEvent( clsEvent );
+        } catch ( ... ) {
+            CLog::Print( LOG_ERROR, "CmpClient HandleEvent exception" );
+        }
+    }
+}
+
+// CMP 이벤트 처리 (EventDispatchLoop 스레드). 회수(teardown)는 active 역할일 때만 —
+//   standby 는 탐지·로그만(오회수 방지, audit 회수 게이트와 동일 정책). 이벤트는 CMP 가 자원을
+//   확정 회수했다는 authoritative 신호라 audit(pull) zombie 추정과 달리 opt-in 없이 즉시 처리한다.
+void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
+    SimpleJson::JsonNode hdr = event.Get( "hdr" );
+    SimpleJson::JsonNode payload = event.Get( "payload" );
+    std::string strCmd = hdr.GetString( "cmd" );
+
+    if ( strCmd == "RELAY_ABORTED" ) {
+        std::string strSid = payload.GetString( "session_id" );
+        std::string strReason = payload.GetString( "reason" );
+        int iHeld = (int)payload.GetInt( "held_sec", 0 );
+        if ( !m_bAuditActiveRole ) {
+            CLog::Print( LOG_INFO, "RELAY_ABORTED observed (standby — no teardown): relay=%s reason=%s held=%ds",
+                         strSid.c_str(), strReason.c_str(), iHeld );
+            return;
+        }
+        // 확립 호(hold_timeout) 또는 실패 setup(orphan_no_rtp) — 양쪽 CallMap 에서 지목 종료(멱등).
+        bool bDone = gclsCallMap.TeardownByRelaySessionId( strSid );
+        if ( !bDone ) bDone = gclsTransCallMap.TeardownByRelaySessionId( strSid );
+        ReleaseEndpointForKey( strSid );
+        {
+            std::lock_guard<std::mutex> lock( m_mutexSesid );
+            m_mapKeyToSesid.erase( strSid );
+        }
+        CLog::Print( LOG_INFO, "RELAY_ABORTED handled: relay=%s reason=%s held=%ds torn_down=%d",
+                     strSid.c_str(), strReason.c_str(), iHeld, bDone );
+    } else if ( strCmd == "PTT_GROUP_ABORTED" ) {
+        std::string strGid = payload.GetString( "group_id" );
+        std::string strReason = payload.GetString( "reason" );
+        if ( !m_bAuditActiveRole ) {
+            CLog::Print( LOG_INFO, "PTT_GROUP_ABORTED observed (standby — no action): group=%s reason=%s",
+                         strGid.c_str(), strReason.c_str() );
+            return;
+        }
+        // CMP 가 유휴 그룹(멤버·활동 없음)을 회수 — CSP 캐시(sesid/endpoint) 정리로 다음 사용 시
+        //   깨끗이 재수립되게 한다. 진행 중 멤버 호는 없음(회수 조건이 멤버 0)이라 teardown 불필요.
+        gclsGroupCallService.OnGroupAborted( strGid );
+        ReleaseEndpointForKey( strGid );
+        {
+            std::lock_guard<std::mutex> lock( m_mutexSesid );
+            m_mapKeyToSesid.erase( strGid );
+        }
+        CLog::Print( LOG_INFO, "PTT_GROUP_ABORTED handled: group=%s reason=%s (캐시 정리)", strGid.c_str(),
+                     strReason.c_str() );
+    } else {
+        CLog::Print( LOG_INFO, "CmpClient: unknown event cmd=%s (무시)", strCmd.c_str() );
+    }
+}
 
 void CCmpClient::KeepAliveLoop() {
     while ( m_bKeepAliveRunning ) {

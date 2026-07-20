@@ -192,13 +192,18 @@ standby 는 탐지·로그만). hot-standby 가 빈 CallMap 으로 active 의 li
 오회수하는 것을 차단하는 핵심 게이트다. `GraceSec`(기본 30s)는 설정 중인 신규
 세션의 오회수를 막는다.
 
-**역할 전환 주의** — 현재 `HaRole` 은 정적 설정이다:
-- **cold-spare**(standby 미기동, keepalived notify 가 승격 시 기동): 기동된 프로세스가
-  곧 active 이므로 `auto`(=active)면 승격 즉시 회수가 발동한다.
-- **hot-standby**(standby 상시 기동): 반드시 `HaRole=standby` 로 두어 오회수를
-  막되, **승격 시 active 로 전환**돼야 회수가 발동한다. 정적 설정만으로는 전환이
-  안 되므로, keepalived `notify_master` 가 CSP 를 `active` 로 재설정(reload)하거나
-  런타임 VIP 소유 감지로 역할을 판정하는 연동이 **후속 과제**다.
+**역할 판정** — `HaRole` 은 `active`/`standby`(정적 override) 또는 `auto`(기본, 동적)다.
+`auto` 는 `HaVip` 설정 여부로 두 배포 모드를 한 규칙으로 처리한다:
+- **cold-spare**(standby 미기동, keepalived notify 가 승격 시 `systemctl start`): 기동된
+  프로세스가 곧 active 다. `HaVip` 미설정이면 `auto`=active 라 부팅 즉시 회수가 발동한다
+  (승격한 노드가 VIP 를 소유하므로 `HaVip` 을 걸어도 결과는 active 로 동일).
+- **hot-standby**(standby 상시 기동): CSP 가 매 audit cycle(≤3s) `HaVip`(예: VIP_csp)의
+  **로컬 소유 여부를 `getifaddrs` 로 확인**해 역할을 동적 판정한다. standby 는 VIP 미소유라
+  탐지·로그만, 승격(keepalived 가 VIP 이전)하면 다음 cycle 에 소유가 감지돼 자동으로 active
+  로 전환·회수가 발동한다. **별도 keepalived 훅 불필요** — VIP 소유가 곧 ground truth 라
+  keepalived 재시작·split-brain 복구에도 연속 수렴한다. `HaVip` 은 configure 가 active_standby
+  ha_group 의 CSP 시그널링 VIP 에서 자동 렌더한다(all_active/단일노드는 CSP 전용 VIP 가 없어
+  빈 값 → auto=active).
 
 **push 가 아닌 pull 인 이유**: 절체 후 새 active 는 옛 세션ID·CallMap 이 없어
 CMP 가 event 를 push 해도 상관지을 대상이 없다(ack 후 폐기). CMP 의 현재 사실을
@@ -212,10 +217,15 @@ CMP 가 event 를 push 해도 상관지을 대상이 없다(ack 후 폐기). CMP
 | `GraceSec` | `30` | SESSION_LIST grace — 신규 setup 세션 보호 |
 | `MaxPerCycle` | `20` | 한 cycle 회수 상한(회수 폭풍 방지, 초과분 다음 cycle) |
 | `ZombieTeardown` | `false` | zombie 호 강제 종료 opt-in(기본 탐지+로그, StaleCallTimeout 백스톱) |
-| `HaRole` | `auto` | `active`/`auto`=회수 실행, `standby`=탐지·로그만 |
+| `HaRole` | `auto` | `active`=회수 실행, `standby`=탐지·로그만, `auto`=HaVip 소유로 동적 판정(미설정 시 active) |
+| `HaVip` | `""` | `auto` 에서 감시할 VIP — 로컬 소유=active. configure 가 active_standby CSP VIP 로 자동 렌더 |
 
-> **다중 endpoint(CMP All Active) per-shard audit** 는 multi-endpoint dispatch
-> 활성화와 함께 후속. 현재는 primary endpoint 기준으로 재조정한다.
+**다중 endpoint(CMP All Active) per-shard audit** — CSP 는 relay 세션을 담당 CMP
+endpoint(consistent hash)로 분할해 endpoint 별 `session_digest` 와 샤드별로 대조하고,
+불일치 샤드만 그 CMP 에서 `SESSION_LIST` 를 당겨 회수한다. 매 HEARTBEAT 는 모든 endpoint 로
+보내 endpoint 별 지문을 갱신한다. 단일 CMP 배치면 샤드가 1개라 전량 대조와 동일하다.
+orphan 회수(`RemoveSession`)는 세션 sticky/ring 으로 해당 CMP 에 라우팅되고, zombie teardown
+은 세션ID 를 직접 지목(`TeardownByRelaySessionId`)해 다른 샤드의 오회수를 막는다.
 
 ## 6. State replication 설계 (Redis)
 

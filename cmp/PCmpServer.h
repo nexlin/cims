@@ -60,6 +60,17 @@ protected:
     int sendErr(const std::string& ip, int port, int transId, const std::string& cmd,
                 const std::string& sesid, const std::string& svc,
                 const char* code, const char* reason);
+
+    // ── cmp → CSP 이벤트 push (RELAY_ABORTED/PTT_GROUP_ABORTED) ──────────────────
+    //   sweeper 가 유휴 자원을 자체 회수할 때 소유 client(CSP)에 비동기 통지한다
+    //   (docs/api/cmp_media_api.md §8). ack = 동일 trans_id 의 type:"response",
+    //   미ack 시 1s 간격 최대 5회 재전송(CmdpClient 이벤트 채널과 동형). digest-on-HB
+    //   audit 과 상보적 — 이벤트는 회수 즉시 특정 세션을 지목해 지연을 단축하고, audit(pull)은
+    //   이벤트 유실·절체까지 커버한다.
+    //   호출은 sweeper 가 _mutex 를 놓은 뒤 수행(비재귀 _mutex 데드락 회피) — 상태는 _eventMtx 로 보호.
+    void emitEvent(const char* name, const SimpleJson::JsonNode& payload, const std::string& sesid,
+                   const std::string& service);
+    void retransmitEvents();  // timeoutLoop 이 매 초 호출
     // HEARTBEAT/STATS 공통 자원 요약 (호출측이 _mutex 보유)
     SimpleJson::JsonNode buildResourceSummary();
     // 세션집합 지문(audit 수준2) — {relay:{count,hash}, group:{count,hash}}. hash=XOR(fnv1a64(id))
@@ -93,6 +104,18 @@ private:
     // 미협상 소스 드롭 전역 누적 — 자원 해제 시 이월 (STATS rtp_src_drop 단조 증가 보장)
     long long _srcDropTotal = 0;
     PMutex _mutex;
+
+    // ── 이벤트 push 상태 (별도 _eventMtx — sweeper 가 _mutex 보유 중 접근하지 않도록 분리) ──
+    std::mutex _eventMtx;         // _cspIp/_cspPort/_pendingEvents/_eventSeq 보호
+    std::string _cspIp;           // 이벤트 회신처 — 마지막 제어 요청 소스(CmpClient 소켓 주소)
+    int _cspPort = 0;
+    struct PendingEvent {
+        std::string json;
+        int attempts;
+        time_t nextAt;
+    };
+    std::map<long, PendingEvent> _pendingEvents;  // event trans_id → 재전송 상태
+    long _eventSeq = 0;           // 이벤트 trans_id 발행 카운터 — 기동 시 ms 시드(재시작 ack 오매칭 방지)
 
     // sesid 발행 유틸: {caller}::cmp::{us_ts}::{counter}
     static std::string issueSesid(const std::string& caller);

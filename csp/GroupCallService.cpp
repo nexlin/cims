@@ -69,6 +69,12 @@ void CGroupCallService::RemoveGroupSesId( const std::string &strGroupId ) {
     m_mapGroupSesId.erase( strGroupId );
 }
 
+void CGroupCallService::OnGroupAborted( const std::string &strGroupId ) {
+    RemoveGroupSesId( strGroupId );
+    CLog::Print( LOG_INFO, "GroupCallService: group=%s aborted by CMP (idle) — sesid 캐시 정리, 재사용 시 재수립",
+                 strGroupId.c_str() );
+}
+
 bool CGroupCallService::GetOrAllocMemberPort( const std::string &strGroupId, const std::string &strMemberId,
                                               int &iAudioPort, int &iVideoPort ) {
     {

@@ -378,6 +378,28 @@ int CCallMap::ReclaimZombieBySessionId( const std::set<std::string> &setLiveOnCm
     return iDone;
 }
 
+// RELAY_ABORTED 이벤트 — CMP 가 회수한 relay 세션ID 를 가진 호를 지목해 StopCall+Delete.
+//   CMP 가 이미 relay 를 해제했으므로 RemoveSession 은 멱등 no-op. 찾으면 종료 후 true.
+bool CCallMap::TeardownByRelaySessionId( const std::string &strSessionId ) {
+    if ( strSessionId.empty() ) return false;
+    std::string strCallId;
+    m_clsMutex.acquire();
+    for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
+        if ( itMap->second.m_strRelaySessionId == strSessionId ) {
+            strCallId = itMap->first;
+            break;
+        }
+    }
+    m_clsMutex.release();
+
+    if ( strCallId.empty() ) return false;  // 이미 종료됨 — 멱등
+    CLog::Print( LOG_INFO, "RELAY_ABORTED teardown: CallId(%s) relay=%s (CMP 회수 — 미디어 소실)",
+                 strCallId.c_str(), strSessionId.c_str() );
+    gclsUserAgent.StopCall( strCallId.c_str() );
+    Delete( strCallId.c_str() );  // bStopPort=true → RemoveSession (이미 CMP 회수라 no-op 멱등)
+    return true;
+}
+
 /**
  * @ingroup CspServer
  * @brief 모든 통화를 종료시킨다.

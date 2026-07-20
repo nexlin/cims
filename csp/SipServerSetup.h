@@ -215,6 +215,10 @@ public:
     // HA 역할 — active 만 회수 실행(standby 는 탐지·로그만; hot-standby 오회수 방지).
     //   "active"|"standby"|"auto"(기본, HA 미배치=active 취급). 절체 시 승격 노드가 active.
     std::string m_strHaRole = "auto";
+    // HaRole=auto 에서 이 VIP(예: VIP_csp)를 로컬 소유하면 active, 아니면 standby 로 동적 판정.
+    //   hot-standby 상시기동 시 승격(VIP 인수)을 별도 훅 없이 다음 audit cycle(≤3s)에 반영.
+    //   빈 값이면 auto=active(단일노드/cold-spare — 승격 시 기동된 프로세스가 곧 active).
+    std::string m_strHaVip;
 
     // ================================================================
     // CMDP(MCData Media Plane, MSRP) 연동 설정 — Setup.McDataMedia.*

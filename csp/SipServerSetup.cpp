@@ -257,6 +257,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                     if ( au.Has( "ZombieTeardown" ) )
                         m_bAuditZombieTeardown = ( au.Get( "ZombieTeardown" ).AsString() == "true" );
                     if ( au.Has( "HaRole" ) ) m_strHaRole = au.GetString( "HaRole" );
+                    if ( au.Has( "HaVip" ) ) m_strHaVip = au.GetString( "HaVip" );
                 }
             } else if ( setup.Has( "RtpRelay" ) ) {
                 SimpleJson::JsonNode rtp = setup.Get( "RtpRelay" );

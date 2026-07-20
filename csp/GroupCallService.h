@@ -71,6 +71,10 @@ public:
     /** Called by CSC interface when group/user config changes externally */
     void OnGroupConfigChanged();
 
+    /** CMP 가 유휴 그룹(멤버·활동 없음)을 자체 회수(PTT_GROUP_ABORTED)했을 때 CSP 캐시를 정리한다.
+     *  다음 그룹 사용 시 SyncGroupsState/AddGroup 경로가 깨끗한 sesid 로 재수립한다. CmpClient 이벤트 핸들러가 호출. */
+    void OnGroupAborted( const std::string &strGroupId );
+
     /**
      * @brief Send RFC 4575 conference-info NOTIFY to all active participants in a group
      * @param strGroupId  Group ID

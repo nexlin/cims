@@ -20,6 +20,10 @@
 #include <unordered_map>
 #include <chrono>
 
+// 이벤트 재전송 정책: 1초 간격 최대 5회 (미ack 시 폐기 — CSP 재기동 구간 손실 허용, digest audit 이 보완)
+static const int kEventMaxAttempts = 5;
+static const int kEventRetryIntervalSec = 1;
+
 // 비동기 배치 writer 튜닝값 (CSP SipMessageLogger 와 동일)
 static const size_t kCmpLogNotifyThreshold = 128;     // 큐가 이만큼 쌓이면 즉시 flush 깨움
 static const size_t kCmpLogMaxQueue = 200000;         // 큐 상한 (NFS 장애 backlog 시 메모리 폭주 방지)
@@ -46,6 +50,12 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     initResourcePool();
     initPttResourcePool();
     initPttMemberPool();
+
+    // 이벤트 trans_id 시드 — 부팅 시각(ms) 하위 비트. 재시작 직후 발행 ID 가 구세대와 겹쳐
+    //   지연 ack datagram 이 새 이벤트를 오소거하는 창을 제거 (CmdpClient/CmpClient trans_id 와 동일 근거).
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    _eventSeq = (long)(((unsigned long long)tv.tv_sec * 1000ULL + tv.tv_usec / 1000) & 0x3FFFFFFF);
 }
 
 PCmpServer::~PCmpServer() {
@@ -196,6 +206,14 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     int transId = (int)hdr.GetInt("trans_id", 0);
     std::string type = hdr.GetString("type");
 
+    // 이벤트 ack — CMP 발행 이벤트(RELAY_ABORTED/PTT_GROUP_ABORTED)에 대한 동일 trans_id 의 response.
+    //   CSP CmpClient 가 회신한다. 여기서 pending 제거하면 재전송이 멈춘다 (cmp_media_api.md §8).
+    if (type == "response") {
+        std::lock_guard<std::mutex> lock(_eventMtx);
+        _pendingEvents.erase((long)transId);
+        return;
+    }
+
     if (ver != 2) {
         sendErr(ip, port, transId, cmdUpper, hdr.GetString("sesid"), hdr.GetString("service"),
                 "UNSUPPORTED_VER", "protocol ver 2 required");
@@ -205,6 +223,15 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
         // 응답/이벤트 방향 오수신 — 응답하면 루프가 되므로 기록만 하고 버린다
         LOG_WARN("PCmpServer", "Drop non-request type=%s cmd=%s from %s:%d", type.c_str(), cmdUpper.c_str(), ip.c_str(), port);
         return;
+    }
+
+    // 이벤트 회신처 학습 — CSP CmpClient 소켓 주소(모든 제어 요청의 소스). sweeper 회수 시
+    //   이 주소로 RELAY_ABORTED/PTT_GROUP_ABORTED 를 push 한다 (cmp_media_api.md §5.1/§8).
+    //   현행 단일 client(CSP) 전제 — 다중 client 배치는 복합 키(§4)와 함께 후속.
+    {
+        std::lock_guard<std::mutex> lock(_eventMtx);
+        _cspIp = ip;
+        _cspPort = port;
     }
 
     // payload 준비 — hdr 의 상관 필드(sesid/service)와 cmd 를 계승해 핸들러 공통 로직에 전달
@@ -277,6 +304,84 @@ int PCmpServer::sendErr(const std::string& ip, int port, int transId, const std:
     SimpleJson::JsonNode env;
     env.Set("hdr", hdr);
     return sendResponse(ip, port, env.ToString());
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  cmp → CSP 이벤트 (ack + 재전송) — docs/api/cmp_media_api.md §8
+// ═══════════════════════════════════════════════════════════════
+
+// v2 이벤트 — {hdr:{ver,trans_id,node,cmd,type:"event"[,sesid,service]},payload}.
+// ack = 동일 trans_id 의 type:"response" (handlePacket 이 _pendingEvents 에서 제거).
+// sweeper 가 _mutex 를 놓은 뒤 호출한다 — 여기서는 _eventMtx 만 잡으므로 lock 순서 충돌 없음.
+void PCmpServer::emitEvent(const char* name, const SimpleJson::JsonNode& payload, const std::string& sesid,
+                           const std::string& service) {
+    std::string cspIp;
+    int cspPort;
+    long id;
+    {
+        std::lock_guard<std::mutex> lock(_eventMtx);
+        if (_cspIp.empty() || _cspPort <= 0) {
+            LOG_WARN("PCmpServer", "event %s dropped — CSP endpoint unknown (no HEARTBEAT yet)", name);
+            return;
+        }
+        cspIp = _cspIp;
+        cspPort = _cspPort;
+        id = ++_eventSeq;
+    }
+
+    SimpleJson::JsonNode hdr;
+    hdr.Set("ver", 2);
+    hdr.Set("trans_id", (long long)id);
+    hdr.Set("node", _systemId);
+    hdr.Set("cmd", name);
+    hdr.Set("type", "event");
+    if (!sesid.empty()) hdr.Set("sesid", sesid);
+    if (!service.empty()) hdr.Set("service", service);
+    SimpleJson::JsonNode env;
+    env.Set("hdr", hdr);
+    env.Set("payload", payload);
+    std::string json = env.ToString();
+
+    {
+        std::lock_guard<std::mutex> lock(_eventMtx);
+        PendingEvent pe;
+        pe.json = json;
+        pe.attempts = 1;
+        pe.nextAt = time(nullptr) + kEventRetryIntervalSec;
+        _pendingEvents[id] = pe;
+    }
+
+    sendResponse(cspIp, cspPort, json);
+    LOG_INFO("PCmpServer", "event %s id=%ld -> %s:%d", name, id, cspIp.c_str(), cspPort);
+}
+
+// 미ack 이벤트 재전송 — timeoutLoop 이 매 초 호출. kEventMaxAttempts 도달 시 폐기.
+void PCmpServer::retransmitEvents() {
+    std::string cspIp;
+    int cspPort;
+    std::vector<std::string> toSend;
+    {
+        std::lock_guard<std::mutex> lock(_eventMtx);
+        if (_pendingEvents.empty()) return;
+        cspIp = _cspIp;
+        cspPort = _cspPort;
+        time_t now = time(nullptr);
+        for (auto it = _pendingEvents.begin(); it != _pendingEvents.end();) {
+            if (it->second.nextAt > now) { ++it; continue; }
+            if (it->second.attempts >= kEventMaxAttempts) {
+                LOG_WARN("PCmpServer", "event id=%ld dropped after %d attempts", it->first, it->second.attempts);
+                it = _pendingEvents.erase(it);
+                continue;
+            }
+            it->second.attempts++;
+            it->second.nextAt = now + kEventRetryIntervalSec;
+            toSend.push_back(it->second.json);
+            ++it;
+        }
+    }
+    // sendResponse 는 _eventMtx 밖에서 (로그 큐 자체 mutex 와의 결합 최소화)
+    if (cspIp.empty() || cspPort <= 0) return;
+    for (const auto& json : toSend) sendResponse(cspIp, cspPort, json);
 }
 
 // HEARTBEAT/STATS 공통 자원 요약 — resource 키 목록이 곧 기능 광고 (호출측이 _mutex 보유)
@@ -498,6 +603,10 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     detail.Set("orphan_reclaim_sec", _orphanReclaimSec);
     detail.Set("leak_reclaim", leak);
     detail.Set("rtp_src_drop", srcDrop);
+    {
+        std::lock_guard<std::mutex> lk(_eventMtx);
+        detail.Set("pending_events", (int)_pendingEvents.size());  // 미ack 이벤트 재전송 대기 수(진단)
+    }
     detail.Set("nat", natArr);
     detail.Set("nat_total", natTotal);
     detail.Set("groups", groupsArr);
@@ -1586,6 +1695,9 @@ void PCmpServer::timeoutLoop() {
             }
         }
 
+        // 미ack 이벤트 재전송(1s 해상도). _eventMtx 만 잡으므로 _mutex 와 무관.
+        retransmitEvents();
+
         // 무거운 세션/그룹 sweep 은 60초마다
         if (tick % 60 != 0) continue;
 
@@ -1609,6 +1721,9 @@ void PCmpServer::timeoutLoop() {
                 }
             }
         }
+        // 회수된 relay — 소유 CSP 에 RELAY_ABORTED 통지 (lock 밖에서 emit).
+        struct AbortedRelay { std::string sid, sesid, svc, reason; int heldSec; };
+        std::vector<AbortedRelay> abortedRelays;
         for (const auto& [sid, bGotRtp, heldSec] : staleSessions) {
             // 누수 회수: owner(CSP)가 REMOVE 를 안 보낸 relay 를 sweeper 가 회수. RtpMap fix 후 이 경로 발동은
             //   비정상 신호(CSP crash/BYE 누락=hold_timeout, setup 실패=orphan_no_rtp). 카운터+상세기록으로 관측.
@@ -1630,7 +1745,16 @@ void PCmpServer::timeoutLoop() {
                 _sessions.erase(it);
                 _sesidMap.erase(sid);
                 _serviceMap.erase(sid);
+                abortedRelays.push_back({sid, sesid, svc, reason, heldSec});
             }
+        }
+        // RELAY_ABORTED push — _mutex 를 놓은 뒤 (emit 은 _eventMtx 만 사용).
+        for (const auto& a : abortedRelays) {
+            SimpleJson::JsonNode p;
+            p.Set("session_id", a.sid);
+            p.Set("reason", a.reason);
+            p.Set("held_sec", a.heldSec);
+            emitEvent("RELAY_ABORTED", p, a.sesid, a.svc);
         }
 
         // Stale 그룹 세션 정리 (공유 RTP에 패킷이 없는 그룹)
@@ -1645,6 +1769,9 @@ void PCmpServer::timeoutLoop() {
                 }
             }
         }
+        // 회수된 그룹 — 참여 CSP 에 PTT_GROUP_ABORTED 통지 (lock 밖에서 emit).
+        struct AbortedGroup { std::string gid, sesid, svc; };
+        std::vector<AbortedGroup> abortedGroups;
         for (const auto& gid : staleGroupIds) {
             LOG_INFO("PCmpServer", "Group timeout: group=%s (no members, no activity) — auto cleanup", gid.c_str());
             PAutoLock lock(_mutex);
@@ -1664,7 +1791,15 @@ void PCmpServer::timeoutLoop() {
                 _sesidMap.erase(gid);
                 _serviceMap.erase(gid);
                 _groupSubId.erase(gid);
+                abortedGroups.push_back({gid, sesid, svc});
             }
+        }
+        // PTT_GROUP_ABORTED push — _mutex 를 놓은 뒤.
+        for (const auto& a : abortedGroups) {
+            SimpleJson::JsonNode p;
+            p.Set("group_id", a.gid);
+            p.Set("reason", "idle_no_members");
+            emitEvent("PTT_GROUP_ABORTED", p, a.sesid, a.svc);
         }
     }
 }

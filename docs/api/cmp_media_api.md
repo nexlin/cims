@@ -113,10 +113,11 @@ CORE 명령은 `sesid`/`service` 를 싣지 않는다.
 ### 5.1 HEARTBEAT
 
 client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 가 주기 송신한다
-(권장 3초, 연속 3회 무응답 시 Disconnected 판정 — client 정책). 이벤트 채널이
-활성화되면 CMP 는 이 요청의 `hdr.node` + 소스 주소로 **이벤트 push 대상 레지스트리**를
-유지한다 (예약 — [§8](#8-이벤트-type-event). 현행 CMP 는 요청-응답만 지원하므로
-레지스트리를 두지 않는다).
+(권장 3초, 연속 3회 무응답 시 Disconnected 판정 — client 정책). CMP 는 이 요청(및 모든
+제어 요청)의 소스 주소를 **이벤트 push 대상**(CSP CmpClient 소켓)으로 학습한다 —
+sweeper 회수 시 그 주소로 [§8](#8-이벤트-type-event) 이벤트를 보낸다. 현행은 단일
+client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [§4](#4-자원-모델과-이벤트-라우팅)
+복합 키와 함께 후속).
 
 요청:
 ```json
@@ -428,16 +429,15 @@ RELAY_REMOVE 와 동일 규칙).
 
 CMP → client 비동기 push. `trans_id` 는 CMP 가 발행하고, 수신 client 는 동일 trans_id 로
 `type:"response", status:"OK"` 를 반환(ack)한다. ack 미수신 시 CMP 가 1s 간격 최대 5회
-재전송한다. push 대상은 HEARTBEAT 로 유지되는 노드 레지스트리에서 [§4](#4-자원-모델과-이벤트-라우팅)
-의 라우팅 규칙으로 정한다.
+재전송하고 그 뒤 폐기한다(CSP 재기동 구간 손실 허용 — [§5.1](#51-heartbeat) digest audit 이 보완).
+push 대상은 마지막 제어 요청(HEARTBEAT 등)의 소스로 학습한 CSP 소켓 주소다([§4](#4-자원-모델과-이벤트-라우팅)).
 
-> **미구현 — 규격 예약.** 현행 CMP 는 요청-응답만 지원한다. 초기 이벤트 후보:
+**sweeper 회수 통지** — CMP sweeper(`timeoutLoop`)가 RTP 무활동 자원을 자체 회수할 때 발행한다:
 
 | cmd | 라우팅 | payload |
 |---|---|---|
-| `RELAY_ABORTED` | 소유 node | `session_id`, `reason`(`orphan_no_rtp`/`hold_timeout`/...), `held_sec` |
-| `PTT_GROUP_ABORTED` | 참여 node 전체 | `group_id`, `reason` |
-| `RELAY_NAT_LATCHED` | 소유 node | `session_id`, `peer_index`, `learned_ip`, `learned_port` — NAT 목적지 latch 통지 (현행은 STATS/로그로 관측) |
+| `RELAY_ABORTED` | 소유 node | `session_id`, `reason`(`orphan_no_rtp`=무RTP setup 실패 / `hold_timeout`=RTP 후 유휴), `held_sec` |
+| `PTT_GROUP_ABORTED` | 참여 node 전체 | `group_id`, `reason`(`idle_no_members`) |
 
 ```json
 {
@@ -446,6 +446,17 @@ CMP → client 비동기 push. `trans_id` 는 CMP 가 발행하고, 수신 clien
   "payload": { "session_id": "a84b4c76e66710", "reason": "orphan_no_rtp", "held_sec": 7300 }
 }
 ```
+
+**CSP 처리** — CSP CmpClient 가 event 를 ack 한 뒤 별도 dispatch 스레드에서 처리한다(핸들러가
+RemoveSession 을 부를 수 있어 수신 스레드와 분리 — 데드락 회피). `RELAY_ABORTED` → 해당
+`session_id` 를 가진 호를 즉시 종료(StopCall+RemoveSession, 멱등). `PTT_GROUP_ABORTED` → 그룹
+캐시(sesid)를 정리해 다음 사용 시 재수립. **회수(teardown)는 active 역할일 때만** 수행하고
+standby 는 탐지·로그만 한다([ha_design.md](../design/ha_design.md) §5.6 역할 게이트와 동일).
+이벤트는 CMP 가 자원을 확정 회수했다는 authoritative 신호라 audit(pull)의 zombie 추정과 달리
+opt-in 없이 즉시 처리하며, [§5.1](#51-heartbeat) digest-on-HB audit 과 **상보적**이다 — 이벤트는
+회수 즉시 특정 세션을 지목해 수렴 지연을 단축하고, audit 은 이벤트 유실·이중화 절체까지 커버한다.
+
+> **RELAY_NAT_LATCHED**(NAT 목적지 latch 통지)는 규격 예약 — 현행은 STATS `detail.nat`/로그로 관측한다.
 
 ## 9. 에러 코드
 

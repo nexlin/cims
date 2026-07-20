@@ -611,6 +611,18 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
     # 자기 노드 svc IP (LocalIp)
     self_svc_ip = idx.service_ip(node_id) or "0.0.0.0"
 
+    # Audit.HaVip — HaRole=auto 에서 감시할 VIP. active_standby 이면 CSP 시그널링 VIP(로컬 소유=active).
+    #   all_active/단일노드는 CSP 전용 VIP 가 없어 빈 값(=auto 는 active). 명시 audit.ha_vip 설정이 우선.
+    audit_ha_vip = (media.get("audit") or {}).get("ha_vip")
+    if audit_ha_vip is None:
+        audit_ha_vip = ""
+        try:
+            _csp_hg = idx.ha_for_package("csp")
+            if _csp_hg is not None and idx.ha_groups[_csp_hg].get("mode") == "active_standby":
+                audit_ha_vip = idx.vip(_csp_hg, idx.service_net()) or ""
+        except Exception:
+            audit_ha_vip = ""
+
     # Database — env.database 가 null 이면 placeholder (file fallback 진입)
     db = idx.env.get("database") or {
         "host": "127.0.0.1", "port": 3306, "user": "cims", "password": "cims1234", "dbname": "cims",
@@ -645,14 +657,15 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             ("LocalPort",   media.get("local_port", 9001)),
             ("LocalIp",     media.get("local_ip", self_svc_ip)),
             # 세션 재조정(audit 수준2) — CSP↔CMP 자원 정합 (ha_design.md §5.6 / cmp_media_api.md §5.3).
-            #   HaRole=auto(단일노드/cold-mode=active 취급). hot-standby 는 promotion 시 active 로
-            #   전환 필요 — 현재는 auto 기본, 노드 역할 연동은 후속.
+            #   HaRole=auto: HaVip 설정 시 VIP 로컬 소유로 active/standby 동적 판정(hot-standby 승격을
+            #   별도 훅 없이 audit cycle 에 반영), 미설정(단일노드/all_active)이면 active 취급.
             ("Audit", OrderedDict([
                 ("Enable",         bool((media.get("audit") or {}).get("enable", True))),
                 ("GraceSec",       int((media.get("audit") or {}).get("grace_sec", 30))),
                 ("MaxPerCycle",    int((media.get("audit") or {}).get("max_per_cycle", 20))),
                 ("ZombieTeardown", bool((media.get("audit") or {}).get("zombie_teardown", False))),
                 ("HaRole",         (media.get("audit") or {}).get("ha_role", "auto")),
+                ("HaVip",          audit_ha_vip),
             ])),
         ])),
         ("Log", OrderedDict([
