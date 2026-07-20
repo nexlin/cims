@@ -580,17 +580,25 @@ INTENTIONALLY_DOWN 을 eligible=true 로 고정하지 않고 현재 역할까지
 
 ## 18. 구현 현황 · 이행
 
-빅뱅 재작성 대신 feature flag + shadow + 서비스별 전환으로 이행한다. 각 축은 기존
-동작을 유지한 채 신규 경로를 병행하고, 검증 후 서비스 단위로 전환한다.
+**기본은 supervisor(선언적 verdict 모델)다.** 배포 즉시 새 모델이 동작하도록 기본값을
+supervisor 로 두고, legacy 는 명시적 escape 로만 남긴다:
+- 노드 전체 강제 legacy: env `CIMS_HA_VERDICT_SOURCE=legacy`.
+- 그룹(서비스)별 opt-out: 그룹 `ha_mode=legacy` (콘솔 HA 모드 토글).
+- 그 외(env 미지정 + `ha_mode` 미지정/supervisor)는 전부 supervisor.
 
 ```yaml
 ha:
-  verdict_source: legacy | supervisor    # 서비스별 지정 가능
-  notify_mode:    legacy | role_writer
-  stagger_enabled: true                  # verdict-driven 전환 시 false
-  planned_failover_v2: false
-  systemd_watchdog: false                # 전제 충족 후 마지막에 활성
+  verdict_source: supervisor | legacy    # env 기본 supervisor, legacy 만 노드 전체 강제
+  ha_mode:        supervisor | legacy    # 그룹별. 기본 supervisor, legacy 는 opt-out
 ```
+
+안전 폴백: `run/ha/flags.json`(agent 기동 시 기록)이 없으면 cims-health/cims-notify 는
+legacy 로 동작한다 — verdict 생산자(Supervisor)가 없는데 verdict 를 읽어 헛절체하는 것을
+막는다. 구 그룹의 옛 기본값 `ha_mode=legacy` 는 최초 로드 시 supervisor 로 1회 승격
+(`_migrate_ha_mode_default`, `_ha_mode_v2` 마커로 재승격 방지 — 이후 운영자가 명시한
+legacy 는 유지).
+
+구현 매핑(단계적 개발 순서로 진행했으나 최종 기본은 supervisor):
 
 이행 순서: (1) `run/ha`·`state/ha` 디렉토리 + 보수적 verdict 스켈레톤 →
 (2) desired 를 영속 경로로 migration(구 `run/ha/` 는 호환 전용) → (3) Supervisor shadow

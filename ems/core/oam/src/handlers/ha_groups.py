@@ -254,6 +254,18 @@ def _migrate_service_intent(group: dict, config: dict) -> bool:
     return True
 
 
+def _migrate_ha_mode_default(group: dict) -> bool:
+    """기본값 legacy→supervisor 전환 마이그레이션. 구 코드가 default 로 저장한 ha_mode=
+    'legacy' 는 운영자의 의도적 선택이 아니라 옛 기본값이므로 supervisor 로 1회 승격한다.
+    _ha_mode_v2 마커로 재승격 방지 — 마커 이후 운영자가 명시한 legacy 는 그대로 유지."""
+    if group.get('_ha_mode_v2'):
+        return False
+    group['_ha_mode_v2'] = True
+    if str(group.get('ha_mode') or '').lower() == 'legacy':
+        group['ha_mode'] = 'supervisor'
+    return True
+
+
 def _ensure_group_migrated(group: dict, config: dict) -> bool:
     """구 record 를 신 스키마(service_intent + module_specs)로 승격. 변경 시 True.
     호출부가 True 면 file_store.save 로 영속화한다 (1회성 — 이후 no-op)."""
@@ -261,6 +273,8 @@ def _ensure_group_migrated(group: dict, config: dict) -> bool:
     if _migrate_service_intent(group, config):
         changed = True
     if _migrate_module_specs(group):
+        changed = True
+    if _migrate_ha_mode_default(group):
         changed = True
     return changed
 
@@ -542,7 +556,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     restart_limit = failover_options.get('restart_limit') or {}
     # per-service 컷오버 — 그룹 ha_mode(legacy|supervisor). agent/cims-notify/cims-health 가
     # 이 값으로 서비스별 legacy↔supervisor 를 판정(노드 env 는 전체 강제 override).
-    ha_mode = 'supervisor' if str(group.get('ha_mode') or 'legacy').lower() == 'supervisor' else 'legacy'
+    ha_mode = 'legacy' if str(group.get('ha_mode') or 'supervisor').lower() == 'legacy' else 'supervisor'
     # 모듈 안전 등급 — 자동 래치 해제 가능 여부(shared_writer/unknown=manual). 콘솔/래치 판정용.
     safety_map = {m: _module_spec(group, m)['safety'] for m in daemon_mods}
 
@@ -992,7 +1006,7 @@ def _serialize_group(g: dict, config: dict) -> dict:
     out.setdefault('vip_bindings', [])
     out['service_intent'] = dict(out.get('service_intent') or {})
     out['module_specs'] = dict(out.get('module_specs') or {})
-    out['ha_mode'] = 'supervisor' if str(out.get('ha_mode') or 'legacy').lower() == 'supervisor' else 'legacy'
+    out['ha_mode'] = 'legacy' if str(out.get('ha_mode') or 'supervisor').lower() == 'legacy' else 'supervisor'
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
     out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
     # 실측 ACTIVE (R4) — heartbeat interfaces[] 의 VIP 보유 관측. 정적 role 과 별개로
@@ -1094,7 +1108,7 @@ async def _create_group(body, config):
         'vip_bindings': vip_bindings or [],
         'failover_options': failover_options,
         # per-service HA 모드 — legacy(기본) | supervisor. 서비스별 컷오버 스위치.
-        'ha_mode': 'supervisor' if str(body.get('ha_mode') or '').lower() == 'supervisor' else 'legacy',
+        'ha_mode': 'legacy' if str(body.get('ha_mode') or '').lower() == 'legacy' else 'supervisor',
         # 신규 그룹은 미개시(빈 의도) — 서비스 시작 시 무장. 모듈 명세는 default.
         'service_intent': _normalize_service_intent(body.get('service_intent')),
         'module_specs': {
@@ -1128,7 +1142,7 @@ async def _update_group(gid: int, body, config):
         if k in body:
             existing[k] = body[k]
     if 'ha_mode' in body:
-        existing['ha_mode'] = 'supervisor' if str(body.get('ha_mode') or '').lower() == 'supervisor' else 'legacy'
+        existing['ha_mode'] = 'legacy' if str(body.get('ha_mode') or '').lower() == 'legacy' else 'supervisor'
     if 'vip_mask' in body:
         existing['vip_mask'] = int(body['vip_mask'])
     # auth_pass — active_standby 만 1~8자 required, 그 외 mode 는 (빈값 포함) 8자 이하 OK.

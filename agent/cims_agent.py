@@ -2070,19 +2070,18 @@ def _boot_id() -> str:
         return ""
 
 
-# ── HA feature flag (단계적 이행 §18) — env 우선, 기본 legacy(동작 무변경) ──────
-#   CIMS_HA_VERDICT_SOURCE = legacy | supervisor   (track_script/판정 주체)
-#   CIMS_HA_NOTIFY_MODE    = legacy | role_writer  (cims-notify 동작)
-#   CIMS_HA_STAGGER        = 1 | 0                 (개시국면 스태거 유지 여부)
-# 현재 단계는 리더만 두고 소비하지 않는다(dormant) — 이후 단계가 게이트로 사용.
+# ── HA 모드 (선언적 verdict 모델) — 기본 supervisor, 명시적 legacy 만 escape ─────
+#   CIMS_HA_VERDICT_SOURCE = supervisor(기본) | legacy(노드 전체 강제 legacy — escape)
+#   CIMS_HA_NOTIFY_MODE    = role_writer | legacy   (미지정 시 verdict_source 따름)
+#   CIMS_HA_STAGGER        = 1 | 0
+# 배포 즉시 새 모델이 동작하도록 기본을 supervisor 로 둔다. 문제 시 노드 env 로 legacy
+# 강제(전체) 하거나 그룹 ha_mode=legacy 로 서비스별 opt-out.
 def _ha_flags() -> dict:
-    vs = (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "legacy").lower()
-    # notify_mode 는 명시 override 없으면 verdict_source 를 따른다 — role_writer(notify)
-    # 와 reconcile(Supervisor)은 한 세트라, 한 스위치(verdict_source=supervisor)로 함께
-    # 켜져야 승격 시 cold 모듈 기동 주체가 끊기지 않는다.
+    env = (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "").lower()
+    vs = "legacy" if env == "legacy" else "supervisor"
     nm = os.environ.get("CIMS_HA_NOTIFY_MODE")
     if not nm:
-        nm = "role_writer" if vs == "supervisor" else "legacy"
+        nm = "legacy" if vs == "legacy" else "role_writer"
     return {"verdict_source": vs, "notify_mode": nm.lower(),
             "stagger": os.environ.get("CIMS_HA_STAGGER", "1") != "0"}
 
@@ -2119,16 +2118,16 @@ _HEALTH_NEXT: dict = {}     # (module, check) -> next_run epoch
 
 
 def _svc_is_supervisor(s: dict) -> bool:
-    """서비스가 supervisor 모드인가 — 노드 env(전체 강제) 또는 ha.json services.<svc>.ha_mode.
-    per-service 컷오버(P6): OAM 이 그룹별 ha_mode 를 렌더, 노드 env 는 전체 override."""
-    if _ha_flags()["verdict_source"] == "supervisor":
-        return True
-    return str((s or {}).get("ha_mode") or "legacy").lower() == "supervisor"
+    """서비스가 supervisor 모드인가 — 기본 supervisor, 명시적 legacy 만 opt-out.
+    노드 env=legacy 면 전체 강제 legacy, 아니면 그룹 ha_mode 가 'legacy' 가 아닌 한 supervisor."""
+    if (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "").lower() == "legacy":
+        return False
+    return str((s or {}).get("ha_mode") or "supervisor").lower() != "legacy"
 
 
 def _any_supervisor_service() -> bool:
-    if _ha_flags()["verdict_source"] == "supervisor":
-        return True
+    if (os.environ.get("CIMS_HA_VERDICT_SOURCE") or "").lower() == "legacy":
+        return False
     cfg = _read_ha_json_nofail()
     return any(_svc_is_supervisor(s) for s in (cfg.get("services") or {}).values())
 

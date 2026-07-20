@@ -60,9 +60,14 @@ import json, sys
 def rd(p):
     try: return json.load(open(p))
     except Exception: return {}
-node = rd(sys.argv[1]).get("verdict_source", "legacy")
-svc_mode = str(((rd(sys.argv[2]).get("services") or {}).get(sys.argv[3]) or {}).get("ha_mode", "legacy")).lower()
-print("supervisor" if (node == "supervisor" or svc_mode == "supervisor") else "legacy")
+fl = rd(sys.argv[1])
+# flags.json 없음 = 신 agent(verdict 생산자) 미기동 → 안전하게 legacy(포트검사).
+# verdict reader 는 Supervisor 가 verdict 를 쓰고 있을 때만(coherence).
+if not fl:
+    print("legacy"); sys.exit()
+node = fl.get("verdict_source", "supervisor")
+svc_mode = str(((rd(sys.argv[2]).get("services") or {}).get(sys.argv[3]) or {}).get("ha_mode", "supervisor")).lower()
+print("legacy" if (node == "legacy" or svc_mode == "legacy") else "supervisor")
 PY
 )
 if [[ "$_HA_MODE" == "supervisor" ]]; then

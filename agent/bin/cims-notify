@@ -111,9 +111,13 @@ def rd(p):
     try: return json.load(open(p))
     except Exception: return {}
 fl = rd(flags_p)
-node_sup = fl.get("verdict_source") == "supervisor" or fl.get("notify_mode") == "role_writer"
-svc_mode = str(((rd(ha_p).get("services") or {}).get(svc) or {}).get("ha_mode", "legacy")).lower()
-print("role_writer" if (node_sup or svc_mode == "supervisor") else "legacy")
+# flags.json 없음 = 신 agent(reconcile 주체) 미기동 → 안전하게 legacy(직접 모듈 제어).
+if not fl:
+    print("legacy"); sys.exit()
+# 기본 role_writer. 노드 flags 나 그룹 ha_mode 가 명시적 legacy 일 때만 legacy.
+node_legacy = fl.get("verdict_source") == "legacy" or fl.get("notify_mode") == "legacy"
+svc_mode = str(((rd(ha_p).get("services") or {}).get(svc) or {}).get("ha_mode", "supervisor")).lower()
+print("legacy" if (node_legacy or svc_mode == "legacy") else "role_writer")
 PY
 )
 
