@@ -83,6 +83,8 @@ private:
     std::map<std::string, std::string> _groupSubId;  // groupId → subid(session_seq)
     std::map<std::string, std::string> _sesidMap;    // sessionId 또는 groupId → sesid (flow 상관용)
     std::map<std::string, std::string> _serviceMap;  // sessionId 또는 groupId → service (payload 계승)
+    // 미협상 소스 드롭 전역 누적 — 자원 해제 시 이월 (STATS rtp_src_drop 단조 증가 보장)
+    long long _srcDropTotal = 0;
     PMutex _mutex;
 
     // sesid 발행 유틸: {caller}::cmp::{us_ts}::{counter}

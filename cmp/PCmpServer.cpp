@@ -390,10 +390,16 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     leak.Set("orphan", (long long)_leakReclaimOrphan);
     leak.Set("hold", (long long)_leakReclaimHold);
 
+    // 배열 상한 — 응답 datagram 4KB 계약(§1.2) 내 안전 상한. 전체 수는 *_total 로 노출.
+    const int kMaxStatsEntries = 20;
+
     // 그룹별 상세 (멤버수, floor 화자)
     SimpleJson::JsonNode groupsArr;
     groupsArr.type = SimpleJson::JSON_ARRAY;
+    int groupsTotal = 0;
     for (auto const& [gid, group] : _groups) {
+        ++groupsTotal;
+        if ((int)groupsArr.array.size() >= kMaxStatsEntries) continue;
         SimpleJson::JsonNode g;
         g.Set("group_id", gid);
         g.Set("members", group->getMemberCount());
@@ -402,19 +408,22 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         groupsArr.Add(g);
     }
 
-    // 미협상 소스 드롭 누적 (활성 세션/그룹 합산 — 진단용)
-    long srcDrop = 0;
+    // 미협상 소스 드롭 — 전역 누적(_srcDropTotal, 해제 시 이월) + 활성 자원 합산 = 단조 증가
+    long long srcDrop = _srcDropTotal;
     for (auto const& [sid, rtp] : _sessions) if (rtp) srcDrop += rtp->getSrcDrop();
     for (auto const& [gid, group] : _groups) if (group) srcDrop += group->getSrcDrop();
 
     // NAT latch 완료 leg 목록 — 학습된 실주소 노출 (ue_nat_traversal.md §5 관측)
     SimpleJson::JsonNode natArr;
     natArr.type = SimpleJson::JSON_ARRAY;
+    int natTotal = 0;
     for (auto const& [sid, rtp] : _sessions) {
         if (!rtp) continue;
         for (int i = 0; i < 2; ++i) {
             std::string learnedIp; int learnedPort = 0;
             if (rtp->getNatLatched(i, learnedIp, learnedPort)) {
+                ++natTotal;
+                if ((int)natArr.array.size() >= kMaxStatsEntries) continue;
                 SimpleJson::JsonNode n;
                 n.Set("key", sid);
                 n.Set("leg", i == 0 ? "a" : "b");
@@ -429,6 +438,8 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         std::vector<std::tuple<std::string, std::string, int>> latched;
         group->collectNatLatched(latched);
         for (auto const& [sid, learnedIp, learnedPort] : latched) {
+            ++natTotal;
+            if ((int)natArr.array.size() >= kMaxStatsEntries) continue;
             SimpleJson::JsonNode n;
             n.Set("key", gid + ":" + sid);
             n.Set("leg", sid);
@@ -442,9 +453,11 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     detail.Set("session_timeout", _sessionTimeout);
     detail.Set("orphan_reclaim_sec", _orphanReclaimSec);
     detail.Set("leak_reclaim", leak);
-    detail.Set("rtp_src_drop", (long long)srcDrop);
+    detail.Set("rtp_src_drop", srcDrop);
     detail.Set("nat", natArr);
+    detail.Set("nat_total", natTotal);
     detail.Set("groups", groupsArr);
+    detail.Set("groups_total", groupsTotal);
     body.Set("detail", detail);
 
     int txSeq = sendOk(ip, port, transId, "STATS", "", "", &body);
@@ -990,6 +1003,7 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
         PMcpttGroup* group = _groups[groupId];
         logFlow(groupId, "cmp", "cmp", "INT", "GROUP_END", "", "", svc.c_str(), sesid.c_str());
         // PTT 리소스 반환 (그룹 floor + 멤버 유닛 전체)
+        _srcDropTotal += group->getSrcDrop();  // 드롭 카운터 이월 (rtp_src_drop 단조 증가)
         PRtpMulticast* ptt = group->getPttSession();
         if (ptt) { ptt->reset(); freePttResource(ptt); }
         freeGroupMemberUnits(groupId);
@@ -1386,6 +1400,9 @@ PRtpRelay* PCmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& vide
 
 void PCmpServer::freeResource(PRtpRelay* rtp) {
     if (rtp) {
+        // 드롭 카운터 이월 — 활성 합산에서 빠지는 몫을 전역 누적으로 보존 (rtp_src_drop 단조 증가).
+        //   _srcDrop 은 reset() 이 아닌 재할당(resetActivity)에서 초기화되므로 여기서 읽어도 유효.
+        _srcDropTotal += rtp->getSrcDrop();
         LOG_INFO("PCmpServer", "freeResource: port=%d", rtp->getLocalPort(0));
         _freeResources.push_back(rtp);
     }
@@ -1536,6 +1553,7 @@ void PCmpServer::timeoutLoop() {
                 logFlow(gid, "cmp", "cmp", "INT", "GROUP_TIMEOUT", "",
                         "", svc.c_str(), sesid.c_str());
                 // PTT 리소스 free pool 반환 (removeGroup 와 동일 패턴) — 누락 시 누적 leak
+                _srcDropTotal += it->second->getSrcDrop();  // 드롭 카운터 이월
                 PRtpMulticast* ptt = it->second->getPttSession();
                 if (ptt) { ptt->reset(); freePttResource(ptt); }
                 freeGroupMemberUnits(gid);

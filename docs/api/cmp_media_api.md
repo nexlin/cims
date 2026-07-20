@@ -110,9 +110,11 @@ CORE 명령은 `sesid`/`service` 를 싣지 않는다.
 
 ### 5.1 HEARTBEAT
 
-client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 가 주기 송신하며
-(권장 3초, 연속 3회 무응답 시 Disconnected 판정 — client 정책), CMP 는 이 요청의
-`hdr.node` + 소스 주소로 **이벤트 push 대상 레지스트리**를 유지한다.
+client 접속(attach)·생존 확인·자원 요약 보고를 겸한다. client 가 주기 송신한다
+(권장 3초, 연속 3회 무응답 시 Disconnected 판정 — client 정책). 이벤트 채널이
+활성화되면 CMP 는 이 요청의 `hdr.node` + 소스 주소로 **이벤트 push 대상 레지스트리**를
+유지한다 (예약 — [§8](#8-이벤트-type-event). 현행 CMP 는 요청-응답만 지원하므로
+레지스트리를 두지 않는다).
 
 요청:
 ```json
@@ -176,8 +178,11 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 
 | detail 필드 | 의미 |
 |---|---|
-| `rtp_src_drop` | 미협상 소스 드롭 누적 카운터 (no-NAT leg 의 선언 주소 불일치 패킷) |
-| `nat` | NAT latch 완료 leg 목록 — `key`(session_id 또는 `group_id:member`), `leg`(`a`/`b`/멤버 sid), 학습된 실주소 |
+| `rtp_src_drop` | 미협상 소스 드롭 누적 카운터 (no-NAT leg 의 선언 주소 불일치 패킷). 해제된 자원의 몫을 이월한 **단조 증가** 값 |
+| `nat` | NAT latch 완료 leg 목록 — `key`(session_id 또는 `group_id:member`), `leg`(`a`/`b`/멤버 sid), 학습된 실주소. 최대 20개 (전체 수는 `nat_total`) |
+| `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_holder`). 최대 20개 (전체 수는 `groups_total`) |
+
+`nat`/`groups` 배열 상한은 응답 datagram 4KB 계약([§1.2](#12-전송)) 내 안전 상한이다.
 
 ## 6. RELAY — 1:1 RTP relay
 
