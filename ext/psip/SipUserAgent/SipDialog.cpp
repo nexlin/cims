@@ -242,6 +242,18 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 	else
 #endif
 	{
+		// RFC 3264: answer 의 dynamic PT 는 offer 가 쓴 PT 를 그대로 echo (rtpmap 이름으로 식별).
+		//   PT 번호를 서버 고정값으로 강제하면(구 동작: AMR-WB=99, telephone-event=101) offer 가
+		//   다른 PT(예: pjsua AMR-WB=96)를 쓴 UE 와 협상이 깨져 미디어 스트림 생성 시 크래시한다.
+		//   offer 에 해당 rtpmap 이 없으면(-1, 예: 발신 offer 생성 시 remote 미수신) 기존 하드코딩값
+		//   fallback → 상용/파트너(AMR-WB=99) interop 및 발신 동작 보존.
+		int iAmrWbPt = FindRemotePayloadType( "AMR-WB/16000" );
+		if( iAmrWbPt < 0 ) iAmrWbPt = 99;
+		int iAmrNbPt = FindRemotePayloadType( "AMR/8000" );
+		if( iAmrNbPt < 0 ) iAmrNbPt = 98;
+		int iTePt = FindRemotePayloadType( "telephone-event/8000" );
+		if( iTePt < 0 ) iTePt = 101;
+
 		if( pclsMessage->IsRequest() && m_clsCodecList.empty() == false )
 		{
 			CODEC_LIST::iterator	itList;
@@ -256,15 +268,16 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 				}
 			}
 
-			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, " 101\r\n" );
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, " %d\r\n", iTePt );
 
 			for( itList = m_clsCodecList.begin(); itList != m_clsCodecList.end(); ++itList )
 			{
 				switch( *itList )
 				{
+				case 96:   // AMR-WB (pjsua/IMS dynamic PT) — 오퍼 시 UE(pjsua) 와 동일 PT 로 광고
 				case 99:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:99 AMR-WB/16000/1\r\n" );
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:99 octet-align=1\r\n" );
+					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d AMR-WB/16000/1\r\n", *itList );
+					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d octet-align=1\r\n", *itList );
 					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=ptime:20\r\n" );
 					break;
 				case 98:
@@ -294,41 +307,42 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 		{
 			switch( m_iCodec )
 			{
+			case 96:   // AMR-WB — m_iCodec 은 코덱 선택자(실 PT 는 iAmrWbPt=오퍼 echo)
 			case 99:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 99 101\r\n", m_iLocalRtpPort );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:99 AMR-WB/16000/1\r\n" );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:99 octet-align=1\r\n" );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP %d %d\r\n", m_iLocalRtpPort, iAmrWbPt, iTePt );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d AMR-WB/16000/1\r\n", iAmrWbPt );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d octet-align=1\r\n", iAmrWbPt );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=ptime:20\r\n" );
 				break;
 			case 98:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 98 101\r\n", m_iLocalRtpPort );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:98 AMR/8000/1\r\n" );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP %d %d\r\n", m_iLocalRtpPort, iAmrNbPt, iTePt );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d AMR/8000/1\r\n", iAmrNbPt );
 				break;
 			case 0:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 0 101\r\n", m_iLocalRtpPort );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 0 %d\r\n", m_iLocalRtpPort, iTePt );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:0 PCMU/8000\r\n" );
 				break;
 			case 3:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 3 101\r\n", m_iLocalRtpPort );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 3 %d\r\n", m_iLocalRtpPort, iTePt );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:3 GSM/8000\r\n" );
 				break;
 			case 4:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 4 101\r\n", m_iLocalRtpPort );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 4 %d\r\n", m_iLocalRtpPort, iTePt );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:4 G723/8000\r\n" );
 				break;
 			case 8:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 8 101\r\n", m_iLocalRtpPort );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 8 %d\r\n", m_iLocalRtpPort, iTePt );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:8 PCMA/8000\r\n" );
 				break;
 			case 18:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 18 101\r\n", m_iLocalRtpPort );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 18 %d\r\n", m_iLocalRtpPort, iTePt );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:18 G729/8000\r\n" );
 				break;
 			}
 		}
 
-		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:101 telephone-event/8000\r\n"
-			"a=fmtp:101 0-15\r\n" );
+		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d telephone-event/8000\r\n"
+			"a=fmtp:%d 0-15\r\n", iTePt, iTePt );
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
 	}
 
@@ -527,6 +541,7 @@ bool CSipDialog::IsUseCodec( int iCodec )
 	case 4:
 	case 8:
 	case 18:
+	case 96:   // AMR-WB (pjsua/IMS 관용 dynamic PT) — rtpmap 로 식별, 정적 화이트리스트는 하위호환용
 	case 99:
 	case 98:
 		bFound = true;
@@ -534,6 +549,48 @@ bool CSipDialog::IsUseCodec( int iCodec )
 	}
 
 	return bFound;
+}
+
+/* 대소문자 무시 prefix 비교 (libc strncasecmp 이식성 회피용 로컬 헬퍼). */
+static bool _RtpMapPrefixIEq( const char * s, const char * prefix )
+{
+	if( s == NULL || prefix == NULL ) return false;
+	for( ; *prefix; ++s, ++prefix )
+	{
+		char a = *s, b = *prefix;
+		if( a >= 'A' && a <= 'Z' ) a = (char)( a - 'A' + 'a' );
+		if( b >= 'A' && b <= 'Z' ) b = (char)( b - 'A' + 'a' );
+		if( a != b ) return false;
+	}
+	return true;
+}
+
+int CSipDialog::FindRemotePayloadType( const char * pszEncoding )
+{
+	if( pszEncoding == NULL ) return -1;
+
+#ifdef USE_MEDIA_LIST
+	SDP_MEDIA_LIST::iterator itM;
+	for( itM = m_clsRemoteMediaList.begin(); itM != m_clsRemoteMediaList.end(); ++itM )
+	{
+		if( strcasecmp( itM->m_strMedia.c_str(), "audio" ) ) continue;
+
+		SDP_ATTRIBUTE_LIST::iterator itA;
+		for( itA = itM->m_clsAttributeList.begin(); itA != itM->m_clsAttributeList.end(); ++itA )
+		{
+			// a=rtpmap:<pt> <encoding>/<rate>[/<ch>]  (m_strName="rtpmap", m_strValue="<pt> <enc>/<rate>")
+			if( strcasecmp( itA->m_strName.c_str(), "rtpmap" ) ) continue;
+
+			const char * v = itA->m_strValue.c_str();
+			const char * sp = strchr( v, ' ' );
+			if( sp == NULL ) continue;
+			if( _RtpMapPrefixIEq( sp + 1, pszEncoding ) )
+				return atoi( v );
+		}
+	}
+#endif
+
+	return -1;
 }
 
 /**

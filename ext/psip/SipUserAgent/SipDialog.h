@@ -182,6 +182,12 @@ public:
 
 	static bool IsUseCodec( int iCodec );
 
+	/** 원격(오퍼) 미디어의 rtpmap 에서 코덱 encoding-name(대소문자 무시, 예 "AMR-WB/16000")에
+	 *  해당하는 payload type 을 찾는다 — RFC 3264: answer 는 코덱을 rtpmap 이름으로 식별하고
+	 *  오퍼의 PT 를 그대로 echo 해야 한다(PT 번호는 dynamic 96-127, RFC 3551). 없으면 -1
+	 *  (호출측이 하드코딩 fallback → 기존 VoLTE 동작 보존). */
+	int FindRemotePayloadType( const char * pszEncoding );
+
 private:
 	CSipMessage * CreateMessage( const char * pszSipMethod );
 };

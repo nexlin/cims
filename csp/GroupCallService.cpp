@@ -677,9 +677,11 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     CSipCallRtp clsRtp;
     clsRtp.SetIpPort( strSharedIp.c_str(), iMemberAudioPort, SOCKET_COUNT_PER_MEDIA );
 
-    // AMR-WB (기본 코덱, 서버 설정으로 추후 변경)
-    clsRtp.m_clsCodecList.push_back( 99 );
-    clsRtp.m_iCodec = 99;
+    // AMR-WB (기본 코덱, 서버 설정으로 추후 변경). PT=96: fan-out 오퍼는 CSP 가 오퍼러라
+    // 이 값이 wire PT 가 된다 — pjsua UE 의 AMR-WB 로컬 PT(96)와 일치시켜 협상 PT 불일치
+    // 크래시를 방지한다 (dynamic PT 는 rtpmap 으로 식별되므로 96/99 모두 규격 적합, RFC 3264).
+    clsRtp.m_clsCodecList.push_back( 96 );
+    clsRtp.m_iCodec = 96;
 
     // 4. Create Call
     std::string strCallId;
@@ -1169,14 +1171,13 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     int iVideoPort = iRemoteVideoPort > 0 ? iRemoteVideoPort : 0;
     // 멤버 role 조회 (chair/participant) — CMP floor 선점 판정에 사용
     std::string strRole = "participant";
-    {
-        CspPttGroup clsGroup;
-        if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) {
-            for ( const auto &pUser : clsGroup._pusers ) {
-                if ( pUser && pUser->_id == strMemberId ) {
-                    strRole = pUser->_role;
-                    break;
-                }
+    CspPttGroup clsGroup;
+    bool bHaveGroup = gclsGroupMap.Select( strGroupId.c_str(), clsGroup );
+    if ( bHaveGroup ) {
+        for ( const auto &pUser : clsGroup._pusers ) {
+            if ( pUser && pUser->_id == strMemberId ) {
+                strRole = pUser->_role;
+                break;
             }
         }
     }
@@ -1194,9 +1195,40 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                          clsNatSvc.name.c_str(), strMemberId.c_str(), strRemoteIp.c_str(), strSigIp.c_str() );
         }
     }
-    if ( gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort,
-                                  GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL, iMemberNat,
-                                  strMemberGuardIp ) ) {
+    bool bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
+                                            iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
+                                            iMemberNat, strMemberGuardIp );
+    if ( !bJoined && bHaveGroup ) {
+        // JoinGroup 실패의 주요 원인은 CMP 그룹 소실(NOT_FOUND) — CMP 재시작/orphan 정리 후 CSP 세션만
+        //   남은 상태. JoinGroup 경로엔 self-heal 이 없어 영구 무음이 되므로, SyncGroupsState 의 MODIFY
+        //   실패 self-heal 과 대칭으로 AddGroup(멱등) 재수립 후 1회 재시도한다.
+        std::string strReAddIp, strReAddRecDir;
+        int iReAddFloor = 0;
+        std::map<std::string, std::pair<int, int>> mapReAddPorts;
+        if ( gclsCallDir.IsEnabled() )
+            strReAddRecDir = gclsCallDir.GetPttSessionDir( strGroupId, TimeToIso( clsGroup._sessionStart ),
+                                                           std::to_string( clsGroup._dbId ) );
+        if ( gclsCmpClient.AddGroup( strGroupId, clsGroup._pusers, strReAddIp, iReAddFloor, mapReAddPorts,
+                                     strReAddRecDir, clsGroup._videoEnabled, clsGroup._sessionSeq,
+                                     GetOrIssueGroupSesId( strGroupId ), clsGroup._groupType, strMemberId.c_str() ) ) {
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                auto itRe = m_mapGroupRtp.find( strGroupId );
+                if ( itRe != m_mapGroupRtp.end() ) {
+                    itRe->second.iFloorPort = iReAddFloor;
+                    itRe->second.strIp = strReAddIp;
+                    itRe->second.memberPorts = mapReAddPorts;
+                    itRe->second.nMemberHash = ComputeMemberHash( clsGroup );
+                }
+            }
+            CLog::Print( LOG_INFO, "OnCallStarted: Group(%s) NOT_FOUND → AddGroup re-established (floor=%d), retry JoinGroup",
+                         strGroupId.c_str(), iReAddFloor );
+            bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
+                                               iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
+                                               iMemberNat, strMemberGuardIp );
+        }
+    }
+    if ( bJoined ) {
         CLog::Print( LOG_INFO, "OnCallStarted: Joined Group(%s) Peer(%s:%d floor=%d video=%d)", strGroupId.c_str(),
                      strRemoteIp.c_str(), iRemotePort, iFloorPort, iVideoPort );
         if ( gclsCallDir.IsEnabled() ) {
