@@ -58,6 +58,11 @@ peer0 (발신 A):  Q    audio RTP     peer1 (착신 B):  Q+4  audio RTP
 - **floor control 포트는 그룹 공유 유지.** floor 메시지(RTCP APP, TS 24.380)는 User ID
   필드가 in-band 신원이라 공유 포트에서도 모호성이 없다. NAT 멤버의 floor 목적지는
   User-ID 기반 주소 latch 로 학습한다 (`PMcpttGroup::onFloorPacket`).
+  - 상향 floor 메시지가 도착해야 하향(GRANT/TAKEN/IDLE) 목적지가 열린다. **한 번도 발언하지
+    않는 청취 전용 멤버**는 자발적 상향이 없으므로, UE 가 참여 직후 및 주기적으로 Floor
+    Ack(User ID 포함)를 송신해 매핑을 열고 유지해야 한다 ([§7](#7-운영-요건)).
+  - latch 는 수신할 때마다 갱신되므로 NAT rebind 를 자연히 추종한다. 학습 실패 구간(첫 Ack
+    이전)에는 SDP 선언 주소로 송신한다 — 사설이면 도달하지 않지만 무해하다.
 - **audio(+video) RTP 는 멤버별 전용 포트.** 멤버 참가 시 멤버 포트 유닛(audio RTP,
   video RTP)을 할당하고, 그 멤버의 SDP 에 해당 포트를 광고한다.
   - 상향(발언): 멤버 유닛 소켓 수신 = 그 멤버의 미디어. floor owner 검증 후 분배·녹취
@@ -66,6 +71,8 @@ peer0 (발신 A):  Q    audio RTP     peer1 (착신 B):  Q+4  audio RTP
   - 하향(청취): 각 멤버의 유닛 소켓에서 그 멤버의 목적지로 송신. NAT 멤버의 목적지는
     유닛 포트로 도착하는 첫 유효 패킷(RTP keepalive 포함)으로 latch — 유닛 포트 자체가
     멤버 신원이므로 같은 NAT 뒤 다중 청취 멤버도 안전하다.
+  - PTT 는 발언 중에만 상향 RTP 가 흐르므로, 청취 전용 멤버의 하향 오디오는 **UE 의 RTP
+    keepalive 에 전적으로 의존**한다 (RFC 6263, [§7](#7-운영-요건)).
 
 ### 3.3 포트 산정
 
@@ -141,10 +148,57 @@ NAT 뒤 단말을 수용하는 access service 배치 체크리스트:
   `Setup.Sip.SendOptionsPeriod` 를 활성(권장 25s 이하)하거나 UE 의 재등록/keepalive 주기를
   그 이하로 설정한다. TCP/TLS 등록은 연결 유지로 충분하다.
 - **미디어 바인딩 유지**: UE 는 RTP keepalive(무음 구간 empty RTP 등)를 송신해야
-  하향 경로 latch 와 NAT 매핑이 유지된다 (PJMEDIA 계열 기본 동작).
+  하향 경로 latch 와 NAT 매핑이 유지된다. PJSIP 계열은 `PJMEDIA_STREAM_ENABLE_KA` 로
+  제어되며 **기본값이 0(비활성)** 이라 config_site.h 에서 명시 활성화해야 한다.
 - **정책**: 해당 access service 에 `media_nat_mode=auto` (판정 불가 단말만 `force`),
   `latch_ip_guard=strict` 유지. CGN 등 시그널링/미디어 공인 IP 상이 환경만 `off`.
 - **포트/방화벽**: leg 별 포트 소요([§3.3](#33-포트-산정))에 맞춰 풀 크기와 방화벽 대역을
   산정한다.
 - 공인 노출망의 인증 우회 스위치 `Setup.TestEnvOpenTermination` 은 검증 전용이다 —
   상용은 false 유지 (미등록 발신 INVITE 는 표준 401 챌린지).
+
+### 7.1 UE 구현 요건 (PTT)
+
+서버는 "UE 가 각 소켓으로 무언가 보낸다"는 전제 위에서만 하향 경로를 열 수 있다. NAT 배치의
+PTT 단말은 **세 소켓 모두**에 대해 유입 매핑을 열고 유지해야 한다.
+
+| 소켓 | UE 동작 | 주기 | 미이행 시 증상 |
+|---|---|---|---|
+| SIP | 재등록 또는 서버 OPTIONS 응답 | ≤25s (UDP) | 인바운드 INVITE 미도달 |
+| floor (m=application) | **Floor Ack (User ID 포함)** — 참여 직후 1회 + idle 주기 송신 | ≤20s | 청취 중 GRANT/TAKEN/IDLE 미수신 (음성은 들리나 발언자 표시·발언권 응답 없음) |
+| audio RTP (멤버 유닛) | **RTP keepalive** (`PJMEDIA_STREAM_ENABLE_KA=1`) | pjsip 기본 KA 주기 | 청취 전용 상태에서 하향 오디오 전무 |
+
+Floor Ack 를 keepalive 로 쓰는 것은 TS 24.380 이 규정한 절차는 아니다 — 규격은 floor 평면의
+NAT traversal 을 (ICE 전제로) 다루지 않으므로, User ID 필드를 이용한 주소 latch 와 그 유지는
+CIMS 의 규격 적합 확장이다. Ack 는 서버 상태를 바꾸지 않아 부작용이 없다.
+
+## 8. 표준 근거
+
+| 규격 | 규정 내용 | 대응 |
+|---|---|---|
+| RFC 3581 / RFC 5626 | 시그널링 NAT — received/rport, outbound 연결 재사용 | [§2](#2-시그널링-평면-csp--psip) |
+| RFC 4961 | Symmetric RTP/RTCP — latch 의 전제 | [§3](#3-미디어-평면--leg-별-전용-포트셋) 송신 소스 포트 = 광고 포트 |
+| RFC 6263 | RTP keepalive (empty RTP 등) — 수신 전용 단말의 매핑 소멸 문제 | [§7.1](#71-ue-구현-요건-ptt) |
+| RFC 7362 | Latching(Hosted NAT Traversal) — 기법과 한계(스푸핑, 무송신 단말 latch 불가) 문서화 | [§5](#5-목적지-latch-cmp) + IP guard + SSRC 고정 |
+| RFC 8445 (ICE) | 양방향 connectivity check — 무송신 단말까지 해소 | **미지원** ([§9](#9-미구현향후-과제)) |
+| 3GPP TS 23.228 Annex G / TS 24.229 | IMS NAT traversal 모델 (IMS-ALG + IMS-AGW) | CSP=ALG, CMP=AGW 로 동형 |
+| 3GPP TS 29.334 (Iq, H.248) | IMS-AGW 에 remote source address 학습(latching)을 **제어평면이 leg 단위로 지시** | `remote_nat`/`user_nat` + `*_sig_ip` ([§4](#4-nat-정책--access-service-단위)) |
+| 3GPP TS 24.380 | floor 메시지 User ID 필드, Floor Ack | [§3.2](#32-ptt-그룹) 멤버 식별 |
+
+규격이 **정의하지 않은 것** — floor 제어 채널 자체의 NAT traversal 절차, 청취 전용 참가자의
+하향 경로 부트스트랩(RFC 6263 은 단말 책임으로 둔다). 위 §3.2·§7.1 은 그 공백을 메우는
+CIMS 구현 규약이다.
+
+## 9. 미구현/향후 과제
+
+- **UE floor Ack 주기 송신** — 현재 참여 직후 1회만 송신(`android/ptt-client/.../PttController.kt`
+  floorRemote 수집부, `FloorClient.sendAck`). idle 타이머 기반 주기 송신 필요 ([§7.1](#71-ue-구현-요건-ptt)).
+- **UE RTP keepalive 활성** — `android/docs/scripts/m1_build_pjsip.sh` 가 생성하는 config_site.h 에
+  `PJMEDIA_STREAM_ENABLE_KA` 정의가 없어 pjsip 기본값 0 이다. 정의 추가 후 pjsip 재빌드 +
+  config_site.h sha256 갱신([android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md)) 필요.
+- **floor latch IP guard** — RTP latch 는 `sigIp` 대조(`PMcpttGroup::_acceptNatRtp`)를 하지만 floor
+  latch(`onFloorPacket` User ID 경로)는 소스 IP 를 검증하지 않는다. User ID 를 아는 제3자가 임의
+  주소로 Ack 를 보내면 그 멤버의 floor 하향을 가로챌 수 있다. RTP 와 동일하게
+  `latch_ip_guard=strict` 시 `user_sig_ip` 대조를 적용해야 한다.
+- **ICE 미지원** — symmetric NAT(포트까지 변환)에서 floor/오디오 매핑을 UE keepalive 없이 여는
+  방법은 없다. 서버측 ICE-lite 도입이 근본 해법이다.
