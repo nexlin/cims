@@ -96,6 +96,15 @@ class PttController(
     /** 사용자 피드백(톤+진동) — 서비스가 Context 로 생성해 주입. */
     var feedback: PttFeedback? = null
 
+    /** 그룹별 수신 음량 영속화 — 서비스가 주입. 신규 그룹 기본=최대([GroupVolumeStore.DEFAULT]). */
+    var volumeStore: com.cims.ue.ptt.audio.GroupVolumeStore? = null
+
+    /** 이어폰(유선/BT) 장치 열거·지정 — 서비스가 주입. */
+    var audioRouter: com.cims.ue.ptt.audio.AudioRouter? = null
+
+    /** 라우팅 선택 영속화 — 서비스가 주입(리부팅/재기동 복원). */
+    var routePrefs: com.cims.ue.ptt.audio.AudioRoutePrefs? = null
+
     /** 통화이력 이벤트 훅 — 서비스가 주입(HistoryStore 영속). 컨트롤러 스레드에서 호출되므로 가볍게. */
     var onEvent: ((PttEvent) -> Unit)? = null
     private fun emit(kind: PttEventKind, groupId: String, peer: String? = null, durationMs: Long = 0) {
@@ -134,7 +143,8 @@ class PttController(
         var speaker: Speaker? = null
         var participants: MutableMap<String, String> = mutableMapOf(bareId(mcpttId) to "connected")
         var audible: Boolean = true
-        var volume: Float = 1f
+        // 영속 저장된 그룹별 음량으로 시작 — 저장값 없는(신규) 그룹은 최대
+        var volume: Float = volumeStore?.get(groupId) ?: 1f
         var emergency: Boolean = false
         var emergencyMine: Boolean = false
         var mySpeakStartMs: Long = 0          // 이력용 — 내 발언 시작(elapsedRealtime)
@@ -159,9 +169,13 @@ class PttController(
     /** 듣기 정책 — 주채널만/전체. */
     val listenPolicy: StateFlow<ListenPolicy> = _listenPolicy.asStateFlow()
 
-    private val _audioRoute = MutableStateFlow(SipController.AUDIO_ROUTE_DEFAULT)
-    /** 오디오 출력 라우팅(전역) — 일반(자동)/수화구/스피커. */
+    private val _audioRoute = MutableStateFlow(SipController.AUDIO_ROUTE_SPEAKER)
+    /** 오디오 출력 라우팅(전역) — 스피커폰(기본)/수화기/이어폰([AUDIO_ROUTE_HEADSET]). */
     val audioRoute: StateFlow<Int> = _audioRoute.asStateFlow()
+
+    private val _headsetId = MutableStateFlow(-1)
+    /** 이어폰 라우팅일 때 선택 장치 id ([com.cims.ue.ptt.audio.AudioRouter.Headset.id]). */
+    val headsetId: StateFlow<Int> = _headsetId.asStateFlow()
 
     // ── 주채널 파생 상태 (발언자 카드·PTT 버튼용) ──
 
@@ -193,6 +207,8 @@ class PttController(
 
     private var csc: CscClient? = cscConfig?.let { CscClient(it, allowInsecureTls) }
     @Volatile private var token: TokenSet? = null
+    /** CSC 토큰 보유 여부 — 서비스의 SSO 주입 중복 방지용(주입은 [setAccessToken]). */
+    val hasAccessToken: Boolean get() = token != null
     @Volatile private var pttHeld = false
     private var requestTimeout: Job? = null
     private val ssrc: Long = (mcpttId.hashCode().toLong() and 0xffffffffL).let { if (it == 0L) 1L else it }
@@ -231,7 +247,7 @@ class PttController(
                     is CallState.Outgoing -> bindCall(bareId(st.remote), st.id)
                     is CallState.Active -> {
                         bindCall(bareId(st.remote), st.id, active = true)
-                        sip.setAudioRoute(_audioRoute.value)        // 통화별 라우팅 재적용
+                        applyAudioRoute()                           // 통화별 라우팅 재적용
                         applyListenPolicy()
                     }
                     is CallState.Disconnected -> onCallEnded(st.id)
@@ -334,14 +350,15 @@ class PttController(
                     s.audible = on
                     if (s.callId >= 0) sip.setCallListen(s.callId, on)
                 }
-                if (s.callId >= 0 && s.active && s.volume != 1f) sip.setCallRxLevel(s.callId, s.volume)
+                if (s.callId >= 0 && s.active) sip.setCallRxLevel(s.callId, s.volume)
             }
         }
         publish()
     }
 
-    /** 채널별 수신 음량(0~2, 1=원음) — conference bridge 유입 레벨. */
+    /** 채널별 수신 음량(0~2, 1=원음) — conference bridge 유입 레벨. 영속 저장(리부팅 유지). */
     fun setChannelVolume(groupId: String, level: Float) {
+        volumeStore?.set(groupId, level)
         synchronized(lock) {
             val s = sessionMap[groupId] ?: return
             s.volume = level
@@ -350,10 +367,24 @@ class PttController(
         publish()
     }
 
-    /** 오디오 출력 라우팅(전역) — [SipController.AUDIO_ROUTE_DEFAULT]/EARPIECE/SPEAKER. */
-    fun setAudioRoute(route: Int) {
+    /** 오디오 출력 라우팅(전역) — 스피커폰/수화기(PJSIP) 또는 이어폰([AUDIO_ROUTE_HEADSET]+[deviceId]).
+     *  선택은 [routePrefs] 로 영속(리부팅/재기동 복원). */
+    fun setAudioRoute(route: Int, deviceId: Int = -1) {
         _audioRoute.value = route
-        sip.setAudioRoute(route)
+        _headsetId.value = deviceId
+        routePrefs?.let { it.route = route; it.headsetId = deviceId }
+        applyAudioRoute()
+    }
+
+    /** 현재 라우팅 적용/재적용 — 통화 성립(pjsua2 스트림 개방) 시에도 호출(라우팅 리셋 대비). */
+    private fun applyAudioRoute() {
+        if (_audioRoute.value == AUDIO_ROUTE_HEADSET) {
+            sip.setAudioRoute(SipController.AUDIO_ROUTE_DEFAULT)   // pjsua2 강제 라우팅 해제
+            audioRouter?.select(_headsetId.value)
+        } else {
+            audioRouter?.clear()
+            sip.setAudioRoute(_audioRoute.value)
+        }
     }
 
     private fun ensureAffiliated(groupId: String) {
@@ -1016,6 +1047,9 @@ class PttController(
         private const val TAG = "PttController"
         /** Floor Request 후 GRANT/DENY 무응답 시 IDLE 복귀 시한. */
         private const val REQUEST_TIMEOUT_MS = 3000L
+
+        /** 오디오 라우팅: 이어폰(유선/BT) — [SipController.AUDIO_ROUTE_DEFAULT]/EARPIECE/SPEAKER(0~2) 확장. */
+        const val AUDIO_ROUTE_HEADSET = 3
 
         /** MCData ICSI (TS 24.282) — MSRP INVITE Accept-Contact·PR4 수신 광고 공용. */
         const val MCDATA_ICSI = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"

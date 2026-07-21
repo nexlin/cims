@@ -85,9 +85,9 @@ fun SettingsScreen(
         SectionLabel("통신 설정")
         SectionCard(padding = 4) {
             val speakerOn = st.route == SipController.AUDIO_ROUTE_SPEAKER
-            ToggleRow("스피커 출력", "끄면 수화구·이어폰 자동", speakerOn) {
+            ToggleRow("스피커 출력", "끄면 수화기 (이어폰은 주채널 화면에서 선택)", speakerOn) {
                 st.ctl?.setAudioRoute(
-                    if (speakerOn) SipController.AUDIO_ROUTE_DEFAULT else SipController.AUDIO_ROUTE_SPEAKER)
+                    if (speakerOn) SipController.AUDIO_ROUTE_EARPIECE else SipController.AUDIO_ROUTE_SPEAKER)
             }
             Divider()
             val all = st.policy == ListenPolicy.ALL

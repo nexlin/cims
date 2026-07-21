@@ -29,7 +29,11 @@ data class MessageEntry(
     val attUrl: String = "",
     val attSize: Long = 0,
     val attPath: String = "",
-)
+) {
+    /** 삭제/선택용 식별 키 — msgId 는 비보장(구버전 text/plain 수신은 공백)이라 복합 키로 식별.
+     *  delivered/sendState 등 가변 필드는 제외(UI 조회 후 변경돼도 같은 키 유지). */
+    val key: String get() = "$peer|$time|${direction.name}|$msgId|${text.hashCode()}"
+}
 
 /** 대화(스레드) 요약 — 상대별 마지막 문자 + 안읽음 수. */
 data class MessageThread(val peer: String, val last: MessageEntry, val unread: Int)
@@ -135,6 +139,19 @@ class MessageStore(context: Context) {
 
     /** 한 상대와의 대화 삭제. */
     fun clearThread(peer: String) = save(all().filterNot { it.peer == peer })
+
+    /** 선택 문자 삭제 — [MessageEntry.key] 집합 기준(1건/다건 공용). @return 실제 삭제 여부. */
+    fun delete(keys: Set<String>): Boolean {
+        if (keys.isEmpty()) return false
+        val list = all()
+        val remain = list.filterNot { it.key in keys }
+        if (remain.size == list.size) return false
+        save(remain)
+        return true
+    }
+
+    /** 전체 문자 삭제. */
+    fun clearAll() = save(emptyList())
 
     private fun all(): List<MessageEntry> {
         val arr = runCatching { JSONArray(prefs.getString(KEY, "[]").orEmpty()) }

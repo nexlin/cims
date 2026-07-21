@@ -1,8 +1,10 @@
 package com.cims.ue.ptt.ui
 
 import android.text.format.DateFormat
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,9 +26,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -59,14 +64,57 @@ private fun fmtSize(n: Long): String = when {
     else -> ""
 }
 
-/** 메시지 탭 — 대화(스레드) 목록. */
+/** 삭제 확인 다이얼로그 공통. */
+@Composable
+private fun DeleteConfirmDialog(text: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("메시지 삭제") },
+        text = { Text(text) },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(); onDismiss() }) { Text("삭제", color = Ct.Red) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
+}
+
+/** 메시지 탭 — 대화(스레드) 목록. 길게 누름=대화 삭제, 헤더 휴지통=전체 삭제. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessagesScreen(st: PttUiState, svc: PttService?, onOpenThread: (String) -> Unit) {
     val tick = svc?.messageTick?.collectAsState()?.value ?: 0
     val threads: List<MessageThread> = remember(tick, svc) { svc?.messages?.threads() ?: emptyList() }
+    var confirmPeer by remember { mutableStateOf<String?>(null) }
+    var confirmAll by remember { mutableStateOf(false) }
+
+    confirmPeer?.let { peer ->
+        DeleteConfirmDialog(
+            "'${st.groupName(peer)}' 대화를 삭제할까요?",
+            onConfirm = { svc?.deleteThread(peer) },
+            onDismiss = { confirmPeer = null },
+        )
+    }
+    if (confirmAll) {
+        DeleteConfirmDialog(
+            "모든 대화를 삭제할까요?",
+            onConfirm = { svc?.deleteAllMessages() },
+            onDismiss = { confirmAll = false },
+        )
+    }
 
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
-        ScreenHeader(label = null, title = "메시지")
+        ScreenHeader(label = null, title = "메시지", trailing = if (threads.isEmpty()) null else {
+            {
+                Box(
+                    Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Ct.SurfaceHi)
+                        .clickable { confirmAll = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(R.drawable.ic_delete), contentDescription = "전체 삭제",
+                        tint = Ct.TextDim, modifier = Modifier.size(17.dp))
+                }
+            }
+        })
         Spacer(Modifier.height(10.dp))
 
         if (threads.isEmpty()) {
@@ -84,7 +132,10 @@ fun MessagesScreen(st: PttUiState, svc: PttService?, onOpenThread: (String) -> U
             items(threads, key = { it.peer }) { th ->
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Ct.Surface)
-                        .clickable { onOpenThread(th.peer) }
+                        .combinedClickable(
+                            onClick = { onOpenThread(th.peer) },
+                            onLongClick = { confirmPeer = th.peer },
+                        )
                         .padding(horizontal = 12.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -117,7 +168,9 @@ fun MessagesScreen(st: PttUiState, svc: PttService?, onOpenThread: (String) -> U
     }
 }
 
-/** 대화 스레드(시안 `메시지화면.png`) — 말풍선 + 입력바. [peer]=그룹ID 또는 상대 번호. */
+/** 대화 스레드(시안 `메시지화면.png`) — 말풍선 + 입력바. [peer]=그룹ID 또는 상대 번호.
+ *  말풍선 길게 누름=선택 모드(1건/다건 삭제), 상단바에서 전체선택·삭제. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: () -> Unit) {
     val tick = svc?.messageTick?.collectAsState()?.value ?: 0
@@ -127,14 +180,31 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
     var input by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
     val joined = st.session(peer) != null
+    // 선택 삭제 모드 — 선택된 MessageEntry.key 집합(비면 일반 모드)
+    val selected = remember(peer) { mutableStateListOf<String>() }
+    val selecting = selected.isNotEmpty()
+    fun toggle(k: String) { if (!selected.remove(k)) selected.add(k) }
+    var confirmSel by remember { mutableStateOf(false) }
 
     LaunchedEffect(peer) { svc?.markThreadRead(peer) }
     LaunchedEffect(entries.size) {
         if (entries.isNotEmpty()) listState.scrollToItem(entries.size - 1)
     }
+    androidx.activity.compose.BackHandler(enabled = selecting) { selected.clear() }
+
+    if (confirmSel) {
+        DeleteConfirmDialog(
+            "선택한 ${selected.size}건을 삭제할까요?",
+            onConfirm = {
+                svc?.deleteMessages(entries.filter { it.key in selected })
+                selected.clear()
+            },
+            onDismiss = { confirmSel = false },
+        )
+    }
 
     Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
-        // 상단바
+        // 상단바 — 선택 모드에서는 선택 수 + 전체선택 + 삭제로 전환
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -142,17 +212,36 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
         ) {
             Box(
                 Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Ct.SurfaceHi)
-                    .clickable(onClick = onBack),
+                    .clickable(onClick = { if (selecting) selected.clear() else onBack() }),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(painterResource(R.drawable.ic_back), contentDescription = "뒤로",
+                Icon(painterResource(if (selecting) R.drawable.ic_close else R.drawable.ic_back),
+                    contentDescription = if (selecting) "선택 취소" else "뒤로",
                     tint = Ct.Text, modifier = Modifier.size(18.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(st.groupName(peer), color = Ct.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("메시지", color = Ct.TextFaint, fontSize = 11.sp)
+                Text(if (selecting) "${selected.size}개 선택" else st.groupName(peer),
+                    color = Ct.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(if (selecting) "삭제할 메시지 선택" else "메시지",
+                    color = Ct.TextFaint, fontSize = 11.sp)
             }
-            if (joined) PillBadge("접속", Ct.Mint)
+            if (selecting) {
+                Text("전체선택", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(Ct.Mint.copy(alpha = 0.14f))
+                        .clickable {
+                            selected.clear()
+                            selected.addAll(entries.map { it.key })
+                        }
+                        .padding(horizontal = 10.dp, vertical = 5.dp))
+                Box(
+                    Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Ct.SurfaceHi)
+                        .clickable { confirmSel = true },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(R.drawable.ic_delete), contentDescription = "삭제",
+                        tint = Ct.Red, modifier = Modifier.size(17.dp))
+                }
+            } else if (joined) PillBadge("접속", Ct.Mint)
         }
 
         // 말풍선 목록 — 날짜 구분선 + 발신(민트, 우측)/수신(다크, 좌측)
@@ -176,7 +265,18 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                 }
                 items(listOf("msg-$i")) {
                     val mine = e.direction == MsgDirection.OUT
-                    Column(Modifier.fillMaxWidth()) {
+                    val isSel = e.key in selected
+                    Column(
+                        Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isSel) Ct.Mint.copy(alpha = 0.10f)
+                                else androidx.compose.ui.graphics.Color.Transparent)
+                            .combinedClickable(
+                                onClick = { if (selecting) toggle(e.key) },
+                                onLongClick = { toggle(e.key) },
+                            )
+                            .padding(2.dp),
+                    ) {
                         // 그룹 수신 문자 — 발신자 라벨 (MCData mcdata-info 그룹 귀속으로 스레드=그룹)
                         if (!mine && e.sender.isNotBlank() && e.sender != peer) {
                             Text(e.sender, color = Ct.TextFaint, fontSize = 10.sp,
@@ -201,7 +301,7 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                                 }
                                 Text(label, color = color, fontSize = 10.sp,
                                     modifier = Modifier.padding(end = 6.dp, bottom = 2.dp).let { m ->
-                                        if (e.sendState == SendState.FAILED)
+                                        if (e.sendState == SendState.FAILED && !selecting)
                                             m.clickable { svc?.resendMessage(e) } else m
                                     })
                             }
@@ -215,10 +315,15 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                                     bottomEnd = if (mine) 4.dp else 14.dp))
                                 .background(if (mine) Ct.Mint else Ct.SurfaceHi)
                                 .let { m ->
-                                    if (isAtt) m.clickable {
-                                        if (e.attPath.isBlank()) svc?.downloadAttachment(e)
-                                        else svc?.openAttachment(e)
-                                    } else m
+                                    // 첨부 탭=받기/열기 — 선택 모드에서는 선택 토글로 동작(길게 누름=선택 진입)
+                                    if (isAtt) m.combinedClickable(
+                                        onClick = {
+                                            if (selecting) toggle(e.key)
+                                            else if (e.attPath.isBlank()) svc?.downloadAttachment(e)
+                                            else svc?.openAttachment(e)
+                                        },
+                                        onLongClick = { toggle(e.key) },
+                                    ) else m
                                 }
                                 .padding(horizontal = 12.dp, vertical = 8.dp)
                             Text(

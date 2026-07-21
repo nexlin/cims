@@ -48,7 +48,11 @@ import kotlinx.coroutines.launch
  */
 class SipService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob())
+    // 상태 collector 에서 예상 못한 예외(플랫폼 정책 예외 등)가 나도 프로세스를 죽이지 않는다.
+    private val scope = CoroutineScope(SupervisorJob() +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+            android.util.Log.e("SipService", "service scope 예외", e)
+        })
     private var controller: SipController? = null
     private var stateJob: Job? = null
     private var netCallback: ConnectivityManager.NetworkCallback? = null
@@ -147,18 +151,30 @@ class SipService : Service() {
         c.register()
     }
 
-    fun makeCall(dst: String) = controller?.makeCall(dst)
+    /** 발신 — 키패드 로컬 표기("013…")는 E.164 로 정규화(가입자 정본은 E.164, 로컬 표기는 서버 404).
+     *  cc=프로비저닝 countryCode, 없으면 내 msisdn 에서 유도. 키패드/통화이력/연락처 공통 경로. */
+    fun makeCall(dst: String) = controller?.makeCall(normalizeDial(dst))
 
-    /** 문자(SIP MESSAGE, RFC 3428 page-mode) 송신 + 인박스(발신) 기록. 대상=sip:번호@도메인. */
+    private fun normalizeDial(dst: String): String {
+        val cfg = ConfigStore(this).load()
+        val cc = cfg.countryCode.ifBlank {
+            com.cims.ue.core.sip.countryCodeOf(cfg.msisdn).orEmpty()
+        }
+        return com.cims.ue.core.sip.toE164(dst, cc)
+    }
+
+    /** 문자(SIP MESSAGE, RFC 3428 page-mode) 송신 + 인박스(발신) 기록. 대상=sip:번호@도메인.
+     *  대상 번호는 발신과 동일하게 E.164 정규화 — 저장 peer 도 정규화해 수신(From=E.164) 스레드와 합치. */
     fun sendMessage(dst: String, text: String) {
         val cfg = ConfigStore(this).load()
+        val to = normalizeDial(dst)
         controller?.sendRequest(
             method = "MESSAGE",
-            targetUri = "sip:${dst}@${cfg.domain}",
+            targetUri = "sip:${to}@${cfg.domain}",
             contentType = "text/plain",
             body = text,
         )
-        MessageStore(this).add(dst, text, MsgDirection.OUT)
+        MessageStore(this).add(to, text, MsgDirection.OUT)
         messagesVersion.value++
     }
     fun answer(callId: Int, video: Boolean = false) = controller?.answer(callId, video)
@@ -236,7 +252,10 @@ class SipService : Service() {
             }.launchIn(this)
 
             c.callState.onEach { call ->
-                elevateForCall(call is CallState.Active || call is CallState.Outgoing || call is CallState.Incoming)
+                // 🔑 Incoming(응답 전)은 승격하지 않는다 — 백그라운드 착신 시 microphone 타입 승격은
+                // API 34+ 에서 금지(ForegroundServiceStartNotAllowedException → 앱 크래시).
+                // 사용자가 받으면(Active) 통화 UI 가 포그라운드라 승격 가능. Outgoing 은 사용자 발신=포그라운드.
+                elevateForCall(call is CallState.Active || call is CallState.Outgoing)
                 // 착신 — 기본 전화앱처럼 벨소리 + 풀스크린/헤드업 착신 알림(받기/거절).
                 if (call is CallState.Incoming) {
                     showIncomingCallNotification(call)
@@ -420,10 +439,17 @@ class SipService : Service() {
         }
     }
 
-    /** 통화 활성/종료 시 FGS 타입 승격/복귀 (마이크 접근 권한 보장). */
+    /** 통화 활성/종료 시 FGS 타입 승격/복귀 (마이크 접근 권한 보장).
+     *  승격이 플랫폼 정책으로 거부돼도(백그라운드 등) 던지지 않고 specialUse 로 유지 — 통화 UI 가
+     *  포그라운드로 오면 while-in-use 마이크 권한으로 통화는 정상 동작한다. */
     private fun elevateForCall(active: Boolean) {
         if (Build.VERSION.SDK_INT >= 34) {
-            startForegroundCompat(buildNotification("CIMS Phone", if (active) "통화 중" else "등록 유지"), inCall = active)
+            val n = buildNotification("CIMS Phone", if (active) "통화 중" else "등록 유지")
+            runCatching { startForegroundCompat(n, inCall = active) }
+                .onFailure {
+                    android.util.Log.w("SipService", "FGS 승격 거부(inCall=$active) — specialUse 유지", it)
+                    runCatching { startForegroundCompat(n, inCall = false) }
+                }
         }
     }
 

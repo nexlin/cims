@@ -26,6 +26,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 하드웨어 음량 키가 통화(수신 음성) 스트림을 조절하게 — PTT 수신 음량 문제 대응
+        volumeControlStream = android.media.AudioManager.STREAM_VOICE_CALL
         HwPtt.init(this)
         PttService.start(this)
         bindService(Intent(this, PttService::class.java), conn, Context.BIND_AUTO_CREATE)

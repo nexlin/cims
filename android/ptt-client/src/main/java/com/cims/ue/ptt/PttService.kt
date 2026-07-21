@@ -27,12 +27,20 @@ import kotlinx.coroutines.launch
  */
 class PttService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob())
+    // 상태 collector 에서 예상 못한 예외(플랫폼 정책 예외 등)가 나도 프로세스를 죽이지 않는다.
+    private val scope = CoroutineScope(SupervisorJob() +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+            android.util.Log.e("PttService", "service scope 예외", e)
+        })
     // StateFlow — 바인드 시점에 아직 컨트롤러가 없어도(SSO 재취득 중) 생성 시 UI 재구성
     private val _controller = kotlinx.coroutines.flow.MutableStateFlow<PttController?>(null)
     val controllerFlow: kotlinx.coroutines.flow.StateFlow<PttController?> = _controller
     val controller: PttController? get() = _controller.value
     private var job: Job? = null
+    private var routeJob: Job? = null
+
+    /** 이어폰 장치 열거(연결/해제 감시) — 컨트롤러 재생성과 무관하게 서비스 수명. */
+    val audioRouter by lazy { com.cims.ue.ptt.audio.AudioRouter(this) }
 
     /** 화면 최상단 전역 상태 아이콘 배지(오버레이, PTT 아이콘=중앙 우측 — CIMS-Phone 전화 아이콘과
      *  자리를 나눔). 아이콘만 표시하고 상태는 tint 색으로. main 스레드에서만 갱신. */
@@ -81,6 +89,24 @@ class PttService : Service() {
     fun markThreadRead(peer: String) {
         if (messages.markRead(peer)) _messageTick.value++
     }
+
+    /** 문자 삭제(1건/선택) — 첨부 로컬 파일·전송 진행률도 함께 정리. */
+    fun deleteMessages(entries: Collection<com.cims.ue.core.message.MessageEntry>) {
+        if (entries.isEmpty()) return
+        entries.forEach { e ->
+            if (e.attPath.isNotBlank()) runCatching { java.io.File(e.attPath).delete() }
+        }
+        _sendProgress.value = _sendProgress.value -
+            entries.mapNotNull { it.msgId.takeIf(String::isNotBlank) }.toSet()
+        if (messages.delete(entries.map { it.key }.toSet())) _messageTick.value++
+    }
+
+    /** 대화(스레드) 통째 삭제. */
+    fun deleteThread(peer: String) = deleteMessages(messages.thread(peer))
+
+    /** 전체 문자 삭제. */
+    fun deleteAllMessages() =
+        deleteMessages(messages.threads().flatMap { messages.thread(it.peer) })
 
     // ── MCData FD (파일전송) ──
 
@@ -206,15 +232,62 @@ class PttService : Service() {
     fun ensureRegistered() {
         val cfg = ConfigStore(this).load()
         if (!cfg.isComplete()) { update("CIMS-McPtt", "로그인 필요"); return }
-        if (controller != null && activeConfig == cfg) return   // 동일 설정 → 그대로
+        if (controller != null && activeConfig == cfg) {        // 동일 설정 → 그대로(토큰만 보강)
+            controller?.let { injectSsoToken(it) }
+            return
+        }
         controller?.let { runCatching { it.shutdown() } }       // 설정 변경(포트/비번) → 재등록
         // msisdn 은 프로비저닝에 따라 "+8250..."/"8250..." 혼재 — tel: URI 로 정규화(+ 중복 방지)
         val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
         val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { _controller.value = it; activeConfig = cfg }
         c.feedback = com.cims.ue.ptt.audio.PttFeedback(this)
+        c.volumeStore = com.cims.ue.ptt.audio.GroupVolumeStore(this)
+        c.audioRouter = audioRouter
+        val rp = com.cims.ue.ptt.audio.AudioRoutePrefs(this)
+        c.routePrefs = rp
+        c.setAudioRoute(rp.route, rp.headsetId)     // 저장된 라우팅 복원(기본=스피커폰)
+        observeHeadsets(c)
         observe(c)
         c.register()
+        injectSsoToken(c)
+    }
+
+    /** CIMS 공유 계정의 MCPTT 토큰(TS 33.180)을 서비스에서 직접 주입 — **로그인만으로**(PTT 앱을
+     *  열지 않아도) 그룹 조회 → 선택 그룹 affiliation PUBLISH 까지 진행돼 REGISTER 직후부터
+     *  CSP fan-out(그룹콜/SDS) 대상이 된다. UI(AppRoot) 주입과 중복돼도 무해(보유 시 생략). */
+    private fun injectSsoToken(c: PttController) {
+        if (c.hasAccessToken) return
+        if (!com.cims.ue.core.account.SsoProvisioner.hasAccount(this)) return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val am = android.accounts.AccountManager.get(this@PttService)
+                val acct = com.cims.ue.core.account.CimsAccounts.get(am) ?: return@launch
+                val tok = com.cims.ue.core.account.CimsAccounts.blockingToken(
+                    am, acct, com.cims.ue.core.account.CimsAccounts.TOKEN_MCPTT)
+                if (tok != null && controller === c && !c.hasAccessToken) c.setAccessToken(tok)
+            }
+        }
+    }
+
+    /** 이어폰 연결/해제 자동 전환 — 연결=그 이어폰으로, (이어폰 사용 중) 해제=남은 이어폰 또는 스피커폰. */
+    private fun observeHeadsets(c: PttController) {
+        routeJob?.cancel()
+        routeJob = scope.launch {
+            var prev = audioRouter.headsets.value
+            audioRouter.headsets.collect { cur ->
+                val added = cur.filter { h -> prev.none { it.id == h.id } }
+                if (added.isNotEmpty()) {
+                    c.setAudioRoute(PttController.AUDIO_ROUTE_HEADSET, added.last().id)
+                } else if (c.audioRoute.value == PttController.AUDIO_ROUTE_HEADSET &&
+                    cur.none { it.id == c.headsetId.value }
+                ) {
+                    if (cur.isNotEmpty()) c.setAudioRoute(PttController.AUDIO_ROUTE_HEADSET, cur.first().id)
+                    else c.setAudioRoute(com.cims.ue.core.sip.SipController.AUDIO_ROUTE_SPEAKER)
+                }
+                prev = cur
+            }
+        }
     }
 
     fun stopSip() {
@@ -325,6 +398,8 @@ class PttService : Service() {
 
     override fun onDestroy() {
         job?.cancel()
+        routeJob?.cancel()
+        audioRouter.close()
         controller?.shutdown()
         _controller.value = null
         mainHandler.post { overlay.hide() }
@@ -361,9 +436,18 @@ class PttService : Service() {
         else startForeground(NID, n)
     }
 
-    /** talk(floor) 활성 시 mic 타입 승격 (포그라운드 사용 시). */
+    /** talk(floor) 활성 시 mic 타입 승격 (포그라운드 사용 시).
+     *  백그라운드(START_STICKY 재기동 등)에서 microphone 승격은 API 34+ 금지 —
+     *  거부돼도 던지지 않고 specialUse 로 유지(포그라운드 진입 후 while-in-use 마이크로 동작). */
     private fun elevateForCall(active: Boolean) {
-        if (Build.VERSION.SDK_INT >= 34) startForegroundCompat(notification("CIMS-McPtt", if (active) "PTT 사용 중" else "등록 유지"), inCall = active)
+        if (Build.VERSION.SDK_INT >= 34) {
+            val n = notification("CIMS-McPtt", if (active) "PTT 사용 중" else "등록 유지")
+            runCatching { startForegroundCompat(n, inCall = active) }
+                .onFailure {
+                    android.util.Log.w("PttService", "FGS 승격 거부(inCall=$active) — specialUse 유지", it)
+                    runCatching { startForegroundCompat(n, inCall = false) }
+                }
+        }
     }
 
     private fun stopForegroundCompat() {

@@ -84,3 +84,29 @@ fun extractSipNumber(remote: String): String {
     s = s.substringBefore("@").substringBefore(";")
     return s.ifBlank { remote }
 }
+
+/** ITU 자릿수 규칙 E.164 국가코드 추정 — 프로비저닝 countryCode 미수신 시 내 msisdn 에서 유도.
+ *  1(NANP)/7=1자리, 유효 2자리 셋, 그 외 3자리. */
+fun countryCodeOf(msisdn: String): String? {
+    val d = msisdn.trim().removePrefix("tel:").removePrefix("+").filter { it.isDigit() }
+    if (d.length < 4) return null
+    if (d[0] == '1' || d[0] == '7') return d.take(1)
+    val two = d.take(2)
+    val twoDigit = setOf(
+        "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45",
+        "46", "47", "48", "49", "51", "52", "53", "54", "55", "56", "57", "58", "60", "61",
+        "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94",
+        "95", "98",
+    )
+    return if (two in twoDigit) two else d.take(3)
+}
+
+/** 발신번호 E.164 정규화 — 키패드 로컬 표기("013…")를 "+{cc}13…" 로.
+ *  가입자 정본(IMPU/조회 키)은 E.164 라 로컬 표기 그대로 보내면 서버가 404.
+ *  "+" 시작=그대로, 숫자 로컬(0 시작)+국가코드 확보 시=변환, 그 외(단축번호 등)=그대로. */
+fun toE164(dialed: String, countryCode: String): String {
+    val d = dialed.trim().replace(Regex("[\\s-]"), "")
+    if (d.isEmpty() || d.startsWith("+")) return d
+    if (countryCode.isBlank() || !d.all { it.isDigit() }) return d
+    return if (d.startsWith("0")) "+$countryCode${d.drop(1)}" else d
+}

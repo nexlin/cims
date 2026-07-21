@@ -76,6 +76,7 @@ fun MainChannelScreen(
     onOpenThread: (String) -> Unit,
 ) {
     var picker by remember { mutableStateOf(false) }
+    var routeSheet by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -100,7 +101,8 @@ fun MainChannelScreen(
             val primary = st.primary
             if (primary != null) {
                 PrimaryChannelPanel(st, svc, primary, onOpenThread,
-                    onSelect = { picker = true }, modifier = Modifier.weight(1f))
+                    onSelect = { picker = true }, onRouteSelect = { routeSheet = true },
+                    modifier = Modifier.weight(1f))
             } else {
                 Column(Modifier.weight(1f).fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -119,6 +121,7 @@ fun MainChannelScreen(
         }
 
         if (picker) ChannelSelectSheet(st, onDismiss = { picker = false })
+        if (routeSheet) AudioRouteSheet(st, onDismiss = { routeSheet = false })
     }
 }
 
@@ -130,6 +133,7 @@ private fun PrimaryChannelPanel(
     s: GroupCallState,
     onOpenThread: (String) -> Unit,
     onSelect: () -> Unit,
+    onRouteSelect: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 그룹 문서(P우선순위 배지) — ETag 캐시라 재호출 저비용
@@ -158,7 +162,7 @@ private fun PrimaryChannelPanel(
         Spacer(Modifier.height(10.dp))
         SpeakerStatusStrip(st, s)
         Spacer(Modifier.height(8.dp))
-        VideoPanel(st)
+        VideoPanel(st, onRouteSelect)
 
         // 화면 PTT 바 — 터치 단말만(하드웨어 PTT 버튼 단말은 표시하지 않음)
         val hwPtt by HwPtt.present.collectAsState()
@@ -224,6 +228,59 @@ private fun ChannelSelectSheet(st: PttUiState, onDismiss: () -> Unit) {
     }
 }
 
+/** 오디오 출력 선택 항목 — [AudioRouteSheet] 행. */
+private data class RouteChoice(
+    val label: String, val icon: Int, val route: Int, val deviceId: Int, val badge: String?)
+
+/** 오디오 출력 선택 시트 — 이어폰 연결 시: 이어폰(장치별, 무선 다중 포함)/스피커폰/수화기. */
+@Composable
+private fun AudioRouteSheet(st: PttUiState, onDismiss: () -> Unit) {
+    val choices = buildList {
+        st.headsets.forEach { h ->
+            add(RouteChoice(h.name, R.drawable.ic_headset, PttController.AUDIO_ROUTE_HEADSET, h.id,
+                if (h.wireless) "무선" else "유선"))
+        }
+        add(RouteChoice("스피커폰", R.drawable.ic_volume_on, SipController.AUDIO_ROUTE_SPEAKER, -1, null))
+        add(RouteChoice("수화기", R.drawable.ic_volume_off, SipController.AUDIO_ROUTE_EARPIECE, -1, null))
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
+        .pointerInput(Unit) { detectTapGestures { onDismiss() } }) {
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                .background(Ct.Surface)
+                .pointerInput(Unit) { detectTapGestures { } }
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text("오디오 출력", color = Ct.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 8.dp))
+            choices.forEach { c ->
+                val selected = st.route == c.route &&
+                    (c.route != PttController.AUDIO_ROUTE_HEADSET || st.headsetId == c.deviceId)
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                        .background(if (selected) Ct.MintDim else Color.Transparent)
+                        .clickable {
+                            st.ctl?.setAudioRoute(c.route, c.deviceId)
+                            onDismiss()
+                        }
+                        .padding(horizontal = 10.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(painterResource(c.icon), contentDescription = null,
+                        tint = if (selected) Ct.Mint else Ct.TextDim, modifier = Modifier.size(17.dp))
+                    Text(c.label, color = if (selected) Ct.Mint else Ct.Text,
+                        fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    c.badge?.let { PillBadge(it, Ct.Gray) }
+                    if (selected) PillBadge("사용 중", Ct.Mint)
+                }
+            }
+        }
+    }
+}
+
 /** 우상단 "▶ ○○ 송신" 칩(시안 — 어두운 민트 면 위 민트 텍스트). */
 @Composable
 private fun SpeakingIndicator(s: GroupCallState) {
@@ -278,9 +335,9 @@ private fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
 }
 
 /** 영상 영역 — 영상 PTT 수신 화면 자리(현재 음성 전용이라 플레이스홀더).
- *  스피커폰/전체듣기는 영상 위 우하단 오버레이 아이콘으로만 노출. */
+ *  출력(스피커폰/수화기/이어폰)·전체듣기는 영상 위 우하단 오버레이 아이콘으로만 노출. */
 @Composable
-private fun VideoPanel(st: PttUiState, modifier: Modifier = Modifier) {
+private fun VideoPanel(st: PttUiState, onRouteSelect: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier.fillMaxWidth().height(150.dp)
             .clip(RoundedCornerShape(12.dp)).background(Color.Black),
@@ -298,13 +355,22 @@ private fun VideoPanel(st: PttUiState, modifier: Modifier = Modifier) {
             Modifier.align(Alignment.BottomEnd).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            val speakerOn = st.route == SipController.AUDIO_ROUTE_SPEAKER
+            // 출력 라우팅 — 이어폰 미연결: 탭=스피커폰↔수화기 토글(기본 스피커폰).
+            //              이어폰 연결(무선 다중 포함): 탭=선택 시트(이어폰/스피커폰/수화기).
+            val (routeIcon, routeDesc) = when (st.route) {
+                PttController.AUDIO_ROUTE_HEADSET -> R.drawable.ic_headset to "이어폰"
+                SipController.AUDIO_ROUTE_SPEAKER -> R.drawable.ic_volume_on to "스피커폰"
+                else -> R.drawable.ic_volume_off to "수화기"
+            }
             OverlayToggle(
-                icon = if (speakerOn) R.drawable.ic_volume_on else R.drawable.ic_volume_off,
-                desc = "스피커폰", active = speakerOn,
+                icon = routeIcon, desc = routeDesc,
+                active = st.route != SipController.AUDIO_ROUTE_EARPIECE,
             ) {
-                st.ctl?.setAudioRoute(
-                    if (speakerOn) SipController.AUDIO_ROUTE_DEFAULT else SipController.AUDIO_ROUTE_SPEAKER)
+                if (st.headsets.isEmpty()) {
+                    st.ctl?.setAudioRoute(
+                        if (st.route == SipController.AUDIO_ROUTE_SPEAKER) SipController.AUDIO_ROUTE_EARPIECE
+                        else SipController.AUDIO_ROUTE_SPEAKER)
+                } else onRouteSelect()
             }
             val all = st.policy == ListenPolicy.ALL
             OverlayToggle(

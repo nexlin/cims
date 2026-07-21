@@ -57,6 +57,8 @@ class PttUiState(
     val affiliated: Set<String>,
     val policy: ListenPolicy,
     val route: Int,
+    val headsetId: Int,
+    val headsets: List<com.cims.ue.ptt.audio.AudioRouter.Headset>,
     val hasAccount: Boolean,
 ) {
     val primary: GroupCallState? get() = sessions.firstOrNull { it.role == com.cims.ue.ptt.ChannelRole.PRIMARY }
@@ -82,7 +84,9 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbAffil = remember { MutableStateFlow<Set<String>>(emptySet()) }
     val fbSessions = remember { MutableStateFlow<List<GroupCallState>>(emptyList()) }
     val fbPolicy = remember { MutableStateFlow(ListenPolicy.ALL) }
-    val fbRoute = remember { MutableStateFlow(SipController.AUDIO_ROUTE_DEFAULT) }
+    val fbRoute = remember { MutableStateFlow(SipController.AUDIO_ROUTE_SPEAKER) }
+    val fbHeadsetId = remember { MutableStateFlow(-1) }
+    val fbHeadsets = remember { MutableStateFlow<List<com.cims.ue.ptt.audio.AudioRouter.Headset>>(emptyList()) }
 
     val st = PttUiState(
         ctl = ctl,
@@ -96,6 +100,8 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         affiliated = (ctl?.affiliated ?: fbAffil).collectAsState().value,
         policy = (ctl?.listenPolicy ?: fbPolicy).collectAsState().value,
         route = (ctl?.audioRoute ?: fbRoute).collectAsState().value,
+        headsetId = (ctl?.headsetId ?: fbHeadsetId).collectAsState().value,
+        headsets = (svc?.audioRouter?.headsets ?: fbHeadsets).collectAsState().value,
         hasAccount = remember(ctl) { com.cims.ue.core.account.SsoProvisioner.hasAccount(context) },
     )
 
