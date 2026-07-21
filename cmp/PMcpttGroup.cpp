@@ -260,6 +260,12 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
         if (sessionId.empty()) {
             for (auto& [sid, peer] : _members) {
                 if (peer.floorPort == port) {
+                    // IP guard — RTP latch(_acceptNatRtp)와 동일 기준. 포트가 같아도 소스 IP 가
+                    //   그 멤버의 시그널링 실소스와 다르면 학습·처리 모두 거부 (하이재킹 차단).
+                    if (!peer.sigIp.empty() && peer.sigIp != ip) {
+                        _dropSrc("floor(ip-guard)", sid, ip, port);
+                        break;
+                    }
                     LOG_INFO("PMcpttGroup", "[%s] Floor IP learned %s -> %s (port %d, session=%s)",
                              _groupId.c_str(), peer.ip.c_str(), ip.c_str(), port, sid.c_str());
                     peer.ip = ip;
@@ -280,14 +286,24 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
                 if (at != std::string::npos) uid = uid.substr(0, at);
                 auto it = _members.find(uid);
                 if (it != _members.end()) {
-                    LOG_INFO("PMcpttGroup", "[%s] Floor addr latched (NAT) %s: %s:%d -> %s:%d",
-                             _groupId.c_str(), uid.c_str(),
-                             it->second.ip.c_str(), it->second.floorPort, ip.c_str(), port);
-                    it->second.ip = ip;
-                    it->second.floorPort = port;
-                    it->second.floorNatLatched = true;
-                    sessionId = uid;
-                    senderSsrc = it->second.ssrc;
+                    // latch 자격은 제어평면이 nat 지정한 멤버만 (ue_nat_traversal.md §4) —
+                    //   no-NAT 멤버는 주소 매칭 실패 = 미협상 소스.
+                    if (!it->second.natEnabled) {
+                        _dropSrc("floor(no-nat user-id)", uid, ip, port);
+                    } else if (!it->second.sigIp.empty() && it->second.sigIp != ip) {
+                        // IP guard — User ID 를 아는 제3자가 임의 주소로 그 멤버의 floor
+                        //   하향을 가로채는 것을 차단 (RTP _acceptNatRtp 와 대칭).
+                        _dropSrc("floor(ip-guard)", uid, ip, port);
+                    } else {
+                        LOG_INFO("PMcpttGroup", "[%s] Floor addr latched (NAT) %s: %s:%d -> %s:%d",
+                                 _groupId.c_str(), uid.c_str(),
+                                 it->second.ip.c_str(), it->second.floorPort, ip.c_str(), port);
+                        it->second.ip = ip;
+                        it->second.floorPort = port;
+                        it->second.floorNatLatched = true;
+                        sessionId = uid;
+                        senderSsrc = it->second.ssrc;
+                    }
                 }
             }
         }
