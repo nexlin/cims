@@ -140,9 +140,19 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - 미구현/향후: NOTIFY 최종 실패(타임아웃/481) 시 구독 종료(RFC 6665 MUST), 명시적 구독해지의
   Subscription-State reason 구분(현재 timeout 고정), reginfo 다중 바인딩·tel URI registration 블록.
 
+- **conference-info NOTIFY (RFC 4575, 그룹콜 참가자)**: 그룹 세션의 모든 활성 참여자에게 in-dialog
+  NOTIFY(`Event: conference`, `application/conference-info+xml`)로 로스터 변경 통지 —
+  **개시자(caller) 조인·fan-out 멤버(callee) 조인·이탈 모두** 통지한다(개시자 조인 누락 시 늦은
+  발신 참여자가 기존 단말 화면에 안 뜨는 증상 방지). 본문은 **항상 `state="full"`(변경 반영 후 현재
+  로스터 전체 스냅샷)** — UDP NOTIFY 유실에도 매 통지가 자가치유(증분 partial 은 유실 시 목록이
+  어긋난 채 잔존). 변경 멤버는 `state`(added/deleted)+`status`(connected/disconnected)로, 나머지는
+  `full`/`connected` 로 싣고, 이탈자는 로스터에서 이미 빠졌으므로 `deleted` 엔트리를 명시 부가.
+  version 은 그룹별 순증. UE(pjsip)는 invite usage 의 tsx 이벤트 원문에서 본문을 읽어 반영
+  (`CimsCall.onCallTsxState`→`PttController.onConferenceInfo`).
+
 ### 보존 — 정합/유지
 - Digest(username=`IMSI@domain`, MD5, qop=auth), emergency/imminent 게이팅·re-INVITE condition,
-  conference-info NOTIFY(RFC 4575), ad-hoc/chat/broadcast/prearranged, GMS/CMS xcap-diff NOTIFY.
+  ad-hoc/chat/broadcast/prearranged, GMS/CMS xcap-diff NOTIFY.
 
 ---
 

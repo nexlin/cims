@@ -304,6 +304,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                                                false );
             }
         }
+
+        // RFC 4575: 발신 조인(개시/늦은 재참여)도 참가자 변경 통지 — 콜리 경로(OnCallStarted)만
+        // 통지하면, 세션이 이미 있는 그룹에 INVITE 로 늦게 참여한 멤버가 기존 단말 화면에
+        // 반영되지 않는다 (음성은 CMP JoinGroup 으로 정상 — 증상=화면 참가자 목록만 미갱신).
+        // full 스냅샷이므로 늦은 참여자 본인도 이 NOTIFY 로 현재 로스터를 받는다.
+        SendConferenceNotify( pszGroupId, pszCallerInfo, "connected", "full" );
     } else {
         CLog::Print( LOG_ERROR, "ProcessGroupCall: No shared RTP port for Group(%s)", pszGroupId );
         return false;
@@ -1316,55 +1322,50 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
     if ( vecCallIds.empty() ) return;
 
     // 2. Build conference-info+xml body (RFC 4575)
-    //    F-09: version=1(첫 NOTIFY)은 state="full" + 전체 멤버 목록, 이후는 state="partial" + 변경분
+    //    F-09: 참가자 NOTIFY 는 항상 state="full"(변경 반영 후 현재 로스터 스냅샷) — partial 증분은
+    //          UDP NOTIFY 유실/늦은 발신 조인 시 수신측 목록이 어긋난 채 남는다. full 은 매 통지가
+    //          자가치유이고, 늦은 참여자 본인도 같은 NOTIFY 로 기존 로스터를 얻는다.
+    //          이탈자는 로스터에서 이미 빠져 있으므로 deleted 엔트리를 명시 부가한다.
     //    F-10: entity는 sip: URI (tel: → RFC 4575 §5.3 위반)
     std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
     std::ostringstream oss;
 
-    if ( iVersion == 1 ) {
-        // state="full": 현재 그룹에 속한 모든 참가자를 열거
-        std::vector<std::string> vecAllMembers;
-        {
-            std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            for ( const auto &kv : m_mapCallSession ) {
-                if ( kv.second.strGroupId == strGroupId ) {
-                    vecAllMembers.push_back( kv.second.strMemberId );
-                }
+    std::vector<std::string> vecAllMembers;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        for ( const auto &kv : m_mapCallSession ) {
+            if ( kv.second.strGroupId == strGroupId ) {
+                vecAllMembers.push_back( kv.second.strMemberId );
             }
         }
-        oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-            << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
-            << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
-            << "  state=\"full\" version=\"" << iVersion << "\">\r\n"
-            << "  <users>\r\n";
-        for ( const auto &strMember : vecAllMembers ) {
-            std::string strMemberStatus = ( strMember == strChangedUser ) ? strStatus : "connected";
-            std::string strMemberJoining = ( strMember == strChangedUser ) ? strJoining : "added";
-            oss << "    <user entity=\"sip:" << strMember << "@" << strMcpttDomain << "\" state=\"" << strMemberJoining
-                << "\">\r\n"
-                << "      <endpoint entity=\"sip:" << strMember << "@" << strMcpttDomain << "\">\r\n"
-                << "        <status>" << strMemberStatus << "</status>\r\n"
-                << "      </endpoint>\r\n"
-                << "    </user>\r\n";
-        }
-        oss << "  </users>\r\n"
-            << "</conference-info>\r\n";
-    } else {
-        // state="partial": 변경된 멤버 하나만
-        oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-            << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
-            << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
-            << "  state=\"partial\" version=\"" << iVersion << "\">\r\n"
-            << "  <users>\r\n"
-            << "    <user entity=\"sip:" << strChangedUser << "@" << strMcpttDomain << "\" state=\"" << strJoining
+    }
+    bool bChangedInRoster = false;
+    oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+        << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
+        << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
+        << "  state=\"full\" version=\"" << iVersion << "\">\r\n"
+        << "  <users>\r\n";
+    for ( const auto &strMember : vecAllMembers ) {
+        bool bChanged = ( strMember == strChangedUser );
+        if ( bChanged ) bChangedInRoster = true;
+        oss << "    <user entity=\"sip:" << strMember << "@" << strMcpttDomain << "\" state=\""
+            << ( bChanged ? strJoining : "full" ) << "\">\r\n"
+            << "      <endpoint entity=\"sip:" << strMember << "@" << strMcpttDomain << "\">\r\n"
+            << "        <status>" << ( bChanged ? strStatus : "connected" ) << "</status>\r\n"
+            << "      </endpoint>\r\n"
+            << "    </user>\r\n";
+    }
+    if ( !bChangedInRoster ) {
+        // 이탈(deleted) — 세션 맵에서 이미 제거된 뒤 호출되므로 명시 엔트리로 알린다
+        oss << "    <user entity=\"sip:" << strChangedUser << "@" << strMcpttDomain << "\" state=\"" << strJoining
             << "\">\r\n"
             << "      <endpoint entity=\"sip:" << strChangedUser << "@" << strMcpttDomain << "\">\r\n"
             << "        <status>" << strStatus << "</status>\r\n"
             << "      </endpoint>\r\n"
-            << "    </user>\r\n"
-            << "  </users>\r\n"
-            << "</conference-info>\r\n";
+            << "    </user>\r\n";
     }
+    oss << "  </users>\r\n"
+        << "</conference-info>\r\n";
     std::string strBody = oss.str();
 
     // 3. Send in-dialog NOTIFY to each active participant via SipUserAgent
