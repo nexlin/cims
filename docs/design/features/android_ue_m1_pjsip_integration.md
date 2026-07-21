@@ -130,6 +130,10 @@ git describe --tags     # 2.16 기대
 /* 5) M4 전까지 보안전송 최소화: SRTP/TLS off (UDP only) */
 #define PJMEDIA_HAS_SRTP          0
 #define PJSIP_HAS_TLS_TRANSPORT   0
+
+/* 6) NAT: RTP keepalive(empty RTP, 기본 0→1) — 청취 전용(무송신) 구간에도 주기 송신해
+      하향 NAT 매핑·CMP latch 유지 (ue_nat_traversal.md §7.1). 주기=PJMEDIA_STREAM_KA_INTERVAL(기본 5s) */
+#define PJMEDIA_STREAM_ENABLE_KA  1
 ```
 
 > **중복 등록 함정(경로 C 방향).** `'AMR-WB/16000/1'` factory가 And-Media + opencore **둘 다** 등록되면 `codecSetPriority`(ID 문자열 기반)의 선택이 비결정적이 된다. 경로 C 확정에 따라 **opencore 계열을 0으로 빌드 제외**해 단일 등록을 보장한다(M1.0 게이트: `codecEnum2()`에 AMR-WB 정확히 1개). 어차피 opencore 라이브러리를 선빌드하지 않으므로(§2.3) 링크 자체가 없지만, 매크로도 명시 0으로 이중 안전.
@@ -146,6 +150,17 @@ git describe --tags     # 2.16 기대
 > 응답 즉시 크래시해 통화화면·오디오가 사라진다. 수정: 가드를 `#if PJMEDIA_HAS_AND_MEDIA_AMRNB
 > || PJMEDIA_HAS_AND_MEDIA_AMRWB` 로 확대. `m1_build_pjsip.sh` `[2-3]` 단계가 clone 후 멱등
 > 적용한다(빌드 재현성). 실기기 검증: cspsim↔단말 AMR-WB 음성 + H.264 영상 통화 크래시 없이 성립.
+
+> **⚠️ PTT 조인 크래시 방어 패치 3종 (`m1_build_pjsip.sh` [2-6]~[2-9], 멱등).** PTT 그룹콜
+> SDP(floor `m=application` 슬롯 재사용·dynamic PT 협상)에서 pjsua 가 죽는 지점들의 방어 —
+> ①`[2-6]` pjsua2 `StreamInfo::fromPj` NULL codec-param 가드(aud/vid — upstream 주석이
+> "param can be NULL" 인정하면서 무가드 역참조) ②`[2-7]` `stream_info.c` `si->param`
+> ZALLOC(협상실패 경로 쓰레기값 방지) ③`[2-8]` `pjsua_txt_channel_update` 게이트에 RTP 협상
+> 조건 추가 — 비 RTP `m=application`(UDP MCPTT) 슬롯은 stream info 가 빈 채(!active) 성공
+> 반환되는데 포트≠0 만 보고 진행하면 AF=0 주소 print abort ④`[2-9]` `fromPj` 주소 print 6곳
+> AF 가드. 근본 분석·실기기 검증은
+> [ptt_join_crash_and_silence.md](ptt_join_crash_and_silence.md) 참조. 스크립트는
+> `set -o pipefail` 로 `make | tail` 실패 마스킹도 방지한다.
 
 ### 2.6 configure / build / SWIG
 
