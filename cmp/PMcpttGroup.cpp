@@ -85,6 +85,11 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         if (!role.empty()) { peer.role = role; _roles[sessionId] = role; }
         if (unit) peer.unit = unit;
         if (sameDecl) {
+            // latch 목적지는 유지하되 SSRC 핀은 해제 — JOIN 은 제어평면 이벤트이므로 단말이
+            //   미디어 세션을 재시작(새 SSRC·새 NAT 매핑)했을 수 있다. 핀을 유지하면 정당한
+            //   재-latch 가 "제3자 주입"으로 오판돼 영구 드랍된다 (주입 방어는 guard + 세션
+            //   중 핀으로 충분).
+            peer.natLatchSsrc = peer.natLatchVideoSsrc = 0;
             LOG_INFO("PMcpttGroup", "[%s] Member unchanged session=%s — keep latch (total=%lu)", _groupId.c_str(),
                      sessionId.c_str(), _members.size());
             return;
@@ -348,11 +353,18 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
             return;
         }
         Peer& sender = itM->second;
-        if (sender.ip != ip || sender.port != port) {
+        // 선언(SDP) 주소 일치는 latch 상태와 무관하게 항상 수락 — 미디어별 NAT 경로가
+        //   갈리는 멤버에서 다른 미디어의 latch 가 ip 를 덮어써도 협상된 신원은 유지.
+        if ((sender.ip != ip || sender.port != port) &&
+            !(sender.declIp == ip && sender.declPort == port)) {
             if (!sender.natEnabled || !_acceptNatRtp(sender, false, ip, port, buf, len)) {
                 _dropSrc("rtp", memberId, ip, port);
                 return;
             }
+        } else if (sender.natEnabled) {
+            // fast-path(주소 일치) 수락 — 활성 스트림이 살아있음을 latch staleness 판정에 반영
+            //   (_acceptNatRtp 를 거치지 않으므로 여기서 timestamp 갱신, 좀비의 조기 인계 방지).
+            sender.natLatchAudioUsec = _nowUsec();
         }
         const std::string& senderId = memberId;
         unsigned int senderSsrc = sender.ssrc;
@@ -426,11 +438,14 @@ void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std:
         return;
     }
     Peer& sender = itM->second;
-    if (sender.ip != ip || sender.videoPort != port) {
+    if ((sender.ip != ip || sender.videoPort != port) &&
+        !(sender.declIp == ip && sender.declVideoPort == port)) {
         if (!sender.natEnabled || !_acceptNatRtp(sender, true, ip, port, buf, len)) {
             _dropSrc("video rtp", memberId, ip, port);
             return;
         }
+    } else if (sender.natEnabled) {
+        sender.natLatchVideoUsec = _nowUsec();   // fast-path 수락 — staleness 판정 갱신
     }
 
     if (_pttSession) _pttSession->touchActivity();
@@ -457,15 +472,28 @@ bool PMcpttGroup::_acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip,
                     ((uint32_t)(unsigned char)buf[10] << 8) | (uint32_t)(unsigned char)buf[11];
     bool& latched = isVideo ? peer.natLatchedVideo : peer.natLatched;
     uint32_t& latchSsrc = isVideo ? peer.natLatchVideoSsrc : peer.natLatchSsrc;
-    if (latched && ssrc != latchSsrc) return false;   // 제3자 주입 차단 (rebind 는 동일 SSRC)
+    int64_t& latchUsec = isVideo ? peer.natLatchVideoUsec : peer.natLatchAudioUsec;
+    int64_t now = _nowUsec();
+    // 제3자 주입 차단 (rebind 는 동일 SSRC). 핀 0 = JOIN 으로 해제된 상태 — 첫 재latch 허용.
+    // 단, 현재 latch SSRC 의 스트림이 [NAT_RELATCH_STALE_US] 이상 끊긴(무수신) 상태면 새 SSRC 가
+    // 인계하도록 허용한다 — 재-JOIN 없는 mid-session SSRC 변경(미디어 재시작·네트워크 blip 후
+    // 재협상)에도 릴레이가 자가치유. 매칭 스트림이 살아 있는 동안엔 여전히 차단(동시 주입 방어).
+    if (latched && latchSsrc != 0 && ssrc != latchSsrc) {
+        if (latchUsec != 0 && now - latchUsec < NAT_RELATCH_STALE_US) return false;
+        LOG_INFO("PMcpttGroup", "[%s] %s re-latch (stale %ldms) member=%s ssrc %u→%u", _groupId.c_str(),
+                 isVideo ? "video" : "audio", (long)((now - latchUsec) / 1000), peer.id.c_str(), latchSsrc, ssrc);
+    }
 
     if (isVideo) peer.videoPort = port;
     else         peer.port = port;
     peer.ip = ip;
     latched = true;
+    bool bNew = (latchSsrc != ssrc);
     latchSsrc = ssrc;
-    LOG_INFO("PMcpttGroup", "[%s] %s dest latched (NAT) member=%s %s:%d ssrc=%u",
-             _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port, ssrc);
+    latchUsec = now;
+    if (bNew)
+        LOG_INFO("PMcpttGroup", "[%s] %s dest latched (NAT) member=%s %s:%d ssrc=%u",
+                 _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port, ssrc);
     return true;
 }
 

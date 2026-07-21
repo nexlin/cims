@@ -23,6 +23,10 @@ class PSyncRtpRecorder;
 #define RTCP_PT_APP 204
 #define RTCP_APP_HDR 12   // RTCP APP 고정 헤더(V/P/subtype + PT + length + SSRC + name)
 
+// NAT latch 인계 임계 — 현재 latch SSRC 의 스트림이 이 시간 이상 무수신이면 새 SSRC 재-latch 허용
+// (재-JOIN 없는 mid-session SSRC 변경 자가치유). 활성 스트림 중엔 차단 유지(동시 주입 방어).
+#define NAT_RELATCH_STALE_US (2 * 1000000LL)
+
 // Floor control 메시지 타입 = RTCP APP subtype (TS 24.380 Table 8.2.2-1).
 enum FloorOpCode {
     FLOOR_REQUEST  = 0,   // Floor Request          (UE→서버)
@@ -273,8 +277,10 @@ private:
         std::string sigIp;             // latch IP guard 기준 (빈 값 = guard 없음)
         bool natLatched = false;       // audio 소스 latch 완료
         uint32_t natLatchSsrc = 0;     // latch 시 고정 — 재-latch 는 동일 SSRC(NAT rebind)만
+        int64_t natLatchAudioUsec = 0; // 마지막으로 latch SSRC 매칭 오디오 수락 시각 (staleness 판정)
         bool natLatchedVideo = false;
         uint32_t natLatchVideoSsrc = 0;
+        int64_t natLatchVideoUsec = 0; // 마지막으로 latch SSRC 매칭 비디오 수락 시각
     };
 
     // nat 멤버의 RTP 수신 판정+latch (호출자가 _mutex 보유). 수락 시 true.

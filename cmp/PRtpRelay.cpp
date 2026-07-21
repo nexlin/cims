@@ -107,6 +107,9 @@ bool PRtpRelay::setRemote(const std::string& ip, unsigned int port, unsigned int
     //   비교는 선언 원본(decl*) 기준 — leg.ip/port 는 latch 시 학습 주소로 덮인다.
     if (leg.active && leg.declIp == ip && leg.declPort == port && leg.declVideoPort == videoPort &&
         leg.nat == nat && leg.sigIp == sigIp) {
+        // latch 목적지는 유지하되 SSRC 핀은 해제 — 제어평면 재선언 시 단말이 미디어 세션을
+        //   재시작(새 SSRC·새 NAT 매핑)했을 수 있다 (PMcpttGroup 재-JOIN 과 동일 규칙).
+        leg.latchSsrc = leg.latchVideoSsrc = 0;
         LOG_INFO("PRtpRelay", "setRemote peer[%d]=%s:%d unchanged — keep latch session=%s",
                  idx, ip.c_str(), port, _sessionId.c_str());
         return true;
@@ -150,7 +153,8 @@ bool PRtpRelay::_acceptNatRtp(int legIdx, bool isVideo, const std::string& ip, i
                     ((uint32_t)(unsigned char)pkt[10] << 8) | (uint32_t)(unsigned char)pkt[11];
     bool& latched = isVideo ? leg.latchedVideo : leg.latched;
     uint32_t& latchSsrc = isVideo ? leg.latchVideoSsrc : leg.latchSsrc;
-    if (latched && ssrc != latchSsrc) return false;   // 제3자 주입 차단 (rebind 는 동일 SSRC)
+    // 제3자 주입 차단 (rebind 는 동일 SSRC). 핀 0 = 재선언으로 해제된 상태 — 첫 재latch 허용.
+    if (latched && latchSsrc != 0 && ssrc != latchSsrc) return false;
 
     if (isVideo) {
         leg.videoPort = port;
@@ -205,13 +209,20 @@ bool PRtpRelay::proc() {
             if (len <= 0) break;
             Leg& src = _legs[i];
             if (!src.active) continue;
-            if (src.ip != ip || (int)src.port + 1 != port) {
+            if ((src.ip != ip || (int)src.port + 1 != port) &&
+                !(src.declIp == ip && (int)src.declPort + 1 == port)) {
                 // nat leg: RTP latch 된(또는 선언) IP 와 일치하는 관측 소스로 RTCP 목적지 교정
-                if (src.nat && src.ip == ip) {
-                    _makeAddr(src.addrRtcp, ip, port);
-                    src.latchedRtcp = true;
-                    LOG_INFO("PRtpRelay", "RTCP dest latched (NAT) peer[%d] %s:%d session=%s",
-                             i, ip.c_str(), port, _sessionId.c_str());
+                if (src.nat && (src.ip == ip || src.declIp == ip)) {
+                    struct sockaddr_in want;
+                    _makeAddr(want, ip, port);
+                    // 목적지가 실제로 바뀔 때만 갱신·로그 (동일 소스 재관측은 무음 통과)
+                    if (src.addrRtcp.sin_addr.s_addr != want.sin_addr.s_addr ||
+                        src.addrRtcp.sin_port != want.sin_port) {
+                        src.addrRtcp = want;
+                        src.latchedRtcp = true;
+                        LOG_INFO("PRtpRelay", "RTCP dest latched (NAT) peer[%d] %s:%d session=%s",
+                                 i, ip.c_str(), port, _sessionId.c_str());
+                    }
                 } else {
                     _dropSrc(i, "rtcp", ip, port, (int)src.port + 1);
                     continue;
@@ -228,12 +239,18 @@ bool PRtpRelay::proc() {
             if (len <= 0) break;
             Leg& src = _legs[i];
             if (!src.active || src.videoPort == 0) continue;
-            if (src.ip != ip || (int)src.videoPort + 1 != port) {
-                if (src.nat && src.ip == ip) {
-                    _makeAddr(src.addrVideoRtcp, ip, port);
-                    src.latchedVideoRtcp = true;
-                    LOG_INFO("PRtpRelay", "video RTCP dest latched (NAT) peer[%d] %s:%d session=%s",
-                             i, ip.c_str(), port, _sessionId.c_str());
+            if ((src.ip != ip || (int)src.videoPort + 1 != port) &&
+                !(src.declIp == ip && (int)src.declVideoPort + 1 == port)) {
+                if (src.nat && (src.ip == ip || src.declIp == ip)) {
+                    struct sockaddr_in want;
+                    _makeAddr(want, ip, port);
+                    if (src.addrVideoRtcp.sin_addr.s_addr != want.sin_addr.s_addr ||
+                        src.addrVideoRtcp.sin_port != want.sin_port) {
+                        src.addrVideoRtcp = want;
+                        src.latchedVideoRtcp = true;
+                        LOG_INFO("PRtpRelay", "video RTCP dest latched (NAT) peer[%d] %s:%d session=%s",
+                                 i, ip.c_str(), port, _sessionId.c_str());
+                    }
                 } else {
                     _dropSrc(i, "video rtcp", ip, port, (int)src.videoPort + 1);
                     continue;
@@ -250,7 +267,10 @@ bool PRtpRelay::proc() {
             if (len <= 0) break;
             Leg& src = _legs[i];
             if (!src.active) continue;
-            if (src.ip != ip || (int)src.port != port) {
+            // 선언(SDP) 주소 일치는 latch 상태와 무관하게 항상 수락 — 미디어별 NAT 경로가
+            //   갈리는 leg 에서 다른 미디어의 latch 가 ip 를 덮어써도 협상된 신원은 유지.
+            if ((src.ip != ip || (int)src.port != port) &&
+                !(src.declIp == ip && (int)src.declPort == port)) {
                 if (!src.nat || !_acceptNatRtp(i, false, ip, port, pkt, len)) {
                     _dropSrc(i, "rtp", ip, port, (int)src.port);
                     continue;
@@ -284,7 +304,8 @@ bool PRtpRelay::proc() {
             if (len <= 0) break;
             Leg& src = _legs[i];
             if (!src.active || src.videoPort == 0) continue;
-            if (src.ip != ip || (int)src.videoPort != port) {
+            if ((src.ip != ip || (int)src.videoPort != port) &&
+                !(src.declIp == ip && (int)src.declVideoPort == port)) {
                 if (!src.nat || !_acceptNatRtp(i, true, ip, port, pkt, len)) {
                     _dropSrc(i, "video rtp", ip, port, (int)src.videoPort);
                     continue;
