@@ -96,3 +96,4 @@ ems/service/console/node_modules
 
 # HA 절체 조사 리포트 — 로컬 전용 (커밋 금지)
 /HA_report*.md
+pw.md
