@@ -66,7 +66,6 @@ export interface ModuleSpec {
   ha: {
     failover_mode: 'cold' | 'hot'               // cold: standby 정지+승격 시 기동 / hot: 양쪽 상시
     failover_relevant: boolean                  // 이 모듈 실패가 절체 사유인가 (default true)
-    run_on_fault?: boolean                      // hot 모듈을 FAULT 강등에도 유지할지 (default false)
   }
   health?: { port?: number; proto?: 'tcp' | 'udp'; config_key?: string; profile?: string }
   // 안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동). ha_service_model.md §14.
@@ -75,7 +74,7 @@ export interface ModuleSpec {
 
 export const MODULE_SPEC_DEFAULT: ModuleSpec = {
   supervision: { watchdog: true },
-  ha: { failover_mode: 'cold', failover_relevant: true, run_on_fault: false },
+  ha: { failover_mode: 'cold', failover_relevant: true },
   safety: { class: 'unknown', latch_clear_mode: 'manual' },
 }
 
@@ -105,8 +104,6 @@ export interface HaGroup {
   service_intent?: Record<string, 'running' | 'stopped'>
   // 모듈 운영 명세 (그룹×모듈) — {module: ModuleSpec}. 부재 모듈은 default.
   module_specs?: Record<string, ModuleSpec>
-  // per-service HA 컷오버 모드 — legacy(기본) | supervisor
-  ha_mode?: 'legacy' | 'supervisor'
   // 진행 중/최근 계획 절체 operation (AS 만, 없으면 부재)
   failover_op?: FailoverOp
   // 실측 ACTIVE (R4, AS 만) — 비-stale 멤버 중 정확히 1명이 VIP 보유일 때만 확정
@@ -129,7 +126,6 @@ export interface HaGroupInput {
   failover_options?: FailoverOptions
   service_intent?: Record<string, 'running' | 'stopped'>
   module_specs?: Record<string, ModuleSpec>
-  ha_mode?: 'legacy' | 'supervisor'
   members?: { agent_id: number; role?: HaRole; priority?: number }[]
 }
 
@@ -163,6 +159,12 @@ export const haGroupsApi = {
     api.post<{ group_id: number; operation_id: number; from_agent_id: number
                to_agent_id: number; state: string }>(
       `/ha-groups/${id}/failover`, {}),
+
+  // 노드 유지보수(EXCLUDE_NODE) 토글 — AS 전용. 지정 멤버를 승격 대상에서 제외(on)/
+  // 복귀(off). on → 그 노드 모듈 정지 + 절체 대상 제외, off → role 기반 자동 재합류.
+  maintenance: (id: number, agentId: number, on: boolean) =>
+    api.post<{ group_id: number; agent_id: number; service: string; maintenance: boolean }>(
+      `/ha-groups/${id}/maintenance`, { agent_id: agentId, on }),
 
   // ── 그룹×패키지 공통 설정 (R4) ──
   // 스위치 ON: target 없이 — 전 멤버 적용. OFF: target_deployment_id 필수(멤버 선택 편집).

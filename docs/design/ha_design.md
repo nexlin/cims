@@ -309,7 +309,7 @@ standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **cold-s
 | keepalived 인프라 자동화 | `agent/keepalived/`, `cims.sh ha` |
 | Redis register replication 골격 | `csp/RedisStore.{h,cpp}` (cold-mode no-op) + `csp/CspUser.cpp` SetBinding/DelBinding hook. hiredis 통합은 후속. |
 | CMP consistent hash 분배 | `csp/ConsistentHashRing.h` + `csp/CmpClient.{h,cpp}` endpoint vector + AddEndpoint + SelectEndpointForSession |
-| A/S cold-spare + 모듈별 hot 선택 | `oam ha_groups.py`(module_modes 정규화 + cold_modules 렌더), `agent/bin/cims-notify`(승격/강등 시 cims-svc start/stop), `agent/bin/cims-health`(standby 승격 자격 검사 + 승격 grace), `agent/cims_agent.py`(cold-standby 기동 억제 게이트), 콘솔 `ServersPage FailoverSection`(Cold/Hot 토글) |
+| A/S cold-spare + 모듈별 hot 선택 | `oam ha_groups.py`(module_specs 정규화 + cold_modules/relevant_modules 렌더), `agent/bin/cims-notify`(role writer — role 파일 기록), `agent/bin/cims-health`(verdict reader — Supervisor verdict 판독 + 비상 밸브), `agent/cims_agent.py`(Recovery Supervisor: Health+Evaluator+reconcile), 콘솔 `ServersPage`(Cold/Hot 토글·유지보수 토글) |
 | cims_agent VIP target + backoff | `agent/cims_agent.py:run_loop` exponential backoff (5s→10s→20s→max 60s, 성공 시 reset). VIP target 은 `--csc-url` 인자로 변경. |
 | verify 시나리오 | `verify/lib/items/stage6/scn_failover_{csc,csp,cmp}.py` 3개 (ha.json + multi-CMP 감지 시 LIVE 활성 분기). |
 
@@ -375,24 +375,17 @@ systemd `cims@` instance 는 enable 하지 않는다.
 
 ### 11.3 health probe 정책
 
-- `agent/bin/cims-health <svc>` — VIP 보유 여부에 따른 2-모드 검사. rc=0 / rc=1.
-  - **VIP 미보유(standby) = 승격 자격 검사**: 실행 상태 대신, 절체 시 기동할 모듈
-    (`health_module ∪ cold_modules ∪ tracked_modules`)이 **설치돼 있는지**만 검사
-    (cold 정지는 정상이므로 PASS). 설치 판정 = `${cims_home}/modules/<mod>/` 에
-    **버전 디렉토리 또는 current 심볼릭 존재** — current 는 start 시에만 생성되므로
-    (`_flip_current`), 승격 전까지 기동 이력이 없는 cold standby 를 current 기준으로
-    판정하면 "MASTER 가 돼야 current 가 생기는데 current 가 있어야 승격 자격" 순환으로
-    영구 FAULT 가 된다. 필수 모듈 정보가 없으면 설치 모듈이 하나라도 있어야 PASS —
-    모듈이 전무한 빈 서버는 승격 자격이 없어 VIP 를 인수하지 못한다.
-  - **VIP 보유(active) = 서비스 검사**: ha.json `services.<svc>.{port, proto,
-    bind_ip}` lookup 후 `ss -ln{t,u}` 로 binding 확인. 포트를 어떤 경로로도 알 수
-    없으면 하드 FAIL 하지 않는다 — 필수 모듈 pgrep 대체 검사, 그것도 없으면
-    PASS+로그 (검사 불능 ≠ 장애: 포트 미상이 FAULT→VIP반납→재승격 무한 flap 으로
-    증폭되는 것을 차단).
-  - **승격 grace**: cims-notify 가 MASTER 전이 시각을 `${ha_log_dir}/master_at_<svc>`
-    로 기록, 이후 `failover_options.health.grace_sec`(기본 30s, 0=유예 없음) 동안
-    VIP 보유 노드의 검사 실패를 유예 — cold 모듈 기동 시간을 흡수해 승격 직후
-    FAULT 로 되돌아가는 race 를 차단.
+- `agent/bin/cims-health <svc>` — **verdict reader** (단일 모델). rc=0 / rc=1. 자체
+  판정(생존/포트/카운터 검사)을 하지 않고, agent 의 Recovery Supervisor 가 계산해
+  `${cims_home}/run/ha/verdict/<svc>.json` 에 쓴 `vrrp_eligible` 만 판독한다 — 장애
+  감지·로컬 복구·좀비 판정·승격 자격은 전부 Supervisor 소관(정본: ha_service_model.md
+  §6~§8). track_script 는 남의 상태를 넘겨짚지 않는다.
+  - **stale/무효 처리**: verdict 없음·`boot_id` 불일치·만료(TTL 6s, role=MASTER 만 짧은
+    grace) → rc=1(fail-safe: verdict 없음 = 자격 없음). role 은 role 파일에서 읽고, 못
+    읽으면 BACKUP 과 동일한 무유예 fail-safe.
+  - **비상 밸브**: `run/ha/disabled` 마커(`CIMS_HA_DISABLE`)가 있으면 verdict 를 보지 않고
+    무조건 rc=0(PASS) — HA 판정을 얼려 현 VIP 위치를 고정한다(노드 사망=VRRP advert
+    소실만 절체). legacy 포트검사로의 폴백은 없다.
 - **port/proto 유도**: OAM 렌더(`ha_groups._infer_health_port_proto`)가 그룹 멤버 배포의
   대표 daemon 모듈로 결정. csc 는 실효 admin 포트를 게이트웨이 self-register 와 동일한
   단일 해석(`handlers.agents.effective_server_port`: materialize `Server.Port` →
@@ -415,13 +408,17 @@ systemd `cims@` instance 는 enable 하지 않는다.
   = 그룹 변이 / 배포 생성·제거 / 실효 upstream 변경 / **start·restart·upgrade job 완료
   (→ 의도 running 승격)·stop·uninstall job 완료**. 선언적 상태 모델·절체 판정 체계의
   정본은 [features/ha_service_model.md](features/ha_service_model.md).
-- **절체 판정 (로컬 복구 우선)**: 운영자 조작은 장애가 아니다. 서버별 stop 은 노드
-  로컬 `run/ha/desired.json` 에 stopped 오버라이드로 기록되어 cims-health 가 검사에서
-  제외(active 노드여도 절체 안 함)하고 watchdog 도 재기동하지 않는다. 모듈 crash 는
-  watchdog 이 먼저 재기동하고, `failover_options.restart_limit`(기본 3회/300초) 를
-  초과해야 cims-health 가 FAULT → 절체(로컬 복구 소진 후에만 VIP 이양). 프로세스는
-  살아있는데 포트만 죽은 좀비·watchdog 비활성 모듈은 즉시 FAULT. restart/제어 job
-  진행 중은 `run/ha/op_grace_<mod>` 마커로 유예. 판정 순서 상세: ha_service_model.md §4.2.
+- **절체 판정 (로컬 복구 우선, Supervisor 소유)**: 운영자 조작은 장애가 아니다. 서버별
+  stop 은 노드 로컬 `run/ha/desired.json` 에 stopped 오버라이드로 기록되어 Supervisor
+  가 절체 사유에서 제외(active 노드여도 절체 안 함)하고 재기동도 하지 않는다. 모듈 crash
+  는 Supervisor reconcile 이 먼저 재기동하고, `failover_options.restart_limit`(기본 3회/
+  300초)를 초과(exhausted)하거나 좀비(프로세스 생존+readiness 실패+op_grace 경과)면
+  Evaluator 가 `eligible=false` + 절체 래치 → track_script(cims-health)가 그 verdict 를
+  읽어 FAULT → VIP 이양(로컬 복구 소진 후에만). 절체당한(래치) 노드는 reconcile 이
+  hot·cold 모듈을 전부 정지(kill)하고, 운영자 start/restart 로 래치가 풀려야 standby 로
+  재합류한다. 유지보수(EXCLUDE_NODE) 노드는 역할 무관 `eligible=false` + 모듈 정지.
+  restart/제어 job 진행 중은 `run/ha/op_grace_<mod>` 마커로 유예. 판정 순서 상세:
+  ha_service_model.md §7·§8.
 - **apply 멱등·무접촉**: `cims-ha apply` 는 스테이징 대상 5종(conf/ha.json/
   cims-health/cims-notify/unit)이 기존 적용본과 동일하면 keepalived 를 건드리지
   않는다. 변경 시에도 가동 중이면 restart 대신 **reload** (VRRP 상태 유지 —
@@ -446,54 +443,44 @@ systemd `cims@` instance 는 enable 하지 않는다.
 - vrrp_instance 는 전 노드 `state BACKUP` 시작 — MASTER 는 priority 차등으로 선출
   (state MASTER + nopreempt 는 keepalived 가 nopreempt 를 무시하는 모순 조합).
 
-### 11.4 notify 스크립트 동작
+### 11.4 notify 스크립트 동작 (role writer)
 
-keepalived 는 기본적으로 **VIP 만 옮기고 서비스는 건드리지 않는다**. 절체 시 함께
-기동/정지할 모듈은 ha.json `services.<svc>.cold_modules[]` 에 등록된 것만 제어한다
-(cold-spare — 미지정/빈 목록이면 hot: 양쪽 상시 기동, VIP-only 절체).
+단일 모델에서 `cims-notify` 는 **role writer** — keepalived 역할 전이를
+`${cims_home}/run/ha/role/<svc>.json` 에 원자적으로 기록만 하고 종료한다. 모듈
+기동/정지·재기동·readiness·절체 판정은 하지 않는다. 그 role 값 변화를 agent 의
+Recovery Supervisor(reconcile)가 관측해 역할에서 기대되는 모듈 상태로 수렴시킨다
+(MASTER→hot·cold 기동, BACKUP→hot 만·cold 정지, FAULT(래치)→전부 정지). legacy
+(cims-notify 가 직접 cold 모듈을 start/stop) 경로는 없다.
 
 상태 전이 매핑 (`cims-notify <svc> <TYPE> <NAME> <STATE> <PRIO>`):
 
 | keepalived state | 동작 |
 |---|---|
-| MASTER  | 승격 시각을 `${ha_log_dir}/master_at_<svc>` 로 기록 (health grace 기준점) 후 cold_modules 각각 `cims-svc start <mod>` (선언 순서) — 없으면 로그만 |
-| BACKUP  | cold_modules 각각 `cims-svc stop <mod>` (역순) — 없으면 로그만 |
-| FAULT   | BACKUP 과 동일 — health probe fail 시 자기 정지 |
-| STOP    | 변경 없음 — keepalived 자체 종료 시 서비스 그대로 유지 |
+| MASTER / BACKUP / FAULT | `run/ha/role/<svc>.json` 에 role·sequence·boot_id 기록 (모듈 제어는 Supervisor reconcile) |
+| STOP | 변경 없음 — keepalived 자체 종료 시 role 무기록 |
 
-모듈 제어는 systemd `cims@` 유닛을 경유하지 않고 `runuser -u <cims_user> -- env
-CIMS_DIST_DIR=<모듈 배포 루트> <cims_home>/agent/current/bin/cims-svc` 직접 호출 —
-pid/health-gate/supervised 와 단일 lifecycle 경로. 모듈 배포 루트는
-`modules/<mod>/current` 우선, 없으면(설치만 되고 기동 이력 없는 cold standby) 최신
-버전 디렉토리 fallback (`CIMS_DIST_DIR` 미지정 시 cims-svc 가 agent 트리 기준으로
-DIST_DIR 를 잡아 versioned 모듈을 못 찾는다). `cims_home`/`cims_user` 는 agent 가
-ha.json 기록 시 자기 설치 루트/실행 계정으로 채운다 (OAM 렌더 값은 placeholder).
-install 은 완료 시 current 를 방금 설치한 버전으로 flip 하므로 cold standby 도
-설치 직후부터 절체 기동 통로가 존재한다.
-
-**실행 컨텍스트 격리** — notify 는 keepalived 의 자식이라 두 가지를 끊어야
-절체 기동이 keepalived 수명에 종속되지 않는다:
-- **cgroup**: start 는 `systemd-run --scope` 로 keepalived.service cgroup 밖에서
-  수행 (systemd-run 부재 시 직접 호출 fallback). 직접 자식으로 띄우면
-  KillMode=control-group 인 `systemctl stop/restart keepalived` 가 STOP 정책
-  ("서비스 유지")과 무관하게 모듈을 함께 죽인다. stop 은 단명 호출이라 무관.
-- **umask**: keepalived(v2.3.x)는 umask 0177 로 돌아 자식에 상속된다 —
-  cims-notify/cims-svc 는 진입 시 `umask 0022` 고정 + 기존 run/·log/ 모드 자가
-  교정. 이 차단이 없으면 cold standby 의 최초 mkdir(run/·log/)가 탐색비트 없는
-  0600 으로 생성돼 모듈 기동(로그 리다이렉트·pidfile)이 EACCES 로 영구 실패한다.
+- **role 파일 권한**: cims-notify 는 root(keepalived 자식)로 돌지만 진입 시 `umask 0022`
+  로 고정한다. keepalived(v2.3.x)는 umask 0177 로 돌아 자식에 상속되는데, 그대로면
+  role 파일이 0600 root-only 로 생성돼 Supervisor(cims)가 못 읽는다. `cims_home` 은
+  ha.json 의 값(agent 가 자기 설치 루트로 채움 — OAM 렌더 값은 placeholder)에서 유도해
+  root 가 cims 소유 트리의 절대경로에 쓸 수 있게 한다.
+- **모듈 기동 컨텍스트**: 모듈 lifecycle 은 keepalived 자식(notify)이 아니라 **agent
+  프로세스의 reconcile** 가 `cims-svc` 로 수행한다 — `systemctl stop/restart keepalived`
+  (KillMode=control-group)가 모듈을 함께 죽이던 문제가 구조적으로 사라진다. 모듈 배포
+  루트는 `modules/<mod>/current` 우선, 없으면(설치만 되고 기동 이력 없는 cold standby)
+  최신 버전 디렉토리 fallback.
 
 **VIP 선행 bind (`ip_nonlocal_bind`)** — VIP 를 설정값으로 bind 하는 모듈(csp
 `LocalIp=VIP` 등)은 VIP 취득 전에도 기동 가능해야 한다 (워크플로: start → VIP
 적용). agent 가 기동 시 `cims-priv net-sysctl net.ipv4.ip_nonlocal_bind 1` 로
 선행 보장 (idempotent, `/etc/sysctl.d/99-cims-net-tuning.conf` 영속). `cims-ha
 apply` 도 동일 값을 설정하지만 그건 VIP 적용 시점이라 최초 start 에는 늦다 —
-agent 선행이 없으면 bind EADDRNOTAVAIL → watchdog crash-loop.
+agent 선행이 없으면 bind EADDRNOTAVAIL → 재기동 crash-loop.
 
-agent watchdog 의 cold-spare 게이트(standby 재기동 억제)는 **keepalived 가 로컬에서
-실행 중일 때만** 유효 — keepalived 정지(STOP=서비스 유지) 상태에서는 게이트가 풀려
-watchdog 이 crash 백스톱으로 동작한다 (정지+VIP 부재 조합에서 죽은 모듈을 아무도 못
-살리는 사각 차단). watchdog tick 은 heartbeat 대기와 분리된 고정 주기(10s)로 돌아
-OAM 장애 backoff(최대 60s)가 로컬 복구를 지연시키지 않는다.
+HA 관리 모듈(relevant∪cold)의 재기동은 Supervisor reconcile 이 소유하고, legacy
+watchdog(`supervise_tick`)은 HA 에 속하지 않은 standalone 모듈만 관할한다(이중 제어
+방지). watchdog tick 은 heartbeat 대기와 분리된 고정 주기로 돌아 OAM 장애
+backoff(최대 60s)가 로컬 복구를 지연시키지 않는다.
 
 모든 전이는 `/var/log/cims-ha/notify_<svc>.log` 에 기록 (디렉토리 755·로그 644 —
 비-root 운영자 열람 가능).

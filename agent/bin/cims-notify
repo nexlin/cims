@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# agent/bin/cims-notify — generic keepalived state transition hook
+# agent/bin/cims-notify — keepalived 상태 전이 → role 파일 기록 (role writer, 단일 모델)
 #
 # 사용법: (keepalived 의 vrrp_instance notify 에서 호출)
 #   cims-notify <svc> <TYPE> <NAME> <STATE> <PRIORITY>
@@ -8,24 +8,19 @@
 # keepalived 설정 시 cims-notify 호출 라인에 명시 (`notify
 # "${BIN_DIR}/cims-notify Control"`) — ha.json services.<svc> 키 (그룹명).
 #
-# 동작 — keepalived 는 기본적으로 VIP 만 옮기고 서비스는 건드리지 않는다:
-#   ha.json services.<svc>.cold_modules[] 에 등록된 모듈만 절체 대상 (cold-spare).
-#     MASTER        → 각 cold 모듈을 cims-svc start (선언 순서)
-#     BACKUP|FAULT  → 각 cold 모듈을 cims-svc stop (역순)
-#   cold_modules 미지정/빈 목록 → 전이 로그만 기록 (hot — 양쪽 상시 기동, VIP-only).
-#   STOP (keepalived 자체 종료) → 무변경.
+# 동작 — keepalived 역할 전이를 run/ha/role/<svc>.json 에 원자적으로 기록만 하고 종료한다.
+#   MASTER / BACKUP / FAULT → role 기록. STOP(keepalived 종료) → 무변경.
+#   모듈 기동/정지·재기동 판단·readiness·OAM 호출·절체 판단은 하지 않는다 —
+#   전부 agent 의 Recovery Supervisor(reconcile)가 role 을 관측해 수행한다.
 #
-# 모듈 제어는 cims@ systemd 유닛 대신 cims-svc 직접 호출 — 단일 lifecycle 경로
-# (pid/health-gate/supervised 일관). keepalived 가 root 로 실행하므로 runuser 로
-# ${CIMS_USER} 강등해 실행한다.
-#
-# 옛 notify_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
+# 단일 모델: legacy(cims-notify 가 직접 모듈 start/stop) 경로는 없다. 유일한 escape 는
+# 비상 밸브 CIMS_HA_DISABLE(§9) 로, 그 경우 Supervisor 가 reconcile 을 안 할 뿐
+# cims-notify 는 그대로 role 만 기록한다(무해).
 
 set -euo pipefail
 
-# keepalived(v2.3.x) 는 umask 0177 로 돌아 이 스크립트와 그 자식(cims-svc)까지
-# 상속된다 — 로그 디렉토리/모듈 run·log 가 탐색비트 없는 0600 으로 생성돼 비-root
-# 모듈 기동이 영구 실패하므로 진입 즉시 고정한다.
+# keepalived(v2.3.x) 는 umask 0177 로 돌아 이 스크립트와 그 자식까지 상속된다 —
+# 로그/파일이 탐색비트 없는 0600 으로 생성돼 운영자 진단이 막히므로 진입 즉시 고정한다.
 umask 0022
 
 SVC="${1:-}"
@@ -55,37 +50,31 @@ mkdir -p "$(dirname "$LOG")" 2>/dev/null
 chmod 755 "$(dirname "$LOG")" 2>/dev/null || true
 [[ -f "$LOG" ]] && chmod 644 "$LOG" 2>/dev/null || true
 
-log() { echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: $*" >> "$LOG"; }
+# 실제 VRRP 역할(MASTER/BACKUP/FAULT)만 기록한다. STOP(keepalived 자체 종료) 등은 마지막
+# 역할을 보존 — reconcile 이 알 수 없는 role 로 모듈을 오작동(잘못된 정지/기동)시키지 않게 한다.
+case "$STATE" in
+    MASTER|BACKUP|FAULT) ;;
+    *)
+        echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: 무시 (role 미기록)" >> "$LOG"
+        exit 0
+        ;;
+esac
 
-# ha.json 에서 cold_modules / cims_home / cims_user lookup.
-# 출력: CIMS_HOME|CIMS_USER|MOD1,MOD2,...
-IFS='|' read -r CIMS_HOME CIMS_USER COLD < <(python3 - "$HA_JSON" "$SVC" <<'PY'
-import json, sys, os
-ha_json, svc = sys.argv[1], sys.argv[2]
-home, user, cold = "/opt/cims", "cims", []
-if os.path.isfile(ha_json):
-    try:
-        cfg = json.load(open(ha_json))
-        home = cfg.get("cims_home", home)
-        user = cfg.get("cims_user", user)
-        s = (cfg.get("services") or {}).get(svc) or {}
-        cold = [str(m).strip() for m in (s.get("cold_modules") or []) if str(m).strip()]
-    except Exception:
-        pass
-print(f"{home}|{user}|{','.join(cold)}")
-PY
-)
-
-# ── role 파일 기록 (ha_service_model.md §9) — 두 모드 공통 ──────────────────
-# keepalived 역할 전이를 run/ha/role/<svc>.json 에 원자적으로 기록한다. Supervisor 가
-# 이걸 관측해 role reconcile(모듈 기동/정지)을 수행한다(role_writer 모드). legacy 모드에서도
-# 기록해 두면 P3 Evaluator 의 _current_role 이 VIP 유도 대신 이 값을 쓸 수 있다.
-RUN_HA="$CIMS_HOME/run/ha"
-mkdir -p "$RUN_HA/role" 2>/dev/null || true
-python3 - "$RUN_HA/role/${SVC}.json" "$SVC" "$STATE" <<'PY' 2>/dev/null || true
+# ── role 파일 기록 (ha_service_model.md §9) ────────────────────────────────
+# CIMS_HOME 은 ha.json 에서 해석 — root(keepalived) 가 agent 의 run/ha 를 쓸 수 있게
+# 절대경로를 확정한다. Supervisor 는 이 role 값 변화를 관측해 reconcile 을 수행한다.
+python3 - "$HA_JSON" "$SVC" "$STATE" <<'PY' 2>>"$LOG" || true
 import json, os, sys, time
-path, svc, state = sys.argv[1], sys.argv[2], sys.argv[3]
-seq = 0
+ha_json, svc, state = sys.argv[1], sys.argv[2], sys.argv[3]
+home = "/opt/cims"
+try:
+    if os.path.isfile(ha_json):
+        home = json.load(open(ha_json)).get("cims_home", home)
+except Exception:
+    pass
+d = os.path.join(home, "run", "ha", "role")
+os.makedirs(d, exist_ok=True)
+path = os.path.join(d, svc + ".json")
 try:
     seq = int(json.load(open(path)).get("sequence", 0))
 except Exception:
@@ -101,112 +90,5 @@ with open(tmp, "w") as f:
 os.replace(tmp, path)
 PY
 
-# 현재 HA 모드 — 노드 flags.json(verdict_source/notify_mode) 또는 서비스별 ha.json
-# ha_mode(per-service 컷오버) 중 하나라도 supervisor 면 role_writer. role_writer 면 모듈
-# 직접 제어는 Supervisor reconcile 이 담당하므로 role 기록만 하고 종료한다.
-NOTIFY_MODE=$(python3 - "$RUN_HA/flags.json" "$HA_JSON" "$SVC" <<'PY' 2>/dev/null || echo legacy
-import json, sys
-flags_p, ha_p, svc = sys.argv[1], sys.argv[2], sys.argv[3]
-def rd(p):
-    try: return json.load(open(p))
-    except Exception: return {}
-fl = rd(flags_p)
-# flags.json 없음 = 신 agent(reconcile 주체) 미기동 → 안전하게 legacy(직접 모듈 제어).
-if not fl:
-    print("legacy"); sys.exit()
-# 기본 role_writer. 노드 flags 나 그룹 ha_mode 가 명시적 legacy 일 때만 legacy.
-node_legacy = fl.get("verdict_source") == "legacy" or fl.get("notify_mode") == "legacy"
-svc_mode = str(((rd(ha_p).get("services") or {}).get(svc) or {}).get("ha_mode", "supervisor")).lower()
-print("legacy" if (node_legacy or svc_mode == "legacy") else "role_writer")
-PY
-)
-
-if [[ "$NOTIFY_MODE" == "role_writer" ]]; then
-    log "role_writer — role=${STATE} 기록, 모듈 제어는 Supervisor(reconcile) 담당"
-    # MASTER 승격 시각은 계속 기록 — 아직 legacy cims-health(verdict_source!=supervisor)
-    # 를 쓰는 서비스의 승격 grace 안전망. verdict reader 전환(P5) 후엔 무해한 잔재.
-    [[ "$STATE" == "MASTER" ]] && date -Iseconds > "$(dirname "$LOG")/master_at_${SVC}" 2>/dev/null || true
-    exit 0
-fi
-
-# ── 이하 legacy 모드 — cims-notify 가 직접 cold 모듈 start/stop ────────────────
-# cims-svc 위치 — 버전화 레이아웃(agent/current) 우선, flat legacy fallback.
-CIMS_SVC=""
-for cand in "$CIMS_HOME/agent/current/bin/cims-svc" "$CIMS_HOME/agent/bin/cims-svc"; do
-    if [[ -x "$cand" ]]; then CIMS_SVC="$cand"; break; fi
-done
-
-# 모듈 배포 루트 해석 — cims-svc 는 CIMS_DIST_DIR 미지정 시 자기 위치(agent 트리)
-# 기준으로 DIST_DIR 를 잡아 versioned 모듈(modules/<mod>/<ver>)을 못 찾는다.
-# current 심볼릭 우선, 없으면(설치만 되고 한 번도 기동 안 된 cold standby) 최신
-# 버전 디렉토리 fallback — 승격 시 기동이 여기 걸려 실패하면 절체가 반쪽이 된다.
-_mod_dist() {  # <module> → stdout: dist dir (실패 시 rc=1)
-    local root="$CIMS_HOME/modules/$1" d
-    if [[ -e "$root/current" ]]; then echo "$root/current"; return 0; fi
-    d=$(ls -1dt "$root"/*/ 2>/dev/null | head -1)
-    [[ -n "$d" ]] && { echo "${d%/}"; return 0; }
-    return 1
-}
-
-_svc_ctl() {  # <start|stop> <module>
-    local act="$1" mod="$2" dist rc
-    if [[ -z "$CIMS_SVC" ]]; then
-        log "FAIL: cims-svc 미발견 (CIMS_HOME=$CIMS_HOME) — $act $mod 스킵"
-        return 0
-    fi
-    if ! dist=$(_mod_dist "$mod"); then
-        log "FAIL: 모듈 배포 루트 미발견 ($CIMS_HOME/modules/$mod) — $act $mod 스킵"
-        return 0
-    fi
-    # start 는 systemd-run --scope 로 keepalived cgroup 밖에서 기동 — 이 스크립트는
-    # keepalived 의 자식이라 직접 띄운 데몬은 keepalived.service cgroup 에 귀속되고,
-    # systemctl stop/restart keepalived (KillMode=control-group) 가 STOP 핸들러의
-    # "서비스 유지" 의도와 무관하게 모듈을 함께 죽인다. stop 은 단명 호출이라 무관.
-    rc=0
-    if [[ "$act" == "start" ]] && command -v systemd-run >/dev/null 2>&1; then
-        systemd-run --quiet --collect --scope --description="cims $mod (HA notify start)" \
-            runuser -u "$CIMS_USER" -- env CIMS_DIST_DIR="$dist" "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1 || rc=$?
-    else
-        runuser -u "$CIMS_USER" -- env CIMS_DIST_DIR="$dist" "$CIMS_SVC" "$act" "$mod" >>"$LOG" 2>&1 || rc=$?
-    fi
-    if [[ $rc -eq 0 ]]; then
-        log "$act $mod OK (dist=$dist)"
-    else
-        log "FAIL: cims-svc $act $mod rc=$rc (dist=$dist)"
-    fi
-}
-
-case "$STATE" in
-    MASTER)
-        # 승격 시각 기록 — cims-health 가 grace_sec 동안 검사 실패를 유예하는 기준점
-        # (cold 모듈 기동 시간 흡수). mtime 기준이라 내용은 로그 용도.
-        date -Iseconds > "$(dirname "$LOG")/master_at_${SVC}" 2>/dev/null || true
-        if [[ -n "${COLD:-}" ]]; then
-            log "MASTER 승격 → cold 모듈 기동: ${COLD}"
-            IFS=',' read -r -a MODS <<< "$COLD"
-            for m in "${MODS[@]}"; do
-                if [[ -n "$m" ]]; then _svc_ctl start "$m"; fi
-            done
-        else
-            log "MASTER 승격 — cold_modules 없음, VIP 인수만 (서비스 무접촉)"
-        fi
-        ;;
-    BACKUP|FAULT)
-        if [[ -n "${COLD:-}" ]]; then
-            log "${STATE} 강등 → cold 모듈 정지 (역순): ${COLD}"
-            IFS=',' read -r -a MODS <<< "$COLD"
-            for (( i=${#MODS[@]}-1; i>=0; i-- )); do
-                if [[ -n "${MODS[$i]}" ]]; then _svc_ctl stop "${MODS[$i]}"; fi
-            done
-        else
-            log "${STATE} 강등 — cold_modules 없음, VIP 반납만 (서비스 무접촉)"
-        fi
-        ;;
-    STOP)
-        log "keepalived 자체 종료 — 서비스 상태 유지 (운영자가 직접 제어)"
-        ;;
-    *)
-        log "알 수 없는 상태 — 무시"
-        ;;
-esac
+echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: role=${STATE} 기록 (모듈 제어는 Supervisor reconcile)" >> "$LOG"
 exit 0

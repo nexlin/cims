@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deploymentApi, type SipPackage, type Deployment } from '../api/deployment'
 import { useToast } from '../components/Toast'
 import PackageUploadModal from './deploy/PackageUploadModal'
-import { fmtSize, fmtRelTime } from './deploy/deployHelpers'
+import { fmtSize, fmtRelTime, depEffectiveStatus } from './deploy/deployHelpers'
 import { agentDisplayName } from '../components/agentDisplay'
 
 interface ModuleGroup {
@@ -34,6 +34,10 @@ export default function PackagesPage() {
   }, [show])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const iv = setInterval(() => void load(), 2_000)   // 실측 상태 자동 갱신 (제어 탭과 일관)
+    return () => clearInterval(iv)
+  }, [load])
 
   const modules = useMemo<ModuleGroup[]>(() => {
     const m = new Map<string, SipPackage[]>()
@@ -358,7 +362,7 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
                       )}
                     </td>
                     <td>{d.process_name || '—'}</td>
-                    <td>{d.status}</td>
+                    <td>{depEffectiveStatus(d)}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.deployed_at || '—'}</td>
                   </tr>
                 ))}

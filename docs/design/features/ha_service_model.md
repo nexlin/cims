@@ -4,6 +4,9 @@
 > 설계다. keepalived 인프라(파일 구조·렌더·apply)의 운영 상세는
 > [../ha_design.md](../ha_design.md) §11 을, 토폴로지 개요는 ha_design.md §1~8 을 본다.
 >
+> **단일 모델**: legacy 경로·모드 플래그·단계적 이행은 없다. 새 supervisor 모델이 유일한
+> 동작이며, 유일한 escape 는 비상 밸브 `CIMS_HA_DISABLE`(§9·§18) 하나다.
+>
 > **적용 범위**: 아래 verdict / eligible / promotion / 절체 모델은 **VIP 를 가진
 > Active/Standby(AS) 그룹 전용**이다. All-Active(AA)는 VIP·keepalived 가 없어 이
 > 모델의 대상이 아니며, §3 에 그 경계를 명시한다.
@@ -155,14 +158,18 @@ agent 설치 루트(`_PREFIX`) 아래에 둔다 — agent 는 **user systemd 유
 | `run/ha/promotion/<svc>.json` | 승격 grace 상태 (휘발) | Supervisor | Supervisor |
 | `run/ha/recovery/<mod>` | 재기동 카운터·deadline (휘발) | Supervisor | Supervisor |
 | `run/ha/operations/<id>` | 계획 절체 operation·prepare token (휘발) | OAM/Agent | OAM/Agent |
-| `state/ha/desired/<svc>.json` | **운영자 의도** (영속) | OAM/Agent | Supervisor |
-| `state/ha/latch/<svc>.json` | **failover 래치·유지보수** (영속) | Supervisor/운영자 | Supervisor |
+| `run/ha/disabled` | **비상 정지 밸브 마커** (휘발) — `CIMS_HA_DISABLE` | agent | track_script |
+| `run/ha/desired.json` | **서버별 정지 의도** — `{module: 'stopped'}` (HOLD_VIP) | Agent `job_process_control` | Supervisor |
+| `state/ha/maintenance/<svc>` | **유지보수 마커** (영속) — `EXCLUDE_NODE` | OAM `ha_maintenance` job | Supervisor |
+| `state/ha/planned_release/<svc>` | 계획 절체 반납 마커 (영속) | OAM job | Supervisor |
+| _(failover 래치)_ | **절체 확정 래치** — 현재 in-memory(`_EVAL_LATCH`), 운영자 start/restart 로 해제. 영속화는 §19 | Supervisor/운영자 | Supervisor |
 
-**영속 vs 휘발**: 래치·운영자 의도는 재부팅 후에도 남아야 안전(절체당한 노드가 재부팅으로
-자동 승격 자격을 되찾으면 안 됨) → `state/ha/`. verdict·카운터·역할은 재부팅 시 초기화돼야
-한다 → `run/ha/`. `_PREFIX` 는 tmpfs 가 아니라 재부팅에도 파일이 남으므로, 휘발 의미는
-(a) **agent 기동 시 `run/ha/` 하위를 초기화**하고 (b) verdict 의 `boot_id`(§13) 로 재부팅
-전 값 재사용을 차단해 달성한다.
+**영속 vs 휘발**: 유지보수(`maintenance`)·계획절체(`planned_release`) 마커는 재부팅 후에도
+남아야 안전(점검/절체 의도가 재부팅으로 사라지면 안 됨) → `state/ha/`. verdict·카운터·역할은
+재부팅 시 초기화돼야 한다 → `run/ha/`. 래치는 현재 in-memory 라 재부팅에 사라지지만,
+`nopreempt` + verdict `boot_id`(§13) 가 자동 승격을 막아 안전하다(영속화는 §19). `_PREFIX`
+는 tmpfs 가 아니라 재부팅에도 파일이 남으므로, 휘발 의미는 (a) **agent 기동 시 `run/ha/`
+하위를 초기화**하고 (b) verdict 의 `boot_id` 로 재부팅 전 값 재사용을 차단해 달성한다.
 
 **소유권**: agent(cims)가 `run/ha/`·`state/ha/` 를 생성·소유한다. 교차 사용자 파일은
 읽기 전용 방향뿐이라 충돌이 없다 — `role`(root 쓰기 → cims 읽기), `verdict`(cims 쓰기 →
@@ -178,7 +185,6 @@ module_specs:
   csp-main:
     failover_relevant: true          # 실패가 절체 사유인가
     standby_mode: hot                # hot: 양쪽 상시 / cold: standby 정지·승격 시 기동
-    run_on_fault: true               # FAULT 강등 시 hot 모듈 유지 여부
     health_profile: csp-main-health
     restart_policy: default
     safety:
@@ -240,34 +246,91 @@ health 결과 캐시 예:
 매 평가 주기마다 기대 상태와 실제 상태를 비교한다.
 
 ```text
-expected_running(module, role, desired_runtime, standby_mode, latch):
-  role == MASTER            → true
-  role == BACKUP, hot       → true
-  role == BACKUP, cold      → false
-  role == FAULT, hot        → run_on_fault 정책
-  role == FAULT, cold       → false
-  role == UNKNOWN, cold     → false (안전)
-  desired_runtime == STOPPED → false (운영자 정지 — 예외)
+expected_running(module, role, cold, desired, excluded, latched):
+  excluded (유지보수·EXCLUDE_NODE)  → false   # 승격 제외 노드 — hot·cold 전부 정지
+  desired == STOPPED               → false   # 운영자 서버별 정지 (HOLD_VIP)
+  latched (절체 확정)               → false   # 탈락 노드 — hot·cold 전부 정지(kill), gap2
+  role == MASTER                   → true    # hot·cold 모두 실행
+  role == BACKUP/FAULT/UNKNOWN     → (module is hot)   # hot 상시, cold 정지
 
 if expected_running and not running:  Process Manager start
-if not expected_running and running:  Process Manager stop
+if not expected_running and running:  Process Manager stop  # excluded/latched 는 즉시, 그 외 op_grace 존중
 ```
 
+**정지(kill)는 keepalived FAULT 상태가 아니라 "절체 확정 래치(latched)"에 묶는다.** 소진
+(restart_limit 초과)·좀비로 Evaluator 가 절체를 확정(§13)하면 그 노드의 hot·cold 를 전부
+정지한다 — 상대가 이미 서비스를 인수했으므로 재기동 churn·이중 active 를 막는다. **FAULT
+여도 래치가 풀린(운영자 start/restart 로 복구) 상태면** role 기준(hot 상시·cold 정지)으로
+동작해 standby 로 재합류한다. 이렇게 하지 않고 "FAULT=무조건 정지"로 두면, 정지된 모듈이
+readiness 를 못 채워 영원히 FAULT 에 갇히는 데드락이 생긴다.
+
+**cold 모듈은 마스터에서만, reconcile 로만 기동한다("마스터 먼저 → 모듈 나중").** 개별/서버
+start 로 cold 모듈을 눌러도 마스터가 아닌 노드에서는 **직접 기동하지 않고**(agent
+`_cold_standby_module` 억제), 서비스 무장(arm)만 트리거한다 → 그 노드가 마스터로 승격되면
+reconcile(role==MASTER)이 기동한다. 마스터 아닌 노드에서 잠깐 켜졌다 걷어내지는 flap 이
+원천 차단된다. 이미 마스터(VIP 보유)면 즉시 직접 기동(crash 복구). keepalived arm 이
+실패하면 그 사실이 update_ha job 실패로 노출된다(cold 모듈이 조용히 안 뜨는 게 아니라).
+
+**일괄 시작(`_control_group start`)의 cold 모듈은 지정 마스터에게만 start job 을 보낸다** —
+마스터는 deploying→running 표시·desired 해제·실제 기동을 하고, 백업엔 start 대신 홀드 해제
+(`ha_clear_holds`: desired=stopped·latch·planned_release 정리)만 보낸다. 백업에 start 를 보내면
+ha.json 렌더 전(stagger 창) 억제 판정을 못 해 잠깐 기동돼 **dual-active** 가 되므로 차단한다.
+AS 의 hot 모듈·AA 모듈은 양쪽 상시라 직접 start. 마스터 사망 시엔 절체로 백업(신 마스터)
+reconcile 이 기동한다. 개별/서버 start 한 대만 눌러도 `note_module_started` 가 그룹 의도를
+승격시켜 양 노드가 무장되므로, 그 뒤 자동/수동 절체가 정상 동작한다.
+
+**승격 엣지에서 타겟의 기동 차단 홀드를 해제한다 (정본 경로).** BACKUP/FAULT→MASTER 로 막
+승격하면 그 노드가 서비스를 인수하므로, agent 가 `_clear_holds_on_promotion` 으로 그 서비스
+모듈의 `desired=stopped`·재기동 카운터·`_EVAL_LATCH`·`planned_release` 를 해제한다. 승격
+시점엔 그 노드가 VIP 를 보유해 ha.json 이 무장돼 있어 **모듈 목록이 확실**하다. 이 경로가
+**자동·수동 절체 모두**에서 타겟 기동을 보장한다. INTENTIONALLY_DOWN(이미 MASTER 인 활성
+노드에서 운영자가 stop)은 승격 엣지가 아니라 해제되지 않는다. (OAM 이 절체/일괄시작 시
+보내는 `ha_clear_holds` job(§12)은 무장 상태에서만 유효한 proactive 보조 — ha.json 미무장
+시엔 모듈 목록이 비어 무효라, 정본은 위 승격-엣지 해제다.)
+
+**op_grace 는 기동 직후 바인드 유예용(기본 3s)이다.** 갓 켠 모듈이 포트를 바인드하는 짧은
+창 동안만 좀비 오판·reconcile 재기동 경쟁을 막는다. 길게 두면 크래시 재기동·승격 후 기동이
+그만큼 지연되므로 짧게(3s) 유지한다. **실제로 아무것도 안 켠 억제(cold on non-master) start 는
+op_grace 를 찍지 않는다** — 안 그러면 그 노드가 마스터로 승격됐을 때 reconcile 의 진짜 기동이
+남은 op_grace 때문에 지연된다(배치시작 후 cold 모듈이 늦게 뜨던 원인).
+
+**콘솔 모듈 상태 표시는 실측(live_state)이 정본이다.** 배포 status(job 결과=의도)가 아니라
+agent 가 주기(≈2s) 보고하는 실제 프로세스 상태로 표시한다(`depEffectiveStatus`): 실제로 떠
+있으면 `running`, 아니면 `stopped` — **실제로 안 도는데 running 으로 보이는 일은 없다.** cold
+모듈을 reconcile 이 마스터에서 켜면 실측이 곧 `running` 을 반영하고, 백업은 실측 down 이라
+`stopped` 로 정확히 보인다(패키지 제어 탭·설치 탭 동일). deploying/pending/failed(진행/실패)는
+실측이 up 이 아닐 때 그대로 노출해 "명령 수행 중"을 알린다.
+
 이 방식은 cims-notify 실행 실패·Supervisor 일시 중단·역할 이벤트 유실·기동 중 Agent
-재시작에도 다음 주기에 정합을 회복한다. 역할 감지는 inotify(빠른 반응) + 평가 루프
-(정합 보장)를 함께 쓸 수 있으며, 정합의 기준은 평가 루프다.
+재시작에도 다음 주기에 정합을 회복한다. 역할 감지는 role 파일(cims-notify) + 평가 루프
+(정합 보장)를 함께 쓰며, 정합의 기준은 평가 루프다.
+
+**stale MASTER 보정**: `_current_role` 은 role 파일이 `MASTER` 여도 이 노드가 서비스 VIP 를
+실제로 보유하지 않으면 `BACKUP` 으로 본다. keepalived 정지 시 cims-notify 는 STOP 상태를
+role 에 쓰지 않아(§9) role 파일이 MASTER 로 남는데, keepalived 는 정지하며 VIP 를 반납하므로
+"VIP 없는 MASTER" 는 실제 마스터가 아니다. 이 보정이 없으면 정지 노드가 cold 모듈을 계속
+붙들어 상대 노드와 dual-active 가 된다. (승격 시 keepalived 는 VIP 를 붙인 뒤 MASTER notify
+하므로 정상 승격을 stale 로 오판하지 않는다.)
 
 ### 7.2 재기동 정책 상태 머신 (`restart_limit`)
 
-**ACTIVE relevant 모듈:**
+**ACTIVE relevant 모듈:** 재기동 카운터는 **크래시(직전 tick 살아있다가 죽음) 횟수를
+window(`restart_limit.window_sec`, 기본 300s) 안에서 누적**한다. 최초 기동·승격 기동은
+크래시가 아니므로 세지 않는다(`_LAST_UP` 로 판별). 재기동 성공만으로 카운터를 리셋하지
+않는다 — 그래야 kill→복구→kill 반복이 누적돼 한도에 도달한다.
 
 ```text
-HEALTHY → (health 실패 확정) → DEGRADED → RECOVERING
-  restart_count < restart_limit AND deadline 미초과 → restart
-  readiness 연속 성공 → restart_count=0 → ACTIVE_HEALTHY
-  restart_count >= restart_limit OR total_recovery_timeout 초과
-      → FAILOVER_LATCHED → vrrp_eligible=false
+HEALTHY → (모듈 크래시) → reconcile 재기동 + fail_count++ (window 내 누적)
+  window 내 fail_count <  restart_limit → 로컬 복구 계속 (RECOVERING)
+  window 내 fail_count >= restart_limit → FAILOVER_LATCHED → vrrp_eligible=false
+       ↑ 현재 떠 있어도(=flapping) 절체. 죽어 있어도(=소진) 절체. 둘 다 같은 판정.
+  window 무크래시 경과 → fail_count 자연 만료(stale 무시) / 운영자 start·restart → 리셋+래치 해제
 ```
+
+**핵심**: "300s 내 크래시 N회면 절체"가 실제로 성립하려면 (a) 카운터를 매 정상 tick 마다
+리셋하지 않고, (b) Evaluator 가 **현재 readiness 와 무관하게** window 내 카운트만으로
+판정해야 한다(모듈이 죽었다 살았다를 반복하면 스냅샷상 살아 보여도 절체).좀비(프로세스
+생존+readiness 실패)는 이와 별개로 op_grace 이후 즉시 절체.
 
 **BACKUP relevant hot 모듈:** (트래픽 미처리라 복구 중엔 승격 자격 없음)
 
@@ -347,7 +410,19 @@ return verdict.vrrp_eligible
 ```
 
 현재 역할은 cims-notify 가 쓴 role 파일에서 읽고, 읽을 수 없으면 BACKUP 과 동일한 무유예
-fail-safe 를 적용한다.
+fail-safe 를 적용한다. **단일 모델**이라 track_script 에 legacy 포트검사 폴백은 없다 —
+verdict 가 유일한 판정 입력이다.
+
+### 비상 정지 밸브 (`CIMS_HA_DISABLE`)
+
+verdict 의 유일 생산자(Supervisor)가 오작동해 절체가 폭주하거나 양 노드가 동시에 자격을
+잃는 것을 막는 운영용 kill-switch. legacy 로 되돌아가는 게 아니라 **판정을 얼린다**:
+- env `CIMS_HA_DISABLE=1` + agent 재기동 → agent 가 Supervisor 스레드를 띄우지 않고
+  `run/ha/disabled` 마커를 기록.
+- **track_script**: 마커 있으면 verdict 를 보지 않고 **무조건 rc0(PASS)** → keepalived 가
+  health 로는 절체하지 않음(현 VIP 위치 고정). 노드 사망(VRRP advert 소실)만 절체.
+- **cims-notify**: 마커 있으면 role 만 기록(모듈 자동 제어 없음 — 운영자 수동).
+결과: HA 판정을 얼리고 서비스 현상 유지 → 운영자가 원인 수습 후 env 제거·재기동으로 복귀.
 
 **stale 정책 (역할 비대칭):** BACKUP 은 stale 즉시 승격 자격 제거(제어 모듈이 죽은
 노드가 승격되면 위험). MASTER 는 짧은 grace(Supervisor 일시 재시작이 곧 절체가 되지
@@ -469,27 +544,46 @@ OAM 복구/운영자 개입 대기.
 cold `readiness_timeout` + 허용 restart 시간. grace 중 readiness 실패를 즉시 절체 실패로
 보지 않는다.
 
+**planned_release 생명주기 (중요)**: source 의 `planned_release` 마커는 **모든 종결
+전이에서 반드시 해제**한다 — 롤백/실패뿐 아니라 **COMMIT 성공 시에도** 해제해야 한다.
+COMMIT 후엔 `nopreempt` 로 target 이 계속 MASTER 를 유지하지만, source 의 자격
+(`vrrp_eligible`)은 정상 복원돼야 **역방향 계획 절체(target→source)가 가능**하다. COMMIT
+에서 해제하지 않으면 source 가 영구 부적격으로 갇혀 다시는 절체 대상이 되지 못한다. OAM
+상태머신은 각 종결 전이(COMMITTED/ROLLED_BACK/FAILED) 시점에 해제 job 을 인라인 전송한다
+(종결 후 "다음 호출이 처리"에 의존하지 않는다 — 종결 op 은 sweep 이 skip 하므로). 이중
+안전망: (1) 운영자가 해당 모듈을 start/restart 하면 agent 가 planned_release 를 함께
+해제하고(정상 운영 의도와 모순), (2) 마커가 절체 최대시간을 크게 초과(기본 180s)해 남아
+있으면 agent 가 stale 로 보고 자가 제거한다(해제 job 유실·OAM 중단 대비).
+
+**타겟 홀드 선해제**: 절체를 시작할 때 OAM 은 **타겟**에 `ha_clear_holds`(서비스) job 을
+먼저 보내 타겟의 `desired=stopped`·재기동 카운터·latch·planned_release 를 지운다. 타겟에
+이전 stop 이 고착돼 있으면 승격돼도 reconcile 이 모듈을 못 켜기 때문이다(그 노드가 서비스를
+인수해야 하므로 "이 노드에서 정지" 오버라이드는 절체 의도와 모순). 일괄 시작도 백업 멤버에
+같은 job 을 보내 향후 절체에 대비한다(§7.1).
+
 ## 13. failover 래치 · 부트스트랩
 
 ### 래치
 
 `nopreempt` 는 "복구된 옛 MASTER 가 VIP 를 도로 안 가져감"까지이고, **노드를 승격 불가로
-만드는 것은 별도 상태**(`FAILOVER_LATCHED`)다. 래치 설정 조건: 재기동 한도 초과, 프로세스
-종료 실패, health 지속 실패, Supervisor 내부 오류, 절체 후 옛 Active 뒤늦은 정상화,
-split-brain 가능성 감지. 래치는 `state/ha/latch/` 에 영속.
+만드는 것은 별도 상태**(`FAILOVER_LATCHED`)다. 현재 구현의 래치 설정 조건(ACTIVE 판정):
+relevant 모듈이 (a) 재기동 한도 초과(exhausted) 또는 (b) 좀비(프로세스 생존 + readiness
+실패 + op_grace 경과). 래치는 Supervisor 프로세스 내 in-memory(`_EVAL_LATCH`)다.
 
-래치 중: `vrrp_eligible=false`, 자동 Active 전환 금지, track_script 실패, OAM 에
-`FAILOVER_LATCHED` 표시.
+래치 중: `vrrp_eligible=false`(자동 Active 전환 금지) + **reconcile 이 그 노드의 hot·cold
+모듈을 전부 정지(kill)한다**(§7.1) — 절체당한 노드는 재기동 경쟁 없이 완전히 내려간다.
+track_script 실패 → keepalived FAULT → VIP 는 peer 로.
 
-해제 정책 (안전등급별, §14):
-- **엄격(수동)**: `ha-control clear-latch <svc>` — shared_writer·unknown.
-- **자동**: 아래 모두 충족 시 `STANDBY_READY` 까지만 복귀 — stateless·read_only.
-  ```yaml
-  latch_clear: { mode: automatic, consecutive_successes: 30,
-                 stabilization_time: 120s, require_peer_vip_observation: true }
-  ```
-  전이: `FAILOVER_LATCHED → RECOVERY_VALIDATING → STANDBY_READY`. 곧바로 ACTIVE 자격을
-  주지 않고 STANDBY 로만 복귀 → 현 MASTER 사망 시에만 승격.
+해제(재합류): 운영자가 콘솔에서 해당 모듈을 **start/restart** 하면 래치가 풀린다
+(`_clear_failover_latch`) — 원인을 고친 뒤 올리라는 명시적 re-arm. 해제되면 role 기반
+reconcile 이 hot 을 기동 → readiness 회복 → track_script PASS → keepalived FAULT→BACKUP
+로 standby 재합류한다(`nopreempt` 라 곧바로 MASTER 는 아님). agent 재기동/노드 재부팅도
+in-memory 래치를 비우지만, boot_id 무효화 + `nopreempt` 로 자동 승격이 아니라 standby
+재합류에 그친다.
+
+> 안전등급별 자동 해제(stateless/read_only 는 연속 성공 창 기반 자동, shared_writer/
+> unknown 은 수동)와 래치 영속화(`state/ha/latch/`)는 §19 후속 과제다. 현재는 in-memory
+> + 운영자 start/restart 해제로 단일화돼 있다.
 
 ### 부트스트랩
 
@@ -499,7 +593,7 @@ verdict 없음/파싱 실패/boot_id 불일치/만료 → track_script 실패(fa
 ```text
 1. cims-agent 시작 → run/ha·state/ha 준비
 2. 보수적 verdict=false(STARTING) 즉시 기록
-3. desired·latch·module_specs 로드
+3. desired(서버별 정지)·maintenance·module_specs 로드 (래치는 in-memory 라 빈 상태로 시작)
 4. hot readiness / cold preflight 평가
 5. 초기 승격 후보 자격 계산 → 정상이면 verdict=true 갱신
 6. keepalived 가 track_script 반영해 선출
@@ -543,83 +637,82 @@ cache·verdict·expires_at·track_script·promotion grace·restart deadline). �
 
 ## 16. 운영자 의도
 
-의도는 상태가 아니라 별도 입력 두 축으로 저장한다(`state/ha/desired/<svc>.json`):
+의도는 상태가 아니라 별도 입력 두 축으로 저장한다. 서버별 정지(desired_runtime)는
+모듈 단위라 `run/ha/desired.json`, 노드 유지보수(ha_intent=EXCLUDE_NODE)는 노드×서비스
+단위라 `state/ha/maintenance/<svc>` 마커로 각각 둔다(둘은 관심사가 달라 분리).
 
-```json
-{ "desired_runtime": "STOPPED", "ha_intent": "HOLD_VIP",
-  "reason": "operator_stop", "operation_id": "op-...", "updated_at": 1784185205 }
+```text
+run/ha/desired.json          { "csp": "stopped" }        # 서버별 정지 = HOLD_VIP
+state/ha/maintenance/<svc>   존재 = EXCLUDE_NODE(유지보수, 영속)
+state/ha/planned_release/<svc>  존재 = PLANNED_FAILOVER 반납(계획 절체 §12)
 ```
 
-| `desired_runtime` | `ha_intent` | 의미 |
-|---|---|---|
-| RUNNING | NORMAL | 일반 운영 |
-| STOPPED | HOLD_VIP | 서비스만 중지, 자동 절체 금지 (ACTIVE 에서만 의미) |
-| STOPPED | EXCLUDE_NODE | 유지보수 — 승격 대상에서도 제외 |
-| RUNNING | PLANNED_FAILOVER | 대상 준비 확인 후 계획 절체 |
-| STOPPED | NORMAL | 모호 — API 에서 거부 |
+| desired_runtime | ha_intent | 실현 | 의미 |
+|---|---|---|---|
+| RUNNING | NORMAL | 마커 없음 | 일반 운영 |
+| STOPPED | HOLD_VIP | `desired.json[mod]=stopped` | 서비스만 중지, 자동 절체 금지 (ACTIVE 에서만 의미) |
+| — | EXCLUDE_NODE | `maintenance/<svc>` | 유지보수 — 승격 대상에서 제외 + 모듈 정지 |
+| RUNNING | PLANNED_FAILOVER | `planned_release/<svc>` | 대상 준비 확인 후 계획 절체 |
 
-역할별 처리: `ACTIVE + HOLD_VIP` → 프로세스 중지·재기동 안 함·`vrrp_eligible=true`·VIP
-유지(서비스 의도적 중단, 파생 표시 `INTENTIONALLY_DOWN`). `BACKUP + HOLD_VIP` →
-`vrrp_eligible=false`(정지된 노드 승격 방지) 또는 `EXCLUDE_NODE` 로 정규화. 즉
-INTENTIONALLY_DOWN 을 eligible=true 로 고정하지 않고 현재 역할까지 포함해 계산한다.
+역할별 처리:
+- `ACTIVE + HOLD_VIP` → 프로세스 중지·재기동 안 함·`vrrp_eligible=true`·VIP 유지(서비스
+  의도적 중단, 파생 표시 `INTENTIONALLY_DOWN`).
+- `EXCLUDE_NODE`(유지보수) → 역할 무관 `vrrp_eligible=false`. **이 노드는 승격 대상에서
+  제외** — 상대가 죽어도 이 노드로 절체되지 않는다(점검 중 노드로 서비스가 올라오는 것
+  방지, 다운 감수). 모듈도 정지.
+- `BACKUP + HOLD_VIP` → `EXCLUDE_NODE` 로 정규화(정지된 노드 승격 방지).
 
-콘솔 매핑: 서버별 stop = `desired_runtime=STOPPED, ha_intent=HOLD_VIP`(active 절체 안 함),
-일괄 중지 = 전 멤버 STOPPED + 비무장, 서버별/일괄 start = RUNNING, 유지보수 = EXCLUDE_NODE.
+즉 의도는 파생 상태 하나로 고정하지 않고 (desired_runtime, ha_intent, 현재 role)을 함께
+넣어 계산한다.
+
+콘솔 매핑: 서버별 stop = `STOPPED/HOLD_VIP`(active 절체 안 함), 일괄 중지 = 전 멤버 STOPPED
++ 비무장, 서버별/일괄 start = `RUNNING/NORMAL`, **유지보수(노드) = `EXCLUDE_NODE`**.
 
 ## 17. 콘솔 배치
 
 - **절체 조건(그룹 편집, AS)**: advert_int, health 타이밍(interval/fall/rise/timeout),
   승격 grace, 재기동 임계(restart_limit), track_interface, preempt. 모듈별 값은 여기 없음.
 - **패키지 설정(그룹 → 모듈별)**: 모듈 운영 명세(감시·hot/cold·relevant·health 프로파일·
-  safety) 편집 → `update_module_spec` push. 앱 설정(config)과 별 섹션.
+  safety 등급) 편집 → `update_module_spec` push. 앱 설정(config)과 별 섹션.
 - **패키지 제어(그룹)**: 멤버×모듈 매트릭스 + 일괄 시작/재시작/중지 + 수동 절체(계획
-  절체 오케스트레이션 진입). 개별 서버 버튼은 "이 노드만".
-- **상태 표시**: 미개시=비무장, `INTENTIONALLY_DOWN`, `FAILOVER_LATCHED`,
-  `MAINTENANCE`, PROMOTING 등 파생 상태 노출. active_agent 관측은 표시·계획절체용
-  (자동 절체 판정 근거 아님).
+  절체 오케스트레이션 진입) + **노드 유지보수 토글(EXCLUDE_NODE)**. 개별 서버 버튼은 "이 노드만".
+- **상태 표시**: 미개시=비무장, `INTENTIONALLY_DOWN`, `FAILOVER_LATCHED`, `MAINTENANCE`,
+  `PROMOTING` 등 파생 상태 노출. active_agent 관측은 표시·계획절체용(자동 절체 판정 근거 아님).
+- HA 모드 legacy/supervisor 토글은 **없다** — 단일 모델이므로.
 
-## 18. 구현 현황 · 이행
+## 18. 단일 모델 · 비상 밸브
 
-**기본은 supervisor(선언적 verdict 모델)다.** 배포 즉시 새 모델이 동작하도록 기본값을
-supervisor 로 두고, legacy 는 명시적 escape 로만 남긴다:
-- 노드 전체 강제 legacy: env `CIMS_HA_VERDICT_SOURCE=legacy`.
-- 그룹(서비스)별 opt-out: 그룹 `ha_mode=legacy` (콘솔 HA 모드 토글).
-- 그 외(env 미지정 + `ha_mode` 미지정/supervisor)는 전부 supervisor.
+**legacy 경로는 존재하지 않는다.** cims-health 는 항상 verdict reader, cims-notify 는 항상
+role writer, agent 는 HA 그룹이 있으면 항상 Supervisor(Health Checker + Evaluator +
+reconcile)를 구동한다. 모드 플래그(verdict_source/ha_mode/notify_mode)·shadow·서비스별
+컷오버·`flags.json`·구 cims-health 포트검사·구 cims-notify 직접 start/stop 은 전부
+제거한다. legacy watchdog(`supervise_tick`)은 **HA 그룹에 속하지 않은 standalone 모듈
+전용**으로만 남긴다(HA 관리 모듈은 Supervisor reconcile 이 소유).
 
-```yaml
-ha:
-  verdict_source: supervisor | legacy    # env 기본 supervisor, legacy 만 노드 전체 강제
-  ha_mode:        supervisor | legacy    # 그룹별. 기본 supervisor, legacy 는 opt-out
-```
+**개시 국면 선착(stagger)은 유지한다.** cold 모듈은 개시 시 양 노드의 승격 자격(preflight)이
+대칭이라, 두 노드를 동시에 arm 하면 우선순위 높은 노드(놀던 standby 여도)가 선착해 "운영자가
+start 누른 노드가 Active" 기대가 깨진다. 따라서 개시(아무도 VIP 미보유) 시 기준 멤버
+(prefer_first = 개별/서버별 start 누른 노드 > record running > 지정 마스터)에게 update_ha 를
+먼저 내리고 나머지는 `_STAGGER_DELAY_SEC` 지연시켜, 기준 멤버가 arm→VIP 선점→nopreempt
+유지로 Active 가 되게 한다. VIP 보유자가 이미 있으면 지연 없음(apply 멱등).
 
-안전 폴백: `run/ha/flags.json`(agent 기동 시 기록)이 없으면 cims-health/cims-notify 는
-legacy 로 동작한다 — verdict 생산자(Supervisor)가 없는데 verdict 를 읽어 헛절체하는 것을
-막는다. 구 그룹의 옛 기본값 `ha_mode=legacy` 는 최초 로드 시 supervisor 로 1회 승격
-(`_migrate_ha_mode_default`, `_ha_mode_v2` 마커로 재승격 방지 — 이후 운영자가 명시한
-legacy 는 유지).
+**유일한 escape 는 비상 밸브 `CIMS_HA_DISABLE`**(§9) 하나뿐이다 — legacy 로 되돌아가는
+이중 판정 엔진이 아니라, 판정을 얼려 현상 유지하는 운영용 kill-switch.
 
-구현 매핑(단계적 개발 순서로 진행했으나 최종 기본은 supervisor):
-
-이행 순서: (1) `run/ha`·`state/ha` 디렉토리 + 보수적 verdict 스켈레톤 →
-(2) desired 를 영속 경로로 migration(구 `run/ha/` 는 호환 전용) → (3) Supervisor shadow
-모드(신 verdict 계산·로그 비교, keepalived 미사용) → (4) cims-notify role_writer 전환 +
-Supervisor role reconcile → (5) cims-health → track_script verdict reader 축소 →
-(6) 서비스별 `verdict_source=supervisor` 전환(영향 적은 것부터: stateless hot → cold 포함
-→ 공유자원 사용) → (7) 계획 절체 v2 → (8) systemd watchdog.
-
-기존 자산 재사용: `service_intent`→`desired_runtime`/`ha_intent` 확장, `module_specs`→
-`failover_relevant`/`standby_mode`/`health_profile`/`safety`, `restart_limit`→Supervisor
-Recovery Policy, `desired.json`→영속 경로 migration, cims-health 판정 로직→Supervisor
-단계 이전, `keepalived.conf.tpl`→기존 notify 유지(cims-notify 내부만 role writer 로).
-
-`_STAGGER_DELAY_SEC` 는 verdict-driven 완전 전환 후 제거한다(priority + eligible 이
-선출을 결정하므로 중복). `prefer_first` 는 keepalived priority 입력으로만 남기고 프로세스/
-평가/기동 지연 용도는 제거한다.
+부트스트랩: verdict 가 아직 없으면 track_script 는 rc1(not eligible) — Supervisor 가 첫
+verdict 를 쓸 때까지 그 노드는 승격 대상이 아니다(fail-safe, §13). 즉 "verdict 없음 =
+자격 없음"이 유일한 규칙이고, legacy 포트검사로의 폴백은 없다.
 
 ## 19. 미구현 · 후속 과제
 
+- **failover 래치 영속화 + 안전등급별 자동 해제** — 현재 래치는 in-memory 이고 해제는
+  운영자 start/restart 단일 경로다(§13). 향후 `state/ha/latch/<svc>.json` 영속 + 안전등급
+  기반 자동 해제(stateless/read_only 는 연속 성공 창 후 `STANDBY_READY` 까지만 자동 복귀,
+  shared_writer/unknown 은 수동)로 확장.
 - shared_writer(특히 csc DB) fencing/leader-lease — 미도입. 확인 전 `safety.class=unknown`
   = 수동 래치 보수 처리.
 - CSP hash ring 의 `MarkUnhealthy` 미구현 — AA 장애 제외가 CSP `KeepAliveLoop`(3초×3회
   ≈9초)에만 의존. 본 HA 재설계와 별개 축의 CSP 과제.
-- hot 모듈 양쪽 동시 다운 시 flap — `CIMS-QOS-001`(ha_flap) 알람으로 노출.
+- 양 노드가 동시에 자격을 잃으면(같은 장애·양쪽 FAULT) VIP 공백 = 서비스 중단. "잘못된
+  노드가 Active" 보다 안전한 fail-safe 이며, 반복 시 `CIMS-QOS-001`(ha_flap) 알람으로 노출.
+  근본 회피는 비상 밸브(`CIMS_HA_DISABLE`)로 판정을 얼려 수동 수습.

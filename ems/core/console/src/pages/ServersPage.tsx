@@ -13,7 +13,7 @@ import { NetTuningPanel } from './ha/NetTuningPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
-import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
+import { agentStatusColor, depStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
 import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
 import HealthCheckModal from '../components/HealthCheckModal'
@@ -108,7 +108,7 @@ export default function ServersPage() {
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    const iv = setInterval(() => void load(), 10_000)
+    const iv = setInterval(() => void load(), 2_000)   // 실측 상태를 빠르게 반영 (heartbeat 주기와 동일)
     return () => clearInterval(iv)
   }, [load])
 
@@ -891,10 +891,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {/* HA 모드 컷오버 (AS 만) — legacy ↔ supervisor 서비스 단위 전환. */}
-        {group.mode === 'active_standby' && (
-          <HaModeToggle group={group} onReload={onReload} />
-        )}
         {/* 절체 조건 — 그룹 단위 설정. 자체 [▶ 적용] 으로 그 영역만 backend push. AS 만. */}
         {group.mode === 'active_standby' && (
           <div style={{ marginBottom: 20 }}>
@@ -1130,44 +1126,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
   )
 }
 
-// HA 모드 컷오버 토글 — legacy(keepalived 직접 판정) ↔ supervisor(선언적 verdict/
-// Supervisor 소유). 서비스(그룹) 단위 점진 전환. ha_service_model.md §18.
-function HaModeToggle({ group, onReload }: { group: HaGroup; onReload: () => Promise<void> | void }) {
-  const { show } = useToast()
-  const [busy, setBusy] = useState(false)
-  const mode = group.ha_mode === 'supervisor' ? 'supervisor' : 'legacy'
-  async function flip(next: 'legacy' | 'supervisor') {
-    if (next === mode || busy) return
-    if (next === 'supervisor' && !window.confirm(
-        `[${group.name}] 를 supervisor 모드로 전환합니다.\n` +
-        `절체 판정·복구를 노드 Supervisor(선언적 verdict)가 담당하게 됩니다. 계속할까요?`))
-      return
-    setBusy(true)
-    try {
-      await haGroupsApi.update(group.id, { ha_mode: next })
-      show(`HA 모드 → ${next}`, 'ok')
-      await onReload()
-    } catch (e) {
-      show(`전환 실패: ${e instanceof Error ? e.message : e}`, 'err')
-    } finally { setBusy(false) }
-  }
-  return (
-    <div style={{ marginBottom: 12, padding: '8px 12px', border: '1px solid #e0e0e0',
-                  borderRadius: 4, display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
-      <span style={{ fontWeight: 600 }}>HA 모드</span>
-      <span style={{ padding: '1px 8px', borderRadius: 3, fontSize: 11,
-                     background: mode === 'supervisor' ? '#e8f5e9' : '#eceff1',
-                     color: mode === 'supervisor' ? '#2e7d32' : '#546e7a' }}>
-        {mode === 'supervisor' ? '● supervisor (선언적 verdict)' : '○ legacy (keepalived 직접)'}
-      </span>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-        <button className="btn btn--sm" disabled={busy || mode === 'legacy'} onClick={() => flip('legacy')}>legacy</button>
-        <button className="btn btn--sm btn--primary" disabled={busy || mode === 'supervisor'} onClick={() => flip('supervisor')}>supervisor</button>
-      </div>
-    </div>
-  )
-}
-
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
 // preempt / track_interface / restart_limit. 모듈별 값(프로세스 감시·절체 모드)은
 // 패키지 설정의 모듈 운영 명세(ModuleSpecSection)로 이관됨.
@@ -1346,7 +1304,6 @@ function _seedSpecs(group: HaGroup, modules: string[]): Record<string, ModuleSpe
       ha: {
         failover_mode:     s?.ha?.failover_mode ?? MODULE_SPEC_DEFAULT.ha.failover_mode,
         failover_relevant: s?.ha?.failover_relevant ?? MODULE_SPEC_DEFAULT.ha.failover_relevant,
-        run_on_fault:      s?.ha?.run_on_fault ?? false,
       },
       safety: { class: s?.safety?.class ?? 'unknown',
                 latch_clear_mode: s?.safety?.latch_clear_mode },
@@ -1725,14 +1682,18 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
                 </td>
                 <td>
                   {deps.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>—</span> :
-                    deps.map(d => (
+                    deps.map(d => {
+                      // 실측 우선 — [패키지 제어] 탭과 같은 상태로 보이게(설치·제어 일치)
+                      const shown = depEffectiveStatus(d)
+                      return (
                       <span key={d.id} className="tag" style={{
-                        background: depStatusColor(d.status), color: '#fff',
+                        background: depStatusColor(shown), color: '#fff',
                         fontSize: 11, padding: '2px 8px', borderRadius: 3, marginRight: 6,
                       }}>
-                        {d.package_name} v{d.package_version} · {d.status}
+                        {d.package_name} v{d.package_version} · {shown}
                       </span>
-                    ))}
+                      )
+                    })}
                 </td>
               </tr>
             )
@@ -1827,7 +1788,10 @@ function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
   onRollback: (d: Deployment) => void
   onRemove: (d: Deployment) => void
 }) {
-  const sc = depStatusColor(d.status)
+  // 상태 배지·색은 실측 우선(depEffectiveStatus) — [패키지 제어] 탭과 동일 기준.
+  // 죽어 있으면 마지막 job 결과가 running 이어도 stopped 로 보인다(두 탭 일치).
+  const shown = depEffectiveStatus(d)
+  const sc = depStatusColor(shown)
   const online = agent.status === 'online'
   // pending = 생성만 됨 (파일 없음), stopped = 설치됐지만 실행 안됨
   const notInstalled = d.status === 'pending'
@@ -1851,7 +1815,7 @@ function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
       <td>
         <span className="tag" style={{
           background: sc, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-        }}>{d.status}</span>
+        }}>{shown}</span>
       </td>
       <td>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -1922,12 +1886,6 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
 // 실측 우선 유효 상태 — running/stopped 구간에서는 실측(live_state)이 정본.
 // 기록(status)은 운영자 지시 이력일 뿐, HA 절체(notify)가 로컬에서 모듈을 켜고
 // 끄면 현실과 어긋난다. pending/deploying/failed/removed 는 lifecycle 상태라 기록 유지.
-function depEffectiveStatus(d: Deployment): Deployment['status'] {
-  if (d.status !== 'running' && d.status !== 'stopped') return d.status
-  if (d.live_state === 'up') return 'running'
-  if (d.live_state === 'down') return 'stopped'
-  return d.status
-}
 
 // 모듈 상태 셀 — 실측(depEffectiveStatus) 단일 표시. running/stopped 는 실제
 // 프로세스 상태 그 자체다 (metric 주기상 최대 30초 지연만 존재).
@@ -2015,6 +1973,41 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
     }
   }
 
+  // 노드 유지보수(EXCLUDE_NODE) — 지정 멤버를 승격 대상에서 제외(on)/복귀(off).
+  async function doMaintenance(agentId: number, on: boolean) {
+    const nm = agentDisplayName(agents.find(a => a.id === agentId)?.name || `#${agentId}`)
+    if (!window.confirm(on
+        ? `[${nm}] 를 유지보수(EXCLUDE_NODE)로 전환합니다.\n이 노드는 승격 대상에서 제외되고 모듈이 정지됩니다. 상대 노드가 죽어도 이 노드로 절체되지 않습니다(다운 감수). 계속할까요?`
+        : `[${nm}] 유지보수를 해제합니다.\nrole 기반으로 모듈이 재기동되어 standby 로 재합류합니다. 계속할까요?`))
+      return
+    setBusy(`maint:${agentId}`)
+    try {
+      await haGroupsApi.maintenance(group.id, agentId, on)
+      show(on ? `${nm} 유지보수 진입 (승격 제외)` : `${nm} 유지보수 해제 (재합류)`, 'ok')
+      await onReload()
+    } catch (e) {
+      show(`유지보수 변경 실패: ${e instanceof Error ? e.message : e}`, 'err')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 멤버 서버 셀에 붙는 유지보수 토글 (AS 만).
+  const maintCtl = (agentId: number) => isAS ? (
+    <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
+      <button className="btn btn--sm" style={{ fontSize: 11, padding: '1px 6px' }}
+              disabled={!!busy} onClick={() => doMaintenance(agentId, true)}
+              title="이 노드를 승격 대상에서 제외(유지보수). 모듈 정지 + 이 노드로 절체 안 됨.">
+        🔧 점검
+      </button>
+      <button className="btn btn--sm" style={{ fontSize: 11, padding: '1px 6px' }}
+              disabled={!!busy} onClick={() => doMaintenance(agentId, false)}
+              title="유지보수 해제 — role 기반 재기동으로 standby 재합류.">
+        복귀
+      </button>
+    </div>
+  ) : null
+
   return (
     <div style={{ padding: 20, overflow: 'auto' }}>
       <h4 style={{ marginTop: 0 }}>멤버별 프로세스 제어 — {group.name}</h4>
@@ -2077,6 +2070,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
                 <td style={{ cursor: 'pointer' }} onClick={() => onSelectMember(m.agent_id)}
                     title="클릭 시 해당 서버 선택">
                   <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
+                  <span onClick={e => e.stopPropagation()}>{maintCtl(m.agent_id)}</span>
                 </td>
                 <td>
                   <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
@@ -2100,6 +2094,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
                     <td rowSpan={deps.length} style={{ cursor: 'pointer', verticalAlign: 'top' }}
                         onClick={() => onSelectMember(m.agent_id)} title="클릭 시 해당 서버 선택">
                       <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
+                      <span onClick={e => e.stopPropagation()}>{maintCtl(m.agent_id)}</span>
                     </td>
                     <td rowSpan={deps.length} style={{ verticalAlign: 'top' }}>
                       <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>

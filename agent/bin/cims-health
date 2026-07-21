@@ -1,37 +1,22 @@
 #!/usr/bin/env bash
-# agent/bin/cims-health — generic listen probe (keepalived vrrp_script 가 호출)
+# agent/bin/cims-health — keepalived vrrp_script track_script (verdict reader, 단일 모델)
 #
 # 사용법:
 #   cims-health <svc>
 #     <svc> = ha.json services.<svc> 에 등록된 slug (그룹명)
 #
-# 동작 (상태 인지 — cold-spare 정합):
-#   0) 이 노드가 해당 서비스의 VIP 를 보유하지 않으면 **승격 자격 검사** —
-#      cold standby 는 모듈이 정지 상태인 것이 정상이므로 실행 여부는 보지 않고,
-#      절체 시 기동할 모듈(health_module ∪ cold_modules ∪ tracked_modules)이
-#      **설치되어 있는지** (${cims_home}/modules/<mod>/current 존재) 만 검사한다.
-#        - 필수 모듈 미설치        → rc=1 (승격 자격 없음 — 빈 서버가 VIP 를
-#          인수해 ACTIVE 로 보이는 것을 차단)
-#        - 필수 모듈 정보가 없으면 → 설치 모듈이 하나라도 있으면 PASS, 전무하면 rc=1
-#   1) VIP 보유 노드: ha.json services.<svc>.{port, proto, bind_ip} lookup 후
-#      `ss -ln{t,u}` 로 binding 확인 (listen 중이면 PASS)
-#      — services.<svc>.health_module/health_config_key 가 렌더돼 있으면(csc 등
-#        설정 단일키 모듈) 검사 시점에 노드 로컬 배포 config.json
-#        (${cims_home}/modules/<mod>/current/<mod>/config.json) 의 그 키에서 포트를
-#        직접 읽는다 — 배포기록↔실파일 포트 드리프트가 나도 헬스는 모듈이 실제
-#        bind 하는 포트를 본다 (드리프트 노출은 config_out_of_sync 알람 몫).
-#        읽기 실패 시 ha.json port → 내장 default 순 fallback.
-#      — 포트를 어떤 경로로도 알 수 없으면 **하드 FAIL 하지 않는다**: 필수 모듈
-#        pgrep 검사로 대체하고, 그것도 없으면 PASS + 로그 (검사 불능 ≠ 장애 —
-#        포트 미상으로 FAULT→VIP반납→재승격 무한 flap 하던 구조 제거).
-#   2) tracked_modules 가 지정되면 `pgrep -x <mod>` 도 모두 PASS 해야 rc=0
-#   3) 승격 grace — cims-notify 가 MASTER 전이 시 기록한
-#      ${HA_LOG_DIR}/master_at_<svc> 이후 grace_sec (ha.json
-#      failover_options.health.grace_sec, 기본 30s) 동안은 검사 실패를 유예
-#      (cold 모듈 기동 시간 흡수 — 승격 직후 FAULT 로 되돌아가는 race 차단).
-#   실패 시 rc=1 → keepalived FAULT → VIP 이양 → 피어가 승격.
+# 동작 (ha_service_model.md §9 — verdict reader):
+#   track_script 는 판정하지 않는다. agent 의 Recovery Supervisor 가 계산해
+#   <cims_home>/run/ha/verdict/<svc>.json 에 쓴 verdict(vrrp_eligible)만 판독해 rc 0/1
+#   을 낸다. raw health 폴백(프로세스/포트/HTTP/DB 검사)은 없다 — 남의 상태를 넘겨짚지
+#   않는다(장애 감지·로컬 복구·좀비 판정은 전부 Supervisor 소관).
 #
-# 옛 check_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
+#   1) run/ha/disabled 마커 존재(비상 밸브 CIMS_HA_DISABLE) → 무조건 rc0(PASS).
+#      HA 판정을 얼려 현 VIP 위치를 고정한다(노드 사망=VRRP advert 소실만 절체).
+#   2) verdict 없음/boot_id 불일치 → rc1 (not eligible, fail-safe).
+#   3) stale: role=MASTER 는 짧은 grace(6s), 그 외(BACKUP/UNKNOWN) 무유예 → rc1.
+#   4) verdict.vrrp_eligible 그대로 반환.
+#   실패 시 rc=1 → keepalived FAULT → VIP 이양 → 피어가 승격.
 
 set -euo pipefail
 
@@ -47,31 +32,18 @@ fi
 SVC="${1:-}"
 [[ -z "$SVC" ]] && { echo "usage: cims-health <svc>" >&2; exit 2; }
 
-STATE_DIR="${HA_LOG_DIR:-/var/log/cims-ha}"
+# CIMS_HOME 은 ha.json 에서 해석 — root(keepalived) 가 agent 의 run/ha 를 읽을 절대경로.
+CIMS_HOME=$(python3 -c "import json;print(json.load(open('$HA_JSON')).get('cims_home','/opt/cims'))" 2>/dev/null || echo /opt/cims)
+RUN_HA="$CIMS_HOME/run/ha"
 
-# ── verdict reader 모드 (ha_service_model.md §9) ─────────────────────────────
-# run/ha/flags.json 의 verdict_source=supervisor 이면 track_script 는 Supervisor 가
-# 계산한 verdict 만 판독하고(raw health 검사 없음), 그 결과로 rc 0/1 을 낸다. 판정 로직은
-# Recovery Supervisor(agent)가 소유 — track_script 는 남의 상태를 넘겨짚지 않는다.
-_CIMS_HOME_Q=$(python3 -c "import json;print(json.load(open('$HA_JSON')).get('cims_home','/opt/cims'))" 2>/dev/null || echo /opt/cims)
-# supervisor 모드 판정 — 노드 flags.json(verdict_source) 또는 서비스별 ha.json ha_mode.
-_HA_MODE=$(python3 - "$_CIMS_HOME_Q/run/ha/flags.json" "$HA_JSON" "$SVC" <<'PY' 2>/dev/null || echo legacy
-import json, sys
-def rd(p):
-    try: return json.load(open(p))
-    except Exception: return {}
-fl = rd(sys.argv[1])
-# flags.json 없음 = 신 agent(verdict 생산자) 미기동 → 안전하게 legacy(포트검사).
-# verdict reader 는 Supervisor 가 verdict 를 쓰고 있을 때만(coherence).
-if not fl:
-    print("legacy"); sys.exit()
-node = fl.get("verdict_source", "supervisor")
-svc_mode = str(((rd(sys.argv[2]).get("services") or {}).get(sys.argv[3]) or {}).get("ha_mode", "supervisor")).lower()
-print("legacy" if (node == "legacy" or svc_mode == "legacy") else "supervisor")
-PY
-)
-if [[ "$_HA_MODE" == "supervisor" ]]; then
-    python3 - "$_CIMS_HOME_Q/run/ha" "$SVC" <<'PY'
+# 1) 비상 밸브 — run/ha/disabled 마커가 있으면 판정을 얼리고 무조건 PASS.
+if [[ -f "$RUN_HA/disabled" ]]; then
+    echo "cims-health: $SVC HA disabled(비상 밸브) — verdict 무시, PASS(현 VIP 고정)" >&2
+    exit 0
+fi
+
+# 2~4) verdict reader
+python3 - "$RUN_HA" "$SVC" <<'PY'
 import json, sys, time
 run_ha, svc = sys.argv[1], sys.argv[2]
 def rd(p):
@@ -103,316 +75,4 @@ sys.stderr.write(f"cims-health(verdict): {svc} eligible=false state={v.get('serv
                  f"reasons={v.get('reason_codes')}\n")
 sys.exit(1)
 PY
-    exit $?
-fi
-# ── 이하 legacy 모드 — cims-health 가 직접 생존/포트/카운터를 판정 ─────────────
-
-# ha.json 에서 port / proto / bind_ip / vips / tracked / 필수모듈 / grace / 재기동임계 lookup.
-# 출력 형식: PORT|PROTO|BIND_IP|VIPS|TRACKED|REQ|GRACE|HOME|RELEVANT|MAXFAILS|WINDOW
-IFS='|' read -r PORT PROTO BIND_IP VIPS TRACKED REQ GRACE CIMS_HOME RELEVANT MAXFAILS WINDOW < <(python3 - "$HA_JSON" "$SVC" <<'PY'
-import json, sys, os
-ha_json, svc = sys.argv[1], sys.argv[2]
-defaults = {"csc": (4421, "tcp", ""),
-            "csp": (5060, "udp", ""),
-            "psp": (5060, "udp", "")}
-port, proto, bind_ip = defaults.get(svc, (0, "udp", ""))
-vips, tracked, req, relevant = [], [], [], []
-grace, home = 30, "/opt/cims"
-max_fails, window = 3, 300
-if os.path.isfile(ha_json):
-    try:
-        cfg = json.load(open(ha_json))
-        home = cfg.get("cims_home") or home
-        s = (cfg.get("services") or {}).get(svc) or {}
-        port = s.get("port", port)
-        proto = s.get("proto", proto)
-        bind_ip = s.get("bind_ip", bind_ip)
-        vips = [str(v.get("ip")).strip() for v in (s.get("vips") or [])
-                if isinstance(v, dict) and v.get("ip")]
-        if s.get("vip"):
-            vips.append(str(s["vip"]).strip())
-        fo = s.get("failover_options") or {}
-        tracked = [str(m).strip() for m in (fo.get("tracked_modules") or []) if str(m).strip()]
-        try:
-            grace = int((fo.get("health") or {}).get("grace_sec", grace))
-        except (TypeError, ValueError):
-            pass
-        # 재기동 임계 (그룹 스코프) — service entry 우선, 없으면 failover_options fallback.
-        rl = s.get("restart_limit") if isinstance(s.get("restart_limit"), dict) else \
-             (fo.get("restart_limit") if isinstance(fo.get("restart_limit"), dict) else {})
-        try:
-            max_fails = int(rl.get("max_fails", max_fails)) or max_fails
-        except (TypeError, ValueError):
-            pass
-        try:
-            window = int(rl.get("window_sec", window)) or window
-        except (TypeError, ValueError):
-            pass
-        # 절체 관여 모듈 — 신 렌더의 relevant_modules. 부재 시 구 유도(호환):
-        # health_module ∪ cold_modules ∪ tracked.
-        relevant = [str(m).strip().lower() for m in (s.get("relevant_modules") or []) if str(m).strip()]
-        # 승격 자격/대체 검사 대상 모듈 — health_module ∪ cold_modules ∪ tracked.
-        mods = []
-        if s.get("health_module"):
-            mods.append(str(s["health_module"]).strip())
-        mods += [str(m).strip() for m in (s.get("cold_modules") or []) if str(m).strip()]
-        mods += tracked
-        for m in mods:
-            if m and m not in req:
-                req.append(m)
-        if not relevant:
-            relevant = [m.lower() for m in req]
-        # 진실 기반 포트 — 모듈이 실제 읽는 배포 config.json 의 키에서 유도.
-        # (OAM 이 수동 health.port 오버라이드 시 health_module 을 렌더하지 않음.)
-        mod, key = s.get("health_module"), s.get("health_config_key")
-        if mod and key:
-            try:
-                base = os.path.join(home, "modules", mod, "current")
-                for rel in (os.path.join(mod, "config.json"), "config.json"):
-                    p = os.path.join(base, rel)
-                    if not os.path.isfile(p):
-                        continue
-                    mc = json.load(open(p))
-                    v = mc.get(key)                      # flat dot-key (배포 표준)
-                    if v is None:
-                        cur = mc                         # nested fallback
-                        for part in key.split("."):
-                            cur = cur.get(part) if isinstance(cur, dict) else None
-                            if cur is None:
-                                break
-                        v = cur
-                    if v and 0 < int(v) < 65536:
-                        port = int(v)
-                    break
-            except Exception:
-                pass                                     # ha.json port 그대로
-    except Exception:
-        pass
-print(f"{port}|{proto}|{bind_ip}|{','.join(vips)}|{','.join(tracked)}|{','.join(req)}|{grace}|{home}|{','.join(relevant)}|{max_fails}|{window}")
-PY
-)
-
-# ── HA 노드 런타임 상태 (agent 가 <CIMS_HOME>/run/ha/ 에 기록 — ha_service_model.md §4.2) ──
-RUN_HA="${CIMS_HOME:-/opt/cims}/run/ha"
-OP_GRACE_SEC=30
-
-_desired_stopped() {  # <mod> — 서버별 stop 오버라이드면 rc=0
-    local m="$1" f="$RUN_HA/desired.json"
-    [[ -f "$f" ]] || return 1
-    python3 - "$f" "$m" <<'PY' 2>/dev/null
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    sys.exit(0 if str(d.get(sys.argv[2].lower())) == "stopped" else 1)
-except Exception:
-    sys.exit(1)
-PY
-}
-
-_op_grace_recent() {  # <mod> — 조작 유예 창(OP_GRACE_SEC) 이내면 rc=0
-    local m="$1" f="$RUN_HA/op_grace_${1,,}" at now
-    [[ -f "$f" ]] || return 1
-    at=$(stat -c %Y "$f" 2>/dev/null) || return 1
-    now=$(date +%s)
-    (( now - at < OP_GRACE_SEC ))
-}
-
-_fail_count() {  # <mod> — 재기동 연속 실패 카운터 (없으면 0)
-    local f="$RUN_HA/fail_${1,,}"
-    [[ -f "$f" ]] || { echo 0; return; }
-    awk '{print $1+0; exit}' "$f" 2>/dev/null || echo 0
-}
-
-_watchdog_enabled() {  # <mod> — service.json supervision.watchdog (부재 시 true) 면 rc=0
-    local f="${CIMS_HOME:-/opt/cims}/modules/${1,,}/service.json"
-    [[ -f "$f" ]] || return 0            # 명세 없음 = default on
-    # if 조건 컨텍스트로 실행해야 set -e 가 python 의 의도적 exit 1(watchdog=false)을
-    # 스크립트 종료로 오인하지 않는다. 파싱 실패는 python 이 exit 0(default on).
-    if python3 - "$f" <<'PY' 2>/dev/null
-import json, sys
-try:
-    d = json.load(open(sys.argv[1]))
-    sup = d.get("supervision") or {}
-    sys.exit(0 if sup.get("watchdog", True) else 1)
-except Exception:
-    sys.exit(0)
-PY
-    then return 0; else return 1; fi
-}
-
-# ── 0) VIP 보유 검사 ────────────────────────────────────────────────
-#    미보유(BACKUP/standby)면 실행 상태 대신 승격 자격(설치 여부)을 검사.
-#    (VIP 미정의 그룹은 판정 불가 → 종전대로 포트 검사로 진행.)
-HOLD=1
-if [[ -n "${VIPS:-}" ]]; then
-    LOCAL_ADDRS=$(ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)
-    HOLD=0
-    IFS=',' read -r -a VIPARR <<< "$VIPS"
-    for v in "${VIPARR[@]}"; do
-        if [[ -n "$v" ]] && grep -qxF "$v" <<< "$LOCAL_ADDRS"; then HOLD=1; break; fi
-    done
-fi
-
-# 설치 판정 — current 심볼릭(기동 이력) 또는 버전 디렉토리 존재.
-# current 는 _flip_current 가 start/restart 시에만 만들므로, 승격 전까지 한 번도
-# 기동하지 않는 cold standby 에는 없다 — current 만 보면 "MASTER 가 돼야 current 가
-# 생기는데 current 가 있어야 승격 자격" 부트스트랩 순환으로 영구 FAULT 가 된다.
-# 설치(버전 디렉토리)만 있으면 승격 자격 인정.
-_mod_installed() {  # <mod>
-    local root="$CIMS_HOME/modules/$1"
-    [[ -e "$root/current" ]] && return 0
-    compgen -G "$root/*/" >/dev/null 2>&1
-}
-
-if [[ $HOLD -eq 0 ]]; then
-    # standby — cold 모듈 정지는 정상. 절체 시 기동할 모듈이 설치돼 있는지만 검사.
-    # 단, 운영자가 이 노드에서 명시적으로 내린(desired=stopped) 절체관여 모듈이 있으면
-    # 승격 자격 없음 — 내려둔 노드로 절체가 서비스를 되살리는 것은 운영자 의도 위반.
-    if [[ -n "${RELEVANT:-}" ]]; then
-        IFS=',' read -r -a RELARR <<< "$RELEVANT"
-        for m in "${RELARR[@]}"; do
-            [[ -z "$m" ]] && continue
-            if _desired_stopped "$m"; then
-                echo "cims-health: $SVC standby — module '$m' 운영자 정지(desired) — 승격 자격 없음" >&2
-                exit 1
-            fi
-        done
-    fi
-    if [[ -n "${REQ:-}" ]]; then
-        IFS=',' read -r -a REQARR <<< "$REQ"
-        for m in "${REQARR[@]}"; do
-            [[ -z "$m" ]] && continue
-            if ! _mod_installed "$m"; then
-                echo "cims-health: $SVC standby — module '$m' not installed (승격 자격 없음)" >&2
-                exit 1
-            fi
-        done
-        exit 0
-    fi
-    # 필수 모듈 정보 없음 — 설치 모듈이 하나라도 있으면 PASS, 전무(빈 서버)면 FAIL.
-    if compgen -G "$CIMS_HOME/modules/*/" >/dev/null 2>&1; then
-        exit 0
-    fi
-    echo "cims-health: $SVC standby — no modules installed (승격 자격 없음)" >&2
-    exit 1
-fi
-
-# ── VIP 보유 노드 검사 ──────────────────────────────────────────────
-# 승격 grace — MASTER 전이 후 grace_sec 이내면 검사 실패를 유예 (cold 기동 흡수).
-_in_grace() {
-    [[ "${GRACE:-0}" -gt 0 ]] || return 1
-    local mf="$STATE_DIR/master_at_$SVC"
-    [[ -f "$mf" ]] || return 1
-    local at now
-    at=$(stat -c %Y "$mf" 2>/dev/null) || return 1
-    now=$(date +%s)
-    (( now - at < GRACE ))
-}
-
-_fail() {  # 검사 실패 — grace 이내면 유예 PASS, 아니면 rc=1
-    if _in_grace; then
-        echo "cims-health: $SVC grace 유예 — $*" >&2
-        exit 0
-    fi
-    echo "cims-health: $*" >&2
-    exit 1
-}
-
-# 서버별 정지 오버라이드 — 운영자가 이 노드에서 내린(desired=stopped) 절체관여 모듈이
-# 있으면 서비스는 의도적 정지 상태다. 검사 제외(PASS) — FAULT/절체를 유발하지 않는다
-# (운영자 조작 ≠ 장애). VIP 는 이 노드에 잔류, 서비스만 내려간 상태 (운영자 책임).
-if [[ -n "${RELEVANT:-}" ]]; then
-    IFS=',' read -r -a RELARR <<< "$RELEVANT"
-    for m in "${RELARR[@]}"; do
-        [[ -z "$m" ]] && continue
-        if _desired_stopped "$m"; then
-            echo "cims-health: $SVC active — '$m' 운영자 정지(desired) — 검사 제외 PASS (절체 안 함)" >&2
-            exit 0
-        fi
-    done
-fi
-
-# 포트/모듈 다운 판정 — 로컬 복구(watchdog)가 소진됐을 때만 FAULT(절체).
-#  · 승격 grace / 조작 유예 이내 → PASS (기동·restart 순단 흡수)
-#  · 절체관여 모듈이 전부 살아있는데 포트만 죽음(좀비) → 즉시 FAIL (watchdog 무력)
-#  · 프로세스 다운 & 재기동 연속실패 < max_fails → PASS (watchdog 재기동 진행 중)
-#  · 프로세스 다운 & 재기동 소진(>= max_fails) → FAIL (이 노드 포기 → 절체)
-#  · RELEVANT 정보 없으면 종전 동작(_fail: grace 외 즉시 FAIL)
-_port_fail() {
-    _in_grace && { echo "cims-health: $SVC grace 유예 — $*" >&2; exit 0; }
-    if [[ -n "${RELEVANT:-}" ]]; then
-        IFS=',' read -r -a RELARR <<< "$RELEVANT"
-        for m in "${RELARR[@]}"; do
-            [[ -z "$m" ]] && continue
-            _op_grace_recent "$m" && { echo "cims-health: $SVC op-grace 유예 — $*" >&2; exit 0; }
-        done
-        local all_alive=1 maxc=0 c down_unmanaged=0
-        for m in "${RELARR[@]}"; do
-            [[ -z "$m" ]] && continue
-            if pgrep -x "$m" >/dev/null 2>&1; then
-                c=$(_fail_count "$m"); (( c > maxc )) && maxc=$c
-            else
-                all_alive=0
-                # 다운 모듈에 watchdog 이 꺼져 있으면 로컬 복구 주체가 없다 — 유예해도
-                # 재기동이 오지 않으므로 즉시 절체 대상.
-                _watchdog_enabled "$m" || down_unmanaged=1
-                c=$(_fail_count "$m"); (( c > maxc )) && maxc=$c
-            fi
-        done
-        if [[ $all_alive -eq 1 ]]; then
-            echo "cims-health: $* (프로세스 생존·포트 무응답=좀비 → 절체)" >&2; exit 1
-        fi
-        if [[ $down_unmanaged -eq 1 ]]; then
-            echo "cims-health: $* (다운 모듈 watchdog 비활성=로컬 복구 없음 → 절체)" >&2; exit 1
-        fi
-        if (( maxc >= MAXFAILS )); then
-            echo "cims-health: $* (재기동 ${maxc}/${MAXFAILS} 소진 → 절체)" >&2; exit 1
-        fi
-        echo "cims-health: $* (재기동 진행 중 ${maxc}/${MAXFAILS} — 유예 PASS)" >&2; exit 0
-    fi
-    echo "cims-health: $*" >&2; exit 1
-}
-
-if [[ -z "${PORT:-}" || "$PORT" == "0" ]]; then
-    # 포트 미상 — 하드 FAIL 금지 (검사 불능 ≠ 장애). 필수 모듈 pgrep 로 대체 검사,
-    # 그것도 없으면 PASS + 로그 (ha.json 렌더 보완은 OAM/알람 몫).
-    if [[ -n "${REQ:-}" ]]; then
-        IFS=',' read -r -a REQARR <<< "$REQ"
-        for m in "${REQARR[@]}"; do
-            [[ -z "$m" ]] && continue
-            if ! pgrep -x "$m" >/dev/null 2>&1; then
-                _port_fail "$SVC port unknown — fallback module '$m' not running"
-            fi
-        done
-        exit 0
-    fi
-    echo "cims-health: $SVC port unknown — 검사 대상 없음, PASS (ha.json 렌더 확인 필요)" >&2
-    exit 0
-fi
-
-case "$PROTO" in
-    tcp) FLAG="-lnt" ;;
-    udp|*) FLAG="-lnu" ;;
-esac
-
-# 1) port listen 검사
-if [[ -n "$BIND_IP" ]]; then
-    ss $FLAG "src ${BIND_IP}:${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}' \
-        || _port_fail "$SVC port ${BIND_IP}:${PORT}/${PROTO} not listening"
-else
-    ss $FLAG "sport = :${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}' \
-        || _port_fail "$SVC port :${PORT}/${PROTO} not listening"
-fi
-
-# 2) tracked_modules pgrep 검사 (지정된 경우만)
-if [[ -n "${TRACKED:-}" ]]; then
-    IFS=',' read -r -a MODS <<< "$TRACKED"
-    for m in "${MODS[@]}"; do
-        [[ -z "$m" ]] && continue
-        if ! pgrep -x "$m" >/dev/null 2>&1; then
-            _port_fail "$SVC tracked module '$m' not running"
-        fi
-    done
-fi
-
-exit 0
+exit $?

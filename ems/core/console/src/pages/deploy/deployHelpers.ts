@@ -24,6 +24,19 @@ export function depStatusColor(s: Deployment['status']) {
   }[s] || '#bbb'
 }
 
+// 실측(live_state) 최우선 유효 상태 — 실제로 떠 있을 때만 running, 안 떠 있으면 절대
+// running 으로 보이지 않는다. status(job 결과=의도)는 실측이 없을 때만(오프라인·최초 보고
+// 전) 노출. reconcile 이 마스터에서 켠 cold 모듈은 job 없이도 실측(up)으로 running 이 되고,
+// 백업은 실측 down 이라 stopped. deploying/pending/failed(진행/실패)는 실측 up 이 아닐 때
+// 그대로 보여 "명령 수행 중"을 알린다.
+export function depEffectiveStatus(d: Deployment): Deployment['status'] {
+  if (d.live_state === 'up') return 'running'
+  if (d.status === 'deploying' || d.status === 'pending' ||
+      d.status === 'failed' || d.status === 'removed') return d.status
+  if (d.live_state === 'down') return 'stopped'
+  return d.status
+}
+
 export function fmtRelTime(iso: string | null) {
   if (!iso) return '—'
   const d = new Date(iso)

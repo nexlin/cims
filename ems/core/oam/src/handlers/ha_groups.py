@@ -167,7 +167,7 @@ def _normalize_failover_options(raw) -> dict:
 _SAFETY_CLASSES = ('stateless', 'read_only', 'shared_writer', 'unknown')
 _MODULE_SPEC_DEFAULT = {
     'supervision': {'watchdog': True},
-    'ha':          {'failover_mode': 'cold', 'failover_relevant': True, 'run_on_fault': False},
+    'ha':          {'failover_mode': 'cold', 'failover_relevant': True},
     'health':      {},   # {port,proto,config_key} 오버라이드 — 미지정 시 배포 유도
     'safety':      {'class': 'unknown', 'latch_clear_mode': 'manual'},
 }
@@ -205,7 +205,6 @@ def _normalize_module_spec(raw) -> dict:
         'ha': {
             'failover_mode':     'hot' if ha.get('failover_mode') == 'hot' else 'cold',
             'failover_relevant': bool(ha.get('failover_relevant', True)),
-            'run_on_fault':      bool(ha.get('run_on_fault', False)),
         },
         'health': health,
         'safety': {'class': sclass, 'latch_clear_mode': lcm},
@@ -254,16 +253,15 @@ def _migrate_service_intent(group: dict, config: dict) -> bool:
     return True
 
 
-def _migrate_ha_mode_default(group: dict) -> bool:
-    """기본값 legacy→supervisor 전환 마이그레이션. 구 코드가 default 로 저장한 ha_mode=
-    'legacy' 는 운영자의 의도적 선택이 아니라 옛 기본값이므로 supervisor 로 1회 승격한다.
-    _ha_mode_v2 마커로 재승격 방지 — 마커 이후 운영자가 명시한 legacy 는 그대로 유지."""
-    if group.get('_ha_mode_v2'):
-        return False
-    group['_ha_mode_v2'] = True
-    if str(group.get('ha_mode') or '').lower() == 'legacy':
-        group['ha_mode'] = 'supervisor'
-    return True
+def _migrate_drop_ha_mode(group: dict) -> bool:
+    """단일 모델 전환 — 구 record 의 ha_mode/_ha_mode_v2(legacy↔supervisor 모드) 잔재 제거.
+    모드 개념 자체가 사라졌으므로 필드가 있으면 1회 제거한다. 변경 시 True."""
+    changed = False
+    for k in ('ha_mode', '_ha_mode_v2'):
+        if k in group:
+            group.pop(k, None)
+            changed = True
+    return changed
 
 
 def _ensure_group_migrated(group: dict, config: dict) -> bool:
@@ -274,7 +272,7 @@ def _ensure_group_migrated(group: dict, config: dict) -> bool:
         changed = True
     if _migrate_module_specs(group):
         changed = True
-    if _migrate_ha_mode_default(group):
+    if _migrate_drop_ha_mode(group):
         changed = True
     return changed
 
@@ -539,24 +537,17 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     # relevant_modules = 실패가 절체 사유가 되는 모듈 (cims-health 가 재기동 임계 판정).
     cold_modules: list = []
     relevant_modules: list = []
-    hot_fault_modules: list = []          # FAULT 강등에도 유지할 hot 모듈 (run_on_fault)
     if group.get('mode') == 'active_standby':
         cold_modules = [m for m in daemon_mods
                         if _module_spec(group, m)['ha']['failover_mode'] != 'hot']
         relevant_modules = [m for m in daemon_mods
                             if _module_spec(group, m)['ha']['failover_relevant']]
-        hot_fault_modules = [m for m in daemon_mods
-                             if _module_spec(group, m)['ha']['failover_mode'] == 'hot'
-                             and _module_spec(group, m)['ha']['run_on_fault']]
 
     # running 의도 daemon 모듈이 없고 헬스포트도 없으면 미개시/빈 서버 — vrrp_instance
     # 를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵 + keepalived 정지 유지).
     # 이후 서비스 의도 변경(일괄/서버별 start)이 재렌더를 태워 자동 무장/해제된다.
     ha_enabled = bool(h_port or daemon_mods)
     restart_limit = failover_options.get('restart_limit') or {}
-    # per-service 컷오버 — 그룹 ha_mode(legacy|supervisor). agent/cims-notify/cims-health 가
-    # 이 값으로 서비스별 legacy↔supervisor 를 판정(노드 env 는 전체 강제 override).
-    ha_mode = 'legacy' if str(group.get('ha_mode') or 'supervisor').lower() == 'legacy' else 'supervisor'
     # 모듈 안전 등급 — 자동 래치 해제 가능 여부(shared_writer/unknown=manual). 콘솔/래치 판정용.
     safety_map = {m: _module_spec(group, m)['safety'] for m in daemon_mods}
 
@@ -603,9 +594,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             if cold_modules: entry['cold_modules'] = cold_modules
             if relevant_modules: entry['relevant_modules'] = relevant_modules
             if restart_limit: entry['restart_limit'] = restart_limit
-            if hot_fault_modules: entry['hot_fault_modules'] = hot_fault_modules
             if safety_map: entry['module_safety'] = safety_map
-            entry['ha_mode'] = ha_mode
             services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
@@ -625,9 +614,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         if cold_modules: entry['cold_modules'] = cold_modules
         if relevant_modules: entry['relevant_modules'] = relevant_modules
         if restart_limit: entry['restart_limit'] = restart_limit
-        if hot_fault_modules: entry['hot_fault_modules'] = hot_fault_modules
         if safety_map: entry['module_safety'] = safety_map
-        entry['ha_mode'] = ha_mode
         services[group['name']] = entry
 
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
@@ -667,9 +654,9 @@ def _agents_with_started_modules(members: list, config: dict) -> set:
         return set()
 
 
-# 개시 국면에서 나머지 멤버 update_ha 를 미루는 시간 — 선행 멤버의 job 회수
-# (heartbeat 정상 2s 주기지만 OAM 불통 직후엔 backoff 로 최대 60s 벌어질 수 있음)
-# + apply + MASTER 승격(~4s)을 worst case 로 덮고도 여유가 남는 값.
+# 개시 국면에서 나머지 멤버 update_ha 를 미루는 시간 — 선행 멤버가 arm→VIP 선점→MASTER
+# 승격을 마치기까지의 worst case(job 회수 + apply + 승격 ~수초)를 덮는 값. 이 창 동안
+# 피어는 미무장이라 초기 개시 중 단일 장애점이지만, 개시 직후 1회뿐이라 수용한다.
 _STAGGER_DELAY_SEC = 75
 
 
@@ -721,13 +708,15 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
         renders.append((m['agent_id'],
                         _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings, config)))
 
-    # 선행 멤버 결정 — start 된 멤버 우선, 없으면 지정 마스터(priority 최대).
-    # 전원 start 상태면 순서가 무의미하므로 지연 없음.
-    # supervisor 모드 그룹은 stagger 은퇴 — 선출은 priority + verdict(eligible)이 결정하고,
-    # 승격 grace 가 콜드 기동 창을 흡수하므로 개시 국면 선착 방지 지연이 불필요하다.
+    # 개시 국면 선착 방지 — AS 그룹이 무장 렌더되는데 아직 아무도 VIP 를 보유하지
+    # 않았다면(최초 개시·전면 재기동), **기준 멤버에게 먼저** update_ha 를 내리고 나머지는
+    # not_before 로 지연시킨다. 동시에 뿌리면 양쪽 keepalived 가 함께 콜드스타트해 우선순위
+    # 높은 노드(놀던 standby 여도)가 선착하는데, 기준 멤버 먼저 arm → VIP 선점 → nopreempt
+    # 로 유지되어 "운영자가 start 누른 노드가 Active" 가 보장된다. 기준 멤버 =
+    # prefer_first(호출부 명시 — 서버별/개별 start 시 그 노드) > record running 멤버 >
+    # 지정 마스터. VIP 보유자가 이미 있으면(운영 중 재렌더) 지연 없음(apply 멱등).
     stagger_first: set = set()
-    _supervisor = str(group.get('ha_mode') or 'legacy').lower() == 'supervisor'
-    if not _supervisor and group.get('mode') == 'active_standby' and len(renders) >= 2:
+    if group.get('mode') == 'active_standby' and len(renders) >= 2:
         armed = any(((hj.get('services') or {}).get(group.get('name')) or {}).get('enabled')
                     for _, hj in renders)
         if armed:
@@ -752,8 +741,8 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
         not_before = (datetime.now() + timedelta(seconds=_STAGGER_DELAY_SEC)) \
             .isoformat(timespec='seconds')
         logger.log_info(
-            f"[ha-group] group#{group_id} 개시 국면 — start 멤버 {sorted(stagger_first)} 선행, "
-            f"나머지 update_ha {_STAGGER_DELAY_SEC}s 지연 (선거 선점 방지)")
+            f"[ha-group] group#{group_id} 개시 국면 — 선행 멤버 {sorted(stagger_first)} 먼저, "
+            f"나머지 update_ha {_STAGGER_DELAY_SEC}s 지연 (선착 노드 Active 보장)")
 
     enqueued = 0
     for aid, ha_json in renders:
@@ -934,6 +923,10 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         if sub == 'failover' and method == 'POST':
             return await _failover_group(gid, handler_args.body, config)
 
+        # 노드 유지보수(EXCLUDE_NODE) 토글 (AS 전용) — admin.
+        if sub == 'maintenance' and method == 'POST':
+            return await _maintenance_group(gid, handler_args.body, config)
+
         if sub == 'collections':
             if not member:
                 return HandlerResult(status=400, body={'error': 'collection name required'})
@@ -1006,7 +999,6 @@ def _serialize_group(g: dict, config: dict) -> dict:
     out.setdefault('vip_bindings', [])
     out['service_intent'] = dict(out.get('service_intent') or {})
     out['module_specs'] = dict(out.get('module_specs') or {})
-    out['ha_mode'] = 'legacy' if str(out.get('ha_mode') or 'supervisor').lower() == 'legacy' else 'supervisor'
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
     out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
     # 실측 ACTIVE (R4) — heartbeat interfaces[] 의 VIP 보유 관측. 정적 role 과 별개로
@@ -1107,8 +1099,6 @@ async def _create_group(body, config):
         'note': note,
         'vip_bindings': vip_bindings or [],
         'failover_options': failover_options,
-        # per-service HA 모드 — legacy(기본) | supervisor. 서비스별 컷오버 스위치.
-        'ha_mode': 'legacy' if str(body.get('ha_mode') or '').lower() == 'legacy' else 'supervisor',
         # 신규 그룹은 미개시(빈 의도) — 서비스 시작 시 무장. 모듈 명세는 default.
         'service_intent': _normalize_service_intent(body.get('service_intent')),
         'module_specs': {
@@ -1141,8 +1131,6 @@ async def _update_group(gid: int, body, config):
     for k in ('name', 'vip', 'auth_pass', 'note'):
         if k in body:
             existing[k] = body[k]
-    if 'ha_mode' in body:
-        existing['ha_mode'] = 'legacy' if str(body.get('ha_mode') or '').lower() == 'legacy' else 'supervisor'
     if 'vip_mask' in body:
         existing['vip_mask'] = int(body['vip_mask'])
     # auth_pass — active_standby 만 1~8자 required, 그 외 mode 는 (빈값 포함) 8자 이하 OK.
@@ -1307,12 +1295,33 @@ async def _control_group(gid: int, body, config):
         base = _compute_master_aid(g.get('members') or [])
         prefer = {base} if base is not None else None
         n_ha = await asyncio.to_thread(_enqueue_update_ha_for_members, gid, config, prefer)
+        # cold 모듈(AS): **지정 마스터에게만** start job 을 보낸다 — 마스터는 deploying→running
+        # 표시·desired 해제·실제 기동을 한다. 백업엔 start 대신 홀드 해제(ha_clear_holds)만
+        # 보내 dual-active 를 막고 백업의 stale desired/latch 를 정리한다(향후 절체 대비).
+        # hot(AS)·AA 모듈은 양쪽 상시라 모두 start. 마스터 사망 시엔 절체로 백업(신 마스터)
+        # reconcile 이 기동.
+        from handlers.agents import _job_create as _jc
+        is_as = g.get('mode') == 'active_standby'
         n_job = 0
         for d in deps:
+            mod = (d.get('process_name') or '').lower().strip()
+            is_cold = is_as and _module_spec(g, mod)['ha']['failover_mode'] != 'hot'
+            if is_cold and d.get('agent_id') != base:
+                continue          # cold on 백업 — start 안 보냄(아래에서 홀드만 해제)
             await asyncio.to_thread(_queue_lifecycle_job, config, d, 'start')
             n_job += 1
+        # 백업들의 홀드 정리 (cold 서비스만, 멤버 중 마스터 아닌 노드)
+        n_clr = 0
+        if is_as and any(_module_spec(g, m)['ha']['failover_mode'] != 'hot' for m in daemon_mods):
+            for m in (g.get('members') or []):
+                aid = m.get('agent_id')
+                if aid is None or aid == base:
+                    continue
+                await asyncio.to_thread(_jc, config, aid, 'ha_clear_holds', {'service': g.get('name')})
+                n_clr += 1
         logger.log_info(f"[ha-group] group#{gid} 일괄 시작 — 의도 running {daemon_mods}, "
-                        f"update_ha {n_ha}, start job {n_job}")
+                        f"update_ha {n_ha}, start job {n_job}(cold 은 마스터#{base}만), "
+                        f"백업 clear_holds {n_clr}")
         return HandlerResult(status=202, body={'action': 'start', 'group_id': gid,
                                                'modules': daemon_mods, 'jobs': n_job})
 
@@ -1350,6 +1359,36 @@ async def _control_group(gid: int, body, config):
                     f"(active#{active_aid} 15s 지연)")
     return HandlerResult(status=202, body={'action': 'restart', 'group_id': gid,
                                            'modules': daemon_mods, 'jobs': n_job})
+
+
+async def _maintenance_group(gid: int, body, config):
+    """노드 유지보수(EXCLUDE_NODE) 토글 — body = {"agent_id": int, "on": bool}.
+
+    지정 멤버 노드를 이 그룹 서비스의 승격 대상에서 제외(on)/복귀(off)시킨다. agent 가
+    state/ha/maintenance/<svc> 마커로 반영 → Evaluator eligible=false(MAINTENANCE) +
+    reconcile 모듈 정지. off → 마커 제거 → role 기반 자동 재합류. 상세: ha_service_model.md §16."""
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if g.get('mode') != 'active_standby':
+        return HandlerResult(status=409, body={'error': 'not_active_standby',
+            'hint': '유지보수(EXCLUDE_NODE)는 Active/Standby 그룹만'})
+    try:
+        aid = int(body.get('agent_id'))
+    except (TypeError, ValueError):
+        return HandlerResult(status=400, body={'error': 'agent_id (int) required'})
+    on = bool(body.get('on'))
+    if not any(m.get('agent_id') == aid for m in (g.get('members') or [])):
+        return HandlerResult(status=404, body={'error': 'agent not a group member'})
+    from handlers.agents import _job_create
+    svc = g.get('name')
+    _job_create(config, aid, 'ha_maintenance', {'service': svc, 'on': on})
+    logger.log_info(f"[ha-group] group#{gid} 유지보수 {'set' if on else 'clear'} — "
+                    f"agent#{aid} svc={svc} (EXCLUDE_NODE)")
+    return HandlerResult(status=202, body={'group_id': gid, 'agent_id': aid,
+                                           'service': svc, 'maintenance': on})
 
 
 # ── 계획 절체(스위치오버) v2 — OAM operation 상태머신 (ha_service_model.md §12) ──
@@ -1422,6 +1461,14 @@ async def _failover_group(gid: int, body, config):
     file_store.save(_op_dir(config), oid, op)
     logger.log_info(f"[ha-op] group#{gid} 계획 절체 operation#{oid} 생성 "
                     f"— source#{active_aid} → target#{target_aid}")
+    # Fix3 — 타겟의 절체 홀드(desired=stopped·latch·planned_release) 선해제. 타겟에 이전
+    # stop/홀드가 고착돼 있으면 승격돼도 reconcile 이 모듈을 못 켜므로(이슈5), 절체 시작
+    # 시점에 타겟에서 지운다. (RELEASE 로 VIP 가 넘어가기 전에 도착하도록 먼저 큐잉.)
+    try:
+        from handlers.agents import _job_create
+        _job_create(config, target_aid, 'ha_clear_holds', {'service': g.get('name')})
+    except Exception as e:
+        logger.log_warning(f"[ha-op] operation#{oid} target#{target_aid} clear_holds 큐잉 실패: {e}")
     # 즉시 첫 스텝 구동(202 응답 전 release job 큐잉 — 이후는 sweep 이 이어감).
     try:
         _advance_ha_operation(config, op)
@@ -1468,6 +1515,15 @@ def _advance_ha_operation(config, op: dict) -> bool:
         op['release_at'] = now.isoformat(timespec='seconds')
         return True
 
+    def _clear_source_once():
+        """source planned_release 해제 (멱등). **종결 전이 시점에 인라인**으로 호출한다 —
+        '다음 호출이 처리'에 의존하면 안 된다. COMMITTED/FAILED 는 terminal 이라 sweep 이
+        skip(_advance 재호출 안 함) → 그 방식이면 COMMIT 절체가 source 마커를 영영 안 지워
+        source 노드가 영구 부적격이 된다(역방향 절체 불가)."""
+        if not op.get('clear_sent'):
+            _op_planned_release(config, src, svc, False)
+            op['clear_sent'] = True
+
     if state == 'WAIT_VIP_MOVE':
         if active == tgt:
             op['state'] = 'VERIFYING'
@@ -1475,32 +1531,33 @@ def _advance_ha_operation(config, op: dict) -> bool:
             op['note'] = 'target VIP 인수 — 안정 검증 중'
             return True
         if _age('release_at') > _OP_RELEASE_TIMEOUT:
-            # target 이 VIP 를 못 잡음 → 롤백(source planned_release 해제 → source 재인수)
-            op['state'] = 'ROLLING_BACK'
+            # target 이 VIP 를 못 잡음 → 롤백. source planned_release 해제 → source 재인수.
+            _clear_source_once()
+            op['state'] = 'ROLLED_BACK'
             op['error'] = 'target_not_promoted'
             return True
         return False
 
     if state == 'VERIFYING':
         if active != tgt:
-            # 검증 중 target 이 VIP 를 놓침 → 실패(수동 개입). source 해제는 종결 처리.
+            # 검증 중 target 이 VIP 를 놓침 → 실패. source 해제(재인수 or nopreempt 유지).
+            _clear_source_once()
             op['state'] = 'FAILED'
             op['error'] = 'target_unstable'
             return True
         if _age('verify_since') >= _OP_VERIFY_SEC:
+            # switchover 성공 — **COMMIT 도 반드시 source 해제**(롤백과 대칭). 이전엔 여기서
+            # 안 지워 source 가 영구 planned_release 로 남던 버그.
+            _clear_source_once()
             op['state'] = 'COMMITTED'
             op['note'] = 'switchover 완료'
             return True
         return False
 
-    if state in ('COMMITTED', 'ROLLING_BACK', 'FAILED'):
-        # 종결 처리 — source planned_release 해제(1회). ROLLING_BACK 은 해제로 source 가
-        # eligible 복귀(VIP 가 비어 있으면 재인수, target 이 잡았으면 nopreempt 로 유지).
-        if not op.get('clear_sent'):
-            _op_planned_release(config, src, svc, False)
-            op['clear_sent'] = True
-        if state == 'ROLLING_BACK':
-            op['state'] = 'ROLLED_BACK'
+    # 구 record(ROLLING_BACK) resume 안전망 — 신 코드는 전이 시점에 이미 해제한다.
+    if state == 'ROLLING_BACK':
+        _clear_source_once()
+        op['state'] = 'ROLLED_BACK'
         return True
     return False
 

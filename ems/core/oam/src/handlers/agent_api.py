@@ -645,6 +645,9 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                 m = _re.search(r"at\s+(\S+?)\s+\(", result_stdout)
                 if m: new_install_path = m.group(1)
             new_status = "running" if jt in ("start", "restart", "upgrade") else "stopped"
+            # status 는 의도(job 결과)이고, 콘솔 표시의 정본은 실측(live_state)이다
+            # (depEffectiveStatus 가 live up→running/down→stopped 로 항상 정정). 그래서
+            # 여기서 낙관적 running 을 찍어도 실제 안 떠 있으면 화면엔 stopped 로 보인다.
             patches = {'status': new_status, 'last_job_id': job_id}
             from datetime import datetime as _dt
             now_iso = _dt.now().isoformat(timespec='seconds')
