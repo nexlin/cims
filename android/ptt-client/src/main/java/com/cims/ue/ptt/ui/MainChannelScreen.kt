@@ -241,7 +241,7 @@ private fun AudioRouteSheet(st: PttUiState, onDismiss: () -> Unit) {
                 if (h.wireless) "무선" else "유선"))
         }
         add(RouteChoice("스피커폰", R.drawable.ic_volume_on, SipController.AUDIO_ROUTE_SPEAKER, -1, null))
-        add(RouteChoice("수화기", R.drawable.ic_volume_off, SipController.AUDIO_ROUTE_EARPIECE, -1, null))
+        add(RouteChoice("수화기", R.drawable.ic_earpiece, SipController.AUDIO_ROUTE_EARPIECE, -1, null))
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
         .pointerInput(Unit) { detectTapGestures { onDismiss() } }) {
@@ -360,7 +360,7 @@ private fun VideoPanel(st: PttUiState, onRouteSelect: () -> Unit, modifier: Modi
             val (routeIcon, routeDesc) = when (st.route) {
                 PttController.AUDIO_ROUTE_HEADSET -> R.drawable.ic_headset to "이어폰"
                 SipController.AUDIO_ROUTE_SPEAKER -> R.drawable.ic_volume_on to "스피커폰"
-                else -> R.drawable.ic_volume_off to "수화기"
+                else -> R.drawable.ic_earpiece to "수화기"
             }
             OverlayToggle(
                 icon = routeIcon, desc = routeDesc,

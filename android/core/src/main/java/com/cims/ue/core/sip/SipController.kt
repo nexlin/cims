@@ -265,6 +265,20 @@ class SipController(private val config: SipAccountConfig) {
     fun setCallRxLevel(callId: Int, level: Float) = onCtl { calls[callId]?.setRxLevel(level) }
 
     /**
+     * 장치단(conference bridge slot0) 오디오 gain — 무전(PTT) 체감 음량 보강용.
+     * [spk]=bridge→스피커 출력 gain, [mic]=마이크→bridge 입력 gain (1.0=원음).
+     * 시스템 스트림 음량·라우팅과 무관하게 디지털 레벨 자체가 낮은 단말(캡처 게인 약함)을
+     * 보정한다. 통화별 RxLevel(슬라이더)과 곱으로 적용되므로 과도값은 클리핑 유발 — 2.0 권장.
+     */
+    fun setDeviceAudioBoost(spk: Float, mic: Float) = onCtl {
+        runCatching {
+            val adm = PjLib.ep.audDevManager()
+            adm.playbackDevMedia.adjustTxLevel(spk)
+            adm.captureDevMedia.adjustRxLevel(mic)
+        }
+    }
+
+    /**
      * 임의 SIP 요청 송신 (affiliation 은 method="PUBLISH"). body/헤더는 호출자(ptt-client)가 규격대로 구성.
      * @param targetUri Request-URI (예: 그룹 `sip:group@domain`)
      */

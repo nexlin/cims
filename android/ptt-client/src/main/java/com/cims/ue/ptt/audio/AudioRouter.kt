@@ -30,9 +30,35 @@ class AudioRouter(context: Context) {
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = refresh()
     }
 
+    /** 현재 통화(in-call) 모드 여부 — 중복 setMode/볼륨 강제 방지. */
+    private var inCall = false
+
     init {
         runCatching { am?.registerAudioDeviceCallback(cb, null) }
         refresh()
+    }
+
+    /**
+     * PTT 통화 진입/이탈 시 오디오 모드 전환. **VoIP 라우팅·음량의 전제**:
+     *  - `MODE_IN_COMMUNICATION` 이라야 스피커폰/수화기(setOutputRoute→setSpeakerphoneOn)와
+     *    이어폰(setCommunicationDevice/BT SCO) 라우팅이 실제 통화 경로에 적용된다(MODE_NORMAL 이면 무시).
+     *  - 통화 경로가 `STREAM_VOICE_CALL` 로 잡히며, 무전(PTT)은 수신을 크게 들어야 하므로 진입 시
+     *    voice-call 스트림 음량을 최대로 올린다(그룹별 미세조절은 conference RxLevel 슬라이더가 담당).
+     * 통화 종료 시 `MODE_NORMAL` 복원.
+     */
+    fun setInCall(on: Boolean) {
+        val a = am ?: return
+        if (on == inCall) return
+        inCall = on
+        runCatching {
+            if (on) {
+                a.mode = AudioManager.MODE_IN_COMMUNICATION
+                val max = a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                a.setStreamVolume(AudioManager.STREAM_VOICE_CALL, max, 0)
+            } else {
+                a.mode = AudioManager.MODE_NORMAL
+            }
+        }
     }
 
     private fun isHeadset(d: AudioDeviceInfo): Boolean = when (d.type) {
@@ -87,6 +113,29 @@ class AudioRouter(context: Context) {
         }
     }
 
+    /**
+     * 스피커폰/수화기 강제 — pjsua `setOutputRoute` 는 오디오 백엔드에 따라 미지원(무시)될 수
+     * 있어(단말별 편차 실측: 스피커폰 설정이 수화기로만 출력) AudioManager 로도 직접 적용한다
+     * (이중 적용 무해). `MODE_IN_COMMUNICATION`([setInCall]) 전제.
+     */
+    fun setSpeakerphone(on: Boolean) {
+        val a = am ?: return
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 31) {
+                if (on) {
+                    val spk = a.availableCommunicationDevices
+                        .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (spk != null) a.setCommunicationDevice(spk)
+                    else @Suppress("DEPRECATION") { a.isSpeakerphoneOn = true }
+                } else {
+                    a.clearCommunicationDevice()   // 통신모드 기본(수화기)으로 복귀
+                }
+            } else @Suppress("DEPRECATION") {
+                a.isSpeakerphoneOn = on
+            }
+        }
+    }
+
     fun close() {
         runCatching { am?.unregisterAudioDeviceCallback(cb) }
     }
@@ -105,4 +154,22 @@ class AudioRoutePrefs(context: Context) {
     var headsetId: Int
         get() = prefs.getInt("headset_id", -1)
         set(v) = prefs.edit().putInt("headset_id", v).apply()
+
+    /** 무전 스피커 출력 게인(장치단, ×1.0~×3.0) — 설정 화면에서 조절, 통화 진입 시 적용. */
+    var spkGain: Float
+        get() = prefs.getFloat("spk_gain", DEFAULT_SPK_GAIN)
+        set(v) = prefs.edit().putFloat("spk_gain", v).apply()
+
+    /** 무전 마이크 송신 게인(장치단, ×1.0~×3.0). */
+    var micGain: Float
+        get() = prefs.getFloat("mic_gain", DEFAULT_MIC_GAIN)
+        set(v) = prefs.edit().putFloat("mic_gain", v).apply()
+
+    companion object {
+        /** 게인 기본값 — 실측상 ×2 는 과대, ×1.5 가 무전 체감 적정 출발점. */
+        const val DEFAULT_SPK_GAIN = 1.5f
+        const val DEFAULT_MIC_GAIN = 1.5f
+        const val GAIN_MIN = 1f
+        const val GAIN_MAX = 3f
+    }
 }

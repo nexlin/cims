@@ -247,6 +247,7 @@ class PttService : Service() {
         val rp = com.cims.ue.ptt.audio.AudioRoutePrefs(this)
         c.routePrefs = rp
         c.setAudioRoute(rp.route, rp.headsetId)     // 저장된 라우팅 복원(기본=스피커폰)
+        c.setAudioGain(rp.spkGain, rp.micGain)      // 저장된 무전 게인 복원(기본=×1.5)
         observeHeadsets(c)
         observe(c)
         c.register()

@@ -94,6 +94,14 @@ fun SettingsScreen(
             ToggleRow("전체 듣기", "끄면 주채널만 수신", all) {
                 st.ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
             }
+            Divider()
+            GainRow("스피커 게인", "무전 수신 음량 보강 (통화 중 즉시 반영)", st.spkGain) {
+                st.ctl?.setAudioGain(it, st.micGain)
+            }
+            Divider()
+            GainRow("마이크 게인", "무전 송신 음량 보강 (상대가 듣는 크기)", st.micGain) {
+                st.ctl?.setAudioGain(st.spkGain, it)
+            }
         }
 
         // ── 채널 설정: 하드웨어 버튼 ──
@@ -155,6 +163,28 @@ private fun ToggleRow(title: String, subtitle: String, on: Boolean, onToggle: ()
             Box(Modifier.padding(horizontal = 3.dp).size(22.dp).clip(CircleShape)
                 .background(if (on) Ct.OnMint else Ct.TextFaint))
         }
+    }
+}
+
+/** 설정 행 — 게인 슬라이더(×1.0~×3.0, 0.1 단위). */
+@Composable
+private fun GainRow(title: String, subtitle: String, value: Float, onChange: (Float) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, color = Ct.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+            Text("×%.1f".format(value), color = Ct.Mint, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        androidx.compose.material3.Slider(
+            value = value,
+            onValueChange = { onChange((it * 10).toInt() / 10f) },   // 0.1 단위 스냅
+            valueRange = com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MIN..com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MAX,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = Ct.Mint, activeTrackColor = Ct.Mint, inactiveTrackColor = Ct.GrayDim),
+            modifier = Modifier.fillMaxWidth().height(30.dp),
+        )
     }
 }
 

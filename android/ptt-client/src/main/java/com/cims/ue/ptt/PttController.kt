@@ -177,6 +177,14 @@ class PttController(
     /** 이어폰 라우팅일 때 선택 장치 id ([com.cims.ue.ptt.audio.AudioRouter.Headset.id]). */
     val headsetId: StateFlow<Int> = _headsetId.asStateFlow()
 
+    private val _spkGain = MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_SPK_GAIN)
+    /** 무전 스피커 출력 게인(장치단 ×1.0~×3.0) — 설정 화면 슬라이더. */
+    val spkGain: StateFlow<Float> = _spkGain.asStateFlow()
+
+    private val _micGain = MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_MIC_GAIN)
+    /** 무전 마이크 송신 게인(장치단 ×1.0~×3.0). */
+    val micGain: StateFlow<Float> = _micGain.asStateFlow()
+
     // ── 주채널 파생 상태 (발언자 카드·PTT 버튼용) ──
 
     private val _floorState = MutableStateFlow(FloorState.IDLE)
@@ -228,7 +236,8 @@ class PttController(
             }
         }
 
-        // 학습된 CMP floor 목적지(호별) → 해당 세션 FloorClient 연결 + Ack 1회(NAT latch 유도)
+        // 학습된 CMP floor 목적지(호별) → 해당 세션 FloorClient 연결 + 즉시 Ack 1회
+        //   (이후 주기 Ack keepalive 는 FloorClient 가 자체 수행 — NAT 매핑·latch 유지)
         scope.launch {
             sip.floorRemote.collect { rem ->
                 rem?.let { (callId, ip, port) ->
@@ -247,6 +256,8 @@ class PttController(
                     is CallState.Outgoing -> bindCall(bareId(st.remote), st.id)
                     is CallState.Active -> {
                         bindCall(bareId(st.remote), st.id, active = true)
+                        audioRouter?.setInCall(true)                // VoIP 오디오 모드 — 라우팅·음량 전제
+                        sip.setDeviceAudioBoost(_spkGain.value, _micGain.value) // 무전 체감 음량 보강
                         applyAudioRoute()                           // 통화별 라우팅 재적용
                         applyListenPolicy()
                     }
@@ -292,6 +303,11 @@ class PttController(
             // 주채널이 사라지면 남은 첫 세션을 주채널로 승격
             if (s.role == ChannelRole.PRIMARY) sessionMap.values.firstOrNull()?.role = ChannelRole.PRIMARY
             s.groupId
+        }
+        // 활성 통화가 모두 끝나면 VoIP 오디오 모드 해제(MODE_NORMAL 복원) + 장치 gain 원복
+        if (synchronized(lock) { sessionMap.values.none { it.active } }) {
+            audioRouter?.setInCall(false)
+            sip.setDeviceAudioBoost(1f, 1f)
         }
         _status.value = "[$gid] 그룹콜 종료"
         emit(PttEventKind.LEAVE, gid)
@@ -376,6 +392,16 @@ class PttController(
         applyAudioRoute()
     }
 
+    /** 무전 장치 게인(스피커 출력/마이크 송신, ×1.0~×3.0) — 영속 + 통화 중이면 즉시 적용. */
+    fun setAudioGain(spk: Float, mic: Float) {
+        val s = spk.coerceIn(com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MIN, com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MAX)
+        val m = mic.coerceIn(com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MIN, com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MAX)
+        _spkGain.value = s
+        _micGain.value = m
+        routePrefs?.let { it.spkGain = s; it.micGain = m }
+        if (synchronized(lock) { sessionMap.values.any { it.active } }) sip.setDeviceAudioBoost(s, m)
+    }
+
     /** 현재 라우팅 적용/재적용 — 통화 성립(pjsua2 스트림 개방) 시에도 호출(라우팅 리셋 대비). */
     private fun applyAudioRoute() {
         if (_audioRoute.value == AUDIO_ROUTE_HEADSET) {
@@ -384,6 +410,8 @@ class PttController(
         } else {
             audioRouter?.clear()
             sip.setAudioRoute(_audioRoute.value)
+            // pjsua setOutputRoute 미지원 백엔드 대비 — AudioManager 직접 적용 병행
+            audioRouter?.setSpeakerphone(_audioRoute.value == SipController.AUDIO_ROUTE_SPEAKER)
         }
     }
 
@@ -1050,6 +1078,7 @@ class PttController(
 
         /** 오디오 라우팅: 이어폰(유선/BT) — [SipController.AUDIO_ROUTE_DEFAULT]/EARPIECE/SPEAKER(0~2) 확장. */
         const val AUDIO_ROUTE_HEADSET = 3
+
 
         /** MCData ICSI (TS 24.282) — MSRP INVITE Accept-Contact·PR4 수신 광고 공용. */
         const val MCDATA_ICSI = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"

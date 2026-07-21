@@ -1,7 +1,7 @@
 #!/bin/bash
 # M1.0-2/3/4: pjproject 2.16 clone → config_site.h(경로 C) → configure-android → make → SWIG
 # 전제: ~/.m1env (m1_provision.sh 산출)
-set -e
+set -e -o pipefail   # pipefail: `make | tail` 파이프가 make 실패를 가리지 않도록
 source ~/.m1env
 
 echo "=== [2-1] pjproject 2.16 clone ==="
@@ -45,6 +45,10 @@ cat > pjlib/include/pj/config_site.h <<'EOF'
 /* 5) M4 전 보안전송 off (UDP only) */
 #define PJMEDIA_HAS_SRTP          0
 #define PJSIP_HAS_TLS_TRANSPORT   0
+
+/* 6) NAT: RTP keepalive(empty RTP) — 청취 전용(무송신) 구간에도 주기 송신해
+      하향 NAT 매핑·CMP latch 유지 (ue_nat_traversal.md §7.1). 주기=PJMEDIA_STREAM_KA_INTERVAL(기본 5s) */
+#define PJMEDIA_STREAM_ENABLE_KA  1
 EOF
 sha256sum pjlib/include/pj/config_site.h
 
@@ -112,6 +116,115 @@ elif anchor in src:
     print("  patched: BIT_RATE cap 500kbps + CBR")
 else:
     raise SystemExit("  ERROR: BIT_RATE anchor not found (pjproject layout changed?)")
+PYEOF
+
+echo "=== [2-6] pjsua2 StreamInfo::fromPj NULL codec-param 크래시 패치 ==="
+# call.cpp StreamInfo::fromPj 가 stream_info 의 param(오디오)/codec_param(비디오)을 무가드
+# 역참조한다. pjsua 자체 주석(pjsua_media.c)이 "param can be NULL if the stream is
+# rejected or disabled" 라고 명시 — SDP 협상 결과에 따라 NULL 이면 on_stream_precreate
+# JNI 업콜에서 SIGSEGV(협상 PT 가 로컬 기본 PT 와 다른 조합 등). NULL 이면 복사 생략
+# (pjsua2 기본값 유지, 스트림 생성부는 원래 NULL param 폴백 있음). 멱등.
+python3 - <<'PYEOF'
+p = "pjsip/src/pjsua2/call.cpp"
+src = open(p).read()
+a_aud = "        audCodecParam.fromPj(*info.info.aud.param);"
+f_aud = ("        if (info.info.aud.param)\n"
+         "            audCodecParam.fromPj(*info.info.aud.param);")
+a_vid = "        vidCodecParam.fromPj(*info.info.vid.codec_param);"
+f_vid = ("        if (info.info.vid.codec_param)\n"
+         "            vidCodecParam.fromPj(*info.info.vid.codec_param);")
+changed = False
+if f_aud in src:
+    print("  aud: already patched (skip)")
+elif a_aud in src:
+    src = src.replace(a_aud, f_aud, 1); changed = True
+    print("  patched: StreamInfo::fromPj aud param NULL guard")
+else:
+    raise SystemExit("  ERROR: aud param anchor not found (pjproject layout changed?)")
+if f_vid in src:
+    print("  vid: already patched (skip)")
+elif a_vid in src:
+    src = src.replace(a_vid, f_vid, 1); changed = True
+    print("  patched: StreamInfo::fromPj vid codec_param NULL guard")
+else:
+    raise SystemExit("  ERROR: vid codec_param anchor not found (pjproject layout changed?)")
+if changed:
+    open(p, "w").write(src)
+PYEOF
+
+echo "=== [2-7] stream_info.c si->param zero-init 패치 ==="
+# get_audio_codec_info_param: si->param 을 ALLOC(비초기화)한 뒤 get_default_param 실패여도
+# dir==NONE 이면 성공 반환하는 경로가 있어 param 이 쓰레기값으로 남을 수 있다 → ZALLOC. 멱등.
+python3 - <<'PYEOF'
+p = "pjmedia/src/pjmedia/stream_info.c"
+src = open(p).read()
+anchor = "si->param = PJ_POOL_ALLOC_T(pool, pjmedia_codec_param);"
+fixed  = "si->param = PJ_POOL_ZALLOC_T(pool, pjmedia_codec_param);"
+if fixed in src:
+    print("  already patched (skip)")
+elif anchor in src:
+    open(p, "w").write(src.replace(anchor, fixed, 1))
+    print("  patched: si->param ALLOC -> ZALLOC")
+else:
+    raise SystemExit("  ERROR: si->param alloc anchor not found (pjproject layout changed?)")
+PYEOF
+
+echo "=== [2-8] pjsua_txt 비-RTP m=text 슬롯 스트림 생성 스킵 패치 ==="
+# 앱이 pjsua 의 m=text 슬롯을 m=application(UDP MCPTT, floor)으로 in-place 교체하면
+# pjmedia_txt_stream_info_from_sdp 는 비 RTP transport 라 stream info 를 비운 채(!active)
+# 성공 반환하는데, pjsua_txt_channel_update 게이트는 포트!=0 만 봐서 빈 info 로
+# on_stream_precreate(SIGABRT: AF=0 주소 print)+스트림 생성까지 진행한다.
+# 협상 로컬 m= 라인이 RTP 기반일 때만 text 채널을 만들도록 게이트 강화. 멱등.
+python3 - <<'PYEOF'
+p = "pjsip/src/pjsua-lib/pjsua_txt.c"
+src = open(p).read()
+anchor = ("    /* Check if no media is active */\n"
+          "    if (local_sdp->media[strm_idx]->desc.port != 0) {")
+fixed  = ("    /* Check if no media is active.\n"
+          "     * CIMS: RTP 기반으로 협상된 text 스트림만 진행 — 비 RTP application m= 라인\n"
+          "     * (floor 슬롯 재사용)은 stream info 가 비어 있어(!active 조기성공) 그대로 진행 시\n"
+          "     * on_stream_precreate 에서 AF=0 주소 print abort / 빈 info 스트림 생성이 된다.\n"
+          "     */\n"
+          "    if (local_sdp->media[strm_idx]->desc.port != 0 &&\n"
+          "        PJMEDIA_TP_PROTO_HAS_FLAG(si->proto, PJMEDIA_TP_PROTO_RTP_AVP)) {")
+if fixed in src:
+    print("  already patched (skip)")
+elif anchor in src:
+    open(p, "w").write(src.replace(anchor, fixed, 1))
+    print("  patched: txt channel gate += RTP_AVP proto check")
+else:
+    raise SystemExit("  ERROR: txt gate anchor not found (pjproject layout changed?)")
+PYEOF
+
+echo "=== [2-9] pjsua2 StreamInfo::fromPj sockaddr print AF 가드 패치 ==="
+# fromPj 가 rem_addr/rem_rtcp 를 무가드 pj_sockaddr_print — 주소 미설정(sa_family=0,
+# 협상 실패/비 RTP 슬롯)이면 pj_sockaddr_get_addr assert 로 SIGABRT. AF 확인 헬퍼로 치환. 멱등.
+python3 - <<'PYEOF'
+import re
+p = "pjsip/src/pjsua2/call.cpp"
+src = open(p).read()
+helper = (
+"static void cims_print_sockaddr_safe(const pj_sockaddr *a, char *buf, unsigned len)\n"
+"{\n"
+"    buf[0] = '\\0';\n"
+"    if (a->addr.sa_family == PJ_AF_INET || a->addr.sa_family == PJ_AF_INET6)\n"
+"        pj_sockaddr_print(a, buf, len, 3);\n"
+"}\n\n")
+if "cims_print_sockaddr_safe" in src:
+    print("  already patched (skip)")
+else:
+    anchor = "void StreamInfo::fromPj(const pjsua_stream_info &info)"
+    if anchor not in src:
+        raise SystemExit("  ERROR: fromPj anchor not found")
+    src = src.replace(anchor, helper + anchor, 1)
+    src, n = re.subn(
+        r"pj_sockaddr_print\((&info\.info\.(?:aud|vid|txt)\.rem_(?:addr|rtcp)), straddr, sizeof\(straddr\), 3\);",
+        r"cims_print_sockaddr_safe(\1, straddr, sizeof(straddr));",
+        src)
+    if n < 6:
+        raise SystemExit("  ERROR: expected >=6 sockaddr_print sites, got %d" % n)
+    open(p, "w").write(src)
+    print("  patched: fromPj sockaddr print guard x%d" % n)
 PYEOF
 
 echo "=== [3] configure-android + make (arm64-v8a) ==="

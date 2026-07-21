@@ -105,7 +105,7 @@ scp nex-ubuntu:'~/pjproject/pjsip-apps/src/swig/java/android/pjsua2/src/main/jav
 | NDK | **28.2.13676358** (r28c) — arm64-v8a, `--use-ndk-cflags`, APP_PLATFORM=28 |
 | SWIG | **4.1.0** (4.4.0 와 4.1.0 동시 추출 시 4.1.0 사용 — 2.16 호환 안전) |
 | JDK(빌드 호스트) | 17(네이티브/SWIG), 21(gradle 데몬) |
-| `config_site.h` sha256 | `de61f562955ef4d5456c9e03be8754b96e3b4f7999cfb4159484a1bab00a9de7` (경로 C 확정본) |
+| `config_site.h` sha256 | `86687d02d0aeda3901467f1feb9e46d6d5bdf60d1fa043b1ced4dd46c994ed3c` (경로 C + RTP keepalive `PJMEDIA_STREAM_ENABLE_KA=1`) |
 | 산출물 | `libpjsua2.so`(arm64, Android 28) + `libc++_shared.so` + SWIG Java 306파일 → `core/src/pjsua2/` |
 
 ## 진행 스냅샷

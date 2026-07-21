@@ -67,23 +67,36 @@ class CimsCall : Call {
 
     /**
      * SDP 생성/협상 훅 (설계서 §5.1). PTT 그룹콜에서:
-     *  - 송신 SDP(offer/answer)에 `m=application` floor 라인 **주입**([SipController.injectApplicationSdp]).
+     *  - 송신 SDP(offer/answer)에 `m=application` floor 라인 **주입**.
      *  - 수신 SDP 의 `m=application` 포트 **파싱** → CMP floor 목적지 학습(RTP+1 고정 금지).
+     *
+     * ⚠️ 주입은 **append 금지, 기존 섹션 교체**가 원칙: pjsua 는 provisioning 한 미디어 수
+     * (`med_prov_cnt` = aud+vid+txt, 기본 txt_cnt=1 로 m=text 슬롯이 항상 있음)와 로컬 SDP 의
+     * m= 라인 수가 어긋나면 `pjsua_media_channel_update` 에서 assert/SIGSEGV 로 **네이티브 크래시**한다.
+     * 그래서 pjsua 가 만든 `m=text`(offer) 또는 `m=application`(answer mirror/재협상) 섹션을
+     * floor 섹션으로 **in-place 교체**해 media_count 를 불변으로 유지한다(m=message 도 동일).
      */
     override fun onCallSdpCreated(prm: OnCallSdpCreatedParam) {
         runCatching {
             pendingAppSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp
-                if (!whole.contains("m=application")) sdp.wholeSdp = appendMediaSection(whole, extra)
+                sdp.wholeSdp = when {
+                    whole.contains("m=application") -> replaceMediaSection(whole, "m=application", extra)
+                    whole.contains("m=text") -> replaceMediaSection(whole, "m=text", extra)
+                    else -> appendMediaSection(whole, extra)
+                }
             }
             pendingMsrpSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp
-                // UAC 오퍼 = 섹션 추가. UAS 답 = pjsua 가 미지원 m=message 를 포트 0 으로 답하므로
-                // 그 섹션을 우리 것으로 교체(오퍼/재협상에서 이미 주입된 경우도 최신으로 갱신).
-                sdp.wholeSdp = if (!whole.contains("m=message")) appendMediaSection(whole, extra)
-                else replaceMessageSection(whole, extra)
+                // UAS 답 = pjsua 가 미지원 m=message 를 포트 0 으로 답하므로 그 섹션을 교체.
+                // UAC 오퍼 = m=text 슬롯 교체(append 는 med_prov_cnt 초과 → 네이티브 크래시).
+                sdp.wholeSdp = when {
+                    whole.contains("m=message") -> replaceMediaSection(whole, "m=message", extra)
+                    whole.contains("m=text") -> replaceMediaSection(whole, "m=text", extra)
+                    else -> appendMediaSection(whole, extra)
+                }
             }
             if (!msrpMode) prm.remSdp?.wholeSdp?.let { rem ->
                 parseApplication(rem)?.let { (ip, port) -> owner.onRemoteFloorLearned(id, ip, port) }
@@ -95,10 +108,11 @@ class CimsCall : Call {
     private fun appendMediaSection(whole: String, extra: String): String =
         whole.trimEnd('\r', '\n') + "\r\n" + withConnLine(whole, extra) + "\r\n"
 
-    /** [whole] 의 기존 `m=message` 섹션(다음 m= 전까지)을 [extra] 로 교체 — UAS answer 패치. */
-    private fun replaceMessageSection(whole: String, extra: String): String {
+    /** [whole] 의 기존 [prefix](예: "m=text") 미디어 섹션(다음 m= 전까지)을 [extra] 로 교체.
+     *  media_count 불변 — pjsua med_prov_cnt 정합 유지(주입 원칙, 클래스 KDoc 참조). */
+    private fun replaceMediaSection(whole: String, prefix: String, extra: String): String {
         val lines = whole.trimEnd('\r', '\n').split("\r\n", "\n").toMutableList()
-        val start = lines.indexOfFirst { it.trim().startsWith("m=message") }
+        val start = lines.indexOfFirst { it.trim().startsWith(prefix) }
         if (start < 0) return appendMediaSection(whole, extra)
         var end = start + 1
         while (end < lines.size && !lines[end].trim().startsWith("m=")) end++
@@ -274,7 +288,7 @@ class CimsCall : Call {
 
     /** 마이크 송신 토글. PTT: GRANT→true(발화), RELEASE/REVOKE→false. */
     fun setMic(on: Boolean) {
-        val aud = audioMedia() ?: return
+        val aud = audioMedia() ?: run { Log.w(TAG, "setMic($on) skipped — no active audio media"); return }
         val cap = PjLib.ep.audDevManager().captureDevMedia
         if (on) cap.startTransmit(aud) else cap.stopTransmit(aud)
     }

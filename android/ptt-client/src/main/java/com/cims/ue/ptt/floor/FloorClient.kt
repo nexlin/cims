@@ -56,12 +56,25 @@ class FloorClient(
 
     // 송신 전용 스레드 — pttDown/Up 은 UI(main) 스레드에서 호출되는데 main 에서의
     // socket.send 는 NetworkOnMainThreadException 으로 즉시 실패한다.
-    private val tx = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "floor-tx") }
+    private val tx = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r -> Thread(r, "floor-tx") }
+    private var ackTask: java.util.concurrent.ScheduledFuture<*>? = null
 
-    /** SDP 에서 학습한 CMP floor 목적지 설정(송신 가능해짐). */
+    /** SDP 에서 학습한 CMP floor 목적지 설정(송신 가능해짐) + Ack keepalive 시작. */
     fun connectRemote(host: String, port: Int) {
         remoteAddr = InetAddress.getByName(host)
         remotePort = port
+        startAckKeepalive()
+    }
+
+    // Ack 주기 송신 — 청취 전용 멤버는 자발적 상향이 없어 이 Ack 가 floor 소켓의 유일한
+    //   상향 트래픽이다. NAT 유입 매핑과 서버 latch 를 유지한다 (ue_nat_traversal.md §7.1,
+    //   요건 ≤20s). 발언 중에도 유지 — 상향 RTP 는 별도(audio) 소켓이라 floor 매핑과 무관.
+    @Synchronized private fun startAckKeepalive() {
+        if (ackTask != null) return
+        ackTask = tx.scheduleWithFixedDelay(
+            { runCatching { sendAck() } },
+            ACK_PERIOD_SEC, ACK_PERIOD_SEC, java.util.concurrent.TimeUnit.SECONDS,
+        )
     }
 
     val hasRemote: Boolean get() = remoteAddr != null
@@ -82,7 +95,8 @@ class FloorClient(
 
     fun requestQueuePosition() = send(FloorCodec.queuePositionRequest(ssrc, userId))
 
-    /** Floor Ack(User ID 포함) — 참여 직후 1회 송신해 NAT 유입 매핑을 열고 서버 latch 를 유도. */
+    /** Floor Ack(User ID 포함) — 참여 직후 1회 + 주기([ACK_PERIOD_SEC]) 송신으로
+     *  NAT 유입 매핑을 열고 서버 latch 를 유지한다. 서버 상태를 바꾸지 않아 부작용 없음. */
     fun sendAck() = send(FloorCodec.ack(ssrc, userId))
 
     private fun send(pkt: ByteArray) {
@@ -147,5 +161,7 @@ class FloorClient(
 
     private companion object {
         const val TAG = "FloorClient"
+        /** floor Ack keepalive 주기(초) — NAT UDP 매핑 유지 요건 ≤20s 에 여유를 둔 값. */
+        const val ACK_PERIOD_SEC = 15L
     }
 }
