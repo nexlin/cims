@@ -40,8 +40,9 @@ page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**. `App.tsx` 의
   `addToFirstFree`/`removeAt` · `flowToGrid`(legacy→grid migrate) · 배치모드 판별(`isGridLayout`). 결정적·idempotent.
 - `widgets/GridRenderer.tsx` — 뷰 렌더. **2 모드 하위호환**: placement 에 `x/y` 있으면 12칸×N행 CSS grid
   (`grid-column`/`grid-row`, `grid-auto-rows` = 셀 높이), 없으면 legacy flow(합>12 wrap). 위젯은 자체 chrome 렌더.
-- `widgets/EditableLayout.tsx` + `widgets/GridEditor.tsx` — admin `[✎ 편집]` → **드래그 이동·우하단 핸들
-  리사이즈**(포인터 이벤트, 마우스+터치)·위젯 추가/제거. 커밋 시 gridLayout 이 충돌/compaction 계산.
+- `widgets/EditableLayout.tsx` + `widgets/GridEditor.tsx` — admin `[✎ 편집]` → **헤더 드래그 이동·8방향 핸들
+  리사이즈**(귀퉁이=가로·세로, 상/하=세로, 좌/우=가로; 위·왼쪽은 위치 x/y 도 이동. 포인터 이벤트, 마우스+터치)·
+  위젯 추가/제거. 커밋 시 gridLayout(`moveItem`/`applyBox`) 이 충돌/compaction 계산.
   편집 진입 시 legacy(flow) 레이아웃은 grid 로 1회 migrate. → `PUT /console/layouts/<id>` 영속(없으면 seed).
   편집(드래그/리사이즈)은 데스크톱 전용(`useIsDesktop`), 좁은 화면은 단일열 뷰로 collapse.
 

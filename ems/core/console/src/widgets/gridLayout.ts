@@ -103,6 +103,17 @@ export function resizeItem(items: WidgetPlacement[], key: number, w: number, h: 
   return compact(next, key)
 }
 
+// 임의 방향 리사이즈/이동 커밋 — 목표 박스(x·y·w·h)를 통째로 clamp 후 세팅하고 compact.
+// 위·왼쪽 모서리 리사이즈처럼 x/y 와 w/h 가 함께 바뀌는 경우에 사용(8방향 핸들).
+export function applyBox(items: WidgetPlacement[], key: number, box: GridBox): WidgetPlacement[] {
+  const w = clamp(Math.round(box.w), 1, GRID_COLS)
+  const x = clamp(Math.round(box.x), 0, GRID_COLS - w)
+  const h = Math.max(1, Math.round(box.h))
+  const y = Math.max(0, Math.round(box.y))
+  const next = items.map((p, i) => i === key ? { ...p, x, y, w, h } : { ...p })
+  return compact(next, key)
+}
+
 // 새 위젯을 첫 빈 슬롯(x=0, 최상단 빈 행)에 배치.
 export function addToFirstFree(
   items: WidgetPlacement[], placement: WidgetPlacement, defW?: number, defH?: number,
