@@ -17,15 +17,20 @@ export interface WidgetDef {
   category?: 'infra' | 'service' | 'stats' | 'event' | 'view' | 'page'
   serviceId?: string              // undefined=코어, 'cims'=CIMS 서비스 pack
   component: ComponentType<WidgetProps>
-  defaultSize?: { w: number }     // 12-col grid 기준 기본 폭 (1~12). 미지정 시 12.
+  defaultSize?: { w: number; h?: number }  // 기본 폭(12-칸 기준 1~12, 미지정=12; grid 은 ×COL_SCALE 환산) + grid 기본 행 span(h).
   adminOnly?: boolean
 }
 
-// 레이아웃에 배치된 위젯 1개.
+// 레이아웃에 배치된 위젯 1개. 두 배치 모드가 하위호환으로 공존한다:
+//  · legacy flow: x/y 없음 → GridRenderer 가 순서+w 로 flow(합>12 wrap). h 는 vh(1~100)|px(>100).
+//  · 2D grid:     x/y 있음 → 절대 셀 좌표 배치. w=열 span, h=행 span(모두 그리드 셀 단위로 통일).
+// 편집 진입 시 legacy 를 grid 로 1회 migrate(gridLayout.flowToGrid). 판별은 gridLayout.isGridPlacement.
 export interface WidgetPlacement {
   widgetId: string
-  w?: number                      // 12-col span. 미지정 시 WidgetDef.defaultSize.w → 12.
-  h?: number                      // 높이(px). 지정 시 그 높이로 고정 + 내부 스크롤. 미지정=자동(내용 높이).
+  x?: number                      // grid: 0-based 열(0..GRID_COLS-1). 없으면 legacy flow 배치.
+  y?: number                      // grid: 0-based 행(>=0).  없으면 legacy flow 배치.
+  w?: number                      // grid: 열 span(1..GRID_COLS). legacy: 12-칸 기준. 미지정 시 defaultSize.w.
+  h?: number                      // grid: 행 span(>=1 정수). legacy: 높이 vh(1~100)|px(>100), 미지정=자동.
   config?: Record<string, unknown>
 }
 
@@ -33,5 +38,6 @@ export interface WidgetPlacement {
 export interface PageLayout {
   id: string                      // 'dashboard'
   title?: string
+  gap?: number                    // 카드 간 간격(px). 미지정 시 기본 간격(gridLayout.GRID_GAP).
   widgets: WidgetPlacement[]
 }

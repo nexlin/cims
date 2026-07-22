@@ -29,17 +29,34 @@ Monitor/Administer, Huawei U2000 Topo/Fault/Perf/Config, TM Forum eTOM Assurance
 
 ## 3. 위젯 합성 (page = 레이아웃)
 
-page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**.
+page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**. `App.tsx` 의 `EditablePageHost` 가 **모든 route**
+를 `EditableLayout` 으로 감싸므로, 대시보드뿐 아니라 어느 페이지에서도 admin 이 위젯을 얹고 배치할 수
+있다(고정 페이지는 자신이 `page:<경로>` 단일 위젯으로 들어간 seed).
 
-- `widgets/types.ts` — `WidgetDef`(id/title/category/component/defaultSize) · `WidgetPlacement` · `PageLayout`.
+- `widgets/types.ts` — `WidgetDef`(id/title/category/component/defaultSize{w,h}) · `WidgetPlacement` · `PageLayout`.
 - `widgets/registry.ts` — 코어 위젯 + 서비스 `manifest.widgets` 병합(lazy — 순환 import 안전). `widgetsByCategory()` 로 편집 드롭다운을 카테고리(infra/service/stats/view/event/etc)로 그룹.
-- `widgets/GridRenderer.tsx` — 12-col 그리드. 위젯은 자체 chrome 렌더.
-- `widgets/EditableLayout.tsx` — admin `[✎ 편집]` → 위젯 추가/제거/순서/폭 → `PUT /console/layouts/<id>` 영속(없으면 seed).
-- `widgets/LayoutRoute.tsx` — route 를 EditableLayout 으로 렌더(출력 섹션 page = 합성 레이아웃).
+- `widgets/gridLayout.ts` — **자유 2D 그리드 엔진(순수 함수, 무의존)**. 48칸(`GRID_COLS`, 칸당 ≈2%)×N행 셀 좌표계에서
+  `overlap`/`compact`(겹침 아래로 밀기 + 빈 행 상단 compaction/중력) · `moveItem`/`resizeItem` ·
+  `addToFirstFree`/`removeAt` · `flowToGrid`(legacy→grid migrate) · 배치모드 판별(`isGridLayout`). 결정적·idempotent.
+- `widgets/GridRenderer.tsx` — 뷰 렌더. **2 모드 하위호환**: placement 에 `x/y` 있으면 12칸×N행 CSS grid
+  (`grid-column`/`grid-row`, `grid-auto-rows` = 셀 높이), 없으면 legacy flow(합>12 wrap). 위젯은 자체 chrome 렌더.
+- `widgets/EditableLayout.tsx` + `widgets/GridEditor.tsx` — admin `[✎ 편집]` → **드래그 이동·우하단 핸들
+  리사이즈**(포인터 이벤트, 마우스+터치)·위젯 추가/제거. 커밋 시 gridLayout 이 충돌/compaction 계산.
+  편집 진입 시 legacy(flow) 레이아웃은 grid 로 1회 migrate. → `PUT /console/layouts/<id>` 영속(없으면 seed).
+  편집(드래그/리사이즈)은 데스크톱 전용(`useIsDesktop`), 좁은 화면은 단일열 뷰로 collapse.
 
-영속: OAM `/api/v1/console` (`console_layouts` / `console_menu` 도메인). 저장본 없으면 404 → 프론트 seed.
+영속: OAM `/api/v1/console` (`console_layouts` / `console_menu` 도메인). PUT 은 `widgets[]` 를 필드 필터
+없이 통째로 저장 → placement 의 `x/y` 등 확장 필드가 그대로 보존(백엔드 무변경). 저장본 없으면 프론트 seed.
 
-위젯 높이는 화면 세로 비율(`vh`, 0~100; >100 은 레거시 px 호환) — `.widget-fixed` 패널 채움/스크롤. 코어 대시보드 위젯(`widgets/core/`): `KpiWidget`(7 KPI 카드) · `SystemTopologyWidget`(EMS 노드 형상 + 외부 시스템 점선 노드) · `SystemResourceWidget`(서버×지표 추이). 데이터 정의는 `features/monitoring.md` §1.7~1.8.
+크기는 **가로·세로 모두 그리드 셀 단위**로 통일(`w`=열 span 1~48 ≈가로 2%/칸, `h`=행 span). 행 높이는
+화면 세로 비율(`gridLayout.ROW_H_VH`, 기본 2%vh) — 가로(48칸)·세로(2%vh) 모두 ~2% 세밀도로 동일하다.
+정수 셀(조작감)은 유지하되 한 행의 실제 크기가 vh 라 **모든 해상도에서 같은 세로 비율**로 보인다.
+편집 배지는 실제 차지 비율(가로%×세로%)을 표시. legacy seed 폭은 12-칸 기준이라 migrate 시 `COL_SCALE`(×4)
+환산. legacy flow 배치는 `h` 를 vh(1~100)|px(>100)로 하위호환 해석(`widgetHeightCss`). 카드 간 간격은
+레이아웃 단위 `PageLayout.gap`(px, 편집 툴바 슬라이더) — 트랙 gap 이 아니라 **카드 margin**(`--card-gap`)이라
+칸수와 무관하게 안전. OAM PUT 이 top-level `gap` 을 보존. `.widget-fixed` 가 패널 채움/스크롤. 코어 대시보드 위젯(`widgets/core/`):
+`KpiWidget`(7 KPI 카드) · `SystemTopologyWidget`(EMS 노드 형상 + 외부 시스템 점선 노드) ·
+`SystemResourceWidget`(서버×지표 추이). 데이터 정의는 `features/monitoring.md` §1.7~1.8.
 
 ## 4. shape 위젯 + 데이터 소스 (완전 데이터 구동)
 

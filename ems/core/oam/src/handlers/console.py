@@ -80,6 +80,8 @@ async def handle_console(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
                 if not isinstance(body, dict) or not isinstance(body.get('widgets'), list):
                     return HandlerResult(status=400, body={'error': 'invalid_layout — widgets[] 필요'})
                 doc = {'id': lid, 'title': body.get('title'), 'widgets': body['widgets']}
+                if isinstance(body.get('gap'), (int, float)):   # 카드 간 간격(px) 보존
+                    doc['gap'] = body['gap']
                 file_store.save(ldir, lid, doc)
                 return HandlerResult(status=200, body=file_store.load(ldir, lid))
             if method == 'DELETE':
