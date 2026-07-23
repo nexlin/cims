@@ -241,6 +241,7 @@ if __name__ == '__main__':
     from handlers.console_accounts import CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
     from handlers.console_layouts  import CIMS_CONSOLE_LAYOUTS_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
+    from handlers.api_catalog          import CIMS_API_CATALOG_HANDLER_LIST
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
     from services import service_registry
@@ -493,6 +494,7 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_CONSOLE_LAYOUTS_HANDLER_LIST)
         base_rules += _bind(CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST)
+        base_rules += _bind(CIMS_API_CATALOG_HANDLER_LIST)   # /api/v1/api-catalog[/openapi.json] — 메타데이터, base 상주
         base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)

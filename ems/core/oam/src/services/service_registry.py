@@ -226,3 +226,13 @@ def data_sources(config: dict = None) -> list:
         for s in (d.get('data_sources') or []):
             out.append({**s, 'service_id': d.get('id')})
     return out
+
+
+def shareable_apis(config: dict = None) -> list:
+    """외부 공유(READ) 엔드포인트 메타 — 전 descriptor 의 shareable_apis 병합.
+    연동/API 카탈로그 탭 + OpenAPI 생성의 단일 소스. (내부 운영 API 는 제외 — READ 전용 인계 계약)"""
+    out = []
+    for d in load_descriptors(config):
+        for a in (d.get('shareable_apis') or []):
+            out.append({**a, 'service_id': d.get('id')})
+    return out

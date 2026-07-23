@@ -128,6 +128,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [sip_service_model.md](docs/design/features/sip_service_model.md) / [sip_runtime_config.md](docs/design/features/sip_runtime_config.md) — SIP 서비스 모델·런타임 설정
 - [ha_service_model.md](docs/design/features/ha_service_model.md) — HA 서비스 운영 모델 (책임 분리·선언적 verdict·절체 판정 — 설계 정본, 단계적 이행)
 - [oam_base_service_split.md](docs/design/features/oam_base_service_split.md) / [oam_self_upgrade.md](docs/design/features/oam_self_upgrade.md) — OAM base/service 분리·self-upgrade
+- [api_catalog.md](docs/design/features/api_catalog.md) — 외부 팀 인계용 공유(READ) API 카탈로그 + OpenAPI 3 산출 (연동/API 탭)
 - [csc_standalone_module.md](docs/design/features/csc_standalone_module.md) — CSC 독립 모듈화
 - [build_and_packaging.md](docs/design/features/build_and_packaging.md) / [package_and_template.md](docs/design/features/package_and_template.md) — 빌드·패키징·템플릿
 - [android_ue_client.md](docs/design/features/android_ue_client.md) / [android_ue_m1_pjsip_integration.md](docs/design/features/android_ue_m1_pjsip_integration.md) — Android UE 클라이언트

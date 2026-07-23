@@ -87,6 +87,8 @@ async def handle_service_descriptors(handler_args: HandlerArgs, kwargs: dict) ->
                 doc['alert_rules'] = body['alert_rules']
             if isinstance(body.get('data_sources'), list):
                 doc['data_sources'] = body['data_sources']
+            if isinstance(body.get('shareable_apis'), list):
+                doc['shareable_apis'] = body['shareable_apis']   # 외부 공유 API 카탈로그 — 보존
             file_store.save(sdir, sid, doc)
             return HandlerResult(status=200, body=file_store.load(sdir, sid))
         if method == 'DELETE':
