@@ -44,8 +44,17 @@ class CimsCall : Call {
     constructor(owner: SipController, acc: Account) : super(acc) { this.owner = owner }
     constructor(owner: SipController, acc: Account, callId: Int) : super(acc, callId) { this.owner = owner }
 
+    /** 지연 작업 가드 — 통화 종료 후 native call 접근(dump 등)은 SIGSEGV (MF52 tombstone 실측). */
+    @Volatile
+    private var alive = true
+
+    /** 진단 dump 1회 예약 가드 — 미디어 이벤트마다 중복 예약 방지. */
+    @Volatile
+    private var dumpScheduled = false
+
     override fun onCallState(prm: OnCallStateParam) {
         val ci = info
+        if (ci.state == pjsip_inv_state.PJSIP_INV_STATE_DISCONNECTED) alive = false
         val mapped = when (ci.state) {
             pjsip_inv_state.PJSIP_INV_STATE_CALLING,
             pjsip_inv_state.PJSIP_INV_STATE_EARLY ->
@@ -193,10 +202,16 @@ class CimsCall : Call {
             }
             owner.videoRenderSurface?.let { attachVideo(it) }   // M1.3 수신 영상 렌더
             startVideoTransmit()                                // 발신 영상(카메라) 송신 개시 → 셀프뷰 소스
-            // 진단: 미디어 활성 8초 후 pjsua 내부 통계(RX/TX 패킷·jbuf·conf 결선) 덤프
-            owner.postCtlDelayed(8000) {
-                runCatching { Log.i(TAG, "media dump(+8s):\n" + dump(true, "  ")) }
-                    .onFailure { Log.w(TAG, "media dump failed: ${it.message}") }
+            // 진단: 미디어 활성 8초 후 pjsua 내부 통계(RX/TX 패킷·jbuf·conf 결선) 덤프.
+            // ⚠️ 통화가 먼저 끝나면 실행 금지 — 파괴된 native call 의 dump() 는 SIGSEGV 로
+            //    프로세스가 죽는다(runCatching 으로 못 잡음). alive 가드 + 1회 예약.
+            if (!dumpScheduled) {
+                dumpScheduled = true
+                owner.postCtlDelayed(8000) {
+                    if (!alive) return@postCtlDelayed
+                    runCatching { Log.i(TAG, "media dump(+8s):\n" + dump(true, "  ")) }
+                        .onFailure { Log.w(TAG, "media dump failed: ${it.message}") }
+                }
             }
         }.onFailure { Log.w(TAG, "onCallMediaState FAILED", it) }
     }
