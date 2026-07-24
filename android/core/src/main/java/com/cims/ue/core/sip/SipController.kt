@@ -258,6 +258,19 @@ class SipController(private val config: SipAccountConfig) {
         )
     }
 
+    /** 진단용 — pj-ctl 스레드에 지연 실행 예약 (pjsua2 호출 직렬화 규약 준수). */
+    fun postCtlDelayed(ms: Long, block: () -> Unit) {
+        h.postDelayed(
+            {
+                runCatching {
+                    if (PjLib.booted) PjLib.ensureThread("pj-ctl")
+                    block()
+                }.onFailure { Log.w(TAG, "postCtlDelayed: ${it.message}") }
+            },
+            ms,
+        )
+    }
+
     /** 통화별 청취(수신 오디오 → 스피커) 토글 — 멀티그룹 듣기 정책용. */
     fun setCallListen(callId: Int, on: Boolean) = onCtl { calls[callId]?.setListen(on) }
 

@@ -179,11 +179,26 @@ class CimsCall : Call {
     override fun onCallMediaState(prm: OnCallMediaStateParam) {
         runCatching {
             if (msrpMode) return@runCatching                    // 더미 오디오(a=inactive) — 결선 없음
+            val aud = audioMedia()
+            Log.i(
+                TAG,
+                "onCallMediaState: audioSlot=${aud?.portId} " +
+                    "spkSlot=${PjLib.ep.audDevManager().playbackDevMedia.portId} halfDuplex=${owner.halfDuplex}",
+            )
             connectListen()
-            if (!owner.halfDuplex) setMic(!owner.muted)         // 통화중 음소거 유지(재협상 후에도)
+            Log.i(TAG, "connectListen OK (call→spk)")
+            if (!owner.halfDuplex) {
+                setMic(!owner.muted)                            // 통화중 음소거 유지(재협상 후에도)
+                Log.i(TAG, "setMic(${!owner.muted}) OK")
+            }
             owner.videoRenderSurface?.let { attachVideo(it) }   // M1.3 수신 영상 렌더
             startVideoTransmit()                                // 발신 영상(카메라) 송신 개시 → 셀프뷰 소스
-        }.onFailure { Log.w(TAG, "onCallMediaState: ${it.message}") }
+            // 진단: 미디어 활성 8초 후 pjsua 내부 통계(RX/TX 패킷·jbuf·conf 결선) 덤프
+            owner.postCtlDelayed(8000) {
+                runCatching { Log.i(TAG, "media dump(+8s):\n" + dump(true, "  ")) }
+                    .onFailure { Log.w(TAG, "media dump failed: ${it.message}") }
+            }
+        }.onFailure { Log.w(TAG, "onCallMediaState FAILED", it) }
     }
 
     /**

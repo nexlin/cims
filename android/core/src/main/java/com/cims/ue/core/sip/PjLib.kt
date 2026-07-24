@@ -5,6 +5,8 @@ import android.util.Log
 import org.pjsip.PjCameraInfo2
 import org.pjsip.pjsua2.Endpoint
 import org.pjsip.pjsua2.EpConfig
+import org.pjsip.pjsua2.LogEntry
+import org.pjsip.pjsua2.LogWriter
 import org.pjsip.pjsua2.TransportConfig
 import org.pjsip.pjsua2.pjsip_transport_type_e
 
@@ -42,6 +44,14 @@ object PjLib {
     // 쓰지 않고, 이 ThreadLocal 로 스레드당 정확히 1회 libRegisterThread 를 보장한다(설계서 §3.5 대안).
     private val threadRegistered = ThreadLocal.withInitial { false }
 
+    /** pjsip 로그 → logcat 브리지. 기본 sink 는 stdout(logcat 미노출)이라 미디어/스트림 진단이
+     *  불가능했다. SWIG 콜백 객체는 GC 되면 native crash — PjLib 필드로 강참조 유지(필수). */
+    private val pjLogWriter = object : LogWriter() {
+        override fun write(entry: LogEntry) {
+            Log.i("PJ", entry.msg.trimEnd())
+        }
+    }
+
     @Synchronized
     fun boot(logLevel: Int = 4) {
         if (booted) return
@@ -62,6 +72,12 @@ object PjLib {
         val epc = EpConfig().apply {
             uaConfig.userAgent = "CIMS-UE/M1 (pjsua2)"
             logConfig.level = logLevel.toLong()
+            logConfig.consoleLevel = logLevel.toLong()
+            logConfig.writer = pjLogWriter
+            // VAD(무음 억제) 비활성 — 침묵 중에도 RTP 연속 송신. 무음 억제로 송신이 멈추면
+            // 중간 장비(NAT/방화벽)의 UDP flow 상태가 만료되어 **하향(수신) RTP 까지 소실**된다
+            // (수신측이 조용한 통화에서 ~8초 뒤 무음 실측 — 사내망 라우터 상태 만료).
+            medConfig.noVad = true
         }
         endpoint.libInit(epc)
 

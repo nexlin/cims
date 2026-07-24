@@ -196,6 +196,32 @@ class SipService : Service() {
     /** 통화중 마이크 음소거 토글. */
     fun setMuted(callId: Int, on: Boolean) { controller?.setMuted(callId, on) }
 
+    /** 통화 오디오 세션 소유 여부 — 중복 setMode 방지. */
+    private var inCallAudio = false
+
+    /**
+     * 통화 진입/이탈 시 오디오 모드 전환 — **VoIP 재생·라우팅의 전제** (ptt AudioRouter 와 동일 원리).
+     * pjsua 는 STREAM_VOICE_CALL 로 재생하는데, 앱이 `MODE_IN_COMMUNICATION` 을 잡지 않으면
+     * 일부 단말(HAL)에서 voice-call 스트림이 어떤 출력으로도 라우팅되지 않아 **수화기/스피커 모두
+     * 완전 무음**이 된다(W999 실측 — RTP 수신·디코드·AudioTrack 정상인데 무음). 스피커폰
+     * (setSpeaker/setCommunicationDevice)도 MODE_NORMAL 에선 무시된다. 진입 시 voice-call
+     * 스트림 음량도 확보한다(단말 저장값이 최소(2/7)로 남아 무음처럼 들리는 사고 예방).
+     */
+    private fun setInCallAudio(on: Boolean) {
+        if (on == inCallAudio) return
+        inCallAudio = on
+        val am = getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            if (on) {
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+                val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+                am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, max, 0)
+            } else {
+                am.mode = AudioManager.MODE_NORMAL
+            }
+        }
+    }
+
     /**
      * 스피커폰 전환 — 플랫폼 오디오 라우팅(PJSIP Android 오디오가 추종).
      * API 31+ 는 communication device, 이하는 speakerphoneOn. 통화 종료 시 자동 원복.
@@ -256,6 +282,8 @@ class SipService : Service() {
                 // API 34+ 에서 금지(ForegroundServiceStartNotAllowedException → 앱 크래시).
                 // 사용자가 받으면(Active) 통화 UI 가 포그라운드라 승격 가능. Outgoing 은 사용자 발신=포그라운드.
                 elevateForCall(call is CallState.Active || call is CallState.Outgoing)
+                // 통화 오디오 세션 소유(MODE_IN_COMMUNICATION) — 미소유 시 일부 단말 완전 무음(setInCallAudio 참조)
+                setInCallAudio(call is CallState.Active || call is CallState.Outgoing)
                 // 착신 — 기본 전화앱처럼 벨소리 + 풀스크린/헤드업 착신 알림(받기/거절).
                 if (call is CallState.Incoming) {
                     showIncomingCallNotification(call)
