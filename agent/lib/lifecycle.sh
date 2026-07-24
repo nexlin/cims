@@ -164,12 +164,18 @@ _kill_own_install_listener() {
 }
 
 # ── deployment overlay 머지 ──────────────────────────────────
+# overlay(flat dotted key) 를 모듈 config(nested json) 에 병합한다. 병합은 target 파일
+# 자체에 누적되므로, overlay 에서 **삭제된 키의 전파**를 위해 직전 적용 키 목록을
+# 사이드카(<overlay>.applied)에 기록하고, 다음 병합 때 사라진 키를 target 에서 제거한다
+# (해당 설정은 모듈의 코드 기본값으로 복귀). 이 목록 없이는 한번 병합된 키가 OAM 설정
+# 저장소에서 지워져도 영구 잔존한다.
 _apply_overlay_to_module_config() {
     local overlay="$1" target="$2"
     [[ ! -f "$overlay" || ! -f "$target" ]] && return 0
     "$PYBIN" - "$overlay" "$target" <<'PY' 2>/dev/null
-import json, sys
+import json, os, sys
 ov_path, tgt_path = sys.argv[1], sys.argv[2]
+applied_path = ov_path + ".applied"
 try:
     with open(ov_path, encoding="utf-8") as f: ov = json.load(f)
     with open(tgt_path, encoding="utf-8") as f: tgt = json.load(f)
@@ -177,6 +183,13 @@ except Exception:
     sys.exit(0)
 if not isinstance(ov, dict) or not isinstance(tgt, dict):
     sys.exit(0)
+
+prev = []
+try:
+    with open(applied_path, encoding="utf-8") as f: prev = json.load(f)
+except Exception:
+    prev = []
+if not isinstance(prev, list): prev = []
 
 def set_path(root, dotted, value):
     cur = root
@@ -189,7 +202,31 @@ def set_path(root, dotted, value):
         cur = nxt
     cur[keys[-1]] = value
 
+def del_path(root, dotted):
+    # dotted leaf 삭제 + 비게 된 중간 dict 정리. 경로 부재/타입 불일치는 no-op.
+    keys = dotted.split(".")
+    stack = []
+    cur = root
+    for k in keys[:-1]:
+        nxt = cur.get(k)
+        if not isinstance(nxt, dict): return False
+        stack.append((cur, k))
+        cur = nxt
+    if keys[-1] not in cur: return False
+    del cur[keys[-1]]
+    for parent, k in reversed(stack):
+        if parent.get(k) == {}: del parent[k]
+        else: break
+    return True
+
 changed = False
+
+# 삭제 전파 — dotted 키만 추적 대상 (OAM deployment config 는 전부 dotted).
+#   비 dotted 키는 base config 와 구분이 안 돼 삭제하지 않는다 (기존 동작 유지).
+for k in prev:
+    if isinstance(k, str) and "." in k and k not in ov:
+        if del_path(tgt, k): changed = True
+
 for k, v in ov.items():
     if "." in k:
         set_path(tgt, k, v); changed = True
@@ -205,8 +242,19 @@ for k, v in ov.items():
         tgt[k] = v; changed = True
 
 if changed:
-    with open(tgt_path, "w", encoding="utf-8") as f:
+    tmp = tgt_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(tgt, f, indent=4, ensure_ascii=False)
+    os.replace(tmp, tgt_path)
+
+# 적용 키 목록 갱신 (병합 무변경이어도 기록 — 최초 도입 시점부터 추적 시작)
+try:
+    tmp = applied_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(sorted(k for k in ov.keys() if "." in k), f)
+    os.replace(tmp, applied_path)
+except Exception:
+    pass
 PY
 }
 

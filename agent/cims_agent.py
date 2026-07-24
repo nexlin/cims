@@ -980,11 +980,16 @@ def _prune_old_versions(module_root: str, keep: int = 3) -> list:
 
 
 def _write_config_file(install_path: str, config_values: dict) -> str:
-    """install_path/config.json 에 설정 값 기록. 경로 반환."""
+    """install_path/config.json 에 설정 값 기록 (tmp+rename 원자 치환). 경로 반환.
+
+    lifecycle.sh 의 overlay 머지가 모듈 기동 시 이 파일을 읽으므로, 부분 기록 상태가
+    관측되지 않도록 원자적으로 치환한다."""
     cfg_path = os.path.join(install_path, "config.json")
     os.makedirs(install_path, exist_ok=True)
-    with open(cfg_path, "w", encoding="utf-8") as f:
+    tmp_path = cfg_path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(config_values or {}, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, cfg_path)
     return cfg_path
 
 
