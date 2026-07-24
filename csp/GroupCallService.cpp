@@ -33,6 +33,7 @@ static std::string TimeToIso( time_t t ) {
 #include "CspPttGroup.h"
 #include "RecordPath.h"
 #include "RtpMap.h"
+#include "SipCodecTable.h"
 #include "SipMessage.h"
 #include "SipServerSetup.h"
 #include "SipUserAgent.h"
@@ -121,6 +122,26 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
     if ( gclsGroupMap.Select( pszGroupId, clsGroup ) == false ) {
         return false;
+    }
+
+    // 협상 게이트 (RFC 3264): 개시자 오퍼에 서비스 코덱(코덱 테이블 최우선, 기본 AMR-WB)이 없으면
+    //   488 로 거부한다. 없는데 수락하면 answer 가 오퍼에 없는 코덱을 선언(비규격)하게 되고 미디어도
+    //   성립하지 않는다. (m_clsCodecList 는 GetSipCallRtp 가 rtpmap 이름 매칭으로 테이블 PT 정규화)
+    if ( pclsRtp ) {
+        const CSipCodecEntry &clsSvcCodec = CSipCodecTable::GetTop();
+        bool bHasSvcCodec = false;
+        for ( CODEC_LIST::iterator it = pclsRtp->m_clsCodecList.begin(); it != pclsRtp->m_clsCodecList.end(); ++it ) {
+            if ( *it == clsSvcCodec.m_iPt ) {
+                bHasSvcCodec = true;
+                break;
+            }
+        }
+        if ( !bHasSvcCodec ) {
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) offer has no service codec(%s) → 488",
+                         pszGroupId, pszCallerInfo, clsSvcCodec.m_strName.c_str() );
+            gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+            return true;  // 488 응답 완료 — 호출측(dispatcher) 이 실패로 보고 403 을 덧보내지 않게 한다
+        }
     }
 
     // condition(emergency/imminent) 능력 게이트 (TS 24.481). 그룹이 긴급 불허면 normal 로 강등.
@@ -225,8 +246,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
         CSipCallRtp clsCallerRtp;
         clsCallerRtp.SetIpPort( strSharedIp.c_str(), iCallerLocalAudio, SOCKET_COUNT_PER_MEDIA );
-        clsCallerRtp.m_iCodec = 99;  // AMR-WB (기본 코덱, 서버 설정으로 추후 변경)
-        clsCallerRtp.m_clsCodecList.push_back( 99 );
+        // 서비스 코덱 (Setup.Media.Codecs 최우선 — 기본 AMR-WB). answer 의 실 wire PT 는
+        // psip AddSdp 가 개시자 오퍼의 rtpmap 에서 echo 한다 (여기 값은 코덱 선택자).
+        const CSipCodecEntry &clsSvcCodec = CSipCodecTable::GetTop();
+        clsCallerRtp.m_iCodec = clsSvcCodec.m_iPt;
+        clsCallerRtp.m_clsCodecList.push_back( clsSvcCodec.m_iPt );
         // MCPTT floor (TS 24.379/24.380): 200 OK 에 m=application(SharedFloorPort) 광고 →
         //   개시자가 floor dest 를 학습해 floor REQUEST 를 올바른 포트로 송신(명시적 GRANT).
         clsCallerRtp.m_iApplicationPort = iSharedFloorPort;
@@ -677,11 +701,13 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     CSipCallRtp clsRtp;
     clsRtp.SetIpPort( strSharedIp.c_str(), iMemberAudioPort, SOCKET_COUNT_PER_MEDIA );
 
-    // AMR-WB (기본 코덱, 서버 설정으로 추후 변경). PT=96: fan-out 오퍼는 CSP 가 오퍼러라
-    // 이 값이 wire PT 가 된다 — pjsua UE 의 AMR-WB 로컬 PT(96)와 일치시켜 협상 PT 불일치
-    // 크래시를 방지한다 (dynamic PT 는 rtpmap 으로 식별되므로 96/99 모두 규격 적합, RFC 3264).
-    clsRtp.m_clsCodecList.push_back( 96 );
-    clsRtp.m_iCodec = 96;
+    // 서비스 코덱 (Setup.Media.Codecs 최우선 — 기본 AMR-WB PT=96). fan-out 오퍼는 CSP 가
+    // 오퍼러라 이 PT 가 그룹 wire PT 가 된다 — CMP 는 relay 시 PT 를 재작성하지 않으므로 그룹
+    // 전 leg 의 PT 가 이 값으로 통일되어야 한다 (pjsua UE 로컬 PT 96 정렬 — 협상 PT 불일치
+    // 크래시 예방 실증값. dynamic PT 는 rtpmap 으로 식별되므로 번호 자체는 정책, RFC 3264).
+    const CSipCodecEntry &clsSvcCodec = CSipCodecTable::GetTop();
+    clsRtp.m_clsCodecList.push_back( clsSvcCodec.m_iPt );
+    clsRtp.m_iCodec = clsSvcCodec.m_iPt;
 
     // 4. Create Call
     std::string strCallId;

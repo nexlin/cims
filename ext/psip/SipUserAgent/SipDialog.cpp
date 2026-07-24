@@ -20,6 +20,8 @@
 #include "SipDialog.h"
 #include "SipUserAgent.h"
 #include "SipUtility.h"
+#include "SipCodecTable.h"
+#include "Log.h"
 #include "MemoryDebug.h"
 
 /**
@@ -202,6 +204,25 @@ CSipMessage * CSipDialog::CreateInfo( )
 	return pclsMessage;
 }
 
+/* 코덱 1개의 a=rtpmap / a=fmtp / a=ptime 라인 출력.
+ * iPt = 실제 광고 PT — answer 는 오퍼 echo 값, 오퍼는 코덱 리스트의 값(테이블 PT). */
+static int AddCodecAttribute( char * pszBuf, int iBufSize, const CSipCodecEntry & clsCodec, int iPt )
+{
+	int iLen = 0;
+
+	iLen += snprintf( pszBuf + iLen, iBufSize - iLen, "a=rtpmap:%d %s\r\n", iPt, clsCodec.GetRtpmap().c_str() );
+	if( clsCodec.m_strFmtp.empty() == false )
+	{
+		iLen += snprintf( pszBuf + iLen, iBufSize - iLen, "a=fmtp:%d %s\r\n", iPt, clsCodec.m_strFmtp.c_str() );
+	}
+	if( clsCodec.m_iPtime > 0 )
+	{
+		iLen += snprintf( pszBuf + iLen, iBufSize - iLen, "a=ptime:%d\r\n", clsCodec.m_iPtime );
+	}
+
+	return iLen;
+}
+
 /**
  * @ingroup SipUserAgent
  * @brief SIP �޽����� SDP �޽����� �߰��Ѵ�.
@@ -242,17 +263,14 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 	else
 #endif
 	{
+		// 코덱 테이블(CSipCodecTable — 응용 주입, 미주입 시 기본 테이블) 기반 SDP 합성.
 		// RFC 3264: answer 의 dynamic PT 는 offer 가 쓴 PT 를 그대로 echo (rtpmap 이름으로 식별).
-		//   PT 번호를 서버 고정값으로 강제하면(구 동작: AMR-WB=99, telephone-event=101) offer 가
-		//   다른 PT(예: pjsua AMR-WB=96)를 쓴 UE 와 협상이 깨져 미디어 스트림 생성 시 크래시한다.
-		//   offer 에 해당 rtpmap 이 없으면(-1, 예: 발신 offer 생성 시 remote 미수신) 기존 하드코딩값
-		//   fallback → 상용/파트너(AMR-WB=99) interop 및 발신 동작 보존.
-		int iAmrWbPt = FindRemotePayloadType( "AMR-WB/16000" );
-		if( iAmrWbPt < 0 ) iAmrWbPt = 99;
-		int iAmrNbPt = FindRemotePayloadType( "AMR/8000" );
-		if( iAmrNbPt < 0 ) iAmrNbPt = 98;
-		int iTePt = FindRemotePayloadType( "telephone-event/8000" );
-		if( iTePt < 0 ) iTePt = 101;
+		//   PT 번호를 서버 고정값으로 강제하면 offer 가 다른 PT(예: pjsua AMR-WB=96)를 쓴 UE 와
+		//   협상이 깨져 미디어 스트림 생성 시 크래시한다. offer 에 해당 rtpmap 이 없으면(-1,
+		//   예: 발신 offer 생성 시 remote 미수신) 테이블 PT 로 광고한다.
+		const CSipCodecEntry & clsTe = CSipCodecTable::GetTelephoneEvent();
+		int iTePt = FindRemotePayloadType( clsTe.GetMatchPrefix().c_str() );
+		if( iTePt < 0 ) iTePt = clsTe.m_iPt;
 
 		if( pclsMessage->IsRequest() && m_clsCodecList.empty() == false )
 		{
@@ -272,77 +290,38 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 
 			for( itList = m_clsCodecList.begin(); itList != m_clsCodecList.end(); ++itList )
 			{
-				switch( *itList )
-				{
-				case 96:   // AMR-WB (pjsua/IMS dynamic PT) — 오퍼 시 UE(pjsua) 와 동일 PT 로 광고
-				case 99:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d AMR-WB/16000/1\r\n", *itList );
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d octet-align=1\r\n", *itList );
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=ptime:20\r\n" );
-					break;
-				case 98:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:98 AMR/8000/1\r\n" );
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:98 octet-align=1\r\n" );
-					break;
-				case 0:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:0 PCMU/8000\r\n" );
-					break;
-				case 3:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:3 GSM/8000\r\n" );
-					break;
-				case 4:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:4 G723/8000\r\n" );
-					break;
-				case 8:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:8 PCMA/8000\r\n" );
-					break;
-				case 18:
-					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:18 G729/8000\r\n" );
-					break;
-					break;
-				}
+				const CSipCodecEntry * pclsCodec = CSipCodecTable::FindByPt( *itList );
+				if( pclsCodec == NULL ) continue;
+
+				iLen += AddCodecAttribute( szSdp + iLen, (int)sizeof(szSdp) - iLen, *pclsCodec, *itList );
 			}
 		}
 		else
 		{
-			switch( m_iCodec )
+			const CSipCodecEntry * pclsCodec = CSipCodecTable::FindByPt( m_iCodec );
+
+			if( pclsCodec == NULL )
 			{
-			case 96:   // AMR-WB — m_iCodec 은 코덱 선택자(실 PT 는 iAmrWbPt=오퍼 echo)
-			case 99:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP %d %d\r\n", m_iLocalRtpPort, iAmrWbPt, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d AMR-WB/16000/1\r\n", iAmrWbPt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d octet-align=1\r\n", iAmrWbPt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=ptime:20\r\n" );
-				break;
-			case 98:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP %d %d\r\n", m_iLocalRtpPort, iAmrNbPt, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d AMR/8000/1\r\n", iAmrNbPt );
-				break;
-			case 0:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 0 %d\r\n", m_iLocalRtpPort, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:0 PCMU/8000\r\n" );
-				break;
-			case 3:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 3 %d\r\n", m_iLocalRtpPort, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:3 GSM/8000\r\n" );
-				break;
-			case 4:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 4 %d\r\n", m_iLocalRtpPort, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:4 G723/8000\r\n" );
-				break;
-			case 8:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 8 %d\r\n", m_iLocalRtpPort, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:8 PCMA/8000\r\n" );
-				break;
-			case 18:
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP 18 %d\r\n", m_iLocalRtpPort, iTePt );
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:18 G729/8000\r\n" );
-				break;
+				// 선택 코덱 부재/테이블 외 — m=audio 없는 구조 불량 SDP 방지용 방어 출력(최우선 코덱).
+				// 협상 실패의 정식 거부(488)는 응용의 서비스별 게이트가 수행한다. VoLTE relay 는
+				// media-list passthrough 분기라 여기에 오지 않는다.
+				CLog::Print( LOG_ERROR, "AddSdp codec(%d) not in codec table — fallback to top codec", m_iCodec );
+				pclsCodec = &CSipCodecTable::GetTop();
 			}
+
+			// answer 코덱의 실 wire PT = 오퍼 echo (없으면 테이블 PT)
+			int iPt = FindRemotePayloadType( pclsCodec->GetMatchPrefix().c_str() );
+			if( iPt < 0 ) iPt = pclsCodec->m_iPt;
+
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP %d %d\r\n", m_iLocalRtpPort, iPt, iTePt );
+			iLen += AddCodecAttribute( szSdp + iLen, (int)sizeof(szSdp) - iLen, *pclsCodec, iPt );
 		}
 
-		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d telephone-event/8000\r\n"
-			"a=fmtp:%d 0-15\r\n", iTePt, iTePt );
+		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d %s\r\n", iTePt, clsTe.GetRtpmap().c_str() );
+		if( clsTe.m_strFmtp.empty() == false )
+		{
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d %s\r\n", iTePt, clsTe.m_strFmtp.c_str() );
+		}
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
 	}
 
@@ -532,23 +511,9 @@ bool CSipDialog::IsConnected( )
  */
 bool CSipDialog::IsUseCodec( int iCodec )
 {
-	bool bFound = false;
-
-	switch( iCodec )
-	{
-	case 0:
-	case 3:
-	case 4:
-	case 8:
-	case 18:
-	case 96:   // AMR-WB (pjsua/IMS 관용 dynamic PT) — rtpmap 로 식별, 정적 화이트리스트는 하위호환용
-	case 99:
-	case 98:
-		bFound = true;
-		break;
-	}
-
-	return bFound;
+	// 코덱 테이블(CSipCodecTable) 등재 PT 만 사용 — 구 정적 화이트리스트(0/3/4/8/18/96/98/99)는
+	// 기본 테이블로 승계. 동적 PT 의 이름 기반 식별은 GetSipCallRtp 의 rtpmap 매칭이 담당한다.
+	return CSipCodecTable::FindByPt( iCodec ) != NULL;
 }
 
 /* 대소문자 무시 prefix 비교 (libc strncasecmp 이식성 회피용 로컬 헬퍼). */

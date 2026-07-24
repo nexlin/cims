@@ -19,6 +19,7 @@
 #include "SipUserAgent.h"
 #include "SipRegisterThread.h"
 #include "SipUtility.h"
+#include "SipCodecTable.h"
 #include "SdpMessage.h"
 #include "StringUtility.h"
 #include "TimeString.h"
@@ -499,22 +500,74 @@ bool CSipUserAgent::GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsR
 
 		clsRtp.m_iPort = itMedia->m_iPort;
 
+		// 코덱 테이블 기반 오퍼 코덱 매칭 (RFC 3264/3551):
+		//  - 동적 PT(>=96)는 번호가 세션별 임의 계약이므로 a=rtpmap encoding 이름으로 식별한다.
+		//    (구 PT 번호 화이트리스트는 같은 코덱이라도 다른 번호를 쓰면 거부하거나 다른 코덱을
+		//     오인식했다 — 예: telephone-event 를 96 으로 오퍼하면 AMR-WB 로 오인.)
+		//  - 정적 PT(<96)는 RFC 3551 고정 번호로 식별.
+		//  - m_clsCodecList 에는 테이블 PT 로 정규화해 보관(코덱 identity). 실 wire PT 는
+		//    answer 생성(AddSdp)이 오퍼 rtpmap 에서 다시 echo 한다.
+		//  - m_iCodec(선택 코덱) = 오퍼∩테이블 중 테이블 우선순위(배열 순서) 최상위.
 		SDP_FMT_LIST::iterator itFmt;
-		int iCodec = -1;
+		int iBestRank = -1;
 
 		for( itFmt = itMedia->m_clsFmtList.begin(); itFmt != itMedia->m_clsFmtList.end(); ++itFmt )
 		{
-			iCodec = atoi( itFmt->c_str() );
-			if( CSipDialog::IsUseCodec( iCodec ) == false ) continue;
+			int iPt = atoi( itFmt->c_str() );
+			const CSipCodecEntry * pclsEntry = NULL;
 
-			if( clsRtp.m_iCodec == -1 || iCodec == 0 )
+			if( iPt >= 96 )
 			{
-				clsRtp.m_iCodec = iCodec;
-				clsRtp.m_clsCodecList.push_front( iCodec );
+				const char * pszEncoding = NULL;
+				SDP_ATTRIBUTE_LIST::iterator itRtpmap;
+
+				for( itRtpmap = itMedia->m_clsAttributeList.begin(); itRtpmap != itMedia->m_clsAttributeList.end(); ++itRtpmap )
+				{
+					if( strcasecmp( itRtpmap->m_strName.c_str(), "rtpmap" ) ) continue;
+					if( atoi( itRtpmap->m_strValue.c_str() ) != iPt ) continue;
+
+					const char * pszSp = strchr( itRtpmap->m_strValue.c_str(), ' ' );
+					if( pszSp ) pszEncoding = pszSp + 1;
+					break;
+				}
+
+				if( pszEncoding )
+				{
+					pclsEntry = CSipCodecTable::FindByRtpmap( pszEncoding );
+				}
+				else
+				{
+					// rtpmap 없는 동적 PT (비규격 오퍼) — 구 화이트리스트 호환으로 번호 매칭 관용
+					pclsEntry = CSipCodecTable::FindByPt( iPt );
+				}
 			}
 			else
 			{
-				clsRtp.m_clsCodecList.push_back( iCodec );
+				pclsEntry = CSipCodecTable::FindByPt( iPt );
+			}
+
+			if( pclsEntry == NULL ) continue;
+
+			// 중복 제거 (같은 코덱을 여러 PT 로 광고한 오퍼)
+			bool bDup = false;
+			CODEC_LIST::iterator itCodec;
+			for( itCodec = clsRtp.m_clsCodecList.begin(); itCodec != clsRtp.m_clsCodecList.end(); ++itCodec )
+			{
+				if( *itCodec == pclsEntry->m_iPt )
+				{
+					bDup = true;
+					break;
+				}
+			}
+			if( bDup ) continue;
+
+			clsRtp.m_clsCodecList.push_back( pclsEntry->m_iPt );
+
+			int iRank = CSipCodecTable::GetRank( pclsEntry->m_iPt );
+			if( iBestRank < 0 || ( iRank >= 0 && iRank < iBestRank ) )
+			{
+				iBestRank = iRank;
+				clsRtp.m_iCodec = pclsEntry->m_iPt;
 			}
 		}
 

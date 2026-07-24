@@ -2,6 +2,7 @@
 #include "SipUtility.h"
 #include "SipMd5.h"
 #include "SdpMedia.h"
+#include "SipCodecTable.h"
 #include "Log.h"
 #include <sstream>
 #include <chrono>
@@ -17,6 +18,58 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+
+// ─────────────────────────────────────────────
+//  협상 오디오 미디어 빌더 (psip CSipCodecTable 공유 — 서버와 동일 기본 테이블)
+// ─────────────────────────────────────────────
+namespace {
+
+/** 오퍼 미디어 리스트의 audio rtpmap 에서 entry 코덱("<Name>/<Clock>")의 PT 를 찾는다 — 없으면 -1.
+ *  RFC 3264: answer 는 오퍼가 선언한 PT 를 그대로 echo 해야 한다 (dynamic PT 는 번호가 임의 계약). */
+int FindOfferedPt(CSipCallRtp* pclsOffer, const CSipCodecEntry& clsEntry) {
+    if (pclsOffer == NULL) return -1;
+    std::string strPrefix = clsEntry.GetMatchPrefix();
+    for (SDP_MEDIA_LIST::iterator itM = pclsOffer->m_clsMediaList.begin();
+         itM != pclsOffer->m_clsMediaList.end(); ++itM) {
+        if (strcasecmp(itM->m_strMedia.c_str(), "audio")) continue;
+        for (SDP_ATTRIBUTE_LIST::iterator itA = itM->m_clsAttributeList.begin();
+             itA != itM->m_clsAttributeList.end(); ++itA) {
+            if (strcasecmp(itA->m_strName.c_str(), "rtpmap")) continue;
+            const char* pszSp = strchr(itA->m_strValue.c_str(), ' ');
+            if (pszSp == NULL) continue;
+            size_t iLen = strPrefix.length();
+            if (strncasecmp(pszSp + 1, strPrefix.c_str(), iLen) == 0 &&
+                (pszSp[1 + iLen] == '\0' || pszSp[1 + iLen] == '/'))
+                return atoi(itA->m_strValue.c_str());
+        }
+    }
+    return -1;
+}
+
+/** 협상 audio 미디어 라인 구성 — 코덱 identity(테이블 PT) 로 엔트리를 찾아 rtpmap/fmtp 생성.
+ *  answer(pclsOffer 지정) 는 오퍼 PT echo, 오퍼는 테이블 PT 광고. 반환 = wire PT (RTP 스탬핑용). */
+int BuildAudioMedia(CSipCallRtp& clsRtp, int iPort, int iCodecPt, CSipCallRtp* pclsOffer) {
+    const CSipCodecEntry* pclsEntry = CSipCodecTable::FindByPt(iCodecPt);
+    if (pclsEntry == NULL) pclsEntry = CSipCodecTable::FindByPt(0);  // 미인식 오퍼 → PCMU 관용 (레거시 동작)
+    if (pclsEntry == NULL) pclsEntry = &CSipCodecTable::GetTop();
+
+    int iWirePt = FindOfferedPt(pclsOffer, *pclsEntry);
+    if (iWirePt < 0) iWirePt = pclsEntry->m_iPt;
+
+    CSdpMedia clsAudio("audio", iPort, "RTP/AVP");
+    clsAudio.AddFmt(iWirePt);
+    char szVal[160];
+    snprintf(szVal, sizeof(szVal), "%d %s", iWirePt, pclsEntry->GetRtpmap().c_str());
+    clsAudio.AddAttribute("rtpmap", szVal);
+    if (!pclsEntry->m_strFmtp.empty()) {
+        snprintf(szVal, sizeof(szVal), "%d %s", iWirePt, pclsEntry->m_strFmtp.c_str());
+        clsAudio.AddAttribute("fmtp", szVal);
+    }
+    clsRtp.m_clsMediaList.push_back(clsAudio);
+    return iWirePt;
+}
+
+}  // namespace
 
 // ─────────────────────────────────────────────
 //  XCAP / IdMS HTTP helper (Phase 3 — UE↔CSC)
@@ -636,26 +689,15 @@ void SimSession::StartCall(const std::string& strTarget) {
 
     clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
     clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
-    // AMR-WB (PT=99) when media file is provided, otherwise PCMU (PT=0)
-    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : 99;
+    // 미디어 파일 지정 시 서비스 코덱(테이블 최우선 — 기본 AMR-WB 96), 아니면 합성 PCMU(0)
+    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
     // PTT: SDP에 m=application(floor 수신 포트) 광고
     if (m_bPttMode && m_clsRtpThread.m_iFloorRecvPort > 0)
         clsRtp.m_iApplicationPort = m_clsRtpThread.m_iFloorRecvPort;
 
 #ifdef USE_MEDIA_LIST
-    // Audio media line
-    {
-        int audioCodec = clsRtp.m_iCodec;
-        CSdpMedia clsAudio("audio", m_clsRtpThread.m_iPort, "RTP/AVP");
-        clsAudio.AddFmt(audioCodec);
-        if (audioCodec == 99) {
-            clsAudio.AddAttribute("rtpmap", "99 AMR-WB/16000/1");
-            clsAudio.AddAttribute("fmtp", "99 mode-change-capability=2; max-red=0; octet-align=1");
-        } else {
-            clsAudio.AddAttribute("rtpmap", "0 PCMU/8000");
-        }
-        clsRtp.m_clsMediaList.push_back(clsAudio);
-    }
+    // Audio media line — 오퍼러이므로 테이블 PT 로 광고, RTP 송신 PT 도 동일 값으로
+    m_clsRtpThread.m_iAudioPt = BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL);
     // Video media line (if video file set)
     if (m_clsRtpThread.m_iVideoPort > 0) {
         CSdpMedia clsVideo("video", m_clsRtpThread.m_iVideoPort, "RTP/AVP");
@@ -1157,21 +1199,12 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         CSipCallRtp clsLocalRtp;
         clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
         clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
-        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;
+        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
 
 #ifdef USE_MEDIA_LIST
-        // PTT 200 OK SDP: audio + video (비디오 파일이 있는 경우)
-        {
-            CSdpMedia clsAudio("audio", m_pOwner->m_clsRtpThread.m_iPort, "RTP/AVP");
-            clsAudio.AddFmt(clsLocalRtp.m_iCodec);
-            if (clsLocalRtp.m_iCodec == 99) {
-                clsAudio.AddAttribute("rtpmap", "99 AMR-WB/16000/1");
-                clsAudio.AddAttribute("fmtp", "99 mode-change-capability=2; max-red=0; octet-align=1");
-            } else {
-                clsAudio.AddAttribute("rtpmap", "0 PCMU/8000");
-            }
-            clsLocalRtp.m_clsMediaList.push_back(clsAudio);
-        }
+        // PTT 200 OK SDP: audio(오퍼 PT echo) + video (비디오 파일이 있는 경우)
+        m_pOwner->m_clsRtpThread.m_iAudioPt =
+            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp);
         if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
             CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
             clsVideo.AddFmt(96);
@@ -1225,21 +1258,12 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
         CSipCallRtp clsLocalRtp;
         clsLocalRtp.m_strIp  = m_pOwner->m_clsSetup.m_strLocalIp;
         clsLocalRtp.m_iPort  = m_pOwner->m_clsRtpThread.m_iPort;
-        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;
+        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // GetSipCallRtp 가 테이블 PT 로 정규화한 identity
 
 #ifdef USE_MEDIA_LIST
-        // 200 OK SDP에 audio + video 미디어 포함
-        {
-            CSdpMedia clsAudio("audio", m_pOwner->m_clsRtpThread.m_iPort, "RTP/AVP");
-            clsAudio.AddFmt(clsLocalRtp.m_iCodec);
-            if (clsLocalRtp.m_iCodec == 99) {
-                clsAudio.AddAttribute("rtpmap", "99 AMR-WB/16000/1");
-                clsAudio.AddAttribute("fmtp", "99 mode-change-capability=2; max-red=0; octet-align=1");
-            } else {
-                clsAudio.AddAttribute("rtpmap", "0 PCMU/8000");
-            }
-            clsLocalRtp.m_clsMediaList.push_back(clsAudio);
-        }
+        // 200 OK SDP에 audio(오퍼 PT echo) + video 미디어 포함
+        m_pOwner->m_clsRtpThread.m_iAudioPt =
+            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp);
         if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
             CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
             clsVideo.AddFmt(96);

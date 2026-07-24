@@ -87,8 +87,8 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
   }
 
   if (bFileMedia) {
-      // ── AMR-WB 파일 기반 전송 (PT=99, 16kHz, 20ms/frame) ──
-      psttRtpHeader->SetPT(99);
+      // ── AMR-WB 파일 기반 전송 (16kHz, 20ms/frame) — PT = SDP 협상값 (미협상 시 레거시 99) ──
+      psttRtpHeader->SetPT(pRtpThread->m_iAudioPt >= 0 ? pRtpThread->m_iAudioPt : 99);
       int iFrameIdx = 0;
       int iTotalFrames = (int)vecFrames.size();
 

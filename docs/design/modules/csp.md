@@ -741,6 +741,13 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
       "CmpPort": 9000,
       "LocalCmpPort": 9001
     },
+    "Media": {
+      "Codecs": [
+        { "Name": "AMR-WB", "Pt": 96, "Clock": 16000, "Channels": 1, "Fmtp": "octet-align=1", "Ptime": 20 },
+        { "Name": "PCMA", "Pt": 8 },
+        { "Name": "telephone-event", "Pt": 101, "Fmtp": "0-15" }
+      ]
+    },
     "Roles": {
       "CSCF": true,
       "TAS": true,
@@ -775,6 +782,33 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
   }
 }
 ```
+
+### 6.1 SDP 코덱 테이블 (`Setup.Media.Codecs`)
+
+SDP 오퍼/answer 의 오디오 코덱·payload type(PT)·fmtp·우선순위의 정본. CSP 기동 시 psip
+`CSipCodecTable` 로 1회 주입된다 (재기동 반영). **비우면 내장 기본 테이블** — AMR-WB(96,
+octet-align=1, ptime 20) 최우선 + AMR(98) + PCMU(0)/PCMA(8)/GSM(3)/G723(4)/G729(18) +
+telephone-event(101, `0-15`).
+
+| 필드 | 의미 | 기본 |
+|---|---|---|
+| `Name` | rtpmap encoding name (`AMR-WB`, `PCMA`, …). `telephone-event` 는 DTMF 슬롯으로 분리 취급 | 필수 |
+| `Pt` | payload type — 정적 코덱은 RFC 3551 고정 번호(0~34), 동적 코덱은 96~127 (번호는 정책값) | 필수 |
+| `Clock` / `Channels` | rtpmap clock rate / 채널 수 (0=미표기) | 8000 / 0 |
+| `Fmtp` / `Ptime` | `a=fmtp` 값 (비면 미출력) / `a=ptime` (0=미출력) | — |
+
+동작 원칙 (RFC 3264/3551):
+
+- **배열 순서 = 우선순위.** 첫 엔트리가 서비스 코덱 — PTT 그룹콜 fan-out 오퍼가 이 코덱·PT 로
+  나가고, CMP relay 는 PT 를 재작성하지 않으므로 **이 PT 가 그룹 전 leg 의 wire PT** 가 된다.
+  기본 96 은 실단말(pjsua)의 로컬 AMR-WB PT(pjmedia 동적 PT 재배정) 정렬 실증값 — 다른 값으로
+  변경 시 실단말 재검증이 전제다.
+- **서버가 answerer 일 때 실 PT 는 항상 오퍼 rtpmap echo.** 테이블 PT 는 오퍼에 해당 rtpmap 이
+  없을 때의 폴백. 코덱 *선택*은 오퍼∩테이블 중 테이블 우선순위 최상위.
+- **인바운드 오퍼의 동적 PT 는 rtpmap 이름으로 식별**한다 (번호 무관 — 예: AMR-WB 를 111 로
+  오퍼해도 인식). 정적 PT 는 번호로 식별. 테이블에 없는 코덱만 담긴 오퍼는 PTT 에서 488
+  (VoLTE B2BUA 는 media-list passthrough 라 서버가 코덱을 이해하지 못해도 단말끼리 협상 가능
+  — 서버 코덱 게이트를 걸지 않는다).
 
 ---
 

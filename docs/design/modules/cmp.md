@@ -4,9 +4,12 @@
 
 CMP는 CIMS 시스템의 미디어 서버로, CSP의 제어 하에 RTP relay, PTT 오디오 믹싱, MCPTT Floor Control을 수행한다.
 
-**서비스 표준 코덱**: VoLTE/PTT 음성 = **AMR-WB** (PT=99, `AMR-WB/16000/1`), 영상 = **H.264**
-(PT=96, `H264/90000`). CMP 는 트랜스코딩 없이 SDP 협상 결과를 릴레이하지만, 녹취 변환
-파이프라인([../features/recording.md](../features/recording.md))은 AMR-WB/H.264 를 전제한다.
+**서비스 표준 코덱**: VoLTE/PTT 음성 = **AMR-WB** (`AMR-WB/16000/1`), 영상 = **H.264**
+(`H264/90000`). 음성 PT 의 정본은 CSP 코덱 테이블(`Setup.Media.Codecs`,
+[csp.md](csp.md) §6.1 — 기본 AMR-WB=96)이며, CMP 는 코덱·PT 를 알지 못한다(제어 API 에 PT
+필드 없음, relay 시 PT 무재작성 — seq/SSRC 만 재작성). 트랜스코딩 없이 SDP 협상 결과를
+릴레이하지만, 녹취 변환 파이프라인([../features/recording.md](../features/recording.md))은
+AMR-WB/H.264 를 전제한다.
 시험(cspsim) 시에도 AMR-WB 미디어 파일 지정이 필수 —
 [../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록 "기본 호시험" 참조.
 

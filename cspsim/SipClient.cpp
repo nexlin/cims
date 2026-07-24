@@ -37,7 +37,7 @@ void CSipClient::EventIncomingCall( const char * pszCallId, const char * pszFrom
         CSipCallRtp clsLocalRtp;
         clsLocalRtp.m_strIp = m_pUserAgent->m_clsSipStack.m_clsSetup.m_strLocalIp;
         clsLocalRtp.m_iPort = m_pRtpThread->m_iPort;
-        clsLocalRtp.m_iCodec = 0; // PCMU
+        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // 오퍼 코덱 echo (미확인 시 PCMU)
 
         m_pUserAgent->AcceptCall( pszCallId, &clsLocalRtp );
 
@@ -58,7 +58,7 @@ void CSipClient::EventIncomingCall( const char * pszCallId, const char * pszFrom
         CSipCallRtp clsLocalRtp;
         clsLocalRtp.m_strIp = m_pUserAgent->m_clsSipStack.m_clsSetup.m_strLocalIp;
         clsLocalRtp.m_iPort = m_pRtpThread->m_iPort;
-        clsLocalRtp.m_iCodec = 0; // PCMU
+        clsLocalRtp.m_iCodec = pclsRtp ? pclsRtp->m_iCodec : 0;  // 오퍼 코덱 echo (미확인 시 PCMU)
 
         m_pUserAgent->AcceptCall( pszCallId, &clsLocalRtp );
 

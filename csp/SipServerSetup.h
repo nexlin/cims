@@ -29,6 +29,19 @@
 
 /**
  * @ingroup CspServer
+ * @brief SDP 오디오 코덱 1개의 설정 (Setup.Media.Codecs[] 엔트리)
+ */
+struct CspMediaCodec {
+    std::string strName;  // rtpmap encoding name (예: "AMR-WB", "telephone-event")
+    int iPt = -1;         // payload type (정적 코덱 = RFC 3551 고정 번호, 동적 = 96~127)
+    int iClock = 8000;    // rtpmap clock rate
+    int iChannels = 0;    // 0 = rtpmap 에 채널 미표기
+    std::string strFmtp;  // a=fmtp 값 (비면 미출력)
+    int iPtime = 0;       // a=ptime 값 (0 = 미출력)
+};
+
+/**
+ * @ingroup CspServer
  * @brief CspServer 설정 파일의 내용을 저장하는 클래스
  */
 class CSipServerSetup {
@@ -234,6 +247,14 @@ public:
     //   FdUrlBase: FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430).
     //   비면 Xcap Host:4430 로 유도.
     std::string m_strFdUrlBase;
+
+    // ================================================================
+    // SDP 미디어 코덱 테이블 — Setup.Media.Codecs (배열 순서 = 우선순위, 첫 엔트리 = 서비스 코덱)
+    //   psip CSipCodecTable 로 기동 시 1회 주입되어 SDP 오퍼/answer 의 코덱·PT·fmtp·우선순위를
+    //   결정한다 (재기동 반영). 비어 있으면 psip 기본 테이블
+    //   (AMR-WB 96 최우선 + AMR 98 + G.711 계열 + telephone-event 101).
+    //   Name="telephone-event" 엔트리는 DTMF 슬롯으로 분리 취급된다.
+    std::vector<CspMediaCodec> m_vecMediaCodecs;
 
     // ================================================================
     // XCAP / CSC 연동 (UE↔CSC, 3GPP TS 24.484 — Phase 3)

@@ -51,8 +51,8 @@ CCallDir gclsCallDir;
 #include "Directory.h"
 #include "GroupCallService.h"
 #include "GroupMap.h"
-#include "McDataMediaService.h"
 #include "Log.h"
+#include "McDataMediaService.h"
 #include "MemoryDebug.h"
 #include "ModuleDispatcher.h"
 #include "Monitor.h"
@@ -60,6 +60,7 @@ CCallDir gclsCallDir;
 #include "RedisStore.h"
 #include "ServerService.h"
 #include "ServerUtility.h"
+#include "SipCodecTable.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
 #include "SipUri.h"
@@ -99,6 +100,25 @@ int ServiceMain() {
                      gclsSetup.m_iOverlayKeys );
     }
     CLog::Print( LOG_DEBUG, "CspServer[%s]", CDirectory::GetProgramDirectory() );
+
+    // SDP 코덱 테이블 주입 (Setup.Media.Codecs → psip CSipCodecTable) — SIP stack 기동 전 1회.
+    //   미설정 시 psip 기본 테이블 (AMR-WB 96 최우선) 그대로 사용.
+    if ( !gclsSetup.m_vecMediaCodecs.empty() ) {
+        SIP_CODEC_ENTRY_LIST clsCodecList;
+        for ( std::vector<CspMediaCodec>::iterator it = gclsSetup.m_vecMediaCodecs.begin();
+              it != gclsSetup.m_vecMediaCodecs.end(); ++it ) {
+            CSipCodecEntry clsEntry;
+            clsEntry.m_iPt = it->iPt;
+            clsEntry.m_strName = it->strName;
+            clsEntry.m_iClockRate = it->iClock;
+            clsEntry.m_iChannels = it->iChannels;
+            clsEntry.m_strFmtp = it->strFmtp;
+            clsEntry.m_iPtime = it->iPtime;
+            clsCodecList.push_back( clsEntry );
+        }
+        CSipCodecTable::Set( clsCodecList );
+    }
+
     // G10+ (2026-04-23): CDR CSV 폴더 생성 제거 — service_log 로 대체됨.
     CSipStackSetup clsSetup;
 

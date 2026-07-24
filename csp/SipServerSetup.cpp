@@ -267,6 +267,30 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( rtp.Has( "LocalCmpPort" ) ) m_iLocalCmpPort = (int)rtp.GetInt( "LocalCmpPort" );
             }
 
+            // SDP 미디어 코덱 테이블 — Setup.Media.Codecs (배열 순서 = 우선순위).
+            //   psip CSipCodecTable 로 주입되어 오퍼/answer 의 코덱·PT·fmtp 를 결정한다.
+            //   비면 psip 기본 테이블 사용 (AMR-WB 96 최우선 — 실단말 pjsua 정렬값).
+            if ( setup.Has( "Media" ) ) {
+                SimpleJson::JsonNode media = setup.Get( "Media" );
+                if ( media.Has( "Codecs" ) ) {
+                    SimpleJson::JsonNode codecs = media.Get( "Codecs" );
+                    if ( codecs.type == SimpleJson::JSON_ARRAY ) {
+                        for ( size_t i = 0; i < codecs.Size(); ++i ) {
+                            SimpleJson::JsonNode c = codecs.At( i );
+                            CspMediaCodec clsCodec;
+                            clsCodec.strName = c.GetString( "Name" );
+                            clsCodec.iPt = (int)c.GetInt( "Pt", -1 );
+                            clsCodec.iClock = (int)c.GetInt( "Clock", 8000 );
+                            clsCodec.iChannels = (int)c.GetInt( "Channels", 0 );
+                            clsCodec.strFmtp = c.GetString( "Fmtp" );
+                            clsCodec.iPtime = (int)c.GetInt( "Ptime", 0 );
+                            if ( !clsCodec.strName.empty() && clsCodec.iPt >= 0 && clsCodec.iPt <= 127 )
+                                m_vecMediaCodecs.push_back( clsCodec );
+                        }
+                    }
+                }
+            }
+
             // MCData media plane(cmdp, MSRP) 연동 — 기본 비활성 (cmdp 미배치 환경 무영향)
             if ( setup.Has( "McDataMedia" ) ) {
                 SimpleJson::JsonNode md = setup.Get( "McDataMedia" );

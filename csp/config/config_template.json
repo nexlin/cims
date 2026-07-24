@@ -189,6 +189,32 @@
       "scope": "service"
     },
     {
+      "key": "media_codec",
+      "title": "SDP 코덱 테이블",
+      "description": "SDP 오퍼/answer 의 오디오 코덱·payload type(PT)·fmtp·우선순위 정본. 배열 순서 = 우선순위 (첫 엔트리 = 서비스 코덱 — PTT fan-out 오퍼가 이 코덱·PT 로 나가며, CMP relay 는 PT 를 재작성하지 않으므로 그룹 wire PT 가 된다). answer 의 실 PT 는 항상 오퍼 rtpmap echo (RFC 3264). 비우면 내장 기본 테이블 (AMR-WB 96 최우선 + AMR 98 + PCMU/PCMA/GSM/G723/G729 + telephone-event 101). 동적 PT(96~127) 변경 시 실단말(pjsua) 재검증 필요 — 96 은 pjsua UE 로컬 PT 정렬 실증값.",
+      "fields": [
+        {
+          "key": "Setup.Media.Codecs",
+          "label": "코덱 목록 (우선순위 순)",
+          "type": "object_list",
+          "default": [],
+          "restart": true,
+          "item_schema": {
+            "fields": [
+              { "key": "Name", "label": "코덱명 (rtpmap encoding)", "type": "string", "required": true, "help": "예: AMR-WB, PCMA, telephone-event (DTMF 슬롯)" },
+              { "key": "Pt", "label": "Payload Type", "type": "int", "required": true, "min": 0, "max": 127, "help": "정적 코덱=RFC 3551 고정 번호(0~34), 동적 코덱=96~127" },
+              { "key": "Clock", "label": "Clock rate", "type": "int", "default": 8000, "help": "예: AMR-WB=16000" },
+              { "key": "Channels", "label": "채널 수", "type": "int", "default": 0, "help": "0=rtpmap 에 채널 미표기" },
+              { "key": "Fmtp", "label": "fmtp", "type": "string", "default": "", "help": "예: octet-align=1 (비면 미출력)" },
+              { "key": "Ptime", "label": "ptime (ms)", "type": "int", "default": 0, "help": "0=미출력" }
+            ]
+          },
+          "help": "비우면 내장 기본 테이블 사용. 예: [{\"Name\":\"AMR-WB\",\"Pt\":96,\"Clock\":16000,\"Channels\":1,\"Fmtp\":\"octet-align=1\",\"Ptime\":20},{\"Name\":\"PCMA\",\"Pt\":8},{\"Name\":\"telephone-event\",\"Pt\":101,\"Fmtp\":\"0-15\"}]"
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "mcdata_media",
       "title": "MCData 미디어평면 (CMDP/MSRP)",
       "description": "대용량 SDS 의 MSRP(media plane) 경로 — cmdp 프로세스 연동 (TS 24.282 §9.2.3).",

@@ -42,6 +42,10 @@ public:
     /** 비디오 파일 경로 (H.264 Annex B raw NAL 파일) 설정 */
     void SetVideoFile(const std::string& strPath) { m_strVideoFile = strPath; }
 
+	/** 협상된 오디오 wire PT (SDP 오퍼/answer 확정값) — 파일 미디어(AMR-WB) 송신 시 스탬핑.
+	 *  -1 = 미협상(레거시 99 폴백). 합성 PCMU 는 정적 PT 0 고정. */
+	int		m_iAudioPt = -1;
+
 	Socket	m_hSocket;
 	Socket	m_hRtcpSocket;       // RTCP 소켓 (RTP 포트 + 1)
 	Socket  m_hFloorRecvSocket;  // floor 수신 소켓 (m=application)

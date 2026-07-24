@@ -123,8 +123,9 @@ leg 의 새 SDP 주소로 NAT 를 재판정해 다시 전달한다: 1:1 relay �
 nat=true leg 의 전용 포트에서:
 
 1. **첫 유효 RTP** 수신 시 소스 주소를 그 leg 의 송신 목적지로 latch.
-   유효 조건 — RTP version=2, 협상된 payload type, 최소 길이, `latch_ip_guard=strict` 면
-   소스 IP == `remote_sig_ip`/`user_sig_ip`.
+   유효 조건 — RTP version=2, 최소 길이(12B), `latch_ip_guard=strict` 면
+   소스 IP == `remote_sig_ip`/`user_sig_ip`. (payload type 은 검사하지 않는다 —
+   CMP 제어 API 는 코덱/PT 를 전달하지 않는 codec-agnostic 설계.)
 2. latch 시 **SSRC 고정.** 이후 소스 주소 갱신(re-latch)은 동일 SSRC 의 패킷일 때만 허용
    — NAT rebind(매핑 변경) 추종과 제3자 주입 차단을 겸한다.
 3. RTCP 목적지는 latch 소스 IP + RTCP 포트 관측으로 교정한다 (관측 전에는 선언 포트+1 추정).
