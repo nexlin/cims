@@ -334,6 +334,23 @@
       "scope": "service"
     },
     {
+      "key": "service_log",
+      "title": "서비스 로그 (녹취·flow)",
+      "description": "녹취·SIP/미디어/CSC msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "fields": [
+        {
+          "key": "Setup.ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "녹취(call.d/*.rtp) + SIP/미디어서버/CSC msg.jsonl + flow.jsonl 저장 루트. CMP·CSC 와 동일 경로여야 함."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. 모든 필드는 hidden: true. UI 렌더링 시 group 속성으로 sub-header 분류.",
@@ -460,17 +477,6 @@
           "hidden": true,
           "restart": true,
           "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback."
-        },
-        {
-          "key": "Setup.ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
-          "group": "service_logging",
-          "type": "path",
-          "default": "service_log",
-          "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true,
-          "restart": true,
-          "help": "녹취(call.d/*.rtp) + SIP/미디어서버/CSC msg.jsonl + flow.jsonl 저장 루트."
         },
         {
           "key": "Setup.ServiceLogging.Enable",

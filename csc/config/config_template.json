@@ -264,6 +264,23 @@
       "scope": "service"
     },
     {
+      "key": "service_log",
+      "title": "서비스 로그",
+      "description": "녹취·msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "fields": [
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "CSP·CMP 와 동일 경로여야 함 (CSC msg.jsonl 등 기록)."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. JWT 시크릿 포함.",
@@ -360,17 +377,6 @@
           "hidden": true,
           "restart": true,
           "help": "CSC 가 agent 별 push 한 설정을 캐시하는 경로."
-        },
-        {
-          "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
-          "group": "service_logging",
-          "type": "path",
-          "default": "service_log",
-          "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true,
-          "restart": true,
-          "help": "CSP/CMP 와 공유되는 서비스 로그 루트."
         },
         {
           "key": "ServiceLogging.Enable",

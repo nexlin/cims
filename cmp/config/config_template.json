@@ -4,7 +4,7 @@
     {
       "key": "listen",
       "title": "Listen / 제어",
-      "description": "CSP ↔ CMP JSON 제어 채널 바인딩. RTP 외부 IP 와 CSP 주소는 _infra 에 배치.",
+      "description": "CSP ↔ CMP JSON 제어 채널 바인딩. RTP 외부 IP(per-node)는 _infra 에 배치.",
       "fields": [
         {
           "key": "ServerIp",
@@ -38,6 +38,16 @@
           "restart": true,
           "help": "CMP → CSP 알림 송신 대상 포트 (CSP 측 수신).",
           "scope": "service"
+        },
+        {
+          "key": "CspIp",
+          "label": "CSP IP (알림 대상)",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@CSP_IP@",
+          "restart": true,
+          "scope": "service",
+          "help": "CMP → CSP 알림 송신 대상 IP. AA 멤버 전부 같은 CSP(VIP)를 가리키므로 그룹 공통. CspPort 와 짝."
         }
       ],
       "scope": "system"
@@ -245,6 +255,23 @@
       "scope": "service"
     },
     {
+      "key": "service_log",
+      "title": "서비스 로그 (녹취·flow)",
+      "description": "녹취·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "fields": [
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "녹취(raw_*.rtp, seg_*.rtp) + flow.jsonl 저장 루트. CSP·CSC 와 동일 경로여야 함."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움.",
@@ -278,28 +305,6 @@
           "hidden": true,
           "restart": true,
           "help": "SDP 에 기재되는 미디어 IP. CSP 가 SDP 에 광고하므로 외부 접근 가능한 주소여야 함."
-        },
-        {
-          "key": "CspIp",
-          "label": "CSP IP",
-          "group": "network",
-          "type": "string",
-          "default": "",
-          "deploy_value": "@CSP_IP@",
-          "hidden": true,
-          "restart": true,
-          "help": "CMP → CSP 알림 송신 대상 IP."
-        },
-        {
-          "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
-          "group": "service_logging",
-          "type": "path",
-          "default": "service_log",
-          "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true,
-          "restart": true,
-          "help": "녹취(raw_*.rtp, seg_*.rtp) + flow.jsonl 저장 루트. CSP 와 공유."
         },
         {
           "key": "ServiceLogging.Enable",
