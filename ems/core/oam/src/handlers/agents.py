@@ -69,22 +69,34 @@ def _pkg_load(config, pid: int = None, name: str = None, version: str = None):
 
 
 def _coerce_list_fields(template: dict, values: dict) -> dict:
-    """config_template 의 string_list/ref_list 필드 값이 콤마 문자열이면 배열로 정규화.
-    프론트 위젯 누락·raw API 우회에도 config.json 에 배열로 저장되게 하는 백엔드 방어."""
+    """config_template 의 string_list/ref_list/object_list 필드 값을 배열로 정규화.
+    프론트 위젯 누락·raw API 우회에도 config.json 에 배열로 저장되게 하는 백엔드 방어.
+    object_list 는 콤마문자열/["ip:port"] 레거시를 [{...}] 로 변환(dict 배열은 그대로)."""
     if not isinstance(values, dict):
         return values
     list_keys = set()
+    obj_fields = {}  # key → item_schema.fields
     for sec in (template or {}).get("sections", []):
         for fld in sec.get("fields", []):
-            if (fld.get("type") or "").lower() in ("string_list", "ref_list") and fld.get("key"):
+            t = (fld.get("type") or "").lower()
+            if not fld.get("key"):
+                continue
+            if t in ("string_list", "ref_list"):
                 list_keys.add(fld["key"])
-    if not list_keys:
+            elif t == "object_list":
+                obj_fields[fld["key"]] = (fld.get("item_schema") or {}).get("fields") or []
+    if not list_keys and not obj_fields:
         return values
     out = dict(values)
     for k in list_keys:
         v = out.get(k)
         if isinstance(v, str):
             out[k] = [s.strip() for s in v.split(",") if s.strip()]
+    if obj_fields:
+        from handlers.modules import _coerce_object_list  # 지연 import (순환 회피)
+        for k, item_fields in obj_fields.items():
+            if k in out:
+                out[k] = _coerce_object_list(out.get(k), item_fields)
     return out
 
 

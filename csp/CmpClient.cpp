@@ -312,8 +312,7 @@ bool CCmpClient::_SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonN
             bSendFail = true;
             break;
         }
-        if ( attempt > 0 )
-            CLog::Print( LOG_INFO, "CmpClient retransmit (TransId=%d attempt=%d)", transId, attempt );
+        if ( attempt > 0 ) CLog::Print( LOG_INFO, "CmpClient retransmit (TransId=%d attempt=%d)", transId, attempt );
 
         std::unique_lock<std::mutex> lock( pTrans->mutex );
         // ★ 술어(predicate) 있는 wait_for 필수 — CMP 응답(~25ms)이 sendto 직후 sender 가
@@ -393,6 +392,66 @@ CmpEndpoint CCmpClient::SelectEndpointForSession( const std::string &strSessionI
     // fallback — primary 반환 (sessionId 비어있거나 ring 빈 경우)
     if ( !m_endpoints.empty() ) return m_endpoints.front();
     return CmpEndpoint( m_strCmpIp, m_iCmpPort );
+}
+
+std::vector<std::string> CCmpClient::TakeSessionKeysForEndpoint( const std::string &strKey ) {
+    std::vector<std::string> keys;
+    std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+    for ( auto it = m_mapSessionToEndpointKey.begin(); it != m_mapSessionToEndpointKey.end(); ) {
+        if ( it->second == strKey ) {
+            keys.push_back( it->first );
+            it = m_mapSessionToEndpointKey.erase( it );
+        } else {
+            ++it;
+        }
+    }
+    return keys;
+}
+
+// per-endpoint HEARTBEAT — 응답이 오면 alive. (내용은 검사하지 않음: 순수 liveness)
+bool CCmpClient::_ProbeAlive( const CmpEndpoint &ep ) {
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "HEARTBEAT" );
+    req.Set( "sesid", CSipMessageLogger::IssueSesId( "", "csp" ) );
+    req.Set( "csp_id", "CSP_MAIN" );
+    req.Set( "csp_sess_id", "0" );
+    req.Set( "cmp_id", "CMP_MAIN" );
+    req.Set( "cmp_sess_id", "0" );
+    std::string resp;
+    return _SendOnEndpoint( ep, req, resp );
+}
+
+// per-endpoint STATS — 가용 RTP 포트(VoIP 풀 + PTT 풀 합) 조회. 응답/파싱 성공 시 true.
+//   HEARTBEAT 는 순수 OK echo 라 "응답은 하지만 포화된" CMP 를 못 잡으므로, 포화(가용 0) 판정에
+//   STATS_REQUEST 를 사용한다 (CMP 는 degraded 자가판정이 없어 CSP 가 임계로 판정).
+bool CCmpClient::_ProbeStats( const CmpEndpoint &ep, int &iFreePorts ) {
+    iFreePorts = -1;
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "STATS_REQUEST" );
+    req.Set( "sesid", CSipMessageLogger::IssueSesId( "", "csp" ) );
+    req.Set( "csp_id", "CSP_MAIN" );
+    req.Set( "csp_sess_id", "0" );
+    req.Set( "cmp_id", "CMP_MAIN" );
+    req.Set( "cmp_sess_id", "0" );
+    std::string resp;
+    if ( !_SendOnEndpoint( ep, req, resp ) ) return false;
+    SimpleJson::JsonNode node = SimpleJson::JsonNode::Parse( resp );
+    if ( node.type != SimpleJson::JSON_OBJECT ) return false;
+    int iVoip = (int)node.GetInt( "rtp_ports_free", -1 );
+    int iPtt = (int)node.GetInt( "ptt_rtp_ports_free", -1 );
+    int iTotal = 0;
+    bool bAny = false;
+    if ( iVoip >= 0 ) {
+        iTotal += iVoip;
+        bAny = true;
+    }
+    if ( iPtt >= 0 ) {
+        iTotal += iPtt;
+        bAny = true;
+    }
+    if ( !bAny ) return false;  // 신뢰할 지표 없음 → 포화 판정 보류
+    iFreePorts = iTotal;
+    return true;
 }
 
 bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort,
@@ -846,37 +905,106 @@ void CCmpClient::RecvLoop() {
 // OnPacketReceived is deprecated/unused with new RecvLoop logic.
 
 void CCmpClient::KeepAliveLoop() {
-    while ( m_bKeepAliveRunning ) {
-        // Use JSON Alive()
-        bool bSuccess = Alive();
+    // per-endpoint 헬스체크. 각 endpoint 에 HEARTBEAT(liveness) 를, 주기적으로 STATS(포화) 를 보낸다.
+    //   - 연속 kMaxAliveFail 회 HEARTBEAT 무응답 → DEAD → ring 제외 + 그 endpoint 의 호 능동 BYE.
+    //   - STATS 가용 RTP 포트 0 → SATURATED → ring 제외(신규 세션만; 기존 세션은 유지, teardown 안 함).
+    //   - 집계 m_bConnected 은 "live endpoint ≥ 1". 콜백은 전부 down ↔ 하나라도 up 전이에서만 발화
+    //     (부분 장애 시 OnCmpStatusChanged(false) 로 전체 그룹이 clear 되던 문제 방지).
+    const int kMaxAliveFail = 3;       // 3회 × 3s ≈ 9s 연속 무응답이어야 DEAD 로 간주
+    const int kStatsEveryNCycles = 5;  // 포화 점검 주기 (5 × 3s ≈ 15s) — STATS 부하 억제
+    int iCycle = 0;
 
-        // 일시적 UDP 제어 타임아웃 1회에 CMP Disconnected 로 판정하면, OnCmpStatusChanged →
-        // 그룹 재수립 + 활성 멤버 전원 재INVITE/teardown 이 발생해 진행 중 PTT 그룹콜이 끊긴다.
-        // (40명 부하 시 HEARTBEAT 가 간헐 타임아웃) → 연속 kMaxAliveFail 회 실패에서만 disconnect.
-        const int kMaxAliveFail = 3;  // 3회 × 3s ≈ 9s 연속 무응답이어야 진짜 다운으로 간주
-        if ( bSuccess ) {
-            m_iAliveFailCount = 0;
+    while ( m_bKeepAliveRunning ) {
+        ++iCycle;
+        bool bCheckStats = ( iCycle % kStatsEveryNCycles == 0 );
+
+        // endpoint 스냅샷 (프로브는 락 밖에서 — 네트워크 I/O)
+        std::vector<CmpEndpoint> eps;
+        {
+            std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+            eps = m_endpoints;
+        }
+
+        int iLive = 0;
+        std::vector<std::string> vecJustDied;  // 이번 cycle 에 DEAD 로 전이한 endpoint key
+
+        for ( const auto &ep : eps ) {
+            bool bLive = _ProbeAlive( ep );
+            bool bSatKnown = false, bSat = false;
+            if ( bLive && bCheckStats ) {
+                int iFree = -1;
+                if ( _ProbeStats( ep, iFree ) ) {
+                    bSatKnown = true;
+                    bSat = ( iFree == 0 );
+                }
+            }
+
+            std::lock_guard<std::mutex> lock( m_mutexEndpoints );
+            EndpointHealth &h = m_mapEndpointHealth[ep.strKey];
+            if ( !bLive ) {
+                if ( h.iFailCount < kMaxAliveFail ) ++h.iFailCount;
+                if ( h.iFailCount >= kMaxAliveFail ) {
+                    if ( h.bLive ) {
+                        h.bLive = false;
+                        vecJustDied.push_back( ep.strKey );
+                        CLog::Print( LOG_ERROR, "CmpClient: endpoint %s DEAD (HEARTBEAT %d회 연속 실패) — ring 제외",
+                                     ep.strKey.c_str(), kMaxAliveFail );
+                    }
+                    m_ring.MarkUnhealthy( ep.strKey, 30 );  // 매 cycle 재확인해 TTL 갱신
+                } else {
+                    CLog::Print( LOG_INFO, "CmpClient: endpoint %s HEARTBEAT 실패 %d/%d — 임계 전까지 유지",
+                                 ep.strKey.c_str(), h.iFailCount, kMaxAliveFail );
+                }
+            } else {
+                h.iFailCount = 0;
+                if ( !h.bLive ) {
+                    h.bLive = true;
+                    CLog::Print( LOG_INFO, "CmpClient: endpoint %s RECOVERED (HEARTBEAT 응답)", ep.strKey.c_str() );
+                }
+                if ( bSatKnown ) {
+                    if ( bSat && !h.bSaturated ) {
+                        h.bSaturated = true;
+                        CLog::Print( LOG_INFO, "CmpClient: endpoint %s SATURATED (가용 RTP 포트 0) — 신규 세션 제외",
+                                     ep.strKey.c_str() );
+                    } else if ( !bSat && h.bSaturated ) {
+                        h.bSaturated = false;
+                        CLog::Print( LOG_INFO, "CmpClient: endpoint %s 포화 해제", ep.strKey.c_str() );
+                    }
+                }
+                // ring 배정 자격 = live && !saturated. 포화는 신규 세션만 제외(기존 세션 유지).
+                if ( h.bSaturated )
+                    m_ring.MarkUnhealthy( ep.strKey, 30 );
+                else
+                    m_ring.MarkHealthy( ep.strKey );
+                ++iLive;
+            }
+        }
+
+        // 집계 연결상태 — live endpoint 유무. 콜백은 전이(전부 down ↔ 하나라도 up)에서만.
+        bool bAnyLive = ( iLive > 0 );
+        if ( bAnyLive ) {
             if ( !m_bConnected ) {
                 m_bConnected = true;
-                if ( m_fnConnectionCallback ) {
-                    m_fnConnectionCallback( true );
-                }
-                CLog::Print( LOG_INFO, "CMP Connected" );
+                if ( m_fnConnectionCallback ) m_fnConnectionCallback( true );
+                CLog::Print( LOG_INFO, "CMP Connected (live endpoints=%d)", iLive );
             }
         } else {
             if ( m_bConnected ) {
-                ++m_iAliveFailCount;
-                CLog::Print( LOG_INFO, "CMP HEARTBEAT 실패 %d/%d (연속) — 임계 도달 전까지 연결 유지",
-                             m_iAliveFailCount, kMaxAliveFail );
-                if ( m_iAliveFailCount >= kMaxAliveFail ) {
-                    m_bConnected = false;
-                    m_iAliveFailCount = 0;
-                    if ( m_fnConnectionCallback ) {
-                        m_fnConnectionCallback( false );
-                    }
-                    CLog::Print( LOG_INFO, "CMP Disconnected (연속 %d회 HEARTBEAT 실패)", kMaxAliveFail );
-                }
+                m_bConnected = false;
+                if ( m_fnConnectionCallback ) m_fnConnectionCallback( false );
+                CLog::Print( LOG_ERROR, "CMP Disconnected (모든 endpoint down)" );
             }
+        }
+
+        // 죽은 endpoint 로 pin 된 호 능동 정리 (Q3-B) — **부분 장애 전용**. 다른 healthy endpoint 가
+        //   남아있을 때(bAnyLive)만 그 노드의 호를 BYE 로 정리한다. 전 endpoint down(단일 CMP 포함)은
+        //   여기서 건드리지 않고 위 m_fnConnectionCallback(false)=OnCmpStatusChanged 경로에 맡긴다
+        //   (기존 동작 보존: 미디어 캐시만 clear, SIP 다이얼로그 유지 → 순단/재시작 시 통화 강제종료 방지).
+        //   락 밖에서 실행 — 핸들러는 StopCall(BYE)/local map 만 건드리고 dead node 로의 blocking
+        //   CmpClient 호출은 하지 않음(비차단). sticky 캐시는 아래에서 항상 정리.
+        for ( const auto &deadKey : vecJustDied ) {
+            std::vector<std::string> keys = TakeSessionKeysForEndpoint( deadKey );
+            if ( bAnyLive && !keys.empty() && m_fnEndpointDownCallback ) m_fnEndpointDownCallback( keys );
         }
 
         std::this_thread::sleep_for( std::chrono::seconds( 3 ) );

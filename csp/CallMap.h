@@ -96,6 +96,11 @@ public:
 
     void DeleteTimeout( int iTimeoutSec );
     void StopCallAll();
+
+    /** 특정 CMP relay session(cmp_sess_N)을 쓰던 B2BUA 양 leg 에 BYE 를 보내고 로컬 레코드를 정리한다.
+     *  미디어 노드(CMP) 다운으로 relay 가 이미 소실된 호의 능동 종료용 — dead node 이므로
+     *  CmpClient::RemoveSession(blocking) 은 호출하지 않는다(bStopPort=false). 종료한 호 수를 반환. */
+    int TerminateByRelaySession( const std::string &strRelaySessionId );
     int GetCount();
 
     void GetString( CMonitorString &strBuf );

@@ -140,23 +140,37 @@
           "restart": true
         },
         {
-          "key": "Setup.MediaServer.Host",
-          "label": "미디어서버 주소",
-          "type": "string",
-          "default": "127.0.0.1",
-          "deploy_value": "@CMP_IP@",
+          "key": "Setup.MediaServer.Endpoints",
+          "label": "미디어서버(CMP) 엔드포인트",
+          "type": "object_list",
           "restart": true,
-          "help": "미디어서버(CMP)의 IP 또는 호스트명."
-        },
-        {
-          "key": "Setup.MediaServer.ControlPort",
-          "label": "제어 포트",
-          "type": "int",
-          "default": 9000,
-          "min": 1,
-          "max": 65535,
-          "restart": true,
-          "help": "미디어서버의 JSON-over-UDP 제어 수신 포트."
+          "help": "미디어서버(CMP) 노드 목록. 첫 행이 primary. 2개 이상이면 Session-ID consistent-hash 로 relay 세션을 분배한다(All-Active). 죽거나(HEARTBEAT 무응답) 포화된(가용 RTP 포트 0) 노드는 헬스체크로 ring 에서 제외되어 신규 세션이 가지 않는다.",
+          "item_schema": {
+            "fields": [
+              {
+                "key": "ip",
+                "label": "IP",
+                "type": "string",
+                "required": true,
+                "help": "미디어서버(CMP)의 IP 또는 호스트명."
+              },
+              {
+                "key": "port",
+                "label": "제어 포트",
+                "type": "int",
+                "default": 9000,
+                "min": 1,
+                "max": 65535,
+                "help": "미디어서버의 JSON-over-UDP 제어 수신 포트."
+              }
+            ]
+          },
+          "default": [
+            { "ip": "127.0.0.1", "port": 9000 }
+          ],
+          "deploy_value": [
+            { "ip": "@CMP_IP@", "port": 9000 }
+          ]
         },
         {
           "key": "Setup.MediaServer.LocalPort",

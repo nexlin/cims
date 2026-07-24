@@ -232,6 +232,19 @@ int ServiceMain() {
     // [FIX] Wire Connection Callback and Start Monitor
     gclsCmpClient.SetConnectionCallback(
         []( bool bConnected ) { gclsGroupCallService.OnCmpStatusChanged( bConnected ); } );
+
+    // 부분 장애(일부 CMP endpoint DEAD) — 그 노드로 pin 된 호를 능동 종료(BYE). key 접두사로 분기:
+    //   "cmp_sess_" = VoLTE relay session_id → CallMap 양 leg BYE, 그 외 = PTT group_id → 그룹 멤버 BYE.
+    //   (전체 media 평면 down 은 위 SetConnectionCallback(false) → OnCmpStatusChanged 경로가 담당.)
+    gclsCmpClient.SetEndpointDownCallback( []( const std::vector<std::string> &keys ) {
+        for ( const auto &k : keys ) {
+            if ( k.rfind( "cmp_sess_", 0 ) == 0 )
+                gclsCallMap.TerminateByRelaySession( k );
+            else
+                gclsGroupCallService.TerminateGroupLocal( k );
+        }
+    } );
+
     gclsGroupCallService.StartMonitor();
 
     // DB 연결 (DbHost 가 설정된 경우 항상 연결)
@@ -342,12 +355,13 @@ int ServiceMain() {
         std::vector<CSipStackUdpListener *> vUdp;
         gclsUserAgent.m_clsSipStack.GetUdpListenerInfo( vUdp );
         if ( vUdp.empty() ) {
-            CLog::Print( LOG_ERROR, "no UDP SIP listener bound after ListenerManager.Sync() — "
-                                    "check local_nodes.jsonl primary record / port availability. aborting." );
+            CLog::Print( LOG_ERROR,
+                         "no UDP SIP listener bound after ListenerManager.Sync() — "
+                         "check local_nodes.jsonl primary record / port availability. aborting." );
             return -1;
         }
-        CLog::Print( LOG_SYSTEM, "ListenerManager: %zu UDP SIP listener(s) active (identity port=%d)",
-                     vUdp.size(), gclsSetup.m_iUdpPort );
+        CLog::Print( LOG_SYSTEM, "ListenerManager: %zu UDP SIP listener(s) active (identity port=%d)", vUdp.size(),
+                     gclsSetup.m_iUdpPort );
     }
     if ( gclsSetup.m_iMonitorPort > 0 ) {
         gclsMonitor.m_iMonitorPort = gclsSetup.m_iMonitorPort;
@@ -493,8 +507,9 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
 
 /**
  * @brief C2: affiliation-info NOTIFY 본문 (application/vnd.3gpp.mcptt-affiliation-info+xml, TS 24.379 §9.3/F.4)
- *   가입자가 active affiliation 을 가진 그룹들을 <affiliation group="sip:g@domain"><status>affiliated</status></affiliation>
- *   로 나열한다. DB 미연결 시 멤버십(그룹 소속) 기준으로 fallback.
+ *   가입자가 active affiliation 을 가진 그룹들을 <affiliation
+ * group="sip:g@domain"><status>affiliated</status></affiliation> 로 나열한다. DB 미연결 시 멤버십(그룹 소속) 기준으로
+ * fallback.
  */
 static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
     std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
@@ -504,7 +519,10 @@ static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
     gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
         bool bMember = false;
         for ( const auto &pUser : clsGroup._pusers ) {
-            if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) { bMember = true; break; }
+            if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) {
+                bMember = true;
+                break;
+            }
         }
         if ( !bMember ) return;
         bool bAff = bDb ? gclsDbManager.IsAffiliated( clsGroup._id, strUserId ) : true;
@@ -545,9 +563,9 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
     // From: server (our PSI), tag = sub.strToTag (the tag we sent in 200 OK)
-    std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
-                             : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
-                                                                     : "cms_psi";
+    std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
+                               : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
+                                                                       : "cms_psi";
     pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     if ( !sub.strToTag.empty() ) {
         pMsg->m_clsFrom.InsertParam( SIP_TAG, sub.strToTag.c_str() );
@@ -646,8 +664,8 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
 
-    CLog::Print( LOG_INFO, "SendTerminatedNotify: User=%s Type=%s Target=%s CSeq=%d",
-                 sub.strUserId.c_str(), sub.strEventType.c_str(), strTarget.c_str(), iSeq );
+    CLog::Print( LOG_INFO, "SendTerminatedNotify: User=%s Type=%s Target=%s CSeq=%d", sub.strUserId.c_str(),
+                 sub.strEventType.c_str(), strTarget.c_str(), iSeq );
 
     gclsUserAgent.m_clsSipStack.SendSipMessage( pMsg );
 }

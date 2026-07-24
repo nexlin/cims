@@ -8,6 +8,7 @@ import {
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 import StringListInput from './StringListInput'
+import { ObjectListEditor } from './ObjectListEditor'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -666,6 +667,13 @@ function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: Fi
       <StringListInput value={value}
         placeholder="콤마로 구분 (예: 10.0.1.48:9000, 10.0.1.49:9000)"
         onChange={onChange} />
+    )
+  }
+  if (f.type === 'object_list') {
+    // ip/port 등 구조화 항목 리스트. 값이 비면 빈 1행 표시 + ＋로 추가(최소 1행 유지).
+    return (
+      <ObjectListEditor field={f} value={value}
+        onChange={(v) => onChange(v as FieldValue)} ensureOne />
     )
   }
   // string / path

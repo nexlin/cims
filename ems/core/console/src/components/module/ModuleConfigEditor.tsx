@@ -4,6 +4,7 @@ import {
   deploymentApi, type ConfigTemplateCollection, type ConfigTemplateField,
 } from '../../api/deployment'
 import StringListInput from './StringListInput'
+import { ObjectListEditor } from './ObjectListEditor'
 
 type Record_ = Record<string, unknown>
 
@@ -463,7 +464,11 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
     )
   }
   if (f.type === 'object_list') {
-    return <ObjectListEditor field={f} value={value} onChange={onChange} refOpts={refOpts} />
+    // 공용 편집기 — item 필드의 ref/ref_list 를 위해 이 renderInput 을 renderCell 로 주입.
+    return (
+      <ObjectListEditor field={f} value={value} onChange={onChange}
+        renderCell={(cf, cv, con) => renderInput(cf, cv, con, refOpts)} />
+    )
   }
   return (
     <input className="form-input" type="text"
@@ -472,56 +477,3 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
   )
 }
 
-function ObjectListEditor({ field, value, onChange, refOpts }: {
-  field: ConfigTemplateField
-  value: unknown
-  onChange: (v: unknown) => void
-  refOpts: RefOptions
-}) {
-  const items = Array.isArray(value) ? (value as Record_[]) : []
-  const itemFields = field.item_schema?.fields || []
-  function addItem() {
-    const r: Record_ = {}
-    for (const f of itemFields) {
-      if (f.default !== undefined) r[f.key] = f.default
-    }
-    onChange([...items, r])
-  }
-  function removeItem(i: number) {
-    onChange(items.filter((_, idx) => idx !== i))
-  }
-  function updateItemField(i: number, key: string, v: unknown) {
-    onChange(items.map((it, idx) => idx === i ? { ...it, [key]: v } : it))
-  }
-  return (
-    <div style={{ border: '1px dashed #bbb', borderRadius: 4, padding: 6 }}>
-      {items.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>항목 없음</div>
-      ) : (
-        <table style={{ width: '100%', fontSize: 12 }}>
-          <thead>
-            <tr>
-              {itemFields.map(f => <th key={f.key} style={{ textAlign: 'left' }}>{f.label}</th>)}
-              <th style={{ width: 40 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((it, i) => (
-              <tr key={i}>
-                {itemFields.map(f => (
-                  <td key={f.key} style={{ padding: '2px 4px' }}>
-                    {renderInput(f, it[f.key], (v) => updateItemField(i, f.key, v), refOpts)}
-                  </td>
-                ))}
-                <td>
-                  <button className="btn btn--sm btn--danger" onClick={() => removeItem(i)}>×</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <button className="btn btn--sm btn--outline" onClick={addItem} style={{ marginTop: 4 }}>＋ 항목</button>
-    </div>
-  )
-}

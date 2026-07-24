@@ -1,15 +1,17 @@
-"""S6-SCN-FAILOVER-CMP — CMP-A kill → 신규 세션 CMP-B 분산.
+"""S6-SCN-FAILOVER-CMP — CMP-A kill → DEAD 판정 후 신규 세션 CMP-B 분산.
 
-Phase 1.H stub. multi-CMP 환경 (`csp.json` Cmp.Endpoints 가 2개 이상) 일
-때만 LIVE. 현재 dev 환경 (단일 CMP) SKIP.
+multi-CMP 환경 (`csp.json` 의 `Setup.MediaServer.Endpoints` 가 2개 이상) 일
+때만 LIVE. 단일 CMP 환경 SKIP.
 
-LIVE 흐름:
-  1. csp.json Cmp.Endpoints 가 ≥2 확인.
+LIVE 흐름 (기대 동작 — CmpClient per-endpoint 헬스체크):
+  1. csp.json Setup.MediaServer.Endpoints 가 ≥2 확인.
   2. CMP-A kill (예: pkill -f 'bin/cmp .*9000').
-  3. cspsim 으로 신규 세션 5개 INVITE → 모두 CMP-B 로 분배 확인
-     (CMP-B 로그에 ADD_SESSION 도착 5건).
-  4. ConsistentHashRing.IsHealthy(CMP-A) == false 확인 (관찰자 endpoint).
-  5. 복구: CMP-A 재기동, 30초 후 healthy 복귀 확인.
+  3. CSP KeepAliveLoop 가 CMP-A 를 DEAD 로 판정할 때까지 대기 (연속 3회 × 3초 ≈9초).
+     → m_ring.MarkUnhealthy → ConsistentHashRing.IsHealthy(CMP-A) == false.
+  4. CMP-A 로 진행중이던 호가 CSP 능동 BYE 로 종료됨 확인 (해당 단말 BYE 수신).
+  5. cspsim 으로 신규 세션 5개 INVITE → 모두 CMP-B 로 분배 확인
+     (CMP-B 로그에 ADD_SESSION 도착 5건; CMP-A 로는 0건).
+  6. 복구: CMP-A 재기동 → HEARTBEAT 재응답 시 ring 재편입(MarkHealthy) 확인.
 """
 from __future__ import annotations
 
@@ -37,13 +39,15 @@ def scn_failover_cmp(ctx: VerifyContext) -> ItemResult:
     except Exception as e:
         return _skip(ctx, f"csp.json 파싱 실패: {e}")
 
-    cmp_section = d.get("Cmp") or {}
-    endpoints = cmp_section.get("Endpoints") or []
-    if not endpoints or len(endpoints) < 2:
-        return _skip(ctx, f"Cmp.Endpoints={len(endpoints)} (<2) — single-CMP 환경, SKIP")
+    media = ((d.get("Setup") or {}).get("MediaServer")) or {}
+    endpoints = media.get("Endpoints") or []
+    # 레거시 단일 Host 또는 Endpoints<2 는 single-CMP → SKIP.
+    if not isinstance(endpoints, list) or len(endpoints) < 2:
+        n = len(endpoints) if isinstance(endpoints, list) else 0
+        return _skip(ctx, f"Setup.MediaServer.Endpoints={n} (<2) — single-CMP 환경, SKIP")
 
-    # LIVE 시나리오 구현은 후속 라운드.
-    return _skip(ctx, f"multi-CMP 환경 감지됨 (Endpoints={len(endpoints)}) — LIVE 본체 미구현 (1.H 후속)")
+    # LIVE 시나리오 본체(kill→DEAD 대기→BYE·분배 확인→복구)는 후속 라운드.
+    return _skip(ctx, f"multi-CMP 환경 감지됨 (Endpoints={len(endpoints)}) — LIVE 본체 미구현 (후속)")
 
 
 def _skip(ctx: VerifyContext, reason: str) -> ItemResult:

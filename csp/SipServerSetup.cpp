@@ -223,23 +223,31 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             if ( setup.Has( "MediaServer" ) ) {
                 SimpleJson::JsonNode ms = setup.Get( "MediaServer" );
                 if ( ms.Has( "Enable" ) ) m_bUseRtpRelay = ( ms.Get( "Enable" ).AsString() == "true" );
-                if ( ms.Has( "Host" ) ) m_strCmpIp = ms.GetString( "Host" );
-                if ( ms.Has( "ControlPort" ) ) m_iCmpPort = (int)ms.GetInt( "ControlPort" );
                 if ( ms.Has( "LocalPort" ) ) m_iLocalCmpPort = (int)ms.GetInt( "LocalPort" );
                 // LocalIp 는 현재 C++ 바인딩 없음 (렌더링 용도). 추후 CmpClient bind 확장 시 연결.
-                // 전용 미디어 풀 (AA 다중 CMP): MediaServer.Endpoints = [{"ip":..,"port":..}, ..].
-                //   SIP remote_nodes 와 무관한 미디어 평면 전용. 비우면 Host 단일 운영(하위호환).
+                // 레거시 단일 Host/ControlPort — 구 배포 csp.json 호환용. Endpoints 가 비었을 때만
+                //   primary 로 쓰인다 (아래 Endpoints[0] override 참조).
+                if ( ms.Has( "Host" ) ) m_strCmpIp = ms.GetString( "Host" );
+                if ( ms.Has( "ControlPort" ) ) m_iCmpPort = (int)ms.GetInt( "ControlPort" );
+                // 미디어(CMP) 엔드포인트 풀 — 통합 리스트. MediaServer.Endpoints = [{"ip":..,"port":..}, ..].
+                //   첫 행이 primary, 2개 이상이면 CmpClient consistent-hash ring 으로 Session-ID 를
+                //   다중 CMP(All-Active) 에 분배한다. 비우면 위 Host/ControlPort 단일 운영(하위호환).
                 if ( ms.Has( "Endpoints" ) ) {
                     SimpleJson::JsonNode eps = ms.Get( "Endpoints" );
                     if ( eps.type == SimpleJson::JSON_ARRAY ) {
                         for ( size_t i = 0; i < eps.Size(); ++i ) {
                             SimpleJson::JsonNode ep = eps.At( i );
                             std::string ip = ep.GetString( "ip" );
-                            int port = (int)ep.GetInt( "port", m_iCmpPort );
-                            if ( !ip.empty() && port > 0 )
-                                m_vecCmpEndpoints.push_back( std::make_pair( ip, port ) );
+                            int port = (int)ep.GetInt( "port", 9000 );
+                            if ( !ip.empty() && port > 0 ) m_vecCmpEndpoints.push_back( std::make_pair( ip, port ) );
                         }
                     }
+                }
+                // Endpoints[0] = primary (레거시 Host 보다 우선). CmpClient::Init 가 이 primary 를
+                //   ring 에 등록하고, CspServer 가 나머지 endpoint 를 AddEndpoint 로 추가한다.
+                if ( !m_vecCmpEndpoints.empty() ) {
+                    m_strCmpIp = m_vecCmpEndpoints.front().first;
+                    m_iCmpPort = m_vecCmpEndpoints.front().second;
                 }
             } else if ( setup.Has( "RtpRelay" ) ) {
                 SimpleJson::JsonNode rtp = setup.Get( "RtpRelay" );

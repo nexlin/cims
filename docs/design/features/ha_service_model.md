@@ -81,9 +81,10 @@ HA 의 책임은 **모듈/노드 이상 시 서비스를 다른 노드로 넘기
 | 로컬 복구(재기동) | 적용 | **적용** — Supervisor 의 프로세스 감시는 mode 무관 공통 |
 
 AA 노드의 유일한 HA 관련 동작은 Supervisor 의 **로컬 복구**(죽은 모듈 재기동)이며,
-이것은 "절체"가 아니라 프로세스 감시다. 장애 노드의 요청 제외는 CSP 가 자체
-`KeepAliveLoop`(Alive ping)로 감지해 consistent hash ring 에서 빼는 것으로 처리되며,
-로컬 HA agent 의 책임이 아니다.
+이것은 "절체"가 아니라 프로세스 감시다. 장애 노드(CMP)의 요청 제외는 CSP 가 자체
+`KeepAliveLoop`(endpoint 별 HEARTBEAT/STATS)로 감지해 consistent hash ring 에서 빼는 것으로
+처리되며(DEAD 노드는 그 노드의 진행중 호를 BYE 로 정리), 로컬 HA agent 의 책임이 아니다.
+상세는 ha_design.md §5.4 / §7.2.
 
 ## 4. 상태 모델과 verdict
 
@@ -711,8 +712,9 @@ verdict 를 쓸 때까지 그 노드는 승격 대상이 아니다(fail-safe, §
   shared_writer/unknown 은 수동)로 확장.
 - shared_writer(특히 csc DB) fencing/leader-lease — 미도입. 확인 전 `safety.class=unknown`
   = 수동 래치 보수 처리.
-- CSP hash ring 의 `MarkUnhealthy` 미구현 — AA 장애 제외가 CSP `KeepAliveLoop`(3초×3회
-  ≈9초)에만 의존. 본 HA 재설계와 별개 축의 CSP 과제.
+- CSP hash ring 의 endpoint 헬스체크는 CSP `KeepAliveLoop`(3초, endpoint 별 HEARTBEAT
+  연속 3회 실패 ≈9초 → `MarkUnhealthy`; STATS 포화 → 신규 제외; DEAD 노드 호는 BYE 정리)로
+  동작 — 본 HA 재설계(keepalived/verdict)와 별개 축의 CSP 미디어평면 로직. 상세 ha_design.md §5.4.
 - 양 노드가 동시에 자격을 잃으면(같은 장애·양쪽 FAULT) VIP 공백 = 서비스 중단. "잘못된
   노드가 Active" 보다 안전한 fail-safe 이며, 반복 시 `CIMS-QOS-001`(ha_flap) 알람으로 노출.
   근본 회피는 비상 밸브(`CIMS_HA_DISABLE`)로 판정을 얼려 수동 수습.

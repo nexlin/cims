@@ -115,8 +115,9 @@
 
 - CSP/PSP standby → active 승격 시 Redis 로부터 register state 복원
 - CMP/PMP All Active 분배 — CSP 의 hash ring 에서 unhealthy CMP-A 제외
-  → 신규 세션은 CMP-B 로만 분배 (기존 세션은 RTP 진행중이라 새로
-  올라온 INVITE 부터 적용)
+  → 신규 세션은 CMP-B 로만 분배. CMP-A 가 DEAD 면 그 노드로 진행중이던 호는
+  CSP 가 능동 BYE 로 정리(미디어 상태 이관 불가 — AA=분배, 상태 미러 아님).
+  포화(가용 RTP 포트 0) 노드는 신규만 제외하고 기존 세션은 유지.
 
 ## 5. fail-over 시나리오
 
@@ -150,20 +151,26 @@
 
 ### 5.4 CMP 일부 노드 장애 (All Active)
 
-1. CSP 가 다음 RTP 세션 할당 시 `addSession` (UDP JSON) 을 hash ring 의
-   첫 선택 노드 (CMP-A) 로 송신
-2. 5초 timeout 발생 → CSP 가 CMP-A 를 unhealthy 마크 (`unhealthy_until =
-   now + 30s`)
-3. 같은 Session-ID 의 재시도가 hash ring 의 다음 healthy 노드 (CMP-B) 로
-   재할당
-4. 이후 30초간 신규 세션은 CMP-B 만 사용 (ring 에서 임시 제외)
-5. 30초 후 heartbeat 1회 success 시 healthy 복귀
-6. **체감 영향**: 첫 세션 1개 RTT (5초) 지연, 이후 자동 복원
+CSP `CCmpClient::KeepAliveLoop` 가 endpoint 별 헬스체크를 수행한다 (`CmpClient.cpp`).
+
+1. CSP 가 3초 주기로 각 CMP endpoint 에 개별 HEARTBEAT 를 보낸다. CMP-A 가 연속
+   3회 무응답(≈9초)이면 **DEAD** 로 판정.
+2. DEAD → `m_ring.MarkUnhealthy("A", 30s)` → 신규 세션은 hash ring 에서 CMP-A 를
+   건너뛰고 healthy 노드(CMP-B)로만 분배.
+3. 추가로 CMP-A 로 pin 되어 있던 진행중 호를 CSP 가 **능동 종료(BYE)** 한다
+   (VoLTE=`CCallMap::TerminateByRelaySession`, PTT=`CGroupCallService::TerminateGroupLocal`).
+   dead node 로의 blocking 제어호출(RemoveSession/LeaveGroup)은 생략하고 로컬 BYE +
+   레코드 정리만 수행. *미디어 상태는 CMP-A 메모리에만 있어 CMP-B 로 이관 불가
+   (AA=분배, 상태 미러 아님) — 사용자는 재발신으로 healthy 노드에 자동 안착.*
+4. HEARTBEAT 재응답 시 `m_ring.MarkHealthy("A")` → ring 재편입(신규만 다시 분배).
+5. **포화**: STATS `rtp_ports_free`(+PTT 풀) 합이 0 이면 SATURATED → ring 제외
+   (신규 세션만; 기존 세션은 유지, teardown 안 함).
+6. **체감 영향**: CMP-A 의 진행중 호는 종료(재발신 필요), 신규 호는 CMP-B 로 무중단.
 
 ### 5.5 PMP 일부 노드 장애
 
-5.4 와 동일 흐름. 그룹 세션의 경우 active 통화 시 floor 호환 RTP 가 mid-
-session 손실되나, 그룹 재진입으로 복구.
+5.4 와 동일 흐름. 그룹 세션의 경우 노드 DEAD 시 그 노드의 그룹 멤버 호가 BYE 로
+종료되고, 신규 그룹콜은 healthy 노드에 생성된다(그룹 재진입).
 
 ## 6. State replication 설계 (Redis)
 
@@ -250,19 +257,22 @@ class CmpRing:
 
 ### 7.2 healthcheck 정책
 
-구현된 동작 (`CmpClient.cpp KeepAliveLoop`):
+구현된 동작 (`CmpClient.cpp KeepAliveLoop`) — endpoint 단위:
 
-- **연결 단위 heartbeat** — CSP 가 3초 주기로 각 CMP 에 `Alive` (JSON-over-UDP)
-  송신. **연속 3회 실패 (≈9초)** 에서만 Disconnected 판정 — 일시적 UDP 타임아웃
-  1회로 끊으면 그룹 재수립 + 재INVITE 로 진행 중 PTT 콜이 끊기므로 (부하 시
-  간헐 타임아웃 흡수). 복구는 다음 Alive 성공 즉시 (`OnCmpStatusChanged`).
-- **동기 요청 타임아웃** — `SendRequestAndWait` 는 100ms × 3회 재시도
-  (총 ≈300ms) 후 실패 반환.
-
-미구현 (향후 과제): ring 단위 healthcheck — `ConsistentHashRing` 은
-`MarkUnhealthy(node, 30s)`/`unhealthy_until` 스킵·재진입을 지원하지만 CSP 에
-호출부가 없다. `addSession` 실패 시 unhealthy 마크 + 다음 ring entry 재시도는
-설계만 존재.
+- **endpoint 별 heartbeat** — CSP 가 3초 주기로 **각 CMP endpoint** 에 개별
+  `HEARTBEAT` (JSON-over-UDP) 송신. endpoint 가 **연속 3회 실패 (≈9초)** 하면 그
+  endpoint 만 **DEAD** 로 판정해 `m_ring.MarkUnhealthy(key, 30s)` — 일시적 UDP
+  타임아웃 1회로 끊지 않아 부하 시 간헐 타임아웃을 흡수. HEARTBEAT 재응답 시
+  `MarkHealthy` 로 ring 재편입.
+- **포화 감지** — HEARTBEAT 는 순수 OK echo 라 "응답하지만 포화된" 노드를 못 잡으므로,
+  N cycle(≈15초)마다 `STATS_REQUEST` 로 가용 RTP 포트(`rtp_ports_free` + PTT 풀)를
+  본다. 합계 0 이면 SATURATED → ring 제외(신규 세션만; 기존 세션 유지). CMP 는 degraded
+  자가판정이 없어 CSP 가 임계로 판정.
+- **집계 연결상태** — `m_bConnected` = "live endpoint ≥ 1". 전부 down ↔ 하나라도 up
+  **전이에서만** `OnCmpStatusChanged` 발화(부분 장애 시 전체 그룹 clear 방지). 부분
+  장애는 `m_fnEndpointDownCallback` 로 죽은 노드의 호만 BYE 정리(§5.4).
+- **동기 요청 타임아웃** — `SendRequestAndWait` 는 100ms × 3회 재시도 (총 ≈300ms) 후
+  실패 반환.
 
 ### 7.3 가상노드 수 (vnode=128) 선택 근거
 
@@ -300,7 +310,7 @@ standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **cold-s
 |---|---|---|
 | S6-FAILOVER-CSC | CSC active 강제 종료 → Console 재연결 | active CSC kill → 5초 대기 → Console API 호출 200 확인 |
 | S6-FAILOVER-CSP | CSP active 강제 종료 → 단말 REGISTER 복원 | active CSP kill → cspsim REGISTER → Redis lookup hit 확인 |
-| S6-FAILOVER-CMP | CMP-A 강제 종료 → 신규 세션 CMP-B 분산 | active CMP-A kill → cspsim 신규 통화 5개 → 모두 CMP-B 도착 확인 |
+| S6-FAILOVER-CMP | CMP-A 강제 종료 → DEAD 판정 후 신규 세션 CMP-B 분산 | CMP-A kill → 헬스체크 DEAD 판정(≈9초) 대기 → cspsim 신규 통화 5개 → 모두 CMP-B 도착 확인 (+ CMP-A 진행중 호 BYE 확인) |
 
 ## 10. 구성 요소별 구현 위치
 
@@ -596,8 +606,10 @@ VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 �
 **fail-over 트리거 / 검증** (agent sync REST + Console 으로 ssh-free 운영):
 - CSP A/S: active(ctrl01) 의 csp 프로세스 kill → keepalived 가 VIP 를 ctrl02 로
   인계 (VRRP advert_int 수백 ms) → 신규 REGISTER 가 동일 VIP 로 ≤수초 내 응답.
-- CMP All-Active: media01 kill → 신규 세션이 consistent-hash ring 으로 media02 에 분배.
-- 진행 중 호 drop 은 허용 (cold dialog 정책 — 절체 시 신규 세션만 보장).
+- CMP All-Active: media01 kill → CSP 헬스체크가 media01 을 DEAD 로 판정(≈9초)해
+  ring 에서 제외 → 신규 세션이 consistent-hash ring 으로 media02 에 분배. media01 로
+  진행중이던 호는 CSP 가 능동 BYE 로 종료(재발신 시 media02 안착).
+- 진행 중 호 drop 은 허용 (미디어 상태 이관 불가 — 절체 시 신규 세션만 보장).
 
 **S6 FAILOVER 구현 진입점**:
 1. `verify/lib/items/stage6/scn_failover_csp.py` — active CSP kill → VIP 인계 후

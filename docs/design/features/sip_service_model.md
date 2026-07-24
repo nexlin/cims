@@ -374,7 +374,7 @@ AccessServices:
 
 - `Setup.Sip.AuthRealm` / `Setup.Realm[]` 없음 — realm/domain 의 SOT 는 AccessService.
 - `Setup.Roles` 사용.
-- `Setup.RtpRelay`, `Setup.Database`, `Setup.Log`, `Setup.Monitor`, `Setup.Security`, `Setup.ServiceLogging`, `Setup.Cdr`, `Setup.DataFolder`, `Setup.SystemId` 사용.
+- `Setup.MediaServer`(구 `Setup.RtpRelay` 는 fallback), `Setup.Database`, `Setup.Log`, `Setup.Monitor`, `Setup.Security`, `Setup.ServiceLogging`, `Setup.Cdr`, `Setup.DataFolder`, `Setup.SystemId` 사용.
 
 ---
 

@@ -87,6 +87,12 @@ public:
     /** Session-ID → 선택된 endpoint (consistent hash). 미등록 endpoint 면 primary 반환. */
     CmpEndpoint SelectEndpointForSession( const std::string &strSessionId );
 
+    // Phase 1.E-3 — endpoint DEAD 전이 시 그 endpoint 로 pin 된 세션/그룹 key 목록을
+    //   수집하고 sticky 캐시에서 제거해 반환한다. 호출측(CSP)이 이 key 들에 해당하는
+    //   VoLTE/PTT 호를 능동 teardown(BYE) 한다. 반환 key: VoLTE=relay session_id(cmp_sess_N),
+    //   PTT=group_id.
+    std::vector<std::string> TakeSessionKeysForEndpoint( const std::string &strKey );
+
 private:
     CCmpClient();
     ~CCmpClient();
@@ -125,6 +131,10 @@ private:
     bool _SendOnEndpoint( const CmpEndpoint &ep, const SimpleJson::JsonNode &payload, std::string &strResponse );
     CmpEndpoint _ResolveEndpoint( const std::string &strSessionKey );
 
+    // per-endpoint 프로브 (KeepAliveLoop 내부용) — endpoint 별 동기 요청/응답.
+    bool _ProbeAlive( const CmpEndpoint &ep );                   // HEARTBEAT liveness (응답=alive)
+    bool _ProbeStats( const CmpEndpoint &ep, int &iFreePorts );  // STATS 가용 RTP 포트(VoIP+PTT 합)
+
     // Threads
     void KeepAliveLoop();
     void RecvLoop();
@@ -153,6 +163,16 @@ private:
     CConsistentHashRing<std::string> m_ring;
     std::map<std::string, std::string> m_mapSessionToEndpointKey;  // sessionId → endpoint key
 
+    // Phase 1.E-3 — per-endpoint 헬스 상태 (KeepAliveLoop 가 갱신, m_mutexEndpoints 보호).
+    //   bLive=HEARTBEAT 응답(liveness, 집계 m_bConnected·DEAD teardown 기준),
+    //   bSaturated=STATS 가용 RTP 포트 0(신규 배정만 ring 제외, 기존 세션은 유지).
+    struct EndpointHealth {
+        int iFailCount = 0;
+        bool bLive = true;
+        bool bSaturated = false;
+    };
+    std::map<std::string, EndpointHealth> m_mapEndpointHealth;  // endpoint key → health
+
     // Threads
     std::atomic<bool> m_bKeepAliveRunning;
     std::thread m_threadKeepAlive;
@@ -169,10 +189,17 @@ private:
     // 그룹콜 전체 teardown 되던 과민 동작을 막기 위해, 임계(kMaxAliveFail) 연속 실패에서만 disconnect.
     int m_iAliveFailCount;
     std::function<void( bool )> m_fnConnectionCallback;
+    // endpoint 가 DEAD 로 전이하면 그 endpoint 로 pin 되어 있던 세션/그룹 key 들을 콜백한다
+    //   (CSP 가 해당 VoLTE/PTT 호를 BYE 로 정리). 부분 장애(일부 endpoint down) 전용 — 전체
+    //   media 평면 down 은 기존 m_fnConnectionCallback(false) 경로.
+    std::function<void( const std::vector<std::string> & )> m_fnEndpointDownCallback;
 
 public:
     void SetConnectionCallback( std::function<void( bool )> fnCallback ) {
         m_fnConnectionCallback = fnCallback;
+    }
+    void SetEndpointDownCallback( std::function<void( const std::vector<std::string> & )> fnCallback ) {
+        m_fnEndpointDownCallback = fnCallback;
     }
     bool IsConnected() const {
         return m_bConnected;

@@ -253,10 +253,11 @@ processAdd()로 위임. 기존 세션이 있으면 피어 주소만 갱신.
 ```
 
 - `rtp_ports_*` = VoIP 풀(`_freeResources`/`PRtpTrans`), `ptt_rtp_ports_*` = PTT 전용 풀(`_freePttResources`/`PPttTrans`). OAM `/stats/health` 가 `cmp.rtp_ports` + `cmp.rtp_ports_ptt` 로 분리 전달.
+- **CSP 의 포화 판정 신호**: CSP 헬스체크가 `rtp_ports_free + ptt_rtp_ports_free == 0` 이면 그 CMP 를 SATURATED 로 보고 ring 에서 신규 세션만 제외한다(csp.md §3.6). `status` 는 항상 `"OK"` 하드코딩이라 degraded 자가판정은 없고, 판정은 CSP 가 임계로 한다.
 
 #### ALIVE / HEARTBEAT — 연결 확인
 
-**응답:** `{"trans_id": N, "response": "OK"}`
+**응답:** `{"trans_id": N, "response": "OK"}` — 순수 liveness ack(부하/health 정보 없음). CSP 는 각 CMP endpoint 에 3초 주기로 보내 연속 3회 무응답이면 DEAD 로 판정(csp.md §3.6). AA 다중 CMP 를 CSP 가 운용하지만 각 CMP 노드는 이를 알지 못한다(분배·헬스는 CSP 책임).
 
 ---
 

@@ -65,10 +65,30 @@
         {
           "key": "MediaServer.Endpoints",
           "label": "CMP probe 엔드포인트",
-          "type": "string_list",
-          "default": [],
+          "type": "object_list",
           "restart": false,
-          "help": "전 미디어 노드 \"ip:port\" 목록 (예: 10.0.1.48:9000). 첫 노드가 대시보드 health 위젯의 대표 probe 대상. 비우면 CMP 관측 비활성."
+          "help": "전 미디어 노드 목록. 첫 노드가 대시보드 health 위젯의 대표 probe 대상. 비우면 CMP 관측 비활성. (레거시 \"ip:port\" 콤마 문자열도 읽어들여 자동 변환.)",
+          "item_schema": {
+            "fields": [
+              {
+                "key": "ip",
+                "label": "IP",
+                "type": "string",
+                "required": true,
+                "help": "미디어 노드(CMP)의 IP."
+              },
+              {
+                "key": "port",
+                "label": "제어 포트",
+                "type": "int",
+                "default": 9000,
+                "min": 1,
+                "max": 65535,
+                "help": "STATS_REQUEST 를 받을 CMP 제어 포트."
+              }
+            ]
+          },
+          "default": []
         },
         {
           "key": "MediaServer.ProbeTimeoutMs",

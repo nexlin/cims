@@ -305,15 +305,23 @@ base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에
 배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
 에는 두지 않는다.
 
-`MediaServer.Endpoints`(type `string_list`)는 `"ip:port"` **배열**로 저장·소비된다. 콘솔
-입력의 콤마 문자열은 배열로 정규화되는데, 세 지점에서 보장한다: (1) 콘솔 위젯(deployment 모드
-`ModuleConfigModal`·모듈 모드 `ModuleConfigEditor` 둘 다 콤마↔배열), (2) 백엔드 coerce
-(`_put_deployment_config` list-coerce + 모듈 모드 `_coerce_value`), (3) 소비자
-(`stats._media_endpoints` 가 최상위 문자열도 콤마 분해). 원소는 `"ip:port"` 문자열과
-`{ip,port}` dict 를 모두 허용한다. **CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
+`MediaServer.Endpoints`(type `object_list`, `item_schema.fields = [{ip:string}, {port:int}]`)는
+`[{ip,port}, ..]` **배열**로 저장·소비된다. 콘솔은 공용 `ObjectListEditor`(ip/port 행 + `＋`로 추가,
+최소 1행)로 편집한다(`ModuleConfigModal`·`ModuleConfigEditor` 공유). 레거시 콤마 문자열
+`"ip:port, .."`/`["ip:port"]` 도 세 지점에서 `[{ip,port}]` 로 정규화·수용한다: (1) 콘솔 위젯
+(`ObjectListEditor` 가 로드 시 `"host:port"` → `{ip,port}` 변환), (2) 백엔드 coerce
+(`agents._coerce_list_fields` + 모듈 모드 `modules._coerce_value` 의 `object_list` 분기 =
+`_coerce_object_list`), (3) 소비자(`stats._media_endpoints` 가 문자열/`{ip,port}` dict 모두 수용).
+**CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
 health 위젯은 전 노드 probe 집계(up = any 노드 응답, 카운터는 합산)이고, 알람 sweeper 의
 `process_down(target=cmp)` 는 endpoint 마다 `mo_instance='cims/cmp/<ip>:<port>'` 로 개별
 발화한다. `Endpoints`/`CmpIp` 미설정이면 CMP 관측 비활성(cmp 계열 규칙 skip).
+
+> **주의 — 이름은 같지만 평면이 다르다.** 여기 oam-svc 의 `MediaServer.Endpoints` 는 **관측(STATS
+> probe)** 전용이다. CSP 가 실제 relay 세션을 CMP 들에 분배하는 **데이터 평면** 설정은 별개의
+> `Setup.MediaServer.Endpoints`(csp `config_template.json`, C++ `SipServerSetup`/`CmpClient` 소비)이며
+> 표현형(`object_list [{ip,port}]`)과 편집 위젯은 동일하다. 둘은 독립 설정이므로 다중 CMP 운영 시 양쪽에
+> 같은 노드 목록을 넣는다. CSP 데이터평면 상세는 modules/csp.md §3.6.
 
 ### file_store 소유권 (I5)
 | 도메인/컬렉션 | 소유 |

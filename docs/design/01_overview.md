@@ -60,9 +60,8 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 | `LocalPort` | int | 5060 | SIP UDP 포트 |
 | `AuthRealm` | string | "csp" | SIP Digest 인증 realm (서비스 도메인과 독립) |
 | `Realm` | array | — | 서비스별 도메인 배열 `[{"service":"volte"/"mcptt"/"system"/"console","domains":["..."]}]` |
-| `CmpIp` | string | "127.0.0.1" | CMP 서버 IP |
-| `CmpPort` | int | 9000 | CMP 제어 포트 |
-| `LocalCmpPort` | int | 9001 | CSP의 CMP 응답 수신 포트 |
+| `MediaServer.Endpoints` | array | — | CMP 노드 배열 `[{"ip":..,"port":9000}, ..]` (첫 행=primary, 2개 이상=All-Active 분배) |
+| `MediaServer.LocalPort` | int | 9001 | CSP의 CMP 응답 수신 포트 |
 | `DataFolder` | string | "../csp" | User/Group JSON 폴더 경로 |
 | `Database.Host` | string | "127.0.0.1" | MySQL 호스트 |
 | `Database.Port` | int | 3306 | MySQL 포트 |
@@ -81,9 +80,10 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
     { "service": "mcptt",  "domains": ["ptt.mnc001.mcc450.3gppnetwork.org"] },
     { "service": "system", "domains": ["csp"] }
   ],
-  "CmpIp": "192.168.0.2",
-  "CmpPort": 9000,
-  "LocalCmpPort": 9001,
+  "MediaServer": {
+    "Endpoints": [ { "ip": "192.168.0.2", "port": 9000 } ],
+    "LocalPort": 9001
+  },
   "DataFolder": "../csp",
   "Database": {
     "Host": "127.0.0.1",
@@ -847,7 +847,7 @@ cd csc/src && python3 csc_app.py
 ### 6.1 CMP 연결 실패
 
 **증상:** CSP 로그에 "CMP Disconnected" 반복
-**원인:** CMP가 실행되지 않았거나, CSP의 `CmpIp`/`CmpPort` 설정이 잘못됨
+**원인:** CMP가 실행되지 않았거나, CSP의 `MediaServer.Endpoints` 설정이 잘못됨
 **해결:**
 ```bash
 # CMP 프로세스 확인
@@ -856,8 +856,8 @@ ps aux | grep cmp
 # CMP 포트 확인
 ss -ulnp | grep 9000
 
-# CSP 설정 확인
-cat config/csp.json | grep -E "CmpIp|CmpPort"
+# CSP 설정 확인 (모든 endpoint 가 DEAD 여야 "CMP Disconnected" — 부분 장애는 로그에 endpoint DEAD 로만 표기)
+cat config/csp.json | grep -A6 MediaServer
 ```
 
 ### 6.2 SIP 등록 실패
