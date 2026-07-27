@@ -264,6 +264,7 @@ class SipController(private val config: SipAccountConfig) {
         runCatching { PjLib.ep.audDevManager().setSndDevMode(mode.toLong()) }
             .onSuccess { Log.i(TAG, "setCaptureEnabled($on) snd mode=$mode") }
             .onFailure { Log.w(TAG, "setCaptureEnabled($on) 실패: ${it.message}") }
+        applyDeviceAudioBoost()    // (재)오픈으로 slot0 레벨 초기화 + 전이중 전환 시 mic 축 적용
     }
 
     /** 사운드 장치 재오픈(현재 캡처 게이트 모드 재적용) — 열려 있으면 즉시 닫고 다시 열어
@@ -278,6 +279,7 @@ class SipController(private val config: SipAccountConfig) {
         runCatching { PjLib.ep.audDevManager().setSndDevMode(mode.toLong()) }
             .onSuccess { Log.i(TAG, "bounceSndDev snd mode=$mode") }
             .onFailure { Log.w(TAG, "bounceSndDev 실패: ${it.message}") }
+        applyDeviceAudioBoost()    // 재오픈으로 slot0 레벨 초기화 — 재적용
     }
 
     /** 오디오 출력 라우팅 — PTT(무전) UX 용 스피커폰 토글. */
@@ -321,12 +323,24 @@ class SipController(private val config: SipAccountConfig) {
      * 보정한다. 통화별 RxLevel(슬라이더)과 곱으로 적용되므로 과도값은 클리핑 유발 — 2.0 권장.
      */
     fun setDeviceAudioBoost(spk: Float, mic: Float) = onCtl {
-        runCatching {
-            val adm = PjLib.ep.audDevManager()
-            adm.playbackDevMedia.adjustTxLevel(spk)
-            adm.captureDevMedia.adjustRxLevel(mic)
-        }
+        boostSpk = spk; boostMic = mic
+        applyDeviceAudioBoost()
     }
+
+    /** 저장된 boost 재적용. 두 축을 **개별** runCatching 으로 적용한다 — 캡처 게이트로 마이크가
+     *  닫힌 동안은 captureDevMedia 가 없어 실패하는데, 한 블록에 묶으면 뒤 축이 조용히 유실된다
+     *  (실측: 발언 녹취 RMS 가 mic 게인과 무관 — 미적용). 또 snd dev (재)오픈마다 bridge slot0
+     *  포트가 재생성돼 레벨이 초기화되므로, 캡처 게이트 전환([setCaptureEnabled])·재오픈
+     *  ([bounceSndDev]) 직후 재적용이 필수. */
+    private fun applyDeviceAudioBoost() {
+        if (!PjLib.booted) return
+        val adm = runCatching { PjLib.ep.audDevManager() }.getOrNull() ?: return
+        runCatching { adm.playbackDevMedia.adjustTxLevel(boostSpk) }
+        runCatching { adm.captureDevMedia.adjustRxLevel(boostMic) }
+    }
+
+    @Volatile private var boostSpk = 1f
+    @Volatile private var boostMic = 1f
 
     /**
      * 임의 SIP 요청 송신 (affiliation 은 method="PUBLISH"). body/헤더는 호출자(ptt-client)가 규격대로 구성.

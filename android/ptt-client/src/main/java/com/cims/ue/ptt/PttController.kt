@@ -437,6 +437,9 @@ class PttController(
             // pjsua setOutputRoute 미지원 백엔드 대비 — AudioManager 직접 적용 병행
             audioRouter?.setSpeakerphone(_audioRoute.value == SipController.AUDIO_ROUTE_SPEAKER)
         }
+        // 볼륨 인덱스는 장치별 — 적용 직후와 재라우팅이 가라앉은 뒤 현재 장치 축의 음량을 확보
+        audioRouter?.ensureRxVolume()
+        scope.launch { delay(800); audioRouter?.ensureRxVolume() }
     }
 
     private fun ensureAffiliated(groupId: String) {

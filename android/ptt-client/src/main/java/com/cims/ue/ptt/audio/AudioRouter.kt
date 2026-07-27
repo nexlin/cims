@@ -98,6 +98,20 @@ class AudioRouter(context: Context) {
         }
     }
 
+    /** 무전 수신 볼륨(MUSIC 축) 확보 — 볼륨 인덱스는 **장치별**이라 [setInCall] 시점의 최대화는
+     *  그 순간 라우팅된 장치 축에만 적용된다(이후 스피커/BT 로 바뀌면 그 축은 낮은 채 남아 무전이
+     *  작게 들림 — 실측: W999 speaker=1/15, MF52 bt_a2dp=2/15). 라우트 적용 후마다 호출해 현재
+     *  장치 축을 확보한다. 스트림 재라우팅이 늦게 가라앉으므로 호출측이 지연 재호출을 병행한다. */
+    fun ensureRxVolume() {
+        if (!inCall) return
+        val a = am ?: return
+        runCatching {
+            val max = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            if (a.getStreamVolume(AudioManager.STREAM_MUSIC) < max)
+                a.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+        }
+    }
+
     private fun isHeadset(d: AudioDeviceInfo): Boolean = when (d.type) {
         AudioDeviceInfo.TYPE_WIRED_HEADSET,
         AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
