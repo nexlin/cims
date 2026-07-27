@@ -1,3 +1,6 @@
 <resources>
     <string name="app_name">CIMS-McPtt</string>
+    <string name="ptt_key_service_label">CIMS PTT 버튼</string>
+    <string name="ptt_key_service_desc">앱이 화면에 없어도 측면 PTT/SOS 버튼으로 무전을 보내기 위해
+        하드웨어 버튼 입력만 감지합니다. 화면 내용은 읽지 않습니다.</string>
 </resources>

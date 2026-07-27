@@ -133,6 +133,18 @@ object HwPtt {
 
     private fun prefs(context: Context) = context.getSharedPreferences("hw_ptt", Context.MODE_PRIVATE)
 
+    // ── 백그라운드 키 경로 중재 ──
+
+    @Volatile private var lastKeyEventMs = 0L
+
+    /** 실제 KeyEvent 경로(Activity/접근성)가 PTT/SOS 키를 처리했음을 기록 — 벤더 브로드캐스트 억제용. */
+    fun noteKeyEvent() { lastKeyEventMs = android.os.SystemClock.elapsedRealtime() }
+
+    /** 최근(1.5s 내) 실제 키 이벤트 처리 여부 — 같은 눌림의 벤더 브로드캐스트 중복 트리거 방지.
+     *  누르고 있는 동안은 키 반복(repeat) DOWN 이 계속 갱신하므로 긴 눌림에도 유효하다. */
+    fun recentKeyEvent(): Boolean =
+        android.os.SystemClock.elapsedRealtime() - lastKeyEventMs < 1500
+
     /** 학습에서 제외할 시스템 키(뒤로/홈/최근/볼륨/전원) — UI 조작·안전 키.
      *  학습 중에도 이 키들은 소비하지 않아 뒤로가기 등으로 학습을 빠져나올 수 있다. */
     fun isSystemNav(keyCode: Int): Boolean = keyCode in SYSTEM_KEYS

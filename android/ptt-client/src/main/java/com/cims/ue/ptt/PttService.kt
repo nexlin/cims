@@ -191,10 +191,111 @@ class PttService : Service() {
         java.io.File(dir, "${msgId.take(12)}_$safe").apply { writeBytes(data) }.absolutePath
     }.getOrNull()
 
+    /** 벤더 PTT 키 브로드캐스트 동적 수신 — 실행 중 확실한 배달(정적 등록은 프로세스 사망 대비). */
+    private val vendorKeyReceiver = VendorPttReceiver()
+
+    // ── 스위트 라우팅 양보(volte 통화 협조) — CimsSuite.ACTION_ROUTE_YIELD/RESUME ──
+
+    /** RESUME 유실(volte 사망) 대비 자동 복귀 — volte 가 통화 중 주기(5분) 재송신으로 갱신한다. */
+    private val routeResumeWatchdog = Runnable { applyRouteYield(false) }
+
+    private val routeHandoffReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                com.cims.ue.core.CimsSuite.ACTION_ROUTE_YIELD -> applyRouteYield(true)
+                com.cims.ue.core.CimsSuite.ACTION_ROUTE_RESUME -> applyRouteYield(false)
+            }
+        }
+    }
+
+    /**
+     * volte 통화 동안 무전 라우팅 요청(스피커폰/이어폰 communication device) 양보 — 일부 단말
+     * (W999/MTK)은 어느 앱이든 스피커 요청이 서 있으면 통화 라우팅이 스피커로 고정돼 volte 의
+     * 수화기 선택이 무시된다(실측). 재생 자체는 계속되며 volte 가 정한 경로(수화기 등)로 나온다.
+     */
+    private fun applyRouteYield(on: Boolean) {
+        mainHandler.removeCallbacks(routeResumeWatchdog)
+        mainHandler.removeCallbacks(verifyResumeRoute)
+        if (on) mainHandler.postDelayed(routeResumeWatchdog, ROUTE_YIELD_MAX_MS)
+        val changed = audioRouter.yieldRoute(on)
+        if (changed) android.util.Log.i("PttService", "route yield=$on")
+        if (changed && !on) {
+            // 복귀 — 영속 선택(스피커폰/이어폰) 재적용. 컨트롤러 부재면 다음 생성 시 적용됨.
+            controller?.let { it.setAudioRoute(it.audioRoute.value, it.headsetId.value) }
+            resumeVerifyTries = RESUME_VERIFY_MAX_TRIES
+            mainHandler.postDelayed(verifyResumeRoute, RESUME_VERIFY_DELAY_MS)
+        }
+        if (changed && on) {
+            // 통화 동안 무전 트랙 핀 주기 재적용 — 통화 수립/전환기의 오디오 정책 재라우팅이
+            // 트랙의 preferred device 를 반복 이탈시키므로(실측: 안정화 후의 재핀은 유지됨),
+            // 양보가 끝날 때까지 주기적으로 재적용해 수렴을 보장한다. 같은 값 재설정은 no-op
+            // 이라 해제→재설정 바운스로 재평가를 강제. 전역 요청은 양보 중이라 sip(트랙 단위)만.
+            mainHandler.removeCallbacks(repinTicker)
+            mainHandler.postDelayed(repinTicker, ROUTE_REPIN_PERIOD_MS)
+        }
+    }
+
+    private val repinTicker = object : Runnable {
+        override fun run() {
+            if (!audioRouter.isYielded) return
+            // 이미 올바르게 라우팅 중이면 네이티브(set_track_preferred_device)가 no-op 처리 —
+            // 이탈 시에만 해제→재설정 바운스가 일어나므로 주기 호출이 재생을 흔들지 않는다.
+            controller?.let { it.setAudioRoute(it.audioRoute.value, it.headsetId.value) }
+            mainHandler.postDelayed(this, ROUTE_REPIN_PERIOD_MS)
+        }
+    }
+
+    /** [verifyResumeRoute] 재에지 잔여 횟수. */
+    private var resumeVerifyTries = 0
+
+    /**
+     * 라우팅 복귀 검증 + 자가 재에지 — volte 통화 종료 복귀 후에도 무전 스피커폰이 실제로
+     * 적용되지 않았으면(라우팅 브로커의 모드 소유 기록이 stale — 해제/재claim 이 겹치면 전이가
+     * 코레이싱돼 에지 유실, 실측), 모드를 짧게 반납→재claim 해 소유자를 재기록시키고 재적용한다.
+     */
+    private val verifyResumeRoute = object : Runnable {
+        override fun run() {
+            if (Build.VERSION.SDK_INT < 31) return
+            val c = controller ?: return
+            // 스피커폰 의도일 때만 판정(수화기/이어폰은 기본 라우팅과 구분 모호)
+            if (c.audioRoute.value != com.cims.ue.core.sip.SipController.AUDIO_ROUTE_SPEAKER) return
+            val am = getSystemService(android.media.AudioManager::class.java) ?: return
+            // 무전 세션 모드 보유 중일 때만 의미(미보유면 통화 경로 아님)
+            if (am.mode != android.media.AudioManager.MODE_IN_COMMUNICATION) return
+            val actual = runCatching { am.communicationDevice?.type }.getOrNull() ?: return
+            if (actual == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return
+            if (resumeVerifyTries-- <= 0) return
+            android.util.Log.i("PttService", "resume route mismatch(actual=$actual) — mode re-edge")
+            runCatching { am.mode = android.media.AudioManager.MODE_NORMAL }
+            mainHandler.postDelayed({
+                runCatching { am.mode = android.media.AudioManager.MODE_IN_COMMUNICATION }
+                controller?.let { it.setAudioRoute(it.audioRoute.value, it.headsetId.value) }
+                mainHandler.postDelayed(this, RESUME_VERIFY_DELAY_MS)
+            }, REEDGE_GAP_MS)
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
+        instance = this
         createChannel()
         startForegroundCompat(notification("CIMS PTT", "시작 중…"))
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 33)
+                registerReceiver(vendorKeyReceiver, VendorPttReceiver.filter(), RECEIVER_EXPORTED)
+            else registerReceiver(vendorKeyReceiver, VendorPttReceiver.filter())
+        }
+        runCatching {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, routeHandoffReceiver,
+                android.content.IntentFilter().apply {
+                    addAction(com.cims.ue.core.CimsSuite.ACTION_ROUTE_YIELD)
+                    addAction(com.cims.ue.core.CimsSuite.ACTION_ROUTE_RESUME)
+                },
+                com.cims.ue.core.CimsSuite.PERMISSION, null,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+            )
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -255,6 +356,9 @@ class PttService : Service() {
         // 유휴 기본 = 스피커 전용(마이크 미보유) — 발언(setTalkCapture)에서만 전이중.
         // register() 뒤에 두어 PjLib 부팅 이후 적용됨을 보장(onCtl 직렬).
         c.sip.setCaptureEnabled(false)
+        // 라우팅 재적용 — PjLib 부팅 후 keep 저장을 확보해 첫 snd 오픈부터 무전 트랙이
+        // 분리 라우팅(STREAM_MUSIC+트랙 장치 고정, pjsip 패치)으로 생성되게 한다.
+        c.setAudioRoute(rp.route, rp.headsetId)
         injectSsoToken(c)
     }
 
@@ -416,6 +520,10 @@ class PttService : Service() {
     }
 
     override fun onDestroy() {
+        instance = null
+        runCatching { unregisterReceiver(vendorKeyReceiver) }
+        runCatching { unregisterReceiver(routeHandoffReceiver) }
+        mainHandler.removeCallbacks(routeResumeWatchdog)
         job?.cancel()
         routeJob?.cancel()
         audioRouter.close()
@@ -475,8 +583,20 @@ class PttService : Service() {
     }
 
     companion object {
+        /** 실행 중 서비스 — 백그라운드 키 경로(PttKeyService/VendorPttReceiver)가 컨트롤러 접근용.
+         *  Activity 는 기존대로 bind 사용. */
+        @Volatile var instance: PttService? = null
+            private set
         private const val CH = "cims_ptt"
         private const val NID = 2001
+        /** 라우팅 양보 워치독 — volte 재송신 주기(5분)의 2주기+여유. */
+        private const val ROUTE_YIELD_MAX_MS = 660_000L
+        /** 통화 중 무전 트랙 핀 재적용 주기(양보 동안 지속 — 정책 재라우팅 수렴 보장). */
+        private const val ROUTE_REPIN_PERIOD_MS = 4_000L
+        /** 복귀 검증 지연/재에지 간격/한도. */
+        private const val RESUME_VERIFY_DELAY_MS = 1_200L
+        private const val REEDGE_GAP_MS = 250L
+        private const val RESUME_VERIFY_MAX_TRIES = 2
         /** 첨부 크기 상한 — CSC McDataFd.MaxBytes 기본값과 동일(50MB). */
         private const val MAX_ATTACH = 52428800L
         /** 그룹문서에 auto-recv 미지정 시 자동 다운로드 임계 (1MB). */

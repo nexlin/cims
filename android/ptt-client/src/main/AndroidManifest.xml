@@ -77,5 +77,35 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+
+        <!-- 전역 하드웨어 PTT/SOS 키 — 접근성 키 필터(백그라운드에서도 측면 버튼 동작).
+             설정→접근성에서 활성화 필요(앱 설정 탭에 바로가기). -->
+        <service
+            android:name=".PttKeyService"
+            android:exported="true"
+            android:label="@string/ptt_key_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/ptt_key_service" />
+        </service>
+
+        <!-- 벤더 PTT 키 브로드캐스트 폴백(정적) — 프로세스 사망 시 down 으로 서비스 재기동.
+             실행 중 수신은 PttService 의 동적 등록이 담당. -->
+        <receiver
+            android:name=".VendorPttReceiver"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.PTT.down" />
+                <action android:name="android.intent.action.PTT.up" />
+                <action android:name="com.android.action.ptt.down" />
+                <action android:name="com.android.action.ptt.up" />
+                <action android:name="com.motorolasolutions.intent.action.ACTION_PTT_BUTTON_DOWN" />
+                <action android:name="com.motorolasolutions.intent.action.ACTION_PTT_BUTTON_UP" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

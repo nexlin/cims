@@ -252,41 +252,214 @@ class SipService : Service() {
      * 완전 무음**이 된다(W999 실측 — RTP 수신·디코드·AudioTrack 정상인데 무음). 스피커폰
      * (setSpeaker/setCommunicationDevice)도 MODE_NORMAL 에선 무시된다. 진입 시 voice-call
      * 스트림 음량도 확보한다(단말 저장값이 최소(2/7)로 남아 무음처럼 들리는 사고 예방).
+     * 진입 시 출력 라우팅도 기본(수화기/이어폰)으로 **명시 적용**하고 이탈 시 해제([applyRoute]).
      */
     private fun setInCallAudio(on: Boolean) {
         if (on == inCallAudio) return
         inCallAudio = on
-        val am = getSystemService(AudioManager::class.java) ?: return
-        runCatching {
-            if (on) {
+        mainHandler.removeCallbacks(routeYieldTicker)
+        mainHandler.removeCallbacks(claimInCallAudio)
+        mainHandler.removeCallbacks(verifyRoute)
+        if (on) {
+            sendRouteHandoff(true)                      // PTT 라우팅+모드 양보 (아래 주석 참조)
+            // 🔑 모드 claim 은 PTT 의 모드 반납 **이후** — 일부 단말의 라우팅 브로커는 전역 모드가
+            // NORMAL→IN_COMMUNICATION 으로 바뀌는 에지에서만 소유자를 기록해(실측: 소유자만 바뀌면
+            // miss → 이 앱의 수화기/스피커 요청 전부 무시), PTT 가 모드를 쥔 채 먼저 claim 하면
+            // 에지가 없다. YIELD 배달 지연이 가변적(수십 ms~수백 ms)이라 고정 지연 대신
+            // **모드가 NORMAL 로 떨어지는 것을 폴링**으로 확인하고 claim 한다(무 PTT 단말=즉시,
+            // 미반납/미설치=타임아웃 후 claim — 기능 저하일 뿐 통화는 정상).
+            claimTriesLeft = MODE_CLAIM_MAX_TRIES
+            mainHandler.post(claimInCallAudio)
+        } else {
+            val am = getSystemService(AudioManager::class.java) ?: return
+            runCatching {
+                unregisterRouteCallback()
+                releaseRoute()
+                am.mode = AudioManager.MODE_NORMAL
+            }
+            // 종료: 자기 해제(모드 NORMAL 에지)가 브로커에 기록될 **간격을 두고** RESUME —
+            // 해제와 PTT 재claim 이 수십 ms 안에 겹치면 일부 단말이 모드 전이를 코레이싱해
+            // 에지가 유실된다(실측: ~190ms 간격은 기록, ~50ms 는 유실 → 무전 스피커 미복귀).
+            mainHandler.postDelayed({ if (!inCallAudio) sendRouteHandoff(false) }, ROUTE_RESUME_DELAY_MS)
+        }
+    }
+
+    /** [claimInCallAudio] 폴링 잔여 횟수. */
+    private var claimTriesLeft = 0
+
+    /** 통화당 모드 재에지(self-bounce) 잔여 횟수 — [verifyRoute] 참조. */
+    private var reEdgeTriesLeft = 0
+
+    /** 통화 오디오 세션 claim — PTT 모드 반납(전역 모드 NORMAL) 확인 폴링 후
+     *  모드 소유 + 음량 확보 + 기본 라우팅(수화기) 명시 적용. */
+    private val claimInCallAudio = object : Runnable {
+        override fun run() {
+            if (!inCallAudio) return                     // 대기 중 통화 종료
+            val am = getSystemService(AudioManager::class.java) ?: return
+            if (am.mode == AudioManager.MODE_IN_COMMUNICATION && --claimTriesLeft > 0) {
+                mainHandler.postDelayed(this, MODE_CLAIM_POLL_MS)
+                return
+            }
+            android.util.Log.i("SipService",
+                "claimInCallAudio (mode=${am.mode} triesLeft=$claimTriesLeft)")
+            reEdgeTriesLeft = MODE_REEDGE_MAX_TRIES
+            runCatching {
                 am.mode = AudioManager.MODE_IN_COMMUNICATION
                 val max = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
                 am.setStreamVolume(AudioManager.STREAM_VOICE_CALL, max, 0)
-            } else {
-                am.mode = AudioManager.MODE_NORMAL
+                speakerOn = false                       // 통화 시작 라우팅 기본=수화기(UI 토글 초기값과 일치)
+                applyRoute()
+                registerRouteCallback()
+                mainHandler.postDelayed(routeYieldTicker, ROUTE_YIELD_TICK_MS)
             }
         }
     }
 
     /**
-     * 스피커폰 전환 — 플랫폼 오디오 라우팅(PJSIP Android 오디오가 추종).
-     * API 31+ 는 communication device, 이하는 speakerphoneOn. 통화 종료 시 자동 원복.
+     * 라우팅 적용 검증 + 자가 재에지 — 적용 후에도 실제 통신 장치가 의도(스피커폰/비스피커)와
+     * 다르면, 라우팅 브로커가 이 앱을 모드 소유자로 기록하지 못한 것(claim 에지가 타이밍 경쟁으로
+     * 유실 — 수신측 실측)이므로 **모드를 짧게 반납→재claim** 해 NORMAL 에지를 다시 만들어 소유자를
+     * 재기록시키고 라우팅을 재적용한다. 통화당 [MODE_REEDGE_MAX_TRIES]회 한도(수렴 보장).
      */
+    private val verifyRoute = object : Runnable {
+        override fun run() {
+            if (!inCallAudio) return
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+            val am = getSystemService(AudioManager::class.java) ?: return
+            val actual = runCatching { am.communicationDevice?.type }.getOrNull() ?: return
+            val ok = if (speakerOn) actual == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            else actual != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+            if (ok || reEdgeTriesLeft-- <= 0) return
+            android.util.Log.i("SipService",
+                "route mismatch(actual=$actual speakerOn=$speakerOn) — mode re-edge")
+            runCatching { am.mode = AudioManager.MODE_NORMAL }
+            mainHandler.postDelayed({
+                if (!inCallAudio) return@postDelayed
+                runCatching {
+                    am.mode = AudioManager.MODE_IN_COMMUNICATION
+                    applyRoute()
+                }
+            }, MODE_REEDGE_GAP_MS)
+        }
+    }
+
+    /**
+     * PTT 앱 라우팅 양보 통지(스위트 협조, [com.cims.ue.core.CimsSuite]) — PTT 는 무전 스피커폰
+     * communication device 요청을 상시 유지하는데, 일부 단말(W999/MTK)은 어느 앱이든 스피커
+     * 요청이 서 있으면 통화 라우팅이 스피커로 고정돼 이 앱의 수화기 요청이 무시된다(실측).
+     * 통화 시작=YIELD/종료=RESUME, 통화 중 주기 재송신([routeYieldTicker])으로 수신측 워치독을
+     * 갱신해 이 앱이 죽어도 PTT 라우팅이 워치독 시한 내 자동 복귀하게 한다.
+     */
+    private fun sendRouteHandoff(yield: Boolean) {
+        val action = if (yield) com.cims.ue.core.CimsSuite.ACTION_ROUTE_YIELD
+        else com.cims.ue.core.CimsSuite.ACTION_ROUTE_RESUME
+        runCatching {
+            sendBroadcast(
+                Intent(action).setPackage(com.cims.ue.core.CimsSuite.PTT_PACKAGE),
+                com.cims.ue.core.CimsSuite.PERMISSION,
+            )
+        }
+    }
+
+    private val routeYieldTicker = object : Runnable {
+        override fun run() {
+            if (!inCallAudio) return
+            sendRouteHandoff(true)
+            mainHandler.postDelayed(this, ROUTE_YIELD_TICK_MS)
+        }
+    }
+
+    /** 사용자 스피커폰 선택 — 통화 중 라우팅 재적용(이어폰 연결/해제)에도 쓰인다. */
+    private var speakerOn = false
+
+    /** 스피커폰 전환(통화중 UI 토글). 통화 종료 시 자동 원복([setInCallAudio]). */
     fun setSpeaker(on: Boolean) {
+        speakerOn = on
+        applyRoute()
+    }
+
+    /** 이어폰 계열(유선/USB/BT SCO/BLE) — 수화기 모드에서 이어폰 연결 시 그쪽 우선(기본 정책과 동일). */
+    private fun isHeadset(d: AudioDeviceInfo): Boolean = when (d.type) {
+        AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> true
+        else -> Build.VERSION.SDK_INT >= 31 && d.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+    }
+
+    /**
+     * 통화 중 출력 라우팅 적용 — **자기 요청을 항상 유지**한다(수화기=이어폰>BUILTIN_EARPIECE,
+     * 스피커폰=BUILTIN_SPEAKER 명시 요청).
+     *
+     * 🔑 `clearCommunicationDevice`(요청 제거)로 수화기를 표현하면 같은 통신 모드를 쥔 다른 앱의
+     * 상시 요청(PTT 앱 무전 스피커폰)으로 폴백돼 수화기 선택이 무시된다(W999 실측: 수화기 선택에도
+     * preferred=speaker 유지). 반대로 `setCommunicationDevice` 요청 자체를 라우팅에 반영하지 않는
+     * 단말 편차도 있어(MF52/AOSP15 실측: 요청 등록·활성인데 preferred=null·force use 0) 레거시
+     * `isSpeakerphoneOn` 을 병행 적용한다(이중 적용 무해 — ptt AudioRouter 와 동일 원리).
+     * 순서 주의: 레거시 off 는 (AOSP 구현상) 자기 communication device 요청의 clear 라서,
+     * 수화기 전환은 **레거시 off 먼저 → 명시 요청 등록** 순서여야 방금 넣은 요청이 지워지지 않는다.
+     */
+    private fun applyRoute() {
+        if (!inCallAudio) return
+        // 적용 후 검증(자가 재에지) 예약 — 토글/기본 적용 공통
+        mainHandler.removeCallbacks(verifyRoute)
+        mainHandler.postDelayed(verifyRoute, ROUTE_VERIFY_DELAY_MS)
         val am = getSystemService(AudioManager::class.java) ?: return
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (on) {
-                    am.availableCommunicationDevices
+                if (speakerOn) {
+                    val spk = am.availableCommunicationDevices
                         .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                        ?.let { am.setCommunicationDevice(it) }
+                    val ok = spk?.let { am.setCommunicationDevice(it) } ?: false
+                    @Suppress("DEPRECATION")
+                    am.isSpeakerphoneOn = true
+                    android.util.Log.i("SipService", "applyRoute speaker ok=$ok")
                 } else {
-                    am.clearCommunicationDevice()
+                    @Suppress("DEPRECATION")
+                    am.isSpeakerphoneOn = false
+                    val dev = am.availableCommunicationDevices.firstOrNull(::isHeadset)
+                        ?: am.availableCommunicationDevices
+                            .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+                    val ok = dev?.let { am.setCommunicationDevice(it) } ?: false
+                    android.util.Log.i("SipService", "applyRoute earpiece/headset dev=${dev?.type} ok=$ok")
                 }
-            } else {
-                @Suppress("DEPRECATION")
-                am.isSpeakerphoneOn = on
+            } else @Suppress("DEPRECATION") {
+                am.isSpeakerphoneOn = speakerOn
             }
+        }
+    }
+
+    /** 통화 종료 — 자기 라우팅 요청 해제(다른 앱 라우팅 복원: PTT 무전 스피커 등). */
+    private fun releaseRoute() {
+        val am = getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            @Suppress("DEPRECATION")
+            am.isSpeakerphoneOn = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.clearCommunicationDevice()
+        }
+    }
+
+    /** 통화 중 이어폰 연결/해제 시 현재 선택(스피커폰/수화기) 기준으로 라우팅 재적용 —
+     *  명시 요청 유지 방식이라 기본 정책의 자동 전환이 동작하지 않으므로 직접 따라간다. */
+    private val routeDeviceCallback = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { applyRoute() }
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { applyRoute() }
+    }
+    private var routeCallbackRegistered = false
+
+    private fun registerRouteCallback() {
+        if (routeCallbackRegistered) return
+        routeCallbackRegistered = true
+        runCatching {
+            getSystemService(AudioManager::class.java)
+                ?.registerAudioDeviceCallback(routeDeviceCallback, mainHandler)
+        }
+    }
+
+    private fun unregisterRouteCallback() {
+        if (!routeCallbackRegistered) return
+        routeCallbackRegistered = false
+        runCatching {
+            getSystemService(AudioManager::class.java)
+                ?.unregisterAudioDeviceCallback(routeDeviceCallback)
         }
     }
 
@@ -339,7 +512,6 @@ class SipService : Service() {
                     notificationManager().cancel(NOTIF_INCOMING)
                 }
                 if (call is CallState.Disconnected) {
-                    setSpeaker(false)                                   // 스피커폰 원복
                     applyMicYield(false)                                // 발언 양보 잔존 해제(다음 통화 대비)
                 }
                 val line = when (call) {
@@ -553,6 +725,17 @@ class SipService : Service() {
 
         /** 마이크 양보 워치독 시한 — 서버 최대 발언시간을 여유 있게 초과(RESUME 유실 안전망). */
         private const val MIC_YIELD_MAX_MS = 40_000L
+        /** 라우팅 양보 재송신 주기 — 수신측(PTT) 워치독(2주기+여유)보다 짧게. */
+        private const val ROUTE_YIELD_TICK_MS = 300_000L
+        /** 모드 claim 폴링 — PTT 모드 반납(YIELD 배달 지연 가변) 대기: 100ms × 20 = 최대 2s. */
+        private const val MODE_CLAIM_POLL_MS = 100L
+        private const val MODE_CLAIM_MAX_TRIES = 20
+        /** 라우팅 적용 검증 지연/재에지 간격/통화당 재에지 한도. */
+        private const val ROUTE_VERIFY_DELAY_MS = 800L
+        private const val MODE_REEDGE_GAP_MS = 150L
+        private const val MODE_REEDGE_MAX_TRIES = 2
+        /** 통화 종료 후 RESUME 지연 — 자기 모드 해제 에지가 기록된 뒤 PTT 재claim 이 오게. */
+        private const val ROUTE_RESUME_DELAY_MS = 300L
 
         /** 착신 알림 "받기" — MainActivity 가 이 extra 를 읽어 서비스 연결 후 응답한다. */
         const val EXTRA_ANSWER_CALL_ID = "answer_call_id"

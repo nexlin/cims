@@ -13,10 +13,19 @@ object CimsSuite {
     const val PERMISSION = "com.cims.ue.permission.CIMS_SUITE"
 
     const val VOLTE_PACKAGE = "com.cims.ue.volte"
+    const val PTT_PACKAGE = "com.cims.ue.ptt"
 
     /** PTT 발언 시도/시작 — 통화 앱은 마이크를 양보한다(재생 유지, 캡처만 해제). */
     const val ACTION_MIC_YIELD = "com.cims.ue.action.MIC_YIELD"
 
     /** PTT 발언 종료 — 통화 앱 마이크 복귀. */
     const val ACTION_MIC_RESUME = "com.cims.ue.action.MIC_RESUME"
+
+    /** 통화(volte) 시작 — PTT 앱은 출력 라우팅 요청(무전 스피커폰)을 양보한다.
+     *  일부 단말(W999/MTK)은 어느 앱이든 스피커 요청이 서 있으면 통화 라우팅이 스피커로 고정돼
+     *  통화 앱이 자기 요청(수화기)으로도 이길 수 없다(실측). 통화 중 주기 재송신(수신측 워치독 갱신). */
+    const val ACTION_ROUTE_YIELD = "com.cims.ue.action.ROUTE_YIELD"
+
+    /** 통화 종료 — PTT 앱 라우팅(무전 스피커폰/이어폰) 복귀. */
+    const val ACTION_ROUTE_RESUME = "com.cims.ue.action.ROUTE_RESUME"
 }

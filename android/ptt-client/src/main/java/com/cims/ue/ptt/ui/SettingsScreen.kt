@@ -110,6 +110,20 @@ fun SettingsScreen(
             val mapping by HwPtt.mapping.collectAsState()
             NavRow("하드웨어 버튼 설정",
                 "PTT ${label(mapping.ptt)} · SOS ${label(mapping.sos)}", onOpenKeyConfig)
+            Divider()
+            // 백그라운드 PTT 키 — 접근성 키 필터(PttKeyService) 활성 여부. 상태 flow 재구성 때마다
+            // 재조회되므로 설정 앱에서 돌아오면 곧 갱신된다.
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val bgKeyOn = com.cims.ue.ptt.PttKeyService.isEnabled(context)
+            NavRow("백그라운드 PTT 버튼",
+                if (bgKeyOn) "사용 중 — 앱이 화면에 없어도 측면 버튼 동작"
+                else "꺼짐 — 접근성에서 'CIMS PTT 버튼' 을 켜세요") {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }
         }
 
         // ── 기타 ──

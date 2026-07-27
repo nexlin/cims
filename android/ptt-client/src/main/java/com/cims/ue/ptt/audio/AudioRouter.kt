@@ -33,6 +33,39 @@ class AudioRouter(context: Context) {
     /** 현재 통화(in-call) 모드 여부 — 중복 setMode/볼륨 강제 방지. */
     private var inCall = false
 
+    /** volte 통화 동안 라우팅 요청 양보 — true 면 [select]/[setSpeakerphone]/[setInCall] 이 요청을 넣지 않는다. */
+    @Volatile private var yielded = false
+
+    /** 현재 양보 중 여부 — 통화 중 무전 트랙 재핀 가드용. */
+    val isYielded: Boolean get() = yielded
+
+    /**
+     * 스위트 라우팅 양보(volte 통화 협조) — 이 앱의 communication device 요청(무전 스피커폰/이어폰)과
+     * **오디오 모드 소유(MODE_IN_COMMUNICATION)** 를 함께 반납하고 재적용을 막는다.
+     * 실측(W999/MTK13·MF52/QC15 공통): 통화 라우팅 요청은 **모드 스택의 선점 소유자** 기준으로
+     * 매칭돼, PTT 가 세션으로 모드를 쥔 채면 volte 가 모드를 나중에 잡아도 volte 의 수화기/스피커
+     * 요청이 무시된다(preferred=null). 모드 반납은 자기 슬롯만 빠지는 것 — 전역 모드는 volte 가
+     * IN_COMMUNICATION 으로 유지하므로 무전 재생은 계속되고 경로만 volte 선택을 따른다.
+     * 선택 상태(PttController._audioRoute)는 유지되므로 복귀는 setAudioRoute 재호출로 한다.
+     * @return 상태가 실제로 바뀌었으면 true.
+     */
+    fun yieldRoute(on: Boolean): Boolean {
+        if (yielded == on) return false
+        yielded = on
+        val a = am
+        if (on) {
+            clear()
+            if (inCall) runCatching { a?.mode = AudioManager.MODE_NORMAL }
+        } else if (inCall) {
+            runCatching {
+                a?.mode = AudioManager.MODE_IN_COMMUNICATION
+                a?.setStreamVolume(AudioManager.STREAM_VOICE_CALL,
+                    a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL), 0)
+            }
+        }
+        return true
+    }
+
     init {
         runCatching { am?.registerAudioDeviceCallback(cb, null) }
         refresh()
@@ -50,11 +83,15 @@ class AudioRouter(context: Context) {
         val a = am ?: return
         if (on == inCall) return
         inCall = on
+        if (yielded) return    // 양보 중(volte 통화) — 모드 소유 금지, 복귀([yieldRoute]) 시 재적용
         runCatching {
             if (on) {
                 a.mode = AudioManager.MODE_IN_COMMUNICATION
                 val max = a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
                 a.setStreamVolume(AudioManager.STREAM_VOICE_CALL, max, 0)
+                // 무전 재생 트랙은 STREAM_MUSIC(트랙 단위 분리 라우팅용 — pjsip 패치) — 그 축도 확보
+                val maxM = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                a.setStreamVolume(AudioManager.STREAM_MUSIC, maxM, 0)
             } else {
                 a.mode = AudioManager.MODE_NORMAL
             }
@@ -89,6 +126,7 @@ class AudioRouter(context: Context) {
 
     /** 이어폰 선택 — [id] 가 없으면(장치 교체 등) 첫 이어폰으로 폴백. @return 적용 여부. */
     fun select(id: Int): Boolean {
+        if (yielded) return true    // 양보 중 — 선택만 기억(복귀 시 setAudioRoute 가 재적용)
         val a = am ?: return false
         val dev = candidates().let { list -> list.firstOrNull { it.id == id } ?: list.firstOrNull() }
             ?: return false
@@ -117,17 +155,27 @@ class AudioRouter(context: Context) {
      * 스피커폰/수화기 강제 — pjsua `setOutputRoute` 는 오디오 백엔드에 따라 미지원(무시)될 수
      * 있어(단말별 편차 실측: 스피커폰 설정이 수화기로만 출력) AudioManager 로도 직접 적용한다
      * (이중 적용 무해). `MODE_IN_COMMUNICATION`([setInCall]) 전제.
+     *
+     * API 31+ 도 명시 장치 요청과 레거시 `isSpeakerphoneOn` 을 **병행 적용**한다 — 한쪽만 듣는
+     * 단말 편차 실측 2형: ①MTK(W999/A13)=타 앱(volte)의 레거시 speakerphone off 가 전역 잠금으로
+     * 남아 setCommunicationDevice(speaker) 만으로 못 뒤집음 ②QC(MF52/A15)=명시 요청이 라우팅
+     * 계산에 반영되지 않아 레거시가 유일한 레버. 순서: on 은 명시→레거시, off 는 레거시(자기 요청
+     * clear 부작용) 먼저→clear.
      */
     fun setSpeakerphone(on: Boolean) {
+        if (yielded) return         // 양보 중 — 요청 금지(복귀 시 setAudioRoute 가 재적용)
         val a = am ?: return
         runCatching {
             if (Build.VERSION.SDK_INT >= 31) {
                 if (on) {
-                    val spk = a.availableCommunicationDevices
+                    a.availableCommunicationDevices
                         .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    if (spk != null) a.setCommunicationDevice(spk)
-                    else @Suppress("DEPRECATION") { a.isSpeakerphoneOn = true }
+                        ?.let { a.setCommunicationDevice(it) }
+                    @Suppress("DEPRECATION")
+                    a.isSpeakerphoneOn = true
                 } else {
+                    @Suppress("DEPRECATION")
+                    a.isSpeakerphoneOn = false
                     a.clearCommunicationDevice()   // 통신모드 기본(수화기)으로 복귀
                 }
             } else @Suppress("DEPRECATION") {

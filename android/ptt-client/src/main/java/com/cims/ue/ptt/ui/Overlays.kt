@@ -68,6 +68,7 @@ fun EmergencyBanner(e: GroupCallState, ctl: PttController?, modifier: Modifier =
  * 물리 키(예: W999 SOS=310)는 gamepad-class 입력장치라, 별도 Dialog 윈도우가 포커스를 잡으면 focus
  * 네비게이션에 소비돼 앱으로 오지 않는다. 오버레이면 Activity 가 키 포커스를 유지해 물리 키가
  * MainActivity.dispatchKeyEvent → HwPtt.consumeLearn 으로 그대로 유입된다.
+ * (접근성 키 필터(PttKeyService) 활성 시엔 그 경로가 같은 학습 규칙으로 먼저 처리한다.)
  */
 @Composable
 fun KeyConfigOverlay(onDismiss: () -> Unit) {
