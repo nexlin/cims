@@ -243,6 +243,29 @@ class SipController(private val config: SipAccountConfig) {
     /** 마이크 송신 토글 (PTT floor GRANT→true, RELEASE/REVOKE→false). */
     fun setMicEnabled(callId: Int, on: Boolean) = onCtl { calls[callId]?.setMic(on) }
 
+    /** 캡처 게이트 현재 상태 — 중복 재오픈 방지. 초기값 true(전이중, VoLTE 기본). */
+    @Volatile private var captureEnabled = true
+
+    /**
+     * snd dev 캡처 게이트 — 마이크(AudioRecord) 보유를 재생과 분리해 제어한다.
+     *  - `false`: SPEAKER_ONLY — 재생은 유지하고 캡처 스트림 자체를 열지 않는다. OS 동시 캡처
+     *    중재(경합 앱 무음화)에서 완전히 빠진다. PTT 유휴/청취, VoLTE 의 발언 양보(MIC_YIELD) 구간.
+     *  - `true`: 전이중 복귀 — PTT 발언(floor GRANT 경로), VoLTE 통화/양보 해제.
+     *  NO_IMMEDIATE_OPEN 동반: snd dev 가 닫혀 있으면 모드만 저장(다음 conference 결선의
+     *  on-demand 오픈에 적용), 열려 있으면 즉시 재오픈 — conference 결선은 브리지에 남아
+     *  재오픈을 넘어 생존한다(pjsua_set_snd_dev2).
+     */
+    fun setCaptureEnabled(on: Boolean) = onCtl {
+        if (captureEnabled == on) return@onCtl
+        captureEnabled = on
+        if (!PjLib.booted) return@onCtl                 // 부팅 전 — register() 이후 호출 전제(onCtl 직렬)
+        val mode = (if (on) 0 else org.pjsip.pjsua2.pjsua_snd_dev_mode.PJSUA_SND_DEV_SPEAKER_ONLY) or
+            org.pjsip.pjsua2.pjsua_snd_dev_mode.PJSUA_SND_DEV_NO_IMMEDIATE_OPEN
+        runCatching { PjLib.ep.audDevManager().setSndDevMode(mode.toLong()) }
+            .onSuccess { Log.i(TAG, "setCaptureEnabled($on) snd mode=$mode") }
+            .onFailure { Log.w(TAG, "setCaptureEnabled($on) 실패: ${it.message}") }
+    }
+
     /** 오디오 출력 라우팅 — PTT(무전) UX 용 스피커폰 토글. */
     fun setLoudspeaker(on: Boolean) =
         setAudioRoute(if (on) AUDIO_ROUTE_SPEAKER else AUDIO_ROUTE_EARPIECE)

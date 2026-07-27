@@ -248,10 +248,28 @@ class PttService : Service() {
         c.routePrefs = rp
         c.setAudioRoute(rp.route, rp.headsetId)     // 저장된 라우팅 복원(기본=스피커폰)
         c.setAudioGain(rp.spkGain, rp.micGain)      // 저장된 무전 게인 복원(기본=×1.5)
+        c.micHandoff = { talk -> sendMicHandoff(talk) }
         observeHeadsets(c)
         observe(c)
         c.register()
+        // 유휴 기본 = 스피커 전용(마이크 미보유) — 발언(setTalkCapture)에서만 전이중.
+        // register() 뒤에 두어 PjLib 부팅 이후 적용됨을 보장(onCtl 직렬).
+        c.sip.setCaptureEnabled(false)
         injectSsoToken(c)
+    }
+
+    /** volte 앱 마이크 핸드오프 통지 — 발언 시작=YIELD/종료=RESUME. 서명(CIMS_SUITE) 보호 명시적 브로드캐스트.
+     *  발언 시작 시 FGS microphone 승격도 함께 시도 — 부팅 자동시작(specialUse) 후 첫 발언 대비. */
+    private fun sendMicHandoff(talk: Boolean) {
+        if (talk) elevateForCall(true)
+        val action = if (talk) com.cims.ue.core.CimsSuite.ACTION_MIC_YIELD
+        else com.cims.ue.core.CimsSuite.ACTION_MIC_RESUME
+        runCatching {
+            sendBroadcast(
+                Intent(action).setPackage(com.cims.ue.core.CimsSuite.VOLTE_PACKAGE),
+                com.cims.ue.core.CimsSuite.PERMISSION,
+            )
+        }
     }
 
     /** CIMS 공유 계정의 MCPTT 토큰(TS 33.180)을 서비스에서 직접 주입 — **로그인만으로**(PTT 앱을

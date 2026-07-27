@@ -84,6 +84,52 @@ class SipService : Service() {
         createChannel()
         startForegroundCompat(buildNotification("CIMS VoLTE", "시작 중…"))
         registerNetworkCallback()
+        registerMicHandoffReceiver()
+    }
+
+    // ── PTT 발언 협조(마이크 핸드오프) ──
+
+    /** PTT 발언 동안 마이크 양보 상태 — 워치독으로 고아 양보(RESUME 유실/PTT 앱 사망) 자동 복귀. */
+    private var micYielded = false
+    private val micResumeWatchdog = Runnable { applyMicYield(false) }
+
+    private val micHandoffReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                com.cims.ue.core.CimsSuite.ACTION_MIC_YIELD -> applyMicYield(true)
+                com.cims.ue.core.CimsSuite.ACTION_MIC_RESUME -> applyMicYield(false)
+            }
+        }
+    }
+
+    /** 스위트 서명 권한으로 보호된 핸드오프 수신 등록 — PTT 앱(발신측)만 통과. */
+    private fun registerMicHandoffReceiver() {
+        val filter = android.content.IntentFilter().apply {
+            addAction(com.cims.ue.core.CimsSuite.ACTION_MIC_YIELD)
+            addAction(com.cims.ue.core.CimsSuite.ACTION_MIC_RESUME)
+        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, micHandoffReceiver, filter, com.cims.ue.core.CimsSuite.PERMISSION, null,
+            androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+        )
+    }
+
+    /**
+     * PTT 발언 동안 통화 마이크만 해제(재생 유지) — OS 동시 캡처 중재는 일반 앱 두 개의 동시
+     * 캡처를 허용하지 않으므로(한쪽 무음 배달), 양보해야 PTT 마이크가 확정적으로 열린다.
+     * 통화가 없으면 무시 — 유휴 상태에서 스피커 전용 모드가 저장되면 다음 통화가 마이크 없이
+     * 열리는 사고를 막는다(벨울림 중 발언 같은 교차 상황은 드물고 자기해소됨).
+     */
+    private fun applyMicYield(on: Boolean) {
+        mainHandler.removeCallbacks(micResumeWatchdog)
+        if (on) {
+            val call = controller?.callState?.value
+            if (call !is CallState.Active && call !is CallState.Outgoing) return
+            mainHandler.postDelayed(micResumeWatchdog, MIC_YIELD_MAX_MS)
+        }
+        if (micYielded == on) return
+        micYielded = on
+        controller?.setCaptureEnabled(!on)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -292,7 +338,10 @@ class SipService : Service() {
                     stopRinging()
                     notificationManager().cancel(NOTIF_INCOMING)
                 }
-                if (call is CallState.Disconnected) setSpeaker(false)   // 스피커폰 원복
+                if (call is CallState.Disconnected) {
+                    setSpeaker(false)                                   // 스피커폰 원복
+                    applyMicYield(false)                                // 발언 양보 잔존 해제(다음 통화 대비)
+                }
                 val line = when (call) {
                     is CallState.Incoming -> "수신: ${call.remote}"
                     is CallState.Outgoing -> "발신: ${call.remote}"
@@ -315,6 +364,8 @@ class SipService : Service() {
 
     override fun onDestroy() {
         stopRinging()
+        runCatching { unregisterReceiver(micHandoffReceiver) }
+        mainHandler.removeCallbacks(micResumeWatchdog)
         mainHandler.post { overlay.hide() }
         stateJob?.cancel()
         netCallback?.let { cb -> runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(cb) } }
@@ -499,6 +550,9 @@ class SipService : Service() {
 
         private const val ACTION_REJECT = "com.cims.ue.volte.action.REJECT"
         private const val EXTRA_CALL_ID = "callId"
+
+        /** 마이크 양보 워치독 시한 — 서버 최대 발언시간을 여유 있게 초과(RESUME 유실 안전망). */
+        private const val MIC_YIELD_MAX_MS = 40_000L
 
         /** 착신 알림 "받기" — MainActivity 가 이 extra 를 읽어 서비스 연결 후 응답한다. */
         const val EXTRA_ANSWER_CALL_ID = "answer_call_id"

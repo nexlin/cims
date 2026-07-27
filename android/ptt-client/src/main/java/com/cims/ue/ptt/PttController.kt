@@ -111,6 +111,25 @@ class PttController(
         runCatching { onEvent?.invoke(PttEvent(kind, groupId, peer, durationMs)) }
     }
 
+    /** 발언 마이크 핸드오프 훅 — 서비스가 주입(volte 앱에 MIC_YIELD/RESUME 브로드캐스트). */
+    var micHandoff: ((Boolean) -> Unit)? = null
+
+    /** 발언 캡처 게이트 현재 상태 — 중복 전환 방지. */
+    private var talkCapture = false
+
+    /**
+     * 발언 캡처 게이트 — 유휴/청취=스피커 전용(마이크 미보유), 발언 시도~종료=전이중.
+     * 마이크를 발언 구간에만 보유해야 OS 동시 캡처 중재가 통화(volte) 앱 캡처를 무음화하지 않는다.
+     * volte 협조 핸드오프([micHandoff])와 snd dev 모드 전환을 한 지점에서 묶는다 — PTT down 에서
+     * floor 요청과 병렬로 시작해 GRANT 톤이 끝날 때(mic 개방)면 전환이 끝나 있다.
+     */
+    private fun setTalkCapture(on: Boolean) {
+        if (talkCapture == on) return
+        talkCapture = on
+        runCatching { micHandoff?.invoke(on) }
+        sip.setCaptureEnabled(on)
+    }
+
     /** 수신 문자(SIP MESSAGE) — core 흐름 그대로 노출(서비스가 MessageStore 에 영속). */
     val incomingMessage get() = sip.incomingMessage
 
@@ -946,6 +965,7 @@ class PttController(
             else -> Unit
         }
         pttHeld = true
+        setTalkCapture(true)     // 마이크 확보 개시 — volte 양보 + 전이중 전환(floor 요청과 병렬 진행)
         // 긴급 세션의 발언은 Floor Indicator 에 emergency 비트 — CMP tier 상향/선점(TS 24.380)
         s.floor.requestFloor(priority = 0,
             indicator = if (s.emergency) FloorIndicator.EMERGENCY else null)
@@ -958,6 +978,7 @@ class PttController(
             val p = primarySession() ?: return@launch
             if (p.floorState == FloorState.REQUESTING) {
                 p.floorState = FloorState.IDLE
+                setTalkCapture(false)
                 feedback?.denyTone()
                 _status.value = "발언권 응답 없음"
                 publish()
@@ -978,6 +999,7 @@ class PttController(
         }
         s.floor.releaseFloor()
         if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+        setTalkCapture(false)    // 발언 종료 — 스피커 전용 복귀 + volte 마이크 복귀
         if (s.floorState != FloorState.LISTENING) s.floorState = FloorState.IDLE
         if (s.speaker?.self == true) s.speaker = null
         if (wasSpeaking) feedback?.releaseTone()
@@ -992,6 +1014,7 @@ class PttController(
                 requestTimeout?.cancel()
                 if (!isPrimary || !pttHeld) {        // 늦은 GRANT/비주채널 — 즉시 반납
                     s.floor.releaseFloor()
+                    if (isPrimary) setTalkCapture(false)
                     s.floorState = FloorState.IDLE
                     publish()
                     return
@@ -1012,6 +1035,7 @@ class PttController(
                 if (isPrimary) {
                     requestTimeout?.cancel()
                     if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+                    setTalkCapture(false)
                     feedback?.denyTone()
                     _status.value = "발언권 거부: ${ev.text ?: ev.cause}"
                 }
@@ -1019,6 +1043,7 @@ class PttController(
             }
             is FloorEvent.Revoked -> {
                 if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+                if (isPrimary) setTalkCapture(false)
                 s.floorState = FloorState.IDLE
                 if (s.speaker?.self == true && s.mySpeakStartMs > 0) {
                     emit(PttEventKind.TALK_ME, s.groupId,
@@ -1063,6 +1088,7 @@ class PttController(
 
     fun shutdown() {
         requestTimeout?.cancel()
+        setTalkCapture(false)    // 발언 중 종료 대비 — volte 마이크 복귀 통지
         synchronized(lock) {
             sessionMap.values.forEach { it.close() }
             sessionMap.clear()
