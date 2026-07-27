@@ -282,7 +282,8 @@ reconcile 이 기동한다. 개별/서버 start 한 대만 눌러도 `note_modul
 
 **승격 엣지에서 타겟의 기동 차단 홀드를 해제한다 (정본 경로).** BACKUP/FAULT→MASTER 로 막
 승격하면 그 노드가 서비스를 인수하므로, agent 가 `_clear_holds_on_promotion` 으로 그 서비스
-모듈의 `desired=stopped`·재기동 카운터·`_EVAL_LATCH`·`planned_release` 를 해제한다. 승격
+모듈의 `desired=stopped`·재기동 카운터·**재기동 backoff**·`_EVAL_LATCH`·`planned_release` 를
+해제한다. 승격
 시점엔 그 노드가 VIP 를 보유해 ha.json 이 무장돼 있어 **모듈 목록이 확실**하다. 이 경로가
 **자동·수동 절체 모두**에서 타겟 기동을 보장한다. INTENTIONALLY_DOWN(이미 MASTER 인 활성
 노드에서 운영자가 stop)은 승격 엣지가 아니라 해제되지 않는다. (OAM 이 절체/일괄시작 시
@@ -294,6 +295,16 @@ reconcile 이 기동한다. 개별/서버 start 한 대만 눌러도 `note_modul
 그만큼 지연되므로 짧게(3s) 유지한다. **실제로 아무것도 안 켠 억제(cold on non-master) start 는
 op_grace 를 찍지 않는다** — 안 그러면 그 노드가 마스터로 승격됐을 때 reconcile 의 진짜 기동이
 남은 op_grace 때문에 지연된다(배치시작 후 cold 모듈이 늦게 뜨던 원인).
+
+**재기동 backoff 는 복구 의도가 있는 지점에서 반드시 해제한다.** reconcile 의 start 실패는
+`min(300, 5·2^n)` 초 지수 backoff 로 스로틀된다(모듈당, agent 메모리). 이 스로틀은 reconcile
+안에서 "정상 기동 확인" 또는 "돌던 것을 정지"로만 자연 해제되는데 **둘 다 프로세스가 떠 있어야
+한다** — 설정 오류 등으로 한 번도 못 뜬 모듈은 어느 쪽에도 안 걸려 상한 300초가 그대로 남는다.
+그래서 운영자 start/restart(`job_process_control`)·`ha_clear_holds`·승격 엣지·uninstall 에서
+`_clear_reconcile_backoff` 로 함께 지운다(`_fail_reset` 과 짝). 이게 없으면 원인을 고치고 start
+를 눌러도 직전 실패 창이 만료될 때까지(최대 5분) 기동되지 않고, 승격 경로에서는 그만큼 절체
+인수가 지연된다. **reconcile start 실패는 rc 와 함께 stderr 앞부분을 로그에 남긴다** — backoff
+가 벌어지면 재시도가 드물어져 rc 만으론 원인을 추적할 단서가 없다.
 
 **콘솔 모듈 상태 표시는 실측(live_state)이 정본이다.** 배포 status(job 결과=의도)가 아니라
 agent 가 주기(≈2s) 보고하는 실제 프로세스 상태로 표시한다(`depEffectiveStatus`): 실제로 떠

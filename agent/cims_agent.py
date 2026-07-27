@@ -1554,6 +1554,7 @@ def job_ha_clear_holds(params: dict) -> tuple:
             continue
         _set_desired(m, None)
         _fail_reset(m)
+        _clear_reconcile_backoff(m)
     _EVAL_LATCH[svc] = False
     try:
         os.remove(os.path.join(_HA_PERSIST_DIR, "planned_release", svc))
@@ -2505,6 +2506,7 @@ def _clear_holds_on_promotion(svc: str, s: dict) -> None:
             _set_desired(m, None)
             cleared.append(m)
         _fail_reset(m)
+        _clear_reconcile_backoff(m)     # 승격 즉시 기동 — 직전 실패 backoff 가 인수를 늦추지 않게
     latch_was = bool(_EVAL_LATCH.get(svc))
     _EVAL_LATCH[svc] = False
     pr = os.path.join(_HA_PERSIST_DIR, "planned_release", svc)
@@ -2700,6 +2702,16 @@ _RECONCILE_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int} (재�
 _LAST_UP: dict = {}               # module -> bool (직전 tick 생존; 크래시(up→down) 판정용)
 
 
+def _clear_reconcile_backoff(module: str) -> None:
+    """재기동 backoff 스로틀 해제 — 운영자 복구(start/restart)·홀드 해제·승격 시 호출.
+    backoff 는 reconcile 안에서 `exp and running`(정상) 또는 정지 경로로만 자연 해제되는데
+    **둘 다 프로세스가 떠 있어야** 한다. 한 번도 못 뜬 모듈(설정 오류로 start 연속 실패)은
+    어디에도 안 걸려 상한 300초가 남고, 원인을 고쳐 start 를 눌러도 그 창이 지나야 기동된다
+    (승격 경로면 그만큼 절체 지연). 그래서 복구 의도가 명시된 지점에서 함께 지운다 —
+    _fail_reset(절체 카운터)과 짝."""
+    _RECONCILE_BACKOFF.pop((module or "").lower().strip(), None)
+
+
 def _module_dist_dir(module: str) -> "str | None":
     """모듈 배포 루트(CIMS_DIST_DIR) — current 우선, 없으면 최신 버전 디렉토리
     (cims-notify _mod_dist 와 동일: 한 번도 기동 안 한 cold standby 도 승격 기동 가능)."""
@@ -2783,7 +2795,10 @@ def ha_reconcile_tick() -> None:
                 dist = _module_dist_dir(m)
                 if dist:
                     rc, out, err = _run_cims_svc(dist, "start", m)
-                    print(f"[agent][ha] reconcile start {m} (role={role}) rc={rc}", flush=True)
+                    # 실패는 원인까지 남긴다 — backoff 가 지수로 벌어지면 재시도가 드물어져
+                    # (상한 300s) rc 만으론 왜 안 뜨는지 추적할 단서가 없다.
+                    detail = f" — {(err or out or '').strip()[:200]}" if rc else ""
+                    print(f"[agent][ha] reconcile start {m} (role={role}) rc={rc}{detail}", flush=True)
             elif (not exp) and running:
                 # 유지보수(excluded)·절체 래치(latched) 정지는 즉시 — 점검/절체를 지연시키지
                 # 않는다. 그 외 role 기반 정지(cold on BACKUP 등)는 op_grace 를 존중한다 —
@@ -3369,6 +3384,8 @@ def job_process_control(params: dict, job_type: str) -> tuple:
         _set_desired(svc, None)
         _clear_failover_holds(svc)      # 운영자 복구 — 절체 래치 + planned_release 해제
         _fail_reset(svc)                # 재기동 카운터 리셋 — 복구 후 곧바로 재절체되지 않게
+        _clear_reconcile_backoff(svc)   # 재기동 backoff 리셋 — 원인 고치고 누른 start 가
+                                        # 직전 실패 창(최대 300s)만큼 지연되지 않게
     elif job_type == "stop":
         _set_desired(svc, 'stopped')
         _fail_reset(svc)
@@ -3876,6 +3893,7 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             _set_desired(_mod, None)   # 오버라이드 잔재 제거 (service.json 은 모듈 트리와 함께 rmtree)
             _clear_failover_holds(_mod)  # 철거 모듈의 절체 래치·planned_release 잔재 해제
             _fail_reset(_mod)
+            _clear_reconcile_backoff(_mod)
             # 버전 디렉토리(…/<module>/<version>) 면 모듈 루트 전체 제거 —
             # uninstall 은 모듈 deployment 자체의 철거이므로 병렬 버전도 함께.
             module = (params.get("package_name") or "").strip()
