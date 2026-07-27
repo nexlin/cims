@@ -17,6 +17,7 @@ import com.cims.ue.ptt.mcdata.McDataCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -407,6 +408,10 @@ class PttService : Service() {
                 ) {
                     if (cur.isNotEmpty()) c.setAudioRoute(PttController.AUDIO_ROUTE_HEADSET, cur.first().id)
                     else c.setAudioRoute(com.cims.ue.core.sip.SipController.AUDIO_ROUTE_SPEAKER)
+                    // 라우팅 중이던 장치 소멸 — 재생 트랙에 시스템 뮤트가 고착되는 단말(MF52/A15
+                    // 실측)이 있어, 정책 재라우팅이 가라앉은 뒤 장치를 재오픈해 트랙을 재생성한다.
+                    delay(500)
+                    c.recoverFromDeviceLoss()
                 }
                 prev = cur
             }

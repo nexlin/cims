@@ -411,6 +411,11 @@ class PttController(
         applyAudioRoute()
     }
 
+    /** 출력 장치 소멸(이어폰/BT 해제) 복구 — 라우트 폴백 후 사운드 장치를 재오픈해 재생 트랙을
+     *  재생성한다. 일부 단말(MF52/A15 실측)이 장치 소멸 순간 무전 트랙에 시스템 뮤트를 건 채
+     *  해제하지 않아 무전이 무음이 되는 상태의 유일한 앱측 해제 수단(상세: [SipController.bounceSndDev]). */
+    fun recoverFromDeviceLoss() = sip.bounceSndDev()
+
     /** 무전 장치 게인(스피커 출력/마이크 송신, ×1.0~×3.0) — 영속 + 통화 중이면 즉시 적용. */
     fun setAudioGain(spk: Float, mic: Float) {
         val s = spk.coerceIn(com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MIN, com.cims.ue.ptt.audio.AudioRoutePrefs.GAIN_MAX)

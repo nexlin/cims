@@ -266,6 +266,20 @@ class SipController(private val config: SipAccountConfig) {
             .onFailure { Log.w(TAG, "setCaptureEnabled($on) 실패: ${it.message}") }
     }
 
+    /** 사운드 장치 재오픈(현재 캡처 게이트 모드 재적용) — 열려 있으면 즉시 닫고 다시 열어
+     *  재생/캡처 트랙을 재생성한다(conference 결선은 브리지에 생존, ~100ms 공백).
+     *  용도: 라우팅 중이던 출력 장치가 소멸(BT/이어폰 해제)하는 순간 일부 단말(MF52/A15 실측)이
+     *  재생 트랙에 시스템 뮤트(streamVolume)를 건 채 재라우팅 후에도 해제하지 않는다 — 볼륨
+     *  변경으로도 안 풀리며, 트랙을 새로 만들어야 뮤트 평가가 리셋된다. */
+    fun bounceSndDev() = onCtl {
+        if (!PjLib.booted) return@onCtl
+        val mode = (if (captureEnabled) 0 else org.pjsip.pjsua2.pjsua_snd_dev_mode.PJSUA_SND_DEV_SPEAKER_ONLY) or
+            org.pjsip.pjsua2.pjsua_snd_dev_mode.PJSUA_SND_DEV_NO_IMMEDIATE_OPEN
+        runCatching { PjLib.ep.audDevManager().setSndDevMode(mode.toLong()) }
+            .onSuccess { Log.i(TAG, "bounceSndDev snd mode=$mode") }
+            .onFailure { Log.w(TAG, "bounceSndDev 실패: ${it.message}") }
+    }
+
     /** 오디오 출력 라우팅 — PTT(무전) UX 용 스피커폰 토글. */
     fun setLoudspeaker(on: Boolean) =
         setAudioRoute(if (on) AUDIO_ROUTE_SPEAKER else AUDIO_ROUTE_EARPIECE)

@@ -28,7 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cims.ue.core.sip.RegState
-import com.cims.ue.core.sip.SipController
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.ListenPolicy
 import com.cims.ue.ptt.PttController
@@ -84,12 +83,7 @@ fun SettingsScreen(
         // ── 통신 설정 ──
         SectionLabel("통신 설정")
         SectionCard(padding = 4) {
-            val speakerOn = st.route == SipController.AUDIO_ROUTE_SPEAKER
-            ToggleRow("스피커 출력", "끄면 수화기 (이어폰은 주채널 화면에서 선택)", speakerOn) {
-                st.ctl?.setAudioRoute(
-                    if (speakerOn) SipController.AUDIO_ROUTE_EARPIECE else SipController.AUDIO_ROUTE_SPEAKER)
-            }
-            Divider()
+            // 출력 라우트(스피커/수화기/이어폰)는 주채널 화면의 오디오 출력 아이콘에서 선택한다.
             val all = st.policy == ListenPolicy.ALL
             ToggleRow("전체 듣기", "끄면 주채널만 수신", all) {
                 st.ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)

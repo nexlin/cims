@@ -4,8 +4,6 @@ import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.net.DatagramPacket
-import java.net.DatagramSocket
 import java.net.InetAddress
 import kotlin.concurrent.thread
 
@@ -39,7 +37,16 @@ class FloorClient(
     localPort: Int = 0,
     private val onEvent: (FloorEvent) -> Unit = {},
 ) {
-    private val socket = DatagramSocket(localPort)
+    // IPv4 전용(AF_INET) 소켓 + 채널 API 직접 사용. 서버(CMP)는 IPv4 전용이라 v4 바인딩으로
+    // 잃는 것이 없고, 채널의 socket() 어댑터 경유 send 는 예외 없이 패킷이 유실되는 동작이
+    // 실기기(W999/MTK13·MF52/QC15 공통)에서 관측돼 send/receive 모두 채널 메서드를 직접 쓴다.
+    private val channel = java.nio.channels.DatagramChannel
+        .open(java.net.StandardProtocolFamily.INET)
+        // INET 채널에 무인자 와일드카드(InetSocketAddress(port))를 주면 v6 "::" 로 해석돼
+        // UnsupportedAddressTypeException — v4 와일드카드(0.0.0.0)를 명시해야 한다.
+        .bind(java.net.InetSocketAddress(
+            java.net.InetAddress.getByAddress(byteArrayOf(0, 0, 0, 0)), localPort))
+        .also { Log.i(TAG, "floor socket bound v4 :${(it.localAddress as java.net.InetSocketAddress).port}") }
 
     // 원격(CMP floor) 목적지는 그룹 INVITE 200 OK SDP 의 m=application 에서 학습 → connectRemote 로 설정.
     @Volatile private var remoteAddr: InetAddress? = null
@@ -49,7 +56,7 @@ class FloorClient(
     val state: StateFlow<FloorState> = _state.asStateFlow()
 
     /** 바인드된 로컬 floor 포트(송신 SDP m=application 에 광고). */
-    val localPort: Int get() = socket.localPort
+    val localPort: Int get() = (channel.localAddress as java.net.InetSocketAddress).port
 
     @Volatile private var running = true
     private val rx = thread(name = "floor-rx", start = true) { receiveLoop() }
@@ -103,20 +110,22 @@ class FloorClient(
         val addr = remoteAddr ?: run { Log.w(TAG, "floor send before remote learned"); return }
         val port = remotePort
         tx.execute {
-            runCatching { socket.send(DatagramPacket(pkt, pkt.size, addr, port)) }
-                .onFailure { Log.w(TAG, "floor send failed: ${it.javaClass.simpleName}: ${it.message}") }
+            runCatching {
+                val n = channel.send(java.nio.ByteBuffer.wrap(pkt), java.net.InetSocketAddress(addr, port))
+                Log.d(TAG, "floor tx ${n}B → ${addr.hostAddress}:$port")
+            }.onFailure { Log.w(TAG, "floor send failed: ${it.javaClass.simpleName}: ${it.message}") }
         }
     }
 
     // ── 수신 ──
 
     private fun receiveLoop() {
-        val buf = ByteArray(1500)
+        val buf = java.nio.ByteBuffer.allocate(1500)
         while (running) {
             try {
-                val dp = DatagramPacket(buf, buf.size)
-                socket.receive(dp)
-                val msg = FloorCodec.decode(buf, dp.length) ?: continue
+                buf.clear()
+                channel.receive(buf) ?: continue
+                val msg = FloorCodec.decode(buf.array(), buf.position()) ?: continue
                 handle(msg)
             } catch (e: Exception) {
                 if (running) Log.w(TAG, "floor rx: ${e.message}")
@@ -141,7 +150,8 @@ class FloorClient(
             FloorMsgType.QUEUE_POS_INFO -> { _state.value = FloorState.QUEUED; FloorEvent.QueuePosition(msg.queuePosition) }
             else -> FloorEvent.Other(msg.type)
         }
-        Log.d(TAG, "floor recv ${msg.typeName()} → state=${_state.value}")
+        // INFO 레벨 — 일부 벤더 단말(MTK)이 D 레벨을 기본 억제(log.tag=I)해 현장 진단이 막힌다.
+        Log.i(TAG, "floor recv ${msg.typeName()} → state=${_state.value}")
         runCatching { onEvent(ev) }
     }
 
@@ -155,7 +165,7 @@ class FloorClient(
     fun close() {
         running = false
         runCatching { tx.shutdownNow() }
-        runCatching { socket.close() }
+        runCatching { channel.close() }
         runCatching { rx.join(500) }
     }
 
