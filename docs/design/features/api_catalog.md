@@ -59,7 +59,7 @@ example 있으면 200 example, 없으면 `schema:{type:object}`), `servers:[{url
 - `pages/ApiCatalogPage.tsx`(**코어**) — category별 검색 표, 엔드포인트 펼침(파라미터 표·응답 예시·경로/curl 복사),
   상단 **[OpenAPI 다운로드]/[복사]**. 공유 API 없으면 empty-state("서비스 미설치/shareable_apis 없음").
 - **게이팅 = CIMS 서비스 매니페스트 기여**: `ems/service/console/src/manifest.tsx` `cimsManifest.sections` 에
-  `integration`(label `연동/API`, area `admin`, order 55, route `/integration/api`) 추가. base 콘솔은
+  `integration`(label `연동/API`, area `admin`, order 80 — 릴리스와 문서 사이, route `/integration/api`) 추가. base 콘솔은
   `SERVICE_MANIFESTS=[]`(빌드타임 DCE)라 섹션이 아예 없음 → **서비스팩 있을 때만 노출**(구성/성능/기록과 동일
   메커니즘). 코어 page 컴포넌트를 서비스 섹션이 참조하는 것은 `ServiceDescriptorsPage` 선례와 동일.
 

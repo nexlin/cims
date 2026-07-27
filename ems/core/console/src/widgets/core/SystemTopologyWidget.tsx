@@ -1,12 +1,14 @@
-// 코어 위젯 — 시스템 형상(구성도) + 상태. HA 그룹(AS/AA)/단독(SA)별로 VIP→멤버 노드→모듈 구성을
-// 그리고, 각 서버/모듈 상태색을 **활성 알람 등급**으로 구동(offline/critical/major 🔴, minor/warning 🟡, 정상 🟢).
+// 코어 위젯 — 시스템 형상(구성도) + 상태. HA 그룹(AS/AA)/단독(SA)별로 VIP→멤버 노드→**설치된** 모듈
+// 구성을 그리고, 각 서버/모듈 상태색을 **활성 알람 등급**으로 구동(offline/critical/major 🔴,
+// minor/warning 🟡, 정상 🟢, 설치만 되고 미기동 ⚪).
 // 서비스 무지(범용 인프라). 자체 폴링 15s. 비관리자/오류 시 빈.
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../../api/ha_groups'
-import { deploymentApi, type Agent, type Deployment } from '../../api/deployment'
+import { deploymentApi, type Agent } from '../../api/deployment'
 import { alertsApi, type AlertEvent } from '../../api/alerts'
 import { externalSystemsApi, type ExternalSystem, type ProbeResult } from '../../api/external_systems'
+import { depEffectiveStatus } from '../../pages/deploy/deployHelpers'
 import type { WidgetDef } from '../types'
 
 const EXT_TYPE_LABEL: Record<string, string> = {
@@ -49,7 +51,10 @@ function activeSevByMo(events: AlertEvent[]): Map<string, number> {
   return m
 }
 
-interface Node { agentId: number; host: string; online: boolean; role?: string; active?: boolean; version?: string; modules: string[] }
+// 노드가 담는 모듈 = **설치된** 모듈. running 은 실측 기동 여부 — 설치만 되고 안 뜬
+// 모듈(AS 대기 노드의 cold 모듈 등)도 회색 칩으로 보인다.
+interface NodeModule { name: string; running: boolean }
+interface Node { agentId: number; host: string; online: boolean; role?: string; active?: boolean; version?: string; modules: NodeModule[] }
 interface Sys { key: string; name: string; mode: 'AS' | 'AA' | 'SA'; vip?: string; vipSlot?: string; nodes: Node[] }
 
 function chipTint(rank: number, running: boolean): string {
@@ -64,7 +69,7 @@ function ModuleChip({ host, module, running, sevByMo }: { host: string; module: 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '2px 8px',
                    border: `1px solid var(--border)`, borderRadius: 12, background: chipTint(rank, running) }}
-          title={`${module} — ${rank >= 3 ? '알람(심각)' : rank >= 1 ? '알람(경고)' : running ? '정상' : '미실행'}`}>
+          title={`${module} — ${rank >= 3 ? '알람(심각)' : rank >= 1 ? '알람(경고)' : running ? '정상' : '설치됨·미기동'}`}>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: col, display: 'inline-block' }} />{module}
     </span>
   )
@@ -72,10 +77,11 @@ function ModuleChip({ host, module, running, sevByMo }: { host: string; module: 
 
 function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number>; onClick: () => void }) {
   // 노드 등급 = offline → critical, 아니면 host/모듈 알람 최고 등급.
+  // 서비스 레벨 알람(cims/<모듈>)은 **기동 중인** 모듈에만 귀속 — 정지된 대기 노드까지 물들지 않게.
   let rank = n.online ? 0 : 4
   for (const [mo, r] of sevByMo) {
     if (mo.split('/')[0] === n.host) rank = Math.max(rank, r)
-    if (n.modules.some(m => mo === `cims/${m}`)) rank = Math.max(rank, r)
+    if (n.modules.some(m => m.running && mo === `cims/${m.name}`)) rank = Math.max(rank, r)
   }
   const col = sevColor(rank, n.online)
   return (
@@ -109,8 +115,9 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
       <div style={{ borderTop: '1px solid var(--border)', padding: '6px 10px 8px', display: 'flex', flexWrap: 'wrap', gap: 5,
                     background: 'var(--bg-soft)' }}>
         {n.modules.length === 0
-          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(모듈 없음)</span>
-          : n.modules.map(m => <ModuleChip key={m} host={n.host} module={m} running={n.online} sevByMo={sevByMo} />)}
+          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(설치된 모듈 없음)</span>
+          : n.modules.map(m => <ModuleChip key={m.name} host={n.host} module={m.name}
+                                           running={n.online && m.running} sevByMo={sevByMo} />)}
       </div>
     </div>
   )
@@ -170,14 +177,25 @@ function SystemTopologyWidget() {
         .then(items => setExtStatus(new Map(items.map(i => [i.id, i]))))
         .catch(() => {})
       const byId = new Map<number, Agent>(agents.map(a => [a.id, a]))
-      const modsOf = (aid: number) => deps
-        .filter((d: Deployment) => d.agent_id === aid && (d.process_name || '') && d.status === 'running')
-        .map((d: Deployment) => (d.process_name || '').toLowerCase())
+      // 설치된 모듈 = 배포기록 존재(pending=미설치 · removed=삭제 제외). 기동 여부는 실측
+      // 우선(depEffectiveStatus) — 배포기록 status 는 운영자 지시 이력이라 HA notify 가
+      // 로컬에서 켠/끈 모듈과 어긋난다. 같은 모듈 중복 기록은 name 으로 합치고 running 은 OR.
+      const modsOf = (aid: number): NodeModule[] => {
+        const byName = new Map<string, NodeModule>()
+        for (const d of deps) {
+          if (d.agent_id !== aid || !(d.process_name || '')) continue
+          if (d.status === 'pending' || d.status === 'removed') continue
+          const name = (d.process_name || '').toLowerCase()
+          const running = depEffectiveStatus(d) === 'running' || !!byName.get(name)?.running
+          byName.set(name, { name, running })
+        }
+        return [...byName.values()]
+      }
       // role = 설정(master/backup), active = 런타임 상태(현재 VIP 보유 = Active).
       const node = (aid: number, role?: string, active?: boolean): Node => {
         const a = byId.get(aid)
         return { agentId: aid, host: a?.name || String(aid), online: a?.status === 'online',
-                 role, active, version: a?.agent_version || undefined, modules: [...new Set(modsOf(aid))] }
+                 role, active, version: a?.agent_version || undefined, modules: modsOf(aid) }
       }
       const holdsVip = (aid: number, vipIps: Set<string>): boolean => {
         const a = byId.get(aid)
@@ -220,7 +238,7 @@ function SystemTopologyWidget() {
     for (const n of s.nodes) {
       if (!n.online) r = Math.max(r, 4)
       for (const [mo, rr] of sevByMo) {
-        if (mo.split('/')[0] === n.host || n.modules.some(m => mo === `cims/${m}`)) r = Math.max(r, rr)
+        if (mo.split('/')[0] === n.host || n.modules.some(m => m.running && mo === `cims/${m.name}`)) r = Math.max(r, rr)
       }
     }
     return r
@@ -281,7 +299,7 @@ function SystemTopologyWidget() {
       </div>
       {/* 상태 범례 */}
       <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
-        {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['외부', '#8e44ad']].map(([t, c]) => (
+        {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['설치됨·미기동', C_GRAY], ['외부', '#8e44ad']].map(([t, c]) => (
           <span key={t as string} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: c as string, display: 'inline-block' }} />{t}
           </span>

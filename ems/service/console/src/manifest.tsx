@@ -103,7 +103,7 @@ export const cimsManifest: ServiceManifest = {
       area: 'admin',
       basePath: '/integration',
       defaultPath: '/integration/api',
-      order: 55,
+      order: 80,   // 관리 영역 — 릴리스(70) 다음, 문서(90) 앞
       routes: [
         { path: '/integration/api', title: 'API 카탈로그', component: ApiCatalogPage, adminOnly: true },
       ],
