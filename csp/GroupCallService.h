@@ -91,6 +91,12 @@ private:
     void CheckMemberState();
     void CheckGroupIntegrity();
 
+    /** 멤버 포트 캐시 무효화 — PTT_LEAVE 는 CMP 멤버 유닛을 풀로 반납하므로 재조인 시 다른
+     *  유닛(포트)이 배정될 수 있다. LeaveGroup 을 보내는 모든 경로에서 호출해, 다음 InviteMember
+     *  가 스테일 포트로 SDP offer 를 만들어 UE 상향이 옛 유닛으로 향하는(전량 pre-join drop 무음)
+     *  것을 막는다. */
+    void InvalidateMemberPort( const std::string &strGroupId, const std::string &strMemberId );
+
     /** 그룹 멤버 구성(id:priority 순서)의 해시. SyncGroupsState 의 "Config Changed" 판정 기준.
      *  그룹 컨텍스트(m_mapGroupRtp)를 만드는 모든 경로(SyncGroupsState/InviteMember/CheckGroupIntegrity)
      *  에서 동일하게 저장해야 한다. 0(미설정)으로 두면 다음 SyncGroupsState 가 실제해시와 불일치로

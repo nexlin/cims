@@ -109,6 +109,12 @@ bool CGroupCallService::GetOrAllocMemberPort( const std::string &strGroupId, con
     return true;
 }
 
+void CGroupCallService::InvalidateMemberPort( const std::string &strGroupId, const std::string &strMemberId ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    auto itRtp = m_mapGroupRtp.find( strGroupId );
+    if ( itRtp != m_mapGroupRtp.end() ) itRtp->second.memberPorts.erase( strMemberId );
+}
+
 CGroupCallService::~CGroupCallService() {
     StopMonitor();
 }
@@ -481,6 +487,7 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         const std::string &strGroupId = clsItem.strGroupId;
         if ( strGroupId.empty() ) continue;
         gclsCmpClient.LeaveGroup( strGroupId, clsItem.strSessionId, GetOrIssueGroupSesId( strGroupId ) );
+        InvalidateMemberPort( strGroupId, clsItem.strSessionId );
 
         // PTT history: member leave event
         if ( gclsCallDir.IsEnabled() ) {
@@ -565,6 +572,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         lock.unlock();
         if ( !strStaleGroup.empty() ) {
             gclsCmpClient.LeaveGroup( strStaleGroup, strStaleSession, GetOrIssueGroupSesId( strStaleGroup ) );
+            InvalidateMemberPort( strStaleGroup, strStaleSession );
         }
         // 재획득 후 계속 진행
         lock.lock();
@@ -1221,9 +1229,26 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                          clsNatSvc.name.c_str(), strMemberId.c_str(), strRemoteIp.c_str(), strSigIp.c_str() );
         }
     }
+    int iJoinLocalAudio = 0, iJoinLocalVideo = 0;
     bool bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
-                                            iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
-                                            iMemberNat, strMemberGuardIp );
+                                            iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole,
+                                            &iJoinLocalAudio, &iJoinLocalVideo, iMemberNat, strMemberGuardIp );
+    // 방어: JOIN 응답의 멤버 포트가 offer 에 쓴 캐시와 다르면(유닛 재배정) 캐시를 교정한다.
+    //   이 호 자체는 이미 옛 포트로 SDP 를 받아 상향이 성립하지 않으므로 발생 = 버그 신호(ERROR).
+    //   정상 경로에서는 LeaveGroup 시 InvalidateMemberPort 로 캐시가 비워져 여기 오지 않는다.
+    if ( bJoined && iJoinLocalAudio > 0 ) {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto itRtp = m_mapGroupRtp.find( strGroupId );
+        if ( itRtp != m_mapGroupRtp.end() ) {
+            auto itM = itRtp->second.memberPorts.find( strSessionId );
+            if ( itM != itRtp->second.memberPorts.end() && itM->second.first != iJoinLocalAudio ) {
+                CLog::Print( LOG_ERROR,
+                             "OnCallStarted: member port drift group=%s member=%s offer=%d join=%d (cache corrected)",
+                             strGroupId.c_str(), strSessionId.c_str(), itM->second.first, iJoinLocalAudio );
+            }
+            itRtp->second.memberPorts[strSessionId] = { iJoinLocalAudio, iJoinLocalVideo };
+        }
+    }
     if ( !bJoined && bHaveGroup ) {
         // JoinGroup 실패의 주요 원인은 CMP 그룹 소실(NOT_FOUND) — CMP 재시작/orphan 정리 후 CSP 세션만
         //   남은 상태. JoinGroup 경로엔 self-heal 이 없어 영구 무음이 되므로, SyncGroupsState 의 MODIFY
@@ -1319,6 +1344,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     // 2. lock 해제 후 외부 호출 (CMP, DB)
     CLog::Print( LOG_INFO, "OnCallTerminated: Group Call Terminated. CallId=%s", strCallId.c_str() );
     gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ) );
+    InvalidateMemberPort( strGroupId, strSessionId );
 
     // PTT history: member leave event
     if ( gclsCallDir.IsEnabled() ) {
