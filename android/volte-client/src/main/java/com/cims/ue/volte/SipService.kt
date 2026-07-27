@@ -79,6 +79,7 @@ class SipService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         // PJSIP boot 전(영상 캡처 디바이스 열거 전)에 CameraManager 주입 — 발신 영상/셀프뷰 카메라 열거의 전제.
         PjLib.cameraManager = getSystemService(Context.CAMERA_SERVICE) as? CameraManager
         createChannel()
@@ -184,7 +185,16 @@ class SipService : Service() {
 
     /** 설정이 완성되어 있으면 컨트롤러를 만들고 REGISTER. 설정이 바뀌면(재프로비저닝) 재등록. 멱등. */
     fun ensureRegistered() {
-        val cfg = ConfigStore(this).load()
+        val store = ConfigStore(this)
+        // 로그아웃 상태(계정 없음, 수동 모드 아님) — 캐시 설정이 남아 있어도 등록하지 않고 종료.
+        // 로그아웃 브로드캐스트 유실(강제종료 등) 후 START_STICKY 재기동이 stale 자격증명으로
+        // 재등록하는 사고를 막는 안전망.
+        if (!store.isManual() && !com.cims.ue.core.account.SsoProvisioner.hasAccount(this)) {
+            updateNotification("CIMS Phone", "로그인 필요")
+            stopSip()
+            return
+        }
+        val cfg = store.load()
         if (!cfg.isComplete()) {
             updateNotification("CIMS Phone", "로그인 필요")
             return
@@ -535,6 +545,7 @@ class SipService : Service() {
     }
 
     override fun onDestroy() {
+        instance = null
         stopRinging()
         runCatching { unregisterReceiver(micHandoffReceiver) }
         mainHandler.removeCallbacks(micResumeWatchdog)
@@ -713,6 +724,9 @@ class SipService : Service() {
     }
 
     companion object {
+        /** 실행 중 서비스 — 로그아웃 리시버가 등록 해제·FGS 종료용으로 접근(Activity 는 bind 사용). */
+        @Volatile var instance: SipService? = null
+            private set
         private const val CHANNEL_ID = "cims_volte"
         private const val CHANNEL_INCOMING = "cims_incoming_call"
         private const val CHANNEL_MESSAGE = "cims_message"

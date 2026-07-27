@@ -79,4 +79,22 @@ object CimsAccounts {
     fun invalidate(am: AccountManager, token: String?) {
         if (!token.isNullOrEmpty()) am.invalidateAuthToken(ACCOUNT_TYPE, token)
     }
+
+    /**
+     * 미로그인(공유 계정 없음, 수동 설정 모드 아님)이면 CIMS 오너 앱 로그인 화면으로 전환한다.
+     * companion 앱(Phone/PTT)이 Activity 진입 시 호출 — true 반환 시 호출자는 자기 화면을
+     * finish 한다. CIMS 앱 미설치 등으로 전환 실패면 false(호출자는 자체 안내 화면 폴백).
+     */
+    fun redirectToLoginIfLoggedOut(activity: android.app.Activity): Boolean {
+        if (get(activity) != null) return false
+        if (com.cims.ue.core.config.ConfigStore(activity).isManual()) return false
+        return runCatching {
+            activity.startActivity(
+                android.content.Intent(ACTION_LOGIN)
+                    .setPackage(com.cims.ue.core.CimsSuite.CIMS_PACKAGE)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            true
+        }.getOrDefault(false)
+    }
 }

@@ -288,6 +288,9 @@ class SipController(private val config: SipAccountConfig) {
 
     /** 오디오 출력 3단 라우팅 — [AUDIO_ROUTE_DEFAULT](자동: 이어폰 연결 시 이어폰)/수화구/스피커. */
     fun setAudioRoute(route: Int) = onCtl {
+        // 부팅 전/종료 후(libDestroy) native 호출 금지 — 로그아웃→재로그인처럼 프로세스가 산 채
+        // 재부팅되는 경로에서 파괴된 endpoint 호출은 abort. register() 후 재적용이 라우팅을 확보.
+        if (!PjLib.booted) return@onCtl
         PjLib.ep.audDevManager().setOutputRoute(
             when (route) {
                 AUDIO_ROUTE_SPEAKER -> org.pjsip.pjsua2.pjmedia_aud_dev_route.PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER
@@ -529,6 +532,9 @@ class SipController(private val config: SipAccountConfig) {
         account?.let { runCatching { it.delete() } }
         account = null
         PjLib.shutdown()
+        // 컨트롤러는 shutdown 후 폐기·재생성되는 계약(ensureRegistered/stopSip) — 전용 pj-ctl
+        // 스레드도 함께 마감해 로그아웃→재로그인 사이클마다 스레드가 누적되지 않게 한다.
+        ctl.quitSafely()
     }
 
     // ── config → pjsua2 매핑 (설계서 §3.2, Digest 계약) ──

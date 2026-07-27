@@ -153,6 +153,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 미로그인(로그아웃 상태) — CIMS 앱 로그인 화면으로 전환해 로그인 유도.
+        if (com.cims.ue.core.account.CimsAccounts.redirectToLoginIfLoggedOut(this)) {
+            finish(); return
+        }
         handleIntent(intent)
         setContent {
             // 시안 다크 고정 — PTT 앱과 같은 다크·민트 톤(Theme.kt).
@@ -182,8 +186,12 @@ class MainActivity : ComponentActivity() {
     }
 
     // 포그라운드 복귀 시 등록 재시도(keepalive) — doze/슬립 후 끊긴 등록 즉시 복구.
+    // 복귀 시점에 로그아웃 상태면(화면이 recents 에 남아 있다 돌아온 경우) 로그인 유도로 전환.
     override fun onResume() {
         super.onResume()
+        if (com.cims.ue.core.account.CimsAccounts.redirectToLoginIfLoggedOut(this)) {
+            finish(); return
+        }
         if (com.cims.ue.core.account.SsoProvisioner.hasAccount(this) || ConfigStore(this).load().isComplete()) {
             runCatching { SipService.poke(this) }
         }

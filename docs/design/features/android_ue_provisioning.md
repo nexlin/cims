@@ -27,6 +27,34 @@ CIMS 앱 [로그인 화면]  (CSC 주소 + 아이디 + 비번)
 - 로그인은 **CSC(IdMS) 한 곳**. CSP/PSP 시그널링 서버 주소는 프로비저닝 응답으로 받는다.
 - **volte-client** 는 `kind=="volte"`, **ptt-client** 는 `kind=="ptt"` 프로파일을 사용. 앱 진입 시 항상 재프로비저닝(GATE)해 서버 설정 변경(포트 등)을 자동 반영. 수동 설정은 **수동 설정 모드**(§5-1) 한정.
 
+### 1-1. 로그아웃 — 스위트 연동 종료
+
+CIMS 로그인 화면의 **로그아웃**(로그인 상태에서만 노출, 확인 다이얼로그) 흐름:
+
+```
+CIMS 앱 [로그아웃]
+  → 공유 계정 제거(removeAccountExplicitly — 캐시 토큰도 함께 소멸)
+  → 스위트 로그아웃 브로드캐스트 CimsSuite.ACTION_LOGOUT
+     (setPackage 명시 + signature 권한 CIMS_SUITE + FLAG_INCLUDE_STOPPED_PACKAGES)
+      → 각 앱 SuiteLogoutReceiver(정적 등록, core CimsLogoutReceiver 서브클래스):
+         ① ConfigStore.clear() — 프로비저닝 설정·자격증명 제거(수동 설정 모드면 전체 무시)
+         ② 서비스 종료: 등록 해제(un-REGISTER Expires:0) + FGS 정리(stopSip)
+         ③ 2s 후 프로세스 종료(killProcess) — "앱 종료" 계약 + PJSIP 프로세스 내 재부팅
+            (libDestroy 후 Endpoint 재생성) 취약성 회피: 다음 로그인은 항상 신규 프로세스 첫 부팅
+```
+
+- 정적 리시버라 앱 프로세스가 죽어 있어도 배달돼 캐시 설정이 항상 제거된다(다음 기동 시
+  stale 자격증명 재등록 방지). 각 서비스 `ensureRegistered` 에도 로그아웃 게이트(계정 없음
+  +수동 모드 아님 → 미등록·종료)가 있어 브로드캐스트 유실 시의 안전망이 된다.
+- PTT 접근성 서비스(PttKeyService)는 시스템 바인딩이라 프로세스가 자동 재기동될 수 있으나,
+  설정·계정이 비어 등록 FGS 는 뜨지 않는다(무해).
+- **미로그인 상태에서 Phone/PTT 실행** 시 각 MainActivity(onCreate/onResume)가
+  `CimsAccounts.redirectToLoginIfLoggedOut` 로 CIMS 로그인 화면(`ACTION_LOGIN` 명시 인텐트)으로
+  전환하고 자신을 finish 한다. CIMS 앱 미설치(해석 실패)면 기존 자체 안내 화면(GATE/Splash) 폴백.
+  수동 설정 모드는 전환하지 않는다.
+- 재로그인 시 §1 흐름이 그대로 재실행돼 등록·affiliation 이 복원되고, 서버에 그룹 세션이
+  살아 있으면 그룹콜도 자동 재조인된다(실기기 확인).
+
 ## 2. 신원 계층 (혼동 방지)
 
 | 식별자 | 용도 | 규격 |
@@ -160,4 +188,4 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 
 - CSC 주소 기본값(빌드 설정) vs 입력 — 현재 입력(기본값 채움). 사내 배포 시 기본값 고정 가능.
 - 다중 서비스 동시(한 단말이 VoLTE+PTT 둘 다) — 현재는 앱별 단일 서비스. 통합 앱 시 확장.
-- refresh_token 회전·로그아웃·EncryptedSharedPreferences(토큰/비번 보관).
+- refresh_token 회전·EncryptedSharedPreferences(토큰/비번 보관). (로그아웃은 §1-1 로 구현됨.)

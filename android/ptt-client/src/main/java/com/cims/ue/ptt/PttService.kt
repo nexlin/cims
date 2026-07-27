@@ -332,7 +332,15 @@ class PttService : Service() {
     private var activeConfig: com.cims.ue.core.config.SipAccountConfig? = null
 
     fun ensureRegistered() {
-        val cfg = ConfigStore(this).load()
+        val store = ConfigStore(this)
+        // 로그아웃 상태(계정 없음, 수동 모드 아님) — 캐시 설정이 남아 있어도 등록하지 않고 종료.
+        // 로그아웃 브로드캐스트 유실 후 START_STICKY/키 경로 재기동의 stale 재등록 방지 안전망.
+        if (!store.isManual() && !com.cims.ue.core.account.SsoProvisioner.hasAccount(this)) {
+            update("CIMS-McPtt", "로그인 필요")
+            stopSip()
+            return
+        }
+        val cfg = store.load()
         if (!cfg.isComplete()) { update("CIMS-McPtt", "로그인 필요"); return }
         if (controller != null && activeConfig == cfg) {        // 동일 설정 → 그대로(토큰만 보강)
             controller?.let { injectSsoToken(it) }
@@ -419,6 +427,7 @@ class PttService : Service() {
     }
 
     fun stopSip() {
+        controller?.let { runCatching { it.sip.unregister() } }   // 명시 종료 — 서버 등록도 해제
         controller?.shutdown()
         _controller.value = null
         mainHandler.post { overlay.hide() }

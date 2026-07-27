@@ -41,8 +41,11 @@ object PjLib {
     var cameraManager: CameraManager? = null
 
     // 스레드별 PJSIP 등록 여부. libIsThreadRegistered() 는 미등록 스레드에서 호출 시 native abort 하므로
-    // 쓰지 않고, 이 ThreadLocal 로 스레드당 정확히 1회 libRegisterThread 를 보장한다(설계서 §3.5 대안).
-    private val threadRegistered = ThreadLocal.withInitial { false }
+    // 쓰지 않고, ThreadLocal 로 스레드당 등록을 보장한다(설계서 §3.5 대안).
+    // **부팅 세대(epoch)** 로 기록 — libDestroy 는 모든 스레드 등록을 소멸시키므로(로그아웃→재로그인의
+    // shutdown→boot 사이클), 이전 세대에 등록했던 스레드도 새 세대에서 재등록해야 한다.
+    @Volatile private var bootEpoch = 0
+    private val threadEpoch = ThreadLocal.withInitial { 0 }   // 0 = 미등록
 
     /** pjsip 로그 → logcat 브리지. 기본 sink 는 stdout(logcat 미노출)이라 미디어/스트림 진단이
      *  불가능했다. SWIG 콜백 객체는 GC 되면 native crash — PjLib 필드로 강참조 유지(필수). */
@@ -97,7 +100,8 @@ object PjLib {
         endpoint.libStart()
         ep = endpoint
         booted = true
-        threadRegistered.set(true)            // libInit 가 boot 스레드를 등록함
+        bootEpoch += 1
+        threadEpoch.set(bootEpoch)            // libInit 가 boot 스레드를 등록함
         Log.i(TAG, "PJSIP started — state=${endpoint.libGetState()}, SIP UDP+TCP transport up")
 
         logRegisteredCodecs()
@@ -108,8 +112,8 @@ object PjLib {
      * ⚠️ `libIsThreadRegistered()` 는 미등록 스레드에서 호출 자체가 abort 하므로 쓰지 않고 ThreadLocal 로 가드.
      */
     fun ensureThread(name: String = Thread.currentThread().name) {
-        if (!booted || threadRegistered.get()) return
-        runCatching { ep.libRegisterThread(name) }.onSuccess { threadRegistered.set(true) }
+        if (!booted || threadEpoch.get() == bootEpoch) return
+        runCatching { ep.libRegisterThread(name) }.onSuccess { threadEpoch.set(bootEpoch) }
     }
 
     /**

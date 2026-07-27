@@ -52,6 +52,11 @@ class ConfigStore(context: Context) {
 
     fun isProvisioned(): Boolean = load().isComplete()
 
+    /** 로그아웃 — 프로비저닝된 계정/서버 설정 전부 제거(캐시 자격증명으로 재등록되지 않게). */
+    fun clear() {
+        prefs.edit().clear().apply()
+    }
+
     /**
      * 수동 설정 모드 — true 면 SSO 자동 프로비저닝이 저장값을 덮어쓰지 않는다.
      * CIMS 로그인 없이(또는 무시하고) 직접 입력한 값을 시험하기 위한 모드. 끄면 다음

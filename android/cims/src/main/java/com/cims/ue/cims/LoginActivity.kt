@@ -32,9 +32,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -54,6 +56,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cims.ue.core.CimsSuite
 import com.cims.ue.core.account.CimsAccounts
 import com.cims.ue.core.provision.CscEndpoint
 import com.cims.ue.core.provision.ProvisioningClient
@@ -73,11 +76,15 @@ class LoginActivity : ComponentActivity() {
             intent.getParcelableExtra(AccountManager.KEY_ACCOUNT_AUTHENTICATOR_RESPONSE)
     }
 
+    /** 현재 로그인된 계정명(없으면 null) — 로그인/로그아웃에 따라 화면 상태 전환. */
+    private val loggedInUser = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val am = AccountManager.get(this)
         val existing = CimsAccounts.get(am)
         val prefillUser = intent.getStringExtra(AccountManager.KEY_ACCOUNT_NAME) ?: existing?.name ?: ""
+        loggedInUser.value = existing?.name
 
         setContent {
             // 시안 다크 고정 — PTT/Phone 과 같은 다크·민트 톤.
@@ -85,8 +92,9 @@ class LoginActivity : ComponentActivity() {
                 Box(Modifier.fillMaxSize().background(Cl.Bg)) {
                     LoginScreen(
                         initialUser = prefillUser,
-                        alreadyLoggedIn = existing != null,
+                        loggedInUser = loggedInUser.value,
                         onSubmit = ::doLogin,
+                        onLogout = ::doLogout,
                     )
                 }
             }
@@ -122,12 +130,40 @@ class LoginActivity : ComponentActivity() {
                     putString(AccountManager.KEY_ACCOUNT_TYPE, account.type)
                 })
                 runOnUiThread {
+                    loggedInUser.value = account.name
                     startCompanionServices()
                     onResult(true, "로그인 성공 — 계정이 등록되었습니다")
                     finish()
                 }
             } catch (e: Exception) {
                 runOnUiThread { onResult(false, "로그인 실패: ${e.message}") }
+            }
+        }.start()
+    }
+
+    /**
+     * 로그아웃 — 공유 계정 제거(캐시 토큰도 함께 소멸) 후 스위트 로그아웃 브로드캐스트.
+     * Phone/PTT 는 수신 시 등록 해제 + 프로비저닝 설정 제거 + 등록유지 FGS 종료하고,
+     * 이후 실행 시 이 로그인 화면으로 유도된다. 정지 상태 앱에도 배달(INCLUDE_STOPPED).
+     */
+    private fun doLogout(onDone: (String) -> Unit) {
+        Thread {
+            val am = AccountManager.get(this)
+            am.getAccountsByType(CimsAccounts.ACCOUNT_TYPE).forEach { acct ->
+                runCatching { am.removeAccountExplicitly(acct) }
+            }
+            listOf(CimsSuite.VOLTE_PACKAGE, CimsSuite.PTT_PACKAGE).forEach { pkg ->
+                runCatching {
+                    sendBroadcast(
+                        Intent(CimsSuite.ACTION_LOGOUT).setPackage(pkg)
+                            .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES),
+                        CimsSuite.PERMISSION,
+                    )
+                }
+            }
+            runOnUiThread {
+                loggedInUser.value = null
+                onDone("로그아웃되었습니다 — Phone/PTT 등록이 해제됩니다")
             }
         }.start()
     }
@@ -178,8 +214,9 @@ private val CimsDark = darkColorScheme(
 @Composable
 private fun LoginScreen(
     initialUser: String,
-    alreadyLoggedIn: Boolean,
+    loggedInUser: String?,
     onSubmit: (host: String, port: Int, user: String, password: String, cb: (Boolean, String) -> Unit) -> Unit,
+    onLogout: (cb: (String) -> Unit) -> Unit,
 ) {
     var host by remember { mutableStateOf("121.161.164.45") }
     var port by remember { mutableStateOf("4430") }
@@ -189,6 +226,7 @@ private fun LoginScreen(
     var status by remember { mutableStateOf("") }
     var failed by remember { mutableStateOf(false) }
     var serverOpen by remember { mutableStateOf(false) }
+    var confirmLogout by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp)
@@ -206,9 +244,9 @@ private fun LoginScreen(
         Spacer(Modifier.height(4.dp))
         Text("1회 로그인으로 CIMS-Phone · McPTT 가 함께 사용합니다",
             color = Cl.TextDim, fontSize = 12.sp)
-        if (alreadyLoggedIn) {
+        if (loggedInUser != null) {
             Spacer(Modifier.height(8.dp))
-            Text("이미 로그인됨 — 재로그인하면 갱신됩니다",
+            Text("$loggedInUser 로그인됨 — 재로그인하면 갱신됩니다",
                 color = Cl.Mint, fontSize = 12.sp,
                 modifier = Modifier.clip(RoundedCornerShape(50)).background(Cl.Mint.copy(alpha = 0.12f))
                     .padding(horizontal = 10.dp, vertical = 3.dp))
@@ -260,6 +298,38 @@ private fun LoginScreen(
             if (busy) CircularProgressIndicator(Modifier.size(22.dp), color = Cl.OnMint, strokeWidth = 2.5.dp)
             else Text("로그인", color = if (enabled) Cl.OnMint else Cl.TextFaint,
                 fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+
+        // 로그아웃 — 로그인 상태에서만. 확인 후 계정 제거 + Phone/PTT 종료 통지.
+        if (loggedInUser != null) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp))
+                    .border(1.dp, Cl.Red.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                    .clickable(enabled = !busy) { confirmLogout = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("로그아웃", color = Cl.Red, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (confirmLogout) {
+            AlertDialog(
+                onDismissRequest = { confirmLogout = false },
+                containerColor = Cl.Surface,
+                title = { Text("로그아웃", color = Cl.Text) },
+                text = { Text("로그아웃하면 CIMS-Phone / McPTT 의 등록이 해제되고 앱이 종료됩니다.",
+                    color = Cl.TextDim) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmLogout = false
+                        busy = true; failed = false; status = "로그아웃 중…"
+                        onLogout { msg -> busy = false; status = msg }
+                    }) { Text("로그아웃", color = Cl.Red) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmLogout = false }) { Text("취소", color = Cl.TextDim) }
+                },
+            )
         }
 
         // 상태/오류 — 실패 시 시안의 붉은 외곽선 박스.

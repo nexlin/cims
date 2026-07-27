@@ -12,8 +12,13 @@ object CimsSuite {
     /** 스위트 서명 권한 — 브로드캐스트 송수신 양쪽에 요구(동일 서명 앱만 통과). */
     const val PERMISSION = "com.cims.ue.permission.CIMS_SUITE"
 
+    const val CIMS_PACKAGE = "com.cims.ue.cims"
     const val VOLTE_PACKAGE = "com.cims.ue.volte"
     const val PTT_PACKAGE = "com.cims.ue.ptt"
+
+    /** CIMS 오너 앱 로그아웃 — companion 앱(Phone/PTT)은 등록 해제 + 프로비저닝 설정 제거 +
+     *  등록유지 FGS 종료. 정지 상태 앱에도 배달(FLAG_INCLUDE_STOPPED_PACKAGES 로 송신). */
+    const val ACTION_LOGOUT = "com.cims.ue.action.LOGOUT"
 
     /** PTT 발언 시도/시작 — 통화 앱은 마이크를 양보한다(재생 유지, 캡처만 해제). */
     const val ACTION_MIC_YIELD = "com.cims.ue.action.MIC_YIELD"

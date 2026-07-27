@@ -24,9 +24,11 @@
         android:protectionLevel="signature" />
     <uses-permission android:name="com.cims.ue.permission.CIMS_SUITE" />
 
-    <!-- 패키지 가시성(API 30+) — 발언 마이크 핸드오프(MIC_YIELD/RESUME) 명시적 브로드캐스트 대상 -->
+    <!-- 패키지 가시성(API 30+) — 발언 마이크 핸드오프(MIC_YIELD/RESUME) 브로드캐스트 대상(volte) +
+         미로그인 시 CIMS 오너 앱 로그인 화면 전환(cims) -->
     <queries>
         <package android:name="com.cims.ue.volte" />
+        <package android:name="com.cims.ue.cims" />
     </queries>
 
     <application
@@ -75,6 +77,16 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- CIMS 로그아웃 통지(서명 권한) — 설정 제거 + 등록 해제 + FGS 종료 -->
+        <receiver
+            android:name=".SuiteLogoutReceiver"
+            android:exported="true"
+            android:permission="com.cims.ue.permission.CIMS_SUITE">
+            <intent-filter>
+                <action android:name="com.cims.ue.action.LOGOUT" />
             </intent-filter>
         </receiver>
 

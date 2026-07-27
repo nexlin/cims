@@ -29,9 +29,11 @@
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
-    <!-- 패키지 가시성(API 30+) — 라우팅 양보(ROUTE_YIELD/RESUME) 명시적 브로드캐스트 대상 -->
+    <!-- 패키지 가시성(API 30+) — 라우팅 양보(ROUTE_YIELD/RESUME) 브로드캐스트 대상(ptt) +
+         미로그인 시 CIMS 오너 앱 로그인 화면 전환(cims) -->
     <queries>
         <package android:name="com.cims.ue.ptt" />
+        <package android:name="com.cims.ue.cims" />
     </queries>
 
     <application
@@ -74,6 +76,16 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- CIMS 로그아웃 통지(서명 권한) — 설정 제거 + 등록 해제 + FGS 종료 -->
+        <receiver
+            android:name=".SuiteLogoutReceiver"
+            android:exported="true"
+            android:permission="com.cims.ue.permission.CIMS_SUITE">
+            <intent-filter>
+                <action android:name="com.cims.ue.action.LOGOUT" />
             </intent-filter>
         </receiver>
     </application>

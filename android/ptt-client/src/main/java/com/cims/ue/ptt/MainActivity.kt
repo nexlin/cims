@@ -26,6 +26,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 미로그인(로그아웃 상태) — CIMS 앱 로그인 화면으로 전환해 로그인 유도(서비스도 안 띄움).
+        if (com.cims.ue.core.account.CimsAccounts.redirectToLoginIfLoggedOut(this)) {
+            finish(); return
+        }
         // 하드웨어 음량 키가 무전 재생 스트림을 조절하게 — 재생 트랙은 STREAM_MUSIC
         // (트랙 단위 분리 라우팅용 pjsip 패치: 통화와 무전을 서로 다른 출력으로)
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
@@ -44,6 +48,14 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         runCatching { unbindService(conn) }
         super.onDestroy()
+    }
+
+    // 복귀 시점에 로그아웃 상태면(화면이 recents 에 남아 있다 돌아온 경우) 로그인 유도로 전환.
+    override fun onResume() {
+        super.onResume()
+        if (com.cims.ue.core.account.CimsAccounts.redirectToLoginIfLoggedOut(this)) {
+            finish(); return
+        }
     }
 
     /** 하드웨어 PTT 키(측면 버튼) — down=발언 요청, up=해제. 화면 버튼과 동일 경로.
