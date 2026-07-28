@@ -360,6 +360,16 @@ void PRtpRelay::collectFds(std::vector<int>& out) const {
     }
 }
 
+void PRtpRelay::setPeerPt(int peerIdx, int pt, int srcPt, int tePt, int srcTePt, const std::string& codec) {
+    PAutoLock lock(_mutex);
+    Leg& leg = _legs[peerIdx & 1];
+    leg.ptOut = pt; leg.srcPt = srcPt; leg.tePtOut = tePt; leg.srcTePt = srcTePt;
+    if (!codec.empty()) leg.codec = codec;
+    // 녹취 활성이면 leg 트랙 메타(audio_pt_a/b, audio_codec_a/b) 갱신 — MODIFY(재협상)도 최신 반영
+    if (_recorder)
+        _recorder->setTrackPtCodec((peerIdx & 1) == 0 ? "a" : "b", leg.srcPt, leg.codec);
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  녹취
 // ═══════════════════════════════════════════════════════════════
@@ -376,6 +386,11 @@ void PRtpRelay::startRecording(const std::string& rawDir, const std::string& ses
     _recorder->addTrack("b");
     _recorder->addTrack("va");
     _recorder->addTrack("vb");
+    // RELAY_ADD 는 setPeerPt → startRecording 순서 — 이미 선언된 leg PT/코덱을 트랙 메타로 반영
+    for (int i = 0; i < 2; ++i) {
+        if (_legs[i].srcPt > 0)
+            _recorder->setTrackPtCodec(i == 0 ? "a" : "b", _legs[i].srcPt, _legs[i].codec);
+    }
     _recorder->startSegment(1);
 
     LOG_INFO("PRtpRelay", "Recording started: dir=%s session=%s interval=%ds",

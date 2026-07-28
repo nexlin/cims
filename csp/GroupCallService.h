@@ -85,6 +85,15 @@ public:
     void SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
                                const std::string &strStatus, const std::string &strJoining );
 
+    /** leg 별 PT 재작성 파라미터 산출 (docs/api/cmp_media_api.md §6.1/§7.4).
+     *  user_pt/user_te_pt = 이 leg 의 원격 SDP 가 수신 선언한 audio/TE wire PT,
+     *  user_src_pt/user_src_te_pt = 서버가 그 leg 쪽에 낸 SDP 의 PT(= UE 송신 PT).
+     *  pstrCodec != NULL 이면 협상 오디오 코덱 문자열("AMR-WB/16000")도 반환 — 녹취 메타용.
+     *  VoLTE relay leg(remote_* 계열)도 동일 규칙으로 사용한다. */
+    static void GetLegPt( const std::string &strCallId, bool bServerOffered,
+                          int &iUserPt, int &iUserSrcPt, int &iUserTePt, int &iUserSrcTePt,
+                          std::string *pstrCodec = NULL );
+
 private:
     void MonitorLoop();
     void SyncGroupsState();

@@ -67,7 +67,7 @@ PMcpttGroup::~PMcpttGroup() {
 
 void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort,
                             const std::string& role, PPttMemberPort* unit, bool nat, const std::string& sigIp,
-                            int ptOut, int srcPt, int tePtOut, int srcTePt) {
+                            int ptOut, int srcPt, int tePtOut, int srcTePt, const std::string& codec) {
     if (ptOut || srcPt || tePtOut || srcTePt)
         LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d pt=%d/%d te=%d/%d",
                  _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(),
@@ -95,6 +95,7 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         peer.srcPt = srcPt;
         peer.tePtOut = tePtOut;
         peer.srcTePt = srcTePt;
+        if (!codec.empty()) peer.codec = codec;
         peer.declIp = ip;
         peer.declPort = port;
         peer.declVideoPort = videoPort;
@@ -134,6 +135,7 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.srcPt = srcPt;
     peer.tePtOut = tePtOut;
     peer.srcTePt = srcTePt;
+    peer.codec = codec;
     // SSRC 배정 공간 분리 — 한 카운터의 근접 오프셋(+1000/+2000)이면 누적 발행 시
     //   멤버 ssrc 와 송출 SSRC 범위가 겹치므로 상위 비트로 격리한다.
     peer.ssrc = _nextSsrc++;
@@ -697,8 +699,13 @@ void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc,
     // 녹취: 초기화 안됐으면 초기화 + 세그먼트 시작.
     if (_recordEnable && !_recorder) startRecording();
     if (_recordEnable && _recorder) {
-        if (preempt) _recorder->startPttSegment(sessionId, prio, true, prevOwner);
-        else         _recorder->startPttSegment(sessionId, prio);
+        // 화자 leg 의 ingress PT/코덱 (JOIN user_src_pt/user_codec) → 세그먼트 메타 (_mutex 보유 중)
+        int spkPt = 0;
+        std::string spkCodec;
+        auto itSpk = _members.find(sessionId);
+        if (itSpk != _members.end()) { spkPt = itSpk->second.srcPt; spkCodec = itSpk->second.codec; }
+        if (preempt) _recorder->startPttSegment(sessionId, prio, true, prevOwner, spkPt, spkCodec);
+        else         _recorder->startPttSegment(sessionId, prio, false, "", spkPt, spkCodec);
     }
 }
 

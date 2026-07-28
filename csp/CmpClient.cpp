@@ -446,7 +446,9 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
                              const std::string &strRecordDir, const std::string &strCaller,
                              const std::string &strCallee, const std::string &strRmtIp, int iRmtPort,
                              int iRmtVideoPort, const std::string &strSesId, int iRemoteNat,
-                             const std::string &strRemoteSigIp ) {
+                             const std::string &strRemoteSigIp,
+                             int iRemotePt, int iRemoteSrcPt, int iRemoteTePt, int iRemoteSrcTePt,
+                             const std::string &strRemoteCodec ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_ADD" );
     req.Set( "session_id", strSessionId );
@@ -458,6 +460,12 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
         req.Set( "remote_nat", 1 );
         if ( !strRemoteSigIp.empty() ) req.Set( "remote_sig_ip", strRemoteSigIp );
     }
+    // leg 별 PT 재작성 + 녹취 메타 (cmp_media_api.md §6.1, optional — 생략=재작성 없음).
+    if ( iRemotePt > 0 ) req.Set( "remote_pt", iRemotePt );
+    if ( iRemoteSrcPt > 0 ) req.Set( "remote_src_pt", iRemoteSrcPt );
+    if ( iRemoteTePt > 0 ) req.Set( "remote_te_pt", iRemoteTePt );
+    if ( iRemoteSrcTePt > 0 ) req.Set( "remote_src_te_pt", iRemoteSrcTePt );
+    if ( !strRemoteCodec.empty() ) req.Set( "remote_codec", strRemoteCodec );
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
     if ( !strCallee.empty() ) req.Set( "callee", strCallee );
@@ -499,7 +507,9 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
 bool CCmpClient::ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort,
                                 int iRmtVideoPort, int iPeerIdx, const std::string &strCaller,
                                 const std::string &strCallee, const std::string &strSesId, int iRemoteNat,
-                                const std::string &strRemoteSigIp ) {
+                                const std::string &strRemoteSigIp,
+                                int iRemotePt, int iRemoteSrcPt, int iRemoteTePt, int iRemoteSrcTePt,
+                                const std::string &strRemoteCodec ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_MODIFY" );
     req.Set( "session_id", strSessionId );
@@ -511,6 +521,12 @@ bool CCmpClient::ModifySession( const std::string &strSessionId, const std::stri
         req.Set( "remote_nat", 1 );
         if ( !strRemoteSigIp.empty() ) req.Set( "remote_sig_ip", strRemoteSigIp );
     }
+    // leg 별 PT 재작성 + 녹취 메타 (cmp_media_api.md §6.1, optional — 생략=재작성 없음).
+    if ( iRemotePt > 0 ) req.Set( "remote_pt", iRemotePt );
+    if ( iRemoteSrcPt > 0 ) req.Set( "remote_src_pt", iRemoteSrcPt );
+    if ( iRemoteTePt > 0 ) req.Set( "remote_te_pt", iRemoteTePt );
+    if ( iRemoteSrcTePt > 0 ) req.Set( "remote_src_te_pt", iRemoteSrcTePt );
+    if ( !strRemoteCodec.empty() ) req.Set( "remote_codec", strRemoteCodec );
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
     if ( !strCallee.empty() ) req.Set( "callee", strCallee );
 
@@ -693,7 +709,8 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
                             const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
                             const std::string &strSesId, const std::string &strRole, int *piLocalPort,
                             int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp,
-                            int iUserPt, int iUserSrcPt, int iUserTePt, int iUserSrcTePt ) {
+                            int iUserPt, int iUserSrcPt, int iUserTePt, int iUserSrcTePt,
+                            const std::string &strUserCodec ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -719,6 +736,7 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
         if ( iUserSrcPt > 0 ) req.Set( "user_src_pt", iUserSrcPt );
         if ( iUserTePt > 0 ) req.Set( "user_te_pt", iUserTePt );
         if ( iUserSrcTePt > 0 ) req.Set( "user_src_te_pt", iUserSrcTePt );
+        if ( !strUserCodec.empty() ) req.Set( "user_codec", strUserCodec );
     }
 
     std::string resp;

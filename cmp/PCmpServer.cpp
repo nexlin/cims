@@ -785,7 +785,8 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                            (int)payload.GetInt("remote_pt", 0),
                            (int)payload.GetInt("remote_src_pt", 0),
                            (int)payload.GetInt("remote_te_pt", 0),
-                           (int)payload.GetInt("remote_src_te_pt", 0));
+                           (int)payload.GetInt("remote_src_te_pt", 0),
+                           payload.GetString("remote_codec"));
         }
 
         // Worker thread는 initResourcePool()에서 영구 등록됨 — 여기서 추가 불필요
@@ -1143,8 +1144,9 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
             int userSrcPt   = (int)payload.GetInt("user_src_pt", 0);
             int userTePt    = (int)payload.GetInt("user_te_pt", 0);
             int userSrcTePt = (int)payload.GetInt("user_src_te_pt", 0);
+            std::string userCodec = payload.GetString("user_codec");
             group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role, mu,
-                             userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt);
+                             userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt, userCodec);
             // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
             std::string tierStr = payload.GetString("tier");
             if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));

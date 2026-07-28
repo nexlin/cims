@@ -43,11 +43,8 @@ public:
     // leg 별 PT 재작성 파라미터 (RELAY_ADD/MODIFY remote_pt 계열, 0=재작성 없음).
     //   pt/tePt: 이 leg 로 송신 시 스탬프할 audio/TE PT. srcPt/srcTePt: 이 leg 가
     //   송신에 쓰는 PT(TE 분류 기준). 규격 준수 단말은 비대칭 PT 통과 가능 — 보험 필드.
-    void setPeerPt(int peerIdx, int pt, int srcPt, int tePt, int srcTePt) {
-        PAutoLock lock(_mutex);
-        Leg& leg = _legs[peerIdx & 1];
-        leg.ptOut = pt; leg.srcPt = srcPt; leg.tePtOut = tePt; leg.srcTePt = srcTePt;
-    }
+    //   codec: 협상 오디오 코덱(remote_codec, 예 "AMR-WB/16000") — 녹취 세그먼트 메타용.
+    void setPeerPt(int peerIdx, int pt, int srcPt, int tePt, int srcTePt, const std::string& codec = "");
 
     unsigned int getLocalPort(int peerIdx = 0) const { return _legs[peerIdx & 1].localPort; }
     unsigned int getLocalVideoPort(int peerIdx = 0) const { return _legs[peerIdx & 1].localVideoPort; }
@@ -110,6 +107,7 @@ private:
         int srcPt = 0;
         int tePtOut = 0;
         int srcTePt = 0;
+        std::string codec;              // 협상 오디오 코덱 (remote_codec) — 녹취 세그먼트 메타용
 
         // NAT 목적지 latch (제어평면이 nat 지정한 leg 만 — ue_nat_traversal.md §5)
         bool nat = false;

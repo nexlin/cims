@@ -36,6 +36,11 @@ void PSyncRtpRecorder::addTrack(const std::string& prefix) {
     _tracks[prefix] = t;
 }
 
+void PSyncRtpRecorder::setTrackPtCodec(const std::string& prefix, int pt, const std::string& codec) {
+    if (pt > 0) _trackPtCodec[prefix] = {pt, codec};
+    else        _trackPtCodec.erase(prefix);
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  세그먼트 시작/종료
 // ═══════════════════════════════════════════════════════════════
@@ -60,8 +65,10 @@ void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId,
 
 // PTT: 시간버킷 + shard, seq 는 시간 단위 자체 관리
 void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
-                                       int priority, bool preempted, const std::string& preemptedFrom) {
+                                       int priority, bool preempted, const std::string& preemptedFrom,
+                                       int audioPt, const std::string& audioCodec) {
     if (_active) finishSegment();
+    setTrackPtCodec("audio", audioPt, audioCodec);   // 화자 leg PT/코덱 (화자마다 다를 수 있음)
 
     std::string hourDir = _hourDirNow();
     if (hourDir != _curHourDir) {
@@ -96,6 +103,7 @@ void PSyncRtpRecorder::_openTracks() {
         t.finalPath = _curSegDir + "/" + t.fileName;
         t.tmpPath = t.finalPath + ".recording";
         t.bytesWritten = 0;
+        t.mediaPackets = 0;
         t.fp = fopen(t.tmpPath.c_str(), "wb");
         if (!t.fp) {
             LOG_ERROR("PSyncRtpRecorder", "Failed to open %s: %s", t.tmpPath.c_str(), strerror(errno));
@@ -138,11 +146,12 @@ void PSyncRtpRecorder::_closeTrack(Track& t) {
     if (t.fp) {
         fclose(t.fp);
         t.fp = nullptr;
-        if (t.bytesWritten > 0) {
+        if (t.mediaPackets > 0) {
             rename(t.tmpPath.c_str(), t.finalPath.c_str());
             LOG_INFO("RtpRecorder", "Recording stopped: %s", t.finalPath.c_str());
         } else {
-            // 데이터 없는 트랙(예: 음성 그룹의 video)은 빈 파일 남기지 않고 제거
+            // 미디어 없는 트랙(빈 파일 또는 헤더-only keepalive 만 — 음성 호의 영상 포트 등)은
+            // 남기지 않고 제거 — 콘솔이 음성 호를 영상 녹취로 오판하는 원인.
             ::unlink(t.tmpPath.c_str());
         }
     }
@@ -168,6 +177,9 @@ void PSyncRtpRecorder::writePacket(const std::string& prefix, const char* pkt, i
     fwrite(&recvUsec, sizeof(recvUsec), 1, t.fp);
     fwrite(pkt, 1, len, t.fp);
     t.bytesWritten += sizeof(pktLen) + sizeof(recvUsec) + len;
+    // payload 있는 패킷만 미디어로 집계 — 헤더-only(keepalive)는 파일 보존/메타 판정에서 제외
+    if (len > 12 && len > 12 + ((unsigned char)pkt[0] & 0x0F) * 4)
+        t.mediaPackets++;
     _lastPktUsec = recvUsec;
 }
 
@@ -184,10 +196,10 @@ void PSyncRtpRecorder::_writeMeta() {
     char seqBuf[16];
     snprintf(seqBuf, sizeof(seqBuf), "%04d", _currentSeq);
 
-    // 파일 존재 + 크기 확인
+    // 미디어(payload 있는 패킷) 보유 확인 — keepalive-only 트랙은 영상 없음으로 판정
     bool hasVideo = false;
     for (auto& [prefix, t] : _tracks) {
-        if (t.bytesWritten > 0 && (prefix.find('v') == 0 || prefix == "video")) {
+        if (t.mediaPackets > 0 && (prefix.find('v') == 0 || prefix == "video")) {
             hasVideo = true;
             break;
         }
@@ -224,7 +236,7 @@ void PSyncRtpRecorder::_writeMeta() {
 
         // 트랙별 파일 참조 (데이터가 있는 트랙만)
         for (auto& [prefix, t] : _tracks) {
-            if (t.bytesWritten <= 0) continue;
+            if (t.mediaPackets <= 0) continue;   // 미디어 없는 트랙(keepalive-only 포함)은 참조 미기록
 
             // 키 결정: VoIP는 audio_file_a/b, video_file_a/b, PTT는 audio_file, video_file
             std::string key;
@@ -244,6 +256,16 @@ void PSyncRtpRecorder::_writeMeta() {
                     key = prefix + "_file";
             }
             fprintf(f, ",\"%s\":\"%s\"", key.c_str(), _jsonEsc(relDir + t.fileName).c_str());
+
+            // 오디오 트랙 PT/코덱 메타 — 변환기의 PT 판별 근거 (미지정 leg 는 생략 → 변환기 자동감지)
+            auto itPc = _trackPtCodec.find(prefix);
+            if (itPc != _trackPtCodec.end() && (prefix == "audio" || prefix == "a" || prefix == "b")) {
+                std::string ptKey = (prefix == "audio") ? "audio_pt" : ("audio_pt_" + prefix);
+                std::string cdKey = (prefix == "audio") ? "audio_codec" : ("audio_codec_" + prefix);
+                fprintf(f, ",\"%s\":%d", ptKey.c_str(), itPc->second.first);
+                if (!itPc->second.second.empty())
+                    fprintf(f, ",\"%s\":\"%s\"", cdKey.c_str(), _jsonEsc(itPc->second.second).c_str());
+            }
         }
 
         fprintf(f, ",\"has_video\":%s}\n", hasVideo ? "true" : "false");

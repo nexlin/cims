@@ -47,14 +47,21 @@ public:
     //   iLocalPort/iLocalVideoPort = peer0(발신 A) leg, iLocalPortB/iLocalVideoPortB = peer1(착신 B) leg.
     //   iRemoteNat/strRemoteSigIp: 해당 peer 의 NAT 목적지 latch 허용 + latch IP guard 기준
     //   (ue_nat_traversal.md §4-5. sig ip 빈 값 = IP guard 없이 latch).
+    //   iRemotePt/iRemoteTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),
+    //   iRemoteSrcPt/iRemoteSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류·녹취 메타). 0=재작성 없음.
+    //   strRemoteCodec: 협상 오디오 코덱("AMR-WB/16000") — 녹취 세그먼트 메타용.
     bool AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
                      int &iLocalPortB, int &iLocalVideoPortB, const std::string &strRecordDir = "",
                      const std::string &strCaller = "", const std::string &strCallee = "",
                      const std::string &strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
-                     const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "" );
+                     const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "",
+                     int iRemotePt = 0, int iRemoteSrcPt = 0, int iRemoteTePt = 0, int iRemoteSrcTePt = 0,
+                     const std::string &strRemoteCodec = "" );
     bool ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                         int iPeerIdx, const std::string &strCaller = "", const std::string &strCallee = "",
-                        const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "" );
+                        const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "",
+                        int iRemotePt = 0, int iRemoteSrcPt = 0, int iRemoteTePt = 0, int iRemoteSrcTePt = 0,
+                        const std::string &strRemoteCodec = "" );
     bool RemoveSession( const std::string &strSessionId, const std::string &strCaller = "",
                         const std::string &strCallee = "", const std::string &strSesId = "" );
     bool Alive();
@@ -74,12 +81,14 @@ public:
     // 2단 멱등 (docs/api/cmp_media_api.md §7.4): strIp 가 비면 ① 선할당(멤버 포트만 확보),
     //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort/piLocalVideoPort 에 멤버 전용 포트 응답.
     //   iUserPt/iUserTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),
-    //   iUserSrcPt/iUserSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류). 0=재작성 없음.
+    //   iUserSrcPt/iUserSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류·녹취 메타). 0=재작성 없음.
+    //   strUserCodec: 협상 오디오 코덱("AMR-WB/16000") — 녹취 세그먼트 메타용.
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
                     int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
                     const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
                     int iUserNat = 0, const std::string &strUserSigIp = "",
-                    int iUserPt = 0, int iUserSrcPt = 0, int iUserTePt = 0, int iUserSrcTePt = 0 );
+                    int iUserPt = 0, int iUserSrcPt = 0, int iUserTePt = 0, int iUserSrcTePt = 0,
+                    const std::string &strUserCodec = "" );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

@@ -263,7 +263,8 @@ diff 한다. push(이벤트)로는 절체 후 새 active 가 옛 세션을 기�
 | `remote_nat` | - | 1 이면 해당 peer 가 NAT 뒤 — 그 peer 전용 포트에 목적지 latch 허용 (생략=0). [ue_nat_traversal.md §5](../design/features/ue_nat_traversal.md) |
 | `remote_sig_ip` | - | 해당 peer 의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
 | `remote_pt` / `remote_te_pt` | - | 이 peer 가 **수신** 선언한 audio/telephone-event wire PT — CMP 가 이 peer 로 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(PT-blind 통과). marker bit 보존, 녹취는 talker 원본 PT 유지 |
-| `remote_src_pt` / `remote_src_te_pt` | - | 이 peer 가 **송신**에 쓰는 audio/TE PT(= 반대편에 낸 SDP 의 PT, RFC 3264) — ingress audio/TE 분류 기준. `remote_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류 |
+| `remote_src_pt` / `remote_src_te_pt` | - | 이 peer 가 **송신**에 쓰는 audio/TE PT(= 반대편에 낸 SDP 의 PT, RFC 3264) — ingress audio/TE 분류 기준 + 녹취 세그먼트 메타(`audio_pt_a/b`). `remote_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류 |
+| `remote_codec` | - | 이 peer 의 협상 오디오 코덱 문자열(예 `"AMR-WB/16000"`) — 녹취 세그먼트 메타(`audio_codec_a/b`)용. CSP 는 코덱 테이블 top 의 rtpmap prefix 를 싣는다 |
 | `caller` / `callee` | - | 발/착신자 (flow 로깅·녹취 메타용) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
@@ -399,7 +400,8 @@ RELAY_REMOVE 와 동일 규칙).
 | `user_nat` | - | 1 이면 NAT 뒤 멤버 — 멤버 전용 포트에 목적지 latch 허용 (생략=0) |
 | `user_sig_ip` | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
 | `user_pt` / `user_te_pt` | - | 이 멤버가 **수신** 선언한 audio/telephone-event wire PT(멤버 자신의 SDP — 개시자=offer, 수신자=answer) — CMP 가 fan-out 으로 이 멤버에 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(현행 PT-blind: 전 leg 와이어 PT 통일 전제) |
-| `user_src_pt` / `user_src_te_pt` | - | 이 멤버가 **송신**에 쓰는 audio/TE PT(= CSP 가 그 leg 쪽에 낸 SDP 의 PT, RFC 3264) — 화자 ingress 의 audio/TE 분류 기준. `user_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류(DTMF push/release 판독도 동일 기준) |
+| `user_src_pt` / `user_src_te_pt` | - | 이 멤버가 **송신**에 쓰는 audio/TE PT(= CSP 가 그 leg 쪽에 낸 SDP 의 PT, RFC 3264) — 화자 ingress 의 audio/TE 분류 기준 + 녹취 세그먼트 메타(`audio_pt`, 화자 leg). `user_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류(DTMF push/release 판독도 동일 기준) |
+| `user_codec` | - | 이 멤버의 협상 오디오 코덱 문자열(예 `"AMR-WB/16000"`) — 녹취 세그먼트 메타(`audio_codec`)용. CSP 는 코덱 테이블 top 의 rtpmap prefix 를 싣는다 |
 | `role` | - | `chair`/`participant` (기본 participant) |
 | `tier` | - | 긴급 멤버 join 시 condition tier 동반 |
 

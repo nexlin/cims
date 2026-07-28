@@ -145,10 +145,12 @@ public:
     // nat/sigIp: NAT 목적지 latch 허용 + latch IP guard (ue_nat_traversal.md §4-5)
     // ptOut/tePtOut: 이 leg 로 송신 시 스탬프할 audio/telephone-event PT (0=재작성 없음).
     // srcTePt: 이 leg 가 송신에 쓰는 telephone-event PT — fan-out 시 audio/TE 분류 기준.
+    // codec: 협상 오디오 코덱 문자열 (user_codec, 예 "AMR-WB/16000") — 녹취 세그먼트 메타용.
     void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
                    const std::string& role = "participant", PPttMemberPort* unit = nullptr,
                    bool nat = false, const std::string& sigIp = "",
-                   int ptOut = 0, int srcPt = 0, int tePtOut = 0, int srcTePt = 0);
+                   int ptOut = 0, int srcPt = 0, int tePtOut = 0, int srcTePt = 0,
+                   const std::string& codec = "");
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -279,6 +281,7 @@ private:
         int srcPt = 0;      // ingress audio PT — 이 leg 가 송신에 쓰는 PT (user_src_pt)
         int tePtOut = 0;    // egress telephone-event PT (user_te_pt)
         int srcTePt = 0;    // ingress telephone-event PT (user_src_te_pt, TE 분류 기준)
+        std::string codec;  // 협상 오디오 코덱 (user_codec) — 녹취 세그먼트 메타용
         bool natLatched = false;       // audio 소스 추종 학습 완료 (관측용)
         bool natLatchedVideo = false;
         int64_t followLogUsec = 0;     // dest follow 로그 rate-limit (소스 경합 시 폭주 방지)

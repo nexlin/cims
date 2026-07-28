@@ -37,9 +37,16 @@ public:
 
     /** PTT 세그먼트 시작 — 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/ 에 기록.
      *  seq 는 recorder 가 시간(HH) 단위로 자체 관리(시간 바뀌면 1부터 리셋),
-     *  shard = (seq-1)/100 → seg/000(1~100), seg/001(101~200) … */
+     *  shard = (seq-1)/100 → seg/000(1~100), seg/001(101~200) …
+     *  audioPt/audioCodec: 화자 leg 의 ingress audio PT·코덱(user_src_pt/user_codec) —
+     *  세그먼트 메타(audio_pt/audio_codec)로 기록되어 변환기의 PT 판별 근거가 된다. */
     void startPttSegment(const std::string& speakerId,
-                         int priority = -1, bool preempted = false, const std::string& preemptedFrom = "");
+                         int priority = -1, bool preempted = false, const std::string& preemptedFrom = "",
+                         int audioPt = 0, const std::string& audioCodec = "");
+
+    /** 트랙별 오디오 PT/코덱 메타 (VoIP leg 별 — remote_src_pt/remote_codec).
+     *  pt<=0 이면 해당 트랙 메타 제거. 세그먼트 메타에 audio_pt_{prefix}/audio_codec_{prefix} 로 기록. */
+    void setTrackPtCodec(const std::string& prefix, int pt, const std::string& codec);
 
     /** 세그먼트 종료 — 모든 트랙 파일 닫기 + 메타 기록 */
     void finishSegment();
@@ -64,6 +71,8 @@ private:
         std::string tmpPath;      // 절대 경로 (.recording)
         std::string finalPath;    // 절대 경로
         int64_t bytesWritten = 0;
+        int64_t mediaPackets = 0; // payload 있는 RTP 수 — 헤더-only keepalive 만 기록된
+                                  // 트랙(음성호의 영상 포트 등)을 미디어 있음으로 오판하지 않기 위함
     };
 
     void _closeTrack(Track& t);
@@ -92,6 +101,9 @@ private:
     int _priority = -1;            // 화자 floor 우선순위
     bool _preempted = false;       // 선점으로 시작된 세그먼트
     std::string _preemptedFrom;    // 선점 직전 화자
+
+    // 트랙별 오디오 PT/코덱 (prefix → {pt, codec}) — PTT="audio"(화자별 갱신), VoIP="a"/"b"(leg 별)
+    std::map<std::string, std::pair<int, std::string>> _trackPtCodec;
 
     // 현재 세그먼트 출력 경로 (VoIP=_baseDir, PTT=shard 디렉터리)
     std::string _curSegDir;        // seg_*.rtp / seg_*.json 위치

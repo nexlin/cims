@@ -746,10 +746,17 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         strRelaySessionId = CCmpClient::IssueSessionId();
         std::string strAllocatedIp;
         int iLocalPort = 0, iLocalVideoPort = 0, iLocalPortB = 0, iLocalVideoPortB = 0;
+        // 발신(A) leg PT/코덱 — 서버 answer 는 오퍼 echo(bServerOffered=false). CMP leg 별
+        //   PT 재작성 + 녹취 세그먼트 메타(audio_pt_a/audio_codec_a) 근거 (cmp_media_api.md §6.1).
+        int iCallerPt = 0, iCallerSrcPt = 0, iCallerTePt = 0, iCallerSrcTePt = 0;
+        std::string strCallerCodec;
+        CGroupCallService::GetLegPt( pszCallId, false, iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt,
+                                     &strCallerCodec );
         if ( !gclsCmpClient.AddSession( strRelaySessionId, strAllocatedIp, iLocalPort, iLocalVideoPort, iLocalPortB,
                                         iLocalVideoPortB, strRecordDir, pszFrom ? pszFrom : "", pszTo ? pszTo : "",
                                         pclsRtp->m_strIp, iAudioPort, iVideoPort, strRelaySesId, iCallerNat,
-                                        strCallerGuardIp ) ) {
+                                        strCallerGuardIp,
+                                        iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt, strCallerCodec ) ) {
             return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
         }
         // leg 별 전용 포트: A(발신) leg SDP = iLocalPort(peer0), B(착신) leg SDP = iLocalPortB(peer1)
@@ -900,10 +907,17 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
                                          strCalleeGuardIp.c_str() );
                         }
                     }
+                    // 착신(B) leg PT/코덱 — 서버 offer(코덱 테이블) vs 착신 answer wire PT
+                    //   (bServerOffered=true). 녹취 세그먼트 메타(audio_pt_b/audio_codec_b) 근거.
+                    int iCalleePt = 0, iCalleeSrcPt = 0, iCalleeTePt = 0, iCalleeSrcTePt = 0;
+                    std::string strCalleeCodec;
+                    CGroupCallService::GetLegPt( pszCallId, true, iCalleePt, iCalleeSrcPt, iCalleeTePt,
+                                                 iCalleeSrcTePt, &strCalleeCodec );
                     gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
                                                  iVideoPort > 0 ? iVideoPort : 0, 1, clsCallInfo.m_strRelayCaller,
                                                  clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iCalleeNat,
-                                                 strCalleeGuardIp );
+                                                 strCalleeGuardIp,
+                                                 iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt, strCalleeCodec );
                 }
             }
 
@@ -1039,10 +1053,16 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
                                      strSigIp.c_str(), strLegGuardIp.c_str() );
                     }
                 }
+                // 재협상 leg PT/코덱 — UE 가 offer, 서버 answer 는 echo(bServerOffered=false).
+                int iLegPt = 0, iLegSrcPt = 0, iLegTePt = 0, iLegSrcTePt = 0;
+                std::string strLegCodec;
+                CGroupCallService::GetLegPt( pszCallId, false, iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt,
+                                             &strLegCodec );
                 gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRemoteRtp->m_strIp, iAudioPort,
                                              iVideoPort, iPeerIdx, clsCallInfo.m_strRelayCaller,
                                              clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iLegNat,
-                                             strLegGuardIp );
+                                             strLegGuardIp,
+                                             iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt, strLegCodec );
             }
         }
         if ( pclsRemoteRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
