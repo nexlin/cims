@@ -26,6 +26,7 @@ import struct
 import shutil
 import subprocess
 import threading
+import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, unquote
@@ -92,11 +93,81 @@ def init(service_log_dir: str = '', ffmpeg_bin: str = '', transcode_workers: int
 #  RTP → codec 추출 유틸
 # ══════════════════════════════════════════════════════════════
 
-def _strip_rtp_to_amrwb(raw_rtp_path: str, out_amr_path: str) -> bool:
-    """raw RTP 파일에서 AMR-WB payload 추출.
+# AMR-WB FT별 frame 크기 (octet-aligned, bytes) — FT 0~8=speech, 9=SID
+_AMRWB_FS = [17, 23, 32, 36, 40, 46, 50, 58, 60, 5, 0, 0, 0, 0, 0, 0]
+
+
+def _detect_audio_pt(raw_rtp_path: str):
+    """raw RTP 파일에서 오디오 PT 자동 감지 — payload 6바이트 이상 패킷의 최빈 PT.
+    협상 PT는 leg마다 다르다(UE 동적 96 등, cspsim 99) — 고정값을 가정하지 않는다.
+    telephone-event(payload 4바이트)·헤더-only 패킷은 표본에서 배제."""
+    counts = {}
+    try:
+        with open(raw_rtp_path, 'rb') as fin:
+            while True:
+                hdr = fin.read(12)  # 4(len) + 8(usec)
+                if len(hdr) < 12:
+                    break
+                pkt_len = struct.unpack('<I', hdr[:4])[0]
+                pkt = fin.read(pkt_len)
+                if len(pkt) < pkt_len or pkt_len < 12:
+                    continue
+                cc = pkt[0] & 0x0F
+                has_ext = (pkt[0] >> 4) & 0x01
+                hdr_len = 12 + cc * 4
+                if has_ext and hdr_len + 4 <= pkt_len:
+                    ext_len = struct.unpack_from('>H', pkt, hdr_len + 2)[0]
+                    hdr_len += 4 + ext_len * 4
+                if pkt_len - hdr_len < 6:
+                    continue
+                pt = pkt[1] & 0x7F
+                counts[pt] = counts.get(pt, 0) + 1
+    except Exception as e:
+        logger.error("_detect_audio_pt error: %s", e)
+        return None
+    if not counts:
+        return None
+    return max(counts, key=counts.get)
+
+
+def _video_has_media(path: str, size_threshold: int = 4096) -> bool:
+    """영상 raw 파일에 실제 미디어(payload 있는 RTP)가 있는가.
+    음성 통화에서도 UE 가 영상 포트로 헤더-only keepalive(레코드당 24B)를 보내
+    24B 짜리 va/vb 파일이 생긴다 — 이를 영상 있음으로 오판하면 콘솔이 음성 호를
+    검은 영상 플레이어로 표시한다. 크면(임계 이상) 실영상, 작으면 payload 스캔."""
+    try:
+        sz = os.path.getsize(path)
+    except OSError:
+        return False
+    if sz >= size_threshold:
+        return True
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError:
+        return False
+    off = 0
+    while off + 12 <= len(data):
+        ln = struct.unpack('<I', data[off:off + 4])[0]
+        off += 12
+        pkt = data[off:off + ln]
+        off += ln
+        if len(pkt) > 12 and len(pkt) > 12 + (pkt[0] & 0x0F) * 4:
+            return True
+    return False
+
+
+def _strip_rtp_to_amrwb(raw_rtp_path: str, out_amr_path: str, audio_pt=None) -> bool:
+    """raw RTP 파일에서 AMR-WB payload 추출 (octet-aligned).
     raw 형식: [uint32 len][int64 recv_usec][RTP pkt] 반복
-    PT=99(AMR-WB)만 추출, DTMF(101)/PCMU(0) 등은 스킵.
+    오디오 PT: 세그먼트 메타(audio_pt — CMP 가 CSP 협상값 기록)를 우선 사용, 메타 없는
+    구 녹취는 파일에서 자동 감지(_detect_audio_pt) fallback.
+    패킷당 다중 프레임(ToC F-bit 체인, ptime 40ms=2프레임 등) 지원.
     """
+    if not audio_pt or audio_pt <= 0:
+        audio_pt = _detect_audio_pt(raw_rtp_path)
+    if audio_pt is None:
+        return False
     try:
         with open(raw_rtp_path, 'rb') as fin, open(out_amr_path, 'wb') as fout:
             fout.write(b'#!AMR-WB\n')
@@ -108,9 +179,8 @@ def _strip_rtp_to_amrwb(raw_rtp_path: str, out_amr_path: str) -> bool:
                 pkt = fin.read(pkt_len)
                 if len(pkt) < pkt_len or pkt_len < 12:
                     continue
-                # PT 필터: AMR-WB(99)만 처리, DTMF(101)/PCMU(0) 등 스킵
                 pt = pkt[1] & 0x7F
-                if pt != 99:
+                if pt != audio_pt:
                     continue
                 cc = pkt[0] & 0x0F
                 has_ext = (pkt[0] >> 4) & 0x01
@@ -121,15 +191,26 @@ def _strip_rtp_to_amrwb(raw_rtp_path: str, out_amr_path: str) -> bool:
                 if hdr_len >= pkt_len:
                     continue
                 payload = pkt[hdr_len:]
-                # AMR-WB RTP: CMR(1) + ToC(1) + frame_data
-                if len(payload) > 2:
-                    toc = payload[1]
-                    ft = (toc >> 3) & 0x0F
-                    # storage ToC: F(0)|FT(4)|Q(1)|pad(2)
-                    q = (toc >> 2) & 0x01
-                    amr_toc = (ft << 3) | (q << 2)
-                    fout.write(bytes([amr_toc]))
-                    fout.write(payload[2:])  # frame data (CMR, ToC 제외)
+                if len(payload) < 2:
+                    continue
+                # octet-aligned: CMR(1) + ToC 체인(F-bit 연쇄) + 프레임 데이터들
+                i = 1
+                tocs = []
+                while i < len(payload):
+                    t = payload[i]
+                    i += 1
+                    tocs.append(t)
+                    if not (t & 0x80):
+                        break
+                for t in tocs:
+                    ft = (t >> 3) & 0x0F
+                    n = _AMRWB_FS[ft]
+                    if n == 0 or i + n > len(payload):
+                        break
+                    # storage ToC = F 비트 제거 (FT·Q 유지)
+                    fout.write(bytes([t & 0x7F]))
+                    fout.write(payload[i:i + n])
+                    i += n
         return os.path.exists(out_amr_path) and os.path.getsize(out_amr_path) > 9
     except Exception as e:
         logger.error("_strip_rtp_to_amrwb error: %s", e)
@@ -295,9 +376,9 @@ def _scan_voip_sessions(base: str, caller: str = '', from_dt: str = '', to_dt: s
         seg_count = len(segs)
         total_ms = sum(s.get('duration_ms', 0) for s in segs)
 
-        # has_video: va/vb 세그먼트 파일 존재 여부
+        # has_video: va/vb 세그먼트 파일에 실제 미디어가 있는지 (keepalive-only 24B 파일 배제)
         has_video = any(
-            os.path.exists(os.path.join(d, f))
+            _video_has_media(os.path.join(d, f))
             for s in segs
             for f in [s.get('video_file_a', ''), s.get('video_file_b', '')]
             if f
@@ -424,8 +505,30 @@ def _session_status(rec_dir: str, segs: list) -> str:
 #  세그먼트 상태 판정 + on-demand 변환
 # ══════════════════════════════════════════════════════════════
 
+def _failed_marker_path(rec_dir: str, seq: int) -> str:
+    return _converted_path_mp4(rec_dir, seq) + '.failed'
+
+
+def _write_failed_marker(rec_dir: str, seq: int, reason: str):
+    """변환 불가/실패 마커 — 상태를 'failed' 로 고정해 무한 '변환중' 표시를 막는다.
+    retry(?retry=1) 시 삭제되어 재시도 가능."""
+    try:
+        with open(_failed_marker_path(rec_dir, seq), 'w') as f:
+            json.dump({'reason': reason, 'ts': time.time()}, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def _read_failed_reason(rec_dir: str, seq: int) -> str:
+    try:
+        with open(_failed_marker_path(rec_dir, seq), 'r') as f:
+            return (json.load(f) or {}).get('reason', '') or '변환 실패'
+    except Exception:
+        return '변환 실패'
+
+
 def _segment_status(rec_dir: str, seg: dict) -> str:
-    """개별 세그먼트 상태: recording / raw / transcoding / ready"""
+    """개별 세그먼트 상태: recording / raw / transcoding / ready / failed"""
     # 대표 오디오 파일 (병합 전/후 모두 대응)
     audio_file = (seg.get('audio_file', '') or seg.get('audio_file_a', '')
                   or seg.get('_audio_a', '') or seg.get('_audio', ''))
@@ -438,9 +541,12 @@ def _segment_status(rec_dir: str, seg: dict) -> str:
             return 'ready'
         if os.path.exists(mp4 + '.transcoding'):
             return 'transcoding'
+        if os.path.exists(mp4 + '.failed'):
+            return 'failed'
 
+    # 오디오 파일 참조 자체가 없음(무데이터 세그먼트) — 변환 대상이 없어 영구 재생불가
     if not audio_file:
-        return 'raw'
+        return 'failed'
 
     full = os.path.join(rec_dir, audio_file)
 
@@ -452,7 +558,8 @@ def _segment_status(rec_dir: str, seg: dict) -> str:
     if os.path.exists(full):
         return 'raw'
 
-    return 'raw'
+    # 참조된 원본이 디스크에 없음(삭제/유실) — 재생불가
+    return 'failed'
 
 
 def _transcode_segment_file(rec_dir: str, seg: dict):
@@ -470,7 +577,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
     # → 임시 파일(.partial.mp4)에 쓰고 완료 시에만 원자적 rename 하여 "mp4 존재 ⟺ 완성" 을 보장.
     tmp_out = (out_path[:-4] if out_path.endswith('.mp4') else out_path) + '.partial.mp4'
 
-    # raw 파일 경로 결정
+    # raw 파일 경로 + leg 별 오디오 PT/코덱 메타 (없으면 0/'' → strip 이 자동감지)
     if seg_type == 'ptt':
         raw_a = seg.get('_audio', seg.get('audio_file', ''))
         if raw_a: raw_a = os.path.join(rec_dir, raw_a)
@@ -478,6 +585,9 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         raw_va = seg.get('_video', seg.get('video_file', ''))
         if raw_va: raw_va = os.path.join(rec_dir, raw_va)
         raw_vb = ''
+        pt_a = seg.get('audio_pt', 0)
+        pt_b = 0
+        codecs = [seg.get('audio_codec', '')]
     else:
         raw_a = seg.get('_audio_a', '')
         if raw_a: raw_a = os.path.join(rec_dir, raw_a)
@@ -487,10 +597,22 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         if raw_va: raw_va = os.path.join(rec_dir, raw_va)
         raw_vb = seg.get('_video_b', '')
         if raw_vb: raw_vb = os.path.join(rec_dir, raw_vb)
+        pt_a = seg.get('audio_pt_a', 0)
+        pt_b = seg.get('audio_pt_b', 0)
+        codecs = [seg.get('audio_codec_a', ''), seg.get('audio_codec_b', '')]
 
-    # 최소 하나의 오디오 파일 필요
+    # 지원 디코더는 AMR-WB 뿐 — 다른 코덱 협상 흔적이 있으면 드러낸다 (변환은 시도).
+    for c in codecs:
+        if c and not c.upper().startswith('AMR-WB'):
+            logger.warning("transcode seg %d: unsupported codec meta '%s' — AMR-WB 로 시도", seq, c)
+
+    # 최소 하나의 오디오 파일 필요 — 없으면 영구 재생불가로 확정 (무한 '변환중' 방지)
     primary = raw_a or raw_b
     if not primary or not os.path.exists(primary):
+        _write_failed_marker(rec_dir, seq, '녹취 원본 파일 없음')
+        lock_key = f"{rec_dir}:{seq}"
+        with _transcoding_mutex:
+            _transcoding_locks.pop(lock_key, None)
         return
 
     # .transcoding 마커
@@ -501,21 +623,29 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
     tmp_files = []
 
     try:
-        # 1) 오디오 추출: AMR-WB
+        # 1) 오디오 추출: AMR-WB (메타 PT 우선, 없으면 자동감지)
         amr_a = primary + '.amr_a'
         amr_b = (raw_b + '.amr_b') if raw_b and os.path.exists(raw_b) else ''
-        has_a = _strip_rtp_to_amrwb(raw_a, amr_a) if raw_a and os.path.exists(raw_a) else False
-        has_b = _strip_rtp_to_amrwb(raw_b, amr_b) if amr_b else False
-        if has_a: tmp_files.append(amr_a)
-        if has_b: tmp_files.append(amr_b)
+        has_a = _strip_rtp_to_amrwb(raw_a, amr_a, audio_pt=pt_a) if raw_a and os.path.exists(raw_a) else False
+        has_b = _strip_rtp_to_amrwb(raw_b, amr_b, audio_pt=pt_b) if amr_b else False
+        # 실패(9바이트 헤더만) 산출물도 정리 대상에 포함 — 잔재 방지
+        if amr_a and os.path.exists(amr_a): tmp_files.append(amr_a)
+        if amr_b and os.path.exists(amr_b): tmp_files.append(amr_b)
 
-        # 2) 영상 추출: H.264
-        h264_a = (raw_va + '.h264_a') if raw_va and os.path.exists(raw_va) and os.path.getsize(raw_va) > 0 else ''
-        h264_b = (raw_vb + '.h264_b') if raw_vb and os.path.exists(raw_vb) and os.path.getsize(raw_vb) > 0 else ''
+        # 오디오 프레임이 한쪽도 없으면(빈/극소 녹취 — keepalive 만 기록 등) 영구 재생불가 확정.
+        if not has_a and not has_b:
+            _write_failed_marker(rec_dir, seq, '녹취 음성 데이터 없음(프레임 0)')
+            logger.warning("transcode seg %d: no audio frames (file too small/empty) — failed 확정", seq)
+            return
+
+        # 2) 영상 추출: H.264 (keepalive-only 영상 파일은 시도 자체를 생략)
+        h264_a = (raw_va + '.h264_a') if raw_va and os.path.exists(raw_va) and _video_has_media(raw_va) else ''
+        h264_b = (raw_vb + '.h264_b') if raw_vb and os.path.exists(raw_vb) and _video_has_media(raw_vb) else ''
         has_va = _strip_rtp_to_h264(raw_va, h264_a) if h264_a else False
         has_vb = _strip_rtp_to_h264(raw_vb, h264_b) if h264_b else False
-        if has_va: tmp_files.append(h264_a)
-        if has_vb: tmp_files.append(h264_b)
+        # 실패 산출물도 정리 대상에 포함 — 0바이트 .h264_* 잔재 방지
+        if h264_a and os.path.exists(h264_a): tmp_files.append(h264_a)
+        if h264_b and os.path.exists(h264_b): tmp_files.append(h264_b)
 
         has_video = has_va or has_vb
 
@@ -632,10 +762,15 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         # 이로써 _segment_status 가 mp4 존재만으로 'ready' 판정해도 항상 "완성된" 파일을 가리킨다.
         if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
             os.replace(tmp_out, out_path)
+            # 재시도 성공 시 이전 실패 마커 해제
+            try: os.remove(_failed_marker_path(rec_dir, seq))
+            except OSError: pass
         else:
-            logger.warning("transcode seg %d produced no/empty output", seq)
+            _write_failed_marker(rec_dir, seq, '변환 실패(ffmpeg 출력 없음)')
+            logger.warning("transcode seg %d produced no/empty output — failed 확정", seq)
 
     except Exception as e:
+        _write_failed_marker(rec_dir, seq, f'변환 오류: {e}')
         logger.error("transcode seg %d error: %s", seq, e)
     finally:
         for tmp in tmp_files:
@@ -657,7 +792,7 @@ def _ensure_segment_ready(rec_dir: str, seg: dict) -> str:
     """세그먼트 변환 보장. 상태 문자열 반환. seg는 _build_segments()의 병합된 dict."""
     status = seg.get('status', _segment_status(rec_dir, seg))
 
-    if status in ('recording', 'ready', 'transcoding'):
+    if status in ('recording', 'ready', 'transcoding', 'failed'):
         return status
 
     if status == 'raw':
@@ -695,12 +830,25 @@ def _build_segments(rec_dir: str) -> list:
         seq = s.get('seq', 0)
         seg_type = s.get('type', s.get('call_type', 'ptt'))
         has_video = s.get('has_video', False)
+        if has_video:
+            # 유령 영상 방어 — keepalive-only(헤더만) 영상 파일이면 음성 세그먼트로 정정.
+            #   (콘텐츠 타입·플레이어 선택이 이 값을 따른다)
+            vids = [s.get('video_file', ''), s.get('video_file_a', ''), s.get('video_file_b', '')]
+            has_video = any(_video_has_media(os.path.join(rec_dir, v)) for v in vids if v)
 
         # 대표 오디오 파일 (상태 판정용)
         primary_audio = (s.get('audio_file_a', '') or s.get('audio_file', '')
                          or s.get('audio_file_b', ''))
 
         status = _segment_status(rec_dir, {'audio_file': primary_audio, 'seq': seq})
+        status_reason = ''
+        if status == 'failed':
+            if not primary_audio:
+                status_reason = '녹취 음성 데이터 없음'
+            elif os.path.exists(_failed_marker_path(rec_dir, seq)):
+                status_reason = _read_failed_reason(rec_dir, seq)
+            else:
+                status_reason = '녹취 원본 파일 없음'
 
         file_size = 0
         conv = _converted_path_mp4(rec_dir, seq)
@@ -719,6 +867,14 @@ def _build_segments(rec_dir: str) -> list:
             'has_video': has_video,
             'file_size': file_size,
             'status': status,
+            'status_reason': status_reason,
+            # 오디오 PT/코덱 메타 (CMP 기록 — 변환기 PT 판별 근거. 구 녹취는 없음 → 자동감지)
+            'audio_pt': s.get('audio_pt', 0),
+            'audio_codec': s.get('audio_codec', ''),
+            'audio_pt_a': s.get('audio_pt_a', 0),
+            'audio_codec_a': s.get('audio_codec_a', ''),
+            'audio_pt_b': s.get('audio_pt_b', 0),
+            'audio_codec_b': s.get('audio_codec_b', ''),
             # 파일 참조 (변환에서 사용)
             '_audio_a': s.get('audio_file_a', ''),
             '_audio_b': s.get('audio_file_b', ''),
@@ -830,7 +986,8 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
             elif len(extra) == 2 and method == 'GET':
                 seq = int(extra[0])
                 video = (extra[1] == 'video')
-                return await _stream_segment(base, session_dir, seq, video=video)
+                retry = str(qs.get('retry', '')).strip() in ('1', 'true')
+                return await _stream_segment(base, session_dir, seq, video=video, retry=retry)
 
         elif action == 'audio' and method == 'GET':
             return await _stream_whole_audio(base, session_dir)
@@ -981,9 +1138,15 @@ async def _list_segments(base: str, rel_dir: str) -> HandlerResult:
     return HandlerResult(status=200, body={'id': rel_dir, 'segments': segs})
 
 
-async def _stream_segment(base: str, rel_dir: str, seq: int, video: bool = False) -> HandlerResult:
+async def _stream_segment(base: str, rel_dir: str, seq: int, video: bool = False,
+                          retry: bool = False) -> HandlerResult:
     d = os.path.join(base, rel_dir)
     rec_dir = _find_rec_dir(d)
+
+    # 명시 재시도(?retry=1) — 실패 마커를 지워 raw 로 되돌린 뒤 재변환 큐잉
+    if retry:
+        try: os.remove(_failed_marker_path(rec_dir, seq))
+        except OSError: pass
 
     # _build_segments로 병합된 세그먼트 데이터 사용
     built_segs = _build_segments(rec_dir)
@@ -1001,6 +1164,10 @@ async def _stream_segment(base: str, rel_dir: str, seq: int, video: bool = False
         return HandlerResult(status=202, body={'status': 'recording', 'message': '녹취 진행 중'})
     if status == 'transcoding':
         return HandlerResult(status=202, body={'status': 'transcoding', 'message': '변환 중'})
+    if status == 'failed':
+        reason = seg.get('status_reason') or _read_failed_reason(rec_dir, seq)
+        return HandlerResult(status=500, body={'status': 'failed', 'reason': reason,
+                                               'message': f'재생 불가 — {reason}'})
 
     # MP4 변환 파일 확인
     conv = _converted_path_mp4(rec_dir, seq)

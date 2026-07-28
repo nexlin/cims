@@ -119,6 +119,7 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
           ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오
           ├── seg_NNNN_video.rtp                 # 영상그룹 + 실제 영상 있을 때만 (빈 파일 미생성)
           └── seg_NNNN.json                      # speaker_id/priority/preempt, audio_file=상대경로(seg/NNN/…)
+                                                 # + audio_pt/audio_codec (화자 leg 협상 PT·코덱 — 아래 참조)
 ```
 > 그룹 키 = surrogate `id`.
 
@@ -174,6 +175,31 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
   `call.json`/`participants.jsonl`/`session.json`(csp 작성) + `seg_NNNN_{a,b,va,vb}.rtp`·
   `seg_NNNN.json`·`segments.jsonl`(cmp 작성) + `seg_NNNN.mp4`(OAM 변환 캐시).
 
+### 녹취 오디오 PT/코덱 메타 — 변환 결정론
+
+녹취 raw RTP 는 **화자/leg 원본 wire PT** 로 기록된다(egress PT 재작성 전 탭). 협상 PT 는
+leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기의 PT 판별 근거를 세그먼트
+메타에 남긴다:
+
+- **CSP → CMP**: PTT_JOIN `user_src_pt`/`user_codec`, RELAY_ADD/MODIFY `remote_src_pt`/
+  `remote_codec` ([cmp_media_api.md](../../api/cmp_media_api.md) §6.1/§7.4). 코덱 문자열 =
+  코덱 테이블 top 의 rtpmap prefix(예 `"AMR-WB/16000"`).
+- **CMP → seg 메타**: PTT `seg_NNNN.json` 에 `audio_pt`/`audio_codec`(화자 leg — GRANT 시점
+  화자별 갱신), VoIP 에 `audio_pt_a/b`/`audio_codec_a/b`(leg 별, 재협상 시 최신 반영).
+- **OAM 변환기**: 메타 `audio_pt` 를 **우선** 사용해 해당 PT 패킷만 추출. 메타 없는(구)
+  녹취는 파일 내 최빈 PT 자동감지 fallback(payload ≥ 6바이트 표본 — telephone-event 배제).
+  AMR-WB 외 코덱 메타는 경고 로그 후 AMR-WB 로 시도(현행 디코더 = AMR-WB + H.264).
+
+### 영상 유무(has_video) 판정 — keepalive-only 트랙 배제
+
+음성 통화에서도 UE 가 영상 포트로 헤더-only RTP keepalive 를 보내므로, "바이트가 기록됨" 을
+영상 있음으로 판정하면 음성 호가 콘솔에서 영상 플레이어(검은 화면)로 열린다.
+
+- **CMP**: payload 있는 RTP 패킷만 미디어로 집계 — keepalive-only 트랙은 파일 미보존·
+  세그먼트 메타 참조 미기록·`has_video` 제외 (빈 트랙과 동일 취급).
+- **OAM**(기존 녹취 방어): 영상 raw 파일이 4KB 미만이면 payload 패킷 존재를 스캔해 판정 —
+  keepalive 만 담긴 파일(레코드당 24B)은 영상 없음. 목록·세그먼트·변환·Content-Type 공통 적용.
+
 ### 3.6.2 트랜스코딩 주체 = OAM + 번들 ffmpeg
 
 - 트랜스코딩은 **OAM** `ems/core/oam/src/handlers/recording.py` 가 수행. 출력은 **MP4**(H.264+AAC) `seg_NNNN.mp4`.
@@ -192,10 +218,11 @@ CMP는 보통 **원격 미디어 노드**(media01/02)에서 동작하고, 조회
    │
    ▼  (OAM 요청 스레드 — ffmpeg 직접 실행 안 함)
  _ensure_segment_ready(rec_dir, seg)
-   ├─ status 판정: ready(mp4 존재) / transcoding(마커·lock) / recording / raw
+   ├─ status 판정: ready(mp4 존재) / transcoding(마커·lock) / failed(.failed 마커
+   │              또는 오디오 원본 없음) / recording / raw
    ├─ raw 면: dedup lock(lock_key="{rec_dir}:{seq}") 획득 후
    │          _transcode_executor.submit(_transcode_segment_file, rec_dir, seg)
-   └─ 즉시 202 transcoding 반환
+   └─ 즉시 202 transcoding 반환 (failed 면 500 + 사유 — 재큐잉 없음)
         │
         ▼  ThreadPoolExecutor(max_workers=N)  ← 내부 FIFO 큐 + 워커 스레드 N개
      [worker] _transcode_segment_file: 마커 생성 → raw RTP strip(AMR-WB/H.264)
@@ -346,7 +373,7 @@ DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모�
 | `raw` | 202 Accepted + 변환 시작 | 첫 요청 시 변환 트리거 |
 | `transcoding` | 202 Accepted | 변환 진행 중, 클라이언트 재시도 |
 | `ready` | 200 OK + 파일 스트리밍 | 캐싱된 파일 즉시 응답 |
-| `failed` | 500 | 변환 실패 |
+| `failed` | 500 + `reason` | 영구 재생불가 — `seg_NNNN.mp4.failed` 마커(사유 JSON). 원본 없음·음성 프레임 0(빈/극소 녹취)·ffmpeg 실패 시 확정되어 **재큐잉하지 않는다**(무한 '변환중' 방지). 세그먼트 목록에는 `status:'failed'`+`status_reason` 으로 노출, 콘솔은 "재생불가" 배지 표시. `?retry=1` 로 마커 해제 후 1회 재변환 시도 가능 |
 
 ---
 

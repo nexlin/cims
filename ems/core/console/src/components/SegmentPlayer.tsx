@@ -45,14 +45,23 @@ async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void>
   while (Date.now() < deadline) {
     if (signal.aborted) return
     const res = await fetch(url, { method: 'GET', signal, credentials: 'same-origin' })
-    try { await res.body?.cancel() } catch { /* noop */ }
-    if (res.status === 200) return
+    if (res.status === 200) {
+      try { await res.body?.cancel() } catch { /* noop */ }
+      return
+    }
     if (res.status === 202) {
+      try { await res.body?.cancel() } catch { /* noop */ }
       await new Promise(r => setTimeout(r, first ? 700 : 1500))
       first = false
       continue
     }
-    throw new Error(`재생 준비 실패 (HTTP ${res.status})`)
+    // failed 등 — 서버가 사유(message/reason)를 주면 그대로 표기
+    let detail = ''
+    try {
+      const body = await res.json()
+      detail = body?.message || body?.reason || body?.error || ''
+    } catch { /* noop */ }
+    throw new Error(detail || `재생 준비 실패 (HTTP ${res.status})`)
   }
   throw new Error('변환 시간 초과')
 }
@@ -61,8 +70,8 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   // 재생 가능한 세그먼트만 (recording 상태 제외)
   const playable = segments.filter(s => s.status !== 'recording')
 
-  // 체크박스: 기본 전체 선택
-  const [checked, setChecked] = useState<Set<number>>(() => new Set(playable.map(s => s.seq)))
+  // 체크박스: 기본 전체 선택 — 단 failed(재생불가)는 제외해 연속재생이 걸리지 않게 한다
+  const [checked, setChecked] = useState<Set<number>>(() => new Set(playable.filter(s => s.status !== 'failed').map(s => s.seq)))
   const selectedSegs = playable.filter(s => checked.has(s.seq))
 
   const [currentIdx, setCurrentIdx] = useState(0)
@@ -76,6 +85,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   const videoRef = useRef<HTMLVideoElement>(null)
   const readySeqs = useRef<Set<number>>(new Set(playable.filter(s => s.status === 'ready').map(s => s.seq)))
   const prepAbort = useRef<AbortController | null>(null)
+  const activeRowRef = useRef<HTMLTableRowElement | null>(null)
 
   const current = selectedSegs[currentIdx]
   const isVideo = current?.has_video
@@ -87,6 +97,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
 
   // 세그먼트 로드. 변환 전(raw/transcoding)이면 완료까지 폴링한 뒤 재생 —
   // 다이얼로그를 닫았다 다시 열 필요 없이 "변환 중" 표시 후 자동 재생.
+  // failed 세그먼트는 ?retry=1 로 폴링해 실패 마커를 지우고 1회 재변환을 시도한다.
   const loadSegment = useCallback(async (seg: RecordingSegment, autoplay: boolean) => {
     const el = seg.has_video ? videoRef.current : audioRef.current
     if (!el) return
@@ -102,6 +113,17 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     prepAbort.current = ac
     setPrepError(''); setPreparingSeq(seg.seq)
     try {
+      if (seg.status === 'failed') {
+        // 재시도 priming 1회 — 실패 마커 해제+재변환 큐잉. 이후엔 일반 폴링(반복 재큐잉 방지).
+        const res = await fetch(`${url}${url.includes('?') ? '&' : '?'}retry=1`,
+          { method: 'GET', signal: ac.signal, credentials: 'same-origin' })
+        if (res.status !== 200 && res.status !== 202) {
+          let detail = ''
+          try { const b = await res.json(); detail = b?.message || b?.reason || '' } catch { /* noop */ }
+          throw new Error(detail || `재생 준비 실패 (HTTP ${res.status})`)
+        }
+        try { await res.body?.cancel() } catch { /* noop */ }
+      }
       await waitSegmentReady(url, ac.signal)
       if (ac.signal.aborted) return
       readySeqs.current.add(seg.seq)
@@ -127,6 +149,11 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   // 언마운트 시 진행 중 폴링 취소
   useEffect(() => () => { prepAbort.current?.abort() }, [])
 
+  // 재생 세그먼트 변경 시 목록에서 현재 행이 보이도록 자동 스크롤
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [current?.seq])
+
   const handleTimeUpdate = useCallback(() => {
     if (!current) return
     const el = isVideo ? videoRef.current : audioRef.current
@@ -142,6 +169,9 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
 
   const handleEnded = useCallback(() => {
     if (currentIdx < selectedSegs.length - 1) {
+      // 미디어 종료 시 'pause' 이벤트가 'ended' 보다 먼저 와 isPlaying 이 꺼진다 —
+      // 연속 재생 의도를 복원해야 다음 세그먼트가 자동 재생된다.
+      setIsPlaying(true)
       setCurrentIdx(prev => prev + 1)
     } else {
       setIsPlaying(false)
@@ -156,8 +186,15 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   }
 
   function handleSegClick(seg: RecordingSegment) {
-    const idx = selectedSegs.findIndex(s => s.seq === seg.seq)
-    if (idx < 0) return
+    let idx = selectedSegs.findIndex(s => s.seq === seg.seq)
+    if (idx < 0) {
+      // 미선택(예: failed 기본 제외) 세그먼트 클릭 — 선택에 포함시키고 그 위치에서 재생
+      const next = new Set(checked)
+      next.add(seg.seq)
+      setChecked(next)
+      idx = playable.filter(s => next.has(s.seq)).findIndex(s => s.seq === seg.seq)
+      if (idx < 0) return
+    }
     setCurrentIdx(idx)
     setIsPlaying(true)
     setPlayToken(t => t + 1)
@@ -340,7 +377,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
               {callType === 'ptt' && <th>화자</th>}
               <th>시간 구간</th>
               <th style={{ width: 60 }}>길이</th>
-              <th style={{ width: 50 }}>상태</th>
+              <th style={{ width: 56 }}>상태</th>
             </tr>
           </thead>
           <tbody>
@@ -349,9 +386,12 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
               const isChecked = checked.has(seg.seq)
               return (
                 <tr key={seg.seq}
+                  ref={isActive ? activeRowRef : undefined}
                   style={{
                     cursor: 'pointer',
                     background: isActive ? 'var(--bg-accent, #e8f0fe)' : undefined,
+                    boxShadow: isActive ? 'inset 3px 0 0 var(--primary, #4f6ef7)' : undefined,
+                    fontWeight: isActive ? 600 : undefined,
                     opacity: isChecked ? 1 : 0.45,
                   }}
                   onClick={() => handleSegClick(seg)}
@@ -360,20 +400,21 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                     <input type="checkbox" checked={isChecked}
                       onChange={() => toggleCheck(seg.seq)} />
                   </td>
-                  <td>{seg.seq}</td>
+                  <td>{isActive && isPlaying ? '▶' : seg.seq}</td>
                   {callType === 'ptt' && <td>{seg.speaker_id}</td>}
                   <td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</td>
                   <td className="ts">{fmtMs(seg.duration_ms)}</td>
                   <td>
                     {preparingSeq === seg.seq
-                      ? <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</span>
+                      ? <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</span>
                       : seg.status === 'ready'
-                      ? <span className="badge badge--green" style={{ fontSize: 10 }}>완료</span>
+                      ? <span className="badge badge--green" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>완료</span>
                       : seg.status === 'raw'
-                      ? <span className="badge badge--gray" style={{ fontSize: 10 }}>미변환</span>
+                      ? <span className="badge badge--gray" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>미변환</span>
                       : seg.status === 'transcoding'
-                      ? <span className="badge badge--blue" style={{ fontSize: 10 }}>변환중</span>
-                      : <span className="badge badge--red" style={{ fontSize: 10 }}>실패</span>}
+                      ? <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>변환중</span>
+                      : <span className="badge badge--red" style={{ fontSize: 10, whiteSpace: 'nowrap' }}
+                          title={seg.status_reason || '변환 실패 — 클릭 시 재시도'}>재생불가</span>}
                   </td>
                 </tr>
               )
@@ -387,7 +428,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                 <td className="ts">{fmtTimeRange(seg.start_time, null)}</td>
                 <td>-</td>
                 <td>
-                  <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>녹취중</span>
+                  <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>녹취중</span>
                 </td>
               </tr>
             ))}

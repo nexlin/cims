@@ -27,6 +27,7 @@ export interface RecordingSegment {
   has_video: boolean
   file_size: number
   status: 'recording' | 'raw' | 'transcoding' | 'ready' | 'failed'
+  status_reason?: string     // status=failed 일 때 사유 (예: 녹취 음성 데이터 없음)
 }
 
 export interface RecordingsResponse {
