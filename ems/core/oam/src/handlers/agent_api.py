@@ -672,6 +672,18 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                                  'at': now_iso, 'job_id': job_id})
                 patches['install_history'] = hist[-10:]
             await asyncio.to_thread(_deploy_update, config, dep_id, patches)
+            # 게이트웨이 self-register 재실행(멱등 upsert) — 종전엔 배포 생성 시 1회뿐이라
+            # upgrade/재기동 후 라우트가 미등록이면 복구 경로가 없었다(게이트웨이 404).
+            try:
+                from handlers.agents import (_deploy_load as _dl,
+                                             self_register_deployment_routes as _srr)
+                dep_now = await asyncio.to_thread(_dl, config, dep_id)
+                _n = await asyncio.to_thread(_srr, config, dep_now)
+                if _n:
+                    logger.log_info(f"[gateway] job {jt} 성공 → self-register 재실행 "
+                                    f"({(dep_now or {}).get('process_name')}: {_n} route(s))")
+            except Exception as _e:
+                logger.log_warning(f"[gateway] job {jt} self-register 재실행 실패: {_e}")
         elif dep_id and jt in ("stop", "uninstall"):
             new_status = "removed" if jt == "uninstall" else "stopped"
             await asyncio.to_thread(_deploy_update, config, dep_id,

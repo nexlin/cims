@@ -139,6 +139,37 @@ def _materialize_deploy_config(config, pkg_file, overlay):
     return out
 
 
+def self_register_deployment_routes(config, dep: dict) -> int:
+    """배포 레코드의 패키지 meta.gateway.routes 를 게이트웨이에 self-register(segment
+    upsert — 멱등) + role=base 면 hot-mount. 배포 생성(_create_deployment)과 job 성공
+    보고(install/upgrade/start/restart — agent_api._report) 양쪽에서 호출한다 —
+    종전엔 생성 시 1회뿐이라 upgrade 후 라우트 미등록 상태를 복구할 경로가 없었다.
+    포트 우선순위: 배포 config 의 Server.Port(SoT) → pkg gateway.default_port."""
+    if not isinstance(dep, dict):
+        return 0
+    pkg = _pkg_load(config, dep.get("package_id")) if dep.get("package_id") else None
+    meta = (pkg or {}).get("meta") if isinstance((pkg or {}).get("meta"), dict) else {}
+    gw_meta = meta.get("gateway") or {}
+    gw_routes = gw_meta.get("routes") or []
+    if not gw_routes:
+        return 0
+    process_name = dep.get("process_name") or (pkg or {}).get("name")
+    overlay = dep.get("config") if isinstance(dep.get("config"), dict) else {}
+    srv = overlay.get("Server") if isinstance(overlay.get("Server"), dict) else {}
+    port = overlay.get("Server.Port") or srv.get("Port") or gw_meta.get("default_port")
+    if not port:
+        logger.log_warning(
+            f"[deploy] {process_name}: gateway.routes 선언됐으나 Server.Port(config)·"
+            f"gateway.default_port(pkg) 둘 다 없어 라우트 self-register skip "
+            f"— 게이트웨이 프록시 404 위험. 배포 config 에 Server.Port 지정 또는 "
+            f"pkg.json 에 gateway.default_port 선언 필요.")
+        return 0
+    # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관.
+    import handlers.gateway as _gw
+    return _gw.register_module_routes(config, process_name, "127.0.0.1",
+                                      int(port), gw_routes)
+
+
 def _pkg_load_all(config) -> list:
     return file_store.load_all(_pkg_dir(config))
 
@@ -2211,32 +2242,10 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     _enrich_deploy([r], config)
 
     # ── self-register: 서비스 모듈이 선언한 게이트웨이 라우트(pkg meta.gateway.routes)를
-    #    배포 config 의 Server.Port(SoT)+Ip 로 게이트웨이에 등록+hot-mount.
-    #    base 가 서비스 모듈을 미리 알 필요 없음(시드 하드코딩 대체). role base 에서만 mount.
+    #    배포 config 의 Server.Port(SoT)로 게이트웨이에 등록+hot-mount(role base).
+    #    공용 헬퍼 — job 성공 보고(agent_api._report)에서도 같은 경로로 재등록된다.
     try:
-        gw_meta = pkg_meta.get("gateway") or {}
-        gw_routes = gw_meta.get("routes") or []
-        if gw_routes:
-            # 포트 결정 우선순위: 배포 config 의 Server.Port(SoT) → gateway.default_port(패키지 선언
-            #   기본 포트 fallback). 콘솔 마법사는 Server.Port 를 채우지만, raw API(또는 config 미지정)
-            #   배포에선 비어 있어 과거엔 라우트 등록이 통째로 skip 돼 게이트웨이 404 가 났다.
-            #   → 패키지가 pkg.json 의 gateway.default_port 로 자기 기본 포트를 선언하면 그걸로 fallback.
-            srv = cfg_overlay.get("Server") if isinstance(cfg_overlay, dict) and isinstance(cfg_overlay.get("Server"), dict) else {}
-            _port = (cfg_overlay.get("Server.Port") if isinstance(cfg_overlay, dict) else None) \
-                    or srv.get("Port") \
-                    or gw_meta.get("default_port")
-            # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관하게
-            #   게이트웨이·모듈이 같은 호스트라 127.0.0.1 로 도달. (0.0.0.0 upstream 은 무효)
-            _ip = "127.0.0.1"
-            if _port:
-                import handlers.gateway as _gw
-                await asyncio.to_thread(_gw.register_module_routes, config,
-                                        process_name, _ip, int(_port), gw_routes)
-            else:
-                logger.log_warning(
-                    f"[deploy] {process_name}: gateway.routes 선언됐으나 Server.Port(config)·"
-                    f"gateway.default_port(pkg) 둘 다 없어 라우트 self-register skip "
-                    f"— 게이트웨이 프록시 404 위험. 배포 config 에 Server.Port 지정 또는 pkg.json 에 gateway.default_port 선언 필요.")
+        await asyncio.to_thread(self_register_deployment_routes, config, r)
     except Exception as e:
         logger.log_warning(f"[deploy] self-register routes 실패({process_name}): {e}")
 

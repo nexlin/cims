@@ -177,6 +177,29 @@ if __name__ == '__main__':
                                    "오동작. 콘솔 배포설정(oam-svc) 확인 필요.")
         auth.init(config)   # 공유 JwtSecret 로 토큰 독립 검증(§5)
 
+        # ── SIGUSR1 = 배포 config reload (agent job_update_config 규약) ──
+        # 종전: 핸들러 부재 → 파이썬 기본 동작(종료)으로 update_config 가 oam-svc 를
+        # 죽였다. CSP 와 동일 규약으로 config 를 재적용한다 — config dict 를 in-place
+        # 로 갱신해 sweeper 등 dict 참조 지점에 전파. bind 계열(Server.Port)과 기동 시
+        # 캡처된 값(ServiceLogging.Dir 등 로컬 변수)은 재기동 필요.
+        import signal as _signal
+
+        def _on_usr1(_sig, _frm):
+            try:
+                newc = load_config()
+                if newc:
+                    config.clear()
+                    config.update(newc)
+                    auth.init(config)
+                    logger.log_info('[reload] SIGUSR1 — config 재적용 '
+                                    '(bind/기동 캡처 항목은 재기동 필요)')
+                else:
+                    logger.log_warning('[reload] SIGUSR1 — 재로드 실패(빈 설정), 기존 유지')
+            except Exception as e:
+                logger.log_error(f'[reload] SIGUSR1 처리 실패: {e}')
+
+        _signal.signal(_signal.SIGUSR1, _on_usr1)
+
         if args_dict.get('preflight'):
             if not config:
                 print('OAMSVC_PREFLIGHT_FAIL: empty config', flush=True)

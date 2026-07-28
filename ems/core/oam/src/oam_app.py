@@ -226,6 +226,28 @@ if __name__ == '__main__':
         config = load_config()
         auth.init(config)
 
+        # ── SIGUSR1 = 배포 config reload (agent job_update_config 규약) ──
+        # 종전: 핸들러 부재 → 파이썬 기본 동작(종료)으로 update_config 가 OAM 을 죽였다.
+        # config dict in-place 갱신으로 dict 참조 지점(sweeper 등)에 전파 — bind 계열
+        # (Port)과 기동 시 캡처된 로컬 값은 재기동 필요.
+        import signal as _signal
+
+        def _on_usr1(_sig, _frm):
+            try:
+                newc = load_config()
+                if newc:
+                    config.clear()
+                    config.update(newc)
+                    auth.init(config)
+                    logger.log_info('[reload] SIGUSR1 — config 재적용 '
+                                    '(bind/기동 캡처 항목은 재기동 필요)')
+                else:
+                    logger.log_warning('[reload] SIGUSR1 — 재로드 실패(빈 설정), 기존 유지')
+            except Exception as e:
+                logger.log_error(f'[reload] SIGUSR1 처리 실패: {e}')
+
+        _signal.signal(_signal.SIGUSR1, _on_usr1)
+
         # D3: --preflight 모드 — 여기까지 왔으면 핸들러 import(107~140) + config 로드 OK.
         # bind/마이그레이션/sweeper 없이 즉시 종료(0). agent 가 구 OAM kill 전에 호출.
         if args_dict.get('preflight'):

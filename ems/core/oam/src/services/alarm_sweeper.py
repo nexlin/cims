@@ -139,8 +139,6 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
     for r in rules:
         thr = r.get('threshold', rtp_threshold)
         if r.get('check') == 'process_down' and r.get('target') == 'cmp':
-            # 노드별 개별 알람 — endpoint 목록이 바뀌면 사라진 노드의 open 알람은
-            # 남을 수 있으나(평가 대상 이탈) 재기동 시 restore 후 대상 재구성으로 수렴.
             base_mo = r.get('mo_instance') or 'cims/cmp'
             for suffix, stats in cmp_nodes:
                 mo = f"{base_mo}/{suffix}"
@@ -148,12 +146,19 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                            not bool(stats),
                            fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr),
                            fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr), log=log)
-            # 구 집계 인스턴스(cims/cmp)로 열려 복원된 알람은 노드별 전환 후 평가
-            # 대상이 없어 영영 안 닫히므로 여기서 close.
-            if f"{r.get('code')}@{base_mo}" in state:
-                transition(state, service_log_dir, r, base_mo, detected_by, False, '',
-                           fmt(r.get('msg_close'), mo=base_mo, pct=pct, threshold=thr),
-                           log=log)
+            # 평가 대상에서 이탈한 인스턴스의 open 알람은 영영 안 닫히므로 여기서 close:
+            # ①구 집계 인스턴스(cims/cmp) ②endpoint 목록에서 제거된 노드(cims/cmp/<ip>:<port>).
+            cur_mo = {f"{base_mo}/{suffix}" for suffix, _ in cmp_nodes}
+            code = r.get('code')
+            stale = [k for k in list(state)
+                     if (k == f"{code}@{base_mo}"
+                         or (k.startswith(f"{code}@{base_mo}/")
+                             and k.split('@', 1)[1] not in cur_mo))]
+            for akey in stale:
+                mo = akey.split('@', 1)[1]
+                transition(state, service_log_dir, r, mo, detected_by, False, '',
+                           fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr)
+                           or f"{mo} 관측 대상 제외 — 정리", log=log)
             continue
         if r.get('check') == 'rtp_pct_gte' and not cmp_nodes:
             continue    # CMP 관측 비활성 — 사용률 평가 불가
