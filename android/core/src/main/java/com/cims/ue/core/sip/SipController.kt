@@ -58,6 +58,11 @@ class SipController(private val config: SipAccountConfig) {
     private val _msrpEvents = MutableSharedFlow<MsrpEvent>(extraBufferCapacity = 32)
     val msrpEvents: SharedFlow<MsrpEvent> = _msrpEvents.asSharedFlow()
 
+    /** [sendRequest] 트랜잭션의 최종 응답(≥200) — token 으로 요청과 상관(affiliation PUBLISH 확인용).
+     *  같은 트랜잭션이 COMPLETED/TERMINATED 로 중복 통지될 수 있어 구독자가 token 당 1회만 처리한다. */
+    private val _sendReqResults = MutableSharedFlow<SendReqResult>(extraBufferCapacity = 32)
+    val sendReqResults: SharedFlow<SendReqResult> = _sendReqResults.asSharedFlow()
+
     /** REGISTER Contact 에 부가할 파라미터(예: MCData ICSI feature tag) — [register] 전에 설정.
      *  예: `;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"` */
     @Volatile var contactParams: String = ""
@@ -355,6 +360,7 @@ class SipController(private val config: SipAccountConfig) {
         contentType: String?,
         body: String?,
         headers: Map<String, String> = emptyMap(),
+        token: Long = 0,
     ) = onCtl {
         val acc = account ?: return@onCtl
         val tx = SipTxOption().apply {
@@ -363,7 +369,7 @@ class SipController(private val config: SipAccountConfig) {
             if (body != null) this.msgBody = body
             if (headers.isNotEmpty()) this.headers = headers.toSipHeaders()
         }
-        acc.sendRequest(SendRequestParam().apply { this.method = method; txOption = tx })
+        acc.sendRequest(SendRequestParam().apply { this.method = method; txOption = tx; userData = token })
     }
 
     /**
@@ -488,6 +494,10 @@ class SipController(private val config: SipAccountConfig) {
     internal fun dispatchMsrpIncoming(call: CimsCall, from: String, inviteMsg: String) {
         calls[call.id] = call
         _msrpEvents.tryEmit(MsrpEvent.Incoming(call.id, from, inviteMsg))
+    }
+
+    internal fun dispatchSendReqResult(token: Long, method: String, code: Int, reason: String) {
+        _sendReqResults.tryEmit(SendReqResult(token, method, code, reason))
     }
 
     internal fun dispatchReg(active: Boolean, code: Int, reason: String) {

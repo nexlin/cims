@@ -229,8 +229,16 @@ class PttController(
     val selectedGroup: StateFlow<String?> = _selectedGroup.asStateFlow()
 
     private val _affiliated = MutableStateFlow<Set<String>>(emptySet())
-    /** affiliate PUBLISH 를 보낸 그룹(낙관적 로컬 추적 — 서버 상태 구독은 후속). */
+    /** 서버가 2xx 로 확인한 affiliation 그룹(응답 기반 — PUBLISH 송신만으로는 포함하지 않음). */
     val affiliated: StateFlow<Set<String>> = _affiliated.asStateFlow()
+
+    // ── affiliation 상태 머신(TS 24.379 §9) — 희망 집합(편성 채널 전체)을 서버 확인 기반으로 유지 ──
+    //   PUBLISH 는 token 으로 최종 응답과 상관: 2xx=확정(만료 기록), 실패=백오프 재시도(그룹 편성이
+    //   PUBLISH 보다 늦는 레이스·일시 오류 자가 치유). TTL 절반 경과 시 주기 루프가 재발행(만료 방치 방지).
+    private val affPending = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, Boolean>>()
+    private val affExpireAt = java.util.concurrent.ConcurrentHashMap<String, Long>()   // 확정 만료(elapsedRealtime)
+    private val affAttempts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val affSeq = java.util.concurrent.atomic.AtomicLong(1)
 
     private val _status = MutableStateFlow("대기")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -295,13 +303,48 @@ class PttController(
                 runCatching { sessionByCall(callId)?.let { onConferenceInfo(it, xml) } }
             }
         }
-        // 등록 완료 시 선택 그룹 자동 affiliation — CSP 는 affiliation 된 멤버에게만 INVITE fan-out
+        // 등록 완료 시 편성 채널 전체 자동 affiliation — CSP 는 affiliation 된 멤버에게만 INVITE fan-out.
+        // (주채널 1개 한정이던 최소 구현을 희망 집합 전체로 확장 — 로그인만으로 전 채널 fan-out 수신)
         scope.launch {
             sip.regState.collect { r ->
                 if (r is RegState.Registered) {
-                    _selectedGroup.value?.let { ensureAffiliated(it) }
+                    affiliateAll()
                     maybeRestoreChannels()
                 }
+            }
+        }
+        // affiliation PUBLISH 최종 응답 — 2xx 확정, 실패는 지수 백오프 재시도. token 당 1회 처리
+        // (같은 트랜잭션의 COMPLETED/TERMINATED 중복 통지는 affPending remove 로 자연 dedupe).
+        scope.launch {
+            sip.sendReqResults.collect { r ->
+                val (g, on) = affPending.remove(r.token) ?: return@collect
+                if (r.code in 200..299) {
+                    affAttempts.remove(g)
+                    if (on) {
+                        affExpireAt[g] = SystemClock.elapsedRealtime() + AFF_EXPIRES_SEC * 1000L
+                        _affiliated.value = _affiliated.value + g
+                    } else {
+                        affExpireAt.remove(g)
+                        _affiliated.value = _affiliated.value - g
+                    }
+                } else if (on) {
+                    _affiliated.value = _affiliated.value - g
+                    val n = ((affAttempts[g] ?: 0) + 1).also { affAttempts[g] = it }
+                    val backoffMs = (30_000L shl (n - 1).coerceAtMost(3)).coerceAtMost(300_000L)
+                    Log.w(TAG, "affiliate $g 실패 ${r.code} ${r.reason} — ${backoffMs / 1000}s 후 재시도(#$n)")
+                    launch {
+                        delay(backoffMs)
+                        if (regState.value is RegState.Registered && g in desiredAffiliations() && !affValid(g))
+                            affiliate(g, true)
+                    }
+                }
+            }
+        }
+        // 주기 갱신 — TTL 절반 경과 그룹 재-PUBLISH(1h 만료 방치로 fan-out 이 조용히 죽는 것 방지)
+        scope.launch {
+            while (true) {
+                delay(60_000)
+                if (sip.regState.value is RegState.Registered) affiliateAll()
             }
         }
     }
@@ -477,8 +520,28 @@ class PttController(
         scope.launch { delay(800); audioRouter?.ensureRxVolume() }
     }
 
+    /** 희망 affiliation 집합 — 편성 채널 전체(CSC 목록 + 영속 참여 채널 + 선택 채널). */
+    private fun desiredAffiliations(): Set<String> = buildSet {
+        _groups.value.forEach { add(bareId(it.uri)) }
+        channelStore?.joined?.forEach { add(it) }
+        _selectedGroup.value?.let { add(it) }
+    }
+
+    /** 서버 확정이 아직 신선한가 — 잔여 수명이 TTL 절반 미만이면 재발행 대상. */
+    private fun affValid(groupId: String): Boolean =
+        (affExpireAt[groupId] ?: 0L) - SystemClock.elapsedRealtime() > AFF_EXPIRES_SEC * 500L
+
+    /** 확정이 없거나 낡았고, 같은 그룹 PUBLISH 가 in-flight 도 아닐 때만 발행(트리거 중복 억제). */
     private fun ensureAffiliated(groupId: String) {
-        if (!_affiliated.value.contains(groupId)) affiliate(groupId, true)
+        if (affValid(groupId)) return
+        if (affPending.values.any { it.first == groupId && it.second }) return
+        affiliate(groupId, true)
+    }
+
+    /** 등록 상태에서 희망 집합 전체를 보장 — 등록 성공·그룹 목록 적재·주기 루프에서 호출. */
+    private fun affiliateAll() {
+        if (regState.value !is RegState.Registered) return
+        desiredAffiliations().forEach { ensureAffiliated(it) }
     }
 
     // ── 그룹콜 참여/이탈 ──
@@ -591,11 +654,9 @@ class PttController(
             .onSuccess { list ->
                 _groups.value = list
                 if (_selectedGroup.value == null) {
-                    list.firstOrNull()?.let { bareId(it.uri) }?.also { g ->
-                        _selectedGroup.value = g
-                        if (regState.value is RegState.Registered) ensureAffiliated(g)
-                    }
+                    list.firstOrNull()?.let { bareId(it.uri) }?.also { g -> _selectedGroup.value = g }
                 }
+                affiliateAll()   // 편성 채널 전체 affiliation (등록 전이면 등록 완료 트리거가 수행)
                 _status.value = "그룹 ${list.size}개"
             }
             .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }
@@ -625,8 +686,11 @@ class PttController(
 
     fun register() = sip.register()
 
-    /** affiliation PUBLISH (TS 24.379 §9). on=false → de-affiliate(Expires:0). */
+    /** affiliation PUBLISH (TS 24.379 §9). on=false → de-affiliate(Expires:0).
+     *  성공 여부는 [affiliated] 에 낙관 기록하지 않는다 — token 상관 응답(2xx)에서만 확정. */
     fun affiliate(groupId: String, on: Boolean = true) {
+        val token = affSeq.getAndIncrement()
+        affPending[token] = groupId to on
         val groupSip = "sip:$groupId@${sipConfig.domain}"
         sip.sendRequest(
             method = "PUBLISH",
@@ -634,9 +698,16 @@ class PttController(
             contentType = McpttXml.CT_AFFILIATION,
             body = McpttXml.affiliationCommand("tel:$groupId", on),
             // Event: mcptt 필수 — TS 24.379 §9 (없으면 CSP 가 489 Bad Event 거부)
-            headers = mapOf("Event" to "mcptt", "Expires" to if (on) "3600" else "0"),
+            headers = mapOf("Event" to "mcptt", "Expires" to if (on) "$AFF_EXPIRES_SEC" else "0"),
+            token = token,
         )
-        _affiliated.value = if (on) _affiliated.value + groupId else _affiliated.value - groupId
+        // 응답이 영영 없는 경우(계정 미생성·전송 실패) pending 이 남아 재발행을 막는 것 방지 —
+        // PUBLISH 트랜잭션 타임아웃(Timer B ≈32s)보다 넉넉히 기다린 뒤 회수(주기 루프가 재시도).
+        scope.launch {
+            delay(40_000)
+            if (affPending.remove(token) != null)
+                Log.w(TAG, "affiliate $groupId 응답 없음(타임아웃) — 주기 갱신 루프가 재시도")
+        }
         _status.value = if (on) "affiliate $groupId" else "de-affiliate $groupId"
     }
 
@@ -1154,6 +1225,9 @@ class PttController(
 
         /** MCData ICSI (TS 24.282) — MSRP INVITE Accept-Contact·PR4 수신 광고 공용. */
         const val MCDATA_ICSI = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"
+        /** affiliation PUBLISH Expires(초) — 잔여 수명이 절반 미만이면 주기 루프가 재발행. */
+        private const val AFF_EXPIRES_SEC = 3600L
+
         /** MSRP INVITE 발신 → 200 OK(a=path) 대기 시한. */
         private const val MSRP_INVITE_TIMEOUT_MS = 15_000L
         /** MSRP 전송 완료 후 서버 BYE 대기 시한(초과 시 로컬 hangup — 서버 스위퍼가 안전망). */

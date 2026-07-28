@@ -53,6 +53,9 @@ sealed interface CallState {
 /** 수신 문자(SIP MESSAGE, RFC 3428 page-mode). [fromUri] 는 SIP URI 원문. */
 data class ImMessage(val fromUri: String, val contentType: String, val body: String)
 
+/** [SipController.sendRequest] 트랜잭션의 최종 응답. [token] 으로 요청과 상관(0=미추적 요청). */
+data class SendReqResult(val token: Long, val method: String, val code: Int, val reason: String)
+
 /**
  * MCData MSRP 미디어평면 호(SDS over media plane, TS 24.282 §9.2.3) 이벤트.
  * 일반 통화 상태([CallState])와 **분리** — MSRP 호의 대상 URI(그룹)가 PTT 음성 세션과 같아

@@ -6,6 +6,8 @@ import org.pjsip.pjsua2.CallOpParam
 import org.pjsip.pjsua2.OnIncomingCallParam
 import org.pjsip.pjsua2.OnInstantMessageParam
 import org.pjsip.pjsua2.OnRegStateParam
+import org.pjsip.pjsua2.OnSendRequestParam
+import org.pjsip.pjsua2.pjsip_event_id_e
 import org.pjsip.pjsua2.pjsip_status_code
 
 /**
@@ -21,6 +23,17 @@ class CimsAccount(private val owner: SipController) : Account() {
         val active = runCatching { info.regIsActive }.getOrDefault(false)
         owner.dispatchReg(active, prm.code, prm.reason)
         Log.i("CimsAccount", "reg: code=${prm.code} active=$active reason=${prm.reason}")
+    }
+
+    /** [SipController.sendRequest] (affiliation PUBLISH 등) 트랜잭션 상태 콜백 — 최종 응답(≥200)만 중계.
+     *  같은 트랜잭션이 COMPLETED/TERMINATED 두 번 올 수 있어 수신측이 token 당 1회 처리한다. */
+    override fun onSendRequest(prm: OnSendRequestParam) {
+        runCatching {
+            if (prm.e.type != pjsip_event_id_e.PJSIP_EVENT_TSX_STATE) return
+            val tsx = prm.e.body.tsxState.tsx
+            if (tsx.statusCode < 200) return
+            owner.dispatchSendReqResult(prm.userData, tsx.method ?: "", tsx.statusCode, tsx.statusText ?: "")
+        }.onFailure { Log.w("CimsAccount", "onSendRequest: ${it.message}") }
     }
 
     override fun onIncomingCall(prm: OnIncomingCallParam) {
