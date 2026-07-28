@@ -800,9 +800,12 @@ telephone-event(101, `0-15`).
 동작 원칙 (RFC 3264/3551):
 
 - **배열 순서 = 우선순위.** 첫 엔트리가 서비스 코덱 — PTT 그룹콜 fan-out 오퍼가 이 코덱·PT 로
-  나가고, CMP relay 는 PT 를 재작성하지 않으므로 **이 PT 가 그룹 전 leg 의 wire PT** 가 된다.
-  기본 96 은 실단말(pjsua)의 로컬 AMR-WB PT(pjmedia 동적 PT 재배정) 정렬 실증값 — 다른 값으로
-  변경 시 실단말 재검증이 전제다.
+  나간다. 그룹 leg 별 wire PT 가 서로 달라도(개시자의 비 96 offer, 타사 단말의 비 96 answer)
+  CSP 가 PTT_JOIN ② 에 leg 별 PT(`user_pt`/`user_src_pt`/`user_te_pt`/`user_src_te_pt` —
+  UE 수신 선언 PT 는 그 leg 의 원격 SDP, UE 송신 PT 는 서버가 그 leg 에 낸 SDP 기준,
+  psip `GetRemotePayloadTypes`)를 전달하고 **CMP 가 fan-out egress 에서 leg 별로 PT 를
+  재작성**해 정합한다 ([cmp_media_api.md §7.4](../../api/cmp_media_api.md)). 기본 96 은
+  실단말(pjsua)의 로컬 AMR-WB PT(pjmedia 동적 PT 재배정) 정렬 실증값.
 - **서버가 answerer 일 때 실 PT 는 항상 오퍼 rtpmap echo.** 테이블 PT 는 오퍼에 해당 rtpmap 이
   없을 때의 폴백. 코덱 *선택*은 오퍼∩테이블 중 테이블 우선순위 최상위.
 - **인바운드 오퍼의 동적 PT 는 rtpmap 이름으로 식별**한다 (번호 무관 — 예: AMR-WB 를 111 로

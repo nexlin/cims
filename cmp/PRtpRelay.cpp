@@ -65,7 +65,6 @@ void PRtpRelay::reset() {
         leg.nat = false;
         leg.sigIp.clear();
         leg.latched = leg.latchedVideo = leg.latchedRtcp = leg.latchedVideoRtcp = false;
-        leg.latchSsrc = leg.latchVideoSsrc = 0;
     }
 }
 
@@ -107,9 +106,8 @@ bool PRtpRelay::setRemote(const std::string& ip, unsigned int port, unsigned int
     //   비교는 선언 원본(decl*) 기준 — leg.ip/port 는 latch 시 학습 주소로 덮인다.
     if (leg.active && leg.declIp == ip && leg.declPort == port && leg.declVideoPort == videoPort &&
         leg.nat == nat && leg.sigIp == sigIp) {
-        // latch 목적지는 유지하되 SSRC 핀은 해제 — 제어평면 재선언 시 단말이 미디어 세션을
-        //   재시작(새 SSRC·새 NAT 매핑)했을 수 있다 (PMcpttGroup 재-JOIN 과 동일 규칙).
-        leg.latchSsrc = leg.latchVideoSsrc = 0;
+        // 재전송·refresh — 학습(추종) 목적지 유지. 목적지 갱신은 추종 모델(_acceptNatRtp)
+        //   이 미디어 소스로부터 계속 수행한다.
         LOG_INFO("PRtpRelay", "setRemote peer[%d]=%s:%d unchanged — keep latch session=%s",
                  idx, ip.c_str(), port, _sessionId.c_str());
         return true;
@@ -126,7 +124,6 @@ bool PRtpRelay::setRemote(const std::string& ip, unsigned int port, unsigned int
     leg.nat = nat;
     leg.sigIp = sigIp;
     leg.latched = leg.latchedVideo = leg.latchedRtcp = leg.latchedVideoRtcp = false;
-    leg.latchSsrc = leg.latchVideoSsrc = 0;
 
     LOG_INFO("PRtpRelay", "setRemote peer[%d]=%s:%d video=%d nat=%d guard=%s (local=%d) session=%s",
              idx, ip.c_str(), port, videoPort, nat ? 1 : 0, sigIp.c_str(), leg.localPort, _sessionId.c_str());
@@ -141,21 +138,27 @@ bool PRtpRelay::getNatLatched(int peerIdx, std::string& learnedIp, int& learnedP
     return true;
 }
 
-// nat leg 의 RTP 수신 판정 — 선언/latch 주소 일치가 아니면 목적지 latch 를 시도한다.
-//   안전 조건: RTP v2 + 최소 길이 + (guard) 소스 IP == sigIp + SSRC 고정(재-latch 는
-//   동일 SSRC = NAT rebind 추종만). 호출자가 _mutex 보유.
+static int64_t _getTimeUsec();
+
+// NAT leg 목적지 추종 — leg 전용 포트가 곧 신원이므로 형식 검사(RTP v2 + 최소 길이 +
+//   (guard) 소스 IP==sigIp + (선언 시) 기대 ingress PT)를 통과한 소스로 송신 목적지를
+//   계속 갱신한다. SSRC 핀·스테일 창은 두지 않는다 — 핀이 잘못된 소스에 걸리면 정당한
+//   단말이 영구 차단되는 고착이 더 해악이고, 추종 모델은 선점 소스 소멸 즉시 자가 복구된다.
 bool PRtpRelay::_acceptNatRtp(int legIdx, bool isVideo, const std::string& ip, int port, const char* pkt, int len) {
     Leg& leg = _legs[legIdx];
     if (len < 12 || (((unsigned char)pkt[0]) >> 6) != 2) return false;
     if (!leg.sigIp.empty() && leg.sigIp != ip) return false;
+    // 기대 ingress PT 검사 (RELAY remote_src_pt 선언 시) — KA(empty RTP)도 협상 PT 를
+    //   실어 보내므로 동일 기준으로 통과한다. TE 는 srcTePt(미선언=관례 101)도 허용.
+    if (!isVideo && leg.srcPt > 0) {
+        unsigned char pt = (unsigned char)(pkt[1] & 0x7F);
+        unsigned char te = (unsigned char)((leg.srcTePt > 0 ? leg.srcTePt : 101) & 0x7F);
+        if (pt != (unsigned char)(leg.srcPt & 0x7F) && pt != te) return false;
+    }
 
-    uint32_t ssrc = ((uint32_t)(unsigned char)pkt[8] << 24) | ((uint32_t)(unsigned char)pkt[9] << 16) |
-                    ((uint32_t)(unsigned char)pkt[10] << 8) | (uint32_t)(unsigned char)pkt[11];
     bool& latched = isVideo ? leg.latchedVideo : leg.latched;
-    uint32_t& latchSsrc = isVideo ? leg.latchVideoSsrc : leg.latchSsrc;
-    // 제3자 주입 차단 (rebind 는 동일 SSRC). 핀 0 = 재선언으로 해제된 상태 — 첫 재latch 허용.
-    if (latched && latchSsrc != 0 && ssrc != latchSsrc) return false;
-
+    bool changed = (leg.ip != ip) ||
+                   (isVideo ? (int)leg.videoPort != port : (int)leg.port != port) || !latched;
     if (isVideo) {
         leg.videoPort = port;
         _makeAddr(leg.addrVideoRtp, ip, port);
@@ -167,9 +170,15 @@ bool PRtpRelay::_acceptNatRtp(int legIdx, bool isVideo, const std::string& ip, i
     }
     leg.ip = ip;
     latched = true;
-    latchSsrc = ssrc;
-    LOG_INFO("PRtpRelay", "%s dest latched (NAT) peer[%d] %s:%d ssrc=%u session=%s",
-             isVideo ? "video RTP" : "RTP", legIdx, ip.c_str(), port, ssrc, _sessionId.c_str());
+    if (changed) {
+        // 소스 경합(두 소스가 번갈아 유입) 시 로그 폭주 방지 — leg 당 2s 간격 요약.
+        int64_t now = _getTimeUsec();
+        if (now - leg.followLogUsec >= 2000000LL) {
+            leg.followLogUsec = now;
+            LOG_INFO("PRtpRelay", "%s dest follow (NAT) peer[%d] %s:%d session=%s",
+                     isVideo ? "video RTP" : "RTP", legIdx, ip.c_str(), port, _sessionId.c_str());
+        }
+    }
     return true;
 }
 
@@ -278,8 +287,26 @@ bool PRtpRelay::proc() {
             }
             touchActivity();
 
-            if (_legs[dst].active)
-                _legs[dst].rtp.sendTo(pkt, len, &_legs[dst].addrRtp);
+            if (_legs[dst].active) {
+                // leg 별 PT 재작성 (cmp_media_api.md — remote_pt/remote_te_pt, 0=재작성 없음).
+                //   녹취는 아래에서 talker 원본(pkt)을 기록하므로 egress 사본에만 스탬프.
+                //   marker bit(0x80) 보존. TE 분류는 src leg 의 srcTePt(미지정=관례 101).
+                int stampPt = 0;
+                if (len >= 12) {
+                    unsigned char inPt = (unsigned char)(pkt[1] & 0x7F);
+                    bool isTe = (src.srcTePt > 0) ? (inPt == (unsigned char)(src.srcTePt & 0x7F))
+                                                  : (inPt == 101);
+                    stampPt = isTe ? _legs[dst].tePtOut : _legs[dst].ptOut;
+                }
+                if (stampPt > 0) {
+                    char out[2048];
+                    memcpy(out, pkt, len);
+                    out[1] = (char)((out[1] & 0x80) | (stampPt & 0x7F));
+                    _legs[dst].rtp.sendTo(out, len, &_legs[dst].addrRtp);
+                } else {
+                    _legs[dst].rtp.sendTo(pkt, len, &_legs[dst].addrRtp);
+                }
+            }
 
             if (_recorder) {
                 if (!_firstRtpReceived) {

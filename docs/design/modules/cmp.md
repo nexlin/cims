@@ -6,10 +6,12 @@ CMP는 CIMS 시스템의 미디어 서버로, CSP의 제어 하에 RTP relay, PT
 
 **서비스 표준 코덱**: VoLTE/PTT 음성 = **AMR-WB** (`AMR-WB/16000/1`), 영상 = **H.264**
 (`H264/90000`). 음성 PT 의 정본은 CSP 코덱 테이블(`Setup.Media.Codecs`,
-[csp.md](csp.md) §6.1 — 기본 AMR-WB=96)이며, CMP 는 코덱·PT 를 알지 못한다(제어 API 에 PT
-필드 없음, relay 시 PT 무재작성 — seq/SSRC 만 재작성). 트랜스코딩 없이 SDP 협상 결과를
-릴레이하지만, 녹취 변환 파이프라인([../features/recording.md](../features/recording.md))은
-AMR-WB/H.264 를 전제한다.
+[csp.md](csp.md) §6.1 — 기본 AMR-WB=96)이며, CMP 는 코덱을 해석하지 않는다(트랜스코딩
+없음). wire PT 는 기본 무재작성(PT-blind, seq/SSRC 만 재작성)이되, 제어평면이 leg 별 PT
+(`user_pt`/`remote_pt` 계열 — [cmp_media_api.md](../../api/cmp_media_api.md) §6.1/§7.4)를
+선언하면 **egress 에서 leg 별 audio/telephone-event PT 를 재작성**해 leg 간 PT 불일치
+(비 96 offer/answer 단말)를 정합한다. 녹취는 화자 원본 PT 로 기록되며, 녹취 변환
+파이프라인([../features/recording.md](../features/recording.md))은 AMR-WB/H.264 를 전제한다.
 시험(cspsim) 시에도 AMR-WB 미디어 파일 지정이 필수 —
 [../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록 "기본 호시험" 참조.
 

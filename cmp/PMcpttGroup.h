@@ -23,10 +23,6 @@ class PSyncRtpRecorder;
 #define RTCP_PT_APP 204
 #define RTCP_APP_HDR 12   // RTCP APP 고정 헤더(V/P/subtype + PT + length + SSRC + name)
 
-// NAT latch 인계 임계 — 현재 latch SSRC 의 스트림이 이 시간 이상 무수신이면 새 SSRC 재-latch 허용
-// (재-JOIN 없는 mid-session SSRC 변경 자가치유). 활성 스트림 중엔 차단 유지(동시 주입 방어).
-#define NAT_RELATCH_STALE_US (2 * 1000000LL)
-
 // Floor control 메시지 타입 = RTCP APP subtype (TS 24.380 Table 8.2.2-1).
 enum FloorOpCode {
     FLOOR_REQUEST  = 0,   // Floor Request          (UE→서버)
@@ -147,9 +143,12 @@ public:
     PRtpMulticast* getPttSession() const { return _pttSession; }
     // unit: 멤버 전용 RTP 포트 유닛 (PCmpServer 가 할당·소유, 그룹은 참조만)
     // nat/sigIp: NAT 목적지 latch 허용 + latch IP guard (ue_nat_traversal.md §4-5)
+    // ptOut/tePtOut: 이 leg 로 송신 시 스탬프할 audio/telephone-event PT (0=재작성 없음).
+    // srcTePt: 이 leg 가 송신에 쓰는 telephone-event PT — fan-out 시 audio/TE 분류 기준.
     void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
                    const std::string& role = "participant", PPttMemberPort* unit = nullptr,
-                   bool nat = false, const std::string& sigIp = "");
+                   bool nat = false, const std::string& sigIp = "",
+                   int ptOut = 0, int srcPt = 0, int tePtOut = 0, int srcTePt = 0);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -275,12 +274,14 @@ private:
         // NAT 목적지 latch (제어평면이 nat 지정한 멤버만 — ue_nat_traversal.md §5)
         bool natEnabled = false;
         std::string sigIp;             // latch IP guard 기준 (빈 값 = guard 없음)
-        bool natLatched = false;       // audio 소스 latch 완료
-        uint32_t natLatchSsrc = 0;     // latch 시 고정 — 재-latch 는 동일 SSRC(NAT rebind)만
-        int64_t natLatchAudioUsec = 0; // 마지막으로 latch SSRC 매칭 오디오 수락 시각 (staleness 판정)
+        // leg 별 PT 재작성 (cmp_media_api.md §6.1) — 0 = 재작성 없음(현행 PT-blind 통과).
+        int ptOut = 0;      // egress audio PT — 이 leg 로 송신 시 스탬프 (user_pt)
+        int srcPt = 0;      // ingress audio PT — 이 leg 가 송신에 쓰는 PT (user_src_pt)
+        int tePtOut = 0;    // egress telephone-event PT (user_te_pt)
+        int srcTePt = 0;    // ingress telephone-event PT (user_src_te_pt, TE 분류 기준)
+        bool natLatched = false;       // audio 소스 추종 학습 완료 (관측용)
         bool natLatchedVideo = false;
-        uint32_t natLatchVideoSsrc = 0;
-        int64_t natLatchVideoUsec = 0; // 마지막으로 latch SSRC 매칭 비디오 수락 시각
+        int64_t followLogUsec = 0;     // dest follow 로그 rate-limit (소스 경합 시 폭주 방지)
     };
 
     // nat 멤버의 RTP 수신 판정+latch (호출자가 _mutex 보유). 수락 시 true.

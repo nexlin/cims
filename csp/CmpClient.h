@@ -73,10 +73,13 @@ public:
                       const std::string &strSesId = "" );
     // 2단 멱등 (docs/api/cmp_media_api.md §7.4): strIp 가 비면 ① 선할당(멤버 포트만 확보),
     //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort/piLocalVideoPort 에 멤버 전용 포트 응답.
+    //   iUserPt/iUserTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),
+    //   iUserSrcPt/iUserSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류). 0=재작성 없음.
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
                     int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
                     const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
-                    int iUserNat = 0, const std::string &strUserSigIp = "" );
+                    int iUserNat = 0, const std::string &strUserSigIp = "",
+                    int iUserPt = 0, int iUserSrcPt = 0, int iUserTePt = 0, int iUserSrcTePt = 0 );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

@@ -66,8 +66,20 @@ PMcpttGroup::~PMcpttGroup() {
 }
 
 void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort,
-                            const std::string& role, PPttMemberPort* unit, bool nat, const std::string& sigIp) {
-    LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(), nat ? 1 : 0);
+                            const std::string& role, PPttMemberPort* unit, bool nat, const std::string& sigIp,
+                            int ptOut, int srcPt, int tePtOut, int srcTePt) {
+    if (ptOut || srcPt || tePtOut || srcTePt)
+        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d pt=%d/%d te=%d/%d",
+                 _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(),
+                 nat ? 1 : 0, ptOut, srcPt, tePtOut, srcTePt);
+    else
+        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(), nat ? 1 : 0);
+    // NAT 멤버인데 guard IP(user_sig_ip)가 비면 latch IP guard(_acceptNatRtp)가 이 멤버에
+    //   한해 무력화된다(SSRC 핀만 방어) — CSP UserMap 미조회(미등록 등)가 원인. 조용히
+    //   약화되지 않도록 드러낸다.
+    if (nat && sigIp.empty())
+        LOG_WARN("PMcpttGroup", "[%s] NAT member without sig-guard ip — latch IP guard disabled (session=%s)",
+                 _groupId.c_str(), sessionId.c_str());
     PAutoLock lock(_mutex);
     // 재-JOIN(주소 갱신) 시 기존 SSRC/seq 카운터 보존 — 주소·역할만 갱신 + NAT latch 리셋.
     auto itExist = _members.find(sessionId);
@@ -78,6 +90,11 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         //   학습 주소로 덮인다 (PRtpRelay::setRemote 와 동일 규칙).
         bool sameDecl = (peer.declIp == ip && peer.declPort == port && peer.declVideoPort == videoPort &&
                          peer.natEnabled == nat && peer.sigIp == sigIp);
+        // PT 재작성 파라미터는 주소 불변 재-JOIN(재협상)에서도 항상 최신 선언을 따른다.
+        peer.ptOut = ptOut;
+        peer.srcPt = srcPt;
+        peer.tePtOut = tePtOut;
+        peer.srcTePt = srcTePt;
         peer.declIp = ip;
         peer.declPort = port;
         peer.declVideoPort = videoPort;
@@ -85,11 +102,8 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         if (!role.empty()) { peer.role = role; _roles[sessionId] = role; }
         if (unit) peer.unit = unit;
         if (sameDecl) {
-            // latch 목적지는 유지하되 SSRC 핀은 해제 — JOIN 은 제어평면 이벤트이므로 단말이
-            //   미디어 세션을 재시작(새 SSRC·새 NAT 매핑)했을 수 있다. 핀을 유지하면 정당한
-            //   재-latch 가 "제3자 주입"으로 오판돼 영구 드랍된다 (주입 방어는 guard + 세션
-            //   중 핀으로 충분).
-            peer.natLatchSsrc = peer.natLatchVideoSsrc = 0;
+            // 재전송·세션 refresh — latch(추종 학습된) 목적지 유지. 목적지 갱신은 추종
+            //   모델(_acceptNatRtp)이 미디어 소스로부터 계속 수행한다.
             LOG_INFO("PMcpttGroup", "[%s] Member unchanged session=%s — keep latch (total=%lu)", _groupId.c_str(),
                      sessionId.c_str(), _members.size());
             return;
@@ -100,7 +114,6 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         peer.natEnabled = nat;
         peer.sigIp = sigIp;
         peer.natLatched = peer.natLatchedVideo = false;
-        peer.natLatchSsrc = peer.natLatchVideoSsrc = 0;
         LOG_INFO("PMcpttGroup", "[%s] Member updated session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
         return;
     }
@@ -117,6 +130,10 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     if (!role.empty()) _roles[sessionId] = role;
     peer.natEnabled = nat;
     peer.sigIp = sigIp;
+    peer.ptOut = ptOut;
+    peer.srcPt = srcPt;
+    peer.tePtOut = tePtOut;
+    peer.srcTePt = srcTePt;
     // SSRC 배정 공간 분리 — 한 카운터의 근접 오프셋(+1000/+2000)이면 누적 발행 시
     //   멤버 ssrc 와 송출 SSRC 범위가 겹치므로 상위 비트로 격리한다.
     peer.ssrc = _nextSsrc++;
@@ -256,26 +273,10 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
                 break;
             }
         }
-        // Symmetric floor: port-only match with IP learning
-        if (sessionId.empty()) {
-            for (auto& [sid, peer] : _members) {
-                if (peer.floorPort == port) {
-                    // IP guard — RTP latch(_acceptNatRtp)와 동일 기준. 포트가 같아도 소스 IP 가
-                    //   그 멤버의 시그널링 실소스와 다르면 학습·처리 모두 거부 (하이재킹 차단).
-                    if (!peer.sigIp.empty() && peer.sigIp != ip) {
-                        _dropSrc("floor(ip-guard)", sid, ip, port);
-                        break;
-                    }
-                    LOG_INFO("PMcpttGroup", "[%s] Floor IP learned %s -> %s (port %d, session=%s)",
-                             _groupId.c_str(), peer.ip.c_str(), ip.c_str(), port, sid.c_str());
-                    peer.ip = ip;
-                    sessionId = sid;
-                    senderSsrc = peer.ssrc;
-                    break;
-                }
-            }
-        }
-        // NAT(포트변환) 단말: 주소 매칭 전부 실패 → TS 24.380 User ID 필드(§8.2.3.6)로
+        // (구) symmetric floor — "소스 포트가 선언 floorPort 와 일치하면 IP 학습" 분기는
+        //   제거됨: 포트 번호만으로 IP 를 갈아치우는 건 우연/제3자 소스에 의한 하향 탈취
+        //   소지가 있고, NAT 케이스는 아래 User ID 식별 latch 가 이미 커버한다.
+        // NAT(포트변환) 단말: 주소 매칭 실패 → TS 24.380 User ID 필드(§8.2.3.6)로
         // 멤버를 식별하고 관측 소스 주소를 latch (symmetric floor). 이후 GRANT/TAKEN/IDLE 도달 가능.
         if (sessionId.empty()) {
             std::string uid = msg.userId();
@@ -377,10 +378,6 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
                 _dropSrc("rtp", memberId, ip, port);
                 return;
             }
-        } else if (sender.natEnabled) {
-            // fast-path(주소 일치) 수락 — 활성 스트림이 살아있음을 latch staleness 판정에 반영
-            //   (_acceptNatRtp 를 거치지 않으므로 여기서 timestamp 갱신, 좀비의 조기 인계 방지).
-            sender.natLatchAudioUsec = _nowUsec();
         }
         const std::string& senderId = memberId;
         unsigned int senderSsrc = sender.ssrc;
@@ -392,8 +389,10 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
         LOG_DEBUG("PMcpttGroup", "[%s] RTP ip=%s port=%d len=%d pt=%d sender=%s", _groupId.c_str(), ip.c_str(), port, len, pt, senderId.c_str());
 
         {
-            // [DTMF Check] — RFC 2833/4733 telephone-event (PT 101)
-            if (len > 12 && pt == 101) {
+            // [DTMF Check] — RFC 2833/4733 telephone-event.
+            //   leg 별 TE PT(srcTePt) 선언 시 그 값으로 판독, 미선언은 관례 PT 101.
+            unsigned char tePt = (sender.srcTePt > 0) ? (unsigned char)(sender.srcTePt & 0x7F) : 101;
+            if (len > 12 && pt == tePt) {
                 unsigned char digitCode = (unsigned char)buf[12];
                 bool endBit = (buf[13] & 0x80) != 0;
                 unsigned char volume = buf[13] & 0x3F;
@@ -460,8 +459,6 @@ void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std:
             _dropSrc("video rtp", memberId, ip, port);
             return;
         }
-    } else if (sender.natEnabled) {
-        sender.natLatchVideoUsec = _nowUsec();   // fast-path 수락 — staleness 판정 갱신
     }
 
     if (_pttSession) _pttSession->touchActivity();
@@ -478,38 +475,39 @@ void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std:
 }
 
 // nat 멤버의 RTP 수신 판정 — 유닛 포트가 곧 멤버 신원이므로 latch 는 신원 판정이 아니라
-//   송신 목적지 학습이다. 안전 조건: RTP v2 + 최소 길이 + (guard) 소스 IP == sigIp +
-//   SSRC 고정(재-latch 는 동일 SSRC = NAT rebind 추종만). 호출자가 _mutex 보유.
+//   송신 목적지 학습이다. 멤버 전용 포트가 곧 신원(수신 소켓=멤버, 포트는 그 멤버에게만
+//   SDP 로 광고)이므로 형식 검사를 통과한 소스로 목적지를 **연속 추종**한다:
+//   RTP v2 + 최소 길이 + (guard) 소스 IP == sigIp + (선언 시) 기대 ingress PT 일치.
+//   SSRC 핀·스테일 창은 두지 않는다 — 핀이 잘못된 소스에 걸리면 정당한 단말이 영구
+//   차단되는 고착이 더 해악이고, 추종 모델은 선점 소스 소멸 즉시 자가 복구된다.
+//   호출자가 _mutex 보유.
 bool PMcpttGroup::_acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip, int port, const char* buf, int len) {
     if (len < 12 || (((unsigned char)buf[0]) >> 6) != 2) return false;
     if (!peer.sigIp.empty() && peer.sigIp != ip) return false;
-
-    uint32_t ssrc = ((uint32_t)(unsigned char)buf[8] << 24) | ((uint32_t)(unsigned char)buf[9] << 16) |
-                    ((uint32_t)(unsigned char)buf[10] << 8) | (uint32_t)(unsigned char)buf[11];
-    bool& latched = isVideo ? peer.natLatchedVideo : peer.natLatched;
-    uint32_t& latchSsrc = isVideo ? peer.natLatchVideoSsrc : peer.natLatchSsrc;
-    int64_t& latchUsec = isVideo ? peer.natLatchVideoUsec : peer.natLatchAudioUsec;
-    int64_t now = _nowUsec();
-    // 제3자 주입 차단 (rebind 는 동일 SSRC). 핀 0 = JOIN 으로 해제된 상태 — 첫 재latch 허용.
-    // 단, 현재 latch SSRC 의 스트림이 [NAT_RELATCH_STALE_US] 이상 끊긴(무수신) 상태면 새 SSRC 가
-    // 인계하도록 허용한다 — 재-JOIN 없는 mid-session SSRC 변경(미디어 재시작·네트워크 blip 후
-    // 재협상)에도 릴레이가 자가치유. 매칭 스트림이 살아 있는 동안엔 여전히 차단(동시 주입 방어).
-    if (latched && latchSsrc != 0 && ssrc != latchSsrc) {
-        if (latchUsec != 0 && now - latchUsec < NAT_RELATCH_STALE_US) return false;
-        LOG_INFO("PMcpttGroup", "[%s] %s re-latch (stale %ldms) member=%s ssrc %u→%u", _groupId.c_str(),
-                 isVideo ? "video" : "audio", (long)((now - latchUsec) / 1000), peer.id.c_str(), latchSsrc, ssrc);
+    // 기대 ingress PT 검사 (JOIN user_src_pt 선언 시) — KA(empty RTP)도 협상 PT 를 실어
+    //   보내므로 동일 기준으로 통과한다. TE 는 srcTePt(미선언=관례 101)도 허용.
+    if (!isVideo && peer.srcPt > 0) {
+        unsigned char pt = (unsigned char)(buf[1] & 0x7F);
+        unsigned char te = (unsigned char)((peer.srcTePt > 0 ? peer.srcTePt : 101) & 0x7F);
+        if (pt != (unsigned char)(peer.srcPt & 0x7F) && pt != te) return false;
     }
 
+    bool& latched = isVideo ? peer.natLatchedVideo : peer.natLatched;
+    bool changed = (peer.ip != ip) ||
+                   (isVideo ? peer.videoPort != port : peer.port != port) || !latched;
     if (isVideo) peer.videoPort = port;
     else         peer.port = port;
     peer.ip = ip;
     latched = true;
-    bool bNew = (latchSsrc != ssrc);
-    latchSsrc = ssrc;
-    latchUsec = now;
-    if (bNew)
-        LOG_INFO("PMcpttGroup", "[%s] %s dest latched (NAT) member=%s %s:%d ssrc=%u",
-                 _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port, ssrc);
+    if (changed) {
+        // 소스 경합(두 소스가 번갈아 유입) 시 로그 폭주 방지 — 멤버당 2s 간격 요약.
+        int64_t now = _nowUsec();
+        if (now - peer.followLogUsec >= 2000000LL) {
+            peer.followLogUsec = now;
+            LOG_INFO("PMcpttGroup", "[%s] %s dest follow (NAT) member=%s %s:%d",
+                     _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port);
+        }
+    }
     return true;
 }
 
@@ -908,6 +906,16 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
 // SDP 에 광고한 포트 (symmetric RTP 정합).
 void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeSessionId) {
     if (len < 12) return;
+    // leg 별 PT 재작성 분류 — 화자(sender) leg 의 srcTePt 로 이 패킷이 audio/TE 인지 판정.
+    //   srcTePt 미지정(0) 시 관례 PT 101 을 TE 로 간주(기존 DTMF 판독과 동일 기준).
+    bool isTe;
+    {
+        unsigned char inPt = (unsigned char)(data[1] & 0x7F);
+        int srcTePt = 0;
+        auto itSrc = _members.find(excludeSessionId);
+        if (itSrc != _members.end()) srcTePt = itSrc->second.srcTePt;
+        isTe = (srcTePt > 0) ? (inPt == (unsigned char)(srcTePt & 0x7F)) : (inPt == 101);
+    }
     for (auto& [sid, peer] : _members) {
         if (sid == excludeSessionId) continue;
         if (!peer.unit || peer.port <= 0) continue;
@@ -920,6 +928,11 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
         memcpy(pkt + 2, &netSeq, 2);
         uint32_t netSsrc = htonl(peer.audioSsrcOut);
         memcpy(pkt + 8, &netSsrc, 4);
+        // egress PT 스탬프 (0=재작성 없음 — 현행 PT-blind 통과). marker bit(0x80) 보존.
+        //   TE 인데 수신 leg TE PT 미지정이면 원본 유지(오디오 PT 로 뭉개면 DTMF 파손).
+        int stampPt = isTe ? peer.tePtOut : peer.ptOut;
+        if (stampPt > 0)
+            pkt[1] = (char)((pkt[1] & 0x80) | (stampPt & 0x7F));
         peer.unit->sendAudioTo(peer.ip, peer.port, pkt, len);
     }
 }

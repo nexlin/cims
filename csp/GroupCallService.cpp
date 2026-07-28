@@ -119,6 +119,29 @@ CGroupCallService::~CGroupCallService() {
     StopMonitor();
 }
 
+/** leg 별 PT 재작성 파라미터 산출 (docs/api/cmp_media_api.md §7.4).
+ *  user_pt/user_te_pt = 이 leg 의 원격 SDP(개시자=offer, 수신자=answer)가 수신 선언한
+ *  audio/TE wire PT — CMP 가 이 leg 로 송신 시 스탬프. user_src_pt/user_src_te_pt =
+ *  서버가 그 leg 쪽으로 낸 SDP 의 PT(= UE 송신 PT, RFC 3264) — CMP ingress 분류 기준.
+ *  - 수신자 leg(bServerOffered): 서버 offer 는 코덱 테이블 PT.
+ *  - 개시자 leg: 서버 answer 는 오퍼 echo(psip AddSdp 규칙) → src = user 와 동일. */
+static void GetLegPt( const std::string &strCallId, bool bServerOffered,
+                      int &iUserPt, int &iUserSrcPt, int &iUserTePt, int &iUserSrcTePt ) {
+    const CSipCodecEntry &clsTop = CSipCodecTable::GetTop();
+    const CSipCodecEntry &clsTe = CSipCodecTable::GetTelephoneEvent();
+    int iPt = -1, iTePt = -1;
+    gclsUserAgent.GetRemotePayloadTypes( strCallId.c_str(), clsTop.GetMatchPrefix().c_str(), iPt, iTePt );
+    iUserPt = iPt > 0 ? iPt : clsTop.m_iPt;
+    iUserTePt = iTePt > 0 ? iTePt : clsTe.m_iPt;
+    if ( bServerOffered ) {
+        iUserSrcPt = clsTop.m_iPt;
+        iUserSrcTePt = clsTe.m_iPt;
+    } else {
+        iUserSrcPt = iUserPt;
+        iUserSrcTePt = iUserTePt;
+    }
+}
+
 /**
  * @brief Process Incoming Group Call (A calling Group)
  */
@@ -303,10 +326,20 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                     if ( gclsUserMap.Select( pszCallerInfo, clsCallerInfo2 ) ) strSigIp = clsCallerInfo2.m_strIp;
                     if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strCallerGuardIp ) )
                         iCallerNat = 1;
+                    // NAT 판정인데 guard IP 가 비면(UserMap 미조회 — 등록 만료/ID 불일치) CMP 의
+                    //   latch IP guard 가 이 leg 에 한해 무력화된다 — 조용한 약화 방지용 경고.
+                    if ( iCallerNat && strCallerGuardIp.empty() && clsNatSvc.latch_ip_guard != "off" )
+                        CLog::Print( LOG_ERROR, "ProcessGroupCall: caller leg NAT without sig-guard ip"
+                                     " (member=%s sdp=%s) — UserMap miss, latch guard disabled",
+                                     pszCallerInfo, pclsRtp->m_strIp.c_str() );
                 }
+                // 개시자 leg PT — 오퍼가 비 96 PT 여도 CMP 가 leg 별 재작성으로 그룹 정합.
+                int iCallerPt = 0, iCallerSrcPt = 0, iCallerTePt = 0, iCallerSrcTePt = 0;
+                GetLegPt( pszCallId, false, iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt );
                 gclsCmpClient.JoinGroup( pszGroupId, pszCallerInfo, pclsRtp->m_strIp, iCallerAudio, iCallerFloor,
                                          iCallerVideo, GetOrIssueGroupSesId( pszGroupId ), strCallerRole, NULL, NULL,
-                                         iCallerNat, strCallerGuardIp );
+                                         iCallerNat, strCallerGuardIp,
+                                         iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt );
                 CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) joined CMP group audio=%d floor=%d role=%s",
                              pszCallerInfo, iCallerAudio, iCallerFloor, strCallerRole.c_str() );
                 // 긴급/임박 개시: 개시자에 floor tier 부여 → 하위 tier 발언자 선점 (TS 24.380, Phase 1 엔진).
@@ -1227,12 +1260,23 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
             iMemberNat = 1;
             CLog::Print( LOG_INFO, "OnCallStarted: member leg NAT (svc=%s member=%s sdp=%s sig=%s)",
                          clsNatSvc.name.c_str(), strMemberId.c_str(), strRemoteIp.c_str(), strSigIp.c_str() );
+            // NAT 판정인데 guard IP 가 비면(UserMap 미조회 — 등록 만료/ID 불일치) CMP 의
+            //   latch IP guard 가 이 leg 에 한해 무력화된다 — 조용한 약화 방지용 경고.
+            if ( strMemberGuardIp.empty() && clsNatSvc.latch_ip_guard != "off" )
+                CLog::Print( LOG_ERROR, "OnCallStarted: member leg NAT without sig-guard ip"
+                             " (member=%s sdp=%s) — UserMap miss, latch guard disabled",
+                             strMemberId.c_str(), strRemoteIp.c_str() );
         }
     }
+    // 멤버 leg PT — 서버 offer(코덱 테이블) vs 멤버 answer wire PT. answer 가 비 96 이어도
+    //   CMP leg 별 재작성으로 그룹 정합 (타사 단말 interop).
+    int iMemberPt = 0, iMemberSrcPt = 0, iMemberTePt = 0, iMemberSrcTePt = 0;
+    GetLegPt( strCallId, true, iMemberPt, iMemberSrcPt, iMemberTePt, iMemberSrcTePt );
     int iJoinLocalAudio = 0, iJoinLocalVideo = 0;
     bool bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
                                             iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole,
-                                            &iJoinLocalAudio, &iJoinLocalVideo, iMemberNat, strMemberGuardIp );
+                                            &iJoinLocalAudio, &iJoinLocalVideo, iMemberNat, strMemberGuardIp,
+                                            iMemberPt, iMemberSrcPt, iMemberTePt, iMemberSrcTePt );
     // 방어: JOIN 응답의 멤버 포트가 offer 에 쓴 캐시와 다르면(유닛 재배정) 캐시를 교정한다.
     //   이 호 자체는 이미 옛 포트로 SDP 를 받아 상향이 성립하지 않으므로 발생 = 버그 신호(ERROR).
     //   정상 경로에서는 LeaveGroup 시 InvalidateMemberPort 로 캐시가 비워져 여기 오지 않는다.
@@ -1276,7 +1320,8 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                          strGroupId.c_str(), iReAddFloor );
             bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
                                                iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
-                                               iMemberNat, strMemberGuardIp );
+                                               iMemberNat, strMemberGuardIp,
+                                               iMemberPt, iMemberSrcPt, iMemberTePt, iMemberSrcTePt );
         }
     }
     if ( bJoined ) {

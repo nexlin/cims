@@ -776,6 +776,17 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         if (rmtPort > 0) {
              rtp->setRemote(rmtIp, rmtPort, rmtVideoPort, peerIdx, rmtNat != 0, rmtSigIp);
         }
+        // leg 별 PT 재작성 파라미터 (optional — 생략=0=재작성 없음, envelope v2 유지).
+        //   remote_pt/remote_te_pt: 이 leg 가 수신 선언한 PT(egress 스탬프),
+        //   remote_src_pt/remote_src_te_pt: 이 leg 가 송신에 쓰는 PT(TE 분류).
+        if (peerIdx >= 0 && (payload.Has("remote_pt") || payload.Has("remote_te_pt") ||
+                             payload.Has("remote_src_pt") || payload.Has("remote_src_te_pt"))) {
+            rtp->setPeerPt(peerIdx,
+                           (int)payload.GetInt("remote_pt", 0),
+                           (int)payload.GetInt("remote_src_pt", 0),
+                           (int)payload.GetInt("remote_te_pt", 0),
+                           (int)payload.GetInt("remote_src_te_pt", 0));
+        }
 
         // Worker thread는 initResourcePool()에서 영구 등록됨 — 여기서 추가 불필요
 
@@ -1125,8 +1136,15 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
         if (!userIp.empty() && userPort > 0) {
             int userNat = (int)payload.GetInt("user_nat", 0);
             std::string userSigIp = payload.GetString("user_sig_ip");
+            // leg 별 PT 재작성 파라미터 (optional — 생략=0=재작성 없음, envelope v2 유지).
+            //   user_pt/user_te_pt: 이 leg 가 수신 선언한 PT(egress 스탬프),
+            //   user_src_pt/user_src_te_pt: 이 leg 가 송신에 쓰는 PT(ingress 분류).
+            int userPt      = (int)payload.GetInt("user_pt", 0);
+            int userSrcPt   = (int)payload.GetInt("user_src_pt", 0);
+            int userTePt    = (int)payload.GetInt("user_te_pt", 0);
+            int userSrcTePt = (int)payload.GetInt("user_src_te_pt", 0);
             group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role, mu,
-                             userNat != 0, userSigIp);
+                             userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt);
             // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
             std::string tierStr = payload.GetString("tier");
             if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));

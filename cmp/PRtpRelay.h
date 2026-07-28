@@ -40,6 +40,15 @@ public:
     // NAT latch 관측 (STATS detail.nat) — latch 완료 시 학습 주소 반환.
     bool getNatLatched(int peerIdx, std::string& learnedIp, int& learnedPort) const;
 
+    // leg 별 PT 재작성 파라미터 (RELAY_ADD/MODIFY remote_pt 계열, 0=재작성 없음).
+    //   pt/tePt: 이 leg 로 송신 시 스탬프할 audio/TE PT. srcPt/srcTePt: 이 leg 가
+    //   송신에 쓰는 PT(TE 분류 기준). 규격 준수 단말은 비대칭 PT 통과 가능 — 보험 필드.
+    void setPeerPt(int peerIdx, int pt, int srcPt, int tePt, int srcTePt) {
+        PAutoLock lock(_mutex);
+        Leg& leg = _legs[peerIdx & 1];
+        leg.ptOut = pt; leg.srcPt = srcPt; leg.tePtOut = tePt; leg.srcTePt = srcTePt;
+    }
+
     unsigned int getLocalPort(int peerIdx = 0) const { return _legs[peerIdx & 1].localPort; }
     unsigned int getLocalVideoPort(int peerIdx = 0) const { return _legs[peerIdx & 1].localVideoPort; }
 
@@ -96,15 +105,20 @@ private:
         struct sockaddr_in addrVideoRtcp{};
         bool active = false;
 
+        // leg 별 PT 재작성 (setPeerPt — 0 = 재작성 없음, 현행 PT-blind 통과)
+        int ptOut = 0;
+        int srcPt = 0;
+        int tePtOut = 0;
+        int srcTePt = 0;
+
         // NAT 목적지 latch (제어평면이 nat 지정한 leg 만 — ue_nat_traversal.md §5)
         bool nat = false;
         std::string sigIp;              // latch IP guard 기준 (빈 값 = guard 없음)
-        bool latched = false;           // audio RTP latch 완료
+        bool latched = false;           // audio RTP 추종 학습 완료 (관측용)
         bool latchedVideo = false;
         bool latchedRtcp = false;       // RTCP 관측 소스로 목적지 교정 완료
         bool latchedVideoRtcp = false;
-        uint32_t latchSsrc = 0;         // latch 시 고정 — 재-latch 는 동일 SSRC(NAT rebind)만
-        uint32_t latchVideoSsrc = 0;
+        int64_t followLogUsec = 0;      // dest follow 로그 rate-limit (소스 경합 시 폭주 방지)
     };
 
     // nat leg 의 audio/video RTP 수신 판정+latch (호출자가 _mutex 보유). 수락 시 true.

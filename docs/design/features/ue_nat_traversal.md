@@ -62,8 +62,10 @@ peer0 (발신 A):  Q    audio RTP     peer1 (착신 B):  Q+4  audio RTP
   필드가 in-band 신원이라 공유 포트에서도 모호성이 없다. NAT 멤버의 floor 목적지는
   User-ID 기반 주소 latch 로 학습한다 (`PMcpttGroup::onFloorPacket`). latch 자격·안전
   조건은 RTP 와 동일하다 — nat 지정 멤버만 대상이고, `latch_ip_guard=strict` 면 소스
-  IP == `user_sig_ip` 일 때만 학습·수락한다(포트만 일치하는 IP 학습 경로 포함, 불일치는
-  드롭 카운터 + rate-limited WARN).
+  IP == `user_sig_ip` 일 때만 학습·수락한다(불일치는 드롭 카운터 + rate-limited WARN).
+  식별은 ①현재 주소 정확 일치 ②User ID 두 경로뿐이다 — "소스 포트가 선언 floorPort 와
+  일치하면 IP 를 학습"하는 symmetric 추정 경로는 두지 않는다(포트 번호만으로 IP 를
+  갈아치우면 우연/제3자 소스가 하향을 탈취할 소지).
   - 상향 floor 메시지가 도착해야 하향(GRANT/TAKEN/IDLE) 목적지가 열린다. **한 번도 발언하지
     않는 청취 전용 멤버**는 자발적 상향이 없으므로, UE 가 참여 직후 및 주기적으로 Floor
     Ack(User ID 포함)를 송신해 매핑을 열고 유지해야 한다 ([§7](#7-운영-요건)).
@@ -120,21 +122,27 @@ leg 의 새 SDP 주소로 NAT 를 재판정해 다시 전달한다: 1:1 relay �
 
 ## 5. 목적지 latch (CMP)
 
-nat=true leg 의 전용 포트에서:
+nat=true leg 의 전용 포트에서 — **연속 추종(follow) 모델**. leg 전용 포트가 곧 신원
+(그 leg 에게만 SDP 로 광고)이므로, 형식 검사를 통과한 미디어 소스로 송신 목적지를
+계속 갱신한다:
 
-1. **첫 유효 RTP** 수신 시 소스 주소를 그 leg 의 송신 목적지로 latch.
+1. **유효 RTP** 수신 시 소스 주소를 그 leg 의 송신 목적지로 갱신(latch).
    유효 조건 — RTP version=2, 최소 길이(12B), `latch_ip_guard=strict` 면
-   소스 IP == `remote_sig_ip`/`user_sig_ip`. (payload type 은 검사하지 않는다 —
-   CMP 제어 API 는 코덱/PT 를 전달하지 않는 codec-agnostic 설계.)
-2. latch 시 **SSRC 고정.** 이후 소스 주소 갱신(re-latch)은 동일 SSRC 의 패킷일 때만 허용
-   — NAT rebind(매핑 변경) 추종과 제3자 주입 차단을 겸한다.
+   소스 IP == `remote_sig_ip`/`user_sig_ip`, 그리고 leg 별 ingress PT 가 선언된 경우
+   (`remote_src_pt`/`user_src_pt`) payload type 일치(TE 는 `*_src_te_pt`, 미선언=101).
+   UE 의 RTP keepalive(empty RTP)도 협상 PT 를 실으므로 동일 기준으로 통과한다.
+2. **SSRC 핀·스테일 창은 두지 않는다** — 갱신은 매 유효 패킷마다 허용된다. 핀이 잘못된
+   소스에 걸리면 정당한 단말이 영구 차단되는 고착이 더 해악이고, 추종 모델은 이전 세대
+   유령 스트림 등 선점 소스가 소멸하는 즉시 자가 복구된다. (소스 경합 중에는 우세 소스가
+   목적지를 차지한다 — 상시 무음 스트림을 없앤 UE 는 KA 만 남아 경합 자체가 희귀하다.)
 3. RTCP 목적지는 latch 소스 IP + RTCP 포트 관측으로 교정한다 (관측 전에는 선언 포트+1 추정).
-4. `RELAY_MODIFY`/`PTT_JOIN` 으로 leg 주소가 갱신되면(re-INVITE) latch 상태를 리셋하고
-   재-latch 를 허용한다. 선언 주소·nat·guard 가 직전과 동일한 재요청(세션 refresh 성
-   re-INVITE, 재전송)은 latch 를 유지한다.
-5. latch 전까지 송신 목적지는 선언 주소다 (사설이면 도달하지 않지만 무해).
+4. `RELAY_MODIFY`/`PTT_JOIN` 으로 leg 주소가 갱신되면(re-INVITE) latch 상태를 리셋한다.
+   선언 주소·nat·guard 가 직전과 동일한 재요청(세션 refresh 성 re-INVITE, 재전송)은
+   학습 목적지를 유지한다.
+5. 학습 전까지 송신 목적지는 선언 주소다 (사설이면 도달하지 않지만 무해).
 
-관측: latch 발생 시 INFO 로그. `STATS` detail 에 nat leg 의 `learned_ip/learned_port`
+관측: 목적지 변경 시 INFO 로그(`dest follow`, leg 당 2s rate-limit). `STATS` detail 에
+nat leg 의 `learned_ip/learned_port`
 노출. 미협상 소스 드롭은 세션/그룹별 카운터 + rate-limited WARN.
 이벤트 채널이 활성화되면 `RELAY_NAT_LATCHED` 이벤트로 통지한다 (규격 예약 —
 [api/cmp_media_api.md §8](../../api/cmp_media_api.md#8-이벤트-type-event)).

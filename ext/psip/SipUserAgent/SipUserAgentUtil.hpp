@@ -41,6 +41,40 @@ bool CSipUserAgent::GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pcls
 
 /**
  * @ingroup SipUserAgent
+ * @brief SIP Call-ID 로 통화를 검색한 후, 원격 SDP(개시자=offer, 수신자=answer)의 rtpmap 에서
+ *        코덱/telephone-event 의 wire payload type 을 조회한다 — CMP leg 별 PT 재작성 파라미터
+ *        (user_pt/user_te_pt) 산출용. 해당 rtpmap 부재 시 각각 -1.
+ * @param pszCallId    SIP Call-ID
+ * @param pszEncoding  코덱 encoding 접두(예: "AMR-WB/16000")
+ * @param iPt          [out] 코덱 wire PT (-1 = 미발견)
+ * @param iTePt        [out] telephone-event wire PT (-1 = 미발견)
+ * @returns 다이얼로그를 찾으면 true.
+ */
+bool CSipUserAgent::GetRemotePayloadTypes( const char * pszCallId, const char * pszEncoding,
+                                           int & iPt, int & iTePt )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	bool	bRes = false;
+
+	iPt = -1;
+	iTePt = -1;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		iPt = itMap->second.FindRemotePayloadType( pszEncoding );
+		iTePt = itMap->second.FindRemotePayloadType(
+			CSipCodecTable::GetTelephoneEvent().GetMatchPrefix().c_str() );
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief SIP Call-ID �� ��ȭ�� �˻��� ��, �˻��� ����� peer ���̵� �����Ѵ�.
  * @param pszCallId SIP Call-ID
  * @param strToId		peer ���̵� ������ ��ü

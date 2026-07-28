@@ -262,8 +262,14 @@ diff 한다. push(이벤트)로는 절체 후 새 active 가 옛 세션을 기�
 | `peer_index` | - | 피어 인덱스 (0=발신 A / 1=착신 B) |
 | `remote_nat` | - | 1 이면 해당 peer 가 NAT 뒤 — 그 peer 전용 포트에 목적지 latch 허용 (생략=0). [ue_nat_traversal.md §5](../design/features/ue_nat_traversal.md) |
 | `remote_sig_ip` | - | 해당 peer 의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
+| `remote_pt` / `remote_te_pt` | - | 이 peer 가 **수신** 선언한 audio/telephone-event wire PT — CMP 가 이 peer 로 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(PT-blind 통과). marker bit 보존, 녹취는 talker 원본 PT 유지 |
+| `remote_src_pt` / `remote_src_te_pt` | - | 이 peer 가 **송신**에 쓰는 audio/TE PT(= 반대편에 낸 SDP 의 PT, RFC 3264) — ingress audio/TE 분류 기준. `remote_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류 |
 | `caller` / `callee` | - | 발/착신자 (flow 로깅·녹취 메타용) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
+
+> PT 재작성 배경: 1:1 relay 는 규격 준수 단말이면 비대칭 PT 로도 동작하므로(RFC 3264 —
+> answer 의 PT echo 는 SHOULD) `remote_pt` 계열은 대칭 PT 를 가정하는 단말 방어용 보험이다.
+> 그룹(fan-out) 경로의 leg 별 PT 재작성은 [§7.4](#74-ptt_join--멤버-참가-2단-멱등) 를 본다.
 
 같은 `(node, session_id)` 재요청 시 재할당 없이 기존 포트를 반환한다 (재전송 안전).
 
@@ -392,6 +398,8 @@ RELAY_REMOVE 와 동일 규칙).
 | `user_video_port` | - | 멤버 Video RTP 포트 |
 | `user_nat` | - | 1 이면 NAT 뒤 멤버 — 멤버 전용 포트에 목적지 latch 허용 (생략=0) |
 | `user_sig_ip` | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
+| `user_pt` / `user_te_pt` | - | 이 멤버가 **수신** 선언한 audio/telephone-event wire PT(멤버 자신의 SDP — 개시자=offer, 수신자=answer) — CMP 가 fan-out 으로 이 멤버에 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(현행 PT-blind: 전 leg 와이어 PT 통일 전제) |
+| `user_src_pt` / `user_src_te_pt` | - | 이 멤버가 **송신**에 쓰는 audio/TE PT(= CSP 가 그 leg 쪽에 낸 SDP 의 PT, RFC 3264) — 화자 ingress 의 audio/TE 분류 기준. `user_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류(DTMF push/release 판독도 동일 기준) |
 | `role` | - | `chair`/`participant` (기본 participant) |
 | `tier` | - | 긴급 멤버 join 시 condition tier 동반 |
 
@@ -407,6 +415,14 @@ RELAY_REMOVE 와 동일 규칙).
 속성이 직전과 동일한 재요청(재전송, 세션 refresh)은 latch 를 유지한다 (RELAY_MODIFY 와
 동일 규칙). 멤버가 re-INVITE 로 주소를 재협상하면 client 는 ② 를 다시 호출해 전달한다.
 `user_video_port` 는 video 를 협상한 멤버만 싣는다 (비협상 멤버에 유령 포트 광고 금지).
+
+**leg 별 PT 재작성** (`user_pt` 계열): fan-out 시 화자 leg 의 `user_src_te_pt` 로 패킷을
+audio/TE 로 분류한 뒤, 각 수신 leg 의 `user_pt`/`user_te_pt` 를 스탬프한다(marker bit
+보존, seq/SSRC 재작성과 같은 자리). 이로써 그룹 전 leg 와이어 PT 통일 전제가 풀려 —
+개시자가 비 96 PT 로 offer 하거나 타사 단말이 비 96 으로 answer 해도 그룹이 정합된다.
+TE 인데 수신 leg `user_te_pt` 미지정이면 원본 PT 를 유지한다(audio PT 로 뭉개면 DTMF
+파손). 녹취는 화자 원본 PT 로 기록된다(egress 재작성 전 탭). PT 파라미터는 주소 불변
+재-JOIN(재협상)에서도 항상 최신 선언으로 갱신된다.
 
 ### 7.5 PTT_LEAVE — 멤버 이탈
 

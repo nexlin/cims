@@ -692,7 +692,8 @@ bool CCmpClient::SetFloorTier( const std::string &strGroupId, const std::string 
 bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &strSessionId,
                             const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
                             const std::string &strSesId, const std::string &strRole, int *piLocalPort,
-                            int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp ) {
+                            int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp,
+                            int iUserPt, int iUserSrcPt, int iUserTePt, int iUserSrcTePt ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -713,6 +714,11 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
             req.Set( "user_nat", 1 );
             if ( !strUserSigIp.empty() ) req.Set( "user_sig_ip", strUserSigIp );
         }
+        // leg 별 PT 재작성 (cmp_media_api.md §7.4, optional — 생략=재작성 없음).
+        if ( iUserPt > 0 ) req.Set( "user_pt", iUserPt );
+        if ( iUserSrcPt > 0 ) req.Set( "user_src_pt", iUserSrcPt );
+        if ( iUserTePt > 0 ) req.Set( "user_te_pt", iUserTePt );
+        if ( iUserSrcTePt > 0 ) req.Set( "user_src_te_pt", iUserSrcTePt );
     }
 
     std::string resp;
