@@ -200,8 +200,16 @@ class SipService : Service() {
             return
         }
         if (controller != null && activeConfig == cfg) return   // 동일 설정 → 그대로
-        // 최초 또는 설정 변경(포트/비번 등) → 기존 컨트롤러 정리 후 재등록
-        controller?.let { runCatching { it.unregister() }; runCatching { it.shutdown() } }
+        // 설정 변경(포트/비번 등) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
+        // Endpoint/LogWriter 수명 지뢰라 로그아웃과 동일하게 프로세스 재시작이 정석:
+        // un-REGISTER 송신 여유(2s) 후 killProcess → START_STICKY 재기동 → 새 설정 첫 부팅.
+        controller?.let {
+            runCatching { it.unregister() }
+            updateNotification("CIMS Phone", "설정 변경 — 재시작")
+            android.os.Handler(mainLooper).postDelayed(
+                { android.os.Process.killProcess(android.os.Process.myPid()) }, 2000)
+            return
+        }
         val c = SipController(cfg).also { controller = it; activeConfig = cfg }
         observe(c)
         c.register()

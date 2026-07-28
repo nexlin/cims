@@ -99,6 +99,9 @@ class PttController(
     /** 그룹별 수신 음량 영속화 — 서비스가 주입. 신규 그룹 기본=최대([GroupVolumeStore.DEFAULT]). */
     var volumeStore: com.cims.ue.ptt.audio.GroupVolumeStore? = null
 
+    /** 참여 채널 영속화 — 서비스가 주입. 프로세스 재시작 후 등록 완료 시 자동 재조인. */
+    var channelStore: ChannelStore? = null
+
     /** 이어폰(유선/BT) 장치 열거·지정 — 서비스가 주입. */
     var audioRouter: com.cims.ue.ptt.audio.AudioRouter? = null
 
@@ -295,8 +298,38 @@ class PttController(
         // 등록 완료 시 선택 그룹 자동 affiliation — CSP 는 affiliation 된 멤버에게만 INVITE fan-out
         scope.launch {
             sip.regState.collect { r ->
-                if (r is RegState.Registered) _selectedGroup.value?.let { ensureAffiliated(it) }
+                if (r is RegState.Registered) {
+                    _selectedGroup.value?.let { ensureAffiliated(it) }
+                    maybeRestoreChannels()
+                }
             }
+        }
+    }
+
+    // ── 참여 채널 자동 복원 ──
+
+    private var channelsRestored = false
+
+    /** 프로세스 재시작(강제종료·재설치·리부팅) 후 참여 채널 자동 재조인 — 등록 완료 시 1회.
+     *  재로그인 경로는 affiliation 후 서버 fan-out INVITE 가 먼저 올 수 있어 3s 양보하고,
+     *  그 사이 생긴 세션은 존중한다([joinGroupCall] 이 중복 참여 무시). */
+    private fun maybeRestoreChannels() {
+        if (channelsRestored) return
+        channelsRestored = true
+        val st = channelStore ?: return
+        val want = st.joined
+        if (want.isEmpty()) return
+        val primary = st.primary
+        scope.launch {
+            delay(3000)
+            val ordered = if (primary != null) listOf(primary) + (want - primary) else want
+            for (g in ordered) {
+                if (synchronized(lock) { sessionMap.containsKey(g) }) continue
+                _status.value = "채널 자동 복원: $g"
+                joinGroupCall(g)
+                delay(300)
+            }
+            primary?.let { p -> if (synchronized(lock) { sessionMap.containsKey(p) }) setPrimary(p) }
         }
     }
 
@@ -357,6 +390,7 @@ class PttController(
             }
             s.role = ChannelRole.PRIMARY
         }
+        channelStore?.primary = groupId
         applyListenPolicy()
     }
 
@@ -367,6 +401,7 @@ class PttController(
             if (s.role != ChannelRole.PRIMARY) return
             s.role = ChannelRole.NONE
         }
+        channelStore?.let { if (it.primary == groupId) it.primary = null }
         applyListenPolicy()
     }
 
@@ -466,6 +501,7 @@ class PttController(
             }
         }
         ensureAffiliated(groupId)
+        channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
         val appSdp = "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio"
         val parts = ArrayList<SipBodyPart>()
         parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
@@ -496,6 +532,7 @@ class PttController(
             }
         }
         sip.answerGroupCall(inc.id, "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio")
+        channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
         if (inc.emergency) feedback?.emergencyTone()
         _status.value = if (inc.emergency) "🚨 긴급 그룹콜 자동 참여: $groupId" else "그룹콜 자동 참여: $groupId"
         emit(PttEventKind.JOIN, groupId)
@@ -505,6 +542,7 @@ class PttController(
 
     /** 그룹별 나가기. */
     fun leaveGroup(groupId: String) {
+        channelStore?.remove(groupId)                 // 명시적 이탈 = 재조인 의도 해제
         val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: return }
         if (callId >= 0) sip.hangup(callId) else {
             synchronized(lock) { sessionMap.remove(groupId)?.close() }

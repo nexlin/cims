@@ -227,6 +227,540 @@ else:
     print("  patched: fromPj sockaddr print guard x%d" % n)
 PYEOF
 
+echo "=== [2-10] CIMS 무전/통화 분리 라우팅 패치 (android_jni_dev OUTPUT_ROUTE) ==="
+# 재생 트랙 단위 출력 장치 강제: OUTPUT_ROUTE 캡 구현(AudioTrack.setPreferredDevice) +
+# 라우트 캡 사용 앱(PTT)은 STREAM_MUSIC 생성(통화 중 voice 전략은 per-track 지정 무시 실측) +
+# get_cap(keep 저장 보존). VoLTE 통화(수화기)와 PTT 무전(스피커) 동시 분리 라우팅의 전제.
+# 멱등: 이미 패치돼 있으면 skip.
+if grep -q set_track_preferred_device pjmedia/src/pjmedia-audiodev/android_jni_dev.c; then
+  echo "  already patched (skip)"
+else
+  git apply <<'CIMS_ROUTE_PATCH_EOF'
+diff --git a/pjmedia/src/pjmedia-audiodev/android_jni_dev.c b/pjmedia/src/pjmedia-audiodev/android_jni_dev.c
+index 65a2cc0..45bdec5 100644
+--- a/pjmedia/src/pjmedia-audiodev/android_jni_dev.c
++++ b/pjmedia/src/pjmedia-audiodev/android_jni_dev.c
+@@ -410,10 +410,14 @@ static pj_status_t android_get_dev_info(pjmedia_aud_dev_factory *f,
+     pj_ansi_strxcpy(info->driver, DRIVER_NAME, sizeof(info->driver));
+     info->default_samples_per_sec = 8000;
+     info->caps = PJMEDIA_AUD_DEV_CAP_OUTPUT_VOLUME_SETTING |
++                 PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE |
+                  PJMEDIA_AUD_DEV_CAP_INPUT_SOURCE;
+     info->input_count = 1;
+     info->output_count = 1;
+-    info->routes = PJMEDIA_AUD_DEV_ROUTE_CUSTOM;
++    info->routes = PJMEDIA_AUD_DEV_ROUTE_CUSTOM |
++                   PJMEDIA_AUD_DEV_ROUTE_DEFAULT |
++                   PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER |
++                   PJMEDIA_AUD_DEV_ROUTE_EARPIECE;
+     
+     return PJ_SUCCESS;
+ }
+@@ -712,7 +716,18 @@ static pj_status_t android_create_stream(pjmedia_aud_dev_factory *f,
+     if (stream->dir & PJMEDIA_DIR_PLAYBACK) {
+         jthrowable exc;
+         jobject track_obj;
+-        
++        int stream_type;
++
++        /* CIMS: 출력 라우트 캡을 쓰는 앱(PTT — setOutputRoute keep 저장 시 생성 param 에
++         * 캡 플래그가 병합됨)은 STREAM_MUSIC 으로 생성 — 통화(voice) 전략 트랙은 통화 중
++         * per-track preferred device 가 정책에 무시되어(실측: MTK/QC 공통) 트랙 단위 분리
++         * 라우팅이 불가하지만, 미디어 전략 트랙은 존중된다. 통화 앱(volte)은 라우트 캡을
++         * 쓰지 않으므로 종전대로 STREAM_VOICE_CALL. */
++        if (param->flags & PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE)
++            stream_type = 3;    /* STREAM_MUSIC */
++        else
++            stream_type = 0;    /* STREAM_VOICE_CALL */
++
+         /* Get pointer to the constructor */
+         constructor_method = (*jni_env)->GetMethodID(jni_env,
+                                                      stream->track_class,
+@@ -722,11 +737,13 @@ static pj_status_t android_create_stream(pjmedia_aud_dev_factory *f,
+             status = PJMEDIA_EAUD_SYSERR;
+             goto on_error;
+         }
+-        
++
++        PJ_LOG(4, (THIS_FILE, "Creating audio track, stream type: %d",
++                   stream_type));
+         track_obj = (*jni_env)->NewObject(jni_env,
+                                           stream->track_class,
+                                           constructor_method,
+-                                          0, /* STREAM_VOICE_CALL */
++                                          stream_type,
+                                           param->clock_rate,
+                                           channelOutCfg,
+                                           sampleFormat,
+@@ -834,17 +851,139 @@ static pj_status_t strm_get_cap(pjmedia_aud_stream *s,
+ {
+     struct android_aud_stream *strm = (struct android_aud_stream*)s;
+     pj_status_t status = PJMEDIA_EAUD_INVCAP;
+-    
++
+     PJ_ASSERT_RETURN(s && pval, PJ_EINVAL);
+-    
++
++    /* CIMS: 출력 라우트 조회 — pjsua 의 update_initial_aud_param 이 open 후 이 get 으로
++     * 저장 캡을 재구성하므로, 미구현이면 keep 저장된 라우트 플래그가 지워져 다음 open 의
++     * 생성 param 에서 사라진다(STREAM_MUSIC 분기·재적용 모두 무효화). */
++    if (cap==PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE &&
++        (strm->param.dir & PJMEDIA_DIR_PLAYBACK))
++    {
++        *(pjmedia_aud_dev_route*)pval = strm->param.output_route;
++        return PJ_SUCCESS;
++    }
++
+     if (cap==PJMEDIA_AUD_DEV_CAP_OUTPUT_VOLUME_SETTING &&
+         (strm->param.dir & PJMEDIA_DIR_PLAYBACK))
+     {
+     }
+-    
++
+     return status;
+ }
+ 
++/* CIMS: 재생 AudioTrack 단위 출력 장치 강제 (AudioTrack.setPreferredDevice).
++ * 전역 통신 라우트(AudioManager communication device)와 독립적으로 이 스트림의
++ * 출력만 지정한다 — VoLTE 통화(수화기)와 PTT 무전(스피커) 동시 분리 라우팅용.
++ * want_type: AudioDeviceInfo.TYPE_*(1=수화기, 2=스피커), 0=해제(전역 정책 추종).
++ * 컨텍스트는 ActivityThread.currentApplication() 으로 획득(디바이스 열거용). */
++static pj_bool_t set_track_preferred_device(JNIEnv *env, jobject track,
++                                            int want_type)
++{
++    jclass track_cls = NULL, at_cls = NULL, app_cls = NULL, am_cls = NULL;
++    jobject app = NULL, am = NULL, dev = NULL;
++    jobjectArray devs = NULL;
++    jmethodID set_dev;
++    jboolean jret = JNI_FALSE;
++    pj_bool_t ok = PJ_FALSE;
++
++    track_cls = (*env)->GetObjectClass(env, track);
++    set_dev = (*env)->GetMethodID(env, track_cls, "setPreferredDevice",
++                                  "(Landroid/media/AudioDeviceInfo;)Z");
++    if (!set_dev) goto on_return;
++
++    /* 이미 원하는 장치로 라우팅 중이면 no-op — 주기 재적용(앱 ticker)이 라우트
++     * 플래핑(재생 끊김)을 만들지 않게 한다. 이탈 시에만 아래에서 해제→재설정
++     * 바운스로 재평가를 강제한다(같은 값 재설정은 정책이 무시). */
++    if (want_type != 0) {
++        jmethodID get_routed = (*env)->GetMethodID(env, track_cls,
++            "getRoutedDevice", "()Landroid/media/AudioDeviceInfo;");
++        if (get_routed) {
++            jobject routed = (*env)->CallObjectMethod(env, track, get_routed);
++            if (routed) {
++                jclass r_cls = (*env)->GetObjectClass(env, routed);
++                jmethodID gt = (*env)->GetMethodID(env, r_cls, "getType", "()I");
++                jint t = gt ? (*env)->CallIntMethod(env, routed, gt) : -1;
++                (*env)->DeleteLocalRef(env, r_cls);
++                (*env)->DeleteLocalRef(env, routed);
++                if (t == want_type) {
++                    ok = PJ_TRUE;
++                    goto on_return;
++                }
++            }
++        }
++        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
++        /* 이탈 상태 — 핀 해제 후 재설정(바운스) */
++        (*env)->CallBooleanMethod(env, track, set_dev, NULL);
++        if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
++    }
++
++    if (want_type != 0) {
++        jmethodID cur_app, get_sys, get_devs;
++        jstring svc;
++        jsize i, n;
++
++        at_cls = (*env)->FindClass(env, "android/app/ActivityThread");
++        if (!at_cls) goto on_return;
++        cur_app = (*env)->GetStaticMethodID(env, at_cls, "currentApplication",
++                                            "()Landroid/app/Application;");
++        if (!cur_app) goto on_return;
++        app = (*env)->CallStaticObjectMethod(env, at_cls, cur_app);
++        if (!app) goto on_return;
++
++        app_cls = (*env)->GetObjectClass(env, app);
++        get_sys = (*env)->GetMethodID(env, app_cls, "getSystemService",
++                                      "(Ljava/lang/String;)Ljava/lang/Object;");
++        if (!get_sys) goto on_return;
++        svc = (*env)->NewStringUTF(env, "audio");
++        am = (*env)->CallObjectMethod(env, app, get_sys, svc);
++        (*env)->DeleteLocalRef(env, svc);
++        if (!am) goto on_return;
++
++        am_cls = (*env)->GetObjectClass(env, am);
++        get_devs = (*env)->GetMethodID(env, am_cls, "getDevices",
++                                       "(I)[Landroid/media/AudioDeviceInfo;");
++        if (!get_devs) goto on_return;
++        /* 2 = AudioManager.GET_DEVICES_OUTPUTS */
++        devs = (jobjectArray)(*env)->CallObjectMethod(env, am, get_devs, 2);
++        if (!devs) goto on_return;
++
++        n = (*env)->GetArrayLength(env, devs);
++        for (i = 0; i < n; ++i) {
++            jobject d = (*env)->GetObjectArrayElement(env, devs, i);
++            jclass d_cls = (*env)->GetObjectClass(env, d);
++            jmethodID get_type = (*env)->GetMethodID(env, d_cls, "getType",
++                                                     "()I");
++            jint t = get_type ? (*env)->CallIntMethod(env, d, get_type) : -1;
++            (*env)->DeleteLocalRef(env, d_cls);
++            if (t == want_type) {
++                dev = d;
++                break;
++            }
++            (*env)->DeleteLocalRef(env, d);
++        }
++        if (!dev) goto on_return;    /* 대상 장치 없음 */
++    }
++
++    jret = (*env)->CallBooleanMethod(env, track, set_dev, dev);
++    ok = jret ? PJ_TRUE : PJ_FALSE;
++
++on_return:
++    if ((*env)->ExceptionCheck(env)) {
++        (*env)->ExceptionClear(env);
++        ok = PJ_FALSE;
++    }
++    if (dev) (*env)->DeleteLocalRef(env, dev);
++    if (devs) (*env)->DeleteLocalRef(env, devs);
++    if (am_cls) (*env)->DeleteLocalRef(env, am_cls);
++    if (am) (*env)->DeleteLocalRef(env, am);
++    if (app_cls) (*env)->DeleteLocalRef(env, app_cls);
++    if (app) (*env)->DeleteLocalRef(env, app);
++    if (at_cls) (*env)->DeleteLocalRef(env, at_cls);
++    if (track_cls) (*env)->DeleteLocalRef(env, track_cls);
++    return ok;
++}
++
+ /* API: set capability */
+ static pj_status_t strm_set_cap(pjmedia_aud_stream *s,
+                                 pjmedia_aud_dev_cap cap,
+@@ -853,9 +992,46 @@ static pj_status_t strm_set_cap(pjmedia_aud_stream *s,
+     struct android_aud_stream *stream = (struct android_aud_stream*)s;
+     JNIEnv *jni_env = 0;
+     pj_bool_t attached;
+-    
++
+     PJ_ASSERT_RETURN(s && value, PJ_EINVAL);
+-    
++
++    /* CIMS: 출력 라우트 — 이 스트림의 AudioTrack 에만 장치를 못박는다(트랙 단위).
++     * LOUDSPEAKER=스피커 강제, EARPIECE=수화기 강제, DEFAULT=해제(전역 정책 추종). */
++    if (cap==PJMEDIA_AUD_DEV_CAP_OUTPUT_ROUTE &&
++        (stream->param.dir & PJMEDIA_DIR_PLAYBACK))
++    {
++        pjmedia_aud_dev_route route = *(const pjmedia_aud_dev_route *)value;
++        int want_type;    /* AudioDeviceInfo.TYPE_* */
++        pj_bool_t ok;
++
++        if (!stream->track)
++            return PJMEDIA_EAUD_INVOP;
++
++        switch (route) {
++        case PJMEDIA_AUD_DEV_ROUTE_LOUDSPEAKER:
++            want_type = 2;    /* TYPE_BUILTIN_SPEAKER */
++            break;
++        case PJMEDIA_AUD_DEV_ROUTE_EARPIECE:
++            want_type = 1;    /* TYPE_BUILTIN_EARPIECE */
++            break;
++        default:
++            want_type = 0;    /* 해제 */
++            break;
++        }
++
++        attached = attach_jvm(&jni_env);
++        ok = set_track_preferred_device(jni_env, stream->track, want_type);
++        detach_jvm(attached);
++
++        PJ_LOG(4, (THIS_FILE, "Output route %d -> track preferred device "
++                   "type %d: %s", route, want_type, ok ? "OK" : "FAILED"));
++        if (ok) {
++            stream->param.output_route = route;
++            return PJ_SUCCESS;
++        }
++        return PJMEDIA_EAUD_SYSERR;
++    }
++
+     if (cap==PJMEDIA_AUD_DEV_CAP_OUTPUT_VOLUME_SETTING &&
+         (stream->param.dir & PJMEDIA_DIR_PLAYBACK))
+     {
+CIMS_ROUTE_PATCH_EOF
+  echo "  patched: android_jni_dev OUTPUT_ROUTE (per-track routing)"
+fi
+
+echo "=== [2-11] AMR 인코더 스톨 워치독 패치 (F-6) ==="
+# and_aud_mediacodec.cpp 인코더가 비동기 버퍼 큐 고갈로 영구 고착되는 결함(F-6) 대응:
+# ①on_error 콜백이 로그만 남기고 방치 → 코덱 치명 에러 시 버퍼 콜백 중단=영구 기아
+# ②encode 에러 경로들이 버퍼 인덱스를 반환하지 않고 이탈 → 유한 풀 점진 소실.
+# 수정: 실패 연속 계수+온셋 증거 로그(ENC-STALL, 마지막 on_error 코드 포함) →
+# 100연속(≈2s) 시 인코더 재생성(ENC-WATCHDOG) + 에러 경로 인덱스 반환(누수 봉합).
+# 멱등: 이미 패치돼 있으면 skip. ([2-3] 적용 후 상태 기준 diff)
+if grep -q enc_fail_watchdog pjmedia/src/pjmedia-codec/and_aud_mediacodec.cpp; then
+  echo "  already patched (skip)"
+else
+  git apply <<'CIMS_ENC_WATCHDOG_EOF'
+--- a/pjmedia/src/pjmedia-codec/and_aud_mediacodec.cpp
++++ b/pjmedia/src/pjmedia-codec/and_aud_mediacodec.cpp
+@@ -165,6 +165,18 @@
+                                                     buffer                  */
+     pj_atomic_queue_t   *dec_avail_output_buf; /**< Decoder available output
+                                                     buffer                  */
++
++    /* CIMS F-6: encoder stall watchdog + first-failure evidence.
++     * A wedged MediaCodec (error state stops the async buffer callbacks, or
++     * error paths losing buffer indices) starves the encode loop forever —
++     * media goes silent while floor control stays up. Track consecutive
++     * encode failures and recreate the encoder when they persist.          */
++    unsigned             enc_fail_streak;   /**< Consecutive encode failures*/
++    unsigned             enc_fail_total;    /**< Encode failures since open */
++    unsigned             enc_restart_cnt;   /**< Watchdog encoder restarts  */
++    int                  enc_err_status;    /**< Last on_error status (enc) */
++    int                  enc_err_action;    /**< Last on_error actionCode   */
++    pj_bool_t            enc_err_seen;      /**< on_error fired for encoder */
+ } and_media_private_t;
+ 
+ /* CUSTOM CALLBACKS */
+@@ -293,7 +305,15 @@
+                          const char *detail)
+  {
+     and_media_private_t *and_media_data = (and_media_private_t *) userdata;
+-     __android_log_print(ANDROID_LOG_INFO, THIS_FILE,
++
++    /* CIMS F-6: keep the last encoder error as first-failure evidence for
++     * the stall watchdog (a fatal error stops the async buffer callbacks). */
++    if (codec == and_media_data->enc) {
++        and_media_data->enc_err_seen = PJ_TRUE;
++        and_media_data->enc_err_status = (int)error;
++        and_media_data->enc_err_action = (int)actionCode;
++    }
++     __android_log_print(ANDROID_LOG_ERROR, THIS_FILE,
+                         "[%s] On Media error : err[%d] code[%d] msg[%s]\r\n",
+                         (codec==and_media_data->enc)?"encoder":"decoder", error,
+                         actionCode, detail);
+@@ -485,6 +505,91 @@
+     return PJ_SUCCESS;
+ }
+ 
++/* CIMS F-6: recreate a wedged encoder in-place — stop/delete the old codec,
++ * drain stale buffer indices (they belong to the dead codec generation),
++ * create a fresh codec, re-arm async callbacks, configure and start.
++ * Called from the encode path when the stall watchdog fires.
++ */
++static pj_bool_t and_med_restart_encoder(and_media_private_t *codec_data)
++{
++    char const *enc_name =
++                   and_media_codec[codec_data->codec_idx].encoder_name->ptr;
++    and_med_buf_info stale;
++
++    if (codec_data->enc) {
++        AMediaCodec_stop(codec_data->enc);
++        AMediaCodec_delete(codec_data->enc);
++        codec_data->enc = NULL;
++    }
++    while (pj_atomic_queue_get(codec_data->enc_avail_input_buf, &stale) ==
++           PJ_SUCCESS)
++        ;
++    while (pj_atomic_queue_get(codec_data->enc_avail_output_buf, &stale) ==
++           PJ_SUCCESS)
++        ;
++
++    codec_data->enc = AMediaCodec_createCodecByName(enc_name);
++    if (!codec_data->enc) {
++        PJ_LOG(2, (THIS_FILE, "ENC-WATCHDOG: recreate '%s' failed", enc_name));
++        return PJ_FALSE;
++    }
++    if (API_AT_LEAST(28)) {
++        AMediaCodecOnAsyncNotifyCallback async_cb = {&and_med_on_input_avail,
++                                                     &and_med_on_output_avail,
++                                                     &and_med_on_format_changed,
++                                                     &and_med_on_error};
++
++        AMediaCodec_setAsyncNotifyCallback(codec_data->enc, async_cb,
++                                           codec_data);
++    }
++    codec_data->enc_err_seen = PJ_FALSE;
++    return (configure_codec(codec_data, PJ_TRUE) == PJ_SUCCESS)? PJ_TRUE
++                                                               : PJ_FALSE;
++}
++
++/* CIMS F-6: account one encode-path failure and run the stall watchdog.
++ * Logs the stall onset with first-failure evidence (last on_error code —
++ * distinguishes "codec error state" from "buffer index starvation"), then
++ * recreates the encoder after ENC_WATCHDOG_RESTART_AFTER consecutive
++ * failures (~2s at 20ms ptime). Returns PJ_TRUE if a restart succeeded.
++ */
++#define ENC_WATCHDOG_RESTART_AFTER 100
++static pj_bool_t enc_fail_watchdog(and_media_private_t *codec_data,
++                                   const char *where)
++{
++    codec_data->enc_fail_streak++;
++    codec_data->enc_fail_total++;
++    if (codec_data->enc_fail_streak == 1) {
++        PJ_LOG(2, (THIS_FILE, "ENC-STALL onset at %s: total=%u restarts=%u "
++                   "on_error(seen=%d status=%d action=%d)",
++                   where, codec_data->enc_fail_total,
++                   codec_data->enc_restart_cnt,
++                   (int)codec_data->enc_err_seen,
++                   codec_data->enc_err_status, codec_data->enc_err_action));
++    } else if (codec_data->enc_fail_streak % 500 == 0) {
++        PJ_LOG(2, (THIS_FILE, "ENC-STALL ongoing at %s: streak=%u total=%u",
++                   where, codec_data->enc_fail_streak,
++                   codec_data->enc_fail_total));
++    }
++    if (codec_data->enc_fail_streak >= ENC_WATCHDOG_RESTART_AFTER) {
++        pj_bool_t ok;
++
++        codec_data->enc_restart_cnt++;
++        PJ_LOG(2, (THIS_FILE, "ENC-WATCHDOG firing: restart #%u (streak=%u "
++                   "total=%u on_error seen=%d status=%d action=%d)",
++                   codec_data->enc_restart_cnt, codec_data->enc_fail_streak,
++                   codec_data->enc_fail_total, (int)codec_data->enc_err_seen,
++                   codec_data->enc_err_status, codec_data->enc_err_action));
++        ok = and_med_restart_encoder(codec_data);
++        PJ_LOG(2, (THIS_FILE, "ENC-WATCHDOG restart #%u %s",
++                   codec_data->enc_restart_cnt, ok? "OK" : "FAILED"));
++        /* Either way wait a full window before considering another restart */
++        codec_data->enc_fail_streak = 0;
++        return ok;
++    }
++    return PJ_FALSE;
++}
++
+ /*
+  * Initialize and register Android MediaCodec codec factory to pjmedia endpoint.
+  */
+@@ -997,6 +1102,12 @@
+     codec_data->plc_enabled = (attr->setting.plc != 0);
+     and_media_data->clock_rate = attr->info.clock_rate;
+ 
++/* NOTE(cims): AMR settings init block handles BOTH AMR-NB and AMR-WB (see the
++ * codec_id condition below), but was guarded by AMRNB only. When AMRNB is
++ * disabled and AMRWB enabled (our build), the whole block is compiled out, so
++ * codec_data->codec_setting stays NULL and parse_amr/pack_amr dereference a
++ * NULL amr_settings_t (SIGSEGV on the first RX/TX media frame). Widen the guard
++ * to cover AMRWB too. */
+ #if PJMEDIA_HAS_AND_MEDIA_AMRNB || PJMEDIA_HAS_AND_MEDIA_AMRWB
+     if (and_media_data->codec_id == AND_AUD_CODEC_AMRNB ||
+         and_media_data->codec_id == AND_AUD_CODEC_AMRWB)
+@@ -1261,8 +1372,9 @@
+         if (pj_atomic_queue_get(queue, &buf_info) != PJ_SUCCESS ||
+             buf_info.index < 0)
+         {
+-            PJ_LOG(4,(THIS_FILE, "Encoder failed to get input Buffer[%d]",
+-                      buf_info.index));
++            /* CIMS F-6: was an unconditional per-frame log (spammed forever
++             * on a wedged codec) — now stall accounting + watchdog. */
++            enc_fail_watchdog(codec_data, "in-queue");
+             goto on_return;
+         }
+         input_size = samples_per_frame << 1;
+@@ -1276,6 +1388,10 @@
+             if (am_status != AMEDIA_OK) {
+                 PJ_LOG(4, (THIS_FILE, "Encoder queueInputBuffer return %d",
+                            am_status));
++                /* CIMS F-6: index was not accepted by the codec — return it
++                 * to the avail queue so it is not leaked. */
++                pj_atomic_queue_put(queue, &buf_info);
++                enc_fail_watchdog(codec_data, "queueInputBuffer");
+                 goto on_return;
+             }
+         } else {
+@@ -1288,6 +1404,11 @@
+                                      (unsigned long)output_size,
+                                      input_size));
+             }
++            /* CIMS F-6: index was never queued to the codec — return it to
++             * the avail queue so it is not leaked (each leaked index
++             * permanently shrinks the finite buffer pool). */
++            pj_atomic_queue_put(queue, &buf_info);
++            enc_fail_watchdog(codec_data, "getInputBuffer");
+             goto on_return;
+         }
+ 
+@@ -1298,6 +1419,7 @@
+         {
+             PJ_LOG(4, (THIS_FILE, "Encoder failed to get output Buffer[%d]",
+                    buf_info.index));
++            enc_fail_watchdog(codec_data, "out-queue");
+             goto on_return;
+         }
+ 
+@@ -1308,6 +1430,11 @@
+             PJ_LOG(4, (THIS_FILE, "Encoder failed getting output buffer, "
+                        "index=%d buffer size=%d, flags %d",
+                        buf_info.index, buf_info.size, buf_info.flags));
++            /* CIMS F-6: release the output buffer back to the codec so it
++             * is not leaked (a full output side stops input recycling). */
++            AMediaCodec_releaseOutputBuffer(codec_data->enc, buf_info.index,
++                                            0);
++            enc_fail_watchdog(codec_data, "getOutputBuffer");
+             goto on_return;
+         }
+ 
+@@ -1315,6 +1442,7 @@
+         AMediaCodec_releaseOutputBuffer(codec_data->enc,
+                                         buf_info.index,
+                                         0);
++        codec_data->enc_fail_streak = 0;    /* CIMS F-6: healthy frame */
+         bits_out += buf_info.size;
+         tx += buf_info.size;
+         pcm_in += samples_per_frame;
+CIMS_ENC_WATCHDOG_EOF
+  echo "  patched: encoder stall watchdog + buffer-leak plugging (F-6)"
+fi
+
+echo "=== [2-12] PTT 유휴 무음 50pps 상향 스트림 제거 패치 ==="
+# stream.c put_frame_imp: 브리지 미연결 시 NAT 유지 목적의 zero-PCM 인코딩 분기가
+# VAD 비활성(noVad=true) 스트림에선 무음 억제 주체가 없어 유휴 내내 50pps 무음 RTP 를
+# 송신한다. VAD 비활성이면 송신 생략+RTP ts 만 전진(수신측 ts 연속성 보존) —
+# NAT 바인딩·CMP latch 는 KA(empty RTP 5s, [2-2] PJMEDIA_STREAM_ENABLE_KA)가 유지. 멱등.
+if grep -q "stream->vad_enabled)" pjmedia/src/pjmedia/stream.c; then
+  echo "  already patched (skip)"
+else
+  git apply <<'CIMS_IDLE_TX_EOF'
+diff --git a/pjmedia/src/pjmedia/stream.c b/pjmedia/src/pjmedia/stream.c
+index 3ecb03f..fb5c4f8 100644
+--- a/pjmedia/src/pjmedia/stream.c
++++ b/pjmedia/src/pjmedia/stream.c
+@@ -1161,7 +1161,8 @@ static pj_status_t put_frame_imp( pjmedia_port *port,
+     } else if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO &&
+                frame->buf == NULL &&
+                c_strm->port.info.fmt.id == PJMEDIA_FORMAT_L16 &&
+-               (c_strm->dir & PJMEDIA_DIR_ENCODING))
++               (c_strm->dir & PJMEDIA_DIR_ENCODING) &&
++               stream->vad_enabled)
+     {
+         pjmedia_frame silence_frame;
+ 
+@@ -1192,6 +1193,24 @@ static pj_status_t put_frame_imp( pjmedia_port *port,
+                                          (const void**)&rtphdr,
+                                          &rtphdrlen);
+ 
++    /* CIMS: 브리지 미연결(무전 유휴) zero-PCM 프레임 — VAD 비활성이면 무음 억제
++     * 주체가 없어 위 분기가 유휴 내내 연속 무음 RTP(50pps)를 송신하게 된다(PTT 대기
++     * 대역·배터리 낭비). 인코딩·송신을 생략하고 RTP 타임스탬프만 전진시킨다 —
++     * NAT 바인딩·CMP latch 유지는 상단 KA(empty RTP, PJMEDIA_STREAM_KA_INTERVAL)가
++     * 담당(ue_nat_traversal.md §7.1). */
++    } else if (frame->type == PJMEDIA_FRAME_TYPE_AUDIO &&
++               frame->buf == NULL &&
++               c_strm->port.info.fmt.id == PJMEDIA_FORMAT_L16 &&
++               (c_strm->dir & PJMEDIA_DIR_ENCODING))
++    {
++        process_dtmf_pause(stream);
++
++        status = pjmedia_rtp_encode_rtp( &channel->rtp,
++                                         0, 0,
++                                         0, rtp_ts_len,
++                                         (const void**)&rtphdr,
++                                         &rtphdrlen);
++
+     /* Encode audio frame */
+     } else if ((frame->type == PJMEDIA_FRAME_TYPE_AUDIO &&
+                 frame->buf != NULL) ||
+CIMS_IDLE_TX_EOF
+  echo "  patched: idle zero-PCM TX suppressed for VAD-off streams"
+fi
+
 echo "=== [3] configure-android + make (arm64-v8a) ==="
 export APP_PLATFORM=28
 export TARGET_ABI=arm64-v8a

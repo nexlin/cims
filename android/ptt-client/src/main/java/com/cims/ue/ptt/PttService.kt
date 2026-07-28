@@ -346,13 +346,24 @@ class PttService : Service() {
             controller?.let { injectSsoToken(it) }
             return
         }
-        controller?.let { runCatching { it.shutdown() } }       // 설정 변경(포트/비번) → 재등록
+        // 설정 변경(포트/비번) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
+        // Endpoint/LogWriter 수명 지뢰라 로그아웃과 동일하게 프로세스 재시작이 정석:
+        // un-REGISTER 송신 여유(2s) 후 killProcess → 접근성/START_STICKY 재기동 →
+        // 새 설정 첫 부팅 + 참여 채널 자동 복원(ChannelStore).
+        controller?.let {
+            runCatching { it.sip.unregister() }
+            update("CIMS-McPtt", "설정 변경 — 재시작")
+            mainHandler.postDelayed(
+                { android.os.Process.killProcess(android.os.Process.myPid()) }, 2000)
+            return
+        }
         // msisdn 은 프로비저닝에 따라 "+8250..."/"8250..." 혼재 — tel: URI 로 정규화(+ 중복 방지)
         val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
         val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { _controller.value = it; activeConfig = cfg }
         c.feedback = com.cims.ue.ptt.audio.PttFeedback(this)
         c.volumeStore = com.cims.ue.ptt.audio.GroupVolumeStore(this)
+        c.channelStore = ChannelStore(this)         // 참여 채널 영속 — 재시작 자동 재조인
         c.audioRouter = audioRouter
         val rp = com.cims.ue.ptt.audio.AudioRoutePrefs(this)
         c.routePrefs = rp
