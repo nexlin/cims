@@ -242,6 +242,8 @@ if __name__ == '__main__':
     from handlers.console_layouts  import CIMS_CONSOLE_LAYOUTS_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
     from handlers.api_catalog          import CIMS_API_CATALOG_HANDLER_LIST
+    from handlers.provision            import (CIMS_PROVISION_HANDLER_LIST,
+                                               init as provision_init)
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
     from services import service_registry
@@ -352,6 +354,18 @@ if __name__ == '__main__':
             tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
         ver_init(tests_dir, config)
         build_init(os.path.dirname(tests_dir))
+
+        # ── 자동 배포 (auto_deployment.md) ──────────────────────
+        # 블루프린트/인벤토리/run 기록은 runtime store 아래 'provision/' 에 둔다.
+        # runtime 은 버전 디렉토리 밖(modules/oam/runtime)이라 업그레이드·롤백에 생존한다.
+        try:
+            from services import file_store as _prov_fs
+            from services.provision.store import Store as _ProvStore
+            _prov_dir = os.path.join(_prov_fs.runtime_root(config), 'provision')
+            provision_init(config, _ProvStore(_prov_dir))
+            logger.log_info(f'[provision] runtime dir: {_prov_dir}')
+        except Exception as _pe:      # 배포 엔진 부재가 OAM 기동을 막지 않게
+            logger.log_error(f'[provision] 초기화 실패 — /api/v1/provision 비활성: {_pe}')
 
         # system_id 명시 — OAM 콘솔/admin flow 는 oam_01 로 기록(같은 호스트의 CSC xcap flow=csc_01 와 파일 분리).
         #   (미지정 시 둘 다 csc_01.flow 로 써서 seq·라인 충돌)
@@ -495,6 +509,7 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST)
         base_rules += _bind(CIMS_API_CATALOG_HANDLER_LIST)   # /api/v1/api-catalog[/openapi.json] — 메타데이터, base 상주
+        base_rules += _bind(CIMS_PROVISION_HANDLER_LIST)   # /api/v1/provision/* — 자동 배포(내장). 별도 모듈 아님
         base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)

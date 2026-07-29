@@ -1,0 +1,52 @@
+# 자동 배포 — 블루프린트 예제 (배포 정의)
+#
+# 하는 일은 두 가지다: 각 서버에 agent 설치, 그 위에 모듈 설치.
+# 설정값은 여기 넣지 않는다 — 설치 후 콘솔 [패키지 설정] 탭에서 편집한다.
+# (넣고 싶으면 modules[].config / per_server / collections 를 쓸 수 있지만 선택이다.)
+#
+# 버전 latest = base OAM 에 등록된 패키지 중 최신을 run 시작 시점에 고정(pin).
+#
+# OAM 엔티티 대응:  systems = HA 그룹 / members = agent(서버) / modules = deployment
+# oam / console / agent 는 넣지 않는다 — 부트스트랩·릴리스 경로가 소유한다
+# (자기 자신을 재설치하려 들 수 있다).
+version: 1
+name: prod-3tier
+description: csc(A/S) + csp(A/S) + cmp(AA) 6-노드 — agent·모듈 설치
+
+systems:
+  - name: Control-Server              # csc — 가입자/MCPTT
+    mode: active_standby              # active_standby | all_active | standalone
+    members:
+      - { server: csc01, role: master }     # ← inventory 의 name
+      - { server: csc02, role: backup }
+    modules:
+      - { package: csc, version: latest, start: false }
+
+  - name: Signaling-Server            # csp — SIP 시그널링
+    mode: active_standby
+    members:
+      - { server: csp01, role: master }
+      - { server: csp02, role: backup }
+    modules:
+      - { package: csp, version: latest, start: false }
+
+  - name: Media-Server                # cmp — RTP 미디어
+    mode: all_active
+    members:
+      - { server: cmp01 }
+      - { server: cmp02 }
+    modules:
+      - { package: cmp, version: latest, start: false }
+
+# start: false 라 기동하지 않는다 — 설치까지만. 설정을 넣고 콘솔 [패키지 제어] 에서
+# 시작한다. 기동까지 자동으로 하려면 start 를 지우고(기본 true) start_order 를 준다:
+#   start_order: [Media-Server, Control-Server, Signaling-Server]
+#   (CMP 가 CSP 보다 먼저, CSP 는 가입자 조회 대상인 CSC 뒤에.)
+#
+# TOPOLOGY 는 **그룹만** 만든다 (콘솔 `＋ 시스템 추가` 와 같은 범위).
+# VIP·절체조건은 그 뒤 콘솔 [시스템/서버 구성] 에서 설정한다. 굳이 여기서 넣으려면:
+#   vips:
+#     - { ip: 10.0.1.13, prefix: 24, interface: eth1, slot: service }
+#
+# keepalived VRRP 인증값(auth_pass, 8자)은 적지 않아도 된다 — 미지정 시 자동 생성되고
+# 콘솔 그룹 탭에서 바꿀 수 있다. 그룹 생성을 아예 생략하려면 `ha_group: false`.

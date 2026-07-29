@@ -982,6 +982,12 @@ cmd_sync() {
         if [[ -f "$SCRIPT_DIR/ems/core/oam/pkg.json" ]]; then
             cp -f "$SCRIPT_DIR/ems/core/oam/pkg.json" "$DIST_DIR/oam/pkg.json"
         fi
+        # 자동 배포 (auto_deployment.md) — AGENT phase 가 대상 노드로 밀어넣는
+        # install-agent.sh 를 oam 패키지에 동봉한다. 배포본에는 레포의 agent/ 가 없으므로
+        # 이게 빠지면 agent 자동 설치가 불가능하다. 항상 agent 소스 원본에서 갱신.
+        mkdir -p "$DIST_DIR/oam/assets"
+        cp -f "$SCRIPT_DIR/agent/install-agent.sh" "$DIST_DIR/oam/assets/install-agent.sh"
+        chmod +x "$DIST_DIR/oam/assets/install-agent.sh"
         # OAM 분리 Phase 3 — oam/config (oam.json / oam-tb.json) 동기화
         # + oam_base_service_split §7 — base 모드 활성화 템플릿(common/base/services 샘플) 동봉.
         #   운영자가 production 노드에서 .sample→실파일 rename 으로 --role base 전환할 수 있게.
@@ -999,18 +1005,26 @@ cmd_sync() {
         _ensure_oam_vendor_ffmpeg
         # Phase 4 vendor: private 환경 (인터넷 없음) 대응 — csc/vendor + oam/vendor 동기화.
         # csc/requirements.txt, oam/requirements.txt 도 함께.
+        # 소스 경로가 컴포넌트마다 다르다: csc 는 레포 직하, oam 은 ems/core/oam.
+        # (옛 코드가 둘 다 $SCRIPT_DIR/<comp>/vendor 로 봐서 oam vendor 동기화가
+        #  조용히 건너뛰어지고 있었다 — dist 의 oam/vendor 는 옛 사본이 남은 것.)
         for _comp in csc oam; do
-            if [[ -d "$SCRIPT_DIR/$_comp/vendor" ]]; then
+            local _vsrc
+            case "$_comp" in
+                oam) _vsrc="$SCRIPT_DIR/ems/core/oam" ;;
+                *)   _vsrc="$SCRIPT_DIR/$_comp" ;;
+            esac
+            if [[ -d "$_vsrc/vendor" ]]; then
                 mkdir -p "$DIST_DIR/$_comp/vendor"
                 if command -v rsync >/dev/null 2>&1; then
                     rsync -a --delete-excluded --exclude='__pycache__' --exclude='*.pyc' \
-                        "$SCRIPT_DIR/$_comp/vendor/" "$DIST_DIR/$_comp/vendor/"
+                        "$_vsrc/vendor/" "$DIST_DIR/$_comp/vendor/"
                 else
-                    cp -r "$SCRIPT_DIR/$_comp/vendor/." "$DIST_DIR/$_comp/vendor/"
+                    cp -r "$_vsrc/vendor/." "$DIST_DIR/$_comp/vendor/"
                 fi
             fi
-            if [[ -f "$SCRIPT_DIR/$_comp/requirements.txt" ]]; then
-                cp -f "$SCRIPT_DIR/$_comp/requirements.txt" "$DIST_DIR/$_comp/requirements.txt"
+            if [[ -f "$_vsrc/requirements.txt" ]]; then
+                cp -f "$_vsrc/requirements.txt" "$DIST_DIR/$_comp/requirements.txt"
             fi
         done
         ok "csc/src + oam/src (+ config, pkg.json, vendor, requirements.txt) ← $SCRIPT_DIR"
