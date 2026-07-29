@@ -244,7 +244,10 @@ class PttController(
     private val affPending = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, Boolean>>()
     private val affExpireAt = java.util.concurrent.ConcurrentHashMap<String, Long>()   // 확정 만료(elapsedRealtime)
     private val affAttempts = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val affBackoffUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()  // 백오프 대기 종료 시각
     private val affSeq = java.util.concurrent.atomic.AtomicLong(1)
+    /** 403(등록 소실) 대응 재-REGISTER 스로틀 — 연속 실패마다 재등록하지 않도록. */
+    @Volatile private var affReRegisterAt = 0L
 
     private val _status = MutableStateFlow("대기")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -326,6 +329,7 @@ class PttController(
                 val (g, on) = affPending.remove(r.token) ?: return@collect
                 if (r.code in 200..299) {
                     affAttempts.remove(g)
+                    affBackoffUntil.remove(g)
                     if (on) {
                         affExpireAt[g] = SystemClock.elapsedRealtime() + AFF_EXPIRES_SEC * 1000L
                         _affiliated.value = _affiliated.value + g
@@ -337,7 +341,16 @@ class PttController(
                     _affiliated.value = _affiliated.value - g
                     val n = ((affAttempts[g] ?: 0) + 1).also { affAttempts[g] = it }
                     val backoffMs = (30_000L shl (n - 1).coerceAtMost(3)).coerceAtMost(300_000L)
+                    affBackoffUntil[g] = SystemClock.elapsedRealtime() + backoffMs
                     Log.w(TAG, "affiliate $g 실패 ${r.code} ${r.reason} — ${backoffMs / 1000}s 후 재시도(#$n)")
+                    // 403 = 서버가 이 사용자의 등록을 모른다(서버 재기동으로 등록 소실 등). 시간이 지나도
+                    // 낫지 않으므로 백오프만으로는 부족 — 즉시 등록 갱신을 트리거한다(60s 스로틀).
+                    // 미조치 시 단말 자체 갱신 타이머(Expires 절반)까지 제휴·fan-out 공백이 이어진다.
+                    if (r.code == 403 && SystemClock.elapsedRealtime() - affReRegisterAt > 60_000L) {
+                        affReRegisterAt = SystemClock.elapsedRealtime()
+                        Log.w(TAG, "affiliate 403 — 등록 소실 추정, 등록 갱신 요청")
+                        sip.refreshRegistration()
+                    }
                     launch {
                         delay(backoffMs)
                         if (regState.value is RegState.Registered && g in desiredAffiliations() && !affValid(g))
@@ -539,10 +552,12 @@ class PttController(
     private fun affValid(groupId: String): Boolean =
         (affExpireAt[groupId] ?: 0L) - SystemClock.elapsedRealtime() > AFF_EXPIRES_SEC * 500L
 
-    /** 확정이 없거나 낡았고, 같은 그룹 PUBLISH 가 in-flight 도 아닐 때만 발행(트리거 중복 억제). */
+    /** 확정이 없거나 낡았고, in-flight·백오프 대기 중도 아닐 때만 발행(트리거 중복 억제).
+     *  백오프 확인이 없으면 주기 루프와 백오프 타이머가 각자 발사해 실패 상태에서 PUBLISH 가 겹친다. */
     private fun ensureAffiliated(groupId: String) {
         if (affValid(groupId)) return
         if (affPending.values.any { it.first == groupId && it.second }) return
+        if ((affBackoffUntil[groupId] ?: 0L) > SystemClock.elapsedRealtime()) return
         affiliate(groupId, true)
     }
 

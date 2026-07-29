@@ -172,6 +172,17 @@ class SipController(private val config: SipAccountConfig) {
         acc.create(buildAccountConfig(config))                    // registerOnAdd=true → REGISTER 발신
     }
 
+    /**
+     * 등록 갱신(재-REGISTER) — 서버가 등록을 잃은 경우(서버 재기동 등) 즉시 복구용.
+     * 단말은 자기 갱신 타이머(Expires 절반)까지 등록 소실을 알 수 없어, 그동안 제휴·착신이 막힌다.
+     * ⚠️[register] 처럼 Account 를 재생성하지 않는다 — 프로세스 내 PJSIP 재부팅은 지뢰(Endpoint 수명).
+     */
+    fun refreshRegistration() = onCtl {
+        val acc = account ?: return@onCtl
+        runCatching { acc.setRegistration(true) }
+            .onFailure { Log.w(TAG, "refreshRegistration: ${it.message}") }
+    }
+
     // de-REGISTER(expires=0). 미등록 상태면 PJSIP 가 EINVALIDOP 를 던지므로 조용히 무시.
     fun unregister() = onCtl { account?.let { runCatching { it.setRegistration(false) } } }
 
