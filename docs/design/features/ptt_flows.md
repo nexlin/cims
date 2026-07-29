@@ -348,6 +348,12 @@ chat (상시):
   자가 재생산해 전원 이탈 후에도 REMOVE 가 밀리는 좀비 세션 방지.
 - **서버 주도 주기 재초대는 chat 전용.** prearranged/broadcast 의 late entry/복구는 UE 주도
   (사용자 재참여 버튼·앱 자동 재조인, TS 24.379 모델) — 서버는 개시 시 fan-out(B5)만 수행한다.
+- **재조인 시 옛 leg 정리**: 멤버가 BYE 없이 죽은 뒤 새 INVITE 로 재참여하면 같은 `(사용자,그룹)`의
+  옛 leg 가 세션 맵에 고아로 남아 참가자 명단에 **중복 표기**된다 → 개시자 경로가 옛 leg 의 SIP
+  다이얼로그를 정리한다. ⚠️이때 **CMP LEAVE 는 보내지 않는다** — 멤버 키가 `(group, user)` 라
+  방금 JOIN 한 자기 멤버십·포트까지 회수되어 미디어가 끊긴다.
+- **참가자 명단(conference NOTIFY)도 확립 leg 만** 싣고, 확립 leg 에게만 보낸다 — 아직 200 OK 가
+  오지 않은 fan-out 초대 대상이 "참여 중"으로 표시되는 것과 다이얼로그 없는 leg 로의 발송을 막는다.
 
 > 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.
 
