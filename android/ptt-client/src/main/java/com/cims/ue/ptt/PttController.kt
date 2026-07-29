@@ -245,6 +245,8 @@ class PttController(
     private val affExpireAt = java.util.concurrent.ConcurrentHashMap<String, Long>()   // 확정 만료(elapsedRealtime)
     private val affAttempts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val affBackoffUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()  // 백오프 대기 종료 시각
+    /** 서버가 준 `SIP-ETag`(RFC 3903) — 갱신 PUBLISH 의 `SIP-If-Match` 로 되돌려 refresh 로 처리되게 한다. */
+    private val affEtag = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val affSeq = java.util.concurrent.atomic.AtomicLong(1)
     /** 403(등록 소실) 대응 재-REGISTER 스로틀 — 연속 실패마다 재등록하지 않도록. */
     @Volatile private var affReRegisterAt = 0L
@@ -331,30 +333,44 @@ class PttController(
                     affAttempts.remove(g)
                     affBackoffUntil.remove(g)
                     if (on) {
+                        r.etag?.takeIf { it.isNotBlank() }?.let { affEtag[g] = it }   // 갱신 시 If-Match 근거
                         affExpireAt[g] = SystemClock.elapsedRealtime() + AFF_EXPIRES_SEC * 1000L
                         _affiliated.value = _affiliated.value + g
                     } else {
+                        affEtag.remove(g)
                         affExpireAt.remove(g)
                         _affiliated.value = _affiliated.value - g
                     }
                 } else if (on) {
                     _affiliated.value = _affiliated.value - g
                     val n = ((affAttempts[g] ?: 0) + 1).also { affAttempts[g] = it }
-                    val backoffMs = (30_000L shl (n - 1).coerceAtMost(3)).coerceAtMost(300_000L)
-                    affBackoffUntil[g] = SystemClock.elapsedRealtime() + backoffMs
-                    Log.w(TAG, "affiliate $g 실패 ${r.code} ${r.reason} — ${backoffMs / 1000}s 후 재시도(#$n)")
-                    // 403 = 서버가 이 사용자의 등록을 모른다(서버 재기동으로 등록 소실 등). 시간이 지나도
-                    // 낫지 않으므로 백오프만으로는 부족 — 즉시 등록 갱신을 트리거한다(60s 스로틀).
-                    // 미조치 시 단말 자체 갱신 타이머(Expires 절반)까지 제휴·fan-out 공백이 이어진다.
-                    if (r.code == 403 && SystemClock.elapsedRealtime() - affReRegisterAt > 60_000L) {
-                        affReRegisterAt = SystemClock.elapsedRealtime()
-                        Log.w(TAG, "affiliate 403 — 등록 소실 추정, 등록 갱신 요청")
-                        sip.refreshRegistration()
-                    }
-                    launch {
-                        delay(backoffMs)
-                        if (regState.value is RegState.Registered && g in desiredAffiliations() && !affValid(g))
-                            affiliate(g, true)
+                    if (r.code == 412 && n <= 2) {
+                        // ETag 불일치(서버 재기동 등으로 event state 소실·타 발행이 덮음) — ETag 를 버리고
+                        // 즉시 초기 publication 으로 재발행한다(RFC 3903 §6). 조건이 바뀌었으므로 대기 불필요.
+                        affEtag.remove(g)
+                        Log.w(TAG, "affiliate $g 412 — ETag 폐기 후 초기 publication 재발행")
+                        affiliate(g, true)
+                    } else if (r.code == 403) {
+                        // RFC 3261 §21.4.4 — 403 은 "수정 없이 반복하지 말 것". 조건이 바뀌어야 낫는
+                        // 실패(등록 소실 / 그룹 비멤버)이므로 타이머 재시도를 걸지 않고, 조건 변화
+                        // 이벤트(등록 성공→affiliateAll, 그룹목록 재적재, 채널 선택·키업)에 맡긴다.
+                        // 등록 소실이 원인일 수 있으므로 등록 갱신만 트리거해 조건 자체를 바꾼다(60s 스로틀).
+                        Log.w(TAG, "affiliate $g 403 ${r.reason} — 타이머 재시도 없음(조건 변화 대기)")
+                        if (SystemClock.elapsedRealtime() - affReRegisterAt > 60_000L) {
+                            affReRegisterAt = SystemClock.elapsedRealtime()
+                            Log.w(TAG, "affiliate 403 — 등록 소실 추정, 등록 갱신 요청")
+                            sip.refreshRegistration()
+                        }
+                    } else {
+                        // 일시적 실패(타임아웃·5xx 등)는 재시도가 정당 — 지수 백오프.
+                        val backoffMs = (30_000L shl (n - 1).coerceAtMost(3)).coerceAtMost(300_000L)
+                        affBackoffUntil[g] = SystemClock.elapsedRealtime() + backoffMs
+                        Log.w(TAG, "affiliate $g 실패 ${r.code} ${r.reason} — ${backoffMs / 1000}s 후 재시도(#$n)")
+                        launch {
+                            delay(backoffMs)
+                            if (regState.value is RegState.Registered && g in desiredAffiliations() && !affValid(g))
+                                affiliate(g, true)
+                        }
                     }
                 }
             }
@@ -710,18 +726,25 @@ class PttController(
     fun register() = sip.register()
 
     /** affiliation PUBLISH (TS 24.379 §9). on=false → de-affiliate(Expires:0).
-     *  성공 여부는 [affiliated] 에 낙관 기록하지 않는다 — token 상관 응답(2xx)에서만 확정. */
+     *  성공 여부는 [affiliated] 에 낙관 기록하지 않는다 — token 상관 응답(2xx)에서만 확정.
+     *  보유 ETag 가 있으면 `SIP-If-Match` 를 실어 **갱신(refresh)** 으로 처리되게 한다(RFC 3903 §4) —
+     *  없으면 매 발행이 초기 publication 이라 서버가 event state 를 새로 만든다. */
     fun affiliate(groupId: String, on: Boolean = true) {
         val token = affSeq.getAndIncrement()
         affPending[token] = groupId to on
         val groupSip = "sip:$groupId@${sipConfig.domain}"
+        val hdrs = mutableMapOf(
+            // Event: mcptt 필수 — TS 24.379 §9 (없으면 CSP 가 489 Bad Event 거부)
+            "Event" to "mcptt",
+            "Expires" to if (on) "$AFF_EXPIRES_SEC" else "0",
+        )
+        affEtag[groupId]?.let { hdrs["SIP-If-Match"] = it }
         sip.sendRequest(
             method = "PUBLISH",
             targetUri = groupSip,
             contentType = McpttXml.CT_AFFILIATION,
             body = McpttXml.affiliationCommand("tel:$groupId", on),
-            // Event: mcptt 필수 — TS 24.379 §9 (없으면 CSP 가 489 Bad Event 거부)
-            headers = mapOf("Event" to "mcptt", "Expires" to if (on) "$AFF_EXPIRES_SEC" else "0"),
+            headers = hdrs,
             token = token,
         )
         // 응답이 영영 없는 경우(계정 미생성·전송 실패) pending 이 남아 재발행을 막는 것 방지 —

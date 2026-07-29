@@ -53,8 +53,15 @@ sealed interface CallState {
 /** 수신 문자(SIP MESSAGE, RFC 3428 page-mode). [fromUri] 는 SIP URI 원문. */
 data class ImMessage(val fromUri: String, val contentType: String, val body: String)
 
-/** [SipController.sendRequest] 트랜잭션의 최종 응답. [token] 으로 요청과 상관(0=미추적 요청). */
-data class SendReqResult(val token: Long, val method: String, val code: Int, val reason: String)
+/** [SipController.sendRequest] 트랜잭션의 최종 응답. [token] 으로 요청과 상관(0=미추적 요청).
+ *  [etag]=응답의 `SIP-ETag`(PUBLISH 2xx, RFC 3903) — 갱신 시 `SIP-If-Match` 로 되돌려준다. */
+data class SendReqResult(
+    val token: Long,
+    val method: String,
+    val code: Int,
+    val reason: String,
+    val etag: String? = null,
+)
 
 /**
  * MCData MSRP 미디어평면 호(SDS over media plane, TS 24.282 §9.2.3) 이벤트.

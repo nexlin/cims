@@ -26,13 +26,23 @@ class CimsAccount(private val owner: SipController) : Account() {
     }
 
     /** [SipController.sendRequest] (affiliation PUBLISH 등) 트랜잭션 상태 콜백 — 최종 응답(≥200)만 중계.
-     *  같은 트랜잭션이 COMPLETED/TERMINATED 두 번 올 수 있어 수신측이 token 당 1회 처리한다. */
+     *  같은 트랜잭션이 COMPLETED/TERMINATED 두 번 올 수 있어 수신측이 token 당 1회 처리한다.
+     *  응답 원문에서 `SIP-ETag`(RFC 3903)를 뽑아 함께 넘긴다 — 갱신 PUBLISH 의 `SIP-If-Match` 근거.
+     *  ⚠️`src.rdata` 는 tsxState.type 이 RX_MSG 일 때만 유효(union) — 타입 확인 없이 접근 금지. */
     override fun onSendRequest(prm: OnSendRequestParam) {
         runCatching {
             if (prm.e.type != pjsip_event_id_e.PJSIP_EVENT_TSX_STATE) return
-            val tsx = prm.e.body.tsxState.tsx
+            val ts = prm.e.body.tsxState
+            val tsx = ts.tsx
             if (tsx.statusCode < 200) return
-            owner.dispatchSendReqResult(prm.userData, tsx.method ?: "", tsx.statusCode, tsx.statusText ?: "")
+            var etag: String? = null
+            if (ts.type == pjsip_event_id_e.PJSIP_EVENT_RX_MSG) {
+                val whole = runCatching { ts.src.rdata.wholeMsg }.getOrNull()
+                if (!whole.isNullOrEmpty()) {
+                    etag = Regex("(?im)^SIP-ETag:\\s*(.+)$").find(whole)?.groupValues?.get(1)?.trim()
+                }
+            }
+            owner.dispatchSendReqResult(prm.userData, tsx.method ?: "", tsx.statusCode, tsx.statusText ?: "", etag)
         }.onFailure { Log.w("CimsAccount", "onSendRequest: ${it.message}") }
     }
 

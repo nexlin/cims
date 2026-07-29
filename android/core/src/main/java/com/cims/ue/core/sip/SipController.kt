@@ -507,8 +507,14 @@ class SipController(private val config: SipAccountConfig) {
         _msrpEvents.tryEmit(MsrpEvent.Incoming(call.id, from, inviteMsg))
     }
 
-    internal fun dispatchSendReqResult(token: Long, method: String, code: Int, reason: String) {
-        _sendReqResults.tryEmit(SendReqResult(token, method, code, reason))
+    internal fun dispatchSendReqResult(
+        token: Long,
+        method: String,
+        code: Int,
+        reason: String,
+        etag: String? = null,
+    ) {
+        _sendReqResults.tryEmit(SendReqResult(token, method, code, reason, etag))
     }
 
     internal fun dispatchReg(active: Boolean, code: Int, reason: String) {
