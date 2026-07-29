@@ -294,7 +294,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             m_mapUserCall[{ pszCallerInfo, pszGroupId }] = pszCallId;
-            m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo };
+            m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo, true };  // 발신자 = 확립
         }
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) MemberPort(%d)", pszCallerInfo,
                      iCallerLocalAudio );
@@ -497,11 +497,11 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         }
         if ( vecItems.empty() ) return;
 
-        // 그룹별로 아직 다른 멤버가 남아있는지 확인
+        // 그룹별로 아직 다른 멤버가 남아있는지 확인 (확립 leg 만 — pending 초대는 세션을 못 붙듦)
         for ( auto &clsItem : vecItems ) {
             if ( clsItem.strGroupId.empty() ) continue;
             for ( const auto &kv : m_mapCallSession ) {
-                if ( kv.second.strGroupId == clsItem.strGroupId ) {
+                if ( kv.second.strGroupId == clsItem.strGroupId && kv.second.bEstablished ) {
                     clsItem.bStillActive = true;
                     break;
                 }
@@ -876,7 +876,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
 
         // Track Session Info
         m_mapUserCall[{ pszUserId, pszGroupId }] = strCallId;
-        m_mapCallSession[strCallId] = { pszGroupId, pszUserId, pszUserId };  // Use UserId as SessionId
+        // Use UserId as SessionId. 미확립(pending) — 200 OK(OnCallStarted)에서 확립 표기
+        m_mapCallSession[strCallId] = { pszGroupId, pszUserId, pszUserId, false };
         CLog::Print( LOG_DEBUG, "InviteMember(%s): Added to Maps. CallId=%s", pszUserId, strCallId.c_str() );
 
         if ( !gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) ) {
@@ -1102,7 +1103,8 @@ void CGroupCallService::CheckMemberState() {
 void CGroupCallService::CheckGroupIntegrity() {
     // 규격 모델(TS 24.379): 세션을 상시 강제하지 않는다.
     //  - chat(group_type)            : 상시 세션 — affiliate+등록 멤버를 합류 유지(필요 시 컨텍스트 생성).
-    //  - prearranged/broadcast       : on-demand — 이미 active 한 세션의 누락 멤버만 재초대(late entry/복구).
+    //  - prearranged/broadcast       : on-demand — active 세션의 컨텍스트/콜로그 보장만. 서버 주도
+    //                                  재초대 없음(late entry/복구 = UE 주도 재조인·사용자 재참여).
     //                                  active 세션이 없으면 무동작(발신 INVITE 가 세션을 만든다).
     //  멤버 자격 = 등록됨(UserMap) ∧ (require_affiliation 이면 affiliated).
     gclsGroupMap.IterateInternal( [this]( const CspPttGroup &group ) {
@@ -1121,13 +1123,13 @@ void CGroupCallService::CheckGroupIntegrity() {
             vecEligible.push_back( strUserId );
         }
 
-        // 2) 세션 존재 판정
+        // 2) 세션 존재 판정 (확립 leg 만 — pending 초대가 '활성'을 자가 재생산하는 루프 방지)
         bool bActive = false, bHasContext = false;
         {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             bHasContext = ( m_mapGroupRtp.find( group._id ) != m_mapGroupRtp.end() );
             for ( const auto &kv : m_mapCallSession ) {
-                if ( kv.second.strGroupId == group._id ) {
+                if ( kv.second.strGroupId == group._id && kv.second.bEstablished ) {
                     bActive = true;
                     break;
                 }
@@ -1183,7 +1185,10 @@ void CGroupCallService::CheckGroupIntegrity() {
             }
         }
 
-        // 5) 누락 멤버 초대 (chat 합류 / on-demand active 세션 late-entry·복구)
+        // 5) 누락 멤버 초대 — chat 전용(상시 채널 유지). prearranged/broadcast 의 서버 주도
+        //    주기 재초대는 폐지: TS 24.379 의 late entry 는 UE 주도 재조인 모델이고, 백오프 없는
+        //    재초대는 미응답 멤버에게 무한 INVITE 루프가 된다(개시 시 fan-out 은 ProcessGroupCall 유지).
+        if ( !bPersistent ) return;
         for ( const auto &strUserId : vecEligible ) {
             bool bInCall;
             {
@@ -1225,6 +1230,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
         auto it = m_mapCallSession.find( strCallId );
         if ( it == m_mapCallSession.end() ) return;
 
+        it->second.bEstablished = true;  // 200 OK 수신 = leg 확립 (세션 활성 집계 대상)
         strGroupId = it->second.strGroupId;
         strSessionId = it->second.strSessionId;
         strMemberId = it->second.strMemberId;
@@ -1376,8 +1382,8 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
         }
 
         for ( const auto &kv : m_mapCallSession ) {
-            if ( kv.second.strGroupId == strGroupId ) {
-                bStillActive = true;
+            if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
+                bStillActive = true;  // 확립 leg 만 집계 — pending 초대가 세션을 붙드는 좀비 방지
                 break;
             }
         }
@@ -1415,10 +1421,37 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     if ( bStillActive ) {
         SendConferenceNotify( strGroupId, strMemberId, "disconnected", "deleted" );
     } else if ( !strGroupId.empty() ) {
-        // on-demand 그룹(prearranged/broadcast): 마지막 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
+        // on-demand 그룹(prearranged/broadcast): 마지막 확립 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
         CspPttGroup clsGrp;
         bool bChat = gclsGroupMap.Select( strGroupId.c_str(), clsGrp ) && clsGrp._groupType == "chat";
         if ( !bChat ) {
+            // 미확립(pending) fan-out INVITE 잔존분 취소 — 세션 해제 후 뒤늦게 200 OK 가 와서
+            // 없는 그룹에 JOIN 하는 고아 leg 방지 (StopCall 재진입은 맵 선삭제로 no-op).
+            std::vector<std::string> vecPending;
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                for ( auto itP = m_mapCallSession.begin(); itP != m_mapCallSession.end(); ) {
+                    if ( itP->second.strGroupId == strGroupId ) {
+                        vecPending.push_back( itP->first );
+                        itP = m_mapCallSession.erase( itP );
+                    } else {
+                        ++itP;
+                    }
+                }
+                for ( auto uIt = m_mapUserCall.begin(); uIt != m_mapUserCall.end(); ) {
+                    if ( uIt->first.second == strGroupId ) {
+                        uIt = m_mapUserCall.erase( uIt );
+                    } else {
+                        ++uIt;
+                    }
+                }
+            }
+            for ( const auto &strPending : vecPending ) {
+                CLog::Print( LOG_INFO, "OnCallTerminated: cancel pending invite Call(%s) — Group(%s) session end",
+                             strPending.c_str(), strGroupId.c_str() );
+                gclsUserAgent.StopCall( strPending.c_str() );
+                gclsCallMap.Delete( strPending.c_str(), false );
+            }
             gclsCmpClient.RemoveGroup( strGroupId, GetOrIssueGroupSesId( strGroupId ) );
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             m_mapGroupRtp.erase( strGroupId );

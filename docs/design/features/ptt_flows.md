@@ -328,7 +328,7 @@ UE                      CSP (CCscfModule)
   │                      │  [fan-out] affiliate+등록 멤버에게 multipart INVITE
   │                      │  ── INVITE ──────────────► 멤버 UE … (B 흐름: 200→JOIN)
   │                      │                            │
-  │  ※ 마지막 멤버 이탈 시 prearranged/broadcast 는 PTT_GROUP_REMOVE + 세션 종료.
+  │  ※ 마지막 확립 멤버 이탈 시 prearranged/broadcast 는 PTT_GROUP_REMOVE + 세션 종료.
   │     chat 은 상시 유지.
 ```
 
@@ -336,12 +336,18 @@ UE                      CSP (CCscfModule)
 
 ```
 prearranged / broadcast (on-demand):
-  세션 없음 ──(개시자 키업 INVITE: B5)──► PTT_GROUP_ADD + 세션 ──(마지막 멤버 이탈)──► PTT_GROUP_REMOVE
+  세션 없음 ──(개시자 키업 INVITE: B5)──► PTT_GROUP_ADD + 세션 ──(마지막 확립 멤버 이탈)──► PTT_GROUP_REMOVE
 
 chat (상시):
-  CheckGroupIntegrity 가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
+  CheckGroupIntegrity(10s 스윕)가 active chat 세션 유지 — affiliate 멤버 합류(InviteMember),
   de-affiliate/dereg 시 이탈.
 ```
+
+- 세션 활성·마지막 이탈 판정은 **확립된 leg(200 OK 수신)만** 센다. 미응답 pending INVITE 는 세션을
+  붙들지 못하며, 세션 해제 시 잔존 pending 초대는 CANCEL 된다 — 미응답 재초대 dialog 가 "활성 세션"을
+  자가 재생산해 전원 이탈 후에도 REMOVE 가 밀리는 좀비 세션 방지.
+- **서버 주도 주기 재초대는 chat 전용.** prearranged/broadcast 의 late entry/복구는 UE 주도
+  (사용자 재참여 버튼·앱 자동 재조인, TS 24.379 모델) — 서버는 개시 시 fan-out(B5)만 수행한다.
 
 > 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.
 

@@ -189,6 +189,10 @@ private:
         std::string strGroupId;
         std::string strMemberId;
         std::string strSessionId;
+        /** 확립된 leg 여부 — 발신자(AcceptCall)=즉시 true, fan-out 초대=200 OK(OnCallStarted)에서 true.
+         *  세션 활성/마지막 이탈 판정은 확립 leg 만 센다 — 미응답 pending INVITE 가 세션을 붙들어
+         *  전원 이탈 후에도 PTT_GROUP_REMOVE 가 밀리는 좀비 세션 방지. */
+        bool bEstablished = false;
     };
     // CallId -> Info
     std::map<std::string, CallSessionInfo> m_mapCallSession;
