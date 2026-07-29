@@ -99,8 +99,14 @@ class PttController(
     /** 그룹별 수신 음량 영속화 — 서비스가 주입. 신규 그룹 기본=최대([GroupVolumeStore.DEFAULT]). */
     var volumeStore: com.cims.ue.ptt.audio.GroupVolumeStore? = null
 
-    /** 참여 채널 영속화 — 서비스가 주입. 프로세스 재시작 후 등록 완료 시 자동 재조인. */
+    /** 참여 채널 영속화 — 서비스가 주입. 프로세스 재시작 후 등록 완료 시 자동 재조인.
+     *  ⚠️접근성(PttKeyService) 리바인드의 헤드리스 재기동에선 등록이 이 배선보다 먼저 끝난다 —
+     *  배선 시점에 복원을 재시도해야 복원 기회가 증발하지 않는다([maybeRestoreChannels] 가드와 한 쌍). */
     var channelStore: ChannelStore? = null
+        set(value) {
+            field = value
+            if (value != null && regState.value is RegState.Registered) maybeRestoreChannels()
+        }
 
     /** 이어폰(유선/BT) 장치 열거·지정 — 서비스가 주입. */
     var audioRouter: com.cims.ue.ptt.audio.AudioRouter? = null
@@ -358,8 +364,10 @@ class PttController(
      *  그 사이 생긴 세션은 존중한다([joinGroupCall] 이 중복 참여 무시). */
     private fun maybeRestoreChannels() {
         if (channelsRestored) return
-        channelsRestored = true
+        // 스토어 배선 전(접근성 헤드리스 재기동)이면 복원 기회를 소모하지 않는다 —
+        // 배선 시점에 channelStore setter 가 재호출(플래그는 실제 복원 착수에서만 소모).
         val st = channelStore ?: return
+        channelsRestored = true
         val want = st.joined
         if (want.isEmpty()) return
         val primary = st.primary
