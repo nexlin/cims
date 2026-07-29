@@ -290,11 +290,26 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
             return false;
         }
-        // 발신자 호출 추적
+        // 발신자 호출 추적. 같은 (발신자,그룹) 의 옛 레그가 남아 있으면(재조인 — 앱이 BYE 없이
+        // 새 INVITE 로 재참여) 고아가 되어 참가자 명단에 중복 표기되고 NOTIFY 가 낭비된다 →
+        // 옛 레그를 정리한다. ⚠️CMP LEAVE 는 보내지 않는다 — 멤버 키가 (group, user) 라 같은
+        // 사용자의 방금 JOIN 한 멤버십·포트까지 회수되어 미디어가 끊긴다(SIP 다이얼로그만 종료).
+        std::string strPrevCallId;
         {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            auto itPrev = m_mapUserCall.find( { pszCallerInfo, pszGroupId } );
+            if ( itPrev != m_mapUserCall.end() && itPrev->second != pszCallId ) {
+                strPrevCallId = itPrev->second;
+                m_mapCallSession.erase( strPrevCallId );
+            }
             m_mapUserCall[{ pszCallerInfo, pszGroupId }] = pszCallId;
             m_mapCallSession[pszCallId] = { pszGroupId, pszCallerInfo, pszCallerInfo, true };  // 발신자 = 확립
+        }
+        if ( !strPrevCallId.empty() ) {
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) rejoined Group(%s) — clearing stale leg(%s)",
+                         pszCallerInfo, pszGroupId, strPrevCallId.c_str() );
+            gclsUserAgent.StopCall( strPrevCallId.c_str() );
+            gclsCallMap.Delete( strPrevCallId.c_str(), false );
         }
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) MemberPort(%d)", pszCallerInfo,
                      iCallerLocalAudio );
@@ -1468,7 +1483,9 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
 
 void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
                                               const std::string &strStatus, const std::string &strJoining ) {
-    // 1. Collect all active call-IDs for this group + bump version
+    // 1. Collect established call-IDs for this group + bump version
+    //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대는 ①다이얼로그가 없어 NOTIFY 가
+    //    성립하지 않고 ②참가자 명단에 실리면 '아직 참여하지 않은 초대 대상'이 참여자로 표시된다.
     std::vector<std::string> vecCallIds;
     int iVersion = 0;
     {
@@ -1480,7 +1497,7 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
         }
 
         for ( const auto &kv : m_mapCallSession ) {
-            if ( kv.second.strGroupId == strGroupId ) {
+            if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
                 vecCallIds.push_back( kv.first );
             }
         }
@@ -1501,7 +1518,7 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         for ( const auto &kv : m_mapCallSession ) {
-            if ( kv.second.strGroupId == strGroupId ) {
+            if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
                 vecAllMembers.push_back( kv.second.strMemberId );
             }
         }
