@@ -106,6 +106,10 @@ public:
     void SubscribeGms();
     void SubscribeCms();
     void SubscribeReg();   // Event: reg — 자신의 등록 상태 구독 (RFC 3680, 실제 UE 플로우)
+    /** Event: conference — 그룹 참가자 정보 구독 (RFC 4575). 그룹 AoR 로
+     * SUBSCRIBE → 200 OK + 즉시 스냅샷 NOTIFY, 이후 멤버 변동마다 구독 경로로
+     * NOTIFY. */
+    void SubscribeConference(const std::string &strGroupId);
     void AffiliateGroup(bool bDeaffiliate = false);   // MCPTT 그룹 affiliation (TS 24.379 §9) — 그룹 URI 로 PUBLISH
     void SendPttRequest();
     void SendPttRelease();
@@ -167,6 +171,13 @@ public:
     std::string  m_strRegSubCallId;
     int          m_iRegSubSeq{0};
     std::string  m_strRegSubFromTag;
+
+    // conference 구독 다이얼로그 (RFC 4575 — 그룹 참가자 정보. 그룹 AoR 로
+    // SUBSCRIBE)
+    std::string m_strConfSubGroup;
+    std::string m_strConfSubCallId;
+    int m_iConfSubSeq{0};
+    std::string m_strConfSubFromTag;
 
     // 통계
     SimStats m_stats;

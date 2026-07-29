@@ -41,6 +41,8 @@ static std::string TimeToIso( time_t t ) {
 
 // Notify subscribers about group changes
 extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
+/** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
+extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody );
 
 // External global objects
 extern CSipUserAgent gclsUserAgent;
@@ -1481,8 +1483,10 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
 // Conference Event Package (RFC 4575) — in-dialog NOTIFY
 // ─────────────────────────────────────────────────────────
 
-void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
-                                              const std::string &strStatus, const std::string &strJoining ) {
+std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGroupId,
+                                                        const std::string &strChangedUser, const std::string &strStatus,
+                                                        const std::string &strJoining,
+                                                        std::vector<std::string> *pvecCallIdsOut ) {
     // 1. Collect established call-IDs for this group + bump version
     //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대는 ①다이얼로그가 없어 NOTIFY 가
     //    성립하지 않고 ②참가자 명단에 실리면 '아직 참여하지 않은 초대 대상'이 참여자로 표시된다.
@@ -1502,8 +1506,7 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
             }
         }
     }
-
-    if ( vecCallIds.empty() ) return;
+    if ( pvecCallIdsOut ) *pvecCallIdsOut = vecCallIds;
 
     // 2. Build conference-info+xml body (RFC 4575)
     //    F-09: 참가자 NOTIFY 는 항상 state="full"(변경 반영 후 현재 로스터 스냅샷) — partial 증분은
@@ -1550,17 +1553,32 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
     }
     oss << "  </users>\r\n"
         << "</conference-info>\r\n";
-    std::string strBody = oss.str();
+    return oss.str();
+}
 
-    // 3. Send in-dialog NOTIFY to each active participant via SipUserAgent
+void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
+                                              const std::string &strStatus, const std::string &strJoining ) {
+    std::vector<std::string> vecCallIds;
+    std::string strBody = BuildConferenceInfoBody( strGroupId, strChangedUser, strStatus, strJoining, &vecCallIds );
+
+    // 전송 — conference 구독자가 있으면 **구독 경로**(RFC 4575/6665 정합, 단말이 200 OK 응답).
+    //   구독자가 없으면 in-dialog NOTIFY 로 폴백한다: 구독 미구현 단말(구 APK)은 통화 다이얼로그로
+    //   받아야 참가자 화면이 갱신되며, 그 경우 단말 스택은 usage 없음으로 500 을 응답한다(무해).
+    int iSubs = SendConferenceNotifyToSubscribers( strGroupId, strBody );
+    if ( iSubs > 0 ) {
+        CLog::Print( LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) → %d subscribers",
+                     strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), iSubs );
+        return;
+    }
+    if ( vecCallIds.empty() ) return;
     for ( const auto &strCallId : vecCallIds ) {
         gclsUserAgent.SendNotifyWithBody( strCallId.c_str(), "conference", "application", "conference-info+xml",
                                           strBody );
     }
 
-    CLog::Print( LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d participants",
-                 strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(),
-                 (int)vecCallIds.size() );
+    CLog::Print(
+        LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d participants(in-dialog)",
+        strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(), (int)vecCallIds.size() );
 }
 
 /**

@@ -18,7 +18,8 @@ struct SubscriptionInfo {
     std::string strToTag;          // Server-generated tag -> NOTIFY From-tag
     std::string strContact;        // Contact URI from SUBSCRIBE -> NOTIFY Request-URI
     std::string strCallId;         // SIP Dialog Call-ID
-    std::string strEventType;      // "gms" or "cms"
+    std::string strEventType;      // "reg"|"affiliation"|"conference"|"gms"|"cms"
+    std::string strResourceId;     // 구독 대상 자원 (Req-URI user) — conference 는 그룹 ID
     int iExpires;                  // Expires in seconds
     time_t tStartTime;             // Subscription Start Time
     int iNotifySeq;                // CSeq counter for NOTIFY messages
@@ -52,6 +53,15 @@ public:
      */
     void GetSubscriptionsByUser( const std::string &strUserId, const std::string &strEventType,
                                  std::list<SubscriptionInfo> &outList );
+
+    /**
+     * @brief 자원(그룹 등) 기준 구독 조회 — conference 이벤트의 그룹별 구독자 목록에 사용
+     * @param strResourceId 자원 ID (conference = 그룹 ID)
+     * @param strEventType  이벤트 종별 ("conference" 등)
+     * @param outList       결과
+     */
+    void GetSubscriptionsByResource( const std::string &strResourceId, const std::string &strEventType,
+                                     std::list<SubscriptionInfo> &outList );
 
     /**
      * @brief Get a single subscription by Call-ID (returns false if not found)

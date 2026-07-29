@@ -639,7 +639,7 @@ static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
  */
 static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::string &etag,
                                     const std::string &strChangedId, const char *pszRegEvent = NULL,
-                                    const CUserInfo *pclsRegInfo = NULL ) {
+                                    const CUserInfo *pclsRegInfo = NULL, const std::string *pstrPrebuiltBody = NULL ) {
     // SUBSCRIBE 수신 listener 의 bind_ip:bind_port 를 Via/From 자기 주소로 사용.
     // listener id 가 0 (옛 dialog) 이거나 매칭 실패 시 stack primary 로 fallback.
     const int iListenerId = sub.iInboundListenerId;
@@ -665,6 +665,9 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     if ( sub.strEventType == "reg" ) {
         // reg-event: From = 가입자 자신의 AoR (RFC 3680)
         pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    } else if ( sub.strEventType == "conference" ) {
+        // conference: notifier = conference focus = 그룹 AoR (RFC 4575)
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
         std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
                                  : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
@@ -727,6 +730,11 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         pMsg->AddHeader( "Event", "presence" );
         strBody = BuildAffiliationInfoBody( sub.strUserId );
         pMsg->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-affiliation-info+xml" );
+    } else if ( sub.strEventType == "conference" ) {
+        // 참가자 정보 (RFC 4575) — 본문은 호출자(GroupCallService)가 만든 로스터 스냅샷
+        pMsg->AddHeader( "Event", "conference" );
+        if ( pstrPrebuiltBody != NULL ) strBody = *pstrPrebuiltBody;
+        pMsg->m_clsContentType.Set( "application", "conference-info+xml" );
     } else {
         pMsg->AddHeader( "Event", "xcap-diff" );
         strBody = BuildXcapDiffBody( sub, etag, strChangedId );
@@ -825,6 +833,13 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
         SendNotifyToSubscriber( sub, "init", "" );
         return;
     }
+    if ( sub.strEventType == "conference" ) {
+        // RFC 6665 §4.1.1: 구독 수락 직후 현재 상태 1건 — 그룹 참가자 로스터 스냅샷.
+        //   활성 세션이 없으면 빈 로스터(users 없음)로 나가 UE 가 "참여자 0" 을 즉시 알 수 있다.
+        std::string strBody = gclsGroupCallService.BuildConferenceInfoBody( sub.strResourceId );
+        SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
+        return;
+    }
     if ( sub.strEventType == "gms" ) {
         // GMS 초기 동기화: 가입자가 속한 그룹별로 group document NOTIFY 발송.
         //   (기존엔 빈 group sel `tel:` 하나만 보내 UE GET 이 404 였음.)
@@ -917,6 +932,23 @@ void SendAffiliationNotify( const std::string &strUserId ) {
     for ( auto &sub : subList ) {
         SendNotifyToSubscriber( sub, "aff", "" );
     }
+}
+
+/**
+ * @brief 그룹의 conference 구독자에게 참가자 정보 NOTIFY 를 푸시한다 (RFC 4575/6665 정합 경로).
+ *   본문은 호출자(GroupCallService)가 만든 로스터 스냅샷.
+ * @returns 전송한 구독자 수. 0 이면 구독자가 없으므로 호출자가 in-dialog 폴백을 쓴다
+ *   (구독 미구현 구 단말 호환 — 전환기 병행).
+ */
+int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody ) {
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByResource( strGroupId, "conference", subList );
+    if ( subList.empty() ) return 0;
+    CLog::Print( LOG_INFO, "SendConferenceNotify(sub): Group=%s subs=%d", strGroupId.c_str(), (int)subList.size() );
+    for ( auto &sub : subList ) {
+        SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
+    }
+    return (int)subList.size();
 }
 
 /**

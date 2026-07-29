@@ -525,6 +525,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     info.strContact = strContactUri;
     info.strCallId = strSubCallId;
     info.strEventType = strEventType;
+    info.strResourceId = strReqUriUser;  // 자원 기준 조회용 (conference = 그룹 ID)
     info.iExpires = ( iExpires > 0 ) ? iExpires : 3600;
     info.tStartTime = time( NULL );
     info.iNotifySeq = 1;

@@ -407,6 +407,12 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             usleep(50000);
             s->AffiliateGroup();   // MCPTT 그룹 affiliation (그룹콜 수신 조건)
             usleep(50000);
+            // 참가자 정보 구독 (RFC 4575) — 그룹콜 참가자 NOTIFY 를 구독 경로로
+            // 수신
+            if (!s->m_strGroupId.empty()) {
+              s->SubscribeConference(s->m_strGroupId);
+              usleep(50000);
+            }
         }
         // 구독 완료 대기 (최대 10초)
         for (int retry = 0; retry < 100; ++retry) {

@@ -480,6 +480,59 @@ void SimSession::SendSubscribe(const std::string& strPsi,
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
 }
 
+// ─────────────────────────────────────────────
+//  conference 구독 (RFC 4575) — 그룹 AoR 로 SUBSCRIBE.
+//  Req-URI/To = 그룹, Event: conference, body 없음.
+//  CSP 는 200 OK 직후 현재 로스터 스냅샷 NOTIFY 를 보내고, 이후 멤버 변동마다
+//  구독 경로로 NOTIFY 한다(구독자 없으면 서버가 in-dialog 폴백).
+// ─────────────────────────────────────────────
+void SimSession::SubscribeConference(const std::string &strGroupId) {
+  const std::string &strLocalIp = m_clsSetup.m_strLocalIp;
+  int iLocalPort = m_iLocalPort;
+
+  char szCallId[128];
+  snprintf(szCallId, sizeof(szCallId), "confsub_%s_%s_%d_%d",
+           strGroupId.c_str(), m_strUser.c_str(), m_iId, (int)time(NULL));
+  m_strConfSubGroup = strGroupId;
+  m_strConfSubCallId = szCallId;
+  m_iConfSubSeq = 1;
+
+  char szTag[64];
+  SipMakeTag(szTag, sizeof(szTag));
+  m_strConfSubFromTag = szTag;
+
+  CSipMessage *pMsg = new CSipMessage();
+  pMsg->m_strSipMethod = "SUBSCRIBE";
+  pMsg->m_clsReqUri.Set("sip", strGroupId.c_str(), m_strDomain.c_str(),
+                        m_iServerPort);
+
+  char szBranch[SIP_BRANCH_MAX_SIZE];
+  SipMakeBranch(szBranch, sizeof(szBranch));
+  pMsg->AddVia(strLocalIp.c_str(), iLocalPort, szBranch);
+
+  pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(),
+                               0);
+  pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
+  pMsg->m_clsTo.m_clsUri.Set("sip", strGroupId.c_str(), m_strDomain.c_str(), 0);
+  pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
+  pMsg->m_clsCSeq.Set(m_iConfSubSeq, "SUBSCRIBE");
+  pMsg->m_iMaxForwards = 70;
+  pMsg->AddHeader("Expires", "3600");
+  pMsg->AddHeader("Event", "conference");
+  pMsg->AddHeader("Accept", "application/conference-info+xml");
+
+  char szContact[128];
+  snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>", m_strUser.c_str(),
+           strLocalIp.c_str(), iLocalPort);
+  pMsg->AddHeader("Contact", szContact);
+
+  pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+
+  printf("[%d] SUBSCRIBE conference group=%s Call-ID=%s\n", m_iId,
+         strGroupId.c_str(), szCallId);
+  m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
 void SimSession::SubscribeGms() {
     SendSubscribe("gms_psi", m_strGmsCallId, m_iGmsSeq, m_strGmsFromTag);
 }

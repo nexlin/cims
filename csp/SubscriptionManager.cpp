@@ -50,6 +50,18 @@ void CSubscriptionManager::GetSubscriptionsByUser( const std::string &strUserId,
     }
 }
 
+void CSubscriptionManager::GetSubscriptionsByResource( const std::string &strResourceId,
+                                                       const std::string &strEventType,
+                                                       std::list<SubscriptionInfo> &outList ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+
+    for ( auto &pair : m_mapSubs ) {
+        if ( pair.second.strResourceId == strResourceId && pair.second.strEventType == strEventType ) {
+            outList.push_back( pair.second );
+        }
+    }
+}
+
 bool CSubscriptionManager::GetSubscriptionByCallId( const std::string &strCallId, SubscriptionInfo &outInfo ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
