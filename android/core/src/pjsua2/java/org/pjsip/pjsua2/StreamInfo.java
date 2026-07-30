@@ -306,6 +306,64 @@ public class StreamInfo {
   }
 
   /**
+   * Stream keep-alive and NAT hole punch (see #PJMEDIA_STREAM_ENABLE_KA) is<br>
+   * enabled?
+   */
+  public void setUseKa(boolean value) {
+    pjsua2JNI.StreamInfo_useKa_set(swigCPtr, this, value);
+  }
+
+  /**
+   * Stream keep-alive and NAT hole punch (see #PJMEDIA_STREAM_ENABLE_KA) is<br>
+   * enabled?
+   */
+  public boolean getUseKa() {
+    return pjsua2JNI.StreamInfo_useKa_get(swigCPtr, this);
+  }
+
+  /**
+   *  Number of keepalive messages to be sent
+   */
+  public void setStartCountKa(long value) {
+    pjsua2JNI.StreamInfo_startCountKa_set(swigCPtr, this, value);
+  }
+
+  /**
+   *  Number of keepalive messages to be sent
+   */
+  public long getStartCountKa() {
+    return pjsua2JNI.StreamInfo_startCountKa_get(swigCPtr, this);
+  }
+
+  /**
+   * Keepalive interval after the stream is created.
+   */
+  public void setStartIntervalKa(long value) {
+    pjsua2JNI.StreamInfo_startIntervalKa_set(swigCPtr, this, value);
+  }
+
+  /**
+   * Keepalive interval after the stream is created.
+   */
+  public long getStartIntervalKa() {
+    return pjsua2JNI.StreamInfo_startIntervalKa_get(swigCPtr, this);
+  }
+
+  /**
+   *  Keepalive sending interval.
+   */
+  public void setIntervalKa(long value) {
+    pjsua2JNI.StreamInfo_intervalKa_set(swigCPtr, this, value);
+  }
+
+  /**
+   *  Keepalive sending interval.
+   */
+  public long getIntervalKa() {
+    return pjsua2JNI.StreamInfo_intervalKa_get(swigCPtr, this);
+  }
+
+  /**
    * Disable automatic sending of RTCP SDES and BYE.
    */
   public void setRtcpSdesByeDisabled(boolean value) {

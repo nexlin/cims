@@ -761,6 +761,554 @@ CIMS_IDLE_TX_EOF
   echo "  patched: idle zero-PCM TX suppressed for VAD-off streams"
 fi
 
+echo "=== [2-13] conference 이벤트 구독 패치 (RFC 4575 로스터 / RFC 6665) ==="
+# MCPTT 그룹콜 참가자 로스터를 정식 구독으로 받는다. 종전엔 CSP 가 통화 dialog 로 보내는
+# in-dialog NOTIFY 를 앱이 tsx 원문에서 훔쳐 읽고 스택은 usage 없음으로 500 을 응답했다
+# (RFC 6665 는 매칭 구독 없는 NOTIFY 에 481 을 요구 — 편법).
+#  ① pjsua_pres.c: "conference" 이벤트 패키지 등록(Allow-Events + Accept:
+#     application/conference-info+xml) + UAC 구독 생성/in-dialog 갱신/종료 +
+#     수신 NOTIFY 본문을 on_pager2 로 앱 전달(→ pjsua2 Account::onInstantMessage).
+#  ② pjsua_acc.c: 앱이 보낸 SUBSCRIBE 중 Event: conference 를 가로채 ①로 넘긴다.
+#     앱 API(Account::sendRequest)가 그대로여서 **SWIG 재생성/변경이 없다**.
+# 구독 생성·갱신(같은 Call-ID/양측 tag/CSeq+1)·Subscription-State 해석·매칭 없는
+# NOTIFY 의 481 응답을 스택이 담당 = 규칙을 앱에서 재구현하지 않는다. 멱등.
+if grep -q "pjsua_cims_conf_subscribe" pjsip/src/pjsua-lib/pjsua_acc.c; then
+  echo "  already patched (skip)"
+else
+  git apply <<'CIMS_CONF_EVSUB_EOF'
+diff --git a/pjsip/src/pjsua-lib/pjsua_acc.c b/pjsip/src/pjsua-lib/pjsua_acc.c
+index 526cb39..816cf3c 100644
+--- a/pjsip/src/pjsua-lib/pjsua_acc.c
++++ b/pjsip/src/pjsua-lib/pjsua_acc.c
+@@ -1546,6 +1546,58 @@ static void on_send_request(void *request_data, pjsip_event *event)
+         (pjsua_var.ua_cfg.cb.on_acc_send_request)(data->acc_id, data->token, event);
+ }
+ 
++/* CIMS: conference 이벤트 구독 (구현 = pjsua_pres.c) */
++pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
++                                      const pj_str_t *target,
++                                      pj_uint32_t expires);
++
++/* CIMS: 앱이 보낸 SUBSCRIBE 가 conference 이벤트면 evsub 기반 구독으로 넘긴다.
++ *
++ * RFC 6665 구독은 단발 요청이 아니다 — 갱신이 in-dialog(같은 Call-ID·양측 tag·
++ * CSeq+1)여야 하고, 종료·만료·Subscription-State 해석·매칭 없는 NOTIFY 의 481
++ * 응답까지 상태를 유지해야 한다. 일반 out-of-dialog 요청으로 모방하면 갱신마다
++ * 새 구독이 생겨 누적되므로(비규격), 스택의 evsub 프레임워크에 위임한다.
++ * 앱 API(pjsua2 Account::sendRequest)는 그대로여서 SWIG 변경이 없다.
++ *
++ * @return PJ_TRUE 면 여기서 처리됨(호출자는 반환), PJ_FALSE 면 일반 경로.
++ */
++static pj_bool_t cims_intercept_subscribe(pjsua_acc_id acc_id,
++                                          const pj_str_t *dest_uri,
++                                          const pj_str_t *method,
++                                          const pjsua_msg_data *msg_data,
++                                          pj_status_t *p_status)
++{
++    const pjsip_hdr *h;
++    pj_bool_t is_conf = PJ_FALSE;
++    pj_uint32_t expires = PJSIP_EXPIRES_NOT_SPECIFIED;
++
++    if (pj_stricmp2(method, "SUBSCRIBE") != 0 || !msg_data)
++        return PJ_FALSE;
++
++    h = msg_data->hdr_list.next;
++    while (h != &msg_data->hdr_list) {
++        const pjsip_generic_string_hdr *gh =
++                                    (const pjsip_generic_string_hdr*)h;
++
++        if (pj_stricmp2(&h->name, "Event") == 0) {
++            if (gh->hvalue.slen >= 10 &&
++                pj_strnicmp2(&gh->hvalue, "conference", 10) == 0)
++            {
++                is_conf = PJ_TRUE;
++            }
++        } else if (pj_stricmp2(&h->name, "Expires") == 0) {
++            expires = (pj_uint32_t) pj_strtoul(&gh->hvalue);
++        }
++        h = h->next;
++    }
++
++    if (!is_conf)
++        return PJ_FALSE;
++
++    *p_status = pjsua_cims_conf_subscribe(acc_id, dest_uri, expires);
++    return PJ_TRUE;
++}
++
+ PJ_DEF(pj_status_t) pjsua_acc_send_request(pjsua_acc_id acc_id,
+                                            const pj_str_t *dest_uri,
+                                            const pj_str_t *method,
+@@ -1566,6 +1618,10 @@ PJ_DEF(pj_status_t) pjsua_acc_send_request(pjsua_acc_id acc_id,
+     PJ_ASSERT_RETURN(method, PJ_EINVAL);
+     PJ_UNUSED_ARG(options);
+ 
++    /* CIMS: conference 구독은 evsub 경로로 (위 주석 참조) */
++    if (cims_intercept_subscribe(acc_id, dest_uri, method, msg_data, &status))
++        return status;
++
+     PJ_LOG(4,(THIS_FILE, "Account %d sending %.*s request..",
+                           acc_id, (int)method->slen, method->ptr));
+     pj_log_push_indent();
+diff --git a/pjsip/src/pjsua-lib/pjsua_pres.c b/pjsip/src/pjsua-lib/pjsua_pres.c
+index 2f3b8b7..ffb8889 100644
+--- a/pjsip/src/pjsua-lib/pjsua_pres.c
++++ b/pjsip/src/pjsua-lib/pjsua_pres.c
+@@ -2636,6 +2636,430 @@ static pj_status_t enable_unsolicited_mwi(void)
+ }
+ 
+ 
++/***************************************************************************
++ * CIMS: conference 이벤트 구독 (RFC 4575 로스터 + RFC 6665 구독 프레임워크)
++ *
++ * MCPTT 그룹콜의 참가자 로스터를 정식 구독으로 받는다. 앱(pjsua2)은 SWIG 변경 없이
++ * 기존 Account::sendRequest("SUBSCRIBE", <group AoR>, Event: conference) 를 그대로
++ * 호출하고, pjsua_acc_send_request 가 그 요청을 여기로 넘긴다 — 단발 out-of-dialog
++ * 요청 대신 스택이 관리하는 구독이 생성된다. 구독 생성·in-dialog 갱신(같은 Call-ID /
++ * 양측 tag / CSeq+1)·종료·Subscription-State 해석·매칭 없는 NOTIFY 의 481 응답을
++ * 모두 evsub 프레임워크가 수행하므로 규칙을 앱에서 재구현하지 않는다.
++ *
++ * 수신 NOTIFY 본문은 on_pager2 로 앱에 올린다 → pjsua2 Account::onInstantMessage
++ * (contentType=application/conference-info+xml, fromUri=그룹 AoR=conference focus).
++ */
++
++/* 동시 구독 상한 = 단말이 동시에 편성/참여할 수 있는 채널 수 */
++#define CIMS_CONF_MAX_SUB       16
++
++typedef struct cims_conf_sub
++{
++    pj_bool_t            used;
++    pjsua_acc_id         acc_id;
++    pj_pool_t           *pool;      /**< target 문자열 보관용            */
++    pj_str_t             target;    /**< 구독 자원 = 그룹 AoR            */
++    pjsip_dialog        *dlg;
++    pjsip_evsub         *sub;
++} cims_conf_sub;
++
++static cims_conf_sub cims_conf_subs[CIMS_CONF_MAX_SUB];
++
++/* 이벤트 패키지 등록용 모듈 (mod-mwi 와 같은 역할 — mod_data 슬롯 소유) */
++static pjsip_module mod_cims_conf =
++{
++    NULL, NULL,                         /* prev, next.                  */
++    { "mod-cims-conf", 13 },            /* Name.                        */
++    -1,                                 /* Id                           */
++    PJSIP_MOD_PRIORITY_DIALOG_USAGE,    /* Priority                     */
++    NULL,                               /* load()                       */
++    NULL,                               /* start()                      */
++    NULL,                               /* stop()                       */
++    NULL,                               /* unload()                     */
++    NULL,                               /* on_rx_request()              */
++    NULL,                               /* on_rx_response()             */
++    NULL,                               /* on_tx_request.               */
++    NULL,                               /* on_tx_response()             */
++    NULL,                               /* on_tsx_state()               */
++};
++
++static const pj_str_t STR_CONF_EVENT = { "conference", 10 };
++static const pj_str_t STR_CONF_INFO  = { "application/conference-info+xml", 31 };
++
++
++static cims_conf_sub *cims_conf_find(const pj_str_t *target)
++{
++    unsigned i;
++
++    for (i=0; i<PJ_ARRAY_SIZE(cims_conf_subs); ++i) {
++        if (cims_conf_subs[i].used &&
++            pj_stricmp(&cims_conf_subs[i].target, target) == 0)
++        {
++            return &cims_conf_subs[i];
++        }
++    }
++    return NULL;
++}
++
++
++static void cims_conf_release(cims_conf_sub *cs)
++{
++    pj_pool_t *pool = cs->pool;
++
++    pj_bzero(cs, sizeof(*cs));
++    if (pool)
++        pj_pool_release(pool);
++}
++
++
++/* 구독 상태 전이 — TERMINATED 면 슬롯을 비워 재구독이 가능하게 한다.
++ * (서버의 Subscription-State: terminated, 구독 만료, NOTIFY 실패 모두 여기로 온다)
++ */
++static void cims_conf_on_evsub_state(pjsip_evsub *sub, pjsip_event *event)
++{
++    cims_conf_sub *cs;
++
++    PJ_UNUSED_ARG(event);
++
++    cs = (cims_conf_sub*) pjsip_evsub_get_mod_data(sub, mod_cims_conf.id);
++    if (!cs)
++        return;
++
++    if (pjsip_evsub_get_state(sub) == PJSIP_EVSUB_STATE_TERMINATED) {
++        PJ_LOG(4,(THIS_FILE, "CIMS conference subscription to %.*s terminated",
++                  (int)cs->target.slen, cs->target.ptr));
++        pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, NULL);
++        cims_conf_release(cs);
++    }
++}
++
++
++/* NOTIFY 수신 — 200 OK(evsub 기본)로 응답하고 본문을 앱에 전달.
++ * evsub 가 Event/dialog 매칭·CSeq·Subscription-State 를 이미 검증한 뒤 불린다.
++ */
++static void cims_conf_on_rx_notify(pjsip_evsub *sub,
++                                   pjsip_rx_data *rdata,
++                                   int *p_st_code,
++                                   pj_str_t **p_st_text,
++                                   pjsip_hdr *res_hdr,
++                                   pjsip_msg_body **p_body)
++{
++    cims_conf_sub *cs;
++    pjsip_msg_body *body;
++    pjsip_contact_hdr *contact_hdr;
++    pjsip_media_type *m;
++    pj_str_t from, to, contact, mime, text;
++    char mime_buf[128];
++
++    PJ_UNUSED_ARG(p_st_text);
++    PJ_UNUSED_ARG(res_hdr);
++    PJ_UNUSED_ARG(p_body);
++
++    cs = (cims_conf_sub*) pjsip_evsub_get_mod_data(sub, mod_cims_conf.id);
++    if (!cs || !rdata)
++        return;
++
++    *p_st_code = 200;
++
++    body = rdata->msg_info.msg->body;
++    if (!body || !body->data || body->len == 0)
++        return;                 /* 본문 없는 상태 통지(갱신 확인 등) — 전달 불필요 */
++
++    if (!pjsua_var.ua_cfg.cb.on_pager2)
++        return;
++
++    /* From/To/Contact 는 pjsua_im 의 pager 처리와 같은 방식으로 문자열화한다
++     * (앱이 MESSAGE 수신에서 쓰는 형식과 동일해야 파싱이 일관된다).
++     */
++    from.ptr = (char*) pj_pool_alloc(rdata->tp_info.pool, PJSIP_MAX_URL_SIZE);
++    from.slen = pjsip_uri_print(PJSIP_URI_IN_FROMTO_HDR,
++                                rdata->msg_info.from->uri,
++                                from.ptr, PJSIP_MAX_URL_SIZE);
++    if (from.slen < 1)
++        from = cs->target;
++
++    to.ptr = (char*) pj_pool_alloc(rdata->tp_info.pool, PJSIP_MAX_URL_SIZE);
++    to.slen = pjsip_uri_print(PJSIP_URI_IN_FROMTO_HDR,
++                              rdata->msg_info.to->uri,
++                              to.ptr, PJSIP_MAX_URL_SIZE);
++    if (to.slen < 1)
++        to.slen = 0;
++
++    contact_hdr = (pjsip_contact_hdr*)
++                  pjsip_msg_find_hdr(rdata->msg_info.msg, PJSIP_H_CONTACT,
++                                     NULL);
++    if (contact_hdr && contact_hdr->uri) {
++        contact.ptr = (char*) pj_pool_alloc(rdata->tp_info.pool,
++                                            PJSIP_MAX_URL_SIZE);
++        contact.slen = pjsip_uri_print(PJSIP_URI_IN_CONTACT_HDR,
++                                       contact_hdr->uri, contact.ptr,
++                                       PJSIP_MAX_URL_SIZE);
++        if (contact.slen < 1)
++            contact.slen = 0;
++    } else {
++        contact.ptr = (char*)"";
++        contact.slen = 0;
++    }
++
++    m = &body->content_type;
++    mime.ptr = mime_buf;
++    mime.slen = pj_ansi_snprintf(mime_buf, sizeof(mime_buf), "%.*s/%.*s",
++                                 (int)m->type.slen, m->type.ptr,
++                                 (int)m->subtype.slen, m->subtype.ptr);
++    if (mime.slen < 1)
++        mime = STR_CONF_INFO;
++
++    text.ptr = (char*) body->data;
++    text.slen = (pj_ssize_t) body->len;
++
++    PJ_LOG(5,(THIS_FILE, "CIMS conference NOTIFY from %.*s (%d bytes)",
++              (int)from.slen, from.ptr, (int)text.slen));
++
++    (*pjsua_var.ua_cfg.cb.on_pager2)(PJSUA_INVALID_ID, &from, &to, &contact,
++                                     &mime, &text, rdata, cs->acc_id);
++}
++
++
++/* on_client_refresh / on_server_timeout 은 기본 동작(자동 in-dialog 갱신)을 쓴다 */
++static pjsip_evsub_user cims_conf_cb =
++{
++    &cims_conf_on_evsub_state,
++    NULL,                       /* on_tsx_state                         */
++    NULL,                       /* on_rx_refresh (UAS 전용)             */
++    &cims_conf_on_rx_notify,
++    NULL,                       /* on_client_refresh: 기본 = 자동 갱신  */
++    NULL,                       /* on_server_timeout                    */
++};
++
++
++/*
++ * conference 구독 시작/갱신/종료.
++ *  expires > 0                        : 신규 생성 또는 in-dialog 갱신
++ *  expires == 0                       : 구독 해지 (SUBSCRIBE Expires: 0)
++ *  expires == PJSIP_EXPIRES_NOT_SPECIFIED : 패키지 기본값 사용
++ */
++pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
++                                      const pj_str_t *target,
++                                      pj_uint32_t expires)
++{
++    pjsua_acc *acc;
++    cims_conf_sub *cs;
++    pj_pool_t *tmp_pool = NULL;
++    pj_str_t contact;
++    pjsip_dialog *dlg = NULL;
++    pjsip_evsub *sub = NULL;
++    pjsip_tx_data *tdata;
++    pjsip_tpselector tp_sel;
++    pj_status_t status;
++    unsigned i;
++
++    PJ_ASSERT_RETURN(target && target->slen, PJ_EINVAL);
++    PJ_ASSERT_RETURN(acc_id>=0 && acc_id<(int)PJ_ARRAY_SIZE(pjsua_var.acc),
++                     PJ_EINVAL);
++    PJ_ASSERT_RETURN(pjsua_acc_is_valid(acc_id), PJ_EINVAL);
++
++    acc = &pjsua_var.acc[acc_id];
++
++    /* 기존 구독이 있으면 갱신 또는 해지 — 둘 다 in-dialog 요청이어야 하며,
++     * 앱의 일반 sendRequest 로는 만들 수 없는 부분이다.
++     */
++    cs = cims_conf_find(target);
++    if (cs) {
++        pjsip_dlg_inc_lock(cs->dlg);
++        status = pjsip_evsub_initiate(cs->sub, NULL, expires, &tdata);
++        if (status == PJ_SUCCESS) {
++            pjsua_process_msg_data(tdata, NULL);
++            status = pjsip_evsub_send_request(cs->sub, tdata);
++        }
++        pjsip_dlg_dec_lock(cs->dlg);
++
++        if (status != PJ_SUCCESS) {
++            pjsua_perror(THIS_FILE, "Unable to update conference subscription",
++                         status);
++        } else {
++            PJ_LOG(4,(THIS_FILE, "CIMS conference subscription to %.*s %s",
++                      (int)target->slen, target->ptr,
++                      (expires==0 ? "terminating" : "refreshed")));
++        }
++        return status;
++    }
++
++    /* 구독이 없는데 해지 요청 — 할 일 없음 */
++    if (expires == 0)
++        return PJ_SUCCESS;
++
++    for (i=0; i<PJ_ARRAY_SIZE(cims_conf_subs); ++i) {
++        if (!cims_conf_subs[i].used)
++            break;
++    }
++    if (i == PJ_ARRAY_SIZE(cims_conf_subs)) {
++        PJ_LOG(3,(THIS_FILE, "Too many conference subscriptions (max %d)",
++                  CIMS_CONF_MAX_SUB));
++        return PJ_ETOOMANY;
++    }
++    cs = &cims_conf_subs[i];
++
++    PJ_LOG(4,(THIS_FILE, "Starting CIMS conference subscription to %.*s..",
++              (int)target->slen, target->ptr));
++    pj_log_push_indent();
++
++    /* Contact — 계정에 이미 있으면 그것을 쓴다(MWI 와 동일) */
++    if (acc->contact.slen) {
++        contact = acc->contact;
++    } else {
++        tmp_pool = pjsua_pool_create("tmpconf", 512, 256);
++        status = pjsua_acc_create_uac_contact(tmp_pool, &contact,
++                                              acc_id, &acc->cfg.id);
++        if (status != PJ_SUCCESS) {
++            pjsua_perror(THIS_FILE, "Unable to generate Contact header",
++                         status);
++            goto on_return;
++        }
++    }
++
++    status = pjsip_dlg_create_uac(pjsip_ua_instance(), &acc->cfg.id, &contact,
++                                  target, NULL, &dlg);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Unable to create dialog", status);
++        goto on_return;
++    }
++
++    pjsip_dlg_inc_lock(dlg);
++
++    if (acc->cfg.allow_via_rewrite && acc->via_addr.host.slen > 0) {
++        pjsip_dlg_set_via_sent_by(dlg, &acc->via_addr, acc->via_tp);
++    } else if (!pjsua_sip_acc_is_using_stun(acc_id) &&
++               !pjsua_sip_acc_is_using_upnp(acc_id))
++    {
++        pjsip_host_port via_addr;
++        const void *via_tp;
++
++        if (pjsua_acc_get_uac_addr(acc_id, dlg->pool, &acc->cfg.id,
++                                   &via_addr, NULL, NULL,
++                                   &via_tp) == PJ_SUCCESS)
++        {
++            pjsip_dlg_set_via_sent_by(dlg, &via_addr,
++                                      (pjsip_transport*)via_tp);
++        }
++    }
++
++    /* Event 헤더에 id 파라미터를 붙이지 않는다 — 서버 NOTIFY 도 "Event: conference"
++     * 단독이므로 id 없는 매칭(PJSIP_EVSUB_NO_EVENT_ID)이어야 짝이 맞는다.
++     */
++    status = pjsip_evsub_create_uac(dlg, &cims_conf_cb, &STR_CONF_EVENT,
++                                    PJSIP_EVSUB_NO_EVENT_ID, &sub);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Error creating conference subscription",
++                     status);
++        pjsip_dlg_dec_lock(dlg);
++        pjsip_dlg_terminate(dlg);
++        goto on_return;
++    }
++
++    pjsua_init_tpselector(acc_id, &tp_sel);
++    pjsip_dlg_set_transport(dlg, &tp_sel);
++
++    if (!pj_list_empty(&acc->route_set))
++        pjsip_dlg_set_route_set(dlg, &acc->route_set);
++
++    if (acc->cred_cnt) {
++        pjsip_auth_clt_set_credentials(&dlg->auth_sess, acc->cred_cnt,
++                                       acc->cred);
++    }
++    pjsip_auth_clt_set_prefs(&dlg->auth_sess, &acc->cfg.auth_pref);
++
++    cs->used   = PJ_TRUE;
++    cs->acc_id = acc_id;
++    cs->pool   = pjsua_pool_create("cimsconf", 512, 256);
++    cs->dlg    = dlg;
++    cs->sub    = sub;
++    pj_strdup_with_null(cs->pool, &cs->target, target);
++
++    pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, cs);
++
++    status = pjsip_evsub_initiate(sub, NULL, expires, &tdata);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Unable to create conference SUBSCRIBE",
++                     status);
++        pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, NULL);
++        pjsip_dlg_dec_lock(dlg);
++        pjsip_evsub_terminate(sub, PJ_FALSE);
++        cims_conf_release(cs);
++        goto on_return;
++    }
++
++    pjsua_process_msg_data(tdata, NULL);
++
++    status = pjsip_evsub_send_request(sub, tdata);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Unable to send conference SUBSCRIBE", status);
++        pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, NULL);
++        pjsip_dlg_dec_lock(dlg);
++        pjsip_evsub_terminate(sub, PJ_FALSE);
++        cims_conf_release(cs);
++        goto on_return;
++    }
++
++    pjsip_dlg_dec_lock(dlg);
++
++on_return:
++    if (tmp_pool) pj_pool_release(tmp_pool);
++    pj_log_pop_indent();
++    return status;
++}
++
++
++/* 라이브러리 종료 시 남은 구독 정리 (로그아웃→재로그인 사이클 누수 방지) */
++static void cims_conf_shutdown(void)
++{
++    unsigned i;
++
++    for (i=0; i<PJ_ARRAY_SIZE(cims_conf_subs); ++i) {
++        cims_conf_sub *cs = &cims_conf_subs[i];
++
++        if (!cs->used || !cs->sub)
++            continue;
++        pjsip_evsub_set_mod_data(cs->sub, mod_cims_conf.id, NULL);
++        pjsip_evsub_terminate(cs->sub, PJ_FALSE);
++        cims_conf_release(cs);
++    }
++}
++
++
++/* conference 이벤트 패키지 등록 — Allow-Events: conference +
++ * SUBSCRIBE 의 Accept: application/conference-info+xml 자동 부착.
++ * 패키지 미등록이면 pjsip_evsub_create_uac 가 PJSIP_SIMPLE_ENOPKG 로 실패한다.
++ */
++static pj_status_t cims_conf_init(void)
++{
++    pj_str_t accept[1];
++    pj_status_t status;
++
++    if (mod_cims_conf.id != -1)
++        return PJ_SUCCESS;                  /* 이미 등록됨 (재init 대비) */
++
++    pj_bzero(cims_conf_subs, sizeof(cims_conf_subs));
++
++    status = pjsip_endpt_register_module(pjsua_var.endpt, &mod_cims_conf);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Unable to register conference module",
++                     status);
++        return status;
++    }
++
++    accept[0] = STR_CONF_INFO;
++    status = pjsip_evsub_register_pkg(&mod_cims_conf, &STR_CONF_EVENT,
++                                      3600, PJ_ARRAY_SIZE(accept), accept);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Unable to register conference event package",
++                     status);
++        pjsip_endpt_unregister_module(pjsua_var.endpt, &mod_cims_conf);
++        return status;
++    }
++
++    return PJ_SUCCESS;
++}
++
+ 
+ /***************************************************************************/
+ 
+@@ -2695,6 +3119,9 @@ pj_status_t pjsua_pres_init()
+         reset_buddy(i);
+     }
+ 
++    /* CIMS: conference 이벤트 패키지 등록 (실패해도 나머지 기능은 유지) */
++    cims_conf_init();
++
+     return status;
+ }
+ 
+@@ -2736,6 +3163,9 @@ void pjsua_pres_shutdown(unsigned flags)
+     PJ_LOG(4,(THIS_FILE, "Shutting down presence.."));
+     pj_log_push_indent();
+ 
++    /* CIMS: conference 구독 정리 */
++    cims_conf_shutdown();
++
+     if (pjsua_var.pres_timer.id != 0) {
+         pjsip_endpt_cancel_timer(pjsua_var.endpt, &pjsua_var.pres_timer);
+         pjsua_var.pres_timer.id = PJ_FALSE;
+CIMS_CONF_EVSUB_EOF
+  echo "  patched: conference event subscription (evsub) + sendRequest intercept"
+fi
+
 echo "=== [3] configure-android + make (arm64-v8a) ==="
 export APP_PLATFORM=28
 export TARGET_ABI=arm64-v8a

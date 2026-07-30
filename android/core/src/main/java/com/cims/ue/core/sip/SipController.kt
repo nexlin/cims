@@ -384,6 +384,29 @@ class SipController(private val config: SipAccountConfig) {
     }
 
     /**
+     * conference 구독(RFC 4575 참가자 로스터) 시작·갱신·해지 — 그룹 AoR 로 SUBSCRIBE.
+     *
+     * native(pjproject CIMS 패치 §2-13)가 이 요청을 가로채 evsub 기반 구독으로 만든다.
+     * 따라서 구독 생성·**in-dialog 갱신**(같은 Call-ID/양측 tag/CSeq+1)·종료·
+     * Subscription-State 해석·매칭 없는 NOTIFY 의 481 응답은 전부 스택이 담당하며,
+     * 앱은 "언제 어느 그룹을 구독할지"만 정한다.
+     *
+     * ⚠️ 단발 트랜잭션이 아니므로 결과가 [sendReqResults] 로 오지 않는다 — 구독 성립의
+     *  확인 신호는 **NOTIFY 도착**이다. NOTIFY 본문은 [incomingMessage] 로 올라온다
+     *  (contentType=`application/conference-info+xml`, fromUri=그룹 AoR=conference focus).
+     *  Event/Accept/Expires 헤더는 스택이 생성하므로 여기서 싣는 값은 의도 전달용이다.
+     *
+     * @param expiresSec 0 이면 구독 해지(SUBSCRIBE Expires: 0).
+     */
+    fun subscribeConference(groupUri: String, expiresSec: Int = CONF_SUB_EXPIRES_SEC) = sendRequest(
+        method = "SUBSCRIBE",
+        targetUri = groupUri,
+        contentType = null,
+        body = null,
+        headers = mapOf("Event" to "conference", "Expires" to "$expiresSec"),
+    )
+
+    /**
      * 키업 그룹 INVITE — multipart 본문(mcptt-info + resource-lists, ptt-client 가 규격대로 구성) +
      * SDP 에 `m=application` floor 라인 주입. 응답 SDP 의 floor 포트는 [floorRemote] 로 학습.
      * @param applicationSdp 주입할 floor SDP 라인(예: "m=application <port> UDP MCPTT\r\nc=IN IP4 ..\r\na=floorid:0 mstrm:audio")
@@ -648,6 +671,12 @@ class SipController(private val config: SipAccountConfig) {
         const val AUDIO_ROUTE_DEFAULT = 0   // 자동(이어폰 연결 시 이어폰)
         const val AUDIO_ROUTE_EARPIECE = 1  // 수화구
         const val AUDIO_ROUTE_SPEAKER = 2   // 외장 스피커
+
+        /** conference 구독 희망 수명(초) — 갱신은 스택이 만료 전에 자동 수행. */
+        const val CONF_SUB_EXPIRES_SEC = 3600
+
+        /** conference 로스터 NOTIFY 본문 MIME (RFC 4575). */
+        const val CONF_INFO_MIME = "application/conference-info+xml"
     }
 }
 

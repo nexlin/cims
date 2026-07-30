@@ -308,7 +308,20 @@ class PttController(
                 }
             }
         }
-        // 참가자 목록 — in-dialog conference NOTIFY(RFC 4575), 호별
+        // 참가자 목록 — 정식 구독 경로(RFC 4575 conference 이벤트). NOTIFY 는 native 구독이
+        // 200 으로 수용한 뒤 본문만 올려주므로 그룹 AoR(=conference focus)로 세션을 찾는다.
+        scope.launch {
+            sip.incomingMessage.collect { im ->
+                if (!im.contentType.contains("conference-info", ignoreCase = true)) return@collect
+                val gid = bareId(im.fromUri)
+                runCatching {
+                    synchronized(lock) { sessionMap[gid] }?.let { onConferenceInfo(it, im.body) }
+                }
+            }
+        }
+        // 참가자 목록 — in-dialog NOTIFY 폴백(구독자 0 인 구 APK 호환 경로). 서버가 구독을
+        // 우선하고 구독자가 없을 때만 통화 dialog 로 보낸다. 본문은 항상 full 스냅샷이라
+        // 두 경로가 겹쳐도 결과가 같다.
         scope.launch {
             sip.conferenceInfo.collect { (callId, xml) ->
                 runCatching { sessionByCall(callId)?.let { onConferenceInfo(it, xml) } }
@@ -415,6 +428,16 @@ class PttController(
 
     // ── 세션 헬퍼 ──
 
+    /** 그룹 AoR — INVITE/PUBLISH/SUBSCRIBE/MESSAGE 공통 Request-URI. */
+    private fun groupAor(groupId: String) = "sip:$groupId@${sipConfig.domain}"
+
+    /** 참여 채널의 참가자 로스터 구독 시작/해지 (RFC 4575 conference 이벤트).
+     *  갱신은 native 구독이 in-dialog 로 자동 수행하므로 여기서는 시작·해지만 다룬다. */
+    private fun subscribeRoster(groupId: String, on: Boolean) {
+        runCatching { sip.subscribeConference(groupAor(groupId), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
+            .onFailure { Log.w(TAG, "conference 구독($on) 실패 $groupId: ${it.message}") }
+    }
+
     private fun sessionByCall(callId: Int): Session? =
         synchronized(lock) { sessionMap.values.firstOrNull { it.callId == callId } }
 
@@ -441,6 +464,7 @@ class PttController(
             audioRouter?.setInCall(false)
             sip.setDeviceAudioBoost(1f, 1f)
         }
+        subscribeRoster(gid, false)                 // 로스터 구독 해지 (세션과 수명 일치)
         _status.value = "[$gid] 그룹콜 종료"
         emit(PttEventKind.LEAVE, gid)
         publish()
@@ -611,7 +635,8 @@ class PttController(
                 emergency = if (emergency) true else null)))
         if (members.isNotEmpty())
             parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
-        sip.makeGroupCall("sip:$groupId@${sipConfig.domain}", parts, appSdp)
+        sip.makeGroupCall(groupAor(groupId), parts, appSdp)
+        subscribeRoster(groupId, true)
         _status.value = if (emergency) "🚨 긴급 그룹콜 개시 $groupId" else "그룹콜 참여 $groupId"
         emit(PttEventKind.JOIN, groupId)
         if (emergency) emit(PttEventKind.EMERGENCY, groupId)
@@ -634,6 +659,7 @@ class PttController(
             }
         }
         sip.answerGroupCall(inc.id, "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio")
+        subscribeRoster(groupId, true)
         channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
         if (inc.emergency) feedback?.emergencyTone()
         _status.value = if (inc.emergency) "🚨 긴급 그룹콜 자동 참여: $groupId" else "그룹콜 자동 참여: $groupId"
@@ -648,6 +674,7 @@ class PttController(
         val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: return }
         if (callId >= 0) sip.hangup(callId) else {
             synchronized(lock) { sessionMap.remove(groupId)?.close() }
+            subscribeRoster(groupId, false)
             publish()
         }
     }

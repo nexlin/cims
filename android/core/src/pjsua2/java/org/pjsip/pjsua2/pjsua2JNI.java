@@ -2190,6 +2190,14 @@ public class pjsua2JNI {
   public final static native int StreamInfo_jbMax_get(long jarg1, StreamInfo jarg1_);
   public final static native void StreamInfo_jbDiscardAlgo_set(long jarg1, StreamInfo jarg1_, int jarg2);
   public final static native int StreamInfo_jbDiscardAlgo_get(long jarg1, StreamInfo jarg1_);
+  public final static native void StreamInfo_useKa_set(long jarg1, StreamInfo jarg1_, boolean jarg2);
+  public final static native boolean StreamInfo_useKa_get(long jarg1, StreamInfo jarg1_);
+  public final static native void StreamInfo_startCountKa_set(long jarg1, StreamInfo jarg1_, long jarg2);
+  public final static native long StreamInfo_startCountKa_get(long jarg1, StreamInfo jarg1_);
+  public final static native void StreamInfo_startIntervalKa_set(long jarg1, StreamInfo jarg1_, long jarg2);
+  public final static native long StreamInfo_startIntervalKa_get(long jarg1, StreamInfo jarg1_);
+  public final static native void StreamInfo_intervalKa_set(long jarg1, StreamInfo jarg1_, long jarg2);
+  public final static native long StreamInfo_intervalKa_get(long jarg1, StreamInfo jarg1_);
   public final static native void StreamInfo_rtcpSdesByeDisabled_set(long jarg1, StreamInfo jarg1_, boolean jarg2);
   public final static native boolean StreamInfo_rtcpSdesByeDisabled_get(long jarg1, StreamInfo jarg1_);
   public final static native long new_StreamInfo();
