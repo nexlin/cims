@@ -93,11 +93,10 @@ OAM 코어의 CIMS 하드코딩(모듈맵/빌드 화이트리스트/제어 허�
 
 - 저장: file_store `services` 도메인. 시드: `csc/src/services/service_descriptors_seed/*.json`(CIMS=`cims.json`). store 비면 1회 주입.
 - 집계: `csc/src/services/service_registry.py` — `all_modules` / `valid_module_names` / `controllable_modules` / `alert_rules`(코어 host 규칙 disk_high/module_down 병합) / `data_sources`.
-- API: `ems/core/oam/src/handlers/service_descriptors.py` — `GET /api/v1/service-descriptors[/{id}]` · `/modules` · `/data-sources` · `PUT`(modules+alert_rules+data_sources+**shareable_apis** 보존) · `DELETE`.
+- API: `ems/core/oam/src/handlers/service_descriptors.py` — `GET /api/v1/service-descriptors[/{id}]` · `/modules` · `/data-sources` · `PUT`(modules+alert_rules+data_sources 보존) · `DELETE`.
 - 콘솔: `/deploy/service-defs`(ServiceDescriptorsPage) — **폼 편집**(`pages/descriptors/forms.tsx`의 `ServiceForm`: id/label·모듈·alert_rules 행 추가/삭제, `DataSourceForm`: shapes 체크 + shape별 매핑 폼) + 전체 JSON "고급" fallback. 데이터 소스는 카드의 데이터 소스 섹션에서 추가/편집/삭제.
-- **`shareable_apis[]`**(외부 인계용 공유 READ API): `service_registry.shareable_apis` 집계 → `handlers/api_catalog.py`
-  가 `GET /api/v1/api-catalog`(목록) · `/api-catalog/openapi.json`(OpenAPI 3 산출) 로 노출. 콘솔은 관리 영역
-  **연동/API** 탭(서비스팩 매니페스트 기여 → 서비스팩 있을 때만 노출). 정본: `features/api_catalog.md`.
+> API 문서(개발자 모드 `[API]` 버튼)는 descriptor 가 아니라 **각 API 를 구현한 모듈의 코드**가 소유한다.
+> 정본: [features/api_docs.md](features/api_docs.md).
 
 ## 6. 서비스 정규화 전략
 

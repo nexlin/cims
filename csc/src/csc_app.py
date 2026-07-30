@@ -106,6 +106,8 @@ if __name__ == '__main__':
     from services       import admin_auth
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
+    # 자기 API 문서 — 분리 배포에서 OAM 이 import 로 읽을 수 없으므로 직접 서비스한다.
+    from handlers.api_docs       import CSC_API_DOCS_HANDLER_LIST
 
     admin_server = None
     mcptt_server = None
@@ -245,7 +247,8 @@ if __name__ == '__main__':
         )
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
-            for path, handler, _ in CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
+            for path, handler, _ in (CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
+                                     + CSC_API_DOCS_HANDLER_LIST)
         ])
         admin_server.start()
         logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4421)}")

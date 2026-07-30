@@ -3633,6 +3633,26 @@ CIMS_AGENT_ADMIN_HANDLER_LIST = (
     (_SIP_SERVICES_BASE,  handle_sip_services, {}),
 )
 
+
+# ── API 문서 (개발자 모드) ──────────────────────────────────────────────────
+#  이 모듈이 제공하는 엔드포인트 중 **노드 사양·자원 사용률 조회(읽기)만** 선언한다.
+#  등록/승인/삭제/제어/패키지/배포/sync/drift 같은 내부 운영 API 는 외부 공유 대상이 아니므로 선언하지
+#  않는다 (docs/design/features/api_docs.md §5). module=None — base OAM 상주라 항상 가용.
+CIMS_AGENT_API_DOCS = [
+    {'id': 'nodes.list', 'module': None, 'method': 'GET', 'path': '/api/v1/agents',
+     'screens': ['/deploy/servers'],
+     'summary': '노드 목록 + 사양·상태 (hostname/ip/OS, cpu_cores·memory_mb·disk_gb, 최근 heartbeat)',
+     'params': [], 'response': '{items:[{id, name, status, hostname, ip_address, os_info, '
+                               'cpu_cores, memory_mb, disk_gb, agent_version, last_heartbeat, ...}]}',
+     'auth': 'Bearer JWT (monitor)'},
+    {'id': 'nodes.metrics', 'module': None, 'method': 'GET', 'path': '/api/v1/agents/{id}/metrics',
+     'screens': ['/deploy/servers'],
+     'summary': '노드 자원 사용률 시계열 (CPU/메모리/디스크/load, 프로세스·인터페이스·마운트별)',
+     'params': [{'name': 'id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '노드 id (agents.list 의 id)'}],
+     'response': '{items:[{ts, cpu_pct, mem_pct, disk_pct, load_avg, processes[], per_iface[], mounts[]}]}',
+     'auth': 'Bearer JWT (monitor)'},
+]
+
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋
 CIMS_AGENT_PUBLIC_HANDLER_LIST = (
     ("/install-agent.sh",   _serve_install_script, {}),

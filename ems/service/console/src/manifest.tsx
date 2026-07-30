@@ -4,7 +4,7 @@
 //   가입자관리(조직/구성원/번호/PTT그룹) · 서비스(상태/VoLTE·PTT 이력) · 통계(VoLTE/PTT/SIP/CMP/CSC/HTTPS).
 // 다른 서비스를 붙이려면 같은 형태의 manifest 를 만들어 services/registry.ts 에 등록.
 
-import { Users, TrendingUp, FileText, Share2 } from 'lucide-react'
+import { Users, TrendingUp, FileText } from 'lucide-react'
 import type { ServiceManifest } from '@core/nav-types'
 
 import { healthDotsWidget } from './widgets/HealthDotsWidget'
@@ -23,7 +23,6 @@ import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
 import ServiceDescriptorsPage from '@core/pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
-import ApiCatalogPage from '@core/pages/ApiCatalogPage'                  // 코어 페이지 — '연동/API' 그룹에 배치
 
 import {
   SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
@@ -93,19 +92,6 @@ export const cimsManifest: ServiceManifest = {
         { path: '/subscribers/workbench',     title: '사용자',         component: ProvisioningWorkbenchPage, requiredRole: 'monitor' },
         { path: '/subscribers/ptt-groups',    title: 'PTT 그룹',       component: PttGroupsWorkbenchPage, requiredRole: 'monitor' },
         { path: '/deploy/service-defs',       title: '서비스 정의',     component: ServiceDescriptorsPage, adminOnly: true },
-      ],
-    },
-    // ── 연동/API (admin) — 외부 팀 인계용 공유(READ) API 카탈로그 + OpenAPI 3 산출. 서비스팩과 함께만 노출. ──
-    {
-      key: 'integration',
-      label: '연동/API',
-      icon: Share2,
-      area: 'admin',
-      basePath: '/integration',
-      defaultPath: '/integration/api',
-      order: 80,   // 관리 영역 — 릴리스(70) 다음, 문서(90) 앞
-      routes: [
-        { path: '/integration/api', title: 'API 카탈로그', component: ApiCatalogPage, adminOnly: true },
       ],
     },
   ],

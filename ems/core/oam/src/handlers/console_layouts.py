@@ -139,12 +139,15 @@ def installed_services(config: dict) -> set:
          미배포 서비스가 가용으로 오보돼 base 대시보드에 svc 위젯이 노출됐음).
       단일 프로세스(--role all): 게이트웨이 미사용(in-process) → 알려진 서비스 전부 가용.
     role 판별: register_gateway 가 _ADMIN_SERVER 를 set (role=base 에서만; role=all 은 None).
+    반환값은 **소문자로 정규화**한다 — 라우트 테이블은 배포 모듈명을 대문자('OAM-SVC'/'CSC')로 저장하는데
+    비교 대상(_KNOWN_SERVICES, 위젯 requires_service, API 문서 module)은 소문자라 그대로 두면 전부 미가용으로
+    오판한다.
     """
     gw_active = _gateway is not None and getattr(_gateway, '_ADMIN_SERVER', None) is not None
     if gw_active:
         # base: 라우트 테이블이 권위 (비어있으면 서비스 0개)
         try:
-            return {r.get('module') for r in _gateway.enabled_routes(config) if r.get('module')}
+            return {str(r['module']).lower() for r in _gateway.enabled_routes(config) if r.get('module')}
         except Exception:
             return set()
     # role=all (in-process) — 서비스 전부 가용

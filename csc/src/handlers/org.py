@@ -216,3 +216,50 @@ async def _list_org_users(org_id, config):
 CIMS_ORG_HANDLER_LIST = [
     (_ORG_BASE, handle_organizations, {}),
 ]
+
+
+# ── API 문서 (개발자 모드) ──────────────────────────────────────────────────
+#  이 모듈이 제공하는 엔드포인트의 자기기술. OAM 의 handlers/api_docs.py 가 수집한다.
+#  csc 미설치 환경에서는 이 파일이 없으므로 수집에서 자연히 빠진다.
+CIMS_ORG_API_DOCS = [
+    {'id': 'csc.orgs.list', 'module': 'csc', 'method': 'GET', 'path': '/api/v1/organizations',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 목록 (계층 코드 체계)',
+     'params': [], 'response': '{organizations[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'csc.orgs.create', 'module': 'csc', 'method': 'POST', 'path': '/api/v1/organizations',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 생성',
+     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
+                 'desc': '{code, name, parent_code?, ...}'}],
+     'response': '{id, code}', 'auth': 'Bearer JWT (manager)'},
+    {'id': 'csc.orgs.get', 'module': 'csc', 'method': 'GET', 'path': '/api/v1/organizations/{org_id}',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 1건 상세',
+     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'}],
+     'response': '조직 객체', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'csc.orgs.update', 'module': 'csc', 'method': 'PUT', 'path': '/api/v1/organizations/{org_id}',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 수정',
+     'params': [
+         {'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'},
+         {'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '변경 필드'},
+     ],
+     'response': '{id}', 'auth': 'Bearer JWT (manager)'},
+    {'id': 'csc.orgs.delete', 'module': 'csc', 'method': 'DELETE', 'path': '/api/v1/organizations/{org_id}',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 삭제',
+     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'}],
+     'response': '{id}', 'auth': 'Bearer JWT (manager)'},
+    {'id': 'csc.orgs.batch-delete', 'module': 'csc', 'method': 'DELETE',
+     'path': '/api/v1/organizations/batch',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 일괄 삭제',
+     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '{ids: [int]}'}],
+     'response': '{deleted}', 'auth': 'Bearer JWT (manager)'},
+    {'id': 'csc.orgs.users', 'module': 'csc', 'method': 'GET',
+     'path': '/api/v1/organizations/{org_id}/users',
+     'screens': ['/subscribers/organizations'],
+     'summary': '조직 소속 가입자 목록',
+     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'}],
+     'response': '{users[]}', 'auth': 'Bearer JWT (monitor)'},
+]

@@ -241,7 +241,7 @@ if __name__ == '__main__':
     from handlers.console_accounts import CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
     from handlers.console_layouts  import CIMS_CONSOLE_LAYOUTS_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
-    from handlers.api_catalog          import CIMS_API_CATALOG_HANDLER_LIST
+    from handlers.api_docs             import CIMS_API_DOCS_HANDLER_LIST
     from handlers.provision            import (CIMS_PROVISION_HANDLER_LIST,
                                                init as provision_init)
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
@@ -508,7 +508,9 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_CONSOLE_LAYOUTS_HANDLER_LIST)
         base_rules += _bind(CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST)
-        base_rules += _bind(CIMS_API_CATALOG_HANDLER_LIST)   # /api/v1/api-catalog[/openapi.json] — 메타데이터, base 상주
+        # /api/v1/api-docs — 각 모듈이 코드 옆에 선언한 API 문서 수집(개발자 모드). 메타데이터만
+        # 읽으므로 base 상주. 모듈 미설치/미가용이면 그 모듈 API 는 응답에서 빠진다.
+        base_rules += _bind(CIMS_API_DOCS_HANDLER_LIST)
         base_rules += _bind(CIMS_PROVISION_HANDLER_LIST)   # /api/v1/provision/* — 자동 배포(내장). 별도 모듈 아님
         base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
