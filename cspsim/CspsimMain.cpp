@@ -327,6 +327,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -no_video                비디오 비활성화 (음성 전용 통화)\n");
     printf("  -no_register             REGISTER 송신 skip (외부 SIP peer 모드)\n");
     printf("  -no_xcap                 xcap-diff NOTIFY 수신 시 XCAP HTTP GET skip (기본: 자동 GET)\n");
+    printf("  -no_conf_sub             [ptt] conference 구독 skip — 구독 미구현 단말(구 APK) 재현용\n");
     printf("  -csc_ip <IP>             [ptt] CSC 서버 IP — REGISTER 전 IdMS auth 수행\n");
     printf("  -csc_port <N>            [ptt] CSC McpttServer 포트 (기본: 4530)\n");
     printf("  -csc_tls                 [ptt] CSC TLS 사용 (기본: off, 테스트 환경)\n");
@@ -353,6 +354,7 @@ static std::atomic<bool> g_bScenarioDone(false);
 static std::atomic<bool> g_bQuit(false);
 static bool g_bPreempt = false;   // -preempt: floor 선점(preemption) 검증 시퀀스
 static int  g_iPreemptBy = 0;     // -preempt_by N: 선점자 세션 인덱스 (default 0; chair 검증 시 chair 인덱스)
+static bool g_bNoConfSub = false;  // -no_conf_sub: conference 구독 skip (구 APK 재현)
 static std::string g_strXcapRoot; // -xcap_root: SUBSCRIBE 후 XCAP 문서 능동 GET (Phase 3D 검증)
 
 static void RunScenario(std::vector<SimSession*>& sessions,
@@ -409,7 +411,9 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             usleep(50000);
             // 참가자 정보 구독 (RFC 4575) — 그룹콜 참가자 NOTIFY 를 구독 경로로
             // 수신
-            if (!s->m_strGroupId.empty()) {
+            //   -no_conf_sub 면 구독을 걸지 않는다: 구독 미구현 단말(구 APK)이 통화 dialog
+            //   in-dialog NOTIFY 폴백으로만 명단을 받는 혼재 상황을 재현하기 위한 스위치.
+            if (!s->m_strGroupId.empty() && !g_bNoConfSub) {
               s->SubscribeConference(s->m_strGroupId);
               usleep(50000);
             }
@@ -710,6 +714,7 @@ int main(int argc, char* argv[])
     bool bNoRegister           = HasFlag(argc, argv, "-no_register");
     // XCAP HTTP GET 비활성화 (Phase 3D). 기본은 xcap-diff NOTIFY 수신 시 자동 GET.
     bool bNoXcap               = HasFlag(argc, argv, "-no_xcap");
+    g_bNoConfSub               = HasFlag(argc, argv, "-no_conf_sub");
     // CSC 연동: REGISTER 전 IdMS auth 수행 (올바른 순서)
     std::string strCscIp       = GetArg(argc, argv, "-csc_ip",   "");
     int iCscPort               = atoi(GetArg(argc, argv, "-csc_port", "4530").c_str());
