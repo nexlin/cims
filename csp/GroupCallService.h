@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 class CSipCallRtp;
@@ -87,11 +88,12 @@ public:
                                const std::string &strStatus, const std::string &strJoining );
 
     /** conference-info+xml 본문(현재 로스터 스냅샷, RFC 4575) 생성. 확립 leg 만 싣고 version 을 증가시킨다.
-     *  @param pvecCallIdsOut  NULL 이 아니면 확립 leg 의 Call-ID 목록을 담아 준다(in-dialog 폴백용).
+     *  @param pvecLegsOut  NULL 이 아니면 확립 leg 의 (Call-ID, 멤버 ID) 목록을 담아 준다 —
+     *                      in-dialog 폴백을 구독 없는 멤버에게만 보내기 위해 멤버 ID 가 필요하다.
      *  구독 수락 직후 초기 NOTIFY(RFC 6665 §4.1.1)에도 사용 — 변경 인자 없이 호출하면 순수 스냅샷. */
     std::string BuildConferenceInfoBody( const std::string &strGroupId, const std::string &strChangedUser = "",
                                          const std::string &strStatus = "", const std::string &strJoining = "",
-                                         std::vector<std::string> *pvecCallIdsOut = NULL );
+                                         std::vector<std::pair<std::string, std::string>> *pvecLegsOut = NULL );
 
     /** leg 별 PT 재작성 파라미터 산출 (docs/api/cmp_media_api.md §6.1/§7.4).
      *  user_pt/user_te_pt = 이 leg 의 원격 SDP 가 수신 선언한 audio/TE wire PT,

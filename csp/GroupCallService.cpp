@@ -5,6 +5,7 @@
 #include "GroupCallService.h"
 
 #include <ctime>
+#include <set>
 
 #include "CspServiceMap.h"
 #include "DbManager.h"
@@ -42,7 +43,8 @@ static std::string TimeToIso( time_t t ) {
 // Notify subscribers about group changes
 extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 /** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
-extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody );
+extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
+                                              std::set<std::string> *psetNotifiedUsers );
 
 // External global objects
 extern CSipUserAgent gclsUserAgent;
@@ -1486,11 +1488,11 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
 std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGroupId,
                                                         const std::string &strChangedUser, const std::string &strStatus,
                                                         const std::string &strJoining,
-                                                        std::vector<std::string> *pvecCallIdsOut ) {
-    // 1. Collect established call-IDs for this group + bump version
+                                                        std::vector<std::pair<std::string, std::string>> *pvecLegsOut ) {
+    // 1. Collect established legs for this group + bump version
     //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대는 ①다이얼로그가 없어 NOTIFY 가
     //    성립하지 않고 ②참가자 명단에 실리면 '아직 참여하지 않은 초대 대상'이 참여자로 표시된다.
-    std::vector<std::string> vecCallIds;
+    std::vector<std::pair<std::string, std::string>> vecLegs;
     int iVersion = 0;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
@@ -1502,11 +1504,11 @@ std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGr
 
         for ( const auto &kv : m_mapCallSession ) {
             if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
-                vecCallIds.push_back( kv.first );
+                vecLegs.push_back( std::make_pair( kv.first, kv.second.strMemberId ) );
             }
         }
     }
-    if ( pvecCallIdsOut ) *pvecCallIdsOut = vecCallIds;
+    if ( pvecLegsOut ) *pvecLegsOut = vecLegs;
 
     // 2. Build conference-info+xml body (RFC 4575)
     //    F-09: 참가자 NOTIFY 는 항상 state="full"(변경 반영 후 현재 로스터 스냅샷) — partial 증분은
@@ -1542,8 +1544,10 @@ std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGr
             << "      </endpoint>\r\n"
             << "    </user>\r\n";
     }
-    if ( !bChangedInRoster ) {
-        // 이탈(deleted) — 세션 맵에서 이미 제거된 뒤 호출되므로 명시 엔트리로 알린다
+    // 변경 사용자가 로스터에 없으면 이탈(deleted)이므로 명시 엔트리로 알린다.
+    //   단 변경 인자 없는 순수 스냅샷(구독 수락 직후 초기 NOTIFY)에서는 대상이 없으므로
+    //   생략한다 — 안 그러면 entity="sip:@domain" 인 빈 참가자가 실려 단말 명단에 유령이 뜬다.
+    if ( !bChangedInRoster && !strChangedUser.empty() ) {
         oss << "    <user entity=\"sip:" << strChangedUser << "@" << strMcpttDomain << "\" state=\"" << strJoining
             << "\">\r\n"
             << "      <endpoint entity=\"sip:" << strChangedUser << "@" << strMcpttDomain << "\">\r\n"
@@ -1558,27 +1562,30 @@ std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGr
 
 void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
                                               const std::string &strStatus, const std::string &strJoining ) {
-    std::vector<std::string> vecCallIds;
-    std::string strBody = BuildConferenceInfoBody( strGroupId, strChangedUser, strStatus, strJoining, &vecCallIds );
+    std::vector<std::pair<std::string, std::string>> vecLegs;
+    std::string strBody = BuildConferenceInfoBody( strGroupId, strChangedUser, strStatus, strJoining, &vecLegs );
 
-    // 전송 — conference 구독자가 있으면 **구독 경로**(RFC 4575/6665 정합, 단말이 200 OK 응답).
-    //   구독자가 없으면 in-dialog NOTIFY 로 폴백한다: 구독 미구현 단말(구 APK)은 통화 다이얼로그로
-    //   받아야 참가자 화면이 갱신되며, 그 경우 단말 스택은 usage 없음으로 500 을 응답한다(무해).
-    int iSubs = SendConferenceNotifyToSubscribers( strGroupId, strBody );
-    if ( iSubs > 0 ) {
-        CLog::Print( LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) → %d subscribers",
-                     strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), iSubs );
-        return;
-    }
-    if ( vecCallIds.empty() ) return;
-    for ( const auto &strCallId : vecCallIds ) {
-        gclsUserAgent.SendNotifyWithBody( strCallId.c_str(), "conference", "application", "conference-info+xml",
+    // 전송 경로는 **멤버 단위**로 갈린다.
+    //   ① conference 구독자 → 구독 경로(RFC 4575/6665 정합, 단말이 200 OK 로 응답).
+    //   ② 구독 없는 멤버 → 통화 dialog in-dialog NOTIFY 폴백. 구독 미구현 단말(구 APK)은 이 경로로만
+    //      참가자 화면이 갱신되며, 그 단말 스택은 usage 없음으로 500 을 응답한다(무해·재전송 중단).
+    //   구독자가 하나라도 있으면 폴백 전체를 생략하던 종전 방식은 구·신 APK 혼재 시 구 APK 단말의
+    //   명단을 멈추게 한다 — 그래서 구독자 집합을 받아 그 멤버만 폴백에서 제외한다.
+    std::set<std::string> setNotified;
+    int iSubs = SendConferenceNotifyToSubscribers( strGroupId, strBody, &setNotified );
+
+    int iFallback = 0;
+    for ( const auto &leg : vecLegs ) {
+        if ( setNotified.count( leg.second ) > 0 ) continue;  // 구독 경로로 이미 통지됨
+        gclsUserAgent.SendNotifyWithBody( leg.first.c_str(), "conference", "application", "conference-info+xml",
                                           strBody );
+        ++iFallback;
     }
 
-    CLog::Print(
-        LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d participants(in-dialog)",
-        strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(), (int)vecCallIds.size() );
+    if ( iSubs == 0 && iFallback == 0 ) return;
+    CLog::Print( LOG_INFO,
+                 "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d subscribers + %d in-dialog",
+                 strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(), iSubs, iFallback );
 }
 
 /**

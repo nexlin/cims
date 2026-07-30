@@ -18,6 +18,7 @@
 #include "CspServer.h"
 
 #include <csignal>
+#include <set>
 
 #include "CallDir.h"
 #include "CspAddressing.h"
@@ -771,10 +772,17 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     SipMakeBranch( szBranch, sizeof( szBranch ) );
     pMsg->AddVia( strLocalIp.c_str(), iLocalPort, szBranch );
 
+    // 종료 NOTIFY 도 notifier 신원이 구독 시와 같아야 한다 — 다르면 구독자 dialog 와 짝이
+    //   맞지 않아 481 로 거절되고 구독 종료가 확인되지 않는다(SendNotifyToSubscriber 와 동일 규칙).
     if ( sub.strEventType == "reg" ) {
         pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
+    } else if ( sub.strEventType == "conference" ) {
+        // conference: notifier = conference focus = 그룹 AoR (RFC 4575)
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" ) ? "gms_psi" : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
+                                 : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
+                                                                         : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -808,6 +816,7 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
 
     pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"
                            : sub.strEventType == "affiliation" ? "presence"
+                           : sub.strEventType == "conference"  ? "conference"
                            :                                     "xcap-diff" );
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
@@ -940,13 +949,16 @@ void SendAffiliationNotify( const std::string &strUserId ) {
  * @returns 전송한 구독자 수. 0 이면 구독자가 없으므로 호출자가 in-dialog 폴백을 쓴다
  *   (구독 미구현 구 단말 호환 — 전환기 병행).
  */
-int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody ) {
+int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
+                                       std::set<std::string> *psetNotifiedUsers ) {
     std::list<SubscriptionInfo> subList;
     gclsSubscriptionManager.GetSubscriptionsByResource( strGroupId, "conference", subList );
     if ( subList.empty() ) return 0;
     CLog::Print( LOG_INFO, "SendConferenceNotify(sub): Group=%s subs=%d", strGroupId.c_str(), (int)subList.size() );
     for ( auto &sub : subList ) {
         SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
+        // 같은 멤버에게 in-dialog 폴백까지 중복 발송하지 않도록 호출자에 통지 대상을 알린다
+        if ( psetNotifiedUsers ) psetNotifiedUsers->insert( sub.strUserId );
     }
     return (int)subList.size();
 }

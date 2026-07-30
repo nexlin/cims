@@ -464,14 +464,28 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         strEventType = "reg";
     } else if ( bAffInfo ) {
         strEventType = "affiliation";  // 제휴상태(affiliation-info) 구독 → presence NOTIFY
-    } else if ( bAffiliation ) {
-        strEventType = "conference";  // 그룹 affiliation/conference 상태 구독
+    } else if ( strEventHdr == "conference" || bAffiliation ) {
+        // conference(RFC 4575) — Event 헤더가 1차 근거, 그룹 URI 매칭은 헤더 없는 구현 호환용.
+        strEventType = "conference";
     } else if ( strReqUri.find( "gms" ) != std::string::npos ) {
         strEventType = "gms";
     } else if ( strReqUri.find( "cms" ) != std::string::npos ) {
         strEventType = "cms";
     } else {
         strEventType = "gms";
+    }
+
+    // 갱신(in-dialog refresh) SUBSCRIBE 는 Request-URI 가 **자원이 아니라 서버 Contact** 이다
+    //   (dialog remote target = 200 OK 의 Contact). 그래서 URI 로 이벤트/자원을 다시 유도하면
+    //   conference 구독이 gms 로 재분류돼 엉뚱한 xcap-diff NOTIFY 가 나가고, 구독자 스택은
+    //   짝이 맞지 않는 NOTIFY 를 481 로 거절해 구독이 죽는다. RFC 6665 §4.1.2.2 상 갱신은
+    //   자원·이벤트를 바꿀 수 없으므로 기존 구독의 값을 그대로 물려받는다(reg/gms/cms 공통).
+    SubscriptionInfo clsPrev;
+    const bool bRefresh = gclsSubscriptionManager.GetSubscriptionByCallId( strSubCallId, clsPrev );
+    if ( bRefresh ) {
+        if ( !clsPrev.strEventType.empty() ) strEventType = clsPrev.strEventType;
+        if ( strReqUriUser.empty() && !clsPrev.strResourceId.empty() ) strReqUriUser = clsPrev.strResourceId;
+        bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
     }
 
     int iExpires = pclsMessage->GetExpires();
@@ -500,7 +514,8 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
         gclsSubscriptionManager.RemoveSubscription( strSubCallId );
 
-        if ( bAffiliation && gclsDbManager.IsConnected() ) {
+        // conference 구독 해지는 제휴와 무관하다 — 아래 참조.
+        if ( bAffiliation && strEventType == "affiliation" && gclsDbManager.IsConnected() ) {
             gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
             CLog::Print( LOG_INFO, "[Affiliation] de-affiliate user=%s group=%s", strFromId.c_str(),
                          strReqUriUser.c_str() );
@@ -508,14 +523,25 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         return true;
     }
 
-    if ( bAffiliation && gclsDbManager.IsConnected() ) {
+    // 제휴(affiliation) 상태 변경은 PUBLISH(TS 24.379 §9) 와 presence 구독 경로만 수행한다.
+    //   conference 구독(RFC 4575, Event: conference)은 그룹 자원을 Request-URI 로 쓰지만
+    //   제휴와 무관한 로스터 열람이다 — 여기서 제휴를 건드리면 그룹콜 이탈 시의 구독 해지가
+    //   제휴까지 지워 fan-out 이 조용히 끊긴다.
+    if ( bAffiliation && strEventType == "affiliation" && gclsDbManager.IsConnected() ) {
         gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iExpires );
         CLog::Print( LOG_INFO, "[Affiliation] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
                      strReqUriUser.c_str(), iExpires );
     }
 
+    // 갱신(refresh) SUBSCRIBE 는 같은 dialog 안에서 오므로 To tag 를 새로 만들면 안 된다 —
+    //   새 tag 를 200 OK/후속 NOTIFY 에 실으면 구독자 dialog 와 remote tag 가 어긋나
+    //   NOTIFY 가 481 로 거절되고 구독이 죽는다(RFC 6665 §4.1.2.2).
     char szToTag[64];
-    SipMakeTag( szToTag, sizeof( szToTag ) );
+    if ( bRefresh && !clsPrev.strToTag.empty() ) {
+        snprintf( szToTag, sizeof( szToTag ), "%s", clsPrev.strToTag.c_str() );
+    } else {
+        SipMakeTag( szToTag, sizeof( szToTag ) );
+    }
 
     SubscriptionInfo info;
     info.strUserId = strFromId;
