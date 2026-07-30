@@ -162,6 +162,28 @@ git describe --tags     # 2.16 기대
 > [ptt_join_crash_and_silence.md](ptt_join_crash_and_silence.md) 참조. 스크립트는
 > `set -o pipefail` 로 `make | tail` 실패 마스킹도 방지한다.
 
+> **conference 이벤트 구독 패치 (`m1_build_pjsip.sh` [2-13], 멱등).** MCPTT 그룹콜 참가자
+> 로스터(RFC 4575)를 정식 구독으로 받기 위한 native 확장. pjsua2 는 범용 evsub 을 노출하지
+> 않지만 pjsip 자체는 이벤트 구독 프레임워크를 갖고 있으므로 그 위에 얹는다 —
+> ①`pjsua_pres.c`: `conference` 이벤트 패키지 등록(`pjsip_evsub_register_pkg` →
+> `Allow-Events: conference` + SUBSCRIBE 의 `Accept: application/conference-info+xml` 자동
+> 부착) + UAC 구독 생성/in-dialog 갱신/종료(`pjsua_cims_conf_subscribe`, 동시 16채널) +
+> 수신 NOTIFY 본문을 `on_pager2` 로 상신(→ pjsua2 `Account::onInstantMessage`)
+> ②`pjsua_acc.c`: `pjsua_acc_send_request` 가 `SUBSCRIBE` + `Event: conference` 요청을
+> 가로채 ①로 넘긴다.
+>
+> 이 인터셉트가 핵심이다 — 앱은 기존 `Account::sendRequest` 를 그대로 호출하므로 **SWIG
+> 인터페이스가 바뀌지 않고**(재생성 불필요), 그러면서 구독 생성·갱신(같은 Call-ID/양측
+> tag/CSeq+1)·종료·`Subscription-State` 해석·매칭 없는 NOTIFY 의 481 응답은 전부 스택이
+> 수행한다. 앱이 out-of-dialog `sendRequest` 로 구독을 흉내 내는 방식은 갱신이 in-dialog 가
+> 될 수 없어 갱신마다 새 구독이 누적되므로(비규격) 채택하지 않았다.
+> 앱 측 사용법·수신 경로는
+> [android_ue_client.md](android_ue_client.md) "참가자 목록", 서버 측 통지 규칙은
+> [ptt_flows.md](ptt_flows.md) "참가자 로스터 통지 경로" 가 정본.
+>
+> 단말 없이 검증할 때는 같은 두 파일만 패치한 **호스트 pjsip 빌드 + 하니스**로 같은 native
+> 경로를 태울 수 있다(`pjsua_acc_send_request` 직접 호출 → `on_pager2` 수신).
+
 ### 2.6 configure / build / SWIG
 
 ```bash

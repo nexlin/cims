@@ -355,6 +355,38 @@ chat (상시):
 - **참가자 명단(conference NOTIFY)도 확립 leg 만** 싣고, 확립 leg 에게만 보낸다 — 아직 200 OK 가
   오지 않은 fan-out 초대 대상이 "참여 중"으로 표시되는 것과 다이얼로그 없는 leg 로의 발송을 막는다.
 
+#### 참가자 로스터 통지 경로 (RFC 4575 / RFC 6665)
+
+`CGroupCallService::SendConferenceNotify` 는 로스터 스냅샷 1건을 만들어 **멤버 단위로 경로를
+갈라** 발송한다.
+
+| 대상 | 경로 | 단말 응답 |
+|---|---|---|
+| `Event: conference` 구독자 | 구독 dialog (`SendConferenceNotifyToSubscribers` → `SendNotifyToSubscriber`) | 200 OK |
+| 구독 없는 확립 leg | 통화 dialog in-dialog NOTIFY (폴백) | 구독 usage 없음 → 500 (무해, 재전송 중단) |
+
+구독자가 있으면 폴백 전체를 생략하던 방식은 구독 구현/미구현 단말이 섞인 채널에서 미구현
+단말의 명단을 멈추게 하므로, 구독 경로로 통지한 **사용자 집합만** 폴백에서 제외한다.
+폴백 가지는 전환기 조치이며 전 단말이 구독을 구현하면 제거한다.
+
+구독 취급 규칙 — 어긋나면 구독자 스택이 NOTIFY 를 481 로 거절해 구독이 조용히 죽는다:
+
+- **자원·이벤트는 Call-ID 로 물려받는다.** 갱신(refresh) SUBSCRIBE 의 Request-URI 는 자원이
+  아니라 200 OK 의 Contact(= 서버 자기 주소)다. URI 로 이벤트 종류를 다시 유도하면 conference
+  구독이 gms 로 재분류돼 엉뚱한 `Event: xcap-diff` NOTIFY 가 나간다 (RFC 6665 §4.1.2.2 상 갱신은
+  자원·이벤트를 바꿀 수 없다). reg/gms/cms 갱신에도 같은 규칙이 적용된다.
+- **To tag 는 최초 구독의 값을 유지한다** — 갱신 200 OK 와 후속 NOTIFY 의 notifier tag 가 바뀌면
+  구독자 dialog 와 remote tag 가 어긋난다.
+- **notifier 신원은 이벤트별로 고정** — conference 는 그룹 AoR(= conference focus), reg 는 가입자
+  AoR, affiliation 은 `mcptt_psi`, gms/cms 는 각 PSI. 종료(terminated) NOTIFY 도 같은 신원·같은
+  `Event` 값을 쓴다.
+- **conference 구독은 제휴(affiliation)를 바꾸지 않는다.** 그룹 자원을 Request-URI 로 쓰지만
+  제휴와 무관한 로스터 열람이다 — 여기서 제휴를 등록/해제하면 그룹콜 이탈 시의 구독 해지가
+  제휴까지 지워 fan-out 이 조용히 끊긴다. 제휴 변경은 PUBLISH(TS 24.379 §9)와
+  presence(affiliation-info) 구독 경로만 수행한다.
+- 변경 인자 없는 **순수 스냅샷**(구독 수락 직후 초기 NOTIFY)에는 이탈자 엔트리를 싣지 않는다 —
+  `entity="sip:@domain"` 인 빈 참가자가 단말 명단에 유령으로 뜬다.
+
 > 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.
 
 ### B7. 단말 등록 해제
@@ -650,7 +682,8 @@ CSP                                    CMP
 | CSC → CSP/PSP | UDP JSON | 4421 | group_change(CSP+PSP broadcast), user_change, stats |
 | UE ↔ CMP (Audio) | RTP/UDP | 52000-52018 | PTT 음성 데이터 (PPttTrans._rtpSock) |
 | UE ↔ CMP (Floor) | RTCP APP/UDP | 54000-54018 | MCPTT Floor Control (PPttTrans._floorSock) |
-| CSP → UE (in-dialog) | SIP NOTIFY | (dialog) | Event: conference, conference-info+xml |
+| CSP → UE (subscription) | SIP NOTIFY | (구독 dialog) | Event: conference, conference-info+xml |
+| CSP → UE (in-dialog) | SIP NOTIFY | (통화 dialog) | Event: conference — 구독 없는 단말용 폴백 |
 | CSP → UE (out-dialog) | SIP NOTIFY | (subscription) | Event: xcap-diff (xcap-root=https://{CSC}:4430/) |
 
 > **참고:** VoIP 1:1 통화는 별도의 PRtpTrans 풀(50000-50079)을 사용한다.

@@ -441,11 +441,27 @@ endBit=1인 최종 패킷에서만 동작 트리거.
 
 ## 9. Conference NOTIFY (참가자 변경 알림)
 
-그룹 멤버 변경 시 CSP가 in-dialog NOTIFY 전송:
+참가자 로스터는 **구독(RFC 4575 / RFC 6665)으로 받는다.** 채널 조인 시 그룹 AoR 로 구독을 걸고,
+이탈 시 `Expires: 0` 으로 해지한다. 갱신은 같은 dialog 안에서 수행해야 한다(같은 Call-ID·양측
+tag·CSeq+1) — 새 out-of-dialog SUBSCRIBE 를 보내면 구독이 중복 누적된다.
+
+```
+SUBSCRIBE sip:group_1000@ptt.csp SIP/2.0
+Event: conference
+Accept: application/conference-info+xml
+Expires: 3600
+```
+
+CSP 는 200 OK 직후 현재 로스터 스냅샷을 1건 보내고, 이후 멤버 변동마다 통지한다. 단말은 각
+NOTIFY 에 **200 OK** 로 응답한다.
+
+> 구독을 구현하지 않은 단말에는 통화 dialog 로 같은 본문을 in-dialog NOTIFY 로 보내는 폴백이
+> 동작한다(전환기 조치). 이 경우 단말 스택은 매칭 구독이 없어 500/481 을 응답하게 된다.
 
 ```
 NOTIFY sip:+82571900001@ue_ip SIP/2.0
 Event: conference
+Subscription-State: active;expires=3600
 Content-Type: application/conference-info+xml
 
 <?xml version="1.0" encoding="UTF-8"?>
