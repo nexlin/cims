@@ -286,6 +286,18 @@ UE                      CSP (CCscfModule)
   │ ◄── 200 OK ──────── │  SIP-ETag (RFC 3903)
   │                      │  (active prearranged/chat 세션이면 late-entry InviteMember)
 ```
+**기록 판정 (침묵 실패 금지)** — `InsertAffiliation` 은 `mcptt_group_id → ptt_groups.id`
+조회를 **먼저** 수행하고 그 결과로 성공/실패를 판정한다. 한 방 `INSERT ... SELECT ... FROM
+ptt_groups WHERE mcptt_group_id=..` 은 그룹을 못 찾으면 **에러 없이 0행**을 써서 호출자가
+"제휴 등록됨" 으로 오판한다(DB 는 비었는데 로그만 affiliate — 제휴 소실 추적 불가).
+`mysql_affected_rows` 로도 구분되지 않는다: `ON DUPLICATE KEY UPDATE` 는 갱신값이 기존과
+같으면(같은 초 재발행·PUBLISH 재전송) 0 을 반환해 "미발견" 과 "무변경" 이 겹친다.
+호출자는 실패 시 `[Affiliation/PUBLISH] affiliate 미기록 ... — DB 미반영` ERROR 를 남긴다.
+
+**회수 로그** — de-REGISTER 시 `UpdateLogoutTime` 이 그 가입자의 **전 그룹 제휴를 한 번에**
+삭제한다(TS 24.379 §9: 제휴는 등록에 묶인다). 이것이 제휴를 일괄 삭제하는 유일한 경로이므로
+`[Affiliation] de-register 회수 user=.. rows=N` 으로 흔적을 남긴다 — 무로그였던 탓에 "제휴
+테이블이 비었다" 를 조사할 때 지운 주체를 특정할 수 없었다(binlog·general_log 도 off).
 
 > **규격 전제조건 (3GPP):** affiliation 은 ① 인증(B1 토큰) → ② service authorization(B2) →
 > ③ 구성취득(B3, GMS group docs = affiliate 가능 그룹의 근거) **이후** 단계다(TS 33.180 §5 /

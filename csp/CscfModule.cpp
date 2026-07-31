@@ -528,9 +528,13 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     //   제휴와 무관한 로스터 열람이다 — 여기서 제휴를 건드리면 그룹콜 이탈 시의 구독 해지가
     //   제휴까지 지워 fan-out 이 조용히 끊긴다.
     if ( bAffiliation && strEventType == "affiliation" && gclsDbManager.IsConnected() ) {
-        gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iExpires );
-        CLog::Print( LOG_INFO, "[Affiliation] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
-                     strReqUriUser.c_str(), iExpires );
+        if ( gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iExpires ) ) {
+            CLog::Print( LOG_INFO, "[Affiliation] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
+                         strReqUriUser.c_str(), iExpires );
+        } else {
+            CLog::Print( LOG_ERROR, "[Affiliation] affiliate 미기록 user=%s group=%s expires=%d — DB 미반영",
+                         strFromId.c_str(), strReqUriUser.c_str(), iExpires );
+        }
     }
 
     // 갱신(refresh) SUBSCRIBE 는 같은 dialog 안에서 오므로 To tag 를 새로 만들면 안 된다 —
@@ -702,10 +706,19 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
             CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] de-affiliate user=%s group=%s", strFromId.c_str(),
                          strReqUriUser.c_str() );
         } else {
-            gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri,
-                                             iExpires > 0 ? iExpires : 3600 );
-            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
-                         strReqUriUser.c_str(), iExpires > 0 ? iExpires : 3600 );
+            const int iAffExpires = ( iExpires > 0 ) ? iExpires : 3600;
+            // 기록 결과를 반드시 판정한다 — 종전엔 반환값을 버리고 성공 로그를 무조건 남겨,
+            //   DB 에 아무것도 안 쓰였는데도 로그만 "affiliate" 로 보이는 침묵 실패가 가능했다
+            //   (그룹 미발견 시 INSERT..SELECT 는 에러 없이 0행).
+            if ( gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iAffExpires ) ) {
+                CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d",
+                             strFromId.c_str(), strReqUriUser.c_str(), iAffExpires );
+            } else {
+                CLog::Print( LOG_ERROR,
+                             "[Affiliation/PUBLISH] affiliate 미기록 user=%s group=%s expires=%d "
+                             "— DB 미반영(그룹 미발견 또는 쿼리 실패). fan-out 대상에서 누락된다.",
+                             strFromId.c_str(), strReqUriUser.c_str(), iAffExpires );
+            }
         }
         // C2: 제휴상태 변경 → 해당 가입자의 affiliation-info(presence) 구독자에게 NOTIFY.
         SendAffiliationNotify( strFromId );

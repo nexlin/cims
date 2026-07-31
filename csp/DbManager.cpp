@@ -216,8 +216,16 @@ bool CDbManager::UpdateLogoutTime( const std::string &strUserId ) {
 
     ExecuteQuery( "UPDATE volte_subscriptions SET logout_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
     ExecuteQuery( "UPDATE ptt_subscriptions  SET logout_time=NOW() WHERE id='" + Escape( strUserId ) + "'" );
-    // de-register 시 affiliation 해제 (TS 24.379 §9)
-    ExecuteQuery( "DELETE FROM ptt_affiliations WHERE user_id='" + Escape( strUserId ) + "'" );
+    // de-register 시 affiliation 해제 (TS 24.379 §9 — 제휴는 등록에 묶인다).
+    //   가입자의 **전 그룹 제휴를 한 번에 지우는 유일한 경로**이므로 반드시 흔적을 남긴다.
+    //   종전엔 무로그였고, 그래서 "제휴 테이블이 비었다" 를 조사할 때 지운 주체를 특정할 수
+    //   없었다(로그·binlog 모두 없음). 지운 행 수까지 남겨 no-op 과 실제 회수를 구분한다.
+    if ( ExecuteQuery( "DELETE FROM ptt_affiliations WHERE user_id='" + Escape( strUserId ) + "'" ) ) {
+        const unsigned long long ullRows = mysql_affected_rows( m_pMysql );
+        if ( ullRows > 0 ) {
+            CLog::Print( LOG_INFO, "[Affiliation] de-register 회수 user=%s rows=%llu", strUserId.c_str(), ullRows );
+        }
+    }
     return true;
 }
 
@@ -382,16 +390,33 @@ bool CDbManager::InsertAffiliation( const std::string &strGroupId, const std::st
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
+    // mcptt_group_id → surrogate id 를 **먼저 확정**한다.
+    //   종전 구현은 `INSERT ... SELECT ... FROM ptt_groups WHERE mcptt_group_id=..` 한 방이었는데,
+    //   서브쿼리가 비면 **에러 없이 0행**을 써서 호출자가 "제휴 등록됨" 으로 오판했다(침묵 실패 —
+    //   DB 는 비어 있는데 로그만 affiliate 로 남아 제휴 소실 추적이 불가능했다).
+    //   affected_rows 로도 구분할 수 없다: ON DUPLICATE KEY UPDATE 는 갱신값이 기존과 같으면
+    //   (같은 초에 재발행·PUBLISH 재전송 등) 0 을 반환하므로 "미발견" 과 "무변경" 이 겹친다.
+    //   그래서 그룹 조회를 분리해 그 결과로 성공/실패를 판정한다 (제휴는 빈발 경로가 아니라
+    //   쿼리 1회 추가 비용은 무의미하다).
+    std::string strGroupPk;
+    {
+        MYSQL_RES *pRes =
+            ExecuteSelect( "SELECT id FROM ptt_groups WHERE mcptt_group_id='" + Escape( strGroupId ) + "' LIMIT 1" );
+        if ( !pRes ) return false;
+        MYSQL_ROW row = mysql_fetch_row( pRes );
+        if ( row && row[0] ) strGroupPk = row[0];
+        mysql_free_result( pRes );
+    }
+    if ( strGroupPk.empty() ) return false;   // 그룹 미발견 = 기록 불가
+
     std::string strExpires =
         ( iExpiresSec > 0 ) ? ( "DATE_ADD(NOW(), INTERVAL " + std::to_string( iExpiresSec ) + " SECOND)" ) : "NULL";
 
-    // mcptt_group_id → surrogate id 서브쿼리. UPSERT (status 재활성).
-    std::string strSql =
-        "INSERT INTO ptt_affiliations (group_id, user_id, client_id, expires_at, status) "
-        "SELECT g.id, '" +
-        Escape( strUserId ) + "', '" + Escape( strClientId ) + "', " + strExpires +
-        ", 'affiliated' FROM ptt_groups g WHERE g.mcptt_group_id='" + Escape( strGroupId ) +
-        "' ON DUPLICATE KEY UPDATE affiliated_at=NOW(), expires_at=" + strExpires + ", status='affiliated'";
+    // UPSERT (status 재활성). group_id 는 자기 테이블 BIGINT 조회값이므로 숫자다.
+    std::string strSql = "INSERT INTO ptt_affiliations (group_id, user_id, client_id, expires_at, status) VALUES (" +
+                         strGroupPk + ", '" + Escape( strUserId ) + "', '" + Escape( strClientId ) + "', " +
+                         strExpires + ", 'affiliated') ON DUPLICATE KEY UPDATE affiliated_at=NOW(), expires_at=" +
+                         strExpires + ", status='affiliated'";
     return ExecuteQuery( strSql );
 }
 
