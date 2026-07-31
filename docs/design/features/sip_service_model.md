@@ -21,7 +21,7 @@ Rule               SIP 메시지 1개 필드에 대한 단일 조건
 Rule Set           Rule 들을 flat AND/OR 로 조합
 Routing Policy     Rule Set match → Route Set 또는 Access Service 로 전달
 ACL Policy         Rule Set match → allow/deny (scope: global/local_node/route/route_set)
-Access Service     UE 가 직접 붙는 서비스(voip/ptt) — domain + auth_realm + 허용 LN
+Access Service     UE 가 직접 붙는 서비스(volte/ptt) — domain + auth_realm + 허용 LN
 ```
 
 재사용성이 원칙이다:
@@ -79,7 +79,7 @@ Access Service     UE 가 직접 붙는 서비스(voip/ptt) — domain + auth_re
 
           ┌──────────────────────────┐
           │   AccessService          │── listeners[] → LocalNode
-          │   kind: voip | ptt       │        (restricted 일 때)
+          │   kind: volte | ptt      │        (restricted 일 때)
           │   domain, auth_realm     │
           │   inbound_policy         │
           └──────────────────────────┘
@@ -118,7 +118,7 @@ LN 과 RN 을 묶은 실제 연결. auth 및 outbound 파라미터는 전부 여
 |---|---|
 | `local_node_ref`, `remote_node_ref` | 필수. pair unique. |
 | `outbound_proxy_ip`, `outbound_proxy_port` | RN 앞에 proxy 가 있을 때 |
-| `register_to_remote`, `register_expires` | trunk REGISTER 가 필요한 경우 |
+| `register_to_remote`, `register_expires` | trunk REGISTER 가 필요한 경우. **런타임 미구현** — 값만 보관하며 REGISTER 를 보내지 않는다 (§9) |
 | `auth_user`, `auth_password`, `auth_realm` | REGISTER/challenge 대응용 |
 | `max_concurrent_calls`, `cps_limit` | 용량 제한 |
 
@@ -132,32 +132,49 @@ Peering cluster (1:1:1, 1 active + N standby 등) 를 표현.
 | `members[].route_ref` | 포함할 Route |
 | `members[].priority` | failover 순서 (낮을수록 우선) |
 | `members[].weight` | weighted 분배 비율 |
-| `health_check_*` | OPTIONS ping 주기 / dead 임계 / recovery 임계 |
+| `health_check_*` | OPTIONS ping 주기 / dead 임계 / recovery 임계. **런타임 미구현** — 프로브를 보내지 않아 모든 Route 가 alive 로 취급된다 (§9) |
 | `fallback_policy` | 전체 dead 시 `reject` / `next_policy` |
 
 같은 Route 가 다른 RouteSet 에 다른 priority 로 속할 수 있다.
+
+선택 규칙 (`CCspRouteSetMap::SelectRoute`):
+
+- `failover` — `priority` 오름차순으로 첫 alive Route
+- `round_robin` — 커서 순환, dead 는 건너뜀
+- `weighted` — weight 비율 분배 (deficit-round-robin 근사)
+- `hash_by_caller` — `{from_uri_user}@{from_uri_host}` 해시로 고정, dead 면 다음 member 순회
+- `weight: 0` 인 member 는 모든 정책에서 **분배 제외**
+- 참조가 깨진 member 는 RouteSet 을 유지한 채 선택에서만 skip
 
 ### 2-5. Rule — 원자 조건
 
 SIP 메시지의 한 필드 + 연산자 + 값.
 
-지원 필드(1차):
+지원 필드:
 
 ```
 from_uri_host   from_uri_user
 to_uri_host     to_uri_user
 req_uri_host    req_uri_user
-src_ip          dst_ip
-user_agent      method
-p_asserted_identity   via_host
+src_ip          user_agent
+method
 ```
 
-지원 연산자(1차):
+스키마(`config_template.json`)에는 `dst_ip` / `p_asserted_identity` / `via_host` 도 열거되어 있으나
+`MessageCtx` 에 채워지지 않아 항상 빈 값으로 평가된다 (§9). `dst_ip` 로 수신 인터페이스를 구분하려면
+ACL `scope=local_node` 를 쓴다.
+
+지원 연산자:
 
 ```
 eq        ne        prefix    suffix    contains
 regex     in_cidr   in_list   exists    not_exists
 ```
+
+- `regex` — `std::regex` **ECMAScript** 문법 (`\d`, `\w`, 비탐욕 `*?` 사용 가능). 컴파일 실패 시 false + ERROR 로그
+- `in_cidr` — IPv4 전용
+- `in_list` — 콤마 구분 문자열
+- `exists` / `not_exists` — 값이 빈 문자열이면 "없음"으로 본다
 
 `tags[]` 가 중요: 같은 Rule 이 다양한 RuleSet 에 재사용될 때 용도를 구분한다.
 
@@ -185,6 +202,10 @@ UI 는 tag filter chip 으로 목록을 필터. Policy 가 다른 용도 태그�
 - `AND`: 모든 member 가 true (negate 고려) → RuleSet true
 - `OR`: 하나라도 true → RuleSet true
 - member 0개 → `true` (catch-all 용이하게)
+- Rule 이 `enabled=false` → 그 member 는 **false** (skip 이 아니다). `AND` 셋에서는 셋 전체가 false 가 된다
+- 존재하지 않는 `rule_ref` → 그 member 는 false. 로드 시 ERROR 로그로 알린다
+- 참조하는 RuleSet 이름 자체가 없으면 → **no-match**(false). 반면 참조가 **빈 문자열**이면 catch-all(true) 이므로
+  Routing/ACL 정책에서 오타와 catch-all 은 정반대로 동작한다
 
 ### 2-7. RoutingPolicy — match → target
 
@@ -196,8 +217,16 @@ Rule Set 이 match 하면 target 으로 호를 routing.
 | `match_rule_set_ref` | 비우면 항상 match (catch-all) |
 | `target_type` | `route_set` / `access_service` / `reject` |
 | `target_ref` | target_type 에 따른 참조 대상 |
-| `transform_rule_set_refs[]` | **예약 필드** — 1차에서 런타임 미구현 |
+| `transform_rule_set_refs[]` | **예약 필드** — 런타임 미구현 |
 | `fail_action` | target=route_set 이 모두 dead 일 때 `reject` / `next_policy` |
+
+`target_type` 별 런타임 동작:
+
+| target_type | 동작 |
+|---|---|
+| `route_set` | RouteSet 에서 Route 선택 → `PendingRouteMap` 적재 → B2BUA B-leg 가 그 peer 로 forward |
+| `reject` | 즉시 403 |
+| `access_service` | 매칭·로그까지만. 이후는 기존 TAS/B2BUA 경로가 처리한다 (명시적 분기 없음, §9) |
 
 **런타임 적용 흐름:**
 
@@ -211,6 +240,8 @@ ModuleDispatcher
   └─ B2BUA 가 B-leg dialog 생성 시 그 peer ip/port/transport 로 forward
 ```
 
+- 평가 대상은 **INVITE 뿐**이며, **PTT 그룹 판정 이후**에 실행된다. 따라서 PTT 그룹 대상 INVITE 는
+  RoutingPolicy 로 외부 peer 로 돌릴 수 없다 (그룹 경로가 먼저 확정된다).
 - 내부 가입자(등록 단말) 콜 라우팅은 별도 경로로, `AddRoute(ip, port, transport)` 로 Route 헤더를 직접 주입한다.
 
 ### 2-8. AclPolicy — match → allow/deny
@@ -219,13 +250,22 @@ Rule Set 이 match 하면 action.
 
 | 필드 | 의미 |
 |---|---|
-| `priority` | 낮을수록 먼저 평가 |
-| `match_rule_set_ref` | 필수 |
+| `priority` | 낮을수록 먼저 평가. 같은 priority 면 name 사전순. 첫 match 적용 |
+| `match_rule_set_ref` | **필수** — 비어 있으면 그 정책은 로드에서 제외된다 (ERROR 로그) |
 | `scope` | `global` / `local_node` / `route` / `route_set` |
 | `scope_ref` | scope ≠ global 일 때 해당 collection 의 name |
 | `action` | `allow` / `deny` |
 
 Rule 은 Routing 과 ACL 이 공유. RuleEvaluator 하나가 양쪽을 처리.
+
+적용 범위와 기본값:
+
+- ACL 은 **모든 inbound SIP 요청**에 대해 `ModuleDispatcher::RecvRequest` 진입 직후 평가된다
+  (REGISTER 포함). deny 면 403 을 보내고 이후 처리를 하지 않는다.
+- **매칭되는 정책이 없으면 기본 ALLOW.** 화이트리스트로 쓰려면 "허용 대상이 아님 → deny" 를
+  `negate` 로 표현한다.
+- 동작하는 scope 는 `global` 과 `local_node` 다. `route` / `route_set` 은 inbound 시점에 outbound
+  route 가 아직 결정되지 않아 빈 문자열로 매칭되므로 실질 미동작이다 (§9).
 
 ### 2-9. AccessService — UE 서비스
 
@@ -233,8 +273,8 @@ UE 가 직접 REGISTER 하는 서비스 도메인.
 
 | 필드 | 의미 |
 |---|---|
-| `kind` | `voip` / `ptt` (IBCF 는 이 collection 에 없음) |
-| `domain` | IMPU/IMPI 조립용. Digest username = `imsi@<domain>` |
+| `kind` | `volte` / `ptt` (IBCF 는 이 collection 에 없음). 다른 값이면 해당 레코드를 skip + ERROR 로그 |
+| `domain` | IMPU/IMPI 조립용. Digest username = `imsi@<domain>`. 비면 레코드 제외 |
 | `auth_realm` | 비우면 domain 상속 |
 | `inbound_policy` | `any` / `restricted` |
 | `allowed_local_node_refs[]` | restricted 일 때 허용 LocalNode 목록 |
@@ -248,19 +288,29 @@ UE 가 직접 REGISTER 하는 서비스 도메인.
 Access Service 가 이 흐름의 "service" 역할.
 
 ```
-UE → REGISTER
-  Authorization: Digest username="<imsi>@<access_service.domain>"
-                 realm="<access_service.auth_realm or domain>"
-                 response=MD5(...)
-
-CSP (CscfModule):
-  1. From URI user + host → AccessServiceMap.GetByDomain(host)
-     (inbound_policy=restricted 이면 수신 Local Node 가 allowed_local_node_refs 에 있는지 확인)
-  2. voip_subscriptions/ptt_subscriptions 에서 service_id 로 가입자 조회
-  3. 기대 username = imsi + "@" + service.domain 비교
-  4. HA1 = MD5(username : realm : password)
-  5. 일치 → 200 OK + Contact 저장 + (binding_key → service_id) 맵 유지
+UE → REGISTER (Request-URI: sip:<domain>)
+  │
+  ├─ Authorization 헤더 없음
+  │   └─ 401 + WWW-Authenticate, realm = Request-URI host
+  │
+  └─ Authorization 헤더 있음  (CCscfModule::CheckAuthorization)
+      1. nonce 검증 (NonceMap) — 미발견이면 401 + stale=true
+      2. From URI user → CspUserMap 에서 가입자 조회
+      3. 가입자의 service_ref → access_services 를 name 으로 조회
+         (service_ref 가 비어 있으면 그 자리에서 거부)
+      4. inbound_policy=restricted 면 수신 listener_id 가 svc.listeners[] 에 있는지 확인
+      5. 기대 username = "{가입자 imsi}@{svc.domain}" 를 Authorization username 과 문자열 비교
+         (imsi 가 비어 있으면 거부)
+      6. HA1 = MD5(username : Authorization.realm : password) → response 검증
+      7. 성공 → 200 OK + Contact 저장
 ```
+
+- **REGISTER 챌린지의 realm 은 Request-URI host** 다. 즉 단말이 `sip:<domain>` 으로 보낸 도메인이
+  그대로 realm 이 된다.
+- `auth_realm` (없으면 `domain`, = `EffectiveRealm()`) 은 **Request-URI 기반 realm 이 없는 챌린지의
+  fallback** 으로 쓰인다 (SUBSCRIBE 등 비-REGISTER 경로). 이때 대상은 `kind=volte` 인 첫 서비스다.
+- 서비스 조회는 `domain` 이 아니라 **가입자의 `service_ref` (= access_service name)** 로 한다.
+  `domain` 은 기대 username 조립과 realm fallback 에 쓰인다.
 
 domain/auth_realm 의 SOT 는 `access_services.*`.
 
@@ -333,8 +383,8 @@ RoutingPolicies:
   rp-default priority=1000 match=""  target=access_service:volte-main (catch-all)
 
 AccessServices:
-  volte-main  voip  domain=ims.mnc001... allowed_ln=[lb-access-udp, lb-access-tls]
-  ptt-main    ptt   domain=ptt.mnc001... allowed_ln=[lb-access-udp]
+  volte-main  volte  domain=ims.mnc001... allowed_ln=[lb-access-udp, lb-access-tls]
+  ptt-main    ptt    domain=ptt.mnc001... allowed_ln=[lb-access-udp]
 ```
 
 ### 5-3. 다중 peering + restricted access
@@ -366,7 +416,7 @@ AccessServices:
 | Routing 결정 | `CRoutingPolicyEngine` | |
 | ACL 결정 | `CAclPolicyEngine` | |
 | RemoteNode/Route/RouteSet 캐시 | `CspRemoteNodeMap`, `CspRouteMap`, `CspRouteSetMap` | |
-| Access service 캐시 | `CspAccessServiceMap` (voip/ptt 만) | |
+| Access service 캐시 | `CCspServiceMap` (`gclsServiceMap`, volte/ptt 만) | |
 
 ---
 
@@ -392,7 +442,8 @@ AccessServices:
 | `csp/CspRuleEvaluator.{h,cpp}` | Rule/RuleSet 평가 엔진 |
 | `csp/CspRoutingPolicyEngine.{h,cpp}` | routing 결정 |
 | `csp/CspAclPolicyEngine.{h,cpp}` | ACL 결정 |
-| `csp/CspAccessServiceMap.{h,cpp}` | Access service (voip/ptt) |
+| `csp/CspServiceMap.{h,cpp}` | Access service (volte/ptt) — `CCspServiceMap` |
+| `csp/CspListenerManager.{h,cpp}` | local_nodes → psip 리스너 add/remove (무중단 rebind) |
 | `csp/SipServerSetup.{h,cpp}` | Setup.Sip 파싱 |
 
 ### Console
@@ -412,10 +463,17 @@ AccessServices:
 
 ## 9. 미구현/예약
 
-| 항목 | 예정 |
+스키마에는 존재하지만 런타임이 아직 소비하지 않는 항목들. 설정해도 동작에 영향이 없다.
+
+| 항목 | 상태 |
 |------|------|
+| RouteSet 헬스체크 (`health_check_*`) | 프로브 송신 코드가 없다. `RouteRuntime.alive` 가 항상 true 이므로 dead peer 도 계속 선택된다. 손절체는 `routes.enabled=false` 로 한다 |
+| `routes.register_to_remote` / `register_expires` | 트렁크 REGISTER 워커 미구현 — 값만 보관 |
+| Rule field `dst_ip` / `p_asserted_identity` / `via_host` | `MessageCtx` 에 채워지지 않아 항상 빈 값. 수신 인터페이스 구분은 ACL `scope=local_node` 로 대체 |
+| `routing_policies.target_type=access_service` | 매칭·로그까지만. 이후는 기존 TAS/B2BUA 경로가 처리 |
+| ACL `scope=route` / `route_set` | inbound 시점에 outbound route 미결정 → 빈 문자열로 매칭되어 실질 미동작 |
+| `routing_policies.transform_rule_set_refs` (메시지 변환) | 예약 필드 |
 | RuleSet 중첩 (tree AND/OR/NOT) | 2차 |
-| `routing_policies.transform_rule_set_refs` 런타임 적용 (메시지 변환) | 2차 |
-| 헬스체크 `invite_response` 모드 | 2차 (1차는 `options_ping` 만) |
-| `hash_by_caller` 분배 | 2차 |
+| 헬스체크 `invite_response` 모드 | 2차 |
 | Rule field: `record_route`, `p_charging_vector` 등 | 필요시 추가 |
+| listener_id 전파 | UDP 수신 경로만. TCP/TLS 는 `-1` → ACL `scope=local_node` 와 `restricted` 는 UDP 리스너에서만 매칭된다 |

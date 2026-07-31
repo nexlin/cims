@@ -882,7 +882,8 @@
             "key": "register_to_remote",
             "label": "REGISTER 전송",
             "type": "bool",
-            "default": false
+            "default": false,
+            "help": "현재 런타임 미구현 — 값만 보관하며 트렁크로 REGISTER 를 보내지 않는다."
           },
           {
             "key": "register_expires",
@@ -1038,7 +1039,8 @@
               "invite_response",
               "none"
             ],
-            "default": "options_ping"
+            "default": "options_ping",
+            "help": "현재 런타임 미구현 — 프로브를 보내지 않아 모든 Route 가 alive 로 취급된다. 특정 Route 를 빼려면 routes.enabled=false 를 쓴다."
           },
           {
             "key": "health_check_interval_sec",
@@ -1149,7 +1151,8 @@
               "method",
               "p_asserted_identity",
               "via_host"
-            ]
+            ],
+            "help": "dst_ip / p_asserted_identity / via_host 는 현재 런타임이 값을 채우지 않아 항상 빈 값으로 평가된다. 수신 인터페이스 구분은 ACL scope=local_node 를 사용."
           },
           {
             "key": "op",
@@ -1174,7 +1177,7 @@
             "label": "값",
             "type": "string",
             "default": "",
-            "help": "in_list 는 콤마 분리. in_cidr 은 1.2.3.0/24. regex 는 POSIX ERE. exists/not_exists 는 무시."
+            "help": "in_list 는 콤마 분리. in_cidr 은 IPv4 전용 1.2.3.0/24. regex 는 ECMAScript 문법. exists/not_exists 는 무시."
           },
           {
             "key": "tags",

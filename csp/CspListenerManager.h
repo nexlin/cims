@@ -9,14 +9,14 @@
 /**
  * CspListenerManager — CspConfigCache(local_nodes) ↔ psip CSipStack 의 UDP/TCP/TLS 리스너 동기화 계층.
  *
- *   R4 범위: UDP + TCP + TLS 모두 처리. WS/WSS 는 psip 미지원으로 skip.
+ *   UDP + TCP + TLS 모두 처리. WS/WSS 는 psip 미지원으로 skip.
  *   psip 의 AddUdpListener/AddTcpListener/AddTlsListener API 를 protocol 에 따라 분기 호출.
  *
  *   ID 타입: 캐시 레코드의 id 는 string (UUID hex). psip SipStack 은 int 외부 ID 를 요구하므로
  *   std::hash<string> 으로 안정적인 int 매핑을 사용. 같은 uuid → 같은 int 보장.
  *
- *   TLS 인증서: 현재 psip 은 stack-global SSLServerStart(cert, ca) 로 1회 초기화.
- *   local_node.tls_cert_path 는 수집하되 per-listener 적용은 R5+ 에서.
+ *   TLS 인증서: local_node 의 tls_cert_path/tls_key_path/tls_ca_path 를 AddTlsListener 로 넘겨
+ *   리스너별 ctx 를 만든다. 비어 있으면 stack-global cert (Setup.Sip.CertFile) 로 폴백.
  */
 
 class CCspListenerManager {

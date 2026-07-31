@@ -84,8 +84,8 @@ bool CCspListenerManager::_removeListenerFromStack( const ManagedInfo &m ) {
 }
 
 bool CCspListenerManager::Sync() {
-    // R4 (2026-04-23): local_nodes.jsonl 을 소비. UDP + TCP + TLS 지원.
-    // 인증서는 stack-global (Setup.Sip.CertFile), per-listener cert 는 R5+.
+    // local_nodes.jsonl 을 소비. UDP + TCP + TLS 지원.
+    // TLS 인증서는 리스너별(tls_cert_path 등) 지정, 비면 stack-global (Setup.Sip.CertFile).
     SimpleJson::JsonNode items = gclsCspConfigCache.GetItems( CACHE_LOCAL_NODE );
     if ( items.type != SimpleJson::JSON_ARRAY ) {
         CLog::Print( LOG_ERROR, "ListenerManager: cache items not array" );
