@@ -56,16 +56,17 @@
     {
       "key": "notify",
       "title": "Signaling Notify",
-      "description": "가입자/그룹 변경 실시간 반영 대상. CSP=VoLTE (CSCF/TAS) / PSP=PTT (CSCF/PTT-AS). PSP IP 가 CSP 와 다르면 자동 분리 broadcast — USER_CHANGED 는 양쪽, GROUP_CHANGED 는 PSP 전용.",
+      "description": "가입자/그룹 변경 실시간 반영 대상. CSP=VoLTE (CSCF/TAS) / PSP=PTT (CSCF/PTT-AS). USER_CHANGED·GROUP_CHANGED 모두 양쪽으로 broadcast 되며, 두 IP:Port 가 같으면 1회로 dedup 된다. 반드시 CSP/PSP 가 CSC notify 를 수신하는 IP (csp.json Setup.Sip.LocalIp) 와 같아야 한다 — CSP 는 그 IP 로만 4421/UDP 를 bind 하므로 127.0.0.1 로 두면 notify 가 조용히 버려진다.",
       "fields": [
         {
           "key": "CspNotify.Ip",
           "label": "CSP (VoLTE) IP",
           "type": "string",
-          "default": "127.0.0.1",
+          "default": "",
           "deploy_value": "@CSP_IP@",
           "restart": false,
-          "reload_hint": "런타임 리로드 가능 (다음 notify 부터 적용)."
+          "reload_hint": "런타임 리로드 가능 (다음 notify 부터 적용).",
+          "help": "CSP 가 4421/UDP 를 bind 한 IP (= csp.json Setup.Sip.LocalIp). 비우면 모듈 기본값 127.0.0.1 — CSP 가 특정 IP 로 bind 한 구성에서는 도달하지 않는다."
         },
         {
           "key": "CspNotify.Port",
@@ -80,10 +81,11 @@
           "key": "PspNotify.Ip",
           "label": "PSP (PTT) IP",
           "type": "string",
-          "default": "127.0.0.1",
+          "default": "",
           "deploy_value": "@PSP_IP@",
           "restart": false,
-          "help": "PTT 가입자/그룹 변경 알림 대상. CSP 와 동일 IP 면 단일 broadcast 됨."
+          "reload_hint": "런타임 리로드 가능 (다음 notify 부터 적용).",
+          "help": "PTT 가입자/그룹 변경 알림 대상 (PSP 가 4421/UDP 를 bind 한 IP). CSP 와 동일 IP 면 단일 broadcast 됨. 비우면 PSP 미설정 = CSP 만 사용."
         },
         {
           "key": "PspNotify.Port",

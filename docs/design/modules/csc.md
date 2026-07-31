@@ -554,10 +554,31 @@ def notify_csp(event, uri="", action="", etag="",
         "event": event, "uri": uri, "action": action, "etag": etag,
         "sesid": sesid, "caller": caller, "service": service,
     })
-    sock.sendto(msg.encode(), (CSP_IP, CSP_PORT))  # 4421
+    for ip, port, label in _notify_targets(event):   # 4421
+        _send_notify(ip, port, label, msg.encode())
 ```
 
 전체 필드 규격은 [../features/flow_logging.md](./../features/flow_logging.md) § 7 (CSC → CSP) 참고.
+
+**목적지 라우팅** — 모든 이벤트를 `CspNotify`(VoLTE 시그널링) + `PspNotify`(PTT 시그널링)
+양쪽으로 broadcast 하고, 두 `(IP, Port)` 가 같으면 1회로 dedup 한다. PTT-AS 가 통합 CSP
+(`Roles.PTT_AS`) 인지 분리 PSP 인지에 무관하게 PTT-AS 노드가 반드시 수신하도록 하기 위한
+것이다. `PspNotify.Ip` 가 비어 있으면 PSP 미설정 = CSP 만 사용.
+
+**목적지 IP 는 CSP 가 4421/UDP 를 bind 한 IP 와 같아야 한다.** CSP 의 `CCscInterface` 는
+`Setup.Sip.LocalIp` 가 명시 IP 면 wildcard 가 아닌 **그 IP 로만** bind 한다 (한 호스트에
+CSP/PSP/ISP 다중 인스턴스가 공존할 때 UDP 전달 대상을 결정적으로 만들기 위한 설계).
+따라서 CSP 가 특정 IP 로 bind 한 구성에서 `CspNotify.Ip` 를 `127.0.0.1` 로 두면 notify 는
+목적지에 도달하지 않는다.
+
+**도달 실패 관측** — 목적지별로 **connect 된** UDP 소켓을 유지한다. 비연결 `sendto` 는
+수신 프로세스가 없어도 항상 성공해 제어평면 단절이 무기한 침묵하지만, connected 소켓은
+커널이 ICMP port-unreachable 을 큐잉하므로 `send`/`recv` 에서 `ECONNREFUSED` 로 관측된다.
+발송 직후 짧은 창(50ms) 동안 ICMP 회신을 확인하고, 도달 실패 시 app 로그에
+`Notify 미도달 → <label>(<ip>:<port>)` ERROR 를 남긴다. 도달한 경우만 `Notify Sent` INFO.
+
+> 도달 실패는 조용한 기능 저하로 나타난다 — 관리자 편성 변경이 즉시 반영되지 않고
+> CSP 의 주기 통지원(`SyncGroupsState`, 60초 해시 비교)으로만 뒤늦게 따라잡는다.
 
 ### 5.2 pi_http 미들웨어 (Admin API 로깅)
 
@@ -686,7 +707,11 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
     "token_ttl": 86400
   },
   "CspNotify": {
-    "Ip": "127.0.0.1",
+    "Ip": "121.161.164.45",
+    "Port": 4421
+  },
+  "PspNotify": {
+    "Ip": "121.161.164.45",
     "Port": 4421
   },
   "MsgLogDir": "/data/msg_log",
@@ -712,6 +737,28 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 base 가 없으면 빈 dict 에서 시작해 overlay 만으로 기동한다. 따라서 상용 배포본은
 agent 가 쓴 `csc/config.json` 단독으로 정상 동작해야 하며, base 부재를 이유로
 빈 설정(포트 4420 default·dummy user·JWT 미설정 → 401)으로 떨어지면 안 된다.
+
+⚠️ **overlay 는 base 를 덮는다** — OAM 은 job 디스패치 시 deployment 의 sparse overlay
+(사용자가 실제로 바꾼 값)를 `config_template` 의 `default` 위에 올려 완전한 설정으로
+실체화한다 (`agents.py:_materialize_deploy_config`). 즉 **콘솔에서 한 번도 만지지 않은
+필드도 template default 값으로 overlay 에 실려 base 를 덮는다.** 따라서 노드 topology 에
+의존하는 필드(피어 주소 등)의 template default 는 `""` 로 두어 실체화 대상에서 빠지게
+하고(`_template_defaults` 는 빈 default 를 제외), 운영값은 콘솔에서 명시 입력한다.
+`deploy_value`(`@CSP_IP@` 등)는 `configure.sh` 경로에서만 치환되며 OAM 배포 경로는
+치환하지 않는다.
+
+### 8.2 런타임 리로드 (SIGUSR1)
+
+agent 의 `job_update_config` 는 overlay 를 재기록한 뒤 모듈에 **SIGUSR1** 을 보낸다.
+CSC 는 `csc_app.py` 에서 핸들러를 등록해 `load_config()` → `admin_auth.init()` →
+`mcptt.apply_config()` 를 다시 수행한다. `config_template` 의 `restart:false` 필드
+(`CspNotify`/`PspNotify`, IdMs TTL, `Provisioning` 등)가 재기동 없이 반영되는 경로다.
+
+- `mcptt.apply_config(config)` = 스칼라 설정만 재적용 (가입자/그룹 데이터 로드는 미포함).
+  기동 시엔 `load_shared_data()` 가 먼저 호출한다.
+- bind 계열(`Server.Port`/`McpttServer.Port`)과 기동 시 캡처된 값은 재기동이 필요하다.
+- 핸들러가 없으면 파이썬 기본 동작(프로세스 종료)이라 `update_config` 가 CSC 를 죽인다 —
+  SIGUSR1 핸들러는 선택이 아니라 배포 규약이다.
 
 ---
 

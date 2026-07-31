@@ -101,7 +101,7 @@ if __name__ == '__main__':
     #   가입자 CRUD(admin) + 조직(org) + MCPTT(IdMS/GMS/CMS/KMS). 로그인/토큰발급(auth)·
     #   본인프로파일(users /me)은 base(oam) 책임 → csc 미서빙·미import.
     #   JWT 검증은 자체 services.admin_auth (공유 JwtSecret = 계약).
-    from services.mcptt import load_shared_data, CSC_HANDLER_LIST, notify_csp
+    from services.mcptt import load_shared_data, apply_config, CSC_HANDLER_LIST, notify_csp
     from services       import logger as csc_logger
     from services       import admin_auth
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
@@ -114,6 +114,30 @@ if __name__ == '__main__':
 
         config = load_config()
         admin_auth.init(config)
+
+        # ── SIGUSR1 = 배포 config reload (agent job_update_config 규약) ──
+        # 핸들러가 없으면 파이썬 기본 동작(프로세스 종료)이라 update_config 가 CSC 를
+        # 죽인다. config_template 의 restart:false (런타임 리로드 가능) 필드 —
+        # CspNotify/PspNotify, IdMs TTL, Provisioning 등 — 가 실제로 재기동 없이
+        # 반영되는 경로. bind 계열(Server.Port/McpttServer.Port)은 재기동 필요.
+        import signal as _signal
+
+        def _on_usr1(_sig, _frm):
+            try:
+                newc = load_config()
+                if newc:
+                    config.clear()
+                    config.update(newc)
+                    admin_auth.init(config)
+                    apply_config(config)
+                    logger.log_info('[reload] SIGUSR1 — config 재적용 '
+                                    '(bind/기동 캡처 항목은 재기동 필요)')
+                else:
+                    logger.log_warning('[reload] SIGUSR1 — 재로드 실패(빈 설정), 기존 유지')
+            except Exception as e:
+                logger.log_error(f'[reload] SIGUSR1 처리 실패: {e}')
+
+        _signal.signal(_signal.SIGUSR1, _on_usr1)
 
         # ServiceLogging 설정 (신규 통합)
         sl = config.get("ServiceLogging", {})

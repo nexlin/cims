@@ -1,5 +1,6 @@
 import os
 import socket
+import select
 import json
 import glob
 import time
@@ -104,11 +105,76 @@ def _users_has_title(cur) -> bool:
     return cur.fetchone()['cnt'] > 0
 
 
+def apply_config(config):
+    """설정 스칼라 값만 모듈 전역에 재적용 — 가입자/그룹 데이터 로드는 하지 않는다.
+
+    기동 시 `load_shared_data()` 가 호출하고, 배포 설정 변경(agent job_update_config →
+    SIGUSR1) 시 `csc_app` 의 reload 훅이 다시 호출한다. config_template 의
+    `restart:false` (런타임 리로드 가능) 필드가 실제로 재기동 없이 반영되는 경로.
+    bind 계열(Server.Port/McpttServer.Port 등 기동 시 소켓에 캡처된 값)은 여기서
+    전역만 갱신되고 실제 반영은 재기동이 필요하다."""
+    db_config  = config.get('CimsDatabase')
+    group_path = config.get('Data', {}).get('Group')
+
+    # Read IdMs config
+    global SECRET_KEY, IDMS_ISSUER, KMS_URI, IDMS_DOMAIN, KMS_CLIENT_REQ_URL
+    global AUTH_CODE_TTL, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL
+    idms_config = config.get('IdMs', {})
+    if idms_config.get('JwtSecret'):
+        SECRET_KEY = idms_config['JwtSecret']
+    else:
+        logger.log_error("[IdMS] IdMs.JwtSecret 미설정 — 임의 시크릿 사용(재기동 시 토큰 무효화). "
+                         "운영은 IdMs.JwtSecret 설정 권장.")
+    if idms_config.get('Issuer'):
+        IDMS_ISSUER = idms_config['Issuer']
+    if idms_config.get('KmsUri'):
+        KMS_URI = idms_config['KmsUri']
+    if idms_config.get('Domain'):
+        IDMS_DOMAIN = idms_config['Domain']
+    if idms_config.get('KmsClientReqUrl'):
+        KMS_CLIENT_REQ_URL = idms_config['KmsClientReqUrl']
+    if idms_config.get('AuthCodeTtl'):
+        AUTH_CODE_TTL = int(idms_config['AuthCodeTtl'])
+    if idms_config.get('AccessTokenTtl'):
+        ACCESS_TOKEN_TTL = int(idms_config['AccessTokenTtl'])
+    if idms_config.get('RefreshTokenTtl'):
+        REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
+
+    global CSP_NOTIFY_IP, CSP_NOTIFY_PORT, PSP_NOTIFY_IP, PSP_NOTIFY_PORT
+    notify_cfg = config.get('CspNotify', {})
+    if notify_cfg.get('Ip'):
+        CSP_NOTIFY_IP = notify_cfg['Ip']
+    if notify_cfg.get('Port'):
+        CSP_NOTIFY_PORT = int(notify_cfg['Port'])
+    psp_cfg = config.get('PspNotify', {})
+    if psp_cfg.get('Ip'):
+        PSP_NOTIFY_IP = psp_cfg['Ip']
+    if psp_cfg.get('Port'):
+        PSP_NOTIFY_PORT = int(psp_cfg['Port'])
+    # 목적지가 바뀌면 기존 connected 소켓은 폐기 (다음 notify 에서 새로 연결).
+    _reset_notify_socks()
+    logger.log_info(f"Notify targets: CSP={CSP_NOTIFY_IP}:{CSP_NOTIFY_PORT} "
+                    f"PSP={PSP_NOTIFY_IP or '(unset)'}:{PSP_NOTIFY_PORT}")
+
+    # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT
+    _DB_CONFIG = db_config
+    PROVISIONING = config.get('Provisioning', {}) or {}
+    _MCPTT_PORT = int((config.get('McpttServer', {}) or {}).get('Port', 4430))
+
+    global GROUP_DIR
+    if group_path:
+        GROUP_DIR = group_path
+
+
 def load_shared_data(config):
     # Do not reassign global variables, modify them in place
     USERS.clear()
     GROUPS.clear()
-    
+
+    # 스칼라 설정(IdMs/Notify/Provisioning/GROUP_DIR)은 리로드 가능 단위로 분리.
+    apply_config(config)
+
     # Config keys match csc.json structure
     user_path = config.get('Data', {}).get('User')
     group_path = config.get('Data', {}).get('Group')
@@ -185,52 +251,6 @@ def load_shared_data(config):
                     logger.log_info(f"Loaded File User: {uri}")
             except Exception as e:
                 logger.log_error(f"Error loading user {fpath}: {e}")
-
-    # Read IdMs config
-    global SECRET_KEY, IDMS_ISSUER, KMS_URI, IDMS_DOMAIN, KMS_CLIENT_REQ_URL
-    global AUTH_CODE_TTL, ACCESS_TOKEN_TTL, REFRESH_TOKEN_TTL
-    idms_config = config.get('IdMs', {})
-    if idms_config.get('JwtSecret'):
-        SECRET_KEY = idms_config['JwtSecret']
-    else:
-        logger.log_error("[IdMS] IdMs.JwtSecret 미설정 — 임의 시크릿 사용(재기동 시 토큰 무효화). "
-                         "운영은 IdMs.JwtSecret 설정 권장.")
-    if idms_config.get('Issuer'):
-        IDMS_ISSUER = idms_config['Issuer']
-    if idms_config.get('KmsUri'):
-        KMS_URI = idms_config['KmsUri']
-    if idms_config.get('Domain'):
-        IDMS_DOMAIN = idms_config['Domain']
-    if idms_config.get('KmsClientReqUrl'):
-        KMS_CLIENT_REQ_URL = idms_config['KmsClientReqUrl']
-    if idms_config.get('AuthCodeTtl'):
-        AUTH_CODE_TTL = int(idms_config['AuthCodeTtl'])
-    if idms_config.get('AccessTokenTtl'):
-        ACCESS_TOKEN_TTL = int(idms_config['AccessTokenTtl'])
-    if idms_config.get('RefreshTokenTtl'):
-        REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
-
-    global CSP_NOTIFY_IP, CSP_NOTIFY_PORT, PSP_NOTIFY_IP, PSP_NOTIFY_PORT
-    notify_cfg = config.get('CspNotify', {})
-    if notify_cfg.get('Ip'):
-        CSP_NOTIFY_IP = notify_cfg['Ip']
-    if notify_cfg.get('Port'):
-        CSP_NOTIFY_PORT = int(notify_cfg['Port'])
-    psp_cfg = config.get('PspNotify', {})
-    if psp_cfg.get('Ip'):
-        PSP_NOTIFY_IP = psp_cfg['Ip']
-    if psp_cfg.get('Port'):
-        PSP_NOTIFY_PORT = int(psp_cfg['Port'])
-
-    # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
-    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT
-    _DB_CONFIG = db_config
-    PROVISIONING = config.get('Provisioning', {}) or {}
-    _MCPTT_PORT = int((config.get('McpttServer', {}) or {}).get('Port', 4430))
-
-    global GROUP_DIR
-    if group_path:
-        GROUP_DIR = group_path
 
     # Load groups: DB primary, file fallback
     db_groups_loaded = False
@@ -408,6 +428,75 @@ def refresh_group_members(group_id: str) -> bool:
 # [FIX] Notify CSP logic
 _notify_seq = 0
 
+# 목적지별 **연결형(connected) UDP 소켓**. 비연결 sendto 는 수신 프로세스가 없어도
+# 항상 성공하므로 제어평면 단절(예: 목적지 IP 오설정)이 무기한 침묵한다. connect 된
+# 소켓은 커널이 ICMP port-unreachable 을 큐잉해 send/recv 에서 ECONNREFUSED 로
+# 관측되므로, 도달 실패를 즉시 ERROR 로 남길 수 있다.
+_notify_socks: Dict[Tuple[str, int], socket.socket] = {}
+
+
+def _notify_sock(ip: str, port: int) -> socket.socket:
+    key = (ip, int(port))
+    sock = _notify_socks.get(key)
+    if sock is None:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setblocking(False)
+        sock.connect((ip, int(port)))
+        _notify_socks[key] = sock
+    return sock
+
+
+def _drop_notify_sock(ip: str, port: int) -> None:
+    sock = _notify_socks.pop((ip, int(port)), None)
+    if sock is not None:
+        try:
+            sock.close()
+        except Exception:
+            pass
+
+
+def _reset_notify_socks() -> None:
+    """설정 리로드로 목적지가 바뀐 경우 등, 캐시된 소켓을 버린다.
+
+    close 를 직접 호출하지 않는다 — 리로드는 SIGUSR1 핸들러(메인 스레드)에서 돌고
+    `_send_notify` 는 요청 처리 스레드에서 도는데, 사용 중 fd 를 닫으면 EBADF 로
+    한 건이 유실될 수 있다. 참조만 끊으면 `_send_notify` 의 지역 참조가 사라지는
+    시점에 인터프리터가 닫는다."""
+    _notify_socks.clear()
+
+
+def _send_notify(ip: str, port: int, label: str, payload: bytes) -> bool:
+    """단일 목적지 발송. 도달 실패(수신 프로세스 없음)면 False + ERROR 로그."""
+    for attempt in (0, 1):
+        try:
+            sock = _notify_sock(ip, port)
+            sock.send(payload)
+        except ConnectionRefusedError as e:
+            # 직전 datagram 이 유발한 잔여 ICMP 일 수 있으므로 새 소켓으로 1회 재시도.
+            _drop_notify_sock(ip, port)
+            if attempt == 0:
+                continue
+            logger.log_error(f"Notify {label} {ip}:{port} 미도달 — 수신 프로세스 없음 ({e})")
+            return False
+        except OSError as e:
+            _drop_notify_sock(ip, port)
+            logger.log_error(f"Notify {label} {ip}:{port} 발송 실패: {e}")
+            return False
+        # 발송 직후 ICMP 회신 확인 — loopback/LAN 은 이 창 안에 도착한다.
+        try:
+            readable, _, _ = select.select([sock], [], [], 0.05)
+            if readable:
+                sock.recv(4096)   # 응답(STATS_RESPONSE 등)은 이 경로에서 쓰지 않는다
+        except ConnectionRefusedError as e:
+            _drop_notify_sock(ip, port)
+            logger.log_error(f"Notify {label} {ip}:{port} 미도달 — 수신 프로세스 없음 ({e})")
+            return False
+        except OSError:
+            pass
+        return True
+    return False
+
+
 def _notify_targets(event_type):
     """이벤트 타입별 endpoint 라우팅 — (ip, port, label) tuple list.
     - GROUP_CHANGED: PSP 단독 (PSP 미설정 시 CSP fallback)
@@ -479,13 +568,11 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
         msg = json.dumps(data)
 
         targets = _notify_targets(event_type)
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        payload = msg.encode('utf-8')
+        delivered, failed = [], []
         for ip, port, label in targets:
-            try:
-                sock.sendto(msg.encode('utf-8'), (ip, port))
-            except Exception as e:
-                logger.log_error(f"Notify {label} failed: {e}")
-        sock.close()
+            dst = f"{label}({ip}:{port})"
+            (delivered if _send_notify(ip, port, label, payload) else failed).append(dst)
 
         # CSC 자체 flow/msg 로그 — peer 는 첫 target (혹은 CSP fallback)
         peer_ip, peer_port = (targets[0][0], targets[0][1]) if targets else (CSP_NOTIFY_IP, CSP_NOTIFY_PORT)
@@ -502,8 +589,12 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
             caller=caller,
         )
 
-        labels = ",".join(t[2] for t in targets) or "(none)"
-        logger.log_info(f"Notify Sent → {labels}: {msg}")
+        if failed:
+            logger.log_error(f"Notify 미도달 → {','.join(failed)}"
+                             + (f" (도달: {','.join(delivered)})" if delivered else "")
+                             + f": {msg}")
+        else:
+            logger.log_info(f"Notify Sent → {','.join(delivered) or '(none)'}: {msg}")
     except Exception as e:
         logger.log_error(f"Notify Failed: {e}")
 
