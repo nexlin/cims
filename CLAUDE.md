@@ -150,6 +150,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [csc_standalone_module.md](docs/design/features/csc_standalone_module.md) — CSC 독립 모듈화
 - [build_and_packaging.md](docs/design/features/build_and_packaging.md) / [package_and_template.md](docs/design/features/package_and_template.md) — 빌드·패키징·템플릿
 - [android_ue_client.md](docs/design/features/android_ue_client.md) / [android_ue_m1_pjsip_integration.md](docs/design/features/android_ue_m1_pjsip_integration.md) — Android UE 클라이언트
+- [mcptt_ue_multitalker_media.md](docs/design/features/mcptt_ue_multitalker_media.md) — 단말 동시 발언 미디어 평면(U10) 선택지·구현 설계 + floor 코덱 공유/정의 단일화 검토 (pjproject·안드로이드 빌드 환경 필요)
 - [android_ue_provisioning.md](docs/design/features/android_ue_provisioning.md) — UE 로그인·자동 프로비저닝(서비스별 프로파일, CSC `/provisioning/me`)
 
 **api/**
