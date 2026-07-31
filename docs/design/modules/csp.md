@@ -552,10 +552,22 @@ SIP SUBSCRIBE/NOTIFY 다이얼로그 상태 관리.
 
 **구독 타입:**
 
-| 이벤트 | 용도 | 본문 형식 |
-|--------|------|-----------|
-| gms | 그룹 멤버십 변경 알림 | xcap-diff XML |
-| cms | 사용자 설정 변경 알림 | xcap-diff XML |
+| 이벤트 | 규격 | 용도 | 본문 형식 |
+|--------|------|------|-----------|
+| reg | RFC 3680 | 자기 등록 상태(생성/갱신/해제/만료) | reginfo XML |
+| affiliation | RFC 3856 (presence) | 제휴 상태 변경 | mcptt-affiliation-info XML |
+| conference | RFC 4575 | 그룹 참가자 로스터 | conference-info XML |
+| gms | RFC 5875 (xcap-diff) | 그룹 멤버십 변경 알림 | xcap-diff XML |
+| cms | RFC 5875 (xcap-diff) | 사용자 설정 변경 알림 | xcap-diff XML |
+
+타입 판별은 `CscfModule` 의 `Event` 헤더 우선 순서를 따른다: `reg` → `affiliation`(Event:presence
+또는 Accept 에 mcptt-affiliation-info) → `conference`(Event:conference **또는** Request-URI 가 알려진
+그룹 — Event 헤더 없는 구현 호환) → Request-URI 의 gms/cms → 기본값 gms.
+
+⚠️ **갱신(in-dialog refresh) SUBSCRIBE 는 이 판별을 타면 안 된다.** 갱신 요청의 Request-URI 는
+자원이 아니라 200 OK 의 Contact(서버 자기 주소)이므로, URI 로 재분류하면 conference 구독이 gms 로
+떨어져 엉뚱한 `Event: xcap-diff` NOTIFY 가 나가고 구독자 스택이 481 로 구독을 죽인다. 갱신은
+Call-ID 로 기존 구독의 event/resource 를 승계한다(reg/gms/cms 공통).
 
 **SubscriptionInfo:**
 
@@ -567,12 +579,31 @@ struct SubscriptionInfo {
     std::string strToTag;          // 서버 To-tag
     std::string strContact;        // NOTIFY 전송 대상
     std::string strCallId;         // SIP 다이얼로그 ID
-    std::string strEventType;      // "gms" 또는 "cms"
+    std::string strEventType;      // "reg"|"affiliation"|"conference"|"gms"|"cms"
+    std::string strResourceId;     // 구독 대상 자원 (conference 는 그룹 ID)
     int iExpires;                  // 구독 유효기간 (초)
     time_t tStartTime;             // 구독 시작 시각
     int iNotifySeq;                // NOTIFY CSeq 카운터
 };
 ```
+
+**구독 종료 사유:**
+
+| 사유 | 계기 | 로그 |
+|------|------|------|
+| 정상 해지 | `SUBSCRIBE Expires: 0` 수신 | `Subscription Removed` |
+| 만료 | `CheckExpired()` 스위퍼 (30초 주기, `tStartTime + iExpires` 경과) | `Subscription Expired` |
+| **NOTIFY 최종 실패** | NOTIFY 응답 **481/404/410** 또는 트랜잭션 타임아웃 | `Subscription Reaped` |
+
+NOTIFY 최종 실패 회수는 RFC 6665 §4.2.2 정합 동작이다 — 구독자 dialog 가 사라졌다는 확정 신호를
+받고도 구독을 남기면 만료까지 죽은 dialog 로 NOTIFY 가 계속 나간다. 앱을 비정상 종료(force-stop·
+크래시·OOM)하면 구 인스턴스 구독이 남는데, CSP 는 NOTIFY 를 **현재 등록 바인딩**으로 보내므로
+새 소켓에 중복 NOTIFY 가 도착하고 단말이 481 로 거절한다. 이 481 을 회수 신호로 쓴다.
+
+`RecvResponse`(응답) / `SendTimeout`(타임아웃) 두 `ISipStackCallBack` 훅에서 처리하며, 둘 다
+`false` 를 반환해 뒤따르는 콜백의 처리를 막지 않는다. **5xx 는 회수하지 않는다** — 구 APK 호환용
+in-dialog 폴백 NOTIFY 가 정상적으로 500 을 주고, 실제 구독자의 5xx 는 일시적 오류일 수 있다.
+(폴백 NOTIFY 는 Call-ID 가 구독 맵에 없어 어차피 무시된다. 죽은 **leg** 회수는 별건.)
 
 **갱신 흐름:**
 

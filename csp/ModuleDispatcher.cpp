@@ -369,15 +369,58 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
     return false;
 }
 
+/**
+ * @brief NOTIFY 가 최종 실패하면 해당 구독을 즉시 회수한다 (RFC 6665 §4.2.2).
+ *
+ * 481/404/410 은 구독자 dialog 가 사라졌다는 **확정 신호**이고, 트랜잭션 타임아웃은 단말이
+ * 응답 자체를 못 하는 상태다. 어느 쪽이든 구독을 남겨두면 만료(최대 Expires=3600)까지
+ * 로스터 이벤트마다 죽은 dialog 로 NOTIFY 가 계속 나간다. 실측(2026-07-31): 앱을 force-stop
+ * 하면 구 인스턴스 구독이 살아남아 신 소켓으로 중복 NOTIFY 가 가고 앱이 481 을 주는데도
+ * 1시간을 버텼다.
+ *
+ * 5xx 는 회수하지 않는다 — 구 APK 호환용 in-dialog 폴백 NOTIFY 가 정상적으로 500 을 주고,
+ * 실제 구독자의 5xx 는 일시적 오류일 수 있다. 폴백 NOTIFY 는 애초에 Call-ID 가 구독 맵에
+ * 없어 무시되지만, 조건을 좁혀 의도를 분명히 한다. (죽은 **leg** 회수는 별건 — P1-①)
+ *
+ * @param pclsMessage NOTIFY 응답(또는 타임아웃된 NOTIFY 요청)
+ * @param iStatusCode 응답 코드. 타임아웃은 0 을 넘긴다.
+ */
+static void ReapSubscriptionOnNotifyFailure( CSipMessage *pclsMessage, int iStatusCode ) {
+    if ( pclsMessage->m_clsCSeq.m_strMethod != SIP_METHOD_NOTIFY ) return;
+
+    const bool bTimeout = ( iStatusCode == 0 );
+    if ( !bTimeout && iStatusCode != SIP_CALL_TRANSACTION_DOES_NOT_EXIST && iStatusCode != SIP_NOT_FOUND &&
+         iStatusCode != SIP_GONE )
+        return;
+
+    std::string strCallId;
+    if ( !pclsMessage->GetCallId( strCallId ) ) return;
+
+    SubscriptionInfo clsSub;
+    if ( !gclsSubscriptionManager.GetSubscriptionByCallId( strCallId, clsSub ) ) return;
+
+    CLog::Print( LOG_INFO, "Subscription Reaped: User=%s Type=%s CallId=%s Cause=%s", clsSub.strUserId.c_str(),
+                 clsSub.strEventType.c_str(), strCallId.c_str(), bTimeout ? "notify-timeout" : "notify-failure" );
+    gclsSubscriptionManager.RemoveSubscription( strCallId );
+}
+
 bool CModuleDispatcher::RecvResponse( int iThreadId, CSipMessage *pclsMessage ) {
     // v3 (2026-04-22): OPTIONS 헬스체크는 RouteSet 의 health_check 가 담당하도록 이관 예정.
     //   현 스테이지는 헬스체크 송신/수신 자체를 아직 구현 안함.
     (void)iThreadId;
-    (void)pclsMessage;
+    if ( pclsMessage == NULL ) return false;
+
+    ReapSubscriptionOnNotifyFailure( pclsMessage, pclsMessage->m_iStatusCode );
+
+    // 응답 소비는 하지 않는다 — 뒤따르는 콜백(CSipUserAgent)의 처리를 막으면 안 된다.
     return false;
 }
 
 bool CModuleDispatcher::SendTimeout( int iThreadId, CSipMessage *pclsMessage ) {
+    (void)iThreadId;
+    if ( pclsMessage == NULL ) return false;
+
+    ReapSubscriptionOnNotifyFailure( pclsMessage, 0 );
     return false;
 }
 
