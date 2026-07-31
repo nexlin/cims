@@ -924,6 +924,28 @@ def main():
     time.sleep(0.4)
     check("GRANT" in ops(B.drain_floor()), "취소되지 않은 대기자 B 는 정상 승급")
     check("GRANT" not in ops(C.drain_floor()), "취소한 C 는 승급 대상이 아니다")
+
+    # 0x0E 목록 없는 취소 = **자기 요청만** — 단말이 PTT 버튼을 뗄 때 보내는 형태다.
+    #   (참가자는 남의 대기 요청을 지울 권한이 없다 — §6.3.4.4.13)
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.2)
+    C.send_floor(a.cmp, fp, req_pkt("C", C.ssrc))
+    time.sleep(0.3); A.drain_floor(); C.drain_floor()
+    C.send_floor(a.cmp, fp, floor_build(QUEUED_CANCEL, C.ssrc,
+                                        [(FF_QUEUED_PURPOSE, struct.pack(">H", 0))]))
+    time.sleep(0.4)
+    gc, ga = C.drain_floor(), A.drain_floor()
+    res = [m for m in gc if m["op_base"] == QUEUED_CANCEL
+           and struct.unpack(">H", m["fields"].get(FF_QUEUED_PURPOSE, b"\xff\xff"))[0] == 1]
+    check(bool(res), f"목록 없는 취소에도 Cancel Result 회신 (C={ops(gc)})")
+    if res:
+        check(struct.unpack(">H", res[0]["fields"][FF_QUEUED_RESULT])[0] == 0, "result=0 (자기 요청 제거)")
+    check(all(m["op_base"] != QUEUED_CANCEL for m in ga),
+          f"다른 대기자 A 의 요청은 건드리지 않는다 (A={ops(ga)})")
+    B.send_floor(a.cmp, fp, rel_pkt("B", B.ssrc))
+    time.sleep(0.4)
+    check("GRANT" in ops(A.drain_floor()), "남아 있던 대기자 A 가 정상 승급")
+    check("GRANT" not in ops(C.drain_floor()), "자기 요청을 취소한 C 는 승급 대상이 아니다")
     remove(g15)
     A.close(); B.close(); C.close()
 

@@ -227,8 +227,11 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 - **Unicast Media Flow Control**(0x0B): 멤버가 자기 하향 미디어 중단/재개를 요청한다 —
   중단 상태 멤버에게는 audio/video 를 보내지 않는다(§6.3.4.4.14~15).
 - **Queued Floor Requests**(0x0E): Cancel Request(purpose 0)를 받으면 지정 사용자(List of
-  Queued Users) 또는 대기열 전체를 제거하고, 제거된 대기자에게 Cancel Notification(2),
+  Queued Users)의 대기 요청을 제거하고, 제거된 대기자에게 Cancel Notification(2),
   요청자에게 Cancel Result(1)+Result 값을 보낸 뒤 남은 대기자에게 위치를 다시 알린다.
+  **목록이 없으면 요청자 본인의 요청만** 제거한다(§6.3.4.4.13 — 참가자에게 남의 대기 요청을
+  지울 권한은 없다). 단말은 PTT 버튼을 뗄 때 이 목록 없는 형태로 자기 취소를 보낸다 —
+  Floor Release 는 발언 중이 아닌 leg 에서 무시되므로 대기 요청을 지우지 못한다.
 
 ### F6. floor SRTCP 키 범위 (TS 33.180 §9.4)
 

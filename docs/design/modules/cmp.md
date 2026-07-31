@@ -547,7 +547,7 @@ SSRC 필드(14)/List of SSRCs(16)로 싣는다. 인코더/디코더는 `PFloorCo
 | Floor Queue Position Info | 9 | CMP → UE | 큐 위치 응답 |
 | Floor Ack | 10 | 양방향 | 수신 확인 (ack 요구 메시지에 대한 응답) |
 | Unicast Media Flow Control | 0x0B | UE → CMP | 자기 하향 미디어 중단/재개 요청 |
-| Queued Floor Requests | 0x0E | 양방향 | 대기 요청 취소(purpose 0) / 결과(1) / 통지(2) |
+| Queued Floor Requests | 0x0E | 양방향 | 대기 요청 취소(purpose 0) / 결과(1) / 통지(2). 대상 목록이 없으면 **요청자 본인의 요청만** 취소 |
 | Floor Release Multi Talker | 0x0F | CMP → 잔여 화자 외 | 동시 발언 중 한 화자의 발언 종료 통지 (Rel-16) |
 
 subtype 의 **첫 비트(0x10)는 "Acknowledgment 요구"** 다 — Granted/Taken/Deny/Release/Idle/

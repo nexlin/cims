@@ -1394,12 +1394,12 @@ void PMcpttGroup::_handleMediaFlowControl(const std::string& sessionId, const Pa
 }
 
 // Queued Floor Requests (§8.2.15 / §6.3.4.4.13) — 대기 중인 floor 요청 취소.
-//   List of Queued Users 가 있으면 그 사용자들만, 없으면 대기열 전체를 제거한다.
+//   List of Queued Users 가 있으면 그 사용자들만, **없으면 요청자 본인의 대기 요청만** 제거한다.
 //   제거된 사용자에게 Cancel Notification 을, 요청자에게 Cancel Result 를 보낸다.
 void PMcpttGroup::_handleQueuedCancel(const std::string& sessionId, unsigned int ssrc, const ParsedFloor& msg) {
     if (msg.u16(FF_QUEUED_PURPOSE, QFR_CANCEL_REQUEST) != QFR_CANCEL_REQUEST) return;  // 결과/통지는 서버가 보낸다
 
-    // 대상 사용자 목록 파싱 (없으면 전체)
+    // 대상 사용자 목록 파싱.
     std::vector<std::string> targets;
     const FloorTlv* lst = msg.field(FF_QUEUED_USERS);
     if (lst && !lst->value.empty()) {
@@ -1413,11 +1413,15 @@ void PMcpttGroup::_handleQueuedCancel(const std::string& sessionId, unsigned int
             p += len;
         }
     }
+    // 목록이 없으면 **자기 취소**다 — 참가자에게 남의 대기 요청까지 지울 권한은 없다
+    //   (§6.3.4.4.13 은 "지시된 사용자들"의 요청만 제거한다). 단말은 PTT 버튼을 뗄 때
+    //   목록 없이 취소를 보내므로, 전체 취소로 해석하면 대기열이 통째로 날아간다.
+    if (targets.empty()) targets.push_back(sessionId);
 
     int before = (int)_floorQueue.size();
     std::vector<std::string> removed;
     for (auto it = _floorQueue.begin(); it != _floorQueue.end(); ) {
-        bool hit = targets.empty();
+        bool hit = false;
         for (const auto& t : targets) {
             // 대상은 MCPTT ID(URI)로 올 수 있다 — sessionId 와 양쪽으로 비교한다.
             if (t == it->sessionId || t == _userIdOf(it->sessionId)) { hit = true; break; }
@@ -1430,7 +1434,7 @@ void PMcpttGroup::_handleQueuedCancel(const std::string& sessionId, unsigned int
     int result = QFR_OK;
     if (before == 0)                                  result = QFR_QUEUE_EMPTY;
     else if (removed.empty())                         result = QFR_NOT_QUEUED;
-    else if (!targets.empty() && removed.size() < targets.size()) result = QFR_PARTIAL;
+    else if (removed.size() < targets.size())         result = QFR_PARTIAL;
 
     // 취소된 대기자에게 Cancel Notification (요청자 본인은 아래 Cancel Result 로 갈음한다)
     for (const auto& r : removed) {
@@ -1446,7 +1450,7 @@ void PMcpttGroup::_handleQueuedCancel(const std::string& sessionId, unsigned int
         char buf[512];
         std::vector<FloorTlv> f{ FloorTlv(FF_QUEUED_PURPOSE, FloorU16(QFR_CANCEL_RESULT)),
                                  FloorTlv(FF_QUEUED_RESULT, FloorU16(result)) };
-        if (!targets.empty()) {
+        {
             // 제거하지 못하고 여전히 대기 중인 사용자만 리스트로 돌려준다(§8.2.15).
             std::vector<std::string> still;
             for (const auto& t : targets)
