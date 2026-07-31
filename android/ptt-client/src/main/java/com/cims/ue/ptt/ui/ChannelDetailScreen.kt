@@ -156,7 +156,10 @@ fun ChannelDetailScreen(
         val speakerId = s?.speaker?.let { PttController.bareId(it.id) }
         val members = doc?.members.orEmpty()
         val byPhone = members.associateBy { PttController.bareId(it.uri) }
-        val onlineIds = s?.participants.orEmpty()
+        // 접속 인원은 참여 여부와 무관하게 conference 구독으로 알 수 있다(제휴 채널 전체 구독).
+        //   참여 중이면 세션 participants 가 같은 값이므로 어느 쪽을 써도 같다.
+        val roster = st.channelRosters[groupId]
+        val onlineIds = s?.participants ?: roster.orEmpty()
         // user-priority 는 클수록 높음(TS 24.481) — 높은 우선순위부터, 미지정=최저
         val online = onlineIds.keys.sortedWith(
             compareByDescending<String> { byPhone[it]?.priority ?: -1 }.thenBy { it })
@@ -173,7 +176,8 @@ fun ChannelDetailScreen(
                     Text(
                         buildString {
                             append("구성원 ${total ?: "-"}명")
-                            if (joined) append(" · 접속 중 ${online.size}명")
+                            // 미참여 채널도 구독으로 접속 인원을 안다 — NOTIFY 수신 전(roster==null)만 생략.
+                            if (joined || roster != null) append(" · 접속 중 ${online.size}명")
                         },
                         color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     )
@@ -234,7 +238,7 @@ fun ChannelDetailScreen(
 
         // 구성원 목록 — 접속 중(우선순위순) / 오프라인
         LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (joined && online.isNotEmpty()) {
+            if ((joined || roster != null) && online.isNotEmpty()) {
                 items(listOf("접속 중")) { SectionLabel("접속 중 (${online.size})") }
                 items(online, key = { "on:$it" }) { pid ->
                     val m = byPhone[pid]

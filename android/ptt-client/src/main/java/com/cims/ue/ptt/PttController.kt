@@ -188,6 +188,8 @@ class PttController(
 
     private val lock = Any()
     private val sessionMap = LinkedHashMap<String, Session>()   // groupId → Session (참여 순서 유지)
+    private val subscribedRosters = mutableSetOf<String>()      // conference 구독 중인 groupId (멱등 가드)
+    private val rosterMap = mutableMapOf<String, Map<String, String>>()  // groupId → 접속 인원(미조인 포함)
 
     private val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
     /** 참여 중인 그룹 세션들(참여 순). */
@@ -237,6 +239,12 @@ class PttController(
     private val _affiliated = MutableStateFlow<Set<String>>(emptySet())
     /** 서버가 2xx 로 확인한 affiliation 그룹(응답 기반 — PUBLISH 송신만으로는 포함하지 않음). */
     val affiliated: StateFlow<Set<String>> = _affiliated.asStateFlow()
+
+    private val _channelRosters = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
+    /** 채널별 접속 인원 — groupId → (참가자ID → status). conference 구독(RFC 4575) NOTIFY 로 갱신되며
+     *  **미조인 채널도 포함**한다(제휴 채널 전체를 구독하므로). 참여 중인 채널의 로스터는
+     *  [sessions] 의 participants 와 같은 값이다. */
+    val channelRosters: StateFlow<Map<String, Map<String, String>>> = _channelRosters.asStateFlow()
 
     // ── affiliation 상태 머신(TS 24.379 §9) — 희망 집합(편성 채널 전체)을 서버 확인 기반으로 유지 ──
     //   PUBLISH 는 token 으로 최종 응답과 상관: 2xx=확정(만료 기록), 실패=백오프 재시도(그룹 편성이
@@ -309,14 +317,14 @@ class PttController(
             }
         }
         // 참가자 목록 — 정식 구독 경로(RFC 4575 conference 이벤트). NOTIFY 는 native 구독이
-        // 200 으로 수용한 뒤 본문만 올려주므로 그룹 AoR(=conference focus)로 세션을 찾는다.
+        // 200 으로 수용한 뒤 본문만 올려주므로 그룹 AoR(=conference focus)로 그룹을 식별한다.
+        // 제휴 채널 전체를 구독하므로 **참여하지 않은 채널의 NOTIFY 도 온다** — 세션 유무와
+        // 무관하게 rosterMap 을 갱신하고, 세션이 있으면 그 participants 도 함께 맞춘다.
         scope.launch {
             sip.incomingMessage.collect { im ->
                 if (!im.contentType.contains("conference-info", ignoreCase = true)) return@collect
                 val gid = bareId(im.fromUri)
-                runCatching {
-                    synchronized(lock) { sessionMap[gid] }?.let { onConferenceInfo(it, im.body) }
-                }
+                runCatching { onConferenceInfo(gid, im.body) }
             }
         }
         // 참가자 목록 — in-dialog NOTIFY 폴백(구독자 0 인 구 APK 호환 경로). 서버가 구독을
@@ -324,7 +332,7 @@ class PttController(
         // 두 경로가 겹쳐도 결과가 같다.
         scope.launch {
             sip.conferenceInfo.collect { (callId, xml) ->
-                runCatching { sessionByCall(callId)?.let { onConferenceInfo(it, xml) } }
+                runCatching { sessionByCall(callId)?.let { onConferenceInfo(it.groupId, xml) } }
             }
         }
         // 등록 완료 시 편성 채널 전체 자동 affiliation — CSP 는 affiliation 된 멤버에게만 INVITE fan-out.
@@ -333,7 +341,12 @@ class PttController(
             sip.regState.collect { r ->
                 if (r is RegState.Registered) {
                     affiliateAll()
+                    syncRosterSubs()   // 편성 채널 전체 로스터 구독 (미조인 채널 인원 표시)
                     maybeRestoreChannels()
+                } else {
+                    // 등록이 끊기면 서버측 구독도 사라진다 — 로컬 가드를 비워 재등록 시 다시 걸리게 한다.
+                    synchronized(lock) { subscribedRosters.clear(); rosterMap.clear() }
+                    publishRosters()
                 }
             }
         }
@@ -392,7 +405,10 @@ class PttController(
         scope.launch {
             while (true) {
                 delay(60_000)
-                if (sip.regState.value is RegState.Registered) affiliateAll()
+                if (sip.regState.value is RegState.Registered) {
+                    affiliateAll()
+                    syncRosterSubs()   // 편성 변경으로 채널이 늘/줄었으면 구독도 따라간다
+                }
             }
         }
     }
@@ -431,11 +447,46 @@ class PttController(
     /** 그룹 AoR — INVITE/PUBLISH/SUBSCRIBE/MESSAGE 공통 Request-URI. */
     private fun groupAor(groupId: String) = "sip:$groupId@${sipConfig.domain}"
 
-    /** 참여 채널의 참가자 로스터 구독 시작/해지 (RFC 4575 conference 이벤트).
-     *  갱신은 native 구독이 in-dialog 로 자동 수행하므로 여기서는 시작·해지만 다룬다. */
+    /** 채널 참가자 로스터 구독 시작/해지 (RFC 4575 conference 이벤트).
+     *  갱신은 native 구독이 in-dialog 로 자동 수행하므로 여기서는 시작·해지만 다룬다.
+     *
+     *  구독 대상은 **참여 채널이 아니라 제휴(편성) 채널 전체**다 — 참여하지 않은 채널의 접속 인원도
+     *  목록에 표시하기 위함. 따라서 채널 이탈은 구독을 끊지 않는다([syncRosterSubs] 가 제휴 집합
+     *  기준으로만 정리).
+     *
+     *  ⚠️멱등이 필요하다 — 등록·제휴·조인이 각자 이 함수를 호출하므로 가드가 없으면 같은 그룹에
+     *  SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측됨). native 의
+     *  `cims_conf_find` 는 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에
+     *  등록되기 전에 두 번째 호출이 들어오면 경합으로 새 다이얼로그가 하나 더 생긴다. */
     private fun subscribeRoster(groupId: String, on: Boolean) {
+        synchronized(lock) {
+            if (on) {
+                if (!subscribedRosters.add(groupId)) return   // 이미 구독 중 — 재발행 불필요
+            } else {
+                if (!subscribedRosters.remove(groupId)) return
+                rosterMap.remove(groupId)
+            }
+        }
+        if (!on) publishRosters()
         runCatching { sip.subscribeConference(groupAor(groupId), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
-            .onFailure { Log.w(TAG, "conference 구독($on) 실패 $groupId: ${it.message}") }
+            .onFailure {
+                Log.w(TAG, "conference 구독($on) 실패 $groupId: ${it.message}")
+                synchronized(lock) { if (on) subscribedRosters.remove(groupId) }
+            }
+    }
+
+    /** 제휴(편성) 채널 집합에 로스터 구독을 맞춘다 — 새로 편성된 채널은 구독하고, 빠진 채널은 해지.
+     *  등록 완료·그룹 목록 적재·제휴 주기 루프에서 호출한다. */
+    private fun syncRosterSubs() {
+        if (regState.value !is RegState.Registered) return
+        val want = desiredAffiliations()
+        val have = synchronized(lock) { subscribedRosters.toSet() }
+        (want - have).forEach { subscribeRoster(it, true) }
+        (have - want).forEach { subscribeRoster(it, false) }
+    }
+
+    private fun publishRosters() {
+        _channelRosters.value = synchronized(lock) { rosterMap.mapValues { it.value.toMap() } }
     }
 
     private fun sessionByCall(callId: Int): Session? =
@@ -464,7 +515,7 @@ class PttController(
             audioRouter?.setInCall(false)
             sip.setDeviceAudioBoost(1f, 1f)
         }
-        subscribeRoster(gid, false)                 // 로스터 구독 해지 (세션과 수명 일치)
+        syncRosterSubs()   // 이탈해도 편성 채널이면 구독 유지 — 인원수는 계속 보여야 한다
         _status.value = "[$gid] 그룹콜 종료"
         emit(PttEventKind.LEAVE, gid)
         publish()
@@ -674,25 +725,36 @@ class PttController(
         val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: return }
         if (callId >= 0) sip.hangup(callId) else {
             synchronized(lock) { sessionMap.remove(groupId)?.close() }
-            subscribeRoster(groupId, false)
+            syncRosterSubs()   // 편성 채널이면 구독 유지 (인원수 표시 계속)
             publish()
         }
     }
 
-    /** RFC 4575 conference-info 파싱 — 해당 세션의 참가자 맵 갱신. */
-    private fun onConferenceInfo(s: Session, xml: String) {
+    /** RFC 4575 conference-info 파싱 — [groupId] 의 접속 인원 갱신.
+     *
+     *  참여 중인 채널이면 세션 participants 도 같은 값으로 맞춘다. 참여하지 않은 채널은
+     *  rosterMap 에만 남아 목록 화면의 인원수로 쓰인다.
+     *  ⚠️"본인은 항상 접속"은 **참여 중일 때만** 성립한다 — 미조인 채널에 자신을 넣으면
+     *  참여하지도 않은 채널에 내가 있는 것으로 보인다. */
+    private fun onConferenceInfo(groupId: String, xml: String) {
         val full = Regex("<conference-info\\b[^>]*state=\"full\"").containsMatchIn(xml)
-        val cur = if (full) mutableMapOf() else s.participants
         val userRe = Regex("<user\\b[^>]*entity=\"([^\"]+)\"[^>]*>(.*?)</user>", RegexOption.DOT_MATCHES_ALL)
         val stRe = Regex("<status>\\s*([A-Za-z-]+)\\s*</status>")
-        for (m in userRe.findAll(xml)) {
-            val id = bareId(m.groupValues[1])
-            if (id.isBlank()) continue
-            val status = stRe.find(m.groupValues[2])?.groupValues?.get(1) ?: "connected"
-            if (status.equals("disconnected", ignoreCase = true)) cur.remove(id) else cur[id] = status
+        synchronized(lock) {
+            val s = sessionMap[groupId]
+            val base = if (full) mutableMapOf() else (s?.participants ?: rosterMap[groupId]?.toMutableMap()
+                ?: mutableMapOf())
+            for (m in userRe.findAll(xml)) {
+                val id = bareId(m.groupValues[1])
+                if (id.isBlank()) continue
+                val status = stRe.find(m.groupValues[2])?.groupValues?.get(1) ?: "connected"
+                if (status.equals("disconnected", ignoreCase = true)) base.remove(id) else base[id] = status
+            }
+            if (s != null) base[bareId(mcpttId)] = "connected"   // 참여 중이면 본인은 항상 포함
+            s?.participants = base
+            rosterMap[groupId] = base.toMap()
         }
-        cur[bareId(mcpttId)] = "connected"                  // 본인은 항상 포함
-        s.participants = cur
+        publishRosters()
         publish()
     }
 
@@ -723,6 +785,7 @@ class PttController(
                     list.firstOrNull()?.let { bareId(it.uri) }?.also { g -> _selectedGroup.value = g }
                 }
                 affiliateAll()   // 편성 채널 전체 affiliation (등록 전이면 등록 완료 트리거가 수행)
+                syncRosterSubs() // 목록이 채워졌으니 로스터 구독도 그 집합으로 맞춘다
                 _status.value = "그룹 ${list.size}개"
             }
             .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }

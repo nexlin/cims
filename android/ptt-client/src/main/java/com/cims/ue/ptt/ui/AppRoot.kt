@@ -55,6 +55,8 @@ class PttUiState(
     val groupDocs: Map<String, GroupDoc>,
     val sessions: List<GroupCallState>,
     val affiliated: Set<String>,
+    /** 채널별 접속 인원 (groupId → 참가자ID → status) — 미조인 채널 포함. */
+    val channelRosters: Map<String, Map<String, String>>,
     val policy: ListenPolicy,
     val route: Int,
     val headsetId: Int,
@@ -67,6 +69,10 @@ class PttUiState(
     val inCall: Boolean get() = sessions.any { it.active || it.callId >= 0 }
     val emergencySession: GroupCallState? get() = sessions.firstOrNull { it.emergency }
     fun session(groupId: String): GroupCallState? = sessions.firstOrNull { it.groupId == groupId }
+
+    /** 채널의 현재 접속 인원 — 참여 여부와 무관(제휴 채널 전체를 구독한다).
+     *  아직 NOTIFY 를 못 받았으면 null(= "모름", 0 과 구분). */
+    fun onlineCount(groupId: String): Int? = channelRosters[groupId]?.size
     fun groupName(groupId: String): String =
         groups.firstOrNull { PttController.bareId(it.uri) == groupId }?.displayName ?: groupId
 }
@@ -84,6 +90,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbGroups = remember { MutableStateFlow<List<GroupSummary>>(emptyList()) }
     val fbGroupDocs = remember { MutableStateFlow<Map<String, GroupDoc>>(emptyMap()) }
     val fbAffil = remember { MutableStateFlow<Set<String>>(emptySet()) }
+    val fbRosters = remember { MutableStateFlow<Map<String, Map<String, String>>>(emptyMap()) }
     val fbSessions = remember { MutableStateFlow<List<GroupCallState>>(emptyList()) }
     val fbPolicy = remember { MutableStateFlow(ListenPolicy.ALL) }
     val fbRoute = remember { MutableStateFlow(SipController.AUDIO_ROUTE_SPEAKER) }
@@ -102,6 +109,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         groupDocs = (ctl?.groupDocs ?: fbGroupDocs).collectAsState().value,
         sessions = (ctl?.sessions ?: fbSessions).collectAsState().value,
         affiliated = (ctl?.affiliated ?: fbAffil).collectAsState().value,
+        channelRosters = (ctl?.channelRosters ?: fbRosters).collectAsState().value,
         policy = (ctl?.listenPolicy ?: fbPolicy).collectAsState().value,
         route = (ctl?.audioRoute ?: fbRoute).collectAsState().value,
         headsetId = (ctl?.headsetId ?: fbHeadsetId).collectAsState().value,

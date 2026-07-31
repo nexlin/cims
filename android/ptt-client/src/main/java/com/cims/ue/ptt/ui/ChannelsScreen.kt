@@ -133,7 +133,11 @@ private fun ChannelRow(
                 if (doc?.video == true) TagChip("영상", R.drawable.ic_video) else TagChip("음성", R.drawable.ic_voice)
                 // TS 24.481 on-network-group-priority (클수록 높음)
                 doc?.priority?.let { TagChip("P$it") }
-                TagChip("${s?.participants?.size ?: g.memberCount ?: "-"}명")
+                // 편성 인원(그룹 문서) — 채널의 정원
+                TagChip("${g.memberCount ?: doc?.members?.size ?: "-"}명")
+                // 현재 접속 인원 — 참여하지 않은 채널도 conference 구독으로 알 수 있다.
+                //   NOTIFY 를 아직 못 받았으면(null) 표시하지 않는다(0 과 "모름"을 구분).
+                st.onlineCount(id)?.let { TagChip("접속 $it", tint = if (it > 0) Ct.Mint else Ct.TextDim) }
                 val sp = s?.speaker
                 when {
                     sp != null -> {
