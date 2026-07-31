@@ -71,6 +71,11 @@ protected:
     void emitEvent(const char* name, const SimpleJson::JsonNode& payload, const std::string& sesid,
                    const std::string& service);
     void retransmitEvents();  // timeoutLoop 이 매 초 호출
+    // 발언자 집합 변경 → FLOOR_TALKERS 이벤트 (PMcpttGroup 콜백. 그룹 _mutex 보유 중 호출되므로
+    //   PCmpServer::_mutex 를 다시 잡지 않는다 — sesid/service 는 그룹이 실어 보낸다).
+    void onFloorTalkers(const std::string& groupId, const char* policy,
+                        const std::vector<std::string>& talkers,
+                        const std::string& sesid, const std::string& service);
     // HEARTBEAT/STATS 공통 자원 요약 (호출측이 _mutex 보유)
     SimpleJson::JsonNode buildResourceSummary();
     // 세션집합 지문(audit 수준2) — {relay:{count,hash}, group:{count,hash}}. hash=XOR(fnv1a64(id))
@@ -103,6 +108,7 @@ private:
     std::map<std::string, std::string> _serviceMap;  // sessionId 또는 groupId → service (payload 계승)
     // 미협상 소스 드롭 전역 누적 — 자원 해제 시 이월 (STATS rtp_src_drop 단조 증가 보장)
     long long _srcDropTotal = 0;
+    long long _floorCryptoDropTotal = 0;   // 해제된 그룹의 floor SRTCP 폐기 이월(단조 증가)
     PMutex _mutex;
 
     // ── 이벤트 push 상태 (별도 _eventMtx — sweeper 가 _mutex 보유 중 접근하지 않도록 분리) ──

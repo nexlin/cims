@@ -41,6 +41,11 @@ void PSyncRtpRecorder::setTrackPtCodec(const std::string& prefix, int pt, const 
     else        _trackPtCodec.erase(prefix);
 }
 
+void PSyncRtpRecorder::setTrackSpeaker(const std::string& prefix, const std::string& speakerId) {
+    if (!speakerId.empty()) _trackSpeaker[prefix] = speakerId;
+    else                    _trackSpeaker.erase(prefix);
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  세그먼트 시작/종료
 // ═══════════════════════════════════════════════════════════════
@@ -69,6 +74,7 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
                                        int audioPt, const std::string& audioCodec) {
     if (_active) finishSegment();
     setTrackPtCodec("audio", audioPt, audioCodec);   // 화자 leg PT/코덱 (화자마다 다를 수 있음)
+    _trackSpeaker.clear();                           // 슬롯 트랙 귀속은 세그먼트 단위
 
     std::string hourDir = _hourDirNow();
     if (hourDir != _curHourDir) {
@@ -266,6 +272,12 @@ void PSyncRtpRecorder::_writeMeta() {
                 if (!itPc->second.second.empty())
                     fprintf(f, ",\"%s\":\"%s\"", cdKey.c_str(), _jsonEsc(itPc->second.second).c_str());
             }
+
+            // 동시 발언(dual/multi-talker) 슬롯 트랙의 화자 귀속 — 대표 화자(speaker_id)와
+            // 다른 트랙만 기록한다(슬롯 0 은 speaker_id 가 곧 그 트랙의 화자).
+            auto itSp = _trackSpeaker.find(prefix);
+            if (itSp != _trackSpeaker.end() && itSp->second != _speakerId)
+                fprintf(f, ",\"speaker_id_%s\":\"%s\"", prefix.c_str(), _jsonEsc(itSp->second).c_str());
         }
 
         fprintf(f, ",\"has_video\":%s}\n", hasVideo ? "true" : "false");

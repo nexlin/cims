@@ -355,6 +355,21 @@ void PCmpServer::emitEvent(const char* name, const SimpleJson::JsonNode& payload
     LOG_INFO("PCmpServer", "event %s id=%ld -> %s:%d", name, id, cspIp.c_str(), cspPort);
 }
 
+// 발언자 집합 변경 통지 — dual/multi-talker 에서 "현재 누가 말하는가"는 floor 가 CMP↔UE
+//   in-band 라 CSP/콘솔이 알 길이 없다. 집합이 바뀔 때마다 push 한다(§8 ack/재전송 규칙 적용).
+void PCmpServer::onFloorTalkers(const std::string& groupId, const char* policy,
+                                const std::vector<std::string>& talkers,
+                                const std::string& sesid, const std::string& service) {
+    SimpleJson::JsonNode arr;
+    arr.type = SimpleJson::JSON_ARRAY;
+    for (const auto& sid : talkers) arr.Add(SimpleJson::JsonNode(sid));
+    SimpleJson::JsonNode p;
+    p.Set("group_id", groupId);
+    p.Set("policy", policy ? policy : "single");
+    p.Set("talkers", arr);
+    emitEvent("FLOOR_TALKERS", p, sesid, service.empty() ? "mcptt" : service);
+}
+
 // 미ack 이벤트 재전송 — timeoutLoop 이 매 초 호출. kEventMaxAttempts 도달 시 폐기.
 void PCmpServer::retransmitEvents() {
     std::string cspIp;
@@ -552,8 +567,15 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         SimpleJson::JsonNode g;
         g.Set("group_id", gid);
         g.Set("members", group->getMemberCount());
-        std::string holder = group->getFloorHolder();
-        if (!holder.empty()) g.Set("floor_holder", holder);
+        // 발언자 — 동시 발언(dual/multi)까지 담도록 배열로 노출한다.
+        std::vector<std::string> holders;
+        group->getFloorHolders(holders);
+        if (!holders.empty()) {
+            SimpleJson::JsonNode arr;
+            arr.type = SimpleJson::JSON_ARRAY;
+            for (const auto& h : holders) arr.Add(SimpleJson::JsonNode(h));
+            g.Set("floor_holders", arr);
+        }
         groupsArr.Add(g);
     }
 
@@ -606,6 +628,12 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     {
         std::lock_guard<std::mutex> lk(_eventMtx);
         detail.Set("pending_events", (int)_pendingEvents.size());  // 미ack 이벤트 재전송 대기 수(진단)
+    }
+    // floor SRTCP 인증 실패/재전송 폐기 누적 (TS 33.180 — 위조 floor 시도 관측)
+    {
+        long long fcDrop = _floorCryptoDropTotal;   // 해제분 이월 + 활성 그룹 합산 = 단조 증가
+        for (auto const& [gid, group] : _groups) if (group) fcDrop += group->getFloorCryptoDrop();
+        detail.Set("floor_crypto_drop", fcDrop);
     }
     detail.Set("nat", natArr);
     detail.Set("nat_total", natTotal);
@@ -907,6 +935,15 @@ void PCmpServer::processModify(const SimpleJson::JsonNode& payload, const std::s
 void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string groupId = payload.GetString("group_id");
     std::string membersStr = payload.GetString("members");
+    // floor 정책 (cmp_media_api.md §7.1) — 유무(floor_control) × 동시성(floor_policy) 2축.
+    //   group_type:"private" 은 TS 24.380 §7 private-call floor 라 동시성 축을 해석하지 않는다.
+    std::string groupType   = payload.GetString("group_type");
+    std::string floorCtlStr = payload.GetString("floor_control");
+    std::string floorPolStr = payload.GetString("floor_policy");
+    int maxTalkers = (int)payload.GetInt("max_talkers", 0);
+    bool privateCall  = (groupType == "private");
+    bool floorControl = (floorCtlStr != "off");
+    int  floorPolicy  = ParseFloorPolicy(floorPolStr);
     // sweeper 와의 _sesidMap/_serviceMap/_groupSubId 동시 접근 방지 — map 쓰기 전에 lock
     PAutoLock lock(_mutex);
     // sesid: payload 수신 값 > 자체 발행 (CSP가 안 보낸 경우 방어)
@@ -926,6 +963,57 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", cmdName.c_str(), groupId.c_str(), txIdStr.c_str(),
             svc.c_str(), sesid.c_str(), subid.c_str(), _lastRxSeq, "csp");
+
+    // floor RTCP 보호 키 (TS 33.180) — inline 전달. key/salt=base64, mki=hex.
+    //   미디어 키는 받지 않는다(미디어는 투명 relay).
+    std::string fcAlg, fcKey, fcSalt, fcMki;
+    bool haveCrypto = false;
+    std::string cryptoErr;
+    {
+        SimpleJson::JsonNode fc = payload.Get("floor_crypto");
+        if (fc.type == SimpleJson::JSON_OBJECT) {
+            haveCrypto = true;
+            fcAlg = fc.GetString("alg");
+            if (!PFloorCrypto::DecodeBase64(fc.GetString("key"), fcKey))   cryptoErr = "floor_crypto.key must be base64";
+            else if (!PFloorCrypto::DecodeBase64(fc.GetString("salt"), fcSalt)) cryptoErr = "floor_crypto.salt must be base64";
+            else if (!PFloorCrypto::DecodeHex(fc.GetString("mki"), fcMki)) cryptoErr = "floor_crypto.mki must be hex";
+        }
+    }
+
+    // 정책 필드 검증 — 미상 값은 조용히 기본값으로 떨어뜨리지 않고 거절한다(계약 위반 노출).
+    {
+        const char* bad = nullptr;
+        if (!floorCtlStr.empty() && floorCtlStr != "on" && floorCtlStr != "off")
+            bad = "floor_control must be on|off";
+        else if (!floorPolStr.empty() && floorPolStr != "single" && floorPolStr != "dual" && floorPolStr != "multi")
+            bad = "floor_policy must be single|dual|multi";
+        else if (floorPolStr == "multi" && maxTalkers < 2)
+            bad = "max_talkers (>=2) required for floor_policy=multi";
+        else if (!cryptoErr.empty())
+            bad = cryptoErr.c_str();
+        else if (haveCrypto && !floorControl)
+            bad = "floor_crypto requires floor_control=on";
+        else if (haveCrypto && !fcAlg.empty() &&
+                 fcAlg != "AES_CM_128_HMAC_SHA1_80" && fcAlg != "AES_CM_128_HMAC_SHA1_32")
+            bad = "floor_crypto.alg must be AES_CM_128_HMAC_SHA1_80|_32";
+        else if (haveCrypto && fcKey.size() != 16)
+            bad = "floor_crypto.key must decode to 16 bytes (AES-128)";
+        else if (haveCrypto && fcSalt.size() != 14)
+            bad = "floor_crypto.salt must decode to 14 bytes";
+        else if (haveCrypto && fcMki.size() > (size_t)PFloorCrypto::kMaxMki)
+            bad = "floor_crypto.mki too long";
+        if (bad) {
+            if (_groups.find(groupId) == _groups.end()) {   // 미생성 그룹 — 캐시 잔존 방지
+                _sesidMap.erase(groupId);
+                _serviceMap.erase(groupId);
+                _groupSubId.erase(groupId);
+            }
+            int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, "BAD_REQUEST", bad);
+            logFlow(groupId, "cmp", "csp", "JSON", "ERROR", bad, txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+            LOG_WARN("PCmpServer", "%s group=%s rejected: %s", cmdName.c_str(), groupId.c_str(), bad);
+            return;
+        }
+    }
 
     std::string sharedIp = _rtpIp;
     int sharedFloorPort = 0;
@@ -961,11 +1049,20 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             logFlow(key, from, to, proto, label, body);
         });
         group->setRtcpLogEnable(_logFlowRtcp);
+        // 발언자 집합 변경 → FLOOR_TALKERS 이벤트 (cmp_media_api.md §8)
+        group->setTalkersCallback([this](const std::string& gid, const char* policy,
+                                          const std::vector<std::string>& talkers,
+                                          const std::string& gsesid, const std::string& gsvc) {
+            onFloorTalkers(gid, policy, talkers, gsesid, gsvc);
+        });
         pttSession = allocPttResource(sharedIp, sharedFloorPort);
         if (pttSession) {
              pttSession->setGroup(group);
              group->setDtmfConfig(_dtmfPttEnable, _dtmfPushDigit, _dtmfReleaseDigit);
              group->setPttSession(pttSession);
+             // floor 정책은 녹취 초기화(슬롯 트랙 수)·멤버 합류보다 먼저 확정한다.
+             group->setBroadcast(groupType, payload.GetString("initiator_id"));
+             group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
              std::string recordDir = payload.GetString("record_dir");
@@ -997,6 +1094,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
         }
         LOG_DEBUG("PCmpServer", "ADD_GROUP group=%s floor=%d (existing)", groupId.c_str(), sharedFloorPort);
     }
+    // 이벤트 hdr 용 세션 메타 (FLOOR_TALKERS) — 그룹이 자체 보관한다.
+    if (group) group->setSessionMeta(sesid, svc);
 
     std::vector<std::string> memberIds;
     if (group) {
@@ -1032,15 +1131,28 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             group->updateTiers(tiers);
         }
 
-        // broadcast 그룹 floor 독점 (TS 24.380 §10.3): 개시자만 floor.
-        std::string groupType = payload.GetString("group_type");
+        // 세션 유형/개시자 — broadcast 는 개시자만 floor 보유(TS 24.380 §10.3),
+        //   private 은 개시자에게 초기 발언권(§7). MODIFY 로 정책이 바뀌면 여기서 갱신된다.
         std::string initiator = payload.GetString("initiator_id");
-        if (!groupType.empty() || !initiator.empty()) {
+        if (!groupType.empty() || !initiator.empty())
             group->setBroadcast(groupType, initiator);
-            if (groupType == "broadcast")
-                LOG_INFO("PCmpServer", "ADD_GROUP group=%s type=broadcast initiator=%s (floor 독점)",
-                         groupId.c_str(), initiator.c_str());
+        group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
+        // floor SRTCP 키 — 재키잉(rekey)도 같은 필드의 MODIFY 로 반영된다.
+        if (haveCrypto) {
+            std::string err;
+            if (!group->setFloorCrypto(fcAlg, fcKey, fcSalt, fcMki, err)) {
+                int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, "BAD_REQUEST", err.c_str());
+                logFlow(groupId, "cmp", "csp", "JSON", "ERROR", err.c_str(), txIdStr.c_str(),
+                        svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+                return;
+            }
         }
+        if (groupType == "broadcast")
+            LOG_INFO("PCmpServer", "%s group=%s type=broadcast initiator=%s (floor 독점)",
+                     cmdName.c_str(), groupId.c_str(), initiator.c_str());
+        else if (privateCall)
+            LOG_INFO("PCmpServer", "%s group=%s type=private floor=%s initiator=%s",
+                     cmdName.c_str(), groupId.c_str(), floorControl ? "on" : "off", initiator.c_str());
 
         // 초기 로스터의 멤버별 전용 포트 할당 (멱등 — 기존 유닛 재사용).
         //   client 는 각 멤버의 SDP offer 에 이 포트를 광고한다.
@@ -1077,7 +1189,10 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
 
         SimpleJson::JsonNode respBody;
         respBody.Set("ip", sharedIp);
-        respBody.Set("floor_port", sharedFloorPort);
+        // floor 미사용 세션(floor_control:"off")은 floor 포트를 광고하지 않는다 —
+        //   client 가 m=application 를 SDP 에 싣지 않도록. 자원(그룹 세션)은 활성도·
+        //   sweeper 기준으로 계속 쓰이므로 할당 자체는 유지한다.
+        if (floorControl) respBody.Set("floor_port", sharedFloorPort);
         respBody.Set("member_ports", memberPorts);
 
         int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody);
@@ -1125,6 +1240,7 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
 
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
+        group->setSessionMeta(sesid, svc);   // 이벤트 hdr 용 세션 메타 갱신
         // 멤버 전용 포트 유닛 (멱등) — ① user_ip 없는 선할당 호출은 포트만 응답,
         //   ② SDP answer 후 user_ip/port 동반 호출로 멤버 등록/주소 갱신.
         PPttMemberPort* mu = ensureMemberUnit(groupId, sessionId, group);
@@ -1145,8 +1261,12 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
             int userTePt    = (int)payload.GetInt("user_te_pt", 0);
             int userSrcTePt = (int)payload.GetInt("user_src_te_pt", 0);
             std::string userCodec = payload.GetString("user_codec");
+            // ambient listening 청취 leg (cmp_media_api.md §7.3) — 상향 미중계/floor 은닉.
+            int recvOnly      = (int)payload.GetInt("recv_only", 0);
+            int floorSuppress = (int)payload.GetInt("floor_suppress", 0);
             group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role, mu,
-                             userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt, userCodec);
+                             userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt, userCodec,
+                             recvOnly != 0, floorSuppress != 0);
             // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
             std::string tierStr = payload.GetString("tier");
             if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
@@ -1237,6 +1357,7 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
         logFlow(groupId, "cmp", "cmp", "INT", "GROUP_END", "", "", svc.c_str(), sesid.c_str());
         // PTT 리소스 반환 (그룹 floor + 멤버 유닛 전체)
         _srcDropTotal += group->getSrcDrop();  // 드롭 카운터 이월 (rtp_src_drop 단조 증가)
+        _floorCryptoDropTotal += group->getFloorCryptoDrop();
         PRtpMulticast* ptt = group->getPttSession();
         if (ptt) { ptt->reset(); freePttResource(ptt); }
         freeGroupMemberUnits(groupId);
@@ -1803,6 +1924,7 @@ void PCmpServer::timeoutLoop() {
                         "", svc.c_str(), sesid.c_str());
                 // PTT 리소스 free pool 반환 (removeGroup 와 동일 패턴) — 누락 시 누적 leak
                 _srcDropTotal += it->second->getSrcDrop();  // 드롭 카운터 이월
+                _floorCryptoDropTotal += it->second->getFloorCryptoDrop();
                 PRtpMulticast* ptt = it->second->getPttSession();
                 if (ptt) { ptt->reset(); freePttResource(ptt); }
                 freeGroupMemberUnits(gid);

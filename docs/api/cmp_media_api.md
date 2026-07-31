@@ -183,9 +183,11 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
       "orphan_reclaim_sec": 60,
       "leak_reclaim": { "total": 3, "orphan": 2, "hold": 1 },
       "rtp_src_drop": 0,
+      "floor_crypto_drop": 0,
       "nat": [ { "key": "a84b4c76e66710", "leg": "b",
                  "learned_ip": "203.0.113.7", "learned_port": 41022 } ],
-      "groups": [ { "group_id": "grp-fire-01", "members": 5, "floor_holder": "01011112222" } ]
+      "groups": [ { "group_id": "grp-fire-01", "members": 5,
+                    "floor_holders": ["01011112222", "01033334444"] } ]
     }
   }
 }
@@ -194,8 +196,9 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 | detail 필드 | 의미 |
 |---|---|
 | `rtp_src_drop` | 미협상 소스 드롭 누적 카운터 (no-NAT leg 의 선언 주소 불일치 패킷). 해제된 자원의 몫을 이월한 **단조 증가** 값 |
+| `floor_crypto_drop` | floor SRTCP 인증 실패·재전송 폐기 누적([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)). 해제된 그룹의 몫을 이월한 **단조 증가** 값 |
 | `nat` | NAT latch 완료 leg 목록 — `key`(session_id 또는 `group_id:member`), `leg`(`a`/`b`/멤버 sid), 학습된 실주소. 최대 20개 (전체 수는 `nat_total`) |
-| `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_holder`). 최대 20개 (전체 수는 `groups_total`) |
+| `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_holders`). `floor_holders` 는 현재 발언자 **배열**(동시 발언 시 복수, 발언자 없으면 생략). 최대 20개 (전체 수는 `groups_total`) |
 
 `nat`/`groups` 배열 상한은 응답 datagram 4KB 계약([§1.2](#12-전송)) 내 안전 상한이다.
 STATS 응답도 HEARTBEAT 와 동일하게 [`session_digest`](#51-heartbeat)를 함께 싣는다.
@@ -354,13 +357,20 @@ member 키 `(node, session_id)`.
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
-| `group_type` | - | `prearranged`/`chat`/`broadcast` (broadcast floor 독점 정책 — TS 24.380 §10.3) |
-| `initiator_id` | - | broadcast 개시자 sessionId |
+| `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §10.3), `private` 은 1:1 private call(2인, TS 24.379 §11 / TS 24.380 §7) |
+| `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자, private 은 초기 발언권 부여 대상 |
+| `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
+| `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
+| `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하면 `BAD_REQUEST` |
+| `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
-응답 payload: `ip`, `floor_port`(그룹 공유 floor control 포트), `member_ports`
-(멤버별 전용 RTP 포트 맵 — members 로 전달된 초기 로스터에 대해 할당).
+응답 payload: `ip`, `floor_port`(그룹 공유 floor control 포트 — `floor_control:"off"` 면
+**생략**), `member_ports`(멤버별 전용 RTP 포트 맵 — members 로 전달된 초기 로스터에 대해 할당).
 기존 그룹 재요청 시 재할당 없이 members 만 갱신하고 동일 포트를 응답한다.
+
+정책 필드의 미상 값(`floor_policy:"dual2"` 등)은 기본값으로 대체하지 않고 `BAD_REQUEST` 로
+거절한다 — 계약 위반이 조용히 다른 동작으로 굳는 것을 막는다.
 
 ```json
 {
@@ -410,6 +420,8 @@ RELAY_REMOVE 와 동일 규칙).
 | `user_codec` | - | 이 멤버의 협상 오디오 코덱 문자열(예 `"AMR-WB/16000"`) — 녹취 세그먼트 메타(`audio_codec`)용. CSP 는 코덱 테이블 top 의 rtpmap prefix 를 싣는다 |
 | `role` | - | `chair`/`participant` (기본 participant) |
 | `tier` | - | 긴급 멤버 join 시 condition tier 동반 |
+| `recv_only` | - | 1 = ambient 청취 leg — 이 멤버의 **상향 미디어를 중계하지 않고** floor 요청도 거절(receive only) |
+| `floor_suppress` | - | 1 = 이 멤버에게 floor 메시지(GRANT/TAKEN/IDLE/DENY)를 **보내지 않는다** — 청취 사실이 floor 상태로 드러나지 않게 한다 |
 
 응답 payload: `ip`, `port`, `video_port` — **멤버 전용 RTP 포트** (client 는 이 포트를
 그 멤버의 SDP 에 광고). 같은 `(group, session_id)` 재요청은 재할당 없이 동일 포트 반환.
@@ -449,6 +461,72 @@ TE 인데 수신 leg `user_te_pt` 미지정이면 원본 PT 를 유지한다(aud
 
 긴급 개시/업그레이드/취소 시 호출. 미디어 재협상 불필요 (floor 우선순위만 변경).
 
+### 7.7 floor 정책 — 동시 발언과 private call
+
+floor 는 **직교하는 두 축**으로 정해진다. `floor_control` 이 제어의 **유무**, `floor_policy` 가
+그 안에서의 **동시 발언 수**다. 정책은 세션 생성 시 1회 전달되고 이후 floor 절차는 CMP↔UE
+in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어가지 않는다.
+
+| 조합 | 동작 |
+|---|---|
+| `floor_control:"off"` | 중재 없음. 모든 멤버의 상향을 나머지 전원에게 중계(full-duplex). `floor_port` 미광고, 수신 floor 메시지 무시. private call without floor 가 이 형태다 |
+| `floor_policy:"single"` (기본) | 단일 화자. 점유 중 요청은 선점 서열 판정 → 선점(REVOKE 후 GRANT) 또는 큐잉/Deny |
+| `floor_policy:"dual"` | 동시 최대 2명. **2번째 자리는 override 전용** — 선점 자격(tier>chair>priority)이 있는 요청만 기존 화자를 REVOKE 하지 않고 동시 GRANT 한다(TS 24.380 dual floor). 자격 없는 요청은 single 과 같이 큐잉/Deny |
+| `floor_policy:"multi"` | 동시 최대 `max_talkers` 명. 정원 여유가 있으면 서열 비교 없이 즉시 GRANT, 정원이 차면 선점 판정(최약 화자 REVOKE) 또는 큐잉 (TS 24.380 Rel-16 multi-talker) |
+| `group_type:"private"` | TS 24.380 §7 private-call floor — 정원 1, **큐잉 없음**(점유 중 요청은 즉시 Deny), chair 개념 없음(tier·priority 만 비교). `initiator_id` 멤버가 참가하는 시점에 **초기 발언권**을 받는다. group 의 `floor_policy` 는 해석하지 않는다 |
+
+동시 발언 시 in-band 표식과 메시지:
+
+- Floor Granted/Taken 의 **Floor Indicator**(TS 24.380 §8.2.3.13)에 `multi` 는 Multi-talker 비트
+  (0x0080), `dual` 은 화자가 2명일 때 Dual floor 비트(0x0200)를 세운다.
+- **Floor Release Multi Talker**(subtype 0x0F, Rel-16)를 Floor Release 와 동일하게 처리한다 —
+  해당 화자만 집합에서 빠진다.
+- 화자 1명이 빠져도 **잔여 화자가 있으면 Floor Idle 을 보내지 않고** 잔여 화자별 Floor Taken 으로
+  단말의 화자 목록을 갱신한다. 마지막 화자가 빠질 때만 Floor Idle.
+- 무활동 자동 회수(`FloorIdleSec`)는 **화자별로 독립** 판정한다(긴급 tier 화자는 제외).
+
+**하향 스트림 분리** — 동시 발언 화자는 슬롯(0..7)을 배정받고, 수신자에게 나가는 RTP 는
+슬롯마다 별도 SSRC·시퀀스를 쓴다. 슬롯 0 은 종전과 동일한 수신자별 고정 SSRC(단일 화자
+정책에서 화자가 바뀌어도 하나의 연속 스트림)라 기존 단말 동작은 그대로다.
+
+**녹취** — 슬롯 0 은 `audio`/`video` 트랙(파일명·메타 종전과 동일), 동시 발언 슬롯은
+`audioN`/`videoN` 트랙에 기록하고 세그먼트 메타에 `speaker_id_audioN` 으로 화자를 남긴다.
+세그먼트는 발언자 집합이 비는 시점에 닫히며, 한 세그먼트 안에서 슬롯이 재사용될 상황이면
+트랙에 다른 화자가 섞이지 않도록 세그먼트를 먼저 끊는다.
+
+### 7.8 floor_crypto — floor RTCP 보호 (TS 33.180)
+
+MCPTT E2E 보안에서 **미디어 RTP 는 CMP 가 복호하지 않는다**(UE↔UE SRTP 를 투명 relay).
+반면 floor control 은 CMP 가 중재자로 참여하므로 floor RTCP 만 보호 키를 받아 SRTCP
+(RFC 3711)로 복호·재암호한다. 키는 CSC(KMS)가 GMK/PCK 에서 파생해 CSP 를 거쳐 inline 으로
+전달한다 — CMP 는 KMS 와 직접 접점을 갖지 않는다.
+
+| `floor_crypto` 필드 | 필수 | 설명 |
+|---|---|---|
+| `alg` | - | `AES_CM_128_HMAC_SHA1_80`(기본) / `AES_CM_128_HMAC_SHA1_32` |
+| `key` | O | master key — base64(16 바이트) |
+| `salt` | O | master salt — base64(14 바이트) |
+| `mki` | - | MKI — hex(≤16 바이트). 지정 시 송신 패킷에 동봉하고 수신 시 대조 |
+
+```json
+{
+  "payload": {
+    "group_id": "grp-fire-01",
+    "floor_control": "on", "floor_policy": "multi", "max_talkers": 3,
+    "floor_crypto": { "alg": "AES_CM_128_HMAC_SHA1_80",
+                      "key": "4fl6DT4Bi+DWT6MsBt5BOQ==", "salt": "DsZ1rUmK/uu2lgs6q+Y=" }
+  }
+}
+```
+
+- 보호 범위: RTCP 헤더 8B 는 평문, 이후 본문 암호화 + `E|SRTCP index`(4B) + MKI(선택) +
+  인증 태그. 인증은 (헤더+본문+E/index) 전체를 덮는다.
+- 재전송 방지: SSRC 별 index 최고값 + 64 슬롯 윈도우. 인증 실패·재전송 패킷은 폐기하고
+  STATS `detail.floor_crypto_drop` 에 누적한다(위조 floor 시도 관측).
+- 키 갱신(rekey)은 같은 필드를 `PTT_GROUP_MODIFY` 로 다시 보내면 된다.
+- `floor_control:"off"` 와 함께 오면 `BAD_REQUEST`(보호할 floor 가 없다). 키 길이·alg 오류도
+  같은 코드로 거절한다.
+
 ## 8. 이벤트 (type: "event")
 
 CMP → client 비동기 push. `trans_id` 는 CMP 가 발행하고, 수신 client 는 동일 trans_id 로
@@ -471,6 +549,22 @@ push 대상은 마지막 제어 요청(HEARTBEAT 등)의 소스로 학습한 CSP
 }
 ```
 
+**발언자 집합 통지** — floor 는 CMP↔UE in-band 라 "지금 누가 말하는가"를 CSP·콘솔이 알 길이
+없다. 발언자 집합이 바뀔 때마다(GRANT/RELEASE/REVOKE/이탈) 발행한다:
+
+| cmd | 라우팅 | payload |
+|---|---|---|
+| `FLOOR_TALKERS` | 참여 node | `group_id`, `policy`(`single`/`dual`/`multi`/`private`/`off`), `talkers`(현재 발언자 배열 — 비면 무발언) |
+
+```json
+{
+  "hdr": { "ver": 2, "trans_id": 90101, "node": "cmp01", "cmd": "FLOOR_TALKERS",
+           "type": "event", "sesid": "01011112222::csp::1768531200123456::7", "service": "mcptt" },
+  "payload": { "group_id": "grp-fire-01", "policy": "multi",
+               "talkers": ["01011112222", "01033334444"] }
+}
+```
+
 **CSP 처리** — CSP CmpClient 가 event 를 ack 한 뒤 별도 dispatch 스레드에서 처리한다(핸들러가
 RemoveSession 을 부를 수 있어 수신 스레드와 분리 — 데드락 회피). `RELAY_ABORTED` → 해당
 `session_id` 를 가진 호를 즉시 종료(StopCall+RemoveSession, 멱등). `PTT_GROUP_ABORTED` → 그룹
@@ -479,6 +573,10 @@ standby 는 탐지·로그만 한다([ha_design.md](../design/ha_design.md) §5.
 이벤트는 CMP 가 자원을 확정 회수했다는 authoritative 신호라 audit(pull)의 zombie 추정과 달리
 opt-in 없이 즉시 처리하며, [§5.1](#51-heartbeat) digest-on-HB audit 과 **상보적**이다 — 이벤트는
 회수 즉시 특정 세션을 지목해 수렴 지연을 단축하고, audit 은 이벤트 유실·이중화 절체까지 커버한다.
+
+`FLOOR_TALKERS` 는 CSP 가 ack 만 하고(미소비) 있다 — 로스터·녹취 태깅·콘솔 실시간 반영은
+Call Control 파트의 후속 과제다([mcptt_csp_cmp_roadmap_contract.md](../design/features/mcptt_csp_cmp_roadmap_contract.md) §B.4).
+콘솔은 그때까지 STATS `detail.groups[].floor_holders` 폴링으로 발언자를 표시한다.
 
 > **RELAY_NAT_LATCHED**(NAT 목적지 latch 통지)는 규격 예약 — 현행은 STATS `detail.nat`/로그로 관측한다.
 

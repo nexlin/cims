@@ -116,10 +116,12 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
       ├── floor.jsonl                            # floor 이벤트 GRANT/REVOKE/REJECT/RELEASE/IDLE (CMP)
       ├── segments.jsonl                         # 세그먼트 인덱스 (CMP)
       └── seg/{NNN}/                             # 100 세그먼트 단위 shard (000,001,…) — 디렉터리 엔트리수 상한
-          ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오
+          ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오 (동시 발언 슬롯 0)
+          ├── seg_NNNN_audioK.rtp                # 동시 발언(dual/multi-talker) 슬롯 K 화자 오디오
           ├── seg_NNNN_video.rtp                 # 영상그룹 + 실제 영상 있을 때만 (빈 파일 미생성)
           └── seg_NNNN.json                      # speaker_id/priority/preempt, audio_file=상대경로(seg/NNN/…)
                                                  # + audio_pt/audio_codec (화자 leg 협상 PT·코덱 — 아래 참조)
+                                                 # + audioK_file/speaker_id_audioK (동시 발언 슬롯 화자)
 ```
 > 그룹 키 = surrogate `id`.
 
@@ -186,6 +188,10 @@ leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기
   코덱 테이블 top 의 rtpmap prefix(예 `"AMR-WB/16000"`).
 - **CMP → seg 메타**: PTT `seg_NNNN.json` 에 `audio_pt`/`audio_codec`(화자 leg — GRANT 시점
   화자별 갱신), VoIP 에 `audio_pt_a/b`/`audio_codec_a/b`(leg 별, 재협상 시 최신 반영).
+- **동시 발언 세그먼트**(dual/multi-talker, [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7):
+  세그먼트는 발언자 집합이 빌 때 닫히고, 화자마다 슬롯 트랙(`audio`/`audio1`…)에 분리 기록된다.
+  대표 화자는 `speaker_id`, 나머지 슬롯 화자는 `speaker_id_audioK` 로 귀속한다. 단일 화자
+  정책에서는 슬롯 0 만 쓰여 파일명·메타가 종전과 같다.
 - **OAM 변환기**: 메타 `audio_pt` 를 **우선** 사용해 해당 PT 패킷만 추출. 메타 없는(구)
   녹취는 파일 내 최빈 PT 자동감지 fallback(payload ≥ 6바이트 표본 — telephone-event 배제).
   AMR-WB 외 코덱 메타는 경고 로그 후 AMR-WB 로 시도(현행 디코더 = AMR-WB + H.264).

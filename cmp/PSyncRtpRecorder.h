@@ -48,6 +48,11 @@ public:
      *  pt<=0 이면 해당 트랙 메타 제거. 세그먼트 메타에 audio_pt_{prefix}/audio_codec_{prefix} 로 기록. */
     void setTrackPtCodec(const std::string& prefix, int pt, const std::string& codec);
 
+    /** 트랙별 화자 귀속 (PTT 동시 발언 — dual/multi-talker). 슬롯 트랙(audio1..N)이
+     *  누구의 발언인지 세그먼트 메타에 speaker_id_{prefix} 로 남긴다. 빈 speakerId = 제거.
+     *  슬롯 0("audio"/"video")의 화자는 세그먼트 대표 화자(speaker_id)와 같다. */
+    void setTrackSpeaker(const std::string& prefix, const std::string& speakerId);
+
     /** 세그먼트 종료 — 모든 트랙 파일 닫기 + 메타 기록 */
     void finishSegment();
 
@@ -104,6 +109,8 @@ private:
 
     // 트랙별 오디오 PT/코덱 (prefix → {pt, codec}) — PTT="audio"(화자별 갱신), VoIP="a"/"b"(leg 별)
     std::map<std::string, std::pair<int, std::string>> _trackPtCodec;
+    // 트랙별 화자 (prefix → sessionId) — PTT 동시 발언 슬롯 트랙의 귀속
+    std::map<std::string, std::string> _trackSpeaker;
 
     // 현재 세그먼트 출력 경로 (VoIP=_baseDir, PTT=shard 디렉터리)
     std::string _curSegDir;        // seg_*.rtp / seg_*.json 위치

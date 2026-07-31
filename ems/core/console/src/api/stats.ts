@@ -153,7 +153,8 @@ export interface PttGroupMember { subscriber_id: string; role: string }
 export interface PttGroup {
   group_id: string; session_id: string; name: string; type: string
   total_members: number; active_members: number
-  floor_holder: string | null; initiator: string | null
+  // floor_holder = 대표 화자, floor_holders = 발언자 전원(dual/multi-talker 동시 발언)
+  floor_holder: string | null; floor_holders?: string[]; initiator: string | null
   invite_time: string | null; duration_sec: number; floor_held_sec?: number
   floor_count?: number; last_floor?: string | null
   members?: PttGroupMember[]; anomalies: LiveAnomalyTag[]; org?: string
@@ -162,7 +163,7 @@ export interface PttTalker { msisdn: string; org: string; group_id: string; grou
 export interface PttMember { msisdn: string; name: string; role: string; priority: number | null; active: boolean; talking: boolean }
 export interface PttMembersResponse {
   group: string; total: number; page: number; limit: number
-  active_count: number; floor_holder: string | null; members: PttMember[]
+  active_count: number; floor_holder: string | null; floor_holders?: string[]; members: PttMember[]
 }
 export interface Anomaly { kind: string; type: string; detail: string; label: string; ref: string }
 export interface MediaNode { host: string; up: boolean; volte_rtp: Pool; ptt_rtp: Pool; groups: number }

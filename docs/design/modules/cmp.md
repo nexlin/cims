@@ -200,10 +200,14 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
 | video_enabled | - | 1 이면 video 포트 활성 |
-| group_type | - | `prearranged`/`chat`/`broadcast` (broadcast floor 정책용) |
-| initiator_id | - | broadcast 개시자 sessionId(=userId) — floor 독점 판정 |
+| group_type | - | `prearranged`/`chat`/`broadcast`/`private` (broadcast=개시자 독점, private=1:1 private call) |
+| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점 / private 초기 발언권 |
+| floor_control | - | `on`(기본)/`off` — floor 중재 유무 |
+| floor_policy | - | `single`(기본)/`dual`/`multi` — 그룹 동시 발언 수 |
+| max_talkers | multi 시 O | 동시 발언 상한(2..8) |
+| floor_crypto | - | floor RTCP SRTCP 보호 키 `{alg,key,salt[,mki]}` (TS 33.180) |
 
-**응답:** `ip`, `floor_port` (그룹 공유 Floor Control),
+**응답:** `ip`, `floor_port` (그룹 공유 Floor Control — `floor_control:"off"` 면 생략),
 `member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port, video_port}`)
 
 **동작:**
@@ -216,6 +220,8 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
    멤버 pool 고갈 시 `NO_RESOURCE` — 이번 호출로 생성된 그룹이면 floor/유닛을 즉시 롤백
    (기존 그룹의 선할당 유닛은 유지 — 멱등 재시도 시 재사용)
 7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`) — TS 24.380 §10.3.
+8. `floor_control`/`floor_policy`/`max_talkers`/`group_type:"private"` → `setFloorPolicy()` (녹취 슬롯 트랙 수가 정원에 따라 정해지므로 녹취 초기화보다 먼저), `floor_crypto` → `setFloorCrypto()`.
+   정책 필드의 미상 값·키 길이 오류는 `BAD_REQUEST` 로 거절한다.
 
 #### PTT_GROUP_MODIFY — 그룹 멤버/우선순위 갱신
 
@@ -237,11 +243,14 @@ processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이
 | user_sig_ip | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard |
 | role | - | `chair`/`participant` (floor 선점 판정용, 기본 participant) |
 | tier | - | `emergency`/`imminent`/`normal` — 긴급 멤버 join 시 동반 |
+| recv_only | - | 1 = ambient 청취 leg — 상향 미중계 + floor 요청 거절 |
+| floor_suppress | - | 1 = 이 멤버에게 floor 메시지 미송신 (청취 은닉) |
 
 **응답:** `ip`, `port`, `video_port` — 멤버 전용 RTP 포트 (같은 멤버 재요청 시 동일 포트).
 
 **동작:** 멤버 포트 유닛(PPttMemberPort) 확보(멱등) 후, 주소 동반 시
-PMcpttGroup::addMember(). Floor taken 상태면 신규 멤버에게 FLOOR_TAKEN 통지.
+PMcpttGroup::addMember(). 발언 중인 화자가 있으면 신규 멤버에게 화자마다 FLOOR_TAKEN 통지
+(private call 은 개시자 합류 시 초기 GRANT).
 
 #### PTT_LEAVE — 멤버 퇴장
 
@@ -291,7 +300,7 @@ CSP 는 이 명령을 보내지 않는다 — OAM stats 핸들러와 검증 파�
     "session_timeout": 600,
     "orphan_reclaim_sec": 120,
     "leak_reclaim": { "total": 0, "orphan": 0, "hold": 0 },
-    "groups": [ { "group_id": "group_1", "members": 4, "floor_holder": "1001" } ]
+    "groups": [ { "group_id": "group_1", "members": 4, "floor_holders": ["1001"] } ]
   }
 }
 ```
@@ -403,7 +412,8 @@ PTT 미디어는 leg 별 포트셋을 따른다 ([ue_nat_traversal.md §3.2](../
 멤버 유닛 audio 수신 → onMemberRtpPacket(memberId, ip, port, buf, len)
   ├─ 소스 검증 (선언 주소) — nat 멤버는 목적지 latch / 불일치 드롭+카운터
   ├─ DTMF 감지 (PT=101, end bit)
-  └─ Floor 소유자 오디오만 전체 송출 (각 멤버 유닛 소켓에서 하향 분배)
+  └─ 발언 중인 화자(floor off 면 전원)의 오디오를 나머지에게 송출
+     (각 멤버 유닛 소켓에서 하향 분배, 화자 슬롯별 SSRC/seq — recv_only 멤버 상향은 제외)
 ```
 
 ### 3.5 PMcpttGroup
@@ -422,109 +432,113 @@ struct Peer {
     int floorPort;            // Floor Control 포트 (m=application)
     int videoPort;            // Video RTP 포트
     unsigned int ssrc;        // CMP 할당 SSRC
-    uint16_t audioSeqOut;     // 수신자별 오디오 시퀀스 카운터
-    uint16_t videoSeqOut;     // 수신자별 비디오 시퀀스 카운터
-    uint32_t audioSsrcOut;    // 수신자에게 보내는 고정 오디오 SSRC
-    uint32_t videoSsrcOut;    // 수신자에게 보내는 고정 비디오 SSRC
+    uint16_t audioSeqOut[8];  // 수신자별 오디오 시퀀스 카운터 (동시 발언 슬롯별)
+    uint16_t videoSeqOut[8];  // 수신자별 비디오 시퀀스 카운터 (슬롯별)
+    int  streamSlot;          // floor off(full-duplex) 시 이 멤버 상향의 고정 슬롯
+    bool recvOnly;            // ambient 청취 leg — 상향 미중계 + 발언 거절
+    bool floorSuppress;       // 이 멤버에게 floor 메시지 미송신
     PPttMemberPort* unit;     // 멤버 전용 RTP 포트 유닛 (수신 신원 + 하향 송신 소켓)
     bool natEnabled;          // PTT_JOIN user_nat — 목적지 latch 허용
 };
 ```
 
-**수신자별 SSRC/시퀀스 재작성:**
+**수신자별 SSRC/시퀀스 재작성 (화자 슬롯별):**
 
 ```cpp
-void sendAudioToAll(data, len, excludeSessionId) {
+void sendAudioToAll(data, len, excludeSessionId, slot) {
     for (auto& [sid, peer] : _members) {
         if (sid == excludeSessionId) continue;   // 발신자 제외
         // 패킷 복제 후 수신자별 SSRC + 시퀀스 재작성
         char pkt[4096];
         memcpy(pkt, data, len);
-        peer.audioSeqOut++;
-        // RTP 헤더 seq(offset 2-3) = peer.audioSeqOut
-        // RTP 헤더 ssrc(offset 8-11) = peer.audioSsrcOut
+        peer.audioSeqOut[slot]++;
+        // RTP 헤더 seq(offset 2-3)  = peer.audioSeqOut[slot]
+        // RTP 헤더 ssrc(offset 8-11) = 슬롯 0 → 0x10000000+peer.ssrc (종전 고정 SSRC),
+        //                              슬롯 k → 0x40000000+(k<<24)+peer.ssrc
         peer.unit->sendAudioTo(peer.ip, peer.port, pkt, len);   // 멤버 전용 유닛 소켓에서 송신
     }
 }
 ```
 
-이 방식으로 각 수신자는 연속적인 시퀀스 번호와 고정 SSRC를 받아 jitter buffer 오동작을 방지한다.
+각 수신자는 화자 슬롯마다 연속적인 시퀀스 번호와 고정 SSRC를 받아 jitter buffer 오동작을
+방지한다. 단일 화자 정책에서는 슬롯 0 하나만 쓰이므로 화자가 바뀌어도 하나의 연속 스트림이다.
 
 #### Floor Control 상태 머신
 
+floor 상태는 **발언자 집합**(`_talkers`, 정원 = `_talkerCapacity`)이다. 정원은
+`floor_control`/`floor_policy` 로 정해진다 — off=0(중재 없음), single/private=1, dual=2,
+multi=`max_talkers`. 정책별 동작 규약은 [api/cmp_media_api.md §7.7](../../api/cmp_media_api.md) 이 정본.
+
 ```
-                    ┌─────────────────────────┐
-                    │                         │
-                    ▼                         │
-              ┌──────────┐                    │
-              │   IDLE   │                    │
-              └────┬─────┘                    │
-                   │ REQUEST                  │
-                   ▼                          │
-              ┌──────────┐    RELEASE         │
-              │  TAKEN   │────────────────────┘
-              └────┬─────┘
-                   │ REQUEST (높은 우선순위)
-                   ▼
-              ┌──────────┐
-              │ PREEMPT  │── REVOKE(이전 화자) + GRANT(새 화자)
-              └──────────┘
+              ┌──────────┐  집합이 빔
+              │   IDLE   │◀───────────────┐
+              └────┬─────┘                │
+                   │ REQUEST              │ 마지막 화자 RELEASE/REVOKE
+                   ▼                      │
+              ┌──────────────────┐        │
+              │  TALKING (1..N)  │────────┘
+              └────┬─────────────┘
+                   │ REQUEST
+                   ├─ 정원 여유 + multi        → 동시 GRANT
+                   ├─ 정원 여유 + dual + 선점  → 동시 GRANT (기존 화자 유지)
+                   ├─ 정원 만석 + 선점         → 최약 화자 REVOKE + GRANT
+                   └─ 그 외                    → 큐잉(QUEUE_POS_INFO) / DENY(private·큐포화)
 ```
 
 **Floor 처리 상세 (handleFloorRequest):**
 
 ```
-handleFloorRequest(sessionId, ssrc)
+handleFloorRequest(sessionId, ssrc, indicatorBits)
   │
-  ├─ Floor IDLE 상태
-  │   ├─ _floorTaken = true
-  │   ├─ _floorOwnerSessionId = sessionId
-  │   ├─ 요청자에게 FLOOR_GRANT 전송
-  │   ├─ 전체에게 FLOOR_TAKEN 브로드캐스트
-  │   └─ 녹취 시작 (미시작 시)
+  ├─ floor_control=off → 무시 (중재 없음)
+  ├─ Indicator(emergency/imminent) → tier 승격
+  ├─ recv_only/floor_suppress 멤버 → DENY(receive only)
+  ├─ broadcast 그룹 비개시자 → DENY(receive only)
   │
-  └─ Floor TAKEN 상태
-      ├─ 동일 화자 → 무시
-      ├─ 선점 판정: chair > participant (chair 항상 선점), 동급이면 우선순위(TS 24.380: 0~255 클수록 우선, 미지정=0 최저)
-      ├─ 선점 시
-      │   ├─ 현재 화자에게 FLOOR_REVOKE
-      │   ├─ 새 화자 등록, FLOOR_GRANT
-      │   └─ 전체에게 FLOOR_TAKEN 브로드캐스트
-      └─ 비선점 → 요청자에게 FLOOR_REJECT
+  ├─ 발언자 없음 → GRANT (슬롯 배정 + 녹취 세그먼트 시작)
+  ├─ 이미 발언 중 → 무시
+  └─ 발언자 있음
+      ├─ 선점 서열: tier(emergency>imminent>normal) > chair > 수치 priority(0~255)
+      │             (private call 은 chair 단계 없음 — TS 24.380 §7)
+      ├─ multi + 정원 여유          → 동시 GRANT
+      ├─ dual + 정원 여유 + 선점자격 → 동시 GRANT (REVOKE 없음, Dual floor 비트)
+      ├─ 선점                        → 최약 화자 REVOKE(cause=preempted) 후 GRANT
+      └─ 비선점 → 큐잉(QUEUE_POS_INFO) / 큐 없음·포화면 DENY
 ```
 > 멤버 `role`(chair/participant)이 PTT_JOIN/멤버문자열(`id:prio:role`)로 전달되어 선점 판정에 사용.
+> 화자 1명이 빠져도 잔여 화자가 있으면 IDLE 대신 잔여 화자 TAKEN 을 재브로드캐스트한다.
+> 무활동 자동 회수(`FloorIdleSec`)는 화자별 독립 판정(긴급 tier 제외).
 > 모든 floor 이벤트는 세션 시간버킷 `{record_dir}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl` 에 기록(GRANT/REVOKE/REJECT/RELEASE/IDLE + prio/preempt).
 > 세그먼트는 `seg/{NNN}/`(100세그 shard), 빈 트랙(.rtp) 미생성. 상세 [recording.md](../features/recording.md).
 
-#### Floor Control 패킷 (RTCP APP)
+#### Floor Control 패킷 (RTCP APP "MCPT")
 
-```
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|V=2|P|  subtype |   PT=204    |          length               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                         SSRC                                  |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   name = "MCPT" (4 bytes)                                    |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   opcode    |   id_len      |          reserved               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   speaker_id (가변 길이, 4바이트 정렬)                         |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-```
+TS 24.380 §8.2 — RTCP APP 12B 고정 헤더(V/P/**subtype**=메시지 타입, PT=204, length, SSRC,
+name="MCPT") 뒤에 floor control field 들의 **TLV**(Field ID 1B + Length 1B + value) 나열.
+문자열 필드(Granted Party/User ID/Queued User ID/Track Info)만 4바이트 경계로 패딩한다.
+인코더/디코더는 `PFloorCodec.cpp`(단말 `floor/FloorCodec.kt` 와 바이트 호환, 단위테스트
+`tests/cmp_floor_codec_test.cpp`).
 
-**OpCode 정의:**
+**메시지 타입 = subtype (TS 24.380 Table 8.2.2-1):**
 
-| OpCode | 값 | 방향 | 설명 |
+| 메시지 | subtype | 방향 | 설명 |
 |--------|---|------|------|
-| FLOOR_REQUEST | 1 | UE → CMP | 발언권 요청 |
-| FLOOR_GRANT | 2 | CMP → UE | 발언권 승인 |
-| FLOOR_REJECT | 3 | CMP → UE | 발언권 거절 |
-| FLOOR_RELEASE | 4 | UE → CMP | 발언권 해제 |
-| FLOOR_IDLE | 5 | CMP → ALL | 발언권 해제됨 (전체 통지) |
-| FLOOR_TAKEN | 6 | CMP → ALL | 발언권 점유됨 (화자 ID 포함) |
-| FLOOR_REVOKE | 7 | CMP → UE | 발언권 강제 회수 |
+| Floor Request | 0 | UE → CMP | 발언권 요청 |
+| Floor Granted | 1 | CMP → UE | 발언권 승인 |
+| Floor Taken | 2 | CMP → ALL | 발언권 점유됨 (화자 ID 포함) |
+| Floor Deny | 3 | CMP → UE | 발언권 거절 (Reject Cause) |
+| Floor Release | 4 | UE → CMP | 발언권 해제 |
+| Floor Idle | 5 | CMP → ALL | 발언자 없음 (전체 통지) |
+| Floor Revoke | 6 | CMP → UE | 발언권 강제 회수 (선점/무활동) |
+| Floor Queue Position Request | 8 | UE → CMP | 큐 위치 조회 |
+| Floor Queue Position Info | 9 | CMP → UE | 큐 위치 응답 |
+| Floor Ack | 10 | 양방향 | 수신 확인 |
+| Floor Release Multi Talker | 0x0F | UE → CMP | 동시 발언 중 자기 발언만 해제 (Rel-16) |
+
+**SRTCP 보호** — `floor_crypto` 가 설정된 그룹은 위 패킷을 SRTCP(RFC 3711, AES-CM +
+HMAC-SHA1)로 주고받는다: 헤더 8B 평문 + 본문 암호화 + `E|SRTCP index` + MKI(선택) + 인증 태그.
+구현 `PFloorCrypto.cpp`(단위테스트 `tests/cmp_floor_crypto_test.cpp`), 인증 실패·재전송은
+폐기 후 STATS `floor_crypto_drop` 에 누적. 미디어 RTP 는 투명 relay 로 유지한다(TS 33.180).
 
 #### Floor 패킷 전송 경로
 

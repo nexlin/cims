@@ -10,6 +10,7 @@
 #include <ctime>
 #include <functional>
 #include "pbase.h"
+#include "PFloorCrypto.h"
 
 class PRtpMulticast;
 class PPttMemberPort;
@@ -34,8 +35,25 @@ enum FloorOpCode {
     FLOOR_REVOKE   = 6,   // Floor Revoke           (서버→화자)
     FLOOR_QUEUE_POS_REQ  = 8,  // Floor Queue Position Request (UE→서버)
     FLOOR_QUEUE_POS_INFO = 9,  // Floor Queue Position Info    (서버→UE)
-    FLOOR_ACK      = 10   // Floor Ack
+    FLOOR_ACK      = 10,  // Floor Ack
+    FLOOR_RELEASE_MULTI  = 0x0F  // Floor Release Multi Talker (UE→서버, Rel-16 multi-talker):
+                                 //   동시 발언 중 자기 발언만 해제 — 나머지 화자는 유지되므로
+                                 //   서버는 Floor Idle 대신 잔여 화자 Taken 갱신으로 응답한다.
 };
+
+// 동시 발언 정책 — floor 제어 "유무"(floor_control)와 직교하는 "동시성" 축
+// (cmp_media_api.md §7.1). group_type:"private" 은 이 축을 해석하지 않는다(TS 24.380 §7).
+enum FloorPolicy {
+    FLOOR_POLICY_SINGLE = 0,  // 단일 화자 (기본)
+    FLOOR_POLICY_DUAL   = 1,  // dual floor — 선점자에게 REVOKE 없이 동시 GRANT (최대 2)
+    FLOOR_POLICY_MULTI  = 2   // multi-talker — 동시 최대 max_talkers 명 (TS 24.380 Rel-16)
+};
+// "single"/"dual"/"multi" → FloorPolicy (미지정·미상 = single)
+int ParseFloorPolicy(const std::string& s);
+
+// 동시 발언 슬롯 상한 — 슬롯은 수신자별 하향 스트림(SSRC/seq)과 녹취 트랙을 가르는 키다.
+// max_talkers 는 이 값으로 clamp 된다.
+#define MCPTT_MAX_TALKER_SLOTS 8
 
 // Floor control field ID (TS 24.380 §8.2.3).
 enum FloorFieldId {
@@ -146,11 +164,13 @@ public:
     // ptOut/tePtOut: 이 leg 로 송신 시 스탬프할 audio/telephone-event PT (0=재작성 없음).
     // srcTePt: 이 leg 가 송신에 쓰는 telephone-event PT — fan-out 시 audio/TE 분류 기준.
     // codec: 협상 오디오 코덱 문자열 (user_codec, 예 "AMR-WB/16000") — 녹취 세그먼트 메타용.
+    // recvOnly/floorSuppress: ambient listening 청취 leg (cmp_media_api.md §7.3) —
+    //   recvOnly=상향 미디어 미중계(+floor 요청 거절), floorSuppress=이 멤버에게 floor 메시지 미송신.
     void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
                    const std::string& role = "participant", PPttMemberPort* unit = nullptr,
                    bool nat = false, const std::string& sigIp = "",
                    int ptOut = 0, int srcPt = 0, int tePtOut = 0, int srcTePt = 0,
-                   const std::string& codec = "");
+                   const std::string& codec = "", bool recvOnly = false, bool floorSuppress = false);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -158,6 +178,23 @@ public:
     //   indicatorBits: 수신 REQUEST 의 Floor Indicator(emergency/imminent) 비트마스크(-1=없음).
     void handleFloorRequest(const std::string& sessionId, unsigned int userId, int indicatorBits = -1);
     void handleFloorRelease(const std::string& sessionId, unsigned int userId);
+
+    // floor 정책 (PTT_GROUP_ADD/MODIFY payload — cmp_media_api.md §7.1).
+    //   floorControl: floor 제어 유무. off = 중재 없는 full-duplex (floor RTCP 미처리).
+    //   policy/maxTalkers: floor 有 그룹의 동시 발언 수 (single=1, dual=2, multi=maxTalkers).
+    //   privateCall: group_type=="private" — TS 24.380 §7 private-call floor(정원 1, 큐 없음),
+    //                group 동시성 정책(policy)은 해석하지 않는다.
+    void setFloorPolicy(bool floorControl, int policy, int maxTalkers, bool privateCall);
+    bool isFloorControlEnabled() const { return _floorControl; }
+    int  getMaxTalkers() const { return _talkerCapacity; }
+
+    // floor RTCP SRTCP 보호 키 (PTT_GROUP_ADD.floor_crypto — TS 33.180).
+    //   key/salt/mki 는 디코드된 바이트열. 실패 시 err 를 채우고 false(평문 유지).
+    bool setFloorCrypto(const std::string& alg, const std::string& key, const std::string& salt,
+                        const std::string& mki, std::string& err);
+    bool isFloorCryptoEnabled() { return _floorCrypto.enabled(); }
+    // SRTCP 인증 실패/재전송으로 폐기한 floor 패킷 누적 (STATS floor_crypto_drop)
+    long getFloorCryptoDrop() const { return _floorCryptoDrop; }
 
     // Called by PRtpMulticast when a floor control packet is received (m=application)
     void onFloorPacket(const std::string& ip, int port, char* buf, int len);
@@ -186,8 +223,22 @@ public:
     /** RTCP SR/RR/SDES/BYE 등 일반 RTCP 메시지도 Flow 에 기록할지 여부 */
     void setRtcpLogEnable(bool b) { _rtcpLogEnable = b; }
 
+    // 발언자 집합 변경 통지 콜백 (PCmpServer → FLOOR_TALKERS 이벤트, cmp_media_api.md §8).
+    //   호출 시 그룹 _mutex 를 보유한 상태다 (_logFlow 콜백과 동일 규약). 이벤트 hdr 의
+    //   sesid/service 는 그룹이 보관한 값을 실어 보낸다 — 콜백이 PCmpServer 의 맵을
+    //   되짚지 않게 해(비재귀 _mutex) 호출 경로와 무관하게 안전하다.
+    using TalkersFunc = std::function<void(const std::string& groupId, const char* policy,
+                                            const std::vector<std::string>& talkers,
+                                            const std::string& sesid, const std::string& service)>;
+    void setTalkersCallback(TalkersFunc fn) { _onTalkers = fn; }
+    // 이 그룹의 세션 식별 메타 (CSP 발행 sesid / service) — 이벤트 hdr 용.
+    void setSessionMeta(const std::string& sesid, const std::string& service);
+
     int getMemberCount() const { return (int)_members.size(); }
-    std::string getFloorHolder() const { return _floorTaken ? _floorOwnerSessionId : ""; }
+    // 대표 화자(가장 먼저 grant 된 발언자) — 단일 화자 정책에서는 유일 화자.
+    std::string getFloorHolder() const { return _talkers.empty() ? "" : _talkers.front().sessionId; }
+    // 현재 발언자 전원 (STATS detail.groups[].floor_holders — dual/multi-talker 관측)
+    void getFloorHolders(std::vector<std::string>& out);
     // 그룹 생성 시각 — audit SESSION_LIST 의 grace(min_age) 판정 기준(now-created, 단조 증가).
     time_t getCreatedTime() const { return _createdTime; }
     // 미협상 소스/미등록 멤버 드롭 누적 (STATS rtp_src_drop)
@@ -214,21 +265,23 @@ private:
     void _logFloorLocal(const char* op, const std::string& user, unsigned int ssrc, int prio,
                         const char* extraJson = nullptr);
 
-    void sendAudioToAll(const char* data, int len, const std::string& excludeSessionId);
+    // 하향 분배 — slot 은 화자의 동시 발언 슬롯(수신자별 egress SSRC/seq 를 가른다).
+    void sendAudioToAll(const char* data, int len, const std::string& excludeSessionId, int slot);
     void sendFloorToAll(const char* data, int len);
-    void sendVideoToAll(const char* data, int len, const std::string& excludeSessionId);
+    void sendVideoToAll(const char* data, int len, const std::string& excludeSessionId, int slot);
     void sendToMember(const std::string& sessionId, const char* data, int len);
     // 미협상 소스/미등록 멤버 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
     void _dropSrc(const char* what, const std::string& memberId, const std::string& ip, int port);
     void broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId);
 
     // ── Floor 송신 헬퍼 (TS 24.380 TLV) — 호출자는 _mutex 보유 ──
-    // emergency/imminent tier → Floor Indicator 비트마스크.
+    // emergency/imminent tier + 동시 발언 정책(dual/multi) → Floor Indicator 비트마스크.
     int  _indicatorFor(const std::string& sessionId) const;
     // 화자에게 GRANTED(Duration+Granted Party+Indicator) 송신 + 전체 TAKEN + 녹취 시작.
     void _grantFloorTo(const std::string& sessionId, unsigned int ssrc, int prio,
                        bool preempt, const std::string& prevOwner);
-    // 현재 owner 해제 후: 큐가 있으면 최우선 대기자에게 grant, 없으면 IDLE 브로드캐스트.
+    // 화자 1명 해제(RELEASE/REVOKE/이탈) 후 상태 수렴: 여유 정원만큼 큐 승급 →
+    //   화자가 남아 있으면 잔여 화자 TAKEN 갱신, 아무도 없으면 IDLE + 녹취 세그먼트 종료.
     void _advanceFloorOrIdle();
     // Floor Deny(cause) 송신.
     void _sendDeny(const std::string& sessionId, unsigned int ssrc, int cause);
@@ -263,10 +316,13 @@ private:
         unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
         int videoPort;
         std::string role;    // "chair" | "participant" (TS 24.380 floor 선점 판정)
-        uint16_t audioSeqOut;   // 수신자별 오디오 시퀀스 카운터
-        uint16_t videoSeqOut;   // 수신자별 비디오 시퀀스 카운터
-        uint32_t audioSsrcOut;  // 수신자에게 보내는 고정 오디오 SSRC
-        uint32_t videoSsrcOut;  // 수신자에게 보내는 고정 비디오 SSRC
+        // 수신자별 하향 스트림 — 동시 발언 슬롯마다 별도 SSRC/seq 를 쓴다. 슬롯 0 은 단일
+        //   화자 정책의 유일 스트림(화자가 바뀌어도 연속) — 종전 동작 그대로다.
+        uint16_t audioSeqOut[MCPTT_MAX_TALKER_SLOTS] = {0};
+        uint16_t videoSeqOut[MCPTT_MAX_TALKER_SLOTS] = {0};
+        int  streamSlot = 0;           // floor off(full-duplex) 시 이 멤버 상향의 고정 슬롯
+        bool recvOnly = false;         // ambient 청취 leg — 상향 미디어 미중계 + floor 요청 거절
+        bool floorSuppress = false;    // 이 멤버에게 floor 메시지 미송신 (청취 은닉)
         bool floorNatLatched = false;  // floor User ID latch 이력 — NAT 단말 표식
         PPttMemberPort* unit = nullptr;  // 멤버 전용 RTP 포트 유닛 (PCmpServer 소유)
         std::string declIp;   // 마지막 SDP 선언 주소 원본 (latch 와 무관하게 보존 —
@@ -295,13 +351,48 @@ private:
     std::map<std::string, int> _tier;       // SessionID -> FloorTier (없으면 TIER_NORMAL)
     bool isChair(const std::string& sessionId) const; // role==chair 여부
     PRtpMulticast* _pttSession;      // PTT 전용 세션 (audio RTP + floor + video)
-    
-    // Floor State
-    bool _floorTaken;
-    std::string _floorOwnerSessionId;
-    unsigned int _floorOwnerSsrc;
-    int64_t _floorGrantUsec = 0;   // floor GRANT 시각 (무활동 판정 기준점 — RTP 무수신 grant 대비)
-    int64_t _lastRtpUsec = 0;      // owner 의 마지막 RTP(audio/video) 수신 시각
+
+    // ── Floor State — 발언자 집합 (정원 1 = 단일 화자, 2 = dual, N = multi-talker) ──
+    struct Talker {
+        std::string sessionId;
+        unsigned int ssrc;      // 요청자 SSRC (GRANT/REVOKE 송신 대상)
+        int prio;
+        int slot;               // 하향 스트림/녹취 트랙 슬롯 (0..capacity-1)
+        int64_t grantUsec;      // GRANT 시각 (무활동 판정 기준점 — RTP 무수신 grant 대비)
+        int64_t lastRtpUsec;    // 마지막 RTP(audio/video) 수신 시각
+    };
+    std::vector<Talker> _talkers;   // grant 순서 — front() 가 대표 화자
+    bool _floorControl = true;      // floor 제어 유무 (off = full-duplex)
+    int  _floorPolicy = FLOOR_POLICY_SINGLE;
+    int  _talkerCapacity = 1;       // 동시 발언 정원 (single=1/dual=2/multi=max_talkers)
+    bool _privateCall = false;      // group_type=="private" — TS 24.380 §7 절차
+    bool _initialGrantDone = false; // private call 개시자 초기 부여 완료 여부
+    unsigned int _slotUsedMask = 0; // 현재 녹취 세그먼트에서 이미 쓴 슬롯 (트랙 화자 혼입 방지)
+    int  _streamSlotNext = 0;       // floor off 멤버 스트림 슬롯 배정 커서
+
+    // 발언자 조회/슬롯 배정 (호출자가 _mutex 보유)
+    Talker* _talkerOf(const std::string& sessionId);
+    bool _isTalker(const std::string& sessionId) const;
+    // 현재 발언자 중 서열이 가장 낮은 화자 (선점 비교 대상). 없으면 nullptr.
+    Talker* _weakestTalker();
+    // TS 24.380 선점 서열 비교: condition tier > chair override > 수치 priority.
+    //   private call(§7)은 chair 개념이 없어 tier·priority 만 본다.
+    bool _preempts(const std::string& reqId, int reqPrio, const std::string& ownerId, int ownerPrio) const;
+    // 여유 슬롯 배정 — 세그먼트 내 재사용이 필요하면 녹취 세그먼트를 먼저 끊는다(-1=정원 초과)
+    int  _allocSlot();
+    // 발언자 제거(해제/회수/이탈 공통) — 녹취 트랙 정리 포함. 제거했으면 true.
+    bool _dropTalker(const std::string& sessionId);
+    // 발언자 집합 통지 (FLOOR_TALKERS) — 집합이 바뀐 직후 호출
+    void _notifyTalkers();
+    // 정책 문자열 ("single"/"dual"/"multi"/"private"/"off")
+    const char* _policyName() const;
+    // 동시 발언 슬롯의 녹취 트랙명 ("audio"/"audio1".., "video"/"video1"..)
+    static std::string _slotTrack(int slot, bool video);
+    // 녹취 세그먼트 시작/재시작 (대표 화자 = 슬롯 0 또는 최초 화자)
+    void _recStartSegment(const std::string& speakerId, int prio, bool preempt, const std::string& prevOwner);
+    // 슬롯 트랙 등록 (0..slots-1) — 이미 등록된 슬롯은 건너뛴다
+    void _recEnsureTracks(int slots);
+    int  _recTrackSlots = 0;   // 현재 recorder 에 등록된 슬롯 트랙 수
 
     static int64_t _nowUsec();
 
@@ -319,7 +410,12 @@ private:
     
     PMutex _mutex;
     LogFlowFunc _logFlow;  // floor event log callback
+    TalkersFunc _onTalkers;  // 발언자 집합 변경 통지 (FLOOR_TALKERS)
+    std::string _sesid;      // CSP 발행 세션 ID (이벤트 hdr)
+    std::string _service;    // 서비스 (mcptt) — 이벤트 hdr
     bool _rtcpLogEnable = false; // 일반 RTCP 로깅 활성화 플래그
+    PFloorCrypto _floorCrypto;   // floor RTCP SRTCP 보호 (미설정 = 평문 floor)
+    long _floorCryptoDrop = 0;   // SRTCP 인증 실패/재전송 폐기 누적
     long _srcDrop = 0;           // 미협상 소스/미등록 멤버 드롭 누적
     time_t _lastDropWarn = 0;    // 드롭 WARN rate-limit
     time_t _createdTime = time(nullptr);  // 그룹 생성 시각 (audit grace) — 구성 시점 고정

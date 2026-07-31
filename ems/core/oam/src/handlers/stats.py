@@ -239,6 +239,20 @@ def _all_media_stats(config: dict):
             for ip, port in _media_endpoints(config)]
 
 
+def _floor_holders(gd: dict) -> list:
+    """CMP STATS group_details 항목의 발언자 목록.
+
+    CMP 는 동시 발언(dual/multi-talker)을 담도록 `floor_holders` 배열로 알린다
+    (docs/api/cmp_media_api.md §5.3). 구버전 CMP 노드는 단일 `floor_holder` 만
+    보내므로 함께 받아준다 — 혼재 배포에서 콘솔이 발언자를 놓치지 않도록.
+    """
+    hs = gd.get('floor_holders')
+    if isinstance(hs, list):
+        return [h for h in hs if h]
+    h = gd.get('floor_holder')
+    return [h] if h else []
+
+
 def _check_db_health(config: dict) -> bool:
     try:
         with _get_db(config) as conn:
@@ -968,14 +982,15 @@ async def _subscribers_status(config: dict, status: str = 'active',
     # 활성 가입자 식별자 집합 (MSISDN). active 필터/카운트의 IN 절에 사용.
     active_ids = set(volte_active_by_sub) | set(ptt_states_by_sub)
 
-    # CMP 에서 floor holder 조회 시도 (실패해도 무관)
+    # CMP 에서 floor holder 조회 시도 (실패해도 무관). 동시 발언이면 대표 화자(첫 발언자).
     group_floor_holder = {}
     try:
         cmp_stats = _get_cmp_stats(config)
         for gd in (cmp_stats or {}).get('group_details', []) or []:
             gid = gd.get('group_id', '')
-            if gid and gd.get('floor_holder'):
-                group_floor_holder[gid] = gd['floor_holder']
+            hs = _floor_holders(gd)
+            if gid and hs:
+                group_floor_holder[gid] = hs[0]
     except Exception:
         pass
 
@@ -1325,13 +1340,14 @@ async def _service_live(config: dict) -> HandlerResult:
             g['initiator'] = sub
         g['members'].append({'subscriber_id': sub, 'role': role})
 
-    # CMP floor holder (전 노드 group_details 병합)
-    floor_holder = {}
+    # CMP floor holders (전 노드 group_details 병합) — 그룹당 발언자 목록(동시 발언 포함)
+    floor_holders = {}
     for nd in media:
         for gd in (nd['stats'].get('group_details') or []):
             gg = gd.get('group_id', '')
-            if gg and gd.get('floor_holder'):
-                floor_holder[gg] = gd['floor_holder']
+            hs = _floor_holders(gd)
+            if gg and hs:
+                floor_holders[gg] = hs
 
     # DB: 그룹 메타(이름/타입/총멤버/surrogate id/org) + 활성 가입자 org 매핑(조직별 필터용)
     gmeta = {}
@@ -1387,19 +1403,22 @@ async def _service_live(config: dict) -> HandlerResult:
         fa = floor_act.get(gid, {})
         g['floor_count'] = fa.get('count', 0)   # 최근 5분 발언 횟수
         g['last_floor'] = fa.get('last_ts')
-        g['floor_holder'] = floor_holder.get(gid)
+        hs = floor_holders.get(gid) or []
+        g['floor_holders'] = hs
+        g['floor_holder'] = hs[0] if hs else None   # 대표 화자 (단일 화자 그룹의 종전 필드)
         g.pop('members', None)   # 멤버 비인라인(그룹당 100~200명) → drill 엔드포인트로 페이지네이션
         participants += g['active_members']
         anomalies = []
-        if g['floor_holder']:
-            talking += 1
-            talkers.append({'msisdn': g['floor_holder'], 'org': m2o.get(g['floor_holder'], ''),
-                            'group_id': gid, 'group_name': g['name']})
-            held = _floor_held_secs(config, meta.get('id'), g['floor_holder'], now)
-            if held is not None and held > _FLOOR_MONOPOLY_SEC:
-                anomalies.append({'type': 'floor_monopoly',
-                                  'detail': f"Floor {held}초 점유"})
-                g['floor_held_sec'] = held
+        if hs:
+            talking += len(hs)   # 동시 발언(dual/multi)이면 발언자 수만큼 계상
+            for h in hs:
+                talkers.append({'msisdn': h, 'org': m2o.get(h, ''),
+                                'group_id': gid, 'group_name': g['name']})
+                held = _floor_held_secs(config, meta.get('id'), h, now)
+                if held is not None and held > _FLOOR_MONOPOLY_SEC:
+                    anomalies.append({'type': 'floor_monopoly',
+                                      'detail': f"Floor {held}초 점유"})
+                    g['floor_held_sec'] = held
         g['anomalies'] = anomalies
         ptt_groups_out.append(g)
 
@@ -1884,8 +1903,7 @@ async def _service_org(config: dict) -> HandlerResult:
     talkers = set()
     for nd in _all_media_stats(config):
         for gd in (nd['stats'].get('group_details') or []):
-            if gd.get('floor_holder'):
-                talkers.add(gd['floor_holder'])
+            talkers.update(_floor_holders(gd))
 
     UNSET = '(미지정)'
     KEYS = ('members', 'volte_reg', 'ptt_reg', 'active_volte', 'active_ptt', 'ptt_talking')
@@ -1990,11 +2008,11 @@ async def _ptt_members(config: dict, group: str, page='1', limit='50') -> Handle
     ptt_states = _load_active_states(config, 'ptt')
     active_in_group = {st.get('subscriber_id') for st in ptt_states
                        if st.get('group_id') == group and st.get('subscriber_id')}
-    floor_holder = None
+    holders = set()
     for nd in _all_media_stats(config):
         for gd in (nd['stats'].get('group_details') or []):
-            if gd.get('group_id') == group and gd.get('floor_holder'):
-                floor_holder = gd['floor_holder']
+            if gd.get('group_id') == group:
+                holders.update(_floor_holders(gd))
     members = []
     total = 0
     try:
@@ -2015,13 +2033,15 @@ async def _ptt_members(config: dict, group: str, page='1', limit='50') -> Handle
                     members.append({'msisdn': r['msisdn'], 'name': r.get('name') or '',
                                     'role': r.get('role') or 'member', 'priority': r.get('priority'),
                                     'active': r['msisdn'] in active_in_group,
-                                    'talking': r['msisdn'] == floor_holder})
+                                    'talking': r['msisdn'] in holders})
     except Exception as e:
         logger.exception('stats handler error: %s', e)
         return HandlerResult(status=500, body=_ERR_INTERNAL)
     return HandlerResult(status=200, body={
         'group': group, 'total': total, 'page': page, 'limit': limit,
-        'active_count': len(active_in_group), 'floor_holder': floor_holder,
+        'active_count': len(active_in_group),
+        'floor_holder': next(iter(sorted(holders)), None),   # 대표 화자
+        'floor_holders': sorted(holders),                    # 동시 발언 전원
         'members': members,
     })
 

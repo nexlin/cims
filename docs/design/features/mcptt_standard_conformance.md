@@ -57,7 +57,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
 | **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✗ (그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) 로 구현) |
 | **First-to-answer call** | TS 24.379 | ✗ |
-| **Ambient listening call** (원격 감청) | TS 24.379 | ✗ |
+| **Ambient listening call** (원격 감청) | TS 24.379 | ✗ 시그널링 미구현 (미디어 평면의 청취 leg 플래그 `recv_only`/`floor_suppress` 는 구현 — [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.4) |
 | **Remotely initiated call** (원격 개시) | TS 24.379 | ✗ |
 | **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
 | **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
@@ -68,17 +68,18 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 
 | 기능 | 규격 | 상태 |
 |---|---|---|
-| **Dual floor control** (선점자와 기존 화자 동시 2명, override) | TS 24.380 | ✗ 미구현 (현재는 REVOKE→GRANT 단일화자, [../modules/cmp.md](../modules/cmp.md)) |
-| **Multi-talker control** (동시 N명, Rel-16) | TS 24.380 (Rel-16) | ✗ (Floor Release Multi Talker 등 전용 메시지 미구현) |
-| **Pre-established session floor** | TS 24.380 | ✗ |
+| **Pre-established session floor** | TS 24.380 | ✗ (Call Control 파트의 세션 2단 수명과 함께 착수) |
 
-> 구현됨: subtype+TLV 인코딩, Cause/Indicator/Duration/Queue, 큐잉, tier 선점, inactivity auto-revoke (F1~F3).
+> 구현됨: subtype+TLV 인코딩, Cause/Indicator/Duration/Queue, 큐잉, tier 선점, inactivity
+> auto-revoke (F1~F3), **dual floor / multi-talker(Floor Release Multi Talker 포함) /
+> private-call floor(§7) / floor SRTCP 보호(TS 33.180)** —
+> 정본 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7~§7.8.
 
 ### R3. 미디어 평면 / 전송
 
 | 기능 | 규격 | 상태 |
 |---|---|---|
-| **E2E 미디어 암호화** (SRTP + MIKEY-SAKKE, PCK/GMK/CSK) | TS 33.180 | ⚠ 구조만 — opensrtp 링크·SRTP 플래그 존재하나 참 ECCSI/SAKKE(RFC 6507/6508) 미구현 (S5 placeholder) |
+| **E2E 미디어 암호화** (SRTP + MIKEY-SAKKE, PCK/GMK/CSK) | TS 33.180 | ⚠ 구조만 — opensrtp 링크·SRTP 플래그 존재하나 참 ECCSI/SAKKE(RFC 6507/6508) 미구현 (S5 placeholder). **floor control(RTCP) SRTCP 보호는 구현** — 키는 제어평면 inline 전달(`floor_crypto`), 미디어는 투명 relay |
 | **MBMS/멀티캐스트 베어러** 그룹 배포 | TS 23.379 | ✗ (unicast RTP relay 만) |
 | **Off-network (ProSe/PC5 직접통신)** | TS 24.379 off-network | ✗ (서버 기반 on-network 만) |
 | **PTT 비디오** | — | ✗ ([../modules/cmp.md](../modules/cmp.md) "향후 확장") |
