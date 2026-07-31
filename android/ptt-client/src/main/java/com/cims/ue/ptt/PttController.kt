@@ -189,6 +189,7 @@ class PttController(
     private val lock = Any()
     private val sessionMap = LinkedHashMap<String, Session>()   // groupId → Session (참여 순서 유지)
     private val subscribedRosters = mutableSetOf<String>()      // conference 구독 중인 groupId (멱등 가드)
+    private var gmsSubscribed = false                           // xcap-diff(GMS) 구독 여부 (멱등 가드)
     private val rosterMap = mutableMapOf<String, Map<String, String>>()  // groupId → 접속 인원(미조인 포함)
 
     private val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
@@ -322,6 +323,10 @@ class PttController(
         // 무관하게 rosterMap 을 갱신하고, 세션이 있으면 그 participants 도 함께 맞춘다.
         scope.launch {
             sip.incomingMessage.collect { im ->
+                if (im.contentType.contains("xcap-diff", ignoreCase = true)) {
+                    runCatching { onXcapDiff(im.body) }
+                    return@collect
+                }
                 if (!im.contentType.contains("conference-info", ignoreCase = true)) return@collect
                 val gid = bareId(im.fromUri)
                 runCatching { onConferenceInfo(gid, im.body) }
@@ -342,10 +347,11 @@ class PttController(
                 if (r is RegState.Registered) {
                     affiliateAll()
                     syncRosterSubs()   // 편성 채널 전체 로스터 구독 (미조인 채널 인원 표시)
+                    subscribeGms(true) // 편성 변경 push (관리자 변경 즉시 반영)
                     maybeRestoreChannels()
                 } else {
                     // 등록이 끊기면 서버측 구독도 사라진다 — 로컬 가드를 비워 재등록 시 다시 걸리게 한다.
-                    synchronized(lock) { subscribedRosters.clear(); rosterMap.clear() }
+                    synchronized(lock) { subscribedRosters.clear(); rosterMap.clear(); gmsSubscribed = false }
                     publishRosters()
                 }
             }
@@ -473,6 +479,39 @@ class PttController(
                 Log.w(TAG, "conference 구독($on) 실패 $groupId: ${it.message}")
                 synchronized(lock) { if (on) subscribedRosters.remove(groupId) }
             }
+    }
+
+    /** GMS 문서 변경 구독 (RFC 5875 xcap-diff) — 서버 PSI 하나에 대한 단일 구독.
+     *  관리자가 편성(멤버·우선순위·채널 추가/삭제)을 바꾸면 서버가 밀어준다. */
+    private fun subscribeGms(on: Boolean) {
+        synchronized(lock) {
+            if (on == gmsSubscribed) return
+            gmsSubscribed = on
+        }
+        runCatching { sip.subscribeXcapDiff(gmsPsiAor(), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
+            .onFailure {
+                Log.w(TAG, "gms 구독($on) 실패: ${it.message}")
+                synchronized(lock) { if (on) gmsSubscribed = false }
+            }
+    }
+
+    private fun gmsPsiAor() = "sip:gms_psi@${sipConfig.domain}"
+
+    /** xcap-diff NOTIFY — "어느 문서가 바뀌었다"는 신호만 온다. 실제 내용은 XCAP HTTP 로 재조회.
+     *
+     *  본문 예: `<document new-etag=".." sel="org.openmobilealliance.groups/users/tel:{나}/tel:{그룹}"/>`
+     *  `loadGroups()` 는 편성 집합 자체의 변화(채널 추가/삭제)를 반영하고, 이어서 제휴·로스터 구독까지
+     *  다시 맞춘다. 바뀐 그룹은 문서까지 재조회한다(둘 다 ETag 캐시라 실제 변화 없으면 저렴). */
+    private fun onXcapDiff(xml: String) {
+        val changed = Regex("sel=\"([^\"]+)\"").findAll(xml)
+            .map { it.groupValues[1] }
+            .filter { it.contains("openmobilealliance.groups", ignoreCase = true) }
+            .mapNotNull { it.substringAfterLast("tel:").takeIf { g -> g.isNotBlank() } }
+            .toList()
+        Log.i(TAG, "xcap-diff NOTIFY — 변경 그룹 $changed")
+        _status.value = if (changed.isEmpty()) "편성 변경 통지" else "편성 변경: ${changed.joinToString()}"
+        loadGroups()
+        changed.forEach { loadGroupDetail(it) }
     }
 
     /** 제휴(편성) 채널 집합에 로스터 구독을 맞춘다 — 새로 편성된 채널은 구독하고, 빠진 채널은 해지.

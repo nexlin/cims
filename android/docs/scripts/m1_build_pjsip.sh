@@ -761,14 +761,17 @@ CIMS_IDLE_TX_EOF
   echo "  patched: idle zero-PCM TX suppressed for VAD-off streams"
 fi
 
-echo "=== [2-13] conference 이벤트 구독 패치 (RFC 4575 로스터 / RFC 6665) ==="
-# MCPTT 그룹콜 참가자 로스터를 정식 구독으로 받는다. 종전엔 CSP 가 통화 dialog 로 보내는
-# in-dialog NOTIFY 를 앱이 tsx 원문에서 훔쳐 읽고 스택은 usage 없음으로 500 을 응답했다
-# (RFC 6665 는 매칭 구독 없는 NOTIFY 에 481 을 요구 — 편법).
-#  ① pjsua_pres.c: "conference" 이벤트 패키지 등록(Allow-Events + Accept:
-#     application/conference-info+xml) + UAC 구독 생성/in-dialog 갱신/종료 +
-#     수신 NOTIFY 본문을 on_pager2 로 앱 전달(→ pjsua2 Account::onInstantMessage).
-#  ② pjsua_acc.c: 앱이 보낸 SUBSCRIBE 중 Event: conference 를 가로채 ①로 넘긴다.
+echo "=== [2-13] CIMS 이벤트 구독 패치 (conference RFC 4575 / xcap-diff RFC 5875, RFC 6665) ==="
+# 두 이벤트 패키지를 하나의 evsub 기계로 처리한다.
+#   - conference : MCPTT 그룹콜 참가자 로스터. 종전엔 CSP 가 통화 dialog 로 보내는
+#     in-dialog NOTIFY 를 앱이 tsx 원문에서 훔쳐 읽고 스택은 usage 없음으로 500 을 응답했다
+#     (RFC 6665 는 매칭 구독 없는 NOTIFY 에 481 을 요구 — 편법).
+#   - xcap-diff  : GMS/CMS 문서 변경 통지. 본문은 "어느 문서가 바뀌었고 새 ETag 는 무엇"뿐이라
+#     앱이 XCAP HTTP GET 으로 실제 문서를 가져온다(관리자 편성 변경 push).
+#  ① pjsua_pres.c: 두 패키지 등록(Allow-Events + 패키지별 Accept) + UAC 구독 생성/
+#     in-dialog 갱신/종료 + 수신 NOTIFY 본문을 on_pager2 로 앱 전달
+#     (→ pjsua2 Account::onInstantMessage). 구독 식별 = (자원 URI, 이벤트 패키지).
+#  ② pjsua_acc.c: 앱이 보낸 SUBSCRIBE 의 Event 가 둘 중 하나면 가로채 ①로 넘긴다.
 #     앱 API(Account::sendRequest)가 그대로여서 **SWIG 재생성/변경이 없다**.
 # 구독 생성·갱신(같은 Call-ID/양측 tag/CSeq+1)·Subscription-State 해석·매칭 없는
 # NOTIFY 의 481 응답을 스택이 담당 = 규칙을 앱에서 재구현하지 않는다. 멱등.
@@ -777,19 +780,22 @@ if grep -q "pjsua_cims_conf_subscribe" pjsip/src/pjsua-lib/pjsua_acc.c; then
 else
   git apply <<'CIMS_CONF_EVSUB_EOF'
 diff --git a/pjsip/src/pjsua-lib/pjsua_acc.c b/pjsip/src/pjsua-lib/pjsua_acc.c
-index 526cb39..816cf3c 100644
+index 526cb39..8420634 100644
 --- a/pjsip/src/pjsua-lib/pjsua_acc.c
 +++ b/pjsip/src/pjsua-lib/pjsua_acc.c
-@@ -1546,6 +1546,58 @@ static void on_send_request(void *request_data, pjsip_event *event)
+@@ -1546,6 +1546,70 @@ static void on_send_request(void *request_data, pjsip_event *event)
          (pjsua_var.ua_cfg.cb.on_acc_send_request)(data->acc_id, data->token, event);
  }
  
-+/* CIMS: conference 이벤트 구독 (구현 = pjsua_pres.c) */
++/* CIMS: 이벤트 구독 (구현 = pjsua_pres.c) */
 +pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
 +                                      const pj_str_t *target,
++                                      const pj_str_t *ev,
 +                                      pj_uint32_t expires);
 +
-+/* CIMS: 앱이 보낸 SUBSCRIBE 가 conference 이벤트면 evsub 기반 구독으로 넘긴다.
++/* CIMS: 앱이 보낸 SUBSCRIBE 가 우리가 다루는 이벤트면 evsub 기반 구독으로 넘긴다.
++ *   conference (RFC 4575) — 그룹 참가자 로스터
++ *   xcap-diff  (RFC 5875) — GMS/CMS 문서 변경 통지
 + *
 + * RFC 6665 구독은 단발 요청이 아니다 — 갱신이 in-dialog(같은 Call-ID·양측 tag·
 + * CSeq+1)여야 하고, 종료·만료·Subscription-State 해석·매칭 없는 NOTIFY 의 481
@@ -805,8 +811,10 @@ index 526cb39..816cf3c 100644
 +                                          const pjsua_msg_data *msg_data,
 +                                          pj_status_t *p_status)
 +{
++    static const pj_str_t EV_CONF = { "conference", 10 };
++    static const pj_str_t EV_XCAP = { "xcap-diff", 9 };
 +    const pjsip_hdr *h;
-+    pj_bool_t is_conf = PJ_FALSE;
++    const pj_str_t *ev = NULL;
 +    pj_uint32_t expires = PJSIP_EXPIRES_NOT_SPECIFIED;
 +
 +    if (pj_stricmp2(method, "SUBSCRIBE") != 0 || !msg_data)
@@ -818,10 +826,17 @@ index 526cb39..816cf3c 100644
 +                                    (const pjsip_generic_string_hdr*)h;
 +
 +        if (pj_stricmp2(&h->name, "Event") == 0) {
-+            if (gh->hvalue.slen >= 10 &&
++            /* Event 헤더 값은 "conference" 처럼 파라미터 없이 오지만, 혹시 붙더라도
++             * 패키지 이름 접두만 비교한다(id 파라미터는 붙이지 않는 규약).
++             */
++            if (gh->hvalue.slen >= EV_CONF.slen &&
 +                pj_strnicmp2(&gh->hvalue, "conference", 10) == 0)
 +            {
-+                is_conf = PJ_TRUE;
++                ev = &EV_CONF;
++            } else if (gh->hvalue.slen >= EV_XCAP.slen &&
++                       pj_strnicmp2(&gh->hvalue, "xcap-diff", 9) == 0)
++            {
++                ev = &EV_XCAP;
 +            }
 +        } else if (pj_stricmp2(&h->name, "Expires") == 0) {
 +            expires = (pj_uint32_t) pj_strtoul(&gh->hvalue);
@@ -829,17 +844,17 @@ index 526cb39..816cf3c 100644
 +        h = h->next;
 +    }
 +
-+    if (!is_conf)
++    if (!ev)
 +        return PJ_FALSE;
 +
-+    *p_status = pjsua_cims_conf_subscribe(acc_id, dest_uri, expires);
++    *p_status = pjsua_cims_conf_subscribe(acc_id, dest_uri, ev, expires);
 +    return PJ_TRUE;
 +}
 +
  PJ_DEF(pj_status_t) pjsua_acc_send_request(pjsua_acc_id acc_id,
                                             const pj_str_t *dest_uri,
                                             const pj_str_t *method,
-@@ -1566,6 +1618,10 @@ PJ_DEF(pj_status_t) pjsua_acc_send_request(pjsua_acc_id acc_id,
+@@ -1566,6 +1630,10 @@ PJ_DEF(pj_status_t) pjsua_acc_send_request(pjsua_acc_id acc_id,
      PJ_ASSERT_RETURN(method, PJ_EINVAL);
      PJ_UNUSED_ARG(options);
  
@@ -851,10 +866,10 @@ index 526cb39..816cf3c 100644
                            acc_id, (int)method->slen, method->ptr));
      pj_log_push_indent();
 diff --git a/pjsip/src/pjsua-lib/pjsua_pres.c b/pjsip/src/pjsua-lib/pjsua_pres.c
-index 2f3b8b7..ffb8889 100644
+index 2f3b8b7..4c168a7 100644
 --- a/pjsip/src/pjsua-lib/pjsua_pres.c
 +++ b/pjsip/src/pjsua-lib/pjsua_pres.c
-@@ -2636,6 +2636,430 @@ static pj_status_t enable_unsolicited_mwi(void)
+@@ -2636,6 +2636,459 @@ static pj_status_t enable_unsolicited_mwi(void)
  }
  
  
@@ -872,15 +887,16 @@ index 2f3b8b7..ffb8889 100644
 + * (contentType=application/conference-info+xml, fromUri=그룹 AoR=conference focus).
 + */
 +
-+/* 동시 구독 상한 = 단말이 동시에 편성/참여할 수 있는 채널 수 */
-+#define CIMS_CONF_MAX_SUB       16
++/* 동시 구독 상한 = 편성/참여 채널 수(conference) + 서버 PSI 구독(xcap-diff) 여유 */
++#define CIMS_CONF_MAX_SUB       24
 +
 +typedef struct cims_conf_sub
 +{
 +    pj_bool_t            used;
 +    pjsua_acc_id         acc_id;
-+    pj_pool_t           *pool;      /**< target 문자열 보관용            */
-+    pj_str_t             target;    /**< 구독 자원 = 그룹 AoR            */
++    pj_pool_t           *pool;      /**< target/ev 문자열 보관용         */
++    pj_str_t             target;    /**< 구독 자원 (그룹 AoR / 서버 PSI) */
++    pj_str_t             ev;        /**< 이벤트 패키지 이름              */
 +    pjsip_dialog        *dlg;
 +    pjsip_evsub         *sub;
 +} cims_conf_sub;
@@ -907,15 +923,21 @@ index 2f3b8b7..ffb8889 100644
 +
 +static const pj_str_t STR_CONF_EVENT = { "conference", 10 };
 +static const pj_str_t STR_CONF_INFO  = { "application/conference-info+xml", 31 };
++static const pj_str_t STR_XCAP_EVENT = { "xcap-diff", 9 };
++static const pj_str_t STR_XCAP_DIFF  = { "application/xcap-diff+xml", 25 };
 +
 +
-+static cims_conf_sub *cims_conf_find(const pj_str_t *target)
++/* 구독 식별 = (자원, 이벤트 패키지). 같은 자원을 서로 다른 패키지로 구독할 수 있으므로
++ * 둘 다 비교해야 한다(예: 서버 PSI 를 xcap-diff 로, 그룹 AoR 을 conference 로).
++ */
++static cims_conf_sub *cims_conf_find(const pj_str_t *target, const pj_str_t *ev)
 +{
 +    unsigned i;
 +
 +    for (i=0; i<PJ_ARRAY_SIZE(cims_conf_subs); ++i) {
 +        if (cims_conf_subs[i].used &&
-+            pj_stricmp(&cims_conf_subs[i].target, target) == 0)
++            pj_stricmp(&cims_conf_subs[i].target, target) == 0 &&
++            pj_stricmp(&cims_conf_subs[i].ev, ev) == 0)
 +        {
 +            return &cims_conf_subs[i];
 +        }
@@ -948,7 +970,8 @@ index 2f3b8b7..ffb8889 100644
 +        return;
 +
 +    if (pjsip_evsub_get_state(sub) == PJSIP_EVSUB_STATE_TERMINATED) {
-+        PJ_LOG(4,(THIS_FILE, "CIMS conference subscription to %.*s terminated",
++        PJ_LOG(4,(THIS_FILE, "CIMS %.*s subscription to %.*s terminated",
++                  (int)cs->ev.slen, cs->ev.ptr,
 +                  (int)cs->target.slen, cs->target.ptr));
 +        pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, NULL);
 +        cims_conf_release(cs);
@@ -1034,7 +1057,8 @@ index 2f3b8b7..ffb8889 100644
 +    text.ptr = (char*) body->data;
 +    text.slen = (pj_ssize_t) body->len;
 +
-+    PJ_LOG(5,(THIS_FILE, "CIMS conference NOTIFY from %.*s (%d bytes)",
++    PJ_LOG(4,(THIS_FILE, "CIMS %.*s NOTIFY from %.*s (%d bytes)",
++              (int)cs->ev.slen, cs->ev.ptr,
 +              (int)from.slen, from.ptr, (int)text.slen));
 +
 +    (*pjsua_var.ua_cfg.cb.on_pager2)(PJSUA_INVALID_ID, &from, &to, &contact,
@@ -1055,13 +1079,15 @@ index 2f3b8b7..ffb8889 100644
 +
 +
 +/*
-+ * conference 구독 시작/갱신/종료.
++ * CIMS 이벤트 구독 시작/갱신/종료 (conference / xcap-diff 공용).
 + *  expires > 0                        : 신규 생성 또는 in-dialog 갱신
 + *  expires == 0                       : 구독 해지 (SUBSCRIBE Expires: 0)
 + *  expires == PJSIP_EXPIRES_NOT_SPECIFIED : 패키지 기본값 사용
++ *  ev == NULL                         : conference (하위호환 기본값)
 + */
 +pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
 +                                      const pj_str_t *target,
++                                      const pj_str_t *ev,
 +                                      pj_uint32_t expires)
 +{
 +    pjsua_acc *acc;
@@ -1082,10 +1108,13 @@ index 2f3b8b7..ffb8889 100644
 +
 +    acc = &pjsua_var.acc[acc_id];
 +
++    if (!ev || !ev->slen)
++        ev = &STR_CONF_EVENT;
++
 +    /* 기존 구독이 있으면 갱신 또는 해지 — 둘 다 in-dialog 요청이어야 하며,
 +     * 앱의 일반 sendRequest 로는 만들 수 없는 부분이다.
 +     */
-+    cs = cims_conf_find(target);
++    cs = cims_conf_find(target, ev);
 +    if (cs) {
 +        pjsip_dlg_inc_lock(cs->dlg);
 +        status = pjsip_evsub_initiate(cs->sub, NULL, expires, &tdata);
@@ -1096,10 +1125,11 @@ index 2f3b8b7..ffb8889 100644
 +        pjsip_dlg_dec_lock(cs->dlg);
 +
 +        if (status != PJ_SUCCESS) {
-+            pjsua_perror(THIS_FILE, "Unable to update conference subscription",
++            pjsua_perror(THIS_FILE, "Unable to update CIMS subscription",
 +                         status);
 +        } else {
-+            PJ_LOG(4,(THIS_FILE, "CIMS conference subscription to %.*s %s",
++            PJ_LOG(4,(THIS_FILE, "CIMS %.*s subscription to %.*s %s",
++                      (int)ev->slen, ev->ptr,
 +                      (int)target->slen, target->ptr,
 +                      (expires==0 ? "terminating" : "refreshed")));
 +        }
@@ -1115,13 +1145,14 @@ index 2f3b8b7..ffb8889 100644
 +            break;
 +    }
 +    if (i == PJ_ARRAY_SIZE(cims_conf_subs)) {
-+        PJ_LOG(3,(THIS_FILE, "Too many conference subscriptions (max %d)",
++        PJ_LOG(3,(THIS_FILE, "Too many CIMS subscriptions (max %d)",
 +                  CIMS_CONF_MAX_SUB));
 +        return PJ_ETOOMANY;
 +    }
 +    cs = &cims_conf_subs[i];
 +
-+    PJ_LOG(4,(THIS_FILE, "Starting CIMS conference subscription to %.*s..",
++    PJ_LOG(4,(THIS_FILE, "Starting CIMS %.*s subscription to %.*s..",
++              (int)ev->slen, ev->ptr,
 +              (int)target->slen, target->ptr));
 +    pj_log_push_indent();
 +
@@ -1168,10 +1199,10 @@ index 2f3b8b7..ffb8889 100644
 +    /* Event 헤더에 id 파라미터를 붙이지 않는다 — 서버 NOTIFY 도 "Event: conference"
 +     * 단독이므로 id 없는 매칭(PJSIP_EVSUB_NO_EVENT_ID)이어야 짝이 맞는다.
 +     */
-+    status = pjsip_evsub_create_uac(dlg, &cims_conf_cb, &STR_CONF_EVENT,
++    status = pjsip_evsub_create_uac(dlg, &cims_conf_cb, ev,
 +                                    PJSIP_EVSUB_NO_EVENT_ID, &sub);
 +    if (status != PJ_SUCCESS) {
-+        pjsua_perror(THIS_FILE, "Error creating conference subscription",
++        pjsua_perror(THIS_FILE, "Error creating CIMS subscription",
 +                     status);
 +        pjsip_dlg_dec_lock(dlg);
 +        pjsip_dlg_terminate(dlg);
@@ -1196,12 +1227,13 @@ index 2f3b8b7..ffb8889 100644
 +    cs->dlg    = dlg;
 +    cs->sub    = sub;
 +    pj_strdup_with_null(cs->pool, &cs->target, target);
++    pj_strdup_with_null(cs->pool, &cs->ev, ev);
 +
 +    pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, cs);
 +
 +    status = pjsip_evsub_initiate(sub, NULL, expires, &tdata);
 +    if (status != PJ_SUCCESS) {
-+        pjsua_perror(THIS_FILE, "Unable to create conference SUBSCRIBE",
++        pjsua_perror(THIS_FILE, "Unable to create CIMS SUBSCRIBE",
 +                     status);
 +        pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, NULL);
 +        pjsip_dlg_dec_lock(dlg);
@@ -1214,7 +1246,7 @@ index 2f3b8b7..ffb8889 100644
 +
 +    status = pjsip_evsub_send_request(sub, tdata);
 +    if (status != PJ_SUCCESS) {
-+        pjsua_perror(THIS_FILE, "Unable to send conference SUBSCRIBE", status);
++        pjsua_perror(THIS_FILE, "Unable to send CIMS SUBSCRIBE", status);
 +        pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, NULL);
 +        pjsip_dlg_dec_lock(dlg);
 +        pjsip_evsub_terminate(sub, PJ_FALSE);
@@ -1248,9 +1280,12 @@ index 2f3b8b7..ffb8889 100644
 +}
 +
 +
-+/* conference 이벤트 패키지 등록 — Allow-Events: conference +
-+ * SUBSCRIBE 의 Accept: application/conference-info+xml 자동 부착.
++/* 이벤트 패키지 등록 — Allow-Events 에 conference·xcap-diff 를 싣고 SUBSCRIBE 에
++ * 패키지별 Accept 를 자동 부착한다(conference-info+xml / xcap-diff+xml).
 + * 패키지 미등록이면 pjsip_evsub_create_uac 가 PJSIP_SIMPLE_ENOPKG 로 실패한다.
++ *   - conference (RFC 4575) : 그룹 참가자 로스터
++ *   - xcap-diff  (RFC 5875) : GMS/CMS 문서 변경 통지(본문은 변경 사실+ETag 뿐이라
++ *                             앱이 XCAP HTTP GET 으로 실제 문서를 가져온다)
 + */
 +static pj_status_t cims_conf_init(void)
 +{
@@ -1264,7 +1299,7 @@ index 2f3b8b7..ffb8889 100644
 +
 +    status = pjsip_endpt_register_module(pjsua_var.endpt, &mod_cims_conf);
 +    if (status != PJ_SUCCESS) {
-+        pjsua_perror(THIS_FILE, "Unable to register conference module",
++        pjsua_perror(THIS_FILE, "Unable to register CIMS evsub module",
 +                     status);
 +        return status;
 +    }
@@ -1279,13 +1314,22 @@ index 2f3b8b7..ffb8889 100644
 +        return status;
 +    }
 +
++    /* xcap-diff 등록 실패는 치명적이지 않다 — conference(로스터)는 계속 쓴다. */
++    accept[0] = STR_XCAP_DIFF;
++    status = pjsip_evsub_register_pkg(&mod_cims_conf, &STR_XCAP_EVENT,
++                                      3600, PJ_ARRAY_SIZE(accept), accept);
++    if (status != PJ_SUCCESS) {
++        pjsua_perror(THIS_FILE, "Unable to register xcap-diff event package",
++                     status);
++    }
++
 +    return PJ_SUCCESS;
 +}
 +
  
  /***************************************************************************/
  
-@@ -2695,6 +3119,9 @@ pj_status_t pjsua_pres_init()
+@@ -2695,6 +3148,9 @@ pj_status_t pjsua_pres_init()
          reset_buddy(i);
      }
  
@@ -1295,7 +1339,7 @@ index 2f3b8b7..ffb8889 100644
      return status;
  }
  
-@@ -2736,6 +3163,9 @@ void pjsua_pres_shutdown(unsigned flags)
+@@ -2736,6 +3192,9 @@ void pjsua_pres_shutdown(unsigned flags)
      PJ_LOG(4,(THIS_FILE, "Shutting down presence.."));
      pj_log_push_indent();
  

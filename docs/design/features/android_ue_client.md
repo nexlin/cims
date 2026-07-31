@@ -253,6 +253,17 @@ name = "MCPT" (0x4D435054)                                     |
   - **구독 대상 = 참여 채널이 아니라 제휴(편성) 채널 전체.** 등록 완료·그룹 목록 적재·60s 제휴 루프에서 `syncRosterSubs()` 가 희망 제휴 집합과 구독 집합의 차이만 맞춘다(신규 구독 / 빠진 채널 `Expires: 0`). 따라서 **채널을 이탈해도 구독은 유지**되고, 참여하지 않은 채널의 접속 인원도 계속 보인다. 해지는 편성에서 빠지거나 등록이 끊길 때만.
   - **미조인 채널 로스터**는 세션이 없으므로 `PttController.rosterMap`(→ `channelRosters` StateFlow)에 담아 목록/상세 화면이 소비한다. 참여 중인 채널은 세션 `participants` 와 같은 값이다. ⚠️"본인은 항상 접속"은 **참여 중일 때만** 적용한다 — 미조인 채널에 자신을 넣으면 참여하지도 않은 채널에 내가 있는 것으로 보인다.
   - ⚠️**멱등 필수**: 등록·제휴·조인이 각자 구독을 트리거하므로 가드가 없으면 같은 그룹에 SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측). native 의 `cims_conf_find` 가 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에 등록되기 전 두 번째 호출이 들어오면 경합한다 → `subscribedRosters` 집합으로 앱에서 1회만 발행한다. 단말은 **200 OK** 로 응답하고 본문은 `Account.onInstantMessage` → `SipController.incomingMessage`(contentType=`application/conference-info+xml`, fromUri=그룹 AoR=focus) 로 올라와 그룹 키로 세션을 찾아 반영한다. 구독 생성·**in-dialog 갱신**·종료·매칭 없는 NOTIFY 의 481 응답은 native pjsip evsub 이 담당하므로(빌드 패치 [2-13]) 앱은 "언제 어느 그룹을 구독할지"만 정한다 — `Account::sendRequest` 를 그대로 쓰기 때문에 **SWIG 인터페이스 변경이 없다**. ⚠️구독은 단발 트랜잭션이 아니어서 결과가 `sendReqResults` 로 오지 않는다(확인 신호 = NOTIFY 도착).
+- **편성 변경 push = GMS 구독(RFC 5875 xcap-diff)**: 등록 완료 시 서버 PSI(`sip:gms_psi@<domain>`)로
+  `SUBSCRIBE (Event: xcap-diff)` 1건(`PttController.subscribeGms`, 멱등 가드 `gmsSubscribed`).
+  NOTIFY 본문은 **"어느 문서가 바뀌었고 새 ETag 는 무엇"뿐**이라(2단 구조) 앱은 `onXcapDiff` 에서
+  `sel` 의 마지막 `tel:` 세그먼트로 바뀐 그룹을 뽑아 **`loadGroups()` + `loadGroupDetail(그룹)`** 으로
+  실제 문서를 XCAP HTTP GET 한다(둘 다 ETag 캐시). `loadGroups()` 는 이어서 `affiliateAll()`·
+  `syncRosterSubs()` 까지 부르므로 **새로 편성된 채널이 제휴·로스터 구독까지 자동으로 따라온다**.
+  native 는 conference 와 **같은 evsub 기계**를 쓴다(빌드 패치 [2-13] 이 두 패키지를 함께 등록 —
+  구독 식별은 (자원 URI, 이벤트 패키지) 쌍).
+  ⚠️**지연은 즉시가 아니다** — CSP 의 통지원이 `SyncGroupsState()`(**60초 주기** 그룹 재적재의
+  멤버 해시 비교)라 편성 변경 반영까지 최대 60초 걸린다. CSC → CSP 즉시 경로(UDP `GROUP_CHANGED`
+  → `OnGroupConfigChanged`)가 따로 있으나 현재 도달하지 않는다(아래 미해결 참조).
 - **폴백(구 버전 서버·구독 미구현 단말 혼재용)**: CSP 가 구독 없는 leg 에 보내는 통화 dialog in-dialog NOTIFY 는 `CimsCall.onCallTsxState` 의 수신 원문에서 파싱한다(`SipController.conferenceInfo` SharedFlow). pjsip 은 evsub 미소유 NOTIFY 에 500 을 응답하지만 invite usage 의 tsx 이벤트로 원문이 전달된다. 본문이 항상 full 스냅샷이라 두 경로가 겹쳐도 결과가 같다.
 - **NAT 경로 개방** (요건 정본: [ue_nat_traversal.md §7.1](ue_nat_traversal.md#71-ue-구현-요건-ptt)): PTT 는 발언 중에만 상향이 흐르므로, 청취 전용 상태의 하향(floor 알림·오디오)은 단말이 각 소켓의 NAT 매핑을 열고 **유지**해야 성립한다. ①floor — 연결 직후 1회 + 주기 15s **Floor Ack(User ID 포함)** 송신(`FloorClient` 내장 keepalive, `connectRemote` 시 시작) → CMP 가 User ID 로 멤버를 식별해 floor 주소 latch(TAKEN/GRANT 수신 가능). ②오디오 — PJSIP RTP keepalive(RFC 6263, empty RTP 주기 5s): `m1_build_pjsip.sh` 가 생성하는 config_site.h 의 `PJMEDIA_STREAM_ENABLE_KA=1`(pjsip 기본값 0 — CIMS 빌드가 활성) → CMP 목적지 latch. UAC 발신 응답의 floor 목적지는 `onCallTsxState` 의 200 OK 원문에서 학습(onCallSdpCreated 는 로컬 SDP 생성 시에만 호출됨). floor UDP 송신은 전용 스레드(main 스레드 send 는 NetworkOnMainThreadException).
 - **멀티그룹 동시 참여**(TS 22.179 group scanning): 한 단말이 N개 그룹에 동시 참여한다. 그룹별로 독립 SIP 다이얼로그+floor 소켓+FloorClient 를 가지며(`PttController.Session`), UI 는 주채널 탭(주채널 전면 패널)과 전체채널 목록으로 나열한다. **주채널(primary)** 지정은 주채널 탭의 선택 시트·채널 상세의 버튼(`setPrimary` — 나머지 참여 그룹은 일반 참여, 별도 역할 없음), **듣기 정책**(주채널만 / 전체듣기)은 주채널 탭 컨트롤 행·설정 화면 토글로 그룹별 `setCallListen`(하향 오디오 mix on/off)을 적용한다. **PTT 발언은 주채널 세션만** 대상(`pttDown`/`pttUp`). 그룹별 나가기(채널 상세)·참여는 독립적. 발언 상태 패널은 주채널 기준으로 파생하되 비주채널 화자는 `[gNNN]` 태그를 붙인다. per-call 문맥 분리 필수: floor 목적지/conference 정보는 callId 로 구분, SDP 주입은 `CimsCall.pendingAppSdp`(전역이면 그룹 간 혼선).

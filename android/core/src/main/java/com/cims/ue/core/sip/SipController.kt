@@ -406,6 +406,21 @@ class SipController(private val config: SipAccountConfig) {
         headers = mapOf("Event" to "conference", "Expires" to "$expiresSec"),
     )
 
+    /** GMS/CMS 문서 변경 구독 (RFC 5875 xcap-diff) — 대상은 서버 PSI(`sip:gms_psi@domain`).
+     *  conference 와 같은 native evsub 경로를 탄다(빌드 패치가 두 패키지를 함께 등록).
+     *  NOTIFY 본문은 "어느 문서가 바뀌었고 새 ETag 는 무엇"뿐이라, 실제 내용은 앱이 XCAP
+     *  HTTP GET 으로 따로 가져와야 한다.
+     *
+     * @param expiresSec 0 이면 구독 해지.
+     */
+    fun subscribeXcapDiff(psiUri: String, expiresSec: Int = CONF_SUB_EXPIRES_SEC) = sendRequest(
+        method = "SUBSCRIBE",
+        targetUri = psiUri,
+        contentType = null,
+        body = null,
+        headers = mapOf("Event" to "xcap-diff", "Expires" to "$expiresSec"),
+    )
+
     /**
      * 키업 그룹 INVITE — multipart 본문(mcptt-info + resource-lists, ptt-client 가 규격대로 구성) +
      * SDP 에 `m=application` floor 라인 주입. 응답 SDP 의 floor 포트는 [floorRemote] 로 학습.
