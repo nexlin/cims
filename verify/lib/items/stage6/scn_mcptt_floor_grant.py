@@ -1,9 +1,9 @@
 """S6-MCPTT-FLOOR-GRANT — PTT 그룹콜 floor signaling 검증.
 
 S6-SCN-PTT-VOICE 가 5인 그룹 rotation 시나리오를 돌리며 CMP `PMcpttGroup` 가
-floor REQUEST/GRANT/RELEASE/IDLE 패킷을 처리한다 (RTCP APP, op-code
-REQUEST=1 / GRANT=2 / RELEASE=4 / IDLE=5). 본 항목은 그 직후 read-only 로
-다음 두 시그널을 본다.
+floor REQUEST/GRANT/RELEASE/IDLE 패킷을 처리한다 (RTCP APP "MCPT", TS 24.380
+subtype: Request=0 / Granted=1 / Taken=2 / Release=4 / Idle=5). 본 항목은 그 직후
+read-only 로 다음 두 시그널을 본다.
 
 1차) CMP `*.flow.jsonl` 의 proto="MCPTT" method="FLOOR_GRANT/FLOOR_TAKEN/
      FLOOR_IDLE" 라인 카운트.

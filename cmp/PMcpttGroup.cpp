@@ -84,11 +84,53 @@ void PMcpttGroup::setFloorPolicy(bool floorControl, int policy, int maxTalkers, 
         _talkerCapacity = 1;
     }
     // private call 은 큐잉 절차가 없다 — 점유 중 요청은 Deny(another client).
-    if (privateCall) _queueEnable = false;
+    //   비-private 로 되돌아오면 큐잉도 함께 복구된다(정책이 sticky 하지 않도록).
+    _queueEnable = !privateCall;
 
     LOG_INFO("PMcpttGroup", "[%s] floor policy: control=%s policy=%s capacity=%d%s",
              _groupId.c_str(), floorControl ? "on" : "off", _policyName(), _talkerCapacity,
              privateCall ? " (private call)" : "");
+
+    // 정책 변경(MODIFY)으로 정원이 줄면 초과 발언자를 회수한다 — 정원과 실제 발언자 수가
+    //   어긋난 채로 남으면 이후 판정(선점/승급)이 정책과 다르게 동작한다.
+    bool revoked = false;
+    while ((int)_talkers.size() > _talkerCapacity) {
+        Talker* weakest = _weakestTalker();
+        if (!weakest) break;
+        revoked = true;
+        const std::string owner = weakest->sessionId;
+        unsigned int ssrc = weakest->ssrc;
+        int prio = weakest->prio;
+        if (_floorControl) {   // floor 유지 중이면 규격대로 REVOKE 통지
+            char revBuf[256];
+            std::vector<FloorTlv> f{ FloorTlv(FF_REJECT_CAUSE, FloorU16(CAUSE_OTHER)),
+                                     FloorTlv(FF_GRANTED_PARTY, owner) };
+            int revLen = BuildFloorMessage(revBuf, sizeof(revBuf), FLOOR_REVOKE, ssrc, f);
+            if (revLen > 0) sendToMember(owner, revBuf, revLen);
+        }
+        char ex[96];
+        snprintf(ex, sizeof(ex), "\"reason\":\"policy_change\",\"cause\":%d", CAUSE_OTHER);
+        _logFloorLocal("REVOKE", owner, ssrc, prio, ex);
+        LOG_INFO("PMcpttGroup", "[%s] Floor revoked by policy change: %s (capacity=%d)",
+                 _groupId.c_str(), owner.c_str(), _talkerCapacity);
+        _dropTalker(owner);
+    }
+    if (!floorControl) {
+        // floor 중재를 끄면 발언 개념이 사라진다 — 대기열도 비우고, 멤버마다 상향 스트림
+        //   슬롯을 부여한다(그러지 않으면 전원이 슬롯 0 을 공유해 수신자에게 SSRC 가 겹친다).
+        _floorQueue.clear();
+        _streamSlotNext = 0;
+        for (auto& [sid, peer] : _members)
+            peer.streamSlot = (_streamSlotNext++) % MCPTT_MAX_TALKER_SLOTS;
+        if ((int)_members.size() > MCPTT_MAX_TALKER_SLOTS)
+            LOG_WARN("PMcpttGroup", "[%s] floor_control=off with %lu members — 슬롯 %d개를 넘어 "
+                     "상향 스트림 SSRC 가 겹친다(1:1 private call 용도)",
+                     _groupId.c_str(), _members.size(), MCPTT_MAX_TALKER_SLOTS);
+    }
+    if (revoked) {
+        if (_talkers.empty()) broadcastFloorStatus(FLOOR_IDLE, 0, "");
+        _notifyTalkers();
+    }
 
     // 정원이 늘면 녹취 슬롯 트랙을 미리 등록(세그먼트 시작 시 파일이 열린다).
     if (_recordEnable && _recorder) _recEnsureTracks(_talkerCapacity > 0 ? _talkerCapacity : 1);
@@ -119,6 +161,11 @@ bool PMcpttGroup::_isTalker(const std::string& sessionId) const {
 void PMcpttGroup::getFloorHolders(std::vector<std::string>& out) {
     PAutoLock lock(_mutex);
     for (const auto& t : _talkers) out.push_back(t.sessionId);
+}
+
+std::string PMcpttGroup::getFloorPolicyName() {
+    PAutoLock lock(_mutex);
+    return _policyName();
 }
 
 PMcpttGroup::~PMcpttGroup() {
@@ -344,9 +391,9 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
     if (_floorCrypto.enabled()) {
         int plainLen = 0;
         if (!_floorCrypto.unprotect(buf, len, plain, sizeof(plain), plainLen)) {
-            ++_floorCryptoDrop;
+            long total = ++_floorCryptoDrop;   // atomic — 수신 스레드와 STATS 조회가 경합
             LOG_WARN("PMcpttGroup", "[%s] floor SRTCP reject from %s:%d (len=%d total=%ld)",
-                     _groupId.c_str(), ip.c_str(), port, len, _floorCryptoDrop);
+                     _groupId.c_str(), ip.c_str(), port, len, total);
             return;
         }
         buf = plain;
@@ -786,13 +833,16 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
     }
 }
 
-// 현재 발언자 중 서열 최약자 — 선점 비교 대상.
+// 현재 발언자 중 서열 최약자 — 선점·정원 축소 시 회수 대상.
 PMcpttGroup::Talker* PMcpttGroup::_weakestTalker() {
     Talker* weakest = nullptr;
     for (auto& t : _talkers) {
         if (!weakest) { weakest = &t; continue; }
-        // 최약자 = 상대를 선점하지 못하는 쪽. 동률이면 먼저 grant 된 쪽을 유지한다.
+        // 최약자 = 상대를 선점하지 못하는 쪽. 서열이 같으면 **나중에 grant 된 화자**를
+        //   최약자로 본다 — 정원이 줄 때 먼저 말하던 화자의 발언이 끊기지 않도록.
         if (_preempts(weakest->sessionId, weakest->prio, t.sessionId, t.prio)) weakest = &t;
+        else if (!_preempts(t.sessionId, t.prio, weakest->sessionId, weakest->prio) &&
+                 t.grantUsec > weakest->grantUsec) weakest = &t;
     }
     return weakest;
 }
@@ -1061,7 +1111,10 @@ std::string PMcpttGroup::_popBestQueued(unsigned int& outSsrc, int& outPrio) {
 void PMcpttGroup::_advanceFloorOrIdle() {
     // 해제된 화자를 걷어낸 상태에서 호출. 여유 정원만큼 대기자를 승급시키고,
     //   화자가 남으면 잔여 화자 TAKEN 갱신, 아무도 없으면 IDLE 브로드캐스트.
-    while ((int)_talkers.size() < _talkerCapacity && !_floorQueue.empty()) {
+    // dual 의 2번째 자리는 **override 전용**이라 큐 승급으로는 채우지 않는다 —
+    //   대기자는 발언자가 모두 빠졌을 때만 올라간다(§7.7). multi 는 정원까지 승급.
+    int promoteCap = (_floorPolicy == FLOOR_POLICY_DUAL) ? 1 : _talkerCapacity;
+    while ((int)_talkers.size() < promoteCap && !_floorQueue.empty()) {
         unsigned int qssrc = 0; int qprio = 0;
         std::string next = _popBestQueued(qssrc, qprio);
         if (next.empty()) break;

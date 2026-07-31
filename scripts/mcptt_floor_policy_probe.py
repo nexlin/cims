@@ -8,6 +8,9 @@ CSP 없이 CMP 제어평면(UDP JSON envelope v2)과 floor RTCP(RTCP APP "MCPT")
 사용:
   python3 scripts/mcptt_floor_policy_probe.py --cmp 192.168.0.x [--port 9000] [--base-port 51200]
 
+`--base-port` 부터 약 110 포트를 멤버 leg 소켓으로 bind 한다 — CMP 자신의 RTP/floor 풀
+(cmp.json `RtpStartPort`/`PttRtpStartPort`/`PttFloorStartPort` 이후 대역)과 겹치지 않는 값을 준다.
+
 주의: CMP 는 요청 소스에서 이벤트 전송 대상(CSP endpoint)을 학습한다. 프로브 실행 중에는
 FLOOR_TALKERS 등 이벤트가 이 스크립트로 오고, 실제 CSP 는 다음 HEARTBEAT(3s)에 다시 학습된다.
 """
@@ -527,6 +530,7 @@ def main():
     bad = [
         ("floor_policy 오타", dict(floor_policy="dual2")),
         ("multi + max_talkers 누락", dict(floor_policy="multi")),
+        ("max_talkers 상한 초과", dict(floor_policy="multi", max_talkers=9)),
         ("floor_control 오타", dict(floor_control="none")),
         ("crypto 키 길이", dict(floor_crypto={"key": base64.b64encode(b"short").decode(),
                                               "salt": base64.b64encode(b"x" * 14).decode()})),
@@ -539,6 +543,77 @@ def main():
         r = add_group(gid, members="A:5:participant", **kw)
         check(code(r) == "BAD_REQUEST", f"{label} → {status(r)} {code(r)}")
         remove(gid)
+
+    # ── 9. 정책 변경(MODIFY) 일관성 ──────────────────────────────────────
+    print("\n[9] MODIFY 정책 변경 — dual 큐는 override 자리 미충원, 정원 축소 시 초과 화자 회수")
+    g9 = f"{a.prefix}_modify"
+    A = Member("A", bp + 80, 0x9001)
+    B = Member("B", bp + 84, 0x9002)
+    C = Member("C", bp + 88, 0x9003)
+    r = add_group(g9, members="A:5:participant,B:5:participant,C:5:participant",
+                  floor_policy="multi", max_talkers=3)
+    fp = payload(r).get("floor_port")
+    for m in (A, B, C):
+        join(g9, m)
+        m.drain_floor()
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g9]
+    check(grp and grp[0].get("floor_policy") == "multi", f"STATS floor_policy 노출 ({grp and grp[0].get('floor_policy')})")
+
+    for m in (A, B, C):
+        m.send_floor(a.cmp, fp, req_pkt(m.sid, m.ssrc))
+        time.sleep(0.2)
+    for m in (A, B, C):
+        m.drain_floor()
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g9]
+    check(sorted(grp[0].get("floor_holders") or []) == ["A", "B", "C"], "3명 동시 발언 준비")
+
+    # multi(3) → single 로 축소: 초과 화자 2명은 REVOKE 되어야 한다
+    r = ctl.send("PTT_GROUP_MODIFY", group_id=g9, sesid=f"probe_{g9}",
+                 members="A:5:participant,B:5:participant,C:5:participant", floor_policy="single")
+    check(status(r) == "OK", f"MODIFY single ({status(r)} {code(r)})")
+    time.sleep(0.4)
+    revoked = sum(1 for m in (A, B, C) if "REVOKE" in ops(m.drain_floor()))
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g9]
+    holders = grp[0].get("floor_holders") or [] if grp else []
+    check(holders == ["A"], f"정원 축소 후 최초 화자 A 만 유지 ({holders})")
+    check(revoked == 2, f"초과 화자 2명 REVOKE 수신 (실제 {revoked})")
+    check(grp and grp[0].get("floor_policy") == "single", "STATS 정책 갱신")
+    remove(g9)
+    A.close(); B.close(); C.close()
+
+    print("\n[10] dual — 큐 대기자는 override 자리를 채우지 않는다")
+    g10 = f"{a.prefix}_dualq"
+    A = Member("A", bp + 92, 0xA001)
+    B = Member("B", bp + 96, 0xA002)
+    C = Member("C", bp + 100, 0xA003)
+    r = add_group(g10, members="A:5:participant,B:5:participant,C:9:participant", floor_policy="dual")
+    fp = payload(r).get("floor_port")
+    for m in (A, B, C):
+        join(g10, m)
+        m.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))          # A 발언
+    time.sleep(0.25)
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc))          # B 동급 → 큐
+    time.sleep(0.25)
+    C.send_floor(a.cmp, fp, req_pkt("C", C.ssrc, emergency=True))   # C 긴급 → dual grant
+    time.sleep(0.35)
+    for m in (A, B, C):
+        m.drain_floor()
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g10]
+    check(sorted(grp[0].get("floor_holders") or []) == ["A", "C"], f"dual 2명 ({grp[0].get('floor_holders')})")
+    C.send_floor(a.cmp, fp, rel_pkt("C", C.ssrc))          # 긴급 화자 해제 → 자리 1개 여유
+    time.sleep(0.4)
+    gb = ops(B.drain_floor())
+    check("GRANT" not in gb, f"대기자 B 는 override 자리로 승급하지 않음 (B={gb})")
+    A.send_floor(a.cmp, fp, rel_pkt("A", A.ssrc))          # 마지막 화자 해제 → 승급
+    time.sleep(0.4)
+    check("GRANT" in ops(B.drain_floor()), "발언자가 모두 빠지면 대기자 승급")
+    remove(g10)
+    A.close(); B.close(); C.close()
 
     print(f"\n결과: {len(PASS)} passed, {len(FAIL)} failed")
     for f in FAIL:

@@ -186,7 +186,7 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
       "floor_crypto_drop": 0,
       "nat": [ { "key": "a84b4c76e66710", "leg": "b",
                  "learned_ip": "203.0.113.7", "learned_port": 41022 } ],
-      "groups": [ { "group_id": "grp-fire-01", "members": 5,
+      "groups": [ { "group_id": "grp-fire-01", "members": 5, "floor_policy": "dual",
                     "floor_holders": ["01011112222", "01033334444"] } ]
     }
   }
@@ -198,7 +198,7 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 | `rtp_src_drop` | 미협상 소스 드롭 누적 카운터 (no-NAT leg 의 선언 주소 불일치 패킷). 해제된 자원의 몫을 이월한 **단조 증가** 값 |
 | `floor_crypto_drop` | floor SRTCP 인증 실패·재전송 폐기 누적([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)). 해제된 그룹의 몫을 이월한 **단조 증가** 값 |
 | `nat` | NAT latch 완료 leg 목록 — `key`(session_id 또는 `group_id:member`), `leg`(`a`/`b`/멤버 sid), 학습된 실주소. 최대 20개 (전체 수는 `nat_total`) |
-| `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_holders`). `floor_holders` 는 현재 발언자 **배열**(동시 발언 시 복수, 발언자 없으면 생략). 최대 20개 (전체 수는 `groups_total`) |
+| `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_policy`/`floor_holders`). `floor_policy` 는 적용 중인 정책(`off`/`single`/`dual`/`multi`/`private`), `floor_holders` 는 현재 발언자 **배열**(동시 발언 시 복수, 발언자 없으면 생략). 최대 20개 (전체 수는 `groups_total`) |
 
 `nat`/`groups` 배열 상한은 응답 datagram 4KB 계약([§1.2](#12-전송)) 내 안전 상한이다.
 STATS 응답도 HEARTBEAT 와 동일하게 [`session_digest`](#51-heartbeat)를 함께 싣는다.
@@ -361,7 +361,7 @@ member 키 `(node, session_id)`.
 | `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자, private 은 초기 발언권 부여 대상 |
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
-| `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하면 `BAD_REQUEST` |
+| `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
 | `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
@@ -489,6 +489,12 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 슬롯마다 별도 SSRC·시퀀스를 쓴다. 슬롯 0 은 종전과 동일한 수신자별 고정 SSRC(단일 화자
 정책에서 화자가 바뀌어도 하나의 연속 스트림)라 기존 단말 동작은 그대로다.
 
+**정책 변경(`PTT_GROUP_MODIFY`)** — 정책은 언제든 바꿀 수 있고 CMP 가 현재 상태를 정책에
+맞춘다. 정원이 줄면(예: `multi`(3) → `single`, 또는 `floor_control:"off"` 전환) 초과 화자를
+서열 최약자부터 **Floor Revoke** 로 회수한다(동급이면 나중에 발언을 시작한 화자부터 —
+먼저 말하던 화자의 발언이 끊기지 않도록). `off` 로 바꾸면 대기열도 비우고 멤버마다 상향
+스트림 슬롯을 재배정한다. `dual`↔`multi`↔`single` 전환은 이후 요청 판정부터 새 정책을 따른다.
+
 **녹취** — 슬롯 0 은 `audio`/`video` 트랙(파일명·메타 종전과 동일), 동시 발언 슬롯은
 `audioN`/`videoN` 트랙에 기록하고 세그먼트 메타에 `speaker_id_audioN` 으로 화자를 남긴다.
 세그먼트는 발언자 집합이 비는 시점에 닫히며, 한 세그먼트 안에서 슬롯이 재사용될 상황이면
@@ -523,7 +529,9 @@ MCPTT E2E 보안에서 **미디어 RTP 는 CMP 가 복호하지 않는다**(UE�
   인증 태그. 인증은 (헤더+본문+E/index) 전체를 덮는다.
 - 재전송 방지: SSRC 별 index 최고값 + 64 슬롯 윈도우. 인증 실패·재전송 패킷은 폐기하고
   STATS `detail.floor_crypto_drop` 에 누적한다(위조 floor 시도 관측).
-- 키 갱신(rekey)은 같은 필드를 `PTT_GROUP_MODIFY` 로 다시 보내면 된다.
+- 키 갱신(rekey)은 같은 필드를 `PTT_GROUP_MODIFY` 로 다시 보내면 된다(새 키로 세션 키를
+  재파생하고 index·재전송 윈도우를 초기화). **보호 해제는 지원하지 않는다** — 한 번 보호된
+  그룹을 세션 도중 평문으로 되돌리는 downgrade 경로를 두지 않는다. 평문이 필요하면 새 그룹으로 수립한다.
 - `floor_control:"off"` 와 함께 오면 `BAD_REQUEST`(보호할 floor 가 없다). 키 길이·alg 오류도
   같은 코드로 거절한다.
 

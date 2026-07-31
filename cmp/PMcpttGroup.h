@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <ctime>
 #include <functional>
+#include <atomic>
 #include "pbase.h"
 #include "PFloorCrypto.h"
 
@@ -194,7 +195,7 @@ public:
                         const std::string& mki, std::string& err);
     bool isFloorCryptoEnabled() { return _floorCrypto.enabled(); }
     // SRTCP 인증 실패/재전송으로 폐기한 floor 패킷 누적 (STATS floor_crypto_drop)
-    long getFloorCryptoDrop() const { return _floorCryptoDrop; }
+    long getFloorCryptoDrop() const { return _floorCryptoDrop.load(); }
 
     // Called by PRtpMulticast when a floor control packet is received (m=application)
     void onFloorPacket(const std::string& ip, int port, char* buf, int len);
@@ -235,10 +236,11 @@ public:
     void setSessionMeta(const std::string& sesid, const std::string& service);
 
     int getMemberCount() const { return (int)_members.size(); }
-    // 대표 화자(가장 먼저 grant 된 발언자) — 단일 화자 정책에서는 유일 화자.
-    std::string getFloorHolder() const { return _talkers.empty() ? "" : _talkers.front().sessionId; }
-    // 현재 발언자 전원 (STATS detail.groups[].floor_holders — dual/multi-talker 관측)
+    // 현재 발언자 전원 (STATS detail.groups[].floor_holders — dual/multi-talker 관측).
+    //   대표 화자는 out[0](가장 먼저 grant 된 발언자).
     void getFloorHolders(std::vector<std::string>& out);
+    // 적용 중인 floor 정책 이름 ("off"/"single"/"dual"/"multi"/"private") — STATS 표기용
+    std::string getFloorPolicyName();
     // 그룹 생성 시각 — audit SESSION_LIST 의 grace(min_age) 판정 기준(now-created, 단조 증가).
     time_t getCreatedTime() const { return _createdTime; }
     // 미협상 소스/미등록 멤버 드롭 누적 (STATS rtp_src_drop)
@@ -415,7 +417,8 @@ private:
     std::string _service;    // 서비스 (mcptt) — 이벤트 hdr
     bool _rtcpLogEnable = false; // 일반 RTCP 로깅 활성화 플래그
     PFloorCrypto _floorCrypto;   // floor RTCP SRTCP 보호 (미설정 = 평문 floor)
-    long _floorCryptoDrop = 0;   // SRTCP 인증 실패/재전송 폐기 누적
+    // SRTCP 인증 실패/재전송 폐기 누적 — 판정이 _mutex 밖(복호가 파싱보다 앞)이라 atomic.
+    std::atomic<long> _floorCryptoDrop{0};
     long _srcDrop = 0;           // 미협상 소스/미등록 멤버 드롭 누적
     time_t _lastDropWarn = 0;    // 드롭 WARN rate-limit
     time_t _createdTime = time(nullptr);  // 그룹 생성 시각 (audit grace) — 구성 시점 고정

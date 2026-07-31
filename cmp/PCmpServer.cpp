@@ -567,6 +567,7 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         SimpleJson::JsonNode g;
         g.Set("group_id", gid);
         g.Set("members", group->getMemberCount());
+        g.Set("floor_policy", group->getFloorPolicyName());   // off/single/dual/multi/private
         // 발언자 — 동시 발언(dual/multi)까지 담도록 배열로 노출한다.
         std::vector<std::string> holders;
         group->getFloorHolders(holders);
@@ -989,6 +990,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             bad = "floor_policy must be single|dual|multi";
         else if (floorPolStr == "multi" && maxTalkers < 2)
             bad = "max_talkers (>=2) required for floor_policy=multi";
+        else if (maxTalkers > MCPTT_MAX_TALKER_SLOTS)
+            bad = "max_talkers exceeds slot limit (2..8)";   // 조용히 clamp 하지 않는다
         else if (!cryptoErr.empty())
             bad = cryptoErr.c_str();
         else if (haveCrypto && !floorControl)

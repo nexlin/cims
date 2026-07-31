@@ -74,6 +74,13 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 > auto-revoke (F1~F3), **dual floor / multi-talker(Floor Release Multi Talker 포함) /
 > private-call floor(§7) / floor SRTCP 보호(TS 33.180)** —
 > 정본 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7~§7.8.
+>
+> **단말 정합 대기**: dual/multi-talker 를 실호로 쓰려면 UE 가 Floor Indicator 의
+> Multi-talker(0x0080)/Dual floor(0x0200) 비트와 Floor Release Multi Talker(subtype 0x0F)를
+> 해석하고 **슬롯별 SSRC 로 오는 동시 스트림을 함께 재생**해야 한다. 현재 cspsim·Android UE 는
+> 단일 화자 전제라 서버측만 CMP 프로브로 검증돼 있다
+> ([../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
+> 마찬가지로 CSP 가 `floor_policy`/`group_type:"private"` 를 아직 발행하지 않는다(Call Control 파트).
 
 ### R3. 미디어 평면 / 전송
 

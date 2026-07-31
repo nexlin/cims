@@ -164,6 +164,9 @@ floor 는 **직교하는 두 축**이다(원칙 ② — 한 enum 에 섞지 않�
 Dev A 는 세션 생성 시 이 필드들을 실어 보내면 된다 — 이후 floor 절차(GRANT/TAKEN/REVOKE/
 Floor Release Multi Talker·동시 발언 슬롯·녹취 트랙 분리)는 CMP 자율이다.
 구현 위치: 코덱 `cmp/PFloorCodec.cpp`, 상태머신 `cmp/PMcpttGroup.cpp`.
+정책은 `PTT_GROUP_MODIFY` 로 언제든 바꿀 수 있고, 정원이 줄면 CMP 가 초과 화자를 Revoke 해
+상태를 정책에 맞춘다. 동시 발언의 **실호 검증은 단말 정합이 전제**다
+([mcptt_standard_conformance.md](mcptt_standard_conformance.md) §0-R R2 각주).
 
 ### B.2 Floor/미디어 보안 키 (E2E, TS 33.180)
 

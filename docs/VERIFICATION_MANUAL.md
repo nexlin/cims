@@ -431,6 +431,29 @@ sudo bash scripts/nat_netns_sim.sh teardown
 > S6 통합 검증이 cspsim 에 넘기는 시나리오별 인자(`-mode`/`-scenario`/`-count`/`-no_video` 등)는
 > 위 「2.6 S6 — 통합 검증」 표를 참조한다.
 
+### floor 정책 시험 (dual/multi-talker·private·ambient·floor SRTCP)
+
+동시 발언·private call·ambient 청취·floor 암호화는 **CSP 가 아직 정책 필드를 발행하지 않고
+cspsim/단말도 동시 발언을 다루지 않아** 실호 시나리오로는 구동되지 않는다. CMP 제어평면과
+floor RTCP 를 직접 구동하는 프로브로 검증한다 (정본 [api/cmp_media_api.md](api/cmp_media_api.md) §7.7~§7.8).
+
+```bash
+python3 scripts/mcptt_floor_policy_probe.py --cmp <CMP_IP> [--port 9000] [--base-port 51500]
+```
+
+검증 항목: single 회귀(GRANT/TAKEN/큐/IDLE) · dual(동급 큐, 긴급 override 동시 GRANT,
+대기자가 override 자리 미충원) · multi(정원 내 동시 GRANT, Floor Release Multi Talker,
+잔여 화자 TAKEN 갱신) · private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
+(floor_port 미광고 + 양방향 중계) · ambient(`recv_only`/`floor_suppress`) · floor SRTCP
+왕복과 평문 거부(`floor_crypto_drop`) · MODIFY 정책 변경(정원 축소 시 초과 화자 회수) ·
+계약 위반 필드의 `BAD_REQUEST`.
+
+주의: `--base-port` 부터 약 110 포트를 bind 하므로 CMP 자신의 RTP/floor 풀 대역과 겹치지
+않는 값을 준다. 프로브 실행 중에는 CMP 가 이벤트 대상(CSP endpoint)을 프로브로 학습하며,
+실제 CSP 는 다음 HEARTBEAT(3s)에 다시 학습된다. 프로브가 만든 그룹은 종료 시 스스로 해제한다.
+
+단일 화자 실호 회귀는 기본 PTT 그룹콜(위 「기본 호시험」)과 S6 `S6-MCPTT-FLOOR-GRANT` 로 커버된다.
+
 ---
 
 ## 부록. 자동화 / CI
@@ -468,6 +491,10 @@ echo $?    # 0=PASS, 1=FAIL
 
 ```bash
 python3 -m unittest tests.test_verify_lib    # 161 OK
+
+# CMP floor 코덱/암호 단위테스트 (외부 의존 없음 — 빌드 트리 불필요)
+g++ -std=c++17 -Icmp -Iext/pasf/include tests/cmp_floor_codec_test.cpp cmp/PFloorCodec.cpp -o /tmp/floorcodec && /tmp/floorcodec
+g++ -std=c++17 -Icmp tests/cmp_floor_crypto_test.cpp cmp/PFloorCrypto.cpp -lcrypto -o /tmp/floorcrypto && /tmp/floorcrypto
 ```
 
 ---
