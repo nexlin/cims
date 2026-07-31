@@ -48,26 +48,38 @@ MCPTT 세션은 `PTT_GROUP_ADD` 하나를 파라미터로 구분한다(§A.1) �
 자원 키(`(node,session_id)` node-전속 vs `(service,group_id)` service-공유)·격리 의미·PT 재작성
 모델이 근본적으로 달라, 병합 시 필수필드가 조건부로 갈리는 단일-이름/이중-스키마가 된다.
 
+> **명명 규약 (의식적 tradeoff)**: 이 통일로 `PTT_GROUP_*` 명령이 1:1 private call 도 다루게 되어
+> 이름의 "GROUP" 이 부정합해진다. 명령 rename 은 기존 구현·API 계약 비용이 크므로 채택하지
+> 않고, **`PTT_GROUP_*` 를 "PTT 미디어 세션(멤버 1..N)" 으로 재정의**하며 `group_type` 이 실제
+> 형태(private=2인 1:1 / prearranged·chat·broadcast=그룹)를 구분한다. 원칙 ②(일관성)와 최소
+> 변경 사이의 명시적 선택임을 남긴다 — 숨은 band-aid 가 아니다.
+
 ### A.1 Private call (1:1) — PTT_GROUP_ADD 파라미터화
 
-TS 24.379 §11. private call 도 별도 명령/RELAY 재사용 없이 `PTT_GROUP_ADD` 에
-`group_type:"private"` + floor 모드(`floor_policy`, §B.1)로 표현한다 — **floor 유무는 같은
-메시지의 파라미터 차이**다. 2인 그룹의 멤버 포트 모델이 1:1 미디어를 그대로 표현하므로
-VoLTE `RELAY_*` 를 끌어올 필요가 없다(§A.0-(2)).
+TS 24.379 §11 / TS 24.380 §7(private call floor control). private call 도 별도 명령/RELAY
+재사용 없이 `PTT_GROUP_ADD` 에 `group_type:"private"` + `floor_control`(§B.1) 로 표현한다 —
+**floor 유무는 같은 메시지의 파라미터 차이**다. 2인 그룹의 멤버 포트 모델이 1:1 미디어를 그대로
+표현하므로 VoLTE `RELAY_*` 를 끌어올 필요가 없다(§A.0-(2)).
 
-| 모드 | 파라미터 | 응답 |
-|---|---|---|
-| **with floor** (한 번에 한 명) | `group_type:"private"`, `floor_policy:"single"`(기본) | `member_ports`(2) + `floor_port` |
-| **without floor** (full-duplex) | `group_type:"private"`, `floor_policy:"none"` | `member_ports`(2), `floor_port` 생략 |
+> **규격 주의(원칙 ①)**: TS 24.380 은 **private call floor control(§7)을 group floor 와 별도
+> 절차로** 정의한다. 따라서 `group_type:"private"` 를 받은 CMP 는 group 의 동시성 정책
+> (`floor_policy`, §B.1)이 아니라 **private-call floor 상태머신**을 적용한다 — private 은 2인
+> 이므로 `floor_policy`(single/dual/multi)를 해석하지 않는다. private 의 floor 유무는 오직
+> `floor_control` 로 정한다.
+
+| 모드 | 파라미터 | 응답 | floor 절차 |
+|---|---|---|---|
+| **with floor** (한 번에 한 명) | `group_type:"private"`, `floor_control:"on"`(기본) | `member_ports`(2) + `floor_port` | TS 24.380 §7 private-call floor |
+| **without floor** (full-duplex) | `group_type:"private"`, `floor_control:"off"` | `member_ports`(2), `floor_port` 생략 | 없음(양방향) |
 
 **PTT_GROUP_ADD 확장 필드** (private):
 
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
 | `group_type` | O | 신규 값 **`private`** 추가 (기존 `prearranged`/`chat`/`broadcast`) |
-| `floor_policy` | - | `none`=floor 없음(full-duplex), `single`(기본)=한 명씩. 값 정의는 §B.1 |
+| `floor_control` | - | `on`(기본)=floor 제어 有(private-call floor), `off`=full-duplex. 값 정의는 §B.1 |
 | `members` | O | 정확히 2 (`caller_sid:prio:role`, `callee_sid:prio:role`) |
-| `initiator_id` | O | 발신자 sessionId (floor 초기 부여 후보; `floor_policy:"none"` 시 무의미) |
+| `initiator_id` | O | 발신자 sessionId (floor 초기 부여 후보; `floor_control:"off"` 시 무의미) |
 
 commencement mode(automatic/manual)와 direction 은 **SIP-only**(§A.4)이므로 CMP 필드가 없다.
 private call 은 affiliation 불요 — CSP 가 멤버십 게이트를 우회(상대 MCPTT ID 직접 지정).
@@ -78,13 +90,13 @@ private call 은 affiliation 불요 — CSP 가 멤버십 게이트를 우회(�
            "type": "request", "sesid": "01011112222::csp::...::1", "service": "mcptt" },
   "payload": {
     "group_id": "priv-01011112222-01033334444",
-    "group_type": "private", "floor_policy": "single",
+    "group_type": "private", "floor_control": "on",
     "initiator_id": "01011112222",
     "members": "01011112222:6:participant,01033334444:6:participant"
   }
 }
 ```
-응답은 기존 PTT_GROUP_ADD 와 동일(`ip`/`floor_port`/`member_ports`; `floor_policy:"none"` 시
+응답은 기존 PTT_GROUP_ADD 와 동일(`ip`/`floor_port`/`member_ports`; `floor_control:"off"` 시
 `floor_port` 생략).
 
 ### A.2 Pre-established session — 2단 수명
@@ -136,22 +148,21 @@ Dev B 는 이들 때문에 새 CMP 동작을 만들지 않는다.
 CSP 가 넘긴 정책 플래그를 받아 floor 를 구현하고, floor/미디어 상태를 이벤트로 통지한다.
 floor 트래픽 자체는 CMP↔UE in-band 라 아래 필드는 **세션 생성/변경 시의 정책 입력**이다.
 
-### B.1 Floor policy — dual / multi-talker (정책 필드)
+### B.1 Floor — 유무(`floor_control`)와 동시성(`floor_policy`)
 
-`PTT_GROUP_ADD`/`PTT_GROUP_MODIFY` 에 신규 필드 **`floor_policy`** 추가. 미지정=현행 단일화자.
+floor 는 **직교하는 두 축**으로 정한다(원칙 ② — 한 enum 에 섞지 않는다).
 
 | payload 필드 | 값 | 설명 |
 |---|---|---|
-| `floor_policy` | `single`(기본) / `none` / `dual` / `multi` | floor 동시 발언 정책 |
+| `floor_control` | `on`(기본) / `off` | floor 제어 **유무**. `off`=중재 없음(full-duplex), `floor_port` 미할당·floor RTCP 미처리 (private call without floor §A.1) |
+| `floor_policy` | `single`(기본) / `dual` / `multi` | `floor_control:"on"` 인 **그룹**의 동시 발언 **수**. 미지정=현행 단일화자 |
 | `max_talkers` | 정수(`multi` 시 필수, 2..K) | 동시 발언 상한 N (TS 24.380 Rel-16 multi-talker) |
 
-- **`none`**: floor 중재 없음(full-duplex) — private call without floor(§A.1) 전용. `floor_port`
-  미할당, floor RTCP 미처리.
-- **`single`**(기본): 현행 단일화자.
-
-- **`dual`** (TS 24.380 dual floor): 선점 시 기존 화자를 REVOKE 하지 않고 override 화자에게
-  **동시 GRANT**(최대 2명). 기존 tier 선점(`PTT_FLOOR_TIER`) 판정 위에 "revoke 대신 dual grant"
-  분기를 얹는다.
+- **`floor_policy` 는 그룹 전용.** `group_type:"private"` 는 이 값을 해석하지 않고 TS 24.380 §7
+  private-call floor 절차를 적용한다(§A.1) — private 은 2인이라 dual/multi 개념이 없다.
+- **`dual`** (TS 24.380 dual floor, override 전용): 선점 시 기존 화자를 REVOKE 하지 않고 override
+  화자에게 **동시 GRANT**(최대 2명). 기존 tier 선점(`PTT_FLOOR_TIER`) 판정 위에 "revoke 대신
+  dual grant" 분기를 얹는다.
 - **`multi`** (multi-talker): 동시 최대 `max_talkers` 명 GRANT. Floor Request/Granted/Taken 및
   **Floor Release Multi Talker** 메시지를 in-band 로 처리(코덱=`cmp/PFloorCodec.cpp`, 상태머신=
   `cmp/PMcpttGroup.cpp`). SSRC/포트 분배는 화자 수만큼 확장.
@@ -160,7 +171,7 @@ floor 트래픽 자체는 CMP↔UE in-band 라 아래 필드는 **세션 생성/
 {
   "payload": {
     "group_id": "grp-rail-01", "group_type": "prearranged",
-    "floor_policy": "multi", "max_talkers": 3,
+    "floor_control": "on", "floor_policy": "multi", "max_talkers": 3,
     "members": "...:6:participant,..."
   }
 }
@@ -220,7 +231,8 @@ multi-talker/dual 에서 현재 발언자 집합을 CSP·콘솔이 알아야 하
 | cmd | 신규 필드 | 소유 | 기능 |
 |---|---|---|---|
 | `PTT_GROUP_ADD`/`_MODIFY` | `group_type:"private"` | A | Private call (1:1) |
-| `PTT_GROUP_ADD`/`_MODIFY` | `floor_policy`(`none`/`single`/`dual`/`multi`), `max_talkers` | B | Private no-floor / Dual / Multi-talker |
+| `PTT_GROUP_ADD`/`_MODIFY` | `floor_control`(`on`/`off`) | B | Floor 유무 (private no-floor 포함) |
+| `PTT_GROUP_ADD`/`_MODIFY` | `floor_policy`(`single`/`dual`/`multi`), `max_talkers` | B | Dual / Multi-talker (그룹 전용) |
 | `PTT_GROUP_ADD` | `floor_crypto` | B | Floor E2E 보호 |
 | `PTT_GROUP_ADD` | `distribution`, `multicast_*` | B(예약) | MBMS/멀티캐스트 |
 | `PTT_GROUP_ADD`/`RELAY_ADD` | `pre_established` | A | Pre-established session |
@@ -236,7 +248,7 @@ payload 확장이라 신뢰성 모델에 영향 없음(신규 이벤트 `FLOOR_T
 
 | # | 결정 | 권고 |
 |---|---|---|
-| **D1** | ~~Private-without-floor 를 RELAY 재사용 vs PTT-private~~ | **확정**: private call 은 with/without 모두 `PTT_GROUP_ADD` + `floor_policy`(`single`/`none`)로 통일. VoLTE `RELAY_*` 는 서비스 경계로 분리 유지 (§A.0/§A.1) |
+| **D1** | ~~Private-without-floor 를 RELAY 재사용 vs PTT-private~~ | **확정**: private call 은 with/without 모두 `PTT_GROUP_ADD` + `group_type:"private"` + `floor_control`(`on`/`off`)로 통일. CMP 는 private-call floor 절차(TS 24.380 §7)를 적용(group `floor_policy` 미해석). VoLTE `RELAY_*` 는 서비스 경계로 분리 유지 (§A.0/§A.1) |
 | **D2** | Floor 보호 키 전달 = inline material vs key-id 참조(CMP 가 KMS fetch) | **inline `floor_crypto`** (CSP↔CMP 단일 계약 유지, KMS 접점 CSC 로 국한) |
 | **D3** | Pre-established sweeper grace 값 | 별도 `pre_established_grace_sec`(분 단위) — 운영 설정 |
 | **D4** | Ambient listening 멤버 플래그 필요 여부 | 요건 확정 후 `recv_only`/`floor_suppress` 추가 |
