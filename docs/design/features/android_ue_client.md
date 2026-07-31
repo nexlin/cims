@@ -210,11 +210,10 @@ Type)로 회신해야 한다. 서버(CMP)는 이미 양방향으로 이를 처�
 구현: `ptt-client/floor/{FloorControl,FloorCodec,FloorClient}.kt` — **모든 필드가 패딩 포함
 4옥텟 배수**(§8.1.3)라 미지 필드도 건너뛴다.
 
-> **서버 정합 대비 UE 과제**: CMP 는 Floor Taken 에 Permission to Request the Floor(5)·Message
-> Sequence Number(8)·SSRC(14)를, 동시 발언 시 List of Granted Users(15)+List of SSRCs(16)를
-> 싣고, 화자가 빠지면 Floor Release Multi Talker(0x0F)로 알린다. 헤더 SSRC 는 **서버 SSRC** 이고
-> 화자 SSRC 는 필드로 온다. UE 는 아직 이 필드/메시지를 해석하지 않는다(동시 발언 재생 포함) —
-> [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §1 이 서버측 정본이다.
+> **서버 정합에 따른 단말 과제는 [§5.4](#54-서버-규격-정합에-따른-단말-구현-요구사항-ts-24380)에
+> 항목(U1~U18)으로 정리했다** — Taken 의 신규 필드(Permission·MSN·SSRC), 동시 발언 리스트,
+> ack 요구 변종, Revoke 응답, SDP fmtp 협상, floor SRTCP 등. 서버측 정본은
+> [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §1 이다.
 
 ### 5.3 단말 Floor 상태머신
 
@@ -310,6 +309,67 @@ Type)로 회신해야 한다. 서버(CMP)는 이미 양방향으로 이를 처�
 - **서버측 멀티그룹 정합**(CSP `GroupCallService`): 활성 콜 추적 키가 `(userId, groupId)` — 사용자가 여러 그룹에 동시 참여하는 것을 전제한다. 다른 멤버가 같은 그룹을 개시(originate)해 fan-out INVITE 가 와도, 이미 **라이브 SIP 다이얼로그**(UA 다이얼로그 맵으로 판정 — 개시자 AcceptCall 레그·CSP StartCall 레그 모두 포함)를 가진 멤버는 재초대하지 않는다(과거엔 선참여 멤버를 stale 로 오판해 LEAVE+재INVITE → 단말이 재INVITE 미응답 → CMP 멤버십 이탈하는 좀비 상태였음). `ClearUserCall` 은 해당 사용자의 **모든** 그룹 콜을 정리.
 - **긴급(SOS)** ([mcptt_emergency_modes.md](mcptt_emergency_modes.md), TS 24.379): 개시=하드웨어 SOS 키(down 1회) 또는 화면 SOS 버튼(주채널 탭 컨트롤 행, 오발동 방지 **길게 누름**) → `PttController.startEmergency()` — 주채널 통화 중이면 **in-dialog re-INVITE**(mcptt-info `emergency-ind=true`, `SipController.reinviteWithBody`)로 상향, 미참여면 긴급 그룹콜 발신(`joinGroupCall(emergency=true)`). CSP 가 그룹 capability(`ppt_groups.emergency_call`) 미허용이면 normal 로 하향 수용(로그 `emergency not allowed → downgrade`). **해제는 화면 배너에서만**(개시자 전용 — 서버도 비개시자의 취소 re-INVITE 를 무시, `emergency-ind=false` 명시 송신). 긴급 세션의 PTT 발언은 Floor Request 에 **Floor Indicator emergency 비트**(TS 24.380 §8.2.3.13)를 실어 CMP tier 상향·선점. **수신측 표시** 경로 2개: ①미참여 멤버=fan-out INVITE 의 emergency-ind(`CallState.Incoming.emergency`) ②참여 중 멤버=CMP 가 긴급 발언자의 TAKEN 방송에 싣는 emergency 비트(latch — CSP 는 in-call 상향을 re-INVITE fan-out 하지 않음; 취소 역시 전파되지 않아 수신측 latch 는 세션 종료 시 해제). UI=붉은 점멸 배너(그룹/개시자, 개시자에게 해제 버튼)+그룹행 [긴급] 배지·적색 하이라이트+SOS 버튼 활성 점멸, 톤=`PttFeedback.emergencyTone()`(긴 경고음+삼중 진동).
 - **레거시 폴백**: 서버는 DTMF(PT=101)도 floor 트리거로 허용([ptt_flows.md](ptt_flows.md) C1). 1차 구현은 RTCP-APP(TS 24.380) 정공법 사용.
+
+### 5.4 서버 규격 정합에 따른 단말 구현 요구사항 (TS 24.380)
+
+서버(CMP)는 TS 24.380 V17.7.0 원문 대조로 floor 규격 정합을 마쳤다(정본
+[mcptt_standard_conformance.md](mcptt_standard_conformance.md) §1). 그 결과 **서버가 새로 보내는
+필드·메시지**와 **서버가 단말에 기대하는 동작**이 생겼다. 아래는 그 델타를 단말 관점에서
+모은 목록이다 — 상태는 `android/ptt-client/floor/*` 기준이며, 서버는 모두 반영·검증 완료다.
+
+#### (A) 상호운용 필수 — 없으면 발언이 끊기거나 상태가 어긋난다
+
+| # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
+|---|---|---|---|---|
+| U1 | **Ack 요구 변종 처리** — 수신 subtype 의 첫 비트(0x10)를 걷어내 기본 타입으로 처리하고 **Floor Ack**(Source(10)=0 floor participant + Message Type(12)=대상 subtype)로 회신 | §8.2.2, §8.2.13 | 수신 처리·회신 구현. 송신은 ack 비트 0 | ✗ `FloorCodec.decode` 가 `subtype and 0x1f` 로 읽어 0x11~0x1E 를 미지 타입으로 무시 |
+| U2 | **Floor Revoke 에 Floor Release 로 응답** — 회수 통지를 받으면 mic 차단 + **Release 송신**, T100(권장 재전송)으로 도달 보장. G-bit(dual)가 서 있으면 Release 에도 G-bit | §6.2.4.5.4 | Revoke 후 T3(기본 3초) 유예 동안 Release 를 기다리고, 그 사이 T8(1초)로 Revoke 재전송. 미응답이면 강제 회수 | ✗ mic 만 끊고 Release 미송신 → 유예 3초를 매번 소모하고 다음 화자 승급이 지연 |
+| U3 | **Granted Duration 준수** — Duration(1)=이번 발언 허용 시간(T2). 잔여시간 표시·임박 알림, 초과 전 자체 종료 | §6.3.4.4.2-1a, §6.3.4.4.4 | 초과 시 Revoke **cause #2**(Media burst too long) | △ `durationSec` 파싱만 하고 UI/자동 종료 없음 |
+| U4 | **발언 중 RTP 연속성** — 발언 중 상향이 T1(기본 4초) 이상 끊기면 서버가 발언 종료로 보고 회수 | §6.3.4.4.3 | T1 만료 시 **Revoke 없이** 회수 후 IDLE/0x0F | △ DTX·홀드 구간에서 무음 지속 시 회수될 수 있음 — 확인 필요 |
+| U5 | **Deny cause 구분 UI** — #1 다른 참가자 점유 / #3 1인 세션 / #5 수신 전용 / #7 큐 포화 | §8.2.6.2 | 상황별로 정확히 구분해 송신 | △ `FloorCause.REJECT` 매핑은 있으나 문구 확인 필요 |
+
+#### (B) Floor Taken 신규 필드 — 표시·정합에 직접 쓰인다
+
+| # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
+|---|---|---|---|---|
+| U6 | **Permission to Request the Floor(5)** — 0 이면 발언 요청 불가(broadcast 그룹·ambient 청취 leg) → PTT 버튼 비활성 | §8.2.3.7, §6.3.4.4.2-3d | broadcast=0, ambient(recv_only) leg 에는 0 변형을 따로 송신 | ✗ 상수만 있고 미사용 → 눌러도 Deny 만 받는 UX |
+| U7 | **Message Sequence Number(8)** — Taken/Idle 의 순서 식별. 역전·중복 수신 시 오래된 것 폐기 | §8.2.3.10 | Taken/Idle 마다 +1(65535 순환) | ✗ 상수만 있고 미사용 |
+| U8 | **SSRC 필드(14)** — 화자의 RTP SSRC. **헤더 SSRC 는 서버 SSRC** 이므로 화자 식별에 쓰면 안 된다 | §8.2.5, §8.2.9 | Granted/Taken 에 화자 SSRC 를 필드로 실음(단말이 보낸 SSRC 를 학습해 되싣는다) | ✗ 미사용 |
+| U9 | **Granted Party(4) = MCPTT ID(URI)** — 표시 시 URI 를 사용자 이름으로 매핑 | §8.2.3.8 | `PTT_JOIN.user_uri` 가 있으면 URI, 없으면 가입자 번호 | △ 문자열 그대로 표시(`sameUser` 가 URI/번호 혼용을 흡수) |
+
+#### (C) 동시 발언(dual/multi-talker) — 규격상 **믹싱은 단말 몫**
+
+TS 24.380 §6.2.4.3.4 NOTE: *"RTP media packets can be received from multiple sources … The MCPTT
+client can differentiate between the different sources using the **SSRC** … How the **media mixer in
+the MCPTT client** mixes the different RTP media stream sources is out of scope."* — 서버는
+media distributor 로서 화자별 스트림을 **슬롯별 SSRC** 로 분리해 그대로 보낸다(믹싱 없음).
+
+| # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
+|---|---|---|---|---|
+| U10 | **SSRC 별 병렬 수신·로컬 믹싱** — 같은 RTP 포트로 오는 N개 스트림을 SSRC 로 갈라 지터버퍼·디코더를 병렬 구동하고 합성 재생 | §4.2.2, §6.2.4.3.4 | 슬롯별 egress SSRC(슬롯0=종전 고정, 슬롯N=별도 공간)로 분리 송신 | ✗ 단일 화자 전제 — 슬롯1+ 스트림 미재생 |
+| U11 | **List of Granted Users(15) + List of SSRCs(16)** — 동시 발언 시 Taken 이 싣는 화자 목록. 순서가 서로 대응한다 | §8.2.3.17~18, §6.3.4.4.7a | 화자 2명 이상이면 단일 Taken 에 두 리스트를 실어 송신 | ✗ 미파싱 |
+| U12 | **Floor Release Multi Talker(0x0F) 수신** — 동시 발언 중 한 화자의 종료 통지. 해당 화자만 목록/재생에서 제거(Idle 아님) | §8.2.14 | 잔여 화자가 있으면 Idle 대신 0x0F 를 나머지에게 송신. **단말이 이 subtype 을 보내면 규격 위반이라 서버가 무시** | ✗ 미처리(미지 타입) |
+| U13 | **Floor Indicator I-bit(0x0080)/G-bit(0x0200)** — multi-talker/dual floor 표시. 화자 목록 UI 제공 권장 | §8.2.3.15, §6.2.4.3.3-4 | 정책·화자 수에 따라 설정 | ✗ emergency/imminent 비트만 사용 |
+
+#### (D) 협상·부가 기능
+
+| # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
+|---|---|---|---|---|
+| U14 | **SDP fmtp 협상** — `m=application` 섹션에 `a=fmtp:MCPTT mc_queueing;mc_priority=N[;mc_granted]` 를 실어야 큐잉·우선순위 상한·초기 발언권이 성립한다 | §12.1.2.3, §6.3.5.4.4 | CSP 가 이 값을 `PTT_JOIN.queueing`/`granted` 로 CMP 에 전달(CSP 측 후속). 미협상 멤버의 비선점 요청은 **Deny #1** | ✗ `m=application … UDP MCPTT` + `a=floorid` 만 송신 — fmtp 없음 |
+| U15 | **Floor Priority(0) 송신** — `mc_priority` 를 협상한 단말만 의미가 있다. 협상값과 요청값 중 **낮은 쪽**이 유효 우선순위이고, 미포함이면 서버 기본값 | §6.3.5.4.4-1a | `PTT_JOIN.max_priority` 가 있는 멤버만 요청값으로 낮춘다. **미협상 멤버의 우선순위 필드는 무시**(기본값 유지) | △ `PttController` 가 항상 `priority = 0` 으로 요청(`FloorClient.requestFloor`) — 지금은 서버가 무시하므로 무해하지만, U14(fmtp `mc_priority`)를 구현하면 **0 이 그대로 유효 우선순위가 된다.** 협상 시엔 필드를 생략하거나 실제 요청 우선순위를 실어야 한다 |
+| U16 | **Queue Position Info(9)** — 대기 위치 표시, 필요 시 Queue Position Request(8) 조회. 취소는 Floor Release 또는 Queued Floor Requests(0x0E) | §8.2.11~8.2.12, §8.2.15 | 큐 진입·변동 시 위치 통지, 재요청에도 **위치 유지** | △ QUEUE_POS_INFO 로 상태만 바꿈, 위치 표시·취소 경로 없음 |
+| U17 | **Unicast Media Flow Control(0x0B)** — 화면 꺼짐·데이터 절약 시 자기 하향 미디어 중단/재개 요청(Media Flow(24) MSB=1 재개) | §8.2.16 | 중단 요청한 leg 로 audio/video 미송신 | ✗ 미구현 |
+| U18 | **floor SRTCP(CSK)** — TS 33.180 키로 floor RTCP 보호. 유니캐스트는 **클라이언트별 CSK** | TS 33.180 §9.4 | `PTT_JOIN.floor_crypto` 로 멤버별 키 수용(그룹 키도 지원). 키 배포는 CSC KMS 연동 대기 | ✗ 평문 floor |
+
+#### 구현 순서 권고
+
+1. **U1·U2** — 재전송/유예 낭비를 없애는 즉효 항목. `FloorCodec`(ack 비트 마스킹·Floor Ack 빌더)와
+   `FloorClient.handle`(Revoke → Release) 두 곳이면 끝난다.
+2. **U6·U7·U8·U3** — Taken/Granted 신규 필드 소비. UI(버튼 비활성·잔여시간)까지 이어진다.
+3. **U14·U15** — SDP fmtp. CSP 가 이 값을 CMP 로 넘기는 작업과 짝이라 서버 담당과 함께 진행한다.
+4. **U10~U13** — 동시 발언. 미디어 파이프라인(§6) 변경이 필요해 가장 크다. dual/multi 실호 검증이
+   막혀 있는 원인이 이 항목이다(현재는 CMP 프로브로만 검증 —
+   [../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
+5. **U16~U18** — 부가 기능·보안. U18 은 CSC KMS 가 키를 내려준 뒤에 의미가 있다.
 
 ---
 

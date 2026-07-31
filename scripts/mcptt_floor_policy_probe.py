@@ -831,6 +831,20 @@ def main():
     if tk:
         check(tk[-1]["fields"].get(FF_GRANTED_PARTY, b"").decode(errors="ignore").rstrip("\x00")
               == "sip:A@mcptt.example.org", "TAKEN Granted Party = MCPTT ID(URI)")
+    # mc_priority 미협상 멤버가 관례적으로 Floor Priority=0 을 실어도 기본 우선순위를 유지한다
+    #   (§6.3.5.4.4-1a-iv) — 협상한 멤버만 요청값으로 낮출 수 있다.
+    A.send_floor(a.cmp, fp, rel_pkt("A", A.ssrc))
+    time.sleep(0.3); A.drain_floor(); B.drain_floor()
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc, prio=0))    # B 는 queueing=0, 미협상
+    time.sleep(0.3); B.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc, prio=0))    # A 도 prio 0 을 실어 요청
+    time.sleep(0.3)
+    ga = A.drain_floor()
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g14]
+    holders = grp[0].get("floor_holders") if grp else None
+    check("DENY" in ops(ga) or holders == ["B"],
+          f"미협상 멤버의 Floor Priority=0 은 기본 우선순위를 낮추지 않는다 (A={ops(ga)}, holders={holders})")
     remove(g14)
     A.close(); B.close()
 

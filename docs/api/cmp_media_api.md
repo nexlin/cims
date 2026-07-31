@@ -425,6 +425,7 @@ RELAY_REMOVE 와 동일 규칙).
 | `floor_suppress` | - | 1 = 이 멤버에게 floor 메시지(GRANT/TAKEN/IDLE/DENY)를 **보내지 않는다** — 청취 사실이 floor 상태로 드러나지 않게 한다 |
 | `user_uri` | - | 이 멤버의 **MCPTT ID(URI)** — floor 메시지의 User ID(6)/Granted Party(4)/화자 리스트에 싣는 값(TS 24.380 §8.2.3.8). 생략 시 `session_id` |
 | `queueing` | - | `0` = 이 멤버가 SDP `mc_queueing` 을 협상하지 않음 → 비선점 요청은 큐잉하지 않고 **Deny #1**(기본 1) |
+| `max_priority` | - | SDP `mc_priority=N` 로 협상한 **요청 가능 최대 우선순위**. 이 값이 있을 때만 Floor Request 의 Floor Priority 로 우선순위를 낮출 수 있다(둘 중 낮은 쪽). 없으면(미협상) 요청의 우선순위 필드를 무시하고 `members` 의 기본값을 쓴다(TS 24.380 §6.3.5.4.4-1a) |
 | `granted` | - | `1` = SDP fmtp `mc_granted` 협상 — 참가 시점에 발언자가 없으면 이 멤버에게 **초기 발언권**을 준다(TS 24.380 §6.3.4.2.2) |
 | `floor_crypto` | - | 이 멤버의 floor SRTCP 키 `{alg,key,salt[,mki]}` — **유니캐스트 floor 는 클라이언트별 CSK 로 보호**(TS 33.180 §9.4)한다. 생략 시 그룹 키([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 

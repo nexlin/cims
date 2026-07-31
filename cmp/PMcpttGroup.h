@@ -229,7 +229,9 @@ public:
     //   mcpttId: floor 메시지의 User ID/Granted Party 에 실을 **MCPTT ID(URI)**. 비면 sessionId.
     //   queueing: 이 멤버가 SDP `mc_queueing` 을 협상했는지 — 미협상 멤버의 비선점 요청은
     //             큐잉하지 않고 Deny #1 이다(TS 24.380 §6.3.5.4.4).
-    void setMemberProfile(const std::string& sessionId, const std::string& mcpttId, bool queueing);
+    //   maxPriority: SDP `mc_priority` 로 협상한 요청 가능 최대 우선순위(-1 = 미협상).
+    void setMemberProfile(const std::string& sessionId, const std::string& mcpttId, bool queueing,
+                          int maxPriority = -1);
     // 호 성립 시 초기 발언권 부여 (SDP fmtp `mc_granted` 협상 결과 — TS 24.380 §6.3.4.2.2-3b).
     //   발언자가 없고 floor 제어가 켜진 그룹에서만 성립한다. 부여했으면 true.
     bool grantInitialFloor(const std::string& sessionId);
@@ -477,6 +479,9 @@ private:
         std::string codec;  // 협상 오디오 코덱 (user_codec) — 녹취 세그먼트 메타용
         std::string mcpttId;  // MCPTT ID(URI) — floor User ID/Granted Party 값 (비면 sessionId)
         bool queueing = true; // SDP mc_queueing 협상 여부 — 미협상이면 비선점 요청은 Deny #1
+        // SDP mc_priority 로 협상한 **요청 가능 최대 우선순위**. -1 = 미협상 —
+        //   이 경우 요청에 실린 Floor Priority 는 무시하고 기본 우선순위를 쓴다(§6.3.5.4.4-1a-iv).
+        int maxPriority = -1;
         bool mediaStopped = false;  // Unicast Media Flow Control(0x0B)로 하향 미디어 중단 요청됨
         // 이 멤버 전용 floor SRTCP 컨텍스트 (CSK 기반). null 이면 그룹 키를 쓴다.
         //   Peer 는 map 에 복사 대입되므로 shared_ptr 로 들고 있는다(PFloorCrypto 는 mutex 보유).

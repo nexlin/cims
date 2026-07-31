@@ -79,10 +79,14 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 > / Unicast Media Flow Control / Queued Floor Requests(취소)** —
 > 정본 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7~§7.8.
 >
-> **단말 정합 대기**: dual/multi-talker 를 실호로 쓰려면 UE 가 Floor Indicator 의
+> **단말 정합 대기**: 규격상 **믹싱은 단말의 media mixer 몫**이다(TS 24.380 §4.2.2, §6.2.4.3.4
+> NOTE — 서버는 media distributor 로서 화자별 스트림을 SSRC 로 구분해 전달하고, 믹싱 방식은
+> out of scope). 따라서 dual/multi-talker 를 실호로 쓰려면 UE 가 Floor Indicator 의
 > Multi-talker(0x0080)/Dual floor(0x0200) 비트와 Floor Release Multi Talker(subtype 0x0F)를
-> 해석하고 **슬롯별 SSRC 로 오는 동시 스트림을 함께 재생**해야 한다. 현재 cspsim·Android UE 는
-> 단일 화자 전제라 서버측만 CMP 프로브로 검증돼 있다
+> 해석하고 **슬롯별 SSRC 로 오는 동시 스트림을 병렬 디코드·합성 재생**해야 한다. 이 밖의 단말
+> 구현 항목(ack 요구 변종·Revoke 응답·Taken 신규 필드·SDP fmtp·floor SRTCP)은
+> [android_ue_client.md](android_ue_client.md) §5.4 에 U1~U18 로 정리했다. 현재 cspsim·Android
+> UE 는 단일 화자 전제라 서버측만 CMP 프로브로 검증돼 있다
 > ([../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
 > 마찬가지로 CSP 가 `floor_policy`/`group_type:"private"` 를 아직 발행하지 않는다(Call Control 파트).
 
@@ -212,7 +216,11 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 - **MCPTT ID**: `PTT_JOIN.user_uri` 로 받은 URI 를 User ID(6)/Granted Party(4)/리스트 필드에
   싣는다(§8.2.3.8). 없으면 sessionId(가입자 번호)로 대체한다.
 - **큐잉 협상**(`PTT_JOIN.queueing`): 미협상 멤버의 비선점 요청은 큐잉하지 않고 Deny **#1**
-  (§6.3.5.4.4). 요청에 실린 Floor Priority 는 멤버의 협상 상한으로 clamp 한다(§6.3.5.4.4-1a).
+  (§6.3.5.4.4).
+- **유효 우선순위**(§6.3.5.4.4-1a): 기본값은 제어평면이 준 멤버 우선순위(default priority).
+  `PTT_JOIN.max_priority`(= SDP `mc_priority` 협상값)가 있는 멤버만 요청에 실린 Floor Priority
+  로 낮출 수 있고(둘 중 낮은 쪽), **미협상 멤버의 Floor Priority 필드는 무시**한다 — 관례적으로
+  0 을 실어 보내는 단말의 요청을 우선순위 0 으로 해석하면 선점 서열이 무너진다.
 - **초기 발언권**(`PTT_JOIN.granted` = fmtp `mc_granted`): 참가 시점에 발언자가 없으면 그
   멤버에게 Floor Granted+Taken 을 보낸다(§6.3.4.2.2-3b).
 - **1인 세션**: 참가자가 한 명뿐인 세션의 요청은 Deny **#3**(Only one participant).

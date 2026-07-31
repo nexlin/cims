@@ -1305,7 +1305,8 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
             // floor 신원·협상 프로파일 (TS 24.380 §8.2.3.8 / §6.3.5.4.4).
             //   user_uri: floor 메시지에 실을 MCPTT ID(URI). queueing: SDP mc_queueing 협상 여부.
             group->setMemberProfile(sessionId, payload.GetString("user_uri"),
-                                    (int)payload.GetInt("queueing", 1) != 0);
+                                    (int)payload.GetInt("queueing", 1) != 0,
+                                    (int)payload.GetInt("max_priority", -1));
             // 멤버별 floor 보호 키 (TS 33.180 §9.4 — 유니캐스트 floor 는 클라이언트 CSK).
             //   실패해도 JOIN 자체는 성립시키되(미디어 경로 유지) 원인을 남긴다.
             SimpleJson::JsonNode mfc = payload.Get("floor_crypto");

@@ -248,6 +248,7 @@ processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이
 | floor_suppress | - | 1 = 이 멤버에게 floor 메시지 미송신 (청취 은닉) |
 | user_uri | - | 이 멤버의 MCPTT ID(URI) — floor User ID/Granted Party 값 (생략 시 session_id) |
 | queueing | - | 0 = SDP `mc_queueing` 미협상 — 비선점 요청은 큐잉 없이 Deny #1 (기본 1) |
+| max_priority | - | SDP `mc_priority=N` 협상값 — 있을 때만 요청의 Floor Priority 로 우선순위를 낮출 수 있다(미협상이면 요청값 무시) |
 | granted | - | 1 = fmtp `mc_granted` — 참가 시점에 발언자가 없으면 초기 발언권 부여 |
 | floor_crypto | - | 이 멤버 전용 floor SRTCP 키 `{alg,key,salt[,mki]}` (TS 33.180 CSK) |
 

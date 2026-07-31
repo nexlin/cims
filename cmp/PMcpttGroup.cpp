@@ -765,11 +765,20 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
                                      int reqPrio) {
     PAutoLock lock(_mutex);
     if (!_floorControl) return;   // 중재 없는 그룹 — 요청 자체가 성립하지 않는다
-    // 유효 우선순위 (§6.3.5.4.4-1a): 요청에 실린 값과 협상 상한(멤버 priority) 중 낮은 쪽.
-    //   요청에 Floor Priority 가 없으면 협상된 기본값(멤버 priority)을 그대로 쓴다.
+    // 유효 우선순위 (§6.3.5.4.4-1a). 기본값은 제어평면이 준 멤버 우선순위(default priority)다.
+    //   요청에 실린 Floor Priority 로 낮추는 것은 그 멤버가 **SDP mc_priority 를 협상한 경우만**
+    //   유효하다 — 미협상 단말(우리 UE 포함)이 관례적으로 0 을 실어 보내는 것을 우선순위 0 으로
+    //   해석하면 선점 서열이 통째로 무너진다(§6.3.5.4.4-1a-iv: 미협상이면 기본 우선순위).
     int requesterPrio = 0;
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
-    if (reqPrio >= 0 && reqPrio < requesterPrio) requesterPrio = reqPrio;
+    {
+        auto itM = _members.find(sessionId);
+        int negotiatedMax = (itM != _members.end()) ? itM->second.maxPriority : -1;
+        if (negotiatedMax >= 0) {
+            if (reqPrio >= 0 && reqPrio < negotiatedMax) requesterPrio = reqPrio;
+            else if (reqPrio >= 0)                        requesterPrio = negotiatedMax;
+        }
+    }
 
     // 수신 Floor Indicator(emergency/imminent) → tier 승격(단말 개시 긴급/임박).
     // CSP PTT_FLOOR_TIER 로 설정된 tier 와 max 결합(영속 → 무활동 자동회수 제외 등에 반영).
@@ -1128,12 +1137,14 @@ bool PMcpttGroup::_unprotectFloor(const std::string& sessionId, const char* in, 
     return false;
 }
 
-void PMcpttGroup::setMemberProfile(const std::string& sessionId, const std::string& mcpttId, bool queueing) {
+void PMcpttGroup::setMemberProfile(const std::string& sessionId, const std::string& mcpttId, bool queueing,
+                                   int maxPriority) {
     PAutoLock lock(_mutex);
     auto it = _members.find(sessionId);
     if (it == _members.end()) return;
     if (!mcpttId.empty()) it->second.mcpttId = mcpttId;
     it->second.queueing = queueing;
+    it->second.maxPriority = maxPriority;
 }
 
 // floor 메시지에 실을 사용자 식별자 — 규격은 MCPTT ID(URI)를 요구한다(§8.2.3.8). 제어평면이
