@@ -340,6 +340,12 @@ latch 를 유지한다.
 group 자원 키 `(service, group_id)` — 같은 service 의 AS 들이 공유한다.
 member 키 `(node, session_id)`.
 
+> **사용 규약 (생성 vs 변경)**: 최초 수립만 `PTT_GROUP_ADD`, **이후 모든 상태 변경(멤버 증감·
+> 우선순위 등)은 `PTT_GROUP_MODIFY`** 로 한다. 둘은 없는 그룹일 때만 다르다 — ADD 는 생성,
+> MODIFY 는 `NOT_FOUND`(재생성 금지: 재할당 포트가 client 가 광고한 SDP 포트와 어긋남).
+> MODIFY 가 `NOT_FOUND` 를 반환하면 그때만 `PTT_GROUP_ADD` 로 복구하고 응답 포트로 캐시를
+> 갱신한다. RELAY 도 동형(`RELAY_ADD` 생성/복구, `RELAY_MODIFY` 변경).
+
 ### 7.1 PTT_GROUP_ADD — 그룹 생성 (멱등)
 
 | payload 필드 | 필수 | 설명 |

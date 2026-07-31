@@ -39,6 +39,68 @@
 
 ---
 
+## 0-R. 미반영 로드맵 (규격 대비 공백)
+
+정합(§1~§4)은 **구현된 항목**의 규격 정합을 다룬다. 여기서는 3GPP MCPTT 규격에 정의돼 있으나
+CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열한다 — 향후 과제 목록이다. 각 항목의
+설계·변경점은 착수 시 별도 정본 문서로 분리한다.
+
+> **CSP↔CMP 연동 계약**: 아래 기능을 2인(Call Control & Signaling / Media Plane & Floor)으로
+> 분담하기 위한 CSP↔CMP 메시지 규격은 [mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) 가 정본이다.
+
+### R1. Call Control (TS 24.379) — 통화 유형/절차
+
+| 기능 | 규격 | 상태 |
+|---|---|---|
+| **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✗ 미구현 (`session-type` 이 prearranged/chat/broadcast 3종만, `csp/McpttInfo.h`) |
+| **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
+| **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
+| **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✗ (그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) 로 구현) |
+| **First-to-answer call** | TS 24.379 | ✗ |
+| **Ambient listening call** (원격 감청) | TS 24.379 | ✗ |
+| **Remotely initiated call** (원격 개시) | TS 24.379 | ✗ |
+| **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
+| **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
+
+> 구현됨: prearranged/chat/broadcast 그룹콜, affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
+
+### R2. Floor Control (TS 24.380)
+
+| 기능 | 규격 | 상태 |
+|---|---|---|
+| **Dual floor control** (선점자와 기존 화자 동시 2명, override) | TS 24.380 | ✗ 미구현 (현재는 REVOKE→GRANT 단일화자, [../modules/cmp.md](../modules/cmp.md)) |
+| **Multi-talker control** (동시 N명, Rel-16) | TS 24.380 (Rel-16) | ✗ (Floor Release Multi Talker 등 전용 메시지 미구현) |
+| **Pre-established session floor** | TS 24.380 | ✗ |
+
+> 구현됨: subtype+TLV 인코딩, Cause/Indicator/Duration/Queue, 큐잉, tier 선점, inactivity auto-revoke (F1~F3).
+
+### R3. 미디어 평면 / 전송
+
+| 기능 | 규격 | 상태 |
+|---|---|---|
+| **E2E 미디어 암호화** (SRTP + MIKEY-SAKKE, PCK/GMK/CSK) | TS 33.180 | ⚠ 구조만 — opensrtp 링크·SRTP 플래그 존재하나 참 ECCSI/SAKKE(RFC 6507/6508) 미구현 (S5 placeholder) |
+| **MBMS/멀티캐스트 베어러** 그룹 배포 | TS 23.379 | ✗ (unicast RTP relay 만) |
+| **Off-network (ProSe/PC5 직접통신)** | TS 24.379 off-network | ✗ (서버 기반 on-network 만) |
+| **PTT 비디오** | — | ✗ ([../modules/cmp.md](../modules/cmp.md) "향후 확장") |
+
+### R4. 부가 서비스 / 인접 규격
+
+| 기능 | 규격 | 상태 |
+|---|---|---|
+| **위치 정보 보고/관리** (Location management) | TS 23.280 / TS 24.379 | ✗ |
+| **MCData MSRP relay / MSRPS(TLS)** | TS 24.282 / RFC 4976 | ✗ 후속 ([mcdata_messaging.md](mcdata_messaging.md)) |
+| **MCData media plane 서비스 설정 문서** | TS 24.484 | ✗ (provisioning 채널 재사용) |
+| **MCVideo** | TS 24.281 | ✗ |
+
+### R5. 시그널링 세부 (RFC/구독) — 부분 미반영
+
+- **NOTIFY 최종 실패(timeout/481) 시 구독 종료** (RFC 6665 MUST) — 미구현 (§C5 참조)
+- **Subscription-State reason 구분** — 현재 timeout 고정
+- **reg-event 다중 바인딩 / tel URI registration** — 미구현
+- **ICE** (RFC 8445) — symmetric NAT 미해소 ([ue_nat_traversal.md](ue_nat_traversal.md) §9)
+
+---
+
 ## 1. CMP — Floor Control (TS 24.380)
 
 Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client/floor/FloorCodec.kt` 와

@@ -138,7 +138,8 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [volte_flows.md](docs/design/features/volte_flows.md) — VoLTE 호 flow
 - [mcptt_authorization.md](docs/design/features/mcptt_authorization.md) — MCPTT 권한/RBAC
 - [mcptt_emergency_modes.md](docs/design/features/mcptt_emergency_modes.md) — 긴급/임박/알림/ad-hoc 모드
-- [mcptt_standard_conformance.md](docs/design/features/mcptt_standard_conformance.md) — MCPTT 서버(CSC/CSP/CMP) 3GPP TS 규격 정합 보완 사항(단말 interop 전제)
+- [mcptt_standard_conformance.md](docs/design/features/mcptt_standard_conformance.md) — MCPTT 서버(CSC/CSP/CMP) 3GPP TS 규격 정합 보완 사항(단말 interop 전제) + §0-R 미반영 로드맵
+- [mcptt_csp_cmp_roadmap_contract.md](docs/design/features/mcptt_csp_cmp_roadmap_contract.md) — 로드맵 기능(private call·dual/multi-talker·pre-established 등) CSP↔CMP 연동 메시지 규격, Call Control/Media Plane 2파트 분담 계약
 - [mcdata_messaging.md](docs/design/features/mcdata_messaging.md) — MCData 그룹 메시징(SDS) — TS 24.282 그룹 SDS·TS 24.481 그룹별 게이트·disposition
 - [ue_nat_traversal.md](docs/design/features/ue_nat_traversal.md) — 단말 NAT traversal (시그널링·미디어 leg 포트·목적지 latch·정책)
 - [recording.md](docs/design/features/recording.md) — 녹취 구조
