@@ -220,7 +220,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 6. members CSV 파싱 → 우선순위/role 설정 + 멤버별 전용 포트 유닛(PPttMemberPort) 선할당.
    멤버 pool 고갈 시 `NO_RESOURCE` — 이번 호출로 생성된 그룹이면 floor/유닛을 즉시 롤백
    (기존 그룹의 선할당 유닛은 유지 — 멱등 재시도 시 재사용)
-7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`) — TS 24.380 §10.3.
+7. `group_type`/`initiator_id` → `setBroadcast()`. **broadcast** 그룹은 `handleFloorRequest` 가 개시자(`_initiatorSessionId`) 외 모든 floor REQUEST 를 Deny #5 Receive only(`floor.jsonl reason=broadcast`) — TS 24.380 §6.3.5.4.4. Floor Taken 의 Permission to Request the Floor 도 0 으로 나간다(§6.3.4.4.2-3d).
 8. `floor_control`/`floor_policy`/`max_talkers`/`group_type:"private"` → `setFloorPolicy()` (녹취 슬롯 트랙 수가 정원에 따라 정해지므로 녹취 초기화보다 먼저), `floor_crypto` → `setFloorCrypto()`.
    정책 필드의 미상 값·키 길이 오류는 `BAD_REQUEST` 로 거절한다.
 
@@ -685,7 +685,8 @@ CallMap(relay descriptor)이 소실되어 relay 가 REMOVE 를 영영 못 받고
 판정은 **RTP 무수신(inactivity)** 시간 기준 — `touchActivity()`가 RTP 수신 시에만 호출되므로
 `now - getLastActivityTime()` = RTP 무수신 경과(또는 생성 후 무RTP 경과)다.
 
-**timeoutLoop() — 60초 주기 검사:**
+**timeoutLoop() — 1초 tick.** 매 초 floor 타이머(T1/T2/T3/T7/T8/T20 — `tickFloorTimers()`)와
+미ack 이벤트 재전송을 처리하고, 아래 무거운 세션 sweep 은 **60초마다** 수행한다:
 
 ```
 1. 개별 세션 (VoIP):

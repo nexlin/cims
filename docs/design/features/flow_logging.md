@@ -205,10 +205,12 @@ CMP는 `hdr.service` 로 `_serviceMap[key]` 채움, `hdr.sesid` 로 `_sesidMap[k
 - proto=`INT`, `_sesidMap[key]`에서 sesid/service 계승
 
 ### 8.2 Floor Control (RTCP APP, MCPT)
-- proto=`MCPTT`, method=`FLOOR_REQUEST` | `GRANT` | `REJECT` | `RELEASE` | `IDLE` | `TAKEN` | `REVOKE`
+- proto=`MCPTT`, method=`FLOOR_REQUEST` | `FLOOR_GRANT` | `FLOOR_DENY` | `FLOOR_RELEASE` |
+  `FLOOR_IDLE` | `FLOOR_TAKEN` | `FLOOR_REVOKE` | `FLOOR_RELEASE_MULTI` | `FLOOR_END_OF_RTP` |
+  `FLOOR_QUEUE_POS_INFO` | `FLOOR_MEDIA_FLOW`
 - detail JSON: `{"op":"GRANT","user":"+82...","ssrc":N,"prio":P}`
-- RX: `PMcpttGroup::onRtcpPacket` — UE→CMP 방향 모든 op-code 기록
-- TX: `PMcpttGroup::broadcastFloorStatus` / `handleFloorRequest` — CMP→UE 방향
+- RX: `PMcpttGroup::onFloorPacket` — UE→CMP 방향 REQUEST/RELEASE 기록(QUEUE_POS/ACK 은 노이즈라 제외)
+- TX: `PMcpttGroup::broadcastFloorStatus` / `handleFloorRequest` / `tickFloorTimers` — CMP→UE 방향
 - cmp.json `ServiceLogging.Flow.Floor=true` 로 제어
 
 ### 8.3 DTMF (RFC 2833/4733)

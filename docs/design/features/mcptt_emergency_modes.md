@@ -81,7 +81,10 @@ else                              bPreempt = (reqPrio < ownPrio); // 동tier·�
 ```
 
 - broadcast 독점 검사는 **그대로 최우선**(기존). 단, **개시자의 emergency**는 그대로 통과(개시자만 floor).
-- emergency 발언자에 대한 inactivity REVOKE 타임아웃은 완화(긴급 중 무음 허용) — `_floorIdleSec`를 emergency tier에서 상향/무효.
+- emergency/imminent 발언자는 **T2(최대 발언시간) 제한에서 제외**한다(긴급 중 장시간 발언 허용).
+  T1(무RTP 발언 종료 판정)은 tier 와 무관하게 동일 적용된다 — 규격상 T1 은 징벌이 아니라
+  "발언이 끝났다"는 판정이고, 긴급 화자만 예외로 두면 조용해진 긴급 화자가 floor 를 무한
+  점유해 다음 긴급 발언자가 막힌다.
 
 ### 3.2 tier 설정 경로
 

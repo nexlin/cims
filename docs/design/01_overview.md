@@ -435,13 +435,12 @@ wire 규격 정본은 [../api/cmp_media_api.md](../api/cmp_media_api.md) 다. �
   │                 │  [80 CC 00 07  │                 │                │
   │                 │   SSRC         │                 │                │
   │                 │   MCPT         │                 │                │
-  │                 │   01(REQ)      │                 │                │
-  │                 │   id_len       │                 │                │
-  │                 │   speaker_id]  │                 │                │
+  │                 │   TLV: prio    │                 │                │
+  │                 │        user_id]│                 │                │
   │                 │                │                 │                │
   │                 │◄── RTCP APP ───│                 │                │
-  │                 │  opcode=2      │── RTCP APP ────►│                │
-  │                 │  (GRANT)       │  opcode=6       │                │
+  │                 │  subtype=1     │── RTCP APP ────►│                │
+  │                 │  (Granted)     │  subtype=2      │                │
   │                 │  speaker=A     │  (TAKEN)        │                │
   │                 │                │  speaker=A      │                │
   │◄── {type:       │               │                 │── {type:       │
@@ -460,8 +459,8 @@ wire 규격 정본은 [../api/cmp_media_api.md](../api/cmp_media_api.md) 다. �
   │    ptt_release}  │               │                 │                │
   │                ──►│              │                 │                │
   │                 │── RTCP APP ───►│                 │                │
-  │                 │  opcode=4      │── RTCP APP ────►│                │
-  │                 │  (RELEASE)     │  opcode=5       │                │
+  │                 │  subtype=4     │── RTCP APP ────►│                │
+  │                 │  (Release)     │  subtype=5      │                │
   │                 │                │  (IDLE)         │── {type:       │
   │◄── {type:       │               │                 │   ptt_idle} ──►│
   │    ptt_idle}    │               │                 │                │
@@ -971,10 +970,10 @@ a=sendrecv
   ├─ 브라우저 → cwrtc (WS): {"type":"ptt_request","call_id":"..."}
   │
   ├─ cwrtc 내부: RtpThread의 RTCP 소켓으로 FLOOR_REQUEST 전송
-  │   → CMP (UDP, RTP포트+1)
-  │   RTCP APP: PT=204, name="MCPT", opcode=1
+  │   → CMP (UDP, SDP m=application 으로 협상한 floor 포트)
+  │   RTCP APP: PT=204, name="MCPT", subtype=0(Floor Request) + TLV
   │
-  ├─ CMP → cwrtc (RTCP): FLOOR_GRANT (opcode=2)
+  ├─ CMP → cwrtc (RTCP): Floor Granted (subtype=1)
   │
   ├─ cwrtc → 브라우저 (WS): {"type":"ptt_floor","speaker":"tel:+82571900001"}
   │

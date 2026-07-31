@@ -447,86 +447,85 @@ a=fmtp:MCPTT mc_queueing;mc_priority=3
 
 ### 3.4 Floor Control (발언권 제어)
 
-RTCP APP 패킷 (포트: RTP포트 + 1)으로 제어합니다.
+**RTCP APP 패킷**(TS 24.380 §8)으로 제어합니다. 포트는 SDP `m=application` 으로 협상한
+전용 floor 포트입니다(RTP+1 을 가정하지 마십시오 — CMP 는 그룹 공유 floor 포트를 광고합니다).
 
-**패킷 구조 (총 20+ 바이트):**
+**패킷 구조** — 12바이트 고정 헤더 + floor control 필드들의 **TLV** 나열:
 ```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|V=2|P|  subtype |   PT=204    |           length              |
+|V=2|P| subtype |    PT=204     |          length               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                          SSRC                                 |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   name = "MCPT" (0x4D435054)                                 |
+|                     name = "MCPT"                             |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  opcode  | id_len |       reserved (0x0000)                  |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|            speaker_id (가변 길이, 4바이트 정렬 패딩)            |
+| Field ID | Length |            value ...              (+패딩)  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
-
-**필드 설명:**
 
 | 필드 | 크기 | 설명 |
 |------|------|------|
-| `V` | 2 bits | RTP 버전 = 2 |
-| `P` | 1 bit | 패딩 = 0 |
-| `subtype` | 5 bits | 0 |
+| `subtype` | 5 bits | **메시지 타입**(아래 표). 첫 비트(0x10)가 서면 "Ack 요구" 변종 — 받은 쪽은 Floor Ack 로 회신 |
 | `PT` | 8 bits | 204 (RTCP APP 고정) |
-| `length` | 16 bits | 전체 32비트 워드 수 - 1 (네트워크 바이트 순서) |
-| `SSRC` | 32 bits | 송신자의 SSRC (CMP가 joinGroup 시 할당, 1000번부터 순차) |
-| `name` | 4 bytes | ASCII `"MCPT"` (0x4D 0x43 0x50 0x54) |
-| `opcode` | 8 bits | Floor 동작 코드 (아래 표 참조) |
-| `id_len` | 8 bits | speaker_id 문자열의 바이트 길이 (0이면 없음) |
-| `reserved` | 16 bits | 예약 (0x0000) |
-| `speaker_id` | 가변 | 화자 session ID 문자열 (UTF-8, 4바이트 정렬 패딩) |
+| `length` | 16 bits | 전체 32비트 워드 수 - 1 |
+| `SSRC` | 32 bits | 보낸 쪽 SSRC. **서버 발신 메시지는 floor control server 의 SSRC** 이고, 화자 SSRC 는 SSRC 필드(14)로 실립니다 |
+| `name` | 4 bytes | ASCII `"MCPT"` |
+| TLV | 가변 | `Field ID(1) + Length(1) + value`. **각 필드는 패딩을 포함해 4옥텟 배수** — 모르는 필드는 건너뛰면 됩니다 |
 
-**실제 패킷 Hex 예시 (FLOOR_REQUEST, SSRC=1001, speaker_id="+82571900001"):**
+**실제 패킷 Hex 예시** (Floor Request, SSRC=0x3E9, Priority=5, User ID="+82571900001"):
 ```
-80 CC 00 07    # V=2, P=0, subtype=0, PT=204, length=7 (8 words = 32 bytes)
+80 CC 00 07    # V=2, P=0, subtype=0(Request), PT=204, length=7 (32 bytes)
 00 00 03 E9    # SSRC = 1001
 4D 43 50 54    # name = "MCPT"
-01 0E 00 00    # opcode=1(REQUEST), id_len=14, reserved=0
-2B 38 32 35    # "+825"
-37 31 39 30    # "7190"
-30 30 30 31    # "0001"
-00 00 00 00    # padding (4바이트 정렬)
+00 02 05 00    # Field 0(Floor Priority), len=2, value=5,spare
+06 0C 2B 38    # Field 6(User ID), len=12, "+8..."
+32 35 37 31    # "2571"
+39 30 30 30    # "9000"
+30 31 00 00    # "01" + 4옥텟 정렬 패딩
 ```
 
-**Opcode 정의 (7종):**
+**메시지 타입(subtype)** — TS 24.380 Table 8.2.2.1-1:
 
-| Opcode | 이름 | 방향 | SSRC 용도 | speaker_id | 설명 |
-|--------|------|------|-----------|------------|------|
-| 1 | FLOOR_REQUEST | UE→CMP | 요청자 SSRC | 요청자 session ID | PTT 버튼 누름 (발언권 요청) |
-| 2 | FLOOR_GRANT | CMP→요청자 | 승인된 SSRC | 승인된 session ID | 발언권 승인 (요청자에게만 전송) |
-| 3 | FLOOR_REJECT | CMP→요청자 | 거부된 SSRC | 거부된 session ID | 발언권 거부 (우선순위 낮음) |
-| 4 | FLOOR_RELEASE | UE→CMP | 해제자 SSRC | 해제자 session ID | PTT 버튼 해제 (발언권 반납) |
-| 5 | FLOOR_IDLE | CMP→ALL | 0 | 빈 문자열 | 발언권 해제됨 (모든 멤버에게 브로드캐스트) |
-| 6 | FLOOR_TAKEN | CMP→ALL | 화자 SSRC | 화자 session ID | 발언권 점유됨 (화자 정보 포함, 모든 멤버에게) |
-| 7 | FLOOR_REVOKE | CMP→현재 화자 | 현재 화자 SSRC | 현재 화자 session ID | 강제 발언권 회수 (우선순위 선점 시) |
+| subtype | 이름 | 방향 | 설명 |
+|---|---|---|---|
+| 0 | Floor Request | UE→CMP | PTT 버튼 누름. Floor Priority(0)·User ID(6)·Floor Indicator(13) 동반 가능 |
+| 1 | Floor Granted | CMP→요청자 | 발언 승인. Duration(1)=허용 발언시간(초)·SSRC(14)·Priority(0)·Indicator(13) |
+| 2 | Floor Taken | CMP→화자 외 | 발언 중 통지. Granted Party(4)=MCPTT ID·Permission(5)·Msg Seq(8)·Indicator(13)·SSRC(14) |
+| 3 | Floor Deny | CMP→요청자 | 거절. Reject Cause(2): 1=다른 참가자 점유, 3=1인 세션, 5=수신 전용, 7=큐 포화 |
+| 4 | Floor Release | UE→CMP | PTT 버튼 뗌. `0x14` 로 보내면 서버가 Floor Ack 로 확인 |
+| 5 | Floor Idle | CMP→ALL | 발언자 없음. Msg Seq(8)+Indicator(13) |
+| 6 | Floor Revoke | CMP→화자 | 회수 통지. Reject Cause(2): 2=발언시간 초과, 4=선점됨 |
+| 8 / 9 | Floor Queue Position Request / Info | UE↔CMP | 대기 위치 조회 / 응답(Queue Info(3)) |
+| 10 | Floor Ack | 양방향 | Ack 요구 메시지 확인. Source(10)+Message Type(12) |
+| 0x0B | Unicast Media Flow Control | UE→CMP | 자기 하향 미디어 중단/재개(Media Flow(24) MSB=1 재개) |
+| 0x0E | Queued Floor Requests | 양방향 | 대기 요청 취소(21 Purpose·22 대상 목록·23 결과) |
+| 0x0F | Floor Release Multi Talker | CMP→UE | 동시 발언 중 한 화자의 발언 종료 통지 |
 
-**우선순위 선점 규칙:**
-- 우선순위 값이 **클수록** 높은 우선순위 (TS 24.380: 0~255, 미지정=0 최저)
-- 동일 우선순위는 선점 불가 → FLOOR_REJECT
-- 현재 화자보다 높은 우선순위 요청 시: 현재 화자에게 REVOKE → 요청자에게 GRANT → 전체에게 TAKEN
-- 화자가 그룹에서 나가면 자동으로 FLOOR_IDLE 브로드캐스트
+**발언 규칙(단말이 지켜야 할 것):**
+- Floor Granted 의 **Duration** 이 이번 발언의 최대 시간입니다. 초과하면 서버가 Floor Revoke
+  (cause 2)를 보내고, 짧은 유예 뒤 발언이 끊깁니다.
+- 발언 중 **RTP 를 멈추면**(기본 4초) 서버가 발언이 끝난 것으로 보고 회수합니다.
+- Floor Revoke 를 받으면 **Floor Release 로 응답**하십시오. 응답하지 않으면 유예 시간이 지난 뒤
+  강제 회수되고, 그 사이 다음 발언자가 기다립니다.
+- 우선순위 값이 **클수록** 높습니다(0~255, 미지정=최저). 같은 우선순위로는 선점할 수 없고
+  큐잉(SDP `mc_queueing` 협상 시) 또는 Deny 입니다. 긴급/임박(Floor Indicator D/E 비트)은
+  상위 서열로 선점합니다.
 
-**Floor 상태 머신:**
+**Floor 상태 머신(단말 관점):**
 ```
-                    REQUEST (floor free)
+                    Request (floor free)
         ┌─────────────────────────────────────┐
         │                                     ▼
-    ┌───────┐   RELEASE / Owner Left    ┌──────────┐
-    │ IDLE  │◄──────────────────────────│  TAKEN   │
-    └───────┘                           └──────────┘
+    ┌───────┐   Release / T1 만료 / 화자 이탈  ┌──────────┐
+    │ Idle  │◄──────────────────────────────│  Taken   │
+    └───────┘                               └──────────┘
         │                                     ▲
-        │         REQUEST (preempt)           │
-        │    ┌──────────────────────────┐     │
-        │    │  REVOKE(old) → GRANT(new)│─────┘
-        │    └──────────────────────────┘
+        │  Request(선점) → Revoke(기존 화자)   │
+        │  → 기존 화자 Release/유예 만료 → Granted
         │                                ┌──────────┐
-        └── REQUEST (floor busy, low) ──►│ REJECT   │
+        └── Request (점유 중, 동급) ────►│ Queue/Deny│
                                          └──────────┘
 ```
 

@@ -348,82 +348,89 @@ RTCP APP 패킷 (PT=204, name="MCPT") 형식으로 `m=application` 소켓을 통
 
 ### 8.2 패킷 구조
 
+12바이트 고정 헤더 + floor control 필드들의 **TLV**(TS 24.380 §8.1~8.2). 메시지 타입은
+헤더의 **subtype** 이 운반하며, 각 필드는 패딩을 포함해 4옥텟 배수라 모르는 필드는 건너뛴다.
+
 ```
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|V=2|P|  ST=0   | PT=204 (APP) |          length               |
+|V=2|P| subtype | PT=204 (APP) |          length               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                     SSRC of sender                            |
+|              SSRC (서버 발신은 floor control server SSRC)      |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|  'M'  |  'C'  |  'P'  |  'T'  |    (name = "MCPT")          |
+|  'M'  |  'C'  |  'P'  |  'T'  |    (name = "MCPT")            |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| opcode |id_len |     reserved                                 |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| speaker_id (가변, id_len 바이트, 4바이트 정렬 패딩)            |
+| Field ID | Length |          value ...              (+패딩)    |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
-### 8.3 OpCode 정의
+### 8.3 메시지 타입 (subtype)
 
-| OpCode | 값 | 방향 | 설명 |
-|--------|---|------|------|
-| FLOOR_REQUEST | 1 | UE → CMP | 발언권 요청 |
-| FLOOR_GRANT | 2 | CMP → UE | 발언권 승인 (speaker_id = 요청자) |
-| FLOOR_REJECT | 3 | CMP → UE | 발언권 거부 (우선순위 낮음) |
-| FLOOR_RELEASE | 4 | UE → CMP | 발언권 해제 |
-| FLOOR_IDLE | 5 | CMP → ALL | 발언권 없음 (대기 상태) |
-| FLOOR_TAKEN | 6 | CMP → ALL | 다른 화자가 발언 중 (speaker_id 포함) |
-| FLOOR_REVOKE | 7 | CMP → UE | 발언권 강제 회수 (높은 우선순위 선점) |
+| subtype | 이름 | 방향 | 주요 필드 |
+|--------|------|------|------|
+| 0 | Floor Request | UE → CMP | Floor Priority(0)·User ID(6)·Indicator(13) |
+| 1 | Floor Granted | CMP → UE | Duration(1)=최대 발언시간·SSRC(14)·Priority(0)·Indicator(13) |
+| 2 | Floor Taken | CMP → 화자 외 | Granted Party(4)=MCPTT ID·Permission(5)·Msg Seq(8)·SSRC(14) |
+| 3 | Floor Deny | CMP → UE | Reject Cause(2) — 1/3/5/7 |
+| 4 | Floor Release | UE → CMP | User ID(6). `0x14` = ack 요구 변종 |
+| 5 | Floor Idle | CMP → ALL | Msg Seq(8)·Indicator(13) |
+| 6 | Floor Revoke | CMP → 화자 | Reject Cause(2) — 2(발언시간 초과)/4(선점) |
+| 8 / 9 | Queue Position Request / Info | UE ↔ CMP | Queue Info(3) |
+| 10 | Floor Ack | 양방향 | Source(10)·Message Type(12) |
+| 0x0B / 0x0E / 0x0F | Media Flow Control / Queued Requests / Release Multi Talker | — | §8.6 |
+
+subtype 의 첫 비트(0x10)는 **Ack 요구** 변종이다 — 받은 쪽은 Floor Ack 로 회신한다.
 
 ### 8.4 Floor 요청/획득 흐름
 
 ```
 UE                          CMP (Floor 소켓)
  │                           │
- │ ── Floor Pkt ───────────► │  opcode=1 (REQUEST)
- │    (m=application 포트)    │  SSRC=내 SSRC
+ │ ── Floor Pkt ───────────► │  subtype=0 Floor Request
+ │    (m=application 포트)    │  Priority + User ID
+ │                           │  [서열 판정: tier > chair > priority]
+ │ ◄── Floor Pkt ──────────── │  subtype=1 Floor Granted
+ │    (내 m=application 포트)  │  Duration=허용 발언시간(초)
  │                           │
- │                           │  [우선순위 확인]
- │                           │
- │ ◄── Floor Pkt ──────────── │  opcode=2 (GRANT)
- │    (내 m=application 포트)  │  speaker_id=내 ID
- │                           │
- │  [이제 음성 전송 가능]      │
- │ ── RTP Audio ───────────► │  (m=audio 포트로)
- │    (m=audio 포트)          │  → 전체 멤버에게 중계
+ │  [이제 음성 전송 가능]      │  → 다른 멤버에게 subtype=2 Floor Taken
+ │ ── RTP Audio ───────────► │  (m=audio 포트로, 전체 멤버에 중계)
 ```
+
+발언 중 **RTP 를 멈추면**(기본 4초) 서버가 발언 종료로 보고 회수하고, **Duration 을 넘겨**
+말하면 Floor Revoke(cause 2) 후 짧은 유예 뒤 끊긴다.
 
 ### 8.5 Floor 해제 흐름
 
 ```
 UE                          CMP
  │                           │
- │ ── Floor Pkt ───────────► │  opcode=4 (RELEASE)
- │                           │
- │ ◄── Floor Pkt ──────────── │  opcode=5 (IDLE)
- │                           │
- │  [음성 전송 중지]           │
+ │ ── Floor Pkt ───────────► │  subtype=4 Floor Release (또는 0x14)
+ │                           │  (0x14 면 Floor Ack 회신)
+ │ ◄── Floor Pkt ──────────── │  subtype=5 Floor Idle (Msg Seq + Indicator)
+ │  [음성 전송 중지]           │  ※ 동시 발언 중 잔여 화자가 있으면
+ │                           │     Idle 대신 0x0F(Release Multi Talker)
 ```
 
 ### 8.6 선점 (Preemption)
 
-높은 우선순위 멤버가 요청하면 현재 화자에게 REVOKE:
+상위 서열(긴급/임박 > chair > 높은 priority) 요청이 오면 서버는 현재 화자에게 Revoke 를
+보내고 **유예(기본 3초) 동안 기존 발언을 계속 중계**하며 Release 를 기다린다. 요청자는 그
+사이 대기열 맨 앞에서 기다리다 회수가 끝나면 Granted 를 받는다.
 
 ```
-현재 화자 UE-B                CMP                  요청자 UE-A (높은 우선순위)
+현재 화자 UE-B                CMP                  요청자 UE-A (상위 서열)
  │                             │                    │
- │                             │ ◄── REQUEST (1) ── │
- │                             │  [A > B 우선순위]    │
- │                             │                    │
- │ ◄── REVOKE (7) ─────────── │                    │
- │  [음성 전송 중지]            │                    │
- │                             │ ── GRANT (2) ────► │
- │                             │    speaker_id=A    │
- │                             │                    │
- │ ◄── TAKEN (6) ─────────── │ ── TAKEN (6) ────► │
- │     speaker_id=A            │    speaker_id=A    │
+ │                             │ ◄── Floor Request ─│
+ │ ◄── Floor Revoke(cause 4) ─│ ── Queue Pos Info ►│  (대기열 선두)
+ │  [Release 로 응답 권장]      │  (유예 중 B 미디어 유지, 미응답 시 재전송)
+ │ ── Floor Release ─────────►│                    │
+ │                             │ ── Floor Granted ─►│
+ │ ◄── Floor Taken(A) ────────│ ─ Taken ─► 화자 외  │
 ```
+
+동급(같은 tier·priority) 요청은 선점하지 못하고 **대기열**에 들어가거나(SDP `mc_queueing`
+협상 시) Floor Deny(cause 1)를 받는다. 참가자가 1명뿐이면 Deny(cause 3)다.
 
 ### 8.7 DTMF 기반 Floor (레거시)
 

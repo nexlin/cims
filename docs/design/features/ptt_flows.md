@@ -6,7 +6,7 @@
 > |---|---|---|
 > | `prearranged` | **on-demand** | 발신 UE 의 키업(그룹 INVITE)→affiliate+등록 멤버 fan-out→무활동 해제 (TS 24.379 §10.1) |
 > | `chat` | **상시(persistent)** | 상시 세션, 멤버는 affiliation 시 합류, de-affiliate/dereg 시 이탈 (§10.2) |
-> | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 REJECT (TS 24.380 §10.3) |
+> | `broadcast` | on-demand + 발신자 floor 독점 | 개시자만 발언, 타 멤버 floor REQUEST 는 CMP 가 Deny #5(Receive only) (TS 24.380 §6.3.5.4.4) |
 >
 > - **REGISTER 는 호에 무영향**. 발신 INVITE 키업이 on-demand 세션 개시 트리거 (`ProcessGroupCall`).
 > - **affiliation = SIP PUBLISH** (`application/vnd.3gpp.mcptt-affiliation-command+xml`, TS 24.379 §9 / RFC 3903) → `CCscfModule::RecvRequestPublish` → `ptt_affiliations`. SUBSCRIBE-presence affiliation 경로도 호환을 위해 동작한다.
@@ -440,19 +440,19 @@ Floor Control은 m=application 전용 소켓(PPttTrans._floorSock)을 통해 처
 ```
 UE-A (발언 요청)         CMP (PPttTrans)             UE-B,C (수신)
   │                      │                            │
-  │ ── Floor Pkt ──────► │  op=FLOOR_REQUEST (1)      │
+  │ ── Floor Pkt ──────► │  subtype=0 Floor Request   │
   │  (m=application port)│  [PPttTrans._floorSock 수신]│
   │                      │  → McpttGroup::onFloorPacket()
   │                      │                            │
   │                      │  [우선순위 확인]             │
   │                      │  플로어 미사용 + A가 요청:  │
   │                      │                            │
-  │ ◄── Floor Pkt ─────── │  op=FLOOR_GRANT (2)       │
-  │  (m=application port)│  speaker_id=A              │
+  │ ◄── Floor Pkt ─────── │  subtype=1 Floor Granted  │
+  │  (m=application port)│  Duration=T2, SSRC=A      │
   │                      │  [PPttTrans::sendFloorTo()]│
   │                      │                            │
-  │                      │ ── Floor Pkt ────────────► │  op=FLOOR_TAKEN (6)
-  │                      │  (각 멤버 floor port로)     │  speaker_id=A
+  │                      │ ── Floor Pkt ────────────► │  subtype=2 Floor Taken
+  │                      │  (화자 외 각 멤버 floor port)│  Granted Party=A(MCPTT ID)
   │                      │                            │
   │ ── RTP Audio ──────► │ ── RTP Forward ──────────► │  A의 음성 → B,C에 전달
   │  (m=audio port)      │  [PPttTrans._rtpSock 수신]  │  (수신자별 SSRC/seq 재작성)
@@ -469,33 +469,40 @@ UE-A ── RTP (PT=101, digit='*', endBit=1) ──► CMP
 ```
 UE-A (화자)              CMP (PPttTrans)             UE-B,C
   │                      │                            │
-  │ ── Floor Pkt ──────► │  op=FLOOR_RELEASE (4)      │
+  │ ── Floor Pkt ──────► │  subtype=4(또는 0x14) Release│
   │  (m=application port)│  [onFloorPacket]           │
-  │                      │                            │
-  │ ◄── Floor Pkt ─────── │  op=FLOOR_IDLE (5)        │
-  │                      │ ── Floor Pkt ────────────► │  op=FLOOR_IDLE (5)
-  │                      │  (각 멤버 floor port로)     │
+  │                      │  (0x14 면 Floor Ack 회신)   │
+  │ ◄── Floor Pkt ─────── │  subtype=5 Floor Idle     │
+  │                      │ ── Floor Pkt ────────────► │  subtype=5 Floor Idle
+  │                      │  (각 멤버 floor port로)     │  MSN + Indicator
+
+동시 발언(dual/multi) 중이라 **잔여 화자가 있으면 Idle 대신** 나머지 참가자에게
+Floor Release Multi Talker(0x0F)를 보낸다. 화자가 RELEASE 없이 조용해지면 T1(기본 4초)
+만료로 같은 처리를 한다(Revoke 를 보내지 않는다 — TS 24.380 §6.3.4.4.3).
 ```
 
 ### C3. 플로어 우선순위 선점
+
+선점은 즉시 교체가 아니라 **'G: pending Floor Revoke'**(TS 24.380 §6.3.4.5)를 거친다 —
+회수 통지 후 T3(기본 3초) 동안 기존 화자의 미디어를 계속 중계하며 Floor Release 를 기다리고,
+요청자는 그 사이 **대기열 맨 앞**에서 기다린다.
 
 ```
 UE-B (낮은 우선순위, 현재 화자)   CMP              UE-A (높은 우선순위)
   │                                │                │
   │  (B가 화자 중)                  │                │
+  │                                │ ◄── Floor Pkt  │  subtype=0 Floor Request
+  │                                │  [A > B 서열]   │
+  │ ◄── Floor Pkt ─────────────── │  subtype=6 Revoke (cause #4 pre-empted)
+  │   (B의 floor port로)           │ ── Floor Pkt ─► │  subtype=9 Queue Position Info
+  │                                │  (T3 유예: B 미디어 계속 중계, T8 마다 Revoke 재전송)
+  │ ── Floor Pkt ──────────────►  │  subtype=4 Floor Release (또는 T3 만료)
+  │                                │ ── Floor Pkt ─► │  subtype=1 Floor Granted
   │                                │                │
-  │                                │ ◄── Floor Pkt  │  op=FLOOR_REQUEST (1)
-  │                                │  [A > B 우선순위] │
-  │                                │                │
-  │ ◄── Floor Pkt ─────────────── │  op=FLOOR_REVOKE (7)
-  │   (B의 floor port로)           │                │
-  │                                │ ── Floor Pkt ─► │  op=FLOOR_GRANT (2)
-  │                                │    speaker_id=A │
-  │                                │                │
-  │                                │ ── FLOOR_TAKEN ► ALL (각 멤버 floor port)
+  │                                │ ── Floor Taken ► 화자 외 전원
 ```
 
-### C3b. broadcast 그룹 floor 독점 (TS 24.380 §10.3)
+### C3b. broadcast 그룹 floor 독점 (TS 24.380 §6.3.5.4.4)
 
 `group_type=broadcast` 그룹은 개시자(initiator)만 발언한다. CMP `handleFloorRequest` 가
 요청자 sessionId(=userId) ≠ `_initiatorSessionId` 이면 floor 점유 여부와 무관하게 REJECT.
@@ -713,15 +720,26 @@ CSP                                    CMP
 
 ### MCPTT Floor Control RTCP APP 코드
 
-| 코드 | 이름 | 방향 | 설명 |
+메시지 타입은 RTCP APP 의 **5비트 subtype** 이다 (TS 24.380 Table 8.2.2.1-1). subtype 의
+첫 비트(0x10)가 서면 "Ack 요구" 변종이고, 수신자는 Floor Ack(0x0A)로 회신한다.
+
+| subtype | 이름 | 방향 | 설명 |
 |------|------|------|------|
-| 1 | FLOOR_REQUEST | UE → CMP | 발언권 요청 |
-| 2 | FLOOR_GRANT | CMP → UE | 발언권 승인 |
-| 3 | FLOOR_REJECT | CMP → UE | 발언권 거부 (우선순위 낮음 / broadcast 비개시자) |
-| 4 | FLOOR_RELEASE | UE → CMP | 발언권 해제 |
-| 5 | FLOOR_IDLE | CMP → ALL | 발언권 없음 (대기) |
-| 6 | FLOOR_TAKEN | CMP → ALL | 화자 변경 알림 |
-| 7 | FLOOR_REVOKE | CMP → UE | 발언권 강제 회수 (선점) |
+| 0 | Floor Request | UE → CMP | 발언권 요청 |
+| 1 | Floor Granted | CMP → UE | 발언권 승인 (Duration=남은 T2) |
+| 2 | Floor Taken | CMP → 화자 외 | 발언 중인 화자 통지 (동시 발언이면 화자 목록) |
+| 3 | Floor Deny | CMP → UE | 발언권 거부 (Reject Cause) |
+| 4 | Floor Release | UE → CMP | 발언권 해제 (`0x14` = ack 요구 변종) |
+| 5 | Floor Idle | CMP → ALL | 발언자 없음 |
+| 6 | Floor Revoke | CMP → UE | 발언권 회수 통지 (선점 #4 / 발언시간 초과 #2) |
+| 8 / 9 | Floor Queue Position Request / Info | UE↔CMP | 큐 위치 조회 / 응답 |
+| 10 | Floor Ack | 양방향 | ack 요구 메시지 확인 |
+| 0x0B | Unicast Media Flow Control | UE → CMP | 자기 하향 미디어 중단/재개 |
+| 0x0E | Queued Floor Requests | 양방향 | 대기 요청 취소/결과/통지 |
+| 0x0F | Floor Release Multi Talker | CMP → 잔여 화자 외 | 동시 발언 중 한 화자의 발언 종료 |
+
+> 전체 필드·타이머 규약은 [../modules/cmp.md](../modules/cmp.md) 「Floor Control 패킷」과
+> [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §1 이 정본이다.
 
 ### Conference NOTIFY XML 형식 (RFC 4575)
 

@@ -159,7 +159,7 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 | Deny | Reject Cause(2) — receive-only(5)/queue-full(7)/another-client(1) + Floor Indicator(13) (`_sendDeny`) |
 | Revoke | Reject Cause(2) — pre-empted(4)/other(255) + Floor Indicator(13) (`_sendRevoke`) |
 | Release Multi Talker | SSRC(14) + User ID(6) + Floor Indicator(13) (`_sendReleaseMultiTalker`) |
-| Queue Position Info | Queue Info(3: position+prio) + Queue Size(7) + Floor Indicator(13) (`_sendQueuePos`) |
+| Queue Position Info | Queue Info(3: position+prio) + Floor Indicator(13) (`_sendQueuePos`) |
 | Ack | Source(10)=controlling + Message Type(12)=확인 대상 subtype (`_sendFloorAck`) |
 
 - Floor Taken 은 **화자 본인을 제외한** 참가자에게 보내고, ambient 청취(`recv_only`) leg 에는
@@ -181,7 +181,7 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 
 ### 보존 — 정합/유지
 - 선점/tier(emergency>imminent>chair>numeric priority, TS 24.380 §6.3.4), SSRC 순차할당,
-  inactivity auto-revoke(REVOKE cause=other + IDLE/큐 승계), DTMF(PT=101) fallback.
+  T1 만료 시 발언 종료 처리(IDLE/0x0F + 큐 승계), DTMF(PT=101) fallback.
 
 ### F4. 타이머와 회수 상태 (§6.3.4 / §11.1.3)
 

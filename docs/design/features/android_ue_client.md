@@ -188,7 +188,7 @@ name = "MCPT" (0x4D435054)                                     |
 |---|---|---|
 | 0 | Floor Request | UE→서버 |
 | 1 | Floor Granted | 서버→UE |
-| 2 | Floor Taken | 서버→ALL |
+| 2 | Floor Taken | 서버→화자 외 |
 | 3 | Floor Deny | 서버→UE |
 | 4 | Floor Release | UE→서버 |
 | 5 | Floor Idle | 서버→ALL |
@@ -196,11 +196,25 @@ name = "MCPT" (0x4D435054)                                     |
 | 8 | Floor Queue Position Request | UE→서버 |
 | 9 | Floor Queue Position Info | 서버→UE |
 | 10 | Floor Ack | both |
+| 0x0B | Unicast Media Flow Control | UE→서버 |
+| 0x0E | Queued Floor Requests | both |
+| 0x0F | Floor Release Multi Talker | 서버→UE |
+
+subtype 의 **첫 비트(0x10)는 "Ack 요구"** 변종이다(§8.2.2) — 받은 쪽은 Floor Ack(Source+Message
+Type)로 회신해야 한다. 서버(CMP)는 이미 양방향으로 이를 처리한다.
 
 주요 Field ID(TS 24.380 §8.2.3): 0 Floor Priority · 1 Duration · 2 Reject Cause · 3 Queue Info ·
 4 Granted Party's Identity · 5 Permission · 6 User ID · 7 Queue Size · 8 Msg Seq No · 10 Source ·
-11 Track Info · 13 Floor Indicator(비트마스크: emergency 0x1000 / imminent 0x0800 …) · 14 SSRC.
-구현: `ptt-client/floor/{FloorControl,FloorCodec,FloorClient}.kt` (가변 문자열 필드만 4B 정렬).
+11 Track Info · 13 Floor Indicator(비트마스크: emergency 0x1000 / imminent 0x0800 …) · 14 SSRC ·
+15/16 List of Granted Users/SSRCs(동시 발언) · 21~23 Queued Floor Requests · 24 Media Flow Control.
+구현: `ptt-client/floor/{FloorControl,FloorCodec,FloorClient}.kt` — **모든 필드가 패딩 포함
+4옥텟 배수**(§8.1.3)라 미지 필드도 건너뛴다.
+
+> **서버 정합 대비 UE 과제**: CMP 는 Floor Taken 에 Permission to Request the Floor(5)·Message
+> Sequence Number(8)·SSRC(14)를, 동시 발언 시 List of Granted Users(15)+List of SSRCs(16)를
+> 싣고, 화자가 빠지면 Floor Release Multi Talker(0x0F)로 알린다. 헤더 SSRC 는 **서버 SSRC** 이고
+> 화자 SSRC 는 필드로 온다. UE 는 아직 이 필드/메시지를 해석하지 않는다(동시 발언 재생 포함) —
+> [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §1 이 서버측 정본이다.
 
 ### 5.3 단말 Floor 상태머신
 

@@ -113,7 +113,7 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
   ├── group.json                                # 그룹 디스크립터 (CSP, base 1개)
   └── {YYYY}/{MM}/{DD}/{HH}/                     # 시간버킷 (시간검색) — VoLTE 관례와 통일
       ├── events.jsonl                           # 멤버 join/leave 등 (CSP)
-      ├── floor.jsonl                            # floor 이벤트 GRANT/REVOKE/REJECT/RELEASE/IDLE (CMP)
+      ├── floor.jsonl                            # floor 이벤트 GRANT/DENY/QUEUE/QUEUE_CANCEL/RELEASE/REVOKE/REVOKE_END/IDLE (CMP)
       ├── segments.jsonl                         # 세그먼트 인덱스 (CMP)
       └── seg/{NNN}/                             # 100 세그먼트 단위 shard (000,001,…) — 디렉터리 엔트리수 상한
           ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오 (동시 발언 슬롯 0)

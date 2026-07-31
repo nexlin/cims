@@ -357,7 +357,7 @@ member 키 `(node, session_id)`.
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
-| `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §10.3), `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통) |
+| `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §6.3.5.4.4 — 타 멤버는 Deny #5, Floor Taken 의 Permission=0), `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통) |
 | `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자, private 은 초기 발언권 부여 대상 |
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
