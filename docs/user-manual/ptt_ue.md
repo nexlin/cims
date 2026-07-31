@@ -299,8 +299,11 @@ a=rtpmap:0 PCMU/8000
 a=rtpmap:101 telephone-event/8000
 a=fmtp:101 0-15
 a=sendrecv
-m=application 54000 udp MCPTT
-a=fmtp:MCPTT mc_priority=5; mc_granted=0
+m=application 54000 UDP MCPTT
+c=IN IP4 <CMP IP>
+a=floorid:0 mstrm:audio
+a=fmtp:MCPTT mc_queueing;mc_priority=3
+a=mcptt-floor-request-uri:sip:<그룹>@<도메인>
 --boundary1--
 ```
 
@@ -332,11 +335,20 @@ a=rtpmap:0 PCMU/8000
 a=rtpmap:101 telephone-event/8000
 a=fmtp:101 0-15
 a=sendrecv
-m=application 30001 udp MCPTT
-a=fmtp:MCPTT mc_priority=5; mc_granted=0
+m=application 30001 UDP MCPTT
+a=floorid:0 mstrm:audio
+a=fmtp:MCPTT mc_queueing
 ```
 
 단말은 `m=audio`에 자신의 오디오 RTP 포트, `m=application`에 Floor Control 수신 포트를 기재한다.
+
+**fmtp 협상**(TS 24.380 §12.1.2.3) — `a=fmtp:MCPTT` 파라미터가 floor 동작을 정한다.
+
+| 파라미터 | 뜻 | CIMS 단말 |
+|---|---|---|
+| `mc_queueing` | 대기열(queueing) 지원. 미협상 멤버의 비선점 요청은 **Deny #1** 로 끊긴다 | **송신** — 발언 대기 순번을 표시하고, 버튼을 떼면 0x0E 로 취소 |
+| `mc_priority=N` | 이 단말이 요청할 수 있는 **최대** 우선순위. 유효 우선순위는 협상값과 요청값 중 낮은 쪽 | **미송신** — Floor Priority 필드 자체를 안 실으므로, 제어평면이 준 멤버 우선순위가 그대로 유효 우선순위가 된다(협상하면 낮아지기만 한다) |
+| `mc_granted` | 호 성립 시 초기 발언권 보유 | **미송신** — 채널 참여는 발언 요청이 아니다. 발언은 항상 PTT down 의 Floor Request 로 시작 |
 
 ---
 
@@ -388,7 +400,7 @@ subtype 의 첫 비트(0x10)는 **Ack 요구** 변종이다 — 받은 쪽은 Fl
 UE                          CMP (Floor 소켓)
  │                           │
  │ ── Floor Pkt ───────────► │  subtype=0 Floor Request
- │    (m=application 포트)    │  Priority + User ID
+ │    (m=application 포트)    │  User ID [+ Priority · Indicator]
  │                           │  [서열 판정: tier > chair > priority]
  │ ◄── Floor Pkt ──────────── │  subtype=1 Floor Granted
  │    (내 m=application 포트)  │  Duration=허용 발언시간(초)
@@ -398,7 +410,13 @@ UE                          CMP (Floor 소켓)
 ```
 
 발언 중 **RTP 를 멈추면**(기본 4초) 서버가 발언 종료로 보고 회수하고, **Duration 을 넘겨**
-말하면 Floor Revoke(cause 2) 후 짧은 유예 뒤 끊긴다.
+말하면 Floor Revoke(cause 2) 후 짧은 유예 뒤 끊긴다. 단말은 Duration 잔여를 표시하고 마감
+직전 스스로 Release 하므로, 정상 동작에서는 cause 2 회수까지 가지 않는다.
+
+다른 사람이 말하는 중이라면 Deny 대신 **대기열**에 들어간다(`mc_queueing` 협상 전제) —
+subtype=9 Floor Queue Position Info 로 순번을 받고, 앞이 비면 Floor Granted 로 승급한다.
+버튼을 떼서 포기하면 subtype=0x0E(Queued Floor Requests, Purpose=Cancel Request)로 취소한다.
+**Floor Release 로는 취소되지 않는다** — 서버는 발언 중이 아닌 leg 의 Release 를 무시한다.
 
 ### 8.5 Floor 해제 흐름
 

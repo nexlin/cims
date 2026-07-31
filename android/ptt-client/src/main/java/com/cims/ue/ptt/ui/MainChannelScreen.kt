@@ -50,6 +50,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cims.ue.core.message.MsgDirection
@@ -62,6 +63,7 @@ import com.cims.ue.ptt.ListenPolicy
 import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.R
+import com.cims.ue.ptt.floor.FloorIndicator
 import com.cims.ue.ptt.floor.FloorState
 import kotlinx.coroutines.delay
 import java.util.Date
@@ -168,7 +170,10 @@ private fun PrimaryChannelPanel(
         val hwPtt by HwPtt.present.collectAsState()
         if (!hwPtt) {
             Spacer(Modifier.height(8.dp))
-            PttBar(floor = st.floor, enabled = st.inCall, modifier = Modifier.fillMaxWidth(),
+            // Floor Taken 의 Permission=0(청취 전용 leg — broadcast 그룹·ambient)이면 버튼을 막는다
+            // (TS 24.380 §8.2.3.7) — 눌러도 Deny 만 돌아온다.
+            PttBar(floor = st.floor, enabled = st.inCall, listenOnly = !s.canRequestFloor,
+                queuePosition = s.queuePosition, modifier = Modifier.fillMaxWidth(),
                 onDown = { st.ctl?.pttDown() }, onUp = { st.ctl?.pttUp() })
         }
         Spacer(Modifier.height(10.dp))
@@ -285,7 +290,9 @@ private fun AudioRouteSheet(st: PttUiState, onDismiss: () -> Unit) {
 @Composable
 private fun SpeakingIndicator(s: GroupCallState) {
     val sp = s.speaker ?: return
-    val name = if (sp.self) "나" else PttController.fmtNumber(PttController.bareId(sp.id))
+    // 동시 발언이면 대표 화자 + "외 N" (전체 명단은 발언 상태 스트립에)
+    val name = (if (sp.self) "나" else PttController.fmtNumber(PttController.bareId(sp.id))) +
+        if (s.talkers.size > 1) " 외 ${s.talkers.size - 1}" else ""
     Row(
         Modifier.clip(RoundedCornerShape(6.dp)).background(Ct.MintDim)
             .padding(horizontal = 7.dp, vertical = 3.dp),
@@ -301,7 +308,7 @@ private fun SpeakingIndicator(s: GroupCallState) {
 /** 발언 상태 스트립 — 슬림 한 줄(발언자/경과시간/상태). */
 @Composable
 private fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
-    var nowMs by remember { mutableLongStateOf(0L) }
+    var nowMs by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
     val sp = s.speaker
     LaunchedEffect(sp) {
         while (sp != null) {
@@ -318,16 +325,37 @@ private fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
         when {
             sp != null -> {
                 val elapsed = ((nowMs - sp.sinceMs).coerceAtLeast(0L)) / 1000
+                // 동시 발언(dual/multi, TS 24.380 §6.2.4.3.3) — 화자가 2명 이상이면 전원을 나열한다.
+                val label = if (s.talkers.size > 1)
+                    s.talkers.joinToString(", ") {
+                        if (it.self) "나" else PttController.fmtNumber(PttController.bareId(it.id))
+                    } +
+                        // G-bit(dual floor)=상위 tier 가 선점 없이 끼어든 동시 발언 (§8.2.3.15)
+                        if (s.floorIndicator and FloorIndicator.DUAL_FLOOR != 0) " 동시 발언(우선)"
+                        else " 동시 발언"
+                else if (sp.self) "내가 발언 중"
+                else "${PttController.fmtNumber(PttController.bareId(sp.id))} 발언 중"
                 Text(
-                    if (sp.self) "내가 발언 중" else "${PttController.fmtNumber(PttController.bareId(sp.id))} 발언 중",
+                    label,
                     color = if (sp.self) Ct.Mint else Ct.Amber,
-                    fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                    fontSize = if (s.talkers.size > 1) 13.sp else 15.sp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
                 Text("%d:%02d".format(elapsed / 60, elapsed % 60), color = Ct.TextDim, fontSize = 13.sp)
+                // Granted Duration(TS 24.380 §8.2.3.3) 잔여 — 마감 전 자동 종료되므로 남은 시간을
+                // 같이 보여준다. 마지막 10초는 경고색.
+                if (sp.self && s.speakDeadlineMs > 0) {
+                    val left = ((s.speakDeadlineMs - nowMs).coerceAtLeast(0L) + 999) / 1000
+                    Text("남은 ${left}초", fontSize = 12.sp,
+                        color = if (left <= 10) Ct.Amber else Ct.TextFaint)
+                }
             }
             st.floor == FloorState.REQUESTING -> Text("발언권 요청 중…", color = Ct.Amber,
                 fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            st.floor == FloorState.QUEUED -> Text(
+                s.queuePosition?.let { "발언 대기 ${it}번째" } ?: "발언 대기 중",
+                color = Ct.Amber, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             s.active -> Text("대기 중", color = Ct.TextFaint, fontSize = 13.sp)
             else -> Text("연결 중…", color = Ct.TextFaint, fontSize = 13.sp)
         }
@@ -399,13 +427,15 @@ private fun OverlayToggle(icon: Int, desc: String, active: Boolean, onClick: () 
 
 /** 가로형 대형 PTT 바(시안의 마이크 버튼) — 누르는 동안 발언, 떼면 해제. */
 @Composable
-private fun PttBar(floor: FloorState, enabled: Boolean, modifier: Modifier = Modifier,
+private fun PttBar(floor: FloorState, enabled: Boolean, listenOnly: Boolean = false,
+                   queuePosition: Int? = null, modifier: Modifier = Modifier,
                    onDown: () -> Unit, onUp: () -> Unit) {
+    @Suppress("NAME_SHADOWING") val enabled = enabled && !listenOnly
     val speaking = floor == FloorState.SPEAKING
     val bg = when {
         !enabled -> Ct.GrayDim
         speaking -> Ct.Mint
-        floor == FloorState.REQUESTING -> Ct.Amber
+        floor == FloorState.REQUESTING || floor == FloorState.QUEUED -> Ct.Amber
         floor == FloorState.LISTENING -> Ct.SurfaceHi
         else -> Ct.Mint
     }
@@ -450,8 +480,12 @@ private fun PttBar(floor: FloorState, enabled: Boolean, modifier: Modifier = Mod
             Icon(painterResource(R.drawable.ic_ptt), contentDescription = "PTT",
                 tint = fg, modifier = Modifier.size(24.dp))
             val label = when {
+                listenOnly -> "청취 전용 채널"
                 !enabled -> "채널 없음"
                 speaking -> "발언 중 — 떼면 종료"
+                // 대기열(§8.2.11) — 버튼을 계속 눌러 두면 순번이 오고, 떼면 대기 요청이 취소된다.
+                floor == FloorState.QUEUED ->
+                    queuePosition?.let { "대기 ${it}번째 — 떼면 취소" } ?: "대기 중 — 떼면 취소"
                 floor == FloorState.REQUESTING -> "요청 중…"
                 floor == FloorState.LISTENING -> "수신 중"
                 else -> "눌러서 말하기"

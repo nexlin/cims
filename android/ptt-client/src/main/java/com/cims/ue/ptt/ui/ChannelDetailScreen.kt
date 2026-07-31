@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.cims.ue.ptt.ChannelRole
 import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.R
+import com.cims.ue.ptt.Speaker
 import com.cims.ue.ptt.csc.GroupMember
 
 /**
@@ -153,7 +154,8 @@ fun ChannelDetailScreen(
 
         // 접속 상태 결합 — 그룹 문서 명부(번호 키) × conference-info 참가자
         val me = st.ctl?.mcpttId?.let { PttController.bareId(it) }
-        val speakerId = s?.speaker?.let { PttController.bareId(it.id) }
+        // 동시 발언(dual/multi)에서는 화자가 여럿이라 집합으로 본다 — 명부의 발언 표시는 전원에게.
+        val speakerIds = s?.talkers?.map { PttController.bareId(it.id) }?.toSet().orEmpty()
         val members = doc?.members.orEmpty()
         val byPhone = members.associateBy { PttController.bareId(it.uri) }
         // 접속 인원은 참여 여부와 무관하게 conference 구독으로 알 수 있다(제휴 채널 전체 구독).
@@ -182,9 +184,14 @@ fun ChannelDetailScreen(
                         color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                     )
                     s?.speaker?.let { sp ->
-                        val spName = byPhone[PttController.bareId(sp.id)]?.name
+                        // 동시 발언이면 전원을 나열한다(§6.2.4.3.3 — dual/multi).
+                        fun label(t: Speaker) = if (t.self) "나"
+                            else byPhone[PttController.bareId(t.id)]?.name
+                                ?: PttController.fmtNumber(PttController.bareId(t.id))
+                        val talkers = s?.talkers?.ifEmpty { listOf(sp) } ?: listOf(sp)
                         Text(
-                            (if (sp.self) "내가" else spName ?: PttController.fmtNumber(PttController.bareId(sp.id))) + " 발언 중",
+                            talkers.joinToString(", ") { label(it) } +
+                                if (talkers.size > 1) " 동시 발언" else " 발언 중",
                             color = if (sp.self) Ct.Mint else Ct.Amber, fontSize = 12.sp,
                             modifier = Modifier.padding(top = 3.dp),
                         )
@@ -244,7 +251,7 @@ fun ChannelDetailScreen(
                     val m = byPhone[pid]
                     MemberRow(
                         member = m, phone = pid, isMe = pid == me,
-                        speaking = pid == speakerId,
+                        speaking = pid in speakerIds,
                         pending = onlineIds[pid].equals("pending", true),
                         online = true,
                     )

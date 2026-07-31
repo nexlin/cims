@@ -143,9 +143,11 @@ private fun ChannelRow(
                     sp != null -> {
                         // 발언 중 — 마이크 아이콘 + 발언자(그룹 문서 이름 우선, 없으면 번호)
                         val spId = PttController.bareId(sp.id)
-                        val spName = if (sp.self) "나"
+                        val spName = (if (sp.self) "나"
                             else doc?.members?.firstOrNull { PttController.bareId(it.uri) == spId }?.name
-                                ?.takeIf { it.isNotBlank() } ?: PttController.fmtNumber(spId)
+                                ?.takeIf { it.isNotBlank() } ?: PttController.fmtNumber(spId)) +
+                            // 동시 발언(dual/multi) — 목록 행에는 "외 N" 으로만(전체는 채널 상세)
+                            (s?.talkers?.size ?: 0).let { if (it > 1) " 외 ${it - 1}" else "" }
                         Row(
                             Modifier.clip(RoundedCornerShape(6.dp)).background(Ct.MintDim)
                                 .padding(horizontal = 7.dp, vertical = 2.dp),

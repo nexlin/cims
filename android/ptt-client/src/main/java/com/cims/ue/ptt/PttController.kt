@@ -16,7 +16,9 @@ import com.cims.ue.ptt.csc.TokenSet
 import com.cims.ue.ptt.floor.FloorClient
 import com.cims.ue.ptt.floor.FloorEvent
 import com.cims.ue.ptt.floor.FloorIndicator
+import com.cims.ue.ptt.floor.FloorPermission
 import com.cims.ue.ptt.floor.FloorState
+import com.cims.ue.ptt.floor.FloorTalker
 import com.cims.ue.core.sip.MsrpEvent
 import com.cims.ue.ptt.mcdata.McDataCodec
 import com.cims.ue.ptt.mcdata.msrp.MsrpCodec
@@ -71,6 +73,18 @@ data class GroupCallState(
     val emergency: Boolean = false,       // 긴급 상태(내 개시 또는 수신 감지)
     val emergencyMine: Boolean = false,   // 내가 개시자(취소 권한 — 서버는 개시자 취소만 수용)
     val volume: Float = 1f,               // 채널별 수신 음량(0~2, 1=원음)
+    /** 발언 요청 가능 여부 — Floor Taken 의 Permission to Request the Floor(TS 24.380 §8.2.3.7).
+     *  broadcast 그룹·ambient(recv_only) 청취 leg 는 0 이 와서 PTT 버튼을 비활성화한다. */
+    val canRequestFloor: Boolean = true,
+    /** 내 발언 마감 시각(elapsedRealtime ms) — Granted Duration(T2) 기반 잔여시간 표시. 0=제한 없음. */
+    val speakDeadlineMs: Long = 0,
+    /** 내 대기열 위치 — Queue Position Info(TS 24.380 §8.2.3.5). null=대기 중 아님. */
+    val queuePosition: Int? = null,
+    /** 동시 발언(dual/multi) 중인 화자 전체. 단일 발언이면 1명, 유휴면 빈 목록.
+     *  [speaker] 는 이 중 대표(내가 있으면 나, 아니면 첫 타인)다. */
+    val talkers: List<Speaker> = emptyList(),
+    /** 이 세션의 Floor Indicator 비트 — dual floor(G)/multi-talker(I) 표시용. */
+    val floorIndicator: Int = 0,
 )
 
 /**
@@ -178,12 +192,23 @@ class PttController(
         var mySpeakStartMs: Long = 0          // 이력용 — 내 발언 시작(elapsedRealtime)
         var otherSpeaker: String? = null      // 이력용 — 수신 중 발언자
         var otherSpeakStartMs: Long = 0
+        // Floor Taken 의 Permission(§8.2.3.7)=0 이면 이 세션에서는 발언 요청이 불가하다
+        // (broadcast 그룹·ambient 청취 leg). 눌러도 Deny 만 받으므로 버튼을 미리 막는다.
+        var canRequestFloor: Boolean = true
+        var speakDeadlineMs: Long = 0         // Granted Duration(T2) 마감(elapsedRealtime), 0=무제한
+        var talkLimit: Job? = null            // 마감 임박 알림 + 자체 종료 타이머
+        var queuePosition: Int? = null        // Queue Position Info — 대기 중일 때만
+        var talkers: List<Speaker> = emptyList()   // 동시 발언 화자 전체(§8.2.3.17~18)
+        var talkerSsrc: Map<String, Long> = emptyMap()  // 화자 → RTP SSRC (SSRC 별 재생용, U10)
+        var floorIndicator: Int = 0           // 마지막 수신 Floor Indicator (G/I 비트 표시)
         val floor: FloorClient = FloorClient(ssrc, mcpttId, localPort = 0,
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
         fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(),
-            audible, emergency, emergencyMine, volume)
-        fun close() { runCatching { floor.close() } }
+            audible, emergency, emergencyMine, volume, canRequestFloor, speakDeadlineMs,
+            // 대기 위치는 QUEUED 상태에서만 의미가 있다 — 상태로 파생해 지난 값이 새지 않게 한다.
+            queuePosition.takeIf { floorState == FloorState.QUEUED }, talkers, floorIndicator)
+        fun close() { talkLimit?.cancel(); runCatching { floor.close() } }
     }
 
     private val lock = Any()
@@ -784,6 +809,24 @@ class PttController(
 
     // ── 그룹콜 참여/이탈 ──
 
+    /**
+     * 그룹콜 SDP 의 floor 섹션 (TS 24.380 §12.1) — offer(발신)·answer(착신 자동 수락) 공용.
+     * `c=` 는 주입 시점에 `CimsCall.withConnLine` 이 세션 IP 로 채운다.
+     *
+     * **fmtp 협상**(§12.1.2.3, §6.3.5.4.4):
+     * - `mc_queueing` — 큐잉 지원 선언. 미협상 멤버의 비선점 요청은 서버가 **Deny #1** 로 끊는다
+     *   (CSP 도 INVITE 에 같은 속성을 광고한다). 단말은 Queue Position Info 를 소비한다.
+     * - `mc_priority` 는 **싣지 않는다** — 협상하면 유효 우선순위가 그 값으로 clamp 되는데
+     *   ([FloorCodec.request] 참조로 우선순위 필드 자체를 안 보내므로) 제어평면이 준 멤버
+     *   우선순위를 그대로 쓰는 편이 항상 같거나 높다.
+     * - `mc_granted`(호 성립 시 초기 발언권) 도 싣지 않는다 — 채널 참여는 발언 요청이 아니다.
+     *   발언은 언제나 PTT down 의 Floor Request 로 시작한다.
+     */
+    private fun floorSdp(s: Session): String =
+        "m=application ${s.floor.localPort} UDP MCPTT\r\n" +
+            "a=floorid:0 mstrm:audio\r\n" +
+            "a=fmtp:MCPTT mc_queueing"
+
     /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널.
      *  [emergency]=true 면 긴급 그룹콜로 개시(INVITE mcptt-info emergency-ind, TS 24.379). */
     fun joinGroupCall(
@@ -803,7 +846,7 @@ class PttController(
         }
         ensureAffiliated(groupId)
         channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
-        val appSdp = "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio"
+        val appSdp = floorSdp(s)
         val parts = ArrayList<SipBodyPart>()
         parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
             McpttXml.mcpttInfo(McpttXml.SessionType.PREARRANGED, "tel:$groupId", mcpttId, "tel:$groupId",
@@ -833,7 +876,7 @@ class PttController(
                 sessionMap[groupId] = it
             }
         }
-        sip.answerGroupCall(inc.id, "m=application ${s.floor.localPort} UDP MCPTT\r\na=floorid:0 mstrm:audio")
+        sip.answerGroupCall(inc.id, floorSdp(s))
         subscribeRoster(groupId, true)
         channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
         if (inc.emergency) feedback?.emergencyTone()
@@ -1337,16 +1380,20 @@ class PttController(
     /** PTT down — 주채널에 Floor Request. GRANT 수신 시에만 실제 발화(mic on). */
     fun pttDown() {
         val s = primarySession() ?: run { _status.value = "그룹콜을 먼저 시작하세요"; return }
+        // Floor Taken 이 Permission=0 을 실어 온 세션(broadcast 그룹·ambient 청취 leg)은
+        // 요청해봐야 Deny 뿐이다 — 요청 자체를 막고 이유를 알린다(TS 24.380 §6.3.4.4.2-3d).
+        if (!s.canRequestFloor) { feedback?.denyTone(); _status.value = "이 채널은 청취 전용"; return }
         when (s.floorState) {
-            FloorState.SPEAKING, FloorState.REQUESTING -> return
+            // QUEUED = 이미 요청이 대기열에 있다(버튼 유지 중) — 다시 보낼 것이 없다.
+            FloorState.SPEAKING, FloorState.REQUESTING, FloorState.QUEUED -> return
             FloorState.LISTENING -> { feedback?.denyTone(); _status.value = "다른 사용자가 발언 중"; return }
             else -> Unit
         }
         pttHeld = true
         setTalkCapture(true)     // 마이크 확보 개시 — volte 양보 + 전이중 전환(floor 요청과 병렬 진행)
-        // 긴급 세션의 발언은 Floor Indicator 에 emergency 비트 — CMP tier 상향/선점(TS 24.380)
-        s.floor.requestFloor(priority = 0,
-            indicator = if (s.emergency) FloorIndicator.EMERGENCY else null)
+        // 긴급 세션의 발언은 Floor Indicator 에 emergency 비트 — CMP tier 상향/선점(TS 24.380).
+        // Floor Priority 는 싣지 않는다 — 유효 우선순위가 요청값으로 깎이지 않게(§6.3.5.4.4-1a).
+        s.floor.requestFloor(indicator = if (s.emergency) FloorIndicator.EMERGENCY else null)
         s.floorState = FloorState.REQUESTING
         publish()
         // GRANT/DENY 무응답 방어 — 타임아웃 시 IDLE 복귀 + 거부 톤
@@ -1370,18 +1417,78 @@ class PttController(
         requestTimeout?.cancel()
         val s = primarySession() ?: return
         val wasSpeaking = s.floorState == FloorState.SPEAKING
+        clearTalkLimit(s)
         if (wasSpeaking && s.mySpeakStartMs > 0) {
             emit(PttEventKind.TALK_ME, s.groupId,
                 durationMs = SystemClock.elapsedRealtime() - s.mySpeakStartMs)
             s.mySpeakStartMs = 0
         }
+        // 대기 중이었다면 대기 요청부터 취소한다(§8.2.15) — 서버는 발언 중이 아닌 leg 의
+        // Floor Release 를 무시하므로, Release 만 보내면 유령 대기자로 남아 나중에 엉뚱한
+        // 시점에 발언권을 받는다(그때는 버튼을 뗀 뒤라 즉시 반납 — 승급 한 턴이 낭비된다).
+        if (s.floorState == FloorState.QUEUED) s.floor.cancelQueuedRequest()
         s.floor.releaseFloor()
+        s.queuePosition = null
         if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
         setTalkCapture(false)    // 발언 종료 — 스피커 전용 복귀 + volte 마이크 복귀
-        if (s.floorState != FloorState.LISTENING) s.floorState = FloorState.IDLE
-        if (s.speaker?.self == true) s.speaker = null
+        // 내 발언만 끝난다 — 동시 발언 중이면 남은 화자를 계속 듣는 상태로 남는다.
+        s.talkers = s.talkers.filterNot { it.self }
+        s.floorState = if (s.talkers.isEmpty()) FloorState.IDLE else FloorState.LISTENING
+        if (s.speaker?.self == true) s.speaker = s.talkers.firstOrNull()
         if (wasSpeaking) feedback?.releaseTone()
         publish()
+    }
+
+    /**
+     * Granted Duration(TS 24.380 §8.2.3.3 = 서버 T2) 준수 — 허용 시간을 넘기면 서버가
+     * Revoke #2(Media burst too long)로 끊는다. 마감 [TALK_WARN_MS] 전에 알리고, 마감
+     * 직전([TALK_END_MARGIN_MS])에 **스스로 발언을 끝낸다** — 회수당하는 것보다 낫다.
+     * Duration 이 없거나 0(서버 FloorStopTalkSec=0 = 무제한)이면 타이머를 걸지 않는다.
+     */
+    private fun armTalkLimit(s: Session, durationSec: Int?) {
+        clearTalkLimit(s)
+        val d = (durationSec ?: 0).toLong() * 1000L
+        if (d <= TALK_END_MARGIN_MS) return
+        s.speakDeadlineMs = SystemClock.elapsedRealtime() + d
+        s.talkLimit = scope.launch {
+            val warnAt = d - TALK_WARN_MS
+            if (warnAt > 0) {
+                delay(warnAt)
+                if (s.floorState == FloorState.SPEAKING) feedback?.talkLimitTone()
+            }
+            delay(maxOf(0L, d - maxOf(0L, warnAt) - TALK_END_MARGIN_MS))
+            if (s.floorState != FloorState.SPEAKING) return@launch
+            Log.i(TAG, "talk limit reached (${durationSec}s) — self release")
+            _status.value = "발언 시간 초과 — 발언 종료"
+            // 주채널이면 평소 발언 종료 경로(mic·캡처 게이트·이력까지) 그대로, 아니면 floor 만 반납.
+            if (primarySession() === s) pttUp() else { s.floor.releaseFloor(); clearTalkLimit(s) }
+        }
+    }
+
+    private fun clearTalkLimit(s: Session) {
+        s.talkLimit?.cancel()
+        s.talkLimit = null
+        s.speakDeadlineMs = 0
+    }
+
+    /**
+     * 동시 발언 화자 집합 반영 (TS 24.380 §8.2.3.17~18) — Floor Taken 의 화자 리스트나
+     * 0x0F 이탈 후 잔여 목록을 세션 상태로 옮긴다.
+     *
+     * **이미 말하고 있던 화자의 [Speaker.sinceMs] 는 보존한다** — 다른 사람이 끼어들 때마다
+     * 목록이 다시 오는데, 매번 새로 만들면 발언 경과시간이 0 으로 되돌아간다.
+     * 화자별 SSRC 는 [Session.talkerSsrc] 에 남긴다(SSRC 별 재생 분리 = U10 의 입력).
+     */
+    private fun applyTalkers(s: Session, list: List<FloorTalker>) {
+        val now = SystemClock.elapsedRealtime()
+        val prev = s.talkers.associateBy { bareId(it.id) }
+        s.talkers = list.map { t ->
+            prev[bareId(t.id)]
+                ?: Speaker(t.id, self = t.self, sinceMs = now, groupId = s.groupId)
+        }
+        s.talkerSsrc = list.mapNotNull { t -> t.ssrc?.let { bareId(t.id) to it } }.toMap()
+        // 대표 화자 = 내가 말하고 있으면 나, 아니면 첫 타인(단일 발언이면 종전과 동일).
+        s.speaker = s.talkers.firstOrNull { it.self } ?: s.talkers.firstOrNull()
     }
 
     private fun onFloorEvent(groupId: String, ev: FloorEvent) {
@@ -1398,8 +1505,14 @@ class PttController(
                     return
                 }
                 s.floorState = FloorState.SPEAKING
-                s.speaker = Speaker(mcpttId, self = true, sinceMs = SystemClock.elapsedRealtime())
+                s.floorIndicator = ev.indicator ?: 0
+                // 동시 발언이면 이미 말하던 화자를 남겨 둔 채 나를 더한다(dual/multi 2번째 자리).
+                val me = s.talkers.firstOrNull { it.self }
+                    ?: Speaker(mcpttId, self = true, sinceMs = SystemClock.elapsedRealtime(), groupId = s.groupId)
+                s.talkers = listOf(me) + s.talkers.filterNot { it.self }
+                s.speaker = me
                 s.mySpeakStartMs = SystemClock.elapsedRealtime()
+                armTalkLimit(s, ev.durationSec)
                 _status.value = "발언권 획득"
                 // "삑 후 말하기": 승인 톤 재생이 끝난 뒤 mic 개방(톤이 그룹으로 송출되지 않게)
                 scope.launch {
@@ -1410,6 +1523,7 @@ class PttController(
                 }
             }
             is FloorEvent.Denied -> {
+                clearTalkLimit(s)
                 if (isPrimary) {
                     requestTimeout?.cancel()
                     if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
@@ -1420,6 +1534,8 @@ class PttController(
                 s.floorState = FloorState.IDLE
             }
             is FloorEvent.Revoked -> {
+                clearTalkLimit(s)
+                // Floor Release 회신은 FloorClient 가 이미 보냈다(§6.2.4.5.4) — 여기선 mic·UI 만.
                 if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
                 if (isPrimary) setTalkCapture(false)
                 s.floorState = FloorState.IDLE
@@ -1428,18 +1544,35 @@ class PttController(
                         durationMs = SystemClock.elapsedRealtime() - s.mySpeakStartMs)
                     s.mySpeakStartMs = 0
                 }
-                if (s.speaker?.self == true) s.speaker = null
+                // 내 발언만 회수된다 — 동시 발언 중이면 남은 화자는 계속 들린다.
+                s.talkers = s.talkers.filterNot { it.self }
+                s.speaker = s.talkers.firstOrNull()
+                if (s.talkers.isNotEmpty()) s.floorState = FloorState.LISTENING
                 if (isPrimary) { feedback?.revokeTone(); _status.value = "발언권 회수: ${ev.text ?: ev.cause}" }
             }
             is FloorEvent.Taken -> {
-                s.floorState = FloorState.LISTENING
-                s.speaker = Speaker(ev.speaker ?: "?", self = false, sinceMs = SystemClock.elapsedRealtime())
-                s.otherSpeaker?.let { prev ->      // 발언자 교대 — 직전 수신 발언 마감
-                    emit(PttEventKind.TALK_OTHER, s.groupId, peer = prev,
-                        durationMs = SystemClock.elapsedRealtime() - s.otherSpeakStartMs)
+                // Permission to Request the Floor(§8.2.3.7) — 이 leg 의 발언 요청 가부. 서버가
+                // broadcast 그룹·ambient 청취 leg 에만 0 을 보내므로, 값이 올 때만 갱신한다.
+                ev.permission?.let { s.canRequestFloor = it != FloorPermission.DENIED }
+                s.floorIndicator = ev.indicator ?: 0
+                applyTalkers(s, ev.talkers)
+                // 동시 발언(dual/multi)에서 뒤에 승급한 화자의 Taken 은 **먼저 말하던 나에게도**
+                // 오고 목록에 내가 있다 — 그때 강등하면 내 마이크가 닫힌다(§6.3.4.4.7a).
+                if (ev.meSpeaking) {
+                    s.floorState = FloorState.SPEAKING
+                } else {
+                    clearTalkLimit(s)
+                    s.floorState = FloorState.LISTENING
                 }
-                s.otherSpeaker = ev.speaker?.let { bareId(it) } ?: "?"
-                s.otherSpeakStartMs = SystemClock.elapsedRealtime()
+                val other = s.talkers.firstOrNull { !it.self }?.let { bareId(it.id) }
+                if (other != s.otherSpeaker) {
+                    s.otherSpeaker?.let { prev ->  // 발언자 교대 — 직전 수신 발언 마감
+                        emit(PttEventKind.TALK_OTHER, s.groupId, peer = prev,
+                            durationMs = SystemClock.elapsedRealtime() - s.otherSpeakStartMs)
+                    }
+                    s.otherSpeaker = other
+                    s.otherSpeakStartMs = SystemClock.elapsedRealtime()
+                }
                 // CMP 는 긴급 tier 발언자의 TAKEN 에 emergency 비트를 방송 — 수신측 긴급 표시 latch
                 // (CSP 는 상향을 fan-out 하지 않으므로 이것이 in-call 수신 경로의 유일한 신호)
                 if ((ev.indicator ?: 0) and FloorIndicator.EMERGENCY != 0 && !s.emergency) {
@@ -1449,8 +1582,29 @@ class PttController(
                     if (isPrimary) _status.value = "🚨 [${s.groupId}] 긴급 발언 수신"
                 }
             }
+            // 동시 발언 중 한 명만 발언 종료(0x0F) — Idle 이 아니므로 목록만 줄인다.
+            is FloorEvent.TalkerLeft -> {
+                applyTalkers(s, ev.talkers)
+                if (ev.meSpeaking) s.floorState = FloorState.SPEAKING
+                else {
+                    clearTalkLimit(s)
+                    s.floorState = if (ev.talkers.isEmpty()) FloorState.IDLE else FloorState.LISTENING
+                }
+                val goneBare = ev.id?.let { bareId(it) }
+                if (goneBare != null && goneBare == s.otherSpeaker) {  // 수신 발언 마감(이력)
+                    emit(PttEventKind.TALK_OTHER, s.groupId, peer = goneBare,
+                        durationMs = SystemClock.elapsedRealtime() - s.otherSpeakStartMs)
+                    s.otherSpeaker = s.talkers.firstOrNull { !it.self }?.let { bareId(it.id) }
+                    s.otherSpeakStartMs = SystemClock.elapsedRealtime()
+                }
+            }
             FloorEvent.Idle -> {
-                if (s.floorState != FloorState.SPEAKING) s.floorState = FloorState.IDLE
+                if (s.floorState != FloorState.SPEAKING) {
+                    clearTalkLimit(s)
+                    s.floorState = FloorState.IDLE
+                    s.talkers = emptyList()
+                    s.talkerSsrc = emptyMap()
+                }
                 if (s.speaker?.self != true) s.speaker = null
                 s.otherSpeaker?.let { prev ->      // 수신 발언 종료 — 이력 마감
                     emit(PttEventKind.TALK_OTHER, s.groupId, peer = prev,
@@ -1458,7 +1612,22 @@ class PttController(
                     s.otherSpeaker = null
                 }
             }
-            is FloorEvent.QueuePosition -> { s.floorState = FloorState.QUEUED; _status.value = "대기열 ${ev.position}" }
+            // 대기열 진입·위치 변동(§8.2.11) — 버튼을 계속 누르고 있으면 승급을 기다리고,
+            // 떼면 pttUp 의 Floor Release 가 대기 요청을 취소한다(§8.2.15 취소 경로).
+            is FloorEvent.QueuePosition -> {
+                s.floorState = FloorState.QUEUED
+                s.queuePosition = ev.position
+                if (isPrimary) _status.value = ev.position?.let { "발언 대기 ${it}번째" } ?: "발언 대기 중"
+            }
+            // 대기 요청 소멸 — 내 취소의 결과이거나 서버/의장이 지운 통지. 어느 쪽이든 IDLE.
+            is FloorEvent.QueueCancelled -> {
+                s.queuePosition = null
+                if (s.floorState == FloorState.QUEUED) s.floorState = FloorState.IDLE
+                if (isPrimary && !ev.byMe) {
+                    feedback?.denyTone()
+                    _status.value = "발언 대기 취소됨"
+                }
+            }
             is FloorEvent.Other -> Log.d(TAG, "floor other ${ev.type}")
         }
         publish()
@@ -1479,6 +1648,11 @@ class PttController(
         private const val TAG = "PttController"
         /** Floor Request 후 GRANT/DENY 무응답 시 IDLE 복귀 시한. */
         private const val REQUEST_TIMEOUT_MS = 3000L
+
+        /** Granted Duration(T2) 마감 임박 알림 시점 — 마감 이 시간 전에 톤·진동으로 알린다. */
+        private const val TALK_WARN_MS = 5000L
+        /** 자체 종료 여유 — 마감 이 시간 전에 Release 를 보내 서버 Revoke #2 를 앞지른다. */
+        private const val TALK_END_MARGIN_MS = 300L
 
         /** 오디오 라우팅: 이어폰(유선/BT) — [SipController.AUDIO_ROUTE_DEFAULT]/EARPIECE/SPEAKER(0~2) 확장. */
         const val AUDIO_ROUTE_HEADSET = 3

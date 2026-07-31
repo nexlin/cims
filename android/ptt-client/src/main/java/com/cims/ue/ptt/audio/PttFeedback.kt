@@ -46,6 +46,13 @@ class PttFeedback(context: Context) {
     /** 발언 종료(내 RELEASE) 로컬 확인 — 짧은 단일 삑. */
     fun releaseTone() = play(ToneGenerator.TONE_PROP_BEEP)
 
+    /** 발언 허용 시간(Granted Duration=T2) 임박 — 짧은 프롬프트 + 단일 진동.
+     *  이 톤을 무시하고 초과하면 서버가 Revoke #2(Media burst too long)로 끊는다(TS 24.380 §6.3.4.4.4). */
+    fun talkLimitTone() {
+        play(ToneGenerator.TONE_PROP_PROMPT, 200)
+        vibrate(longArrayOf(0, 50))
+    }
+
     /** 긴급(SOS) 개시/수신 — 긴 경고 톤 + 강한 삼중 진동(다른 톤과 뚜렷이 구별). */
     fun emergencyTone() {
         play(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 800)
