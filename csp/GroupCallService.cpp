@@ -560,6 +560,11 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
             }
         }
 
+        // RFC 4575: 이탈 통지 — OnCallTerminated(BYE) 와 동일 계약. de-register/로그아웃/
+        //   force-stop 으로 들어오는 이 경로도 conference 구독자에게 알려야 남은 단말의
+        //   접속 명단에서 이 사용자가 사라진다 (teardown 앞에서 호출 — 버전 단조성).
+        SendConferenceNotify( strGroupId, strUserId, "disconnected", "deleted" );
+
         // on-demand 그룹(prearranged/broadcast): 마지막 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
         //   stale 캐시로 JOIN→'Group Not Found' 되던 문제도 원천 차단.
         if ( !clsItem.bStillActive ) {
@@ -1436,10 +1441,18 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
         }
     }
 
-    // RFC 4575: Notify remaining participants about member leaving
-    if ( bStillActive ) {
+    // RFC 4575: 이탈을 conference 구독자 + 잔여 참가자에게 통지.
+    //   구독은 참여보다 오래 산다 — 단말은 이탈 후에도 conference 구독을 유지하고 미조인
+    //   채널까지 구독한다. 따라서 "잔여 확립 leg 없음"이 "통지 대상 없음"을 뜻하지 않으며,
+    //   마지막 멤버 이탈도 반드시 통지해야 구독자의 로스터가 빈 상태로 수렴한다. (통지를
+    //   in-dialog 로만 보내던 시절엔 leg=0 이면 실을 다이얼로그가 없어 생략이 맞았다.)
+    //   ⚠ teardown 앞에서 호출한다 — BuildConferenceInfoBody 가 m_mapGroupRtp 의
+    //   iConfVersion 을 증가시키므로 erase 뒤에 부르면 version 이 0 으로 되돌아가고
+    //   수신측이 stale 로 버릴 수 있다.
+    if ( !strGroupId.empty() ) {
         SendConferenceNotify( strGroupId, strMemberId, "disconnected", "deleted" );
-    } else if ( !strGroupId.empty() ) {
+    }
+    if ( !bStillActive && !strGroupId.empty() ) {
         // on-demand 그룹(prearranged/broadcast): 마지막 확립 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
         CspPttGroup clsGrp;
         bool bChat = gclsGroupMap.Select( strGroupId.c_str(), clsGrp ) && clsGrp._groupType == "chat";

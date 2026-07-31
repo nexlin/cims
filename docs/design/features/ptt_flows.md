@@ -352,8 +352,9 @@ chat (상시):
   옛 leg 가 세션 맵에 고아로 남아 참가자 명단에 **중복 표기**된다 → 개시자 경로가 옛 leg 의 SIP
   다이얼로그를 정리한다. ⚠️이때 **CMP LEAVE 는 보내지 않는다** — 멤버 키가 `(group, user)` 라
   방금 JOIN 한 자기 멤버십·포트까지 회수되어 미디어가 끊긴다.
-- **참가자 명단(conference NOTIFY)도 확립 leg 만** 싣고, 확립 leg 에게만 보낸다 — 아직 200 OK 가
-  오지 않은 fan-out 초대 대상이 "참여 중"으로 표시되는 것과 다이얼로그 없는 leg 로의 발송을 막는다.
+- **참가자 명단(conference NOTIFY)도 확립 leg 만** 싣는다 — 아직 200 OK 가 오지 않은 fan-out 초대
+  대상이 "참여 중"으로 표시되는 것을 막는다. in-dialog 폴백 발송도 확립 leg 에만 한다(다이얼로그
+  없는 leg 로는 보낼 수 없다). 반면 **구독 경로 발송은 leg 유무와 무관**하다 — 아래 통지 대상 규칙 참조.
 
 #### 참가자 로스터 통지 경로 (RFC 4575 / RFC 6665)
 
@@ -386,6 +387,15 @@ chat (상시):
   presence(affiliation-info) 구독 경로만 수행한다.
 - 변경 인자 없는 **순수 스냅샷**(구독 수락 직후 초기 NOTIFY)에는 이탈자 엔트리를 싣지 않는다 —
   `entity="sip:@domain"` 인 빈 참가자가 단말 명단에 유령으로 뜬다.
+- **구독은 참여보다 오래 산다 — 통지 대상은 "잔여 참가자"가 아니라 "구독자"다.** 단말은 채널을
+  이탈해도 구독을 유지하고 미조인 채널까지 구독하므로, 확립 leg 이 0 이 되는 **마지막 멤버 이탈도
+  반드시 통지**해야 구독자의 로스터가 빈 상태로 수렴한다. 통지를 생략하면 구독자는 마지막으로 받은
+  스냅샷(= 그 이탈자가 아직 접속 중)을 무한히 들고 있게 되며, 서버는 이미 세션을 해제했으므로
+  자연 정정도 없다. 통지는 **세션 teardown 전에** 발송한다 — `BuildConferenceInfoBody` 가
+  `m_mapGroupRtp` 의 `iConfVersion` 을 증가시키므로, 맵을 지운 뒤 부르면 `version` 이 0 으로
+  되돌아가 수신 스택이 stale 로 버릴 수 있다.
+  이탈 통지는 BYE(`OnCallTerminated`)와 등록 해제·타임아웃(`ClearUserCall`) 양쪽이 동일 계약으로
+  수행한다.
 
 > 신규 그룹은 `EventIncomingCall` 의 캐시 미스 lazy-reload 로 재기동 없이 즉시 발신 가능. CSC `notify_csp(GROUP_CHANGED)` 는 CSP+PSP 양쪽 broadcast.
 
