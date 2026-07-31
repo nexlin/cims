@@ -246,13 +246,32 @@ name = "MCPT" (0x4D435054)                                     |
   - **발행 트리거**: 등록 성공·그룹 목록 적재·채널 선택/키업 시 `affiliateAll`/`ensureAffiliated` — 확정이 신선하면(잔여 수명 > TTL 절반) 생략, 같은 그룹 in-flight 중복 억제.
   - **응답 기반 확정**: PUBLISH(`Event: mcptt` 필수 — 없으면 CSP 489)는 token 으로 최종 응답과 상관(`Account.onSendRequest` → `SipController.sendReqResults`). 2xx 에서만 [affiliated] 확정+만료 기록 — **송신만으로 성공 처리하지 않는다**(과거 낙관 기록이 403 후 영구 미재시도 사고의 원인).
   - **실패 재시도**: 403(비멤버 — 그룹 편성이 PUBLISH 보다 늦는 레이스 포함)·오류는 지수 백오프(30s→60s→120s→240s, cap 300s) 재시도. 무응답은 40s 후 pending 회수(주기 루프가 재발행). 백오프 대기 중인 그룹은 주기 루프가 발행을 생략한다(두 경로 중복 발사 억제).
-  - **403 = 등록 소실 대응**: 서버가 등록을 잃으면(CSP 재기동 등) PUBLISH 는 `not registered` 403 으로 **시간이 지나도 낫지 않는다** → 백오프와 별개로 `SipController.refreshRegistration()`(60s 스로틀)로 **즉시 등록 갱신**을 트리거한다. 미조치 시 단말 자체 갱신 시점(Expires ≈1h)까지 제휴·fan-out 공백(= require_affiliation 그룹에서 무전 불가)이 이어진다. ⚠️`register()` 는 Account 재생성이라 프로세스 내 PJSIP 재부팅 지뢰 — 등록 갱신에는 쓰지 않는다. 남은 갭: 등록 소실을 PUBLISH 시점(TTL 절반)에야 감지 — 능동 감지(짧은 Expires·OPTIONS·reg-event 구독)는 후속.
+  - **403 = 등록 소실 대응**: 서버가 등록을 잃으면(CSP 재기동 등) PUBLISH 는 `not registered` 403 으로 **시간이 지나도 낫지 않는다** → 백오프와 별개로 `SipController.refreshRegistration()`(60s 스로틀)로 **즉시 등록 갱신**을 트리거한다. 미조치 시 단말 자체 갱신 시점(Expires ≈1h)까지 제휴·fan-out 공백(= require_affiliation 그룹에서 무전 불가)이 이어진다. 등록이 서버에서 사라졌다면 **구독도 함께 사라졌다** — `refreshRegistration()` 은 성공 시 pjsua 계정 상태를 Registered 에서 내리지 않아 `regState` 전이 기반 정리가 돌지 않으므로, 이 지점에서 구독 확인 상태(conference/gms)도 함께 비워 다음 `syncRosterSubs()`(60s 주기·조인·그룹목록 적재)가 재발행하게 한다. ⚠️`register()` 는 Account 재생성이라 프로세스 내 PJSIP 재부팅 지뢰 — 등록 갱신에는 쓰지 않는다. 남은 갭: 등록 소실을 PUBLISH 시점(TTL 절반)에야 감지 — 능동 감지(짧은 Expires·OPTIONS·reg-event 구독)는 후속.
   - **주기 갱신**: 60s 루프가 잔여 수명 TTL(Expires 3600) 절반 미만인 그룹을 재-PUBLISH — 만료 방치로 fan-out 이 조용히 죽는 것 방지. de-affiliate(Expires:0)는 명시 호출 시에만.
 - **참여 채널 자동 복원**(`ChannelStore` — `ptt_channels` SharedPreferences): 참여 "의도"(joined 목록+주채널)를 영속화해 프로세스 재시작(강제종료·재설치·리부팅) 후 등록 완료 시 1회 재조인한다(재로그인 경로는 서버 fan-out INVITE 가 먼저 올 수 있어 3s 양보). 서버/네트워크 사정으로 세션이 끊겨도 지우지 않으며, **사용자가 명시적으로 나가면 제거**(재조인 의도 해제) — 로그아웃 시에는 `SuiteLogoutReceiver` 가 `clear`. 🔑복원 1회 플래그는 **스토어 배선 확인 뒤에** 소모하고, 스토어가 늦게 주입되면 setter 가 복원을 재트리거한다 — force-stop 후 접근성(PttKeyService) 리바인드가 프로세스를 **헤드리스**(UI·서비스 미배선)로 먼저 살리면 등록·제휴는 진행되지만 스토어가 없어, 플래그를 먼저 세우면 이후 사용자가 앱을 열어도 복원이 영구 스킵된다.
 - **참가자 목록 = conference 정식 구독(RFC 4575 / RFC 6665)**: `PttController.subscribeRoster` 가 그룹 AoR 로 `SUBSCRIBE (Event: conference)` 를 보내고, CSP 는 그 구독 dialog 로 로스터 NOTIFY 를 보낸다.
+  - **구독 상태는 서버 확인 기반으로 관리한다** — affiliation 의 `affiliated` 와 같은 원칙.
+    SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"으로 취급하면, 서버가 구독을 잃고(CSP 재기동 =
+    in-memory 구독 소멸) 단말이 등록 끊김을 관측하지 못한 경우 멱등 가드가 재발행을 영구히 막아
+    **로스터·편성 push 가 앱 재시작 전까지 얼어붙는다**(실측). 확인 신호는 **NOTIFY 도착**이다
+    (네이티브가 SUBSCRIBE 응답을 앱에 올려주지 않고, CSP 는 구독 수락 직후 초기 NOTIFY 를 항상
+    보낸다 — conference 는 로스터가 비어도, gms 는 그룹별로). 따라서 `confirmedRosters`(NOTIFY 로
+    확인) 와 `pendingRosters`(발행 시각) 를 분리하고, 확인 대기가 시한을 넘기면 다음 트리거가
+    재발행한다. 확인 판정은 **그룹 AoR 발신 NOTIFY 경로만** 근거로 삼는다 — 통화 다이얼로그로 오는
+    in-dialog 폴백 NOTIFY 는 구독의 증거가 아니다.
+  - **재확인은 주기적으로 한다 — 구독 소멸은 감지할 수 없다.** native evsub 이 in-dialog 갱신 중
+    481 을 받아 구독을 접어도 앱에는 통지가 없다. 따라서 `SUB_REASSERT_MS`(10분)마다 SUBSCRIBE 를
+    다시 던진다: 살아 있는 구독은 native `cims_conf_find` 가 in-dialog 갱신으로 흡수하고(CSP 는
+    갱신에도 `SendInitialNotify` 를 보내므로 확인 시각이 갱신된다), 죽은 구독은 새로 만들어진다 —
+    감지 없이 수렴한다. affiliation 을 TTL 절반마다 재-PUBLISH 하는 것과 같은 형태다.
+  - ⚠️**구독 복구는 등록 복구에 종속된다.** CSP 는 미등록 사용자의 SUBSCRIBE 를 401 로 거절한다
+    (`CscfModule::RecvRequestSubscribe`). CSP 재기동은 등록과 구독을 동시에 날리므로, 재확인이
+    돌아도 등록이 살아나기 전에는 401 이다. 즉 실질 복구 시한은 **등록 소실 감지 latency**(현재
+    제휴 PUBLISH 의 TTL 절반 ≈30분)가 지배한다 — 위 "403 = 등록 소실 대응" 참조. 미등록 중의
+    재확인 실패는 10분 뒤 재시도 또는 403 경로의 상태 초기화로 흡수된다.
   - **구독 대상 = 참여 채널이 아니라 제휴(편성) 채널 전체.** 등록 완료·그룹 목록 적재·60s 제휴 루프에서 `syncRosterSubs()` 가 희망 제휴 집합과 구독 집합의 차이만 맞춘다(신규 구독 / 빠진 채널 `Expires: 0`). 따라서 **채널을 이탈해도 구독은 유지**되고, 참여하지 않은 채널의 접속 인원도 계속 보인다. 해지는 편성에서 빠지거나 등록이 끊길 때만.
   - **미조인 채널 로스터**는 세션이 없으므로 `PttController.rosterMap`(→ `channelRosters` StateFlow)에 담아 목록/상세 화면이 소비한다. 참여 중인 채널은 세션 `participants` 와 같은 값이다. ⚠️"본인은 항상 접속"은 **참여 중일 때만** 적용한다 — 미조인 채널에 자신을 넣으면 참여하지도 않은 채널에 내가 있는 것으로 보인다.
-  - ⚠️**멱등 필수**: 등록·제휴·조인이 각자 구독을 트리거하므로 가드가 없으면 같은 그룹에 SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측). native 의 `cims_conf_find` 가 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에 등록되기 전 두 번째 호출이 들어오면 경합한다 → `subscribedRosters` 집합으로 앱에서 1회만 발행한다. 단말은 **200 OK** 로 응답하고 본문은 `Account.onInstantMessage` → `SipController.incomingMessage`(contentType=`application/conference-info+xml`, fromUri=그룹 AoR=focus) 로 올라와 그룹 키로 세션을 찾아 반영한다. 구독 생성·**in-dialog 갱신**·종료·매칭 없는 NOTIFY 의 481 응답은 native pjsip evsub 이 담당하므로(빌드 패치 [2-13]) 앱은 "언제 어느 그룹을 구독할지"만 정한다 — `Account::sendRequest` 를 그대로 쓰기 때문에 **SWIG 인터페이스 변경이 없다**. ⚠️구독은 단발 트랜잭션이 아니어서 결과가 `sendReqResults` 로 오지 않는다(확인 신호 = NOTIFY 도착).
+  - ⚠️**멱등 필수**: 등록·제휴·조인이 각자 구독을 트리거하므로 가드가 없으면 같은 그룹에 SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측). native 의 `cims_conf_find` 가 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에 등록되기 전 두 번째 호출이 들어오면 경합한다 → 앱이 1회만 발행한다. 단 그 가드는 **발행 후 확인까지의 창**에만 걸린다 — 확인(NOTIFY) 없이 `SUB_CONFIRM_TIMEOUT_MS`(15s) 가 지나면 재발행 대상으로 되돌린다. 단말은 **200 OK** 로 응답하고 본문은 `Account.onInstantMessage` → `SipController.incomingMessage`(contentType=`application/conference-info+xml`, fromUri=그룹 AoR=focus) 로 올라와 그룹 키로 세션을 찾아 반영한다. 구독 생성·**in-dialog 갱신**·종료·매칭 없는 NOTIFY 의 481 응답은 native pjsip evsub 이 담당하므로(빌드 패치 [2-13]) 앱은 "언제 어느 그룹을 구독할지"만 정한다 — `Account::sendRequest` 를 그대로 쓰기 때문에 **SWIG 인터페이스 변경이 없다**. ⚠️구독은 단발 트랜잭션이 아니어서 결과가 `sendReqResults` 로 오지 않는다(확인 신호 = NOTIFY 도착).
 - **편성 변경 push = GMS 구독(RFC 5875 xcap-diff)**: 등록 완료 시 서버 PSI(`sip:gms_psi@<domain>`)로
   `SUBSCRIBE (Event: xcap-diff)` 1건(`PttController.subscribeGms`, 멱등 가드 `gmsSubscribed`).
   NOTIFY 본문은 **"어느 문서가 바뀌었고 새 ETag 는 무엇"뿐**이라(2단 구조) 앱은 `onXcapDiff` 에서

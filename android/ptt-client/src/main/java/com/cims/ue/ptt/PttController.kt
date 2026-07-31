@@ -188,8 +188,21 @@ class PttController(
 
     private val lock = Any()
     private val sessionMap = LinkedHashMap<String, Session>()   // groupId → Session (참여 순서 유지)
-    private val subscribedRosters = mutableSetOf<String>()      // conference 구독 중인 groupId (멱등 가드)
-    private var gmsSubscribed = false                           // xcap-diff(GMS) 구독 여부 (멱등 가드)
+    // 구독 상태는 **서버 확인 기반**으로 관리한다 — SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"
+    // 으로 취급하면, 서버가 구독을 잃고(예: CSP 재기동으로 in-memory 구독 소멸) 단말이 등록
+    // 끊김을 관측하지 못한 경우 멱등 가드가 재발행을 영구히 막아 로스터·편성 push 가 앱 재시작
+    // 전까지 얼어붙는다(실측). affiliation 의 [affiliated] 와 같은 원칙이다.
+    //   확인 신호 = **NOTIFY 도착**. 네이티브는 SUBSCRIBE 응답을 앱에 올려주지 않고, CSP 는
+    //   구독 수락 직후 초기 NOTIFY 를 항상 보낸다(conference 는 로스터가 비어도, gms 는 그룹별로).
+    //   나아가 확인 상태에 **재확인 주기**를 둔다 — 구독 소멸을 앱이 감지할 수단이 없기 때문이다
+    //   (네이티브 evsub 이 in-dialog 갱신을 하다 481 을 받아 구독을 접어도 앱에는 통지가 없다).
+    //   [SUB_REASSERT_MS] 마다 SUBSCRIBE 를 다시 던지면 살아 있는 구독은 native `cims_conf_find`
+    //   가 in-dialog 갱신으로 흡수하고, 죽은 구독은 새로 만들어진다 — 감지 없이 수렴한다.
+    //   affiliation 을 TTL 절반마다 재-PUBLISH 하는 것과 같은 형태다.
+    private val confirmedRosters = mutableMapOf<String, Long>() // groupId → 마지막 확인/재확인 시각(ms)
+    private val pendingRosters = mutableMapOf<String, Long>()   // groupId → 최초 SUBSCRIBE 발행 시각(ms)
+    private var gmsConfirmedAt = 0L                             // xcap-diff(GMS) 마지막 확인/재확인 시각(ms)
+    private var gmsPendingAt = 0L                               // GMS 최초 SUBSCRIBE 발행 시각(ms)
     private val rosterMap = mutableMapOf<String, Map<String, String>>()  // groupId → 접속 인원(미조인 포함)
 
     private val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
@@ -324,11 +337,18 @@ class PttController(
         scope.launch {
             sip.incomingMessage.collect { im ->
                 if (im.contentType.contains("xcap-diff", ignoreCase = true)) {
+                    synchronized(lock) { gmsPendingAt = 0L; gmsConfirmedAt = SystemClock.elapsedRealtime() }
                     runCatching { onXcapDiff(im.body) }
                     return@collect
                 }
                 if (!im.contentType.contains("conference-info", ignoreCase = true)) return@collect
                 val gid = bareId(im.fromUri)
+                // 구독 확인 — 이 경로(그룹 AoR 발신 NOTIFY)만 구독의 증거다. 아래 in-dialog
+                // 폴백 경로는 통화 다이얼로그로 오므로 구독 확인으로 쓰면 안 된다.
+                if (gid.isNotBlank()) synchronized(lock) {
+                    pendingRosters.remove(gid)
+                    confirmedRosters[gid] = SystemClock.elapsedRealtime()
+                }
                 runCatching { onConferenceInfo(gid, im.body) }
             }
         }
@@ -350,8 +370,8 @@ class PttController(
                     subscribeGms(true) // 편성 변경 push (관리자 변경 즉시 반영)
                     maybeRestoreChannels()
                 } else {
-                    // 등록이 끊기면 서버측 구독도 사라진다 — 로컬 가드를 비워 재등록 시 다시 걸리게 한다.
-                    synchronized(lock) { subscribedRosters.clear(); rosterMap.clear(); gmsSubscribed = false }
+                    // 등록이 끊기면 서버측 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다.
+                    synchronized(lock) { clearSubStateLocked() }
                     publishRosters()
                 }
             }
@@ -391,6 +411,12 @@ class PttController(
                         if (SystemClock.elapsedRealtime() - affReRegisterAt > 60_000L) {
                             affReRegisterAt = SystemClock.elapsedRealtime()
                             Log.w(TAG, "affiliate 403 — 등록 소실 추정, 등록 갱신 요청")
+                            // 등록이 서버에서 사라졌다면 구독도 함께 사라졌다. refreshRegistration()
+                            // 은 성공 시 pjsua 계정 상태를 Registered 에서 내리지 않으므로 regState
+                            // 전이에 기대면 구독 확인 상태가 그대로 남아 재발행이 막힌다 — 여기서
+                            // 직접 비워 다음 syncRosterSubs(주기 60s·조인·그룹목록 적재)가 재발행하게 한다.
+                            synchronized(lock) { clearSubStateLocked() }
+                            publishRosters()
                             sip.refreshRegistration()
                         }
                     } else {
@@ -463,35 +489,74 @@ class PttController(
      *  ⚠️멱등이 필요하다 — 등록·제휴·조인이 각자 이 함수를 호출하므로 가드가 없으면 같은 그룹에
      *  SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측됨). native 의
      *  `cims_conf_find` 는 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에
-     *  등록되기 전에 두 번째 호출이 들어오면 경합으로 새 다이얼로그가 하나 더 생긴다. */
+     *  등록되기 전에 두 번째 호출이 들어오면 경합으로 새 다이얼로그가 하나 더 생긴다.
+     *
+     *  다만 그 가드는 **발행 후 확인까지의 창**에만 걸린다 — 확인(NOTIFY) 없이
+     *  [SUB_CONFIRM_TIMEOUT_MS] 가 지나면 재발행 대상으로 되돌린다. 서버가 구독을 잃은 경우
+     *  (CSP 재기동 등) 조인·주기 루프가 스스로 복구하는 유일한 경로다. */
     private fun subscribeRoster(groupId: String, on: Boolean) {
-        synchronized(lock) {
-            if (on) {
-                if (!subscribedRosters.add(groupId)) return   // 이미 구독 중 — 재발행 불필요
-            } else {
-                if (!subscribedRosters.remove(groupId)) return
+        if (on) {
+            val now = SystemClock.elapsedRealtime()
+            synchronized(lock) {
+                val confirmedAt = confirmedRosters[groupId]
+                if (confirmedAt != null) {
+                    if (now - confirmedAt < SUB_REASSERT_MS) return    // 아직 유효 — 재확인 시점 아님
+                    confirmedRosters[groupId] = now                    // 재확인 발행 — 다음 주기까지 유효 취급
+                } else {
+                    val at = pendingRosters[groupId]
+                    if (at != null && now - at < SUB_CONFIRM_TIMEOUT_MS) return   // 첫 확인 대기 중
+                    pendingRosters[groupId] = now
+                }
+            }
+        } else {
+            synchronized(lock) {
+                val wasConfirmed = confirmedRosters.remove(groupId) != null
+                val wasPending = pendingRosters.remove(groupId) != null
+                if (!wasConfirmed && !wasPending) return   // 걸어둔 적 없는 구독 — 해지 불필요
                 rosterMap.remove(groupId)
             }
+            publishRosters()
         }
-        if (!on) publishRosters()
         runCatching { sip.subscribeConference(groupAor(groupId), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
             .onFailure {
                 Log.w(TAG, "conference 구독($on) 실패 $groupId: ${it.message}")
-                synchronized(lock) { if (on) subscribedRosters.remove(groupId) }
+                synchronized(lock) { if (on) pendingRosters.remove(groupId) }
             }
+    }
+
+    /** 구독 확인 상태 일괄 초기화 — 서버가 우리 상태를 잃었다고 판단했을 때만 호출.
+     *  호출자는 [lock] 을 보유해야 한다. */
+    private fun clearSubStateLocked() {
+        confirmedRosters.clear()
+        pendingRosters.clear()
+        rosterMap.clear()
+        gmsConfirmedAt = 0L
+        gmsPendingAt = 0L
     }
 
     /** GMS 문서 변경 구독 (RFC 5875 xcap-diff) — 서버 PSI 하나에 대한 단일 구독.
      *  관리자가 편성(멤버·우선순위·채널 추가/삭제)을 바꾸면 서버가 밀어준다. */
     private fun subscribeGms(on: Boolean) {
+        val now = SystemClock.elapsedRealtime()
         synchronized(lock) {
-            if (on == gmsSubscribed) return
-            gmsSubscribed = on
+            if (on) {
+                if (gmsConfirmedAt != 0L) {
+                    if (now - gmsConfirmedAt < SUB_REASSERT_MS) return   // 아직 유효
+                    gmsConfirmedAt = now                                 // 재확인 발행
+                } else {
+                    if (gmsPendingAt != 0L && now - gmsPendingAt < SUB_CONFIRM_TIMEOUT_MS) return
+                    gmsPendingAt = now
+                }
+            } else {
+                if (gmsConfirmedAt == 0L && gmsPendingAt == 0L) return
+                gmsConfirmedAt = 0L
+                gmsPendingAt = 0L
+            }
         }
         runCatching { sip.subscribeXcapDiff(gmsPsiAor(), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
             .onFailure {
                 Log.w(TAG, "gms 구독($on) 실패: ${it.message}")
-                synchronized(lock) { if (on) gmsSubscribed = false }
+                synchronized(lock) { if (on) gmsPendingAt = 0L }
             }
     }
 
@@ -519,8 +584,9 @@ class PttController(
     private fun syncRosterSubs() {
         if (regState.value !is RegState.Registered) return
         val want = desiredAffiliations()
-        val have = synchronized(lock) { subscribedRosters.toSet() }
-        (want - have).forEach { subscribeRoster(it, true) }
+        val have = synchronized(lock) { confirmedRosters.keys + pendingRosters.keys }
+        // 발행 여부 판단은 subscribeRoster 단일 지점에 맡긴다 — 미확인·확인대기 만료면 재발행한다.
+        want.forEach { subscribeRoster(it, true) }
         (have - want).forEach { subscribeRoster(it, false) }
     }
 
@@ -1402,6 +1468,18 @@ class PttController(
         const val MCDATA_ICSI = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"
         /** affiliation PUBLISH Expires(초) — 잔여 수명이 절반 미만이면 주기 루프가 재발행. */
         private const val AFF_EXPIRES_SEC = 3600L
+
+        /** 최초 SUBSCRIBE 발행 후 확인(NOTIFY) 대기 시한 — 초과하면 재발행 대상으로 되돌린다.
+         *  CSP 는 구독 수락 직후 초기 NOTIFY 를 보내므로 정상 경로는 수십 ms 다. 이 창은
+         *  생성 경합(중복 구독)을 막는 용도이므로 짧게 두되, 패킷 유실·일시 지연은 흡수하는 값. */
+        private const val SUB_CONFIRM_TIMEOUT_MS = 15_000L
+
+        /** 구독 재확인 주기 — 이 시간마다 SUBSCRIBE 를 다시 던진다(살아 있으면 native 가
+         *  in-dialog 갱신으로 흡수, 죽었으면 새로 생성). 구독 소멸을 앱이 감지할 수단이
+         *  없으므로(evsub 481 종료는 앱에 통지되지 않음) **감지 대신 주기적 재확인**으로
+         *  수렴시킨다 — 서버가 구독을 잃어도 최대 이 시간 안에 복구된다.
+         *  `SipController.CONF_SUB_EXPIRES_SEC`(3600s)보다 충분히 짧게 둔다. */
+        private const val SUB_REASSERT_MS = 600_000L
 
         /** MSRP INVITE 발신 → 200 OK(a=path) 대기 시한. */
         private const val MSRP_INVITE_TIMEOUT_MS = 15_000L
