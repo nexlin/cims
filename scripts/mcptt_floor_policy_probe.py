@@ -31,7 +31,11 @@ QUEUE_POS_REQ, QUEUE_POS_INFO, ACK, RELEASE_MULTI = 8, 9, 10, 0x0F
 OPN = {REQUEST: "REQUEST", GRANT: "GRANT", TAKEN: "TAKEN", DENY: "DENY", RELEASE: "RELEASE",
        IDLE: "IDLE", REVOKE: "REVOKE", QUEUE_POS_REQ: "QPOS_REQ", QUEUE_POS_INFO: "QPOS_INFO",
        ACK: "ACK", RELEASE_MULTI: "RELEASE_MULTI"}
-FF_PRIORITY, FF_GRANTED_PARTY, FF_USER_ID, FF_INDICATOR = 0, 4, 6, 13
+ACK_REQ_BIT = 0x10          # subtype 첫 비트 = Acknowledgment is required (§8.2.2)
+FF_PRIORITY, FF_DURATION, FF_CAUSE, FF_QUEUE_INFO = 0, 1, 2, 3
+FF_GRANTED_PARTY, FF_PERMISSION = 4, 5
+FF_USER_ID, FF_MSG_SEQ, FF_SOURCE, FF_MSG_TYPE, FF_INDICATOR = 6, 8, 10, 12, 13
+FF_SSRC, FF_GRANTED_USERS, FF_SSRC_LIST = 14, 15, 16
 FI_EMERGENCY, FI_DUAL, FI_MULTI = 0x1000, 0x0200, 0x0080
 
 PASS, FAIL = [], []
@@ -48,11 +52,11 @@ def _pad4(n):
 
 
 def floor_build(subtype, ssrc, fields):
+    # §8.1.3 — 모든 필드는 패딩 포함 4옥텟 배수다(문자열 필드만 정렬하는 게 아니다).
     body = b""
     for fid, val in fields:
         body += bytes([fid, len(val)]) + val
-        if fid in (FF_GRANTED_PARTY, FF_USER_ID):
-            body += b"\x00" * _pad4(2 + len(val))
+        body += b"\x00" * _pad4(2 + len(val))
     body += b"\x00" * _pad4(len(body))
     total = 12 + len(body)
     return struct.pack(">BBHI4s", 0x80 | (subtype & 0x1F), RTCP_PT_APP, total // 4 - 1,
@@ -62,22 +66,24 @@ def floor_build(subtype, ssrc, fields):
 def floor_parse(buf):
     if len(buf) < 12 or buf[8:12] != b"MCPT":
         return None
-    out = {"subtype": buf[0] & 0x1F, "ssrc": struct.unpack(">I", buf[4:8])[0], "fields": {}}
+    sub = buf[0] & 0x1F
+    out = {"subtype": sub, "op_base": sub & 0x0F, "ack_req": bool(sub & ACK_REQ_BIT),
+           "ssrc": struct.unpack(">I", buf[4:8])[0], "fields": {}}
     p = 12
     while p + 2 <= len(buf):
-        fid, ln = buf[p], buf[p + 1]
-        start = p
-        p += 2
-        if p + ln > len(buf):
+        fid = buf[p]
+        hdr = 3 if fid >= 192 else 2
+        if p + hdr > len(buf):
             break
-        val = buf[p:p + ln]
-        p += ln
-        if fid in (FF_GRANTED_PARTY, FF_USER_ID):
-            p += _pad4(p - start)
+        ln = struct.unpack(">H", buf[p + 1:p + 3])[0] if hdr == 3 else buf[p + 1]
         if fid == 0 and ln == 0:
             break
-        out["fields"][fid] = val
-    out["op"] = OPN.get(out["subtype"], f"?{out['subtype']}")
+        if p + hdr + ln > len(buf):
+            break
+        out["fields"][fid] = buf[p + hdr:p + hdr + ln]
+        p += hdr + ln
+        p += _pad4(hdr + ln)          # 필드 단위 4옥텟 정렬
+    out["op"] = OPN.get(out["op_base"], f"?{sub}")
     return out
 
 
@@ -88,8 +94,28 @@ def req_pkt(user, ssrc, prio=5, emergency=False):
     return floor_build(REQUEST, ssrc, f)
 
 
-def rel_pkt(user, ssrc, multi=False):
-    return floor_build(RELEASE_MULTI if multi else RELEASE, ssrc, [(FF_USER_ID, user.encode())])
+def rel_pkt(user, ssrc, multi=False, ack_req=False):
+    """Floor Release. ack_req=True 면 subtype 0x14(확인 요구) — 단말이 실제로 쓰는 변종."""
+    sub = RELEASE_MULTI if multi else (RELEASE | (ACK_REQ_BIT if ack_req else 0))
+    return floor_build(sub, ssrc, [(FF_USER_ID, user.encode())])
+
+
+def user_list(val):
+    """List of Granted Users(§8.2.3.17) 디코드 → [user, ...]"""
+    out, n, p = [], val[0] if val else 0, 1
+    for _ in range(n):
+        if p >= len(val):
+            break
+        ln = val[p]
+        out.append(val[p + 1:p + 1 + ln].decode(errors="ignore"))
+        p += 1 + ln
+    return out
+
+
+def ssrc_list(val):
+    """List of SSRCs(§8.2.3.18) 디코드 → [ssrc, ...]"""
+    n = val[0] if val else 0
+    return [struct.unpack(">I", val[2 + 4 * i:6 + 4 * i])[0] for i in range(n) if 6 + 4 * i <= len(val)]
 
 
 # ── SRTCP (RFC 3711, AES_CM_128_HMAC_SHA1_80) — cmp/PFloorCrypto.cpp 대응 ────
@@ -251,7 +277,7 @@ class Member:
             if self.crypto:
                 d = self.crypto.unprotect(d)
                 if d is None:
-                    got.append({"op": "AUTH_FAIL", "fields": {}})
+                    got.append({"op": "AUTH_FAIL", "op_base": -1, "subtype": -1, "fields": {}})
                     continue
             m = floor_parse(d)
             if m:
@@ -279,7 +305,7 @@ def ops(msgs):
 
 def granted_parties(msgs, op=TAKEN):
     return [m["fields"].get(FF_GRANTED_PARTY, b"").decode(errors="ignore").rstrip("\x00")
-            for m in msgs if m["subtype"] == op]
+            for m in msgs if m["op_base"] == op]
 
 
 def main():
@@ -327,6 +353,20 @@ def main():
     ga, gb = A.drain_floor(), B.drain_floor()
     check("GRANT" in ops(ga), f"A GRANT (A={ops(ga)})")
     check("TAKEN" in ops(gb), f"B TAKEN (B={ops(gb)})")
+    # 규격 필드 (TS 24.380 §8.2.5/§8.2.9): 헤더 SSRC 는 서버 SSRC, 화자 SSRC 는 SSRC 필드(14).
+    grant = [m for m in ga if m["op_base"] == GRANT][0]
+    taken = [m for m in gb if m["op_base"] == TAKEN][0]
+    srv = grant["ssrc"]
+    check(srv not in (A.ssrc, B.ssrc, 0), f"GRANT 헤더 SSRC = 서버 SSRC ({srv:#x})")
+    check(taken["ssrc"] == srv, f"TAKEN 헤더 SSRC 도 서버 SSRC ({taken['ssrc']:#x})")
+    check(FF_SSRC in grant["fields"] and
+          struct.unpack(">I", grant["fields"][FF_SSRC][:4])[0] == A.ssrc,
+          "GRANT SSRC 필드 = 화자 SSRC")
+    check(FF_DURATION in grant["fields"], "GRANT Duration 필드")
+    check(taken["fields"].get(FF_PERMISSION) == b"\x00\x01", "TAKEN Permission to Request the Floor=1")
+    check(FF_MSG_SEQ in taken["fields"], "TAKEN Message Sequence Number 필드")
+    check(FF_SSRC in taken["fields"], "TAKEN SSRC 필드(단일 화자)")
+    check("TAKEN" not in ops(ga), f"화자 본인에게는 TAKEN 미송신 (A={ops(ga)})")
 
     B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc))
     time.sleep(0.3)
@@ -341,9 +381,20 @@ def main():
     time.sleep(0.3)
     gb = B.drain_floor()
     check("GRANT" in ops(gb), f"큐 승급으로 B GRANT (B={ops(gb)})")
-    B.send_floor(a.cmp, fp, rel_pkt("B", B.ssrc))
+    # 마지막 해제는 Ack 요구 변종(subtype 0x14)으로 — 서버가 이를 무시하면 발언권이 고착된다.
+    B.send_floor(a.cmp, fp, rel_pkt("B", B.ssrc, ack_req=True))
     time.sleep(0.3)
-    check("IDLE" in ops(A.drain_floor()), "마지막 해제 후 IDLE")
+    gb2, ga2 = B.drain_floor(), A.drain_floor()
+    check("IDLE" in ops(ga2), f"ack 요구 RELEASE(0x14) 처리 후 IDLE (A={ops(ga2)})")
+    acks = [m for m in gb2 if m["op_base"] == ACK]
+    check(bool(acks), f"Floor Ack 회신 (B={ops(gb2)})")
+    if acks:
+        check(acks[0]["fields"].get(FF_SOURCE) == b"\x00\x02", "Floor Ack Source=controlling(2)")
+        check(acks[0]["fields"].get(FF_MSG_TYPE, b"\x00")[0] == (RELEASE | ACK_REQ_BIT),
+              "Floor Ack Message Type = 확인 대상 subtype")
+    idle = [m for m in ga2 if m["op_base"] == IDLE][0]
+    check(FF_MSG_SEQ in idle["fields"] and FF_INDICATOR in idle["fields"],
+          "IDLE 에 MSN·Floor Indicator 필드 (§8.2.8)")
     remove(g1)
     A.close(); B.close()
 
@@ -391,8 +442,19 @@ def main():
     for m in ms[:3]:
         m.send_floor(a.cmp, fp, req_pkt(m.sid, m.ssrc))
         time.sleep(0.2)
-    got = {m.sid: ops(m.drain_floor()) for m in ms}
+    raw = {m.sid: m.drain_floor() for m in ms}
+    got = {k: ops(v) for k, v in raw.items()}
     check(all("GRANT" in got[s] for s in "ABC"), f"A/B/C 동시 GRANT ({ {k: v for k, v in got.items()} })")
+    # 동시 발언 Taken 은 화자 전원을 리스트로 싣는다 (§8.2.9 / §6.3.4.4.7a-3c)
+    tk = [m for m in raw["D"] if m["op_base"] == TAKEN]
+    if tk:
+        last = tk[-1]
+        users = user_list(last["fields"].get(FF_GRANTED_USERS, b""))
+        check(sorted(users) == ["A", "B", "C"], f"TAKEN List of Granted Users ({users})")
+        check(len(ssrc_list(last["fields"].get(FF_SSRC_LIST, b""))) == 3, "TAKEN List of SSRCs 3개")
+        check(struct.unpack(">H", last["fields"][FF_INDICATOR])[0] & FI_MULTI, "TAKEN Multi-talker 비트")
+    else:
+        check(False, "동시 발언 TAKEN 수신")
     ms[3].send_floor(a.cmp, fp, req_pkt("D", ms[3].ssrc))
     time.sleep(0.3)
     gd = ops(ms[3].drain_floor())
@@ -403,11 +465,19 @@ def main():
     check(holders == ["A", "B", "C"], f"STATS floor_holders 3명 ({holders})")
 
     ctl.events.clear()
-    ms[0].send_floor(a.cmp, fp, rel_pkt("A", ms[0].ssrc, multi=True))   # Floor Release Multi Talker
+    ms[0].send_floor(a.cmp, fp, rel_pkt("A", ms[0].ssrc))   # 화자 1명 해제
     time.sleep(0.4)
     gb = ms[1].drain_floor()
     check("IDLE" not in ops(gb), f"잔여 화자 있으면 IDLE 아님 (B={ops(gb)})")
-    check("TAKEN" in ops(gb), f"잔여 화자 TAKEN 갱신 (B={ops(gb)})")
+    # 규격: 나머지 참가자에게 Floor Release Multi Talker(0x0F) 로 알린다 (§8.2.14)
+    rm = [m for m in gb if m["op_base"] == RELEASE_MULTI]
+    check(bool(rm), f"잔여 화자에게 RELEASE_MULTI 통지 (B={ops(gb)})")
+    if rm:
+        check(rm[0]["fields"].get(FF_USER_ID, b"").decode(errors="ignore").rstrip("\x00") == "A",
+              "RELEASE_MULTI User ID = 해제한 화자")
+        check(struct.unpack(">I", rm[0]["fields"].get(FF_SSRC, b"\0\0\0\0")[:4])[0] == ms[0].ssrc,
+              "RELEASE_MULTI SSRC 필드 = 해제한 화자 SSRC")
+    check("RELEASE_MULTI" not in ops(ms[0].drain_floor()), "해제한 화자에게는 미송신")
     check("GRANT" in ops(ms[3].drain_floor()), "여유 정원으로 대기자 D 승급")
     evs = [e for e in ctl.drain_events(0.5) if (e.get("hdr") or {}).get("cmd") == "FLOOR_TALKERS"]
     check(bool(evs), f"FLOOR_TALKERS 이벤트 수신 ({len(evs)}건)")
@@ -415,6 +485,19 @@ def main():
         last = evs[-1].get("payload") or {}
         check(last.get("policy") == "multi" and isinstance(last.get("talkers"), list),
               f"이벤트 payload policy/talkers ({last})")
+    # 0x0F 는 서버→단말 통지 전용(§8.2.14) — 단말이 보내면 무시한다(발언 해제는 Floor Release).
+    ms[3].send_floor(a.cmp, fp, rel_pkt("D", ms[3].ssrc, multi=True))
+    time.sleep(0.35)
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g3]
+    holders = sorted(grp[0].get("floor_holders") or []) if grp else []
+    check("D" in holders, f"단말이 보낸 0x0F 는 무시 — 발언권 유지 ({holders})")
+    ms[3].send_floor(a.cmp, fp, rel_pkt("D", ms[3].ssrc))   # 규격대로 Floor Release
+    time.sleep(0.35)
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g3]
+    holders = sorted(grp[0].get("floor_holders") or []) if grp else []
+    check("D" not in holders, f"Floor Release 로는 해제 ({holders})")
     remove(g3)
     for m in ms:
         m.close()
@@ -582,6 +665,132 @@ def main():
     check(revoked == 2, f"초과 화자 2명 REVOKE 수신 (실제 {revoked})")
     check(grp and grp[0].get("floor_policy") == "single", "STATS 정책 갱신")
     remove(g9)
+    A.close(); B.close(); C.close()
+
+    # ── 11. floor 타이머 (T1/T2/T3/T8) + 재요청/큐 위치 유지 ────────────────
+    print("\n[11] 타이머 — T1 발언종료·T2 발언시간 초과·T3 회수 유예·T8 재전송")
+    g11 = f"{a.prefix}_timer"
+    A = Member("A", bp + 106, 0xB001)
+    B = Member("B", bp + 110, 0xB002)
+    r = add_group(g11, members="A:5:participant,B:9:participant",
+                  floor_timers={"t1_end_rtp": 2, "t2_stop_talk": 3, "t3_grace": 2, "t8_revoke": 1})
+    fp = payload(r).get("floor_port")
+    check(status(r) == "OK" and fp, f"ADD floor_timers ok ({status(r)} {code(r)})")
+    ports = payload(r).get("member_ports") or {}
+    for m in (A, B):
+        join(g11, m)
+        m.drain_floor()
+
+    # T1 — RTP 없이 grant 후 2초 무수신 = 발언 종료. REVOKE 없이 IDLE.
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.3)
+    ga = A.drain_floor()
+    grant = [m for m in ga if m["op_base"] == GRANT]
+    check(bool(grant), f"A GRANT (A={ops(ga)})")
+    if grant:
+        check(struct.unpack(">H", grant[0]["fields"][FF_DURATION])[0] == 3,
+              "GRANT Duration = T2(3초) — 최대 발언시간 광고")
+    B.drain_floor()
+    time.sleep(3.0)
+    gb, ga = B.drain_floor(), A.drain_floor()
+    check("IDLE" in ops(gb), f"T1 만료로 발언 종료 → IDLE (B={ops(gb)})")
+    check("REVOKE" not in ops(ga), f"T1 만료에는 REVOKE 를 보내지 않는다 (A={ops(ga)})")
+
+    # T2 — RTP 를 계속 보내며 3초 넘게 발언 → Revoke cause #2(Media burst too long)
+    aport = (ports.get("A") or {}).get("port")
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.3); A.drain_floor(); B.drain_floor()
+    t_end = time.time() + 4.2
+    seq = 1
+    while time.time() < t_end:
+        A.send_rtp(a.cmp, aport, seq=seq); seq += 1
+        time.sleep(0.15)
+    time.sleep(2.5)   # T3(2초) 유예 경과 — 그 사이 T8(1초)로 REVOKE 가 재전송된다
+    ga = A.drain_floor()
+    rev = [m for m in ga if m["op_base"] == REVOKE]
+    check(bool(rev), f"T2 초과 → REVOKE (A={ops(ga)})")
+    if rev:
+        check(struct.unpack(">H", rev[0]["fields"][FF_CAUSE])[0] == 2,
+              "REVOKE cause #2 (Media burst too long)")
+        check(len(rev) >= 2, f"T8 로 REVOKE 재전송 (수신 {len(rev)}건)")
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g11]
+    check(not (grp and grp[0].get("floor_holders")), f"T3 유예 후 회수 완료 ({grp and grp[0].get('floor_holders')})")
+    remove(g11)
+    A.close(); B.close()
+
+    print("\n[12] 선점 — Revoke 유예(T3) 중 미디어 유지, 요청자는 큐 선두에서 승급")
+    g12 = f"{a.prefix}_preempt"
+    A = Member("A", bp + 114, 0xC001)
+    B = Member("B", bp + 118, 0xC002)
+    r = add_group(g12, members="A:3:participant,B:9:participant",
+                  floor_timers={"t1_end_rtp": 6, "t2_stop_talk": 0, "t3_grace": 3, "t8_revoke": 1})
+    fp = payload(r).get("floor_port")
+    for m in (A, B):
+        join(g12, m)
+        m.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc, prio=3))
+    time.sleep(0.3); A.drain_floor(); B.drain_floor()
+
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc, prio=9))     # 상위 우선순위 선점
+    time.sleep(0.4)
+    ga, gb = A.drain_floor(), B.drain_floor()
+    check("REVOKE" in ops(ga), f"기존 화자 A 에 REVOKE (A={ops(ga)})")
+    check("QPOS_INFO" in ops(gb) and "GRANT" not in ops(gb),
+          f"선점 요청자는 즉시 GRANT 가 아니라 큐 선두 대기 (B={ops(gb)})")
+    st = payload(ctl.send("STATS"))
+    grp = [g for g in (st.get("detail") or {}).get("groups", []) if g.get("group_id") == g12]
+    check(grp and grp[0].get("floor_holders") == ["A"],
+          f"유예 중에는 기존 화자가 floor 유지 ({grp and grp[0].get('floor_holders')})")
+
+    A.send_floor(a.cmp, fp, rel_pkt("A", A.ssrc))             # 회수 응답 → 승급
+    time.sleep(0.4)
+    check("GRANT" in ops(B.drain_floor()), "revoked 화자의 RELEASE 후 선점 요청자 GRANT")
+
+    # T3 만료 경로 — 이번엔 RELEASE 를 보내지 않는다
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc, prio=3))     # A 는 큐(하위 우선순위)
+    time.sleep(0.3); A.drain_floor()
+    B.send_floor(a.cmp, fp, rel_pkt("B", B.ssrc))             # B 해제 → A 승급
+    time.sleep(0.4); A.drain_floor(); B.drain_floor()
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc, prio=9))     # B 재선점
+    time.sleep(4.0)                                            # RELEASE 없이 T3(3초) 경과
+    gb = B.drain_floor()
+    check("GRANT" in ops(gb), f"T3 만료 후 선점 요청자 자동 GRANT (B={ops(gb)})")
+    remove(g12)
+    A.close(); B.close()
+
+    print("\n[13] 재요청/큐 위치 — 화자 재요청은 GRANT 재송신, 대기자 재요청은 위치 유지")
+    g13 = f"{a.prefix}_requeue"
+    A = Member("A", bp + 122, 0xD001)
+    B = Member("B", bp + 126, 0xD002)
+    C = Member("C", bp + 130, 0xD003)
+    r = add_group(g13, members="A:5:participant,B:5:participant,C:5:participant",
+                  floor_timers={"t1_end_rtp": 20, "t2_stop_talk": 0, "t3_grace": 3, "t8_revoke": 1})
+    fp = payload(r).get("floor_port")
+    for m in (A, B, C):
+        join(g13, m)
+        m.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.3); A.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))              # 화자 재요청(§6.3.4.4.8)
+    time.sleep(0.3)
+    check("GRANT" in ops(A.drain_floor()), "발언 중 재요청 → GRANT 재송신")
+
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc))              # 큐 1번
+    time.sleep(0.25)
+    C.send_floor(a.cmp, fp, req_pkt("C", C.ssrc))              # 큐 2번
+    time.sleep(0.25); B.drain_floor(); C.drain_floor()
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc))              # B 재전송 — 위치 유지여야
+    time.sleep(0.3)
+    gb = B.drain_floor()
+    qp = [m for m in gb if m["op_base"] == QUEUE_POS_INFO]
+    check(bool(qp), f"대기자 재요청 → QPOS_INFO 재회신 (B={ops(gb)})")
+    if qp:
+        check(qp[-1]["fields"][FF_QUEUE_INFO][0] == 1, f"큐 위치 유지 (pos={qp[-1]['fields'][FF_QUEUE_INFO][0]})")
+    A.send_floor(a.cmp, fp, rel_pkt("A", A.ssrc))
+    time.sleep(0.4)
+    check("GRANT" in ops(B.drain_floor()), "먼저 대기한 B 가 승급")
+    remove(g13)
     A.close(); B.close(); C.close()
 
     print("\n[10] dual — 큐 대기자는 override 자리를 채우지 않는다")

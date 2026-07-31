@@ -36,11 +36,18 @@ enum FloorOpCode {
     FLOOR_REVOKE   = 6,   // Floor Revoke           (서버→화자)
     FLOOR_QUEUE_POS_REQ  = 8,  // Floor Queue Position Request (UE→서버)
     FLOOR_QUEUE_POS_INFO = 9,  // Floor Queue Position Info    (서버→UE)
-    FLOOR_ACK      = 10,  // Floor Ack
-    FLOOR_RELEASE_MULTI  = 0x0F  // Floor Release Multi Talker (UE→서버, Rel-16 multi-talker):
-                                 //   동시 발언 중 자기 발언만 해제 — 나머지 화자는 유지되므로
-                                 //   서버는 Floor Idle 대신 잔여 화자 Taken 갱신으로 응답한다.
+    FLOOR_ACK      = 10,  // Floor Ack               (양방향)
+    FLOOR_RELEASE_MULTI  = 0x0F  // Floor Release Multi Talker (서버→UE 전용, Rel-16 multi-talker):
+                                 //   동시 발언 중 한 명이 발언을 끝냈음을 나머지 참가자에게
+                                 //   알린다(§8.2.14). 잔여 화자가 있으므로 Floor Idle 은 보내지
+                                 //   않는다. 단말이 이 subtype 을 보내면 규격 위반이라 무시한다.
 };
+
+// subtype 첫 비트(0x10) = "Acknowledgment is required" 변종 (TS 24.380 §8.2.2 Table 8.2.2.1-1).
+//   Granted(x0001)/Taken(x0010)/Deny(x0011)/Release(x0100)/Idle(x0101)/QueuePosInfo(x1001) 등에
+//   정의된다 — 수신 시 이 비트를 걷어내 기본 타입으로 처리하고 Floor Ack 로 응답해야 한다.
+#define FLOOR_ACK_REQ_BIT 0x10
+#define FLOOR_OP(subtype) ((subtype) & 0x0F)
 
 // 동시 발언 정책 — floor 제어 "유무"(floor_control)와 직교하는 "동시성" 축
 // (cmp_media_api.md §7.1). group_type:"private" 은 이 축을 해석하지 않는다(TS 24.380 §7).
@@ -72,7 +79,23 @@ enum FloorFieldId {
     FF_TRACK_INFO     = 11,  // 문자열(4B 정렬)
     FF_MSG_TYPE       = 12,
     FF_FLOOR_INDICATOR= 13,
-    FF_SSRC           = 14
+    FF_SSRC           = 14,
+    FF_GRANTED_USERS  = 15,  // List of Granted Users (multi-talker, 문자열 리스트)
+    FF_SSRC_LIST      = 16   // List of SSRCs         (multi-talker, 화자 순서 동일)
+};
+
+// Source 필드 값 (§8.2.3.12) — Floor Ack 가 "누가 보낸 확인인지"를 싣는다.
+enum FloorSourceId {
+    FLOOR_SRC_PARTICIPANT     = 0,
+    FLOOR_SRC_PARTICIPATING   = 1,
+    FLOOR_SRC_CONTROLLING     = 2,  // CMP = controlling MCPTT function 의 미디어 평면
+    FLOOR_SRC_NON_CONTROLLING = 3
+};
+
+// Permission to Request the Floor 값 (§8.2.3.7) — Floor Taken 수신자의 발언 요청 가부.
+enum FloorPermission {
+    FLOOR_PERM_DENIED  = 0,   // broadcast 그룹·ambient 청취 leg
+    FLOOR_PERM_ALLOWED = 1
 };
 
 // Floor Indicator 비트마스크 (TS 24.380 §8.2.3.13).
@@ -95,6 +118,7 @@ enum FloorCause {
     CAUSE_DENY_RECEIVE_ONLY   = 5,   // Receive only (broadcast 비개시자)
     CAUSE_DENY_NO_RESOURCES   = 6,   // No resources available
     CAUSE_DENY_QUEUE_FULL     = 7,   // Queue full
+    CAUSE_REVOKE_TOO_LONG     = 2,   // Media burst too long (T2 Stop talking 만료)
     CAUSE_REVOKE_PREEMPTED    = 4,   // Media Burst pre-empted
     CAUSE_OTHER               = 255  // Other reason
 };
@@ -142,10 +166,13 @@ struct ParsedFloor {
     int indicator() const { return u16(FF_FLOOR_INDICATOR); }
 };
 
-// TLV 필드 값 빌더(big-endian u16 / priority 2옥텟 / queue-info 2옥텟).
+// TLV 필드 값 빌더(big-endian u16 / priority 2옥텟 / queue-info 2옥텟 / SSRC 6옥텟 / 리스트).
 std::string FloorU16(int v);
 std::string FloorPriority(int prio);
 std::string FloorQueueInfo(int position, int prio);
+std::string FloorSsrc(unsigned int ssrc);
+std::string FloorUserList(const std::vector<std::string>& users);
+std::string FloorSsrcList(const std::vector<unsigned int>& ssrcs);
 
 // Floor 메시지 빌드: 12B RTCP APP 헤더 + TLV 본문(문자열 필드 4B 정렬, 전체 4B 정렬).
 int BuildFloorMessage(char* buf, int bufSize, unsigned char subtype,
@@ -248,13 +275,22 @@ public:
     // NAT latch 관측 (STATS detail.nat) — latch 완료 멤버의 (sessionId, learnedIp, learnedPort)
     void collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out);
 
-    // Floor 무활동(inactivity) 자동 회수 — owner 가 RELEASE 없이 RTP 송출을 멈춘 경우
-    // (예: 검증 마지막 발언자가 RELEASE 없이 호 종료). 마지막 RTP 수신 후 idleSec 초가
-    // 지나면 세그먼트 종료 + REVOKE/IDLE 송출 + floor 해제. PCmpServer::timeoutLoop 가 주기 호출.
-    // 회수했으면 true. idleSec<=0 이면 비활성.
-    bool checkFloorInactivity(int idleSec);
+    // Floor 타이머 값 (TS 24.380 §11.1.3 — 초 단위, 0=비활성). PCmpServer 가 설정에서 읽어
+    //   그룹 생성 시 넣어준다.
+    //   t1: End of RTP media   — 마지막 RTP 후 이 시간이 지나면 **발언 완료**로 보고 회수
+    //                            (Revoke 를 보내지 않는다, §6.3.4.4.3). 규격 기본 4초·최대 6초.
+    //   t2: Stop talking       — 최대 발언시간. Floor Granted 의 Duration 으로 광고하고,
+    //                            초과하면 Revoke cause #2(Media burst too long). 규격 기본 30초.
+    //   t3: Stop talking grace — Revoke 후 Floor Release 를 기다리는 유예(그 동안 미디어 유지).
+    //   t8: Floor Revoke       — 유예 중 Revoke 재전송 간격.
+    void setFloorTimers(int t1, int t2, int t3, int t8);
+
+    // Floor 타이머 점검 (T1/T2/T3/T8) — PCmpServer::timeoutLoop 가 1초마다 호출한다.
+    //   발언자 집합이 바뀌었으면 true.
+    bool tickFloorTimers();
 
 private:
+    struct Talker;   // 발언자 레코드 (정의는 아래 Floor State 절)
     /** DTMF(RFC2833/4733) 이벤트 Flow 기록 헬퍼.
      *  detail JSON: {"digit":"X","duration":ms,"volume":V,"user":"..."}
      *  PCmpServer 의 _logFlow 콜백을 통해 proto="DTMF", label="DTMF" 로 기록. */
@@ -269,7 +305,11 @@ private:
 
     // 하향 분배 — slot 은 화자의 동시 발언 슬롯(수신자별 egress SSRC/seq 를 가른다).
     void sendAudioToAll(const char* data, int len, const std::string& excludeSessionId, int slot);
-    void sendFloorToAll(const char* data, int len);
+    // floor 브로드캐스트. roData 가 있으면 recv_only(ambient 청취) 멤버에게만 그 변형을 보낸다
+    //   (Floor Taken 의 Permission to Request the Floor 를 수신자별로 달리하기 위한 것).
+    //   excludeSessionId 는 제외할 멤버 — Floor Taken 은 화자 본인에게 보내지 않는다(§6.3.4.4.2-3).
+    void sendFloorToAll(const char* data, int len, const char* roData = nullptr, int roLen = 0,
+                        const std::string& excludeSessionId = "");
     void sendVideoToAll(const char* data, int len, const std::string& excludeSessionId, int slot);
     void sendToMember(const std::string& sessionId, const char* data, int len);
     // 미협상 소스/미등록 멤버 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
@@ -279,6 +319,16 @@ private:
     // ── Floor 송신 헬퍼 (TS 24.380 TLV) — 호출자는 _mutex 보유 ──
     // emergency/imminent tier + 동시 발언 정책(dual/multi) → Floor Indicator 비트마스크.
     int  _indicatorFor(const std::string& sessionId) const;
+    // 화자와 무관한 메시지(Floor Idle)용 그룹 성격 비트 — normal/broadcast/multi.
+    int  _groupIndicator() const;
+    // SSRC 필드(14)/List of SSRCs(16)에 실을 값 — 학습한 단말 SSRC(없으면 CMP 할당 SSRC).
+    unsigned int _uaSsrcOf(const std::string& sessionId) const;
+    // Floor Taken/Idle 을 묶는 Message Sequence Number (§8.2.3.10) — 송신마다 +1, 65535 순환.
+    int  _nextMsgSeq() { _msgSeq = (unsigned short)(_msgSeq + 1); return _msgSeq; }
+    // Ack 요구(subtype 첫 비트=1) 메시지에 대한 Floor Ack 응답 (§8.2.13).
+    void _sendFloorAck(const std::string& sessionId, int ackedSubtype);
+    // 동시 발언 중 한 화자의 발언 종료를 나머지 참가자에게 통지 (§8.2.14 Floor Release Multi Talker).
+    void _sendReleaseMultiTalker(const std::string& sessionId, unsigned int ssrc);
     // 화자에게 GRANTED(Duration+Granted Party+Indicator) 송신 + 전체 TAKEN + 녹취 시작.
     void _grantFloorTo(const std::string& sessionId, unsigned int ssrc, int prio,
                        bool preempt, const std::string& prevOwner);
@@ -287,6 +337,15 @@ private:
     void _advanceFloorOrIdle();
     // Floor Deny(cause) 송신.
     void _sendDeny(const std::string& sessionId, unsigned int ssrc, int cause);
+    // Floor Revoke(cause) 송신 (§8.2.10) — 선점·정원 축소·최대 발언시간 초과 공통.
+    void _sendRevoke(const std::string& sessionId, int cause);
+    // 'G: pending Floor Revoke' 진입 (§6.3.4.5.2) — Revoke 송신 + T3/T8 무장. T3=0 이면
+    //   유예 없이 즉시 회수한다(audio cut-in). 회수까지 끝났으면 true.
+    bool _beginRevoke(Talker& t, int cause);
+    // 이미 발언 중인 참가자의 재요청에 Floor Granted 를 재송신 (§6.3.4.4.8) — Duration 은 남은 T2.
+    void _resendGrant(const Talker& t);
+    // 선점 요청자를 대기열 **맨 앞**에 넣는다(§6.3.4.4.7-2e). 이미 있으면 앞으로 당긴다.
+    void _queueFront(const std::string& sessionId, unsigned int ssrc, int prio);
     // Floor Queue Position Info 송신(position=1-based, 없으면 0).
     void _sendQueuePos(const std::string& sessionId, unsigned int ssrc);
     // 큐 항목을 우선순위(tier>chair>prio>ts)로 정렬한 순서에서의 1-based 위치(없으면 0).
@@ -302,11 +361,19 @@ private:
         int tier;
         bool chair;
         int64_t ts;
+        // 선점 요청자 — 회수 유예(T3) 동안 대기열 맨 앞을 차지한다(§6.3.4.4.7-2e).
+        bool front = false;
     };
+    // 대기열 서열 비교 (a 가 b 보다 앞) — 선점 대기 > tier > chair > 수치 priority > 도착순.
+    static bool _queueBetter(const QueuedReq& a, const QueuedReq& b);
     std::vector<QueuedReq> _floorQueue;
     bool _queueEnable = true;       // SDP mc_queueing 광고 → 비선점 요청은 큐잉
     int  _queueMax = 30;            // 큐 상한(초과 시 Deny cause=queue full)
-    int  _grantDurationSec = 60;    // Floor Granted Duration 필드(최대 발언시간 표시값)
+    // Floor 타이머 (§11.1.3 권고값) — setFloorTimers 로 주입.
+    int  _t1EndRtpSec   = 4;        // T1 End of RTP media (규격 기본 4초, 최대 6초)
+    int  _t2StopTalkSec = 30;       // T2 Stop talking — Granted Duration 값이기도 하다
+    int  _t3GraceSec    = 3;        // T3 Stop talking grace (audio cut-in 이면 0)
+    int  _t8RevokeSec   = 1;        // T8 Floor Revoke 재전송 간격
 
     std::string _groupId;
     
@@ -315,7 +382,11 @@ private:
         std::string ip;
         int port;
         int floorPort;       // floor control 포트 (m=application)
-        unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당)
+        unsigned int ssrc;   // 멤버 SSRC (joinGroup 시 할당) — 하향 스트림 SSRC 파생 기준
+        // 단말이 floor 메시지 헤더에 쓰는 자기 SSRC (첫 수신 시 학습, 0=미상).
+        //   Floor Granted/Taken 의 SSRC 필드(14)·List of SSRCs(16)에 싣는 값이다 —
+        //   규격이 말하는 "SSRC of granted floor participant" 는 단말의 SSRC 다(§8.2.3.16).
+        unsigned int uaSsrc = 0;
         int videoPort;
         std::string role;    // "chair" | "participant" (TS 24.380 floor 선점 판정)
         // 수신자별 하향 스트림 — 동시 발언 슬롯마다 별도 SSRC/seq 를 쓴다. 슬롯 0 은 단일
@@ -360,8 +431,15 @@ private:
         unsigned int ssrc;      // 요청자 SSRC (GRANT/REVOKE 송신 대상)
         int prio;
         int slot;               // 하향 스트림/녹취 트랙 슬롯 (0..capacity-1)
-        int64_t grantUsec;      // GRANT 시각 (무활동 판정 기준점 — RTP 무수신 grant 대비)
-        int64_t lastRtpUsec;    // 마지막 RTP(audio/video) 수신 시각
+        int64_t grantUsec;      // GRANT 시각 (T1 판정 기준점 — RTP 무수신 grant 대비)
+        int64_t lastRtpUsec;    // 마지막 RTP(audio/video) 수신 시각 — T1(End of RTP media)
+        int64_t talkStartUsec = 0;  // 첫 RTP 수신 시각 — T2(Stop talking) 기준(0=미개시)
+        // 'G: pending Floor Revoke' (§6.3.4.5) — Revoke 를 보낸 뒤 T3(Stop talking grace)
+        //   동안 화자의 미디어를 계속 중계하며 Floor Release 를 기다리는 상태.
+        bool    revokePending = false;
+        int     revokeCause = 0;
+        int64_t revokeSentUsec = 0;      // 마지막 Revoke 송신 시각 — T8 재전송 기준
+        int64_t revokeDeadlineUsec = 0;  // T3 만료 시각 — 넘기면 강제 회수
     };
     std::vector<Talker> _talkers;   // grant 순서 — front() 가 대표 화자
     bool _floorControl = true;      // floor 제어 유무 (off = full-duplex)
@@ -376,7 +454,8 @@ private:
     Talker* _talkerOf(const std::string& sessionId);
     bool _isTalker(const std::string& sessionId) const;
     // 현재 발언자 중 서열이 가장 낮은 화자 (선점 비교 대상). 없으면 nullptr.
-    Talker* _weakestTalker();
+    //   skipPending=true 면 이미 회수 진행 중(pending Revoke)인 화자는 후보에서 제외한다.
+    Talker* _weakestTalker(bool skipPending = false);
     // TS 24.380 선점 서열 비교: condition tier > chair override > 수치 priority.
     //   private call(§7)은 chair 개념이 없어 tier·priority 만 본다.
     bool _preempts(const std::string& reqId, int reqPrio, const std::string& ownerId, int ownerPrio) const;
@@ -402,6 +481,11 @@ private:
     std::string _groupType;            // "broadcast" 면 개시자 외 floor REQUEST REJECT
     std::string _initiatorSessionId;   // 개시자(broadcaster) sessionId(=userId)
     static unsigned int _nextSsrc;  // SSRC 할당 카운터
+
+    // 서버→단말 floor 메시지의 RTCP 헤더 SSRC = **floor control server 의 SSRC**
+    //   (§8.2.5/§8.2.8/§8.2.9 — 화자 SSRC 는 SSRC 필드(14)/List of SSRCs(16)로 싣는다).
+    unsigned int _serverSsrc;
+    unsigned short _msgSeq = 0;     // Floor Taken/Idle Message Sequence Number
 
 
 

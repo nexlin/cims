@@ -499,41 +499,56 @@ handleFloorRequest(sessionId, ssrc, indicatorBits)
   ├─ 이미 발언 중 → 무시
   └─ 발언자 있음
       ├─ 선점 서열: tier(emergency>imminent>normal) > chair > 수치 priority(0~255)
-      │             (private call 은 chair 단계 없음 — TS 24.380 §7)
+      │             (private call 은 chair 단계 없음 — CMP 로컬 정책)
       ├─ multi + 정원 여유          → 동시 GRANT
       ├─ dual + 정원 여유 + 선점자격 → 동시 GRANT (REVOKE 없음, Dual floor 비트)
-      ├─ 선점                        → 최약 화자 REVOKE(cause=preempted) 후 GRANT
-      └─ 비선점 → 큐잉(QUEUE_POS_INFO) / 큐 없음·포화면 DENY
+      ├─ 이미 발언 중              → GRANT 재송신(§6.3.4.4.8, Duration=남은 T2)
+      ├─ 선점                        → 최약 화자 REVOKE(cause=preempted) + 요청자는 큐 선두 대기
+      │                                → 그 화자의 RELEASE 또는 T3 만료 후 승급
+      └─ 비선점 → 큐잉(QUEUE_POS_INFO, 재전송은 위치 유지) / 큐 없음·포화면 DENY
 ```
 > 멤버 `role`(chair/participant)이 PTT_JOIN/멤버문자열(`id:prio:role`)로 전달되어 선점 판정에 사용.
-> 화자 1명이 빠져도 잔여 화자가 있으면 IDLE 대신 잔여 화자 TAKEN 을 재브로드캐스트한다.
-> 무활동 자동 회수(`FloorIdleSec`)는 화자별 독립 판정(긴급 tier 제외).
+> 화자 1명이 빠져도 잔여 화자가 있으면 IDLE 대신 **Floor Release Multi Talker**(0x0F)로 나머지
+> 참가자에게 알린다(마지막 화자가 빠질 때만 IDLE).
+> **타이머**(화자별 독립, 설정 `FloorIdleSec`/`FloorStopTalkSec`/`FloorRevokeGraceSec`/
+> `FloorRevokeRetxSec`, 그룹별 `floor_timers` 로 덮어쓰기): T1(4초) 무RTP=발언 완료 회수(Revoke
+> 없음) · T2(30초) 최대 발언시간 초과 → Revoke cause#2(긴급 tier 제외) · T3(3초) Revoke 후
+> Release 대기 유예(그 동안 미디어 유지) · T8(1초) 유예 중 Revoke 재전송.
 > 모든 floor 이벤트는 세션 시간버킷 `{record_dir}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl` 에 기록(GRANT/REVOKE/REJECT/RELEASE/IDLE + prio/preempt).
 > 세그먼트는 `seg/{NNN}/`(100세그 shard), 빈 트랙(.rtp) 미생성. 상세 [recording.md](../features/recording.md).
 
 #### Floor Control 패킷 (RTCP APP "MCPT")
 
-TS 24.380 §8.2 — RTCP APP 12B 고정 헤더(V/P/**subtype**=메시지 타입, PT=204, length, SSRC,
+TS 24.380 §8.1~8.2 — RTCP APP 12B 고정 헤더(V/P/**subtype**=메시지 타입, PT=204, length, SSRC,
 name="MCPT") 뒤에 floor control field 들의 **TLV**(Field ID 1B + Length 1B + value) 나열.
-문자열 필드(Granted Party/User ID/Queued User ID/Track Info)만 4바이트 경계로 패딩한다.
-인코더/디코더는 `PFloorCodec.cpp`(단말 `floor/FloorCodec.kt` 와 바이트 호환, 단위테스트
-`tests/cmp_floor_codec_test.cpp`).
+**모든 필드는 패딩을 포함해 4바이트 배수**(§8.1.3)라 미지 필드도 건너뛸 수 있다(Field ID ≥192 는
+Length 2B). 서버 발신 메시지의 헤더 SSRC 는 **floor control server 의 SSRC** 이고, 화자 SSRC 는
+SSRC 필드(14)/List of SSRCs(16)로 싣는다. 인코더/디코더는 `PFloorCodec.cpp`(단말
+`floor/FloorCodec.kt` 와 바이트 호환, 단위테스트 `tests/cmp_floor_codec_test.cpp`).
 
-**메시지 타입 = subtype (TS 24.380 Table 8.2.2-1):**
+**메시지 타입 = subtype (TS 24.380 Table 8.2.2.1-1):**
 
 | 메시지 | subtype | 방향 | 설명 |
 |--------|---|------|------|
 | Floor Request | 0 | UE → CMP | 발언권 요청 |
 | Floor Granted | 1 | CMP → UE | 발언권 승인 |
-| Floor Taken | 2 | CMP → ALL | 발언권 점유됨 (화자 ID 포함) |
+| Floor Taken | 2 | CMP → 화자 외 | 발언권 점유됨 (화자 ID·화자 목록) |
 | Floor Deny | 3 | CMP → UE | 발언권 거절 (Reject Cause) |
 | Floor Release | 4 | UE → CMP | 발언권 해제 |
 | Floor Idle | 5 | CMP → ALL | 발언자 없음 (전체 통지) |
-| Floor Revoke | 6 | CMP → UE | 발언권 강제 회수 (선점/무활동) |
+| Floor Revoke | 6 | CMP → UE | 발언권 회수 통지 (선점 cause#4 / 발언시간 초과 cause#2 / 정책 변경 cause#255) |
 | Floor Queue Position Request | 8 | UE → CMP | 큐 위치 조회 |
 | Floor Queue Position Info | 9 | CMP → UE | 큐 위치 응답 |
-| Floor Ack | 10 | 양방향 | 수신 확인 |
-| Floor Release Multi Talker | 0x0F | UE → CMP | 동시 발언 중 자기 발언만 해제 (Rel-16) |
+| Floor Ack | 10 | 양방향 | 수신 확인 (ack 요구 메시지에 대한 응답) |
+| Floor Release Multi Talker | 0x0F | CMP → 잔여 화자 외 | 동시 발언 중 한 화자의 발언 종료 통지 (Rel-16) |
+
+subtype 의 **첫 비트(0x10)는 "Acknowledgment 요구"** 다 — Granted/Taken/Deny/Release/Idle/
+QueuePosInfo 에 정의돼 있고, 단말은 Floor Release 를 `0x14` 로 보낼 수 있다. CMP 는 이 비트를
+걷어내 기본 타입으로 처리한 뒤 **Floor Ack**(Source=controlling, Message Type=대상 subtype)로
+회신한다. 미정의 subtype·미정의 ack 조합은 §8.1.4 대로 메시지 전체를 무시한다.
+
+> 0x0F 는 **서버→단말 통지 전용**이다. 단말이 이 subtype 으로 발언 해제를 보내면 규격 위반이라
+> WARN 로그 후 무시한다 — 해제는 Floor Release(`0x04`/`0x14`)로 받는다.
 
 **SRTCP 보호** — `floor_crypto` 가 설정된 그룹은 위 패킷을 SRTCP(RFC 3711, AES-CM +
 HMAC-SHA1)로 주고받는다: 헤더 8B 평문 + 본문 암호화 + `E|SRTCP index` + MKI(선택) + 인증 태그.

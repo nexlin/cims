@@ -196,13 +196,43 @@
         },
         {
           "key": "FloorIdleSec",
-          "label": "PTT floor 무활동 회수 (초)",
+          "label": "PTT floor T1 발언 종료 판정 (초)",
           "type": "int",
-          "default": 10,
+          "default": 4,
           "min": 0,
           "max": 600,
           "restart": true,
-          "help": "PTT 발언자(floor owner)가 RELEASE 없이 RTP 송출을 멈추면 마지막 RTP 후 이 초만큼 무수신 시 floor 를 강제 해제(REVOKE+IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 검증 마지막 발언자처럼 RELEASE 누락 시 floor 가 영구 점유되어 발언시간이 부풀던 문제 방지. 0=비활성."
+          "help": "TS 24.380 T1(End of RTP media) — 발언자의 마지막 RTP 후 이 초만큼 무수신이면 발언이 끝난 것으로 보고 floor 를 회수한다(Revoke 를 보내지 않고 잔여 화자에게 0x0F, 아무도 없으면 IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 규격 권고 기본 4초·최대 6초. 0=비활성."
+        },
+        {
+          "key": "FloorStopTalkSec",
+          "label": "PTT floor T2 최대 발언시간 (초)",
+          "type": "int",
+          "default": 30,
+          "min": 0,
+          "max": 600,
+          "restart": true,
+          "help": "TS 24.380 T2(Stop talking) — 한 번에 말할 수 있는 최대 시간. Floor Granted 의 Duration 으로 단말에 광고하고, 초과하면 Floor Revoke(cause #2 Media burst too long) 후 회수한다. 긴급/임박 발언자는 제외. 규격 권고 기본 30초. 0=제한 없음."
+        },
+        {
+          "key": "FloorRevokeGraceSec",
+          "label": "PTT floor T3 회수 유예 (초)",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 30,
+          "restart": true,
+          "help": "TS 24.380 T3(Stop talking grace) — Floor Revoke 를 보낸 뒤 단말의 Floor Release 를 기다리는 유예. 그 동안 그 화자의 미디어는 계속 중계되고, 유예가 끝나면 강제 회수한다. 0=유예 없이 즉시 회수(audio cut-in)."
+        },
+        {
+          "key": "FloorRevokeRetxSec",
+          "label": "PTT floor T8 Revoke 재전송 간격 (초)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 10,
+          "restart": true,
+          "help": "TS 24.380 T8(Floor Revoke) — 회수 유예(T3) 중 Floor Release 가 올 때까지 Floor Revoke 를 이 간격으로 재전송한다."
         }
       ],
       "scope": "service"

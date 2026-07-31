@@ -441,9 +441,14 @@ floor RTCP 를 직접 구동하는 프로브로 검증한다 (정본 [api/cmp_me
 python3 scripts/mcptt_floor_policy_probe.py --cmp <CMP_IP> [--port 9000] [--base-port 51500]
 ```
 
-검증 항목: single 회귀(GRANT/TAKEN/큐/IDLE) · dual(동급 큐, 긴급 override 동시 GRANT,
-대기자가 override 자리 미충원) · multi(정원 내 동시 GRANT, Floor Release Multi Talker,
-잔여 화자 TAKEN 갱신) · private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
+검증 항목: single 회귀(GRANT/TAKEN/큐/IDLE) · 규격 필드(서버 SSRC 헤더, GRANT 의 SSRC/Duration,
+TAKEN 의 Permission·MSN·SSRC, IDLE 의 MSN·Indicator, 화자 본인 TAKEN 제외) · ack 요구
+RELEASE(subtype 0x14) 처리와 Floor Ack 회신 · dual(동급 큐, 긴급 override 동시 GRANT,
+대기자가 override 자리 미충원) · multi(정원 내 동시 GRANT, TAKEN 의 화자 리스트,
+화자 1명 해제 시 잔여 참가자에게 Floor Release Multi Talker) · 타이머(T1 발언 종료 회수·
+T2 초과 시 Revoke cause#2·T3 회수 유예·T8 재전송, 그룹별 `floor_timers` 로 짧게 설정) ·
+선점(유예 중 기존 화자 floor 유지, 요청자 큐 선두 승급) · 재요청 시 GRANT 재송신과 큐 위치
+유지 · private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
 (floor_port 미광고 + 양방향 중계) · ambient(`recv_only`/`floor_suppress`) · floor SRTCP
 왕복과 평문 거부(`floor_crypto_drop`) · MODIFY 정책 변경(정원 축소 시 초과 화자 회수) ·
 계약 위반 필드의 `BAD_REQUEST`.

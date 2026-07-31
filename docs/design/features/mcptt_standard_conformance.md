@@ -21,9 +21,10 @@
 
 | # | 항목 | 컴포넌트 | 규격 | 상태 |
 |---|---|---|---|---|
-| F1 | Floor 패킷 = subtype(메시지타입) + TLV | CMP | TS 24.380 §8 | ✅ 정합 |
-| F2 | Reject/Revoke Cause·Floor Indicator·Duration·Queue TLV | CMP | TS 24.380 §8.3 | ✅ 정합 |
-| F3 | Floor Ack / Queue Position(큐잉) | CMP | TS 24.380 §8.3.2 | ✅ 정합 |
+| F1 | Floor 패킷 = subtype(메시지타입) + TLV | CMP | TS 24.380 §8.1~8.2 | ✅ 정합 |
+| F2 | Reject/Revoke Cause·Floor Indicator·Duration·Queue TLV | CMP | TS 24.380 §8.2.3 | ✅ 정합 |
+| F3 | Floor Ack / Queue Position(큐잉) | CMP | TS 24.380 §8.2.12~8.2.13 | ✅ 정합 |
+| F4 | floor 상태머신(T1/T2/T3/T8, pending Floor Revoke, 재요청·큐 안정성) | CMP | TS 24.380 §6.3.4 | ✅ 정합 (T7 Idle 재송신·T20 Granted 재송신 미구현 — [§0-R R2-1](#r2-1-floor-control--구현-항목의-규격-편차)) |
 | C1 | affiliation PUBLISH = affiliation-command XML 파싱 + Content-Type | CSP | TS 24.379 §9 | ✅ 정합 |
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
@@ -82,6 +83,29 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 > ([../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
 > 마찬가지로 CSP 가 `floor_policy`/`group_type:"private"` 를 아직 발행하지 않는다(Call Control 파트).
 
+### R2-1. Floor Control — 구현 항목의 규격 편차
+
+구현돼 동작하지만 **TS 24.380 V17.7.0 원문과 어긋나는** 지점이다(2026-07 원문 대조). 위 R2 가
+"미구현 기능"이라면 여기는 "구현됐으나 규격과 다른 동작"으로, 3rd-party 단말 interop 의 실제
+장애 지점이다. 근거는 모두 TS 24.380 클라우즈.
+
+| # | 규격 | 규격 요구 | 현재 동작 |
+|---|---|---|---|
+| G2 | §6.3.4.4.2-1e, §6.3.5.4.4 | 서버도 필요할 때 **ack 요구 변종으로 송신**하고 Floor Ack 미수신 시 재전송한다(원격 개시 ambient 의 Floor Granted 는 `shall`, 그 밖은 `may`) | 수신 ack 요구는 처리·회신하지만, **서버 송신은 항상 ack 비트 0**(재전송 없음) |
+| G11 | §13.3.2-2 | 유니캐스트 floor SRTCP 는 **클라이언트별 CSK**로 보호(그룹 키 MuSiK 는 MBMS 전용) | 그룹 단위 키 1개 + 브로드캐스트 1회 보호 (`floor_crypto` 가 그룹 필드) |
+| G12 | §8.2.12 | Queue Size(7)·Queued User ID(9)·SSRC of queued floor participant 는 **off-network 전용** | Queue Position Info 에 Queue Size 를 함께 싣는다(온넷 단말은 무시) |
+| G13 | §8.2.3.8 | User ID·Granted Party 값 = **MCPTT ID(URI)** | bare 사용자 번호 |
+| G14 | §6.3.4.3.4, §6.3.4.4.9 | Floor Idle 은 **T7** 만료마다 C7 상한까지, 큐에서 승급한 Floor Granted 는 **T20** 만료마다 C20 상한까지 재송신(도달 보장). 1인 세션의 요청은 Deny **#3**(Only one participant) | Idle·Granted 각 1회 송신, 1인 세션에도 GRANT |
+| G15 | §8.2.15, §8.2.16 | Queued Floor Requests(Cancel, 0x0E/0x1E)·Unicast Media Flow Control(0x0B) | 미구현(무시) — 큐 취소 요청이 반영되지 않는다 |
+| G16 | §6.3.5.4.4, §12.1.2.3 | 큐잉·우선순위 가용성은 **클라이언트별 SDP 협상**(`mc_queueing`/`mc_priority`), 미협상 클라이언트는 Deny #1 | 서버 전역 플래그(`_queueEnable`)로 모든 멤버에 큐잉 적용 (CMP API 에 멤버별 필드 없음) |
+| G17 | §6.3.4.2.2-3b, §12.1.2.3 | 호 성립 시 초기 발언권은 fmtp **`mc_granted`** 협상 결과로 결정(ambient listening 이면 금지). floor 없는 세션은 `mc_no_floor_ctrl` | `group_type:"private"` + `initiator_id` 로 CMP 가 자체 판단 |
+| G18 | §6.3.6 | dual floor = **overriding pre-emptive priority 사용자 1명**에 한정(호당 1개 인스턴스) | `_preempts()` 성립이면(chair·수치 우선순위 포함) 2번째 자리 부여 |
+
+> **인용 정정**: TS 24.380 **클라우즈 7은 off-network floor control** 이다. 온넷 private call 은
+> 클라우즈 6.3 의 일반 floor 절차를 그대로 쓰며, 별도 private-call floor 절차는 없다. 이전
+> 문서·주석의 "TS 24.380 §7 private-call floor" 인용은 잘못된 것으로 §6.3 + fmtp
+> (`mc_granted`/`mc_no_floor_ctrl`) 기준으로 대체한다.
+
 ### R3. 미디어 평면 / 전송
 
 | 기능 | 규격 | 상태 |
@@ -118,35 +142,80 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 
 - **RTCP APP "MCPT"** (PT=204). 메시지 타입 = **5비트 subtype** (`BuildFloorMessage`/`ParseFloorMessage`,
   `PFloorCodec.cpp`). subtype 값은 규격 정렬: Request=0/Granted=1/Taken=2/Deny=3/Release=4/Idle=5/
-  Revoke=6/QueuePosReq=8/QueuePosInfo=9/Ack=10 (`PMcpttGroup.h` `FloorOpCode`).
-- **본문 = TLV**: `Field ID(8) + Length(8) + value`. 가변 길이 문자열 필드(Granted Party 4/User ID 6/
-  Queued User ID 9/Track Info 11)만 32비트 경계로 패딩, 전체 패킷도 32비트 정렬.
-- 수신 REQUEST 의 **Floor Priority**(필드 0)·**Floor Indicator**(필드 13)를 파싱한다(`onFloorPacket`/`onRtcpPacket`).
+  Revoke=6/QueuePosReq=8/QueuePosInfo=9/Ack=10/ReleaseMultiTalker=0x0F (`PMcpttGroup.h` `FloorOpCode`).
+- subtype **첫 비트(0x10)=Acknowledgment 요구**(Table 8.2.2.1-1). 수신 시 비트를 걷어내 기본 타입으로
+  처리하고 **Floor Ack**(Source=controlling(2) + Message Type)로 회신한다. 규격이 ack 변종을 정의하지
+  않은 subtype 에 이 비트가 서 있거나 미정의 subtype 이면 §8.1.4 대로 메시지 전체를 무시한다.
+- **본문 = TLV**: `Field ID(8) + Length(8) + value`. **모든 필드는 패딩을 포함해 4옥텟 배수**(§8.1.3)
+  이므로 미지·가변 필드도 건너뛸 수 있다. Field ID ≥192 는 Length 가 2옥텟.
+- 수신 REQUEST 의 **Floor Priority**(필드 0)·**Floor Indicator**(필드 13)를 파싱한다(`onFloorPacket`).
+  단말이 floor 헤더에 쓰는 SSRC 를 학습해(`Peer.uaSsrc`) SSRC 필드에 되싣는다.
 
-### F2. Cause / Indicator / Duration / Queue TLV
+### F2. 메시지별 필드 / Cause / Indicator
+
+서버 발신 메시지의 RTCP 헤더 SSRC 는 **floor control server 의 SSRC**(`_serverSsrc`)이고,
+화자 SSRC 는 SSRC 필드(14) 또는 List of SSRCs(16)로 싣는다.
 
 | 메시지 | 송신 필드(TLV) |
 |---|---|
-| Granted | Duration(1) + Granted Party(4) + Floor Indicator(13) (`_grantFloorTo`) |
-| Taken | Granted Party(4) + Floor Indicator(13) (`broadcastFloorStatus`) |
-| Deny | Reject Cause(2) — receive-only(5)/queue-full(7)/another-client(1) (`_sendDeny`) |
-| Revoke | Reject Cause(2) — pre-empted(4)/other(255) |
-| Queue Position Info | Queue Info(3: position+prio) + Queue Size(7) (`_sendQueuePos`) |
+| Granted | Duration(1) + SSRC(14) + Floor Priority(0) + Floor Indicator(13) (`_grantFloorTo`) |
+| Taken | Granted Party(4) + Permission to Request the Floor(5) + Message Seq Number(8) + Floor Indicator(13) + SSRC(14) — 동시 발언이면 SSRC 대신 List of Granted Users(15) + List of SSRCs(16) (`broadcastFloorStatus`) |
+| Idle | Message Seq Number(8) + Floor Indicator(13) |
+| Deny | Reject Cause(2) — receive-only(5)/queue-full(7)/another-client(1) + Floor Indicator(13) (`_sendDeny`) |
+| Revoke | Reject Cause(2) — pre-empted(4)/other(255) + Floor Indicator(13) (`_sendRevoke`) |
+| Release Multi Talker | SSRC(14) + User ID(6) + Floor Indicator(13) (`_sendReleaseMultiTalker`) |
+| Queue Position Info | Queue Info(3: position+prio) + Queue Size(7) + Floor Indicator(13) (`_sendQueuePos`) |
+| Ack | Source(10)=controlling + Message Type(12)=확인 대상 subtype (`_sendFloorAck`) |
 
+- Floor Taken 은 **화자 본인을 제외한** 참가자에게 보내고, ambient 청취(`recv_only`) leg 에는
+  Permission to Request the Floor=0 변형을 보낸다. broadcast 그룹도 0 이다.
 - Floor Indicator 는 owner tier 로 매핑: emergency→`0x1000`, imminent→`0x0800`, else normal `0x8000`
-  (`_indicatorFor`). 수신 REQUEST 의 Indicator emergency/imminent 비트는 tier 로 승격된다.
+  (`_indicatorFor`). broadcast 그룹은 `0x4000`, multi 정책은 `0x0080`, dual 은 화자 2명일 때 `0x0200`.
+  수신 REQUEST 의 Indicator emergency/imminent 비트는 tier 로 승격된다.
 
-### F3. Floor Ack / Queue Position(큐잉)
+### F3. Floor Ack / Queue Position(큐잉) / 동시 발언 해제
 
 - **큐잉**(SDP `mc_queueing` 광고): floor 점유 중 비선점 REQUEST 는 Deny 대신 우선순위
   (tier>chair>prio>ts) 대기열에 넣고 **Queue Position Info**(subtype 9)를 회신한다. RELEASE/REVOKE/
   owner-leave 시 최우선 대기자에게 자동 grant(`_advanceFloorOrIdle`/`_popBestQueued`). 큐 포화 시 Deny(queue full).
 - **Floor Queue Position Request**(subtype 8) 수신 → 현재 위치 회신.
-- **Floor Ack**(subtype 10) 수신 처리(재전송 안 함 → no-op 확인).
+- **Floor Ack**(subtype 10): ack 요구 메시지에 대한 회신으로 **송신**하고, 수신은 no-op 이다
+  (단말이 NAT 매핑 유지용으로 주기 송신한다).
+- **Floor Release Multi Talker**(0x0F): 동시 발언 중 한 화자가 빠지면 **나머지 참가자에게 통지**
+  한다(`_dropTalker` → `_sendReleaseMultiTalker`). 잔여 화자가 있으면 Floor Idle 은 보내지 않는다.
 
 ### 보존 — 정합/유지
-- 선점/tier(emergency>imminent>chair>numeric priority, TS 24.380 §8.2), SSRC 순차할당,
+- 선점/tier(emergency>imminent>chair>numeric priority, TS 24.380 §6.3.4), SSRC 순차할당,
   inactivity auto-revoke(REVOKE cause=other + IDLE/큐 승계), DTMF(PT=101) fallback.
+
+### F4. 타이머와 회수 상태 (§6.3.4 / §11.1.3)
+
+값은 CMP 설정(`FloorIdleSec`/`FloorStopTalkSec`/`FloorRevokeGraceSec`/`FloorRevokeRetxSec`)이
+기본이고, 그룹별로 `PTT_GROUP_ADD.floor_timers` 가 덮어쓴다. 점검은 `tickFloorTimers()` 가
+1초 주기로 화자마다 독립 수행한다.
+
+| 타이머 | 기본 | 동작 |
+|---|---|---|
+| **T1** End of RTP media | 4초 | 마지막 RTP 후 무수신이면 **발언 완료**로 보고 회수한다 — Revoke 를 보내지 않고, 잔여 화자가 있으면 0x0F, 없으면 Floor Idle |
+| **T2** Stop talking | 30초 | 첫 RTP 부터의 최대 발언시간. Floor Granted 의 Duration 으로 광고하고, 초과하면 Revoke cause **#2**(Media burst too long). 긴급/임박 tier 화자는 제외(로컬 정책) |
+| **T3** Stop talking grace | 3초 | Revoke 를 보낸 뒤 Floor Release 를 기다리는 유예. 그 동안 그 화자의 미디어는 **계속 중계**되고, 유예가 끝나면 강제 회수한다. 0 이면 즉시 회수(audio cut-in) |
+| **T8** Floor Revoke | 1초 | 유예 중 Floor Release 가 올 때까지 Revoke 재전송 |
+
+**선점**(§6.3.4.4.7)은 즉시 교체가 아니라 위 유예를 거친다: 최약 화자에게 Revoke → 요청자는
+**대기열 맨 앞**에 넣고 Queue Position Info 회신 → 그 화자의 Release(또는 T3 만료) 후 승급.
+`PTT_GROUP_MODIFY` 로 정원이 줄어 초과 화자를 회수할 때는 정책과 상태를 즉시 맞춰야 하므로
+유예 없이 회수한다.
+
+**재요청·큐 안정성** — 이미 발언 중인 참가자가 Floor Request 를 재전송하면 Floor Granted 를
+다시 보내고(§6.3.4.4.8, Duration 은 남은 T2), 이미 대기 중인 요청의 재전송은 **큐 위치를
+유지**한 채 Queue Position Info 만 재회신한다(§6.3.5.4.4-4).
+
+### 규격 밖 수용(관대 처리) — 의도된 예외
+- **Floor Ack 수신**: 서버가 ack 를 요구하지 않아도 단말이 NAT 매핑 유지용으로 주기 송신한다 —
+  상태를 바꾸지 않고 수용한다([ue_nat_traversal.md](ue_nat_traversal.md)).
+- **User ID 기반 주소 latch**: 소스 주소가 등록 floor 포트와 다르면 규격상 미협상 소스지만,
+  제어평면이 `nat` 로 지정한 멤버에 한해 User ID(6)로 식별하고 관측 주소를 학습한다(IP guard 적용).
+- 손상 TLV 는 그 지점에서 파싱을 멈추고 앞서 읽은 필드만 사용한다(메시지 폐기 대신).
 
 ---
 

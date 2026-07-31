@@ -19,16 +19,16 @@ NAME = {REQUEST:"REQUEST",GRANTED:"GRANTED",TAKEN:"TAKEN",DENY:"DENY",RELEASE:"R
         IDLE:"IDLE",REVOKE:"REVOKE",QPREQ:"QPREQ",QPINFO:"QPINFO",ACK:"ACK"}
 # Field IDs (TS 24.380 §8.2.3)
 F_PRIO, F_DUR, F_CAUSE, F_QINFO, F_GPARTY, F_USERID, F_QSIZE, F_INDIC = 0, 1, 2, 3, 4, 6, 7, 13
-STRING_FIELDS = {4, 6, 9, 11}
+F_MSGSEQ, F_PERM, F_SSRC = 8, 5, 14
 
 def _pad4(n): return (4 - (n % 4)) % 4
 
 def encode(subtype, ssrc, fields):
+    # §8.1.3 — 모든 필드는 패딩 포함 4옥텟 배수
     body = b""
     for fid, val in fields:
         body += bytes([fid & 0xFF, len(val) & 0xFF]) + val
-        if fid in STRING_FIELDS:
-            body += b"\x00" * _pad4(2 + len(val))
+        body += b"\x00" * _pad4(2 + len(val))
     body += b"\x00" * _pad4(len(body))
     total = 12 + len(body)
     words = total // 4 - 1
@@ -42,13 +42,15 @@ def decode(buf):
     ssrc = struct.unpack(">I", buf[4:8])[0]
     fields, p = {}, 12
     while p + 2 <= len(buf):
-        fid, fl = buf[p], buf[p+1]; start = p; p += 2
-        if p + fl > len(buf): break
-        val = buf[p:p+fl]; p += fl
-        if fid in STRING_FIELDS: p += _pad4(p - start)
+        fid = buf[p]
+        hdr = 3 if fid >= 192 else 2          # ID>=192 는 Length 2옥텟 (§8.1.3)
+        if p + hdr > len(buf): break
+        fl = struct.unpack(">H", buf[p+1:p+3])[0] if hdr == 3 else buf[p+1]
         if fid == 0 and fl == 0: break
-        fields[fid] = val
-    return {"subtype": subtype, "ssrc": ssrc, "fields": fields}
+        if p + hdr + fl > len(buf): break
+        fields[fid] = buf[p+hdr:p+hdr+fl]
+        p += hdr + fl + _pad4(hdr + fl)       # 모든 필드 4옥텟 정렬
+    return {"subtype": subtype & 0x0F, "raw_subtype": subtype, "ssrc": ssrc, "fields": fields}
 
 def req(ssrc, userid, prio=5):
     return encode(REQUEST, ssrc, [(F_PRIO, bytes([prio, 0])), (F_USERID, userid.encode())])
@@ -72,10 +74,17 @@ def ctl(sock, ip, port, payload, tid):
     if p:
         pkt["payload"] = p
     sock.sendto(json.dumps(pkt).encode(), (ip, port))
-    try:
-        return json.loads(sock.recvfrom(8192)[0].decode())
-    except socket.timeout:
-        return None
+    # CMP 는 같은 소켓으로 이벤트(FLOOR_TALKERS 등)도 보낸다 — trans_id 로 응답만 골라낸다.
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        try:
+            r = json.loads(sock.recvfrom(8192)[0].decode())
+        except socket.timeout:
+            return None
+        h = r.get("hdr") or {}
+        if h.get("type") == "response" and h.get("trans_id") in (tid, str(tid)):
+            return r
+    return None
 
 def main():
     ap = argparse.ArgumentParser()
@@ -85,7 +94,9 @@ def main():
     a = ap.parse_args()
 
     ctlsock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); ctlsock.settimeout(3.0)
-    myip = "127.0.0.1"
+    # CMP 로 나가는 실제 소스 IP — 선언 주소(user_ip)와 다르면 CMP 가 미협상 소스로 드롭한다.
+    _p = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); _p.connect((a.cmp, a.port))
+    myip = _p.getsockname()[0]; _p.close()
     tid = int(time.time()) % 100000
     def step(label, payload):
         nonlocal tid; tid += 1
@@ -97,8 +108,11 @@ def main():
     def run_group(group, fpa, fpb):
         sa = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sa.bind(("0.0.0.0", fpa)); sa.settimeout(1.5)
         sb = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sb.bind(("0.0.0.0", fpb)); sb.settimeout(1.5)
+        # 이 스크립트는 미디어를 보내지 않는 **wire/코덱** 시험이라 T1(무RTP 발언 종료)·T3(회수
+        #   유예)가 단계 사이에 끼어들면 안 된다 — 길게 잡는다(타이머 동작은 floor 정책 프로브가 검증).
         r = step(f"PTT_GROUP_ADD {group}", {"cmd":"PTT_GROUP_ADD","group_id":group,
                  "members":"A:5:participant,B:5:participant","count":2,
+                 "floor_timers":{"t1_end_rtp":120,"t2_stop_talk":0,"t3_grace":10},
                  "record_dir":f"{a.rec}/{group}","log_dir":f"{a.rec}/{group}"})
         fport = (r.get("payload") or {}).get("floor_port") if r else None
         if not fport:
@@ -130,9 +144,16 @@ def main():
         check(ga is not None, "A 가 GRANTED(1) 수신")
         if ga:
             check(u16(ga["fields"], F_DUR) is not None, f"GRANTED Duration TLV (={u16(ga['fields'],F_DUR)}s)")
-            check(F_GPARTY in ga["fields"], f"GRANTED Granted Party TLV (={ga['fields'].get(F_GPARTY,b'').decode(errors='replace')})")
+            # §8.2.5 — Granted 는 화자 SSRC 를 SSRC 필드(14)로 싣는다(Granted Party 는 Taken 전용)
+            check(F_SSRC in ga["fields"], "GRANTED SSRC TLV (§8.2.3.16)")
             check(u16(ga["fields"], F_INDIC) is not None, f"GRANTED Floor Indicator TLV (=0x{(u16(ga['fields'],F_INDIC) or 0):04x})")
-        check(find(ma, TAKEN) or find(mb, TAKEN), "TAKEN(2) 브로드캐스트 수신")
+        tk = find(mb, TAKEN)
+        check(tk is not None, "TAKEN(2) 브로드캐스트 수신 (화자 외)")
+        if tk:
+            # §8.2.9 — Granted Party + Permission to Request the Floor + Message Seq Number
+            check(F_GPARTY in tk["fields"], f"TAKEN Granted Party TLV (={tk['fields'].get(F_GPARTY,b'').decode(errors='replace')})")
+            check(u16(tk["fields"], F_PERM) == 1, "TAKEN Permission to Request the Floor=1")
+            check(u16(tk["fields"], F_MSGSEQ) is not None, "TAKEN Message Sequence Number TLV")
 
         print("[2] B REQUEST (동prio 비선점) → QUEUE_POS_INFO")
         sb.sendto(req(0xB1, "tel:+8210000002"), (a.cmp, fport)); time.sleep(0.4)
@@ -163,15 +184,24 @@ def main():
         drain(sa); drain(sb)
         print("[2] PTT_FLOOR_TIER B = emergency")
         step("TIER", {"cmd":"PTT_FLOOR_TIER","group_id":g,"session_id":"B","tier":"emergency"})
-        print("[3] B REQUEST (긴급) → A REVOKE + B GRANTED")
+        # 선점은 'G: pending Floor Revoke'(§6.3.4.5)를 거친다 — 기존 화자에 REVOKE 를 보내고
+        #   T3 유예 동안 Floor Release 를 기다리며, 요청자는 큐 선두에서 대기한다.
+        print("[3] B REQUEST (긴급) → A REVOKE + B 큐 선두 대기")
         sb.sendto(req(0xB2, "tel:+8210000002"), (a.cmp, fport)); time.sleep(0.5)
+        # B 먼저 확인 — A 는 유예 동안 T8 로 REVOKE 를 반복 수신하므로 나중에 비운다.
+        mb = drain(sb)
+        check(find(mb, QPINFO) is not None, "B 가 QUEUE_POS_INFO(9) 수신 (회수 유예 대기)")
+        check(find(mb, GRANTED) is None, "유예 중에는 GRANTED 를 보내지 않는다")
+
+        print("[4] A RELEASE (회수 응답) → B GRANTED")
+        sa.sendto(rel(0xA2, "tel:+8210000001"), (a.cmp, fport)); time.sleep(0.5)
         ma, mb = drain(sa), drain(sb)
         rv = find(ma, REVOKE)
         check(rv is not None, "A 가 REVOKE(6) 수신")
         if rv:
-            check(u16(rv["fields"], F_CAUSE) is not None, f"REVOKE Reject Cause TLV (={u16(rv['fields'],F_CAUSE)})")
-        check(find(mb, GRANTED) is not None, "B(긴급) 가 GRANTED(1) 수신")
+            check(u16(rv["fields"], F_CAUSE) == 4, f"REVOKE cause #4 Media Burst pre-empted (={u16(rv['fields'],F_CAUSE)})")
         gb = find(mb, GRANTED)
+        check(gb is not None, "B(긴급) 가 GRANTED(1) 수신")
         if gb:
             ind = u16(gb["fields"], F_INDIC) or 0
             check((ind & 0x1000) != 0, f"B GRANTED Floor Indicator=emergency 비트(0x1000) (=0x{ind:04x})")

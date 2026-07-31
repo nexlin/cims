@@ -357,11 +357,12 @@ member 키 `(node, session_id)`.
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
-| `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §10.3), `private` 은 1:1 private call(2인, TS 24.379 §11 / TS 24.380 §7) |
+| `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §10.3), `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통) |
 | `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자, private 은 초기 발언권 부여 대상 |
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
+| `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
 | `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
@@ -473,17 +474,34 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 | `floor_policy:"single"` (기본) | 단일 화자. 점유 중 요청은 선점 서열 판정 → 선점(REVOKE 후 GRANT) 또는 큐잉/Deny |
 | `floor_policy:"dual"` | 동시 최대 2명. **2번째 자리는 override 전용** — 선점 자격(tier>chair>priority)이 있는 요청만 기존 화자를 REVOKE 하지 않고 동시 GRANT 한다(TS 24.380 dual floor). 자격 없는 요청은 single 과 같이 큐잉/Deny |
 | `floor_policy:"multi"` | 동시 최대 `max_talkers` 명. 정원 여유가 있으면 서열 비교 없이 즉시 GRANT, 정원이 차면 선점 판정(최약 화자 REVOKE) 또는 큐잉 (TS 24.380 Rel-16 multi-talker) |
-| `group_type:"private"` | TS 24.380 §7 private-call floor — 정원 1, **큐잉 없음**(점유 중 요청은 즉시 Deny), chair 개념 없음(tier·priority 만 비교). `initiator_id` 멤버가 참가하는 시점에 **초기 발언권**을 받는다. group 의 `floor_policy` 는 해석하지 않는다 |
+| `group_type:"private"` | 2인 세션용 floor — 정원 1, **큐잉 없음**(점유 중 요청은 즉시 Deny), chair 개념 없음(tier·priority 만 비교). `initiator_id` 멤버가 참가하는 시점에 **초기 발언권**을 받는다. group 의 `floor_policy` 는 해석하지 않는다. TS 24.380 은 온넷 private call 에 별도 floor 절차를 두지 않으므로(§6.3 공통) 이 3가지는 CMP 로컬 정책이며, 초기 발언권은 규격상 fmtp `mc_granted` 협상 결과여야 한다([../design/features/mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) §0-R G17) |
 
 동시 발언 시 in-band 표식과 메시지:
 
-- Floor Granted/Taken 의 **Floor Indicator**(TS 24.380 §8.2.3.13)에 `multi` 는 Multi-talker 비트
+- Floor Granted/Taken 의 **Floor Indicator**(TS 24.380 §8.2.3.15)에 `multi` 는 Multi-talker 비트
   (0x0080), `dual` 은 화자가 2명일 때 Dual floor 비트(0x0200)를 세운다.
-- **Floor Release Multi Talker**(subtype 0x0F, Rel-16)를 Floor Release 와 동일하게 처리한다 —
-  해당 화자만 집합에서 빠진다.
-- 화자 1명이 빠져도 **잔여 화자가 있으면 Floor Idle 을 보내지 않고** 잔여 화자별 Floor Taken 으로
-  단말의 화자 목록을 갱신한다. 마지막 화자가 빠질 때만 Floor Idle.
-- 무활동 자동 회수(`FloorIdleSec`)는 **화자별로 독립** 판정한다(긴급 tier 화자는 제외).
+- 동시 발언 중의 **Floor Taken** 은 화자 전원을 **List of Granted Users**(15)+**List of SSRCs**(16)
+  로 싣는다(단일 화자면 Granted Party + SSRC 필드). 화자 본인에게는 보내지 않는다.
+- 화자 1명이 빠지면 **Floor Release Multi Talker**(subtype 0x0F)로 나머지 참가자에게 알리고
+  (SSRC + User ID), 잔여 화자가 있는 동안 Floor Idle 은 보내지 않는다. 마지막 화자가 빠질 때만
+  Floor Idle. 0x0F 는 **서버→단말 통지 전용**이라 단말이 이 subtype 을 보내면 무시한다
+  (발언 해제는 Floor Release `0x04`/`0x14`).
+- 타이머는 **화자별로 독립** 판정한다. 값은 CMP 설정이 기본이고 `floor_timers` 로 그룹마다
+  덮어쓴다(TS 24.380 §11.1.3):
+
+| 타이머 | 필드 / 설정 | 기본 | 만료 시 |
+|---|---|---|---|
+| T1 End of RTP media | `t1_end_rtp` / `FloorIdleSec` | 4초 | **발언 완료**로 회수 — Revoke 없이 잔여 화자 0x0F, 없으면 IDLE |
+| T2 Stop talking | `t2_stop_talk` / `FloorStopTalkSec` | 30초 | Floor Revoke cause **#2**(Media burst too long). Granted 의 Duration 으로 광고. 긴급/임박 화자는 제외. 0=무제한 |
+| T3 Stop talking grace | `t3_grace` / `FloorRevokeGraceSec` | 3초 | Revoke 후 Release 대기 유예 — 그 동안 미디어 계속 중계, 만료 시 강제 회수. 0=즉시 |
+| T8 Floor Revoke | `t8_revoke` / `FloorRevokeRetxSec` | 1초 | 유예 중 Revoke 재전송 간격 |
+
+- **선점은 즉시 교체가 아니다**: 최약 화자에게 Revoke → 요청자는 **대기열 맨 앞**에서 대기
+  (Queue Position Info 회신) → 그 화자의 Floor Release 또는 T3 만료 후 승급한다. 유예 중에도
+  기존 화자의 미디어는 계속 중계되므로 발언이 뚝 끊기지 않는다.
+- 발언 중인 참가자의 Floor Request 재전송에는 **Floor Granted 를 재송신**하고(남은 T2 를
+  Duration 으로), 대기 중인 요청의 재전송은 **큐 위치를 유지**한 채 Queue Position Info 만
+  다시 보낸다.
 
 **하향 스트림 분리** — 동시 발언 화자는 슬롯(0..7)을 배정받고, 수신자에게 나가는 RTP 는
 슬롯마다 별도 SSRC·시퀀스를 쓴다. 슬롯 0 은 종전과 동일한 수신자별 고정 SSRC(단일 화자

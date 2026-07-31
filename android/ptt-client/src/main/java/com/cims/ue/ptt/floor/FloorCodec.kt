@@ -28,11 +28,9 @@ object FloorCodec {
             body.write(f.id)
             body.write(len)
             body.write(f.value)
-            if (f.id in FloorFieldId.STRING_FIELDS) {
-                // 필드(헤더 2 + value) 를 4바이트 경계로 패딩
-                val pad = pad4(2 + len)
-                repeat(pad) { body.write(0) }
-            }
+            // §8.1.3 — 모든 필드는 (헤더 2 + value) 를 4바이트 경계로 패딩한다.
+            //   고정 2옥텟 값 필드는 2+2=4 라 패딩이 0 이고, 가변 길이 필드만 실제로 채워진다.
+            repeat(pad4(2 + len)) { body.write(0) }
         }
         var bodyBytes = body.toByteArray()
         // 전체 패킷을 32비트 경계로 (header 12 는 이미 4의 배수)
@@ -69,16 +67,17 @@ object FloorCodec {
         var p = HEADER_LEN
         while (p + 2 <= len) {
             val id = buf[p].toInt() and 0xff
-            val fl = buf[p + 1].toInt() and 0xff
-            val start = p
-            p += 2
-            if (p + fl > len) break                                   // 손상
-            val value = buf.copyOfRange(p, p + fl)
-            p += fl
-            if (id in FloorFieldId.STRING_FIELDS) p += pad4(p - start) // 필드 4B 정렬
+            // §8.1.3 — Length 는 ID<192 면 1옥텟, 그 이상이면 2옥텟.
+            val hdr = if (id >= 192) 3 else 2
+            if (p + hdr > len) break
+            val fl = if (hdr == 3) ((buf[p + 1].toInt() and 0xff) shl 8) or (buf[p + 2].toInt() and 0xff)
+                     else buf[p + 1].toInt() and 0xff
             // id==0(Priority) & fl==0 등 trailing zero 패딩을 필드로 오인하지 않도록:
             if (id == 0 && fl == 0) break
-            fields.add(FloorField(id, value))
+            if (p + hdr + fl > len) break                             // 손상
+            fields.add(FloorField(id, buf.copyOfRange(p + hdr, p + hdr + fl)))
+            p += hdr + fl
+            p += pad4(hdr + fl)                                       // 모든 필드 4B 정렬(§8.1.3)
         }
         return FloorMessage(type, ssrc, fields)
     }

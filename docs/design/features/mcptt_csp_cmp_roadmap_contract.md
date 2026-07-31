@@ -57,20 +57,22 @@ MCPTT 세션은 `PTT_GROUP_ADD` 하나를 파라미터로 구분한다(§A.1) �
 
 ### A.1 Private call (1:1) — PTT_GROUP_ADD 파라미터화
 
-TS 24.379 §11 / TS 24.380 §7(private call floor control). private call 도 별도 명령/RELAY
+TS 24.379 §11(call control) + TS 24.380 §6.3(floor control 공통). private call 도 별도 명령/RELAY
 재사용 없이 `PTT_GROUP_ADD` 에 `group_type:"private"` + `floor_control`(§B.1) 로 표현한다 —
 **floor 유무는 같은 메시지의 파라미터 차이**다. 2인 그룹의 멤버 포트 모델이 1:1 미디어를 그대로
 표현하므로 VoLTE `RELAY_*` 를 끌어올 필요가 없다(§A.0-(2)).
 
-> **규격 주의(원칙 ①)**: TS 24.380 은 **private call floor control(§7)을 group floor 와 별도
-> 절차로** 정의한다. 따라서 `group_type:"private"` 를 받은 CMP 는 group 의 동시성 정책
-> (`floor_policy`, §B.1)이 아니라 **private-call floor 상태머신**을 적용한다 — private 은 2인
-> 이므로 `floor_policy`(single/dual/multi)를 해석하지 않는다. private 의 floor 유무는 오직
-> `floor_control` 로 정한다.
+> **규격 주의(원칙 ①)**: TS 24.380 은 온넷 private call 에 **별도 floor 절차를 두지 않는다**
+> (§6.3 일반 절차를 그대로 쓴다 — 클라우즈 7은 off-network 용이다). 따라서
+> `group_type:"private"` 는 "2인 세션" 이라는 사실만 전달하고, CMP 는 그 위에 정원 1·큐 없음·
+> chair 미적용을 **로컬 정책**으로 적용한다 — private 은 2인이므로 `floor_policy`
+> (single/dual/multi)를 해석하지 않는다. private 의 floor 유무는 오직 `floor_control` 로 정한다.
+> 규격상 초기 발언권은 fmtp `mc_granted`, floor 없는 세션은 `mc_no_floor_ctrl` 협상 결과여야
+> 한다([mcptt_standard_conformance.md](mcptt_standard_conformance.md) §0-R G17).
 
 | 모드 | 파라미터 | 응답 | floor 절차 |
 |---|---|---|---|
-| **with floor** (한 번에 한 명) | `group_type:"private"`, `floor_control:"on"`(기본) | `member_ports`(2) + `floor_port` | TS 24.380 §7 private-call floor |
+| **with floor** (한 번에 한 명) | `group_type:"private"`, `floor_control:"on"`(기본) | `member_ports`(2) + `floor_port` | TS 24.380 §6.3 + 2인 로컬 정책 |
 | **without floor** (full-duplex) | `group_type:"private"`, `floor_control:"off"` | `member_ports`(2), `floor_port` 생략 | 없음(양방향) |
 
 **PTT_GROUP_ADD 확장 필드** (private):
@@ -158,8 +160,9 @@ floor 트래픽 자체는 CMP↔UE in-band 라 아래 필드는 **세션 생성/
 
 floor 는 **직교하는 두 축**이다(원칙 ② — 한 enum 에 섞지 않는다): `floor_control`(on/off) 이
 제어 유무, `floor_policy`(single/dual/multi + `max_talkers`) 가 동시 발언 수.
-`group_type:"private"` 은 동시성 축을 해석하지 않고 TS 24.380 §7 private-call floor 절차를
-적용한다(정원 1·큐 없음·개시자 초기 발언권).
+`group_type:"private"` 은 동시성 축을 해석하지 않고 2인 세션 floor 규약을 적용한다
+(정원 1·큐 없음·개시자 초기 발언권 — TS 24.380 은 온넷 private call 에 별도 floor 절차를 두지
+않으므로 §6.3 공통 절차 위의 CMP 로컬 정책이다).
 
 Dev A 는 세션 생성 시 이 필드들을 실어 보내면 된다 — 이후 floor 절차(GRANT/TAKEN/REVOKE/
 Floor Release Multi Talker·동시 발언 슬롯·녹취 트랙 분리)는 CMP 자율이다.
@@ -220,7 +223,7 @@ payload 확장이라 신뢰성 모델에 영향 없음(신규 이벤트 `FLOOR_T
 
 | # | 결정 | 권고 |
 |---|---|---|
-| **D1** | ~~Private-without-floor 를 RELAY 재사용 vs PTT-private~~ | **확정**: private call 은 with/without 모두 `PTT_GROUP_ADD` + `group_type:"private"` + `floor_control`(`on`/`off`)로 통일. CMP 는 private-call floor 절차(TS 24.380 §7)를 적용(group `floor_policy` 미해석). VoLTE `RELAY_*` 는 서비스 경계로 분리 유지 (§A.0/§A.1) |
+| **D1** | ~~Private-without-floor 를 RELAY 재사용 vs PTT-private~~ | **확정**: private call 은 with/without 모두 `PTT_GROUP_ADD` + `group_type:"private"` + `floor_control`(`on`/`off`)로 통일. CMP 는 2인 세션 floor 규약(정원 1·큐 없음, TS 24.380 §6.3 공통 절차 + 로컬 정책)을 적용(group `floor_policy` 미해석). VoLTE `RELAY_*` 는 서비스 경계로 분리 유지 (§A.0/§A.1) |
 | **D2** | Floor 보호 키 전달 = inline material vs key-id 참조(CMP 가 KMS fetch) | **확정·구현**: inline `floor_crypto`(CSP↔CMP 단일 계약 유지, KMS 접점은 CSC 로 국한). 프로파일 `AES_CM_128_HMAC_SHA1_80`/`_32` |
 | **D3** | Pre-established sweeper grace 값 | 별도 `pre_established_grace_sec`(분 단위) — 운영 설정 |
 | **D4** | Ambient listening 멤버 플래그 필요 여부 | **확정·구현**: `PTT_JOIN` 에 `recv_only`(상향 미중계+발언 거절)/`floor_suppress`(floor 메시지 미송신) |

@@ -30,7 +30,8 @@ static const size_t kCmpLogMaxQueue = 200000;         // 큐 상한 (NFS 장애 
 static const int kCmpLogFlushIntervalMs = 100;        // 주기 flush (버퍼 잔여분 보장)
 
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
-    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120), _floorIdleSec(10), _rtpWorkerCount(4),
+    : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120),
+      _floorIdleSec(4), _floorStopTalkSec(30), _floorRevokeGraceSec(3), _floorRevokeRetxSec(1), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _pttMemberPoolSize(40), _segmentIntervalSec(60),
       _msgSeq(-1), _lastRxSeq(0),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
@@ -937,11 +938,29 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     std::string groupId = payload.GetString("group_id");
     std::string membersStr = payload.GetString("members");
     // floor 정책 (cmp_media_api.md §7.1) — 유무(floor_control) × 동시성(floor_policy) 2축.
-    //   group_type:"private" 은 TS 24.380 §7 private-call floor 라 동시성 축을 해석하지 않는다.
+    //   group_type:"private" 은 2인 세션이라 동시성 축을 해석하지 않는다.
     std::string groupType   = payload.GetString("group_type");
     std::string floorCtlStr = payload.GetString("floor_control");
     std::string floorPolStr = payload.GetString("floor_policy");
     int maxTalkers = (int)payload.GetInt("max_talkers", 0);
+    // floor 타이머 (TS 24.380 §11.1.3) — 그룹 문서(CMS)에서 온 값을 CSP 가 실어 보낼 수 있다.
+    //   미지정 필드는 CMP 설정값(FloorIdleSec/FloorStopTalkSec/…)을 쓴다.
+    int t1Sec = _floorIdleSec, t2Sec = _floorStopTalkSec;
+    int t3Sec = _floorRevokeGraceSec, t8Sec = _floorRevokeRetxSec;
+    std::string timerErr;
+    {
+        SimpleJson::JsonNode ft = payload.Get("floor_timers");
+        if (ft.type == SimpleJson::JSON_OBJECT) {
+            t1Sec = (int)ft.GetInt("t1_end_rtp", t1Sec);
+            t2Sec = (int)ft.GetInt("t2_stop_talk", t2Sec);
+            t3Sec = (int)ft.GetInt("t3_grace", t3Sec);
+            t8Sec = (int)ft.GetInt("t8_revoke", t8Sec);
+            if (t1Sec < 0 || t1Sec > 600)      timerErr = "floor_timers.t1_end_rtp out of range (0..600)";
+            else if (t2Sec < 0 || t2Sec > 600) timerErr = "floor_timers.t2_stop_talk out of range (0..600)";
+            else if (t3Sec < 0 || t3Sec > 30)  timerErr = "floor_timers.t3_grace out of range (0..30)";
+            else if (t8Sec < 1 || t8Sec > 10)  timerErr = "floor_timers.t8_revoke out of range (1..10)";
+        }
+    }
     bool privateCall  = (groupType == "private");
     bool floorControl = (floorCtlStr != "off");
     int  floorPolicy  = ParseFloorPolicy(floorPolStr);
@@ -992,6 +1011,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             bad = "max_talkers (>=2) required for floor_policy=multi";
         else if (maxTalkers > MCPTT_MAX_TALKER_SLOTS)
             bad = "max_talkers exceeds slot limit (2..8)";   // 조용히 clamp 하지 않는다
+        else if (!timerErr.empty())
+            bad = timerErr.c_str();
         else if (!cryptoErr.empty())
             bad = cryptoErr.c_str();
         else if (haveCrypto && !floorControl)
@@ -1065,6 +1086,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
              group->setPttSession(pttSession);
              // floor 정책은 녹취 초기화(슬롯 트랙 수)·멤버 합류보다 먼저 확정한다.
              group->setBroadcast(groupType, payload.GetString("initiator_id"));
+             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec);
              group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
@@ -1135,10 +1157,11 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
         }
 
         // 세션 유형/개시자 — broadcast 는 개시자만 floor 보유(TS 24.380 §10.3),
-        //   private 은 개시자에게 초기 발언권(§7). MODIFY 로 정책이 바뀌면 여기서 갱신된다.
+        //   private 은 개시자에게 초기 발언권. MODIFY 로 정책이 바뀌면 여기서 갱신된다.
         std::string initiator = payload.GetString("initiator_id");
         if (!groupType.empty() || !initiator.empty())
             group->setBroadcast(groupType, initiator);
+        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec);
         group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
         // floor SRTCP 키 — 재키잉(rekey)도 같은 필드의 MODIFY 로 반영된다.
         if (haveCrypto) {
@@ -1518,6 +1541,9 @@ void PCmpServer::loadConfig() {
         if (root.Has("SessionTimeout")) _sessionTimeout = (int)root.GetInt("SessionTimeout");
         if (root.Has("OrphanReclaimSec")) _orphanReclaimSec = (int)root.GetInt("OrphanReclaimSec");
         if (root.Has("FloorIdleSec")) _floorIdleSec = (int)root.GetInt("FloorIdleSec");
+        if (root.Has("FloorStopTalkSec")) _floorStopTalkSec = (int)root.GetInt("FloorStopTalkSec");
+        if (root.Has("FloorRevokeGraceSec")) _floorRevokeGraceSec = (int)root.GetInt("FloorRevokeGraceSec");
+        if (root.Has("FloorRevokeRetxSec")) _floorRevokeRetxSec = (int)root.GetInt("FloorRevokeRetxSec");
         if (root.Has("RtpWorkerCount")) {
             int w = (int)root.GetInt("RtpWorkerCount");
             if (w >= 1 && w <= 32) _rtpWorkerCount = w;
@@ -1613,11 +1639,12 @@ void PCmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d FloorIdleSec=%d",
+    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d floor timers T1=%d T2=%d T3=%d T8=%d",
            _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttVideoStartPort, _pttMemberPoolSize,
            _pttFloorStartPort, _pttRtpPoolSize,
            _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
-           _dtmfPttEnable, _sessionTimeout, _floorIdleSec);
+           _dtmfPttEnable, _sessionTimeout,
+           _floorIdleSec, _floorStopTalkSec, _floorRevokeGraceSec, _floorRevokeRetxSec);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1829,13 +1856,13 @@ void PCmpServer::timeoutLoop() {
         if (!_running) break;
         ++tick;
 
-        // PTT floor 무활동 회수 — 매 초 점검(idleSec 해상도). owner 가 RELEASE 없이 RTP 를
-        //   멈추면(검증 마지막 발언자 등) floor 강제 해제. _mutex 보유 중 호출 → 그룹 삭제 방지.
-        //   checkFloorInactivity 는 그룹 자체 mutex 만 잡고 서버 _mutex 를 역으로 잡지 않으므로 안전.
-        if (_floorIdleSec > 0) {
+        // PTT floor 타이머 — 매 초 점검(T1 발언 종료 / T2 발언시간 초과 / T3 회수 유예 / T8 재전송).
+        //   _mutex 보유 중 호출 → 그룹 삭제 방지. tickFloorTimers 는 그룹 자체 mutex 만 잡고
+        //   서버 _mutex 를 역으로 잡지 않으므로 안전.
+        {
             PAutoLock lock(_mutex);
             for (auto const& [gid, group] : _groups) {
-                if (group) group->checkFloorInactivity(_floorIdleSec);
+                if (group) group->tickFloorTimers();
             }
         }
 
