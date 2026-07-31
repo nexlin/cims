@@ -448,7 +448,9 @@ RELEASE(subtype 0x14) 처리와 Floor Ack 회신 · dual(동급 큐, 긴급 over
 화자 1명 해제 시 잔여 참가자에게 Floor Release Multi Talker) · 타이머(T1 발언 종료 회수·
 T2 초과 시 Revoke cause#2·T3 회수 유예·T8 재전송, 그룹별 `floor_timers` 로 짧게 설정) ·
 선점(유예 중 기존 화자 floor 유지, 요청자 큐 선두 승급) · 재요청 시 GRANT 재송신과 큐 위치
-유지 · private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
+유지 · 멤버 프로파일(MCPTT ID·큐잉 미협상 Deny#1·mc_granted 초기 발언권·1인 세션 Deny#3) ·
+Unicast Media Flow Control(0x0B)·Queued Floor Requests 취소(0x0E) · 멤버별 floor 키(CSK) ·
+private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
 (floor_port 미광고 + 양방향 중계) · ambient(`recv_only`/`floor_suppress`) · floor SRTCP
 왕복과 평문 거부(`floor_crypto_drop`) · MODIFY 정책 변경(정원 축소 시 초과 화자 회수) ·
 계약 위반 필드의 `BAD_REQUEST`.

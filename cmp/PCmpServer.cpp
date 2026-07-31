@@ -31,7 +31,8 @@ static const int kCmpLogFlushIntervalMs = 100;        // 주기 flush (버퍼 �
 
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120),
-      _floorIdleSec(4), _floorStopTalkSec(30), _floorRevokeGraceSec(3), _floorRevokeRetxSec(1), _rtpWorkerCount(4),
+      _floorIdleSec(4), _floorStopTalkSec(30), _floorRevokeGraceSec(3), _floorRevokeRetxSec(1),
+      _floorIdleResendSec(0), _floorGrantRetxSec(1), _rtpWorkerCount(4),
       _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _pttMemberPoolSize(40), _segmentIntervalSec(60),
       _msgSeq(-1), _lastRxSeq(0),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
@@ -947,6 +948,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     //   미지정 필드는 CMP 설정값(FloorIdleSec/FloorStopTalkSec/…)을 쓴다.
     int t1Sec = _floorIdleSec, t2Sec = _floorStopTalkSec;
     int t3Sec = _floorRevokeGraceSec, t8Sec = _floorRevokeRetxSec;
+    int t7Sec = _floorIdleResendSec, t20Sec = _floorGrantRetxSec;
     std::string timerErr;
     {
         SimpleJson::JsonNode ft = payload.Get("floor_timers");
@@ -955,10 +957,14 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             t2Sec = (int)ft.GetInt("t2_stop_talk", t2Sec);
             t3Sec = (int)ft.GetInt("t3_grace", t3Sec);
             t8Sec = (int)ft.GetInt("t8_revoke", t8Sec);
+            t7Sec = (int)ft.GetInt("t7_idle_resend", t7Sec);
+            t20Sec = (int)ft.GetInt("t20_grant_retx", t20Sec);
             if (t1Sec < 0 || t1Sec > 600)      timerErr = "floor_timers.t1_end_rtp out of range (0..600)";
             else if (t2Sec < 0 || t2Sec > 600) timerErr = "floor_timers.t2_stop_talk out of range (0..600)";
             else if (t3Sec < 0 || t3Sec > 30)  timerErr = "floor_timers.t3_grace out of range (0..30)";
             else if (t8Sec < 1 || t8Sec > 10)  timerErr = "floor_timers.t8_revoke out of range (1..10)";
+            else if (t7Sec < 0 || t7Sec > 60)  timerErr = "floor_timers.t7_idle_resend out of range (0..60)";
+            else if (t20Sec < 1 || t20Sec > 10) timerErr = "floor_timers.t20_grant_retx out of range (1..10)";
         }
     }
     bool privateCall  = (groupType == "private");
@@ -1086,7 +1092,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
              group->setPttSession(pttSession);
              // floor 정책은 녹취 초기화(슬롯 트랙 수)·멤버 합류보다 먼저 확정한다.
              group->setBroadcast(groupType, payload.GetString("initiator_id"));
-             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec);
+             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec);
              group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
@@ -1161,7 +1167,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
         std::string initiator = payload.GetString("initiator_id");
         if (!groupType.empty() || !initiator.empty())
             group->setBroadcast(groupType, initiator);
-        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec);
+        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec);
         group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
         // floor SRTCP 키 — 재키잉(rekey)도 같은 필드의 MODIFY 로 반영된다.
         if (haveCrypto) {
@@ -1296,6 +1302,28 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
             // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
             std::string tierStr = payload.GetString("tier");
             if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
+            // floor 신원·협상 프로파일 (TS 24.380 §8.2.3.8 / §6.3.5.4.4).
+            //   user_uri: floor 메시지에 실을 MCPTT ID(URI). queueing: SDP mc_queueing 협상 여부.
+            group->setMemberProfile(sessionId, payload.GetString("user_uri"),
+                                    (int)payload.GetInt("queueing", 1) != 0);
+            // 멤버별 floor 보호 키 (TS 33.180 §9.4 — 유니캐스트 floor 는 클라이언트 CSK).
+            //   실패해도 JOIN 자체는 성립시키되(미디어 경로 유지) 원인을 남긴다.
+            SimpleJson::JsonNode mfc = payload.Get("floor_crypto");
+            if (mfc.type == SimpleJson::JSON_OBJECT) {
+                std::string mk, ms, mm, merr;
+                if (!PFloorCrypto::DecodeBase64(mfc.GetString("key"), mk))        merr = "floor_crypto.key must be base64";
+                else if (!PFloorCrypto::DecodeBase64(mfc.GetString("salt"), ms))  merr = "floor_crypto.salt must be base64";
+                else if (!PFloorCrypto::DecodeHex(mfc.GetString("mki"), mm))      merr = "floor_crypto.mki must be hex";
+                if (merr.empty()) group->setMemberCrypto(sessionId, mfc.GetString("alg"), mk, ms, mm, merr);
+                if (!merr.empty()) {
+                    int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", merr.c_str());
+                    logFlow(groupId, "cmp", "csp", "JSON", "ERROR", merr.c_str(), txIdStr.c_str(),
+                            svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+                    return;
+                }
+            }
+            // fmtp mc_granted — 호 성립 시 이 멤버가 발언권을 갖는다(§6.3.4.2.2-3b).
+            if ((int)payload.GetInt("granted", 0) != 0) group->grantInitialFloor(sessionId);
         }
 
         SimpleJson::JsonNode respBody;
@@ -1544,6 +1572,8 @@ void PCmpServer::loadConfig() {
         if (root.Has("FloorStopTalkSec")) _floorStopTalkSec = (int)root.GetInt("FloorStopTalkSec");
         if (root.Has("FloorRevokeGraceSec")) _floorRevokeGraceSec = (int)root.GetInt("FloorRevokeGraceSec");
         if (root.Has("FloorRevokeRetxSec")) _floorRevokeRetxSec = (int)root.GetInt("FloorRevokeRetxSec");
+        if (root.Has("FloorIdleResendSec")) _floorIdleResendSec = (int)root.GetInt("FloorIdleResendSec");
+        if (root.Has("FloorGrantRetxSec")) _floorGrantRetxSec = (int)root.GetInt("FloorGrantRetxSec");
         if (root.Has("RtpWorkerCount")) {
             int w = (int)root.GetInt("RtpWorkerCount");
             if (w >= 1 && w <= 32) _rtpWorkerCount = w;
@@ -1639,12 +1669,13 @@ void PCmpServer::loadConfig() {
         system(mkdirCmd.c_str());
     }
 
-    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d floor timers T1=%d T2=%d T3=%d T8=%d",
+    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d floor timers T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d",
            _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttVideoStartPort, _pttMemberPoolSize,
            _pttFloorStartPort, _pttRtpPoolSize,
            _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
            _dtmfPttEnable, _sessionTimeout,
-           _floorIdleSec, _floorStopTalkSec, _floorRevokeGraceSec, _floorRevokeRetxSec);
+           _floorIdleSec, _floorStopTalkSec, _floorRevokeGraceSec,
+           _floorIdleResendSec, _floorRevokeRetxSec, _floorGrantRetxSec);
 }
 
 // ═══════════════════════════════════════════════════════════════

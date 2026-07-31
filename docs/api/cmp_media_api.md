@@ -362,7 +362,7 @@ member 키 `(node, session_id)`.
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
-| `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
+| `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke, t7_idle_resend, t20_grant_retx}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
 | `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
@@ -423,6 +423,10 @@ RELAY_REMOVE 와 동일 규칙).
 | `tier` | - | 긴급 멤버 join 시 condition tier 동반 |
 | `recv_only` | - | 1 = ambient 청취 leg — 이 멤버의 **상향 미디어를 중계하지 않고** floor 요청도 거절(receive only) |
 | `floor_suppress` | - | 1 = 이 멤버에게 floor 메시지(GRANT/TAKEN/IDLE/DENY)를 **보내지 않는다** — 청취 사실이 floor 상태로 드러나지 않게 한다 |
+| `user_uri` | - | 이 멤버의 **MCPTT ID(URI)** — floor 메시지의 User ID(6)/Granted Party(4)/화자 리스트에 싣는 값(TS 24.380 §8.2.3.8). 생략 시 `session_id` |
+| `queueing` | - | `0` = 이 멤버가 SDP `mc_queueing` 을 협상하지 않음 → 비선점 요청은 큐잉하지 않고 **Deny #1**(기본 1) |
+| `granted` | - | `1` = SDP fmtp `mc_granted` 협상 — 참가 시점에 발언자가 없으면 이 멤버에게 **초기 발언권**을 준다(TS 24.380 §6.3.4.2.2) |
+| `floor_crypto` | - | 이 멤버의 floor SRTCP 키 `{alg,key,salt[,mki]}` — **유니캐스트 floor 는 클라이언트별 CSK 로 보호**(TS 33.180 §9.4)한다. 생략 시 그룹 키([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 
 응답 payload: `ip`, `port`, `video_port` — **멤버 전용 RTP 포트** (client 는 이 포트를
 그 멤버의 SDP 에 광고). 같은 `(group, session_id)` 재요청은 재할당 없이 동일 포트 반환.
@@ -495,6 +499,8 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 | T2 Stop talking | `t2_stop_talk` / `FloorStopTalkSec` | 30초 | Floor Revoke cause **#2**(Media burst too long). Granted 의 Duration 으로 광고. 긴급/임박 화자는 제외. 0=무제한 |
 | T3 Stop talking grace | `t3_grace` / `FloorRevokeGraceSec` | 3초 | Revoke 후 Release 대기 유예 — 그 동안 미디어 계속 중계, 만료 시 강제 회수. 0=즉시 |
 | T8 Floor Revoke | `t8_revoke` / `FloorRevokeRetxSec` | 1초 | 유예 중 Revoke 재전송 간격 |
+| T7 Floor Idle | `t7_idle_resend` / `FloorIdleResendSec` | 0(비활성) | 발언자 없는 동안 Floor Idle 재송신(최대 3회) |
+| T20 Floor Granted | `t20_grant_retx` / `FloorGrantRetxSec` | 1초 | **큐 승급** 화자에게 첫 RTP 까지 Granted 재송신(최대 3회) |
 
 - **선점은 즉시 교체가 아니다**: 최약 화자에게 Revoke → 요청자는 **대기열 맨 앞**에서 대기
   (Queue Position Info 회신) → 그 화자의 Floor Release 또는 T3 만료 후 승급한다. 유예 중에도

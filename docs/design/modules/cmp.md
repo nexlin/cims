@@ -200,12 +200,13 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
 | video_enabled | - | 1 이면 video 포트 활성 |
-| group_type | - | `prearranged`/`chat`/`broadcast`/`private` (broadcast=개시자 독점, private=1:1 private call) |
-| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점 / private 초기 발언권 |
+| group_type | - | `prearranged`/`chat`/`broadcast`/`private` (broadcast=개시자 독점, private=2인 세션) |
+| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점 / private 초기 발언권(규격상 정본은 PTT_JOIN `granted`) |
 | floor_control | - | `on`(기본)/`off` — floor 중재 유무 |
 | floor_policy | - | `single`(기본)/`dual`/`multi` — 그룹 동시 발언 수 |
 | max_talkers | multi 시 O | 동시 발언 상한(2..8) |
-| floor_crypto | - | floor RTCP SRTCP 보호 키 `{alg,key,salt[,mki]}` (TS 33.180) |
+| floor_crypto | - | floor RTCP SRTCP 보호 키 `{alg,key,salt[,mki]}` (TS 33.180) — 그룹 공통 키. 유니캐스트는 멤버별 키(PTT_JOIN)가 정본 |
+| floor_timers | - | floor 타이머 override `{t1_end_rtp,t2_stop_talk,t3_grace,t8_revoke,t7_idle_resend,t20_grant_retx}` (초) |
 
 **응답:** `ip`, `floor_port` (그룹 공유 Floor Control — `floor_control:"off"` 면 생략),
 `member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port, video_port}`)
@@ -245,6 +246,10 @@ processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이
 | tier | - | `emergency`/`imminent`/`normal` — 긴급 멤버 join 시 동반 |
 | recv_only | - | 1 = ambient 청취 leg — 상향 미중계 + floor 요청 거절 |
 | floor_suppress | - | 1 = 이 멤버에게 floor 메시지 미송신 (청취 은닉) |
+| user_uri | - | 이 멤버의 MCPTT ID(URI) — floor User ID/Granted Party 값 (생략 시 session_id) |
+| queueing | - | 0 = SDP `mc_queueing` 미협상 — 비선점 요청은 큐잉 없이 Deny #1 (기본 1) |
+| granted | - | 1 = fmtp `mc_granted` — 참가 시점에 발언자가 없으면 초기 발언권 부여 |
+| floor_crypto | - | 이 멤버 전용 floor SRTCP 키 `{alg,key,salt[,mki]}` (TS 33.180 CSK) |
 
 **응답:** `ip`, `port`, `video_port` — 멤버 전용 RTP 포트 (같은 멤버 재요청 시 동일 포트).
 
@@ -540,6 +545,8 @@ SSRC 필드(14)/List of SSRCs(16)로 싣는다. 인코더/디코더는 `PFloorCo
 | Floor Queue Position Request | 8 | UE → CMP | 큐 위치 조회 |
 | Floor Queue Position Info | 9 | CMP → UE | 큐 위치 응답 |
 | Floor Ack | 10 | 양방향 | 수신 확인 (ack 요구 메시지에 대한 응답) |
+| Unicast Media Flow Control | 0x0B | UE → CMP | 자기 하향 미디어 중단/재개 요청 |
+| Queued Floor Requests | 0x0E | 양방향 | 대기 요청 취소(purpose 0) / 결과(1) / 통지(2) |
 | Floor Release Multi Talker | 0x0F | CMP → 잔여 화자 외 | 동시 발언 중 한 화자의 발언 종료 통지 (Rel-16) |
 
 subtype 의 **첫 비트(0x10)는 "Acknowledgment 요구"** 다 — Granted/Taken/Deny/Release/Idle/

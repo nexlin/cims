@@ -24,7 +24,9 @@
 | F1 | Floor 패킷 = subtype(메시지타입) + TLV | CMP | TS 24.380 §8.1~8.2 | ✅ 정합 |
 | F2 | Reject/Revoke Cause·Floor Indicator·Duration·Queue TLV | CMP | TS 24.380 §8.2.3 | ✅ 정합 |
 | F3 | Floor Ack / Queue Position(큐잉) | CMP | TS 24.380 §8.2.12~8.2.13 | ✅ 정합 |
-| F4 | floor 상태머신(T1/T2/T3/T8, pending Floor Revoke, 재요청·큐 안정성) | CMP | TS 24.380 §6.3.4 | ✅ 정합 (T7 Idle 재송신·T20 Granted 재송신 미구현 — [§0-R R2-1](#r2-1-floor-control--구현-항목의-규격-편차)) |
+| F4 | floor 상태머신(T1/T2/T3/T7/T8/T20, pending Floor Revoke, 재요청·큐 안정성) | CMP | TS 24.380 §6.3.4 | ✅ 정합 |
+| F5 | 멤버 프로파일(MCPTT ID·mc_queueing·mc_granted)·Unicast Media Flow Control·Queued Floor Requests | CMP | TS 24.380 §6.3.5, §8.2.15~8.2.16 | ✅ 정합 |
+| F6 | floor SRTCP — 유니캐스트 leg 별 클라이언트 키(CSK) | CMP | TS 33.180 §9.4 / TS 24.380 §13.3.2 | ✅ 정합 (키 배포는 CSC KMS 연동 대기) |
 | C1 | affiliation PUBLISH = affiliation-command XML 파싱 + Content-Type | CSP | TS 24.379 §9 | ✅ 정합 |
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
@@ -71,9 +73,10 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 |---|---|---|
 | **Pre-established session floor** | TS 24.380 | ✗ (Call Control 파트의 세션 2단 수명과 함께 착수) |
 
-> 구현됨: subtype+TLV 인코딩, Cause/Indicator/Duration/Queue, 큐잉, tier 선점, inactivity
-> auto-revoke (F1~F3), **dual floor / multi-talker(Floor Release Multi Talker 포함) /
-> private-call floor(§7) / floor SRTCP 보호(TS 33.180)** —
+> 구현됨: subtype+TLV 인코딩(ack 변종 포함), Cause/Indicator/Duration/Queue, 큐잉, tier 선점,
+> 타이머 상태머신(T1/T2/T3/T7/T8/T20)과 pending Floor Revoke, **dual floor / multi-talker
+> (Floor Release Multi Talker 포함) / 2인(private) floor / floor SRTCP 보호(그룹 키 + 멤버별 CSK)
+> / Unicast Media Flow Control / Queued Floor Requests(취소)** —
 > 정본 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7~§7.8.
 >
 > **단말 정합 대기**: dual/multi-talker 를 실호로 쓰려면 UE 가 Floor Indicator 의
@@ -91,15 +94,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 
 | # | 규격 | 규격 요구 | 현재 동작 |
 |---|---|---|---|
-| G2 | §6.3.4.4.2-1e, §6.3.5.4.4 | 서버도 필요할 때 **ack 요구 변종으로 송신**하고 Floor Ack 미수신 시 재전송한다(원격 개시 ambient 의 Floor Granted 는 `shall`, 그 밖은 `may`) | 수신 ack 요구는 처리·회신하지만, **서버 송신은 항상 ack 비트 0**(재전송 없음) |
-| G11 | §13.3.2-2 | 유니캐스트 floor SRTCP 는 **클라이언트별 CSK**로 보호(그룹 키 MuSiK 는 MBMS 전용) | 그룹 단위 키 1개 + 브로드캐스트 1회 보호 (`floor_crypto` 가 그룹 필드) |
-| G12 | §8.2.12 | Queue Size(7)·Queued User ID(9)·SSRC of queued floor participant 는 **off-network 전용** | Queue Position Info 에 Queue Size 를 함께 싣는다(온넷 단말은 무시) |
-| G13 | §8.2.3.8 | User ID·Granted Party 값 = **MCPTT ID(URI)** | bare 사용자 번호 |
-| G14 | §6.3.4.3.4, §6.3.4.4.9 | Floor Idle 은 **T7** 만료마다 C7 상한까지, 큐에서 승급한 Floor Granted 는 **T20** 만료마다 C20 상한까지 재송신(도달 보장). 1인 세션의 요청은 Deny **#3**(Only one participant) | Idle·Granted 각 1회 송신, 1인 세션에도 GRANT |
-| G15 | §8.2.15, §8.2.16 | Queued Floor Requests(Cancel, 0x0E/0x1E)·Unicast Media Flow Control(0x0B) | 미구현(무시) — 큐 취소 요청이 반영되지 않는다 |
-| G16 | §6.3.5.4.4, §12.1.2.3 | 큐잉·우선순위 가용성은 **클라이언트별 SDP 협상**(`mc_queueing`/`mc_priority`), 미협상 클라이언트는 Deny #1 | 서버 전역 플래그(`_queueEnable`)로 모든 멤버에 큐잉 적용 (CMP API 에 멤버별 필드 없음) |
-| G17 | §6.3.4.2.2-3b, §12.1.2.3 | 호 성립 시 초기 발언권은 fmtp **`mc_granted`** 협상 결과로 결정(ambient listening 이면 금지). floor 없는 세션은 `mc_no_floor_ctrl` | `group_type:"private"` + `initiator_id` 로 CMP 가 자체 판단 |
-| G18 | §6.3.6 | dual floor = **overriding pre-emptive priority 사용자 1명**에 한정(호당 1개 인스턴스) | `_preempts()` 성립이면(chair·수치 우선순위 포함) 2번째 자리 부여 |
+| G2 | §6.3.4.4.2-1e | **원격 개시 ambient listening** 의 Floor Granted 는 ack 요구 변종으로 보내야 한다(`shall`). 그 밖의 서버 메시지는 `may` | 서버 송신은 항상 ack 비트 0 — 도달 보장은 T20(Granted)·T7(Idle) 재송신으로 대신한다. ambient 원격 개시 여부는 CSP 가 알려주지 않는다 |
 
 > **인용 정정**: TS 24.380 **클라우즈 7은 off-network floor control** 이다. 온넷 private call 은
 > 클라우즈 6.3 의 일반 floor 절차를 그대로 쓰며, 별도 private-call floor 절차는 없다. 이전
@@ -200,6 +195,8 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 | **T2** Stop talking | 30초 | 첫 RTP 부터의 최대 발언시간. Floor Granted 의 Duration 으로 광고하고, 초과하면 Revoke cause **#2**(Media burst too long). 긴급/임박 tier 화자는 제외(로컬 정책) |
 | **T3** Stop talking grace | 3초 | Revoke 를 보낸 뒤 Floor Release 를 기다리는 유예. 그 동안 그 화자의 미디어는 **계속 중계**되고, 유예가 끝나면 강제 회수한다. 0 이면 즉시 회수(audio cut-in) |
 | **T8** Floor Revoke | 1초 | 유예 중 Floor Release 가 올 때까지 Revoke 재전송 |
+| **T7** Floor Idle | 0(비활성) | 발언자가 없는 동안 Floor Idle 을 C7(3)회까지 재송신 — 무선 유실 대비, 설정으로 활성 |
+| **T20** Floor Granted | 1초 | **큐에서 승급한** 화자에게 첫 RTP 가 올 때까지 Granted 를 C20(3)회까지 재송신 |
 
 **선점**(§6.3.4.4.7)은 즉시 교체가 아니라 위 유예를 거친다: 최약 화자에게 Revoke → 요청자는
 **대기열 맨 앞**에 넣고 Queue Position Info 회신 → 그 화자의 Release(또는 T3 만료) 후 승급.
@@ -209,6 +206,30 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 **재요청·큐 안정성** — 이미 발언 중인 참가자가 Floor Request 를 재전송하면 Floor Granted 를
 다시 보내고(§6.3.4.4.8, Duration 은 남은 T2), 이미 대기 중인 요청의 재전송은 **큐 위치를
 유지**한 채 Queue Position Info 만 재회신한다(§6.3.5.4.4-4).
+
+### F5. 멤버 프로파일 · 부가 메시지
+
+- **MCPTT ID**: `PTT_JOIN.user_uri` 로 받은 URI 를 User ID(6)/Granted Party(4)/리스트 필드에
+  싣는다(§8.2.3.8). 없으면 sessionId(가입자 번호)로 대체한다.
+- **큐잉 협상**(`PTT_JOIN.queueing`): 미협상 멤버의 비선점 요청은 큐잉하지 않고 Deny **#1**
+  (§6.3.5.4.4). 요청에 실린 Floor Priority 는 멤버의 협상 상한으로 clamp 한다(§6.3.5.4.4-1a).
+- **초기 발언권**(`PTT_JOIN.granted` = fmtp `mc_granted`): 참가 시점에 발언자가 없으면 그
+  멤버에게 Floor Granted+Taken 을 보낸다(§6.3.4.2.2-3b).
+- **1인 세션**: 참가자가 한 명뿐인 세션의 요청은 Deny **#3**(Only one participant).
+- **Unicast Media Flow Control**(0x0B): 멤버가 자기 하향 미디어 중단/재개를 요청한다 —
+  중단 상태 멤버에게는 audio/video 를 보내지 않는다(§6.3.4.4.14~15).
+- **Queued Floor Requests**(0x0E): Cancel Request(purpose 0)를 받으면 지정 사용자(List of
+  Queued Users) 또는 대기열 전체를 제거하고, 제거된 대기자에게 Cancel Notification(2),
+  요청자에게 Cancel Result(1)+Result 값을 보낸 뒤 남은 대기자에게 위치를 다시 알린다.
+
+### F6. floor SRTCP 키 범위 (TS 33.180 §9.4)
+
+유니캐스트 floor 는 **클라이언트별 키**(CSK 유도값)로 보호한다 — `PTT_JOIN.floor_crypto` 로
+멤버마다 넣고, 그 멤버의 송·수신에만 쓴다. 그룹 단위 `PTT_GROUP_ADD.floor_crypto` 는 모든
+멤버가 같은 키를 쓰는 경우(멀티캐스트/MBMS MuSiK 대응)와 멤버 키 미설정 시의 기본값이다.
+수신은 **주소로 멤버를 먼저 식별한 뒤 그 멤버 키로만** 해제하고, NAT 로 주소가 바뀐 첫
+패킷은 그룹 키 → 각 멤버 키 순으로 시도한다(인증 태그가 오인을 막는다). 멤버 키를 쓰는
+그룹의 브로드캐스트(Taken/Idle)는 leg 마다 따로 보호한다.
 
 ### 규격 밖 수용(관대 처리) — 의도된 예외
 - **Floor Ack 수신**: 서버가 ack 를 요구하지 않아도 단말이 NAT 매핑 유지용으로 주기 송신한다 —

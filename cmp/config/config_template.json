@@ -225,6 +225,26 @@
           "help": "TS 24.380 T3(Stop talking grace) — Floor Revoke 를 보낸 뒤 단말의 Floor Release 를 기다리는 유예. 그 동안 그 화자의 미디어는 계속 중계되고, 유예가 끝나면 강제 회수한다. 0=유예 없이 즉시 회수(audio cut-in)."
         },
         {
+          "key": "FloorIdleResendSec",
+          "label": "PTT floor T7 Idle 재송신 간격 (초)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 60,
+          "restart": true,
+          "help": "TS 24.380 T7(Floor Idle) — 발언자가 없는 동안 Floor Idle 을 이 간격으로 최대 3회 재송신해 도달을 보장한다(무선 구간 유실 대비). 0=비활성(1회만 송신)."
+        },
+        {
+          "key": "FloorGrantRetxSec",
+          "label": "PTT floor T20 Granted 재송신 간격 (초)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 10,
+          "restart": true,
+          "help": "TS 24.380 T20(Floor Granted) — 대기열에서 승급한 화자에게 보낸 Floor Granted 가 유실되면 발언 기회가 통째로 사라지므로, 첫 RTP 가 올 때까지 이 간격으로 최대 3회 재송신한다."
+        },
+        {
           "key": "FloorRevokeRetxSec",
           "label": "PTT floor T8 Revoke 재전송 간격 (초)",
           "type": "int",

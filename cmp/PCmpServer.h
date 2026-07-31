@@ -258,6 +258,8 @@ private:
     int _floorStopTalkSec;    // T2(Stop talking) — 최대 발언시간, Granted Duration 값. 기본 30초
     int _floorRevokeGraceSec; // T3(Stop talking grace) — Revoke 후 Release 대기 유예. 기본 3초
     int _floorRevokeRetxSec;  // T8(Floor Revoke) — 유예 중 Revoke 재전송 간격. 기본 1초
+    int _floorIdleResendSec;  // T7(Floor Idle) — Floor Idle 재송신 간격(0=비활성, 최대 3회)
+    int _floorGrantRetxSec;   // T20(Floor Granted) — 큐 승급 화자에게 Granted 재송신 간격. 기본 1초
 
     // 누수 회수(leak reclaim) 관측 — sweeper 가 고아 relay 를 회수한 누적 카운터(STATS 노출) +
     //   회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 기록(콘솔 조회용).

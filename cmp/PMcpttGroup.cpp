@@ -396,30 +396,14 @@ static bool _knownFloorSubtype(int subtype) {
             return !ackReq;                     // ack 변종이 정의돼 있지 않다
         case FLOOR_GRANT: case FLOOR_TAKEN: case FLOOR_REJECT:
         case FLOOR_RELEASE: case FLOOR_IDLE: case FLOOR_QUEUE_POS_INFO:
-            return true;                        // x0001/x0010/x0011/x0100/x0101/x1001
+        case FLOOR_MEDIA_FLOW: case FLOOR_QUEUED_CANCEL:
+            return true;                        // x0001/x0010/x0011/x0100/x0101/x1001/x1011/x1110
         default:
-            return false;   // Unicast Media Flow Control(x1011)·Queued Floor Requests(x1110) 등 미구현
+            return false;   // 규격 미정의 subtype (§8.1.4 — 메시지 전체 무시)
     }
 }
 
 void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int len) {
-    // SRTCP 보호가 켜져 있으면 인증·복호 후 파싱 (TS 33.180 — floor 만 보호, 미디어는 투명).
-    char plain[2048];
-    if (_floorCrypto.enabled()) {
-        int plainLen = 0;
-        if (!_floorCrypto.unprotect(buf, len, plain, sizeof(plain), plainLen)) {
-            long total = ++_floorCryptoDrop;   // atomic — 수신 스레드와 STATS 조회가 경합
-            LOG_WARN("PMcpttGroup", "[%s] floor SRTCP reject from %s:%d (len=%d total=%ld)",
-                     _groupId.c_str(), ip.c_str(), port, len, total);
-            return;
-        }
-        buf = plain;
-        len = plainLen;
-    }
-
-    ParsedFloor msg;
-    if (!ParseFloorMessage(buf, len, msg)) return;
-
     // floor 제어 없는 그룹(floor_control:"off", private full-duplex)은 floor 를 중재하지
     //   않는다 — 수신 floor 메시지는 무시한다 (포트도 광고하지 않음).
     if (!_floorControl) {
@@ -428,18 +412,38 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
         return;
     }
 
-    // 멤버의 floorPort로 매칭
+    // 보호(SRTCP)가 걸린 그룹은 **보낸 멤버의 키**로 풀어야 한다(TS 33.180 §9.4 — 유니캐스트
+    //   floor 는 클라이언트별 CSK). 멤버 식별은 주소로 하므로 복호보다 먼저 한다.
+    char plain[2048];
+    ParsedFloor msg;
     std::string sessionId = "";
     unsigned int senderSsrc = 0;
     {
         PAutoLock lock(_mutex);
-        for (auto& [sid, peer] : _members) {
-            if (peer.ip == ip && peer.floorPort == port) {
-                sessionId = sid;
-                senderSsrc = peer.ssrc;
-                // 단말이 쓰는 자기 SSRC 학습 — Granted/Taken 의 SSRC 필드(§8.2.3.16)에 싣는다.
-                if (msg.ssrc) peer.uaSsrc = msg.ssrc;
-                break;
+        for (auto const& [sid, peer] : _members)
+            if (peer.ip == ip && peer.floorPort == port) { sessionId = sid; break; }
+
+        bool needCrypto = (sessionId.empty() ? (_floorCrypto.enabled() || _anyMemberCrypto())
+                                             : _cryptoFor(sessionId) != nullptr);
+        if (needCrypto) {
+            int plainLen = 0;
+            if (!_unprotectFloor(sessionId, buf, len, plain, sizeof(plain), plainLen)) {
+                long total = ++_floorCryptoDrop;   // atomic — 수신 스레드와 STATS 조회가 경합
+                LOG_WARN("PMcpttGroup", "[%s] floor SRTCP reject from %s:%d (len=%d total=%ld)",
+                         _groupId.c_str(), ip.c_str(), port, len, total);
+                return;
+            }
+            buf = plain;
+            len = plainLen;
+        }
+        if (!ParseFloorMessage(buf, len, msg)) return;
+
+        // 단말이 쓰는 자기 SSRC 학습 — Granted/Taken 의 SSRC 필드(§8.2.3.16)에 싣는다.
+        if (!sessionId.empty()) {
+            auto it = _members.find(sessionId);
+            if (it != _members.end()) {
+                senderSsrc = it->second.ssrc;
+                if (msg.ssrc) it->second.uaSsrc = msg.ssrc;
             }
         }
         // (구) symmetric floor — "소스 포트가 선언 floorPort 와 일치하면 IP 학습" 분기는
@@ -526,7 +530,7 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
     }
 
     switch (op) {
-        case FLOOR_REQUEST:        handleFloorRequest(sessionId, senderSsrc, msg.indicator()); break;
+        case FLOOR_REQUEST:        handleFloorRequest(sessionId, senderSsrc, msg.indicator(), msg.priority()); break;
         // Floor Release — "이 화자의 발언 종료". 집합에서 그 화자만 걷어내므로 잔여 화자 유무는
         //   _advanceFloorOrIdle 이 판정한다.
         case FLOOR_RELEASE:        handleFloorRelease(sessionId, senderSsrc); break;
@@ -543,9 +547,20 @@ void PMcpttGroup::onFloorPacket(const std::string& ip, int port, char* buf, int 
             break;
         }
         case FLOOR_ACK:
-            // 신뢰성 Ack — 재전송을 하지 않으므로 수신 확인만(no-op).
+            // 서버는 ack 를 요구하지 않으므로 수신 Ack 는 상태를 바꾸지 않는다(단말이 NAT
+            //   매핑 유지용으로 주기 송신한다 — ue_nat_traversal.md).
             LOG_DEBUG("PMcpttGroup", "[%s] Floor ACK from %s", _groupId.c_str(), sessionId.c_str());
             break;
+        case FLOOR_MEDIA_FLOW: {
+            PAutoLock lock(_mutex);
+            _handleMediaFlowControl(sessionId, msg);
+            break;
+        }
+        case FLOOR_QUEUED_CANCEL: {
+            PAutoLock lock(_mutex);
+            _handleQueuedCancel(sessionId, senderSsrc, msg);
+            break;
+        }
         default:
             break;
     }
@@ -746,11 +761,15 @@ void PMcpttGroup::_dropSrc(const char* what, const std::string& memberId, const 
     }
 }
 
-void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc, int indicatorBits) {
+void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int ssrc, int indicatorBits,
+                                     int reqPrio) {
     PAutoLock lock(_mutex);
     if (!_floorControl) return;   // 중재 없는 그룹 — 요청 자체가 성립하지 않는다
+    // 유효 우선순위 (§6.3.5.4.4-1a): 요청에 실린 값과 협상 상한(멤버 priority) 중 낮은 쪽.
+    //   요청에 Floor Priority 가 없으면 협상된 기본값(멤버 priority)을 그대로 쓴다.
     int requesterPrio = 0;
     if (_priorities.find(sessionId) != _priorities.end()) requesterPrio = _priorities[sessionId];
+    if (reqPrio >= 0 && reqPrio < requesterPrio) requesterPrio = reqPrio;
 
     // 수신 Floor Indicator(emergency/imminent) → tier 승격(단말 개시 긴급/임박).
     // CSP PTT_FLOOR_TIER 로 설정된 tier 와 max 결합(영속 → 무활동 자동회수 제외 등에 반영).
@@ -773,6 +792,17 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
             _logFloorLocal("DENY", sessionId, ssrc, requesterPrio, ex);
             return;
         }
+    }
+
+    // 세션에 참가자가 1명뿐이면 발언이 성립하지 않는다 — Deny #3 (§6.3.4.3.3-1a/2a).
+    if (_members.size() <= 1) {
+        _sendDeny(sessionId, ssrc, CAUSE_DENY_ONLY_ONE);
+        LOG_INFO("PMcpttGroup", "[%s] Floor DENY (only one participant) session=%s",
+                 _groupId.c_str(), sessionId.c_str());
+        char ex[64];
+        snprintf(ex, sizeof(ex), "\"reason\":\"only_one\",\"cause\":%d", CAUSE_DENY_ONLY_ONE);
+        _logFloorLocal("DENY", sessionId, ssrc, requesterPrio, ex);
+        return;
     }
 
     // Broadcast 그룹 (TS 24.380 §10.3): 개시자(initiator)만 floor 보유.
@@ -823,7 +853,10 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         _grantFloorTo(sessionId, ssrc, requesterPrio, false, "");
         return;
     }
-    if (hasRoom && _floorPolicy == FLOOR_POLICY_DUAL && bPreempt) {
+    // dual floor(§6.3.6)는 **overriding pre-emptive priority** 사용자에게만 열린다 —
+    //   긴급/임박(tier 상위) 요청만 기존 화자를 끊지 않고 동시 발언한다. chair·수치 우선순위로
+    //   앞서는 요청은 dual 자리가 아니라 일반 선점 절차(회수 후 승급)를 탄다.
+    if (hasRoom && _floorPolicy == FLOOR_POLICY_DUAL && reqTier > ownTier) {
         LOG_INFO("PMcpttGroup", "[%s] Floor DUAL grant to %s (prio=%d tier=%s) — %s keeps floor",
                  _groupId.c_str(), sessionId.c_str(), requesterPrio, _tierName(reqTier), ownerId.c_str());
         _grantFloorTo(sessionId, ssrc, requesterPrio, false, "");
@@ -854,9 +887,14 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         return;
     }
 
-    // 비선점 — SDP `mc_queueing` 광고 시 큐잉(TS 24.380 §8). 큐가 가득 차면 Deny.
-    //   private call(§7)은 큐잉 절차가 없어 _queueEnable=false → 곧바로 Deny.
-    if (_queueEnable && (int)_floorQueue.size() < _queueMax) {
+    // 비선점 — 큐잉을 협상한 멤버만 대기열에 넣는다(§6.3.5.4.4). 미협상 멤버·큐 포화는 Deny.
+    //   private call 은 큐잉 절차 자체가 없어 그룹 차원에서 _queueEnable=false 다.
+    bool memberQueueing = true;
+    {
+        auto itQ = _members.find(sessionId);
+        if (itQ != _members.end()) memberQueueing = itQ->second.queueing;
+    }
+    if (_queueEnable && memberQueueing && (int)_floorQueue.size() < _queueMax) {
         // 이미 대기 중인 요청의 재전송이면 **위치를 유지**하고 현재 위치만 다시 알린다
         //   (§6.3.5.4.4-4). 유효 우선순위가 바뀌었을 때만 갱신한다 — 재전송할수록 뒤로
         //   밀리면 대기자가 영원히 승급하지 못한다.
@@ -884,8 +922,9 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         return;
     }
 
-    // 큐 비활성/포화 → Deny.
-    _sendDeny(sessionId, ssrc, _queueEnable ? CAUSE_DENY_QUEUE_FULL : CAUSE_DENY_ANOTHER_CLIENT);
+    // 큐 비활성/미협상/포화 → Deny. 포화만 #7(Queue full)이고 나머지는 #1(다른 참가자 점유).
+    _sendDeny(sessionId, ssrc,
+              (_queueEnable && memberQueueing) ? CAUSE_DENY_QUEUE_FULL : CAUSE_DENY_ANOTHER_CLIENT);
     LOG_INFO("PMcpttGroup", "[%s] Floor DENY session=%s (prio=%d). Owner=%s (prio=%d)",
            _groupId.c_str(), sessionId.c_str(), requesterPrio, ownerId.c_str(), ownerPrio);
     {
@@ -1028,14 +1067,95 @@ bool PMcpttGroup::setFloorCrypto(const std::string& alg, const std::string& key,
     return ok;
 }
 
-void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8) {
+void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20) {
     PAutoLock lock(_mutex);
     _t1EndRtpSec   = t1 >= 0 ? t1 : 0;
     _t2StopTalkSec = t2 >= 0 ? t2 : 0;
     _t3GraceSec    = t3 >= 0 ? t3 : 0;
     _t8RevokeSec   = t8 > 0 ? t8 : 1;
-    LOG_INFO("PMcpttGroup", "[%s] floor timers: T1=%ds T2=%ds T3=%ds T8=%ds",
-             _groupId.c_str(), _t1EndRtpSec, _t2StopTalkSec, _t3GraceSec, _t8RevokeSec);
+    _t7IdleSec     = t7 >= 0 ? t7 : 0;
+    _t20GrantSec   = t20 > 0 ? t20 : 1;
+    LOG_INFO("PMcpttGroup", "[%s] floor timers: T1=%ds T2=%ds T3=%ds T7=%ds T8=%ds T20=%ds",
+             _groupId.c_str(), _t1EndRtpSec, _t2StopTalkSec, _t3GraceSec,
+             _t7IdleSec, _t8RevokeSec, _t20GrantSec);
+}
+
+bool PMcpttGroup::setMemberCrypto(const std::string& sessionId, const std::string& alg,
+                                  const std::string& key, const std::string& salt,
+                                  const std::string& mki, std::string& err) {
+    PAutoLock lock(_mutex);
+    auto it = _members.find(sessionId);
+    if (it == _members.end()) { err = "member not joined"; return false; }
+    auto ctx = std::make_shared<PFloorCrypto>();
+    if (!ctx->init(alg, key, salt, mki, err)) {
+        LOG_WARN("PMcpttGroup", "[%s] member floor crypto rejected (%s): %s",
+                 _groupId.c_str(), sessionId.c_str(), err.c_str());
+        return false;
+    }
+    it->second.crypto = ctx;
+    LOG_INFO("PMcpttGroup", "[%s] member floor crypto enabled: session=%s alg=%s",
+             _groupId.c_str(), sessionId.c_str(), ctx->alg().c_str());
+    return true;
+}
+
+// 이 멤버의 floor 메시지에 쓸 SRTCP 컨텍스트 — 멤버 키(CSK) > 그룹 키 > 평문(null).
+PFloorCrypto* PMcpttGroup::_cryptoFor(const std::string& sessionId) {
+    auto it = _members.find(sessionId);
+    if (it != _members.end() && it->second.crypto) return it->second.crypto.get();
+    return _floorCrypto.enabled() ? &_floorCrypto : nullptr;
+}
+
+bool PMcpttGroup::_anyMemberCrypto() const {
+    for (auto const& [sid, peer] : _members) if (peer.crypto) return true;
+    return false;
+}
+
+// 수신 floor 패킷 해제. 보낸 멤버를 아는 경우(주소 매칭)엔 그 멤버 키만 시도하고, 모르는
+//   경우(NAT 로 주소가 바뀐 첫 패킷)엔 그룹 키 → 각 멤버 키 순으로 시도한다. 인증 태그가
+//   있으므로 잘못된 키로는 통과하지 않는다.
+bool PMcpttGroup::_unprotectFloor(const std::string& sessionId, const char* in, int inLen,
+                                  char* out, int outCap, int& outLen) {
+    if (!sessionId.empty()) {
+        PFloorCrypto* c = _cryptoFor(sessionId);
+        if (!c) { outLen = 0; return false; }        // 평문 그룹 — 호출부가 원본을 쓴다
+        return c->unprotect(in, inLen, out, outCap, outLen);
+    }
+    if (_floorCrypto.enabled() && _floorCrypto.unprotect(in, inLen, out, outCap, outLen)) return true;
+    for (auto& [sid, peer] : _members) {
+        if (!peer.crypto) continue;
+        if (peer.crypto->unprotect(in, inLen, out, outCap, outLen)) return true;
+    }
+    return false;
+}
+
+void PMcpttGroup::setMemberProfile(const std::string& sessionId, const std::string& mcpttId, bool queueing) {
+    PAutoLock lock(_mutex);
+    auto it = _members.find(sessionId);
+    if (it == _members.end()) return;
+    if (!mcpttId.empty()) it->second.mcpttId = mcpttId;
+    it->second.queueing = queueing;
+}
+
+// floor 메시지에 실을 사용자 식별자 — 규격은 MCPTT ID(URI)를 요구한다(§8.2.3.8). 제어평면이
+//   주지 않은 그룹은 sessionId(가입자 번호)로 대체한다.
+const std::string& PMcpttGroup::_userIdOf(const std::string& sessionId) const {
+    auto it = _members.find(sessionId);
+    if (it != _members.end() && !it->second.mcpttId.empty()) return it->second.mcpttId;
+    return sessionId;
+}
+
+bool PMcpttGroup::grantInitialFloor(const std::string& sessionId) {
+    PAutoLock lock(_mutex);
+    if (!_floorControl || !_talkers.empty()) return false;
+    auto it = _members.find(sessionId);
+    if (it == _members.end() || it->second.recvOnly || it->second.floorSuppress) return false;
+    int prio = 0;
+    auto itP = _priorities.find(sessionId);
+    if (itP != _priorities.end()) prio = itP->second;
+    LOG_INFO("PMcpttGroup", "[%s] Initial floor granted to %s (mc_granted)", _groupId.c_str(), sessionId.c_str());
+    _grantFloorTo(sessionId, it->second.ssrc, prio, false, "");
+    _initialGrantDone = true;
+    return true;
 }
 
 void PMcpttGroup::setSessionMeta(const std::string& sesid, const std::string& service) {
@@ -1045,7 +1165,7 @@ void PMcpttGroup::setSessionMeta(const std::string& sesid, const std::string& se
 }
 
 void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc, int prio,
-                                bool preempt, const std::string& prevOwner) {
+                                bool preempt, const std::string& prevOwner, bool fromQueue) {
     int slot = _allocSlot();
     if (slot < 0) {
         LOG_WARN("PMcpttGroup", "[%s] grant aborted — no talker slot (capacity=%d)", _groupId.c_str(), _talkerCapacity);
@@ -1054,7 +1174,14 @@ void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc,
     Talker tk;
     tk.sessionId = sessionId; tk.ssrc = ssrc; tk.prio = prio; tk.slot = slot;
     tk.grantUsec = _nowUsec(); tk.lastRtpUsec = 0;
+    // 대기열에서 승급한 화자는 PTT 를 누르고 있지 않을 수 있어 Granted 유실이 곧 발언 기회
+    //   상실이다 — 첫 RTP 가 올 때까지 T20 으로 재송신한다(§6.3.4.4.2-2).
+    if (fromQueue && _t20GrantSec > 0) {
+        tk.grantRetxLeft = kGrantResendMax;
+        tk.grantSentUsec = tk.grantUsec;
+    }
     _talkers.push_back(tk);
+    _idleResendLeft = 0;   // 더 이상 Floor Idle 상태가 아니다 (T7 중단)
 
     // Floor Granted → 요청자 (§8.2.5: Duration + SSRC of granted floor participant +
     //   Floor Priority + Floor Indicator. 헤더 SSRC 는 floor control server 의 것).
@@ -1235,6 +1362,102 @@ void PMcpttGroup::_queueFront(const std::string& sessionId, unsigned int ssrc, i
     _floorQueue.push_back(q);
 }
 
+// Unicast Media Flow Control (§8.2.16 / §6.3.4.4.14~15) — 단말이 자기 하향 미디어를
+//   중단/재개해 달라고 요청한다(수신 전용 화면 전환·데이터 절약 등). 발언권과는 무관하다.
+void PMcpttGroup::_handleMediaFlowControl(const std::string& sessionId, const ParsedFloor& msg) {
+    const FloorTlv* f = msg.field(FF_MEDIA_FLOW);
+    if (!f || f->value.empty()) return;
+    bool resume = ((unsigned char)f->value[0] & FLOOR_MEDIA_RESUME_BIT) != 0;
+    auto it = _members.find(sessionId);
+    if (it == _members.end()) return;
+    if (it->second.mediaStopped == !resume) return;   // 상태 동일 — 무시
+    it->second.mediaStopped = !resume;
+    LOG_INFO("PMcpttGroup", "[%s] Unicast media flow %s for %s",
+             _groupId.c_str(), resume ? "RESUME" : "STOP", sessionId.c_str());
+    if (_logFlow) {
+        char detail[192];
+        snprintf(detail, sizeof(detail), "{\"op\":\"MEDIA_FLOW\",\"user\":\"%s\",\"action\":\"%s\"}",
+                 sessionId.c_str(), resume ? "resume" : "stop");
+        _logFlow(_groupId, "ue", "cmp", "MCPTT", "FLOOR_MEDIA_FLOW", detail);
+    }
+}
+
+// Queued Floor Requests (§8.2.15 / §6.3.4.4.13) — 대기 중인 floor 요청 취소.
+//   List of Queued Users 가 있으면 그 사용자들만, 없으면 대기열 전체를 제거한다.
+//   제거된 사용자에게 Cancel Notification 을, 요청자에게 Cancel Result 를 보낸다.
+void PMcpttGroup::_handleQueuedCancel(const std::string& sessionId, unsigned int ssrc, const ParsedFloor& msg) {
+    if (msg.u16(FF_QUEUED_PURPOSE, QFR_CANCEL_REQUEST) != QFR_CANCEL_REQUEST) return;  // 결과/통지는 서버가 보낸다
+
+    // 대상 사용자 목록 파싱 (없으면 전체)
+    std::vector<std::string> targets;
+    const FloorTlv* lst = msg.field(FF_QUEUED_USERS);
+    if (lst && !lst->value.empty()) {
+        const std::string& v = lst->value;
+        size_t p = 1;
+        int n = (unsigned char)v[0];
+        for (int i = 0; i < n && p < v.size(); ++i) {
+            int len = (unsigned char)v[p++];
+            if (p + len > v.size()) break;
+            targets.push_back(v.substr(p, len));
+            p += len;
+        }
+    }
+
+    int before = (int)_floorQueue.size();
+    std::vector<std::string> removed;
+    for (auto it = _floorQueue.begin(); it != _floorQueue.end(); ) {
+        bool hit = targets.empty();
+        for (const auto& t : targets) {
+            // 대상은 MCPTT ID(URI)로 올 수 있다 — sessionId 와 양쪽으로 비교한다.
+            if (t == it->sessionId || t == _userIdOf(it->sessionId)) { hit = true; break; }
+        }
+        if (!hit) { ++it; continue; }
+        removed.push_back(it->sessionId);
+        it = _floorQueue.erase(it);
+    }
+
+    int result = QFR_OK;
+    if (before == 0)                                  result = QFR_QUEUE_EMPTY;
+    else if (removed.empty())                         result = QFR_NOT_QUEUED;
+    else if (!targets.empty() && removed.size() < targets.size()) result = QFR_PARTIAL;
+
+    // 취소된 대기자에게 Cancel Notification (요청자 본인은 아래 Cancel Result 로 갈음한다)
+    for (const auto& r : removed) {
+        if (r == sessionId) continue;
+        char buf[256];
+        std::vector<FloorTlv> f{ FloorTlv(FF_QUEUED_PURPOSE, FloorU16(QFR_CANCEL_NOTIFY)),
+                                 FloorTlv(FF_USER_ID, _userIdOf(r)) };
+        int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_QUEUED_CANCEL, _serverSsrc, f);
+        if (n > 0) sendToMember(r, buf, n);
+    }
+    // 요청자에게 Cancel Result
+    {
+        char buf[512];
+        std::vector<FloorTlv> f{ FloorTlv(FF_QUEUED_PURPOSE, FloorU16(QFR_CANCEL_RESULT)),
+                                 FloorTlv(FF_QUEUED_RESULT, FloorU16(result)) };
+        if (!targets.empty()) {
+            // 제거하지 못하고 여전히 대기 중인 사용자만 리스트로 돌려준다(§8.2.15).
+            std::vector<std::string> still;
+            for (const auto& t : targets)
+                for (const auto& q : _floorQueue)
+                    if (t == q.sessionId || t == _userIdOf(q.sessionId)) { still.push_back(t); break; }
+            if (!still.empty()) f.push_back(FloorTlv(FF_QUEUED_USERS, FloorUserList(still)));
+        }
+        int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_QUEUED_CANCEL, _serverSsrc, f);
+        if (n > 0) sendToMember(sessionId, buf, n);
+    }
+    LOG_INFO("PMcpttGroup", "[%s] Queued floor requests cancel by %s — removed %zu/%d (result=%d)",
+             _groupId.c_str(), sessionId.c_str(), removed.size(), before, result);
+    {
+        char ex[160];
+        snprintf(ex, sizeof(ex), "\"reason\":\"cancel\",\"removed\":%zu,\"result\":%d", removed.size(), result);
+        _logFloorLocal("QUEUE_CANCEL", sessionId, ssrc, 0, ex);
+    }
+    // 남은 대기자들의 위치가 바뀌었으면 다시 알린다(§6.3.4.4.13-2d).
+    if (!removed.empty())
+        for (const auto& q : _floorQueue) _sendQueuePos(q.sessionId, q.ssrc);
+}
+
 // Floor Ack (§8.2.13) — Ack 요구(subtype 첫 비트=1) 메시지를 받았음을 알린다.
 //   Source=controlling MCPTT function(2), Message Type=확인 대상 subtype(ack 비트 포함, §8.2.3.14).
 void PMcpttGroup::_sendFloorAck(const std::string& sessionId, int ackedSubtype) {
@@ -1253,7 +1476,7 @@ void PMcpttGroup::_sendReleaseMultiTalker(const std::string& sessionId, unsigned
     char buf[256];
     unsigned int ua = _uaSsrcOf(sessionId);
     std::vector<FloorTlv> f{ FloorTlv(FF_SSRC, FloorSsrc(ua ? ua : ssrc)),
-                             FloorTlv(FF_USER_ID, sessionId),
+                             FloorTlv(FF_USER_ID, _userIdOf(sessionId)),
                              FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_groupIndicator())) };
     int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_RELEASE_MULTI, _serverSsrc, f);
     if (n > 0) sendFloorToAll(buf, n, nullptr, 0, sessionId);
@@ -1291,8 +1514,9 @@ void PMcpttGroup::_sendQueuePos(const std::string& sessionId, unsigned int ssrc)
     if (_priorities.find(sessionId) != _priorities.end()) prio = _priorities[sessionId];
     (void)ssrc;   // 헤더 SSRC 는 floor control server 의 것 (§8.2.12)
     char buf[256];
+    // §8.2.12 — 온넷에서는 Queue Info + Floor Indicator 만 싣는다. Queue Size(7)·Queued User
+    //   ID(9)·SSRC of queued floor participant 는 off-network 전용 필드다.
     std::vector<FloorTlv> f{ FloorTlv(FF_QUEUE_INFO, FloorQueueInfo(pos, prio)),
-                             FloorTlv(FF_QUEUE_SIZE, FloorU16((int)_floorQueue.size())),
                              FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(sessionId))) };
     int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_QUEUE_POS_INFO, _serverSsrc, f);
     if (n > 0) sendToMember(sessionId, buf, n);
@@ -1328,11 +1552,16 @@ void PMcpttGroup::_advanceFloorOrIdle() {
         std::string next = _popBestQueued(qssrc, qprio);
         if (next.empty()) break;
         if (_members.find(next) == _members.end()) continue;   // 이미 떠난 멤버 skip
-        _grantFloorTo(next, qssrc, qprio, false, "");
+        _grantFloorTo(next, qssrc, qprio, false, "", true);   // 큐 승급 → T20 재송신 무장
     }
     // 화자가 모두 빠졌으면 Floor Idle. 잔여 화자가 있으면 'G: Floor Taken' 을 유지한다 —
     //   빠진 화자는 _dropTalker 가 이미 Floor Release Multi Talker 로 알렸다(§6.3.4.4.6-5).
-    if (_talkers.empty()) broadcastFloorStatus(FLOOR_IDLE, 0, "");
+    if (_talkers.empty()) {
+        broadcastFloorStatus(FLOOR_IDLE, 0, "");
+        // T7(Floor Idle) 무장 — 설정돼 있으면 C7 회까지 재송신해 도달을 보장한다(§6.3.4.3.4).
+        _idleSinceUsec = _nowUsec();
+        _idleResendLeft = (_t7IdleSec > 0) ? kIdleResendMax : 0;
+    }
 }
 
 void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int ssrc) {
@@ -1366,10 +1595,21 @@ int64_t PMcpttGroup::_nowUsec() {
 //   1초 주기 호출 — 화자마다 독립 판정한다(동시 발언).
 bool PMcpttGroup::tickFloorTimers() {
     PAutoLock lock(_mutex);
-    if (!_floorControl || _talkers.empty()) return false;
+    if (!_floorControl) return false;
 
     int64_t now = _nowUsec();
     bool changed = false;
+
+    // ── T7 (Floor Idle): 발언자가 없는 동안 Floor Idle 을 C7 회까지 재송신 (§6.3.4.3.4) ──
+    if (_talkers.empty()) {
+        if (_t7IdleSec > 0 && _idleResendLeft > 0 && _idleSinceUsec > 0 &&
+            (now - _idleSinceUsec) >= (int64_t)_t7IdleSec * 1000000LL) {
+            --_idleResendLeft;
+            broadcastFloorStatus(FLOOR_IDLE, 0, "");
+            _idleSinceUsec = now;
+        }
+        return false;
+    }
 
     // 목록 복사 후 순회: _dropTalker 가 _talkers 를 변경한다.
     std::vector<Talker> snapshot = _talkers;
@@ -1395,6 +1635,17 @@ bool PMcpttGroup::tickFloorTimers() {
                 t->revokeSentUsec = now;
             }
             continue;
+        }
+
+        // ── T20 (Floor Granted): 큐에서 승급한 화자가 아직 말을 시작하지 않았으면 Granted 재송신 ──
+        if (t->grantRetxLeft > 0) {
+            if (t->lastRtpUsec > 0) {
+                t->grantRetxLeft = 0;               // 미디어가 오면 도달 확인 — 재송신 중단
+            } else if ((now - t->grantSentUsec) >= (int64_t)_t20GrantSec * 1000000LL) {
+                --t->grantRetxLeft;
+                t->grantSentUsec = now;
+                _resendGrant(*t);
+            }
         }
 
         // ── T2 (Stop talking): 최대 발언시간 초과 → Revoke cause #2 후 유예 ──
@@ -1453,7 +1704,7 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
     if (opcode == FLOOR_TAKEN && !speakerId.empty()) {
         // broadcast 그룹은 수신자가 발언 요청을 할 수 없다(§6.3.4.4.2-3d).
         int perm = (_groupType == "broadcast") ? FLOOR_PERM_DENIED : FLOOR_PERM_ALLOWED;
-        fields.push_back(FloorTlv(FF_GRANTED_PARTY, speakerId));
+        fields.push_back(FloorTlv(FF_GRANTED_PARTY, _userIdOf(speakerId)));
         fields.push_back(FloorTlv(FF_PERMISSION, FloorU16(perm)));
         fields.push_back(FloorTlv(FF_MSG_SEQ, FloorU16(_nextMsgSeq())));
         fields.push_back(FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_indicatorFor(speakerId))));
@@ -1462,7 +1713,7 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
             //   고정 길이 필드 뒤에 둔다(구 파서 호환).
             std::vector<std::string> users;
             std::vector<unsigned int> ssrcs;
-            for (const auto& t : _talkers) { users.push_back(t.sessionId); ssrcs.push_back(_uaSsrcOf(t.sessionId)); }
+            for (const auto& t : _talkers) { users.push_back(_userIdOf(t.sessionId)); ssrcs.push_back(_uaSsrcOf(t.sessionId)); }
             fields.push_back(FloorTlv(FF_GRANTED_USERS, FloorUserList(users)));
             fields.push_back(FloorTlv(FF_SSRC_LIST, FloorSsrcList(ssrcs)));
         } else {
@@ -1482,7 +1733,7 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
         fields.push_back(FloorTlv(FF_MSG_SEQ, FloorU16(_nextMsgSeq())));
         fields.push_back(FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_groupIndicator())));
     } else if (!speakerId.empty()) {
-        fields.push_back(FloorTlv(FF_GRANTED_PARTY, speakerId));
+        fields.push_back(FloorTlv(FF_GRANTED_PARTY, _userIdOf(speakerId)));
     }
 
     char pktBuf[512];
@@ -1536,6 +1787,8 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
     for (auto& [sid, peer] : _members) {
         if (sid == excludeSessionId) continue;
         if (!peer.unit || peer.port <= 0) continue;
+        // Unicast Media Flow Control(0x0B)로 중단을 요청한 멤버에게는 보내지 않는다(§6.3.4.4.14).
+        if (peer.mediaStopped) continue;
         // 수신자별 SSRC + 시퀀스 번호 재작성 (화자 슬롯별 스트림)
         char pkt[4096];
         if (len > (int)sizeof(pkt)) continue;
@@ -1557,11 +1810,13 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
 void PMcpttGroup::sendFloorToAll(const char* data, int len, const char* roData, int roLen,
                                  const std::string& excludeSessionId) {
     if (!_pttSession) return;
-    // SRTCP 보호는 패킷 변형마다 1회만 적용한다 — 같은 SSRC·같은 패킷이므로
-    //   수신자마다 index 를 소모하면 재전송 방지 창이 무의미해진다.
+    // 멤버별 키(CSK)를 쓰는 그룹은 leg 마다 따로 보호해야 한다. 모두 그룹 키(또는 평문)면
+    //   패킷 변형마다 1회만 보호한다 — 같은 SSRC·같은 패킷을 수신자마다 다시 보호하면
+    //   SRTCP index 만 소모되어 재전송 방지 창이 무의미해진다.
     char sec[2048];
     char roSec[2048];
-    if (_floorCrypto.enabled()) {
+    const bool perMember = _anyMemberCrypto();
+    if (!perMember && _floorCrypto.enabled()) {
         int secLen = 0;
         if (!_floorCrypto.protect(data, len, sec, sizeof(sec), secLen)) {
             LOG_ERROR("PMcpttGroup", "[%s] floor SRTCP protect failed (len=%d)", _groupId.c_str(), len);
@@ -1581,6 +1836,19 @@ void PMcpttGroup::sendFloorToAll(const char* data, int len, const char* roData, 
         if (peer.floorPort <= 0) continue;
         const char* p = (peer.recvOnly && roData && roLen > 0) ? roData : data;
         int n = (peer.recvOnly && roData && roLen > 0) ? roLen : len;
+        char legSec[2048];
+        if (perMember) {
+            PFloorCrypto* crypto = _cryptoFor(sid);
+            if (crypto) {
+                int m = 0;
+                if (!crypto->protect(p, n, legSec, sizeof(legSec), m)) {
+                    LOG_ERROR("PMcpttGroup", "[%s] floor SRTCP protect failed (session=%s)",
+                              _groupId.c_str(), sid.c_str());
+                    continue;
+                }
+                p = legSec; n = m;
+            }
+        }
         _pttSession->sendFloorTo(peer.ip, peer.floorPort, (char*)p, n);
     }
 }
@@ -1591,6 +1859,7 @@ void PMcpttGroup::sendVideoToAll(const char* data, int len, const std::string& e
     for (auto& [sid, peer] : _members) {
         if (sid == excludeSessionId) continue;
         if (!peer.unit || peer.videoPort <= 0) continue;
+        if (peer.mediaStopped) continue;   // 하향 미디어 중단 요청 멤버 (0x0B)
         char pkt[4096];
         if (len > (int)sizeof(pkt)) continue;
         memcpy(pkt, data, len);
@@ -1613,9 +1882,10 @@ void PMcpttGroup::sendToMember(const std::string& sessionId, const char* data, i
     // PPttTrans의 floor 소켓으로 전송 (규격: m=application 포트)
     if (_pttSession && peer.floorPort > 0) {
         char sec[2048];
-        if (_floorCrypto.enabled()) {
+        PFloorCrypto* crypto = _cryptoFor(sessionId);   // 멤버 키(CSK) > 그룹 키 > 평문
+        if (crypto) {
             int secLen = 0;
-            if (!_floorCrypto.protect(data, len, sec, sizeof(sec), secLen)) {
+            if (!crypto->protect(data, len, sec, sizeof(sec), secLen)) {
                 LOG_ERROR("PMcpttGroup", "[%s] floor SRTCP protect failed (session=%s len=%d)",
                           _groupId.c_str(), sessionId.c_str(), len);
                 return;

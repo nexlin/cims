@@ -10,6 +10,7 @@
 #include <ctime>
 #include <functional>
 #include <atomic>
+#include <memory>
 #include "pbase.h"
 #include "PFloorCrypto.h"
 
@@ -37,6 +38,8 @@ enum FloorOpCode {
     FLOOR_QUEUE_POS_REQ  = 8,  // Floor Queue Position Request (UE→서버)
     FLOOR_QUEUE_POS_INFO = 9,  // Floor Queue Position Info    (서버→UE)
     FLOOR_ACK      = 10,  // Floor Ack               (양방향)
+    FLOOR_MEDIA_FLOW     = 0x0B, // Unicast Media Flow Control (UE→서버) — 자기 하향 미디어 중단/재개
+    FLOOR_QUEUED_CANCEL  = 0x0E, // Queued Floor Requests (양방향) — 대기 요청 취소/결과/통지
     FLOOR_RELEASE_MULTI  = 0x0F  // Floor Release Multi Talker (서버→UE 전용, Rel-16 multi-talker):
                                  //   동시 발언 중 한 명이 발언을 끝냈음을 나머지 참가자에게
                                  //   알린다(§8.2.14). 잔여 화자가 있으므로 Floor Idle 은 보내지
@@ -81,8 +84,28 @@ enum FloorFieldId {
     FF_FLOOR_INDICATOR= 13,
     FF_SSRC           = 14,
     FF_GRANTED_USERS  = 15,  // List of Granted Users (multi-talker, 문자열 리스트)
-    FF_SSRC_LIST      = 16   // List of SSRCs         (multi-talker, 화자 순서 동일)
+    FF_SSRC_LIST      = 16,  // List of SSRCs         (multi-talker, 화자 순서 동일)
+    FF_QUEUED_PURPOSE = 21,  // Queued Floor Requests Purpose (0=Cancel Request/1=Result/2=Notification)
+    FF_QUEUED_USERS   = 22,  // List of Queued Users (문자열 리스트)
+    FF_QUEUED_RESULT  = 23,  // Queued Floor Requests Result
+    FF_MEDIA_FLOW     = 24   // Media Flow Control Indicator (MSB=1 재개 / 0 중단)
 };
+
+// Queued Floor Requests Purpose (§8.2.3.23) / Result (§8.2.3.25) 값.
+enum FloorQueuedPurpose {
+    QFR_CANCEL_REQUEST = 0,
+    QFR_CANCEL_RESULT  = 1,
+    QFR_CANCEL_NOTIFY  = 2
+};
+enum FloorQueuedResult {
+    QFR_OK            = 0,   // 지정된(또는 전체) 대기 요청을 모두 제거
+    QFR_QUEUE_EMPTY   = 2,   // 대기열이 이미 비어 있음
+    QFR_NOT_QUEUED    = 3,   // 지정된 사용자들의 대기 요청이 없음
+    QFR_PARTIAL       = 5    // 일부 사용자의 대기 요청이 없음
+};
+
+// Media Flow Control Indicator (§8.2.3.26) — 값의 MSB(A 비트).
+#define FLOOR_MEDIA_RESUME_BIT 0x80
 
 // Source 필드 값 (§8.2.3.12) — Floor Ack 가 "누가 보낸 확인인지"를 싣는다.
 enum FloorSourceId {
@@ -202,9 +225,20 @@ public:
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
+    // 멤버 프로파일 (PTT_JOIN 확장 — cmp_media_api.md §7.4).
+    //   mcpttId: floor 메시지의 User ID/Granted Party 에 실을 **MCPTT ID(URI)**. 비면 sessionId.
+    //   queueing: 이 멤버가 SDP `mc_queueing` 을 협상했는지 — 미협상 멤버의 비선점 요청은
+    //             큐잉하지 않고 Deny #1 이다(TS 24.380 §6.3.5.4.4).
+    void setMemberProfile(const std::string& sessionId, const std::string& mcpttId, bool queueing);
+    // 호 성립 시 초기 발언권 부여 (SDP fmtp `mc_granted` 협상 결과 — TS 24.380 §6.3.4.2.2-3b).
+    //   발언자가 없고 floor 제어가 켜진 그룹에서만 성립한다. 부여했으면 true.
+    bool grantInitialFloor(const std::string& sessionId);
+
     // Floor Control Logic
     //   indicatorBits: 수신 REQUEST 의 Floor Indicator(emergency/imminent) 비트마스크(-1=없음).
-    void handleFloorRequest(const std::string& sessionId, unsigned int userId, int indicatorBits = -1);
+    //   reqPrio: 수신 REQUEST 의 Floor Priority(-1=미포함). 협상 상한(멤버 priority)으로 clamp 한다.
+    void handleFloorRequest(const std::string& sessionId, unsigned int userId, int indicatorBits = -1,
+                            int reqPrio = -1);
     void handleFloorRelease(const std::string& sessionId, unsigned int userId);
 
     // floor 정책 (PTT_GROUP_ADD/MODIFY payload — cmp_media_api.md §7.1).
@@ -218,8 +252,14 @@ public:
 
     // floor RTCP SRTCP 보호 키 (PTT_GROUP_ADD.floor_crypto — TS 33.180).
     //   key/salt/mki 는 디코드된 바이트열. 실패 시 err 를 채우고 false(평문 유지).
+    //   **그룹 단위 키**는 모든 멤버에게 같은 키를 쓰는 경우(멀티캐스트/MBMS MuSiK 대응)이고,
+    //   유니캐스트 floor 는 TS 33.180 §9.4 대로 **클라이언트별 CSK**(setMemberCrypto)가 정본이다.
     bool setFloorCrypto(const std::string& alg, const std::string& key, const std::string& salt,
                         const std::string& mki, std::string& err);
+    // 멤버별 floor 보호 키 (PTT_JOIN.floor_crypto — 클라이언트의 CSK/CSK-ID 로 유도된 값).
+    //   설정한 멤버의 floor 메시지는 그 키로만 보호·해제된다. 미설정 멤버는 그룹 키를 쓴다.
+    bool setMemberCrypto(const std::string& sessionId, const std::string& alg, const std::string& key,
+                         const std::string& salt, const std::string& mki, std::string& err);
     bool isFloorCryptoEnabled() { return _floorCrypto.enabled(); }
     // SRTCP 인증 실패/재전송으로 폐기한 floor 패킷 누적 (STATS floor_crypto_drop)
     long getFloorCryptoDrop() const { return _floorCryptoDrop.load(); }
@@ -283,7 +323,9 @@ public:
     //                            초과하면 Revoke cause #2(Media burst too long). 규격 기본 30초.
     //   t3: Stop talking grace — Revoke 후 Floor Release 를 기다리는 유예(그 동안 미디어 유지).
     //   t8: Floor Revoke       — 유예 중 Revoke 재전송 간격.
-    void setFloorTimers(int t1, int t2, int t3, int t8);
+    //   t7: Floor Idle         — Floor Idle 재송신 간격(0=비활성, C7=3회까지).
+    //   t20: Floor Granted     — 큐에서 승급한 화자에게 Granted 재송신 간격(첫 RTP 까지, C20=3회).
+    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1);
 
     // Floor 타이머 점검 (T1/T2/T3/T8) — PCmpServer::timeoutLoop 가 1초마다 호출한다.
     //   발언자 집합이 바뀌었으면 true.
@@ -312,6 +354,14 @@ private:
                         const std::string& excludeSessionId = "");
     void sendVideoToAll(const char* data, int len, const std::string& excludeSessionId, int slot);
     void sendToMember(const std::string& sessionId, const char* data, int len);
+    // 이 멤버의 floor 메시지에 적용할 SRTCP 컨텍스트 (멤버 키 > 그룹 키 > 평문=null).
+    PFloorCrypto* _cryptoFor(const std::string& sessionId);
+    // 멤버 전용 키를 가진 멤버가 하나라도 있는지 (미식별 소스의 복호 시도 여부 판단)
+    bool _anyMemberCrypto() const;
+    // 수신 floor 패킷 해제 — sessionId 를 알면 그 멤버 키로, 모르면(NAT 미식별) 그룹 키와
+    //   각 멤버 키를 차례로 시도한다. 성공 시 out/outLen 에 평문을 담고 true.
+    bool _unprotectFloor(const std::string& sessionId, const char* in, int inLen,
+                         char* out, int outCap, int& outLen);
     // 미협상 소스/미등록 멤버 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
     void _dropSrc(const char* what, const std::string& memberId, const std::string& ip, int port);
     void broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, const std::string& speakerId);
@@ -329,9 +379,16 @@ private:
     void _sendFloorAck(const std::string& sessionId, int ackedSubtype);
     // 동시 발언 중 한 화자의 발언 종료를 나머지 참가자에게 통지 (§8.2.14 Floor Release Multi Talker).
     void _sendReleaseMultiTalker(const std::string& sessionId, unsigned int ssrc);
+    // floor 메시지에 실을 사용자 식별자 — MCPTT ID(URI)가 있으면 그것, 없으면 sessionId (§8.2.3.8).
+    const std::string& _userIdOf(const std::string& sessionId) const;
+    // Unicast Media Flow Control(0x0B) 수신 — 이 멤버의 하향 미디어 중단/재개 (§6.3.4.4.14~15).
+    void _handleMediaFlowControl(const std::string& sessionId, const ParsedFloor& msg);
+    // Queued Floor Requests(0x0E) 수신 — 대기 요청 취소 처리 + 결과/통지 회신 (§6.3.4.4.13).
+    void _handleQueuedCancel(const std::string& sessionId, unsigned int ssrc, const ParsedFloor& msg);
     // 화자에게 GRANTED(Duration+Granted Party+Indicator) 송신 + 전체 TAKEN + 녹취 시작.
+    //   fromQueue=true 면 대기열 승급이라 T20(Granted 재송신)을 건다.
     void _grantFloorTo(const std::string& sessionId, unsigned int ssrc, int prio,
-                       bool preempt, const std::string& prevOwner);
+                       bool preempt, const std::string& prevOwner, bool fromQueue = false);
     // 화자 1명 해제(RELEASE/REVOKE/이탈) 후 상태 수렴: 여유 정원만큼 큐 승급 →
     //   화자가 남아 있으면 잔여 화자 TAKEN 갱신, 아무도 없으면 IDLE + 녹취 세그먼트 종료.
     void _advanceFloorOrIdle();
@@ -374,6 +431,13 @@ private:
     int  _t2StopTalkSec = 30;       // T2 Stop talking — Granted Duration 값이기도 하다
     int  _t3GraceSec    = 3;        // T3 Stop talking grace (audio cut-in 이면 0)
     int  _t8RevokeSec   = 1;        // T8 Floor Revoke 재전송 간격
+    int  _t7IdleSec     = 0;        // T7 Floor Idle 재송신 간격 (0=비활성)
+    int  _t20GrantSec   = 1;        // T20 Floor Granted 재송신 간격 (큐 승급 화자 한정)
+    // C7/C20 재송신 상한 (§6.3.4.3.4 / §6.3.4.4.9) — 도달 보장용이라 작게 잡는다.
+    static const int kIdleResendMax  = 3;
+    static const int kGrantResendMax = 3;
+    int64_t _idleSinceUsec = 0;     // 마지막 Floor Idle 송신 시각 (0=Idle 상태 아님)
+    int     _idleResendLeft = 0;    // 남은 Floor Idle 재송신 횟수 (C7)
 
     std::string _groupId;
     
@@ -411,6 +475,12 @@ private:
         int tePtOut = 0;    // egress telephone-event PT (user_te_pt)
         int srcTePt = 0;    // ingress telephone-event PT (user_src_te_pt, TE 분류 기준)
         std::string codec;  // 협상 오디오 코덱 (user_codec) — 녹취 세그먼트 메타용
+        std::string mcpttId;  // MCPTT ID(URI) — floor User ID/Granted Party 값 (비면 sessionId)
+        bool queueing = true; // SDP mc_queueing 협상 여부 — 미협상이면 비선점 요청은 Deny #1
+        bool mediaStopped = false;  // Unicast Media Flow Control(0x0B)로 하향 미디어 중단 요청됨
+        // 이 멤버 전용 floor SRTCP 컨텍스트 (CSK 기반). null 이면 그룹 키를 쓴다.
+        //   Peer 는 map 에 복사 대입되므로 shared_ptr 로 들고 있는다(PFloorCrypto 는 mutex 보유).
+        std::shared_ptr<PFloorCrypto> crypto;
         bool natLatched = false;       // audio 소스 추종 학습 완료 (관측용)
         bool natLatchedVideo = false;
         int64_t followLogUsec = 0;     // dest follow 로그 rate-limit (소스 경합 시 폭주 방지)
@@ -440,6 +510,10 @@ private:
         int     revokeCause = 0;
         int64_t revokeSentUsec = 0;      // 마지막 Revoke 송신 시각 — T8 재전송 기준
         int64_t revokeDeadlineUsec = 0;  // T3 만료 시각 — 넘기면 강제 회수
+        // T20(Floor Granted) — 대기열에서 승급한 화자에게만 건다(§6.3.4.4.2-2). 단말이 Granted 를
+        //   놓치면 발언 기회가 통째로 사라지므로 첫 RTP 가 올 때까지 C20 회 재송신한다.
+        int     grantRetxLeft = 0;
+        int64_t grantSentUsec = 0;
     };
     std::vector<Talker> _talkers;   // grant 순서 — front() 가 대표 화자
     bool _floorControl = true;      // floor 제어 유무 (off = full-duplex)

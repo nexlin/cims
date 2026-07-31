@@ -27,15 +27,18 @@ import time
 RTCP_PT_APP = 204
 # TS 24.380 Table 8.2.2-1 subtype
 REQUEST, GRANT, TAKEN, DENY, RELEASE, IDLE, REVOKE = 0, 1, 2, 3, 4, 5, 6
-QUEUE_POS_REQ, QUEUE_POS_INFO, ACK, RELEASE_MULTI = 8, 9, 10, 0x0F
+QUEUE_POS_REQ, QUEUE_POS_INFO, ACK = 8, 9, 10
+FLOOR_MEDIA_FLOW, QUEUED_CANCEL, RELEASE_MULTI = 0x0B, 0x0E, 0x0F
 OPN = {REQUEST: "REQUEST", GRANT: "GRANT", TAKEN: "TAKEN", DENY: "DENY", RELEASE: "RELEASE",
        IDLE: "IDLE", REVOKE: "REVOKE", QUEUE_POS_REQ: "QPOS_REQ", QUEUE_POS_INFO: "QPOS_INFO",
-       ACK: "ACK", RELEASE_MULTI: "RELEASE_MULTI"}
+       ACK: "ACK", FLOOR_MEDIA_FLOW: "MEDIA_FLOW", QUEUED_CANCEL: "QUEUED_CANCEL",
+       RELEASE_MULTI: "RELEASE_MULTI"}
 ACK_REQ_BIT = 0x10          # subtype 첫 비트 = Acknowledgment is required (§8.2.2)
 FF_PRIORITY, FF_DURATION, FF_CAUSE, FF_QUEUE_INFO = 0, 1, 2, 3
 FF_GRANTED_PARTY, FF_PERMISSION = 4, 5
 FF_USER_ID, FF_MSG_SEQ, FF_SOURCE, FF_MSG_TYPE, FF_INDICATOR = 6, 8, 10, 12, 13
 FF_SSRC, FF_GRANTED_USERS, FF_SSRC_LIST = 14, 15, 16
+FF_QUEUED_PURPOSE, FF_QUEUED_USERS, FF_QUEUED_RESULT, FF_MEDIA_FLOW = 21, 22, 23, 24
 FI_EMERGENCY, FI_DUAL, FI_MULTI = 0x1000, 0x0200, 0x0080
 
 PASS, FAIL = [], []
@@ -792,6 +795,163 @@ def main():
     check("GRANT" in ops(B.drain_floor()), "먼저 대기한 B 가 승급")
     remove(g13)
     A.close(); B.close(); C.close()
+
+    print("\n[14] 멤버 프로파일 — MCPTT ID·큐잉 미협상·mc_granted·1인 세션")
+    g14 = f"{a.prefix}_profile"
+    A = Member("A", bp + 134, 0xE001)
+    B = Member("B", bp + 138, 0xE002)
+    r = add_group(g14, members="A:5:participant,B:5:participant",
+                  floor_timers={"t1_end_rtp": 30, "t2_stop_talk": 0})
+    fp = payload(r).get("floor_port")
+    # A: MCPTT ID(URI) + mc_granted(초기 발언권), B: 큐잉 미협상
+    join(g14, A, user_uri="sip:A@mcptt.example.org", granted=1)
+    time.sleep(0.3)
+    ga = A.drain_floor()
+    check("GRANT" in ops(ga), f"mc_granted 멤버는 참가 시 초기 발언권 (A={ops(ga)})")
+    join(g14, B, queueing=0)
+    time.sleep(0.3)
+    gb = B.drain_floor()
+    # B 는 뒤늦게 합류했으므로 A 의 발언을 알리는 TAKEN 이 아직 없다 — B 가 요청해 DENY 를 받고,
+    #   그 다음 A 가 재요청하면 B 에게 TAKEN 이 간다. MCPTT ID 는 그 TAKEN 으로 확인한다.
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc))
+    time.sleep(0.3)
+    gb = B.drain_floor()
+    deny = [m for m in gb if m["op_base"] == DENY]
+    check(bool(deny) and "QPOS_INFO" not in ops(gb), f"큐잉 미협상 멤버는 DENY (B={ops(gb)})")
+    if deny:
+        check(struct.unpack(">H", deny[0]["fields"][FF_CAUSE])[0] == 1,
+              "DENY cause #1 (Another MCPTT client has permission)")
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))      # 화자 재요청 → B 에게 TAKEN 재통지는 없으나
+    A.send_floor(a.cmp, fp, rel_pkt("A", A.ssrc))      # A 해제 후 다시 잡으면 B 가 TAKEN 을 받는다
+    time.sleep(0.3); B.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.3)
+    tk = [m for m in B.drain_floor() if m["op_base"] == TAKEN]
+    check(bool(tk), "재발언 시 B 에게 TAKEN")
+    if tk:
+        check(tk[-1]["fields"].get(FF_GRANTED_PARTY, b"").decode(errors="ignore").rstrip("\x00")
+              == "sip:A@mcptt.example.org", "TAKEN Granted Party = MCPTT ID(URI)")
+    remove(g14)
+    A.close(); B.close()
+
+    # 1인 세션 — Deny #3 (Only one participant)
+    g14b = f"{a.prefix}_solo"
+    A = Member("A", bp + 142, 0xE101)
+    r = add_group(g14b, members="A:5:participant")
+    fp = payload(r).get("floor_port")
+    join(g14b, A)
+    A.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.3)
+    ga = A.drain_floor()
+    deny = [m for m in ga if m["op_base"] == DENY]
+    check(bool(deny), f"1인 세션 요청은 DENY (A={ops(ga)})")
+    if deny:
+        check(struct.unpack(">H", deny[0]["fields"][FF_CAUSE])[0] == 3, "DENY cause #3 (Only one participant)")
+    remove(g14b)
+    A.close()
+
+    print("\n[15] 0x0B 미디어 흐름 제어 · 0x0E 대기 요청 취소")
+    g15 = f"{a.prefix}_msgs"
+    A = Member("A", bp + 146, 0xF001)
+    B = Member("B", bp + 150, 0xF002)
+    C = Member("C", bp + 154, 0xF003)
+    r = add_group(g15, members="A:5:participant,B:5:participant,C:5:participant",
+                  floor_timers={"t1_end_rtp": 30, "t2_stop_talk": 0})
+    fp = payload(r).get("floor_port")
+    ports = payload(r).get("member_ports") or {}
+    for m in (A, B, C):
+        join(g15, m)
+        m.drain_floor()
+    A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))
+    time.sleep(0.3)
+    for m in (A, B, C):
+        m.drain_floor()
+    aport = (ports.get("A") or {}).get("port")
+
+    # 0x0B — B 가 하향 미디어 중단 요청 → B 만 수신 끊김, C 는 계속 수신
+    B.send_floor(a.cmp, fp, floor_build(FLOOR_MEDIA_FLOW, B.ssrc,
+                                        [(FF_USER_ID, b"B"), (FF_MEDIA_FLOW, b"\x00\x00")]))
+    time.sleep(0.3)
+    B.drain_rtp(); C.drain_rtp()
+    for i in range(6):
+        A.send_rtp(a.cmp, aport, seq=100 + i)
+        time.sleep(0.05)
+    time.sleep(0.2)
+    nb, nc = B.drain_rtp(), C.drain_rtp()
+    check(nb == 0 and nc > 0, f"media stop 요청 멤버만 하향 중단 (B={nb} C={nc})")
+    B.send_floor(a.cmp, fp, floor_build(FLOOR_MEDIA_FLOW, B.ssrc,
+                                        [(FF_USER_ID, b"B"), (FF_MEDIA_FLOW, b"\x80\x00")]))
+    time.sleep(0.3)
+    for i in range(6):
+        A.send_rtp(a.cmp, aport, seq=200 + i)
+        time.sleep(0.05)
+    time.sleep(0.2)
+    check(B.drain_rtp() > 0, "media resume 요청 후 하향 재개")
+
+    # 0x0E — B/C 가 대기열에 들어간 뒤 C 가 자기 요청 취소
+    B.send_floor(a.cmp, fp, req_pkt("B", B.ssrc))
+    time.sleep(0.2)
+    C.send_floor(a.cmp, fp, req_pkt("C", C.ssrc))
+    time.sleep(0.3); B.drain_floor(); C.drain_floor()
+    cancel = floor_build(QUEUED_CANCEL, C.ssrc,
+                         [(FF_QUEUED_PURPOSE, struct.pack(">H", 0)),
+                          (FF_QUEUED_USERS, bytes([1, 1]) + b"C")])
+    C.send_floor(a.cmp, fp, cancel)
+    time.sleep(0.4)
+    gc = C.drain_floor()
+    res = [m for m in gc if m["op_base"] == QUEUED_CANCEL
+           and struct.unpack(">H", m["fields"].get(FF_QUEUED_PURPOSE, b"\xff\xff"))[0] == 1]
+    check(bool(res), f"Cancel Result(purpose=1) 회신 (C={ops(gc)})")
+    if res:
+        check(struct.unpack(">H", res[0]["fields"][FF_QUEUED_RESULT])[0] == 0, "result=0 (제거 성공)")
+    check(len(gc) == 1, f"요청자에게는 Notification 없이 Result 만 (수신 {len(gc)}건)")
+    A.send_floor(a.cmp, fp, rel_pkt("A", A.ssrc))
+    time.sleep(0.4)
+    check("GRANT" in ops(B.drain_floor()), "취소되지 않은 대기자 B 는 정상 승급")
+    check("GRANT" not in ops(C.drain_floor()), "취소한 C 는 승급 대상이 아니다")
+    remove(g15)
+    A.close(); B.close(); C.close()
+
+    print("\n[16] 멤버별 floor 키(CSK) — leg 마다 다른 키로 보호/해제")
+    if not HAVE_CRYPTO:
+        print("    (python cryptography 미설치 — SKIP)")
+    else:
+        g16 = f"{a.prefix}_csk"
+        keyA = bytes.fromhex("A1F97A0D3E018BE0D64FA32C06DE4139")
+        saltA = bytes.fromhex("1EC675AD498AFEEBB6960B3AABE6")
+        keyB = bytes.fromhex("B2F97A0D3E018BE0D64FA32C06DE4139")
+        saltB = bytes.fromhex("2EC675AD498AFEEBB6960B3AABE6")
+        A = Member("A", bp + 158, 0x1601, crypto=Srtcp(keyA, saltA))
+        B = Member("B", bp + 162, 0x1602, crypto=Srtcp(keyB, saltB))
+        r = add_group(g16, members="A:5:participant,B:5:participant",
+                      floor_timers={"t1_end_rtp": 30, "t2_stop_talk": 0})
+        fp = payload(r).get("floor_port")
+        check(status(r) == "OK", f"ADD (그룹 키 없음) ok ({status(r)} {code(r)})")
+        def fc(k, s):
+            return {"alg": "AES_CM_128_HMAC_SHA1_80",
+                    "key": base64.b64encode(k).decode(), "salt": base64.b64encode(s).decode()}
+        rj = join(g16, A, floor_crypto=fc(keyA, saltA))
+        check(status(rj) == "OK", f"JOIN A + 멤버 키 ({status(rj)} {code(rj)})")
+        join(g16, B, floor_crypto=fc(keyB, saltB))
+        A.drain_floor(); B.drain_floor()
+        st0 = payload(ctl.send("STATS")).get("detail", {}).get("floor_crypto_drop", 0)
+
+        A.send_floor(a.cmp, fp, req_pkt("A", A.ssrc))     # A 키로 보호
+        time.sleep(0.35)
+        ga, gb = A.drain_floor(), B.drain_floor()
+        check("GRANT" in ops(ga), f"A 는 자기 키로 GRANT 복호 (A={ops(ga)})")
+        check("TAKEN" in ops(gb), f"B 는 **자기 키**로 TAKEN 복호 (B={ops(gb)})")
+
+        # B 가 A 의 키로 보호해 보내면 서버가 B 의 키로 풀지 못해 폐기된다
+        wrong = Srtcp(keyA, saltA).protect(req_pkt("B", B.ssrc))
+        B.fsock.sendto(wrong, (a.cmp, fp))
+        time.sleep(0.35)
+        check(not [m for m in B.drain_floor() if m["op_base"] == GRANT], "다른 멤버 키로 보낸 요청은 무시")
+        st1 = payload(ctl.send("STATS")).get("detail", {}).get("floor_crypto_drop", 0)
+        check(st1 > st0, f"floor_crypto_drop 증가 ({st0} → {st1})")
+        remove(g16)
+        A.close(); B.close()
 
     print("\n[10] dual — 큐 대기자는 override 자리를 채우지 않는다")
     g10 = f"{a.prefix}_dualq"
