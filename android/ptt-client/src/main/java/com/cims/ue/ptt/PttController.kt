@@ -517,11 +517,19 @@ class PttController(
             }
             publishRosters()
         }
+        Log.i(TAG, "conference 구독 ${if (on) "발행" else "해지"} $groupId")
         runCatching { sip.subscribeConference(groupAor(groupId), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
             .onFailure {
                 Log.w(TAG, "conference 구독($on) 실패 $groupId: ${it.message}")
                 synchronized(lock) { if (on) pendingRosters.remove(groupId) }
             }
+    }
+
+    /** 특정 그룹의 구독 확인만 무효화 — 다음 [syncRosterSubs] 가 재확인(SUBSCRIBE)을 발행한다.
+     *  해지가 아니다. 구독이 살아 있으면 in-dialog 갱신으로 흡수되므로 여분 트래픽이 거의 없다. */
+    private fun invalidateRosterConfirm(groupId: String) {
+        if (groupId.isBlank()) return
+        synchronized(lock) { confirmedRosters.remove(groupId); pendingRosters.remove(groupId) }
     }
 
     /** 구독 확인 상태 일괄 초기화 — 서버가 우리 상태를 잃었다고 판단했을 때만 호출.
@@ -585,9 +593,16 @@ class PttController(
         if (regState.value !is RegState.Registered) return
         val want = desiredAffiliations()
         val have = synchronized(lock) { confirmedRosters.keys + pendingRosters.keys }
+        val drop = have - want
+        if (drop.isNotEmpty()) {
+            // 해지는 편성에서 빠질 때만 정당하다 — 오해지는 로스터를 조용히 죽이므로 근거를 남긴다.
+            Log.i(TAG, "syncRosterSubs 해지 대상=$drop (want=$want have=$have " +
+                    "groups=${_groups.value.map { bareId(it.uri) }} " +
+                    "joined=${channelStore?.joined} sel=${_selectedGroup.value})")
+        }
         // 발행 여부 판단은 subscribeRoster 단일 지점에 맡긴다 — 미확인·확인대기 만료면 재발행한다.
         want.forEach { subscribeRoster(it, true) }
-        (have - want).forEach { subscribeRoster(it, false) }
+        drop.forEach { subscribeRoster(it, false) }
     }
 
     private fun publishRosters() {
@@ -620,6 +635,10 @@ class PttController(
             audioRouter?.setInCall(false)
             sip.setDeviceAudioBoost(1f, 1f)
         }
+        // 세션 종료 시점은 서버측 구독이 사라진 채 발견된 실측 지점이다(단말이 구독은 살아있다고
+        // 믿는 동안 서버엔 없어 로스터가 죽는다). 확인을 무효화해 아래 sync 가 즉시 재확인하게 한다 —
+        // 살아 있으면 in-dialog 갱신으로 흡수되므로 비용이 없고, 죽었으면 여기서 되살아난다.
+        invalidateRosterConfirm(gid)
         syncRosterSubs()   // 이탈해도 편성 채널이면 구독 유지 — 인원수는 계속 보여야 한다
         _status.value = "[$gid] 그룹콜 종료"
         emit(PttEventKind.LEAVE, gid)
@@ -830,6 +849,7 @@ class PttController(
         val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: return }
         if (callId >= 0) sip.hangup(callId) else {
             synchronized(lock) { sessionMap.remove(groupId)?.close() }
+            invalidateRosterConfirm(groupId)
             syncRosterSubs()   // 편성 채널이면 구독 유지 (인원수 표시 계속)
             publish()
         }
