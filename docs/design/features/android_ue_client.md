@@ -355,7 +355,7 @@ media distributor 로서 화자별 스트림을 **슬롯별 SSRC** 로 분리해
 
 | # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
 |---|---|---|---|---|
-| U10 | **SSRC 별 병렬 수신·로컬 믹싱** — 같은 RTP 포트로 오는 N개 스트림을 SSRC 로 갈라 지터버퍼·디코더를 병렬 구동하고 합성 재생 | §4.2.2, §6.2.4.3.4 | 슬롯별 egress SSRC(슬롯0=종전 고정, 슬롯N=별도 공간)로 분리 송신 | ✗ **미구현 — 유일한 잔여 항목.** 화자→SSRC 매핑은 이미 준비돼 있다(`Session.talkerSsrc`, `FloorClient.talkers`). 설계·선택지 정본 = [mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md) |
+| U10 | **SSRC 별 병렬 수신·로컬 믹싱** — 같은 RTP 포트로 오는 N개 스트림을 SSRC 로 갈라 지터버퍼·디코더를 병렬 구동하고 합성 재생 | §4.2.2, §6.2.4.3.4 | 슬롯별 egress SSRC(슬롯0=종전 고정, 슬롯N=별도 공간)로 분리 송신 | ✅ 구현 — pjproject 패치 `[2-14]`(`stream.c` 내부 SSRC 디먹스, `get_frame` PCM 합산, RTP 무활동 회수). 네이티브가 도착 SSRC 로 서브스트림을 자동 생성/회수하므로 SWIG·앱 불변(`Session.talkerSsrc` 는 발언 스트립 UI 에만 사용). 실기기 3대 실호 검증 대기(WSL2 빌드). 정본 = [mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md) |
 | U11 | **List of Granted Users(15) + List of SSRCs(16)** — 동시 발언 시 Taken 이 싣는 화자 목록. 순서가 서로 대응한다 | §8.2.3.17~18, §6.3.4.4.7a | 화자 2명 이상이면 단일 Taken 에 두 리스트를 실어 송신 | ✅ `FloorMessage.talkers` 가 리스트(없으면 Granted Party+SSRC)에서 화자 집합을 만들고, `FloorClient.talkers` StateFlow + `GroupCallState.talkers` 로 UI 까지 전달. 발언 스트립·채널 목록·구성원 명부가 전원을 표시 |
 | U12 | **Floor Release Multi Talker(0x0F) 수신** — 동시 발언 중 한 화자의 종료 통지. 해당 화자만 목록/재생에서 제거(Idle 아님) | §8.2.14 | 잔여 화자가 있으면 Idle 대신 0x0F 를 나머지에게 송신. **단말이 이 subtype 을 보내면 규격 위반이라 서버가 무시** | ✅ `FloorEvent.TalkerLeft` — User ID(없으면 SSRC)로 그 화자만 집합에서 제거하고, 잔여 화자가 있으면 LISTENING 유지(내가 남아 있으면 SPEAKING). 송신은 하지 않는다 |
 | U13 | **Floor Indicator I-bit(0x0080)/G-bit(0x0200)** — multi-talker/dual floor 표시. 화자 목록 UI 제공 권장 | §8.2.3.15, §6.2.4.3.3-4 | 정책·화자 수에 따라 설정 | ✅ `GroupCallState.floorIndicator` 보관, 화자 2명 이상이면 발언 스트립에 전원 명단(+G-bit 면 "동시 발언(우선)"), 목록/칩에는 "외 N" |
@@ -372,15 +372,15 @@ media distributor 로서 화자별 스트림을 **슬롯별 SSRC** 로 분리해
 
 #### 남은 순서
 
-**floor 평면은 U10 을 빼고 모두 반영했다** — U1·U2·U3·U6·U7·U11·U12·U13·U15·U16 완료,
-U8 은 파싱·전달까지(소비처가 U10), U14 는 단말 절반
+**floor 평면과 미디어 평면(U10) 을 반영했다** — U1·U2·U3·U6·U7·U11·U12·U13·U15·U16 완료,
+U8 은 파싱·전달까지(소비처가 U10), U10 은 네이티브 반영(실기기 검증 대기), U14 는 단말 절반
 (`floor/{FloorControl,FloorCodec,FloorClient}.kt` · `PttController` · `ui/*.kt` ·
 `audio/PttFeedback.kt`). 코덱 계약은 `ptt-client/src/test/java/.../FloorCodecTest.kt` 가 지킨다 —
 ack 요구 변종, Floor Ack 의 Source/Message Type, Priority 생략, Release G-bit,
 Taken 신규 필드(Permission·MSN·SSRC), 화자 집합 파생, 0x0F, 대기열 취소, 미지 필드 건너뛰기.
 
-1. **U10 — SSRC 별 병렬 수신·믹싱**(아래 설계). 남은 것 중 유일하게 큰 작업이고, dual/multi
-   실호 검증이 막혀 있는 원인이다(현재는 CMP 프로브로만 검증 —
+1. **U10 실호 검증** — 네이티브 반영은 끝났다(패치 `[2-14]`). WSL2 빌드로 `.so` 를 투입한 뒤
+   실기기 3대(A·B 발언·C 청취)로 dual/multi 를 검증한다(현재 서버측만 CMP 프로브로 검증 —
    [../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
 2. **U14 의 서버 절반** — CSP 가 단말 SDP 의 `a=fmtp:MCPTT …` 를 파싱해 `PTT_JOIN` 의
    `queueing`/`max_priority`/`granted` 로 CMP 에 넘겨야 협상이 실제로 성립한다(CSP 담당).

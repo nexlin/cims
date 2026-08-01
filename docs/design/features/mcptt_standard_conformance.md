@@ -79,15 +79,16 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 > / Unicast Media Flow Control / Queued Floor Requests(취소)** —
 > 정본 [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7~§7.8.
 >
-> **단말 정합 대기**: 규격상 **믹싱은 단말의 media mixer 몫**이다(TS 24.380 §4.2.2, §6.2.4.3.4
+> **단말 정합**: 규격상 **믹싱은 단말의 media mixer 몫**이다(TS 24.380 §4.2.2, §6.2.4.3.4
 > NOTE — 서버는 media distributor 로서 화자별 스트림을 SSRC 로 구분해 전달하고, 믹싱 방식은
-> out of scope). 따라서 dual/multi-talker 를 실호로 쓰려면 UE 가 Floor Indicator 의
-> Multi-talker(0x0080)/Dual floor(0x0200) 비트와 Floor Release Multi Talker(subtype 0x0F)를
-> 해석하고 **슬롯별 SSRC 로 오는 동시 스트림을 병렬 디코드·합성 재생**해야 한다. 이 밖의 단말
-> 구현 항목(ack 요구 변종·Revoke 응답·Taken 신규 필드·SDP fmtp·floor SRTCP)은
-> [android_ue_client.md](android_ue_client.md) §5.4 에 U1~U18 로 정리했다. 현재 cspsim·Android
-> UE 는 단일 화자 전제라 서버측만 CMP 프로브로 검증돼 있다
-> ([../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
+> out of scope). Android UE 는 Floor Indicator 의 Multi-talker(0x0080)/Dual floor(0x0200) 비트와
+> Floor Release Multi Talker(subtype 0x0F)를 해석하고, **슬롯별 SSRC 로 오는 동시 스트림을 병렬
+> 디코드·합성 재생**하는 미디어 평면(U10)을 반영했다 — pjproject 패치로 `pjmedia_stream` 안에서
+> SSRC 를 디먹스해 `get_frame` 에서 PCM 을 합산한다(정본 [mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md)).
+> 이 밖의 단말 구현 항목(ack 요구 변종·Revoke 응답·Taken 신규 필드·SDP fmtp·floor SRTCP)은
+> [android_ue_client.md](android_ue_client.md) §5.4 에 U1~U18 로 정리했다. 서버측은 CMP 프로브로
+> 검증돼 있고([../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」),
+> 단말측 dual/multi 실호는 WSL2 빌드 + 실기기 3대 검증이 남아 있다(cspsim 은 단일 화자 전제).
 > 마찬가지로 CSP 가 `floor_policy`/`group_type:"private"` 를 아직 발행하지 않는다(Call Control 파트).
 
 ### R2-1. Floor Control — 구현 항목의 규격 편차

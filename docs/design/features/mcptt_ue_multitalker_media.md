@@ -4,8 +4,9 @@
 [android_ue_client.md §5.4](android_ue_client.md#54-서버-규격-정합에-따른-단말-구현-요구사항-ts-24380) 의
 **U10** 이 이 문서의 대상이며, 나머지 U 항목(floor 평면)은 모두 반영을 마쳤다.
 
-작업에는 **pjproject 소스와 안드로이드 빌드 환경**이 필요하다 — 개발 서버(media01)에는 둘 다 없다
-(pjsip `.so` 는 WSL2 에서 빌드해 투입하는 구조, `android/` 에는 네이티브 빌드가 없다).
+구현은 `android/docs/scripts/m1_build_pjsip.sh` 의 pjproject 패치 `[2-14]` 로 반영돼 있다(§5).
+빌드·실기기 검증에는 **WSL2 네이티브 빌드 환경**이 필요하다 — pjsip `.so` 는 WSL2 에서 빌드해
+`android/core/src/pjsua2/jniLibs/` 로 투입하는 구조이고, `android/` 에는 네이티브 빌드가 없다.
 
 ---
 
@@ -58,8 +59,10 @@ N개 그룹 통화의 오디오가 이미 브리지에서 섞여 나온다(`setC
 
 ### A. pjmedia 에 SSRC 디먹스 추가 — **권고**
 
-하나의 `pjmedia_transport` 아래에 SSRC → 서브스트림 테이블을 두고, 새 SSRC 가 오면 서브스트림
-(지터버퍼 + 디코더)을 만들어 conference bridge 슬롯에 붙인다. 믹싱은 브리지가 한다.
+`pjmedia_stream` 안에 SSRC → 서브스트림 테이블을 두고, 첫 SSRC 는 기존 경로(primary)로 그대로
+두고 두 번째 이후 SSRC 는 서브스트림(지터버퍼 + 디코더)으로 갈라 디코드한 뒤 `get_frame` 에서
+PCM 을 합산(믹싱)한다. 스트림은 이미 믹싱된 PCM 한 포트를 conference bridge 에 내므로 브리지
+포트·AudioTrack 은 1개로 유지된다. (구현 상세 = §5)
 
 - 규격 그대로다 — TS 24.380 §6.2.4.3.4 NOTE: *"RTP media packets can be received from multiple
   sources … The MCPTT client can differentiate between the different sources using the **SSRC** …
@@ -101,33 +104,49 @@ pjsua 는 통화당 오디오 스트림을 여러 개 지원한다 — 각 스�
 따른다. C 는 가장 싸지만 ①에 어긋나고, B 는 ①은 만족하나 U10 하나를 위해 검증된 미디어 스택을
 버리는 대가가 크다.
 
-## 5. A 안 구현 설계
+## 5. 구현 — `pjmedia_stream` 내부 SSRC 디먹스
 
-- **패치 위치**: `android/docs/scripts/m1_build_pjsip.sh` 에 다른 네이티브 수정과 같은 형식으로
-  번호를 붙여 넣는다(그 스크립트가 pjproject 패치의 정본).
-- **디먹스 지점**: `pjmedia_transport` 어댑터로 RX 를 가로채 SSRC 별로 서브스트림에 배달한다.
-  기존 스트림(슬롯 0 = 종전 고정 SSRC)은 지금 경로 그대로 두어 **단일 화자 동작이 바뀌지 않게**
-  한다 — 슬롯 1 이상이 나타날 때만 서브스트림을 만든다.
-- **브리지 결선**: 서브스트림마다 conference bridge 포트를 만들어 스피커 슬롯에 connect.
-  채널별 수신 음량(`adjustRxLevel`)은 서브스트림 전체에 같은 값을 적용한다.
-- **서브스트림 정리**: RTP 타임아웃이 아니라 **floor 이벤트 기준**으로 건다 —
-  `FloorEvent.TalkerLeft`(0x0F)에서 그 화자의 SSRC, `FloorEvent.Idle` 에서 전부.
-  floor 평면이 이미 정확한 시점을 주므로 타임아웃 추정이 불필요하다.
-- **상한**: 서버 정원과 맞춰 `MCPTT_MAX_TALKER_SLOTS`(8) 를 넘지 않게 한다.
-- **SWIG**: 앱이 화자별 SSRC 를 네이티브로 내려보내야 하면 인터페이스 추가가 필요하다.
-  가능하면 **SSRC 를 앱이 알려주지 않고 네이티브가 도착 SSRC 로 자동 생성**하는 형태로 두어
-  SWIG 변경을 피한다(floor 이벤트는 정리 트리거로만 쓴다).
+**패치**: `android/docs/scripts/m1_build_pjsip.sh` `[2-14]`(멱등 `git apply`) —
+pjproject `pjmedia/src/pjmedia/stream.c` + `stream_imp_common.c`. 앱(Kotlin)·SWIG 는 바뀌지
+않는다. 네이티브 상태는 `struct cims_mt_sub`(서브스트림 테이블)과 `cims_mt_*` 함수로 모인다.
+
+- **디먹스 지점** — `on_rx_rtp`(RX/ioqueue 스레드). RTP 헤더 SSRC 를 보고:
+  - **첫 SSRC = primary** 로 확정하고 기존 단일 화자 경로 그대로 흘려보낸다(지터버퍼·디코더·RTP
+    세션 불변). CMP 의 슬롯0 고정 SSRC 가 여기에 해당한다.
+  - 이후 **다른 SSRC = secondary 화자** → 그 화자의 서브스트림에 넣고 즉시 반환한다. primary RTP
+    세션에는 넣지 않으므로 SSRC 변경(`PJMEDIA_RTP_ESESSRESTART`) 지터버퍼 리셋이 나지 않는다.
+  - 상한 초과 SSRC 는 드롭한다.
+- **서브스트림** — secondary 화자마다 **자체 지터버퍼 + 디코더**. 슬롯(지터버퍼·버퍼)은 스트림
+  생성 시 `MCPTT_MAX_TALKER_SLOTS`(8) − primary = **7 개 선할당**(RX 경로에서 지터버퍼 생성/파괴
+  회피)하고, 디코더(AMR-WB MediaCodec)는 **실제 화자가 나타날 때 지연 생성·재사용**한다 — 무거운
+  코덱 인스턴스를 동시 화자 수만큼만 연다.
+- **믹싱** — `get_frame`(오디오 스레드). primary PCM 을 만든 뒤 활성 서브스트림을 각각 디코드해
+  PCM 을 **포화 합산**한다. 스트림은 **이미 믹싱된 PCM 한 포트**를 conference bridge 에 내므로
+  브리지 포트·AudioTrack·`adjustRxLevel` 대상이 1개로 유지되고, 채널별 수신 음량은 합산 결과
+  전체에 같은 값이 적용된다. 활성 서브스트림이 없으면 no-op — **단일 화자 동작이 바뀌지 않는다.**
+- **정리(회수)** — **RTP 무활동** 기준. 어떤 secondary SSRC 로 `CIMS_MT_IDLE_FRAMES`(100 프레임,
+  20ms 기준 ≈2s) 동안 재생할 프레임이 없으면 슬롯을 반납한다(코덱·지터버퍼는 재사용 위해 파괴하지
+  않는다). floor 가 화자를 재통지하므로 다음 패킷에 즉시 재바인딩된다.
+  - floor 이벤트(0x0F/Idle)를 정리 트리거로 쓰지 **않는다** — 미디어를 floor 로 게이팅하는 권위는
+    **CMP(media distributor)에 있기 때문**이다. CMP 는 발언권 있는 화자만 egress 로 중계하므로
+    (`PMcpttGroup.cpp` 중계 자격 판정) 화자가 발언권을 놓으면 그 화자의 egress 가 멈추고, 해제 후
+    오류 RTP 도 단말에 도달하지 않는다. 단말의 RTP 무활동 회수는 **서버측 T1(End of RTP media)**
+    이 무수신으로 발언 종료를 판정하는 것과 대칭이며, floor→네이티브 정리 훅(SWIG)·앱 연동이
+    불필요하다. floor 평면은 발언 스트립 UI(`Session.talkerSsrc`)에만 쓴다.
+- **상한** — `MCPTT_MAX_TALKER_SLOTS`(8) − primary = 7 secondary. 서버 정원과 일치한다.
 
 ### 검증
 
-- **서버측은 이미 검증됨** — `scripts/mcptt_floor_policy_probe.py` 116/116 에 dual/multi 정책,
-  슬롯별 SSRC, 0x0F 통지가 포함돼 있다([VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md)
+- **서버측 (완료)** — `scripts/mcptt_floor_policy_probe.py` 116/116 에 dual/multi 정책, 슬롯별
+  SSRC, 0x0F 통지가 포함돼 있다([VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md)
   「floor 정책 시험」).
-- **단말측 실호 시험**(이번 작업으로 처음 가능해진다): CMP 에 `floor_policy: "multi"`,
-  `max_talkers: 2` 그룹을 만들고 실기기 3대(A·B 발언, C 청취)로
-  ① A 발언 중 B 승급 시 **A 의 마이크가 닫히지 않을 것**(floor 평면은 이미 반영 — `meSpeaking`)
-  ② C 에서 A·B 음성이 **둘 다** 들릴 것 ③ A 가 Release 하면 B 만 계속 들릴 것(0x0F 경로)
-  ④ 발언 스트립에 두 화자가 모두 표시될 것.
+- **네이티브 정합 (완료)** — 호스트 `gcc -fsyntax-only`(pjmedia 헤더 대상) 로 `stream.c` 전체
+  타입검사 통과. 실제 코덱 링크·동작 빌드는 WSL2(§0)에서 한다.
+- **단말측 실호 (대기 — WSL2 빌드 + 실기기 3대)**: CMP 에 `floor_policy: "multi"`, `max_talkers: 2`
+  그룹을 만들고 A·B 발언, C 청취로
+  ① A 발언 중 B 승급 시 **A 의 마이크가 닫히지 않을 것**(floor 평면 기반영 — `meSpeaking`)
+  ② C 에서 A·B 음성이 **둘 다** 들릴 것 ③ A 가 Release 하면 B 만 계속 들릴 것(A 서브스트림 무활동
+  회수) ④ 발언 스트립에 두 화자가 모두 표시될 것.
 
 ## 6. 부록 — floor 코덱 공유 / 정의 단일화
 
