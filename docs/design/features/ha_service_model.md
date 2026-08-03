@@ -208,6 +208,41 @@ module_specs:
 | **readiness** | 요청 처리 준비 판단 | TCP listen, HTTP health API, 관리 API, DB 연결, 핵심 기능 |
 | **preflight** | 미기동 cold 모듈의 승격 가능성 판단 | 실행 파일·설정 존재, 포트 사용 가능, 의존성 접근, 인증서 존재 |
 
+### 6.1 readiness 검사 포트의 해석 (실효 설정 추종)
+
+readiness 는 "그 모듈이 **실제로 리슨하고 있는 포트**" 를 찔러야 한다. descriptor 의 상수
+포트를 그대로 쓰면, 운영자가 리슨 포트를 바꾼 순간 readiness 가 영구 FAIL → 양 노드
+FAULT 래치 → 전 노드 정지로 이어진다. 따라서 포트는 아래 우선순위로 해석한다.
+
+| 우선순위 | 출처 | 위치 |
+|---|---|---|
+| 1 | HA 그룹 수동 오버라이드 `failover_options.health.port` | OAM (`ha_groups.py`) |
+| 2 | 모듈 운영 명세 `module_specs.<mod>.health` | OAM (그룹×모듈) |
+| 3 | **service descriptor 의 `modules[].health`** | OAM (`service_registry.module_health_specs`) |
+| 4 | descriptor `modules[].port` 상수 | 폴백 |
+
+3번의 `health` 블록은 "노드의 실제 설정 파일에서 유도하라"는 선언이며, OAM 은 이를
+`ha.json` 의 `health_config_key` / `health_collection` 힌트로 내려보낸다. **해석은 agent 가
+검사 시점에 노드 로컬 파일을 직접 읽어 수행**한다 — 배포기록↔실파일 드리프트가 나도 HA 는
+실제 bind 포트를 본다(드리프트 자체는 `config_out_of_sync` 알람이 노출).
+
+```jsonc
+// 스칼라 config.json 의 단일 키 — 포트가 설정키 하나로 정해지는 모듈 (csc)
+{ "name": "csc", "port": 4421, "proto": "tcp",
+  "health": { "config_key": "Server.Port" } }
+
+// 컬렉션 jsonl 의 match 레코드 — 리슨 엔드포인트가 컬렉션에 있는 모듈 (csp/psp/isp)
+{ "name": "csp", "port": 5060, "proto": "udp",
+  "health": { "collection_file": "config/local_nodes.jsonl", "field": "bind_port",
+              "match": { "enabled": true, "is_primary": true, "protocol": "UDP" } } }
+```
+
+csp 계열의 대표 포트는 `local_nodes` 의 **primary UDP 레코드**다 — CSP 자신이 인스턴스
+identity(`Setup.Sip.LocalIp/UdpPort`)를 유도하는 레코드와 동일하므로(`csp/CspServer.cpp`),
+"CSP 가 살아 있다" 의 판정 기준으로 일관된다. 서비스 그룹당 대표 포트는 1개이므로 **비-primary
+리스너(예: PTT 전용 local_node)는 readiness 대상이 아니다** — 그 리스너만 죽은 상태는
+readiness 로 잡히지 않는다. 파일·레코드가 없으면 4번(descriptor 상수)으로 폴백한다.
+
 모든 검사를 2초 HA 루프에서 동기 실행하지 않는다. **검사별 독립 주기로 비동기 실행하고
 결과를 캐시**하며, HA Evaluator 는 캐시와 신선도만 읽는다.
 

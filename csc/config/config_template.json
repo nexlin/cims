@@ -107,6 +107,101 @@
       "scope": "service"
     },
     {
+      "key": "provisioning",
+      "title": "자동 프로비저닝 (단말 접속 정보)",
+      "description": "단말이 로그인 후 GET /provisioning/me 로 받아가는 서비스별 시그널링 접속 정보 (android_ue_provisioning.md §3). CSC 는 CSP 의 local_nodes/access_services 를 직접 읽을 수 없으므로, 단말에 내려줄 SIP 주소/포트/도메인을 여기에 따로 선언한다 — CSP 의 수신 포트를 바꾸면 이 값도 같이 맞춰야 단말이 새 포트로 등록한다.",
+      "fields": [
+        {
+          "key": "Provisioning.CountryCode",
+          "label": "홈 국가코드",
+          "type": "string",
+          "default": "82",
+          "deploy_value": "@COUNTRY_CODE@",
+          "restart": true,
+          "help": "E.164 digits (+ 없음). 단말 번호 로컬 표기의 SoT. 비우면 로그인 msisdn 에서 유도."
+        },
+        {
+          "key": "Provisioning.Services.volte.host",
+          "label": "VoLTE SIP 주소 (CSP)",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "단말이 REGISTER 할 CSP 주소. 빈값이면 단말이 접속한 CSC Host 를 사용(올인원 기본). 모듈별로 서버가 나뉘면 CSP 대표/VIP 주소를 넣는다."
+        },
+        {
+          "key": "Provisioning.Services.volte.port",
+          "label": "VoLTE SIP 포트",
+          "type": "int",
+          "default": 5060,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "CSP 의 VoLTE 수신 local_node bind_port 와 일치해야 한다."
+        },
+        {
+          "key": "Provisioning.Services.volte.transport",
+          "label": "VoLTE SIP transport",
+          "type": "enum",
+          "options": [
+            "UDP",
+            "TCP",
+            "TLS"
+          ],
+          "default": "UDP",
+          "restart": true
+        },
+        {
+          "key": "Provisioning.Services.volte.domain",
+          "label": "VoLTE 도메인",
+          "type": "string",
+          "default": "ims.mnc033.mcc450.3gppnetwork.org",
+          "deploy_value": "@VOLTE_DOMAIN@",
+          "restart": true,
+          "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
+        },
+        {
+          "key": "Provisioning.Services.ptt.host",
+          "label": "PTT SIP 주소 (PSP)",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "단말이 REGISTER 할 PSP 주소. 빈값이면 단말이 접속한 CSC Host 를 사용. VoLTE 와 다른 서버일 수 있다."
+        },
+        {
+          "key": "Provisioning.Services.ptt.port",
+          "label": "PTT SIP 포트",
+          "type": "int",
+          "default": 5060,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "PSP(또는 CSP) 의 PTT 수신 local_node bind_port 와 일치해야 한다."
+        },
+        {
+          "key": "Provisioning.Services.ptt.transport",
+          "label": "PTT SIP transport",
+          "type": "enum",
+          "options": [
+            "UDP",
+            "TCP",
+            "TLS"
+          ],
+          "default": "UDP",
+          "restart": true
+        },
+        {
+          "key": "Provisioning.Services.ptt.domain",
+          "label": "PTT 도메인",
+          "type": "string",
+          "default": "ptt.mnc033.mcc450.3gppnetwork.org",
+          "deploy_value": "@PTT_DOMAIN@",
+          "restart": true,
+          "help": "PTT access_service 도메인. MCPTT ID 와는 별개."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "log",
       "title": "로깅",
       "fields": [

@@ -2198,8 +2198,12 @@ def _read_ha_json() -> dict:
 
 def _health_targets() -> list:
     """ha.json services → 검사 대상 모듈 목록. 모듈 = relevant ∪ cold ∪ health_module.
-    port/proto 는 service 레벨 힌트(단일 데몬 또는 health_module 에 적용), config_key 는
-    health_module 에만(csc 실효포트 유도). 단일 모델 — 전 HA 서비스 대상."""
+    port/proto 는 service 레벨 힌트(단일 데몬 또는 health_module 에 적용), config_key /
+    collection 은 health_module 에만. 단일 모델 — 전 HA 서비스 대상.
+
+    config_key   = 스칼라 config.json 단일 키에서 실효 포트 (csc: Server.Port)
+    collection   = 컬렉션 jsonl 의 match 레코드에서 실효 포트 (csp: local_nodes.bind_port)
+                   — 리슨 엔드포인트가 설정키가 아니라 컬렉션에 있는 모듈용."""
     cfg = _read_ha_json()
     home = cfg.get("cims_home") or _PREFIX
     out, seen = [], set()
@@ -2213,14 +2217,66 @@ def _health_targets() -> list:
         port = s.get("port")
         proto = (s.get("proto") or "tcp").lower()
         ckey = s.get("health_config_key")
+        coll = s.get("health_collection")
         for m in mods:
             if not m or m in seen:
                 continue
             seen.add(m)
             out.append({"module": m, "service": svc, "home": home, "proto": proto,
                         "port": port if (m == hmod or len(mods) == 1) else None,
-                        "config_key": ckey if m == hmod else None})
+                        "config_key": ckey if m == hmod else None,
+                        "collection": coll if m == hmod else None})
     return out
+
+
+def _module_collection_port(mod: str, home: str, spec: dict) -> "int | None":
+    """모듈 배포 컬렉션 jsonl 에서 실효 리슨 포트.
+
+    spec = {"file": "config/local_nodes.jsonl", "field": "bind_port",
+            "match": {"enabled": true, "is_primary": true, "protocol": "UDP"}}
+
+    match 를 모두 만족하는 첫 레코드의 field 를 반환. 문자열 비교는 대소문자 무시
+    (protocol "UDP"/"udp"). 파일·레코드 부재 시 None → 호출부가 descriptor port 로 폴백.
+    컬렉션은 install_path 루트(config/)가 표준이고, 변종 내부(<pkg>/config/)도 수용한다."""
+    rel = str((spec or {}).get("file") or "").strip().lstrip("/")
+    if not rel:
+        return None
+    field = (spec or {}).get("field") or "bind_port"
+    match = (spec or {}).get("match") or {}
+    base = os.path.join(home, "modules", mod, "current")
+    for path in (os.path.join(base, rel), os.path.join(base, mod, rel)):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    ok = True
+                    for k, want in match.items():
+                        got = rec.get(k)
+                        if isinstance(want, str) and isinstance(got, str):
+                            ok = got.strip().lower() == want.strip().lower()
+                        else:
+                            ok = got == want
+                        if not ok:
+                            break
+                    if not ok:
+                        continue
+                    v = rec.get(field)
+                    if v and 0 < int(v) < 65536:
+                        return int(v)
+        except Exception:
+            pass
+        break
+    return None
 
 
 def _module_config_port(mod: str, home: str, key: str) -> "int | None":
@@ -2277,6 +2333,10 @@ def _run_health_check(mod: str, check: str, t: dict) -> dict:
         port = t.get("port")
         if t.get("config_key"):
             p = _module_config_port(mod, t.get("home") or _PREFIX, t["config_key"])
+            if p:
+                port = p
+        if t.get("collection"):
+            p = _module_collection_port(mod, t.get("home") or _PREFIX, t["collection"])
             if p:
                 port = p
         proto = (t.get("proto") or "tcp").lower()

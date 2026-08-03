@@ -178,6 +178,30 @@ def module_health_defaults(config: dict = None) -> dict:
     return res
 
 
+def module_health_specs(config: dict = None) -> dict:
+    """ha_groups 용 {name: health} — descriptor 모듈의 `health` 블록만 추린다.
+
+    `health` 는 "리슨 포트를 descriptor 상수가 아니라 노드의 실제 설정에서 유도하라"는
+    선언이다. 두 형태를 지원한다 (둘 다 agent 가 검사 시점에 노드 로컬 파일을 직접 읽음
+    — 배포기록↔실파일 드리프트가 나도 HA 는 실제 bind 포트를 본다):
+
+      { "config_key": "Server.Port" }
+          스칼라 config.json 의 단일 키 (csc 처럼 포트가 설정키 하나로 정해지는 모듈).
+
+      { "collection_file": "config/local_nodes.jsonl",
+        "field": "bind_port",
+        "match": { "enabled": true, "is_primary": true, "protocol": "UDP" } }
+          컬렉션 jsonl 에서 match 를 만족하는 첫 레코드의 field (csp 처럼 리슨
+          엔드포인트가 컬렉션에 있는 모듈). 파일/레코드가 없으면 descriptor port 로 폴백.
+    """
+    res = {}
+    for nm, m in all_modules(config).items():
+        h = m.get('health')
+        if isinstance(h, dict) and h:
+            res[nm] = h
+    return res
+
+
 def valid_module_names(config: dict = None) -> set:
     """build 용 — 코어 + 전 descriptor 모듈명."""
     return set(_CORE_MODULES) | set(all_modules(config).keys())

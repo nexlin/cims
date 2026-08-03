@@ -241,7 +241,7 @@ apply_config_template() {
     CMP_IP="$CMP_IP" PMP_IP="$PMP_IP" IMP_IP="$IMP_IP" \
     CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" \
     DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" \
+    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" \
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
     INTERNAL_TOKEN="$INTERNAL_TOKEN" \
     MSG_LOG_DIR="$MSG_LOG_DIR" SERVICE_LOG_DIR="$SERVICE_LOG_DIR" \
@@ -292,23 +292,10 @@ apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIS
 apply_config_template "$DIST_DIR/cwrtc/config/config_template.json"        "$DIST_DIR/cwrtc/config/cwrtc.json"
 apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
-# ── 자동 프로비저닝(/provisioning/me) 서비스 매핑 주입 (android_ue_provisioning.md §3) ─
-#   서비스 kind 별 시그널링 도메인/포트. host 빈값 = 단말이 접속한 CSC Host(올인원 기본).
-#   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 채운다(여기선 LOCAL_IP, 빈값 유지도 가능).
-python3 - "$DIST_DIR/csc/config/csc.json" "$VOLTE_DOMAIN" "$PTT_DOMAIN" "$COUNTRY_CODE" <<'PY'
-import json, sys
-path, volte_dom, ptt_dom, country = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-with open(path) as f: c = json.load(f)
-c["Provisioning"] = {
-    "CountryCode": country,   # 홈 국가코드(digits) — /provisioning/me countryCode SoT
-    "Services": {
-        "volte": {"host": "", "port": 15060, "transport": "UDP", "domain": volte_dom},
-        "ptt":   {"host": "", "port": 15060, "transport": "UDP", "domain": ptt_dom},
-    },
-}
-with open(path, "w") as f: json.dump(c, f, indent=4, ensure_ascii=False); f.write("\n")
-print("  csc.json Provisioning 주입: volte=%s ptt=%s cc=+%s" % (volte_dom, ptt_dom, country))
-PY
+# 자동 프로비저닝(/provisioning/me) 서비스 매핑은 csc config_template 의 `provisioning`
+# 섹션이 소유한다 — 위 apply_config_template 이 @VOLTE_DOMAIN@/@PTT_DOMAIN@/@COUNTRY_CODE@
+# 를 치환해 csc.json 에 함께 기록한다. 분산 배포(configure 미경유)에서는 콘솔
+# [패키지 설정] > csc 에서 편집한다.
 
 # ── TB-CSC (4419) overlay: csc.json 을 기반으로 포트/경로만 치환 ─
 #   TB 는 검증 Phase 진행 중 UI 세션 유지용 임시 기동 모듈.

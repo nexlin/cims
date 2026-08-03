@@ -515,19 +515,34 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     elif fo_health.get('proto'):
         h_proto = fo_health['proto']
 
-    # 진실 기반 헬스체크 힌트 — csc(설정 단일키로 리슨 포트가 정해지는 모듈)는
-    # cims-health 가 검사 시점에 노드 로컬 배포 config.json 의 Server.Port 를 직접
-    # 읽어 검사한다 (배포기록↔실파일 드리프트가 나도 HA 는 실제 bind 포트를 봄 —
-    # 드리프트 자체는 config_out_of_sync 알람이 노출). 운영자가 health.port 를
-    # 수동 지정하면 힌트를 내리지 않아 오버라이드가 그대로 최우선.
+    # 진실 기반 헬스체크 힌트 (ha_service_model.md §6.1) — descriptor 상수 포트 대신
+    # "노드의 실제 설정에서 리슨 포트를 유도하라" 는 선언을 agent 로 내려보낸다. agent 가
+    # 검사 시점에 노드 로컬 파일을 직접 읽으므로 배포기록↔실파일 드리프트가 나도 HA 는
+    # 실제 bind 포트를 본다 (드리프트 자체는 config_out_of_sync 알람이 노출).
+    #   config_key      : 스칼라 config.json 단일 키          (csc = Server.Port)
+    #   collection_file : 컬렉션 jsonl 의 match 레코드 field  (csp = local_nodes.bind_port)
+    # 운영자가 health.port 를 수동 지정하면 힌트를 내리지 않아 오버라이드가 그대로 최우선.
     h_cfg_key = None
-    if h_module == 'csc' and not fo_health.get('port'):
-        h_cfg_key = 'Server.Port'
-    # 모듈 운영 명세의 health.config_key 오버라이드 (있으면 우선 — 수동 그룹 override 제외).
+    h_coll = None
     if h_module and not fo_health.get('port'):
+        # ① service descriptor 의 health 블록 (데이터 선언 — service_registry.module_health_specs)
+        _dh = {}
+        try:
+            _dh = service_registry.module_health_specs(config).get(h_module) or {}
+        except Exception:
+            _dh = {}
+        # ② csc 전환 안전망 — descriptor 가 아직 health 를 안 가진 구(舊) store 대비
+        if not _dh and h_module == 'csc':
+            _dh = {'config_key': 'Server.Port'}
+        # ③ 모듈 운영 명세(그룹×모듈)가 있으면 최우선
         _mh = _module_spec(group, h_module).get('health') or {}
-        if _mh.get('config_key'):
-            h_cfg_key = _mh['config_key']
+        src = _mh if (_mh.get('config_key') or _mh.get('collection_file')) else _dh
+        if src.get('config_key'):
+            h_cfg_key = src['config_key']
+        if src.get('collection_file'):
+            h_coll = {'file': src['collection_file'],
+                      'field': src.get('field') or 'bind_port',
+                      'match': src.get('match') or {}}
 
     # armed daemon 모듈 = 이 agent 에 배포된 daemon 모듈 ∩ running 의도.
     daemon_mods = [m for m in (_agent_daemon_modules(agent_id, config) if config else [])
@@ -588,9 +603,10 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             }
             if h_port:  entry['port']  = h_port
             if h_proto: entry['proto'] = h_proto
-            if h_cfg_key:
+            if h_cfg_key or h_coll:
                 entry['health_module'] = h_module
-                entry['health_config_key'] = h_cfg_key
+            if h_cfg_key: entry['health_config_key'] = h_cfg_key
+            if h_coll:    entry['health_collection'] = h_coll
             if cold_modules: entry['cold_modules'] = cold_modules
             if relevant_modules: entry['relevant_modules'] = relevant_modules
             if restart_limit: entry['restart_limit'] = restart_limit
@@ -608,9 +624,10 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         }
         if h_port:  entry['port']  = h_port
         if h_proto: entry['proto'] = h_proto
-        if h_cfg_key:
+        if h_cfg_key or h_coll:
             entry['health_module'] = h_module
-            entry['health_config_key'] = h_cfg_key
+        if h_cfg_key: entry['health_config_key'] = h_cfg_key
+        if h_coll:    entry['health_collection'] = h_coll
         if cold_modules: entry['cold_modules'] = cold_modules
         if relevant_modules: entry['relevant_modules'] = relevant_modules
         if restart_limit: entry['restart_limit'] = restart_limit
