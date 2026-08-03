@@ -204,6 +204,28 @@ def scan_all(config) -> list[dict]:
     return out
 
 
+_UNKNOWN_STREAK: dict = {}    # alert_type -> 연속 '판정 불가'(all_ok=False) 횟수
+_UNKNOWN_LIMIT = 3            # 이 횟수 연속이면 열린 알람을 판정불가 사유로 종료
+
+
+def _reseed_if_empty(open_state: dict, service_log_dir: str) -> None:
+    """in-memory 열림상태가 비어 있으면 alert_log 에서 재도출.
+
+    open_state 는 OAM 프로세스 메모리에만 있고 기동 시 1회 복원된다. 그 복원이
+    실패했거나 프로세스가 교체되면 "이미 열려 있는 알람"을 없다고 보고 open 을
+    중복 발행한다 — close 는 1건만 뒤따르므로 앞선 open 이 영구 미해소로 남는다
+    (2026-07-07 config_drift::g2::local_nodes 사례). 스윕마다 비었을 때만 도므로
+    정상 경로에서는 비용이 없다."""
+    if open_state or not service_log_dir:
+        return
+    try:
+        for k in alert_log.compute_open_state(service_log_dir, days=90):
+            if k.startswith('config_drift::'):
+                open_state[k] = True
+    except Exception:
+        pass
+
+
 def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
                       open_state: dict) -> dict:
     """scan 결과를 alert_log 에 반영.
@@ -215,6 +237,13 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
     counts = {'opened': 0, 'closed': 0, 'still_open': 0}
     if not service_log_dir:
         return counts
+    # 관측 대상이 하나도 없으면 아무 판정도 하지 않는다. HA 절체 직후 standby OAM 은
+    # 자기 file_store(deployments/ha_groups)가 비어 있어 scan 이 공집합이 되는데,
+    # 그대로 진행하면 아래 orphan reap 이 universe 를 공집합으로 보고 열려 있던
+    # 알람을 전부 오종결한다. (ha_design.md §12 — OAM 스토어는 노드 간 미복제)
+    if not scan_results:
+        return counts
+    _reseed_if_empty(open_state, service_log_dir)
     # 고아 reap — 이번 스윕의 비교 대상(모든 row, all_ok 무관)에 더 이상 없는 open 키는
     # 그룹 삭제/컬렉션 제거/배포 재구성으로 재평가가 불가능해진 알람 → close 발행.
     # (all_ok=False row 도 universe 에 포함되므로 proxy 일시 실패로 오닫힘 없음.)
@@ -230,11 +259,27 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
         })
         counts['closed'] += 1
     for r in scan_results:
-        if not r.get('all_ok'):
-            continue  # proxy 실패는 drift 판정 보류
         gid = r['ha_group_id']
         coll = r['collection']
         typ = f"config_drift::g{gid}::{coll}"
+        if not r.get('all_ok'):
+            # proxy 실패는 drift 판정 보류. 다만 무기한 보류하면 이미 열린 알람이
+            # 영원히 닫히지 않는다 (universe 에는 남아 orphan reap 도 안 걸림).
+            # 연속 _UNKNOWN_LIMIT 회면 '판정 불가' 사유로 종료한다.
+            n = _UNKNOWN_STREAK[typ] = _UNKNOWN_STREAK.get(typ, 0) + 1
+            if typ in open_state and n >= _UNKNOWN_LIMIT:
+                open_state.pop(typ, None)
+                alert_log.record_event(service_log_dir, {
+                    'ts': now,
+                    'type': typ,
+                    'severity': 'warning',
+                    'action': 'close',
+                    'message': (f"HA drift 판정 불가 {n}회 연속 (멤버 컬렉션 조회 실패) — "
+                                f"알람 종료. group '{r.get('ha_group_name')}' / {coll}"),
+                })
+                counts['closed'] += 1
+            continue
+        _UNKNOWN_STREAK.pop(typ, None)      # 정상 판정 → 스트릭 리셋
         was = typ in open_state
         if r['drift']:
             counts['still_open'] += 1 if was else 0

@@ -885,7 +885,10 @@ if __name__ == '__main__':
         if _service_log:
             try:
                 from services import alert_log as _alert_log
-                _drift_open = {k: True for k in _alert_log.compute_open_state(_service_log)
+                # 창을 활성 알람 뷰(90일)와 맞춘다 — 기본 30일이면 30~90일 구간의
+                # 열린 알람을 서버가 잊어 중복 open 을 낸다. (스윕 중 재도출은
+                # drift_sweeper._reseed_if_empty 가 담당 — 여기 실패해도 자가복구)
+                _drift_open = {k: True for k in _alert_log.compute_open_state(_service_log, days=90)
                                if k.startswith('config_drift::')}
                 if _drift_open:
                     logger.log_info(f"[drift-sweep] restored {len(_drift_open)} open drift alarm(s)")

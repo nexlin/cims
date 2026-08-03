@@ -147,6 +147,24 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 - `alarm_id` = `f"{code}@{mo_instance}@{open_epoch}"` — open 시 생성, close/ack 가 동일 alarm_id 참조. 재발(clear 후 재open)은 새 alarm_id.
 - 현재 `_alert_open` 의 키(`type` / `type:host:module`)가 이미 `(code, mo_instance)` 와 동형 → 이행 시 키를 `code@mo_instance` 로 정규화하고 open_epoch 만 부가하면 alarm_id 완성.
 
+**(d) 재통지 — clear 없는 연속 open**
+
+같은 활성키(`code@mo_instance`, 구 레코드는 `type`)로 **close 없이 open 이 다시 들어오면
+같은 알람의 재통지**다. 새 occurrence 가 아니며 새 행·새 alarm_id 를 만들지 않는다 —
+`(c)` 의 "재발 = clear 후 재open" 정의의 대우(對偶)다.
+
+- **판독측**(콘솔 `AlertsPage.pairEvents`): 미해소 open 이 이미 있으면 기존 행을 갱신하고
+  `occurrences` 를 증가시킨다(발생시각은 최초 유지, `last_open_ts` 로 최근 수신 시각 기록,
+  화면에 `×N` 배지). 연속 open 마다 행을 새로 만들면 **뒤따르는 close 1건이 마지막 행만
+  닫고 앞선 행은 영구 미해소로 남아 활성 알람에 유령이 생긴다.**
+- **발행측**: 열림상태를 잃은 채(프로세스 교체·복원 실패) 재발행하지 않도록, 발행 주체는
+  in-memory 상태가 비면 alert_log 에서 재도출한 뒤 판정한다
+  (`drift_sweeper._reseed_if_empty`, `alert_log.compute_open_state`).
+- **판정 불가의 종결**: 관측이 연속 실패해 open/close 어느 쪽도 판정할 수 없으면 알람이
+  영원히 닫히지 않는다. 발행 주체는 연속 실패 임계(drift 스위퍼 3회)에서 "판정 불가" 사유로
+  close 를 발행한다. 반대로 **관측 대상 자체가 0건이면 아무 판정도 하지 않는다** — 절체 직후
+  standby 처럼 세상이 안 보이는 상태에서 열린 알람을 일괄 오종결하는 것을 막는다.
+
 ### 3.5 원칙 — 알람 type 은 "조건 클래스", 객체/리소스/임계는 그 밖 (★ 핵심)
 
 알람 `type`/`code` 는 **조건(condition) 클래스**만 표현한다. 객체·리소스·임계·심각도는 type 에 넣지 않는다.

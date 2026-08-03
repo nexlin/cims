@@ -32,6 +32,28 @@ from typing import Optional
 #  경로 유틸
 # ──────────────────────────────────────────────────────────────────────────
 
+_SHARED_FSTYPES = {'nfs', 'nfs4', 'cifs', 'smb3', 'fuse.sshfs', 'glusterfs', 'ceph', 'lustre'}
+
+
+def _is_shared_mount(path: str) -> bool:
+    """path 를 담고 있는 마운트의 fstype 이 공유 파일시스템인가 (/proc/mounts 최장일치).
+    판정 불가(비 Linux·읽기 실패)면 False — 폴백을 막지 않는다."""
+    try:
+        best, fstype = '', ''
+        target = os.path.abspath(path)
+        with open('/proc/mounts') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mp = parts[1]
+                if (target == mp or target.startswith(mp.rstrip('/') + '/')) and len(mp) > len(best):
+                    best, fstype = mp, parts[2]
+        return fstype in _SHARED_FSTYPES
+    except Exception:
+        return False
+
+
 def runtime_root(config: dict) -> str:
     """runtime store 의 base 디렉토리.
 
@@ -40,6 +62,13 @@ def runtime_root(config: dict) -> str:
       2. ServiceLogging.Dir 의 sibling '../runtime'
       3. ServiceLogDir / MsgLogDir 의 sibling
       4. 현재 CWD 의 'runtime' (개발 fallback)
+
+    2·3 은 로그 디렉터리에서 유도하는 폴백인데, 로그를 공유 스토리지(NAS)에 두는
+    구성에서는 **관리 데이터(배포/그룹/에이전트)까지 공유 스토리지로 끌려간다**.
+    그러면 (a) 노드를 밀어도 관리 데이터가 남고 (b) OAM 이 A/S 로 두 노드에 올라갈 때
+    두 프로세스가 같은 store 를 동시에 write 한다. 노드 간 미복제가 전제인 설계라
+    (ha_design.md §12) 이는 손상 경로다 — 폴백이 공유 마운트로 유도되면 기동을 막는다.
+    운영자가 CimsRuntimeDir 을 명시했다면 그 의도를 존중하고 검사하지 않는다.
     """
     explicit = config.get('CimsRuntimeDir')
     if explicit:
@@ -47,7 +76,15 @@ def runtime_root(config: dict) -> str:
     sl = config.get('ServiceLogging', {}).get('Dir') or config.get('ServiceLogDir') \
         or config.get('MsgLogDir', '')
     if sl:
-        return os.path.normpath(os.path.join(sl, '..', 'runtime'))
+        cand = os.path.normpath(os.path.join(sl, '..', 'runtime'))
+        if _is_shared_mount(cand):
+            raise RuntimeError(
+                f"CimsRuntimeDir 미설정 → runtime store 가 공유 스토리지로 유도됨: {cand}\n"
+                f"  관리 데이터(배포/그룹/에이전트)는 노드 로컬이어야 한다 "
+                f"(OAM 다중 노드에서 동시 write 시 손상).\n"
+                f"  해결: 모듈 설정 CimsRuntimeDir 을 로컬 경로로 지정 "
+                f"(예: <install_path>/runtime).")
+        return cand
     return os.path.abspath('runtime')
 
 
