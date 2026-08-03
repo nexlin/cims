@@ -84,7 +84,8 @@ const CORE_SECTIONS: RouteSection[] = [
     defaultPath: '/deploy/servers',
     order: 60,
     routes: [
-      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         requiredRole: 'operator' },
+      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         requiredRole: 'operator',
+        apis: ['nodes.list', 'nodes.metrics'] },
       // ↑ RBAC: 페이지 진입 operator+. 탭1(시스템/서버 구성)·탭2(패키지 설치)·탭4(패키지 제어)는
       //   조회만 가능, 변이는 admin 세션 또는 admin 패스워드 승격. 탭3(패키지 설정)=operator 편집.
       // 자동 배포 — 인벤토리/블루프린트 YAML 로 agent 설치~모듈 설치를 일괄 수행.

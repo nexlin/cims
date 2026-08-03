@@ -1,19 +1,19 @@
-# API 문서 (개발자 모드) — 메뉴별 사용 API 노출
+# API 문서 (개발자 모드) — 위젯별 사용 API 노출
 
 ## 목적·원칙
 
-콘솔의 각 메뉴가 **어떤 API 를 호출하는지** 를 그 메뉴 화면에서 바로 확인한다. 별도 카탈로그 탭은 두지
-않는다.
+각 위젯이 **어떤 API 를 호출하는지** 를 그 위젯 자리에서 바로 확인한다. 별도 카탈로그 탭은 두지 않는다.
 
-원칙 셋:
+원칙 넷:
 
-1. **문서는 API 를 구현한 모듈이 소유한다.** 각 핸들러 파일이 자기 엔드포인트를 `*_API_DOCS` 로 선언한다.
+1. **내용은 API 를 구현한 모듈이 소유한다.** 각 핸들러 파일이 자기 엔드포인트를 `*_API_DOCS` 로 선언한다.
    중앙 카탈로그(descriptor/JSON)에 모아두지 않는다 → 경로·파라미터를 고칠 때 같은 파일에서 문서도 고친다.
-2. **모듈이 설치·가용해야 그 API 문서도 존재한다.** 선언이 모듈 코드와 같이 배포되므로 별도 게이팅 코드가
-   없다. csc 미설치면 가입자/조직/PTT그룹 API 는 애초에 수집되지 않는다.
-3. **콘솔은 읽어서 표시만 한다.** 프런트에 API 목록·경로·파라미터를 두지 않는다.
-
-노출은 **개발자 모드 ON** 일 때만 (`utils/devMode.ts` — 릴리스 메뉴 게이팅과 동일 스위치).
+2. **소비 관계는 위젯이 선언한다.** `WidgetDef.apis` / `RouteDef.apis` 가 **API id 목록만** 갖는다.
+   백엔드는 자기를 누가 쓰는지 모른다(콘솔 위젯 id 가 백엔드로 새지 않는다). 표시되는 내용은 100% 백엔드
+   에서 오므로 "콘솔은 읽어서 표시만 한다" 는 그대로다.
+3. **모듈이 설치·가용해야 그 API 문서도 존재한다.** 선언이 모듈 코드와 같이 배포되므로 별도 게이팅 코드가
+   없다. csc 미설치면 가입자/조직/PTT그룹 API 는 애초에 수집되지 않고, 그 위젯의 배지도 뜨지 않는다.
+4. **개발자 모드 ON 일 때만** 노출 (`utils/devMode.ts` — 릴리스 메뉴 게이팅과 동일 스위치).
 
 ## 1. 선언 — 각 모듈의 `*_API_DOCS`
 
@@ -21,11 +21,10 @@
 
 | 키 | 설명 |
 |---|---|
-| `id` | 고유 id (예: `stats.service.volte`) |
+| `id` | 고유 id (예: `stats.service.volte`) — **위젯의 `apis` 가 참조하는 키** |
 | `module` | 제공 모듈 — `'csc'` · `'oam-svc'` · `None`(base 상주). **가용 판정 키** |
 | `method` | HTTP 메서드 |
 | `path` | `/api/v1` 을 포함한 전체 경로. path 파라미터는 `{name}` |
-| `screens` | 이 API 를 쓰는 콘솔 메뉴 라우트 경로 목록 (예: `['/stats/volte']`) |
 | `summary` | 한 줄 설명 |
 | `params` | `[{name, in(query\|path\|body), type, required, enum?, desc}]` |
 | `response` | 응답 요약 (전체 JSON 스키마는 미도입) |
@@ -72,10 +71,11 @@ csc 가 자기 문서를 직접 서비스하고 OAM 이 가져와 병합한다 (
 ## 2. 수집 — `handlers/api_docs.py` (base 상주)
 
 ```
-GET /api/v1/api-docs                 가용 모듈의 API 문서 전체
-GET /api/v1/api-docs?screen=<path>   그 콘솔 메뉴가 쓰는 API 만
-→ { screen, modules[], count, apis[] }
+GET /api/v1/api-docs   가용 모듈의 API 문서 전체 → { modules[], count, apis[] }
 ```
+
+**소비처 필터는 없다.** 전부 내려주고 콘솔이 위젯의 `apis` id 로 골라 쓴다 (한 화면에 배지가 여럿이라
+콘솔이 요청을 공유 캐시로 1회만 보낸다).
 
 소스 두 갈래를 병합한다:
 
@@ -98,28 +98,40 @@ GET /api/v1/api-docs?screen=<path>   그 콘솔 메뉴가 쓰는 API 만
   건드리지 않는다.
 - `GET` 외 405, 하위 경로 404.
 
-## 3. 콘솔 — `[API]` 버튼
+## 3. 소비 선언 — 위젯의 `apis`
 
-- `ems/core/console/src/api/apiDocs.ts` — `apiDocsApi.get(screen?)`.
-- `ems/core/console/src/components/ApiDocsButton.tsx` — 개발자 모드 전용 버튼 + 모달. 메서드 배지·경로·
-  요약, 펼치면 파라미터 표·응답·인증·id, `경로`/`curl` 복사.
+위젯이 자기가 부르는 **API id 만** 선언한다. 두 자리:
+
+- **`WidgetDef.apis`** (`widgets/types.ts`) — 실제 위젯. 예: `cims.service-stats` →
+  `['stats.service.volte', 'stats.service.ptt', 'stats.messages']`.
+- **`RouteDef.apis`** (`nav-types.ts`) — 고정 페이지(`component:` 라우트). 페이지 전체가 위젯 1개
+  (`page:<path>`)로 감싸지므로, `App.tsx` 가 `route.apis` 를 그 page 위젯 def 로 전달한다.
+
+## 4. 콘솔 — `[API]` 배지
+
+- `ems/core/console/src/api/apiDocs.ts` — `loadApiDocs()` 가 `/api-docs` 를 받아 `id → ApiDoc` Map 으로
+  준다. 한 화면에 배지가 여럿이므로 **in-flight 프라미스를 공유**해 요청은 페이지당 1회.
+- `ems/core/console/src/components/WidgetApiBadge.tsx` — 개발자 모드 전용 배지 + 모달. 메서드 배지·경로·
+  제공 모듈·요약, 펼치면 파라미터 표·응답·인증·id, `경로`/`curl` 복사.
   - **개발자 모드 OFF 면 조회 자체를 하지 않는다** (평시 트래픽 0).
-  - 이 메뉴가 쓰는 API 가 0건이면 **버튼도 렌더하지 않는다** (모듈 미설치/미가용 또는 선언 없음).
-  - 조회 결과를 조회 대상 경로와 함께 보관해, 메뉴 전환 직후 이전 메뉴의 목록이 보이지 않게 한다.
-- 배선은 `widgets/EditableLayout.tsx` **한 곳**: 헤더 슬롯(`#layout-edit-slot`)으로 portal. 모든 라우트가
-  `EditablePageHost` → `EditableLayout` 을 거치므로 화면별 배선 없이 전 메뉴에 붙는다. 현재 메뉴 경로는
-  `useLocation().pathname`.
+  - 위젯에 `apis` 선언이 없거나 문서 0건이면 **배지를 렌더하지 않는다** (모듈 미설치/미가용 포함).
+- 배선 두 곳:
+  - **보기 모드** — `widgets/GridRenderer.tsx` (grid·flow 양쪽). 위젯 래퍼(`.widget-api-host`) 우상단
+    오버레이(`.widget-api-badge--overlay`). 평소 흐리고 hover 시 또렷 — 내용 가림 최소화.
+  - **편집 모드** — `widgets/GridEditor.tsx` 카드 헤더, 크기 배지와 `✕` 사이 인라인. 배치하면서 이
+    위젯이 뭘 부르는지 바로 확인.
 
-## 4. 유지 규칙
+## 5. 유지 규칙
 
 - 엔드포인트의 경로·메서드·파라미터를 바꾸면 **같은 커밋에서 같은 파일의 `*_API_DOCS` 를 갱신**한다.
-- 새 메뉴가 기존 API 를 쓰기 시작하면 그 API 엔트리의 `screens` 에 경로를 추가한다.
+- 위젯이 호출하는 API 가 바뀌면 그 **위젯의 `apis`** 를 갱신한다. id 가 백엔드에 없으면 그 항목만 조용히
+  빠진다(배지 건수 감소) — 오타가 에러로 드러나지 않으니 주의.
 - 새 모듈이 API 를 제공하면 그 모듈 파일에 `*_API_DOCS` 를 두고 `handlers/api_docs.py` 의 로더 목록에
   한 줄 추가한다. 그 모듈이 **다른 서버에 배포될 수 있으면** csc 처럼 자기 `/api/v1/api-docs` 도 서비스한다.
 - 선언을 바꾼 뒤에는 **해당 모듈을 재배포**해야 반영된다 (문서는 코드와 함께 배포된다). 원격 조회분은
   최대 60초 캐시된다.
 
-## 5. 미도입
+## 6. 미도입
 
 - 전체 응답 JSON 스키마 (현재 `response` 한 줄 요약).
 - OpenAPI 산출물 — 외부 팀 인계 수단은 별도 결정 대기 (접근 모델·인증·CORS·base URL 미정).
@@ -128,4 +140,8 @@ GET /api/v1/api-docs?screen=<path>   그 콘솔 메뉴가 쓰는 API 만
   먼저 필요하다.
 - csc MCPTT(4430) 12개 경로 — 단말용 규격 인터페이스라 제외. 넘길 필요가 생기면 `csc/src/services/mcptt.py`
   에 선언을 두고 `csc/src/handlers/api_docs.py` 에서 합친다.
-- 라우트 테이블과 선언을 대조하는 CI 체크 (선언 누락·경로 오타 탐지).
+- 라우트 테이블과 선언을 대조하는 CI 체크 (선언 누락·경로 오타 탐지) + **위젯 `apis` id 가 백엔드
+  선언에 존재하는지** 대조 (오타가 조용히 누락되는 것 방지).
+- 콘솔이 호출하지 않는 선언(현재 `flow.list` · `recording.list` · `recording.delete` ·
+  `recording.audio` · `stats.service.summary`)은 배지에 안 뜬다 — `/api-docs` 응답에는 있으므로 인계에는
+  포함된다.

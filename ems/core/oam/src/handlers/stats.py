@@ -2117,11 +2117,9 @@ CIMS_STATS_SERVICE_HANDLER_LIST = [
 #  module='oam-svc' — stats 전체가 oam-svc 귀속(role=base 는 게이트웨이 프록시). 스키마는 api_docs.py 주석.
 CIMS_STATS_API_DOCS = [
     {'id': 'stats.health', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/health',
-     'screens': ['/dashboard', '/service/status'],
      'summary': '노드 health + 대시보드 KPI 카운트 (가입자/번호/등록/그룹)',
      'params': [], 'response': '노드별 상태 + counts 객체', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.subscribers', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/subscribers',
-     'screens': ['/dashboard', '/service/status'],
      'summary': '가입자 등록 현황 (활성/비활성 목록, 페이지네이션)',
      'params': [
          {'name': 'status', 'in': 'query', 'type': 'string', 'required': False,
@@ -2133,12 +2131,10 @@ CIMS_STATS_API_DOCS = [
      ],
      'response': '{total, page, limit, subscribers[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.messages', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/messages',
-     'screens': ['/stats/sip', '/stats/cmp', '/stats/csc', '/stats/https'],
      'summary': '전 인터페이스 메시지 카운터 (시간대 버킷 + 메서드별 집계)',
      'params': [{'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'}],
      'response': '{buckets[], method_counts{}}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.messages.iface', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/messages/{iface}',
-     'screens': ['/stats/sip', '/stats/cmp', '/stats/csc', '/stats/https'],
      'summary': '인터페이스별 메시지 카운터',
      'params': [
          {'name': 'iface', 'in': 'path', 'type': 'string', 'required': True,
@@ -2147,14 +2143,12 @@ CIMS_STATS_API_DOCS = [
      ],
      'response': '{buckets[], method_counts{}}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.leak-reclaims', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/leak-reclaims',
-     'screens': ['/stats/leak-reclaims'],
      'summary': 'CMP 누수 세션 회수(sweeper) 이력 + reason/node 별 집계',
      'params': [{'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'}],
      'response': '{items[], by_reason{}, by_node{}}', 'auth': 'Bearer JWT (monitor)'},
 
     # service KPI
     {'id': 'stats.service.volte', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/volte',
-     'screens': ['/stats/volte'],
      'summary': 'VoLTE 서비스 KPI (호 시도/성공률/시간대 버킷/종료사유 분포)',
      'params': [
          {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
@@ -2165,7 +2159,6 @@ CIMS_STATS_API_DOCS = [
      ],
      'response': '{volte:{total_attempts, success_rate, buckets[], causes{}}}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.ptt', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/ptt',
-     'screens': ['/stats/ptt'],
      'summary': 'PTT 서비스 KPI (그룹콜 수/평균 세션/floor 통계)',
      'params': [
          {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
@@ -2176,7 +2169,6 @@ CIMS_STATS_API_DOCS = [
      ],
      'response': '{ptt:{total_calls, avg_session_sec, buckets[]}}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.summary', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/summary',
-     'screens': ['/dashboard', '/service/status'],
      'summary': 'VoLTE+PTT 통합 요약 (service 미지정 시 기본 응답)',
      'params': [
          {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
@@ -2185,26 +2177,21 @@ CIMS_STATS_API_DOCS = [
      ],
      'response': '통합 요약 객체', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.live', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/live',
-     'screens': ['/dashboard', '/service/status'],
      'summary': '실시간 활성 세션 수 (VoIP/PTT)',
      'params': [], 'response': '{voip:{active}, ptt:{active}}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.trend', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/trend',
-     'screens': ['/dashboard', '/stats/volte', '/stats/ptt'],
      'summary': '최근 구간 추이 (스파크라인용)',
      'params': [{'name': 'window', 'in': 'query', 'type': 'string', 'required': False, 'desc': '조회 구간 (기본 8h)'}],
      'response': '{points[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.events', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/events',
-     'screens': ['/dashboard', '/service/status'],
      'summary': '최근 서비스 이벤트 목록',
      'params': [{'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '건수 (기본 60)'}],
      'response': '{events[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.org', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/org',
-     'screens': ['/dashboard', '/stats/volte', '/stats/ptt'],
      'summary': '조직별 사용량 집계',
      'params': [], 'response': '{orgs[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'stats.service.ptt-members', 'module': 'oam-svc', 'method': 'GET',
      'path': '/api/v1/stats/service/ptt-members',
-     'screens': ['/service/status', '/stats/ptt'],
      'summary': 'PTT 그룹 구성원 실시간 상태 (활성/발언중)',
      'params': [
          {'name': 'group', 'in': 'query', 'type': 'string', 'required': True, 'desc': 'MCPTT 그룹 ID'},

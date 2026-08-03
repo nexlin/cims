@@ -19,6 +19,9 @@ export interface WidgetDef {
   component: ComponentType<WidgetProps>
   defaultSize?: { w: number; h?: number }  // 기본 폭(12-칸 기준 1~12, 미지정=12; grid 은 ×COL_SCALE 환산) + grid 기본 행 span(h).
   adminOnly?: boolean
+  // 이 위젯이 호출하는 API 의 id 목록 (백엔드 `*_API_DOCS` 의 id). 개발자 모드에서 위젯에 [API]
+  // 배지로 노출된다. **id 만** 선언한다 — 경로/파라미터/응답 등 내용은 백엔드가 소유(api_docs.md).
+  apis?: string[]
 }
 
 // 레이아웃에 배치된 위젯 1개. 두 배치 모드가 하위호환으로 공존한다:

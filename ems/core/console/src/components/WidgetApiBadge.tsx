@@ -1,14 +1,15 @@
-// [API] 버튼 — 지금 보고 있는 메뉴가 쓰는 API 정보를 표시한다. **개발자 모드에서만** 노출.
+// [API] 배지 — 이 위젯이 호출하는 API 정보를 보여준다. **개발자 모드에서만** 노출.
 //
-// 정보의 출처는 그 API 를 구현한 모듈의 코드다 (백엔드 각 핸들러의 `*_API_DOCS`). 이 컴포넌트는
-// /api-docs?screen=<현재 경로> 로 받아 그대로 렌더만 한다 — 여기에 API 목록을 두지 않는다.
-// 모듈이 설치·가용하지 않으면 응답이 비고, 그 경우 버튼 자체를 숨긴다.
+// 매핑: 위젯 정의(WidgetDef.apis)가 자기가 부르는 API **id 만** 선언하고, 표시되는 내용(경로·
+// 파라미터·응답·인증)은 전부 백엔드 `/api/v1/api-docs` 에서 온다. 즉 콘솔은 API 정보를 저술하지
+// 않는다. 모듈이 설치·가용하지 않으면 문서가 없으므로 배지도 뜨지 않는다. 정본: docs/design/features/api_docs.md
+//
+// 보기 모드: 위젯 래퍼 우상단 오버레이. 편집 모드: 위젯 카드 헤더에 인라인.
 
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
 import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
-import { apiDocsApi, type ApiDoc } from '../api/apiDocs'
+import { loadApiDocs, type ApiDoc } from '../api/apiDocs'
 
 const METHOD_COLOR: Record<string, string> = {
   GET: 'badge--green', POST: 'badge--blue', PUT: 'badge--yellow', DELETE: 'badge--red',
@@ -100,35 +101,36 @@ function ApiRow({ a }: { a: ApiDoc }) {
   )
 }
 
-export default function ApiDocsButton() {
+/** ids 로 문서를 조회해 [API n] 배지를 렌더. 개발자 모드 OFF / 문서 0건이면 null. */
+export default function WidgetApiBadge({ ids, title, overlay }: {
+  ids?: string[]
+  title?: string          // 모달 제목에 쓸 위젯 이름
+  overlay?: boolean       // true=보기 모드(위젯 우상단 절대배치), false=편집 카드 헤더 인라인
+}) {
   const devMode = useDevMode()
-  const { pathname } = useLocation()
-  // 조회 결과는 조회 대상 경로와 묶어 보관 — 메뉴가 바뀌면 새로 받기 전까지 이전 목록을 쓰지 않는다.
-  const [loaded, setLoaded] = useState<{ screen: string; apis: ApiDoc[] } | null>(null)
+  const [docs, setDocs] = useState<ApiDoc[] | null>(null)
   const [open, setOpen] = useState(false)
+  const key = (ids || []).join(',')
 
-  // 개발자 모드가 아니면 조회하지 않는다 (평시 트래픽 0).
   useEffect(() => {
-    if (!devMode) return
+    if (!devMode || !key) return
     let alive = true
-    const done = (apis: ApiDoc[]) => { if (alive) setLoaded({ screen: pathname, apis }) }
-    apiDocsApi.get(pathname)
-      .then(r => done(Array.isArray(r.apis) ? r.apis : []))
-      .catch(() => done([]))
+    loadApiDocs().then(map => {
+      if (alive) setDocs((ids || []).map(i => map.get(i)).filter((a): a is ApiDoc => !!a))
+    })
     return () => { alive = false }
-  }, [devMode, pathname])
+    // key 로 ids 변화를 추적 (배열 아이덴티티 대신)
+  }, [devMode, key])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 이 메뉴가 쓰는 API 가 없으면(= 해당 모듈 미설치/미가용, 또는 선언 없음) 버튼도 없다.
-  const apis = loaded?.screen === pathname ? loaded.apis : []
-  if (!devMode || apis.length === 0) return null
+  if (!devMode || !key || !docs || docs.length === 0) return null
 
   return (
     <>
-      <button className="btn btn--sm" onClick={() => setOpen(true)}
-              title="이 메뉴가 사용하는 API 정보 (개발자 모드)"
-              style={{ color: '#7c3aed', whiteSpace: 'nowrap' }}>
-        <Code2 size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-        API {apis.length}
+      <button className={overlay ? 'widget-api-badge widget-api-badge--overlay' : 'widget-api-badge'}
+              onClick={e => { e.stopPropagation(); setOpen(true) }}
+              onPointerDown={e => e.stopPropagation()}
+              title="이 위젯이 사용하는 API (개발자 모드)">
+        <Code2 size={12} style={{ verticalAlign: '-2px' }} /> API {docs.length}
       </button>
 
       {open && (
@@ -136,15 +138,14 @@ export default function ApiDocsButton() {
           <div className="modal-box modal-box--wide" onClick={e => e.stopPropagation()}
                style={{ width: 'min(860px, 94vw)' }}>
             <div className="modal-header">
-              <span className="modal-title">{'</>'} 이 메뉴가 사용하는 API</span>
+              <span className="modal-title">{'</>'} {title || '위젯'} — 사용 API</span>
               <button className="modal-close" onClick={() => setOpen(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-                <code>{pathname}</code> — {apis.length}건. 각 API 를 구현한 모듈이 선언한 정보이며,
-                모듈이 설치·가용할 때만 표시됩니다.
+                {docs.length}건. 각 API 를 구현한 모듈이 선언한 정보이며, 모듈이 설치·가용할 때만 표시됩니다.
               </div>
-              {apis.map(a => <ApiRow key={a.id} a={a} />)}
+              {docs.map(a => <ApiRow key={a.id} a={a} />)}
             </div>
           </div>
         </div>

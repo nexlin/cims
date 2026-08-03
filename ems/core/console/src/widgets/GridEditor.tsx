@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
 import type { WidgetPlacement } from './types'
 import {
@@ -173,6 +174,8 @@ export function GridEditor({ widgets, gap = GRID_GAP, onChange }: {
               <span className="grid-size-badge" title="가로 % × 세로 %">
                 {Math.round(view.w / GRID_COLS * 100)}%×{Math.round(view.h * ROW_H_VH)}%
               </span>
+              {/* 사용 API — 개발자 모드에서만. 배치하면서 이 위젯이 뭘 부르는지 바로 확인. */}
+              <WidgetApiBadge ids={def?.apis} title={def?.title ?? p.widgetId} />
               <button className="btn btn--sm" title="제거"
                       style={{ color: 'var(--danger)', marginLeft: 'auto', position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()} onClick={() => onChange(removeAt(widgets, i))}>✕</button>

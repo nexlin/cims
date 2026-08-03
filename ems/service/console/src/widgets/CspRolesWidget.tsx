@@ -32,6 +32,7 @@ function CspRolesWidget() {
 
 export const cspRolesWidget: WidgetDef = {
   id: 'cims.csp-roles',
+  apis: ['stats.health'],
   title: 'CSP 모듈 역할',
   category: 'service',
   component: CspRolesWidget,

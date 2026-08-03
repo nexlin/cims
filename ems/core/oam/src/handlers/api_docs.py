@@ -8,18 +8,19 @@ API 문서 수집 REST API — 각 모듈이 자기 엔드포인트를 스스로
   - 경로·파라미터를 고칠 때 같은 파일의 문서를 같이 고치게 된다 (문서-코드 drift 최소화).
 
 Routes (mounted at /api/v1/api-docs):
-  GET /api/v1/api-docs                 가용 모듈의 API 문서 전체
-  GET /api/v1/api-docs?screen=<path>   그 콘솔 메뉴(라우트 경로)가 쓰는 API 만
+  GET /api/v1/api-docs   가용 모듈의 API 문서 전체 → {modules[], count, apis[]}
+
+**소비처는 여기서 모른다.** 어떤 위젯이 어떤 API 를 쓰는지는 콘솔의 `WidgetDef.apis`(id 목록)가
+선언하고, 콘솔이 id 로 골라 쓴다. 이 선언은 "이 API 가 무엇인가" 만 담는다.
 
 가용 판정은 `console_layouts.installed_services()` 를 그대로 쓴다 (role=base 는 게이트웨이 라우트
 테이블이 권위, role=all 은 in-process 전체). 즉 "모듈 파일이 import 되나" AND "그 서비스가 가용하나".
 
 엔트리 스키마 (모듈이 선언):
-  id       고유 id (예: 'stats.service.volte')
+  id       고유 id (예: 'stats.service.volte') — 콘솔 WidgetDef.apis 가 참조하는 키
   module   제공 모듈 — 'csc' | 'oam-svc' | None(base 상주). 가용 판정 키.
   method   HTTP 메서드
   path     전체 경로 (/api/v1 포함)
-  screens  이 API 를 쓰는 콘솔 메뉴 라우트 경로 목록 (예: ['/stats/volte'])
   summary  한 줄 설명
   params   [{name, in(query|path|body), type, required, enum, desc}]
   response 응답 요약
@@ -161,8 +162,11 @@ def _fetch_remote(module: str, upstreams: list, token: str) -> list:
     return apis
 
 
-def collect(config: dict, screen: str = None, token: str = '') -> list:
-    """가용 모듈의 API 문서. screen 지정 시 그 메뉴가 쓰는 것만.
+def collect(config: dict, token: str = '') -> list:
+    """가용 모듈의 API 문서 전체.
+
+    어떤 위젯이 어떤 API 를 쓰는지는 **콘솔의 WidgetDef.apis(id 목록)** 가 선언한다 — 여기서는
+    필터하지 않고 전부 준다(콘솔이 id 로 골라 쓴다). 백엔드 선언은 "이 API 가 무엇인가" 만 담는다.
 
     소스 두 갈래:
       1) 로컬 import — 그 모듈 코드가 이 OAM 에 있는 경우 (base 상주 + 동일 호스트 서비스 모듈).
@@ -181,8 +185,6 @@ def collect(config: dict, screen: str = None, token: str = '') -> list:
         if ups.get(mod):
             apis += _fetch_remote(mod, ups[mod], token)
 
-    if screen:
-        apis = [a for a in apis if screen in (a.get('screens') or [])]
     return apis
 
 
@@ -196,11 +198,8 @@ async def handle_api_docs(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
         return HandlerResult(status=404, body={'error': 'not_found'})
 
     try:
-        qs = handler_args.query_params or {}
-        screen = qs.get('screen') or None
-        apis = collect(config, screen, _bearer(handler_args))
+        apis = collect(config, _bearer(handler_args))
         return HandlerResult(status=200, body={
-            'screen': screen,
             'modules': sorted({a['module'] for a in apis if a.get('module')}),
             'count': len(apis),
             'apis': apis,

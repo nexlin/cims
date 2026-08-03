@@ -1127,6 +1127,24 @@ body {
 }
 .grid-widget--dragging { z-index: 20; box-shadow: var(--shadow-lg); opacity: 0.95; }
 .grid-widget--dragging .grid-drag-handle { cursor: grabbing; }
+
+/* [API] 배지 — 개발자 모드에서 위젯이 쓰는 API 를 연다. 편집 카드 헤더는 인라인,
+   보기 모드는 위젯 우상단 오버레이(평소 흐리게, hover 시 또렷하게 — 내용 가림 최소화). */
+.widget-api-badge {
+  font-size: 10px; line-height: 1.6; white-space: nowrap; cursor: pointer;
+  color: #7c3aed; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
+}
+.widget-api-badge:hover { border-color: #7c3aed; }
+.widget-api-host { position: relative; }
+.widget-api-badge--overlay {
+  position: absolute; top: 4px; right: 4px; z-index: 4;
+  /* width:auto 명시 — 래퍼의 `.widget-fixed > * { width:100% }`(L174)가 배지에도 걸려
+     상단 전체를 덮고 위젯 제목을 가렸다. 뒤에 오는 같은 특이도 규칙이라 이걸로 상쇄된다. */
+  width: auto; max-width: none;
+  opacity: 0.35; transition: opacity 0.12s;
+}
+.widget-api-host:hover > .widget-api-badge--overlay { opacity: 1; }
 /* 8방향 리사이즈 핸들 — 모서리(n/s=세로, e/w=가로) + 귀퉁이(양방향). 카드 경계에 살짝 겹쳐 잡기 쉽게. */
 .grid-rz { position: absolute; z-index: 5; touch-action: none; }
 .grid-rz-n { top: -3px; left: 12px; right: 12px; height: 8px; cursor: ns-resize; }

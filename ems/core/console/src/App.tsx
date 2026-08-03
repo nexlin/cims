@@ -36,6 +36,7 @@ function pageWidgetDefs() {
     category: 'page' as const,
     component: r.component as unknown as ComponentType<WidgetProps>,
     adminOnly: r.adminOnly,
+    apis: r.apis,          // 고정 페이지의 사용 API — 개발자 모드 [API] 배지용
   }))
 }
 registerWidgets(pageWidgetDefs())
@@ -63,6 +64,7 @@ function EditablePageHost({ route }: { route: RouteDef }) {
       category: 'page' as const,
       component: route.component as unknown as ComponentType<WidgetProps>,
       adminOnly: route.adminOnly,
+      apis: route.apis,
     }])
   }
   // key=layoutId — 모든 라우트가 동일한 EditableLayout 타입이라, 메뉴 전환 시 React 가 인스턴스를

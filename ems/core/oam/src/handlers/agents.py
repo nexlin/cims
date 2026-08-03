@@ -3640,13 +3640,11 @@ CIMS_AGENT_ADMIN_HANDLER_LIST = (
 #  않는다 (docs/design/features/api_docs.md §5). module=None — base OAM 상주라 항상 가용.
 CIMS_AGENT_API_DOCS = [
     {'id': 'nodes.list', 'module': None, 'method': 'GET', 'path': '/api/v1/agents',
-     'screens': ['/deploy/servers'],
      'summary': '노드 목록 + 사양·상태 (hostname/ip/OS, cpu_cores·memory_mb·disk_gb, 최근 heartbeat)',
      'params': [], 'response': '{items:[{id, name, status, hostname, ip_address, os_info, '
                                'cpu_cores, memory_mb, disk_gb, agent_version, last_heartbeat, ...}]}',
      'auth': 'Bearer JWT (monitor)'},
     {'id': 'nodes.metrics', 'module': None, 'method': 'GET', 'path': '/api/v1/agents/{id}/metrics',
-     'screens': ['/deploy/servers'],
      'summary': '노드 자원 사용률 시계열 (CPU/메모리/디스크/load, 프로세스·인터페이스·마운트별)',
      'params': [{'name': 'id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '노드 id (agents.list 의 id)'}],
      'response': '{items:[{ts, cpu_pct, mem_pct, disk_pct, load_avg, processes[], per_iface[], mounts[]}]}',

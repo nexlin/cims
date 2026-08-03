@@ -129,7 +129,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [ha_service_model.md](docs/design/features/ha_service_model.md) — HA 서비스 운영 모델 (책임 분리·선언적 verdict·절체 판정 — 설계 정본, 단계적 이행)
 - [oam_base_service_split.md](docs/design/features/oam_base_service_split.md) / [oam_self_upgrade.md](docs/design/features/oam_self_upgrade.md) — OAM base/service 분리·self-upgrade
 - [auto_deployment.md](docs/design/features/auto_deployment.md) — 자동 배포 (인벤토리+블루프린트 YAML → SSH agent 설치·시스템 구성·모듈 설치. **OAM 내장** — `services/provision/`, 콘솔 `관리>시스템>자동 배포`, CLI `scripts/prov`)
-- [api_docs.md](docs/design/features/api_docs.md) — 메뉴별 사용 API 노출 (각 모듈이 코드 옆에 자기 API 선언 → 개발자 모드 `[API]` 버튼)
+- [api_docs.md](docs/design/features/api_docs.md) — 위젯별 사용 API 노출 (모듈이 코드 옆에 자기 API 선언 + 위젯이 쓰는 id 선언 → 개발자 모드 `[API]` 배지)
 - [csc_standalone_module.md](docs/design/features/csc_standalone_module.md) — CSC 독립 모듈화
 - [build_and_packaging.md](docs/design/features/build_and_packaging.md) / [package_and_template.md](docs/design/features/package_and_template.md) — 빌드·패키징·템플릿
 - [android_ue_client.md](docs/design/features/android_ue_client.md) / [android_ue_m1_pjsip_integration.md](docs/design/features/android_ue_m1_pjsip_integration.md) — Android UE 클라이언트

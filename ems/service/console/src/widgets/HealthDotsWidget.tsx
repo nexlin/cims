@@ -28,6 +28,7 @@ function HealthDotsWidget() {
 
 export const healthDotsWidget: WidgetDef = {
   id: 'cims.health-dots',
+  apis: ['stats.health'],
   title: 'CSP/CMP/DB 상태',
   category: 'service',
   component: HealthDotsWidget,

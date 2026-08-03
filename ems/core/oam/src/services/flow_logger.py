@@ -2800,7 +2800,6 @@ FLOW_HANDLER_LIST = [
 #  /api/v1/recordings 는 handlers/recording.py 가 우선 등록되어 소유하므로 여기 문서에 넣지 않는다.
 FLOW_API_DOCS = [
     {'id': 'flow.call-logs', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/call/logs',
-     'screens': ['/service/history/volte', '/service/history/ptt'],
      'summary': '통화/세션 이력 목록 (일자 스캔 + 필터·정렬)',
      'params': [
          {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'},
@@ -2816,7 +2815,6 @@ FLOW_API_DOCS = [
      ],
      'response': '{total, logs[], heatmap[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.list', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/flow/list',
-     'screens': ['/service/history/volte', '/service/history/ptt'],
      'summary': 'SIP Flow 가 기록된 call_id 목록 (일자/시간창)',
      'params': [
          {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'},
@@ -2826,7 +2824,6 @@ FLOW_API_DOCS = [
      ],
      'response': '{date, hour, call_ids[], count}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.get', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/flow/{call_id}',
-     'screens': ['/service/history/volte', '/service/history/ptt'],
      'summary': '단일 호의 SIP Flow (메시지 시퀀스)',
      'params': [
          {'name': 'call_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'SIP Call-ID'},
@@ -2835,7 +2832,6 @@ FLOW_API_DOCS = [
      ],
      'response': '{call_id, messages[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.body', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/flow/body',
-     'screens': ['/service/history/volte', '/service/history/ptt', '/service/register-flow'],
      'summary': '개별 SIP 메시지 body 조회 (Flow 상세 펼침용)',
      'params': [
          {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD'},
@@ -2844,7 +2840,6 @@ FLOW_API_DOCS = [
      ],
      'response': '{body}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.register.list', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/flow/register/list',
-     'screens': ['/service/register-flow'],
      'summary': '단말 등록(REGISTER) 이력이 있는 사용자 목록',
      'params': [
          {'name': 'user', 'in': 'query', 'type': 'string', 'required': False, 'desc': '가입자 번호/ID'},
@@ -2852,7 +2847,6 @@ FLOW_API_DOCS = [
      ],
      'response': '{users[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.register', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/flow/register',
-     'screens': ['/service/register-flow'],
      'summary': '단말 메시지 이력 — 등록/인증 시퀀스 Flow',
      'params': [
          {'name': 'user', 'in': 'query', 'type': 'string', 'required': True, 'desc': '가입자 번호/ID'},
@@ -2860,7 +2854,6 @@ FLOW_API_DOCS = [
      ],
      'response': '{user, date, messages[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.ptt-history', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/ptt/history',
-     'screens': ['/service/history/ptt'],
      'summary': 'PTT 그룹 세션 목록 (summary=1 이면 그룹별 요약)',
      'params': [
          {'name': 'group_id', 'in': 'query', 'type': 'string', 'required': False,
@@ -2873,7 +2866,6 @@ FLOW_API_DOCS = [
      'response': '{group_id, sessions[]} 또는 {summaries[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.ptt-history.session', 'module': 'oam-svc', 'method': 'GET',
      'path': '/api/v1/ptt/history/{group_id}/{session}',
-     'screens': ['/service/history/ptt'],
      'summary': 'PTT 세션 이벤트 (floor 요청/승인/해제)',
      'params': [
          {'name': 'group_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'MCPTT 그룹 ID'},
@@ -2882,7 +2874,6 @@ FLOW_API_DOCS = [
      'response': '{events[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.ptt-history.flow', 'module': 'oam-svc', 'method': 'GET',
      'path': '/api/v1/ptt/history/{group_id}/{session}/flow',
-     'screens': ['/service/history/ptt'],
      'summary': 'PTT 세션의 SIP Flow',
      'params': [
          {'name': 'group_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'MCPTT 그룹 ID'},
@@ -2891,7 +2882,6 @@ FLOW_API_DOCS = [
      'response': '{messages[]}', 'auth': 'Bearer JWT (monitor)'},
     {'id': 'flow.abnormal-sessions', 'module': 'oam-svc', 'method': 'GET',
      'path': '/api/v1/security/abnormal-sessions',
-     'screens': ['/service/abnormal-sessions'],
      'summary': '비정상 세션 이력 — 외부 SIP 스캔/사기 호 시도 탐지',
      'params': [
          {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'},

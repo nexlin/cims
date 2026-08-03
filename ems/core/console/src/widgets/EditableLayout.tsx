@@ -9,7 +9,6 @@ import { useAuth } from '../contexts/AuthContext'
 import { hasRole } from '../utils/permissions'
 import { useToast } from '../components/Toast'
 import { useIsDesktop } from '../hooks/useIsDesktop'
-import ApiDocsButton from '../components/ApiDocsButton'
 import { consoleApi } from '../api/console'
 import { GridRenderer } from './GridRenderer'
 import { GridEditor } from './GridEditor'
@@ -137,10 +136,6 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
 
   return (
     <div className="layout-host">
-      {/* [API] — 이 메뉴가 쓰는 API 정보(개발자 모드 전용). 모든 라우트가 EditableLayout 을 거치므로
-          여기 한 번만 두면 화면별 배선 없이 전 메뉴에 붙는다. 개발자 모드 OFF / 해당 API 없으면 스스로 숨는다. */}
-      {editSlot && createPortal(<ApiDocsButton />, editSlot)}
-
       {/* 편집 컨트롤 — 헤더 슬롯에 portal. FAB 는 데스크톱에서만, 편집 중이면 계속 노출(완료 보장). */}
       {isAdmin && editSlot && (isDesktop || editing) && createPortal(editControls, editSlot)}
 

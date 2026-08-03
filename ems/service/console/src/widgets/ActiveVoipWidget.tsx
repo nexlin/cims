@@ -45,6 +45,7 @@ function ActiveVoipWidget() {
 
 export const activeVoipWidget: WidgetDef = {
   id: 'cims.active-voip',
+  apis: ['stats.health'],
   title: 'VoIP 활성 통화',
   category: 'service',
   component: ActiveVoipWidget,

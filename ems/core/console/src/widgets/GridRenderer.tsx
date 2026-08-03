@@ -5,6 +5,7 @@
 // registry 에 없는 위젯 id → fallback 카드(graceful, 레이아웃 안 깨짐).
 
 import type { CSSProperties } from 'react'
+import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
 import type { PageLayout } from './types'
 import { isGridLayout, gridBox, GRID_COLS, ROW_H_VH, GRID_GAP } from './gridLayout'
@@ -53,7 +54,8 @@ function GridCanvas({ layout }: { layout: PageLayout }) {
         }
         ;(style as Record<string, string | number>)['--h-rows'] = b.h
         return (
-          <div key={`${p.widgetId}-${i}`} className="widget-fixed" style={style}>
+          <div key={`${p.widgetId}-${i}`} className="widget-fixed widget-api-host" style={style}>
+            <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
         )
@@ -75,8 +77,10 @@ function FlowGrid({ layout }: { layout: PageLayout }) {
         const fixed = !!p.h
         const hStyle = fixed ? { height: widgetHeightCss(p.h), display: 'flex' as const } : {}
         return (
-          <div key={`${p.widgetId}-${i}`} className={fixed ? 'widget-fixed' : undefined}
+          <div key={`${p.widgetId}-${i}`}
+               className={`${fixed ? 'widget-fixed ' : ''}widget-api-host`}
                style={{ gridColumn: `span ${span}`, minWidth: 0, ...hStyle }}>
+            <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
         )
