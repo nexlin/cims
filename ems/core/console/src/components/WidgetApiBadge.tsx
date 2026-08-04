@@ -7,6 +7,7 @@
 // 보기 모드: 위젯 래퍼 우상단 오버레이. 편집 모드: 위젯 카드 헤더에 인라인.
 
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
 import { loadApiDocs, type ApiDoc } from '../api/apiDocs'
@@ -133,8 +134,16 @@ export default function WidgetApiBadge({ ids, title, overlay }: {
         <Code2 size={12} style={{ verticalAlign: '-2px' }} /> API {docs.length}
       </button>
 
-      {open && (
-        <div className="modal-overlay" onClick={() => setOpen(false)}>
+      {/* 모달은 document.body 로 portal — 편집 모드에서 배지가 카드 헤더(.grid-drag-handle) 안에 있어
+          모달을 그 자리에 렌더하면 카드에 갇힌다(클리핑·스태킹). 또한 React 이벤트는 **DOM 이 아니라
+          컴포넌트 트리**를 타고 버블링하므로, portal 뒤에도 pointer 이벤트를 여기서 끊어야 드래그
+          핸들이 반응하지 않는다 (안 끊으면 모달 클릭이 위젯 이동으로 먹혀 닫기 버튼조차 안 눌린다). */}
+      {open && createPortal(
+        <div className="modal-overlay"
+             onClick={() => setOpen(false)}
+             onPointerDown={e => e.stopPropagation()}
+             onPointerUp={e => e.stopPropagation()}
+             onPointerMove={e => e.stopPropagation()}>
           <div className="modal-box modal-box--wide" onClick={e => e.stopPropagation()}
                style={{ width: 'min(860px, 94vw)' }}>
             <div className="modal-header">
@@ -148,8 +157,8 @@ export default function WidgetApiBadge({ ids, title, overlay }: {
               {docs.map(a => <ApiRow key={a.id} a={a} />)}
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+        document.body)}
     </>
   )
 }
