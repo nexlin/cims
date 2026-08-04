@@ -148,6 +148,11 @@ private fun PrimaryChannelPanel(
             st.groupDocs[s.groupId]?.priority?.let { PillBadge("P$it", Ct.Mint) }
             if (s.emergency) PillBadge("긴급", Ct.Red, filled = true)
             Spacer(Modifier.weight(1f))
+            // 현재 세션에서 나가기 — 1:1(private)·그룹 공통 (상단 우측, 소형).
+            Text("나가기", color = Ct.Red, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Ct.RedDim)
+                    .clickable { st.ctl?.leaveGroup(s.groupId) }
+                    .padding(horizontal = 7.dp, vertical = 3.dp))
             Text("주채널 선택", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Ct.MintDim)
                     .clickable(onClick = onSelect)
@@ -427,7 +432,7 @@ private fun OverlayToggle(icon: Int, desc: String, active: Boolean, onClick: () 
 
 /** 가로형 대형 PTT 바(시안의 마이크 버튼) — 누르는 동안 발언, 떼면 해제. */
 @Composable
-private fun PttBar(floor: FloorState, enabled: Boolean, listenOnly: Boolean = false,
+fun PttBar(floor: FloorState, enabled: Boolean, listenOnly: Boolean = false,
                    queuePosition: Int? = null, modifier: Modifier = Modifier,
                    onDown: () -> Unit, onUp: () -> Unit) {
     @Suppress("NAME_SHADOWING") val enabled = enabled && !listenOnly

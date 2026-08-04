@@ -1752,11 +1752,13 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
 
 
 async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """회사 전화번호부 — 조직 트리 + VoLTE 가입자. 단말 '회사 연락처'(읽기전용) 소스.
+    """회사 전화번호부 — 조직 트리 + 가입자. 단말 '회사 연락처'(읽기전용) 소스.
 
-    provisioning scope 토큰 필요. 조직(organizations) 계층(parent_id)과 전 VoLTE 가입자를 반환한다.
+    provisioning scope 토큰 필요. 조직(organizations) 계층(parent_id)과 가입자를 반환한다.
+    `?service=volte|ptt` 로 가입 테이블을 고른다(기본 volte — 기존 VoLTE 단말 호환).
+    PTT 단말은 `service=ptt` 로 1:1 private call 대상(ptt_subscriptions)을 받는다.
     `orgs[]` = 조직 트리(code/name/parent code/sort), `entries[]` = 가입자(org=조직 code).
-    users.org_id 는 조직 코드(organizations.code)를 담는다.
+    users.org_id 는 조직 코드(organizations.code)를 담는다. ETag 는 내용 해시라 서비스별로 다르다.
     """
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
@@ -1790,10 +1792,12 @@ async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> Hand
                 orgs.append({"code": code or "", "name": name or "",
                              "parent": id2code.get(parent_id, "") if parent_id is not None else "",
                              "sort": so or 0})
-            # 가입자 — org = users.org_id(조직 code)
+            # 가입자 — org = users.org_id(조직 code). service 인자로 가입 테이블 선택.
+            service = (getattr(args, 'query_params', None) or {}).get('service') or 'volte'
+            table = 'ptt_subscriptions' if service == 'ptt' else 'volte_subscriptions'
             cur.execute(
-                "SELECT u.org_id AS org, u.name AS name, v.id AS msisdn "
-                "FROM volte_subscriptions v JOIN users u ON u.id = v.user_id "
+                f"SELECT u.org_id AS org, u.name AS name, v.id AS msisdn "
+                f"FROM {table} v JOIN users u ON u.id = v.user_id "
                 "ORDER BY u.name")
             for org, name, msisdn in cur.fetchall():
                 entries.append({"org": org or "", "name": name or "", "msisdn": msisdn or ""})

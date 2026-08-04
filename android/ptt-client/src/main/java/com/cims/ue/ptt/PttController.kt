@@ -647,7 +647,12 @@ class PttController(
 
     private fun bindCall(groupId: String, callId: Int, active: Boolean = false) {
         synchronized(lock) {
-            val s = sessionMap[groupId] ?: return
+            val s = sessionMap[groupId]
+                // 방어: 키 불일치(URI 표기 차이) 시 private 세션을 번호 동치로 매칭
+                ?: sessionMap.values.firstOrNull {
+                    it.privatePeer && bareId(it.groupId).trimStart('+') == bareId(groupId).trimStart('+')
+                }
+                ?: run { Log.w(TAG, "bindCall miss: key=$groupId call=$callId"); return }
             s.callId = callId
             if (active) s.active = true
         }
@@ -727,7 +732,9 @@ class PttController(
         val policy = _listenPolicy.value
         synchronized(lock) {
             for (s in sessionMap.values) {
-                val on = policy == ListenPolicy.ALL || s.role != ChannelRole.NONE
+                // 1:1(private)은 사용자가 명시적으로 건/받은 대화 — 채널 소음 제어용 듣기
+                // 정책(CHANNELS_ONLY)의 대상이 아니다. 주채널 비점유(role=NONE)라도 항상 수신.
+                val on = policy == ListenPolicy.ALL || s.role != ChannelRole.NONE || s.privatePeer
                 if (s.audible != on) {
                     s.audible = on
                     if (s.callId >= 0) sip.setCallListen(s.callId, on)
@@ -883,14 +890,19 @@ class PttController(
             Session(target).also {
                 it.privatePeer = true
                 it.fullDuplex = fullDuplex
-                it.role = ChannelRole.NONE                        // 주채널(PTT 키) 승격 없음
+                // 1:1 은 주채널을 점유하지 않는다 — 활성 1:1 이 있는 동안 PTT 키가 1:1 에
+                // 우선하는 규칙(talkSession)으로 발언을 라우팅하고, 끝나면 주채널로 복귀한다.
+                it.role = ChannelRole.NONE
                 sessionMap[target] = it
             }
         }
         // 편성 채널이 아니므로 channelStore/affiliation/roster 구독 없음 — 즉석 세션.
         val parts = listOf(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
             McpttXml.mcpttInfo(McpttXml.SessionType.PRIVATE, "tel:$target", mcpttId, "tel:$target")))
-        sip.makeGroupCall(groupAor(target), parts, floorSdp(s), fullDuplex = fullDuplex)
+        // C안: 멀티(mc_no_floor_ctrl 협상)여도 오디오는 반이중 규칙 — mic 은 PTT 게이트로만 연다.
+        // 발신 call id 는 콜백으로 즉시 바인딩 — remote URI 파싱(bindCall) 의존을 없앤다
+        // (미바인딩이면 PTT 게이트의 mic 결선이 스킵되어 TX 0 = 무음, 08-04 tcpdump 실측).
+        sip.makeGroupCall(groupAor(target), parts, floorSdp(s)) { cid -> bindCall(target, cid) }
         _status.value = if (fullDuplex) "1:1 통화 발신 $target" else "1:1 무전 발신 $target"
         emit(PttEventKind.JOIN, target)
         publish()
@@ -902,17 +914,30 @@ class PttController(
     private fun autoJoinPrivateCall(inc: CallState.Incoming) {
         val peer = bareId(inc.callerId.ifBlank { inc.remote })
         if (peer.isBlank()) return
+        val stale = synchronized(lock) {
+            val old = sessionMap[peer]
+            when {
+                old == null -> null
+                old.callId == inc.id -> return                    // 같은 호 재통지 — 무시
+                else -> {
+                    // 상대가 새 호를 걸었다 = 이전 1:1 은 끝난 것. 종료 경합(BYE 지연)으로
+                    // 남은 세션을 정리하고 새 호를 받는다 — 방치하면 새 INVITE 가 무응답된다.
+                    sessionMap.remove(peer)?.also { it.close() }
+                }
+            }
+        }
+        stale?.let { if (it.callId >= 0) sip.hangup(it.callId) }
         val s = synchronized(lock) {
-            if (sessionMap.containsKey(peer)) return              // 이미 그 상대와 세션 중
+            if (sessionMap.containsKey(peer)) return              // 경합 재확인
             Session(peer).also {
                 it.callId = inc.id
                 it.privatePeer = true
                 it.fullDuplex = inc.noFloorCtrl
-                it.role = ChannelRole.NONE
+                it.role = ChannelRole.NONE                        // 1:1 은 주채널 비점유
                 sessionMap[peer] = it
             }
         }
-        sip.answerGroupCall(inc.id, floorSdp(s), fullDuplex = s.fullDuplex)
+        sip.answerGroupCall(inc.id, floorSdp(s))
         _status.value = if (s.fullDuplex) "1:1 통화 수신: $peer" else "1:1 무전 수신: $peer"
         emit(PttEventKind.JOIN, peer)
         publish()
@@ -1435,8 +1460,31 @@ class PttController(
     // ── PTT 버튼 (주채널 전용) ──
 
     /** PTT down — 주채널에 Floor Request. GRANT 수신 시에만 실제 발화(mic on). */
+    /** PTT 발언 대상 — 활성 1:1 이 있으면 그것이 우선(전화>무전 규칙), 없으면 주채널. */
+    private fun talkSession(): Session? = synchronized(lock) {
+        sessionMap.values.firstOrNull { v -> v.privatePeer && v.callId >= 0 }
+    } ?: primarySession()
+
     fun pttDown() {
-        val s = primarySession() ?: run { _status.value = "그룹콜을 먼저 시작하세요"; return }
+        val s = talkSession() ?: run { _status.value = "그룹콜을 먼저 시작하세요"; return }
+        // 멀티 1:1(mc_no_floor_ctrl — floor 절차 없음, TS 24.379): PTT 는 서버 요청 없이
+        // 로컬 마이크 게이트로만 동작한다. 양쪽이 같이 누르면 동시 발화(서버는 상시 중계).
+        if (s.fullDuplex) {
+            pttHeld = true
+            setTalkCapture(true)
+            s.floorState = FloorState.SPEAKING     // 로컬 표시 (서버 GRANT 아님)
+            s.mySpeakStartMs = SystemClock.elapsedRealtime()
+            // 그룹 GRANT 경로와 동일한 "삑 후 말하기" — 톤 재생 뒤 mic 결선. 같은 틱에 열면
+            // snd dev 재오픈(setCaptureEnabled)과 경합해 두 번째 press 부터 캡처가 안 열린다(실측).
+            scope.launch {
+                delay(feedback?.grantTone() ?: 100L)
+                val p = talkSession()
+                if (pttHeld && p?.fullDuplex == true && p.callId >= 0)
+                    sip.setMicEnabled(p.callId, true)
+            }
+            publish()
+            return
+        }
         // Floor Taken 이 Permission=0 을 실어 온 세션(broadcast 그룹·ambient 청취 leg)은
         // 요청해봐야 Deny 뿐이다 — 요청 자체를 막고 이유를 알린다(TS 24.380 §6.3.4.4.2-3d).
         if (!s.canRequestFloor) { feedback?.denyTone(); _status.value = "이 채널은 청취 전용"; return }
@@ -1472,7 +1520,20 @@ class PttController(
     fun pttUp() {
         pttHeld = false
         requestTimeout?.cancel()
-        val s = primarySession() ?: return
+        val s = talkSession() ?: return
+        // 멀티 1:1 — 로컬 마이크 게이트 닫기 (pttDown 과 쌍, 서버 메시지 없음).
+        if (s.fullDuplex) {
+            if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
+            setTalkCapture(false)
+            if (s.mySpeakStartMs > 0) {
+                emit(PttEventKind.TALK_ME, s.groupId,
+                    durationMs = SystemClock.elapsedRealtime() - s.mySpeakStartMs)
+                s.mySpeakStartMs = 0
+            }
+            s.floorState = FloorState.IDLE
+            publish()
+            return
+        }
         val wasSpeaking = s.floorState == FloorState.SPEAKING
         clearTalkLimit(s)
         if (wasSpeaking && s.mySpeakStartMs > 0) {

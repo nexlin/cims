@@ -227,6 +227,7 @@ fun InitialAvatar(name: String, active: Boolean = true, size: Int = 36) {
 enum class Tab(val label: String, val icon: Int) {
     MAIN("주채널", R.drawable.ic_nav_main),
     CHANNELS("전체채널", R.drawable.ic_nav_channels),
+    CONTACTS("연락처", R.drawable.ic_nav_contacts),
     MESSAGES("메시지", R.drawable.ic_nav_message),
     SETTINGS("설정", R.drawable.ic_nav_settings),
 }

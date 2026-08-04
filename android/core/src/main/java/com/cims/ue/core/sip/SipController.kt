@@ -432,6 +432,7 @@ class SipController(private val config: SipAccountConfig) {
         parts: List<SipBodyPart>,
         applicationSdp: String,
         fullDuplex: Boolean = false,
+        onCallId: ((Int) -> Unit)? = null,
     ) = onCtl {
         val acc = account ?: return@onCtl
         halfDuplex = !fullDuplex
@@ -447,6 +448,8 @@ class SipController(private val config: SipAccountConfig) {
         }
         call.makeCall(groupUri, prm)
         calls[call.id] = call
+        // 발신 call id 통지 — 호출자(PTT 1:1)가 세션에 즉시 바인딩(remote URI 문자열 매칭 불요).
+        onCallId?.invoke(call.id)
     }
 
     /**

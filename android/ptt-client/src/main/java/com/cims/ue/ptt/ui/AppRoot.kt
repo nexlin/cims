@@ -222,6 +222,10 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
             )
         }
 
+        // 1:1 통화 화면 — 활성 private 세션이 있는 동안 전체 오버레이(전화앱 스타일).
+        // 어느 탭/화면에 있든 표시되고, 나가기/상대 종료로 세션이 사라지면 자동으로 걷힌다.
+        st.sessions.firstOrNull { it.privatePeer }?.let { PrivateCallOverlay(st, it) }
+
         // 하드웨어 버튼 설정 오버레이 — 같은 Activity 윈도우(물리 키가 dispatchKeyEvent 로 유입되게)
         if (showKeyConfig) KeyConfigOverlay(onDismiss = { HwPtt.cancelLearn(); showKeyConfig = false })
     }
@@ -250,6 +254,7 @@ private fun HomeScaffold(
             when (tab) {
                 Tab.MAIN -> MainChannelScreen(st, svc, onOpenThread = onOpenThread)
                 Tab.CHANNELS -> ChannelsScreen(st, onOpenChannel = onOpenChannel, onOpenThread = onOpenThread)
+                Tab.CONTACTS -> ContactsScreen(st, onOpenThread = onOpenThread)
                 Tab.MESSAGES -> MessagesScreen(st, svc, onOpenThread = onOpenThread)
                 Tab.SETTINGS -> SettingsScreen(st, svc, onStopSip = onStopSip, onOpenKeyConfig = onOpenKeyConfig)
             }

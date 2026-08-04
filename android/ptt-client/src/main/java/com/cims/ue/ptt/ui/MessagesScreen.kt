@@ -249,19 +249,19 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                 when {
                     isGroupPeer -> if (joined) PillBadge("접속", Ct.Mint)
                     ps == null -> {
-                        Text("무전", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        Text("싱글", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(50))
                                 .background(Ct.Mint.copy(alpha = 0.14f))
                                 .clickable { st.ctl?.startPrivateCall(peer, fullDuplex = false) }
                                 .padding(horizontal = 10.dp, vertical = 5.dp))
-                        Text("통화", color = Ct.Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                        Text("멀티", color = Ct.Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(50))
                                 .background(Ct.Amber.copy(alpha = 0.14f))
                                 .clickable { st.ctl?.startPrivateCall(peer, fullDuplex = true) }
                                 .padding(horizontal = 10.dp, vertical = 5.dp))
                     }
                     else -> {
-                        PillBadge(if (ps.fullDuplex) "통화 중" else "무전 중", Ct.Mint)
+                        PillBadge(if (ps.fullDuplex) "멀티 무전 중" else "싱글 무전 중", Ct.Mint)
                         Text("종료", color = Ct.Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clip(RoundedCornerShape(50))
                                 .background(Ct.Red.copy(alpha = 0.14f))

@@ -106,9 +106,13 @@ class ProvisioningClient(
      * GET /provisioning/directory → 회사 전화번호부(조직 트리 + VoLTE 가입자, 읽기전용).
      * [knownEtag] 를 If-None-Match 로 보내 서버 버전이 같으면 304 → `changed=false`(다운로드 생략).
      */
-    fun fetchDirectory(accessToken: String, knownEtag: String? = null): com.cims.ue.core.contacts.DirectorySync {
+    fun fetchDirectory(
+        accessToken: String,
+        knownEtag: String? = null,
+        service: String = "volte",
+    ): com.cims.ue.core.contacts.DirectorySync {
         val b = Request.Builder()
-            .url("${csc.baseUrl}/provisioning/directory")
+            .url("${csc.baseUrl}/provisioning/directory?service=$service")
             .addHeader("Authorization", "Bearer $accessToken")
         if (!knownEtag.isNullOrBlank()) b.addHeader("If-None-Match", knownEtag)
         http.newCall(b.get().build()).execute().use { resp ->
