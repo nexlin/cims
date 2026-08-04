@@ -29,6 +29,8 @@ CspPttGroup::CspPttGroup()
       _onNetwork( true ),
       _maxMembers( 0 ),
       _requireAffiliation( true ),
+      _floorPolicy( "single" ),
+      _maxTalkers( 2 ),
       _authorizedUserId( 0 ) {
 }
 
@@ -86,6 +88,10 @@ bool CspPttGroup::load( std::string groupId ) {
     if ( root.Has( "require_affiliation" ) ) _requireAffiliation = ( root.GetInt( "require_affiliation" ) != 0 );
     if ( root.Has( "alias" ) ) _alias = root.GetString( "alias" );
 
+    // floor 정책 (JSON fallback)
+    if ( root.Has( "floor_policy" ) ) _floorPolicy = root.GetString( "floor_policy" );
+    if ( root.Has( "max_talkers" ) ) _maxTalkers = root.GetInt( "max_talkers" );
+
     // MCData 그룹 메시징 게이트 (JSON fallback)
     if ( root.Has( "allow_sds" ) ) _allowSds = ( root.GetInt( "allow_sds" ) != 0 );
     if ( root.Has( "allow_fd" ) ) _allowFd = ( root.GetInt( "allow_fd" ) != 0 );
@@ -137,6 +143,8 @@ void CspPttGroup::Clear() {
     _maxMembers = 0;
     _requireAffiliation = true;
     _alias.clear();
+    _floorPolicy = "single";
+    _maxTalkers = 2;
     _authorizedUserId = 0;
     _authorizedUser.clear();
     _createdAt.clear();

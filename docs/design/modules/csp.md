@@ -365,8 +365,8 @@ CCmpClient
 | `RELAY_ADD` | VoIP RTP relay 세션 생성 (+`remote_nat`/`remote_sig_ip` — leg NAT 지시) | local_ip, local_port(_b), local_video_port(_b) — leg 별 전용 포트 |
 | `RELAY_MODIFY` | 세션 remote 주소 갱신 (re-INVITE 등) | 동일 |
 | `RELAY_REMOVE` | 세션 해제 | — (hdr.status 만) |
-| `PTT_GROUP_ADD` | PTT 그룹 RTP 생성 | ip, floor_port, member_ports(멤버별 전용 포트 맵) |
-| `PTT_GROUP_MODIFY` | 그룹 멤버/우선순위 갱신 | 동일 |
+| `PTT_GROUP_ADD` | PTT 그룹 RTP 생성 (+`floor_policy`/`max_talkers` — 동시 발언 정책) | ip, floor_port, member_ports(멤버별 전용 포트 맵) |
+| `PTT_GROUP_MODIFY` | 그룹 멤버/우선순위·floor 정책 갱신 | 동일 |
 | `PTT_JOIN` | 멤버 그룹 참가 — 2단 멱등: user_ip 없이 선할당 → 주소 갱신 (+`user_nat`/`user_sig_ip`) | ip, port, video_port (멤버 전용) |
 | `PTT_LEAVE` | 멤버 그룹 퇴장 | — |
 | `PTT_GROUP_REMOVE` | 그룹 해제 | — |
@@ -375,6 +375,22 @@ CCmpClient
 
 > `STATS` 는 CMP 가 처리하는 통계 조회 명령이지만 CSP(CCmpClient)는 송신하지 않는다 —
 > OAM(`ems/core/oam` stats 핸들러)과 검증 파이프라인(stage6)이 CMP 9000/UDP 로 직접 조회한다.
+
+**Floor 정책 발행 (동시 발언 — TS 24.380)**
+
+그룹의 동시 발언 정책은 DB `ptt_groups.floor_policy`(`single`/`dual`/`multi`) 와 `max_talkers`
+가 원천이고(JSON fallback 은 같은 이름의 키), `CspPttGroup._floorPolicy`/`_maxTalkers` 로 실려
+`PTT_GROUP_ADD`/`_MODIFY` payload 에 나간다. floor 절차 자체는 CMP↔UE in-band 라 CSP 는 정책만
+전달하고 floor 루프에 들어가지 않는다 ([../features/mcptt_csp_cmp_roadmap_contract.md](../features/mcptt_csp_cmp_roadmap_contract.md) §B.1).
+
+CMP 는 미상 policy 값과 `multi` 의 범위 밖 `max_talkers`(계약 2..8)를 `BAD_REQUEST` 로 거절하며,
+거절되면 그룹 생성 자체가 실패해 통화 불가가 된다. 따라서 `CCmpClient::SetFloorPolicy` 가 발행
+직전에 검증해 잘못된 설정은 `single` 로 낮춰 보내고 `LOG_ERROR` 로 남긴다 — 설정 오류가 통화
+장애로 번지지 않게 하되 조용히 묻히지도 않게 한다.
+
+정책 변경은 `PTT_GROUP_MODIFY` 로 전달된다. 변경 감지는 `ComputeGroupConfigHash`(로스터 +
+floor 정책)가 담당하므로, 멤버가 그대로여도 정책만 바꾸면 `SyncGroupsState` 가 MODIFY 를 보낸다.
+정원이 줄면 CMP 가 초과 화자를 Revoke 해 상태를 정책에 맞춘다.
 
 **Flow 메타 필드 (모든 Session/Group API 파라미터):**
 

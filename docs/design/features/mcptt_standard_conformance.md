@@ -89,7 +89,8 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 > [android_ue_client.md](android_ue_client.md) §5.4 에 U1~U18 로 정리했다. 서버측은 CMP 프로브로
 > 검증돼 있고([../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」),
 > 단말측 dual/multi 실호는 WSL2 빌드 + 실기기 3대 검증이 남아 있다(cspsim 은 단일 화자 전제).
-> 마찬가지로 CSP 가 `floor_policy`/`group_type:"private"` 를 아직 발행하지 않는다(Call Control 파트).
+> CSP 는 그룹 `floor_policy`/`max_talkers` 를 발행한다(DB `ptt_groups` 원천). `group_type:"private"`
+> 는 아직 발행하지 않는다(Call Control 파트).
 
 ### R2-1. Floor Control — 구현 항목의 규격 편차
 

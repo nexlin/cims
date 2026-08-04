@@ -35,6 +35,35 @@ static unsigned int SeedTransId() {
     return (unsigned int)( ( (unsigned long long)tv.tv_sec * 1000ULL + tv.tv_usec / 1000 ) & 0x3FFFFFFF ) | 1;
 }
 
+// floor 정책 필드를 PTT_GROUP_ADD/MODIFY payload 에 싣는다 (docs/api/cmp_media_api.md §7.1/§7.7).
+//   CMP 는 미상 policy 값과 multi 의 범위 밖 max_talkers 를 BAD_REQUEST 로 거절한다 — 거절되면
+//   그룹 생성 자체가 실패해 통화 불가가 되므로, 잘못된 설정은 여기서 걸러 기본 동작(single)으로
+//   보낸다. 조용히 넘기지 않고 로그를 남겨 설정 오류가 드러나게 한다.
+static void SetFloorPolicy( SimpleJson::JsonNode &req, const std::string &strGroupId, const std::string &strFloorPolicy,
+                            int iMaxTalkers ) {
+    if ( strFloorPolicy.empty() ) return;  // 미지정 — CMP 기본값(single) 유지
+
+    if ( strFloorPolicy != "single" && strFloorPolicy != "dual" && strFloorPolicy != "multi" ) {
+        CLog::Print( LOG_ERROR, "CmpClient: group=%s 미상 floor_policy='%s' — 미전송(CMP 기본 single)",
+                     strGroupId.c_str(), strFloorPolicy.c_str() );
+        return;
+    }
+
+    if ( strFloorPolicy == "multi" ) {
+        // multi 는 max_talkers 필수(2..8). 범위 밖이면 single 로 낮춘다 — multi 를 그대로 보내면
+        //   CMP 가 그룹 자체를 거절한다.
+        if ( iMaxTalkers < 2 || iMaxTalkers > 8 ) {
+            CLog::Print( LOG_ERROR,
+                         "CmpClient: group=%s floor_policy=multi 인데 max_talkers=%d (계약 2..8) — single 로 대체",
+                         strGroupId.c_str(), iMaxTalkers );
+            req.Set( "floor_policy", "single" );
+            return;
+        }
+        req.Set( "max_talkers", iMaxTalkers );
+    }
+    req.Set( "floor_policy", strFloorPolicy );
+}
+
 CCmpClient::CCmpClient()
     : m_iCmpPort( 0 ),
       m_hSocket( -1 ),
@@ -591,7 +620,8 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
                            std::string &strIp, int &iFloorPort,
                            std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
                            bool bVideoEnabled, int iSessionSeq, const std::string &strSesId,
-                           const std::string &strGroupType, const std::string &strInitiator ) {
+                           const std::string &strGroupType, const std::string &strInitiator,
+                           const std::string &strFloorPolicy, int iMaxTalkers ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_ADD" );
     req.Set( "group_id", strGroupId );
@@ -613,6 +643,8 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     //   broadcast: 개시자(initiator)만 floor 보유, 타 멤버 REQUEST 는 CMP 가 REJECT.
     if ( !strGroupType.empty() ) req.Set( "group_type", strGroupType );
     if ( !strInitiator.empty() ) req.Set( "initiator_id", strInitiator );
+    // 동시 발언 정책 — floor 절차는 CMP↔UE in-band 라 세션 생성 시 1회 전달로 끝난다.
+    SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
 
     std::stringstream ssMembers;
     for ( size_t i = 0; i < vecMembers.size(); ++i ) {
@@ -658,7 +690,7 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
 }
 
 bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                              const std::string &strSesId ) {
+                              const std::string &strSesId, const std::string &strFloorPolicy, int iMaxTalkers ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_MODIFY" );
     req.Set( "group_id", strGroupId );
@@ -674,6 +706,8 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
         ssMembers << vecMembers[i]->_id << ":" << vecMembers[i]->_priority << ":" << vecMembers[i]->_role;
     }
     req.Set( "members", ssMembers.str() );
+    // 정책 변경 반영 — 정원이 줄면 CMP 가 초과 화자를 Revoke 해 상태를 정책에 맞춘다.
+    SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
 
     std::string strResp;
     if ( !SendRequestAndWait( strGroupId, req, strResp ) ) return false;

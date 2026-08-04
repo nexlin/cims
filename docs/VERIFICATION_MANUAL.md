@@ -433,9 +433,15 @@ sudo bash scripts/nat_netns_sim.sh teardown
 
 ### floor 정책 시험 (dual/multi-talker·private·ambient·floor SRTCP)
 
-동시 발언·private call·ambient 청취·floor 암호화는 **CSP 가 아직 정책 필드를 발행하지 않고
-cspsim/단말도 동시 발언을 다루지 않아** 실호 시나리오로는 구동되지 않는다. CMP 제어평면과
-floor RTCP 를 직접 구동하는 프로브로 검증한다 (정본 [api/cmp_media_api.md](api/cmp_media_api.md) §7.7~§7.8).
+private call·ambient 청취·floor 암호화는 **CSP 가 아직 해당 정책 필드를 발행하지 않아** 실호
+시나리오로는 구동되지 않는다. CMP 제어평면과 floor RTCP 를 직접 구동하는 프로브로 검증한다
+(정본 [api/cmp_media_api.md](api/cmp_media_api.md) §7.7~§7.8).
+
+> **그룹 동시 발언(dual/multi)은 실호 경로가 열려 있다** — CSP 가 `floor_policy`/`max_talkers`
+> 를 발행한다. DB 에서 대상 그룹의 정책을 바꾸면(`UPDATE ptt_groups SET floor_policy='multi',
+> max_talkers=2 WHERE mcptt_group_id='<그룹>'`) 다음 `SyncGroupsState` 주기에 `PTT_GROUP_MODIFY`
+> 로 CMP 에 반영된다. 다만 **cspsim 은 단일 화자 전제**라 동시 발언 실호는 단말(Android UE)로
+> 검증한다 — 화자 2 + 청취자 1, 총 3대.
 
 ```bash
 python3 scripts/mcptt_floor_policy_probe.py --cmp <CMP_IP> [--port 9000] [--base-port 51500]

@@ -139,6 +139,8 @@ CREATE TABLE IF NOT EXISTS ptt_groups (
     allow_fd            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'mcdata-allow-file-distribution (그룹 파일전송 허용, TS 24.481)',
     max_sds_size        INT          NOT NULL DEFAULT 10000 COMMENT 'mcdata-on-network-max-data-size-for-SDS (payload octets, 0=무제한)',
     max_auto_recv       INT          NOT NULL DEFAULT 1048576 COMMENT 'mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계 octets)',
+    floor_policy        ENUM('single','dual','multi') NOT NULL DEFAULT 'single' COMMENT 'TS 24.380 동시 발언 정책 (single=단일 화자, dual=2인째는 선점 자격자만, multi=max_talkers 명)',
+    max_talkers         INT          NOT NULL DEFAULT 2 COMMENT 'floor_policy=multi 일 때 동시 발언 상한 (CMP 계약 범위 2..8)',
     PRIMARY KEY (id),
     UNIQUE KEY uk_mcptt_group_id (mcptt_group_id),
     KEY idx_authorized_user (authorized_user_id),

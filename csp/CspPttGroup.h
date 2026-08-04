@@ -108,6 +108,13 @@ public:
     /** 그룹 별칭/단축명 */
     std::string _alias;
 
+    // ── floor 정책 (TS 24.380 동시 발언 — docs/api/cmp_media_api.md §7.7) ──
+    /** "single" | "dual" | "multi" — CMP 는 미상 값을 BAD_REQUEST 로 거절한다 */
+    std::string _floorPolicy;
+
+    /** _floorPolicy=="multi" 일 때 동시 발언 상한 (CMP 계약 범위 2..8) */
+    int _maxTalkers;
+
     // ── 그룹 소유 (3GPP TS 23.280 authorized user = 생성자 = 관리주체) ──
     /** 소유자 users.id (0=미지정) */
     int _authorizedUserId;

@@ -166,6 +166,10 @@ floor 는 **직교하는 두 축**이다(원칙 ② — 한 enum 에 섞지 않�
 
 Dev A 는 세션 생성 시 이 필드들을 실어 보내면 된다 — 이후 floor 절차(GRANT/TAKEN/REVOKE/
 Floor Release Multi Talker·동시 발언 슬롯·녹취 트랙 분리)는 CMP 자율이다.
+그룹 정책 발행은 구현됐다: DB `ptt_groups.floor_policy`/`max_talkers` 가 원천이고 CSP 가
+`PTT_GROUP_ADD`/`_MODIFY` 에 싣는다 (발행 전 계약 검증은
+[../modules/csp.md](../modules/csp.md) 「Floor 정책 발행」). `floor_control` 은 private call
+(§A.1)에서 붙는다 — 그룹은 항상 `on` 이다.
 구현 위치: 코덱 `cmp/PFloorCodec.cpp`, 상태머신 `cmp/PMcpttGroup.cpp`.
 정책은 `PTT_GROUP_MODIFY` 로 언제든 바꿀 수 있고, 정원이 줄면 CMP 가 초과 화자를 Revoke 해
 상태를 정책에 맞춘다. 동시 발언의 **실호 검증은 단말 정합이 전제**다
@@ -207,7 +211,7 @@ STATS `detail.groups[].floor_holders`(배열)와 이벤트 `FLOOR_TALKERS`(발�
 |---|---|---|---|---|
 | `PTT_GROUP_ADD`/`_MODIFY` | `group_type:"private"` | A | Private call (1:1) | CMP 수용 완료 / CSP 발행 미구현 |
 | `PTT_GROUP_ADD`/`_MODIFY` | `floor_control`(`on`/`off`) | B | Floor 유무 (private no-floor 포함) | 완료 |
-| `PTT_GROUP_ADD`/`_MODIFY` | `floor_policy`(`single`/`dual`/`multi`), `max_talkers` | B | Dual / Multi-talker (그룹 전용) | 완료 |
+| `PTT_GROUP_ADD`/`_MODIFY` | `floor_policy`(`single`/`dual`/`multi`), `max_talkers` | B | Dual / Multi-talker (그룹 전용) | 완료 (CSP 발행 완료 — DB `ptt_groups.floor_policy`/`max_talkers` 원천) |
 | `PTT_GROUP_ADD`/`_MODIFY` | `floor_crypto` | B | Floor E2E 보호 | 완료 (CSC KMS 연결 대기) |
 | `PTT_GROUP_ADD` | `distribution`, `multicast_*` | B(예약) | MBMS/멀티캐스트 | 미구현 |
 | `PTT_GROUP_ADD`/`RELAY_ADD` | `pre_established` | A | Pre-established session | 미구현 |

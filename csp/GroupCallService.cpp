@@ -245,11 +245,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         std::map<std::string, std::pair<int, int>> mapMemberPorts;
         if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedFloorPort, mapMemberPorts,
                                      strRecordDir, clsGroup._videoEnabled, iSessionSeq, strGroupSesId,
-                                     clsGroup._groupType, pszCallerInfo ) ) {
+                                     clsGroup._groupType, pszCallerInfo, clsGroup._floorPolicy,
+                                     clsGroup._maxTalkers ) ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            // nMemberHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
+            // nConfigHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
             m_mapGroupRtp[pszGroupId] = {
-                iSharedFloorPort, strSharedIp, ComputeMemberHash( clsGroup ), "", "", clsGroup._videoEnabled, 0,
+                iSharedFloorPort, strSharedIp, ComputeGroupConfigHash( clsGroup ), "", "", clsGroup._videoEnabled, 0,
                 mapMemberPorts };
         }
     } else if ( !strRecordDir.empty() ) {
@@ -260,7 +261,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         std::map<std::string, std::pair<int, int>> tmpMemberPorts;
         std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpFPort, tmpMemberPorts, strRecordDir,
-                                clsGroup._videoEnabled, 0, strGroupSesId, clsGroup._groupType, pszCallerInfo );
+                                clsGroup._videoEnabled, 0, strGroupSesId, clsGroup._groupType, pszCallerInfo,
+                                clsGroup._floorPolicy, clsGroup._maxTalkers );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -742,13 +744,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             int iNewFloorPort = 0;
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iNewFloorPort, mapMemberPorts,
                                          strRecordDir, false, 0, GetOrIssueGroupSesId( pszGroupId ),
-                                         clsGroup._groupType, strInitiator ) ) {
+                                         clsGroup._groupType, strInitiator, clsGroup._floorPolicy,
+                                         clsGroup._maxTalkers ) ) {
                 bVideoEnabled = clsGroup._videoEnabled;
                 iSharedFloorPortIM = iNewFloorPort;
-                // nMemberHash 는 반드시 실제 멤버해시로 설정 — 0 으로 두면 다음 SyncGroupsState 가
+                // nConfigHash 는 반드시 실제 설정해시로 설정 — 0 으로 두면 다음 SyncGroupsState 가
                 // 변경으로 오인해 스퓨리어스 ModifyGroup+group_change NOTIFY storm → 멤버 drop.
                 m_mapGroupRtp[pszGroupId] = {
-                    iNewFloorPort, strSharedIp, ComputeMemberHash( clsGroup ), "", "", bVideoEnabled, 0,
+                    iNewFloorPort, strSharedIp, ComputeGroupConfigHash( clsGroup ), "", "", bVideoEnabled, 0,
                     mapMemberPorts };
             } else {
                 CLog::Print( LOG_ERROR, "InviteMember(%s) Failed to get/alloc Shared Port for Group %s", pszUserId,
@@ -992,12 +995,16 @@ void CGroupCallService::OnGroupConfigChanged() {
     CheckGroupIntegrity();
 }
 
-size_t CGroupCallService::ComputeMemberHash( const CspPttGroup &group ) {
+// CMP 에 재전달이 필요한 그룹 설정의 지문 — 값이 바뀌면 SyncGroupsState 가 MODIFY 를 보낸다.
+//   멤버(로스터·우선순위)에 더해 floor 정책을 포함한다: 정책만 바꾼 경우에도 CMP 에 도달해야
+//   운영 중 정원 조정(예: single ↔ multi)이 실제로 반영된다.
+size_t CGroupCallService::ComputeGroupConfigHash( const CspPttGroup &group ) {
     std::string strHashInput;
     for ( const auto &pUser : group._pusers ) {
         if ( !pUser ) continue;
         strHashInput += pUser->_id + ":" + std::to_string( pUser->_priority ) + ";";
     }
+    strHashInput += "|floor=" + group._floorPolicy + ":" + std::to_string( group._maxTalkers );
     return std::hash<std::string>{}( strHashInput );
 }
 
@@ -1007,7 +1014,7 @@ void CGroupCallService::SyncGroupsState() {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
         // Calculate Hash
-        size_t nHash = ComputeMemberHash( group );
+        size_t nHash = ComputeGroupConfigHash( group );
 
         auto itRtp = m_mapGroupRtp.find( group._id );
         if ( itRtp == m_mapGroupRtp.end() ) {
@@ -1017,14 +1024,15 @@ void CGroupCallService::SyncGroupsState() {
             return;
         } else {
             // EXISTING GROUP - Check for Diff
-            if ( itRtp->second.nMemberHash != nHash ) {
+            if ( itRtp->second.nConfigHash != nHash ) {
                 // CHANGED
                 lock.unlock();
                 CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) Config Changed. Sending ModifyGroup.",
                              group._id.c_str() );
-                if ( gclsCmpClient.ModifyGroup( group._id, group._pusers, GetOrIssueGroupSesId( group._id ) ) ) {
+                if ( gclsCmpClient.ModifyGroup( group._id, group._pusers, GetOrIssueGroupSesId( group._id ),
+                                                group._floorPolicy, group._maxTalkers ) ) {
                     std::unique_lock<std::recursive_mutex> lock2( m_mutex );
-                    m_mapGroupRtp[group._id].nMemberHash = nHash;
+                    m_mapGroupRtp[group._id].nConfigHash = nHash;
                 } else {
                     // MODIFY 실패 (NOT_FOUND: CMP 그룹 소실 등) — AddGroup 멱등 재수립.
                     //   재생성이면 floor/멤버 포트가 새로 할당되므로 캐시를 응답값으로 갱신한다.
@@ -1036,14 +1044,15 @@ void CGroupCallService::SyncGroupsState() {
                                                                      std::to_string( group._dbId ) );
                     if ( gclsCmpClient.AddGroup( group._id, group._pusers, strIp, iFloorPort, mapMemberPorts,
                                                  strRecordDir, group._videoEnabled, group._sessionSeq,
-                                                 GetOrIssueGroupSesId( group._id ), group._groupType, "" ) ) {
+                                                 GetOrIssueGroupSesId( group._id ), group._groupType, "",
+                                                 group._floorPolicy, group._maxTalkers ) ) {
                         std::unique_lock<std::recursive_mutex> lock2( m_mutex );
                         auto it2 = m_mapGroupRtp.find( group._id );
                         if ( it2 != m_mapGroupRtp.end() ) {
                             it2->second.iFloorPort = iFloorPort;
                             it2->second.strIp = strIp;
                             it2->second.memberPorts = mapMemberPorts;
-                            it2->second.nMemberHash = nHash;
+                            it2->second.nConfigHash = nHash;
                         }
                         CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) re-established on CMP (floor=%d)",
                                      group._id.c_str(), iFloorPort );
@@ -1188,12 +1197,12 @@ void CGroupCallService::CheckGroupIntegrity() {
                                                              std::to_string( group._dbId ) );
             std::string strGroupSesId = GetOrIssueGroupSesId( group._id );
             if ( !gclsCmpClient.AddGroup( group._id, group._pusers, ip, floorPort, mapMemberPorts, strRecordDir,
-                                          group._videoEnabled, group._sessionSeq, strGroupSesId, group._groupType,
-                                          "" ) )
+                                          group._videoEnabled, group._sessionSeq, strGroupSesId, group._groupType, "",
+                                          group._floorPolicy, group._maxTalkers ) )
                 return;
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            m_mapGroupRtp[group._id] = { floorPort,     ip, ComputeMemberHash( group ), "", "", group._videoEnabled, 0,
-                                         mapMemberPorts };
+            m_mapGroupRtp[group._id] = {
+                floorPort, ip, ComputeGroupConfigHash( group ), "", "", group._videoEnabled, 0, mapMemberPorts };
         }
 
         // 4) call log 보장
@@ -1340,7 +1349,8 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                                                            std::to_string( clsGroup._dbId ) );
         if ( gclsCmpClient.AddGroup( strGroupId, clsGroup._pusers, strReAddIp, iReAddFloor, mapReAddPorts,
                                      strReAddRecDir, clsGroup._videoEnabled, clsGroup._sessionSeq,
-                                     GetOrIssueGroupSesId( strGroupId ), clsGroup._groupType, strMemberId.c_str() ) ) {
+                                     GetOrIssueGroupSesId( strGroupId ), clsGroup._groupType, strMemberId.c_str(),
+                                     clsGroup._floorPolicy, clsGroup._maxTalkers ) ) {
             {
                 std::unique_lock<std::recursive_mutex> lock( m_mutex );
                 auto itRe = m_mapGroupRtp.find( strGroupId );
@@ -1348,7 +1358,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                     itRe->second.iFloorPort = iReAddFloor;
                     itRe->second.strIp = strReAddIp;
                     itRe->second.memberPorts = mapReAddPorts;
-                    itRe->second.nMemberHash = ComputeMemberHash( clsGroup );
+                    itRe->second.nConfigHash = ComputeGroupConfigHash( clsGroup );
                 }
             }
             CLog::Print( LOG_INFO, "OnCallStarted: Group(%s) NOT_FOUND → AddGroup re-established (floor=%d), retry JoinGroup",

@@ -71,13 +71,15 @@ public:
     static std::string IssueSessionId();
 
     // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).
+    //   strFloorPolicy/iMaxTalkers: 동시 발언 정책 (docs/api/cmp_media_api.md §7.7). 비면 미전송(CMP 기본 single).
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                    std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
                    const std::string &strRecordDir = "", bool bVideoEnabled = false, int iSessionSeq = 0,
                    const std::string &strSesId = "", const std::string &strGroupType = "",
-                   const std::string &strInitiator = "" );
+                   const std::string &strInitiator = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0 );
+    // 정책 변경도 MODIFY 로 전달한다 (생성=ADD 1회, 이후 모든 상태 변경=MODIFY — 계약 §A.0).
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                      const std::string &strSesId = "" );
+                      const std::string &strSesId = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0 );
     // 2단 멱등 (docs/api/cmp_media_api.md §7.4): strIp 가 비면 ① 선할당(멤버 포트만 확보),
     //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort/piLocalVideoPort 에 멤버 전용 포트 응답.
     //   iUserPt/iUserTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),

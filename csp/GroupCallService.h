@@ -120,7 +120,7 @@ private:
      *  그룹 컨텍스트(m_mapGroupRtp)를 만드는 모든 경로(SyncGroupsState/InviteMember/CheckGroupIntegrity)
      *  에서 동일하게 저장해야 한다. 0(미설정)으로 두면 다음 SyncGroupsState 가 실제해시와 불일치로
      *  착각해 스퓨리어스 ModifyGroup + group_change NOTIFY storm 을 일으켜 멤버 무더기 drop 됨. */
-    static size_t ComputeMemberHash( const class CspPttGroup &group );
+    static size_t ComputeGroupConfigHash( const class CspPttGroup &group );
 
     /**
      * @brief Build MCPTT call control info XML (application/vnd.3gpp.mcptt-info+xml, TS 24.379)
@@ -165,7 +165,7 @@ private:
     struct GroupRtpInfo {
         int iFloorPort;  // 그룹 공유 floor control 포트 (>0 = CMP 그룹 유효)
         std::string strIp;
-        size_t nMemberHash;
+        size_t nConfigHash;  // CMP 재전달이 필요한 설정(로스터·floor 정책)의 지문 — 변경 감지용
         std::string strSessionCallId;
         std::string strCallerId;
         bool bVideoEnabled;
