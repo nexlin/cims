@@ -164,7 +164,7 @@ private:
      */
     static void WrapMultipartBody( class CSipMessage *pclsInvite, const std::string &strGroupXml,
                                    const std::string &strRosterXml, const std::string &strFloorIp, int iFloorPort,
-                                   const std::string &strGroupUri = "" );
+                                   const std::string &strGroupUri = "", bool bNoFloorCtrl = false );
 
     bool m_bMonitorRunning;
     std::thread m_threadMonitor;

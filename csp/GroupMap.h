@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <vector>
 
 #include "CspPttGroup.h"
 
@@ -36,6 +37,11 @@ public:
 
     /** Remove a group by ID (ad hoc 임시 그룹 정리용) */
     void Remove( const char *pszGroupId );
+
+    /** ephemeral(_isAdhoc — ad hoc/private 즉석 세션) 그룹 수집 — DB 전체 재로드가 맵을
+     *  재구축할 때 보존·재삽입용 (DB 에 없는 그룹이라 재구축이 지우면 CheckMemberState 가
+     *  "Group removed" 로 진행 중 호를 끊는다). */
+    void CollectEphemeral( std::vector<CspPttGroup> &vecOut );
 
     /** Select a group by ID */
     bool Select( const char *pszGroupId, CspPttGroup &clsGroup );

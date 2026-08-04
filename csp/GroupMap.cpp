@@ -128,6 +128,14 @@ void CGroupMap::Remove( const char *pszGroupId ) {
     m_clsMutex.unlock();
 }
 
+void CGroupMap::CollectEphemeral( std::vector<CspPttGroup> &vecOut ) {
+    m_clsMutex.lock();
+    for ( const auto &kv : m_clsMap ) {
+        if ( kv.second._isAdhoc ) vecOut.push_back( kv.second );
+    }
+    m_clsMutex.unlock();
+}
+
 bool CGroupMap::Select( const char *pszGroupId, CspPttGroup &clsGroup ) {
     bool bRes = false;
     GROUP_MAP::iterator it;

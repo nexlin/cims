@@ -588,6 +588,25 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             return StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
         }
         std::string strPrivId = std::string( "priv-" ) + pszFrom + "-" + pszTo;
+        // 새 발신의 floor 모드 — 싱글(floor on, 기본) vs 멀티(mc_no_floor_ctrl → off).
+        McpttFmtp clsPrivFmtpChk;
+        CGroupCallService::ParseMcpttFmtp( pclsRtp, clsPrivFmtpChk );
+        const char *pszWantFloorCtl = clsPrivFmtpChk.iNoFloorCtrl ? "off" : "";
+        // 잔존 ephemeral 그룹의 모드가 이번 발신과 다르면 재사용하지 않는다 — 이전 호의
+        //   그룹이 남아(경합·앱 강제종료 등) 이후 모든 1:1 이 그 모드로 고정되는 오염 방지.
+        //   CMP 그룹도 REMOVE 로 확실히 재생성한다 (ADD 멱등 경로는 floor_control 을 갱신하지 않음).
+        {
+            CspPttGroup clsPrivOld;
+            if ( gclsGroupMap.Select( strPrivId.c_str(), clsPrivOld ) &&
+                 clsPrivOld._floorControl != pszWantFloorCtl ) {
+                CLog::Print( LOG_INFO,
+                             "EventIncomingCall: private(%s) 잔존 그룹 모드 불일치(%s→%s) — 제거 후 재생성 [PTT-AS]",
+                             strPrivId.c_str(), clsPrivOld._floorControl.empty() ? "on" : "off",
+                             clsPrivFmtpChk.iNoFloorCtrl ? "off" : "on" );
+                gclsCmpClient.RemoveGroup( strPrivId );
+                gclsGroupMap.Remove( strPrivId.c_str() );
+            }
+        }
         if ( !gclsGroupMap.Contains( strPrivId.c_str() ) ) {
             CspPttGroup clsPriv;
             clsPriv.Clear();
@@ -596,9 +615,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsPriv._groupType = "private";
             clsPriv._requireAffiliation = false;  // 계약 §A.1 — 상대 MCPTT ID 직접 지정, 사전 편성 없음
             clsPriv._isAdhoc = true;              // 통화 종료 시 GroupMap 에서 제거(ephemeral)
-            McpttFmtp clsPrivFmtp;
-            CGroupCallService::ParseMcpttFmtp( pclsRtp, clsPrivFmtp );
-            if ( clsPrivFmtp.iNoFloorCtrl ) clsPriv._floorControl = "off";
+            if ( clsPrivFmtpChk.iNoFloorCtrl ) clsPriv._floorControl = "off";
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszTo, 5, "participant", "" ) );
             gclsGroupMap.Insert( clsPriv );

@@ -495,6 +495,11 @@ bool CDbManager::LoadAllGroups( CGroupMap &clsMap ) {
     }
     mysql_free_result( pRes );
 
+    // ephemeral(ad hoc/private 즉석 세션) 그룹은 DB 에 없다 — 전체 재구축이 지우면
+    // CheckMemberState 가 "Group removed" 로 진행 중 호를 끊는다(60초 재로드마다). 보존·재삽입.
+    std::vector<CspPttGroup> vecEphemeral;
+    clsMap.CollectEphemeral( vecEphemeral );
+
     // 그룹별 멤버 로드 및 맵 삽입
     clsMap.Clear();
     for ( const auto &strId : vecGroupIds ) {
@@ -503,6 +508,7 @@ bool CDbManager::LoadAllGroups( CGroupMap &clsMap ) {
             clsMap.Insert( clsGroup );
         }
     }
+    for ( auto &clsEph : vecEphemeral ) clsMap.Insert( clsEph );
 
     CLog::Print( LOG_INFO, "[DB] LoadAllGroups: %d groups loaded", (int)vecGroupIds.size() );
     return true;

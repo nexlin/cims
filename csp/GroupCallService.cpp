@@ -165,10 +165,11 @@ void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp
                 if ( iEnd == std::string::npos ) iEnd = strParams.size();
                 std::string strTok = strParams.substr( iPos, iEnd - iPos );
                 iPos = iEnd + 1;
-                // 공백 trim (fmtp value 선두 공백·"; " 구분 표기 허용)
-                size_t iB = strTok.find_first_not_of( " \t" );
+                // 공백 trim — CR/LF 포함 (SDP 마지막 라인의 잔존 \r 이 마지막 토큰 매칭을
+                //   깨뜨린다: "mc_no_floor_ctrl\r" != "mc_no_floor_ctrl")
+                size_t iB = strTok.find_first_not_of( " \t\r\n" );
                 if ( iB == std::string::npos ) continue;
-                strTok = strTok.substr( iB, strTok.find_last_not_of( " \t" ) - iB + 1 );
+                strTok = strTok.substr( iB, strTok.find_last_not_of( " \t\r\n" ) - iB + 1 );
                 if ( strcasecmp( strTok.c_str(), "mc_queueing" ) == 0 ) {
                     clsFmtp.iQueueing = 1;
                 } else if ( strncasecmp( strTok.c_str(), "mc_priority=", 12 ) == 0 ) {
@@ -310,9 +311,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
 
     // 2. 발신자(Caller)에게 caller 전용 CMP 포트로 200 OK 응답 (leg 별 포트셋)
+    //   ⚠ floor 없는 세션(private 멀티, floor_control=off)은 floor_port 가 0 이다 — 종전
+    //   `iSharedFloorPort > 0` 게이트는 이 경우 200 OK 응답 블록 전체를 건너뛰어 발신자가
+    //   서버 미디어 주소를 받지 못했다(peer 없음 → 무음, 08-04 실측). 멤버 포트 확보 성공을
+    //   기준으로 응답한다 (floor 라인은 포트 0 이면 SDP 에서 자연 생략).
     int iCallerLocalAudio = 0, iCallerLocalVideo = 0;
-    if ( iSharedFloorPort > 0 &&
-         GetOrAllocMemberPort( pszGroupId, pszCallerInfo, iCallerLocalAudio, iCallerLocalVideo ) ) {
+    if ( GetOrAllocMemberPort( pszGroupId, pszCallerInfo, iCallerLocalAudio, iCallerLocalVideo ) ) {
         // PTT 발신 Dialog 도 mcptt realm 사용 (200 OK 의 From/To/Contact 도메인)
         {
             std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
@@ -880,7 +884,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                     iFloorPort = itRtp2->second.iFloorPort;
             }
             std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
-            WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort, strGroupUri );
+            WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort, strGroupUri,
+                               clsGroup._floorControl == "off" );
 
             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
             pclsInvite->AddHeader(
@@ -1478,6 +1483,24 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     gclsCmpClient.LeaveGroup( strGroupId, strSessionId, GetOrIssueGroupSesId( strGroupId ) );
     InvalidateMemberPort( strGroupId, strSessionId );
 
+    // private call(1:1, TS 24.379 §11.1): 한쪽이 끊으면 세션 전체가 끝난다 — 그룹 시맨틱
+    //   (한 멤버 이탈해도 세션 유지)을 적용하지 않고 잔여 leg 에 BYE 를 보낸다. 각 leg 의
+    //   종료가 다시 이 함수로 들어와 기존 마지막-멤버 teardown 경로(그룹 해제·adhoc 제거)를 밟는다.
+    if ( bStillActive ) {
+        CspPttGroup clsPrivChk;
+        if ( gclsGroupMap.Select( strGroupId.c_str(), clsPrivChk ) && clsPrivChk._groupType == "private" ) {
+            std::vector<std::string> vecPeerLegs;
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                for ( const auto &kv : m_mapCallSession )
+                    if ( kv.second.strGroupId == strGroupId ) vecPeerLegs.push_back( kv.first );
+            }
+            CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)",
+                         strGroupId.c_str(), vecPeerLegs.size() );
+            for ( const auto &strPeerLeg : vecPeerLegs ) gclsUserAgent.StopCall( strPeerLeg.c_str() );
+        }
+    }
+
     // PTT history: member leave event
     if ( gclsCallDir.IsEnabled() ) {
         gclsCallDir.PttMemberLeave( strGroupId, strMemberId );
@@ -1785,7 +1808,7 @@ std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup
  */
 void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::string &strGroupXml,
                                            const std::string &strRosterXml, const std::string &strFloorIp,
-                                           int iFloorPort, const std::string &strGroupUri ) {
+                                           int iFloorPort, const std::string &strGroupUri, bool bNoFloorCtrl ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
     // F-16: boundary를 랜덤 hex 문자열로 생성 — body 내 "mcptt" 등장과 충돌 방지 (RFC 2046 §5.1.1)
@@ -1802,8 +1825,13 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     std::ostringstream sdpFloor;
     sdpFloor << "m=application " << iFloorPort << " UDP MCPTT\r\n"
              << "c=IN IP4 " << strFloorIp << "\r\n"
-             << "a=floorid:0 mstrm:audio\r\n"
-             << "a=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
+             << "a=floorid:0 mstrm:audio\r\n";
+    // floor 없는 세션(private full-duplex)은 fan-out 에도 mc_no_floor_ctrl 을 광고해야
+    //   수신 단말이 전이중(마이크 상시)으로 수락한다 (G17 — 협상 결과의 양방향 정합).
+    if ( bNoFloorCtrl )
+        sdpFloor << "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl\r\n";
+    else
+        sdpFloor << "a=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
     if ( !strGroupUri.empty() ) sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
     strSdp += sdpFloor.str();
 
