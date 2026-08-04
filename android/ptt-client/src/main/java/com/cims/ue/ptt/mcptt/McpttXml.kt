@@ -29,7 +29,11 @@ object McpttXml {
     const val CT_RESOURCE_LISTS = "application/resource-lists+xml"
     const val CT_AFFILIATION = "application/vnd.3gpp.mcptt-affiliation-command+xml"
 
-    enum class SessionType(val v: String) { PREARRANGED("prearranged"), CHAT("chat"), BROADCAST("broadcast") }
+    enum class SessionType(val v: String) {
+        PREARRANGED("prearranged"), CHAT("chat"), BROADCAST("broadcast"),
+        /** 1:1 private call (TS 24.379 §11.1) — 서버가 합성 2인 세션으로 라우팅. */
+        PRIVATE("private"),
+    }
 
     // ── 빌더: 키업 그룹 INVITE multipart 본문 ──
 

@@ -63,11 +63,20 @@ class CimsAccount(private val owner: SipController) : Account() {
         val mcptt = whole.contains("mcptt-info")
         // 긴급 그룹콜 = fan-out INVITE mcptt-info 의 emergency-ind=true (TS 24.379) — 긴급 UI/톤
         val emergency = mcptt && Regex("<emergency-ind>\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(whole)
+        // 1:1 private call = mcptt-info session-type=private (TS 24.379 §11.1). 상대는
+        // mcptt-calling-user-id(tel:번호)로 식별 — From 은 서버 표기라 규격 필드를 우선한다.
+        val privateCall = mcptt &&
+            Regex("<session-type>\\s*private", RegexOption.IGNORE_CASE).containsMatchIn(whole)
+        val callerId = if (privateCall)
+            Regex("<mcptt-calling-user-id>\\s*(?:tel:|sip:)?([+\\d]+)", RegexOption.IGNORE_CASE)
+                .find(whole)?.groupValues?.get(1) ?: "" else ""
+        // 전이중 1:1 = INVITE 의 floor fmtp 에 mc_no_floor_ctrl (G17) — floor 없이 mic 상시 개방
+        val noFloorCtrl = privateCall && whole.contains("mc_no_floor_ctrl")
         // 180 Ringing 만 자동 응답 — 실제 200 OK 는 사용자 answer().
         runCatching {
             call.answer(CallOpParam().apply { statusCode = pjsip_status_code.PJSIP_SC_RINGING })
         }
-        owner.dispatchIncoming(call, from, video, mcptt, emergency)
+        owner.dispatchIncoming(call, from, video, mcptt, emergency, privateCall, callerId, noFloorCtrl)
     }
 
     /** 문자(SIP MESSAGE) 수신 — 200 OK 응답은 PJSIP 가 자동, 본문만 컨트롤러로 중계.

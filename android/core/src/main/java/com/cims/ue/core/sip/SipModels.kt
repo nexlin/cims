@@ -34,13 +34,19 @@ sealed interface CallState {
 
     /** 착신 수신(INVITE 도착, 180 자동 응답 후 사용자 응답 대기). [video]=상대 SDP 에 m=video 포함.
      *  [mcptt]=multipart 에 mcptt-info 포함(MCPTT 그룹콜 — PTT 앱이 자동 수락).
-     *  [emergency]=mcptt-info 에 emergency-ind=true(긴급 그룹콜 fan-out — 긴급 UI/톤). */
+     *  [emergency]=mcptt-info 에 emergency-ind=true(긴급 그룹콜 fan-out — 긴급 UI/톤).
+     *  [privateCall]=mcptt-info session-type=private(1:1, TS 24.379 §11.1). [callerId]=
+     *  mcptt-calling-user-id 의 번호(1:1 상대 식별·표시). [noFloorCtrl]=INVITE fmtp 에
+     *  mc_no_floor_ctrl(전이중 1:1 — 마이크 상시 개방으로 수락). */
     data class Incoming(
         val id: Int,
         val remote: String,
         val video: Boolean = false,
         val mcptt: Boolean = false,
         val emergency: Boolean = false,
+        val privateCall: Boolean = false,
+        val callerId: String = "",
+        val noFloorCtrl: Boolean = false,
     ) : CallState
 
     /** 통화 활성(CONNECTING/CONFIRMED). */

@@ -85,6 +85,10 @@ data class GroupCallState(
     val talkers: List<Speaker> = emptyList(),
     /** 이 세션의 Floor Indicator 비트 — dual floor(G)/multi-talker(I) 표시용. */
     val floorIndicator: Int = 0,
+    /** 1:1 private call(TS 24.379 §11.1) — groupId 자리에 상대 번호. 채널 편성과 무관한 즉석 세션. */
+    val privatePeer: Boolean = false,
+    /** 전이중 1:1(mc_no_floor_ctrl 협상) — floor 없음, 마이크 상시 개방. PTT 버튼 대신 통화 UI. */
+    val fullDuplex: Boolean = false,
 )
 
 /**
@@ -201,13 +205,16 @@ class PttController(
         var talkers: List<Speaker> = emptyList()   // 동시 발언 화자 전체(§8.2.3.17~18)
         var talkerSsrc: Map<String, Long> = emptyMap()  // 화자 → RTP SSRC (SSRC 별 재생용, U10)
         var floorIndicator: Int = 0           // 마지막 수신 Floor Indicator (G/I 비트 표시)
+        var privatePeer: Boolean = false      // 1:1 private call — groupId=상대 번호
+        var fullDuplex: Boolean = false       // 전이중 1:1 — floor 없음, mic 상시 개방
         val floor: FloorClient = FloorClient(ssrc, mcpttId, localPort = 0,
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
         fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(),
             audible, emergency, emergencyMine, volume, canRequestFloor, speakDeadlineMs,
             // 대기 위치는 QUEUED 상태에서만 의미가 있다 — 상태로 파생해 지난 값이 새지 않게 한다.
-            queuePosition.takeIf { floorState == FloorState.QUEUED }, talkers, floorIndicator)
+            queuePosition.takeIf { floorState == FloorState.QUEUED }, talkers, floorIndicator,
+            privatePeer, fullDuplex)
         fun close() { talkLimit?.cancel(); runCatching { floor.close() } }
     }
 
@@ -350,7 +357,8 @@ class PttController(
                         applyListenPolicy()
                     }
                     is CallState.Disconnected -> onCallEnded(st.id)
-                    is CallState.Incoming -> if (st.mcptt) autoJoinGroupCall(st)
+                    is CallState.Incoming ->
+                        if (st.mcptt) { if (st.privateCall) autoJoinPrivateCall(st) else autoJoinGroupCall(st) }
                     else -> Unit
                 }
             }
@@ -825,7 +833,9 @@ class PttController(
     private fun floorSdp(s: Session): String =
         "m=application ${s.floor.localPort} UDP MCPTT\r\n" +
             "a=floorid:0 mstrm:audio\r\n" +
-            "a=fmtp:MCPTT mc_queueing"
+            // 전이중 1:1 은 mc_no_floor_ctrl 로 floor 없는 세션을 협상한다(G17) — CSP 가
+            // PTT_GROUP_ADD floor_control:"off" 로 변환.
+            (if (s.fullDuplex) "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl" else "a=fmtp:MCPTT mc_queueing")
 
     /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널.
      *  [emergency]=true 면 긴급 그룹콜로 개시(INVITE mcptt-info emergency-ind, TS 24.379). */
@@ -858,6 +868,53 @@ class PttController(
         _status.value = if (emergency) "🚨 긴급 그룹콜 개시 $groupId" else "그룹콜 참여 $groupId"
         emit(PttEventKind.JOIN, groupId)
         if (emergency) emit(PttEventKind.EMERGENCY, groupId)
+        publish()
+    }
+
+    /** 1:1 private call 발신 (TS 24.379 §11.1 on-demand — mcptt-info session-type=private).
+     *  사전 그룹편성·affiliation 불요(서버가 멤버십 게이트 우회). 세션 키=[peer](상대 번호).
+     *  [fullDuplex]=true 면 mc_no_floor_ctrl 을 협상해 floor 없는 전이중(마이크 상시 개방)으로
+     *  연다 — 서버 PTT_GROUP_ADD floor_control:"off". false 면 2인 floor(반이중 무전) 세션. */
+    fun startPrivateCall(peer: String, fullDuplex: Boolean = false) {
+        val target = bareId(peer)
+        if (target.isBlank() || target == bareId(mcpttId)) return
+        val s = synchronized(lock) {
+            if (sessionMap.containsKey(target)) return            // 이미 그 상대와 세션 중
+            Session(target).also {
+                it.privatePeer = true
+                it.fullDuplex = fullDuplex
+                it.role = ChannelRole.NONE                        // 주채널(PTT 키) 승격 없음
+                sessionMap[target] = it
+            }
+        }
+        // 편성 채널이 아니므로 channelStore/affiliation/roster 구독 없음 — 즉석 세션.
+        val parts = listOf(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
+            McpttXml.mcpttInfo(McpttXml.SessionType.PRIVATE, "tel:$target", mcpttId, "tel:$target")))
+        sip.makeGroupCall(groupAor(target), parts, floorSdp(s), fullDuplex = fullDuplex)
+        _status.value = if (fullDuplex) "1:1 통화 발신 $target" else "1:1 무전 발신 $target"
+        emit(PttEventKind.JOIN, target)
+        publish()
+    }
+
+    /** 1:1 private call 착신 자동 수락 — 세션 키=발신자 번호(mcptt-calling-user-id).
+     *  전이중(INVITE fmtp mc_no_floor_ctrl)이면 answer 에도 같은 fmtp 를 에코하고 마이크를
+     *  상시 개방한다(auto commencement — 그룹콜 fan-out 과 동일한 즉시 연결 모델). */
+    private fun autoJoinPrivateCall(inc: CallState.Incoming) {
+        val peer = bareId(inc.callerId.ifBlank { inc.remote })
+        if (peer.isBlank()) return
+        val s = synchronized(lock) {
+            if (sessionMap.containsKey(peer)) return              // 이미 그 상대와 세션 중
+            Session(peer).also {
+                it.callId = inc.id
+                it.privatePeer = true
+                it.fullDuplex = inc.noFloorCtrl
+                it.role = ChannelRole.NONE
+                sessionMap[peer] = it
+            }
+        }
+        sip.answerGroupCall(inc.id, floorSdp(s), fullDuplex = s.fullDuplex)
+        _status.value = if (s.fullDuplex) "1:1 통화 수신: $peer" else "1:1 무전 수신: $peer"
+        emit(PttEventKind.JOIN, peer)
         publish()
     }
 

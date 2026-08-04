@@ -220,8 +220,9 @@ class SipController(private val config: SipAccountConfig) {
      * MCPTT 그룹콜 착신 자동 수락(ptt_ue.md §12.3) — 응답 SDP 에 `m=application`(floor) 주입,
      * 상대(INVITE offer)의 floor 포트는 [floorRemote] 로 학습(onCallSdpCreated remSdp).
      */
-    fun answerGroupCall(callId: Int, applicationSdp: String) = onCtl {
-        halfDuplex = true
+    /** [fullDuplex]=전이중 1:1 수락(mc_no_floor_ctrl 협상) — 마이크 상시 개방(VoLTE 와 동일). */
+    fun answerGroupCall(callId: Int, applicationSdp: String, fullDuplex: Boolean = false) = onCtl {
+        halfDuplex = !fullDuplex
         muted = false
         calls[callId]?.apply {
             pendingAppSdp = applicationSdp
@@ -430,9 +431,10 @@ class SipController(private val config: SipAccountConfig) {
         groupUri: String,
         parts: List<SipBodyPart>,
         applicationSdp: String,
+        fullDuplex: Boolean = false,
     ) = onCtl {
         val acc = account ?: return@onCtl
-        halfDuplex = true
+        halfDuplex = !fullDuplex
         val call = CimsCall(this, acc)
         call.pendingAppSdp = applicationSdp
         val prm = CallOpParam(true).apply {
@@ -569,9 +571,12 @@ class SipController(private val config: SipAccountConfig) {
         video: Boolean,
         mcptt: Boolean = false,
         emergency: Boolean = false,
+        privateCall: Boolean = false,
+        callerId: String = "",
+        noFloorCtrl: Boolean = false,
     ) {
         calls[call.id] = call
-        _call.value = CallState.Incoming(call.id, from, video, mcptt, emergency)
+        _call.value = CallState.Incoming(call.id, from, video, mcptt, emergency, privateCall, callerId, noFloorCtrl)
     }
 
     internal fun dispatchConferenceInfo(callId: Int, xml: String) {

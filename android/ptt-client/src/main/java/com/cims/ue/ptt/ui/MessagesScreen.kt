@@ -51,6 +51,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import com.cims.ue.core.message.MessageThread
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.message.SendState
+import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.R
 import java.util.Date
@@ -241,7 +242,34 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                     Icon(painterResource(R.drawable.ic_delete), contentDescription = "삭제",
                         tint = Ct.Red, modifier = Modifier.size(17.dp))
                 }
-            } else if (joined) PillBadge("접속", Ct.Mint)
+            } else {
+                // 1:1 통화 진입 — 상대가 그룹이 아닌 개인일 때만 (private call, TS 24.379 §11.1)
+                val isGroupPeer = st.groups.any { PttController.bareId(it.uri) == peer }
+                val ps = st.session(peer)
+                when {
+                    isGroupPeer -> if (joined) PillBadge("접속", Ct.Mint)
+                    ps == null -> {
+                        Text("무전", color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                .background(Ct.Mint.copy(alpha = 0.14f))
+                                .clickable { st.ctl?.startPrivateCall(peer, fullDuplex = false) }
+                                .padding(horizontal = 10.dp, vertical = 5.dp))
+                        Text("통화", color = Ct.Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                .background(Ct.Amber.copy(alpha = 0.14f))
+                                .clickable { st.ctl?.startPrivateCall(peer, fullDuplex = true) }
+                                .padding(horizontal = 10.dp, vertical = 5.dp))
+                    }
+                    else -> {
+                        PillBadge(if (ps.fullDuplex) "통화 중" else "무전 중", Ct.Mint)
+                        Text("종료", color = Ct.Red, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.clip(RoundedCornerShape(50))
+                                .background(Ct.Red.copy(alpha = 0.14f))
+                                .clickable { st.ctl?.leaveGroup(peer) }
+                                .padding(horizontal = 10.dp, vertical = 5.dp))
+                    }
+                }
+            }
         }
 
         // 말풍선 목록 — 날짜 구분선 + 발신(민트, 우측)/수신(다크, 좌측)
