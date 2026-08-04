@@ -219,6 +219,7 @@ STATS `detail.groups[].floor_holders`(배열)와 이벤트 `FLOOR_TALKERS`(발�
 | `PTT_JOIN` | `recv_only`, `floor_suppress` | B | Ambient listening | 완료 (CSP 발행 미구현) |
 | STATS `detail.groups[]` | `floor_holders[]` | B | 다중 발언자 관측 | 완료 (OAM 콘솔 반영) |
 | (event) `FLOOR_TALKERS` | 신규 이벤트 | B | 발언자 집합 통지 | CMP push 완료 / CSP 소비 미구현 |
+| (녹취 메타) `tracks[].speakers[]` | 슬롯 트랙·화자 구간 | B | 동시 발언·전이중 녹취 귀속/재생 | 완료 — 이력 조회·믹스/슬롯 재생까지 ([recording.md](recording.md) §3.3.1·§3.6.3) |
 
 멱등성·자원 키·재전송·`session_digest` audit 규칙은 **불변** — 위 필드는 모두 기존 명령의
 payload 확장이라 신뢰성 모델에 영향 없음(신규 이벤트 `FLOOR_TALKERS` 만 §8 ack/재전송 정책 준수).

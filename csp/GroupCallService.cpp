@@ -1722,6 +1722,16 @@ std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup
     else
         oss << ",\"alias\":\"" << CCallDir::JsonEsc( clsGroup._alias ) << "\"";
     oss << ",\"group_type\":\"" << CCallDir::JsonEsc( clsGroup._groupType ) << "\"";
+    // floor 축 (docs/api/cmp_media_api.md §7.7) — 세션 이력이 반이중/전이중·동시 발언 정원을
+    //   표시하는 근거. floor_control 은 발신 SDP 협상 결과(private call)라 그룹 컬럼이 아니다.
+    oss << ",\"floor_control\":\""
+        << ( clsGroup._floorControl.empty() ? "on" : CCallDir::JsonEsc( clsGroup._floorControl ) ) << "\"";
+    if ( clsGroup._floorPolicy.empty() )
+        oss << ",\"floor_policy\":\"single\"";
+    else
+        oss << ",\"floor_policy\":\"" << CCallDir::JsonEsc( clsGroup._floorPolicy ) << "\"";
+    oss << ",\"max_talkers\":"
+        << ( clsGroup._floorPolicy == "multi" ? clsGroup._maxTalkers : ( clsGroup._floorPolicy == "dual" ? 2 : 1 ) );
     oss << ",\"priority\":" << clsGroup._priority;
     oss << ",\"encryption\":" << jbool( clsGroup._encryption );
     oss << ",\"emergency_call\":" << jbool( clsGroup._emergencyCall );

@@ -3,6 +3,7 @@
 
 #include <string>
 #include <map>
+#include <vector>
 #include <cstdint>
 #include <cstdio>
 
@@ -48,9 +49,11 @@ public:
      *  pt<=0 이면 해당 트랙 메타 제거. 세그먼트 메타에 audio_pt_{prefix}/audio_codec_{prefix} 로 기록. */
     void setTrackPtCodec(const std::string& prefix, int pt, const std::string& codec);
 
-    /** 트랙별 화자 귀속 (PTT 동시 발언 — dual/multi-talker). 슬롯 트랙(audio1..N)이
-     *  누구의 발언인지 세그먼트 메타에 speaker_id_{prefix} 로 남긴다. 빈 speakerId = 제거.
-     *  슬롯 0("audio"/"video")의 화자는 세그먼트 대표 화자(speaker_id)와 같다. */
+    /** 트랙별 화자 귀속 (PTT 동시 발언 — dual/multi-talker).
+     *  한 슬롯 트랙은 세그먼트 도중 화자가 바뀔 수 있으므로(선점 회수 후 슬롯 재사용)
+     *  귀속을 **구간(span) 목록**으로 누적한다 — 호출 시각을 경계로 이전 구간을 닫고
+     *  새 구간을 연다. 같은 화자 재호출은 멱등, 빈 speakerId 는 현재 구간만 닫는다.
+     *  세그먼트 메타에는 tracks[].speakers[] 로 기록된다. */
     void setTrackSpeaker(const std::string& prefix, const std::string& speakerId);
 
     /** 세그먼트 종료 — 모든 트랙 파일 닫기 + 메타 기록 */
@@ -69,6 +72,13 @@ public:
     void abort();
 
 private:
+    /** 한 트랙 안에서 한 화자가 점유한 구간. endUsec=0 이면 아직 열려 있다. */
+    struct SpeakerSpan {
+        std::string id;
+        int64_t startUsec = 0;
+        int64_t endUsec = 0;
+    };
+
     struct Track {
         std::string prefix;
         FILE* fp = nullptr;
@@ -82,6 +92,9 @@ private:
 
     void _closeTrack(Track& t);
     void _writeMeta();
+    /** 트랙 prefix → 미디어 종류/슬롯(PTT)/leg(VoIP). tracks[] 메타 구성용.
+     *  PTT: audio/audio1..N, video/video1..N (슬롯 번호). VoIP: a/b, va/vb (leg). */
+    void _trackKind(const std::string& prefix, std::string& kind, int& slot, std::string& side) const;
     /** _baseDir 하위 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH} 경로 (mkdir 포함) */
     std::string _hourDirNow();
     /** mkdir -p (경로 내 모든 상위 디렉터리 생성) */
@@ -107,10 +120,11 @@ private:
     bool _preempted = false;       // 선점으로 시작된 세그먼트
     std::string _preemptedFrom;    // 선점 직전 화자
 
-    // 트랙별 오디오 PT/코덱 (prefix → {pt, codec}) — PTT="audio"(화자별 갱신), VoIP="a"/"b"(leg 별)
+    // 트랙별 오디오 PT/코덱 (prefix → {pt, codec}) — PTT=슬롯 트랙별(화자 leg), VoIP="a"/"b"(leg 별)
     std::map<std::string, std::pair<int, std::string>> _trackPtCodec;
-    // 트랙별 화자 (prefix → sessionId) — PTT 동시 발언 슬롯 트랙의 귀속
-    std::map<std::string, std::string> _trackSpeaker;
+    // 트랙별 화자 구간 (prefix → spans) — 슬롯 재사용으로 한 트랙에 화자가 연이어 기록되는
+    //   경우까지 귀속한다. 세그먼트 단위로 초기화된다.
+    std::map<std::string, std::vector<SpeakerSpan>> _trackSpans;
 
     // 현재 세그먼트 출력 경로 (VoIP=_baseDir, PTT=shard 디렉터리)
     std::string _curSegDir;        // seg_*.rtp / seg_*.json 위치

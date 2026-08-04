@@ -3,6 +3,7 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <cstdlib>
 #include <ctime>
 #include <unistd.h>
 
@@ -42,8 +43,34 @@ void PSyncRtpRecorder::setTrackPtCodec(const std::string& prefix, int pt, const 
 }
 
 void PSyncRtpRecorder::setTrackSpeaker(const std::string& prefix, const std::string& speakerId) {
-    if (!speakerId.empty()) _trackSpeaker[prefix] = speakerId;
-    else                    _trackSpeaker.erase(prefix);
+    int64_t now = _nowUsec();
+    auto& spans = _trackSpans[prefix];
+
+    if (!spans.empty() && spans.back().endUsec == 0) {
+        if (spans.back().id == speakerId) return;   // 같은 화자 재호출 — 멱등
+        spans.back().endUsec = now;                 // 화자 교대/이탈 → 이전 구간 종료
+    }
+    if (speakerId.empty()) return;                  // 빈 값 = 구간 닫기만
+
+    SpeakerSpan s;
+    s.id = speakerId;
+    // 세그먼트 시작 전 귀속(트랙 선등록 시점)은 세그먼트 시작으로 당긴다 — 음수 offset 방지.
+    s.startUsec = (_active && now < _segStartUsec) ? _segStartUsec : now;
+    spans.push_back(s);
+}
+
+// 트랙 prefix → kind/slot(PTT)/side(VoIP)
+void PSyncRtpRecorder::_trackKind(const std::string& prefix, std::string& kind, int& slot,
+                                  std::string& side) const {
+    kind.clear(); slot = -1; side.clear();
+    if (_type == "ptt") {
+        if (prefix.compare(0, 5, "audio") == 0)      { kind = "audio"; slot = atoi(prefix.c_str() + 5); }
+        else if (prefix.compare(0, 5, "video") == 0) { kind = "video"; slot = atoi(prefix.c_str() + 5); }
+        return;
+    }
+    // VoIP: a/b = 음성 leg, va/vb = 영상 leg
+    if (prefix == "a" || prefix == "b")        { kind = "audio"; side = prefix; }
+    else if (prefix == "va" || prefix == "vb") { kind = "video"; side = prefix.substr(1); }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -54,6 +81,7 @@ void PSyncRtpRecorder::setTrackSpeaker(const std::string& prefix, const std::str
 void PSyncRtpRecorder::startSegment(int seq, const std::string& speakerId,
                                     int priority, bool preempted, const std::string& preemptedFrom) {
     if (_active) finishSegment();
+    _trackSpans.clear();          // 화자 귀속은 세그먼트 단위
     _curSegDir = _baseDir;
     _curIndexDir = _baseDir;
     _currentSeq = seq;
@@ -74,7 +102,7 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
                                        int audioPt, const std::string& audioCodec) {
     if (_active) finishSegment();
     setTrackPtCodec("audio", audioPt, audioCodec);   // 화자 leg PT/코덱 (화자마다 다를 수 있음)
-    _trackSpeaker.clear();                           // 슬롯 트랙 귀속은 세그먼트 단위
+    _trackSpans.clear();                             // 슬롯 트랙 귀속은 세그먼트 단위
 
     std::string hourDir = _hourDirNow();
     if (hourDir != _curHourDir) {
@@ -127,6 +155,12 @@ void PSyncRtpRecorder::finishSegment() {
     // 뒤늦게 닫혀도 floor 점유 시간이 발언시간으로 부풀지 않게 한다.
     _segEndUsec = (_lastPktUsec > _segStartUsec) ? _lastPktUsec : _nowUsec();
     _active = false;
+
+    // 열려 있는 화자 구간을 세그먼트 종료로 닫는다 (마지막 화자는 RELEASE 없이 끝날 수 있다).
+    for (auto& [prefix, spans] : _trackSpans) {
+        (void)prefix;
+        if (!spans.empty() && spans.back().endUsec == 0) spans.back().endUsec = _segEndUsec;
+    }
 
     // 모든 트랙 파일 닫기 + rename
     for (auto& [prefix, t] : _tracks) {
@@ -275,10 +309,61 @@ void PSyncRtpRecorder::_writeMeta() {
 
             // 동시 발언(dual/multi-talker) 슬롯 트랙의 화자 귀속 — 대표 화자(speaker_id)와
             // 다른 트랙만 기록한다(슬롯 0 은 speaker_id 가 곧 그 트랙의 화자).
-            auto itSp = _trackSpeaker.find(prefix);
-            if (itSp != _trackSpeaker.end() && itSp->second != _speakerId)
-                fprintf(f, ",\"speaker_id_%s\":\"%s\"", prefix.c_str(), _jsonEsc(itSp->second).c_str());
+            // 트랙 안에서 화자가 교대한 경우 첫 화자만 실린다 — 정본은 tracks[].speakers[].
+            auto itSp = _trackSpans.find(prefix);
+            if (itSp != _trackSpans.end() && !itSp->second.empty() && itSp->second[0].id != _speakerId)
+                fprintf(f, ",\"speaker_id_%s\":\"%s\"", prefix.c_str(), _jsonEsc(itSp->second[0].id).c_str());
         }
+
+        // ── tracks[] — 트랙 메타 정본 ────────────────────────────────────
+        // 위 flat 키(audio_file/audio_pt/speaker_id_*)는 기존 녹취와의 호환을 위해 남기고,
+        // 슬롯/leg·화자 구간·코덱을 모두 담는 정본은 이 배열이다. 소비자(OAM 변환기·콘솔)는
+        // tracks[] 가 있으면 그것을 쓰고, 없으면(구 녹취) flat 키에서 합성한다.
+        fprintf(f, ",\"tracks\":[");
+        bool firstTrack = true;
+        for (auto& [prefix, t] : _tracks) {
+            if (t.mediaPackets <= 0) continue;
+
+            std::string kind, side;
+            int slot = -1;
+            _trackKind(prefix, kind, slot, side);
+
+            fprintf(f, "%s{\"prefix\":\"%s\"", firstTrack ? "" : ",", _jsonEsc(prefix).c_str());
+            firstTrack = false;
+            if (!kind.empty()) fprintf(f, ",\"kind\":\"%s\"", kind.c_str());
+            if (slot >= 0)     fprintf(f, ",\"slot\":%d", slot);
+            if (!side.empty()) fprintf(f, ",\"side\":\"%s\"", side.c_str());
+            fprintf(f, ",\"file\":\"%s\"", _jsonEsc(relDir + t.fileName).c_str());
+
+            auto itPc = _trackPtCodec.find(prefix);
+            if (itPc != _trackPtCodec.end() && kind == "audio") {
+                fprintf(f, ",\"pt\":%d", itPc->second.first);
+                if (!itPc->second.second.empty())
+                    fprintf(f, ",\"codec\":\"%s\"", _jsonEsc(itPc->second.second).c_str());
+            }
+
+            // 화자 구간 — 트랙 시작(=세그먼트 시작) 기준 offset. 슬롯 재사용으로 화자가
+            //   교대한 트랙은 원소가 2개 이상이다.
+            auto itSpans = _trackSpans.find(prefix);
+            if (itSpans != _trackSpans.end() && !itSpans->second.empty()) {
+                fprintf(f, ",\"speakers\":[");
+                bool firstSpan = true;
+                for (const auto& sp : itSpans->second) {
+                    int64_t end = sp.endUsec > 0 ? sp.endUsec : _segEndUsec;
+                    int64_t off = (sp.startUsec - _segStartUsec) / 1000;
+                    int64_t len = (end - sp.startUsec) / 1000;
+                    if (off < 0) { len += off; off = 0; }
+                    if (len < 0) len = 0;
+                    fprintf(f, "%s{\"id\":\"%s\",\"offset_ms\":%lld,\"dur_ms\":%lld}",
+                            firstSpan ? "" : ",", _jsonEsc(sp.id).c_str(),
+                            (long long)off, (long long)len);
+                    firstSpan = false;
+                }
+                fprintf(f, "]");
+            }
+            fprintf(f, "}");
+        }
+        fprintf(f, "]");
 
         fprintf(f, ",\"has_video\":%s}\n", hasVideo ? "true" : "false");
     };

@@ -520,10 +520,15 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 먼저 말하던 화자의 발언이 끊기지 않도록). `off` 로 바꾸면 대기열도 비우고 멤버마다 상향
 스트림 슬롯을 재배정한다. `dual`↔`multi`↔`single` 전환은 이후 요청 판정부터 새 정책을 따른다.
 
-**녹취** — 슬롯 0 은 `audio`/`video` 트랙(파일명·메타 종전과 동일), 동시 발언 슬롯은
-`audioN`/`videoN` 트랙에 기록하고 세그먼트 메타에 `speaker_id_audioN` 으로 화자를 남긴다.
-세그먼트는 발언자 집합이 비는 시점에 닫히며, 한 세그먼트 안에서 슬롯이 재사용될 상황이면
-트랙에 다른 화자가 섞이지 않도록 세그먼트를 먼저 끊는다.
+**녹취** — 슬롯 0 은 `audio`/`video` 트랙(파일명 종전과 동일), 동시 발언 슬롯은
+`audioN`/`videoN` 트랙에 기록한다. 세그먼트는 발언자 집합이 비는 시점에 닫힌다.
+
+세그먼트가 여러 발언을 담으므로 **한 트랙 안에서 화자가 바뀔 수 있다** — 선점 회수로 비워진
+슬롯을 다른 화자가 이어받는 경우다. 그래서 화자 귀속은 트랙당 한 값이 아니라 **구간 목록**
+(`tracks[].speakers[] = {id, offset_ms, dur_ms}`)으로 남긴다. 트랙별 `pt`/`codec` 도 슬롯마다
+따로 기록한다(화자 leg 가 이종 단말이면 협상 PT 가 다르다).
+세그먼트 메타 전체 형식은 [../design/features/recording.md](../design/features/recording.md)
+§3.3.1 이 정본이며, 구 소비자 호환용 flat 키(`audio_file`/`speaker_id_audioN`)도 함께 기록된다.
 
 ### 7.8 floor_crypto — floor RTCP 보호 (TS 33.180)
 

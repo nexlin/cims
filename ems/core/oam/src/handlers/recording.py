@@ -446,6 +446,23 @@ def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
         seg_count = len(segs)
         total_ms = sum(s.get('duration_ms', 0) for s in segs)
 
+        # 발언 턴·화자·최대 동시 발언 — 슬롯 트랙(동시 발언·전이중)까지 반영한다.
+        #   세그먼트 수만 세면 동시 발언이 과소 집계된다(3명이 겹쳐 말해도 세그먼트 1개).
+        turn_count = 0
+        speakers = set()
+        max_con = 0
+        for s in segs:
+            tr = _seg_tracks(s)
+            max_con = max(max_con, _max_concurrent(tr))
+            for t in tr:
+                if t['kind'] != 'audio':
+                    continue
+                spans = t['speakers']
+                turn_count += len(spans) or 1
+                speakers.update(sp['id'] for sp in spans if sp.get('id'))
+        if not speakers:
+            speakers = {s.get('speaker_id', '') for s in segs if s.get('speaker_id')}
+
         status = _session_status(rec_dir, segs)
 
         results.append({
@@ -461,6 +478,9 @@ def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
             'has_video': any(s.get('has_video') for s in segs),
             'status': status,
             'segment_count': seg_count,
+            'turn_count': turn_count,
+            'speaker_count': len(speakers),
+            'max_concurrent': max_con,
             'total_speech_ms': total_ms,
         })
 
@@ -502,41 +522,167 @@ def _session_status(rec_dir: str, segs: list) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
+#  세그먼트 트랙 정규화
+# ══════════════════════════════════════════════════════════════
+
+def _seg_tracks(s: dict) -> list:
+    """세그먼트 원본 메타(segments.jsonl 한 행) → 트랙 목록 정규화.
+
+    CMP 가 기록하는 `tracks[]` 가 정본이다. 그 이전 녹취는 flat 키
+    (audio_file/audio1_file/speaker_id_audio1/audio_pt …)만 있으므로 여기서 합성해
+    호출부가 두 포맷을 구분하지 않게 한다.
+    반환 원소: {prefix, kind, slot, side, file, pt, codec, speakers[{id,offset_ms,dur_ms}]}
+    """
+    raw = s.get('tracks')
+    if isinstance(raw, list) and raw:
+        out = []
+        for t in raw:
+            if not isinstance(t, dict) or not t.get('file'):
+                continue
+            out.append({
+                'prefix': t.get('prefix', ''),
+                'kind': t.get('kind', 'audio'),
+                'slot': t.get('slot', -1),
+                'side': t.get('side', ''),
+                'file': t.get('file', ''),
+                'pt': t.get('pt', 0),
+                'codec': t.get('codec', ''),
+                'speakers': [sp for sp in (t.get('speakers') or []) if isinstance(sp, dict)],
+            })
+        return out
+
+    # ── 구 녹취 합성 (tracks[] 이전) ──
+    out = []
+    dur = s.get('duration_ms', 0)
+    seg_type = s.get('type', s.get('call_type', 'ptt'))
+
+    def _spans(sid):
+        return [{'id': sid, 'offset_ms': 0, 'dur_ms': dur}] if sid else []
+
+    if seg_type == 'ptt':
+        rep = s.get('speaker_id', '')
+        for key, val in s.items():
+            if not key.endswith('_file') or not val or not isinstance(val, str):
+                continue
+            prefix = key[:-len('_file')]          # audio, audio1, video, video2 …
+            if prefix.startswith('audio'):
+                kind, tail = 'audio', prefix[len('audio'):]
+            elif prefix.startswith('video'):
+                kind, tail = 'video', prefix[len('video'):]
+            else:
+                continue
+            slot = int(tail) if tail.isdigit() else 0
+            sid = s.get(f'speaker_id_{prefix}', '') or (rep if slot == 0 else '')
+            out.append({
+                'prefix': prefix, 'kind': kind, 'slot': slot, 'side': '', 'file': val,
+                'pt': s.get('audio_pt', 0) if (kind == 'audio' and slot == 0) else 0,
+                'codec': s.get('audio_codec', '') if (kind == 'audio' and slot == 0) else '',
+                'speakers': _spans(sid),
+            })
+        out.sort(key=lambda t: (t['kind'], t['slot']))
+        return out
+
+    # VoIP — leg(a/b) 기준
+    for prefix, key, kind, side in (('a', 'audio_file_a', 'audio', 'a'),
+                                    ('b', 'audio_file_b', 'audio', 'b'),
+                                    ('va', 'video_file_a', 'video', 'a'),
+                                    ('vb', 'video_file_b', 'video', 'b')):
+        val = s.get(key, '')
+        if not val:
+            continue
+        out.append({
+            'prefix': prefix, 'kind': kind, 'slot': -1, 'side': side, 'file': val,
+            'pt': s.get(f'audio_pt_{side}', 0) if kind == 'audio' else 0,
+            'codec': s.get(f'audio_codec_{side}', '') if kind == 'audio' else '',
+            'speakers': _spans(s.get('caller', '') if side == 'a' else s.get('callee', '')),
+        })
+    return out
+
+
+def _track_speaker_ids(tracks: list) -> list:
+    """트랙 화자 구간을 시간순으로 훑어 등장 순서대로 중복 없는 화자 목록"""
+    spans = []
+    for t in tracks:
+        if t['kind'] != 'audio':
+            continue
+        for sp in t['speakers']:
+            if sp.get('id'):
+                spans.append((sp.get('offset_ms', 0), sp['id']))
+    spans.sort(key=lambda x: x[0])
+    seen = []
+    for _, sid in spans:
+        if sid not in seen:
+            seen.append(sid)
+    return seen
+
+
+def _max_concurrent(tracks: list) -> int:
+    """세그먼트 안에서 동시에 열려 있던 화자 구간의 최대 수 (동시 발언 인원)"""
+    events = []
+    for t in tracks:
+        if t['kind'] != 'audio':
+            continue
+        for sp in t['speakers']:
+            off = sp.get('offset_ms', 0)
+            d = sp.get('dur_ms', 0)
+            if d <= 0:
+                continue
+            events.append((off, 1))
+            events.append((off + d, -1))
+    if not events:
+        return 1 if any(t['kind'] == 'audio' for t in tracks) else 0
+    events.sort(key=lambda e: (e[0], e[1]))   # 같은 시각이면 종료(-1) 먼저 — 인접 구간을 겹침으로 세지 않는다
+    cur = peak = 0
+    for _, delta in events:
+        cur += delta
+        peak = max(peak, cur)
+    return peak
+
+
+# ══════════════════════════════════════════════════════════════
 #  세그먼트 상태 판정 + on-demand 변환
 # ══════════════════════════════════════════════════════════════
 
-def _failed_marker_path(rec_dir: str, seq: int) -> str:
-    return _converted_path_mp4(rec_dir, seq) + '.failed'
+def _failed_marker_path(rec_dir: str, seq: int, slot=None) -> str:
+    return _converted_path_mp4(rec_dir, seq, slot) + '.failed'
 
 
-def _write_failed_marker(rec_dir: str, seq: int, reason: str):
+def _write_failed_marker(rec_dir: str, seq: int, reason: str, slot=None):
     """변환 불가/실패 마커 — 상태를 'failed' 로 고정해 무한 '변환중' 표시를 막는다.
     retry(?retry=1) 시 삭제되어 재시도 가능."""
     try:
-        with open(_failed_marker_path(rec_dir, seq), 'w') as f:
+        with open(_failed_marker_path(rec_dir, seq, slot), 'w') as f:
             json.dump({'reason': reason, 'ts': time.time()}, f, ensure_ascii=False)
     except Exception:
         pass
 
 
-def _read_failed_reason(rec_dir: str, seq: int) -> str:
+def _read_failed_reason(rec_dir: str, seq: int, slot=None) -> str:
     try:
-        with open(_failed_marker_path(rec_dir, seq), 'r') as f:
+        with open(_failed_marker_path(rec_dir, seq, slot), 'r') as f:
             return (json.load(f) or {}).get('reason', '') or '변환 실패'
     except Exception:
         return '변환 실패'
 
 
-def _segment_status(rec_dir: str, seg: dict) -> str:
-    """개별 세그먼트 상태: recording / raw / transcoding / ready / failed"""
-    # 대표 오디오 파일 (병합 전/후 모두 대응)
-    audio_file = (seg.get('audio_file', '') or seg.get('audio_file_a', '')
-                  or seg.get('_audio_a', '') or seg.get('_audio', ''))
+def _segment_status(rec_dir: str, seg: dict, slot=None) -> str:
+    """개별 세그먼트(또는 슬롯 단독본) 상태: recording / raw / transcoding / ready / failed"""
     seq = seg.get('seq', 0)
+
+    # 대표 오디오 파일 — slot 지정 시 그 슬롯 트랙, 아니면 세그먼트 대표
+    if slot is None:
+        audio_file = (seg.get('audio_file', '') or seg.get('audio_file_a', '')
+                      or seg.get('_audio_a', '') or seg.get('_audio', ''))
+    else:
+        audio_file = ''
+        for t in seg.get('_tracks', []) or []:
+            if t['kind'] == 'audio' and t['slot'] == slot:
+                audio_file = t['file']
+                break
 
     # seq 기반 MP4 변환 파일 확인 (최우선)
     if seq > 0:
-        mp4 = _converted_path_mp4(rec_dir, seq)
+        mp4 = _converted_path_mp4(rec_dir, seq, slot)
         if os.path.exists(mp4):
             return 'ready'
         if os.path.exists(mp4 + '.transcoding'):
@@ -562,44 +708,241 @@ def _segment_status(rec_dir: str, seg: dict) -> str:
     return 'failed'
 
 
-def _transcode_segment_file(rec_dir: str, seg: dict):
-    """세그먼트의 raw RTP를 변환 (백그라운드 스레드). 출력: seg_NNNN.mp4 (통일)
+def _ffprobe_bin() -> str:
+    p = (_FFMPEG[:-len('ffmpeg')] + 'ffprobe') if _FFMPEG.endswith('ffmpeg') else 'ffprobe'
+    if os.path.isabs(p) and os.path.exists(p):
+        return p
+    return shutil.which('ffprobe') or 'ffprobe'
+
+
+def _audio_duration(path: str, default: str = '60') -> str:
+    """오디오 파일 길이(초, 문자열). 영상 mux 시 동기화 기준."""
+    try:
+        ret = subprocess.run([_ffprobe_bin(), '-v', 'error', '-show_entries', 'format=duration',
+                              '-of', 'csv=p=0', path], capture_output=True, timeout=10)
+        d = ret.stdout.decode().strip()
+        return d or default
+    except Exception:
+        return default
+
+
+# 파형 피크 버킷 수 — 콘솔 파형 레인 폭(≈600px)에 맞춘 고정 해상도.
+_PEAKS_BUCKETS = 600
+
+
+def _write_peaks(pcm_path: str, out_path: str) -> bool:
+    """s16le mono PCM → 진폭 피크 배열(0..255) JSON. 콘솔 파형 레인용.
+
+    PCM 은 변환 ffmpeg 의 두 번째 출력으로 곁다리 생성되므로 추가 프로세스가 없다.
+    """
+    try:
+        size = os.path.getsize(pcm_path)
+    except OSError:
+        return False
+    if size < 2:
+        return False
+    bucket = max(1, (size // 2) // _PEAKS_BUCKETS)
+    peaks = []
+    try:
+        with open(pcm_path, 'rb') as f:
+            while True:
+                chunk = f.read(bucket * 2)
+                n = len(chunk) // 2
+                if n == 0:
+                    break
+                vals = struct.unpack(f'<{n}h', chunk[:n * 2])
+                peaks.append(min(255, max(abs(v) for v in vals) * 255 // 32768))
+        with open(out_path, 'w') as f:
+            json.dump({'buckets': len(peaks), 'peaks': peaks}, f)
+        return True
+    except Exception as e:
+        logger.error("_write_peaks error: %s", e)
+        return False
+
+
+def _video_grid_filter(n: int, audio_dur: str):
+    """영상 트랙 n개를 격자로 합치는 filter_complex + 캔버스 크기.
+    1개는 호출부가 copy mux 로 처리하므로 여기서는 2개 이상만 다룬다
+    (2 = 좌우, 3~4 = 2x2 …). 입력 라벨은 [v0]..[v{n-1}] 로 온다고 가정."""
+    cols = 2
+    rows = (n + cols - 1) // cols
+    cell = 640
+    w, h = cols * cell, rows * cell
+    parts = [f'color=c=black:s={w}x{h}:r=15:d={audio_dur}[bg]']
+    for i in range(n):
+        parts.append(f'[v{i}]scale={cell}:{cell}:force_original_aspect_ratio=decrease,'
+                     f'pad={cell}:{cell}:(ow-iw)/2:(oh-ih)/2:black[c{i}]')
+    prev = 'bg'
+    for i in range(n):
+        x, y = (i % cols) * cell, (i // cols) * cell
+        label = 'vout' if i == n - 1 else f'ov{i}'
+        parts.append(f'[{prev}][c{i}]overlay={x}:{y}:eof_action=pass[{label}]')
+        prev = label
+    return ';'.join(parts), w, h
+
+
+def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: str) -> bool:
+    """PTT 세그먼트 변환 — 슬롯 트랙 N개를 다룬다.
+
+    slot=None → 화자 전원 amix (실제로 무전에서 들린 소리 = 기본 재생본)
+    slot=K    → 슬롯 K 화자 단독본
+
+    동시 발언(dual/multi-talker)과 floor 없는 private call(전이중, 멤버별 슬롯)이
+    모두 이 경로를 쓴다. 슬롯이 1개뿐이면 종전 단일 트랙 변환과 동일한 결과다.
+    """
+    seq = seg.get('seq', 0)
+    tracks = seg.get('_tracks', []) or []
+    atracks = [t for t in tracks if t['kind'] == 'audio']
+    vtracks = [t for t in tracks if t['kind'] == 'video']
+    if slot is not None:
+        atracks = [t for t in atracks if t['slot'] == slot]
+        vtracks = [t for t in vtracks if t['slot'] == slot]
+    atracks.sort(key=lambda t: t['slot'])
+    vtracks.sort(key=lambda t: t['slot'])
+
+    tmp_files = []
+    try:
+        # 1) 슬롯별 AMR-WB 추출 — PT 는 슬롯마다 다를 수 있다(이종 단말 혼재)
+        amrs = []
+        for t in atracks:
+            raw = os.path.join(rec_dir, t['file'])
+            if not os.path.exists(raw):
+                continue
+            amr = f"{raw}.amr_s{t['slot']}"
+            ok = _strip_rtp_to_amrwb(raw, amr, audio_pt=t.get('pt', 0))
+            if os.path.exists(amr):
+                tmp_files.append(amr)
+            if ok:
+                amrs.append(amr)
+            codec = t.get('codec', '')
+            if codec and not codec.upper().startswith('AMR-WB'):
+                logger.warning("transcode seg %d slot %s: unsupported codec meta '%s' — AMR-WB 로 시도",
+                               seq, t['slot'], codec)
+
+        if not amrs:
+            _write_failed_marker(rec_dir, seq, '녹취 음성 데이터 없음(프레임 0)', slot)
+            logger.warning("transcode seg %d slot=%s: no audio frames — failed 확정", seq, slot)
+            return False
+
+        # 2) 슬롯별 H.264 추출 (keepalive-only 는 시도 생략)
+        h264s = []
+        for t in vtracks:
+            raw = os.path.join(rec_dir, t['file'])
+            if not os.path.exists(raw) or not _video_has_media(raw):
+                continue
+            h = f"{raw}.h264_s{t['slot']}"
+            ok = _strip_rtp_to_h264(raw, h)
+            if os.path.exists(h):
+                tmp_files.append(h)
+            if ok:
+                h264s.append(h)
+
+        audio_dur = _audio_duration(amrs[0])
+        pcm_out = tmp_out + '.pcm'
+
+        cmd = [_FFMPEG, '-y', '-hide_banner', '-loglevel', 'error']
+        for a in amrs:
+            cmd += ['-i', a]
+        for h in h264s:
+            cmd += ['-f', 'h264', '-r', '15', '-i', h]
+
+        n_a, n_v = len(amrs), len(h264s)
+        # 필터 출력 라벨은 한 번만 소비할 수 있으므로 asplit 으로 mp4/파형용을 나눈다.
+        if n_a > 1:
+            mix = ''.join(f'[{i}:a]' for i in range(n_a))
+            afilter = (f'{mix}amix=inputs={n_a}:duration=longest:normalize=0,'
+                       f'dynaudnorm,asplit=2[aout][apcm]')
+        else:
+            afilter = '[0:a]asplit=2[aout][apcm]'
+
+        if n_v == 0:
+            cmd += ['-filter_complex', afilter, '-map', '[aout]']
+        elif n_v == 1:
+            # 영상 1개 — 재인코딩 없이 원본 mux (종전 PTT 영상 경로와 동일)
+            cmd += ['-filter_complex', afilter, '-map', f'{n_a}:v', '-map', '[aout]',
+                    '-t', audio_dur, '-c:v', 'copy']
+        else:
+            vf, _w, _h = _video_grid_filter(n_v, audio_dur)
+            # 입력 인덱스 → [v{i}] 라벨 매핑을 filter 앞에 붙인다
+            relabel = ''.join(f'[{n_a + i}:v]null[v{i}];' for i in range(n_v))
+            cmd += ['-filter_complex', f'{afilter};{relabel}{vf}',
+                    '-map', '[vout]', '-map', '[aout]',
+                    '-t', audio_dur, '-c:v', 'libx264', '-preset', 'fast', '-crf', '23']
+
+        cmd += ['-c:a', 'aac', '-ar', '16000', '-ac', '1', '-movflags', '+faststart', tmp_out]
+        # 두 번째 출력 = 파형 피크용 PCM (같은 디코딩·믹싱 결과를 재사용 — 추가 프로세스 없음)
+        cmd += ['-map', '[apcm]', '-f', 's16le', '-ar', '8000', '-ac', '1', pcm_out]
+
+        ret = subprocess.run(cmd, capture_output=True, timeout=300)
+        if ret.returncode != 0:
+            logger.warning("ffmpeg ptt seg=%d slot=%s failed: %s", seq, slot,
+                           ret.stderr.decode(errors='replace')[:500])
+
+        if os.path.exists(pcm_out):
+            tmp_files.append(pcm_out)
+            _write_peaks(pcm_out, _peaks_path(rec_dir, seq, slot))
+
+        if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
+            os.replace(tmp_out, out_path)
+            try: os.remove(_failed_marker_path(rec_dir, seq, slot))
+            except OSError: pass
+            return True
+
+        _write_failed_marker(rec_dir, seq, '변환 실패(ffmpeg 출력 없음)', slot)
+        logger.warning("transcode seg %d slot=%s produced no/empty output — failed 확정", seq, slot)
+        return False
+    finally:
+        for tmp in tmp_files:
+            try: os.remove(tmp)
+            except OSError: pass
+
+
+def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
+    """세그먼트의 raw RTP를 변환 (백그라운드 스레드). 출력: seg_NNNN.mp4 / seg_NNNN_s{K}.mp4
 
     VoIP 음성:  A + B 음성 mixing → MP4 (AAC)
     VoIP 영상:  A + B 음성 mixing + A + B 영상 좌우 배치 → MP4
-    PTT:        단일 음성 → MP4 (AAC)
+    PTT:        슬롯 트랙 N개 amix(믹스) 또는 슬롯 단독 → MP4 (AAC) — _transcode_ptt_multi
     """
     seg_type = seg.get('type', seg.get('_type', 'ptt'))
     seq = seg.get('seq', 0)
-    out_path = _converted_path_mp4(rec_dir, seq)
+    lock_key = f"{rec_dir}:{seq}:{'mix' if slot is None else slot}"
+    out_path = _converted_path_mp4(rec_dir, seq, slot)
     # ffmpeg 는 출력 파일을 변환 시작 시점에 생성하므로(부분 파일), 최종 경로(seg_NNNN.mp4)에
     # 바로 쓰면 변환 도중 _segment_status 가 부분 mp4 를 'ready' 로 오판 → 첫 재생이 깨진다.
     # → 임시 파일(.partial.mp4)에 쓰고 완료 시에만 원자적 rename 하여 "mp4 존재 ⟺ 완성" 을 보장.
     tmp_out = (out_path[:-4] if out_path.endswith('.mp4') else out_path) + '.partial.mp4'
 
-    # raw 파일 경로 + leg 별 오디오 PT/코덱 메타 (없으면 0/'' → strip 이 자동감지)
+    # ── PTT: 슬롯 트랙 기반 변환 (믹스/단독) ──
+    # 슬롯 1개짜리 단일 화자 세그먼트도 같은 경로를 지나며 결과는 종전과 같다.
     if seg_type == 'ptt':
-        raw_a = seg.get('_audio', seg.get('audio_file', ''))
-        if raw_a: raw_a = os.path.join(rec_dir, raw_a)
-        raw_b = ''
-        raw_va = seg.get('_video', seg.get('video_file', ''))
-        if raw_va: raw_va = os.path.join(rec_dir, raw_va)
-        raw_vb = ''
-        pt_a = seg.get('audio_pt', 0)
-        pt_b = 0
-        codecs = [seg.get('audio_codec', '')]
-    else:
-        raw_a = seg.get('_audio_a', '')
-        if raw_a: raw_a = os.path.join(rec_dir, raw_a)
-        raw_b = seg.get('_audio_b', '')
-        if raw_b: raw_b = os.path.join(rec_dir, raw_b)
-        raw_va = seg.get('_video_a', '')
-        if raw_va: raw_va = os.path.join(rec_dir, raw_va)
-        raw_vb = seg.get('_video_b', '')
-        if raw_vb: raw_vb = os.path.join(rec_dir, raw_vb)
-        pt_a = seg.get('audio_pt_a', 0)
-        pt_b = seg.get('audio_pt_b', 0)
-        codecs = [seg.get('audio_codec_a', ''), seg.get('audio_codec_b', '')]
+        try:
+            _transcode_ptt_multi(rec_dir, seg, slot, out_path, tmp_out)
+        except Exception as e:
+            _write_failed_marker(rec_dir, seq, f'변환 오류: {e}', slot)
+            logger.error("transcode seg %d slot=%s error: %s", seq, slot, e)
+        finally:
+            try:
+                if os.path.exists(tmp_out): os.remove(tmp_out)
+            except OSError:
+                pass
+            with _transcoding_mutex:
+                _transcoding_locks.pop(lock_key, None)
+        return
+
+    # ── VoIP: leg(a/b) 기반 변환 ──
+    # raw 파일 경로 + leg 별 오디오 PT/코덱 메타 (없으면 0/'' → strip 이 자동감지)
+    raw_a = seg.get('_audio_a', '')
+    if raw_a: raw_a = os.path.join(rec_dir, raw_a)
+    raw_b = seg.get('_audio_b', '')
+    if raw_b: raw_b = os.path.join(rec_dir, raw_b)
+    raw_va = seg.get('_video_a', '')
+    if raw_va: raw_va = os.path.join(rec_dir, raw_va)
+    raw_vb = seg.get('_video_b', '')
+    if raw_vb: raw_vb = os.path.join(rec_dir, raw_vb)
+    pt_a = seg.get('audio_pt_a', 0)
+    pt_b = seg.get('audio_pt_b', 0)
+    codecs = [seg.get('audio_codec_a', ''), seg.get('audio_codec_b', '')]
 
     # 지원 디코더는 AMR-WB 뿐 — 다른 코덱 협상 흔적이 있으면 드러낸다 (변환은 시도).
     for c in codecs:
@@ -610,7 +953,6 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
     primary = raw_a or raw_b
     if not primary or not os.path.exists(primary):
         _write_failed_marker(rec_dir, seq, '녹취 원본 파일 없음')
-        lock_key = f"{rec_dir}:{seq}"
         with _transcoding_mutex:
             _transcoding_locks.pop(lock_key, None)
         return
@@ -782,22 +1124,25 @@ def _transcode_segment_file(rec_dir: str, seg: dict):
         except: pass
         try: os.remove(marker)
         except: pass
+        # 어느 경로로 빠져나가든(조기 return 포함) 중복방지 lock 을 반드시 해제한다.
+        with _transcoding_mutex:
+            _transcoding_locks.pop(lock_key, None)
 
-    lock_key = f"{rec_dir}:{seq}"
-    with _transcoding_mutex:
-        _transcoding_locks.pop(lock_key, None)
 
-
-def _ensure_segment_ready(rec_dir: str, seg: dict) -> str:
-    """세그먼트 변환 보장. 상태 문자열 반환. seg는 _build_segments()의 병합된 dict."""
-    status = seg.get('status', _segment_status(rec_dir, seg))
+def _ensure_segment_ready(rec_dir: str, seg: dict, slot=None) -> str:
+    """세그먼트(또는 슬롯 단독본) 변환 보장. 상태 문자열 반환.
+    seg 는 _build_segments()의 병합된 dict."""
+    if slot is None:
+        status = seg.get('status', _segment_status(rec_dir, seg))
+    else:
+        status = _segment_status(rec_dir, seg, slot)
 
     if status in ('recording', 'ready', 'transcoding', 'failed'):
         return status
 
     if status == 'raw':
         seq = seg.get('seq', 0)
-        lock_key = f"{rec_dir}:{seq}"
+        lock_key = f"{rec_dir}:{seq}:{'mix' if slot is None else slot}"
         with _transcoding_mutex:
             if lock_key in _transcoding_locks:
                 return 'transcoding'
@@ -805,10 +1150,11 @@ def _ensure_segment_ready(rec_dir: str, seg: dict) -> str:
         # 워커 풀에 큐잉 — max_workers 만큼만 동시 ffmpeg 실행(초과분은 큐 대기).
         # 요청 스레드는 즉시 반환(202), 변환은 풀에서 비동기 처리.
         if _transcode_executor is not None:
-            _transcode_executor.submit(_transcode_segment_file, rec_dir, seg)
+            _transcode_executor.submit(_transcode_segment_file, rec_dir, seg, slot)
         else:
             # init 전(이론상 없음) fallback — 단발 스레드
-            threading.Thread(target=_transcode_segment_file, args=(rec_dir, seg), daemon=True).start()
+            threading.Thread(target=_transcode_segment_file, args=(rec_dir, seg, slot),
+                             daemon=True).start()
         return 'transcoding'
 
     return status
@@ -829,16 +1175,26 @@ def _build_segments(rec_dir: str) -> list:
     for s in segs_raw:
         seq = s.get('seq', 0)
         seg_type = s.get('type', s.get('call_type', 'ptt'))
-        has_video = s.get('has_video', False)
-        if has_video:
-            # 유령 영상 방어 — keepalive-only(헤더만) 영상 파일이면 음성 세그먼트로 정정.
-            #   (콘텐츠 타입·플레이어 선택이 이 값을 따른다)
-            vids = [s.get('video_file', ''), s.get('video_file_a', ''), s.get('video_file_b', '')]
-            has_video = any(_video_has_media(os.path.join(rec_dir, v)) for v in vids if v)
+
+        # 트랙 정규화 — 슬롯(동시 발언·전이중 private call)·leg(VoIP) 공통 표현
+        tracks = _seg_tracks(s)
+        for t in tracks:
+            if t['kind'] == 'video' and not _video_has_media(os.path.join(rec_dir, t['file'])):
+                t['_ghost'] = True     # keepalive-only 영상 트랙 — 없는 것으로 취급
+        tracks = [t for t in tracks if not t.get('_ghost')]
+
+        # 유령 영상 방어 — keepalive-only(헤더만) 영상 트랙만 있으면 음성 세그먼트로 정정.
+        #   (콘텐츠 타입·플레이어 선택이 이 값을 따른다)
+        has_video = bool(s.get('has_video', False)) and any(t['kind'] == 'video' for t in tracks)
 
         # 대표 오디오 파일 (상태 판정용)
         primary_audio = (s.get('audio_file_a', '') or s.get('audio_file', '')
                          or s.get('audio_file_b', ''))
+        if not primary_audio:
+            for t in tracks:
+                if t['kind'] == 'audio':
+                    primary_audio = t['file']
+                    break
 
         status = _segment_status(rec_dir, {'audio_file': primary_audio, 'seq': seq})
         status_reason = ''
@@ -855,6 +1211,10 @@ def _build_segments(rec_dir: str) -> list:
         if os.path.exists(conv):
             file_size = os.path.getsize(conv)
 
+        audio_tracks = [t for t in tracks if t['kind'] == 'audio']
+        video_slots = {t['slot'] for t in tracks if t['kind'] == 'video'}
+        speaker_ids = _track_speaker_ids(tracks)
+
         result.append({
             'seq': seq,
             'type': seg_type,
@@ -868,6 +1228,22 @@ def _build_segments(rec_dir: str) -> list:
             'file_size': file_size,
             'status': status,
             'status_reason': status_reason,
+            # ── 슬롯 트랙 (동시 발언 dual/multi-talker, floor 없는 전이중 private call) ──
+            # 슬롯이 1개뿐인 단일 화자 세그먼트는 tracks 원소도 1개 — 콘솔이 종전과 같이 보인다.
+            'tracks': [{
+                'slot': t['slot'],
+                'kind': t['kind'],
+                'side': t['side'],
+                'pt': t['pt'],
+                'codec': t['codec'],
+                'speakers': t['speakers'],
+                'has_video': (t['slot'] in video_slots) if t['kind'] == 'audio' else True,
+                'status': _segment_status(rec_dir, {'seq': seq, '_tracks': tracks}, t['slot'])
+                          if (t['kind'] == 'audio' and t['slot'] >= 0) else status,
+            } for t in tracks],
+            'speaker_ids': speaker_ids,
+            'talker_count': len(audio_tracks),
+            'max_concurrent': _max_concurrent(tracks),
             # 오디오 PT/코덱 메타 (CMP 기록 — 변환기 PT 판별 근거. 구 녹취는 없음 → 자동감지)
             'audio_pt': s.get('audio_pt', 0),
             'audio_codec': s.get('audio_codec', ''),
@@ -875,7 +1251,8 @@ def _build_segments(rec_dir: str) -> list:
             'audio_codec_a': s.get('audio_codec_a', ''),
             'audio_pt_b': s.get('audio_pt_b', 0),
             'audio_codec_b': s.get('audio_codec_b', ''),
-            # 파일 참조 (변환에서 사용)
+            # 파일 참조 (변환에서 사용 — 응답에서는 제거)
+            '_tracks': tracks,
             '_audio_a': s.get('audio_file_a', ''),
             '_audio_b': s.get('audio_file_b', ''),
             '_audio': s.get('audio_file', ''),
@@ -886,9 +1263,20 @@ def _build_segments(rec_dir: str) -> list:
     return result
 
 
-def _converted_path_mp4(rec_dir: str, seq: int) -> str:
-    """변환된 MP4 파일 경로"""
-    return os.path.join(rec_dir, f"seg_{seq:04d}.mp4")
+def _converted_path_mp4(rec_dir: str, seq: int, slot=None) -> str:
+    """변환된 MP4 파일 경로.
+    slot=None → 세그먼트 믹스(동시 발언 화자 전원 합성 — 실제로 들린 소리, 기본 재생본).
+    slot=K    → 슬롯 K 화자 단독본 (화자 식별·증거용).
+    믹스 경로는 종전과 같아 기존 변환 캐시가 그대로 유효하다."""
+    if slot is None:
+        return os.path.join(rec_dir, f"seg_{seq:04d}.mp4")
+    return os.path.join(rec_dir, f"seg_{seq:04d}_s{int(slot)}.mp4")
+
+
+def _peaks_path(rec_dir: str, seq: int, slot=None) -> str:
+    """파형 피크 JSON 경로 (변환 산출물과 함께 캐시)"""
+    mp4 = _converted_path_mp4(rec_dir, seq, slot)
+    return mp4[:-4] + '.peaks.json' if mp4.endswith('.mp4') else mp4 + '.peaks.json'
 
 
 # ══════════════════════════════════════════════════════════════
@@ -926,8 +1314,8 @@ def _parse_rec_route(parts: tuple):
         return '', None, ()
 
     # 끝에서부터 action 패턴 탐지
-    # 패턴 1: .../segments/{seq}/audio|video
-    if len(parts) >= 3 and parts[-1] in ('audio', 'video'):
+    # 패턴 1: .../segments/{seq}/audio|video|peaks
+    if len(parts) >= 3 and parts[-1] in ('audio', 'video', 'peaks'):
         # .../segments/{seq}/audio 패턴 확인
         try:
             seq_idx = len(parts) - 2
@@ -985,9 +1373,14 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                 return await _list_segments(base, session_dir)
             elif len(extra) == 2 and method == 'GET':
                 seq = int(extra[0])
-                video = (extra[1] == 'video')
                 retry = str(qs.get('retry', '')).strip() in ('1', 'true')
-                return await _stream_segment(base, session_dir, seq, video=video, retry=retry)
+                # slot 미지정 = 믹스(동시 발언 화자 전원 합성). slot=K = 슬롯 K 화자 단독본.
+                slot_q = str(qs.get('slot', '')).strip()
+                slot = int(slot_q) if slot_q.isdigit() else None
+                if extra[1] == 'peaks':
+                    return await _stream_peaks(base, session_dir, seq, slot=slot)
+                return await _stream_segment(base, session_dir, seq,
+                                             video=(extra[1] == 'video'), retry=retry, slot=slot)
 
         elif action == 'audio' and method == 'GET':
             return await _stream_whole_audio(base, session_dir)
@@ -1104,9 +1497,13 @@ async def _get_recording(base: str, rel_dir: str) -> HandlerResult:
         }
 
     segs = _build_segments(rec_dir)
-    rec['segments'] = segs
+    rec['segments'] = [_public_seg(s) for s in segs]
     rec['segment_count'] = len(segs)
     rec['total_speech_ms'] = sum(s['duration_ms'] for s in segs)
+    # 발언 턴 = 화자 구간 수 (동시 발언 세그먼트는 턴이 여럿). 세그먼트 수와 구분한다.
+    rec['turn_count'] = sum(len(t.get('speakers') or []) or 1
+                            for s in segs for t in s.get('tracks', []) if t.get('kind') == 'audio')
+    rec['max_concurrent'] = max((s.get('max_concurrent', 1) for s in segs), default=0)
     rec['has_video'] = any(s['has_video'] for s in segs)
     rec['status'] = _session_status(rec_dir, _read_jsonl(os.path.join(rec_dir, 'segments.jsonl')))
 
@@ -1123,6 +1520,11 @@ async def _delete_recording(base: str, rel_dir: str) -> HandlerResult:
     return HandlerResult(status=200, body={'id': rel_dir, 'deleted': True})
 
 
+def _public_seg(seg: dict) -> dict:
+    """응답용 세그먼트 — 변환기 전용 내부 키(_tracks/_audio_* 등 raw 파일 참조)는 제외."""
+    return {k: v for k, v in seg.items() if not k.startswith('_')}
+
+
 def _find_rec_dir(d: str) -> str:
     """세그먼트가 있는 녹취 디렉터리 찾기: recordings/ 하위 또는 세션 디렉터리 직접"""
     rec_dir = os.path.join(d, 'recordings')
@@ -1135,50 +1537,89 @@ async def _list_segments(base: str, rel_dir: str) -> HandlerResult:
     d = os.path.join(base, rel_dir)
     rec_dir = _find_rec_dir(d)
     segs = _build_segments(rec_dir)
-    return HandlerResult(status=200, body={'id': rel_dir, 'segments': segs})
+    return HandlerResult(status=200, body={'id': rel_dir, 'segments': [_public_seg(s) for s in segs]})
+
+
+def _find_seg(rec_dir: str, seq: int):
+    for s in _build_segments(rec_dir):
+        if s.get('seq') == seq:
+            return s
+    return None
+
+
+def _slot_has_video(seg: dict, slot) -> bool:
+    """해당 재생 단위에 영상이 있는가 — Content-Type·플레이어 선택 기준"""
+    if slot is None:
+        return bool(seg.get('has_video'))
+    for t in seg.get('tracks', []) or []:
+        if t.get('kind') == 'audio' and t.get('slot') == slot:
+            return bool(t.get('has_video'))
+    return False
 
 
 async def _stream_segment(base: str, rel_dir: str, seq: int, video: bool = False,
-                          retry: bool = False) -> HandlerResult:
+                          retry: bool = False, slot=None) -> HandlerResult:
     d = os.path.join(base, rel_dir)
     rec_dir = _find_rec_dir(d)
 
     # 명시 재시도(?retry=1) — 실패 마커를 지워 raw 로 되돌린 뒤 재변환 큐잉
     if retry:
-        try: os.remove(_failed_marker_path(rec_dir, seq))
+        try: os.remove(_failed_marker_path(rec_dir, seq, slot))
         except OSError: pass
 
     # _build_segments로 병합된 세그먼트 데이터 사용
-    built_segs = _build_segments(rec_dir)
-    seg = None
-    for s in built_segs:
-        if s.get('seq') == seq:
-            seg = s
-            break
+    seg = _find_seg(rec_dir, seq)
     if not seg:
         return HandlerResult(status=404, body={'error': 'Segment not found'})
 
-    status = _ensure_segment_ready(rec_dir, seg)
+    status = _ensure_segment_ready(rec_dir, seg, slot)
 
     if status == 'recording':
         return HandlerResult(status=202, body={'status': 'recording', 'message': '녹취 진행 중'})
     if status == 'transcoding':
         return HandlerResult(status=202, body={'status': 'transcoding', 'message': '변환 중'})
     if status == 'failed':
-        reason = seg.get('status_reason') or _read_failed_reason(rec_dir, seq)
+        reason = (seg.get('status_reason') if slot is None else '') or _read_failed_reason(rec_dir, seq, slot)
         return HandlerResult(status=500, body={'status': 'failed', 'reason': reason,
                                                'message': f'재생 불가 — {reason}'})
 
     # MP4 변환 파일 확인
-    conv = _converted_path_mp4(rec_dir, seq)
+    conv = _converted_path_mp4(rec_dir, seq, slot)
     if not os.path.exists(conv):
         return HandlerResult(status=404, body={'error': 'File not found'})
 
-    ct = 'video/mp4' if seg.get('has_video') else 'audio/mp4'
+    ct = 'video/mp4' if _slot_has_video(seg, slot) else 'audio/mp4'
 
     return HandlerResult(status=200, body=conv, headers={
         'Content-Type': ct, 'X-File-Path': conv
     })
+
+
+async def _stream_peaks(base: str, rel_dir: str, seq: int, slot=None) -> HandlerResult:
+    """파형 피크 배열 — 변환 산출물과 함께 만들어지므로 변환을 먼저 보장한다.
+    미변환이면 202(변환중) — 콘솔은 오디오와 같은 폴링 규약으로 기다린다."""
+    d = os.path.join(base, rel_dir)
+    rec_dir = _find_rec_dir(d)
+
+    peaks = _peaks_path(rec_dir, seq, slot)
+    if os.path.exists(peaks):
+        data = _read_json(peaks) or {}
+        return HandlerResult(status=200, body={'seq': seq, 'slot': slot, **data})
+
+    seg = _find_seg(rec_dir, seq)
+    if not seg:
+        return HandlerResult(status=404, body={'error': 'Segment not found'})
+
+    status = _ensure_segment_ready(rec_dir, seg, slot)
+    if status in ('recording', 'transcoding', 'raw'):
+        return HandlerResult(status=202, body={'status': status, 'message': '변환 중'})
+    if status == 'failed':
+        reason = _read_failed_reason(rec_dir, seq, slot)
+        return HandlerResult(status=500, body={'status': 'failed', 'reason': reason})
+
+    # 변환은 끝났는데 피크가 없다 — 이 변환본은 피크 생성 이전(구 캐시)이다.
+    return HandlerResult(status=404, body={'error': 'No waveform for this recording',
+                                           'message': '이 녹취는 파형 없이 변환되었습니다'})
 
 
 async def _stream_whole_audio(base: str, rel_dir: str) -> HandlerResult:

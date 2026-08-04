@@ -1849,19 +1849,35 @@ def _find_ptt_sessions(group_id: str, date: str = None, days: int = None) -> lis
             continue
         yyyy, mm, dd, hh = rel
         window = f"{yyyy}{mm}{dd}{hh}"
-        # 시간창 segments.jsonl 1회 읽어 세그먼트수·화자수·발화시간·실제 시간범위 집계
+        # 시간창 segments.jsonl 1회 읽어 세그먼트수·발언턴·화자수·발화시간·시간범위 집계
         seg_count = 0
         speakers: set = set()
-        total_ms = 0
+        turn_count = 0
+        max_con = 0
+        total_ms = 0       # 발화 구간 합 (세그먼트 = 겹침 1회 계산)
+        talk_ms = 0        # 발화 누적 합 (화자별 구간 합 — 동시 발언은 겹쳐서 더해진다)
         st_min = ""
         en_max = ""
         segs = _read_jsonl(os.path.join(hh_dir, "segments.jsonl"))
         for s in segs:
             seg_count += 1
-            sp = s.get("speaker_id", "")
-            if sp:
-                speakers.add(sp)
             total_ms += int(s.get("duration_ms", 0) or 0)
+            # 동시 발언(dual/multi-talker)·전이중 private call 은 한 세그먼트에 슬롯 트랙이
+            #   여럿이다 — speaker_id(대표 화자)만 세면 화자·발언이 과소 집계된다.
+            tracks = _ptt_seg_audio_tracks(s)
+            max_con = max(max_con, _ptt_seg_max_concurrent(tracks))
+            for t in tracks:
+                spans = t.get("speakers") or []
+                turn_count += len(spans) or 1
+                for sp in spans:
+                    if sp.get("id"):
+                        speakers.add(sp["id"])
+                    talk_ms += int(sp.get("dur_ms", 0) or 0)
+            if not tracks:
+                sp = s.get("speaker_id", "")
+                if sp:
+                    speakers.add(sp)
+                turn_count += 1
             stt = s.get("start_time", "")
             ent = s.get("end_time", "")
             if stt and (not st_min or stt < st_min):
@@ -1877,16 +1893,71 @@ def _find_ptt_sessions(group_id: str, date: str = None, days: int = None) -> lis
             "end_time": (None if is_active else (en_max or f"{yyyy}-{mm}-{dd}T{hh}:59:59")),
             "state": "active" if is_active else "ended",
             "segment_count": seg_count,
+            "turn_count": turn_count,
             "speaker_count": len(speakers),
+            "max_concurrent": max_con,
             "total_speech_ms": total_ms,
+            "talk_ms": talk_ms,
         })
     result.sort(key=lambda x: x["dir"], reverse=True)
     return result
 
 
+def _ptt_seg_audio_tracks(s: dict) -> list:
+    """세그먼트 한 행의 음성 슬롯 트랙 목록. CMP 의 tracks[] 가 정본이고, 그 이전
+    녹취는 flat 키(audio_file/audio1_file/speaker_id_audioK)에서 합성한다.
+    반환 원소: {slot, speakers:[{id,offset_ms,dur_ms}]}"""
+    raw = s.get("tracks")
+    if isinstance(raw, list) and raw:
+        return [{"slot": t.get("slot", 0), "speakers": t.get("speakers") or []}
+                for t in raw
+                if isinstance(t, dict) and t.get("kind") == "audio" and t.get("file")]
+    out = []
+    dur = int(s.get("duration_ms", 0) or 0)
+    rep = s.get("speaker_id", "")
+    for key, val in s.items():
+        if not key.endswith("_file") or not val or not isinstance(val, str):
+            continue
+        prefix = key[:-len("_file")]
+        if not prefix.startswith("audio"):
+            continue
+        tail = prefix[len("audio"):]
+        slot = int(tail) if tail.isdigit() else 0
+        sid = s.get(f"speaker_id_{prefix}", "") or (rep if slot == 0 else "")
+        out.append({"slot": slot,
+                    "speakers": [{"id": sid, "offset_ms": 0, "dur_ms": dur}] if sid else []})
+    out.sort(key=lambda t: t["slot"])
+    return out
+
+
+def _ptt_seg_max_concurrent(tracks: list) -> int:
+    """세그먼트 안에서 동시에 열려 있던 화자 구간의 최대 수"""
+    events = []
+    for t in tracks:
+        for sp in t.get("speakers") or []:
+            d = int(sp.get("dur_ms", 0) or 0)
+            if d <= 0:
+                continue
+            off = int(sp.get("offset_ms", 0) or 0)
+            events.append((off, 1))
+            events.append((off + d, -1))
+    if not events:
+        return 1 if tracks else 0
+    events.sort(key=lambda e: (e[0], e[1]))   # 같은 시각이면 종료 먼저 — 인접 구간은 겹침이 아니다
+    cur = peak = 0
+    for _, delta in events:
+        cur += delta
+        peak = max(peak, cur)
+    return peak
+
+
 def _ptt_group_summaries() -> dict:
-    """모든 PTT 그룹의 경량 요약(세션수·최근 시간창)을 그룹키별로 반환.
-    디렉터리 글롭만 수행(파일 미독) → 그룹 다수에도 저렴. 키 = ptt/{groupKey}."""
+    """모든 PTT 그룹의 경량 요약을 그룹키별로 반환. 키 = ptt/{groupKey} 디렉터리명.
+
+    콘솔 좌측 목록의 출처다 — DB(ptt_groups)가 아니라 **녹취 디렉터리**를 훑으므로
+    DB 행이 없는 세션(1:1 private call `priv-*`, ad-hoc 임시 그룹)도 드러난다.
+    분류/표시에 필요한 만큼만 group.json 을 읽는다(그룹당 1파일).
+    """
     if not _calls_dir:
         return {}
     import glob as _glob
@@ -1908,6 +1979,33 @@ def _ptt_group_summaries() -> dict:
             s["session_count"] += 1
             if window > s["last_window"]:
                 s["last_window"] = window
+
+    # 그룹 디스크립터 — 종류(prearranged/chat/broadcast/private)·floor 축·이름·참여자
+    for gid, s in summaries.items():
+        gj = _read_json(os.path.join(ptt_root, gid, "group.json")) or {}
+        members = [m.get("user_id", "") for m in (gj.get("members") or [])
+                   if isinstance(m, dict) and m.get("user_id")]
+        s["mcptt_group_id"] = gj.get("mcptt_group_id", "") or gid
+        s["name"] = gj.get("name", "")
+        s["group_type"] = gj.get("group_type", "")
+        s["floor_control"] = gj.get("floor_control", "")   # ""=미기록(구 세션) / on / off
+        s["floor_policy"] = gj.get("floor_policy", "")
+        s["max_talkers"] = gj.get("max_talkers", 0)
+        s["video_enabled"] = bool(gj.get("video_enabled"))
+        s["member_count"] = gj.get("member_count", len(members))
+        # 분류: DB 그룹이 아닌 세션을 콘솔이 구분해 담을 수 있게 한다.
+        #   private = 1:1 (priv-<caller>-<callee> ephemeral)
+        #   adhoc   = ad-hoc 그룹콜 — group.json 은 있으나 surrogate id 가 없다(DB 미등록)
+        #   group   = DB 등록 그룹 (surrogate id > 0)
+        if s["group_type"] == "private" or gid.startswith("priv-"):
+            s["kind"] = "private"
+            s["peers"] = members[:2]
+        elif not gj:
+            s["kind"] = "unknown"       # group.json 유실 — 그룹으로도 1:1 로도 단정 못한다
+        elif not gj.get("id"):
+            s["kind"] = "adhoc"
+        else:
+            s["kind"] = "group"
     return summaries
 
 

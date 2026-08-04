@@ -10,17 +10,34 @@ export interface PttSession {
   initiator?: string
   member_count?: number
   segment_count?: number
-  speaker_count?: number
-  total_speech_ms?: number
+  turn_count?: number        // 발언 턴 = 화자 구간 수 (동시 발언 세그먼트는 턴이 여럿)
+  speaker_count?: number     // 슬롯 화자 포함
+  max_concurrent?: number    // 최대 동시 발언 인원
+  total_speech_ms?: number   // 발화 구간 합 (겹침 1회 계산)
+  talk_ms?: number           // 발화 누적 합 (화자별 구간 합)
 }
+
+// 세션 분류 — 좌측 목록의 섹션. DB 그룹이 아닌 세션(1:1/임시)도 녹취 디렉터리에서 드러난다.
+export type PttSessionKind = 'group' | 'private' | 'adhoc' | 'unknown'
 
 export interface PttGroupSummary {
   session_count: number
-  last_window: string   // YYYYMMDDHH
+  last_window: string        // YYYYMMDDHH
+  kind?: PttSessionKind
+  mcptt_group_id?: string
+  name?: string
+  group_type?: string        // prearranged | chat | broadcast | private
+  floor_control?: string     // 'on' | 'off'(전이중) | ''(구 세션 — 미기록)
+  floor_policy?: string      // single | dual | multi
+  max_talkers?: number
+  video_enabled?: boolean
+  member_count?: number
+  peers?: string[]           // kind=private 일 때 상대 2인
 }
 
 export interface PttSummaryResponse {
-  summaries: Record<string, PttGroupSummary>   // key = groupKey(ptt_groups.id)
+  // key = 녹취 디렉터리명 — DB 그룹은 ptt_groups.id(surrogate), 그 외는 세션 식별자
+  summaries: Record<string, PttGroupSummary>
 }
 
 export interface PttEvent {
@@ -50,17 +67,40 @@ export interface PttFlowResponse {
   messages?: FlowMessage[]
 }
 
+// CMP 가 floor.jsonl 에 기록하는 op 8종 (TS 24.380)
+export type PttFloorOp =
+  | 'GRANT' | 'RELEASE' | 'IDLE' | 'REVOKE' | 'REVOKE_END'
+  | 'QUEUE' | 'QUEUE_CANCEL' | 'DENY'
+
 export interface PttFloorEvent {
   ts: string
-  op: string            // GRANT | REVOKE | REJECT | RELEASE | IDLE | TAKEN
+  op: PttFloorOp | string
   user: string
   ssrc?: number
   prio?: number
+  // GRANT
+  slot?: number
+  talkers?: number
+  policy?: string
   preempt?: boolean
   preempted_from?: string
-  preempted_by?: string
+  tier?: string
+  // DENY
+  reason?: string
+  cause?: number
   owner?: string
   owner_prio?: number
+  owner_tier?: string
+  initiator?: string
+  // QUEUE / QUEUE_CANCEL
+  pos?: number
+  qsize?: number
+  revoked?: string
+  removed?: number
+  // REVOKE / REVOKE_END / RELEASE
+  grace_sec?: number
+  idle_ms?: number
+  preempted_by?: string
   [key: string]: unknown
 }
 

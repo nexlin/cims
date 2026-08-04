@@ -4,9 +4,13 @@
 import { useState, useRef, useCallback, useEffect, type ReactElement } from 'react'
 import { recordingsApi } from '../api/recordings'
 
-export type PlayRef = { recId: string; seq: number } | null
+// slot: 동시 발언·전이중 세그먼트의 슬롯 단독 재생. undefined = 믹스(화자 전원 합성).
+export type PlayRef = { recId: string; seq: number; slot?: number } | null
 
-async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void> {
+export const samePlay = (a: PlayRef, b: PlayRef) =>
+  !!a && !!b && a.recId === b.recId && a.seq === b.seq && a.slot === b.slot
+
+export async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void> {
   const deadline = Date.now() + 120_000
   let first = true
   while (Date.now() < deadline) {
@@ -25,7 +29,7 @@ async function waitSegmentReady(url: string, signal: AbortSignal): Promise<void>
 }
 
 export interface InlineAudio {
-  play: (recId: string, seq: number) => Promise<void>
+  play: (recId: string, seq: number, slot?: number) => Promise<void>
   stop: () => void
   playing: PlayRef
   preparing: PlayRef
@@ -44,24 +48,25 @@ export function useInlineAudio(onError: (m: string) => void): InlineAudio {
     setPlaying(null); setPreparing(null)
   }, [])
 
-  const play = useCallback(async (recId: string, seq: number) => {
+  const play = useCallback(async (recId: string, seq: number, slot?: number) => {
     const el = audioRef.current
     if (!el) return
+    const ref: PlayRef = { recId, seq, slot }
     // 같은 발언 재클릭 = 토글 정지
-    if (playing && playing.recId === recId && playing.seq === seq) {
+    if (samePlay(playing, ref)) {
       el.pause(); setPlaying(null); return
     }
     abortRef.current?.abort()
     const ac = new AbortController()
     abortRef.current = ac
-    const url = recordingsApi.segmentAudioUrl(recId, seq)
-    setPreparing({ recId, seq })
+    const url = recordingsApi.segmentAudioUrl(recId, seq, slot)
+    setPreparing(ref)
     try {
       await waitSegmentReady(url, ac.signal)
       if (ac.signal.aborted) return
       setPreparing(null)
       el.src = url
-      setPlaying({ recId, seq })
+      setPlaying(ref)
       el.play().catch(() => {})
     } catch (e) {
       if (!ac.signal.aborted) {

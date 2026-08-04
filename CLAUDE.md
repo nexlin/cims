@@ -142,7 +142,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [mcptt_csp_cmp_roadmap_contract.md](docs/design/features/mcptt_csp_cmp_roadmap_contract.md) — 로드맵 기능(private call·dual/multi-talker·pre-established 등) CSP↔CMP 연동 메시지 규격, Call Control/Media Plane 2파트 분담 계약
 - [mcdata_messaging.md](docs/design/features/mcdata_messaging.md) — MCData 그룹 메시징(SDS) — TS 24.282 그룹 SDS·TS 24.481 그룹별 게이트·disposition
 - [ue_nat_traversal.md](docs/design/features/ue_nat_traversal.md) — 단말 NAT traversal (시그널링·미디어 leg 포트·목적지 latch·정책)
-- [recording.md](docs/design/features/recording.md) — 녹취 구조
+- [recording.md](docs/design/features/recording.md) — 녹취 구조 (슬롯 트랙·믹스/단독 재생·PTT 세션 이력 UI)
 - [flow_logging.md](docs/design/features/flow_logging.md) — SIP/Flow 로깅 (sesid 규칙·5분 버킷)
 - [monitoring.md](docs/design/features/monitoring.md) — 모니터링
 - [sip_service_model.md](docs/design/features/sip_service_model.md) / [sip_runtime_config.md](docs/design/features/sip_runtime_config.md) — SIP 서비스 모델·런타임 설정

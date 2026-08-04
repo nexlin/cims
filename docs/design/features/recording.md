@@ -1,10 +1,10 @@
 # CIMS 통화 녹취 설계서
 
-> 상위 문서: [04_Monitoring_Statistics.md](04_Monitoring_Statistics.md) Part 2 참조
-> 이 문서는 녹취의 CMP 구현 상세(RTP 덤프, 파일 형식)를 다룸. UI/API는 상위 문서 Part 2에 통합.
+> 이 문서가 녹취의 정본이다 — CMP 기록(RTP 덤프·세그먼트 메타), OAM 변환·재생, 콘솔 UI 규약.
+> 관련: [monitoring.md](monitoring.md) · [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7(floor 정책)
 >
 > 재생 변환 런타임의 정본은 **[§3.6 재생 변환 런타임](#36-재생-변환-런타임)** 이다(트랜스코딩 주체=**OAM**,
-> 공유 NAS, ffmpeg 번들, 변환 워커 풀, 콘솔 자동재생).
+> 공유 NAS, ffmpeg 번들, 변환 워커 풀, 믹스/슬롯 재생 단위, 콘솔 자동재생).
 > 녹취 메타는 DB 미사용 — call.json/segments.jsonl 파일 SoT, OAM `recording.py` 가 파일 스캔.
 
 ---
@@ -43,10 +43,10 @@ VoIP 1:1 통화 및 PTT 그룹콜의 음성·영상을 녹취하고, Console UI�
                      └────┬────┘                         │
                           │                              │
                      ┌────┴────┐   재생 요청 시           │
-                     │   CSC   │←────────────────────────┘
+                     │   OAM   │←────────────────────────┘
                      │ (Python)│
-                     │         │── ffmpeg 변환 (on-demand)
-                     │         │── 변환 완료 → status=ready
+                     │         │── ffmpeg 변환 (on-demand, 워커 풀)
+                     │         │── 변환 완료 → mp4 + peaks 캐시
                      │         │── 스트리밍 응답
                      └────┬────┘
                           │
@@ -60,9 +60,9 @@ VoIP 1:1 통화 및 PTT 그룹콜의 음성·영상을 녹취하고, Console UI�
 
 | 컴포넌트 | 역할 | CPU 부하 |
 |----------|------|----------|
-| **CMP** | raw RTP 패킷을 파일에 덤프 (비동기 write) | 최소 (I/O only) |
-| **CSP** | DB에 녹취 메타데이터 생성 (통화 시작/종료) | 최소 |
-| **CSC** | 재생 요청 시 ffmpeg 변환 + 캐싱 + 스트리밍 | 변환 시에만 |
+| **CMP** | raw RTP 패킷을 파일에 덤프 (비동기 write) + 세그먼트 메타 기록 | 최소 (I/O only) |
+| **CSP** | 녹취 경로(record_dir) 결정·전달 + 세션/그룹 디스크립터 기록 | 최소 |
+| **OAM** | 재생 요청 시 ffmpeg 변환 + 캐싱 + 스트리밍 ([§3.6](#36-재생-변환-런타임)) | 변환 시에만 |
 
 ---
 
@@ -119,44 +119,67 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
           ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오 (동시 발언 슬롯 0)
           ├── seg_NNNN_audioK.rtp                # 동시 발언(dual/multi-talker) 슬롯 K 화자 오디오
           ├── seg_NNNN_video.rtp                 # 영상그룹 + 실제 영상 있을 때만 (빈 파일 미생성)
-          └── seg_NNNN.json                      # speaker_id/priority/preempt, audio_file=상대경로(seg/NNN/…)
-                                                 # + audio_pt/audio_codec (화자 leg 협상 PT·코덱 — 아래 참조)
-                                                 # + audioK_file/speaker_id_audioK (동시 발언 슬롯 화자)
+          ├── seg_NNNN.json                      # 세그먼트 메타 — tracks[] 가 정본 (아래 §3.3.1)
+          ├── seg_NNNN.mp4                       # 믹스 변환본 (OAM 캐시 — 화자 전원 합성)
+          ├── seg_NNNN_sK.mp4                    # 슬롯 K 화자 단독 변환본 (OAM 캐시)
+          └── seg_NNNN[_sK].peaks.json           # 파형 피크 배열 (콘솔 전이중 플레이어 레인)
 ```
-> 그룹 키 = surrogate `id`.
+> 그룹 키 = surrogate `id`. 1:1 private call·ad-hoc 그룹은 DB 행이 없어 surrogate 가 없다 —
+> 이때 키는 세션 식별자(`priv-<caller>-<callee>` 등)가 그대로 쓰인다.
 
-### 3.4 CSC: on-demand 트랜스코딩 (파일시스템 기반)
+#### 3.3.1 세그먼트 메타 — `tracks[]` (정본)
 
-DB 미사용. 세션 디렉토리에서 직접 raw RTP를 트랜스코딩.
+한 세그먼트는 **슬롯 트랙 N개**를 가질 수 있다. 동시 발언(dual/multi-talker)은 화자마다,
+floor 없는 private call(전이중)은 멤버마다 슬롯이 하나씩이다. 트랙 메타의 정본은 `tracks[]` 다:
 
+```json
+{
+  "seq": 15, "type": "ptt", "speaker_id": "01011112222", "priority": 5,
+  "start_time": "…", "end_time": "…", "duration_ms": 94000,
+  "audio_file": "seg/000/seg_0015_audio.rtp", "audio_pt": 96,       // ← 구 소비자 호환 flat 키
+  "audio1_file": "…", "speaker_id_audio1": "01033334444",           //   (슬롯 0 / 첫 화자만)
+  "tracks": [
+    { "prefix": "audio", "kind": "audio", "slot": 0,
+      "file": "seg/000/seg_0015_audio.rtp", "pt": 96, "codec": "AMR-WB/16000",
+      "speakers": [ { "id": "01011112222", "offset_ms": 0,     "dur_ms": 58000 },
+                    { "id": "01099990000", "offset_ms": 58000, "dur_ms": 36000 } ] },
+    { "prefix": "audio1", "kind": "audio", "slot": 1, "file": "…", "pt": 99, "codec": "AMR-WB/16000",
+      "speakers": [ { "id": "01033334444", "offset_ms": 25000, "dur_ms": 44000 } ] }
+  ],
+  "has_video": false
+}
 ```
-Console UI: GET /api/v1/ptt/history/{gid}/{session}/audio
-  ↓
-CSC (services/flow_logger.py):
-  1. 세션 디렉토리 탐색 → .d 폴더
-  2. recording_mixed.wav 캐시 확인
-     ├─ 캐시 존재 → 즉시 스트리밍 (audio/wav)
-     └─ 캐시 없음 → _transcode_audio(d_dir)
-          │
-          ├─ PTT: raw_audio.rtp → AMR-WB strip → ffmpeg PCM → recording_mixed.wav
-          └─ VoIP: raw_a.rtp + raw_b.rtp → AMR-WB strip → ffmpeg → amix → recording_mixed.wav
-  3. recording_mixed.wav 스트리밍
 
-VoIP 녹취: GET /api/v1/recordings/{call_id}/audio
-  → 동일한 _transcode_audio() 로직 적용
-       ↓
-     변환된 파일 스트리밍 (또는 202 → 클라이언트 재시도)
-```
+| 필드 | 의미 |
+|---|---|
+| `kind`/`slot` | PTT 슬롯 트랙 — `audio`/`audio1`… = 슬롯 0..N, `video`/`videoK` 동일 |
+| `side` | VoIP leg (`a`/`b`) — PTT 에는 없다 |
+| `pt`/`codec` | **슬롯마다** 다를 수 있다(이종 단말 혼재) — 변환기의 PT 판별 근거 |
+| `speakers[]` | 그 트랙을 점유한 화자 **구간** 목록. 선점 회수로 슬롯이 재사용되면 원소가 2개 이상이 된다 — 트랙당 화자를 한 값으로만 두면 뒤 화자만 남아 귀속이 소실된다 |
 
-### 3.5 변환 전략
+미디어(payload 있는 RTP)가 없는 트랙은 파일·`tracks[]` 양쪽에서 제외된다(keepalive-only 포함).
+flat 키(`audio_file`/`audio_pt`/`speaker_id_audioK`)는 기존 녹취와의 호환을 위해 계속 기록되며,
+슬롯 0 과 각 트랙의 **첫 화자**만 담는다. 소비자는 `tracks[]` 가 있으면 그것을 쓰고, 없으면
+(그 이전 녹취) flat 키에서 트랙 1개를 합성한다.
 
-| 시나리오 | 입력 | ffmpeg 명령 | 출력 |
-|----------|------|------------|------|
-| VoIP 음성 | _a.rtp + _b.rtp | raw → PCM → 믹스 → MP3 | {call_id}.mp3 |
-| VoIP 영상 (발신) | _a.rtp + _va.rtp | audio+video mux | {call_id}_a.mp4 |
-| VoIP 영상 (착신) | _b.rtp + _vb.rtp | audio+video mux | {call_id}_b.mp4 |
-| PTT 음성 세그먼트 | seg_audio.rtp | raw → MP3 | seg_{seq}.mp3 |
-| PTT 영상 세그먼트 | seg_audio.rtp + seg_video.rtp | mux | seg_{seq}.mp4 |
+### 3.4 변환 전략
+
+DB 미사용 — 녹취 디렉터리에서 직접 raw RTP 를 트랜스코딩한다. 출력은 **MP4**(AAC, 영상 있으면
+H.264) 로 통일하고 원본 옆에 캐시한다. 실행 주체·큐잉·상태 규약은 [§3.6](#36-재생-변환-런타임)
+이 정본이다.
+
+| 시나리오 | 입력 | 처리 | 출력 |
+|----------|------|------|------|
+| PTT 단일 화자 | `seg_NNNN_audio.rtp` | AMR-WB strip → AAC | `seg_NNNN.mp4` |
+| PTT 동시 발언·전이중 (믹스) | 슬롯 트랙 N개 | AMR-WB strip → `amix` → AAC | `seg_NNNN.mp4` |
+| PTT 슬롯 단독 | 슬롯 K 트랙 | AMR-WB strip → AAC | `seg_NNNN_sK.mp4` |
+| PTT 영상 (슬롯 1개) | 음성 + `seg_NNNN_video.rtp` | H.264 `copy` mux | `seg_NNNN.mp4` |
+| PTT 영상 (슬롯 2개 이상) | 음성 + 영상 트랙 N개 | 2열 격자 합성 + mux | `seg_NNNN.mp4` |
+| VoIP 음성 | `_a.rtp` + `_b.rtp` | AMR-WB strip → `amix` → AAC | `seg_NNNN.mp4` |
+| VoIP 영상 | `_a/_b` + `_va/_vb` | 발신=좌 / 착신=우 배치 + mux | `seg_NNNN.mp4` |
+
+모든 음성 변환은 같은 ffmpeg 실행의 두 번째 출력으로 PCM 을 뽑아 파형 피크
+(`seg_NNNN[_sK].peaks.json`)까지 만든다.
 
 ---
 
@@ -190,11 +213,11 @@ leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기
   화자별 갱신), VoIP 에 `audio_pt_a/b`/`audio_codec_a/b`(leg 별, 재협상 시 최신 반영).
 - **동시 발언 세그먼트**(dual/multi-talker, [../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.7):
   세그먼트는 발언자 집합이 빌 때 닫히고, 화자마다 슬롯 트랙(`audio`/`audio1`…)에 분리 기록된다.
-  대표 화자는 `speaker_id`, 나머지 슬롯 화자는 `speaker_id_audioK` 로 귀속한다. 단일 화자
-  정책에서는 슬롯 0 만 쓰여 파일명·메타가 종전과 같다.
-- **OAM 변환기**: 메타 `audio_pt` 를 **우선** 사용해 해당 PT 패킷만 추출. 메타 없는(구)
-  녹취는 파일 내 최빈 PT 자동감지 fallback(payload ≥ 6바이트 표본 — telephone-event 배제).
-  AMR-WB 외 코덱 메타는 경고 로그 후 AMR-WB 로 시도(현행 디코더 = AMR-WB + H.264).
+  귀속은 `tracks[].speakers[]` 구간이 정본이다(§3.3.1). 단일 화자 정책에서는 슬롯 0 만 쓰여
+  파일명·메타가 종전과 같다.
+- **OAM 변환기**: 트랙 메타 `pt`(구 녹취는 `audio_pt`)를 **우선** 사용해 해당 PT 패킷만 추출.
+  메타 없는 녹취는 파일 내 최빈 PT 자동감지 fallback(payload ≥ 6바이트 표본 — telephone-event
+  배제). AMR-WB 외 코덱 메타는 경고 로그 후 AMR-WB 로 시도(현행 디코더 = AMR-WB + H.264).
 
 ### 영상 유무(has_video) 판정 — keepalive-only 트랙 배제
 
@@ -220,29 +243,48 @@ leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기
 **요청 처리 경로와 분리**하고 **동시 변환 수를 제한**한다.
 
 ```
-[콘솔] GET …/segments/{seq}/audio
+[콘솔] GET …/segments/{seq}/audio[?slot=K]
    │
    ▼  (OAM 요청 스레드 — ffmpeg 직접 실행 안 함)
- _ensure_segment_ready(rec_dir, seg)
+ _ensure_segment_ready(rec_dir, seg, slot)
    ├─ status 판정: ready(mp4 존재) / transcoding(마커·lock) / failed(.failed 마커
    │              또는 오디오 원본 없음) / recording / raw
-   ├─ raw 면: dedup lock(lock_key="{rec_dir}:{seq}") 획득 후
-   │          _transcode_executor.submit(_transcode_segment_file, rec_dir, seg)
+   ├─ raw 면: dedup lock(lock_key="{rec_dir}:{seq}:{slot|mix}") 획득 후
+   │          _transcode_executor.submit(_transcode_segment_file, rec_dir, seg, slot)
    └─ 즉시 202 transcoding 반환 (failed 면 500 + 사유 — 재큐잉 없음)
         │
         ▼  ThreadPoolExecutor(max_workers=N)  ← 내부 FIFO 큐 + 워커 스레드 N개
-     [worker] _transcode_segment_file: 마커 생성 → raw RTP strip(AMR-WB/H.264)
-              → ffmpeg mux → seg_NNNN.mp4 → finally: 마커·lock 해제
+     [worker] 마커 생성 → 슬롯별 raw RTP strip(AMR-WB/H.264)
+              → ffmpeg (amix + mux) → seg_NNNN[_sK].mp4
+              → 같은 실행의 2번째 출력(PCM)으로 peaks.json
+              → finally: 마커·lock 해제
 ```
+
+**재생 단위 = 믹스 또는 슬롯**. 동시 발언·전이중 세션은 세그먼트 하나에 화자가 여럿이므로
+재생본이 둘로 나뉜다.
+
+| 재생 단위 | 출력 | 내용 |
+|---|---|---|
+| **믹스**(기본, `slot` 미지정) | `seg_NNNN.mp4` | 그 세그먼트 화자 **전원 합성**(`amix`) — 실제로 무전/통화에서 들린 소리 |
+| **슬롯 단독**(`?slot=K`) | `seg_NNNN_sK.mp4` | 슬롯 K 화자만 — 화자 식별·증거용 |
+
+슬롯이 1개뿐인 단일 화자 세그먼트는 콘솔이 `slot` 을 붙이지 않아 종전 `seg_NNNN.mp4` 경로·캐시를
+그대로 쓴다(중복 변환 없음). 영상은 슬롯 1개면 재인코딩 없이 `-c:v copy` mux, 2개 이상이면
+2열 격자(640×640 셀)로 합성한다.
 
 | 항목 | 설명 |
 |------|------|
 | **워커 풀** | `ThreadPoolExecutor(max_workers=N, thread_name_prefix='rec-transcode')`. 내부 FIFO 큐 + 워커 스레드. OAM `init()`에서 1회 생성 |
 | **동시 변환 수(N)** | 기본 **2**. `oam.json` 의 `RecordingTranscodeWorkers` 로 조정. 초과 작업은 큐에서 대기(FIFO), 빈 워커 생기면 시작 → **CPU 폭주 방지** |
 | **동작 주기** | 폴링 타이머 **없음** — 이벤트 구동(`submit` 시 idle 워커가 즉시 pull, 큐 비면 블로킹 대기). 유일한 주기는 콘솔 폴링(아래) |
-| **할당 단위** | **세그먼트(seq) 1개 = 작업 1개** (녹취 1건이 아님). 어느 워커가 받을지는 풀이 FIFO 선착순 결정 |
-| **중복 방지** | `_transcoding_locks[lock_key]` — 같은 세그먼트에 동시 요청이 와도 1회만 큐잉. 작업 종료 시(`finally`) 해제 |
-| **캐시** | 결과 `seg_NNNN.mp4` 영속 → 재시청은 변환 없이 즉시 200 |
+| **할당 단위** | **재생 단위 1개 = 작업 1개** — 세그먼트 믹스와 슬롯 단독본은 각각 별도 작업이다 |
+| **중복 방지** | `_transcoding_locks[lock_key]` — 같은 재생 단위에 동시 요청이 와도 1회만 큐잉. 작업 종료 시(`finally`) 해제 |
+| **캐시** | 결과 `seg_NNNN[_sK].mp4` 영속 → 재시청은 변환 없이 즉시 200 |
+
+**파형 피크**(`seg_NNNN[_sK].peaks.json`): 변환 ffmpeg 의 **두 번째 출력**으로 s16le/8kHz PCM 을
+같이 뽑아 그 자리에서 진폭 피크 배열(0..255, 600 버킷)로 요약한다 — 별도 프로세스·재디코딩이
+없다. 콘솔 전이중 플레이어의 화자별 파형 레인이 이 값을 쓴다. 이 기능 이전에 변환된 캐시에는
+피크가 없어 `/peaks` 가 404 를 반환하고, 콘솔은 레인을 비운 채 재생만 제공한다.
 
 ### 3.6.4 콘솔 자동재생 (폴링)
 
@@ -291,7 +333,12 @@ leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기
 
 ---
 
-## 5. DB 스키마
+## 5. DB 스키마 (미사용 — 참고)
+
+> 녹취 메타는 **파일이 SoT** 다(`group.json`/`call.json`/`segments.jsonl`/`seg_NNNN.json`).
+> 아래 스키마는 조회 인덱스가 필요해질 때를 위한 참고안이며, 현재 조회·변환 경로는 DB 를 쓰지
+> 않는다. 특히 세그먼트의 슬롯 트랙·화자 구간([§3.3.1](#331-세그먼트-메타--tracks-정본))은
+> 아래 평면 스키마로 표현되지 않는다.
 
 ```sql
 CREATE TABLE recordings (
@@ -368,9 +415,26 @@ GET    /api/v1/recordings/{id}                     상세 (메타 + 세그먼트
 GET    /api/v1/recordings/{id}/audio               음성 (on-demand 변환 후 스트리밍)
 GET    /api/v1/recordings/{id}/video?side=a|b       영상 (on-demand 변환 후 스트리밍)
 GET    /api/v1/recordings/{id}/segments            PTT 세그먼트 목록
-GET    /api/v1/recordings/{id}/segments/{seq}/audio 세그먼트 (on-demand 변환 후 스트리밍)
+GET    /api/v1/recordings/{id}/segments/{seq}/audio[?slot=K]  세그먼트 음성 (믹스 / 슬롯 단독)
+GET    /api/v1/recordings/{id}/segments/{seq}/video[?slot=K]  세그먼트 영상
+GET    /api/v1/recordings/{id}/segments/{seq}/peaks[?slot=K]  파형 피크 배열
 DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모두)
 ```
+
+`slot` 미지정 = **믹스**(화자 전원 합성), `slot=K` = 슬롯 K 화자 단독본 (§3.6.3).
+
+세그먼트 응답 필드 — 슬롯 트랙과 집계:
+
+| 필드 | 의미 |
+|---|---|
+| `tracks[]` | `{slot, kind, side, pt, codec, speakers[], has_video, status}` — 재생 가능한 단위와 화자 귀속 |
+| `speaker_ids[]` | 그 세그먼트의 화자 (등장 순서) |
+| `talker_count` | 음성 트랙 수 |
+| `max_concurrent` | 동시에 열려 있던 화자 구간의 최대 수 (동시 발언 인원) |
+
+녹취 목록(`/recordings`)·PTT 세션 목록(`/ptt/history`)에는 `turn_count`(발언 턴 = 화자 구간 수),
+`speaker_count`(슬롯 화자 포함), `max_concurrent`, `talk_ms`(화자별 발화 누적)가 함께 실린다 —
+세그먼트 수만 세면 동시 발언이 과소 집계된다(3명이 겹쳐 말해도 세그먼트는 1개).
 
 ### 응답 상태
 
@@ -400,18 +464,65 @@ DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모�
 [발신측▾]
 ```
 
-### PTT 그룹콜
-```
-타임라인 (클릭하면 해당 세그먼트 재생):
-09:00          10:00          11:00
-├──┤           ├┤             ├──┤
-1001           1003           1001
+### PTT 세션 이력 (`/service/history/ptt`)
 
-발언 목록:
-# │화자   │시간      │길이  │영상│재생
-1 │김철수 │09:00:12 │4:51 │ ○ │ ▶    ← .mp4 (영상+음성)
-2 │박영희 │09:30:45 │0:38 │   │ ▶    ← .mp3 (음성만)
+**좌측 목록의 출처는 DB(`ptt_groups`)가 아니라 녹취 디렉터리 요약**(`/ptt/history?summary=1`)
+이다. DB 만 보면 1:1 private call(`priv-<caller>-<callee>`)·ad-hoc 그룹은 행이 없어 이력에서
+통째로 사라진다. 아직 통화가 없는 DB 그룹도 계속 보이도록 **DB 그룹 ∪ 녹취 요약**으로 합치고,
+`kind` 로 섹션을 나눈다.
+
+| kind | 판정 | 섹션 |
+|---|---|---|
+| `group` | `group.json` 의 surrogate `id` > 0 | 그룹 |
+| `private` | `group_type=private` 또는 키가 `priv-` 로 시작 | 1:1 private call |
+| `adhoc` | `group.json` 은 있으나 surrogate `id` 없음 | 임시 / ad-hoc |
+| `unknown` | `group.json` 유실 | 분류 미상 |
+
+세션 헤더 배지는 `group.json` 의 floor 축을 그대로 읽는다 — `floor_control:"off"` = **전이중·통화**,
+`"on"` = **반이중·무전**, `floor_policy`/`max_talkers` = 동시 발언 정원.
+
+**반이중(무전형)** — 화자 레인 타임바 + 발언 턴 목록:
 ```
+발언권 타임라인      14:20:03 ~ 14:31:47 · 최대 동시 발언 3명
+                          ╎동시 2╎ ╎동시 3╎
+  01011112222   ██████▌      ▐███████
+  01033334444        ▐████████▌
+  01055556666            ▐███▌      ▐██▌
+  14:20          14:26          14:31
+
+타임라인 (발언 / 발언권 / 이벤트 레이어 토글):
+ 14:23:11  ▶  ▌▌ 동시 2명  01011112222, 01033334444   [믹스]        0:59
+ 14:23:11  ▶  01011112222  발언  슬롯 0                            0:47
+ 14:23:39  ▶  01033334444  발언  슬롯 1                            0:31
+ 14:23:39  ◆  발언권 부여   01033334444  슬롯 1 · 동시 2명 · 정책 multi
+```
+- 화자마다 **레인 1줄**. 겹친 구간은 음영 + `동시 N` 라벨 — 단일 화자 세션은 레인이 1개라
+  종전 미니 타임바와 같은 모습이다.
+- 동시 발언 세그먼트만 **믹스 행**이 앞에 붙는다(전원 합성 = 실제로 들린 소리). 그 아래
+  화자별 턴 행은 각자 슬롯 단독본을 재생한다.
+- floor 레이어는 CMP 가 기록하는 op 8종을 사유와 함께 편다:
+  `GRANT`(슬롯·동시 인원·정책) · `RELEASE`(잔여 인원, T1 무RTP 회수) · `IDLE` ·
+  `REVOKE`(cause·유예) · `REVOKE_END`(유예 만료 강제 회수) · `QUEUE`(선점 대기/대기 위치) ·
+  `QUEUE_CANCEL` · `DENY`(수신전용·1인·broadcast·점유 중 등 사유).
+
+**전이중(통화형)** — floor 가 없어 발언 턴이 성립하지 않으므로 통화형 플레이어:
+```
+▶ ━━━━━━●━━━━━━━━━  1:30 / 2:52   [믹스(양측) ▾]
+   01011112222 ▁▃▅▂▁▁▃▅▇▅▃▁▁▁▂▄▂▁     ← 화자별 파형 레인 (클릭 = 탐색)
+   01055556666 ▁▁▁▄▆▃▁▁▁▁▁▂▅▃▁▁▁▁
+```
+기본은 믹스, 드롭다운으로 화자 단독 전환. 파형은 `/segments/{seq}/peaks?slot=K` 를 쓴다.
+
+**지표** — 동시 발언에서 뜻이 갈리는 값은 분리해 표기한다:
+
+| 지표 | 정의 |
+|---|---|
+| 발언 턴 | 화자 구간 수 (동시 발언 세그먼트는 턴이 여럿) |
+| 녹취 세그먼트 | 파일 단위 — 발언자 집합이 빌 때 닫힌다 |
+| 발화 구간 | 세그먼트 길이 합 — 겹침을 1회로 센 실제 무전 점유 시간 |
+| 발화 누적 | 화자별 발언 시간 합 — 겹치면 각각 더해진다 |
+
+> PTT 통계(`/stats/ptt`)는 아직 세그먼트 기준 집계를 쓴다 — 통계 평면 전면 개선 시 함께 맞춘다.
 
 ---
 

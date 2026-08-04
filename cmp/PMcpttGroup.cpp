@@ -1044,11 +1044,16 @@ bool PMcpttGroup::_dropTalker(const std::string& sessionId) {
     for (auto it = _talkers.begin(); it != _talkers.end(); ++it) {
         if (it->sessionId != sessionId) continue;
         unsigned int ssrc = it->ssrc;
+        int slot = it->slot;
         _talkers.erase(it);
         if (_talkers.empty()) {
+            // 마지막 화자 — 열린 구간은 finishSegment 가 세그먼트 종료(마지막 패킷 시각)로
+            //   닫는다. 여기서 닫으면 무RTP 대기시간까지 발언으로 잡힌다.
             if (_recordEnable && _recorder && _recorder->isActive()) _recorder->finishSegment();
             _slotUsedMask = 0;
         } else if (_floorControl) {
+            // 동시 발언 중 이탈 — 이 슬롯의 화자 구간을 닫아 둔다(슬롯 재사용 시 귀속 분리).
+            _recDetachSlot(slot);
             // 동시 발언 중 한 명만 빠진 경우 — Floor Idle 은 성립하지 않는다.
             _sendReleaseMultiTalker(sessionId, ssrc);
         }
@@ -1236,8 +1241,7 @@ void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc,
         if (_recorder && !_recorder->isActive()) {
             _recStartSegment(sessionId, prio, preempt, prevOwner);
         } else if (_recorder) {
-            _recorder->setTrackSpeaker(_slotTrack(slot, false), sessionId);
-            _recorder->setTrackSpeaker(_slotTrack(slot, true), sessionId);
+            _recAttachSlot(slot, sessionId);
         }
     }
     _notifyTalkers();
@@ -1255,18 +1259,31 @@ void PMcpttGroup::_recStartSegment(const std::string& speakerId, int prio,
     auto itSpk = _members.find(speakerId);
     if (itSpk != _members.end()) { spkPt = itSpk->second.srcPt; spkCodec = itSpk->second.codec; }
     _recorder->startPttSegment(speakerId, prio, preempt, prevOwner, spkPt, spkCodec);
-    for (const auto& t : _talkers) {
-        _recorder->setTrackSpeaker(_slotTrack(t.slot, false), t.sessionId);
-        _recorder->setTrackSpeaker(_slotTrack(t.slot, true), t.sessionId);
-    }
+    for (const auto& t : _talkers) _recAttachSlot(t.slot, t.sessionId);
     if (!_floorControl) {
         // floor 없는 세션은 멤버 슬롯이 곧 화자 — 슬롯 트랙 귀속을 멤버로 채운다.
         for (const auto& [sid, peer] : _members) {
             if (peer.recvOnly) continue;
-            _recorder->setTrackSpeaker(_slotTrack(peer.streamSlot, false), sid);
-            _recorder->setTrackSpeaker(_slotTrack(peer.streamSlot, true), sid);
+            _recAttachSlot(peer.streamSlot, sid);
         }
     }
+}
+
+// 슬롯 트랙 화자 귀속 — 음성/영상 트랙에 화자 구간을 열고, 음성 트랙에는 그 화자 leg 의
+//   ingress PT/코덱을 붙인다(변환기의 PT 판별 근거는 슬롯마다 다르다 — 이종 단말 혼재).
+void PMcpttGroup::_recAttachSlot(int slot, const std::string& sessionId) {
+    if (!_recordEnable || !_recorder) return;
+    _recorder->setTrackSpeaker(_slotTrack(slot, false), sessionId);
+    _recorder->setTrackSpeaker(_slotTrack(slot, true), sessionId);
+    auto it = _members.find(sessionId);
+    if (it != _members.end() && it->second.srcPt > 0)
+        _recorder->setTrackPtCodec(_slotTrack(slot, false), it->second.srcPt, it->second.codec);
+}
+
+void PMcpttGroup::_recDetachSlot(int slot) {
+    if (!_recordEnable || !_recorder) return;
+    _recorder->setTrackSpeaker(_slotTrack(slot, false), "");
+    _recorder->setTrackSpeaker(_slotTrack(slot, true), "");
 }
 
 // 슬롯 트랙 등록 (0..slots-1). 트랙 파일은 세그먼트 시작 시 열리므로 세그먼트 전에 부른다.

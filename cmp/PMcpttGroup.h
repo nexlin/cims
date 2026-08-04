@@ -552,6 +552,10 @@ private:
     void _recStartSegment(const std::string& speakerId, int prio, bool preempt, const std::string& prevOwner);
     // 슬롯 트랙 등록 (0..slots-1) — 이미 등록된 슬롯은 건너뛴다
     void _recEnsureTracks(int slots);
+    // 슬롯 트랙에 화자 귀속 + 그 화자 leg 의 PT/코덱 부착 (음성·영상 트랙 공통)
+    void _recAttachSlot(int slot, const std::string& sessionId);
+    // 슬롯 트랙의 화자 구간 종료 (발언 종료·회수 — 슬롯 재사용 시 귀속이 섞이지 않게)
+    void _recDetachSlot(int slot);
     int  _recTrackSlots = 0;   // 현재 recorder 에 등록된 슬롯 트랙 수
 
     static int64_t _nowUsec();

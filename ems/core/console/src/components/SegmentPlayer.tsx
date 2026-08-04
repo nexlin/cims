@@ -25,6 +25,13 @@ function fmtTimeRange(start: string | null, end: string | null): string {
   return `${s} ~ ${e}`
 }
 
+/** 세그먼트의 화자 표시 — 동시 발언이면 전원(믹스 재생본과 일치) */
+function segSpeakers(seg: RecordingSegment): string {
+  const ids = seg.speaker_ids?.length ? seg.speaker_ids : (seg.speaker_id ? [seg.speaker_id] : [])
+  if (ids.length <= 1) return ids[0] || ''
+  return `${ids.join(', ')} (동시 ${seg.max_concurrent ?? ids.length}명)`
+}
+
 function fmtMs(ms: number): string {
   const sec = Math.floor(ms / 1000)
   const m = Math.floor(sec / 60)
@@ -161,7 +168,8 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
     const offsetMs = el.currentTime * 1000
     setWallTime(fmtWallTime(current.start_time, offsetMs))
     if (callType === 'ptt') {
-      setSpeakerInfo(current.speaker_id || '')
+      // 동시 발언 세그먼트는 화자가 여럿이고 재생본은 믹스다 — 대표 화자만 쓰면 오해를 준다.
+      setSpeakerInfo(segSpeakers(current))
     } else {
       setSpeakerInfo(`${caller || ''} \u2192 ${callee || ''}`)
     }
@@ -401,7 +409,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                       onChange={() => toggleCheck(seg.seq)} />
                   </td>
                   <td>{isActive && isPlaying ? '▶' : seg.seq}</td>
-                  {callType === 'ptt' && <td>{seg.speaker_id}</td>}
+                  {callType === 'ptt' && <td>{segSpeakers(seg)}</td>}
                   <td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</td>
                   <td className="ts">{fmtMs(seg.duration_ms)}</td>
                   <td>
@@ -424,7 +432,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
               <tr key={`rec_${seg.seq}`} style={{ opacity: 0.4 }}>
                 <td><input type="checkbox" disabled /></td>
                 <td>{seg.seq}</td>
-                {callType === 'ptt' && <td>{seg.speaker_id}</td>}
+                {callType === 'ptt' && <td>{segSpeakers(seg)}</td>}
                 <td className="ts">{fmtTimeRange(seg.start_time, null)}</td>
                 <td>-</td>
                 <td>
