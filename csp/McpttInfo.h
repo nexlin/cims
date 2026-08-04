@@ -12,7 +12,7 @@
 //  emergency/imminent 는 prearranged/chat/broadcast(session-type)와 직교하는 런타임 조건.
 
 struct CMcpttInfo {
-    std::string strSessionType;          // prearranged|chat|broadcast (선택)
+    std::string strSessionType;          // prearranged|chat|broadcast|private (선택)
     bool bEmergency = false;             // <emergency-ind>true</emergency-ind>
     bool bImminent  = false;             // <imminentperil-ind>true</imminentperil-ind>
     bool bAlert     = false;             // <alert-ind>true</alert-ind>

@@ -24,6 +24,17 @@ struct CmpSocket {
     bool bInUse;
 };
 
+// 멤버 SDP 의 a=fmtp:MCPTT 협상 결과 (TS 24.380 §12.1.2.3) — PTT_JOIN 의
+//   queueing/max_priority/granted 로 전달 (docs/api/cmp_media_api.md §7.4).
+//   fmtp:MCPTT 부재(레거시 단말) 시 전부 미전송 → CMP 기본 동작 유지.
+struct McpttFmtp {
+    int iQueueing = -1;     // -1=fmtp 부재(미전송) / 0=mc_queueing 미협상(비선점 요청 Deny #1) / 1=협상
+    int iMaxPriority = 0;   // mc_priority=N — 요청 가능 최대 우선순위 (0=미전송: 요청의 우선순위 필드 무시)
+    int iGranted = 0;       // 1=mc_granted 협상 — 참가 시 발언자 없으면 초기 발언권 (0=미전송)
+    int iNoFloorCtrl = 0;   // 1=mc_no_floor_ctrl 협상 — floor 없는 세션 제안(G17). private call 의
+                            //   floor_control:"off"(full-duplex) 판정 입력 — PTT_JOIN 필드 아님
+};
+
 // Phase 1.E (HA — CMP All Active) — endpoint descriptor for multi-endpoint dispatch.
 // 단일 endpoint 운영 시에는 m_endpoints 가 1개 element (primary) 만 가짐 → 기존 동작과 동일.
 struct CmpEndpoint {
@@ -72,11 +83,13 @@ public:
 
     // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).
     //   strFloorPolicy/iMaxTalkers: 동시 발언 정책 (docs/api/cmp_media_api.md §7.7). 비면 미전송(CMP 기본 single).
+    //   strFloorControl: ""(미전송=on)/"off" — off=full-duplex, 응답에 floor_port 생략 (private call 전용).
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                    std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
                    const std::string &strRecordDir = "", bool bVideoEnabled = false, int iSessionSeq = 0,
                    const std::string &strSesId = "", const std::string &strGroupType = "",
-                   const std::string &strInitiator = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0 );
+                   const std::string &strInitiator = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0,
+                   const std::string &strFloorControl = "" );
     // 정책 변경도 MODIFY 로 전달한다 (생성=ADD 1회, 이후 모든 상태 변경=MODIFY — 계약 §A.0).
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0 );
@@ -85,12 +98,13 @@ public:
     //   iUserPt/iUserTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),
     //   iUserSrcPt/iUserSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류·녹취 메타). 0=재작성 없음.
     //   strUserCodec: 협상 오디오 코덱("AMR-WB/16000") — 녹취 세그먼트 메타용.
+    //   clsFmtp: 멤버 SDP 의 a=fmtp:MCPTT 협상 결과 (queueing/max_priority/granted).
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
                     int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
                     const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
-                    int iUserNat = 0, const std::string &strUserSigIp = "",
-                    int iUserPt = 0, int iUserSrcPt = 0, int iUserTePt = 0, int iUserSrcTePt = 0,
-                    const std::string &strUserCodec = "" );
+                    int iUserNat = 0, const std::string &strUserSigIp = "", int iUserPt = 0, int iUserSrcPt = 0,
+                    int iUserTePt = 0, int iUserSrcTePt = 0, const std::string &strUserCodec = "",
+                    const McpttFmtp &clsFmtp = McpttFmtp() );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

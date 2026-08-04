@@ -543,12 +543,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     if ( strlen( pszTo ) == 0 ) return StopCall( pszCallId, SIP_DECLINE );
 
-    // MCPTT condition(emergency/imminent) 파싱 — INVITE 의 mcptt-info+xml 지시자 (TS 24.379).
-    //   session-type(그룹유형)과 직교. ProcessGroupCall 로 전달해 floor tier·fan-out 광고에 반영.
+    // MCPTT condition(emergency/imminent)·session-type 파싱 — INVITE 의 mcptt-info+xml (TS 24.379).
+    //   condition 은 session-type 과 직교. ProcessGroupCall 로 전달해 floor tier·fan-out 광고에 반영.
     int iMcpttCond = 0;
+    std::string strMcpttSessionType;
     if ( pclsMessage ) {
         CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
         iMcpttCond = clsMi.Condition();
+        strMcpttSessionType = clsMi.strSessionType;
     }
 
     // 1. PTT-AS: 그룹콜 (MCPTT 규격 on-demand) — UE 발신 그룹 INVITE 를 받아 fan-out.
@@ -573,6 +575,46 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             }
         }
     }
+    // MCPTT private call (1:1, TS 24.379 §11.1 on-demand): mcptt-info session-type=private.
+    //   합성 2인 ephemeral 그룹(priv-<caller>-<callee>)을 만들어 기존 ProcessGroupCall 경로
+    //   (fan-out·CMP 세션·teardown)를 그대로 재사용한다 — 별도 CMP 명령 없음, 계약 §A.1
+    //   (mcptt_csp_cmp_roadmap_contract.md). affiliation 불요(멤버십 게이트 우회).
+    //   floor 유무는 발신 offer 의 fmtp mc_no_floor_ctrl(G17)로 정한다 — off=full-duplex.
+    if ( m_clsPttAs.IsEnabled() && strMcpttSessionType == "private" && !gclsGroupMap.Contains( pszTo ) ) {
+        CspUser clsCallee;
+        if ( !gclsCspUserMap.isAlive( pszTo, clsCallee ) ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 480 [PTT-AS]",
+                         pszTo );
+            return StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
+        }
+        std::string strPrivId = std::string( "priv-" ) + pszFrom + "-" + pszTo;
+        if ( !gclsGroupMap.Contains( strPrivId.c_str() ) ) {
+            CspPttGroup clsPriv;
+            clsPriv.Clear();
+            clsPriv._id = strPrivId;
+            clsPriv._name = std::string( "private:" ) + pszFrom + "-" + pszTo;
+            clsPriv._groupType = "private";
+            clsPriv._requireAffiliation = false;  // 계약 §A.1 — 상대 MCPTT ID 직접 지정, 사전 편성 없음
+            clsPriv._isAdhoc = true;              // 통화 종료 시 GroupMap 에서 제거(ephemeral)
+            McpttFmtp clsPrivFmtp;
+            CGroupCallService::ParseMcpttFmtp( pclsRtp, clsPrivFmtp );
+            if ( clsPrivFmtp.iNoFloorCtrl ) clsPriv._floorControl = "off";
+            clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
+            clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszTo, 5, "participant", "" ) );
+            gclsGroupMap.Insert( clsPriv );
+            CLog::Print( LOG_INFO, "EventIncomingCall: private call session(%s) created floor_control=%s [PTT-AS]",
+                         strPrivId.c_str(), clsPriv._floorControl.empty() ? "on" : clsPriv._floorControl.c_str() );
+        }
+        SetCallOwner( pszCallId, &m_clsPttAs );
+        CSipCallRoute clsPrivRoute;
+        clsUserInfo.GetCallRoute( clsPrivRoute );
+        if ( gclsGroupCallService.ProcessGroupCall( strPrivId.c_str(), pszFrom, pszCallId, pclsRtp, &clsPrivRoute,
+                                                    iMcpttCond ) )
+            return;
+        CLog::Print( LOG_INFO, "EventIncomingCall: private call(%s) failed → 403 [PTT-AS]", strPrivId.c_str() );
+        return StopCall( pszCallId, SIP_FORBIDDEN );
+    }
+
     // MCPTT ad hoc 그룹콜 (TS 22.179 Rel-18): 미프로비저닝 타겟 + INVITE resource-lists 멤버 →
     //   임시 그룹을 동적 생성(in-memory, 비영속 ephemeral). 이후 기존 ProcessGroupCall(on-demand)
     //   경로가 fan-out·teardown 까지 처리. requireAffiliation=false(사전 가입 없음).
@@ -971,7 +1013,7 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
                 // SDP m=application floor control 포트 파싱 (≤0 이면 OnCallStarted 내부 fallback)
                 int iRemoteFloor = pclsRtp->GetApplicationPort();
                 gclsGroupCallService.OnCallStarted( pszCallId, pclsRtp->m_strIp, iRemoteAudio,
-                                                    iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo );
+                                                    iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo, pclsRtp );
             }
 
             std::string strRelayIp = CspAddressing::GetLocalRtpAddress();
@@ -1125,7 +1167,7 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
             int iRemoteVideo = pclsRemoteRtp->GetVideoPort();
             int iRemoteFloor = pclsRemoteRtp->GetApplicationPort();
             gclsGroupCallService.OnCallStarted( pszCallId, pclsRemoteRtp->m_strIp, iAudioPort,
-                                                iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo );
+                                                iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo, pclsRemoteRtp );
         }
     }
 }

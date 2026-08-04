@@ -392,6 +392,40 @@ CMP 는 미상 policy 값과 `multi` 의 범위 밖 `max_talkers`(계약 2..8)�
 floor 정책)가 담당하므로, 멤버가 그대로여도 정책만 바꾸면 `SyncGroupsState` 가 MODIFY 를 보낸다.
 정원이 줄면 CMP 가 초과 화자를 Revoke 해 상태를 정책에 맞춘다.
 
+**멤버별 floor 협상 전달 (SDP fmtp → PTT_JOIN)**
+
+멤버 SDP(개시자=INVITE offer, fan-out 수신자=200 OK answer)의 `a=fmtp:MCPTT
+mc_queueing[;mc_priority=N][;mc_granted]` 를 `CGroupCallService::ParseMcpttFmtp` 가 파싱해
+`PTT_JOIN` 의 `queueing`/`max_priority`/`granted` 로 전달한다(`McpttFmtp` 구조체,
+[../../api/cmp_media_api.md](../../api/cmp_media_api.md) §7.4). 규칙:
+
+- `fmtp:MCPTT` 부재(레거시 단말) → 세 필드 모두 미전송 — CMP 기본(queueing 1)이 유지되어
+  구단말이 깨지지 않는다.
+- `fmtp:MCPTT` 는 있는데 `mc_queueing` 이 없으면 `queueing:0` — 미협상 멤버의 비선점 요청은
+  CMP 가 Deny #1 (TS 24.380 §6.3.5.4.4).
+- 재협상(re-INVITE)도 같은 경로(`OnCallStarted` 멱등 JOIN)로 최신 협상값이 재전달된다.
+
+CSP 자신도 fan-out INVITE offer(`WrapMultipartBody`)와 psip `CSipDialog::AddSdp`(개시자 200 OK
+answer)에 `a=fmtp:MCPTT mc_queueing` 을 광고한다.
+
+> multipart body 의 SDP part 는 경계 탐색이 마지막 라인의 CRLF 를 소비하므로, psip
+> `GetSipCallRtp` 가 종결 CRLF 를 복원해 추출한다 — 복원하지 않으면 라인 단위 SDP 파서가
+> 마지막 라인(단말 INVITE 에서는 대개 `a=fmtp:MCPTT …`)을 버린다.
+
+**Private call (1:1) — TS 24.379 §11.1 on-demand**
+
+mcptt-info `session-type:private` INVITE 를 받으면(타겟=그룹이 아닌 등록 PTT 가입자, 미등록이면
+480) 합성 2인 ephemeral 그룹 `priv-<발신>-<착신>` 을 만들어 **기존 그룹콜 경로(ProcessGroupCall
+fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher::EventIncomingCall`, 계약
+[../features/mcptt_csp_cmp_roadmap_contract.md](../features/mcptt_csp_cmp_roadmap_contract.md) §A.1).
+
+- **affiliation 불요** — `_requireAffiliation=false` 로 멤버십 게이트를 우회한다(상대 MCPTT ID
+  직접 지정). `_isAdhoc=true` 라 통화 종료 시 GroupMap 에서 제거된다(ephemeral).
+- **floor 유무** — 발신 offer 의 fmtp `mc_no_floor_ctrl`(G17) 협상 시
+  `PTT_GROUP_ADD.floor_control:"off"`(full-duplex, `floor_port` 미광고). 기본은 on(2인 floor).
+- `PTT_GROUP_ADD` 에 `group_type:"private"` + `initiator_id`(발신자=초기 발언권 후보) + 멤버
+  정확히 2 를 싣는다. private 은 동시성 축을 해석하지 않으므로 `floor_policy` 는 **미전송**.
+
 **Flow 메타 필드 (모든 Session/Group API 파라미터):**
 
 `CCmpClient` 의 Session/Group 메서드는 공통으로 다음 파라미터를 받고, `_SendOnEndpoint` 가

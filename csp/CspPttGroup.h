@@ -115,6 +115,11 @@ public:
     /** _floorPolicy=="multi" 일 때 동시 발언 상한 (CMP 계약 범위 2..8) */
     int _maxTalkers;
 
+    /** floor 제어 유무 — ""(미지정=on)/"on"/"off". off=full-duplex(floor_port 미광고).
+     *  private call(즉석 세션) 전용 파라미터 — DB 그룹 컬럼이 아니라 발신 SDP 협상
+     *  (fmtp mc_no_floor_ctrl, G17)으로 정해진다. 그룹콜은 항상 on. */
+    std::string _floorControl;
+
     // ── 그룹 소유 (3GPP TS 23.280 authorized user = 생성자 = 관리주체) ──
     /** 소유자 users.id (0=미지정) */
     int _authorizedUserId;

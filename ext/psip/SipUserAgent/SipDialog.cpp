@@ -330,8 +330,12 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 	//   광고해 UE 가 floor dest 를 학습하게 한다. (미설정(-1)이면 VoLTE/일반 호 SDP 무변경.)
 	if( m_iLocalApplicationPort > 0 )
 	{
+		// fmtp: floor 협상 파라미터 (TS 24.380 §12.1.2.3) — mc_queueing 을 광고해 큐잉을
+		//   협상한다 (미협상 멤버의 비선점 요청은 서버가 Deny #1). mc_priority/mc_granted 는
+		//   응용 정책이라 싣지 않는다.
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen,
-			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\n", m_iLocalApplicationPort );
+			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing\r\n",
+			m_iLocalApplicationPort );
 	}
 
 	pclsMessage->m_strBody = szSdp;

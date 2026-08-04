@@ -145,6 +145,7 @@ void CspPttGroup::Clear() {
     _alias.clear();
     _floorPolicy = "single";
     _maxTalkers = 2;
+    _floorControl.clear();
     _authorizedUserId = 0;
     _authorizedUser.clear();
     _createdAt.clear();

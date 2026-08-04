@@ -68,7 +68,7 @@ public:
     void OnCmpStatusChanged( bool bConnected );
     bool OnCallTerminated( const std::string &strCallId );
     void OnCallStarted( const std::string &strCallId, const std::string &strRemoteIp, int iRemotePort,
-                        int iRemoteFloorPort = 0, int iRemoteVideoPort = 0 );
+                        int iRemoteFloorPort = 0, int iRemoteVideoPort = 0, class CSipCallRtp *pclsRtp = NULL );
 
     /** Called by CSC interface when group/user config changes externally */
     void OnGroupConfigChanged();
@@ -103,6 +103,13 @@ public:
     static void GetLegPt( const std::string &strCallId, bool bServerOffered,
                           int &iUserPt, int &iUserSrcPt, int &iUserTePt, int &iUserSrcTePt,
                           std::string *pstrCodec = NULL );
+
+    /** 멤버 SDP(m=application)의 a=fmtp:MCPTT 협상 결과 파싱 (TS 24.380 §12.1.2.3) —
+     *  mc_queueing/mc_priority=N/mc_granted → PTT_JOIN 의 queueing/max_priority/granted.
+     *  fmtp:MCPTT 부재(레거시 단말·cspsim 구버전)면 clsFmtp 를 미전송 상태로 둔다
+     *  (CMP 기본 동작 유지). fmtp 가 있는데 mc_queueing 이 없으면 queueing=0 (규격: 미협상
+     *  멤버의 비선점 요청은 Deny #1). */
+    static void ParseMcpttFmtp( class CSipCallRtp *pclsRtp, struct McpttFmtp &clsFmtp );
 
 private:
     void MonitorLoop();

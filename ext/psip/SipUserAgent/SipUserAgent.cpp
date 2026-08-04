@@ -463,6 +463,10 @@ bool CSipUserAgent::GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsR
 				size_t sdpEnd = body.find( "\r\n--", sdpStart );
 				if( sdpEnd == std::string::npos ) sdpEnd = body.length();
 				strSdpBody = body.substr( sdpStart, sdpEnd - sdpStart );
+				// 경계 탐색이 마지막 라인의 CRLF 를 소비한다 — 종결 CRLF 를 복원하지 않으면
+				// 라인 단위 SDP 파서가 마지막 라인(예: a=fmtp:MCPTT ...)을 버린다.
+				if( strSdpBody.length() >= 2 && strSdpBody.compare( strSdpBody.length()-2, 2, "\r\n" ) != 0 )
+					strSdpBody += "\r\n";
 			}
 		}
 		if( strSdpBody.empty() ) return false;

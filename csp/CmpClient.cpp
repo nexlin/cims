@@ -621,7 +621,7 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
                            std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
                            bool bVideoEnabled, int iSessionSeq, const std::string &strSesId,
                            const std::string &strGroupType, const std::string &strInitiator,
-                           const std::string &strFloorPolicy, int iMaxTalkers ) {
+                           const std::string &strFloorPolicy, int iMaxTalkers, const std::string &strFloorControl ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_ADD" );
     req.Set( "group_id", strGroupId );
@@ -644,7 +644,11 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     if ( !strGroupType.empty() ) req.Set( "group_type", strGroupType );
     if ( !strInitiator.empty() ) req.Set( "initiator_id", strInitiator );
     // 동시 발언 정책 — floor 절차는 CMP↔UE in-band 라 세션 생성 시 1회 전달로 끝난다.
-    SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
+    //   private(2인 세션)은 동시성 축을 해석하지 않으므로(계약 §A.1) 미전송.
+    if ( strGroupType != "private" ) SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
+    // floor 제어 유무 (private call full-duplex) — on/off 외 값은 CMP 가 BAD_REQUEST 로
+    //   거절하므로 off 만 명시 전달(미전송=on 기본).
+    if ( strFloorControl == "off" ) req.Set( "floor_control", "off" );
 
     std::stringstream ssMembers;
     for ( size_t i = 0; i < vecMembers.size(); ++i ) {
@@ -742,9 +746,9 @@ bool CCmpClient::SetFloorTier( const std::string &strGroupId, const std::string 
 bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &strSessionId,
                             const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
                             const std::string &strSesId, const std::string &strRole, int *piLocalPort,
-                            int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp,
-                            int iUserPt, int iUserSrcPt, int iUserTePt, int iUserSrcTePt,
-                            const std::string &strUserCodec ) {
+                            int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp, int iUserPt,
+                            int iUserSrcPt, int iUserTePt, int iUserSrcTePt, const std::string &strUserCodec,
+                            const McpttFmtp &clsFmtp ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -771,6 +775,11 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
         if ( iUserTePt > 0 ) req.Set( "user_te_pt", iUserTePt );
         if ( iUserSrcTePt > 0 ) req.Set( "user_src_te_pt", iUserSrcTePt );
         if ( !strUserCodec.empty() ) req.Set( "user_codec", strUserCodec );
+        // SDP fmtp:MCPTT 협상 결과 (cmp_media_api.md §7.4). fmtp 부재(레거시)면 미전송 —
+        //   CMP 기본(queueing 1)이 유지되어 구단말·cspsim 부하시험이 깨지지 않는다.
+        if ( clsFmtp.iQueueing >= 0 ) req.Set( "queueing", clsFmtp.iQueueing );
+        if ( clsFmtp.iMaxPriority > 0 ) req.Set( "max_priority", clsFmtp.iMaxPriority );
+        if ( clsFmtp.iGranted > 0 ) req.Set( "granted", 1 );
     }
 
     std::string resp;

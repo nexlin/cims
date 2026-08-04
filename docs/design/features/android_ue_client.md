@@ -364,7 +364,7 @@ media distributor 로서 화자별 스트림을 **슬롯별 SSRC** 로 분리해
 
 | # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
 |---|---|---|---|---|
-| U14 | **SDP fmtp 협상** — `m=application` 섹션에 `a=fmtp:MCPTT mc_queueing;mc_priority=N[;mc_granted]` 를 실어야 큐잉·우선순위 상한·초기 발언권이 성립한다 | §12.1.2.3, §6.3.5.4.4 | CSP 가 이 값을 `PTT_JOIN.queueing`/`granted` 로 CMP 에 전달(CSP 측 후속). 미협상 멤버의 비선점 요청은 **Deny #1** | △ 단말은 `PttController.floorSdp` 로 offer·answer 양쪽에 **`a=fmtp:MCPTT mc_queueing`** 송신(CSP 도 INVITE 에 같은 속성 광고). `mc_priority`·`mc_granted` 는 **의도적으로 미송신**(U15 / 채널 참여≠발언 요청). **CSP 가 이 fmtp 를 파싱해 `PTT_JOIN` 으로 넘기는 작업이 남았다** |
+| U14 | **SDP fmtp 협상** — `m=application` 섹션에 `a=fmtp:MCPTT mc_queueing;mc_priority=N[;mc_granted]` 를 실어야 큐잉·우선순위 상한·초기 발언권이 성립한다 | §12.1.2.3, §6.3.5.4.4 | CSP 가 멤버 SDP(개시자=offer, 수신자=answer)의 fmtp 를 파싱해 `PTT_JOIN` 의 `queueing`/`max_priority`/`granted` 로 CMP 에 전달(`CGroupCallService::ParseMcpttFmtp`). fmtp:MCPTT 부재(레거시 단말)는 미전송 — CMP 기본(queueing 1) 유지. fmtp 는 있는데 `mc_queueing` 이 없으면 `queueing:0` — 비선점 요청은 **Deny #1** | ✅ 단말은 `PttController.floorSdp` 로 offer·answer 양쪽에 **`a=fmtp:MCPTT mc_queueing`** 송신(CSP·cspsim 도 psip `AddSdp` 로 같은 속성 광고). `mc_priority`·`mc_granted` 는 **의도적으로 미송신**(U15 / 채널 참여≠발언 요청) |
 | U15 | **Floor Priority(0) 송신** — `mc_priority` 를 협상한 단말만 의미가 있다. 협상값과 요청값 중 **낮은 쪽**이 유효 우선순위이고, 미포함이면 서버 기본값 | §6.3.5.4.4-1a | `PTT_JOIN.max_priority` 가 있는 멤버만 요청값으로 낮춘다. **미협상 멤버의 우선순위 필드는 무시**(기본값 유지) | ✅ Floor Priority 필드를 **싣지 않는다**(`FloorCodec.request(priority = null)` 기본) — 서버 기본값이 유효 우선순위가 되어 U14 를 구현해도 0 으로 깎이지 않는다. 실제 요청 우선순위를 쓸 때만 명시 전달 |
 | U16 | **Queue Position Info(9)** — 대기 위치 표시, 필요 시 Queue Position Request(8) 조회. 취소는 Queued Floor Requests(0x0E) | §8.2.11~8.2.12, §8.2.15 | 큐 진입·변동 시 위치 통지, 재요청에도 **위치 유지**. 목록 없는 0x0E 취소 = 요청자 본인 요청만 제거 | ✅ `GroupCallState.queuePosition` → PTT 바·발언 스트립에 "대기 N번째"(황색), 버튼을 떼면 `FloorClient.cancelQueuedRequest`(0x0E, 목록 없음) 로 취소 + Cancel Result/Notification 수신 처리. Queue Position Request(8) 폴링은 불필요(서버가 변동마다 통지) |
 | U17 | **Unicast Media Flow Control(0x0B)** — 화면 꺼짐·데이터 절약 시 자기 하향 미디어 중단/재개 요청(Media Flow(24) MSB=1 재개) | §8.2.16 | 중단 요청한 leg 로 audio/video 미송신 | ✗ 미구현 |
@@ -372,8 +372,8 @@ media distributor 로서 화자별 스트림을 **슬롯별 SSRC** 로 분리해
 
 #### 남은 순서
 
-**floor 평면과 미디어 평면(U10) 을 반영했다** — U1·U2·U3·U6·U7·U11·U12·U13·U15·U16 완료,
-U8 은 파싱·전달까지(소비처가 U10), U10 은 네이티브 반영(실기기 검증 대기), U14 는 단말 절반
+**floor 평면과 미디어 평면(U10) 을 반영했다** — U1·U2·U3·U6·U7·U11·U12·U13·U14·U15·U16 완료,
+U8 은 파싱·전달까지(소비처가 U10), U10 은 네이티브 반영(실기기 검증 대기)
 (`floor/{FloorControl,FloorCodec,FloorClient}.kt` · `PttController` · `ui/*.kt` ·
 `audio/PttFeedback.kt`). 코덱 계약은 `ptt-client/src/test/java/.../FloorCodecTest.kt` 가 지킨다 —
 ack 요구 변종, Floor Ack 의 Source/Message Type, Priority 생략, Release G-bit,
@@ -382,11 +382,8 @@ Taken 신규 필드(Permission·MSN·SSRC), 화자 집합 파생, 0x0F, 대기�
 1. **U10 실호 검증** — 네이티브 반영은 끝났다(패치 `[2-14]`). WSL2 빌드로 `.so` 를 투입한 뒤
    실기기 3대(A·B 발언·C 청취)로 dual/multi 를 검증한다(현재 서버측만 CMP 프로브로 검증 —
    [../../VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 「floor 정책 시험」).
-2. **U14 의 서버 절반** — CSP 가 단말 SDP 의 `a=fmtp:MCPTT …` 를 파싱해 `PTT_JOIN` 의
-   `queueing`/`max_priority`/`granted` 로 CMP 에 넘겨야 협상이 실제로 성립한다(CSP 담당).
-   그 전까지는 CMP 기본값(`queueing=true`)으로 동작해 결과는 같다.
-3. **U4·U5** — 발언 중 RTP 연속성 확인(DTX·홀드 구간에서 T1 회수 여부 실측)과 Deny cause 문구 한글화.
-4. **U17·U18** — 화면 꺼짐 시 하향 미디어 중단(0x0B), floor SRTCP. U18 은 CSC KMS 가 키를
+2. **U4·U5** — 발언 중 RTP 연속성 확인(DTX·홀드 구간에서 T1 회수 여부 실측)과 Deny cause 문구 한글화.
+3. **U17·U18** — 화면 꺼짐 시 하향 미디어 중단(0x0B), floor SRTCP. U18 은 CSC KMS 가 키를
    내려준 뒤에 의미가 있다.
 
 U10 의 문제 정의·선택지 비교·구현 설계와, floor 코덱 공유/정의 단일화 검토는

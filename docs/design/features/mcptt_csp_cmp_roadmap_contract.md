@@ -209,8 +209,8 @@ STATS `detail.groups[].floor_holders`(배열)와 이벤트 `FLOOR_TALKERS`(발�
 
 | cmd | 신규 필드 | 소유 | 기능 | 상태 |
 |---|---|---|---|---|
-| `PTT_GROUP_ADD`/`_MODIFY` | `group_type:"private"` | A | Private call (1:1) | CMP 수용 완료 / CSP 발행 미구현 |
-| `PTT_GROUP_ADD`/`_MODIFY` | `floor_control`(`on`/`off`) | B | Floor 유무 (private no-floor 포함) | 완료 |
+| `PTT_GROUP_ADD`/`_MODIFY` | `group_type:"private"` | A | Private call (1:1) | 완료 — CSP 가 mcptt-info `session-type:private` INVITE 를 합성 2인 ephemeral 그룹(`priv-<발신>-<착신>`)으로 발행 ([../modules/csp.md](../modules/csp.md) 「Private call」) |
+| `PTT_GROUP_ADD`/`_MODIFY` | `floor_control`(`on`/`off`) | B | Floor 유무 (private no-floor 포함) | 완료 — CSP 는 발신 offer 의 fmtp `mc_no_floor_ctrl`(G17)로 `off` 를 발행 |
 | `PTT_GROUP_ADD`/`_MODIFY` | `floor_policy`(`single`/`dual`/`multi`), `max_talkers` | B | Dual / Multi-talker (그룹 전용) | 완료 (CSP 발행 완료 — DB `ptt_groups.floor_policy`/`max_talkers` 원천) |
 | `PTT_GROUP_ADD`/`_MODIFY` | `floor_crypto` | B | Floor E2E 보호 | 완료 (CSC KMS 연결 대기) |
 | `PTT_GROUP_ADD` | `distribution`, `multicast_*` | B(예약) | MBMS/멀티캐스트 | 미구현 |

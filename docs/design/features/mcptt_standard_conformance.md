@@ -285,6 +285,10 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 - `m=application {port} UDP MCPTT` + `c=IN IP4 ...` + `a=floorid:0 mstrm:audio` +
   `a=fmtp:MCPTT mc_queueing;mc_priority=3` + **`a=mcptt-floor-request-uri:sip:{group}@{domain}`**
   (`GroupCallService.cpp`). 단말은 floor 목적지를 이 `m=application` 포트에서 학습.
+  개시자 200 OK answer(psip `CSipDialog::AddSdp`)도 `a=fmtp:MCPTT mc_queueing` 을 광고한다.
+- **역방향(멤버 SDP → CMP)**: 멤버가 광고한 `a=fmtp:MCPTT` 는 CSP 가 파싱해 `PTT_JOIN` 의
+  `queueing`/`max_priority`/`granted` 로 전달한다 (U14 서버 절반 —
+  [../modules/csp.md](../modules/csp.md) 「멤버별 floor 협상 전달」).
 - 보존: multipart(mcptt-info+resource-lists+SDP), `urn:3gpp:ns:mcpttInfo:1.0` 등 namespace.
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
