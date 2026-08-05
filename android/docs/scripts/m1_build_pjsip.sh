@@ -1825,6 +1825,11 @@ echo "=== native build DONE ==="
 
 echo "=== [4] SWIG Java 바인딩 ==="
 cd pjsip-apps/src/swig
+# ⚠️ swig/java 의 libpjsua2.so 규칙은 pjsua2_wrap.o 만 의존한다 — pjlib/pjmedia 정적
+#   라이브러리(.a)가 바뀌어도 wrap.o 가 최신이면 make 가 **재링크를 건너뛴다**. 그러면
+#   [2-x] 네이티브 패치를 넣고 빌드해도 산출 .so 는 옛 것 그대로다(U10 실측). 링크는
+#   수 초라 항상 강제한다.
+find java -path "*jniLibs/*/libpjsua2.so" -delete 2>/dev/null || true
 make 2>&1 | tail -25
 
 echo "=== [4-검증] 산출물 ==="

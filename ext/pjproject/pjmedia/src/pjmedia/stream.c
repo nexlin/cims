@@ -87,6 +87,50 @@ struct dtmf
  * A media stream corresponds to a single "m=" line in a SDP session
  * description.
  */
+/*
+ * CIMS U10 — MCPTT 단말 동시 발언(multi-talker) SSRC 디먹스 자료구조.
+ *
+ * CMP 는 동시 발언 화자마다 다른 SSRC 를 같은 RTP 포트로 보낸다(egress: 슬롯0=고정 SSRC,
+ * 슬롯N=별도 공간 — mcptt_ue_multitalker_media.md §2). pjmedia_stream 은 스트림당 SSRC 가
+ * 하나여서 두 번째 SSRC 가 오면 RTP 세션이 SSRC 변경(ESESSRESTART)으로 판정해 지터버퍼를
+ * 리셋한다 — 두 화자가 모두 끊긴다. 여기서는 스트림 안에 SSRC→서브스트림(지터버퍼+디코더)
+ * 테이블을 두어 첫 SSRC 는 기존 경로(primary)로, 두 번째 이후 SSRC 는 서브스트림으로 갈라
+ * 넣고 get_frame 에서 PCM 을 합산(믹싱)한다. 브리지 포트·AudioTrack 은 1개로 유지되고 단일
+ * 화자 경로는 바뀌지 않는다(TS 24.380 §6.2.4.3.4 NOTE: SSRC 로 소스 구분, 믹싱은 단말 몫).
+ */
+#define CIMS_MT_MAX_SUB      7   /* MCPTT_MAX_TALKER_SLOTS(8) - primary            */
+#define CIMS_MT_IDLE_FRAMES  100 /* 무활동 회수 임계(get_frame 프레임) — 20ms 기준 ≈2s*/
+
+/* secondary 화자 하나의 서브스트림 — 자체 지터버퍼 + 디코더. 코덱은 최초 바인딩 시 지연
+ * 생성하고 회수 시 파괴하지 않는다(무거운 AMR-WB MediaCodec 인스턴스를 실제 동시 화자
+ * 수만큼만 만들고 재사용). 슬롯 자체(지터버퍼·버퍼)는 create 시 CIMS_MT_MAX_SUB 개 미리
+ * 만들어 둔다(RX 경로에서 지터버퍼 생성/파괴 회피). */
+struct cims_mt_sub
+{
+    pj_bool_t            used;      /**< 활성 화자에 바인딩됨?               */
+    pj_uint32_t          ssrc;      /**< 화자 egress SSRC (host order)       */
+    pjmedia_codec       *codec;     /**< per-talker 디코더(지연 생성·재사용) */
+    pjmedia_codec_param  cp;        /**< open 에 넘긴 코덱 param(소유 복사본) */
+    pjmedia_jbuf        *jb;        /**< per-talker 지터버퍼                 */
+    void                *buf;       /**< jbuf get 용 encoded-frame 스크래치  */
+    unsigned             buf_size;
+    unsigned             idle_cnt;  /**< 연속 무활동 get_frame 프레임 수     */
+};
+
+/* 서브스트림 생성/구동 파라미터 — primary 와 동일값을 create 시점에 포획한다. */
+struct cims_mt_cfg
+{
+    unsigned                 frame_size;         /**< jbuf 프레임 크기        */
+    unsigned                 jb_max;
+    int                      jb_init, jb_min_pre, jb_max_pre;
+    unsigned                 ptime, ptime_denum;
+    pjmedia_jb_discard_algo  discard;
+    unsigned                 buf_size;           /**< 디코드 encoded 버퍼     */
+    unsigned                 samples_per_frame;
+    unsigned                 samples_required;   /**< 포트 프레임당 샘플 수   */
+};
+
+
 struct pjmedia_stream
 {
     pjmedia_stream_common    base;
@@ -188,6 +232,13 @@ struct pjmedia_stream
                                                  checking */
 #endif
 
+    /* CIMS U10: 동시 발언(multi-talker) SSRC 디먹스 상태 (cims_mt_* 참조). */
+    pj_bool_t                mt_prim_set;   /**< primary SSRC 확정됨?        */
+    pj_uint32_t              mt_prim_ssrc;  /**< primary(slot-0) SSRC(host)  */
+    struct cims_mt_sub      *mt_sub;        /**< secondary 화자 테이블[MAX]  */
+    struct cims_mt_cfg       mt_cfg;        /**< 서브스트림 생성/구동 param  */
+    pj_int16_t              *mt_mix_buf;    /**< 스크래치 PCM(서브스트림 1개)*/
+
 };
 
 
@@ -205,6 +256,319 @@ static pj_int16_t zero_frame[2 * 30 * 16000 / 1000];
 static void on_rx_rtcp( void *data,
                         void *pkt,
                         pj_ssize_t bytes_read);
+
+
+/*===========================================================================*
+ * CIMS U10 — 동시 발언(multi-talker) SSRC 디먹스 구현.
+ *   cims_mt_rx()   : RX(ioqueue) 경로 — secondary SSRC 를 서브스트림에 넣는다.
+ *   cims_mt_mix()  : get_frame 말미 — 활성 서브스트림을 디코드해 primary 에 합산.
+ *   cims_mt_init() : create 시 서브스트림 슬롯 선할당 + 구동 param 포획.
+ *   cims_mt_destroy: stream 파괴 시 코덱/지터버퍼 정리.
+ * 스레드 안전: 서브스트림 테이블·지터버퍼 접근은 primary 와 같은 c_strm->jb_mutex 로
+ * 보호한다(RX put ↔ get_frame get/reclaim). primary SSRC 는 잠금 없이 통과한다.
+ *===========================================================================*/
+
+/* 서브스트림 코덱을 최초 바인딩 시 지연 생성(재사용 — 회수 시 파괴하지 않음). */
+static pj_status_t cims_mt_sub_open_codec(pjmedia_stream *stream,
+                                          struct cims_mt_sub *sub)
+{
+    pj_status_t status;
+
+    if (sub->codec)
+        return PJ_SUCCESS;
+
+    status = pjmedia_codec_mgr_alloc_codec(stream->codec_mgr,
+                                           &stream->si.fmt, &sub->codec);
+    if (status != PJ_SUCCESS) {
+        sub->codec = NULL;
+        return status;
+    }
+    sub->cp = stream->codec_param;
+    status = pjmedia_codec_init(sub->codec, stream->base.own_pool);
+    if (status == PJ_SUCCESS)
+        status = pjmedia_codec_open(sub->codec, &sub->cp);
+    if (status != PJ_SUCCESS) {
+        pjmedia_codec_mgr_dealloc_codec(stream->codec_mgr, sub->codec);
+        sub->codec = NULL;
+    }
+    return status;
+}
+
+/* SSRC 로 서브스트림을 찾고, 없으면 빈 슬롯에 바인딩한다(jb_mutex 보유 상태로 호출).
+ * 정원 초과면 NULL(호출자는 그 화자 패킷을 드롭한다). */
+static struct cims_mt_sub *cims_mt_find_or_bind(pjmedia_stream *stream,
+                                                pj_uint32_t ssrc)
+{
+    struct cims_mt_sub *free_sub = NULL;
+    unsigned i;
+
+    if (!stream->mt_sub)
+        return NULL;
+
+    for (i = 0; i < CIMS_MT_MAX_SUB; ++i) {
+        struct cims_mt_sub *sub = &stream->mt_sub[i];
+        if (sub->used && sub->ssrc == ssrc)
+            return sub;
+        if (!sub->used && !free_sub)
+            free_sub = sub;
+    }
+    if (!free_sub)
+        return NULL;                            /* 정원 초과 */
+
+    /* 새 화자 바인딩 — 코덱 지연 생성 + 지터버퍼 리셋 */
+    if (cims_mt_sub_open_codec(stream, free_sub) != PJ_SUCCESS)
+        return NULL;
+    pjmedia_jbuf_reset(free_sub->jb);
+    free_sub->used = PJ_TRUE;
+    free_sub->ssrc = ssrc;
+    free_sub->idle_cnt = 0;
+    PJ_LOG(4, (stream->base.port.info.name.ptr,
+               "CIMS multi-talker: bind secondary SSRC 0x%x (slot %u)",
+               ssrc, (unsigned)(free_sub - stream->mt_sub)));
+    return free_sub;
+}
+
+/* 서브스트림 지터버퍼에 payload 를 넣는다 — on_stream_rx_rtp 의 parse→put 을 미러.
+ * (jb_mutex 보유 상태로 호출) */
+static void cims_mt_put(pjmedia_stream *stream, struct cims_mt_sub *sub,
+                        const pjmedia_rtp_hdr *hdr,
+                        const void *payload, unsigned payloadlen)
+{
+    enum { MAX = 16 };
+    unsigned i, count = MAX, ts_span;
+    pj_timestamp ts;
+    pjmedia_frame frames[MAX];
+    pj_status_t status;
+
+    ts.u64 = pj_ntohl(hdr->ts);
+    pj_bzero(frames, sizeof(frames[0]) * MAX);
+
+    status = pjmedia_codec_parse(sub->codec, (void*)payload, payloadlen,
+                                 &ts, &count, frames);
+    if (status != PJ_SUCCESS || count == 0)
+        return;
+
+    ts_span = stream->dec_ptime * stream->codec_param.info.clock_rate /
+              stream->dec_ptime_denum / 1000;
+    if (ts_span == 0)
+        ts_span = 1;
+
+    for (i = 0; i < count; ++i) {
+        unsigned ext_seq = (unsigned)(frames[i].timestamp.u64 / ts_span);
+        pj_bool_t discarded;
+        pjmedia_jbuf_put_frame3(sub->jb, frames[i].buf, frames[i].size,
+                                frames[i].bit_info, ext_seq, ts.u32.lo,
+                                &discarded);
+    }
+}
+
+/* RX 디먹스 엔트리(on_rx_rtp, ioqueue 스레드). primary SSRC → PJ_FALSE(기존 경로),
+ * secondary SSRC → 서브스트림에 넣고 PJ_TRUE(호출자는 즉시 반환). */
+static pj_bool_t cims_mt_rx(pjmedia_stream *stream, const pjmedia_rtp_hdr *hdr,
+                            const void *payload, unsigned payloadlen)
+{
+    pj_uint32_t ssrc = pj_ntohl(hdr->ssrc);
+    struct cims_mt_sub *sub;
+
+    if (!stream->mt_sub)
+        return PJ_FALSE;                        /* 초기화 실패 — 단일 화자 폴백 */
+
+    if (!stream->mt_prim_set) {
+        stream->mt_prim_ssrc = ssrc;
+        stream->mt_prim_set = PJ_TRUE;
+        return PJ_FALSE;                        /* 첫 SSRC = primary */
+    }
+    if (ssrc == stream->mt_prim_ssrc)
+        return PJ_FALSE;                        /* primary 화자 */
+
+    /* secondary 화자 — 정원 초과면 소비(=드롭), primary 세션엔 넣지 않는다. */
+    pj_mutex_lock(stream->base.jb_mutex);
+    sub = cims_mt_find_or_bind(stream, ssrc);
+    if (sub)
+        cims_mt_put(stream, sub, hdr, payload, payloadlen);
+    pj_mutex_unlock(stream->base.jb_mutex);
+    return PJ_TRUE;
+}
+
+/* get_frame 말미: 활성 서브스트림을 디코드해 primary PCM(frame->buf)에 합산(믹싱)한다.
+ * 재생할 프레임이 없으면(무활동) 서브스트림 idle 카운트를 올리고, CIMS_MT_IDLE_FRAMES
+ * 연속이면 슬롯을 회수한다(코덱/지터버퍼는 재사용 위해 유지). */
+static void cims_mt_mix(pjmedia_stream *stream, pjmedia_frame *frame)
+{
+    struct cims_mt_cfg *cfg = &stream->mt_cfg;
+    pj_bool_t base_audio;
+    unsigned si;
+
+    if (!stream->mt_sub || !stream->mt_mix_buf)
+        return;
+
+    pj_mutex_lock(stream->base.jb_mutex);
+
+    base_audio = (frame->type == PJMEDIA_FRAME_TYPE_AUDIO);
+
+    for (si = 0; si < CIMS_MT_MAX_SUB; ++si) {
+        struct cims_mt_sub *sub = &stream->mt_sub[si];
+        pj_int16_t *mix = stream->mt_mix_buf;
+        pj_bool_t got_audio = PJ_FALSE;
+        unsigned count = 0;
+
+        if (!sub->used)
+            continue;
+
+        /* 한 프레임(samples_required) 분량의 PCM 을 mix 에 만든다. */
+        while (count < cfg->samples_required) {
+            char ftype;
+            pj_size_t fsize = sub->buf_size;
+            pj_uint32_t bit_info, sts;
+
+            pjmedia_jbuf_get_frame3(sub->jb, sub->buf, &fsize, &ftype,
+                                    &bit_info, &sts, NULL);
+            if (ftype == PJMEDIA_JB_NORMAL_FRAME) {
+                pjmedia_frame in, out;
+
+                in.type = PJMEDIA_FRAME_TYPE_AUDIO;
+                in.buf = sub->buf;
+                in.size = fsize;
+                in.bit_info = bit_info;
+                out.buf = mix + count;
+                out.size = (cfg->samples_required - count) * sizeof(pj_int16_t);
+
+                if (pjmedia_codec_decode(sub->codec, &in,
+                                         (unsigned)out.size, &out) == PJ_SUCCESS)
+                {
+                    got_audio = PJ_TRUE;
+                    count += cfg->samples_per_frame;
+                } else {
+                    unsigned need = cfg->samples_required - count;
+                    if (need > cfg->samples_per_frame)
+                        need = cfg->samples_per_frame;
+                    pjmedia_zero_samples(mix + count, need);
+                    count += need;
+                }
+            } else {
+                /* MISSING/EMPTY/PREFETCH — 이 서브스트림은 무음. 나머지 0 채우고 종료. */
+                pjmedia_zero_samples(mix + count, cfg->samples_required - count);
+                count = cfg->samples_required;
+                break;
+            }
+        }
+
+        if (got_audio) {
+            unsigned n = cfg->samples_required, k;
+            pj_int16_t *dst;
+
+            /* primary 가 무음(NONE)이었으면 여기서 오디오 프레임으로 승격한다. */
+            if (!base_audio) {
+                pjmedia_zero_samples((pj_int16_t*)frame->buf, n);
+                frame->type = PJMEDIA_FRAME_TYPE_AUDIO;
+                frame->size = n * sizeof(pj_int16_t);
+                base_audio = PJ_TRUE;
+            }
+            dst = (pj_int16_t*)frame->buf;
+            for (k = 0; k < n; ++k) {
+                int v = (int)dst[k] + (int)mix[k];      /* 포화 합산 */
+                dst[k] = (pj_int16_t)(v > 32767 ? 32767 : (v < -32768 ? -32768 : v));
+            }
+            sub->idle_cnt = 0;
+        } else if (++sub->idle_cnt >= CIMS_MT_IDLE_FRAMES) {
+            PJ_LOG(4, (stream->base.port.info.name.ptr,
+                       "CIMS multi-talker: reclaim secondary SSRC 0x%x (idle)",
+                       sub->ssrc));
+            sub->used = PJ_FALSE;
+            sub->ssrc = 0;
+            sub->idle_cnt = 0;
+            pjmedia_jbuf_reset(sub->jb);
+        }
+    }
+
+    pj_mutex_unlock(stream->base.jb_mutex);
+}
+
+/* create 시 호출 — 서브스트림 슬롯(지터버퍼·버퍼)을 선할당하고 구동 param 을 포획한다.
+ * 코덱은 지연 생성이므로 여기서 만들지 않는다. 실패 시 mt_sub=NULL 로 두어 단일 화자로
+ * 폴백한다(치명 아님). jb_* 인자는 primary 지터버퍼와 동일값(create_stream 지역변수). */
+static pj_status_t cims_mt_init(pjmedia_stream *stream, pj_pool_t *pool,
+                                unsigned jb_max, int jb_init,
+                                int jb_min_pre, int jb_max_pre,
+                                pjmedia_jb_discard_algo discard)
+{
+    pjmedia_stream_common *c_strm = &stream->base;
+    struct cims_mt_cfg *cfg = &stream->mt_cfg;
+    unsigned i;
+
+    cfg->frame_size  = c_strm->frame_size;
+    cfg->jb_max      = jb_max;
+    cfg->jb_init     = jb_init;
+    cfg->jb_min_pre  = jb_min_pre;
+    cfg->jb_max_pre  = jb_max_pre;
+    cfg->ptime       = stream->codec_param.info.frm_ptime;
+    cfg->ptime_denum = PJ_MAX(stream->codec_param.info.frm_ptime_denum, 1);
+    cfg->discard     = discard;
+    cfg->buf_size    = c_strm->dec->buf_size;
+    cfg->samples_required  = PJMEDIA_PIA_SPF(&c_strm->port.info);
+    cfg->samples_per_frame = stream->dec_ptime *
+                             stream->codec_param.info.clock_rate *
+                             stream->codec_param.info.channel_cnt /
+                             stream->dec_ptime_denum / 1000;
+
+    stream->mt_sub = (struct cims_mt_sub*)
+                     pj_pool_calloc(pool, CIMS_MT_MAX_SUB,
+                                    sizeof(struct cims_mt_sub));
+    stream->mt_mix_buf = (pj_int16_t*)
+                     pj_pool_alloc(pool, cfg->samples_required *
+                                         sizeof(pj_int16_t));
+    if (!stream->mt_sub || !stream->mt_mix_buf) {
+        stream->mt_sub = NULL;
+        return PJ_ENOMEM;
+    }
+
+    for (i = 0; i < CIMS_MT_MAX_SUB; ++i) {
+        struct cims_mt_sub *sub = &stream->mt_sub[i];
+        pj_status_t status;
+
+        status = pjmedia_jbuf_create(pool, &c_strm->port.info.name,
+                                     cfg->frame_size, cfg->ptime,
+                                     cfg->jb_max, &sub->jb);
+        if (status != PJ_SUCCESS) {
+            stream->mt_sub = NULL;              /* 부분 실패 — 기능 비활성 */
+            return status;
+        }
+        pjmedia_jbuf_set_ptime2(sub->jb, cfg->ptime, cfg->ptime_denum);
+        pjmedia_jbuf_set_adaptive(sub->jb, jb_init, jb_min_pre, jb_max_pre);
+        pjmedia_jbuf_set_discard(sub->jb, discard);
+        sub->buf_size = cfg->buf_size;
+        sub->buf = pj_pool_alloc(pool, cfg->buf_size);
+        sub->codec = NULL;
+        sub->used = PJ_FALSE;
+    }
+
+    PJ_LOG(4, (c_strm->port.info.name.ptr,
+               "CIMS multi-talker demux ready (max %d secondary talkers)",
+               CIMS_MT_MAX_SUB));
+    return PJ_SUCCESS;
+}
+
+/* stream 파괴 시 서브스트림 코덱·지터버퍼 정리. */
+static void cims_mt_destroy(pjmedia_stream *stream)
+{
+    unsigned i;
+
+    if (!stream->mt_sub)
+        return;
+    for (i = 0; i < CIMS_MT_MAX_SUB; ++i) {
+        struct cims_mt_sub *sub = &stream->mt_sub[i];
+        if (sub->codec) {
+            pjmedia_codec_close(sub->codec);
+            pjmedia_codec_mgr_dealloc_codec(stream->codec_mgr, sub->codec);
+            sub->codec = NULL;
+        }
+        if (sub->jb) {
+            pjmedia_jbuf_destroy(sub->jb);
+            sub->jb = NULL;
+        }
+    }
+    stream->mt_sub = NULL;
+}
 
 
 #include "stream_imp_common.c"
@@ -627,6 +991,10 @@ static pj_status_t get_frame( pjmedia_port *port, pjmedia_frame *frame)
         frame->size = samples_count * BYTES_PER_SAMPLE;
         frame->timestamp.u64 = 0;
     }
+
+    /* CIMS U10: 동시 발언 서브스트림(secondary SSRC)을 primary PCM 에 믹싱한다.
+     * 활성 서브스트림이 없으면 no-op(단일 화자 동작 불변). */
+    cims_mt_mix(stream, frame);
 
     return PJ_SUCCESS;
 }
@@ -2260,6 +2628,13 @@ PJ_DEF(pj_status_t) pjmedia_stream_create( pjmedia_endpt *endpt,
         goto err_cleanup;
 
 
+    /* CIMS U10: 동시 발언 SSRC 디먹스 초기화 — dec 채널이 만들어진 뒤(버퍼 크기 확정)
+     * primary 지터버퍼와 같은 파라미터로 서브스트림 슬롯을 선할당한다. 실패해도 단일
+     * 화자로 폴백하므로 치명적이지 않다(반환값 무시). */
+    cims_mt_init(stream, pool, jb_max, jb_init, jb_min_pre, jb_max_pre,
+                 info->jb_discard_algo);
+
+
     /* Create encoder channel: */
     status = create_channel( pool, c_strm, PJMEDIA_DIR_ENCODING,
                              info->tx_pt, buf_size, c_strm->si, &c_strm->enc);
@@ -2514,6 +2889,9 @@ err_cleanup:
 static void on_stream_destroy(void *arg)
 {
     pjmedia_stream* stream = (pjmedia_stream*)arg;
+
+    /* CIMS U10: 동시 발언 서브스트림(코덱·지터버퍼) 정리 — codec 해제보다 먼저. */
+    cims_mt_destroy(stream);
 
     /* Free codec. */
     if (stream->codec) {
