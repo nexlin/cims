@@ -72,6 +72,17 @@ class CimsAccount(private val owner: SipController) : Account() {
                 .find(whole)?.groupValues?.get(1) ?: "" else ""
         // 전이중 1:1 = INVITE 의 floor fmtp 에 mc_no_floor_ctrl (G17) — floor 없이 mic 상시 개방
         val noFloorCtrl = privateCall && whole.contains("mc_no_floor_ctrl")
+        // ⚠️ floor 섹션 주입은 **180 응답 전**에 끝내야 한다 — pjsua 는 여기서 응답 SDP 를 한 번
+        //   만들고 200 OK 에 재사용하므로, 그 뒤에 pendingAppSdp 를 넣으면 onCallSdpCreated 가
+        //   이미 지나가 주입이 영구히 스킵된다(= m=application 0 송신 → CSP 가 착신 leg floor
+        //   포트를 모른 채 audio+1 fallback). 계약은 [SipController.incomingFloorSdp] KDoc 참조.
+        if (mcptt) {
+            runCatching {
+                owner.incomingFloorSdp?.invoke(
+                    IncomingFloorInfo(prm.callId, from, callerId, privateCall, noFloorCtrl),
+                )?.let { call.pendingAppSdp = it }
+            }.onFailure { Log.w("CimsAccount", "incomingFloorSdp: ${it.message}") }
+        }
         // 180 Ringing 만 자동 응답 — 실제 200 OK 는 사용자 answer().
         runCatching {
             call.answer(CallOpParam().apply { statusCode = pjsip_status_code.PJSIP_SC_RINGING })

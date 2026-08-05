@@ -67,6 +67,23 @@ class SipController(private val config: SipAccountConfig) {
      *  예: `;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"` */
     @Volatile var contactParams: String = ""
 
+    /**
+     * MCPTT 착신 INVITE 의 응답 SDP 에 실을 floor(m=application) 섹션 공급자 — 앱이 등록한다.
+     *
+     * ⚠️ **호출 시점이 계약의 본질**: pjsua 는 착신 INVITE 를 처리하며(180 Ringing) 로컬 응답
+     * SDP 를 **한 번** 만들고 그것을 200 OK 에 재사용한다. 그 시점 이후에 `pendingAppSdp` 를
+     * 넣어봐야 [CimsCall.onCallSdpCreated] 는 이미 지나갔으므로 주입이 영구히 스킵되고,
+     * pjsua 가 미지원 스트림에 붙인 `m=application 0` 이 그대로 나간다. 그러면 CSP 는 착신
+     * leg 의 floor 포트를 알 수 없어 관례 fallback(audio+1 = RTCP 포트)으로 CMP 에 JOIN 을
+     * 보내고, floor 메시지는 CMP 의 주소 latch(단말 Floor Ack 학습)에 의존해서만 도달한다.
+     * 따라서 앱은 **INVITE 를 받는 순간 floor 소켓을 이미 갖고** 있어야 하며, 이 공급자가
+     * 그 시점(=180 응답 전)에 호출된다.
+     *
+     * 반환값 = 주입할 SDP 섹션(예: `m=application 40603 UDP MCPTT\r\na=floorid:0 ...`).
+     * null 이면 주입하지 않는다(floor 를 쓰지 않는 착신).
+     */
+    @Volatile var incomingFloorSdp: ((IncomingFloorInfo) -> String?)? = null
+
     private val ctl = HandlerThread("pj-ctl").apply { start() }
     private val h = Handler(ctl.looper)
 

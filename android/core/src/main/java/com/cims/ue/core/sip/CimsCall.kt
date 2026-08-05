@@ -87,6 +87,10 @@ class CimsCall : Call {
      */
     override fun onCallSdpCreated(prm: OnCallSdpCreatedParam) {
         runCatching {
+            // floor 주입 여부를 남긴다 — pendingAppSdp=false 면 SDP 생성이 주입보다 앞섰다는 뜻
+            //   (착신 경로의 고전적 회귀 지점, [SipController.incomingFloorSdp] KDoc 참조).
+            Log.i(TAG, "onCallSdpCreated(call=$id) floorInject=${pendingAppSdp != null} " +
+                "localM=[${prm.sdp.wholeSdp.lineSequence().filter { it.startsWith("m=") }.joinToString("|") { it.trim() }}]")
             pendingAppSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp

@@ -181,7 +181,7 @@ class PttController(
 
     // ── 그룹별 세션 ──
 
-    private inner class Session(val groupId: String) {
+    private inner class Session(val groupId: String, preFloor: FloorClient? = null) {
         var callId: Int = -1
         var active: Boolean = false
         var role: ChannelRole = ChannelRole.NONE
@@ -207,7 +207,9 @@ class PttController(
         var floorIndicator: Int = 0           // 마지막 수신 Floor Indicator (G/I 비트 표시)
         var privatePeer: Boolean = false      // 1:1 private call — groupId=상대 번호
         var fullDuplex: Boolean = false       // 전이중 1:1 — floor 없음, mic 상시 개방
-        val floor: FloorClient = FloorClient(ssrc, mcpttId, localPort = 0,
+        // 착신은 INVITE 수신 시점에 선바인드된 floor 소켓([pendingFloors])을 인수한다 —
+        //   응답 SDP 가 그보다 먼저 만들어지므로 여기서 새로 만들면 광고할 포트가 없다.
+        val floor: FloorClient = preFloor ?: FloorClient(ssrc, mcpttId, localPort = 0,
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
         fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(),
@@ -220,6 +222,18 @@ class PttController(
 
     private val lock = Any()
     private val sessionMap = LinkedHashMap<String, Session>()   // groupId → Session (참여 순서 유지)
+
+    /** 착신 INVITE 시점에 선바인드한 floor 소켓 (callId → FloorClient). 수락 시 Session 이 인수하고,
+     *  수락 없이 끝난 호는 [releasePendingFloor] 로 회수한다 — 미회수는 소켓·수신 스레드 누수다. */
+    private val pendingFloors = java.util.concurrent.ConcurrentHashMap<Int, FloorClient>()
+
+    /** 선바인드 floor 소켓 인수(수락 경로) — 없으면 null(발신·재통지 등). */
+    private fun takePendingFloor(callId: Int): FloorClient? = pendingFloors.remove(callId)
+
+    /** 인수되지 않은 선바인드 floor 소켓 폐기. */
+    private fun releasePendingFloor(callId: Int) {
+        pendingFloors.remove(callId)?.let { runCatching { it.close() } }
+    }
     // 구독 상태는 **서버 확인 기반**으로 관리한다 — SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"
     // 으로 취급하면, 서버가 구독을 잃고(예: CSP 재기동으로 in-memory 구독 소멸) 단말이 등록
     // 끊김을 관측하지 못한 경우 멱등 가드가 재발행을 영구히 막아 로스터·편성 push 가 앱 재시작
@@ -344,6 +358,18 @@ class PttController(
                 }
             }
         }
+        // 착신 floor 소켓 선바인드 — INVITE 수신 즉시(응답 SDP 생성 전) 호출된다.
+        //   여기서 만든 FloorClient 를 autoJoin* 의 Session 이 그대로 인수한다(재바인드 금지 —
+        //   광고한 포트와 실제 수신 소켓이 어긋나면 floor 가 도달하지 않는다).
+        sip.incomingFloorSdp = { info ->
+            val gid = bareId(info.callerId.ifBlank { info.remote })
+            if (gid.isBlank()) null else {
+                val fc = FloorClient(ssrc, mcpttId, localPort = 0,
+                    onEvent = { ev -> onFloorEvent(gid, ev) })
+                pendingFloors.put(info.callId, fc)?.let { runCatching { it.close() } }  // 재통지 방어
+                floorSdp(fc.localPort, info.noFloorCtrl)
+            }
+        }
         // 호 상태 → 세션 매핑 + MCPTT 그룹콜 착신 자동 수락(ptt_ue.md §12.3)
         scope.launch {
             sip.callState.collect { st ->
@@ -356,7 +382,10 @@ class PttController(
                         applyAudioRoute()                           // 통화별 라우팅 재적용
                         applyListenPolicy()
                     }
-                    is CallState.Disconnected -> onCallEnded(st.id)
+                    is CallState.Disconnected -> {
+                        releasePendingFloor(st.id)   // 수락 전 종료(취소·거절) — 선바인드 소켓 회수
+                        onCallEnded(st.id)
+                    }
                     is CallState.Incoming ->
                         if (st.mcptt) { if (st.privateCall) autoJoinPrivateCall(st) else autoJoinGroupCall(st) }
                     else -> Unit
@@ -837,12 +866,15 @@ class PttController(
      * - `mc_granted`(호 성립 시 초기 발언권) 도 싣지 않는다 — 채널 참여는 발언 요청이 아니다.
      *   발언은 언제나 PTT down 의 Floor Request 로 시작한다.
      */
-    private fun floorSdp(s: Session): String =
-        "m=application ${s.floor.localPort} UDP MCPTT\r\n" +
+    private fun floorSdp(s: Session): String = floorSdp(s.floor.localPort, s.fullDuplex)
+
+    /** floor 섹션 조립 — 세션 성립 전(착신 선바인드) 경로도 같은 문자열을 쓰도록 포트/모드만 받는다. */
+    private fun floorSdp(localPort: Int, fullDuplex: Boolean): String =
+        "m=application $localPort UDP MCPTT\r\n" +
             "a=floorid:0 mstrm:audio\r\n" +
             // 전이중 1:1 은 mc_no_floor_ctrl 로 floor 없는 세션을 협상한다(G17) — CSP 가
             // PTT_GROUP_ADD floor_control:"off" 로 변환.
-            (if (s.fullDuplex) "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl" else "a=fmtp:MCPTT mc_queueing")
+            (if (fullDuplex) "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl" else "a=fmtp:MCPTT mc_queueing")
 
     /** 키업 그룹콜 참여(발신). 이미 참여 중이면 무시. 첫 세션은 주채널.
      *  [emergency]=true 면 긴급 그룹콜로 개시(INVITE mcptt-info emergency-ind, TS 24.379). */
@@ -913,12 +945,12 @@ class PttController(
      *  상시 개방한다(auto commencement — 그룹콜 fan-out 과 동일한 즉시 연결 모델). */
     private fun autoJoinPrivateCall(inc: CallState.Incoming) {
         val peer = bareId(inc.callerId.ifBlank { inc.remote })
-        if (peer.isBlank()) return
+        if (peer.isBlank()) { releasePendingFloor(inc.id); return }
         val stale = synchronized(lock) {
             val old = sessionMap[peer]
             when {
                 old == null -> null
-                old.callId == inc.id -> return                    // 같은 호 재통지 — 무시
+                old.callId == inc.id -> return                    // 같은 호 재통지 — 인수 없이 유지
                 else -> {
                     // 상대가 새 호를 걸었다 = 이전 1:1 은 끝난 것. 종료 경합(BYE 지연)으로
                     // 남은 세션을 정리하고 새 호를 받는다 — 방치하면 새 INVITE 가 무응답된다.
@@ -927,9 +959,13 @@ class PttController(
             }
         }
         stale?.let { if (it.callId >= 0) sip.hangup(it.callId) }
+        val pre = takePendingFloor(inc.id)
         val s = synchronized(lock) {
-            if (sessionMap.containsKey(peer)) return              // 경합 재확인
-            Session(peer).also {
+            if (sessionMap.containsKey(peer)) {                   // 경합 재확인
+                pre?.let { runCatching { it.close() } }
+                return
+            }
+            Session(peer, pre).also {
                 it.callId = inc.id
                 it.privatePeer = true
                 it.fullDuplex = inc.noFloorCtrl
@@ -947,10 +983,14 @@ class PttController(
      *  fan-out INVITE 의 emergency-ind → 긴급 표시 + 경고 톤. */
     private fun autoJoinGroupCall(inc: CallState.Incoming) {
         val groupId = bareId(inc.remote)
-        if (groupId.isBlank()) return
+        if (groupId.isBlank()) { releasePendingFloor(inc.id); return }
+        val pre = takePendingFloor(inc.id)
         val s = synchronized(lock) {
-            if (sessionMap.containsKey(groupId)) return          // 이미 참여 중
-            Session(groupId).also {
+            if (sessionMap.containsKey(groupId)) {               // 이미 참여 중
+                pre?.let { runCatching { it.close() } }
+                return
+            }
+            Session(groupId, pre).also {
                 it.callId = inc.id
                 it.role = if (sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
                 else ChannelRole.NONE

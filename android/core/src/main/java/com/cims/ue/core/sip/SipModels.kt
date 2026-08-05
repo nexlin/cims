@@ -25,6 +25,19 @@ sealed interface RegState {
 }
 
 /** 1:1 호 상태. */
+/** MCPTT 착신 INVITE 의 floor 섹션 공급자([SipController.incomingFloorSdp])에 넘기는 식별 정보.
+ *  응답 SDP 생성 **전**(180 Ringing 전)에 전달되므로 [CallState.Incoming] 보다 이르다. */
+data class IncomingFloorInfo(
+    val callId: Int,
+    /** 발신측 URI (그룹콜이면 그룹 URI). */
+    val remote: String,
+    /** 1:1 private call 의 상대 번호 (mcptt-calling-user-id). 그룹콜이면 빈 문자열. */
+    val callerId: String,
+    val privateCall: Boolean,
+    /** INVITE 가 mc_no_floor_ctrl 를 협상 — 전이중 1:1(floor 없음). */
+    val noFloorCtrl: Boolean,
+)
+
 sealed interface CallState {
     /** 통화 없음(초기). */
     data object Null : CallState
