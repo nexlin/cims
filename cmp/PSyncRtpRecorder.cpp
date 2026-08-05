@@ -32,9 +32,13 @@ PSyncRtpRecorder::~PSyncRtpRecorder() {
 // ═══════════════════════════════════════════════════════════════
 
 void PSyncRtpRecorder::addTrack(const std::string& prefix) {
+    if (_tracks.find(prefix) != _tracks.end()) return;   // 멱등 — 열려 있는 파일을 잃지 않는다
     Track t;
     t.prefix = prefix;
     _tracks[prefix] = t;
+    // 세그먼트 진행 중 추가된 트랙(늦게 합류한 멤버의 상향 슬롯)은 즉시 연다 — 파일을
+    //   세그먼트 시작 시점에만 열면 그 뒤 합류한 멤버의 미디어가 통째로 유실된다.
+    if (_active) _openTrack(_tracks[prefix]);
 }
 
 void PSyncRtpRecorder::setTrackPtCodec(const std::string& prefix, int pt, const std::string& codec) {
@@ -130,20 +134,25 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
 }
 
 void PSyncRtpRecorder::_openTracks() {
+    for (auto& [prefix, t] : _tracks) {
+        (void)prefix;
+        _openTrack(t);
+    }
+}
+
+void PSyncRtpRecorder::_openTrack(Track& t) {
     char seqBuf[16];
     snprintf(seqBuf, sizeof(seqBuf), "%04d", _currentSeq);
-    for (auto& [prefix, t] : _tracks) {
-        t.fileName = std::string("seg_") + seqBuf + "_" + prefix + ".rtp";
-        t.finalPath = _curSegDir + "/" + t.fileName;
-        t.tmpPath = t.finalPath + ".recording";
-        t.bytesWritten = 0;
-        t.mediaPackets = 0;
-        t.fp = fopen(t.tmpPath.c_str(), "wb");
-        if (!t.fp) {
-            LOG_ERROR("PSyncRtpRecorder", "Failed to open %s: %s", t.tmpPath.c_str(), strerror(errno));
-        } else {
-            LOG_INFO("RtpRecorder", "Recording started: %s", t.tmpPath.c_str());
-        }
+    t.fileName = std::string("seg_") + seqBuf + "_" + t.prefix + ".rtp";
+    t.finalPath = _curSegDir + "/" + t.fileName;
+    t.tmpPath = t.finalPath + ".recording";
+    t.bytesWritten = 0;
+    t.mediaPackets = 0;
+    t.fp = fopen(t.tmpPath.c_str(), "wb");
+    if (!t.fp) {
+        LOG_ERROR("PSyncRtpRecorder", "Failed to open %s: %s", t.tmpPath.c_str(), strerror(errno));
+    } else {
+        LOG_INFO("RtpRecorder", "Recording started: %s", t.tmpPath.c_str());
     }
 }
 

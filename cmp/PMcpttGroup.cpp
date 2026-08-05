@@ -130,7 +130,14 @@ void PMcpttGroup::setFloorPolicy(bool floorControl, int policy, int maxTalkers, 
     }
 
     // 정원이 늘면 녹취 슬롯 트랙을 미리 등록(세그먼트 시작 시 파일이 열린다).
-    if (_recordEnable && _recorder) _recEnsureTracks(_talkerCapacity > 0 ? _talkerCapacity : 1);
+    //   floor off 는 발언 정원이 없다(_talkerCapacity=0) — 멤버마다 부여한 상향 스트림 슬롯
+    //   수를 기준으로 삼는다. 정원 기준으로 두면 슬롯 1 이상(=상대방)의 미디어가 트랙 없이
+    //   버려져 녹취에 한쪽 음성만 남는다.
+    if (_recordEnable && _recorder) {
+        int slots = floorControl ? (_talkerCapacity > 0 ? _talkerCapacity : 1)
+                                 : (_streamSlotNext > 0 ? _streamSlotNext : 1);
+        _recEnsureTracks(slots);
+    }
 }
 
 const char* PMcpttGroup::_policyName() const {
@@ -257,6 +264,13 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     //   서로 다른 SSRC 로 구분한다 (floor 有 그룹은 발언 슬롯이 이 역할을 한다).
     peer.streamSlot = _floorControl ? 0 : (_streamSlotNext++ % MCPTT_MAX_TALKER_SLOTS);
     _members[sessionId] = peer;
+    // floor off: 이 멤버의 슬롯 트랙을 지금 등록·귀속한다 — 세그먼트가 이미 열려 있어도
+    //   (개시자 미디어가 상대 합류보다 먼저 도착하는 것이 정상 순서) recorder 가 파일을
+    //   즉시 연다. 귀속까지 여기서 해야 늦게 합류한 멤버의 트랙에 화자·PT/코덱이 남는다.
+    if (!_floorControl && _recordEnable && _recorder) {
+        _recEnsureTracks(peer.streamSlot + 1);
+        if (!peer.recvOnly) _recAttachSlot(peer.streamSlot, sessionId);
+    }
     LOG_INFO("PMcpttGroup", "[%s] Member added session=%s (total=%lu)%s%s", _groupId.c_str(), sessionId.c_str(),
              _members.size(), recvOnly ? " recv_only" : "", floorSuppress ? " floor_suppress" : "");
     if (_logFlow) _logFlow(_groupId, "ue", "cmp", "MCPTT", "MEMBER_JOIN", sessionId.c_str());

@@ -134,6 +134,7 @@ private:
     int _hourSeq = 0;              // 현재 시간 내 세그먼트 시퀀스 (시간 바뀌면 리셋)
 
     void _openTracks();            // _curSegDir 에 등록 트랙 파일 열기 (공통)
+    void _openTrack(Track& t);     // 트랙 1개 열기 (세그먼트 중 추가된 트랙 포함)
 };
 
 #endif // __PSYNC_RTP_RECORDER_H__
