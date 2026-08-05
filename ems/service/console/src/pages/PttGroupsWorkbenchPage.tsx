@@ -102,8 +102,9 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'priority', header: '우선', width: 56, align: 'center', sortable: true, sortValue: g => g.priority ?? 5, render: g => g.priority ?? 5 },
     { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
       const fp = g.floor_policy || 'single'
-      if (fp === 'single') return <span className="ts" style={{ color: 'var(--text-muted)' }}>단일</span>
-      return <span className="badge badge--blue" style={{ fontSize: 9 }}>{fp === 'dual' ? '2명' : `${g.max_talkers ?? 2}명`}</span>
+      if (fp === 'single') return <span className="ts" style={{ color: 'var(--text-muted)' }} title="한 명씩 발언">단일</span>
+      if (fp === 'dual') return <span className="badge badge--yellow" style={{ fontSize: 9 }} title="평시 1명, 긴급·임박자만 끼어들기">긴급</span>
+      return <span className="badge badge--blue" style={{ fontSize: 9 }} title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</span>
     } },
     { key: 'owner', header: '소유자', width: 110, render: g => <span className="ts">{g.authorized_user_name || g.authorized_user || '—'}</span> },
     { key: 'org', header: '조직', width: 130, render: g => <span className="ts">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
@@ -209,10 +210,14 @@ function GroupDrawer(p: GroupDrawerProps) {
     chat: '상시 유지 채팅형 그룹',
     broadcast: '개시자만 발언, 나머지는 수신 전용',
   }
+  // 정책은 "동시 인원수" 가 아니라 "자리를 여는 조건" 이 다르다 — 인원만 적으면
+  //   듀얼과 멀티(2명)가 같아 보인다. 의미 중심으로 설명한다.
   const floorPolicyHint: Record<string, string> = {
-    single: '한 번에 한 명만 발언 (기본)',
-    dual: '두 명까지 동시 발언 — 나머지는 대기열',
-    multi: `동시 발언자 수만큼 동시 발언 (최대 ${MAX_TALKERS_LIMIT}명). 단말이 동시 수신을 지원해야 한다`,
+    single: '한 번에 한 명만 발언. 다른 요청은 우선순위·긴급도로 선점하거나 대기열로 간다',
+    dual: '평시 한 명만 발언하고, 긴급·임박 등급 사용자만 기존 발언자를 끊지 않고 끼어든다 '
+        + '(TS 24.380 dual floor). 일반 요청에는 두 번째 자리를 주지 않는다 — 대기열로도 채우지 않는다',
+    multi: `정원(최대 ${MAX_TALKERS_LIMIT}명)까지는 선착순으로 동시 발언하고, 정원이 차면 `
+        + '우선순위·긴급도로 선점하거나 대기열로 간다. ⚠️ 단말이 동시 수신(SSRC 분리 재생)을 지원해야 실제로 겹쳐 들린다',
   }
 
   async function save() {
@@ -272,9 +277,9 @@ function GroupDrawer(p: GroupDrawerProps) {
                 const mt = fp === 'multi' ? Math.min(Math.max(form.max_talkers ?? 2, 2), MAX_TALKERS_LIMIT) : 2
                 setForm({ ...form, floor_policy: fp, max_talkers: mt })
               }}>
-              <option value="single">단일(1명)</option>
-              <option value="dual">듀얼(2명)</option>
-              <option value="multi">멀티(N명)</option>
+              <option value="single">단일 — 한 명씩</option>
+              <option value="dual">듀얼 — 긴급 끼어들기</option>
+              <option value="multi">멀티 — N명 동시</option>
             </select>
           </Field>
           {form.floor_policy === 'multi' && (
@@ -325,8 +330,8 @@ function GroupDrawer(p: GroupDrawerProps) {
           <span className="ts">ID {existing.id}</span>
           <span className="ts">타입 {existing.group_type || 'prearranged'}</span>
           <span className="ts">우선순위 {existing.priority ?? 5}</span>
-          <span className="ts">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일'
-            : (existing.floor_policy === 'dual' ? '2명' : `${existing.max_talkers ?? 2}명`)}</span>
+          <span className="ts">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일(한 명씩)'
+            : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
           <span className="ts">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
           <span className="ts">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
           {canManage && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>그룹 속성 편집</button>}
