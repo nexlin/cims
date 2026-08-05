@@ -358,7 +358,7 @@ member 키 `(node, session_id)`.
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
 | `video_enabled` | - | 1 이면 video 포트 활성 |
 | `group_type` | - | `prearranged`/`chat`/`broadcast`/`private` — `broadcast` 는 개시자 floor 독점(TS 24.380 §6.3.5.4.4 — 타 멤버는 Deny #5, Floor Taken 의 Permission=0), `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통) |
-| `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자, private 은 초기 발언권 부여 대상 |
+| `initiator_id` | - | 개시자 sessionId — broadcast 는 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`) |
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
@@ -479,7 +479,7 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 | `floor_policy:"single"` (기본) | 단일 화자. 점유 중 요청은 선점 서열 판정 → 선점(REVOKE 후 GRANT) 또는 큐잉/Deny |
 | `floor_policy:"dual"` | 동시 최대 2명. **2번째 자리는 override 전용** — 선점 자격(tier>chair>priority)이 있는 요청만 기존 화자를 REVOKE 하지 않고 동시 GRANT 한다(TS 24.380 dual floor). 자격 없는 요청은 single 과 같이 큐잉/Deny |
 | `floor_policy:"multi"` | 동시 최대 `max_talkers` 명. 정원 여유가 있으면 서열 비교 없이 즉시 GRANT, 정원이 차면 선점 판정(최약 화자 REVOKE) 또는 큐잉 (TS 24.380 Rel-16 multi-talker) |
-| `group_type:"private"` | 2인 세션용 floor — 정원 1, **큐잉 없음**(점유 중 요청은 즉시 Deny), chair 개념 없음(tier·priority 만 비교). `initiator_id` 멤버가 참가하는 시점에 **초기 발언권**을 받는다. group 의 `floor_policy` 는 해석하지 않는다. TS 24.380 은 온넷 private call 에 별도 floor 절차를 두지 않으므로(§6.3 공통) 이 3가지는 CMP 로컬 정책이며, 초기 발언권은 규격상 fmtp `mc_granted` 협상 결과여야 한다([../design/features/mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) §0-R G17) |
+| `group_type:"private"` | 2인 세션용 floor — 정원 1, **큐잉 없음**(점유 중 요청은 즉시 Deny), chair 개념 없음(tier·priority 만 비교). **초기 발언권은 PTT_JOIN `granted`(=fmtp `mc_granted` 협상) 로만 부여한다** — `initiator_id` 만으로 주지 않는다(협상하지 않은 단말에서 아무도 말하지 않는데 상대에게 Floor Taken 이 날아가 "수신 중" 으로 표시됨). group 의 `floor_policy` 는 해석하지 않는다. TS 24.380 은 온넷 private call 에 별도 floor 절차를 두지 않으므로(§6.3 공통) 이 3가지는 CMP 로컬 정책이며, 초기 발언권은 규격상 fmtp `mc_granted` 협상 결과여야 한다([../design/features/mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) §0-R G17) |
 
 동시 발언 시 in-band 표식과 메시지:
 

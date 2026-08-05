@@ -212,6 +212,13 @@ class PttController(
         val floor: FloorClient = preFloor ?: FloorClient(ssrc, mcpttId, localPort = 0,
             onEvent = { ev -> onFloorEvent(groupId, ev) })
 
+        /** 이 세션이 동시 발언을 허용하는가 — 서버 Floor Indicator 의 I-bit(multi-talker)/
+         *  G-bit(dual floor) 로 판정한다(TS 24.380 §8.2.3.15). multi 정책은 모든 floor 메시지에
+         *  I-bit 가 실리고, dual 은 실제로 2명이 말할 때 G-bit 가 실린다. 참이면 남이 발언 중
+         *  이어도 요청을 보내고 정원 판단은 서버에 맡긴다. */
+        fun multiTalkerSession(): Boolean =
+            (floorIndicator and (FloorIndicator.MULTI_TALKER or FloorIndicator.DUAL_FLOOR)) != 0
+
         fun toState() = GroupCallState(groupId, callId, active, role, floorState, speaker, participants.toMap(),
             audible, emergency, emergencyMine, volume, canRequestFloor, speakDeadlineMs,
             // 대기 위치는 QUEUED 상태에서만 의미가 있다 — 상태로 파생해 지난 값이 새지 않게 한다.
@@ -1531,7 +1538,13 @@ class PttController(
         when (s.floorState) {
             // QUEUED = 이미 요청이 대기열에 있다(버튼 유지 중) — 다시 보낼 것이 없다.
             FloorState.SPEAKING, FloorState.REQUESTING, FloorState.QUEUED -> return
-            FloorState.LISTENING -> { feedback?.denyTone(); _status.value = "다른 사용자가 발언 중"; return }
+            // 남이 발언 중 — 동시 발언 세션이면 **서버가 정원을 보고 판단**하므로 요청을 보낸다.
+            //   로컬에서 막으면 multi 정책의 남은 슬롯을 영원히 못 쓴다(실측: 요청 미발신 +
+            //   버튼을 뗄 때 Release 만 나가 서버 로그에 고아 Release 가 쌓임). 동시 발언
+            //   불가(single)일 때만 종전처럼 즉시 거부음으로 알린다.
+            FloorState.LISTENING -> if (!s.multiTalkerSession()) {
+                feedback?.denyTone(); _status.value = "다른 사용자가 발언 중"; return
+            }
             else -> Unit
         }
         pttHeld = true
@@ -1585,7 +1598,12 @@ class PttController(
         // Floor Release 를 무시하므로, Release 만 보내면 유령 대기자로 남아 나중에 엉뚱한
         // 시점에 발언권을 받는다(그때는 버튼을 뗀 뒤라 즉시 반납 — 승급 한 턴이 낭비된다).
         if (s.floorState == FloorState.QUEUED) s.floor.cancelQueuedRequest()
-        s.floor.releaseFloor()
+        // 요청/점유한 적이 있을 때만 Release 를 보낸다 — 요청조차 안 한 상태(LISTENING/IDLE)의
+        //   Release 는 서버가 무시하는 고아 메시지일 뿐이고, 반복 누름마다 쌓여 로그를 오염시킨다.
+        if (s.floorState == FloorState.SPEAKING || s.floorState == FloorState.REQUESTING ||
+            s.floorState == FloorState.QUEUED) {
+            s.floor.releaseFloor()
+        }
         s.queuePosition = null
         if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
         setTalkCapture(false)    // 발언 종료 — 스피커 전용 복귀 + volte 마이크 복귀

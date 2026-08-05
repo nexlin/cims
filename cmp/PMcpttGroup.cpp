@@ -290,18 +290,13 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         }
     }
 
-    // Private call (TS 24.380 §7): 개시자는 호 성립 시점에 발언권을 가진다 —
-    //   개시자 leg 가 붙는 즉시 초기 부여(1회). floor 없는 private(full-duplex)은 해당 없음.
-    if (_privateCall && _floorControl && !_initialGrantDone && _talkers.empty() &&
-        !_initiatorSessionId.empty() && sessionId == _initiatorSessionId && !recvOnly && !floorSuppress) {
-        _initialGrantDone = true;
-        int prio = 0;
-        auto itP = _priorities.find(sessionId);
-        if (itP != _priorities.end()) prio = itP->second;
-        LOG_INFO("PMcpttGroup", "[%s] Private call — initial floor to initiator %s",
-                 _groupId.c_str(), sessionId.c_str());
-        _grantFloorTo(sessionId, _members[sessionId].ssrc, prio, false, "");
-    }
+    // ⚠️ private call 개시자에게 **무조건** 초기 발언권을 주지 않는다. 초기 발언권은 SDP fmtp
+    //   `mc_granted` 협상 결과여야 하고(§6.3.4.2.2-3b, 계약 §A.1), 그 경로는 PTT_JOIN 의
+    //   `granted` 필드 → [grantInitialFloor] 로 이미 구현돼 있다. 종전에는 여기서 개시자에게
+    //   즉시 GRANT 해 버려서, mc_granted 를 협상하지 않은 단말(발언은 항상 PTT 로 시작하는
+    //   정상 구현)에서도 상대 leg 에 Floor Taken 이 날아가 **아무도 말하지 않는데 "수신 중"**
+    //   으로 표시됐다(실측). 근거로 든 TS 24.380 §7 은 off-network 절이라 온넷 private 에
+    //   적용되지 않는다 — 온넷은 §6.3 일반 절차를 따른다.
 }
 
 void PMcpttGroup::removeMember(const std::string& sessionId) {

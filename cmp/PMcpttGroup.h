@@ -525,7 +525,7 @@ private:
     int  _floorPolicy = FLOOR_POLICY_SINGLE;
     int  _talkerCapacity = 1;       // 동시 발언 정원 (single=1/dual=2/multi=max_talkers)
     bool _privateCall = false;      // group_type=="private" — TS 24.380 §7 절차
-    bool _initialGrantDone = false; // private call 개시자 초기 부여 완료 여부
+    bool _initialGrantDone = false; // 초기 발언권(mc_granted) 부여 완료 여부 — 1회만
     unsigned int _slotUsedMask = 0; // 현재 녹취 세그먼트에서 이미 쓴 슬롯 (트랙 화자 혼입 방지)
     int  _streamSlotNext = 0;       // floor off 멤버 스트림 슬롯 배정 커서
 

@@ -201,7 +201,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | record_dir | - | 녹취 디렉토리 |
 | video_enabled | - | 1 이면 video 포트 활성 |
 | group_type | - | `prearranged`/`chat`/`broadcast`/`private` (broadcast=개시자 독점, private=2인 세션) |
-| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점 / private 초기 발언권(규격상 정본은 PTT_JOIN `granted`) |
+| initiator_id | - | 개시자 sessionId(=userId) — broadcast floor 독점. private 초기 발언권에는 쓰지 않는다(정본=PTT_JOIN `granted`) |
 | floor_control | - | `on`(기본)/`off` — floor 중재 유무 |
 | floor_policy | - | `single`(기본)/`dual`/`multi` — 그룹 동시 발언 수 |
 | max_talkers | multi 시 O | 동시 발언 상한(2..8) |
