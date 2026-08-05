@@ -235,6 +235,11 @@ CMP AddGroup 응답 → {port, floor_port, video_port}
             └→ CMP McpttGroup::addMember(floorPort=UE floor 포트)
 ```
 
+floor 없는 세션(`floor_control:"off"` — private 멀티)은 CMP 가 `floor_port` 를 주지 않는다.
+이때 fan-out SDP 의 floor 라인은 **`m=application 0`**(미사용, RFC 3264 §6)으로 내고
+`a=fmtp:MCPTT mc_no_floor_ctrl` 만 에코한다 — 관례 fallback(멤버 audio+1)을 그대로 두면
+멤버 RTCP 포트가 floor 로 오광고되어 단말이 그 포트로 floor 연결을 시도한다.
+
 **그룹 단위 통일 sesid:**
 
 PTT 그룹 세션에 대한 모든 모듈간 메시지(`PTT_GROUP_ADD`, `PTT_JOIN`, `PTT_LEAVE`, `PTT_GROUP_REMOVE`)와 SIP INVITE leg 들이 동일 sesid 를 공유하도록 per-group 매핑 유지:
@@ -423,8 +428,21 @@ fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher:
   직접 지정). `_isAdhoc=true` 라 통화 종료 시 GroupMap 에서 제거된다(ephemeral).
 - **floor 유무** — 발신 offer 의 fmtp `mc_no_floor_ctrl`(G17) 협상 시
   `PTT_GROUP_ADD.floor_control:"off"`(full-duplex, `floor_port` 미광고). 기본은 on(2인 floor).
+- **싱글/멀티 토커** — 단말이 거는 1:1 은 두 가지다. **싱글**=`floor_control:"on"`(한 번에 한
+  명, 2인 floor 절차). **멀티**=규격 `mc_no_floor_ctrl` 세션(`off`)에 단말이 로컬 마이크
+  게이트를 얹어 동시 발언을 허용한다 — 서버는 양방향 상시 중계만 하고 발언 중재를 하지
+  않는다. 멀티에서도 마이크는 상시 개방이 아니라 단말 PTT 로 여닫는다(단말 책임). 멀티토커를
+  floor 절차로 1:1 에 넣는 것은 규격 밖이다(동시 발언은 그룹 전용 `floor_policy` 축).
 - `PTT_GROUP_ADD` 에 `group_type:"private"` + `initiator_id`(발신자=초기 발언권 후보) + 멤버
   정확히 2 를 싣는다. private 은 동시성 축을 해석하지 않으므로 `floor_policy` 는 **미전송**.
+- **모드 오염 방지** — 잔존 ephemeral 그룹의 floor 모드가 이번 발신과 다르면 재사용하지 않고
+  CMP `PTT_GROUP_REMOVE` 후 재생성한다(`EventIncomingCall`).
+- **종료 전파와 teardown 완결** — 한쪽이 끊으면 세션 전체가 끝난다(그룹 시맨틱 미적용).
+  `OnCallTerminated` 가 잔여 leg 에 BYE 를 보내고 **그 leg 의 teardown 을 직접 재진입 호출**한다.
+  psip 은 로컬 `StopCall` 로 끝낸 호에 `EventCallEnd` 를 올리지 않으므로, BYE 만 보내면 마지막
+  leg 의 그룹 해제·`PTT_GROUP_REMOVE`·멤버 포트 회수·녹취 마감이 실행되지 않는다(BYE 응답
+  유무와 무관해야 한다 — 미응답 단말이 그룹을 붙들면 안 된다). 마지막 leg 처리에서
+  `_isAdhoc` 그룹을 GroupMap 에서도 제거한다(de-register 경로와 동일 계약).
 
 **Flow 메타 필드 (모든 Session/Group API 파라미터):**
 

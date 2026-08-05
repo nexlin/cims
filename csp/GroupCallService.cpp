@@ -883,6 +883,11 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 if ( itRtp2 != m_mapGroupRtp.end() && itRtp2->second.iFloorPort > 0 )
                     iFloorPort = itRtp2->second.iFloorPort;
             }
+            // floor 없는 세션(floor_control=off)은 floor 포트가 없다 — 관례 fallback(audio+1)을
+            //   그대로 두면 멤버 RTCP 포트가 floor 로 오광고되어 단말이 거기로 floor 연결을
+            //   시도한다(08-05 실측 52199). m=application 은 mc_no_floor_ctrl 에코를 실어야
+            //   하므로 라인은 유지하되 포트 0(미사용)으로 내린다 (RFC 3264 §6).
+            if ( clsGroup._floorControl == "off" ) iFloorPort = 0;
             std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
             WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort, strGroupUri,
                                clsGroup._floorControl == "off" );
@@ -1484,20 +1489,22 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     InvalidateMemberPort( strGroupId, strSessionId );
 
     // private call(1:1, TS 24.379 §11.1): 한쪽이 끊으면 세션 전체가 끝난다 — 그룹 시맨틱
-    //   (한 멤버 이탈해도 세션 유지)을 적용하지 않고 잔여 leg 에 BYE 를 보낸다. 각 leg 의
-    //   종료가 다시 이 함수로 들어와 기존 마지막-멤버 teardown 경로(그룹 해제·adhoc 제거)를 밟는다.
+    //   (한 멤버 이탈해도 세션 유지)을 적용하지 않고 잔여 leg 를 종료한다. 실행은 함수 끝에서
+    //   BYE 발신 + 본 함수 재진입으로 한다 — psip 은 로컬 StopCall 로 끝낸 호에 EventCallEnd
+    //   를 올리지 않으므로, BYE 만 보내면 잔여 leg 의 마지막-멤버 teardown(그룹 해제·adhoc
+    //   제거·CMP REMOVE)이 실행되지 않는다. BYE 응답 유무와도 무관해야 한다 — 미응답 단말이
+    //   그룹을 붙들면 안 된다.
+    std::vector<std::string> vecPrivPeerLegs;
     if ( bStillActive ) {
         CspPttGroup clsPrivChk;
         if ( gclsGroupMap.Select( strGroupId.c_str(), clsPrivChk ) && clsPrivChk._groupType == "private" ) {
-            std::vector<std::string> vecPeerLegs;
             {
                 std::unique_lock<std::recursive_mutex> lock( m_mutex );
                 for ( const auto &kv : m_mapCallSession )
-                    if ( kv.second.strGroupId == strGroupId ) vecPeerLegs.push_back( kv.first );
+                    if ( kv.second.strGroupId == strGroupId ) vecPrivPeerLegs.push_back( kv.first );
             }
             CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)",
-                         strGroupId.c_str(), vecPeerLegs.size() );
-            for ( const auto &strPeerLeg : vecPeerLegs ) gclsUserAgent.StopCall( strPeerLeg.c_str() );
+                         strGroupId.c_str(), vecPrivPeerLegs.size() );
         }
     }
 
@@ -1530,7 +1537,8 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     if ( !bStillActive && !strGroupId.empty() ) {
         // on-demand 그룹(prearranged/broadcast): 마지막 확립 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
         CspPttGroup clsGrp;
-        bool bChat = gclsGroupMap.Select( strGroupId.c_str(), clsGrp ) && clsGrp._groupType == "chat";
+        bool bSelected = gclsGroupMap.Select( strGroupId.c_str(), clsGrp );
+        bool bChat = bSelected && clsGrp._groupType == "chat";
         if ( !bChat ) {
             // 미확립(pending) fan-out INVITE 잔존분 취소 — 세션 해제 후 뒤늦게 200 OK 가 와서
             // 없는 그룹에 JOIN 하는 고아 leg 방지 (StopCall 재진입은 맵 선삭제로 no-op).
@@ -1560,10 +1568,26 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                 gclsCallMap.Delete( strPending.c_str(), false );
             }
             gclsCmpClient.RemoveGroup( strGroupId, GetOrIssueGroupSesId( strGroupId ) );
-            std::unique_lock<std::recursive_mutex> lock( m_mutex );
-            m_mapGroupRtp.erase( strGroupId );
-            RemoveGroupSesId( strGroupId );
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                m_mapGroupRtp.erase( strGroupId );
+                RemoveGroupSesId( strGroupId );
+            }
+            // ad hoc/private 임시 그룹: 세션 종료 시 GroupMap 에서도 제거 (ephemeral —
+            //   다음 개시 시 발신 SDP 기준 새 모드로 재생성. de-register 경로와 동일 계약)
+            if ( bSelected && clsGrp._isAdhoc ) {
+                gclsGroupMap.Remove( strGroupId.c_str() );
+                CLog::Print( LOG_INFO, "OnCallTerminated: ad-hoc group(%s) removed from map (session ended)",
+                             strGroupId.c_str() );
+            }
         }
+    }
+
+    // private 잔여 leg 종료 실행 — BYE 발신 + teardown 재진입. 마지막 leg 가 위의
+    //   !bStillActive 경로를 밟아 그룹 해제까지 완결한다 (동시 BYE glare 는 맵 선삭제로 no-op).
+    for ( const auto &strPeerLeg : vecPrivPeerLegs ) {
+        gclsUserAgent.StopCall( strPeerLeg.c_str() );
+        OnCallTerminated( strPeerLeg );
     }
 
     return bFound;
