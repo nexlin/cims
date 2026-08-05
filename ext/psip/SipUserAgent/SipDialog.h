@@ -170,7 +170,10 @@ public:
 	CSipMessage * CreateInfo( );
 
 	bool AddSdp( CSipMessage * pclsMessage );
-	
+
+	/** 상대(offer) SDP 에 m=application(MCPTT floor) 미디어가 있었는가 — RFC 3264 m= 미러링 판정용. */
+	bool HasRemoteApplicationMedia( );
+
 	bool SetLocalRtp( CSipCallRtp * pclsRtp );
 	bool SetRemoteRtp( CSipCallRtp * pclsRtp );
 

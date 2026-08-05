@@ -240,6 +240,12 @@ floor 없는 세션(`floor_control:"off"` — private 멀티)은 CMP 가 `floor_
 `a=fmtp:MCPTT mc_no_floor_ctrl` 만 에코한다 — 관례 fallback(멤버 audio+1)을 그대로 두면
 멤버 RTCP 포트가 floor 로 오광고되어 단말이 그 포트로 floor 연결을 시도한다.
 
+발신자에게 주는 **200 OK answer 도 같은 규칙**을 따른다 — psip `CSipDialog::AddSdp` 는 광고할
+floor 포트가 없어도 상대 offer 에 `m=application` 이 있었으면 **포트 0 라인을 반드시 넣는다**
+(RFC 3264 §6: answer 의 m= 라인 개수·순서는 offer 와 같아야 하고, 쓰지 않는 스트림은 라인을
+지우는 것이 아니라 포트 0 으로 거절한다). 라인을 생략하면 m= 개수가 어긋나 협상을 엄격히
+구현한 단말이 answer 를 거부한다. 세션 중 offer(re-INVITE)에도 같은 규칙이 적용된다.
+
 **그룹 단위 통일 sesid:**
 
 PTT 그룹 세션에 대한 모든 모듈간 메시지(`PTT_GROUP_ADD`, `PTT_JOIN`, `PTT_LEAVE`, `PTT_GROUP_REMOVE`)와 SIP INVITE leg 들이 동일 sesid 를 공유하도록 per-group 매핑 유지:

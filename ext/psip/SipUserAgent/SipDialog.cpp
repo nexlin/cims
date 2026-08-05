@@ -225,6 +225,25 @@ static int AddCodecAttribute( char * pszBuf, int iBufSize, const CSipCodecEntry 
 
 /**
  * @ingroup SipUserAgent
+ * @brief 상대(offer) SDP 가 m=application(MCPTT floor) 미디어를 제안했는지 확인한다.
+ * @returns 제안했으면 true.
+ */
+bool CSipDialog::HasRemoteApplicationMedia( )
+{
+#ifdef USE_MEDIA_LIST
+	SDP_MEDIA_LIST::iterator	itList;
+
+	for( itList = m_clsRemoteMediaList.begin(); itList != m_clsRemoteMediaList.end(); ++itList )
+	{
+		if( !strcmp( itList->m_strMedia.c_str(), "application" ) ) return true;
+	}
+#endif
+
+	return false;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief SIP �޽����� SDP �޽����� �߰��Ѵ�.
  * @param pclsMessage SDP �޽����� �߰��� SIP �޽��� ��ü
  * @returns true �� �����Ѵ�.
@@ -336,6 +355,15 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen,
 			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing\r\n",
 			m_iLocalApplicationPort );
+	}
+	else if( strstr( szSdp, "m=application" ) == NULL && HasRemoteApplicationMedia() )
+	{
+		// RFC 3264 §6: answer 의 m= 라인 개수·순서는 offer 와 같아야 하고, 쓰지 않는 스트림은
+		//   라인을 지우는 것이 아니라 **포트 0** 으로 거절한다. floor 없는 세션(private 멀티 —
+		//   mc_no_floor_ctrl 협상 결과)은 광고할 floor 포트가 없지만, 상대가 제안한 floor
+		//   스트림을 라인째 생략하면 m= 개수가 어긋나 엄격한 단말이 answer 를 거부한다.
+		//   세션 중 offer(re-INVITE)도 같은 규칙 — 이미 협상된 m= 라인은 제거할 수 없다.
+		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=application 0 UDP MCPTT\r\n" );
 	}
 
 	pclsMessage->m_strBody = szSdp;
