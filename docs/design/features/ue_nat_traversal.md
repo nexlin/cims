@@ -172,6 +172,12 @@ NAT 뒤 단말을 수용하는 access service 배치 체크리스트:
   산정한다.
 - 공인 노출망의 인증 우회 스위치 `Setup.TestEnvOpenTermination` 은 검증 전용이다 —
   상용은 false 유지 (미등록 발신 INVITE 는 표준 401 챌린지).
+- **스캐너 로그 억제**: 공인 노출 리스너에는 SIP 계정 무차별 대입 스캐너가 상시 유입된다.
+  CSP 는 처리·응답(401/403)은 표준대로 하되, **미가입 계정**(`E_AUTH_USER_NOT_FOUND` —
+  가입자 DB 에 없는 사용자)의 REGISTER/일반 요청 403 시 소스 IP 의 NETWORK 원본 덤프를
+  `CLog::SuppressNetworkSource`(TTL 300s, toll-fraud INVITE 603 경로와 동일 계약)로 억제해
+  로그 폭주를 막는다. 요약 INFO 는 억제 창 진입 시 1회만 남는다. 가입자의 자격 증명 실패
+  (`E_AUTH_ERROR`)는 실단말일 수 있어 억제하지 않는다.
 
 ### 7.1 UE 구현 요건 (PTT)
 

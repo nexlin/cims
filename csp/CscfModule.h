@@ -8,7 +8,15 @@
 /**
  * @brief SIP 인증 결과
  */
-enum ECheckAuthResult { E_AUTH_OK = 0, E_AUTH_NONCE_NOT_FOUND, E_AUTH_ERROR };
+enum ECheckAuthResult {
+    E_AUTH_OK = 0,
+    E_AUTH_NONCE_NOT_FOUND,
+    E_AUTH_ERROR,           // 가입자 존재 — 자격 증명/정책 불일치 (실단말 가능성, 로그 유지)
+    E_AUTH_USER_NOT_FOUND,  // 미가입 계정 — 계정 무차별 대입 스캐너 신호 (소스 로그 억제 대상)
+};
+
+// 미가입 계정 무차별 대입 소스의 NETWORK 덤프 억제 시간 (toll-fraud INVITE 603 경로와 동일 값)
+#define SIP_SCAN_SUPPRESS_TTL_SEC 300
 
 /** 서버 지원 메서드 목록 — REGISTER 401/200·OPTIONS 200 등의 Allow 헤더 값 (실망 패킷 형태) */
 #define SIP_ALLOW_METHODS "REGISTER,INVITE,ACK,BYE,CANCEL,REFER,OPTIONS,NOTIFY,SUBSCRIBE,MESSAGE,INFO,PRACK,UPDATE,PUBLISH"

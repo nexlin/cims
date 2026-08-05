@@ -123,7 +123,7 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential
     const bool bQop = !pclsCredential->m_strQop.empty();
     if ( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str(), !bQop ) == false )
         return E_AUTH_NONCE_NOT_FOUND;
-    if ( gclsCspUserMap.Select( pszFromId, clsXmlUser ) == false ) return E_AUTH_ERROR;
+    if ( gclsCspUserMap.Select( pszFromId, clsXmlUser ) == false ) return E_AUTH_USER_NOT_FOUND;
 
     // v3 (2026-04-22): 가입자의 service_ref 가 비어있으면 REGISTER 거부
     if ( clsXmlUser.m_strServiceRef.empty() ) {
@@ -204,6 +204,20 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
         case E_AUTH_NONCE_NOT_FOUND:
             SendUnAuthorizedResponse( pclsMessage, "", true );
             return false;
+        case E_AUTH_USER_NOT_FOUND:
+            // 미가입 계정 요청 — REGISTER 경로와 동일하게 소스 NETWORK 덤프 억제 (스캐너).
+            //   요약 INFO 는 억제 창 진입 시 1회만.
+            if ( !CLog::IsNetworkSourceSuppressed( pclsMessage->m_strClientIp.c_str() ) )
+                CLog::Print( LOG_INFO, "CheckAuthrization: unknown user(%s) %s from %s → 403, 소스 로그 %d초 억제",
+                             pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_strSipMethod.c_str(),
+                             pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
+            CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
+            // fallthrough 없이 동일 403 — 아래 E_AUTH_ERROR 와 같은 응답
+            {
+                CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+                if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+            }
+            return false;
         case E_AUTH_ERROR: {
             CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
             if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
@@ -282,6 +296,19 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
             SendUnAuthorizedResponse( pclsMessage, strRegRealm, true );  // F-07: stale=true
+            return true;
+        case E_AUTH_USER_NOT_FOUND:
+            // 미가입 계정 REGISTER = 인터넷 노출 리스너의 계정 무차별 대입 스캐너 신호.
+            //   403 후 소스 NETWORK 덤프를 억제해 로그 폭주를 막는다 (toll-fraud INVITE 603
+            //   경로와 동일 계약 — 처리·응답은 그대로, 원본 패킷 로그만 생략). 가입자의 자격
+            //   증명 실패(E_AUTH_ERROR)는 실단말일 수 있어 억제하지 않는다.
+            //   요약 INFO 는 억제 창 진입 시 1회만 — 매 시도마다 찍으면 그 라인이 새 폭주가 된다.
+            if ( !CLog::IsNetworkSourceSuppressed( pclsMessage->m_strClientIp.c_str() ) )
+                CLog::Print( LOG_INFO, "RecvRequestRegister: unknown user(%s) from %s → 403, 소스 로그 %d초 억제",
+                             pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_strClientIp.c_str(),
+                             SIP_SCAN_SUPPRESS_TTL_SEC );
+            CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
+            SendResponse( pclsMessage, SIP_FORBIDDEN );
             return true;
         case E_AUTH_ERROR:
             SendResponse( pclsMessage, SIP_FORBIDDEN );

@@ -266,7 +266,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                                     gclsCspUserMap.isAlive( strTo.c_str(), clsToProv ) ||
                                     gclsDbManager.SelectUser( strTo, clsToProv );
                 if ( !bLocalTarget ) {
-                    CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), 300 );
+                    CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
                     SendResponse( pclsMessage, SIP_DECLINE );  // 603
                     return true;
                 }
