@@ -1669,11 +1669,16 @@ class PttController(
 
     private fun onFloorEvent(groupId: String, ev: FloorEvent) {
         val s = synchronized(lock) { sessionMap[groupId] } ?: return
+        // 발언 주체 판정은 **pttDown 과 같은 규칙([talkSession])** 이어야 한다 — 1:1 은 주채널을
+        //   점유하지 않으므로(role=NONE) role 로만 보면 내가 요청해 받은 GRANT 를 "비주채널"로
+        //   오판해 즉시 반납한다(실측: GRANT 16ms 뒤 Release, 버튼은 누른 채). 마이크 결선·해제
+        //   같은 장치 조작은 종전대로 주채널일 때만 수행한다.
         val isPrimary = s.role == ChannelRole.PRIMARY
+        val isTalkTarget = s === talkSession()
         when (ev) {
             is FloorEvent.Granted -> {
                 requestTimeout?.cancel()
-                if (!isPrimary || !pttHeld) {        // 늦은 GRANT/비주채널 — 즉시 반납
+                if (!isTalkTarget || !pttHeld) {     // 늦은 GRANT/발언 대상 아님 — 즉시 반납
                     s.floor.releaseFloor()
                     if (isPrimary) setTalkCapture(false)
                     s.floorState = FloorState.IDLE
@@ -1690,17 +1695,20 @@ class PttController(
                 s.mySpeakStartMs = SystemClock.elapsedRealtime()
                 armTalkLimit(s, ev.durationSec)
                 _status.value = "발언권 획득"
-                // "삑 후 말하기": 승인 톤 재생이 끝난 뒤 mic 개방(톤이 그룹으로 송출되지 않게)
+                // "삑 후 말하기": 승인 톤 재생이 끝난 뒤 mic 개방(톤이 그룹으로 송출되지 않게).
+                //   결선 대상은 GRANT 를 받은 그 세션 — primarySession() 으로 잡으면 1:1(주채널
+                //   비점유)에서 엉뚱한 세션(또는 null)을 보고 마이크가 열리지 않는다.
                 scope.launch {
                     delay(feedback?.grantTone() ?: 0L)
-                    val p = primarySession()
-                    if (pttHeld && p?.floorState == FloorState.SPEAKING && p.callId >= 0)
-                        sip.setMicEnabled(p.callId, true)
+                    if (pttHeld && s.floorState == FloorState.SPEAKING && s.callId >= 0)
+                        sip.setMicEnabled(s.callId, true)
                 }
             }
             is FloorEvent.Denied -> {
                 clearTalkLimit(s)
-                if (isPrimary) {
+                // 거부 피드백은 **요청한 세션** 기준 — 1:1 은 주채널이 아니라 role 로 보면
+                //   거부음·사유 표시가 통째로 누락된다.
+                if (isTalkTarget) {
                     requestTimeout?.cancel()
                     if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
                     setTalkCapture(false)
@@ -1713,7 +1721,7 @@ class PttController(
                 clearTalkLimit(s)
                 // Floor Release 회신은 FloorClient 가 이미 보냈다(§6.2.4.5.4) — 여기선 mic·UI 만.
                 if (s.callId >= 0) sip.setMicEnabled(s.callId, false)
-                if (isPrimary) setTalkCapture(false)
+                if (isTalkTarget) setTalkCapture(false)
                 s.floorState = FloorState.IDLE
                 if (s.speaker?.self == true && s.mySpeakStartMs > 0) {
                     emit(PttEventKind.TALK_ME, s.groupId,
@@ -1724,7 +1732,7 @@ class PttController(
                 s.talkers = s.talkers.filterNot { it.self }
                 s.speaker = s.talkers.firstOrNull()
                 if (s.talkers.isNotEmpty()) s.floorState = FloorState.LISTENING
-                if (isPrimary) { feedback?.revokeTone(); _status.value = "발언권 회수: ${ev.text ?: ev.cause}" }
+                if (isTalkTarget) { feedback?.revokeTone(); _status.value = "발언권 회수: ${ev.text ?: ev.cause}" }
             }
             is FloorEvent.Taken -> {
                 // Permission to Request the Floor(§8.2.3.7) — 이 leg 의 발언 요청 가부. 서버가
@@ -1793,7 +1801,7 @@ class PttController(
             is FloorEvent.QueuePosition -> {
                 s.floorState = FloorState.QUEUED
                 s.queuePosition = ev.position
-                if (isPrimary) _status.value = ev.position?.let { "발언 대기 ${it}번째" } ?: "발언 대기 중"
+                if (isTalkTarget) _status.value = ev.position?.let { "발언 대기 ${it}번째" } ?: "발언 대기 중"
             }
             // 대기 요청 소멸 — 내 취소의 결과이거나 서버/의장이 지운 통지. 어느 쪽이든 IDLE.
             is FloorEvent.QueueCancelled -> {
