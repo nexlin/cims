@@ -26,6 +26,9 @@ export interface Group {
   org_code?: string
   session_start?: string | null
   session_end?: string | null
+  // floor 동시 발언 정책 (CSP → CMP PTT_GROUP_ADD, 계약 §B.1)
+  floor_policy?: 'single' | 'dual' | 'multi'   // single=한 명, dual=2명, multi=max_talkers 명
+  max_talkers?: number                         // multi 일 때만 유효 (2~8, CMP 슬롯 상한)
   // 3GPP MCPTT
   group_type?: 'prearranged' | 'chat' | 'broadcast'
   on_network?: boolean

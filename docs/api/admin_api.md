@@ -734,9 +734,19 @@ Content-Type: application/json
 | `id` | string | Y | 그룹 MSISDN (E.164 형식) |
 | `name` | string | Y | 그룹 표시 이름 |
 | `video_enabled` | boolean | N | 영상 지원 여부 (기본: false) |
+| `floor_policy` | string | N | 동시 발언 정책 `single`(기본)/`dual`/`multi` |
+| `max_talkers` | integer | N | `multi` 의 동시 발언자 수 (2~8, CMP 슬롯 상한). `single`/`dual` 은 미해석 — 2 로 정규화 |
 | `members` | array | N | 초기 멤버 목록 |
 | `members[].user_id` | string | Y | PTT 구독 MSISDN |
 | `members[].priority` | integer | Y | 우선순위 (0=최고, 숫자가 클수록 낮음) |
+
+> `floor_policy`/`max_talkers` 는 CSP 가 `PTT_GROUP_ADD`/`_MODIFY` 로 CMP 에 발행한다
+> ([mcptt_csp_cmp_roadmap_contract.md](../design/features/mcptt_csp_cmp_roadmap_contract.md) §B.1).
+> `multi` 인데 정원이 범위를 벗어나면 **400 으로 거절**한다 — CMP 가 BAD_REQUEST 로 그룹 생성을
+> 거부해 통화 불가가 되는 것을 저장 단계에서 막는다. 정책 변경은 다음 그룹콜 개설부터 적용되며,
+> 통화 중 그룹은 CSP 의 설정 해시 변경 감지로 `PTT_GROUP_MODIFY` 가 나간다.
+> ⚠️ `multi` 는 **단말이 동시 수신(SSRC 디먹스)을 지원해야** 실제로 겹쳐 들린다
+> ([mcptt_ue_multitalker_media.md](../design/features/mcptt_ue_multitalker_media.md) U10).
 
 **curl 예시:**
 ```bash

@@ -18,6 +18,8 @@ import { canCreateGroup, canManageGroup, hasRole } from '@core/utils/permissions
 type GroupExt = Group
 
 const ICON = 14
+/** CMP 화자 슬롯 상한(MCPTT_MAX_TALKER_SLOTS) — 초과 값은 CMP 가 BAD_REQUEST 로 거절한다. */
+const MAX_TALKERS_LIMIT = 8
 
 
 function Caret({ open }: { open: boolean }) {
@@ -98,6 +100,11 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="ts">{g.id}</span> },
     { key: 'type', header: '타입', width: 90, render: g => <span className="ts">{g.group_type || 'prearranged'}</span> },
     { key: 'priority', header: '우선', width: 56, align: 'center', sortable: true, sortValue: g => g.priority ?? 5, render: g => g.priority ?? 5 },
+    { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
+      const fp = g.floor_policy || 'single'
+      if (fp === 'single') return <span className="ts" style={{ color: 'var(--text-muted)' }}>단일</span>
+      return <span className="badge badge--blue" style={{ fontSize: 9 }}>{fp === 'dual' ? '2명' : `${g.max_talkers ?? 2}명`}</span>
+    } },
     { key: 'owner', header: '소유자', width: 110, render: g => <span className="ts">{g.authorized_user_name || g.authorized_user || '—'}</span> },
     { key: 'org', header: '조직', width: 130, render: g => <span className="ts">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
     { key: 'members', header: '멤버', width: 64, align: 'center', render: g => <span className="ts">{g.members?.length ?? 0}명</span> },
@@ -185,8 +192,8 @@ function GroupDrawer(p: GroupDrawerProps) {
   const [editing, setEditing] = useState(isNew)
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, imminent_peril_call: existing.imminent_peril_call ?? true, emergency_alert: existing.emergency_alert ?? true, adhoc_enabled: existing.adhoc_enabled ?? false, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, imminent_peril_call: true, emergency_alert: true, adhoc_enabled: false, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null })
+    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, imminent_peril_call: existing.imminent_peril_call ?? true, emergency_alert: existing.emergency_alert ?? true, adhoc_enabled: existing.adhoc_enabled ?? false, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2 }
+    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, imminent_peril_call: true, emergency_alert: true, adhoc_enabled: false, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2 })
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
 
@@ -201,6 +208,11 @@ function GroupDrawer(p: GroupDrawerProps) {
     prearranged: '미리 구성된 그룹콜 (키업 시 on-demand 개설)',
     chat: '상시 유지 채팅형 그룹',
     broadcast: '개시자만 발언, 나머지는 수신 전용',
+  }
+  const floorPolicyHint: Record<string, string> = {
+    single: '한 번에 한 명만 발언 (기본)',
+    dual: '두 명까지 동시 발언 — 나머지는 대기열',
+    multi: `동시 발언자 수만큼 동시 발언 (최대 ${MAX_TALKERS_LIMIT}명). 단말이 동시 수신을 지원해야 한다`,
   }
 
   async function save() {
@@ -251,6 +263,28 @@ function GroupDrawer(p: GroupDrawerProps) {
             </select>
           </Field>
           <Field label="우선순위" w={80}><input className="form-input" type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
+          <Field label="동시 발언" w={110}>
+            <select className="form-input" title="floor 동시 발언 정책 — CSP 가 CMP 로 발행"
+              value={form.floor_policy || 'single'}
+              onChange={e => {
+                const fp = e.target.value as GroupExt['floor_policy']
+                // multi 로 바꿀 때 정원이 범위 밖이면 기본 2 로 — 저장 거절(400) 을 미리 막는다.
+                const mt = fp === 'multi' ? Math.min(Math.max(form.max_talkers ?? 2, 2), MAX_TALKERS_LIMIT) : 2
+                setForm({ ...form, floor_policy: fp, max_talkers: mt })
+              }}>
+              <option value="single">단일(1명)</option>
+              <option value="dual">듀얼(2명)</option>
+              <option value="multi">멀티(N명)</option>
+            </select>
+          </Field>
+          {form.floor_policy === 'multi' && (
+            <Field label={`동시 발언자 수 (2~${MAX_TALKERS_LIMIT})`} w={130}>
+              <input className="form-input" type="number" min={2} max={MAX_TALKERS_LIMIT}
+                title="CMP 화자 슬롯 수 — 이 수만큼 동시에 발언할 수 있다"
+                value={form.max_talkers ?? 2}
+                onChange={e => setForm({ ...form, max_talkers: Number(e.target.value) })} />
+            </Field>
+          )}
           {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
             {form.authorized_user_id != null
               ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -284,12 +318,15 @@ function GroupDrawer(p: GroupDrawerProps) {
             <button className="btn btn--sm btn--ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</button>
           </div>
           <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--text-muted)' }}>타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
+          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--text-muted)' }}>동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
         </FieldRow>
       ) : existing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
           <span className="ts">ID {existing.id}</span>
           <span className="ts">타입 {existing.group_type || 'prearranged'}</span>
           <span className="ts">우선순위 {existing.priority ?? 5}</span>
+          <span className="ts">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일'
+            : (existing.floor_policy === 'dual' ? '2명' : `${existing.max_talkers ?? 2}명`)}</span>
           <span className="ts">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
           <span className="ts">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
           {canManage && <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>그룹 속성 편집</button>}

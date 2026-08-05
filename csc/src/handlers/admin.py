@@ -603,8 +603,30 @@ _GROUP_COLS = (
     "imminent_peril_call, emergency_alert, adhoc_enabled, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
-    "require_affiliation, alias, authorized_user_id, created_at"
+    "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, created_at"
 )
+
+# floor 동시 발언 정책 (mcptt_csp_cmp_roadmap_contract.md §B.1) — CSP 가 CMP 로 발행한다.
+_FLOOR_POLICIES = ('single', 'dual', 'multi')
+_MAX_TALKERS_MIN = 2      # multi 의 하한 (dual 은 정원 2 고정, 값은 무시)
+_MAX_TALKERS_MAX = 8      # CMP 슬롯 상한 (MCPTT_MAX_TALKER_SLOTS)
+
+
+def _norm_floor(policy, talkers, cur_policy='single', cur_talkers=2):
+    """floor_policy/max_talkers 정규화. multi 는 정원이 범위 밖이면 거절한다 —
+    CMP 가 BAD_REQUEST 로 그룹 생성을 거부해 통화 불가가 되므로 저장 단계에서 막는다."""
+    p = (policy or cur_policy or 'single').strip().lower()
+    if p not in _FLOOR_POLICIES:
+        return None, None, f"floor_policy must be one of {'|'.join(_FLOOR_POLICIES)}"
+    try:
+        n = int(talkers if talkers is not None else cur_talkers)
+    except (TypeError, ValueError):
+        return None, None, 'max_talkers must be an integer'
+    if p == 'multi' and not (_MAX_TALKERS_MIN <= n <= _MAX_TALKERS_MAX):
+        return None, None, f'max_talkers must be {_MAX_TALKERS_MIN}..{_MAX_TALKERS_MAX} for floor_policy=multi'
+    if p != 'multi':
+        n = 2      # single/dual 은 정원을 해석하지 않는다 — 기본값으로 정규화
+    return p, n, None
 
 
 def _shape_group(g: dict, members: list, owner: dict = None):
@@ -626,6 +648,8 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['max_auto_recv'] = int(g.get('max_auto_recv', 1048576) or 0)
     g['on_network'] = bool(g.get('on_network', 1))
     g['require_affiliation'] = bool(g.get('require_affiliation', 1))
+    g['floor_policy'] = g.get('floor_policy') or 'single'
+    g['max_talkers'] = int(g.get('max_talkers', 2) or 2)
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
     if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
     if g.get('created_at'): g['created_at'] = g['created_at'].isoformat()
@@ -790,6 +814,9 @@ async def _create_group(body, config, payload=None):
     require_affiliation = 1 if body.get('require_affiliation', True) else 0
     alias          = body.get('alias', '') or None
     members        = body.get('members', [])
+    floor_policy, max_talkers, floor_err = _norm_floor(body.get('floor_policy'), body.get('max_talkers'))
+    if floor_err:
+        return HandlerResult(status=400, body={'error': floor_err})
 
     # 그룹 소유 (authorized user) — 명시 없으면 생성자(payload sub) 기본.
     authorized_user_id = body.get('authorized_user_id')
@@ -817,13 +844,15 @@ async def _create_group(body, config, payload=None):
                 "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
                 "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
-                "max_members, require_affiliation, alias, authorized_user_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "max_members, require_affiliation, alias, authorized_user_id, "
+                "floor_policy, max_talkers) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
                  emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled,
                  allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
-                 on_network, max_members, require_affiliation, alias, authorized_user_id)
+                 on_network, max_members, require_affiliation, alias, authorized_user_id,
+                 floor_policy, max_talkers)
             )
             gpk = cur.lastrowid
             for m in members:
@@ -877,6 +906,17 @@ async def _update_group(group_id: str, body, config, payload=None):
             if 'group_type' in body and body['group_type'] in ('prearranged', 'chat', 'broadcast'):
                 update_fields.append('group_type=%s')
                 update_vals.append(body['group_type'])
+            # floor 동시 발언 정책 — 한 축만 보내도 나머지는 현재 값을 기준으로 검증한다.
+            if 'floor_policy' in body or 'max_talkers' in body:
+                cur.execute("SELECT floor_policy, max_talkers FROM ptt_groups WHERE id=%s", (gpk,))
+                cur_row = cur.fetchone() or {}
+                fp, mt, err = _norm_floor(
+                    body.get('floor_policy'), body.get('max_talkers'),
+                    cur_row.get('floor_policy') or 'single', cur_row.get('max_talkers') or 2)
+                if err:
+                    return HandlerResult(status=400, body={'error': err})
+                update_fields.append('floor_policy=%s'); update_vals.append(fp)
+                update_fields.append('max_talkers=%s'); update_vals.append(mt)
             for fld in ('org_code', 'alias'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
