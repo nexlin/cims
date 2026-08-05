@@ -351,12 +351,33 @@ class SipController(private val config: SipAccountConfig) {
      *  닫힌 동안은 captureDevMedia 가 없어 실패하는데, 한 블록에 묶으면 뒤 축이 조용히 유실된다
      *  (실측: 발언 녹취 RMS 가 mic 게인과 무관 — 미적용). 또 snd dev (재)오픈마다 bridge slot0
      *  포트가 재생성돼 레벨이 초기화되므로, 캡처 게이트 전환([setCaptureEnabled])·재오픈
-     *  ([bounceSndDev]) 직후 재적용이 필수. */
-    private fun applyDeviceAudioBoost() {
+     *  ([bounceSndDev]) 직후 재적용이 필수.
+     *
+     *  ⚠ 캡처 장치는 `PJSUA_SND_DEV_NO_IMMEDIATE_OPEN` 으로 **지연 개방**된다 — 게이트를 연
+     *  직후엔 captureDevMedia 가 아직 없어 mic 축이 실패하고, 재시도가 없으면 그 발언 내내
+     *  게인이 빠진 원음이 나간다(서버 녹취 RMS 비교로 실측). 게이트가 열린 상태에서 mic 축이
+     *  실패하면 장치가 열릴 때까지 짧게 재시도한다. */
+    private fun applyDeviceAudioBoost(retriesLeft: Int = MIC_BOOST_RETRY_MAX) {
         if (!PjLib.booted) return
         val adm = runCatching { PjLib.ep.audDevManager() }.getOrNull() ?: return
         runCatching { adm.playbackDevMedia.adjustTxLevel(boostSpk) }
-        runCatching { adm.captureDevMedia.adjustRxLevel(boostMic) }
+        val micOk = runCatching { adm.captureDevMedia.adjustRxLevel(boostMic) }.isSuccess
+        if (micOk) {
+            if (retriesLeft < MIC_BOOST_RETRY_MAX)
+                Log.i(TAG, "mic boost=$boostMic 적용 (지연 개방 재시도 ${MIC_BOOST_RETRY_MAX - retriesLeft}회)")
+            return
+        }
+        if (!captureEnabled) return          // 게이트가 닫힌 상태 — 열릴 때 setCaptureEnabled 가 다시 건다
+        if (retriesLeft <= 0) {
+            Log.w(TAG, "mic boost=$boostMic 미적용 — 캡처 장치 개방 대기 초과")
+            return
+        }
+        h.postDelayed({
+            runCatching {
+                if (PjLib.booted) PjLib.ensureThread("pj-ctl")
+                applyDeviceAudioBoost(retriesLeft - 1)
+            }
+        }, MIC_BOOST_RETRY_MS)
     }
 
     @Volatile private var boostSpk = 1f
@@ -689,6 +710,10 @@ class SipController(private val config: SipAccountConfig) {
 
     companion object {
         private const val TAG = "SipController"
+
+        /** 캡처 장치 지연 개방(PJSUA_SND_DEV_NO_IMMEDIATE_OPEN) 대기 — mic boost 재시도 간격/횟수. */
+        private const val MIC_BOOST_RETRY_MS = 120L
+        private const val MIC_BOOST_RETRY_MAX = 8
 
         /** 오디오 출력 라우팅 상수 — [setAudioRoute]. */
         const val AUDIO_ROUTE_DEFAULT = 0   // 자동(이어폰 연결 시 이어폰)
