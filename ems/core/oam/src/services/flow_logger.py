@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs, unquote
 
 from httpsrv.handler import HandlerArgs, HandlerResult
+from services import ptt_index
 
 logger = logging.getLogger(__name__)
 
@@ -1809,233 +1810,154 @@ def _ptt_group_base(group_id: str) -> str:
     return ""
 
 
-def _find_ptt_sessions(group_id: str, date: str = None, days: int = None) -> list:
-    """PTT 그룹의 시간창(YYYY/MM/DD/HH) 목록 반환. window dir 이름 = 'YYYYMMDDHH'.
+# ── PTT 세션 스캔 원시 함수는 services.ptt_index 가 소유한다 ─────────────────
+#   읽기 모델(인덱스)과 그 근거(녹취 스캔)가 한 모듈에 있어야 둘이 어긋나지 않는다.
+#   여기서는 기존 호출부가 쓰던 이름만 얇게 잇는다.
+_PTT_SES_RE = ptt_index._SES_RE
+_ptt_ses_start_iso = ptt_index.ses_start_iso
+_ptt_window_of = ptt_index.window_of
+_ptt_bucket_parts = ptt_index.bucket_parts
+_ptt_session_dirs = ptt_index.session_dirs
+_ptt_seg_audio_tracks = ptt_index.seg_audio_tracks
+_ptt_seg_max_concurrent = ptt_index.seg_max_concurrent
 
-    스캔 범위(우선순위):
-      - date('YYYY-MM-DD') 지정 → 해당 일자 시간창만.
-      - days(N) 지정 → 최근 N개 캘린더 일자(오늘 포함) 시간창만 (콘솔 일별 히트맵용).
-      - 둘 다 미지정 → 전체(주의: 장시간 세션이면 최대 8760개).
-    일자별로 디렉터리를 직접 순회해 glob 폭을 N일로 제한한다."""
-    base = _ptt_group_base(group_id)
-    if not base:
-        return []
-    import glob as _glob
-    digit4, digit2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
-    # date 필터: 'YYYY-MM-DD' → base/YYYY/MM/DD/* 만 스캔
-    day_digits = "".join(c for c in (date or "") if c.isdigit())
-    patterns = []
-    if len(day_digits) >= 8:
-        patterns.append(os.path.join(base, day_digits[0:4], day_digits[4:6], day_digits[6:8], digit2))
-    elif days and days > 0:
-        # 최근 N일(오늘 포함) 각 일자 디렉터리만 glob → 범위 밖 미스캔
-        from datetime import timedelta as _td
-        today = datetime.now()
-        for i in range(days):
-            d = today - _td(days=i)
-            patterns.append(os.path.join(base, d.strftime("%Y"), d.strftime("%m"), d.strftime("%d"), digit2))
+
+def _index_row_to_session(r: dict) -> dict:
+    """인덱스 행 → 기존 세션 목록 스키마 (`/ptt/history?group_id=` 계약 유지)."""
+    return {
+        "dir": r.get("key", ""),
+        "session_id": r.get("key", "") if not r.get("legacy") else
+                      (lambda w: f"{w[0:4]}-{w[4:6]}-{w[6:8]} {w[8:10]}:00")(
+                          (r.get("windows") or [""])[0]),
+        "windows": r.get("windows", []),
+        "sesid": r.get("sesid", ""),
+        "initiator": r.get("initiator", ""),
+        "call_id": r.get("call_id", ""),
+        "floor_control": r.get("floor_control", ""),
+        "floor_policy": r.get("floor_policy", ""),
+        "max_talkers": r.get("max_talkers", 0),
+        "start_time": r.get("start", ""),
+        "end_time": r.get("end"),
+        "state": r.get("state", "ended"),
+        "segment_count": r.get("segments", 0),
+        "turn_count": r.get("turns", 0),
+        "speaker_count": r.get("speaker_count", 0),
+        "speakers": r.get("speakers", []),
+        "max_concurrent": r.get("max_concurrent", 0),
+        "total_speech_ms": r.get("speech_ms", 0),
+        "talk_ms": r.get("talk_ms", 0),
+    }
+
+
+def _ptt_index_rows(date: str = None, days: int = None,
+                    from_date: str = None, to_date: str = None) -> list:
+    """조회 범위의 인덱스 행 + 진행중 세션.
+
+    범위 우선순위: from/to > date > days > 최근 90일.
+    진행중 세션은 인덱스에 없으므로(종료돼야 확정된다) 상태 파일에서 얹고, 같은 세션이
+    오늘 인덱스에 'ended' 로 들어가 있으면 실시간 쪽으로 갈아 끼운다."""
+    from datetime import timedelta as _td
+
+    def _digits8(v):
+        d = "".join(c for c in (v or "") if c.isdigit())
+        return d[0:8] if len(d) >= 8 else ""
+
+    d_from, d_to = _digits8(from_date), _digits8(to_date)
+    day_digits = _digits8(date)
+    if d_from or d_to:
+        rows = ptt_index.range_days(d_from or d_to, d_to or d_from)
+        scope = None if not (d_from and d_to) else (min(d_from, d_to), max(d_from, d_to))
+        if scope is None:
+            one = d_from or d_to
+            scope = (one, one)
+    elif day_digits:
+        rows = list(ptt_index.day(day_digits))
+        scope = (day_digits, day_digits)
     else:
-        patterns.append(os.path.join(base, digit4, digit2, digit2, digit2))
-    result = []
-    now_window = datetime.now().strftime("%Y%m%d%H")
-    hh_dirs = []
-    for pat in patterns:
-        hh_dirs.extend(_glob.glob(pat))
-    for hh_dir in hh_dirs:
-        if not os.path.isdir(hh_dir):
-            continue
-        rel = os.path.relpath(hh_dir, base).split(os.sep)
-        if len(rel) != 4:
-            continue
-        yyyy, mm, dd, hh = rel
-        window = f"{yyyy}{mm}{dd}{hh}"
-        # 시간창 segments.jsonl 1회 읽어 세그먼트수·발언턴·화자수·발화시간·시간범위 집계
-        seg_count = 0
-        speakers: set = set()
-        turn_count = 0
-        max_con = 0
-        total_ms = 0       # 발화 구간 합 (세그먼트 = 겹침 1회 계산)
-        talk_ms = 0        # 발화 누적 합 (화자별 구간 합 — 동시 발언은 겹쳐서 더해진다)
-        st_min = ""
-        en_max = ""
-        segs = _read_jsonl(os.path.join(hh_dir, "segments.jsonl"))
-        for s in segs:
-            seg_count += 1
-            total_ms += int(s.get("duration_ms", 0) or 0)
-            # 동시 발언(dual/multi-talker)·전이중 private call 은 한 세그먼트에 슬롯 트랙이
-            #   여럿이다 — speaker_id(대표 화자)만 세면 화자·발언이 과소 집계된다.
-            tracks = _ptt_seg_audio_tracks(s)
-            max_con = max(max_con, _ptt_seg_max_concurrent(tracks))
-            for t in tracks:
-                spans = t.get("speakers") or []
-                turn_count += len(spans) or 1
-                for sp in spans:
-                    if sp.get("id"):
-                        speakers.add(sp["id"])
-                    talk_ms += int(sp.get("dur_ms", 0) or 0)
-            if not tracks:
-                sp = s.get("speaker_id", "")
-                if sp:
-                    speakers.add(sp)
-                turn_count += 1
-            stt = s.get("start_time", "")
-            ent = s.get("end_time", "")
-            if stt and (not st_min or stt < st_min):
-                st_min = stt
-            if ent and (not en_max or ent > en_max):
-                en_max = ent
-        # 진행중 판정: 현재 시각 시간창이고 녹취가 아직 .recording 인 경우
-        is_active = (window == now_window) and _has_active_recording(hh_dir)
-        # 세션 디스크립터(session.json) — CSP 가 세션 시작 시 시간버킷에 남긴 당시 스냅샷.
-        #   floor 축은 이것이 정본(그룹 루트 group.json 은 최신 스냅샷이라 과거 세션에
-        #   소급되면 왜곡 — private 은 floor_control 이 세션마다 SDP 협상으로 달라진다).
-        #   없으면 ""/0 → 콘솔이 그룹 레벨로 폴백.
-        sj = _read_json(os.path.join(hh_dir, "session.json")) or {}
-        result.append({
-            "dir": window,
-            "session_id": f"{yyyy}-{mm}-{dd} {hh}:00",
-            "floor_control": sj.get("floor_control", ""),
-            "floor_policy": sj.get("floor_policy", ""),
-            "max_talkers": sj.get("max_talkers", 0) or 0,
-            "start_time": st_min or f"{yyyy}-{mm}-{dd}T{hh}:00:00",
-            "end_time": (None if is_active else (en_max or f"{yyyy}-{mm}-{dd}T{hh}:59:59")),
-            "state": "active" if is_active else "ended",
-            "segment_count": seg_count,
-            "turn_count": turn_count,
-            "speaker_count": len(speakers),
-            "max_concurrent": max_con,
-            "total_speech_ms": total_ms,
-            "talk_ms": talk_ms,
-        })
-    result.sort(key=lambda x: x["dir"], reverse=True)
-    return result
+        n = days if (days and days > 0) else 90
+        today = datetime.now()
+        d0 = (today - _td(days=n - 1)).strftime("%Y%m%d")
+        d1 = today.strftime("%Y%m%d")
+        rows = ptt_index.range_days(d0, d1)
+        scope = (d0, d1)
+
+    live = ptt_index.live()
+    if live:
+        live_ids = {(l.get("group_key"), l.get("key")) for l in live}
+        rows = [r for r in rows if (r.get("group_key"), r.get("key")) not in live_ids]
+        for l in live:
+            sd = ptt_index.ses_start_day(l.get("key", ""))
+            if scope and sd and not (scope[0] <= sd <= scope[1]):
+                continue        # 조회 범위 밖에서 시작한 세션은 넣지 않는다
+            rows.append(l)
+    rows.sort(key=lambda r: (r.get("start") or "", r.get("key") or ""), reverse=True)
+    return rows
 
 
-def _ptt_seg_audio_tracks(s: dict) -> list:
-    """세그먼트 한 행의 음성 슬롯 트랙 목록. CMP 의 tracks[] 가 정본이고, 그 이전
-    녹취는 flat 키(audio_file/audio1_file/speaker_id_audioK)에서 합성한다.
-    반환 원소: {slot, speakers:[{id,offset_ms,dur_ms}]}"""
-    raw = s.get("tracks")
-    if isinstance(raw, list) and raw:
-        return [{"slot": t.get("slot", 0), "speakers": t.get("speakers") or []}
-                for t in raw
-                if isinstance(t, dict) and t.get("kind") == "audio" and t.get("file")]
-    out = []
-    dur = int(s.get("duration_ms", 0) or 0)
-    rep = s.get("speaker_id", "")
-    for key, val in s.items():
-        if not key.endswith("_file") or not val or not isinstance(val, str):
-            continue
-        prefix = key[:-len("_file")]
-        if not prefix.startswith("audio"):
-            continue
-        tail = prefix[len("audio"):]
-        slot = int(tail) if tail.isdigit() else 0
-        sid = s.get(f"speaker_id_{prefix}", "") or (rep if slot == 0 else "")
-        out.append({"slot": slot,
-                    "speakers": [{"id": sid, "offset_ms": 0, "dur_ms": dur}] if sid else []})
-    out.sort(key=lambda t: t["slot"])
-    return out
+def _find_ptt_sessions(group_id: str, date: str = None, days: int = None) -> list:
+    """PTT 그룹의 **세션** 목록. 세션키 = 'S{ts}_{n}' (구 녹취는 'YYYYMMDDHH').
 
+    기록 단위가 세션이므로 같은 시간대에 두 번 통화하면 두 행이고, 통화가 시간을
+    넘겨도 한 행이다. 출처는 읽기 모델(services.ptt_index) — 종전처럼 그룹 디렉터리를
+    직접 glob 하지 않는다.
 
-def _ptt_seg_max_concurrent(tracks: list) -> int:
-    """세그먼트 안에서 동시에 열려 있던 화자 구간의 최대 수"""
-    events = []
-    for t in tracks:
-        for sp in t.get("speakers") or []:
-            d = int(sp.get("dur_ms", 0) or 0)
-            if d <= 0:
-                continue
-            off = int(sp.get("offset_ms", 0) or 0)
-            events.append((off, 1))
-            events.append((off + d, -1))
-    if not events:
-        return 1 if tracks else 0
-    events.sort(key=lambda e: (e[0], e[1]))   # 같은 시각이면 종료 먼저 — 인접 구간은 겹침이 아니다
-    cur = peak = 0
-    for _, delta in events:
-        cur += delta
-        peak = max(peak, cur)
-    return peak
+    스캔 범위: date('YYYY-MM-DD') 지정 → 그 일자 / days(N) → 최근 N일 / 미지정 → 최근 90일.
+    """
+    rows = [r for r in _ptt_index_rows(date, days) if r.get("group_key") == group_id]
+    return [_index_row_to_session(r) for r in rows]
 
 
 def _ptt_group_summaries() -> dict:
     """모든 PTT 그룹의 경량 요약을 그룹키별로 반환. 키 = ptt/{groupKey} 디렉터리명.
 
-    콘솔 좌측 목록의 출처다 — DB(ptt_groups)가 아니라 **녹취 디렉터리**를 훑으므로
-    DB 행이 없는 세션(1:1 private call `priv-*`, ad-hoc 임시 그룹)도 드러난다.
-    분류/표시에 필요한 만큼만 group.json 을 읽는다(그룹당 1파일).
+    DB(ptt_groups)가 아니라 **녹취 디렉터리**가 출처다 — DB 행이 없는 세션(1:1 private
+    call `priv-*`, ad-hoc 임시 그룹)도 드러난다.
+
+    비용: 그룹당 group.json 1회 + 최근 버킷 탐색 listdir 4회. 종전엔 전 그룹의 전 시간
+    버킷을 glob 했는데(그룹 100개 × 1년 = 87만 디렉터리) 요약 하나 만들자고 치를 값이
+    아니다. `session_count` 는 그래서 전 기간 합계가 아니라 **최근 활동일의 세션 수** 다
+    (그 하루치 인덱스 1파일이면 구해진다).
     """
     if not _calls_dir:
         return {}
-    import glob as _glob
-    ptt_root = os.path.join(_calls_dir, "ptt")
-    if not os.path.isdir(ptt_root):
-        return {}
-    d4, d2 = "[0-9][0-9][0-9][0-9]", "[0-9][0-9]"
     summaries: dict = {}
-    for hh_dir in _glob.glob(os.path.join(ptt_root, "*", d4, d2, d2, d2)):
-        rel = os.path.relpath(hh_dir, ptt_root).split(os.sep)
-        if len(rel) != 5:
-            continue
-        gid, yyyy, mm, dd, hh = rel
-        window = f"{yyyy}{mm}{dd}{hh}"
-        s = summaries.get(gid)
-        if s is None:
-            summaries[gid] = {"session_count": 1, "last_window": window}
-        else:
-            s["session_count"] += 1
-            if window > s["last_window"]:
-                s["last_window"] = window
-
-    # 그룹 디스크립터 — 종류(prearranged/chat/broadcast/private)·floor 축·이름·참여자
-    for gid, s in summaries.items():
-        gj = _read_json(os.path.join(ptt_root, gid, "group.json")) or {}
-        members = [m.get("user_id", "") for m in (gj.get("members") or [])
-                   if isinstance(m, dict) and m.get("user_id")]
-        s["mcptt_group_id"] = gj.get("mcptt_group_id", "") or gid
-        s["name"] = gj.get("name", "")
-        s["group_type"] = gj.get("group_type", "")
-        s["floor_control"] = gj.get("floor_control", "")   # ""=미기록(구 세션) / on / off
-        s["floor_policy"] = gj.get("floor_policy", "")
-        s["max_talkers"] = gj.get("max_talkers", 0)
-        s["video_enabled"] = bool(gj.get("video_enabled"))
-        s["member_count"] = gj.get("member_count", len(members))
-        # 분류: DB 그룹이 아닌 세션을 콘솔이 구분해 담을 수 있게 한다.
-        #   private = 1:1 (priv-<caller>-<callee> ephemeral)
-        #   adhoc   = ad-hoc 그룹콜 — group.json 은 있으나 surrogate id 가 없다(DB 미등록)
-        #   group   = DB 등록 그룹 (surrogate id > 0)
-        if s["group_type"] == "private" or gid.startswith("priv-"):
-            s["kind"] = "private"
-            s["peers"] = members[:2]
-        elif not gj:
-            s["kind"] = "unknown"       # group.json 유실 — 그룹으로도 1:1 로도 단정 못한다
-        elif not gj.get("id"):
-            s["kind"] = "adhoc"
-        else:
-            s["kind"] = "group"
+    for gid in ptt_index.group_keys():
+        gd = ptt_index.group_descriptor(gid)
+        lw = ptt_index.last_window(gid)
+        summaries[gid] = {
+            "session_count": ptt_index.count_on_day(gid, lw[0:8]) if len(lw) >= 8 else 0,
+            "last_window": lw,
+            "mcptt_group_id": gd["mcptt_group_id"],
+            "name": gd["name"],
+            "group_type": gd["group_type"],
+            "floor_control": gd["floor_control"],   # ""=미기록(구 세션) / on / off
+            "floor_policy": gd["floor_policy"],
+            "max_talkers": gd["max_talkers"],
+            "video_enabled": gd["video"],
+            "member_count": gd["member_count"],
+            "kind": gd["kind"],
+        }
+        if gd["kind"] == "private":
+            summaries[gid]["peers"] = gd["members"][:2]
     return summaries
 
 
 def _find_ptt_session_dir(group_id: str, session_dir: str) -> str:
-    """시간창 식별자 'YYYYMMDDHH' → ptt/{gid}/{YYYY}/{MM}/{DD}/{HH} 경로"""
-    base = _ptt_group_base(group_id)
-    if not base:
-        return ""
-    w = "".join(c for c in (session_dir or "") if c.isdigit())
-    if len(w) >= 10:
-        d = os.path.join(base, w[:4], w[4:6], w[6:8], w[8:10])
-        if os.path.isdir(d):
-            return d
-    return ""
+    """세션키 → 세션 **시작 버킷** 디렉터리. 세션이 여러 버킷에 걸치면 첫 버킷이다
+    (session.json·최초 이벤트가 여기 있다). 전체가 필요하면 _ptt_session_dirs 를 쓴다."""
+    dirs = _ptt_session_dirs(group_id, session_dir)
+    return dirs[0] if dirs else ""
 
 
-def _load_ptt_events(d_dir: str, date: str = None) -> list:
-    """PTT 시간창 이벤트 로드 (events.jsonl — 멤버 join/leave 등). floor 는 별도 endpoint."""
+def _load_ptt_events(d_dir, date: str = None) -> list:
+    """PTT 세션 이벤트 로드 (events.jsonl — 멤버 join/leave 등). floor 는 별도 endpoint.
+    d_dir 은 디렉터리 하나 또는 여러 개(세션이 시간버킷을 넘긴 경우) 를 받는다."""
+    dirs = [d_dir] if isinstance(d_dir, str) else list(d_dir or [])
     events = []
-    events_path = os.path.join(d_dir, "events.jsonl")
-    if os.path.exists(events_path):
-        events.extend(_read_jsonl(events_path))
+    for d in dirs:
+        events_path = os.path.join(d, "events.jsonl")
+        if os.path.exists(events_path):
+            events.extend(_read_jsonl(events_path))
 
     events.sort(key=lambda e: e.get("ts", ""))
     return events
@@ -2269,13 +2191,20 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         return HandlerResult(status=404, body=json.dumps({"error": "No recording available"}))
 
     if len(parts) >= 3 and parts[2] == "flow":
-        # ── Flow: 해당 세션 시간버킷의 flow.jsonl 읽기 → 필터 → 노드별 배열 ──
+        # ── Flow: 세션이 걸친 시간버킷의 flow.jsonl 읽기 → 필터 → 노드별 배열 ──
         date_str = _qp("date", datetime.now().strftime("%Y-%m-%d"))
-        # 세션 식별자 = 'YYYYMMDDHH' (시간버킷). 그 시(HH)만 스캔 — 하루 24시간×5분버킷×전노드
-        #   (수백 파일) 전체를 읽던 것을 해당 시간으로 한정해 Flow 조회를 대폭 가속한다.
-        _sd = "".join(c for c in session_dir if c.isdigit())
-        _hour = _sd[8:10] if len(_sd) >= 10 else None
-        flow_paths = _resolve_flow_paths(date_str, _hour, "ptt")
+        # 세션이 실제로 존재한 시(HH)만 스캔 — 하루 24시간×5분버킷×전노드(수백 파일) 전체를
+        #   읽던 것을 그 시간대로 한정해 Flow 조회를 대폭 가속한다.
+        s_dirs = _ptt_session_dirs(group_id, session_dir)
+        _scope = []
+        for _w in [_ptt_window_of(d) for d in s_dirs]:
+            if len(_w) >= 10:
+                _scope.append({"date": f"{_w[0:4]}-{_w[4:6]}-{_w[6:8]}", "hour": _w[8:10]})
+        if _scope:
+            flow_paths = _resolve_flow_paths(date_str, None, "ptt", _scope)
+        else:
+            _sd = "".join(c for c in session_dir if c.isdigit())
+            flow_paths = _resolve_flow_paths(date_str, _sd[8:10] if len(_sd) >= 10 else None, "ptt")
 
         # 세션의 시간 범위: events.jsonl에서 추출 (ISO 형식 → HH:MM:SS.ffffff)
         def _iso_to_hms(iso: str) -> str:
@@ -2284,7 +2213,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                 return iso.split("T", 1)[1][:15]
             return iso[:15]
 
-        d_dir = _find_ptt_session_dir(group_id, session_dir)
+        d_dir = s_dirs[0] if s_dirs else ""
         # 매칭 토큰: URL 의 group_id 는 surrogate("1") 라 sesid 부분문자열 매칭 시
         #   스캔/사기 sesid(예: 0000…/9999…, 숫자 '1' 포함)에 오매칭되어 flow 가 오염된다.
         #   group.json 의 mcptt_group_id("g001", 영문 포함→숫자 sesid 와 충돌 없음)로 매칭.
@@ -2301,7 +2230,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         except Exception:
             pass
         session_meta = _load_session_json(d_dir) if d_dir else {}
-        events = _load_ptt_events(d_dir) if d_dir else []
+        events = _load_ptt_events(s_dirs) if s_dirs else []
         ev_times = [e.get("ts", "") for e in events if e.get("ts")]
         ses_t_start = _iso_to_hms(min(ev_times)) if ev_times else ""
         ses_t_end = _iso_to_hms(max(ev_times)) if ev_times else ""
@@ -2413,35 +2342,42 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
         }), media_type="application/json")
 
     elif len(parts) >= 3 and parts[2] == "floor":
-        # ── 세션 로컬 floor 타임라인 (CMP 가 .d/floor.jsonl 에 기록) ──
-        d_dir = _find_ptt_session_dir(group_id, session_dir)
-        if not d_dir:
+        # ── 세션 로컬 floor 타임라인 (CMP 가 세션 디렉터리 floor.jsonl 에 기록) ──
+        #    세션이 시간버킷을 넘겼으면 버킷들의 floor 를 시간순으로 이어붙인다.
+        s_dirs = _ptt_session_dirs(group_id, session_dir)
+        if not s_dirs:
             return HandlerResult(status=404, body=json.dumps({"error": "Session not found"}),
                                  media_type="application/json")
-        floor_path = os.path.join(d_dir, "floor.jsonl")
-        floor = _read_jsonl(floor_path) if os.path.exists(floor_path) else []
+        floor = []
+        for d in s_dirs:
+            fp = os.path.join(d, "floor.jsonl")
+            if os.path.exists(fp):
+                floor.extend(_read_jsonl(fp))
+        floor.sort(key=lambda e: e.get("ts", ""))
         return HandlerResult(status=200, body=json.dumps({"floor": floor}),
                              media_type="application/json")
 
     else:
-        # ── 시간창 이벤트 ──
+        # ── 세션 이벤트 ──
         date = _qp("date")
 
-        d_dir = _find_ptt_session_dir(group_id, session_dir)
-        if not d_dir:
+        s_dirs = _ptt_session_dirs(group_id, session_dir)
+        if not s_dirs:
             return HandlerResult(status=404, body=json.dumps({"error": "Session not found"}),
                                  media_type="application/json")
+        d_dir = s_dirs[0]
 
-        # 그룹 스냅샷은 base/group.json 에서
-        session_meta = {"session_id": session_dir}
-        base = _ptt_group_base(group_id)
-        if base:
-            gj = _read_json(os.path.join(base, "group.json"))
-            if gj:
-                session_meta = gj
-                session_meta["session_id"] = session_dir
+        # 세션 당시 스냅샷(session.json)이 정본, 없으면(구 녹취) 그룹 최신 스냅샷으로 폴백.
+        session_meta = _read_json(os.path.join(d_dir, "session.json")) or {}
+        if not session_meta:
+            base = _ptt_group_base(group_id)
+            if base:
+                session_meta = _read_json(os.path.join(base, "group.json")) or {}
+        session_meta = dict(session_meta) if session_meta else {}
+        session_meta["session_id"] = session_dir
+        session_meta["windows"] = [_ptt_window_of(d) for d in s_dirs]
         group_snapshot = session_meta.get("group_snapshot", {}) if session_meta else {}
-        events = _load_ptt_events(d_dir, date)
+        events = _load_ptt_events(s_dirs, date)
 
         # participants 정보도 포함 (없으면 events에서 유도)
         participants = _load_participants(d_dir)
@@ -3082,6 +3018,149 @@ async def _handle_messages(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
     }, ensure_ascii=False), media_type="application/json")
 
 
+async def _handle_ptt_sessions(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """PTT 세션 이력 — 그룹 축이 아니라 **세션 축** 의 평면 목록.
+
+    GET /api/v1/ptt/sessions
+        ?date=YYYY-MM-DD            단일 일자 (기본: 오늘)
+        &from=&to=                  기간 (지정 시 date 무시, 최대 90일)
+        &days=N                     최근 N일 (from/to 없을 때)
+        &kind=group,private,adhoc   종류 (콤마 다중, 미지정=전체)
+        &group_key=1,3              녹취 저장 키 (콤마 다중) — 그룹 세션만 좁힌다
+        &person=+8250…              참여자 부분일치 (발언 안 한 참가자도 포함)
+        &state=live|ended           진행중/종료
+        &hour=HH                    목록만 그 시간대로 (hours 히스토그램은 유지)
+        &q=                         발신·화자·상대·그룹명·call_id·sesid 부분일치
+        &sort=start|turns|speech|duration|speakers  &order=asc|desc
+        &limit=&offset=
+
+    1:1 private call·ad-hoc 은 그룹 엔티티가 아니라 개별 호다(TS 24.379 §11.1 /
+    TS 22.179). 그룹 드릴다운이 아니라 VoLTE 호 이력(/call/logs)과 같은 계약으로 낸다.
+
+    진행중 세션은 `state=live` 로 따로 받는다(페이징 없이 전량). 콘솔의 '진행중' 구역이
+    정렬·페이징과 무관하게 상단에 고정되려면 목록과 분리해 조회하는 편이 단순하다.
+    """
+    if handler_args.method != "GET":
+        return HandlerResult(status=405, body="Method Not Allowed")
+
+    qp = getattr(handler_args, 'query_params', {}) or {}
+    qs = parse_qs(urlparse(handler_args.full_path or "").query)
+
+    def _q(name, default=None):
+        v = qp.get(name)
+        if v:
+            return v[0] if isinstance(v, list) else v
+        vl = qs.get(name)
+        return vl[0] if vl else default
+
+    def _csv(name):
+        return {x.strip() for x in (_q(name, "") or "").split(",") if x.strip()}
+
+    date_str = _q("date", datetime.now().strftime("%Y-%m-%d"))
+    from_str, to_str = _q("from"), _q("to")
+    try:
+        days = int(_q("days") or 0) or None
+    except ValueError:
+        days = None
+    hour = _q("hour")
+    kinds = _csv("kind")
+    group_keys = _csv("group_key")
+    person = (_q("person", "") or "").strip()
+    state = (_q("state", "") or "").strip().lower()
+    search = (_q("q", "") or "").strip().lower()
+    sort_key = (_q("sort", "start") or "start").strip().lower()
+    order_desc = (_q("order", "desc") or "desc").strip().lower() != "asc"
+    limit = min(int(_q("limit", "200") or 200), 1000)
+    offset = int(_q("offset", "0") or 0)
+
+    # 인덱스에서 바로 행을 얻는다 — 그룹을 하나씩 훑던 종전 경로(그룹 × 일자 glob)를
+    #   대체한다. 진행중 세션은 인덱스에 없으므로 _ptt_index_rows 가 얹어 준다.
+    if from_str or to_str:
+        rows = _ptt_index_rows(None, None, from_str or to_str, to_str or from_str)
+    else:
+        rows = _ptt_index_rows(date_str if not days else None, days)
+
+    items = []
+    for r in rows:
+        kind = r.get("kind") or "unknown"
+        if kinds and kind not in kinds:
+            continue
+        if group_keys and r.get("group_key") not in group_keys:
+            continue
+        if person and not any(person in (p or "") for p in (r.get("people") or [])):
+            continue
+        it = _index_row_to_session(r)
+        it["group_key"] = r.get("group_key", "")
+        it["kind"] = kind
+        it["group_name"] = r.get("name", "")
+        it["mcptt_group_id"] = r.get("mcptt_group_id", "")
+        it["group_type"] = r.get("group_type", "")
+        it["people"] = r.get("people", [])
+        # 1:1·임시는 개시자를 뺀 나머지가 곧 상대다 — 그룹 편성이 아니라 그 통화의 참여자.
+        it["peers"] = [p for p in r.get("people", []) if p != r.get("initiator")] \
+            if kind in ("private", "adhoc") else []
+        items.append(it)
+
+    if search:
+        def _hit(it) -> bool:
+            hay = [it.get("initiator", ""), it.get("group_name", ""), it.get("mcptt_group_id", ""),
+                   it.get("call_id", ""), it.get("sesid", ""), it.get("group_key", ""),
+                   it.get("dir", "")]
+            hay.extend(it.get("people") or [])
+            return any(search in (v or "").lower() for v in hay)
+        items = [it for it in items if _hit(it)]
+
+    live_total = sum(1 for it in items if it.get("state") == "active")
+    if state == "live":
+        items = [it for it in items if it.get("state") == "active"]
+    elif state == "ended":
+        items = [it for it in items if it.get("state") != "active"]
+
+    def _hour_of(it) -> str:
+        st = it.get("start_time") or ""
+        return st[11:13] if len(st) >= 13 else ""
+
+    # 히스토그램은 내용 필터까지 반영하고 hour 필터만 빼고 센다 —
+    #   "이 시간대를 고르면 몇 건이 남나" 가 곧 이동의 근거이기 때문.
+    hours: dict = {}
+    for it in items:
+        h = _hour_of(it)
+        if h:
+            hours[h] = hours.get(h, 0) + 1
+
+    if hour:
+        hh = str(hour).zfill(2)
+        items = [it for it in items if _hour_of(it) == hh]
+
+    def _dur(it) -> int:
+        a, b = it.get("start_time") or "", it.get("end_time") or ""
+        if not a or not b:
+            return 0
+        try:
+            return int((datetime.fromisoformat(b) - datetime.fromisoformat(a)).total_seconds())
+        except ValueError:
+            return 0
+    _SORT = {
+        "start":    lambda it: it.get("start_time") or "",
+        "turns":    lambda it: it.get("turn_count") or 0,
+        "speech":   lambda it: it.get("total_speech_ms") or 0,
+        "speakers": lambda it: it.get("speaker_count") or 0,
+        "duration": _dur,
+    }
+    keyf = _SORT.get(sort_key, _SORT["start"])
+    # 2차 키는 항상 시작 시각 — 같은 값이 많은 정렬(발언 턴 등)에서 순서가 흔들리지 않게.
+    items.sort(key=lambda it: (keyf(it), it.get("start_time") or ""), reverse=order_desc)
+
+    total = len(items)
+    return HandlerResult(status=200, body=json.dumps({
+        "date": date_str, "from": from_str or "", "to": to_str or "",
+        "hour": hour or "", "state": state, "sort": sort_key,
+        "order": "desc" if order_desc else "asc",
+        "total": total, "live_total": live_total,
+        "items": items[offset:offset + limit], "hours": hours,
+    }, ensure_ascii=False), media_type="application/json")
+
+
 FLOW_HANDLER_LIST = [
     ("/api/v1/flow/body", _handle_flow_body, {}),
     ("/api/v1/flow/register/list", _handle_register_list, {}),
@@ -3090,6 +3169,7 @@ FLOW_HANDLER_LIST = [
     ("/api/v1/flow", _handle_flow, {}),
     ("/api/v1/call/logs", _handle_call_logs, {}),
     ("/api/v1/recordings", _handle_recordings, {}),
+    ("/api/v1/ptt/sessions", _handle_ptt_sessions, {}),
     ("/api/v1/ptt/history", _handle_ptt_history, {}),
     ("/api/v1/security/abnormal-sessions", _handle_abnormal_sessions, {}),
     ("/api/v1/messages", _handle_messages, {}),

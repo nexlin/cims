@@ -22,6 +22,7 @@ CIMS Recording REST API  (파일시스템 기반 — DB 미사용)
 import os
 import json
 import glob
+import re
 import struct
 import shutil
 import subprocess
@@ -29,6 +30,7 @@ import threading
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
@@ -409,16 +411,19 @@ def _scan_voip_sessions(base: str, caller: str = '', from_dt: str = '', to_dt: s
 def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
                        from_dt: str = '', to_dt: str = '',
                        limit: int = 200, offset: int = 0):
-    """PTT 시간창 디렉터리를 스캔하여 녹취 목록 반환.
-    디렉터리: {base}/ptt/{groupKey}/{YYYY}/{MM}/{DD}/{HH}/  (groupKey=ptt_groups.id)
+    """PTT 세션 디렉터리를 스캔하여 녹취 목록 반환.
+    디렉터리: {base}/ptt/{groupKey}/{YYYY}/{MM}/{DD}/{HH}/{sesdir}/  (groupKey=ptt_groups.id)
+    세션 디렉터리 도입 이전 녹취는 시간버킷 자체가 세션이라 두 깊이를 모두 훑는다.
     """
     ptt_root = os.path.join(base, 'ptt')
     if not os.path.isdir(ptt_root):
         return [], 0
 
-    # 시간창 = ptt/{groupKey}/{YYYY}/{MM}/{DD}/{HH}  (segments.jsonl 보유)
+    # 세션 = ptt/{groupKey}/{YYYY}/{MM}/{DD}/{HH}/{sesdir}, 구 녹취 = 그 버킷 자체
+    #   (segments.jsonl 보유 여부로 가른다 — 신형 버킷에는 인덱스가 없다)
     d4, d2 = '[0-9]' * 4, '[0-9]' * 2
-    dirs = sorted(glob.glob(os.path.join(ptt_root, '*', d4, d2, d2, d2)), reverse=True)
+    bucket = os.path.join(ptt_root, '*', d4, d2, d2, d2)
+    dirs = sorted(glob.glob(os.path.join(bucket, 'S*_*')) + glob.glob(bucket), reverse=True)
 
     results = []
     for d in dirs:
@@ -433,10 +438,13 @@ def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
         rel = os.path.relpath(d, ptt_root).split(os.sep)
         gid = rel[0] if rel else ''
         yyyy, mm, dd, hh = (rel[1], rel[2], rel[3], rel[4]) if len(rel) >= 5 else ('', '', '', '')
+        ses_name = rel[5] if len(rel) >= 6 else ''
 
         if group_id and gid != group_id:
             continue
-        start = f"{yyyy}-{mm}-{dd}T{hh}:00:00" if yyyy else (segs[0].get('start_time', '') if segs else '')
+        # 세션 디렉터리는 실제 시작 시각을 안다 — 버킷 정시로 뭉개지 않는다.
+        start = (segs[0].get('start_time', '') if ses_name else '') \
+            or (f"{yyyy}-{mm}-{dd}T{hh}:00:00" if yyyy else (segs[0].get('start_time', '') if segs else ''))
         if from_dt and start and start[:10] < from_dt:
             continue
         if to_dt and start and start[:10] > to_dt:
@@ -472,8 +480,10 @@ def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
             'callee': None,
             'group_id': gid,
             'window': f"{yyyy}{mm}{dd}{hh}",
+            'session_key': ses_name or f"{yyyy}{mm}{dd}{hh}",
             'start_time': start,
-            'end_time': f"{yyyy}-{mm}-{dd}T{hh}:59:59" if yyyy else None,
+            'end_time': (max((s.get('end_time') or '') for s in segs) or None) if ses_name
+                        else (f"{yyyy}-{mm}-{dd}T{hh}:59:59" if yyyy else None),
             'duration': 0,
             'has_video': any(s.get('has_video') for s in segs),
             'status': status,
@@ -1496,7 +1506,7 @@ async def _get_recording(base: str, rel_dir: str) -> HandlerResult:
             'state': meta.get('state', ''),
         }
 
-    segs = _build_segments(rec_dir)
+    segs = _session_segments(d)
     rec['segments'] = [_public_seg(s) for s in segs]
     rec['segment_count'] = len(segs)
     rec['total_speech_ms'] = sum(s['duration_ms'] for s in segs)
@@ -1533,10 +1543,62 @@ def _find_rec_dir(d: str) -> str:
     return d
 
 
+# PTT 세션 디렉터리 이름 — CSP CallDir::_sesDirName 규약 S{yyyymmddHHMMSSuuuuuu}_{n}
+_PTT_SES_NAME = re.compile(r'^S(\d{14,20})_(\d+)$')
+
+
+def _ptt_part_dirs(d: str) -> list:
+    """PTT 세션 디렉터리 → 그 세션이 걸친 시간버킷 디렉터리들 (시간순).
+
+    세션이 시간을 넘기면 다음 버킷에 같은 이름의 디렉터리가 생긴다. 녹취 id 는 세션
+    하나를 가리키므로, 이어지는 버킷은 서버가 찾아 붙인다(콘솔은 버킷을 모른다).
+    세그먼트 seq 는 세션 단위 단조증가라(CMP) 어느 버킷에 있든 seq 로 유일하다."""
+    d = d.rstrip('/')
+    m = _PTT_SES_NAME.match(os.path.basename(d))
+    if not m:
+        return [d]
+    ts = m.group(1)
+    name = os.path.basename(d)
+    grp_base = os.path.abspath(os.path.join(d, '..', '..', '..', '..', '..'))
+    try:
+        cur = datetime(int(ts[0:4]), int(ts[4:6]), int(ts[6:8]), int(ts[8:10]))
+    except ValueError:
+        return [d]
+    out = []
+    while True:
+        p = os.path.join(grp_base, cur.strftime('%Y'), cur.strftime('%m'),
+                         cur.strftime('%d'), cur.strftime('%H'), name)
+        if not os.path.isdir(p):
+            break
+        out.append(p)
+        cur += timedelta(hours=1)
+    return out or [d]
+
+
+def _session_segments(d: str) -> list:
+    """세션 전체의 세그먼트 (여러 버킷에 걸쳐 있으면 이어붙인다)."""
+    parts = _ptt_part_dirs(d)
+    if len(parts) <= 1:
+        return _build_segments(_find_rec_dir(d))
+    segs = []
+    for p in parts:
+        segs.extend(_build_segments(_find_rec_dir(p)))
+    segs.sort(key=lambda s: s.get('seq', 0))
+    return segs
+
+
+def _rec_dir_for_seq(d: str, seq: int) -> str:
+    """seq 가 실제로 놓인 버킷의 녹취 디렉터리 — 재생·변환은 이 자리에서 한다."""
+    for p in _ptt_part_dirs(d):
+        rd = _find_rec_dir(p)
+        if _find_seg(rd, seq):
+            return rd
+    return _find_rec_dir(d)
+
+
 async def _list_segments(base: str, rel_dir: str) -> HandlerResult:
     d = os.path.join(base, rel_dir)
-    rec_dir = _find_rec_dir(d)
-    segs = _build_segments(rec_dir)
+    segs = _session_segments(d)
     return HandlerResult(status=200, body={'id': rel_dir, 'segments': [_public_seg(s) for s in segs]})
 
 
@@ -1560,7 +1622,7 @@ def _slot_has_video(seg: dict, slot) -> bool:
 async def _stream_segment(base: str, rel_dir: str, seq: int, video: bool = False,
                           retry: bool = False, slot=None) -> HandlerResult:
     d = os.path.join(base, rel_dir)
-    rec_dir = _find_rec_dir(d)
+    rec_dir = _rec_dir_for_seq(d, seq)
 
     # 명시 재시도(?retry=1) — 실패 마커를 지워 raw 로 되돌린 뒤 재변환 큐잉
     if retry:
@@ -1599,7 +1661,7 @@ async def _stream_peaks(base: str, rel_dir: str, seq: int, slot=None) -> Handler
     """파형 피크 배열 — 변환 산출물과 함께 만들어지므로 변환을 먼저 보장한다.
     미변환이면 202(변환중) — 콘솔은 오디오와 같은 폴링 규약으로 기다린다."""
     d = os.path.join(base, rel_dir)
-    rec_dir = _find_rec_dir(d)
+    rec_dir = _rec_dir_for_seq(d, seq)
 
     peaks = _peaks_path(rec_dir, seq, slot)
     if os.path.exists(peaks):

@@ -180,7 +180,7 @@ if __name__ == '__main__':
             logger.log_error(f"OAM overlay failed: {e}")
         return c
 
-    from services       import flow_logger, logger as csc_logger
+    from services       import flow_logger, ptt_index, logger as csc_logger
     from handlers       import auth, recording
     from handlers.auth           import CIMS_AUTH_HANDLER_LIST
     # /users/me (본인 프로파일) = identity-plane, base 귀속(oam_base_service_split D8).
@@ -340,6 +340,13 @@ if __name__ == '__main__':
             db_config=config.get('CimsDatabase'),
             trusted_nets=_trusted,
         )
+
+        # PTT 세션 읽기 모델 — 녹취가 정본이고 인덱스는 파생물이다. Enabled=false 로 두면
+        #   조회가 종전처럼 녹취를 직접 스캔한다(되돌리기 경로).
+        _ptt_idx_cfg = config.get('PttIndex') or {}
+        _ptt_index_enabled = bool(_ptt_idx_cfg.get('Enabled', True))
+        PTT_INDEX_INTERVAL = int(_ptt_idx_cfg.get('Interval', 30))
+        ptt_index.init(_service_log_dir, enabled=_ptt_index_enabled)
 
         tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
         if not os.path.isdir(tests_dir):
@@ -798,6 +805,21 @@ if __name__ == '__main__':
         METRIC_RETAIN_DAYS    = int(config.get('MetricRetentionDays', 3))
         METRIC_PURGE_INTERVAL = int(config.get('MetricPurgeSweepSec', 3600))
 
+        _ptt_index_last_n = [-1]
+
+        def _sweep_ptt_index():
+            # 오늘 인덱스만 다시 만든다 — 지난 날짜 파일은 불변이라 손대지 않는다.
+            #   30초마다 도는 스위퍼라 세션 수가 바뀔 때만 남긴다(로그 오염 방지).
+            try:
+                if not ptt_index.enabled():
+                    return
+                n = ptt_index.sweep()
+                if n != _ptt_index_last_n[0]:
+                    logger.log_info(f"[ptt-index] today: {n} session(s)")
+                    _ptt_index_last_n[0] = n
+            except Exception as e:
+                logger.log_error(f"[ptt-index] error: {e}")
+
         def _sweep_metric_purge():
             try:
                 from handlers.agents import _metric_root
@@ -819,12 +841,14 @@ if __name__ == '__main__':
         logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
                         f"auto_resync={DRIFT_AUTO_RESYNC}")
         logger.log_info(f"[metric-purge] retain={METRIC_RETAIN_DAYS}d, interval={METRIC_PURGE_INTERVAL}s")
+        logger.log_info(f"[ptt-index] enabled={_ptt_index_enabled}, interval={PTT_INDEX_INTERVAL}s")
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
         _last_sync_txn_sweep = 0
         _last_drift_sweep = 0
         _last_metric_purge = 0
+        _last_ptt_index = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -846,6 +870,9 @@ if __name__ == '__main__':
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now
+            if _now - _last_ptt_index >= PTT_INDEX_INTERVAL:
+                _sweep_ptt_index()
+                _last_ptt_index = _now
 
     except Exception as e:
         tb_str = traceback.format_exc()

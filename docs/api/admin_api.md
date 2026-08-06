@@ -1178,6 +1178,71 @@ Authorization: Bearer <token>
   `.d` 디렉터리 카운트(readdir 만)로 집계해 call.json 읽기 없이 유지된다.
 - `participants`/`has_recording` 은 페이지 슬라이스에만 부착 (파일 I/O 최소화).
 
+### 11.1.1 PTT 세션 이력 조회
+
+PTT 는 축이 둘이다. **그룹**은 상시 편성 엔티티라 그룹 드릴다운(`/ptt/history`)이고,
+**세션**은 그 자체가 기록 단위라 평면 목록이다. 후자는 11.1 과 같은 계약을 쓴다 —
+1:1 private call·ad-hoc 은 그룹 문서가 없는 개별 호(TS 24.379 §11.1 / TS 22.179)라
+그룹으로 묶을 자리가 애초에 없다.
+
+```
+GET /api/v1/ptt/sessions?date=2026-08-06&kind=private,adhoc&limit=50
+```
+
+| 파라미터 | 설명 |
+|---|---|
+| `date` | YYYY-MM-DD (기본: 오늘) |
+| `from` / `to` | 기간 조회 (지정 시 `date` 무시, 최대 90일) |
+| `days` | 최근 N일 (`from`/`to` 없을 때) |
+| `kind` | `group`/`private`/`adhoc` 콤마 다중. 미지정 = 전체 |
+| `group_key` | 녹취 저장 키 콤마 다중 (`ptt/{key}`) — 그룹 세션을 좁힌다 |
+| `person` | 참여자 부분일치. 발언하지 않은 참가자도 포함 (`people[]` 기준) |
+| `state` | `live`(진행중) / `ended`(종료). 진행중은 페이징 없이 전량 받는 용도 |
+| `hour` | HH — **목록만** 그 시간대로 (`hours` 히스토그램은 유지) |
+| `q` | 발신·화자·상대·그룹명·`call_id`·`sesid`·세션키 부분일치 |
+| `sort` / `order` | `start`(기본)/`turns`/`speech`/`duration`/`speakers`, `desc`(기본)/`asc` |
+| `limit` / `offset` | 기본 200, 최대 1000 |
+
+**응답 200:** `{date, from, to, hour, state, sort, order, total, live_total, items[], hours{}}`
+
+```json
+{
+  "date": "2026-08-06", "hour": "", "state": "", "sort": "start", "order": "desc",
+  "total": 2, "live_total": 1, "hours": { "13": 2 },
+  "items": [
+    { "dir": "S20260806135230852083_1", "windows": ["2026080613"],
+      "sesid": "g001::csp::20260806135230852083::1", "call_id": "WCS…",
+      "initiator": "+82500000001", "people": ["+82500000001", "+82500000002"],
+      "speakers": ["+82500000001", "+82500000002"], "peers": [],
+      "start_time": "2026-08-06T13:52:30", "end_time": "2026-08-06T13:52:48",
+      "state": "ended", "segment_count": 3, "turn_count": 3, "speaker_count": 2,
+      "max_concurrent": 1, "total_speech_ms": 15231, "talk_ms": 15223,
+      "floor_control": "on", "floor_policy": "single", "max_talkers": 1,
+      "group_key": "1", "kind": "group", "mcptt_group_id": "g001",
+      "group_name": "음성그룹1", "group_type": "prearranged" }
+  ]
+}
+```
+
+- `dir` = **세션키** = 녹취 세션 디렉터리 이름(`S{ts}_{n}`). 세션 디렉터리 도입 이전 녹취는
+  `YYYYMMDDHH` 이며 그 버킷 하나가 세션 1건으로 읽힌다.
+- `windows[]` = 세션이 걸친 시간버킷. 통화가 시간을 넘겨도 행은 하나다.
+- `people[]` = 참여자(세션 스냅샷 멤버 ∪ 실제 화자 ∪ 개시자), `speakers[]` = 실제 발언자,
+  `peers[]` = 1:1·임시에서 개시자를 뺀 상대.
+- `hours` = 시간대별 세션 수. `hour` 를 뺀 나머지 필터는 반영한다 — "이 시간대를 고르면
+  몇 건이 남나" 가 이동의 근거이기 때문.
+- `live_total` = 필터 적용 후 진행중 세션 수 (`state` 필터 이전 값).
+- 상세·floor·flow·녹취는 같은 세션키로 조회한다:
+  `/api/v1/ptt/history/{group_key}/{dir}[/floor|/flow]`,
+  녹취 id = `ptt/{group_key}/{YYYY}/{MM}/{DD}/{HH}/{dir}`
+  (이어지는 버킷은 서버가 `seq` 로 찾아 붙인다 — 콘솔은 버킷을 몰라도 된다).
+
+> **읽기 모델.** 이 엔드포인트의 출처는 세션 인덱스
+> (`{ServiceLogDir}/ptt/index/YYYYMMDD.jsonl`, OAM `services/ptt_index`)다. 녹취
+> 디렉터리가 정본이고 인덱스는 파생물이라 지우면 다시 만들어진다. `oam.json` 의
+> `PttIndex.Enabled=false` 면 종전처럼 녹취를 직접 스캔한다(되돌리기 경로).
+> 진행중 세션은 인덱스에 없다 — 종료돼야 확정되므로 `state/ptt/*.json` 에서 실시간 도출한다.
+
 ### 11.2 호별 메시지 Flow 조회
 
 ```
