@@ -5,7 +5,7 @@
 ## 1. 역할
 
 1. **Enroll**: 최초 기동 시 enrollment 토큰으로 CSC 에 등록 → session 토큰 수령
-2. **Heartbeat**: 30초 주기로 CSC 에 상태 보고 + pending job 수령
+2. **Heartbeat**: 2초 주기(기본, `--heartbeat-sec`)로 CSC 에 상태 보고 + pending job 수령. OAM 불통 시 5→10→…→60초 지수 backoff 후 재시도
 3. **Job 실행**:
    - `install` / `upgrade`: 패키지 다운로드 + tar 풀기 + config 이관
    - `start` / `stop` / `restart`: `install_path/cims.sh` 호출
@@ -15,6 +15,10 @@
    - `rollback_agent`: `current` 를 직전(또는 지정) 버전 디렉토리로 flip → execv (다운로드 불요)
    - `health_check`: 포트 probe
 4. **Sync REST 서버** (HTTPS): CSC 가 collection(jsonl) 을 즉시 read/write 할 수 있게 REST 엔드포인트 노출
+5. **HA 로컬 판정**: Health Checker(모듈 생존·readiness·preflight) + Recovery Supervisor
+   (로컬 복구·재기동 정책·verdict 생성·역할 reconcile). keepalived 는 이 verdict 만 입력으로
+   받아 절체한다. 책임 분리·상태 모델·파일 레이아웃의 정본은
+   [../features/ha_service_model.md](../features/ha_service_model.md).
 
 ## 2. 운영 정책 (단일 systemd + linger)
 
@@ -23,6 +27,7 @@
 | die 시 자동 재기동 | systemd `Restart=always`, `RestartSec=10` |
 | host 재기동 시 자동 기동 | `loginctl enable-linger $USER` + unit `WantedBy=default.target` |
 | 1 user = 1 agent | unit 이름 단일 (`cims-agent.service`). 같은 호스트에 여러 agent 필요 시 별도 user (`cims2` 등) 로 install |
+| agent 재기동이 모듈에 무영향 | unit `KillMode=process` — agent 가 기동한 모듈(cims-svc & 백그라운드)은 unit cgroup 에 있지만 main process 만 kill. 모듈 lifecycle 은 pidfile 기반 cims-svc + watchdog 이 관리 (agent 는 감독자, 소유자 아님). update.sh 는 unit 을 유지하므로 기존 설치본은 agent 가 기동 시 drop-in(`cims-agent.service.d/10-cims-killmode.conf`)으로 자가 적용 |
 
 install 시점부터 systemd 로 운영한다.
 
@@ -129,7 +134,9 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 ### 10.1 Heartbeat / Metric (raw 시계열)
 
 - agent 는 기본 **2초** 주기로 heartbeat + metric 전송 (`DEFAULT_HEARTBEAT_SEC` / `DEFAULT_METRIC_SEC`).
-- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[]`.
+- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[] / cfg_hashes{} / ha_transitions{}`.
+  - `cfg_hashes` = {모듈: 배포 config.json canonical hash 12hex} — 설치 모듈 전체(중지 포함, `modules/<mod>/current/<mod>/config.json`, mtime 캐시). OAM `config_drift` 평가(`CIMS-CFG-001`) 입력.
+  - `ha_transitions` = {svc: 최근 10분 keepalived 전이 수} — `/var/log/cims-ha/notify_<svc>.log` tail 집계. OAM `ha_flap` 평가(`CIMS-QOS-001`) 입력. 미가독/부재 시 생략.
   - ⚠ OAM `agent_api.py _metric()` 가 record 를 필드 화이트리스트로 저장 — **신규 metric 필드는 화이트리스트 추가 필수**(미추가 시 버려짐). 조회는 `jsonl_tail_recent`(tail-read, 2초 시계열 풀파싱 금지).
 - OAM 가 `POST /metric` 수신 → `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` append.
 - retention: `_sweep_metric_purge` 가 `MetricRetentionDays`(기본 3일) 초과 일별 파일 삭제.
@@ -160,6 +167,8 @@ OAM `_sweep_alerts` 가 평가. 규칙은 service descriptor(`service_registry.a
 |---|---|---|---|
 | core | `disk_high` | disk_pct ≥ threshold(기본 90%) | online agent 별 |
 | core | `module_down` | deployment(status=running) 모듈이 metric 실행 집합에 없음 | online agent 별. `process_down` 규칙 대상(csp/cmp)은 제외 — 중복 방지 |
+| core | `config_drift` | metric.cfg_hashes[모듈] ≠ 배포기록 실체화본 hash | online agent 별, 배포(status=running/stopped) 단위. 미보고(구 agent) 시 미평가 — 오탐 없음 |
+| core | `ha_flap` | metric.ha_transitions[svc] ≥ threshold(기본 6회/10분) | online agent 별. flap 정지 시 윈도 만료로 자동 close |
 | service(CIMS) | `csp_down`/`cmp_down` | CSP/CMP stats 응답 없음 | 중앙 poll |
 | service(CIMS) | `db_down` | DB 연결 실패 | 중앙 |
 | service(CIMS) | `rtp_high` | RTP 포트 사용률 ≥ threshold | 중앙 |

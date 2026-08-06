@@ -29,7 +29,7 @@ _TB_PORTS = [
 ]
 _TARGET_PORTS = [
     (5060, "udp"), (5061, "tcp"), (9000, "udp"), (9001, "udp"),
-    (4420, "tcp"), (4421, "tcp"), (3001, "tcp"), (3002, "tcp"),
+    (4421, "tcp"), (3001, "tcp"), (3002, "tcp"),
     (8080, "tcp"), (8443, "tcp"),
 ]
 _CIMS_NATIVE_BINS = {"csp", "psp", "isp", "cmp", "pmp", "imp", "cspsim", "cwrtc"}

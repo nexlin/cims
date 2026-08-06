@@ -9,7 +9,7 @@ async def test_create_group():
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_context)
-    base_url = "https://localhost:4420"
+    base_url = "https://localhost:4421"
     headers = {'Authorization': 'Bearer dummy_token'} # Mock auth not fully checked for valid token in GMS yet, or use valid one?
     # Actually csc_service checks validate_access_token. I need a valid token.
     # So I must login first.
@@ -50,7 +50,7 @@ async def test_check_group():
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
     connector = aiohttp.TCPConnector(ssl=ssl_context)
-    base_url = "https://localhost:4420"
+    base_url = "https://localhost:4421"
 
     async with aiohttp.ClientSession(connector=connector) as session:
         # 1. Login (Need token again)

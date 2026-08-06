@@ -60,9 +60,8 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
 | `LocalPort` | int | 5060 | SIP UDP 포트 |
 | `AuthRealm` | string | "csp" | SIP Digest 인증 realm (서비스 도메인과 독립) |
 | `Realm` | array | — | 서비스별 도메인 배열 `[{"service":"volte"/"mcptt"/"system"/"console","domains":["..."]}]` |
-| `CmpIp` | string | "127.0.0.1" | CMP 서버 IP |
-| `CmpPort` | int | 9000 | CMP 제어 포트 |
-| `LocalCmpPort` | int | 9001 | CSP의 CMP 응답 수신 포트 |
+| `MediaServer.Endpoints` | array | — | CMP 노드 배열 `[{"ip":..,"port":9000}, ..]` (첫 행=primary, 2개 이상=All-Active 분배) |
+| `MediaServer.LocalPort` | int | 9001 | CSP의 CMP 응답 수신 포트 |
 | `DataFolder` | string | "../csp" | User/Group JSON 폴더 경로 |
 | `Database.Host` | string | "127.0.0.1" | MySQL 호스트 |
 | `Database.Port` | int | 3306 | MySQL 포트 |
@@ -81,9 +80,10 @@ CIMS는 6개 컴포넌트로 구성된 MCPTT/VoIP 서버 시스템입니다.
     { "service": "mcptt",  "domains": ["ptt.mnc001.mcc450.3gppnetwork.org"] },
     { "service": "system", "domains": ["csp"] }
   ],
-  "CmpIp": "192.168.0.2",
-  "CmpPort": 9000,
-  "LocalCmpPort": 9001,
+  "MediaServer": {
+    "Endpoints": [ { "ip": "192.168.0.2", "port": 9000 } ],
+    "LocalPort": 9001
+  },
   "DataFolder": "../csp",
   "Database": {
     "Host": "127.0.0.1",
@@ -264,16 +264,16 @@ wire 규격 정본은 [../api/cmp_media_api.md](../api/cmp_media_api.md) 다. �
 |------|-----|
 | 바이너리 | `python3 app.py` |
 | 설정 | `config/csc.json` |
-| Admin API 포트 | HTTPS 4420 |
+| Admin API 포트 | HTTPS 4421 |
 | MCPTT API 포트 | HTTPS 4430 |
 
 **서비스 구성:**
 
 | 포트 | 경로 | 서비스 |
 |------|------|--------|
-| 4420 | `/api/v1/auth/*` | 사용자 인증 (JWT) |
-| 4420 | `/api/v1/users/*` | 가입자/구독 관리 |
-| 4420 | `/api/v1/ptt/groups/*` | PTT 그룹 관리 |
+| 4421 | `/api/v1/auth/*` | 사용자 인증 (JWT) |
+| 4421 | `/api/v1/users/*` | 가입자/구독 관리 |
+| 4421 | `/api/v1/ptt/groups/*` | PTT 그룹 관리 |
 | 4430 | `/idms/*` | MCPTT IdMS (OAuth2 PKCE) |
 | 4430 | `/org.openmobilealliance.groups/*` | GMS (그룹 관리) |
 | 4430 | `/org.3gpp.mcptt.user-profile/*` | CMS (사용자 프로파일) |
@@ -328,7 +328,7 @@ wire 규격 정본은 [../api/cmp_media_api.md](../api/cmp_media_api.md) 다. �
 ### 3.1 사용자 등록 및 로그인
 
 ```
-브라우저                   CSC(4420)                    DB
+브라우저                   CSC(4421)                    DB
   │                         │                           │
   │── POST /auth/login ────►│                           │
   │   {                     │                           │
@@ -519,7 +519,7 @@ wire 규격 정본은 [../api/cmp_media_api.md](../api/cmp_media_api.md) 다. �
 ### 3.5 가입자 관리 Flow
 
 ```
-Console          CSC(4420)              DB                CSP
+Console          CSC(4421)              DB                CSP
   │                 │                    │                  │
   │── POST /users ──►│                   │                  │
   │  {name,login_id, │── INSERT INTO    │                  │
@@ -561,7 +561,7 @@ Console          CSC(4420)              DB                CSP
 | CSP | 9001 | UDP | CMP 응답 수신 |
 | CMP | 9000 | UDP JSON | CSP→CMP 제어 |
 | CMP | 50000-50079 | RTP/RTCP | 미디어 릴레이 (기본 설정) |
-| CSC | 4420 | HTTPS | Admin/Auth API |
+| CSC | 4421 | HTTPS | Admin/Auth API |
 | CSC | 4430 | HTTPS | MCPTT API (IdMS/GMS/CMS/KMS) |
 | cwrtc | 8080 | HTTP/WS | WebSocket + 정적 파일 |
 | cwrtc | 30000+ | DTLS-SRTP | 브라우저↔cwrtc 미디어 |
@@ -588,7 +588,7 @@ mysql -u cims -pcims1234 -e "SELECT 1" cims
 
 # 3. CSC (API 서버)
 cd csc/src && python3 csc_app.py
-# 확인: "HTTPS server on port 4420" + "HTTPS server on port 4430"
+# 확인: "HTTPS server on port 4421" + "HTTPS server on port 4430"
 
 # 4. cwrtc (WebRTC 브리지)
 ./bin/cwrtc config/cwrtc.json
@@ -608,7 +608,7 @@ cd csc/src && python3 csc_app.py
 ### 6.1 CMP 연결 실패
 
 **증상:** CSP 로그에 "CMP Disconnected" 반복
-**원인:** CMP가 실행되지 않았거나, CSP의 `CmpIp`/`CmpPort` 설정이 잘못됨
+**원인:** CMP가 실행되지 않았거나, CSP의 `MediaServer.Endpoints` 설정이 잘못됨
 **해결:**
 ```bash
 # CMP 프로세스 확인
@@ -617,8 +617,8 @@ ps aux | grep cmp
 # CMP 포트 확인
 ss -ulnp | grep 9000
 
-# CSP 설정 확인
-cat config/csp.json | grep -E "CmpIp|CmpPort"
+# CSP 설정 확인 (모든 endpoint 가 DEAD 여야 "CMP Disconnected" — 부분 장애는 로그에 endpoint DEAD 로만 표기)
+cat config/csp.json | grep -A6 MediaServer
 ```
 
 ### 6.2 SIP 등록 실패
@@ -673,11 +673,11 @@ grep "Floor RTCP" /path/to/cmp.log
 **해결:**
 ```bash
 # 그룹 설정 확인
-curl -k -X GET https://192.168.0.2:4420/api/v1/ptt/groups \
+curl -k -X GET https://192.168.0.2:4421/api/v1/ptt/groups \
   -H "Authorization: Bearer <token>" | python3 -m json.tool
 
 # video_enabled를 true로 변경
-curl -k -X PUT "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001" \
+curl -k -X PUT "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"video_enabled":true}'

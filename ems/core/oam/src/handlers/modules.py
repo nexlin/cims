@@ -152,6 +152,41 @@ def _template_field_map(template: dict) -> dict:
     return out
 
 
+def _endpoint_str_to_item(s: str, item_fields: list) -> dict:
+    """레거시 "host:port" 문자열 → { <field0>: host, <field1>: port }. ':' 없으면 전체를 첫 필드로."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    keys = [f.get("key") for f in item_fields]
+    types = [(f.get("type") or "string").lower() for f in item_fields]
+    item = {}
+    if ":" in s and len(keys) >= 2 and keys[1]:
+        host, _, port = s.rpartition(":")
+        if keys[0]:
+            item[keys[0]] = host
+        item[keys[1]] = int(port) if (types[1] == "int" and port.strip().lstrip("-").isdigit()) else port
+    elif keys and keys[0]:
+        item[keys[0]] = s
+    return item or None
+
+
+def _coerce_object_list(raw, item_fields: list) -> list:
+    """object_list 값을 dict 배열로 정규화. dict 배열은 그대로, 콤마문자열/문자열배열("ip:port")은 파싱."""
+    if isinstance(raw, str):
+        return [x for x in (_endpoint_str_to_item(p, item_fields) for p in raw.split(",")) if x]
+    if isinstance(raw, list):
+        out = []
+        for e in raw:
+            if isinstance(e, dict):
+                out.append(e)
+            elif isinstance(e, str):
+                x = _endpoint_str_to_item(e, item_fields)
+                if x:
+                    out.append(x)
+        return out
+    return []
+
+
 def _coerce_value(field: dict, raw):
     """template field type 에 맞게 값을 강제 변환. 실패 시 (None, 에러메시지) 반환."""
     t = (field.get("type") or "string").lower()
@@ -188,6 +223,10 @@ def _coerce_value(field: dict, raw):
         if not isinstance(raw, list):
             return (None, "not_list")
         return ([str(x) for x in raw], None)
+    if t == "object_list":
+        # 구조화 항목 배열. dict 배열은 그대로 통과, 레거시 콤마문자열/["ip:port"] 는 [{...}] 로 정규화.
+        item_fields = (field.get("item_schema") or {}).get("fields") or []
+        return (_coerce_object_list(raw, item_fields), None)
     # string / password / path / 기타 → 문자열
     if not isinstance(raw, str):
         return (None, "not_string")

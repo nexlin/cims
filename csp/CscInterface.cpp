@@ -6,6 +6,7 @@
 #include "CallMap.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
+#include "CspLocalNodeMap.h"
 #include "CspRouteMap.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
@@ -83,13 +84,25 @@ void CCscInterface::ListenerLoop() {
     setsockopt( m_iServerSock, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof( opt ) );
 
     serverAddr.sin_family = AF_INET;
-    // host-specific bind — 같은 host 의 여러 csp 인스턴스 (CSP/PSP/ISP) 가 4421 을
-    // 0.0.0.0 wildcard 로 점유하면 SO_REUSEADDR 로 충돌은 안 나지만 UDP packet
-    // routing 비결정적 (kernel 이 어느 socket 에 deliver 할지 모호). gclsSetup
-    // 의 LocalIp 가 명시 IP (예: PSP=127.0.0.3) 면 그 IP 로 bind 해서 destination
-    // IP 매칭으로 정확한 라우팅 보장. LocalIp 가 0.0.0.0/공백이면 INADDR_ANY 유지.
-    if ( !gclsSetup.m_strLocalIp.empty() && gclsSetup.m_strLocalIp != "0.0.0.0" ) {
-        serverAddr.sin_addr.s_addr = inet_addr( gclsSetup.m_strLocalIp.c_str() );
+    // bind IP 는 primary local_node 의 bind_ip "원문" 기준. gclsSetup.m_strLocalIp 는
+    // 기동 시 0.0.0.0 이 실IP 로 치환된 값 (CspServer R1 주입) 이라 그걸로 판단하면
+    // HA 운용 (bind_ip=0.0.0.0 + keepalived VIP) 에서 실IP 에만 bind 되어 VIP:4421
+    // 수신이 안 된다 (oam-svc STATS probe 오탐).
+    //  - 빈값/0.0.0.0/:: → INADDR_ANY: 실IP·VIP 모든 destination 수신 (SIP 리스너와 동일 규칙)
+    //  - 명시 IP (예: PSP=127.0.0.3) → 그 IP: 같은 host 의 여러 csp 인스턴스 (CSP/PSP/ISP)
+    //    가 공유하는 4421 을 destination IP 매칭으로 정확히 라우팅
+    // primary 미존재 시 (CspServer 가 기동 시 fail-fast 라 정상 경로에선 도달 불가)
+    // 기존 동작대로 gclsSetup.m_strLocalIp 를 사용.
+    std::string strBindIp = gclsSetup.m_strLocalIp;
+    LocalNodeInfo clsPrimary = gclsLocalNodeMap.GetPrimary();
+    if ( clsPrimary.IsValid() ) strBindIp = clsPrimary.bind_ip;
+
+    if ( !strBindIp.empty() && strBindIp != "0.0.0.0" && strBindIp != "::" ) {
+        serverAddr.sin_addr.s_addr = inet_addr( strBindIp.c_str() );
+        if ( serverAddr.sin_addr.s_addr == INADDR_NONE ) {
+            CLog::Print( LOG_ERROR, "CscInterface: invalid bind ip [%s] — fallback INADDR_ANY", strBindIp.c_str() );
+            serverAddr.sin_addr.s_addr = INADDR_ANY;
+        }
     } else {
         serverAddr.sin_addr.s_addr = INADDR_ANY;
     }
@@ -102,7 +115,8 @@ void CCscInterface::ListenerLoop() {
 
     // No Listen for UDP
 
-    CLog::Print( LOG_INFO, "CscInterface: UDP Listener Started..." );
+    CLog::Print( LOG_INFO, "CscInterface: UDP Listener Started (bind=%s:%d)", inet_ntoa( serverAddr.sin_addr ),
+                 m_iPort );
 
     char buffer[4096];
     struct sockaddr_in clientAddr;

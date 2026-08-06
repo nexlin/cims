@@ -588,7 +588,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--target", choices=["verify", "prod"], default="verify",
         help="배포 환경 — verify(default, csc=4445/console=8081) 또는 "
-             "prod(csc=4420/console=80). csp/cmp 포트는 두 환경 동일.",
+             "prod(csc=4421/console=80). csp/cmp 포트는 두 환경 동일.",
     )
     p_run.add_argument(
         "--only-children",

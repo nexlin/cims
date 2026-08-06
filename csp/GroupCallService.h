@@ -67,6 +67,11 @@ public:
     void StopMonitor();
     void OnCmpStatusChanged( bool bConnected );
     bool OnCallTerminated( const std::string &strCallId );
+
+    /** 미디어 노드(CMP) 다운으로 relay 가 소실된 그룹의 활성 멤버 호를 능동 종료(BYE)하고 로컬 상태를
+     *  정리한다. dead node 이므로 CmpClient(LeaveGroup/RemoveGroup, blocking)는 호출하지 않는다.
+     *  종료한 멤버 호 수를 반환. */
+    int TerminateGroupLocal( const std::string &strGroupId );
     void OnCallStarted( const std::string &strCallId, const std::string &strRemoteIp, int iRemotePort,
                         int iRemoteFloorPort = 0, int iRemoteVideoPort = 0, class CSipCallRtp *pclsRtp = NULL );
 

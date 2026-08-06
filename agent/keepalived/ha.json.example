@@ -16,7 +16,7 @@
   "cims_user":  "cims",
 
   "services": {
-    "csc": { "enabled": true, "vrid": 51, "vip": "10.0.0.100", "priority": 100, "port": 4420, "proto": "tcp" },
+    "csc": { "enabled": true, "vrid": 51, "vip": "10.0.0.100", "priority": 100, "port": 4421, "proto": "tcp" },
     "csp": { "enabled": true, "vrid": 52, "vip": "10.0.0.101", "priority": 100, "port": 5060, "proto": "udp" },
     "psp": { "enabled": true, "vrid": 53, "vip": "10.0.0.102", "priority": 100, "port": 5060, "proto": "udp", "bind_ip": "" }
   }

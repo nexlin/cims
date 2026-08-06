@@ -21,15 +21,24 @@ _ha_check_config() {
     return 0
 }
 
+# cims-health/cims-notify 스테이징 경로 — `cims-ha apply` 가 root:root 로 복사.
+# 버전 디렉토리(agent/<ver>/bin) 대신 이 고정 경로를 keepalived.conf 가 참조 —
+# agent 업그레이드(current flip)에 안전 + enable_script_security(root 소유 요구) 통과.
+HA_STAGE_BIN="/etc/keepalived/bin"
+
 # 단일 keepalived.conf.tpl + ha.json.services 반복 → out/keepalived.conf
 _ha_render_keepalived() {
     local out="$1"
+    # 템플릿은 실행 중인 번들(cims-ha 와 같은 버전 트리)이 정본. --ha-dir 로 ha.json
+    # 위치가 분리된 경우(agent 의 update_ha job — run/keepalived/) 그 디렉토리에는
+    # 템플릿이 없으므로 번들 fallback 이 필수.
     local tpl="$HA_DIR/keepalived.conf.tpl"
-    [[ ! -f $tpl ]] && { err "템플릿 없음: $tpl"; return 1; }
+    [[ ! -f $tpl ]] && tpl="$SCRIPT_DIR/../keepalived/keepalived.conf.tpl"
+    [[ ! -f $tpl ]] && { err "템플릿 없음: $HA_DIR 및 $SCRIPT_DIR/../keepalived"; return 1; }
 
-    python3 - "$HA_JSON" "$tpl" "$HA_DIR" "$out" <<'PY'
+    python3 - "$HA_JSON" "$tpl" "$HA_STAGE_BIN" "$out" <<'PY'
 import json, re, sys
-ha_json, tpl_path, ha_dir, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+ha_json, tpl_path, bin_dir, out_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 cfg = json.load(open(ha_json))
 
 required_top = ["node_name", "interface", "local_ip", "peer_ip", "initial_state",
@@ -72,7 +81,7 @@ common = {
     "INITIAL_STATE": cfg["initial_state"],
     "VIP_MASK":      str(cfg["vip_mask"]),
     "AUTH_PASS":     cfg["auth_pass"],
-    "HA_DIR":        ha_dir,
+    "BIN_DIR":       bin_dir,
     "CIMS_HOME":     cfg.get("cims_home", "/opt/cims"),
     "CIMS_USER":     cfg.get("cims_user", "cims"),
 }
@@ -287,29 +296,64 @@ cmd_ha() {
             local unit="$HA_OUT/cims@.service"
             [[ ! -f $out ]] && { err "config 미생성: $out — 먼저 'cims-ha config' 실행"; return 1; }
             [[ ! -f $unit ]] && { err "unit 미생성: $unit"; return 1; }
+            # 변경 감지 — 스테이징 대상 5종이 기존 적용본과 전부 동일하면 keepalived
+            # 무접촉. 배포/서비스(start/stop) 이벤트마다 재렌더가 전파되므로 apply 가
+            # 멱등이어야 잦은 호출이 VRRP 상태(MASTER/VIP)를 흔들지 않는다.
+            local _hachanged=0 _pair _src _dst
+            for _pair in "$out:/etc/keepalived/keepalived.conf" \
+                         "$HA_JSON:/etc/keepalived/ha.json" \
+                         "$SCRIPT_DIR/cims-health:$HA_STAGE_BIN/cims-health" \
+                         "$SCRIPT_DIR/cims-notify:$HA_STAGE_BIN/cims-notify" \
+                         "$unit:/etc/systemd/system/cims@.service"; do
+                _src="${_pair%%:*}"; _dst="${_pair#*:}"
+                cmp -s "$_src" "$_dst" 2>/dev/null || { _hachanged=1; break; }
+            done
+
+            # health/notify 스크립트 + ha.json 스테이징 — root:root 고정 경로.
+            #   · conf 의 script/notify 가 ${HA_STAGE_BIN} 을 참조 (버전 트리 비의존)
+            #   · root 소유 + group-write 없음 → enable_script_security 통과
+            #     (agent 배포 트리는 비-root 소유라 keepalived 가 "insecure" 로 비활성화)
+            #   · cims-health 는 자기 위치 기준 ../ha.json lookup → 함께 스테이징
+            info "health/notify 스크립트 스테이징: $HA_STAGE_BIN (root:root)"
+            sudo install -d -m 755 -o root -g root /etc/keepalived "$HA_STAGE_BIN"
+            sudo install -m 755 -o root -g root \
+                "$SCRIPT_DIR/cims-health" "$SCRIPT_DIR/cims-notify" "$HA_STAGE_BIN/"
+            sudo install -m 644 -o root -g root "$HA_JSON" /etc/keepalived/ha.json
             info "/etc/keepalived/keepalived.conf 적용 — sudo 권한 필요"
             sudo cp "$out" /etc/keepalived/keepalived.conf
             info "/etc/systemd/system/cims@.service 적용"
             sudo cp "$unit" /etc/systemd/system/cims@.service
             sudo systemctl daemon-reload
-            # enable per-instance — start 는 keepalived notify 가 제어 (cold-spare)
-            local svc enabled_svcs
-            enabled_svcs=$(_ha_enabled_services)
-            for svc in $enabled_svcs; do
-                info "systemctl enable cims@${svc}.service"
-                sudo systemctl enable "cims@${svc}.service"
-            done
-            # 옛 slug 의 enable 심볼릭링크 잔재 제거 (예: 재구성으로 svc 이름이 바뀐 경우)
-            _ha_prune_stale_instances $enabled_svcs
+            # cims@ instance enable 하지 않음 — 절체 시 모듈 제어는 cims-notify 가
+            # ha.json services.<svc>.cold_modules 를 보고 cims-svc 로 직접 수행
+            # (systemd 유닛 경유 폐지 — 그룹명 slug 가 lifecycle 모듈명과 달라 항상
+            # 실패하던 경로. 단일 lifecycle 경로로 일원화). 옛 enable 잔재는 전부 정리.
+            _ha_prune_stale_instances
             # VIP 를 보유하지 않은 BACKUP 노드도 VIP 로 bind 가능해야 fail-over 즉시 처리
-            # (Hot Standby — Standby 도 모듈 기동 유지). private 환경: apt/외부 의존 없이
+            # (hot 모듈 — standby 도 기동 유지 — 이 VIP 로 listen 하는 경우). private 환경: apt/외부 의존 없이
             # sysctl 로 직접 설정 + /etc/sysctl.d 영구화. agent 가 sudo 로 cims-ha 를 실행하므로
             # 별도 수동 sudo 불요 — "HA install/update(apply) 시 자동" 충족.
             info "net.ipv4.ip_nonlocal_bind=1 설정 (VIP backup bind 전제)"
             echo 'net.ipv4.ip_nonlocal_bind = 1' | sudo tee /etc/sysctl.d/99-cims-ha.conf >/dev/null
             sudo sysctl -w net.ipv4.ip_nonlocal_bind=1 >/dev/null 2>&1 || true
-            sudo systemctl restart keepalived
-            ok "keepalived + systemd unit + ip_nonlocal_bind 적용 완료 (services start 는 keepalived notify 가 제어)"
+            # enabled 인스턴스 0개 (전 서비스 disabled — 미개시 그룹/배포 없는 멤버) 이면
+            # 정지 유지 — vrrp_instance 없는 conf 로 systemctl restart 하면 keepalived 가
+            # 기동 완료를 알리지 못해 60초+ hang (agent job timeout → heartbeat 끊겨
+            # offline 오판). 인스턴스가 있으면: 변경 없음 → 무접촉 / 변경 → 가동 중이면
+            # reload (VRRP 상태 유지 — restart 는 MASTER 를 내렸다 올려 무의미한 절체 유발)
+            # / 정지 상태면 start.
+            if ! grep -q '^vrrp_instance' /etc/keepalived/keepalived.conf; then
+                sudo systemctl stop keepalived 2>/dev/null || true
+                ok "vrrp_instance 없음 — keepalived 정지 상태 유지 (서비스 개시/인스턴스 렌더 시 자동 기동)"
+            elif [[ $_hachanged -eq 0 ]] && systemctl is-active --quiet keepalived; then
+                ok "변경 없음 — keepalived 무접촉 (이미 적용된 구성)"
+            elif systemctl is-active --quiet keepalived; then
+                sudo systemctl reload keepalived
+                ok "keepalived reload — 구성 변경 반영 (VRRP 상태 유지, cold_modules 절체는 cims-notify → cims-svc)"
+            else
+                sudo systemctl start keepalived
+                ok "keepalived 기동 + ip_nonlocal_bind 적용 완료 (cold_modules 절체는 cims-notify → cims-svc)"
+            fi
             ;;
         start)  sudo systemctl start  keepalived ;;
         stop)   sudo systemctl stop   keepalived ;;

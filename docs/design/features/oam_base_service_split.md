@@ -32,7 +32,11 @@
 
 ### 불변식 (보존)
 - **I1. 단일 공개 오리진** — 브라우저/관제는 오직 **base OAM 4419(HTTPS)** 만 본다. 서비스 모듈은
-  **loopback(127.0.0.1) 비공개 포트**. CORS·방화벽 포트 추가 없음, nginx 재도입 없음.
+  게이트웨이만 접근하는 **비공개 upstream** — 동거 배치는 loopback(127.0.0.1, 기본),
+  모듈이 base 와 다른 호스트에 배치되면(분리 토폴로지) 운영자가 그 모듈 배포 설정
+  `Server.GatewayHost` 에 그룹 VIP(권장)/노드 IP 를 명시해 게이트웨이가 그 주소로 프록시
+  (self-register/설정 저장 시 자동 재등록, HA 절체는 VIP 가 추종). CORS·방화벽 공개 포트
+  추가 없음, nginx 재도입 없음.
 - **I2. 콘솔 정적 자산은 base 가 전부 서빙** — 셸 + 전 위젯 청크. 서비스 모듈은 API 만 담당.
 - **I3. 의존 방향 단방향** — service → base(인증/형상 조회) 허용, **base → service 의존 금지**.
   서비스 모듈 부재 시 base 정상 동작(해당 서비스 라우트만 503/404).
@@ -308,15 +312,23 @@ base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에
 배포 overlay(`config.json`) 또는 로컬/TB 설정(`oam-tb.json` 등)으로 제공한다 — 레포 `oam.json`
 에는 두지 않는다.
 
-`MediaServer.Endpoints`(type `string_list`)는 `"ip:port"` **배열**로 저장·소비된다. 콘솔
-입력의 콤마 문자열은 배열로 정규화되는데, 세 지점에서 보장한다: (1) 콘솔 위젯(deployment 모드
-`ModuleConfigModal`·모듈 모드 `ModuleConfigEditor` 둘 다 콤마↔배열), (2) 백엔드 coerce
-(`_put_deployment_config` list-coerce + 모듈 모드 `_coerce_value`), (3) 소비자
-(`stats._media_endpoints` 가 최상위 문자열도 콤마 분해). 원소는 `"ip:port"` 문자열과
-`{ip,port}` dict 를 모두 허용한다. **CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
+`MediaServer.Endpoints`(type `object_list`, `item_schema.fields = [{ip:string}, {port:int}]`)는
+`[{ip,port}, ..]` **배열**로 저장·소비된다. 콘솔은 공용 `ObjectListEditor`(ip/port 행 + `＋`로 추가,
+최소 1행)로 편집한다(`ModuleConfigModal`·`ModuleConfigEditor` 공유). 레거시 콤마 문자열
+`"ip:port, .."`/`["ip:port"]` 도 세 지점에서 `[{ip,port}]` 로 정규화·수용한다: (1) 콘솔 위젯
+(`ObjectListEditor` 가 로드 시 `"host:port"` → `{ip,port}` 변환), (2) 백엔드 coerce
+(`agents._coerce_list_fields` + 모듈 모드 `modules._coerce_value` 의 `object_list` 분기 =
+`_coerce_object_list`), (3) 소비자(`stats._media_endpoints` 가 문자열/`{ip,port}` dict 모두 수용).
+**CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
 health 위젯은 전 노드 probe 집계(up = any 노드 응답, 카운터는 합산)이고, 알람 sweeper 의
 `process_down(target=cmp)` 는 endpoint 마다 `mo_instance='cims/cmp/<ip>:<port>'` 로 개별
 발화한다. `Endpoints`/`CmpIp` 미설정이면 CMP 관측 비활성(cmp 계열 규칙 skip).
+
+> **주의 — 이름은 같지만 평면이 다르다.** 여기 oam-svc 의 `MediaServer.Endpoints` 는 **관측(STATS
+> probe)** 전용이다. CSP 가 실제 relay 세션을 CMP 들에 분배하는 **데이터 평면** 설정은 별개의
+> `Setup.MediaServer.Endpoints`(csp `config_template.json`, C++ `SipServerSetup`/`CmpClient` 소비)이며
+> 표현형(`object_list [{ip,port}]`)과 편집 위젯은 동일하다. 둘은 독립 설정이므로 다중 CMP 운영 시 양쪽에
+> 같은 노드 목록을 넣는다. CSP 데이터평면 상세는 modules/csp.md §3.6.
 
 ### file_store 소유권 (I5)
 | 도메인/컬렉션 | 소유 |
@@ -378,7 +390,7 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 | 구성 | 내용 |
 |---|---|
 | 역할 플래그 | `oam_app.py --role {base\|all}`(기본 `all`). `all`=단일프로세스(하위호환), `base`=게이트웨이 프록시 마운트. stats 함수 단위 분리(`handle_stats_service`/`/api/v1/stats/service`). |
-| 게이트웨이 | `handlers/gateway.py`: file_store `control/gateway_routes` 라우트 테이블 + aiohttp 프록시(method/body/query/header 화이트리스트 passthrough·ETag/304·Content-Disposition 보존·RFC8594 Deprecation/Sunset·loopback 업스트림 강제 I1) + self-register API `/api/v1/gateway/routes`. |
+| 게이트웨이 | `handlers/gateway.py`: file_store `control/gateway_routes` 라우트 테이블 + aiohttp 프록시(method/body/query/header 화이트리스트 passthrough·ETag/304·Content-Disposition 보존·RFC8594 Deprecation/Sunset) + self-register API `/api/v1/gateway/routes`. upstream host = 배포 설정 `Server.GatewayHost`(운영자 명시, 분리 배치 시 그룹 VIP/노드 IP) → 미지정 시 loopback. https upstream 은 TLS 검증 스킵(self-signed 전제). 라우트 lifecycle: 배포 생성 시 등록, **같은 process 의 마지막 배포 삭제 시에만 deregister**(AS 피어 잔존 시 유지), 개별 배포/그룹 공통 설정 저장으로 실효 host/port 가 바뀌면 재등록, 기동 시 배포↔테이블 정합 self-heal(`reconcile_routes_from_deployments` — 빠진 세그먼트 복구). |
 | 설정 분리 | `common.json`/`base.json`(`load_config` 비파괴 fallback, `.sample` 동봉). |
 | csc 프록시 | csc 가입자 API 는 게이트웨이 프록시(D3). `--role base` 에서 D8 `/me` 분리(base 가 `/api/v1/users/me` 직접, 나머지 `/users/*`·`/users/import`·`/ptt/groups`·`/organizations` 는 csc 프록시, admin 4421/TCP). loopback-https 업스트림 TLS 검증 스킵(self-signed). **분리 배포는 모듈간 JwtSecret 통일 필수**(common.json §5). |
 | svc-mgmt | 독립 모듈 `svc-mgmt/src/svc_mgmt_app.py`(stats/service·recording·flow·verification, loopback 4480, `--preflight`, common.json+services/svc-mgmt.json 로드) + 게이트웨이 svc-mgmt 라우트 + agent `lifecycle.sh start_svc_mgmt/stop_svc_mgmt`(`all` 미포함, 명시 기동만). |
@@ -461,15 +473,26 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
   모듈 테이블 컬럼 **"이름"·"설명"**.
 - `csc/pkg.json`·`oam-svc/pkg.json` `description`: csc=가입자·조직·인증·MCPTT(XCAP), 이력/통계/녹취=oam-svc.
 
-### 14.2 설정 편집 일원화 — 개별 서버의 패키지 설정 탭
-- **모든 설정 편집은 개별 서버(멤버) 선택 → [패키지 설정] 탭에서 한다.** scope 별 편집 트랙
-  분리(그룹=service / 서버=system)는 없다 — `ModuleConfigModal` 이 전 섹션·컬렉션을 항상 편집
-  가능하게 노출하고, HA 정합은 필드별 동기화(§14.6)가 담당한다.
-- config_template `scope` 의 역할: **service=동기화 체크 기본 ON**(그룹 공통 권장) /
-  **system=기본 OFF**(노드별 고유값). 편집 위치를 가르지 않고 전파 기본값만 가른다.
-- 그룹 선택 → [패키지 설정] 탭은 **읽기 전용 비교 뷰**(`GroupConfigCompareView`) — 멤버별
-  설정값을 나란히 비교(동기화+동일=정상 / 동기화+상이=드리프트 경고 / 비동기=개별),
-  셀 클릭 시 해당 서버의 편집 화면으로 점프. 그룹 단위 편집기(`GroupServiceConfigModal`)는 없다.
+### 14.2 설정 편집 — 공통은 그룹 탭, 개별은 서버 탭
+설정의 편집 창구가 유효 scope 로 갈린다. **유효 scope = `field.scope ?? section.scope
+?? "service"`** — 섹션 안에 공통값·노드별 값이 섞이면 필드에 scope 를 줘 오버라이드한다
+(예: csp `media_server` 는 service 지만 `Setup.MediaServer.LocalIp` 는 system).
+프론트 `effectiveScope`(`deployment.ts`)·`serviceScopeKeys`·`sectionForScope`
+(`ModuleConfigModal.tsx`)와 백엔드 `_effective_scope`/`_service_scope_keys`(`agents.py`)가
+같은 규칙을 공유한다.
+
+- **AS 그룹의 공통(service) 설정·컬렉션 = 그룹 탭이 유일한 편집 창구.** 그룹 선택 →
+  [패키지 설정](`GroupConfigCompareView`) → 패키지별 탭 → [공통 설정] 편집 폼 +
+  공통 컬렉션 탭 + [멤버 비교] 표 + **동기화 스위치**(§14.6).
+- **AS 그룹 멤버 서버의 [패키지 설정] 탭(`ModuleConfigModal`) = 서버 개별(system)
+  설정·컬렉션만 노출.** 공통 필드는 화면에 없으며, 안내 배너가 그룹 탭으로 유도한다.
+  저장은 항상 그 서버에만 적용(`PUT /deployments/{id}/config` — 전파 없음).
+- **AA 그룹·standalone 은 동기화 개념이 없다** — 서버 화면에서 전체 섹션·컬렉션 편집.
+  AA 그룹의 그룹 탭은 [멤버 비교] 표만 제공(정보성 드리프트 표시).
+- `_infra`(Infrastructure) 섹션은 **전부 서버 개별(system)** — 배포 시 configure.sh 가
+  `deploy_value` 로 자동 주입하는 서버별 인프라 값이므로 그룹 공통 화면에 노출하지
+  않고, 서버 화면의 접힌 "인프라" 블록으로만 보인다. (시크릿 등 멤버 간 동일해야
+  하는 인프라 값은 배포 시 자동 주입이 정합을 담당 — §14.3 JwtSecret 주입.)
 
 ### 14.3 설치 전(pending) 배포도 설정 가능
 - 설정 탭(`AgentConfigTab`)은 `pending` 배포도 포함 → 설치 전에
@@ -490,29 +513,67 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 - `_dt(val)` 는 file_store 의 ISO 문자열에 대해 `hasattr(val,"isoformat")` 가드 후 변환
   (동일 버전 재업로드 409 conflict 응답 직렬화 시 500 방지, `ems/core/oam/src/handlers/agents.py`).
 
-### 14.6 필드 단위 HA 동기화 (config sync)
-설정 저장의 HA 전파는 **필드 단위 opt-in** 이다 — 그룹 통짜 전파 없음.
+### 14.6 HA 자동 동기화 — 스위치 + ACTIVE→STANDBY 자동 교정
+AS 그룹의 공통 설정 정합은 **그룹×패키지 단위 동기화 스위치**(기본 ON)와 **자동 교정
+데몬**이 담당한다. 저장 API 자체에는 HA 전파가 없다.
 
-**API 계약** (`PUT /api/v1/deployments/{id}/config`, `agents.py _put_deployment_config`):
-- `sync_keys?: string[]` — 피어 deployment 에 merge 할 키 목록(= **변경∩동기화체크**).
-  부재=레거시(피어에 values 통짜 — 구 클라이언트 호환) · `[]`=피어 무변경.
-- `sync_checked?: string[]` — 체크 상태 전체. 저장 성공 시 `ha_group.config_sync[package_name]`
-  에 영속(부재 시 미갱신). 콘솔 UI 복원용 메타 — keepalived/update_ha 와 무관.
-- 요청 dep 은 values 를 overlay 전체로 저장(기존 계약), **피어만** `{**peer.config, **subset}`
-  부분 merge → 피어 고유 설정(SystemId·LocalIp 등) 보존.
-- 전파 대상 그룹은 **요청 dep 의 agent 가 멤버로 소속된 그룹으로 한정**(동일 패키지 다중 그룹
-  오전파 방지). update_config job 의 config 는 **target 별 overlay 로 각각 실체화**.
-- `GET /deployments/{id}/config` 응답에 `ha` block: `{group_id, group_name, mode,
-  sync_keys(=config_sync[pkg] | null), members[]}` — standalone 이면 null.
+**실측 ACTIVE 판정** (`ha_lookup.vip_observation`):
+- agent 가 heartbeat(기본 2s 주기)로 보고하는 `interfaces[]`(secondary IP 포함)에 그룹
+  VIP(`vip_bindings[].ip ∪ vip`)가 붙은 멤버를 찾는다 — agent 수정 없이 기존 데이터 소비.
+- **비-stale**(heartbeat ≤90s) 멤버 중 **정확히 1명**이 보유할 때만 ACTIVE 확정.
+  0명(VIP 이동 중)·2명(절체 직후 관측 창)·전원 stale → 판정 불가(None).
+- `GET /ha-groups` 응답에 `active_agent_id` + 멤버별 `vip_observed`(true/false/null) —
+  콘솔 뱃지(`● ACT`/`○ SBY`)가 정적 role 과 별개로 실제 절체를 표시 — 지연은
+  agent heartbeat(2s) + 콘솔 폴링(10s) ≈ 최대 12초.
+  ServersPage 의 [🔄 실측](sync health-check)은 즉시 재확인용으로 존치.
 
-**콘솔 UX** (`ModuleConfigModal`):
-- HA 그룹 멤버의 필드마다 **🔗 동기화 체크박스**. 체크+값 변경+저장 = 그룹 멤버 전체에 그 값
-  반영, 해제 = 이 서버만. standalone 은 체크박스 없음(항상 `sync_keys:[]` 전송).
-- 기본값: 영속값(`config_sync[pkg]`) 있으면 복원, 없으면 **scope=service 섹션 필드 = ON**.
-- 체크됐지만 값이 안 바뀐 필드는 전파하지 않는다(최소 놀람) — 잔여 드리프트는 그룹 비교 뷰
-  (§14.2)가 경고로 노출하고, 기준 서버에서 해당 필드 재저장으로 해소한다.
-- 동시 편집은 키 단위 last-write-wins (피어 read→merge→save 사이 창은 수용).
-- RBAC: config PUT 은 operator — `config_sync` 기록은 그 저장의 파생 상태라 ha-groups
-  PUT(admin) 을 경유하지 않고 백엔드가 직접 기록한다.
-- **컬렉션(jsonl)은 이 모델 밖** — 종전대로 백엔드 scope 기반 자동 전파(`should_propagate`)
-  + drift 감지. 서버 화면에서 항상 편집 가능(그룹 전용 잠금 없음).
+**동기화 스위치** (`PUT /ha-groups/{gid}/packages/{pkg}/auto-sync {enabled}`, operator):
+- `ha_group.auto_sync[pkg]` 영속, **부재 = ON**. AS 그룹만 존재(AA/standalone 은 없음).
+- ON 전환 시 즉시 정합 1회(`reconcile_group_package`) — 판정 불가·버전 혼재면 보류 사유를
+  응답에 담고 스위퍼가 조건 충족 시 자동 재시도.
+
+**자동 교정** (`agents.py reconcile_group_package` — oam_app `[auto-sync]` 스위퍼가 주기
+실행, 기본 60s / 컬렉션은 매 5라운드):
+- 대상: AS 그룹 × 스위치 ON 패키지. **ACTIVE 멤버의 overlay 를 기준으로** STANDBY 의
+  유효 scope=service 키를 merge, ACTIVE 에 없는 service 키는 제거(기본값 복귀) →
+  STANDBY 의 유효 공통값이 ACTIVE 와 정확히 일치. scope=system 키는 절대 건드리지 않음.
+- scope=service 컬렉션도 ACTIVE records 기준 복사(hash 동일 시 PUT 생략).
+- 교정 시 target 별 update_config job + `sync_txn(op=auto_sync)` — 이력 조회 가능.
+- **안전 원칙 — 애매하면 복사하지 않는다**: 스위치 OFF·ACTIVE 판정 불가 → skip,
+  버전 불일치 target → deferred(버전이 같아지는 다음 라운드에서 자동 정합).
+- 즉시 트리거: 스위치 ON 전환, upgrade/start/restart job 성공(agent_api `_report` 훅 —
+  롤링 업그레이드 마지막 단계에서 STANDBY 가 같은 버전으로 올라오는 순간 자동 복사).
+- 스위퍼는 확정 ACTIVE 변화(절체)를 로그로 기록한다.
+
+**그룹 공통 설정 저장** (`PUT /ha-groups/{gid}/packages/{pkg}/config`, `ha_groups.py
+_put_group_pkg_config`, operator):
+- body = `{values, target_deployment_id?, queue_update?}` — values 는 유효 scope=service
+  키만(그 외 400 `non_service_keys`).
+- **스위치 ON**: target 없이 호출 — 전 멤버 overlay 에 merge + 멤버별 update_config job
+  (+`sync_txn(op=group_config)`). 버전 혼재면 409(스위치 OFF 후 멤버별 편집 유도).
+  target 지정은 400 — ON 상태의 멤버별 저장은 자동 교정이 곧 되돌리므로 배제.
+- **스위치 OFF**: `target_deployment_id` 필수 — 그 멤버에만 저장(업그레이드 창에서 새
+  버전 멤버의 설정 경로).
+
+**단일 서버 저장 API** (`PUT /deployments/{id}/config` / `.../collection/{name}`):
+- 항상 해당 deployment 에만 저장 + job 1건. 구 body 필드(`sync_keys`/`sync_checked`/
+  `propagate_to_ha_peers`)는 어떤 값이 와도 무시 — 피어에는 절대 쓰지 않는다.
+- `POST /deployments/{id}/sync`(방향성 복사 — 멤버십·버전 가드, service 마스크)는
+  자동 교정·그룹 컬렉션 즉시 전파의 내부 엔진으로 유지.
+- `GET /deployments/{id}/config` 응답 `ha` block: `{group_id, group_name, mode,
+  members[{deployment_id, agent_id, agent_name, package_version}]}` — standalone 이면
+  null. 콘솔이 "AS 멤버 = 개별 설정만" 판단에 사용.
+
+**드리프트 감시**: 그룹 탭 [멤버 비교]의 필드 비교, 컬렉션 GET 의 멤버 hash 비교,
+`drift_sweeper`(주기 감시·알람)는 유지 — 스위치 ON 이면 표시된 드리프트를 자동 교정이
+곧 해소하고, OFF 면 수동 편집의 참고 정보가 된다. `should_propagate` 는 "동일해야
+정상인 컬렉션" 판정(드리프트 감시)에만 쓰인다.
+
+**운영 시나리오 — 롤링 업그레이드** (S1=ACTIVE·S2=STANDBY, V1→V2, 스위치 ON 상태):
+1. 그룹 탭에서 동기화 스위치 **OFF**
+2. S2 를 V2 로 업그레이드 — 설정은 overlay 승계, 새 키는 템플릿 기본값
+3. 그룹 탭 [공통 설정]에서 **멤버=S2 선택** 후 새/변경 항목 수정 (S2 개별 값은 S2 서버
+   화면에서) → S2 기동 → 절체(S2 가 VIP 획득 — 콘솔 뱃지가 십수 초 내 반영)
+4. 스위치 **ON** — S1 은 아직 V1 이라 정합 보류(버전 가드)
+5. S1 을 V2 로 업그레이드 → upgrade 성공 훅 + 스위퍼가 버전 일치 확인 →
+   **ACTIVE(S2) 설정이 S1 로 자동 복사** — 수동 동기화 없이 완료

@@ -1,5 +1,6 @@
-// 편집 가능한 위젯 레이아웃 — 저장본 로드 → admin 이 [✎ 편집] 으로 위젯 추가/제거/순서/폭 조정 후 저장.
-// view 모드: GridRenderer 그대로. edit 모드: 각 위젯에 컨트롤 오버레이 + 위젯 추가 + 저장/취소/초기화.
+// 편집 가능한 위젯 레이아웃 — 저장본 로드 → admin 이 [✎ 편집] 으로 위젯 추가/제거 및 드래그·리사이즈로
+// 2D 배치 후 저장. view 모드: GridRenderer. edit 모드: GridEditor(포인터 드래그/리사이즈 + compaction).
+// 편집 진입 시 legacy(flow) 레이아웃은 grid 로 1회 migrate(flowToGrid). 좁은 화면에선 편집 비활성.
 // 영속: OAM /console/layouts/<id> (PUT 저장 / DELETE seed 리셋). 없으면 seed.
 
 import { useState, useEffect } from 'react'
@@ -7,14 +8,13 @@ import { createPortal } from 'react-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { hasRole } from '../utils/permissions'
 import { useToast } from '../components/Toast'
+import { useIsDesktop } from '../hooks/useIsDesktop'
 import { consoleApi } from '../api/console'
-import { GridRenderer, widgetHeightCss } from './GridRenderer'
+import { GridRenderer } from './GridRenderer'
+import { GridEditor } from './GridEditor'
 import { getWidget, widgetsByCategory } from './registry'
-import type { PageLayout, WidgetPlacement } from './types'
-
-const WIDTH_OPTS: { v: number; label: string }[] = [
-  { v: 12, label: '전체' }, { v: 6, label: '1/2' }, { v: 4, label: '1/3' }, { v: 3, label: '1/4' },
-]
+import { flowToGrid, addToFirstFree, isGridLayout, ROW_H_VH, GRID_GAP } from './gridLayout'
+import type { PageLayout } from './types'
 
 function clone(l: PageLayout): PageLayout {
   return JSON.parse(JSON.stringify(l))
@@ -38,13 +38,12 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   const { user } = useAuth()
   const { show } = useToast()
   const isAdmin = hasRole(user, 'admin')   // developer(admin 동급) 포함
+  const isDesktop = useIsDesktop()          // 편집(드래그/리사이즈)은 데스크톱 전용 — 뷰는 좁은 화면도 단일열 동작
   const [layout, setLayout] = useState<PageLayout>(() => _readCache(layoutId) || seed)
   const [draft, setDraft] = useState<PageLayout | null>(null)
   const [addId, setAddId] = useState('')
   const [saving, setSaving] = useState(false)
-  // 편집 컨트롤은 글로벌 헤더의 슬롯(#layout-edit-slot)으로 portal — 콘텐츠/위젯
-  // 컨트롤과의 겹침 원천 차단 (구 우상단 플로팅 overlay 가 첫 행 위젯의
-  // ↑↓/폭/높이/✕ 를 덮던 문제). Header 가 먼저 마운트되므로 effect 에서 탐색.
+  // 편집 컨트롤은 글로벌 헤더의 슬롯(#layout-edit-slot)으로 portal — 콘텐츠/위젯 컨트롤과의 겹침 원천 차단.
   const [editSlot, setEditSlot] = useState<HTMLElement | null>(null)
   useEffect(() => { setEditSlot(document.getElementById('layout-edit-slot')) }, [])
 
@@ -57,25 +56,24 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   }, [layoutId])
 
   const editing = draft !== null
-  const beginEdit = () => setDraft(clone(layout))
+  // 편집 진입 — legacy(flow) 면 grid 로 migrate. vh→행 변환은 라이브 뷰포트 기준.
+  const beginEdit = () => {
+    const base = clone(layout)
+    const widgets = isGridLayout(base.widgets)
+      ? base.widgets
+      : flowToGrid(base.widgets,
+          id => getWidget(id)?.defaultSize?.w,
+          vh => Math.round(vh / ROW_H_VH))   // legacy vh → 행 (뷰포트 무관: 행=화면 5%)
+    setDraft({ ...base, widgets })
+  }
   const cancelEdit = () => { setDraft(null); setAddId('') }
 
-  const mutate = (fn: (ws: WidgetPlacement[]) => WidgetPlacement[]) =>
-    setDraft(d => d ? { ...d, widgets: fn([...d.widgets]) } : d)
-
-  const move = (i: number, dir: -1 | 1) => mutate(ws => {
-    const j = i + dir
-    if (j < 0 || j >= ws.length) return ws
-    ;[ws[i], ws[j]] = [ws[j], ws[i]]
-    return ws
-  })
-  const remove = (i: number) => mutate(ws => ws.filter((_, k) => k !== i))
-  const setWidth = (i: number, w: number) => mutate(ws => ws.map((p, k) => k === i ? { ...p, w } : p))
-  const setHeight = (i: number, h: number) => mutate(ws => ws.map((p, k) => k === i ? { ...p, h: h || undefined } : p))
   const addWidget = () => {
     if (!addId) return
     const def = getWidget(addId)
-    mutate(ws => [...ws, { widgetId: addId, w: def?.defaultSize?.w ?? 12 }])
+    setDraft(d => d
+      ? { ...d, widgets: addToFirstFree(d.widgets, { widgetId: addId }, def?.defaultSize?.w, def?.defaultSize?.h) }
+      : d)
     setAddId('')
   }
 
@@ -122,6 +120,11 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
             ))}
           </select>
           <button className="btn btn--sm" onClick={addWidget} disabled={!addId}>추가</button>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
+                title="카드 사이 간격(px)">간격</span>
+          <input type="range" min={0} max={40} step={2} value={draft?.gap ?? GRID_GAP}
+                 onChange={e => { const g = parseInt(e.target.value); setDraft(d => d ? { ...d, gap: g } : d) }}
+                 style={{ width: 64 }} title={`카드 사이 간격 ${draft?.gap ?? GRID_GAP}px`} />
           <button className="btn btn--sm btn--primary" onClick={saveLayout} disabled={saving}>저장</button>
           <button className="btn btn--sm" onClick={cancelEdit} disabled={saving}>취소</button>
           <button className="btn btn--sm" onClick={resetLayout} disabled={saving}
@@ -133,67 +136,18 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
 
   return (
     <div className="layout-host">
-      {/* 편집 컨트롤 — 글로벌 헤더 중앙 슬롯에 portal (콘텐츠와 겹침 없음) */}
-      {isAdmin && editSlot && createPortal(editControls, editSlot)}
+      {/* 편집 컨트롤 — 헤더 슬롯에 portal. FAB 는 데스크톱에서만, 편집 중이면 계속 노출(완료 보장). */}
+      {isAdmin && editSlot && (isDesktop || editing) && createPortal(editControls, editSlot)}
 
       {!editing ? (
         layout.widgets.length === 0 ? (
-          // 빈 페이지(메뉴 편집으로 만든 커스텀 페이지 등) — 보기 모드 안내
           <div className="empty" style={{ padding: 40, textAlign: 'center' }}>
             아직 위젯이 없습니다{isAdmin ? ' — 상단 [✎ 편집]으로 위젯을 배치하세요.' : '.'}
           </div>
         ) : <GridRenderer layout={layout} />
       ) : draft && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 12, alignItems: 'start' }}>
-          {draft.widgets.map((p, i) => {
-            const def = getWidget(p.widgetId)
-            const span = Math.min(Math.max(p.w ?? def?.defaultSize?.w ?? 12, 1), 12)
-            const Comp = def?.component
-            return (
-              <div key={`${p.widgetId}-${i}`}
-                   style={{ gridColumn: `span ${span}`, minWidth: 0, border: '1px dashed var(--primary)', borderRadius: 6, padding: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6, fontSize: 11 }}>
-                  <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {def?.title ?? p.widgetId}
-                  </b>
-                  <span style={{ color: 'var(--text-muted)' }}>({p.widgetId})</span>
-                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 3, alignItems: 'center' }}>
-                    <button className="btn btn--sm" onClick={() => move(i, -1)} disabled={i === 0} title="위로">↑</button>
-                    <button className="btn btn--sm" onClick={() => move(i, 1)} disabled={i === draft.widgets.length - 1} title="아래로">↓</button>
-                    <select value={span} onChange={e => setWidth(i, parseInt(e.target.value))}
-                            style={{ fontSize: 11, padding: '1px 2px' }} title="폭">
-                      {WIDTH_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
-                    </select>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}
-                          title="높이 — 화면 세로 비율(%, 0=자동). 슬라이더로 대략, 숫자칸으로 정확히.">
-                      <span>H</span>
-                      <input type="range" min={0} max={100} step={1}
-                             value={p.h && p.h <= 100 ? p.h : 0}
-                             onChange={e => setHeight(i, parseInt(e.target.value))}
-                             style={{ width: 70 }} />
-                      <input type="number" min={0} max={100} step={1}
-                             value={p.h && p.h <= 100 ? p.h : 0}
-                             onChange={e => setHeight(i, Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
-                             style={{ width: 42, fontSize: 11, padding: '1px 2px' }} />
-                      <span>{!p.h ? '자동' : p.h <= 100 ? '%' : 'px'}</span>
-                    </span>
-                    <button className="btn btn--sm" onClick={() => remove(i)} title="제거"
-                            style={{ color: 'var(--danger)' }}>✕</button>
-                  </div>
-                </div>
-                <div className={p.h ? 'widget-fixed' : undefined}
-                     style={{ pointerEvents: 'none', opacity: 0.85, ...(p.h ? { height: widgetHeightCss(p.h), display: 'flex' as const } : {}) }}>
-                  {Comp ? <Comp config={p.config} /> : <div style={{ color: 'var(--danger)', fontSize: 12 }}>알 수 없는 위젯: {p.widgetId}</div>}
-                </div>
-              </div>
-            )
-          })}
-          {draft.widgets.length === 0 && (
-            <div style={{ gridColumn: 'span 12', color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
-              위젯이 없습니다 — 상단 [+ 위젯 추가]로 배치하세요.
-            </div>
-          )}
-        </div>
+        <GridEditor widgets={draft.widgets} gap={draft.gap ?? GRID_GAP}
+                    onChange={ws => setDraft(d => d ? { ...d, widgets: ws } : d)} />
       )}
     </div>
   )

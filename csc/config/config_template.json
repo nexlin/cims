@@ -13,7 +13,8 @@
           "default": "0.0.0.0",
           "required": true,
           "restart": true,
-          "help": "0.0.0.0 = 모든 인터페이스."
+          "help": "0.0.0.0 = 모든 인터페이스.",
+          "scope": "system"
         },
         {
           "key": "Server.Port",
@@ -24,7 +25,14 @@
           "max": 65535,
           "required": true,
           "restart": true,
-          "help": "Phase 1 Test-CSC 기본 4421 (Phase 2 배포본 기본 4420 과 분리)."
+          "help": "CSC admin API 포트 — 전 환경 4421 (verify 배포본만 4445, OAM 4419 와 충돌 회피)."
+        },
+        {
+          "key": "Server.GatewayHost",
+          "label": "게이트웨이 접근 주소",
+          "type": "string",
+          "default": "",
+          "help": "base OAM 게이트웨이가 CSC API 를 프록시할 때 접속하는 주소. CSC 가 OAM 과 다른 서버에 배치되면(분리 토폴로지) 그룹 VIP(권장) 또는 노드 IP 를 입력. 비우면 127.0.0.1 (동거 배치)."
         }
       ],
       "scope": "service"
@@ -39,7 +47,8 @@
           "label": "MCPTT API 바인딩 IP",
           "type": "string",
           "default": "0.0.0.0",
-          "restart": true
+          "restart": true,
+          "scope": "system"
         },
         {
           "key": "McpttServer.Port",
@@ -95,6 +104,101 @@
           "min": 1,
           "max": 65535,
           "restart": false
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "provisioning",
+      "title": "자동 프로비저닝 (단말 접속 정보)",
+      "description": "단말이 로그인 후 GET /provisioning/me 로 받아가는 서비스별 시그널링 접속 정보 (android_ue_provisioning.md §3). CSC 는 CSP 의 local_nodes/access_services 를 직접 읽을 수 없으므로, 단말에 내려줄 SIP 주소/포트/도메인을 여기에 따로 선언한다 — CSP 의 수신 포트를 바꾸면 이 값도 같이 맞춰야 단말이 새 포트로 등록한다.",
+      "fields": [
+        {
+          "key": "Provisioning.CountryCode",
+          "label": "홈 국가코드",
+          "type": "string",
+          "default": "82",
+          "deploy_value": "@COUNTRY_CODE@",
+          "restart": true,
+          "help": "E.164 digits (+ 없음). 단말 번호 로컬 표기의 SoT. 비우면 로그인 msisdn 에서 유도."
+        },
+        {
+          "key": "Provisioning.Services.volte.host",
+          "label": "VoLTE SIP 주소 (CSP)",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "단말이 REGISTER 할 CSP 주소. 빈값이면 단말이 접속한 CSC Host 를 사용(올인원 기본). 모듈별로 서버가 나뉘면 CSP 대표/VIP 주소를 넣는다."
+        },
+        {
+          "key": "Provisioning.Services.volte.port",
+          "label": "VoLTE SIP 포트",
+          "type": "int",
+          "default": 15060,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "CSP 의 VoLTE 수신 local_node bind_port 와 일치해야 한다."
+        },
+        {
+          "key": "Provisioning.Services.volte.transport",
+          "label": "VoLTE SIP transport",
+          "type": "enum",
+          "options": [
+            "UDP",
+            "TCP",
+            "TLS"
+          ],
+          "default": "UDP",
+          "restart": true
+        },
+        {
+          "key": "Provisioning.Services.volte.domain",
+          "label": "VoLTE 도메인",
+          "type": "string",
+          "default": "ims.mnc033.mcc450.3gppnetwork.org",
+          "deploy_value": "@VOLTE_DOMAIN@",
+          "restart": true,
+          "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
+        },
+        {
+          "key": "Provisioning.Services.ptt.host",
+          "label": "PTT SIP 주소 (PSP)",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "단말이 REGISTER 할 PSP 주소. 빈값이면 단말이 접속한 CSC Host 를 사용. VoLTE 와 다른 서버일 수 있다."
+        },
+        {
+          "key": "Provisioning.Services.ptt.port",
+          "label": "PTT SIP 포트",
+          "type": "int",
+          "default": 15060,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "PSP(또는 CSP) 의 PTT 수신 local_node bind_port 와 일치해야 한다."
+        },
+        {
+          "key": "Provisioning.Services.ptt.transport",
+          "label": "PTT SIP transport",
+          "type": "enum",
+          "options": [
+            "UDP",
+            "TCP",
+            "TLS"
+          ],
+          "default": "UDP",
+          "restart": true
+        },
+        {
+          "key": "Provisioning.Services.ptt.domain",
+          "label": "PTT 도메인",
+          "type": "string",
+          "default": "ptt.mnc033.mcc450.3gppnetwork.org",
+          "deploy_value": "@PTT_DOMAIN@",
+          "restart": true,
+          "help": "PTT access_service 도메인. MCPTT ID 와는 별개."
         }
       ],
       "scope": "service"
@@ -224,7 +328,7 @@
           "label": "KMS Client 초기 요청 URL",
           "type": "string",
           "default": "https://127.0.0.1:4421/keymanagement/identity/v1/init",
-          "deploy_value": "https://@CSC_HOST@:4420/keymanagement/identity/v1/init",
+          "deploy_value": "https://@CSC_HOST@:4421/keymanagement/identity/v1/init",
           "restart": true
         },
         {
@@ -252,6 +356,23 @@
           "default": 604800,
           "min": 600,
           "restart": true
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "service_log",
+      "title": "서비스 로그",
+      "description": "녹취·msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "fields": [
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "CSP·CMP 와 동일 경로여야 함 (CSC msg.jsonl 등 기록)."
         }
       ],
       "scope": "service"
@@ -353,17 +474,6 @@
           "hidden": true,
           "restart": true,
           "help": "CSC 가 agent 별 push 한 설정을 캐시하는 경로."
-        },
-        {
-          "key": "ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
-          "group": "service_logging",
-          "type": "path",
-          "default": "service_log",
-          "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true,
-          "restart": true,
-          "help": "CSP/CMP 와 공유되는 서비스 로그 루트."
         },
         {
           "key": "ServiceLogging.Enable",

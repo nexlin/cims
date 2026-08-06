@@ -45,6 +45,7 @@ function ActivePttWidget() {
 
 export const activePttWidget: WidgetDef = {
   id: 'cims.active-ptt',
+  apis: ['stats.health'],
   title: 'PTT 활성 그룹',
   category: 'service',
   component: ActivePttWidget,

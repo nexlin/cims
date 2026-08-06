@@ -95,6 +95,32 @@ CSP/CMP 내부 메모리 상태를 주기적으로 수집하여 Console UI 대�
 | DB 연결 | SELECT 1 | CSC 내부 |
 | CSC 프로세스 | HTTP /test | self-check |
 
+#### probe 수집 규약 (`stats.py`)
+
+CSP/CMP STATS probe 는 UDP 단발 요청이라 재전송이 없다. 다음 규약으로 게이트웨이 프록시
+타임아웃(`gateway._DEFAULT_TIMEOUT` = 5s, oam_base_service_split §5) 안에서 항상 응답한다.
+
+- **노드 동시 probe**: `_all_media_stats` 는 `MediaServer.Endpoints` 전 노드를 전용 스레드 풀
+  (`_PROBE_POOL`)로 **동시에** probe 한다. 무응답 노드가 여럿이어도 총 비용은 노드 수와 무관하게
+  `ProbeTimeoutMs × ProbeAttempts` 가 상한이다. 응답 순서가 아니라 엔드포인트 순서를 보존한다.
+- **재시도**: 시도마다 새 소켓으로 `ProbeAttempts` 회까지 재전송 — 데이터그램 한 개 유실은
+  다음 시도에서 복구된다.
+- **최근 정상값 유지**: probe miss 여도 `LastGoodTtlSec` 이내면 마지막 정상값(`_CMP_LAST_GOOD`)을
+  반환한다. 일시 타임아웃 한 번으로 대시보드 RTP 합계가 0 으로 튀지 않는다. 초과하면 down 인정.
+- **TTL 캐시**: `_cached` 는 3s TTL + single-flight + stale-while-revalidate. producer 반환 **후**
+  시각으로 스탬프하므로 느린 probe 가 자기 TTL 을 갉아먹지 않는다. 같은 키를 동시에 miss 한
+  스레드는 probe 를 중복 실행하지 않고, 갱신 중이면 stale 값을 즉시 받는다. 캐시는 이벤트 루프
+  스레드·probe 풀·`alarm_sweeper` 스레드가 공유하므로 락으로 보호한다.
+- **이벤트 루프 격리**: `/stats/*` 핸들러 본문은 UDP probe·NFS glob·DB 조회로 이루어진 동기
+  코드다. `@_offload`(`asyncio.to_thread`)로 스레드에 위임해, 한 엔드포인트의 지연이 같은 루프의
+  다른 요청(`/call/logs`, `/ptt/history` 등)을 함께 죽이지 않는다.
+
+| config 키 (oam-svc, `scope: service`) | 기본 | 의미 |
+|---|---|---|
+| `MediaServer.ProbeTimeoutMs` | 1200 | 시도당 UDP 응답 대기 |
+| `MediaServer.ProbeAttempts` | 2 | 총 시도 횟수 |
+| `MediaServer.LastGoodTtlSec` | 30 | probe miss 시 최근 정상값 유지 한도 |
+
 ### 1.2 가입자 접속 상태
 
 대시보드 KPI 카드는 CSP UserMap probe 가 아니라 **DB 단일 쿼리**(`stats.py _get_dashboard_counts`, 3s 캐시)로 산출한다 — csp 가 REGISTER/로그아웃 시 `register_time`/`logout_time` 을 갱신하므로 DB 가 SoT.

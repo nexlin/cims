@@ -43,6 +43,20 @@ _CORE_ALERT_RULES = [
      'msg_open': '{mo} 프로세스 응답 없음', 'msg_close': '{mo} 정상화',
      'effect': '해당 호스트의 모듈 기능 중단',
      'recommended_action': '프로세스 재기동, 로그/코어 확인, HA 절체 점검'},
+    {'type': 'config_out_of_sync', 'code': 'CIMS-CFG-001', 'perceived_severity': 'warning',
+     'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software',
+     'check': 'config_drift', 'scope': 'agent', 'metric': '배포 설정 정합',
+     'msg_open': '{mo} 노드 설정 파일이 배포 기록과 불일치 (node={actual}, 기대={expected})',
+     'msg_close': '{mo} 배포 설정 정합 회복',
+     'effect': '모듈이 OAM 기록과 다른 설정(포트 등)으로 동작 — 게이트웨이 프록시/HA 헬스 오동작 위험',
+     'recommended_action': '해당 배포 설정 재적용(update_config)으로 노드 파일 정렬, 수기 편집 여부 확인'},
+    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'perceived_severity': 'warning',
+     'event_type': 'qualityOfService', 'probable_cause': 'thresholdCrossed', 'mo_class': 'service',
+     'check': 'ha_flap', 'scope': 'agent', 'threshold': 6, 'unit': '회/10분', 'metric': 'HA 전이 빈도',
+     'msg_open': '{mo} keepalived 상태 전이 {count}회/10분 ({threshold}회 이상) — VIP flap 의심',
+     'msg_close': '{mo} HA 전이 빈도 정상',
+     'effect': 'VIP 반복 이동 — 해당 서비스 간헐 단절',
+     'recommended_action': '헬스체크 포트/모듈 상태 확인, notify_<svc>.log·keepalived journal 점검'},
 ]
 
 # 알람 클래스 기본값 — check → 표준 분류 필드. 규칙에 명시값 있으면 우선(setdefault).
@@ -57,6 +71,10 @@ _ALERT_CLASS_DEFAULTS = {
                      'probable_cause': 'resourceAtOrNearingCapacity', 'mo_class': 'service', 'perceived_severity': 'warning'},
     'disk_high':    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
                      'probable_cause': 'storageCapacityProblem', 'mo_class': 'host', 'perceived_severity': 'warning'},
+    'config_drift': {'type': 'config_out_of_sync', 'code': 'CIMS-CFG-001', 'event_type': 'processingError',
+                     'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software', 'perceived_severity': 'warning'},
+    'ha_flap':      {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
+                     'probable_cause': 'thresholdCrossed', 'mo_class': 'service', 'perceived_severity': 'warning'},
 }
 
 # 옛 per-process/리소스 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.
@@ -157,6 +175,30 @@ def module_health_defaults(config: dict = None) -> dict:
     for nm, m in all_modules(config).items():
         if m.get('port'):
             res[nm] = (int(m['port']), m.get('proto', 'tcp'))
+    return res
+
+
+def module_health_specs(config: dict = None) -> dict:
+    """ha_groups 용 {name: health} — descriptor 모듈의 `health` 블록만 추린다.
+
+    `health` 는 "리슨 포트를 descriptor 상수가 아니라 노드의 실제 설정에서 유도하라"는
+    선언이다. 두 형태를 지원한다 (둘 다 agent 가 검사 시점에 노드 로컬 파일을 직접 읽음
+    — 배포기록↔실파일 드리프트가 나도 HA 는 실제 bind 포트를 본다):
+
+      { "config_key": "Server.Port" }
+          스칼라 config.json 의 단일 키 (csc 처럼 포트가 설정키 하나로 정해지는 모듈).
+
+      { "collection_file": "config/local_nodes.jsonl",
+        "field": "bind_port",
+        "match": { "enabled": true, "is_primary": true, "protocol": "UDP" } }
+          컬렉션 jsonl 에서 match 를 만족하는 첫 레코드의 field (csp 처럼 리슨
+          엔드포인트가 컬렉션에 있는 모듈). 파일/레코드가 없으면 descriptor port 로 폴백.
+    """
+    res = {}
+    for nm, m in all_modules(config).items():
+        h = m.get('health')
+        if isinstance(h, dict) and h:
+            res[nm] = h
     return res
 
 

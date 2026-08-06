@@ -17,6 +17,9 @@ import socket
 import time
 import asyncio
 import logging
+import functools
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from urllib.parse import urlparse, parse_qs, unquote
 from pathlib import PurePath
@@ -64,33 +67,91 @@ def _path_parts(full_path: str, base: str):
 #  UDP 통신 헬퍼 (CSP/CMP stats 수집)
 # ──────────────────────────────────────────────────────────────
 
-def _udp_request(ip: str, port: int, data: dict, timeout: float = 1.0) -> dict:
-    """UDP로 JSON 요청 보내고 응답 수신. timeout 단축(down 서버 fail-fast)."""
+_PROBE_TIMEOUT = 1.2    # 시도당 UDP 응답 대기(초)
+_PROBE_ATTEMPTS = 2     # 총 시도 횟수 — 단발 데이터그램 유실을 재전송으로 복구
+
+# probe 총 예산(timeout × attempts)은 게이트웨이 프록시 타임아웃(gateway._DEFAULT_TIMEOUT, 5s)
+# 보다 확실히 작아야 한다. 노드 probe 는 병렬이므로 노드 수와 무관하게 이 값이 상한이다.
+
+
+def _probe_params(config: dict):
+    """(timeout_sec, attempts) — MediaServer.ProbeTimeoutMs / ProbeAttempts 로 조정."""
+    ms = config.get('MediaServer', {}) or {}
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(timeout)
-        msg = json.dumps(data).encode('utf-8')
-        sock.sendto(msg, (ip, port))
-        resp_data, _ = sock.recvfrom(4096)
-        sock.close()
-        return json.loads(resp_data.decode('utf-8'))
-    except Exception:
-        return {}
+        timeout = float(ms.get('ProbeTimeoutMs', _PROBE_TIMEOUT * 1000)) / 1000.0
+    except (TypeError, ValueError):
+        timeout = _PROBE_TIMEOUT
+    try:
+        attempts = int(ms.get('ProbeAttempts', _PROBE_ATTEMPTS))
+    except (TypeError, ValueError):
+        attempts = _PROBE_ATTEMPTS
+    return max(timeout, 0.1), max(attempts, 1)
+
+
+def _udp_request(ip: str, port: int, data: dict,
+                 timeout: float = _PROBE_TIMEOUT, attempts: int = 1) -> dict:
+    """UDP로 JSON 요청 보내고 응답 수신. timeout 단축(down 서버 fail-fast).
+    UDP 는 재전송이 없어 데이터그램 한 개만 유실돼도 timeout 전액을 문다 →
+    attempts 회까지 재시도(시도마다 새 소켓). 전부 실패하면 {}. 최악 = timeout × attempts."""
+    msg = json.dumps(data).encode('utf-8')
+    for _ in range(max(attempts, 1)):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(timeout)
+                sock.sendto(msg, (ip, port))
+                resp_data, _addr = sock.recvfrom(4096)
+            return json.loads(resp_data.decode('utf-8'))
+        except Exception:
+            continue
+    return {}
 
 
 # csp/cmp 상태 단기 캐시 — down 서버 probe 가 timeout 까지 블로킹하므로, 다중 위젯/스위퍼의
 # 반복 요청이 매번 probe 하지 않도록 TTL 캐시. (정상 서버는 즉시 응답하므로 영향 미미.)
+# 캐시는 uvicorn 루프 스레드(to_thread 워커)·_PROBE_POOL·oam-svc 메인 스레드(alarm_sweeper)
+# 에서 동시에 접근한다 → 락 필수.
 _STATS_CACHE: dict = {}
 _STATS_TTL = 3.0
+_CACHE_LOCK = threading.Lock()   # _STATS_CACHE / _CMP_LAST_GOOD / _INFLIGHT 보호
+_INFLIGHT: dict = {}             # key → threading.Event (해당 키 갱신 진행 중 표식)
 
 
 def _cached(key: str, producer):
-    now = time.time()
-    e = _STATS_CACHE.get(key)
-    if e and now - e[0] < _STATS_TTL:
-        return e[1]
-    v = producer()
-    _STATS_CACHE[key] = (now, v)
+    """TTL 캐시 + single-flight + stale-while-revalidate.
+
+    producer 는 락 밖에서 실행하고 반환 '후' 시각으로 스탬프한다 — 느린 probe 가 자기
+    TTL 을 갉아먹지 않도록(2.4s probe + 3.0s TTL 이면 예전엔 잔여 0.6s 였다).
+    같은 키를 동시에 miss 한 스레드는 producer 를 중복 실행하지 않는다(single-flight).
+    갱신 중인 키에 stale 값이 있으면 즉시 반환 — down 노드가 매 요청에 timeout 을
+    물리지 않는다.
+    """
+    with _CACHE_LOCK:
+        e = _STATS_CACHE.get(key)
+        if e and time.time() - e[0] < _STATS_TTL:
+            return e[1]
+        ev = _INFLIGHT.get(key)
+        if ev is not None:
+            if e is not None:
+                return e[1]          # SWR — 갱신은 leader 에게 맡기고 stale 반환
+            leader = False
+        else:
+            ev = _INFLIGHT[key] = threading.Event()
+            leader = True
+
+    if not leader:                   # 캐시가 아직 비어 있는 최초 채움만 대기
+        ev.wait(timeout=_STATS_TTL)
+        with _CACHE_LOCK:
+            e = _STATS_CACHE.get(key)
+        return e[1] if e else {}
+
+    v = {}
+    try:
+        v = producer()               # 락 밖 — 오래 걸려도 다른 키를 막지 않는다
+    finally:
+        with _CACHE_LOCK:
+            _STATS_CACHE[key] = (time.time(), v)   # producer '이후' 시각
+            _INFLIGHT.pop(key, None)
+        ev.set()
     return v
 
 
@@ -100,7 +161,9 @@ def _get_csp_stats(config: dict) -> dict:
         notify = config.get('CspNotify', {})
         ip = notify.get('Ip', '127.0.0.1')
         port = int(notify.get('Port', 4421))
-        resp = _udp_request(ip, port, {"event": "STATS_REQUEST", "uri": "", "action": ""})
+        timeout, attempts = _probe_params(config)
+        resp = _udp_request(ip, port, {"event": "STATS_REQUEST", "uri": "", "action": ""},
+                            timeout=timeout, attempts=attempts)
         return resp if resp.get('status') == 'OK' else {}
     return _cached('csp', probe)
 
@@ -136,13 +199,14 @@ def _load_active_states(config: dict, kind: str) -> list:
     return items
 
 
-def _cmp_stats_request(ip: str, port: int, timeout: float = 1.0) -> dict:
+def _cmp_stats_request(ip: str, port: int, timeout: float = 1.0,
+                       attempts: int = 1) -> dict:
     """CMP STATS 조회 (envelope v2 — docs/api/cmp_media_api.md).
        응답 payload {resource, detail} 를 대시보드가 쓰는 flat 키로 정규화해 반환."""
     resp = _udp_request(ip, port, {
         "hdr": {"ver": 2, "trans_id": int(time.time()) % 100000,
                 "node": "oam", "cmd": "STATS", "type": "request"}
-    }, timeout=timeout)
+    }, timeout=timeout, attempts=attempts)
     hdr = resp.get('hdr') or {}
     if hdr.get('status') != 'OK':
         return {}
@@ -179,7 +243,8 @@ def _get_cmp_stats(config: dict) -> dict:
         else:
             # CmpIp 미설정(콘솔 관리 oam-svc 설정) — MediaServer.Endpoints 첫 노드를 대표 probe.
             cmp_ip, cmp_port = _media_endpoints(config)[0]
-        return _cmp_stats_request(cmp_ip, cmp_port)
+        timeout, attempts = _probe_params(config)
+        return _cmp_stats_request(cmp_ip, cmp_port, timeout=timeout, attempts=attempts)
     return _cached('cmp', probe)
 
 
@@ -212,31 +277,63 @@ def _media_endpoints(config: dict):
 _CMP_LAST_GOOD: dict = {}
 _CMP_LAST_GOOD_TTL = 30.0   # 마지막 정상값 보존 한도 — 이 이상 연속 실패면 진짜 down 으로 인정
 
+# 노드 probe 전용 풀. 기본 executor(asyncio.to_thread) 와 반드시 분리한다 — _health 는
+# 기본 executor 워커에서 _all_media_stats 를 호출하고 그 워커가 여기에 submit 후 대기하므로,
+# 같은 풀이면 자기 재submit 기아가 생긴다. 의존은 default → _PROBE_POOL 단방향이고
+# _probe_cmp 는 재submit 하지 않는 leaf 라 순환이 없다.
+_PROBE_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix='cmp-probe')
 
-def _probe_cmp(ip: str, port: int) -> dict:
+
+def _last_good_ttl(config: dict) -> float:
+    """probe miss 시 최근 정상값을 몇 초까지 유지할지 — MediaServer.LastGoodTtlSec."""
+    ms = config.get('MediaServer', {}) or {}
+    try:
+        return float(ms.get('LastGoodTtlSec', _CMP_LAST_GOOD_TTL))
+    except (TypeError, ValueError):
+        return _CMP_LAST_GOOD_TTL
+
+
+def _probe_cmp(ip: str, port: int, timeout: float = _PROBE_TIMEOUT,
+               attempts: int = _PROBE_ATTEMPTS, last_good_ttl: float = _CMP_LAST_GOOD_TTL) -> dict:
     """단일 CMP 노드 STATS probe (노드별 3s 캐시).
-       부하 중 CMP STATS 응답이 1s 를 넘겨 일시 타임아웃되면 노드가 used=0/down 으로
-       튀어 대시보드 RTP 합계가 요동친다 → (1) timeout 을 2.5s 로 늘리고
-       (2) miss 시 30s 이내 최근 정상값을 유지해 한 번의 타임아웃으로 0 이 되지 않게 한다."""
+       부하 중 CMP STATS 응답이 timeout 을 넘겨 일시 miss 되면 노드가 used=0/down 으로
+       튀어 대시보드 RTP 합계가 요동친다 → miss 시 last_good_ttl 이내 최근 정상값을 유지해
+       한 번의 타임아웃으로 0 이 되지 않게 한다. 유실 복구는 _udp_request 의 attempts 재시도."""
     key = f'{ip}:{port}'
 
     def probe():
-        r = _cmp_stats_request(ip, port, timeout=2.5) or None
+        r = _cmp_stats_request(ip, port, timeout=timeout, attempts=attempts) or None
         now = time.time()
         if r:
-            _CMP_LAST_GOOD[key] = (now, r)
+            with _CACHE_LOCK:
+                _CMP_LAST_GOOD[key] = (now, r)
             return r
-        lg = _CMP_LAST_GOOD.get(key)   # probe miss → 최근 정상값 유지(연속 실패 30s 까지)
-        if lg and now - lg[0] < _CMP_LAST_GOOD_TTL:
+        with _CACHE_LOCK:              # probe miss → 최근 정상값 유지(연속 실패 ttl 까지)
+            lg = _CMP_LAST_GOOD.get(key)
+        if lg and now - lg[0] < last_good_ttl:
             return lg[1]
         return {}
     return _cached(f'cmp:{ip}:{port}', probe)
 
 
 def _all_media_stats(config: dict):
-    """전 미디어 노드 STATS — [{host, port, stats}]."""
-    return [{'host': ip, 'port': port, 'stats': _probe_cmp(ip, port)}
-            for ip, port in _media_endpoints(config)]
+    """전 미디어 노드 STATS — [{host, port, stats}].
+
+    노드별 동시 probe — N개 노드 비용이 N×timeout 이 아니라 max(timeout) 이다.
+    (직렬이면 down 노드 2개에서 게이트웨이 프록시 타임아웃 5s 를 넘긴다.)
+    실행 중인 이벤트 루프를 가정할 수 없어(alarm_sweeper 는 일반 스레드에서 호출)
+    asyncio 대신 전용 스레드 풀을 쓴다. 엔드포인트 순서는 보존한다(합산·표시 순서).
+    """
+    eps = _media_endpoints(config)
+    timeout, attempts = _probe_params(config)
+    ttl = _last_good_ttl(config)
+    if len(eps) == 1:                  # 단일 노드 — 풀 왕복 비용 회피
+        ip, port = eps[0]
+        return [{'host': ip, 'port': port,
+                 'stats': _probe_cmp(ip, port, timeout, attempts, ttl)}]
+    futs = [(ip, port, _PROBE_POOL.submit(_probe_cmp, ip, port, timeout, attempts, ttl))
+            for ip, port in eps]
+    return [{'host': ip, 'port': port, 'stats': f.result()} for ip, port, f in futs]
 
 
 def _floor_holders(gd: dict) -> list:
@@ -266,6 +363,19 @@ def _check_db_health(config: dict) -> bool:
 # ──────────────────────────────────────────────────────────────
 #  Handlers
 # ──────────────────────────────────────────────────────────────
+
+def _offload(fn):
+    """동기 핸들러를 스레드로 오프로드 — 이벤트 루프 스톨 방지.
+
+    이 모듈의 핸들러 본문은 UDP probe·NFS glob·DB 조회 같은 블로킹 I/O 로 이루어져 있다.
+    단일 이벤트 루프(uvicorn) 위에서 직접 실행하면 한 핸들러의 지연이 그 순간 처리 중인
+    모든 요청을 함께 죽인다. external_systems._probe_result 와 같은 to_thread 패턴.
+    """
+    @functools.wraps(fn)
+    async def _wrapped(*args, **kwargs):
+        return await asyncio.to_thread(fn, *args, **kwargs)
+    return _wrapped
+
 
 _STATS_BASE = '/api/v1/stats'
 
@@ -581,7 +691,8 @@ def _parse_msg_method(msg: str) -> str:
     return method if method in _SIP_REQUEST_METHODS else method
 
 
-async def _leak_reclaims(config, date=None) -> HandlerResult:
+@_offload
+def _leak_reclaims(config, date=None) -> HandlerResult:
     """CMP sweeper 가 회수한 누수 세션 상세.
        {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 을 읽어 목록 + reason/node 별 집계 반환.
        RtpMap fix 후 정상 환경에서는 빈 목록이 기대값 — 항목이 있으면 CSP crash/teardown 누락 등 누수 신호."""
@@ -620,7 +731,8 @@ async def _leak_reclaims(config, date=None) -> HandlerResult:
                                            'items': items[:500]})
 
 
-async def _messages_stats_v2(config, iface, date) -> HandlerResult:
+@_offload
+def _messages_stats_v2(config, iface, date) -> HandlerResult:
     """service_log JSONL 기반 인터페이스별 메시지 통계.
 
     실제 레이아웃: {ServiceLogDir}/YYYY/MM/DD/HH/csp_01_{sip|cmp|csc}.msg.jsonl
@@ -793,7 +905,8 @@ def _bucket_key(ts: str, gran: str) -> str:
     return ts[:10]
 
 
-async def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResult:
+@_offload
+def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResult:
     if not from_dt:
         if date:
             from_dt = date + ' 00:00:00'
@@ -918,7 +1031,8 @@ def _calc_ptt_stats(config, from_dt, to_dt, gran):
 #  Subscribers real-time status (가입자별 실시간 접속/통화 상태)
 # ──────────────────────────────────────────────────────────────
 
-async def _subscribers_status(config: dict, status: str = 'active',
+@_offload
+def _subscribers_status(config: dict, status: str = 'active',
                               q: str = '', page='1', limit='50', org: str = '') -> HandlerResult:
     """가입자 서비스 이용 상태 조회 — 서버사이드 필터/페이지네이션.
 
@@ -1268,7 +1382,8 @@ def _ptt_floor_activity(config: dict, window_min: int = 5) -> dict:
     return act
 
 
-async def _service_live(config: dict) -> HandlerResult:
+@_offload
+def _service_live(config: dict) -> HandlerResult:
     """VoLTE 호 / PTT 그룹 중심 실시간 모니터링 스냅샷 + KPI/용량/이상징후."""
     now = datetime.now()
     volte_states = _load_active_states(config, 'volte')
@@ -1618,7 +1733,8 @@ _TREND_METRICS = ('volte_active', 'volte_calls', 'ptt_grants', 'ptt_speakers', '
 _TREND2_CACHE: dict = {'key': None, 'data': None}
 
 
-async def _service_trend(config: dict, window='8h') -> HandlerResult:
+@_offload
+def _service_trend(config: dict, window='8h') -> HandlerResult:
     """사용량 추세 — 윈도우를 24등분한 버킷으로 지표를 서비스 로그에서 재구성.
        간격: 2h=5분, 4h=10분, 8h=20분, 16h=40분, 24h=1시간 (모두 24버킷). 버킷 경계는 정시(clock) 정렬,
        마지막 칸은 현재 시각이 속한 버킷.
@@ -1828,7 +1944,8 @@ def _build_service_events(config: dict) -> list:
     return events[:200]
 
 
-async def _service_events(config: dict, limit='60') -> HandlerResult:
+@_offload
+def _service_events(config: dict, limit='60') -> HandlerResult:
     """최근 서비스 이벤트 피드 — VoLTE 호 시작/종료, PTT floor GRANT/RELEASE/REJECT,
        멤버 입장/퇴장을 로그에서 모아 시각 역순. 3초 캐시."""
     try:
@@ -1894,7 +2011,8 @@ def _org_descendants(config: dict, code: str):
     return out
 
 
-async def _service_org(config: dict) -> HandlerResult:
+@_offload
+def _service_org(config: dict) -> HandlerResult:
     """조직 트리별 이용 — 회사>본부>팀 트리 + 구성원/등록/활성 롤업(상위=하위 합)."""
     volte_states = _load_active_states(config, 'volte')
     ptt_states = _load_active_states(config, 'ptt')
@@ -1990,7 +2108,8 @@ async def _service_org(config: dict) -> HandlerResult:
     return HandlerResult(status=200, body=body)
 
 
-async def _ptt_members(config: dict, group: str, page='1', limit='50') -> HandlerResult:
+@_offload
+def _ptt_members(config: dict, group: str, page='1', limit='50') -> HandlerResult:
     """그룹 멤버 on-demand 페이지네이션 (그룹당 100~200명 → 비인라인 drill)."""
     group = (group or '').strip()
     try:
@@ -2055,4 +2174,95 @@ CIMS_STATS_HANDLER_LIST = [
 # controller 최장 일치 덕에 _STATS_BASE 와 충돌 없이 공존(longest match → service).
 CIMS_STATS_SERVICE_HANDLER_LIST = [
     (_STATS_SERVICE_BASE, handle_stats_service, {}),
+]
+
+
+# ── API 문서 (개발자 모드) ──────────────────────────────────────────────────
+#  이 모듈이 제공하는 엔드포인트의 자기기술. handlers/api_docs.py 가 수집하고, 콘솔은 각 메뉴에서
+#  [API] 버튼으로 읽어 표시한다. 경로/파라미터를 바꾸면 **여기도 같은 커밋에서** 갱신한다.
+#  module='oam-svc' — stats 전체가 oam-svc 귀속(role=base 는 게이트웨이 프록시). 스키마는 api_docs.py 주석.
+CIMS_STATS_API_DOCS = [
+    {'id': 'stats.health', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/health',
+     'summary': '노드 health + 대시보드 KPI 카운트 (가입자/번호/등록/그룹)',
+     'params': [], 'response': '노드별 상태 + counts 객체', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.subscribers', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/subscribers',
+     'summary': '가입자 등록 현황 (활성/비활성 목록, 페이지네이션)',
+     'params': [
+         {'name': 'status', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['active', 'inactive', 'all'], 'desc': '등록 상태 (기본 active)'},
+         {'name': 'q', 'in': 'query', 'type': 'string', 'required': False, 'desc': '검색어 (번호/이름)'},
+         {'name': 'org', 'in': 'query', 'type': 'string', 'required': False, 'desc': '조직 코드 필터'},
+         {'name': 'page', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '페이지 (기본 1)'},
+         {'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '페이지 크기 (기본 50)'},
+     ],
+     'response': '{total, page, limit, subscribers[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.messages', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/messages',
+     'summary': '전 인터페이스 메시지 카운터 (시간대 버킷 + 메서드별 집계)',
+     'params': [{'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'}],
+     'response': '{buckets[], method_counts{}}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.messages.iface', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/messages/{iface}',
+     'summary': '인터페이스별 메시지 카운터',
+     'params': [
+         {'name': 'iface', 'in': 'path', 'type': 'string', 'required': True,
+          'enum': ['sip', 'cmp', 'csc', 'https'], 'desc': '인터페이스'},
+         {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'},
+     ],
+     'response': '{buckets[], method_counts{}}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.leak-reclaims', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/leak-reclaims',
+     'summary': 'CMP 누수 세션 회수(sweeper) 이력 + reason/node 별 집계',
+     'params': [{'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'}],
+     'response': '{items[], by_reason{}, by_node{}}', 'auth': 'Bearer JWT (monitor)'},
+
+    # service KPI
+    {'id': 'stats.service.volte', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/volte',
+     'summary': 'VoLTE 서비스 KPI (호 시도/성공률/시간대 버킷/종료사유 분포)',
+     'params': [
+         {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['1h', '1d', '1M'], 'desc': '집계 단위 (기본 1d)'},
+         {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD 단일 일자'},
+         {'name': 'from', 'in': 'query', 'type': 'string', 'required': False, 'desc': '시작 일시 (구간 조회)'},
+         {'name': 'to', 'in': 'query', 'type': 'string', 'required': False, 'desc': '종료 일시 (구간 조회)'},
+     ],
+     'response': '{volte:{total_attempts, success_rate, buckets[], causes{}}}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.ptt', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/ptt',
+     'summary': 'PTT 서비스 KPI (그룹콜 수/평균 세션/floor 통계)',
+     'params': [
+         {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['1h', '1d', '1M'], 'desc': '집계 단위 (기본 1d)'},
+         {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD 단일 일자'},
+         {'name': 'from', 'in': 'query', 'type': 'string', 'required': False, 'desc': '시작 일시'},
+         {'name': 'to', 'in': 'query', 'type': 'string', 'required': False, 'desc': '종료 일시'},
+     ],
+     'response': '{ptt:{total_calls, avg_session_sec, buckets[]}}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.summary', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/summary',
+     'summary': 'VoLTE+PTT 통합 요약 (service 미지정 시 기본 응답)',
+     'params': [
+         {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['1h', '1d', '1M'], 'desc': '집계 단위 (기본 1d)'},
+         {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD'},
+     ],
+     'response': '통합 요약 객체', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.live', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/live',
+     'summary': '실시간 활성 세션 수 (VoIP/PTT)',
+     'params': [], 'response': '{voip:{active}, ptt:{active}}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.trend', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/trend',
+     'summary': '최근 구간 추이 (스파크라인용)',
+     'params': [{'name': 'window', 'in': 'query', 'type': 'string', 'required': False, 'desc': '조회 구간 (기본 8h)'}],
+     'response': '{points[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.events', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/events',
+     'summary': '최근 서비스 이벤트 목록',
+     'params': [{'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '건수 (기본 60)'}],
+     'response': '{events[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.org', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/service/org',
+     'summary': '조직별 사용량 집계',
+     'params': [], 'response': '{orgs[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'stats.service.ptt-members', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/service/ptt-members',
+     'summary': 'PTT 그룹 구성원 실시간 상태 (활성/발언중)',
+     'params': [
+         {'name': 'group', 'in': 'query', 'type': 'string', 'required': True, 'desc': 'MCPTT 그룹 ID'},
+         {'name': 'page', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '페이지 (기본 1)'},
+         {'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '페이지 크기 (기본 50)'},
+     ],
+     'response': '{group, total, active_count, floor_holder, members[]}', 'auth': 'Bearer JWT (monitor)'},
 ]

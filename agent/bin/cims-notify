@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
-# agent/bin/cims-notify — generic keepalived state transition hook
+# agent/bin/cims-notify — keepalived 상태 전이 → role 파일 기록 (role writer, 단일 모델)
 #
 # 사용법: (keepalived 의 vrrp_instance notify 에서 호출)
 #   cims-notify <svc> <TYPE> <NAME> <STATE> <PRIORITY>
 #
 # keepalived 가 인자 4개 (TYPE/NAME/STATE/PRIORITY) 를 자동 전달. <svc> 는
 # keepalived 설정 시 cims-notify 호출 라인에 명시 (`notify
-# "${HA_DIR}/cims-notify csc"`).
+# "${BIN_DIR}/cims-notify Control"`) — ha.json services.<svc> 키 (그룹명).
 #
-# 동작:
-#   MASTER 승격 → systemctl start cims@<svc>
-#   BACKUP|FAULT → systemctl stop  cims@<svc>
-#   STOP (keepalived 자체 종료) → 무변경
+# 동작 — keepalived 역할 전이를 run/ha/role/<svc>.json 에 원자적으로 기록만 하고 종료한다.
+#   MASTER / BACKUP / FAULT → role 기록. STOP(keepalived 종료) → 무변경.
+#   모듈 기동/정지·재기동 판단·readiness·OAM 호출·절체 판단은 하지 않는다 —
+#   전부 agent 의 Recovery Supervisor(reconcile)가 role 을 관측해 수행한다.
 #
-# 옛 notify_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
+# 단일 모델: legacy(cims-notify 가 직접 모듈 start/stop) 경로는 없다. 유일한 escape 는
+# 비상 밸브 CIMS_HA_DISABLE(§9) 로, 그 경우 Supervisor 가 reconcile 을 안 할 뿐
+# cims-notify 는 그대로 role 만 기록한다(무해).
 
 set -euo pipefail
+
+# keepalived(v2.3.x) 는 umask 0177 로 돌아 이 스크립트와 그 자식까지 상속된다 —
+# 로그/파일이 탐색비트 없는 0600 으로 생성돼 운영자 진단이 막히므로 진입 즉시 고정한다.
+umask 0022
 
 SVC="${1:-}"
 TYPE="${2:-}"
@@ -28,26 +34,61 @@ if [[ -z "$SVC" || -z "$STATE" ]]; then
     exit 2
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ha.json lookup — 스테이징 레이아웃(/etc/keepalived/bin/ → ../ha.json) 우선,
+# 없으면 개발/번들 레이아웃(agent/bin/ → ../keepalived/ha.json). cims-health 와 동일.
+if [[ -f "$SCRIPT_DIR/../ha.json" ]]; then
+    HA_JSON="$(cd "$SCRIPT_DIR/.." && pwd)/ha.json"
+else
+    HA_JSON="$(cd "$SCRIPT_DIR/../keepalived" 2>/dev/null && pwd)/ha.json"
+fi
+
 LOG="${HA_LOG_DIR:-/var/log/cims-ha}/notify_${SVC}.log"
-UNIT="cims@${SVC}.service"
 mkdir -p "$(dirname "$LOG")" 2>/dev/null
+# 과거 umask 전파로 0600 이 된 기존 디렉토리/로그 자가 교정 — 운영자(비-root)가
+# notify 로그를 읽을 수 있어야 절체 진단이 된다.
+chmod 755 "$(dirname "$LOG")" 2>/dev/null || true
+[[ -f "$LOG" ]] && chmod 644 "$LOG" 2>/dev/null || true
 
-log() { echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: $*" >> "$LOG"; }
-
+# 실제 VRRP 역할(MASTER/BACKUP/FAULT)만 기록한다. STOP(keepalived 자체 종료) 등은 마지막
+# 역할을 보존 — reconcile 이 알 수 없는 role 로 모듈을 오작동(잘못된 정지/기동)시키지 않게 한다.
 case "$STATE" in
-    MASTER)
-        log "MASTER 승격 → systemctl start ${UNIT}"
-        systemctl start "${UNIT}" 2>>"$LOG" || log "FAIL: systemctl start ${UNIT}"
-        ;;
-    BACKUP|FAULT)
-        log "${STATE} 강등 → systemctl stop ${UNIT}"
-        systemctl stop "${UNIT}" 2>>"$LOG" || log "FAIL: systemctl stop ${UNIT}"
-        ;;
-    STOP)
-        log "keepalived 자체 종료 — ${UNIT} 상태 유지 (운영자가 직접 제어)"
-        ;;
+    MASTER|BACKUP|FAULT) ;;
     *)
-        log "알 수 없는 상태 — 무시"
+        echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: 무시 (role 미기록)" >> "$LOG"
+        exit 0
         ;;
 esac
+
+# ── role 파일 기록 (ha_service_model.md §9) ────────────────────────────────
+# CIMS_HOME 은 ha.json 에서 해석 — root(keepalived) 가 agent 의 run/ha 를 쓸 수 있게
+# 절대경로를 확정한다. Supervisor 는 이 role 값 변화를 관측해 reconcile 을 수행한다.
+python3 - "$HA_JSON" "$SVC" "$STATE" <<'PY' 2>>"$LOG" || true
+import json, os, sys, time
+ha_json, svc, state = sys.argv[1], sys.argv[2], sys.argv[3]
+home = "/opt/cims"
+try:
+    if os.path.isfile(ha_json):
+        home = json.load(open(ha_json)).get("cims_home", home)
+except Exception:
+    pass
+d = os.path.join(home, "run", "ha", "role")
+os.makedirs(d, exist_ok=True)
+path = os.path.join(d, svc + ".json")
+try:
+    seq = int(json.load(open(path)).get("sequence", 0))
+except Exception:
+    seq = 0
+try:
+    bid = open("/proc/sys/kernel/random/boot_id").read().strip()
+except Exception:
+    bid = ""
+tmp = path + ".tmp"
+with open(tmp, "w") as f:
+    json.dump({"service": svc, "role": state, "sequence": seq + 1,
+               "updated_at": int(time.time()), "boot_id": bid}, f)
+os.replace(tmp, path)
+PY
+
+echo "$(date -Iseconds) ${TYPE} ${NAME} -> ${STATE} (prio=${PRIO}) :: role=${STATE} 기록 (모듈 제어는 Supervisor reconcile)" >> "$LOG"
 exit 0

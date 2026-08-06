@@ -99,8 +99,8 @@ public:
     /** IPv6 사용 유무 */
     bool m_bIpv6;
 
-    // v3 (2026-04-22): Realm/AuthRealm 필드 제거.
-    //   domain/auth_realm 은 access_services.jsonl (CspAccessServiceMap) 이 SOT.
+    // Realm/AuthRealm 필드는 없다.
+    //   domain/auth_realm 의 SOT 는 access_services.jsonl (CCspServiceMap, CspServiceMap.{h,cpp}).
     //   도메인→서비스 매핑은 CCspServiceMap::BuildDomainToKindMap().
 
     /** SIP REGISTER timeout 최소 시간 */

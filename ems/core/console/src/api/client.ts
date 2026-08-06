@@ -6,7 +6,7 @@ function buildApiUrl(path: string): string {
   const env = (import.meta as unknown as { env: Record<string, string> }).env || {}
   if (env.VITE_CSC_DIRECT === '1' && env.PROD !== 'true') {
     const loc = window.location
-    const port = env.VITE_CSC_PORT || '4420'
+    const port = env.VITE_CSC_PORT || '4421'
     return `${loc.protocol}//${loc.hostname}:${port}${BASE}${path}`
   }
   return `${BASE}${path}`

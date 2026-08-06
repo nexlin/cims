@@ -25,7 +25,7 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 
 | 서버 | 포트 | 용도 |
 |------|------|------|
-| Admin API Server | 4420 (HTTPS) | 관리 콘솔 REST API |
+| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API |
 | MCPTT Service Server | 4430 (HTTPS) | 단말용 IdMS/GMS/CMS/KMS |
 
 ### 1.3 프로세스 구성
@@ -43,7 +43,7 @@ python3 csc_app.py [--config csc.json]
 ```
 Console UI (React)
      │
-     ▼ HTTPS (4420 운영 / 4445 검증 / 4419 TB)
+     ▼ HTTPS (4421 운영 / 4445 검증 / 4419 TB)
 Admin API Server ─────────────────────────────────┐
   ├─ auth.py            (인증/JWT)                  │
   ├─ admin.py           (가입자 CRUD + Call/PTT 구독 + PTT 그룹) │
@@ -80,7 +80,7 @@ MCPTT Service Server                                │
 
 ### 2.2 핸들러 등록
 
-각 handler 모듈이 `<NAME>_HANDLER_LIST` 를 export, `csc_app.py` 가 모두 합쳐서 Admin Server (4420/4445/4419) 에 등록:
+각 handler 모듈이 `<NAME>_HANDLER_LIST` 를 export, `csc_app.py` 가 모두 합쳐서 Admin Server (4421/4445/4419) 에 등록:
 
 ```python
 HANDLER_LIST = (
@@ -682,7 +682,7 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 {
   "Server": {
     "Ip": "0.0.0.0",
-    "Port": 4420
+    "Port": 4421
   },
   "McpttServer": {
     "Ip": "0.0.0.0",
@@ -736,7 +736,7 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 
 base 가 없으면 빈 dict 에서 시작해 overlay 만으로 기동한다. 따라서 상용 배포본은
 agent 가 쓴 `csc/config.json` 단독으로 정상 동작해야 하며, base 부재를 이유로
-빈 설정(포트 4420 default·dummy user·JWT 미설정 → 401)으로 떨어지면 안 된다.
+빈 설정(포트 4421 default·dummy user·JWT 미설정 → 401)으로 떨어지면 안 된다.
 
 ⚠️ **overlay 는 base 를 덮는다** — OAM 은 job 디스패치 시 deployment 의 sparse overlay
 (사용자가 실제로 바꾼 값)를 `config_template` 의 `default` 위에 올려 완전한 설정으로
@@ -767,7 +767,7 @@ CSC 는 `csc_app.py` 에서 핸들러를 등록해 `load_config()` → `admin_au
 ```
 csc/
 ├── src/
-│   ├── csc_app.py                  # 메인 엔트리포인트 (Admin 4420 + MCPTT 4430)
+│   ├── csc_app.py                  # 메인 엔트리포인트 (Admin 4421 + MCPTT 4430)
 │   ├── handlers/                   # HTTP 라우트 핸들러
 │   │   ├── auth.py                 # JWT 인증
 │   │   ├── admin.py                # 가입자/Call/PTT 구독 + PTT 그룹 CRUD

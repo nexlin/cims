@@ -36,7 +36,7 @@ SCOPE_MCPTT        = "3gpp:mcptt:ptt_server"  # MCPTT 서비스 평면(XCAP/KMS/
 IDMS_ISSUER = "idms.mcptt.com"
 KMS_URI = "kms.mcptt.com"
 IDMS_DOMAIN = "mcptt.com"
-KMS_CLIENT_REQ_URL = "http://localhost:4420/keymanagement/identity/v1/init"
+KMS_CLIENT_REQ_URL = "http://localhost:4421/keymanagement/identity/v1/init"
 USERS = {}            # tel:+msisdn → {password,...} (XCAP/profile 키 = MCPTT ID)
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}

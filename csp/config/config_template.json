@@ -148,23 +148,37 @@
           "restart": true
         },
         {
-          "key": "Setup.MediaServer.Host",
-          "label": "미디어서버 주소",
-          "type": "string",
-          "default": "127.0.0.1",
-          "deploy_value": "@CMP_IP@",
+          "key": "Setup.MediaServer.Endpoints",
+          "label": "미디어서버(CMP) 엔드포인트",
+          "type": "object_list",
           "restart": true,
-          "help": "미디어서버(CMP)의 IP 또는 호스트명."
-        },
-        {
-          "key": "Setup.MediaServer.ControlPort",
-          "label": "제어 포트",
-          "type": "int",
-          "default": 9000,
-          "min": 1,
-          "max": 65535,
-          "restart": true,
-          "help": "미디어서버의 JSON-over-UDP 제어 수신 포트."
+          "help": "미디어서버(CMP) 노드 목록. 첫 행이 primary. 2개 이상이면 Session-ID consistent-hash 로 relay 세션을 분배한다(All-Active). 죽거나(HEARTBEAT 무응답) 포화된(가용 RTP 포트 0) 노드는 헬스체크로 ring 에서 제외되어 신규 세션이 가지 않는다.",
+          "item_schema": {
+            "fields": [
+              {
+                "key": "ip",
+                "label": "IP",
+                "type": "string",
+                "required": true,
+                "help": "미디어서버(CMP)의 IP 또는 호스트명."
+              },
+              {
+                "key": "port",
+                "label": "제어 포트",
+                "type": "int",
+                "default": 9000,
+                "min": 1,
+                "max": 65535,
+                "help": "미디어서버의 JSON-over-UDP 제어 수신 포트."
+              }
+            ]
+          },
+          "default": [
+            { "ip": "127.0.0.1", "port": 9000 }
+          ],
+          "deploy_value": [
+            { "ip": "@CMP_IP@", "port": 9000 }
+          ]
         },
         {
           "key": "Setup.MediaServer.LocalPort",
@@ -183,7 +197,8 @@
           "default": "0.0.0.0",
           "deploy_value": "@CSP_IP@",
           "restart": true,
-          "help": "CSP 가 미디어서버 응답을 받을 로컬 bind IP. 0.0.0.0 이면 모든 인터페이스."
+          "help": "CSP 가 미디어서버 응답을 받을 로컬 bind IP. 0.0.0.0 이면 모든 인터페이스.",
+          "scope": "system"
         }
       ],
       "scope": "service"
@@ -415,6 +430,23 @@
       "scope": "service"
     },
     {
+      "key": "service_log",
+      "title": "서비스 로그 (녹취·flow)",
+      "description": "녹취·SIP/미디어/CSC msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",
+      "fields": [
+        {
+          "key": "Setup.ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "service_log",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "녹취(call.d/*.rtp) + SIP/미디어서버/CSC msg.jsonl + flow.jsonl 저장 루트. CMP·CSC 와 동일 경로여야 함."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. 모든 필드는 hidden: true. UI 렌더링 시 group 속성으로 sub-header 분류.",
@@ -541,17 +573,6 @@
           "hidden": true,
           "restart": true,
           "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback."
-        },
-        {
-          "key": "Setup.ServiceLogging.Dir",
-          "label": "서비스 로그 루트",
-          "group": "service_logging",
-          "type": "path",
-          "default": "service_log",
-          "deploy_value": "@SERVICE_LOG_DIR@",
-          "hidden": true,
-          "restart": true,
-          "help": "녹취(call.d/*.rtp) + SIP/미디어서버/CSC msg.jsonl + flow.jsonl 저장 루트."
         },
         {
           "key": "Setup.ServiceLogging.Enable",
@@ -769,8 +790,8 @@
         "kind": "jsonl",
         "file": "config/local_nodes.jsonl"
       },
-      "scope": "system",
-      "scope_note": "system: HA mode 따라 분배. active_standby → 양 멤버 동일 (VIP), all_active → 멤버별 svc IP. csc 의 _put_deployment_collection 이 자동 결정."
+      "scope": "service",
+      "scope_note": "service: 그룹 공통 — CSP active_standby 는 keepalived 가 VIP 를 부여하는 방식이라 bind_ip=0.0.0.0 (기본값) 으로 실IP/VIP 를 모두 수신하며, 멤버 간 리스너 정의가 동일해야 한다. 명시 IP bind 는 같은 host 다중 인스턴스 (CSP/PSP/ISP) 구분 등 특수한 경우만. 편집은 그룹 탭, 정합은 자동 동기화."
     },
     {
       "key": "remote_nodes",
@@ -957,7 +978,8 @@
             "key": "register_to_remote",
             "label": "REGISTER 전송",
             "type": "bool",
-            "default": false
+            "default": false,
+            "help": "현재 런타임 미구현 — 값만 보관하며 트렁크로 REGISTER 를 보내지 않는다."
           },
           {
             "key": "register_expires",
@@ -1113,7 +1135,8 @@
               "invite_response",
               "none"
             ],
-            "default": "options_ping"
+            "default": "options_ping",
+            "help": "현재 런타임 미구현 — 프로브를 보내지 않아 모든 Route 가 alive 로 취급된다. 특정 Route 를 빼려면 routes.enabled=false 를 쓴다."
           },
           {
             "key": "health_check_interval_sec",
@@ -1224,7 +1247,8 @@
               "method",
               "p_asserted_identity",
               "via_host"
-            ]
+            ],
+            "help": "dst_ip / p_asserted_identity / via_host 는 현재 런타임이 값을 채우지 않아 항상 빈 값으로 평가된다. 수신 인터페이스 구분은 ACL scope=local_node 를 사용."
           },
           {
             "key": "op",
@@ -1249,7 +1273,7 @@
             "label": "값",
             "type": "string",
             "default": "",
-            "help": "in_list 는 콤마 분리. in_cidr 은 1.2.3.0/24. regex 는 POSIX ERE. exists/not_exists 는 무시."
+            "help": "in_list 는 콤마 분리. in_cidr 은 IPv4 전용 1.2.3.0/24. regex 는 ECMAScript 문법. exists/not_exists 는 무시."
           },
           {
             "key": "tags",

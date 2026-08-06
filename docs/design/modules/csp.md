@@ -357,16 +357,47 @@ if (gclsSipServerMap.SelectRoutePrefix(pszTo, clsSipServer, strTo)) {
 
 **파일:** `CmpClient.h/.cpp`
 
-CMP(미디어 서버)와 JSON-over-UDP 통신.
+CMP(미디어 서버)와 JSON-over-UDP 통신. 단일 공유 소켓으로 다중 CMP endpoint(All-Active)를 다룬다.
 
 **통신 구조:**
 
 ```
 CCmpClient
-  ├─ KeepAliveLoop (3초 주기 HEARTBEAT, 연속 3회 실패 시 Disconnected 판정)
+  ├─ KeepAliveLoop (3초 주기 — endpoint 별 HEARTBEAT: liveness + 자원 요약(포화) + audit digest)
   ├─ RecvLoop (CMP 응답 수신, transId 매칭)
-  └─ SendRequestAndWait() (동기 요청, 100ms 대기 × 3회 재전송)
+  └─ SendRequestAndWait(sessionKey, payload) (동기 요청, 100ms × 3회 재시도 ≈ 최대 300ms)
 ```
+
+**다중 endpoint 분배 (All-Active):**
+
+`Setup.MediaServer.Endpoints` = `[{ip,port}, ..]` 로 다중 CMP 를 등록한다(첫 행=primary). 각 endpoint 는
+`m_endpoints` + consistent-hash ring(`ConsistentHashRing.h`, vnode 128)에 등록되고, Session/Group API 는
+routing key(VoLTE=relay `session_id`=`cmp_sess_N`, PTT=`group_id`)로 endpoint 를 선택한다.
+
+- **session-sticky**: `m_mapSessionToEndpointKey` 캐시로 같은 세션/그룹의 후속 Modify/Remove 가 최초 배정된
+  동일 CMP 로 간다.
+- `_ResolveEndpoint(key)`: 캐시 hit → 그 endpoint, miss → `m_ring.Select(key)` → 캐시 기록.
+  endpoint 미등록/전 endpoint 제외 시 primary(`m_endpoints.front()`) fallback.
+- keyless 호출(빈 sessionKey)은 primary 로 간다. `AddEndpoint(ip,port)` 는 중복 dedup.
+- Endpoints 를 비우면 레거시 `Host`/`ControlPort`(그 다음 `RtpRelay.*`)를 primary 로 쓰는 단일 운영(하위호환).
+
+**per-endpoint 헬스체크 (신규 세션 회피 + 절체 정리):**
+
+`KeepAliveLoop` 는 3초마다 각 endpoint 에 개별 HEARTBEAT 를 보낸다. 응답 payload 의 `resource` 요약
+(relay/ptt total·used — [cmp.md](cmp.md) §3.2)으로 포화를 같은 왕복에서 판정하고(별도 STATS 폴링 없음.
+CMP 는 degraded 자가판정이 없어 CSP 가 relay free + ptt free 합계 0 임계로 판정), `session_digest` 는
+audit 수준2 지문으로 stash 한다. 판정에 따라 ring 을 갱신한다:
+
+- **DEAD** (HEARTBEAT 연속 3회 무응답 ≈9초) → `m_ring.MarkUnhealthy(key,30s)` → 신규 세션이 그 노드로 안 감.
+  추가로 그 endpoint 로 pin 된 호를 **능동 종료(BYE)**: `TakeSessionKeysForEndpoint(key)` 로 sticky 캐시에서
+  key 를 수거해 `m_fnEndpointDownCallback` 발화 → CSP 가 VoLTE(`CCallMap::TerminateByRelaySession`) / PTT
+  (`CGroupCallService::TerminateGroupLocal`) 호를 정리. dead node 이므로 CMP 로의 blocking 호출(RemoveSession/
+  LeaveGroup)은 생략(local BYE + 레코드 정리만). *신규만 회피 — 죽은 노드의 미디어 상태는 이관 불가(AA=분배,
+  상태 미러 아님), 사용자는 재발신으로 healthy 노드에 자동 안착.*
+- **SATURATED** (resource 가용 RTP 포트 0) → ring 제외(신규 세션만; 기존 세션은 유지, teardown 안 함).
+- **RECOVERED** (HEARTBEAT 응답 & 포화 해제) → `m_ring.MarkHealthy(key)` → ring 재편입.
+- 집계 `m_bConnected` = "live endpoint ≥ 1". `m_fnConnectionCallback` 은 전부 down ↔ 하나라도 up **전이에서만**
+  발화(부분 장애 시 전체 그룹이 clear 되지 않도록). 전 노드 down 만 `OnCmpStatusChanged(false)` 경로.
 
 **주요 명령** (wire 는 envelope v2 `{hdr, payload}` — 정본
 [../../api/cmp_media_api.md](../../api/cmp_media_api.md), payload 필드는 [cmp.md](cmp.md) §3.2):
@@ -478,22 +509,18 @@ SendRequestAndWait(payload)
   └─ RecvLoop에서 transId 매칭 → notify (총 대기 ceiling ≈ 300ms)
 ```
 
-멀티 CMP endpoint(HA) 시 session_id/group_id 기반 consistent hash ring 으로 endpoint 를
-sticky 선택하고, 단일 endpoint 환경에서는 primary 를 사용한다.
-
-**연결 상태 관리:**
+**연결 상태 관리 (per-endpoint 헬스 → 집계):**
 
 ```
-m_bConnected = false
-  │
-  ├─ KeepAliveLoop (3초 주기) → HEARTBEAT 전송
-  │   ├─ 응답 수신 → m_bConnected = true, 실패 카운터 리셋
-  │   └─ 타임아웃 → 실패 카운터 증가
-  │       └─ 연속 3회 실패 (≈9초 무응답) → m_bConnected = false
-  │           └─ m_fnConnectionCallback(false) → GroupCallService 통보
-  │
-  └─ 재연결 시 → m_fnConnectionCallback(true)
-      └─ GroupCallService::OnCmpStatusChanged() → 그룹 재생성
+각 endpoint h ∈ m_endpoints (EndpointHealth: iFailCount/bLive/bSaturated)
+  ├─ HEARTBEAT 응답             → h.bLive=true,  ring MarkHealthy(포화 아니면)
+  ├─ HEARTBEAT 3회 무응답       → h.bLive=false, ring MarkUnhealthy → DEAD 전이 시 그 노드 호 BYE
+  └─ 응답 resource 가용포트 0   → h.bSaturated=true, ring MarkUnhealthy(신규만 제외)
+
+집계 m_bConnected = (live endpoint ≥ 1)
+  ├─ 0→≥1 전이 → m_fnConnectionCallback(true)  → OnCmpStatusChanged(true)  → SyncGroupsState
+  └─ ≥1→0 전이 → m_fnConnectionCallback(false) → OnCmpStatusChanged(false) → 전 그룹 RTP 캐시 clear
+부분 장애(일부 endpoint DEAD) → m_fnEndpointDownCallback(keys) → 그 노드 호만 BYE (전체 clear 아님)
 ```
 
 단발 HEARTBEAT 타임아웃(부하 시 간헐 발생)으로는 끊김 판정하지 않는다 — 연속 3회 실패에서만
@@ -699,6 +726,11 @@ CSC(관리 서버)로부터 설정 변경 이벤트를 UDP로 수신.
 
 **수신 포트:** 4421 (UDP)
 
+**bind IP:** primary local_node 의 `bind_ip` 원문을 따른다. `0.0.0.0`/빈값이면 INADDR_ANY
+(실IP·keepalived VIP 모두 수신 — SIP 리스너와 동일 규칙), 명시 IP 면 그 IP 로 bind (같은 호스트에서
+CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). `gclsSetup.m_strLocalIp` 는
+기동 시 `0.0.0.0` 이 실IP 로 치환된 값이라 bind 판단에 쓰지 않는다.
+
 **이벤트 형식:**
 
 ```json
@@ -809,9 +841,9 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
 | SIP UDP RX | 2 (설정) | SIP UDP 수신 |
 | SIP TCP RX | 2 (설정) | SIP TCP 연결 수락 |
 | SIP Callback Pool | 5 (설정) | ISipStackCallBack 디스패치 |
-| CMP KeepAlive | 1 | CMP heartbeat (30초) |
+| CMP KeepAlive | 1 | endpoint 별 CMP heartbeat/STATS (3초 주기, 연속 3회 실패 ~9초 시 DEAD) |
 | CMP RecvLoop | 1 | CMP 응답 수신 |
-| CSC Interface | 1 | CSC 이벤트 수신 (TCP 4421) |
+| CSC Interface | 1 | CSC 이벤트 수신 (UDP 4421) |
 | GroupCall Monitor | 1 | 그룹 상태 주기 점검 |
 | Monitor Server | 1 | HTTP 모니터링 인터페이스 |
 
@@ -841,10 +873,14 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
       "TcpCallBackThreadCount": 5,
       "StackPeriod": 20
     },
-    "RtpRelay": {
-      "CmpIp": "127.0.0.1",
-      "CmpPort": 9000,
-      "LocalCmpPort": 9001
+    "MediaServer": {
+      "Enable": true,
+      "Endpoints": [
+        { "ip": "10.0.1.48", "port": 9000 },
+        { "ip": "10.0.1.49", "port": 9000 }
+      ],
+      "LocalPort": 9001,
+      "LocalIp": "0.0.0.0"
     },
     "Media": {
       "Codecs": [
@@ -887,6 +923,11 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
   }
 }
 ```
+
+> **미디어서버 주소**: `Setup.MediaServer.Endpoints` = `[{ip,port}, ..]` 가 정본(첫 행=primary, 2개 이상이면
+> All-Active 분배). `LocalPort` 는 CSP 가 CMP 응답을 받는 로컬 bind 포트(단수). 구 배포 호환을 위해
+> `Setup.MediaServer.Host`/`ControlPort`, 그리고 더 오래된 `Setup.RtpRelay.{CmpIp,CmpPort,LocalCmpPort}` 는
+> Endpoints 가 비었을 때만 primary 로 읽힌다(deprecated fallback).
 
 ### 6.1 SDP 코덱 테이블 (`Setup.Media.Codecs`)
 
@@ -931,7 +972,7 @@ ServiceMain()
   5. CGroupMap 로드 (DB 또는 파일)
   6. CspUserMap 로드 (DB 또는 파일)
   7. MariaDB 연결 (DbHost 설정 시)
-  8. CCscInterface 시작 (TCP 4421)
+  8. CCscInterface 시작 (UDP 4421)
   9. CModuleDispatcher 시작 (SIP 스택 + 콜백 등록)
   10. Monitor Server 시작
   11. Main Loop:

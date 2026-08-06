@@ -952,7 +952,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertIn("subscribe-complete=True", r.detail)
 
     def test_entry_check_required_ports_target_prod(self) -> None:
-        """target=prod → _required_ports csc/console 4420/80 + 시그널링/미디어 인스턴스."""
+        """target=prod → _required_ports csc/console 4421/80 + 시그널링/미디어 인스턴스."""
         from verify.lib.items.stage6 import entry_check
         ctx = self._VerifyContext.create(
             repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
@@ -960,7 +960,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         ports = entry_check._required_ports(ctx)
         # entry: (port, proto, host, label)
         triples = {(p, proto) for p, proto, _h, _l in ports}
-        self.assertIn((4420, "tcp"), triples)
+        self.assertIn((4421, "tcp"), triples)
         self.assertIn((80,   "tcp"), triples)
         # csp/cmp + psp/pmp 는 두 환경 동일 (포트는 같고 host 만 다름)
         self.assertIn((5060, "udp"), triples)
@@ -987,7 +987,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
         )
         self.assertEqual(scn_db_sync._deployed_csc_base(ctx),
-                         "https://127.0.0.1:4420")
+                         "https://127.0.0.1:4421")
 
     def test_scn_subscribe_pass_when_notify_missing_but_marker_present(self) -> None:
         """NOTIFY 라인 0 이어도 SUBSCRIBE 마커 있으면 PASS — msg_log 비활성 환경 대응."""
@@ -2399,14 +2399,14 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4445")
 
     def test_target_helpers_prod(self) -> None:
-        """opts.target='prod' — _ports {csc:4420, console:80}."""
+        """opts.target='prod' — _ports {csc:4421, console:80}."""
         from verify.lib.items.stage5 import _native_steps as ns
         ctx = self._VerifyContext.create(
             repo_root=_REPO_ROOT, stage=5, opts={"target": "prod"},
         )
         self.assertEqual(ns._target(ctx), "prod")
-        self.assertEqual(ns._ports(ctx), {"csc": 4420, "console": 80})
-        self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4420")
+        self.assertEqual(ns._ports(ctx), {"csc": 4421, "console": 80})
+        self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4421")
 
     def test_target_helpers_unknown_falls_back_to_verify(self) -> None:
         """알 수 없는 target → verify default."""
@@ -2422,29 +2422,29 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         """_csc_overlay 가 명시 ports dict 사용."""
         from verify.lib.items.stage5 import _native_steps as ns
         verify_ports = {"csc": 4445, "console": 8081}
-        prod_ports = {"csc": 4420, "console": 80}
+        prod_ports = {"csc": 4421, "console": 80}
         self.assertEqual(ns._csc_overlay("csc", verify_ports), {"Server.Port": 4445})
-        self.assertEqual(ns._csc_overlay("csc", prod_ports), {"Server.Port": 4420})
+        self.assertEqual(ns._csc_overlay("csc", prod_ports), {"Server.Port": 4421})
         self.assertEqual(ns._csc_overlay("console", verify_ports), {"Port": 8081})
         self.assertEqual(ns._csc_overlay("console", prod_ports), {"Port": 80})
         self.assertEqual(ns._csc_overlay("unknown", verify_ports), {})
 
-    def test_step_12_target_prod_uses_4420(self) -> None:
-        """target=prod 시 _csc_overlay 가 csc=4420 기대값으로."""
+    def test_step_12_target_prod_uses_4421(self) -> None:
+        """target=prod 시 _csc_overlay 가 csc=4421 기대값으로."""
         from verify.lib.items.stage5 import _native_steps
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
             base = os.path.join(td, "mgmt-server", "csc")
             os.makedirs(base)
-            # 4420 으로 overlay 된 config 가 있다 가정
+            # 4421 으로 overlay 된 config 가 있다 가정
             with open(os.path.join(base, "config.json"), "w") as f:
-                _json.dump({"Server.Port": 4420}, f)
+                _json.dump({"Server.Port": 4421}, f)
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
                                               opts={"target": "prod"})
             ctx.dist_dir = td
             r = _native_steps.step_12_verify_overlay(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertIn("Server.Port=4420", r.detail)
+        self.assertIn("Server.Port=4421", r.detail)
 
     def test_step_12_target_prod_fail_when_4445(self) -> None:
         """target=prod 인데 config 가 verify 값(4445) 면 FAIL."""
@@ -2460,7 +2460,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
             ctx.dist_dir = td
             r = _native_steps.step_12_verify_overlay(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertIn("기대=4420", r.detail)
+        self.assertIn("기대=4421", r.detail)
 
     def test_step_12_pass_with_flat_key(self) -> None:
         import tempfile

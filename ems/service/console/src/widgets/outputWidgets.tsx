@@ -13,20 +13,22 @@ import VolteHistoryPage from '../pages/VolteHistoryPage'
 import PttHistoryPage from '../pages/PttHistoryPage'
 
 // 서비스 현황 — 섹션별 개별 위젯 (각 위젯 자체 데이터 페칭, /service/live·/trend 는 공유 폴러)
-export const svcVolteKpiWidget: WidgetDef = { id: 'cims.svc-volte-kpi', title: 'VoLTE 요약', category: 'service', component: VolteKpiCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcPttKpiWidget: WidgetDef = { id: 'cims.svc-ptt-kpi', title: 'PTT 요약 · 노드 분산', category: 'service', component: PttKpiCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcTrendWidget: WidgetDef = { id: 'cims.svc-trend', title: '동시 사용량 추세', category: 'service', component: TrendCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcAnomalyWidget: WidgetDef = { id: 'cims.svc-anomaly', title: '서비스 이상 징후', category: 'service', component: AnomalyCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcVolteCallsWidget: WidgetDef = { id: 'cims.svc-volte-calls', title: 'VoLTE 활성 호', category: 'service', component: VolteCallsCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcPttGroupsWidget: WidgetDef = { id: 'cims.svc-ptt-groups', title: 'PTT 활성 그룹', category: 'service', component: PttGroupsCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcEventsWidget: WidgetDef = { id: 'cims.svc-events', title: '라이브 이벤트', category: 'event', component: EventFeedCard, defaultSize: { w: 6 }, adminOnly: true }
-export const svcOrgWidget: WidgetDef = { id: 'cims.svc-org', title: '부서별 서비스 이용', category: 'service', component: OrgStatsCard, defaultSize: { w: 12 }, adminOnly: true }
+export const svcVolteKpiWidget: WidgetDef = { id: 'cims.svc-volte-kpi', title: 'VoLTE 요약', category: 'service', apis: ['stats.service.live'], component: VolteKpiCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcPttKpiWidget: WidgetDef = { id: 'cims.svc-ptt-kpi', title: 'PTT 요약 · 노드 분산', category: 'service', apis: ['stats.service.live'], component: PttKpiCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcTrendWidget: WidgetDef = { id: 'cims.svc-trend', title: '동시 사용량 추세', category: 'service', apis: ['stats.service.trend'], component: TrendCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcAnomalyWidget: WidgetDef = { id: 'cims.svc-anomaly', title: '서비스 이상 징후', category: 'service', apis: ['stats.service.live'], component: AnomalyCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcVolteCallsWidget: WidgetDef = { id: 'cims.svc-volte-calls', title: 'VoLTE 활성 호', category: 'service', apis: ['stats.service.live'], component: VolteCallsCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcPttGroupsWidget: WidgetDef = { id: 'cims.svc-ptt-groups', title: 'PTT 활성 그룹', category: 'service', apis: ['stats.service.live', 'stats.service.ptt-members'], component: PttGroupsCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcEventsWidget: WidgetDef = { id: 'cims.svc-events', title: '라이브 이벤트', category: 'event', apis: ['stats.service.events'], component: EventFeedCard, defaultSize: { w: 6 }, adminOnly: true }
+export const svcOrgWidget: WidgetDef = { id: 'cims.svc-org', title: '부서별 서비스 이용', category: 'service', apis: ['stats.service.org', 'stats.subscribers'], component: OrgStatsCard, defaultSize: { w: 12 }, adminOnly: true }
 // 호·그룹·이벤트·조직·조회를 탭 1개 위젯으로 통합 (빈 위젯/헤더 스크롤 완화 + 한 영역 운용)
-export const svcDetailWidget: WidgetDef = { id: 'cims.svc-detail', title: '서비스 상세 (호·그룹·이벤트·부서·조회)', category: 'service', component: ServiceDetailTabs, defaultSize: { w: 12 }, adminOnly: true }
+export const svcDetailWidget: WidgetDef = { id: 'cims.svc-detail', title: '서비스 상세 (호·그룹·이벤트·부서·조회)', category: 'service',
+  apis: ['stats.service.live', 'stats.service.ptt-members', 'stats.service.events', 'stats.service.org', 'stats.subscribers'], component: ServiceDetailTabs, defaultSize: { w: 12 }, adminOnly: true }
 
 // 가입자 조회 (특정 가입자 현재 상태) — 기존 id 유지(하위호환), 내용은 조회 위젯으로 정정
 export const subscriberStatusWidget: WidgetDef = {
   id: 'cims.subscriber-status',
+  apis: ['stats.subscribers'],
   title: '가입자 조회',
   category: 'service',
   component: SubscriberLookup,
@@ -36,6 +38,7 @@ export const subscriberStatusWidget: WidgetDef = {
 
 export const serviceStatsWidget: WidgetDef = {
   id: 'cims.service-stats',
+  apis: ['stats.service.volte', 'stats.service.ptt', 'stats.messages'],
   title: '서비스 통계 (VoLTE/PTT)',
   category: 'stats',
   component: (p: WidgetProps) => {
@@ -48,6 +51,7 @@ export const serviceStatsWidget: WidgetDef = {
 
 export const messageStatsWidget: WidgetDef = {
   id: 'cims.message-stats',
+  apis: ['stats.messages.iface'],
   title: '메시지 통계 (iface)',
   category: 'stats',
   component: (p: WidgetProps) => {
@@ -60,6 +64,8 @@ export const messageStatsWidget: WidgetDef = {
 
 export const volteHistoryWidget: WidgetDef = {
   id: 'cims.volte-history',
+  apis: ['flow.call-logs', 'flow.get', 'flow.body', 'stats.service.org',
+         'recording.get', 'recording.segments', 'recording.segment.audio'],
   title: 'VoLTE 이력',
   category: 'event',
   component: VolteHistoryPage,
@@ -69,6 +75,8 @@ export const volteHistoryWidget: WidgetDef = {
 
 export const pttHistoryWidget: WidgetDef = {
   id: 'cims.ptt-history',
+  apis: ['flow.ptt-history', 'flow.ptt-history.session', 'flow.ptt-history.flow',
+         'csc.ptt-groups.list', 'recording.get', 'recording.segments', 'recording.segment.audio'],
   title: 'PTT 이력',
   category: 'event',
   component: PttHistoryPage,

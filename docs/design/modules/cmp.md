@@ -313,12 +313,18 @@ CSP 는 이 명령을 보내지 않는다 — OAM stats 핸들러와 검증 파�
 
 - `relay` = VoIP 풀(`_freeResources`/`PRtpRelay`), `ptt` = 그룹(floor) 풀 + 멤버 유닛 풀(`member_total`/`member_used`).
   OAM stats 핸들러가 이를 flat 키(`rtp_ports_*`/`ptt_rtp_ports_*`)로 정규화해 대시보드에 전달.
+- **CSP 의 포화 판정 신호**: CSP 헬스체크는 HEARTBEAT 응답의 동일 `resource` 요약으로 relay·ptt
+  가용 포트(total−used) 합이 0 이면 그 CMP 를 SATURATED 로 보고 ring 에서 신규 세션만 제외한다
+  (csp.md §3.6). `status` 는 항상 `"OK"` 라 degraded 자가판정은 없고, 판정은 CSP 가 임계로 한다.
 
 #### HEARTBEAT — 연결 확인 + 자원 요약
 
-CSP 가 3초 주기로 송신 (hdr-only, sesid/service 없음). **응답 payload** 에 `resource`
-요약(STATS 의 resource 와 동일 구조)이 동봉된다 — client 는 이를 부하 기반 CMP 선택·조기
-호 거절에 쓸 수 있고, `resource` 의 키 목록이 곧 CMP 의 기능(function) 광고다.
+CSP 가 각 CMP endpoint 에 3초 주기로 송신 (hdr-only, sesid/service 없음). **응답 payload** 에
+`resource` 요약(STATS 의 resource 와 동일 구조)과 `session_digest`(audit 수준2 지문)가 동봉된다 —
+client 는 이 한 왕복으로 liveness·포화(부하 기반 CMP 선택·조기 호 거절)·audit 대조를 수행하고,
+`resource` 의 키 목록이 곧 CMP 의 기능(function) 광고다. CSP 는 연속 3회 무응답이면 그 endpoint 를
+DEAD 로 판정한다(csp.md §3.6). AA 다중 CMP 를 CSP 가 운용하지만 각 CMP 노드는 이를 알지 못한다
+(분배·헬스는 CSP 책임).
 
 ---
 

@@ -66,6 +66,7 @@ function KpiWidget() {
 
 export const kpiWidget: WidgetDef = {
   id: 'cims.kpi',
+  apis: ['stats.health'],
   title: 'KPI (가입자/번호/호/그룹/RTP)',
   category: 'service',
   component: KpiWidget,

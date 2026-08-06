@@ -58,6 +58,8 @@ function formatSec(sec: number): string {
 interface AlertRow extends AlertEvent {
   resolved_at?: string  // close 이벤트가 있으면 그 시각
   duration?: string
+  occurrences?: number  // 재통지 횟수 (clear 없이 반복 수신된 open 수, 최초 포함)
+  last_open_ts?: string // 마지막 재통지 시각 (occurrences > 1 일 때만 의미)
 }
 
 function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
@@ -96,6 +98,11 @@ function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
 /**
  * open/close 페어링: 같은 type 의 가장 가까운 후속 close 를 찾아 매칭.
  * 매칭 안 된 open 은 currently open 으로 표시. close 는 standalone 으로도 표시.
+ *
+ * clear 없이 같은 key 의 open 이 다시 오면 **같은 알람의 재통지**로 보고 기존 행을
+ * 갱신한다 (새 행 X). alarm_standardization.md §3.4 — 새 occurrence 는 clear 후
+ * 재open 일 때만 성립하므로, 연속 open 을 별개 행으로 만들면 뒤따르는 close 1건이
+ * 마지막 행만 닫고 앞선 행은 영구 미해소로 남는다(활성 알람 유령).
  */
 // 활성 식별 키 = alarm_id 의 occurrence epoch 제거(code@mo) / 구 레코드는 type.
 function akey(ev: AlertEvent): string {
@@ -110,7 +117,14 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
   for (const ev of sortedAsc) {
     const k = akey(ev)
     if (ev.action === 'open') {
-      const row: AlertRow = { ...ev }
+      const prev = openByKey[k]
+      if (prev) {                      // 미해소 open 이 이미 있음 → 재통지, 행 추가 X
+        prev.occurrences = (prev.occurrences ?? 1) + 1
+        prev.last_open_ts = ev.ts
+        prev.message = ev.message ?? prev.message
+        continue
+      }
+      const row: AlertRow = { ...ev, occurrences: 1 }
       rows.push(row)
       openByKey[k] = row
     } else if (ev.action === 'ack') {  // 승인 — 해당 open 행에 ack 상태 주석 (행 추가 X)
@@ -338,7 +352,17 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
                     <td>{typeLabel(r.type)}</td>
                     <td><code style={{ fontSize: 11 }}>{r.source?.mo_instance || '-'}</code></td>
                     <td>{r.message}{isOpen && <span style={{ marginLeft: 8, color: 'var(--danger)', fontSize: 11, fontWeight: 600 }}>OPEN</span>}</td>
-                    <td className="ts">{fmtTime(r.ts)}</td>
+                    <td className="ts">
+                      {fmtTime(r.ts)}
+                      {(r.occurrences ?? 1) > 1 && (
+                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600,
+                                       color: 'var(--text-muted)', border: '1px solid var(--border)',
+                                       borderRadius: 3, padding: '0 3px' }}
+                              title={`해제 없이 ${r.occurrences}회 재통지 — 최근 ${r.last_open_ts ? fmtTime(r.last_open_ts) : ''}`}>
+                          ×{r.occurrences}
+                        </span>
+                      )}
+                    </td>
                     <td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : (r.action === 'open' ? '—' : fmtTime(r.ts))}</td>
                     <td>{r.duration || (isOpen ? '진행 중' : '-')}</td>
                     <td>

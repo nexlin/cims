@@ -16,10 +16,10 @@
  *     failover       : priority 오름차순, alive 중 첫번째
  *     round_robin    : cursor 순환, alive 만 선택
  *     weighted       : weight 비율 (alive 만), cursor + deficit 라운드로빈 근사
- *     hash_by_caller : (후속) 발신자 uri 의 해시로 고정
+ *     hash_by_caller : 발신자 uri ({from_user}@{from_host}) 의 해시로 고정, dead 면 다음 member 순회
  *
- *   헬스체크 수집 (OPTIONS ping 발사 + 응답 처리) 은 이 클래스가 후속 스테이지에서 담당.
- *   현재 버전은 RouteMap 의 alive 상태만 소비.
+ *   헬스체크 수집 (OPTIONS ping 발사 + 응답 처리) 은 미구현. RouteMap 의 alive 는 기본값 true 로
+ *   남아 있어 모든 Route 가 alive 로 취급된다 — 특정 Route 제외는 routes.enabled=false 로 한다.
  */
 
 struct RouteSetMember {

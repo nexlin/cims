@@ -27,6 +27,9 @@ export type RouteDef = {
   hidden?: boolean
   // 개발자 모드(admin 토글) ON 일 때만 노출 — 릴리스(빌드/검증/패키징) 등 공급사 개발 기능
   devOnly?: boolean
+  // 이 고정 페이지가 호출하는 API 의 id 목록. page 위젯(`page:<path>`)의 WidgetDef.apis 로 전달돼
+  // 개발자 모드 [API] 배지에 쓰인다. 합성 라우트(layout)는 각 위젯이 자기 apis 를 선언한다.
+  apis?: string[]
 }
 
 // OAM 대영역 — EMS(Nokia NetAct 의 Monitor/Administer, TM Forum eTOM 의 Assurance/Fulfillment) 관례.

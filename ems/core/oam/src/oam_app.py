@@ -34,6 +34,32 @@ _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))  # = oam/
 _CONFIG_PATH = os.environ.get('CIMS_OAM_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'oam.json')
 
 
+def _generate_self_signed_cert(dest_dir):
+    """cert 가 어디에도 없을 때 runtime/cert 에 self-signed 생성 — 부트스트랩 없이 패키지
+    배포로 올라온 노드도 항상 HTTPS 로 기동해 에이전트 health-gate(HTTPS 전용)가 성립한다.
+    install.sh 의 부트스트랩 생성과 동형 (CN=hostname/O=CIMS + SAN).
+    실패 시 (None, None) — 기존 평문 fallback 유지 (호출부가 SSL Disabled 로그)."""
+    import socket as _socket
+    import subprocess as _subprocess
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        host = _socket.gethostname() or 'cims-oam'
+        key = os.path.join(dest_dir, 'server.key')
+        crt = os.path.join(dest_dir, 'server.crt')
+        _subprocess.run(
+            ['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650',
+             '-subj', f'/CN={host}/O=CIMS',
+             '-addext', f'subjectAltName=DNS:{host},IP:127.0.0.1',
+             '-keyout', key, '-out', crt],
+            check=True, capture_output=True, timeout=60)
+        os.chmod(key, 0o600)
+        print(f'[oam-cert] self-signed TLS cert 생성: {dest_dir} (CN={host})', flush=True)
+        return key, crt
+    except Exception as e:
+        print(f'[oam-cert] self-signed 생성 실패 — 평문 기동: {e}', flush=True)
+        return None, None
+
+
 def _resolve_oam_cert():
     """OAM TLS cert (server.key, server.crt) 경로 결정 — 버전 업그레이드 생존이 핵심.
 
@@ -41,7 +67,8 @@ def _resolve_oam_cert():
     cert 가 없어 평문 기동 → self-upgrade health-gate(HTTPS 프로브) 실패 → 롤백. oam-svc 도
     동일 사유로 평문→게이트웨이 502. 그래서 **버전무관 위치(modules/oam/runtime/cert)** 를 SoT 로 한다.
 
-    우선순위: (1) runtime/cert (업그레이드 생존)  (2) 자기 버전 cert (dev/repo·구 레이아웃).
+    우선순위: (1) runtime/cert (업그레이드 생존)  (2) 자기 버전 cert (dev/repo·구 레이아웃)
+    (3) 형제 버전 cert  (4) 어디에도 없으면 self-signed 를 runtime 에 생성 (패키지 배포 노드).
     self-heal: runtime 이 비어있고 자기/형제 버전에 cert 가 있으면 runtime 으로 복사 → 이후
     버전업이 자동 상속(부트스트랩 재실행 불요).
     """
@@ -67,7 +94,7 @@ def _resolve_oam_cert():
                 src = cand
                 break
     if not src:
-        return None, None
+        return _generate_self_signed_cert(runtime_cert)
     # self-heal: runtime 으로 복사(가능하면). 실패해도 src 직접 사용.
     try:
         os.makedirs(runtime_cert, exist_ok=True)
@@ -214,6 +241,9 @@ if __name__ == '__main__':
     from handlers.console_accounts import CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
     from handlers.console_layouts  import CIMS_CONSOLE_LAYOUTS_HANDLER_LIST
     from handlers.service_descriptors import CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST
+    from handlers.api_docs             import CIMS_API_DOCS_HANDLER_LIST
+    from handlers.provision            import (CIMS_PROVISION_HANDLER_LIST,
+                                               init as provision_init)
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
     from services import service_registry
@@ -353,6 +383,18 @@ if __name__ == '__main__':
             tests_dir = os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', 'tests'))
         ver_init(tests_dir, config)
         build_init(os.path.dirname(tests_dir))
+
+        # ── 자동 배포 (auto_deployment.md) ──────────────────────
+        # 블루프린트/인벤토리/run 기록은 runtime store 아래 'provision/' 에 둔다.
+        # runtime 은 버전 디렉토리 밖(modules/oam/runtime)이라 업그레이드·롤백에 생존한다.
+        try:
+            from services import file_store as _prov_fs
+            from services.provision.store import Store as _ProvStore
+            _prov_dir = os.path.join(_prov_fs.runtime_root(config), 'provision')
+            provision_init(config, _ProvStore(_prov_dir))
+            logger.log_info(f'[provision] runtime dir: {_prov_dir}')
+        except Exception as _pe:      # 배포 엔진 부재가 OAM 기동을 막지 않게
+            logger.log_error(f'[provision] 초기화 실패 — /api/v1/provision 비활성: {_pe}')
 
         # system_id 명시 — OAM 콘솔/admin flow 는 oam_01 로 기록(같은 호스트의 CSC xcap flow=csc_01 와 파일 분리).
         #   (미지정 시 둘 다 csc_01.flow 로 써서 seq·라인 충돌)
@@ -495,6 +537,10 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_CONSOLE_LAYOUTS_HANDLER_LIST)
         base_rules += _bind(CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST)
         base_rules += _bind(CIMS_SERVICE_DESCRIPTORS_HANDLER_LIST)
+        # /api/v1/api-docs — 각 모듈이 코드 옆에 선언한 API 문서 수집(개발자 모드). 메타데이터만
+        # 읽으므로 base 상주. 모듈 미설치/미가용이면 그 모듈 API 는 응답에서 빠진다.
+        base_rules += _bind(CIMS_API_DOCS_HANDLER_LIST)
+        base_rules += _bind(CIMS_PROVISION_HANDLER_LIST)   # /api/v1/provision/* — 자동 배포(내장). 별도 모듈 아님
         base_rules += _bind(CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)
@@ -672,8 +718,45 @@ if __name__ == '__main__':
             alarm_sweeper.transition(_alert_open, _service_log, rule, mo_instance,
                                      detected_by, is_open, msg_open, msg_close, log=logger)
 
+        def _cold_module_ha_sets() -> tuple:
+            """AS 그룹 cold 모듈의 HA 상태별 module_down 평가 보정 집합 2개.
+            반환: (skip, must_run) — 각각 {(agent_id, module)}.
+            - skip: VIP 미보유 확정(standby) 멤버의 cold 모듈 — 정지가 정상 상태라
+              평가 제외 (오탐 방지).
+            - must_run: VIP 보유 확정(active) 멤버의 cold 모듈 — 배포기록 status 가
+              stopped 여도 실제로는 떠 있어야 정상 (절체 시 notify 가 기동하는 모듈이라
+              기록은 stopped 인 채 남는다). 기록 기준 평가에서 빠져 죽어도 무알람이던
+              것을 잡는다.
+            VIP 관측 None(판정 불가) 멤버는 종전대로 기록 기준 평가."""
+            skip, must_run = set(), set()
+            try:
+                from handlers.ha_groups import _agent_daemon_modules, _group_started_modules
+                from services import ha_lookup
+                for g in ha_lookup.ha_groups_all(config):
+                    if g.get('mode') != 'active_standby':
+                        continue
+                    fo = g.get('failover_options') if isinstance(g.get('failover_options'), dict) else {}
+                    modes = fo.get('module_modes') if isinstance(fo.get('module_modes'), dict) else {}
+                    members = ha_lookup.members_of(g)
+                    # 서비스 개시 게이트와 동일 기준 — 개시된 모듈만 HA 평가 대상
+                    # (설치만 된 모듈을 must-run 으로 오판하지 않게).
+                    started = _group_started_modules(members, config)
+                    observed = ha_lookup.vip_observation(config, g)['observed']
+                    for m in members:
+                        aid = m.get('agent_id')
+                        if observed.get(aid) is None:
+                            continue
+                        for mod in _agent_daemon_modules(aid, config):
+                            if mod in started and modes.get(mod, 'cold') != 'hot':
+                                (must_run if observed.get(aid) else skip).add((aid, mod))
+            except Exception as e:
+                logger.log_error(f"[alarm-sweep] cold 모듈 HA 집합 계산 실패: {e}")
+            return skip, must_run
+
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
-                             deps: list, proc_down_targets: set) -> list:
+                             deps: list, proc_down_targets: set,
+                             cold_skip: set, cold_must_run: set = frozenset(),
+                             expected_cfg: dict | None = None) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
             반환: (mo_instance, is_open, msg_open, msg_close) 목록."""
             chk = rule.get('check')
@@ -694,9 +777,13 @@ if __name__ == '__main__':
                 for dep in deps:
                     if dep.get('agent_id') != agent.get('id'):
                         continue
-                    if dep.get('status') != 'running':
-                        continue
                     proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    # 기록 running 이 평가 기본. 예외: VIP 보유 멤버의 cold 모듈은 절체
+                    # notify 가 기동해 기록이 stopped 인 채 실행되는 게 정상 상태라,
+                    # 기록 stopped 여도 must-run 으로 평가 (죽어 있으면 알람).
+                    must = (agent.get('id'), proc) in cold_must_run
+                    if dep.get('status') != 'running' and not (must and dep.get('status') == 'stopped'):
+                        continue
                     # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alarm 방지.
                     if not proc or proc in proc_down_targets:
                         continue
@@ -705,9 +792,46 @@ if __name__ == '__main__':
                     #   console = OAM 이 정적 서빙(별도 프로세스 없음), agent = 자기 자신.
                     if proc in ('console', 'agent'):
                         continue
+                    # cold-spare standby 의 cold 모듈 — 정지가 desired state, 오탐 방지.
+                    if (agent.get('id'), proc) in cold_skip:
+                        continue
                     mo = f"{host}/{proc}"
                     kw = dict(mo=mo, host=host, module=proc)
                     res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+            elif chk == 'config_drift':
+                # 노드 실파일 hash (agent 보고) vs 배포기록 실체화본 hash — 불일치 = 드리프트.
+                # 구 agent(cfg_hashes 미보고)는 평가 자체를 건너뜀 (오알람 없음).
+                reported = metric.get('cfg_hashes')
+                if not isinstance(reported, dict) or not reported:
+                    return res
+                for dep in deps:
+                    if dep.get('agent_id') != agent.get('id'):
+                        continue
+                    if dep.get('status') not in ('running', 'stopped'):
+                        continue
+                    proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    got = reported.get(proc)
+                    exp = (expected_cfg or {}).get((agent.get('id'), proc))
+                    if not proc or not got or not exp:
+                        continue        # 미보고 모듈/기대값 산출 실패 — 판정 보류
+                    mo = f"{host}/{proc}/config"
+                    kw = dict(mo=mo, host=host, module=proc, expected=exp, actual=got)
+                    res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+            elif chk == 'ha_flap':
+                # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
+                # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.
+                trans = metric.get('ha_transitions')
+                if not isinstance(trans, dict) or not trans:
+                    return res
+                thr = int(rule.get('threshold', 6))
+                for svc, cnt in trans.items():
+                    try:
+                        cnt = int(cnt)
+                    except (TypeError, ValueError):
+                        continue
+                    mo = f"{host}/ha/{svc}"
+                    kw = dict(mo=mo, host=host, svc=svc, count=cnt, threshold=thr)
+                    res.append((mo, cnt >= thr, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
             return res
 
         def _sweep_agent_alerts(agent_rules: list, proc_down_targets: set):
@@ -717,6 +841,29 @@ if __name__ == '__main__':
             agents = _agent_load_all(config)
             deps = _deploy_load_all(config)
             mroot = _metric_root(config)
+            cold_skip, cold_must_run = _cold_module_ha_sets()
+            # config_drift 기대 hash — 배포별 실체화본을 스윕당 1회만 계산 (pkg 캐시).
+            expected_cfg: dict = {}
+            if any(r.get('check') == 'config_drift' for r in agent_rules):
+                from handlers.agents import _pkg_load, deploy_config_hash
+                _pkgs: dict = {}
+                for dep in deps:
+                    if dep.get('status') not in ('running', 'stopped'):
+                        continue
+                    proc = (dep.get('process_name') or dep.get('package_name') or '').lower()
+                    pid = dep.get('package_id')
+                    if not proc or pid is None:
+                        continue
+                    if pid not in _pkgs:
+                        try:
+                            _pkgs[pid] = _pkg_load(config, pid)
+                        except Exception:
+                            _pkgs[pid] = None
+                    try:
+                        expected_cfg[(dep.get('agent_id'), proc)] = \
+                            deploy_config_hash(config, _pkgs[pid], dep.get('config'))
+                    except Exception:
+                        pass
             active = set()
             for ag in agents:
                 if ag.get('status') != 'online':
@@ -726,7 +873,7 @@ if __name__ == '__main__':
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets):
+                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, cold_must_run, expected_cfg):
                         active.add(f"{r.get('code')}@{mo}")
                         _transition(r, mo, f"agent:{host}", is_open, msg_open, msg_close)
             # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.
@@ -774,7 +921,23 @@ if __name__ == '__main__':
         # ── HA fan-out drift sweeper ────────────────────────────────────
         DRIFT_SWEEP_INTERVAL  = int(config.get('DriftSweepSec', 300))
         DRIFT_AUTO_RESYNC     = bool(config.get('AutoResyncDrift', False))
+        # 기동 시 open drift 알람을 alert_log 리플레이로 복원 — 빈 dict 로 시작하면
+        # 재시작 이전에 열린 알람의 close 를 영원히 발행하지 못한다 (좀비).
+        # drift 이벤트는 alarm_id 없이 type(config_drift::g<id>::<coll>) 이 그대로
+        # akey 라 emit_drift_alerts 의 open_state 키와 포맷이 동일.
         _drift_open: dict = {}
+        if _service_log:
+            try:
+                from services import alert_log as _alert_log
+                # 창을 활성 알람 뷰(90일)와 맞춘다 — 기본 30일이면 30~90일 구간의
+                # 열린 알람을 서버가 잊어 중복 open 을 낸다. (스윕 중 재도출은
+                # drift_sweeper._reseed_if_empty 가 담당 — 여기 실패해도 자가복구)
+                _drift_open = {k: True for k in _alert_log.compute_open_state(_service_log, days=90)
+                               if k.startswith('config_drift::')}
+                if _drift_open:
+                    logger.log_info(f"[drift-sweep] restored {len(_drift_open)} open drift alarm(s)")
+            except Exception as e:
+                logger.log_error(f"[drift-sweep] open-state restore failed: {e}")
 
         def _sweep_drift():
             try:
@@ -798,6 +961,54 @@ if __name__ == '__main__':
                             f"{summary['resynced']} errors={len(summary['errors'])}")
             except Exception as e:
                 logger.log_error(f"[drift-sweep] error: {e}")
+
+        # ── HA 자동 동기화 스위퍼 (R4) ──────────────────────────────────
+        #  AS 그룹 × 스위치 ON 패키지의 STANDBY 를 실측 ACTIVE(heartbeat VIP 관측)
+        #  기준으로 자동 교정. 판정 불가·버전 불일치는 reconcile 내부에서 skip/보류.
+        #  컬렉션 정합은 agent proxy GET 비용이 있어 매 N 라운드마다만 포함.
+        AUTO_SYNC_SWEEP_INTERVAL = int(config.get('AutoSyncSweepSec', 60))
+        AUTO_SYNC_COLL_EVERY     = max(1, int(config.get('AutoSyncCollectionEvery', 5)))
+        _auto_sync_round = {'n': 0}
+        _observed_active: dict = {}   # gid → 마지막 확정 active_agent_id (절체 감지)
+
+        def _sweep_auto_sync():
+            try:
+                from services import ha_lookup
+                from handlers.agents import reconcile_group_package
+                _auto_sync_round['n'] += 1
+                include_colls = (_auto_sync_round['n'] % AUTO_SYNC_COLL_EVERY) == 0
+                for g in ha_lookup.ha_groups_all(config):
+                    if g.get('mode') != 'active_standby':
+                        continue
+                    gid = g.get('id')
+                    # 절체 감지 — 확정 판정 간 변화만 기록 (판정 불가(None)는 미갱신)
+                    obs = ha_lookup.vip_observation(config, g)
+                    active = obs['active_agent_id']
+                    prev = _observed_active.get(gid)
+                    if active is not None:
+                        if prev is not None and active != prev:
+                            logger.log_info(
+                                f"[auto-sync] HA 절체 감지 — group#{gid}"
+                                f"({g.get('name')}) agent#{prev} → agent#{active}")
+                        _observed_active[gid] = active
+                    for pkg_name in sorted(ha_lookup.packages_in_group(config, g)):
+                        if not ha_lookup.auto_sync_enabled(g, pkg_name):
+                            continue
+                        r = reconcile_group_package(
+                            config, g, pkg_name,
+                            include_collections=include_colls, actor='sweeper')
+                        if r['status'] == 'synced':
+                            logger.log_info(
+                                f"[auto-sync] group#{gid} pkg={pkg_name} 교정 — "
+                                f"keys={len(r['synced_keys']) + len(r['removed_keys'])} "
+                                f"colls={len(r['collections'])} "
+                                f"active=agent#{r['active_agent_id']} sync#{r['sync_id']}")
+                        elif r['deferred']:
+                            logger.log_info(
+                                f"[auto-sync] group#{gid} pkg={pkg_name} 보류 — "
+                                f"버전 불일치 {r['deferred']}")
+            except Exception as e:
+                logger.log_error(f"[auto-sync] error: {e}")
 
         # ── Metric JSONL retention purge sweeper ────────────────────────
         # heartbeat 2s × 다수 host → metrics/<id>/YYYY/MM/DD.jsonl 무한 누적.
@@ -840,15 +1051,28 @@ if __name__ == '__main__':
         logger.log_info(f"[sync-txn-sweep] interval={SYNC_TXN_SWEEP_INTERVAL}s")
         logger.log_info(f"[drift-sweep] interval={DRIFT_SWEEP_INTERVAL}s "
                         f"auto_resync={DRIFT_AUTO_RESYNC}")
+        logger.log_info(f"[auto-sync] interval={AUTO_SYNC_SWEEP_INTERVAL}s, "
+                        f"collections_every={AUTO_SYNC_COLL_EVERY} round(s)")
         logger.log_info(f"[metric-purge] retain={METRIC_RETAIN_DAYS}d, interval={METRIC_PURGE_INTERVAL}s")
         logger.log_info(f"[ptt-index] enabled={_ptt_index_enabled}, interval={PTT_INDEX_INTERVAL}s")
+        # 계획 절체 operation 구동 — 짧은 주기(VIP 이동 관측이 필요하므로).
+        HA_OP_SWEEP_INTERVAL = int(config.get('HaOpSweepSec', 2))
+        def _sweep_ha_ops():
+            try:
+                from handlers.ha_groups import sweep_ha_operations
+                sweep_ha_operations(config)
+            except Exception as e:
+                logger.log_warning(f"[ha-op] sweep 실패: {e}")
+
         _last_sweep = 0
         _last_cert_sweep = 0
         _last_alert_sweep = 0
         _last_sync_txn_sweep = 0
         _last_drift_sweep = 0
+        _last_auto_sync_sweep = 0
         _last_metric_purge = 0
         _last_ptt_index = 0
+        _last_ha_op_sweep = 0
         while True:
             time.sleep(1)
             _now = time.time()
@@ -867,6 +1091,12 @@ if __name__ == '__main__':
             if _now - _last_drift_sweep >= DRIFT_SWEEP_INTERVAL:
                 _sweep_drift()
                 _last_drift_sweep = _now
+            if _now - _last_auto_sync_sweep >= AUTO_SYNC_SWEEP_INTERVAL:
+                _sweep_auto_sync()
+                _last_auto_sync_sweep = _now
+            if _now - _last_ha_op_sweep >= HA_OP_SWEEP_INTERVAL:
+                _sweep_ha_ops()
+                _last_ha_op_sweep = _now
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now

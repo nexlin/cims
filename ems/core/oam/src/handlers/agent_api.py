@@ -3,7 +3,7 @@ CSC Agent API — 배포 에이전트용 엔드포인트 (P10).
 
 Agent 와 CSC 간 통신 프로토콜:
   POST /api/agent/enroll     — 최초 등록 (enrollment token → session token + agent_id)
-  POST /api/agent/heartbeat  — 주기 heartbeat (30s) — pending job 수신
+  POST /api/agent/heartbeat  — 주기 heartbeat (agent 기본 2s, 불통 시 backoff 최대 60s) — pending job 수신
   POST /api/agent/report     — 작업 결과 보고
   GET  /api/agent/package/{id} — 패키지 다운로드
 
@@ -400,7 +400,9 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
         "name": row["name"],
         "session_token": session_token,
         "status": row.get("status"),
-        "heartbeat_interval_sec": 30,
+        # 정보성 필드 — agent 는 이 값을 소비하지 않고 자체 기본(DEFAULT_HEARTBEAT_SEC=2,
+        # --heartbeat-sec)을 쓴다. 실제 주기와 일치하도록 유지.
+        "heartbeat_interval_sec": 2,
     }
     # mTLS 활성화 시 agent 서버용 cert 발급해 함께 전달 + 레코드에 플래그/만료 기록
     if _mtls_enabled(config):
@@ -643,6 +645,9 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                 m = _re.search(r"at\s+(\S+?)\s+\(", result_stdout)
                 if m: new_install_path = m.group(1)
             new_status = "running" if jt in ("start", "restart", "upgrade") else "stopped"
+            # status 는 의도(job 결과)이고, 콘솔 표시의 정본은 실측(live_state)이다
+            # (depEffectiveStatus 가 live up→running/down→stopped 로 항상 정정). 그래서
+            # 여기서 낙관적 running 을 찍어도 실제 안 떠 있으면 화면엔 stopped 로 보인다.
             patches = {'status': new_status, 'last_job_id': job_id}
             from datetime import datetime as _dt
             now_iso = _dt.now().isoformat(timespec='seconds')
@@ -684,10 +689,66 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                                     f"({(dep_now or {}).get('process_name')}: {_n} route(s))")
             except Exception as _e:
                 logger.log_warning(f"[gateway] job {jt} self-register 재실행 실패: {_e}")
+            # R4 자동 동기화 트리거 — upgrade/start/restart 성공 = 멤버 기동·버전 변경
+            # 시점. AS 그룹 + 스위치 ON 이면 ACTIVE 기준 즉시 정합 시도 (롤링 업그레이드
+            # 마지막 단계: STANDBY 가 같은 버전으로 올라오는 순간 ACTIVE 설정 자동 복사).
+            # 판정 불가·버전 불일치는 reconcile 내부에서 skip — 다음 스위퍼가 재시도.
+            if jt in ("upgrade", "start", "restart"):
+                def _auto_sync_after_event():
+                    try:
+                        from services import ha_lookup
+                        from handlers.agents import (_deploy_load, _enrich_deploy,
+                                                     reconcile_group_package)
+                        dep = _deploy_load(config, dep_id)
+                        if not dep:
+                            return
+                        _enrich_deploy([dep], config)
+                        pkg_name = dep.get('package_name')
+                        aid = dep.get('agent_id')
+                        if not pkg_name:
+                            return
+                        for grp in ha_lookup.ha_groups_for_package(config, pkg_name):
+                            if any(m.get('agent_id') == aid
+                                   for m in ha_lookup.members_of(grp)):
+                                reconcile_group_package(config, grp, pkg_name,
+                                                        include_collections=True,
+                                                        actor='post-job')
+                    except Exception:
+                        pass   # 정합은 스위퍼가 재시도 — job report 응답을 막지 않는다
+                await asyncio.to_thread(_auto_sync_after_event)
         elif dep_id and jt in ("stop", "uninstall"):
             new_status = "removed" if jt == "uninstall" else "stopped"
             await asyncio.to_thread(_deploy_update, config, dep_id,
                                     {'status': new_status, 'last_job_id': job_id})
+
+        # HA 재렌더 전파 — 서비스 의도/배포 존재 변화가 무장 상태에 반영되게 한다.
+        #  · start/restart/upgrade 성공 = 운영자 명시 start → 그룹 서비스 의도를
+        #    running 으로 승격(note_module_started) → 무장. 승격 시 그 노드를
+        #    prefer_first 로 두어 개시 국면 선착(standby 선점)을 방지.
+        #  · stop 성공 = 노드 오버라이드는 agent(desired.json)가 기록. 그룹 의도는
+        #    불변이라 재렌더해도 무장 유지 (서버별 stop 이 그룹을 disarm 하지 않는다 —
+        #    구 record 유추 모델의 disarm-on-stop 제거).
+        #  · uninstall = 모듈 제거 → 재렌더가 daemon 집합에서 빠뜨려 자연 비무장.
+        # 렌더 결과가 같으면 agent apply 가 멱등이라 keepalived 무접촉.
+        if dep_id and jt in ("start", "restart", "upgrade", "stop", "uninstall"):
+            try:
+                from handlers.ha_groups import (enqueue_update_ha_for_agent,
+                                                _enqueue_update_ha_for_members,
+                                                note_module_started)
+                proc = (params.get("process_name") if isinstance(params, dict) else None) or ""
+                promoted_gid = None
+                if jt in ("start", "restart", "upgrade") and proc:
+                    promoted_gid = await asyncio.to_thread(
+                        note_module_started, config, agent['id'], proc)
+                if promoted_gid is not None:
+                    n = await asyncio.to_thread(
+                        _enqueue_update_ha_for_members, promoted_gid, config, {agent['id']})
+                else:
+                    n = await asyncio.to_thread(enqueue_update_ha_for_agent, agent['id'], config)
+                if n:
+                    logger.log_info(f"[report] job#{job_id}({jt}) → update_ha {n}건 재렌더 큐잉")
+            except Exception as e:
+                logger.log_warning(f"[report] job#{job_id} ha 재렌더 전파 실패: {e}")
 
     return HandlerResult(status=200, body={"ok": True, "updated": changed},
                          media_type="application/json")
@@ -704,6 +765,8 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     per_iface = body.get("per_iface") or []
     modules = body.get("modules") or []
     mounts = body.get("mounts") or []
+    cfg_hashes = body.get("cfg_hashes") or {}          # {module: 배포 config.json canonical hash}
+    ha_transitions = body.get("ha_transitions") or {}  # {svc: 최근 10분 keepalived 전이 수}
     record = {
         'cpu_pct': body.get("cpu_pct"),
         'mem_pct': body.get("mem_pct"),
@@ -713,10 +776,19 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
         'per_iface': per_iface if isinstance(per_iface, list) else [],
         'modules':   modules if isinstance(modules, list) else [],
         'mounts':    mounts if isinstance(mounts, list) else [],
+        'cfg_hashes': cfg_hashes if isinstance(cfg_hashes, dict) else {},
+        'ha_transitions': ha_transitions if isinstance(ha_transitions, dict) else {},
     }
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
+    # live_modules — 실행 중 모듈 스냅샷을 agent row 에 캐시. deployments 조회가
+    # 배포기록 status(의도)와 별개로 실측 프로세스 상태(live_state)를 enrich 하는 원천
+    # (jsonl tail 재파싱 없이 row 1회 read). metric 주기(기본 2s, DEFAULT_METRIC_SEC)만큼 지연될 수 있음.
+    live = [{'name': str(m.get('name', '')), 'pid': m.get('pid')}
+            for m in (modules if isinstance(modules, list) else [])
+            if isinstance(m, dict) and m.get('name')]
     await asyncio.to_thread(_agent_update, config, agent['id'], {
         'last_metric': datetime.now().isoformat(timespec='seconds'),
+        'live_modules': live,
     })
     return HandlerResult(status=200, body={"ok": True}, media_type="application/json")
 

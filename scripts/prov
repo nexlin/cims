@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""prov — 자동 배포 CLI (auto_deployment.md).
+
+콘솔 [자동 배포] 탭이 호출하는 것과 **같은 엔진**을 명령행에서 구동한다. 엔진은 base OAM
+안에 있고(`ems/core/oam/src/services/provision/`), 이 스크립트는 그 코드를 직접 import 한다 —
+OAM 이 안 떠 있어도 검증·계획·실행이 가능한 우회 경로다.
+
+  prov validate  -b blueprint.yaml -i inventory.yaml
+  prov preflight -i inventory.yaml [-b blueprint.yaml]        SSH/sudo 접속만 확인
+  prov plan      -b blueprint.yaml -i inventory.yaml          dry-run (아무것도 안 바꿈)
+  prov apply     -b blueprint.yaml -i inventory.yaml --oam-url URL --token TOK
+  prov resume    --run N --oam-url URL --token TOK
+  prov runs | prov run N
+"""
+
+import argparse
+import json
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.dirname(_HERE)                       # scripts/ → 레포 루트
+_OAM = os.path.join(_REPO, 'ems', 'core', 'oam')
+for p in (os.path.join(_OAM, 'src'), os.path.join(_OAM, 'vendor')):
+    if os.path.isdir(p) and p not in sys.path:
+        sys.path.insert(0, p)
+
+from services.provision import schema, engine, phases          # noqa: E402
+from services.provision import store as store_mod              # noqa: E402
+from services.provision import ssh as sshmod                   # noqa: E402
+from services.provision.oam_client import OamClient, OamError   # noqa: E402
+
+_C = {'red': '\033[31m', 'grn': '\033[32m', 'yel': '\033[33m',
+      'dim': '\033[2m', 'bold': '\033[1m', 'off': '\033[0m'}
+
+
+def _c(s, k):
+    return f"{_C[k]}{s}{_C['off']}" if sys.stdout.isatty() else s
+
+
+def _read(path):
+    with open(path, encoding='utf-8') as f:
+        return f.read()
+
+
+def _check_perm(path):
+    """인벤토리는 비밀을 담으므로 0600 을 요구한다 (§8)."""
+    mode = os.stat(path).st_mode & 0o777
+    if mode & 0o077:
+        print(_c(f'거부: {path} 권한이 {oct(mode)[2:]} — 비밀정보 파일은 0600 이어야 함', 'red'))
+        print(f'  chmod 600 {path}')
+        sys.exit(2)
+
+
+def _load_pair(args, need_inventory=True):
+    bp = inv = None
+    if getattr(args, 'blueprint', None):
+        bp_txt = _read(args.blueprint)
+        bp, iss = schema.parse_blueprint(bp_txt)
+        _print_issues(iss, 'blueprint')
+        if bp is None:
+            sys.exit(1)
+    if getattr(args, 'inventory', None):
+        _check_perm(args.inventory)
+        inv_txt = _read(args.inventory)
+        inv, iss = schema.parse_inventory(inv_txt)
+        _print_issues(iss, 'inventory')
+        if inv is None:
+            sys.exit(1)
+    if need_inventory and inv is None:
+        print(_c('인벤토리(-i) 필요', 'red'))
+        sys.exit(2)
+    if bp and inv:
+        cross = schema.cross_validate(bp, inv)
+        _print_issues(cross, None)
+        if any(i.level == 'error' for i in cross):
+            sys.exit(1)
+    return bp, inv
+
+
+def _print_issues(issues, doc):
+    for i in issues:
+        tag = _c('ERROR', 'red') if i.level == 'error' else _c('WARN ', 'yel')
+        path = i.path if doc is None else f'{doc}:{i.path}'
+        print(f'  {tag} {path}: {i.message}')
+
+
+def _config(args, runtime_dir):
+    return {
+        'OamUrl': getattr(args, 'oam_url', '') or '',
+        'AgentEnrollUrl': getattr(args, 'enroll_url', '') or '',
+        'Ssh': {'ConnectTimeout': args.connect_timeout,
+                'CommandTimeout': args.command_timeout,
+                'StrictHostKeyChecking': args.host_key},
+        'Run': {'MaxParallel': args.parallel,
+                'EnrollTimeoutSec': args.enroll_timeout},
+        '_runtime_dir': runtime_dir,
+    }
+
+
+# ── 명령 ────────────────────────────────────────────────────────
+
+def cmd_validate(args):
+    bp, inv = _load_pair(args)
+    print(_c('✓ 검증 통과', 'grn'))
+    print(f'  블루프린트 : {bp.name} — 시스템 {len(bp.systems)}개, '
+          f'서버 참조 {len(bp.referenced_servers())}개')
+    print(f'  기동 순서   : {" → ".join(s.name for s in bp.systems_in_start_order())}')
+    print(f'  인벤토리    : 서버 {len(inv.servers)}개')
+    for s in inv.servers:
+        print(f'    - {s.name:<12} {s.host:<16} auth={s.auth_mode:<8} sudo={s.sudo_method}')
+    return 0
+
+
+def cmd_preflight(args):
+    bp, inv = _load_pair(args)
+    targets = inv.servers
+    if bp:
+        want = set(bp.referenced_servers())
+        targets = [s for s in inv.servers if s.name in want]
+    print(f'{len(targets)}개 서버 접속 확인 (병렬 {args.parallel})...\n')
+    kw = {'connect_timeout': args.connect_timeout,
+          'command_timeout': args.command_timeout,
+          'strict_host_key': args.host_key}
+    results = sshmod.preflight_all(targets, max_parallel=args.parallel, **kw)
+    bad = 0
+    for r in results:
+        if r.get('ok'):
+            print(f"  {_c('OK  ', 'grn')} {r['server']:<12} {r['host']:<16} "
+                  f"{r.get('os','')} · {r.get('login_user','')} · sudo OK")
+        else:
+            bad += 1
+            print(f"  {_c('FAIL', 'red')} {r['server']:<12} {r['host']:<16} "
+                  f"[{r.get('error_code','')}] {r.get('error','')}")
+    print()
+    print(_c(f'{len(results)-bad}/{len(results)} 접속 가능', 'grn' if not bad else 'yel'))
+    return 1 if bad else 0
+
+
+def _build(args, run):
+    runtime = args.runtime or os.path.expanduser('~/.cims-provision')
+    st = store_mod.Store(runtime)
+    bp, inv = _load_pair(args)
+    cfg = _config(args, runtime)
+    oam = OamClient(args.oam_url, args.token) if args.oam_url else None
+    logs = run.setdefault('log', [])
+
+    def log(msg):
+        logs.append(msg)
+        print(f'  {_c(msg, "dim")}')
+
+    ctx = engine.Context(blueprint=bp, inventory=inv, oam=oam,
+                         config=cfg, run=run, log=log)
+    return st, ctx
+
+
+def cmd_plan(args):
+    run = {'id': 0, 'phases': [], 'log': []}
+    st, ctx = _build(args, run)
+    eng = engine.Engine(st, ctx, phases.ORDER)
+    print(_c(f'계획 — {ctx.blueprint.name} (dry-run, 변경 없음)\n', 'bold'))
+    for ph in eng.plan():
+        mark = _c('serial', 'dim') if ph.get('serial') else ''
+        print(f"  {_c(ph['key'], 'bold')} · {ph['title']} {mark}")
+        if ph.get('error'):
+            print(f"    {_c('ERROR', 'red')} {ph['error']}")
+        for s in ph['steps']:
+            extra = ' '.join(f'{k}={v}' for k, v in s.items()
+                             if k not in ('target', 'action'))
+            print(f"    - {s['target']:<12} {s.get('action','')}  {_c(extra, 'dim')}")
+        print()
+    return 0
+
+
+def _execute(args, run, st, ctx):
+    eng = engine.Engine(st, ctx, phases.ORDER, on_error=args.on_error)
+    print(_c(f"run #{run['id']} 시작 — {ctx.blueprint.name}\n", 'bold'))
+    out = eng.execute()
+    print()
+    for ph in out.get('phases', []):
+        icon = {'done': _c('✓', 'grn'), 'failed': _c('✗', 'red')}.get(ph['status'],
+                                                                      _c('·', 'yel'))
+        print(f"  {icon} {ph['key']:<10} {ph['status']}")
+        for s in ph.get('steps', []):
+            si = {'done': _c('✓', 'grn'), 'skipped': _c('–', 'dim'),
+                  'failed': _c('✗', 'red')}.get(s['status'], '·')
+            line = f"      {si} {s['target']:<12} {s.get('detail') or s.get('error') or ''}"
+            print(line + (f"  ({s.get('elapsed_sec')}s)" if s.get('elapsed_sec') else ''))
+    print()
+    ok = out['status'] == 'succeeded'
+    print(_c(f"run #{out['id']}: {out['status']}", 'grn' if ok else 'red'))
+    if out.get('error'):
+        print(f"  {out['error']}")
+    if not ok:
+        print(f"  재개: prov resume --run {out['id']} --oam-url {args.oam_url} --token …")
+    return 0 if ok else 1
+
+
+def cmd_apply(args):
+    if not args.oam_url or not args.token:
+        print(_c('--oam-url 과 --token 필요', 'red'))
+        return 2
+    runtime = args.runtime or os.path.expanduser('~/.cims-provision')
+    st0 = store_mod.Store(runtime)
+    run = engine.new_run(st0, blueprint_id=None, inventory_id=None,
+                         blueprint_name=os.path.basename(args.blueprint),
+                         actor='cli', on_error=args.on_error)
+    st, ctx = _build(args, run)
+    return _execute(args, run, st, ctx)
+
+
+def cmd_resume(args):
+    runtime = args.runtime or os.path.expanduser('~/.cims-provision')
+    st0 = store_mod.Store(runtime)
+    run = st0.get_run(args.run)
+    if not run:
+        print(_c(f'run #{args.run} 없음', 'red'))
+        return 2
+    if not args.oam_url or not args.token:
+        print(_c('--oam-url 과 --token 필요', 'red'))
+        return 2
+    st, ctx = _build(args, run)
+    print(_c(f'run #{run["id"]} 재개 — 완료된 step 은 건너뜁니다', 'bold'))
+    return _execute(args, run, st, ctx)
+
+
+def cmd_runs(args):
+    st = store_mod.Store(args.runtime or os.path.expanduser('~/.cims-provision'))
+    rows = st.list_runs()
+    if not rows:
+        print('run 기록 없음')
+        return 0
+    for r in rows:
+        p = r.get('progress') or {}
+        print(f"  #{r['id']:<4} {r['status']:<10} {r.get('blueprint',''):<24} "
+              f"{p.get('done',0)}/{p.get('total',0)} done, {p.get('failed',0)} failed  "
+              f"{r.get('created_at','')}")
+    return 0
+
+
+def cmd_run(args):
+    st = store_mod.Store(args.runtime or os.path.expanduser('~/.cims-provision'))
+    r = st.get_run(args.run)
+    if not r:
+        print(_c(f'run #{args.run} 없음', 'red'))
+        return 2
+    print(json.dumps(r, ensure_ascii=False, indent=2))
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(prog='prov', description='CIMS 자동 배포')
+    sub = ap.add_subparsers(dest='cmd', required=True)
+
+    def runtime_opt(p):
+        # 하위명령마다 붙인다 — 최상위에만 두면 `prov plan … --runtime X` 가 거부돼
+        # 옵션 위치를 외워야 한다.
+        p.add_argument('--runtime', help='영속 디렉토리 (기본 provisioner/runtime)')
+
+    def common(p, need_bp=True):
+        runtime_opt(p)
+        if need_bp:
+            p.add_argument('-b', '--blueprint', required=True)
+        else:
+            p.add_argument('-b', '--blueprint')
+        p.add_argument('-i', '--inventory', required=True)
+        p.add_argument('--parallel', type=int, default=8)
+        p.add_argument('--connect-timeout', type=int, default=15)
+        p.add_argument('--command-timeout', type=int, default=900)
+        p.add_argument('--enroll-timeout', type=int, default=180)
+        p.add_argument('--host-key', default='accept-new',
+                       choices=['accept-new', 'yes'])
+
+    def oam(p):
+        p.add_argument('--oam-url', default=os.environ.get('CIMS_OAM_URL', ''))
+        p.add_argument('--token', default=os.environ.get('CIMS_OAM_TOKEN', ''))
+        p.add_argument('--enroll-url', default='',
+                       help='대상 노드가 닿을 OAM 주소 (미지정 시 --oam-url)')
+        p.add_argument('--on-error', default='stop', choices=['stop', 'continue'])
+
+    p = sub.add_parser('validate', help='두 YAML 스키마·참조 검증')
+    common(p); p.set_defaults(fn=cmd_validate)
+
+    p = sub.add_parser('preflight', help='SSH/sudo 접속만 확인 (변경 없음)')
+    common(p, need_bp=False); p.set_defaults(fn=cmd_preflight)
+
+    p = sub.add_parser('plan', help='dry-run 계획')
+    common(p); oam(p); p.set_defaults(fn=cmd_plan)
+
+    p = sub.add_parser('apply', help='배포 실행')
+    common(p); oam(p); p.set_defaults(fn=cmd_apply)
+
+    p = sub.add_parser('resume', help='실패 지점부터 재개')
+    common(p); oam(p)
+    p.add_argument('--run', type=int, required=True)
+    p.set_defaults(fn=cmd_resume)
+
+    p = sub.add_parser('runs', help='run 목록')
+    runtime_opt(p); p.set_defaults(fn=cmd_runs)
+    p = sub.add_parser('run', help='run 상세 (JSON)')
+    runtime_opt(p); p.add_argument('run', type=int); p.set_defaults(fn=cmd_run)
+
+    args = ap.parse_args()
+    try:
+        sys.exit(args.fn(args))
+    except (OamError, sshmod.SshError) as e:
+        print(_c(f'[{e.code}] {e.message}', 'red'))
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print('\n중단됨')
+        sys.exit(130)
+
+
+if __name__ == '__main__':
+    main()

@@ -445,7 +445,7 @@ CSC (Common Service Core) IDMS (Identity Management System)는 MCPTT (Mission Cr
 │                    (test_csc_http.py)                       │
 └─────────────────────┬───────────────────────────────────────┘
                       │
-                      │ HTTPS (4420)
+                      │ HTTPS (4421)
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
 │                     CSC Server                              │
@@ -558,7 +558,7 @@ MariaDB 연결 정보를 포함하도록 설정 파일을 관리합니다.
 {
     "Server": {
         "Ip": "0.0.0.0",
-        "Port": 4420
+        "Port": 4421
     },
     "Database": {
         "Host": "localhost",
@@ -572,7 +572,7 @@ MariaDB 연결 정보를 포함하도록 설정 파일을 관리합니다.
 | 항목 | 설명 | 예시 값 | 비고 |
 |------|------|---------|------|
 | `Server.Ip` | 서버 바인딩 주소 | `"0.0.0.0"` | 모든 인터페이스에서 수신 |
-| `Server.Port` | 서버 포트 | `4420` | HTTPS 포트 |
+| `Server.Port` | 서버 포트 | `4421` | HTTPS 포트 |
 | `Database.Host` | MariaDB 호스트 | `"localhost"` | |
 | `Database.User` | MariaDB 사용자명 | `"agapeoom"` | |
 | `Database.Password` | MariaDB 비밀번호 | `"내비밀번호"` | |

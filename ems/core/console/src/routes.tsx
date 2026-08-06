@@ -19,6 +19,7 @@ import AlertsPage from './pages/AlertsPage'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
+import AutoDeployPage from './pages/AutoDeployPage'
 import HaServicesPage from './pages/HaServicesPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
@@ -83,9 +84,14 @@ const CORE_SECTIONS: RouteSection[] = [
     defaultPath: '/deploy/servers',
     order: 60,
     routes: [
-      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         requiredRole: 'operator' },
+      { path: '/deploy/servers',          title: '시스템/인프라', component: ServersPage,         requiredRole: 'operator',
+        apis: ['nodes.list', 'nodes.metrics'] },
       // ↑ RBAC: 페이지 진입 operator+. 탭1(시스템/서버 구성)·탭2(패키지 설치)·탭4(패키지 제어)는
       //   조회만 가능, 변이는 admin 세션 또는 admin 패스워드 승격. 탭3(패키지 설정)=operator 편집.
+      // 자동 배포 — 인벤토리/블루프린트 YAML 로 agent 설치~모듈 설치를 일괄 수행.
+      //   위 4탭이 수동 경로, 이쪽이 선언적 경로. 좌측 서버 트리를 쓰지 않고 실행이 수 분
+      //   걸리므로(run 이력·재개·롤백) 탭이 아니라 독립 페이지다.
+      { path: '/deploy/auto-deploy',      title: '자동 배포',     component: AutoDeployPage,      adminOnly: true },
       { path: '/deploy/external-systems', title: '외부 시스템',   component: ExternalSystemsPage, adminOnly: true },
       { path: '/deploy/console-accounts', title: '콘솔 계정',     component: ConsoleAccountsPage, adminOnly: true },
       { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },

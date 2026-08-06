@@ -69,22 +69,34 @@ def _pkg_load(config, pid: int = None, name: str = None, version: str = None):
 
 
 def _coerce_list_fields(template: dict, values: dict) -> dict:
-    """config_template 의 string_list/ref_list 필드 값이 콤마 문자열이면 배열로 정규화.
-    프론트 위젯 누락·raw API 우회에도 config.json 에 배열로 저장되게 하는 백엔드 방어."""
+    """config_template 의 string_list/ref_list/object_list 필드 값을 배열로 정규화.
+    프론트 위젯 누락·raw API 우회에도 config.json 에 배열로 저장되게 하는 백엔드 방어.
+    object_list 는 콤마문자열/["ip:port"] 레거시를 [{...}] 로 변환(dict 배열은 그대로)."""
     if not isinstance(values, dict):
         return values
     list_keys = set()
+    obj_fields = {}  # key → item_schema.fields
     for sec in (template or {}).get("sections", []):
         for fld in sec.get("fields", []):
-            if (fld.get("type") or "").lower() in ("string_list", "ref_list") and fld.get("key"):
+            t = (fld.get("type") or "").lower()
+            if not fld.get("key"):
+                continue
+            if t in ("string_list", "ref_list"):
                 list_keys.add(fld["key"])
-    if not list_keys:
+            elif t == "object_list":
+                obj_fields[fld["key"]] = (fld.get("item_schema") or {}).get("fields") or []
+    if not list_keys and not obj_fields:
         return values
     out = dict(values)
     for k in list_keys:
         v = out.get(k)
         if isinstance(v, str):
             out[k] = [s.strip() for s in v.split(",") if s.strip()]
+    if obj_fields:
+        from handlers.modules import _coerce_object_list  # 지연 import (순환 회피)
+        for k, item_fields in obj_fields.items():
+            if k in out:
+                out[k] = _coerce_object_list(out.get(k), item_fields)
     return out
 
 
@@ -139,12 +151,68 @@ def _materialize_deploy_config(config, pkg_file, overlay):
     return out
 
 
+def effective_server_port(config, pkg_file, overlay):
+    """배포의 실효 admin 포트 — 게이트웨이 self-register 와 HA 헬스포트 유도가
+    공유하는 단일 해석. 해석이 갈라지면 프록시와 헬스체크가 서로 다른 포트를 보는
+    반쪽 장애가 되므로 여기 한 곳만 고친다.
+      materialize(template default + overlay) 의 Server.Port — flat dot-key
+      (배포 config.json 표준 형태) 우선, nested 수용 → pkg meta.gateway.default_port.
+    실패/범위 밖은 None."""
+    def _valid(p):
+        try:
+            p = int(p)
+        except (TypeError, ValueError):
+            return None
+        return p if 0 < p < 65536 else None
+
+    try:
+        eff = _materialize_deploy_config(config, pkg_file, overlay)
+        port = _valid(eff.get("Server.Port"))
+        if port is None and isinstance(eff.get("Server"), dict):
+            port = _valid(eff["Server"].get("Port"))
+        if port:
+            return port
+    except Exception:
+        pass
+    meta = (pkg_file or {}).get("meta") if isinstance(pkg_file, dict) else None
+    return _valid(((meta or {}).get("gateway") or {}).get("default_port"))
+
+
+def effective_gateway_host(config, pkg_file, overlay):
+    """배포의 게이트웨이 upstream host — 운영자가 배포 설정 `Server.GatewayHost` 로
+    명시한 도달 주소. base OAM 과 모듈이 다른 호스트에 배치되는 분리 토폴로지에서
+    그룹 VIP(권장) 또는 노드 IP 를 넣는다. 비우면 None — caller 가 127.0.0.1
+    (동거 배치 기본) 사용. 해석 규칙은 effective_server_port 와 동일 (flat 우선,
+    nested 수용)."""
+    try:
+        eff = _materialize_deploy_config(config, pkg_file, overlay)
+        host = eff.get("Server.GatewayHost")
+        if not host and isinstance(eff.get("Server"), dict):
+            host = eff["Server"].get("GatewayHost")
+        host = str(host or "").strip()
+        if host:
+            return host
+    except Exception:
+        pass
+    return None
+
+
+def deploy_config_hash(config, pkg_file, overlay) -> str:
+    """배포 config 실체화본의 canonical hash 12hex — agent 가 metric.cfg_hashes 로
+    보고하는 노드 실파일 hash (cims_agent._cfg_hash_for_module) 와 동일 규칙
+    (parse→sort_keys canonical dump→sha256). 불일치 = config_out_of_sync 알람."""
+    eff = _materialize_deploy_config(config, pkg_file, overlay)
+    return hashlib.sha256(json.dumps(eff, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()[:12]
+
+
 def self_register_deployment_routes(config, dep: dict) -> int:
     """배포 레코드의 패키지 meta.gateway.routes 를 게이트웨이에 self-register(segment
     upsert — 멱등) + role=base 면 hot-mount. 배포 생성(_create_deployment)과 job 성공
     보고(install/upgrade/start/restart — agent_api._report) 양쪽에서 호출한다 —
     종전엔 생성 시 1회뿐이라 upgrade 후 라우트 미등록 상태를 복구할 경로가 없었다.
-    포트 우선순위: 배포 config 의 Server.Port(SoT) → pkg gateway.default_port."""
+    포트/호스트 해석은 effective_server_port / effective_gateway_host (HA 헬스포트
+    유도와 공유하는 단일 해석) — 프록시와 헬스체크가 다른 포트를 보는 드리프트 차단."""
     if not isinstance(dep, dict):
         return 0
     pkg = _pkg_load(config, dep.get("package_id")) if dep.get("package_id") else None
@@ -155,8 +223,7 @@ def self_register_deployment_routes(config, dep: dict) -> int:
         return 0
     process_name = dep.get("process_name") or (pkg or {}).get("name")
     overlay = dep.get("config") if isinstance(dep.get("config"), dict) else {}
-    srv = overlay.get("Server") if isinstance(overlay.get("Server"), dict) else {}
-    port = overlay.get("Server.Port") or srv.get("Port") or gw_meta.get("default_port")
+    port = effective_server_port(config, pkg, overlay)
     if not port:
         logger.log_warning(
             f"[deploy] {process_name}: gateway.routes 선언됐으나 Server.Port(config)·"
@@ -164,9 +231,10 @@ def self_register_deployment_routes(config, dep: dict) -> int:
             f"— 게이트웨이 프록시 404 위험. 배포 config 에 Server.Port 지정 또는 "
             f"pkg.json 에 gateway.default_port 선언 필요.")
         return 0
-    # 게이트웨이 upstream 은 항상 loopback(I1) — 모듈 bind Ip(0.0.0.0 등)와 무관.
+    # 게이트웨이 upstream host = Server.GatewayHost(분리 배치 명시) → 127.0.0.1(동거 기본).
+    host = effective_gateway_host(config, pkg, overlay) or "127.0.0.1"
     import handlers.gateway as _gw
-    return _gw.register_module_routes(config, process_name, "127.0.0.1",
+    return _gw.register_module_routes(config, process_name, host,
                                       int(port), gw_routes)
 
 
@@ -284,8 +352,12 @@ def _job_load_all(config) -> list:
 
 
 def _job_create(config, agent_id: int, job_type: str, params: dict,
-                status: str = 'queued') -> int:
-    """agent_job 1건 생성. lastrowid 호환을 위해 id 반환."""
+                status: str = 'queued', not_before: str | None = None) -> int:
+    """agent_job 1건 생성. lastrowid 호환을 위해 id 반환.
+
+    not_before (ISO, 선택): 그 시각 전에는 agent 가 job 을 가져가지 않는다 —
+    HA 개시 국면에서 start 된 멤버가 VIP 를 먼저 잡도록 나머지 멤버의 update_ha
+    를 지연시키는 용도 (_job_pick_pending 이 필터)."""
     from datetime import datetime as _dt
     d = _job_dir(config)
     new_id = file_store.next_id(d)
@@ -304,6 +376,8 @@ def _job_create(config, agent_id: int, job_type: str, params: dict,
         'create_time': now,
         'update_time': now,
     }
+    if not_before:
+        obj['not_before'] = not_before
     file_store.save(d, new_id, obj)
     return new_id
 
@@ -323,8 +397,11 @@ def _job_pick_pending(config, agent_id: int, limit: int = 10) -> list:
     파일 잠금 없이 동시성 호출 가능하지만 단일 CSC 환경 기준 충돌 가능성 낮음.
     """
     from datetime import datetime as _dt
+    now_iso = _dt.now().isoformat(timespec='seconds')
     all_jobs = _job_load_all(config)
-    pending = [j for j in all_jobs if j.get('agent_id') == agent_id and j.get('status') == 'queued']
+    pending = [j for j in all_jobs
+               if j.get('agent_id') == agent_id and j.get('status') == 'queued'
+               and (not j.get('not_before') or str(j['not_before']) <= now_iso)]
     pending.sort(key=lambda j: j.get('id', 0))
     picked = pending[:limit]
     if picked:
@@ -1793,6 +1870,7 @@ def _deployment_to_json(r: dict) -> dict:
         "process_name": r.get("process_name"),
         "service_functions": sf_list,
         "status":       r.get("status"),
+        "live_state":   r.get("live_state"),
         "install_path": r.get("install_path"),
         "prev_install_path": r.get("prev_install_path"),
         "prev_package_version": r.get("prev_package_version"),
@@ -1822,9 +1900,9 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
     tail = _path_tail(handler_args.full_path, _DEPLOYMENT_BASE)
     method = handler_args.method.upper()
 
-    # 패키지 설정(탭3: config/collection) = operator+ (read 도 — 설정값에 민감정보).
+    # 패키지 설정(탭3: config/collection/sync) = operator+ (read 도 — 설정값에 민감정보).
     # 그 외 변이(설치/잡/롤백/레코드) = admin.
-    if len(tail) >= 2 and tail[1] in ("config", "collection"):
+    if len(tail) >= 2 and tail[1] in ("config", "collection", "sync"):
         deny = _console_rbac(handler_args, read_role="operator", write_role="operator")
     else:
         deny = _console_rbac(handler_args)
@@ -1848,6 +1926,8 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
         elif len(tail) == 2 and tail[1] == "config":
             if method == "GET":  return await _get_deployment_config(did, config)
             if method == "PUT":  return await _put_deployment_config(handler_args, did, config)
+        elif len(tail) == 2 and tail[1] == "sync" and method == "POST":
+            return await _sync_deployment_config(handler_args, did, config)
         elif len(tail) == 3 and tail[1] == "collection":
             name = tail[2]
             if method == "GET":  return await _get_deployment_collection(did, name, config)
@@ -1876,8 +1956,8 @@ async def _get_deployment_config(did: int, config):
     """해당 배포의 현재 설정 값 + 참조 템플릿을 함께 반환.
 
     ha block: dep 이 소속된 ha_group 이 이 패키지를 호스팅하면
-    {group_id, group_name, mode, sync_keys(=config_sync[pkg] | null), members[]}.
-    소속 그룹 없으면(standalone) null — 콘솔 동기화 체크박스 노출 판단 기준."""
+    {group_id, group_name, mode, members[]}. 소속 그룹 없으면(standalone) null —
+    콘솔이 그룹 컨텍스트(공통/개별 탭 안내·설정 비교 링크) 노출 판단에 사용."""
     from services import ha_lookup
 
     r = await asyncio.to_thread(_deploy_load, config, did)
@@ -1898,15 +1978,15 @@ async def _get_deployment_config(did: int, config):
         if g and g.get("id") is not None:
             member_rows = await asyncio.to_thread(
                 ha_lookup.deployments_in_group_for_package, config, g["id"], pkg_name)
-            _enrich_with_agent(member_rows, config)
+            _enrich_deploy(member_rows, config)   # agent_name + package_version (버전 가드 표시용)
             ha_block = {
                 "group_id":   g.get("id"),
                 "group_name": g.get("name"),
                 "mode":       g.get("mode"),
-                "sync_keys":  (g.get("config_sync") or {}).get(pkg_name),
-                "members":    [{"deployment_id": m.get("id"),
-                                "agent_id":      m.get("agent_id"),
-                                "agent_name":    m.get("agent_name")} for m in member_rows],
+                "members":    [{"deployment_id":   m.get("id"),
+                                "agent_id":        m.get("agent_id"),
+                                "agent_name":      m.get("agent_name"),
+                                "package_version": m.get("package_version")} for m in member_rows],
             }
 
     return HandlerResult(status=200,
@@ -1921,45 +2001,29 @@ async def _get_deployment_config(did: int, config):
 
 
 async def _put_deployment_config(handler_args, did: int, config):
-    """설정 값 저장. body = {
-         "config":         {<key>: <value>, ...},   # 요청 dep 의 새 overlay 전체
-         "queue_update"?:  bool (기본 true),
-         "propagate_to_ha_peers"?: bool (기본 true),
-         "sync_keys"?:     [<key>, ...],   # 피어에 merge 할 키만 (변경∩동기화체크).
-                                           #   부재=레거시(피어에 values 통짜) · []=피어 무변경
-         "sync_checked"?:  [<key>, ...],   # 동기화 체크 상태 전체 — ha_group.config_sync[pkg] 영속
+    """설정 값 저장 — 항상 해당 deployment 에만. body = {
+         "config":        {<key>: <value>, ...},   # 이 dep 의 새 overlay 전체
+         "queue_update"?: bool (기본 true),
        }
 
-    요청 dep 은 values 를 overlay 전체로 저장(기존 계약). HA 그룹 피어는
-    sync_keys 지정 시 해당 키 값만 기존 overlay 에 merge — 피어 고유 설정 보존.
-    sync_keys 부재 시 레거시: 피어에도 values 통짜 저장(split-brain config 방지).
-    propagate_to_ha_peers=false 면 단일 deployment 만.
-    queue_update=true 이면 갱신된 멤버별 update_config job enqueue + sync 트랜잭션 1건 생성.
+    저장은 단일 deployment 대상 — HA 그룹 전파 없음. 멤버 간 정합은 그룹 동기화
+    (POST /deployments/{id}/sync — 콘솔 그룹 [설정 비교] 뷰의 명시적 실행)로만
+    맞춘다. 구 body 필드(propagate_to_ha_peers/sync_keys/sync_checked)는 어떤
+    값이 오더라도 무시되며 피어에는 절대 쓰지 않는다.
+    queue_update=true 이면 update_config job 1건 enqueue.
     """
-    from services import ha_lookup, sync_txn
-
     body = _parse_body(handler_args)
     values = body.get("config")
     if not isinstance(values, dict):
         return HandlerResult(status=400, body={"error": "config dict required"},
                              media_type="application/json")
     queue_update = body.get("queue_update", True)
-    propagate    = body.get("propagate_to_ha_peers", True)
-    sync_keys    = body.get("sync_keys")      # None=레거시 통짜 | list=피어 merge 키
-    sync_checked = body.get("sync_checked")   # None=미갱신 | list=config_sync 영속
-    if sync_keys is not None and not isinstance(sync_keys, list):
-        return HandlerResult(status=400, body={"error": "sync_keys must be a list"},
-                             media_type="application/json")
-    if sync_checked is not None and not isinstance(sync_checked, list):
-        return HandlerResult(status=400, body={"error": "sync_checked must be a list"},
-                             media_type="application/json")
 
     dep = await asyncio.to_thread(_deploy_load, config, did)
     if not dep:
         return HandlerResult(status=404, body={"error": "not_found"},
                              media_type="application/json")
     _enrich_deploy([dep], config)
-    pkg_name = dep.get("package_name")
 
     # string_list/ref_list 필드가 콤마 문자열로 오면 배열로 정규화(백엔드 coerce).
     #   프론트 위젯 누락·raw API 우회 시에도 config.json 에 항상 배열로 저장되게 하는
@@ -1973,74 +2037,234 @@ async def _put_deployment_config(handler_args, did: int, config):
     except Exception as _e:
         logger.log_warning(f"deployment config list-coerce skip: {_e}")
 
-    # ── 적용 대상 deployment 들 결정 — 요청 dep 이 멤버로 소속된 그룹으로 한정
-    #    (동일 패키지 다중 그룹 오전파 방지, 멤버십 미매치 시 첫 매치 fallback)
-    targets: list[dict] = [dep]
-    ha_group_id = None
-    if propagate and pkg_name:
-        g = await asyncio.to_thread(_ha_group_for_deployment, config, dep, pkg_name)
-        if g and g.get("id") is not None:
-            ha_group_id = g.get("id")
-            peers = await asyncio.to_thread(
-                ha_lookup.deployments_in_group_for_package, config, ha_group_id, pkg_name)
-            # 첫 deployment (요청 대상) 기준으로 중복 제거
-            seen = {dep.get("id")}
-            for p in peers:
-                pid = p.get("id")
-                if pid not in seen:
-                    targets.append(p)
-                    seen.add(pid)
-            _enrich_deploy(targets, config)
+    updated = await asyncio.to_thread(_deploy_update, config, dep["id"], {"config": values})
+    if not updated:
+        return HandlerResult(status=500, body={"error": "save_failed"},
+                             media_type="application/json")
 
-    # ── 대상 deployment.config 갱신 — 요청 dep=values 전체(overlay 교체),
-    #    피어=sync_keys 값만 기존 overlay 에 merge (레거시: sync_keys 부재 → 통짜)
-    subset = None
-    if sync_keys is not None:
-        subset = {k: values[k] for k in sync_keys if k in values}
-    saved: list[dict] = []
-    for t in targets:
-        if t["id"] == dep["id"] or subset is None:
-            new_overlay = values
-        else:
-            if not subset:
-                continue   # 동기화 대상 없음 — 피어 무변경 (job/sync_txn 도 자연 배제)
-            cur = t.get("config")
-            if not isinstance(cur, dict):
-                cur = _safe_json(t.get("config_json")) or {}
-            new_overlay = {**cur, **subset}
-        updated = await asyncio.to_thread(_deploy_update, config, t["id"], {"config": new_overlay})
-        if updated:
-            saved.append(updated)
-
-    # ── 동기화 체크 상태 영속 — ha_group.config_sync[pkg] (콘솔 UI 복원용 메타).
-    #    operator 의 config 저장에 파생된 상태라 ha_groups PUT(admin) 를 경유하지 않고
-    #    직접 기록. keepalived 와 무관 — update_ha job enqueue 없음.
-    if ha_group_id is not None and isinstance(sync_checked, list) and pkg_name:
-        def _persist_config_sync():
-            g2 = ha_lookup.ha_group_by_id(config, ha_group_id)
-            if not g2:
-                return
-            cs = g2.get("config_sync")
-            cs = dict(cs) if isinstance(cs, dict) else {}
-            cs[pkg_name] = [str(k) for k in sync_checked]
-            g2["config_sync"] = cs
-            ha_lookup.save_group(config, g2)
-        await asyncio.to_thread(_persist_config_sync)
-
-    # ── update_config job 일괄 enqueue + sync_txn 생성
-    sync_id = None
+    # ── update_config job enqueue
+    job_id = None
     members_resp: list[dict] = []
-    if queue_update and saved:
+    if queue_update:
         # _deploy_update 반환 = raw 레코드 (package_name/version 은 패키지 join 필드라
         # 없음) → agent 의 pkg_subdir 해석(overlay 를 <pkg>/config.json 에 기록)에
         # 필요하므로 재-enrich. 누락 시 overlay 가 install_path 루트에 쓰여 CSP 의
         # SIGUSR1 즉시반영(_findDeploymentConfig = csp.json 부모×2)이 읽지 못한다.
-        _enrich_deploy(saved, config)
+        _enrich_deploy([updated], config)
+        sf = updated.get("service_functions")
+        if isinstance(sf, str):
+            sf = _split_csv(sf)
         # 레코드는 sparse overlay 그대로, agent 로 나가는 job config 만 실체화 —
         #   template default + base 공유값 병합으로 config.json 을 완전한 유효설정으로.
-        #   per-target: 피어는 sync_keys 부분 merge 로 overlay 가 서로 다를 수 있어
-        #   각자의 저장된 overlay 로 실체화 (레거시 경로는 전 target 동일 → 결과 동일).
-        member_rows: list[dict] = []
+        params = {
+            "deployment_id":   updated["id"],
+            "package_id":      updated.get("package_id"),
+            "package_name":    updated.get("package_name"),
+            "package_version": updated.get("package_version"),
+            "process_name":    updated.get("process_name"),
+            "service_functions": sf or [],
+            "install_path":    updated.get("install_path"),
+            "config":          _materialize_deploy_config(config, _pkg, updated.get("config")),
+        }
+        job_id = await asyncio.to_thread(_job_create, config, updated["agent_id"],
+                                         "update_config", params)
+        members_resp.append({"deployment_id": updated["id"],
+                             "agent_id": updated.get("agent_id"), "job_id": job_id})
+
+        # ── 실효 포트/게이트웨이 host 변경 전파 — 게이트웨이 라우트 재등록 + HA 재렌더.
+        #   라우트는 배포 생성 시 1회 등록이라 Server.Port/Server.GatewayHost 변경 시
+        #   여기서 재등록하지 않으면 프록시가 구 upstream 을 계속 본다. ha.json
+        #   헬스포트는 포트 변경일 때만 재렌더 (host 는 HA 무관).
+        #   (전파 실패는 저장 성공에 영향 없음.)
+        try:
+            old_port = effective_server_port(config, _pkg, dep.get("config"))
+            new_port = effective_server_port(config, _pkg, updated.get("config"))
+            old_host = effective_gateway_host(config, _pkg, dep.get("config")) or "127.0.0.1"
+            new_host = effective_gateway_host(config, _pkg, updated.get("config")) or "127.0.0.1"
+            if new_port and (new_port != old_port or new_host != old_host):
+                _meta = (_pkg or {}).get("meta") if isinstance(_pkg, dict) else None
+                gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
+                if gw_routes and updated.get("process_name"):
+                    import handlers.gateway as _gw
+                    await asyncio.to_thread(_gw.register_module_routes, config,
+                                            updated["process_name"], new_host,
+                                            int(new_port), gw_routes)
+                n = 0
+                if new_port != old_port:
+                    from handlers.ha_groups import enqueue_update_ha_for_agent
+                    n = await asyncio.to_thread(enqueue_update_ha_for_agent,
+                                                updated.get("agent_id"), config)
+                logger.log_info(f"[deploy-config] dep={updated['id']} 실효 upstream "
+                                f"{old_host}:{old_port}->{new_host}:{new_port}: gateway 재등록"
+                                f"={'O' if gw_routes else 'X'}, update_ha {n}건")
+        except Exception as e:
+            logger.log_warning(f"[deploy-config] upstream 변경 전파 실패(dep={did}): {e}")
+
+    return HandlerResult(status=200,
+        body={
+            "ok":      True,
+            "job_id":  job_id,
+            "members": members_resp,
+        },
+        media_type="application/json")
+
+
+def _effective_scope(field: dict, section_scope) -> str:
+    """필드 유효 scope — field.scope 가 섹션 scope 를 오버라이드. 기본 service.
+
+    섹션 안에 공통값·노드별 값이 섞인 경우(예: csp media_server 의 LocalIp)를
+    필드 단위로 표현하기 위한 규칙. 콘솔(effectiveScope)과 동일해야 한다."""
+    s = field.get("scope") or section_scope or "service"
+    return str(s).lower()
+
+
+def _service_scope_keys(template) -> set:
+    """유효 scope=service 인 필드 키 집합 — 그룹 동기화 복사 마스크.
+    scope=system 필드(바인드 IP·노드 식별자 등)는 동기화로 절대 복사되지 않는다."""
+    out: set = set()
+    if not isinstance(template, dict):
+        return out
+    for s in template.get("sections") or []:
+        sec_scope = s.get("scope")
+        for f in s.get("fields") or []:
+            if f.get("key") and _effective_scope(f, sec_scope) == "service":
+                out.add(f["key"])
+    return out
+
+
+def _service_scope_collections(template) -> set:
+    """scope=service 인 컬렉션 key 집합 — 그룹 동기화 복사 허용 컬렉션."""
+    out: set = set()
+    if not isinstance(template, dict):
+        return out
+    for c in template.get("collections") or []:
+        if c.get("key") and str(c.get("scope") or "service").lower() == "service":
+            out.add(c["key"])
+    return out
+
+
+async def _sync_deployment_config(handler_args, did: int, config):
+    """그룹 설정 동기화 — 명시적 방향성 복사 (source=이 deployment → targets).
+
+    body = {
+      "targets":       [<deployment_id>, ...],  # 같은 HA 그룹·같은 패키지·같은 버전
+      "keys"?:         [<key>, ...],            # 복사할 scalar 키 — 유효 scope=service 만
+      "collections"?:  [<name>, ...],           # 복사할 컬렉션 — scope=service 만
+      "queue_update"?: bool (기본 true),
+    }
+
+    설정 저장(PUT config/collection)은 단일 서버 대상이며, 멤버 간 정합은 이
+    엔드포인트의 명시적 실행(콘솔 그룹 [설정 비교] 뷰 [동기화])으로만 맞춘다.
+      - scalar: source overlay 에 있는 키는 값을 target overlay 에 merge,
+        source overlay 에 없는 키는 target overlay 에서 제거(템플릿 기본값 복귀)
+        → 유효값이 source 와 정확히 일치.
+      - 버전 가드: package_version 불일치 target 이 있으면 409 — 롤링 업그레이드
+        혼재 구간의 오동기화 차단.
+      - scope=system 키/컬렉션은 요청에 있어도 복사하지 않고 skipped 로 보고.
+    """
+    from services import ha_lookup, sync_txn
+
+    body = _parse_body(handler_args)
+    target_ids = body.get("targets")
+    keys = body.get("keys") or []
+    coll_names = body.get("collections") or []
+    queue_update = body.get("queue_update", True)
+    if not isinstance(target_ids, list) or not target_ids:
+        return HandlerResult(status=400, body={"error": "targets list required"},
+                             media_type="application/json")
+    if not isinstance(keys, list) or not isinstance(coll_names, list):
+        return HandlerResult(status=400, body={"error": "keys/collections must be lists"},
+                             media_type="application/json")
+    if not keys and not coll_names:
+        return HandlerResult(status=400, body={"error": "keys or collections required"},
+                             media_type="application/json")
+
+    src = await asyncio.to_thread(_deploy_load, config, did)
+    if not src:
+        return HandlerResult(status=404, body={"error": "not_found"},
+                             media_type="application/json")
+    _enrich_deploy([src], config)
+    pkg_name = src.get("package_name")
+    _pkg = await asyncio.to_thread(_pkg_load, config, src.get("package_id")) or {}
+    template = _pkg.get("config_template") if isinstance(_pkg, dict) else None
+
+    # ── 멤버십 가드: source 가 멤버로 소속된 그룹의 같은-패키지 deployment 만 target 허용
+    g = await asyncio.to_thread(_ha_group_for_deployment, config, src, pkg_name, True)
+    if not g or g.get("id") is None:
+        return HandlerResult(status=409, body={"error": "not_in_ha_group"},
+                             media_type="application/json")
+    ha_group_id = g.get("id")
+    member_rows = await asyncio.to_thread(
+        ha_lookup.deployments_in_group_for_package, config, ha_group_id, pkg_name)
+    member_ids = {m.get("id") for m in member_rows}
+
+    targets: list[dict] = []
+    for tid in target_ids:
+        try:
+            tid = int(tid)
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={"error": "invalid_target", "target": tid},
+                                 media_type="application/json")
+        if tid == src["id"]:
+            continue   # 자기 자신은 대상에서 제외
+        if tid not in member_ids:
+            return HandlerResult(status=409,
+                body={"error": "target_not_in_group", "deployment_id": tid},
+                media_type="application/json")
+        t = await asyncio.to_thread(_deploy_load, config, tid)
+        if not t:
+            return HandlerResult(status=404,
+                body={"error": "target_not_found", "deployment_id": tid},
+                media_type="application/json")
+        targets.append(t)
+    if not targets:
+        return HandlerResult(status=400, body={"error": "no_valid_targets"},
+                             media_type="application/json")
+    _enrich_deploy(targets, config)
+
+    # ── 버전 가드 — 롤링 업그레이드 혼재 구간 오동기화 차단
+    src_ver = src.get("package_version")
+    mismatched = [{"deployment_id": t["id"], "package_version": t.get("package_version")}
+                  for t in targets if t.get("package_version") != src_ver]
+    if mismatched:
+        return HandlerResult(status=409,
+            body={"error": "version_mismatch", "source_version": src_ver,
+                  "targets": mismatched},
+            media_type="application/json")
+
+    # ── scalar 복사 — 유효 scope=service 키만 (system 키는 skipped 보고)
+    allowed = _service_scope_keys(template)
+    apply_keys = [k for k in keys if k in allowed]
+    skipped_keys = sorted(set(keys) - set(apply_keys))
+    src_overlay = src.get("config")
+    if not isinstance(src_overlay, dict):
+        src_overlay = _safe_json(src.get("config_json")) or {}
+    applied_keys = sorted(k for k in apply_keys if k in src_overlay)
+    removed_keys = sorted(k for k in apply_keys if k not in src_overlay)
+
+    saved: list[dict] = []
+    if apply_keys:
+        for t in targets:
+            cur = t.get("config")
+            if not isinstance(cur, dict):
+                cur = _safe_json(t.get("config_json")) or {}
+            new_overlay = dict(cur)
+            for k in apply_keys:
+                if k in src_overlay:
+                    new_overlay[k] = src_overlay[k]
+                else:
+                    new_overlay.pop(k, None)
+            updated = await asyncio.to_thread(_deploy_update, config, t["id"],
+                                              {"config": new_overlay})
+            if updated:
+                saved.append(updated)
+
+    # ── update_config job enqueue + sync_txn (scalar 대상만 — 컬렉션은 proxy 동기호출)
+    sync_id = None
+    members_resp: list[dict] = []
+    if queue_update and saved:
+        _enrich_deploy(saved, config)
+        member_jobs: list[dict] = []
         for t in saved:
             sf = t.get("service_functions")
             if isinstance(sf, str):
@@ -2057,25 +2281,20 @@ async def _put_deployment_config(handler_args, did: int, config):
             }
             jid = await asyncio.to_thread(_job_create, config, t["agent_id"],
                                           "update_config", params)
-            member_rows.append({
-                "agent_id":      t["agent_id"],
-                "deployment_id": t["id"],
-                "job_id":        jid,
-            })
+            member_jobs.append({"agent_id": t["agent_id"],
+                                "deployment_id": t["id"], "job_id": jid})
             members_resp.append({"deployment_id": t["id"],
                                  "agent_id": t["agent_id"], "job_id": jid})
-        # 그룹 멤버 2명 이상일 때만 sync_txn 생성 — 단일 deployment 는 옛 동작 유지
-        if len(member_rows) > 1:
+        if member_jobs:
             txn = await asyncio.to_thread(sync_txn.create, config,
                                           collection="config",
-                                          op="put_config",
-                                          members=member_rows,
+                                          op="group_sync",
+                                          members=member_jobs,
                                           actor="console",
                                           ttl_sec=120,
-                                          note=f"deployment#{did} ha_group#{ha_group_id}")
+                                          note=f"src_deployment#{did} ha_group#{ha_group_id}")
             sync_id = txn["id"]
-            # backfill sync_id into each job's params (agent ack endpoint uses it)
-            for m in member_rows:
+            for m in member_jobs:
                 j = await asyncio.to_thread(_job_load, config, m["job_id"])
                 if not j:
                     continue
@@ -2083,19 +2302,250 @@ async def _put_deployment_config(handler_args, did: int, config):
                 p["sync_id"] = sync_id
                 await asyncio.to_thread(_job_update, config, m["job_id"], {"params": p})
 
-    # ── 응답: 옛 단일-deployment 호출자 호환 위해 첫 멤버의 job_id 도 그대로 노출
-    first_job = members_resp[0]["job_id"] if members_resp else None
-    return HandlerResult(status=200,
+    # ── 컬렉션 복사 — source agent 에서 records GET → target agent 들에 PUT (동기 proxy)
+    coll_results: list[dict] = []
+    colls_ok = True
+    if coll_names:
+        allowed_colls = _service_scope_collections(template)
+        src_full = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
+        target_fulls = []
+        for t in targets:
+            tf = await asyncio.to_thread(_fetch_deployment_for_proxy, t["id"], config)
+            if tf and tf.get("install_path"):
+                target_fulls.append(tf)
+        if not src_full or not src_full.get("install_path"):
+            return HandlerResult(status=409, body={"error": "source_not_installed"},
+                                 media_type="application/json")
+        for name in coll_names:
+            if name not in allowed_colls:
+                coll_results.append({"name": name, "ok": False,
+                                     "skipped": "scope_not_service"})
+                continue
+            status, resp = await asyncio.to_thread(
+                _agent_proxy_call, "GET", src_full,
+                "/collection", {"install_path": src_full["install_path"], "name": name},
+                None, 15, config)
+            if status != 200:
+                coll_results.append({"name": name, "ok": False, "error": resp})
+                colls_ok = False
+                continue
+            records = (resp or {}).get("records") or []
+            peers = []
+            all_ok = True
+            for tf in target_fulls:
+                st, rp = await asyncio.to_thread(
+                    _agent_proxy_call, "PUT", tf,
+                    "/collection", {"install_path": tf["install_path"], "name": name},
+                    {"records": records, "signal": True}, 15, config)
+                ok = (st == 200)
+                peers.append({"deployment_id": tf["id"], "agent_id": tf.get("agent_id"),
+                              "status": st, "ok": ok,
+                              "error": None if ok else rp})
+                if not ok:
+                    all_ok = False
+            coll_results.append({"name": name, "ok": all_ok,
+                                 "count": len(records), "peers": peers})
+            if not all_ok:
+                colls_ok = False
+
+    return HandlerResult(status=200 if colls_ok else 502,
         body={
-            "ok":           True,
-            "job_id":       first_job,         # 옛 호환
-            "members":      members_resp,
-            "ha_group_id":  ha_group_id,
-            "sync_id":      sync_id,
-            "propagated":   len(saved) > 1,
-            "sync_keys_applied": sorted(subset) if subset is not None else None,
+            "ok":                   colls_ok,
+            "source_deployment_id": src["id"],
+            "ha_group_id":          ha_group_id,
+            "applied_keys":         applied_keys,
+            "removed_keys":         removed_keys,
+            "skipped_keys":         skipped_keys,
+            "members":              members_resp,
+            "collections":          coll_results,
+            "sync_id":              sync_id,
         },
         media_type="application/json")
+
+
+def _enqueue_update_config_jobs(config, deps: list, pkg_file, *, op: str,
+                                actor: str, note: str) -> tuple:
+    """저장된 deployment 들에 update_config job enqueue + sync_txn 생성 + sync_id
+    backfill (그룹 저장/자동 교정 공용 — deps 는 _enrich_deploy 된 레코드, sync 함수).
+    반환 (members[{deployment_id, agent_id, job_id}], sync_id|None)."""
+    from services import sync_txn
+    members: list[dict] = []
+    for t in deps:
+        sf = t.get("service_functions")
+        if isinstance(sf, str):
+            sf = _split_csv(sf)
+        params = {
+            "deployment_id":   t["id"],
+            "package_id":      t.get("package_id"),
+            "package_name":    t.get("package_name"),
+            "package_version": t.get("package_version"),
+            "process_name":    t.get("process_name"),
+            "service_functions": sf or [],
+            "install_path":    t.get("install_path"),
+            "config":          _materialize_deploy_config(config, pkg_file, t.get("config")),
+        }
+        jid = _job_create(config, t["agent_id"], "update_config", params)
+        members.append({"agent_id": t["agent_id"], "deployment_id": t["id"], "job_id": jid})
+    sync_id = None
+    if members:
+        txn = sync_txn.create(config, collection="config", op=op, members=members,
+                              actor=actor, ttl_sec=120, note=note)
+        sync_id = txn["id"]
+        for m in members:
+            j = _job_load(config, m["job_id"])
+            if not j:
+                continue
+            p = j.get("params") or {}
+            p["sync_id"] = sync_id
+            _job_update(config, m["job_id"], {"params": p})
+    return members, sync_id
+
+
+def reconcile_group_package(config, group: dict, pkg_name: str, *,
+                            include_collections: bool = True,
+                            actor: str = "auto-sync") -> dict:
+    """AS 그룹×패키지 자동 정합 (R4 자동 교정 코어 — sync 함수, thread offload 권장).
+
+    실측 ACTIVE(ha_lookup.vip_observation) 멤버를 기준으로 STANDBY 의 공통(service)
+    설정을 맞춘다. 호출처: oam_app 의 auto-sync 스위퍼(주기), 스위치 ON 전환,
+    upgrade/start/restart job 성공 훅.
+
+    안전 원칙 — 애매하면 복사하지 않는다:
+      - 스위치 OFF / AS 아님 → skip
+      - ACTIVE 판정 불가(0명·2명 보유·전원 stale) → skip
+      - 버전 불일치 target → deferred (버전이 같아지는 다음 호출에서 자동 정합)
+    """
+    from services import ha_lookup
+    out = {"group_id": group.get("id"), "package": pkg_name,
+           "status": "skipped", "reason": None,
+           "active_agent_id": None, "synced_keys": [], "removed_keys": [],
+           "collections": [], "deferred": [], "members": [], "sync_id": None}
+    if group.get("mode") != "active_standby":
+        out["reason"] = "not_active_standby"
+        return out
+    if not ha_lookup.auto_sync_enabled(group, pkg_name):
+        out["reason"] = "switch_off"
+        return out
+    obs = ha_lookup.vip_observation(config, group)
+    active_aid = obs["active_agent_id"]
+    out["active_agent_id"] = active_aid
+    if active_aid is None:
+        out["reason"] = "active_unknown"
+        return out
+
+    deps = ha_lookup.deployments_in_group_for_package(config, group["id"], pkg_name)
+    _enrich_deploy(deps, config)
+    src = next((d for d in deps if d.get("agent_id") == active_aid), None)
+    if not src:
+        out["reason"] = "active_has_no_deployment"
+        return out
+    targets = [d for d in deps if d.get("id") != src.get("id")]
+    if not targets:
+        out["reason"] = "no_peers"
+        return out
+    src_ver = src.get("package_version")
+    same_ver = [t for t in targets if t.get("package_version") == src_ver]
+    out["deferred"] = [{"deployment_id": t["id"],
+                        "package_version": t.get("package_version")}
+                       for t in targets if t.get("package_version") != src_ver]
+    if not same_ver:
+        out["reason"] = "version_mismatch"
+        return out
+
+    _pkg = _pkg_load(config, src.get("package_id")) or {}
+    template = _pkg.get("config_template") if isinstance(_pkg, dict) else None
+    svc_keys = _service_scope_keys(template)
+    src_overlay = src.get("config")
+    if not isinstance(src_overlay, dict):
+        src_overlay = _safe_json(src.get("config_json")) or {}
+
+    # ── scalar 정합: ACTIVE overlay 의 service 키 기준 merge / 제거(기본값 복귀)
+    saved: list[dict] = []
+    synced_keys: set = set()
+    removed_keys: set = set()
+    for t in same_ver:
+        cur = t.get("config")
+        if not isinstance(cur, dict):
+            cur = _safe_json(t.get("config_json")) or {}
+        new_overlay = dict(cur)
+        changed = False
+        for k in svc_keys:
+            if k in src_overlay:
+                if new_overlay.get(k) != src_overlay[k]:
+                    new_overlay[k] = src_overlay[k]
+                    synced_keys.add(k)
+                    changed = True
+            elif k in new_overlay:
+                new_overlay.pop(k)
+                removed_keys.add(k)
+                changed = True
+        if changed:
+            updated = _deploy_update(config, t["id"], {"config": new_overlay})
+            if updated:
+                saved.append(updated)
+    out["synced_keys"] = sorted(synced_keys)
+    out["removed_keys"] = sorted(removed_keys)
+    if saved:
+        _enrich_deploy(saved, config)
+        members, sync_id = _enqueue_update_config_jobs(
+            config, saved, _pkg, op="auto_sync", actor=actor,
+            note=f"auto-sync ha_group#{group.get('id')} pkg={pkg_name} "
+                 f"active=agent#{active_aid}")
+        out["members"] = members
+        out["sync_id"] = sync_id
+
+    # ── 컬렉션 정합: scope=service 컬렉션 records 를 ACTIVE 기준으로 복사
+    #    (hash 동일하면 PUT 생략 — 매 라운드 무해)
+    colls_changed = False
+    if include_collections:
+        svc_colls = _service_scope_collections(template)
+        if svc_colls:
+            import hashlib
+            def _rhash(recs):
+                try:
+                    return hashlib.sha256(json.dumps(recs or [], ensure_ascii=False,
+                                                     sort_keys=True).encode()).hexdigest()[:12]
+                except Exception:
+                    return ""
+            src_full = _fetch_deployment_for_proxy(src["id"], config)
+            target_fulls = [tf for tf in
+                            (_fetch_deployment_for_proxy(t["id"], config) for t in same_ver)
+                            if tf and tf.get("install_path")]
+            if src_full and src_full.get("install_path") and target_fulls:
+                for name in sorted(svc_colls):
+                    st, resp = _agent_proxy_call(
+                        "GET", src_full, "/collection",
+                        {"install_path": src_full["install_path"], "name": name},
+                        None, 15, config)
+                    if st != 200:
+                        out["collections"].append({"name": name, "ok": False, "error": resp})
+                        continue
+                    records = (resp or {}).get("records") or []
+                    src_hash = _rhash(records)
+                    peers = []
+                    for tf in target_fulls:
+                        gst, gresp = _agent_proxy_call(
+                            "GET", tf, "/collection",
+                            {"install_path": tf["install_path"], "name": name},
+                            None, 15, config)
+                        if gst == 200 and _rhash((gresp or {}).get("records") or []) == src_hash:
+                            continue   # 이미 정합
+                        pst, presp = _agent_proxy_call(
+                            "PUT", tf, "/collection",
+                            {"install_path": tf["install_path"], "name": name},
+                            {"records": records, "signal": True}, 15, config)
+                        peers.append({"deployment_id": tf["id"], "agent_id": tf.get("agent_id"),
+                                      "ok": pst == 200,
+                                      "error": None if pst == 200 else presp})
+                        if pst == 200:
+                            colls_changed = True
+                    if peers:
+                        out["collections"].append({"name": name,
+                                                   "ok": all(p["ok"] for p in peers),
+                                                   "count": len(records), "peers": peers})
+
+    out["status"] = "synced" if (saved or colls_changed) else "in_sync"
+    return out
 
 
 # _SELECT_DEPLOY 는 더 이상 사용하지 않음 (agent_deployment 가 file_store 로 이전됨).
@@ -2122,7 +2572,17 @@ def _enrich_deploy(rows, config):
         if aid is not None:
             if aid not in agent_cache:
                 agent_cache[aid] = _agent_load(config, aid=aid) or {}
-            r['agent_name'] = agent_cache[aid].get('name')
+            ag = agent_cache[aid]
+            r['agent_name'] = ag.get('name')
+            # 실측 프로세스 상태 — agent metric 의 live_modules 스냅샷과 대조.
+            # status(배포기록=의도)와 달리 실제 프로세스 생존을 반영 (metric 주기 지연).
+            # online + 보고 있음 + 설치됨(비 pending) 일 때만 판정, 그 외 None(모름).
+            lm = ag.get('live_modules')
+            if (ag.get('status') == 'online' and isinstance(lm, list)
+                    and r.get('status') in ('running', 'stopped')):
+                names = {str(x.get('name', '')).lower() for x in lm if isinstance(x, dict)}
+                proc = (r.get('process_name') or r.get('package_name') or '').lower()
+                r['live_state'] = ('up' if proc in names else 'down') if proc else None
     return rows
 
 
@@ -2249,6 +2709,19 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     except Exception as e:
         logger.log_warning(f"[deploy] self-register routes 실패({process_name}): {e}")
 
+    # ── HA ha.json 재렌더 전파 — 헬스포트/cold_modules 는 렌더 시점의 배포 목록에서
+    #   유도되는 파생값이라, 정본 흐름(그룹 구성 → 설치)에서는 그룹 적용 시점에 배포가
+    #   없어 port 미기재 ha.json 이 만들어진다. 배포 생성이 렌더 입력을 바꾸므로
+    #   여기서 재렌더를 태워 ha.json 이 자동 추종하게 한다. (전파 실패는 생성 성공에
+    #   영향 없음 — flap 방어는 cims-health 쪽 안전망이 담당.)
+    try:
+        from handlers.ha_groups import enqueue_update_ha_for_agent
+        n = await asyncio.to_thread(enqueue_update_ha_for_agent, agent_id, config)
+        if n:
+            logger.log_info(f"[deploy] {process_name}: 배포 생성 → update_ha {n}건 재렌더 큐잉")
+    except Exception as e:
+        logger.log_warning(f"[deploy] 배포 생성 ha 재렌더 전파 실패(agent={agent_id}): {e}")
+
     return HandlerResult(status=201, body=_deployment_to_json(r), media_type="application/json")
 
 
@@ -2296,6 +2769,29 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
                         logger.log_info(f"runtime store v2 P5: '{owner}' 컬렉션 schema 정합 v{new_ver}: {migrated}")
         except Exception as _e:
             logger.log_warning(f"runtime store v2 P5 schema 정합 skip: {_e}")
+    # 실효 포트 전파 — package_id 전환으로 template default 포트가 바뀌면
+    # 게이트웨이 라우트/HA 헬스포트가 추종 (deployment config 변경 경로와 동일).
+    if "package_id" in patches and patches["package_id"] != _old_pkg_id:
+        try:
+            newp = await asyncio.to_thread(_pkg_load, config, patches["package_id"])
+            oldp = await asyncio.to_thread(_pkg_load, config, _old_pkg_id) if _old_pkg_id else None
+            old_port = effective_server_port(config, oldp, r.get("config"))
+            new_port = effective_server_port(config, newp, r.get("config"))
+            if new_port and new_port != old_port:
+                _meta = (newp or {}).get("meta") if isinstance(newp, dict) else None
+                gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
+                if gw_routes and r.get("process_name"):
+                    import handlers.gateway as _gw
+                    _host = effective_gateway_host(config, newp, r.get("config")) or "127.0.0.1"
+                    await asyncio.to_thread(_gw.register_module_routes, config,
+                                            r["process_name"], _host,
+                                            int(new_port), gw_routes)
+                from handlers.ha_groups import enqueue_update_ha_for_agent
+                n = await asyncio.to_thread(enqueue_update_ha_for_agent, r.get("agent_id"), config)
+                logger.log_info(f"[deploy-update] dep={did} 실효포트 {old_port}->{new_port} "
+                                f"(pkg 전환): gateway 재등록={'O' if gw_routes else 'X'}, update_ha {n}건")
+        except Exception as e:
+            logger.log_warning(f"[deploy-update] 포트 변경 전파 실패(dep={did}): {e}")
     _enrich_deploy([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
@@ -2304,15 +2800,22 @@ async def _delete_deployment(did: int, config):
     # runtime store v2 P4 — 모듈의 마지막 deployment 제거 시 그 모듈 컬렉션 SoT prune.
     dep = await asyncio.to_thread(_deploy_load, config, did)
     pkg = (dep or {}).get("package_name") or (dep or {}).get("package")
-    # self-register 해제: 이 deployment 의 모듈 라우트를 게이트웨이에서 deregister+unmount.
     _proc = (dep or {}).get("process_name") or pkg
+    await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
+    # self-register 해제: 라우트는 모듈(process) 단위 공유라, 같은 process 의 다른
+    # 배포(AS 그룹 피어 등)가 남아 있으면 유지 — 한쪽 멤버 제거/재설치가 모듈 라우트를
+    # 전멸시키던 것 방지. 마지막 배포일 때만 deregister+unmount.
     if _proc:
         try:
-            import handlers.gateway as _gw
-            await asyncio.to_thread(_gw.deregister_module_routes, config, _proc)
+            siblings = [d for d in await asyncio.to_thread(_deploy_load_all, config)
+                        if (d.get("process_name") or d.get("package_name")) == _proc]
+            if not siblings:
+                import handlers.gateway as _gw
+                await asyncio.to_thread(_gw.deregister_module_routes, config, _proc)
+            else:
+                logger.log_info(f"[deploy] dep={did} 제거 — '{_proc}' 배포 {len(siblings)}개 잔존, 라우트 유지")
         except Exception as e:
             logger.log_warning(f"[deploy] deregister routes 실패({_proc}): {e}")
-    await asyncio.to_thread(file_store.delete, _deploy_dir(config), did)
     if pkg:
         try:
             remaining = [d for d in await asyncio.to_thread(_deploy_load_all, config)
@@ -2323,6 +2826,15 @@ async def _delete_deployment(did: int, config):
                     logger.log_info(f"runtime store v2: '{pkg}' 마지막 deployment 제거 → 컬렉션 SoT prune")
         except Exception as _e:
             logger.log_warning(f"runtime store v2 prune skip (pkg={pkg}): {_e}")
+    # 배포 제거도 렌더 입력 변경 — ha.json 재렌더 전파 (생성 경로와 대칭).
+    if dep and dep.get("agent_id") is not None:
+        try:
+            from handlers.ha_groups import enqueue_update_ha_for_agent
+            n = await asyncio.to_thread(enqueue_update_ha_for_agent, dep["agent_id"], config)
+            if n:
+                logger.log_info(f"[deploy] dep={did} 제거 → update_ha {n}건 재렌더 큐잉")
+        except Exception as e:
+            logger.log_warning(f"[deploy] 배포 제거 ha 재렌더 전파 실패(dep={did}): {e}")
     return HandlerResult(status=204, body=None, media_type="application/json")
 
 
@@ -2454,6 +2966,16 @@ async def _rollback_deployment(handler_args: HandlerArgs, did: int, config):
 
     cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
           else _safe_json(dep.get("config_json"))
+    # job 으로 나가는 config 는 실체화 (record 는 sparse overlay 유지) — 다른
+    # 디스패치 경로와 동일. agent job_health_check 포트 유도가 template default
+    # 를 보게 한다.
+    if cfg is None or isinstance(cfg, dict):
+        try:
+            _rb_pkg = await asyncio.to_thread(_pkg_load, config,
+                                              patches.get("package_id") or dep.get("package_id"))
+            cfg = _materialize_deploy_config(config, _rb_pkg, cfg)
+        except Exception as _e:
+            logger.log_warning(f"[deployment-rollback] config 실체화 skip: {_e}")
     sf = dep.get("service_functions")
     if isinstance(sf, str):
         sf = _split_csv(sf)
@@ -2857,17 +3379,13 @@ async def _get_deployment_collection(did: int, name: str, config):
 
 
 async def _put_deployment_collection(handler_args, did: int, name: str, config):
-    """deployment 의 jsonl 컬렉션 PUT.
+    """deployment 의 jsonl 컬렉션 PUT — 항상 해당 deployment 에만.
 
-    HA fan-out (T1, commit b/9b5699b 후속):
-      - body.propagate_to_ha_peers (선택). 명시 시 그 값 우선.
-      - 자동 결정: scope=service 또는 (scope=system + mode=active_standby) → True.
-        scope=system + mode=all_active → False (멤버별 다른 svc IP 등 정상 의도).
-      - propagate=True 면 ha_group 의 모든 csp deployment 에 동일 records 동시 PUT.
-      - 멤버 2명 이상이면 sync_txn 1건 생성 (csc 가 proxy 동기호출 결과로 즉시 ack/nack).
+    HA 그룹 전파 없음 — 멤버 간 정합은 그룹 동기화(POST /deployments/{id}/sync)의
+    명시적 실행으로만 맞춘다. 구 body.propagate_to_ha_peers 는 무시된다.
+    드리프트는 GET 의 멤버 hash 비교(drift_detected)와 drift_sweeper 가 감지해
+    콘솔 그룹 [설정 비교] 뷰가 경고로 노출한다.
     """
-    from services import ha_lookup, sync_txn
-
     dep = await asyncio.to_thread(_fetch_deployment_for_proxy, did, config)
     if not dep:
         return HandlerResult(status=404, body={"error": "deployment_not_found"},
@@ -2907,98 +3425,35 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
             media_type="application/json")
 
     do_signal = body.get("signal", True)
-
-    # ── 대상 deployment 들 결정
     scope = ((coll or {}).get("scope") or "service").lower()
-    pkg_name = dep.get("package_name")
-    propagate_override = body.get("propagate_to_ha_peers")
-    targets: list[dict] = [dep]
-    ha_group_id = None
-    ha_mode = None
-    if propagate_override is not False and pkg_name:
-        g = await asyncio.to_thread(ha_lookup.ha_group_for_package, config, pkg_name)
-        if g:
-            ha_group_id = g.get("id")
-            ha_mode = g.get("mode")
-            should_prop = ha_lookup.should_propagate(scope, ha_mode, propagate_override)
-            if should_prop:
-                peers = await asyncio.to_thread(
-                    ha_lookup.deployments_in_group_for_package, config, ha_group_id, pkg_name)
-                seen = {dep.get("id")}
-                for p in peers:
-                    pid = p.get("id")
-                    if pid in seen:
-                        continue
-                    full = await asyncio.to_thread(_fetch_deployment_for_proxy, pid, config)
-                    if full and full.get("install_path"):
-                        targets.append(full)
-                        seen.add(pid)
 
-    # ── 각 target 에 동시 PUT (병렬)
-    async def _put_one(t):
-        return await asyncio.to_thread(
-            _agent_proxy_call, "PUT", t,
-            "/collection", {"install_path": t["install_path"], "name": name},
-            {"records": records, "signal": do_signal}, 15, config,
-        )
-    results = await asyncio.gather(*[_put_one(t) for t in targets])
+    # ── 해당 deployment 의 agent 에만 PUT
+    status, resp = await asyncio.to_thread(
+        _agent_proxy_call, "PUT", dep,
+        "/collection", {"install_path": dep["install_path"], "name": name},
+        {"records": records, "signal": do_signal}, 15, config,
+    )
+    ok = (status == 200)
+    peers_resp = [{
+        "deployment_id": dep["id"],
+        "agent_id":      dep.get("agent_id"),
+        "status":        status,
+        "ok":            ok,
+        "count":         (resp or {}).get("count")    if ok else None,
+        "signaled":      (resp or {}).get("signaled") if ok else [],
+        "error":         None                          if ok else resp,
+    }]
 
-    # ── 결과 집계
-    peers_resp: list[dict] = []
-    success_all = True
-    for t, (status, resp) in zip(targets, results):
-        ok = (status == 200)
-        peers_resp.append({
-            "deployment_id": t["id"],
-            "agent_id":      t.get("agent_id"),
-            "status":        status,
-            "ok":            ok,
-            "count":         (resp or {}).get("count")    if ok else None,
-            "signaled":      (resp or {}).get("signaled") if ok else [],
-            "error":         None                          if ok else resp,
-        })
-        if not ok:
-            success_all = False
-
-    # ── sync_txn (멤버 2명 이상 + csc 가 proxy 결과 즉시 알므로 ack 직접)
-    sync_id = None
-    if len(targets) > 1:
-        member_rows = [{"agent_id":      p["agent_id"],
-                        "deployment_id": p["deployment_id"],
-                        "job_id":        None}
-                       for p in peers_resp]
-        txn = await asyncio.to_thread(sync_txn.create, config,
-                                      collection=name,
-                                      op="put_collection",
-                                      members=member_rows,
-                                      actor="console",
-                                      ttl_sec=60,
-                                      note=f"deployment#{did} ha_group#{ha_group_id} scope={scope}")
-        sync_id = txn["id"]
-        for p in peers_resp:
-            err = None
-            if not p["ok"]:
-                try: err = json.dumps(p.get("error"), ensure_ascii=False)
-                except Exception: err = str(p.get("error"))
-            await asyncio.to_thread(sync_txn.ack, config, sync_id, p["agent_id"],
-                                    status="ack" if p["ok"] else "nack",
-                                    error=err)
-
-    # ── 응답 (옛 single-deployment 호출자 호환 위해 count/signaled 도 노출)
-    first = peers_resp[0] if peers_resp else {}
-    return HandlerResult(status=200 if success_all else 502,
+    # ── 응답 (옛 다중-peer 호출자 호환 위해 peers/propagated 형태 유지)
+    return HandlerResult(status=200 if ok else 502,
         body={
-            "ok":            success_all,
-            "count":         first.get("count"),
-            "signaled":      first.get("signaled") or [],
+            "ok":            ok,
+            "count":         peers_resp[0].get("count"),
+            "signaled":      peers_resp[0].get("signaled") or [],
             "peers":         peers_resp,
-            "ha_group_id":   ha_group_id,
-            "ha_group_mode": ha_mode,
             "scope":         scope,
-            "propagated":    len(targets) > 1,
-            "sync_id":       sync_id,
-            # peer 호출 실패 detail (옛 single 호출자가 'detail' 만 보던 경우 호환)
-            "detail":        None if success_all else [p.get("error") for p in peers_resp if not p["ok"]],
+            "propagated":    False,
+            "detail":        None if ok else [resp],
         },
         media_type="application/json")
 
@@ -3191,6 +3646,24 @@ CIMS_AGENT_ADMIN_HANDLER_LIST = (
     (_DRIFT_BASE,         handle_drift,        {}),
     (_SIP_SERVICES_BASE,  handle_sip_services, {}),
 )
+
+
+# ── API 문서 (개발자 모드) ──────────────────────────────────────────────────
+#  이 모듈이 제공하는 엔드포인트 중 **노드 사양·자원 사용률 조회(읽기)만** 선언한다.
+#  등록/승인/삭제/제어/패키지/배포/sync/drift 같은 내부 운영 API 는 외부 공유 대상이 아니므로 선언하지
+#  않는다 (docs/design/features/api_docs.md §5). module=None — base OAM 상주라 항상 가용.
+CIMS_AGENT_API_DOCS = [
+    {'id': 'nodes.list', 'module': None, 'method': 'GET', 'path': '/api/v1/agents',
+     'summary': '노드 목록 + 사양·상태 (hostname/ip/OS, cpu_cores·memory_mb·disk_gb, 최근 heartbeat)',
+     'params': [], 'response': '{items:[{id, name, status, hostname, ip_address, os_info, '
+                               'cpu_cores, memory_mb, disk_gb, agent_version, last_heartbeat, ...}]}',
+     'auth': 'Bearer JWT (monitor)'},
+    {'id': 'nodes.metrics', 'module': None, 'method': 'GET', 'path': '/api/v1/agents/{id}/metrics',
+     'summary': '노드 자원 사용률 시계열 (CPU/메모리/디스크/load, 프로세스·인터페이스·마운트별)',
+     'params': [{'name': 'id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '노드 id (agents.list 의 id)'}],
+     'response': '{items:[{ts, cpu_pct, mem_pct, disk_pct, load_avg, processes[], per_iface[], mounts[]}]}',
+     'auth': 'Bearer JWT (monitor)'},
+]
 
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋
 CIMS_AGENT_PUBLIC_HANDLER_LIST = (

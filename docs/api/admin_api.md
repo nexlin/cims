@@ -3,9 +3,9 @@
 ## 1. 개요
 
 CIMS 관리 콘솔은 REST API 기반으로 사용자, 구독(Call/PTT 번호), PTT 그룹을 관리합니다.
-API 서버는 CSC (`csc/src/csc_app.py`) 가 HTTPS 포트 4420에서 제공합니다.
+API 서버는 CSC (`csc/src/csc_app.py`) 가 HTTPS 포트 4421에서 제공합니다.
 
-**기본 URL:** `https://<서버IP>:4420/api/v1`
+**기본 URL:** `https://<서버IP>:4421/api/v1`
 **인증:** JWT Bearer Token (`Authorization: Bearer <token>`)
 **콘텐츠 타입:** `application/json`
 
@@ -40,7 +40,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST https://192.168.0.2:4420/api/v1/auth/login \
+curl -k -X POST https://192.168.0.2:4421/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"login_id":"admin","password":"1234"}'
 ```
@@ -112,7 +112,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST https://192.168.0.2:4420/api/v1/auth/register \
+curl -k -X POST https://192.168.0.2:4421/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"name":"홍길동","login_id":"hong001","password":"mypassword"}'
 ```
@@ -161,7 +161,7 @@ Authorization: Bearer <token>
 
 **curl 예시:**
 ```bash
-curl -k -X GET https://192.168.0.2:4420/api/v1/auth/me \
+curl -k -X GET https://192.168.0.2:4421/api/v1/auth/me \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -247,7 +247,7 @@ Authorization: Bearer <admin_token>
 
 **curl 예시:**
 ```bash
-curl -k -X GET https://192.168.0.2:4420/api/v1/users \
+curl -k -X GET https://192.168.0.2:4421/api/v1/users \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -334,7 +334,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST https://192.168.0.2:4420/api/v1/users \
+curl -k -X POST https://192.168.0.2:4421/api/v1/users \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -381,7 +381,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X PUT https://192.168.0.2:4420/api/v1/users/35 \
+curl -k -X PUT https://192.168.0.2:4421/api/v1/users/35 \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{"name":"변경이름","org_id":"본부2팀"}'
@@ -413,7 +413,7 @@ Authorization: Bearer <admin_token>
 
 **curl 예시:**
 ```bash
-curl -k -X DELETE https://192.168.0.2:4420/api/v1/users/35 \
+curl -k -X DELETE https://192.168.0.2:4421/api/v1/users/35 \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -468,7 +468,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST https://192.168.0.2:4420/api/v1/users/1/call \
+curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/call \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{"id":"+821012345678","passwd":"1234"}'
@@ -513,7 +513,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X PUT "https://192.168.0.2:4420/api/v1/users/1/call/%2B821012345678" \
+curl -k -X PUT "https://192.168.0.2:4421/api/v1/users/1/call/%2B821012345678" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{"dnd":true,"forward_id":"+821099999999"}'
@@ -543,7 +543,7 @@ Authorization: Bearer <admin_token>
 
 **curl 예시:**
 ```bash
-curl -k -X DELETE "https://192.168.0.2:4420/api/v1/users/1/call/%2B821012345678" \
+curl -k -X DELETE "https://192.168.0.2:4421/api/v1/users/1/call/%2B821012345678" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -594,7 +594,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST https://192.168.0.2:4420/api/v1/users/1/ptt \
+curl -k -X POST https://192.168.0.2:4421/api/v1/users/1/ptt \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -675,7 +675,7 @@ Authorization: Bearer <admin_token>
 
 **curl 예시:**
 ```bash
-curl -k -X GET https://192.168.0.2:4420/api/v1/ptt/groups \
+curl -k -X GET https://192.168.0.2:4421/api/v1/ptt/groups \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -750,7 +750,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST https://192.168.0.2:4420/api/v1/ptt/groups \
+curl -k -X POST https://192.168.0.2:4421/api/v1/ptt/groups \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -824,7 +824,7 @@ Authorization: Bearer <admin_token>
 
 **curl 예시:**
 ```bash
-curl -k -X DELETE "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910003" \
+curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910003" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 
@@ -855,7 +855,7 @@ Content-Type: application/json
 
 **curl 예시:**
 ```bash
-curl -k -X POST "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001/members" \
+curl -k -X POST "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/members" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..." \
   -H "Content-Type: application/json" \
   -d '{"user_id":"+82571900005","priority":2}'
@@ -892,7 +892,7 @@ Authorization: Bearer <admin_token>
 
 **curl 예시:**
 ```bash
-curl -k -X DELETE "https://192.168.0.2:4420/api/v1/ptt/groups/%2B82571910001/members/%2B82571900005" \
+curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/members/%2B82571900005" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIs..."
 ```
 

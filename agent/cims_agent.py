@@ -4,7 +4,7 @@ CIMS Server Agent (P10)
 
 Usage:
   cims_agent.py \
-      --csc-url https://csc.example.com:4420 \
+      --oam-url https://oam.example.com:4419 \
       --state-dir ~/.local/state/cims-agent
 
 On first start (no state):
@@ -13,7 +13,8 @@ On first start (no state):
 
 On subsequent starts:
   - reads session_token from state
-  - POST /api/agent/heartbeat every 30s → receives pending jobs → executes
+  - POST /api/agent/heartbeat every 2s (DEFAULT_HEARTBEAT_SEC, --heartbeat-sec;
+    OAM 불통 시 5→10→…→60s 지수 backoff) → receives pending jobs → executes
 
 Job types (minimal P10 implementation):
   - install: download pkg → untar → save to install_path
@@ -611,6 +612,77 @@ def _pgrep_module(name: str):
     return None
 
 
+_HA_NOTIFY_LOG_DIR = os.environ.get("HA_LOG_DIR", "/var/log/cims-ha")
+_HA_FLAP_WINDOW_SEC = 600
+
+
+def _ha_transitions_10m() -> dict:
+    """{svc: 최근 10분 keepalived 상태 전이 수} — cims-notify 로그
+    (notify_<svc>.log, '<ISO8601> TYPE NAME -> STATE ...') tail 파싱.
+    OAM 의 ha_flap 알람(threshold_crossed) 입력. 전이 개별 건은 알람이 아니라
+    이벤트(로그)로만 남긴다(alarm_standardization §3.6). 미가독/부재는 조용히 생략."""
+    out = {}
+    try:
+        names = os.listdir(_HA_NOTIFY_LOG_DIR)
+    except OSError:
+        return out
+    now = time.time()
+    for fn in names:
+        if not (fn.startswith("notify_") and fn.endswith(".log")):
+            continue
+        svc = fn[len("notify_"):-len(".log")]
+        try:
+            with open(os.path.join(_HA_NOTIFY_LOG_DIR, fn), "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - 32768))
+                lines = f.read().decode("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        n = 0
+        for ln in lines[-200:]:
+            if " -> " not in ln:
+                continue
+            try:
+                t = datetime.fromisoformat(ln.split(" ", 1)[0]).timestamp()
+            except ValueError:
+                continue
+            if now - t <= _HA_FLAP_WINDOW_SEC:
+                n += 1
+        if n:
+            out[svc] = n
+    return out
+
+
+_CFG_HASH_CACHE: dict = {}   # config.json path → (mtime, hash) — 2초 주기 재해시 방지
+
+
+def _cfg_hash_for_module(name: str):
+    """modules/<name>/current/<name>/config.json (legacy 는 current/config.json) 의
+    canonical hash 12hex — OAM 이 배포기록 실체화본 hash 와 비교해 config_out_of_sync
+    알람을 판정. parse→canonical dump(sort_keys) 해시라 들여쓰기·키순서에 불변.
+    파일 없음/파싱 실패는 None (보고 생략 → OAM 평가 제외)."""
+    base = os.path.join(DEFAULT_INSTALL_ROOT, name, "current")
+    for rel in (os.path.join(name, "config.json"), "config.json"):
+        p = os.path.join(base, rel)
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        cached = _CFG_HASH_CACHE.get(p)
+        if cached and cached[0] == st.st_mtime:
+            return cached[1]
+        try:
+            with open(p) as f:
+                obj = json.load(f)
+            h = hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False,
+                                          separators=(",", ":")).encode("utf-8")).hexdigest()[:12]
+        except Exception:
+            return None
+        _CFG_HASH_CACHE[p] = (st.st_mtime, h)
+        return h
+    return None
+
+
 def collect_metrics() -> dict:
     """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
@@ -664,6 +736,25 @@ def collect_metrics() -> dict:
     for stale_pid in list(_PROC_CPU_CACHE.keys()):
         if stale_pid not in live:
             _PROC_CPU_CACHE.pop(stale_pid, None)
+    # 설치 모듈별 배포 config.json canonical hash — modules[](실행 중만) 와 별개
+    # top-level 키: 중지 모듈의 드리프트도 OAM 이 평가할 수 있게.
+    try:
+        hashes = {}
+        for name in _metric_module_names():
+            h = _cfg_hash_for_module(name)
+            if h:
+                hashes[name] = h
+        if hashes:
+            m["cfg_hashes"] = hashes
+    except Exception:
+        pass
+    # keepalived 전이 카운트 (최근 10분) — OAM ha_flap 알람 입력.
+    try:
+        ht = _ha_transitions_10m()
+        if ht:
+            m["ha_transitions"] = ht
+    except Exception:
+        pass
     return m
 
 
@@ -1193,10 +1284,12 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
 
     # 오래된 버전 디렉토리 prune (최신 3개 유지; 방금 설치본이 mtime 최신이므로
     # 직전 버전 2개까지 롤백 가능). legacy 평탄 잔재는 비대상.
-    # current 심볼릭을 방금 설치한 버전으로 flip — 활성 버전 통로(start/restart 가 이 경로로 기동).
-    # (flip 후 prune: current 타겟은 prune 보호 대상이라 안전)
+    # current 심볼릭을 방금 설치한 버전으로 flip — 활성 버전 통로. start/restart 외에
+    # cims-health 진실 검사(current/<mod>/config.json)와 cims-notify 절체 기동이 이
+    # 경로를 본다. cold standby 는 승격 전까지 start 가 없어 install 이 current 를
+    # 만들어 두지 않으면 절체 시점에 통로가 없다. (flip 후 prune: current 타겟은 보호)
     flipped = ""
-    if module_root and install_path != legacy_path:
+    if module_root:
         if _flip_current(module_root, install_path):
             flipped = " current->" + os.path.basename(install_path)
 
@@ -1361,21 +1454,182 @@ def _sync_ack_and_return(oam_url: str, session_token: str, sync_id,
     return rc, out, err + ack_note
 
 
+def job_ha_keepalived(params: dict) -> tuple:
+    """keepalived 프로세스 제어 — 수동 절체(스위치오버) 오케스트레이션용.
+
+    Params: { action: 'stop' | 'start' }.
+      · stop  = 이 노드 keepalived 정지 → priority-0 advert 로 peer 즉시 승격
+                (STOP notify 는 서비스 유지 — 이 노드 모듈은 안 내림).
+      · start = keepalived 재기동 → nopreempt 라 BACKUP 복귀 → BACKUP notify 가
+                이 노드 cold 모듈 정지.
+    상세: ha_service_model.md §7. sudo 미등록(dev)은 graceful skip."""
+    action = (params.get("action") or "").strip().lower()
+    if action not in ("stop", "start"):
+        return 1, "", f"invalid action: {action} (stop|start)"
+    cims_ha = _resolve_cims_ha()
+    if not cims_ha:
+        return 0, "cims-ha not found — skip (no keepalived)", ""
+    try:
+        r = subprocess.run(["sudo", "-n", cims_ha, action],
+                           capture_output=True, text=True, timeout=60)
+        out = (r.stdout or "").strip()[-400:]
+        if r.returncode == 0:
+            return 0, f"cims-ha {action} rc=0 {out}", ""
+        err = (r.stderr or r.stdout or "").strip()
+        # sudo 미등록(dev)만 graceful — 그 외는 실패.
+        if "password is required" in err or "sudo:" in err:
+            return 0, f"cims-ha {action} skipped (no sudo, dev): {err[-160:]}", ""
+        return 3, out, f"cims-ha {action} rc={r.returncode}: {err[-200:]}"
+    except subprocess.TimeoutExpired as e:
+        return 4, "", f"cims-ha {action} timeout: {e}"
+    except Exception as e:
+        return 5, "", f"cims-ha {action} exception: {e}"
+
+
+def job_ha_planned_release(params: dict) -> tuple:
+    """계획 절체(스위치오버) — 이 노드의 service VIP 반납 의도를 set/clear.
+    Params: { service: str, release: bool }. release=true → state/ha/planned_release/<svc>
+    마커 생성 → Evaluator 가 eligible=false → track_script fail → VIP 반납 → peer 승격.
+    release=false → 마커 제거(COMMIT/ROLLBACK). 상세: ha_service_model.md §12."""
+    svc = (params.get("service") or "").strip()
+    if not svc:
+        return 1, "", "service missing"
+    d = os.path.join(_HA_PERSIST_DIR, "planned_release")
+    p = os.path.join(d, svc)
+    try:
+        os.makedirs(d, exist_ok=True)
+        if params.get("release"):
+            tmp = p + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(str(int(time.time())))
+            os.replace(tmp, p)
+            return 0, f"planned_release set: {svc}", ""
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+        return 0, f"planned_release cleared: {svc}", ""
+    except Exception as e:
+        return 2, "", f"planned_release {svc} failed: {e}"
+
+
+def job_ha_maintenance(params: dict) -> tuple:
+    """노드 유지보수(EXCLUDE_NODE) — 이 노드를 서비스의 승격 대상에서 제외/복귀 (§16).
+    Params: { service: str, on: bool }. on=true → state/ha/maintenance/<svc> 마커 생성
+    → Evaluator 가 eligible=false(MAINTENANCE) → 상대가 죽어도 이 노드로 절체 안 됨,
+    reconcile 이 모듈 정지. on=false → 마커 제거 → role 기반으로 자동 재합류(hot 기동).
+    영속(state/ha) — 재부팅 생존. 상세: ha_service_model.md §16."""
+    svc = (params.get("service") or "").strip()
+    if not svc:
+        return 1, "", "service missing"
+    d = os.path.join(_HA_PERSIST_DIR, "maintenance")
+    p = os.path.join(d, svc)
+    try:
+        os.makedirs(d, exist_ok=True)
+        if params.get("on"):
+            tmp = p + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(str(int(time.time())))
+            os.replace(tmp, p)
+            return 0, f"maintenance(EXCLUDE_NODE) set: {svc}", ""
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+        return 0, f"maintenance cleared: {svc}", ""
+    except Exception as e:
+        return 2, "", f"maintenance {svc} failed: {e}"
+
+
+def job_ha_clear_holds(params: dict) -> tuple:
+    """서비스 절체 홀드 일괄 해제 (Fix3) — 수동절체 타겟이 승격 시 모듈을 켤 수 있게.
+    Params: { service: str }. 그 서비스의 relevant∪cold 모듈의 desired=stopped·재기동
+    카운터 해제 + 절체 래치(_EVAL_LATCH)·planned_release 마커 제거. 타겟에 고착된 stop/홀드가
+    승격 기동을 막는 것(이슈5)을 방지한다. INTENTIONALLY_DOWN 등 활성 노드의 의도적 정지와
+    무관 — 절체 타겟에 대해서만 OAM 이 명시적으로 호출한다."""
+    svc = (params.get("service") or "").strip()
+    if not svc:
+        return 1, "", "service missing"
+    cfg = _read_ha_json_nofail()
+    s = (cfg.get("services") or {}).get(svc) or {}
+    mods = set(_service_relevant(s)) | {
+        str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+    for m in mods:
+        if not m:
+            continue
+        _set_desired(m, None)
+        _fail_reset(m)
+        _clear_reconcile_backoff(m)
+    _EVAL_LATCH[svc] = False
+    try:
+        os.remove(os.path.join(_HA_PERSIST_DIR, "planned_release", svc))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+    print(f"[agent][ha] 절체 홀드 해제(clear_holds): {svc} mods={sorted(mods)}", flush=True)
+    return 0, f"holds cleared: {svc} ({sorted(mods)})", ""
+
+
+def job_update_module_spec(params: dict) -> tuple:
+    """modules/<mod>/service.json 갱신 — 모듈 운영 명세 (감시·절체모드·헬스).
+
+    Params: { module: str, spec: dict }. 앱 config.json 과 물리 분리된 별도 파일로,
+    agent watchdog(supervision.watchdog)과 제어 게이팅이 참조한다. 버전 트리 밖
+    모듈 루트에 두어 업그레이드에 안전(uninstall 시 모듈과 함께 철거).
+    상세: ha_service_model.md §3.2."""
+    module = (params.get("module") or "").lower().strip()
+    spec = params.get("spec")
+    if not module:
+        return 1, "", "module missing"
+    if not isinstance(spec, dict):
+        return 1, "", "spec must be dict"
+    mod_root = os.path.join(_PREFIX, "modules", module)
+    if not os.path.isdir(mod_root):
+        # 아직 설치 안 된 모듈 — 디렉토리 없으면 생성해 두면 uninstall 대칭이 깨지므로
+        # 스킵(설치 시 재푸시). 성공 반환 (no-op).
+        return 0, f"module '{module}' not installed — service.json skip", ""
+    path = os.path.join(mod_root, "service.json")
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(spec, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as e:
+        return 2, "", f"write service.json failed: {e}"
+    return 0, f"service.json updated: {path}", ""
+
+
 def job_update_ha(params: dict) -> tuple:
-    """install_path/agent/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
+    """<prefix>/run/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
 
     Params:
-      - install_path: install root (예: /opt/cims/mgmt-server)
-      - ha_json: dict — CSC 가 ha_groups + members 로부터 render 한 내용
+      - install_path: (무시 — 구 OAM 호환 잔재. 과거엔 이 값의 쓰기불가 cwd-fallback
+        이 우연히 flat 레이아웃의 <prefix>/agent/keepalived/ 에 떨어져 동작했으나,
+        agent 버전화 이후 그 위치는 템플릿 없는 잔재 디렉토리라 cims-ha config 가
+        실패했다 — keepalived 갱신 불능의 원인.)
+      - ha_json: dict — OAM 이 ha_groups + members 로부터 render 한 내용
 
+    ha.json 은 버전 트리 밖 <prefix>/run/keepalived/ 에 기록 (agent 업그레이드
+    무관 영속 — managed_ips/supervised 와 동일 위치 규칙). 템플릿은 cims-ha 가
+    자기 번들(current 경유)에서 찾고, apply 가 health/notify 스크립트와 ha.json 을
+    /etc/keepalived/ 에 root 소유로 스테이징한다 (enable_script_security 충족).
     cims-ha apply 는 sudo 권한이 필요. 미등록 환경 (dev 등) 에서는 graceful
     skip — config 까지만 진행하고 apply 실패는 log 만 남기고 성공 반환.
     """
-    install_path = _resolve_install_path(params)
     ha_json = params.get("ha_json") or {}
     if not isinstance(ha_json, dict) or not ha_json:
         return 1, "", "ha_json missing or empty"
-    ha_path = os.path.join(install_path, "agent", "keepalived", "ha.json")
+    # cims_home/cims_user 는 노드 로컬 사실 — OAM 렌더 값은 placeholder(/opt/cims, cims)
+    # 라 실제 설치 루트/실행 계정과 다를 수 있다. agent 자신이 정본으로 덮어쓴다
+    # (cims-notify 의 cims-svc 경로·runuser 대상, cims@.service ExecStart 치환에 사용).
+    ha_json["cims_home"] = _PREFIX
+    try:
+        import getpass
+        ha_json["cims_user"] = getpass.getuser()
+    except Exception:
+        pass
+    ha_path = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
     try:
         os.makedirs(os.path.dirname(ha_path), exist_ok=True)
         with open(ha_path, "w", encoding="utf-8") as f:
@@ -1407,6 +1661,7 @@ def job_update_ha(params: dict) -> tuple:
     msgs = [f"ha.json updated: {ha_path}"]
     cims_ha = _resolve_cims_ha()
     ha_dir = os.path.dirname(ha_path)
+    failed = ""      # 실패 사유 — dev graceful skip(sudo 미등록)과 구분해 정직하게 보고
     if cims_ha:
         try:
             r0 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "install"],
@@ -1422,17 +1677,39 @@ def job_update_ha(params: dict) -> tuple:
                                 capture_output=True, text=True, timeout=30)
             msgs.append(f"cims-ha config rc={r1.returncode}"
                        + (f" err={(r1.stderr or r1.stdout).strip()[-200:]}" if r1.returncode != 0 else ""))
+            if r1.returncode != 0:
+                failed = "cims-ha config failed"     # render 실패는 환경 무관 진짜 오류
         except Exception as e:
             msgs.append(f"cims-ha config exception: {e}")
+            failed = f"cims-ha config exception: {e}"
         try:
             r2 = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir, "apply"],
                                 capture_output=True, text=True, timeout=60)
-            msgs.append(f"cims-ha apply rc={r2.returncode}"
-                       + (f" err={(r2.stderr or r2.stdout).strip()[-200:]}" if r2.returncode != 0 else ""))
+            if r2.returncode != 0:
+                err_txt = (r2.stderr or r2.stdout).strip()
+                msgs.append(f"cims-ha apply rc={r2.returncode} err={err_txt[-200:]}")
+                # sudo 미등록(dev)만 graceful — 그 외 rc!=0 은 실제 적용 실패.
+                if "password is required" not in err_txt and "sudo:" not in err_txt:
+                    failed = f"cims-ha apply rc={r2.returncode}"
+            else:
+                msgs.append("cims-ha apply rc=0")
+        except subprocess.TimeoutExpired as e:
+            # 적용이 hang — keepalived 가 기동/정지 완료를 못 알린 것. 성공으로 위장하면
+            # 콘솔이 정상 반영으로 오판하므로 job 실패로 보고한다.
+            msgs.append(f"cims-ha apply timeout: {e}")
+            failed = "cims-ha apply timeout (keepalived hang 의심)"
         except Exception as e:
             msgs.append(f"cims-ha apply exception (likely no keepalived / no sudo): {e}")
     else:
         msgs.append("cims-ha not found in candidate paths — ha.json only (no apply)")
+    # 런타임 컷오버 — 새 ha.json 에 supervisor 서비스가 생겼는데 Supervisor 스레드가 아직
+    # 안 떴으면 지금 기동한다(agent 재기동 없이 legacy→supervisor 전환 반영).
+    try:
+        _maybe_start_supervisor()
+    except Exception:
+        pass
+    if failed:
+        return 5, "\n".join(msgs), failed
     return 0, "\n".join(msgs), ""
 
 
@@ -1797,6 +2074,1113 @@ _SUPERVISE_FILE = os.path.join(_PREFIX, "run", "supervised.json")
 _WATCHDOG_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int}
 SUPERVISE_INTERVAL_SEC = 10
 
+# cold-spare 게이트 — update_ha 가 기록한 ha.json 의 services.*.cold_modules 기준.
+_HA_JSON_PATH = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
+
+# ── HA 런타임 상태 (ha_service_model.md §3.2) ─────────────────────────────
+#   run/ha/desired.json      노드 오버라이드 {module: 'stopped'} — 서버별 stop 기록
+#   run/ha/fail_<mod>        재기동 실패 카운터 (watchdog 기록, cims-health 판독)
+#   run/ha/op_grace_<mod>    조작 유예 마커 (제어 job 진입 시 touch — mtime 만 사용)
+# agent(cims user)가 쓰고 cims-health(root)가 읽는다. CIMS_HOME(ha.json)==_PREFIX 라
+# cims-health 는 <CIMS_HOME>/run/ha/ 로 동일 경로를 유도한다.
+_HA_STATE_DIR = os.path.join(_PREFIX, "run", "ha")
+_DESIRED_FILE = os.path.join(_HA_STATE_DIR, "desired.json")
+_OP_GRACE_SEC = 3                # 조작 유예 창 — 기동 직후 바인드(readiness) 대기만 흡수(좀비
+                                 # 오판 방지). 짧게 둬서 크래시 재기동·승격 후 기동이 지연되지
+                                 # 않게 한다. (모듈 바인드는 통상 1초 내라 3초면 충분)
+
+
+def _ha_state_dir() -> str:
+    try:
+        os.makedirs(_HA_STATE_DIR, exist_ok=True)
+    except Exception:
+        pass
+    return _HA_STATE_DIR
+
+
+# ── HA 상태 디렉토리 레이아웃 (ha_service_model.md §5) ────────────────────────
+# run/ha/   = 휘발(재부팅 시 초기화 대상) — verdict/role/health/promotion/recovery/
+#             operations. (legacy 447fa27d: desired.json·fail_*·op_grace_* 는 run/ha
+#             루트에 잔존 — verdict-driven 전환 시 desired 는 state/ha 로 이관.)
+# state/ha/ = 영속 — desired/latch (운영자 의도·failover 래치, 재부팅 생존).
+# agent(cims)가 소유·생성한다. user systemd 유닛이라 RuntimeDirectory/StateDirectory 를
+# 쓸 수 없어(→ /run/user·~/.local/state, root keepalived 와 경로 어긋남) 직접 만든다.
+# 교차 사용자 접근은 읽기 전용 방향뿐: role(root 쓰기→cims 읽기), verdict(cims 쓰기→
+# root 읽기). _PREFIX 는 tmpfs 가 아니므로 휘발 의미는 기동 시 초기화 + verdict boot_id.
+_HA_RUN_DIR = _HA_STATE_DIR                       # _PREFIX/run/ha (기존 상수 재사용)
+_HA_PERSIST_DIR = os.path.join(_PREFIX, "state", "ha")
+_HA_RUN_SUBDIRS = ("verdict", "role", "health", "promotion", "recovery", "operations")
+_HA_PERSIST_SUBDIRS = ("desired", "latch", "planned_release", "maintenance")
+
+
+def _ensure_ha_dirs() -> None:
+    """HA 상태 디렉토리 골격 생성 (idempotent, 기동 1회). 비-systemd·기존 설치본에서도
+    경로가 보장되도록 agent 가 자체 생성한다."""
+    try:
+        for sub in _HA_RUN_SUBDIRS:
+            os.makedirs(os.path.join(_HA_RUN_DIR, sub), exist_ok=True)
+        for sub in _HA_PERSIST_SUBDIRS:
+            os.makedirs(os.path.join(_HA_PERSIST_DIR, sub), exist_ok=True)
+    except Exception as e:
+        print(f"[agent][ha] 상태 디렉토리 생성 실패(무시): {e}", flush=True)
+
+
+def _boot_id() -> str:
+    """현재 부팅 식별자 — verdict/role 이 재부팅 전 값 재사용을 막는 데 쓴다(§13).
+    읽기 실패 시 빈 문자열 (비교 측이 mismatch 로 처리)."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except Exception:
+        return ""
+
+
+# ── 비상 밸브 (CIMS_HA_DISABLE) — 단일 모델의 유일한 escape (ha_service_model.md §9·§18) ─
+# 단일 모델이라 legacy 경로·모드 플래그는 없다. verdict 생산자(Supervisor)가 오작동해
+# 절체가 폭주하거나 양 노드가 동시에 자격을 잃는 것을 막는 운영용 kill-switch 하나만 둔다.
+#   env CIMS_HA_DISABLE=1 + agent 재기동 → Supervisor 미기동 + run/ha/disabled 마커 기록.
+#   track_script(cims-health)가 마커를 보고 무조건 PASS → keepalived 가 health 로 절체하지
+#   않음(현 VIP 고정, 노드 사망=VRRP advert 소실만 절체). legacy 로 되돌아가는 게 아니라
+#   판정을 얼려 서비스 현상을 유지한다 → 운영자가 원인 수습 후 env 제거·재기동으로 복귀.
+_HA_DISABLED_MARKER = os.path.join(_HA_RUN_DIR, "disabled")
+
+
+def _ha_disabled() -> bool:
+    return bool(os.environ.get("CIMS_HA_DISABLE"))
+
+
+def _sync_ha_disabled_marker() -> None:
+    """CIMS_HA_DISABLE 상태를 run/ha/disabled 마커에 반영 (agent 기동 시 1회).
+    켜져 있으면 마커 생성, 아니면 잔재 마커 제거 — env 없이 재기동하면 자동 복귀."""
+    try:
+        os.makedirs(_HA_RUN_DIR, exist_ok=True)
+        if _ha_disabled():
+            with open(_HA_DISABLED_MARKER, "w") as f:
+                f.write(str(int(time.time())))
+        elif os.path.exists(_HA_DISABLED_MARKER):
+            os.remove(_HA_DISABLED_MARKER)
+    except Exception as e:
+        print(f"[agent][ha] disabled 마커 동기화 실패(무시): {e}", flush=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Health Checker (ha_service_model.md §6) — liveness / readiness / preflight
+#  검사별 독립 주기·타임아웃으로 실행해 결과를 run/ha/health/<mod>.json 에 캐시한다.
+#  HA Evaluator 가 캐시만 읽어 verdict 를 합성한다. 단일 모델이라 HA 서비스가 있으면
+#  항상 기동한다. 검사 대상·힌트는 ha.json(services)에서 유도(OAM 렌더 재사용).
+# ══════════════════════════════════════════════════════════════════════════
+
+_HEALTH_DIR = os.path.join(_HA_RUN_DIR, "health")
+_HEALTH_DEFAULTS = {
+    "liveness":  {"interval": 2,  "timeout": 2},
+    "readiness": {"interval": 3,  "timeout": 2},
+    "preflight": {"interval": 10, "timeout": 2},
+}
+_HEALTH_NEXT: dict = {}     # (module, check) -> next_run epoch
+
+
+def _has_ha_services() -> bool:
+    """ha.json 에 등록된 HA 서비스가 하나라도 있는가 — Supervisor 기동 여부 판정.
+    단일 모델: HA 서비스가 있으면 항상 supervisor(Health+Evaluator+reconcile)."""
+    return bool(_read_ha_json_nofail().get("services") or {})
+
+
+def _read_ha_json_nofail() -> dict:
+    try:
+        with open(_HA_JSON_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _read_ha_json() -> dict:
+    try:
+        with open(_HA_JSON_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _health_targets() -> list:
+    """ha.json services → 검사 대상 모듈 목록. 모듈 = relevant ∪ cold ∪ health_module.
+    port/proto 는 service 레벨 힌트(단일 데몬 또는 health_module 에 적용), config_key /
+    collection 은 health_module 에만. 단일 모델 — 전 HA 서비스 대상.
+
+    config_key   = 스칼라 config.json 단일 키에서 실효 포트 (csc: Server.Port)
+    collection   = 컬렉션 jsonl 의 match 레코드에서 실효 포트 (csp: local_nodes.bind_port)
+                   — 리슨 엔드포인트가 설정키가 아니라 컬렉션에 있는 모듈용."""
+    cfg = _read_ha_json()
+    home = cfg.get("cims_home") or _PREFIX
+    out, seen = [], set()
+    for svc, s in (cfg.get("services") or {}).items():
+        hmod = str(s.get("health_module") or "").lower().strip()
+        mods = set()
+        if hmod:
+            mods.add(hmod)
+        mods |= {str(m).lower().strip() for m in (s.get("relevant_modules") or []) if str(m).strip()}
+        mods |= {str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+        port = s.get("port")
+        proto = (s.get("proto") or "tcp").lower()
+        ckey = s.get("health_config_key")
+        coll = s.get("health_collection")
+        for m in mods:
+            if not m or m in seen:
+                continue
+            seen.add(m)
+            out.append({"module": m, "service": svc, "home": home, "proto": proto,
+                        "port": port if (m == hmod or len(mods) == 1) else None,
+                        "config_key": ckey if m == hmod else None,
+                        "collection": coll if m == hmod else None})
+    return out
+
+
+def _module_collection_port(mod: str, home: str, spec: dict) -> "int | None":
+    """모듈 배포 컬렉션 jsonl 에서 실효 리슨 포트.
+
+    spec = {"file": "config/local_nodes.jsonl", "field": "bind_port",
+            "match": {"enabled": true, "is_primary": true, "protocol": "UDP"}}
+
+    match 를 모두 만족하는 첫 레코드의 field 를 반환. 문자열 비교는 대소문자 무시
+    (protocol "UDP"/"udp"). 파일·레코드 부재 시 None → 호출부가 descriptor port 로 폴백.
+    컬렉션은 install_path 루트(config/)가 표준이고, 변종 내부(<pkg>/config/)도 수용한다."""
+    rel = str((spec or {}).get("file") or "").strip().lstrip("/")
+    if not rel:
+        return None
+    field = (spec or {}).get("field") or "bind_port"
+    match = (spec or {}).get("match") or {}
+    base = os.path.join(home, "modules", mod, "current")
+    for path in (os.path.join(base, rel), os.path.join(base, mod, rel)):
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(rec, dict):
+                        continue
+                    ok = True
+                    for k, want in match.items():
+                        got = rec.get(k)
+                        if isinstance(want, str) and isinstance(got, str):
+                            ok = got.strip().lower() == want.strip().lower()
+                        else:
+                            ok = got == want
+                        if not ok:
+                            break
+                    if not ok:
+                        continue
+                    v = rec.get(field)
+                    if v and 0 < int(v) < 65536:
+                        return int(v)
+        except Exception:
+            pass
+        break
+    return None
+
+
+def _module_config_port(mod: str, home: str, key: str) -> "int | None":
+    """모듈 배포 config.json 의 key(flat 우선, nested 수용)에서 실효 포트 — cims-health 와 동일."""
+    base = os.path.join(home, "modules", mod, "current")
+    for rel in (os.path.join(mod, "config.json"), "config.json"):
+        p = os.path.join(base, rel)
+        if not os.path.isfile(p):
+            continue
+        try:
+            mc = json.load(open(p))
+            v = mc.get(key)
+            if v is None:
+                cur = mc
+                for part in key.split("."):
+                    cur = cur.get(part) if isinstance(cur, dict) else None
+                    if cur is None:
+                        break
+                v = cur
+            if v and 0 < int(v) < 65536:
+                return int(v)
+        except Exception:
+            pass
+        break
+    return None
+
+
+def _port_listening(port: int, proto: str) -> bool:
+    flag = "-lnt" if proto == "tcp" else "-lnu"
+    try:
+        r = subprocess.run(["ss", flag, f"sport = :{port}"],
+                           capture_output=True, text=True, timeout=2)
+        return any(line.strip() for line in r.stdout.splitlines()[1:])
+    except Exception:
+        return False
+
+
+def _mod_installed_local(root: str) -> bool:
+    if os.path.exists(os.path.join(root, "current")):
+        return True
+    try:
+        return any(os.path.isdir(os.path.join(root, d)) for d in os.listdir(root))
+    except Exception:
+        return False
+
+
+def _run_health_check(mod: str, check: str, t: dict) -> dict:
+    st = time.time()
+    if check == "liveness":
+        up = _pgrep_module(mod) is not None
+        r = {"status": "SUCCESS" if up else "FAIL",
+             "detail": "process " + ("up" if up else "down")}
+    elif check == "readiness":
+        port = t.get("port")
+        if t.get("config_key"):
+            p = _module_config_port(mod, t.get("home") or _PREFIX, t["config_key"])
+            if p:
+                port = p
+        if t.get("collection"):
+            p = _module_collection_port(mod, t.get("home") or _PREFIX, t["collection"])
+            if p:
+                port = p
+        proto = (t.get("proto") or "tcp").lower()
+        if not port:
+            up = _pgrep_module(mod) is not None      # 포트 미상 → 프로세스 대체 (cims-health 동일)
+            r = {"status": "SUCCESS" if up else "FAIL",
+                 "detail": "port unknown; process " + ("up" if up else "down")}
+        else:
+            listening = _port_listening(int(port), proto)
+            r = {"status": "SUCCESS" if listening else "FAIL",
+                 "detail": f":{port}/{proto} " + ("listening" if listening else "not listening")}
+    else:  # preflight
+        root = os.path.join(t.get("home") or _PREFIX, "modules", mod)
+        if not _mod_installed_local(root):
+            r = {"status": "FAIL", "detail": "not installed"}
+        else:
+            cur = os.path.join(root, "current")
+            cfg_ok = any(os.path.isfile(os.path.join(cur, rel))
+                         for rel in (os.path.join(mod, "config.json"), "config.json"))
+            r = {"status": "SUCCESS", "detail": "installed" + ("" if cfg_ok else "; config?")}
+    r["duration_ms"] = int((time.time() - st) * 1000)
+    return r
+
+
+def _health_merge_write(mod: str, updated: dict) -> None:
+    path = os.path.join(_HEALTH_DIR, f"{mod}.json")
+    data = {}
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    checks.update(updated)
+    data = {"module": mod, "checks": checks, "updated_at": int(time.time())}
+    try:
+        os.makedirs(_HEALTH_DIR, exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception as e:
+        print(f"[agent][health] cache write 실패({mod}): {e}", flush=True)
+
+
+def health_scheduler_tick() -> None:
+    """due 검사만 실행해 캐시 갱신. 각 검사는 자체 timeout 을 갖고, expires_at 은
+    interval×3(3회 연속 미갱신이면 stale)."""
+    now = time.time()
+    for t in _health_targets():
+        mod = t["module"]
+        updated = {}
+        for check in ("liveness", "readiness", "preflight"):
+            key = (mod, check)
+            if now < _HEALTH_NEXT.get(key, 0):
+                continue
+            prof = _HEALTH_DEFAULTS[check]
+            _HEALTH_NEXT[key] = now + prof["interval"]
+            res = _run_health_check(mod, check, t)
+            res["checked_at"] = int(now)
+            res["expires_at"] = int(now + prof["interval"] * 3)
+            updated[check] = res
+        if updated:
+            _health_merge_write(mod, updated)
+
+
+def _start_health_scheduler() -> None:
+    """Health Scheduler 스레드 — OAM 루프·watchdog 과 독립. flag 활성 시에만 기동."""
+    def _loop():
+        while True:
+            try:
+                health_scheduler_tick()
+                _hb("health")                    # watchdog coordinator heartbeat
+            except Exception as e:
+                print(f"[agent][health] tick error: {e}", flush=True)
+            time.sleep(1)
+    threading.Thread(target=_loop, daemon=True, name="agent-health").start()
+    print("[agent][health] Health Scheduler 기동 (liveness/readiness/preflight)", flush=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Recovery Supervisor — HA Evaluator (ha_service_model.md §7·§8·§10)
+#  role/desired/latch/health 캐시 + ha.json 명세 → 다축 verdict 합성해 run/ha/
+#  verdict/<svc>.json 에 기록하고, role reconcile 로 모듈 lifecycle 을 수렴시킨다. OAM
+#  루프와 독립된 전용 스레드(2초). 단일 모델 — HA 서비스가 있으면 항상 기동.
+# ══════════════════════════════════════════════════════════════════════════
+
+_EVAL_INTERVAL = 2
+_VERDICT_TTL = 6
+_PROMOTION_GRACE_SEC = 20
+_EVAL_SEQ: dict = {}          # svc -> 단조 sequence
+_EVAL_PREV_ROLE: dict = {}    # svc -> 직전 role (승격 전이 감지)
+_EVAL_PREV_ELIG: dict = {}    # svc -> 직전 eligible (전이 로그)
+_EVAL_LATCH: dict = {}        # svc -> bool (절체 확정 래치 — 소진/좀비 시 set, 재기동 시 해제)
+_SUP_STARTED = False          # supervisor 스레드 기동 여부 (idempotent 가드)
+
+
+def _fail_count_read(mod: str, window_sec: "int | None" = None) -> int:
+    """재기동 실패 카운터 읽기. window_sec 를 주면 first_ts 가 window 밖이면 0 반환(stale
+    카운터 무시) — 오래 전 소진 기록이 재기동/승격을 영구 차단하지 않게 한다. 파일 형식은
+    'count first_ts' (cims-health(root)는 첫 필드만 읽으므로 호환)."""
+    try:
+        with open(_fail_path(mod)) as f:
+            parts = f.read().split()
+        count = int(parts[0])
+        first_ts = int(parts[1]) if len(parts) > 1 else 0
+    except Exception:
+        return 0
+    if window_sec and first_ts and (int(time.time()) - first_ts) > int(window_sec):
+        return 0
+    return count
+
+
+def _local_ips() -> set:
+    return {r.get("ip") for r in collect_interfaces() if r.get("ip")}
+
+
+def _service_vips(s: dict) -> list:
+    vips = [str(v.get("ip")).strip() for v in (s.get("vips") or [])
+            if isinstance(v, dict) and v.get("ip")]
+    if s.get("vip"):
+        vips.append(str(s["vip"]).strip())
+    return [v for v in vips if v]
+
+
+def _service_relevant(s: dict) -> list:
+    rel = [str(m).lower().strip() for m in (s.get("relevant_modules") or []) if str(m).strip()]
+    if rel:
+        return rel
+    out = []
+    if s.get("health_module"):
+        out.append(str(s["health_module"]).lower().strip())
+    out += [str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()]
+    return list(dict.fromkeys([m for m in out if m]))
+
+
+def _current_role(svc: str, s: dict) -> str:
+    """role 파일 우선, 없으면 VIP 보유로 유도. keepalived 상태 MASTER/BACKUP/FAULT.
+
+    stale MASTER 보정(Fix2): role 파일이 MASTER 인데 이 노드가 서비스 VIP 를 실제로 보유하지
+    않으면 BACKUP 으로 본다. keepalived stop 시 cims-notify 는 STOP 을 role 에 안 쓰므로 role
+    파일이 MASTER 로 남는데, keepalived 는 정지하며 VIP 를 반납한다 — VIP 없는 MASTER 는
+    실제 마스터가 아니므로 reconcile 이 cold 모듈을 계속 붙들어(정지 안 함) dual-active 가
+    되는 것을 막는다. (승격 시 keepalived 는 VIP 를 붙인 뒤 MASTER notify 하므로 오탐 없음.)"""
+    role = None
+    rf = os.path.join(_HA_RUN_DIR, "role", f"{svc}.json")
+    try:
+        with open(rf) as f:
+            d = json.load(f)
+        if d.get("boot_id") == _boot_id():
+            role = str(d.get("role") or "UNKNOWN").upper()
+    except Exception:
+        role = None
+    vips = _service_vips(s)
+    if role is not None:
+        if role == "MASTER" and vips and not any(v in _local_ips() for v in vips):
+            return "BACKUP"                 # stale MASTER — VIP 미보유(keepalived 정지 등)
+        return role
+    if not vips:
+        return "UNKNOWN"
+    return "MASTER" if any(v in _local_ips() for v in vips) else "BACKUP"
+
+
+def _module_health(mod: str, check: str):
+    """health 캐시 판독 → True/False/None(미상·stale). 신선도(expires_at) 확인."""
+    try:
+        with open(os.path.join(_HEALTH_DIR, f"{mod}.json")) as f:
+            d = json.load(f)
+        c = (d.get("checks") or {}).get(check)
+        if not c or c.get("expires_at", 0) < time.time():
+            return None
+        return c.get("status") == "SUCCESS"
+    except Exception:
+        return None
+
+
+def _restart_limit_for(s: dict) -> dict:
+    rl = s.get("restart_limit") if isinstance(s.get("restart_limit"), dict) else {}
+    return {"max_fails": int(rl.get("max_fails", 3) or 3),
+            "window_sec": int(rl.get("window_sec", 300) or 300)}
+
+
+_PLANNED_RELEASE_TTL = 180        # 절체 최대(release 30 + verify 15)를 훨씬 초과 — stale 자가무시
+
+
+def _planned_released(svc: str) -> bool:
+    """계획 절체(스위치오버) 중 이 노드가 이 서비스의 VIP 를 의도적으로 반납 중인가.
+    OAM 이 ha_planned_release job 으로 set/clear. 존재 시 Evaluator 가 eligible=false.
+    **TTL 자가치유**: 정상 절체는 수십 초 내 종결되므로, 마커가 TTL(_PLANNED_RELEASE_TTL)을
+    넘겨 남아 있으면 stale(해제 job 유실·OAM sweep 중단 등)로 보고 제거·무시한다 — 노드가
+    영구 부적격으로 갇히는 것을 막는 최후 방어선."""
+    p = os.path.join(_HA_PERSIST_DIR, "planned_release", svc)
+    try:
+        age = time.time() - os.path.getmtime(p)
+    except OSError:
+        return False
+    if age > _PLANNED_RELEASE_TTL:
+        try:
+            os.remove(p)
+            print(f"[agent][ha] planned_release stale({int(age)}s) 자가 제거: {svc}", flush=True)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _node_excluded(svc: str) -> bool:
+    """이 노드가 이 서비스의 승격 대상에서 제외(유지보수, EXCLUDE_NODE)됐는가 (§16).
+    OAM 이 ha_maintenance job 으로 set/clear. 존재 시 role 무관 eligible=false + 모듈 정지
+    (점검 중 노드로 절체·서비스 기동 방지, 다운 감수). 영속(state/ha) — 재부팅 생존."""
+    return os.path.exists(os.path.join(_HA_PERSIST_DIR, "maintenance", svc))
+
+
+def _clear_holds_on_promotion(svc: str, s: dict) -> None:
+    """BACKUP/FAULT→MASTER 승격 시 이 서비스의 기동 차단 홀드를 해제한다 — 이 노드가 서비스를
+    인수하므로 desired=stopped(서버별 정지)·재기동 카운터·절체 래치·planned_release 를 지운다.
+    승격 시점엔 ha.json 이 무장돼 있어 모듈 목록이 확실하다(OAM clear_holds 의 mods=[] 문제
+    없음). 자동·수동 절체 모두 이 경로로 타겟이 모듈을 확실히 기동한다. INTENTIONALLY_DOWN
+    (이미 MASTER 인 활성 노드에서 운영자가 stop)은 승격 엣지가 아니라 해제되지 않는다."""
+    mods = set(_service_relevant(s)) | {
+        str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+    cleared = []
+    for m in mods:
+        if not m:
+            continue
+        if _desired_stopped(m):
+            _set_desired(m, None)
+            cleared.append(m)
+        _fail_reset(m)
+        _clear_reconcile_backoff(m)     # 승격 즉시 기동 — 직전 실패 backoff 가 인수를 늦추지 않게
+    latch_was = bool(_EVAL_LATCH.get(svc))
+    _EVAL_LATCH[svc] = False
+    pr = os.path.join(_HA_PERSIST_DIR, "planned_release", svc)
+    pr_was = os.path.exists(pr)
+    try:
+        os.remove(pr)
+    except OSError:
+        pass
+    print(f"[agent][ha] 승격 홀드 해제: {svc} (desired해제={cleared}, "
+          f"latch={latch_was}, planned_release={pr_was})", flush=True)
+
+
+def _update_promotion_grace(svc: str, s: dict, role: str, now: float) -> bool:
+    """역할 전이 감지 — MASTER 진입 시 grace 설정(start 전에). grace 활성이면 True."""
+    prev = _EVAL_PREV_ROLE.get(svc)
+    _EVAL_PREV_ROLE[svc] = role
+    pf = os.path.join(_HA_RUN_DIR, "promotion", f"{svc}.json")
+    if role == "MASTER" and prev != "MASTER":
+        # 승격 엣지 — 실제 전이(prev 가 BACKUP/FAULT/UNKNOWN)에서만 홀드 해제. prev=None(최초
+        # 평가)은 부트 직후라 제외(desired 는 휘발이라 어차피 비어 있음).
+        if prev in ("BACKUP", "FAULT", "UNKNOWN"):
+            _clear_holds_on_promotion(svc, s)
+        try:
+            os.makedirs(os.path.dirname(pf), exist_ok=True)
+            tmp = pf + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump({"service": svc, "state": "PROMOTING", "started_at": int(now),
+                           "grace_until": int(now + _PROMOTION_GRACE_SEC),
+                           "boot_id": _boot_id()}, f)
+            os.replace(tmp, pf)
+        except Exception:
+            pass
+        return True
+    if role != "MASTER":
+        return False
+    try:
+        with open(pf) as f:
+            d = json.load(f)
+        return d.get("boot_id") == _boot_id() and now < d.get("grace_until", 0)
+    except Exception:
+        return False
+
+
+def _eval_service(svc: str, s: dict) -> dict:
+    now = time.time()
+    role = _current_role(svc, s)
+    relevant = _service_relevant(s)
+    cold = {str(m).lower().strip() for m in (s.get("cold_modules") or [])}
+    desired = _load_desired()                       # legacy {mod: 'stopped'} 노드 오버라이드
+    rl = _restart_limit_for(s)
+    reasons: list = []
+
+    def op_stopped(m):
+        return desired.get(m) == "stopped"
+
+    in_grace = _update_promotion_grace(svc, s, role, now)
+    hot = [m for m in relevant if m not in cold]
+    cold_rel = [m for m in relevant if m in cold]
+
+    def all_ready(mods, check, label):
+        ok = True
+        for m in mods:
+            if op_stopped(m):
+                continue
+            v = _module_health(m, check)
+            if v is not True:
+                reasons.append(f"{label}:{m}:{'unknown' if v is None else 'fail'}")
+                ok = False
+        return ok
+
+    eligible, state, svc_avail, standby_ready = False, "STARTING", False, False
+
+    if _node_excluded(svc):
+        # 유지보수(EXCLUDE_NODE) — 운영자가 이 노드를 승격 대상에서 제외. role 무관
+        # eligible=false → 상대가 죽어도 이 노드로 절체 안 됨(다운 감수). 모듈은
+        # reconcile 이 정지. 마커 제거 시 role 기반으로 자동 재합류.
+        eligible, state = False, "MAINTENANCE"
+        reasons.append("maintenance")
+    elif _planned_released(svc):
+        # 계획 절체 — 운영자/OAM 이 이 노드에서 VIP 를 의도적으로 넘기는 중.
+        # eligible=false → track_script fail → VIP 반납 → peer 승격. 모듈은 role 전이
+        # (MASTER→BACKUP/FAULT) 에 따라 reconcile 이 정지(서비스는 target 이 인수).
+        eligible, state = False, "PLANNED_RELEASE"
+        reasons.append("planned_release")
+    elif _EVAL_LATCH.get(svc):
+        eligible, state = False, "FAILOVER_LATCHED"
+        reasons.append("latched")
+    elif role in ("BACKUP", "UNKNOWN", "FAULT"):
+        # 승격 자격 = hot readiness + cold preflight (cold runtime 정지는 정상)
+        eligible = all_ready(hot, "readiness", "hot_readiness") \
+            and all_ready(cold_rel, "preflight", "cold_preflight")
+        state = "STANDBY_READY" if eligible else "STANDBY_INELIGIBLE"
+        standby_ready = eligible
+    elif role == "MASTER":
+        if in_grace:
+            # 승격 grace — cold runtime readiness 제외, hot readiness + cold preflight 만
+            eligible = all_ready(hot, "readiness", "hot_readiness") \
+                and all_ready(cold_rel, "preflight", "cold_preflight")
+            state = "PROMOTING"
+        else:
+            ok, any_down, any_intent = True, False, False
+            for m in relevant:
+                if op_stopped(m):
+                    any_intent = True
+                    continue                             # 의도적 정지 — 절체 사유 아님
+                # flapping — window 내 재기동(크래시)이 max_fails 이상이면 **현재 떠 있어도**
+                # 절체. 로컬 복구로 못 잡는 불안정이므로. (죽었다 살았다를 반복해 매 tick
+                # 살아있게 보여도 카운터가 누적돼 여기서 잡힌다 — 반복 kill 절체의 핵심.)
+                fc = _fail_count_read(m, rl["window_sec"])
+                if fc >= rl["max_fails"]:
+                    ok = False
+                    any_down = True
+                    reasons.append(f"restart_exhausted:{m}:{fc}/{rl['max_fails']}")
+                    continue
+                v = _module_health(m, "readiness")
+                if v is True:
+                    continue
+                any_down = True
+                proc_up = _pgrep_module(m) is not None
+                if not proc_up:
+                    # 프로세스 다운 = liveness 실패. reconcile 이 재기동 중(카운터 < max).
+                    reasons.append(f"recovering:{m}:{fc}/{rl['max_fails']}")
+                elif v is None:
+                    # 프로세스는 살아있는데 readiness **미상**(health 캐시 stale/미생성) —
+                    # 검사 불능은 장애가 아니다. 절체 사유로 삼지 않고 다음 tick 에 재판정
+                    # (stale 캐시가 순간 좀비로 오인돼 헛절체하는 것을 방지).
+                    reasons.append(f"unknown:{m}")
+                elif not _in_op_grace(m):
+                    # 좀비 — 프로세스 생존 + readiness **명확히 실패**(포트 미리슨 등) + 재기동
+                    # 유예(op_grace)도 지남 → 로컬 복구가 못 고치는 상태이므로 절체 사유.
+                    ok = False
+                    reasons.append(f"zombie:{m}")
+                else:
+                    reasons.append(f"starting:{m}")       # op_grace 이내 — 기동/바인딩 대기
+            eligible = ok
+            if not ok:
+                state = "FAILOVER_REQUIRED"
+                _EVAL_LATCH[svc] = True                   # 절체 확정 래치 — 운영자 start/restart 로 해제(§14)
+            elif any_intent and not any_down:
+                state = "INTENTIONALLY_DOWN"
+            elif any_down:
+                state = "RECOVERING"
+            else:
+                state = "ACTIVE_HEALTHY"
+            svc_avail = (not any_down) and (not any_intent)
+    return {
+        "service": svc, "role": role,
+        "service_state": state, "vrrp_eligible": bool(eligible),
+        "service_available": bool(svc_avail), "standby_ready": bool(standby_ready),
+        "in_promotion_grace": bool(in_grace),
+        "reason_codes": reasons[:12],
+    }
+
+
+def _verdict_write(svc: str, v: dict) -> None:
+    _EVAL_SEQ[svc] = _EVAL_SEQ.get(svc, 0) + 1
+    now = time.time()
+    v.update({"sequence": _EVAL_SEQ[svc], "boot_id": _boot_id(),
+              "updated_at": int(now), "expires_at": int(now + _VERDICT_TTL)})
+    p = os.path.join(_HA_RUN_DIR, "verdict", f"{svc}.json")
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(v, f)
+        os.replace(tmp, p)
+    except Exception as e:
+        print(f"[agent][ha] verdict write 실패({svc}): {e}", flush=True)
+
+
+def ha_evaluator_tick() -> None:
+    cfg = _read_ha_json()
+    for svc, s in (cfg.get("services") or {}).items():
+        try:
+            v = _eval_service(svc, s)
+        except Exception as e:
+            print(f"[agent][ha] eval error({svc}): {e}", flush=True)
+            continue
+        _verdict_write(svc, v)
+        if _EVAL_PREV_ELIG.get(svc) != v["vrrp_eligible"]:
+            _EVAL_PREV_ELIG[svc] = v["vrrp_eligible"]
+            print(f"[agent][ha] verdict {svc}: eligible={v['vrrp_eligible']} "
+                  f"state={v['service_state']} role={v['role']} "
+                  f"reasons={v['reason_codes']}", flush=True)
+
+
+# ── Recovery Supervisor — role reconcile (ha_service_model.md §7.1) ──────────
+# 매 주기 "역할에서 기대되는 모듈 상태 vs 실제"를 비교해 Process Manager 로 start/stop.
+# cims-notify(role writer)가 모듈을 직접 안 띄우는 대신 여기서 role 전이를 reconcile 해
+# 모듈을 기동/정지한다. 이벤트가 아니라 목표상태 수렴이라 notify/전이 이벤트를 놓쳐도
+# 다음 주기에 복구된다. 단일 모델 — 전 HA 서비스 대상.
+_RECONCILE_BACKOFF: dict = {}     # module -> {"ts": float, "fails": int} (재기동 backoff 스로틀)
+_LAST_UP: dict = {}               # module -> bool (직전 tick 생존; 크래시(up→down) 판정용)
+
+
+def _clear_reconcile_backoff(module: str) -> None:
+    """재기동 backoff 스로틀 해제 — 운영자 복구(start/restart)·홀드 해제·승격 시 호출.
+    backoff 는 reconcile 안에서 `exp and running`(정상) 또는 정지 경로로만 자연 해제되는데
+    **둘 다 프로세스가 떠 있어야** 한다. 한 번도 못 뜬 모듈(설정 오류로 start 연속 실패)은
+    어디에도 안 걸려 상한 300초가 남고, 원인을 고쳐 start 를 눌러도 그 창이 지나야 기동된다
+    (승격 경로면 그만큼 절체 지연). 그래서 복구 의도가 명시된 지점에서 함께 지운다 —
+    _fail_reset(절체 카운터)과 짝."""
+    _RECONCILE_BACKOFF.pop((module or "").lower().strip(), None)
+
+
+def _module_dist_dir(module: str) -> "str | None":
+    """모듈 배포 루트(CIMS_DIST_DIR) — current 우선, 없으면 최신 버전 디렉토리
+    (cims-notify _mod_dist 와 동일: 한 번도 기동 안 한 cold standby 도 승격 기동 가능)."""
+    root = os.path.join(_PREFIX, "modules", (module or "").lower().strip())
+    cur = os.path.join(root, "current")
+    if os.path.exists(cur):
+        return cur
+    try:
+        subs = [os.path.join(root, d) for d in os.listdir(root)
+                if os.path.isdir(os.path.join(root, d))]
+        subs.sort(key=os.path.getmtime, reverse=True)
+        return subs[0] if subs else None
+    except Exception:
+        return None
+
+
+def _ha_managed_modules() -> set:
+    """HA 서비스의 relevant ∪ cold 모듈 — Supervisor reconcile 이 lifecycle 을 소유하는
+    집합. legacy watchdog(supervise_tick)은 이 집합을 건드리지 않는다(이중 제어 방지) —
+    HA 에 속하지 않은 standalone 모듈만 watchdog 관할."""
+    cfg = _read_ha_json()
+    out = set()
+    for s in (cfg.get("services") or {}).values():
+        out |= set(_service_relevant(s))
+        out |= {str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+    return {m for m in out if m}
+
+
+def _expected_running(m: str, role: str, cold: set, desired: dict,
+                      excluded: bool = False, latched: bool = False) -> bool:
+    """역할·정책 기반 기대 실행 상태 (§7.1)."""
+    if excluded:
+        return False                       # 유지보수(EXCLUDE_NODE) — 정지
+    if desired.get(m) == "stopped":
+        return False                       # 운영자 서버별 정지 — 기동 안 함
+    if latched:
+        return False                       # 절체 확정(FAULT) — hot·cold 전부 정지(kill), gap2
+    if role == "MASTER":
+        return True                        # hot·cold 모두 실행
+    # BACKUP/FAULT/UNKNOWN(래치 없음): hot 상시, cold 는 정지가 정상.
+    # FAULT 여도 래치 해제(운영자 복구) 상태면 hot 을 올려 standby 로 재합류시킨다.
+    return m not in cold
+
+
+def ha_reconcile_tick() -> None:
+    cfg = _read_ha_json()
+    desired = _load_desired()
+    now = time.time()
+    for svc, s in (cfg.get("services") or {}).items():
+        role = _current_role(svc, s)
+        excluded = _node_excluded(svc)
+        latched = bool(_EVAL_LATCH.get(svc))
+        cold = {str(m).lower().strip() for m in (s.get("cold_modules") or [])}
+        managed = set(_service_relevant(s)) | cold
+        rl = _restart_limit_for(s)
+        for m in managed:
+            if not m or m in _NON_DAEMON_MODULES:
+                continue
+            running = _pgrep_module(m) is not None
+            was_up = _LAST_UP.get(m, False)         # 직전 tick 생존 여부 (크래시 판정)
+            _LAST_UP[m] = running                   # 이번 상태 저장(다음 tick 용)
+            exp = _expected_running(m, role, cold, desired, excluded, latched)
+            # **크래시 카운트는 재기동 스로틀(op_grace/backoff)과 분리한다.** 직전 tick 살아
+            # 있다가 죽은(크래시) 엣지에서 감지 즉시 1회 카운트 — 최초/승격 기동은 크래시가
+            # 아니라 제외. 카운트를 op_grace 뒤에 두면, op_grace(30s) 창 안의 kill 은 재기동이
+            # 미뤄지는 사이 was_up 이 decay 돼 누락된다(빠른 연속 kill 이 안 세짐 → 절체 지연).
+            if exp and was_up and not running:
+                _fail_bump(m, rl["window_sec"])
+                print(f"[agent][ha] {m} 크래시 감지 (role={role}) — fail 카운트 증가", flush=True)
+            if exp and not running:
+                if _in_op_grace(m):
+                    continue               # 운영자 제어 job/기동 유예 중 — 재기동만 보류(카운트는 위에서 함)
+                if _fail_count_read(m, rl["window_sec"]) >= rl["max_fails"]:
+                    continue               # 재기동 소진(window 내) — Evaluator 가 latch/절체 처리
+                st = _RECONCILE_BACKOFF.setdefault(m, {"ts": 0.0, "fails": 0})
+                backoff = min(300, 5 * (2 ** st["fails"]))
+                if now - st["ts"] < backoff:
+                    continue
+                st["ts"] = now; st["fails"] += 1
+                _touch_op_grace(m)                  # 기동 직후 readiness/바인딩 대기 유예 (좀비 오판 방지)
+                dist = _module_dist_dir(m)
+                if dist:
+                    rc, out, err = _run_cims_svc(dist, "start", m)
+                    # 실패는 원인까지 남긴다 — backoff 가 지수로 벌어지면 재시도가 드물어져
+                    # (상한 300s) rc 만으론 왜 안 뜨는지 추적할 단서가 없다.
+                    detail = f" — {(err or out or '').strip()[:200]}" if rc else ""
+                    print(f"[agent][ha] reconcile start {m} (role={role}) rc={rc}{detail}", flush=True)
+            elif (not exp) and running:
+                # 유지보수(excluded)·절체 래치(latched) 정지는 즉시 — 점검/절체를 지연시키지
+                # 않는다. 그 외 role 기반 정지(cold on BACKUP 등)는 op_grace 를 존중한다 —
+                # 운영자가 방금 올린(서버별/개별 start) 모듈을 reconcile 이 곧바로 되돌려
+                # 싸우지 않고, 개시·선출(어느 노드가 MASTER 가 되는지)이 안정될 창을 준다.
+                if not (latched or excluded) and _in_op_grace(m):
+                    continue
+                dist = _module_dist_dir(m)
+                if dist:
+                    _run_cims_svc(dist, "stop", m)
+                    print(f"[agent][ha] reconcile stop {m} (role={role})", flush=True)
+                _RECONCILE_BACKOFF.pop(m, None)
+                _fail_reset(m)                       # 의도적 정지(강등/유지보수) — 카운터 리셋
+            elif exp and running:
+                _RECONCILE_BACKOFF.pop(m, None)      # 정상 — backoff 스로틀만 리셋
+                # fail 카운터는 여기서 리셋하지 않는다 — window 내 크래시 누적이 유지돼야
+                # 반복 재기동이 max_fails 에 도달해 절체된다(window 만료 시 자연 리셋).
+
+
+def _start_ha_evaluator() -> None:
+    def _loop():
+        while True:
+            try:
+                ha_evaluator_tick()
+                ha_reconcile_tick()              # verdict 계산 후 role reconcile
+                _hb("eval")                      # watchdog coordinator heartbeat
+            except Exception as e:
+                print(f"[agent][ha] evaluator error: {e}", flush=True)
+            time.sleep(_EVAL_INTERVAL)
+    threading.Thread(target=_loop, daemon=True, name="agent-ha-eval").start()
+    print("[agent][ha] HA Evaluator 기동 (verdict + reconcile)", flush=True)
+
+
+# ── systemd watchdog coordinator (ha_service_model.md §9) ────────────────────
+# 핵심 스레드(Evaluator·Health)의 heartbeat 가 모두 신선할 때만 sd_notify(WATCHDOG=1).
+# OAM 연결/job 완료는 조건에서 제외 — OAM 불통·장시간 job 이 agent 재기동을 유발하지
+# 않게 한다. Type=notify + WatchdogSec 유닛 + CIMS_HA_WATCHDOG=1 에서만 활성(opt-in).
+_HB: dict = {}                    # 스레드명 -> 마지막 tick epoch
+_WATCHDOG_STALE_SEC = 10
+
+
+def _hb(name: str) -> None:
+    _HB[name] = time.time()
+
+
+def _sd_notify(msg: str) -> None:
+    """systemd sd_notify — $NOTIFY_SOCKET 없으면 no-op(Type=simple 기본)."""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    try:
+        if addr.startswith("@"):
+            addr = "\0" + addr[1:]        # abstract namespace
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        s.sendto(msg.encode(), addr)
+        s.close()
+    except Exception:
+        pass
+
+
+def _start_watchdog_coordinator() -> None:
+    """WATCHDOG=1 ping 루프 — 핵심 스레드 heartbeat 종합 게이트. CIMS_HA_WATCHDOG=1 에서만."""
+    if not os.environ.get("NOTIFY_SOCKET"):
+        print("[agent][wd] NOTIFY_SOCKET 없음 (Type=notify 아님) — watchdog coordinator 스킵", flush=True)
+        return
+    def _loop():
+        while True:
+            now = time.time()
+            fresh = all(now - _HB.get(k, 0) < _WATCHDOG_STALE_SEC for k in ("eval", "health"))
+            if fresh:
+                _sd_notify("WATCHDOG=1")
+            time.sleep(5)
+    threading.Thread(target=_loop, daemon=True, name="agent-ha-wd").start()
+    print("[agent][wd] Watchdog Coordinator 기동 (eval+health heartbeat 게이트)", flush=True)
+
+
+def _maybe_start_supervisor() -> None:
+    """Recovery Supervisor 스레드(Health Scheduler + Evaluator + reconcile) 기동 —
+    idempotent. 단일 모델: HA 서비스가 하나라도 있으면 항상 기동한다. 단, 비상 밸브
+    CIMS_HA_DISABLE 가 켜져 있으면 기동하지 않는다(판정 얼림). job_update_ha 후에도
+    호출돼 ha.json 에 HA 서비스가 생기면 그 시점에 기동한다."""
+    global _SUP_STARTED
+    if _SUP_STARTED:
+        return
+    if _ha_disabled():
+        print("[agent][ha] CIMS_HA_DISABLE — Supervisor 미기동 (비상 밸브, 판정 얼림)", flush=True)
+        return
+    if _has_ha_services():
+        _SUP_STARTED = True
+        _start_health_scheduler()
+        _start_ha_evaluator()
+
+
+def _load_desired() -> dict:
+    try:
+        with open(_DESIRED_FILE) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_desired(d: dict) -> None:
+    try:
+        _ha_state_dir()
+        tmp = _DESIRED_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, _DESIRED_FILE)
+    except Exception as e:
+        print(f"[agent][ha] desired.json 저장 실패: {e}", flush=True)
+
+
+def _set_desired(module: str, state: "str | None") -> None:
+    """노드 오버라이드 설정. state='stopped' → 기록, None/'running' → 오버라이드 해제.
+    서버별 stop = stopped 기록(watchdog·health 제외), 서버별 start = 해제."""
+    module = (module or "").lower().strip()
+    if not module:
+        return
+    d = _load_desired()
+    if state == 'stopped':
+        if d.get(module) != 'stopped':
+            d[module] = 'stopped'
+            _save_desired(d)
+            print(f"[agent][ha] 노드 오버라이드: {module}=stopped (서버별 정지 — 절체 안 함)", flush=True)
+    else:
+        if module in d:
+            d.pop(module, None)
+            _save_desired(d)
+            print(f"[agent][ha] 노드 오버라이드 해제: {module}", flush=True)
+
+
+def _desired_stopped(module: str) -> bool:
+    return _load_desired().get((module or "").lower().strip()) == 'stopped'
+
+
+def _clear_failover_holds(module: str) -> None:
+    """운영자 복구(start/restart) → 이 모듈이 속한 서비스의 절체 홀드를 전부 해제한다:
+    (1) 절체 래치(`_EVAL_LATCH`) — 서 있는 동안 reconcile 이 그 노드 모듈을 전부 정지(kill)로
+        유지(§14). 운영자가 원인을 고치고 올리면 풀어야 FAULT 노드가 standby 로 재합류.
+    (2) planned_release 마커 — start = '여기서 정상 운영' 의도라 'VIP 반납(planned_release)'과
+        모순. OAM 절체 종결 시 해제가 유실돼 마커가 stale 로 남아도 운영자 start 로 복구된다."""
+    module = (module or "").lower().strip()
+    if not module:
+        return
+    cfg = _read_ha_json_nofail()
+    for svc, s in (cfg.get("services") or {}).items():
+        mods = set(_service_relevant(s)) | {
+            str(m).lower().strip() for m in (s.get("cold_modules") or []) if str(m).strip()}
+        if module not in mods:
+            continue
+        if _EVAL_LATCH.get(svc):
+            _EVAL_LATCH[svc] = False
+            print(f"[agent][ha] 절체 래치 해제: {svc} (운영자 {module} 복구 — standby 재합류 준비)",
+                  flush=True)
+        pr = os.path.join(_HA_PERSIST_DIR, "planned_release", svc)
+        if os.path.exists(pr):
+            try:
+                os.remove(pr)
+                print(f"[agent][ha] planned_release 해제: {svc} (운영자 {module} start — 정상 운영 의도)",
+                      flush=True)
+            except OSError:
+                pass
+
+
+def _touch_op_grace(module: str) -> None:
+    """제어 job 진입 시 조작 유예 마커 갱신 — reconcile/Evaluator 가 mtime 으로 유예."""
+    module = (module or "").lower().strip()
+    if not module:
+        return
+    try:
+        _ha_state_dir()
+        p = os.path.join(_HA_STATE_DIR, f"op_grace_{module}")
+        with open(p, "w") as f:
+            f.write(str(int(time.time())))
+    except Exception as e:
+        print(f"[agent][ha] op_grace 마커 실패({module}): {e}", flush=True)
+
+
+def _clear_op_grace(module: str) -> None:
+    """조작 유예 마커 제거 — 실제로 아무것도 기동/제어하지 않은 경우(억제된 cold start)에
+    되돌린다. 안 그러면 실기동이 없는데도 유예가 걸려 이후 reconcile 의 진짜 기동을 막는다."""
+    module = (module or "").lower().strip()
+    if not module:
+        return
+    try:
+        os.remove(os.path.join(_HA_STATE_DIR, f"op_grace_{module}"))
+    except OSError:
+        pass
+
+
+def _in_op_grace(module: str) -> bool:
+    """조작 유예 창 이내인가 — 제어 job 진입 후 _OP_GRACE_SEC 초."""
+    module = (module or "").lower().strip()
+    if not module:
+        return False
+    try:
+        at = os.path.getmtime(os.path.join(_HA_STATE_DIR, f"op_grace_{module}"))
+        return (time.time() - at) < _OP_GRACE_SEC
+    except Exception:
+        return False
+
+
+def _fail_path(module: str) -> str:
+    return os.path.join(_HA_STATE_DIR, f"fail_{(module or '').lower().strip()}")
+
+
+def _fail_bump(module: str, window_sec: int) -> int:
+    """재기동 실패 카운터 증가 (window_sec 밖이면 리셋). 갱신된 count 반환.
+    파일 형식: 'count first_ts' (공백 구분) — cims-health 가 첫 필드를 읽는다."""
+    now = int(time.time())
+    count, first_ts = 0, now
+    try:
+        with open(_fail_path(module)) as f:
+            parts = f.read().split()
+            count = int(parts[0]); first_ts = int(parts[1]) if len(parts) > 1 else now
+    except Exception:
+        pass
+    if now - first_ts > max(1, int(window_sec or 300)):
+        count, first_ts = 0, now        # 윈도우 만료 — 리셋
+    count += 1
+    try:
+        _ha_state_dir()
+        # 원자적 쓰기 — cims-health(root)가 동시에 읽으므로 torn read 방지.
+        p = _fail_path(module); tmp = p + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(f"{count} {first_ts}")
+        os.replace(tmp, p)
+    except Exception as e:
+        print(f"[agent][ha] fail 카운터 저장 실패({module}): {e}", flush=True)
+    return count
+
+
+def _fail_reset(module: str) -> None:
+    try:
+        os.remove(_fail_path(module))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
+def _module_spec_path(module: str) -> str:
+    return os.path.join(_PREFIX, "modules", (module or "").lower().strip(), "service.json")
+
+
+def _load_module_spec(module: str) -> dict:
+    """modules/<mod>/service.json — 부재/파싱실패 시 default(watchdog on)."""
+    try:
+        with open(_module_spec_path(module)) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _watchdog_enabled(module: str) -> bool:
+    """service.json supervision.watchdog (부재 시 True — 종전 동작 유지)."""
+    spec = _load_module_spec(module)
+    sup = spec.get("supervision") if isinstance(spec.get("supervision"), dict) else {}
+    return bool(sup.get("watchdog", True))
+
+
+def _ha_restart_limit(svc_cold_module: str) -> dict:
+    """ha.json services.* 중 svc_cold_module 을 cold_modules 로 갖는 항목의 restart_limit.
+    미상 시 default {max_fails:3, window_sec:300}."""
+    default = {"max_fails": 3, "window_sec": 300}
+    try:
+        with open(_HA_JSON_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return default
+    m = (svc_cold_module or "").lower()
+    for s in (cfg.get("services") or {}).values():
+        cold = [str(x).lower() for x in (s.get("cold_modules") or [])]
+        if m in cold:
+            rl = s.get("restart_limit") if isinstance(s.get("restart_limit"), dict) else {}
+            return {
+                "max_fails": int(rl.get("max_fails", default["max_fails"]) or default["max_fails"]),
+                "window_sec": int(rl.get("window_sec", default["window_sec"]) or default["window_sec"]),
+            }
+    return default
+
+
+def _cold_standby_module(svc: str) -> bool:
+    """svc 가 cold-spare 모듈이고 이 노드가 해당 서비스 VIP 를 보유하지 않으면(=마스터 아님) True.
+
+    True = 이 노드에서 **직접 기동하지 않는다**. cold 모듈은 마스터에서만 존재해야 하므로,
+    개별/서버 start 는 직접 켜지 않고 서비스 무장(arm)만 트리거하고, 이 노드가 마스터로
+    승격된 뒤 Supervisor reconcile 이 마스터에서 기동한다("마스터 먼저 → 모듈 나중").
+    이 노드가 이미 VIP 보유(마스터)면 False → 즉시 직접 기동(마스터에서의 crash 복구).
+    ha.json 부재/파싱 실패/VIP 미정의는 False — hot 모듈·비HA 모듈은 종전대로 직접 기동."""
+    try:
+        with open(_HA_JSON_PATH) as f:
+            cfg = json.load(f)
+    except Exception:
+        return False
+    svc = (svc or "").lower()
+    vips = []
+    for s in (cfg.get("services") or {}).values():
+        cold = [str(m).lower() for m in (s.get("cold_modules") or [])]
+        if svc not in cold:
+            continue
+        vips = [str(v.get("ip")) for v in (s.get("vips") or [])
+                if isinstance(v, dict) and v.get("ip")]
+        if s.get("vip"):
+            vips.append(str(s["vip"]))
+        break
+    if not vips:
+        return False
+    # 단일 모델: HA cold 모듈의 lifecycle 은 Supervisor reconcile 이 소유한다. keepalived 가
+    # 아직 안 떠 있어도(최초 미무장) 직접 기동하지 않는다 — start 가 arm(update_ha)을 트리거해
+    # keepalived 를 띄우고, 마스터 승격 후 reconcile 이 기동한다. (구: keepalived 죽었으면
+    # 게이트를 풀어 직접 기동 → 마스터 아닌 노드에서 켜졌다 걷어내지는 flap 을 유발했다.)
+    local = {r.get("ip") for r in collect_interfaces() if r.get("ip")}
+    return not any(v in local for v in vips)
+
 
 def _find_cims_svc(install_path: str):
     for c in (os.path.join(install_path, "agent", "bin", "cims-svc"),
@@ -1919,12 +3303,37 @@ def supervise_tick() -> None:
     sup = _load_supervised()
     if not sup:
         return
+    # HA 관리 모듈(relevant∪cold)의 lifecycle 은 Supervisor reconcile 이 소유한다 —
+    # legacy watchdog 은 이중 제어를 피하려 그 집합을 건드리지 않는다(HA 밖 standalone 만 관할).
+    ha_managed = _ha_managed_modules()
     now = time.time()
     for svc, install_path in list(sup.items()):
         if svc in _NON_DAEMON_MODULES:
             continue
+        if svc in ha_managed:
+            continue     # Supervisor reconcile 소관
         if _pgrep_module(svc):
             _WATCHDOG_BACKOFF.pop(svc, None)     # 정상 — backoff 리셋
+            _fail_reset(svc)                     # 실패 카운터 리셋 (연속성 판정 기준)
+            continue
+        # 모듈 감시 비활성 (service.json supervision.watchdog=false) — 운영자가 감시를
+        # 끈 모듈은 재기동하지 않는다.
+        if not _watchdog_enabled(svc):
+            continue
+        # 서버별 정지 오버라이드 — 운영자가 이 노드에서 내린 모듈은 재기동하지 않는다
+        # (의도적 정지 ≠ 장애). desired 해제(서버별 start) 시 백스톱 복귀.
+        if _desired_stopped(svc):
+            _WATCHDOG_BACKOFF.pop(svc, None)
+            continue
+        # 조작 유예 — 제어 job(restart 등) 진행 중이면 잠시 손대지 않는다.
+        if _in_op_grace(svc):
+            continue
+        # cold-spare standby — 정지가 desired state (notify 가 강등 시 내림).
+        # 여기서 재기동하면 keepalived 와 엎치락뒤치락한다. VIP 취득 후엔 게이트가
+        # 풀려 crash 재기동 백스톱으로 복귀.
+        if _cold_standby_module(svc):
+            _WATCHDOG_BACKOFF.pop(svc, None)
+            _fail_reset(svc)                     # standby 진입 — 카운터 초기화 (승격 시 신선)
             continue
         st = _WATCHDOG_BACKOFF.setdefault(svc, {"ts": 0.0, "fails": 0})
         backoff = min(300, 5 * (2 ** st["fails"]))
@@ -1932,8 +3341,13 @@ def supervise_tick() -> None:
             continue
         st["ts"] = now
         st["fails"] += 1
+        # 재기동 실패 카운터 — cims-health 가 max_fails 초과 시 FAULT(절체) 판정.
+        # 로컬 복구를 먼저 시도하고 소진되면 keepalived 가 VIP 를 넘긴다.
+        rl = _ha_restart_limit(svc)
+        fails = _fail_bump(svc, rl["window_sec"])
         nxt = min(300, 5 * (2 ** st["fails"]))
-        print(f"[agent][watchdog] '{svc}' 다운 감지 — 재시작 (시도 {st['fails']}, 다음 backoff {nxt}s)", flush=True)
+        print(f"[agent][watchdog] '{svc}' 다운 감지 — 재시작 (시도 {st['fails']}, "
+              f"연속실패 {fails}/{rl['max_fails']}, 다음 backoff {nxt}s)", flush=True)
         rc, out, err = _run_cims_svc(install_path, "start", svc)
         tail = (err or out or "").strip().replace("\n", " ")[-160:]
         print(f"[agent][watchdog] '{svc}' start rc={rc} {tail}", flush=True)
@@ -2026,6 +3440,21 @@ def job_process_control(params: dict, job_type: str) -> tuple:
             f"(install_path={install_path}, job_type={job_type})"
         )
 
+    # 조작 유예 마커 — restart 순단·start 기동 시간 동안 cims-health/watchdog 가
+    # 이 노드에서 절체/재기동 경쟁을 하지 않도록 (운영자 조작 ≠ 장애).
+    _touch_op_grace(svc)
+    # 노드 오버라이드 — 서버별 stop = 이 노드에서 의도적 정지(절체 안 함), start/restart
+    # = 오버라이드 해제(HA 관리로 복귀). 절체 판정(cims-health)과 watchdog 이 참조.
+    if job_type in ("start", "restart"):
+        _set_desired(svc, None)
+        _clear_failover_holds(svc)      # 운영자 복구 — 절체 래치 + planned_release 해제
+        _fail_reset(svc)                # 재기동 카운터 리셋 — 복구 후 곧바로 재절체되지 않게
+        _clear_reconcile_backoff(svc)   # 재기동 backoff 리셋 — 원인 고치고 누른 start 가
+                                        # 직전 실패 창(최대 300s)만큼 지연되지 않게
+    elif job_type == "stop":
+        _set_desired(svc, 'stopped')
+        _fail_reset(svc)
+
     # ── current 심볼릭 모델: 활성 버전 통로 ────────────────────────────────
     #   install_path(버전 디렉토리)가 버전 패턴이면 module_root/current 로 통로화한다.
     #   프로세스는 항상 <module_root>/current 로 기동(CIMS_DIST_DIR) → systemd·모니터링
@@ -2077,6 +3506,20 @@ def job_process_control(params: dict, job_type: str) -> tuple:
         if prev_path and prev_path != install_path and os.path.isdir(prev_path):
             prc, _po, perr = _run_cims_svc(prev_path, "stop", svc)
             prev_note = f" (prev-stop {prev_path} rc={prc}{' ' + perr.strip()[:120] if prc else ''})"
+
+    # cold-spare standby — 실제 기동은 스킵 (current flip/prev-stop 은 이미 수행 →
+    # 승격 시 notify/watchdog 이 신 버전으로 기동). supervised 에는 desired-state 로
+    # 등록해 VIP 취득 후 watchdog 백스톱이 동작하게 한다.
+    if job_type in ("start", "restart") and _cold_standby_module(svc):
+        _mark_supervised(svc, launch_path)
+        # cold 모듈은 마스터에서만 reconcile 로 기동한다. 이 노드는 마스터가 아니라 직접
+        # 기동을 억제한다. **실제로 아무것도 안 켰으므로 위에서 찍은 op_grace 를 되돌린다** —
+        # 안 그러면 이 노드가 마스터로 승격됐을 때 reconcile 의 진짜 기동이 op_grace 때문에
+        # 지연된다(억제 start 가 승격 후 기동을 막던 버그). 콘솔 표시는 실측(live_state)이
+        # 정본이라 여기서 status 를 조작할 필요 없다.
+        _clear_op_grace(svc)
+        return 0, (f"cold standby — '{svc}' 직접 기동 억제 (VIP 미보유). 서비스 무장(arm) 후 "
+                   f"이 노드가 마스터로 승격되면 Supervisor reconcile 이 기동한다.{prev_note}"), ""
 
     rc, out, err = _run_cims_svc(launch_path, job_type, svc)
     if prev_note:
@@ -2143,7 +3586,7 @@ def job_health_check(params: dict) -> tuple:
     probes_default = {
         "csp":     [("udp", 5060)],
         "cmp":     [("udp", 9000)],
-        "csc":     [("tcp", 4420)],
+        "csc":     [("tcp", 4421)],
         "cwrtc":   [("tcp", 8080)],
         "console": [("tcp", 3001)],
         "phone":   [("tcp", 3000)],
@@ -2491,6 +3934,16 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_sync_config(params, oam_url, session_token)
         elif jt == "update_ha":
             rc, out, err = job_update_ha(params)
+        elif jt == "update_module_spec":
+            rc, out, err = job_update_module_spec(params)
+        elif jt == "ha_keepalived":
+            rc, out, err = job_ha_keepalived(params)
+        elif jt == "ha_planned_release":
+            rc, out, err = job_ha_planned_release(params)
+        elif jt == "ha_maintenance":
+            rc, out, err = job_ha_maintenance(params)
+        elif jt == "ha_clear_holds":
+            rc, out, err = job_ha_clear_holds(params)
         elif jt == "apply_ip_config":
             rc, out, err = job_apply_ip_config(params)
         elif jt == "apply_mounts":
@@ -2499,8 +3952,13 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str) ->
             rc, out, err = job_apply_net_tuning(params)
         elif jt == "uninstall":
             install_path = params.get("install_path")
-            # 감독 해제 (watchdog 가 재시작하지 않도록)
-            _unmark_supervised((params.get("process_name") or params.get("service_kind") or "").lower())
+            # 감독 해제 (watchdog 가 재시작하지 않도록) + HA 노드 상태 정리
+            _mod = (params.get("process_name") or params.get("service_kind") or "").lower()
+            _unmark_supervised(_mod)
+            _set_desired(_mod, None)   # 오버라이드 잔재 제거 (service.json 은 모듈 트리와 함께 rmtree)
+            _clear_failover_holds(_mod)  # 철거 모듈의 절체 래치·planned_release 잔재 해제
+            _fail_reset(_mod)
+            _clear_reconcile_backoff(_mod)
             # 버전 디렉토리(…/<module>/<version>) 면 모듈 루트 전체 제거 —
             # uninstall 은 모듈 deployment 자체의 철거이므로 병렬 버전도 함께.
             module = (params.get("package_name") or "").strip()
@@ -2619,6 +4077,77 @@ def rotate_mtls_cert(oam_url: str, state: AgentState) -> bool:
         return False
 
 
+def _ensure_nonlocal_bind() -> None:
+    """net.ipv4.ip_nonlocal_bind=1 선행 보장 (idempotent, 1회).
+
+    VIP 를 설정값으로 bind 하는 모듈(csp LocalIp=VIP 등)은 VIP 취득 전에도 기동
+    가능해야 한다 — 워크플로가 "start → VIP 적용" 순서라 cims-ha apply 의 설정
+    (VIP 적용 시점)만으로는 늦다: 최초 start 가 bind EADDRNOTAVAIL 로 실패해
+    watchdog crash-loop 가 된다. sudoers 미등록(dev) 환경은 로그만 남기고 무시."""
+    try:
+        with open("/proc/sys/net/ipv4/ip_nonlocal_bind") as f:
+            if f.read().strip() == "1":
+                return
+    except Exception:
+        pass
+    priv = _resolve_cims_priv()
+    if not priv:
+        print("[agent] cims-priv 미발견 — ip_nonlocal_bind 설정 스킵", flush=True)
+        return
+    try:
+        r = subprocess.run(["sudo", "-n", priv, "net-sysctl",
+                            "net.ipv4.ip_nonlocal_bind", "1"],
+                           capture_output=True, text=True, timeout=15)
+        if r.returncode == 0:
+            print("[agent] net.ipv4.ip_nonlocal_bind=1 적용 (VIP 선행 bind 보장)", flush=True)
+        else:
+            print(f"[agent] ip_nonlocal_bind 설정 실패(무시): rc={r.returncode} "
+                  f"{(r.stderr or r.stdout).strip()[-120:]}", flush=True)
+    except Exception as e:
+        print(f"[agent] ip_nonlocal_bind 설정 예외(무시): {e}", flush=True)
+
+
+def _ensure_unit_killmode() -> None:
+    """user unit 에 KillMode=process drop-in 보장 — agent 재기동(업그레이드 포함)이
+    자기 cgroup 의 모듈(cims-svc & 백그라운드 데몬)까지 동반 종료시키지 않게 한다.
+    fresh install 의 unit 에는 포함되지만 update.sh(--update-only)는 unit 을 유지
+    하므로, 기존 설치본은 agent 가 기동 시 스스로 drop-in 으로 교정한다 (idempotent,
+    systemd 미사용(nohup) 환경은 daemon-reload 실패를 무시)."""
+    dropin_dir = os.path.join(os.path.expanduser("~"), ".config", "systemd", "user",
+                              "cims-agent.service.d")
+    dropin = os.path.join(dropin_dir, "10-cims-killmode.conf")
+    content = "[Service]\nKillMode=process\n"
+    try:
+        if os.path.isfile(dropin):
+            with open(dropin) as f:
+                if f.read() == content:
+                    return
+        os.makedirs(dropin_dir, exist_ok=True)
+        with open(dropin, "w") as f:
+            f.write(content)
+        subprocess.run(["systemctl", "--user", "daemon-reload"],
+                       capture_output=True, timeout=10)
+        print("[agent] systemd drop-in 적용: KillMode=process (agent 재기동 시 모듈 동반종료 차단)", flush=True)
+    except Exception as e:
+        print(f"[agent] KillMode drop-in 적용 실패(무시): {e}", flush=True)
+
+
+def _sleep_with_supervision(total_sec: float) -> None:
+    """total_sec 대기하되 SUPERVISE_INTERVAL_SEC 간격으로 watchdog tick 을 돌린다 —
+    heartbeat 대기(정상 heartbeat_sec, OAM 장애 backoff 최대 60s)와 죽은 모듈 감지
+    주기를 분리 (OAM 불통이 로컬 복구를 지연시키지 않게)."""
+    deadline = time.time() + total_sec
+    while True:
+        remain = deadline - time.time()
+        if remain <= 0:
+            return
+        time.sleep(min(remain, SUPERVISE_INTERVAL_SEC))
+        try:
+            supervise_tick()
+        except Exception as e:
+            print(f"[agent][watchdog] tick error: {e}", flush=True)
+
+
 def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: int,
              sync_port: int = 0):
     """
@@ -2632,13 +4161,22 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
     global _MGMT_IP
     _MGMT_IP = detect_mgmt_ip(oam_url)
 
+    _ensure_ha_dirs()                  # HA 상태 디렉토리 골격(run/ha·state/ha) 보장 (1회)
+    _sync_ha_disabled_marker()         # 비상 밸브 상태 → run/ha/disabled 마커 (root cims-health 판독)
+    # HA Supervisor 스레드 — HA 서비스가 있으면 항상 기동(단일 모델). CIMS_HA_DISABLE
+    # 면 미기동(판정 얼림). ha.json 이 나중에 생기면 job_update_ha 후 재확인해 기동.
+    _maybe_start_supervisor()
+    _sd_notify("READY=1")              # Type=notify 유닛에서 기동 완료 통지(아니면 no-op)
+    if os.environ.get("CIMS_HA_WATCHDOG"):
+        _start_watchdog_coordinator()
     _seed_supervised_from_pidfiles()   # 기존 실행 모듈을 감독 집합에 편입 (1회)
+    _ensure_unit_killmode()            # 자기 unit 에 KillMode=process 보장 (기존 설치본 자가 교정, 1회)
+    _ensure_nonlocal_bind()            # VIP 선행 bind 보장 — csp(LocalIp=VIP) 가 VIP 적용 전에도 기동 가능 (1회)
     ensure_base_deps()                 # vendor deb 균일 설치(keepalived/nfs/lib) — 실행은 config 제어. ip/네트워크 수집 전제, idempotent
     reapply_managed_ips()              # 재부팅으로 소실된 cims-managed service IP 자력 복원 (1회, OAM 무관)
     reapply_net_tuning()               # 재부팅으로 소실된 RPS(rps_cpus) 자력 복원 (1회, sysctl 은 sysctl.d 가 처리)
 
     next_metric = 0
-    next_supervise = 0
     fail_count = 0
     max_backoff = max(heartbeat_sec, 60)
     while True:
@@ -2709,20 +4247,14 @@ def run_loop(oam_url: str, state: AgentState, heartbeat_sec: int, metric_sec: in
             fail_count += 1
             print(f"[agent] loop error (fail_count={fail_count}): {e}")
 
-        # 모듈 감독 — OAM 연결과 무관하게 로컬에서 죽은 supervised 모듈 재시작
-        if time.time() >= next_supervise:
-            try:
-                supervise_tick()
-            except Exception as e:
-                print(f"[agent][watchdog] tick error: {e}", flush=True)
-            next_supervise = time.time() + SUPERVISE_INTERVAL_SEC
-
         if fail_count == 0:
             sleep_sec = heartbeat_sec
         else:
             sleep_sec = min(5 * (2 ** (fail_count - 1)), max_backoff)
             print(f"[agent] HA backoff sleep {sleep_sec}s (fail_count={fail_count})", flush=True)
-        time.sleep(sleep_sec)
+        # 모듈 감독은 heartbeat 대기와 무관하게 SUPERVISE_INTERVAL_SEC 주기 유지 —
+        # OAM 장애 backoff(최대 60s)가 죽은 모듈 복구까지 함께 지연시키지 않는다.
+        _sleep_with_supervision(sleep_sec)
 
 
 def main():

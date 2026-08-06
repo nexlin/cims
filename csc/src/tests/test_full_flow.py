@@ -8,7 +8,7 @@ import sys
 # Configuration
 CSP_IP = "192.168.0.73"
 CSP_SIP_PORT = 5060
-CSC_HTTP_URL = "https://127.0.0.1:4420"
+CSC_HTTP_URL = "https://127.0.0.1:4421"
 
 # SIP Client Config
 CLIENT_IP = "192.168.0.73"

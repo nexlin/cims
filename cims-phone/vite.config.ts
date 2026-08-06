@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
       port: 3002,
       proxy: {
         '/api': {
-          target: env.VITE_ADMIN_TARGET || 'http://127.0.0.1:4420',
+          target: env.VITE_ADMIN_TARGET || 'http://127.0.0.1:4421',
           changeOrigin: true,
           secure: false,
         },

@@ -14,7 +14,8 @@
           "deploy_value": "@CWRTC_IP@",
           "required": true,
           "restart": true,
-          "help": "cwrtc 가 설치된 노드의 실 IP. 브라우저 DTLS-SRTP 미디어와 CSP SIP Contact 양쪽에 광고된다. loopback 이면 로컬 브라우저 시험만 가능."
+          "help": "cwrtc 가 설치된 노드의 실 IP. 브라우저 DTLS-SRTP 미디어와 CSP SIP Contact 양쪽에 광고된다. loopback 이면 로컬 브라우저 시험만 가능.",
+          "scope": "system"
         },
         {
           "key": "Setup.WsPort",

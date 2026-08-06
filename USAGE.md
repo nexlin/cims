@@ -24,7 +24,7 @@
   ├─ HTTP/WS :3000 ──→ csc_client (React Web UI)
   │                         │ /api/v1/* 프록시
   │                         ↓
-  │                    csc (Python REST API) :4420 HTTPS
+  │                    csc (Python REST API) :4421 HTTPS
   │                         │ MariaDB
   │
   ├─ WS :8080 ──────→ cwrtc (WebRTC 게이트웨이)
@@ -291,7 +291,7 @@ cd test_run && ../build/bin/cspsim -server_ip 192.168.199.129 \
 | 포트 | 프로토콜 | 컴포넌트 | 용도 |
 |---|---|---|---|
 | **3000** | HTTP/WS | csc_client | Web UI (개발 서버) |
-| **4420** | HTTPS | csc | REST API |
+| **4421** | HTTPS | csc | REST API |
 | **5060** | UDP/TCP | CSP | SIP 신호 (단말 접속) |
 | **5062** | UDP | cwrtc | cwrtc SIP (CSP 연결) |
 | **8080** | WS | cwrtc | WebRTC WebSocket |
@@ -381,7 +381,7 @@ npm run build
 
 CSC는 Python HTTP 서버(`csc/bin/csc_pihttp/`)로 구현된 REST API를 제공합니다.
 
-- **Base URL:** `https://192.168.199.129:4420`
+- **Base URL:** `https://192.168.199.129:4421`
 - **Content-Type:** `application/json` (MCPTT 서비스 API는 XML 별도 명시)
 - **인증:** JWT Bearer Token — `Authorization: Bearer <token>`
 
@@ -941,7 +941,7 @@ GET    /keymanagement/identity/v1/keyprov
 ### 포트 충돌
 
 ```bash
-ss -tlnp | grep -E "5060|8080|3000|4420|9000"
+ss -tlnp | grep -E "5060|8080|3000|4421|9000"
 ```
 
 ### CMP RTP 포트 오류 (`Failed to init resource`)

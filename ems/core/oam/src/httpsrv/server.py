@@ -1,7 +1,13 @@
 import asyncio, uvicorn, threading
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List, Tuple
+
+# asyncio.to_thread 가 쓰는 기본 executor. 핸들러가 블로킹 I/O(NFS·DB·UDP probe)를 스레드로
+# 오프로드하므로 파이썬 기본값 min(32, cpu+4) 로는 동시 요청 버스트에 고갈돼 head-of-line
+# 블로킹이 되돌아온다. CMP 노드 probe 는 stats._PROBE_POOL(별도) 이라 서로 굶기지 않는다.
+_IO_EXECUTOR_WORKERS = 48
 
 from httpsrv.controller import HttpServerController
 from httpsrv.handler import Server_Dynamic_Handler
@@ -16,6 +22,7 @@ class HttpServer:
         self._ssl_keyfile = ssl_keyfile
         self._ssl_certfile = ssl_certfile
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._io_executor: Optional[ThreadPoolExecutor] = None
         self._ready_event = threading.Event()
         self._shutdown_event = threading.Event()
         self._thread = threading.Thread(target=self._start_event_loop, daemon=True)
@@ -45,6 +52,9 @@ class HttpServer:
         self._shutdown_event.set()
 
     async def _bootstrap(self):
+        self._io_executor = ThreadPoolExecutor(
+            max_workers=_IO_EXECUTOR_WORKERS, thread_name_prefix='oam-io')
+        asyncio.get_running_loop().set_default_executor(self._io_executor)
         config = uvicorn.Config(
             app=self._app, host=self._host, port=self._port, log_level="info", loop="asyncio",
             ssl_keyfile=self._ssl_keyfile, ssl_certfile=self._ssl_certfile
@@ -60,6 +70,10 @@ class HttpServer:
     async def _cleanup_async(self):
         try:
             await self._server.shutdown()
+        except Exception:
+            pass
+        try:
+            self._io_executor.shutdown(wait=False)
         except Exception:
             pass
 

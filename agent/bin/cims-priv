@@ -51,6 +51,10 @@ valid_sysctl_key() {
         net.core.netdev_max_backlog|net.core.netdev_budget|net.core.netdev_budget_usecs|\
         net.core.rmem_max|net.core.wmem_max|net.core.rmem_default|net.core.wmem_default|\
         net.core.optmem_max|net.core.somaxconn|net.core.busy_poll|net.core.busy_read) return 0 ;;
+        # 기능 키 — VIP 를 설정값으로 bind 하는 모듈(csp LocalIp=VIP 등)이 VIP 취득
+        # 전에도 기동 가능해야 한다 (워크플로: start → VIP 적용). cims-ha apply 도
+        # 설정하지만 그건 VIP 적용 후라 순서가 늦다 — agent 가 기동 시 선행 보장.
+        net.ipv4.ip_nonlocal_bind) return 0 ;;
         *) err "sysctl key not in allowlist: $1"; return 1 ;;
     esac
 }

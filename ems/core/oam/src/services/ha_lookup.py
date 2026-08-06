@@ -17,6 +17,7 @@ from services import file_store
 _HA_DOMAIN = 'ha_groups'
 _DEPLOY_DOMAIN = 'deployments'
 _PKG_DOMAIN = 'packages'
+_AGENT_DOMAIN = 'agents'
 
 
 def _ha_dir(config):
@@ -40,7 +41,7 @@ def ha_group_by_id(config, gid: int) -> Optional[dict]:
 
 
 def save_group(config, group: dict) -> dict:
-    """그룹 레코드 atomic 저장 — config_sync 등 콘솔 메타 갱신용 (id 필수)."""
+    """그룹 레코드 atomic 저장 — 콘솔 메타 갱신용 (id 필수)."""
     file_store.save(_ha_dir(config), int(group['id']), group)
     return group
 
@@ -61,6 +62,66 @@ def _pkg_name(config, pid: Optional[int]) -> Optional[str]:
         return None
     p = file_store.by_id(_pkg_dir(config), pid)
     return p.get('name') if p else None
+
+
+def group_vip_set(group: dict) -> set:
+    """그룹의 VIP 집합 — vip_bindings[].ip ∪ legacy 단일 vip."""
+    vips = set()
+    for b in (group.get('vip_bindings') or []):
+        ip = (b or {}).get('ip')
+        if ip:
+            vips.add(str(ip))
+    if group.get('vip'):
+        vips.add(str(group['vip']))
+    return vips
+
+
+def vip_observation(config, group: dict, stale_sec: int = 90) -> dict:
+    """AS 그룹의 실측 ACTIVE 판정 — agent heartbeat(기본 2s 주기, OAM 불통 시
+    backoff 최대 60s)가 보고하는 interfaces[](secondary IP 포함 — VIP 추적용)에
+    그룹 VIP 가 붙은 멤버 찾기.
+    agent 수정·재배포 없이 동작 (데이터는 이미 heartbeat 로 도착, 계산만 추가).
+
+    반환 {'active_agent_id': int|None, 'observed': {agent_id: True|False|None}}:
+      observed  True=VIP 보유 / False=미보유 / None=판정 불가(heartbeat stale·VIP 미정의)
+      active_agent_id  비-stale 멤버 중 정확히 1명이 보유할 때만 확정 — 0명(이동 중)·
+        2명(절체 직후 관측 창)·전원 stale 이면 None. 애매하면 None: 자동 교정이
+        잘못된 방향으로 복사하지 않도록 보수적으로 판정한다.
+    """
+    from datetime import datetime
+    vips = group_vip_set(group)
+    agents_dir = file_store.domain_dir(config, _AGENT_DOMAIN)
+    now = datetime.now()
+    observed: dict = {}
+    for m in members_of(group):
+        aid = m['agent_id']
+        a = file_store.by_id(agents_dir, aid) or {}
+        stale = True
+        hb = a.get('last_heartbeat')
+        if hb:
+            try:
+                stale = (now - datetime.fromisoformat(str(hb))).total_seconds() > stale_sec
+            except (ValueError, TypeError):
+                stale = True
+        if stale or not vips:
+            observed[aid] = None
+            continue
+        observed[aid] = any(str(r.get('ip')) in vips
+                            for r in (a.get('interfaces') or []) if isinstance(r, dict))
+    holders = [aid for aid, v in observed.items() if v is True]
+    return {'active_agent_id': holders[0] if len(holders) == 1 else None,
+            'observed': observed}
+
+
+def auto_sync_enabled(group: dict, pkg_name: str) -> bool:
+    """그룹×패키지 자동 동기화 스위치 — AS 그룹만 의미 있음, 부재 시 기본 ON.
+    AA/standalone 은 동기화 개념 자체가 없다 (호출측이 mode 로 거른다)."""
+    if group.get('mode') != 'active_standby':
+        return False
+    au = group.get('auto_sync')
+    if isinstance(au, dict) and pkg_name in au:
+        return bool(au[pkg_name])
+    return True
 
 
 def deployments_in_group_for_package(config, gid: int, package_name: str) -> list[dict]:
@@ -93,6 +154,27 @@ def deployments_in_group_for_package(config, gid: int, package_name: str) -> lis
                 d['package_name'] = name
         if name == package_name:
             out.append(d)
+    return out
+
+
+def packages_in_group(config, group: dict) -> set:
+    """그룹 멤버들이 호스팅하는 패키지 이름 집합 — auto-sync 스위퍼의 순회 대상."""
+    member_ids = {m['agent_id'] for m in members_of(group)}
+    if not member_ids:
+        return set()
+    out: set = set()
+    pkg_cache: dict = {}
+    for d in file_store.load_all(_deploy_dir(config)):
+        if d.get('agent_id') not in member_ids:
+            continue
+        name = d.get('package_name')
+        if not name:
+            pid = d.get('package_id')
+            if pid not in pkg_cache:
+                pkg_cache[pid] = _pkg_name(config, pid)
+            name = pkg_cache[pid]
+        if name:
+            out.add(name)
     return out
 
 
@@ -289,13 +371,17 @@ def migrate_flat_collections(config: dict) -> int:
 
 def should_propagate(scope: Optional[str], mode: Optional[str],
                      override: Optional[bool] = None) -> bool:
-    """ha_group 멤버 fan-out 결정 — T4 scope 의미 재정의 반영.
+    """"이 컬렉션은 그룹 멤버 간 동일해야 하는가" 판정 — drift_sweeper 전용.
+
+    설정 저장의 자동 fan-out 은 폐지됨 (저장=단일 서버, 정합은
+    POST /deployments/{id}/sync 의 명시적 그룹 동기화로만). 이 함수는 드리프트
+    감시가 "동일해야 정상인" 컬렉션을 고를 때만 사용한다.
 
     Rules:
-      override True/False        → 그대로 (사용자 의도 우선)
-      scope = "service"/None     → True (그룹 공통)
+      override True/False        → 그대로 (호출자 의도 우선)
+      scope = "service"/None     → True (그룹 공통 — 불일치=드리프트)
       scope = "system"
-          mode = "active_standby"  → True  (VIP 모델 — 양 멤버 동일)
+          mode = "active_standby"  → True  (VIP 모델 — 양 멤버 동일 기대)
           mode = "all_active"      → False (멤버별 svc IP 정상)
           mode = "standalone"      → False (단일 멤버 — 의미 없음)
           mode = None              → False (그룹 없음)

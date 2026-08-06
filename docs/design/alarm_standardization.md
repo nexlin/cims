@@ -108,14 +108,21 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 ### 3.3 현재 CIMS 알람 → 표준 매핑 (확정)
 
-기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스 3개**로 정규화.
+기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스**로 정규화.
 어느 프로세스/리소스/호스트인지는 `source.mo_instance`, 심각도/임계/원인은 **rule 속성**(클래스 정체성 아님).
 
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
 | `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) · `<host>/<module>` | critical | oam / agent:<host> |
 | `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (향후 `cims/trunk/<id>`·peer) | critical | oam |
-| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` (향후 `<host>/cpu`·`mem`·`<iface>`) | warning(minor/major 승격) | oam / agent:<host> |
+| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | warning(minor/major 승격) | oam / agent:<host> |
+| `CIMS-CFG-001` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` | warning | agent:<host> |
+
+`CIMS-CFG-001` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
+agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.
+`ha_flap`(QOS-001 rule) 은 agent 가 cims-notify 로그에서 집계한 `metric.ha_transitions`
+(최근 10분 keepalived 전이 수, 기본 임계 6회)로 VIP flap 을 노출한다 — 전이 개별 건은
+§3.6 대로 이벤트(로그)일 뿐이며, 알람은 빈도 임계 초과라는 *조건*이다.
 
 > **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `csp_down`+`cmp_down`+`module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`threshold_crossed` / `db_down`→`connection_lost`. 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
 > 같은 클래스라도 rule 별로 probableCause/severity 가 다를 수 있음(disk→storageCapacityProblem/warning, rtp→resourceAtOrNearingCapacity/warning, 단계별 minor→major).
@@ -139,6 +146,24 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - 활성 알람 식별 = `(code, mo_instance)` (동일 객체의 동일 알람은 하나만 active).
 - `alarm_id` = `f"{code}@{mo_instance}@{open_epoch}"` — open 시 생성, close/ack 가 동일 alarm_id 참조. 재발(clear 후 재open)은 새 alarm_id.
 - 현재 `_alert_open` 의 키(`type` / `type:host:module`)가 이미 `(code, mo_instance)` 와 동형 → 이행 시 키를 `code@mo_instance` 로 정규화하고 open_epoch 만 부가하면 alarm_id 완성.
+
+**(d) 재통지 — clear 없는 연속 open**
+
+같은 활성키(`code@mo_instance`, 구 레코드는 `type`)로 **close 없이 open 이 다시 들어오면
+같은 알람의 재통지**다. 새 occurrence 가 아니며 새 행·새 alarm_id 를 만들지 않는다 —
+`(c)` 의 "재발 = clear 후 재open" 정의의 대우(對偶)다.
+
+- **판독측**(콘솔 `AlertsPage.pairEvents`): 미해소 open 이 이미 있으면 기존 행을 갱신하고
+  `occurrences` 를 증가시킨다(발생시각은 최초 유지, `last_open_ts` 로 최근 수신 시각 기록,
+  화면에 `×N` 배지). 연속 open 마다 행을 새로 만들면 **뒤따르는 close 1건이 마지막 행만
+  닫고 앞선 행은 영구 미해소로 남아 활성 알람에 유령이 생긴다.**
+- **발행측**: 열림상태를 잃은 채(프로세스 교체·복원 실패) 재발행하지 않도록, 발행 주체는
+  in-memory 상태가 비면 alert_log 에서 재도출한 뒤 판정한다
+  (`drift_sweeper._reseed_if_empty`, `alert_log.compute_open_state`).
+- **판정 불가의 종결**: 관측이 연속 실패해 open/close 어느 쪽도 판정할 수 없으면 알람이
+  영원히 닫히지 않는다. 발행 주체는 연속 실패 임계(drift 스위퍼 3회)에서 "판정 불가" 사유로
+  close 를 발행한다. 반대로 **관측 대상 자체가 0건이면 아무 판정도 하지 않는다** — 절체 직후
+  standby 처럼 세상이 안 보이는 상태에서 열린 알람을 일괄 오종결하는 것을 막는다.
 
 ### 3.5 원칙 — 알람 type 은 "조건 클래스", 객체/리소스/임계는 그 밖 (★ 핵심)
 

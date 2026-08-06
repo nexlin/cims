@@ -494,7 +494,7 @@ echo $?    # 0=PASS, 1=FAIL
 
 ### 운영 환경 verify (`--target prod`)
 
-기본 `--target verify` (csc=4445, console=8081) 외에 운영 배포본 (csc=4420, console=80) 도 동일 native step 으로 검증 가능. step_09 overlay / step_12~15 LISTEN / S6-ENTRY-CHECK / SCN-DB-SYNC admin login 모두 `target` 따라 분기. csp/cmp 포트는 환경 동일 (5060/9000/udp).
+기본 `--target verify` (csc=4445, console=8081) 외에 운영 배포본 (csc=4421, console=80) 도 동일 native step 으로 검증 가능. step_09 overlay / step_12~15 LISTEN / S6-ENTRY-CHECK / SCN-DB-SYNC admin login 모두 `target` 따라 분기. csp/cmp 포트는 환경 동일 (5060/9000/udp).
 
 ```bash
 ./cims-verify run --preset post-deploy --target prod

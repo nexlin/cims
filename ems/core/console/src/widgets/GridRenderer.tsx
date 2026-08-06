@@ -1,12 +1,16 @@
-// 레이아웃 렌더러 — PageLayout 의 위젯 배치를 12-col grid 로 그린다.
-// 위젯은 자체 chrome(패널/헤더)을 렌더 — 렌더러는 배치(span)만 담당.
+// 레이아웃 렌더러 — PageLayout 의 위젯 배치를 그린다. 두 배치 모드를 하위호환으로 지원:
+//  · 2D grid (placement 에 x/y): 12칸×N행 셀 그리드에 grid-column/grid-row 로 절대 배치.
+//  · legacy flow (x/y 없음): 12-col flow(합>12 wrap) — 기존 저장본/미편집 seed 가 그대로 렌더.
+// 위젯은 자체 chrome(패널/헤더)을 렌더 — 렌더러는 배치(span·좌표)만 담당.
 // registry 에 없는 위젯 id → fallback 카드(graceful, 레이아웃 안 깨짐).
 
+import type { CSSProperties } from 'react'
+import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
 import type { PageLayout } from './types'
+import { isGridLayout, gridBox, GRID_COLS, ROW_H_VH, GRID_GAP } from './gridLayout'
 
-// 위젯 높이 해석: 0/없음 = 자동, 1~100 = 화면 세로 비율(vh), >100 = 레거시 픽셀(하위호환).
-// 픽셀 절대값 대신 화면 세로 기준 비율로 지정 — 해상도에 따라 비례.
+// legacy 높이 해석: 0/없음 = 자동, 1~100 = 화면 세로 비율(vh), >100 = 레거시 픽셀(하위호환).
 export function widgetHeightCss(h?: number): string | undefined {
   if (!h) return undefined
   return h > 100 ? `${h}px` : `${h}vh`
@@ -21,19 +25,62 @@ function UnknownWidget({ id }: { id: string }) {
 }
 
 export function GridRenderer({ layout }: { layout: PageLayout }) {
+  return isGridLayout(layout.widgets)
+    ? <GridCanvas layout={layout} />
+    : <FlowGrid layout={layout} />
+}
+
+// ── 2D grid 렌더 ─────────────────────────────────────────────────────────
+// DOM 은 (y,x) 정렬로 렌더 — 명시 배치라 데스크톱은 순서 무관, 단일열 폴백(index.css @media)이
+// 올바른 시각 순서로 쌓이도록. --h-rows 는 단일열 폴백에서 min-height 계산에 쓰인다.
+function GridCanvas({ layout }: { layout: PageLayout }) {
+  const gap = layout.gap ?? GRID_GAP
+  const items = layout.widgets
+    .map((p, i) => ({ p, i, b: gridBox(p) }))
+    .sort((a, b) => (a.b.y - b.b.y) || (a.b.x - b.b.x))
+  // 트랙 gap 은 0 — 칸 사이 간격은 카드 margin(--card-gap)으로 처리해 칸수와 간격을 분리(48칸에서도 안전).
+  return (
+    <div className="grid-canvas"
+         style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
+                  gridAutoRows: `${ROW_H_VH}vh`, gap: 0, alignItems: 'stretch',
+                  ['--card-gap']: `${gap}px` } as CSSProperties}>
+      {items.map(({ p, i, b }) => {
+        const def = getWidget(p.widgetId)
+        const Comp = def?.component
+        const style: CSSProperties = {
+          gridColumn: `${b.x + 1} / span ${b.w}`,
+          gridRow: `${b.y + 1} / span ${b.h}`,
+          minWidth: 0,
+        }
+        ;(style as Record<string, string | number>)['--h-rows'] = b.h
+        return (
+          <div key={`${p.widgetId}-${i}`} className="widget-fixed widget-api-host" style={style}>
+            <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
+            {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── legacy flow 렌더 (현행 유지) ─────────────────────────────────────────
+function FlowGrid({ layout }: { layout: PageLayout }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: 12, alignItems: 'start' }}>
       {layout.widgets.map((p, i) => {
         const def = getWidget(p.widgetId)
         const span = Math.min(Math.max(p.w ?? def?.defaultSize?.w ?? 12, 1), 12)
         const Comp = def?.component
-        // h(px) 지정 시 높이 '고정'(maxHeight 가 아니라 height) + 래퍼를 flex 로 만들어
-        // 내부 .panel(flex:1)이 그 높이를 채우게 함. .widget-fixed > .panel 이 내부 스크롤 부여.
+        // h 지정 시 높이 '고정'(height) + 래퍼를 flex 로 만들어 내부 .panel(flex:1)이 채우게 함.
+        // .widget-fixed > .panel 이 내부 스크롤 부여.
         const fixed = !!p.h
         const hStyle = fixed ? { height: widgetHeightCss(p.h), display: 'flex' as const } : {}
         return (
-          <div key={`${p.widgetId}-${i}`} className={fixed ? 'widget-fixed' : undefined}
+          <div key={`${p.widgetId}-${i}`}
+               className={`${fixed ? 'widget-fixed ' : ''}widget-api-host`}
                style={{ gridColumn: `span ${span}`, minWidth: 0, ...hStyle }}>
+            <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
         )

@@ -5,6 +5,15 @@ bin/csc_pihttp/logs/
 
 # Python cache
 **/__pycache__/
+
+# 자동 배포 — 실사이트 인벤토리/블루프린트 (SSH·sudo 비밀번호 포함). 절대 커밋 금지.
+provision-site/
+
+# OAM 런타임 산출물 — 레포에서 oam_app.py 를 직접 실행하면 생긴다.
+# cert/ 에 self-signed TLS **개인키**가 들어간다 (_resolve_oam_cert 가 CimsRuntimeDir 과
+# 무관하게 ems/runtime/cert 에 생성). 절대 커밋 금지.
+ems/runtime/
+
 **/*.pyc
 **/*.pyo
 
@@ -93,3 +102,8 @@ ems/core/oam/packages/
 
 # 콘솔 svc 팩 node_modules 심링크(빌드시 cims.sh 가 생성, core 공유)
 ems/service/console/node_modules
+
+# HA 절체 조사 리포트·설계 검토 — 로컬 전용 (커밋 금지)
+/HA_report*.md
+/HA_design_recommand*.md
+pw.md

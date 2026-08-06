@@ -1,8 +1,8 @@
-# Agent API (Agent ↔ CSC)
+# Agent API (Agent ↔ OAM)
 
-Agent 데몬이 CSC 와 통신하는 프로토콜. **Agent 가 CSC 에 요청하는** 측면만 여기서 다룹니다. CSC 가 Agent 에 요청하는 Collection 프록시는 `collection_api.md` 참조.
+Agent 데몬이 OAM 과 통신하는 프로토콜. **Agent 가 OAM 에 요청하는** 측면만 여기서 다룹니다. OAM 이 Agent 에 요청하는 Collection 프록시는 `collection_api.md` 참조.
 
-**Base URL**: `https://<CSC>:4420/api/agent`
+**Base URL**: `https://<OAM>:4419/api/agent`
 **인증**:
 - `/enroll` 은 `enrollment_token` (1회용, body 에 전달)
 - 나머지는 `X-Agent-Token` 헤더 (enroll 응답의 `session_token`)

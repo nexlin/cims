@@ -1,81 +1,78 @@
 #!/usr/bin/env bash
-# agent/bin/cims-health — generic listen probe (keepalived vrrp_script 가 호출)
+# agent/bin/cims-health — keepalived vrrp_script track_script (verdict reader, 단일 모델)
 #
 # 사용법:
 #   cims-health <svc>
-#     <svc> = csc | csp | psp | ...   (ha.json services.<svc> 에 등록된 slug)
+#     <svc> = ha.json services.<svc> 에 등록된 slug (그룹명)
 #
-# 동작:
-#   ha.json 의 services.<svc>.{port, proto, bind_ip, tracked_modules} 를 lookup 후
-#   1) `ss -ln{t,u}` 로 binding 확인 (listen 중이면 PASS)
-#   2) tracked_modules 가 지정되면 `pgrep -x <mod>` 도 모두 PASS 해야 rc=0
-#   둘 다 통과해야 rc=0, 하나라도 실패면 rc=1.
+# 동작 (ha_service_model.md §9 — verdict reader):
+#   track_script 는 판정하지 않는다. agent 의 Recovery Supervisor 가 계산해
+#   <cims_home>/run/ha/verdict/<svc>.json 에 쓴 verdict(vrrp_eligible)만 판독해 rc 0/1
+#   을 낸다. raw health 폴백(프로세스/포트/HTTP/DB 검사)은 없다 — 남의 상태를 넘겨짚지
+#   않는다(장애 감지·로컬 복구·좀비 판정은 전부 Supervisor 소관).
 #
-# 옛 check_{csc,csp,psp}.sh (각 서비스별 분리) 의 대체.
+#   1) run/ha/disabled 마커 존재(비상 밸브 CIMS_HA_DISABLE) → 무조건 rc0(PASS).
+#      HA 판정을 얼려 현 VIP 위치를 고정한다(노드 사망=VRRP advert 소실만 절체).
+#   2) verdict 없음/boot_id 불일치 → rc1 (not eligible, fail-safe).
+#   3) stale: role=MASTER 는 짧은 grace(6s), 그 외(BACKUP/UNKNOWN) 무유예 → rc1.
+#   4) verdict.vrrp_eligible 그대로 반환.
+#   실패 시 rc=1 → keepalived FAULT → VIP 이양 → 피어가 승격.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-HA_JSON="$(cd "$SCRIPT_DIR/../keepalived" && pwd)/ha.json"
+# ha.json lookup — 스테이징 레이아웃(/etc/keepalived/bin/ → ../ha.json, cims-ha apply
+# 가 함께 복사) 우선, 없으면 개발/번들 레이아웃(agent/bin/ → ../keepalived/ha.json).
+if [[ -f "$SCRIPT_DIR/../ha.json" ]]; then
+    HA_JSON="$(cd "$SCRIPT_DIR/.." && pwd)/ha.json"
+else
+    HA_JSON="$(cd "$SCRIPT_DIR/../keepalived" 2>/dev/null && pwd)/ha.json"
+fi
 
 SVC="${1:-}"
 [[ -z "$SVC" ]] && { echo "usage: cims-health <svc>" >&2; exit 2; }
 
-# ha.json 에서 port / proto / bind_ip / tracked_modules lookup. 미존재 시 default.
-# 출력 형식: PORT|PROTO|BIND_IP|MOD1,MOD2,...  (bind_ip 빈값 케이스에서 split 충돌 회피)
-IFS='|' read -r PORT PROTO BIND_IP TRACKED < <(python3 - "$HA_JSON" "$SVC" <<'PY'
-import json, sys, os
-ha_json, svc = sys.argv[1], sys.argv[2]
-defaults = {"csc": (4420, "tcp", ""),
-            "csp": (5060, "udp", ""),
-            "psp": (5060, "udp", ""),
-            "cmdp": (9100, "udp", "")}
-port, proto, bind_ip = defaults.get(svc, (0, "udp", ""))
-tracked = []
-if os.path.isfile(ha_json):
+# CIMS_HOME 은 ha.json 에서 해석 — root(keepalived) 가 agent 의 run/ha 를 읽을 절대경로.
+CIMS_HOME=$(python3 -c "import json;print(json.load(open('$HA_JSON')).get('cims_home','/opt/cims'))" 2>/dev/null || echo /opt/cims)
+RUN_HA="$CIMS_HOME/run/ha"
+
+# 1) 비상 밸브 — run/ha/disabled 마커가 있으면 판정을 얼리고 무조건 PASS.
+if [[ -f "$RUN_HA/disabled" ]]; then
+    echo "cims-health: $SVC HA disabled(비상 밸브) — verdict 무시, PASS(현 VIP 고정)" >&2
+    exit 0
+fi
+
+# 2~4) verdict reader
+python3 - "$RUN_HA" "$SVC" <<'PY'
+import json, sys, time
+run_ha, svc = sys.argv[1], sys.argv[2]
+def rd(p):
     try:
-        cfg = json.load(open(ha_json))
-        s = (cfg.get("services") or {}).get(svc) or {}
-        port = s.get("port", port)
-        proto = s.get("proto", proto)
-        bind_ip = s.get("bind_ip", bind_ip)
-        fo = s.get("failover_options") or {}
-        tracked = [str(m).strip() for m in (fo.get("tracked_modules") or []) if str(m).strip()]
+        return json.load(open(p))
     except Exception:
-        pass
-print(f"{port}|{proto}|{bind_ip}|{','.join(tracked)}")
+        return None
+try:
+    bid = open("/proc/sys/kernel/random/boot_id").read().strip()
+except Exception:
+    bid = ""
+MASTER_GRACE = 6                                    # verdict TTL 과 동일 — MASTER 만 짧은 유예
+v = rd(f"{run_ha}/verdict/{svc}.json")
+if not v:
+    sys.stderr.write(f"cims-health(verdict): {svc} verdict 없음 → not eligible\n"); sys.exit(1)
+if v.get("boot_id") != bid:
+    sys.stderr.write(f"cims-health(verdict): {svc} boot_id mismatch → not eligible\n"); sys.exit(1)
+# 역할 — role 파일 boot_id 일치 시에만 신뢰, 아니면 UNKNOWN(무유예 fail-safe)
+rf = rd(f"{run_ha}/role/{svc}.json") or {}
+role = rf.get("role", "UNKNOWN") if rf.get("boot_id") == bid else "UNKNOWN"
+now, exp = time.time(), v.get("expires_at", 0)
+grace = MASTER_GRACE if role == "MASTER" else 0
+if now > exp + grace:
+    sys.stderr.write(f"cims-health(verdict): {svc} stale (role={role}, {int(now-exp)}s past) → not eligible\n")
+    sys.exit(1)
+if v.get("vrrp_eligible"):
+    sys.exit(0)
+sys.stderr.write(f"cims-health(verdict): {svc} eligible=false state={v.get('service_state')} "
+                 f"reasons={v.get('reason_codes')}\n")
+sys.exit(1)
 PY
-)
-
-if [[ -z "${PORT:-}" || "$PORT" == "0" ]]; then
-    echo "cims-health: port unknown for svc=$SVC" >&2
-    exit 2
-fi
-
-case "$PROTO" in
-    tcp) FLAG="-lnt" ;;
-    udp|*) FLAG="-lnu" ;;
-esac
-
-# 1) port listen 검사
-if [[ -n "$BIND_IP" ]]; then
-    ss $FLAG "src ${BIND_IP}:${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}' \
-        || { echo "cims-health: $SVC port ${BIND_IP}:${PORT}/${PROTO} not listening" >&2; exit 1; }
-else
-    ss $FLAG "sport = :${PORT}" 2>/dev/null | awk 'NR>1 {found=1} END {exit found?0:1}' \
-        || { echo "cims-health: $SVC port :${PORT}/${PROTO} not listening" >&2; exit 1; }
-fi
-
-# 2) tracked_modules pgrep 검사 (지정된 경우만)
-if [[ -n "${TRACKED:-}" ]]; then
-    IFS=',' read -r -a MODS <<< "$TRACKED"
-    for m in "${MODS[@]}"; do
-        [[ -z "$m" ]] && continue
-        if ! pgrep -x "$m" >/dev/null 2>&1; then
-            echo "cims-health: $SVC tracked module '$m' not running" >&2
-            exit 1
-        fi
-    done
-fi
-
-exit 0
+exit $?

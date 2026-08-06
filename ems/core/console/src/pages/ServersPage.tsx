@@ -5,14 +5,15 @@ import {
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
 } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type VipBinding,
-         type FailoverOptions, FAILOVER_DEFAULTS } from '../api/ha_groups'
+         type FailoverOptions, FAILOVER_DEFAULTS,
+         type ModuleSpec, MODULE_SPEC_DEFAULT, type SafetyClass } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { MountPanel } from './ha/MountPanel'
 import { NetTuningPanel } from './ha/NetTuningPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
-import { agentStatusColor, depStatusColor, fmtRelTime } from './deploy/deployHelpers'
+import { agentStatusColor, depStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
 import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
 import HealthCheckModal from '../components/HealthCheckModal'
@@ -64,6 +65,15 @@ export default function ServersPage() {
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [haGroups, setHaGroups]       = useState<HaGroup[]>([])
   const [loading, setLoading]         = useState(true)
+  // 패키지 목록 "도착함" 래치 — 설정 탭 key 의 remount 트리거용. 최초 로드 시
+  // 패키지가 도착하면 1회 remount(스냅샷 재캡처)가 의도인데, 원시 packages.length>0
+  // 를 key 에 그대로 쓰면 폴링 응답이 일시적으로 비는 순간 true→false→true 로
+  // 뒤집혀 편집 중인 설정 화면 전체가 주기적으로 remount 된다 (스크롤 리셋 +
+  // 컬렉션 추가행 닫힘). 한 번 true 가 되면 되돌리지 않는다.
+  const [pkgsReady, setPkgsReady]     = useState(false)
+  useEffect(() => {
+    if (packages.length > 0) setPkgsReady(true)
+  }, [packages])
   const [selection, setSelection]     = useState<Selection>(initialSelection)
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
@@ -98,7 +108,7 @@ export default function ServersPage() {
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {
-    const iv = setInterval(() => void load(), 10_000)
+    const iv = setInterval(() => void load(), 2_000)   // 실측 상태를 빠르게 반영 (heartbeat 주기와 동일)
     return () => clearInterval(iv)
   }, [load])
 
@@ -376,7 +386,7 @@ export default function ServersPage() {
         }}>
           {selectedAgent ? (
             pageTab === 'config' ? (
-              <AgentConfigTab key={`${selectedAgent.id}:${packages.length > 0}`}
+              <AgentConfigTab key={`${selectedAgent.id}:${pkgsReady}`}
                 agent={selectedAgent}
                 deployments={depsByAgent.get(selectedAgent.id) || []}
                 onDone={load} />
@@ -403,17 +413,24 @@ export default function ServersPage() {
             )
           ) : selectedGroup ? (
             pageTab === 'config' ? (
-              // R2: 그룹 설정 편집 폐지 — 멤버별 설정을 나란히 비교하는 읽기 전용 뷰.
-              // 편집은 멤버 서버 선택 → 패키지 설정 탭 (필드별 🔗 동기화).
-              <GroupConfigCompareView key={`${selectedGroup.id}:${packages.length > 0}`}
-                group={selectedGroup}
-                members={selectedGroup.members.map(m => ({
-                  id: m.agent_id,
-                  name: m.agent_name || agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`,
-                }))}
-                deployments={deployments}
-                packages={packages}
-                onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
+              // 그룹 = 모듈 운영 명세(감시·절체 모드) + 멤버별 앱 설정 비교/동기화.
+              // 앱 설정 편집은 멤버 서버 선택 → 패키지 설정 탭 (항상 그 서버에만 저장).
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div style={{ padding: '12px 12px 0' }}>
+                  <ModuleSpecSection group={selectedGroup} deployments={deployments} onReload={load} />
+                </div>
+                <div style={{ flex: 1, minHeight: 0 }}>
+                  <GroupConfigCompareView key={`${selectedGroup.id}:${pkgsReady}`}
+                    group={selectedGroup}
+                    members={selectedGroup.members.map(m => ({
+                      id: m.agent_id,
+                      name: m.agent_name || agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`,
+                    }))}
+                    deployments={deployments}
+                    packages={packages}
+                    onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
+                </div>
+              </div>
             ) : pageTab === 'install' ? (
               <GroupInstallOverview group={selectedGroup} agents={agents}
                 depsByAgent={depsByAgent}
@@ -423,7 +440,8 @@ export default function ServersPage() {
                 <GroupControlMatrix group={selectedGroup} agents={agents}
                   depsByAgent={depsByAgent}
                   onJob={queueJob}
-                  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })} />
+                  onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
+                  onReload={load} />
               </fieldset>
             ) : (
               <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
@@ -952,22 +970,30 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                               }}>{isMasterSel ? 'M' : 'B'}</span>
                       </td>
                       <td>
-                        {/* A/S = 실제 VIP 보유 (관측값) — [🔄 실측] 으로 health-check 후 채워짐. */}
+                        {/* A/S = 실제 VIP 보유. 기본은 heartbeat 관측(≤30s 지연, R4) —
+                            [🔄 실측] 은 sync health-check 로 즉시 재확인 (관측 override). */}
                         {(() => {
                           const o = vipObs[a.id]
                           if (o === 'active') return (
-                            <span title="VIP 실제 보유 — Active"
+                            <span title="VIP 실제 보유 — Active (실측)"
                                   style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
                           if (o === 'standby') return (
-                            <span title="VIP 미보유 — Standby"
+                            <span title="VIP 미보유 — Standby (실측)"
                                   style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
                           if (o === 'fail') return (
                             <span title="점검 실패 — offline 또는 health-check 오류"
                                   style={{ fontSize: 11, color: '#c0392b' }}>✕</span>)
                           if (vipChecking) return (
                             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>…</span>)
+                          const hb = group.members.find(gm => gm.agent_id === a.id)?.vip_observed
+                          if (hb === true) return (
+                            <span title="VIP 실제 보유 — Active (heartbeat 관측, ≤30s 지연)"
+                                  style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
+                          if (hb === false) return (
+                            <span title="VIP 미보유 — Standby (heartbeat 관측, ≤30s 지연)"
+                                  style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
                           return (
-                            <span title="미점검 — 상단 [🔄 실측] 버튼으로 확인"
+                            <span title="판정 불가 (heartbeat stale·VIP 미설정) — [🔄 실측] 으로 확인"
                                   style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>)
                         })()}
                       </td>
@@ -1100,10 +1126,9 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
   )
 }
 
-// AS 절체 조건 — keepalived advert_int / vrrp_script health / preempt / track_interface / tracked_modules.
-// 모든 default = 현재 hardcoded 와 동일 (호환성 보장).
-const TRACKABLE_MODULE_CANDIDATES = ['csp', 'cmp', 'csc', 'psp', 'isp', 'imp', 'pmp']
-
+// AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
+// preempt / track_interface / restart_limit. 모듈별 값(프로세스 감시·절체 모드)은
+// 패키지 설정의 모듈 운영 명세(ModuleSpecSection)로 이관됨.
 function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
   value: FailoverOptions
   onChange: (v: FailoverOptions) => void
@@ -1116,11 +1141,9 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
     onChange({ ...value, [k]: v })
   const setHealth = (k: keyof FailoverOptions['health'], v: number) =>
     onChange({ ...value, health: { ...value.health, [k]: v } })
-  const toggleMod = (mod: string) => {
-    const cur = value.tracked_modules || []
-    const next = cur.includes(mod) ? cur.filter(x => x !== mod) : [...cur, mod]
-    set('tracked_modules', next)
-  }
+  const rl = value.restart_limit || { max_fails: 3, window_sec: 300 }
+  const setRestart = (k: 'max_fails' | 'window_sec', v: number) =>
+    set('restart_limit', { ...rl, [k]: v })
   return (
     <div style={{ marginTop: 0, border: '1px solid #e0e0e0', borderRadius: 4 }}>
       <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
@@ -1191,26 +1214,38 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
             </span>
           </div>
 
-          <div>
-            <label style={{ width: 150, color: 'var(--text-muted)', display: 'inline-block' }}>
-              프로세스 감시
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label style={{ width: 150, color: 'var(--text-muted)' }}
+                   title="MASTER 승격 후 이 시간 동안 헬스 실패를 유예 — cold 모듈 기동 시간 흡수 (승격 직후 재장애 방지)">
+              승격 유예 (초)
             </label>
-            <span style={{ color: 'var(--text-muted)' }}>
-              포트 listen 외에 해당 프로세스 실행 여부도 점검 (pgrep -x). 비워두면 포트만 점검.
-            </span>
-            <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 8, paddingLeft: 150 }}>
-              {TRACKABLE_MODULE_CANDIDATES.map(mod => (
-                <label key={mod} style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
-                                          padding: '2px 8px', border: '1px solid var(--border)', borderRadius: 3,
-                                          background: (value.tracked_modules || []).includes(mod) ? '#e3f2fd' : '#fff',
-                                          cursor: 'pointer' }}>
-                  <input type="checkbox"
-                         checked={(value.tracked_modules || []).includes(mod)}
-                         onChange={() => toggleMod(mod)} />
-                  {mod}
-                </label>
-              ))}
-            </div>
+            <input type="number" min={0} max={600}
+                   value={value.health.grace_sec ?? 30}
+                   onChange={e => setHealth('grace_sec', Number(e.target.value) || 0)}
+                   className="form-input" style={{ width: 80 }} />
+            <span style={{ color: 'var(--text-muted)' }}>기본 30초 (0=유예 없음)</span>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <label style={{ width: 150, color: 'var(--text-muted)' }}
+                   title={
+                     '모듈 장애 시 watchdog 이 로컬 재기동을 먼저 시도하고, 윈도우 내 연속 N회 실패하면 ' +
+                     '그 노드를 포기하고 절체(VIP 이양)한다. 일시적 crash 1회로 절체하지 않도록 하는 방어선.\n' +
+                     '값이 클수록 flap 은 줄지만 진짜 장애의 절체가 늦어진다 (절체 지연 ≈ N × 재기동 backoff).'
+                   }>
+              재기동 임계
+            </label>
+            <span style={{ color: 'var(--text-muted)' }}>연속</span>
+            <input type="number" min={1} max={20}
+                   value={rl.max_fails}
+                   onChange={e => setRestart('max_fails', Number(e.target.value) || 3)}
+                   className="form-input" style={{ width: 60 }} />
+            <span style={{ color: 'var(--text-muted)' }}>회 실패 (윈도우</span>
+            <input type="number" min={10} max={3600}
+                   value={rl.window_sec}
+                   onChange={e => setRestart('window_sec', Number(e.target.value) || 300)}
+                   className="form-input" style={{ width: 80 }} />
+            <span style={{ color: 'var(--text-muted)' }}>초) → 절체. 기본 3회/300초</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -1245,6 +1280,157 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
 
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             오른쪽 위 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ──────────────────────────────────────────────────────────────
+//  모듈 운영 명세 (패키지 설정 — 그룹 선택) : 프로세스 감시 / 절체 모드 / 절체 관여
+//  앱 config.json 과 물리 분리된 group.module_specs → agent modules/<mod>/service.json.
+// ──────────────────────────────────────────────────────────────
+
+const HA_DAEMON_MODULES = ['csp', 'cmp', 'csc', 'psp', 'isp', 'imp', 'pmp']
+
+function _seedSpecs(group: HaGroup, modules: string[]): Record<string, ModuleSpec> {
+  const seed: Record<string, ModuleSpec> = {}
+  for (const m of modules) {
+    const s = group.module_specs?.[m]
+    seed[m] = {
+      supervision: { watchdog: s?.supervision?.watchdog ?? MODULE_SPEC_DEFAULT.supervision.watchdog },
+      ha: {
+        failover_mode:     s?.ha?.failover_mode ?? MODULE_SPEC_DEFAULT.ha.failover_mode,
+        failover_relevant: s?.ha?.failover_relevant ?? MODULE_SPEC_DEFAULT.ha.failover_relevant,
+      },
+      safety: { class: s?.safety?.class ?? 'unknown',
+                latch_clear_mode: s?.safety?.latch_clear_mode },
+      ...(s?.health ? { health: s.health } : {}),
+    }
+  }
+  return seed
+}
+
+function ModuleSpecSection({ group, deployments, onReload }: {
+  group: HaGroup
+  deployments: Deployment[]
+  onReload: () => Promise<void> | void
+}) {
+  const { show } = useToast()
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const modules = useMemo(() => {
+    const ids = new Set(group.members.map(m => m.agent_id))
+    const s = new Set<string>()
+    for (const d of deployments) {
+      if (!ids.has(d.agent_id) || d.status === 'removed') continue
+      const p = (d.process_name || '').toLowerCase()
+      if (HA_DAEMON_MODULES.includes(p)) s.add(p)
+    }
+    return [...s].sort()
+  }, [deployments, group.id, group.members])
+  const baseline = useMemo(() => _seedSpecs(group, modules),
+    [group.id, group.update_time, modules])
+  const [specs, setSpecs] = useState<Record<string, ModuleSpec>>(baseline)
+  useEffect(() => { setSpecs(baseline) }, [baseline])
+  const dirty = JSON.stringify(specs) !== JSON.stringify(baseline)
+
+  const setSup = (m: string, watchdog: boolean) =>
+    setSpecs(s => ({ ...s, [m]: { ...s[m], supervision: { watchdog } } }))
+  const setMode = (m: string, mode: 'cold' | 'hot') =>
+    setSpecs(s => ({ ...s, [m]: { ...s[m], ha: { ...s[m].ha, failover_mode: mode } } }))
+  const setRelevant = (m: string, v: boolean) =>
+    setSpecs(s => ({ ...s, [m]: { ...s[m], ha: { ...s[m].ha, failover_relevant: v } } }))
+  const setSafety = (m: string, cls: SafetyClass) =>
+    setSpecs(s => ({ ...s, [m]: { ...s[m], safety: { class: cls } } }))
+
+  async function save() {
+    if (!dirty) return
+    setSaving(true)
+    try {
+      await haGroupsApi.update(group.id, { module_specs: specs })
+      show('모듈 운영 명세 적용됨 (각 노드 service.json 반영)', 'ok')
+      await onReload()
+    } catch (e) {
+      show(`저장 실패: ${e instanceof Error ? e.message : e}`, 'err')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (modules.length === 0) return null
+  return (
+    <div style={{ marginBottom: 16, border: '1px solid #e0e0e0', borderRadius: 4 }}>
+      <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
+                    display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
+           title="모듈별 운영 설정 (앱 설정과 별개) — 각 노드 modules/<mod>/service.json 으로 반영">
+        <span onClick={() => setOpen(v => !v)} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
+        <span onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer' }}>모듈 운영 명세 (감시 · 절체 모드)</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, cursor: 'pointer' }}
+              onClick={() => setOpen(v => !v)}>
+          {modules.join(', ')}
+        </span>
+        <button className="btn btn--sm btn--primary" style={{ marginLeft: 'auto' }}
+                onClick={save} disabled={!dirty || saving}
+                title="모듈 운영 명세 변경을 각 멤버 노드에 반영 (service.json + keepalived 재렌더)">
+          ▶ 적용
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: 12, fontSize: 12, overflowX: 'auto' }}>
+          <table className="data-table" style={{ minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left' }}>모듈</th>
+                <th title="프로세스 감시(watchdog) — 죽으면 자동 재기동. 끄면 재기동 안 함(장애 시 즉시 절체 판정).">프로세스 감시</th>
+                <th title="Cold(기본): standby 정지 + 승격 시 기동 / Hot: 양쪽 상시 기동(VIP-only). AS 만 적용.">절체 모드</th>
+                <th title="이 모듈 실패가 절체 사유가 되는지. 끄면 이 모듈이 죽어도 절체하지 않음(부가 모듈).">절체 관여</th>
+                <th title="안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동 확인 필요). VIP 없이 DB/파일에 쓰는 모듈은 fencing/lease 전제.">안전 등급</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modules.map(m => {
+                const sp = specs[m] || MODULE_SPEC_DEFAULT
+                return (
+                  <tr key={m}>
+                    <td><b>{m}</b></td>
+                    <td style={{ textAlign: 'center' }}>
+                      <input type="checkbox" checked={sp.supervision.watchdog}
+                             onChange={e => setSup(m, e.target.checked)} />
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <select value={sp.ha.failover_mode}
+                              onChange={e => setMode(m, e.target.value as 'cold' | 'hot')}
+                              className="form-input" style={{ fontSize: 11, height: 22 }}
+                              disabled={group.mode !== 'active_standby'}>
+                        <option value="cold">Cold</option>
+                        <option value="hot">Hot</option>
+                      </select>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <input type="checkbox" checked={sp.ha.failover_relevant}
+                             onChange={e => setRelevant(m, e.target.checked)} />
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <select value={sp.safety?.class ?? 'unknown'}
+                              onChange={e => setSafety(m, e.target.value as SafetyClass)}
+                              className="form-input" style={{ fontSize: 11, height: 22 }}>
+                        <option value="stateless">stateless</option>
+                        <option value="read_only">read_only</option>
+                        <option value="shared_writer">shared_writer</option>
+                        <option value="unknown">unknown</option>
+                      </select>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+            이 설정은 앱 설정(config.json)과 별개 파일(service.json)로 각 노드에 저장되며 agent 가 감시·절체 판정에 사용합니다.
+            안전 등급 shared_writer/unknown 은 절체 후 자동 복귀(래치 해제)를 하지 않고 운영자 확인을 요구합니다.
           </div>
         </div>
       )}
@@ -1496,14 +1682,18 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
                 </td>
                 <td>
                   {deps.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>—</span> :
-                    deps.map(d => (
+                    deps.map(d => {
+                      // 실측 우선 — [패키지 제어] 탭과 같은 상태로 보이게(설치·제어 일치)
+                      const shown = depEffectiveStatus(d)
+                      return (
                       <span key={d.id} className="tag" style={{
-                        background: depStatusColor(d.status), color: '#fff',
+                        background: depStatusColor(shown), color: '#fff',
                         fontSize: 11, padding: '2px 8px', borderRadius: 3, marginRight: 6,
                       }}>
-                        {d.package_name} v{d.package_version} · {d.status}
+                        {d.package_name} v{d.package_version} · {shown}
                       </span>
-                    ))}
+                      )
+                    })}
                 </td>
               </tr>
             )
@@ -1598,7 +1788,10 @@ function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
   onRollback: (d: Deployment) => void
   onRemove: (d: Deployment) => void
 }) {
-  const sc = depStatusColor(d.status)
+  // 상태 배지·색은 실측 우선(depEffectiveStatus) — [패키지 제어] 탭과 동일 기준.
+  // 죽어 있으면 마지막 job 결과가 running 이어도 stopped 로 보인다(두 탭 일치).
+  const shown = depEffectiveStatus(d)
+  const sc = depStatusColor(shown)
   const online = agent.status === 'online'
   // pending = 생성만 됨 (파일 없음), stopped = 설치됐지만 실행 안됨
   const notInstalled = d.status === 'pending'
@@ -1622,7 +1815,7 @@ function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
       <td>
         <span className="tag" style={{
           background: sc, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-        }}>{d.status}</span>
+        }}>{shown}</span>
       </td>
       <td>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -1670,7 +1863,7 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
         {deployments.map(d => (
           <tr key={d.id}>
             <td style={{ padding: 0 }}>
-              <div style={{ width: 4, background: depStatusColor(d.status), height: 32 }} />
+              <div style={{ width: 4, background: depStatusColor(depEffectiveStatus(d)), height: 32 }} />
             </td>
             <td><b>{d.process_name || '—'}</b></td>
             <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -1680,15 +1873,28 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
               {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
             </td>
             <td>
-              <span className="tag" style={{
-                background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-              }}>{d.status}</span>
+              <DepStatusCell dep={d} />
             </td>
             <td><ProcessControlButtons dep={d} agent={a} onJob={onJob} /></td>
           </tr>
         ))}
       </tbody>
     </table>
+  )
+}
+
+// 실측 우선 유효 상태 — running/stopped 구간에서는 실측(live_state)이 정본.
+// 기록(status)은 운영자 지시 이력일 뿐, HA 절체(notify)가 로컬에서 모듈을 켜고
+// 끄면 현실과 어긋난다. pending/deploying/failed/removed 는 lifecycle 상태라 기록 유지.
+
+// 모듈 상태 셀 — 실측(depEffectiveStatus) 단일 표시. running/stopped 는 실제
+// 프로세스 상태 그 자체다 (metric 주기상 최대 30초 지연만 존재).
+function DepStatusCell({ dep: d }: { dep: Deployment }) {
+  const shown = depEffectiveStatus(d)
+  return (
+    <span className="tag" style={{
+      background: depStatusColor(shown), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
+    }}>{shown}</span>
   )
 }
 
@@ -1715,14 +1921,93 @@ function ProcessControlButtons({ dep: d, agent, onJob }: {
   )
 }
 
-// ── [패키지 제어] 탭 — 그룹 선택: 멤버 × 모듈 프로세스 상태/제어 매트릭스 ──
-function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember }: {
+// ── [패키지 제어] 탭 — 그룹 선택: 일괄 제어 바 + 멤버 × 모듈 프로세스 상태/제어 매트릭스 ──
+function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember, onReload }: {
   group: HaGroup
   agents: Agent[]
   depsByAgent: Map<number, Deployment[]>
   onJob: (d: Deployment, jt: JobType) => void
   onSelectMember: (aid: number) => void
+  onReload: () => Promise<void> | void
 }) {
+  const { show } = useToast()
+  const [busy, setBusy] = useState<string | null>(null)
+  const isAS = group.mode === 'active_standby'
+  const activeName = group.active_agent_id != null
+    ? agentDisplayName(agents.find(a => a.id === group.active_agent_id)?.name || `#${group.active_agent_id}`)
+    : null
+
+  async function batch(action: 'start' | 'stop' | 'restart') {
+    const label = action === 'start' ? '일괄 시작' : action === 'stop' ? '일괄 중지' : '일괄 재시작'
+    if (action === 'stop' && !window.confirm(
+        `[${group.name}] 그룹의 서비스를 전부 중지합니다.\nVIP(가상 IP)도 내려가 서비스가 완전히 중단됩니다. 계속할까요?`))
+      return
+    setBusy(action)
+    try {
+      const r = await haGroupsApi.control(group.id, action)
+      show(`${label} — job ${r.jobs}건 큐잉 (모듈: ${r.modules.join(', ') || '없음'})`, 'ok')
+      await onReload()
+    } catch (e) {
+      show(`${label} 실패: ${e instanceof Error ? e.message : e}`, 'err')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function doFailover() {
+    if (!window.confirm(
+        `[${group.name}] 수동 절체 — 현재 Active(${activeName || '?'}) 에서 Standby 로 서비스를 넘깁니다.\n` +
+        `절체 중 수 초의 순단이 발생할 수 있습니다. 계속할까요?`))
+      return
+    setBusy('failover')
+    try {
+      const r = await haGroupsApi.failover(group.id)
+      const to = agentDisplayName(agents.find(a => a.id === r.to_agent_id)?.name || `#${r.to_agent_id}`)
+      show(`수동 절체 큐잉 — → ${to} 로 스위치오버`, 'ok')
+      await onReload()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      show(`수동 절체 실패: ${msg}`, 'err')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 노드 유지보수(EXCLUDE_NODE) — 지정 멤버를 승격 대상에서 제외(on)/복귀(off).
+  async function doMaintenance(agentId: number, on: boolean) {
+    const nm = agentDisplayName(agents.find(a => a.id === agentId)?.name || `#${agentId}`)
+    if (!window.confirm(on
+        ? `[${nm}] 를 유지보수(EXCLUDE_NODE)로 전환합니다.\n이 노드는 승격 대상에서 제외되고 모듈이 정지됩니다. 상대 노드가 죽어도 이 노드로 절체되지 않습니다(다운 감수). 계속할까요?`
+        : `[${nm}] 유지보수를 해제합니다.\nrole 기반으로 모듈이 재기동되어 standby 로 재합류합니다. 계속할까요?`))
+      return
+    setBusy(`maint:${agentId}`)
+    try {
+      await haGroupsApi.maintenance(group.id, agentId, on)
+      show(on ? `${nm} 유지보수 진입 (승격 제외)` : `${nm} 유지보수 해제 (재합류)`, 'ok')
+      await onReload()
+    } catch (e) {
+      show(`유지보수 변경 실패: ${e instanceof Error ? e.message : e}`, 'err')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // 멤버 서버 셀에 붙는 유지보수 토글 (AS 만).
+  const maintCtl = (agentId: number) => isAS ? (
+    <div style={{ marginTop: 6, display: 'flex', gap: 4 }}>
+      <button className="btn btn--sm" style={{ fontSize: 11, padding: '1px 6px' }}
+              disabled={!!busy} onClick={() => doMaintenance(agentId, true)}
+              title="이 노드를 승격 대상에서 제외(유지보수). 모듈 정지 + 이 노드로 절체 안 됨.">
+        🔧 점검
+      </button>
+      <button className="btn btn--sm" style={{ fontSize: 11, padding: '1px 6px' }}
+              disabled={!!busy} onClick={() => doMaintenance(agentId, false)}
+              title="유지보수 해제 — role 기반 재기동으로 standby 재합류.">
+        복귀
+      </button>
+    </div>
+  ) : null
+
   return (
     <div style={{ padding: 20, overflow: 'auto' }}>
       <h4 style={{ marginTop: 0 }}>멤버별 프로세스 제어 — {group.name}</h4>
@@ -1730,6 +2015,48 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember 
         그룹 멤버 전체의 모듈 프로세스 상태를 한눈에 보고 시작/재시작/정지합니다.
         설치/재설치/롤백은 [패키지 설치] 탭에서 수행합니다.
       </p>
+      {/* 그룹 일괄 제어 바 — 서비스 의도 전환(무장/비무장) + 수동 절체 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                    padding: '10px 12px', marginBottom: 12, background: 'var(--bg-soft)',
+                    border: '1px solid #e0e0e0', borderRadius: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>그룹 일괄 제어</span>
+        <button className="btn btn--sm btn--primary" disabled={!!busy}
+                onClick={() => batch('start')}
+                title="그룹 서비스 시작 — 서비스 의도를 running 으로 두고 무장(VIP 활성). 기준 멤버가 Active 로 기동.">
+          ▶ 일괄 시작
+        </button>
+        <button className="btn btn--sm" disabled={!!busy}
+                onClick={() => batch('restart')}
+                title="그룹 전 멤버 재시작 — AS 는 standby 먼저, active 는 유예 하에 재시작(절체 없음, 순단 1회).">
+          ⟳ 일괄 재시작
+        </button>
+        <button className="btn btn--sm btn--danger" disabled={!!busy}
+                onClick={() => batch('stop')}
+                title="그룹 서비스 중지 — 의도를 stopped 로 두고 비무장(VIP 내려감) + 전 모듈 정지.">
+          ■ 일괄 중지
+        </button>
+        {isAS && (
+          <button className="btn btn--sm" disabled={!!busy || group.active_agent_id == null}
+                  style={{ marginLeft: 'auto' }}
+                  onClick={doFailover}
+                  title={group.active_agent_id == null
+                    ? 'Active 판정 불가 — 잠시 후 재시도'
+                    : '수동 절체 — 현재 Active 에서 Standby 로 서비스를 넘김(스위치오버).'}>
+            ⇄ 수동 절체{activeName ? ` (현재 ${activeName})` : ''}
+          </button>
+        )}
+      </div>
+      {group.failover_op && (
+        <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
+                      border: '1px solid ' + (group.failover_op.error ? '#e57373' : '#90caf9'),
+                      background: group.failover_op.error ? '#ffebee' : '#e3f2fd' }}>
+          <b>계획 절체 진행</b> — 상태 <code>{group.failover_op.state}</code>
+          {` (${agentDisplayName(agents.find(a => a.id === group.failover_op!.source_agent_id)?.name || '?')}`}
+          {` → ${agentDisplayName(agents.find(a => a.id === group.failover_op!.target_agent_id)?.name || '?')})`}
+          {group.failover_op.note && <span style={{ color: 'var(--text-muted)' }}> · {group.failover_op.note}</span>}
+          {group.failover_op.error && <span style={{ color: '#c62828' }}> · 오류: {group.failover_op.error}</span>}
+        </div>
+      )}
       <table className="data-table">
         <thead>
           <tr><th>서버</th><th>서버 상태</th><th>모듈 · 버전</th><th>모듈 상태</th><th style={{ width: 220 }}>제어</th></tr>
@@ -1743,6 +2070,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember 
                 <td style={{ cursor: 'pointer' }} onClick={() => onSelectMember(m.agent_id)}
                     title="클릭 시 해당 서버 선택">
                   <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
+                  <span onClick={e => e.stopPropagation()}>{maintCtl(m.agent_id)}</span>
                 </td>
                 <td>
                   <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
@@ -1766,6 +2094,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember 
                     <td rowSpan={deps.length} style={{ cursor: 'pointer', verticalAlign: 'top' }}
                         onClick={() => onSelectMember(m.agent_id)} title="클릭 시 해당 서버 선택">
                       <b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b>
+                      <span onClick={e => e.stopPropagation()}>{maintCtl(m.agent_id)}</span>
                     </td>
                     <td rowSpan={deps.length} style={{ verticalAlign: 'top' }}>
                       <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
@@ -1779,9 +2108,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember 
                   <span style={{ color: 'var(--text-muted)' }}>{d.package_name} v{d.package_version}</span>
                 </td>
                 <td>
-                  <span className="tag" style={{
-                    background: depStatusColor(d.status), color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-                  }}>{d.status}</span>
+                  <DepStatusCell dep={d} />
                 </td>
                 <td><ProcessControlButtons dep={d} agent={ag} onJob={onJob} /></td>
               </tr>

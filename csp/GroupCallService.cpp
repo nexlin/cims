@@ -1444,6 +1444,50 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
 }
 
 // BYE/Error -> Leave Group
+int CGroupCallService::TerminateGroupLocal( const std::string &strGroupId ) {
+    if ( strGroupId.empty() ) return 0;
+
+    std::vector<std::string> vecCallIds;
+    // 1) lock 안 — 이 그룹의 활성 멤버 호를 수집하고 로컬 맵에서 제거 (CMP/네트워크 호출 금지)
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        for ( auto it = m_mapCallSession.begin(); it != m_mapCallSession.end(); ) {
+            if ( it->second.strGroupId == strGroupId ) {
+                vecCallIds.push_back( it->first );
+                for ( auto uIt = m_mapUserCall.begin(); uIt != m_mapUserCall.end(); ++uIt ) {
+                    if ( uIt->second == it->first ) {
+                        m_mapUserCall.erase( uIt );
+                        break;
+                    }
+                }
+                it = m_mapCallSession.erase( it );
+            } else {
+                ++it;
+            }
+        }
+        m_mapGroupRtp.erase( strGroupId );
+        RemoveGroupSesId( strGroupId );
+        // CheckGroupIntegrity race 방지 grace 기록 (OnCallTerminated 와 동일)
+        m_mapGroupLastTerminate[strGroupId] = std::chrono::steady_clock::now();
+    }
+
+    if ( vecCallIds.empty() ) return 0;
+
+    // 2) lock 해제 후 BYE + B2BUA 레코드 정리. dead node → LeaveGroup/RemoveGroup(blocking) 생략.
+    CLog::Print( LOG_INFO, "TerminateGroupLocal: Group(%s) media node down — %zu member call(s) BYE (local only)",
+                 strGroupId.c_str(), vecCallIds.size() );
+    for ( const auto &strCallId : vecCallIds ) {
+        gclsUserAgent.StopCall( strCallId.c_str() );
+        gclsCallMap.Delete( strCallId.c_str(), false );  // 그룹호: RemoveSession 미사용(dead node)
+    }
+
+    // best-effort 이력/DB 마감 (dead node 무관 — 로컬/DB 만)
+    if ( gclsCallDir.IsEnabled() ) gclsCallDir.PttSessionEnd( strGroupId );
+    if ( gclsDbManager.IsConnected() ) gclsDbManager.EndGroupCallLog( strGroupId );
+
+    return (int)vecCallIds.size();
+}
+
 bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     std::string strGroupId, strMemberId, strSessionId;
     bool bStillActive = false;

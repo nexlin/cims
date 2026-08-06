@@ -24,13 +24,8 @@ from ...context import VerifyContext
 from ...common import csc_http
 
 
-_TARGET_CSC_PORTS = {"verify": 4445, "prod": 4420}
-
-
 def _deployed_csc_base(ctx: VerifyContext) -> str:
-    target = (ctx.opts or {}).get("target") or "verify"
-    port = _TARGET_CSC_PORTS.get(target, 4445)
-    return f"https://127.0.0.1:{port}"
+    return csc_http.deployed_csc_base((ctx.opts or {}).get("target") or "verify")
 
 
 @verify_item(

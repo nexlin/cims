@@ -18,6 +18,10 @@
  */
 #include "CallMap.h"
 
+#include <list>
+#include <set>
+#include <utility>
+
 #include "CmpClient.h"
 #include "Log.h"
 #include "MemoryDebug.h"
@@ -398,6 +402,38 @@ bool CCallMap::TeardownByRelaySessionId( const std::string &strSessionId ) {
     gclsUserAgent.StopCall( strCallId.c_str() );
     Delete( strCallId.c_str() );  // bStopPort=true → RemoveSession (이미 CMP 회수라 no-op 멱등)
     return true;
+}
+
+int CCallMap::TerminateByRelaySession( const std::string &strRelaySessionId ) {
+    if ( strRelaySessionId.empty() ) return 0;
+
+    // 1) 매칭 레코드 수집 (락 안, 네트워크 I/O 금지). B2BUA 양 leg 가 같은 relay session 을 공유하므로
+    //    매칭이 2건 나올 수 있다 — peer 를 함께 담아 dedup.
+    std::list<std::pair<std::string, std::string>> clsTargets;  // (callId, peerCallId)
+    m_clsMutex.acquire();
+    for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
+        if ( itMap->second.m_strRelaySessionId == strRelaySessionId ) {
+            clsTargets.push_back( std::make_pair( itMap->first, itMap->second.m_strPeerCallId ) );
+        }
+    }
+    m_clsMutex.release();
+
+    // 2) 락 해제 후 BYE + 로컬 정리. dead node → RemoveSession 생략(bStopPort=false).
+    int iCount = 0;
+    std::set<std::string> clsDone;
+    for ( const auto &tgt : clsTargets ) {
+        if ( clsDone.count( tgt.first ) ) continue;
+        clsDone.insert( tgt.first );
+        if ( !tgt.second.empty() ) clsDone.insert( tgt.second );
+        gclsUserAgent.StopCall( tgt.first.c_str() );  // BYE — psip 가 다이얼로그 재구성
+        if ( !tgt.second.empty() ) gclsUserAgent.StopCall( tgt.second.c_str() );
+        Delete( tgt.first.c_str(), false );  // 양 leg 레코드 삭제(peer 링크 추적) — dead node 이므로 relay 미회수
+        ++iCount;
+    }
+    if ( iCount > 0 )
+        CLog::Print( LOG_INFO, "TerminateByRelaySession: relay(%s) media node down — %d call(s) BYE (relay 회수 생략)",
+                     strRelaySessionId.c_str(), iCount );
+    return iCount;
 }
 
 /**

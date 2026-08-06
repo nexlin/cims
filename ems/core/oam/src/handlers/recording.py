@@ -1699,3 +1699,50 @@ async def _stream_whole_audio(base: str, rel_dir: str) -> HandlerResult:
 CIMS_RECORDING_HANDLER_LIST = [
     (_REC_BASE, handle_recordings, {}),
 ]
+
+
+# ── API 문서 (개발자 모드) ──────────────────────────────────────────────────
+#  이 모듈이 제공하는 엔드포인트의 자기기술. handlers/api_docs.py 가 수집한다.
+#  {id} 는 세션 디렉터리 경로 세그먼트(call_type/YYYY/MM/DD/HH/caller/session) 를 URL-encode 한 값.
+CIMS_RECORDING_API_DOCS = [
+    {'id': 'recording.list', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/recordings',
+     'summary': '녹취 세션 목록 (VoIP/PTT, 기간·발신자·그룹 필터)',
+     'params': [
+         {'name': 'call_type', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['voip', 'ptt'], 'desc': '통화 종류 (미지정 시 전체)'},
+         {'name': 'caller', 'in': 'query', 'type': 'string', 'required': False, 'desc': '발신 번호'},
+         {'name': 'group_id', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'PTT 그룹 ID'},
+         {'name': 'from_dt', 'in': 'query', 'type': 'string', 'required': False, 'desc': '시작 일시'},
+         {'name': 'to_dt', 'in': 'query', 'type': 'string', 'required': False, 'desc': '종료 일시'},
+         {'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '건수 (기본 200, 최대 1000)'},
+         {'name': 'offset', 'in': 'query', 'type': 'integer', 'required': False, 'desc': '오프셋 (기본 0)'},
+     ],
+     'response': '{total, recordings[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'recording.get', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/recordings/{id}',
+     'summary': '녹취 세션 1건 상세 (메타 + 세그먼트 요약)',
+     'params': [{'name': 'id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '세션 디렉터리 경로'}],
+     'response': '녹취 세션 객체', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'recording.delete', 'module': 'oam-svc', 'method': 'DELETE', 'path': '/api/v1/recordings/{id}',
+     'summary': '녹취 세션 삭제',
+     'params': [{'name': 'id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '세션 디렉터리 경로'}],
+     'response': '{id}', 'auth': 'Bearer JWT (manager)'},
+    {'id': 'recording.segments', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/recordings/{id}/segments',
+     'summary': '세션의 발언(세그먼트) 목록 — PTT floor 단위',
+     'params': [{'name': 'id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '세션 디렉터리 경로'}],
+     'response': '{id, segments[]}', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'recording.segment.audio', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/recordings/{id}/segments/{seq}/{media}',
+     'summary': '세그먼트 미디어 스트리밍 (변환 후 전송)',
+     'params': [
+         {'name': 'id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '세션 디렉터리 경로'},
+         {'name': 'seq', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '세그먼트 순번'},
+         {'name': 'media', 'in': 'path', 'type': 'string', 'required': True,
+          'enum': ['audio', 'video'], 'desc': '미디어 종류'},
+     ],
+     'response': '오디오/비디오 스트림 (JSON 아님)', 'auth': 'Bearer JWT (monitor)'},
+    {'id': 'recording.audio', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/recordings/{id}/audio',
+     'summary': '세션 전체 오디오 스트리밍 (세그먼트 병합)',
+     'params': [{'name': 'id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '세션 디렉터리 경로'}],
+     'response': '오디오 스트림 (JSON 아님)', 'auth': 'Bearer JWT (monitor)'},
+]
