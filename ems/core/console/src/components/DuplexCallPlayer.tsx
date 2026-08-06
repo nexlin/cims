@@ -174,7 +174,8 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         const dim = sel !== MIX && Number(sel) !== t.slot
         return (
           <div key={t.slot} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: '0 0 128px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+            {/* 표시는 이름(labelOf), 번호는 hover — 이력 화면 공통 규약 */}
+            <div title={spk} style={{ flex: '0 0 128px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flex: '0 0 auto' }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name(spk)}</span>
               <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 10 }}>슬롯 {t.slot}</span>
