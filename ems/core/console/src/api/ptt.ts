@@ -2,8 +2,14 @@ import { api } from './client'
 import type { FlowMessage } from './flow'
 
 export interface PttSession {
+  // 세션키 — 'S{yyyymmddHHMMSSuuuuuu}_{n}' (세션 디렉터리 이름). 구 녹취는 'YYYYMMDDHH'.
   dir: string
   session_id?: string
+  // 이 세션이 걸친 시간버킷들 — 통화가 시간을 넘기면 2개 이상 (행은 그래도 하나).
+  windows?: string[]
+  sesid?: string             // flow 로그와 같은 세션 식별자
+  call_id?: string
+  speakers?: string[]
   start_time: string
   end_time: string | null
   state: string
@@ -56,6 +62,51 @@ export interface PttSessionsResponse {
   group_id: string
   sessions: PttSession[]
 }
+
+// ── 세션 행 (평면 목록) ────────────────────────────────────────────
+// 기록 단위가 세션이므로 그룹·1:1·임시가 같은 행 모양을 갖는다. 그룹 축 값(그룹명·
+// mcptt_group_id)은 행에 실려 오고, 목록이 그룹을 따로 펼치지 않는다.
+export interface PttSessionRow extends PttSession {
+  group_key: string          // 녹취 저장 키 (= ptt/{key}) — 상세/녹취 조회에 쓴다
+  kind: PttSessionKind
+  group_name?: string
+  mcptt_group_id?: string
+  group_type?: string
+  people?: string[]          // 참여자 (발언 안 한 참가자 포함)
+  peers?: string[]           // 1:1·임시에서 개시자를 뺀 상대
+}
+
+export interface PttSessionsFlatResponse {
+  date: string
+  from: string
+  to: string
+  hour: string
+  state: string
+  sort: string
+  order: string
+  total: number
+  live_total: number         // 필터 적용 후 진행중 수 (state 필터 이전 값)
+  items: PttSessionRow[]
+  hours: Record<string, number>   // 시간대별 세션 수 (hour 필터 이전) — 히트맵용
+}
+
+export interface PttSessionQuery {
+  date?: string
+  from?: string
+  to?: string
+  days?: number
+  kind?: string              // group,private,adhoc (콤마)
+  group_key?: string         // 콤마 다중
+  person?: string
+  state?: 'live' | 'ended'
+  hour?: string
+  q?: string
+  sort?: 'start' | 'turns' | 'speech' | 'duration' | 'speakers'
+  order?: 'asc' | 'desc'
+  limit?: number
+  offset?: number
+}
+
 
 export interface PttSessionEventsResponse {
   session: Record<string, unknown>
@@ -115,6 +166,16 @@ export interface PttFloorResponse {
 export const pttApi = {
   summary(): Promise<PttSummaryResponse> {
     return api.get(`/ptt/history?summary=1`)
+  },
+
+  /** 세션 평면 목록 — /call/logs 와 같은 계약 (date/hour/q/limit/offset + hours).
+   *  진행중 세션은 state='live' 로 따로 받는다(페이징 없이 전량). */
+  flat(q: PttSessionQuery = {}): Promise<PttSessionsFlatResponse> {
+    const p = new URLSearchParams()
+    for (const [k, v] of Object.entries(q)) {
+      if (v !== undefined && v !== null && v !== '') p.set(k, String(v))
+    }
+    return api.get(`/ptt/sessions?${p.toString()}`)
   },
 
   sessions(groupId: string, opts?: { date?: string; days?: number }): Promise<PttSessionsResponse> {
