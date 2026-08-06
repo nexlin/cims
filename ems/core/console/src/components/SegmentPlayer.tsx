@@ -322,7 +322,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
             marginTop: 8, padding: '8px 12px', borderRadius: 6,
-            background: 'var(--bg-secondary, #f5f7fa)', fontSize: 13,
+            background: 'var(--surface-2)', fontSize: 13,
           }}>
             <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</span>
             <span>녹취를 변환하고 있습니다… 완료되면 자동으로 재생됩니다.</span>
@@ -345,7 +345,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '4px 20px', fontSize: 13,
-          background: 'var(--bg-secondary, #f5f7fa)', margin: '0 20px', borderRadius: 4,
+          background: 'var(--surface-2)', margin: '0 20px', borderRadius: 4,
         }}>
           <span style={{ fontFamily: 'monospace' }}>{wallTime}</span>
           <span style={{ fontWeight: 600 }}>
@@ -397,7 +397,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   ref={isActive ? activeRowRef : undefined}
                   style={{
                     cursor: 'pointer',
-                    background: isActive ? 'var(--bg-accent, #e8f0fe)' : undefined,
+                    background: isActive ? 'var(--primary-soft)' : undefined,
                     boxShadow: isActive ? 'inset 3px 0 0 var(--primary, #4f6ef7)' : undefined,
                     fontWeight: isActive ? 600 : undefined,
                     opacity: isChecked ? 1 : 0.45,

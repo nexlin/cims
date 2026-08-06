@@ -188,7 +188,7 @@ export default function PttGroupActivity({ storeKey }: {
               <div style={{ overflowX: 'auto' }}>
                 <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: 'var(--surface-alt, #f7f9fc)', textAlign: 'left' }}>
+                    <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
                       <th style={{ ...thStyle, width: 24, cursor: 'default' }}></th>
                       <th style={{ ...thStyle, cursor: 'default' }}>세션</th>
                       <th style={{ ...thStyle, cursor: 'default' }}>시각</th>

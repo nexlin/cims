@@ -268,15 +268,17 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
               title={`${fmtDayShort(d.day)}(${dayWeekday(d.day)}) · 발언 턴 ${d.turns} · 화자 ${d.speakers} · ${fmtSpeechMs(d.ms)}${d.active ? ' · 진행중' : ''}`}
               style={{
                 height: 48, borderRadius: 4,
-                background: d.hasData ? `rgba(37,99,235,${ratio || 0.12})` : 'var(--surface-alt, #f3f5f9)',
-                border: isSel ? '2px solid var(--primary, #2563eb)' : '1px solid var(--border)',
+                background: d.hasData ? `color-mix(in srgb, var(--primary) ${Math.round((ratio || 0.12) * 100)}%, var(--surface))` : 'var(--surface-2)',
+                border: isSel ? '2px solid var(--primary)' : '1px solid var(--border)',
                 cursor: 'pointer', opacity: d.hasData ? 1 : 0.65,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--text-muted)', position: 'relative', overflow: 'hidden',
               }}>
               <span style={{ fontSize: 11, fontWeight: 700 }}>{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 9, opacity: 0.85 }}>{fmtDayShort(d.day)}</span>
-              {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: '#fff' }} />}
+              {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--success)',
+                // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
+                boxShadow: '0 0 0 1px var(--surface)' }} />}
             </div>
           )
         })}
@@ -335,8 +337,8 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
                 : `${String(h).padStart(2, '0')}시 · 활동 없음`}
               style={{
                 height: 34, borderRadius: 4,
-                background: sess ? `rgba(37,99,235,${ratio || 0.12})` : 'var(--surface-alt, #f3f5f9)',
-                border: isSel ? '2px solid var(--primary, #2563eb)' : '1px solid var(--border)',
+                background: sess ? `color-mix(in srgb, var(--primary) ${Math.round((ratio || 0.12) * 100)}%, var(--surface))` : 'var(--surface-2)',
+                border: isSel ? '2px solid var(--primary)' : '1px solid var(--border)',
                 cursor: sess ? 'pointer' : 'default', opacity: sess ? 1 : 0.5,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                 fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--text-muted)', position: 'relative',
@@ -345,7 +347,9 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
               <span style={{ fontSize: 8, opacity: 0.8 }}>
                 {String(h).padStart(2, '0')}{list && list.length > 1 ? ` ·${list.length}` : ''}
               </span>
-              {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: '#fff' }} />}
+              {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--success)',
+                // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
+                boxShadow: '0 0 0 1px var(--surface)' }} />}
             </div>
           )
         })}
@@ -380,7 +384,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         style={{
           cursor: 'pointer',
           borderTop: '1px solid var(--border)',
-          background: isOpen ? 'var(--hover, #eef5ff)' : 'transparent',
+          background: isOpen ? 'var(--hover)' : 'transparent',
         }}
       >
         <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
@@ -411,7 +415,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={9} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={9} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '12px 16px' }}>
               {!detail || detail.loading ? (
                 <div className="empty" style={{ padding: 12 }}>상세 로딩 중...</div>
@@ -521,7 +525,7 @@ export function SessionDetail({ detail, sess, recId, hourNum, isDuplex, audio, f
       {/* 지표 — 발언 턴/세그먼트, 발화 구간/누적을 분리해 동시 발언을 왜곡 없이 읽는다 */}
       <div style={{
         display: 'flex', gap: 18, flexWrap: 'wrap', padding: '9px 12px',
-        background: 'var(--surface, #fff)', border: '1px solid var(--border)', borderRadius: 6,
+        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
       }}>
         <Metric k="발언 턴" v={String(sess.turn_count ?? allTurns.length)} s="건" />
         <Metric k="녹취 세그먼트" v={String(sess.segment_count ?? detail.segments.length)} s="개" />
@@ -594,10 +598,10 @@ export function SessionDetail({ detail, sess, recId, hourNum, isDuplex, audio, f
       {slots.length === 0 ? (
         <div className="ts" style={{ color: 'var(--text-muted)' }}>표시할 항목이 없습니다</div>
       ) : (
-        <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface, #fff)' }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', background: 'var(--surface)' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ background: 'var(--surface-alt, #f7f9fc)', textAlign: 'left', color: 'var(--text-muted)' }}>
+              <tr style={{ background: 'var(--bg-soft)', textAlign: 'left', color: 'var(--text-muted)' }}>
                 <th style={{ ...thStyle, width: 22, cursor: 'default' }}></th>
                 <th style={{ ...thStyle, cursor: 'default' }}>구간(10분)</th>
                 <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>발언 턴</th>
@@ -616,7 +620,7 @@ export function SessionDetail({ detail, sess, recId, hourNum, isDuplex, audio, f
                   <Fragment key={slot.min}>
                     <tr
                       onClick={() => setOpenSlot(prev => prev === slot.min ? null : slot.min)}
-                      style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--hover, #eef5ff)' : 'transparent' }}
+                      style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--hover)' : 'transparent' }}
                     >
                       <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
                       <td style={{ ...tdStyle, fontWeight: 600 }} className="ts">{hh2}:{m0} ~ {hh2}:{m9}</td>
@@ -630,7 +634,7 @@ export function SessionDetail({ detail, sess, recId, hourNum, isDuplex, audio, f
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={6} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
+                        <td colSpan={6} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
                           <div style={{ padding: '10px 12px' }}>
                             <SlotTimeline slot={slot} speakerOrder={speakerOrder} participants={detail.participants} recId={recId} audio={audio} />
                           </div>
@@ -720,7 +724,7 @@ export function SlotTimeline({ slot, speakerOrder, participants, recId, audio }:
       {shown.length === 0 ? (
         <div className="ts" style={{ color: 'var(--text-muted)' }}>표시할 항목이 없습니다</div>
       ) : (
-        <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)' }}>
+        <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
           {shown.map((it, i) => {
             const border = i > 0 ? '1px solid var(--border)' : undefined
 
@@ -734,8 +738,8 @@ export function SlotTimeline({ slot, speakerOrder, participants, recId, audio }:
               return (
                 <div key={`m${seg.seq}`} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', fontSize: 12,
-                  borderTop: border, borderLeft: '4px solid var(--primary, #2563eb)',
-                  background: 'var(--surface-alt, #f7f9fc)',
+                  borderTop: border, borderLeft: '4px solid var(--primary)',
+                  background: 'var(--bg-soft)',
                 }}>
                   <span className="ts" style={{ minWidth: 70, color: 'var(--text-muted)' }}>{fmtShortTime(seg.start_time)}</span>
                   <button
@@ -773,7 +777,7 @@ export function SlotTimeline({ slot, speakerOrder, participants, recId, audio }:
                 <div key={`t${turn.seq}-${turn.slot}-${turn.start}`} style={{
                   display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px', fontSize: 12,
                   borderTop: border, borderLeft: `4px solid ${color}`,
-                  background: isPlaying ? 'var(--hover, #eef5ff)' : undefined,
+                  background: isPlaying ? 'var(--hover)' : undefined,
                 }}>
                   <span className="ts" style={{ minWidth: 70, color: 'var(--text-muted)' }}>{fmtClockMs(turn.start)}</span>
                   <button
@@ -899,7 +903,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio }: {
         )}
       </div>
       <div style={{
-        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)',
+        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
         padding: '8px 10px 4px', overflowX: 'auto',
       }}>
         <div style={{ minWidth: 480 }}>
@@ -908,7 +912,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio }: {
             {bands.map((b, i) => (
               <span key={i} style={{
                 position: 'absolute', left: `${(pct(b.a) + pct(b.b)) / 2}%`, transform: 'translateX(-50%)',
-                fontSize: 9.5, fontWeight: 700, color: 'var(--primary, #2563eb)', whiteSpace: 'nowrap',
+                fontSize: 9.5, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap',
               }}>
                 동시 {b.n}
               </span>
@@ -928,7 +932,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio }: {
                     <div key={i} style={{
                       position: 'absolute', top: 0, bottom: 0,
                       left: `${pct(b.a)}%`, width: `${Math.max(0.3, pct(b.b) - pct(b.a))}%`,
-                      background: 'rgba(37,99,235,.10)', pointerEvents: 'none',
+                      background: 'color-mix(in srgb, var(--primary) 10%, transparent)', pointerEvents: 'none',
                     }} />
                   ))}
                   {mine.map((t, i) => {
@@ -947,7 +951,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio }: {
                           top: 5, bottom: 5, minWidth: 3,
                           background: color, opacity: isPlaying ? 1 : 0.78, borderRadius: 2,
                           cursor: recId && t.playable ? 'pointer' : 'default',
-                          boxShadow: isPlaying ? '0 0 0 2px var(--primary, #2563eb)' : undefined,
+                          boxShadow: isPlaying ? '0 0 0 2px var(--primary)' : undefined,
                         }}
                       />
                     )

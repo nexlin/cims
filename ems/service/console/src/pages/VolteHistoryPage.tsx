@@ -65,11 +65,11 @@ function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>
               flex: 1, cursor: c.v > 0 && !on ? 'pointer' : 'default', textAlign: 'center',
               borderRadius: 4, padding: '3px 0',
               border: on ? '2px solid var(--primary)' : '1px solid var(--border)',
-              boxShadow: on ? '0 0 0 2px rgba(37,99,235,.30)' : undefined,
+              boxShadow: on ? '0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent)' : undefined,
               transform: on ? 'translateY(-2px)' : undefined,
               fontWeight: on ? 700 : undefined,
-              background: on && c.v === 0 ? 'rgba(37,99,235,.10)'
-                : c.v > 0 ? `rgba(37,99,235,${ratio.toFixed(3)})` : 'var(--surface-alt, #f7f9fc)',
+              background: on && c.v === 0 ? 'color-mix(in srgb, var(--primary) 10%, transparent)'
+                : c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--surface))` : 'var(--surface-2)',
               color: ratio > 0.55 ? '#fff' : 'var(--text)',
             }}>
             <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, height: 16 }}>{c.v > 0 ? c.v : ' '}</div>
@@ -245,7 +245,7 @@ export default function VolteHistoryPage() {
               <span style={{ fontSize: 12, fontWeight: 600 }}>시간대별 호 분포</span>
               <span className="ts" style={{ color: 'var(--text-muted)' }}>{fDate} · 총 {dayTotal}건</span>
               <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--primary)',
-                background: 'rgba(37,99,235,.10)', border: '1px solid rgba(37,99,235,.35)',
+                background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 35%, transparent)',
                 borderRadius: 10, padding: '1px 10px' }}>
                 {selHour}:00 ~ {selHour}:59 조회 중 · {hours[selHour] || 0}건
               </span>
@@ -357,7 +357,7 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={10} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={10} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '10px 14px' }}>
               <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} />
             </div>
@@ -452,7 +452,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                   : (
                     <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
-                        <tr style={{ background: 'var(--surface-alt, #f7f9fc)', position: 'sticky', top: 0 }}>
+                        <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0 }}>
                           <th style={{ ...hS, width: 28, textAlign: 'right' }}>#</th>
                           <th style={hS}>시간</th>
                           <th style={hS}>From→To</th>

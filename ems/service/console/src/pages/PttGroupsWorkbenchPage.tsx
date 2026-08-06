@@ -497,7 +497,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
 
   const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
   const countChip = (n: number, tone?: 'primary') => <span className={`badge ${tone === 'primary' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{n}</span>
-  const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-card, #fff)' }
+  const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--surface)' }
 
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 12 }}>

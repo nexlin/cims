@@ -115,7 +115,7 @@ export default function SubscriberPicker({
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          background: 'var(--bg-card, #fff)', border: '1px solid var(--border)', borderRadius: 6,
+          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
           marginTop: 2, maxHeight: 240, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
         }}>
           {all.length === 0 ? (

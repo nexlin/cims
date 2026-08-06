@@ -45,6 +45,15 @@ const SORT_LABEL: Record<SortKey, string> = {
 }
 const PAGE_SIZES = [20, 50, 100]
 
+// 조회 기간 — 기본은 '오늘 고정'(관제·시험 확인이 대부분 당일이라). 최근 7일·기간 지정은
+// P2 에서 연 days / from·to 파라미터를 쓴다.
+type RangeId = 'day' | 'week' | 'custom'
+const RANGES: Array<{ id: RangeId; label: string }> = [
+  { id: 'day', label: '오늘' },
+  { id: 'week', label: '최근 7일' },
+  { id: 'custom', label: '기간 지정' },
+]
+
 const todayStr = () => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -72,6 +81,9 @@ export default function PttHistoryPage() {
 
   // ── 조회 조건 ──
   const [date, setDate] = useState(todayStr())
+  const [range, setRange] = useState<RangeId>('day')
+  const [fromDate, setFrom] = useState(() => shiftDay(todayStr(), -6))
+  const [toDate, setTo] = useState(todayStr())
   const [kinds, setKinds] = useState<Set<PttSessionKind>>(new Set(ALL_KINDS))
   const [groupKeys, setGroupKeys] = useState<Set<string>>(new Set())
   const [person, setPerson] = useState('')
@@ -116,9 +128,16 @@ export default function PttHistoryPage() {
     return () => clearTimeout(t)
   }, [searchInput])
 
+  // 기간 프리셋 → API 파라미터. 셋 중 하나만 보낸다(서버 우선순위: from/to > date > days).
+  const rangeParam = useMemo(() => (
+    range === 'week' ? { days: 7 }
+      : range === 'custom' ? { from: fromDate, to: toDate }
+        : { date }
+  ), [range, date, fromDate, toDate])
+
   const load = useCallback(async () => {
     setLoading(true)
-    const common = { date, kind: kindParam, group_key: groupParam, person, q, hour }
+    const common = { ...rangeParam, kind: kindParam, group_key: groupParam, person, q, hour }
     try {
       // 진행중은 페이징 밖 — 종료 목록을 아무리 넘겨도 '지금 열린 것' 은 늘 위에 있어야 한다.
       const [ended, live] = await Promise.all([
@@ -135,7 +154,7 @@ export default function PttHistoryPage() {
     } finally {
       setLoading(false)
     }
-  }, [date, kindParam, groupParam, person, q, hour, sort, order, ps, page, show])
+  }, [rangeParam, kindParam, groupParam, person, q, hour, sort, order, ps, page, show])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -149,7 +168,7 @@ export default function PttHistoryPage() {
   useEffect(() => {
     if (firstRun.current) { firstRun.current = false; return }
     setOpen(null); setPage(0)
-  }, [date, kindParam, groupParam, person, q, hour])
+  }, [rangeParam, kindParam, groupParam, person, q, hour])
 
   // ── 세션 상세 lazy 로드 (그룹 활동 탭과 같은 규약) ──
   const loadDetail = useCallback(async (r: PttSessionRow) => {
@@ -250,16 +269,32 @@ export default function PttHistoryPage() {
 
       {/* ── 툴바 1: 기간 · 검색 ── */}
       <div className="toolbar">
-        <button className="btn btn--sm btn--ghost" onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날">‹</button>
-        <input className="input" type="date" value={date} style={{ width: 148 }}
-               onChange={e => setDate(e.target.value)} aria-label="날짜" />
-        <button className="btn btn--sm btn--ghost" disabled={date >= todayStr()}
+        <button className="btn btn--sm btn--ghost" disabled={range !== 'day'}
+                onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날">‹</button>
+        <input type="date" className="form-input" value={date} style={{ width: 150 }}
+               onChange={e => setDate(e.target.value)} aria-label="조회 날짜" />
+        <button className="btn btn--sm btn--ghost" disabled={range !== 'day' || date >= todayStr()}
                 onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날">›</button>
-        <button className={`btn btn--sm ${date === todayStr() ? 'btn--primary' : 'btn--outline'}`}
-                onClick={() => setDate(todayStr())}>오늘</button>
+        {/* 기간 프리셋 — P2 의 days/from·to 를 화면에서 쓰는 자리 */}
+        {RANGES.map(r => (
+          <button key={r.id} className={`btn btn--sm ${range === r.id ? 'btn--primary' : 'btn--outline'}`}
+                  onClick={() => { setRange(r.id); if (r.id === 'day') setDate(todayStr()) }}>
+            {r.label}
+          </button>
+        ))}
+        {range === 'custom' && (
+          <>
+            <input type="date" className="form-input" value={fromDate} style={{ width: 150 }}
+                   max={toDate} onChange={e => setFrom(e.target.value)} aria-label="시작 날짜" />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>~</span>
+            <input type="date" className="form-input" value={toDate} style={{ width: 150 }}
+                   min={fromDate} max={todayStr()} onChange={e => setTo(e.target.value)} aria-label="종료 날짜" />
+          </>
+        )}
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
-        <input className="input" placeholder="그룹·번호·세션키 검색" style={{ width: 210 }}
+        <input className="search-input" placeholder="그룹·번호·세션키 검색" style={{ maxWidth: 240 }}
                value={searchInput} onChange={e => setSearchInput(e.target.value)} />
+        {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
         <button className="btn btn--primary btn--sm" onClick={load}>새로고침</button>
         <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />
@@ -295,7 +330,7 @@ export default function PttHistoryPage() {
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
           {loading ? '조회 중…' : <>
             <b style={{ color: 'var(--text)' }}>{total}</b>건
-            {liveRows.length > 0 && <> · 진행중 <b style={{ color: 'var(--success, #16a34a)' }}>{liveRows.length}</b></>}
+            {liveRows.length > 0 && <> · 진행중 <b style={{ color: 'var(--success)' }}>{liveRows.length}</b></>}
             {' · 발화 합 '}{fmtSpeechMs(speechSum)}
           </>}
         </span>
@@ -311,7 +346,7 @@ export default function PttHistoryPage() {
             <div style={{ overflowX: 'auto' }}>
               <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
-                  <tr style={{ background: 'var(--surface-alt, #f7f9fc)', textAlign: 'left' }}>
+                  <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
                     <th style={{ ...thStyle, width: 24, cursor: 'default' }}></th>
                     <SortTh id="start" label="시각" sort={sort} order={order} onSort={setSort} onOrder={setOrder} />
                     <th style={{ ...thStyle, cursor: 'default' }}>종류</th>
@@ -340,7 +375,7 @@ export default function PttHistoryPage() {
           <button className="btn btn--sm btn--ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>이전</button>
           <span>{page + 1} / {pages}</span>
           <button className="btn btn--sm btn--ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>다음</button>
-          <select className="input" style={{ width: 92, marginLeft: 8 }} value={ps}
+          <select className="form-input" style={{ width: 92, marginLeft: 8 }} value={ps}
                   onChange={e => { setPs(Number(e.target.value)); setPage(0) }}>
             {PAGE_SIZES.map(n => <option key={n} value={n}>{n}개</option>)}
           </select>
@@ -376,12 +411,12 @@ export default function PttHistoryPage() {
 // ════════════════════════════════════════════════════════════════
 function SectionRow({ label, n, live }: { label: string; n: number; live?: boolean }) {
   return (
-    <tr style={{ background: 'var(--surface-alt, #f7f9fc)' }}>
+    <tr style={{ background: 'var(--bg-soft)' }}>
       <td colSpan={9} style={{
         padding: '5px 12px', fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em',
         textTransform: 'uppercase', color: 'var(--text-muted)', borderTop: '1px solid var(--border)',
       }}>
-        {live && <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--success, #16a34a)', marginRight: 5 }} />}
+        {live && <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', marginRight: 5 }} />}
         {label}
         <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none', opacity: .75, marginLeft: 6 }}>{n}</span>
       </td>
@@ -429,7 +464,7 @@ function Row({ r, isOpen, detail, audio, flowLoading, onToggle, onFlow, onPlayAl
     <>
       <tr onClick={onToggle} style={{
         cursor: 'pointer', borderTop: '1px solid var(--border)',
-        background: isOpen ? 'var(--hover, #eef5ff)' : 'transparent',
+        background: isOpen ? 'var(--hover)' : 'transparent',
       }}>
         <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
         <td style={tdStyle} className="ts">
@@ -457,7 +492,7 @@ function Row({ r, isOpen, detail, audio, flowLoading, onToggle, onFlow, onPlayAl
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={9} style={{ padding: 0, background: 'var(--surface-alt, #fafbfd)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={9} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '12px 16px' }}>
               {!detail || detail.loading ? (
                 <div className="empty" style={{ padding: 12 }}>상세 로딩 중...</div>
@@ -501,7 +536,7 @@ function HourHeatmap({ hours, sel, onPick }: {
                    flex: 1, cursor: c.v > 0 ? 'pointer' : 'default', textAlign: 'center',
                    borderRadius: 4, padding: on ? '2px 0' : '3px 0',
                    border: on ? '2px solid var(--primary)' : '1px solid var(--border)',
-                   background: c.v > 0 ? `rgba(79,70,229,${ratio.toFixed(3)})` : 'var(--surface-alt, #f7f9fc)',
+                   background: c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--surface))` : 'var(--bg-soft)',
                    color: ratio > 0.55 ? '#fff' : 'var(--text)',
                  }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.3, height: 16, fontVariantNumeric: 'tabular-nums' }}>
@@ -536,8 +571,8 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
       {open && (
         <div style={{
           position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 240, maxHeight: 320,
-          overflowY: 'auto', padding: 6, background: 'var(--surface, #fff)', border: '1px solid var(--border)',
-          borderRadius: 8, boxShadow: '0 10px 30px rgba(16,24,40,.13)',
+          overflowY: 'auto', padding: 6, background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: 'var(--shadow-lg)',
         }}>
           {opts.length === 0 && <div className="empty" style={{ padding: 12, fontSize: 12 }}>녹취가 있는 그룹이 없습니다</div>}
           {opts.map(([key, s]) => (
@@ -579,11 +614,11 @@ function PersonFilter({ value, candidates, open, onToggleMenu, onChange }: {
       {open && !value && (
         <div style={{
           position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 230, maxHeight: 320,
-          overflowY: 'auto', padding: 6, background: 'var(--surface, #fff)', border: '1px solid var(--border)',
-          borderRadius: 8, boxShadow: '0 10px 30px rgba(16,24,40,.13)',
+          overflowY: 'auto', padding: 6, background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: 'var(--shadow-lg)',
         }}>
           <div style={{ padding: '2px 4px 6px' }}>
-            <input className="input" autoFocus placeholder="번호 입력 후 Enter" style={{ width: '100%' }}
+            <input className="form-input" autoFocus placeholder="번호 입력 후 Enter"
                    value={input} onChange={e => setInput(e.target.value)}
                    onKeyDown={e => { if (e.key === 'Enter' && input.trim()) onChange(input.trim()) }} />
           </div>
