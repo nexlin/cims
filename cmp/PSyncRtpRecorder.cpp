@@ -111,7 +111,11 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
     std::string hourDir = _hourDirNow();
     if (hourDir != _curHourDir) {
         _curHourDir = hourDir;
-        _hourSeq = 0;
+        // 버킷 내 seq 이어받기 — _hourSeq 는 레코더 인스턴스 메모리라, 세션 재시작
+        // (새 그룹/레코더)이 같은 시간버킷에 들어오면 1부터 다시 매겨 이전 세션의
+        // seg_NNNN_* 파일을 덮어쓴다. append-only 인덱스(segments.jsonl)가 정본이므로
+        // 거기 마지막 seq 뒤에 이어붙인다.
+        _hourSeq = _lastIndexedSeq(hourDir);
     }
     int seq = ++_hourSeq;
     int shard = (seq - 1) / 100;          // 100 세그먼트 단위 shard
@@ -131,6 +135,26 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
     _lastPktUsec = 0;
     _active = true;
     _openTracks();
+}
+
+// 시간버킷 segments.jsonl 의 최대 seq — 없으면 0. _writeMeta 가 seq 를 항상 행 선두에
+// 기록하므로("{\"seq\":N,...") 행 선두 매칭이면 화자 문자열 등 내용 오탐이 없다.
+int PSyncRtpRecorder::_lastIndexedSeq(const std::string& hourDir) {
+    FILE* f = fopen((hourDir + "/segments.jsonl").c_str(), "r");
+    if (!f) return 0;
+    int last = 0;
+    char line[4096];
+    bool lineStart = true;
+    while (fgets(line, sizeof(line), f)) {
+        if (lineStart && strncmp(line, "{\"seq\":", 7) == 0) {
+            int v = atoi(line + 7);
+            if (v > last) last = v;
+        }
+        // fgets 가 긴 행을 쪼개 읽어도 다음 조각은 행 선두가 아니다
+        lineStart = (strchr(line, '\n') != nullptr);
+    }
+    fclose(f);
+    return last;
 }
 
 void PSyncRtpRecorder::_openTracks() {

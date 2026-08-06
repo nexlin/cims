@@ -37,7 +37,8 @@ public:
                       int priority = -1, bool preempted = false, const std::string& preemptedFrom = "");
 
     /** PTT 세그먼트 시작 — 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/ 에 기록.
-     *  seq 는 recorder 가 시간(HH) 단위로 자체 관리(시간 바뀌면 1부터 리셋),
+     *  seq 는 시간(HH) 버킷 단위 — 버킷 진입 시 segments.jsonl 의 마지막 seq 를 이어받는다
+     *  (세션 재시작으로 레코더가 새로 만들어져도 같은 버킷의 이전 세그먼트를 덮어쓰지 않음),
      *  shard = (seq-1)/100 → seg/000(1~100), seg/001(101~200) …
      *  audioPt/audioCodec: 화자 leg 의 ingress audio PT·코덱(user_src_pt/user_codec) —
      *  세그먼트 메타(audio_pt/audio_codec)로 기록되어 변환기의 PT 판별 근거가 된다. */
@@ -97,6 +98,8 @@ private:
     void _trackKind(const std::string& prefix, std::string& kind, int& slot, std::string& side) const;
     /** _baseDir 하위 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH} 경로 (mkdir 포함) */
     std::string _hourDirNow();
+    /** 시간버킷 segments.jsonl 의 최대 seq (없으면 0) — 세션 재시작 시 이어받기용 */
+    static int _lastIndexedSeq(const std::string& hourDir);
     /** mkdir -p (경로 내 모든 상위 디렉터리 생성) */
     static void _mkdirP(const std::string& path);
     static int64_t _nowUsec();
