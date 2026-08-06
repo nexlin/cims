@@ -15,6 +15,10 @@ export interface PttSession {
   max_concurrent?: number    // 최대 동시 발언 인원
   total_speech_ms?: number   // 발화 구간 합 (겹침 1회 계산)
   talk_ms?: number           // 발화 누적 합 (화자별 구간 합)
+  // 세션 당시 floor 축 (시간버킷 session.json — 없으면 ''/0, 그룹 레벨로 폴백)
+  floor_control?: string     // 'on' | 'off'(전이중) | ''
+  floor_policy?: string      // single | dual | multi
+  max_talkers?: number
 }
 
 // 세션 분류 — 좌측 목록의 섹션. DB 그룹이 아닌 세션(1:1/임시)도 녹취 디렉터리에서 드러난다.

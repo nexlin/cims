@@ -266,29 +266,29 @@ public:
             if ( it == m_mapPttSession.end() ) return;
             dir = it->second;  // 그룹 base
 
-            // group.json (자기완결 그룹 디스크립터) — base 루트에 1개. 없으면 생성.
-            std::string path = dir + "/group.json";
-            struct stat st;
-            bool bNew = ( stat( path.c_str(), &st ) != 0 );
-
             sessId = m_mapPttSessionId[strGroupId];
             char ts[32];
             IsoNow( ts, sizeof( ts ) );
 
-            if ( bNew ) {
-                // 디스크립터 객체에 state/updated_at 주입 (말미 '}' 직전에 삽입).
-                std::string desc = strGroupJson;
-                if ( desc.empty() || desc.back() != '}' ) desc = "{}";
-                desc.pop_back();
-                if ( !desc.empty() && desc.back() != '{' ) desc += ",";
-                desc += "\"state\":\"active\",\"updated_at\":\"" + std::string( ts ) + "\"}";
+            // 디스크립터 객체에 state/updated_at 주입 (말미 '}' 직전에 삽입).
+            std::string desc = strGroupJson;
+            if ( desc.empty() || desc.back() != '}' ) desc = "{}";
+            desc.pop_back();
+            if ( !desc.empty() && desc.back() != '{' ) desc += ",";
+            desc += "\"state\":\"active\",\"updated_at\":\"" + std::string( ts ) + "\"}";
 
-                FILE *f = fopen( path.c_str(), "w" );
-                if ( f ) {
-                    fprintf( f, "%s\n", desc.c_str() );
-                    fclose( f );
-                }
-            }
+            // group.json (자기완결 그룹 디스크립터) — base 루트에 1개 = 최신 편성 스냅샷.
+            //   매 세션 시작마다 재작성한다 — 최초 1회만 기록하면 이후 추가된 필드
+            //   (floor_control/floor_policy/max_talkers)·편성 변경이 영영 반영되지 않는다.
+            _writeDescriptor( dir + "/group.json", desc );
+
+            // session.json — 세션 시작 시간버킷에 당시 디스크립터를 남긴다. 세션 이력의
+            //   반이중/전이중·동시 발언 정원 표시는 이것이 정본 — 루트 group.json 은 최신
+            //   스냅샷이라 과거 세션에 소급되면 이력이 왜곡된다 (private 은 floor_control 이
+            //   세션마다 SDP 협상으로 달라질 수 있다).
+            std::string sessPath = _pttHourDir( dir ) + "/session.json";
+            _writeDescriptor( sessPath, desc );
+            m_mapPttSessionDesc[strGroupId] = sessPath;
 
             // 초기 가입자(발신자) 상태 파일 기록 (state/ptt/{sub}.json — 버킷과 독립)
             if ( !strInitiator.empty() && strInitiator != "autojoin" ) {
@@ -430,6 +430,7 @@ private:
     std::map<std::string, std::string> m_mapCallSession;   // callId → sessionId
     std::map<std::string, std::string> m_mapPttSession;    // groupId → active session dir
     std::map<std::string, std::string> m_mapPttSessionId;  // groupId → session start time string
+    std::map<std::string, std::string> m_mapPttSessionDesc;  // groupId → 세션 시작 버킷 session.json 경로
 
     std::string _dir( const std::string &key ) {
         // 1) 직접 조회
@@ -462,33 +463,55 @@ private:
 
     /** 세션 종료 (lock 이미 획득된 상태에서 호출).
      *
-     *  session.json state="ended" + end_time 업데이트만 수행.
+     *  group.json/session.json state="ended" + end_time 업데이트만 수행.
      *  m_mapPttSession / m_mapPttSessionId 의 entry 는 의도적으로 유지하여
      *  바로 뒤따르는 멤버 leave/join 의 PttLogEvent 가 같은 디렉토리에
-     *  events.jsonl 을 누적할 수 있게 한다. 새 _sessionStart 로 호 재시작
-     *  시에는 GetPttSessionDir 의 sessKey 비교(line 234)에서 _endSessionLocked
-     *  가 다시 호출된 직후 line 253 에서 entry 가 overwrite 되므로 누수 없음.
+     *  events.jsonl 을 누적할 수 있게 한다. 새 세션 시작 시에는
+     *  PttSessionStart 가 두 파일을 재작성하므로 잔존값 걱정이 없다.
      */
     void _endSessionLocked( const std::string &strGroupId ) {
         auto it = m_mapPttSession.find( strGroupId );
         if ( it == m_mapPttSession.end() ) return;
-        std::string dir = it->second;
-        std::string path = dir + "/group.json";
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        _finalizeDescriptor( it->second + "/group.json", ts );
+        auto itDesc = m_mapPttSessionDesc.find( strGroupId );
+        if ( itDesc != m_mapPttSessionDesc.end() ) {
+            _finalizeDescriptor( itDesc->second, ts );
+            m_mapPttSessionDesc.erase( itDesc );
+        }
+    }
+
+    /** 디스크립터 파일 기록 (전체 재작성) */
+    void _writeDescriptor( const std::string &path, const std::string &desc ) {
+        FILE *f = fopen( path.c_str(), "w" );
+        if ( f ) {
+            fprintf( f, "%s\n", desc.c_str() );
+            fclose( f );
+        }
+    }
+
+    /** 디스크립터 종료 마킹 — state=ended + end_time. end_time 은 이미 있으면 값만
+     *  교체한다 (종전엔 종료마다 말미에 삽입해 중복 키가 무한 누적됐다). */
+    void _finalizeDescriptor( const std::string &path, const char *ts ) {
         std::string c = _readFile( path );
-        if ( !c.empty() ) {
-            char ts[32];
-            IsoNow( ts, sizeof( ts ) );
-            _replace( c, "\"state\":\"active\"", "\"state\":\"ended\"" );
+        if ( c.empty() ) return;
+        _replace( c, "\"state\":\"active\"", "\"state\":\"ended\"" );
+        static const char kKey[] = "\"end_time\":\"";
+        size_t k = c.find( kKey );
+        if ( k != std::string::npos ) {
+            size_t vs = k + sizeof( kKey ) - 1;
+            size_t ve = c.find( '"', vs );
+            if ( ve != std::string::npos ) c.replace( vs, ve - vs, ts );
+        } else {
             size_t lb = c.rfind( '}' );
             if ( lb != std::string::npos ) c.insert( lb, std::string( ",\"end_time\":\"" ) + ts + "\"" );
-            FILE *f = fopen( path.c_str(), "w" );
-            if ( f ) {
-                fputs( c.c_str(), f );
-                fclose( f );
-            }
         }
-        // NOTE: m_mapPttSession / m_mapPttSessionId 는 erase 하지 않음.
-        // GetPttSessionDir 가 새 sessKey 진입 시 자동 overwrite.
+        FILE *f = fopen( path.c_str(), "w" );
+        if ( f ) {
+            fputs( c.c_str(), f );
+            fclose( f );
+        }
     }
 
     void _writeJsonl( const std::string &dir, const char *from, const char *to, const char *proto, const char *label,

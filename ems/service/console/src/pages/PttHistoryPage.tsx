@@ -365,7 +365,9 @@ export default function PttHistoryPage() {
   }, [visibleItems, selectedKey])
 
   const selItem = railItems.find(i => i.key === selectedKey) || null
-  // floor 중재가 없는 세션(private call without floor) = 전이중 통화
+  // floor 중재가 없는 세션(private call without floor) = 전이중 통화.
+  // 그룹 레벨 폴백값 — 세션 행에 당시 스냅샷(sess.floor_control)이 있으면 그것이 우선한다
+  // (private 은 세션마다 SDP 협상으로 달라진다).
   const isDuplex = selItem?.floorControl === 'off'
 
   // ── 시간버킷 목록 lazy 로드 ──
@@ -717,7 +719,7 @@ export default function PttHistoryPage() {
                                 isOpen={isOpen}
                                 detail={detail}
                                 storeKey={selItem.key}
-                                isDuplex={isDuplex}
+                                isDuplex={sess.floor_control ? sess.floor_control === 'off' : isDuplex}
                                 audio={audio}
                                 flowLoading={flowLoading}
                                 onToggle={() => toggleExpand(sess.dir)}
@@ -1117,6 +1119,21 @@ function BucketDetail({ detail, sess, recId, hourNum, isDuplex, audio, flowLoadi
         <Metric k="발화 구간" v={fmtSpeechMs(sess.total_speech_ms)} s="" hint="겹침을 1회로 센 실제 무전 점유 시간" />
         <Metric k="발화 누적" v={fmtSpeechMs(talkMs)} s="" hint="화자별 발언 시간의 합" />
         <Metric k="화자" v={String(sess.speaker_count ?? speakerOrder.length)} s="명" />
+        {/* 세션 당시 floor 축 (시간버킷 session.json) — 그룹 최신 스냅샷과 다를 수 있다 */}
+        {sess.floor_control === 'off' ? (
+          <span className="badge badge--green" style={{ alignSelf: 'center', marginLeft: 'auto' }}
+                title="floor 중재 없음 — 양측 상시 송신(통화형)">전이중 · 통화</span>
+        ) : sess.floor_control === 'on' ? (
+          <span style={{ alignSelf: 'center', marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+            <span className="badge badge--yellow" title="floor 중재 있음 — 발언권 기반(무전형)">반이중 · 무전</span>
+            {sess.floor_policy && (
+              <span className="badge badge--gray" title="세션 당시 동시 발언 정책 (TS 24.380)">
+                {sess.floor_policy === 'multi' ? `multi · 최대 ${sess.max_talkers || '?'}명`
+                  : sess.floor_policy === 'dual' ? 'dual · 최대 2명' : 'single'}
+              </span>
+            )}
+          </span>
+        ) : null}
       </div>
 
       {isDuplex ? (

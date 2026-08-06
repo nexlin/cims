@@ -1886,9 +1886,17 @@ def _find_ptt_sessions(group_id: str, date: str = None, days: int = None) -> lis
                 en_max = ent
         # 진행중 판정: 현재 시각 시간창이고 녹취가 아직 .recording 인 경우
         is_active = (window == now_window) and _has_active_recording(hh_dir)
+        # 세션 디스크립터(session.json) — CSP 가 세션 시작 시 시간버킷에 남긴 당시 스냅샷.
+        #   floor 축은 이것이 정본(그룹 루트 group.json 은 최신 스냅샷이라 과거 세션에
+        #   소급되면 왜곡 — private 은 floor_control 이 세션마다 SDP 협상으로 달라진다).
+        #   없으면 ""/0 → 콘솔이 그룹 레벨로 폴백.
+        sj = _read_json(os.path.join(hh_dir, "session.json")) or {}
         result.append({
             "dir": window,
             "session_id": f"{yyyy}-{mm}-{dd} {hh}:00",
+            "floor_control": sj.get("floor_control", ""),
+            "floor_policy": sj.get("floor_policy", ""),
+            "max_talkers": sj.get("max_talkers", 0) or 0,
             "start_time": st_min or f"{yyyy}-{mm}-{dd}T{hh}:00:00",
             "end_time": (None if is_active else (en_max or f"{yyyy}-{mm}-{dd}T{hh}:59:59")),
             "state": "active" if is_active else "ended",

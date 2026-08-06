@@ -110,8 +110,9 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 **파일 구조 (시간버킷):**
 ```
 {ServiceLogDir}/ptt/{id}/                       # id = ptt_groups.id (surrogate, mcptt_group_id 아님)
-  ├── group.json                                # 그룹 디스크립터 (CSP, base 1개)
+  ├── group.json                                # 그룹 디스크립터 (CSP, base 1개) — 최신 편성 스냅샷
   └── {YYYY}/{MM}/{DD}/{HH}/                     # 시간버킷 (시간검색) — VoLTE 관례와 통일
+      ├── session.json                           # 세션 디스크립터 (CSP) — 세션 시작 당시 스냅샷
       ├── events.jsonl                           # 멤버 join/leave 등 (CSP)
       ├── floor.jsonl                            # floor 이벤트 GRANT/DENY/QUEUE/QUEUE_CANCEL/RELEASE/REVOKE/REVOKE_END/IDLE (CMP)
       ├── segments.jsonl                         # 세그먼트 인덱스 (CMP)
@@ -126,6 +127,20 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 ```
 > 그룹 키 = surrogate `id`. 1:1 private call·ad-hoc 그룹은 DB 행이 없어 surrogate 가 없다 —
 > 이때 키는 세션 식별자(`priv-<caller>-<callee>` 등)가 그대로 쓰인다.
+
+**그룹/세션 디스크립터 — 2단 스냅샷.** CSP 가 `BuildGroupDescriptor`(편성·floor 축·멤버)에
+`state`/`updated_at` 을 주입해 세션 시작마다 두 곳에 기록한다:
+
+| 파일 | 위치 | 의미 | 갱신 |
+|---|---|---|---|
+| `group.json` | 그룹 base 루트 1개 | **최신** 편성 스냅샷 — 좌측 목록(요약)의 분류·이름·멤버 근거 | 매 세션 시작 시 전체 재작성, 종료 시 `state:"ended"`+`end_time` 마킹 |
+| `session.json` | 세션 시작 시간버킷 | **세션 당시** 스냅샷 — 세션 이력의 반이중/전이중·동시 발언 정원 배지의 정본 | 세션 시작 시 기록(같은 버킷 재시작은 덮어쓰기), 종료 시 동일 마킹 |
+
+세션 축을 분리하는 이유: floor 축은 소급되면 안 된다 — private call 의 `floor_control` 은
+세션마다 SDP 협상으로 달라지고, 그룹의 `floor_policy`/`max_talkers` 도 편성 변경 전 세션은
+당시 값으로 보여야 이력이 왜곡되지 않는다. `session.json` 이 없는 버킷(구 녹취, 시간 경계를
+넘긴 세션의 후속 버킷)은 그룹 레벨(`group.json`)로 폴백한다. 종료 마킹은 `end_time` 이 이미
+있으면 값만 교체한다(키 중복 누적 금지).
 
 #### 3.3.1 세그먼트 메타 — `tracks[]` (정본)
 
@@ -441,6 +456,8 @@ DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모�
 녹취 목록(`/recordings`)·PTT 세션 목록(`/ptt/history`)에는 `turn_count`(발언 턴 = 화자 구간 수),
 `speaker_count`(슬롯 화자 포함), `max_concurrent`, `talk_ms`(화자별 발화 누적)가 함께 실린다 —
 세그먼트 수만 세면 동시 발언이 과소 집계된다(3명이 겹쳐 말해도 세그먼트는 1개).
+PTT 세션 행에는 세션 당시 floor 축(`floor_control`/`floor_policy`/`max_talkers` — 시간버킷
+`session.json`, 없으면 ``''``/0)도 실린다 (§3.3, §7).
 
 ### 응답 상태
 
@@ -484,8 +501,10 @@ DELETE /api/v1/recordings/{id}                     삭제 (raw + converted 모�
 | `adhoc` | `group.json` 은 있으나 surrogate `id` 없음 | 임시 / ad-hoc |
 | `unknown` | `group.json` 유실 | 분류 미상 |
 
-세션 헤더 배지는 `group.json` 의 floor 축을 그대로 읽는다 — `floor_control:"off"` = **전이중·통화**,
-`"on"` = **반이중·무전**, `floor_policy`/`max_talkers` = 동시 발언 정원.
+세션 헤더 배지의 floor 축은 **세션 시간버킷의 `session.json`(세션 당시 스냅샷) 이 정본**이고,
+없으면 그룹 루트 `group.json`(최신 스냅샷) 으로 폴백한다 (§3.3) — `floor_control:"off"` =
+**전이중·통화**, `"on"` = **반이중·무전**, `floor_policy`/`max_talkers` = 동시 발언 정원.
+세션 목록 API(`/ptt/history?group_id=`)가 각 세션 행에 이 세 값을 실어 준다.
 
 **반이중(무전형)** — 화자 레인 타임바 + 발언 턴 목록:
 ```
