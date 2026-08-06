@@ -8,6 +8,7 @@ import OrgTreePanel from '@core/components/OrgTreePanel'
 import { DataTable, type Column } from '@core/components/DataTable'
 import SubscriberPicker, { buildPickIndex, type PickItem } from '@core/components/SubscriberPicker'
 import { useToast } from '@core/components/Toast'
+import PttGroupActivity from '@svc/components/PttGroupActivity'
 import { useAuth } from '@core/contexts/AuthContext'
 import { canCreateGroup, canManageGroup, hasRole } from '@core/utils/permissions'
 
@@ -191,6 +192,9 @@ function GroupDrawer(p: GroupDrawerProps) {
   const isNew = p.mode === 'add'
   const allowOwner = hasRole(p.me, 'manager') || (isNew && p.canGroupCreate)
   const [editing, setEditing] = useState(isNew)
+  // 구성(편성) / 활동(이력) — 그룹 축 드릴다운은 이력 페이지가 아니라 여기 산다.
+  //   신규 생성 중에는 볼 활동이 없으므로 탭 자체를 내지 않는다.
+  const [tab, setTab] = useState<'config' | 'activity'>('config')
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
     ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2 }
@@ -253,8 +257,45 @@ function GroupDrawer(p: GroupDrawerProps) {
 
   const memberIds = useMemo(() => new Set(members.map(m => m.user_id)), [members])
 
+  const TABS: Array<{ id: 'config' | 'activity'; label: string }> = [
+    { id: 'config', label: '구성' },
+    { id: 'activity', label: '활동' },
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+      {/* ── 탭 (콘솔 표준 밑줄 탭) ── */}
+      {existing && (
+        <div role="tablist" aria-label="그룹 상세"
+             style={{ display: 'flex', alignItems: 'stretch', gap: 2, borderBottom: '2px solid var(--border)' }}>
+          {TABS.map(t => {
+            const on = tab === t.id
+            return (
+              <button key={t.id} role="tab" aria-selected={on} onClick={() => setTab(t.id)}
+                      style={{
+                        padding: '8px 16px', border: 'none', cursor: 'pointer', fontSize: 13,
+                        background: on ? 'var(--surface)' : 'none',
+                        fontWeight: on ? 700 : 500,
+                        color: on ? 'var(--primary)' : 'var(--text-muted)',
+                        borderBottom: on ? '2px solid var(--primary)' : '2px solid transparent',
+                        marginBottom: -2,
+                      }}>
+                {t.label}
+              </button>
+            )
+          })}
+          {tab === 'activity' && (
+            <span style={{ marginLeft: 10, alignSelf: 'center', paddingBottom: 2, fontSize: 11.5, color: 'var(--text-muted)' }}>
+              이 그룹의 세션만 — 전체 세션은 <b>서비스 › 이력 › PTT 이력</b>
+            </span>
+          )}
+        </div>
+      )}
+
+      {existing && tab === 'activity' ? (
+        <PttGroupActivity storeKey={existing.db_id != null ? String(existing.db_id) : ''} />
+      ) : (
+      <>
       {/* ── 속성 ── */}
       {editing ? (
         <FieldRow>
@@ -341,6 +382,8 @@ function GroupDrawer(p: GroupDrawerProps) {
         <MemberTransfer members={members} memberIds={memberIds} pttIndex={p.pttIndex} pttName={p.pttName}
           canManage={canManage} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
           onAdd={addMembers} onRemove={removeMembers} onSaveMember={saveMember} />
+      )}
+      </>
       )}
     </div>
   )
