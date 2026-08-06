@@ -1233,25 +1233,27 @@ class TestStage6NewScenarios(unittest.TestCase):
             delete_called.append(url)
             return 204
 
-        def fake_cmp_request(payload, ip="127.0.0.1", port=9000, timeout=1.0):
-            sesid = payload.get("sesid", "")
-            if "precheck" in sesid:
-                return {"response": {"groups": 0, "group_details": []}}
+        calls = {"n": 0}
+
+        def fake_cmp_stats(ip="127.0.0.1", port=9000, timeout=1.0):
+            calls["n"] += 1
+            if calls["n"] == 1:  # precheck
+                return {"groups": 0, "group_details": []}
             gid = captured_gid[0] if captured_gid else "x"
-            return {"response": {"groups": 1,
-                                 "group_details": [{"group_id": gid, "members": 0}]}}
+            return {"groups": 1,
+                    "group_details": [{"group_id": gid, "members": 0}]}
 
         orig_login = csc_http.admin_login
         orig_post = csc_http.post_json
         orig_delete = csc_http.delete
-        orig_cmp = mod.cmp_request
+        orig_cmp = mod.cmp_stats
         import time as _t
         orig_sleep = _t.sleep
         try:
             csc_http.admin_login = lambda *a, **k: "JWT"
             csc_http.post_json = fake_post
             csc_http.delete = fake_delete
-            mod.cmp_request = fake_cmp_request
+            mod.cmp_stats = fake_cmp_stats
             _t.sleep = lambda s: None
             ctx = self._ctx()
             r = mod.scn_cmp_group_sync(ctx)
@@ -1259,7 +1261,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             csc_http.admin_login = orig_login
             csc_http.post_json = orig_post
             csc_http.delete = orig_delete
-            mod.cmp_request = orig_cmp
+            mod.cmp_stats = orig_cmp
             _t.sleep = orig_sleep
         self.assertEqual(r.status, self._ItemStatus.PASS)
         self.assertEqual(len(delete_called), 1, "cleanup DELETE 호출 1회")
@@ -1271,16 +1273,14 @@ class TestStage6NewScenarios(unittest.TestCase):
         orig_login = csc_http.admin_login
         orig_post = csc_http.post_json
         orig_delete = csc_http.delete
-        orig_cmp = mod.cmp_request
+        orig_cmp = mod.cmp_stats
         import time as _t
         orig_sleep = _t.sleep
         try:
             csc_http.admin_login = lambda *a, **k: "JWT"
             csc_http.post_json = lambda *a, **k: (201, {"id": "x"})
             csc_http.delete = lambda *a, **k: 204
-            mod.cmp_request = lambda *a, **k: {
-                "response": {"groups": 0, "group_details": []}
-            }
+            mod.cmp_stats = lambda *a, **k: {"groups": 0, "group_details": []}
             _t.sleep = lambda s: None
             ctx = self._ctx()
             r = mod.scn_cmp_group_sync(ctx)
@@ -1288,7 +1288,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             csc_http.admin_login = orig_login
             csc_http.post_json = orig_post
             csc_http.delete = orig_delete
-            mod.cmp_request = orig_cmp
+            mod.cmp_stats = orig_cmp
             _t.sleep = orig_sleep
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
@@ -1297,15 +1297,15 @@ class TestStage6NewScenarios(unittest.TestCase):
         from verify.lib.items.stage6 import scn_cmp_group_sync as mod
         from verify.lib.common import csc_http
         orig_login = csc_http.admin_login
-        orig_cmp = mod.cmp_request
+        orig_cmp = mod.cmp_stats
         try:
             csc_http.admin_login = lambda *a, **k: "JWT"
-            mod.cmp_request = lambda *a, **k: None
+            mod.cmp_stats = lambda *a, **k: None
             ctx = self._ctx()
             r = mod.scn_cmp_group_sync(ctx)
         finally:
             csc_http.admin_login = orig_login
-            mod.cmp_request = orig_cmp
+            mod.cmp_stats = orig_cmp
         self.assertEqual(r.status, self._ItemStatus.SKIP)
         self.assertIn("STATS", r.detail)
 
