@@ -600,7 +600,7 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 # 그룹 조회 컬럼 (id=surrogate, mcptt_group_id=식별자). 응답에서 id 는 mcptt_group_id 로 노출.
 _GROUP_COLS = (
     "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
-    "imminent_peril_call, emergency_alert, adhoc_enabled, "
+    "emergency_alert, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
     "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, created_at"
@@ -639,9 +639,7 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['video_enabled'] = bool(g.get('video_enabled', 0))
     g['encryption'] = bool(g.get('encryption', 0))
     g['emergency_call'] = bool(g.get('emergency_call', 0))
-    g['imminent_peril_call'] = bool(g.get('imminent_peril_call', 1))
     g['emergency_alert'] = bool(g.get('emergency_alert', 1))
-    g['adhoc_enabled'] = bool(g.get('adhoc_enabled', 0))
     g['allow_sds'] = bool(g.get('allow_sds', 1))
     g['allow_fd'] = bool(g.get('allow_fd', 0))
     g['max_sds_size'] = int(g.get('max_sds_size', 10000) or 0)
@@ -791,14 +789,17 @@ async def _create_group(body, config, payload=None):
     group_id = (body.get('mcptt_group_id') or body.get('id', '')).strip()
     if not group_id:
         return HandlerResult(status=400, body={'error': 'id (mcptt_group_id) is required'})
+    # 접두사 예약 — CSP 가 즉석 세션 ID 로 사용(adhoc-=애드혹 임시그룹, priv-=1:1 합성그룹).
+    #   편성 그룹이 이 접두사를 쓰면 즉석 세션 라우팅과 충돌한다.
+    if group_id.startswith(('adhoc-', 'priv-')):
+        return HandlerResult(status=400,
+                             body={'error': "group id 접두사 'adhoc-'/'priv-' 는 즉석 세션용 예약어입니다"})
     name           = body.get('name', group_id)
     video_enabled  = 1 if body.get('video_enabled', False) else 0
     priority       = int(body.get('priority', 5))
     encryption     = 1 if body.get('encryption', False) else 0
     emergency_call = 1 if body.get('emergency_call', False) else 0
-    imminent_peril_call = 1 if body.get('imminent_peril_call', True) else 0
     emergency_alert     = 1 if body.get('emergency_alert', True) else 0
-    adhoc_enabled       = 1 if body.get('adhoc_enabled', False) else 0
     allow_sds           = 1 if body.get('allow_sds', True) else 0
     allow_fd            = 1 if body.get('allow_fd', False) else 0
     max_sds_size        = int(body.get('max_sds_size', 10000))
@@ -841,14 +842,14 @@ async def _create_group(body, config, payload=None):
                                      body={'error': 'authorized user 는 PTT 가입자여야 합니다'})
             cur.execute(
                 "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
-                "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
+                "emergency_call, emergency_alert, "
                 "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
                 "max_members, require_affiliation, alias, authorized_user_id, "
                 "floor_policy, max_talkers) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
-                 emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled,
+                 emergency_call, emergency_alert,
                  allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
                  on_network, max_members, require_affiliation, alias, authorized_user_id,
@@ -897,8 +898,8 @@ async def _update_group(group_id: str, body, config, payload=None):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(int(body[fld]))
-            for fld in ('encryption', 'emergency_call', 'imminent_peril_call', 'emergency_alert',
-                        'adhoc_enabled', 'on_network', 'require_affiliation',
+            for fld in ('encryption', 'emergency_call', 'emergency_alert',
+                        'on_network', 'require_affiliation',
                         'allow_sds', 'allow_fd'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')

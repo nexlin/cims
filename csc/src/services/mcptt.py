@@ -270,7 +270,7 @@ def load_shared_data(config):
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
-                        "emergency_call, imminent_peril_call, emergency_alert, adhoc_enabled, "
+                        "emergency_call, emergency_alert, "
                         "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                         "org_code, session_start, session_end, "
                         "group_type, on_network, max_members, require_affiliation, alias, "
@@ -288,9 +288,7 @@ def load_shared_data(config):
                             "priority": row.get('priority', 5),
                             "encryption": bool(row.get('encryption', 0)),
                             "emergency_call": bool(row.get('emergency_call', 0)),
-                            "imminent_peril_call": bool(row.get('imminent_peril_call', 1)),
                             "emergency_alert": bool(row.get('emergency_alert', 1)),
-                            "adhoc_enabled": bool(row.get('adhoc_enabled', 0)),
                             "allow_sds": bool(row.get('allow_sds', 1)),
                             "allow_fd": bool(row.get('allow_fd', 0)),
                             "max_sds_size": row.get('max_sds_size', 10000),
@@ -878,7 +876,9 @@ def get_group_xml(group_uri):
     grp_priority = group.get('priority', 5)
     encryption_val = 'true' if group.get('encryption') else 'false'
     emergency_val = 'true' if group.get('emergency_call') else 'false'
-    imminent_val = 'true' if group.get('imminent_peril_call', True) else 'false'
+    # allow-imminent-peril-call 은 emergency_call 미러 — condition(긴급·임박)은 단일 게이트.
+    #   규격 요소(TS 24.481)는 유지하되 별도 설정 축을 두지 않는다.
+    imminent_val = emergency_val
     alert_val = 'true' if group.get('emergency_alert', True) else 'false'
     org_code = group.get('org_code', '')
     group_type = group.get('group_type', 'prearranged')

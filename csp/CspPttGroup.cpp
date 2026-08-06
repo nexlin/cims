@@ -16,7 +16,6 @@ CspPttGroup::CspPttGroup()
       _priority( 5 ),
       _encryption( false ),
       _emergencyCall( false ),
-      _imminentPerilCall( true ),
       _emergencyAlert( true ),
       _isAdhoc( false ),
       _allowSds( true ),
@@ -128,7 +127,6 @@ void CspPttGroup::Clear() {
     _priority = 5;
     _encryption = false;
     _emergencyCall = false;
-    _imminentPerilCall = true;
     _emergencyAlert = true;
     _isAdhoc = false;
     _allowSds = true;

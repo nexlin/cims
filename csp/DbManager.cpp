@@ -245,7 +245,7 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
         "COALESCE(g.authorized_user_id,0), "
         "COALESCE(DATE_FORMAT(g.created_at,'%Y-%m-%dT%H:%i:%s'),''), "
         "COALESCE(ps.id,''), "
-        "g.imminent_peril_call, g.emergency_alert, "
+        "g.emergency_alert, "
         "g.allow_sds, g.allow_fd, g.max_sds_size, "
         "g.floor_policy, g.max_talkers "
         "FROM ptt_groups g "
@@ -282,13 +282,12 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._authorizedUserId = row[16] ? atoi( row[16] ) : 0;
     clsGroup._createdAt = row[17] ? row[17] : "";
     clsGroup._authorizedUser = row[18] ? row[18] : "";  // 소유자 PTT MSISDN (파생 MCPTT ID)
-    clsGroup._imminentPerilCall = row[19] ? ( atoi( row[19] ) != 0 ) : true;
-    clsGroup._emergencyAlert = row[20] ? ( atoi( row[20] ) != 0 ) : true;
-    clsGroup._allowSds = row[21] ? ( atoi( row[21] ) != 0 ) : true;
-    clsGroup._allowFd = row[22] ? ( atoi( row[22] ) != 0 ) : false;
-    clsGroup._maxSdsSize = row[23] ? atoi( row[23] ) : 10000;
-    clsGroup._floorPolicy = row[24] ? row[24] : "single";
-    clsGroup._maxTalkers = row[25] ? atoi( row[25] ) : 2;
+    clsGroup._emergencyAlert = row[19] ? ( atoi( row[19] ) != 0 ) : true;
+    clsGroup._allowSds = row[20] ? ( atoi( row[20] ) != 0 ) : true;
+    clsGroup._allowFd = row[21] ? ( atoi( row[21] ) != 0 ) : false;
+    clsGroup._maxSdsSize = row[22] ? atoi( row[22] ) : 10000;
+    clsGroup._floorPolicy = row[23] ? row[23] : "single";
+    clsGroup._maxTalkers = row[24] ? atoi( row[24] ) : 2;
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조

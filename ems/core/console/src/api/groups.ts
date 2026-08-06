@@ -14,10 +14,8 @@ export interface Group {
   members: Member[]
   priority?: number
   encryption?: boolean
-  emergency_call?: boolean
-  imminent_peril_call?: boolean   // allow-imminent-peril-call (TS 24.481)
+  emergency_call?: boolean         // allow-MCPTT-emergency-call — condition(긴급·임박) 공통 게이트
   emergency_alert?: boolean        // allow-MCPTT-emergency-alert
-  adhoc_enabled?: boolean          // ad hoc 그룹콜 허용 (Rel-18)
   allow_sds?: boolean              // mcdata-allow-short-data-service (그룹 SDS 메시징, TS 24.481)
   allow_fd?: boolean               // mcdata-allow-file-distribution (그룹 파일전송)
   max_sds_size?: number            // mcdata-on-network-max-data-size-for-SDS (octets, 0=무제한)

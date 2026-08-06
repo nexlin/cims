@@ -66,10 +66,9 @@ public:
     /** 암호화 여부 (SRTP) */
     bool _encryption;
 
-    /** 긴급통화 허용 여부 (allow-MCPTT-emergency-call) */
+    /** 긴급통화 허용 여부 (allow-MCPTT-emergency-call) — condition(긴급·임박위험) 공통 게이트 */
     bool _emergencyCall;
-    /** 임박위험 통화 허용 여부 (allow-imminent-peril-call), 긴급경보 허용 (allow-MCPTT-emergency-alert) */
-    bool _imminentPerilCall;
+    /** 긴급경보 허용 (allow-MCPTT-emergency-alert) */
     bool _emergencyAlert;
     /** ad hoc 동적 그룹(Rel-18) — 비영속 in-memory, 통화 종료 시 GroupMap 에서 제거 */
     bool _isAdhoc;

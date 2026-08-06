@@ -217,15 +217,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
 
-    // condition(emergency/imminent) 능력 게이트 (TS 24.481). 그룹이 긴급 불허면 normal 로 강등.
-    //   (imminent capability 의 per-condition 강제는 CSP DB 로드 보강 후 — 현재 기본 허용.)
+    // condition(emergency/imminent) 능력 게이트 (TS 24.481) — emergency_call 이 두 tier 공통.
+    //   그룹이 불허면 normal 로 강등 (호는 거절하지 않는다).
     int iCond = iCondition;
-    if ( iCond >= 2 && !clsGroup._emergencyCall ) {
-        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) emergency not allowed → downgrade to normal", pszGroupId );
-        iCond = 0;
-    } else if ( iCond == 1 && !clsGroup._imminentPerilCall ) {
-        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) imminent-peril not allowed → downgrade to normal",
-                     pszGroupId );
+    if ( iCond >= 1 && !clsGroup._emergencyCall ) {
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) condition(%d) not allowed → downgrade to normal",
+                     pszGroupId, iCond );
         iCond = 0;
     }
     {
