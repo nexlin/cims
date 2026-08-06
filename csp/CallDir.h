@@ -219,12 +219,21 @@ public:
 
     // ── PTT ──────────────────────────────────────────────
 
-    /** PTT 그룹 base 디렉터리 — ptt/{group_id}.
-     *  고빈도 데이터(녹취 세그먼트·floor)는 CMP 가 이 base 하위에
-     *  {YYYY}/{MM}/{DD}/{HH}/ 시간버킷 + seg/{NNN}/ shard 로 회전 기록한다.
-     *  (옛 sessions/{key}.d 단일 누적 구조 폐지 → 시간검색·디렉터리 엔트리수 상한)
-     *  반환값이 CMP record_dir(base)로 전달된다. */
-    std::string GetPttSessionDir( const std::string &strGroupId, const std::string &strSessionStart = "",
+    /** PTT 그룹 base 디렉터리 — ptt/{group_id}. 반환값이 CMP record_dir 로 전달된다.
+     *
+     *  기록 단위는 **세션** 이다 — 세션 산출물(녹취 세그먼트·floor·events·session.json)은
+     *  base 하위 {YYYY}/{MM}/{DD}/{HH}/{sesdir}/ 에 모인다. sesdir = 세션 sesid 에서
+     *  유도한 S{yyyymmddHHMMSSuuuuuu}_{n} (GetPttSessionName).
+     *
+     *  시간버킷을 세션 위에 둔 이유: chat 그룹 세션은 상시 유지라 종료가 없어 세션만으로는
+     *  디렉터리 엔트리수·시간범위 스캔의 상한이 사라진다. 대신 세션이 시간을 넘기면 다음
+     *  버킷에 **같은 이름** 의 sesdir 이 생기고, 이력 API 가 이름으로 이어붙여 한 세션으로
+     *  제시한다 (sesdir 이름에 시작 시각이 박혀 있어 시작 버킷을 바로 찾는다).
+     *
+     *  strSesId 가 직전과 같으면 같은 sesdir 을 이어 쓴다 — 멤버 추가 INVITE 마다 호출되는
+     *  멱등 경로다. 새 sesid = 새 세션 = 새 sesdir (같은 시간대의 두 번째 통화가 앞 통화에
+     *  섞이지 않는 근거). */
+    std::string GetPttSessionDir( const std::string &strGroupId, const std::string &strSesId = "",
                                   const std::string &strStorageId = "" ) {
         std::lock_guard<std::mutex> lock( m_mtx );
 
@@ -238,8 +247,23 @@ public:
 
         // 런타임 맵은 mcptt_group_id 로 키잉(다른 PTT 메서드가 group._id 로 조회).
         m_mapPttSession[strGroupId] = base;
-        m_mapPttSessionId[strGroupId] = _sessionKey( strSessionStart );
+        if ( !strSesId.empty() && m_mapPttSessionId[strGroupId] != strSesId ) {
+            m_mapPttSessionId[strGroupId] = strSesId;
+            m_mapPttSesName[strGroupId] = _sesDirName( strSesId );
+            // 새 세션 = session.json 미기록 상태 — PttSessionStart 가 1회만 쓰도록 신호.
+            m_mapPttSessionDesc.erase( strGroupId );
+        } else if ( m_mapPttSesName[strGroupId].empty() ) {
+            // sesid 없이 진입한 로그 전용 경로 — 기록을 잃지 않도록 이름을 만들어 둔다.
+            m_mapPttSesName[strGroupId] = _sesDirName( m_mapPttSessionId[strGroupId] );
+        }
         return base;
+    }
+
+    /** 현재 세션의 디렉터리 이름 (CMP 에 session_dir 로 전달) — 세션 미개시면 빈 문자열. */
+    std::string GetPttSessionName( const std::string &strGroupId ) {
+        std::lock_guard<std::mutex> lock( m_mtx );
+        auto it = m_mapPttSesName.find( strGroupId );
+        return it == m_mapPttSesName.end() ? std::string() : it->second;
     }
 
     /** 그룹 base 하위 현재 시각 시간버킷 ptt/{gid}/{YYYY}/{MM}/{DD}/{HH} (생성 후 반환) */
@@ -247,6 +271,18 @@ public:
         std::string yyyy, mm, dd, hh;
         DateHour( yyyy, mm, dd, hh );
         std::string dir = base + "/" + yyyy + "/" + mm + "/" + dd + "/" + hh;
+        struct stat st;
+        if ( stat( dir.c_str(), &st ) != 0 ) MkdirP( dir );
+        return dir;
+    }
+
+    /** 현재 시각 버킷의 세션 디렉터리 (생성 후 반환). m_mtx 획득 상태에서 호출한다.
+     *  세션이 시간을 넘기면 다음 버킷에 같은 이름으로 자연히 생성된다. */
+    std::string _pttSessionDirLocked( const std::string &strGroupId, const std::string &base ) {
+        std::string hourDir = _pttHourDir( base );
+        auto it = m_mapPttSesName.find( strGroupId );
+        if ( it == m_mapPttSesName.end() || it->second.empty() ) return hourDir;  // 이름 미상 — 버킷 직행
+        std::string dir = hourDir + "/" + it->second;
         struct stat st;
         if ( stat( dir.c_str(), &st ) != 0 ) MkdirP( dir );
         return dir;
@@ -275,24 +311,34 @@ public:
             if ( desc.empty() || desc.back() != '}' ) desc = "{}";
             desc.pop_back();
             if ( !desc.empty() && desc.back() != '{' ) desc += ",";
-            desc += "\"state\":\"active\",\"updated_at\":\"" + std::string( ts ) + "\"}";
+            std::string body = "\"state\":\"active\",\"updated_at\":\"" + std::string( ts ) + "\"";
 
             // group.json (자기완결 그룹 디스크립터) — base 루트에 1개 = 최신 편성 스냅샷.
             //   매 세션 시작마다 재작성한다 — 최초 1회만 기록하면 이후 추가된 필드
             //   (floor_control/floor_policy/max_talkers)·편성 변경이 영영 반영되지 않는다.
-            _writeDescriptor( dir + "/group.json", desc );
+            _writeDescriptor( dir + "/group.json", desc + body + "}" );
 
-            // session.json — 세션 시작 시간버킷에 당시 디스크립터를 남긴다. 세션 이력의
+            // session.json — 세션 디렉터리(시작 버킷)에 당시 디스크립터 + 세션 사실을 남긴다.
             //   반이중/전이중·동시 발언 정원 표시는 이것이 정본 — 루트 group.json 은 최신
             //   스냅샷이라 과거 세션에 소급되면 이력이 왜곡된다 (private 은 floor_control 이
             //   세션마다 SDP 협상으로 달라질 수 있다).
-            std::string sessPath = _pttHourDir( dir ) + "/session.json";
-            _writeDescriptor( sessPath, desc );
-            m_mapPttSessionDesc[strGroupId] = sessPath;
+            //   sesid/initiator/call_id/start_time 은 통화형 이력(1:1·임시)의 행 자체를
+            //   이루는 값이라 세션 쪽에만 넣는다 — 그룹 편성 스냅샷과 성격이 다르다.
+            //   세션당 1회만 쓴다 — 두 번째 멤버의 INVITE 도 같은 세션의 ProcessGroupCall 을
+            //   타므로, 매번 쓰면 개시자·시작시각이 마지막 참가자 값으로 덮인다.
+            std::string sesDir = _pttSessionDirLocked( strGroupId, dir );
+            if ( m_mapPttSessionDesc.find( strGroupId ) == m_mapPttSessionDesc.end() ) {
+                std::string sessBody = body + ",\"sesid\":\"" + Esc( sessId ) + "\"" + ",\"initiator\":\"" +
+                                       Esc( strInitiator ) + "\"" + ",\"call_id\":\"" + Esc( strCallId ) + "\"" +
+                                       ",\"start_time\":\"" + std::string( ts ) + "\"";
+                std::string sessPath = sesDir + "/session.json";
+                _writeDescriptor( sessPath, desc + sessBody + "}" );
+                m_mapPttSessionDesc[strGroupId] = sessPath;
+            }
 
             // 초기 가입자(발신자) 상태 파일 기록 (state/ptt/{sub}.json — 버킷과 독립)
             if ( !strInitiator.empty() && strInitiator != "autojoin" ) {
-                _writePttState( strInitiator, strGroupId, sessId, strCallId, "initiator", ts, dir );
+                _writePttState( strInitiator, strGroupId, sessId, strCallId, "initiator", ts, sesDir );
             }
         }
 
@@ -324,7 +370,8 @@ public:
         std::string sessId = m_mapPttSessionId[strGroupId];
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
-        _writePttState( strMemberId, strGroupId, sessId, strCallId, "member", ts, dir );
+        _writePttState( strMemberId, strGroupId, sessId, strCallId, "member", ts,
+                        _pttSessionDirLocked( strGroupId, dir ) );
     }
 
     /** 멤버 leave — member_leave 이벤트 로그 + 상태 파일 제거 */
@@ -355,9 +402,9 @@ public:
         }
         line += "}";
 
-        // 시간버킷 events.jsonl 에 append (dir=그룹 base → {YYYY}/{MM}/{DD}/{HH}/events.jsonl)
-        std::string hourDir = _pttHourDir( dir );
-        FILE *f = fopen( ( hourDir + "/events.jsonl" ).c_str(), "a" );
+        // 세션 디렉터리 events.jsonl 에 append (dir=그룹 base → {YYYY}/{MM}/{DD}/{HH}/{sesdir}/)
+        std::string sesDir = _pttSessionDirLocked( strGroupId, dir );
+        FILE *f = fopen( ( sesDir + "/events.jsonl" ).c_str(), "a" );
         if ( f ) {
             fprintf( f, "%s\n", line.c_str() );
             fclose( f );
@@ -411,10 +458,11 @@ public:
     void LogPtt( const std::string &strGroupId, const char *from, const char *to, const char *proto, const char *label,
                  const char *body ) {
         if ( m_strCallsDir.empty() ) return;
-        std::string base = GetPttSessionDir( strGroupId );
-        if ( base.empty() ) return;
         std::lock_guard<std::mutex> lock( m_mtx );
-        _writeJsonl( _pttHourDir( base ), from, to, proto, label, body );
+        // 세션 개시 전(GetPttSessionDir 미호출)이면 기록할 세션이 없다 — 새로 만들지 않는다.
+        auto it = m_mapPttSession.find( strGroupId );
+        if ( it == m_mapPttSession.end() || it->second.empty() ) return;
+        _writeJsonl( _pttSessionDirLocked( strGroupId, it->second ), from, to, proto, label, body );
     }
 
     /** JSON string escaper (public for external callers) */
@@ -426,10 +474,11 @@ private:
     std::string m_strCallsDir;
     std::string m_strComponent;
     std::mutex m_mtx;
-    std::map<std::string, std::string> m_mapDir;           // key(sessionId or callId) → dir path
-    std::map<std::string, std::string> m_mapCallSession;   // callId → sessionId
-    std::map<std::string, std::string> m_mapPttSession;    // groupId → active session dir
-    std::map<std::string, std::string> m_mapPttSessionId;  // groupId → session start time string
+    std::map<std::string, std::string> m_mapDir;             // key(sessionId or callId) → dir path
+    std::map<std::string, std::string> m_mapCallSession;     // callId → sessionId
+    std::map<std::string, std::string> m_mapPttSession;      // groupId → 그룹 base 디렉터리
+    std::map<std::string, std::string> m_mapPttSessionId;    // groupId → 현재 세션 sesid
+    std::map<std::string, std::string> m_mapPttSesName;      // groupId → 세션 디렉터리 이름 S{ts}_{n}
     std::map<std::string, std::string> m_mapPttSessionDesc;  // groupId → 세션 시작 버킷 session.json 경로
 
     std::string _dir( const std::string &key ) {
@@ -448,17 +497,35 @@ private:
         return "";
     }
 
-    /** session_start → 디렉터리 키 변환: "2026-04-11T09:00:00" → "20260411_090000", 빈값 → "permanent" */
-    static std::string _sessionKey( const std::string &sessionStart ) {
-        if ( sessionStart.empty() ) return "permanent";
-        std::string k;
-        for ( char c : sessionStart ) {
-            if ( c >= '0' && c <= '9' ) k += c;
+    /** sesid → 세션 디렉터리 이름. "{caller}::csp::{yyyymmddHHMMSSuuuuuu}::{n}" → "S{ts}_{n}".
+     *
+     *  이름에 시작 시각(µs)이 그대로 박히므로 (a) 시간순 정렬, (b) 이름만으로 시작 버킷
+     *  직접 접근, (c) VoLTE 의 S{ts}.d 와 같은 모양이 한 번에 성립한다. 카운터는 같은 µs
+     *  에 두 세션이 열릴 때의 충돌 방지용(sesid 발행 규칙과 동일).
+     *  형식이 다르거나 비었으면 현재 시각으로 만든다 — 기록을 잃지 않는다. */
+    static std::string _sesDirName( const std::string &sesId ) {
+        std::string ts, ctr;
+        size_t p2 = sesId.size() >= 2 ? sesId.rfind( "::" ) : std::string::npos;
+        if ( p2 != std::string::npos && p2 >= 2 ) {
+            size_t p1 = sesId.rfind( "::", p2 - 1 );
+            if ( p1 != std::string::npos ) {
+                ts = sesId.substr( p1 + 2, p2 - p1 - 2 );
+                ctr = sesId.substr( p2 + 2 );
+            }
         }
-        // "20260411090000" → "20260411_090000"
-        if ( k.size() >= 14 ) return k.substr( 0, 8 ) + "_" + k.substr( 8, 6 );
-        if ( k.size() >= 8 ) return k.substr( 0, 8 ) + "_000000";
-        return k.empty() ? "permanent" : k;
+        if ( ts.size() < 14 || ts.find_first_not_of( "0123456789" ) != std::string::npos ) {
+            struct timespec tsp;
+            clock_gettime( CLOCK_REALTIME, &tsp );
+            struct tm t;
+            localtime_r( &tsp.tv_sec, &t );
+            char b[32];
+            snprintf( b, sizeof( b ), "%04d%02d%02d%02d%02d%02d%06ld", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+                      t.tm_hour, t.tm_min, t.tm_sec, tsp.tv_nsec / 1000 );
+            ts = b;
+            ctr.clear();
+        }
+        if ( ctr.empty() || ctr.find_first_not_of( "0123456789" ) != std::string::npos ) ctr = "0";
+        return "S" + ts + "_" + ctr;
     }
 
     /** 세션 종료 (lock 이미 획득된 상태에서 호출).
@@ -697,9 +764,8 @@ private:
                            ",\"session_id\":\"" + Esc( sessionId ) + "\"" + ",\"call_id\":\"" + Esc( callId ) + "\"" +
                            ",\"peer_id\":\"" + Esc( peerId ) + "\"" + ",\"role\":\"" + Esc( role ) + "\"" +
                            ",\"state\":\"" + Esc( state ) + "\"" + ",\"video\":" + ( bVideo ? "true" : "false" ) +
-                           ",\"media_node\":\"" + Esc( mediaNode ) + "\"" +
-                           ",\"started_at\":\"" + ts + "\"" + ",\"answered_at\":null" + ",\"record_dir\":\"" +
-                           Esc( recordDir ) + "\"}\n";
+                           ",\"media_node\":\"" + Esc( mediaNode ) + "\"" + ",\"started_at\":\"" + ts + "\"" +
+                           ",\"answered_at\":null" + ",\"record_dir\":\"" + Esc( recordDir ) + "\"}\n";
         _atomicWrite( _stateFilePath( "volte", subId ), body );
     }
 

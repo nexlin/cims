@@ -28,11 +28,11 @@ struct CmpSocket {
 //   queueing/max_priority/granted 로 전달 (docs/api/cmp_media_api.md §7.4).
 //   fmtp:MCPTT 부재(레거시 단말) 시 전부 미전송 → CMP 기본 동작 유지.
 struct McpttFmtp {
-    int iQueueing = -1;     // -1=fmtp 부재(미전송) / 0=mc_queueing 미협상(비선점 요청 Deny #1) / 1=협상
-    int iMaxPriority = 0;   // mc_priority=N — 요청 가능 최대 우선순위 (0=미전송: 요청의 우선순위 필드 무시)
-    int iGranted = 0;       // 1=mc_granted 협상 — 참가 시 발언자 없으면 초기 발언권 (0=미전송)
-    int iNoFloorCtrl = 0;   // 1=mc_no_floor_ctrl 협상 — floor 없는 세션 제안(G17). private call 의
-                            //   floor_control:"off"(full-duplex) 판정 입력 — PTT_JOIN 필드 아님
+    int iQueueing = -1;    // -1=fmtp 부재(미전송) / 0=mc_queueing 미협상(비선점 요청 Deny #1) / 1=협상
+    int iMaxPriority = 0;  // mc_priority=N — 요청 가능 최대 우선순위 (0=미전송: 요청의 우선순위 필드 무시)
+    int iGranted = 0;      // 1=mc_granted 협상 — 참가 시 발언자 없으면 초기 발언권 (0=미전송)
+    int iNoFloorCtrl = 0;  // 1=mc_no_floor_ctrl 협상 — floor 없는 세션 제안(G17). private call 의
+                           //   floor_control:"off"(full-duplex) 판정 입력 — PTT_JOIN 필드 아님
 };
 
 // Phase 1.E (HA — CMP All Active) — endpoint descriptor for multi-endpoint dispatch.
@@ -84,12 +84,15 @@ public:
     // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).
     //   strFloorPolicy/iMaxTalkers: 동시 발언 정책 (docs/api/cmp_media_api.md §7.7). 비면 미전송(CMP 기본 single).
     //   strFloorControl: ""(미전송=on)/"off" — off=full-duplex, 응답에 floor_port 생략 (private call 전용).
+    //   strSessionDir: 세션 디렉터리 이름 S{ts}_{n} — CMP 는 record_dir/{시간버킷}/{이 이름}/ 에
+    //     세그먼트·floor 를 기록한다. 세션이 곧 기록 단위라, 같은 시간대의 다음 통화가 앞
+    //     통화에 섞이지 않는 근거 (docs/design/features/recording.md §3.1).
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                    std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
                    const std::string &strRecordDir = "", bool bVideoEnabled = false, int iSessionSeq = 0,
                    const std::string &strSesId = "", const std::string &strGroupType = "",
                    const std::string &strInitiator = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0,
-                   const std::string &strFloorControl = "" );
+                   const std::string &strFloorControl = "", const std::string &strSessionDir = "" );
     // 정책 변경도 MODIFY 로 전달한다 (생성=ADD 1회, 이후 모든 상태 변경=MODIFY — 계약 §A.0).
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0 );
@@ -261,11 +264,11 @@ private:
     int m_iAuditGraceSec = 30;
     int m_iAuditMaxPerCycle = 20;
     bool m_bAuditZombieTeardown = false;
-    std::string m_strHaRole = "auto";      // active|standby|auto (auto+HaVip 시 VIP 소유로 동적 판정)
-    std::string m_strHaVip;                // 감시할 VIP(예: VIP_csp). 소유 시 active — HaRole=auto 에서만 사용
+    std::string m_strHaRole = "auto";              // active|standby|auto (auto+HaVip 시 VIP 소유로 동적 판정)
+    std::string m_strHaVip;                        // 감시할 VIP(예: VIP_csp). 소유 시 active — HaRole=auto 에서만 사용
     std::atomic<bool> m_bAuditActiveRole{ true };  // 매 cycle ResolveActiveRole 이 갱신 (event 핸들러도 참조)
-    bool m_bLastActiveRole = true;         // 역할 전환 로그용 직전값
-    bool m_bAuditStandbyLogged = false;    // standby 불일치 로그 1회 억제
+    bool m_bLastActiveRole = true;                 // 역할 전환 로그용 직전값
+    bool m_bAuditStandbyLogged = false;            // standby 불일치 로그 1회 억제
     // endpoint 별 CMP relay 세션집합 지문 (Alive 가 endpoint 마다 stash, RunAuditCycle 이 샤드별 소비)
     struct CmpDigest {
         bool bValid = false;

@@ -26,11 +26,13 @@ void PMcpttGroup::_logFloorLocal(const char* op, const std::string& user, unsign
     int n = (int)strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tmv);
     snprintf(ts + n, sizeof(ts) - n, ".%06ld", (long)tv.tv_usec);
 
-    // 시간버킷 {base}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl (mkdir -p)
+    // 세션 디렉터리 {base}/{YYYY}/{MM}/{DD}/{HH}/{sesdir}/floor.jsonl (mkdir -p).
+    //   sesdir 미지정(레거시)이면 버킷 직행 — 기존 녹취와 같은 자리.
     char hb[32];
     snprintf(hb, sizeof(hb), "/%04d/%02d/%02d/%02d",
              tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour);
     std::string hourDir = _recordDir + hb;
+    if (!_recordSesDir.empty()) hourDir += "/" + _recordSesDir;
     {
         std::string p = hourDir;
         for (size_t i = 1; i < p.size(); ++i)
@@ -1944,9 +1946,10 @@ void PMcpttGroup::sendToMember(const std::string& sessionId, const char* data, i
 //  녹취 — Floor 단위 세그먼트 (SegmentedRecorder)
 // ──────────────────────────────────────────────────────────────
 
-void PMcpttGroup::setRecording(bool enable, const std::string& dir) {
+void PMcpttGroup::setRecording(bool enable, const std::string& dir, const std::string& sesDir) {
     _recordEnable = enable;
     _recordDir = dir;
+    _recordSesDir = sesDir;
     if (enable && !dir.empty()) {
         std::string mkdirCmd = "mkdir -p " + dir;
         system(mkdirCmd.c_str());
@@ -1959,6 +1962,7 @@ void PMcpttGroup::startRecording() {
     if (_recordDir.empty()) return;
 
     _recorder = new PSyncRtpRecorder(_recordDir, "ptt");
+    _recorder->setSessionSubdir(_recordSesDir);
     _recTrackSlots = 0;
     // 동시 발언 정원만큼 슬롯 트랙 등록 (슬롯 0 = "audio"/"video" — 종전 파일명 그대로).
     //   floor 없는 세션은 멤버 슬롯 수만큼 필요하므로 첫 미디어에서 추가 등록한다.

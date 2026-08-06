@@ -592,11 +592,13 @@ private:
 
     // 녹취 (Floor 단위 세그먼트 — 화자 교대 시 파일 분할)
     bool _recordEnable;
-    std::string _recordDir;
+    std::string _recordDir;     // 그룹 base — CSP 가 record_dir 로 지정
+    std::string _recordSesDir;  // 세션 디렉터리 이름 S{ts}_{n} — 시간버킷 아래 한 겹
     PSyncRtpRecorder* _recorder;
 
 public:
-    void setRecording(bool enable, const std::string& dir);
+    /** sesDir = PTT_GROUP_ADD 의 session_dir. 기록 자리는 dir/{시간버킷}/{sesDir}/ 이다. */
+    void setRecording(bool enable, const std::string& dir, const std::string& sesDir = "");
     bool isRecordEnabled() const { return _recordEnable; }
     void startRecording();
     void stopRecording();

@@ -1096,9 +1096,10 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
              group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
+             //   기록 자리 = record_dir/{시간버킷}/{session_dir}/ (session_dir 미전달=레거시 버킷)
              std::string recordDir = payload.GetString("record_dir");
              if (!recordDir.empty()) {
-                 group->setRecording(true, recordDir);
+                 group->setRecording(true, recordDir, payload.GetString("session_dir"));
              }
              _groups[groupId] = group;
 
@@ -1121,7 +1122,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
         // 기존 그룹이더라도 record_dir이 새로 전달되면 갱신
         std::string recordDir = payload.GetString("record_dir");
         if (!recordDir.empty() && !group->isRecordEnabled()) {
-            group->setRecording(true, recordDir);
+            group->setRecording(true, recordDir, payload.GetString("session_dir"));
         }
         LOG_DEBUG("PCmpServer", "ADD_GROUP group=%s floor=%d (existing)", groupId.c_str(), sharedFloorPort);
     }

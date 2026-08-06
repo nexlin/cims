@@ -821,12 +821,17 @@ print(best.get('domain','') if best else '')
     echo ""
     header "=== 검증 결과 ==="
 
-    # 녹취 파일 확인
-    local rec_files; rec_files=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l)
-    local rec_zero;  rec_zero=$(find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l)
+    # 녹취 파일 확인 — 기록 위치는 설정된 service_log_dir 이다. dist 안의 기본 경로만
+    #   보면 로그 경로를 옮긴 환경(.cims service_log_dir)에서 늘 '파일 없음' 으로 뜬다.
+    local rec_root=""
+    eval "$(cims_local_cfg_eval "$SCRIPT_DIR/.cims/server.local.json" service_log_dir)"
+    rec_root="${_init_service_log_dir:-}"
+    [[ -n "$rec_root" && -d "$rec_root" ]] || rec_root="$DIST_DIR/ext_mnt/service_log"
+    local rec_files; rec_files=$(find "$rec_root" -name "seg_*.rtp" -size +0 2>/dev/null | wc -l)
+    local rec_zero;  rec_zero=$(find "$rec_root" -name "seg_*.rtp" -size 0 2>/dev/null | wc -l)
     if [[ $rec_files -gt 0 ]]; then
-        ok "녹취: ${rec_files}개 파일 정상"
-        find "$DIST_DIR/ext_mnt/service_log" -name "seg_*.rtp" -size +0 -exec ls -lh {} \; 2>/dev/null | sed 's/^/  /'
+        ok "녹취: ${rec_files}개 파일 정상 (${rec_root})"
+        find "$rec_root" -name "seg_*.rtp" -size +0 -newermt "-10 minutes" -exec ls -lh {} \; 2>/dev/null | sed 's/^/  /'
     elif [[ $rec_zero -gt 0 ]]; then
         err "녹취: ${rec_zero}개 파일 0바이트"
     else

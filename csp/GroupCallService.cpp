@@ -130,9 +130,8 @@ CGroupCallService::~CGroupCallService() {
  *  - 수신자 leg(bServerOffered): 서버 offer 는 코덱 테이블 PT.
  *  - 개시자 leg: 서버 answer 는 오퍼 echo(psip AddSdp 규칙) → src = user 와 동일.
  *  pstrCodec: 협상 오디오 코덱 문자열(코덱 테이블 top, 예 "AMR-WB/16000") — 녹취 메타용. */
-void CGroupCallService::GetLegPt( const std::string &strCallId, bool bServerOffered,
-                                  int &iUserPt, int &iUserSrcPt, int &iUserTePt, int &iUserSrcTePt,
-                                  std::string *pstrCodec ) {
+void CGroupCallService::GetLegPt( const std::string &strCallId, bool bServerOffered, int &iUserPt, int &iUserSrcPt,
+                                  int &iUserTePt, int &iUserSrcTePt, std::string *pstrCodec ) {
     const CSipCodecEntry &clsTop = CSipCodecTable::GetTop();
     const CSipCodecEntry &clsTe = CSipCodecTable::GetTelephoneEvent();
     int iPt = -1, iTePt = -1;
@@ -262,12 +261,16 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
     // 세션 시작 기록 (그룹이 이미 CMP에 있어도 통화 기록은 필요)
+    //   sesid 를 먼저 확보한다 — 녹취 세션 디렉터리 이름의 근거이자, 같은 세션의 두 번째
+    //   INVITE 가 같은 디렉터리를 이어 쓰게 하는 키다 (세션 종료 시 RemoveGroupSesId).
+    std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
+    std::string strSessionDir;
     if ( gclsCallDir.IsEnabled() ) {
-        strRecordDir = gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
-                                                     std::to_string( clsGroup._dbId ) );
+        strRecordDir = gclsCallDir.GetPttSessionDir( pszGroupId, strGroupSesId, std::to_string( clsGroup._dbId ) );
         // 자기완결 그룹 디스크립터 (계획서 §5) — group.json
         std::string strDescriptor = BuildGroupDescriptor( clsGroup );
         gclsCallDir.PttSessionStart( pszGroupId, pszCallId, pszCallerInfo, strDescriptor );
+        strSessionDir = gclsCallDir.GetPttSessionName( pszGroupId );
     }
 
     if ( iSharedFloorPort <= 0 ) {
@@ -275,12 +278,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         int iSessionSeq = gclsDbManager.IncrementSessionSeq( pszGroupId );
         clsGroup._sessionSeq = iSessionSeq;
         CLog::Print( LOG_INFO, "GroupCall: session_seq=%d for group %s", iSessionSeq, pszGroupId );
-        std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         std::map<std::string, std::pair<int, int>> mapMemberPorts;
         if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iSharedFloorPort, mapMemberPorts,
                                      strRecordDir, clsGroup._videoEnabled, iSessionSeq, strGroupSesId,
-                                     clsGroup._groupType, pszCallerInfo, clsGroup._floorPolicy,
-                                     clsGroup._maxTalkers, clsGroup._floorControl ) ) {
+                                     clsGroup._groupType, pszCallerInfo, clsGroup._floorPolicy, clsGroup._maxTalkers,
+                                     clsGroup._floorControl, strSessionDir ) ) {
             std::unique_lock<std::recursive_mutex> lock( m_mutex );
             // nConfigHash 실제값 (0 이면 다음 SyncGroupsState 오탐 → NOTIFY storm → drop).
             m_mapGroupRtp[pszGroupId] = {
@@ -293,10 +295,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         std::string tmpIp;
         int tmpFPort = 0;
         std::map<std::string, std::pair<int, int>> tmpMemberPorts;
-        std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
         gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, tmpIp, tmpFPort, tmpMemberPorts, strRecordDir,
                                 clsGroup._videoEnabled, 0, strGroupSesId, clsGroup._groupType, pszCallerInfo,
-                                clsGroup._floorPolicy, clsGroup._maxTalkers, clsGroup._floorControl );
+                                clsGroup._floorPolicy, clsGroup._maxTalkers, clsGroup._floorControl, strSessionDir );
     }
 
     // 발신자 ID 저장 (XML mcptt-calling-user-id 용)
@@ -390,7 +391,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                     // NAT 판정인데 guard IP 가 비면(UserMap 미조회 — 등록 만료/ID 불일치) CMP 의
                     //   latch IP guard 가 이 leg 에 한해 무력화된다 — 조용한 약화 방지용 경고.
                     if ( iCallerNat && strCallerGuardIp.empty() && clsNatSvc.latch_ip_guard != "off" )
-                        CLog::Print( LOG_ERROR, "ProcessGroupCall: caller leg NAT without sig-guard ip"
+                        CLog::Print( LOG_ERROR,
+                                     "ProcessGroupCall: caller leg NAT without sig-guard ip"
                                      " (member=%s sdp=%s) — UserMap miss, latch guard disabled",
                                      pszCallerInfo, pclsRtp->m_strIp.c_str() );
                 }
@@ -765,13 +767,15 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         // Try to allocate now ((재)확보)
         CspPttGroup clsGroup;
         if ( gclsGroupMap.Select( pszGroupId, clsGroup ) ) {
-            std::string strRecordDir;
+            std::string strGroupSesId = GetOrIssueGroupSesId( pszGroupId );
+            std::string strRecordDir, strSessionDir;
             if ( gclsCallDir.IsEnabled() ) {
-                strRecordDir = gclsCallDir.GetPttSessionDir( pszGroupId, TimeToIso( clsGroup._sessionStart ),
-                                                             std::to_string( clsGroup._dbId ) );
+                strRecordDir =
+                    gclsCallDir.GetPttSessionDir( pszGroupId, strGroupSesId, std::to_string( clsGroup._dbId ) );
                 // 자기완결 그룹 디스크립터 (계획서 §5) — group.json (autojoin 경로)
                 std::string strDescriptor = BuildGroupDescriptor( clsGroup );
                 gclsCallDir.PttSessionStart( pszGroupId, "autojoin", pszUserId, strDescriptor );
+                strSessionDir = gclsCallDir.GetPttSessionName( pszGroupId );
             }
             // broadcast 그룹 재생성 시 기존 개시자 유지 (m_mapGroupRtp 캐시)
             std::string strInitiator;
@@ -783,9 +787,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             std::map<std::string, std::pair<int, int>> mapMemberPorts;
             int iNewFloorPort = 0;
             if ( gclsCmpClient.AddGroup( pszGroupId, clsGroup._pusers, strSharedIp, iNewFloorPort, mapMemberPorts,
-                                         strRecordDir, false, 0, GetOrIssueGroupSesId( pszGroupId ),
-                                         clsGroup._groupType, strInitiator, clsGroup._floorPolicy,
-                                         clsGroup._maxTalkers, clsGroup._floorControl ) ) {
+                                         strRecordDir, false, 0, strGroupSesId, clsGroup._groupType, strInitiator,
+                                         clsGroup._floorPolicy, clsGroup._maxTalkers, clsGroup._floorControl,
+                                         strSessionDir ) ) {
                 bVideoEnabled = clsGroup._videoEnabled;
                 iSharedFloorPortIM = iNewFloorPort;
                 // nConfigHash 는 반드시 실제 설정해시로 설정 — 0 으로 두면 다음 SyncGroupsState 가
@@ -1352,7 +1356,8 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
             // NAT 판정인데 guard IP 가 비면(UserMap 미조회 — 등록 만료/ID 불일치) CMP 의
             //   latch IP guard 가 이 leg 에 한해 무력화된다 — 조용한 약화 방지용 경고.
             if ( strMemberGuardIp.empty() && clsNatSvc.latch_ip_guard != "off" )
-                CLog::Print( LOG_ERROR, "OnCallStarted: member leg NAT without sig-guard ip"
+                CLog::Print( LOG_ERROR,
+                             "OnCallStarted: member leg NAT without sig-guard ip"
                              " (member=%s sdp=%s) — UserMap miss, latch guard disabled",
                              strMemberId.c_str(), strRemoteIp.c_str() );
         }
@@ -1410,7 +1415,8 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                     itRe->second.nConfigHash = ComputeGroupConfigHash( clsGroup );
                 }
             }
-            CLog::Print( LOG_INFO, "OnCallStarted: Group(%s) NOT_FOUND → AddGroup re-established (floor=%d), retry JoinGroup",
+            CLog::Print( LOG_INFO,
+                         "OnCallStarted: Group(%s) NOT_FOUND → AddGroup re-established (floor=%d), retry JoinGroup",
                          strGroupId.c_str(), iReAddFloor );
             bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
                                                iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
@@ -1500,8 +1506,8 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                 for ( const auto &kv : m_mapCallSession )
                     if ( kv.second.strGroupId == strGroupId ) vecPrivPeerLegs.push_back( kv.first );
             }
-            CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)",
-                         strGroupId.c_str(), vecPrivPeerLegs.size() );
+            CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)", strGroupId.c_str(),
+                         vecPrivPeerLegs.size() );
         }
     }
 
@@ -1594,10 +1600,9 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
 // Conference Event Package (RFC 4575) — in-dialog NOTIFY
 // ─────────────────────────────────────────────────────────
 
-std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGroupId,
-                                                        const std::string &strChangedUser, const std::string &strStatus,
-                                                        const std::string &strJoining,
-                                                        std::vector<std::pair<std::string, std::string>> *pvecLegsOut ) {
+std::string CGroupCallService::BuildConferenceInfoBody(
+    const std::string &strGroupId, const std::string &strChangedUser, const std::string &strStatus,
+    const std::string &strJoining, std::vector<std::pair<std::string, std::string>> *pvecLegsOut ) {
     // 1. Collect established legs for this group + bump version
     //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대는 ①다이얼로그가 없어 NOTIFY 가
     //    성립하지 않고 ②참가자 명단에 실리면 '아직 참여하지 않은 초대 대상'이 참여자로 표시된다.

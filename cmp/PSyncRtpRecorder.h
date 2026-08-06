@@ -29,6 +29,10 @@ public:
                      const std::string& caller = "", const std::string& callee = "");
     ~PSyncRtpRecorder();
 
+    /** PTT 세션 디렉터리 이름 (CSP 가 PTT_GROUP_ADD 의 session_dir 로 지정) — 시간버킷
+     *  아래 한 겹 더. 기록 단위가 세션이므로 같은 시간대의 다음 통화와 섞이지 않는다. */
+    void setSessionSubdir(const std::string& name) { _sesSubdir = name; }
+
     /** 트랙 추가 (prefix: "a", "b", "va", "vb", "audio", "video" 등) */
     void addTrack(const std::string& prefix);
 
@@ -36,9 +40,11 @@ public:
     void startSegment(int seq, const std::string& speakerId = "",
                       int priority = -1, bool preempted = false, const std::string& preemptedFrom = "");
 
-    /** PTT 세그먼트 시작 — 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH}/seg/{NNN}/ 에 기록.
-     *  seq 는 시간(HH) 버킷 단위 — 버킷 진입 시 segments.jsonl 의 마지막 seq 를 이어받는다
-     *  (세션 재시작으로 레코더가 새로 만들어져도 같은 버킷의 이전 세그먼트를 덮어쓰지 않음),
+    /** PTT 세그먼트 시작 — 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH}/{sesdir}/seg/{NNN}/ 에 기록.
+     *  seq 는 **세션 단위 단조증가** — 세션이 시간버킷을 넘어가도 리셋하지 않는다(넘어간
+     *  버킷의 segments.jsonl 과 seq 가 겹치지 않아야 이력 API 가 한 세션으로 이어붙일 수
+     *  있다). 레코더가 새로 만들어진 경우(CMP 재기동 후 같은 세션 복귀)에만 그 디렉터리
+     *  segments.jsonl 의 마지막 seq 를 이어받는다,
      *  shard = (seq-1)/100 → seg/000(1~100), seg/001(101~200) …
      *  audioPt/audioCodec: 화자 leg 의 ingress audio PT·코덱(user_src_pt/user_codec) —
      *  세그먼트 메타(audio_pt/audio_codec)로 기록되어 변환기의 PT 판별 근거가 된다. */
@@ -133,8 +139,9 @@ private:
     std::string _curSegDir;        // seg_*.rtp / seg_*.json 위치
     std::string _curIndexDir;      // segments.jsonl 위치 (VoIP=_baseDir, PTT=시간버킷)
     // PTT 시간버킷 + shard
-    std::string _curHourDir;       // 현재 시간버킷 {base}/{YYYY}/{MM}/{DD}/{HH}
-    int _hourSeq = 0;              // 현재 시간 내 세그먼트 시퀀스 (시간 바뀌면 리셋)
+    std::string _sesSubdir;        // PTT 세션 디렉터리 이름 S{ts}_{n} (빈값=레거시 버킷 직행)
+    std::string _curHourDir;       // 현재 기록 디렉터리 {base}/{YYYY}/{MM}/{DD}/{HH}[/{sesdir}]
+    int _hourSeq = 0;              // 세션 내 세그먼트 시퀀스 (시간버킷을 넘어도 이어진다)
 
     void _openTracks();            // _curSegDir 에 등록 트랙 파일 열기 (공통)
     void _openTrack(Track& t);     // 트랙 1개 열기 (세그먼트 중 추가된 트랙 포함)

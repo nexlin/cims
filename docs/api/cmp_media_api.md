@@ -364,7 +364,8 @@ member 키 `(node, session_id)`.
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
 | `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke, t7_idle_resend, t20_grant_retx}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
 | `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
-| `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
+| `record_dir` | - | 녹취 그룹 base 디렉토리 (있으면 녹취 시작) |
+| `session_dir` | - | 세션 디렉터리 이름 `S{yyyymmddHHMMSSuuuuuu}_{n}` — 기록 자리는 `record_dir/{YYYY}/{MM}/{DD}/{HH}/{session_dir}/`. 기록 단위가 세션이라 같은 시간대의 다음 통화가 앞 통화에 섞이지 않는다. 미전달 시 시간버킷 직행(구 동작). 세그먼트 `seq` 는 **세션 단위 단조증가** — 세션이 시간버킷을 넘어가도 리셋하지 않는다 ([recording.md §3.3](../design/features/recording.md)) |
 
 응답 payload: `ip`, `floor_port`(그룹 공유 floor control 포트 — `floor_control:"off"` 면
 **생략**), `member_ports`(멤버별 전용 RTP 포트 맵 — members 로 전달된 초기 로스터에 대해 할당).

@@ -110,12 +110,12 @@ void PSyncRtpRecorder::startPttSegment(const std::string& speakerId,
 
     std::string hourDir = _hourDirNow();
     if (hourDir != _curHourDir) {
+        // 첫 진입(레코더 신규 생성)에서만 인덱스의 마지막 seq 를 이어받는다 — CMP 재기동
+        // 후 같은 세션 디렉터리로 복귀했을 때 이전 세그먼트를 덮어쓰지 않기 위함.
+        // 세션 도중의 시간버킷 전환은 리셋하지 않는다: seq 가 세션 전체에서 유일해야
+        // 이력 API 가 여러 버킷의 segments.jsonl 을 한 세션으로 이어붙일 수 있다.
+        if (_curHourDir.empty()) _hourSeq = _lastIndexedSeq(hourDir);
         _curHourDir = hourDir;
-        // 버킷 내 seq 이어받기 — _hourSeq 는 레코더 인스턴스 메모리라, 세션 재시작
-        // (새 그룹/레코더)이 같은 시간버킷에 들어오면 1부터 다시 매겨 이전 세션의
-        // seg_NNNN_* 파일을 덮어쓴다. append-only 인덱스(segments.jsonl)가 정본이므로
-        // 거기 마지막 seq 뒤에 이어붙인다.
-        _hourSeq = _lastIndexedSeq(hourDir);
     }
     int seq = ++_hourSeq;
     int shard = (seq - 1) / 100;          // 100 세그먼트 단위 shard
@@ -426,7 +426,8 @@ std::string PSyncRtpRecorder::_hourDirNow() {
     char buf[32];
     snprintf(buf, sizeof(buf), "/%04d/%02d/%02d/%02d",
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
-    return _baseDir + buf;
+    // 세션 디렉터리가 지정되면 버킷 아래 한 겹 더 (기록 단위 = 세션).
+    return _sesSubdir.empty() ? _baseDir + buf : _baseDir + buf + "/" + _sesSubdir;
 }
 
 void PSyncRtpRecorder::_mkdirP(const std::string& path) {

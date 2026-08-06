@@ -473,9 +473,8 @@ CmpEndpoint CCmpClient::SelectEndpointForSession( const std::string &strSessionI
 bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort,
                              int &iLocalVideoPort, int &iLocalPortB, int &iLocalVideoPortB,
                              const std::string &strRecordDir, const std::string &strCaller,
-                             const std::string &strCallee, const std::string &strRmtIp, int iRmtPort,
-                             int iRmtVideoPort, const std::string &strSesId, int iRemoteNat,
-                             const std::string &strRemoteSigIp,
+                             const std::string &strCallee, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
+                             const std::string &strSesId, int iRemoteNat, const std::string &strRemoteSigIp,
                              int iRemotePt, int iRemoteSrcPt, int iRemoteTePt, int iRemoteSrcTePt,
                              const std::string &strRemoteCodec ) {
     SimpleJson::JsonNode req;
@@ -536,9 +535,8 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
 bool CCmpClient::ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort,
                                 int iRmtVideoPort, int iPeerIdx, const std::string &strCaller,
                                 const std::string &strCallee, const std::string &strSesId, int iRemoteNat,
-                                const std::string &strRemoteSigIp,
-                                int iRemotePt, int iRemoteSrcPt, int iRemoteTePt, int iRemoteSrcTePt,
-                                const std::string &strRemoteCodec ) {
+                                const std::string &strRemoteSigIp, int iRemotePt, int iRemoteSrcPt, int iRemoteTePt,
+                                int iRemoteSrcTePt, const std::string &strRemoteCodec ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_MODIFY" );
     req.Set( "session_id", strSessionId );
@@ -621,7 +619,8 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
                            std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
                            bool bVideoEnabled, int iSessionSeq, const std::string &strSesId,
                            const std::string &strGroupType, const std::string &strInitiator,
-                           const std::string &strFloorPolicy, int iMaxTalkers, const std::string &strFloorControl ) {
+                           const std::string &strFloorPolicy, int iMaxTalkers, const std::string &strFloorControl,
+                           const std::string &strSessionDir ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_GROUP_ADD" );
     req.Set( "group_id", strGroupId );
@@ -638,6 +637,8 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
 
     req.Set( "subid", std::to_string( iSessionSeq > 0 ? iSessionSeq : 1 ) );
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
+    // 기록 단위 = 세션. record_dir 하위 {시간버킷}/{session_dir}/ 이 이 세션의 산출물 자리다.
+    if ( !strSessionDir.empty() ) req.Set( "session_dir", strSessionDir );
     if ( bVideoEnabled ) req.Set( "video_enabled", 1 );
     // group_type / initiator — broadcast 그룹 floor 독점(TS 24.380 §10.3) 판정용.
     //   broadcast: 개시자(initiator)만 floor 보유, 타 멤버 REQUEST 는 CMP 가 REJECT.
@@ -888,10 +889,9 @@ void CCmpClient::SetAuditConfig( bool bEnable, int iGraceSec, int iMaxPerCycle, 
     m_strHaRole = strHaRole.empty() ? "auto" : strHaRole;
     m_strHaVip = strHaVip;
     ResolveActiveRole();  // 초기 역할 확정 (이후 매 audit cycle 재평가)
-    CLog::Print( LOG_INFO,
-                 "CmpClient audit: enable=%d grace=%ds max=%d zombie_teardown=%d role=%s vip=%s(active=%d)",
-                 m_bAuditEnable, m_iAuditGraceSec, m_iAuditMaxPerCycle, m_bAuditZombieTeardown,
-                 m_strHaRole.c_str(), m_strHaVip.empty() ? "-" : m_strHaVip.c_str(), m_bAuditActiveRole.load() );
+    CLog::Print( LOG_INFO, "CmpClient audit: enable=%d grace=%ds max=%d zombie_teardown=%d role=%s vip=%s(active=%d)",
+                 m_bAuditEnable, m_iAuditGraceSec, m_iAuditMaxPerCycle, m_bAuditZombieTeardown, m_strHaRole.c_str(),
+                 m_strHaVip.empty() ? "-" : m_strHaVip.c_str(), m_bAuditActiveRole.load() );
 }
 
 // 로컬 인터페이스 중 strIp 를 소유한 게 있는지 (getifaddrs). VIP 소유 = 이 노드가 active.
@@ -928,8 +928,8 @@ void CCmpClient::ResolveActiveRole() {
     m_bAuditActiveRole = bActive;
     if ( bActive != m_bLastActiveRole ) {
         CLog::Print( LOG_INFO, "Audit HaRole 전환: %s → %s (role=%s vip=%s%s)",
-                     m_bLastActiveRole ? "active" : "standby", bActive ? "active" : "standby",
-                     m_strHaRole.c_str(), m_strHaVip.empty() ? "-" : m_strHaVip.c_str(),
+                     m_bLastActiveRole ? "active" : "standby", bActive ? "active" : "standby", m_strHaRole.c_str(),
+                     m_strHaVip.empty() ? "-" : m_strHaVip.c_str(),
                      ( m_strHaRole == "auto" && !m_strHaVip.empty() ) ? ( bActive ? " 소유" : " 미소유" ) : "" );
         m_bLastActiveRole = bActive;
         m_bAuditStandbyLogged = false;  // 전환 시 재로그 허용
@@ -977,7 +977,8 @@ bool CCmpClient::FetchSessionList( const CmpEndpoint &ep, const std::string &str
 void CCmpClient::RunAuditCycle() {
     if ( !m_bAuditEnable ) return;
 
-    ResolveActiveRole();  // 매 cycle 역할 재평가 — HaRole=auto+HaVip 시 VIP 소유로 active/standby 갱신(hot-standby 승격 반영)
+    ResolveActiveRole();  // 매 cycle 역할 재평가 — HaRole=auto+HaVip 시 VIP 소유로 active/standby 갱신(hot-standby 승격
+                          // 반영)
 
     std::vector<CmpEndpoint> eps;
     {
@@ -1020,19 +1021,18 @@ void CCmpClient::RunAuditCycle() {
         // 불일치 — standby 는 탐지·로그만(오회수 방지), active 만 회수.
         if ( !m_bAuditActiveRole ) {
             if ( !m_bAuditStandbyLogged ) {
-                CLog::Print(
-                    LOG_INFO,
-                    "Audit: shard(%s) digest mismatch observed (standby role — no reclaim). csp[%d,%016llx] cmp[%d,%016llx]",
-                    ep.strKey.c_str(), iCspCount, (unsigned long long)uCspHash, dg.iCount,
-                    (unsigned long long)dg.uHash );
+                CLog::Print( LOG_INFO,
+                             "Audit: shard(%s) digest mismatch observed (standby role — no reclaim). csp[%d,%016llx] "
+                             "cmp[%d,%016llx]",
+                             ep.strKey.c_str(), iCspCount, (unsigned long long)uCspHash, dg.iCount,
+                             (unsigned long long)dg.uHash );
                 m_bAuditStandbyLogged = true;
             }
             continue;
         }
         m_bAuditStandbyLogged = false;
 
-        CLog::Print( LOG_INFO,
-                     "Audit: shard(%s) digest mismatch — reconciling. csp[%d,%016llx] cmp[%d,%016llx]",
+        CLog::Print( LOG_INFO, "Audit: shard(%s) digest mismatch — reconciling. csp[%d,%016llx] cmp[%d,%016llx]",
                      ep.strKey.c_str(), iCspCount, (unsigned long long)uCspHash, dg.iCount,
                      (unsigned long long)dg.uHash );
         ReconcileShard( ep, shard );
@@ -1084,8 +1084,8 @@ void CCmpClient::ReconcileShard( const CmpEndpoint &ep, const std::set<std::stri
     }
     if ( iZombie > 0 ) {
         if ( m_bAuditZombieTeardown )
-            CLog::Print( LOG_INFO, "Audit zombie teardown: %d/%d call(s) 종료 (shard=%s CSP有 CMP無)", iTorn,
-                         iZombie, ep.strKey.c_str() );
+            CLog::Print( LOG_INFO, "Audit zombie teardown: %d/%d call(s) 종료 (shard=%s CSP有 CMP無)", iTorn, iZombie,
+                         ep.strKey.c_str() );
         else
             CLog::Print( LOG_INFO,
                          "Audit: zombie relay %d건 감지 (shard=%s CSP有 CMP無 — 미디어 소실). teardown 비활성(탐지만); "
@@ -1243,8 +1243,8 @@ void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
             std::lock_guard<std::mutex> lock( m_mutexSesid );
             m_mapKeyToSesid.erase( strSid );
         }
-        CLog::Print( LOG_INFO, "RELAY_ABORTED handled: relay=%s reason=%s held=%ds torn_down=%d",
-                     strSid.c_str(), strReason.c_str(), iHeld, bDone );
+        CLog::Print( LOG_INFO, "RELAY_ABORTED handled: relay=%s reason=%s held=%ds torn_down=%d", strSid.c_str(),
+                     strReason.c_str(), iHeld, bDone );
     } else if ( strCmd == "PTT_GROUP_ABORTED" ) {
         std::string strGid = payload.GetString( "group_id" );
         std::string strReason = payload.GetString( "reason" );
