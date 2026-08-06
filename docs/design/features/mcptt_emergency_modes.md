@@ -21,38 +21,20 @@
 
 ## 2. 데이터 모델 (DB)
 
-마이그레이션 `sql/migrate_ptt_emergency.sql`:
+`ptt_groups` capability (TS 24.481 group config, `sql/cims_schema.sql`):
 
-```sql
--- 그룹 능력(capability) — TS 24.481 group config
-ALTER TABLE ptt_groups
-  ADD COLUMN imminent_peril_call   TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'allow-imminent-peril-call',
-  ADD COLUMN emergency_alert       TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'allow-MCPTT-emergency-alert',
-  ADD COLUMN adhoc_enabled         TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'ad hoc 그룹콜 허용';
--- emergency_call 은 기존 컬럼 재사용(allow-MCPTT-emergency-call)
+- `emergency_call` — allow-MCPTT-emergency-call. **condition(긴급·임박위험) 공통 게이트** —
+  두 tier 는 floor 서열만 다르고 능력 축은 하나로 둔다(별도 임박위험 컬럼 없음).
+  XCAP `allow-imminent-peril-call` 은 이 값의 미러로 산출한다.
+- `emergency_alert` — allow-MCPTT-emergency-alert (기본 1).
 
--- 진행 중 상태(in-progress) — 세션 런타임. CSP가 권위(authoritative), DB는 관측·복구용.
-ALTER TABLE ptt_groups
-  ADD COLUMN inprogress_emergency  TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'in-progress emergency 상태',
-  ADD COLUMN inprogress_imminent   TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'in-progress imminent peril';
+ad hoc 은 그룹 컬럼을 두지 않는다 — 임시 그룹은 비영속 in-memory(ephemeral)로만 존재하고(§6),
+인가는 판정 시점에 그룹이 없으므로 그룹 속성이 아니라 **사용자/시스템 정책** 소관이다(미구현, §9).
 
--- 사용자 MCPTT 프로파일(TS 24.483) — 기본 긴급/임박 그룹, 긴급 개시 권한
-CREATE TABLE IF NOT EXISTS ptt_user_profile (
-  user_id                     INT NOT NULL PRIMARY KEY,
-  allow_emergency_init        TINYINT(1) NOT NULL DEFAULT 1,
-  allow_alert_init            TINYINT(1) NOT NULL DEFAULT 1,
-  default_emergency_group_id  BIGINT NULL,
-  default_imminent_group_id   BIGINT NULL,
-  CONSTRAINT fk_pup_user  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
--- ad hoc 멤버는 ptt_group_members 재사용 + 그룹에 adhoc 표식
-ALTER TABLE ptt_groups
-  ADD COLUMN is_adhoc TINYINT(1) NOT NULL DEFAULT 0 COMMENT '동적 생성 임시 그룹',
-  ADD COLUMN adhoc_expires_at DATETIME NULL COMMENT 'ad hoc TTL(미사용 시 sweep 삭제)';
-```
-
-`in-progress` 상태를 DB에도 두는 이유: CSP 재기동 시 진행 중 긴급 세션의 관측/콘솔 표시·OAM stat. CSP가 SoT, 비동기 미러.
+**미구현 (향후 과제, §9)**:
+- in-progress 상태 DB 미러 — 현재 CSP 인메모리(`m_mapGroupCondition`) + events.jsonl 관측만.
+  CSP 재기동 시 진행 중 긴급 상태는 소실된다.
+- 사용자 MCPTT 프로파일(TS 24.483 — 긴급/경보 개시 권한, 기본 긴급그룹). 사용자 단위 게이트 없음.
 
 ---
 
@@ -81,7 +63,8 @@ else                              bPreempt = (reqPrio < ownPrio); // 동tier·�
 ```
 
 - broadcast 독점 검사는 **그대로 최우선**(기존). 단, **개시자의 emergency**는 그대로 통과(개시자만 floor).
-- emergency/imminent 발언자는 **T2(최대 발언시간) 제한에서 제외**한다(긴급 중 장시간 발언 허용).
+- emergency 발언자는 **T2(최대 발언시간) 제한에서 제외**한다(긴급 중 장시간 발언 허용).
+  imminent 발언자는 T2 를 일반 적용한다.
   T1(무RTP 발언 종료 판정)은 tier 와 무관하게 동일 적용된다 — 규격상 T1 은 징벌이 아니라
   "발언이 끝났다"는 판정이고, 긴급 화자만 예외로 두면 조용해진 긴급 화자가 floor 를 무한
   점유해 다음 긴급 발언자가 막힌다.
@@ -121,22 +104,30 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 ### 4.2 긴급 개시 / 업그레이드 / 취소
 
 - **개시**: 그룹 INVITE에 `emergency-ind=true` → `ProcessGroupCall(condition=EMERGENCY)`:
-  1. 그룹 capability `emergency_call` + 개시자 `allow_emergency_init` 게이트(불허 시 SIP 4xx 또는 강등).
+  1. 그룹 capability `emergency_call` 게이트 — condition(긴급·임박) 공통. 불허 시 normal 로
+     강등 수용(호는 거절하지 않는다). 개시자(사용자) 단위 게이트는 미구현(§9).
   2. in-progress emergency 설정(메모리 + DB 미러), 개시자에 MCPTT emergency state.
   3. CMP `ADD/PTT_GROUP_MODIFY`에 `emergency=1`(+개시자 tier=emergency) → floor 선점 보장.
   4. fan-out INVITE의 `mcptt-info`에 `<emergency-ind>true` 광고(`BuildGroupInfoXml` 확장).
   5. 자원 우선순위: 송출 INVITE에 `Resource-Priority` 헤더(RFC 4412, namespace `mcpttp.x`) 부가.
 - **업그레이드**: 진행 중 그룹콜에 re-INVITE(`emergency-ind=true`) → `EventReInvite`의 **PTT 인지 분기** → `PTT_FLOOR_TIER`/`PTT_GROUP_MODIFY`로 floor만 격상, 멤버에 re-INVITE/UPDATE 전파.
 - **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀, 상태 클리어. 비권한자 취소 무시(규격).
-- **imminent peril**: 동일 경로의 `imminentperil-ind`, tier=IMMINENT.
+- **imminent peril**: 동일 경로의 `imminentperil-ind`, tier=IMMINENT. capability 는
+  `emergency_call` 공통 게이트를 따른다.
 
 ### 4.3 emergency alert (SIP MESSAGE)
 
 `EventMessage`에서 `mcptt-info`(`alert-ind=true`) 판별 → SMS 경로와 분기:
-- alert capability(`emergency_alert`) + 사용자 `allow_alert_init` 게이트.
-- 대상 그룹 멤버에게 alert fan-out(MESSAGE 또는 그룹 NOTIFY) + 위치/신원 포함.
-- `CallDir`에 `alert_sent`/`alert_cancelled` 이벤트 기록(그룹 events.jsonl + 전용 보안/긴급 로그).
-- 취소(`alert-ind=false`) 권한자만.
+- alert capability(`emergency_alert`) 게이트 — 허용 시에만 그룹 등록 멤버에게 같은 MESSAGE 를
+  fan-out(발신자 제외, affiliation 요구 그룹은 affiliate 된 멤버만). 취소(`alert-ind=false`)도
+  동일 본문 전파. 등록(온라인) 멤버에게만 전달된다 — 저장 후 전달(경보 보류함)은 없다.
+- `CallDir`에 `alert_sent`/`alert_cancelled` 이벤트 기록(그룹 events.jsonl).
+- **단말(ptt-client)**: SOS 개시가 규격 시퀀스대로 **경보 MESSAGE 를 먼저** 보내고 긴급콜을
+  개시한다(`McpttXml.alertInfo` + `PttController.sendAlert` — 호 성립과 무관하게 신원·그룹 전파).
+  SOS 해제 시 경보 취소도 함께. 수신 측은 mcptt-info MESSAGE 를 파싱해 활성 경보
+  상태(`alerts` StateFlow)로 들고, 전 탭 상단 배너(`AlertBanner`)+경고음으로 표시 —
+  발신자 취소로 자동 해제, [닫기]는 로컬 표시만 제거. 이력 이벤트 `ALERT/ALERT_IN/ALERT_END`.
+- 사용자 단위 개시 권한(`allow_alert_init`)은 미구현(§9).
 
 ### 4.4 상태/로깅
 
@@ -146,10 +137,12 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 ## 5. CSC — 능력/프로파일 (TS 24.481/483/484)
 
-- **XCAP group config**(`mcptt.py get_group_xml`): `allow-imminent-peril-call`·`allow-MCPTT-emergency-alert`를 DB값(`imminent_peril_call`,`emergency_alert`)으로 산출. ad-hoc 정책 element 추가(선택).
-- **user profile**(`get_user_profile_xml`): `ptt_user_profile`에서 `default_emergency_group`·`allow-emergency-call/alert`를 DB 연동.
-- **service config**(`get_service_config_xml`): `allow-emergency-call/allow-alert`를 user 프로파일과 정합.
-- **admin API**(`admin.py` group create/update): `imminent_peril_call`·`emergency_alert`·`adhoc_enabled` 수용 + INSERT/UPDATE. user MCPTT 프로파일 엔드포인트 `PUT /users/{id}/mcptt-profile` 신설.
+- **XCAP group config**(`mcptt.py get_group_xml`): `allow-MCPTT-emergency-call`·
+  `allow-imminent-peril-call`(=`emergency_call` 미러)·`allow-MCPTT-emergency-alert`(=`emergency_alert`)
+  산출 — 규격 요소는 셋 다 내보내되 설정 축은 둘이다.
+- **admin API**(`admin.py` group create/update): `emergency_call`·`emergency_alert` 수용 + INSERT/UPDATE.
+- user profile XML 의 DB 연동(`default_emergency_group`·`allow-emergency-call/alert`)과
+  user MCPTT 프로파일 엔드포인트는 미구현(§9) — 현재 정적/기본값.
 - **notify_csp**: capability 변경은 `GROUP_CHANGED`로 전파(CSP lazy-reload). in-progress 상태는 CSP→CSC 역방향 보고가 필요할 수 있음(관측용, 선택).
 
 ---
@@ -158,17 +151,28 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 사전 프로비저닝 없이 개시 시점에 멤버를 동적 구성:
 
-- **개시 입력**: INVITE의 `resource-lists+xml`(멤버 URI 목록) + `mcptt-info`(adhoc 표식). 또는 콘솔/Admin이 ad-hoc 그룹을 즉석 생성.
-- **CSP 처리**: 영속 그룹 없이 **임시 CspPttGroup** 구성(temp group-id 발급, `is_adhoc=1`로 DB에 단명 레코드 + `adhoc_expires_at`), 멤버 fan-out, CMP `PTT_GROUP_ADD`. broadcast/emergency 조건도 ad-hoc 위에 얹힘.
-- **수명**: 마지막 멤버 이탈 시 즉시 teardown(on-demand와 동일) + DB 레코드 sweep(만료/빈 ad-hoc). chat형 ad-hoc은 비범위.
-- **권한**: 개시자/그룹 정책 `adhoc_enabled`.
+- **개시 입력**: INVITE의 `resource-lists+xml`(멤버 URI 목록). 단말(ptt-client)은 **연락처 탭
+  long-press 다중 선택 → [그룹통화 N]** 으로 발신(`PttController.startAdhocCall`).
+- **임시 그룹 ID**: 단말이 `adhoc-<발신자번호>-<epoch초>` 로 생성. `adhoc-`/`priv-` 접두사는
+  **편성 그룹 ID 예약어** — CSC admin 이 그룹 생성 시 400 거부해 즉석 세션 라우팅과의 충돌을
+  차단한다.
+- **CSP 처리**: 영속 그룹 없이 **임시 CspPttGroup** 구성(in-memory, `_isAdhoc` — DB 레코드 없음),
+  멤버 fan-out, CMP `PTT_GROUP_ADD`. broadcast/emergency 조건도 ad-hoc 위에 얹힘.
+- **수명**: 마지막 멤버 이탈 시 즉시 teardown(on-demand와 동일) + GroupMap 에서 제거(ephemeral).
+  단말도 대칭 — 애드혹 세션은 채널 영속(ChannelStore)·affiliation·로스터 구독 대상이 아니고
+  (참가자는 in-dialog NOTIFY 폴백), 통화 중엔 전용 오버레이(`AdhocCallOverlay`)가 전면 표시되며
+  PTT 는 애드혹 세션을 주채널보다 우선한다. chat형 ad-hoc은 비범위.
+- **권한**: 시스템 정책 `Setup.PttAdhocEnabled`(csp.json, 미지정 시 허용) — false 면 임시 그룹을
+  합성하지 않는다(이후 비가입 착신 거절). 판정 시점에 그룹이 존재하지 않으므로 그룹 속성으로는
+  성립 불가 — **사용자 단위 인가**는 MCPTT 프로파일 트랙(§9)에서.
 
 ---
 
 ## 7. 콘솔/관측
 
-- **그룹 편집(PttGroupsWorkbenchPage)**: capability 체크박스 추가 — 임박위험 허용, 긴급경보 허용, ad-hoc 허용. (emergency_call 기존)
-- **사용자(ProvisioningWorkbench)**: MCPTT 프로파일 섹션(기본 긴급그룹, 긴급/경보 개시 권한).
+- **그룹 편집(PttGroupsWorkbenchPage)**: capability 체크박스 — 긴급콜(condition 공통 게이트),
+  긴급경보. (임박위험·ad-hoc 은 별도 축을 두지 않는다 — §2.)
+- **사용자(ProvisioningWorkbench)**: MCPTT 프로파일 섹션(기본 긴급그룹, 긴급/경보 개시 권한) — 미구현(§9).
 - **PTT 세션 이력**: 진행 중/과거 emergency·imminent 에피소드, alert 발신 타임라인 표시(events.jsonl·floor.jsonl tier 활용).
 - **OAM stats**: 긴급콜/경보 카운터, 진행 중 긴급 그룹 수.
 
@@ -193,13 +197,18 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 1. **floor 패킷 priority 필드**: UE가 REQUEST에 priority/emergency를 실어보내는 규격 동작을 수용할지(상호운용), 아니면 CMP 중앙판정만 쓸지. → 중앙판정 + 패킷필드 옵션 파싱.
 2. **in-progress 상태 DB 미러**: CSP→CSC 역보고 채널이 없으면 관측 정확도 한계. group.json/flow로 관측, DB 미러는 best-effort.
 3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
-4. **ad hoc 멤버 소스**: UE resource-lists vs 콘솔 즉석생성 우선순위.
+4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
+   인원을 골라 서버가 개시하는 dispatcher 입구는 미착수.
+5. **사용자 단위 인가**: 긴급/경보 개시 권한·ad hoc 개시 권한(현재 무게이트)·기본 긴급그룹 —
+   사용자 MCPTT 프로파일(TS 24.483) 트랙으로 일괄 설계.
+6. **in-call 업그레이드 capability 게이트**: 개시(INVITE)만 게이트하고 re-INVITE 업그레이드는
+   미적용 — `emergency_call=0` 그룹도 통화 중 격상 가능.
 
 ---
 
 ## 10. 관련 파일
 
-- DB: `sql/migrate_ptt_emergency.sql`
+- DB: `sql/cims_schema.sql` (`ptt_groups.emergency_call`/`emergency_alert`)
 - CMP: `cmp/PMcpttGroup.{h,cpp}`(tier·선점·로깅), `cmp/PCmpServer.cpp`(명령 파싱)
 - CSP: `csp/McpttInfo.{h,cpp}`(파서), `csp/ModuleDispatcher.cpp`(EventIncomingCall/EventReInvite/EventMessage), `csp/GroupCallService.cpp`(condition·fan-out·descriptor), `csp/CmpClient.cpp`(필드 전송), `csp/CspPttGroup.{h,cpp}`·`csp/DbManager.cpp`(컬럼), `csp/CallDir.h`(이벤트)
 - CSC: `csc/src/services/mcptt.py`(XCAP DB연동), `csc/src/handlers/admin.py`(CRUD·user 프로파일)

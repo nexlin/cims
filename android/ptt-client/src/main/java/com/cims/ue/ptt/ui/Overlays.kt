@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.cims.ue.ptt.ActiveAlert
 import com.cims.ue.ptt.GroupCallState
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.PttController
@@ -57,6 +58,27 @@ fun EmergencyBanner(e: GroupCallState, ctl: PttController?, modifier: Modifier =
             Text("해제", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.plainClickable { ctl?.cancelEmergency() }.padding(8.dp))
         }
+    }
+}
+
+/** 수신 긴급경보 배너 — 통화 없는 위험 통지(TS 24.379 emergency alert).
+ *  발신자의 취소 MESSAGE 로 자동 해제되고, [닫기] 는 이 단말의 표시만 지운다. */
+@Composable
+fun AlertBanner(a: ActiveAlert, groupName: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier.fillMaxWidth().padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Ct.RedDim)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("🚨 긴급경보 — ${a.userId}", color = Ct.Red,
+                fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(groupName, color = Color.White, fontSize = 11.sp)
+        }
+        Text("닫기", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.plainClickable(onDismiss).padding(8.dp))
     }
 }
 

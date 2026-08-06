@@ -64,6 +64,8 @@ class PttUiState(
     val spkGain: Float,
     val micGain: Float,
     val hasAccount: Boolean,
+    /** 활성 긴급경보(수신+내 발신) — 통화와 별개인 위험 통지. */
+    val alerts: List<com.cims.ue.ptt.ActiveAlert> = emptyList(),
 ) {
     val primary: GroupCallState? get() = sessions.firstOrNull { it.role == com.cims.ue.ptt.ChannelRole.PRIMARY }
     val inCall: Boolean get() = sessions.any { it.active || it.callId >= 0 }
@@ -98,6 +100,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbHeadsets = remember { MutableStateFlow<List<com.cims.ue.ptt.audio.AudioRouter.Headset>>(emptyList()) }
     val fbSpkGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_SPK_GAIN) }
     val fbMicGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_MIC_GAIN) }
+    val fbAlerts = remember { MutableStateFlow<List<com.cims.ue.ptt.ActiveAlert>>(emptyList()) }
 
     val st = PttUiState(
         ctl = ctl,
@@ -117,6 +120,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         spkGain = (ctl?.spkGain ?: fbSpkGain).collectAsState().value,
         micGain = (ctl?.micGain ?: fbMicGain).collectAsState().value,
         hasAccount = remember(ctl) { com.cims.ue.core.account.SsoProvisioner.hasAccount(context) },
+        alerts = (ctl?.alerts ?: fbAlerts).collectAsState().value,
     )
 
     // SSO: 컨트롤러 연결 시 CIMS 공유 계정의 MCPTT(TS 33.180) 토큰을 주입(별도 로그인 없음).
@@ -226,6 +230,10 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         // 어느 탭/화면에 있든 표시되고, 나가기/상대 종료로 세션이 사라지면 자동으로 걷힌다.
         st.sessions.firstOrNull { it.privatePeer }?.let { PrivateCallOverlay(st, it) }
 
+        // 애드혹(즉석 그룹) 통화 화면 — 임시 그룹 세션이 있는 동안 전면 오버레이
+        st.sessions.firstOrNull { com.cims.ue.ptt.PttController.isAdhocId(it.groupId) }
+            ?.let { AdhocCallOverlay(st, it) }
+
         // 하드웨어 버튼 설정 오버레이 — 같은 Activity 윈도우(물리 키가 dispatchKeyEvent 로 유입되게)
         if (showKeyConfig) KeyConfigOverlay(onDismiss = { HwPtt.cancelLearn(); showKeyConfig = false })
     }
@@ -249,6 +257,12 @@ private fun HomeScaffold(
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         // 긴급 상태 — 어느 탭에서든 최상단 붉은 점멸 배너
         st.emergencySession?.let { e -> EmergencyBanner(e, st.ctl, Modifier.padding(horizontal = 16.dp)) }
+        // 수신 긴급경보 — 통화 없는 위험 통지(발신자·그룹). 발신측 취소로 자동 해제.
+        st.alerts.filterNot { it.mine }.forEach { a ->
+            AlertBanner(a, groupName = st.groupName(a.groupId),
+                onDismiss = { st.ctl?.dismissAlert(a.groupId, a.userId) },
+                modifier = Modifier.padding(horizontal = 16.dp))
+        }
 
         Box(Modifier.weight(1f)) {
             when (tab) {

@@ -55,7 +55,11 @@ enum class ChannelRole { PRIMARY, NONE }
 enum class ListenPolicy { CHANNELS_ONLY, ALL }
 
 /** 통화이력용 이벤트 종별. */
-enum class PttEventKind { JOIN, LEAVE, TALK_ME, TALK_OTHER, EMERGENCY, EMERGENCY_IN, EMERGENCY_END }
+enum class PttEventKind { JOIN, LEAVE, TALK_ME, TALK_OTHER, EMERGENCY, EMERGENCY_IN, EMERGENCY_END, ALERT, ALERT_IN, ALERT_END }
+
+/** 활성 긴급경보 (TS 24.379 emergency alert) — 통화와 별개인 위험 통지 상태.
+ *  [mine]=내가 발신(취소 MESSAGE 는 SOS 해제와 함께 나간다). */
+data class ActiveAlert(val groupId: String, val userId: String, val atMs: Long, val mine: Boolean)
 
 /** 통화이력용 이벤트 — [PttController.onEvent] 로 방출(서비스가 HistoryStore 에 영속). */
 data class PttEvent(val kind: PttEventKind, val groupId: String, val peer: String? = null, val durationMs: Long = 0)
@@ -303,6 +307,10 @@ class PttController(
     /** 그룹 목록에서 선택된 그룹(참여 전 하이라이트·affiliation 대상). */
     val selectedGroup: StateFlow<String?> = _selectedGroup.asStateFlow()
 
+    /** 활성 긴급경보 — 수신(fan-out)+내 발신. 취소 MESSAGE 수신/발신 시 해제. */
+    private val _alerts = MutableStateFlow<List<ActiveAlert>>(emptyList())
+    val alerts: StateFlow<List<ActiveAlert>> = _alerts.asStateFlow()
+
     private val _affiliated = MutableStateFlow<Set<String>>(emptySet())
     /** 서버가 2xx 로 확인한 affiliation 그룹(응답 기반 — PUBLISH 송신만으로는 포함하지 않음). */
     val affiliated: StateFlow<Set<String>> = _affiliated.asStateFlow()
@@ -408,6 +416,12 @@ class PttController(
                 if (im.contentType.contains("xcap-diff", ignoreCase = true)) {
                     synchronized(lock) { gmsPendingAt = 0L; gmsConfirmedAt = SystemClock.elapsedRealtime() }
                     runCatching { onXcapDiff(im.body) }
+                    return@collect
+                }
+                // 긴급경보 (TS 24.379 emergency alert) — mcptt-info MESSAGE(alert-ind).
+                //   서버 fan-out 은 원본 본문 그대로 중계(From=발신자)라 그룹은 본문에서 읽는다.
+                if (im.contentType.contains("mcptt-info", ignoreCase = true)) {
+                    runCatching { onAlertMessage(im.fromUri, im.body) }
                     return@collect
                 }
                 if (!im.contentType.contains("conference-info", ignoreCase = true)) return@collect
@@ -900,8 +914,13 @@ class PttController(
                 sessionMap[groupId] = it
             }
         }
-        ensureAffiliated(groupId)
-        channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
+        // 애드혹 임시 그룹은 편성 자산이 아니다 — affiliation(사전 가입 없음)·채널 영속·
+        //   로스터 구독(참가자는 in-dialog NOTIFY 폴백으로 수신)을 모두 건너뛴다.
+        val adhoc = isAdhocId(groupId)
+        if (!adhoc) {
+            ensureAffiliated(groupId)
+            channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
+        }
         val appSdp = floorSdp(s)
         val parts = ArrayList<SipBodyPart>()
         parts.add(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
@@ -910,11 +929,24 @@ class PttController(
         if (members.isNotEmpty())
             parts.add(SipBodyPart("application", "resource-lists+xml", McpttXml.resourceLists(members)))
         sip.makeGroupCall(groupAor(groupId), parts, appSdp)
-        subscribeRoster(groupId, true)
+        if (!adhoc) subscribeRoster(groupId, true)
         _status.value = if (emergency) "🚨 긴급 그룹콜 개시 $groupId" else "그룹콜 참여 $groupId"
         emit(PttEventKind.JOIN, groupId)
         if (emergency) emit(PttEventKind.EMERGENCY, groupId)
         publish()
+    }
+
+    /** 애드혹 그룹통화 발신 (TS 22.179 Rel-18) — 편성 없이 즉석 멤버 지정. 임시 그룹 ID 로
+     *  INVITE 에 resource-lists 멤버 명단을 실어 보내면 서버(CSP)가 비영속 임시 그룹을 합성해
+     *  전원 fan-out 한다. 그룹은 통화 종료와 함께 소멸(양쪽 모두 ephemeral). */
+    fun startAdhocCall(members: List<String>) {
+        val me = bareId(mcpttId)
+        val peers = members.map { bareId(it) }.filter { it.isNotBlank() && it != me }.distinct()
+        if (peers.isEmpty()) { _status.value = "애드혹: 대상 없음"; return }
+        // 임시 ID = adhoc-<발신자>-<epoch초> — 가입자 번호(숫자)·편성 그룹(접두사 예약)과 충돌 불가.
+        val gid = "adhoc-${me.trimStart('+')}-${System.currentTimeMillis() / 1000}"
+        joinGroupCall(gid, members = peers.map { McpttXml.ResourceEntry("tel:$it") })
+        _status.value = "애드혹 그룹통화 개시 — ${peers.size}명"
     }
 
     /** 1:1 private call 발신 (TS 24.379 §11.1 on-demand — mcptt-info session-type=private).
@@ -1006,8 +1038,11 @@ class PttController(
             }
         }
         sip.answerGroupCall(inc.id, floorSdp(s))
-        subscribeRoster(groupId, true)
-        channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
+        // 애드혹 임시 그룹 수신 — 편성 채널이 아니므로 영속/구독 제외 (발신측 joinGroupCall 과 대칭)
+        if (!isAdhocId(groupId)) {
+            subscribeRoster(groupId, true)
+            channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
+        }
         if (inc.emergency) feedback?.emergencyTone()
         _status.value = if (inc.emergency) "🚨 긴급 그룹콜 자동 참여: $groupId" else "그룹콜 자동 참여: $groupId"
         emit(PttEventKind.JOIN, groupId)
@@ -1469,6 +1504,7 @@ class PttController(
         val s = primarySession()
         if (s == null) {
             val gid = _selectedGroup.value ?: run { _status.value = "긴급: 대상 그룹 없음"; return }
+            sendAlert(gid, true)   // 규격 시퀀스: 경보 먼저(말 못 해도 신원·그룹은 전파), 통화 다음
             joinGroupCall(gid, emergency = true)
             feedback?.emergencyTone()
             return
@@ -1476,6 +1512,7 @@ class PttController(
         if (s.emergency) { _status.value = "[${s.groupId}] 이미 긴급 상태"; return }
         s.emergency = true
         s.emergencyMine = true
+        sendAlert(s.groupId, true)
         if (s.callId >= 0) sendConditionReinvite(s, emergency = true)
         feedback?.emergencyTone()
         _status.value = "🚨 [${s.groupId}] 긴급 개시"
@@ -1486,13 +1523,73 @@ class PttController(
     /** 긴급 해제 — 개시자만 유효(서버는 비개시자의 취소 re-INVITE 를 무시, TS 24.379). */
     fun cancelEmergency() {
         val s = synchronized(lock) { sessionMap.values.firstOrNull { it.emergency && it.emergencyMine } }
-            ?: run { _status.value = "해제할 긴급 없음(개시자만 해제 가능)"; return }
+        if (s == null) {
+            // 호 성립 전 SOS(경보만 나감)·호 실패 잔존 — 내 경보만이라도 취소한다.
+            val mine = _alerts.value.firstOrNull { it.mine }
+                ?: run { _status.value = "해제할 긴급 없음(개시자만 해제 가능)"; return }
+            sendAlert(mine.groupId, false)
+            _status.value = "[${mine.groupId}] 긴급경보 해제"
+            publish()
+            return
+        }
         s.emergency = false
         s.emergencyMine = false
+        sendAlert(s.groupId, false)
         if (s.callId >= 0) sendConditionReinvite(s, emergency = false)
         _status.value = "[${s.groupId}] 긴급 해제"
         emit(PttEventKind.EMERGENCY_END, s.groupId)
         publish()
+    }
+
+    /** 긴급경보 MESSAGE 발신/취소 — SOS 개시/해제와 한 쌍 (TS 24.379 emergency alert).
+     *  통화(INVITE)와 독립 경로라 호 성립 여부와 무관하게 신원·그룹이 전파된다. */
+    private fun sendAlert(groupId: String, activate: Boolean) {
+        runCatching {
+            sip.sendRequest(
+                method = "MESSAGE",
+                targetUri = "sip:$groupId@${sipConfig.domain}",
+                contentType = McpttXml.CT_MCPTT_INFO,
+                body = McpttXml.alertInfo("tel:$groupId", mcpttId, activate),
+            )
+        }.onFailure { Log.w(TAG, "긴급경보 ${if (activate) "발신" else "취소"} 실패: ${it.message}") }
+        val me = bareId(mcpttId)
+        if (activate) {
+            addAlert(ActiveAlert(groupId, me, System.currentTimeMillis(), mine = true))
+            emit(PttEventKind.ALERT, groupId)
+        } else {
+            removeAlert(groupId, me)
+            emit(PttEventKind.ALERT_END, groupId)
+        }
+    }
+
+    private fun addAlert(a: ActiveAlert) {
+        _alerts.value = _alerts.value.filterNot { it.groupId == a.groupId && it.userId == a.userId } + a
+    }
+
+    private fun removeAlert(groupId: String, userId: String) {
+        _alerts.value = _alerts.value.filterNot { it.groupId == groupId && it.userId == userId }
+    }
+
+    /** 수신 경보 배너 수동 닫기 — 이 단말의 표시만 제거(발신측 경보 상태와 무관). */
+    fun dismissAlert(groupId: String, userId: String) = removeAlert(groupId, userId)
+
+    /** 수신 긴급경보 MESSAGE — 서버 fan-out 은 원본 본문 그대로라 그룹·발신자를 본문에서 읽는다. */
+    private fun onAlertMessage(fromUri: String, body: String) {
+        val info = McpttXml.parseMcpttInfo(body)
+        val activate = info.alertInd ?: return   // alert-ind 없는 mcptt-info 는 경보가 아니다
+        val gid = info.requestUri?.let { bareId(it) }?.takeIf { it.isNotBlank() } ?: return
+        val user = bareId(info.callingUserId ?: fromUri)
+        if (user == bareId(mcpttId)) return      // 내 발신 에코(서버는 발신자 제외 — 방어)
+        if (activate) {
+            addAlert(ActiveAlert(gid, user, System.currentTimeMillis(), mine = false))
+            feedback?.emergencyTone()
+            _status.value = "🚨 [$gid] 긴급경보 수신 — $user"
+            emit(PttEventKind.ALERT_IN, gid, peer = user)
+        } else {
+            removeAlert(gid, user)
+            _status.value = "[$gid] 긴급경보 해제 — $user"
+            emit(PttEventKind.ALERT_END, gid, peer = user)
+        }
     }
 
     /** in-dialog re-INVITE 로 긴급 상태 상향/하향 광고 — CSP ApplyInCallCondition 경로. */
@@ -1510,6 +1607,8 @@ class PttController(
     /** PTT 발언 대상 — 활성 1:1 이 있으면 그것이 우선(전화>무전 규칙), 없으면 주채널. */
     private fun talkSession(): Session? = synchronized(lock) {
         sessionMap.values.firstOrNull { v -> v.privatePeer && v.callId >= 0 }
+            // 애드혹 진행 중엔 전용 오버레이가 전면이라 PTT 도 애드혹 세션을 향한다(주채널보다 우선).
+            ?: sessionMap.values.firstOrNull { v -> isAdhocId(v.groupId) && v.callId >= 0 }
     } ?: primarySession()
 
     fun pttDown() {
@@ -1869,6 +1968,10 @@ class PttController(
             val m = Regex("(?:tel:|sips?:)([^@>;\\s]+)").find(uri)
             return (m?.groupValues?.get(1) ?: uri.trim()).substringBefore('@')
         }
+
+        /** 애드혹 임시 그룹 ID 판별 — `adhoc-` 접두사는 편성 그룹 ID 로 예약 거부(CSC)돼
+         *  기존 그룹·가입자 번호와 충돌하지 않는다. 편성 채널 저장/구독/affiliation 제외 기준. */
+        fun isAdhocId(id: String): Boolean = id.startsWith("adhoc-")
 
         /** 홈 국가코드(digits) — 프로비저닝 countryCode, 없으면 내 msisdn ITU 규칙 유도(VoLTE 앱과 동일). */
         var homeCountryCode: String? = null

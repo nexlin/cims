@@ -93,6 +93,7 @@ CSipServerSetup::CSipServerSetup()
       m_iRedisPort( 0 ),
       m_strServiceMode( "both" ),
       m_bTestEnvOpenTermination( false ),  // ⚠️ 상용 기본 false — 테스트망에서만 true
+      m_bPttAdhocEnabled( true ),          // ad hoc 그룹콜 허용 (기존 동작 보존 — 끄면 합성 거부)
       m_iLogLevel( 0 ),
       m_iLogMaxSize( 20000000 ),
       m_iMonitorPort( 6000 ),
@@ -395,6 +396,11 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             // ⚠️ 테스트 환경 전용 개방형 착신 스위치 — 상용은 미지정(false) 유지.
             if ( setup.Has( "TestEnvOpenTermination" ) ) {
                 m_bTestEnvOpenTermination = ( setup.GetString( "TestEnvOpenTermination" ) == "true" );
+            }
+
+            // MCPTT ad hoc 그룹콜 시스템 정책 (미지정 시 허용).
+            if ( setup.Has( "PttAdhocEnabled" ) ) {
+                m_bPttAdhocEnabled = ( setup.GetString( "PttAdhocEnabled" ) != "false" );
             }
 
             // IMS 역할 설정 (미지정 시 모두 활성화)

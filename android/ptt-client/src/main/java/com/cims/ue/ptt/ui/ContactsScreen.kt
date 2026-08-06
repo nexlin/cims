@@ -1,7 +1,9 @@
 package com.cims.ue.ptt.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,7 +61,11 @@ import kotlinx.coroutines.withContext
  * (아바타/이름 중앙 + [싱글]/[멀티]/[문자] 액션 + 정보 행). 통화가 시작되면
  * [PrivateCallOverlay] (AppRoot 전역)가 전화앱 스타일 통화 화면을 띄운다.
  * 캐시를 먼저 그리고 진입 시 ETag 동기화(304=다운로드 생략, 오프라인 허용).
+ *
+ * **애드혹 그룹통화**: 행 long-press = 다중 선택 모드 → 체크 토글 → 하단 [그룹통화 N] =
+ * 즉석 임시 그룹 발신([PttController.startAdhocCall]) — 통화 화면은 [AdhocCallOverlay].
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContactsScreen(st: PttUiState, onOpenThread: (String) -> Unit) {
     val context = LocalContext.current
@@ -68,6 +74,10 @@ fun ContactsScreen(st: PttUiState, onOpenThread: (String) -> Unit) {
     var syncNote by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var detail by remember { mutableStateOf<CompanyContact?>(null) }
+    // 애드혹 다중 선택 (bareId 집합) — 비어 있지 않으면 선택 모드
+    var picked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val selecting = picked.isNotEmpty()
+    BackHandler(enabled = selecting) { picked = emptySet() }
 
     LaunchedEffect(Unit) {
         val res = withContext(Dispatchers.IO) {
@@ -97,12 +107,20 @@ fun ContactsScreen(st: PttUiState, onOpenThread: (String) -> Unit) {
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column {
-                Text("연락처", color = Ct.Text, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                Text("1:1 무전·문자", color = Ct.TextFaint, fontSize = 11.sp)
+                Text(if (selecting) "그룹통화 대상 선택" else "연락처", color = Ct.Text,
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(if (selecting) "선택 ${picked.size}명" else "1:1 무전·문자 · 길게 눌러 그룹통화",
+                    color = Ct.TextFaint, fontSize = 11.sp)
             }
             Spacer(Modifier.weight(1f))
-            Text("총 ${dir.members.count { PttController.bareId(it.number) != me }}명",
-                color = Ct.TextDim, fontSize = 12.sp)
+            if (selecting) {
+                Text("취소", color = Ct.TextDim, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { picked = emptySet() }
+                        .padding(horizontal = 10.dp, vertical = 6.dp))
+            } else {
+                Text("총 ${dir.members.count { PttController.bareId(it.number) != me }}명",
+                    color = Ct.TextDim, fontSize = 12.sp)
+            }
         }
         Spacer(Modifier.height(8.dp))
         // 검색 (volte 와 동일 동선 — 이름/번호 부분 일치)
@@ -132,29 +150,50 @@ fun ContactsScreen(st: PttUiState, onOpenThread: (String) -> Unit) {
         val byOrg = remember(visible) { visible.groupBy { it.orgCode } }
         val sections = (orgSort.filter { byOrg.containsKey(it) } + byOrg.keys.filterNot { orgSort.contains(it) })
             .map { code -> (orgNames[code] ?: code.ifBlank { "미지정" }) to byOrg.getValue(code) }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             sections.forEach { (orgName, members) ->
                 item(key = "org:$orgName") {
                     Text(orgName, color = Ct.Mint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
                 }
                 items(members, key = { "m:${it.number}" }) { m ->
+                    val peer = PttController.bareId(m.number)
+                    val isPicked = picked.contains(peer)
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                            .clickable { detail = m }
+                            .background(if (isPicked) Ct.MintDim else Color.Transparent)
+                            .combinedClickable(
+                                onClick = {
+                                    if (selecting) picked = if (isPicked) picked - peer else picked + peer
+                                    else detail = m
+                                },
+                                onLongClick = { picked = picked + peer },   // 선택 모드 진입/추가
+                            )
                             .padding(horizontal = 4.dp, vertical = 9.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Avatar(m.name, 34.dp)
+                        if (selecting) {
+                            Box(
+                                Modifier.size(34.dp).clip(CircleShape)
+                                    .background(if (isPicked) Ct.Mint else Ct.SurfaceHi),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(if (isPicked) "✓" else "", color = Ct.Bg,
+                                    fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Avatar(m.name, 34.dp)
+                        }
                         Column(Modifier.weight(1f)) {
                             Text(m.name.ifBlank { m.number }, color = Ct.Text, fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold)
                             Text(m.number, color = Ct.TextFaint, fontSize = 11.sp)
                         }
-                        val peer = PttController.bareId(m.number)
                         val ps = st.session(peer)
-                        if (ps != null) {
+                        if (selecting) {
+                            // 선택 모드 — 행 전체가 토글, 개별 액션 숨김
+                        } else if (ps != null) {
                             PillBadge(if (ps.fullDuplex) "멀티" else "싱글", Ct.Mint)
                         } else {
                             RowAction("싱글", Ct.Mint) { st.ctl?.startPrivateCall(peer, fullDuplex = false) }
@@ -166,6 +205,19 @@ fun ContactsScreen(st: PttUiState, onOpenThread: (String) -> Unit) {
                 }
             }
             item { Spacer(Modifier.height(12.dp)) }
+        }
+        // 애드혹 발신 바 — 선택 모드에서만. 임시 그룹을 만들어 선택 인원 전원 호출.
+        if (selecting) {
+            Text("그룹통화 (${picked.size}명)", color = Ct.Bg, fontSize = 15.sp,
+                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    .clip(RoundedCornerShape(50)).background(Ct.Mint)
+                    .clickable {
+                        st.ctl?.startAdhocCall(picked.toList())
+                        picked = emptySet()
+                    }
+                    .padding(vertical = 13.dp))
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
@@ -251,6 +303,57 @@ fun PrivateCallOverlay(st: PttUiState, s: GroupCallState) {
             Spacer(Modifier.weight(1f))
             // 화면 PTT 바 — 1:1 통화 화면에서는 HW 키 단말에도 함께 제공(둘 다 동작).
             PttBar(floor = s.floorState, enabled = true, listenOnly = false,
+                queuePosition = s.queuePosition, modifier = Modifier.fillMaxWidth(),
+                onDown = { st.ctl?.pttDown() }, onUp = { st.ctl?.pttUp() })
+            Spacer(Modifier.height(14.dp))
+            Text("나가기", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.55f).clip(RoundedCornerShape(50)).background(Ct.Red)
+                    .clickable { st.ctl?.leaveGroup(s.groupId) }
+                    .padding(vertical = 12.dp))
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+/** 애드혹(즉석 그룹) 통화 화면 — 임시 그룹 세션이 있는 동안 전체 오버레이 (AppRoot 에서 표시).
+ *  편성 채널이 아니므로 이름 대신 참여 인원·발언 상태를 보여주고, 나가면 세션째 소멸한다. */
+@Composable
+fun AdhocCallOverlay(st: PttUiState, s: GroupCallState) {
+    val context = LocalContext.current
+    val dirNames = remember {
+        CompanyDirectoryStore(context).load().members
+            .associate { PttController.bareId(it.number) to it.name }
+    }
+    fun nameOf(id: String) = dirNames[id]?.takeIf { it.isNotBlank() } ?: id
+    val others = s.participants.keys.filter { it != PttController.bareId(st.ctl?.mcpttId ?: "") }
+    Box(Modifier.fillMaxSize().background(Ct.Bg)) {
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(36.dp))
+            PillBadge("즉석 그룹통화", Ct.Amber)
+            Spacer(Modifier.height(22.dp))
+            Avatar("+", 100.dp, fontSize = 38.sp)
+            Spacer(Modifier.height(14.dp))
+            Text("참여 ${s.participants.size}명", color = Ct.Text, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(others.joinToString(" · ") { nameOf(it) }.ifBlank { "연결 중…" },
+                color = Ct.TextFaint, fontSize = 12.sp, textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 12.dp))
+            Spacer(Modifier.height(18.dp))
+            val talking = s.speaker
+            Text(
+                when {
+                    !s.active && s.callId < 0 -> "연결 중…"
+                    talking?.self == true -> "발언 중"
+                    talking != null -> "${nameOf(PttController.bareId(talking.id))} 발언 중"
+                    else -> "PTT 를 누르고 말하세요"
+                },
+                color = if (talking != null) Ct.Mint else Ct.TextDim, fontSize = 13.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            PttBar(floor = s.floorState, enabled = s.canRequestFloor, listenOnly = !s.canRequestFloor,
                 queuePosition = s.queuePosition, modifier = Modifier.fillMaxWidth(),
                 onDown = { st.ctl?.pttDown() }, onUp = { st.ctl?.pttUp() })
             Spacer(Modifier.height(14.dp))

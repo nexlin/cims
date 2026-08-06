@@ -58,6 +58,18 @@ object McpttXml {
         append("  </mcptt-Params>\n</mcpttinfo>\n")
     }
 
+    /** 긴급경보(emergency alert) MESSAGE 본문 (TS 24.379 §12) — 통화와 별개인 위험 통지.
+     *  [activate] true=경보 발신, false=경보 취소. 서버(CSP)가 alert-ind 로 판별해 그룹
+     *  등록 멤버에게 같은 본문을 fan-out 한다(발신자 제외). */
+    fun alertInfo(requestUri: String, callingUserId: String, activate: Boolean): String = buildString {
+        append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        append("<mcpttinfo xmlns=\"$NS_MCPTT_INFO\">\n  <mcptt-Params>\n")
+        append("    <mcptt-request-uri>${esc(requestUri)}</mcptt-request-uri>\n")
+        append("    <mcptt-calling-user-id>${esc(callingUserId)}</mcptt-calling-user-id>\n")
+        append("    <alert-ind>$activate</alert-ind>\n")
+        append("  </mcptt-Params>\n</mcpttinfo>\n")
+    }
+
     /** `application/resource-lists+xml` 본문 (TS 24.379) — 임시그룹/대상 멤버. */
     fun resourceLists(members: List<ResourceEntry>): String = buildString {
         append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
@@ -125,6 +137,25 @@ object McpttXml {
         )
     }
 
+    // ── 파서: mcptt-info (수신 MESSAGE — 긴급경보 등) ──
+
+    data class McpttInfoDoc(
+        val alertInd: Boolean?,        // null=alert-ind 요소 없음
+        val requestUri: String?,       // 대상 그룹 (tel:URI)
+        val callingUserId: String?,    // 발신자 MCPTT ID
+    )
+
+    /** `application/vnd.3gpp.mcptt-info+xml` 파싱 — 서버 fan-out 은 원본을 그대로 중계하므로
+     *  그룹·발신자는 헤더가 아닌 이 본문에서 읽는다. 손상 본문은 예외 → 호출측 runCatching. */
+    fun parseMcpttInfo(xml: String): McpttInfoDoc {
+        val root = parse(xml).documentElement
+        return McpttInfoDoc(
+            alertInd = firstAnyNs(root, "alert-ind")?.toBoolean(),
+            requestUri = firstAnyNs(root, "mcptt-request-uri"),
+            callingUserId = firstAnyNs(root, "mcptt-calling-user-id"),
+        )
+    }
+
     // ── 내부 헬퍼 ──
 
     private fun parse(xml: String): org.w3c.dom.Document {
@@ -147,6 +178,12 @@ object McpttXml {
     private fun firstTextNs(scope: Element, ns: String, local: String): String? {
         val nl = scope.getElementsByTagNameNS(ns, local)
         return (nl.item(0) as? Element)?.textContent?.trim()
+    }
+
+    /** 네임스페이스 무관 첫 요소 텍스트 — 서버가 prefix 없이 쓰는 요소(mcptt-info)와 호환. */
+    private fun firstAnyNs(scope: Element, local: String): String? {
+        val nl = scope.getElementsByTagNameNS("*", local)
+        return (nl.item(0) as? Element)?.textContent?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     private fun esc(s: String): String =

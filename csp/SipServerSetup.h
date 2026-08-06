@@ -168,6 +168,13 @@ public:
     //   설정 키: Setup.TestEnvOpenTermination = "true" (미지정 시 false).
     bool m_bTestEnvOpenTermination;
 
+    // MCPTT ad hoc 그룹콜(TS 22.179 Rel-18) 허용 — 시스템 정책 스위치.
+    //   ad hoc 은 판정 시점에 그룹이 존재하지 않아 그룹 단위 capability 로 게이트할 수 없다 —
+    //   사용자 단위 인가(MCPTT 프로파일)가 생기기 전까지의 시스템 층 게이트.
+    //   false 이면 미편성 타겟 + resource-lists INVITE 를 임시 그룹으로 합성하지 않는다
+    //   (이후 라우팅에서 비가입 착신으로 거절). 설정 키: Setup.PttAdhocEnabled (미지정 시 true).
+    bool m_bPttAdhocEnabled;
+
     // ================================================================
     // IMS 역할 활성화 (기본값: 모두 true)
 

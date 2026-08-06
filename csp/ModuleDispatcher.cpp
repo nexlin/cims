@@ -635,7 +635,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     // MCPTT ad hoc 그룹콜 (TS 22.179 Rel-18): 미프로비저닝 타겟 + INVITE resource-lists 멤버 →
     //   임시 그룹을 동적 생성(in-memory, 비영속 ephemeral). 이후 기존 ProcessGroupCall(on-demand)
     //   경로가 fan-out·teardown 까지 처리. requireAffiliation=false(사전 가입 없음).
-    if ( m_clsPttAs.IsEnabled() && !gclsGroupMap.Contains( pszTo ) && pclsMessage ) {
+    //   게이트: Setup.PttAdhocEnabled (시스템 정책 — 사용자 단위 인가는 MCPTT 프로파일 트랙에서).
+    if ( m_clsPttAs.IsEnabled() && gclsSetup.m_bPttAdhocEnabled && !gclsGroupMap.Contains( pszTo ) && pclsMessage ) {
         std::vector<std::string> vecAdhoc = ParseResourceListUsers( pclsMessage->m_strBody );
         if ( !vecAdhoc.empty() ) {
             CspPttGroup clsAdhoc;
