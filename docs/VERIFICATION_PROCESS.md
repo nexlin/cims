@@ -246,6 +246,16 @@ Build/Configure/Pkg 는 S2/S3/S4 가 담당하므로 S5 step 에서 제외.
 
 - `csc_http.py` — TB-CSC API client. urllib + TLS skip. `admin_login` / `get_json` / `post_json` / `delete` / `post_multipart` / `list_agents` / `find_agent_id_by_name`.
 - `db.py` — `csp_db_config(dist_dir)` + `connect(cfg)` (pymysql).
+- `service_log.py` — `service_log_roots(dist_dir)`. 녹취·flow 카운터의 탐색 루트. dist 설정
+  (`cmp.json`/`csp.json` 의 `ServiceLogging.Dir`)을 읽어 **설정된 경로**를 쓰고 기본
+  `<dist>/ext_mnt/service_log` 는 폴백으로 둔다 — `configure --service-log-dir` 로 공유 NAS
+  경로를 쓰는 환경에서 기본 경로만 보면 서비스가 정상인데도 "녹취 파일 없음" 으로 오판한다.
+- `recordings.py` — `count_recordings` / `count_ptt_events`. 위 루트 기준 delta 카운트.
+- `subscribers.py` — `select_subscribers(db_cfg, voip_count, ptt_count)`. **cspsim 은 시작
+  가입자의 비밀번호 하나로 `-count` 명을 시뮬레이션**하므로(번호만 +1, auth_id 는 계정별 파생)
+  "번호 연속 + 비밀번호 동일" 구간의 첫 가입자를 고른다(`pick_start_subscriber`). 일부 계정만
+  비밀번호가 다르면 2번째 단말부터 REGISTER 403(digest 불일치)이 나 제품 결함처럼 보인다.
+  조건을 만족하는 구간이 없으면 첫 가입자로 폴백.
 - `pkg_manifest.py` — `write_marker(dist_dir)` (S5 immutability) / `immutability_check(dist_dir)` (S6).
 
 #### 옵션

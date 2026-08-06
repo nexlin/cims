@@ -13,13 +13,22 @@ from __future__ import annotations
 import os
 from glob import glob
 
+from .service_log import service_log_roots
+
+
+def _glob_roots(dist_dir: str, *parts: str) -> list:
+    """설정된 ServiceLogDir(들) 아래에서 패턴 매칭 — 기본 경로 가정 금지."""
+    files = []
+    for root in service_log_roots(dist_dir):
+        files.extend(glob(os.path.join(root, *parts), recursive=True))
+    return files
+
 
 def count_recordings(dist_dir: str, since: float = 0.0) -> int:
-    """`{dist_dir}/ext_mnt/service_log/**/seg_*.rtp` 개수.
+    """ServiceLogDir 아래 `**/seg_*.rtp` 개수.
     `since>0` 이면 mtime >= since 인 파일만 카운트.
     """
-    files = glob(os.path.join(dist_dir, "ext_mnt", "service_log",
-                              "**", "seg_*.rtp"), recursive=True)
+    files = _glob_roots(dist_dir, "**", "seg_*.rtp")
     if since <= 0:
         return len(files)
     n = 0
@@ -33,12 +42,11 @@ def count_recordings(dist_dir: str, since: float = 0.0) -> int:
 
 
 def count_ptt_events(dist_dir: str, since: float = 0.0) -> int:
-    """`{dist_dir}/ext_mnt/service_log/ptt/**/events.jsonl` 개수.
+    """ServiceLogDir 아래 `ptt/**/events.jsonl` 개수.
     PTT 시나리오가 floor/dtmf 이벤트를 추가하면 mtime 이 갱신된다.
     `since>0` 이면 mtime >= since 인 파일만 카운트.
     """
-    files = glob(os.path.join(dist_dir, "ext_mnt", "service_log",
-                              "ptt", "**", "events.jsonl"), recursive=True)
+    files = _glob_roots(dist_dir, "ptt", "**", "events.jsonl")
     if since <= 0:
         return len(files)
     n = 0

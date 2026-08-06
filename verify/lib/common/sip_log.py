@@ -20,12 +20,17 @@ import os
 from glob import glob
 from typing import Iterator, Optional
 
+from .service_log import service_log_roots
+
 
 def _msg_roots(dist_dir: str) -> list:
-    primary = os.path.join(dist_dir, "ext_mnt", "service_log")
+    # 설정된 ServiceLogDir(기본 <dist>/ext_mnt/service_log, configure 로 변경 가능) + 옛 경로
     legacy = os.path.join(os.path.dirname(dist_dir), "ext_mnt",
                           "msg_log", "csp", "sip")
-    return [p for p in (primary, legacy) if os.path.isdir(p)]
+    roots = service_log_roots(dist_dir)
+    if os.path.isdir(legacy):
+        roots.append(legacy)
+    return roots
 
 
 def iter_sip_msgs(dist_dir: str, *, since: float = 0.0,
@@ -72,11 +77,11 @@ def iter_flow_lines(dist_dir: str, *, node: Optional[str] = None,
     - `proto`: 라인의 `proto` 필드 매칭 (MCPTT/SIP/JSON ...).
     - `since`: 파일 mtime 이 since 미만이면 skip.
     """
-    primary = os.path.join(dist_dir, "ext_mnt", "service_log")
-    if not os.path.isdir(primary):
-        return
     file_pat = f"{node}_*.flow.jsonl" if node else "*.flow.jsonl"
-    for p in glob(os.path.join(primary, "**", file_pat), recursive=True):
+    paths = []
+    for root in service_log_roots(dist_dir):
+        paths.extend(glob(os.path.join(root, "**", file_pat), recursive=True))
+    for p in paths:
         try:
             if os.path.getmtime(p) < since:
                 continue

@@ -3289,5 +3289,93 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(len(kill_calls), 5)
 
 
+class TestPickStartSubscriber(unittest.TestCase):
+    """cspsim 은 시작 가입자 비밀번호 하나로 -count 명을 만든다 —
+    시작 가입자는 '번호 연속 + 비밀번호 동일' 구간에서 골라야 한다."""
+
+    def setUp(self) -> None:
+        from verify.lib.common.subscribers import pick_start_subscriber
+        self.pick = pick_start_subscriber
+
+    def test_skips_accounts_with_odd_password(self) -> None:
+        # 앞 2개만 계정별 비밀번호(실서버에서 발견된 데이터 흔들림) → 균일 구간부터 시작
+        rows = [("+821300000001", "45033821300000001"),
+                ("+821300000002", "45033821300000002"),
+                ("+821300000003", "123456"),
+                ("+821300000004", "123456")]
+        self.assertEqual(self.pick(rows, 2)[0], "+821300000003")
+
+    def test_count_one_takes_first(self) -> None:
+        rows = [("+821300000001", "A"), ("+821300000002", "B")]
+        self.assertEqual(self.pick(rows, 1)[0], "+821300000001")
+
+    def test_requires_consecutive_numbers(self) -> None:
+        # 비밀번호는 같지만 번호가 끊기면 구간이 아니다 (cspsim 은 +1 씩 올린다)
+        rows = [("+821300000001", "123456"), ("+821300000003", "123456")]
+        self.assertEqual(self.pick(rows, 2)[0], "+821300000001")   # 폴백 = 첫 행
+
+    def test_no_run_falls_back_to_first(self) -> None:
+        rows = [("+821300000001", "A"), ("+821300000002", "B")]
+        self.assertEqual(self.pick(rows, 2)[0], "+821300000001")
+
+    def test_empty_rows(self) -> None:
+        self.assertEqual(self.pick([], 3), ())
+
+    def test_ignores_blank_password_run(self) -> None:
+        rows = [("+821300000001", ""), ("+821300000002", ""),
+                ("+821300000003", "123456"), ("+821300000004", "123456")]
+        self.assertEqual(self.pick(rows, 2)[0], "+821300000003")
+
+
+class TestServiceLogRoots(unittest.TestCase):
+    """녹취/flow 카운터는 설정된 ServiceLogDir 을 봐야 한다 —
+    기본 경로(<dist>/ext_mnt/service_log)만 보면 경로를 옮긴 환경에서 '파일 없음' 오판."""
+
+    def setUp(self) -> None:
+        import tempfile
+        from verify.lib.common.service_log import service_log_roots
+        self.roots = service_log_roots
+        self.tmp = tempfile.mkdtemp(prefix="cims_svclog_")
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_cfg(self, rel_parts, payload) -> None:
+        import json
+        p = os.path.join(self.tmp, *rel_parts)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            json.dump(payload, f)
+
+    def test_reads_cmp_configured_dir(self) -> None:
+        ext = os.path.join(self.tmp, "elsewhere")
+        os.makedirs(ext)
+        self._write_cfg(("cmp", "config", "cmp.json"),
+                        {"ServiceLogging": {"Dir": ext}})
+        self.assertIn(ext, self.roots(self.tmp))
+
+    def test_reads_csp_setup_wrapper(self) -> None:
+        ext = os.path.join(self.tmp, "csp_log")
+        os.makedirs(ext)
+        self._write_cfg(("csp", "config", "csp.json"),
+                        {"Setup": {"ServiceLogging": {"Dir": ext}}})
+        self.assertIn(ext, self.roots(self.tmp))
+
+    def test_default_path_included(self) -> None:
+        default = os.path.join(self.tmp, "ext_mnt", "service_log")
+        os.makedirs(default)
+        self.assertIn(default, self.roots(self.tmp))
+
+    def test_missing_dirs_excluded(self) -> None:
+        # 설정에만 있고 실제로 없는 경로는 제외 (glob 대상이 아니다)
+        self._write_cfg(("cmp", "config", "cmp.json"),
+                        {"ServiceLogging": {"Dir": "/nonexistent/cims_log"}})
+        self.assertEqual(self.roots(self.tmp), [])
+
+    def test_no_config_no_crash(self) -> None:
+        self.assertEqual(self.roots(self.tmp), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -29,7 +29,9 @@ def seed(ctx: VerifyContext) -> ItemResult:
     cfg_dir  = os.path.join(ctx.dist_dir, "config")
     pid_file = os.path.join(ctx.dist_dir, "run", "csp.pid")
 
-    sub = select_subscribers(_db.csp_db_config(ctx.dist_dir))
+    # count 는 아래 시나리오의 cspsim -count 와 일치시킨다 — cspsim 이 비밀번호 하나로
+    # 그 수만큼 단말을 만들므로, 연속·동일 비밀번호 구간의 첫 가입자를 골라야 한다.
+    sub = select_subscribers(_db.csp_db_config(ctx.dist_dir), voip_count=2, ptt_count=5)
     seeded_n = seed_access_services(
         cfg_dir, sub["voip_ref"], sub["ptt_ref"],
         tag="verify-stage3-seed",

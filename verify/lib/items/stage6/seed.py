@@ -67,7 +67,9 @@ def _wait_group_in_cmp(target_gid: str, ip: str = "127.0.0.1",
     execution_order=20,
 )
 def seed(ctx: VerifyContext) -> ItemResult:
-    sub = select_subscribers(_db.csp_db_config(ctx.dist_dir))
+    # count 는 stage6 시나리오의 cspsim -count 와 일치 (volte 2 / ptt 5) —
+    # cspsim 이 비밀번호 하나로 그 수만큼 단말을 만든다.
+    sub = select_subscribers(_db.csp_db_config(ctx.dist_dir), voip_count=2, ptt_count=5)
 
     # _INSTANCES 의 모든 csp variant (CSP/PSP/ISP) 에 access_services.jsonl 시드
     # + SIGUSR1 reload. 누락 시 해당 인스턴스의 gclsServiceMap 이 빈 채로 유지되어
