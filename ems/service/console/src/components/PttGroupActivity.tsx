@@ -116,13 +116,6 @@ export default function PttGroupActivity({ storeKey }: {
     return dir
   })
 
-  const openPlayer = (dir: string, segs: RecordingSegment[], title?: string) => {
-    const recId = recIdOf(storeKey, dir)
-    if (!recId) { show('세션키가 올바르지 않습니다', 'err'); return }
-    const playable = segs.filter(s => s.status !== 'recording')
-    if (!playable.length) { show('재생 가능한 녹취 세그먼트가 없습니다', 'err'); return }
-    setPlayer({ id: recId, segments: playable, title })
-  }
   const playAll = async (dir: string) => {
     const recId = recIdOf(storeKey, dir)
     if (!recId) { show('세션키가 올바르지 않습니다', 'err'); return }
@@ -132,24 +125,12 @@ export default function PttGroupActivity({ storeKey }: {
       else show('녹취 세그먼트가 없습니다', 'err')
     } catch (e: unknown) { show(String(e), 'err') }
   }
-  const openFlow = async (dir: string, slot?: { hh: number; min: number }) => {
+  const openFlow = async (dir: string) => {
     setFlowLoading(true)
     const dt = dateOf(dir)
     try {
       const resp = await pttApi.flow(storeKey, dir, dt || undefined)
-      let nodes = resp.nodes, messages = resp.messages
-      if (slot) {
-        const lo = `${String(slot.hh).padStart(2, '0')}:${String(slot.min).padStart(2, '0')}:00`
-        const hi = `${String(slot.hh).padStart(2, '0')}:${String(slot.min + 9).padStart(2, '0')}:59.999999`
-        const inWin = (m: FlowMessage) => (m.ts || '') >= lo && (m.ts || '') <= hi
-        if (nodes) {
-          const f: Record<string, FlowMessage[]> = {}
-          for (const [k, arr] of Object.entries(nodes)) f[k] = arr.filter(inWin)
-          nodes = f
-        }
-        if (messages) messages = messages.filter(inWin)
-      }
-      setFlow({ date: dt, nodes, messages })
+      setFlow({ date: dt, nodes: resp.nodes, messages: resp.messages })
     } catch (e: unknown) {
       show(String(e), 'err')
       setFlow({ date: dt })
@@ -213,8 +194,6 @@ export default function PttGroupActivity({ storeKey }: {
                         onToggle={() => toggle(s.dir)}
                         onFlow={() => openFlow(s.dir)}
                         onPlayAll={() => playAll(s.dir)}
-                        onSlotFlow={(hh, min) => openFlow(s.dir, { hh, min })}
-                        onSlotPlay={(segs, title) => openPlayer(s.dir, segs, title)}
                       />
                     ))}
                   </tbody>

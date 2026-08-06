@@ -8,7 +8,7 @@
  * "이 그룹의 최근 활동" 은 여기가 아니라 **PTT 그룹 › 활동** 탭에서 본다
  * (PttGroupsWorkbenchPage). 이력 페이지가 그룹 목록을 다시 그릴 이유가 없다.
  */
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import {
   pttApi, type PttSessionRow, type PttGroupSummary, type PttSessionKind,
 } from '@core/api/ptt'
@@ -18,9 +18,10 @@ import FlowPage from '@core/pages/FlowPage'
 import SegmentPlayer from '@core/components/SegmentPlayer'
 import { useInlineAudio, type InlineAudio } from '@core/components/useInlineAudio'
 import { useToast } from '@core/components/Toast'
+import { useDirectory, type Directory } from '@core/components/useDirectory'
 import {
-  SessionDetail, recIdOf, dateOf, detailKey, fmtShortTime, fmtDur, fmtSpeechMs,
-  thStyle, tdStyle, type DetailState,
+  SessionDetail, Person, recIdOf, dateOf, detailKey, fmtShortTime, fmtDur, fmtSpeechMs,
+  type DetailState,
 } from '@svc/components/pttSession'
 
 // ── 종류 ────────────────────────────────────────────────────────
@@ -67,17 +68,30 @@ const shiftDay = (day: string, n: number) => {
 // 세션 하나를 가리키는 키 — 구 녹취는 세션키가 시간버킷이라 그룹키까지 묶어야 유일하다.
 const rowKey = (r: PttSessionRow) => `${r.group_key}|${r.dir}`
 
+// 목록/상세 경계 — 잡아끈 폭은 브라우저에 남긴다 (기본은 화면의 1/4)
+const LIST_W_KEY = 'cims.ptt.history.listW'
+const LIST_W_MIN = 240      // 요약 카드가 읽히는 최소 폭
+const PANE_W_MIN = 420      // 타임바 레인·이벤트 한 줄이 읽히는 최소 폭
+
 // 대상 = 그룹이면 그룹명, 1:1 이면 상대, 임시면 참여 요약.
-function targetOf(r: PttSessionRow): string {
-  if (r.kind === 'group') return r.group_name || r.mcptt_group_id || r.group_key
+// 사람은 이름으로 쓰고 번호는 hover 로 확인한다 (Person).
+function Target({ r, names }: { r: PttSessionRow; names: Directory }) {
+  if (r.kind === 'group') return <>{r.group_name || r.mcptt_group_id || r.group_key}</>
   const peers = r.peers || []
-  if (r.kind === 'adhoc') return `${r.initiator || '?'} 외 ${peers.length}명`
-  return peers.length ? `${r.initiator || '?'} ↔ ${peers.join(', ')}` : (r.initiator || '—')
+  if (r.kind === 'adhoc') return <><Person id={r.initiator} names={names} /> 외 {peers.length}명</>
+  if (!peers.length) return <Person id={r.initiator} names={names} />
+  return (
+    <>
+      <Person id={r.initiator} names={names} />{' ↔ '}
+      {peers.map((p, i) => <Fragment key={p}>{i > 0 && ', '}<Person id={p} names={names} /></Fragment>)}
+    </>
+  )
 }
 
 export default function PttHistoryPage() {
   const { show } = useToast()
   const audio = useInlineAudio(useCallback((m: string) => show(m, 'err'), [show]))
+  const names = useDirectory()
 
   // ── 조회 조건 ──
   const [date, setDate] = useState(todayStr())
@@ -203,13 +217,6 @@ export default function PttHistoryPage() {
   }
 
   // ── 녹취 · Flow ──
-  const openPlayer = (r: PttSessionRow, segs: RecordingSegment[], title?: string) => {
-    const recId = recIdOf(r.group_key, r.dir)
-    if (!recId) { show('세션키가 올바르지 않습니다', 'err'); return }
-    const playable = segs.filter(s => s.status !== 'recording')
-    if (!playable.length) { show('재생 가능한 녹취 세그먼트가 없습니다', 'err'); return }
-    setPlayer({ id: recId, segments: playable, title })
-  }
   const playAll = async (r: PttSessionRow) => {
     const recId = recIdOf(r.group_key, r.dir)
     if (!recId) { show('세션키가 올바르지 않습니다', 'err'); return }
@@ -219,24 +226,12 @@ export default function PttHistoryPage() {
       else show('녹취 세그먼트가 없습니다', 'err')
     } catch (e: unknown) { show(String(e), 'err') }
   }
-  const openFlow = async (r: PttSessionRow, slot?: { hh: number; min: number }) => {
+  const openFlow = async (r: PttSessionRow) => {
     setFlowLoading(true)
     const dt = dateOf(r.dir)
     try {
       const resp = await pttApi.flow(r.group_key, r.dir, dt || undefined)
-      let nodes = resp.nodes, messages = resp.messages
-      if (slot) {
-        const lo = `${String(slot.hh).padStart(2, '0')}:${String(slot.min).padStart(2, '0')}:00`
-        const hi = `${String(slot.hh).padStart(2, '0')}:${String(slot.min + 9).padStart(2, '0')}:59.999999`
-        const inWin = (m: FlowMessage) => (m.ts || '') >= lo && (m.ts || '') <= hi
-        if (nodes) {
-          const f: Record<string, FlowMessage[]> = {}
-          for (const [k, arr] of Object.entries(nodes)) f[k] = arr.filter(inWin)
-          nodes = f
-        }
-        if (messages) messages = messages.filter(inWin)
-      }
-      setFlow({ storeKey: r.group_key, date: dt, nodes, messages })
+      setFlow({ storeKey: r.group_key, date: dt, nodes: resp.nodes, messages: resp.messages })
     } catch (e: unknown) {
       show(String(e), 'err')
       setFlow({ storeKey: r.group_key, date: dt })
@@ -250,18 +245,83 @@ export default function PttHistoryPage() {
     [rows, liveRows],
   )
 
-  const rowProps = (r: PttSessionRow) => ({
+  const cardProps = (r: PttSessionRow) => ({
     r,
-    isOpen: open === rowKey(r),
-    detail: detailByKey.get(detailKey(r.group_key, r.dir)),
-    audio,
-    flowLoading,
-    onToggle: () => toggle(r),
-    onFlow: () => openFlow(r),
-    onPlayAll: () => playAll(r),
-    onSlotFlow: (hh: number, min: number) => openFlow(r, { hh, min }),
-    onSlotPlay: (segs: RecordingSegment[], title: string) => openPlayer(r, segs, title),
+    sel: open === rowKey(r),
+    names,
+    onSelect: () => toggle(r),
   })
+
+  // ── 선택 세션 → 우측 상세 드로어 ──
+  // 상세를 목록 행 안에서 펼치면 상세 높이(지표+타임바+이벤트)만큼 화면이 아래로 늘어나
+  // 목록이 밀리고, 아래쪽 행을 펼치면 상세가 화면 밖에서 열린다. 목록은 그대로 두고
+  // 상세만 고정 패널에 띄우면 스크롤 위치를 잃지 않고 세션을 바꿔 가며 볼 수 있다.
+  const selRow = useMemo(
+    () => [...liveRows, ...rows].find(r => rowKey(r) === open) || null,
+    [liveRows, rows, open],
+  )
+  const selDetail = selRow ? detailByKey.get(detailKey(selRow.group_key, selRow.dir)) : undefined
+
+  // 폭이 좁으면 나란히 두지 못한다 — 그때는 겹쳐 띄운다(오버레이).
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const [wide, setWide] = useState(true)
+  const [bodyW, setBodyW] = useState(0)
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const measure = () => { setWide(el.clientWidth >= 1080); setBodyW(el.clientWidth) }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // ── 목록/상세 경계 드래그 ──
+  // 기본은 화면의 1/4 이지만 세션마다 읽고 싶은 게 달라(대상 이름이 길거나, 이벤트 사유가
+  // 길거나) 고정폭은 늘 누군가에게 좁다. 잡아끈 폭은 브라우저에 남겨 다음에도 그대로 쓴다.
+  const [listW, setListW] = useState<number | null>(() => {
+    const v = Number(localStorage.getItem(LIST_W_KEY))
+    return Number.isFinite(v) && v > 0 ? v : null
+  })
+  const listWidth = Math.max(
+    LIST_W_MIN,
+    Math.min(listW ?? (Math.round(bodyW * 0.25) || LIST_W_MIN), Math.max(LIST_W_MIN, bodyW - PANE_W_MIN)),
+  )
+  const dragRef = useRef<{ x: number; w: number } | null>(null)
+  const onSplitDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    dragRef.current = { x: e.clientX, w: listWidth }
+  }
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const d = dragRef.current
+      const el = bodyRef.current
+      if (!d || !el) return
+      const max = Math.max(LIST_W_MIN, el.clientWidth - PANE_W_MIN)
+      setListW(Math.max(LIST_W_MIN, Math.min(max, d.w + (e.clientX - d.x))))
+    }
+    const onUp = () => {
+      if (!dragRef.current) return
+      dragRef.current = null
+      setListW(w => { if (w) localStorage.setItem(LIST_W_KEY, String(w)); return w })
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+  // 더블클릭 = 기본(1/4) 복귀
+  const resetSplit = () => { localStorage.removeItem(LIST_W_KEY); setListW(null) }
+
+  // Esc = 닫기 (드로어 관례)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 480 }}
@@ -320,7 +380,7 @@ export default function PttHistoryPage() {
         <GroupFilter summaries={summaries} selected={groupKeys} open={dd === 'group'}
                      onToggleMenu={() => setDd(v => (v === 'group' ? null : 'group'))}
                      onChange={setGroupKeys} />
-        <PersonFilter value={person} candidates={peopleSeen} open={dd === 'person'}
+        <PersonFilter value={person} candidates={peopleSeen} names={names} open={dd === 'person'}
                       onToggleMenu={() => setDd(v => (v === 'person' ? null : 'person'))}
                       onChange={v => { setPerson(v); setDd(null) }} />
         {hour && (
@@ -336,53 +396,86 @@ export default function PttHistoryPage() {
         </span>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '12px 14px', minHeight: 0 }}>
+      {/* ── 시간대 밴드 — 목록 위 전체 폭 (필터이자 그날의 분포) ── */}
+      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
         <HourHeatmap hours={hours} sel={hour} onPick={h => { setHour(prev => (prev === h ? '' : h)); setPage(0) }} />
+      </div>
 
-        <div style={{ marginTop: 14, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-          {(!rows.length && !liveRows.length && !loading) ? (
-            <div className="empty" style={{ padding: 28 }}>조건에 맞는 세션이 없습니다</div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
-                    <th style={{ ...thStyle, width: 24, cursor: 'default' }}></th>
-                    <SortTh id="start" label="시각" sort={sort} order={order} onSort={setSort} onOrder={setOrder} />
-                    <th style={{ ...thStyle, cursor: 'default' }}>종류</th>
-                    <th style={{ ...thStyle, cursor: 'default' }}>대상</th>
-                    <th style={{ ...thStyle, cursor: 'default' }}>개시</th>
-                    <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>참여</th>
-                    <SortTh id="turns" label="발언 턴" sort={sort} order={order} onSort={setSort} onOrder={setOrder} right />
-                    <SortTh id="speech" label="발화" sort={sort} order={order} onSort={setSort} onOrder={setOrder} right />
-                    <th style={{ ...thStyle, cursor: 'default', textAlign: 'right' }}>동작</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {/* 상시 세션(chat 그룹 등)은 종료가 없어 시각 정렬에서 늘 맨 아래로 밀린다 —
-                      구역으로 고정해 '지금 열려 있는 것' 을 먼저 보게 한다. */}
-                  {liveRows.length > 0 && <SectionRow label="진행중" n={liveRows.length} live />}
-                  {liveRows.map(r => <Row key={rowKey(r)} {...rowProps(r)} />)}
-                  {liveRows.length > 0 && rows.length > 0 && <SectionRow label="종료" n={total} />}
-                  {rows.map(r => <Row key={rowKey(r)} {...rowProps(r)} />)}
-                </tbody>
-              </table>
+      {/* ── 본문 = 좌 세션 목록(요약 카드) · 우 선택 세션(발언 + 이벤트) ── */}
+      <div ref={bodyRef} style={{ flex: 1, display: 'flex', minHeight: 0, position: 'relative' }}>
+        <div style={{
+          flex: wide ? `0 0 ${listWidth}px` : '0 0 100%', minWidth: 0,
+          display: 'flex', flexDirection: 'column',
+        }}>
+          {/* 목록 머리 — 표 헤더가 없어진 자리의 정렬 컨트롤 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>정렬</span>
+            <select className="form-input" style={{ width: 96, padding: '2px 6px', fontSize: 12 }}
+                    value={sort} onChange={e => { setSort(e.target.value as SortKey); setPage(0) }}>
+              {(Object.keys(SORT_LABEL) as SortKey[]).map(k => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
+            </select>
+            <button className="btn btn--sm btn--ghost" title={order === 'desc' ? '내림차순' : '오름차순'}
+                    onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
+              {order === 'desc' ? '▼' : '▲'}
+            </button>
+            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-muted)' }}>
+              {loading ? '조회 중…' : `${total}건`}
+            </span>
+          </div>
+
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {(!rows.length && !liveRows.length && !loading) ? (
+              <div className="empty" style={{ padding: 24 }}>조건에 맞는 세션이 없습니다</div>
+            ) : (
+              <>
+                {/* 상시 세션(chat 그룹 등)은 종료가 없어 시각 정렬에서 늘 맨 아래로 밀린다 —
+                    구역으로 고정해 '지금 열려 있는 것' 을 먼저 보게 한다. */}
+                {liveRows.length > 0 && <SectionLabel label="진행중" n={liveRows.length} live />}
+                {liveRows.map(r => <SessionCard key={rowKey(r)} {...cardProps(r)} />)}
+                {liveRows.length > 0 && rows.length > 0 && <SectionLabel label="종료" n={total} />}
+                {rows.map(r => <SessionCard key={rowKey(r)} {...cardProps(r)} />)}
+              </>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
+            <button className="btn btn--sm btn--ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>‹</button>
+            <span>{page + 1} / {pages}</span>
+            <button className="btn btn--sm btn--ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>›</button>
+            <select className="form-input" style={{ width: 78, marginLeft: 'auto', padding: '2px 6px', fontSize: 12 }} value={ps}
+                    onChange={e => { setPs(Number(e.target.value)); setPage(0) }}>
+              {PAGE_SIZES.map(n => <option key={n} value={n}>{n}개</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* 경계 — 잡아끌어 좌우 폭 조정, 더블클릭으로 기본(1/4) 복귀 */}
+        {wide && (
+          <div
+            onMouseDown={onSplitDown}
+            onDoubleClick={resetSplit}
+            title="드래그로 폭 조정 · 더블클릭으로 기본 폭"
+            style={{
+              flex: '0 0 5px', cursor: 'col-resize', background: 'var(--border)',
+              // 잡기 쉬우라고 실제 폭보다 넓게 — 가운데 1px 만 선으로 보인다
+              backgroundClip: 'content-box', borderLeft: '2px solid var(--bg)', borderRight: '2px solid var(--bg)',
+            }}
+          />
+        )}
+
+        {/* 우 — 선택 세션. 지표는 왼쪽 카드가 이미 보여주므로 여기는 발언·이벤트만 둔다. */}
+        {selRow
+          ? <SessionPane
+              r={selRow} detail={selDetail} names={names} audio={audio} overlay={!wide}
+              flowLoading={flowLoading}
+              onFlow={() => openFlow(selRow)} onPlayAll={() => playAll(selRow)}
+              onClose={() => setOpen(null)}
+            />
+          : wide && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12.5 }}>
+              왼쪽에서 세션을 고르면 발언·이벤트가 여기 나옵니다
             </div>
           )}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
-          <button className="btn btn--sm btn--ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>이전</button>
-          <span>{page + 1} / {pages}</span>
-          <button className="btn btn--sm btn--ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>다음</button>
-          <select className="form-input" style={{ width: 92, marginLeft: 8 }} value={ps}
-                  onChange={e => { setPs(Number(e.target.value)); setPage(0) }}>
-            {PAGE_SIZES.map(n => <option key={n} value={n}>{n}개</option>)}
-          </select>
-          <span style={{ marginLeft: 'auto' }}>
-            정렬 {SORT_LABEL[sort]} {order === 'desc' ? '내림차순' : '오름차순'}
-          </span>
-        </div>
       </div>
 
       {audio.node}
@@ -409,50 +502,30 @@ export default function PttHistoryPage() {
 // ════════════════════════════════════════════════════════════════
 // 목록 조각
 // ════════════════════════════════════════════════════════════════
-function SectionRow({ label, n, live }: { label: string; n: number; live?: boolean }) {
+function SectionLabel({ label, n, live }: { label: string; n: number; live?: boolean }) {
   return (
-    <tr style={{ background: 'var(--bg-soft)' }}>
-      <td colSpan={9} style={{
-        padding: '5px 12px', fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em',
-        textTransform: 'uppercase', color: 'var(--text-muted)', borderTop: '1px solid var(--border)',
-      }}>
-        {live && <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: 'var(--success)', marginRight: 5 }} />}
-        {label}
-        <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none', opacity: .75, marginLeft: 6 }}>{n}</span>
-      </td>
-    </tr>
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 5, padding: '4px 2px 1px',
+      fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em',
+      textTransform: 'uppercase', color: 'var(--text-muted)',
+    }}>
+      {live && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />}
+      {label}
+      <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none', opacity: .75 }}>{n}</span>
+    </div>
   )
 }
 
-function SortTh({ id, label, sort, order, onSort, onOrder, right }: {
-  id: SortKey
-  label: string
-  sort: SortKey
-  order: 'asc' | 'desc'
-  onSort: (v: SortKey) => void
-  onOrder: (v: 'asc' | 'desc') => void
-  right?: boolean
-}) {
-  const on = sort === id
-  return (
-    <th style={{ ...thStyle, textAlign: right ? 'right' : 'left' }}
-        onClick={() => { if (on) onOrder(order === 'asc' ? 'desc' : 'asc'); else { onSort(id); onOrder('desc') } }}>
-      {label}{on ? (order === 'asc' ? ' ▲' : ' ▼') : ''}
-    </th>
-  )
-}
-
-function Row({ r, isOpen, detail, audio, flowLoading, onToggle, onFlow, onPlayAll, onSlotFlow, onSlotPlay }: {
+// ── 세션 요약 카드 (좌측 목록의 한 항목) ──────────────────────
+// 표가 아니라 카드인 이유: 목록 폭이 화면의 1/4 이라 열을 늘어놓을 자리가 없고, 세션에서
+// 먼저 읽어야 할 것은 열의 값이 아니라 "무엇을·언제·얼마나" 한 덩어리이기 때문이다.
+// 카드는 선택돼도 내용·크기가 변하지 않는다 — 동작(Flow·재생)은 우측 패널 머리가 맡아
+// 목록에서 선택을 옮겨도 카드가 자라며 아래 목록을 밀지 않는다.
+function SessionCard({ r, sel, names, onSelect }: {
   r: PttSessionRow
-  isOpen: boolean
-  detail: DetailState | undefined
-  audio: InlineAudio
-  flowLoading: boolean
-  onToggle: () => void
-  onFlow: () => void
-  onPlayAll: () => void
-  onSlotFlow: (hh: number, min: number) => void
-  onSlotPlay: (segs: RecordingSegment[], title: string) => void
+  sel: boolean
+  names: Directory
+  onSelect: () => void
 }) {
   // floor 축은 세션 당시 스냅샷이 정본 — private 은 통화마다 SDP 협상으로 달라진다.
   const duplex = r.floor_control === 'off'
@@ -460,54 +533,118 @@ function Row({ r, isOpen, detail, audio, flowLoading, onToggle, onFlow, onPlayAl
   const dur = r.end_time && r.start_time
     ? Math.max(0, Math.round((Date.parse(r.end_time) - Date.parse(r.start_time)) / 1000))
     : null
+  const maxCon = r.max_concurrent ?? 0
+  return (
+    <div onClick={onSelect} style={{
+      cursor: 'pointer', padding: '7px 9px', borderRadius: 8,
+      border: `1px solid ${sel ? 'var(--primary)' : 'var(--border)'}`,
+      background: sel ? 'var(--primary-soft)' : 'var(--surface)',
+      display: 'flex', flexDirection: 'column', gap: 4,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+        <span className={`badge ${KIND_BADGE[r.kind] || 'badge--gray'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
+        {duplex && <span className="badge badge--blue">전이중</span>}
+        {/* 상태는 카드마다 명시 — 구역 라벨은 스크롤하면 시야에서 사라진다 */}
+        <span className={`badge ${live ? 'badge--green' : 'badge--gray'}`}>{live ? '진행중' : '종료'}</span>
+        <span style={{ fontWeight: 600, fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Target r={r} names={names} />
+        </span>
+      </div>
+
+      <div className="ts" style={{ fontSize: 11.5 }}>
+        {fmtShortTime(r.start_time)} ~ {live ? '진행중' : fmtShortTime(r.end_time)}
+        {dur != null && <> · {fmtDur(dur)}</>}
+        {r.kind === 'group' && r.mcptt_group_id && <> · {r.mcptt_group_id}</>}
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
+        <span>턴 <b style={{ color: 'var(--text)' }}>{r.turn_count ?? r.segment_count ?? 0}</b></span>
+        <span>화자 <b style={{ color: 'var(--text)' }}>{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
+        <span>발화 <b style={{ color: 'var(--text)' }}>{fmtSpeechMs(r.total_speech_ms)}</b></span>
+        {maxCon > 1 && <span className="badge badge--blue" style={{ fontSize: 9 }}>동시 {maxCon}</span>}
+        {r.initiator && <span style={{ marginLeft: 'auto' }}>개시 <Person id={r.initiator} names={names} /></span>}
+      </div>
+    </div>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════
+// 선택 세션 — 머리(정체성·동작) + 참여자/발언/이벤트 3구획(경계 드래그로 높이 조절).
+// 지표는 왼쪽 카드가 맡는다. 좁은 화면(<1080px)에서는 목록 위에 겹쳐 뜬다.
+// ════════════════════════════════════════════════════════════════
+const PANE_W = 560
+
+function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, onPlayAll, onClose }: {
+  r: PttSessionRow
+  detail: DetailState | undefined
+  names: Directory
+  audio: InlineAudio
+  overlay: boolean
+  flowLoading: boolean
+  onFlow: () => void
+  onPlayAll: () => void
+  onClose: () => void
+}) {
+  const duplex = r.floor_control === 'off'
+  const live = r.state === 'active'
+
+  const body = (
+    <section
+      onClick={e => e.stopPropagation()}
+      style={{
+        background: 'var(--bg-soft)', display: 'flex', flexDirection: 'column', minHeight: 0,
+        ...(overlay
+          ? {
+              position: 'absolute', top: 0, right: 0, bottom: 0, width: `min(${PANE_W}px, 100%)`,
+              zIndex: 21, boxShadow: 'var(--shadow-lg)', borderLeft: '1px solid var(--border)',
+            }
+          : { flex: 1 }),
+      }}
+    >
+      {/* 머리 — 세션 정체성 + 동작. 동작을 카드가 아니라 여기에 두는 것은 카드 크기를
+          선택 여부와 무관하게 고정하기 위해서다 (좁은 화면에선 카드가 가려지기도 한다). */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
+        borderBottom: '1px solid var(--border)', background: 'var(--surface)',
+      }}>
+        <span className={`badge ${KIND_BADGE[r.kind] || 'badge--gray'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
+        {duplex && <span className="badge badge--blue">전이중</span>}
+        <span className={`badge ${live ? 'badge--green' : 'badge--gray'}`}>{live ? '진행중' : '종료'}</span>
+        <span style={{ fontWeight: 600, fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Target r={r} names={names} />
+        </span>
+        {r.floor_control === 'on' && r.floor_policy && (
+          <span className="badge badge--gray" style={{ fontSize: 9, flex: '0 0 auto' }}
+                title="세션 당시 동시 발언 정책 (TS 24.380)">
+            {r.floor_policy === 'multi' ? `multi · 최대 ${r.max_talkers || '?'}명`
+              : r.floor_policy === 'dual' ? 'dual · 2명' : 'single'}
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flex: '0 0 auto' }}>
+          <button className="btn btn--sm btn--outline" disabled={flowLoading} onClick={onFlow}>Flow</button>
+          <button className="btn btn--sm btn--outline" onClick={onPlayAll}>&#9654; 전체</button>
+          <button className="btn btn--sm btn--ghost" onClick={onClose} title="닫기 (Esc)">✕</button>
+        </span>
+      </div>
+
+      {/* 본문 — 구획별 스크롤·높이 조절은 SessionDetail(panel) 이 맡는다 */}
+      {!detail || detail.loading ? (
+        <div className="empty" style={{ padding: 16 }}>상세 로딩 중...</div>
+      ) : (
+        <SessionDetail
+          detail={detail} sess={r} recId={recIdOf(r.group_key, r.dir)}
+          isDuplex={duplex} audio={audio} layout="panel"
+        />
+      )}
+    </section>
+  )
+
+  if (!overlay) return body
   return (
     <>
-      <tr onClick={onToggle} style={{
-        cursor: 'pointer', borderTop: '1px solid var(--border)',
-        background: isOpen ? 'var(--hover)' : 'transparent',
-      }}>
-        <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
-        <td style={tdStyle} className="ts">
-          <b style={{ color: 'var(--text)' }}>{fmtShortTime(r.start_time)}</b>
-          {' ~ '}{live ? '진행중' : fmtShortTime(r.end_time)}
-          {dur != null && <span style={{ opacity: .8 }}> · {fmtDur(dur)}</span>}
-        </td>
-        <td style={tdStyle}>
-          <span className={`badge ${KIND_BADGE[r.kind] || 'badge--gray'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
-          {duplex && <span className="badge badge--blue" style={{ marginLeft: 4 }}>전이중</span>}
-        </td>
-        <td style={tdStyle}>
-          {targetOf(r)}
-          {r.kind === 'group' && r.mcptt_group_id &&
-            <span className="ts" style={{ color: 'var(--text-muted)' }}> · {r.mcptt_group_id}</span>}
-        </td>
-        <td style={{ ...tdStyle, color: 'var(--text-muted)' }} className="ts">{r.initiator || '—'}</td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>{(r.people || []).length || r.member_count || 0}</td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>{r.turn_count ?? r.segment_count ?? 0}</td>
-        <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(r.total_speech_ms)}</td>
-        <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-          <button className="btn btn--sm btn--outline" style={{ marginRight: 4 }} disabled={flowLoading} onClick={onFlow}>Flow</button>
-          <button className="btn btn--sm btn--outline" onClick={onPlayAll}>&#9654; 전체</button>
-        </td>
-      </tr>
-      {isOpen && (
-        <tr>
-          <td colSpan={9} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
-            <div style={{ padding: '12px 16px' }}>
-              {!detail || detail.loading ? (
-                <div className="empty" style={{ padding: 12 }}>상세 로딩 중...</div>
-              ) : (
-                <SessionDetail
-                  detail={detail} sess={r} recId={recIdOf(r.group_key, r.dir)}
-                  hourNum={Number((r.windows?.[0] || r.dir).replace(/\D/g, '').slice(8, 10))}
-                  isDuplex={duplex} audio={audio} flowLoading={flowLoading}
-                  onSlotFlow={onSlotFlow} onSlotPlay={onSlotPlay}
-                />
-              )}
-            </div>
-          </td>
-        </tr>
-      )}
+      <div onClick={onClose}
+           style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,.35)', zIndex: 20 }} />
+      {body}
     </>
   )
 }
@@ -597,19 +734,28 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
   )
 }
 
-function PersonFilter({ value, candidates, open, onToggleMenu, onChange }: {
+function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }: {
   value: string
   candidates: string[]
+  names: Directory
   open: boolean
   onToggleMenu: () => void
   onChange: (v: string) => void
 }) {
   const [input, setInput] = useState('')
+  // 이름으로도 찾는다 — 목록은 이름으로 읽히는데 검색만 번호면 앞뒤가 맞지 않는다.
+  // (서버 필터는 번호가 계약이라 고른 결과는 번호로 보낸다)
+  const shown = useMemo(() => {
+    const s = input.trim().toLowerCase()
+    if (!s) return candidates
+    return candidates.filter(p => p.toLowerCase().includes(s) || names.nameOf(p).toLowerCase().includes(s))
+  }, [candidates, input, names])
   return (
     <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
       <button className={`btn btn--sm ${value ? 'btn--primary' : 'btn--outline'}`}
+              title={value ? names.tipOf(value) : undefined}
               onClick={() => (value ? onChange('') : onToggleMenu())}>
-        {value ? `사람 ${value} ✕` : '사람 ▾'}
+        {value ? `사람 ${names.nameOf(value)} ✕` : '사람 ▾'}
       </button>
       {open && !value && (
         <div style={{
@@ -618,18 +764,19 @@ function PersonFilter({ value, candidates, open, onToggleMenu, onChange }: {
           borderRadius: 8, boxShadow: 'var(--shadow-lg)',
         }}>
           <div style={{ padding: '2px 4px 6px' }}>
-            <input className="form-input" autoFocus placeholder="번호 입력 후 Enter"
+            <input className="form-input" autoFocus placeholder="이름·번호로 찾기 (Enter=번호 직접)"
                    value={input} onChange={e => setInput(e.target.value)}
                    onKeyDown={e => { if (e.key === 'Enter' && input.trim()) onChange(input.trim()) }} />
           </div>
           {/* 현재 목록에 등장한 참여자 — 발언하지 않은 참가자도 포함된다 */}
-          {candidates.slice(0, 40).map(p => (
-            <div key={p} onClick={() => onChange(p)} className="ts"
-                 style={{ padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
-              {p}
+          {shown.slice(0, 40).map(p => (
+            <div key={p} onClick={() => onChange(p)} title={names.tipOf(p)}
+                 style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
+              <span>{names.nameOf(p)}</span>
+              {names.person(p) && <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 11 }}>{p}</span>}
             </div>
           ))}
-          {candidates.length === 0 && <div className="empty" style={{ padding: 10, fontSize: 12 }}>표시할 참여자가 없습니다</div>}
+          {shown.length === 0 && <div className="empty" style={{ padding: 10, fontSize: 12 }}>표시할 참여자가 없습니다</div>}
         </div>
       )}
     </div>
