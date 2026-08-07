@@ -262,7 +262,10 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
             CspUser clsSecUser;
             if ( !gclsCspUserMap.isAlive( strFrom, clsSecUser ) ) {
                 CspUser clsToProv;
+                // adhoc-* 는 PTT-AS 의 로컬 서비스 주소공간(EventIncomingCall 에서 ephemeral 합성,
+                // CSC 도 접두사 예약) — GroupMap 에는 합성 후에야 실리므로 접두사로 로컬 판정한다.
                 bool bLocalTarget = gclsGroupMap.Contains( strTo.c_str() ) ||
+                                    strncmp( strTo.c_str(), "adhoc-", 6 ) == 0 ||
                                     gclsCspUserMap.isAlive( strTo.c_str(), clsToProv ) ||
                                     gclsDbManager.SelectUser( strTo, clsToProv );
                 if ( !bLocalTarget ) {
@@ -1326,7 +1329,11 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
                     pszTo, pszEvt, std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
             // Phase 3b — 그룹 등록 멤버에게 alert MESSAGE fan-out (발신자 제외). affiliation 요구 그룹은
             //   affiliate 된 멤버만. 취소(alert-ind=false)도 동일 본문 전파로 멤버에 반영.
+            //   Content-Type 보존 (mcptt-info+xml — text/plain 강등 시 단말이 SMS 로 오인해 경보 분기 미동작).
             {
+                char szContentType[512];
+                szContentType[0] = '\0';
+                pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
                 for ( const auto &pUser : clsGroup._pusers ) {
                     if ( !pUser || pUser->_id == pszFrom ) continue;
                     if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
@@ -1337,7 +1344,7 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
                         CSipCallRoute clsMemRoute;
                         clsMemInfo.GetCallRoute( clsMemRoute );
                         if ( gclsUserAgent.SendSms( pszFrom, pUser->_id.c_str(), pclsMessage->m_strBody.c_str(),
-                                                    &clsMemRoute ) )
+                                                    &clsMemRoute, szContentType[0] ? szContentType : NULL ) )
                             iFanout++;
                     }
                 }

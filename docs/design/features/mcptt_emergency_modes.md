@@ -110,8 +110,8 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   3. CMP `ADD/PTT_GROUP_MODIFY`에 `emergency=1`(+개시자 tier=emergency) → floor 선점 보장.
   4. fan-out INVITE의 `mcptt-info`에 `<emergency-ind>true` 광고(`BuildGroupInfoXml` 확장).
   5. 자원 우선순위: 송출 INVITE에 `Resource-Priority` 헤더(RFC 4412, namespace `mcpttp.x`) 부가.
-- **업그레이드**: 진행 중 그룹콜에 re-INVITE(`emergency-ind=true`) → `EventReInvite`의 **PTT 인지 분기** → `PTT_FLOOR_TIER`/`PTT_GROUP_MODIFY`로 floor만 격상, 멤버에 re-INVITE/UPDATE 전파.
-- **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀, 상태 클리어. 비권한자 취소 무시(규격).
+- **업그레이드**: 진행 중 그룹콜에 re-INVITE(`emergency-ind=true`) → `EventReInvite`의 **PTT 인지 분기** → `PTT_FLOOR_TIER`/`PTT_GROUP_MODIFY`로 floor만 격상. **멤버 leg 재광고(re-INVITE/UPDATE)는 미구현**(§9) — 수신 단말은 floor TAKEN 의 emergency 비트로 상향을 인지(latch)한다.
+- **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀, 상태 클리어. 비권한자 취소 무시(규격). 하향도 멤버 leg 에 전파되지 않으므로 수신 단말 표시는 경보 취소 MESSAGE 로 정합한다(§4.3).
 - **imminent peril**: 동일 경로의 `imminentperil-ind`, tier=IMMINENT. capability 는
   `emergency_call` 공통 게이트를 따른다.
 
@@ -119,14 +119,22 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 `EventMessage`에서 `mcptt-info`(`alert-ind=true`) 판별 → SMS 경로와 분기:
 - alert capability(`emergency_alert`) 게이트 — 허용 시에만 그룹 등록 멤버에게 같은 MESSAGE 를
-  fan-out(발신자 제외, affiliation 요구 그룹은 affiliate 된 멤버만). 취소(`alert-ind=false`)도
-  동일 본문 전파. 등록(온라인) 멤버에게만 전달된다 — 저장 후 전달(경보 보류함)은 없다.
+  fan-out(발신자 제외, affiliation 요구 그룹은 affiliate 된 멤버만, **원본 Content-Type
+  `application/vnd.3gpp.mcptt-info+xml` 보존** — 단말이 content-type 으로 경보를 분기한다).
+  취소(`alert-ind=false`)도 동일 본문 전파. 등록(온라인) 멤버에게만 전달된다 — 저장 후
+  전달(경보 보류함)은 없다.
 - `CallDir`에 `alert_sent`/`alert_cancelled` 이벤트 기록(그룹 events.jsonl).
 - **단말(ptt-client)**: SOS 개시가 규격 시퀀스대로 **경보 MESSAGE 를 먼저** 보내고 긴급콜을
   개시한다(`McpttXml.alertInfo` + `PttController.sendAlert` — 호 성립과 무관하게 신원·그룹 전파).
   SOS 해제 시 경보 취소도 함께. 수신 측은 mcptt-info MESSAGE 를 파싱해 활성 경보
   상태(`alerts` StateFlow)로 들고, 전 탭 상단 배너(`AlertBanner`)+경고음으로 표시 —
   발신자 취소로 자동 해제, [닫기]는 로컬 표시만 제거. 이력 이벤트 `ALERT/ALERT_IN/ALERT_END`.
+- **수신측 세션 긴급 표시와의 정합**: 수신 단말의 in-call 긴급 표시(`session.emergency`)는
+  floor TAKEN 의 emergency 비트로 latch 된다(CSP 는 상향/하향 re-INVITE 를 멤버에 전파하지
+  않음 — §9). 경보 취소 수신 시 같은 그룹에 잔여 활성 경보가 없으면 이 latch 도 함께
+  해제한다(비개시자 한정). UI 는 같은 그룹의 경보 배너가 떠 있으면 세션 긴급
+  배너(`EmergencyBanner`)를 숨겨 중복 표시를 막고, 비개시자 배너에는 로컬 [닫기](표시 latch 만
+  해제)를 둔다 — 취소 MESSAGE 유실 대비 탈출구.
 - 사용자 단위 개시 권한(`allow_alert_init`)은 미구현(§9).
 
 ### 4.4 상태/로깅
@@ -203,6 +211,9 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
    사용자 MCPTT 프로파일(TS 24.483) 트랙으로 일괄 설계.
 6. **in-call 업그레이드 capability 게이트**: 개시(INVITE)만 게이트하고 re-INVITE 업그레이드는
    미적용 — `emergency_call=0` 그룹도 통화 중 격상 가능.
+7. **in-call 상태 변경의 멤버 전파**: 상향/하향 시 CSP 가 멤버 leg 에 re-INVITE/UPDATE 로
+   `emergency-ind` 를 재광고하는 규격 동작(§8 흐름) 미구현. 현재 수신 단말은 상향=floor TAKEN
+   emergency 비트 latch, 하향=경보 취소 MESSAGE 정합(§4.3)으로 대신한다.
 
 ---
 

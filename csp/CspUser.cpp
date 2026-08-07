@@ -138,6 +138,11 @@ void CspUserMap::Insert( CspUser &clsXmlUser ) {
     if ( itMap == m_clsMap.end() ) {
         m_clsMap.insert( CSP_USER_MAP::value_type( clsXmlUser.m_strId, clsXmlUser ) );
     } else {
+        // 프로비저닝 재로드(LoadAllUsers/ReloadFromDb — CSC_RESTART·USER_CHANGED)는 등록 상태와
+        // 직교하는 축이다 — 교체로 m_iRegisterTime 이 0 이 되면 isAlive 가 전원 false 로 붕괴
+        // (TestEnv 선차단이 실단말 비로컬 착신을 스캐너로 오분류하는 연쇄). 등록시각은 보존한다.
+        if ( clsXmlUser.m_iRegisterTime < itMap->second.m_iRegisterTime )
+            clsXmlUser.m_iRegisterTime = itMap->second.m_iRegisterTime;
         itMap->second = clsXmlUser;
     }
     m_clsMutex.release();

@@ -609,6 +609,27 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         //   접속 명단에서 이 사용자가 사라진다 (teardown 앞에서 호출 — 버전 단조성).
         SendConferenceNotify( strGroupId, strUserId, "disconnected", "deleted" );
 
+        // ad hoc 임시 그룹: 잔여 leg 1개 → 세션 해제 — OnCallTerminated(BYE) 경로와 동일 계약
+        //   (잔여 1명은 대화 상대도 재합류 입구도 없다. pending 초대가 있으면 count>1 로 유지).
+        if ( clsItem.bStillActive ) {
+            CspPttGroup clsAdhocChk;
+            if ( gclsGroupMap.Select( strGroupId.c_str(), clsAdhocChk ) && clsAdhocChk._isAdhoc &&
+                 clsAdhocChk._groupType != "private" ) {
+                std::vector<std::string> vecRemainLegs;
+                {
+                    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                    for ( const auto &kv : m_mapCallSession )
+                        if ( kv.second.strGroupId == strGroupId ) vecRemainLegs.push_back( kv.first );
+                }
+                if ( vecRemainLegs.size() == 1 ) {
+                    CLog::Print( LOG_INFO, "GroupCall: ad-hoc(%s) — 잔여 1 leg 종료(BYE, min-participants)",
+                                 strGroupId.c_str() );
+                    gclsUserAgent.StopCall( vecRemainLegs[0].c_str() );
+                    OnCallTerminated( vecRemainLegs[0] );
+                }
+            }
+        }
+
         // on-demand 그룹(prearranged/broadcast): 마지막 멤버 이탈 시 세션 즉시 해제 (chat 은 상시 유지).
         //   stale 캐시로 JOIN→'Group Not Found' 되던 문제도 원천 차단.
         if ( !clsItem.bStillActive ) {
@@ -1544,14 +1565,25 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     std::vector<std::string> vecPrivPeerLegs;
     if ( bStillActive ) {
         CspPttGroup clsPrivChk;
-        if ( gclsGroupMap.Select( strGroupId.c_str(), clsPrivChk ) && clsPrivChk._groupType == "private" ) {
+        if ( gclsGroupMap.Select( strGroupId.c_str(), clsPrivChk ) ) {
+            std::vector<std::string> vecRemainLegs;
             {
                 std::unique_lock<std::recursive_mutex> lock( m_mutex );
                 for ( const auto &kv : m_mapCallSession )
-                    if ( kv.second.strGroupId == strGroupId ) vecPrivPeerLegs.push_back( kv.first );
+                    if ( kv.second.strGroupId == strGroupId ) vecRemainLegs.push_back( kv.first );
             }
-            CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)", strGroupId.c_str(),
-                         vecPrivPeerLegs.size() );
+            if ( clsPrivChk._groupType == "private" ) {
+                vecPrivPeerLegs = vecRemainLegs;
+                CLog::Print( LOG_INFO, "OnCallTerminated: private(%s) — 상대 leg %zu 개 종료(BYE)", strGroupId.c_str(),
+                             vecPrivPeerLegs.size() );
+            } else if ( clsPrivChk._isAdhoc && vecRemainLegs.size() == 1 ) {
+                // ad hoc 임시 그룹: 잔여 1명 = 대화 상대가 없고 재합류 입구(편성 채널)도 없는
+                //   세션 — 편성 그룹의 '멤버 잔류 대기'를 적용하지 않고 해제한다 (미확립
+                //   fan-out 초대가 남아 있으면 맵에 함께 잡혀 여기 오지 않는다 — 합류 대기 유지).
+                vecPrivPeerLegs = vecRemainLegs;
+                CLog::Print( LOG_INFO, "OnCallTerminated: ad-hoc(%s) — 잔여 1 leg 종료(BYE, min-participants)",
+                             strGroupId.c_str() );
+            }
         }
     }
 
