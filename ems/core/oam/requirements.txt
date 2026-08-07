@@ -13,6 +13,10 @@ fastapi
 uvicorn
 starlette
 
+# 패키지 tarball 업로드 (multipart/form-data) — starlette `Request.form()` 런타임 의존.
+# 빠지면 POST /api/v1/packages 가 500 ("python-multipart must be installed").
+python-multipart
+
 # DB
 pymysql
 
@@ -36,3 +40,6 @@ strenum
 
 # oam-svc 가입자/조직 Excel 일괄 등록 오케스트레이션 (handlers/subscriber_import.py)
 openpyxl
+
+# 자동 배포 인벤토리/블루프린트 YAML 파싱 (services/provision/schema.py)
+PyYAML

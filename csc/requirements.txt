@@ -12,6 +12,10 @@ fastapi
 uvicorn
 starlette
 
+# 패키지 tarball 업로드 (multipart/form-data) — starlette `Request.form()` 런타임 의존.
+# 빠지면 배포본 csc 의 패키지 업로드가 500 ("python-multipart must be installed").
+python-multipart
+
 # DB
 pymysql
 
