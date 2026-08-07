@@ -13,7 +13,7 @@ from glob import glob
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
-from ._helpers import target_ip
+from ._helpers import target_ip, local_ip_args
 
 
 @verify_item(
@@ -34,14 +34,16 @@ def scn_subscribe(ctx: VerifyContext) -> ItemResult:
             detail=f"PTT 가입자 미준비: {','.join(missing)}",
         )
 
+    _tgt = target_ip("psp", ctx.sim_ip)
     args = [
         "-no-db", "-mode", "ptt", "-scenario", "subscribe",
-        "-count", "1", "-duration", "3", "-ip", target_ip("psp", ctx.sim_ip),
+        "-count", "1", "-duration", "3", "-ip", _tgt,
         "-user", s["PTT_USER"], "-domain", s["PTT_DOM"],
         "-password", s["PTT_PWD"],
     ]
     if s.get("PTT_AUTH"):
         args += ["-auth_id", s["PTT_AUTH"]]
+    args += local_ip_args(_tgt)
 
     t0 = time.time()
     ctx.state["S6_SUBSCRIBE_T0"] = t0

@@ -1,13 +1,14 @@
 """S6-ENTRY-CHECK — 통합 검증 진입 조건.
 
 체크 항목:
-1. Stage 5 결과물 LISTEN (csc/console + _INSTANCES 의 시그널링/미디어 인스턴스)
+1. Stage 5 결과물 LISTEN (mgmt OAM + _INSTANCES 의 csc/시그널링/미디어 인스턴스)
 2. Immutability gate — packages/manifest.json sha == .deployed-manifest.json sha
    (S5 배포 이후 패키지 재빌드 시 mismatch → FAIL, S5 부터 재배포 필요)
 
-target=verify (default) → csc=4445, console=8081
-target=prod             → csc=4421, console=80
-시그널링/미디어 포트 (5060/9000) 는 LocalIp 별로 분리 — _INSTANCES.local_ip 매칭.
+target=verify (default) → mgmt(oam)=4445 / target=prod → 4419.
+콘솔은 OAM 정적 서빙(단일 오리진)이라 별도 포트가 없다. 배포본 csc(4446) 는
+_INSTANCES 항목으로 포함된다. 시그널링/미디어 포트 (5060/9000) 는 LocalIp 별로
+분리 — _INSTANCES.local_ip 매칭.
 """
 from __future__ import annotations
 
@@ -15,23 +16,22 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ... import shell
 from ...common import pkg_manifest as _pkgm
-from ...common.csc_http import deployed_csc_port
+from ...common.csc_http import deployed_mgmt_port
 from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
 
 
 _TARGET_PORTS = {
-    "verify": {"csc": deployed_csc_port("verify"), "console": 8081},
-    "prod":   {"csc": deployed_csc_port("prod"), "console": 80},
+    "verify": {"mgmt": deployed_mgmt_port("verify")},
+    "prod":   {"mgmt": deployed_mgmt_port("prod")},
 }
 
 
 def _required_ports(ctx: VerifyContext) -> list:
-    """csc/console + _INSTANCES (listen 있는 entry) 의 (port, proto, host, label)."""
+    """mgmt OAM + _INSTANCES (listen 있는 entry) 의 (port, proto, host, label)."""
     target = (ctx.opts or {}).get("target") or "verify"
     p = _TARGET_PORTS.get(target, _TARGET_PORTS["verify"])
     out = [
-        (p["csc"],     "tcp", "",            "배포본 csc"),
-        (p["console"], "tcp", "",            "배포본 console"),
+        (p["mgmt"], "tcp", "", "배포본 oam (관리평면 + console 정적)"),
     ]
     for inst in _NATIVE_INSTANCES:
         listen = inst.get("listen")

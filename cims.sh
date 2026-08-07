@@ -358,6 +358,11 @@ cmd_reset() {
         info "Agent 설치 경로 정리 (/tmp/cims-agent-*)..."
         rm -rf /tmp/cims-agent-* 2>/dev/null || true
 
+        # verify Test-agent 가 남긴 감독 상태 정리 — dev run/ 을 _PREFIX 로 쓰는
+        # agent 가 dev pid 를 seed 하고 감독 경로를 배포본 트리로 flip 해 두면,
+        # 다음 회차 agent 가 dev 스택(oam 등)과 재기동 경쟁을 한다.
+        rm -f "$DIST_DIR/run/supervised.json" 2>/dev/null || true
+
         if [[ $keep_deployed -eq 1 ]]; then
             info "Phase 2/3 배포 대상 정리 — SKIP (--keep-deployed, mgmt-server + service-server 보존)"
         else
@@ -365,7 +370,7 @@ cmd_reset() {
             # Test-agent 프로세스부터 종료 (파일 잠금 회피)
             # _INSTANCES 의 agent_name 과 동기 — _INSTANCES 에 추가/제거 시 양쪽 갱신 필요.
             # P2 (2026-05-11): ISP/IMP 는 volte-sip-server / volte-media-server 와 한 agent 공유.
-            local _agents=(mgmt-server
+            local _agents=(mgmt-server mgmt-svc-server
                            volte-sip-server volte-media-server
                            ptt-sip-server ptt-media-server)
             local _a

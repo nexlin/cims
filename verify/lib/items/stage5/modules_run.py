@@ -1,4 +1,4 @@
-"""S5-MODULES-RUN (그룹) — 배포된 csp/cmp 기동 (native step 21).
+"""S5-MODULES-RUN (그룹) — 배포된 csc/csp/cmp 기동 (native step 21).
 
 Start 가 PASS 일 때 .deployed-manifest.json marker 도 step 21 안에서 자동 기록
 (S6-ENTRY-CHECK immutability gate).
@@ -12,7 +12,7 @@ from . import _native_steps
 
 @verify_item(
     id="S5-MODULES-RUN", stage=5, category="배포",
-    name="csp/cmp Start (5060/udp + 9000/udp LISTEN — sim install-only)",
+    name="csc/csp/cmp Start (4446/tcp + 5060/udp + 9000/udp — sim install-only)",
     is_group=True,
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=180,
@@ -27,12 +27,12 @@ def modules_run_group(ctx: VerifyContext) -> ItemResult:
 
 @verify_item(
     id="S5-MODULES-RUN-START", stage=5, category="배포",
-    name="csp/cmp Start (5060/udp + 9000/udp)",
+    name="csc/csp/cmp Start (4446 + 5060 + 9000)",
     parent="S5-MODULES-RUN",
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["service-start", "network"], timeout_s=120,
     execution_order=61,
 )
 def modules_start(ctx: VerifyContext) -> ItemResult:
-    """Step 21 native — csp/cmp Start + LISTEN 확인 + immutability marker."""
+    """Step 21 native — csc/csp/cmp Start + LISTEN 확인 + immutability marker."""
     return _native_steps.step_21_modules_start(ctx)

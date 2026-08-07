@@ -24,8 +24,10 @@ from ...common.cmp_client import cmp_stats
 from ._helpers import target_ip
 
 
-def _deployed_csc_base(ctx: VerifyContext) -> str:
-    return csc_http.deployed_csc_base((ctx.opts or {}).get("target") or "verify")
+def _deployed_admin_base(ctx: VerifyContext) -> str:
+    """admin CRUD 진입점 — 배포본 OAM(게이트웨이). auth/login 은 OAM 소유이고
+    가입자/그룹 라우트는 csc 모듈이 install 시 self-register 한 프록시로 도달."""
+    return csc_http.deployed_mgmt_base((ctx.opts or {}).get("target") or "verify")
 
 
 def _stats_has_gid(stats: dict | None, gid: str) -> bool:
@@ -50,7 +52,7 @@ def _stats_has_gid(stats: dict | None, gid: str) -> bool:
 )
 def scn_cmp_group_sync(ctx: VerifyContext) -> ItemResult:
     notes: list = []
-    base = _deployed_csc_base(ctx)
+    base = _deployed_admin_base(ctx)
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
     pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
     # PTT 그룹 동기화는 PMP 미디어를 검증 (CSP 의 PTT_AS 가 PSP 로 분리된 P1 토폴로지).

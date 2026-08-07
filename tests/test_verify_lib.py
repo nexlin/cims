@@ -952,7 +952,7 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertIn("subscribe-complete=True", r.detail)
 
     def test_entry_check_required_ports_target_prod(self) -> None:
-        """target=prod → _required_ports csc/console 4421/80 + 시그널링/미디어 인스턴스."""
+        """target=prod → mgmt(oam) 4419 + _INSTANCES (csc 4446 + 시그널링/미디어)."""
         from verify.lib.items.stage6 import entry_check
         ctx = self._VerifyContext.create(
             repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
@@ -960,8 +960,11 @@ class TestStage6NewScenarios(unittest.TestCase):
         ports = entry_check._required_ports(ctx)
         # entry: (port, proto, host, label)
         triples = {(p, proto) for p, proto, _h, _l in ports}
-        self.assertIn((4421, "tcp"), triples)
-        self.assertIn((80,   "tcp"), triples)
+        self.assertIn((4419, "tcp"), triples)     # 배포본 oam (관리평면, prod)
+        self.assertIn((4446, "tcp"), triples)     # csc 서비스 모듈 (_INSTANCES)
+        # 콘솔은 oam 정적 서빙 (단일 오리진) — 별도 포트 행 없음
+        self.assertNotIn((80,   "tcp"), triples)
+        self.assertNotIn((8081, "tcp"), triples)
         # csp/cmp + psp/pmp 는 두 환경 동일 (포트는 같고 host 만 다름)
         self.assertIn((5060, "udp"), triples)
         self.assertIn((9000, "udp"), triples)
@@ -978,16 +981,18 @@ class TestStage6NewScenarios(unittest.TestCase):
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=6)
         ports = entry_check._required_ports(ctx)
         triples = {(p, proto) for p, proto, _h, _l in ports}
-        self.assertIn((4445, "tcp"), triples)
-        self.assertIn((8081, "tcp"), triples)
+        self.assertIn((4445, "tcp"), triples)     # 배포본 oam (관리평면 + console 정적)
+        self.assertIn((4446, "tcp"), triples)     # csc 서비스 모듈
+        self.assertNotIn((8081, "tcp"), triples)  # 단독 console 프로세스 폐기
 
     def test_scn_db_sync_deployed_base_target_prod(self) -> None:
         from verify.lib.items.stage6 import scn_db_sync
         ctx = self._VerifyContext.create(
             repo_root=_REPO_ROOT, stage=6, opts={"target": "prod"},
         )
-        self.assertEqual(scn_db_sync._deployed_csc_base(ctx),
-                         "https://127.0.0.1:4421")
+        # admin CRUD 진입점 = 배포본 OAM(게이트웨이) — prod 4419
+        self.assertEqual(scn_db_sync._deployed_admin_base(ctx),
+                         "https://127.0.0.1:4419")
 
     def test_scn_subscribe_pass_when_notify_missing_but_marker_present(self) -> None:
         """NOTIFY 라인 0 이어도 SUBSCRIBE 마커 있으면 PASS — msg_log 비활성 환경 대응."""
@@ -2077,6 +2082,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self._orig = {
             "post_multipart": csc_http.post_multipart,
             "post_json":      csc_http.post_json,
+            "get_json":       csc_http.get_json,
             "csp_db_config":  _db.csp_db_config,
             "connect":        _db.connect,
         }
@@ -2084,6 +2090,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
     def tearDown(self) -> None:
         self._csc_http.post_multipart = self._orig["post_multipart"]
         self._csc_http.post_json      = self._orig["post_json"]
+        self._csc_http.get_json       = self._orig["get_json"]
         self._db.csp_db_config        = self._orig["csp_db_config"]
         self._db.connect              = self._orig["connect"]
 
@@ -2126,20 +2133,19 @@ class TestStage5CscDeploySteps(unittest.TestCase):
                                 filename=None, form_fields=None,
                                 token=None, timeout=60):
             captured.append((url, file_path, form_fields, token))
-            # csc / console / cspsim — 파일명으로 구분해 다른 id 반환
+            # oam / cspsim — 파일명으로 구분해 다른 id 반환
             base = os.path.basename(file_path)
-            if base.startswith("csc-"):       pid = 1
-            elif base.startswith("console-"): pid = 2
-            else:                              pid = 3   # cspsim
+            if base.startswith("oam-"): pid = 1
+            else:                        pid = 3   # cspsim
             return (201, {"id": pid})
         self._csc_http.post_multipart = fake_post_multipart
 
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            # csc-1.0.0.tar.gz, csc-1.10.0.tar.gz (natural sort: 1.10 > 1.0)
-            for fn in ("csc-1.0.0.tar.gz", "csc-1.10.0.tar.gz",
-                       "console-2.5.0.tar.gz", "cspsim-0.0.1.tar.gz"):
+            # oam-1.0.0.tar.gz, oam-1.10.0.tar.gz (natural sort: 1.10 > 1.0)
+            for fn in ("oam-1.0.0.tar.gz", "oam-1.10.0.tar.gz",
+                       "cspsim-0.0.1.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f:
                     f.write("dummy")
             ctx = self._ctx_with_dist(td)
@@ -2147,15 +2153,14 @@ class TestStage5CscDeploySteps(unittest.TestCase):
             r = self._native.step_08_package_upload(ctx)
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertEqual(self._native._get(ctx, "pkg_id_csc"), 1)
-        self.assertEqual(self._native._get(ctx, "pkg_id_console"), 2)
+        self.assertEqual(self._native._get(ctx, "pkg_id_oam"), 1)
         self.assertEqual(self._native._get(ctx, "pkg_id_sim"), 3)
-        # csc 는 1.10.0 (natural sort) 이 선택됐는지 검증
-        csc_call = next(c for c in captured if "csc-" in c[1])
-        self.assertIn("csc-1.10.0.tar.gz", csc_call[1])
+        # oam 은 1.10.0 (natural sort) 이 선택됐는지 검증
+        oam_call = next(c for c in captured if "oam-" in c[1])
+        self.assertIn("oam-1.10.0.tar.gz", oam_call[1])
         # form_fields 에 force=true
-        self.assertEqual(csc_call[2], {"force": "true"})
-        self.assertEqual(csc_call[3], "JWT")
+        self.assertEqual(oam_call[2], {"force": "true"})
+        self.assertEqual(oam_call[3], "JWT")
 
     def test_step_08_fail_on_http_error(self) -> None:
         import tempfile
@@ -2165,9 +2170,9 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            with open(os.path.join(pkg_dir, "csc-1.0.0.tar.gz"), "w") as f:
+            with open(os.path.join(pkg_dir, "oam-1.0.0.tar.gz"), "w") as f:
                 f.write("d")
-            with open(os.path.join(pkg_dir, "console-1.0.0.tar.gz"), "w") as f:
+            with open(os.path.join(pkg_dir, "cspsim-1.0.0.tar.gz"), "w") as f:
                 f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok", "JWT")
@@ -2187,7 +2192,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "aid_csc", 7)
-        # pkg_id_csc / pkg_id_console 미설정 → SKIP 노트 + FAIL
+        # pkg_id_oam / pkg_id_sim 미설정 → SKIP 노트 + FAIL
         r = self._native.step_09_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
         self.assertIn("step 08", r.detail)
@@ -2196,28 +2201,31 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         captured: list = []
         def fake_post_json(url, payload, token=None, timeout=15):
             captured.append((url, payload))
-            # csc → did=11, console → did=22, sim → did=33
+            # oam → did=11, sim → did=33
             pname = payload["process_name"]
-            did = {"CSC": 11, "CONSOLE": 22, "CSPSIM": 33}[pname]
+            did = {"OAM": 11, "CSPSIM": 33}[pname]
             return (201, {"id": did})
         self._csc_http.post_json = fake_post_json
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok", "JWT")
         self._native._set(ctx, "aid_csc", 7)
-        self._native._set(ctx, "pkg_id_csc", 1)
-        self._native._set(ctx, "pkg_id_console", 2)
+        self._native._set(ctx, "pkg_id_oam", 1)
         self._native._set(ctx, "pkg_id_sim", 3)
         r = self._native.step_09_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertEqual(self._native._get(ctx, "dep_id_csc"), 11)
-        self.assertEqual(self._native._get(ctx, "dep_id_console"), 22)
+        self.assertEqual(self._native._get(ctx, "dep_id_oam"), 11)
         self.assertEqual(self._native._get(ctx, "dep_id_sim"), 33)
-        # config overlay 검증 — csc:Server.Port=4445, console:Port=8081, sim: 없음
-        csc_payload = next(p for u, p in captured if p["process_name"] == "CSC")
-        self.assertEqual(csc_payload["config"], {"Server.Port": 4445})
-        cons_payload = next(p for u, p in captured if p["process_name"] == "CONSOLE")
-        self.assertEqual(cons_payload["config"], {"Port": 8081})
+        # config overlay 검증 — oam: Server.Port=4445 + runtime/packages/log 격리,
+        # sim: 없음 ({}).
+        mgmt_root = os.path.join(ctx.dist_dir, "mgmt-server")
+        oam_payload = next(p for u, p in captured if p["process_name"] == "OAM")
+        self.assertEqual(oam_payload["config"], {
+            "Server.Port":        4445,
+            "CimsRuntimeDir":     os.path.join(mgmt_root, "oam", "runtime"),
+            "Packages.Dir":       os.path.join(mgmt_root, "oam", "packages"),
+            "ServiceLogging.Dir": os.path.join(mgmt_root, "oam", "service_log"),
+        })
         sim_payload = next(p for u, p in captured if p["process_name"] == "CSPSIM")
         self.assertEqual(sim_payload["config"], {})
 
@@ -2235,27 +2243,16 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         self.assertIn("step 09", r.detail)
 
     def test_step_10_pass_when_all_succeed(self) -> None:
-        # agent_deployment.status enum: pending|deploying|running|stopped|failed|removed
+        # deployment status: pending|deploying|running|stopped|failed|removed
         # PASS 조건: 폴링 종료 시 모든 deployment 가 running 또는 stopped.
+        # 상태 조회는 REST (GET /deployments — 제어평면 SoT = OAM runtime store).
         def fake_post_json(url, payload, token=None, timeout=10):
             return (202, {"job_id": 1})
         self._csc_http.post_json = fake_post_json
-
-        self._db.csp_db_config = lambda dist: {"Host": "x", "User": "x",
-                                                "Password": "x", "DbName": "x"}
-
-        class FakeCursor:
-            def __init__(self, results): self._r = results
-            def execute(self, sql, params=None):
-                self._params = params
-            def fetchone(self):
-                return ("running",)    # install 후 정상 done 상태
-
-        class FakeConn:
-            def cursor(self): return FakeCursor([])
-            def close(self): pass
-
-        self._db.connect = lambda cfg: FakeConn()
+        self._csc_http.get_json = lambda url, token=None, timeout=10: {
+            "items": [{"id": 11, "status": "running"},
+                      {"id": 33, "status": "running"}],
+        }
 
         # time.sleep 을 빠르게 만들기
         import time as _t
@@ -2264,8 +2261,8 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         try:
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
             self._native._set(ctx, "tok", "JWT")
-            self._native._set(ctx, "dep_id_csc", 11)
-            self._native._set(ctx, "dep_id_console", 22)
+            self._native._set(ctx, "dep_id_oam", 11)
+            self._native._set(ctx, "dep_id_sim", 33)
             r = self._native.step_10_install_poll(ctx)
         finally:
             _t.sleep = orig_sleep
@@ -2278,16 +2275,10 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         def fake_post_json(url, payload, token=None, timeout=10):
             return (202, {})
         self._csc_http.post_json = fake_post_json
-        self._db.csp_db_config = lambda dist: {"Host": "x", "User": "x",
-                                                "Password": "x", "DbName": "x"}
-
-        class FakeCursor:
-            def execute(self, sql, params=None): pass
-            def fetchone(self): return ("deploying",)    # 영원히 deploying
-        class FakeConn:
-            def cursor(self): return FakeCursor()
-            def close(self): pass
-        self._db.connect = lambda cfg: FakeConn()
+        # 영원히 deploying — 폴링 60s 소진 → all_done=False
+        self._csc_http.get_json = lambda url, token=None, timeout=10: {
+            "items": [{"id": 11, "status": "deploying"}],
+        }
 
         import time as _t
         orig_sleep = _t.sleep
@@ -2295,7 +2286,7 @@ class TestStage5CscDeploySteps(unittest.TestCase):
         try:
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
             self._native._set(ctx, "tok", "JWT")
-            self._native._set(ctx, "dep_id_csc", 11)
+            self._native._set(ctx, "dep_id_oam", 11)
             r = self._native.step_10_install_poll(ctx)
         finally:
             _t.sleep = orig_sleep
@@ -2336,11 +2327,11 @@ class TestStage5CscVerifySteps(unittest.TestCase):
     def test_step_11_pass_when_all_files_exist(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            for name in ("csc", "console"):
-                base = os.path.join(td, "mgmt-server", name)
-                os.makedirs(os.path.join(base, "config"))
-                with open(os.path.join(base, "meta.json"), "w") as f:
-                    f.write('{"name": "' + name + '"}')
+            # oam — meta.json + config/ (평탄 설치 레이아웃)
+            base = os.path.join(td, "mgmt-server", "oam")
+            os.makedirs(os.path.join(base, "config"))
+            with open(os.path.join(base, "meta.json"), "w") as f:
+                f.write('{"name": "oam"}')
             # sim 은 cspsim tarball 구조상 config/ 없음 — meta.json 만
             sim_base = os.path.join(td, "mgmt-server", "sim")
             os.makedirs(sim_base)
@@ -2349,33 +2340,54 @@ class TestStage5CscVerifySteps(unittest.TestCase):
             ctx = self._ctx_with_dist(td)
             r = self._native.step_11_verify_files(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertIn("csc: meta.json + config/ 존재", r.detail)
-        self.assertIn("console: meta.json + config/ 존재", r.detail)
+        self.assertIn("oam: meta.json + config/ 존재", r.detail)
+        self.assertIn("sim: meta.json 존재", r.detail)
+
+    def test_step_11_pass_with_versioned_current_layout(self) -> None:
+        """버전 디렉토리 + current 심볼릭 레이아웃 — _resolve_install_root 가 흡수."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            # oam — <base>/<ver>/ + current 심볼릭 (agent 의 버전 단위 설치)
+            vdir = os.path.join(td, "mgmt-server", "oam", "1.0.0")
+            os.makedirs(os.path.join(vdir, "config"))
+            with open(os.path.join(vdir, "meta.json"), "w") as f:
+                f.write('{"name": "oam"}')
+            os.symlink(vdir, os.path.join(td, "mgmt-server", "oam", "current"))
+            # sim — modules/<pkg>/current 한 겹 더 (install-only 모듈)
+            sim_v = os.path.join(td, "mgmt-server", "sim", "modules", "cspsim", "0.1.0")
+            os.makedirs(sim_v)
+            with open(os.path.join(sim_v, "meta.json"), "w") as f:
+                f.write('{"name": "cspsim"}')
+            os.symlink(sim_v, os.path.join(
+                td, "mgmt-server", "sim", "modules", "cspsim", "current"))
+            ctx = self._ctx_with_dist(td)
+            r = self._native.step_11_verify_files(ctx)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("oam: meta.json + config/ 존재", r.detail)
         self.assertIn("sim: meta.json 존재", r.detail)
 
     def test_step_11_fail_when_meta_missing(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            # csc 만 정상, console 의 meta.json 누락
-            os.makedirs(os.path.join(td, "mgmt-server", "csc", "config"))
-            with open(os.path.join(td, "mgmt-server", "csc", "meta.json"), "w") as f:
+            # oam 만 정상, sim 의 meta.json 누락
+            os.makedirs(os.path.join(td, "mgmt-server", "oam", "config"))
+            with open(os.path.join(td, "mgmt-server", "oam", "meta.json"), "w") as f:
                 f.write("{}")
-            os.makedirs(os.path.join(td, "mgmt-server", "console", "config"))
-            # console/meta.json 만들지 않음
+            os.makedirs(os.path.join(td, "mgmt-server", "sim"))
+            # sim/meta.json 만들지 않음
             ctx = self._ctx_with_dist(td)
             r = self._native.step_11_verify_files(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertIn("console: 누락 meta.json", r.detail)
+        self.assertIn("sim: 누락 meta.json", r.detail)
 
     def test_step_11_fail_when_config_dir_missing(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            for name in ("csc", "console"):
-                base = os.path.join(td, "mgmt-server", name)
-                os.makedirs(base)
-                with open(os.path.join(base, "meta.json"), "w") as f:
-                    f.write("{}")
-                # config/ 디렉토리 만들지 않음
+            base = os.path.join(td, "mgmt-server", "oam")
+            os.makedirs(base)
+            with open(os.path.join(base, "meta.json"), "w") as f:
+                f.write("{}")
+            # config/ 디렉토리 만들지 않음
             ctx = self._ctx_with_dist(td)
             r = self._native.step_11_verify_files(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
@@ -2391,22 +2403,22 @@ class TestStage5CscVerifySteps(unittest.TestCase):
 
     # ── step 12 ──
     def test_target_helpers_verify_default(self) -> None:
-        """opts 비어있으면 verify default — _ports {csc:4445, console:8081}."""
+        """opts 비어있으면 verify default — _ports {mgmt:4445}."""
         from verify.lib.items.stage5 import _native_steps as ns
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self.assertEqual(ns._target(ctx), "verify")
-        self.assertEqual(ns._ports(ctx), {"csc": 4445, "console": 8081})
-        self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4445")
+        self.assertEqual(ns._ports(ctx), {"mgmt": 4445})
+        self.assertEqual(ns._deployed_mgmt_base(ctx), "https://127.0.0.1:4445")
 
     def test_target_helpers_prod(self) -> None:
-        """opts.target='prod' — _ports {csc:4421, console:80}."""
+        """opts.target='prod' — _ports {mgmt:4419} (운영 OAM)."""
         from verify.lib.items.stage5 import _native_steps as ns
         ctx = self._VerifyContext.create(
             repo_root=_REPO_ROOT, stage=5, opts={"target": "prod"},
         )
         self.assertEqual(ns._target(ctx), "prod")
-        self.assertEqual(ns._ports(ctx), {"csc": 4421, "console": 80})
-        self.assertEqual(ns._deployed_csc_base(ctx), "https://127.0.0.1:4421")
+        self.assertEqual(ns._ports(ctx), {"mgmt": 4419})
+        self.assertEqual(ns._deployed_mgmt_base(ctx), "https://127.0.0.1:4419")
 
     def test_target_helpers_unknown_falls_back_to_verify(self) -> None:
         """알 수 없는 target → verify default."""
@@ -2416,42 +2428,47 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         )
         # _target 자체는 "staging" 반환하지만 _ports 는 verify default fallback
         self.assertEqual(ns._target(ctx), "staging")
-        self.assertEqual(ns._ports(ctx), {"csc": 4445, "console": 8081})
+        self.assertEqual(ns._ports(ctx), {"mgmt": 4445})
 
-    def test_csc_overlay_uses_ports(self) -> None:
-        """_csc_overlay 가 명시 ports dict 사용."""
+    def test_mgmt_overlay_uses_ports(self) -> None:
+        """_mgmt_overlay 가 명시 ports dict + mgmt_root 격리 경로 사용."""
         from verify.lib.items.stage5 import _native_steps as ns
-        verify_ports = {"csc": 4445, "console": 8081}
-        prod_ports = {"csc": 4421, "console": 80}
-        self.assertEqual(ns._csc_overlay("csc", verify_ports), {"Server.Port": 4445})
-        self.assertEqual(ns._csc_overlay("csc", prod_ports), {"Server.Port": 4421})
-        self.assertEqual(ns._csc_overlay("console", verify_ports), {"Port": 8081})
-        self.assertEqual(ns._csc_overlay("console", prod_ports), {"Port": 80})
-        self.assertEqual(ns._csc_overlay("unknown", verify_ports), {})
+        verify_ports = {"mgmt": 4445}
+        prod_ports = {"mgmt": 4419}
+        root = "/x/mgmt-server"
+        ov = ns._mgmt_overlay("oam", verify_ports, root)
+        self.assertEqual(ov["Server.Port"], 4445)
+        # runtime store / 패키지 저장소 / 서비스 로그 — oam 모듈 트리로 격리
+        self.assertEqual(ov["CimsRuntimeDir"],     "/x/mgmt-server/oam/runtime")
+        self.assertEqual(ov["Packages.Dir"],       "/x/mgmt-server/oam/packages")
+        self.assertEqual(ov["ServiceLogging.Dir"], "/x/mgmt-server/oam/service_log")
+        self.assertEqual(ns._mgmt_overlay("oam", prod_ports, root)["Server.Port"], 4419)
+        self.assertEqual(ns._mgmt_overlay("sim", verify_ports, root), {})
+        self.assertEqual(ns._mgmt_overlay("unknown", verify_ports, root), {})
 
-    def test_step_12_target_prod_uses_4421(self) -> None:
-        """target=prod 시 _csc_overlay 가 csc=4421 기대값으로."""
+    def test_step_12_target_prod_uses_4419(self) -> None:
+        """target=prod 시 oam overlay 기대값이 4419 (운영 OAM 포트)."""
         from verify.lib.items.stage5 import _native_steps
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "mgmt-server", "csc")
+            base = os.path.join(td, "mgmt-server", "oam")
             os.makedirs(base)
-            # 4421 으로 overlay 된 config 가 있다 가정
+            # 4419 로 overlay 된 config 가 있다 가정
             with open(os.path.join(base, "config.json"), "w") as f:
-                _json.dump({"Server.Port": 4421}, f)
+                _json.dump({"Server.Port": 4419}, f)
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
                                               opts={"target": "prod"})
             ctx.dist_dir = td
             r = _native_steps.step_12_verify_overlay(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertIn("Server.Port=4421", r.detail)
+        self.assertIn("Server.Port=4419", r.detail)
 
     def test_step_12_target_prod_fail_when_4445(self) -> None:
         """target=prod 인데 config 가 verify 값(4445) 면 FAIL."""
         from verify.lib.items.stage5 import _native_steps
         import tempfile, json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "mgmt-server", "csc")
+            base = os.path.join(td, "mgmt-server", "oam")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server.Port": 4445}, f)
@@ -2460,13 +2477,13 @@ class TestStage5CscVerifySteps(unittest.TestCase):
             ctx.dist_dir = td
             r = _native_steps.step_12_verify_overlay(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertIn("기대=4421", r.detail)
+        self.assertIn("기대=4419", r.detail)
 
     def test_step_12_pass_with_flat_key(self) -> None:
         import tempfile
         import json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "mgmt-server", "csc")
+            base = os.path.join(td, "mgmt-server", "oam")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server.Port": 4445, "other": 1}, f)
@@ -2479,7 +2496,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         import json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "mgmt-server", "csc")
+            base = os.path.join(td, "mgmt-server", "oam")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server": {"Port": 4445}}, f)
@@ -2491,7 +2508,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
         import tempfile
         import json as _json
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "mgmt-server", "csc")
+            base = os.path.join(td, "mgmt-server", "oam")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 _json.dump({"Server.Port": 4444}, f)
@@ -2511,7 +2528,7 @@ class TestStage5CscVerifySteps(unittest.TestCase):
     def test_step_12_fail_malformed_json(self) -> None:
         import tempfile
         with tempfile.TemporaryDirectory() as td:
-            base = os.path.join(td, "mgmt-server", "csc")
+            base = os.path.join(td, "mgmt-server", "oam")
             os.makedirs(base)
             with open(os.path.join(base, "config.json"), "w") as f:
                 f.write("not-json{")
@@ -2521,25 +2538,22 @@ class TestStage5CscVerifySteps(unittest.TestCase):
 
 
 class TestStage5CscRunSteps(unittest.TestCase):
-    """S5 native — step 13 (csc start), 14 (csc health), 15 (console start)."""
+    """S5 native — step 13 (oam start), 14 (oam health), 15 (console 정적 서빙)."""
 
     def setUp(self) -> None:
         from verify.lib.items.stage5 import _native_steps
         from verify.lib.context import VerifyContext
         from verify.lib.common import csc_http
-        from verify.lib.common import db as _db
         from verify.lib import shell as _shell
         from verify.lib.registry import ItemStatus
         self._native = _native_steps
         self._VerifyContext = VerifyContext
         self._csc_http = csc_http
-        self._db = _db
         self._shell = _shell
         self._ItemStatus = ItemStatus
         self._orig = {
-            "post_json":     csc_http.post_json,
-            "csp_db_config": _db.csp_db_config,
-            "connect":       _db.connect,
+            "post_json":      csc_http.post_json,
+            "get_json":       csc_http.get_json,
             "port_listening": _shell.port_listening,
         }
         # time.sleep 빠르게
@@ -2549,8 +2563,7 @@ class TestStage5CscRunSteps(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._csc_http.post_json   = self._orig["post_json"]
-        self._db.csp_db_config     = self._orig["csp_db_config"]
-        self._db.connect           = self._orig["connect"]
+        self._csc_http.get_json    = self._orig["get_json"]
         self._shell.port_listening = self._orig["port_listening"]
         import time as _t
         _t.sleep = self._orig_sleep
@@ -2566,31 +2579,31 @@ class TestStage5CscRunSteps(unittest.TestCase):
 
     def test_step_13_pass_when_listening(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        # 첫 polling 시도에서 즉시 LISTEN
+        # 첫 polling 시도에서 즉시 LISTEN (mgmt 포트 4445)
         self._shell.port_listening = lambda port, proto="tcp", host="": port == 4445
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
+        self._native._set(ctx, "dep_id_oam", 11)
         r = self._native.step_13_csc_start(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertTrue(self._native._get(ctx, "csc_start_ok"))
+        self.assertTrue(self._native._get(ctx, "mgmt_start_ok"))
 
     def test_step_13_fail_on_listen_timeout(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
         self._shell.port_listening = lambda port, proto="tcp", host="": False
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
+        self._native._set(ctx, "dep_id_oam", 11)
         r = self._native.step_13_csc_start(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertFalse(self._native._get(ctx, "csc_start_ok"))
+        self.assertFalse(self._native._get(ctx, "mgmt_start_ok"))
 
     def test_step_13_fail_on_post_status_error(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (500, {})
         self._shell.port_listening = lambda port, proto="tcp", host="": True
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
+        self._native._set(ctx, "dep_id_oam", 11)
         r = self._native.step_13_csc_start(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
         self.assertIn("status=500", r.detail)
@@ -2599,97 +2612,136 @@ class TestStage5CscRunSteps(unittest.TestCase):
     def test_step_14_skips_when_csc_not_started(self) -> None:
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
-        # csc_start_ok 미설정 (False)
+        self._native._set(ctx, "dep_id_oam", 11)
+        # mgmt_start_ok 미설정 (False)
         r = self._native.step_14_csc_health(ctx)
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
     def test_step_14_pass_when_health_succeeds(self) -> None:
+        # job 상태 조회는 REST (GET /agents/<aid>/jobs/<jid> — SoT = runtime store).
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {"job_id": 99})
-        self._db.csp_db_config = lambda d: {"Host":"x","User":"x","Password":"x","DbName":"x"}
-        class FakeCursor:
-            def execute(self, sql, params=None): pass
-            def fetchone(self):
-                # status=succeeded, rc=0, stdout 안 'tcp:4445=open'
-                return ("succeeded", 0, "tcp:4445=open\n")
-        class FakeConn:
-            def cursor(self): return FakeCursor()
-            def close(self): pass
-        self._db.connect = lambda cfg: FakeConn()
+        self._csc_http.get_json = lambda url, token=None, timeout=10: {
+            # status=succeeded, rc=0, stdout 안 'tcp:4445=open'
+            "status": "succeeded", "result_code": 0,
+            "result_stdout": "tcp:4445=open\n",
+        }
 
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
-        self._native._set(ctx, "csc_start_ok", True)
+        self._native._set(ctx, "aid_csc", 7)
+        self._native._set(ctx, "dep_id_oam", 11)
+        self._native._set(ctx, "mgmt_start_ok", True)
         r = self._native.step_14_csc_health(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertTrue(self._native._get(ctx, "csc_health_ok"))
+        self.assertTrue(self._native._get(ctx, "mgmt_health_ok"))
 
     def test_step_14_fail_when_stdout_missing_tcp_open(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {"job_id": 99})
-        self._db.csp_db_config = lambda d: {"Host":"x","User":"x","Password":"x","DbName":"x"}
-        class FakeCursor:
-            def execute(self, sql, params=None): pass
-            def fetchone(self):
-                return ("succeeded", 0, "")    # stdout 비어있음
-        class FakeConn:
-            def cursor(self): return FakeCursor()
-            def close(self): pass
-        self._db.connect = lambda cfg: FakeConn()
+        self._csc_http.get_json = lambda url, token=None, timeout=10: {
+            "status": "succeeded", "result_code": 0,
+            "result_stdout": "",    # stdout 비어있음
+        }
 
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
-        self._native._set(ctx, "csc_start_ok", True)
+        self._native._set(ctx, "aid_csc", 7)
+        self._native._set(ctx, "dep_id_oam", 11)
+        self._native._set(ctx, "mgmt_start_ok", True)
         r = self._native.step_14_csc_health(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
-        self.assertFalse(self._native._get(ctx, "csc_health_ok"))
+        self.assertFalse(self._native._get(ctx, "mgmt_health_ok"))
 
     def test_step_14_fail_when_post_missing_job_id(self) -> None:
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (200, {})
         ctx = self._ctx()
         self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_csc", 11)
-        self._native._set(ctx, "csc_start_ok", True)
+        self._native._set(ctx, "dep_id_oam", 11)
+        self._native._set(ctx, "mgmt_start_ok", True)
         r = self._native.step_14_csc_health(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
         self.assertIn("job_id 누락", r.detail)
 
     # ── step 15 ──
-    def test_step_15_pass_when_listening(self) -> None:
-        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        self._shell.port_listening = lambda port, proto="tcp", host="": port == 8081
-        ctx = self._ctx()
-        self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_console", 22)
-        r = self._native.step_15_console_start(ctx)
-        self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertTrue(self._native._get(ctx, "console_start_ok"))
+    # console 은 별도 프로세스가 아니다 — oam 이 SPA 를 정적 동봉·단일 오리진 서빙.
+    # step_15_console_static 은 GET https://127.0.0.1:<mgmt>/ 가 200+HTML 인지 본다.
+    class _FakeResp:
+        def __init__(self, status=200, body=b"<!doctype html><html></html>"):
+            self.status = status
+            self._body = body
+        def read(self, n=-1): return self._body
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
 
-    def test_step_15_target_prod_uses_port_80(self) -> None:
-        """target=prod 시 step_15 가 console port 80 LISTEN 검증."""
-        captured_ports: list = []
-        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        def fake_listen(port, proto="tcp", host=""):
-            captured_ports.append(port)
-            return port == 80
-        self._shell.port_listening = fake_listen
-        ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
-                                          opts={"target": "prod"})
-        self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_console", 22)
-        r = self._native.step_15_console_start(ctx)
-        self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertEqual(captured_ports[0], 80)
-        self.assertIn("port 80", r.detail)
-
-    def test_step_15_fail_on_listen_timeout(self) -> None:
-        self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        self._shell.port_listening = lambda port, proto="tcp", host="": False
+    def test_step_15_skips_when_oam_not_started(self) -> None:
         ctx = self._ctx()
-        self._native._set(ctx, "tok", "JWT")
-        self._native._set(ctx, "dep_id_console", 22)
-        r = self._native.step_15_console_start(ctx)
+        # mgmt_start_ok 미설정 (False) → SKIP
+        r = self._native.step_15_console_static(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+
+    def test_step_15_pass_when_spa_served(self) -> None:
+        import urllib.request as _rq
+        captured_urls: list = []
+        orig_urlopen = _rq.urlopen
+        def fake_urlopen(url, timeout=10, context=None):
+            captured_urls.append(url)
+            return self._FakeResp()
+        _rq.urlopen = fake_urlopen
+        try:
+            ctx = self._ctx()
+            self._native._set(ctx, "mgmt_start_ok", True)
+            r = self._native.step_15_console_static(ctx)
+        finally:
+            _rq.urlopen = orig_urlopen
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertTrue(self._native._get(ctx, "console_static_ok"))
+        # verify target — mgmt 4445 단일 오리진으로 GET /
+        self.assertIn("4445", captured_urls[0])
+
+    def test_step_15_target_prod_uses_4419(self) -> None:
+        """target=prod 시 step_15 가 운영 OAM(4419) 오리진으로 확인."""
+        import urllib.request as _rq
+        captured_urls: list = []
+        orig_urlopen = _rq.urlopen
+        def fake_urlopen(url, timeout=10, context=None):
+            captured_urls.append(url)
+            return self._FakeResp()
+        _rq.urlopen = fake_urlopen
+        try:
+            ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5,
+                                              opts={"target": "prod"})
+            self._native._set(ctx, "mgmt_start_ok", True)
+            r = self._native.step_15_console_static(ctx)
+        finally:
+            _rq.urlopen = orig_urlopen
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertIn("4419", captured_urls[0])
+
+    def test_step_15_fail_when_not_html(self) -> None:
+        import urllib.request as _rq
+        orig_urlopen = _rq.urlopen
+        _rq.urlopen = lambda url, timeout=10, context=None: self._FakeResp(
+            status=200, body=b'{"error": "no static dir"}')
+        try:
+            ctx = self._ctx()
+            self._native._set(ctx, "mgmt_start_ok", True)
+            r = self._native.step_15_console_static(ctx)
+        finally:
+            _rq.urlopen = orig_urlopen
+        self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertFalse(self._native._get(ctx, "console_static_ok"))
+
+    def test_step_15_fail_on_connection_error(self) -> None:
+        import urllib.request as _rq
+        orig_urlopen = _rq.urlopen
+        def fake_urlopen(url, timeout=10, context=None):
+            raise ConnectionRefusedError("refused")
+        _rq.urlopen = fake_urlopen
+        try:
+            ctx = self._ctx()
+            self._native._set(ctx, "mgmt_start_ok", True)
+            r = self._native.step_15_console_static(ctx)
+        finally:
+            _rq.urlopen = orig_urlopen
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
 
@@ -2906,6 +2958,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
             "admin_login":     csc_http.admin_login,
             "post_json":       csc_http.post_json,
             "post_multipart":  csc_http.post_multipart,
+            "get_json":        csc_http.get_json,
             "delete":          csc_http.delete,
             "find_by_name":    csc_http.find_agent_id_by_name,
             "csp_db_config":   _db.csp_db_config,
@@ -2929,6 +2982,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self._csc_http.admin_login           = self._orig["admin_login"]
         self._csc_http.post_json             = self._orig["post_json"]
         self._csc_http.post_multipart        = self._orig["post_multipart"]
+        self._csc_http.get_json              = self._orig["get_json"]
         self._csc_http.delete                = self._orig["delete"]
         self._csc_http.find_agent_id_by_name = self._orig["find_by_name"]
         self._db.csp_db_config               = self._orig["csp_db_config"]
@@ -2956,23 +3010,24 @@ class TestStage5ModulesSteps(unittest.TestCase):
             return "JWT2-XYZ"
         self._csc_http.admin_login = fake_login
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
-        self._native._set(ctx, "csc_start_ok", True)
+        self._native._set(ctx, "mgmt_start_ok", True)
         r = self._native.step_16_modules_auth(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        # 배포본 csc(4445) 로 호출됐는지
+        # 배포본 OAM(4445) 로 호출됐는지
         self.assertIn("4445", called[0])
         self.assertEqual(self._native._get(ctx, "tok2"), "JWT2-XYZ")
 
     def test_step_16_fail_login(self) -> None:
         self._csc_http.admin_login = lambda *a, **k: ""
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
-        self._native._set(ctx, "csc_start_ok", True)
+        self._native._set(ctx, "mgmt_start_ok", True)
         r = self._native.step_16_modules_auth(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
 
     # ── step 17 ──
     def test_step_17_pass_with_modules(self) -> None:
-        # P2 토폴로지: 6 service-server (csp/psp/isp + cmp/pmp/imp) tarball 업로드 PASS.
+        # oam_csc_split 토폴로지: csc(서비스 모듈) + 6 service-server
+        # (csp/psp/isp + cmp/pmp/imp) tarball 업로드 PASS.
         # sim 은 mgmt-server agent 가 step_08 에서 처리 — step_17 대상 아님.
         import tempfile
         captured: list = []
@@ -2981,7 +3036,8 @@ class TestStage5ModulesSteps(unittest.TestCase):
                                 token=None, timeout=60):
             captured.append(file_path)
             base = os.path.basename(file_path)
-            if   base.startswith("csp-"): pid = 11
+            if   base.startswith("csc-"): pid = 10
+            elif base.startswith("csp-"): pid = 11
             elif base.startswith("psp-"): pid = 14
             elif base.startswith("isp-"): pid = 16
             elif base.startswith("cmp-"): pid = 12
@@ -2994,13 +3050,15 @@ class TestStage5ModulesSteps(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz", "isp-1.0.0.tar.gz",
+            for fn in ("csc-1.0.0.tar.gz",
+                       "csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz", "isp-1.0.0.tar.gz",
                        "cmp-1.0.0.tar.gz", "pmp-1.0.0.tar.gz", "imp-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
             r = self._native.step_17_modules_pkg_upload(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "pkg2_id_csc"), 10)
         self.assertEqual(self._native._get(ctx, "pkg2_id_csp"), 11)
         self.assertEqual(self._native._get(ctx, "pkg2_id_psp"), 14)
         self.assertEqual(self._native._get(ctx, "pkg2_id_isp"), 16)
@@ -3014,9 +3072,9 @@ class TestStage5ModulesSteps(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pkg_dir = os.path.join(td, "packages")
             os.makedirs(pkg_dir)
-            # pmp tarball 만 누락 — 나머지 3 모듈은 존재
-            for fn in ("csp-1.0.0.tar.gz", "psp-1.0.0.tar.gz",
-                       "cmp-1.0.0.tar.gz"):
+            # pmp tarball 만 누락 — 나머지 모듈은 존재
+            for fn in ("csc-1.0.0.tar.gz", "csp-1.0.0.tar.gz",
+                       "psp-1.0.0.tar.gz", "cmp-1.0.0.tar.gz"):
                 with open(os.path.join(pkg_dir, fn), "w") as f: f.write("d")
             ctx = self._ctx_with_dist(td)
             self._native._set(ctx, "tok2", "JWT2")
@@ -3032,10 +3090,12 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.SKIP)
 
     def test_step_18_pass(self) -> None:
-        # P2 토폴로지 (2026-05-11): 4 unique agent (volte-sip/media, ptt-sip/media) +
-        # 6 instances (csp/psp/isp/cmp/pmp/imp). 같은 agent_name 의 변종은 aid/pid 공유.
+        # oam_csc_split 토폴로지: 5 unique agent (mgmt-svc + volte-sip/media,
+        # ptt-sip/media) + 7 instances (csc/csp/psp/isp/cmp/pmp/imp).
+        # 같은 agent_name 의 변종은 aid/pid 공유.
         post_called: list = []
         _AID_BY_AGENT = {
+            "mgmt-svc-server":    90,    # csc (서비스 모듈)
             "volte-sip-server":   100,   # csp + isp 공유
             "ptt-sip-server":     110,   # psp
             "volte-media-server": 200,   # cmp + imp 공유
@@ -3061,9 +3121,9 @@ class TestStage5ModulesSteps(unittest.TestCase):
             return (1000 + _AID_BY_AGENT.get(aname, 0), "")
         self._native._spawn_one_module_agent = fake_spawn
 
-        # _all_modules_online 즉시 True
+        # _all_modules_online 즉시 True — 시그니처 (base, token)
         orig_all = self._native._all_modules_online
-        self._native._all_modules_online = lambda dist: True
+        self._native._all_modules_online = lambda base, token: True
 
         try:
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
@@ -3077,22 +3137,24 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
         # 같은 agent 의 변종은 같은 aid 공유 (csp=isp=100, cmp=imp=200)
-        self.assertEqual(self._native._get(ctx, "aid_csp"), 100)
-        self.assertEqual(self._native._get(ctx, "aid_isp"), 100)
-        self.assertEqual(self._native._get(ctx, "aid_psp"), 110)
-        self.assertEqual(self._native._get(ctx, "aid_cmp"), 200)
-        self.assertEqual(self._native._get(ctx, "aid_imp"), 200)
-        self.assertEqual(self._native._get(ctx, "aid_pmp"), 210)
-        self.assertEqual(self._native._get(ctx, "ta_pid_csp"), 1100)
-        self.assertEqual(self._native._get(ctx, "ta_pid_isp"), 1100)
-        # spawn 은 unique agent 당 1회 — 4번
-        self.assertEqual(len(spawned), 4)
+        self.assertEqual(self._native._get(ctx, "aid2_csc"), 90)
+        self.assertEqual(self._native._get(ctx, "aid2_csp"), 100)
+        self.assertEqual(self._native._get(ctx, "aid2_isp"), 100)
+        self.assertEqual(self._native._get(ctx, "aid2_psp"), 110)
+        self.assertEqual(self._native._get(ctx, "aid2_cmp"), 200)
+        self.assertEqual(self._native._get(ctx, "aid2_imp"), 200)
+        self.assertEqual(self._native._get(ctx, "aid2_pmp"), 210)
+        self.assertEqual(self._native._get(ctx, "ta_pid2_csp"), 1100)
+        self.assertEqual(self._native._get(ctx, "ta_pid2_isp"), 1100)
+        # spawn 은 unique agent 당 1회 — 5번
+        self.assertEqual(len(spawned), 5)
 
     # ── step 19 ──
     def test_step_19_pass(self) -> None:
-        # P2 토폴로지: 6 service-server deployment (CSP/PSP/ISP/CMP/PMP/IMP) 생성 PASS.
+        # oam_csc_split: csc + 6 service-server deployment
+        # (CSC/CSP/PSP/ISP/CMP/PMP/IMP) 생성 PASS.
         captured: list = []
-        _PMAP = {"CSP": 11, "PSP": 14, "ISP": 16,
+        _PMAP = {"CSC": 10, "CSP": 11, "PSP": 14, "ISP": 16,
                  "CMP": 12, "PMP": 15, "IMP": 17}
         def fake_post_json(url, payload, token=None, timeout=15):
             captured.append(payload)
@@ -3101,17 +3163,28 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, aid, pid in [("csp", 100, 11), ("psp", 110, 14), ("isp", 120, 16),
+        for m, aid, pid in [("csc", 90, 10),
+                             ("csp", 100, 11), ("psp", 110, 14), ("isp", 120, 16),
                              ("cmp", 200, 12), ("pmp", 210, 15), ("imp", 220, 17)]:
-            self._native._set(ctx, f"aid_{m}", aid)
+            self._native._set(ctx, f"aid2_{m}", aid)
             self._native._set(ctx, f"pkg2_id_{m}", pid)
         r = self._native.step_19_modules_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(self._native._get(ctx, "dep2_id_csc"), 10)
         self.assertEqual(self._native._get(ctx, "dep2_id_csp"), 11)
         self.assertEqual(self._native._get(ctx, "dep2_id_psp"), 14)
         self.assertEqual(self._native._get(ctx, "dep2_id_isp"), 16)
         self.assertEqual(self._native._get(ctx, "dep2_id_pmp"), 15)
         self.assertEqual(self._native._get(ctx, "dep2_id_imp"), 17)
+        # csc 는 Server.Port=4446 (dev 4421·mgmt oam 4445 와 분리) + MCPTT 4431
+        # (dev 4430 회피) + notify 대상 = 배포본 CSP/PSP. DB 접속(CimsDatabase.*)은
+        # 환경 SoT(dist csp.json)에서 동적 주입되므로 키 존재만 확인.
+        csc_payload = next(p for p in captured if p["process_name"] == "CSC")
+        for k, v in {"Server.Port": 4446, "McpttServer.Port": 4431,
+                     "CspNotify.Ip": "127.0.0.1",
+                     "PspNotify.Ip": "127.0.0.3"}.items():
+            self.assertEqual(csc_payload["config"].get(k), v)
+        self.assertTrue(csc_payload["install_path"].endswith("/mgmt-svc-server"))
         # PSP/PMP 는 config_overlay (Roles/LocalIp) 가 payload 에 포함
         psp_payload = next(p for p in captured if p["process_name"] == "PSP")
         self.assertIn("config", psp_payload)
@@ -3146,9 +3219,9 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self._native._set(ctx, "tok2", "JWT2")
         # csp/cmp 만 ready, pmp 의 pkg_id 누락
         for m in ("csp", "cmp"):
-            self._native._set(ctx, f"aid_{m}", 100)
+            self._native._set(ctx, f"aid2_{m}", 100)
             self._native._set(ctx, f"pkg2_id_{m}", 1)
-        self._native._set(ctx, "aid_pmp", 210)
+        self._native._set(ctx, "aid2_pmp", 210)
         # pkg2_id_pmp 미설정
         r = self._native.step_19_modules_deployment_create(ctx)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
@@ -3156,22 +3229,18 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 20 ──
     def test_step_20_pass_when_all_succeed(self) -> None:
-        # PASS 조건: 폴링 종료 시 모든 service-server deployment status ∈ {running, stopped}.
+        # PASS 조건: 폴링 종료 시 모든 모듈 deployment status ∈ {running, stopped}.
+        # 상태 조회는 REST (GET /deployments — 제어평면 SoT = OAM runtime store).
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
-        self._db.csp_db_config = lambda d: {"Host": "x", "User": "x",
-                                             "Password": "x", "DbName": "x"}
-        class FakeCursor:
-            def execute(self, sql, params=None): pass
-            def fetchone(self): return ("stopped",)
-        class FakeConn:
-            def cursor(self): return FakeCursor()
-            def close(self): pass
-        self._db.connect = lambda cfg: FakeConn()
+        _DIDS = [("csc", 10), ("csp", 11), ("psp", 14), ("isp", 16),
+                 ("cmp", 12), ("pmp", 15), ("imp", 17)]
+        self._csc_http.get_json = lambda url, token=None, timeout=10: {
+            "items": [{"id": did, "status": "stopped"} for _m, did in _DIDS],
+        }
 
         ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
         self._native._set(ctx, "tok2", "JWT2")
-        for m, did in [("csp", 11), ("psp", 14), ("isp", 16),
-                        ("cmp", 12), ("pmp", 15), ("imp", 17)]:
+        for m, did in _DIDS:
             self._native._set(ctx, f"dep2_id_{m}", did)
         r = self._native.step_20_modules_install_poll(ctx)
         self.assertEqual(r.status, self._ItemStatus.PASS)
@@ -3179,10 +3248,13 @@ class TestStage5ModulesSteps(unittest.TestCase):
 
     # ── step 21 ──
     def test_step_21_pass(self) -> None:
-        # P2: csp/psp/isp + cmp/pmp/imp 6 인스턴스 모두 LISTEN. CMP_WAIT_S=0 으로
-        # 시그널링↔미디어 connection wait 자체 비활성 (단위 테스트 — 실제 csp_*.log 없음).
+        # oam_csc_split: csc(4446/tcp) + csp/psp/isp + cmp/pmp/imp 7 인스턴스 모두
+        # LISTEN. CMP_WAIT_S=0 으로 시그널링↔미디어 connection wait 자체 비활성
+        # (단위 테스트 — 실제 csp_*.log 없음).
         self._csc_http.post_json = lambda u, p, token=None, timeout=10: (202, {})
         def fake_listen(port, proto="tcp", host=""):
+            if port == 4446 and proto == "tcp":
+                return True     # csc 서비스 모듈
             return port in (5060, 9000) and proto == "udp"
         self._shell.port_listening = fake_listen
         marker_called = [0]
@@ -3197,7 +3269,7 @@ class TestStage5ModulesSteps(unittest.TestCase):
         try:
             ctx = self._VerifyContext.create(repo_root=_REPO_ROOT, stage=5)
             self._native._set(ctx, "tok2", "JWT2")
-            for m, did in [("csp", 11), ("psp", 14), ("isp", 16),
+            for m, did in [("csc", 10), ("csp", 11), ("psp", 14), ("isp", 16),
                             ("cmp", 12), ("pmp", 15), ("imp", 17)]:
                 self._native._set(ctx, f"dep2_id_{m}", did)
             r = self._native.step_21_modules_start(ctx)
@@ -3243,7 +3315,9 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertIn("기동 유지", r.detail)
 
     def test_step_22_stop_after_kills_agents(self) -> None:
-        # stop_after=True 시 stop jobs + kill
+        # stop_after=True 시 stop jobs + kill.
+        # 순서: 모듈(배포본 OAM 4445 경유) 먼저 → mgmt(TB-OAM 4419 경유) 나중 —
+        # oam 이 배포본 관리평면이라 먼저 내리면 stop 발행이 갈 곳이 없다.
         post_calls: list = []
         def fake_post_json(url, payload, token=None, timeout=10):
             post_calls.append((url, payload))
@@ -3263,29 +3337,33 @@ class TestStage5ModulesSteps(unittest.TestCase):
             # 모든 deployment + Test-agent pid 설정
             self._native._set(ctx, "tok", "JWT")
             self._native._set(ctx, "tok2", "JWT2")
-            # mgmt-server 배포 3 모듈 (csc/console/sim)
-            self._native._set(ctx, "dep_id_csc", 1)
-            self._native._set(ctx, "dep_id_console", 2)
+            # mgmt-server 배포 2 모듈 (oam/sim)
+            self._native._set(ctx, "dep_id_oam", 1)
             self._native._set(ctx, "dep_id_sim", 3)
-            # 4 service-server deployment
+            # 모듈 deployment (csc + 4 service-server)
+            self._native._set(ctx, "dep2_id_csc", 10)
             self._native._set(ctx, "dep2_id_csp", 11)
             self._native._set(ctx, "dep2_id_psp", 14)
             self._native._set(ctx, "dep2_id_cmp", 12)
             self._native._set(ctx, "dep2_id_pmp", 15)
-            # Test-agent pid: mgmt-server 1 + service-server 4 = 5
-            self._native._set(ctx, "ta_pid_csc", 1000)
-            self._native._set(ctx, "ta_pid_csp", 1001)
-            self._native._set(ctx, "ta_pid_psp", 1011)
-            self._native._set(ctx, "ta_pid_cmp", 1002)
-            self._native._set(ctx, "ta_pid_pmp", 1012)
+            # Test-agent pid: mgmt-server(ta_pid2_csc — csc 인스턴스와 키 공유) 1
+            # + service-server 4 = 5 unique pid
+            self._native._set(ctx, "ta_pid2_csc", 1000)
+            self._native._set(ctx, "ta_pid2_csp", 1001)
+            self._native._set(ctx, "ta_pid2_psp", 1011)
+            self._native._set(ctx, "ta_pid2_cmp", 1002)
+            self._native._set(ctx, "ta_pid2_pmp", 1012)
             r = self._native.step_22_finalize(ctx)
         finally:
             _os.kill = orig_kill
 
         self.assertEqual(r.status, self._ItemStatus.PASS)
-        # mgmt-server: csc/console/sim (3) + service-server: csp/psp/cmp/pmp (4) = 7 stop 발행
+        # 모듈: csc/csp/psp/cmp/pmp (5) + mgmt: oam/sim (2) = 7 stop 발행
         self.assertEqual(len(post_calls), 7)
-        # 5 Test-agent kill (mgmt-server + 4 service-server)
+        # 순서 검증 — 앞 5건은 배포본 OAM(4445), 뒤 2건은 TB-OAM(4419)
+        self.assertTrue(all("4445" in u for u, _p in post_calls[:5]))
+        self.assertTrue(all("4419" in u for u, _p in post_calls[5:]))
+        # 5 unique Test-agent kill (mgmt-server + 4 service-server)
         self.assertEqual(len(kill_calls), 5)
 
 

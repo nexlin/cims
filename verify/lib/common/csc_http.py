@@ -29,18 +29,33 @@ _INSECURE_CTX = ssl.create_default_context()
 _INSECURE_CTX.check_hostname = False
 _INSECURE_CTX.verify_mode = ssl.CERT_NONE
 
-# 배포본 csc admin 포트 — target(ctx.opts["target"]) 별. verify 파이프라인이
-# 자체 배포하는 csc 는 4445, 운영 배포본은 4421 (시스템 단일 admin 포트).
-DEPLOYED_CSC_PORTS = {"verify": 4445, "prod": 4421}
+# 배포본 관리평면(OAM) 포트 — target(ctx.opts["target"]) 별. 관리 API
+# (auth/agents/packages/deployments)와 콘솔 정적 서빙은 OAM 단일 오리진
+# (oam_csc_split). verify 파이프라인이 자체 배포하는 OAM 은 4445, 운영은 4419.
+DEPLOYED_MGMT_PORTS = {"verify": 4445, "prod": 4419}
+
+# 배포본 csc(서비스 모듈) admin 포트 — 게이트웨이 뒤 직접 접근용(HA failover
+# 시나리오 등). verify 는 dev csc(4421)와의 충돌을 피해 4446 을 쓴다.
+DEPLOYED_CSC_PORTS = {"verify": 4446, "prod": 4421}
+
+
+def deployed_mgmt_port(target: str = "verify") -> int:
+    """배포본 관리평면(OAM) 포트 — 미지정/미지원 target 은 verify(4445)."""
+    return DEPLOYED_MGMT_PORTS.get(target or "verify", DEPLOYED_MGMT_PORTS["verify"])
+
+
+def deployed_mgmt_base(target: str = "verify") -> str:
+    """배포본 관리평면(OAM) API base URL (https://127.0.0.1:<port>)."""
+    return f"https://127.0.0.1:{deployed_mgmt_port(target)}"
 
 
 def deployed_csc_port(target: str = "verify") -> int:
-    """배포본 csc admin 포트 — 미지정/미지원 target 은 verify(4445)."""
+    """배포본 csc(서비스 모듈) 포트 — 미지정/미지원 target 은 verify(4446)."""
     return DEPLOYED_CSC_PORTS.get(target or "verify", DEPLOYED_CSC_PORTS["verify"])
 
 
 def deployed_csc_base(target: str = "verify") -> str:
-    """배포본 csc admin API base URL (https://127.0.0.1:<port>)."""
+    """배포본 csc(서비스 모듈) API base URL (https://127.0.0.1:<port>)."""
     return f"https://127.0.0.1:{deployed_csc_port(target)}"
 
 

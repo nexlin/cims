@@ -24,6 +24,7 @@ from ...common.ibcf_routing import seed_ibcf_routing, IBCF_PEER_DOMAIN
 IBCF_MOCK_PEER_IP   = "127.0.0.1"
 IBCF_MOCK_PEER_PORT = 6800
 from ..stage5._native_steps import _INSTANCES as _NATIVE_INSTANCES
+from ..stage5._native_steps import variant_jsonl_dir
 
 
 def _wait_cmp_ready(ip: str = "127.0.0.1", port: int = 9000,
@@ -82,22 +83,14 @@ def seed(ctx: VerifyContext) -> ItemResult:
     primary_seeded = 0
     primary_reloaded = False
     for inst in csp_variants:
-        # install_path = dist_dir/<agent_name> (server level — 변종 tarball 안 dir
-        # 디렉토리가 그 안에 풀려 install_path/<dir>/config/<dir>.json 가 됨).
-        # cims.sh DIST_DIR = install_path. PID 파일은 PID_DIR=$DIST_DIR/run.
-        # access_services.jsonl 시드 위치는 csp ELF 의 ConfigJsonlDir fallback
-        # 정합: csp.json 의 부모×3 + "/config" → install_path/config (server
-        # level 의 config/). 한 server 에 한 변종만 install 되는 P1 토폴로지에서
-        # 안전. (csp.json 에 ConfigJsonlDir 명시 안 됨 → fallback 동작.)
-        install_path = os.path.join(ctx.dist_dir, inst["agent_name"])
-        cfg_dir = os.path.join(install_path, "config")
-        pid_file = os.path.join(install_path, "run", f"{inst['id']}.pid")
+        # 버전형 설치(current 통로) 기준 collection jsonl 경로 — csp ELF 의
+        # ConfigJsonlDir fallback(csp.json 부모×3 + "/config") 과 정합. 변종별로
+        # 자기 버전 디렉토리를 가지므로 config/ 는 더 이상 형제 변종과 공유되지
+        # 않는다. PID 파일은 같은 current 통로의 run/<id>.pid (CIMS_DIST_DIR).
+        cfg_dir = variant_jsonl_dir(ctx.dist_dir, inst)
+        pid_file = os.path.join(os.path.dirname(cfg_dir), "run", f"{inst['id']}.pid")
         # ISP 는 IBCF role only — access_services (voip/ptt) 시드는 IBCF 흐름과
-        # 무관 (ISP 의 CSCF=false 라 REGISTER 자체를 받지 않음).
-        # P2 토폴로지에서 isp 와 csp 가 같은 install_path/config/ 를 공유하므로
-        # ISP 측에서 access_services 를 건드리면 안 됨 (CSP 의 시드를 보존).
-        # routing 6종만 시드 (rule이 req_uri_host contains "trunk.peer.test" 라
-        # CSP 의 VoLTE 호 흐름은 매칭 안 되므로 sharing 무해).
+        # 무관 (ISP 의 CSCF=false 라 REGISTER 자체를 받지 않음). routing 6종만 시드.
         if inst["id"] == "isp":
             n = 0   # ISP 는 access_services 시드 skip (공유 dir 보존)
         else:

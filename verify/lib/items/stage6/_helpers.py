@@ -20,6 +20,15 @@ def target_ip(role: str, default: str = "127.0.0.1") -> str:
     return default
 
 
+def local_ip_args(server_ip: str) -> list:
+    """루프백 배포본 대상 시 sim 의 로컬 바인드도 루프백으로.
+
+    sim 이 ens IP 로 auto-detect 바인드하면 SDP 광고 주소(ens IP)와 실제 송신
+    src(루프백 라우팅 → 127.0.0.1)가 어긋나 CMP relay 의 소스 매칭(nat=0)이
+    RTP 를 버린다 — 통화는 되는데 녹취 트랙이 비는 증상."""
+    return ["-local_ip", "127.0.0.1"] if server_ip.startswith("127.") else []
+
+
 def run_scenario(ctx: VerifyContext, item_id: str, title: str,
                  sim_args: list, prereq_keys: list,
                  timeout: int = 120,

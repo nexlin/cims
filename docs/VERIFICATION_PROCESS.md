@@ -16,7 +16,7 @@
 | **S2** | 빌드 | preflight + cmake build | 컴파일 통과 | 1~5m |
 | **S3** | 스모크 | configure → start dev → 1콜 VoIP/PTT | 빠른 sanity | 1~2m |
 | **S4** | 패키지화 | tarball 12종 + manifest.json (SHA-256) | immutability gate | <30s |
-| **S5** | 로컬 배포 | TB-CSC → Test-agent → mgmt-server → 4 service-server (VoLTE/PTT) | 배포 절차 회귀 | 3~5m |
+| **S5** | 로컬 배포 | TB-OAM → Test-agent → mgmt(oam) → 배포본 OAM 경유 csc + 4 service-server | 배포 절차 회귀 | 3~5m |
 | **S6** | 통합 검증 | VoLTE/PTT 음성·영상 + summary | 상용 진입 | 2~3m |
 
 **원칙**:
@@ -177,46 +177,52 @@ S2 FAIL → S3~S6 BLOCKED.
 
 패키지 포맷·변종 staging·빌드 흐름은 [`design/features/build_and_packaging.md`](design/features/build_and_packaging.md) + [`design/features/package_and_template.md`](design/features/package_and_template.md) 참조.
 
-### S5 — 로컬 배포 (7 부모 + 13 자식, 22 native step, 5 server topology)
+### S5 — 로컬 배포 (7 부모 + 13 자식, 22 native step, mgmt + 5 service-server topology)
 
-#### P1 토폴로지 (server 단위 분리) — SSOT
+#### 토폴로지 (server 단위 분리) — SSOT
 
-`_INSTANCES` (`verify/lib/items/stage5/_native_steps.py`) 가 5 server 의 SoT:
+mgmt 체인은 **standalone OAM**(02_deployment §2.1 — 콘솔 SPA 정적 동봉, 관리 API 단일
+오리진)을 배포하고, 이후 모든 모듈(csc 서비스 모듈 + service-server)은 **배포본 OAM 경유**로
+배포한다 (oam_csc_split — auth/agents/packages/deployments 는 OAM 소유, csc 는 게이트웨이 뒤
+서비스 모듈). `_INSTANCES` (`verify/lib/items/stage5/_native_steps.py`) 가 모듈 인스턴스의 SoT:
 
 | display_name | agent_name | dist 디렉토리 | 역할 / 변종 |
 |---|---|---|---|
-| CIMS 관리 서버 | `mgmt-server` | `<dist>/mgmt-server/` | csc + console + cspsim (sim 은 install-only) |
+| CIMS 관리 서버 | `mgmt-server` | `<dist>/mgmt-server/` | oam (관리평면 4445, console 동봉) + cspsim (install-only) |
+| Mgmt Service (CSC) | `mgmt-svc-server` | `<dist>/mgmt-svc-server/` | csc (variant=CSC, 4446 — 게이트웨이 뒤 서비스 모듈) |
 | VoLTE SIP Server | `volte-sip-server` | `<dist>/volte-sip-server/` | csp (variant=CSP) |
 | VoLTE Media Server | `volte-media-server` | `<dist>/volte-media-server/` | cmp (variant=CMP) |
 | PTT SIP Server | `ptt-sip-server` | `<dist>/ptt-sip-server/` | psp (variant=PSP) |
 | PTT Media Server | `ptt-media-server` | `<dist>/ptt-media-server/` | pmp (variant=PMP) |
 
-각 service-server 는 **base 바이너리 동일 + Roles 토글 + LocalIp/Port overlay** 로 인스턴스화 (deployment overlay = `install_path/config.json` → `csp.json`/`cmp.json` 시작 직전 머지). loopback alias (127.0.0.2 / 127.0.0.3 등) 는 `verify/lib/common/loopback.py` 가 관리. ISP / IMP (IBCF 변종) 는 패키지 산출물에는 포함되지만 P1 에서는 배포/검증 미적용.
+각 service-server 는 **base 바이너리 동일 + Roles 토글 + LocalIp/Port overlay** 로 인스턴스화 (deployment overlay = `install_path/<모듈>/config.json` → 모듈 config 시작 직전 머지). 설치 레이아웃은 버전형 (`<agent>/modules/<모듈>/<ver>/` + `current` 심볼릭). csp 변종의 DB 접속·`Setup.Xcap.*`(배포본 csc 4431), csc 의 `CimsDatabase.*`·`McpttServer.Port`(4431)·notify 대상은 step 19 가 overlay 로 주입 — 운영에서 블루프린트/콘솔 설정 단계가 담당하는 값을 verify 체인에서는 하네스가 담당한다. csp 변종의 SIP 리스너 SoT(`local_nodes.jsonl` primary) 는 step 21 이 시작 전 non-clobber 시드. loopback alias (127.0.0.2 / 127.0.0.3 등) 는 `verify/lib/common/loopback.py` 가 관리.
+
+verify Test-agent 는 `CIMS_AGENT_NO_SUPERVISE=1` 로 spawn 한다 — `_PREFIX`(build/dist)/run 의 dev pid 파일이 감독 집합에 seed 되어 dev 스택(oam 등)과 재기동 경쟁하는 사고 방지. `cims.sh reset` 이 `<dist>/run/supervised.json` 잔재도 정리한다.
 
 #### 항목 트리 (execution_order 순)
 
 ```
 S5-RESET                      (10) — step 01: cleanup
-S5-CSC-DEPLOY                 (20) ─ group  (mgmt-server: csc + console + sim)
-  ├─ S5-CSC-DEPLOY-AGENT-ENROLL (21) — step 05+06+07: TB-CSC admin login + agent + Test-agent (mgmt-server, sync 9903)
-  ├─ S5-CSC-DEPLOY-PKG-UPLOAD   (22) — step 08: csc/console/cspsim 3 tarball multipart upload
-  └─ S5-CSC-DEPLOY-INSTALL      (23) — step 09+10: 3 deployment 생성 (overlay) + install poll 60s
+S5-CSC-DEPLOY                 (20) ─ group  (mgmt-server: oam + sim 부트스트랩)
+  ├─ S5-CSC-DEPLOY-AGENT-ENROLL (21) — step 05+06+07: TB-OAM admin login + agent + Test-agent (mgmt-server, sync 9903)
+  ├─ S5-CSC-DEPLOY-PKG-UPLOAD   (22) — step 08: oam/cspsim 2 tarball multipart upload
+  └─ S5-CSC-DEPLOY-INSTALL      (23) — step 09+10: 2 deployment 생성 (overlay: Server.Port=4445 + runtime/packages/log 격리) + install poll 60s
 S5-CSC-VERIFY                 (30) ─ group
-  ├─ S5-CSC-VERIFY-FILES        (31) — step 11: meta.json + config/ 존재
-  └─ S5-CSC-VERIFY-OVERLAY      (32) — step 12: csc/config.json Server.Port=4445
+  ├─ S5-CSC-VERIFY-FILES        (31) — step 11: meta.json + config/ 존재 (current 통로 해석)
+  └─ S5-CSC-VERIFY-OVERLAY      (32) — step 12: oam/config.json Server.Port=4445
 S5-CSC-RUN                    (40) ─ group
-  ├─ S5-CSC-RUN-CSC-START       (41) — step 13: csc Start + 4445 LISTEN (25s)
-  ├─ S5-CSC-RUN-CSC-HEALTH      (42) — step 14: health_check job + agent_job 폴링 (15s)
-  └─ S5-CSC-RUN-CONSOLE-START   (43) — step 15: console Start + 8081 LISTEN
-S5-MODULES-DEPLOY             (50) ─ group  (배포본 csc 4445 경유, 4 service-server)
-  ├─ S5-MODULES-DEPLOY-AUTH       (51) — step 16: 배포본 csc admin login → tok2
-  ├─ S5-MODULES-DEPLOY-PKG-UPLOAD (52) — step 17: csp/cmp/psp/pmp 4 tarball upload (_INSTANCES iteration)
-  ├─ S5-MODULES-DEPLOY-AGENT-ENROLL (53) — step 18: 4 agent + 4 Test-agent (sync 9903~9906)
-  └─ S5-MODULES-DEPLOY-INSTALL    (54) — step 19+20: 4 deployment + install poll
+  ├─ S5-CSC-RUN-CSC-START       (41) — step 13: oam Start + 4445 LISTEN (25s)
+  ├─ S5-CSC-RUN-CSC-HEALTH      (42) — step 14: health_check job + job 상태 폴링 (15s)
+  └─ S5-CSC-RUN-CONSOLE-START   (43) — step 15: console 정적 서빙 확인 (GET / → SPA HTML)
+S5-MODULES-DEPLOY             (50) ─ group  (배포본 OAM 4445 경유, csc + 4 service-server)
+  ├─ S5-MODULES-DEPLOY-AUTH       (51) — step 16: 배포본 OAM admin login → tok2
+  ├─ S5-MODULES-DEPLOY-PKG-UPLOAD (52) — step 17: csc/csp/cmp/psp/pmp tarball upload (_INSTANCES iteration)
+  ├─ S5-MODULES-DEPLOY-AGENT-ENROLL (53) — step 18: agent + Test-agent (sync 9904~9909)
+  └─ S5-MODULES-DEPLOY-INSTALL    (54) — step 19+20: deployment (overlay 주입) + install poll
 S5-MODULES-RUN                (60) ─ group
-  └─ S5-MODULES-RUN-START         (61) — step 21: 시그널링↔미디어 두 pair (csp↔cmp + psp↔pmp)
-                                          OnCmpStatusChanged Connected wait + .deployed-manifest.json marker
-S5-FINALIZE                   (70) — step 22: 기본 기동 유지 / --stop-after 시 stop list (3 mgmt + 4 service = 7) + kill 5 agents
+  └─ S5-MODULES-RUN-START         (61) — step 21: csc(4446) + 시그널링↔미디어 두 pair (csp↔cmp + psp↔pmp)
+                                          local_nodes 시드 + OnCmpStatusChanged Connected wait + .deployed-manifest.json marker
+S5-FINALIZE                   (70) — step 22: 기본 기동 유지 / --stop-after 시 모듈(배포본 OAM 경유) → mgmt 순 stop + agent kill
 ```
 
 Build/Configure/Pkg 는 S2/S3/S4 가 담당하므로 S5 step 에서 제외.
@@ -226,18 +232,17 @@ Build/Configure/Pkg 는 S2/S3/S4 가 담당하므로 S5 step 에서 제외.
 ```
 {
   "results": {step_no: ItemResult},                 # cache (idempotent)
-  # csc 체인 (TB-CSC 4419)
-  "tok", "aid_csc", "enroll_tok_csc", "ta_pid_csc",      # 05~07
-  "pkg_id_csc", "pkg_id_console",                         # 08
-  "dep_id_csc", "dep_id_console",                         # 09
+  # mgmt 체인 (TB-OAM 4419 → oam + sim 부트스트랩)
+  "tok", "aid_csc", "enroll_tok_csc", "ta_pid_csc",      # 05~07 (mgmt agent)
+  "pkg_id_oam", "pkg_id_sim",                             # 08
+  "dep_id_oam", "dep_id_sim",                             # 09
   "all_install_done_csc",                                 # 10
-  "csc_start_ok", "csc_health_ok", "console_start_ok",    # 13~15
-  # modules 체인 (배포본 csc 4445)
+  "mgmt_start_ok", "mgmt_health_ok", "console_static_ok", # 13~15
+  # modules 체인 (배포본 OAM 4445 — csc + service-server)
   "tok2",
-  "aid_csp", "aid_cmp", "aid_sim",                        # 18
-  "enroll_tok_csp/cmp/sim", "ta_pid_csp/cmp/sim",         # 18
-  "pkg2_id_csp/cmp/sim",                                  # 17
-  "dep2_id_csp/cmp/sim",                                  # 19
+  "aid2_<id>", "enroll_tok2_<id>", "ta_pid2_<id>",        # 18
+  "pkg2_id_<id>",                                         # 17
+  "dep2_id_<id>",                                         # 19
   "all_install_done_modules", "modules_start_ok",         # 20, 21
 }
 ```
@@ -265,7 +270,7 @@ Build/Configure/Pkg 는 S2/S3/S4 가 담당하므로 S5 step 에서 제외.
 
 ### S6 — 통합 검증 (7 항목)
 
-- **S6-ENTRY-CHECK** — 4 ports LISTEN + immutability gate 매칭 (S5-MODULES-RUN-START 가 기록한 `.deployed-manifest.json` ↔ 현재 `packages/manifest.json` SHA-256).
+- **S6-ENTRY-CHECK** — mgmt OAM(4445) + _INSTANCES 포트 LISTEN + immutability gate 매칭 (S5-MODULES-RUN-START 가 기록한 `.deployed-manifest.json` ↔ 현재 `packages/manifest.json` SHA-256).
 - **S6-SEED** — 배포본 csp jsonlDir 에 access_services.jsonl 시드 + SIGUSR1.
 - **S6-SCN-VOLTE-VOICE / VOLTE-VIDEO / PTT-VOICE / PTT-VIDEO** — cspsim 4시나리오. 각 `seg_*.rtp` 녹취 +1 이상 → PASS.
 - **S6-SUMMARY** — 4 시나리오 결과 합산 + 로그 ERROR/FATAL 카운트.
@@ -381,13 +386,13 @@ build/dist/
 | | Test-Console (dist) | 8080 |
 | | Test-CSP | 5060/udp + 5061/tls + 25061/tcp |
 | | Test-CMP | 9000/udp + RTP 풀 |
-| **S5 배포본 (verify, 5 server)** | mgmt csc | **4445** |
-| | mgmt console | **8081** |
+| **S5 배포본 (verify)** | mgmt oam (관리평면 + console 정적) | **4445** |
+| | mgmt csc (서비스 모듈, 게이트웨이 뒤) | **4446** (MCPTT 4431) |
 | | volte-sip (csp) | 5060/udp · LocalIp 127.0.0.1 |
 | | volte-media (cmp) | 9000/udp · 127.0.0.1 |
 | | ptt-sip (psp) | 5060/udp · LocalIp 127.0.0.2 (loopback alias) |
 | | ptt-media (pmp) | 9000/udp · 127.0.0.3 |
-| | Test-agent | sync 9903~9906 (mgmt 9903, 4 service 9904~9906 + 추가) |
+| | Test-agent | sync 9903~9909 (mgmt 9903, csc 9909, service 9904~9908) |
 | **운영 배포본 (참고)** | csc | 4421 |
 | | console | 80 |
 

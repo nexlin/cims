@@ -25,17 +25,17 @@ ctx.state["_s5_native"] 에 결과 + 공유 변수 (JWT, agent_id, Test-agent pi
 ** 공유 상태 구조 **
   ctx.state["_s5_native"] = {
     "results": {step_no: ItemResult},   # step 결과 cache (idempotent)
-    # csc 체인 (TB-CSC 4419)
+    # mgmt 체인 (TB-OAM 4419 → oam + sim 부트스트랩)
     "tok", "aid_csc", "enroll_tok_csc", "ta_pid_csc",       # 05~07
-    "pkg_id_csc", "pkg_id_console",                          # 08
-    "dep_id_csc", "dep_id_console",                          # 09
+    "pkg_id_oam", "pkg_id_sim",                              # 08
+    "dep_id_oam", "dep_id_sim",                              # 09
     "all_install_done_csc",                                  # 10
-    "csc_start_ok", "csc_health_ok", "console_start_ok",     # 13~15
-    # modules 체인 (배포본 csc 4445)
-    "tok2", "aid_csp/cmp/sim", "enroll_tok_csp/cmp/sim",     # 16, 18
-    "ta_pid_csp/cmp/sim",                                    # 18
-    "pkg2_id_csp/cmp/sim",                                   # 17
-    "dep2_id_csp/cmp/sim",                                   # 19
+    "mgmt_start_ok", "mgmt_health_ok", "console_static_ok",  # 13~15
+    # modules 체인 (배포본 OAM 4445 — csc 서비스 모듈 + 4 service-server)
+    "tok2", "aid2_<id>", "enroll_tok2_<id>",                 # 16, 18
+    "ta_pid2_<id>",                                          # 18
+    "pkg2_id_csp/cmp/...",                                   # 17
+    "dep2_id_csp/cmp/...",                                   # 19
     "all_install_done_modules", "modules_start_ok",          # 20, 21
   }
 """
@@ -55,7 +55,7 @@ from ...registry import ItemResult, ItemStatus
 from ...context import VerifyContext
 from ... import shell
 from ...common import csc_http
-from ...common import db as _db
+from ...common import db as _dbmod   # dev 환경 DB 설정 읽기 (제어평면 조회 아님)
 
 
 def _natural_key(s: str) -> list:
@@ -64,8 +64,13 @@ def _natural_key(s: str) -> list:
 
 
 def _latest_tarball(pkg_dir: str, prefix: str) -> Optional[str]:
-    """$pkg_dir/<prefix>-*.tar.gz 중 natural sort 최고값 (sort -V tail -1 동등)."""
-    cands = glob.glob(os.path.join(pkg_dir, f"{prefix}-*.tar.gz"))
+    """$pkg_dir/<prefix>-<ver>.tar.gz 중 natural sort 최고값 (sort -V tail -1 동등).
+
+    `<prefix>-` 바로 뒤가 버전 숫자인 것만 매칭 — 단순 glob 은 형제 컴포넌트를
+    삼킨다 (oam-*.tar.gz 가 oam-svc-*, csp-*.tar.gz 가 cspsim-* 을 매칭)."""
+    pat = re.compile(rf"^{re.escape(prefix)}-\d")
+    cands = [c for c in glob.glob(os.path.join(pkg_dir, f"{prefix}-*.tar.gz"))
+             if pat.match(os.path.basename(c))]
     if not cands:
         return None
     return sorted(cands, key=_natural_key)[-1]
@@ -80,12 +85,12 @@ _AGENT_NAME_CSC = "mgmt-server"
 _DIST_ROOT_CSC = "mgmt-server"
 _AGENT_SYNC_PORT_CSC = 9903
 
-# 배포본 csc — verify 환경 기본 포트 (4445/8081). 운영 환경 (4421/80) 도
-# ctx.opts["target"]="prod" 로 분기 가능. csp/cmp 는 두 환경 동일 (5060/9000).
-# csc 포트 SoT 는 csc_http.DEPLOYED_CSC_PORTS.
+# 배포본 관리평면(OAM) — verify 4445 / prod 4419. 콘솔은 OAM 정적 서빙(단일
+# 오리진)이라 별도 포트가 없다. csp/cmp 는 두 환경 동일 (5060/9000).
+# 포트 SoT 는 csc_http.DEPLOYED_MGMT_PORTS / DEPLOYED_CSC_PORTS.
 _TARGET_PORTS = {
-    "verify": {"csc": csc_http.deployed_csc_port("verify"), "console": 8081},
-    "prod":   {"csc": csc_http.deployed_csc_port("prod"), "console": 80},
+    "verify": {"mgmt": csc_http.deployed_mgmt_port("verify")},
+    "prod":   {"mgmt": csc_http.deployed_mgmt_port("prod")},
 }
 
 # Instance descriptor — 한 entry = 한 service-server 인스턴스. tarball/install/process/
@@ -120,6 +125,26 @@ _TARGET_PORTS = {
 #                     RtpIp + CspIp 분기. cims.sh start_*_variant 가 시작 직전
 #                     install_path/config.json 을 모듈 csp.json/cmp.json 에 머지.
 _INSTANCES = [
+    # csc — mgmt 호스트의 서비스 모듈 (oam_csc_split). 배포본 OAM(게이트웨이) 이
+    # install 성공 시 JwtSecret 자동 주입 + 가입자/조직 라우트를 self-register
+    # 하므로, S6 admin CRUD 는 mgmt 포트(4445) 하나로 게이트웨이 경유 도달한다.
+    # 포트 4446 = dev Test-CSC(4421)·mgmt OAM(4445) 과 분리 (SoT: csc_http).
+    {"id": "csc",
+     "display_name": "Mgmt Service (CSC)",
+     "agent_name":   "mgmt-svc-server",
+     "tarball": "csc", "dir": "csc", "process": "CSC",
+     "sync_port": 9909, "local_ip": "127.0.0.1",
+     "listen": (csc_http.deployed_csc_port("verify"), "tcp"),
+     "peer_id": None,
+     "config_overlay": {
+         "Server.Port": csc_http.deployed_csc_port("verify"),
+         # dev Test-CSC 의 MCPTT(4430) 와 bind 충돌 회피 — 배포본 스택은 4431.
+         # csp/psp 변종의 Setup.Xcap.Port 와 동기 (아래 _INSTANCES overlay).
+         "McpttServer.Port": 4431,
+         # 그룹/가입자 변경 notify 대상 = 배포본 CSP/PSP (dev 스택 아님).
+         "CspNotify.Ip": "127.0.0.1",
+         "PspNotify.Ip": "127.0.0.3",
+     }},
     {"id": "csp",
      "display_name": "VoLTE SIP Server",
      "agent_name":   "volte-sip-server",
@@ -136,6 +161,9 @@ _INSTANCES = [
          "Setup.MediaServer.LocalIp": "127.0.0.1",
          # dev csp (9001) 와 충돌 회피 — 배포본 CSP 는 9011 사용.
          "Setup.MediaServer.LocalPort": 9011,
+         # XCAP(GMS/CMS) 대상 = 배포본 csc (mgmt 호스트 127.0.0.1:4431).
+         "Setup.Xcap.Host": "127.0.0.1",
+         "Setup.Xcap.Port": 4431,
      }},
     {"id": "psp",
      "display_name": "PTT SIP Server",
@@ -153,6 +181,9 @@ _INSTANCES = [
          "Setup.MediaServer.LocalIp": "127.0.0.3",
          # 인스턴스별 LocalPort 분리 — dev csp(9001)/CSP(9011) 와 충돌 회피.
          "Setup.MediaServer.LocalPort": 9012,
+         # XCAP(GMS/CMS) 대상 = 배포본 csc (mgmt 호스트 127.0.0.1:4431).
+         "Setup.Xcap.Host": "127.0.0.1",
+         "Setup.Xcap.Port": 4431,
      }},
     {"id": "cmp",
      "display_name": "VoLTE Media Server",
@@ -350,13 +381,13 @@ def _kill_listener_on_port(port: int) -> Optional[int]:
 
 
 def _ports(ctx: VerifyContext) -> dict:
-    """target → {csc:int, console:int}. 알 수 없는 target 은 verify default."""
+    """target → {mgmt:int}. 알 수 없는 target 은 verify default."""
     return _TARGET_PORTS.get(_target(ctx), _TARGET_PORTS["verify"])
 
 
-def _deployed_csc_base(ctx: VerifyContext) -> str:
-    """배포본 csc API URL — target 의 csc 포트로."""
-    return f"https://127.0.0.1:{_ports(ctx)['csc']}"
+def _deployed_mgmt_base(ctx: VerifyContext) -> str:
+    """배포본 관리평면(OAM) API URL — target 의 mgmt 포트로."""
+    return f"https://127.0.0.1:{_ports(ctx)['mgmt']}"
 
 
 def _store(ctx: VerifyContext) -> dict:
@@ -613,24 +644,17 @@ def step_06_agent_register(ctx: VerifyContext) -> ItemResult:
 # ─────────────────────────────────────────────────────────────
 # Step 07 — Test-agent spawn + enroll wait
 # ─────────────────────────────────────────────────────────────
-def _agent_online_in_db(name: str, dist_dir: str) -> bool:
-    """cims_agent 테이블에서 status='online' 확인. DB 미접속 시 False."""
-    cfg = _db.csp_db_config(dist_dir)
-    if not cfg:
+def _agent_online(base: str, token: str, name: str) -> bool:
+    """GET /agents 에서 name 의 status='online' 확인. 조회 실패 시 False.
+
+    제어평면 SoT 는 runtime store(file_store) 라 DB 테이블로는 알 수 없다
+    (db_schema.md — agent/deployment/job 은 OAM file_store 소유). API 가 정본."""
+    if not token:
         return False
-    try:
-        conn = _db.connect(cfg)
-    except Exception:
-        return False
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT 1 FROM cims_agent WHERE name=%s AND status='online'", (name,),
-        )
-        return cur.fetchone() is not None
-    finally:
-        try: conn.close()
-        except Exception: pass
+    for a in csc_http.list_agents(base, token):
+        if isinstance(a, dict) and a.get("name") == name:
+            return str(a.get("status") or "") == "online"
+    return False
 
 
 def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
@@ -639,7 +663,7 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
     cims_agent.py 를 nohup 으로 spawn:
       env CIMS_AGENT_INSTALL_ROOT=build/dist/mgmt-server
           CIMS_AGENT_SYNC_PORT=9903
-    enroll polling: cims_agent 테이블에서 name=mgmt-server + status='online'.
+    enroll polling: GET /agents 에서 name=mgmt-server + status='online'.
     성공 시 ctx.state["_s5_native"]["ta_pid_csc"] 저장.
     """
     if already_ran(ctx, 7):
@@ -685,6 +709,9 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
     env = dict(os.environ)
     env["CIMS_AGENT_INSTALL_ROOT"] = os.path.join(dist, _DIST_ROOT_CSC)
     env["CIMS_AGENT_SYNC_PORT"] = str(sync_port)
+    # verify Test-agent 는 감독(watchdog) 금지 — _PREFIX(build/dist)/run 의 dev
+    # pid 파일을 감독 집합에 seed 해 dev 스택(oam 등)을 죽이고/재시작한다.
+    env["CIMS_AGENT_NO_SUPERVISE"] = "1"
     log_fp = open(ta_log, "w")
     try:
         proc = subprocess.Popen(
@@ -713,7 +740,7 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
     waited = 0
     for _ in range(15):
         time.sleep(1); waited += 1
-        if _agent_online_in_db(aname, dist):
+        if _agent_online(_TB_CSC_BASE, _get(ctx, "tok", ""), aname):
             online = True
             break
 
@@ -756,20 +783,22 @@ def step_07_testagent_spawn(ctx: VerifyContext) -> ItemResult:
 # ─────────────────────────────────────────────────────────────
 # Step 08 — Package upload (csc + console)
 # ─────────────────────────────────────────────────────────────
-# S5-CSC-DEPLOY 단계가 다루는 패키지 모듈 — mgmt-server 1 agent 가 csc + console + sim
-# 모두 install. sim 은 install-only (Start 없음 — step_13/14 등은 csc/console 만 처리).
-# tarball prefix 와 deployment process_name 매핑은 _CSC_PKG_TARBALL / _CSC_PKG_PROCESS.
-_CSC_PACKAGES = ("csc", "console", "sim")
-_CSC_PKG_TARBALL = {"csc": "csc", "console": "console", "sim": "cspsim"}
-_CSC_PKG_PROCESS = {"csc": "CSC", "console": "CONSOLE", "sim": "CSPSIM"}
+# S5-CSC-DEPLOY 단계가 다루는 패키지 모듈 — mgmt-server 1 agent 가 oam + sim install.
+# oam 이 배포본 스택의 관리평면(standalone OAM, 02_deployment §2.1) — 콘솔 SPA 를
+# 정적 동봉·단일 오리진 서빙하므로 console 단독 배포는 없다. csc(서비스 모듈)는
+# 배포본 OAM 경유의 modules 체인(_INSTANCES)에서 배포된다 (oam_csc_split).
+# sim 은 install-only (Start 없음).
+_CSC_PACKAGES = ("oam", "sim")
+_CSC_PKG_TARBALL = {"oam": "oam", "sim": "cspsim"}
+_CSC_PKG_PROCESS = {"oam": "OAM", "sim": "CSPSIM"}
 
 
 def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
-    """Step 08 — TB-CSC(4419) 에 csc + console + sim tarball 업로드.
+    """Step 08 — TB-OAM(4419) 에 oam + sim tarball 업로드.
 
-    $DIST_DIR/packages/{csc,console,cspsim}-*.tar.gz 중 natural-sort 최고값 1개씩.
+    $DIST_DIR/packages/{oam,cspsim}-*.tar.gz 중 natural-sort 최고값 1개씩.
     POST /api/v1/packages (multipart, force=true) → package_id 추출.
-    성공 시 ctx.state["pkg_id_csc"] / ["pkg_id_console"] / ["pkg_id_sim"] 저장.
+    성공 시 ctx.state["pkg_id_oam"] / ["pkg_id_sim"] 저장.
     한 모듈이라도 tarball 없거나 업로드 실패면 FAIL.
     """
     if already_ran(ctx, 8):
@@ -778,7 +807,7 @@ def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
     tok = _get(ctx, "tok", "")
     if not tok:
         result = ItemResult(
-            id="S5-CSC-DEPLOY-PKG-UPLOAD", name="패키지 업로드 (csc + console + sim)",
+            id="S5-CSC-DEPLOY-PKG-UPLOAD", name="패키지 업로드 (oam + sim)",
             status=ItemStatus.SKIP,
             detail="step 05 (admin login) 미실행 / 실패 — JWT 없음",
             stage=5,
@@ -819,7 +848,7 @@ def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
         notes.append(f"- [OK] {name}: package_id={pkg_id} ({os.path.basename(tar)})")
 
     result = ItemResult(
-        id="S5-CSC-DEPLOY-PKG-UPLOAD", name="패키지 업로드 (csc + console + sim)",
+        id="S5-CSC-DEPLOY-PKG-UPLOAD", name="패키지 업로드 (oam + sim)",
         status=ItemStatus.FAIL if fail else ItemStatus.PASS,
         detail="\n".join(notes) if notes else "no packages",
         stage=5,
@@ -831,20 +860,30 @@ def step_08_package_upload(ctx: VerifyContext) -> ItemResult:
 # ─────────────────────────────────────────────────────────────
 # Step 09 — Deployment 생성 (config overlay)
 # ─────────────────────────────────────────────────────────────
-def _csc_overlay(name: str, ports: dict) -> dict:
-    """mgmt-server 자식 config overlay — target 의 포트 매핑. sim 은 overlay 없음."""
-    if name == "csc":     return {"Server.Port": ports["csc"]}
-    if name == "console": return {"Port": ports["console"]}
+def _mgmt_overlay(name: str, ports: dict, mgmt_root: str) -> dict:
+    """mgmt-server 자식 config overlay. sim 은 overlay 없음.
+
+    oam 은 포트에 더해 runtime store / 패키지 저장소 / 서비스 로그를 자기
+    모듈 트리로 격리한다 — 패키징된 oam.json 은 빌드 서버(dev) 경로를 담고
+    있어, overlay 없이 기동하면 TB 와 file_store 를 공유하는 사고가 난다."""
+    if name == "oam":
+        oam_root = os.path.join(mgmt_root, "oam")
+        return {
+            "Server.Port":        ports["mgmt"],
+            "CimsRuntimeDir":     os.path.join(oam_root, "runtime"),
+            "Packages.Dir":       os.path.join(oam_root, "packages"),
+            "ServiceLogging.Dir": os.path.join(oam_root, "service_log"),
+        }
     return {}
 
 
 def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
-    """Step 09 — csc + console + sim deployment 생성 (config overlay 포함).
+    """Step 09 — oam + sim deployment 생성 (config overlay 포함).
 
-    install_path = $DIST_DIR/mgmt-server/{csc,console,sim}.
-    process_name = CSC / CONSOLE / CSPSIM.
-    config overlay 로 csc:Server.Port=4445, console:Port=8081 적용. sim 은 overlay 없음.
-    성공 시 ctx.state["dep_id_csc"] / ["dep_id_console"] / ["dep_id_sim"] 저장.
+    install_path = $DIST_DIR/mgmt-server/{oam,sim}.
+    process_name = OAM / CSPSIM.
+    config overlay 로 oam:Server.Port=4445 + runtime/packages/log 격리. sim 은 없음.
+    성공 시 ctx.state["dep_id_oam"] / ["dep_id_sim"] 저장.
     """
     if already_ran(ctx, 9):
         return get_native_result(ctx, 9)
@@ -877,7 +916,8 @@ def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
             "package_id":    int(pkg_id),
             "install_path":  install_path,
             "process_name":  _CSC_PKG_PROCESS[name],
-            "config":        _csc_overlay(name, ports),
+            "config":        _mgmt_overlay(
+                name, ports, os.path.join(ctx.dist_dir, _DIST_ROOT_CSC)),
         }
         try:
             status, body = csc_http.post_json(
@@ -909,28 +949,25 @@ def step_09_deployment_create(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 10 — Install job + DB 폴링
+# Step 10 — Install job + deployment 상태 폴링
 # ─────────────────────────────────────────────────────────────
-def _deployment_status(name: str, did: int, dist_dir: str) -> Optional[str]:
-    """agent_deployment.status 조회. 실패 시 None."""
-    cfg = _db.csp_db_config(dist_dir)
-    if not cfg: return None
+def _deployment_status(base: str, token: str, did: int) -> Optional[str]:
+    """GET /deployments 에서 did 의 status. 조회 실패 시 None.
+    (제어평면 SoT = OAM runtime store — DB 테이블이 아니라 API 가 정본)"""
     try:
-        conn = _db.connect(cfg)
+        d = csc_http.get_json(f"{base}/api/v1/deployments", token=token, timeout=10)
     except Exception:
         return None
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT status FROM agent_deployment WHERE id=%s", (did,))
-        row = cur.fetchone()
-        return str(row[0]) if row and row[0] is not None else None
-    finally:
-        try: conn.close()
-        except Exception: pass
+    items = d.get("items") if isinstance(d, dict) else d
+    for it in (items or []):
+        if isinstance(it, dict) and it.get("id") == did:
+            st = it.get("status")
+            return str(st) if st is not None else None
+    return None
 
 
 def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
-    """Step 10 — install job 발행 + agent_deployment 상태 폴링 (최대 60s).
+    """Step 10 — install job 발행 + deployment 상태 폴링 (최대 60s).
 
     pending/deploying 이 모두 사라질 때까지 대기. 각 deployment 의 최종 상태를
     detail 에 기록. all_done 여부를 ctx.state["all_install_done_csc"] 에 저장.
@@ -980,7 +1017,7 @@ def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
             notes.append(f"- [FAIL] {name}: install 발행 status={status}")
 
     # 폴링 (sleep 2s × 30 = 60s)
-    # agent_deployment.status enum: pending|deploying|running|stopped|failed|removed
+    # deployment status: pending|deploying|running|stopped|failed|removed
     # 폴링 종료 조건: pending/deploying 가 사라질 때 (install 완료 또는 실패)
     elapsed = 0
     all_done = False
@@ -989,7 +1026,7 @@ def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
         time.sleep(2); elapsed += 2
         still = False
         for name, did in deployments:
-            st = _deployment_status(name, did, ctx.dist_dir)
+            st = _deployment_status(_TB_CSC_BASE, tok, did)
             final_status[name] = st or "(unknown)"
             if st in ("pending", "deploying"):
                 still = True
@@ -1025,8 +1062,30 @@ def step_10_install_poll(ctx: VerifyContext) -> ItemResult:
 # ─────────────────────────────────────────────────────────────
 # Step 11 — 설치 파일 검증 (meta.json + config/)
 # ─────────────────────────────────────────────────────────────
+def _resolve_install_root(base: str) -> str:
+    """배포 산출물의 실제 루트(meta.json 이 있는 디렉토리)를 찾는다.
+
+    agent 는 `<base>/<version>/` 에 풀고 `<base>/current` 심볼릭을 건다(업그레이드·
+    롤백 통로). 모듈에 따라 `<base>/modules/<pkg>/current` 로 한 겹 더 들어간다.
+    구(평탄) 설치본은 `<base>` 자체가 루트 — 셋 다 흡수한다."""
+    cur = os.path.join(base, "current")
+    if os.path.isdir(cur):
+        return cur
+    if os.path.isfile(os.path.join(base, "meta.json")):
+        return base
+    # `<base>/modules/<pkg>/current` (install-only 모듈 등)
+    for sub in sorted(glob.glob(os.path.join(base, "modules", "*", "current"))):
+        if os.path.isdir(sub):
+            return sub
+    # 마지막 수단 — meta.json 을 품은 하위 디렉토리 (버전 디렉토리 직접 탐색)
+    for meta in sorted(glob.glob(os.path.join(base, "*", "meta.json"))
+                       + glob.glob(os.path.join(base, "modules", "*", "*", "meta.json"))):
+        return os.path.dirname(meta)
+    return base
+
+
 def step_11_verify_files(ctx: VerifyContext) -> ItemResult:
-    """Step 11 — `$DIST_DIR/mgmt-server/{csc,console,sim}/` 안에 meta.json + config/
+    """Step 11 — `$DIST_DIR/mgmt-server/{oam,sim}/` 안에 meta.json + config/
     디렉토리가 존재하는지 확인. install job 후 파일 배포 검증.
 
     이전 step 들 (08/09/10) 의 결과에 의존하지 않음 — install_path 만 기준으로
@@ -1038,13 +1097,14 @@ def step_11_verify_files(ctx: VerifyContext) -> ItemResult:
 
     notes: list = []
     ok_all = True
-    # _CSC_PACKAGES = {"csc", "console", "sim"} — agent_name=mgmt-server.
-    # cims_agent 가 install 시 tarball top-level 디렉토리 (csc/console/cspsim) 안에
+    # _CSC_PACKAGES = {"oam", "sim"} — agent_name=mgmt-server.
+    # cims_agent 가 install 시 tarball top-level 디렉토리 (oam/cspsim) 안에
     # config.json/config/ 를 쓰므로 검증 경로도 변종별 위치를 본다. sim 은
     # cspsim/* 구조 (tarball root="cspsim").
-    _TAR_PKG_NAME = {"csc": "csc", "console": "console", "sim": "cspsim"}
+    _TAR_PKG_NAME = {"oam": "oam", "sim": "cspsim"}
     for name in _CSC_PACKAGES:
-        install_path = os.path.join(ctx.dist_dir, _DIST_ROOT_CSC, name)
+        install_path = _resolve_install_root(
+            os.path.join(ctx.dist_dir, _DIST_ROOT_CSC, name))
         pkg_subdir = _TAR_PKG_NAME[name]
         meta_p = os.path.join(install_path, "meta.json")
         # config/ 는 변종 디렉토리 내부 (cfg_target_dir) 에 위치
@@ -1074,15 +1134,15 @@ def step_11_verify_files(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 12 — config overlay 반영 검증 (csc/config.json Server.Port=4445)
+# Step 12 — config overlay 반영 검증 (oam/config.json Server.Port=4445)
 # ─────────────────────────────────────────────────────────────
-def _read_csc_port(install_path: str) -> Optional[int]:
-    """`<install_path>/config.json` 또는 `<install_path>/csc/config.json` 에서
+def _read_mgmt_port(install_path: str) -> Optional[int]:
+    """`<install_path>/oam/config.json` 또는 `<install_path>/config.json` 에서
     `Server.Port` (flat 또는 nested Server.Port) 추출. cims_agent 가 멀티-변종
     install 지원으로 config.json 을 변종 디렉토리 안에 쓸 수 있어 두 위치를 확인.
     파일/JSON 오류 시 None.
     """
-    for p in (os.path.join(install_path, "csc", "config.json"),
+    for p in (os.path.join(install_path, "oam", "config.json"),
               os.path.join(install_path, "config.json")):
         try:
             with open(p) as f:
@@ -1108,25 +1168,26 @@ def _read_csc_port(install_path: str) -> Optional[int]:
 
 
 def step_12_verify_overlay(ctx: VerifyContext) -> ItemResult:
-    """Step 12 — csc/config.json overlay 반영 (target 의 csc 포트 매칭)."""
+    """Step 12 — oam/config.json overlay 반영 (target 의 mgmt 포트 매칭)."""
     if already_ran(ctx, 12):
         return get_native_result(ctx, 12)
 
-    install_path = os.path.join(ctx.dist_dir, _DIST_ROOT_CSC, "csc")
-    port = _read_csc_port(install_path)
-    expected = _ports(ctx)["csc"]
+    install_path = _resolve_install_root(
+        os.path.join(ctx.dist_dir, _DIST_ROOT_CSC, "oam"))
+    port = _read_mgmt_port(install_path)
+    expected = _ports(ctx)["mgmt"]
     if port == expected:
         result = ItemResult(
             id="S5-CSC-VERIFY-OVERLAY", name="config overlay 반영",
             status=ItemStatus.PASS,
-            detail=f"- [OK] csc/config.json: Server.Port={expected} 반영 ({install_path})",
+            detail=f"- [OK] oam/config.json: Server.Port={expected} 반영 ({install_path})",
             stage=5,
         )
     else:
         result = ItemResult(
             id="S5-CSC-VERIFY-OVERLAY", name="config overlay 반영",
             status=ItemStatus.FAIL,
-            detail=f"- [FAIL] csc/config.json Server.Port 이상 (실제={port}, 기대={expected}, "
+            detail=f"- [FAIL] oam/config.json Server.Port 이상 (실제={port}, 기대={expected}, "
                    f"path={install_path}/config.json)",
             stage=5,
         )
@@ -1135,7 +1196,7 @@ def step_12_verify_overlay(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 13 — csc Start + 포트 4445 LISTEN
+# Step 13 — oam Start + 포트 4445 LISTEN
 # ─────────────────────────────────────────────────────────────
 def _post_job(ctx: VerifyContext, did: int, job_type: str,
               base: str = _TB_CSC_BASE, timeout: int = 10) -> tuple:
@@ -1163,12 +1224,11 @@ def _wait_listen(port: int, proto: str, timeout_s: int, host: str = "") -> int:
 
 
 def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
-    """Step 13 — csc Start job 발행 + LISTEN 대기 (25s, target 의 csc 포트).
+    """Step 13 — oam Start job 발행 + LISTEN 대기 (25s, target 의 mgmt 포트).
 
-    `opts.enable_mtls` true 시 csc 시작 직전 csc-tb.json `Agent.MtlsEnabled`
+    `opts.enable_mtls` true 시 시작 직전 csc-tb.json `Agent.MtlsEnabled`
     를 true 로 토글. 후속 신규 enroll agent (csp/cmp/sim) 가 mTLS cert 발급
-    받아 S6-SCN-CERT-ROTATE 가 PASS 가능. csc 메모리에는 enroll 시점에
-    반영되므로 이후 재시작 불필요.
+    받아 S6-SCN-CERT-ROTATE 가 PASS 가능.
     """
     if already_ran(ctx, 13):
         return get_native_result(ctx, 13)
@@ -1177,16 +1237,14 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
         from ...common.csc_config import set_mtls_enabled
         toggled = set_mtls_enabled(ctx.dist_dir, True)
         _set(ctx, "mtls_toggled", bool(toggled))
-        # 주의: TB-CSC (4419) 가 이미 LISTEN 중이라면 csc-tb.json 캐시 가능성.
-        # 효과 보장하려면 사용자가 사전에 `cims.sh restart csc` 1회 실행 권장.
-        # (배포본 mgmt-server 4445 는 step_13 의 start job 으로 신규 시작이라
-        #  토글이 자동 반영.)
+        # 주의: TB-OAM (4419) 가 이미 LISTEN 중이라면 캐시 가능성 — 효과 보장은
+        # 사전 `cims.sh restart oam` 1회. (배포본 4445 는 신규 시작이라 자동 반영.)
 
     tok = _get(ctx, "tok", "")
-    csc_did = _get(ctx, "dep_id_csc")
-    csc_port = _ports(ctx)["csc"]
-    name = f"csc Start ({csc_port} LISTEN)"
-    if not tok or csc_did is None:
+    oam_did = _get(ctx, "dep_id_oam")
+    mgmt_port = _ports(ctx)["mgmt"]
+    name = f"oam Start ({mgmt_port} LISTEN)"
+    if not tok or oam_did is None:
         result = ItemResult(
             id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.SKIP,
@@ -1196,7 +1254,7 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 13, result)
         return result
 
-    status, _ = _post_job(ctx, int(csc_did), "start", timeout=10)
+    status, _ = _post_job(ctx, int(oam_did), "start", timeout=10)
     if status not in (200, 201, 202):
         result = ItemResult(
             id="S5-CSC-RUN-CSC-START", name=name,
@@ -1207,21 +1265,21 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 13, result)
         return result
 
-    waited = _wait_listen(csc_port, "tcp", 25)
+    waited = _wait_listen(mgmt_port, "tcp", 25)
     if waited >= 0:
-        _set(ctx, "csc_start_ok", True)
+        _set(ctx, "mgmt_start_ok", True)
         result = ItemResult(
             id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.PASS,
-            detail=f"- [OK] csc port {csc_port} LISTEN ({waited}s)",
+            detail=f"- [OK] oam port {mgmt_port} LISTEN ({waited}s)",
             stage=5,
         )
     else:
-        _set(ctx, "csc_start_ok", False)
+        _set(ctx, "mgmt_start_ok", False)
         result = ItemResult(
             id="S5-CSC-RUN-CSC-START", name=name,
             status=ItemStatus.FAIL,
-            detail=f"- [FAIL] csc port {csc_port} LISTEN 실패 (25s timeout)",
+            detail=f"- [FAIL] oam port {mgmt_port} LISTEN 실패 (25s timeout)",
             stage=5,
         )
     _save(ctx, 13, result)
@@ -1229,55 +1287,48 @@ def step_13_csc_start(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 14 — csc Health check job
+# Step 14 — oam Health check job
 # ─────────────────────────────────────────────────────────────
-def _agent_job_status(job_id: int, dist_dir: str) -> Optional[tuple]:
-    """agent_job (status, result_code, result_stdout) 행 반환. 없거나 오류 시 None."""
-    cfg = _db.csp_db_config(dist_dir)
-    if not cfg: return None
+def _agent_job_status(base: str, token: str, aid: int,
+                      job_id: int) -> Optional[tuple]:
+    """GET /agents/<aid>/jobs/<jid> → (status, result_code, result_stdout).
+    조회 실패 시 None. (job SoT = OAM runtime store — API 가 정본)"""
     try:
-        conn = _db.connect(cfg)
+        d = csc_http.get_json(
+            f"{base}/api/v1/agents/{aid}/jobs/{job_id}", token=token, timeout=10,
+        )
     except Exception:
         return None
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT status, result_code, COALESCE(result_stdout,'') "
-            "FROM agent_job WHERE id=%s", (job_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return (str(row[0] or ""), row[1], str(row[2] or ""))
-    finally:
-        try: conn.close()
-        except Exception: pass
+    if not isinstance(d, dict):
+        return None
+    return (str(d.get("status") or ""), d.get("result_code"),
+            str(d.get("result_stdout") or ""))
 
 
 def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
-    """Step 14 — csc Health check job 발행 + agent_job 폴링 (15s).
+    """Step 14 — csc Health check job 발행 + job 상태 폴링 (15s).
 
-    PASS 조건: status=succeeded, result_code=0, result_stdout 안 'tcp:4445=open'.
+    PASS 조건: status=succeeded, result_code=0, result_stdout 안 'tcp:<mgmt>=open'.
     """
     if already_ran(ctx, 14):
         return get_native_result(ctx, 14)
 
     tok = _get(ctx, "tok", "")
-    csc_did = _get(ctx, "dep_id_csc")
-    if not tok or csc_did is None or not _get(ctx, "csc_start_ok"):
+    oam_did = _get(ctx, "dep_id_oam")
+    if not tok or oam_did is None or not _get(ctx, "mgmt_start_ok"):
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            id="S5-CSC-RUN-CSC-HEALTH", name="oam Health check",
             status=ItemStatus.SKIP,
-            detail="step 13 (csc Start) 미실행 / 실패 — health 발행 의미 없음",
+            detail="step 13 (oam Start) 미실행 / 실패 — health 발행 의미 없음",
             stage=5,
         )
         _save(ctx, 14, result)
         return result
 
-    status, body = _post_job(ctx, int(csc_did), "health_check", timeout=10)
+    status, body = _post_job(ctx, int(oam_did), "health_check", timeout=10)
     if status not in (200, 201, 202) or not isinstance(body, dict):
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            id="S5-CSC-RUN-CSC-HEALTH", name="oam Health check",
             status=ItemStatus.FAIL,
             detail=f"health_check 발행 실패 status={status}",
             stage=5,
@@ -1288,7 +1339,7 @@ def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
     job_id = body.get("job_id")
     if job_id is None:
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            id="S5-CSC-RUN-CSC-HEALTH", name="oam Health check",
             status=ItemStatus.FAIL,
             detail=f"응답에 job_id 누락: {str(body)[:200]}",
             stage=5,
@@ -1300,14 +1351,15 @@ def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
     final_row = None
     for _ in range(15):
         time.sleep(1)
-        row = _agent_job_status(job_id, ctx.dist_dir)
+        row = _agent_job_status(
+            _TB_CSC_BASE, tok, int(_get(ctx, "aid_csc") or 0), job_id)
         if row and row[0] in ("succeeded", "failed"):
             final_row = row
             break
 
     if not final_row:
         result = ItemResult(
-            id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+            id="S5-CSC-RUN-CSC-HEALTH", name="oam Health check",
             status=ItemStatus.FAIL,
             detail=f"agent_job(id={job_id}) 폴링 타임아웃 (15s)",
             stage=5,
@@ -1316,16 +1368,16 @@ def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
         return result
 
     jstatus, rc, stdout = final_row
-    csc_port = _ports(ctx)["csc"]
+    mgmt_port = _ports(ctx)["mgmt"]
     ok = (jstatus == "succeeded" and (rc == 0 or rc == "0")
-          and f"tcp:{csc_port}=open" in stdout)
-    _set(ctx, "csc_health_ok", bool(ok))
+          and f"tcp:{mgmt_port}=open" in stdout)
+    _set(ctx, "mgmt_health_ok", bool(ok))
     detail = (
         f"- 결과: status={jstatus} rc={rc} out={stdout[:160]}\n"
         f"- 판정: {'OK' if ok else 'FAIL'}"
     )
     result = ItemResult(
-        id="S5-CSC-RUN-CSC-HEALTH", name="csc Health check",
+        id="S5-CSC-RUN-CSC-HEALTH", name="oam Health check",
         status=ItemStatus.PASS if ok else ItemStatus.FAIL,
         detail=detail, stage=5,
     )
@@ -1334,56 +1386,59 @@ def step_14_csc_health(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 15 — console Start + 포트 8081 LISTEN
+# Step 15 — console 정적 서빙 (oam 단일 오리진)
 # ─────────────────────────────────────────────────────────────
-def step_15_console_start(ctx: VerifyContext) -> ItemResult:
-    """Step 15 — console Start job 발행 + LISTEN 대기 (25s, target 의 console 포트).
+def step_15_console_static(ctx: VerifyContext) -> ItemResult:
+    """Step 15 — 배포본 OAM 이 콘솔 SPA 를 정적 서빙하는지 확인.
 
-    target=prod 시 80 (운영 — cap_net_bind 또는 reverse proxy 필요).
+    console 은 별도 프로세스가 아니다 — oam-base 가 SPA 를 동봉해 단일 오리진
+    (mgmt 포트 HTTPS) 으로 서빙한다 (02_deployment §2.1). GET / 가 200 + HTML
+    (SPA 엔트리) 이면 PASS.
     """
     if already_ran(ctx, 15):
         return get_native_result(ctx, 15)
 
-    tok = _get(ctx, "tok", "")
-    console_did = _get(ctx, "dep_id_console")
-    cport = _ports(ctx)["console"]
-    name = f"console Start ({cport} LISTEN)"
-    if not tok or console_did is None:
+    mgmt_port = _ports(ctx)["mgmt"]
+    name = f"console 정적 서빙 (oam {mgmt_port})"
+    if not _get(ctx, "mgmt_start_ok"):
         result = ItemResult(
             id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.SKIP,
-            detail="step 05/09 미실행 — tok/dep_id_console 없음",
+            detail="step 13 (oam Start) 미실행 / 실패",
             stage=5,
         )
         _save(ctx, 15, result)
         return result
 
-    status, _ = _post_job(ctx, int(console_did), "start", timeout=10)
-    if status not in (200, 201, 202):
-        result = ItemResult(
-            id="S5-CSC-RUN-CONSOLE-START", name=name,
-            status=ItemStatus.FAIL,
-            detail=f"start job 발행 실패 status={status}",
-            stage=5,
-        )
-        _save(ctx, 15, result)
-        return result
+    import ssl as _ssl
+    import urllib.request as _rq
+    ctx_ssl = _ssl.create_default_context()
+    ctx_ssl.check_hostname = False
+    ctx_ssl.verify_mode = _ssl.CERT_NONE
+    url = f"{_deployed_mgmt_base(ctx)}/"
+    status = 0
+    body = ""
+    try:
+        with _rq.urlopen(url, timeout=10, context=ctx_ssl) as resp:
+            status = resp.status
+            body = resp.read(4096).decode("utf-8", "replace")
+    except Exception as e:
+        body = f"{type(e).__name__}: {e}"
 
-    waited = _wait_listen(cport, "tcp", 25)
-    if waited >= 0:
-        _set(ctx, "console_start_ok", True)
+    ok = status == 200 and ("<html" in body.lower() or "<!doctype" in body.lower())
+    _set(ctx, "console_static_ok", bool(ok))
+    if ok:
         result = ItemResult(
             id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.PASS,
-            detail=f"- [OK] console port {cport} LISTEN ({waited}s)",
+            detail=f"- [OK] GET / → 200, SPA HTML 서빙 ({url})",
             stage=5,
         )
     else:
-        _set(ctx, "console_start_ok", False)
         result = ItemResult(
             id="S5-CSC-RUN-CONSOLE-START", name=name,
             status=ItemStatus.FAIL,
-            detail=f"- [FAIL] console port {cport} LISTEN 실패 (25s timeout)",
+            detail=f"- [FAIL] GET / → status={status} body[:120]={body[:120]!r} ({url})",
             stage=5,
         )
     _save(ctx, 15, result)
@@ -1391,34 +1446,34 @@ def step_15_console_start(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 16 — 배포본 csc(4445) admin login
+# Step 16 — 배포본 OAM(4445) admin login
 # ─────────────────────────────────────────────────────────────
 def step_16_modules_auth(ctx: VerifyContext) -> ItemResult:
-    """Step 16 — 배포본 csc(4445) admin login → tok2.
+    """Step 16 — 배포본 OAM(4445) admin login → tok2.
 
-    csc 가 step 13 에서 4445 로 LISTEN 중이어야 함. csc_start_ok 가 False 면 SKIP.
-    DB 는 TB-CSC 와 공유 — admin/1234 동일.
+    oam 이 step 13 에서 mgmt 포트로 LISTEN 중이어야 함. mgmt_start_ok 가
+    False 면 SKIP. 관리 계정은 패키징된 oam.json CimsAuth (admin/1234).
     """
     if already_ran(ctx, 16):
         return get_native_result(ctx, 16)
 
-    if not _get(ctx, "csc_start_ok"):
+    if not _get(ctx, "mgmt_start_ok"):
         result = ItemResult(
-            id="S5-MODULES-DEPLOY-AUTH", name="배포본 csc admin login",
+            id="S5-MODULES-DEPLOY-AUTH", name="배포본 OAM admin login",
             status=ItemStatus.SKIP,
-            detail="step 13 (csc Start 4445) 미실행 / 실패",
+            detail="step 13 (oam Start) 미실행 / 실패",
             stage=5,
         )
         _save(ctx, 16, result)
         return result
 
-    base = _deployed_csc_base(ctx)
+    base = _deployed_mgmt_base(ctx)
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
     pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
     tok2 = csc_http.admin_login(base, login_id, pw, timeout=5)
     if not tok2:
         result = ItemResult(
-            id="S5-MODULES-DEPLOY-AUTH", name="배포본 csc admin login",
+            id="S5-MODULES-DEPLOY-AUTH", name="배포본 OAM admin login",
             status=ItemStatus.FAIL,
             detail=f"admin login 실패 (base={base} id={login_id})",
             stage=5,
@@ -1428,7 +1483,7 @@ def step_16_modules_auth(ctx: VerifyContext) -> ItemResult:
 
     _set(ctx, "tok2", tok2)
     result = ItemResult(
-        id="S5-MODULES-DEPLOY-AUTH", name="배포본 csc admin login",
+        id="S5-MODULES-DEPLOY-AUTH", name="배포본 OAM admin login",
         status=ItemStatus.PASS,
         detail=f"base={base} id={login_id} → JWT (len={len(tok2)})",
         stage=5,
@@ -1438,11 +1493,11 @@ def step_16_modules_auth(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 17 — service-server 패키지 업로드 (배포본 csc 4445)
+# Step 17 — 모듈 패키지 업로드 (배포본 OAM 4445)
 # ─────────────────────────────────────────────────────────────
 def step_17_modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
-    """Step 17 — 4 service-server 모듈 (csp/psp/cmp/pmp) tarball 을
-    배포본 csc(4445) 에 업로드. pkg2_id_{id} 캐시.
+    """Step 17 — 모듈 (csc + csp/psp/cmp/pmp) tarball 을 배포본 OAM(4445) 에
+    업로드. pkg2_id_{id} 캐시.
     """
     if already_ran(ctx, 17):
         return get_native_result(ctx, 17)
@@ -1453,13 +1508,13 @@ def step_17_modules_pkg_upload(ctx: VerifyContext) -> ItemResult:
             id="S5-MODULES-DEPLOY-PKG-UPLOAD",
             name="service-server 패키지 업로드",
             status=ItemStatus.SKIP,
-            detail="step 16 (배포본 csc admin login) 미실행 / 실패",
+            detail="step 16 (배포본 OAM admin login) 미실행 / 실패",
             stage=5,
         )
         _save(ctx, 17, result)
         return result
 
-    base = _deployed_csc_base(ctx)
+    base = _deployed_mgmt_base(ctx)
     pkg_dir = os.path.join(ctx.dist_dir, "packages")
     notes: list = []
     fail = False
@@ -1561,6 +1616,7 @@ def _spawn_one_module_agent(ctx: VerifyContext, m: str, base: str,
     env = dict(os.environ)
     env["CIMS_AGENT_INSTALL_ROOT"] = install_root
     env["CIMS_AGENT_SYNC_PORT"] = str(sync_port)
+    env["CIMS_AGENT_NO_SUPERVISE"] = "1"   # dev 스택 오염 방지 (step 07 참조)
     log_fp = open(ta_log, "w")
     try:
         proc = subprocess.Popen(
@@ -1579,10 +1635,10 @@ def _spawn_one_module_agent(ctx: VerifyContext, m: str, base: str,
         return (None, f"Popen 실패: {type(e).__name__}: {e}")
 
 
-def _all_modules_online(dist_dir: str) -> bool:
-    """모든 service-server agent (4 인스턴스) 가 cims_agent.status='online' 인지."""
+def _all_modules_online(base: str, token: str) -> bool:
+    """모든 service-server agent (4 인스턴스) 가 배포본 csc 에서 online 인지."""
     for inst in _INSTANCES:
-        if not _agent_online_in_db(inst["agent_name"], dist_dir):
+        if not _agent_online(base, token, inst["agent_name"]):
             return False
     return True
 
@@ -1607,7 +1663,7 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 18, result)
         return result
 
-    base = _deployed_csc_base(ctx)
+    base = _deployed_mgmt_base(ctx)
     notes: list = []
     register_fail = False
 
@@ -1620,9 +1676,9 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
         aname = inst["agent_name"]
         if aname in seen_agents:
             aid, enroll_tok, pid = seen_agents[aname]
-            _set(ctx, f"aid_{m}", aid)
-            _set(ctx, f"enroll_tok_{m}", enroll_tok)
-            _set(ctx, f"ta_pid_{m}", pid)
+            _set(ctx, f"aid2_{m}", aid)
+            _set(ctx, f"enroll_tok2_{m}", enroll_tok)
+            _set(ctx, f"ta_pid2_{m}", pid)
             notes.append(f"- [OK] {aname}/{m}: 형제 변종 — aid={aid} pid={pid} 공유")
             continue
         aid, enroll_tok, err = _register_one_module_agent(base, tok2, aname)
@@ -1630,14 +1686,14 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
             notes.append(f"- [FAIL] {aname}: {err}")
             register_fail = True
             continue
-        _set(ctx, f"aid_{m}", aid)
-        _set(ctx, f"enroll_tok_{m}", enroll_tok)
+        _set(ctx, f"aid2_{m}", aid)
+        _set(ctx, f"enroll_tok2_{m}", enroll_tok)
         pid, perr = _spawn_one_module_agent(ctx, m, base, aname, enroll_tok)
         if perr:
             notes.append(f"- [FAIL] {aname}: spawn {perr}")
             register_fail = True
             continue
-        _set(ctx, f"ta_pid_{m}", pid)
+        _set(ctx, f"ta_pid2_{m}", pid)
         seen_agents[aname] = (aid, enroll_tok, pid)
         notes.append(
             f"- [OK] {aname}/{m}: aid={aid} pid={pid} sync={inst['sync_port']}"
@@ -1649,7 +1705,7 @@ def step_18_modules_agent_enroll(ctx: VerifyContext) -> ItemResult:
     if not register_fail:
         for _ in range(20):
             time.sleep(1); waited += 1
-            if _all_modules_online(ctx.dist_dir):
+            if _all_modules_online(base, tok2):
                 online = True; break
 
     if not register_fail and online:
@@ -1691,12 +1747,12 @@ def step_19_modules_deployment_create(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 19, result)
         return result
 
-    base = _deployed_csc_base(ctx)
+    base = _deployed_mgmt_base(ctx)
     notes: list = []
     fail = False
     for inst in _INSTANCES:
         m = inst["id"]
-        aid = _get(ctx, f"aid_{m}")
+        aid = _get(ctx, f"aid2_{m}")
         pkg_id = _get(ctx, f"pkg2_id_{m}")
         if aid is None or pkg_id is None:
             notes.append(f"- [SKIP] {inst['agent_name']}: aid/pkg_id 미확보 (step 17/18 실패)")
@@ -1710,7 +1766,30 @@ def step_19_modules_deployment_create(ctx: VerifyContext) -> ItemResult:
             "install_path": install_path,
             "process_name": pname,
         }
-        overlay = inst.get("config_overlay") or {}
+        overlay = dict(inst.get("config_overlay") or {})
+        # csp 변종 — DB 접속 정보를 dev 환경 SoT(dist csp.json)에서 주입.
+        # 서버측이 overlay 를 config_template 기본값(Host=127.0.0.1)으로 채우므로,
+        # 운영에서 블루프린트가 담당하는 값을 verify 체인에서는 하네스가 담당한다.
+        if inst.get("tarball") in ("csp", "psp", "isp"):
+            dbc = _dbmod.csp_db_config(ctx.dist_dir)
+            if dbc:
+                overlay.update({
+                    "Setup.Database.Host":     dbc["Host"],
+                    "Setup.Database.Port":     int(dbc.get("Port", 3306)),
+                    "Setup.Database.User":     dbc["User"],
+                    "Setup.Database.Password": dbc["Password"],
+                    "Setup.Database.DbName":   dbc["DbName"],
+                })
+        elif inst.get("tarball") == "csc":
+            dbc = _dbmod.csp_db_config(ctx.dist_dir)
+            if dbc:
+                overlay.update({
+                    "CimsDatabase.Host":     dbc["Host"],
+                    "CimsDatabase.Port":     int(dbc.get("Port", 3306)),
+                    "CimsDatabase.User":     dbc["User"],
+                    "CimsDatabase.Password": dbc["Password"],
+                    "CimsDatabase.Db":       dbc["DbName"],
+                })
         if overlay:
             payload["config"] = overlay
         try:
@@ -1739,10 +1818,10 @@ def step_19_modules_deployment_create(ctx: VerifyContext) -> ItemResult:
 
 
 # ─────────────────────────────────────────────────────────────
-# Step 20 — 3 install jobs + DB 폴링
+# Step 20 — 3 install jobs + deployment 상태 폴링
 # ─────────────────────────────────────────────────────────────
 def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
-    """Step 20 — service-server install jobs 발행 + agent_deployment 상태 폴링 60s."""
+    """Step 20 — service-server install jobs 발행 + deployment 상태 폴링 60s."""
     if already_ran(ctx, 20):
         return get_native_result(ctx, 20)
 
@@ -1770,7 +1849,7 @@ def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 20, result)
         return result
 
-    base = _deployed_csc_base(ctx)
+    base = _deployed_mgmt_base(ctx)
     notes: list = []
     for m, did in deployments:
         try:
@@ -1791,7 +1870,7 @@ def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
         time.sleep(2); elapsed += 2
         still = False
         for m, did in deployments:
-            st = _deployment_status(m, did, ctx.dist_dir)
+            st = _deployment_status(base, tok2, did)
             final_status[m] = st or "(unknown)"
             if st in ("pending", "deploying"):
                 still = True
@@ -1799,7 +1878,7 @@ def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
             all_done = True; break
 
     _set(ctx, "all_install_done_modules", bool(all_done))
-    # agent_deployment enum: pending|deploying|running|stopped|failed|removed
+    # deployment status: pending|deploying|running|stopped|failed|removed
     # 정상 완료: running/stopped. 실패: failed/removed.
     for m, did in deployments:
         st = final_status.get(m, "(unknown)")
@@ -1821,8 +1900,41 @@ def step_20_modules_install_poll(ctx: VerifyContext) -> ItemResult:
 # ─────────────────────────────────────────────────────────────
 # Step 21 — csp/cmp Start + LISTEN (sim install-only)
 # ─────────────────────────────────────────────────────────────
+def variant_jsonl_dir(dist_dir: str, inst: dict) -> str:
+    """변종 인스턴스의 collection jsonl 디렉토리 (csp ConfigJsonlDir fallback 정합).
+
+    버전형 설치(current 통로)는 `<agent>/modules/<dir>/current/config` —
+    csp.json(=…/current/csp/config/csp.json) 부모×3 + "/config" 과 일치.
+    구(평탄) 설치는 `<agent>/config` fallback."""
+    cur = os.path.join(dist_dir, inst["agent_name"], "modules", inst["dir"], "current")
+    if os.path.isdir(cur):
+        return os.path.join(cur, "config")
+    return os.path.join(dist_dir, inst["agent_name"], "config")
+
+
+def _seed_variant_local_nodes(cfg_dir: str, inst: dict) -> bool:
+    """csp 변종의 SIP 리스너 SoT(local_nodes.jsonl) 시드 — non-clobber.
+
+    CSP 는 primary local_node 부재 시 기동을 거부한다(fail-fast). dev 는
+    configure.sh 가, 운영은 배포 렌더가 시드하지만 S5 직접 배포 체인은 그 단계가
+    없어 하네스가 최초 1회 시드한다. 반환: 시드 수행 여부."""
+    path = os.path.join(cfg_dir, "local_nodes.jsonl")
+    if os.path.isfile(path):
+        return False
+    os.makedirs(cfg_dir, exist_ok=True)
+    import uuid as _uuid
+    row = {"id": _uuid.uuid4().hex, "name": f"access-udp-{inst['id']}",
+           "enabled": True, "is_primary": True, "edge": "access",
+           "bind_ip": inst["local_ip"], "bind_port": inst["listen"][0],
+           "protocol": "UDP", "tags": ["verify-s5-seed"],
+           "note": "auto-seeded by cims_verify S5 (step 21)"}
+    with open(path, "w") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return True
+
+
 def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
-    """Step 21 — 4 service-server Start (csp/psp 5060/udp + cmp/pmp 9000/udp)."""
+    """Step 21 — service-server Start (csc 4446/tcp + csp/psp 5060/udp + cmp/pmp 9000/udp)."""
     if already_ran(ctx, 21):
         return get_native_result(ctx, 21)
 
@@ -1836,7 +1948,7 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
         _save(ctx, 21, result)
         return result
 
-    base = _deployed_csc_base(ctx)
+    base = _deployed_mgmt_base(ctx)
     notes: list = []
     started: list = []  # (id, agent_name, port, proto, host)
     fail = False
@@ -1850,6 +1962,11 @@ def step_21_modules_start(ctx: VerifyContext) -> ItemResult:
         if did is None:
             notes.append(f"- [FAIL] {aname}: dep2_id 없음 (step 19 실패)")
             fail = True; continue
+        # csp 변종 — SIP 리스너 SoT(local_nodes) 없으면 기동 거부 → 시작 전 시드
+        if inst.get("tarball") in ("csp", "psp", "isp"):
+            cfg_dir = variant_jsonl_dir(ctx.dist_dir, inst)
+            if _seed_variant_local_nodes(cfg_dir, inst):
+                notes.append(f"- [SEED] {aname}/{m}: local_nodes.jsonl → {cfg_dir}")
         try:
             st, _ = csc_http.post_json(
                 f"{base}/api/v1/deployments/{did}/job",
@@ -1955,7 +2072,7 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
         ]
         notes = [
             "- 전체 기동 유지 (기본)",
-            "- mgmt-server: csc(4445) · console(8081) · sim (install-only)",
+            "- mgmt-server: oam(4445, console 정적 동봉) · sim (install-only)",
             *listen_lines,
             "- Test-agent (1 mgmt + service-server agents) heartbeat 유지",
         ]
@@ -1967,9 +2084,26 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
         return result
 
     # --stop-after: 모든 deployment stop + Test-agent kill
+    # 순서: 모듈(배포본 OAM 경유) 먼저 → mgmt(oam) 나중 — oam 이 배포본 스택의
+    # 관리평면이라 먼저 내리면 이후 stop 발행이 갈 곳이 없다.
     notes: list = []
-    # mgmt-server modules stop (TB-CSC 4419 경유) — csc/console/sim
     tok = _get(ctx, "tok", "")
+    # 모듈 stop (배포본 OAM 4445 경유) — csc + service-server
+    tok2 = _get(ctx, "tok2", "")
+    if tok2:
+        for inst in _INSTANCES:
+            m = inst["id"]
+            did = _get(ctx, f"dep2_id_{m}")
+            if did is None: continue
+            try:
+                st, _ = csc_http.post_json(
+                    f"{_deployed_mgmt_base(ctx)}/api/v1/deployments/{did}/job",
+                    {"job_type": "stop"}, token=tok2, timeout=10,
+                )
+                notes.append(f"- {inst['agent_name']}: stop 발행 status={st}")
+            except Exception as e:
+                notes.append(f"- {inst['agent_name']}: stop 발행 예외 {e}")
+    # mgmt stop (TB-OAM 4419 경유) — oam/sim. 모듈 stop 뒤에 내린다.
     if tok:
         for k in _CSC_PACKAGES:
             did = _get(ctx, f"dep_id_{k}")
@@ -1982,21 +2116,6 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
                 notes.append(f"- {k}: stop 발행 status={st}")
             except Exception as e:
                 notes.append(f"- {k}: stop 발행 예외 {e}")
-    # service-server stop (배포본 csc 4445 경유)
-    tok2 = _get(ctx, "tok2", "")
-    if tok2:
-        for inst in _INSTANCES:
-            m = inst["id"]
-            did = _get(ctx, f"dep2_id_{m}")
-            if did is None: continue
-            try:
-                st, _ = csc_http.post_json(
-                    f"{_deployed_csc_base(ctx)}/api/v1/deployments/{did}/job",
-                    {"job_type": "stop"}, token=tok2, timeout=10,
-                )
-                notes.append(f"- {inst['agent_name']}: stop 발행 status={st}")
-            except Exception as e:
-                notes.append(f"- {inst['agent_name']}: stop 발행 예외 {e}")
     time.sleep(5)
 
     # Test-agent kill — mgmt-server + service-server agents (agent_name dedup).
@@ -2007,7 +2126,7 @@ def step_22_finalize(ctx: VerifyContext) -> ItemResult:
     csc_pid = _get(ctx, "ta_pid_csc")
     if csc_pid: pid_set.add(int(csc_pid))
     for inst in _INSTANCES:
-        p = _get(ctx, f"ta_pid_{inst['id']}")
+        p = _get(ctx, f"ta_pid2_{inst['id']}")
         if p: pid_set.add(int(p))
     total = len(pid_set)
     for pid in pid_set:
@@ -2071,7 +2190,7 @@ def steps_05_06_07_agent_enroll(ctx: VerifyContext) -> ItemResult:
 
 def steps_09_10_install(ctx: VerifyContext) -> ItemResult:
     """S5-CSC-DEPLOY-INSTALL 본체 — step 09 (deployment 생성) + step 10 (install
-    job + DB 폴링) 순차.
+    job + 상태 폴링) 순차.
     """
     rs = [
         step_09_deployment_create(ctx),

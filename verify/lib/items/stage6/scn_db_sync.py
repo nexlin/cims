@@ -24,8 +24,10 @@ from ...context import VerifyContext
 from ...common import csc_http
 
 
-def _deployed_csc_base(ctx: VerifyContext) -> str:
-    return csc_http.deployed_csc_base((ctx.opts or {}).get("target") or "verify")
+def _deployed_admin_base(ctx: VerifyContext) -> str:
+    """admin CRUD 진입점 — 배포본 OAM(게이트웨이). auth/login 은 OAM 소유이고
+    가입자/그룹 라우트는 csc 모듈이 install 시 self-register 한 프록시로 도달."""
+    return csc_http.deployed_mgmt_base((ctx.opts or {}).get("target") or "verify")
 
 
 @verify_item(
@@ -39,14 +41,14 @@ def _deployed_csc_base(ctx: VerifyContext) -> str:
 def scn_db_sync(ctx: VerifyContext) -> ItemResult:
     notes: list = []
 
-    # 1) 배포본 csc admin login (target 의 csc 포트)
-    base = _deployed_csc_base(ctx)
+    # 1) 배포본 OAM admin login (target 의 csc 포트)
+    base = _deployed_admin_base(ctx)
     login_id = os.environ.get("CIMS_TB_ADMIN_ID", "admin")
     pw = os.environ.get("CIMS_TB_ADMIN_PASSWORD", "1234")
     try:
         tok = csc_http.admin_login(base, login_id, pw, timeout=5)
     except Exception as e:
-        return _skip(ctx, f"배포본 csc login 예외: {type(e).__name__}: {e}")
+        return _skip(ctx, f"배포본 OAM login 예외: {type(e).__name__}: {e}")
     if not tok:
         return _skip(ctx, f"배포본 csc({base}) login 실패 — S5 미실행?")
     notes.append(f"- login: {base} OK")
@@ -138,13 +140,18 @@ def _csp_log_paths(dist_dir: str) -> list:
     for inst in _NATIVE_INSTANCES:
         if inst.get("tarball") not in ("csp", "psp", "isp"):
             continue
-        # install_path/<dir>/log/csp_*.log — 변종 분리 후 tarball 안 디렉토리가
-        # inst["dir"] 그대로 풀려 한 단계 깊이. csp ELF 의 SystemId 기반 prefix 라
-        # 변종 (psp/isp) 도 csp_*.log 그대로.
+        # 버전형 설치(current 통로): <agent>/modules/<dir>/current/<dir>/log/csp_*.log.
+        # csp ELF 의 SystemId 기반 prefix 라 변종 (psp/isp) 도 csp_*.log 그대로.
+        # 구(평탄) 설치 fallback: <agent>/<dir>/log/csp_*.log.
         log_glob = os.path.join(
-            dist_dir, inst["agent_name"], inst["dir"], "log", "csp_*.log",
+            dist_dir, inst["agent_name"], "modules", inst["dir"], "current",
+            inst["dir"], "log", "csp_*.log",
         )
-        paths.extend(glob(log_glob))
+        hits = glob(log_glob)
+        if not hits:
+            hits = glob(os.path.join(
+                dist_dir, inst["agent_name"], inst["dir"], "log", "csp_*.log"))
+        paths.extend(hits)
     return sorted(paths)
 
 

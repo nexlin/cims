@@ -1,4 +1,4 @@
-"""S5-CSC-VERIFY (그룹) — 배포된 csc 파일/overlay 검증 (native).
+"""S5-CSC-VERIFY (그룹) — 배포된 oam 파일/overlay 검증 (native).
 
 파일 시스템 검증만 — install job 후 산출물 정합성. 외부 의존 없음.
 """
@@ -11,7 +11,7 @@ from . import _native_steps
 
 @verify_item(
     id="S5-CSC-VERIFY", stage=5, category="배포",
-    name="csc 배포 산출물 검증 (파일/overlay)",
+    name="oam 배포 산출물 검증 (파일/overlay)",
     is_group=True,
     presets=["stage5-full", "pipeline-full", "post-deploy"],
     side_effects=["read-only"], timeout_s=60,
@@ -19,7 +19,7 @@ from . import _native_steps
 )
 def csc_verify_group(ctx: VerifyContext) -> ItemResult:
     return ItemResult(
-        id="S5-CSC-VERIFY", name="csc 배포 산출물 검증 (그룹)",
+        id="S5-CSC-VERIFY", name="oam 배포 산출물 검증 (그룹)",
         status=ItemStatus.PASS, stage=5,
     )
 
@@ -46,5 +46,5 @@ def verify_files(ctx: VerifyContext) -> ItemResult:
     execution_order=32,
 )
 def verify_overlay(ctx: VerifyContext) -> ItemResult:
-    """Step 12 native — csc/config.json Server.Port=4445 반영 검증."""
+    """Step 12 native — oam/config.json Server.Port=4445 반영 검증."""
     return _native_steps.step_12_verify_overlay(ctx)

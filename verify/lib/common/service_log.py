@@ -41,8 +41,11 @@ def service_log_roots(dist_dir: str) -> list:
     """서비스 로그 루트 후보 (존재하는 것만, 중복 제거).
 
     설정된 경로를 우선하고 기본 경로(`<dist>/ext_mnt/service_log`)를 함께 둔다 —
-    설정을 바꾸기 전 남은 산출물도 계속 집계되도록.
+    설정을 바꾸기 전 남은 산출물도 계속 집계되도록. S5 배포본 미디어 인스턴스
+    (cmp/pmp/imp)는 자기 트리의 상대 `service_log` 에 기록하므로 그 경로들도
+    포함한다 (S6 시나리오의 녹취 delta 가 배포본 스택에서 잡히도록).
     """
+    import glob as _glob
     roots = []
     for parts in _CONFIGS:
         d = _dir_from_config(os.path.join(dist_dir, *parts))
@@ -51,4 +54,10 @@ def service_log_roots(dist_dir: str) -> list:
     default = os.path.join(dist_dir, "ext_mnt", "service_log")
     if default not in roots:
         roots.append(default)
+    # 배포본 (S5 verify 스택) — <agent>/modules/<mod>/current/<mod>/service_log
+    for d in _glob.glob(os.path.join(dist_dir, "*-server", "modules", "*",
+                                     "current", "*", "service_log")):
+        rp = os.path.realpath(d)
+        if rp not in [os.path.realpath(r) for r in roots]:
+            roots.append(d)
     return [p for p in roots if os.path.isdir(p)]
