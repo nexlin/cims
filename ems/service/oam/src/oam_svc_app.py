@@ -155,7 +155,7 @@ if __name__ == '__main__':
         return merged
 
     # 귀속 핸들러 import (공유 모듈) — preflight 가 여기 import 성공을 검증.
-    from services import flow_logger, logger as csc_logger
+    from services import flow_logger, ptt_index, logger as csc_logger
     from services.flow_logger    import FLOW_HANDLER_LIST
     from handlers                import recording, auth
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
@@ -233,6 +233,10 @@ if __name__ == '__main__':
         flow_logger.init(service_log_dir=_service_log_dir, system_id=_system_id,
                          db_config=config.get('CimsDatabase'), trusted_nets=_trusted)
         csc_logger.init(service_log_dir=_service_log_dir, system_id=_system_id)
+        # PTT 세션 읽기 모델 — flow_logger 의 /ptt/history 가 ptt_index 를 소비하므로
+        # oam-svc 도 base(oam_app)와 동일하게 초기화해야 한다. 미초기화면 빈 목록이 나온다.
+        _ptt_idx_cfg = config.get('PttIndex') or {}
+        ptt_index.init(_service_log_dir, enabled=bool(_ptt_idx_cfg.get('Enabled', True)))
 
         # verification (S1~S6) — tests 디렉토리 탐색
         tests_dir = _first_dir([os.path.join(_repo_root, 'tests')]) \
