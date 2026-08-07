@@ -342,7 +342,8 @@ health 위젯은 전 노드 probe 집계(up = any 노드 응답, 카운터는 �
 
 `agent/lib/lifecycle.sh`:
 ```sh
-start_base_oam()  { "$PYBIN" -u oam_app.py --role "${OAM_ROLE:-all}" --config base.json >> oam.log 2>&1 & }
+# role 우선순위: env OAM_ROLE(개발 오버라이드) > 배포 설정 Server.Role > all(코드 기본)
+start_base_oam()  { "$PYBIN" -u oam_app.py --role "$oam_role" --config base.json >> oam.log 2>&1 & }
 start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
                     "$PYBIN" -u svc_mgmt_app.py --config services/svc-mgmt.json >> svc-mgmt.log 2>&1 & }
 # csc 는 기존 start_csc 유지 (독립 모듈)
@@ -351,6 +352,10 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
 - **`kill_stray`/watchdog pgrep 은 `--role`/config 인자까지 포함 매칭** → base 오살 방지(과거 pgrep
   자기명중 footgun 재발 차단 — 메모리 다발 기록).
 - `--preflight` 각 role 지원(핸들러 import + config 검증).
+- **역할의 SoT 는 배포 설정 `Server.Role`**(oam `config_template`, 기본 `base`). 환경변수는
+  개발 오버라이드로만 남는다 — systemd drop-in(env)에만 role 이 있으면 그 drop-in 이 없는
+  노드에서 HA 승격으로 기동될 때 `role=all` 로 떠 게이트웨이 프록시를 마운트하지 않아
+  승격 직후 서비스 API 가 전면 장애난다([oam_ha.md](oam_ha.md) §6.6).
 - 기동 순서: **base 먼저(게이트웨이·인증) → 서비스 모듈.** 서비스 지연/실패 시 base 정상, 해당
   라우트만 503(I3).
 

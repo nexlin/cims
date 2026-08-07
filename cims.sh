@@ -1624,6 +1624,7 @@ desc = ""
 service = None
 ha_capability = None
 gateway = None
+src_pkg = {}
 # 소스 루트 pkg.json 은 단일 컴포넌트 형식: { "name": "...", "description": "...", "ha_capability": "...", "service": {...}, "gateway": {...} }
 if meta_file and os.path.isfile(meta_file):
     try:
@@ -1638,6 +1639,7 @@ if meta_file and os.path.isfile(meta_file):
                 ha_capability = entry.get("ha_capability")
                 if isinstance(entry.get("gateway"), dict):
                     gateway = entry["gateway"]
+                src_pkg = entry
             # 구(舊) 레지스트리 스키마 (후방 호환)
             elif name in entry and isinstance(entry[name], dict):
                 desc = entry[name].get("description", "")
@@ -1646,6 +1648,7 @@ if meta_file and os.path.isfile(meta_file):
                 ha_capability = entry[name].get("ha_capability")
                 if isinstance(entry[name].get("gateway"), dict):
                     gateway = entry[name]["gateway"]
+                src_pkg = entry[name]
     except Exception:
         pass
 # csp/cmp 변종은 base description 끝에 역할 suffix 추가 (식별용).
@@ -1674,6 +1677,18 @@ if ha_capability is not None:
     meta["ha_capability"] = ha_capability
 if gateway is not None:
     meta["gateway"] = gateway      # self-register: 모듈 선언 라우트(세그먼트) — OAM 이 배포 시 등록
+
+# pkg.json 의 **나머지 선언도 그대로 싣는다** (passthrough).
+#   옛 구현은 service/ha_capability/gateway 만 옮기는 화이트리스트라, 뒤에 추가된 선언이
+#   조용히 사라졌다 — `shared_identity` 가 빠져 콘솔로 설치한 oam 에 그룹 공통 신원
+#   (JwtSecret·CimsRuntimeDir)이 주입되지 않았고, 패키지 기본 경로(빌드 머신 경로)로
+#   기동하다 죽어 절체가 실패했다(실측). 새 선언을 추가할 때마다 이 스크립트를 고쳐야
+#   하는 구조 자체가 결함이므로, 여기서 정한 필드만 빼고 전부 넘긴다.
+_OWNED = {"name", "version", "description", "build_date", "git_sha", "git_branch",
+          "packaged_at", "packaged_by", "changelog", "service", "ha_capability", "gateway"}
+for _k, _v in (src_pkg or {}).items():
+    if _k not in _OWNED and _k not in meta:
+        meta[_k] = _v
 print(json.dumps(meta, indent=2, ensure_ascii=False))
 PYEOF
 

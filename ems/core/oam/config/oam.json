@@ -2,11 +2,11 @@
     "Server": {
         "Ip": "0.0.0.0",
         "Port": 4419,
-        "AgentOamUrl": "https://10.0.2.45:4419",
+        "AgentOamUrl": "https://192.168.0.82:4419",
         "DevMode": false
     },
     "Mgmt": {
-        "Cidr": "10.0.2.0/24",
+        "Cidr": "121.161.164.0/24",
         "_comment": "mgmt 망 대역 — agent enroll 시 interface.role='mgmt' 자동 매핑 근거. AgentOamUrl 의 IP 도 이 대역이어야 함."
     },
     "Log": {
@@ -17,7 +17,8 @@
         "MtlsEnabled": false
     },
     "CimsAuth": {
-        "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8=",
+        "_comment": "시크릿은 패키지에 동봉하지 않는다(하드코딩 상수는 예측 가능 = 토큰 위조 위험). 비어 있으면 OAM 이 runtime/_secrets/jwt_secret 을 읽고, 그것도 없으면 노드 로컬로 1회 생성한다. 이중화(두 노드 동일 신원)는 배포 설정 overlay 로 주입된다 — docs/design/features/oam_ha.md §5.",
+        "JwtSecret": "",
         "BuiltinAccounts": [
             {
                 "login_id": "admin",
@@ -31,11 +32,11 @@
         "Dir": "packages",
         "BackupDir": "packages_trash"
     },
-    "CimsRuntimeDir": "/home/cims/work/cims/build/dist/ext_mnt/runtime",
-    "_runtime_comment": "관리 데이터(file_store) SoT 는 mgmt host(ctrl01) 로컬 유지. ServiceLogging.Dir 을 공유 NAS 로 옮겨도 runtime store 가 따라가지 않도록 명시 고정.",
+    "CimsRuntimeDir": "",
+    "_runtime_comment": "관리 데이터(file_store) SoT. 단일 노드는 mgmt host 로컬, 이중화는 소유권 리스(flock+epoch) 하에 양 노드 공용 마운트 — CimsRuntimeDir 로 **명시**한다(oam_ha.md §4). 금지 대상은 공유 스토리지가 아니라 펜싱 없는 다중 writer 이므로, ServiceLogging.Dir 을 NAS 로 두었다고 runtime store 가 자동으로 따라가는 일만 막는다(유도 폴백 차단).",
     "ServiceLogging": {
         "_comment": "base 도 사용하는 공유 키 — agent 계열 알람(alert_log) 저장·조회 API 와 콘솔 flow 기록 위치. oam-svc 는 콘솔 배포설정(config_template logging 섹션)으로 관리하고, 미설정 시 이 값을 fallback 상속.",
-        "Dir": "/mnt/cims/service_log",
+        "Dir": "/NAS/cims_johnyim/service_log",
         "Enable": [
             "csp",
             "ue"

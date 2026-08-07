@@ -1,8 +1,9 @@
 {
   "name": "oam",
   "description": "CIMS O&M — Agent / HA / 배포 / 검증 / 통계 / 알림 (Phase 2: 같은 cims-csc 프로세스, 별도 패키지)",
-  "version": "0.2.70",
+  "version": "0.2.95",
   "ha_capability": "active_standby",
+  "shared_identity": true,
   "service": {
     "functions": [
       {

@@ -26,6 +26,20 @@
           "restart": true,
           "help": "OAM 프로세스가 실제 listen 하는 포트. 비root 라 1024 이상. 변경+재기동 시 재bind.",
           "scope": "service"
+        },
+        {
+          "key": "Server.Role",
+          "label": "OAM 역할",
+          "type": "enum",
+          "options": [
+            "base",
+            "all"
+          ],
+          "default": "base",
+          "required": true,
+          "restart": true,
+          "help": "base = 게이트웨이(서비스 API 는 csc/oam-svc 로 프록시, 상용 기본). all = 서비스 핸들러 동일 프로세스(단일 노드 하위호환). 배포 설정이 정본이라 절체로 승격된 노드도 같은 역할로 뜬다.",
+          "scope": "system"
         }
       ],
       "scope": "system"
@@ -36,8 +50,14 @@
       "description": "UI 비노출 인프라 값. 부트스트랩/agent 가 채움. upgrade 시 deployment overlay 로 보존.",
       "hidden": true,
       "groups": [
-        { "key": "secrets", "title": "시크릿" },
-        { "key": "paths", "title": "런타임/패키지 경로" }
+        {
+          "key": "secrets",
+          "title": "시크릿"
+        },
+        {
+          "key": "paths",
+          "title": "런타임/패키지 경로"
+        }
       ],
       "fields": [
         {
@@ -49,6 +69,16 @@
           "hidden": true,
           "restart": true,
           "help": "전 모듈(csc/oam-svc) 동일값 — 게이트웨이 프록시 토큰 검증. 재생성 시 전 세션 무효화."
+        },
+        {
+          "key": "Server.CertSans",
+          "label": "인증서 추가 주소(SAN)",
+          "group": "paths",
+          "type": "string_list",
+          "default": [],
+          "hidden": true,
+          "restart": true,
+          "help": "서버 인증서 SAN 에 넣을 추가 IP/호스트명 (VIP·피어 노드·별칭). AgentOamUrl 의 host 와 hostname·127.0.0.1 은 자동 포함. 부족하면 그룹 CA 로 재발급된다."
         },
         {
           "key": "Server.AgentOamUrl",
@@ -78,6 +108,16 @@
           "hidden": true,
           "restart": true,
           "help": "file_store 루트(deployments·packages·gateway_routes). 버전 무관 영속."
+        },
+        {
+          "key": "CimsRuntimeMount",
+          "label": "런타임 마운트 지점",
+          "group": "paths",
+          "type": "path",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "관리 store 가 공유 스토리지(NAS)에 있을 때의 마운트 지점. 설정 시 OAM 은 기동 전 이 경로가 실제 마운트인지 확인하고, 아니면 기동을 거부한다(마운트 없이 떠서 로컬 디스크에 두 번째 store 를 만드는 것 방지). 단일 노드는 비움."
         },
         {
           "key": "Packages.Dir",

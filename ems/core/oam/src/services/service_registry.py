@@ -151,6 +151,55 @@ def seed_if_empty(config: dict = None) -> int:
     return n
 
 
+def merge_seed_modules(config: dict = None) -> int:
+    """seed descriptor 에만 있는 **모듈**을 store 의 같은 id descriptor 에 추가 (기동 마이그레이션).
+
+    `seed_if_empty` 는 store 가 비었을 때만 주입하므로, 이미 운용 중인 노드에는 새 모듈
+    (예: 관리평면 `oam`/`oam-svc`)이 영구히 반영되지 않는다. 모듈이 descriptor 에 없으면
+    `_agent_daemon_modules` 가 그 모듈을 daemon 으로 보지 않아 HA 의 cold/relevant/헬스
+    대상에서 빠진다 → 이중화 대상이 될 수 없다.
+
+    운영자 편집을 보존한다: **이름이 없는 모듈만 추가**하고, 기존 모듈 엔트리·alert_rules·
+    label 은 건드리지 않는다. 예외로 기존 모듈의 `health` 블록에는 **없는 키만 채운다**
+    (`startup_grace_sec` 처럼 뒤에 추가된 안전 필드가 기존 설치본에 영구히 빠지지 않게 —
+    값이 이미 있으면 운영자 판단으로 보고 덮지 않는다). 추가/보강 건수 반환."""
+    c = _cfg(config)
+    if c is None:
+        return 0
+    d = file_store.domain_dir(c, _DOMAIN)
+    rows = {r.get('id'): r for r in file_store.load_all(d) if isinstance(r, dict) and r.get('id')}
+    if not rows:
+        return 0            # 비어 있으면 seed_if_empty 가 전체 주입 — 여기서 할 일 없음
+    added = 0
+    for doc in _load_seed_files():
+        cur = rows.get(doc.get('id'))
+        if not cur:
+            continue        # store 에 없는 서비스 pack — 전체 주입은 seed_if_empty 의 몫
+        by_name = {m.get('name'): m for m in (cur.get('modules') or []) if isinstance(m, dict)}
+        new_mods = [m for m in (doc.get('modules') or [])
+                    if isinstance(m, dict) and m.get('name') and m['name'] not in by_name]
+        # 기존 모듈의 health 블록 보강 — 없는 키만 (안전 필드 소급 적용)
+        filled = 0
+        for sm in (doc.get('modules') or []):
+            if not isinstance(sm, dict):
+                continue
+            tgt = by_name.get(sm.get('name'))
+            sh = sm.get('health')
+            if not tgt or not isinstance(sh, dict) or not isinstance(tgt.get('health'), dict):
+                continue
+            for k, v in sh.items():
+                if k not in tgt['health']:
+                    tgt['health'][k] = v
+                    filled += 1
+        if not new_mods and not filled:
+            continue
+        if new_mods:
+            cur.setdefault('modules', []).extend(new_mods)
+        file_store.save(d, cur['id'], cur)
+        added += len(new_mods) + filled
+    return added
+
+
 def load_descriptors(config: dict = None) -> list:
     c = _cfg(config)
     if c is None:

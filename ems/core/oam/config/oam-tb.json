@@ -40,7 +40,7 @@
     },
     "ConfigCacheDir": "cache_tb",
     "ServiceLogging": {
-        "Dir": "/home/cims/work/cims/build/dist/ext_mnt/service_log",
+        "Dir": "",
         "Enable": [
             "csp",
             "ue"

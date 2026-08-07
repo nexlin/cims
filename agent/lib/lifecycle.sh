@@ -339,6 +339,54 @@ print(p)" 2>/dev/null || echo 4421)
 
 # OAM 분리 Phase 3b — cims@oam.service / cims-svc start oam 으로 동작.
 # OAM(4419) = Agent / HA / 배포 / 검증 책임. CSC(4421 admin + 4430 mcptt) 와 별개 프로세스.
+# ══════════════════════════════════════════════════════════════════════════
+#  관리평면 설정 자가 복구 — "설정 하나로 콘솔을 잃을 수 없다"
+#
+#  OAM 은 자기 자신이 복구 통로다. 잘못된 설정으로 기동에 실패하면 그것을 되돌릴 화면이
+#  같이 사라져 SSH 없이는 복구가 불가능해진다. 이번 라운드에서 그 형태의 사고가 반복됐다
+#  (store 경로 오지정 / 마운트 아닌 경로 / 잘못된 포트·주소). 개별 설정마다 가드를 붙이는
+#  방식은 새 설정 키가 생길 때마다 다시 뚫린다 — 그래서 **설정과 무관한 한 곳**에서 막는다:
+#
+#    기동 성공(/health 200) → 그 설정을 config.json.last-good 으로 승격
+#    기동 실패             → last-good 으로 되돌려 1회 재기동
+#                            성공하면 콘솔이 살아나 운영자가 설정을 고칠 수 있다
+#
+#  last-good 은 **성공한 설정만** 담는다(실패 설정이 승격되지 않는다). 되돌린 사실은
+#  로그와 마커 파일(config.json.rolled-back)로 남겨 콘솔에서 원인을 볼 수 있게 한다.
+# ══════════════════════════════════════════════════════════════════════════
+_oam_overlay_path() {              # agent 가 쓰는 배포 overlay (job_update_config 대상)
+    local p
+    for p in "$DIST_DIR/oam/config.json" "$DIST_DIR/config.json"; do
+        [[ -f "$p" ]] && { echo "$p"; return 0; }
+    done
+    echo ""
+}
+
+_oam_promote_last_good() {
+    local cfg; cfg="$(_oam_overlay_path)"
+    [[ -n "$cfg" ]] || return 0
+    # 되돌림 이력은 **새 설정이 성공했을 때만** 해소한다. 되돌린 직후의 재기동은 현재 설정이
+    # last-good 과 같으므로 마커를 남겨야 한다 — 안 그러면 그 재기동이 마커를 지워
+    # 콘솔 배너가 뜨지 않고, 운영자는 자기 설정이 적용된 줄 안다(실측: 이관 실패가 조용히
+    # 되돌려져 그룹은 /NAS, 배포설정은 로컬인 채로 남았다).
+    if [[ ! -f "$cfg.last-good" ]] || ! cmp -s "$cfg" "$cfg.last-good"; then
+        rm -f "$cfg.rolled-back" 2>/dev/null || true
+    fi
+    cp -a "$cfg" "$cfg.last-good" 2>/dev/null || true
+}
+
+_oam_rollback_last_good() {        # 0=되돌림, 1=되돌릴 것 없음
+    local cfg; cfg="$(_oam_overlay_path)"
+    [[ -n "$cfg" && -f "$cfg.last-good" ]] || return 1
+    if cmp -s "$cfg" "$cfg.last-good"; then
+        return 1                   # 이미 last-good — 설정 탓이 아니다
+    fi
+    cp -a "$cfg" "$cfg.failed-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
+    cp -a "$cfg.last-good" "$cfg" 2>/dev/null || return 1
+    date -Is > "$cfg.rolled-back" 2>/dev/null || true
+    return 0
+}
+
 start_oam() {
     if is_running oam; then warn "OAM 이미 실행 중 (pid=$(read_pid oam))"; return 0; fi
     [[ ! -f "$DIST_DIR/oam/src/oam_app.py" ]] && err "OAM 소스 없음 (make dist 실행 필요)" && return 1
@@ -370,14 +418,17 @@ except Exception as e:
 
 changed = False
 
-# CimsRuntimeDir
+# CimsRuntimeDir 는 **자동으로 바꾸지 않는다.**
+#   옛 동작은 경로를 못 만들면 조용히 dist_dir/ext_mnt/runtime 으로 바꿨다. 그 결과
+#   관리 데이터의 SoT 가 **버전 디렉터리 안**으로 옮겨져, 업그레이드가 그 디렉터리를
+#   교체하면서 서버·그룹·배포 기록이 통째로 사라졌다(실측 사고). 게다가 이관 대상이
+#   공유 마운트인 구성에서는 "마운트가 잠깐 없다" 는 이유로 store 가 로컬로 이동해
+#   절체 시 빈 콘솔이 된다. 경로 문제는 OAM 이 판정하고(mount guard·폴백), 여기서는
+#   접근 가능 여부만 알린다.
 cur = c.get('CimsRuntimeDir', '')
 if cur and not can_mkdir(cur):
-    new = os.path.join(dist_dir, 'ext_mnt', 'runtime')
-    os.makedirs(new, exist_ok=True)
-    c['CimsRuntimeDir'] = new
-    changed = True
-    print(f'[auto-fix] CimsRuntimeDir: {cur} -> {new}', flush=True)
+    print(f'[warn] CimsRuntimeDir 접근 불가: {cur} '
+          f'(마운트/권한 확인 필요 — 경로를 자동 변경하지 않습니다)', flush=True)
 
 # ServiceLogging.Dir
 sl = c.get('ServiceLogging', {})
@@ -415,9 +466,31 @@ if not p:
     except: p=4419
 print(p)" 2>/dev/null || echo 4419)
     kill_stray "$DIST_DIR/oam/src/oam_app.py" "$oam_port" tcp
-    # oam_base_service_split §8 — 역할 플래그. 기본 all = 현행 단일프로세스(무변경).
-    # 분리 배포(게이트웨이) 노드만 OAM_ROLE=base 로 기동 → 서비스 라우트는 csc/oam-svc 로 프록시.
-    local oam_role="${OAM_ROLE:-all}"
+    # oam_base_service_split §8 — 역할 플래그.
+    #   우선순위: env OAM_ROLE(개발 오버라이드) > 배포 설정 Server.Role > all(코드 기본).
+    # 배포 설정이 정본인 이유: 옛 구현은 부트스트랩이 만든 systemd drop-in(env)에만 role 이
+    # 있어서, drop-in 이 없는 노드에서 HA 승격으로 기동되면 role=all 로 떠 게이트웨이 프록시를
+    # 아예 마운트하지 않았다(승격 직후 서비스 API 전면 장애). 배포 설정에 두면 어느 노드에서
+    # 기동되든 같은 역할이 된다.
+    local oam_role_cfg
+    oam_role_cfg=$("$PYBIN" -c "
+import json, os
+candidates=['$DIST_DIR/oam/config.json', '$DIST_DIR/config.json']
+r=None
+for ov in candidates:
+    if not os.path.isfile(ov): continue
+    try:
+        f=json.load(open(ov))
+        if isinstance(f,dict):
+            r=f.get('Server.Role') or (f.get('Server',{}) or {}).get('Role')
+            if r: break
+    except: pass
+print(r or '')" 2>/dev/null || echo "")
+    local oam_role="${OAM_ROLE:-${oam_role_cfg:-all}}"
+    case "$oam_role" in
+        base|all) ;;
+        *) warn "알 수 없는 OAM 역할 '$oam_role' — all 로 기동"; oam_role="all" ;;
+    esac
     info "OAM (Operation & Management REST API) 시작... (port=$oam_port, role=$oam_role)"
     cd "$DIST_DIR/oam/src"
     "$PYBIN" -u "$DIST_DIR/oam/src/oam_app.py" --role "$oam_role" >> "$LOG_DIR/oam.log" 2>&1 &
@@ -427,11 +500,41 @@ print(p)" 2>/dev/null || echo 4419)
     # self-upgrade 시 agent 의 후속 report 가 "아직 안 뜬 신 OAM" 에 닿아 유실되던 문제 방지.
     if _oam_health_gate "$oam_port" "${CIMS_OAM_HEALTH_TIMEOUT:-20}"; then
         ok "OAM 시작 완료 (pid=$(read_pid oam), port=$oam_port, /health 200)"
-    else
-        err "OAM 시작 실패 — /health 미응답 (${CIMS_OAM_HEALTH_TIMEOUT:-20}s)"
-        tail -5 "$LOG_DIR/oam.log" | sed 's/^/  /'
+        _oam_promote_last_good          # 이 설정은 정상 — 복구 기준으로 승격
+        return 0
+    fi
+
+    err "OAM 시작 실패 — /health 미응답 (${CIMS_OAM_HEALTH_TIMEOUT:-20}s)"
+    tail -5 "$LOG_DIR/oam.log" | sed 's/^/  /'
+
+    # ── 자가 복구: 직전 정상 설정으로 1회 되돌려 재기동 ──────────────────
+    if ! _oam_rollback_last_good; then
+        err "되돌릴 직전 정상 설정이 없습니다 — 설정 문제가 아닐 수 있습니다(로그 확인)"
         return 1
     fi
+    warn "설정을 직전 정상값으로 되돌리고 재기동합니다 — 콘솔이 살아나면 설정을 고치세요"
+    kill_stray "$DIST_DIR/oam/src/oam_app.py" "$oam_port" tcp
+    oam_port=$("$PYBIN" -c "
+import json, sys
+for p in ['$DIST_DIR/oam/config.json', '$DIST_DIR/config.json', '$DIST_DIR/oam/config/oam.json']:
+    try:
+        d = json.load(open(p))
+    except Exception:
+        continue
+    v = d.get('Server.Port') or (d.get('Server') or {}).get('Port')
+    if v: print(int(v)); sys.exit(0)
+print(4419)" 2>/dev/null || echo 4419)
+    cd "$DIST_DIR/oam/src"
+    "$PYBIN" -u "$DIST_DIR/oam/src/oam_app.py" --role "$oam_role" >> "$LOG_DIR/oam.log" 2>&1 &
+    save_pid oam $!
+    if _oam_health_gate "$oam_port" "${CIMS_OAM_HEALTH_TIMEOUT:-20}"; then
+        warn "OAM 이 **직전 정상 설정**으로 기동됐습니다 (방금 저장한 설정은 "
+        warn "  $(_oam_overlay_path).failed-* 로 보관). 콘솔에서 설정을 고쳐 다시 적용하세요."
+        return 0
+    fi
+    err "되돌린 설정으로도 기동 실패 — 설정 외의 문제입니다"
+    tail -5 "$LOG_DIR/oam.log" | sed 's/^/  /'
+    return 1
 }
 
 # OAM 전용 health-gate: 프로세스 생존 + https://127.0.0.1:<port>/health 200 까지
