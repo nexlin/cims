@@ -57,6 +57,10 @@ fun EmergencyBanner(e: GroupCallState, ctl: PttController?, modifier: Modifier =
         if (e.emergencyMine) {
             Text("해제", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.plainClickable { ctl?.cancelEmergency() }.padding(8.dp))
+        } else {
+            // 수신측 로컬 닫기 — 이 단말의 표시만 제거 (발신측 긴급 상태와 무관, AlertBanner 닫기와 동일 의미)
+            Text("닫기", color = Color.White, fontSize = 14.sp,
+                modifier = Modifier.plainClickable { ctl?.dismissEmergency(e.groupId) }.padding(8.dp))
         }
     }
 }

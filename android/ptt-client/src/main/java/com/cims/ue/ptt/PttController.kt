@@ -1573,6 +1573,15 @@ class PttController(
     /** 수신 경보 배너 수동 닫기 — 이 단말의 표시만 제거(발신측 경보 상태와 무관). */
     fun dismissAlert(groupId: String, userId: String) = removeAlert(groupId, userId)
 
+    /** 수신측 세션 긴급 배너 수동 닫기 — 이 단말의 표시 latch 만 해제(개시자 상태와 무관).
+     *  경보 취소 MESSAGE 유실 시의 탈출구 — 개시자 자신은 cancelEmergency 로만 해제한다. */
+    fun dismissEmergency(groupId: String) {
+        synchronized(lock) {
+            sessionMap[groupId]?.takeIf { it.emergency && !it.emergencyMine }?.emergency = false
+        }
+        publish()
+    }
+
     /** 수신 긴급경보 MESSAGE — 서버 fan-out 은 원본 본문 그대로라 그룹·발신자를 본문에서 읽는다. */
     private fun onAlertMessage(fromUri: String, body: String) {
         val info = McpttXml.parseMcpttInfo(body)
@@ -1587,6 +1596,15 @@ class PttController(
             emit(PttEventKind.ALERT_IN, gid, peer = user)
         } else {
             removeAlert(gid, user)
+            // 세션 긴급 표시 un-latch — CSP 는 하향 re-INVITE 를 멤버에 전파하지 않으므로
+            // (mcptt_emergency_modes.md 로드맵) 경보 취소가 멤버에 닿는 유일한 해제 신호다.
+            // 같은 그룹에 다른 활성 경보가 남아 있으면 유지한다.
+            if (_alerts.value.none { it.groupId == gid }) {
+                synchronized(lock) {
+                    sessionMap[gid]?.takeIf { it.emergency && !it.emergencyMine }?.emergency = false
+                }
+                publish()
+            }
             _status.value = "[$gid] 긴급경보 해제 — $user"
             emit(PttEventKind.ALERT_END, gid, peer = user)
         }
