@@ -19,7 +19,7 @@ Covers (handlers 직접 호출 — 서버 미기동):
     (ON=전 멤버, OFF=target 필수) + 스위치 영속·ON 전환 즉시 정합
 
 각 테스트는 tmpdir 로 CimsRuntimeDir 격리. sys.path 는 ems/core/oam/{src,vendor}
-(csc→oam 분리 이후 배포 admin 핸들러는 oam 소유 — test_ha_fanout.py 의 csc/src 와 다름).
+(csc→oam 분리 이후 배포 admin 핸들러는 oam 소유).
 """
 import asyncio
 import os
@@ -30,8 +30,8 @@ import unittest
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_HERE)
 
-# 같은 프로세스에서 다른 테스트(예: test_ha_fanout)가 csc/src 의 services 를 먼저
-# import 했을 수 있다 — oam 쪽 모듈로 재해석되도록 관련 모듈 캐시를 비운다.
+# 같은 프로세스에서 다른 테스트가 csc/src 의 services 를 먼저 import 했을 수 있다
+# — oam 쪽 모듈로 재해석되도록 관련 모듈 캐시를 비운다.
 for _m in [m for m in list(sys.modules)
            if m.split('.')[0] in ('services', 'handlers', 'httpsrv', 'util')]:
     del sys.modules[_m]
@@ -70,8 +70,17 @@ class _FsCase(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
         self.config = {"CimsRuntimeDir": self._td.name}
+        # 관리 store 는 단일 writer 다 — write 는 소유권 리스를 요구한다(oam_ha.md §4.4).
+        # 실기동(oam_app)이 bind 전에 acquire 하는 것과 같은 자리에서 잡아, 테스트도
+        # 실제 write 경로(assert_writable)를 그대로 통과하게 한다.
+        from services import file_store, lease
+        self._lease = lease
+        st = lease.acquire(file_store.runtime_root(self.config))
+        if not st.get('active'):
+            self.skipTest(f"store 리스 획득 불가({st.get('reason')}) — flock 미지원 tmpdir")
 
     def tearDown(self):
+        self._lease.release()
         self._td.cleanup()
 
     # ── file_store seed helpers ─────────────────────────────────────
@@ -155,10 +164,14 @@ class TestPutConfigNoPropagation(_FsCase):
     """PUT /deployments/{id}/config — 항상 단일 서버 저장, 전파 없음."""
 
     def test_put_saves_only_this_deployment(self):
+        """온 키만 기존 overlay 에 병합 — 콘솔은 **바뀐 키만** 보낸다.
+        전체 값을 되돌려 보내지 않으므로, 안 온 키(Tls.Port)는 보존되어야 한다.
+        (전체 덮어쓰기면 화면에 마스킹돼 보이던 _infra 시크릿이 지워져 전면 401)"""
         self._seed_as_pair()
         r = self._put(5, {"config": {"Db.Host": "10.5.5.5", "SystemId": "A"}})
         self.assertEqual(r.status, 200)
-        self.assertEqual(self._dep(5)["config"], {"Db.Host": "10.5.5.5", "SystemId": "A"})
+        self.assertEqual(self._dep(5)["config"],
+                         {"Db.Host": "10.5.5.5", "SystemId": "A", "Tls.Port": 6061})
         # 피어 무변경
         self.assertEqual(self._dep(6)["config"],
                          {"SystemId": "B", "Db.Host": "10.0.0.1", "Db.Port": 3307})
@@ -168,6 +181,13 @@ class TestPutConfigNoPropagation(_FsCase):
         self.assertEqual(r.body["job_id"], jobs[0]["id"])
         # 실체화 — template default + 저장 overlay
         self.assertEqual(jobs[0]["params"]["config"]["Db.Port"], 3306)
+
+    def test_put_null_removes_key(self):
+        """병합의 반대편 — 값 null 은 **명시 삭제**(기본값 복귀). 안 보낸 키와 구분된다."""
+        self._seed_as_pair()
+        r = self._put(5, {"config": {"Tls.Port": None}})
+        self.assertEqual(r.status, 200)
+        self.assertEqual(self._dep(5)["config"], {"SystemId": "A", "Db.Host": "10.9.9.9"})
 
     def test_put_ignores_legacy_sync_body_fields(self):
         """구 R2 body(sync_keys/sync_checked/propagate_to_ha_peers)는 완전 무시 —
