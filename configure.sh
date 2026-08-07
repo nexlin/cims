@@ -432,36 +432,50 @@ apply_config_template "$DIST_DIR/cmdp/config/config_template.json"         "$DIS
 apply_config_template "$DIST_DIR/csp/config/config_template.json"          "$DIST_DIR/csp/config/csp.json"
 apply_config_template "$DIST_DIR/csc/config/config_template.json"          "$DIST_DIR/csc/config/csc.json"
 
-# ── base OAM JwtSecret 정렬 (oam_base_service_split §5) ────────
+# ── base OAM 노드값 → **overlay** (oam_base_service_split §5, 02_deployment 설정 계층) ──
 # 콘솔(4419) 로그인 토큰은 base OAM 이 발급하고, 게이트웨이 프록시 뒤의 csc 가
 # 같은 시크릿으로 독립 검증한다. csc.json 은 @CIMS_JWT_SECRET@ 로 렌더되므로
-# dist oam.json 의 CimsAuth.JwtSecret 을 같은 값으로 패치해 정렬한다.
-# ServiceLogging.Dir 도 SERVICE_LOG_DIR 로 정렬 — oam.json 소스에는 플레이스홀더가
-# 없어 여기서 패치하지 않으면 flow/alert 조회가 타 모듈과 다른 경로를 본다.
-# (배포 흐름은 deploy 가 JwtSecret 자동 공유 — 이 패치는 dev/build/dist 용.)
-if [[ -f "$DIST_DIR/oam/config/oam.json" ]]; then
-    OAM_CFG="$DIST_DIR/oam/config/oam.json" SECRET="$CIMS_JWT_SECRET" \
-        SVC_LOG_DIR="$SERVICE_LOG_DIR" \
+# oam 도 같은 값을 가져야 한다.
+#
+# 노드 종속 값(경로·시크릿·DB)은 **base(oam/config/oam.json)가 아니라 노드 overlay
+# (oam/config.json, 평면 점표기)** 에 쓴다 — base 는 패키지에 실려 나가므로 여기 쓰면
+# 빌드 머신 값이 배포된다 (S1-CONFIG-PORTABILITY 게이트가 차단). base 는 소스 정본으로
+# 복원해 과거 in-place 패치 잔재를 청소한다. oam_app 이 기동 시 overlay 를 병합한다.
+if [[ -d "$DIST_DIR/oam/config" ]]; then
+    # base 복원 — 소스 트리에서 실행 중일 때만 (배포본 단독 configure 는 base 를 보존)
+    if [[ -f "$SCRIPT_DIR/ems/core/oam/config/oam.json" ]]; then
+        cp -f "$SCRIPT_DIR/ems/core/oam/config/oam.json"    "$DIST_DIR/oam/config/oam.json"
+        cp -f "$SCRIPT_DIR/ems/core/oam/config/oam-tb.json" "$DIST_DIR/oam/config/oam-tb.json" 2>/dev/null || true
+    fi
+    OAM_OVL="$DIST_DIR/oam/config.json" SECRET="$CIMS_JWT_SECRET" \
+        SVC_LOG_DIR="$SERVICE_LOG_DIR" RUNTIME_DIR="$DIST_DIR/ext_mnt/runtime" \
         DBH="$DB_HOST" DBP="${DB_PORT:-3306}" DBU="$DB_USER" DBW="$DB_PASSWORD" DBN="${DB_NAME:-cims}" \
         python3 - <<'PY'
 import json, os
-p = os.environ["OAM_CFG"]
-with open(p) as f:
-    c = json.load(f)
-c.setdefault("CimsAuth", {})["JwtSecret"] = os.environ["SECRET"]
-c.setdefault("ServiceLogging", {})["Dir"] = os.environ["SVC_LOG_DIR"]
+p = os.environ["OAM_OVL"]
+try:
+    with open(p) as f:
+        ovl = json.load(f)
+    if not isinstance(ovl, dict):
+        ovl = {}
+except Exception:
+    ovl = {}
+ovl["CimsAuth.JwtSecret"] = os.environ["SECRET"]
+ovl["ServiceLogging.Dir"] = os.environ["SVC_LOG_DIR"]
+ovl["CimsRuntimeDir"] = os.environ["RUNTIME_DIR"]
 # stats 핸들러(_get_db)가 읽는 CimsDatabase — 미주입 시 기본 127.0.0.1 로 접속을 시도해
 # 외부 DB 구성에서 통계 API 가 MySQL 에러(500)를 반환한다.
-c["CimsDatabase"] = {
+ovl["CimsDatabase"] = {
     "Host": os.environ["DBH"], "Port": int(os.environ["DBP"]),
     "User": os.environ["DBU"], "Password": os.environ["DBW"], "Db": os.environ["DBN"],
 }
 with open(p, "w") as f:
-    json.dump(c, f, indent=4, ensure_ascii=False)
+    json.dump(ovl, f, indent=4, ensure_ascii=False)
     f.write("\n")
-print("  oam.json CimsAuth.JwtSecret ← csc 와 동일 값 정렬")
-print("  oam.json ServiceLogging.Dir ← " + os.environ["SVC_LOG_DIR"])
-print("  oam.json CimsDatabase ← %s@%s" % (os.environ["DBU"], os.environ["DBH"]))
+print("  oam overlay(config.json) CimsAuth.JwtSecret ← csc 와 동일 값 정렬")
+print("  oam overlay ServiceLogging.Dir ← " + os.environ["SVC_LOG_DIR"])
+print("  oam overlay CimsRuntimeDir ← " + os.environ["RUNTIME_DIR"])
+print("  oam overlay CimsDatabase ← %s@%s" % (os.environ["DBU"], os.environ["DBH"]))
 PY
 fi
 

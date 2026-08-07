@@ -253,6 +253,15 @@ cmd_pkg() {
             mkdir -p "$stage"
             cp -a "$DIST_DIR/oam" "$stage/oam"
             find "$stage/oam/src" -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null
+            # 노드 overlay·런타임 산출물은 패키지에서 제외 — 패키지는 소스 기본값만 싣는다
+            # (02_deployment 설정 계층: 노드 종속 값은 설치/배포가 overlay 로 주입).
+            rm -f "$stage/oam/config.json" "$stage/oam/config.json.applied" \
+                  "$stage/oam/config.json.rolled-back" 2>/dev/null
+            rm -rf "$stage/oam/log" 2>/dev/null
+            if [[ -f "$SCRIPT_DIR/ems/core/oam/config/oam.json" ]]; then
+                cp -f "$SCRIPT_DIR/ems/core/oam/config/oam.json"    "$stage/oam/config/oam.json"
+                cp -f "$SCRIPT_DIR/ems/core/oam/config/oam-tb.json" "$stage/oam/config/oam-tb.json" 2>/dev/null || true
+            fi
             # 콘솔 base/svc 분리 (백엔드 oam-base/oam-svc 와 대칭) —
             #   oam-base 패키지엔 **base 메뉴 콘솔(dist-base)** 만 동봉.
             #   oam 이 <root>/oam/console/dist 를 서빙(console_static.resolve 의 번들 후보).
