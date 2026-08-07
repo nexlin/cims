@@ -820,12 +820,17 @@ async def _create_group(body, config, payload=None):
         return HandlerResult(status=400, body={'error': floor_err})
 
     # 그룹 소유 (authorized user) — 명시 없으면 생성자(payload sub) 기본.
+    # 단 OAM builtin 관리자(CimsAuth, sub<0)는 users 행이 아니다 — 소유자로
+    # 넣으면 FK(fk_grp_authorized_user) 위반. 소유자 미지정 그룹으로 생성한다.
     authorized_user_id = body.get('authorized_user_id')
     explicit_owner = authorized_user_id is not None
     if not explicit_owner and payload is not None:
         try:
             authorized_user_id = int(payload.get('sub'))
         except (TypeError, ValueError):
+            authorized_user_id = None
+        if payload.get('builtin') or (authorized_user_id is not None
+                                      and authorized_user_id < 0):
             authorized_user_id = None
     if authorized_user_id is not None:
         try:

@@ -3573,6 +3573,8 @@ def job_health_check(params: dict) -> tuple:
     if override is None:
         if svc in ("csc", "tb-csc"):
             override = _flat("Server.Port") or _flat("Port")
+        elif svc == "oam":
+            override = _flat("Server.Port")
         elif svc == "console":
             override = _flat("Port") or _flat("ConsolePort")
         elif svc == "csp":
@@ -3587,6 +3589,7 @@ def job_health_check(params: dict) -> tuple:
         "csp":     [("udp", 5060)],
         "cmp":     [("udp", 9000)],
         "csc":     [("tcp", 4421)],
+        "oam":     [("tcp", 4419)],
         "cwrtc":   [("tcp", 8080)],
         "console": [("tcp", 3001)],
         "phone":   [("tcp", 3000)],
