@@ -159,6 +159,10 @@ _INSTANCES = [
          "Setup.Sip.LocalIp":         "127.0.0.1",
          "Setup.MediaServer.Host":    "127.0.0.1",
          "Setup.MediaServer.LocalIp": "127.0.0.1",
+         # 다중 endpoint 모델 — Endpoints[0]=primary 가 레거시 Host 보다 우선.
+         # template 기본([127.0.0.1:9000])이 overlay Host 를 이겨 짝이 아닌 CMP 로
+         # 가는 사고 방지 위해 변종마다 짝 미디어를 명시한다.
+         "Setup.MediaServer.Endpoints": [{"ip": "127.0.0.1", "port": 9000}],
          # dev csp (9001) 와 충돌 회피 — 배포본 CSP 는 9011 사용.
          "Setup.MediaServer.LocalPort": 9011,
          # XCAP(GMS/CMS) 대상 = 배포본 csc (mgmt 호스트 127.0.0.1:4431).
@@ -179,6 +183,7 @@ _INSTANCES = [
          "Setup.Sip.LocalIp":         "127.0.0.3",
          "Setup.MediaServer.Host":    "127.0.0.3",  # PMP control port
          "Setup.MediaServer.LocalIp": "127.0.0.3",
+         "Setup.MediaServer.Endpoints": [{"ip": "127.0.0.3", "port": 9000}],
          # 인스턴스별 LocalPort 분리 — dev csp(9001)/CSP(9011) 와 충돌 회피.
          "Setup.MediaServer.LocalPort": 9012,
          # XCAP(GMS/CMS) 대상 = 배포본 csc (mgmt 호스트 127.0.0.1:4431).
@@ -226,6 +231,7 @@ _INSTANCES = [
          "Setup.Sip.LocalIp":         "127.0.0.5",
          "Setup.MediaServer.Host":    "127.0.0.5",
          "Setup.MediaServer.LocalIp": "127.0.0.5",
+         "Setup.MediaServer.Endpoints": [{"ip": "127.0.0.5", "port": 9000}],
          # 인스턴스별 LocalPort 분리 — dev csp(9001)/CSP(9011)/PSP(9012) 와 충돌 회피.
          "Setup.MediaServer.LocalPort": 9013,
      }},

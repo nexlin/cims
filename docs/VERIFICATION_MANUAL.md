@@ -153,48 +153,52 @@ FAIL 시 → S2~S6 자동 BLOCKED. 코드 수정 후 재시도.
 > tarball 안 디렉토리 구조가 실제로 분리된 형태다. 콘솔 `/release/package`
 > 카드의 ⤓ 다운로드 버튼은 변종별로 노출.
 
-### 2.5 S5 — 로컬 배포 (22 native step, 5 server)
+### 2.5 S5 — 로컬 배포 (22 native step, mgmt + 5 service-server)
 
 ```bash
-./cims-verify stage5                       # 기본: 4 ports 기동 유지
+./cims-verify stage5                       # 기본: 전체 기동 유지
 ./cims-verify stage5 --stop-after          # 종료 시 stop+kill
 ```
 
-**5 server 토폴로지 (P1)** — `verify/lib/items/stage5/_native_steps.py`
+**토폴로지** — mgmt 체인이 standalone **oam**(관리평면 4445, 콘솔 정적 동봉·단일
+오리진)을 부트스트랩하고, 이후 모든 모듈(csc 서비스 모듈 + service-server)은
+**배포본 OAM(4445) 경유**로 배포한다. `verify/lib/items/stage5/_native_steps.py`
 의 `_INSTANCES` SoT:
 
 | display_name | agent | dist 경로 | 변종 | 포트 |
 |---|---|---|---|---|
-| CIMS 관리 서버 | mgmt-server | `build/dist/mgmt-server/` | csc + console + sim (sim install-only) | 4445 / 8081 |
+| CIMS 관리 서버 | mgmt-server | `build/dist/mgmt-server/` | oam (console 동봉) + sim (install-only) | 4445 |
+| Mgmt Service (CSC) | mgmt-svc-server | `build/dist/mgmt-svc-server/` | csc | 4446/tcp (MCPTT 4431) |
 | VoLTE SIP Server | volte-sip-server | `build/dist/volte-sip-server/` | csp (CSP) | 5060/udp · 127.0.0.1 |
 | VoLTE Media Server | volte-media-server | `build/dist/volte-media-server/` | cmp (CMP) | 9000/udp · 127.0.0.1 |
-| PTT SIP Server | ptt-sip-server | `build/dist/ptt-sip-server/` | psp | 5060/udp · 127.0.0.2 |
+| PTT SIP Server | ptt-sip-server | `build/dist/ptt-sip-server/` | psp | 5060/udp · 127.0.0.3 |
 | PTT Media Server | ptt-media-server | `build/dist/ptt-media-server/` | pmp | 9000/udp · 127.0.0.3 |
 
 **기대 결과**:
 
 | 그룹 | 자식 / step |
 |---|---|
-| RESET (10) | step 01: cleanup (가입자 보존, 5 agent dir + pkill 패턴) |
-| CSC-DEPLOY (20) | 21 AGENT-ENROLL (05+06+07: mgmt-server) / 22 PKG-UPLOAD (08: csc/console/cspsim) / 23 INSTALL (09+10) |
-| CSC-VERIFY (30) | 31 FILES (11) / 32 OVERLAY (12) |
-| CSC-RUN (40) | 41 CSC-START (13) / 42 CSC-HEALTH (14) / 43 CONSOLE-START (15) |
-| MODULES-DEPLOY (50) | 51 AUTH (16) / 52 PKG-UPLOAD (17: csp/cmp/psp/pmp) / 53 AGENT-ENROLL (18) / 54 INSTALL (19+20) |
-| MODULES-RUN (60) | 61 START (21) — csp+cmp pair + psp+pmp pair OnCmpStatusChanged Connected wait + immutability marker |
-| FINALIZE (70) | step 22: 기동 유지 / --stop-after = stop list 7 + kill 5 agents |
+| RESET (10) | step 01: cleanup (가입자 보존, agent dir + pkill 패턴 + supervised.json 잔재 정리) |
+| CSC-DEPLOY (20) | 21 AGENT-ENROLL (05+06+07: mgmt-server) / 22 PKG-UPLOAD (08: oam/cspsim) / 23 INSTALL (09+10, oam overlay = Server.Port 4445 + runtime/packages/log 격리) |
+| CSC-VERIFY (30) | 31 FILES (11, current 통로 해석) / 32 OVERLAY (12: oam/config.json Server.Port=4445) |
+| CSC-RUN (40) | 41 CSC-START (13: oam 4445 LISTEN) / 42 CSC-HEALTH (14) / 43 CONSOLE-START (15: GET / SPA 정적 서빙) |
+| MODULES-DEPLOY (50) | 51 AUTH (16: 배포본 OAM) / 52 PKG-UPLOAD (17: csc/csp/cmp/psp/pmp) / 53 AGENT-ENROLL (18: sync 9904~9909) / 54 INSTALL (19+20 — DB·Xcap·MediaServer.Endpoints·MCPTT 포트 overlay 주입) |
+| MODULES-RUN (60) | 61 START (21) — local_nodes 시드 + csc(4446) + csp+cmp/psp+pmp pair OnCmpStatusChanged Connected wait + immutability marker |
+| FINALIZE (70) | step 22: 기동 유지 / --stop-after = 모듈(배포본 OAM 경유) → mgmt 순 stop + agent kill |
 
 **합격 체크**:
 
 ```bash
-# 6 endpoint LISTEN (mgmt 2 + service 4)
-ss -tln | grep -E ':(4445|8081)\b'
-ss -uln | grep -E '127.0.0.[123]:(5060|9000)\b'
+# endpoint LISTEN (mgmt oam 4445 + csc 4446 + service 4)
+ss -tln | grep -E ':(4445|4446)\b'
+ss -uln | grep -E '127.0.0.[135]:(5060|9000)\b'
 
-# 디렉토리 구조 — 5 server
-ls build/dist/mgmt-server/                           # agent/ csc/ console/ sim/ config/
-ls build/dist/{volte-sip,volte-media,ptt-sip,ptt-media}-server/
+# 디렉토리 구조 — 버전형 설치 (modules/<모듈>/<ver>/ + current 심볼릭)
+ls build/dist/mgmt-server/                           # agent/ oam/ sim/
+ls build/dist/mgmt-svc-server/modules/csc/
+ls build/dist/{volte-sip,volte-media,ptt-sip,ptt-media}-server/modules/
 
-# Test-agent 5개 (mgmt 9903 + 4 service 9904~9906/+1)
+# Test-agent (mgmt 9903 + csc 9909 + service 9904~9908, CIMS_AGENT_NO_SUPERVISE=1)
 pgrep -af cims_agent.py
 
 # Immutability marker
@@ -214,15 +218,15 @@ cat build/dist/.deployed-manifest.json    # manifest_sha + ts
 |---|---|---|---|
 | 1 | VoLTE 음성 2자 (`-mode volte -count 2 -no_video`) | volte-sip | seg_*.rtp +1 |
 | 2 | VoLTE 영상 2자 (`-mode volte -count 2`) | volte-sip | seg_*.rtp +1 |
-| 3 | PTT 그룹 음성 5인 (`-mode ptt -scenario group_call -count 5 -no_video`) | ptt-sip (127.0.0.2) | seg_*.rtp +1 |
+| 3 | PTT 그룹 음성 5인 (`-mode ptt -scenario group_call -count 5 -no_video`) | ptt-sip (127.0.0.3) | seg_*.rtp +1 |
 | 4 | PTT 그룹 영상 5인 (`-mode ptt -scenario group_call -count 5`) | ptt-sip | seg_*.rtp +1 |
 | 5 | L7-NOTIFY (SUBSCRIBE/NOTIFY xcap-diff/resource-lists/conference-info XML well-formed) | csp | NOTIFY body XML namespace 매칭 |
-| 6 | CMP-GROUP-SYNC (admin POST → CMP STATS 응답의 group_details 매칭) | pmp 9000/udp | 5s polling group_id 매칭 |
+| 6 | CMP-GROUP-SYNC (그룹콜 세션 중 admin PUT floor_policy → PTT_GROUP_MODIFY 전파) | pmp 9000/udp | 세션 수립(STATS group_details 등장) + 변경값 STATS 반영 (CMP 그룹은 on-demand 세션 자원 — 유휴 시 상시 roster 없음) |
 | 7 | MCPTT-FLOOR-GRANT (cmp_*.flow.jsonl 의 FLOOR_GRANT/TAKEN/IDLE) | pmp | flow.jsonl 매칭 |
 | 8 | DB-SYNC (admin → CSP 의 USER_CHANGED/GROUP_CHANGED notify 로그 매칭) | csp + psp | log glob 매칭 |
 | 9 | CERT-ROTATE (mTLS 토글 시 cert 발급 + agent reload) — `--enable-mtls` 시만 | mgmt csc + agent | cert_issued_at 갱신 또는 agent_mtls.crt mtime 60s 이내 |
 
-> 각 PTT 시나리오는 `_helpers.target_ip("psp")` 로 PSP 의 LocalIp (127.0.0.2)
+> 각 PTT 시나리오는 `_helpers.target_ip("psp")` 로 PSP 의 LocalIp (127.0.0.3)
 > 를 자동 선택. ENTRY-CHECK 는 `csc_console + 4 service-server` 6 host:port
 > 매트릭스로 LISTEN 검증.
 

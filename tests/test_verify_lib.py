@@ -1222,80 +1222,94 @@ class TestStage6NewScenarios(unittest.TestCase):
         self.assertEqual(r.status, self._ItemStatus.FAIL)
         self.assertIn("malformed", r.detail)
 
-    # ── S6-CMP-GROUP-SYNC ──
-    def test_scn_cmp_group_sync_pass_when_stats_has_gid(self) -> None:
-        """admin OK + CMP STATS 응답 group_details 에 gid 포함 → PASS + cleanup."""
-        from verify.lib.items.stage6 import scn_cmp_group_sync as mod
-        from verify.lib.common import csc_http
-        captured_gid: list = []
-        delete_called: list = []
+    # ── S6-CMP-GROUP-SYNC (세션 중 admin 변경 → PTT_GROUP_MODIFY 전파) ──
+    def _cmp_sync_mocks(self, mod, csc_http, *, propagate: bool):
+        """공통 mock 세트 — (fake_popen 기록, put 기록) 반환.
 
-        def fake_post(url, payload, **kw):
-            captured_gid.append(payload.get("id"))
-            return (201, {"id": payload.get("id")})
+        cmp_stats: 1회차=사전 reachability, 이후 g001 entry (floor_policy 는
+        put 이 오기 전 single, propagate=True 면 put 이후 요청값 반영)."""
+        puts: list = []
+        procs: list = []
 
-        def fake_delete(url, **kw):
-            delete_called.append(url)
-            return 204
+        class FakeProc:
+            def terminate(self): procs.append("terminate")
+            def kill(self): procs.append("kill")
+            def wait(self, timeout=None): procs.append("wait")
+
+        def fake_popen(*a, **k):
+            procs.append("spawn")
+            return FakeProc()
+
+        def fake_put(url, payload, **kw):
+            puts.append((url, dict(payload)))
+            return (200, {"id": "g001"})
 
         calls = {"n": 0}
 
         def fake_cmp_stats(ip="127.0.0.1", port=9000, timeout=1.0):
             calls["n"] += 1
-            if calls["n"] == 1:  # precheck
+            if calls["n"] == 1:      # 사전 reachability
                 return {"groups": 0, "group_details": []}
-            gid = captured_gid[0] if captured_gid else "x"
+            fp = "single"
+            if propagate and puts:   # 변경 PUT 이후 → 요청값 반영 (원복 PUT 도 동일)
+                fp = puts[-1][1].get("floor_policy", "single")
             return {"groups": 1,
-                    "group_details": [{"group_id": gid, "members": 0}]}
+                    "group_details": [{"group_id": "g001", "members": 5,
+                                       "floor_policy": fp}]}
 
-        orig_login = csc_http.admin_login
-        orig_post = csc_http.post_json
-        orig_delete = csc_http.delete
-        orig_cmp = mod.cmp_stats
-        import time as _t
-        orig_sleep = _t.sleep
-        try:
-            csc_http.admin_login = lambda *a, **k: "JWT"
-            csc_http.post_json = fake_post
-            csc_http.delete = fake_delete
-            mod.cmp_stats = fake_cmp_stats
-            _t.sleep = lambda s: None
-            ctx = self._ctx()
-            r = mod.scn_cmp_group_sync(ctx)
-        finally:
-            csc_http.admin_login = orig_login
-            csc_http.post_json = orig_post
-            csc_http.delete = orig_delete
-            mod.cmp_stats = orig_cmp
-            _t.sleep = orig_sleep
-        self.assertEqual(r.status, self._ItemStatus.PASS)
-        self.assertEqual(len(delete_called), 1, "cleanup DELETE 호출 1회")
+        csc_http.admin_login = lambda *a, **k: "JWT"
+        csc_http.get_json = lambda *a, **k: {"floor_policy": "single", "max_talkers": 2}
+        csc_http.put_json = fake_put
+        mod.cmp_stats = fake_cmp_stats
+        mod.subprocess.Popen = fake_popen
+        return procs, puts
 
-    def test_scn_cmp_group_sync_fail_when_stats_silent(self) -> None:
-        """admin OK + CMP STATS 가 항상 빈 group_details → FAIL (5s 폴링 미발견)."""
+    def _cmp_sync_run(self, *, propagate: bool):
         from verify.lib.items.stage6 import scn_cmp_group_sync as mod
         from verify.lib.common import csc_http
-        orig_login = csc_http.admin_login
-        orig_post = csc_http.post_json
-        orig_delete = csc_http.delete
-        orig_cmp = mod.cmp_stats
+        orig = (csc_http.admin_login, csc_http.get_json, csc_http.put_json,
+                mod.cmp_stats, mod.subprocess.Popen)
         import time as _t
         orig_sleep = _t.sleep
         try:
-            csc_http.admin_login = lambda *a, **k: "JWT"
-            csc_http.post_json = lambda *a, **k: (201, {"id": "x"})
-            csc_http.delete = lambda *a, **k: 204
-            mod.cmp_stats = lambda *a, **k: {"groups": 0, "group_details": []}
+            procs, puts = self._cmp_sync_mocks(mod, csc_http, propagate=propagate)
             _t.sleep = lambda s: None
             ctx = self._ctx()
+            ctx.state.update({"PTT_GROUP": "g001", "PTT_DOM": "d"})
             r = mod.scn_cmp_group_sync(ctx)
         finally:
-            csc_http.admin_login = orig_login
-            csc_http.post_json = orig_post
-            csc_http.delete = orig_delete
-            mod.cmp_stats = orig_cmp
+            (csc_http.admin_login, csc_http.get_json, csc_http.put_json,
+             mod.cmp_stats, mod.subprocess.Popen) = orig
             _t.sleep = orig_sleep
+        return r, procs, puts
+
+    def test_scn_cmp_group_sync_skip_without_seed(self) -> None:
+        """PTT_GROUP/PTT_DOM 상태 없음 → SKIP (SEED 미실행)."""
+        from verify.lib.items.stage6 import scn_cmp_group_sync as mod
+        ctx = self._ctx()
+        r = mod.scn_cmp_group_sync(ctx)
+        self.assertEqual(r.status, self._ItemStatus.SKIP)
+        self.assertIn("SEED", r.detail)
+
+    def test_scn_cmp_group_sync_pass_on_modify_propagation(self) -> None:
+        """세션 수립(STATS 등장) + PUT floor_policy 변경이 STATS 에 반영 → PASS.
+
+        cleanup 계약: 원복 PUT(총 2회) + sim terminate."""
+        r, procs, puts = self._cmp_sync_run(propagate=True)
+        self.assertEqual(r.status, self._ItemStatus.PASS)
+        self.assertEqual(len(puts), 2, "변경 + 원복 PUT 2회")
+        self.assertEqual(puts[0][1].get("floor_policy"), "multi")   # single→multi 토글
+        self.assertEqual(puts[1][1].get("floor_policy"), "single")  # 원복
+        self.assertIn("spawn", procs)
+        self.assertIn("terminate", procs)
+
+    def test_scn_cmp_group_sync_fail_when_no_propagation(self) -> None:
+        """세션은 수립됐지만 PUT 이후 STATS floor_policy 가 안 바뀜 → FAIL
+        (notify → SyncGroupsState → PTT_GROUP_MODIFY 체인 단절 검출)."""
+        r, procs, puts = self._cmp_sync_run(propagate=False)
         self.assertEqual(r.status, self._ItemStatus.FAIL)
+        self.assertEqual(len(puts), 2, "실패해도 원복 PUT 은 수행")
+        self.assertIn("terminate", procs)
 
     def test_scn_cmp_group_sync_skip_when_cmp_unreachable(self) -> None:
         """CMP precheck timeout (None) → SKIP."""
@@ -1307,6 +1321,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             csc_http.admin_login = lambda *a, **k: "JWT"
             mod.cmp_stats = lambda *a, **k: None
             ctx = self._ctx()
+            ctx.state.update({"PTT_GROUP": "g001", "PTT_DOM": "d"})
             r = mod.scn_cmp_group_sync(ctx)
         finally:
             csc_http.admin_login = orig_login

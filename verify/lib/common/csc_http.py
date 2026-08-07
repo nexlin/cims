@@ -110,6 +110,23 @@ def post_json(url: str, payload: dict, token: Optional[str] = None,
     return (status, parsed)
 
 
+def put_json(url: str, payload: dict, token: Optional[str] = None,
+             timeout: int = 15) -> tuple:
+    """PUT JSON. (status, parsed_json_or_text) 반환 — post_json 과 동일 계약."""
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    data = json.dumps(payload).encode("utf-8")
+    status, body = _request("PUT", url, headers=headers, data=data, timeout=timeout)
+    parsed: Any = body
+    if body:
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            pass
+    return (status, parsed)
+
+
 def delete(url: str, token: Optional[str] = None, timeout: int = 10) -> int:
     """DELETE. status code 반환. 4xx/5xx 도 그대로 반환."""
     headers = {}
