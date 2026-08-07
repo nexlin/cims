@@ -55,10 +55,37 @@ _AGENT_CERT_ROTATE_THRESHOLD_DAYS = 30
 # ──────────────────────────────────────────────────────────────
 
 def _agent_mtls_dir(config: dict) -> str:
-    base = (config.get("Agent") or {}).get("MtlsDir") or "cert/agent_mtls"
-    if not os.path.isabs(base):
-        # csc 바이너리 기준 상대 경로 → 현 프로세스 cwd 가 csc root
-        base = os.path.abspath(base)
+    """agent mTLS CA/클라이언트 인증서 디렉토리 — **버전무관 `<runtime>/_secrets/agent_mtls`**.
+
+    옛 기본값은 cwd 상대(`cert/agent_mtls`) 였고 OAM 의 cwd 는 버전 디렉토리(`modules/oam/
+    <ver>/oam/src`)라, **버전업마다 CA 가 사라져** 이미 발급한 agent 인증서를 검증할 수 없었다.
+    그룹 공통 신원(두 노드가 같은 CA)이 되어야 하는 자산이기도 하므로 시크릿 격리 위치로 옮긴다.
+    구 위치에 CA 가 있으면 1회 이관한다(기존 agent 인증서 유효 유지).
+    `Agent.MtlsDir` 절대경로 지정 시 그 값을 그대로 쓴다(운영자 오버라이드)."""
+    explicit = (config.get("Agent") or {}).get("MtlsDir")
+    if explicit and os.path.isabs(explicit):
+        return explicit
+    # **노드 로컬** — CimsRuntimeDir(이중화 시 공유 store)에서 유도하지 않는다(oam_ha.md §5).
+    from services import paths as _paths
+    base = os.path.join(_paths.secrets_dir(config), "agent_mtls")
+    try:
+        os.makedirs(base, mode=0o700, exist_ok=True)
+    except Exception:
+        pass
+    # 구 위치(cwd 상대) → 신 위치 1회 이관. CA 키/인증서가 없을 때만.
+    legacy = os.path.abspath(explicit or "cert/agent_mtls")
+    if not os.path.isfile(os.path.join(base, "ca.key")) and \
+            os.path.isfile(os.path.join(legacy, "ca.key")):
+        import shutil as _sh
+        try:
+            for fn in os.listdir(legacy):
+                src, dst = os.path.join(legacy, fn), os.path.join(base, fn)
+                if os.path.isfile(src) and not os.path.exists(dst):
+                    _sh.copy2(src, dst)
+            os.chmod(os.path.join(base, "ca.key"), 0o600)
+            logger.log_info(f"[mtls] 구 CA 위치 이관: {legacy} → {base}")
+        except Exception as e:
+            logger.log_warning(f"[mtls] CA 이관 실패({e}) — 신 위치에 새로 생성될 수 있음")
     return base
 
 
@@ -497,6 +524,26 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
         patches['routes'] = routes
     if isinstance(mounts, list):
         patches['mounts'] = mounts
+    # 실제 마운트 목록 — 공유 store 마운트 지점의 **검증·선택**에 쓴다. `mounts`(cims-managed
+    # desired)와 별개로, 운영자가 미리 붙여둔 NAS(/NAS 등)도 포함된다. 이 목록 없이 자유
+    # 입력을 받으면 마운트가 아닌 경로가 저장돼 OAM 이 기동을 거부한다(실측 사고).
+    mtg = body.get("mount_targets")
+    if isinstance(mtg, list):
+        patches['mount_targets'] = [
+            {'target': str(m.get('target') or '').rstrip('/') or '/',
+             'fstype': str(m.get('fstype') or '')[:16],
+             'source': str(m.get('source') or '')[:200]}
+            for m in mtg[:64] if isinstance(m, dict) and m.get('target')]
+    # HA 판정 요약(래치 포함) — 래치로 승격 불가가 된 노드를 콘솔이 표시해야 한다.
+    _hs = body.get("ha_state")
+    if isinstance(_hs, dict):
+        patches['ha_state'] = {str(k)[:64]: v for k, v in list(_hs.items())[:16]
+                               if isinstance(v, dict)}
+    # agent 가 실제로 보고하는 OAM 주소 — 절체 후 fleet 단절(구 Active 주소 고착)을
+    # 콘솔이 감지·경고하는 근거. 형식 검증만 하고 그대로 보관한다.
+    _ou = (body.get("oam_url") or "").strip()
+    if _ou.startswith(("http://", "https://")) and len(_ou) <= 200:
+        patches['oam_url'] = _ou
     # agent_version 도 매 heartbeat 시 갱신 — update.sh 후 새 버전 즉시 반영.
     if ver:
         patches['agent_version'] = ver[:32]
@@ -749,6 +796,23 @@ async def _report(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                     logger.log_info(f"[report] job#{job_id}({jt}) → update_ha {n}건 재렌더 큐잉")
             except Exception as e:
                 logger.log_warning(f"[report] job#{job_id} ha 재렌더 전파 실패: {e}")
+
+        # 모듈 운영 명세(service.json) 시딩 — install/upgrade 성공 시.
+        #   agent 의 update_module_spec 은 모듈 디렉토리가 없으면 no-op 으로 skip 한다
+        #   ("설치 시 재푸시" 전제). 그런데 재푸시 훅이 없어서, 갓 설치된 모듈은 명세 없이
+        #   기본값(watchdog=on)으로 동작했다 — 운영자가 그룹에서 감시를 끈 경우에도 새
+        #   노드만 켜져 있는 비대칭. 설치가 끝난 이 시점에 해당 모듈 명세를 내려보낸다.
+        if dep_id and jt in ("install", "upgrade") and result_code == 0:
+            try:
+                from handlers.ha_groups import enqueue_module_spec_for_agent
+                _proc = (params.get("process_name") if isinstance(params, dict) else None) or None
+                n_spec = await asyncio.to_thread(
+                    enqueue_module_spec_for_agent, agent['id'], config, _proc)
+                if n_spec:
+                    logger.log_info(f"[report] job#{job_id}({jt}) → update_module_spec {n_spec}건 큐잉 "
+                                    f"(service.json 시딩)")
+            except Exception as e:
+                logger.log_warning(f"[report] job#{job_id} module_spec 시딩 실패: {e}")
 
     return HandlerResult(status=200, body={"ok": True, "updated": changed},
                          media_type="application/json")

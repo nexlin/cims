@@ -1,31 +1,53 @@
 """
-HA fan-out core (Phase: 흐름 B + 흐름 A 정상화) 단위 테스트.
+HA fan-out core 단위 테스트.
+
+HA 그룹 멤버 사이에서 설정·컬렉션을 같게 유지하는 기능이다. 절체로 넘어간 쪽이 다른
+설정으로 뜨는 것을 막는 게 목적.
 
 Covers:
-  - services.ha_lookup — ha_group ↔ package ↔ deployment 매핑
-  - services.sync_txn — 트랜잭션 store CRUD + status 도출
-  - services.sync_dispatch — 멤버 fan-out + job enqueue + txn 생성
+  - services.ha_lookup — ha_group ↔ package ↔ deployment 매핑, scope+mode → 전파 판정
+    (scope=service 는 그룹 공통값이라 항상 전파, scope=system 은 노드 고유값이라 A/S 만)
+  - services.sync_txn — 여러 멤버에 나간 job 을 한 트랜잭션으로 묶어 per-member
+    ack/nack 추적 + status 도출
 
-각 테스트는 tmpdir 로 CimsRuntimeDir 격리. csc 서버 본체는 안 띄움 —
-순수 함수 호출만.
+전파 모델은 **자동 push 에서 관측 후 교정으로 바뀌었다**: 쓸 때마다 밀어넣던
+`sync_dispatch` 는 없어지고(절체 직후 못 받은 멤버에서 조용히 유실됐다), 지금은
+명시 동기화(`POST /deployments/{id}/sync`, op=group_sync) · 자동 정합
+(`reconcile_group_package`, op=auto_sync) · 주기 비교(`drift_sweeper`)가 대신한다.
+sync_txn 은 그 세 경로가 공통으로 쓰는 현역이다.
+
+각 테스트는 tmpdir 로 CimsRuntimeDir 격리. 서버 본체는 안 띄움 — 순수 함수 호출만.
 """
 import os
 import sys
 import tempfile
 import unittest
 
-# csc/src/services 모듈을 직접 import 하기 위해 sys.path 셋업
+# fan-out 정본은 **oam** 이다 — csc/src/services/ha_lookup 에도 같은 함수가 남아
+# 있지만 csc 는 collection_dir(경로 해석)만 쓰고 나머지는 죽은 코드다.
+# 다른 테스트가 csc 쪽 services 를 먼저 import 했을 수 있으므로 캐시를 비운다.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.dirname(_HERE)
-sys.path.insert(0, os.path.join(_REPO, "csc", "src"))
+for _m in [m for m in list(sys.modules)
+           if m.split('.')[0] in ('services', 'handlers', 'httpsrv', 'util')]:
+    del sys.modules[_m]
+sys.path.insert(0, os.path.join(_REPO, "ems", "core", "oam", "src"))
+sys.path.insert(1, os.path.join(_REPO, "ems", "core", "oam", "vendor"))
 
 
 class _FsCase(unittest.TestCase):
     def setUp(self):
         self._td = tempfile.TemporaryDirectory()
         self.config = {"CimsRuntimeDir": self._td.name}
+        # 관리 store 는 단일 writer — write 는 소유권 리스를 요구한다(oam_ha.md §4.4).
+        from services import file_store, lease
+        self._lease = lease
+        st = lease.acquire(file_store.runtime_root(self.config))
+        if not st.get('active'):
+            self.skipTest(f"store 리스 획득 불가({st.get('reason')}) — flock 미지원 tmpdir")
 
     def tearDown(self):
+        self._lease.release()
         self._td.cleanup()
 
     def _seed_pkg(self, pid, name, version="0.1.0"):
@@ -156,49 +178,6 @@ class SyncTxnTests(_FsCase):
         self.assertIsNone(sync_txn.get(self.config, 99999))
 
 
-class SyncDispatchTests(_FsCase):
-    def test_enqueue_creates_jobs_and_txn(self):
-        from services import sync_dispatch, sync_txn, file_store
-        self._seed_pkg(1, "csp")
-        self._seed_agent(10, "ctrl-a"); self._seed_agent(11, "ctrl-b")
-        self._seed_ha_group(100, "Control", "active_standby", [10, 11])
-        self._seed_deployment(500, 10, 1)
-        self._seed_deployment(501, 11, 1)
-
-        sid = sync_dispatch.enqueue_collection_sync(
-            self.config, entity="listener", op="CREATE", row_id=42, actor="console")
-        self.assertIsNotNone(sid)
-
-        txn = sync_txn.get(self.config, sid)
-        self.assertEqual(txn["collection"], "csp_listener")
-        self.assertEqual(txn["op"], "CREATE")
-        self.assertEqual(len(txn["members"]), 2)
-
-        # 각 멤버 job 이 생성되고 params.sync_id 가 backfill 되었는지
-        jobs_dir = file_store.domain_dir(self.config, "jobs")
-        for m in txn["members"]:
-            j = file_store.by_id(jobs_dir, m["job_id"])
-            self.assertIsNotNone(j)
-            self.assertEqual(j["job_type"], "sync_config")
-            self.assertEqual(j["params"]["sync_id"], sid)
-            self.assertEqual(j["params"]["collection"], "csp_listener")
-            self.assertEqual(j["params"]["op"], "CREATE")
-            self.assertEqual(j["params"]["row_id"], 42)
-
-    def test_enqueue_returns_none_when_no_members(self):
-        from services import sync_dispatch
-        # ha_group 도 deployment 도 없음
-        sid = sync_dispatch.enqueue_collection_sync(
-            self.config, entity="listener", op="CREATE", row_id=42)
-        self.assertIsNone(sid)
-
-    def test_enqueue_unknown_entity_returns_none(self):
-        from services import sync_dispatch
-        sid = sync_dispatch.enqueue_collection_sync(
-            self.config, entity="bogus", op="CREATE", row_id=1)
-        self.assertIsNone(sid)
-
-
 class ShouldPropagateTests(unittest.TestCase):
     """T4 의 scope+mode → propagate 결정 헬퍼."""
 
@@ -224,8 +203,7 @@ class ShouldPropagateTests(unittest.TestCase):
 def tearDownModule():
     """test_verify_lib 의 httpsrv stub 등록 로직과 충돌 회피.
 
-    csc/src 의 services / handlers 를 import 하면 httpsrv 가 sys.modules 에
-    real 모듈로 적재됨. test_verify_lib 가 'httpsrv' not in sys.modules 일 때만
+    services / handlers 를 import 하면 httpsrv 가 sys.modules 에 real 모듈로 적재됨. test_verify_lib 가 'httpsrv' not in sys.modules 일 때만
     stub 을 등록하므로, 우리가 남긴 real 모듈이 무인자 HandlerArgs 호출을 깨뜨림.
     여기서 정리해 두면 다른 테스트가 자기 stub 을 자유롭게 등록 가능.
     """

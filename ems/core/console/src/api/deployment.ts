@@ -144,6 +144,16 @@ export interface Agent {
   service_ip_rows: ServiceIpRow[] | null
   routes: AgentRoute[] | null
   mounts?: AgentMount[] | null
+  // **실제** 마운트 목록 (cims-managed 아닌 기존 마운트 포함) — 공유 store 마운트 지점
+  // 선택·검증용. mount guard 는 /proc/mounts 와 정확히 일치하는 경로만 통과시킨다.
+  mount_targets?: Array<{ target: string; fstype: string; source: string }> | null
+  /** 이 agent 가 실제로 보고하는 OAM 주소 (heartbeat 보고값). VIP 와 다르면 절체 후 단절된다. */
+  oam_url?: string | null
+  /** HA 판정 요약 {svc: {...}} — latched=true 면 그 노드는 승격 불가(운영자 해제 필요). */
+  ha_state?: Record<string, {
+    role?: string; state?: string; eligible?: boolean
+    reasons?: string[]; latched?: boolean
+  }> | null
   net_tuning?: AgentNetTuning | null
 }
 
@@ -379,6 +389,9 @@ export interface PackageCreateInput {
 
 // ──────────────── Deployment ────────────────
 export interface Deployment {
+  // 생성 응답에만 실린다 — 성공했지만 전제 미충족으로 이중화되지 않는 경우의 사유.
+  warning?: string
+  warning_code?: string
   id: number
   agent_id: number
   agent_name: string | null
@@ -528,8 +541,15 @@ export const deploymentApi = {
   updateDeployment: (id: number, body: Partial<DeploymentCreateInput>) =>
     api.put<Deployment>(`/deployments/${id}`, body),
   deleteDeployment: (id: number) => api.delete<null>(`/deployments/${id}`),
-  queueJob: (id: number, job_type: JobType, extra?: Record<string, unknown>) =>
-    api.post<{ job_id: number; status: string }>(`/deployments/${id}/job`, { job_type, extra }),
+  // 전 agent 의 OAM 접속 주소 재지정 (이중화 전환: 노드 IP → VIP).
+  // 각 agent 가 새 주소로 /health 도달 확인 후에만 적용한다 — VIP 가 없으면 아무 것도 안 바뀐다.
+  retargetOamUrl: (url: string) =>
+    api.post<{ url: string; jobs: { agent_id: number; job_id: number }[] }>(
+      '/agents/oam-url', { url }),
+  // force: 안전 가드(관리평면 업그레이드 순서·단일 writer 동시 기동) 우회 — 운영자 확인 후에만.
+  queueJob: (id: number, job_type: JobType, extra?: Record<string, unknown>, force?: boolean) =>
+    api.post<{ job_id: number; status: string }>(`/deployments/${id}/job`,
+      { job_type, extra, ...(force ? { force: true } : {}) }),
   rollbackDeployment: (id: number, target?: { install_path?: string; version?: string }) =>
     api.post<{ ok: boolean; job_ids: number[]; restart_job_id: number;
                install_path: string; version: string | null }>(

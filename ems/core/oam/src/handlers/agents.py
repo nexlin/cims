@@ -113,17 +113,61 @@ def _template_defaults(template: dict) -> dict:
     return out
 
 
+# 배포 설정 조회 시 시크릿을 가리는 sentinel. 콘솔은 이 값을 그대로 표시(입력창은 dots)하고,
+# 운영자가 손대지 않으면 저장 payload 에 포함되지 않는다(변경 키만 전송). 구 콘솔이 전체 값을
+# 되돌려 보내는 경우에도 PUT 에서 이 값을 '변경 없음' 으로 걸러내 실제 시크릿을 덮지 않는다.
+_SECRET_MASK = "••••••••"
+
+
+def _password_keys(template) -> set:
+    """config_template 에서 type=password 인 필드 키 집합."""
+    out = set()
+    if not isinstance(template, dict):
+        return out
+    for sec in template.get("sections") or []:
+        for fld in sec.get("fields") or []:
+            if isinstance(fld, dict) and fld.get("type") == "password" and fld.get("key"):
+                out.add(fld["key"])
+    return out
+
+
+def _mask_secrets(overlay, template):
+    """조회 응답용 — password 필드 값을 sentinel 로 치환 (비어있으면 그대로 빈 값)."""
+    if not isinstance(overlay, dict):
+        return overlay
+    pw = _password_keys(template)
+    if not pw:
+        return overlay
+    out = dict(overlay)
+    for k in pw:
+        if out.get(k):
+            out[k] = _SECRET_MASK
+    return out
+
+
+def _strip_masked(values, template) -> dict:
+    """저장 입력용 — sentinel 그대로 온 password 값은 '변경 없음' 이므로 제거."""
+    if not isinstance(values, dict):
+        return values
+    pw = _password_keys(template)
+    return {k: v for k, v in values.items()
+            if not (k in pw and isinstance(v, str) and v == _SECRET_MASK)}
+
+
 def _materialize_deploy_config(config, pkg_file, overlay):
     """배포 config 실체화 — agent 가 쓰는 config.json 이 항상 완전한 유효설정이 되도록
     config_template default 를 base 로 깔고 deployment overlay(사용자 변경분)를 병합.
     deployment 레코드는 sparse overlay 그대로 유지(사용자 의도 SoT) — template default
     변경은 다음 job 디스패치에서 자동 추종된다.
 
-    게이트웨이 서비스 모듈(meta.gateway.routes 보유 — oam-svc)에는 base 소유 공유값도
-    주입한다: oam-svc 의 base oam.json fallback 상속 폐지의 대체 경로.
+    **그룹 공통 신원 주입** — 대상은 (a) 게이트웨이 서비스 모듈(`meta.gateway.routes` 보유:
+    csc/oam-svc, base 발급 토큰을 검증해야 함) + (b) `meta.shared_identity` 선언 모듈
+    (base `oam` 자신 — 이중화된 두 번째 노드의 OAM 이 같은 신원으로 떠야 한다).
       - CimsAuth.JwtSecret / CimsRuntimeDir / Mgmt.Cidr — base 가 SoT, overlay 보다 우선
         (시크릿 회전·runtime 이동 시 base 현재값 추종).
-      - ServiceLogging.Dir — template 소유(콘솔 편집 가능), 비어있을 때만 base 값 주입."""
+      - ServiceLogging.Dir — template 소유(콘솔 편집 가능), 비어있을 때만 base 값 주입.
+      - CimsAuth.BuiltinAccounts — shared_identity 모듈만. admin 계정이 노드마다 다르면
+        절체 후 로그인이 깨진다(관리평면 이중화 전제, oam_ha.md §5)."""
     overlay = overlay if isinstance(overlay, dict) else {}
     tmpl = (pkg_file or {}).get("config_template") if isinstance(pkg_file, dict) else None
     if isinstance(tmpl, dict):
@@ -136,18 +180,32 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             continue
         out[k] = v
     pkg_meta = (pkg_file or {}).get("meta") if isinstance(pkg_file, dict) else None
-    if isinstance(pkg_meta, dict) and (pkg_meta.get("gateway") or {}).get("routes"):
-        secret = (config.get("CimsAuth") or {}).get("JwtSecret")
-        if secret:
-            out["CimsAuth.JwtSecret"] = secret
-        if config.get("CimsRuntimeDir"):
-            out["CimsRuntimeDir"] = config["CimsRuntimeDir"]
-        if (config.get("Mgmt") or {}).get("Cidr"):
-            out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
-        if not out.get("ServiceLogging.Dir"):
-            sld = (config.get("ServiceLogging") or {}).get("Dir")
-            if sld:
-                out["ServiceLogging.Dir"] = sld
+    if isinstance(pkg_meta, dict):
+        _gw = bool((pkg_meta.get("gateway") or {}).get("routes"))
+        _shared = bool(pkg_meta.get("shared_identity"))
+        if _gw or _shared:
+            secret = (config.get("CimsAuth") or {}).get("JwtSecret")
+            if secret:
+                out["CimsAuth.JwtSecret"] = secret
+            # store 경로는 **overlay 명시값이 우선**이다. base 를 무조건 덮어쓰면 이관
+            # (overlay 에 새 경로를 넣는 작업)이 무력화된다 — 실측 사고: 이관이 overlay 에
+            # `CimsRuntimeDir=/NAS/runtime` + `CimsRuntimeMount=/NAS` 를 넣었는데 여기서
+            # base(로컬 경로)가 Dir 만 되돌려, "store 가 마운트 하위가 아님" guard 에 걸려
+            # OAM 이 기동을 거부했다(자가복구가 되돌려 콘솔은 살아남음).
+            # overlay 에 값이 없을 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
+            if config.get("CimsRuntimeDir") and not str(out.get("CimsRuntimeDir") or "").strip():
+                out["CimsRuntimeDir"] = config["CimsRuntimeDir"]
+            if (config.get("Mgmt") or {}).get("Cidr"):
+                out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
+            if not out.get("ServiceLogging.Dir"):
+                sld = (config.get("ServiceLogging") or {}).get("Dir")
+                if sld:
+                    out["ServiceLogging.Dir"] = sld
+        if _shared:
+            # admin 계정(해시 포함) — 노드마다 다르면 절체 후 로그인이 깨진다.
+            accts = (config.get("CimsAuth") or {}).get("BuiltinAccounts")
+            if isinstance(accts, list) and accts:
+                out["CimsAuth.BuiltinAccounts"] = accts
     return out
 
 
@@ -351,6 +409,54 @@ def _job_load_all(config) -> list:
     return file_store.load_all(_job_dir(config))
 
 
+# ── 대기 job 인덱스 (agent_id → queued job id 목록) ─────────────────────────
+#   `_job_pick_pending` 이 **전 job 을 읽어** 필터하던 것이 store 가 NFS 로 옮겨간 뒤
+#   최대 비용이 됐다: job 103건 × NFS 5ms ≈ 0.5초를 agent 6대가 2초마다 = 상시 포화.
+#   job 이 쌓일수록 선형으로 악화된다. 그래서 큐잉 시 인덱스에 id 만 적고, 픽 시 그
+#   인덱스 1파일만 읽어 후보 job 만 로드한다(≤limit).
+#   인덱스는 **캐시**다 — 없거나 깨졌으면 전체 스캔으로 재구축한다(정본은 job 파일).
+_JOB_INDEX_DOMAIN = 'job_index'
+
+
+def _job_index_dir(config):
+    return file_store.domain_dir(config, _JOB_INDEX_DOMAIN)
+
+
+def _job_index_load(config, agent_id: int) -> "list | None":
+    """[job_id...] 또는 None(인덱스 없음 → 재구축 필요)."""
+    try:
+        rec = file_store.load(_job_index_dir(config), int(agent_id))
+    except Exception:
+        return None
+    if not isinstance(rec, dict):
+        return None
+    ids = rec.get('queued')
+    return [int(x) for x in ids] if isinstance(ids, list) else None
+
+
+def _job_index_save(config, agent_id: int, ids: list) -> None:
+    try:
+        file_store.save(_job_index_dir(config), int(agent_id),
+                        {'id': int(agent_id), 'queued': sorted({int(x) for x in ids})})
+    except Exception as e:
+        logger.log_warning(f"[job-index] agent#{agent_id} 저장 실패(무해, 다음에 재구축): {e}")
+
+
+def _job_index_add(config, agent_id: int, jid: int) -> None:
+    ids = _job_index_load(config, agent_id)
+    if ids is None:
+        ids = _job_index_rebuild(config, agent_id)
+    _job_index_save(config, agent_id, list(ids) + [jid])
+
+
+def _job_index_rebuild(config, agent_id: int) -> list:
+    """전체 스캔으로 인덱스 복원 — 인덱스 부재/손상, 구버전 store 이행 경로."""
+    ids = [j.get('id') for j in _job_load_all(config)
+           if j.get('agent_id') == agent_id and j.get('status') == 'queued' and j.get('id')]
+    _job_index_save(config, agent_id, ids)
+    return sorted(ids)
+
+
 def _job_create(config, agent_id: int, job_type: str, params: dict,
                 status: str = 'queued', not_before: str | None = None) -> int:
     """agent_job 1건 생성. lastrowid 호환을 위해 id 반환.
@@ -379,7 +485,52 @@ def _job_create(config, agent_id: int, job_type: str, params: dict,
     if not_before:
         obj['not_before'] = not_before
     file_store.save(d, new_id, obj)
+    if status == 'queued' and agent_id is not None:
+        _job_index_add(config, agent_id, new_id)      # 픽 경로가 전체 스캔을 피하도록
     return new_id
+
+
+_JOB_TERMINAL = ('succeeded', 'failed', 'cancelled', 'canceled', 'timeout')
+
+
+def purge_old_jobs(config, retain_days: int = 2, retain_count: int = 200) -> int:
+    """완료 job 정리 — 삭제 건수 반환.
+
+    job 은 무한히 쌓인다. store 가 NFS 인 구성에서는 그 자체가 상시 비용이 되고
+    (파일당 ~5ms), 콘솔 조회·픽 경로가 전부 느려진다. 종료 상태 job 만 대상으로,
+    **개수 상한과 보존 기간을 함께** 적용한다(둘 중 하나라도 넘으면 오래된 것부터).
+
+    미완(queued/running)은 절대 지우지 않는다 — 진행 중 작업을 잃으면 상태가 갈린다.
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        rows = _job_load_all(config)
+    except Exception:
+        return 0
+    done = [j for j in rows if str(j.get('status') or '').lower() in _JOB_TERMINAL and j.get('id')]
+    if not done:
+        return 0
+    cutoff = (_dt.now() - _td(days=max(0, int(retain_days)))).isoformat(timespec='seconds')
+
+    def _ts(j):
+        return str(j.get('completed_at') or j.get('update_time') or j.get('create_time') or '')
+
+    done.sort(key=lambda j: (_ts(j), j.get('id') or 0))
+    victims = [j for j in done if _ts(j) and _ts(j) < cutoff]
+    keep_n = max(0, int(retain_count))
+    if len(done) > keep_n:                      # 개수 상한 — 오래된 것부터 추가 삭제
+        extra = done[:len(done) - keep_n]
+        seen = {id(x) for x in victims}
+        victims += [x for x in extra if id(x) not in seen]
+    n = 0
+    d = _job_dir(config)
+    for j in victims:
+        try:
+            file_store.delete(d, j['id'])
+            n += 1
+        except Exception:
+            pass
+    return n
 
 
 def _job_update(config, jid: int, patches: dict) -> dict | None:
@@ -398,11 +549,22 @@ def _job_pick_pending(config, agent_id: int, limit: int = 10) -> list:
     """
     from datetime import datetime as _dt
     now_iso = _dt.now().isoformat(timespec='seconds')
-    all_jobs = _job_load_all(config)
-    pending = [j for j in all_jobs
-               if j.get('agent_id') == agent_id and j.get('status') == 'queued'
-               and (not j.get('not_before') or str(j['not_before']) <= now_iso)]
-    pending.sort(key=lambda j: j.get('id', 0))
+    # 인덱스 우선 — 없으면 1회 재구축(그 뒤부터는 인덱스만 읽는다).
+    ids = _job_index_load(config, agent_id)
+    if ids is None:
+        ids = _job_index_rebuild(config, agent_id)
+    pending, stale = [], []
+    for jid in sorted(ids):
+        j = _job_load(config, jid)
+        if not j or j.get('status') != 'queued' or j.get('agent_id') != agent_id:
+            stale.append(jid)                         # 이미 처리됨/삭제됨 → 인덱스에서 제거
+            continue
+        if j.get('not_before') and str(j['not_before']) > now_iso:
+            continue                                  # 지연 job — 인덱스에는 남긴다
+        pending.append(j)
+    if stale:
+        _job_index_save(config, agent_id, [i for i in ids if i not in set(stale)])
+        ids = [i for i in ids if i not in set(stale)]
     picked = pending[:limit]
     if picked:
         now = _dt.now().isoformat(timespec='seconds')
@@ -410,6 +572,9 @@ def _job_pick_pending(config, agent_id: int, limit: int = 10) -> list:
             j['status'] = 'running'
             j['dispatched_at'] = now
             file_store.save(_job_dir(config), j['id'], j)
+        # 픽한 것은 더 이상 대기가 아니다 — 인덱스에서 뺀다.
+        _picked_ids = {j['id'] for j in picked}
+        _job_index_save(config, agent_id, [i for i in ids if i not in _picked_ids])
     return picked
 
 
@@ -560,6 +725,15 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
         "routes":          r.get("routes") if isinstance(r.get("routes"), (dict, list)) else None,
         # cims-managed 마운트 (fstab 영속). agent heartbeat 보고(mounted 상태 포함) + apply 갱신.
         "mounts":          r.get("mounts") if isinstance(r.get("mounts"), list) else None,
+        # HA 판정 요약 {svc: {role,state,eligible,reasons,latched}} — 래치로 승격 불가인
+        # 노드를 콘솔이 표시하는 근거(노드 로컬 파일이라 이 보고 없이는 OAM 이 모른다).
+        "ha_state":        r.get("ha_state") if isinstance(r.get("ha_state"), dict) else None,
+        # 이 agent 가 실제로 보고하는 OAM 주소 (heartbeat 보고값). 그룹 VIP 와 다르면
+        # 절체 후 단절되므로 콘솔이 경고한다.
+        "oam_url":         r.get("oam_url") if isinstance(r.get("oam_url"), str) else None,
+        # **실제** 마운트 목록 [{target,fstype,source}] — cims-managed 아닌 기존 마운트 포함.
+        # 공유 store 마운트 지점을 자유 입력 대신 이 목록에서 고르게 하는 근거 데이터.
+        "mount_targets":   r.get("mount_targets") if isinstance(r.get("mount_targets"), list) else None,
         # 서버별 네트워크 튜닝 desired-state ({sysctl:{...}, rps:[...]}). apply 시 저장.
         "net_tuning":      r.get("net_tuning") if isinstance(r.get("net_tuning"), dict) else None,
     }
@@ -594,6 +768,10 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         if method == "POST": return await _create_agent(handler_args, config)
         return HandlerResult(status=405, body={"error": "method_not_allowed"}, media_type="application/json")
 
+    # POST /agents/oam-url — 전 agent 의 OAM 접속 주소 재지정 (이중화 전환: 노드 IP → VIP)
+    if len(tail) == 1 and tail[0] == "oam-url" and method == "POST":
+        return await _retarget_oam_url(handler_args, None, config)
+
     try: aid = int(tail[0])
     except (TypeError, ValueError):
         return HandlerResult(status=400, body={"error": "invalid_id"}, media_type="application/json")
@@ -620,6 +798,8 @@ async def handle_agents(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             return await _rollback_agent_binary(handler_args, aid, config)
         if action == "restart" and method == "POST":
             return await _restart_agent(handler_args, aid, config)
+        if action == "oam-url" and method == "POST":
+            return await _retarget_oam_url(handler_args, aid, config)
         if action == "apply-ip-config" and method == "POST":
             return await _apply_ip_config(handler_args, aid, config)
         if action == "apply-mounts" and method == "POST":
@@ -1991,7 +2171,9 @@ async def _get_deployment_config(did: int, config):
 
     return HandlerResult(status=200,
         body={
-            "config":             cfg or {},
+            # 시크릿(type=password)은 sentinel 로 가려 응답한다 — 콘솔 화면·API 로그에
+            # 평문이 흐르지 않게. 저장 시 sentinel 은 '변경 없음' 으로 걸러진다(_strip_masked).
+            "config":             _mask_secrets(cfg or {}, pkg.get("config_template")),
             "config_applied_at":  ca,
             "template":           pkg.get("config_template"),
             "meta":               pkg.get("meta"),
@@ -2002,9 +2184,16 @@ async def _get_deployment_config(did: int, config):
 
 async def _put_deployment_config(handler_args, did: int, config):
     """설정 값 저장 — 항상 해당 deployment 에만. body = {
-         "config":        {<key>: <value>, ...},   # 이 dep 의 새 overlay 전체
+         "config":        {<key>: <value>, ...},   # 변경분 (기존 overlay 에 **병합**)
          "queue_update"?: bool (기본 true),
        }
+
+    **병합 저장**(전체 교체 아님). 옛 동작은 body.config 로 overlay 를 통째로 교체해서,
+    화면에 빈칸으로 보이던 값(예: 다른 노드에서 만들어진 `_infra` 시크릿)을 그대로 저장하면
+    시크릿·런타임 경로가 overlay 에서 사라졌다 — 다음 update_config 에서 패키지 기본값으로
+    회귀해 토큰 검증 불일치(전면 401)를 만드는 경로였다. 이제 온 키만 반영하고,
+    **명시 삭제는 값 `null`** 로 표현한다(그룹 공통 저장 `_put_group_pkg_config` 와 동일 규칙).
+    `type=password` 필드가 조회 sentinel 그대로 오면 '변경 없음' 으로 무시한다.
 
     저장은 단일 deployment 대상 — HA 그룹 전파 없음. 멤버 간 정합은 그룹 동기화
     (POST /deployments/{id}/sync — 콘솔 그룹 [설정 비교] 뷰의 명시적 실행)로만
@@ -2029,6 +2218,7 @@ async def _put_deployment_config(handler_args, did: int, config):
     #   프론트 위젯 누락·raw API 우회 시에도 config.json 에 항상 배열로 저장되게 하는
     #   최종 방어. (예: MediaServer.Endpoints "a:9000, b:9000" → ["a:9000","b:9000"])
     _pkg = None
+    _tmpl = None
     try:
         _pkg = await asyncio.to_thread(_pkg_load, config, dep.get("package_id"))
         _tmpl = (_pkg or {}).get("config_template") if isinstance(_pkg, dict) else None
@@ -2036,6 +2226,47 @@ async def _put_deployment_config(handler_args, did: int, config):
             values = _coerce_list_fields(_tmpl, values)
     except Exception as _e:
         logger.log_warning(f"deployment config list-coerce skip: {_e}")
+
+    # 조회 sentinel 로 온 시크릿은 변경 없음 → 실제 저장값 보존.
+    values = _strip_masked(values, _tmpl)
+
+    # bind IP 가드 — `Server.Ip` 에 **VIP** 를 넣으면 그 VIP 를 보유하지 않은 노드에서
+    #   bind 가 실패해 프로세스가 못 뜨고, watchdog 이 같은 설정으로 재기동을 반복한다
+    #   (관리평면이면 콘솔이 사라져 수습 통로까지 없어진다). 콘솔 접속 주소는 설정값이
+    #   아니라 "접속한 IP" 이므로 bind 는 0.0.0.0 이어야 한다 — oam_ha.md §8.
+    _bind_ip = str(values.get("Server.Ip") or "").strip()
+    if _bind_ip and _bind_ip not in ("0.0.0.0", "::", "127.0.0.1"):
+        try:
+            from services import ha_lookup
+            _vips = set()
+            for _g in ha_lookup.ha_groups_all(config):
+                _vips |= set(ha_lookup.group_vip_set(_g) or [])
+            if _bind_ip in _vips:
+                return HandlerResult(status=400, body={
+                    "error": "bind_ip_is_vip",
+                    "detail": f"Server.Ip 에 VIP({_bind_ip})를 지정할 수 없습니다. VIP 를 보유하지 "
+                              f"않은 노드에서 bind 가 실패해 기동 불능 루프가 됩니다. "
+                              f"0.0.0.0 을 쓰세요 — 접속 주소는 설정값이 아니라 접속한 IP 입니다.",
+                }, media_type="application/json")
+        except Exception as _e:
+            logger.log_warning(f"[deploy] bind IP VIP 검사 skip: {_e}")
+
+    # 기존 overlay 에 병합 — 온 키만 반영, 값 null 은 명시 삭제.
+    cur = dep.get("config")
+    if not isinstance(cur, dict):
+        cur = _safe_json(dep.get("config_json")) or {}
+    new_overlay = dict(cur)
+    removed = []
+    for k, v in values.items():
+        if v is None:
+            if k in new_overlay:
+                new_overlay.pop(k, None)
+                removed.append(k)
+        else:
+            new_overlay[k] = v
+    logger.log_info(f"deployment#{dep['id']} config 저장 — 병합 {len(values)}키"
+                    + (f", 삭제 {removed}" if removed else ""))
+    values = new_overlay
 
     updated = await asyncio.to_thread(_deploy_update, config, dep["id"], {"config": values})
     if not updated:
@@ -2594,7 +2825,9 @@ def _enrich_deploy_with_pkg(rows, config):
 async def _list_deployments(config):
     rows = await asyncio.to_thread(_deploy_load_all, config)
     rows.sort(key=lambda x: x.get('id', 0))
-    _enrich_deploy(rows, config)
+    # enrich 는 package/agent 를 file_store 에서 읽는다(캐시하지만 여전히 파일 I/O) —
+    # 콘솔이 2초마다 폴링하므로 이벤트 루프에서 돌리면 heartbeat·job 결과 처리가 밀린다.
+    await asyncio.to_thread(_enrich_deploy, rows, config)
     return HandlerResult(status=200, body={"items": [_deployment_to_json(r) for r in rows]},
                          media_type="application/json")
 
@@ -2652,6 +2885,39 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     if mismatch:
         return HandlerResult(status=400, body={"error": "ha_mismatch", "detail": mismatch},
                              media_type="application/json")
+
+    # 단일 writer 자원 소유 모듈(requires_leader_lease)의 2번째 노드 설치 — 전제 검사.
+    # 그룹 공통 신원 주입 확인 — 관리평면 모듈은 노드 경로·시크릿이 **반드시** 주입돼야 한다.
+    # 빠지면 패키지 기본값으로 기동해 (a) 빌드 머신 경로에 store 를 만들려다 죽거나
+    # (b) 노드 로컬 시크릿을 써서 절체 후 전 노드가 401 이 된다(둘 다 실측 사고).
+    # 주입은 패키지 meta 의 선언에 의존하므로, 선언이 유실되면 **조용히** 누락된다 —
+    # 그래서 여기서 확인하고 거부한다.
+    try:
+        if (pkg_meta or {}).get("shared_identity") or process_name in ("oam", "oam-svc"):
+            _eff = _materialize_deploy_config(config, pkg_file, cfg_overlay)
+            _missing = [k for k in ("CimsRuntimeDir", "CimsAuth.JwtSecret")
+                        if not str(_eff.get(k) or "").strip()]
+            if _missing:
+                return HandlerResult(status=409, body={
+                    "error": "shared_identity_missing",
+                    "detail": (f"'{process_name}' 에 그룹 공통 신원이 주입되지 않았습니다: "
+                               f"{_missing}. 패키지 meta 의 `shared_identity` 선언이 유실됐거나 "
+                               f"현재 OAM 설정에 그 값이 없습니다. 이대로 설치하면 노드마다 "
+                               f"다른 경로·시크릿으로 기동해 절체 시 인증이 전부 실패합니다. "
+                               f"패키지를 다시 빌드·업로드하세요."),
+                    "missing": _missing}, media_type="application/json")
+    except HandlerResult:
+        raise
+    except Exception as _e:
+        logger.log_warning(f"[deploy] 신원 주입 확인 skip({process_name}): {_e}")
+
+    # 전제(공유 store) 미충족 알림 — **차단하지 않는다**. 설치만 된 standby 는 HA 편입에서
+    # 제외돼(§6.3) 승격돼도 기동되지 않으므로 무해하고, 볼륨을 먼저 요구하면 이중화 구축
+    # 순서가 뒤집힌다. 차단은 위험한 액션인 기동에서 한다(_leader_lease_start_guard).
+    _lease_notice = await asyncio.to_thread(_leader_lease_install_notice,
+                                            config, agent_id, process_name)
+    if _lease_notice:
+        logger.log_warning(f"[deploy] agent#{agent_id} {process_name}: {_lease_notice}")
 
     # JwtSecret 자동 공유 — 게이트웨이 프록시 서비스 모듈(meta.gateway.routes 보유)은
     #   base 가 발급한 토큰을 검증해야 하므로 base 의 CimsAuth.JwtSecret 와 같아야 한다.
@@ -2722,7 +2988,12 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     except Exception as e:
         logger.log_warning(f"[deploy] 배포 생성 ha 재렌더 전파 실패(agent={agent_id}): {e}")
 
-    return HandlerResult(status=201, body=_deployment_to_json(r), media_type="application/json")
+    _created = _deployment_to_json(r)
+    if _lease_notice:
+        # 조용히 성공시키면 운영자는 이중화가 된 줄 안다 — 응답에 사유를 싣는다.
+        _created["warning"] = _lease_notice
+        _created["warning_code"] = "leader_lease_precondition"
+    return HandlerResult(status=201, body=_created, media_type="application/json")
 
 
 async def _update_deployment(handler_args: HandlerArgs, did: int, config):
@@ -2838,6 +3109,194 @@ async def _delete_deployment(did: int, config):
     return HandlerResult(status=204, body=None, media_type="application/json")
 
 
+def _leader_lease_unmet(config, agent_id: int, proc: str) -> bool:
+    """`requires_leader_lease` 모듈인데 그 전제(공유 store)가 없는 A/S 그룹의 2번째 노드인가.
+
+    선언을 키로 판정한다(모듈 이름 하드코딩 없음). 그룹 명세 오버라이드가 있으면 그것을
+    따르고, 그룹에 이 노드 말고 다른 멤버가 없으면(단일 구성) 전제는 문제되지 않는다.
+    """
+    proc = (proc or "").lower().strip()
+    if not proc:
+        return False
+    try:
+        from services import ha_lookup, service_registry
+        mods = service_registry.all_modules(config) or {}
+        if not ((mods.get(proc) or {}).get("safety") or {}).get("requires_leader_lease"):
+            return False
+        from handlers.ha_groups import _normalize_shared_store, _module_spec
+        for g in ha_lookup.ha_groups_all(config):
+            if g.get("mode") != "active_standby":
+                continue
+            members = [m.get("agent_id") for m in ha_lookup.members_of(g)]
+            if agent_id not in members or len(members) < 2:
+                continue
+            # 그룹 명세가 선언을 덮었으면 그것을 따른다(운영자 판단 우선).
+            if not _module_spec(g, proc)["safety"].get("requires_leader_lease"):
+                return False
+            if _normalize_shared_store(g.get("shared_store")):
+                return False                    # 전제 충족 — 정상 이중화 구성
+            return True
+    except Exception as e:
+        logger.log_warning(f"[deploy] leader-lease 전제 검사 skip: {e}")
+    return False
+
+
+def _leader_lease_install_notice(config, agent_id: int, proc: str) -> "str | None":
+    """설치는 **막지 않고 알린다** — 설치 자체는 위험하지 않다.
+
+    위험한 상태는 "두 노드에서 각자 도는 OAM" 이지 "설치돼 있음" 이 아니다. 전제 미충족
+    모듈은 이미 렌더 단계에서 HA 편입(cold·relevant·health)에서 제외되므로(§6.3), 설치만
+    된 standby 노드는 **승격돼도 기동되지 않는** 무해한 상태다. 오히려 볼륨을 먼저 요구하면
+    마운트 지점이 모듈 디렉터리 하위라 순서가 뒤집히고, 이중화 구축 자체가 막힌다.
+
+    그래서 설치는 허용하고 (1) 서버 로그 (2) 응답 `warning` 으로 "아직 이중화되지 않는다"
+    를 알린다. 실제 차단은 위험한 액션인 **기동**(`_leader_lease_start_guard`)에서 한다.
+    """
+    if not _leader_lease_unmet(config, agent_id, proc):
+        return None
+    return (f"'{proc}' 는 설치되지만 **아직 이중화되지 않습니다** — 이 그룹에 공유 store 가 "
+            f"설정되지 않아 HA 편입(절체 대상)에서 제외됩니다. 설정 없이 두 노드에서 동시에 "
+            f"기동하면 각자 자기 노드 디스크에 관리 데이터를 쌓아, 콘솔이 보는 내용이 VIP "
+            f"위치에 따라 바뀝니다. HA 화면의 '공유 store' 를 설정하면 자동 편입됩니다.")
+
+
+def _leader_lease_start_guard(config, dep: dict) -> "str | None":
+    """`requires_leader_lease` 모듈의 **동시 기동 차단** — 전제 미충족 시.
+
+    이것이 실제로 위험한 액션이다. 공유 store 가 없으면 노드마다 독립 store 를 가지므로,
+    같은 그룹의 다른 노드에서 이미 도는 모듈을 이 노드에서 또 띄우면 **VIP 위치에 따라
+    콘솔이 다른 데이터를 보여준다**(실측 사고 — 절체 후 서버·그룹이 전부 사라져 보임).
+    리스는 같은 store 루트 안에서만 작동하므로 이 경우를 막아주지 못한다.
+
+    상대 노드의 그 모듈이 정지 상태면 허용한다 — 공유 store 없이 수동 이관하는 경로(§9.4)이고,
+    store 이관 책임은 운영자에게 있다. body `force: true` 로 우회 가능.
+    """
+    proc = (dep.get("process_name") or dep.get("package_name") or "").lower().strip()
+    aid = dep.get("agent_id")
+    if not _leader_lease_unmet(config, aid, proc):
+        return None
+    try:
+        from services import ha_lookup
+        for g in ha_lookup.ha_groups_all(config):
+            if g.get("mode") != "active_standby":
+                continue
+            members = [m.get("agent_id") for m in ha_lookup.members_of(g)]
+            if aid not in members:
+                continue
+            others = [a for a in members if a != aid]
+            running = [d for d in _deploy_load_all(config)
+                       if d.get("agent_id") in others
+                       and (d.get("process_name") or "").lower().strip() == proc
+                       and (d.get("status") or "") in ("running", "deploying")]
+            if running:
+                return (f"'{proc}' 가 같은 그룹의 다른 노드에서 이미 동작 중입니다. 이 그룹은 "
+                        f"공유 store 가 없어 관리 store 가 노드마다 독립이므로, 동시에 기동하면 "
+                        f"절체 시 콘솔이 보는 관리 데이터가 통째로 바뀝니다(서버·그룹이 사라져 "
+                        f"보임). 이중화하려면 HA 화면에서 '공유 store' 를 설정하세요. "
+                        f"수동 이관이면 먼저 상대 노드의 '{proc}' 를 정지하세요.")
+    except Exception as e:
+        logger.log_warning(f"[deploy] leader-lease 기동 가드 검사 skip: {e}")
+    return None
+
+
+def _plane_upgrade_order_guard(config, dep: dict) -> "str | None":
+    """관리평면 모듈(oam/oam-svc)의 **Active 직접 upgrade** 차단 — 순서가 있다.
+
+    관리평면은 자기 자신을 업그레이드하는 유일한 모듈이다. Active 를 먼저 올리면 새 버전이
+    기동 실패할 때 **콘솔이 사라져** 롤백을 지시할 통로가 없다. 안전한 순서는
+    **standby 먼저 → 계획 절체 → 구 Active** 다(oam_ha.md §11 · oam_self_upgrade.md).
+    standby 가 없거나(단일 노드) 이 노드가 Active 가 아니면 제약하지 않는다.
+    body `force: true` 로 우회 가능 — 판단은 운영자 몫이되, 기본은 안전한 순서다."""
+    proc = (dep.get("process_name") or dep.get("package_name") or "").lower().strip()
+    if proc not in ("oam", "oam-svc"):
+        return None
+    try:
+        from services import ha_lookup
+        aid = dep.get("agent_id")
+        for g in ha_lookup.ha_groups_all(config):
+            if g.get("mode") != "active_standby":
+                continue
+            members = [m.get("agent_id") for m in ha_lookup.members_of(g)]
+            if aid not in members or len(members) < 2:
+                continue
+            obs = ha_lookup.vip_observation(config, g) or {}
+            if obs.get("active_agent_id") == aid:
+                peers = [m for m in members if m != aid]
+                return (f"관리평면({proc}) 업그레이드는 **standby 먼저** 입니다. 이 서버는 현재 "
+                        f"Active(VIP 보유)라 여기서 먼저 올리면 실패 시 콘솔이 사라져 롤백을 "
+                        f"지시할 수 없습니다. 순서: ① standby(agent#{peers[0]}) upgrade → "
+                        f"② 수동 절체 → ③ 이 서버 upgrade. 강제하려면 force:true.")
+    except Exception as e:
+        logger.log_warning(f"[upgrade] 순서 가드 검사 skip: {e}")
+    return None
+
+
+async def _retarget_oam_url(handler_args: HandlerArgs, aid, config):
+    """agent 의 OAM 접속 주소 재지정 — body `{url, agent_ids?[]}`. aid 지정 시 그 agent 만.
+
+    이중화 전환(노드 IP → VIP)의 정규 경로다. 옛 구조에서는 주소가 agent 의 systemd unit
+    인자에만 있어 **재설치 말고는 바꿀 방법이 없었다**(oam_ha.md §8).
+
+    안전장치 2중:
+      1) 여기서 URL 형식·포트를 검증하고, 미지정 시 `Server.AgentOamUrl`(콘솔에 설정된 주소)을
+         기본값으로 쓴다 — 오타를 손으로 다시 입력할 이유를 없앤다.
+      2) **각 agent 가 전환 전에 그 주소로 /health 를 찔러 도달 확인**한다(job 내부). 도달
+         불가면 주소를 바꾸지 않고 job 이 실패한다 — VIP 가 아직 없을 때 전 fleet 이
+         OAM 과 단절되는 것을 막는다.
+    """
+    from urllib.parse import urlparse as _up
+    body = _parse_body(handler_args) or {}
+    url = str(body.get("url") or "").strip().rstrip("/")
+    if not url:
+        url = _oam_public_url(handler_args, config)
+    p = _up(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        return HandlerResult(status=400, body={"error": "invalid_url", "url": url},
+                             media_type="application/json")
+
+    # **도달성 사전 확인** — 각 agent 가 도달 확인 후에만 적용하므로 안전하지만, VIP 가 아직
+    # 없으면 6개 job 이 전부 조용히 실패하고 콘솔은 "큐잉" 만 알려 운영자가 성공으로 오해한다
+    # (실측: 첫 전환이 그렇게 실패했고 화면엔 아무 표시가 없었다). OAM 은 VIP 를 보유한
+    # 노드에서 돌므로 여기서 먼저 찔러 실패를 즉시 알린다.
+    try:
+        import ssl as _ssl
+        import urllib.request as _ur
+        _ctx = _ssl.create_default_context()
+        _ctx.check_hostname = False
+        _ctx.verify_mode = _ssl.CERT_NONE
+        await asyncio.to_thread(
+            lambda: _ur.urlopen(_ur.Request(url + "/health"), timeout=5, context=_ctx).read(1))
+    except Exception as _e:
+        return HandlerResult(status=409, body={
+            "error": "url_unreachable",
+            "detail": (f"{url}/health 에 도달할 수 없습니다({type(_e).__name__}). VIP 가 아직 "
+                       f"올라오지 않았거나 주소가 잘못됐습니다. 이대로 보내면 agent 들이 "
+                       f"주소를 바꾸지 않고 job 만 실패합니다 — 그룹을 시작해 VIP 를 띄운 뒤 "
+                       f"다시 실행하세요."),
+        }, media_type="application/json")
+    if aid is not None:
+        targets = [aid]
+    else:
+        ids = body.get("agent_ids")
+        if isinstance(ids, list) and ids:
+            targets = [int(x) for x in ids]
+        else:
+            rows = await asyncio.to_thread(_agent_load_all, config)
+            targets = [int(r["id"]) for r in rows if r.get("id") is not None
+                       and r.get("status") != "revoked"]
+    jobs = []
+    for t in targets:
+        try:
+            jid = await asyncio.to_thread(_job_create, config, t, "set_oam_url", {"url": url})
+            jobs.append({"agent_id": t, "job_id": jid})
+        except Exception as e:
+            logger.log_warning(f"[oam-url] agent#{t} job 큐잉 실패: {e}")
+    logger.log_info(f"[oam-url] 재지정 요청 url={url} agents={len(jobs)}건 "
+                    f"(각 agent 가 도달 확인 후 적용)")
+    return HandlerResult(status=202, body={"url": url, "jobs": jobs},
+                         media_type="application/json")
+
+
 async def _queue_job(handler_args: HandlerArgs, did: int, config):
     """Deployment 대상으로 job 큐잉 (install/start/stop/restart/uninstall)."""
     body = _parse_body(handler_args)
@@ -2852,6 +3311,21 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
         return HandlerResult(status=404, body={"error": "deployment_not_found"},
                              media_type="application/json")
     _enrich_deploy([dep], config)
+    # 관리평면 업그레이드 순서 가드 (standby 먼저) — force:true 로 우회 가능.
+    if job_type == "upgrade" and not body.get("force"):
+        _g = await asyncio.to_thread(_plane_upgrade_order_guard, config, dep)
+        if _g:
+            return HandlerResult(status=409, body={"error": "upgrade_order_active_first",
+                                                   "detail": _g},
+                                 media_type="application/json")
+    # 단일 writer 자원 모듈의 **동시 기동** 가드 — 공유 store 없이 두 노드에서 도는 것을 막는다.
+    # 설치는 막지 않는다(무해) — 위험한 액션은 기동이다. force:true 로 우회 가능.
+    if job_type in ("start", "restart") and not body.get("force"):
+        _g = await asyncio.to_thread(_leader_lease_start_guard, config, dep)
+        if _g:
+            return HandlerResult(status=409, body={"error": "leader_lease_precondition",
+                                                   "detail": _g},
+                                 media_type="application/json")
     cfg = dep.get("config") if isinstance(dep.get("config"), (dict, list)) \
           else _safe_json(dep.get("config_json"))
     # 레코드의 sparse overlay 를 실체화 — install/upgrade/update_config 가 agent 에
@@ -2906,6 +3380,14 @@ async def _rollback_deployment(handler_args: HandlerArgs, did: int, config):
         return HandlerResult(status=404, body={"error": "deployment_not_found"},
                              media_type="application/json")
     _enrich_deploy([dep], config)
+    # 롤백도 관리평면 버전 변경이므로 같은 순서 제약을 받는다(standby 먼저).
+    # force:true 로 우회 가능.
+    if not body.get("force"):
+        _g = await asyncio.to_thread(_plane_upgrade_order_guard, config, dep)
+        if _g:
+            return HandlerResult(status=409, body={"error": "upgrade_order_active_first",
+                                                   "detail": _g},
+                                 media_type="application/json")
     current = dep.get("install_path") or ""
 
     # ── 대상 결정

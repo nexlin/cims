@@ -196,6 +196,13 @@ class DynamicRouteProc:
             res = _http_response(accept_format, handler_result)
             return res
         except Exception as e:
+            # 관리 store 소유권 상실(LeaseLostError)은 서버 오류가 아니라 **거부**다 —
+            # 409 로 매핑해 콘솔이 read-only 상태를 그대로 표시할 수 있게 한다
+            # (500 이면 "OAM 이 고장" 으로 오해된다). 상세: oam_ha.md §4.4
+            if type(e).__name__ == 'LeaseLostError':
+                self._logger.log_warning(f"HttpServer : route({full_path}) : 409 not_lease_owner : {e}")
+                return JSONResponse(status_code=409,
+                                    content={"error": "not_lease_owner", "detail": str(e)})
             import traceback
             tb_str = traceback.format_exc()
             self._logger.log_error(f"HttpServer : route({full_path}) : fail : exception : {e} : {tb_str}")

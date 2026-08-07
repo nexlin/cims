@@ -27,6 +27,12 @@
 #     --no-start       설치만 하고 기동하지 않음
 #     --no-agent       이 서버의 agent 자동 설치/기동 생략
 #     --batch          대화식 입력 생략 (옵션/기본값만 사용 — 자동화용)
+#   관리평면 이중화 — 두 번째 노드 합류 (docs/design/features/oam_ha.md §9):
+#     --join                  합류 모드 (peer 에서 그룹 공통 신원 수령, OAM 미기동)
+#     --peer-url URL          기존 OAM 주소 (예: https://121.161.164.140:4419)
+#     --join-token TOKEN      1회용 합류 토큰 (콘솔/API: POST /api/v1/ha/join-token)
+#     --runtime-dir DIR       관리 store 경로 (공유 마운트 하위)
+#     --runtime-mount DIR     공유 store 마운트 지점 (mount guard 기준)
 #   옵션 없이 실행하면 설치 경로/포트/admin 비밀번호를 단계별로 묻는다.
 #   제거: sudo <prefix>/uninstall-base.sh [--yes]
 #     --user USER      서비스 사용자 (기본: sudo 호출자) — agent/OAM 프로세스 소유자
@@ -41,6 +47,11 @@ USE_SYSTEMD=1
 DO_START=1
 DO_AGENT=1
 BATCH=0
+JOIN=0              # 관리평면 합류 모드 (두 번째 OAM 노드)
+PEER_URL=""         # 기존 OAM 주소 (신원 수령 + agent enroll 대상)
+JOIN_TOKEN=""       # 1회용 합류 토큰
+STORE_DIR=""        # 관리 store 경로 (공유 마운트 하위) — CimsRuntimeDir
+STORE_MOUNT=""      # 공유 store 마운트 지점 — CimsRuntimeMount (mount guard 기준)
 # 서비스 사용자 — sudo 호출자 (agent/OAM 프로세스 소유자. 모듈 설치 경로 쓰기 주체)
 SVC_USER="${SUDO_USER:-$(id -un)}"
 
@@ -55,6 +66,11 @@ while [[ $# -gt 0 ]]; do
         --no-start)   DO_START=0; shift ;;
         --no-agent)   DO_AGENT=0; shift ;;
         --batch)      BATCH=1; shift ;;
+        --join)         JOIN=1; BATCH=1; shift ;;      # 합류는 항상 비대화식
+        --peer-url)     PEER_URL="$2"; shift 2 ;;
+        --join-token)   JOIN_TOKEN="$2"; shift 2 ;;
+        --runtime-dir)  STORE_DIR="$2"; shift 2 ;;
+        --runtime-mount) STORE_MOUNT="$2"; shift 2 ;;
         --user)       SVC_USER="$2"; shift 2 ;;
         -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "알 수 없는 옵션: $1"; exit 1 ;;
@@ -233,14 +249,87 @@ if [[ ( ! -f "$CERT_DIR/server.key" || ! -f "$CERT_DIR/server.crt" ) \
 fi
 if [[ ! -f "$CERT_DIR/server.key" || ! -f "$CERT_DIR/server.crt" ]]; then
     HOSTNM=$(hostname -f 2>/dev/null || hostname)
+    # SAN 에 관리 IP 도 포함 — 없으면 OAM 이 기동 시 SAN 부족으로 판단해 그룹 CA 로 재발급한다
+    # (동작은 같지만 불필요한 재발급·인증서 교체를 아낀다). VIP 는 이중화 구성 시 추가된다
+    # (배포 설정 Server.CertSans → OAM 이 그룹 CA 로 재발급).
+    _SAN="DNS:${HOSTNM},IP:127.0.0.1"
+    [[ -n "$MGMT_IP" ]] && _SAN="${_SAN},IP:${MGMT_IP}"
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
         -subj "/CN=${HOSTNM}/O=CIMS" \
-        -addext "subjectAltName=DNS:${HOSTNM},IP:127.0.0.1" \
+        -addext "subjectAltName=${_SAN}" \
         -keyout "$CERT_DIR/server.key" -out "$CERT_DIR/server.crt" 2>/dev/null
     chmod 600 "$CERT_DIR/server.key"
-    ok "self-signed TLS 인증서 생성 (CN=$HOSTNM) — 상용 인증서는 $CERT_DIR 에 교체"
+    ok "self-signed TLS 인증서 생성 (CN=$HOSTNM, SAN=${_SAN}) — 상용 인증서는 $CERT_DIR 에 교체"
 else
     ok "기존 TLS 인증서 보존"
+fi
+
+# ── 합류 모드: peer 에서 그룹 공통 신원 수령 ─────────────────────────
+# 두 노드가 같은 신원(JwtSecret·admin·CA)을 갖는 것이 이중화의 전제다 — 다르면 절체 후
+# 전 세션 무효 + 모듈 401. 콘솔 배포 경로로는 `_infra` 값이 전달되지 않아 성립하지 않으므로
+# (oam_ha.md §9) 여기서 명시적으로 받아온다. 개인키는 **1회 복사**이며 공유 볼륨에 두지 않는다.
+JOIN_IDENTITY=""
+if [[ $JOIN -eq 1 ]]; then
+    [[ -n "$PEER_URL"   ]] || { err "--join 에는 --peer-url 필수 (기존 OAM 주소)"; exit 1; }
+    [[ -n "$JOIN_TOKEN" ]] || { err "--join 에는 --join-token 필수 (POST /api/v1/ha/join-token)"; exit 1; }
+    info "peer 에서 그룹 공통 신원 수령... ($PEER_URL)"
+    JOIN_IDENTITY=$(curl -fsSk -X POST "$PEER_URL/api/v1/ha/join" \
+        -H "Content-Type: application/json" \
+        -d "{\"token\":\"$JOIN_TOKEN\",\"node_name\":\"${SERVER_NAME:-$(hostname -s 2>/dev/null || hostname)}\"}" \
+        2>/dev/null || true)
+    if [[ -z "$JOIN_IDENTITY" ]] || ! echo "$JOIN_IDENTITY" | grep -q '"identity"'; then
+        err "신원 수령 실패 — peer 주소/토큰(1회용·만료)을 확인하세요: $PEER_URL"
+        exit 1
+    fi
+    # 신원을 _secrets 에 전개 (JwtSecret / 그룹 CA / mTLS CA) + 설치 파라미터 반영
+    JOIN_IDENTITY="$JOIN_IDENTITY" SECRETS_DIR_PRE="$STORE_DIR" \
+    LOCAL_RUNTIME="$RUNTIME_DIR" python3 - <<'PYJOIN' || { err "신원 전개 실패"; exit 1; }
+import json, os, sys
+d = json.loads(os.environ['JOIN_IDENTITY'])['identity']
+rt = (d.get('runtime') or {}).get('CimsRuntimeDir') or os.environ.get('SECRETS_DIR_PRE') or ''
+if not rt:
+    sys.stderr.write('peer 가 CimsRuntimeDir 를 주지 않았고 --runtime-dir 도 없음\n'); sys.exit(1)
+# 시크릿·CA 는 **노드 로컬** runtime 에 둔다 — 관리 store(공유 마운트)에 개인키를 올리지
+# 않는다(oam_ha.md §5). 관리 store 경로(rt)는 아래 .join_params 로만 전달한다.
+sd = os.path.join(os.environ['LOCAL_RUNTIME'], '_secrets')
+os.makedirs(sd, mode=0o700, exist_ok=True)
+os.chmod(sd, 0o700)
+sec = (d.get('auth') or {}).get('JwtSecret') or ''
+if sec:
+    p = os.path.join(sd, 'jwt_secret')
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f: f.write(sec + '\n')
+for sub, keys in (('ca', {'crt': 'ca.crt', 'key': 'ca.key'}),
+                  ('agent_mtls', {'ca_crt': 'ca.crt', 'ca_key': 'ca.key',
+                                  'client_crt': 'csc_client.crt', 'client_key': 'csc_client.key'})):
+    src = d.get(sub) or {}
+    if not src: continue
+    dd = os.path.join(sd, sub); os.makedirs(dd, mode=0o700, exist_ok=True)
+    for k, fn in keys.items():
+        pem = src.get(k)
+        if not pem: continue
+        p = os.path.join(dd, fn)
+        mode = 0o600 if fn.endswith('.key') else 0o644
+        fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, 'w') as f: f.write(pem)
+# 후속 단계가 읽을 파라미터
+with open(os.path.join(sd, '.join_params'), 'w') as f:
+    json.dump({'port': (d.get('server') or {}).get('Port'),
+               'role': (d.get('server') or {}).get('Role') or 'base',
+               'agent_oam_url': (d.get('server') or {}).get('AgentOamUrl') or '',
+               'cert_sans': (d.get('server') or {}).get('CertSans') or [],
+               'mgmt_cidr': (d.get('mgmt') or {}).get('Cidr') or '',
+               'runtime_dir': rt,
+               'runtime_mount': (d.get('runtime') or {}).get('CimsRuntimeMount') or '',
+               'log_dir': (d.get('logging') or {}).get('Dir') or '',
+               'accounts': (d.get('auth') or {}).get('BuiltinAccounts') or [],
+               'agent': d.get('agent') or {}}, f)
+print(f"  신원 전개 완료: {sd} (jwt_secret / ca / agent_mtls)")
+PYJOIN
+    ok "그룹 공통 신원 수령 완료 — 이 노드는 peer 와 같은 토큰·CA 를 사용"
+    # 합류 노드는 OAM 을 기동하지 않는다 — cold standby 이고, 승격 시 agent 의 reconcile 이
+    # 볼륨 인수 후 기동한다. 여기서 띄우면 마운트 없이 떠 로컬 store 를 만들 수 있다.
+    DO_START=0
 fi
 
 # ── oam.json 구성 ────────────────────────────────────────────
@@ -255,35 +344,73 @@ OAM_OVERLAY_FILE="$SECRETS_DIR/.oam_deploy_overlay.json"
 if [[ ! -f "$JWT_SECRET_FILE" && -f "$RUNTIME_DIR/.jwt_secret" ]]; then
     mv "$RUNTIME_DIR/.jwt_secret" "$JWT_SECRET_FILE"
 fi
+# 합류 모드에서는 peer 신원(jwt_secret)이 이미 이 파일에 전개돼 있다 — 새로 만들지 않는다.
 if [[ ! -f "$JWT_SECRET_FILE" ]]; then
+    if [[ $JOIN -eq 1 ]]; then
+        err "합류 모드인데 신원(jwt_secret)이 없습니다 — 수령 단계 실패"; exit 1
+    fi
     openssl rand -base64 32 > "$JWT_SECRET_FILE"
 fi
 chmod 600 "$JWT_SECRET_FILE"
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
 JWT_SECRET="$(cat "$JWT_SECRET_FILE")" MGMT_IP="$MGMT_IP" \
+STORE_DIR="$STORE_DIR" STORE_MOUNT="$STORE_MOUNT" JOIN="$JOIN" \
+JOIN_PARAMS_FILE="$SECRETS_DIR/.join_params" \
 ADMIN_PASS="$ADMIN_PASS" OAM_OVERLAY_FILE="$OAM_OVERLAY_FILE" python3 - <<'PYEOF'
 import hashlib, json, os
 p = os.path.join(os.environ['OAM_ROOT'], 'oam', 'config', 'oam.json')
 d = json.load(open(p))
 port = int(os.environ['PORT'])
+join = os.environ.get('JOIN') == '1'
+jp = {}
+if join:
+    try:
+        with open(os.environ['JOIN_PARAMS_FILE']) as f:
+            jp = json.load(f)
+    except Exception:
+        jp = {}
+    if jp.get('port'):
+        port = int(jp['port'])          # peer 와 같은 포트 (게이트웨이/콘솔 주소 일관)
 d['Server'] = {'Ip': '0.0.0.0', 'Port': port}
+if jp.get('role'):
+    d['Server']['Role'] = jp['role']
 # 관리(mgmt) IP — agent↔OAM 통신 기준. AgentOamUrl(콘솔 install-command)·Mgmt.Cidr(/24) 반영.
 mgmt = (os.environ.get('MGMT_IP') or '').strip()
 if mgmt:
     d['Server']['AgentOamUrl'] = f"https://{mgmt}:{port}"
     d.setdefault('Mgmt', {})['Cidr'] = mgmt.rsplit('.', 1)[0] + '.0/24'
-d['CimsRuntimeDir'] = os.environ['RUNTIME_DIR']
-d.setdefault('Packages', {})['Dir'] = os.path.join(os.environ['RUNTIME_DIR'], 'pkg_files')
+if join:
+    # 합류 노드는 **peer 와 같은 주소·대역·SAN** 을 쓴다 (VIP 기준).
+    if jp.get('agent_oam_url'):
+        d['Server']['AgentOamUrl'] = jp['agent_oam_url']
+    if jp.get('mgmt_cidr'):
+        d.setdefault('Mgmt', {})['Cidr'] = jp['mgmt_cidr']
+    sans = list(jp.get('cert_sans') or [])
+    if mgmt and mgmt not in sans:
+        sans.append(mgmt)               # 이 노드 IP 도 SAN 에 (직접 접속 대비)
+    if sans:
+        d['Server']['CertSans'] = sans
+    if jp.get('log_dir'):
+        d.setdefault('ServiceLogging', {})['Dir'] = jp['log_dir']
+# 관리 store 경로 — 이중화면 공유 마운트 하위. 미지정 시 노드 로컬 runtime(단일 노드 기본).
+store = (os.environ.get('STORE_DIR') or '').strip() or (jp.get('runtime_dir') or '').strip() \
+        or os.environ['RUNTIME_DIR']
+mount = (os.environ.get('STORE_MOUNT') or '').strip() or (jp.get('runtime_mount') or '').strip()
+d['CimsRuntimeDir'] = store
+if mount:
+    d['CimsRuntimeMount'] = mount       # mount guard — 마운트 없으면 기동 거부
+d.setdefault('Packages', {})['Dir'] = os.path.join(store, 'pkg_files')
 d.setdefault('CimsAuth', {})['JwtSecret'] = os.environ['JWT_SECRET']
+if join and jp.get('accounts'):
+    d['CimsAuth']['BuiltinAccounts'] = jp['accounts']   # admin 계정도 그룹 공통
 ap = os.environ.get('ADMIN_PASS') or ''
-if ap:
+if ap and not join:                     # 합류 노드는 peer 계정을 그대로 쓴다
     for a in d['CimsAuth'].get('BuiltinAccounts', []):
         if a.get('login_id') == 'admin':
             a['password_sha256'] = hashlib.sha256(ap.encode()).hexdigest()
             a.pop('password', None)
-json.dump(d, open(p, 'w'), ensure_ascii=False, indent=4)
-open(p, 'a').write('\n')
-print('  oam.json 구성 완료')
+# oam.json 은 **고치지 않는다** — 패키지 기본값 그대로 두고 위 overlay 가 노드 값을 정한다.
+print('  oam.json 무변경 (패키지 기본값) — 노드 값은 config.json overlay 가 정의')
 
 # ── upgrade-safe: 같은 instance 값을 deployment overlay(flat dotted)로도 기록 ──
 #   agent 가 config.json 으로 써서 oam.json 위에 적용(load_config) + 버전 간 이관 →
@@ -296,12 +423,34 @@ ov = {
     'CimsAuth.JwtSecret': d['CimsAuth']['JwtSecret'],
     'CimsAuth.BuiltinAccounts': d['CimsAuth'].get('BuiltinAccounts', []),
 }
-if mgmt:
+if d['Server'].get('Role'):
+    ov['Server.Role'] = d['Server']['Role']
+if d['Server'].get('CertSans'):
+    ov['Server.CertSans'] = d['Server']['CertSans']
+if d.get('CimsRuntimeMount'):
+    ov['CimsRuntimeMount'] = d['CimsRuntimeMount']
+# 조건은 **값 존재**로 판정한다 — `if mgmt:` 로 묶으면 합류(join) 모드에서 peer 가 준
+# agent_oam_url·mgmt_cidr 이 d 에는 들어가고 overlay 에는 빠져 유실된다(oam.json 을 더 이상
+# 쓰지 않으므로 overlay 에 없으면 그대로 사라진다).
+if (d.get('Server') or {}).get('AgentOamUrl'):
     ov['Server.AgentOamUrl'] = d['Server']['AgentOamUrl']
+if (d.get('Mgmt') or {}).get('Cidr'):
     ov['Mgmt.Cidr'] = d['Mgmt']['Cidr']
+if (d.get('ServiceLogging') or {}).get('Dir'):
+    ov['ServiceLogging.Dir'] = d['ServiceLogging']['Dir']
 ovf = os.environ.get('OAM_OVERLAY_FILE')
 if ovf:
     json.dump(ov, open(ovf, 'w'), ensure_ascii=False)
+
+# ── 첫 기동용 overlay 를 **패키지 파일이 아니라 config.json 에** 쓴다 ──────────
+#   `oam.json` 은 패키지 기본값이고 노드 값은 overlay(config.json)가 정한다 — 그것이
+#   콘솔 설치 경로가 쓰는 메커니즘이고 `load_config()` 도 그렇게 병합한다. 부트스트랩만
+#   패키지 파일을 직접 고치면 **같은 버전인데 노드마다 내용이 달라진다**(실측: 부트스트랩
+#   노드는 정상, 콘솔 설치 노드는 패키지 기본값 그대로 → 빌드 머신 경로로 기동하다 크래시).
+#   두 경로가 같은 메커니즘을 쓰도록 여기서도 overlay 로만 쓴다.
+json.dump(ov, open(os.path.join(os.environ['OAM_ROOT'], 'oam', 'config.json'), 'w'),
+          ensure_ascii=False, indent=2)
+print('  config.json (deployment overlay) 기록 — oam.json 은 패키지 기본값 유지')
 PYEOF
 
 # ── uninstall 스크립트 생성 (install 의 대칭 — 언제든 단독 실행 가능) ──────
@@ -440,7 +589,50 @@ fi
 # 갓 (재)기동한 OAM 은 / 가 200 이어도 첫 요청이 일시 실패할 수 있어 각 단계를 재시도한다.
 # (구버전 footgun: set -euo pipefail 아래 curl|python 파이프가 nonzero 면 메시지 없이 즉시 exit)
 AGENT_STATE="미설치 (--no-agent)"
-if [[ $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
+# ── 합류 모드 agent 설치 — 대상은 **peer/VIP** OAM (이 노드 OAM 은 cold standby 라 미기동)
+if [[ $JOIN -eq 1 && $DO_AGENT -eq 1 ]]; then
+    info "agent 설치 (합류 — 대상 OAM: $PEER_URL)..."
+    _JOIN_ENROLL=$(python3 -c "
+import json
+try:
+    d=json.load(open('$SECRETS_DIR/.join_params'))
+    print((d.get('agent') or {}).get('enrollment_token') or '')
+except Exception: print('')" 2>/dev/null)
+    if [[ -z "$_JOIN_ENROLL" ]]; then
+        err "peer 가 agent enrollment token 을 주지 않았습니다 (같은 이름 agent 가 이미 등록됐을 수 있음)"
+        err "  → 콘솔에서 이 서버의 install-command 를 받아 수동 실행하세요"
+        AGENT_STATE="실패 (enrollment token 없음 — 콘솔 수동설치)"
+    else
+        _IA="$PREFIX/.cims-install-agent.sh"
+        if curl -fsSk -o "$_IA" "$PEER_URL/install-agent.sh" && [[ -s "$_IA" ]]; then
+            chmod 0644 "$_IA" 2>/dev/null || true
+            _ia_args=(--oam-url "$PEER_URL" --enrollment-token "$_JOIN_ENROLL"
+                      --name "${SERVER_NAME:-$(hostname -s 2>/dev/null || hostname)}"
+                      --install-dir "$PREFIX" --svc-user "$SVC_USER")
+            if [[ $USE_SYSTEMD -eq 1 && -d /run/systemd/system ]]; then
+                # 합류 노드도 OAM 은 role=base — 배포 설정(Server.Role)이 정본이지만
+                # drop-in 도 함께 둬서 어느 경로로 기동돼도 같은 역할이 되게 한다.
+                _run_as "mkdir -p ~/.config/systemd/user/cims-agent.service.d && printf '[Service]\nEnvironment=OAM_ROLE=%s\n' \"$(python3 -c "
+import json
+try: print((json.load(open('$SECRETS_DIR/.join_params')).get('role') or 'base'))
+except Exception: print('base')" 2>/dev/null)\" > ~/.config/systemd/user/cims-agent.service.d/override.conf" || true
+            else
+                _ia_args+=(--no-systemd)
+            fi
+            if bash "$_IA" "${_ia_args[@]}" >> "$OAM_ROOT/log/agent_install.log" 2>&1; then
+                ok "agent 설치·enroll 완료 (대상 $PEER_URL)"
+                AGENT_STATE="실행 중 (합류 — OAM 은 미기동/cold standby)"
+            else
+                err "agent 설치 실패 (상세: $OAM_ROOT/log/agent_install.log)"
+                AGENT_STATE="실패 (install-agent.sh)"
+            fi
+        else
+            err "install-agent.sh 다운로드 실패 ($PEER_URL) — agent 미설치"
+            AGENT_STATE="실패 (install-agent.sh 다운로드)"
+        fi
+    fi
+fi
+if [[ $JOIN -eq 0 && $DO_AGENT -eq 1 && $DO_START -eq 1 ]]; then
     info "로컬 agent 등록/설치..."
     set +e
     _HTTP_FILE=$(mktemp)   # _api 가 HTTP status 를 여기 기록 (파이프 subshell 에서도 보존)
@@ -605,6 +797,36 @@ except Exception: print('')" 2>/dev/null)
     set -e
 elif [[ $DO_AGENT -eq 1 ]]; then
     AGENT_STATE="미기동 (--no-start)"
+fi
+
+if [[ $JOIN -eq 1 ]]; then
+cat <<JOINDONE
+
+────────────────────────────────────────────────────────────
+ CIMS 관리평면 합류(2번째 노드) 설치 완료
+   OAM      : **미기동** (cold standby — 승격 시 agent 가 볼륨 인수 후 기동)
+   신원      : peer 와 동일 (JwtSecret / admin 계정 / 그룹 CA / mTLS CA)
+   agent    : $AGENT_STATE  → 대상 OAM $PEER_URL
+   store    : $(python3 -c "
+import json
+try: d=json.load(open('$SECRETS_DIR/.join_params')); print(d.get('runtime_dir') or '(미지정)')
+except Exception: print('(미지정)')" 2>/dev/null)
+   마운트    : $(python3 -c "
+import json
+try: d=json.load(open('$SECRETS_DIR/.join_params')); print(d.get('runtime_mount') or '(미설정 — mount guard 비활성)')
+except Exception: print('(미설정)')" 2>/dev/null)
+
+   다음 (콘솔에서):
+     1) 공유 store 마운트 확인 — 이 서버에도 상대 노드와 **같은 NAS 경로**가 붙어야 한다
+        (콘솔 시스템/인프라 > 마운트 관리 로 추가하면 fstab 에 영속)
+     2) HA 그룹에 이 서버를 멤버로 추가 + 공유 store 설정
+     3) 이 서버에 oam / oam-svc 패키지 설치 (배포설정은 그룹 공통값이 주입됨)
+     4) 그룹 서비스 시작 → VIP 보유 노드에서만 OAM 이 뜬다
+     5) 전 agent 를 VIP 로 재지정: POST /api/v1/agents/oam-url
+   제거   : sudo $PREFIX/uninstall-base.sh
+────────────────────────────────────────────────────────────
+JOINDONE
+exit 0
 fi
 
 cat <<DONE

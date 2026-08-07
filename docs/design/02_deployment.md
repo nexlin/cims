@@ -275,3 +275,17 @@ CSC notify 라우팅 (`csc/src/services/mcptt.py::_notify_targets`):
 - `design/features/build_and_packaging.md` — 빌드/패키징 워크플로우 (콘솔 `/release/package`)
 - `design/features/sip_runtime_config.md` — jsonl 런타임 설정
 - `VERIFICATION_PROCESS.md` — 6단계 파이프라인 (P1 토폴로지 SoT)
+
+## 설정 계층 — 패키지 기본값 vs 노드 overlay
+
+모듈 설정은 두 층이다. **노드 종속 값(경로·포트·시크릿·계정)은 언제나 overlay 가 정한다.**
+
+| 파일 | 역할 | 수명 |
+|---|---|---|
+| `<install>/<comp>/config/<comp>.json` | 패키지 기본값 — 노드 종속 값 없음(빈 값) | 업그레이드가 교체 |
+| `<install>/<comp>/config.json` | 노드 overlay (flat dotted) — OAM 배포설정이 SoT | 버전 간 이관 |
+
+부트스트랩도 콘솔 설치도 **overlay 에만** 쓴다. 설치 경로가 다르면 같은 버전 패키지가
+노드마다 달라지고, 패키지 기본값의 결함이 한쪽에서만 드러난다(실측 사고 —
+[features/oam_ha.md](features/oam_ha.md) §12.5). 패키지에 빌드 머신 절대경로가 들어가는 것은
+`S1-CONFIG-PORTABILITY` 가 막는다.

@@ -1427,10 +1427,109 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | PUT | `/deployments/{id}` | 필드 업데이트 (`note`, `process_name`, ...) |
 | DELETE | `/deployments/{id}` | 제거 |
 | POST | `/deployments/{id}/job` | job 큐잉 (`{job_type, extra?}`) |
-| GET | `/deployments/{id}/config` | scalar 설정 + 템플릿 |
-| PUT | `/deployments/{id}/config` | scalar 설정 저장 (`{config, queue_update?}`) |
+| GET | `/deployments/{id}/config` | scalar 설정 + 템플릿. `type=password` 필드는 **마스킹**되어 반환 |
+| PUT | `/deployments/{id}/config` | scalar 설정 저장 (`{config, queue_update?}`) — **변경분 병합** |
 | GET | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 읽기 (Agent 프록시) |
 | PUT | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 저장 (`{records, signal?}`) |
+
+관리평면 노드 합류 (2번째 OAM 노드 — [oam_ha.md](../design/features/oam_ha.md) §9):
+
+| Method | Path | 용도 |
+|---|---|---|
+| POST | `/ha/join-token` | **1회용** 합류 토큰 발급 (admin, body `{ttl_sec?}` 기본 900). 평문은 응답에만 |
+| GET | `/ha/join-token` | 발급/사용 이력 (admin) |
+| POST | `/ha/join` | 토큰으로 **그룹 공통 신원** 수령 (body `{token, node_name?}`) — 인증=토큰 |
+
+`/ha/join` 응답에는 JwtSecret·admin 계정·그룹 CA·mTLS CA(개인키 포함) + `node_name` 지정 시
+**agent enrollment token** 이 들어간다. 서버 인증서는 넘기지 않는다(합류 노드가 같은 CA 로 자기
+인증서를 발급 — 개인키는 노드를 떠나지 않는다). 토큰 재사용은 409, 만료·오류는 401 이며
+발급·사용은 감사 로그로 남는다.
+
+Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
+
+| Method | Path | 용도 |
+|---|---|---|
+| POST | `/agents/oam-url` | **전 agent** 재지정 (body `{url?, agent_ids?[]}` — `url` 생략 시 `Server.AgentOamUrl`) |
+| POST | `/agents/{id}/oam-url` | 그 agent 만 재지정 |
+
+각 agent 는 `set_oam_url` job 에서 **새 주소로 `/health` 를 찔러 도달 확인한 뒤에만** 적용한다
+(도달 불가 시 주소 미변경 + job 실패) — VIP 가 아직 없을 때 fleet 이 OAM 과 단절되는 것을 막는다.
+
+> **400 `bind_ip_is_vip`** — 배포 설정 `Server.Ip` 에 HA 그룹 VIP 를 지정하면 거부된다. VIP 를
+> 보유하지 않은 노드에서 bind 가 실패해 기동 불능 루프가 되기 때문이며, `0.0.0.0` 이 정답이다
+> (접속 주소는 설정값이 아니라 접속한 IP).
+
+> **409 `upgrade_order_active_first`** — 관리평면(`oam`/`oam-svc`) 업그레이드는 **standby
+> 먼저**다. 현재 Active 노드에서 `job_type:"upgrade"` 를 요청하면 거부되고 순서를 안내한다
+> (실패 시 콘솔이 사라져 롤백을 지시할 통로가 없기 때문). 버전 롤백
+> (`POST /deployments/{id}/rollback`)도 같은 제약을 받는다. `force:true` 로 우회 가능.
+
+> 오류 응답의 `detail` 은 **사람이 읽을 설명**이고 `error` 는 분기용 코드다. 콘솔은 `detail` 을
+> 화면에 띄우고 코드로 분기한다(가드 409 는 사유를 보여준 뒤 `force` 재시도를 묻는다).
+
+> **`POST /api/v1/ha-groups/{id}/shared-store/migrate`** (admin) — 관리 store 를 공유
+> 마운트로 이관. body `{mount_point}`. 그룹 `shared_store` 저장 + 멤버 oam/oam-svc 배포설정
+> (`CimsRuntimeDir`/`CimsRuntimeMount`) 갱신 + store 보유 노드에 `migrate_oam_store` job
+> (정지→복사→config→기동) 까지 한 번에 수행하고 **202** 를 반환한다. 진행 중 OAM 이
+> 재기동되므로 콘솔이 잠깐 끊긴다. 복사는 멱등이고, 실패 시 구 설정으로 되돌려 기동한다.
+> 시크릿·인증서는 이관 대상이 아니다(노드 로컬 유지). 대상 경로에 이전 데이터가 있으면
+> **확인 없이 덮는다** — 이관의 source 는 지금 도는 OAM 의 store 이므로 정의상 정본이다.
+> 기존 대상은 삭제하지 않고 `<target>.stale-<시각>` 으로 보관한다. `source == target` 이면
+> 거부한다(이관이 무의미).
+> 400: `invalid_mount_point` / `not_active_standby` / `no_oam_deployment`.
+> 상세: [oam_ha.md](../design/features/oam_ha.md) §9.4
+
+> **400 `not_a_mount_point`** — `shared_store.mount_point` 가 그룹 멤버의 **실제 마운트**가
+> 아니면 저장·이관이 거부된다. 판정 근거는 agent heartbeat 의 `mount_targets`(실제 마운트
+> 목록, cims-managed 아닌 것 포함)이고, 응답 `nodes[]` 에 노드별 실제 마운트 목록이 실린다.
+> mount guard 는 `/proc/mounts` 와 **정확히 일치**하는 경로만 통과시키므로 하위 디렉터리는
+> 마운트 지점이 될 수 없다. 마운트 보고가 아직 없는 노드는 판정하지 않는다.
+
+> **409 `store_path_not_shared`** — `PUT /api/v1/ha-groups/{id}` 로 `shared_store` **경로만**
+> 저장하려 할 때, 그룹 멤버의 oam/oam-svc 배포설정 `CimsRuntimeDir` 이 아직 그 마운트 하위가
+> 아니면 거부된다. 그 상태로 두면 HA 편입은 되는데 데이터는 노드별 로컬에 남아 **절체 시 빈
+> 콘솔**이 된다. 응답 `conflicts[]` 에 어긋난 배포가 실린다. 해결은 위 이관 엔드포인트
+> (콘솔 `이 경로로 이관`). 신규 설치처럼 이미 경로가 맞으면 그대로 저장된다.
+
+> **409 `url_unreachable`** — `POST /api/v1/agents/oam-url` 사전 확인. OAM 이 그 주소의
+> `/health` 에 도달하지 못하면 job 을 큐잉하지 않고 거부한다. 각 agent 도 도달 확인 후에만
+> 적용하므로 안전하지만, VIP 가 아직 없으면 **전 agent job 이 조용히 실패**하고 콘솔은
+> "큐잉" 만 알려 성공으로 오해된다(실측). 그룹을 시작해 VIP 를 띄운 뒤 다시 실행한다.
+
+> **409 `agents_not_on_vip`** — `POST /api/v1/ha-groups/{id}/failover` 사전 점검.
+> **관리평면(`oam`)을 호스팅하는 그룹에만 적용된다** — agent 는 OAM 주소 하나만 보므로 다른
+> 그룹의 VIP 와 비교하면 전원이 어긋남으로 잡혀 그 그룹 절체까지 막힌다. VIP 가 아닌
+> 주소로 OAM 에 보고하는 agent 가 있으면 거부된다(응답 `agents[]`에 `{agent_id,name,oam_url}`).
+> 그대로 절체하면 구 Active 주소가 죽어 fleet 전체가 단절되고, 콘솔에는 전 노드 offline·모듈
+> 상태 고착으로 보인다(실측). 해결은 `POST /api/v1/agents/oam-url` (콘솔 `⇢ OAM 주소 VIP 전환`).
+> `force: true` 로 우회 가능. 판정 근거는 agent heartbeat 의 `oam_url` 보고값이며,
+> `GET /api/v1/agents` 의 `oam_url` 과 그룹 조회의 `agents_not_on_vip[]` 로도 노출된다.
+
+> **409 `leader_lease_precondition`** — 안전 명세가 `requires_leader_lease` 인 모듈
+> (`oam`/`oam-svc`)을 **공유 store 없는 A/S 그룹에서, 상대 노드가 이미 그 모듈을 돌리는 중에**
+> `start`/`restart` 하려 하면 거부된다(관리 store 가 노드마다 독립이라 VIP 위치에 따라 콘솔이
+> 다른 데이터를 보여준다). `force: true` 로 우회 가능하며, 상대 노드를 먼저 정지하거나 그룹에
+> 공유 store 를 설정하면 해제된다.
+>
+> **설치(`POST /deployments`)는 차단하지 않는다** — 대신 201 응답에 `warning` +
+> `warning_code: "leader_lease_precondition"` 이 실린다(설치만 된 standby 는 HA 편입에서
+> 제외돼 무해하다). 편입 제외 사유는 `GET /api/v1/ha-groups` 응답의
+> `ha_excluded`(`{모듈: 사유}`)와 ha.json 서비스 엔트리에도 실린다
+> ([oam_ha.md](../design/features/oam_ha.md) §6.3).
+
+> **409 `not_lease_owner`** — 관리 store 소유권(리스)이 없는 OAM 은 **read-only** 다. 모든
+> 변경 API 가 이 응답을 낼 수 있고, 조회는 정상 동작한다. 상태는
+> `GET /api/v1/gateway/health` 의 `lease`/`read_only` 로 확인한다
+> ([oam_ha.md](../design/features/oam_ha.md) §4.4).
+
+배포 설정 저장 규칙:
+- **병합 저장** — `config` 는 변경분이며 기존 overlay 에 병합된다. 전체 교체가 아니므로 보내지
+  않은 키는 보존된다. **명시 삭제는 값 `null`**.
+- **시크릿 마스킹** — 조회 응답의 `type=password` 필드는 sentinel 로 가려진다. 저장 시 그 값이
+  그대로 오면 "변경 없음" 으로 무시하므로 실제 값이 덮이지 않는다.
+- 위 두 규칙은 짝이다: 화면에 빈칸/마스킹으로 보이는 값을 그대로 저장해도 시크릿·런타임 경로가
+  overlay 에서 사라지지 않는다(사라지면 다음 `update_config` 에서 패키지 기본값으로 회귀해
+  토큰 검증 불일치 = 전면 401).
 
 Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/agent_api.md`.
 
@@ -1439,9 +1538,9 @@ Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/age
 | Method | Path | 용도 |
 |---|---|---|
 | GET | `/ha-groups` | HA 그룹 목록 (멤버 포함) |
-| POST | `/ha-groups` | 생성 (body `{name, mode, vip?, vip_mask?, auth_pass, members?[], vip_bindings?[]}`) |
+| POST | `/ha-groups` | 생성 (body `{name, mode, vip?, vip_mask?, auth_pass, members?[], vip_bindings?[], volume?}`) |
 | GET | `/ha-groups/{id}` | 단일 조회 |
-| PUT | `/ha-groups/{id}` | `{name, vip, vip_mask, auth_pass, vip_bindings, members?}` 업데이트 (mode 변경 불가) |
+| PUT | `/ha-groups/{id}` | `{name, vip, vip_mask, auth_pass, vip_bindings, members?, volume?}` 업데이트 (mode 변경 불가) |
 | DELETE | `/ha-groups/{id}` | 삭제 (멤버 cascade) |
 | GET | `/ha-groups/{id}/members` | 멤버 목록 |
 | POST | `/ha-groups/{id}/members` | 멤버 추가 `{agent_id, role?, priority?}` (1 agent = 1 group UNIQUE) |

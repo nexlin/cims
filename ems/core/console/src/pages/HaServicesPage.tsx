@@ -15,7 +15,8 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { haGroupsApi, type HaGroup } from '../api/ha_groups'
+import { haGroupsApi, type HaGroup, type HaSharedStore } from '../api/ha_groups'
+import { ApiError } from '../api/client'
 import { deploymentApi, type Agent, type SipPackage, type Deployment, type AgentMetric,
          type ServiceIpRow as ApiServiceIpRow } from '../api/deployment'
 import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
@@ -25,6 +26,7 @@ import MetricTrend from '../components/MetricTrend'
 import { summarizeApplyResult } from './ha/helpers'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { VipPanel } from './ha/VipPanel'
+import { SharedStorePanel } from './ha/SharedStorePanel'
 import { btnSmall, btnPrimary, btnSecondary, btnDanger, btnAdd } from './ha/styles'
 import type {
   Mode, Role, ServerStatus, IpSlot, ServiceIpRow, ServiceRow, ServerRow,
@@ -168,6 +170,7 @@ function agentToServer(a: Agent, role: Role, vipObserved?: boolean | null): Serv
     interfaces: a.interfaces ?? [],
     serviceIpRows: (a.service_ip_rows ?? []) as ServiceIpRow[],
     routes: a.routes ?? [],
+    mountTargets: a.mount_targets ?? [],
   }
 }
 
@@ -340,6 +343,8 @@ export default function HaServicesPage() {
         // 백엔드 vip_bindings 에는 bid 가 없음(slot/ip/mask 만) → 로딩 시 안정적 bid 부여.
         // 누락 시 모든 row 의 bid 가 undefined 가 되어 removeRow(filter by bid) 가 전체를 지움.
         vipBindings: (g.vip_bindings ?? []).map((b, i) => ({ ...b, bid: b.bid ?? i + 1 })),
+        sharedStore: g.shared_store,
+        haExcluded: g.ha_excluded,
       })
     }
     // standalone agents (ha_group 미배정)
@@ -578,6 +583,39 @@ export default function HaServicesPage() {
   }
 
   // ── 서비스 update (이름 등) ──
+  // 공유 store 이관 — 경로 저장 + oam 배포설정 갱신 + 정지/복사/기동을 서버가 처리한다.
+  // 진행 중 OAM 이 재기동되므로 이 화면의 요청도 잠깐 실패한다(정상) — 안내만 남긴다.
+  const migrateSharedStore = async (sid: number, mountPoint: string) => {
+    try {
+      const r = await haGroupsApi.migrateSharedStore(sid, mountPoint)
+      flash(`이관 시작 — ${r.jobs.length}건 큐잉. 콘솔이 잠깐 끊깁니다 (${r.runtime_dir})`)
+      await load()
+    } catch (e) {
+      flash(`이관 실패: ${(e as Error).message}`)
+    }
+  }
+
+  // 공유 store 경로만 저장하려다 데이터 위치가 어긋나면 서버가 409 로 막는다 —
+  // 사용자에게 '이관' 을 권하고 동의하면 그대로 이어서 실행한다(막다른 골목 금지).
+  const saveSharedStore = async (sid: number, v: HaSharedStore | Record<string, never>) => {
+    const mp = (v as HaSharedStore).mount_point
+    try {
+      await haGroupsApi.update(sid, { shared_store: v as HaSharedStore })
+      flash('공유 store 경로 저장')
+      await load()
+    } catch (e) {
+      if (e instanceof ApiError && e.data?.error === 'store_path_not_shared' && mp) {
+        if (confirm(`${(e as Error).message}\n\n지금 이관할까요? (콘솔이 잠깐 끊깁니다)`)) {
+          await migrateSharedStore(sid, mp)
+          return
+        }
+        flash('취소됨 — 경로는 저장되지 않았습니다')
+        return
+      }
+      flash(`저장 실패: ${(e as Error).message}`)
+    }
+  }
+
   const updateService = async (sid: number, patch: Partial<ServiceRow>) => {
     if (sid > 0) {
       // HA group update
@@ -586,6 +624,8 @@ export default function HaServicesPage() {
       if (patch.vipBindings !== undefined) body.vip_bindings = patch.vipBindings
       if (patch.vip !== undefined) body.vip = patch.vip
       if (patch.authPass !== undefined) body.auth_pass = patch.authPass
+      // 공유 store — 절대경로여야 서버가 적용한다(아니면 미사용으로 정규화).
+      if (patch.sharedStore !== undefined) body.shared_store = patch.sharedStore
       try {
         await haGroupsApi.update(sid, body)
         await load()
@@ -804,6 +844,8 @@ export default function HaServicesPage() {
               packageMap={packageMap}
               pendingTokens={pendingTokens}
               updateService={updateService}
+              migrateSharedStore={migrateSharedStore}
+              saveSharedStore={saveSharedStore}
               updateServer={updateServer}
               updatePackageIds={updatePackageIds}
               applyVip={applyVip}
@@ -1009,6 +1051,8 @@ interface SystemDetailProps {
   packageMap: Map<number, PkgDef>
   pendingTokens: Map<number, { token: string; cmd: string }>
   updateService: (sid: number, patch: Partial<ServiceRow>) => void
+  migrateSharedStore: (sid: number, mountPoint: string) => void
+  saveSharedStore: (sid: number, v: HaSharedStore | Record<string, never>) => void
   updateServer: (sid: number, srvId: number, patch: Partial<ServerRow>) => void
   updatePackageIds: (svc: ServiceRow, ids: number[]) => void
   applyVip: (svc: ServiceRow) => void
@@ -1210,6 +1254,17 @@ function SystemDetail(p: SystemDetailProps) {
             vrid={svc.vrid}
             onChange={(bindings) => p.updateService(svc.id, { vipBindings: bindings })}
             onApply={() => p.applyVip(svc)}
+          />
+        </AccordionSection>
+      )}
+
+      {/* 공유 store — AS 만 (관리평면 데이터 이중화). 미설정이면 이중화 대상 아님. */}
+      {needsVip && (
+        <AccordionSection title="공유 store (관리평면 데이터)" defaultOpen={false}>
+          <SharedStorePanel
+            svc={svc}
+            onChange={(v) => p.saveSharedStore(svc.id, v)}
+            onMigrate={(mp) => p.migrateSharedStore(svc.id, mp)}
           />
         </AccordionSection>
       )}

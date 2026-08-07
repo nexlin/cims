@@ -5,6 +5,7 @@ import { MenuProvider } from './contexts/MenuContext'
 import { ToastProvider } from './components/Toast'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
+import ReadOnlyBanner from './components/ReadOnlyBanner'
 import LoginPage from './pages/LoginPage'
 import { FLAT_ROUTES, HOME_PATH } from './routes'
 import { useMenu } from './contexts/MenuContext'
@@ -158,6 +159,8 @@ function Shell() {
         />
         <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
         <main className="app-content">
+          {/* 관리 store 소유권 미보유(read-only) 경고 — 정상 상태에서는 렌더 안 함 */}
+          <ReadOnlyBanner />
           <div className="app-content-body">
             <Routes>
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />

@@ -163,12 +163,13 @@ agent 설치 루트(`_PREFIX`) 아래에 둔다 — agent 는 **user systemd 유
 | `run/ha/desired.json` | **서버별 정지 의도** — `{module: 'stopped'}` (HOLD_VIP) | Agent `job_process_control` | Supervisor |
 | `state/ha/maintenance/<svc>` | **유지보수 마커** (영속) — `EXCLUDE_NODE` | OAM `ha_maintenance` job | Supervisor |
 | `state/ha/planned_release/<svc>` | 계획 절체 반납 마커 (영속) | OAM job | Supervisor |
-| _(failover 래치)_ | **절체 확정 래치** — 현재 in-memory(`_EVAL_LATCH`), 운영자 start/restart 로 해제. 영속화는 §19 | Supervisor/운영자 | Supervisor |
+| `state/ha/latch/<svc>.json` | **절체 확정 래치** (영속) — 운영자 start/restart 로 해제 | Supervisor/운영자 | Supervisor |
 
 **영속 vs 휘발**: 유지보수(`maintenance`)·계획절체(`planned_release`) 마커는 재부팅 후에도
 남아야 안전(점검/절체 의도가 재부팅으로 사라지면 안 됨) → `state/ha/`. verdict·카운터·역할은
-재부팅 시 초기화돼야 한다 → `run/ha/`. 래치는 현재 in-memory 라 재부팅에 사라지지만,
-`nopreempt` + verdict `boot_id`(§13) 가 자동 승격을 막아 안전하다(영속화는 §19). `_PREFIX`
+재부팅 시 초기화돼야 한다 → `run/ha/`. 래치도 영속이다 — 절체당한 노드가 agent 재기동·
+재부팅만으로 승격 후보로 되돌아오면 `shared_writer` 모듈(공유 store write·스케줄러 보유)이
+검증 없이 다시 Active 가 될 수 있다. `_PREFIX`
 는 tmpfs 가 아니라 재부팅에도 파일이 남으므로, 휘발 의미는 (a) **agent 기동 시 `run/ha/`
 하위를 초기화**하고 (b) verdict 의 `boot_id` 로 재부팅 전 값 재사용을 차단해 달성한다.
 
@@ -198,6 +199,11 @@ module_specs:
 `health_module`/`health_config_key`/service.json health 는 이 명세(health_profile)의
 입력으로 연결된다.
 
+`requires_leader_lease: true` 는 **선언에서 끝나지 않고 집행된다** — 그 전제(단일 writer 복제
+공유 store)가 없는 A/S 그룹에서는 해당 모듈이 HA 편입(cold·relevant·health)에서 제외되고 사유가
+노출되며, 2번째 노드 install 이 거부된다. 선언만 있고 집행이 없으면 절체 후 신 Active 가 빈
+상태로 뜬다: [oam_ha.md](oam_ha.md) §6.3.
+
 ## 6. Health Checker
 
 검사는 세 종류로 나눈다.
@@ -220,6 +226,15 @@ FAULT 래치 → 전 노드 정지로 이어진다. 따라서 포트는 아래 �
 | 2 | 모듈 운영 명세 `module_specs.<mod>.health` | OAM (그룹×모듈) |
 | 3 | **service descriptor 의 `modules[].health`** | OAM (`service_registry.module_health_specs`) |
 | 4 | descriptor `modules[].port` 상수 | 폴백 |
+
+**모듈별로 해석한다.** 렌더는 그룹의 관리 모듈(relevant ∪ cold) 각각에 대해 위 우선순위를
+적용한 결과를 `ha.json` 의 `services.<svc>.module_health` 맵으로 내려보내고, Health Checker 는
+모듈마다 자기 포트를 찌른다. 그룹당 대표 하나만 포트를 갖게 하면 나머지 모듈의 readiness 가
+프로세스 존재로 대체돼 **좀비(소켓 생존 + 요청 무응답)를 영구히 놓친다.**
+
+`health.http_path` 를 선언한 모듈은 포트 listen 확인에 **로컬 HTTP 프로브**를 더한다
+(loopback, TLS 검증 없음). 2xx/3xx 또는 401/403(인증 요구 = 핸들러 생존)은 정상, 그 외 응답·
+무응답은 readiness 실패다 — bind 는 유지되는데 핸들러만 죽은 상태를 잡는 유일한 검사다.
 
 3번의 `health` 블록은 "노드의 실제 설정 파일에서 유도하라"는 선언이며, OAM 은 이를
 `ha.json` 의 `health_config_key` / `health_collection` 힌트로 내려보낸다. **해석은 agent 가
@@ -333,7 +348,8 @@ op_grace 를 찍지 않는다** — 안 그러면 그 노드가 마스터로 승
 
 **재기동 backoff 는 복구 의도가 있는 지점에서 반드시 해제한다.** reconcile 의 start 실패는
 `min(300, 5·2^n)` 초 지수 backoff 로 스로틀된다(모듈당, agent 메모리). 이 스로틀은 reconcile
-안에서 "정상 기동 확인" 또는 "돌던 것을 정지"로만 자연 해제되는데 **둘 다 프로세스가 떠 있어야
+안에서 "**연속 생존 60초 이상** 확인"(짧은 생존 후 죽는 crash-loop 이 backoff 를 매 tick
+무력화하지 않도록) 또는 "돌던 것을 정지"로만 자연 해제되는데 **둘 다 프로세스가 떠 있어야
 한다** — 설정 오류 등으로 한 번도 못 뜬 모듈은 어느 쪽에도 안 걸려 상한 300초가 그대로 남는다.
 그래서 운영자 start/restart(`job_process_control`)·`ha_clear_holds`·승격 엣지·uninstall 에서
 `_clear_reconcile_backoff` 로 함께 지운다(`_fail_reset` 과 짝). 이게 없으면 원인을 고치고 start
@@ -493,8 +509,11 @@ WatchdogSec=15
 `WatchdogSec` 는 별도 Watchdog Coordinator 가 핵심 스레드(HA Evaluator·Health
 Scheduler·role observer·verdict writer) heartbeat 를 종합해서만 `sd_notify` 를 보낸다.
 OAM 연결/heartbeat 응답/job 완료/외부 응답은 watchdog 조건에서 **제외**한다(OAM 이 끊겨도
-로컬 HA 는 살아 있어야 하므로). 장시간 job 은 subprocess/별도 worker 로 분리해 Evaluator·
-watchdog 이 영향받지 않게 한다.
+로컬 HA 는 살아 있어야 하므로). **job 실행은 heartbeat 루프와 분리된 전용 worker 스레드가
+수행한다** — 긴 job(패키지·keepalived 설치, 업그레이드)이 heartbeat 를 막으면 OAM 이 그 노드를
+offline 로 오판하고 `vip_observation`(heartbeat 의 interfaces[] 기반)이 stale 이 되어 계획 절체·
+auto-sync 판정까지 틀어진다. worker 는 1개라 실행 순서·직렬성은 보존되며, self-exec(업그레이드·
+재기동)은 worker 가 요청만 기록하고 execv 는 메인 루프가 수행한다.
 
 ## 10. 승격 grace
 
@@ -521,12 +540,11 @@ grace 종료: 전 cold relevant 모듈 readiness 성공 → `ACTIVE_HEALTHY`. �
 
 grace 값은 cold 모듈 기동 시간보다 충분히 길게 서비스별 설정:
 
-```yaml
-services:
-  csp: { promotion_grace_sec: 15 }
-  csc: { promotion_grace_sec: 30, restart_limit: 3, restart_interval_sec: 5,
-         readiness_timeout_sec: 15, total_recovery_timeout_sec: 90 }
-```
+그룹 설정 `failover_options.health.grace_sec`(콘솔 절체 조건 UI, 기본 30초)가 그대로 승격
+grace 다 — Supervisor 가 승격 엣지에서 이 값을 읽어 `run/ha/promotion/<svc>.json` 의
+`grace_until` 을 정한다. `0` 은 "유예 없음"(명시 의도). cold 모듈 기동이 오래 걸리는 서비스
+(공유 store 확인·python 콜드스타트)는 이 값을 넉넉히 둔다 — 짧으면 승격 직후 자격을 잃어
+방금 얻은 VIP 를 반납하는 flap 이 난다.
 
 ## 11. 자동 장애 절체 흐름
 
@@ -615,7 +633,8 @@ COMMIT 후엔 `nopreempt` 로 target 이 계속 MASTER 를 유지하지만, sour
 `nopreempt` 는 "복구된 옛 MASTER 가 VIP 를 도로 안 가져감"까지이고, **노드를 승격 불가로
 만드는 것은 별도 상태**(`FAILOVER_LATCHED`)다. 현재 구현의 래치 설정 조건(ACTIVE 판정):
 relevant 모듈이 (a) 재기동 한도 초과(exhausted) 또는 (b) 좀비(프로세스 생존 + readiness
-실패 + op_grace 경과). 래치는 Supervisor 프로세스 내 in-memory(`_EVAL_LATCH`)다.
+실패 + op_grace 경과). 래치는 `state/ha/latch/<svc>.json` 에 영속되며 판정은 항상 파일을
+본다(재부팅·agent 재기동 생존).
 
 래치 중: `vrrp_eligible=false`(자동 Active 전환 금지) + **reconcile 이 그 노드의 hot·cold
 모듈을 전부 정지(kill)한다**(§7.1) — 절체당한 노드는 재기동 경쟁 없이 완전히 내려간다.
@@ -624,13 +643,11 @@ track_script 실패 → keepalived FAULT → VIP 는 peer 로.
 해제(재합류): 운영자가 콘솔에서 해당 모듈을 **start/restart** 하면 래치가 풀린다
 (`_clear_failover_latch`) — 원인을 고친 뒤 올리라는 명시적 re-arm. 해제되면 role 기반
 reconcile 이 hot 을 기동 → readiness 회복 → track_script PASS → keepalived FAULT→BACKUP
-로 standby 재합류한다(`nopreempt` 라 곧바로 MASTER 는 아님). agent 재기동/노드 재부팅도
-in-memory 래치를 비우지만, boot_id 무효화 + `nopreempt` 로 자동 승격이 아니라 standby
-재합류에 그친다.
+로 standby 재합류한다(`nopreempt` 라 곧바로 MASTER 는 아님). **agent 재기동·노드 재부팅은
+래치를 풀지 않는다**(영속) — 원인을 고친 뒤 운영자가 명시적으로 올려야 재합류한다.
 
 > 안전등급별 자동 해제(stateless/read_only 는 연속 성공 창 기반 자동, shared_writer/
-> unknown 은 수동)와 래치 영속화(`state/ha/latch/`)는 §19 후속 과제다. 현재는 in-memory
-> + 운영자 start/restart 해제로 단일화돼 있다.
+> unknown 은 수동)는 §19 후속 과제다. 현재는 등급 무관 **운영자 start/restart 단일 해제**다.
 
 ### 부트스트랩
 
@@ -640,7 +657,7 @@ verdict 없음/파싱 실패/boot_id 불일치/만료 → track_script 실패(fa
 ```text
 1. cims-agent 시작 → run/ha·state/ha 준비
 2. 보수적 verdict=false(STARTING) 즉시 기록
-3. desired(서버별 정지)·maintenance·module_specs 로드 (래치는 in-memory 라 빈 상태로 시작)
+3. desired(서버별 정지)·maintenance·**래치**·module_specs 로드 (래치가 서 있으면 승격 자격 없음)
 4. hot readiness / cold preflight 평가
 5. 초기 승격 후보 자격 계산 → 정상이면 verdict=true 갱신
 6. keepalived 가 track_script 반영해 선출
@@ -752,10 +769,10 @@ verdict 를 쓸 때까지 그 노드는 승격 대상이 아니다(fail-safe, §
 
 ## 19. 미구현 · 후속 과제
 
-- **failover 래치 영속화 + 안전등급별 자동 해제** — 현재 래치는 in-memory 이고 해제는
-  운영자 start/restart 단일 경로다(§13). 향후 `state/ha/latch/<svc>.json` 영속 + 안전등급
-  기반 자동 해제(stateless/read_only 는 연속 성공 창 후 `STANDBY_READY` 까지만 자동 복귀,
-  shared_writer/unknown 은 수동)로 확장.
+- **안전등급별 래치 자동 해제** — 래치 영속(`state/ha/latch/<svc>.json`)은 적용됐고, 해제는
+  등급 무관 운영자 start/restart 단일 경로다(§13). 향후 안전등급 기반 자동 해제
+  (stateless/read_only 는 연속 성공 창 후 `STANDBY_READY` 까지만 자동 복귀, shared_writer/
+  unknown 은 수동)로 확장.
 - shared_writer(특히 csc DB) fencing/leader-lease — 미도입. 확인 전 `safety.class=unknown`
   = 수동 래치 보수 처리.
 - CSP hash ring 의 endpoint 헬스체크는 CSP `KeepAliveLoop`(3초, endpoint 별 HEARTBEAT
