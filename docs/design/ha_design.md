@@ -544,12 +544,44 @@ sql/migrate_ha_groups_vip_nullable.sql):
 
 모듈 ha_capability (각 모듈 pkg.json):
 - `csp/psp/isp/csc` → `active_standby`
+- `oam/oam-svc` → `active_standby` (관리평면 — 서비스 그룹에 동거, [oam_ha.md](features/oam_ha.md))
 - `cmp/pmp/imp` → `all_active`
 - `cwrtc/cspsim/agent/console/phone` → `standalone`
+
+**모듈별 health (`services.<svc>.module_health`)** — 그룹의 관리 모듈(relevant ∪ cold) 각각에
+`{port, proto, config_key?, collection?, http_path?}` 을 내려보낸다. service 레벨 대표
+(`health_module`/`port`) 하나만 포트를 갖던 구 렌더에서는 나머지 모듈 readiness 가 "프로세스
+존재" 로 대체돼 **소켓만 살아있는 좀비를 놓쳤다**. 해석 우선순위는 운영자 `module_specs.health`
+> descriptor `modules[].health` > descriptor 상수 `port/proto` 이며, 실제 포트 해석과 HTTP
+프로브는 agent 가 검사 시점에 노드 로컬에서 수행한다. 구 ha.json(맵 없음)은 종전 동작 유지.
+
+**공유 store (`services.<svc>.shared_store`)** — 그룹 record 의 `shared_store`
+(`{mount_point}`)을 내려보낸다. 관리평면 데이터가 놓인 **양 노드 공용 마운트 경로**이며,
+agent 는 마운트를 조작하지 않고 승격 전 그 경로가 **실제 마운트이고 write 가능한지 확인**한다
+(접근 불가 노드는 승격 자격에서 제외). 마운트 생성·영속은 서버별 마운트 관리(fstab)가
+담당한다. 스펙이 없으면 store 단계 자체가 없다(기존 그룹 무영향). 상세:
+[features/oam_ha.md](features/oam_ha.md) §4.
+
+**콘솔 모듈 (`services.<svc>.console_modules`)** — 복구 통로(콘솔)를 서빙하는 모듈(base `oam`).
+agent 는 이 모듈들을 **상대 노드가 실제로 그 모듈을 서비스 중일 때만** 정지한다(자기보존).
+cold 규칙을 그대로 적용하면 래치·FAULT 상태에서 어느 노드에서도 관리평면이 뜨지 못해 복구
+통로(콘솔)가 사라진다. 동시 기동 위험은 소유권 리스가 담당한다.
+또 `module_health[mod].startup_grace_sec`(oam/oam-svc=60) 로 **모듈별 기동 유예**를 내려보내
+콜드스타트 창의 좀비 오판을 막는다. 상세: [features/oam_ha.md](features/oam_ha.md) §6.4.
+
+**HA 편입 제외 (`services.<svc>.ha_excluded`)** — 실효 명세가 `requires_leader_lease` 인 모듈이
+그 전제(공유 store)를 갖추지 못하면 `cold_modules`·`relevant_modules`·`module_health` 에서
+빠지고, 사유가 `{모듈: 'no_shared_store'}` 로 실린다(그룹 조회 응답에도 동일 필드).
+조용히 빠지면 운영자는 이중화가 되는 줄 알기 때문에 **사유를 반드시 노출**한다. 공유 store 를
+설정하면 다음 렌더에서 자동 편입된다. 상세: [features/oam_ha.md](features/oam_ha.md) §6.3.
 
 install 정책 (csc/src/handlers/agents.py:_create_deployment):
 - ha_group 정의된 agent → ha_capability 가 group.mode 와 일치해야 install OK
   (mismatch 시 400)
+- `requires_leader_lease` 모듈(oam/oam-svc)의 install 은 **허용**하고 응답 `warning` 으로
+  "이중화되지 않음" 을 알린다. 차단은 위험한 액션인 **기동**에서 — 공유 store 없는 A/S
+  그룹에서 상대 노드가 이미 그 모듈을 돌리는 중이면 start/restart 가 409
+  `leader_lease_precondition` (`force:true` 우회)
 - ha_group 미정의 agent → 모든 모듈 install 허용 (워크플로 가이드 — 그룹 정의
   후 install 권장)
 - `standalone` 모듈은 어느 그룹/그룹 없음 OK
@@ -583,7 +615,12 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
      · apply 가 cims-health/cims-notify + ha.json 을 `/etc/keepalived/{bin/,}` 에
        **root:root 로 스테이징** — keepalived.conf 는 이 고정 경로만 참조.
        버전 디렉토리 비의존 + `enable_script_security`(root 소유 요구) 통과
-   - dev / sudo 미등록 시 ha.json 만 갱신 + apply 실패는 log 만 (graceful)
+   - **세 단계 모두 실패 시 job 실패**(install/config/apply 동일 기준). keepalived 가 안 깔린
+     채 "VIP 적용 성공" 으로 보고되면 VIP 주인이 없어 cold 모듈이 어느 노드에서도 안 뜬다 —
+     install 은 dpkg 락 경합을 바운드 재시도하고(우분투 unattended-upgrade 와 겹치는 창),
+     dpkg 구간에는 `policy-rc.d`(101)로 postinst 의 데몬 자동기동을 막는다(conf 부재 상태로
+     기동돼 systemd start 타임아웃에 걸리는 경로 차단)
+   - dev / sudo 미등록 시 ha.json 만 갱신 + 적용 실패는 log 만 (graceful)
 
 VRID 자동 할당 (51-255 range, ha_groups.uk_vrid UNIQUE). VIP 는 운영자 수동
 입력 (네트워크 대역 의존).

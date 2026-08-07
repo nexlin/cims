@@ -65,7 +65,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       window.location.reload()
     }
     const obj = (data ?? {}) as Record<string, unknown>
-    const msg = (typeof obj.error === 'string' && obj.error) || `HTTP ${res.status}`
+    // 사람이 읽을 설명(detail)이 있으면 그것을 메시지로 쓴다 — 코드만 띄우면
+    // (`leader_lease_precondition` 처럼) 화면에서 원인을 알 수 없다.
+    // 코드 분기는 message 가 아니라 `ApiError.data.error` 로 한다.
+    const code = (typeof obj.error === 'string' && obj.error) || ''
+    const detail = typeof obj.detail === 'string' ? obj.detail : ''
+    const msg = detail || code || `HTTP ${res.status}`
     throw new ApiError(msg, res.status, obj)
   }
   return data as T

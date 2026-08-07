@@ -89,6 +89,14 @@ export interface FailoverOp {
   updated_at?: string
 }
 
+// 공유 store — 관리평면 store 가 놓인 **공유 마운트 지점**(NAS). 그룹 스코프이며 양 노드가
+// 같은 경로를 상시 마운트한다. agent 는 마운트를 조작하지 않고, 승격 전 그 경로가 실제
+// 마운트이고 write 가능한지 확인만 한다. 마운트 생성·영속(fstab)은 서버별 마운트 관리 담당.
+// 상세: docs/design/features/oam_ha.md §4
+export interface HaSharedStore {
+  mount_point: string       // 절대경로 (CimsRuntimeMount 와 동일해야 함)
+}
+
 export interface HaGroup {
   id: number
   name: string
@@ -99,6 +107,12 @@ export interface HaGroup {
   auth_pass: string
   note?: string
   vip_bindings?: VipBinding[]
+  shared_store?: HaSharedStore                    // 공유 store (미설정 = 이중화 대상 아님)
+  // 선언(`requires_leader_lease`) 전제 미충족으로 **HA 편입에서 제외된** 모듈과 사유.
+  // 예: {oam: 'no_shared_store'} — 공유 store 가 없으면 관리평면은 절체 대상이 아니다.
+  ha_excluded?: Record<string, string>
+  /** VIP 가 아닌 주소로 OAM 에 보고하는 agent — 이대로 절체하면 fleet 이 단절된다. */
+  agents_not_on_vip?: Array<{ agent_id: number; name: string; oam_url: string }>
   failover_options?: FailoverOptions
   // 서비스 의도 (선언적 무장) — {module: 'running'|'stopped'}. 무장 = running 모듈 존재.
   service_intent?: Record<string, 'running' | 'stopped'>
@@ -123,6 +137,7 @@ export interface HaGroupInput {
   auth_pass: string
   note?: string
   vip_bindings?: VipBinding[]
+  shared_store?: HaSharedStore
   failover_options?: FailoverOptions
   service_intent?: Record<string, 'running' | 'stopped'>
   module_specs?: Record<string, ModuleSpec>
@@ -136,6 +151,13 @@ export const haGroupsApi = {
   update: (id: number, data: Partial<HaGroupInput>) =>
     api.put<{ id: number }>(`/ha-groups/${id}`, data),
   delete: (id: number)                      => api.delete<{ id: number }>(`/ha-groups/${id}`),
+  // 관리 store 를 공유 마운트로 이관 — 그룹 shared_store 저장 + oam 배포설정 갱신 +
+  // store 를 들고 있는 노드에 이관 job(정지→복사→기동)까지 한 번에. 콘솔이 잠깐 끊긴다.
+  migrateSharedStore: (id: number, mount_point: string) =>
+    api.post<{
+      shared_store: HaSharedStore; runtime_dir: string; detail: string
+      jobs: { agent_id: number; process_name: string; job_type: string; job_id: number }[]
+    }>(`/ha-groups/${id}/shared-store/migrate`, { mount_point }),
 
   listMembers:  (id: number)                =>
     api.get<{ members: HaMember[] }>(`/ha-groups/${id}/members`).then(r => r.members),
@@ -155,10 +177,11 @@ export const haGroupsApi = {
 
   // 수동 계획 절체 (스위치오버) — AS 전용. operation 생성 후 sweep 이 구동(진행상태는
   // group.failover_op 로 폴링). 현 Active → Standby.
-  failover: (id: number) =>
+  // force: agent 주소가 VIP 가 아닐 때의 사전 점검(409 agents_not_on_vip)을 우회.
+  failover: (id: number, force = false) =>
     api.post<{ group_id: number; operation_id: number; from_agent_id: number
                to_agent_id: number; state: string }>(
-      `/ha-groups/${id}/failover`, {}),
+      `/ha-groups/${id}/failover`, force ? { force: true } : {}),
 
   // 노드 유지보수(EXCLUDE_NODE) 토글 — AS 전용. 지정 멤버를 승격 대상에서 제외(on)/
   // 복귀(off). on → 그 노드 모듈 정지 + 절체 대상 제외, off → role 기반 자동 재합류.

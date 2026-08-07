@@ -1,3 +1,4 @@
+import type { HaSharedStore } from '../../api/ha_groups'
 // ServersPage 와 HaServicesPage 가 공유하는 type. HaServicesPage 가 SoT,
 // 통합 후 ServersPage 의 ServerInspector "네트워크" 탭도 같은 type 사용.
 
@@ -38,9 +39,13 @@ export interface ServerRow {
   interfaces: NetIface[]
   serviceIpRows: ServiceIpRow[]
   routes: AgentRoute[]
+  /** 실제 마운트 목록 — 공유 store 마운트 지점 선택지. */
+  mountTargets: Array<{ target: string; fstype: string; source: string }>
 }
 
 /** 서비스 = HA 그룹 (active_standby|all_active) 또는 standalone agent (id=-agent.id). */
+export type { HaSharedStore } from '../../api/ha_groups'
+
 export interface ServiceRow {
   id: number                    // HaGroup.id (양수) 또는 -agent.id (standalone)
   name: string
@@ -52,4 +57,8 @@ export interface ServiceRow {
   servers: ServerRow[]
   packageIds: number[]          // derived from deployments
   vipBindings: VipBinding[]
+  // 공유 store (관리평면 store) — 미설정이면 이중화 대상 아님. 양 노드 동일 경로.
+  sharedStore?: HaSharedStore
+  // 전제 미충족으로 HA 편입 제외된 모듈 {module: reason}
+  haExcluded?: Record<string, string>
 }

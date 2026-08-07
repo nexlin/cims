@@ -79,6 +79,25 @@
 - 빈 디렉토리는 1부터. 최초 부팅 시 디렉토리 스캔으로 max id 발견 시 .seq 동기화.
 - 옛 DB 마이그레이션 데이터는 원래 id 그대로 보존 (.seq 는 max(id)+1 로 시드).
 
+## 4.1 소유권 리스 (단일 writer)
+
+관리 store 는 **단일 writer** 다. 이중화(관리평면 A/S)에서 두 OAM 이 같은 store 를 쓰면
+손상되므로, 모든 write 진입점(`save`/`delete`/`next_id`/`jsonl_append`)이 소유권 리스를
+확인하고 없으면 `LeaseLostError` 를 던진다(HTTP **409 `not_lease_owner`**). 조회(`load`/
+`load_all`/`by_id`)는 제약이 없다 — 소유권이 없으면 **read-only 로 강등**된다.
+
+- 획득: `<runtime>/.owner.lock` 에 배타 `flock`(프로세스 수명 유지) + `<runtime>/.owner.json`
+  의 `epoch` +1 기록. OAM 은 store 접근(마이그레이션·seed) 전에 획득한다.
+- 펜싱: write 직전(1초 캐시) `.owner.json` 의 `node_id`/`epoch` 가 자기 것과 다르면 소유권을
+  잃은 것으로 보고 read-only 로 내려간다 — **시각 비교를 하지 않는다**(노드 간 clock skew
+  무관, ha_service_model.md §15).
+- 상태 노출: `GET /api/v1/gateway/health` 의 `lease`/`read_only`.
+- 구현: `services/lease.py`. 설계·3층 방어(파일시스템 펜싱 → mount guard → 리스):
+  [features/oam_ha.md](features/oam_ha.md) §4.
+
+> 단일 노드 구성에서도 같은 경로를 지난다(획득이 성공하므로 무영향). `--preflight` 실행은
+> 잠금을 잡지 않는다 — 살아있는 OAM 의 소유권을 건드리면 안 되므로.
+
 ## 5. Atomic Write
 
 표준 패턴 (모든 write 가 따름):
@@ -128,3 +147,17 @@ def _atomic_write(path, content):
 
 - `CimsRuntimeDir` 전체를 tar 로 백업 (compose 기반 배포의 volume 와 동일 단순성).
 - 일별 jsonl (jobs/metrics) 는 운영 정책으로 30~90일 보존 후 자동 삭제 (cron + `find -mtime`).
+
+## 공유 스토리지(NFS)에서의 접근 비용
+
+관리 store 를 공유 스토리지로 옮기면 **파일 1건 읽기가 로컬의 ~100배**가 된다(실측: NFS
+약 5ms/파일). 콘솔은 2초 폴링, agent 는 2초 heartbeat 이므로 접근 횟수가 그대로 체감 지연이
+된다. 그래서 다음 규칙을 지킨다.
+
+| 규칙 | 이유 |
+|---|---|
+| `by_id` 는 **파일명 직접 조회(`<id>.json`) 우선**, 실패 시에만 전체 스캔 | 옛 구현은 무조건 디렉터리 전체를 읽었다. job 120건 store 에서 **단건 조회 1회 = 120파일** — heartbeat·조회마다 반복돼 콘솔 전체가 느려졌다(실측 최대 병목) |
+| 대기 job 은 **agent 별 인덱스**(`control/job_index/<agent_id>.json`)로 찾는다 | `_job_pick_pending` 이 전 job 을 읽어 필터하던 것이 heartbeat×agent수 만큼 반복됐다. 인덱스는 캐시이므로 부재·손상 시 전체 스캔으로 재구축한다(정본은 job 파일) |
+| 완료 job 은 **정리한다** (`JobRetentionDays`=2, `JobRetentionCount`=200) | 무한 누적이 상시 비용이 된다. 미완(queued/running)은 절대 지우지 않는다 |
+| 여러 레코드를 훑는 응답은 **한 번만 읽어 공유**한다 | 그룹 목록에서 그룹마다 배포·agent 를 다시 읽으면 O(그룹수 × 레코드수)가 된다. 같은 실수를 배포·agent 두 번 했다 — 테스트가 "그룹 N개 조회 시 스캔 1회"를 단정한다 |
+| 무거운 조회는 **폴링 주기를 분리**한다 | 콘솔 시스템/인프라는 실측 상태(agents·deployments)만 2초, 거의 안 바뀌는 packages·ha-groups 는 6초. 변이 직후에는 전체를 즉시 갱신한다 |

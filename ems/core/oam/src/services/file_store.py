@@ -27,6 +27,10 @@ import tempfile
 from datetime import datetime
 from typing import Optional
 
+# 소유권 리스 — write 진입점 가드. 관리 store 는 단일 writer 다(oam_ha.md §4.4).
+# 미획득 상태에서는 조회는 되고 write 만 LeaseLostError 로 막힌다(read-only 강등).
+from services import lease
+
 
 # ──────────────────────────────────────────────────────────────────────────
 #  경로 유틸
@@ -54,6 +58,15 @@ def _is_shared_mount(path: str) -> bool:
         return False
 
 
+def _writable_dir(path: str) -> bool:
+    """이 경로에 store 를 만들 수 있는가 — 존재하면 쓰기 가능, 없으면 생성 가능."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        return os.access(path, os.W_OK)
+    except Exception:
+        return False
+
+
 def runtime_root(config: dict) -> str:
     """runtime store 의 base 디렉토리.
 
@@ -64,28 +77,48 @@ def runtime_root(config: dict) -> str:
       4. 현재 CWD 의 'runtime' (개발 fallback)
 
     2·3 은 로그 디렉터리에서 유도하는 폴백인데, 로그를 공유 스토리지(NAS)에 두는
-    구성에서는 **관리 데이터(배포/그룹/에이전트)까지 공유 스토리지로 끌려간다**.
-    그러면 (a) 노드를 밀어도 관리 데이터가 남고 (b) OAM 이 A/S 로 두 노드에 올라갈 때
-    두 프로세스가 같은 store 를 동시에 write 한다. 노드 간 미복제가 전제인 설계라
-    (ha_design.md §12) 이는 손상 경로다 — 폴백이 공유 마운트로 유도되면 기동을 막는다.
-    운영자가 CimsRuntimeDir 을 명시했다면 그 의도를 존중하고 검사하지 않는다.
+    구성에서는 **관리 데이터(배포/그룹/에이전트)까지 공유 스토리지로 끌려간다**. 그러면
+    노드를 밀어도 관리 데이터가 남고, 무엇보다 **펜싱 없이** 두 OAM 이 같은 store 를
+    동시에 write 할 수 있다.
+
+    금지의 대상은 공유 스토리지 자체가 아니라 **펜싱 없는 다중 writer** 다(oam_ha.md §4).
+    이중화 구성에서는 (a) mount guard, (b) 소유권 리스(`services.lease`) 2층으로 단일
+    writer 를 보장하고, 그때는 운영자가 `CimsRuntimeDir` 을 그 공유 경로로 **명시**한다. 따라서 명시 경로는 존중하고(리스가
+    보호), **유도된 폴백이 공유 마운트로 끌려가는 사고**만 기동 실패로 막는다.
     """
     explicit = config.get('CimsRuntimeDir')
     if explicit:
-        return explicit
-    sl = config.get('ServiceLogging', {}).get('Dir') or config.get('ServiceLogDir') \
-        or config.get('MsgLogDir', '')
-    if sl:
-        cand = os.path.normpath(os.path.join(sl, '..', 'runtime'))
-        if _is_shared_mount(cand):
-            raise RuntimeError(
-                f"CimsRuntimeDir 미설정 → runtime store 가 공유 스토리지로 유도됨: {cand}\n"
-                f"  관리 데이터(배포/그룹/에이전트)는 노드 로컬이어야 한다 "
-                f"(OAM 다중 노드에서 동시 write 시 손상).\n"
-                f"  해결: 모듈 설정 CimsRuntimeDir 을 로컬 경로로 지정 "
-                f"(예: <install_path>/runtime).")
-        return cand
-    return os.path.abspath('runtime')
+        # **쓸 수 있는 경로인지 확인한다.** 패키지 기본값이나 옛 배포 overlay 에 다른 머신의
+        # 절대경로가 들어 있으면(실측: 빌드 머신 경로 `/home/<user>/work/...` 가 패키지
+        # oam.json 에 커밋돼 배포됨) OAM 은 그 경로에 makedirs 하다 PermissionError 로 죽고,
+        # 콘솔이 사라져 설정을 고칠 통로까지 없어진다. 접근 불가면 **노드 로컬로 폴백**한다.
+        #
+        # 단, 공유 마운트 구성(`CimsRuntimeMount` 설정)에서는 폴백하지 않는다 — 마운트가
+        # 잠깐 없다고 로컬로 갈아타면 store 가 갈라진다. 그 판정은 mount guard 의 몫이다.
+        if _writable_dir(explicit) or config.get('CimsRuntimeMount'):
+            return explicit
+        from services import paths as _p
+        fallback = _p.local_runtime_dir(config)
+        print(f'[store] ⚠ CimsRuntimeDir={explicit} 를 쓸 수 없습니다(권한/경로). '
+              f'노드 로컬 {fallback} 로 폴백합니다 — 관리평면이 기동하지 못하는 것보다 안전합니다. '
+              f'콘솔에서 경로를 고치세요.', flush=True)
+        return fallback
+    # ── 폴백은 **버전무관 노드 로컬 경로**로 고정한다 ──────────────────────────
+    # 옛 폴백(로그 디렉터리 sibling → cwd/runtime)은 OAM 의 cwd 가 **버전 디렉터리**
+    # (modules/oam/<ver>/oam/src)라서 store 를 `.../current/ext_mnt/runtime` 같은 위치에
+    # 만들었다(실서버 실측). 그 위치는 **oam 업그레이드 시 통째로 사라진다** — 관리
+    # 데이터(에이전트·배포·그룹·패키지)를 잃는 경로다. 설정 누락은 흔한 일이므로
+    # (배포 overlay 에 CimsRuntimeDir 이 주입되지 않은 노드가 실제로 있었다) 폴백 자체가
+    # 안전해야 한다: services.paths 가 계산하는 `modules/oam/runtime` 로 고정한다.
+    from services import paths as _paths
+    cand = _paths.local_runtime_dir(config)
+    if _is_shared_mount(cand):
+        raise RuntimeError(
+            f"runtime store 폴백이 공유 스토리지로 유도됨: {cand}\n"
+            f"  펜싱 없이 두 OAM 이 같은 store 를 write 하면 손상된다.\n"
+            f"  해결: 모듈 설정 CimsRuntimeDir 을 명시하라 — 단일 노드는 로컬 경로,"
+            f" 이중화는 공유 store 마운트 하위 경로(+ CimsRuntimeMount).")
+    return cand
 
 
 # runtime store v2 P2 — OAM 자기 데이터 카테고리화.
@@ -96,6 +129,9 @@ _OAM_CATEGORY = {
     'agents': 'control', 'deployments': 'control', 'jobs': 'control',
     'metrics': 'control', 'packages': 'control', 'ha_groups': 'control',
     'csp_sync_txn': 'control', 'gateway_routes': 'control',
+    # 계획 절체 operation — 관리평면 이중화에서 **신 Active 가 이어받아야 하는** 상태다
+    # (source 가 자기 자신을 정지시키므로). control/ 로 묶어 백업·복제 범위를 통일한다.
+    'ha_operations': 'control',
     'console_accounts': 'console', 'console_layouts': 'console', 'console_menu': 'console',
     'console_user_layouts': 'console',
 }
@@ -206,7 +242,10 @@ def load_all(dir_path: str) -> list:
 
 
 def save(dir_path: str, key, obj: dict) -> None:
-    """JSON 1건 atomic write. obj['update_time'] 자동 갱신."""
+    """JSON 1건 atomic write. obj['update_time'] 자동 갱신.
+
+    소유권 리스가 없으면 `LeaseLostError` — 관리 store 는 단일 writer 다(oam_ha.md §4.4)."""
+    lease.assert_writable()
     obj = dict(obj)
     now = datetime.now().isoformat(timespec='seconds')
     obj.setdefault('create_time', now)
@@ -216,7 +255,8 @@ def save(dir_path: str, key, obj: dict) -> None:
 
 
 def delete(dir_path: str, key) -> bool:
-    """삭제. 존재했으면 True, 없으면 False."""
+    """삭제. 존재했으면 True, 없으면 False. (리스 필요 — save 와 동일)"""
+    lease.assert_writable()
     path = os.path.join(dir_path, _safe_key(key) + '.json')
     try:
         os.unlink(path)
@@ -234,7 +274,10 @@ def exists(dir_path: str, key) -> bool:
 # ──────────────────────────────────────────────────────────────────────────
 
 def next_id(dir_path: str) -> int:
-    """단조 증가 다음 ID. .seq 미존재 시 디렉토리 스캔으로 max(id)+1 시드."""
+    """단조 증가 다음 ID. .seq 미존재 시 디렉토리 스캔으로 max(id)+1 시드.
+
+    ID 발급도 write 다(.seq 갱신) — 리스 없이 발급하면 두 writer 가 같은 ID 를 준다."""
+    lease.assert_writable()
     os.makedirs(dir_path, exist_ok=True)
     seq_path = os.path.join(dir_path, '.seq')
     with open(seq_path, 'a+') as f:
@@ -301,7 +344,19 @@ def find_all_by(dir_path: str, predicate) -> list:
 
 
 def by_id(dir_path: str, target_id: int) -> Optional[dict]:
-    """id 필드로 검색 (파일명이 자연키일 때 사용)."""
+    """id 로 1건 조회.
+
+    **파일명 우선(`<id>.json`) → 없을 때만 전체 스캔.** 우리 도메인은 `save(dir, id, obj)`
+    로 id 를 파일명에 쓰므로 거의 항상 직접 히트한다. 옛 구현은 무조건 `find_by` 로 디렉터리
+    전체를 읽었고, store 가 공유 스토리지(NFS, 파일당 ~5ms)로 옮겨간 뒤 이것이 최대 비용이
+    됐다 — 예: job 120건 store 에서 단건 조회 1회가 120파일 읽기. 그것이 heartbeat·조회마다
+    반복돼 콘솔 전체가 느려졌다(실측).
+
+    파일명이 자연키(id 아님)인 도메인은 스캔 폴백이 그대로 커버한다.
+    """
+    direct = load(dir_path, target_id)
+    if isinstance(direct, dict) and direct.get('id') == target_id:
+        return direct
     return find_by(dir_path, lambda o: o.get('id') == target_id)
 
 
@@ -318,7 +373,10 @@ def jsonl_path(domain_path: str, key: str, dt: datetime) -> str:
 
 
 def jsonl_append(domain_path: str, key: str, record: dict, dt: datetime = None) -> str:
-    """JSONL 한 줄 append. dt 미지정 시 now. POSIX append-atomic 한 단일 write 보장."""
+    """JSONL 한 줄 append. dt 미지정 시 now. POSIX append-atomic 한 단일 write 보장.
+
+    시계열 append 도 store write 이므로 리스가 필요하다(oam_ha.md §4.4)."""
+    lease.assert_writable()
     dt = dt or datetime.now()
     path = jsonl_path(domain_path, key, dt)
     os.makedirs(os.path.dirname(path), exist_ok=True)

@@ -34,6 +34,324 @@ _COMPONENT_ROOT = os.path.normpath(os.path.join(_HERE, '..'))  # = oam/
 _CONFIG_PATH = os.environ.get('CIMS_OAM_CONFIG') or os.path.join(_COMPONENT_ROOT, 'config', 'oam.json')
 
 
+def _runtime_dir(config=None):
+    """버전무관 runtime 루트 — `CimsRuntimeDir` 우선, 없으면 modules/oam/runtime 추정."""
+    d = (config or {}).get('CimsRuntimeDir')
+    if d:
+        return d
+    return os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime'))
+
+
+def _secrets_dir(config=None):
+    """시크릿 격리 디렉토리(0700) — **노드 로컬**(services.paths).
+
+    `CimsRuntimeDir` 에서 유도하면 안 된다: 이중화에서 그 값은 **공유 store**를 가리키고,
+    개인키(그룹 CA·mTLS CA)를 볼륨에 올리는 것은 설계 위반이다(oam_ha.md §5 — 복제가 아니라
+    join 1회 복사)."""
+    from services import paths as _paths
+    return _paths.secrets_dir(config)
+
+
+def _resolve_jwt_secret(config):
+    """콘솔/게이트웨이 토큰 서명 시크릿 해석 — config → `_secrets/jwt_secret` → 생성.
+
+    패키지에는 시크릿을 동봉하지 않는다(하드코딩 상수는 예측 가능 = 토큰 위조). 해석 순서:
+      1) 설정값(배포 overlay 또는 oam.json) — **이중화의 정본**. 두 노드에 같은 값이
+         주입되므로 절체 후에도 세션·모듈 토큰 검증이 유지된다(oam_ha.md §5).
+      2) `<runtime>/_secrets/jwt_secret` — 부트스트랩이 만든 노드 로컬 파일.
+      3) 없으면 **노드 로컬로 1회 생성**(0600) + 경고. 관리평면이 부팅 불가가 되는 것보다
+         안전하되, 이 노드 토큰은 피어와 호환되지 않으므로 경고를 남긴다.
+    config 를 제자리에서 갱신한다."""
+    import base64 as _b64
+    ca = config.setdefault('CimsAuth', {})
+    if (ca.get('JwtSecret') or '').strip():
+        return ca['JwtSecret']
+    path = os.path.join(_secrets_dir(config), 'jwt_secret')
+    try:
+        with open(path) as f:
+            s = f.read().strip()
+        if s:
+            ca['JwtSecret'] = s
+            print(f'[oam-auth] JwtSecret 로드: {path}', flush=True)
+            return s
+    except Exception:
+        pass
+    s = _b64.b64encode(os.urandom(32)).decode()
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            f.write(s + '\n')
+        print(f'[oam-auth] ⚠ JwtSecret 미설정 — 이 노드용으로 새로 생성했습니다: {path}\n'
+              f'[oam-auth]   HA(이중화) 구성에서는 배포 설정으로 두 노드에 **같은 값**이 '
+              f'주입되어야 합니다. 지금 발급되는 토큰은 피어 노드에서 검증되지 않습니다.',
+              flush=True)
+    except Exception as e:
+        print(f'[oam-auth] ⚠ JwtSecret 파일 기록 실패({e}) — 메모리 값으로만 기동 '
+              f'(재기동 시 전 세션 무효)', flush=True)
+    ca['JwtSecret'] = s
+    return s
+
+
+def _assert_runtime_mount(config):
+    """mount guard — `CimsRuntimeMount` 가 설정돼 있으면 그 경로가 **실제 마운트**인지 확인.
+
+    관리평면 store 가 공유 스토리지(NAS)에 있는 구성에서, 마운트가 안 된 상태로 OAM 이 뜨면
+    마운트 포인트 **하부 로컬 디스크**에 두 번째 store 를 만든다. 절체마다 서로 다른 데이터를
+    보게 되는 최악의 divergence 이고 조용히 진행되므로, 여기서 **기동을 거부**한다
+    (oam_ha.md §4.3). 미설정이면 검사하지 않는다(단일 노드·개발).
+
+    반환 없음. 위반 시 프로세스 종료(비0) — agent 의 health-gate 가 실패로 잡아 롤백/재시도.
+    """
+    mp = (config or {}).get('CimsRuntimeMount')
+    if not mp:
+        return
+    mp = str(mp).rstrip('/')
+    rt = os.path.abspath((config or {}).get('CimsRuntimeDir') or '')
+    mounted = False
+    try:
+        with open('/proc/mounts') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].rstrip('/') == mp:
+                    mounted = True
+                    break
+    except Exception as e:
+        print(f'[oam-mount] /proc/mounts 확인 실패({e}) — guard 통과시킴', flush=True)
+        return
+
+    if not mounted:
+        # 마운트가 없다. 막아야 하는 사고는 "**마운트 지점 하부 로컬 디스크에 두 번째
+        # store 를 새로 만드는 것**" 이다. 그런데 무조건 기동을 거부하면 관리평면은
+        # **되돌릴 통로 없이 영구 정지**한다 — 설정을 고칠 콘솔이 사라지기 때문이다(실측).
+        # 그래서 위험한 경우만 거부하고, 안전한 경우는 **직전 로컬 store 로 기동**한다.
+        target_has_store = os.path.isdir(os.path.join(rt, 'control')) if rt else False
+        local = ''
+        try:
+            from services import paths as _paths
+            local = _paths.local_runtime_dir(config)
+        except Exception:
+            local = ''
+        local_has_store = bool(local) and os.path.isdir(os.path.join(local, 'control'))
+
+        if target_has_store:
+            # 그 경로에 이미 store 가 있는데 마운트가 빠졌다 = 공유 store 를 보던 노드가
+            # 스토리지를 잃은 상태. 로컬로 갈아타면 분기(divergence)가 되므로 거부한다.
+            print(f'OAM_MOUNT_GUARD_FAIL: CimsRuntimeMount={mp} 가 마운트되지 않았습니다. '
+                  f'그 경로({rt})에 이미 store 가 있어 로컬로 대체하면 데이터가 분기됩니다 — '
+                  f'마운트를 복구한 뒤 기동하세요.', flush=True)
+            sys.exit(3)
+        if local_has_store:
+            # 대상은 비었고 로컬에 기존 store 가 있다 = 아직 이관 전이거나 설정이 잘못 들어갔다.
+            # 새 빈 store 를 만들지 않고 **기존 로컬 store 로 뜬다** → 콘솔이 살아 있어
+            # 운영자가 설정을 고치거나 이관을 실행할 수 있다. 이 노드는 공유 store 를 쓸 수
+            # 없으므로 agent preflight 가 승격 자격에서 제외한다(정상).
+            config['CimsRuntimeDir'] = local
+            config.pop('CimsRuntimeMount', None)
+            print(f'[oam-mount] ⚠ CimsRuntimeMount={mp} 미마운트 — 대상 store 는 비어 있고 '
+                  f'로컬 store 가 있으므로 **로컬로 기동**합니다: {local}\n'
+                  f'  마운트를 붙인 뒤 콘솔 HA > 공유 store 에서 "이 경로로 이관" 을 실행하세요. '
+                  f'(현 상태에서는 관리평면이 이중화되지 않습니다)', flush=True)
+            return
+        # 양쪽 다 store 가 없다 = 신규 설치인데 마운트가 없다. 여기서 뜨면 마운트 지점 하부
+        # 로컬 디스크에 store 가 생기고, 나중에 마운트가 붙으면 그 데이터가 가려진다.
+        print(f'OAM_MOUNT_GUARD_FAIL: CimsRuntimeMount={mp} 가 마운트되지 않았습니다. '
+              f'지금 기동하면 마운트 지점 하부 로컬 디스크에 store 가 만들어져, 마운트 후 '
+              f'그 데이터가 가려집니다 — 마운트를 먼저 붙이세요.', flush=True)
+        sys.exit(3)
+
+    if rt and not (rt == mp or rt.startswith(mp + '/')):
+        print(f'OAM_MOUNT_GUARD_FAIL: CimsRuntimeDir={rt} 가 마운트 {mp} 하위가 아닙니다 '
+              f'— 설정 불일치로 기동을 거부합니다.', flush=True)
+        sys.exit(3)
+    print(f'[oam-mount] runtime store 마운트 확인: {mp}', flush=True)
+
+
+def _install_signal_guards(logger) -> None:
+    """SIGUSR1/SIGHUP 을 **치명적이지 않게** 만든다.
+
+    agent 의 `update_config` job 은 설정 파일을 쓴 뒤 모듈에 SIGUSR1 을 보낸다(CSP 처럼
+    즉시 재적용하는 모듈용). 파이썬의 SIGUSR1 **기본 동작은 프로세스 종료**이므로, 핸들러가
+    없으면 **oam 설정을 저장하는 것만으로 OAM 이 죽는다** — 콘솔이 사라지고, 그 상태에서
+    되돌릴 통로도 없다(실측 사고).
+
+    OAM 은 bind 포트·store 경로·시크릿을 **기동 시점에** 읽으므로 부분 reload 가 안전하지
+    않다. 그래서 신호는 **기록만 하고 무시**하고, 반영은 명시적 재기동(콘솔 restart)으로
+    한다 — 조용히 죽는 것보다 낫다.
+    """
+    import signal as _signal
+
+    def _noop(signum, _frame):
+        name = {getattr(_signal, 'SIGUSR1', -1): 'SIGUSR1',
+                getattr(_signal, 'SIGHUP', -2): 'SIGHUP'}.get(signum, str(signum))
+        logger.log_warning(
+            f'{name} 수신 — OAM 은 설정을 기동 시점에 읽으므로 무시합니다. '
+            f'변경 반영이 필요하면 콘솔에서 oam restart 를 실행하세요.')
+
+    for sig in ('SIGUSR1', 'SIGHUP'):
+        s_ = getattr(_signal, sig, None)
+        if s_ is None:
+            continue
+        try:
+            _signal.signal(s_, _noop)
+        except Exception as e:                      # 스레드 컨텍스트 등 — 치명적 아님
+            logger.log_warning(f'{sig} 핸들러 설치 실패: {e}')
+
+
+def _cert_required_sans(config):
+    """서버 인증서에 반드시 들어가야 하는 SAN 집합 (IP/DNS 구분해 반환).
+
+    브라우저·agent 가 접속하는 주소가 전부 들어 있어야 한다. 이중화에서는 **VIP** 가 그
+    주소이므로 `Server.AgentOamUrl`(= agent/콘솔 접속 주소)의 host 를 자동 포함하고,
+    운영자가 `Server.CertSans` 로 추가 주소(피어 노드 IP·별칭)를 넣는다. 그룹 공통 CA 로
+    서명되므로 노드마다 인증서가 달라도 브라우저는 CA 하나만 신뢰하면 된다."""
+    import socket as _socket
+    from urllib.parse import urlparse as _urlparse
+    ips, dns = {'127.0.0.1'}, set()
+    host = _socket.gethostname()
+    if host:
+        dns.add(host)
+        try:
+            fq = _socket.getfqdn(host)
+            if fq:
+                dns.add(fq)
+        except Exception:
+            pass
+    srv = (config or {}).get('Server') or {}
+    cand = []
+    aou = (srv.get('AgentOamUrl') or '').strip()
+    if aou:
+        try:
+            h = _urlparse(aou).hostname
+            if h:
+                cand.append(h)
+        except Exception:
+            pass
+    extra = srv.get('CertSans')
+    if isinstance(extra, str):
+        extra = [x.strip() for x in extra.split(',')]
+    if isinstance(extra, list):
+        cand += [str(x).strip() for x in extra]
+    for c in cand:
+        if not c:
+            continue
+        try:
+            import ipaddress as _ipa
+            _ipa.ip_address(c)
+            ips.add(c)
+        except ValueError:
+            dns.add(c)
+    return ips, dns
+
+
+def _cert_info(crt_path):
+    """(subject, issuer, san_text) — openssl 로 조회. 실패 시 ('','','')."""
+    import subprocess as _sp
+    try:
+        r = _sp.run(['openssl', 'x509', '-in', crt_path, '-noout', '-subject', '-issuer', '-text'],
+                    capture_output=True, text=True, timeout=20)
+        out = r.stdout or ''
+        sub = next((l for l in out.splitlines() if l.startswith('subject=')), '')
+        iss = next((l for l in out.splitlines() if l.startswith('issuer=')), '')
+        san = ''
+        lines = out.splitlines()
+        for i, l in enumerate(lines):
+            if 'Subject Alternative Name' in l and i + 1 < len(lines):
+                san = lines[i + 1].strip()
+                break
+        return sub, iss, san
+    except Exception:
+        return '', '', ''
+
+
+def _ensure_group_ca(config):
+    """그룹 공통 CA (`<runtime>/_secrets/ca/{ca.crt,ca.key}`) — 없으면 생성.
+
+    노드 로컬 0600 자산이며, 두 번째 노드에는 join 절차가 **같은 CA 를 복사**한다.
+    (개인키를 공유 볼륨에 두지 않는다 — oam_ha.md §5.) 실패 시 (None, None)."""
+    import subprocess as _sp
+    d = os.path.join(_secrets_dir(config), 'ca')
+    crt, key = os.path.join(d, 'ca.crt'), os.path.join(d, 'ca.key')
+    if os.path.isfile(crt) and os.path.isfile(key):
+        return crt, key
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        _sp.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650',
+                 '-subj', '/CN=CIMS-OAM-CA/O=CIMS', '-keyout', key, '-out', crt],
+                check=True, capture_output=True, timeout=60)
+        os.chmod(key, 0o600)
+        print(f'[oam-cert] 그룹 CA 생성: {d} — 두 번째 노드에는 join 이 이 CA 를 복사한다', flush=True)
+        return crt, key
+    except Exception as e:
+        print(f'[oam-cert] 그룹 CA 생성 실패({e}) — self-signed 유지', flush=True)
+        return None, None
+
+
+def _issue_server_cert(dest_dir, ca_crt, ca_key, ips, dns):
+    """그룹 CA 로 노드 서버 인증서 발급 (SAN = ips ∪ dns). 성공 시 (key, crt)."""
+    import subprocess as _sp
+    import socket as _socket
+    import tempfile as _tf
+    key = os.path.join(dest_dir, 'server.key')
+    crt = os.path.join(dest_dir, 'server.crt')
+    csr = os.path.join(dest_dir, '.server.csr')
+    cn = _socket.gethostname() or 'cims-oam'
+    san = ','.join([f'DNS:{d}' for d in sorted(dns)] + [f'IP:{i}' for i in sorted(ips)])
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        _sp.run(['openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes',
+                 '-subj', f'/CN={cn}/O=CIMS', '-keyout', key, '-out', csr],
+                check=True, capture_output=True, timeout=60)
+        with _tf.NamedTemporaryFile('w', suffix='.ext', delete=False) as f:
+            f.write(f'subjectAltName={san}\n'
+                    'basicConstraints=CA:FALSE\n'
+                    'keyUsage=digitalSignature,keyEncipherment\n'
+                    'extendedKeyUsage=serverAuth\n')
+            ext = f.name
+        _sp.run(['openssl', 'x509', '-req', '-in', csr, '-CA', ca_crt, '-CAkey', ca_key,
+                 '-CAcreateserial', '-days', '825', '-extfile', ext, '-out', crt],
+                check=True, capture_output=True, timeout=60)
+        os.chmod(key, 0o600)
+        for junk in (csr, ext):
+            try:
+                os.remove(junk)
+            except OSError:
+                pass
+        print(f'[oam-cert] 서버 인증서 발급 (그룹 CA 서명, CN={cn}, SAN={san})', flush=True)
+        return key, crt
+    except Exception as e:
+        print(f'[oam-cert] 서버 인증서 발급 실패({e}) — 기존 인증서 유지', flush=True)
+        return None, None
+
+
+def _ensure_cert_sans(config, key, crt):
+    """현 인증서가 필요한 SAN 을 모두 담고 있는지 확인하고, 아니면 그룹 CA 로 재발급.
+
+    운영자가 넣은 상용 인증서는 건드리지 않는다 — **CIMS 가 만든 인증서**(O=CIMS self-signed
+    또는 우리 CA 서명)만 재발급 대상이고, 그 외는 경고만 남긴다(VIP 로 접속 시 경고가 날 수
+    있음을 알린다). 반환: (key, crt) — 재발급 실패 시 입력 그대로."""
+    if not (key and crt and os.path.isfile(crt)):
+        return key, crt
+    ips, dns = _cert_required_sans(config)
+    sub, iss, san = _cert_info(crt)
+    missing = [x for x in sorted(ips) if f'IP Address:{x}' not in san] + \
+              [x for x in sorted(dns) if f'DNS:{x}' not in san]
+    if not missing:
+        return key, crt
+    cims_managed = ('O=CIMS' in sub or 'O = CIMS' in sub) or \
+                   ('CIMS-OAM-CA' in iss)
+    if not cims_managed:
+        print(f'[oam-cert] ⚠ 인증서 SAN 에 {missing} 가 없습니다. 운영자 인증서로 판단해 '
+              f'재발급하지 않습니다 — 그 주소(VIP 등)로 접속하면 브라우저 경고가 납니다.',
+              flush=True)
+        return key, crt
+    ca_crt, ca_key = _ensure_group_ca(config)
+    if not (ca_crt and ca_key):
+        return key, crt
+    print(f'[oam-cert] SAN 부족({missing}) — 그룹 CA 로 재발급', flush=True)
+    nk, nc = _issue_server_cert(os.path.dirname(crt), ca_crt, ca_key, ips, dns)
+    return (nk, nc) if (nk and nc) else (key, crt)
+
+
 def _generate_self_signed_cert(dest_dir):
     """cert 가 어디에도 없을 때 runtime/cert 에 self-signed 생성 — 부트스트랩 없이 패키지
     배포로 올라온 노드도 항상 HTTPS 로 기동해 에이전트 health-gate(HTTPS 전용)가 성립한다.
@@ -246,6 +564,7 @@ if __name__ == '__main__':
                                                init as provision_init)
     from handlers.external_systems     import CIMS_EXTERNAL_SYSTEMS_HANDLER_LIST
     from handlers.gateway              import CIMS_GATEWAY_HANDLER_LIST, register_gateway
+    from handlers.oam_join             import CIMS_OAM_JOIN_HANDLER_LIST
     from services import service_registry
     from services.flow_logger    import FLOW_HANDLER_LIST
 
@@ -253,7 +572,14 @@ if __name__ == '__main__':
     try:
         logger.log_info(f'==================== start (OAM) ====================')
 
+        # 설정 저장(update_config)이 보내는 SIGUSR1 로 죽지 않게 — config 로드보다 먼저.
+        _install_signal_guards(logger)
+
         config = load_config()
+        # mount guard — store 가 공유 스토리지에 있는 구성에서 마운트 없이 뜨면 로컬 디스크에
+        # 두 번째 store 를 만든다. store 접근(마이그레이션·seed) 전에 먼저 확인한다.
+        _assert_runtime_mount(config)
+        _resolve_jwt_secret(config)     # 패키지 하드코딩 제거 → _secrets 파일/생성으로 해석
         auth.init(config)
 
         # D3: --preflight 모드 — 여기까지 왔으면 핸들러 import(107~140) + config 로드 OK.
@@ -265,6 +591,60 @@ if __name__ == '__main__':
             logger.log_info('[preflight] handler imports + config OK — exit 0 (no bind)')
             print('OAM_PREFLIGHT_OK', flush=True)
             sys.exit(0)
+
+        # ── 관리 store 소유권 리스 (oam_ha.md §4.4) ─────────────────────────
+        # store 에 처음 write 하기 전(마이그레이션·seed 포함) 반드시 획득한다. 실패하면
+        # **죽지 않고 read-only 로 강등** — 조회는 되어야 운영자가 원인을 볼 수 있다.
+        # preflight 는 위에서 이미 종료했다: 검증 실행이 살아있는 OAM 의 잠금·epoch 를
+        # 건드리면 안 되므로 리스 획득은 preflight 경로에 없어야 한다.
+        from services import file_store as _fs0, lease as _lease
+        try:
+            _lst = _lease.acquire(_fs0.runtime_root(config))
+            if _lst.get('active'):
+                logger.log_info(f"[lease] 관리 store 소유권 획득 — node={_lst['node_id']} "
+                                f"epoch={_lst['epoch']} path={_lst['path']}")
+            else:
+                logger.log_error(
+                    f"[lease] 소유권 획득 실패({_lst.get('reason')}) — **read-only 모드**로 기동합니다. "
+                    f"다른 OAM 프로세스가 같은 store 를 쓰고 있거나(같은 노드 이중 기동), "
+                    f"강제 dual-primary 로 두 노드가 같은 볼륨을 열었을 수 있습니다. "
+                    f"조회는 가능하고 변경(API/스위퍼)은 409 로 거부됩니다.")
+        except Exception as _e:
+            logger.log_error(f"[lease] 획득 예외({_e}) — read-only 모드")
+
+        # ── 잘못된 위치의 store 1회 회수 (버전 디렉터리 → 버전무관) ──────────
+        # 배포 overlay 에 CimsRuntimeDir 이 없던 노드는 옛 폴백 때문에 store 가 버전
+        # 디렉터리 안(`.../current/ext_mnt/runtime`, `cwd/runtime`)에 생겼다 — oam 업그레이드
+        # 시 사라지는 위치다(실서버 실측). 폴백은 고쳤지만 **이미 생긴 데이터**는 옮겨줘야
+        # 잃지 않는다. 목표 위치에 control/ 이 없을 때만 복사한다(멱등, 덮어쓰기 없음).
+        try:
+            _rt_now = _fs0.runtime_root(config)
+            if not os.path.isdir(os.path.join(_rt_now, 'control')):
+                import shutil as _sh
+                for _legacy in (os.path.join(_COMPONENT_ROOT, 'ext_mnt', 'runtime'),
+                                os.path.join(_COMPONENT_ROOT, '..', 'ext_mnt', 'runtime'),
+                                os.path.abspath('runtime')):
+                    _legacy = os.path.normpath(_legacy)
+                    if os.path.abspath(_legacy) == os.path.abspath(_rt_now):
+                        continue
+                    if not os.path.isdir(os.path.join(_legacy, 'control')):
+                        continue
+                    os.makedirs(_rt_now, exist_ok=True)
+                    for _ent in os.listdir(_legacy):
+                        _src, _dst = os.path.join(_legacy, _ent), os.path.join(_rt_now, _ent)
+                        if os.path.exists(_dst):
+                            continue
+                        if os.path.isdir(_src):
+                            _sh.copytree(_src, _dst)
+                        else:
+                            _sh.copy2(_src, _dst)
+                    logger.log_warning(
+                        f"[store] 잘못된 위치의 관리 store 회수: {_legacy} → {_rt_now} "
+                        f"(버전 디렉터리 안이라 업그레이드 시 소실되는 위치였다. "
+                        f"배포 설정 CimsRuntimeDir 를 명시해 두는 것을 권장)")
+                    break
+        except Exception as _e:
+            logger.log_warning(f"[store] 위치 회수 skip: {_e}")
 
         # runtime store v2 — 구 평면 도메인 1회 이행 (도메인 접근 전 선행).
         #   P2: OAM 자기 데이터 → control/·console/.   P3: 컬렉션 → modules/<owner>/runtime.
@@ -434,6 +814,12 @@ if __name__ == '__main__':
         # SSL certificates — 버전무관 runtime cert(modules/oam/runtime/cert) 우선 + self-heal.
         #   (버전 디렉터리 cert 만 있으면 버전업 시 평문→health-gate 롤백. _resolve_oam_cert 참조.)
         ssl_keyfile, ssl_certfile = _resolve_oam_cert()
+        # 접속 주소(VIP 포함)가 SAN 에 없으면 그룹 CA 로 재발급 — 절체로 노드가 바뀌어도
+        # 같은 CA 서명이라 브라우저 경고가 없다(oam_ha.md §5). 운영자 인증서는 미변경.
+        try:
+            ssl_keyfile, ssl_certfile = _ensure_cert_sans(config, ssl_keyfile, ssl_certfile)
+        except Exception as _e:
+            logger.log_warning(f"[oam-cert] SAN 점검 skip: {_e}")
         if ssl_keyfile and ssl_certfile:
             logger.log_info(f"SSL Enabled. Key: {ssl_keyfile}, Cert: {ssl_certfile}")
         else:
@@ -473,6 +859,16 @@ if __name__ == '__main__':
         _seeded = service_registry.seed_if_empty(config)
         if _seeded:
             logger.log_info(f'[service-registry] seeded {_seeded} service descriptor(s) from seed dir (store was empty)')
+        else:
+            # 이미 운용 중인 store — seed 에 새로 생긴 **모듈만** 병합(운영자 편집 보존).
+            # 이게 없으면 신규 모듈(관리평면 oam/oam-svc 등)이 기존 노드에서 영구히
+            # descriptor 밖에 남아 HA 의 daemon/cold/relevant/헬스 대상이 되지 못한다.
+            try:
+                _merged = service_registry.merge_seed_modules(config)
+                if _merged:
+                    logger.log_info(f'[service-registry] merged {_merged} new module(s) from seed dir')
+            except Exception as _e:
+                logger.log_warning(f'[service-registry] seed module merge skip: {_e}')
 
         admin_server = HttpServer(
             admin_conf.get('Ip', '0.0.0.0'),
@@ -516,6 +912,8 @@ if __name__ == '__main__':
         base_rules += _bind(CIMS_AGENT_API_HANDLER_LIST)
         base_rules += _bind(CIMS_AGENT_PUBLIC_HANDLER_LIST)
         base_rules += _bind(CIMS_GATEWAY_HANDLER_LIST)   # /api/v1/gateway/* 제어면(base 소유)
+        # /api/v1/ha/join* — 관리평면 2번째 노드 합류(그룹 공통 신원 전달). base 소유.
+        base_rules += _bind(CIMS_OAM_JOIN_HANDLER_LIST)
 
         # D8 — /users/me(identity-plane)는 base 가 소유, 가입자 CRUD(/users/*)는 csc(resource).
         #   all  : ME 를 /api/v1/users 에 mount → 뒤의 SERVICE admin superset 이 overwrite(현행 동작).
@@ -970,7 +1368,21 @@ if __name__ == '__main__':
         # heartbeat 2s × 다수 host → metrics/<id>/YYYY/MM/DD.jsonl 무한 누적.
         # retain_days 보다 오래된 일별 파일 삭제 (B 트랙 Phase 1 의 24h purge 설계 구현).
         METRIC_RETAIN_DAYS    = int(config.get('MetricRetentionDays', 3))
+        # 완료 job 보존 — 무한 누적이 store(특히 NFS) 상시 비용이 된다. 미완 job 은 대상 아님.
+        JOB_RETAIN_DAYS       = int(config.get('JobRetentionDays', 2))
+        JOB_RETAIN_COUNT      = int(config.get('JobRetentionCount', 200))
+        JOB_PURGE_INTERVAL    = 600
         METRIC_PURGE_INTERVAL = int(config.get('MetricPurgeSweepSec', 3600))
+
+        def _sweep_job_purge():
+            try:
+                from handlers.agents import purge_old_jobs
+                n = purge_old_jobs(config, JOB_RETAIN_DAYS, JOB_RETAIN_COUNT)
+                if n > 0:
+                    logger.log_info(f"[job-purge] 완료 job {n}건 정리 "
+                                    f"(보존 {JOB_RETAIN_DAYS}d / 최대 {JOB_RETAIN_COUNT}건)")
+            except Exception as e:
+                logger.log_error(f"[job-purge] error: {e}")
 
         def _sweep_metric_purge():
             try:
@@ -1011,10 +1423,39 @@ if __name__ == '__main__':
         _last_drift_sweep = 0
         _last_auto_sync_sweep = 0
         _last_metric_purge = 0
+        _last_job_purge = 0
         _last_ha_op_sweep = 0
+        _last_ro_log = 0
+        # 리스 재획득 주기 — 절체 직후 구 Active 가 물러나는 데 수 초 걸리므로 짧게.
+        LEASE_RETRY_INTERVAL = 5
+        _last_lease_retry = 0
         while True:
             time.sleep(1)
             _now = time.time()
+            # ── 리스 게이트 (oam_ha.md §4.5) ────────────────────────────────
+            # 8개 스위퍼는 전부 store 에 쓴다 — API 만 막고 스위퍼를 두면 background
+            # writer 가 그대로 남아 이중 write 가 된다. 소유권이 없으면 전부 건너뛴다.
+            # verify() 는 epoch fence 도 겸한다(다른 writer 가 epoch 를 올렸으면 강등).
+            if not _lease.verify():
+                # **재획득 시도** — 리스는 기동 시 1회만 잡았고 재시도가 없었다. 그래서 절체
+                # 직후 신 Active 가 (구 Active 가 아직 놓지 않아) 획득에 실패하면, 구 Active 가
+                # 물러난 뒤에도 **영원히 read-only** 로 남았다(실측: VIP 는 넘어갔는데 콘솔이
+                # locked_by_other_writer). 주기적으로 다시 잡아 절체를 완결시킨다.
+                if _now - _last_lease_retry >= LEASE_RETRY_INTERVAL:
+                    _last_lease_retry = _now
+                    try:
+                        _st = _lease.acquire(_fs0.runtime_root(config))
+                        if _st.get('active'):
+                            logger.log_info(f"[lease] 소유권 재획득 — epoch={_st['epoch']} "
+                                            f"(절체 완결: 이제 변경 가능)")
+                    except Exception as _e:
+                        logger.log_warning(f"[lease] 재획득 예외: {_e}")
+                if not _lease.is_active():
+                    if _now - _last_ro_log >= 60:
+                        _last_ro_log = _now
+                        logger.log_warning(f"[lease] read-only — 스위퍼 중단 "
+                                           f"({_lease.state().get('reason')})")
+                    continue
             if _now - _last_sweep >= SWEEP_INTERVAL:
                 _sweep_stale_agents()
                 _last_sweep = _now
@@ -1036,6 +1477,9 @@ if __name__ == '__main__':
             if _now - _last_ha_op_sweep >= HA_OP_SWEEP_INTERVAL:
                 _sweep_ha_ops()
                 _last_ha_op_sweep = _now
+            if _now - _last_job_purge >= JOB_PURGE_INTERVAL:
+                _sweep_job_purge()
+                _last_job_purge = _now
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now

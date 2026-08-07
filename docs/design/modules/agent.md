@@ -5,11 +5,16 @@
 ## 1. 역할
 
 1. **Enroll**: 최초 기동 시 enrollment 토큰으로 CSC 에 등록 → session 토큰 수령
-2. **Heartbeat**: 2초 주기(기본, `--heartbeat-sec`)로 CSC 에 상태 보고 + pending job 수령. OAM 불통 시 5→10→…→60초 지수 backoff 후 재시도
-3. **Job 실행**:
+2. **Heartbeat**: 2초 주기(기본, `--heartbeat-sec`)로 OAM 에 상태 보고 + pending job 수령. 보고 항목에 **`ha_state`**(verdict·래치 요약 — 래치는 노드 로컬 파일이라 이 보고 없이는 콘솔이 "승격 불가" 를 표시할 수 없다)와 **`oam_url`**(이 agent 가 실제로 보고하는 주소 — OAM 이 "VIP 로 전환 필요" 를 감지·경고하고 수동 절체 전에 점검하는 근거. 이 값이 없어 절체 후 fleet 단절을 아무도 몰랐다)과 **`mount_targets`**(실제 마운트 목록 `{target,fstype,source}` — 의사 FS 제외, cims-managed 여부 무관)이 포함된다: 공유 store 의 마운트 지점을 **자유 입력이 아니라 실제 마운트에서 고르게** 하는 근거이고(`mounts` 는 cims-managed desired 라 운영자가 미리 붙여둔 NAS 가 빠진다), 서버는 이 목록으로 저장·이관을 검증한다. 접속 주소는 **`<state-dir>/oam_url`(있으면) > unit 인자** — 상태 파일이 있어 재설치 없이 무중단 재지정된다(VIP 전환). OAM 불통 시 5→10→…→60초 지수 backoff 후 재시도
+3. **Job 실행** — **heartbeat 루프와 분리된 전용 worker 스레드**. 긴 job(패키지·keepalived 설치, 업그레이드)이 heartbeat 를 막으면 OAM 이 그 노드를 offline 으로 오판하고 VIP 관측(heartbeat 의 `interfaces[]`)이 stale 이 되어 HA 판정까지 틀어진다. worker 는 **레인 2개**다 — `ha`(update_ha·ha_keepalived·ha_planned_release·ha_maintenance·ha_clear_holds)와 `module`(install/upgrade/start/stop/…). **레인 안에서는 직렬**(같은 모듈의 install→start 순서 보존), **레인끼리는 병렬**이다: VIP 가 걸린 A/S 그룹은 배포 생성마다 `update_ha` 가 큐에 들어가고 그 job 이 keepalived **dpkg 설치**를 포함하는데, 단일 worker 에서는 뒤따르는 모듈 install 이 수십 초~수 분 대기해 콘솔에서 `deploying` 에 멈춘 것처럼 보였다(실측). 두 작업은 자원이 겹치지 않는다(keepalived 유닛 vs 모듈 tarball). self-exec 계열(`upgrade_agent`/`rollback_agent`/`agent_restart`)은 worker 가 요청만 기록하고 execv 는 메인 루프가 수행:
    - `install` / `upgrade`: 패키지 다운로드 + tar 풀기 + config 이관
    - `start` / `stop` / `restart`: `install_path/cims.sh` 호출
    - `update_config`: `config.json` 재기록
+   - **관리평면 설정 자가 복구**: `start_oam` 은 `/health` 게이트를 통과한 설정만 `config.json.last-good` 으로 승격하고, 기동 실패 시 그 값으로 되돌려 1회 재기동한다(실패 설정은 `config.json.failed-<시각>` 보관, 되돌림은 `config.json.rolled-back` 마커 → 콘솔 배너). 관리평면은 자기가 복구 통로라 잘못된 설정 하나로 영구 정지될 수 있다 ([oam_ha.md](../features/oam_ha.md) §9.5)
+   - **base deps 보증기** (job 아님, 300초 루프): vendor deb(keepalived·NFS 클라이언트·공유 lib) 설치를 **백그라운드**에서 보증한다. 옛 구조는 heartbeat 루프 직전에 동기로 호출해, dpkg OS 락(`unattended-upgrade` 가 새 서버에서 수 분 점유)을 기다리는 동안 agent 가 **pending 으로 고착**했다(실측 102초). 상태 판정은 `cims-priv base-deps-status`(설치 없이 조회만, 락 무관)
+   - **keepalived 설치 보증기** (job 아님, 상태 기반 60초 루프): ha.json 에 VIP 서비스가 있는데(무장) keepalived 패키지가 없으면 `install → config → apply` 를 재시도한다. 설치를 시도하는 주체가 `update_ha` job 뿐이면, 한 번 실패하고 이벤트가 소진됐을 때 **아무도 다시 시도하지 않아** VIP 주인이 영영 없고 cold 모듈(관리평면 포함)이 어디서도 기동하지 못한다(실측). 실패 원인은 대개 일시적이다 — 우분투 `unattended-upgrade` 가 수 분간 dpkg 를 점유(실측 14:21~14:28). 평가 루프를 막지 않도록 전용 스레드에서 돈다
+   - `migrate_oam_store`: **관리 store 를 공유 마운트(NAS)로 이관** — 마운트·write 확인 → 모듈 정지 → 복사(`_secrets`·`cert` 제외, target 에 없는 항목만=멱등) → `config.json` 기록 → 기동. OAM 은 자기 store 를 자기가 옮길 수 없어 agent 가 주체다. 실패 시 **구 설정으로 되돌려 기동** ([oam_ha.md](../features/oam_ha.md) §9.4)
+   - `set_oam_url`: **OAM 접속 주소 재지정** — 새 주소로 `/health` 도달 확인 후 `<state-dir>/oam_url` 기록 + self-restart. 도달 불가 시 미변경·실패(이중화 전환 시 fleet 단절 방지)
    - `uninstall`: install_path 제거
    - `upgrade_agent`: 신 버전을 `agent/<신버전>/` 에 전개 → `current` flip → execv self-restart
    - `rollback_agent`: `current` 를 직전(또는 지정) 버전 디렉토리로 flip → execv (다운로드 불요)

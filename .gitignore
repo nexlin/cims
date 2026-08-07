@@ -14,6 +14,11 @@ provision-site/
 # 무관하게 ems/runtime/cert 에 생성). 절대 커밋 금지.
 ems/runtime/
 
+# agent 런타임 상태 — 레포에서 cims_agent.py 를 직접 실행하면 생긴다.
+# run/keepalived/ha.json (VIP·피어 구성), run/ha/ (역할·op grace 마커) 는 전부
+# **노드 로컬** 값이라 레포에 들어가면 다른 노드에서 오동작한다.
+/run/
+
 **/*.pyc
 **/*.pyo
 

@@ -10,6 +10,8 @@
 #   sudo -n cims-priv ip-del <iface> <cidr>
 #   sudo -n cims-priv route-add <dest_cidr> <via> <dev>
 #   sudo -n cims-priv route-del <dest_cidr> <via> <dev>
+#   sudo -n cims-priv keepalived-unmask               # 설치 중단으로 남은 mask 잔재 해제
+#   sudo -n cims-priv policy-rc-clear                 # 구버전이 남긴 policy-rc.d 잔재 제거
 #   sudo -n cims-priv version
 #
 # ip-add 는 항상 'label <iface>:cims' 를 부여 — collect_interfaces 가 label 로
@@ -164,6 +166,39 @@ valid_target() {
 
 valid_nospace() { [[ -n "$1" && ! "$1" =~ [[:space:]] ]] || { err "invalid (empty/contains space): '$1'"; return 1; }; }
 
+# cims 내부 dpkg 직렬화 — agent job worker 가 module/ha 레인으로 병렬 실행되므로
+# 우리 쪽 dpkg 호출(keepalived / NFS·CIFS 클라이언트 / base deps)이 겹칠 수 있다.
+# dpkg 는 동시 실행 불가라 **락을 잡은 채로** 실행해 줄을 세운다(대기만 하고 놓으면 무의미).
+# flock 이 없거나 타임아웃이면 그대로 실행 — 뒤의 재시도·backoff 가 경합을 담당한다.
+_CIMS_DPKG_LOCK="/var/lock/cims-dpkg.lock"
+
+_cims_dpkg() {                     # _cims_dpkg <cmd...> — 락 보유 상태로 실행
+    if command -v flock >/dev/null 2>&1; then
+        flock -w 300 "$_CIMS_DPKG_LOCK" "$@"
+    else
+        "$@"
+    fi
+}
+
+# cims-ha 가 dpkg 구간에 만든 policy-rc.d(exit 101) 잔재 제거.
+#   상위(agent)가 타임아웃으로 cims-ha 를 **kill** 하면 스크립트의 trap 이 실행되지 않아
+#   파일이 남고, 그러면 **그 호스트의 모든 패키지 서비스 자동기동이 차단**된다(실측 사고).
+#   우리 마커가 있는 파일만 지운다 — 타 도구/운영자가 만든 파일은 건드리지 않는다.
+POLICY_RC_PATH="/usr/sbin/policy-rc.d"
+POLICY_RC_MARK="cims-ha managed"
+
+do_policy_rc_clear() {
+    if [[ ! -e "$POLICY_RC_PATH" ]]; then
+        info "policy-rc.d 없음 (정상)"
+        return 0
+    fi
+    if grep -qF "$POLICY_RC_MARK" "$POLICY_RC_PATH" 2>/dev/null; then
+        rm -f "$POLICY_RC_PATH" && ok "cims 소유 policy-rc.d 잔재 제거 — 서비스 자동기동 차단 해제"
+    else
+        info "policy-rc.d 가 cims 소유 아님 — 보존"
+    fi
+}
+
 _fstab_drop_target() {   # stdout: 주어진 target 의 cims-managed 라인을 제외한 fstab 내용
     awk -v tgt="$1" -v tag="$CIMS_MNT_TAG" '!($2==tgt && index($0,tag)>0)' "$FSTAB"
 }
@@ -183,9 +218,11 @@ ensure_fs_client() {
     fi
     if ls "$vdir"/*.deb >/dev/null 2>&1; then
         info "$helper 미설치 — vendor offline 설치 ($vdir)"
-        if ! dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1; then
-            apt-get -y --fix-broken install >/dev/null 2>&1 || true
-            dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1 || {
+        # 우리 쪽 다른 dpkg 작업(keepalived 설치 등)과 겹치지 않게 락을 잡고 실행한다 —
+        # agent job worker 가 module/ha 레인으로 병렬 실행되므로 동시 호출이 가능하다.
+        if ! _cims_dpkg dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1; then
+            _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y --fix-broken install >/dev/null 2>&1 || true
+            _cims_dpkg dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1 || {
                 err "$fstype client vendor 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"
                 return 1
             }
@@ -272,13 +309,74 @@ do_net_sysctl() {
 # 안 써서 의존성이 빠진 노드(예: media01 가 HA 미사용이라 libmnl 누락→ip 깨짐) 류
 # 버그 원천 차단. idempotent: 이미 정상(ip+keepalived+mount.nfs 존재)이면 skip 하여
 # 매 부팅 dpkg 재실행/서비스 교란(특히 HA 노드 keepalived flap)을 피한다.
+# keepalived 설치 경로는 **둘**이다: cims-ha install(update_ha 안)과 이 함수(agent 기동마다).
+# 그래서 cims-ha 에 넣은 보호(설치 중 서비스 기동 억제·상태 기반 판정·락 즉시 후퇴)를
+# 여기에도 같은 방식으로 적용한다 — 한쪽만 고치면 agent 재시작·fresh 노드에서 재발한다.
+_KA_MASKED_BY_US=0
+
+_priv_pkg_ok() {   # 상태 기반 판정 — 실행 성공(-v)이 아니라 dpkg 상태가 정본
+    [[ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null)" == "install ok installed" ]]
+}
+
+_priv_mask_ka() {
+    if [[ "$(systemctl is-enabled keepalived 2>/dev/null)" == "masked" ]]; then
+        _KA_MASKED_BY_US=1     # 잔재 — 우리가 정리한다
+    else
+        systemctl mask keepalived >/dev/null 2>&1 && _KA_MASKED_BY_US=1
+    fi
+    trap '_priv_unmask_ka' EXIT TERM INT HUP
+}
+
+_priv_unmask_ka() {
+    [[ $_KA_MASKED_BY_US -eq 1 ]] || return 0
+    systemctl unmask keepalived >/dev/null 2>&1 || true
+    _KA_MASKED_BY_US=0
+    trap - EXIT TERM INT HUP
+}
+
+# dpkg -i (락 경합이면 2 반환 — fix-broken 도 같은 락을 요구하므로 상위가 시도하지 않게)
+_priv_dpkg_install() {
+    local try out rc
+    # 락 대기는 cims-ha 와 같은 기조 — unattended-upgrade 가 수 분간 점유한다(실측).
+    for ((try = 1; try <= 5; try++)); do
+        out=$(_cims_dpkg dpkg -i --force-confnew --force-overwrite "$@" 2>&1); rc=$?
+        [[ $rc -eq 0 ]] && return 0
+        # 정확 문구만 락으로 본다 — 부분일치(`lock`)는 'block' 같은 무관한 출력도 잡는다.
+        if printf '%s' "$out" | grep -qiE 'dpkg frontend lock|Could not get lock|lock .* (is )?held by|dpkg status database is locked|another process (is )?using'; then
+            info "dpkg 락 경합 (시도 $try/5) — 20s 후 재시도"; sleep 20; continue
+        fi
+        printf '%s\n' "$out" | tail -3 > /tmp/cims-priv.err
+        return $rc
+    done
+    echo "dpkg 락이 풀리지 않음 (apt.systemd.daily/unattended-upgrade)" > /tmp/cims-priv.err
+    return 2
+}
+
+do_base_deps_status() {   # 0=완비, 1=미완비. vendor deb 의 Package 들이 설치돼 있는지만 본다.
+    local missing="" d name
+    for d in "$VENDOR_DIR"/*/*.deb; do
+        [[ -e "$d" ]] || continue
+        name=$(dpkg-deb -f "$d" Package 2>/dev/null) || continue
+        dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q "install ok installed" \
+            || missing+=" $name"
+    done
+    if [[ -n "$missing" ]]; then
+        info "base deps 미완비:$missing"
+        return 1
+    fi
+    ok "base deps 완비"
+    return 0
+}
+
 do_ensure_base_deps() {
     local need=0
     "$IP_CMD" -j addr >/dev/null 2>&1                                   || need=1
-    command -v keepalived >/dev/null 2>&1                              || need=1
+    # 상태 기반 — iF(half-configured) 도 "미완비" 로 잡힌다. 실행 성공 여부로 판정하면
+    # 공유 라이브러리 갱신 순간에 실패해 불필요한 재설치 루프를 만든다.
+    _priv_pkg_ok keepalived                                            || need=1
     { command -v mount.nfs >/dev/null 2>&1 || [[ -x /sbin/mount.nfs ]]; } || need=1
     if [[ $need -eq 0 ]]; then
-        ok "base deps 정상 (ip/keepalived/mount.nfs 존재 — 설치 불필요)"
+        ok "base deps 정상 (ip/keepalived/mount.nfs — 설치 불필요)"
         return 0
     fi
     local debs=()
@@ -287,13 +385,35 @@ do_ensure_base_deps() {
     if [[ ${#debs[@]} -eq 0 ]]; then
         err "vendor deb 없음 ($VENDOR_DIR) — agent 패키지 vendor/ 확인"; exit 3
     fi
-    info "base deps 미완비 — vendor offline 균일 설치 (${#debs[@]} deb)"
-    if ! dpkg -i --force-confnew --force-overwrite "${debs[@]}" >/tmp/cims-priv.err 2>&1; then
-        apt-get -y --fix-broken install >/dev/null 2>&1 || true
-        dpkg -i --force-confnew --force-overwrite "${debs[@]}" >/tmp/cims-priv.err 2>&1 || {
-            err "base deps 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"; exit 3
-        }
+    # 설치 구간 서비스 기동 억제 — postinst 가 conf(vrrp_instance) 없이 keepalived 를
+    # 기동하면 systemd 90초 타임아웃 → configure 실패 → 패키지가 iF 로 갇힌다(실측 사고).
+    _priv_mask_ka
+    # half-configured 는 재설치가 아니라 configure 완료가 정답.
+    if ! _priv_pkg_ok keepalived && dpkg -l keepalived 2>/dev/null | grep -q "^iF"; then
+        info "keepalived half-configured(iF) — dpkg --configure 로 복구 시도"
+        _cims_dpkg dpkg --configure -a >/dev/null 2>&1 || true
     fi
+    if _priv_pkg_ok keepalived && "$IP_CMD" -j addr >/dev/null 2>&1 \
+       && { command -v mount.nfs >/dev/null 2>&1 || [[ -x /sbin/mount.nfs ]]; }; then
+        _priv_unmask_ka
+        ok "base deps 복구 완료 (configure 만으로 해소 — 재설치 불필요)"
+        return 0
+    fi
+    info "base deps 미완비 — vendor offline 균일 설치 (${#debs[@]} deb)"
+    local rc=0
+    _priv_dpkg_install "${debs[@]}" || rc=$?
+    if [[ $rc -eq 2 ]]; then
+        _priv_unmask_ka
+        err "base deps 설치 보류 — dpkg 락 경합 (다음 agent 기동/HA 적용 시 재시도)"
+        exit 3
+    elif [[ $rc -ne 0 ]]; then
+        _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y --fix-broken install >/dev/null 2>&1 || true
+        if ! _priv_dpkg_install "${debs[@]}"; then
+            _priv_unmask_ka
+            err "base deps 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"; exit 3
+        fi
+    fi
+    _priv_unmask_ka
     # keepalived 는 '설치'만 균일하게. '실행'은 cims-ha(config)가 제어 — config 없는
     # 노드(비-HA)서 dpkg postinst 자동기동 잔재를 비활성화. config 있으면(HA 노드)
     # cims-ha 가 관리하므로 건드리지 않음(VIP flap 방지).
@@ -302,6 +422,18 @@ do_ensure_base_deps() {
     fi
     ok "base deps 설치 완료 (${#debs[@]} deb; keepalived 실행은 config 활성 시 cims-ha 가 기동)"
     rm -f /tmp/cims-priv.err
+}
+
+# agent 기동 자가복구 — 설치가 중단돼(SIGKILL 등) 남은 mask 잔재 해제.
+# 남으면 apply 의 start 가 "Unit is masked" 로 실패해 VIP 가 안 붙는다.
+do_keepalived_unmask() {
+    if [[ "$(systemctl is-enabled keepalived 2>/dev/null)" == "masked" ]]; then
+        systemctl unmask keepalived >/dev/null 2>&1 \
+            && ok "keepalived mask 잔재 해제 (설치 중단으로 남았던 것)" \
+            || { err "unmask 실패"; exit 3; }
+    else
+        info "keepalived mask 잔재 없음 (정상)"
+    fi
 }
 
 do_net_rps() {
@@ -347,6 +479,19 @@ case "${1:-}" in
     mount-del)
         [[ $# -eq 2 ]] || { err "usage: cims-priv mount-del <target>"; exit 1; }
         do_mount_del "$2"
+        ;;
+    base-deps-status)
+        # 설치하지 않고 **상태만** 판정 (dpkg 락과 무관) — 보증기 루프가 쓴다.
+        [[ $# -eq 1 ]] || { err "usage: cims-priv base-deps-status"; exit 1; }
+        do_base_deps_status
+        ;;
+    keepalived-unmask)
+        [[ $# -eq 1 ]] || { err "usage: cims-priv keepalived-unmask"; exit 1; }
+        do_keepalived_unmask
+        ;;
+    policy-rc-clear)
+        [[ $# -eq 1 ]] || { err "usage: cims-priv policy-rc-clear"; exit 1; }
+        do_policy_rc_clear
         ;;
     net-sysctl)
         [[ $# -eq 3 ]] || { err "usage: cims-priv net-sysctl <key> <value>"; exit 1; }

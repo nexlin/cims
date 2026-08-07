@@ -306,6 +306,24 @@ async def proxy(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
 #  register_gateway — --role base 시작 시 세그먼트별 프록시 마운트
 # ──────────────────────────────────────────────────────────────────────────
 
+def _config_rollback_mark() -> "str | None":
+    """배포 overlay 옆의 `config.json.rolled-back` 마커 — 되돌린 시각(ISO) 또는 None.
+
+    agent 의 `start_oam` 이 기동 실패 시 직전 정상 설정으로 되돌리면 남긴다
+    (lifecycle.sh `_oam_rollback_last_good`). 다음 성공 기동에서 지워진다."""
+    import os as _os
+    try:
+        base = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))  # .../oam/src → .../oam
+        for cand in (_os.path.join(base, 'config.json.rolled-back'),
+                     _os.path.join(_os.path.dirname(base), 'config.json.rolled-back')):
+            if _os.path.isfile(cand):
+                with open(cand) as f:
+                    return (f.read().strip() or 'unknown')[:64]
+    except Exception:
+        pass
+    return None
+
+
 def register_gateway(admin_server, config: dict) -> int:
     """라우트 테이블의 enabled 라우트마다 프록시 동적 라우트를 등록.
     반환=마운트한 라우트 수. base 고유 경로(/api/v1/users/me 등)는 controller 최장 일치로
@@ -468,8 +486,25 @@ async def handle_gateway(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
             items.append({'segment': r.get('segment'), 'upstream': r.get('upstream'),
                           'module': r.get('module'), 'enabled': r.get('enabled', True),
                           'alive': bool(ok) if not isinstance(ok, Exception) else False})
+        # 관리 store 소유권(리스) 상태 동봉 — 콘솔이 read-only 배너를 띄우는 근거.
+        # (base 평면 상태를 한 응답으로 보게 해 새 라우트를 늘리지 않는다.)
+        from services import lease as _lease
+        _ls = _lease.state()
         return HandlerResult(status=200, body={'proxy_enabled': aiohttp is not None,
-                                               'routes': items})
+                                               'routes': items,
+                                               'lease': {
+                                                   'active': bool(_ls.get('active')),
+                                                   'reason': _ls.get('reason'),
+                                                   'node_id': _ls.get('node_id'),
+                                                   'epoch': _ls.get('epoch'),
+                                                   'lost_at': _ls.get('lost_at'),
+                                               },
+                                               'read_only': not bool(_ls.get('active')),
+                                               # 설정 자가 복구 흔적 — agent 가 기동 실패 후
+                                               # 직전 정상 설정으로 되돌렸으면 마커가 남는다.
+                                               # 조용히 되돌리면 운영자는 자기가 저장한 설정이
+                                               # 적용된 줄 알기 때문에 반드시 노출한다.
+                                               'config_rolled_back': _config_rollback_mark()})
 
     # /api/v1/gateway/routes ...
     if parts and parts[0] == 'routes':

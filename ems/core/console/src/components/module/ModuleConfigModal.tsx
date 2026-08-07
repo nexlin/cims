@@ -109,7 +109,13 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   const saveConfig = useCallback(async (vals: Record<string, FieldValue>,
                                         changedKeys: Set<string>) => {
     if (source.type === 'deployment') {
-      const r = await deploymentApi.putDeploymentConfig(source.deployment.id, vals, true)
+      // 변경된 키만 전송 — 서버는 기존 overlay 에 병합한다. 전체 값을 되돌려 보내면
+      // 화면에 빈칸으로 보이던 값(다른 노드에서 만들어진 _infra 시크릿 등)이 빈 값으로
+      // 덮여 사라진다(시크릿 소실 → 전면 401). 시크릿은 조회 시 마스킹돼 오므로
+      // 손대지 않은 필드는 애초에 changed 에 들어오지 않는다.
+      const payload: Record<string, FieldValue> = {}
+      for (const k of changedKeys) payload[k] = vals[k]
+      const r = await deploymentApi.putDeploymentConfig(source.deployment.id, payload, true)
       return {
         ok: true,
         message: r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨',

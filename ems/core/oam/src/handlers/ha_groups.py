@@ -20,9 +20,12 @@ from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 import asyncio
 import json
+import os
+import re
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services import file_store, service_registry
+from services.lease import LeaseLostError
 from util.log_util import Logger
 
 logger = Logger()
@@ -200,6 +203,11 @@ def _normalize_module_spec(raw) -> dict:
     lcm = str(sf.get('latch_clear_mode') or '').lower()
     if lcm not in ('auto', 'manual'):
         lcm = 'auto' if sclass in ('stateless', 'read_only') else 'manual'
+    safety = {'class': sclass, 'latch_clear_mode': lcm}
+    # 리더 리스 요구 — 공유 볼륨 단일 writer 가 전제인 모듈(관리평면). 소유권 리스를
+    # 못 잡으면 write 를 거부해야 하므로 명세로 노출한다(oam_ha.md §4.4·§6.2).
+    if sf.get('requires_leader_lease') is not None:
+        safety['requires_leader_lease'] = bool(sf.get('requires_leader_lease'))
     return {
         'supervision': {'watchdog': bool(sup.get('watchdog', True))},
         'ha': {
@@ -207,14 +215,203 @@ def _normalize_module_spec(raw) -> dict:
             'failover_relevant': bool(ha.get('failover_relevant', True)),
         },
         'health': health,
-        'safety': {'class': sclass, 'latch_clear_mode': lcm},
+        'safety': safety,
     }
 
 
+def _descriptor_module_spec_defaults(mod: str) -> dict:
+    """service descriptor 가 데이터로 선언한 모듈 기본 명세 (현재 safety 블록).
+
+    코드 상수가 아니라 descriptor(데이터)가 SoT — 관리평면처럼 `shared_writer` 로 다뤄야
+    하는 모듈이 그룹마다 수동 설정 없이도 올바른 등급을 갖게 한다."""
+    try:
+        m = (service_registry.all_modules() or {}).get(mod) or {}
+    except Exception:
+        return {}
+    out = {}
+    if isinstance(m.get('safety'), dict):
+        out['safety'] = dict(m['safety'])
+    return out
+
+
+def _normalize_shared_store(raw) -> dict:
+    """공유 store 스펙 정규화 — 관리평면 store 가 놓인 **공유 마운트 지점**.
+
+    `{mount_point}` 하나다. 마운트 자체(NFS/CIFS 소스·옵션·fstab 영속)는 서버별 마운트
+    관리가 담당하므로 그룹은 **어느 경로를 store 로 쓰는지**만 안다. 양 노드가 이 경로를
+    상시 마운트하고, VIP 를 가진 노드만 소유권 리스를 잡아 write 한다 (oam_ha.md §4).
+
+    절대경로여야 하고 `..` 는 불허. 유효하지 않으면 빈 dict(= 공유 store 미사용)."""
+    if not isinstance(raw, dict):
+        return {}
+    mp = str(raw.get('mount_point') or '').strip().rstrip('/')
+    if not (mp.startswith('/') and '..' not in mp):
+        return {}
+    return {'mount_point': mp or '/'}
+
+
+def _mount_point_unverified(config: dict, group: dict, store: dict) -> dict:
+    """공유 store 의 `mount_point` 가 **각 멤버의 실제 마운트**인지 확인.
+
+    자유 입력을 그대로 받으면 마운트가 아닌 하위 경로가 저장되고, OAM 은 mount guard 로
+    기동을 거부한다 — 콘솔이 사라져 되돌릴 통로까지 없어진다(실측 사고:
+    `/NAS/cims_johnyim/oam_store` 를 지정했으나 실제 마운트는 `/NAS` 하나였다).
+
+    판정 근거는 agent 가 heartbeat 로 보고하는 `mount_targets`(cims-managed 아닌 기존
+    마운트 포함)다. 아직 보고가 없는 노드는 판정하지 않는다(신규 노드 차단 방지).
+
+    반환: {'bad': [{agent_id, name, available:[...]}], 'checked': n} — bad 가 비면 정합.
+    """
+    from handlers.agents import _agent_load
+    mp = (store or {}).get('mount_point') or ''
+    out = {'bad': [], 'checked': 0}
+    if not mp:
+        return out
+    for m in (group.get('members') or []):
+        try:
+            ag = _agent_load(config, aid=m.get('agent_id')) or {}
+        except Exception:
+            continue
+        mts = ag.get('mount_targets')
+        if not isinstance(mts, list) or not mts:
+            continue                       # 보고 없음 — 판정 유보
+        out['checked'] += 1
+        targets = {str(x.get('target') or '').rstrip('/') for x in mts if isinstance(x, dict)}
+        if mp not in targets:
+            out['bad'].append({'agent_id': m.get('agent_id'),
+                               'name': ag.get('name') or f"agent#{m.get('agent_id')}",
+                               'available': sorted(t for t in targets if t)})
+    return out
+
+
+def _group_hosts_oam(config: dict, group: dict, all_deps: list | None = None) -> bool:
+    """이 그룹이 **관리평면(oam)** 을 호스팅하는가 — 멤버에 oam 배포가 있는지로 판정."""
+    from handlers.agents import _deploy_load_all
+    aids = {m.get('agent_id') for m in (group.get('members') or [])}
+    for d in (all_deps if all_deps is not None else _deploy_load_all(config)):
+        if d.get('agent_id') in aids and d.get('status') != 'removed' \
+                and (d.get('process_name') or '').lower().strip() == 'oam':
+            return True
+    return False
+
+
+def _agents_not_on_vip(config: dict, group: dict, all_agents: list | None = None,
+                       all_deps: list | None = None) -> list:
+    """그룹 VIP 가 아닌 주소로 OAM 에 보고하는 agent 목록.
+
+    절체는 VIP 를 옮기는 것이므로, agent 가 **구 Active 의 노드 IP** 를 보고 있으면 절체 후
+    그 주소가 죽어 **fleet 전체가 OAM 과 단절**된다(실측: 절체는 성공했는데 콘솔에 전 노드
+    offline, 모듈 상태는 절체 직전 값으로 고착). 판정 근거는 agent 가 heartbeat 로 보고하는
+    `oam_url` 이다.
+
+    **관리평면(oam)을 호스팅하는 그룹에서만** 의미가 있다. agent 는 OAM 주소 하나만 보므로,
+    Signaling·Media 처럼 oam 이 없는 그룹의 VIP 와 비교하면 전원이 "어긋남" 으로 잡혀
+    그 그룹의 절체까지 막힌다(실측). 그런 그룹은 절체해도 OAM 주소와 무관하다.
+
+    그룹에 VIP 가 없으면(단일 노드) 대상이 아니다. 보고가 없는 agent(구 버전)는 판정 유보.
+    반환: [{agent_id, name, oam_url}] — 비어 있으면 전원 정상.
+    """
+    from services import ha_lookup
+    from handlers.agents import _agent_load_all
+    vips = set(ha_lookup.group_vip_set(group) or [])
+    if not vips:
+        return []
+    if not _group_hosts_oam(config, group, all_deps):
+        return []
+    out = []
+    # `all_agents` 를 넘기면 재조회하지 않는다 — 여러 그룹을 직렬화할 때 그룹마다 전 agent 를
+    # 다시 읽으면 **O(그룹수 × agent수)** 가 된다(2초 폴링 × NFS 5ms/파일 = 체감 지연).
+    # 배포 목록에 이미 같은 실수를 했고 프리페치로 고쳤다 — 같은 규칙을 여기에도 적용한다.
+    # 그룹 멤버뿐 아니라 **전 agent** 가 대상이다 — 관리평면 주소는 fleet 공통이다.
+    for r in (all_agents if all_agents is not None else _agent_load_all(config)):
+        if (r.get('status') or '') == 'revoked':
+            continue
+        url = (r.get('oam_url') or '').strip()
+        if not url:
+            continue                       # 보고 없음(구 agent) — 판정 유보
+        try:
+            from urllib.parse import urlparse as _up
+            host = _up(url).hostname or ''
+        except Exception:
+            host = ''
+        if host in vips:
+            continue
+        # loopback 은 그 노드 자신의 OAM — Active 가 바뀌면 역시 끊긴다
+        out.append({'agent_id': r.get('id'), 'name': r.get('name'), 'oam_url': url})
+    return out
+
+
+def _store_path_conflicts(config: dict, group: dict, store: dict) -> list:
+    """공유 store 경로와 **실제 배포설정이 어긋난** oam/oam-svc 목록.
+
+    그룹에 공유 store 만 지정하고 배포설정(`CimsRuntimeDir`)은 노드 로컬로 남겨두면,
+    oam/oam-svc 는 HA 편입되지만(절체 대상) 데이터는 노드마다 따로 있다 — 절체하면 신
+    Active 가 **빈 콘솔**로 뜬다. 정확히 과거 사고 상태이므로 만들 수 없게 막는다.
+
+    반환: [{agent_id, process_name, runtime_dir}] — 비어 있으면 정합.
+    """
+    from handlers.agents import _deploy_load_all, _pkg_load, _materialize_deploy_config
+    mnt = (store or {}).get('mount_point') or ''
+    if not mnt:
+        return []
+    aids = {m.get('agent_id') for m in (group.get('members') or [])}
+    bad = []
+    for d in _deploy_load_all(config):
+        mod = (d.get('process_name') or '').lower().strip()
+        if d.get('agent_id') not in aids or d.get('status') == 'removed':
+            continue
+        if mod not in ('oam', 'oam-svc'):
+            continue
+        try:
+            pkg = _pkg_load(config, d.get('package_id'))
+            eff = _materialize_deploy_config(config, pkg, d.get('config')) or {}
+        except Exception:
+            eff = d.get('config') if isinstance(d.get('config'), dict) else {}
+        rt = str(eff.get('CimsRuntimeDir') or '').rstrip('/')
+        if not rt or not (rt == mnt or rt.startswith(mnt + '/')):
+            bad.append({'agent_id': d.get('agent_id'), 'process_name': mod,
+                        'runtime_dir': rt or '(미지정 — 노드 로컬)'})
+    return bad
+
+
+def _lease_precondition_unmet(group: dict, mod: str) -> "str | None":
+    """`requires_leader_lease` 선언의 **집행** — 전제 미충족 사유. 충족이면 None.
+
+    `safety.requires_leader_lease` 는 "이 모듈은 단일 writer 자원(관리 store)을 소유하므로
+    **그 자원이 노드 간 이동 가능해야** 절체가 성립한다" 는 선언이다. 전제가 없으면 절체는
+    '서비스 이관' 이 아니라 **상태 상실**이 된다(관리평면이면 빈 콘솔).
+
+    옛 구현은 이 선언을 저장·전달만 하고 **아무도 검사하지 않았다** — 그래서 공유 store 가
+    없는 상태에서도 oam/oam-svc 가 cold 모듈로 편입돼 절체 대상이 됐고, 실제로 절체 후
+    관리 데이터가 없는 노드가 Active 가 되는 사고가 났다. 선언과 집행을 여기서 잇는다.
+
+    특정 모듈 이름을 하드코딩하지 않는다 — 같은 선언을 가진 모든 모듈이 같은 보호를 받는다.
+    """
+    if not _module_spec(group, mod)['safety'].get('requires_leader_lease'):
+        return None
+    if group.get('mode') != 'active_standby':
+        return None                     # 절체가 없는 모드 — 전제 불필요
+    if not _normalize_shared_store(group.get('shared_store')):
+        return 'no_shared_store'        # 공유 store 미설정 → 상태가 노드에 묶여 있다
+    return None
+
+
 def _module_spec(group: dict, mod: str) -> dict:
-    """group.module_specs[mod] 의 실효 명세 (미지정 모듈은 default)."""
+    """group.module_specs[mod] 의 실효 명세.
+
+    우선순위: 운영자 설정(group.module_specs) > service descriptor 기본값 > 전역 default.
+    (sub-dict 는 키 단위 병합 — 운영자가 safety.class 만 지정해도 descriptor 의 나머지
+    안전 속성이 유지된다.)"""
     specs = group.get('module_specs') if isinstance(group.get('module_specs'), dict) else {}
-    return _normalize_module_spec(specs.get(mod))
+    raw = specs.get(mod) if isinstance(specs.get(mod), dict) else {}
+    base = _descriptor_module_spec_defaults(mod)
+    merged = dict(base)
+    for k, v in (raw or {}).items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    return _normalize_module_spec(merged)
 
 
 def _migrate_module_specs(group: dict) -> bool:
@@ -273,6 +470,11 @@ def _ensure_group_migrated(group: dict, config: dict) -> bool:
     if _migrate_module_specs(group):
         changed = True
     if _migrate_drop_ha_mode(group):
+        changed = True
+    # DRBD 시절의 `volume` 키 제거 — 지금 store 스펙은 `shared_store` 다. 남겨두면
+    # 콘솔·API 응답에 의미 없는 값이 보여 운영자가 이중화된 줄 오해한다.
+    if 'volume' in group:
+        group.pop('volume', None)
         changed = True
     return changed
 
@@ -363,18 +565,22 @@ def _iface_ip(agent_row: dict, iface_name: str) -> str:
 # 해결: ha.json render 시 그룹 멤버 deployment 들의 daemon module 을 보고
 # 대표 module 의 default port/proto 를 services.<group> 에 자동 채워준다.
 _MODULE_HEALTH_DEFAULTS = {
-    'csp':   (5060, 'udp'),
-    'isp':   (5060, 'udp'),
-    'psp':   (5060, 'udp'),
-    'csc':   (4421, 'tcp'),
-    'cmp':   (9000, 'udp'),
-    'imp':   (9000, 'udp'),
-    'pmp':   (9000, 'udp'),
+    'csp':     (5060, 'udp'),
+    'isp':     (5060, 'udp'),
+    'psp':     (5060, 'udp'),
+    'csc':     (4421, 'tcp'),
+    'cmp':     (9000, 'udp'),
+    'imp':     (9000, 'udp'),
+    'pmp':     (9000, 'udp'),
+    'oam':     (4419, 'tcp'),
+    'oam-svc': (4480, 'tcp'),
 }
 # 동일 그룹에 여러 daemon module 이 deployed 되어 있을 때의 우선순위.
 # Control: csp 가 핵심 (SIP signaling) — psp/isp/csc 는 부수.
 # Media: cmp 가 핵심 (RTP relay).
-_HEALTH_MODULE_PRIORITY = ['csp', 'cmp', 'csc', 'psp', 'isp', 'pmp', 'imp']
+# 관리평면(oam/oam-svc)은 **맨 뒤** — 서비스 모듈과 동거하는 그룹에서 대표를 가로채지
+# 않게. 모듈별 감시는 service 레벨 대표가 아니라 `module_health` 맵이 담당한다(§3.1).
+_HEALTH_MODULE_PRIORITY = ['csp', 'cmp', 'csc', 'psp', 'isp', 'pmp', 'imp', 'oam', 'oam-svc']
 
 
 def _csc_effective_health_port(dep: dict, config: dict):
@@ -504,7 +710,9 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     intent_running = {m for m, s in intent.items() if s == 'running'}
 
     # cims-health 가 lookup 하는 port/proto — running 의도 모듈의 배포로 유도.
-    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config, allowed=intent_running) if config else (None, None, None)
+    # 대표 헬스 모듈 선정에서도 전제 미충족 모듈은 제외한다(제외 모듈은 HA 관리 대상이 아님).
+    _allowed_health = {m for m in intent_running if not _lease_precondition_unmet(group, m)}
+    h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config, allowed=_allowed_health) if config else (None, None, None)
 
     failover_options = _normalize_failover_options(group.get('failover_options'))
     # 그룹 옵션의 수동 오버라이드가 최우선 (운영자 명시 > 배포 실효설정 유도 > descriptor 기본).
@@ -547,6 +755,23 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     # armed daemon 모듈 = 이 agent 에 배포된 daemon 모듈 ∩ running 의도.
     daemon_mods = [m for m in (_agent_daemon_modules(agent_id, config) if config else [])
                    if m in intent_running]
+    # 선언 집행 — 전제(단일 writer 볼륨) 미충족 모듈은 **HA 관리에서 제외**한다.
+    #   제외 = cold/relevant/health 대상 아님 = 절체로 이동하지 않는다. 조용히 빠지면
+    #   운영자는 이중화가 되는 줄 아므로 **사유를 ha.json·그룹 응답에 노출**한다.
+    ha_excluded: dict = {}
+    _kept: list = []
+    for _m in daemon_mods:
+        _why = _lease_precondition_unmet(group, _m)
+        if _why:
+            ha_excluded[_m] = _why
+        else:
+            _kept.append(_m)
+    if ha_excluded:
+        logger.log_warning(
+            f"[ha-render] group#{group.get('id')}({group.get('name')}) agent#{agent_id} — "
+            f"전제 미충족으로 HA 편입 제외: {ha_excluded} "
+            f"(공유 store 설정 후 자동 편입. 상세: docs/design/features/oam_ha.md §4)")
+    daemon_mods = _kept
     # cold-spare 절체 대상 — AS 그룹의 armed daemon 중 명세 failover_mode 가 hot 이 아닌
     # 전부(기본 cold). cims-notify 가 MASTER 승격 시 start / BACKUP·FAULT 강등 시 stop.
     # relevant_modules = 실패가 절체 사유가 되는 모듈 (cims-health 가 재기동 임계 판정).
@@ -557,6 +782,69 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                         if _module_spec(group, m)['ha']['failover_mode'] != 'hot']
         relevant_modules = [m for m in daemon_mods
                             if _module_spec(group, m)['ha']['failover_relevant']]
+
+    # ── 모듈별 health 맵 (oam_ha.md §3.1) ────────────────────────────────
+    # service 레벨 대표(health_module) 하나만 포트를 갖던 옛 렌더는, 한 그룹에 데몬이
+    # 여럿이면 나머지 모듈의 readiness 가 "프로세스 존재" 로 대체돼 **소켓만 살아있는
+    # 좀비를 영구히 놓친다**. 관리 모듈 전부에 자기 포트/해석 힌트를 내려보낸다.
+    #   우선순위: 운영자 module_specs.health > descriptor health(config_key/collection/
+    #   http_path) > descriptor 상수 port/proto. 실제 포트 해석은 agent 가 검사 시점에
+    #   노드 로컬 파일로 수행한다(배포기록↔실파일 드리프트에도 실제 bind 포트를 본다).
+    module_health: dict = {}
+    try:
+        _mh_defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
+        _mh_specs = service_registry.module_health_specs(config) or {}
+    except Exception:
+        _mh_defaults, _mh_specs = _MODULE_HEALTH_DEFAULTS, {}
+    for _m in sorted(set(relevant_modules) | set(cold_modules) | ({h_module} if h_module else set())):
+        if not _m:
+            continue
+        _e: dict = {}
+        _dp = _mh_defaults.get(_m)
+        if _dp:
+            _e['port'], _e['proto'] = int(_dp[0]), _dp[1]
+        _dh = _mh_specs.get(_m) or {}
+        _oh = _module_spec(group, _m).get('health') or {}
+        if _dh.get('config_key'):
+            _e['config_key'] = _dh['config_key']
+        if _dh.get('collection_file'):
+            _e['collection'] = {'file': _dh['collection_file'],
+                                'field': _dh.get('field') or 'bind_port',
+                                'match': _dh.get('match') or {}}
+        if _dh.get('http_path'):
+            _e['http_path'] = _dh['http_path']
+        # 모듈별 **기동 유예** — 이 시간 안의 readiness 실패는 좀비가 아니라 '기동 중'이다.
+        # 관리평면은 콜드스타트(인증서 재발급 등)가 20초를 넘겨 3초 상수로는 좀비 오판이
+        # 나고, 그 오판이 절체 래치를 걸어 콘솔이 사라졌다(실측 데드락).
+        if _dh.get('startup_grace_sec'):
+            _e['startup_grace_sec'] = int(_dh['startup_grace_sec'])
+        if _oh.get('startup_grace_sec'):
+            _e['startup_grace_sec'] = int(_oh['startup_grace_sec'])
+        # 운영자 오버라이드가 최우선 — 지정 시 포트 해석 힌트는 무시(명시 포트를 그대로 찔러야 함).
+        if _oh.get('port'):
+            _e['port'] = int(_oh['port'])
+            _e.pop('config_key', None)
+            _e.pop('collection', None)
+        if _oh.get('proto'):
+            _e['proto'] = _oh['proto']
+        elif not _e.get('proto'):
+            _e['proto'] = 'tcp'
+        if _oh.get('config_key'):
+            _e['config_key'] = _oh['config_key']
+        if _e.get('port') or _e.get('config_key') or _e.get('collection'):
+            module_health[_m] = _e
+
+    # **복구 통로**를 제공하는 모듈 — 콘솔을 서빙하는 base `oam`. agent 는 이 모듈만
+    # "상대 노드가 실제로 서비스 중일 때" 정지한다(자기보존). cold 규칙을 그대로 적용하면
+    # 래치·FAULT 상태에서 어느 노드에서도 콘솔이 뜨지 못해 설정을 고칠 통로가 사라진다
+    # (실측 데드락 — oam_ha.md §6.4). 동시 기동 위험은 소유권 리스가 담당한다.
+    # `oam-svc` 는 게이트웨이 뒤의 서비스라 그것만 살아도 콘솔이 열리지 않으므로 제외한다.
+    console_modules = sorted(
+        _m for _m in (set(relevant_modules) | set(cold_modules)) if _m == 'oam')
+
+    # 공유 store — 그룹 스코프(양 노드 동일 경로). agent 는 마운트를 조작하지 않고
+    # 승격 전 **마운트·write 가능 여부만 확인**한다(마운트는 fstab 이 영속).
+    shared_store = _normalize_shared_store(group.get('shared_store'))
 
     # running 의도 daemon 모듈이 없고 헬스포트도 없으면 미개시/빈 서버 — vrrp_instance
     # 를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵 + keepalived 정지 유지).
@@ -611,6 +899,10 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             if relevant_modules: entry['relevant_modules'] = relevant_modules
             if restart_limit: entry['restart_limit'] = restart_limit
             if safety_map: entry['module_safety'] = safety_map
+            if module_health: entry['module_health'] = module_health
+            if shared_store: entry['shared_store'] = shared_store
+            if console_modules: entry['console_modules'] = console_modules
+            if ha_excluded: entry['ha_excluded'] = ha_excluded
             services[group['name']] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
@@ -632,6 +924,10 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         if relevant_modules: entry['relevant_modules'] = relevant_modules
         if restart_limit: entry['restart_limit'] = restart_limit
         if safety_map: entry['module_safety'] = safety_map
+        if module_health: entry['module_health'] = module_health
+        if shared_store: entry['shared_store'] = shared_store
+        if console_modules: entry['console_modules'] = console_modules
+        if ha_excluded: entry['ha_excluded'] = ha_excluded
         services[group['name']] = entry
 
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
@@ -875,6 +1171,31 @@ def _enqueue_module_spec_for_members(group_id: int, config: dict) -> int:
     return enqueued
 
 
+def enqueue_module_spec_for_agent(agent_id: int, config: dict, module: str | None = None) -> int:
+    """이 agent 에 배포된 daemon 모듈의 운영 명세(service.json)를 push — 소속 그룹 기준.
+
+    **신규 설치 시딩**: 옛 동작은 명세 변경(_update_group) 시에만 push 해서, 갓 설치된
+    모듈은 service.json 이 없는 상태로 남았다(agent 는 watchdog=on default 로 동작 —
+    운영자가 감시 off 로 저장해둔 그룹에서도 새 노드만 on 으로 도는 비대칭). 배포 생성·
+    install 완료 시 이 함수로 해당 모듈 명세를 즉시 내려보낸다.
+    module 지정 시 그 모듈만, 없으면 이 agent 의 daemon 모듈 전부. 큐잉된 job 수 반환."""
+    groups = _ha_load_all(config)
+    group = next((g for g in groups
+                  if any(m.get('agent_id') == agent_id for m in (g.get('members') or []))), None)
+    if not group:
+        return 0        # HA 그룹 미소속 — 명세는 그룹×모듈 스코프라 내려보낼 근거가 없다
+    from handlers.agents import _job_create
+    mods = [module.lower().strip()] if module else _agent_daemon_modules(agent_id, config)
+    enqueued = 0
+    for mod in mods:
+        if not mod:
+            continue
+        _job_create(config, agent_id, 'update_module_spec',
+                    {'module': mod, 'spec': _module_spec(group, mod)})
+        enqueued += 1
+    return enqueued
+
+
 async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     """Dispatch /api/v1/ha-groups/* routes."""
     config = kwargs.get('config', {})
@@ -940,6 +1261,10 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         if sub == 'failover' and method == 'POST':
             return await _failover_group(gid, handler_args.body, config)
 
+        # 관리 store 를 공유 마운트로 이관 (AS 전용) — admin. 콘솔에서 원클릭.
+        if sub == 'shared-store' and member == 'migrate' and method == 'POST':
+            return await _migrate_shared_store(gid, handler_args.body, config)
+
         # 노드 유지보수(EXCLUDE_NODE) 토글 (AS 전용) — admin.
         if sub == 'maintenance' and method == 'POST':
             return await _maintenance_group(gid, handler_args.body, config)
@@ -965,11 +1290,14 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         return HandlerResult(status=404, body={'error': 'Not Found'})
-    except pymysql.IntegrityError as e:
-        # uk_agent (1 agent = 1 group) / uk_vrid 위반 등
-        return HandlerResult(status=409, body={'error': 'conflict', 'detail': str(e)})
-    except pymysql.Error as e:
-        return HandlerResult(status=500, body={'error': str(e)})
+    except LeaseLostError as e:
+        # 관리 store 소유권 없음 → read-only (oam_ha.md §4.4). 조회는 여기 오지 않는다.
+        return HandlerResult(status=409, body={'error': 'not_lease_owner', 'detail': str(e)})
+    except Exception as e:
+        # store 는 file_store(파일)다 — DB 예외 타입으로 잡으면 이 핸들러의 모든 오류가
+        # NameError 로 뒤바뀌어 실제 사유가 사라진다(과거 DB 시절 잔재).
+        logger.log_error(f"[ha-group] 처리 실패 {method} {handler_args.full_path}: {e}")
+        return HandlerResult(status=500, body={'error': 'internal_error', 'detail': str(e)})
 
 
 def _attach_member_names(members: list, config: dict) -> list:
@@ -997,7 +1325,10 @@ def _attach_derived_role(members: list) -> list:
     return members
 
 
-def _serialize_group(g: dict, config: dict) -> dict:
+def _serialize_group(g: dict, config: dict,
+                     all_deps: list | None = None,
+                     health_defaults: dict | None = None,
+                     all_agents: list | None = None) -> dict:
     """file_store group dict → 응답용 (멤버 정렬 + agent_name enrich + role derive).
 
     구 record 는 여기서(GET 경로) 신 스키마로 1회 마이그레이션·영속화한다 — 렌더
@@ -1018,6 +1349,24 @@ def _serialize_group(g: dict, config: dict) -> dict:
     out['module_specs'] = dict(out.get('module_specs') or {})
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
     out['failover_options'] = _normalize_failover_options(out.get('failover_options'))
+    # 선언 집행 결과 노출 — `requires_leader_lease` 전제 미충족으로 **HA 편입에서 제외된**
+    # 모듈과 사유. 조용히 빠지면 운영자는 이중화가 되는 줄 안다(실측 사고). 그룹에 배포된
+    # daemon 모듈 전체를 대상으로 계산한다(멤버별 렌더와 동일 기준).
+    try:
+        _excl = {}
+        for _m in sorted({(d.get('process_name') or '').lower().strip()
+                          for d in _group_member_daemon_deps(out, config,
+                                                              all_deps, health_defaults)
+                          if d.get('process_name')}):
+            _why = _lease_precondition_unmet(out, _m)
+            if _why:
+                _excl[_m] = _why
+        out['ha_excluded'] = _excl
+        # agent 주소가 VIP 가 아니면 절체 후 fleet 이 단절된다 — 조용히 두면 정상인 줄 안다.
+        out['agents_not_on_vip'] = _agents_not_on_vip(config, out, all_agents, all_deps)
+    except Exception as e:
+        logger.log_warning(f"[ha-group] group#{out.get('id')} ha_excluded 계산 skip: {e}")
+        out['ha_excluded'] = {}
     # 실측 ACTIVE (R4) — heartbeat interfaces[] 의 VIP 보유 관측. 정적 role 과 별개로
     # 콘솔이 실제 ACTIVE/STANDBY 를 상시 표시. AS 만 의미 (AA/SA 는 null 생략).
     if out.get('mode') == 'active_standby':
@@ -1040,18 +1389,168 @@ def _serialize_group(g: dict, config: dict) -> dict:
     return out
 
 
-async def _list_groups(config):
+def _build_group_list(config) -> list:
+    """목록 직렬화 — 배포·health defaults 를 **한 번만** 읽어 전 그룹이 공유한다."""
+    from handlers.agents import _deploy_load_all, _agent_load_all
     groups = _ha_load_all(config)
     groups.sort(key=lambda g: g.get('id', 0))
-    return HandlerResult(status=200,
-                         body={'groups': [_serialize_group(g, config) for g in groups]})
+    deps = _deploy_load_all(config)
+    agents = _agent_load_all(config)
+    defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
+    return [_serialize_group(g, config, deps, defaults, agents) for g in groups]
+
+
+async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResult:
+    """POST /ha-groups/{id}/shared-store/migrate — 관리 store 를 공유 마운트로 이관.
+
+    body: { "mount_point": "/NAS/.../oam_store" }
+
+    콘솔 한 번의 조작으로 끝나야 하는 작업이다. 운영자가 SSH 로 나눠 하면 순서를 틀리기
+    쉽고(설정을 먼저 바꾸면 빈 콘솔, 프로세스를 SSH 로 죽이면 watchdog 이 되살림),
+    무엇보다 OAM 은 **자기 store 를 자기가 옮길 수 없다**. 그래서:
+
+      1. 그룹에 `shared_store` 저장 (이 시점부터 oam/oam-svc 가 HA 편입 대상)
+      2. 그룹 멤버의 oam/oam-svc 배포 overlay 에 `CimsRuntimeDir`/`CimsRuntimeMount` 병합
+         → **현재 store 에 기록**되므로 3단계 복사에 함께 실려 간다(신 store 와 일관)
+      3. store 를 들고 있는 노드(현재 oam 이 running 인 노드)에 `migrate_oam_store` job
+         → agent 가 정지 → 복사 → config.json 기록 → 기동 을 수행
+      4. 나머지 멤버는 `update_config` 만 (그 노드는 같은 공유 store 를 읽게 된다)
+
+    응답은 202 다 — 3단계에서 OAM 이 재기동되므로 **콘솔이 잠깐 끊긴다**(정상).
+    """
+    from handlers.agents import (_deploy_load_all, _deploy_update, _pkg_load, _job_create,
+                                 _materialize_deploy_config, _split_csv, _enrich_deploy)
+    body = body_raw if isinstance(body_raw, dict) else (json.loads(body_raw or '{}') or {})
+    store = _normalize_shared_store(body)
+    if not store:
+        return HandlerResult(status=400, body={
+            'error': 'invalid_mount_point',
+            'detail': 'mount_point 는 절대경로여야 합니다 (.. 불가).'})
+    mnt = store['mount_point']
+    target_dir = f"{mnt}/runtime"
+
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    if g.get('mode') != 'active_standby':
+        return HandlerResult(status=400, body={
+            'error': 'not_active_standby',
+            'detail': '공유 store 는 Active/Standby 그룹에서만 의미가 있습니다.'})
+    _mv = _mount_point_unverified(config, g, store)
+    if _mv['bad']:
+        _lines = '; '.join(f"{b['name']}: 실제 마운트 {b['available'] or '(없음)'}"
+                           for b in _mv['bad'])
+        return HandlerResult(status=400, body={
+            'error': 'not_a_mount_point',
+            'detail': (f"'{mnt}' 는 마운트 지점이 아닙니다 — mount guard 가 기동을 거부합니다. "
+                       f"{_lines}. 마운트 지점을 고르고 store 는 그 하위로 두세요."),
+            'nodes': _mv['bad']})
+
+    aids = {m.get('agent_id') for m in (g.get('members') or [])}
+    targets = [d for d in _deploy_load_all(config)
+               if d.get('agent_id') in aids
+               and (d.get('process_name') or '').lower().strip() in ('oam', 'oam-svc')
+               and d.get('status') != 'removed']
+    if not targets:
+        return HandlerResult(status=400, body={
+            'error': 'no_oam_deployment',
+            'detail': '이 그룹 멤버에 oam/oam-svc 배포가 없습니다. 먼저 설치하세요.'})
+
+    # ── 1) 그룹에 공유 store 저장
+    g['shared_store'] = store
+    file_store.save(_ha_dir(config), gid, g)
+    logger.log_info(f"[ha-group] group#{gid} 공유 store 설정 → {mnt}")
+
+    # 이관(복사) 대상 1건 선정 — 이 OAM 이 도는 노드의 oam 배포.
+    import socket as _sock
+    _host = (_sock.gethostname() or '').split('.')[0].lower()
+    from handlers.agents import _agent_load
+    _mig_target_id = None
+    _cands = [d for d in targets if (d.get('process_name') or '').lower() == 'oam'] or targets
+    for d in _cands:                                   # ① hostname 일치 (가장 정확)
+        try:
+            ag = _agent_load(config, aid=d.get('agent_id')) or {}
+        except Exception:
+            ag = {}
+        for nm in (ag.get('hostname'), ag.get('name')):
+            if nm and str(nm).split('.')[0].lower() == _host:
+                _mig_target_id = d['id']
+                break
+        if _mig_target_id:
+            break
+    if _mig_target_id is None:                         # ② 도는 노드
+        for d in _cands:
+            if (d.get('status') or '') == 'running':
+                _mig_target_id = d['id']
+                break
+    if _mig_target_id is None:                         # ③ 최후 — 첫 배포
+        _mig_target_id = _cands[0]['id']
+        logger.log_warning(f"[ha-group] group#{gid} 이관 대상 노드를 특정하지 못해 "
+                           f"deployment#{_mig_target_id} 로 진행합니다(복사 누락 방지)")
+
+    # ── 2)~4) 배포별 overlay 병합 + job 큐잉
+    jobs: list = []
+    for dep in targets:
+        cur = dep.get('config') if isinstance(dep.get('config'), dict) else {}
+        overlay = dict(cur)
+        overlay['CimsRuntimeDir'] = target_dir
+        overlay['CimsRuntimeMount'] = mnt
+        updated = _deploy_update(config, dep['id'], {'config': overlay}) or dep
+        _enrich_deploy([updated], config)
+        pkg = _pkg_load(config, updated.get('package_id'))
+        sf = updated.get('service_functions')
+        if isinstance(sf, str):
+            sf = _split_csv(sf)
+        params = {
+            'deployment_id': updated['id'],
+            'package_id': updated.get('package_id'),
+            'package_name': updated.get('package_name'),
+            'package_version': updated.get('package_version'),
+            'process_name': updated.get('process_name'),
+            'service_functions': sf or [],
+            'install_path': updated.get('install_path'),
+            'config': _materialize_deploy_config(config, pkg, updated.get('config')),
+        }
+        # store 를 실제로 들고 있는 노드 = **이 OAM 이 도는 노드**. 그 노드만 복사가 필요하다.
+        # 판정은 hostname 우선(정확), 없으면 status=running (배포기록 기준). 둘 다 못 찾으면
+        # 아래에서 첫 배포를 대상으로 삼는다 — 아무도 대상이 아니면 복사가 조용히 빠져
+        # 절체 시 빈 콘솔이 되므로, 대상 0건은 허용하지 않는다.
+        if updated['id'] == _mig_target_id:
+            params['module'] = (updated.get('process_name') or '').lower().strip()
+            params['source_dir'] = file_store.runtime_root(config)
+            params['target_dir'] = target_dir
+            params['target_mount'] = mnt
+            jt = 'migrate_oam_store'
+        else:
+            jt = 'update_config'
+        jid = _job_create(config, updated['agent_id'], jt, params)
+        jobs.append({'deployment_id': updated['id'], 'agent_id': updated.get('agent_id'),
+                     'process_name': updated.get('process_name'), 'job_type': jt,
+                     'job_id': jid})
+        logger.log_info(f"[ha-group] group#{gid} {updated.get('process_name')} "
+                        f"agent#{updated.get('agent_id')} {jt} job#{jid} 큐잉")
+
+    _enqueue_update_ha_for_members(gid, config)   # 공유 store 반영 → HA 편입 재렌더
+    return HandlerResult(status=202, body={
+        'shared_store': store, 'runtime_dir': target_dir, 'jobs': jobs,
+        'detail': ('이관을 시작했습니다. store 를 들고 있는 노드의 OAM 이 정지 → 복사 → '
+                   '재기동되므로 콘솔이 30초 내외 끊깁니다. 돌아오면 새 경로로 동작합니다.'),
+    })
+
+
+async def _list_groups(config):
+    # 직렬화는 파일 store 를 여러 번 읽으므로 **워커 스레드**에서 수행한다 — 이벤트 루프에서
+    # 돌면 그동안 heartbeat·job 결과 POST 가 대기해 배포 상태 전이가 늦어진다.
+    groups = await asyncio.to_thread(_build_group_list, config)
+    return HandlerResult(status=200, body={'groups': groups})
 
 
 async def _get_group(gid: int, config):
     g = _ha_load(config, gid)
     if not g:
         return HandlerResult(status=404, body={'error': 'Group not found'})
-    return HandlerResult(status=200, body=_serialize_group(g, config))
+    return HandlerResult(status=200,
+                         body=await asyncio.to_thread(_serialize_group, g, config))
 
 
 def _normalize_member(m: dict, idx: int) -> dict:
@@ -1110,6 +1609,7 @@ async def _create_group(body, config):
         'name': name,
         'mode': mode,
         'vip': vip,
+        'shared_store': _normalize_shared_store(body.get('shared_store')),
         'vrid': vrid,
         'vip_mask': vip_mask,
         'auth_pass': auth_pass,
@@ -1168,6 +1668,38 @@ async def _update_group(gid: int, body, config):
         existing['vip_bindings'] = v if isinstance(v, list) else []
     if 'service_intent' in body:
         existing['service_intent'] = _normalize_service_intent(body.get('service_intent'))
+    if 'shared_store' in body:
+        # 공유 store — 그룹 스코프. 잘못된 형식은 미사용({})으로 정규화되므로 저장 후
+        # 렌더가 store 단계를 건너뛴다(조용한 부분 적용 방지 = 값이 응답에 그대로 보임).
+        _new_store = _normalize_shared_store(body.get('shared_store'))
+        # 경로만 저장하고 실제 데이터를 옮기지 않으면 **절체 시 빈 콘솔**이 된다
+        # (HA 편입은 되는데 store 는 노드별 로컬). 그 상태를 만들 수 없게 막고
+        # 이관 경로(POST .../shared-store/migrate)로 안내한다 — oam_ha.md §9.4.
+        if _new_store:
+            _mv = _mount_point_unverified(config, existing, _new_store)
+            if _mv['bad']:
+                _lines = '; '.join(
+                    f"{b['name']}: 실제 마운트 {b['available'] or '(없음)'}" for b in _mv['bad'])
+                return HandlerResult(status=400, body={
+                    'error': 'not_a_mount_point',
+                    'detail': (f"'{_new_store['mount_point']}' 는 마운트 지점이 아닙니다. "
+                               f"mount guard 는 /proc/mounts 와 **정확히 일치**하는 경로만 "
+                               f"통과시킵니다(하위 디렉터리는 불가) — 지금 저장하면 OAM 이 "
+                               f"기동을 거부합니다. {_lines}. 마운트 지점을 고르고, store 위치는 "
+                               f"그 하위 경로로 지정하세요."),
+                    'nodes': _mv['bad']})
+            _bad = _store_path_conflicts(config, existing, _new_store)
+            if _bad:
+                _who = ', '.join(f"agent#{b['agent_id']} {b['process_name']}"
+                                 f"({b['runtime_dir']})" for b in _bad)
+                return HandlerResult(status=409, body={
+                    'error': 'store_path_not_shared',
+                    'detail': (f"공유 store 경로만 저장하면 이 모듈들의 관리 데이터가 아직 "
+                               f"노드 로컬에 있어, 절체 시 빈 콘솔이 됩니다: {_who}. "
+                               f"'이 경로로 이관' 을 사용하세요 — 경로 저장·배포설정 갱신·"
+                               f"데이터 복사·재기동을 한 번에 처리합니다."),
+                    'conflicts': _bad})
+        existing['shared_store'] = _new_store
     module_specs_changed = False
     if 'module_specs' in body and isinstance(body.get('module_specs'), dict):
         existing['module_specs'] = {
@@ -1231,14 +1763,21 @@ async def _delete_group(gid: int, config):
 #  그룹 일괄 제어 + 수동 절체 (ha_service_model.md §6·§7)
 # ════════════════════════════════════════════════════════════
 
-def _group_member_daemon_deps(group: dict, config: dict) -> list:
+def _group_member_daemon_deps(group: dict, config: dict,
+                              all_deps: list | None = None,
+                              defaults: dict | None = None) -> list:
     """그룹 멤버들의 daemon 배포(status != removed) 목록 — 일괄 제어 대상.
-    (process_name 이 health defaults 에 있는 리슨 데몬만; cspsim/console 등 제외.)"""
+    (process_name 이 health defaults 에 있는 리슨 데몬만; cspsim/console 등 제외.)
+
+    `all_deps`/`defaults` 를 넘기면 재조회하지 않는다 — 여러 그룹을 한 번에 직렬화할 때
+    그룹마다 전체 배포 목록을 다시 읽으면 **O(그룹수 × 배포수)** 파일 I/O 가 된다
+    (조회 지연이 heartbeat·job 결과 처리까지 밀어 배포가 deploying 에 머문 실측 사고)."""
     from handlers.agents import _deploy_load_all
-    defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
+    if defaults is None:
+        defaults = service_registry.module_health_defaults(config) or _MODULE_HEALTH_DEFAULTS
     aids = {m.get('agent_id') for m in (group.get('members') or [])}
     out = []
-    for d in _deploy_load_all(config):
+    for d in (all_deps if all_deps is not None else _deploy_load_all(config)):
         if d.get('agent_id') not in aids or d.get('status') == 'removed':
             continue
         mod = (d.get('process_name') or '').lower().strip()
@@ -1417,6 +1956,14 @@ async def _maintenance_group(gid: int, body, config):
 _HA_OP_DOMAIN = 'ha_operations'
 _OP_RELEASE_TIMEOUT = 30      # VIP 가 target 으로 이동하기까지 최대 대기(초)
 _OP_VERIFY_SEC = 15          # target 이 VIP 를 안정 보유해야 하는 검증 창(초)
+# 관측 불가(판정 None) 유예 — 이 창 안에서는 타임아웃을 세지 않는다.
+#   관리평면 그룹의 절체는 **source 가 오케스트레이터 자신**이다: release 후 그 노드의 OAM 이
+#   정지되고 신 Active 의 OAM 이 이 operation 을 이어받는다(공유 store). 그 직후에는 heartbeat
+#   수집 창 때문에 vip_observation 이 판정 불가(None)를 낼 수 있는데, 옛 구현은 그것을 그냥
+#   타임아웃으로 세어 **이미 정상 완료된 절체를 ROLLED_BACK 으로 오기록**했다.
+#   원칙: "target 이 VIP 를 못 잡았다" 는 **확정 관측**이 있을 때만 롤백 사유다. 관측 자체가
+#   불가하면 기다리고, 이 창을 넘기면 롤백이 아니라 관측 실패(FAILED)로 종결한다.
+_OP_OBSERVE_GRACE = 180
 
 
 def _op_dir(config):
@@ -1448,6 +1995,19 @@ async def _failover_group(gid: int, body, config):
     if _op_active_for_group(config, gid):
         return HandlerResult(status=409, body={'error': 'failover_in_progress',
             'hint': '이미 진행 중인 절체 operation 이 있습니다'})
+    # 사전 점검 — agent 가 구 Active 노드 IP 를 보고 있으면 절체 후 전 fleet 이 단절된다.
+    # 절체 자체는 성공하는데 콘솔에 전 노드 offline 으로 보이는 상태가 되므로 먼저 막는다.
+    _body = body if isinstance(body, dict) else (json.loads(body or '{}') or {})
+    if not _body.get('force'):
+        _stray = _agents_not_on_vip(config, g)
+        if _stray:
+            return HandlerResult(status=409, body={
+                'error': 'agents_not_on_vip',
+                'detail': (f"{len(_stray)}개 agent 가 VIP 가 아닌 주소로 OAM 에 보고하고 "
+                           f"있습니다. 이대로 절체하면 그 agent 들은 구 Active 주소가 죽어 "
+                           f"OAM 과 단절되고, 콘솔에는 전 노드 offline·모듈 상태 고착으로 "
+                           f"보입니다. 먼저 'OAM 주소 VIP 전환' 을 실행하세요."),
+                'agents': _stray})
 
     from services import ha_lookup
     from handlers.agents import _agent_load
@@ -1469,10 +2029,14 @@ async def _failover_group(gid: int, body, config):
     from datetime import datetime
     now_iso = datetime.now().isoformat(timespec='seconds')
     oid = file_store.next_id(_op_dir(config))
+    # 관리평면 자기 절체 여부 — source 가 오케스트레이터(OAM) 자신인 그룹. 표시·로그용이며
+    # 관측 유예는 모든 op 에 공통 적용된다(관측 불가 ≠ 롤백 사유).
+    _self_orch = 'oam' in {str(m).lower() for m in (g.get('service_intent') or {})}
     op = {
         'id': oid, 'group_id': gid, 'service': g.get('name'),
         'source_agent_id': active_aid, 'target_agent_id': target_aid,
         'state': 'RELEASING', 'release_sent': False, 'clear_sent': False,
+        'self_orchestrated': _self_orch,
         'created_at': now_iso, 'updated_at': now_iso, 'note': None, 'error': None,
     }
     file_store.save(_op_dir(config), oid, op)
@@ -1547,8 +2111,23 @@ def _advance_ha_operation(config, op: dict) -> bool:
             op['verify_since'] = now.isoformat(timespec='seconds')
             op['note'] = 'target VIP 인수 — 안정 검증 중'
             return True
-        if _age('release_at') > _OP_RELEASE_TIMEOUT:
-            # target 이 VIP 를 못 잡음 → 롤백. source planned_release 해제 → source 재인수.
+        age = _age('release_at')
+        if active is None:
+            # 관측 불가 — 판정 유예. (신 Active OAM 이 막 뜬 직후, 전원 heartbeat stale 등)
+            if age > _OP_OBSERVE_GRACE:
+                _clear_source_once()
+                op['state'] = 'FAILED'
+                op['error'] = 'observation_unavailable'
+                op['note'] = (f'VIP 보유 판정을 {int(age)}초간 확정할 수 없었다 — 롤백이 아니라 '
+                              f'관측 실패로 종결. 실제 VIP 위치를 확인하라(콘솔 멤버 상태).')
+                return True
+            if not op.get('obs_wait_logged'):
+                op['obs_wait_logged'] = True
+                op['note'] = 'VIP 보유 판정 대기 (관측 불가 — 유예 중)'
+                return True
+            return False
+        if age > _OP_RELEASE_TIMEOUT:
+            # **확정 관측**으로 target 이 아닌 노드가 VIP 를 갖고 있다 → 롤백.
             _clear_source_once()
             op['state'] = 'ROLLED_BACK'
             op['error'] = 'target_not_promoted'
@@ -1556,6 +2135,14 @@ def _advance_ha_operation(config, op: dict) -> bool:
         return False
 
     if state == 'VERIFYING':
+        if active is None:
+            # 관측 불가는 실패가 아니다 — 유예 안에서는 기다린다(관리평면 self-절체 직후 등).
+            if _age('verify_since') > _OP_OBSERVE_GRACE:
+                _clear_source_once()
+                op['state'] = 'FAILED'
+                op['error'] = 'observation_unavailable'
+                return True
+            return False
         if active != tgt:
             # 검증 중 target 이 VIP 를 놓침 → 실패. source 해제(재인수 or nopreempt 유지).
             _clear_source_once()

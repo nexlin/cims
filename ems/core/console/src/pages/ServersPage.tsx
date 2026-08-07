@@ -11,6 +11,7 @@ import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { MountPanel } from './ha/MountPanel'
 import { NetTuningPanel } from './ha/NetTuningPanel'
 import { splitPrefixHost } from './ha/helpers'
+import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
@@ -93,22 +94,33 @@ export default function ServersPage() {
   const { user } = useAuth()
   const canEdit = useAdminCapable()   // admin 세션 또는 admin 승격(sudo) 활성
 
-  const load = useCallback(async () => {
+  // 폴링을 **비용별로 분리**한다. store 가 공유 스토리지(NFS)로 옮겨간 뒤 파일 1건 읽기가
+  // ~5ms 라, 모든 목록을 2초마다 다 긁으면 콘솔 조작(시스템 추가 등)이 체감상 느려진다.
+  //   · agents/deployments = 실측 상태(heartbeat 반영) → 2초 유지
+  //   · packages/ha-groups = 거의 안 바뀌고 응답이 무겁다 → 6초
+  // 변이 직후에는 load(true) 로 전체를 즉시 갱신하므로 반영 지연이 체감되지 않는다.
+  const load = useCallback(async (full = true) => {
     try {
-      const [a, p, d, g] = await Promise.all([
+      const [a, d] = await Promise.all([
         deploymentApi.listAgents(),
-        deploymentApi.listPackages(),
         deploymentApi.listDeployments(),
-        haGroupsApi.list(),
       ])
-      setAgents(a); setPackages(p); setDeployments(d); setHaGroups(g)
+      setAgents(a); setDeployments(d)
+      if (full) {
+        const [p, g] = await Promise.all([
+          deploymentApi.listPackages(),
+          haGroupsApi.list(),
+        ])
+        setPackages(p); setHaGroups(g)
+      }
     } catch (e) { show((e as Error).message, 'err') }
     finally { setLoading(false) }
   }, [show])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { void load(true) }, [load])
   useEffect(() => {
-    const iv = setInterval(() => void load(), 2_000)   // 실측 상태를 빠르게 반영 (heartbeat 주기와 동일)
+    let n = 0
+    const iv = setInterval(() => { n += 1; void load(n % 3 === 0) }, 2_000)
     return () => clearInterval(iv)
   }, [load])
 
@@ -240,7 +252,24 @@ export default function ServersPage() {
       const r = await deploymentApi.queueJob(d.id, jt)
       show(`${jt} 큐 등록 (#${r.job_id})`, 'ok')
       await load()
-    } catch (e) { show((e as Error).message, 'err') }
+    } catch (e) {
+      // 안전 가드(409)는 막다른 골목이 아니다 — 사유를 보여주고 강행 여부를 묻는다.
+      const guard = e instanceof ApiError && e.status === 409 &&
+        (e.data?.error === 'leader_lease_precondition' ||
+         e.data?.error === 'upgrade_order_active_first')
+      if (guard) {
+        if (!confirm(`${(e as Error).message}\n\n그래도 강행할까요? (안전 가드 우회)`)) {
+          show('취소됨 — 안전 가드 유지', 'err'); return
+        }
+        try {
+          const r = await deploymentApi.queueJob(d.id, jt, undefined, true)
+          show(`${jt} 큐 등록 (#${r.job_id}) — 가드 우회`, 'ok')
+          await load()
+        } catch (e2) { show((e2 as Error).message, 'err') }
+        return
+      }
+      show((e as Error).message, 'err')
+    }
   }
   async function rollbackDeployment(d: Deployment) {
     const target = d.prev_install_path
@@ -1954,20 +1983,61 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
     }
   }
 
-  async function doFailover() {
-    if (!window.confirm(
+  async function doFailover(force = false) {
+    if (!force && !window.confirm(
         `[${group.name}] 수동 절체 — 현재 Active(${activeName || '?'}) 에서 Standby 로 서비스를 넘깁니다.\n` +
         `절체 중 수 초의 순단이 발생할 수 있습니다. 계속할까요?`))
       return
     setBusy('failover')
     try {
-      const r = await haGroupsApi.failover(group.id)
+      const r = await haGroupsApi.failover(group.id, force)
       const to = agentDisplayName(agents.find(a => a.id === r.to_agent_id)?.name || `#${r.to_agent_id}`)
       show(`수동 절체 큐잉 — → ${to} 로 스위치오버`, 'ok')
       await onReload()
     } catch (e) {
+      // 사전 점검 — agent 가 구 Active 주소를 보고 있으면 절체 후 fleet 이 단절된다.
+      // 막다른 골목으로 두지 않고 전환을 권하거나 강행을 선택하게 한다.
+      if (e instanceof ApiError && e.data?.error === 'agents_not_on_vip') {
+        const list = (e.data.agents as Array<{ name: string; oam_url: string }> | undefined) || []
+        const lines = list.slice(0, 6).map(a => `  · ${a.name} → ${a.oam_url}`).join('\n')
+        if (window.confirm(
+            `${(e as Error).message}\n\n${lines}\n\n` +
+            `지금 'OAM 주소 VIP 전환' 을 실행할까요? (취소 = 아무것도 하지 않음)`)) {
+          setBusy(null)
+          await doRetargetOamUrl()
+          return
+        }
+        show('절체 취소됨 — 먼저 OAM 주소를 VIP 로 전환하세요', 'err')
+        return
+      }
       const msg = e instanceof Error ? e.message : String(e)
       show(`수동 절체 실패: ${msg}`, 'err')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // OAM 주소 VIP 전환 — 전 agent 가 VIP 를 보게 한다. 각 agent 가 새 주소로 /health
+  // 도달 확인 후에만 적용하므로 VIP 가 없을 때 눌러도 fleet 이 끊기지 않는다.
+  async function doRetargetOamUrl() {
+    // VipBinding 의 주소 필드는 `ip` 다(`vip` 아님). 다중 VIP 면 관리 접속용을 고르되,
+    // slot 이름에 admin/oam/mgmt 가 들어간 것을 우선하고 없으면 첫 항목. legacy vip 폴백.
+    const binds = group.vip_bindings || []
+    const admin = binds.find(b => /admin|oam|mgmt/i.test(b.slot || ''))
+    const vip = ((admin || binds[0])?.ip || group.vip || '').trim()
+    if (!vip) { show('이 그룹에 VIP 가 없습니다', 'err'); return }
+    const url = `https://${vip}:4419`
+    if (!window.confirm(
+        `전 agent 의 OAM 접속 주소를 아래로 전환합니다.\n\n  ${url}\n\n` +
+        `각 agent 가 그 주소로 /health 도달을 확인한 뒤에만 적용합니다 — 도달 불가면 ` +
+        `주소를 바꾸지 않고 실패로 남습니다(fleet 단절 방지).\n\n진행할까요?`)) return
+    setBusy('retarget')
+    try {
+      const r = await deploymentApi.retargetOamUrl(url)
+      show(`OAM 주소 전환 큐잉 — ${r.jobs.length}개 agent (${url})`, 'ok')
+      await onReload()
+    } catch (e) {
+      show(`주소 전환 실패: ${(e as Error).message}`, 'err')
     } finally {
       setBusy(null)
     }
@@ -2035,10 +2105,17 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
                 title="그룹 서비스 중지 — 의도를 stopped 로 두고 비무장(VIP 내려감) + 전 모듈 정지.">
           ■ 일괄 중지
         </button>
+        {isAS && (group.vip_bindings?.length || group.vip) && (
+          <button className="btn btn--sm" disabled={!!busy}
+                  style={{ marginLeft: 'auto' }}
+                  onClick={() => doRetargetOamUrl()}
+                  title="전 agent 가 OAM 을 VIP 로 보게 전환. 각 agent 가 도달 확인 후에만 적용(실패해도 fleet 무단절).">
+            ⇢ OAM 주소 VIP 전환
+          </button>
+        )}
         {isAS && (
           <button className="btn btn--sm" disabled={!!busy || group.active_agent_id == null}
-                  style={{ marginLeft: 'auto' }}
-                  onClick={doFailover}
+                  onClick={() => doFailover()}
                   title={group.active_agent_id == null
                     ? 'Active 판정 불가 — 잠시 후 재시도'
                     : '수동 절체 — 현재 Active 에서 Standby 로 서비스를 넘김(스위치오버).'}>
@@ -2046,6 +2123,51 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           </button>
         )}
       </div>
+      {/* 절체 래치 — 그 노드는 승격 불가다. 노드 로컬 판정이라 예전에는 콘솔에 아무 표시가
+          없어, 래치 걸린 노드로는 절체가 영영 안 되는 것을 운영자가 알 수 없었다(실측). */}
+      {isAS && (() => {
+        const latched = (group.members || [])
+          .map(m => agents.find(a => a.id === m.agent_id))
+          .filter((a): a is Agent => !!a)
+          .filter(a => Object.values(a.ha_state || {}).some(v => v?.latched))
+        if (!latched.length) return null
+        return (
+          <div role="alert" style={{
+            marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
+            background: '#7f1d1d', color: '#fff', lineHeight: 1.6,
+          }}>
+            <b>절체 래치 — 승격 불가: {latched.map(a => agentDisplayName(a.name)).join(', ')}</b>
+            <div style={{ marginTop: 4 }}>
+              이 노드는 이전 장애 판정이 걸려 있어 <b>절체 대상이 되지 않습니다.</b> 원인을
+              확인한 뒤 해당 모듈을 start/restart 하거나 <b>[홀드 해제]</b> 로 풀어야 합니다.
+              {latched.map(a => {
+                const rs = Object.values(a.ha_state || {})
+                  .flatMap(v => v?.reasons || []).slice(0, 4)
+                return rs.length ? ` (${agentDisplayName(a.name)}: ${rs.join(', ')})` : ''
+              }).join('')}
+            </div>
+          </div>
+        )
+      })()}
+      {/* agent 주소가 VIP 가 아니면 절체 후 fleet 이 단절된다 — 조용히 두면 정상인 줄 안다.
+          절체 성공했는데 콘솔에 전 노드 offline·모듈 상태 고착으로 보이는 실측 사고. */}
+      {isAS && (group.agents_not_on_vip?.length || 0) > 0 && (
+        <div role="alert" style={{
+          marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
+          background: '#7c2d12', color: '#fff', lineHeight: 1.6,
+        }}>
+          <b>agent {group.agents_not_on_vip!.length}개가 VIP 가 아닌 주소로 OAM 에 보고 중</b>
+          <div style={{ marginTop: 4 }}>
+            이대로 절체하면 구 Active 주소가 죽어 그 agent 들이 OAM 과 단절됩니다 —
+            콘솔에는 전 노드 offline, 모듈 상태는 절체 직전 값으로 고착돼 보입니다.
+            위 <b>[⇢ OAM 주소 VIP 전환]</b> 을 먼저 실행하세요.
+          </div>
+          <div style={{ marginTop: 4, opacity: 0.85 }}>
+            {group.agents_not_on_vip!.slice(0, 6).map(a => `${a.name} → ${a.oam_url}`).join(' / ')}
+            {group.agents_not_on_vip!.length > 6 ? ' …' : ''}
+          </div>
+        </div>
+      )}
       {group.failover_op && (
         <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
                       border: '1px solid ' + (group.failover_op.error ? '#e57373' : '#90caf9'),
@@ -2635,6 +2757,9 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         note: note || undefined,
       })
       show(`${agent.name} 에 ${processName} 배포 추가 (설치 전)`, 'ok')
+      // 이중화 전제(공유 store) 미충족은 여기서 알리지 않는다 — 모듈을 추가할 때마다 뜨면
+      // 방해만 된다. 상태는 HA 화면 '공유 store' 패널이 상시 표시한다(응답 `warning` 은
+      // API/CLI 용으로 남는다).
       await onDone(); onClose()
     } catch (e) { show((e as Error).message, 'err') }
   }
