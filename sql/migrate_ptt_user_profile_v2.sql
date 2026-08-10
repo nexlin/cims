@@ -5,6 +5,15 @@
 --  - emergency_group_id 는 ptt_groups.mcptt_group_id 참조 — 그룹 삭제 시 NULL(미지정=미인가→403).
 --  적용 순서: 테이블 생성은 코드 배포와 독립적으로 선행 가능 (CSC/CSP 는 부재 row 를 기본값으로 취급).
 
+-- v1 잔존 정리 — migrate_drop_unused_tables.sql 미적용 DB 에 구 스키마(users.id 키,
+--   allow_emergency_init 컬럼)가 남아 CREATE IF NOT EXISTS 를 무력화하는 경우만 드롭.
+--   v2 스키마(allow_emergency_call)에는 no-op (재실행 안전).
+SET @legacy := (SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ptt_user_profile'
+      AND COLUMN_NAME = 'allow_emergency_init');
+SET @sql := IF(@legacy > 0, 'DROP TABLE ptt_user_profile', 'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 CREATE TABLE IF NOT EXISTS ptt_user_profile (
     ptt_id                VARCHAR(64)  NOT NULL COMMENT 'ptt_subscriptions.id (PTT MSISDN)',
     allow_emergency_call  TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'allow-emergency-group-call (TS 24.484 ruleset) — 긴급 그룹콜 개시 인가',
