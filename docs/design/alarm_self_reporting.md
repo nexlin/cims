@@ -239,6 +239,8 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 
 - [alarm_standardization.md](alarm_standardization.md) — 알람 모델 정본 (X.733 속성·code
   체계·활성키·재통지·이행)
+- [alarm_module_catalog.md](alarm_module_catalog.md) — 모듈별 자기감지 가능 조건 전수 카탈로그
+  (현행 fm_catalog 대비 누락 알람/이벤트 후보)
 - [../api/cmp_media_api.md](../api/cmp_media_api.md) — envelope v2·이벤트 채널 신뢰성 규칙
 - [features/oam_base_service_split.md](features/oam_base_service_split.md) — 소유 분리 /
   [features/oam_ha.md](features/oam_ha.md) — 관리평면 VIP
