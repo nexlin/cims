@@ -1,7 +1,7 @@
 {
   "name": "csc",
   "description": "CIMS Service Controller — 가입자·조직·인증·MCPTT(XCAP) 관리 REST API. OAM 게이트웨이 뒤에서 동작하는 서비스 모듈 (가입자/그룹/조직 프로비저닝 + MCPTT XCAP 문서 제공). 통계·녹취·플로우 이력은 oam-svc 모듈 담당.",
-  "version": "0.2.79",
+  "version": "0.2.80",
   "ha_capability": "active_standby",
   "gateway": {
     "default_port": 4421,
