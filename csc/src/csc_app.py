@@ -249,7 +249,18 @@ if __name__ == '__main__':
             GROUPS["tel:+2000"] = {"display_name": "Test Group", "etag": "etag_2000", "members": []}
 
         # SSL certificates (shared by both servers)
-        _cert_dir = os.path.join(_COMPONENT_ROOT, 'cert')
+        #   **버전무관 runtime/cert 우선** — lifecycle 엔진(cims-svc)이 기동 전에 노드
+        #   인증서를 보증해 두는 자리다(agent/lib/cert.sh). 버전 디렉터리 cert 만 보면
+        #   csc 업그레이드마다 새 디렉터리엔 인증서가 없어 평문으로 뜨고, 게이트웨이가
+        #   https 로 프록시하므로 가입자 API 가 통째로 끊긴다. oam/oam-svc 와 같은 규칙.
+        _cert_dir = None
+        for _cand in (os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime', 'cert')),
+                      os.path.join(_COMPONENT_ROOT, 'cert')):
+            if os.path.exists(os.path.join(_cand, 'server.key')) and \
+               os.path.exists(os.path.join(_cand, 'server.crt')):
+                _cert_dir = _cand
+                break
+        _cert_dir = _cert_dir or os.path.join(_COMPONENT_ROOT, 'cert')
         ssl_keyfile  = os.path.join(_cert_dir, 'server.key')  if os.path.exists(os.path.join(_cert_dir, 'server.key'))  else None
         ssl_certfile = os.path.join(_cert_dir, 'server.crt') if os.path.exists(os.path.join(_cert_dir, 'server.crt')) else None
         if ssl_keyfile and ssl_certfile:

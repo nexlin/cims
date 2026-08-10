@@ -62,6 +62,8 @@ header()  { echo -e "\n${BOLD}$*${NC}"; }
 
 # lifecycle library
 source "$SCRIPT_DIR/../lib/lifecycle.sh"
+# 노드 TLS 인증서 보증 — 관리평면 모듈 기동 전 선행 조건 (cert.sh 머리말 참조)
+source "$SCRIPT_DIR/../lib/cert.sh"
 
 usage() {
     cat <<EOF

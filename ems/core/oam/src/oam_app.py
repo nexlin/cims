@@ -197,159 +197,11 @@ def _install_signal_guards(logger) -> None:
             logger.log_warning(f'{sig} 핸들러 설치 실패: {e}')
 
 
-def _cert_required_sans(config):
-    """서버 인증서에 반드시 들어가야 하는 SAN 집합 (IP/DNS 구분해 반환).
-
-    브라우저·agent 가 접속하는 주소가 전부 들어 있어야 한다. 이중화에서는 **VIP** 가 그
-    주소이므로 `Server.AgentOamUrl`(= agent/콘솔 접속 주소)의 host 를 자동 포함하고,
-    운영자가 `Server.CertSans` 로 추가 주소(피어 노드 IP·별칭)를 넣는다. 그룹 공통 CA 로
-    서명되므로 노드마다 인증서가 달라도 브라우저는 CA 하나만 신뢰하면 된다."""
-    import socket as _socket
-    from urllib.parse import urlparse as _urlparse
-    ips, dns = {'127.0.0.1'}, set()
-    host = _socket.gethostname()
-    if host:
-        dns.add(host)
-        try:
-            fq = _socket.getfqdn(host)
-            if fq:
-                dns.add(fq)
-        except Exception:
-            pass
-    srv = (config or {}).get('Server') or {}
-    cand = []
-    aou = (srv.get('AgentOamUrl') or '').strip()
-    if aou:
-        try:
-            h = _urlparse(aou).hostname
-            if h:
-                cand.append(h)
-        except Exception:
-            pass
-    extra = srv.get('CertSans')
-    if isinstance(extra, str):
-        extra = [x.strip() for x in extra.split(',')]
-    if isinstance(extra, list):
-        cand += [str(x).strip() for x in extra]
-    for c in cand:
-        if not c:
-            continue
-        try:
-            import ipaddress as _ipa
-            _ipa.ip_address(c)
-            ips.add(c)
-        except ValueError:
-            dns.add(c)
-    return ips, dns
-
-
-def _cert_info(crt_path):
-    """(subject, issuer, san_text) — openssl 로 조회. 실패 시 ('','','')."""
-    import subprocess as _sp
-    try:
-        r = _sp.run(['openssl', 'x509', '-in', crt_path, '-noout', '-subject', '-issuer', '-text'],
-                    capture_output=True, text=True, timeout=20)
-        out = r.stdout or ''
-        sub = next((l for l in out.splitlines() if l.startswith('subject=')), '')
-        iss = next((l for l in out.splitlines() if l.startswith('issuer=')), '')
-        san = ''
-        lines = out.splitlines()
-        for i, l in enumerate(lines):
-            if 'Subject Alternative Name' in l and i + 1 < len(lines):
-                san = lines[i + 1].strip()
-                break
-        return sub, iss, san
-    except Exception:
-        return '', '', ''
-
-
-def _ensure_group_ca(config):
-    """그룹 공통 CA (`<runtime>/_secrets/ca/{ca.crt,ca.key}`) — 없으면 생성.
-
-    노드 로컬 0600 자산이며, 두 번째 노드에는 join 절차가 **같은 CA 를 복사**한다.
-    (개인키를 공유 볼륨에 두지 않는다 — oam_ha.md §5.) 실패 시 (None, None)."""
-    import subprocess as _sp
-    d = os.path.join(_secrets_dir(config), 'ca')
-    crt, key = os.path.join(d, 'ca.crt'), os.path.join(d, 'ca.key')
-    if os.path.isfile(crt) and os.path.isfile(key):
-        return crt, key
-    try:
-        os.makedirs(d, mode=0o700, exist_ok=True)
-        _sp.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650',
-                 '-subj', '/CN=CIMS-OAM-CA/O=CIMS', '-keyout', key, '-out', crt],
-                check=True, capture_output=True, timeout=60)
-        os.chmod(key, 0o600)
-        print(f'[oam-cert] 그룹 CA 생성: {d} — 두 번째 노드에는 join 이 이 CA 를 복사한다', flush=True)
-        return crt, key
-    except Exception as e:
-        print(f'[oam-cert] 그룹 CA 생성 실패({e}) — self-signed 유지', flush=True)
-        return None, None
-
-
-def _issue_server_cert(dest_dir, ca_crt, ca_key, ips, dns):
-    """그룹 CA 로 노드 서버 인증서 발급 (SAN = ips ∪ dns). 성공 시 (key, crt)."""
-    import subprocess as _sp
-    import socket as _socket
-    import tempfile as _tf
-    key = os.path.join(dest_dir, 'server.key')
-    crt = os.path.join(dest_dir, 'server.crt')
-    csr = os.path.join(dest_dir, '.server.csr')
-    cn = _socket.gethostname() or 'cims-oam'
-    san = ','.join([f'DNS:{d}' for d in sorted(dns)] + [f'IP:{i}' for i in sorted(ips)])
-    try:
-        os.makedirs(dest_dir, exist_ok=True)
-        _sp.run(['openssl', 'req', '-new', '-newkey', 'rsa:2048', '-nodes',
-                 '-subj', f'/CN={cn}/O=CIMS', '-keyout', key, '-out', csr],
-                check=True, capture_output=True, timeout=60)
-        with _tf.NamedTemporaryFile('w', suffix='.ext', delete=False) as f:
-            f.write(f'subjectAltName={san}\n'
-                    'basicConstraints=CA:FALSE\n'
-                    'keyUsage=digitalSignature,keyEncipherment\n'
-                    'extendedKeyUsage=serverAuth\n')
-            ext = f.name
-        _sp.run(['openssl', 'x509', '-req', '-in', csr, '-CA', ca_crt, '-CAkey', ca_key,
-                 '-CAcreateserial', '-days', '825', '-extfile', ext, '-out', crt],
-                check=True, capture_output=True, timeout=60)
-        os.chmod(key, 0o600)
-        for junk in (csr, ext):
-            try:
-                os.remove(junk)
-            except OSError:
-                pass
-        print(f'[oam-cert] 서버 인증서 발급 (그룹 CA 서명, CN={cn}, SAN={san})', flush=True)
-        return key, crt
-    except Exception as e:
-        print(f'[oam-cert] 서버 인증서 발급 실패({e}) — 기존 인증서 유지', flush=True)
-        return None, None
-
-
-def _ensure_cert_sans(config, key, crt):
-    """현 인증서가 필요한 SAN 을 모두 담고 있는지 확인하고, 아니면 그룹 CA 로 재발급.
-
-    운영자가 넣은 상용 인증서는 건드리지 않는다 — **CIMS 가 만든 인증서**(O=CIMS self-signed
-    또는 우리 CA 서명)만 재발급 대상이고, 그 외는 경고만 남긴다(VIP 로 접속 시 경고가 날 수
-    있음을 알린다). 반환: (key, crt) — 재발급 실패 시 입력 그대로."""
-    if not (key and crt and os.path.isfile(crt)):
-        return key, crt
-    ips, dns = _cert_required_sans(config)
-    sub, iss, san = _cert_info(crt)
-    missing = [x for x in sorted(ips) if f'IP Address:{x}' not in san] + \
-              [x for x in sorted(dns) if f'DNS:{x}' not in san]
-    if not missing:
-        return key, crt
-    cims_managed = ('O=CIMS' in sub or 'O = CIMS' in sub) or \
-                   ('CIMS-OAM-CA' in iss)
-    if not cims_managed:
-        print(f'[oam-cert] ⚠ 인증서 SAN 에 {missing} 가 없습니다. 운영자 인증서로 판단해 '
-              f'재발급하지 않습니다 — 그 주소(VIP 등)로 접속하면 브라우저 경고가 납니다.',
-              flush=True)
-        return key, crt
-    ca_crt, ca_key = _ensure_group_ca(config)
-    if not (ca_crt and ca_key):
-        return key, crt
-    print(f'[oam-cert] SAN 부족({missing}) — 그룹 CA 로 재발급', flush=True)
-    nk, nc = _issue_server_cert(os.path.dirname(crt), ca_crt, ca_key, ips, dns)
-    return (nk, nc) if (nk and nc) else (key, crt)
+# 인증서 발급(그룹 CA 생성·SAN 재발급)은 **lifecycle 엔진**이 모듈 기동 전에 수행한다
+# (agent/lib/cert.sh, oam_ha.md §5.2). oam 이 자기 기동 중에 만들면 그 사이 뜬 oam-svc 가
+# cert 를 못 찾고 평문으로 bind 한다 — 발급자와 소비자를 분리해 순환을 없앴다.
+# 아래 _generate_self_signed_cert 는 엔진을 거치지 않은 기동(수동 실행 등)을 위한
+# 최후 폴백으로만 남는다.
 
 
 def _generate_self_signed_cert(dest_dir):
@@ -844,12 +696,9 @@ if __name__ == '__main__':
         # SSL certificates — 버전무관 runtime cert(modules/oam/runtime/cert) 우선 + self-heal.
         #   (버전 디렉터리 cert 만 있으면 버전업 시 평문→health-gate 롤백. _resolve_oam_cert 참조.)
         ssl_keyfile, ssl_certfile = _resolve_oam_cert()
-        # 접속 주소(VIP 포함)가 SAN 에 없으면 그룹 CA 로 재발급 — 절체로 노드가 바뀌어도
-        # 같은 CA 서명이라 브라우저 경고가 없다(oam_ha.md §5). 운영자 인증서는 미변경.
-        try:
-            ssl_keyfile, ssl_certfile = _ensure_cert_sans(config, ssl_keyfile, ssl_certfile)
-        except Exception as _e:
-            logger.log_warning(f"[oam-cert] SAN 점검 skip: {_e}")
+        # SAN 점검·그룹 CA 재발급은 여기서 하지 않는다 — lifecycle 엔진이 **기동 전**에
+        # 끝낸다(agent/lib/cert.sh, oam_ha.md §5.2). 기동 중에 재발급하면 이미 뜬
+        # oam-svc·csc 가 옛 인증서를 계속 서빙해 노드 안에서 인증서가 갈린다.
         if ssl_keyfile and ssl_certfile:
             logger.log_info(f"SSL Enabled. Key: {ssl_keyfile}, Cert: {ssl_certfile}")
         else:

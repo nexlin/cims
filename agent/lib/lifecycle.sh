@@ -355,6 +355,7 @@ start_cwrtc() {
 start_csc() {
     if is_running csc; then warn "CSC 이미 실행 중 (pid=$(read_pid csc))"; return 0; fi
     [[ ! -f "$DIST_DIR/csc/src/csc_app.py" ]] && err "CSC 소스 없음 (make dist 실행 필요)" && return 1
+    ensure_node_cert csc          # 기동 전 TLS 인증서 보증 (cert.sh)
     # overlay-aware port: deployment overlay 를 먼저 확인.
     # cims_agent 가 변종별로 분리 저장 (install_path/csc/config.json) — fallback 으로
     # legacy 위치 (install_path/config.json) 도 본다.
@@ -439,6 +440,7 @@ _oam_rollback_last_good() {        # 0=되돌림, 1=되돌릴 것 없음
 start_oam() {
     if is_running oam; then warn "OAM 이미 실행 중 (pid=$(read_pid oam))"; return 0; fi
     [[ ! -f "$DIST_DIR/oam/src/oam_app.py" ]] && err "OAM 소스 없음 (make dist 실행 필요)" && return 1
+    ensure_node_cert oam          # 기동 전 TLS 인증서 보증 (cert.sh)
 
     # ── oam.json 경로 자가 교정 ───────────────────────────────────────────────
     # make dist 로 생성된 oam.json 은 배포 서버 기준 경로(/home/cims/work/...)를 담는다.
@@ -625,6 +627,7 @@ stop_oam() {
 start_oam_svc() {
     if is_running oam-svc; then warn "oam-svc 이미 실행 중 (pid=$(read_pid oam-svc))"; return 0; fi
     [[ ! -f "$DIST_DIR/oam-svc/src/oam_svc_app.py" ]] && err "oam-svc 소스 없음 (make dist 실행 필요)" && return 1
+    ensure_node_cert oam-svc      # 기동 전 TLS 인증서 보증 (cert.sh)
     local svc_port
     svc_port=$("$PYBIN" -c "
 import json, os

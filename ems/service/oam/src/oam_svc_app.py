@@ -263,6 +263,11 @@ if __name__ == '__main__':
         #   과거: oam 버전업 시 oam/<ver>/oam/cert 만 보고 못 찾아 평문→게이트웨이 https 업스트림 502.
         ssl_keyfile = ssl_certfile = None
         _cert_cands = []
+        # 자기 버전무관 runtime/cert 가 최우선 — lifecycle 엔진이 기동 전에 보증해 두는
+        #   자리(agent/lib/cert.sh)이고, base oam 이 이 노드에 없어도 성립한다. 종전엔
+        #   oam 의 runtime/cert 만 봐서 **oam 이 cert 를 만들기 전에 뜨면 평문**이 됐다
+        #   (oam 은 자기 기동 끝자락에 만든다 → 첫 승격 노드에서 2초 차로 짐, 실측).
+        _cert_cands.append(os.path.normpath(os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime', 'cert')))
         if _OAM_SRC:
             _cert_cands.append(os.path.normpath(os.path.join(_OAM_SRC, '..', '..', '..', 'runtime', 'cert')))
         _cert_cands.append(os.path.join(_COMPONENT_ROOT, 'cert'))
