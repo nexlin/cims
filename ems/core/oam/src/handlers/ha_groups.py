@@ -1278,11 +1278,13 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
                 return await _put_group_collection(gid, member, handler_args, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
-        # 그룹×패키지 공통 설정 (R4) — /ha-groups/{gid}/packages/{pkg}/config|auto-sync
+        # 그룹×패키지 공통 설정 (R4) — /ha-groups/{gid}/packages/{pkg}/config|auto-sync|sync
         if sub == 'packages':
             if not member:
                 return HandlerResult(status=400, body={'error': 'package name required'})
             action = parts[3] if len(parts) > 3 else None
+            if action == 'sync' and method == 'GET':
+                return await _get_group_pkg_sync(gid, member, config)
             if action == 'config' and method == 'PUT':
                 return await _put_group_pkg_config(gid, member, handler_args, config)
             if action == 'auto-sync' and method == 'PUT':
@@ -2401,6 +2403,21 @@ async def _put_group_collection(gid: int, name: str, handler_args, config):
 # ════════════════════════════════════════════════════════════
 #  그룹×패키지 공통 설정 + 자동 동기화 스위치 (R4)
 # ════════════════════════════════════════════════════════════
+
+async def _get_group_pkg_sync(gid: int, pkg_name: str, config):
+    """그룹×패키지 공통 설정 정합 상태 조회 (읽기 전용) — 콘솔 드리프트 표시의 정본.
+
+    판정은 서버가 소유한다. 콘솔이 멤버별 설정을 받아 브라우저에서 직접 비교하면
+    자동 교정 데몬과 판정 주체가 둘로 갈라져, 데몬이 손대지 않을 것을 "교정 대기"로
+    표시하거나 그 반대가 생긴다. 여기서 내려주는 status/drift 만 그리면 된다.
+    응답 스키마는 handlers.agents.evaluate_group_package 참조."""
+    from handlers.agents import evaluate_group_package
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+    r = await asyncio.to_thread(evaluate_group_package, config, g, pkg_name)
+    return HandlerResult(status=200, body=r)
+
 
 async def _put_group_pkg_config(gid: int, pkg_name: str, handler_args, config):
     """그룹 공통(service) 설정 저장 — 콘솔 그룹 탭 편집기 (AS 그룹 전용).

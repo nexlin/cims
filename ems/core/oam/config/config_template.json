@@ -45,6 +45,23 @@
       "scope": "system"
     },
     {
+      "key": "logging",
+      "title": "서비스 로그",
+      "description": "CSP/CMP/CSC/oam-svc 와 공유하는 서비스 로그 루트 — base 값이 서비스 모듈의 상속 기준(overlay 에 값이 없는 모듈은 이 값을 받는다).",
+      "fields": [
+        {
+          "key": "ServiceLogging.Dir",
+          "label": "서비스 로그 루트",
+          "type": "path",
+          "default": "",
+          "deploy_value": "@SERVICE_LOG_DIR@",
+          "restart": true,
+          "help": "그룹 공통 — 절체해도 같은 경로를 읽어야 하므로 멤버 간 동일해야 한다(공유 스토리지 하위 권장)."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 비노출 인프라 값. 부트스트랩/agent 가 채움. upgrade 시 deployment overlay 로 보존.",

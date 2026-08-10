@@ -97,6 +97,49 @@ export interface HaSharedStore {
   mount_point: string       // 절대경로 (CimsRuntimeMount 와 동일해야 함)
 }
 
+// 그룹×패키지 공통(service) 설정 정합 판정 — 서버(evaluate_group_package)가 자동 교정과
+// 동일한 규칙으로 낸 결과. 콘솔은 이걸 그리기만 한다.
+//   status  in_sync=정합 / out_of_sync=드리프트 / unknown=판정 불가(reason 참조)
+//   reason  active_unknown(ACTIVE 미확정)·version_mismatch(버전 혼재)·no_peers 등
+//   action  copy=ACTIVE 값 복사 / reset=overlay 제거(템플릿 기본값 복귀)
+//   auto_sync  false 면 교정은 멈춰 있다 (드리프트가 있어도 스스로 해소되지 않음)
+export interface GroupPkgSyncDrift {
+  key: string
+  action: 'copy' | 'reset'
+  active: unknown
+  members: Array<{
+    deployment_id: number; agent_id: number; agent_name: string | null
+    value: unknown; present: boolean
+  }>
+}
+
+// 표시용 실효값 — 렌더 결과(overlay + 템플릿 기본값 + 배포 시 주입). 화면이 overlay 만
+// 보고 그리면 주입 값(JwtSecret 등)이 빈칸으로 보이고, 판정(overlay 기준)과 표시 기준이
+// 달라 "값이 같은데 드리프트"가 된다. src 가 그 차이를 드러낸다.
+export interface GroupPkgSyncMember {
+  deployment_id: number
+  agent_id: number
+  agent_name: string | null
+  package_version: string | null
+  values: Record<string, { v: unknown; src: 'overlay' | 'injected' | 'default' }>
+}
+
+export interface GroupPkgSync {
+  group_id: number
+  package: string
+  auto_sync: boolean
+  status: 'in_sync' | 'out_of_sync' | 'unknown'
+  reason: string | null
+  active_agent_id: number | null
+  compared_to: {
+    deployment_id: number; agent_id: number
+    agent_name: string | null; package_version: string | null
+  } | null
+  drift: GroupPkgSyncDrift[]
+  deferred: Array<{ deployment_id: number; package_version: string | null }>
+  members: GroupPkgSyncMember[]
+}
+
 export interface HaGroup {
   id: number
   name: string
@@ -190,6 +233,11 @@ export const haGroupsApi = {
       `/ha-groups/${id}/maintenance`, { agent_id: agentId, on }),
 
   // ── 그룹×패키지 공통 설정 (R4) ──
+  // 정합 상태 조회 — 드리프트 판정은 **서버 소유**다. 멤버별 설정을 받아 화면에서 직접
+  // 비교하지 말 것: 자동 교정 데몬과 판정이 갈라져 실제로 교정되지 않을 것을 "교정 대기"로
+  // 표시하게 된다 (다른 패키지의 설정을 새 템플릿에 얹어 세던 유령 드리프트가 그 사례).
+  getGroupPkgSync: (id: number, pkg: string) =>
+    api.get<GroupPkgSync>(`/ha-groups/${id}/packages/${encodeURIComponent(pkg)}/sync`),
   // 스위치 ON: target 없이 — 전 멤버 적용. OFF: target_deployment_id 필수(멤버 선택 편집).
   putGroupPkgConfig: (id: number, pkg: string, body: {
     values: Record<string, unknown>; target_deployment_id?: number; queue_update?: boolean

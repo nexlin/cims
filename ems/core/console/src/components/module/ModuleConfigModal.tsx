@@ -116,9 +116,13 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       const payload: Record<string, FieldValue> = {}
       for (const k of changedKeys) payload[k] = vals[k]
       const r = await deploymentApi.putDeploymentConfig(source.deployment.id, payload, true)
+      // overlay 는 config_template 선언 키만 담는다 — 템플릿 밖 키는 저장되지 않고
+      // pruned_keys 로 돌아온다. 조용히 사라지면 안 되므로 결과 문구에 싣는다.
+      const pruned = r.pruned_keys?.length
+        ? ` · 미저장(템플릿에 없는 키): ${r.pruned_keys.join(', ')}` : ''
       return {
         ok: true,
-        message: r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨',
+        message: (r.job_id ? `저장됨. update_config job #${r.job_id}` : '저장됨') + pruned,
       }
     }
     // module 모드: 변경된 키만 보냄 (not_owned_by_module 오류 회피 위해 모든 키 아닌 템플릿 소유 키만)

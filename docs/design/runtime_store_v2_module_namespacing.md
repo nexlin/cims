@@ -40,6 +40,10 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
    **이 deployment 에만** (그룹 전파 없음)
 4. GET 시 멤버 간 records hash 비교로 **drift 감지**
 
+### overlay 스키마 계약
+deployment overlay 는 그 패키지 `config_template` 이 선언한 키만 담는다 — 저장 시 마스크,
+기동 시 렌더 동치가 증명된 레거시 키만 정리. 상세: oam_base_service_split.md §14.7.
+
 ### HA 멤버 정합 — 자동 동기화 (스위치 + ACTIVE 기준 교정)
 저장은 A/B 모두 단일 deployment 대상이다. AS 그룹의 멤버 간 정합은 그룹×패키지
 동기화 스위치(기본 ON)가 켜져 있으면 `reconcile_group_package` 가 실측

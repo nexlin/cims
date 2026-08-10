@@ -227,6 +227,50 @@
         }
       ],
       "scope": "service"
+    },
+    {
+      "key": "_infra",
+      "title": "Infrastructure (내부 전용)",
+      "description": "UI 비노출 인프라 값. 배포 시 base 가 주입(그룹 공통 신원·store 경로). csc 의 _infra 와 같은 관용.",
+      "hidden": true,
+      "groups": [
+        { "key": "secrets", "title": "시크릿" },
+        { "key": "paths", "title": "런타임 경로" }
+      ],
+      "fields": [
+        {
+          "key": "CimsAuth.JwtSecret",
+          "label": "콘솔/게이트웨이 JWT 시크릿",
+          "group": "secrets",
+          "type": "password",
+          "default": "",
+          "deploy_value": "@CIMS_JWT_SECRET@",
+          "hidden": true,
+          "restart": true,
+          "help": "base 가 SoT — 배포 시 자동 주입. 게이트웨이 프록시 토큰 검증에 쓰인다."
+        },
+        {
+          "key": "CimsRuntimeDir",
+          "label": "런타임 store",
+          "group": "paths",
+          "type": "path",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "file_store 루트. base 와 같은 경로를 본다 (ptt_index 등 서비스 인덱스)."
+        },
+        {
+          "key": "CimsRuntimeMount",
+          "label": "런타임 마운트 지점",
+          "group": "paths",
+          "type": "path",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "관리 store 가 공유 스토리지(NAS)에 있을 때의 마운트 지점. 단일 노드는 비움."
+        }
+      ],
+      "scope": "system"
     }
   ]
 }

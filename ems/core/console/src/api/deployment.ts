@@ -560,9 +560,12 @@ export const deploymentApi = {
   //   항상 명시 — 옛 백엔드의 레거시 통짜 전파 경로를 차단.
   getDeploymentConfig: (id: number) =>
     api.get<DeploymentConfigView>(`/deployments/${id}/config`),
+  // overlay 는 config_template 이 선언한 키만 저장한다(스키마가 계약) — 템플릿 밖 키는
+  // 저장되지 않고 `pruned_keys` 로 돌아온다(조용히 버리지 않음).
   putDeploymentConfig: (id: number, values: Record<string, unknown>, queue_update = true) =>
     api.put<{ ok: boolean; job_id: number | null;
-              members: Array<{ deployment_id: number; agent_id: number; job_id: number }> }>(
+              members: Array<{ deployment_id: number; agent_id: number; job_id: number }>
+              pruned_keys?: string[] }>(
       `/deployments/${id}/config`,
       { config: values, queue_update, propagate_to_ha_peers: false }),
   // 그룹 설정 동기화 — 명시적 방향성 복사 (source=id → targets). 같은 패키지·

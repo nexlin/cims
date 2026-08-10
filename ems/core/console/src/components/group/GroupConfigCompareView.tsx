@@ -10,6 +10,11 @@
 //      개별=중립). 드리프트는 스위치 ON 이면 자동 교정이 곧 해소.
 //  AA 그룹: 동기화 개념 없음 — 비교 표만 (편집은 각 서버의 설정 탭).
 //
+//  **드리프트 판정은 이 화면이 하지 않는다** — 서버(GET .../packages/{pkg}/sync)가
+//  자동 교정과 같은 규칙으로 낸 status/drift 를 표시만 한다. 값(표)과 판정(드리프트)은
+//  모두 "어느 패키지의 것인지" 태그와 함께 보관해, 탭 전환 대기 창에서 이전 패키지의
+//  데이터가 새 템플릿에 얹히지 않게 한다. 정본: oam_base_service_split.md §14.6.
+//
 //  서버 개별(scope=system) 설정은 여기 없음 — 각 서버 선택 → [패키지 설정] 탭.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
@@ -18,7 +23,8 @@ import {
   type Deployment, type SipPackage, type ConfigTemplateField,
   type ConfigTemplateSection,
 } from '../../api/deployment'
-import { haGroupsApi, type HaGroup } from '../../api/ha_groups'
+import { haGroupsApi, type HaGroup, type GroupPkgSync,
+         type GroupPkgSyncMember } from '../../api/ha_groups'
 import ModuleConfigEditor from '../module/ModuleConfigEditor'
 import {
   SectionBlock, defaultValue, serviceScopeKeys, fieldValueEq, type FieldValue,
@@ -36,6 +42,22 @@ interface Props {
 type CellState = 'ok' | 'drift' | 'individual'
 type View = 'edit' | 'compare' | string   // string = collection.key
 
+// 값의 출처 — 왜 "같아 보이는데 드리프트"인지 설명하는 근거.
+const SRC_HINT: Record<string, string> = {
+  overlay:  '이 서버에 지정된 값 (deployment overlay)',
+  injected: '배포 시 base 가 주입한 값 — overlay 에는 없지만 노드 config.json 에는 들어간다',
+  default:  'overlay 미설정 → 템플릿 기본값. 값이 같아 보여도 지정된 값이 아니라 교정 대상이다',
+}
+
+// 서버가 "판정 불가"로 돌려준 사유 → 운영자 문구. 판정은 애매하면 하지 않는다(오방향 교정 방지).
+const SYNC_REASON: Record<string, string> = {
+  active_unknown:           'ACTIVE 미확정 (heartbeat·VIP 관측 대기)',
+  version_mismatch:         '버전 혼재 — 버전이 같아지면 자동 판정',
+  no_peers:                 '비교할 멤버 없음 (단일 배포)',
+  active_has_no_deployment: 'ACTIVE 노드에 이 패키지 미배포',
+  package_not_deployed:     '그룹에 이 패키지 배포 없음',
+}
+
 export function GroupConfigCompareView({ group, members: liveMembers,
     deployments: liveDeployments, packages: livePackages, onSelectMember }: Props) {
   const { show } = useToast()
@@ -50,8 +72,13 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   const [selectedPkgName, setSelectedPkgName] = useState<string>('')
   const [view, setView] = useState<View>(isAS ? 'edit' : 'compare')
   const [loading, setLoading] = useState(false)
-  // agent_id → config overlay (멤버별 GET /deployments/{id}/config 병렬 합성)
-  const [configs, setConfigs] = useState<Map<number, Record<string, unknown>> | null>(null)
+  // agent_id → config overlay (멤버별 GET /deployments/{id}/config 병렬 합성) +
+  // 서버 정합 판정. 둘 다 **어느 패키지의 것인지 태그와 함께** 보관한다 — 태그 없이 두면
+  // 탭 전환 직후(fetch 대기 창) 이전 패키지의 값·판정이 새 패키지 템플릿에 얹혀 렌더된다.
+  // 응답 역전(느린 이전 요청이 나중에 도착)도 태그 불일치로 자동 무시된다.
+  const [configs, setConfigs] =
+    useState<{ pkg: string; map: Map<number, Record<string, unknown>> } | null>(null)
+  const [sync, setSync] = useState<{ pkg: string; data: GroupPkgSync } | null>(null)
   // OFF 모드 멤버 선택 편집 대상 (agent_id)
   const [offTarget, setOffTarget] = useState<number | null>(null)
   // 스위치 토글 직후 group prop 폴링 반영 전까지의 낙관적 상태
@@ -146,21 +173,33 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     () => (template?.collections || []).filter(c => (c.scope ?? 'service') === 'service'),
     [template])
 
+  // 진행 중 요청 식별자 — 응답 역전 가드. 태그(pkg)만으로는 "늦게 도착한 이전 요청이
+  // 최신 응답을 덮어쓰고, 태그 불일치로 화면이 로딩에 머무는" 경우를 막지 못한다.
+  const reqIdRef = useRef(0)
+
   const load = useCallback(async () => {
-    if (memberDepsForPkg.length === 0) { setConfigs(null); return }
+    const pkg = effectivePkgName
+    const req = ++reqIdRef.current
+    if (memberDepsForPkg.length === 0) { setConfigs(null); setSync(null); return }
     setLoading(true)
     try {
-      const views = await Promise.all(
-        memberDepsForPkg.map(d => deploymentApi.getDeploymentConfig(d.id)))
+      // 표(값)와 판정(드리프트)을 같은 라운드에서 가져온다 — 판정은 서버 소유라
+      // 실패해도 값 표시는 살린다(구 OAM 호환: 라우트 없으면 드리프트 표시만 빠짐).
+      const [views, sv] = await Promise.all([
+        Promise.all(memberDepsForPkg.map(d => deploymentApi.getDeploymentConfig(d.id))),
+        haGroupsApi.getGroupPkgSync(group.id, pkg).catch(() => null),
+      ])
+      if (reqIdRef.current !== req) return   // 더 새 요청이 떴다 — 이 응답은 폐기
       const m = new Map<number, Record<string, unknown>>()
       memberDepsForPkg.forEach((d, i) => m.set(d.agent_id, views[i].config || {}))
-      setConfigs(m)
+      setConfigs({ pkg, map: m })
+      setSync(sv ? { pkg, data: sv } : null)
     } catch (e) {
-      show((e as Error).message, 'err')
+      if (reqIdRef.current === req) show((e as Error).message, 'err')
     } finally {
-      setLoading(false)
+      if (reqIdRef.current === req) setLoading(false)
     }
-  }, [memberDepsForPkg, show])
+  }, [memberDepsForPkg, effectivePkgName, group.id, show])
 
   useEffect(() => { void load() }, [load])
   useEffect(() => {   // 패키지 전환 시 뷰/선택/폼 초기화 (dirty 해제 → 새 기준으로 재초기화)
@@ -171,14 +210,18 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     autoBaseRef.current = null   // ON 모드 기준 멤버 재판정
   }, [effectivePkgName, isAS])
 
+  // 현재 패키지의 것일 때만 유효 — 태그가 다르면 아직 로딩 중으로 취급한다.
+  const configView = configs && configs.pkg === effectivePkgName ? configs.map : null
+  const syncView   = sync && sync.pkg === effectivePkgName ? sync.data : null
+
   // 멤버별 실효값 — overlay 값 없으면 template default (fromDefault 표시용)
   const effective = useCallback((agentId: number, f: ConfigTemplateField):
       { v: FieldValue; fromDefault: boolean } => {
-    const c = configs?.get(agentId)
+    const c = configView?.get(agentId)
     const v = c?.[f.key]
     if (v === undefined) return { v: defaultValue(f), fromDefault: true }
     return { v: v as FieldValue, fromDefault: false }
-  }, [configs])
+  }, [configView])
 
   // effect 에서 최신 dirty 여부를 deps 순환 없이 참조하기 위한 미러 ref
   const dirtyRef = useRef(false)
@@ -189,7 +232,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   // 재실행되는데, 그때 편집 중이던 입력이 서버값으로 덮어써지던 것 방지.
   // 저장/패키지 전환으로 dirty 가 풀리면 다음 실행에서 새 기준으로 재초기화.
   useEffect(() => {
-    if (!template || !configs || baseAgentId == null) return
+    if (!template || !configView || baseAgentId == null) return
     if (dirtyRef.current) return
     const base: Record<string, FieldValue> = {}
     for (const sec of svcSections) {
@@ -197,7 +240,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     }
     setFormValues(base)
     setFormInitial(base)
-  }, [template, configs, baseAgentId, svcSections, effective])
+  }, [template, configView, baseAgentId, svcSections, effective])
 
   const changed = useMemo(() => {
     const s = new Set<string>()
@@ -278,11 +321,33 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSyncOn, baseDep?.id, baseAgentId, deployedIds.join(','), depByAgent, show])
 
-  function cellState(f: ConfigTemplateField, ids: number[]): CellState {
+  // 드리프트 판정은 **서버 소유** — 자동 교정 데몬과 같은 규칙으로 낸 결과를 그대로 쓴다.
+  // 여기서 멤버 값을 다시 비교하면 판정 주체가 둘이 되어 데몬이 손대지 않을 것을 드리프트로
+  // 표시하게 된다 (정본: docs/design/features/oam_base_service_split.md §14.6).
+  const driftKeys = useMemo(
+    () => new Set((syncView?.drift || []).map(d => d.key)), [syncView])
+
+  function cellState(f: ConfigTemplateField): CellState {
     if (!syncKeys.has(f.key)) return 'individual'
-    if (ids.length < 2) return 'ok'
-    const first = JSON.stringify(effective(ids[0], f).v)
-    return ids.every(aid => JSON.stringify(effective(aid, f).v) === first) ? 'ok' : 'drift'
+    return driftKeys.has(f.key) ? 'drift' : 'ok'
+  }
+
+  // 표시값도 서버가 계산한 **실효값**(overlay + 기본값 + 배포 시 주입)을 쓴다.
+  // overlay 만 보고 그리면 판정(overlay 기준)과 표시 기준이 달라, 화면에는 같은 값이
+  // 보이는데 드리프트로 표시되는 일이 생긴다 — src 배지로 그 차이를 드러낸다.
+  // 서버 값이 아직 없으면(판정 보류·구 OAM) overlay 기준으로 폴백한다(표시 전용).
+  const memberValues = useMemo(() => {
+    const m = new Map<number, GroupPkgSyncMember['values']>()
+    for (const mem of syncView?.members || []) m.set(mem.agent_id, mem.values)
+    return m
+  }, [syncView])
+
+  function memberValue(agentId: number, f: ConfigTemplateField):
+      { v: FieldValue; src: 'overlay' | 'injected' | 'default' } {
+    const cell = memberValues.get(agentId)?.[f.key]
+    if (cell) return { v: cell.v as FieldValue, src: cell.src }
+    const { v, fromDefault } = effective(agentId, f)
+    return { v, src: fromDefault ? 'default' : 'overlay' }
   }
 
   function display(f: ConfigTemplateField, v: FieldValue): string {
@@ -295,20 +360,17 @@ export function GroupConfigCompareView({ group, members: liveMembers,
 
   const summary = useMemo(() => {
     let ok = 0, drift = 0, individual = 0
-    const driftFields: string[] = []
-    if (template && configs) {
+    if (template) {
       for (const sec of template.sections) {
         for (const f of sec.fields) {
-          const st = cellState(f, deployedIds)
-          if (st === 'drift') { drift++; driftFields.push(f.label || f.key) }
-          else if (st === 'ok' && syncKeys.has(f.key)) ok++
-          else individual++
+          if (!syncKeys.has(f.key)) individual++
+          else if (driftKeys.has(f.key)) drift++
+          else ok++
         }
       }
     }
-    return { ok, drift, individual, driftFields }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [template, configs, syncKeys, deployedIds.join(',')])
+    return { ok, drift, individual }
+  }, [template, syncKeys, driftKeys])
 
   const stateStyle: Record<CellState, React.CSSProperties> = {
     ok:         { background: '#f0f9f1' },
@@ -388,11 +450,21 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           </span>
           {mixedVersions && (
             <span style={{ color: '#e67e22' }}>
-              ⚠ 버전 혼재 (v{memberVersions.join(' / v')}) — 자동 교정은 버전이 같아질 때까지 보류
+              ⚠ 버전 혼재 (v{memberVersions.join(' / v')})
             </span>
           )}
-          {autoSyncOn && summary.drift > 0 && (
-            <span style={{ color: '#e67e22' }}>⚠ 드리프트 {summary.drift}건 — 자동 교정 대기 중</span>
+          {/* 정합 상태 — 서버 판정(GET .../packages/{pkg}/sync)을 그대로 표시.
+              화면이 자체 계산하면 자동 교정이 실제로 할 일과 어긋난다. */}
+          {syncView?.status === 'out_of_sync' && (
+            <span style={{ color: '#e67e22' }}>
+              ⚠ 드리프트 {summary.drift}건 —{' '}
+              {syncView.auto_sync ? '자동 교정 대기 중' : '동기화 OFF — 자동 교정 안 함'}
+            </span>
+          )}
+          {syncView?.status === 'unknown' && (
+            <span style={{ color: 'var(--text-muted)' }}>
+              정합 판정 보류 — {SYNC_REASON[syncView.reason || ''] || syncView.reason}
+            </span>
           )}
         </div>
       )}
@@ -422,7 +494,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           </div>
         ) : view === 'edit' && isAS ? (
           /* ── 공통 설정 편집 ── */
-          !configs ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
+          !configView ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
             <>
               {autoSyncOn ? (
                 <div style={{ padding: 10, background: '#e8f0fe', border: '1px solid #b8d4f5',
@@ -494,7 +566,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           })()
         ) : (
           /* ── 멤버 비교 표 ── */
-          !configs ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
+          !configView ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
             <>
               <div style={{ fontSize: 12, marginBottom: 12, display: 'flex', gap: 12,
                             alignItems: 'center', flexWrap: 'wrap' }}>
@@ -546,7 +618,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                     </thead>
                     <tbody>
                       {sec.fields.map(f => {
-                        const st = cellState(f, deployedIds)
+                        const st = cellState(f)
                         return (
                           <tr key={f.key} style={{ borderTop: '1px solid #eee', ...stateStyle[st] }}>
                             <td style={{ padding: '6px 14px' }} title={f.key}>
@@ -560,16 +632,22 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                                 : <span title="서버별 고유값 — 동기화 대상 아님" style={{ fontSize: 10, color: 'var(--text-muted)' }}>개별</span>}
                             </td>
                             {deployedMembers.map(m => {
-                              const { v, fromDefault } = effective(m.id, f)
+                              const cell = memberValue(m.id, f)
+                              const muted = cell.src !== 'overlay'
                               return (
                                 <td key={m.id}
                                     style={{ padding: '6px 10px', fontFamily: 'monospace',
                                              cursor: 'pointer',
-                                             color: fromDefault ? 'var(--text-muted)' : undefined,
-                                             fontStyle: fromDefault ? 'italic' : undefined }}
-                                    title={fromDefault ? '템플릿 기본값 (overlay 미설정)' : undefined}
+                                             color: muted ? 'var(--text-muted)' : undefined,
+                                             fontStyle: muted ? 'italic' : undefined }}
+                                    title={SRC_HINT[cell.src]}
                                     onClick={() => onSelectMember(m.id, effectivePkgName)}>
-                                  {display(f, v)}
+                                  {display(f, cell.v)}
+                                  {muted && (
+                                    <span style={{ fontSize: 10, marginLeft: 5, fontStyle: 'normal' }}>
+                                      {cell.src === 'injected' ? '(주입)' : '(미설정)'}
+                                    </span>
+                                  )}
                                 </td>
                               )
                             })}

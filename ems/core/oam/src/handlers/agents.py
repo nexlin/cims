@@ -154,6 +154,48 @@ def _strip_masked(values, template) -> dict:
             if not (k in pw and isinstance(v, str) and v == _SECRET_MASK)}
 
 
+def _template_key_set(template) -> set:
+    """config_template 이 선언한 모든 필드 키 (scope 무관)."""
+    out: set = set()
+    if not isinstance(template, dict):
+        return out
+    for s in template.get("sections") or []:
+        for f in s.get("fields") or []:
+            if f.get("key"):
+                out.add(f["key"])
+    return out
+
+
+def _prune_to_template(values, pkg_file, *, where: str) -> tuple:
+    """overlay 쓰기 마스크 — **템플릿에 선언된 키만 저장한다** (스키마가 계약).
+
+    deployment.config overlay 는 "운영자가 정한 값"(desired state)이고, 렌더된
+    `<pkg>/config.json` 은 그 파생물이다. 템플릿 밖 키가 overlay 에 앉으면
+      - 그 패키지 화면에는 안 보이고(템플릿에 필드가 없으니 편집·조회 불가),
+      - 자동 교정도 못 건드리며(교정은 템플릿 service 키만 순회),
+      - 다른 패키지 템플릿에 얹히면 남의 필드로 오독된다.
+    실측 사고: base oam overlay 에 얹힌 `ServiceLogging.Dir` 이 oam-svc/csc 화면에서
+    유령 드리프트로 표시됐다.
+
+    **템플릿이 없는 패키지는 프루닝하지 않는다** — 검증 근거가 없으면 판단하지 않는다
+    (판단 불가 시 보수적으로, reconcile 의 원칙과 동일).
+
+    반환 (pruned_values, dropped_keys). dropped 는 응답·로그로 드러낸다(조용히 버리지 않음).
+    """
+    if not isinstance(values, dict):
+        return values, []
+    template = pkg_file.get("config_template") if isinstance(pkg_file, dict) else None
+    keys = _template_key_set(template)
+    if not keys:
+        return values, []
+    dropped = sorted(k for k in values if k not in keys)
+    if not dropped:
+        return values, []
+    logger.log_warning(f"[config] {where}: 템플릿 밖 키 {len(dropped)}개 미저장 {dropped} "
+                       f"— 모듈이 읽는 값이면 config_template 에 선언해야 한다")
+    return {k: v for k, v in values.items() if k in keys}, dropped
+
+
 def _materialize_deploy_config(config, pkg_file, overlay):
     """배포 config 실체화 — agent 가 쓰는 config.json 이 항상 완전한 유효설정이 되도록
     config_template default 를 base 로 깔고 deployment overlay(사용자 변경분)를 병합.
@@ -2230,6 +2272,12 @@ async def _put_deployment_config(handler_args, did: int, config):
     # 조회 sentinel 로 온 시크릿은 변경 없음 → 실제 저장값 보존.
     values = _strip_masked(values, _tmpl)
 
+    # 스키마 마스크 — 템플릿 밖 키는 저장하지 않는다(들어오는 값 기준). 이미 저장된
+    # 레거시 키는 여기서 건드리지 않는다: 평범한 저장이 다른 키를 조용히 지우면 안 되고,
+    # 정리는 렌더 동치가 증명된 것만 하는 시작 시 스윕(_sweep_overlay_schema)이 맡는다.
+    values, pruned_keys = _prune_to_template(values, _pkg or {},
+                                             where=f"deployment#{dep['id']} 저장")
+
     # bind IP 가드 — `Server.Ip` 에 **VIP** 를 넣으면 그 VIP 를 보유하지 않은 노드에서
     #   bind 가 실패해 프로세스가 못 뜨고, watchdog 이 같은 설정으로 재기동을 반복한다
     #   (관리평면이면 콘솔이 사라져 수습 통로까지 없어진다). 콘솔 접속 주소는 설정값이
@@ -2336,6 +2384,8 @@ async def _put_deployment_config(handler_args, did: int, config):
             "ok":      True,
             "job_id":  job_id,
             "members": members_resp,
+            # 템플릿에 없어 저장하지 않은 키 — 조용히 버리지 않고 호출자에게 돌려준다.
+            "pruned_keys": pruned_keys,
         },
         media_type="application/json")
 
@@ -2632,6 +2682,260 @@ def _enqueue_update_config_jobs(config, deps: list, pkg_file, *, op: str,
     return members, sync_id
 
 
+def sweep_overlay_schema(config, *, apply: bool = True) -> dict:
+    """저장된 overlay 에서 템플릿 밖 키 정리 — **렌더 동치가 증명된 것만** 지운다.
+
+    write 경로(_prune_to_template)는 새 오염만 막는다. 이미 굳은 레거시 키는 여기서
+    치우는데, 맹목적으로 지우면 안 된다 — 템플릿에 없어도 렌더 결과에 살아있는 키가 있다
+    (예: `CimsRuntimeMount` 은 주입 대상이 아니라 overlay 가 유일한 출처였다. 지웠다면
+    "store 가 마운트 하위가 아님" 가드에 걸려 OAM 이 기동을 거부한다).
+
+    그래서 판정을 규칙으로 흉내내지 않고 **렌더 함수 자신을 오라클로** 쓴다:
+    `_materialize_deploy_config(원본 overlay)` 와 `(정리된 overlay)` 의 결과가 완전히
+    같을 때만 정리한다. 다르면 그 키는 살아있는 설정이므로 두고 경고만 남긴다
+    (= config_template 에 선언되어야 한다는 신호).
+
+    정리는 저장 레코드만 바꾼다 — 렌더 결과가 같으므로 job 을 큐잉하지 않는다(무중단).
+    apply=False 면 판정만(dry-run). 반환 요약 dict.
+    """
+    out = {"scanned": 0, "cleaned": 0, "removed_keys": {}, "kept_keys": {}}
+    for dep in _deploy_load_all(config) or []:
+        overlay = _deploy_overlay(dep)
+        if not overlay:
+            continue
+        out["scanned"] += 1
+        pkg_file = _pkg_load(config, dep.get("package_id")) or {}
+        keys = _template_key_set(pkg_file.get("config_template")
+                                 if isinstance(pkg_file, dict) else None)
+        if not keys:
+            continue        # 템플릿 없는 패키지 — 검증 근거 없음, 손대지 않는다
+        extra = [k for k in overlay if k not in keys]
+        if not extra:
+            continue
+        did = dep.get("id")
+        pruned = {k: v for k, v in overlay.items() if k in keys}
+        before = _materialize_deploy_config(config, pkg_file, overlay)
+        after = _materialize_deploy_config(config, pkg_file, pruned)
+        if before != after:
+            # 렌더에 영향 → 살아있는 설정. 지우지 않고 드러낸다.
+            out["kept_keys"][did] = sorted(extra)
+            logger.log_warning(
+                f"[config-sweep] deployment#{did}: 템플릿 밖 키 {sorted(extra)} 가 렌더 결과에 "
+                f"살아있어 정리하지 않음 — 해당 패키지 config_template 에 선언이 필요하다")
+            continue
+        out["removed_keys"][did] = sorted(extra)
+        out["cleaned"] += 1
+        if apply:
+            _deploy_update(config, did, {"config": pruned})
+            logger.log_info(f"[config-sweep] deployment#{did}: 템플릿 밖 키 {sorted(extra)} 정리 "
+                            f"(렌더 결과 동일 — job 큐잉 없음)")
+    return out
+
+
+def _deploy_overlay(dep: dict) -> dict:
+    """deployment 레코드의 overlay(사용자 의도 SoT) — dict 아니면 config_json 파싱."""
+    cur = dep.get("config")
+    if not isinstance(cur, dict):
+        cur = _safe_json(dep.get("config_json")) or {}
+    return cur
+
+
+def _group_package_plan(config, group: dict, pkg_name: str) -> dict:
+    """그룹×패키지 정합의 **전제 계산** — 판정(evaluate)·교정(reconcile) 공용, 읽기 전용.
+
+    "무엇을 기준으로 무엇과 비교할 것인가" 를 한 곳에서만 정한다. 판정과 교정이 각자
+    전제를 계산하면 콘솔이 보여주는 드리프트와 자동 교정이 실제로 바꾸는 것이 갈라진다.
+
+    반환 {reason, active_agent_id, src, same_ver, deferred, svc_keys, src_overlay,
+          pkg_file}. reason 이 None 일 때만 src/same_ver/svc_keys 가 유효하다.
+    동기화 스위치는 여기서 보지 않는다 — 교정 여부만 좌우할 뿐, 정합 여부 판정은
+    스위치 OFF 에서도 성립하므로 호출측(reconcile)이 따로 건다.
+    """
+    from services import ha_lookup
+    plan: dict = {"reason": None, "active_agent_id": None, "src": None,
+                  "same_ver": [], "deferred": [], "svc_keys": set(),
+                  "src_overlay": {}, "pkg_file": {}, "deps": []}
+    if group.get("mode") != "active_standby":
+        plan["reason"] = "not_active_standby"
+        return plan
+    # 멤버 배포는 판정 불가 사유와 무관하게 먼저 채운다 — 판정이 보류돼도 화면은
+    # 멤버 값을 나란히 보여줘야 한다(롤링 업그레이드 중 버전 혼재 창 등).
+    deps = ha_lookup.deployments_in_group_for_package(config, group["id"], pkg_name)
+    _enrich_deploy(deps, config)
+    plan["deps"] = deps
+
+    active_aid = ha_lookup.vip_observation(config, group)["active_agent_id"]
+    plan["active_agent_id"] = active_aid
+    if active_aid is None:
+        plan["reason"] = "active_unknown"
+        return plan
+
+    src = next((d for d in deps if d.get("agent_id") == active_aid), None)
+    if not src:
+        plan["reason"] = "active_has_no_deployment"
+        return plan
+    targets = [d for d in deps if d.get("id") != src.get("id")]
+    if not targets:
+        plan["reason"] = "no_peers"
+        return plan
+    src_ver = src.get("package_version")
+    plan["deferred"] = [{"deployment_id": t["id"],
+                         "package_version": t.get("package_version")}
+                        for t in targets if t.get("package_version") != src_ver]
+    same_ver = [t for t in targets if t.get("package_version") == src_ver]
+    if not same_ver:
+        plan["reason"] = "version_mismatch"
+        return plan
+
+    _pkg = _pkg_load(config, src.get("package_id")) or {}
+    plan.update({
+        "src": src, "same_ver": same_ver, "pkg_file": _pkg,
+        "svc_keys": _service_scope_keys(
+            _pkg.get("config_template") if isinstance(_pkg, dict) else None),
+        "src_overlay": _deploy_overlay(src),
+    })
+    return plan
+
+
+def evaluate_group_package(config, group: dict, pkg_name: str) -> dict:
+    """그룹×패키지 공통 설정 정합 **판정** (읽기 전용 dry-run — 쓰기·job 없음).
+
+    reconcile_group_package 와 같은 전제(_group_package_plan)·같은 비교 규칙을 쓰므로
+    "여기서 드리프트라고 표시된 것" = "자동 교정이 실제로 바꿀 것" 이 항상 일치한다.
+    콘솔은 이 결과를 **표시만** 한다 — 멤버 설정을 각자 받아 브라우저에서 다시 비교하면
+    판정 주체가 둘이 되어 어긋난다 (템플릿과 다른 패키지의 overlay 를 섞어 세는 유령
+    드리프트가 그 사례).
+
+    스위치 OFF 도 판정은 한다 — 멈추는 건 교정이지 정합 여부가 아니다. 호출측은
+    auto_sync 필드로 "교정 대기" 와 "수동(교정 안 함)" 을 갈라 표시한다.
+
+    AS 는 ACTIVE 를 기준으로 한 방향 판정(교정 가능), AA 는 기준 멤버가 없으므로
+    "멤버 간 값이 같은가" 만 본다(교정 주체 없음 — action=None). 모드별로 판정 주체가
+    갈리지 않도록 두 경우 모두 서버가 낸다.
+
+    반환 {
+      group_id, package, auto_sync,
+      status:  'in_sync' | 'out_of_sync' | 'unknown',
+      reason:  판정 불가 사유 (status='unknown' 일 때만),
+      active_agent_id, compared_to: 판정 기준 멤버 | None(AA),
+      drift:   [{key, action: 'copy'|'reset'|None, active, members[]}],
+      deferred: 버전 혼재로 보류된 멤버,
+      members: [{deployment_id, agent_id, agent_name, package_version,
+                 values: {key: {v, src}}}]   # 표시용 실효값
+    }
+    action=copy 는 ACTIVE 값 복사, reset 은 overlay 제거(=템플릿 기본값 복귀)를 뜻한다.
+
+    **members[].values 는 렌더 결과(실효값)** 다 — overlay + 템플릿 기본값 + 배포 시 주입을
+    모두 반영한 `_materialize_deploy_config` 의 산출물. 화면이 overlay 만 보고 표시하면
+    (a) 주입으로 채워지는 값(JwtSecret 등)이 빈칸으로 보여 "시크릿 없음"으로 오해되고,
+    (b) 판정은 overlay 기준인데 표시는 다른 기준이라 "값이 같은데 드리프트"가 된다.
+    `src` 가 그 차이를 드러낸다: overlay(운영자 지정) / injected(배포 시 주입) /
+    default(템플릿 기본값 — overlay 미설정).
+    """
+    from services import ha_lookup
+    out: dict = {"group_id": group.get("id"), "package": pkg_name,
+                 "auto_sync": ha_lookup.auto_sync_enabled(group, pkg_name),
+                 "status": "unknown", "reason": None, "active_agent_id": None,
+                 "compared_to": None, "drift": [], "deferred": [], "members": []}
+
+    def _member_values(dep):
+        """멤버의 표시용 실효값 — 렌더 결과 + 값의 출처. 멤버마다 **자기 버전의
+        템플릿**으로 계산한다(버전 혼재 창에서도 각자 맞는 필드로 보이게)."""
+        pkg_file = _pkg_load(config, dep.get("package_id")) or {}
+        tmpl = pkg_file.get("config_template") if isinstance(pkg_file, dict) else None
+        show = _masker(pkg_file)
+        overlay = _deploy_overlay(dep)
+        mat = _materialize_deploy_config(config, pkg_file, overlay)
+        defaults = _template_defaults(tmpl)
+        vals = {}
+        for k in _template_key_set(tmpl):
+            v = mat.get(k)
+            if k in overlay:
+                src = "overlay"
+            elif v is not None and v != defaults.get(k):
+                src = "injected"        # 배포 시 주입 (base 신원·경로 등)
+            else:
+                src = "default"
+            vals[k] = {"v": show(k, v), "src": src}
+        return {"deployment_id": dep.get("id"), "agent_id": dep.get("agent_id"),
+                "agent_name": dep.get("agent_name"),
+                "package_version": dep.get("package_version"), "values": vals}
+
+    def _masker(pkg_file):
+        # 값 노출 — 시크릿은 조회 응답 관용대로 sentinel (_get_deployment_config 와 동일).
+        tmpl = pkg_file.get("config_template") if isinstance(pkg_file, dict) else None
+        pw_keys = _password_keys(tmpl)
+        return lambda k, v: (_SECRET_MASK if (k in pw_keys and v) else v)
+
+    def _member_view(dep, overlay, key, show):
+        return {"deployment_id": dep.get("id"), "agent_id": dep.get("agent_id"),
+                "agent_name": dep.get("agent_name"),
+                "value": show(key, overlay.get(key)), "present": key in overlay}
+
+    if group.get("mode") != "active_standby":
+        # ── AA/standalone — 기준(ACTIVE) 없음: 멤버 간 동일성만 본다 ──
+        deps = ha_lookup.deployments_in_group_for_package(config, group["id"], pkg_name)
+        _enrich_deploy(deps, config)
+        out["members"] = [_member_values(d) for d in deps]
+        if len(deps) < 2:
+            out["reason"] = "no_peers"
+            return out
+        ref = min(deps, key=lambda d: d.get("id") or 0)
+        ref_ver = ref.get("package_version")
+        out["deferred"] = [{"deployment_id": d["id"],
+                            "package_version": d.get("package_version")}
+                           for d in deps if d.get("package_version") != ref_ver]
+        peers = [d for d in deps if d.get("package_version") == ref_ver]
+        if len(peers) < 2:
+            out["reason"] = "version_mismatch"
+            return out
+        pkg_file = _pkg_load(config, ref.get("package_id")) or {}
+        show = _masker(pkg_file)
+        svc_keys = _service_scope_keys(
+            pkg_file.get("config_template") if isinstance(pkg_file, dict) else None)
+        views = [(p, _deploy_overlay(p)) for p in peers]
+        first = views[0][1]
+        for k in sorted(svc_keys):
+            if all((k in ov) == (k in first) and ov.get(k) == first.get(k)
+                   for _p, ov in views[1:]):
+                continue
+            out["drift"].append({"key": k, "action": None, "active": None,
+                                 "members": [_member_view(p, ov, k, show)
+                                             for p, ov in views]})
+        out["status"] = "out_of_sync" if out["drift"] else "in_sync"
+        return out
+
+    plan = _group_package_plan(config, group, pkg_name)
+    out["active_agent_id"] = plan["active_agent_id"]
+    out["deferred"] = plan["deferred"]
+    out["members"] = [_member_values(d) for d in plan["deps"]]
+    if plan["reason"]:
+        out["reason"] = plan["reason"]
+        return out
+
+    src, src_overlay = plan["src"], plan["src_overlay"]
+    out["compared_to"] = {"deployment_id": src.get("id"),
+                          "agent_id": src.get("agent_id"),
+                          "agent_name": src.get("agent_name"),
+                          "package_version": src.get("package_version")}
+    show = _masker(plan["pkg_file"])
+    for k in sorted(plan["svc_keys"]):
+        in_src = k in src_overlay
+        members = []
+        for t in plan["same_ver"]:
+            cur = _deploy_overlay(t)
+            # 교정 규칙과 1:1 — ACTIVE 에 있으면 값 비교, 없으면 '남아있는가' 가 곧 드리프트.
+            differs = (cur.get(k) != src_overlay[k]) if in_src else (k in cur)
+            if differs:
+                members.append(_member_view(t, cur, k, show))
+        if members:
+            out["drift"].append({"key": k, "action": "copy" if in_src else "reset",
+                                 "active": show(k, src_overlay.get(k)) if in_src else None,
+                                 "members": members})
+    out["status"] = "out_of_sync" if out["drift"] else "in_sync"
+    return out
+
+
 def reconcile_group_package(config, group: dict, pkg_name: str, *,
                             include_collections: bool = True,
                             actor: str = "auto-sync") -> dict:
@@ -2655,49 +2959,28 @@ def reconcile_group_package(config, group: dict, pkg_name: str, *,
         out["reason"] = "not_active_standby"
         return out
     if not ha_lookup.auto_sync_enabled(group, pkg_name):
+        # 스위치 OFF 는 교정만 멈춘다 — 정합 여부 판정은 evaluate_group_package 가 계속 한다.
         out["reason"] = "switch_off"
         return out
-    obs = ha_lookup.vip_observation(config, group)
-    active_aid = obs["active_agent_id"]
-    out["active_agent_id"] = active_aid
-    if active_aid is None:
-        out["reason"] = "active_unknown"
+    plan = _group_package_plan(config, group, pkg_name)
+    out["active_agent_id"] = plan["active_agent_id"]
+    out["deferred"] = plan["deferred"]
+    if plan["reason"]:
+        out["reason"] = plan["reason"]
         return out
 
-    deps = ha_lookup.deployments_in_group_for_package(config, group["id"], pkg_name)
-    _enrich_deploy(deps, config)
-    src = next((d for d in deps if d.get("agent_id") == active_aid), None)
-    if not src:
-        out["reason"] = "active_has_no_deployment"
-        return out
-    targets = [d for d in deps if d.get("id") != src.get("id")]
-    if not targets:
-        out["reason"] = "no_peers"
-        return out
-    src_ver = src.get("package_version")
-    same_ver = [t for t in targets if t.get("package_version") == src_ver]
-    out["deferred"] = [{"deployment_id": t["id"],
-                        "package_version": t.get("package_version")}
-                       for t in targets if t.get("package_version") != src_ver]
-    if not same_ver:
-        out["reason"] = "version_mismatch"
-        return out
-
-    _pkg = _pkg_load(config, src.get("package_id")) or {}
+    src, same_ver = plan["src"], plan["same_ver"]
+    svc_keys, src_overlay = plan["svc_keys"], plan["src_overlay"]
+    active_aid = plan["active_agent_id"]
+    _pkg = plan["pkg_file"]
     template = _pkg.get("config_template") if isinstance(_pkg, dict) else None
-    svc_keys = _service_scope_keys(template)
-    src_overlay = src.get("config")
-    if not isinstance(src_overlay, dict):
-        src_overlay = _safe_json(src.get("config_json")) or {}
 
     # ── scalar 정합: ACTIVE overlay 의 service 키 기준 merge / 제거(기본값 복귀)
     saved: list[dict] = []
     synced_keys: set = set()
     removed_keys: set = set()
     for t in same_ver:
-        cur = t.get("config")
-        if not isinstance(cur, dict):
-            cur = _safe_json(t.get("config_json")) or {}
+        cur = _deploy_overlay(t)
         new_overlay = dict(cur)
         changed = False
         for k in svc_keys:
@@ -2874,6 +3157,11 @@ async def _create_deployment(handler_args: HandlerArgs, config):
 
     pkg_file = await asyncio.to_thread(_pkg_load, config, package_id)
     pkg_file = pkg_file or {}
+    # 스키마 마스크 — 등록 시점(부트스트랩·프로비저닝 포함)에 템플릿 밖 키를 막는다.
+    # 부트스트랩이 기동 중 config.json 을 통째로 스냅샷해 보내면 템플릿에 없는 키까지
+    # desired state 로 굳는데, 그 오염이 다른 패키지 화면으로 새는 경로였다.
+    cfg_overlay, pruned_keys = _prune_to_template(
+        cfg_overlay, pkg_file, where=f"deployment 등록(agent#{agent_id} pkg#{package_id})")
     pkg_meta = pkg_file.get("meta") if isinstance(pkg_file.get("meta"), dict) else {}
     ha_cap = (pkg_meta.get("ha_capability") or "standalone").lower()
     # Phase 4 fix: process_name 자동 추론 — package_name 그대로 (csc, oam, csp 등).
@@ -2989,6 +3277,8 @@ async def _create_deployment(handler_args: HandlerArgs, config):
         logger.log_warning(f"[deploy] 배포 생성 ha 재렌더 전파 실패(agent={agent_id}): {e}")
 
     _created = _deployment_to_json(r)
+    if pruned_keys:
+        _created["pruned_keys"] = pruned_keys
     if _lease_notice:
         # 조용히 성공시키면 운영자는 이중화가 된 줄 안다 — 응답에 사유를 싣는다.
         _created["warning"] = _lease_notice

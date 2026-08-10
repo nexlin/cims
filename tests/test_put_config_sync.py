@@ -15,6 +15,8 @@ Covers (handlers 직접 호출 — 서버 미기동):
     ACTIVE 판정 (정확히 1명 보유·stale 제외·애매하면 None) + 스위치 기본 ON
   - reconcile_group_package: 자동 교정 — ACTIVE→STANDBY service 키 복사/기본값 복귀,
     스위치 OFF·판정 불가·버전 불일치 skip, sync_txn(op=auto_sync), 멱등(in_sync)
+  - evaluate_group_package: 드리프트 판정(읽기 전용) — 교정이 바꿀 키와 정확히 일치,
+    스위치 OFF 에서도 판정, 판정 불가는 unknown(+reason), password 값 마스킹
   - _put_group_pkg_config / _put_group_auto_sync (ha_groups): 그룹 공통 설정 저장
     (ON=전 멤버, OFF=target 필수) + 스위치 영속·ON 전환 즉시 정합
 
@@ -532,6 +534,293 @@ class TestReconcileGroupPackage(_R4Case):
         self.assertEqual(r["deferred"],
                          [{"deployment_id": 6, "package_version": "0.2.0"}])
         self.assertEqual(self._dep(6)["config"], {})
+
+
+class TestOverlaySchemaMask(_R4Case):
+    """overlay = config_template 선언 키만 — write 프루닝 + 렌더 동치 증명 스윕."""
+
+    # 주입 대상 모듈(shared_identity)로 두 경로를 한 픽스처에서 본다.
+    TPL = {"version": 1, "sections": [
+        {"key": "svc", "title": "S", "scope": "service", "fields": [
+            {"key": "Db.Host", "type": "string", "default": "127.0.0.1"},
+        ]},
+        {"key": "_infra", "title": "Infra", "scope": "system", "fields": [
+            {"key": "CimsRuntimeDir", "type": "path", "default": ""},
+        ]}]}
+
+    def _seed_shared_pkg(self, pid=1, name="oam"):
+        from services import file_store
+        file_store.save(file_store.domain_dir(self.config, "packages"), pid, {
+            "id": pid, "name": name, "version": "0.1.0",
+            "config_template": self.TPL, "meta": {"shared_identity": True}})
+
+    def _put(self, did, cfg):
+        from handlers.agents import _put_deployment_config
+        from httpsrv.handler import HandlerArgs
+        ha = HandlerArgs(method="PUT", full_path=f"/api/v1/deployments/{did}/config",
+                         client_ip="127.0.0.1", client_port=0,
+                         body={"config": cfg, "queue_update": False})
+        return asyncio.run(_put_deployment_config(ha, did, self.config))
+
+    def _sweep(self, apply=True):
+        from handlers.agents import sweep_overlay_schema
+        return sweep_overlay_schema(self.config, apply=apply)
+
+    def test_put_drops_untemplated_keys_and_reports(self):
+        self._seed_shared_pkg()
+        self._seed_agent(10, "a")
+        self._seed_deployment(5, 10, 1, config={})
+        r = self._put(5, {"Db.Host": "10.0.0.9", "Bogus.Key": "x"})
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body["pruned_keys"], ["Bogus.Key"])   # 조용히 버리지 않는다
+        self.assertEqual(self._dep(5)["config"], {"Db.Host": "10.0.0.9"})
+
+    def test_put_keeps_all_keys_when_package_has_no_template(self):
+        """템플릿 없는 패키지는 검증 근거가 없다 — 판단하지 않고 그대로 저장."""
+        from services import file_store
+        file_store.save(file_store.domain_dir(self.config, "packages"), 1,
+                        {"id": 1, "name": "x", "version": "0.1.0"})
+        self._seed_agent(10, "a")
+        self._seed_deployment(5, 10, 1, config={})
+        r = self._put(5, {"Whatever": 1})
+        self.assertEqual(r.body["pruned_keys"], [])
+        self.assertEqual(self._dep(5)["config"], {"Whatever": 1})
+
+    def test_create_prunes_bootstrap_snapshot(self):
+        """부트스트랩이 실행 중 config.json 을 통째로 보내도 템플릿 키만 굳는다."""
+        from handlers.agents import _create_deployment
+        from httpsrv.handler import HandlerArgs
+        self._seed_pkg(1, "csp", template=self.TPL)
+        self._seed_agent(10, "a")
+        ha = HandlerArgs(method="POST", full_path="/api/v1/deployments",
+                         client_ip="127.0.0.1", client_port=0,
+                         body={"agent_id": 10, "package_id": 1, "process_name": "csp",
+                               "install_path": "/opt/x", "status": "running",
+                               "config": {"Db.Host": "10.0.0.9",
+                                          "CimsRuntimeDir": "/mnt/cims/runtime",
+                                          "Runtime.Snapshot.Junk": "from-config-json"}})
+        r = asyncio.run(_create_deployment(ha, self.config))
+        self.assertEqual(r.status, 201)
+        self.assertEqual(r.body["pruned_keys"], ["Runtime.Snapshot.Junk"])
+        self.assertEqual(self._dep(r.body["id"])["config"],
+                         {"Db.Host": "10.0.0.9", "CimsRuntimeDir": "/mnt/cims/runtime"})
+
+    def test_sweep_removes_only_render_equivalent_keys(self):
+        """렌더 결과가 같을 때만 정리 — 살아있는 키는 두고 경고."""
+        self._seed_shared_pkg()
+        self._seed_agent(10, "a")
+        # dep5: 주입으로 되살아나는 키(BuiltinAccounts) → 정리 대상
+        # dep6: 렌더에 그대로 실리는 키(Live.Key) → 보존 대상
+        self.config["CimsAuth"] = {"BuiltinAccounts": [{"login_id": "admin"}]}
+        self._seed_deployment(5, 10, 1, config={
+            "Db.Host": "10.0.0.1", "CimsAuth.BuiltinAccounts": [{"login_id": "admin"}]})
+        self._seed_deployment(6, 10, 1, config={"Db.Host": "10.0.0.1", "Live.Key": "keep-me"})
+        r = self._sweep()
+        self.assertEqual(r["removed_keys"], {5: ["CimsAuth.BuiltinAccounts"]})
+        self.assertEqual(r["kept_keys"], {6: ["Live.Key"]})
+        self.assertEqual(self._dep(5)["config"], {"Db.Host": "10.0.0.1"})
+        self.assertEqual(self._dep(6)["config"], {"Db.Host": "10.0.0.1", "Live.Key": "keep-me"})
+
+    def test_sweep_is_idempotent_and_dry_run_writes_nothing(self):
+        self._seed_shared_pkg()
+        self._seed_agent(10, "a")
+        self.config["CimsAuth"] = {"BuiltinAccounts": [{"login_id": "admin"}]}
+        self._seed_deployment(5, 10, 1, config={
+            "Db.Host": "x", "CimsAuth.BuiltinAccounts": [{"login_id": "admin"}]})
+        dry = self._sweep(apply=False)
+        self.assertEqual(dry["removed_keys"], {5: ["CimsAuth.BuiltinAccounts"]})
+        self.assertIn("CimsAuth.BuiltinAccounts", self._dep(5)["config"])   # 미적용
+        self._sweep()
+        self.assertEqual(self._sweep()["cleaned"], 0)                       # 멱등
+
+
+class TestEvaluateGroupPackage(_R4Case):
+    """evaluate_group_package — 드리프트 **판정**(읽기 전용). 콘솔 표시의 정본."""
+
+    def _evaluate(self, g, pkg="csp"):
+        from handlers.agents import evaluate_group_package
+        return evaluate_group_package(self.config, g, pkg)
+
+    def _reconcile(self, g, pkg="csp"):
+        from handlers.agents import reconcile_group_package
+        return reconcile_group_package(self.config, g, pkg, include_collections=False)
+
+    def test_drift_matches_what_reconcile_would_change(self):
+        """판정과 교정의 단일 진실 — drift 키 == 교정이 실제로 바꾼 키."""
+        g = self._seed_r4_pair(active_agent=10)
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "out_of_sync")
+        self.assertEqual(ev["active_agent_id"], 10)
+        self.assertEqual(ev["compared_to"]["deployment_id"], 5)
+        self.assertEqual([d["key"] for d in ev["drift"]],
+                         ["Db.Host", "Db.Port", "Tls.Port"])
+        # ACTIVE 에 있는 키는 복사, 없는 키는 제거(기본값 복귀)
+        self.assertEqual({d["key"]: d["action"] for d in ev["drift"]},
+                         {"Db.Host": "copy", "Db.Port": "reset", "Tls.Port": "copy"})
+        # ACTIVE 에 없어 STANDBY 에서 지워질 키는 기준값이 없다
+        self.assertIsNone(next(d for d in ev["drift"] if d["key"] == "Db.Port")["active"])
+        # 어느 멤버가 무슨 값을 갖고 있는지 (present=False → overlay 부재)
+        tls = next(d for d in ev["drift"] if d["key"] == "Tls.Port")
+        self.assertEqual(tls["members"],
+                         [{"deployment_id": 6, "agent_id": 11, "agent_name": "ctrl-b",
+                           "value": None, "present": False}])
+        # 실제 교정이 손대는 키 집합과 정확히 일치해야 한다
+        rc = self._reconcile(g)
+        self.assertEqual(sorted(rc["synced_keys"] + rc["removed_keys"]),
+                         [d["key"] for d in ev["drift"]])
+
+    def test_in_sync_after_reconcile(self):
+        """교정 직후 재판정은 in_sync — 콘솔이 계속 '대기 중'을 띄우지 않는다."""
+        g = self._seed_r4_pair(active_agent=10)
+        self._reconcile(g)
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "in_sync")
+        self.assertEqual(ev["drift"], [])
+
+    def test_switch_off_still_judges(self):
+        """스위치 OFF 는 교정만 멈춘다 — 정합 여부는 계속 판정 (교정 대기와 구분 표시)."""
+        g = self._seed_r4_pair(active_agent=10, auto_sync={"csp": False})
+        ev = self._evaluate(g)
+        self.assertFalse(ev["auto_sync"])
+        self.assertEqual(ev["status"], "out_of_sync")
+        self.assertIsNone(ev["reason"])
+        # 교정은 실제로 멈춰 있다
+        self.assertEqual(self._reconcile(g)["reason"], "switch_off")
+
+    def test_active_unknown_is_unknown_not_drift(self):
+        """ACTIVE 판정 불가면 드리프트를 단정하지 않는다 (기준이 없으므로)."""
+        self._seed_pkg(1, "csp")
+        self._seed_agent_hb(10, "a", ["10.0.0.11", self.VIP])
+        self._seed_agent_hb(11, "b", ["10.0.0.12", self.VIP])   # 2명 보유 = 애매
+        g = self._seed_as_group()
+        self._seed_deployment(5, 10, 1, config={"Db.Host": "x"})
+        self._seed_deployment(6, 11, 1, config={})
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "unknown")
+        self.assertEqual(ev["reason"], "active_unknown")
+        self.assertEqual(ev["drift"], [])
+
+    def test_version_mismatch_unknown_with_deferred(self):
+        self._seed_pkg(1, "csp", version="0.1.0")
+        self._seed_pkg(3, "csp", version="0.2.0")
+        self._seed_agent_hb(10, "a", ["10.0.0.11", self.VIP])
+        self._seed_agent_hb(11, "b", ["10.0.0.12"])
+        g = self._seed_as_group()
+        self._seed_deployment(5, 10, 1, config={"Db.Host": "x"})
+        self._seed_deployment(6, 11, 3, config={})
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "unknown")
+        self.assertEqual(ev["reason"], "version_mismatch")
+        self.assertEqual(ev["deferred"],
+                         [{"deployment_id": 6, "package_version": "0.2.0"}])
+
+    def test_all_active_compares_members_without_reference(self):
+        """AA 는 기준(ACTIVE)이 없다 — 멤버 간 동일성만 판정하고 교정 지시는 없다."""
+        from services import file_store
+        self._seed_pkg(1, "csp")
+        self._seed_agent_hb(10, "a", ["10.0.0.11"])
+        self._seed_agent_hb(11, "b", ["10.0.0.12"])
+        g = self._seed_as_group()
+        g["mode"] = "all_active"
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        self._seed_deployment(5, 10, 1, config={"Db.Host": "10.0.0.1", "Db.Port": 3306})
+        self._seed_deployment(6, 11, 1, config={"Db.Host": "10.0.0.2", "Db.Port": 3306})
+        ev = self._evaluate(g)
+        self.assertFalse(ev["auto_sync"])            # AA 는 동기화 개념 없음
+        self.assertIsNone(ev["compared_to"])         # 기준 멤버 없음
+        self.assertEqual(ev["status"], "out_of_sync")
+        self.assertEqual([d["key"] for d in ev["drift"]], ["Db.Host"])
+        d = ev["drift"][0]
+        self.assertIsNone(d["action"])               # 자동 교정 주체 없음
+        self.assertEqual([m["value"] for m in d["members"]], ["10.0.0.1", "10.0.0.2"])
+        # 값이 같아지면 in_sync
+        self._seed_deployment(6, 11, 1, config={"Db.Host": "10.0.0.1", "Db.Port": 3306})
+        self.assertEqual(self._evaluate(g)["status"], "in_sync")
+
+    def test_all_active_single_member_no_peers(self):
+        from services import file_store
+        self._seed_pkg(1, "csp")
+        self._seed_agent_hb(10, "a", ["10.0.0.11"])
+        self._seed_agent_hb(11, "b", ["10.0.0.12"])
+        g = self._seed_as_group()
+        g["mode"] = "all_active"
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        self._seed_deployment(5, 10, 1, config={"Db.Host": "10.0.0.1"})
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "unknown")
+        self.assertEqual(ev["reason"], "no_peers")
+
+    def test_members_expose_effective_values_and_source(self):
+        """표시값은 렌더 실효값 — overlay/주입/기본값을 src 로 구분한다.
+
+        overlay 만 보고 그리면 (a) 주입 값이 빈칸으로 보이고 (b) 판정(overlay 기준)과
+        표시 기준이 달라 "값이 같은데 드리프트"가 된다. 그 근거를 응답이 들고 온다."""
+        from services import file_store
+        tmpl = {"version": 1, "sections": [
+            {"key": "svc", "title": "S", "scope": "service", "fields": [
+                {"key": "Db.Host", "type": "string", "default": "127.0.0.1"},
+            ]},
+            {"key": "_infra", "title": "I", "scope": "system", "fields": [
+                {"key": "CimsAuth.JwtSecret", "type": "password", "default": ""},
+                {"key": "Mgmt.Cidr", "type": "string", "default": ""},
+            ]}]}
+        file_store.save(file_store.domain_dir(self.config, "packages"), 1, {
+            "id": 1, "name": "oam", "version": "0.1.0", "config_template": tmpl,
+            "meta": {"shared_identity": True}})
+        self._seed_agent_hb(10, "a", ["10.0.0.11", self.VIP])
+        self._seed_agent_hb(11, "b", ["10.0.0.12"])
+        g = self._seed_as_group()
+        # base(OAM 자신)가 주입 소스 — overlay 에 없어도 렌더에는 들어간다
+        self.config["CimsAuth"] = {"JwtSecret": "shared-secret"}
+        self.config["Mgmt"] = {"Cidr": "10.0.0.0/24"}
+        self.config["CimsRuntimeDir"] = self.config["CimsRuntimeDir"]
+        self._seed_deployment(5, 10, 1, config={"Db.Host": "10.9.9.9"})
+        self._seed_deployment(6, 11, 1, config={})
+        ev = self._evaluate(g, pkg="oam")
+        by_agent = {m["agent_id"]: m["values"] for m in ev["members"]}
+        self.assertEqual(sorted(by_agent), [10, 11])
+        # ACTIVE: overlay 로 지정한 값
+        self.assertEqual(by_agent[10]["Db.Host"], {"v": "10.9.9.9", "src": "overlay"})
+        # STANDBY: overlay 미설정 → 기본값. 값은 달라 보여도 '지정 안 됨' 이 근거다.
+        self.assertEqual(by_agent[11]["Db.Host"], {"v": "127.0.0.1", "src": "default"})
+        # 주입 값 — overlay 에 없지만 노드 config.json 에는 들어간다(빈칸으로 보이면 오해)
+        self.assertEqual(by_agent[11]["Mgmt.Cidr"], {"v": "10.0.0.0/24", "src": "injected"})
+        self.assertEqual(by_agent[11]["CimsAuth.JwtSecret"]["src"], "injected")
+        from handlers.agents import _SECRET_MASK
+        self.assertEqual(by_agent[11]["CimsAuth.JwtSecret"]["v"], _SECRET_MASK)
+
+    def test_members_present_even_when_judgment_deferred(self):
+        """판정이 보류돼도(버전 혼재) 멤버 값 비교는 계속 보여야 한다."""
+        self._seed_pkg(1, "csp", version="0.1.0")
+        self._seed_pkg(3, "csp", version="0.2.0")
+        self._seed_agent_hb(10, "a", ["10.0.0.11", self.VIP])
+        self._seed_agent_hb(11, "b", ["10.0.0.12"])
+        g = self._seed_as_group()
+        self._seed_deployment(5, 10, 1, config={"Db.Host": "x"})
+        self._seed_deployment(6, 11, 3, config={"Db.Host": "y"})
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "unknown")
+        self.assertEqual(ev["reason"], "version_mismatch")
+        self.assertEqual({m["agent_id"] for m in ev["members"]}, {10, 11})
+
+    def test_secret_values_masked(self):
+        """password 필드 값은 조회 응답 관용대로 sentinel — 표시 경로로 평문이 새지 않게."""
+        from handlers.agents import _SECRET_MASK
+        tmpl = {"version": 1, "sections": [
+            {"key": "svc", "title": "S", "scope": "service", "fields": [
+                {"key": "Db.Password", "type": "password", "default": ""},
+            ]}]}
+        self._seed_pkg(1, "csp", template=tmpl)
+        self._seed_agent_hb(10, "a", ["10.0.0.11", self.VIP])
+        self._seed_agent_hb(11, "b", ["10.0.0.12"])
+        g = self._seed_as_group()
+        self._seed_deployment(5, 10, 1, config={"Db.Password": "active-secret"})
+        self._seed_deployment(6, 11, 1, config={"Db.Password": "standby-secret"})
+        ev = self._evaluate(g)
+        self.assertEqual(ev["status"], "out_of_sync")
+        d = ev["drift"][0]
+        self.assertEqual(d["active"], _SECRET_MASK)
+        self.assertEqual(d["members"][0]["value"], _SECRET_MASK)
 
 
 class TestGroupPkgConfig(_R4Case):

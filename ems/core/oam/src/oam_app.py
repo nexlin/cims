@@ -1040,6 +1040,19 @@ if __name__ == '__main__':
         except Exception as _e:
             logger.log_warning(f"[self-reconcile] skip: {_e}")
 
+        # ── overlay 스키마 정리 (1회, 멱등) ──────────────────────────────
+        # deployment overlay 는 config_template 에 선언된 키만 담는다(스키마가 계약).
+        # 옛 레코드에 남은 템플릿 밖 키를 치우되, **렌더 결과가 동일함이 증명된 것만**
+        # 지운다 — 살아있는 설정이면 경고만 남겨 템플릿 선언 누락을 드러낸다.
+        try:
+            from handlers.agents import sweep_overlay_schema
+            _sw = sweep_overlay_schema(config)
+            if _sw["cleaned"] or _sw["kept_keys"]:
+                logger.log_info(f"[config-sweep] scanned={_sw['scanned']} "
+                                f"cleaned={_sw['cleaned']} kept={len(_sw['kept_keys'])}")
+        except Exception as _e:
+            logger.log_warning(f"[config-sweep] skip: {_e}")
+
         # ── Agent stale sweeper ─────────────────────────────────────────
         from handlers.agent_api import _AGENT_CERT_ROTATE_THRESHOLD_DAYS
         STALE_SEC = int(config.get('AgentStaleSec', 8))

@@ -493,7 +493,8 @@ start_svc_mgmt()  { kill_stray "svc_mgmt_app.py" "$port" tcp
   설정·컬렉션만 노출.** 공통 필드는 화면에 없으며, 안내 배너가 그룹 탭으로 유도한다.
   저장은 항상 그 서버에만 적용(`PUT /deployments/{id}/config` — 전파 없음).
 - **AA 그룹·standalone 은 동기화 개념이 없다** — 서버 화면에서 전체 섹션·컬렉션 편집.
-  AA 그룹의 그룹 탭은 [멤버 비교] 표만 제공(정보성 드리프트 표시).
+  AA 그룹의 그룹 탭은 [멤버 비교] 표만 제공(정보성 드리프트 표시 — 판정 주체는 AS 와
+  같은 서버 API, 다만 기준 멤버가 없어 멤버 간 동일성만 본다).
 - `_infra`(Infrastructure) 섹션은 **전부 서버 개별(system)** — 배포 시 configure.sh 가
   `deploy_value` 로 자동 주입하는 서버별 인프라 값이므로 그룹 공통 화면에 노출하지
   않고, 서버 화면의 접힌 "인프라" 블록으로만 보인다. (시크릿 등 멤버 간 동일해야
@@ -550,6 +551,33 @@ AS 그룹의 공통 설정 정합은 **그룹×패키지 단위 동기화 스위
   롤링 업그레이드 마지막 단계에서 STANDBY 가 같은 버전으로 올라오는 순간 자동 복사).
 - 스위퍼는 확정 ACTIVE 변화(절체)를 로그로 기록한다.
 
+**드리프트 판정 — 서버 소유** (`GET /ha-groups/{gid}/packages/{pkg}/sync`, `agents.py
+evaluate_group_package`, operator):
+- 자동 교정과 **같은 전제·같은 비교 규칙**(`_group_package_plan`)을 쓰는 읽기 전용
+  dry-run 이다 — "표시된 드리프트" 와 "교정이 실제로 바꿀 키" 가 항상 일치한다.
+  콘솔은 이 응답을 **표시만** 한다. 멤버별 설정을 받아 화면에서 다시 비교하면 판정 주체가
+  둘이 되어, 교정 대상이 아닌 것을 "교정 대기"로 표시하게 된다.
+- 응답 `{status, reason, auto_sync, active_agent_id, compared_to, drift[], deferred[], members[]}`
+  - `status` — `in_sync` / `out_of_sync` / `unknown`(판정 불가 — `reason`: `active_unknown`·
+    `version_mismatch`·`no_peers`·`active_has_no_deployment`·`package_not_deployed`)
+  - `drift[]` — `{key, action, active, members[{deployment_id, agent_id, agent_name,
+    value, present}]}`. `action=copy` 는 ACTIVE 값 복사, `reset` 은 overlay 제거(기본값 복귀).
+  - `compared_to` — 판정 기준 멤버(AS = 실측 ACTIVE)
+  - password 필드 값은 sentinel 마스킹 (`GET /deployments/{id}/config` 와 동일 관용)
+- **표시값도 서버가 낸다** — `members[].values = {key: {v, src}}` 는 렌더 실효값
+  (`_materialize_deploy_config` = 템플릿 기본값 + overlay + 배포 시 주입)이고, `src` 는
+  `overlay`(운영자 지정) / `injected`(배포 시 base 주입) / `default`(overlay 미설정)다.
+  판정은 overlay 기준인데 화면이 실효값만 그리면 **같은 값이 드리프트로 보인다** —
+  예: `Server.Port` 기본값이 4419 인데 STANDBY overlay 에 값이 없으면 양쪽 다 4419 로
+  보이지만 교정 대상이다. `src` 가 그 근거를 드러낸다(`4419 (미설정)`). 주입 값도
+  overlay 에 없다는 이유로 빈칸으로 보이면 "시크릿 없음"으로 오해되므로 같은 경로로 해결한다.
+  판정이 보류(`unknown`)여도 `members[]` 는 채워진다 — 비교 표는 계속 보여야 한다.
+  단, **편집 폼은 overlay 기준**을 유지한다(주입값을 overlay 로 굳히지 않기 위해).
+- **스위치 OFF 도 판정한다** — 멈추는 건 교정이지 정합 여부가 아니다. `auto_sync=false` 로
+  "드리프트 있음 + 자동 교정 안 함"을 구분 표시한다.
+- **AA 그룹도 판정한다** — 기준(ACTIVE)이 없으므로 "멤버 간 값이 같은가"만 보고
+  `action`·`compared_to` 는 null. 교정 주체는 없다(운영자가 각 서버에서 수정).
+
 **그룹 공통 설정 저장** (`PUT /ha-groups/{gid}/packages/{pkg}/config`, `ha_groups.py
 _put_group_pkg_config`, operator):
 - body = `{values, target_deployment_id?, queue_update?}` — values 는 유효 scope=service
@@ -569,10 +597,10 @@ _put_group_pkg_config`, operator):
   members[{deployment_id, agent_id, agent_name, package_version}]}` — standalone 이면
   null. 콘솔이 "AS 멤버 = 개별 설정만" 판단에 사용.
 
-**드리프트 감시**: 그룹 탭 [멤버 비교]의 필드 비교, 컬렉션 GET 의 멤버 hash 비교,
-`drift_sweeper`(주기 감시·알람)는 유지 — 스위치 ON 이면 표시된 드리프트를 자동 교정이
-곧 해소하고, OFF 면 수동 편집의 참고 정보가 된다. `should_propagate` 는 "동일해야
-정상인 컬렉션" 판정(드리프트 감시)에만 쓰인다.
+**드리프트 감시**: 스칼라 공통 설정은 위 판정 API(`evaluate_group_package`)가, 컬렉션은
+멤버 hash 비교와 `drift_sweeper`(주기 감시·알람)가 담당한다. 스위치 ON 이면 표시된
+드리프트를 자동 교정이 곧 해소하고, OFF 면 수동 편집의 참고 정보가 된다.
+`should_propagate` 는 "동일해야 정상인 컬렉션" 판정(드리프트 감시)에만 쓰인다.
 
 **운영 시나리오 — 롤링 업그레이드** (S1=ACTIVE·S2=STANDBY, V1→V2, 스위치 ON 상태):
 1. 그룹 탭에서 동기화 스위치 **OFF**
@@ -582,3 +610,30 @@ _put_group_pkg_config`, operator):
 4. 스위치 **ON** — S1 은 아직 V1 이라 정합 보류(버전 가드)
 5. S1 을 V2 로 업그레이드 → upgrade 성공 훅 + 스위퍼가 버전 일치 확인 →
    **ACTIVE(S2) 설정이 S1 로 자동 복사** — 수동 동기화 없이 완료
+
+### 14.7 overlay 스키마 계약 — 선언된 키만 저장한다
+
+`deployment.config` overlay 는 **운영자가 정한 값(desired state)** 이고, 노드의
+`<pkg>/config.json` 은 `template default + overlay + 주입` 으로 만들어지는 **파생물**이다.
+둘을 섞지 않는 것이 이 설계의 불변식이다 — 실행 중인 렌더 결과를 overlay 로 되먹이면
+기본값·주입값이 사용자 의도로 굳어 이후 기본값 변경을 따라가지 못한다.
+
+**규칙: overlay 는 그 패키지 `config_template` 이 선언한 키만 담는다.** 템플릿 밖 키가
+앉으면 (a) 그 패키지 화면에 필드가 없어 보이지도 고치지도 못하고, (b) 자동 교정도
+템플릿 service 키만 순회하므로 영원히 방치되며, (c) 다른 패키지 템플릿에 얹히면 남의
+필드로 오독된다. (실측: base `oam` overlay 의 `ServiceLogging.Dir` 이 oam-svc/csc
+그룹 화면에서 드리프트로 표시됐다.)
+
+- **write 마스크** (`_prune_to_template`) — `POST /deployments`(부트스트랩·프로비저닝
+  등록 포함)와 `PUT /deployments/{id}/config` 에서 **들어오는 값**을 템플릿으로 거른다.
+  제외된 키는 응답 `pruned_keys[]` + 경고 로그로 드러낸다(조용히 버리지 않는다).
+  이미 저장된 키는 건드리지 않는다 — 평범한 저장이 다른 키를 지우면 안 되므로.
+- **템플릿 없는 패키지는 거르지 않는다** — 검증 근거가 없으면 판단하지 않는다.
+- **레거시 정리 스윕** (`sweep_overlay_schema`, OAM 기동 시 1회·멱등) — 저장된 템플릿 밖
+  키를 치우되 **렌더 동치가 증명된 것만** 지운다. 규칙을 흉내내지 않고 렌더 함수
+  자신을 오라클로 써서, `_materialize_deploy_config(원본)` 과 `(정리본)` 이 완전히 같을
+  때만 적용한다. 다르면 그 키는 살아있는 설정이므로 두고 **경고**를 남긴다 —
+  "이 키는 `config_template` 에 선언되어야 한다"는 신호다. 렌더 결과가 같으므로
+  update_config job 을 큐잉하지 않는다(무중단).
+- 따라서 **모듈이 읽는 값은 반드시 템플릿에 선언한다.** 주입으로만 채워지는 값도
+  예외가 아니다 — 선언이 없으면 콘솔에서 고칠 수 없고 정합 대상도 되지 못한다.

@@ -1422,13 +1422,13 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | Method | Path | 용도 |
 |---|---|---|
 | GET | `/deployments` | 배포 목록 |
-| POST | `/deployments` | 생성 (body `{agent_id, package_id, process_name, service_functions[]}`) |
+| POST | `/deployments` | 생성 (body `{agent_id, package_id, process_name, service_functions[], config?}`). `config` 는 **템플릿 선언 키만** 저장 — 제외분은 응답 `pruned_keys[]` |
 | GET | `/deployments/{id}` | 단일 조회 |
 | PUT | `/deployments/{id}` | 필드 업데이트 (`note`, `process_name`, ...) |
 | DELETE | `/deployments/{id}` | 제거 |
 | POST | `/deployments/{id}/job` | job 큐잉 (`{job_type, extra?}`) |
 | GET | `/deployments/{id}/config` | scalar 설정 + 템플릿. `type=password` 필드는 **마스킹**되어 반환 |
-| PUT | `/deployments/{id}/config` | scalar 설정 저장 (`{config, queue_update?}`) — **변경분 병합** |
+| PUT | `/deployments/{id}/config` | scalar 설정 저장 (`{config, queue_update?}`) — **변경분 병합**. overlay 는 `config_template` 선언 키만 담는다(스키마가 계약) — 저장되지 않은 키는 응답 `pruned_keys[]` 로 반환 |
 | GET | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 읽기 (Agent 프록시) |
 | PUT | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 저장 (`{records, signal?}`) |
 
@@ -1546,6 +1546,9 @@ Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/age
 | POST | `/ha-groups/{id}/members` | 멤버 추가 `{agent_id, role?, priority?}` (1 agent = 1 group UNIQUE) |
 | DELETE | `/ha-groups/{id}/members/{agent_id}` | 멤버 제거 |
 | POST | `/ha-groups/{id}/apply` | 데이터 변경 없이 멤버에 `update_ha` job 강제 큐잉 (VipPanel [적용]) |
+| GET | `/ha-groups/{id}/packages/{pkg}/sync` | 그룹×패키지 공통 설정 **정합 판정 + 표시용 실효값**(읽기 전용, operator) — `{status, reason, auto_sync, active_agent_id, compared_to, drift[], deferred[], members[{…, values:{key:{v, src}}}]}`. 판정·표시 모두 서버 소유(자동 교정과 동일 규칙). `src` = `overlay`/`injected`/`default` |
+| PUT | `/ha-groups/{id}/packages/{pkg}/config` | 그룹 공통(scope=service) 설정 저장 (operator) — body `{values, target_deployment_id?, queue_update?}`. 스위치 ON=전 멤버 / OFF=target 필수 |
+| PUT | `/ha-groups/{id}/packages/{pkg}/auto-sync` | 자동 동기화 스위치 (operator) — body `{enabled}`. ON 전환 시 즉시 정합 1회 |
 
 응답 필드:
 - `mode` — `active_standby` | `all_active` (standalone 은 ha_groups 미배정 agent 로 표현)
