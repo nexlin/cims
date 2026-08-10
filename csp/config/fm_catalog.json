@@ -1,0 +1,21 @@
+{
+  "alarms": [
+    {
+      "type": "connection_lost",
+      "code": "CIMS-COM-001",
+      "perceived_severity": "major",
+      "event_type": "communications",
+      "probable_cause": "communicationsSubsystemFailure",
+      "mo_class": "service",
+      "metric": "CSP DB 연결",
+      "msg_open": "{mo} CSP 의 DB 연결 두절 (probe 연속 실패)",
+      "msg_close": "{mo} CSP 의 DB 연결 정상화",
+      "effect": "가입자/그룹 DB 조회·호이력 기록 실패 — 신규 등록/호 설정 기능 저하 (파일 fallback 범위로 축소)",
+      "recommended_action": "DB 서버 상태·네트워크·계정 확인, csp.json Database 설정 점검"
+    }
+  ],
+  "events": [
+    { "type": "process_started", "kind": "stateChange", "msg": "{mo} CSP 기동 완료" },
+    { "type": "process_stopping", "kind": "stateChange", "msg": "{mo} CSP 종료 시작" }
+  ]
+}

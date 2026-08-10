@@ -2,137 +2,41 @@
 Alert 이력 — 파일 기반 (JSONL, 일별 회전)
 
 저장 경로: {ServiceLogDir}/alerts/YYYY/MM/DD.jsonl
+(append/조회 코어는 daily_jsonl 공용 — event_log 와 공유)
 
-각 라인은 임계값 위반 이벤트 — 발생(open) 또는 해제(close) 1건.
+각 라인은 알람 이벤트 — 발생(open)·해제(close)·승인(ack) 1건.
 """
 
-import os
-import json
-import glob
 from datetime import datetime, timedelta
-from threading import Lock
 from typing import Optional
 
+from services import daily_jsonl
 
-_write_lock = Lock()
-
-
-def _alerts_dir(service_log_dir: str) -> str:
-    return os.path.join(service_log_dir, 'alerts')
-
-
-def _file_for(service_log_dir: str, dt: datetime) -> str:
-    return os.path.join(
-        _alerts_dir(service_log_dir),
-        f"{dt.year:04d}",
-        f"{dt.month:02d}",
-        f"{dt.day:02d}.jsonl",
-    )
+_SUBDIR = 'alerts'
 
 
 def record_event(service_log_dir: str, event: dict) -> None:
     """이벤트 1건을 일별 jsonl 에 append. event 에 'ts' 없으면 현재시각으로 채움."""
-    if not service_log_dir:
-        return
-    ts = event.get('ts')
-    if not ts:
-        ts = datetime.now().isoformat(timespec='seconds')
-        event = {**event, 'ts': ts}
-    try:
-        dt = datetime.fromisoformat(ts)
-    except Exception:
-        dt = datetime.now()
-    path = _file_for(service_log_dir, dt)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    line = json.dumps(event, ensure_ascii=False)
-    with _write_lock:
-        with open(path, 'a', encoding='utf-8') as f:
-            f.write(line + '\n')
+    daily_jsonl.record(service_log_dir, _SUBDIR, event)
 
 
 def read_recent(service_log_dir: str, days: int = 7,
                 type_filter: Optional[str] = None,
                 limit: int = 500) -> list:
     """최근 N일치 alert 이벤트를 최신순으로 반환."""
-    if not service_log_dir:
-        return []
-    results = []
-    today = datetime.now().date()
-    for i in range(days):
-        d = today - timedelta(days=i)
-        path = _file_for(service_log_dir, datetime(d.year, d.month, d.day))
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        ev = json.loads(line)
-                    except Exception:
-                        continue
-                    if type_filter and ev.get('type') != type_filter:
-                        continue
-                    results.append(ev)
-        except Exception:
-            pass
-    results.sort(key=lambda x: x.get('ts', ''), reverse=True)
-    return results[:limit]
+    match = (lambda ev: ev.get('type') == type_filter) if type_filter else None
+    return daily_jsonl.read_recent(service_log_dir, _SUBDIR, days=days,
+                                   match=match, limit=limit)
 
 
 def list_types(service_log_dir: str, days: int = 30) -> list:
     """최근 N일 내에 등장한 alert type 목록."""
-    types = set()
-    if not service_log_dir:
-        return []
-    today = datetime.now().date()
-    for i in range(days):
-        d = today - timedelta(days=i)
-        path = _file_for(service_log_dir, datetime(d.year, d.month, d.day))
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        ev = json.loads(line.strip())
-                        t = ev.get('type')
-                        if t:
-                            types.add(t)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-    return sorted(types)
+    return daily_jsonl.list_values(service_log_dir, _SUBDIR, field='type', days=days)
 
 
 def _iter_events_asc(service_log_dir: str, days: int):
     """최근 N일치 이벤트를 시간순(asc) yield."""
-    if not service_log_dir:
-        return
-    today = datetime.now().date()
-    files = []
-    for i in range(days):
-        d = today - timedelta(days=i)
-        path = _file_for(service_log_dir, datetime(d.year, d.month, d.day))
-        if os.path.exists(path):
-            files.append(path)
-    files.sort()  # 일별 파일은 경로 정렬 = 시간 정렬
-    for path in files:
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        yield json.loads(line)
-                    except Exception:
-                        continue
-        except Exception:
-            continue
+    return daily_jsonl.iter_asc(service_log_dir, _SUBDIR, days)
 
 
 def _akey(ev: dict) -> str:
@@ -144,10 +48,13 @@ def _akey(ev: dict) -> str:
     return ev.get('type', '')
 
 
-def compute_open_state(service_log_dir: str, days: int = 30) -> dict:
-    """최근 N일 이벤트 replay → 현재 열린 알람 {akey: alarm_id} 반환 (sweeper 재시작 시드용).
+def compute_open_state(service_log_dir: str, days: int = 30,
+                       with_meta: bool = False) -> dict:
+    """최근 N일 이벤트 replay → 현재 열린 알람 반환 (sweeper/FM ingest 재시작 시드용).
 
     akey=(code@mo_instance). close 가 잇따른 open 은 덮어쓰고, close 없으면 open 유지.
+    반환: {akey: alarm_id}. with_meta=True 면 {akey: {'alarm_id', 'detected_by'}} —
+    발화 주체별 소유 분리(restore_open_state scope)에 쓴다.
     """
     open_state: dict = {}
     for ev in _iter_events_asc(service_log_dir, days):
@@ -156,7 +63,12 @@ def compute_open_state(service_log_dir: str, days: int = 30) -> dict:
             continue
         action = ev.get('action')
         if action == 'open':
-            open_state[ak] = ev.get('alarm_id') or ak
+            aid = ev.get('alarm_id') or ak
+            if with_meta:
+                open_state[ak] = {'alarm_id': aid,
+                                  'detected_by': (ev.get('source') or {}).get('detected_by') or ''}
+            else:
+                open_state[ak] = aid
         elif action == 'close':
             open_state.pop(ak, None)
     return open_state

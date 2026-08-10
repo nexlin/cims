@@ -325,6 +325,10 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/cmp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmdp/config/config_template.json  ${CMAKE_BINARY_DIR}/dist/cmdp/config/config_template.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csp/config/config_template.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/config/fm_catalog.json        ${CMAKE_BINARY_DIR}/dist/csp/config/fm_catalog.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmp/config/fm_catalog.json        ${CMAKE_BINARY_DIR}/dist/cmp/config/fm_catalog.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/cmdp/config/fm_catalog.json       ${CMAKE_BINARY_DIR}/dist/cmdp/config/fm_catalog.json
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/fm_catalog.json        ${CMAKE_BINARY_DIR}/dist/csc/config/fm_catalog.json
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csc/config/config_template.json   ${CMAKE_BINARY_DIR}/dist/csc/config/config_template.json
 
     # ── 3a. base <module>.json 생성 (config_template.json 의 field.default) ──

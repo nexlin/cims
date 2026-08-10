@@ -15,10 +15,11 @@ const CLASS_LABEL: Record<string, string> = {
   db_down: '연결 끊김', rtp_high: '임계 초과', disk_high: '임계 초과',
 }
 
-interface ActiveAlarm extends AlertEvent { acked?: boolean; ackUser?: string }
+export interface ActiveAlarm extends AlertEvent { acked?: boolean; ackUser?: string }
 
 // 이벤트 스트림 → 현재 활성(open, close 없음) 알람 + 승인 상태. akey=alarm_id(occurrence epoch 제거)/type.
-function computeActive(events: AlertEvent[]): ActiveAlarm[] {
+// AlertBannerWidget 도 같은 판정을 공유한다 (알람 스트림 단일 소스).
+export function computeActive(events: AlertEvent[]): ActiveAlarm[] {
   const asc = [...events].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
   const open: Record<string, ActiveAlarm> = {}
   for (const ev of asc) {

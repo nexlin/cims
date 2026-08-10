@@ -8,8 +8,11 @@
 
 #include <mariadb/mysql.h>
 
+#include <atomic>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 class CspUser;
@@ -34,6 +37,13 @@ public:
                   const std::string &strDb, int iPort = 3306 );
     void Disconnect();
     bool IsConnected() const;
+
+    // DB 연결 상태 probe — FM 자기보고(alarm_self_reporting.md) 파일럿 훅.
+    //   호출 경로와 mutex/연결을 공유하지 않는 **전용 연결**로 mysql_ping 하고,
+    //   3연속 실패 시 down / 성공 시 up — 전이 시에만 콜백 (CmpClient KeepAliveLoop 관례).
+    //   Connect() 이후 호출 (접속 정보 필요 — 최초 Connect 실패여도 접속 정보는 저장됨).
+    void StartHealthProbe( std::function<void( bool )> fnStateChange );
+    void StopHealthProbe();
 
     // ─────────────────────────────────────────────
     //  User operations
@@ -146,6 +156,11 @@ private:
     bool Reconnect();
     bool ExecuteQuery( const std::string &strSql );
     MYSQL_RES *ExecuteSelect( const std::string &strSql );
+
+    void HealthProbeLoop();
+    std::thread m_threadProbe;
+    std::atomic<bool> m_bProbeRunning{ false };
+    std::function<void( bool )> m_fnProbeCallback;
 
     /** SQL 인젝션 방지 이스케이프 */
     std::string Escape( const std::string &str );

@@ -312,6 +312,18 @@ if __name__ == '__main__':
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
         _alert_open = alarm_sweeper.restore_open_state(
             _service_log_dir, scope='service', log=logger)
+
+        # ── FM ingest (모듈 자기보고 — alarm_self_reporting.md) ─────────
+        # 서비스 모듈(csp/cmp/cmdp/csc)의 FM_* push 수신 — 서비스 관측 소유라
+        # oam-svc 귀속 (--role all 단일 프로세스는 oam_app 이 대행). 자기보고
+        # 계열(detected_by=self:*) 활성 상태는 FmIngest 가 자체 복원·추적.
+        if _service_log_dir:
+            try:
+                from services.fm_ingest import FmIngest
+                FmIngest(config, _service_log_dir, log=logger).start()
+            except Exception as e:
+                logger.log_error(f"[fm] ingest start failed: {e}")
+
         if _service_log_dir:
             logger.log_info(f"[alert-sweep] interval={ALERT_SWEEP_INTERVAL}s, "
                             f"rtp_threshold={ALERT_RTP_THRESHOLD}%, dir={_service_log_dir}")

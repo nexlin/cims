@@ -128,6 +128,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [csc_config_server.md](docs/design/csc_config_server.md) — CSC config server
 - [csp_control_plane_load_hardening.md](docs/design/csp_control_plane_load_hardening.md) — CSP 제어평면 부하 대책
 - [alarm_standardization.md](docs/design/alarm_standardization.md) — 알람 표준화
+- [alarm_self_reporting.md](docs/design/alarm_self_reporting.md) — 모듈 알람/이벤트 자기보고(FM push) 경로
 - [runtime_store_design.md](docs/design/runtime_store_design.md) / [runtime_store_v2_module_namespacing.md](docs/design/runtime_store_v2_module_namespacing.md) — 런타임 스토어
 
 **design/modules/** (컴포넌트별 상세)

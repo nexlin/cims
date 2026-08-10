@@ -300,10 +300,44 @@ if __name__ == '__main__':
         except Exception as e:
             logger.log_error(f"CSC_RESTART notification failed: {e}")
 
+        # ── FM 자기보고 (alarm_self_reporting.md) — OAM 으로 알람/이벤트 push ──
+        # DB 연결 알람은 요청 경로와 분리된 전용 probe 연결(10s 주기, 3연속 실패 전이).
+        from services import fm_reporter
+        _fm = fm_reporter.init(
+            config, node=_system_id,
+            catalog_file=os.path.join(_COMPONENT_ROOT, 'config', 'fm_catalog.json'),
+            log=logger)
+        _fm_db_probe = None
+        if _fm:
+            _fm.send_event('process_started', mo='cims/csc')
+            _db_mo = f'cims/csc/{_system_id}/db'
+            _fm_db_probe = fm_reporter.DbHealthProbe(
+                lambda: config.get('CimsDatabase') or {},
+                lambda up: (_fm.alarm_close('CIMS-COM-001', _db_mo) if up
+                            else _fm.alarm_open('CIMS-COM-001', _db_mo)),
+                log=logger)
+            _fm_db_probe.start()
+
+        # ── SIGTERM = graceful stop — process_stopping 이벤트 후 서버 정리 ──
+        # (종전: 핸들러 부재 → 파이썬 기본 동작으로 즉사, 종료 통지 불가)
+        import threading as _threading
+        _stop_evt = _threading.Event()
+        _signal.signal(_signal.SIGTERM, lambda _s, _f: _stop_evt.set())
+
         # OAM 분리 Phase 3b — sweeper (agent/cert/alert/sync_txn/drift) 는 oam_app.py
         # 책임. csc 는 가입자 CRUD + MCPTT signaling 만 — 백그라운드 작업 없음.
-        while True:
-            time.sleep(60)
+        while not _stop_evt.wait(1):
+            pass
+
+        logger.log_info('==================== stop (SIGTERM) ====================')
+        if _fm:
+            _fm.send_event('process_stopping', mo='cims/csc')
+            time.sleep(1)          # ack/재전송 1회 여유 (best-effort)
+            if _fm_db_probe:
+                _fm_db_probe.stop()
+            _fm.stop()
+        if admin_server:  admin_server.stop(5)
+        if mcptt_server:  mcptt_server.stop(5)
 
     except Exception as e:
         tb_str = traceback.format_exc()

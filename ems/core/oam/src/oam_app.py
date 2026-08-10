@@ -555,6 +555,7 @@ if __name__ == '__main__':
     from handlers.modules        import CIMS_MODULES_HANDLER_LIST
     from handlers.ha_groups      import CIMS_HA_GROUPS_HANDLER_LIST
     from handlers.alerts         import CIMS_ALERTS_HANDLER_LIST
+    from handlers.events         import CIMS_EVENTS_HANDLER_LIST
     from handlers.console        import CIMS_CONSOLE_HANDLER_LIST
     from handlers.console_accounts import CIMS_CONSOLE_ACCOUNTS_HANDLER_LIST
     from handlers.console_layouts  import CIMS_CONSOLE_LAYOUTS_HANDLER_LIST
@@ -928,6 +929,7 @@ if __name__ == '__main__':
         if _console_dir:
             base_rules += _bind(CIMS_CONSOLE_STATIC_HANDLER_LIST)
         base_rules += _bind(CIMS_ALERTS_HANDLER_LIST)
+        base_rules += _bind(CIMS_EVENTS_HANDLER_LIST)
         base_rules += _bind(CIMS_CONSOLE_HANDLER_LIST)
         # D1 사용자 레이아웃/카탈로그/프로파일 — console.py 보다 구체 경로(최장 일치 우선).
         base_rules += _bind(CIMS_CONSOLE_LAYOUTS_HANDLER_LIST)
@@ -1109,6 +1111,17 @@ if __name__ == '__main__':
         # _alert_open: { akey(code@mo_instance) : alarm_id } — 자기 소유 계열만 추적.
         _alert_open: dict = alarm_sweeper.restore_open_state(
             _service_log, scope=('all' if role == 'all' else 'agent'), log=logger)
+
+        # ── FM ingest (모듈 자기보고 — alarm_self_reporting.md) ─────────
+        # 소유는 oam-svc — role=all 단일 프로세스에서만 base 가 대행 (sweeper 소유
+        # 규약과 동일). 자기보고 계열(detected_by=self:*)의 활성 상태는 FmIngest 가
+        # 자체 복원·추적한다 (_alert_open 과 분리).
+        if role == 'all' and _service_log:
+            try:
+                from services.fm_ingest import FmIngest
+                FmIngest(config, _service_log, log=logger).start()
+            except Exception as e:
+                logger.log_error(f"[fm] ingest start failed: {e}")
 
         _fmt = alarm_sweeper.fmt
 
@@ -1327,11 +1340,14 @@ if __name__ == '__main__':
         if _service_log:
             try:
                 from services import alert_log as _alert_log
+                from services import drift_sweeper as _ds
                 # 창을 활성 알람 뷰(90일)와 맞춘다 — 기본 30일이면 30~90일 구간의
                 # 열린 알람을 서버가 잊어 중복 open 을 낸다. (스윕 중 재도출은
                 # drift_sweeper._reseed_if_empty 가 담당 — 여기 실패해도 자가복구)
-                _drift_open = {k: True for k in _alert_log.compute_open_state(_service_log, days=90)
-                               if k.startswith('config_drift::')}
+                # 표준 akey(CIMS-CFG-001@cims/ha/…)와 구 포맷(config_drift::…, 이행
+                # 종결 대상) 둘 다 복원한다.
+                _st = _alert_log.compute_open_state(_service_log, days=90)
+                _drift_open = {k: _st[k] for k in _ds._drift_prefix_keys(_st.keys())}
                 if _drift_open:
                     logger.log_info(f"[drift-sweep] restored {len(_drift_open)} open drift alarm(s)")
             except Exception as e:

@@ -1,4 +1,5 @@
 #include "PCmdpServer.h"
+#include "FmReporter.h"
 #include "PLog.h"
 #include "McDataCodec.h"
 #include <algorithm>
@@ -128,16 +129,35 @@ bool PCmdpServer::startServer() {
     LOG_INFO("PCmdpServer", "control %s:%d, MSRP tcp :%d (adv %s), store=%s",
              _serverIp.c_str(), _serverPort, _msrpPort, _msrpIp.c_str(),
              _fdStore.IsEnabled() ? "on" : "off");
+
+    // FM 자기보고 (alarm_self_reporting.md) — OAM FM ingest 로 알람/이벤트 push.
+    //   fm_catalog.json 은 설정 파일 옆(dist: config/) — 배치별 후보 순서 탐색.
+    if (_fmEnable) {
+        std::string confDir = _configFile;
+        size_t slash = confDir.find_last_of('/');
+        confDir = (slash == std::string::npos) ? "." : confDir.substr(0, slash);
+        std::string catalog;
+        const std::string cands[2] = {confDir + "/fm_catalog.json", confDir + "/config/fm_catalog.json"};
+        for (int i = 0; i < 2; ++i) {
+            if (access(cands[i].c_str(), R_OK) == 0) { catalog = cands[i]; break; }
+        }
+        if (catalog.empty()) catalog = cands[0];  // 부재 시 FmReporter 가 로그로 드러냄
+        gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec);
+        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName);
+    }
     return true;
 }
 
 void PCmdpServer::stopServer() {
+    if (gclsFmReporter.IsEnabled())
+        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName);
     _running = false;
     _reactorRunning = false;
     for (auto& r : _reactors) {
         if (r.thread.joinable()) r.thread.join();
     }
     if (_timeoutThread.joinable()) _timeoutThread.join();
+    gclsFmReporter.Stop();
     stopLogWriter();
     if (_listenFd >= 0) { ::close(_listenFd); _listenFd = -1; }
     if (_udpFd >= 0) { ::close(_udpFd); _udpFd = -1; }
@@ -719,12 +739,15 @@ void PCmdpServer::finishRecvSession(PMsrpSession* s) {
     std::string fileId;
     if (!_fdStore.Store(binContent, body, ct, name, mime, s->_groupId, s->_caller, fileId)) {
         LOG_ERROR("PCmdpServer", "session=%s store failed", s->_sessionId.c_str());
+        // FM 자기보고 — 저장 실패 전이 (성공 경로가 close, AlarmOpen/Close 는 멱등)
+        gclsFmReporter.AlarmOpen("CIMS-PRC-002", _fmStoreMo);
         SimpleJson::JsonNode p;
         p.Set("session_id", s->_sessionId);
         p.Set("reason", "store_error");
         emitEvent("MSRP_ABORTED", p, s->_sesid);
         return;
     }
+    gclsFmReporter.AlarmClose("CIMS-PRC-002", _fmStoreMo);
 
     _statRecvMessages++;
     SimpleJson::JsonNode p;
@@ -979,6 +1002,16 @@ void PCmdpServer::loadConfig() {
     _nodeName = _systemId;
     auto upos = _nodeName.find('_');
     if (upos != std::string::npos) _nodeName = _nodeName.substr(0, upos);
+
+    // FM 자기보고 (alarm_self_reporting.md)
+    if (root.Has("Fm")) {
+        SimpleJson::JsonNode fm = root.Get("Fm");
+        if (fm.Has("Enable")) _fmEnable = (fm.GetString("Enable") == "true");
+        if (fm.Has("OamIp")) _fmOamIp = fm.GetString("OamIp");
+        if (fm.Has("OamPort")) _fmOamPort = (int)fm.GetInt("OamPort", 9010);
+        if (fm.Has("SyncSec")) _fmSyncSec = (int)fm.GetInt("SyncSec", 60);
+    }
+    _fmStoreMo = "cims/" + _nodeName + "/" + _systemId + "/fd_store";
 
     // 스토어 미설정 시 ServiceLogging.Dir 기반 기본 경로 (csc 기본값과 동일 규칙)
     if (!_fdStore.IsEnabled() && !_serviceLogDir.empty())

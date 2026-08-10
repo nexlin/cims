@@ -247,6 +247,13 @@ public:
     int m_iCmdpPort;            // cmdp 제어 포트 (기본 9100)
     int m_iLocalCmdpPort;       // CSP 측 수신 포트 (기본 9101) — cmdp 이벤트 도착지
 
+    // ================================================================
+    // FM 자기보고(알람/이벤트 push) — Setup.Fm.* (docs/design/alarm_self_reporting.md)
+    bool m_bFmEnable;          // Enable (기본 false — OAM FM ingest 미배치 환경 무영향)
+    std::string m_strFmOamIp;  // OAM FM ingest 주소 (관리평면 이중화 시 VIP)
+    int m_iFmOamPort;          // OAM FM ingest UDP 포트 (기본 9010)
+    int m_iFmSyncSec;          // FM_SYNC 주기 초기값 (FM_REGISTER 응답의 sync_interval_sec 가 덮음)
+
     // MCData C-plane 정책 — Setup.McData.*
     //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.
     //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).

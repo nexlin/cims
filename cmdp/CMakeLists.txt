@@ -14,6 +14,7 @@ include_directories(
 add_executable(cmdp
    PMain.cpp
    PCmdpServer.cpp
+   FmReporter.cpp
    PMsrpParser.cpp
    PMsrpSession.cpp
    PMsrpConnection.cpp
@@ -31,4 +32,4 @@ install(TARGETS ${TEST_SRCS}
 		LIBRARY DESTINATION ${PMPROC_LIB_PATH}
 		ARCHIVE DESTINATION ${PMPROC_LIB_PATH})
 
-install(FILES config/config_template.json DESTINATION ${PMPROC_BIN_PATH}/../config)
+install(FILES config/config_template.json config/fm_catalog.json DESTINATION ${PMPROC_BIN_PATH}/../config)

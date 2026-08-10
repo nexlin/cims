@@ -378,6 +378,61 @@
       "scope": "service"
     },
     {
+      "key": "fm",
+      "title": "FM 자기보고 (알람/이벤트 push)",
+      "description": "모듈 내부 알람/이벤트를 OAM FM ingest 로 push — alarm_self_reporting.md. 카탈로그는 config/fm_catalog.json (기동 시 FM_REGISTER 로 등록).",
+      "fields": [
+        {
+          "key": "SystemId",
+          "label": "System ID",
+          "type": "string",
+          "default": "csc_01",
+          "restart": true,
+          "help": "노드 논리 ID — FM hdr.node 및 flow 로그 파일명에 사용. 다중 배치 시 노드별 분리 (csc_01/csc_02).",
+          "scope": "system"
+        },
+        {
+          "key": "Fm.Enable",
+          "label": "FM 자기보고 사용",
+          "type": "bool",
+          "default": "true",
+          "restart": true,
+          "help": "끄면 자기보고 알람(DB 연결 등)·이벤트가 OAM 에 보고되지 않음 (외부 관측 폴링만 동작)."
+        },
+        {
+          "key": "Fm.OamIp",
+          "label": "OAM FM ingest 주소",
+          "type": "string",
+          "default": "127.0.0.1",
+          "deploy_value": "@OAM_IP@",
+          "restart": true,
+          "help": "OAM(oam-svc) FM 수신 주소. 관리평면 이중화 환경에서는 VIP."
+        },
+        {
+          "key": "Fm.OamPort",
+          "label": "OAM FM ingest 포트",
+          "type": "int",
+          "default": 9010,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "OAM FmIngest.Port 와 일치해야 함."
+        },
+        {
+          "key": "Fm.SyncSec",
+          "label": "활성 알람 동기화 주기 (초)",
+          "type": "int",
+          "default": 60,
+          "min": 10,
+          "max": 600,
+          "restart": true,
+          "advanced": true,
+          "help": "FM_SYNC 주기 초기값 — FM_REGISTER 응답으로 OAM 이 지시하는 값이 우선."
+        }
+      ],
+      "scope": "system"
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 에 노출하지 않는 배포/인프라 값. configure.sh 가 deploy_value 로 채움. JWT 시크릿 포함.",

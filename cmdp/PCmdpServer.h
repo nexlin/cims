@@ -150,6 +150,13 @@ private:
     std::string _serviceLogDir;
     std::string _systemId = "cmdp_01";
     std::string _nodeName = "cmdp";
+
+    // FM 자기보고 (alarm_self_reporting.md) — Fm.{Enable,OamIp,OamPort,SyncSec}
+    bool _fmEnable = false;
+    std::string _fmOamIp = "127.0.0.1";
+    int _fmOamPort = 9010;
+    int _fmSyncSec = 60;
+    std::string _fmStoreMo;   // cims/cmdp/<node>/fd_store — 저장 실패 알람 객체
     std::string _currentBucketKey;
     std::string _currentHourDir;
     int _msgSeq = -1;

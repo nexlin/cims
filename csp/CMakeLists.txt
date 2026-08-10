@@ -120,7 +120,7 @@ install(PROGRAMS csp.sh DESTINATION bin)
 
 # 2. Configuration (config/)
 #    A안 통합 — csp.json.template 는 config_template.json 으로 흡수됨.
-install(FILES csp.xml config/config_template.json DESTINATION config)
+install(FILES csp.xml config/config_template.json config/fm_catalog.json DESTINATION config)
 install(DIRECTORY User Group DESTINATION .)
 install(DIRECTORY DESTINATION config/cdr)
 

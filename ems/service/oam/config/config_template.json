@@ -127,6 +127,43 @@
       "scope": "service"
     },
     {
+      "key": "fm",
+      "title": "모듈 자기보고 수신 (FM ingest)",
+      "description": "서비스 모듈(csp/cmp/cmdp/csc)이 UDP JSON envelope v2 로 push 하는 알람/이벤트(FM_*) 수신 — alarm_self_reporting.md. --role all 단일 프로세스에서는 base(oam)가 대행하며 동일 키를 읽는다.",
+      "fields": [
+        {
+          "key": "FmIngest.Ip",
+          "label": "FM 수신 bind IP",
+          "type": "string",
+          "default": "0.0.0.0",
+          "restart": true,
+          "help": "모듈들이 원격 노드에 있을 수 있어 외부 bind. OAM 이중화에서는 모듈이 관리평면 VIP 로 보낸다."
+        },
+        {
+          "key": "FmIngest.Port",
+          "label": "FM 수신 포트 (UDP)",
+          "type": "int",
+          "default": 9010,
+          "min": 1,
+          "max": 65535,
+          "restart": true,
+          "help": "각 모듈 fm 설정(Setup.Fm.OamPort 등)과 일치해야 함."
+        },
+        {
+          "key": "FmIngest.SyncSec",
+          "label": "활성 알람 동기화 주기 (초)",
+          "type": "int",
+          "default": 60,
+          "min": 10,
+          "max": 600,
+          "restart": true,
+          "advanced": true,
+          "help": "FM_REGISTER 응답으로 모듈에 지시하는 FM_SYNC 주기. 3회 연속 누락 시 해당 모듈의 자기보고 알람을 판정 불가로 종결."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "db",
       "title": "데이터베이스",
       "description": "CIMS MariaDB 접속 정보 — 조직/가입자 통계·호이력 필터·DB health 알람 조회용 (read-only 성격). 소유는 oam-svc — 여기(콘솔 배포설정)가 정규 관리 경로.",

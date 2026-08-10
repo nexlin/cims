@@ -9,11 +9,15 @@ drift 발견 시 alert_log 에 1건 기록 + (optional) auto-resync.
 - 첫 멤버 (master 우선, 없으면 deployment id 작은 쪽) 를 기준으로 hash 비교
 - 비교 자체는 agent proxy GET 으로 현재 jsonl 읽음 — drift 없으면 alert 안 냄
 - drift 있을 시:
-    * alert_log 에 type='config_drift_{collection}' open 이벤트 (severity warning)
+    * 표준 알람 발화 (alarm_standardization.md) — 클래스 config_out_of_sync/CIMS-CFG-001,
+      객체 mo_instance='cims/ha/g<group_id>/<collection>' (alarm_sweeper.transition 코어)
     * auto_resync=True 면 master records 로 다른 멤버에 PUT (배포)
-    * drift 해소 시 alert close
+    * drift 해소 시 Cleared(close)
+- 구 포맷(type='config_drift::g<id>::<coll>', code/alarm_id 없음)의 미해소 open 은
+  스윕에서 발견 즉시 이행 종결(close)하고, 조건이 지속이면 같은 스윕에서 표준 알람으로
+  재발행한다 — 구 행이 영구 미해소로 남는 것을 막는 1회성 이행 경로.
 
-호출자: csc_app.py main loop (interval default 300s).
+호출자: oam_app.py main loop (interval default 300s).
 """
 from __future__ import annotations
 
@@ -204,8 +208,34 @@ def scan_all(config) -> list[dict]:
     return out
 
 
-_UNKNOWN_STREAK: dict = {}    # alert_type -> 연속 '판정 불가'(all_ok=False) 횟수
+_UNKNOWN_STREAK: dict = {}    # akey -> 연속 '판정 불가'(all_ok=False) 횟수
 _UNKNOWN_LIMIT = 3            # 이 횟수 연속이면 열린 알람을 판정불가 사유로 종료
+
+# HA fan-out drift 알람 정의 — 표준화 §3.5: 클래스는 조건(config_out_of_sync), 객체는
+# source.mo_instance. agent 계열 노드파일 드리프트(CIMS-CFG-001, <host>/<module>/config)와
+# 같은 조건 클래스이며 객체만 다르다 (cims/ha/g<gid>/<collection>).
+_DRIFT_RULE = {
+    'type': 'config_out_of_sync', 'code': 'CIMS-CFG-001', 'perceived_severity': 'warning',
+    'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError',
+    'mo_class': 'software', 'metric': 'HA fan-out 정합',
+    'effect': 'HA 멤버 간 런타임 컬렉션 불일치 — 절체 시 동작 상이 위험',
+    'recommended_action': 'auto_resync 또는 콘솔에서 해당 컬렉션 재배포로 멤버 정렬',
+}
+
+_OLD_PREFIX = 'config_drift::'    # 구 포맷 akey(type) — 이행 종결 대상
+
+
+def _mo_instance(gid, coll: str) -> str:
+    return f"cims/ha/g{gid}/{coll}"
+
+
+def _akey(gid, coll: str) -> str:
+    return f"{_DRIFT_RULE['code']}@{_mo_instance(gid, coll)}"
+
+
+def _drift_prefix_keys(state_keys) -> list:
+    return [k for k in state_keys
+            if k.startswith(f"{_DRIFT_RULE['code']}@cims/ha/") or k.startswith(_OLD_PREFIX)]
 
 
 def _reseed_if_empty(open_state: dict, service_log_dir: str) -> None:
@@ -214,25 +244,33 @@ def _reseed_if_empty(open_state: dict, service_log_dir: str) -> None:
     open_state 는 OAM 프로세스 메모리에만 있고 기동 시 1회 복원된다. 그 복원이
     실패했거나 프로세스가 교체되면 "이미 열려 있는 알람"을 없다고 보고 open 을
     중복 발행한다 — close 는 1건만 뒤따르므로 앞선 open 이 영구 미해소로 남는다
-    (2026-07-07 config_drift::g2::local_nodes 사례). 스윕마다 비었을 때만 도므로
-    정상 경로에서는 비용이 없다."""
+    (2026-07-07 사례). 스윕마다 비었을 때만 도므로 정상 경로에서는 비용이 없다.
+    구 포맷 키(config_drift::…)도 함께 재도출해 이행 종결이 걸리게 한다."""
     if open_state or not service_log_dir:
         return
     try:
-        for k in alert_log.compute_open_state(service_log_dir, days=90):
-            if k.startswith('config_drift::'):
-                open_state[k] = True
+        st = alert_log.compute_open_state(service_log_dir, days=90)
+        for k in _drift_prefix_keys(st.keys()):
+            open_state[k] = st[k]
     except Exception:
         pass
 
 
+def _close(open_state: dict, service_log_dir: str, akey: str, message: str) -> None:
+    """표준 close 발화 — akey 에서 mo 를 복원해 transition 코어로 종결."""
+    from services import alarm_sweeper
+    mo = akey.split('@', 1)[1]
+    alarm_sweeper.transition(open_state, service_log_dir, _DRIFT_RULE, mo, 'oam',
+                             False, '', message)
+
+
 def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
                       open_state: dict) -> dict:
-    """scan 결과를 alert_log 에 반영.
+    """scan 결과를 표준 알람으로 반영 (alarm_sweeper.transition 코어).
 
-    open_state: { alert_type: True } — 호출 전후 mutate 되는 상태 dict
-                 (csc_app.py 의 _alert_open 과 동일 의도).
+    open_state: { akey(code@mo_instance): alarm_id } — 호출 전후 mutate 되는 상태 dict.
     """
+    from services import alarm_sweeper
     now = datetime.now().isoformat(timespec='seconds')
     counts = {'opened': 0, 'closed': 0, 'still_open': 0}
     if not service_log_dir:
@@ -244,68 +282,57 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
     if not scan_results:
         return counts
     _reseed_if_empty(open_state, service_log_dir)
+    # 구 포맷 이행 종결 — 표준 필드 없는 open 행은 ack/색 매핑이 안 되므로 legacy
+    # 포맷 그대로 close 를 페어링해 닫는다. 조건 지속이면 아래 평가가 같은 스윕에서
+    # 표준 알람으로 다시 연다.
+    for typ in [k for k in list(open_state) if k.startswith(_OLD_PREFIX)]:
+        open_state.pop(typ, None)
+        alert_log.record_event(service_log_dir, {
+            'ts': now, 'type': typ, 'severity': 'warning', 'action': 'close',
+            'message': f"알람 표준 포맷 이행 — 지속 조건은 표준 알람(CIMS-CFG-001)으로 재발행",
+        })
+        counts['closed'] += 1
     # 고아 reap — 이번 스윕의 비교 대상(모든 row, all_ok 무관)에 더 이상 없는 open 키는
     # 그룹 삭제/컬렉션 제거/배포 재구성으로 재평가가 불가능해진 알람 → close 발행.
     # (all_ok=False row 도 universe 에 포함되므로 proxy 일시 실패로 오닫힘 없음.)
-    universe = {f"config_drift::g{r['ha_group_id']}::{r['collection']}" for r in scan_results}
-    for typ in [t for t in open_state if t not in universe]:
-        open_state.pop(typ, None)
-        alert_log.record_event(service_log_dir, {
-            'ts': now,
-            'type': typ,
-            'severity': 'warning',
-            'action': 'close',
-            'message': f"HA drift 대상 소멸 (그룹/컬렉션 제거) — {typ}",
-        })
+    universe = {_akey(r['ha_group_id'], r['collection']) for r in scan_results}
+    for akey in [k for k in list(open_state) if k not in universe]:
+        _close(open_state, service_log_dir, akey,
+               f"HA drift 대상 소멸 (그룹/컬렉션 제거) — {akey.split('@', 1)[1]}")
         counts['closed'] += 1
     for r in scan_results:
         gid = r['ha_group_id']
         coll = r['collection']
-        typ = f"config_drift::g{gid}::{coll}"
+        akey = _akey(gid, coll)
+        mo = _mo_instance(gid, coll)
         if not r.get('all_ok'):
             # proxy 실패는 drift 판정 보류. 다만 무기한 보류하면 이미 열린 알람이
             # 영원히 닫히지 않는다 (universe 에는 남아 orphan reap 도 안 걸림).
             # 연속 _UNKNOWN_LIMIT 회면 '판정 불가' 사유로 종료한다.
-            n = _UNKNOWN_STREAK[typ] = _UNKNOWN_STREAK.get(typ, 0) + 1
-            if typ in open_state and n >= _UNKNOWN_LIMIT:
-                open_state.pop(typ, None)
-                alert_log.record_event(service_log_dir, {
-                    'ts': now,
-                    'type': typ,
-                    'severity': 'warning',
-                    'action': 'close',
-                    'message': (f"HA drift 판정 불가 {n}회 연속 (멤버 컬렉션 조회 실패) — "
-                                f"알람 종료. group '{r.get('ha_group_name')}' / {coll}"),
-                })
+            n = _UNKNOWN_STREAK[akey] = _UNKNOWN_STREAK.get(akey, 0) + 1
+            if akey in open_state and n >= _UNKNOWN_LIMIT:
+                _close(open_state, service_log_dir, akey,
+                       (f"HA drift 판정 불가 {n}회 연속 (멤버 컬렉션 조회 실패) — "
+                        f"알람 종료. group '{r.get('ha_group_name')}' / {coll}"))
                 counts['closed'] += 1
             continue
-        _UNKNOWN_STREAK.pop(typ, None)      # 정상 판정 → 스트릭 리셋
-        was = typ in open_state
+        _UNKNOWN_STREAK.pop(akey, None)     # 정상 판정 → 스트릭 리셋
+        was = akey in open_state
         if r['drift']:
             counts['still_open'] += 1 if was else 0
             if not was:
-                open_state[typ] = True
-                alert_log.record_event(service_log_dir, {
-                    'ts': now,
-                    'type': typ,
-                    'severity': 'warning',
-                    'action': 'open',
-                    'message': (f"HA fan-out drift — group '{r.get('ha_group_name')}' "
-                                f"collection '{coll}': "
-                                + ", ".join(f"d{m['deployment_id']}={m['hash'] or 'err'}"
-                                            for m in r['members']))
-                })
+                alarm_sweeper.transition(
+                    open_state, service_log_dir, _DRIFT_RULE, mo, 'oam', True,
+                    (f"HA fan-out drift — group '{r.get('ha_group_name')}' "
+                     f"collection '{coll}': "
+                     + ", ".join(f"d{m['deployment_id']}={m['hash'] or 'err'}"
+                                 for m in r['members'])),
+                    '')
                 counts['opened'] += 1
         else:
             if was:
-                open_state.pop(typ, None)
-                alert_log.record_event(service_log_dir, {
-                    'ts': now,
-                    'type': typ,
-                    'severity': 'warning',
-                    'action': 'close',
-                    'message': f"HA drift 해소 — group '{r.get('ha_group_name')}' / {coll}",
-                })
+                _close(open_state, service_log_dir, akey,
+                       f"HA drift 해소 — group '{r.get('ha_group_name')}' / {coll}")
                 counts['closed'] += 1
     return counts
 

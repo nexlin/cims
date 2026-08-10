@@ -1,4 +1,5 @@
 #include "PCmpServer.h"
+#include "FmReporter.h"
 #include "PLog.h"
 #include "SimpleJson.h"
 #include <sys/types.h>
@@ -132,10 +133,67 @@ bool PCmpServer::startServer() {
     LOG_INFO("PCmpServer", "RTP epoll reactors started (%d workers, event-driven)", (int)_reactors.size());
 
     LOG_INFO("PCmpServer", "Server listening on %s:%d", _serverIp.c_str(), _serverPort);
+
+    // FM 자기보고 (alarm_self_reporting.md) — OAM FM ingest 로 알람/이벤트 push.
+    //   fm_catalog.json 은 설정 파일 옆(dist: config/) — 배치별 후보 순서 탐색.
+    if (_fmEnable) {
+        std::string confDir = _configFile;
+        size_t slash = confDir.find_last_of('/');
+        confDir = (slash == std::string::npos) ? "." : confDir.substr(0, slash);
+        std::string catalog;
+        const std::string cands[2] = {confDir + "/fm_catalog.json", confDir + "/config/fm_catalog.json"};
+        for (int i = 0; i < 2; ++i) {
+            if (access(cands[i].c_str(), R_OK) == 0) { catalog = cands[i]; break; }
+        }
+        if (catalog.empty()) catalog = cands[0];  // 부재 시 FmReporter 가 로그로 드러냄
+        gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec);
+        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName);
+        _fmMonitorThread = std::thread([this]() { this->fmMonitorLoop(); });
+    }
     return true;
 }
 
+// FM 자기보고 — 자원 풀 고갈 전이 감시 (1s). AlarmOpen/Close 는 멱등(같은 상태 재호출
+// no-op)이라 매초 판정해도 통지는 전이 시에만 나간다. 완전 고갈(할당 불가) 조건만 자기보고
+// 하고, 사용률 임계는 OAM sweeper(rtp_pct_gte, cims/rtp_ports)가 담당 — 역할 분담.
+void PCmpServer::fmMonitorLoop() {
+    const std::string moBase = "cims/" + _nodeName + "/" + _systemId;
+    while (_running) {
+        msleep(1000);
+        if (!_running) break;
+        int relayFree, relayTotal, pttFree, pttTotal, memberFree, memberTotal;
+        {
+            PAutoLock lock(_mutex);
+            relayFree = (int)_freeResources.size();
+            relayTotal = _rtpPoolSize;
+            pttFree = (int)_freePttResources.size();
+            pttTotal = (int)_pttPool.size();
+            memberFree = (int)_freePttMembers.size();
+            memberTotal = (int)_pttMemberPool.size();
+        }
+        const struct { const char* comp; int freeN; int total; } pools[3] = {
+            {"rtp_pool", relayFree, relayTotal},
+            {"ptt_floor_pool", pttFree, pttTotal},
+            {"ptt_member_pool", memberFree, memberTotal},
+        };
+        for (const auto& p : pools) {
+            if (p.total <= 0) continue;  // 미구성 풀은 판정 제외
+            std::string mo = moBase + "/" + p.comp;
+            if (p.freeN == 0) {
+                SimpleJson::JsonNode params;
+                params.Set("used", p.total);
+                params.Set("total", p.total);
+                gclsFmReporter.AlarmOpen("CIMS-QOS-002", mo, params);
+            } else {
+                gclsFmReporter.AlarmClose("CIMS-QOS-002", mo);
+            }
+        }
+    }
+}
+
 void PCmpServer::stopServer() {
+    if (gclsFmReporter.IsEnabled())
+        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName);
     _running = false;
     // 리액터 스레드 정지 (epoll_wait 1s timeout 내 종료)
     _reactorRunning = false;
@@ -143,6 +201,8 @@ void PCmpServer::stopServer() {
         if (r.thread.joinable()) r.thread.join();
     }
     if (_timeoutThread.joinable()) _timeoutThread.join();
+    if (_fmMonitorThread.joinable()) _fmMonitorThread.join();
+    gclsFmReporter.Stop();  // process_stopping pending 재전송 여지 후 종료
     stopLogWriter();  // timeout 스레드 정지 후 잔여 로그 전량 flush
     if (_udpFd >= 0) {
         ::close(_udpFd);
@@ -1663,6 +1723,15 @@ void PCmpServer::loadConfig() {
             _nodeName = _systemId;
             auto upos = _nodeName.find('_');
             if (upos != std::string::npos) _nodeName = _nodeName.substr(0, upos);
+
+            // FM 자기보고 (alarm_self_reporting.md)
+            if (root2.Has("Fm")) {
+                SimpleJson::JsonNode fm = root2.Get("Fm");
+                if (fm.Has("Enable")) _fmEnable = (fm.GetString("Enable") == "true");
+                if (fm.Has("OamIp")) _fmOamIp = fm.GetString("OamIp");
+                if (fm.Has("OamPort")) _fmOamPort = (int)fm.GetInt("OamPort", 9010);
+                if (fm.Has("SyncSec")) _fmSyncSec = (int)fm.GetInt("SyncSec", 60);
+            }
         }
     }
 

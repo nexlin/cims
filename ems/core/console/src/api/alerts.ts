@@ -94,6 +94,23 @@ export interface AlarmCatalogItem {
   metric?: string
   effect?: string
   recommended_action?: string
+  origin?: string               // 'rule' | 'module:<module>' (자기보고 등록분)
+}
+
+// 이벤트(정상 동작 통지) — 알람과 스트림 분리 (X.730/731 stateChange · X.740 audit).
+export interface EventRecord {
+  ts: string
+  type: string                  // process_started / config_reloaded / ...
+  kind?: 'stateChange' | 'audit' | string
+  source?: AlertSource
+  message: string
+  params?: Record<string, unknown>
+}
+
+export interface EventsResponse {
+  days: number
+  count: number
+  events: EventRecord[]
 }
 
 export const alertsApi = {
@@ -113,4 +130,17 @@ export const alertsApi = {
   rules: () => api.get<AlertRulesResponse>('/alerts/rules'),
   catalog: () => api.get<{ catalog: AlarmCatalogItem[] }>('/alerts/catalog'),
   ack: (alarmId: string) => api.post<{ ok: boolean; ack_user: string; ack_time: string }>('/alerts/ack', { alarm_id: alarmId }),
+}
+
+export const eventsApi = {
+  list: (params: { days?: number; type?: string; kind?: string; limit?: number } = {}) => {
+    const p = new URLSearchParams()
+    if (params.days) p.set('days', String(params.days))
+    if (params.type) p.set('type', params.type)
+    if (params.kind) p.set('kind', params.kind)
+    if (params.limit) p.set('limit', String(params.limit))
+    const s = p.toString()
+    return api.get<EventsResponse>(`/events${s ? '?' + s : ''}`)
+  },
+  types: () => api.get<{ types: string[] }>('/events/types'),
 }

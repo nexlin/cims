@@ -644,28 +644,28 @@ def audit_config_change(db_cfg: dict, actor: str, actor_ip: str,
                         before: dict = None, after: dict = None,
                         etag_before: str = "", etag_after: str = "",
                         reason: str = "") -> None:
-    """csp 설정 변경 이력 JSONL append. {CimsRuntimeDir}/csp_config_audit/YYYY/MM/DD.jsonl.
+    """csp 설정 변경 감사 — FM 이벤트 스트림(kind=audit)으로 발신
+    (alarm_self_reporting.md §6 — 구 {CimsRuntimeDir}/csp_config_audit JSONL 흡수).
 
-    db_cfg 인자는 호환을 위해 유지 (구 시그니처). 실제로는 file_store 사용.
-    실패는 조용히 삼킴 (운영 기능 차단 안 함).
+    db_cfg 인자는 호환을 위해 유지 (구 시그니처).
+    실패/FM 비활성 시 프로세스 로그로만 남김 (운영 기능 차단 안 함).
     """
     try:
-        from datetime import datetime as _dt
-        from services import file_store as _fs
-        from services import config_cache as _cc
-        # init_config_cache 가 보관한 runtime config 에서 CimsRuntimeDir 추출
-        runtime_config = getattr(_cc.CONFIG_CACHE, "_runtime_config", {}) if _cc.CONFIG_CACHE else {}
-        domain_path = _fs.domain_dir(runtime_config or {}, "csp_config_audit")
-        record = {
-            "ts": _dt.now().isoformat(timespec='seconds'),
+        from services import fm_reporter as _fm
+        params = {
             "actor": actor, "actor_ip": actor_ip,
-            "entity": entity, "entity_id": str(entity_id),
-            "action": action,
+            "entity": entity, "entity_id": str(entity_id), "action": action,
             "before": before, "after": after,
             "etag_before": etag_before, "etag_after": etag_after,
             "reason": (reason or "")[:512] if reason else None,
         }
-        _fs.jsonl_append(domain_path, "audit", record)
+        message = f"{actor}({actor_ip}) {entity}/{entity_id} {action}"
+        r = _fm.get()
+        if r is not None:
+            r.send_event('config_change', kind='audit',
+                         mo=f"cims/csp/config/{entity}", params=params, message=message)
+        else:
+            logger.log_info(f"audit_config_change (fm 비활성): {message}")
     except Exception as e:
         logger.log_warning(f"audit_config_change: {e}")
 

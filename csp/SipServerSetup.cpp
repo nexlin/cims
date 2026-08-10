@@ -104,6 +104,10 @@ CSipServerSetup::CSipServerSetup()
       m_strCmdpIp( "127.0.0.1" ),
       m_iCmdpPort( 9100 ),
       m_iLocalCmdpPort( 9101 ),
+      m_bFmEnable( false ),
+      m_strFmOamIp( "127.0.0.1" ),
+      m_iFmOamPort( 9010 ),
+      m_iFmSyncSec( 60 ),
       m_iMaxSdsCplaneBytes( 0 ),
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
@@ -307,6 +311,15 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( md.Has( "Host" ) ) m_strCmdpIp = md.GetString( "Host" );
                 if ( md.Has( "ControlPort" ) ) m_iCmdpPort = (int)md.GetInt( "ControlPort" );
                 if ( md.Has( "LocalPort" ) ) m_iLocalCmdpPort = (int)md.GetInt( "LocalPort" );
+            }
+
+            // FM 자기보고 (모듈 알람/이벤트 push — docs/design/alarm_self_reporting.md)
+            if ( setup.Has( "Fm" ) ) {
+                SimpleJson::JsonNode fm = setup.Get( "Fm" );
+                if ( fm.Has( "Enable" ) ) m_bFmEnable = ( fm.Get( "Enable" ).AsString() == "true" );
+                if ( fm.Has( "OamIp" ) ) m_strFmOamIp = fm.GetString( "OamIp" );
+                if ( fm.Has( "OamPort" ) ) m_iFmOamPort = (int)fm.GetInt( "OamPort" );
+                if ( fm.Has( "SyncSec" ) ) m_iFmSyncSec = (int)fm.GetInt( "SyncSec" );
             }
 
             // MCData C-plane 정책 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응)

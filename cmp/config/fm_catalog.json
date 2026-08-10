@@ -1,0 +1,21 @@
+{
+  "alarms": [
+    {
+      "type": "resource_exhausted",
+      "code": "CIMS-QOS-002",
+      "perceived_severity": "major",
+      "event_type": "qualityOfService",
+      "probable_cause": "resourceAtOrNearingCapacity",
+      "mo_class": "service",
+      "metric": "미디어 자원 풀",
+      "msg_open": "{mo} 자원 풀 완전 고갈 ({used}/{total}) — 신규 할당 불가",
+      "msg_close": "{mo} 자원 풀 여유 회복",
+      "effect": "신규 호/그룹/멤버의 미디어 자원 할당 실패 (NO_RESOURCE 거절)",
+      "recommended_action": "동시 호 수 확인, 풀 크기(RtpPoolSize 등) 증설, stale 세션 sweep 점검"
+    }
+  ],
+  "events": [
+    { "type": "process_started", "kind": "stateChange", "msg": "{mo} CMP 기동 완료" },
+    { "type": "process_stopping", "kind": "stateChange", "msg": "{mo} CMP 종료 시작" }
+  ]
+}

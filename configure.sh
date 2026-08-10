@@ -259,6 +259,7 @@ CMDP_IP="${CMDP_IP:-$CMP_IP}"
 CWRTC_IP="${CWRTC_IP:-$LOCAL_IP}"
 CSC_HOST="${CSC_HOST:-$LOCAL_IP}"
 CSC_IP="$CSC_HOST"            # 템플릿 @CSC_IP@ 별칭 (csp Xcap.Host)
+OAM_IP="${OAM_IP:-$LOCAL_IP}" # 템플릿 @OAM_IP@ — 모듈 FM 자기보고 목적지 (이중화 시 관리평면 VIP)
 DB_HOST="${DB_HOST:-127.0.0.1}"
 VOLTE_DOMAIN="${VOLTE_DOMAIN:-ims.mnc033.mcc450.3gppnetwork.org}"
 PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^ims\./ptt./')}"
@@ -352,6 +353,7 @@ apply_template() {
         -e "s|@CWRTC_IP@|${CWRTC_IP}|g" \
         -e "s|@CSC_HOST@|${CSC_HOST}|g" \
         -e "s|@CSC_IP@|${CSC_IP}|g" \
+        -e "s|@OAM_IP@|${OAM_IP}|g" \
         -e "s|@DB_HOST@|${DB_HOST}|g" \
         -e "s|@DB_USER@|${DB_USER}|g" \
         -e "s|@DB_PASSWORD@|${DB_PASSWORD}|g" \
@@ -379,7 +381,7 @@ apply_config_template() {
     CSP_IP="$CSP_IP" PSP_IP="$PSP_IP" ISP_IP="$ISP_IP" \
     CMP_IP="$CMP_IP" PMP_IP="$PMP_IP" IMP_IP="$IMP_IP" \
     CMDP_IP="$CMDP_IP" SYSTEM_ID="${SYSTEM_ID:-cmdp_01}" \
-    CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" CSC_IP="$CSC_IP" \
+    CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" CSC_IP="$CSC_IP" OAM_IP="$OAM_IP" \
     DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
     VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" \
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
@@ -450,6 +452,7 @@ if [[ -d "$DIST_DIR/oam/config" ]]; then
     OAM_OVL="$DIST_DIR/oam/config.json" SECRET="$CIMS_JWT_SECRET" \
         SVC_LOG_DIR="$SERVICE_LOG_DIR" RUNTIME_DIR="$DIST_DIR/ext_mnt/runtime" \
         DBH="$DB_HOST" DBP="${DB_PORT:-3306}" DBU="$DB_USER" DBW="$DB_PASSWORD" DBN="${DB_NAME:-cims}" \
+        CSPIP="$CSP_IP" CMPIP="$CMP_IP" \
         python3 - <<'PY'
 import json, os
 p = os.environ["OAM_OVL"]
@@ -469,6 +472,11 @@ ovl["CimsDatabase"] = {
     "Host": os.environ["DBH"], "Port": int(os.environ["DBP"]),
     "User": os.environ["DBU"], "Password": os.environ["DBW"], "Db": os.environ["DBN"],
 }
+# 서비스 관측 대상(health/알람 sweeper probe) — 미주입 시 기본 127.0.0.1 인데 CSP 의
+# CscInterface 는 LOCAL_IP 에 bind 하므로 probe 가 영구 실패해 health=down + 유령
+# process_down 알람이 남는다. CMP 는 Endpoints 비면 관측 자체가 비활성.
+ovl["CspNotify.Ip"] = os.environ["CSPIP"]
+ovl["MediaServer.Endpoints"] = [{"ip": os.environ["CMPIP"], "port": 9000}]
 with open(p, "w") as f:
     json.dump(ovl, f, indent=4, ensure_ascii=False)
     f.write("\n")

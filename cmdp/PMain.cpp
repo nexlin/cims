@@ -3,6 +3,13 @@
 #include "PCmdpServer.h"
 #include "PLog.h"
 
+#include <csignal>
+
+// SIGTERM = graceful stop — FM process_stopping 통지·로그 flush 후 종료.
+// (종전: 핸들러 부재 → 즉사, stopServer 미실행)
+static volatile sig_atomic_t g_stop = 0;
+static void onTerm(int) { g_stop = 1; }
+
 int main(int argc, char** argv) {
     std::string configFile = "../config/cmdp.json";
     if (argc > 1) {
@@ -29,9 +36,11 @@ int main(int argc, char** argv) {
 
     LOG_INFO("Main", "cmdp started. config=%s", configFile.c_str());
 
-    // Keep main thread alive
-    while (true) {
+    signal(SIGTERM, onTerm);
+    while (!g_stop) {
         msleep(1000);
     }
+    LOG_INFO("Main", "SIGTERM — graceful stop");
+    server.stopServer();
     return 0;
 }

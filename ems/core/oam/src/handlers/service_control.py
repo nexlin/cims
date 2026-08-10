@@ -31,25 +31,28 @@ from typing import Optional
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
 
-from services import file_store, service_registry
+from services import service_registry
 
 logger = Logger()
 
 
 def _audit_service_action(config: dict, actor: str, actor_ip: str,
                           service: str, action: str, reason: str = "") -> None:
-    """서비스 제어 감사 — base 자체 기록(file_store JSONL, mcptt 비의존).
-    {CimsRuntimeDir}/service_control_audit/YYYY/MM/DD.jsonl.
-    csc_standalone_module.md P3: base 는 csc 의 mcptt 함수를 빌려 쓰지 않는다 —
-    MCPTT→CSP notify/audit 는 csc 전용. base 는 자기 감사 로그만 남긴다."""
+    """서비스 제어 감사 — 이벤트 스트림(event_log, kind=audit)에 기록
+    (alarm_self_reporting.md §6 — 구 {CimsRuntimeDir}/service_control_audit JSONL 흡수).
+    콘솔 '알람·이벤트 이력 > 이벤트' 탭과 GET /events 로 조회된다."""
     try:
-        from datetime import datetime as _dt
-        domain_path = file_store.domain_dir(config or {}, "service_control_audit")
-        file_store.jsonl_append(domain_path, "audit", {
-            "ts": _dt.now().isoformat(timespec='seconds'),
-            "actor": actor, "actor_ip": actor_ip,
-            "entity": "service", "entity_id": str(service),
-            "action": action, "reason": (reason or "")[:512] if reason else None,
+        from services import event_log
+        sl = (config or {}).get('ServiceLogging', {})
+        base = sl.get('Dir', '') or (config or {}).get(
+            'ServiceLogDir', (config or {}).get('MsgLogDir', ''))
+        event_log.record_event(base, {
+            'type': 'service_control', 'kind': 'audit',
+            'source': {'mo_class': 'software', 'mo_instance': f'cims/{service}',
+                       'detected_by': 'oam'},
+            'message': f"{actor}({actor_ip}) {service} {action}",
+            'params': {'actor': actor, 'actor_ip': actor_ip, 'action': action,
+                       'reason': (reason or '')[:512] or None},
         })
     except Exception as e:
         logger.log_warning(f"service_control audit: {e}")

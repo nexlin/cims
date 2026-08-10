@@ -17,7 +17,7 @@ message(" ***> ${PMPROC_LIB_PATH}")
 
 #add_executable(pmpagent pmpagent.cpp)
 #add_executable(prtpsim prtpsim.cpp)
-add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PFloorCrypto.cpp PRtpRelay.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp)
+add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PFloorCrypto.cpp PRtpRelay.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp FmReporter.cpp)
 
 # floor control(RTCP) SRTCP 보호 — TS 33.180. 미디어 RTP 는 투명 relay 라 암호 의존이 없다.
 find_package(OpenSSL REQUIRED)
@@ -35,6 +35,6 @@ install(TARGETS ${TEST_SRCS}
 		LIBRARY DESTINATION ${PMPROC_LIB_PATH}
 		ARCHIVE DESTINATION ${PMPROC_LIB_PATH})
 
-install(FILES config/config_template.json DESTINATION ${PMPROC_BIN_PATH}/../config)
+install(FILES config/config_template.json config/fm_catalog.json DESTINATION ${PMPROC_BIN_PATH}/../config)
 
 

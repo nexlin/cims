@@ -29,18 +29,28 @@ def _is_service_akey(akey: str) -> bool:
 
 def restore_open_state(service_log_dir: str, scope: str = 'all', days: int = 30,
                        log=None) -> dict:
-    """기동 시 활성 알람 복원. scope: 'service'=cims/* 만, 'agent'=cims/* 제외, 'all'=전부.
-    분리 배포에서 base/oam-svc 가 각자 소유 계열만 추적하도록 나눈다."""
+    """기동 시 활성 알람 복원. scope: 'service'=cims/* 만, 'agent'=cims/* 제외,
+    'self'=모듈 자기보고(detected_by self:*)만, 'all'=자기보고 제외 전부.
+    분리 배포에서 base/oam-svc/FM ingest 가 각자 소유 계열만 추적하도록 나눈다 —
+    자기보고 계열은 mo 접두가 아니라 발화 주체(detected_by)로 구분한다
+    (alarm_self_reporting.md §5)."""
     from services import alert_log
     state: dict = {}
     if not service_log_dir:
         return state
     try:
-        restored = alert_log.compute_open_state(service_log_dir, days=days)
-        if scope == 'service':
-            restored = {k: v for k, v in restored.items() if _is_service_akey(k)}
-        elif scope == 'agent':
-            restored = {k: v for k, v in restored.items() if not _is_service_akey(k)}
+        meta = alert_log.compute_open_state(service_log_dir, days=days, with_meta=True)
+        def _is_self(m):
+            return (m.get('detected_by') or '').startswith('self:')
+        if scope == 'self':
+            meta = {k: m for k, m in meta.items() if _is_self(m)}
+        else:
+            meta = {k: m for k, m in meta.items() if not _is_self(m)}
+            if scope == 'service':
+                meta = {k: m for k, m in meta.items() if _is_service_akey(k)}
+            elif scope == 'agent':
+                meta = {k: m for k, m in meta.items() if not _is_service_akey(k)}
+        restored = {k: m['alarm_id'] for k, m in meta.items()}
         state.update(restored)
         if restored and log:
             log.log_info(f"[alarm] restored open state ({scope}): {sorted(restored.keys())}")

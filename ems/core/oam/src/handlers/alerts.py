@@ -28,7 +28,6 @@ def _path_parts(full_path: str):
 
 
 # 활성 알림 규칙 — service descriptor(service_registry.alert_rules) 구동. sweeper 발화 조건과 1:1.
-# descriptor 비었을 때만 하드코딩 fallback (전환 안전망).
 def _condition_text(rule: dict) -> str:
     chk = rule.get('check')
     if chk in ('rtp_pct_gte', 'disk_high'):
@@ -63,14 +62,6 @@ def _alert_rules(config: dict) -> dict:
             'recommended_action': r.get('recommended_action'),
             'scope': r.get('scope') or 'service',
         })
-    if not out:   # descriptor 비었을 때 fallback
-        rtp_pct = int(config.get('AlertRtpThresholdPct', 80))
-        out = [
-            {'type': 'csp_down', 'severity': 'critical', 'metric': 'CSP 프로세스', 'condition': '응답 없음', 'threshold': None, 'unit': None},
-            {'type': 'cmp_down', 'severity': 'critical', 'metric': 'CMP 프로세스', 'condition': '응답 없음', 'threshold': None, 'unit': None},
-            {'type': 'db_down', 'severity': 'critical', 'metric': 'DB 연결', 'condition': '연결 끊김', 'threshold': None, 'unit': None},
-            {'type': 'rtp_high', 'severity': 'warning', 'metric': 'RTP 포트 사용률', 'condition': f'≥ {rtp_pct}%', 'threshold': rtp_pct, 'unit': '%'},
-        ]
     return {'editable': False, 'sweep_sec': sweep, 'rules': out}
 
 
@@ -143,8 +134,28 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 
         if parts and parts[0] == 'catalog':
             # 알람 클래스 카탈로그 (code 별 정의) — X.733/32.111 표준화.
-            from services import service_registry
-            return HandlerResult(status=200, body={'catalog': service_registry.alarm_catalog(config)})
+            # OAM 평가 규칙(origin=rule) + 모듈 자기보고 등록분(origin=module:<module>,
+            # alarm_self_reporting.md §4 — file_store 보존본이라 모듈 다운 중에도 표시).
+            from services import service_registry, fm_ingest
+            catalog = [{**c, 'origin': 'rule'} for c in service_registry.alarm_catalog(config)]
+            seen = {c['code'] for c in catalog}
+            for row in fm_ingest.module_catalogs(_service_log_dir(config)):
+                for a in (row.get('alarms') or []):
+                    code = a.get('code')
+                    if not code or code in seen:
+                        continue
+                    seen.add(code)
+                    catalog.append({
+                        'code': code, 'type': a.get('type'),
+                        'perceived_severity': a.get('perceived_severity'),
+                        'event_type': a.get('event_type'),
+                        'probable_cause': a.get('probable_cause'),
+                        'mo_class': a.get('mo_class'), 'metric': a.get('metric'),
+                        'effect': a.get('effect'),
+                        'recommended_action': a.get('recommended_action'),
+                        'origin': f"module:{row.get('module') or row.get('node')}",
+                    })
+            return HandlerResult(status=200, body={'catalog': catalog})
 
         if parts and parts[0] == 'types':
             return HandlerResult(status=200, body={'types': alert_log.list_types(base, days=30)})

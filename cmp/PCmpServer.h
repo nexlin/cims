@@ -130,6 +130,14 @@ private:
     std::string _serviceLogDir;
     std::string _systemId;      // 파일명용 (cmp_01)
     std::string _nodeName;      // flow node 필드용 (cmp)
+
+    // FM 자기보고 (alarm_self_reporting.md) — Fm.{Enable,OamIp,OamPort,SyncSec}
+    bool _fmEnable = false;
+    std::string _fmOamIp = "127.0.0.1";
+    int _fmOamPort = 9010;
+    int _fmSyncSec = 60;
+    std::thread _fmMonitorThread;
+    void fmMonitorLoop();
     // 5분 버킷 + open-per-write (구 시간당 persistent handle → .nfs 고아·데이터유실·대용량검색 해소; CSP SipMessageLogger 와 동일)
     std::string _currentBucketKey;   // {hourDir}/{mm5} — 버킷 회전 감지
     std::string _currentFlowHourDir;

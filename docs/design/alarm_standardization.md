@@ -39,7 +39,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   에서만 base 가 대행 `detected_by='oam'`), **agent 계열**(disk/module)은 base(`oam_app.py`
   `_sweep_alerts`→`_eval_agent_rule`) 잔류. 기동 시 open-state 복원도 소유 계열별
   (`restore_open_state` — 서비스=`cims/*` mo, agent=그 외).
-- **이벤트 레코드** (`csc/src/services/alert_log.py`, `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl`):
+- **이벤트 레코드** (`ems/core/oam/src/services/alert_log.py`, `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl`):
   `{ ts, type, severity, action(open|close), message }`
 - **API** (`ems/core/oam/src/handlers/alerts.py`): `GET /alerts`, `/types`, `/summary`, `/rules`.
 - **UI**: `AlertsPage.tsx`(이력/통계/규칙) · `AlertBannerWidget`(활성 배너). 색은 critical/warning 2색.
@@ -195,7 +195,7 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 - **정상 기동/실행 중인 프로세스는 알람이 아니다.** "프로세스 start/stop", "config 변경", "배포", "로그인" 등은 **이벤트**(stateChange/audit) → 이벤트 로그에만, 알람 카탈로그/배너엔 미포함.
 - 프로세스 복구는 새 알람이 아니라 기존 `process_down` 의 **Cleared(close)** 통지.
 - 단, **실행 중이어도** 다른 클래스 알람은 발생(threshold_crossed/connection_lost/처리오류 등) — "프로세스 생존 ≠ 정상".
-- CIMS 현황: 알람 스트림은 fault-only(정상 통지를 알람화하지 않음) — 원칙 준수 중. 정상 라이프사이클/감사는 별도 **이벤트 스트림**(예 `mcptt.audit_config_change`)으로 둔다. 알람·이벤트 통합 뷰는 표시단에서 합치되 **모델은 분리**.
+- CIMS 현황: 알람 스트림은 fault-only(정상 통지를 알람화하지 않음). 정상 라이프사이클/감사는 별도 **이벤트 스트림**(`event_log` — `{ServiceLogDir}/events/`, `GET /events`, 모듈 자기보고 FM_EVENT 가 공급 — [alarm_self_reporting.md](alarm_self_reporting.md) §6)으로 흐른다. 콘솔 표시도 알람/이벤트 탭으로 스트림을 구분 — **모델 분리 유지**.
 
 ## 4. 전파 경로(구현 시 변경 지점)
 
@@ -255,5 +255,6 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 - 매핑은 별도 테이블(code↔int OID)로 관리 — CIMS 내부 모델은 문자열 code 유지, northbound 게이트웨이에서 변환.
 
 ## 관련
+- [alarm_self_reporting.md](alarm_self_reporting.md) — 모듈 자기보고(FM push) 경로 — 본 모델 위의 발생 경로 확장 + 이벤트 스트림
 - `console_platform.md` (Service Descriptor: modules/alert_rules/data_sources) · `features/monitoring.md`
 - 3GPP TS 32.111-2 (Alarm IRP) · ITU-T X.733 (Alarm reporting) · IETF RFC 3877 (Alarm MIB) · ONAP VES (fault) / ETSI NFV · Project Clearwater (IMS 알람 사례)

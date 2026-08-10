@@ -5,6 +5,8 @@
 
 #include "DbManager.h"
 
+#include <unistd.h>
+
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -96,6 +98,95 @@ bool CDbManager::IsConnected() const {
 bool CDbManager::Reconnect() {
     if ( m_strHost.empty() ) return false;
     return Connect( m_strHost, m_strUser, m_strPasswd, m_strDb, m_iPort );
+}
+
+// ─────────────────────────────────────────────
+//  Health probe (FM 자기보고 파일럿 — alarm_self_reporting.md)
+// ─────────────────────────────────────────────
+
+static const int kDbProbePeriodSec = 10;  // probe 주기
+static const int kDbProbeMaxFail = 3;     // 연속 실패 임계 — 초과 시 down 전이
+
+void CDbManager::StartHealthProbe( std::function<void( bool )> fnStateChange ) {
+    if ( m_bProbeRunning ) return;
+    m_fnProbeCallback = fnStateChange;
+    m_bProbeRunning = true;
+    m_threadProbe = std::thread( &CDbManager::HealthProbeLoop, this );
+}
+
+void CDbManager::StopHealthProbe() {
+    if ( !m_bProbeRunning ) return;
+    m_bProbeRunning = false;
+    if ( m_threadProbe.joinable() ) m_threadProbe.join();
+}
+
+void CDbManager::HealthProbeLoop() {
+    // 전용 probe 연결 — 호출 경로의 m_pMysql/m_mutex 와 완전 분리. 쿼리 경로가
+    //   half-open 으로 5s stall 하는 동안에도 probe 는 독립적으로 상태를 판정한다.
+    MYSQL *pProbe = nullptr;
+    int iFailCount = 0;
+    bool bUp = true;  // 기동 시 up 가정 — 3연속 실패 후 첫 down 전이
+    int iTick = 0;
+
+    while ( m_bProbeRunning ) {
+        sleep( 1 );
+        if ( ++iTick < kDbProbePeriodSec ) continue;
+        iTick = 0;
+
+        bool bOk = false;
+        if ( !pProbe ) {
+            std::string strHost, strUser, strPasswd, strDb;
+            int iPort;
+            {
+                std::lock_guard<std::recursive_mutex> lock( m_mutex );
+                strHost = m_strHost;
+                strUser = m_strUser;
+                strPasswd = m_strPasswd;
+                strDb = m_strDb;
+                iPort = m_iPort;
+            }
+            if ( strHost.empty() ) continue;  // Connect() 전 — 판정 보류
+            pProbe = mysql_init( nullptr );
+            if ( pProbe ) {
+                unsigned int uTimeout = 3;
+                mysql_options( pProbe, MYSQL_OPT_CONNECT_TIMEOUT, &uTimeout );
+                mysql_options( pProbe, MYSQL_OPT_READ_TIMEOUT, &uTimeout );
+                mysql_options( pProbe, MYSQL_OPT_WRITE_TIMEOUT, &uTimeout );
+                if ( mysql_real_connect( pProbe, strHost.c_str(), strUser.c_str(), strPasswd.c_str(), strDb.c_str(),
+                                         iPort, nullptr, 0 ) ) {
+                    bOk = true;
+                } else {
+                    mysql_close( pProbe );
+                    pProbe = nullptr;
+                }
+            }
+        } else {
+            if ( mysql_ping( pProbe ) == 0 ) {
+                bOk = true;
+            } else {
+                mysql_close( pProbe );
+                pProbe = nullptr;
+            }
+        }
+
+        if ( bOk ) {
+            iFailCount = 0;
+            if ( !bUp ) {
+                bUp = true;
+                CLog::Print( LOG_SYSTEM, "[DB] health probe RECOVERED" );
+                if ( m_fnProbeCallback ) m_fnProbeCallback( true );
+            }
+        } else {
+            iFailCount++;
+            if ( bUp && iFailCount >= kDbProbeMaxFail ) {
+                bUp = false;
+                CLog::Print( LOG_ERROR, "[DB] health probe DOWN (%d연속 실패)", iFailCount );
+                if ( m_fnProbeCallback ) m_fnProbeCallback( false );
+            }
+        }
+    }
+
+    if ( pProbe ) mysql_close( pProbe );
 }
 
 // ─────────────────────────────────────────────

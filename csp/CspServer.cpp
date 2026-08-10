@@ -20,6 +20,8 @@
 #include <csignal>
 #include <set>
 
+#include <unistd.h>
+
 #include "CallDir.h"
 #include "CspAddressing.h"
 
@@ -50,6 +52,7 @@ CCallDir gclsCallDir;
 #include "CspServiceMap.h"
 #include "DbManager.h"
 #include "Directory.h"
+#include "FmReporter.h"
 #include "GroupCallService.h"
 #include "GroupMap.h"
 #include "Log.h"
@@ -251,6 +254,25 @@ int ServiceMain() {
                                   gclsSetup.m_iAuditMaxPerCycle, gclsSetup.m_bAuditZombieTeardown,
                                   gclsSetup.m_strHaRole, gclsSetup.m_strHaVip );
 
+    // FM 자기보고 (alarm_self_reporting.md) — OAM FM ingest 로 알람/이벤트 push.
+    //   fm_catalog.json 은 설정 파일 옆(dist: config/) — 배치별 후보 순서 탐색.
+    if ( gclsSetup.m_bFmEnable ) {
+        std::string strConfDir = GetConfigFileName();
+        size_t iSlash = strConfDir.find_last_of( '/' );
+        strConfDir = ( iSlash == std::string::npos ) ? "." : strConfDir.substr( 0, iSlash );
+        std::string strCatalog;
+        const std::string arrCands[2] = { strConfDir + "/fm_catalog.json", strConfDir + "/config/fm_catalog.json" };
+        for ( int i = 0; i < 2; ++i ) {
+            if ( access( arrCands[i].c_str(), R_OK ) == 0 ) {
+                strCatalog = arrCands[i];
+                break;
+            }
+        }
+        if ( strCatalog.empty() ) strCatalog = arrCands[0];  // 부재 시 FmReporter 가 로그로 드러냄
+        gclsFmReporter.Init( gclsSetup.m_strFmOamIp, gclsSetup.m_iFmOamPort, sysId, "csp", strCatalog,
+                             gclsSetup.m_iFmSyncSec );
+    }
+
     // Phase 1.D-2 — Redis register state replication (optional, cold-mode if not configured)
     if ( !gclsSetup.m_strRedisHost.empty() && gclsSetup.m_iRedisPort > 0 ) {
         gclsRedisStore.Init( gclsSetup.m_strRedisHost, gclsSetup.m_iRedisPort, gclsSetup.m_strRedisPassword );
@@ -285,6 +307,17 @@ int ServiceMain() {
         if ( !gclsDbManager.Connect( gclsSetup.m_strDbHost, gclsSetup.m_strDbUser, gclsSetup.m_strDbPasswd,
                                      gclsSetup.m_strDbName, gclsSetup.m_iDbPort ) ) {
             CLog::Print( LOG_ERROR, "DB Connect failed — check csp.json Database section" );
+        }
+        // DB 연결 상태 자기보고 — 전이 시 CIMS-COM-001 open/close.
+        //   probe 는 전용 연결이라 쿼리 경로와 무간섭. Connect 실패여도 접속 정보는 저장돼 판정 가능.
+        //   mo 는 노드별 분리 (cims/csp/<node>/db — HA 다중 CSP 의 활성키 충돌 방지).
+        if ( gclsFmReporter.IsEnabled() ) {
+            gclsDbManager.StartHealthProbe( [mo = "cims/csp/" + sysId + "/db"]( bool bUp ) {
+                if ( bUp )
+                    gclsFmReporter.AlarmClose( "CIMS-COM-001", mo );
+                else
+                    gclsFmReporter.AlarmOpen( "CIMS-COM-001", mo );
+            } );
         }
     }
 
@@ -328,6 +361,7 @@ int ServiceMain() {
         return -1;
     }
     CLog::Print( LOG_SYSTEM, "SipServer started successfully." );
+    gclsFmReporter.SendEvent( "process_started", "stateChange", "cims/csp" );
 
     // SIGUSR1: agent 가 jsonl 쓰기 직후 보내는 reload 시그널.
     //   핸들러에서는 플래그만 세팅, 실제 reload 는 메인 루프에서 수행.
@@ -478,6 +512,8 @@ int ServiceMain() {
             gclsSetup.Read();
         }
     }
+    gclsFmReporter.SendEvent( "process_stopping", "stateChange", "cims/csp" );
+    gclsDbManager.StopHealthProbe();
     gclsCallMap.StopCallAll();
     gclsTransCallMap.StopCallAll();
     gclsGroupCallService.StopMonitor();
@@ -490,6 +526,7 @@ int ServiceMain() {
     }
     gclsUserAgent.Stop();
     gclsUserAgent.Final();
+    gclsFmReporter.Stop();  // 호 소진 대기 동안 pending 재전송 유지 후 종료
     CLog::Print( LOG_SYSTEM, "CspServer is terminated" );
     CLog::Release();
     return 0;

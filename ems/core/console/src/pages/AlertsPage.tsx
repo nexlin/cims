@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { alertsApi, type AlertEvent, type AlertSummaryResponse, type AlertRulesResponse } from '../api/alerts'
+import { alertsApi, eventsApi, type AlertEvent, type AlertSummaryResponse, type AlertRulesResponse, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
 
 const TYPE_LABEL: Record<string, string> = {
@@ -148,6 +148,112 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
   return rows.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
 }
 
+// 이벤트 탭 — 정상 동작 통지(stateChange/audit) 스트림. 알람과 모델 분리(§3.6),
+// 표시단에서도 스트림 구분 (alarm_self_reporting.md §6).
+const EVENT_TYPE_LABEL: Record<string, string> = {
+  process_started: '프로세스 기동',
+  process_stopping: '프로세스 종료',
+  config_reloaded: '설정 재적재',
+  catalog_registered: '카탈로그 등록',
+}
+const KIND_LABEL: Record<string, string> = { stateChange: '상태 변화', audit: '감사' }
+
+function EventsSection() {
+  const { show } = useToast()
+  const [events, setEvents] = useState<EventRecord[]>([])
+  const [types, setTypes] = useState<string[]>([])
+  const [days, setDays] = useState(7)
+  const [filterType, setFilterType] = useState('')
+  const [filterKind, setFilterKind] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [list, typeList] = await Promise.all([
+        eventsApi.list({ days, type: filterType || undefined, kind: filterKind || undefined, limit: 2000 }),
+        eventsApi.types(),
+      ])
+      setEvents(list.events)
+      setTypes(typeList.types)
+    } catch (e: unknown) {
+      show(String(e), 'err')
+    } finally {
+      setLoading(false)
+    }
+  }, [days, filterType, filterKind, show])
+
+  useEffect(() => { load() }, [load])
+
+  return (
+    <>
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>기간:</span>
+        {[1, 7, 30, 90].map(d => (
+          <button key={d}
+            className={`btn btn--sm ${days === d ? 'btn--primary' : 'btn--ghost'}`}
+            onClick={() => setDays(d)}>
+            {d === 1 ? '오늘' : `${d}일`}
+          </button>
+        ))}
+        <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>유형:</span>
+        <select className="form-input" value={filterType}
+          onChange={e => setFilterType(e.target.value)} style={{ width: 160 }}>
+          <option value="">전체</option>
+          {types.map(t => <option key={t} value={t}>{EVENT_TYPE_LABEL[t] || t}</option>)}
+        </select>
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>분류:</span>
+        <select className="form-input" value={filterKind}
+          onChange={e => setFilterKind(e.target.value)} style={{ width: 120 }}>
+          <option value="">전체</option>
+          <option value="stateChange">상태 변화</option>
+          <option value="audit">감사</option>
+        </select>
+        <button className="btn btn--ghost btn--sm" onClick={load} style={{ marginLeft: 'auto' }}>↻</button>
+      </div>
+
+      <div className="panel">
+        <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
+          이벤트 이력 ({events.length}건)
+        </div>
+        {loading ? (
+          <div className="empty">로딩 중…</div>
+        ) : events.length === 0 ? (
+          <div className="empty">기록된 이벤트 없음</div>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 150 }}>시각</th>
+                <th style={{ width: 90 }}>분류</th>
+                <th style={{ width: 140 }}>유형</th>
+                <th style={{ width: 170 }}>소스</th>
+                <th>메시지</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((ev, i) => (
+                <tr key={`${ev.ts}-${ev.type}-${i}`}>
+                  <td className="ts">{fmtTime(ev.ts)}</td>
+                  <td>
+                    <span className={`badge ${ev.kind === 'audit' ? 'badge--gray' : 'badge--blue'}`}>
+                      {KIND_LABEL[ev.kind || ''] || ev.kind || '-'}
+                    </span>
+                  </td>
+                  <td>{EVENT_TYPE_LABEL[ev.type] || ev.type}</td>
+                  <td><code style={{ fontSize: 11 }}>{ev.source?.mo_instance || '-'}</code></td>
+                  <td title={ev.source?.detected_by}>{ev.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
+  )
+}
+
 // openOnly=true → 활성 알람 뷰(해소된 알람 숨김 기본), false → 알람·이벤트 이력 전체.
 export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } = {}) {
   const { show } = useToast()
@@ -159,6 +265,8 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
   const [filterType, setFilterType] = useState('')
   const [showResolved, setShowResolved] = useState(!openOnly)
   const [loading, setLoading] = useState(false)
+  // 알람/이벤트 스트림 탭 — 활성 알람 뷰(openOnly)에는 이벤트 탭 없음.
+  const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -191,8 +299,26 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
   const rows = pairEvents(events).filter(r => showResolved || !r.resolved_at)
   const openCount = rows.filter(r => r.action === 'open' && !r.resolved_at).length
 
+  if (!openOnly && tab === 'events') {
+    return (
+      <div className="page">
+        <div className="tab-nav">
+          <button className="tab-btn" onClick={() => setTab('alarms')}>알람</button>
+          <button className="tab-btn tab-btn--active">이벤트</button>
+        </div>
+        <EventsSection />
+      </div>
+    )
+  }
+
   return (
     <div className="page">
+      {!openOnly && (
+        <div className="tab-nav">
+          <button className="tab-btn tab-btn--active">알람</button>
+          <button className="tab-btn" onClick={() => setTab('events')}>이벤트</button>
+        </div>
+      )}
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>기간:</span>
         {[1, 7, 30, 90].map(d => (
