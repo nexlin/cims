@@ -16,7 +16,17 @@ class ChannelStore(context: Context) {
 
     var primary: String?
         get() = prefs.getString(K_PRIMARY, null)?.takeIf { it.isNotBlank() }
-        set(v) { prefs.edit().putString(K_PRIMARY, v ?: "").apply() }
+        set(v) {
+            val e = prefs.edit().putString(K_PRIMARY, v ?: "")
+            // 마지막 주채널은 별도 보존 — 참여 이탈로 primary 가 비워져도 SOS "선택 그룹"
+            // (TS 24.484 UseCurrentlySelectedGroup)의 대상으로 남는다. clear(로그아웃)로만 소거.
+            if (!v.isNullOrBlank()) e.putString(K_LAST_PRIMARY, v)
+            e.apply()
+        }
+
+    /** 마지막 주채널 (SOS 선택그룹 폴백) — primary 해제/이탈 후에도 유지. */
+    val lastPrimary: String?
+        get() = prefs.getString(K_LAST_PRIMARY, null)?.takeIf { it.isNotBlank() }
 
     /** 참여 그룹(참여 순서 유지). groupId 에 쉼표가 없다는 전제의 CSV 저장. */
     var joined: List<String>
@@ -34,6 +44,7 @@ class ChannelStore(context: Context) {
 
     private companion object {
         const val K_PRIMARY = "primary"
+        const val K_LAST_PRIMARY = "last_primary"
         const val K_JOINED = "joined"
     }
 }

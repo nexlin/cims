@@ -11,6 +11,16 @@ export interface Subscription {
   imsi?: string | null          // SIM IMSI — 인증 username 의 user 파트. 번호 add 시 필수.
   register_time?: string | null
   logout_time?: string | null
+  mcptt_profile?: McpttProfile | null   // PTT 번호에만 (상세 응답 동봉, 미설정=null → 기본값)
+}
+
+// 사용자 MCPTT 프로파일 (ptt_user_profile — TS 24.484). SOS 대상 결정 + 개시 인가.
+export interface McpttProfile {
+  allow_emergency_call: boolean     // 긴급 그룹콜 개시 인가
+  allow_emergency_alert: boolean    // 긴급경보 개시 인가
+  allow_adhoc_call: boolean         // ad hoc 개시 인가 (시스템 정책과 AND)
+  emergency_group_mode: 'DedicatedGroup' | 'UseCurrentlySelectedGroup'  // SOS 대상 결정
+  emergency_group_id: string | null // 전용 긴급그룹 (DedicatedGroup 모드의 콜·경보 대상)
 }
 
 // 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.
@@ -54,4 +64,7 @@ export const usersApi = {
   addSub:     (pid: number, svc: 'call'|'ptt', sub: Partial<Subscription>)              => api.post<{id:string}>(`/users/${pid}/${svc}`, sub),
   updateSub:  (pid: number, svc: 'call'|'ptt', msisdn: string, data: Partial<Subscription>) => api.put<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`, data),
   deleteSub:  (pid: number, svc: 'call'|'ptt', msisdn: string)                          => api.delete<{id:string}>(`/users/${pid}/${svc}/${enc(msisdn)}`),
+
+  getPttProfile:    (pid: number, msisdn: string)                        => api.get<McpttProfile & {id:string, exists:boolean}>(`/users/${pid}/ptt/${enc(msisdn)}/profile`),
+  updatePttProfile: (pid: number, msisdn: string, data: McpttProfile)    => api.put<McpttProfile & {id:string}>(`/users/${pid}/ptt/${enc(msisdn)}/profile`, data),
 }

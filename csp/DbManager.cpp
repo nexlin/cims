@@ -292,6 +292,34 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     return true;
 }
 
+int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile &clsProfile ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    clsProfile = CspUserProfile();
+    if ( !m_pMysql && !Reconnect() ) return -1;
+
+    std::string strSql =
+        "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
+        "       emergency_group_mode, COALESCE(emergency_group_id,'') "
+        "FROM ptt_user_profile WHERE ptt_id='" +
+        Escape( strUserId ) + "'";
+
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
+    if ( !pRes ) return -1;  // 마이그레이션 전 테이블 부재 포함 — 호출측 fail-open
+
+    MYSQL_ROW row = mysql_fetch_row( pRes );
+    if ( !row ) {
+        mysql_free_result( pRes );
+        return 0;
+    }
+    clsProfile.m_bAllowEmergencyCall = row[0] ? ( atoi( row[0] ) != 0 ) : true;
+    clsProfile.m_bAllowEmergencyAlert = row[1] ? ( atoi( row[1] ) != 0 ) : true;
+    clsProfile.m_bAllowAdhocCall = row[2] ? ( atoi( row[2] ) != 0 ) : true;
+    if ( row[3] && row[3][0] ) clsProfile.m_strEmergencyGroupMode = row[3];
+    clsProfile.m_strEmergencyGroupId = row[4] ? row[4] : "";
+    mysql_free_result( pRes );
+    return 1;
+}
+
 bool CDbManager::UpdateRegisterTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
-import { usersApi, type UserSummary, type Subscription, type UserInput } from '@core/api/users'
+import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile } from '@core/api/users'
+import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
 import OrgTreePanel from '@core/components/OrgTreePanel'
 import { DataTable, type Column } from '@core/components/DataTable'
@@ -418,6 +419,108 @@ function UserDetail({ user, catalog, orgOpts, canWrite, initialEdit, highlight, 
         <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>번호</div>
         <NumbersTable user={user} catalog={catalog} canWrite={canWrite} highlight={highlight} onReload={onReload} />
       </div>
+
+      {/* MCPTT 프로파일 — SOS 대상 결정(TS 24.484 entry-info)·사용자 단위 개시 인가 */}
+      {user.ptt_subscriptions.length > 0 && (
+        <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>MCPTT 프로파일 (SOS 대상·개시 인가)</div>
+          {user.ptt_subscriptions.map(s => (
+            <PttProfileRow key={s.id} pid={user.id} msisdn={s.id} canWrite={canWrite} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── 사용자 MCPTT 프로파일 행 (PTT 번호당 1개) — DedicatedGroup=전용 긴급그룹으로 SOS,
+//    UseCurrentlySelectedGroup=단말 선택 그룹(주채널)으로 SOS. 미저장 시 서버 기본값 표시. ──
+const MODE_LABEL: Record<McpttProfile['emergency_group_mode'], string> = {
+  DedicatedGroup: '전용 긴급그룹',
+  UseCurrentlySelectedGroup: '선택 그룹(주채널)',
+}
+
+function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string; canWrite: boolean }) {
+  const { show } = useToast()
+  const [prof, setProf] = useState<(McpttProfile & { exists?: boolean }) | null>(null)
+  const [groups, setGroups] = useState<Group[]>([])
+  const [editing, setEditing] = useState(false)
+  const [form, setForm] = useState<McpttProfile | null>(null)
+
+  const load = useCallback(() => {
+    usersApi.getPttProfile(pid, msisdn).then(setProf).catch(() => setProf(null))
+  }, [pid, msisdn])
+  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    if (editing && groups.length === 0) groupsApi.list().then(setGroups).catch(() => {})
+  }, [editing, groups.length])
+
+  async function save() {
+    if (!form) return
+    if (form.emergency_group_mode === 'DedicatedGroup' && !form.emergency_group_id) {
+      show('전용 긴급그룹 지정이 필요합니다 — 미지정이면 SOS 가 불발됩니다', 'err'); return
+    }
+    try { await usersApi.updatePttProfile(pid, msisdn, form); show('저장', 'ok'); setEditing(false); load() }
+    catch (e: unknown) { show(String(e), 'err') }
+  }
+
+  if (!prof) return <div className="ts" style={{ fontSize: 12 }}>{msisdn} — 프로파일 조회 실패(서버 구버전?)</div>
+
+  if (editing && form) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
+        <strong>{msisdn}</strong>
+        <label className="ts">SOS 대상
+          <select className="form-input" style={{ marginLeft: 4 }} value={form.emergency_group_mode}
+            onChange={e => setForm({ ...form, emergency_group_mode: e.target.value as McpttProfile['emergency_group_mode'] })}>
+            <option value="DedicatedGroup">{MODE_LABEL.DedicatedGroup}</option>
+            <option value="UseCurrentlySelectedGroup">{MODE_LABEL.UseCurrentlySelectedGroup}</option>
+          </select>
+        </label>
+        {form.emergency_group_mode === 'DedicatedGroup' && (
+          <label className="ts">긴급그룹
+            <select className="form-input" style={{ marginLeft: 4 }} value={form.emergency_group_id || ''}
+              onChange={e => setForm({ ...form, emergency_group_id: e.target.value || null })}>
+              <option value="">(미지정)</option>
+              {groups.map(g => <option key={g.id} value={g.id}>{g.name || g.id}</option>)}
+            </select>
+          </label>
+        )}
+        <label className="ts"><input type="checkbox" checked={form.allow_emergency_call}
+          onChange={e => setForm({ ...form, allow_emergency_call: e.target.checked })} /> 긴급콜</label>
+        <label className="ts"><input type="checkbox" checked={form.allow_emergency_alert}
+          onChange={e => setForm({ ...form, allow_emergency_alert: e.target.checked })} /> 긴급경보</label>
+        <label className="ts"><input type="checkbox" checked={form.allow_adhoc_call}
+          onChange={e => setForm({ ...form, allow_adhoc_call: e.target.checked })} /> 애드혹</label>
+        <IconBtn title="저장" tone="primary" onClick={save}><Check size={ICON} /></IconBtn>
+        <IconBtn title="취소" onClick={() => setEditing(false)}><X size={ICON} /></IconBtn>
+      </div>
+    )
+  }
+
+  const noDedicated = prof.emergency_group_mode === 'DedicatedGroup' && !prof.emergency_group_id
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
+      <strong>{msisdn}</strong>
+      <span className="badge badge--blue" style={{ fontSize: 9 }}>{MODE_LABEL[prof.emergency_group_mode]}</span>
+      {prof.emergency_group_mode === 'DedicatedGroup' && (
+        noDedicated
+          ? <span className="badge badge--red" style={{ fontSize: 9 }}>긴급그룹 미지정 — SOS 불발</span>
+          : <span className="ts">긴급그룹 <b>{prof.emergency_group_id}</b></span>
+      )}
+      {!prof.allow_emergency_call && <span className="badge badge--red" style={{ fontSize: 9 }}>긴급콜 차단</span>}
+      {!prof.allow_emergency_alert && <span className="badge badge--red" style={{ fontSize: 9 }}>경보 차단</span>}
+      {!prof.allow_adhoc_call && <span className="badge badge--red" style={{ fontSize: 9 }}>애드혹 차단</span>}
+      {!prof.exists && <span className="ts">(기본값)</span>}
+      {canWrite && (
+        <IconBtn title="편집" onClick={() => { setForm({
+          allow_emergency_call: prof.allow_emergency_call,
+          allow_emergency_alert: prof.allow_emergency_alert,
+          allow_adhoc_call: prof.allow_adhoc_call,
+          emergency_group_mode: prof.emergency_group_mode,
+          emergency_group_id: prof.emergency_group_id,
+        }); setEditing(true) }}><Pencil size={ICON} /></IconBtn>
+      )}
     </div>
   )
 }

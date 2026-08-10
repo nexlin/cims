@@ -15,6 +15,7 @@
 
 class CSipCallRtp;
 class CSipCallRoute;
+class CspPttGroup;
 
 /**
  * @ingroup CspServer
@@ -61,6 +62,18 @@ public:
      *  iNewCond: 2=emergency/1=imminent/0=normal. 상향=멤버가 개시(누구나), 하향=개시자만(권한).
      *  floor tier(CMP)·m_mapGroupCondition 갱신 + 이벤트 로깅. 미디어 재협상은 기존 UA 경로가 처리. */
     void ApplyInCallCondition( const std::string &strGroupId, const std::string &strMemberId, int iNewCond );
+
+    /** condition(긴급·임박) 개시 인가 (TS 24.379 §6.3.3.1.13.2) — 3중 판정:
+     *  그룹 capability(emergency_call) + 사용자 allow-emergency-group-call +
+     *  DedicatedGroup 모드의 대상 일치. DB 불가 시 프로파일 축은 fail-open(그룹 축만 판정).
+     *  거부 시 strReason 에 사유. */
+    bool IsConditionInitAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId,
+                                    std::string &strReason );
+
+    /** in-call condition 상향 게이트 — 상향 시도에 IsConditionInitAuthorized 를 적용.
+     *  취소/비상향은 항상 true (하향 권한은 Apply 가 판정).
+     *  false 시 호출측이 재-INVITE 를 403(emergency-ind=false)으로 거절한다 (§6.3.3.1.14). */
+    bool IsInCallUpgradeAllowed( const std::string &strGroupId, const std::string &strMemberId, int iNewCond );
 
     // Recovery & Monitor
     void StartMonitor();

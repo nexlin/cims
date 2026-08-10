@@ -237,14 +237,37 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         std::string strTo = pclsMessage->m_clsTo.m_clsUri.m_strUser;
         std::string strFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
 
-        // MCPTT 진행 중 호의 condition 변경(re-INVITE 업그레이드/취소, TS 24.379) 엿보기 — 순수 side-effect.
+        // MCPTT 진행 중 호의 condition 변경(re-INVITE 업그레이드/취소, TS 24.379) 엿보기.
         //   초기 INVITE 는 아직 세션맵 미등록 → 미발동(초기 긴급은 EventIncomingCall 경로가 처리).
         //   재-INVITE(in-dialog, 동일 Call-ID)만 활성 그룹콜로 매칭되어 floor tier 갱신. 흐름은 그대로 진행.
+        //   단, capability 불허 그룹으로의 상향은 403 + mcptt-info(emergency-ind=false)로 거절한다
+        //   (TS 24.379 §6.3.3.1.14) — 재-INVITE 거절은 다이얼로그를 깨지 않아 호는 normal 유지.
         {
             std::string strGid, strMid;
             if ( gclsGroupCallService.GetGroupCallSession( strCallId, strGid, strMid ) ) {
                 CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
-                gclsGroupCallService.ApplyInCallCondition( strGid, strMid, clsMi.Condition() );
+                int iCond = clsMi.Condition();
+                if ( !gclsGroupCallService.IsInCallUpgradeAllowed( strGid, strMid, iCond ) ) {
+                    CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+                    if ( pclsResp ) {
+                        pclsResp->m_strBody =
+                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                            "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
+                            "  <mcptt-Params>\r\n"
+                            "    <emergency-ind>false</emergency-ind>\r\n"
+                            "    <alert-ind>false</alert-ind>\r\n"
+                            "  </mcptt-Params>\r\n"
+                            "</mcpttinfo>\r\n";
+                        pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
+                        pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-info+xml" );
+                        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+                    }
+                    CLog::Print( LOG_INFO,
+                                 "RecvRequest: in-call upgrade denied group(%s) member(%s) cond(%d) → 403",
+                                 strGid.c_str(), strMid.c_str(), iCond );
+                    return true;
+                }
+                gclsGroupCallService.ApplyInCallCondition( strGid, strMid, iCond );
             }
         }
 
@@ -642,6 +665,13 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( m_clsPttAs.IsEnabled() && gclsSetup.m_bPttAdhocEnabled && !gclsGroupMap.Contains( pszTo ) && pclsMessage ) {
         std::vector<std::string> vecAdhoc = ParseResourceListUsers( pclsMessage->m_strBody );
         if ( !vecAdhoc.empty() ) {
+            // 사용자 단위 ad hoc 개시 인가 (프로파일 allow_adhoc_call — 시스템 정책과 AND)
+            CspUserProfile clsAdhocProf;
+            if ( gclsDbManager.SelectUserProfile( pszFrom, clsAdhocProf ) >= 0 && !clsAdhocProf.m_bAllowAdhocCall ) {
+                CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc by(%s) not authorised (user profile) → 403 [PTT-AS]",
+                             pszFrom );
+                return StopCall( pszCallId, SIP_FORBIDDEN );
+            }
             CspPttGroup clsAdhoc;
             clsAdhoc.Clear();
             clsAdhoc._id = pszTo;
@@ -649,6 +679,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsAdhoc._groupType = "prearranged";  // on-demand 수명(마지막 이탈 시 teardown)
             clsAdhoc._requireAffiliation = false;
             clsAdhoc._isAdhoc = true;  // 통화 종료 시 GroupMap 에서 제거(ephemeral)
+            clsAdhoc._emergencyCall = true;  // 그룹문서 없음 — capability 축 공허, 긴급 조건은 ad-hoc 위에 얹힘(§6)
             bool bHasInit = false;
             for ( const auto &m : vecAdhoc ) {
                 clsAdhoc._pusers.push_back( std::make_shared<CspPttUser>( m, 5, "participant", "" ) );
@@ -1321,6 +1352,15 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
         CspPttGroup clsGroup;
         bool bHaveGroup = bGroupTarget && gclsGroupMap.Select( pszTo, clsGroup );
         bool bAllowed = bHaveGroup ? clsGroup._emergencyAlert : true;
+        // 사용자 단위 개시 인가 (TS 24.484 allow-activate-emergency-alert) — 미인가 경보는 전파하지
+        //   않는다 (규격: 콜과 달리 거절이 아닌 스트립). 취소는 항상 통과 — 잔존 경보 정리 경로 보존.
+        if ( bAllowed && bActivate ) {
+            CspUserProfile clsProf;
+            if ( gclsDbManager.SelectUserProfile( pszFrom, clsProf ) >= 0 && !clsProf.m_bAllowEmergencyAlert ) {
+                bAllowed = false;
+                CLog::Print( LOG_INFO, "EventMessage: alert by(%s) not authorised (user profile) → drop", pszFrom );
+            }
+        }
         const char *pszEvt = bActivate ? "alert_sent" : "alert_cancelled";
         int iFanout = 0;
         if ( bAllowed && bHaveGroup ) {

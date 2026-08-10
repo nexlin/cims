@@ -16,6 +16,7 @@
 #include <vector>
 
 class CspUser;
+struct CspUserProfile;
 class CspUserMap;
 class CspPttGroup;
 class CGroupMap;
@@ -51,6 +52,10 @@ public:
 
     /** 가입자 정보를 DB에서 조회한다 */
     bool SelectUser( const std::string &strUserId, CspUser &clsUser );
+
+    /** 사용자 MCPTT 프로파일 조회 (ptt_user_profile).
+     *  @return 1=행 로드, 0=행 없음(clsProfile 은 기본값), -1=DB 오류/테이블 부재(fail-open 판정용) */
+    int SelectUserProfile( const std::string &strUserId, CspUserProfile &clsProfile );
 
     /** 등록 시간을 갱신한다 */
     bool UpdateRegisterTime( const std::string &strUserId );

@@ -216,13 +216,18 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
 
-    // condition(emergency/imminent) 능력 게이트 (TS 24.481) — emergency_call 이 두 tier 공통.
-    //   그룹이 불허면 normal 로 강등 (호는 거절하지 않는다).
+    // condition(긴급·임박) 개시 인가 (TS 24.379 §6.3.3.1.13.2) — 그룹 capability(emergency_call,
+    //   두 tier 공통) + 사용자 프로파일(개시 인가·DedicatedGroup 대상 일치). 미인가는 403 거절
+    //   (§6.3.3.1.14) — 단말이 normal 재발신으로 폴백한다.
     int iCond = iCondition;
-    if ( iCond >= 1 && !clsGroup._emergencyCall ) {
-        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) condition(%d) not allowed → downgrade to normal",
-                     pszGroupId, iCond );
-        iCond = 0;
+    if ( iCond >= 1 ) {
+        std::string strReason;
+        if ( !IsConditionInitAuthorized( clsGroup, pszCallerInfo, strReason ) ) {
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) condition(%d) denied (%s) → 403",
+                         pszGroupId, pszCallerInfo, iCond, strReason.c_str() );
+            gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
+            return true;  // 403 응답 완료 — 호출측(dispatcher)이 중복 응답하지 않게 한다
+        }
     }
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
@@ -476,6 +481,46 @@ bool CGroupCallService::GetGroupCallSession( const std::string &strCallId, std::
     if ( it == m_mapCallSession.end() ) return false;
     strGroupId = it->second.strGroupId;
     strMemberId = it->second.strMemberId;
+    return true;
+}
+
+bool CGroupCallService::IsConditionInitAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId,
+                                                   std::string &strReason ) {
+    if ( !clsGroup._emergencyCall ) {
+        strReason = "group capability";
+        return false;
+    }
+    CspUserProfile clsProf;
+    int iRes = gclsDbManager.SelectUserProfile( strUserId, clsProf );
+    if ( iRes < 0 ) return true;  // DB 불가/마이그레이션 전 — fail-open (그룹 capability 만 판정)
+    if ( !clsProf.m_bAllowEmergencyCall ) {
+        strReason = "user not authorised";
+        return false;
+    }
+    if ( clsProf.m_strEmergencyGroupMode == "DedicatedGroup" && clsProf.m_strEmergencyGroupId != clsGroup._id ) {
+        strReason = clsProf.m_strEmergencyGroupId.empty() ? "dedicated group not provisioned"
+                                                          : "dedicated-group mismatch";
+        return false;
+    }
+    return true;
+}
+
+bool CGroupCallService::IsInCallUpgradeAllowed( const std::string &strGroupId, const std::string &strMemberId,
+                                                int iNewCond ) {
+    if ( iNewCond <= 0 ) return true;  // 취소는 게이트 비대상 (하향 권한은 ApplyInCallCondition 이 판정)
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto it = m_mapGroupCondition.find( strGroupId );
+        if ( it != m_mapGroupCondition.end() && iNewCond <= it->second ) return true;  // 상향 아님
+    }
+    CspPttGroup clsGroup;
+    if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) == false ) return true;
+    std::string strReason;
+    if ( !IsConditionInitAuthorized( clsGroup, strMemberId, strReason ) ) {
+        CLog::Print( LOG_INFO, "IsInCallUpgradeAllowed: group(%s) member(%s) denied (%s)", strGroupId.c_str(),
+                     strMemberId.c_str(), strReason.c_str() );
+        return false;
+    }
     return true;
 }
 
@@ -922,13 +967,14 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             pclsInvite->AddHeader( "P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
             // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
             pclsInvite->AddHeader( "Answer-Mode", "Auto" );
-            // Resource-Priority (RFC 4412, TS 24.379) — namespace당 값 하나 (F-08 수정)
+            // Resource-Priority (RFC 4412/8101, TS 24.379 §6.3.3.1.19) — namespace당 값 하나 (F-08 수정).
+            //   mcpttp 서열은 .0(최저)~.15(최고) (RFC 8101) — emergency > imminent > normal.
             if ( iGroupCond >= 2 )
-                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.4" );
+                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.15" );
             else if ( iGroupCond == 1 )
-                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.2" );
+                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.8" );
             else
-                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.6" );
+                pclsInvite->AddHeader( "Resource-Priority", "mcpttp.0" );
             // Callee identity (MCPTT 도메인 사용)
             std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
             char szPCalledParty[256];

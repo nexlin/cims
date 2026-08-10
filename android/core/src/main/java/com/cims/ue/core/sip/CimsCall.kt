@@ -173,6 +173,13 @@ class CimsCall : Call {
                 val sdp = msg.substringAfter("\r\n\r\n", "")
                 parseApplication(sdp)?.let { (ip, port) -> owner.onRemoteFloorLearned(id, ip, port) }
             }
+            // 미인가 in-call 긴급 상향 거절 (TS 24.379 §6.3.3.1.14) — 서버가 재-INVITE 를
+            //   403 + mcptt-info(emergency-ind=false)로 거절. 재-INVITE 거절은 통화를 끊지
+            //   않으므로(CallState 불변) 이 tsx 원문에서만 관측된다. 초기 INVITE 403 은 본문이
+            //   없어 여기 매치되지 않는다(Disconnected 경로가 처리).
+            if (msg.startsWith("SIP/2.0 403") && msg.contains("emergency-ind>false")) {
+                owner.onEmergencyUpgradeDenied(id)
+            }
             // 참가자 변경 in-dialog NOTIFY (RFC 4575 conference-info) → 참가자 목록 갱신
             // ※ pjsip 다이얼로그는 evsub 미소유 NOTIFY 에 500 을 응답하지만, invite usage 의
             //   tsx 이벤트로 원문은 전달되므로 여기서 본문을 읽는다(응답코드와 무관).

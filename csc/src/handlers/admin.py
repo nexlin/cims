@@ -22,7 +22,7 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services.mcptt import notify_csp, refresh_group_members
+from services.mcptt import notify_csp, refresh_group_members, DEFAULT_USER_PROFILE, update_user_profile_cache
 from services import admin_auth
 
 # ──────────────────────────────────────────────────────────────
@@ -117,6 +117,14 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 return await _update_user(person_id, handler_args.body, config, payload)
             elif method == 'DELETE':
                 return await _delete_user(person_id, config)
+            return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+        # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — /users/:pid/ptt/:msisdn/profile
+        if sub == 'ptt' and sub_id is not None and len(parts) > 3 and parts[3] == 'profile':
+            if method == 'GET':
+                return await _get_ptt_profile(person_id, sub_id, config)
+            elif method == 'PUT':
+                return await _put_ptt_profile(person_id, sub_id, handler_args.body, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         if sub in ('call', 'ptt'):
@@ -271,6 +279,28 @@ async def _get_user(person_id: str, config):
                 s['dnd'] = bool(s['dnd'])
                 s['register_time'] = _dt(s['register_time'])
                 s['logout_time']   = _dt(s['logout_time'])
+
+            # 사용자 MCPTT 프로파일 동봉 (부재/마이그레이션 전 = None → 콘솔이 기본값 표시)
+            profiles = {}
+            if ptt_subs:
+                try:
+                    ph = ','.join(['%s'] * len(ptt_subs))
+                    cur.execute(
+                        "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
+                        f"emergency_group_mode, emergency_group_id FROM ptt_user_profile WHERE ptt_id IN ({ph})",
+                        [s['id'] for s in ptt_subs])
+                    for p in cur.fetchall():
+                        profiles[p['ptt_id']] = {
+                            'allow_emergency_call': bool(p['allow_emergency_call']),
+                            'allow_emergency_alert': bool(p['allow_emergency_alert']),
+                            'allow_adhoc_call': bool(p['allow_adhoc_call']),
+                            'emergency_group_mode': p['emergency_group_mode'],
+                            'emergency_group_id': p['emergency_group_id'],
+                        }
+                except pymysql.Error:
+                    pass
+            for s in ptt_subs:
+                s['mcptt_profile'] = profiles.get(s['id'])
             row['ptt_subscriptions'] = ptt_subs
 
     return HandlerResult(status=200, body=row)
@@ -522,8 +552,83 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
             )
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
+    if svc == 'ptt':
+        update_user_profile_cache(msisdn, None)  # 프로파일 행은 FK CASCADE 로 함께 삭제됨
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "DELETE")
     return HandlerResult(status=200, body={'id': msisdn})
+
+
+# ──────────────────────────────────────────────────────────────
+#  사용자 MCPTT 프로파일 (ptt_user_profile — TS 24.484 / TS 24.379 §6.3.3.1.13.2)
+# ──────────────────────────────────────────────────────────────
+
+_PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call')
+
+
+async def _get_ptt_profile(person_id: str, msisdn: str, config):
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s", (msisdn, person_id))
+            if cur.fetchone() is None:
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            cur.execute(
+                "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
+                "emergency_group_mode, emergency_group_id "
+                "FROM ptt_user_profile WHERE ptt_id=%s", (msisdn,))
+            row = cur.fetchone()
+    if row:
+        prof = {k: bool(row[k]) for k in _PROFILE_BOOL_FIELDS}
+        prof['emergency_group_mode'] = row['emergency_group_mode']
+        prof['emergency_group_id'] = row['emergency_group_id']
+        prof['exists'] = True
+    else:
+        prof = dict(DEFAULT_USER_PROFILE)
+        prof['exists'] = False
+    prof['id'] = msisdn
+    return HandlerResult(status=200, body=prof)
+
+
+async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+    mode = (body.get('emergency_group_mode') or 'DedicatedGroup').strip()
+    if mode not in ('DedicatedGroup', 'UseCurrentlySelectedGroup'):
+        return HandlerResult(status=400, body={'error': 'invalid emergency_group_mode'})
+    egid = (body.get('emergency_group_id') or '').strip() or None
+    allow_call  = 1 if body.get('allow_emergency_call', True) else 0
+    allow_alert = 1 if body.get('allow_emergency_alert', True) else 0
+    allow_adhoc = 1 if body.get('allow_adhoc_call', True) else 0
+
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s", (msisdn, person_id))
+            if cur.fetchone() is None:
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            if egid:
+                cur.execute("SELECT 1 FROM ptt_groups WHERE mcptt_group_id=%s", (egid,))
+                if cur.fetchone() is None:
+                    return HandlerResult(status=400, body={'error': f'unknown emergency_group_id: {egid}'})
+            cur.execute(
+                "INSERT INTO ptt_user_profile (ptt_id, allow_emergency_call, allow_emergency_alert, "
+                "allow_adhoc_call, emergency_group_mode, emergency_group_id, update_time) "
+                "VALUES (%s,%s,%s,%s,%s,%s,NOW()) "
+                "ON DUPLICATE KEY UPDATE allow_emergency_call=VALUES(allow_emergency_call), "
+                "allow_emergency_alert=VALUES(allow_emergency_alert), "
+                "allow_adhoc_call=VALUES(allow_adhoc_call), "
+                "emergency_group_mode=VALUES(emergency_group_mode), "
+                "emergency_group_id=VALUES(emergency_group_id), update_time=NOW()",
+                (msisdn, allow_call, allow_alert, allow_adhoc, mode, egid))
+
+    prof = {
+        "allow_emergency_call": bool(allow_call),
+        "allow_emergency_alert": bool(allow_alert),
+        "allow_adhoc_call": bool(allow_adhoc),
+        "emergency_group_mode": mode,
+        "emergency_group_id": egid,
+    }
+    update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
+    notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
+    return HandlerResult(status=200, body=dict(prof, id=msisdn))
 
 
 # ──────────────────────────────────────────────────────────────

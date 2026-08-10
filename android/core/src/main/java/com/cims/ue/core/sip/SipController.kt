@@ -63,6 +63,11 @@ class SipController(private val config: SipAccountConfig) {
     private val _sendReqResults = MutableSharedFlow<SendReqResult>(extraBufferCapacity = 32)
     val sendReqResults: SharedFlow<SendReqResult> = _sendReqResults.asSharedFlow()
 
+    /** 미인가 in-call 긴급 상향 거절(403 + emergency-ind=false, TS 24.379 §6.3.3.1.14) — callId.
+     *  재-INVITE 거절은 통화를 끊지 않으므로 별도 이벤트로 올려 긴급 latch 를 되돌리게 한다. */
+    private val _emergencyDenied = MutableSharedFlow<Int>(extraBufferCapacity = 8)
+    val emergencyDenied: SharedFlow<Int> = _emergencyDenied.asSharedFlow()
+
     /** REGISTER Contact 에 부가할 파라미터(예: MCData ICSI feature tag) — [register] 전에 설정.
      *  예: `;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"` */
     @Volatile var contactParams: String = ""
@@ -569,6 +574,10 @@ class SipController(private val config: SipAccountConfig) {
 
     internal fun onMsrpPathLearned(callId: Int, path: String) {
         _msrpEvents.tryEmit(MsrpEvent.PathReady(callId, path))
+    }
+
+    internal fun onEmergencyUpgradeDenied(callId: Int) {
+        _emergencyDenied.tryEmit(callId)
     }
 
     /** MSRP 호 상태 — [dispatchCallState] 와 분리(전역 _call 미접촉, 호 수명만 관리). */

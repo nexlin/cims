@@ -399,12 +399,27 @@ class PttController(
                     }
                     is CallState.Disconnected -> {
                         releasePendingFloor(st.id)   // 수락 전 종료(취소·거절) — 선바인드 소켓 회수
+                        handleEmergencyDenied(st.id, st.code)  // 긴급 개시 403 → normal 재발신 폴백
                         onCallEnded(st.id)
                     }
                     is CallState.Incoming ->
                         if (st.mcptt) { if (st.privateCall) autoJoinPrivateCall(st) else autoJoinGroupCall(st) }
                     else -> Unit
                 }
+            }
+        }
+        // 미인가 in-call 긴급 상향 거절 (403 + emergency-ind=false, TS 24.379 §6.3.3.1.14) —
+        //   재-INVITE 거절은 통화를 끊지 않으므로 낙관 latch 만 되돌린다. 선발신된 경보는 별개
+        //   기능(자체 게이트)이라 회수하지 않는다 — 취소는 사용자의 SOS 해제로.
+        scope.launch {
+            sip.emergencyDenied.collect { cid ->
+                val s = synchronized(lock) {
+                    sessionMap.values.firstOrNull { it.callId == cid && it.emergency && it.emergencyMine }
+                } ?: return@collect
+                s.emergency = false
+                s.emergencyMine = false
+                _status.value = "[${s.groupId}] 긴급 상향 미인가"
+                publish()
             }
         }
         // 참가자 목록 — 정식 구독 경로(RFC 4575 conference 이벤트). NOTIFY 는 native 구독이
@@ -758,6 +773,7 @@ class PttController(
             s.role = ChannelRole.PRIMARY
         }
         channelStore?.primary = groupId
+        _selectedGroup.value = groupId   // 선택 그룹 = 주채널 (SOS UseCurrentlySelectedGroup 대상)
         applyListenPolicy()
     }
 
@@ -920,6 +936,7 @@ class PttController(
         if (!adhoc) {
             ensureAffiliated(groupId)
             channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
+            if (s.role == ChannelRole.PRIMARY) _selectedGroup.value = groupId
         }
         val appSdp = floorSdp(s)
         val parts = ArrayList<SipBodyPart>()
@@ -943,6 +960,8 @@ class PttController(
         val me = bareId(mcpttId)
         val peers = members.map { bareId(it) }.filter { it.isNotBlank() && it != me }.distinct()
         if (peers.isEmpty()) { _status.value = "애드혹: 대상 없음"; return }
+        // 사용자 단위 ad hoc 개시 인가 (프로파일) — 서버(403)가 최종 판정이나 UX 를 위해 선차단.
+        if (_userProfile.value?.allowAdhocCall == false) { _status.value = "애드혹: 개시 권한 없음"; return }
         // 임시 ID = adhoc-<발신자>-<epoch초> — 가입자 번호(숫자)·편성 그룹(접두사 예약)과 충돌 불가.
         val gid = "adhoc-${me.trimStart('+')}-${System.currentTimeMillis() / 1000}"
         joinGroupCall(gid, members = peers.map { McpttXml.ResourceEntry("tel:$it") })
@@ -1042,6 +1061,7 @@ class PttController(
         if (!isAdhocId(groupId)) {
             subscribeRoster(groupId, true)
             channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
+            if (s.role == ChannelRole.PRIMARY) _selectedGroup.value = groupId
         }
         if (inc.emergency) feedback?.emergencyTone()
         _status.value = if (inc.emergency) "🚨 긴급 그룹콜 자동 참여: $groupId" else "그룹콜 자동 참여: $groupId"
@@ -1113,14 +1133,57 @@ class PttController(
         runCatching { withContext(Dispatchers.IO) { c.listGroups(t, mcpttId) } }
             .onSuccess { list ->
                 _groups.value = list
+                // 선택 그룹(TS 24.484 currently-selected group) 복원 — 마지막 주채널 우선,
+                // 이력이 없거나 편성에서 빠졌으면 목록 첫 그룹(최초 1회 폴백).
                 if (_selectedGroup.value == null) {
-                    list.firstOrNull()?.let { bareId(it.uri) }?.also { g -> _selectedGroup.value = g }
+                    val ids = list.map { bareId(it.uri) }
+                    _selectedGroup.value =
+                        channelStore?.lastPrimary?.takeIf { it in ids } ?: ids.firstOrNull()
                 }
                 affiliateAll()   // 편성 채널 전체 affiliation (등록 전이면 등록 완료 트리거가 수행)
                 syncRosterSubs() // 목록이 채워졌으니 로스터 구독도 그 집합으로 맞춘다
                 _status.value = "그룹 ${list.size}개"
             }
             .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }
+        loadUserProfile()
+    }
+
+    /** 사용자 MCPTT 프로파일 (TS 24.484) — SOS 대상 결정 모드·전용 긴급그룹·개시 인가. */
+    data class UserProfile(
+        val emergencyGroupMode: String,   // DedicatedGroup | UseCurrentlySelectedGroup
+        val emergencyGroupId: String?,    // 전용 긴급그룹 (bare id, DedicatedGroup 모드 대상)
+        val allowEmergencyCall: Boolean,
+        val allowEmergencyAlert: Boolean,
+        val allowAdhocCall: Boolean,
+    )
+
+    private val _userProfile = MutableStateFlow<UserProfile?>(null)
+    val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
+
+    /** user-profile 문서 조회 — 실패해도 치명 아님(서버 게이트가 최종 판정, 앱은 현행 동작 유지). */
+    fun loadUserProfile() = scope.launch {
+        val c = csc ?: return@launch
+        val t = token?.accessToken ?: return@launch
+        runCatching { withContext(Dispatchers.IO) { c.getUserProfile(t, mcpttId) } }
+            .onSuccess { doc -> doc.body?.let { _userProfile.value = parseUserProfile(it) } }
+            .onFailure { Log.d(TAG, "user-profile 조회 실패(프로파일 없이 동작): ${it.message}") }
+    }
+
+    private fun parseUserProfile(xml: String): UserProfile {
+        val giBlock = Regex("<MCPTTGroupInitiation>(.*?)</MCPTTGroupInitiation>", RegexOption.DOT_MATCHES_ALL)
+            .find(xml)?.groupValues?.get(1) ?: ""
+        val mode = Regex("entry-info=\"([^\"]+)\"").find(giBlock)?.groupValues?.get(1) ?: "DedicatedGroup"
+        val egid = Regex("<uri-entry>([^<]+)</uri-entry>").find(giBlock)?.groupValues?.get(1)
+            ?.let { bareId(it) }?.takeIf { it.isNotBlank() }
+        fun flag(tag: String) =
+            Regex("<$tag>\\s*(true|false)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toBoolean() ?: true
+        return UserProfile(
+            emergencyGroupMode = mode,
+            emergencyGroupId = egid,
+            allowEmergencyCall = flag("allow-emergency-group-call"),
+            allowEmergencyAlert = flag("allow-activate-emergency-alert"),
+            allowAdhocCall = flag("cims:allow-adhoc-group-call"),
+        )
     }
 
     /** 그룹 문서(TS 24.481, GMS XCAP) 조회 — 채널 상세 진입 시 호출. ETag(If-None-Match) 캐시. */
@@ -1498,12 +1561,14 @@ class PttController(
     /**
      * 긴급(SOS) 개시 — 하드웨어 SOS 키/화면 SOS 버튼.
      * 주채널 통화 중이면 re-INVITE(mcptt-info emergency-ind=true)로 상향, 미참여면 긴급 그룹콜 발신.
-     * 서버(CSP)가 그룹 capability(emergency_call) 미허용이면 normal 로 하향 수용된다.
+     * 새 긴급콜 대상은 프로파일 entry-info(TS 24.484)가 결정: DedicatedGroup=전용 긴급그룹,
+     * UseCurrentlySelectedGroup=선택 그룹(마지막 주채널). 서버가 미인가로 403 거절하면
+     * normal 재발신 폴백(개시)·latch 복원(상향)한다.
      */
     fun startEmergency() {
         val s = primarySession()
         if (s == null) {
-            val gid = _selectedGroup.value ?: run { _status.value = "긴급: 대상 그룹 없음"; return }
+            val gid = emergencyTargetGroup() ?: return
             sendAlert(gid, true)   // 규격 시퀀스: 경보 먼저(말 못 해도 신원·그룹은 전파), 통화 다음
             joinGroupCall(gid, emergency = true)
             feedback?.emergencyTone()
@@ -1518,6 +1583,35 @@ class PttController(
         _status.value = "🚨 [${s.groupId}] 긴급 개시"
         emit(PttEventKind.EMERGENCY, s.groupId)
         publish()
+    }
+
+    /** SOS 새 긴급콜 대상 결정 (TS 24.484 MCPTTGroupInitiation entry-info).
+     *  DedicatedGroup(기본)=프로비저닝된 전용 긴급그룹 — 미지정이면 불발(서버도 미인가 403).
+     *  UseCurrentlySelectedGroup=선택 그룹(마지막 주채널). 프로파일 미수신이면 선택 그룹으로
+     *  현행 동작 유지(서버 게이트가 최종 판정). null 반환 시 상태 메시지는 이미 표시됨. */
+    private fun emergencyTargetGroup(): String? {
+        val p = _userProfile.value
+        if (p != null && p.emergencyGroupMode == "DedicatedGroup") {
+            return p.emergencyGroupId
+                ?: run { _status.value = "긴급: 전용 긴급그룹 미지정 — 관리자에게 문의"; null }
+        }
+        return _selectedGroup.value ?: run { _status.value = "긴급: 대상 그룹 없음"; null }
+    }
+
+    /** 미인가 긴급콜 403 (TS 24.379 §6.3.3.1.14) — 성립 전 거절된 긴급 개시를 normal 재발신으로
+     *  폴백한다. 긴급이 아닌 403(스캐너 차단 등)은 비대상. [onCallEnded] 전에 호출되어야 세션
+     *  플래그를 볼 수 있다. */
+    private fun handleEmergencyDenied(callId: Int, code: Int) {
+        if (code != 403) return
+        val gid = synchronized(lock) {
+            sessionMap.values.firstOrNull { it.callId == callId && it.emergency && it.emergencyMine }?.groupId
+        } ?: return
+        if (isAdhocId(gid)) return
+        _status.value = "[$gid] 긴급 미인가 — 일반 통화로 전환"
+        scope.launch {
+            delay(300)             // 거절 세션 teardown(onCallEnded) 정리 후 재발신
+            joinGroupCall(gid)
+        }
     }
 
     /** 긴급 해제 — 개시자만 유효(서버는 비개시자의 취소 re-INVITE 를 무시, TS 24.379). */

@@ -38,6 +38,16 @@ KMS_URI = "kms.mcptt.com"
 IDMS_DOMAIN = "mcptt.com"
 KMS_CLIENT_REQ_URL = "http://localhost:4421/keymanagement/identity/v1/init"
 USERS = {}            # tel:+msisdn → {password,...} (XCAP/profile 키 = MCPTT ID)
+# 사용자 MCPTT 프로파일 (ptt_user_profile) — ptt_subscriptions.id(MSISDN) → {allow_*, emergency_group_*}.
+#   user-profile XCAP 문서(TS 24.484) 산출 + admin PUT 캐시 갱신. 부재 = DEFAULT_USER_PROFILE.
+PTT_PROFILES = {}
+DEFAULT_USER_PROFILE = {
+    "allow_emergency_call": True,
+    "allow_emergency_alert": True,
+    "allow_adhoc_call": True,
+    "emergency_group_mode": "DedicatedGroup",
+    "emergency_group_id": None,
+}
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
 LOGIN_ACCOUNTS = {}
@@ -207,8 +217,28 @@ def load_shared_data(config):
                             pw  = row['passwd'] or ''
                             uri = f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}"
                             if uri not in USERS:
-                                USERS[uri] = {"password": pw, "name": uid, "profile_etag": "etag_" + uri}
+                                USERS[uri] = {"password": pw, "name": uid, "msisdn": uid,
+                                              "profile_etag": "etag_" + uri}
                                 logger.log_info(f"Loaded DB User: {uri}")
+
+                    # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — 마이그레이션 전이면 스킵
+                    try:
+                        cur.execute(
+                            "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, "
+                            "allow_adhoc_call, emergency_group_mode, emergency_group_id "
+                            "FROM ptt_user_profile")
+                        PTT_PROFILES.clear()
+                        for r in cur.fetchall():
+                            PTT_PROFILES[r['ptt_id']] = {
+                                "allow_emergency_call": bool(r['allow_emergency_call']),
+                                "allow_emergency_alert": bool(r['allow_emergency_alert']),
+                                "allow_adhoc_call": bool(r['allow_adhoc_call']),
+                                "emergency_group_mode": r['emergency_group_mode'],
+                                "emergency_group_id": r['emergency_group_id'],
+                            }
+                        logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
+                    except Exception as pe:
+                        logger.log_info(f"ptt_user_profile load skipped (pre-migration?): {pe}")
 
                     # IdMS 로그인 계정(login_id) — MCPTT ID 는 ptt(없으면 volte) msisdn 에서 tel:+ 파생.
                     LOGIN_ACCOUNTS.clear()
@@ -246,6 +276,7 @@ def load_shared_data(config):
                     USERS[uri] = {
                         "password": data.get('passwd', 'password123'),
                         "name": data.get('name', 'Unknown User'),
+                        "msisdn": user_id,
                         "profile_etag": "etag_" + uri
                     }
                     logger.log_info(f"Loaded File User: {uri}")
@@ -949,32 +980,71 @@ def get_group_xml(group_uri):
 </group>"""
     return xml, _content_etag(xml)
 
+def get_user_profile(msisdn):
+    """사용자 MCPTT 프로파일 조회 — 부재 시 기본값 (모드 DedicatedGroup·긴급그룹 미지정·인가 전부 허용)."""
+    return PTT_PROFILES.get(msisdn, DEFAULT_USER_PROFILE)
+
+
+def update_user_profile_cache(ptt_id, profile):
+    """admin PUT 반영 — profile=None 이면 캐시 제거(행 삭제). user-profile ETag 는 내용 파생이라 자동 갱신."""
+    if profile is None:
+        PTT_PROFILES.pop(ptt_id, None)
+    else:
+        PTT_PROFILES[ptt_id] = profile
+
+
 def get_user_profile_xml(user_uri):
+    """MCPTT user profile 문서 (TS 24.484) — SOS 대상 결정(MCPTTGroupInitiation entry-info)과
+    사용자 단위 개시 인가(ruleset)를 DB(ptt_user_profile)에서 산출. ad hoc 인가는 규격에 요소가
+    없어 cims 확장 네임스페이스로 노출."""
     user = USERS.get(user_uri)
     if not user:
         return None, None
 
     display_name = user.get('name', user_uri)
+    prof = get_user_profile(user.get('msisdn', ''))
+    mode = prof.get('emergency_group_mode') or 'DedicatedGroup'
+    egid = prof.get('emergency_group_id')
+    uri_entry = f"\n            <uri-entry>{_group_uri(egid)}</uri-entry>\n          " if egid else ""
+
+    def _b(k):
+        return "true" if prof.get(k, True) else "false"
+
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <mcptt-user-profile xmlns="urn:3gpp:ns:mcpttUserProfile:1.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:cims="urn:cims:mcptt:ext:1.0"
   user-profile-index="1">
   <Name>
     <display-name xml:lang="en">{display_name}</display-name>
   </Name>
   <Common>
     <MCPTTUserID>{user_uri}</MCPTTUserID>
+    <MCPTT-group-call>
+      <EmergencyCall>
+        <MCPTTGroupInitiation>
+          <entry entry-info="{mode}">{uri_entry}</entry>
+        </MCPTTGroupInitiation>
+      </EmergencyCall>
+      <EmergencyAlert>
+        <entry entry-info="{mode}">{uri_entry}</entry>
+      </EmergencyAlert>
+    </MCPTT-group-call>
     <PrivateCall>
       <MaxSimultaneousCallsN6>1</MaxSimultaneousCallsN6>
       <MaxCallsN7>1</MaxCallsN7>
-      <EmergencyCall>
-        <MCPTTUserID>{user_uri}</MCPTTUserID>
-      </EmergencyCall>
     </PrivateCall>
-    <EmergencyAlert>
-      <MCPTTUserID>{user_uri}</MCPTTUserID>
-    </EmergencyAlert>
   </Common>
+  <ruleset>
+    <rule id="mcptt-user-authorisation">
+      <actions>
+        <allow-emergency-group-call>{_b('allow_emergency_call')}</allow-emergency-group-call>
+        <allow-activate-emergency-alert>{_b('allow_emergency_alert')}</allow-activate-emergency-alert>
+        <allow-cancel-emergency-alert>{_b('allow_emergency_alert')}</allow-cancel-emergency-alert>
+        <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
+      </actions>
+    </rule>
+  </ruleset>
   <OnNetwork>
     <MCPTTUserID>{user_uri}</MCPTTUserID>
   </OnNetwork>
