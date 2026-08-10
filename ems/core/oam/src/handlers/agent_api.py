@@ -844,6 +844,32 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
         'ha_transitions': ha_transitions if isinstance(ha_transitions, dict) else {},
     }
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
+    # 프로세스 전이 이벤트(process_died) — 감지 L1 (alarm_standardization §3.4(b)).
+    # agent 가 실행 집합 소멸 전이를 발생 tick 의 metric 에만 동반하므로 여기서 1회
+    # event_log 기록 (SIGKILL 등 모듈 자기보고 process_stopping 유실 보완). best-effort.
+    module_events = body.get("module_events") or []
+    if isinstance(module_events, list) and module_events:
+        def _record_module_events():
+            from services import event_log
+            sl = (config or {}).get('ServiceLogging', {})
+            base = sl.get('Dir', '') or (config or {}).get(
+                'ServiceLogDir', (config or {}).get('MsgLogDir', ''))
+            host = agent.get('name') or str(agent.get('id'))
+            for ev in module_events:
+                mod = str((ev.get('module') if isinstance(ev, dict) else '') or '').strip()
+                if not mod:
+                    continue
+                event_log.record_event(base, {
+                    'type': 'process_died', 'kind': 'stateChange',
+                    'source': {'mo_class': 'software', 'mo_instance': f'{host}/{mod}',
+                               'detected_by': 'agent'},
+                    'message': f'{host}/{mod} 프로세스 소멸 (agent 전이 관측)',
+                    'params': {'module': mod},
+                })
+        try:
+            await asyncio.to_thread(_record_module_events)
+        except Exception as e:
+            logger.log_warning(f"module_events record: {e}")
     # live_modules — 실행 중 모듈 스냅샷을 agent row 에 캐시. deployments 조회가
     # 배포기록 status(의도)와 별개로 실측 프로세스 상태(live_state)를 enrich 하는 원천
     # (jsonl tail 재파싱 없이 row 1회 read). metric 주기(기본 2s, DEFAULT_METRIC_SEC)만큼 지연될 수 있음.

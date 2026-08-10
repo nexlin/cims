@@ -10,9 +10,10 @@ wire 규격**을 정의한다. 구현: OAM 수신 = `ems/core/oam/src/services/f
 
 ## 1. 원칙
 
-- **보완이지 대체가 아니다.** 죽은 프로세스는 자기보고를 못 한다 — 생존 감시(process_down
-  probe)와 호스트 자원 감시(agent metric)는 기존 폴링을 유지한다. 자기보고는 "프로세스 생존
-  ≠ 정상"(표준화 §3.6)의 나머지 절반, 즉 **모듈 내부 상태**를 채운다.
+- **보완이지 대체가 아니다.** 죽은 프로세스는 자기보고를 못 한다 — 감지 3계층(표준화 §3.4(b))
+  중 프로세스 생존(L1 — agent 관측 process_down)·서비스 응답성(L3 — OAM probe
+  service_unresponsive)·호스트 자원(agent metric)은 기존 관측을 유지한다. 자기보고는
+  "프로세스 생존 ≠ 정상"(표준화 §3.6)의 나머지 절반, 즉 **모듈 내부 상태(L2)** 를 채운다.
 - **표준 근거**: 3GPP TS 32.111-2 Alarm IRP 의 notification push(NE→Manager) +
   alarm synchronization. 카탈로그(alarmModel)와 발생(alarmActive)의 분리는 RFC 3877 구조 —
   통지에는 (code, mo_instance, params)만 싣고 클래스 속성은 카탈로그가 보유한다.
@@ -38,7 +39,8 @@ CSC ──┘            oam-svc 소유               └ event_log JSONL (이�
   식별([cmp_media_api.md](../api/cmp_media_api.md) §1.1 과 동일 모델). OAM 이중화(oam_ha.md)
   환경에서는 관리평면 VIP 로 전송 — 절체 후에도 목적지 불변.
 - **agent 는 편입하지 않는다** — agent 계열(disk/module/config/HA)은 기존 원시 metric 보고 →
-  base 평가 경로 유지.
+  base 평가 경로 유지. L1 의 `process_died` 이벤트(표준화 §3.4(b))도 metric 에 동반된 전이
+  관측을 OAM 이 event_log 로 기록하는 것이지 FM push 가 아니다.
 - 보안 신뢰 모델은 CMP media API(:9001 계열)와 동일 — 내부 제어평면 평문 UDP.
 
 ## 3. Wire 규격 — envelope v2 / FM function
@@ -73,7 +75,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 { "boot_id": 1754805000, "seq": 17,
   "action": "open",                        // open | close
   "code": "CIMS-COM-001", "type": "connection_lost",
-  "mo_instance": "cims/csp/db",            // code@mo_instance = 활성키 (표준화 §3.4)
+  "mo_instance": "cims/csp/<node>/db",     // code@mo_instance = 활성키 (표준화 §3.4)
   "params": { "used": 20, "total": 20 },   // 카탈로그 msg 템플릿 치환 값
   "perceived_severity": "major",           // (선택) 카탈로그 기본 덮기
   "message": "...",                        // (선택) 렌더 결과 직접 지정
@@ -87,13 +89,13 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 ```jsonc
 { "boot_id": 1754805000, "seq": 18,
   "type": "config_reloaded", "kind": "stateChange",   // kind: stateChange | audit
-  "mo_instance": "cims/csp", "params": { "rev": "r12" }, "ts": "..." }
+  "mo_instance": "cims/csp/<node>", "params": { "rev": "r12" }, "ts": "..." }
 ```
 
 **FM_SYNC** — 주기(기본 60s, FM_REGISTER 응답으로 OAM 이 지시):
 ```jsonc
 { "boot_id": 1754805000, "seq": 19,
-  "active": [ { "code": "CIMS-COM-001", "mo_instance": "cims/csp/db",
+  "active": [ { "code": "CIMS-COM-001", "mo_instance": "cims/csp/<node>/db",
                 "open_ts": "2026-08-10T09:31:05" } ] }
 ```
 
@@ -131,8 +133,11 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 - **같은 조건은 기존 code 재사용**(connection_lost=CIMS-COM-001 등) — 객체는 mo_instance 로
   구분한다(§3.5: 새 객체 추가 = 코드 신설 없음). 새 *조건* 클래스만 코드를 신설한다.
 - sweeper 가 발화 중인 `code@mo` 공간과의 충돌은 등록 시 검증해 거부한다.
-- `mo_instance` 규칙: `cims/<module>[/<node>]/<component>` (표준화 §3.4(b) 계층 준수).
-- `detected_by`: **`self:<node>`** 신설 (기존 `oam`/`oam-svc`/`agent:<host>` 와 병렬).
+- `mo_instance` 규칙: `cims/<module>/<node>[/<component>]` — **노드 필수, 알람·이벤트 공통**
+  (표준화 §3.4(b) 계층 준수). detected_by 가 주체 클래스만 담으므로 발생 노드는 mo_instance
+  가 유일 보유자다.
+- `detected_by`: **`self`** (주체 클래스 — 표준화 §3.4(b) 감지 3계층의 L2). 발신 노드는
+  envelope `hdr.node`(wire)와 mo_instance 가 보유하므로 접미로 중복하지 않는다.
 - `perceived_severity` 는 통지 payload → 카탈로그 순으로 취하고, 둘 다 없으면
   **indeterminate** 로 발화한다 (X.733 — 미지정을 warning 으로 임의 판정하지 않음).
 - 활성 알람에 severity 가 달라진 open 재통지가 오면 **action=change** 로 기록된다
@@ -149,7 +154,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 | `CIMS-PRC-002` | resource_failure | processingError | CMDP FD 스토어 저장 실패 (`cims/cmdp/<node>/fd_store`). 후보: 녹취 쓰기 실패 |
 
 새 *조건* 클래스 후보(미구현): `overload`(CSP 제어평면 과부하 차단 발동 — 차단 로직 자체가
-미구현), 포트 bind 실패(기동 실패 = 프로세스 사망 → process_down probe 소관, §1 원칙).
+미구현), 포트 bind 실패(기동 실패 = 프로세스 사망 → L1 process_down(agent) 소관, §1 원칙).
 
 **이벤트**: `process_started`/`process_stopping`(stateChange — cmp/cmdp/csc 는 SIGTERM
 graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 서비스 제어, event_log
@@ -164,8 +169,8 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
   reconcile 로 정리한다. 재기동으로 조건이 소멸했으면 sync 가 닫고, 지속 중이면 모듈이 다시
   open 을 싣는다(새 occurrence).
 - **관측 두절**: FM_SYNC 3회 연속 누락 시 해당 node 의 self 활성 알람을 "판정 불가" 사유로
-  close 한다(표준화 §3.4(d), drift 스위퍼 3회 임계와 동일 관례). 프로세스 생존 여부는 별도로
-  probe(process_down)가 판정한다.
+  close 한다(표준화 §3.4(d), drift 스위퍼 3회 임계와 동일 관례). 프로세스 생존은 L1(agent
+  process_down)이, 서비스 응답성은 L3(service_unresponsive)가 별도 판정한다.
 - **OAM 재기동**: alert_log replay(restore_open_state)로 복원한다. self 계열 복원을 위해
   `compute_open_state` 가 detected_by 를 함께 반환하도록 확장하고, base/oam-svc 소유 분리
   scope 를 mo-prefix 기반에서 **detected_by 기반**으로 일반화한다. 이후 sync 로 수렴.
@@ -173,7 +178,7 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 ## 6. 저장·API·콘솔
 
 - **알람**: 기존 alert_log JSONL 스트림에 합류 — 레코드 스키마 동일(표준화 §3.2),
-  detected_by 만 `self:<node>`. AlertsPage/활성 위젯/ack 이 무변경으로 동작한다.
+  detected_by 만 `self`. AlertsPage/활성 위젯/ack 이 무변경으로 동작한다.
 - **이벤트**: 신규 event_log `{ServiceLogDir}/events/YYYY/MM/DD.jsonl` — alert_log 의 일별
   JSONL 헬퍼를 공용화해 재사용. 레코드:
   `{ts, type, kind, source{mo_class, mo_instance, detected_by}, message, params}`.
@@ -191,8 +196,8 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
    `FmIngest{Ip,Port,SyncSec}` (oam-svc config_template).
 2. **저장 코어**: `services/daily_jsonl.py`(일별 JSONL 공용) 위에 `alert_log`(alerts/)와
    `event_log`(events/)가 얹힘. `alert_log.compute_open_state(with_meta=True)` 가
-   detected_by 를 동반 반환 — `restore_open_state` scope 가 자기보고 계열(self:*)을
-   sweeper 소유에서 제외한다.
+   detected_by 를 동반 반환 — `restore_open_state` scope 가 자기보고 계열(detected_by=`self`,
+   구 레코드 `self:*` 포함)을 sweeper 소유에서 제외한다.
 3. **handlers**: `GET /events`·`/events/types` (`handlers/events.py`), `/alerts/catalog`
    모듈 카탈로그 병합(origin=rule|module:<module>). OAM 서비스 제어 감사
    (`service_control.py`)는 event_log 에 직접 기록(type=service_control, kind=audit).

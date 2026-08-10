@@ -171,14 +171,17 @@ OAM `_sweep_alerts` 가 평가. 규칙은 service descriptor(`service_registry.a
 | scope | type | check | 설명 |
 |---|---|---|---|
 | core | `disk_high` | disk_pct ≥ threshold(기본 90%) | online agent 별 |
-| core | `module_down` | deployment(status=running) 모듈이 metric 실행 집합에 없음 | online agent 별. `process_down` 규칙 대상(csp/cmp)은 제외 — 중복 방지 |
+| core | `process_down` (check=module_down) | deployment(status=running) 모듈이 metric 실행 집합에 없음 | online agent 별, **전 모듈 정본** — csp/cmp 포함 (감지 L1, 표준화 §3.4(b)). 원격 probe 무응답은 별개 조건(`service_unresponsive`) |
 | core | `config_drift` | metric.cfg_hashes[모듈] ≠ 배포기록 실체화본 hash | online agent 별, 배포(status=running/stopped) 단위. 미보고(구 agent) 시 미평가 — 오탐 없음 |
 | core | `ha_flap` | metric.ha_transitions[svc] ≥ threshold(기본 6회/10분) | online agent 별. flap 정지 시 윈도 만료로 자동 close |
-| service(CIMS) | `csp_down`/`cmp_down` | CSP/CMP stats 응답 없음 | 중앙 poll |
-| service(CIMS) | `db_down` | DB 연결 실패 | 중앙 |
-| service(CIMS) | `rtp_high` | RTP 포트 사용률 ≥ threshold | 중앙 |
+| service(CIMS) | `service_unresponsive` | CSP/CMP STATS 무응답 — 프로세스 생존과 별개 조건(hang·과부하), 생존은 L1 process_down | 중앙 poll (oam-svc) |
+| service(CIMS) | `connection_lost` | DB 연결 실패 | 중앙 |
+| service(CIMS) | `threshold_crossed` | RTP 포트 사용률 ≥ threshold | 중앙 |
 
 per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가(오프라인/metric 없음/배포 제거) 시 열린 alert 를 자동 close.
+- **프로세스 전이 이벤트**: agent 는 감시 tick 의 실행 집합 전이(소멸)를 metric 보고에 동반하고,
+  OAM 이 event_log 에 `process_died`(stateChange, detected_by=`agent`)로 기록한다 — SIGKILL 등
+  모듈 자기보고(`process_stopping`)가 유실되는 종료를 보완 (표준화 §3.4(b) L1).
 - **uninstall 은 반드시 `./uninstall.sh`** — 단순 `pkill` 만 하면 systemd 가 즉시 재기동 (`Restart=always` + linger). `uninstall.sh` 는 unit stop+disable 부터 처리하므로 안전
 - linger 자동 해제 안 함 — 다른 user service 보호. 완전 정리 원하면 `sudo loginctl disable-linger $USER` 별도 실행
 

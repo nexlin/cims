@@ -147,7 +147,7 @@ bool PCmpServer::startServer() {
         }
         if (catalog.empty()) catalog = cands[0];  // 부재 시 FmReporter 가 로그로 드러냄
         gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec);
-        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName);
+        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName + "/" + _systemId);
         _fmMonitorThread = std::thread([this]() { this->fmMonitorLoop(); });
     }
     return true;
@@ -193,7 +193,7 @@ void PCmpServer::fmMonitorLoop() {
 
 void PCmpServer::stopServer() {
     if (gclsFmReporter.IsEnabled())
-        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName);
+        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName + "/" + _systemId);
     _running = false;
     // 리액터 스레드 정지 (epoll_wait 1s timeout 내 종료)
     _reactorRunning = false;

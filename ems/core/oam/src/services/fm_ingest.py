@@ -11,7 +11,8 @@
 
 활성 알람의 SoT 는 모듈, 여기는 미러 — 통지 유실·양측 재기동은 FM_SYNC 가 수렴시킨다.
 활성키/alarm_id/재통지 의미는 alarm_standardization.md §3.4 그대로 (transition 코어 재사용).
-detected_by = 'self:<node>'.
+detected_by = 'self' (주체 클래스만 — 발신 노드는 envelope hdr.node 와 mo_instance
+(cims/<module>/<node>[/<component>], 노드 필수)가 보유. 표준화 §3.4(b)).
 
 신뢰성 (cmp_media_api.md §8 과 동일 계약):
   - ack = 동일 trans_id 의 type:"response" (발신측 재전송 1s×5).
@@ -88,7 +89,7 @@ class FmIngest:
                 pass
 
     def _restore(self):
-        """기동 시 복원 — alert_log replay 에서 자기보고(detected_by self:*) 계열만.
+        """기동 시 복원 — alert_log replay 에서 자기보고(detected_by=self) 계열만.
         node 별 akey 집합도 재구성해 이후 FM_SYNC reconcile 이 이어받는다."""
         from services import alert_log
         try:
@@ -99,9 +100,18 @@ class FmIngest:
         now = time.time()
         for akey, m in meta.items():
             db = m.get('detected_by') or ''
-            if not db.startswith('self:'):
+            if db != 'self' and not db.startswith('self:'):
                 continue
-            node = db.split(':', 1)[1]
+            # 발신 노드 — 구 레코드는 detected_by 접미(self:<node>), 현행은 mo_instance
+            # 규칙 cims/<module>/<node>[/...] 의 3번째 세그먼트 (envelope hdr.node 와
+            # 동일 값 — 모듈이 mo 를 SystemId 로 구성). 도출 불가 시 mo 자체를 노드
+            # 키로 두면 sync 부재 → stale 종결로 자가 정리된다.
+            mo = akey.split('@', 1)[1] if '@' in akey else ''
+            if db.startswith('self:'):
+                node = db.split(':', 1)[1]
+            else:
+                seg = mo.split('/')
+                node = seg[2] if len(seg) >= 3 else (mo or akey)
             self.state[akey] = {'alarm_id': m['alarm_id'],
                                 'severity': m.get('perceived_severity')}
             ent = self.nodes.setdefault(node, {'boot_id': None, 'module': '',
@@ -223,7 +233,8 @@ class FmIngest:
             return self._resp_err(hdr, 'BAD_REQUEST', 'type required')
         from services import event_log
         cat = (self.catalogs.get(node) or {}).get('events', {}).get(etype) or {}
-        mo = payload.get('mo_instance') or f"cims/{ent.get('module') or node}"
+        # mo 규칙: cims/<module>/<node>[/<component>] — 노드 필수 (자기보고 §4).
+        mo = payload.get('mo_instance') or f"cims/{ent.get('module') or node}/{node}"
         params = payload.get('params') or {}
         from services.alarm_sweeper import fmt
         message = payload.get('message') or fmt(cat.get('msg', ''), **{**params, 'mo': mo}) or etype
@@ -232,7 +243,7 @@ class FmIngest:
             'type': etype,
             'kind': payload.get('kind') or cat.get('kind') or 'stateChange',
             'source': {'mo_class': cat.get('mo_class') or 'software',
-                       'mo_instance': mo, 'detected_by': f'self:{node}'},
+                       'mo_instance': mo, 'detected_by': 'self'},
             'message': message,
             'params': params,
         })
@@ -262,7 +273,7 @@ class FmIngest:
             or f"{mo} 정상화"
         akey = f"{r.get('code')}@{mo}"
         was = akey in self.state
-        alarm_sweeper.transition(self.state, self.dir, r, mo, f'self:{node}',
+        alarm_sweeper.transition(self.state, self.dir, r, mo, 'self',
                                  is_open, msg_open, msg_close, log=self.log)
         if is_open and not was:
             ent['akeys'].add(akey)
@@ -295,7 +306,8 @@ class FmIngest:
 
     def _check_stale(self):
         """sync 연속 누락 노드의 자기보고 활성 알람을 판정 불가로 종결 (표준화 §3.4(d)).
-        프로세스 생존 여부는 별도로 probe(process_down)가 판정한다."""
+        프로세스 생존은 L1(agent process_down)이, 응답성은 L3(service_unresponsive)가
+        별도 판정한다 (표준화 §3.4(b))."""
         limit = self.sync_sec * _STALE_SYNC_MISSES
         now = time.time()
         for node, ent in self.nodes.items():

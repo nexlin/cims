@@ -143,14 +143,14 @@ bool PCmdpServer::startServer() {
         }
         if (catalog.empty()) catalog = cands[0];  // 부재 시 FmReporter 가 로그로 드러냄
         gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec);
-        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName);
+        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName + "/" + _systemId);
     }
     return true;
 }
 
 void PCmdpServer::stopServer() {
     if (gclsFmReporter.IsEnabled())
-        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName);
+        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName + "/" + _systemId);
     _running = false;
     _reactorRunning = false;
     for (auto& r : _reactors) {

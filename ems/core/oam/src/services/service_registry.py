@@ -62,9 +62,15 @@ _CORE_ALERT_RULES = [
 ]
 
 # 알람 클래스 기본값 — check → 표준 분류 필드. 규칙에 명시값 있으면 우선(setdefault).
+# service_unresponsive 는 check 개정 이행 규칙(_CHECK_REVISIONS)이 명시값을 폐기하고 오므로
+# 메시지·runbook 까지 기본값으로 보유한다.
 _ALERT_CLASS_DEFAULTS = {
-    'process_down': {'type': 'process_down', 'code': 'CIMS-PRC-001', 'event_type': 'processingError',
-                     'probable_cause': 'softwareError', 'mo_class': 'software', 'perceived_severity': 'critical'},
+    'service_unresponsive': {'type': 'service_unresponsive', 'code': 'CIMS-PRC-004',
+                     'event_type': 'processingError', 'probable_cause': 'responseTimeExcessive',
+                     'mo_class': 'service', 'perceived_severity': 'major', 'metric': '서비스 응답성',
+                     'msg_open': '{mo} 관리 프로브(STATS) 무응답', 'msg_close': '{mo} 응답 정상화',
+                     'effect': '제어/관측 불가 — hang·과부하 의심, 호처리 영향 가능',
+                     'recommended_action': '프로세스 상태·부하 확인(process_down 동반 여부), 필요 시 재기동'},
     'module_down':  {'type': 'process_down', 'code': 'CIMS-PRC-001', 'event_type': 'processingError',
                      'probable_cause': 'softwareError', 'mo_class': 'software', 'perceived_severity': 'critical'},
     'db_down':      {'type': 'connection_lost', 'code': 'CIMS-COM-001', 'event_type': 'communications',
@@ -92,17 +98,42 @@ _OLD_TYPE_ALIAS = {
 # (alarm_sweeper.close_legacy_code) 로 흡수.
 _CODE_REVISIONS = {'CIMS-CFG-001': 'CIMS-PRC-003'}
 
+# check 개정 — 감지 3계층 분리(표준화 §3.4(b)): 구 probe check 'process_down' 은 프로세스
+# 생존이 아니라 관리 응답성을 보므로 'service_unresponsive' 클래스로 개정. 규칙 **정체성**이
+# 바뀌는 케이스라, 저장된 descriptor 의 구 클래스 명시값(type/code/severity/메시지·runbook)은
+# read 시 폐기하고 새 클래스 기본값을 적용한다 — target/mo_instance 는 유지.
+# (프로세스 생존의 process_down/PRC-001 은 agent module_down 정본으로 존속.)
+_CHECK_REVISIONS = {'process_down': 'service_unresponsive'}
+_CHECK_REVISION_DROP = ('type', 'code', 'event_type', 'probable_cause', 'mo_class',
+                        'perceived_severity', 'severity', 'metric', 'msg_open', 'msg_close',
+                        'effect', 'recommended_action')
+
+# check 개정으로 규칙의 code 가 교체된 경우의 옛 code — 스윕의 **targeted** 이행 종결용.
+# 코드 개정(_CODE_REVISIONS)이 아니다: 옛 code 가 다른 규칙(module_down)으로 존속하므로
+# code 전량 종결(close_legacy_code)을 쓰면 안 되고, 해당 규칙의 mo 공간으로 한정한다.
+_CHECK_LEGACY_CODES = {'service_unresponsive': ('CIMS-PRC-001',)}
+
 
 def legacy_codes(code: str) -> list:
     """현행 code 의 옛 code 목록 — 스윕의 이행 종결(close_legacy_code) 용."""
     return [old for old, new in _CODE_REVISIONS.items() if new == code]
 
 
+def legacy_check_codes(check: str) -> tuple:
+    """check 개정으로 code 가 교체된 규칙의 옛 code 목록 — mo 한정 이행 종결용."""
+    return _CHECK_LEGACY_CODES.get(check or '', ())
+
+
 def normalize_alert_rule(r: dict) -> dict:
     """규칙에 표준 알람 필드(type 클래스/code/event_type/probable_cause/mo_class/perceived_severity)를 채움.
     명시값 우선, 없으면 check 기반 기본값. severity→perceived_severity 하위호환."""
     out = dict(r)
-    for k, v in _ALERT_CLASS_DEFAULTS.get(r.get('check'), {}).items():
+    new_chk = _CHECK_REVISIONS.get(out.get('check'))
+    if new_chk:
+        out['check'] = new_chk
+        for k in _CHECK_REVISION_DROP:
+            out.pop(k, None)
+    for k, v in _ALERT_CLASS_DEFAULTS.get(out.get('check'), {}).items():
         out.setdefault(k, v)
     # 옛 type 슬러그(csp_down 등) → 클래스/코드 보정
     alias = _OLD_TYPE_ALIAS.get(out.get('type'))

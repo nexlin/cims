@@ -743,6 +743,9 @@ def _cfg_hash_for_module(name: str):
     return None
 
 
+_PREV_RUNNING_MODULES: set = set()   # 직전 metric 의 실행 모듈 집합 — 소멸 전이(process_died) 감지
+
+
 def collect_metrics() -> dict:
     """CPU/mem/disk percent + load + per-iface RX/TX + CIMS module pid/cpu/mem."""
     m = {}
@@ -796,6 +799,17 @@ def collect_metrics() -> dict:
     for stale_pid in list(_PROC_CPU_CACHE.keys()):
         if stale_pid not in live:
             _PROC_CPU_CACHE.pop(stale_pid, None)
+    # 실행 집합 소멸 전이 → module_events(process_died) 동반 보고 — 감지 L1
+    # (alarm_standardization §3.4(b)). SIGKILL 등 모듈 자기보고(process_stopping)가
+    # 못 남기는 종료를 OAM event_log 가 받는다. 전이는 발생 tick 의 보고에만 실린다
+    # (기동 이벤트는 모듈 자기보고 process_started 소관).
+    global _PREV_RUNNING_MODULES
+    running_now = {x["name"] for x in m["modules"]}
+    died = _PREV_RUNNING_MODULES - running_now
+    if died:
+        m["module_events"] = [{"module": name, "event": "process_died"}
+                              for name in sorted(died)]
+    _PREV_RUNNING_MODULES = running_now
     # 설치 모듈별 배포 config.json canonical hash — modules[](실행 중만) 와 별개
     # top-level 키: 중지 모듈의 드리프트도 OAM 이 평가할 수 있게.
     try:

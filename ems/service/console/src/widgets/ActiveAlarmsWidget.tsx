@@ -10,7 +10,8 @@ const SEV_COLOR: Record<string, string> = {
   critical: '#e74c3c', major: '#e67e22', minor: '#f39c12', warning: '#eab308', indeterminate: '#3498db',
 }
 const CLASS_LABEL: Record<string, string> = {
-  process_down: '프로세스 다운', connection_lost: '연결 끊김', threshold_crossed: '임계 초과',
+  process_down: '프로세스 다운', service_unresponsive: '서비스 무응답',
+  connection_lost: '연결 끊김', threshold_crossed: '임계 초과',
   csp_down: '프로세스 다운', cmp_down: '프로세스 다운', module_down: '프로세스 다운',
   db_down: '연결 끊김', rtp_high: '임계 초과', disk_high: '임계 초과',
 }

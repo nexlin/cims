@@ -361,7 +361,7 @@ int ServiceMain() {
         return -1;
     }
     CLog::Print( LOG_SYSTEM, "SipServer started successfully." );
-    gclsFmReporter.SendEvent( "process_started", "stateChange", "cims/csp" );
+    gclsFmReporter.SendEvent( "process_started", "stateChange", "cims/csp/" + gclsFmReporter.Node() );
 
     // SIGUSR1: agent 가 jsonl 쓰기 직후 보내는 reload 시그널.
     //   핸들러에서는 플래그만 세팅, 실제 reload 는 메인 루프에서 수행.
@@ -512,7 +512,7 @@ int ServiceMain() {
             gclsSetup.Read();
         }
     }
-    gclsFmReporter.SendEvent( "process_stopping", "stateChange", "cims/csp" );
+    gclsFmReporter.SendEvent( "process_stopping", "stateChange", "cims/csp/" + gclsFmReporter.Node() );
     gclsDbManager.StopHealthProbe();
     gclsCallMap.StopCallAll();
     gclsTransCallMap.StopCallAll();

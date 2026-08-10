@@ -61,27 +61,27 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 ```jsonc
 {
-  "type": "process_down",              // 알람 **클래스** 슬러그 (프로세스명 박지 않음 — §3.5)
-  "code": "CIMS-PRC-001",              // 알람 클래스 코드(카탈로그) — §3.4
-  "perceived_severity": "critical",    // critical|major|minor|warning|indeterminate  (기존 severity 대체)
+  "type": "service_unresponsive",      // 알람 **클래스** 슬러그 (프로세스명 박지 않음 — §3.5)
+  "code": "CIMS-PRC-004",              // 알람 클래스 코드(카탈로그) — §3.4
+  "perceived_severity": "major",       // critical|major|minor|warning|indeterminate  (기존 severity 대체)
   "event_type": "processingError",     // communications|qualityOfService|processingError|equipment|environmental
-  "probable_cause": "softwareError",   // X.733 Annex 코드
-  "mo_class": "software",              // managedObject class: software|service|equipment|host|network
-  "check": "process_down", "target": "csp",   // 무엇을 점검할지(탐지) — 어느 프로세스는 여기서, 알람 type 엔 안 박음
+  "probable_cause": "responseTimeExcessive",   // X.733 Annex 코드
+  "mo_class": "service",               // managedObject class: software|service|equipment|host|network
+  "check": "service_unresponsive", "target": "csp",   // 무엇을 점검할지(탐지) — 어느 프로세스는 여기서, 알람 type 엔 안 박음
   "mo_instance": "cims/csp",           // (선택) 소스 instance 명시 — 없으면 target/host 로 런타임 합성
   "threshold": null, "unit": null,
   "thresholds": null,                  // (선택) 단계 임계 {severity: value} — 예 {"minor":80,"major":90,"critical":95}
                                        //   도달한 최고 단계가 severity 가 되고, 승격/완화는 action=change 로 통지.
                                        //   있으면 threshold/perceived_severity 단일값 대신 사용 (disk·rtp 기본 적용)
-  "metric": "프로세스 가용성",
-  "msg_open": "{mo} 프로세스 응답 없음",   // → specificProblem ({mo}=mo_instance)
-  "msg_close": "{mo} 정상화",
-  "effect": "해당 서비스 호처리 중단",            // (선택) 영향 — 운영 runbook (Clearwater 벤치마크 §7.1)
-  "recommended_action": "프로세스 재기동 / 로그 확인",  // (선택) 권장 조치 (이벤트의 action=open/close 와 구분)
+  "metric": "서비스 응답성",
+  "msg_open": "{mo} 관리 프로브(STATS) 무응답",   // → specificProblem ({mo}=mo_instance)
+  "msg_close": "{mo} 응답 정상화",
+  "effect": "제어/관측 불가 — hang·과부하 의심",        // (선택) 영향 — 운영 runbook (Clearwater 벤치마크 §7.1)
+  "recommended_action": "프로세스 상태·부하 확인 / 로그 확인",  // (선택) 권장 조치 (이벤트의 action=open/close 와 구분)
   "scope": "service"                   // service|agent (유지)
 }
 ```
-- **type/code 는 알람 클래스** (process_down). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
+- **type/code 는 알람 클래스** (service_unresponsive). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
 - `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 perceived_severity 로 승격(critical/warning 표준 값 유효). 신규 major/minor/indeterminate 가능.
 - managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4): service 규칙 = `cims/<target>`, agent 규칙 = `<host>/<module|disk|rtp>`. CMP 는 다중 미디어 노드(AA)를 개별 관측하므로 endpoint 별 `cims/cmp/<ip>:<port>` 로 합성.
 
@@ -90,16 +90,16 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 ```jsonc
 {
   "ts": "2026-05-30T09:31:05",         // eventTime
-  "alarm_id": "CIMS-PRC-010@Media-Server-01/csp@1748590265",  // 발생 인스턴스 고유 id (occurrence) — §3.4
-  "type": "module_down",               // 정의 슬러그
-  "code": "CIMS-PRC-010",              // 정의 코드
+  "alarm_id": "CIMS-PRC-001@Media-Server-01/csp@1748590265",  // 발생 인스턴스 고유 id (occurrence) — §3.4
+  "type": "process_down",              // 정의 슬러그
+  "code": "CIMS-PRC-001",              // 정의 코드
   "perceived_severity": "critical",    // open=규칙 severity, close=cleared
   "event_type": "processingError",
   "probable_cause": "softwareError",
   "source": {                          // 발생 소스 (§3.4)
     "mo_class": "software",            //   managedObjectClass
     "mo_instance": "Media-Server-01/csp",  //   managedObjectInstance (DN-유사)
-    "detected_by": "oam"              //   탐지 주체 (oam | agent:<host>)
+    "detected_by": "agent"            //   탐지 주체 클래스 (agent|self|oam-svc|oam) — §3.4(b)
   },
   "action": "open",                    // open|close (close = Cleared)
   "message": "Media-Server-01 모듈 csp 프로세스 응답 없음",  // specificProblem
@@ -130,10 +130,11 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
-| `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) · `<host>/<module>` | critical | oam / agent:<host> |
-| `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (향후 `cims/trunk/<id>`·peer) | critical | oam |
-| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | 단계 임계(disk·rtp: minor 80 / major 90 / critical 95, 승격=action change) · ha_flap warning | oam / agent:<host> |
-| `CIMS-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` · `cims/ha/g<gid>/<collection>`(HA fan-out) | warning | agent:<host> / oam |
+| `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `<host>/<module>` (전 모듈 — csp/cmp 포함) | critical | agent |
+| `CIMS-PRC-004` | `service_unresponsive` | processingError | responseTimeExcessive | service | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) | major | oam-svc / oam |
+| `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (모듈 관점은 `cims/<mod>/<node>/db` — 자기보고 §4) | critical | oam-svc / oam / self |
+| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | 단계 임계(disk·rtp: minor 80 / major 90 / critical 95, 승격=action change) · ha_flap warning | oam-svc·oam / agent |
+| `CIMS-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` · `cims/ha/g<gid>/<collection>`(HA fan-out) | warning | agent / oam |
 
 `CIMS-PRC-003` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
 agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.
@@ -141,9 +142,9 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 (최근 10분 keepalived 전이 수, 기본 임계 6회)로 VIP flap 을 노출한다 — 전이 개별 건은
 §3.6 대로 이벤트(로그)일 뿐이며, 알람은 빈도 임계 초과라는 *조건*이다.
 
-> **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `csp_down`+`cmp_down`+`module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`threshold_crossed` / `db_down`→`connection_lost`. 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
+> **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`threshold_crossed` / `db_down`→`connection_lost`. 구 `csp_down`/`cmp_down` 은 "프로세스 생존"과 "관리 응답성" 두 *조건*의 혼합이었다 — 생존은 `process_down`(agent 관측), 응답성은 `service_unresponsive`(OAM probe)로 분리한다(§3.4(b) 감지 3계층). 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
 > 같은 클래스라도 rule 별로 probableCause/severity 가 다를 수 있음(disk→storageCapacityProblem/warning, rtp→resourceAtOrNearingCapacity/warning, 단계별 minor→major).
-> 중복 발화 방지(agent module 점검에서 중앙 점검 대상 csp/cmp 제외)는 구현에 유지.
+> `process_down` 은 전 모듈을 agent 관측으로 판정한다 — agent module 점검에서 csp/cmp 를 제외하던 규칙(proc_down_targets)은 두지 않는다. 같은 모듈에 `process_down`(L1)과 `service_unresponsive`(L3)가 함께 열리는 것은 중복이 아니라 별개 조건이며, correlatedNotifications(P2)로 상관을 명시한다.
 
 ### 3.4 알람 코드 체계 · 발생 소스 · occurrence id
 
@@ -170,8 +171,22 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 
 **(b) 발생 소스 (managedObject + detected-by)** — 알람이 "무엇에서/어디서" 났는지 표준화.
 - `mo_class`: software | service | equipment | host | network (managedObjectClass).
-- `mo_instance`: DN-유사 경로. service 규칙 = `cims/<target>` · agent 규칙 = `<host>/<module|disk|rtp>`. (계층: `<service|host>/<component>[/<instance>]`)
-- `detected_by`: 탐지 주체 — `oam-svc`(서비스 계열 stats poll, 분리 배포) | `oam`(단일 프로세스 `--role all` 대행) | `agent:<host>`(per-agent metric). 고장 객체(mo_instance)와 탐지 주체가 다를 수 있음(예: db_down 은 oam-svc 탐지, 객체는 cims/db).
+- `mo_instance`: DN-유사 경로. service 규칙 = `cims/<target>` · agent 규칙 = `<host>/<module|disk|rtp>` · 자기보고 = `cims/<module>/<node>[/<component>]`. (계층: `<service|host>/<component>[/<instance>]`) **발생 노드/호스트는 mo_instance 가 유일 보유자다** — detected_by 에 중복하지 않는다.
+- `detected_by`: 탐지 주체 **클래스** — `agent` | `self` | `oam-svc`(분리 배포) | `oam`(단일 프로세스 `--role all` 대행, HA fan-out drift 등 OAM 자체 판정). 인스턴스 접미(`agent:<host>`·`self:<node>`)는 두지 않는다 — 노드는 mo_instance 와 (자기보고는 wire 의) envelope `hdr.node` 가 보유하고, detected_by 는 ① 발행 주체별 open-state **소유 파티션**(복원·스윕·stale close 의 scope 필터) ② **감지 계층 식별**(아래 표, correlatedNotifications 상관 근거) 에 쓰인다. 고장 객체(mo_instance)와 탐지 주체가 다를 수 있음(예: db_down 은 oam-svc 탐지, 객체는 cims/db).
+
+**감지 주체 3계층** — 모듈 상태는 서로 다른 사실을 보는 세 주체가 나눠 감지하며, 한 주체의
+관측을 다른 계층의 의미로 쓰지 않는다(원격 probe 무응답 ≠ 프로세스 사망).
+
+| 계층 | 주체 (detected_by) | 보는 사실 | 알람 / 이벤트 |
+|---|---|---|---|
+| **L1 프로세스 생존** | agent (`agent`) | 노드 로컬 프로세스의 기동/종료 — 모듈을 배포·실행하는 주체가 생존도 판정 (ha_service_model §1 "판정은 노드 로컬") | `CIMS-PRC-001` process_down (**전 모듈**) · 이벤트 `process_died`(전이 관측 — SIGKILL 등으로 모듈 자기보고가 유실되는 종료 보완) |
+| **L2 모듈 내부 상태** | 모듈 자기보고 (`self`) | 살아 있는 프로세스의 내부 이상 — DB 연결·자원 풀·스토어 | `CIMS-COM-001` · `CIMS-QOS-002` · `CIMS-PRC-002` · 이벤트 `process_started`/`process_stopping` ([alarm_self_reporting.md](alarm_self_reporting.md)) |
+| **L3 서비스 응답성** | OAM 원격 probe (`oam-svc`/`oam`) | 살아 있어도 응답하지 못하는 상태 — hang·과부하 (STATS 무응답, DB SELECT 실패) | `CIMS-PRC-004` service_unresponsive · `CIMS-COM-001`(`cims/db`) |
+
+호스트 자원(disk)·HA 전이 빈도(ha_flap)·설정 정합(config drift)은 agent 원시 metric 을 OAM 이
+평가하는 기존 경로(detected_by=`agent`)이고, HA fan-out drift 는 OAM 자체 판정(`oam`)이다.
+L1 과 L3 는 같은 모듈에 함께 열릴 수 있다(프로세스 사망 시 probe 도 무응답) — L3 발화 시 같은
+모듈의 활성 L1 이 있으면 correlatedNotifications(P2)로 참조하는 것이 첫 실사용처다.
 
 **(c) alarm_id (발생 인스턴스 id, occurrence / X.733 notificationIdentifier)**
 - 활성 알람 식별 = `(code, mo_instance)` (동일 객체의 동일 알람은 하나만 active).
@@ -235,7 +250,7 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 
 ## 4. 전파 경로(구현 시 변경 지점)
 
-1. **규칙 데이터**: `cims.json` + `_CORE_ALERT_RULES` 에 `code`/event_type/probable_cause/mo_class 추가, severity→perceived_severity. **type 을 클래스로 통합** (csp_down/cmp_down/module_down → `process_down`, target/scope 로 인스턴스 구분, mo_instance 명시).
+1. **규칙 데이터**: `cims.json` + `_CORE_ALERT_RULES` 에 `code`/event_type/probable_cause/mo_class 추가, severity→perceived_severity. **type 을 클래스로 통합·분리** (module_down → `process_down`(agent, 전 모듈) / csp_down·cmp_down probe → `service_unresponsive`, target/scope 로 인스턴스 구분, mo_instance 명시 — §3.4(b)).
 2. **sweeper** (`oam_app.py`): `_transition` 키를 `code@mo_instance` 로 정규화 + open 시 `alarm_id` 생성. `_emit` 가 code/표준필드/`source`(mo_class·mo_instance·detected_by) 동반 기록.
 3. **alert_log** (`alert_log.py`): record/read 가 신규 필드 통과(free-form JSONL 호환). open↔close 상관을 `alarm_id` 기반으로(현 type 페어링 대체). summary 에 event_type/severity 분포 추가(선택).
 4. **API** (`alerts.py`): `/alerts` 이벤트에 code/source/alarm_id 노출, `/rules` 에 code/event_type/probable_cause/severity(6), **신규 `GET /alerts/catalog`**(코드 카탈로그).
@@ -246,7 +261,7 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 
 - **P0 — 분류 체계 + 코드/소스** (본 설계의 §3.1~3.4): `code`(카탈로그) · perceived_severity(6) · event_type(5) · probable_cause · source(mo_class/mo_instance/detected_by) · `alarm_id`(occurrence) · (선택) `effect`/`action`(runbook, §7.1). 규칙/이벤트/API(+/catalog)/UI/폼 전파. 하위호환.
 - **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `POST /alerts/ack {alarm_id}` API + UI 승인 버튼 + 코멘트(`POST /alerts/comment`, §3.2). 운영 감사추적.
-- **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조), **SNMP/NMS northbound**(§7.2, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
+- **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조 — 첫 실사용처: L1 `process_down` ↔ L3 `service_unresponsive`, §3.4(b)), **SNMP/NMS northbound**(§7.2, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
 
 ## 6. 하위호환·이행
 
@@ -254,6 +269,12 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 - `severity` 읽는 곳은 `perceived_severity ?? severity` 로 폴백 → 점진 전환.
 - 규칙은 `event_type`/`probable_cause` 누락 시 기본값(processingError/—) 부여하는 정규화 헬퍼로 흡수(데이터 미보강 descriptor 안전).
 - 옛 per-process type(`csp_down`/`cmp_down`/`module_down`)은 read 시 `process_down` 클래스 + `source.mo_instance` 로 매핑하는 alias 표로 흡수 → 기존 이력/배너 무중단.
+- probe 계열 규칙의 code 교체(csp/cmp 규칙 `CIMS-PRC-001`→`CIMS-PRC-004`)는 **코드 개정이
+  아니다** — PRC-001 은 process_down 으로 존속하므로 `_CODE_REVISIONS` 를 쓰지 않고, 스윕이
+  구 활성키(`CIMS-PRC-001@cims/csp`·`@cims/cmp/<ip>:<port>`)를 이행 종결(close)하고 지속
+  조건은 `CIMS-PRC-004` 로 재발화한다 (CMP endpoint 재편 시 stale mo 강제 close 와 동일 관례).
+- detected_by 인스턴스 접미(`agent:<host>`·`self:<node>`)는 구 레코드에만 남는다 — read·scope
+  필터는 클래스 매칭(`self` = `self`·`self:*` 접두)으로 양쪽을 흡수하고, 신규 기록은 클래스만 쓴다.
 
 ## 7. 벤치마크 — 다른 통신 서버/규격의 알람 코드 정의
 
@@ -280,6 +301,7 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 | code / type | effect | recommended action |
 |---|---|---|
 | `CIMS-PRC-001` process_down | 해당 인스턴스 호처리/기능 중단 | 프로세스 재기동, 로그/코어 확인, HA 절체 점검 |
+| `CIMS-PRC-004` service_unresponsive | 관리/제어 응답 불가 — hang·과부하 의심, 호처리 영향 가능 | 프로세스 상태·부하 확인(L1 process_down 동반 여부), 필요 시 재기동 |
 | `CIMS-COM-001` connection_lost | 의존 자원(DB/트렁크) 사용 기능 저하 | 연결성/방화벽/원격 노드 상태 확인 |
 | `CIMS-QOS-001` threshold_crossed | 용량 임계 근접 — 추가 부하 시 실패 위험 | 사용량 원인 파악, 자원 증설/정리 |
 

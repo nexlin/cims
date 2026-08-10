@@ -38,6 +38,10 @@ public:
     bool IsEnabled() const {
         return m_bRunning;
     }
+    // 논리 노드 ID (hdr.node = SystemId) — 이벤트 mo 구성용 (cims/<module>/<node>, 노드 필수).
+    const std::string &Node() const {
+        return m_strNode;
+    }
 
     // 알람 open/close — (code, mo) 가 활성키. 이미 같은 상태면 no-op (전이 시에만 통지).
     void AlarmOpen( const std::string &strCode, const std::string &strMo );

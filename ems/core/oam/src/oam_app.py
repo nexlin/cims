@@ -1127,7 +1127,7 @@ if __name__ == '__main__':
 
         # ── FM ingest (모듈 자기보고 — alarm_self_reporting.md) ─────────
         # 소유는 oam-svc — role=all 단일 프로세스에서만 base 가 대행 (sweeper 소유
-        # 규약과 동일). 자기보고 계열(detected_by=self:*)의 활성 상태는 FmIngest 가
+        # 규약과 동일). 자기보고 계열(detected_by=self)의 활성 상태는 FmIngest 가
         # 자체 복원·추적한다 (_alert_open 과 분리).
         if role == 'all' and _service_log:
             try:
@@ -1180,7 +1180,7 @@ if __name__ == '__main__':
             return skip, must_run
 
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
-                             deps: list, proc_down_targets: set,
+                             deps: list,
                              cold_skip: set, cold_must_run: set = frozenset(),
                              expected_cfg: dict | None = None) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
@@ -1221,8 +1221,9 @@ if __name__ == '__main__':
                     must = (agent.get('id'), proc) in cold_must_run
                     if dep.get('status') != 'running' and not (must and dep.get('status') == 'stopped'):
                         continue
-                    # process_down 규칙으로 이미 평가되는 모듈(csp/cmp 등)은 제외 — 중복 alarm 방지.
-                    if not proc or proc in proc_down_targets:
+                    # 프로세스 생존은 agent 관측이 전 모듈 정본(감지 L1 — 표준화 §3.4(b)).
+                    # 원격 probe 무응답은 별개 조건(service_unresponsive)이라 여기서 제외하지 않는다.
+                    if not proc:
                         continue
                     # 비데몬(별도 프로세스 없음) 모듈은 module_down 대상 아님 — agent 가 metric.modules
                     # 에 보고하지 않으므로(_NON_DAEMON_MODULES) 'running' 이어도 항상 down 으로 오탐.
@@ -1281,7 +1282,7 @@ if __name__ == '__main__':
                     res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             return res
 
-        def _sweep_agent_alerts(agent_rules: list, proc_down_targets: set):
+        def _sweep_agent_alerts(agent_rules: list):
             """per-agent 규칙(disk/module)을 online agent 별로 평가. 관측 불가 시 자동 close."""
             from handlers.agents import _agent_load_all, _deploy_load_all, _metric_root
             from services import file_store
@@ -1327,10 +1328,11 @@ if __name__ == '__main__':
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, cold_must_run, expected_cfg):
+                    for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, cold_skip, cold_must_run, expected_cfg):
                         active.add(f"{r.get('code')}@{mo}")
                         rr = {**r, 'perceived_severity': sev} if sev else r
-                        _transition(rr, mo, f"agent:{host}", is_open, msg_open, msg_close, tinfo)
+                        # detected_by 는 주체 클래스만(표준화 §3.4(b)) — 호스트는 mo 가 보유.
+                        _transition(rr, mo, 'agent', is_open, msg_open, msg_close, tinfo)
             # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.
             agent_rule_by_code = {r.get('code'): r for r in agent_rules}
             for akey in list(_alert_open.keys()):
@@ -1339,7 +1341,7 @@ if __name__ == '__main__':
                     continue
                 r = agent_rule_by_code.get(akey.split('@', 1)[0])
                 if r:
-                    _transition(r, mo_part, f"agent:{mo_part.split('/', 1)[0]}", False, '',
+                    _transition(r, mo_part, 'agent', False, '',
                                 _fmt(r.get('msg_close'), mo=mo_part))
 
         def _sweep_alerts():
@@ -1354,10 +1356,7 @@ if __name__ == '__main__':
                         config, _alert_open, _service_log,
                         detected_by='oam', rtp_threshold=ALERT_RTP_THRESHOLD, log=logger)
                 if agent_rules:
-                    # process_down 대상(csp/cmp)은 module_down 중복 alarm 제외 기준으로만 사용.
-                    proc_down_targets = {(r.get('target') or '').lower()
-                                         for r in svc_rules if r.get('check') == 'process_down'}
-                    _sweep_agent_alerts(agent_rules, proc_down_targets)
+                    _sweep_agent_alerts(agent_rules)
             except Exception as e:
                 logger.log_error(f"[alarm-sweep] error: {e}")
 
