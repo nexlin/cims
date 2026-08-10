@@ -246,7 +246,11 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 
 ## 9. 미해결/결정 필요
 
-1. **floor 패킷 priority 필드**: UE가 REQUEST에 priority/emergency를 실어보내는 규격 동작을 수용할지(상호운용), 아니면 CMP 중앙판정만 쓸지. → 중앙판정 + 패킷필드 옵션 파싱.
+1. **floor 패킷 priority 필드**: 중앙판정으로 단일화 — tier 는 CSP 지시(`PTT_FLOOR_TIER`,
+   긴급 개시자 한정)로만 변한다. REQUEST 의 Floor Indicator(emergency/imminent)는 **호 단위**
+   표식(TS 24.380 §8.2.3.15)이라 긴급 호에선 수신 멤버 요청에도 실려 오므로, 요청자 tier
+   승격에 쓰면 전원이 emergency 로 비겨 선점이 chair/priority 로 퇴화하고 CSP 사용자 인가도
+   우회된다(08-10 실측) — 판정에 쓰지 않는다.
 2. **in-progress 상태 DB 미러**: CSP→CSC 역보고 채널이 없으면 관측 정확도 한계. group.json/flow로 관측, DB 미러는 best-effort.
 3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
 4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
@@ -255,6 +259,9 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
    `emergency-ind` 를 재광고하는 규격 동작(§8 흐름, TS 24.379 §6.3.3.1.15/16) 미구현. 현재
    수신 단말은 상향=floor TAKEN emergency 비트 latch, 하향=경보 취소 MESSAGE 정합(§4.3)으로
    대신한다. psip `SendReInvite` 가 SDP 전용이라 mcptt-info multipart 부가 확장이 선행 과제.
+   같은 뿌리: **UE 주도 조인/재조인의 200 OK 에도 현재 `emergency-ind` 를 동봉해야 한다** —
+   현재는 미동봉이라 긴급 진행 중 재조인한 단말이 개시자의 다음 발언(floor TAKEN)까지 세션
+   긴급 표시를 갖지 못한다(실기기 검증에서 확인, 경보 배너는 별개 신호라 유지됨).
 6. **긴급 사설콜(emergency private call)**: 미구현 — 착수 시 프로파일 `PrivateCall > EmergencyCall
    > MCPTTPrivateRecipient`(entry-info `UsePreConfigured`/`LocallyDetermined`)와 `ruleset`
    `allow-emergency-private-call` 이 규격 자리(TS 24.379 §6.2.8.3).

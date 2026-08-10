@@ -60,10 +60,21 @@ class AudioRouter(context: Context) {
             runCatching {
                 a?.mode = AudioManager.MODE_IN_COMMUNICATION
                 a?.setStreamVolume(AudioManager.STREAM_VOICE_CALL,
-                    a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL), 0)
+                    rxTargetIndex(a, AudioManager.STREAM_VOICE_CALL), 0)
             }
         }
         return true
+    }
+
+    /** 무전 수신 목표 음량 인덱스 — 최대의 [RX_VOLUME_RATIO](중간). 최대 강제는 과청감(실사용
+     *  피드백)이라 목표치 방식으로: 진입 시 이 값으로 맞추고, 확보([ensureRxVolume])는 이 값
+     *  미만일 때만 끌어올린다(사용자가 통화 중 수동으로 키운 값은 존중). */
+    private fun rxTargetIndex(a: AudioManager, stream: Int): Int =
+        (a.getStreamMaxVolume(stream) * RX_VOLUME_RATIO).toInt().coerceAtLeast(1)
+
+    companion object {
+        /** 무전 수신 스트림 목표 음량 비율 — 최대 강제는 과청감(실사용 피드백), 중간이 기준. */
+        const val RX_VOLUME_RATIO = 0.5f
     }
 
     init {
@@ -87,11 +98,11 @@ class AudioRouter(context: Context) {
         runCatching {
             if (on) {
                 a.mode = AudioManager.MODE_IN_COMMUNICATION
-                val max = a.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
-                a.setStreamVolume(AudioManager.STREAM_VOICE_CALL, max, 0)
-                // 무전 재생 트랙은 STREAM_MUSIC(트랙 단위 분리 라우팅용 — pjsip 패치) — 그 축도 확보
-                val maxM = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                a.setStreamVolume(AudioManager.STREAM_MUSIC, maxM, 0)
+                a.setStreamVolume(AudioManager.STREAM_VOICE_CALL,
+                    rxTargetIndex(a, AudioManager.STREAM_VOICE_CALL), 0)
+                // 무전 재생 트랙은 STREAM_MUSIC(트랙 단위 분리 라우팅용 — pjsip 패치) — 그 축도 기준값으로
+                a.setStreamVolume(AudioManager.STREAM_MUSIC,
+                    rxTargetIndex(a, AudioManager.STREAM_MUSIC), 0)
             } else {
                 a.mode = AudioManager.MODE_NORMAL
             }
@@ -106,9 +117,9 @@ class AudioRouter(context: Context) {
         if (!inCall) return
         val a = am ?: return
         runCatching {
-            val max = a.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-            if (a.getStreamVolume(AudioManager.STREAM_MUSIC) < max)
-                a.setStreamVolume(AudioManager.STREAM_MUSIC, max, 0)
+            val target = rxTargetIndex(a, AudioManager.STREAM_MUSIC)
+            if (a.getStreamVolume(AudioManager.STREAM_MUSIC) < target)
+                a.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
         }
     }
 

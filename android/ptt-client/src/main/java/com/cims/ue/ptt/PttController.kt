@@ -1753,7 +1753,9 @@ class PttController(
             //   로컬에서 막으면 multi 정책의 남은 슬롯을 영원히 못 쓴다(실측: 요청 미발신 +
             //   버튼을 뗄 때 Release 만 나가 서버 로그에 고아 Release 가 쌓임). 동시 발언
             //   불가(single)일 때만 종전처럼 즉시 거부음으로 알린다.
-            FloorState.LISTENING -> if (!s.multiTalkerSession()) {
+            //   긴급 개시자도 예외 — 선점(REVOKE→GRANT, TS 24.380 §6.3.4.4.7)은 CMP 의
+            //   tier 판정이므로 요청이 서버에 도달해야 발동한다(로컬 차단 = 선점 불가).
+            FloorState.LISTENING -> if (!s.multiTalkerSession() && !(s.emergency && s.emergencyMine)) {
                 feedback?.denyTone(); _status.value = "다른 사용자가 발언 중"; return
             }
             else -> Unit

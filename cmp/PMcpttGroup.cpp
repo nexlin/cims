@@ -791,14 +791,11 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
         }
     }
 
-    // 수신 Floor Indicator(emergency/imminent) → tier 승격(단말 개시 긴급/임박).
-    // CSP PTT_FLOOR_TIER 로 설정된 tier 와 max 결합(영속 → 무활동 자동회수 제외 등에 반영).
-    if (indicatorBits > 0) {
-        int indTier = (indicatorBits & FI_EMERGENCY)      ? TIER_EMERGENCY
-                    : (indicatorBits & FI_IMMINENT_PERIL) ? TIER_IMMINENT
-                    : TIER_NORMAL;
-        if (indTier > tierOf(sessionId)) _tier[sessionId] = indTier;
-    }
+    // 수신 Floor Indicator(emergency/imminent)는 **호 단위** 표식(TS 24.380 §8.2.3.15) — 긴급
+    //   호에서는 수신 멤버의 요청에도 실려 온다. 요청자 tier 승격에 쓰면 전원이 emergency 로
+    //   비겨 선점이 chair/priority 로 퇴화하고(개시자=participant 의 역방향 선점 불능, 08-10
+    //   실측) CSP 의 사용자 단위 인가도 우회된다. tier 는 CSP 지시(PTT_FLOOR_TIER — 긴급
+    //   개시자 한정)로만 변한다 — 지시자는 판정에 쓰지 않는다.
 
     // Ambient listening 청취 leg — 발언 불가(수신 전용). recv_only/floor_suppress 어느 쪽이든
     //   발언권을 주지 않는다 (cmp_media_api.md §7.3).
