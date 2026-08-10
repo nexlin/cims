@@ -60,6 +60,7 @@ interface AlertRow extends AlertEvent {
   duration?: string
   occurrences?: number  // 재통지 횟수 (clear 없이 반복 수신된 open 수, 최초 포함)
   last_open_ts?: string // 마지막 재통지 시각 (occurrences > 1 일 때만 의미)
+  comments?: { text: string; user?: string; ts: string }[]   // setComment 누적 (32.111 comments)
 }
 
 function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
@@ -134,7 +135,19 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
         open.ack_user = ev.ack_user
         open.ack_time = ev.ts
       }
-    } else {  // close
+    } else if (ev.action === 'change') {  // severity 변경(notifyChangedAlarm) — 행 추가 X, 현재값 갱신
+      const open = openByKey[k]
+      if (open) {
+        open.perceived_severity = ev.perceived_severity ?? open.perceived_severity
+        open.severity = ev.perceived_severity ?? open.severity
+        open.message = ev.message ?? open.message
+      }
+    } else if (ev.action === 'comment') {  // 코멘트(setComment) — 해당 open 행에 누적 (행 추가 X)
+      const open = openByKey[k]
+      if (open && ev.comment) {
+        open.comments = [...(open.comments ?? []), { text: ev.comment, user: ev.comment_user, ts: ev.ts }]
+      }
+    } else if (ev.action === 'close') {
       const open = openByKey[k]
       if (open) {
         open.resolved_at = ev.ts
@@ -143,7 +156,7 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
       } else {
         rows.push({ ...ev })
       }
-    }
+    }   // 미지 action 은 무시 — close 로 오인해 활성 알람을 닫지 않는다
   }
   return rows.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
 }
@@ -293,6 +306,14 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
   const ackAlarm = useCallback(async (alarmId?: string) => {
     if (!alarmId) return
     try { await alertsApi.ack(alarmId); show('알람 승인됨', 'ok'); load() }
+    catch (e) { show((e as Error).message, 'err') }
+  }, [load, show])
+
+  const commentAlarm = useCallback(async (alarmId?: string) => {
+    if (!alarmId) return
+    const text = window.prompt('알람 코멘트 입력')?.trim()
+    if (!text) return
+    try { await alertsApi.comment(alarmId, text); show('코멘트 기록됨', 'ok'); load() }
     catch (e) { show((e as Error).message, 'err') }
   }, [load, show])
 
@@ -461,7 +482,7 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
                 <th style={{ width: 150 }}>발생 시각</th>
                 <th style={{ width: 150 }}>해제 시각</th>
                 <th style={{ width: 90 }}>지속 시간</th>
-                <th style={{ width: 120 }}>승인</th>
+                <th style={{ width: 130 }}>승인·코멘트</th>
               </tr>
             </thead>
             <tbody>
@@ -470,7 +491,9 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
                 const sev = evSev(r)
                 const tip = [r.code && `code: ${r.code}`, r.event_type && `eventType: ${r.event_type}`,
                              r.probable_cause && `cause: ${r.probable_cause}`, r.effect && `영향: ${r.effect}`,
-                             r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')
+                             r.recommended_action && `조치: ${r.recommended_action}`,
+                             ...(r.comments ?? []).map(c => `💬 ${c.user || ''} ${fmtTime(c.ts)}: ${c.text}`)]
+                            .filter(Boolean).join('\n')
                 return (
                   <tr key={`${r.ts}-${r.alarm_id || r.type}-${i}`} title={tip || undefined}
                       style={isOpen ? { background: 'rgba(220, 53, 69, 0.08)' } : undefined}>
@@ -492,11 +515,20 @@ export default function AlertsPage({ openOnly = false }: { openOnly?: boolean } 
                     <td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : (r.action === 'open' ? '—' : fmtTime(r.ts))}</td>
                     <td>{r.duration || (isOpen ? '진행 중' : '-')}</td>
                     <td>
-                      {r.ack_state === 'acknowledged'
-                        ? <span style={{ fontSize: 11, color: 'var(--success, #16a34a)' }} title={r.ack_time ? fmtTime(r.ack_time) : ''}>✓ {r.ack_user || '승인'}</span>
-                        : isOpen
-                          ? <button className="btn btn--sm btn--outline" onClick={() => ackAlarm(r.alarm_id)} disabled={!r.alarm_id}>승인</button>
-                          : <span style={{ color: 'var(--text-muted)' }}>-</span>}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        {r.ack_state === 'acknowledged'
+                          ? <span style={{ fontSize: 11, color: 'var(--success, #16a34a)' }} title={r.ack_time ? fmtTime(r.ack_time) : ''}>✓ {r.ack_user || '승인'}</span>
+                          : isOpen
+                            ? <button className="btn btn--sm btn--outline" onClick={() => ackAlarm(r.alarm_id)} disabled={!r.alarm_id}>승인</button>
+                            : <span style={{ color: 'var(--text-muted)' }}>-</span>}
+                        {(isOpen || (r.comments?.length ?? 0) > 0) && (
+                          <button className="btn btn--sm btn--outline" disabled={!r.alarm_id || !isOpen}
+                                  title={(r.comments ?? []).map(c => `${c.user || ''} ${fmtTime(c.ts)}: ${c.text}`).join('\n') || '코멘트'}
+                                  onClick={() => commentAlarm(r.alarm_id)}>
+                            💬{(r.comments?.length ?? 0) > 0 ? ` ${r.comments!.length}` : ''}
+                          </button>
+                        )}
+                      </span>
                     </td>
                   </tr>
                 )

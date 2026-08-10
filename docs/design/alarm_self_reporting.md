@@ -133,6 +133,10 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 - sweeper 가 발화 중인 `code@mo` 공간과의 충돌은 등록 시 검증해 거부한다.
 - `mo_instance` 규칙: `cims/<module>[/<node>]/<component>` (표준화 §3.4(b) 계층 준수).
 - `detected_by`: **`self:<node>`** 신설 (기존 `oam`/`oam-svc`/`agent:<host>` 와 병렬).
+- `perceived_severity` 는 통지 payload → 카탈로그 순으로 취하고, 둘 다 없으면
+  **indeterminate** 로 발화한다 (X.733 — 미지정을 warning 으로 임의 판정하지 않음).
+- 활성 알람에 severity 가 달라진 open 재통지가 오면 **action=change** 로 기록된다
+  (표준화 §3.4(d) notifyChangedAlarm — transition 코어 공통 동작).
 - 자기보고 클래스의 임계/발화 조건은 **모듈 설정 소유** — 콘솔 카탈로그에는 read-only 로 노출
   (descriptor `alert_rules` 는 OAM 평가 규칙 전용으로 유지, 혼합하지 않음).
 
@@ -211,9 +215,10 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 5. **콘솔**: AlertsPage 알람/이벤트 탭(`EventsSection`), `api/alerts.ts` `eventsApi`.
    AlertBannerWidget 은 `/alerts` 활성 critical/major 를 소비(자체 임계 판정 제거,
    `ActiveAlarmsWidget.computeActive` 공유).
-6. **drift_sweeper**: HA fan-out drift 를 표준 알람(CIMS-CFG-001,
+6. **drift_sweeper**: HA fan-out drift 를 표준 알람(CIMS-PRC-003,
    `cims/ha/g<gid>/<collection>`, transition 코어)으로 발화. 구 포맷
-   (`config_drift::…`) open 은 스윕에서 이행 종결 후 표준 알람으로 재발행.
+   (`config_drift::…`)·옛 code(CIMS-CFG-001) open 은 스윕에서 이행 종결 후
+   현행 알람으로 재발행.
 
 ## 8. 향후 단계
 

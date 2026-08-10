@@ -53,8 +53,10 @@ def compute_open_state(service_log_dir: str, days: int = 30,
     """최근 N일 이벤트 replay → 현재 열린 알람 반환 (sweeper/FM ingest 재시작 시드용).
 
     akey=(code@mo_instance). close 가 잇따른 open 은 덮어쓰고, close 없으면 open 유지.
-    반환: {akey: alarm_id}. with_meta=True 면 {akey: {'alarm_id', 'detected_by'}} —
-    발화 주체별 소유 분리(restore_open_state scope)에 쓴다.
+    change(severity 변경) 는 열림 유지 + 현재 severity 갱신.
+    반환: {akey: alarm_id}. with_meta=True 면
+    {akey: {'alarm_id', 'detected_by', 'perceived_severity'}} — 발화 주체별 소유 분리
+    (restore_open_state scope)와 재기동 후 change 판정 연속성에 쓴다.
     """
     open_state: dict = {}
     for ev in _iter_events_asc(service_log_dir, days):
@@ -66,9 +68,14 @@ def compute_open_state(service_log_dir: str, days: int = 30,
             aid = ev.get('alarm_id') or ak
             if with_meta:
                 open_state[ak] = {'alarm_id': aid,
-                                  'detected_by': (ev.get('source') or {}).get('detected_by') or ''}
+                                  'detected_by': (ev.get('source') or {}).get('detected_by') or '',
+                                  'perceived_severity': ev.get('perceived_severity') or ev.get('severity')}
             else:
                 open_state[ak] = aid
+        elif action == 'change':
+            if with_meta and ak in open_state:
+                open_state[ak]['perceived_severity'] = \
+                    ev.get('perceived_severity') or open_state[ak].get('perceived_severity')
         elif action == 'close':
             open_state.pop(ak, None)
     return open_state
@@ -98,7 +105,7 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
 
     for ev in _iter_events_asc(service_log_dir, days):
         action = ev.get('action')
-        if action == 'ack':       # 승인 이벤트는 통계 집계 대상 아님 (open/close 만)
+        if action in ('ack', 'comment'):   # 승인/코멘트는 통계 집계 대상 아님 (open/close 만)
             continue
         ak = _akey(ev)
         if not ak:
@@ -118,6 +125,9 @@ def compute_summary(service_log_dir: str, days: int = 7) -> dict:
             'last_ts': '',
         })
         entry['last_ts'] = ts
+        if action == 'change':   # severity 변경 — 발생/해소 카운트 없음, 현재 severity 만 갱신
+            entry['perceived_severity'] = ev.get('perceived_severity') or entry['perceived_severity']
+            continue
         if action == 'open':
             entry['opens'] += 1
             entry['currently_open'] = True

@@ -2,10 +2,13 @@
 CIMS Alert 이력 REST API
 
 Routes:
-  GET /api/v1/alerts?days=7&type=&limit=500    최근 alert 이벤트 목록
-  GET /api/v1/alerts/types                     최근 30일 alert type 목록
-  GET /api/v1/alerts/summary?days=7            type별 통계 + 일별 발생량
-  GET /api/v1/alerts/rules                     활성 알림 규칙 + threshold (read-only, config 기반)
+  GET  /api/v1/alerts?days=7&type=&limit=500   최근 alert 이벤트 목록
+  GET  /api/v1/alerts/types                    최근 30일 alert type 목록
+  GET  /api/v1/alerts/summary?days=7           type별 통계 + 일별 발생량
+  GET  /api/v1/alerts/rules                    활성 알림 규칙 + threshold (read-only, config 기반)
+  GET  /api/v1/alerts/catalog                  알람 클래스 카탈로그 (rule + 모듈 자기보고)
+  POST /api/v1/alerts/ack {alarm_id}           알람 승인 (32.111 acknowledgeAlarms)
+  POST /api/v1/alerts/comment {alarm_id,text}  알람 코멘트 (32.111 setComment)
 """
 
 from urllib.parse import urlparse, unquote
@@ -28,8 +31,17 @@ def _path_parts(full_path: str):
 
 
 # 활성 알림 규칙 — service descriptor(service_registry.alert_rules) 구동. sweeper 발화 조건과 1:1.
+_SEV_ABBR = {'minor': 'min', 'major': 'maj', 'critical': 'crit'}
+
+
 def _condition_text(rule: dict) -> str:
     chk = rule.get('check')
+    ths = rule.get('thresholds')
+    if isinstance(ths, dict) and ths:
+        # 단계 임계 — 낮은 단계부터 "80(min)/90(maj)/95(crit)%" 형태로
+        unit = rule.get('unit') or ''
+        parts = sorted(((v, s) for s, v in ths.items()), key=lambda x: x[0])
+        return '≥ ' + '/'.join(f"{v}({_SEV_ABBR.get(s, s)})" for v, s in parts) + unit
     if chk in ('rtp_pct_gte', 'disk_high'):
         return f"≥ {rule.get('threshold')}{rule.get('unit') or ''}"
     if chk == 'db_down':
@@ -57,6 +69,7 @@ def _alert_rules(config: dict) -> dict:
             'metric': r.get('metric') or r.get('type'),
             'condition': _condition_text(r),
             'threshold': r.get('threshold'),
+            'thresholds': r.get('thresholds'),
             'unit': r.get('unit'),
             'effect': r.get('effect'),
             'recommended_action': r.get('recommended_action'),
@@ -95,8 +108,9 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     # query string 은 full_path 가 아니라 query_params dict 로 전달된다 (이미 URL-decode).
     qs = handler_args.query_params or {}
 
-    # 알람 승인(ack) — P1 라이프사이클. alarm_id 에 '/'(mo_instance) 있어 body 로 전달.
-    if method == 'POST' and parts and parts[0] == 'ack':
+    # 알람 승인(ack)/코멘트 — P1 라이프사이클 (32.111 acknowledgeAlarms/setComment).
+    # alarm_id 에 '/'(mo_instance) 있어 body 로 전달.
+    if method == 'POST' and parts and parts[0] in ('ack', 'comment'):
         try:
             body = _parse_body(handler_args)
             aid = (body.get('alarm_id') or '').strip()
@@ -112,6 +126,17 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             code = akey.split('@', 1)[0]
             mo = akey.split('@', 1)[1] if '@' in akey else ''
             ts = _dt.now().isoformat(timespec='seconds')
+            if parts[0] == 'comment':
+                text = (body.get('text') or '').strip()
+                if not text:
+                    return HandlerResult(status=400, body={'error': 'text required'})
+                alert_log.record_event(base, {
+                    'ts': ts, 'alarm_id': aid, 'code': code, 'action': 'comment',
+                    'comment': text[:500], 'comment_user': user, 'comment_time': ts,
+                    'source': {'mo_instance': mo}, 'message': f'{user} 코멘트: {text[:500]}',
+                })
+                return HandlerResult(status=200, body={'ok': True, 'alarm_id': aid,
+                                                       'comment_user': user, 'comment_time': ts})
             alert_log.record_event(base, {
                 'ts': ts, 'alarm_id': aid, 'code': code, 'action': 'ack',
                 'ack_state': 'acknowledged', 'ack_user': user, 'ack_time': ts,

@@ -140,7 +140,7 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 
 - agent 는 기본 **2초** 주기로 heartbeat + metric 전송 (`DEFAULT_HEARTBEAT_SEC` / `DEFAULT_METRIC_SEC`).
 - metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[] / cfg_hashes{} / ha_transitions{}`.
-  - `cfg_hashes` = {모듈: 배포 config.json canonical hash 12hex} — 설치 모듈 전체(중지 포함, `modules/<mod>/current/<mod>/config.json`, mtime 캐시). OAM `config_drift` 평가(`CIMS-CFG-001`) 입력.
+  - `cfg_hashes` = {모듈: 배포 config.json canonical hash 12hex} — 설치 모듈 전체(중지 포함, `modules/<mod>/current/<mod>/config.json`, mtime 캐시). OAM `config_drift` 평가(`CIMS-PRC-003`) 입력.
   - `ha_transitions` = {svc: 최근 10분 keepalived 전이 수} — `/var/log/cims-ha/notify_<svc>.log` tail 집계. OAM `ha_flap` 평가(`CIMS-QOS-001`) 입력. 미가독/부재 시 생략.
   - ⚠ OAM `agent_api.py _metric()` 가 record 를 필드 화이트리스트로 저장 — **신규 metric 필드는 화이트리스트 추가 필수**(미추가 시 버려짐). 조회는 `jsonl_tail_recent`(tail-read, 2초 시계열 풀파싱 금지).
 - OAM 가 `POST /metric` 수신 → `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` append.

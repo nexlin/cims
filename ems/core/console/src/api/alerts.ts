@@ -14,7 +14,7 @@ export interface AlertEvent {
   type: string                  // 조건 클래스 (process_down/connection_lost/threshold_crossed)
   severity?: PerceivedSeverity   // 구 호환
   perceived_severity?: PerceivedSeverity
-  action: 'open' | 'close' | 'ack'
+  action: 'open' | 'close' | 'ack' | 'change' | 'comment'   // change = severity 변경 (notifyChangedAlarm)
   message: string
   // 표준 필드 (P0)
   alarm_id?: string
@@ -24,10 +24,19 @@ export interface AlertEvent {
   source?: AlertSource
   effect?: string
   recommended_action?: string
-  // P1 ack 라이프사이클
+  // 발생/해제/변경 시각 (32.111 alarmRaisedTime/ClearedTime/ChangedTime)
+  raised_time?: string
+  clear_time?: string
+  change_time?: string
+  trend_indication?: 'moreSevere' | 'lessSevere'   // change 동반
+  threshold_info?: { observed: number; threshold: number; unit?: string }   // 임계 계열
+  // P1 ack/코멘트 라이프사이클
   ack_state?: 'acknowledged' | 'unacknowledged'
   ack_user?: string
   ack_time?: string
+  comment?: string              // action=comment (setComment)
+  comment_user?: string
+  comment_time?: string
 }
 
 export interface AlertsResponse {
@@ -72,6 +81,7 @@ export interface AlertRule {
   metric: string
   condition: string
   threshold: number | null
+  thresholds?: Record<string, number> | null   // 단계 임계 {severity: value}
   unit: string | null
   effect?: string
   recommended_action?: string
@@ -130,6 +140,8 @@ export const alertsApi = {
   rules: () => api.get<AlertRulesResponse>('/alerts/rules'),
   catalog: () => api.get<{ catalog: AlarmCatalogItem[] }>('/alerts/catalog'),
   ack: (alarmId: string) => api.post<{ ok: boolean; ack_user: string; ack_time: string }>('/alerts/ack', { alarm_id: alarmId }),
+  comment: (alarmId: string, text: string) =>
+    api.post<{ ok: boolean; comment_user: string; comment_time: string }>('/alerts/comment', { alarm_id: alarmId, text }),
 }
 
 export const eventsApi = {

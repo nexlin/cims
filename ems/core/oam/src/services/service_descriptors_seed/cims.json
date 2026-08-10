@@ -168,7 +168,11 @@
       "probable_cause": "resourceAtOrNearingCapacity",
       "mo_class": "service",
       "check": "rtp_pct_gte",
-      "threshold": 80,
+      "thresholds": {
+        "minor": 80,
+        "major": 90,
+        "critical": 95
+      },
       "unit": "%",
       "mo_instance": "cims/rtp_ports",
       "metric": "RTP 포트 사용률",

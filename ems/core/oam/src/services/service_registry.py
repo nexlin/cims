@@ -33,7 +33,9 @@ _CORE_CONTROLLABLE = {'console'}
 _CORE_ALERT_RULES = [
     {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'perceived_severity': 'warning',
      'event_type': 'qualityOfService', 'probable_cause': 'storageCapacityProblem', 'mo_class': 'host',
-     'check': 'disk_high', 'scope': 'agent', 'threshold': 90, 'unit': '%', 'metric': '디스크 사용률',
+     'check': 'disk_high', 'scope': 'agent', 'unit': '%', 'metric': '디스크 사용률',
+     # 단계 임계 (X.733 severity 승격 — 도달 단계가 severity, 승격/완화는 action=change)
+     'thresholds': {'minor': 80, 'major': 90, 'critical': 95},
      'msg_open': '{mo} 디스크 사용률 {pct}% ({threshold}% 초과)', 'msg_close': '{mo} 디스크 사용률 {pct}% (정상)',
      'effect': '디스크 용량 임계 근접 — 로그/녹취 적재 실패 위험',
      'recommended_action': '사용량 원인 파악, 오래된 파일/로그 정리, 용량 증설'},
@@ -43,7 +45,7 @@ _CORE_ALERT_RULES = [
      'msg_open': '{mo} 프로세스 응답 없음', 'msg_close': '{mo} 정상화',
      'effect': '해당 호스트의 모듈 기능 중단',
      'recommended_action': '프로세스 재기동, 로그/코어 확인, HA 절체 점검'},
-    {'type': 'config_out_of_sync', 'code': 'CIMS-CFG-001', 'perceived_severity': 'warning',
+    {'type': 'config_out_of_sync', 'code': 'CIMS-PRC-003', 'perceived_severity': 'warning',
      'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software',
      'check': 'config_drift', 'scope': 'agent', 'metric': '배포 설정 정합',
      'msg_open': '{mo} 노드 설정 파일이 배포 기록과 불일치 (node={actual}, 기대={expected})',
@@ -71,7 +73,7 @@ _ALERT_CLASS_DEFAULTS = {
                      'probable_cause': 'resourceAtOrNearingCapacity', 'mo_class': 'service', 'perceived_severity': 'warning'},
     'disk_high':    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
                      'probable_cause': 'storageCapacityProblem', 'mo_class': 'host', 'perceived_severity': 'warning'},
-    'config_drift': {'type': 'config_out_of_sync', 'code': 'CIMS-CFG-001', 'event_type': 'processingError',
+    'config_drift': {'type': 'config_out_of_sync', 'code': 'CIMS-PRC-003', 'event_type': 'processingError',
                      'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software', 'perceived_severity': 'warning'},
     'ha_flap':      {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
                      'probable_cause': 'thresholdCrossed', 'mo_class': 'service', 'perceived_severity': 'warning'},
@@ -83,6 +85,17 @@ _OLD_TYPE_ALIAS = {
     'module_down': ('process_down', 'CIMS-PRC-001'), 'db_down': ('connection_lost', 'CIMS-COM-001'),
     'rtp_high': ('threshold_crossed', 'CIMS-QOS-001'), 'disk_high': ('threshold_crossed', 'CIMS-QOS-001'),
 }
+
+# 코드 개정 이력 — 옛 code → 현행 code. 코드는 불변이 원칙(§3.4 코드 문법 — NMS 사전 키)
+# 이며, northbound 연동 전에 한해 개정 가능. CFG 는 DOMAIN=eventType 약어 규칙 위반이라
+# PRC(processingError) 로 정정. 옛 code 규칙/활성 알람은 read 시 alias + 스윕 이행 종결
+# (alarm_sweeper.close_legacy_code) 로 흡수.
+_CODE_REVISIONS = {'CIMS-CFG-001': 'CIMS-PRC-003'}
+
+
+def legacy_codes(code: str) -> list:
+    """현행 code 의 옛 code 목록 — 스윕의 이행 종결(close_legacy_code) 용."""
+    return [old for old, new in _CODE_REVISIONS.items() if new == code]
 
 
 def normalize_alert_rule(r: dict) -> dict:
@@ -101,6 +114,7 @@ def normalize_alert_rule(r: dict) -> dict:
     out.setdefault('perceived_severity', 'warning')
     out.setdefault('severity', out['perceived_severity'])  # 구 reader 호환
     out.setdefault('type', 'event'); out.setdefault('code', 'CIMS-GEN-000')
+    out['code'] = _CODE_REVISIONS.get(out['code'], out['code'])   # 개정된 옛 code 보정
     out.setdefault('event_type', 'processingError'); out.setdefault('probable_cause', '')
     out.setdefault('mo_class', 'service')
     return out

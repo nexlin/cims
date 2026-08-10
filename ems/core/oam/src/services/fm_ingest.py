@@ -102,7 +102,8 @@ class FmIngest:
             if not db.startswith('self:'):
                 continue
             node = db.split(':', 1)[1]
-            self.state[akey] = m['alarm_id']
+            self.state[akey] = {'alarm_id': m['alarm_id'],
+                                'severity': m.get('perceived_severity')}
             ent = self.nodes.setdefault(node, {'boot_id': None, 'module': '',
                                                'akeys': set(), 'seq': {}, 'last_sync': now})
             ent['akeys'].add(akey)
@@ -250,6 +251,10 @@ class FmIngest:
         r = dict(rule)
         if severity:
             r['perceived_severity'] = severity
+        if not r.get('perceived_severity'):
+            # X.733: 심각도 미지정은 indeterminate — 통지·카탈로그 둘 다 없을 때 warning
+            # 으로 임의 판정하지 않는다 (emit_alarm 기본값 대체).
+            r['perceived_severity'] = 'indeterminate'
         kw = {**(params or {}), 'mo': mo}
         msg_open = message or alarm_sweeper.fmt(r.get('msg_open', ''), **kw) \
             or f"{mo} {r.get('type')}"

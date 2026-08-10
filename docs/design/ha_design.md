@@ -514,7 +514,7 @@ systemd `cims@` instance 는 enable 하지 않는다.
   `${cims_home}/modules/<mod>/current/<mod>/config.json` 의 그 키(flat `"Server.Port"`
   우선, nested 수용)에서 포트를 직접 읽어 검사한다. 배포기록과 노드 실파일의 포트가
   드리프트해도 헬스는 모듈이 실제 bind 하는 포트를 보므로 HA 는 흔들리지 않고,
-  드리프트 자체는 `CIMS-CFG-001 config_out_of_sync` 알람이 노출한다. 읽기 실패 시
+  드리프트 자체는 `CIMS-PRC-003 config_out_of_sync` 알람이 노출한다. 읽기 실패 시
   ha.json port → 내장 default 순 fallback.
 - **flap 가시화**: agent 가 notify 로그를 집계한 `metric.ha_transitions`(최근 10분
   전이 수)로 OAM 이 `CIMS-QOS-001`(check=ha_flap, 기본 6회/10분) 알람을 올린다 —

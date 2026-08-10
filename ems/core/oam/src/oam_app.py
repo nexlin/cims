@@ -1138,9 +1138,11 @@ if __name__ == '__main__':
 
         _fmt = alarm_sweeper.fmt
 
-        def _transition(rule, mo_instance, detected_by, is_open, msg_open, msg_close):
+        def _transition(rule, mo_instance, detected_by, is_open, msg_open, msg_close,
+                        threshold_info=None):
             alarm_sweeper.transition(_alert_open, _service_log, rule, mo_instance,
-                                     detected_by, is_open, msg_open, msg_close, log=logger)
+                                     detected_by, is_open, msg_open, msg_close,
+                                     threshold_info=threshold_info, log=logger)
 
         def _cold_module_ha_sets() -> tuple:
             """AS 그룹 cold 모듈의 HA 상태별 module_down 평가 보정 집합 2개.
@@ -1182,7 +1184,9 @@ if __name__ == '__main__':
                              cold_skip: set, cold_must_run: set = frozenset(),
                              expected_cfg: dict | None = None) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
-            반환: (mo_instance, is_open, msg_open, msg_close) 목록."""
+            반환: (mo_instance, is_open, msg_open, msg_close, threshold_info, severity) 목록 —
+            threshold_info 는 임계 계열의 {observed, threshold, unit}, severity 는 단계
+            임계(thresholds) 도달 단계 (단일 임계/비임계 규칙은 None = rule 기본값)."""
             chk = rule.get('check')
             host = agent.get('name') or str(agent.get('id'))
             res = []
@@ -1192,9 +1196,18 @@ if __name__ == '__main__':
                     return res
                 disk = round(float(disk), 1)
                 thr = int(rule.get('threshold', 90))
+                sev = None
+                if isinstance(rule.get('thresholds'), dict):
+                    sev, sthr = alarm_sweeper.staged_severity(rule, disk)
+                    if sthr is not None:
+                        thr = int(sthr)
+                    is_open = sev is not None
+                else:
+                    is_open = disk >= thr
                 mo = f"{host}/disk"
                 kw = dict(mo=mo, host=host, pct=disk, threshold=thr)
-                res.append((mo, disk >= thr, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+                tinfo = {'observed': disk, 'threshold': thr, 'unit': rule.get('unit') or '%'}
+                res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             elif chk == 'module_down':
                 running = {(m.get('name') or '').lower()
                            for m in (metric.get('modules') or []) if m.get('name')}
@@ -1221,7 +1234,7 @@ if __name__ == '__main__':
                         continue
                     mo = f"{host}/{proc}"
                     kw = dict(mo=mo, host=host, module=proc)
-                    res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+                    res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
             elif chk == 'config_drift':
                 # 노드 실파일 hash (agent 보고) vs 배포기록 실체화본 hash — 불일치 = 드리프트.
                 # 구 agent(cfg_hashes 미보고)는 평가 자체를 건너뜀 (오알람 없음).
@@ -1240,7 +1253,7 @@ if __name__ == '__main__':
                         continue        # 미보고 모듈/기대값 산출 실패 — 판정 보류
                     mo = f"{host}/{proc}/config"
                     kw = dict(mo=mo, host=host, module=proc, expected=exp, actual=got)
-                    res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+                    res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
             elif chk == 'ha_flap':
                 # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
                 # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.
@@ -1253,9 +1266,19 @@ if __name__ == '__main__':
                         cnt = int(cnt)
                     except (TypeError, ValueError):
                         continue
+                    sev = None
+                    thr_svc = thr
+                    if isinstance(rule.get('thresholds'), dict):
+                        sev, sthr = alarm_sweeper.staged_severity(rule, cnt)
+                        if sthr is not None:
+                            thr_svc = int(sthr)
+                        is_open = sev is not None
+                    else:
+                        is_open = cnt >= thr
                     mo = f"{host}/ha/{svc}"
-                    kw = dict(mo=mo, host=host, svc=svc, count=cnt, threshold=thr)
-                    res.append((mo, cnt >= thr, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw)))
+                    kw = dict(mo=mo, host=host, svc=svc, count=cnt, threshold=thr_svc)
+                    tinfo = {'observed': cnt, 'threshold': thr_svc, 'unit': rule.get('unit') or '회/10분'}
+                    res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             return res
 
         def _sweep_agent_alerts(agent_rules: list, proc_down_targets: set):
@@ -1266,6 +1289,13 @@ if __name__ == '__main__':
             deps = _deploy_load_all(config)
             mroot = _metric_root(config)
             cold_skip, cold_must_run = _cold_module_ha_sets()
+            # 코드 개정 이행 종결 — 옛 code(CIMS-CFG-001 등)로 열린 agent 계열 알람은
+            # 현행 code 평가/자동 close 어느 쪽에도 안 잡힌다(akey 의 code 가 다름).
+            # 여기서 종결하고, 지속 조건은 아래 평가가 현행 code 로 재발행.
+            for r in agent_rules:
+                for old in service_registry.legacy_codes(r.get('code')):
+                    alarm_sweeper.close_legacy_code(_alert_open, _service_log, r, old,
+                                                    'oam', log=logger)
             # config_drift 기대 hash — 배포별 실체화본을 스윕당 1회만 계산 (pkg 캐시).
             expected_cfg: dict = {}
             if any(r.get('check') == 'config_drift' for r in agent_rules):
@@ -1297,9 +1327,10 @@ if __name__ == '__main__':
                 if not metric:
                     continue
                 for r in agent_rules:
-                    for mo, is_open, msg_open, msg_close in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, cold_must_run, expected_cfg):
+                    for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, proc_down_targets, cold_skip, cold_must_run, expected_cfg):
                         active.add(f"{r.get('code')}@{mo}")
-                        _transition(r, mo, f"agent:{host}", is_open, msg_open, msg_close)
+                        rr = {**r, 'perceived_severity': sev} if sev else r
+                        _transition(rr, mo, f"agent:{host}", is_open, msg_open, msg_close, tinfo)
             # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.
             agent_rule_by_code = {r.get('code'): r for r in agent_rules}
             for akey in list(_alert_open.keys()):
@@ -1357,7 +1388,7 @@ if __name__ == '__main__':
                 # 창을 활성 알람 뷰(90일)와 맞춘다 — 기본 30일이면 30~90일 구간의
                 # 열린 알람을 서버가 잊어 중복 open 을 낸다. (스윕 중 재도출은
                 # drift_sweeper._reseed_if_empty 가 담당 — 여기 실패해도 자가복구)
-                # 표준 akey(CIMS-CFG-001@cims/ha/…)와 구 포맷(config_drift::…, 이행
+                # 표준 akey(CIMS-PRC-003@cims/ha/…, 옛 CIMS-CFG-001 포함)와 구 포맷(config_drift::…, 이행
                 # 종결 대상) 둘 다 복원한다.
                 _st = _alert_log.compute_open_state(_service_log, days=90)
                 _drift_open = {k: _st[k] for k in _ds._drift_prefix_keys(_st.keys())}

@@ -26,6 +26,10 @@ export function computeActive(events: AlertEvent[]): ActiveAlarm[] {
     const k = ev.alarm_id ? ev.alarm_id.replace(/@\d+$/, '') : ev.type
     if (ev.action === 'open') open[k] = { ...ev }
     else if (ev.action === 'ack') { if (open[k]) { open[k].acked = true; open[k].ackUser = ev.ack_user } }
+    else if (ev.action === 'change') {   // severity 변경 — 활성 유지, 현재값 갱신 (ack 보존)
+      const o = open[k]
+      if (o) Object.assign(o, ev, { action: 'open', acked: o.acked, ackUser: o.ackUser })
+    }
     else if (ev.action === 'close') delete open[k]
   }
   return Object.values(open).sort((a, b) => {

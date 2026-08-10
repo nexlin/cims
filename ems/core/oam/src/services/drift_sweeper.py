@@ -9,7 +9,7 @@ drift 발견 시 alert_log 에 1건 기록 + (optional) auto-resync.
 - 첫 멤버 (master 우선, 없으면 deployment id 작은 쪽) 를 기준으로 hash 비교
 - 비교 자체는 agent proxy GET 으로 현재 jsonl 읽음 — drift 없으면 alert 안 냄
 - drift 있을 시:
-    * 표준 알람 발화 (alarm_standardization.md) — 클래스 config_out_of_sync/CIMS-CFG-001,
+    * 표준 알람 발화 (alarm_standardization.md) — 클래스 config_out_of_sync/CIMS-PRC-003,
       객체 mo_instance='cims/ha/g<group_id>/<collection>' (alarm_sweeper.transition 코어)
     * auto_resync=True 면 master records 로 다른 멤버에 PUT (배포)
     * drift 해소 시 Cleared(close)
@@ -212,10 +212,10 @@ _UNKNOWN_STREAK: dict = {}    # akey -> 연속 '판정 불가'(all_ok=False) 횟
 _UNKNOWN_LIMIT = 3            # 이 횟수 연속이면 열린 알람을 판정불가 사유로 종료
 
 # HA fan-out drift 알람 정의 — 표준화 §3.5: 클래스는 조건(config_out_of_sync), 객체는
-# source.mo_instance. agent 계열 노드파일 드리프트(CIMS-CFG-001, <host>/<module>/config)와
+# source.mo_instance. agent 계열 노드파일 드리프트(CIMS-PRC-003, <host>/<module>/config)와
 # 같은 조건 클래스이며 객체만 다르다 (cims/ha/g<gid>/<collection>).
 _DRIFT_RULE = {
-    'type': 'config_out_of_sync', 'code': 'CIMS-CFG-001', 'perceived_severity': 'warning',
+    'type': 'config_out_of_sync', 'code': 'CIMS-PRC-003', 'perceived_severity': 'warning',
     'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError',
     'mo_class': 'software', 'metric': 'HA fan-out 정합',
     'effect': 'HA 멤버 간 런타임 컬렉션 불일치 — 절체 시 동작 상이 위험',
@@ -234,8 +234,10 @@ def _akey(gid, coll: str) -> str:
 
 
 def _drift_prefix_keys(state_keys) -> list:
-    return [k for k in state_keys
-            if k.startswith(f"{_DRIFT_RULE['code']}@cims/ha/") or k.startswith(_OLD_PREFIX)]
+    from services import service_registry
+    codes = [_DRIFT_RULE['code']] + service_registry.legacy_codes(_DRIFT_RULE['code'])
+    prefixes = tuple([f"{c}@cims/ha/" for c in codes] + [_OLD_PREFIX])
+    return [k for k in state_keys if k.startswith(prefixes)]
 
 
 def _reseed_if_empty(open_state: dict, service_log_dir: str) -> None:
@@ -289,9 +291,16 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
         open_state.pop(typ, None)
         alert_log.record_event(service_log_dir, {
             'ts': now, 'type': typ, 'severity': 'warning', 'action': 'close',
-            'message': f"알람 표준 포맷 이행 — 지속 조건은 표준 알람(CIMS-CFG-001)으로 재발행",
+            'message': f"알람 표준 포맷 이행 — 지속 조건은 표준 알람({_DRIFT_RULE['code']})으로 재발행",
         })
         counts['closed'] += 1
+    # 코드 개정 이행 종결 — 옛 code(CIMS-CFG-001 등)로 열린 알람. 지속 조건은 아래
+    # 평가가 같은 스윕에서 현행 code 로 재발행. (universe/orphan reap 은 현행 code
+    # akey 기준이라 옛 키를 다루지 못함 — 반드시 그 앞에서 종결.)
+    from services import service_registry
+    for old in service_registry.legacy_codes(_DRIFT_RULE['code']):
+        counts['closed'] += alarm_sweeper.close_legacy_code(
+            open_state, service_log_dir, _DRIFT_RULE, old, 'oam')
     # 고아 reap — 이번 스윕의 비교 대상(모든 row, all_ok 무관)에 더 이상 없는 open 키는
     # 그룹 삭제/컬렉션 제거/배포 재구성으로 재평가가 불가능해진 알람 → close 발행.
     # (all_ok=False row 도 universe 에 포함되므로 proxy 일시 실패로 오닫힘 없음.)

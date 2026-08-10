@@ -70,6 +70,9 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   "check": "process_down", "target": "csp",   // 무엇을 점검할지(탐지) — 어느 프로세스는 여기서, 알람 type 엔 안 박음
   "mo_instance": "cims/csp",           // (선택) 소스 instance 명시 — 없으면 target/host 로 런타임 합성
   "threshold": null, "unit": null,
+  "thresholds": null,                  // (선택) 단계 임계 {severity: value} — 예 {"minor":80,"major":90,"critical":95}
+                                       //   도달한 최고 단계가 severity 가 되고, 승격/완화는 action=change 로 통지.
+                                       //   있으면 threshold/perceived_severity 단일값 대신 사용 (disk·rtp 기본 적용)
   "metric": "프로세스 가용성",
   "msg_open": "{mo} 프로세스 응답 없음",   // → specificProblem ({mo}=mo_instance)
   "msg_close": "{mo} 정상화",
@@ -100,11 +103,25 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   },
   "action": "open",                    // open|close (close = Cleared)
   "message": "Media-Server-01 모듈 csp 프로세스 응답 없음",  // specificProblem
+  "raised_time": "2026-05-30T09:31:05",   // 32.111 alarmRaisedTime — open 레코드는 ts 와 동일,
+                                          //   close 레코드는 alarm_id 의 occurrence epoch 에서 복원
   "ack_state": "unacknowledged"        // P1: acknowledged 시 ack_time/ack_user 추가
 }
 ```
 - 기존 필드 보존(`ts/type/action/message`) → 이력/통계/배너 무중단. `severity`→`perceived_severity`, `managed_object`(평면 문자열)→`source.mo_instance` 로 점진 치환(읽기 시 둘 다 허용).
 - `alarm_id` 로 open↔close 상관 및 ack 대상 지정. 동일 활성알람 식별 = `(code, source.mo_instance)`.
+- **발생/해제/변경 시각 명시** (32.111 alarmRaisedTime/ClearedTime/ChangedTime): open 레코드는
+  `raised_time`, close 는 `clear_time` + `raised_time`, change 는 `change_time` + `raised_time`
+  을 명시 — 레코드 단독으로 지속시간 산출 가능 (open 레코드 역추적 불요).
+- **severity 변경 = `action: "change"`** (32.111 notifyChangedAlarm): 같은 alarm_id 에
+  새 `perceived_severity` + `trend_indication`(moreSevere|lessSevere). open/close 카운트에
+  포함되지 않는다 (§3.4(d)).
+- **코멘트 = `action: "comment"`** (32.111 setComment/notifyComments): `POST /alerts/comment
+  {alarm_id, text}` → `{comment, comment_user, comment_time}` 레코드. ack 과 같이 통계
+  미집계, 판독측은 해당 활성 행에 누적 표시 (AlertsPage 💬).
+- **임계 계열 구조화** (X.733 thresholdInfo): threshold_crossed 계열 레코드는
+  `threshold_info: {observed, threshold, unit}` 를 동반 — 관측값/임계값이 message 문자열에만
+  있지 않고 기계 판독 가능 (rtp 사용률·disk·ha_flap).
 
 ### 3.3 현재 CIMS 알람 → 표준 매핑 (확정)
 
@@ -115,10 +132,10 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 |---|---|---|---|---|---|---|---|
 | `CIMS-PRC-001` | `process_down` | processingError | softwareError | software | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) · `<host>/<module>` | critical | oam / agent:<host> |
 | `CIMS-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (향후 `cims/trunk/<id>`·peer) | critical | oam |
-| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | warning(minor/major 승격) | oam / agent:<host> |
-| `CIMS-CFG-001` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` | warning | agent:<host> |
+| `CIMS-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | 단계 임계(disk·rtp: minor 80 / major 90 / critical 95, 승격=action change) · ha_flap warning | oam / agent:<host> |
+| `CIMS-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` · `cims/ha/g<gid>/<collection>`(HA fan-out) | warning | agent:<host> / oam |
 
-`CIMS-CFG-001` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
+`CIMS-PRC-003` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
 agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.
 `ha_flap`(QOS-001 rule) 은 agent 가 cims-notify 로그에서 집계한 `metric.ha_transitions`
 (최근 10분 keepalived 전이 수, 기본 임계 6회)로 VIP flap 을 노출한다 — 전이 개별 건은
@@ -133,9 +150,23 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 **(a) 알람 코드 (클래스 카탈로그 식별자)** — `type`(클래스) 슬러그와 1:1, 안정적·불변. 운영 alarm dictionary / 상위 NMS 연동 키.
 포맷 `**<SERVICE>-<DOMAIN>-<SEQ>**`:
 - `SERVICE` = 서비스 pack 네임스페이스 (CIMS, 타 서비스는 자기 prefix → 코드 충돌 없음).
+  단일 서비스 문맥 화면에서는 표시상 생략 가능(UI 재량) — 저장·연동 키는 항상 풀 코드.
 - `DOMAIN` = eventType 약어: **PRC**(processingError) · **COM**(communications) · **QOS**(qualityOfService) · **EQP**(equipment) · **ENV**(environmental).
 - `SEQ` = 3자리, **조건 클래스당 1개**(객체 인스턴스마다 부여 ❌ — 인스턴스는 source). 예: PRC-001 process_down, COM-001 connection_lost, QOS-001 threshold_crossed. 같은 도메인 내 새 *조건* 클래스가 생기면 002,003…
-- 코드 카탈로그 = descriptor 의 alert_rules 클래스 집합(코어 + 서비스). `GET /alerts/catalog`(신규, P0)로 노출.
+- 코드 카탈로그 = descriptor 의 alert_rules 클래스 집합(코어 + 서비스) + 모듈 자기보고 등록분. `GET /alerts/catalog` 로 노출.
+
+**코드 문법 규칙 (신설 시 준수)**:
+- `SEQ` 는 **무의미 일련번호** — 조건 클래스의 정체성은 code↔type 1:1 뿐, 번호에 의미를 싣지 않는다.
+- eventType(DOMAIN) 외의 분류는 코드에 **인코딩하지 않는다** — probableCause 는 rule 속성(같은
+  클래스 안에서 rule 별로 다름 — disk→storageCapacityProblem, rtp→resourceAtOrNearingCapacity),
+  specificProblem 은 발생 건의 message(자유 서술)라 열거 불가. 코드에 박으면 속성 정정 =
+  코드 개정(NMS 사전 키 단절)이 되고, 클래스가 원인 수만큼 쪼개진다(§3.5 안티패턴의 원인 축 재현).
+  eventType 만은 클래스 정체성의 일부(재판정 없음)라 코드에 넣어도 안전.
+- **코드는 불변** — northbound 연동 전에 한해 개정 가능하며, 개정은
+  `service_registry._CODE_REVISIONS`(옛→현행)에 기록한다. 옛 code 규칙은 read 시 alias,
+  옛 code 로 열려 있던 활성 알람은 스윕이 이행 종결(close)하고 지속 조건은 현행 code 로
+  재발행한다(`alarm_sweeper.close_legacy_code`). 개정 이력: `CIMS-CFG-001`→`CIMS-PRC-003`
+  (CFG 는 DOMAIN=eventType 약어 규칙 위반 — processingError 의 PRC 로 정정).
 
 **(b) 발생 소스 (managedObject + detected-by)** — 알람이 "무엇에서/어디서" 났는지 표준화.
 - `mo_class`: software | service | equipment | host | network (managedObjectClass).
@@ -152,6 +183,11 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 같은 활성키(`code@mo_instance`, 구 레코드는 `type`)로 **close 없이 open 이 다시 들어오면
 같은 알람의 재통지**다. 새 occurrence 가 아니며 새 행·새 alarm_id 를 만들지 않는다 —
 `(c)` 의 "재발 = clear 후 재open" 정의의 대우(對偶)다.
+
+단, 재통지의 **severity 가 기존 활성 알람과 다르면 `action=change`** 로 발행한다
+(32.111 notifyChangedAlarm — 같은 alarm_id 유지, `trend_indication: moreSevere|lessSevere`
++ `change_time` 동반). 단계 임계(§3.1 `thresholds`)의 승격/완화가 이 경로다. 판독측은
+change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close 오인 ❌ — 미지 action 은 무시).
 
 - **판독측**(콘솔 `AlertsPage.pairEvents`): 미해소 open 이 이미 있으면 기존 행을 갱신하고
   `occurrences` 를 증가시킨다(발생시각은 최초 유지, `last_open_ts` 로 최근 수신 시각 기록,
@@ -209,7 +245,7 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 ## 5. 단계 계획
 
 - **P0 — 분류 체계 + 코드/소스** (본 설계의 §3.1~3.4): `code`(카탈로그) · perceived_severity(6) · event_type(5) · probable_cause · source(mo_class/mo_instance/detected_by) · `alarm_id`(occurrence) · (선택) `effect`/`action`(runbook, §7.1). 규칙/이벤트/API(+/catalog)/UI/폼 전파. 하위호환.
-- **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `POST /alerts/ack {alarm_id}` API + UI 승인 버튼. 운영 감사추적.
+- **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `POST /alerts/ack {alarm_id}` API + UI 승인 버튼 + 코멘트(`POST /alerts/comment`, §3.2). 운영 감사추적.
 - **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조), **SNMP/NMS northbound**(§7.2, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
 
 ## 6. 하위호환·이행
