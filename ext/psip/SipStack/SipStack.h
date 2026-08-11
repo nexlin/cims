@@ -138,6 +138,10 @@ public:
 	CSipStackSetup	m_clsSetup;		// SIP stack ����
 
 	CThreadList			m_clsTcpThreadList;
+	/** TCP worker pool 초기화 여부 — Start(정적 TCP 포트) 또는 AddTcpListener(런타임 추가)의
+	 *  지연 초기화에서 true. UDP 전용 기동 후 런타임 TCP 리스너 추가 시 pool 부재로 accept 직후
+	 *  연결을 닫던 결함의 가드. */
+	bool						m_bTcpThreadListInit;
 	CTcpSocketMap		m_clsTcpSocketMap;
 	CTcpConnectMap	m_clsTcpConnectMap;
 

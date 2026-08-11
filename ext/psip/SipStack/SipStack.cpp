@@ -45,6 +45,7 @@ CSipStack::CSipStack()
 #endif
 
 	m_bStarted = false;
+	m_bTcpThreadListInit = false;
 	m_iUdpThreadRunCount = 0;
 	m_iTcpThreadRunCount = 0;
 	m_iNextUdpListenerExtId = 0;
@@ -149,6 +150,7 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 			_Stop();
 			return false;
 		}
+		m_bTcpThreadListInit = true;
 
 		if( StartSipTcpListenThreadForListener( pTcpPrimary ) == false )
 		{
@@ -481,6 +483,7 @@ bool CSipStack::_Stop( )
 	m_clsTcpListenerMutex.release();
 
 	m_clsTcpThreadList.Final();
+	m_bTcpThreadListInit = false;
 	m_clsTcpSocketMap.DeleteAll();
 
 #ifdef USE_TLS
@@ -855,6 +858,22 @@ void CSipStack::_RefreshPrimaryTcpSocketLocked()
 bool CSipStack::AddTcpListener( int iExtId, const char* pszBindIp, int iPort, int& outId )
 {
 	if( !m_bStarted ) return false;
+
+	// 스택이 TCP 없이(Start 시 m_iLocalTcpPort=0) 기동했으면 TCP worker pool 이 미초기화 상태다.
+	// 이대로 리스너만 추가하면 accept 후 SendCommand 가 실패해 연결을 즉시 닫는(수락 후 무응답
+	// 종료) 결함이 되므로 여기서 지연 초기화한다.
+	if( m_bTcpThreadListInit == false )
+	{
+		int iThreadCount = m_clsSetup.m_iTcpThreadCount > 0 ? m_clsSetup.m_iTcpThreadCount : 1;
+		m_clsTcpThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
+		if( m_clsTcpThreadList.Init( iThreadCount, iThreadCount, SipTcpThread, this ) == false )
+		{
+			CLog::Print( LOG_ERROR, "AddTcpListener: TcpThreadList.Init() error ip=%s port=%d",
+			             pszBindIp ? pszBindIp : "", iPort );
+			return false;
+		}
+		m_bTcpThreadListInit = true;
+	}
 
 	CSipStackTcpListener * pListener = new CSipStackTcpListener();
 	pListener->m_iId       = (iExtId != 0) ? iExtId : (++m_iNextTcpListenerExtId);
