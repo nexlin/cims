@@ -42,3 +42,24 @@ def secrets_dir(config: dict = None, create: bool = True) -> str:
         except Exception:
             pass
     return d
+
+
+def service_log_dir(config: dict = None) -> str:
+    """서비스 로그 루트 — 설정값이 있으면 그대로, **비어 있으면 노드 로컬**.
+
+    `ServiceLogging.Dir` 은 보통 공유 스토리지를 가리키지만, **부트스트랩 직후에는 그
+    경로가 없는 것이 정상**이다 — 공유 마운트를 붙이는 수단이 콘솔이고, 콘솔은 이 OAM 이
+    서빙하기 때문이다. 그래서 패키지 기본값에는 공유 경로를 박지 않고(`CimsRuntimeDir`
+    과 같은 규칙, oam_ha.md §5), 비어 있으면 여기서 노드 로컬로 해석한다. 공유 경로는
+    마운트를 붙인 뒤 배포 overlay 가 정한다.
+
+    비운 채로 두면 로깅이 통째로 꺼져 부트스트랩 노드가 아무 기록도 남기지 않는다 —
+    그건 진단 통로를 없애는 것이라 로컬로라도 남긴다."""
+    d = str(((config or {}).get('ServiceLogging') or {}).get('Dir') or '').strip()
+    if d:
+        return d
+    legacy = str((config or {}).get('ServiceLogDir')
+                 or (config or {}).get('MsgLogDir') or '').strip()
+    if legacy:
+        return legacy
+    return os.path.join(local_runtime_dir(config), 'service_log')

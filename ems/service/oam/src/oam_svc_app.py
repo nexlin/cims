@@ -208,8 +208,9 @@ if __name__ == '__main__':
             print('OAMSVC_PREFLIGHT_OK', flush=True)
             sys.exit(0)
 
-        sl = config.get("ServiceLogging", {})
-        _service_log_dir = sl.get("Dir", "") or config.get("ServiceLogDir", config.get("MsgLogDir", ""))
+        # 비어 있으면 노드 로컬 (부트스트랩 직후 공유 마운트 부재는 정상) — paths 참조.
+        from services import paths as _paths
+        _service_log_dir = _paths.service_log_dir(config)
         _system_id = config.get("SystemId", "oam_svc_01")
 
         # 신뢰망(비정상 세션 탐지에서 '외부' 제외) — mgmt CIDR + config 공인 IP /24 + override.

@@ -40,8 +40,8 @@
     "CimsRuntimeDir": "",
     "_runtime_comment": "관리 데이터(file_store) SoT. 단일 노드는 mgmt host 로컬, 이중화는 소유권 리스(flock+epoch) 하에 양 노드 공용 마운트 — CimsRuntimeDir 로 **명시**한다(oam_ha.md §4). 금지 대상은 공유 스토리지가 아니라 펜싱 없는 다중 writer 이므로, ServiceLogging.Dir 을 NAS 로 두었다고 runtime store 가 자동으로 따라가는 일만 막는다(유도 폴백 차단).",
     "ServiceLogging": {
-        "_comment": "base 도 사용하는 공유 키 — agent 계열 알람(alert_log) 저장·조회 API 와 콘솔 flow 기록 위치. oam-svc 는 콘솔 배포설정(config_template logging 섹션)으로 관리하고, 미설정 시 이 값을 fallback 상속.",
-        "Dir": "/mnt/cims/service_log",
+        "_comment": "base 도 사용하는 공유 키 — agent 계열 알람(alert_log) 저장·조회 API 와 콘솔 flow 기록 위치. **패키지 기본값은 비운다**: 노드 종속 값이고, 공유 스토리지를 가리키면 부트스트랩 직후(마운트 전) 반드시 없는 경로가 된다 — 붙이는 수단이 이 OAM 이 서빙하는 콘솔이다(CimsRuntimeDir 과 같은 규칙, oam_ha.md §5). 비면 노드 로컬 runtime/service_log 로 해석하고, 공유 경로는 마운트 후 배포 overlay 가 정한다. oam-svc 는 콘솔 배포설정으로 관리하고 미설정 시 이 값을 fallback 상속.",
+        "Dir": "",
         "Enable": [
             "csp",
             "ue"

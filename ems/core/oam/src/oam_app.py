@@ -571,10 +571,10 @@ if __name__ == '__main__':
         # config 에 정규화된 mgmt_net 캐시 (handlers 가 사용 가능).
         config['_mgmt_net'] = _mgmt_net
 
-        sl = config.get("ServiceLogging", {})
-        _service_log_dir = sl.get("Dir", "")
-        if not _service_log_dir:
-            _service_log_dir = config.get("ServiceLogDir", config.get("MsgLogDir", ""))
+        # 비어 있으면 **노드 로컬**로 해석 — 부트스트랩 직후엔 공유 마운트가 없는 것이
+        # 정상이다(붙이는 수단이 이 OAM 이 서빙하는 콘솔이다). services/paths 참조.
+        from services import paths as _paths
+        _service_log_dir = _paths.service_log_dir(config)
         _system_id = config.get("SystemId", "oam_01")
 
         # 신뢰망(trusted_nets): 비정상 세션 탐지에서 '외부' 제외 대상.
@@ -968,8 +968,8 @@ if __name__ == '__main__':
         from services import alarm_sweeper
         ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
-        _service_log = config.get('ServiceLogging', {}).get('Dir') \
-            or config.get('ServiceLogDir', config.get('MsgLogDir', ''))
+        from services import paths as _paths2
+        _service_log = _paths2.service_log_dir(config)
         # _alert_open: { akey(code@mo_instance) : alarm_id } — 자기 소유 계열만 추적.
         _alert_open: dict = alarm_sweeper.restore_open_state(
             _service_log, scope=('all' if role == 'all' else 'agent'), log=logger)

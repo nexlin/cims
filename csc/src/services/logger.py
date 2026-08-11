@@ -11,6 +11,7 @@ sesid 포맷: {caller}::{module}::{yyyymmddHHMMSSuuuuuu}::{counter}
 """
 
 import os
+import time as _time
 import json
 import atexit
 import threading
@@ -168,7 +169,49 @@ def clear_sesid(key: str):
 
 
 def _ensure_dir(path: str):
-    os.makedirs(path, exist_ok=True)
+    # exist_ok=True 여도 공유 NAS(NFS)에서 base/oam-svc/csc 가 같은 시각 버킷 디렉토리를
+    # 프로세스 간 동시 생성하면 속성 캐시 레이스로 FileExistsError 가 새어나온다
+    # (in-process 락으론 못 막음). 이미 존재하면 성공으로 간주.
+    try:
+        os.makedirs(path, exist_ok=True)
+    except FileExistsError:
+        pass
+
+
+# 로그 목적지 미가용(부트스트랩 직후 NAS 미마운트 등) 억제 상태.
+#   `ServiceLogging.Dir` 은 보통 공유 스토리지를 가리키는데, **콘솔에서 마운트를 붙이기
+#   전까지는 그 경로가 없는 것이 정상**이다(마운트 추가 기능 자체가 콘솔에 있다).
+#   그런데 기록 실패를 요청마다 예외로 올리면 호출부가 매 요청 ERROR 를 찍어 로그가
+#   분당 수백 건으로 덮인다(실측: 17분간 분당 ~400건). 진짜 문제를 찾을 통로가 그걸로
+#   막힌다 — 기록 실패는 기능 실패가 아니므로 **한 번만 알리고 조용히 건너뛴다**.
+#   목적지는 주기적으로 다시 확인한다: 마운트가 붙는 순간 재기동 없이 기록이 재개된다.
+_DEST_RETRY_SEC = 30
+_dest_state = {'ok': True, 'next_try': 0.0, 'warned': ''}
+
+
+def _dest_ready(path: str) -> bool:
+    """로그 목적지가 지금 쓸 수 있는가 — 실패해도 예외를 올리지 않는다."""
+    now = _time.time()
+    if not _dest_state['ok'] and now < _dest_state['next_try']:
+        return False
+    try:
+        _ensure_dir(path)
+    except OSError as e:
+        _dest_state['ok'] = False
+        _dest_state['next_try'] = now + _DEST_RETRY_SEC
+        key = f"{path}:{e.errno}"
+        if _dest_state['warned'] != key:      # 사유가 바뀔 때만 다시 알린다
+            _dest_state['warned'] = key
+            print(f"[service-log] 기록 목적지 미가용 — 건너뜁니다 ({path}: {e}). "
+                  f"공유 스토리지를 아직 마운트하지 않았다면 정상입니다. "
+                  f"{_DEST_RETRY_SEC}초마다 재확인하며, 가용해지면 재기동 없이 재개됩니다.",
+                  flush=True)
+        return False
+    if not _dest_state['ok']:
+        _dest_state['ok'] = True
+        _dest_state['warned'] = ''
+        print(f"[service-log] 기록 목적지 복구 — 기록 재개 ({path})", flush=True)
+    return True
 
 
 def _ts_hms() -> str:
@@ -186,7 +229,8 @@ def _hour_dir() -> str:
         return ""
     yyyy, mm, dd, hh = _ymdh()
     d = os.path.join(_service_log_dir, yyyy, mm, dd, hh)
-    _ensure_dir(d)
+    if not _dest_ready(d):
+        return ""            # 호출부는 빈 문자열이면 기록을 건너뛴다
     return d
 
 
