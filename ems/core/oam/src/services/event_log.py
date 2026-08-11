@@ -16,6 +16,12 @@ _SUBDIR = 'events'
 
 def record_event(service_log_dir: str, event: dict) -> None:
     daily_jsonl.record(service_log_dir, _SUBDIR, event)
+    # 라이브 통지(SSE) — 이벤트 스트림 변경 nudge (alarm_pipeline.md §8.2 P1). best-effort.
+    try:
+        from services.live_bus import LIVE_BUS
+        LIVE_BUS.publish({'stream': 'events', 'record': event})
+    except Exception:
+        pass
 
 
 def read_recent(service_log_dir: str, days: int = 7,

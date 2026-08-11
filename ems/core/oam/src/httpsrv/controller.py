@@ -12,6 +12,10 @@ from util.log_util import Logger
 
 
 def _http_response(accept_format: str, result: HandlerResult) -> Response:
+    # 핸들러가 raw starlette Response(StreamingResponse 등)를 직접 넘긴 경우 그대로 반환 —
+    # SSE(text/event-stream) 라이브 스트림 경로 (alarm_pipeline.md §8.2 P1).
+    if result.response is not None:
+        return result.response
     status, body, headers, media = result.status, result.body, result.headers, result.media_type
     if body is None:
         return Response(status_code=status, headers=headers)

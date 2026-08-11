@@ -182,7 +182,8 @@ api client 가 토큰을 동봉한다.
 |---|---|---|---|
 | 활성 알람 | `/alerts/active` | `/alerts`(openOnly 접기) | 열린 알람 목록 — ack/comment 조작 |
 | 알람·이벤트 이력 | `/alerts/history` | `/alerts`·`/events` | 알람 탭 + 이벤트 탭(type/kind 필터) — 스트림을 화면에서도 분리(표준화 §3.6) |
-| 활성 알람 위젯 | `cims.active-alarms`(기본 대시보드 최상단) | `/alerts` | `computeActive` 접기 재사용 |
+| 활성 알람 위젯 | `cims.active-alarms`(기본 대시보드 1단) | `/alerts`(+ `/alerts/stream` 라이브) | severity 요약 타일(6단계)+활성 목록. `foldActive` 접기 재사용, 타일 클릭 필터, ack 인라인. 배너 역할 흡수(critical/major 강조) |
+| 최근 이벤트 위젯 | `cims.recent-events`(기본 대시보드 2단) | `/events`(+ `/alerts/stream` 라이브) | kind 요약 타일(STC/AUD)+이벤트 목록(code/mo/message/ts). 알람과 분리된 스트림 표시(§3.6) |
 | 배너 | AlertBanner(활성 위젯에 흡수) | `/alerts` | critical/major 만 |
 | 토폴로지 상태색 | SystemTopologyWidget | `/alerts` | mo_instance 별 최고 severity 로 노드/모듈 칩 채색 |
 | 알람 카탈로그 | `/alerts/catalog` (장애 메뉴) | `/alerts/catalog` | 코드 사전 — code·type·severity·effect·recommended_action 열람(운영 사전·POD 의 화면 대응물). rule + 모듈 등록분 병합 |
@@ -193,9 +194,14 @@ api client 가 토큰을 동봉한다.
 운영자가 어느 화면에 있든 신규 critical/major 를 놓치지 않는 것이 목적(NOC 알람 배너 관례).
 
 1. **전역 알람 store (구독 1원화)** — 셸 상주 모듈 싱글톤(`useAlarms`)이 `/alerts` 를
-   주기 폴링(10s — 스윕 30s·FM push 실시간의 절충)하고 §8.3 접기 규율(`foldActive`)로
-   활성 상태를 유지한다. 위젯(활성 알람·배너·토폴로지)도 개별 fetch 없이 이 store 를
-   구독한다 — 표시 일관성 + 요청 수 절감. 미로그인(토큰 부재) 시 폴링을 건너뛴다.
+   §8.3 접기 규율(`foldActive`)로 접어 활성 상태를 유지한다. 위젯(활성 알람·최근 이벤트·
+   배너·토폴로지)도 개별 fetch 없이 이 store 를 구독한다 — 표시 일관성 + 요청 수 절감.
+   미로그인(토큰 부재) 시 갱신을 건너뛴다.
+   갱신 경로 두 겹: **① 라이브 push(주)** — SSE `/alerts/stream` 을 구독해 알람/이벤트
+   변경 프레임이 오면 해당 스트림을 **즉시 재조회**(변경 nudge — 부분 레코드로 fold 를
+   재구현하지 않아 정확). **② 폴링 fallback** — 알람 10s·이벤트 60s 주기 재조회로 SSE
+   재연결 공백·프록시 버퍼링을 메운다. 대시보드 위젯은 ①로 라이브다(이력 페이지
+   `/alerts/history` 는 조회 성격이라 폴링/쿼리 그대로).
 2. **헤더 상시 인디케이터** — 활성 요약 배지(최고 severity 색 + 건수). 클릭 시 드로어
    (활성 알람 목록 + 최근 이벤트 탭 — ack/이동 가능). **0건이어도 회색 배지를 상시
    표시한다** — "표시 없음 = 정상"과 "표시 없음 = 표시 고장"을 구분(observability_lost 와
@@ -210,9 +216,17 @@ api client 가 토큰을 동봉한다.
 
 - **신규 판정은 alarm_id 기준 high-water mark** — 폴링 중복·재통지(×N)를 새 알람으로
   오인하지 않는다. 토스트/배지도 §8.3 판독 규율(접기·미지 action 무시)을 공유한다.
-- **전송 단계**: 현행 = 위 폴링 구조(서버 무변경). P1 = SSE `GET /alerts/stream` — 수렴점
-  (§4.2)에 구독자 hook 을 달아 push, 폴링은 fallback 유지(재연결·프록시 대비). 단방향
-  통지라 WebSocket 은 두지 않는다. OAM httpsrv 의 long-lived 응답 지원 확인이 선행.
+- **전송 단계 (구현)**: SSE `GET /api/v1/alerts/stream` (text/event-stream). 수렴점의
+  append 함수(`services/alert_log.record_event`·`event_log.record_event`)가 in-process
+  브로커 `services/live_bus.LIVE_BUS.publish()` 로 변경을 흘리고, SSE 핸들러
+  (`handlers/alerts._sse_stream`)가 구독자 asyncio 큐로 fan-out 한다. writer(FM ingest·
+  sweeper 스레드)와 SSE(HTTP asyncio 루프)가 서로 다른 스레드라 `loop.call_soon_threadsafe`
+  로 크로스-스레드 핸드오프하며, 큐 포화 시 드롭한다(nudge 성격이라 무해). 20s 하트비트
+  (`: ping`)로 keep-alive + 절단 감지. `controller._http_response` 가 `HandlerResult.response`
+  의 raw `StreamingResponse` 를 그대로 통과시킨다. 인증은 콘솔이 `fetch`+`ReadableStream`
+  으로 Authorization 헤더를 동봉(EventSource 의 토큰 URL 노출 회피). 단방향 통지라
+  WebSocket 은 두지 않는다. 분리 배포(role=base)에서는 SSE 가 oam-svc 에 있고 base
+  게이트웨이가 버퍼링 없이 통과시켜야 한다(`X-Accel-Buffering: no`).
 
 ### 8.3 판독 규율 (표시단 공통)
 

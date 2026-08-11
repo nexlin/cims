@@ -100,6 +100,41 @@ def _parse_body(handler_args):
     return {}
 
 
+def _sse_stream() -> HandlerResult:
+    """SSE(text/event-stream) 응답 — live_bus 구독 → 변경 레코드를 프레임으로 흘린다.
+
+    각 프레임 `data: {"stream":"alerts|events","record":{...}}`. 20초 무변경 시 `: ping`
+    하트비트로 연결 유지 + 죽은 연결 감지. 클라이언트 절단 시 generator 취소 → 구독 해제.
+    """
+    import asyncio
+    import json as _json
+    from starlette.responses import StreamingResponse
+    from services.live_bus import LIVE_BUS
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+    sid = LIVE_BUS.subscribe(loop, queue)
+
+    async def gen():
+        try:
+            yield b': connected\n\n'
+            while True:
+                try:
+                    rec = await asyncio.wait_for(queue.get(), timeout=20)
+                    yield f'data: {_json.dumps(rec, ensure_ascii=False)}\n\n'.encode('utf-8')
+                except asyncio.TimeoutError:
+                    yield b': ping\n\n'   # 하트비트 — keep-alive + 절단 감지
+        finally:
+            LIVE_BUS.unsubscribe(sid)
+
+    resp = StreamingResponse(gen(), media_type='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',   # nginx/게이트웨이 버퍼링 방지(스트리밍 통과)
+        'Connection': 'keep-alive',
+    })
+    return HandlerResult(response=resp)
+
+
 async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     config = kwargs.get('config', {})
     method = handler_args.method.upper()
@@ -153,6 +188,12 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 
     if method != 'GET':
         return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+    # 라이브 스트림(SSE) — 알람/이벤트 변경을 실시간 push (alarm_pipeline.md §8.2 P1).
+    # 콘솔 대시보드 store 가 이 신호를 받아 /alerts·/events 를 즉시 재조회한다(라이브).
+    # 인증은 위 require_auth 에서 이미 강제(fetch+ReadableStream 이 Authorization 헤더 동봉).
+    if parts and parts[0] == 'stream':
+        return _sse_stream()
 
     def qp(name, default=None):
         v = qs.get(name)

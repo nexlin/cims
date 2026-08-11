@@ -18,6 +18,12 @@ _SUBDIR = 'alerts'
 def record_event(service_log_dir: str, event: dict) -> None:
     """이벤트 1건을 일별 jsonl 에 append. event 에 'ts' 없으면 현재시각으로 채움."""
     daily_jsonl.record(service_log_dir, _SUBDIR, event)
+    # 라이브 통지(SSE) — 알람 스트림 변경 nudge (alarm_pipeline.md §8.2 P1). best-effort.
+    try:
+        from services.live_bus import LIVE_BUS
+        LIVE_BUS.publish({'stream': 'alerts', 'record': event})
+    except Exception:
+        pass
 
 
 def read_recent(service_log_dir: str, days: int = 7,

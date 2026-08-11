@@ -166,12 +166,76 @@ function pollEvents() {
     .catch(() => {})
 }
 
+// ── 라이브 스트림(SSE) ─────────────────────────────────────────────────────
+//   대시보드 store 는 라이브여야 한다(§8.2 P1). OAM `/alerts/stream` 이 알람/이벤트 변경을
+//   text/event-stream 으로 push 하면, 그 신호를 "변경 발생" nudge 로 받아 해당 스트림을 즉시
+//   재조회한다 — 부분 레코드로 fold 를 재구현하지 않아 정확·안전(폴링과 동일 경로). 폴링은
+//   재연결 공백·프록시 대비 fallback 으로 유지. EventSource 대신 fetch+ReadableStream 을 써
+//   Authorization 헤더로 인증(EventSource 는 커스텀 헤더 불가 → 토큰 URL 노출 회피).
+const SSE_URL = '/api/v1/alerts/stream'
+let sseAbort: AbortController | null = null
+let sseBackoff = 1000
+let nudgeTimer: ReturnType<typeof setTimeout> | null = null
+let nudgeAlerts = false, nudgeEvents = false
+
+function nudge(stream: string) {
+  if (stream === 'events') nudgeEvents = true; else nudgeAlerts = true
+  if (nudgeTimer) return
+  nudgeTimer = setTimeout(() => {   // 버스트 합치기(250ms) — 한 번에 재조회
+    nudgeTimer = null
+    if (nudgeAlerts) { nudgeAlerts = false; pollAlerts() }
+    if (nudgeEvents) { nudgeEvents = false; pollEvents() }
+  }, 250)
+}
+
+async function runSse() {
+  if (!hasToken()) return
+  const token = (() => { try { return localStorage.getItem('cims_token') } catch { return null } })()
+  if (!token) return
+  sseAbort = new AbortController()
+  const res = await fetch(SSE_URL, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+    signal: sseAbort.signal,
+  })
+  if (!res.ok || !res.body) throw new Error(`sse ${res.status}`)
+  sseBackoff = 1000   // 연결 성공 → 백오프 리셋
+  const reader = res.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) throw new Error('sse closed')
+    buf += dec.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, idx); buf = buf.slice(idx + 2)
+      const dataLine = frame.split('\n').find(l => l.startsWith('data:'))
+      if (!dataLine) continue   // 주석/하트비트(: ping) — 무시
+      try {
+        const rec = JSON.parse(dataLine.slice(5).trim())
+        nudge(rec?.stream || 'alerts')
+      } catch { nudge('alerts') }
+    }
+  }
+}
+
+function startSse() {
+  if (!hasToken()) { setTimeout(startSse, 5000); return }   // 로그인 대기
+  runSse().catch(() => {}).finally(() => {
+    // 재연결 — 지수 백오프(최대 15s). 폴링 fallback 이 그동안 공백을 메운다.
+    const delay = sseBackoff
+    sseBackoff = Math.min(sseBackoff * 2, 15000)
+    setTimeout(startSse, delay)
+  })
+}
+
 function start() {
   if (started) return
   started = true
   pollAlerts(); pollEvents()
   setInterval(pollAlerts, ALERT_POLL_MS)
   setInterval(pollEvents, EVENT_POLL_MS)
+  startSse()   // 라이브 push — 변경 즉시 재조회
 }
 
 export function refreshAlarms() {   // ack 등 조작 직후 즉시 반영용

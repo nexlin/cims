@@ -111,6 +111,7 @@ export interface AlarmCatalogItem {
 export interface EventRecord {
   ts: string
   type: string                  // process_started / config_reloaded / ...
+  code?: string                 // E-STC-* / E-AUD-* (재정의 이벤트 코드 — kind=DOMAIN 약어 STC/AUD)
   kind?: 'stateChange' | 'audit' | string
   source?: AlertSource
   message: string

@@ -10,7 +10,8 @@ export const DASHBOARD_LAYOUT: PageLayout = {
   title: '대시보드',
   widgets: [
     { widgetId: 'cims.active-alarms', h: 26 },                   // 1단: 활성 알람 (표준 알람 스트림) ★ 최상단
-    { widgetId: 'core.system-topology', w: 6, h: 46 },           // 2단: 시스템 형상(½) + 리소스(½) 나란히
+    { widgetId: 'cims.recent-events', h: 26 },                   // 2단: 최근 이벤트 (알람과 분리된 stateChange/audit 스트림)
+    { widgetId: 'core.system-topology', w: 6, h: 46 },           // 3단: 시스템 형상(½) + 리소스(½) 나란히
     { widgetId: 'core.system-resource', w: 6, h: 46 },
     { widgetId: 'cims.kpi' },                                    // 3단: KPI (가입자/번호/통화/PTT/RTP) — 자동 높이
     { widgetId: 'cims.active-voip', w: 6, h: 31 },               // 4단: 활성 VoIP(½) + PTT(½)
