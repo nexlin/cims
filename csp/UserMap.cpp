@@ -108,9 +108,18 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
     } else {
         // SIP REGISTER 를 제외한 요청에서 IP 주소 또는 포트 번호가 변경된 경우, m_iLoginTimeout 를 0 으로 저장하지 않기
         // 위해서 각 멤버별로 저장함
-        itMap->second.m_strIp = clsInfo.m_strIp;
-        itMap->second.m_iPort = clsInfo.m_iPort;
-        itMap->second.m_eTransport = clsInfo.m_eTransport;
+        //
+        // 단, latch(received/rport)는 UDP 도달 주소를 추적한다 — 단말이 대형 요청을 RFC 3261
+        // §18.1.1 로 TCP 승격해 보내는 경우(예: multipart 조인 INVITE), 그 TCP 소스 포트로
+        // latch 를 덮으면 서버 발신(NOTIFY·fan-out INVITE, UDP)이 TCP 플로우 주소로 나가
+        // NAT 미매핑으로 전량 유실된다(08-11 실측: 통화 구간 NOTIFY 불달 → 로스터 stale).
+        // REGISTER 는 등록 바인딩의 정의이므로 transport 그대로 신뢰하고, 비REGISTER 는
+        // UDP 소스일 때만 갱신한다.
+        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) || pclsMessage->m_eTransport == E_SIP_UDP ) {
+            itMap->second.m_strIp = clsInfo.m_strIp;
+            itMap->second.m_iPort = clsInfo.m_iPort;
+            itMap->second.m_eTransport = clsInfo.m_eTransport;
+        }
         itMap->second.m_strGroupId = clsInfo.m_strGroupId;
         // 재등록 갱신 — REGISTER 에서만 capability·Contact 재평가 (비REGISTER 갱신은 Contact 미포함)
         if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
