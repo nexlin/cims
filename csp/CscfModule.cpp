@@ -514,6 +514,17 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         if ( strReqUriUser.empty() && !clsPrev.strResourceId.empty() ) strReqUriUser = clsPrev.strResourceId;
         bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
     }
+    // 재기동 직후의 in-dialog refresh: R-URI 에 자원이 없고(위 주석 — remote target) 이전 기록도
+    //   없다(구독 상태는 메모리 — 재기동으로 소실). 이대로 수립하면 자원 없는 구독이 되어
+    //   NOTIFY 가 빈 entity/빈 roster 로 나가고 구독자 로스터(채널 접속 인원)가 영구 stale
+    //   된다(08-11 실측). 구독 자원 = To URI(초기 SUBSCRIBE 의 R-URI 보존값, RFC 6665)이므로
+    //   To 에서 복원한다.
+    if ( strReqUriUser.empty() && !pclsMessage->m_clsTo.m_clsUri.m_strUser.empty() ) {
+        strReqUriUser = pclsMessage->m_clsTo.m_clsUri.m_strUser;
+        bAffiliation = gclsGroupMap.Contains( strReqUriUser.c_str() );
+        CLog::Print( LOG_INFO, "SUBSCRIBE refresh without state — resource restored from To URI (%s, user=%s)",
+                     strReqUriUser.c_str(), strFromId.c_str() );
+    }
 
     int iExpires = pclsMessage->GetExpires();
 
@@ -568,8 +579,14 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     //   새 tag 를 200 OK/후속 NOTIFY 에 실으면 구독자 dialog 와 remote tag 가 어긋나
     //   NOTIFY 가 481 로 거절되고 구독이 죽는다(RFC 6665 §4.1.2.2).
     char szToTag[64];
+    std::string strReqToTag;
+    pclsMessage->m_clsTo.SelectParam( SIP_TAG, strReqToTag );
     if ( bRefresh && !clsPrev.strToTag.empty() ) {
         snprintf( szToTag, sizeof( szToTag ), "%s", clsPrev.strToTag.c_str() );
+    } else if ( !strReqToTag.empty() ) {
+        // 상태 없는(재기동 후) in-dialog refresh — 구독자 dialog 의 remote tag(요청 To tag)를
+        //   그대로 승계해야 후속 NOTIFY 가 구독자 스택에서 481(dialog 불일치)로 거절되지 않는다.
+        snprintf( szToTag, sizeof( szToTag ), "%s", strReqToTag.c_str() );
     } else {
         SipMakeTag( szToTag, sizeof( szToTag ) );
     }
