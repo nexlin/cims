@@ -391,8 +391,21 @@ config.json 에 실체화한다. 대상은 두 부류다:
 
 | 선언 | 모듈 | 주입 값 |
 |---|---|---|
-| `meta.gateway.routes` | csc, oam-svc | JwtSecret · CimsRuntimeDir · Mgmt.Cidr · (빈 경우) ServiceLogging.Dir |
+| `meta.gateway.routes` | csc, oam-svc | JwtSecret · Mgmt.Cidr · (빈 경우) ServiceLogging.Dir |
+| `safety.requires_leader_lease` | oam, oam-svc | 위 + **CimsRuntimeDir**(관리 store 경로) |
 | `meta.shared_identity` | **base `oam`** | 위 + `CimsAuth.BuiltinAccounts` |
+
+**관리 store 경로(`CimsRuntimeDir`)는 리스 보유 모듈에만 준다.** 공유 store 는 소유권
+리스(flock+epoch)를 쥔 하나만 write 하는 자원인데, `csc` 같은 서비스 모듈은 리스 획득
+코드가 없다 — 경로만 받아두면 IdMS 가 토큰을 발급하는 순간(`auth_codes`·`refresh_tokens`)
+**펜싱 없는 두 번째 writer** 가 된다. 판별자는 descriptor 의
+`safety.requires_leader_lease`(= "이 모듈은 단일 writer 자원을 소유한다" 선언)이고,
+descriptor 를 못 읽으면 주지 않는다(잘못 주는 쪽이 손상이므로 보수적으로).
+
+서비스 모듈은 **노드 로컬 runtime** 을 쓴다. 그 대가로 절체 시 그 모듈의 로컬 상태는
+유실된다 — csc IdMS 의 `auth_codes`·`refresh_tokens` 가 사라져 **단말이 재로그인**한다.
+관리평면 이중화의 목적은 관리 데이터(agent 등록·배포 기록)를 절체 너머로 잇는 것이지
+서비스 모듈의 세션 상태까지 잇는 것이 아니다.
 
 **패키지에는 시크릿을 동봉하지 않는다.** 하드코딩 상수는 예측 가능해서 그 값으로 뜬 노드의
 토큰이 위조될 수 있다. 해석 순서는 **설정(overlay/oam.json) → `_secrets/jwt_secret` →

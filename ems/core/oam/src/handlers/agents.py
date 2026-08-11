@@ -196,6 +196,23 @@ def _prune_to_template(values, pkg_file, *, where: str) -> tuple:
     return {k: v for k, v in values.items() if k in keys}, dropped
 
 
+def _module_holds_lease(config, pkg_file) -> bool:
+    """이 패키지의 모듈이 **관리 store 의 리스 보유자**인가 (descriptor `safety.
+    requires_leader_lease`). 공유 store 경로를 줄 대상을 가르는 기준이다 — 서비스 모듈
+    (csc 등)은 리스 획득 코드가 없어 경로만 받으면 펜싱 없는 두 번째 writer 가 된다.
+    descriptor 를 못 읽으면 **주지 않는다**(보수적: 잘못 주는 쪽이 손상이다)."""
+    name = ((pkg_file or {}).get("name") or "").lower().strip() if isinstance(pkg_file, dict) else ""
+    if not name:
+        return False
+    try:
+        from services import service_registry
+        spec = (service_registry.all_modules(config) or {}).get(name) or {}
+        return bool((spec.get("safety") or {}).get("requires_leader_lease"))
+    except Exception as e:
+        logger.log_warning(f"[config] {name}: 리스 보유 판정 실패({e}) — store 경로 미주입")
+        return False
+
+
 def _materialize_deploy_config(config, pkg_file, overlay):
     """배포 config 실체화 — agent 가 쓰는 config.json 이 항상 완전한 유효설정이 되도록
     config_template default 를 base 로 깔고 deployment overlay(사용자 변경분)를 병합.
@@ -229,13 +246,23 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             secret = (config.get("CimsAuth") or {}).get("JwtSecret")
             if secret:
                 out["CimsAuth.JwtSecret"] = secret
+            # 관리 store 경로는 **리스 보유 모듈에만** 준다. 공유 store 는 소유권 리스
+            # (flock+epoch)를 쥔 하나만 write 하는 자원인데, csc 같은 서비스 모듈은 리스
+            # 획득 코드가 없다 — 경로만 받아두면 IdMS 가 토큰을 발급하는 순간 **펜싱 없는
+            # 두 번째 writer** 가 된다. 판별자는 descriptor 의 `safety.requires_leader_lease`
+            # (= "이 모듈은 단일 writer 자원을 소유한다" 선언, oam/oam-svc 만 true).
+            # 서비스 모듈은 노드 로컬 runtime 을 쓴다 — 절체 시 그 모듈의 로컬 상태
+            # (csc IdMS 의 auth_codes·refresh_tokens 등)는 유실되고 단말이 재로그인한다.
+            #
             # store 경로는 **overlay 명시값이 우선**이다. base 를 무조건 덮어쓰면 이관
             # (overlay 에 새 경로를 넣는 작업)이 무력화된다 — 실측 사고: 이관이 overlay 에
             # `CimsRuntimeDir=/NAS/runtime` + `CimsRuntimeMount=/NAS` 를 넣었는데 여기서
             # base(로컬 경로)가 Dir 만 되돌려, "store 가 마운트 하위가 아님" guard 에 걸려
             # OAM 이 기동을 거부했다(자가복구가 되돌려 콘솔은 살아남음).
             # overlay 에 값이 없을 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
-            if config.get("CimsRuntimeDir") and not str(out.get("CimsRuntimeDir") or "").strip():
+            if _module_holds_lease(config, pkg_file) \
+                    and config.get("CimsRuntimeDir") \
+                    and not str(out.get("CimsRuntimeDir") or "").strip():
                 out["CimsRuntimeDir"] = config["CimsRuntimeDir"]
             if (config.get("Mgmt") or {}).get("Cidr"):
                 out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
