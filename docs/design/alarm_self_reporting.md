@@ -227,7 +227,7 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 
 ## 8. 향후 단계
 
-- **P2 — northbound**: 표준화 §7.2 그대로 — self 알람도 동일 code 매핑으로 자동 편입.
+- **P2 — northbound**: 표준화 §7.3 그대로 — self 알람도 동일 code 매핑으로 자동 편입.
 
 ## 9. 잔여 논점
 

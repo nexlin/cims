@@ -10,7 +10,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   Manager(NMS)로 보고하는 인터페이스. CIMS 가 향후 상위 NMS 와 연동할 때의 정합 기준.
 - **ITU-T X.733** — *Systems Management: Alarm reporting function.* 위 IRP 가 기반하는 알람(장애) 속성 모델.
 - **ITU-T X.730 / X.731** — *Object Management / State Management.* 정상 동작 통지(객체 생성·삭제, **stateChangeNotification**) — 알람과 구분되는 **이벤트** 규격(§3.6).
-- **IETF RFC 3877** — *Alarm Management Information Base (MIB).* X.733 의 SNMP 표준화 — 알람 정의 카탈로그(`alarmModelTable`) + 활성 알람(`alarmActiveTable`) 분리. 향후 SNMP/NMS northbound 연동 기준(§7.2).
+- **IETF RFC 3877** — *Alarm Management Information Base (MIB).* X.733 의 SNMP 표준화 — 알람 정의 카탈로그(`alarmModelTable`) + 활성 알람(`alarmActiveTable`) 분리. 향후 SNMP/NMS northbound 연동 기준(§7.3).
 - (참고) **ITU-T M.3100 / X.736 / X.740** — 관리객체 모델 / 보안 알람 / 보안감사(audit) 통지.
 
 ### 1.1 X.733 핵심 알람 속성
@@ -261,7 +261,7 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 
 - **P0 — 분류 체계 + 코드/소스** (본 설계의 §3.1~3.4): `code`(카탈로그) · perceived_severity(6) · event_type(5) · probable_cause · source(mo_class/mo_instance/detected_by) · `alarm_id`(occurrence) · (선택) `effect`/`action`(runbook, §7.1). 규칙/이벤트/API(+/catalog)/UI/폼 전파. 하위호환.
 - **P1 — 라이프사이클**: ackState/ackTime/ackUser + clearTime 명시 + `POST /alerts/ack {alarm_id}` API + UI 승인 버튼 + 코멘트(`POST /alerts/comment`, §3.2). 운영 감사추적.
-- **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조 — 첫 실사용처: L1 `process_down` ↔ L3 `service_unresponsive`, §3.4(b)), **SNMP/NMS northbound**(§7.2, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
+- **P2 — 상관/연동**: correlatedNotifications(연관 알람, alarm_id 참조 — 첫 실사용처: L1 `process_down` ↔ L3 `service_unresponsive`, §3.4(b)), **SNMP/NMS northbound**(§7.3, RFC3877 alarmModel ↔ code 매핑 + 32.111 IRP / VES alarmCondition 매핑).
 
 ## 6. 하위호환·이행
 
@@ -305,7 +305,25 @@ change 를 활성 행의 현재값 갱신으로 처리한다 (새 행 ❌, close
 | `CIMS-COM-001` connection_lost | 의존 자원(DB/트렁크) 사용 기능 저하 | 연결성/방화벽/원격 노드 상태 확인 |
 | `CIMS-QOS-001` threshold_crossed | 용량 임계 근접 — 추가 부하 시 실패 위험 | 사용량 원인 파악, 자원 증설/정리 |
 
-### 7.2 보강 — SNMP / NMS northbound 매핑 (P2)
+### 7.2 보강 — 사내 벤치마크: vIBCF/TrGW POD 대조
+
+사내 타 시스템 vIBCF/TrGW 의 알람 정의서(POD)를 md 로 변환해 보존한다 —
+[vibcf_pod_alarms.md](vibcf_pod_alarms.md) (알람 32종 + Fault/상태 메시지 79종, 코드별
+조치사항 포함). CIMS 모델과의 대조와 채용 포인트:
+
+| 관점 | vIBCF/TrGW | CIMS | 판단 |
+|---|---|---|---|
+| 스트림 분리 | **A**(알람)/**F**(Fault — 호처리 이상 로그, FAULT/WARNING/INFO)/**S**(상태·통계 알림) 3분리 | 알람 vs 이벤트(stateChange/audit) 2분리, 요청 단위 이상은 로그/PM 소관(§3.6) | 동형. 단 vIBCF 는 요청 단위 이상(F 계열 — SIP syntax error, dialog 초과 등)도 **코드화해 운영자 스트림으로 노출**한다 — CIMS 가 "로그 소관"으로 제외한 영역의 운영 노출 필요성 검토 여지(이벤트 kind 확장 또는 PM 위임 유지) |
+| 조건 클래스 | 타입 인덱스(CommunicationFail/DatabaseError/QueueFull…) — code 와 분리 | type/code 1:1 (§3.4) | 동형. 단 vIBCF 는 리소스별 분리(CPUOverflow/DiskOverload/MemoryOverflow) — CIMS §3.5 가 안티패턴으로 정리한 축(threshold_crossed 하나 + mo)이 맞다 |
+| severity | CLEARED+MINOR/MAJOR/CRITICAL "가변", 단계 임계 70/80/90 을 설명 템플릿에 명시(`CPU load is A% (CRI:B,MAJ:C,MIN:D)`) | thresholds 단계(80/90/95) + action=change + threshold_info(§3.2) | 동형 — 관측값·임계 동반 표기는 threshold_info 로 이미 수용 |
+| 발생 위치 | `서버명/프로세스명`·`서버명/DISK/파티션명` 경로 | mo_instance DN-유사 경로(§3.4(b)) | 동형 |
+| **조치사항** | **전 알람 코드에 다단계 조치 절차**(확인 경로·설정 파일·해제 메뉴까지) | effect/recommended_action 선택 필드(§7.1) — 현행 카탈로그는 1줄 수준 | **채용** — 카탈로그(fm_catalog·rule)의 recommended_action 을 절차 수준으로 강화하고 콘솔 상세에 노출. POD 문서 산출물(코드별 1페이지) 자체가 운영 이관 규격이라는 점도 참고(카탈로그 CSV → POD 생성 후보) |
+| 감시 항목 | NTP 3종(Delay/Offset/Status), 성공률(SuccessFailError), CPS/세션/채널 과부하 세분, Manual Block 상태 알람, 절체 알림(S3001~5) | NTP 없음(검사 코드 부재), 성공률 없음, overload 1클래스, 수동 개입은 node_maintenance 이벤트+redundancy_degraded reason, ha_switchover 이벤트 후보 | **채용 2건**: ①NTP 시각 동기 이상 — vIBCF 가 3클래스로 운영할 만큼 실운영 가치 검증됨 → AGENT 후보(선행 필요)로 카탈로그 편입(CIMS 는 threshold_crossed 로 통합) ②호 성공률/응답률 임계(SuccessFailError 상당) — §3.6 원칙상 "율 임계 전이"로 허용 가능하나 CSP 통계 카운터 관측 지점 확인 선행 — 검토 후보로만 기록 |
+
+> vIBCF POD 원문의 A0000 "메시지 설명"이 CPU 문구로 오기재된 것 등 원문 결함은 변환본에
+> 그대로 보존했다(원문 보존 원칙).
+
+### 7.3 보강 — SNMP / NMS northbound 매핑 (P2)
 
 상위 NMS 연동 시 `code` 를 표준 식별자로 매핑:
 - **RFC 3877 alarmModel**: `code` → `alarmModelIndex`(정수, 도메인별 범위 예약) + perceived_severity → `alarmModelState`. 활성 알람 → `alarmActiveTable`(alarm_id).
