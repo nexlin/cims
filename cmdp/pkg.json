@@ -1,7 +1,7 @@
 {
   "name": "cmdp",
   "description": "CIMS MCData Media Plane — MSRP 종단 (TS 24.282 SDS over media plane) + FD 스토어 연동",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "ha_capability": "all_active",
   "service": {
     "functions": [

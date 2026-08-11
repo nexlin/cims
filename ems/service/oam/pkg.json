@@ -1,7 +1,7 @@
 {
   "name": "oam-svc",
   "description": "CIMS oam-svc — 서비스 관측/관리 모듈 (서비스 KPI·녹취·SIP flow·S1~S6 검증). base OAM 게이트웨이 뒤 loopback 독립 모듈 (oam_base_service_split D5)",
-  "version": "0.2.87",
+  "version": "0.2.88",
   "ha_capability": "active_standby",
   "gateway": {
     "default_port": 4480,
