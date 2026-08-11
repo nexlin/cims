@@ -81,7 +81,7 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
   주기 probe(접근 불가)가 **같은 활성 알람의 상보 감지 경로**라 활성키를 공유한다(probe 가
   close 정본).
 - 대상(외부 객체)과 component 는 공존할 수 있다: `대상=DB, component=db/query` →
-  `cims/csp/<node>/db/query`.
+  `<서버명>/csp/db/query`.
 - 프로세스 자체가 객체인 이벤트(process_started 등)는 component 도 비운다.
 
 ### 2.3 type 체계 — 조건 클래스 카탈로그 (★)
@@ -150,17 +150,20 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 ## 3. mo_instance 매핑
 
 CSV 컬럼이 wire/저장 레코드의 `source.mo_instance` 를 구성한다
-(alarm_self_reporting §4 의 `cims/<module>/<node>[/<component>]`):
+(표준화 §3.4(b) 소유 주체 루트 — 자기보고는 `<서버명>/<module>[/<component>]`):
 
 ```
-cims / <instance> / <source_system> / <component>              ← 대상 비움
-cims / <instance> / <source_system> / <대상-키>[/<component>]  ← 대상 있음
-  예) cims/csp/SIG_SVR_01/db                       ← 대상 DB, component=db
-      cims/csp/SIG_SVR_01/db/query                 ← 대상 DB, component=db/query
-      cims/csp/SIG_SVR_01/cmp/192.168.1.10:9000    ← 대상 CMP_01, component=cmp/<ep>
-      cims/csp/SIG_SVR_01/call_dir                 ← 대상 비움, 내부 component
-      cims/csp/SIG_SVR_01                          ← 이벤트 등 component 도 비움
+<source_system> / <instance> / <component>              ← 대상 비움
+<source_system> / <instance> / <대상-키>[/<component>]  ← 대상 있음
+  예) SIG_SVR_01/csp/db                       ← 대상 DB, component=db
+      SIG_SVR_01/csp/db/query                 ← 대상 DB, component=db/query
+      SIG_SVR_01/csp/cmp/192.168.1.10:9000    ← 대상 CMP_01, component=cmp/<ep>
+      SIG_SVR_01/csp/call_dir                 ← 대상 비움, 내부 component
+      SIG_SVR_01/csp                          ← 이벤트 등 component 도 비움
 ```
+
+구현 현행 wire/저장은 구 형식(`cims/<instance>/<source_system>/...`) — 전환은 표준화 §6
+mo 루트 개편 규율(스윕 이행 종결 + 재발화)을 따른다.
 
 - 활성 알람 식별키는 `(정의 코드, mo_instance)` 다. 같은 클래스(type)를 여러 조건에
   재사용하는 행들은 `component` 컬럼(§2.2)이 행과 활성키를 분리한다 — 컬럼 불변식 위반 =
@@ -168,8 +171,9 @@ cims / <instance> / <source_system> / <대상-키>[/<component>]  ← 대상 있
 - 노드 분리를 빠뜨리면 HA 다중 인스턴스에서 활성키가 충돌한다 (cmp 변종 pmp/imp 의
   SystemId overlay 필수 사유와 동일).
 - **AGENT/OAM 행의 mo 는 위 규칙이 아니라 sweeper 합성 규칙을 따른다** — agent 계열
-  `<host>/<module|disk|…>`, 서비스 probe `cims/<target>`, HA fan-out `cims/ha/g<gid>/<collection>`
-  (표준화 §3.4(b)). CSV 의 `instance` 컬럼은 어느 쪽이든 **발신(감지) 모듈**이다.
+  `<서버명>/<module|disk|…>`, 서비스 probe 는 관측 신원 기준 `<서버명>|<그룹명>/<모듈>`,
+  HA fan-out `<그룹명>/config/<collection>` (표준화 §3.4(b)). CSV 의 `instance` 컬럼은
+  어느 쪽이든 **발신(감지) 모듈**이다.
 - `detected_by` 는 CSV 에 컬럼을 두지 않는다 — `instance`(감지 모듈)가 주체 클래스를
   결정한다 (CSP/CMP/CMDP/CSC→`self`, AGENT→`agent`, OAM-SVC→`oam-svc`, OAM→`oam`).
 - `source_system` 예시 표기: `SIG_SVR_01`(csp 계열) · `MED_SVR_01`(cmp/cmdp) ·
@@ -365,7 +369,7 @@ MsrpWorkerCount 사실상 무효(`:589,593,789` — 리액터 사망 판정은 �
 CSV `구현` 행 일치" 규약(§4)의 현행 유일 예외). 원인: csp 런타임 설정 CUD 가 OAM 으로
 이관돼 잔재만 남음. 배선처는 CSC 가 실제 소유한 CUD(가입자/그룹/조직 — admin 13 + org 5
 = 18개 지점 실측) + mo 규약 교정(`cims/csp/config/*` 오기재 →
-`cims/csc/<node>/config/<entity>`) + entity 어휘 신설(현행 `_CONFIG_EVENT_BY_ENTITY` 는
+`<서버명>/csc/config/<entity>`) + entity 어휘 신설(현행 `_CONFIG_EVENT_BY_ENTITY` 는
 listener/trunk/route/access — CSP 잔재).
 
 **자기보고 대상이 아닌 것**: 통화이력/flow API(CSC 미서빙 — OAM 소관), FM 채널 자기장애,

@@ -155,7 +155,12 @@ CSC 는 결과에 따라 다음을 자동 처리:
   ],
   "processes": [
     {"name":"csp","pid":12345,"cmdline":"..."}
-  ]
+  ],
+  "module_events": [
+    {"module":"cmp","event":"process_died"}
+  ],
+  "cfg_hashes": {"csp": "c40e66e87ce3"},
+  "ha_transitions": 0
 }
 ```
 
@@ -165,6 +170,12 @@ CSC 는 결과에 따라 다음을 자동 처리:
 - `mounts` — `/proc/mounts` 순회(가상 fs·bind·중복 device 제외, `/dev/*` 만) + `statvfs` 마운트별 사용률. 기존 root `disk_pct` 와 별개.
 - `modules` — 실행 중 CIMS 모듈 (pid/cpu_pct/mem_mb). 탐지 대상은 `_metric_module_names()` (아래 ⚠ 참조).
 - `processes` — 하위호환 필드 (modules 와 중복, name/pid/cmdline).
+- `module_events` — 직전 tick 대비 모듈 소멸 전이(`process_died`) 관측 — 발생 tick 에만 동봉.
+  OAM 이 event_log 로 기록한다(L1 이벤트 — [alarm_pipeline.md](../design/alarm_pipeline.md) §4.1).
+- `cfg_hashes` — 설치 모듈별(중지 모듈 포함) 배포 `config.json` canonical hash 12hex —
+  OAM 이 배포기록 실체화본 hash 와 비교해 config drift(`A-PRC-003`) 판정. 파일 없음/파싱
+  실패 모듈은 생략(OAM 평가 제외).
+- `ha_transitions` — 최근 10분 keepalived 전이 수 (ha_flap 임계 판정 입력). 0/무전이 시 생략.
 
 > ⚠️ CSC(OAM) 의 `agent_api.py _metric()` 는 record 화이트리스트로 필드를 거른다 — **신규 metric 필드(`mounts` 등)는 화이트리스트에 명시 추가하지 않으면 저장 시 버려진다**. 마찬가지로 응답 직렬화(`_agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 전달된다.
 

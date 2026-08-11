@@ -75,7 +75,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 { "boot_id": 1754805000, "seq": 17,
   "action": "open",                        // open | close
   "code": "CIMS-COM-001", "type": "connection_lost",
-  "mo_instance": "cims/csp/<node>/db",     // code@mo_instance = 활성키 (표준화 §3.4)
+  "mo_instance": "<node>/csp/db",          // code@mo_instance = 활성키 (표준화 §3.4 — 서버명 루트)
   "params": { "used": 20, "total": 20 },   // 카탈로그 msg 템플릿 치환 값
   "perceived_severity": "major",           // (선택) 카탈로그 기본 덮기
   "message": "...",                        // (선택) 렌더 결과 직접 지정
@@ -89,13 +89,13 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 ```jsonc
 { "boot_id": 1754805000, "seq": 18,
   "type": "config_reloaded", "kind": "stateChange",   // kind: stateChange | audit
-  "mo_instance": "cims/csp/<node>", "params": { "rev": "r12" }, "ts": "..." }
+  "mo_instance": "<node>/csp", "params": { "rev": "r12" }, "ts": "..." }
 ```
 
 **FM_SYNC** — 주기(기본 60s, FM_REGISTER 응답으로 OAM 이 지시):
 ```jsonc
 { "boot_id": 1754805000, "seq": 19,
-  "active": [ { "code": "CIMS-COM-001", "mo_instance": "cims/csp/<node>/db",
+  "active": [ { "code": "CIMS-COM-001", "mo_instance": "<node>/csp/db",
                 "open_ts": "2026-08-10T09:31:05" } ] }
 ```
 
@@ -133,9 +133,11 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 - **같은 조건은 기존 code 재사용**(connection_lost=CIMS-COM-001 등) — 객체는 mo_instance 로
   구분한다(§3.5: 새 객체 추가 = 코드 신설 없음). 새 *조건* 클래스만 코드를 신설한다.
 - sweeper 가 발화 중인 `code@mo` 공간과의 충돌은 등록 시 검증해 거부한다.
-- `mo_instance` 규칙: `cims/<module>/<node>[/<component>]` — **노드 필수, 알람·이벤트 공통**
-  (표준화 §3.4(b) 계층 준수). detected_by 가 주체 클래스만 담으므로 발생 노드는 mo_instance
-  가 유일 보유자다.
+- `mo_instance` 규칙: `<서버명>/<module>[/<component>]` — **서버명(= envelope `hdr.node`)
+  루트, 알람·이벤트 공통** (표준화 §3.4(b) 소유 주체 루트 규약). detected_by 가 주체 클래스만
+  담으므로 발생 노드는 mo_instance 가 유일 보유자다. 구현 현행 wire/저장은 구 형식
+  `cims/<module>/<node>[/<component>]` — 전환은 정의 코드 이행과 함께(표준화 §6 mo 루트
+  개편 규율).
 - `detected_by`: **`self`** (주체 클래스 — 표준화 §3.4(b) 감지 3계층의 L2). 발신 노드는
   envelope `hdr.node`(wire)와 mo_instance 가 보유하므로 접미로 중복하지 않는다.
 - `perceived_severity` 는 통지 payload → 카탈로그 순으로 취하고, 둘 다 없으면
@@ -149,9 +151,9 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 
 | code | type(클래스) | eventType | 사용처 |
 |---|---|---|---|
-| `CIMS-COM-001` (재사용) | connection_lost | communications | CSP·CSC 의 DB 연결 두절 (`cims/<mod>/<node>/db`) |
-| `CIMS-QOS-002` | resource_exhausted | qualityOfService | CMP 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member (`cims/cmp/<node>/<pool>`). 사용률 임계는 OAM sweeper(QOS-001) 담당 — 역할 분담 |
-| `CIMS-PRC-002` | resource_failure | processingError | CMDP FD 스토어 저장 실패 (`cims/cmdp/<node>/fd_store`). 후보: 녹취 쓰기 실패 |
+| `CIMS-COM-001` (재사용) | connection_lost | communications | CSP·CSC 의 DB 연결 두절 (`<서버명>/<mod>/db`) |
+| `CIMS-QOS-002` | resource_exhausted | qualityOfService | CMP 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member (`<서버명>/cmp/<pool>`). 사용률 임계는 OAM sweeper(QOS-001) 담당 — 역할 분담 |
+| `CIMS-PRC-002` | resource_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 후보: 녹취 쓰기 실패 |
 
 새 *조건* 클래스 후보(미구현): `overload`(CSP 제어평면 과부하 차단 발동 — 차단 로직 자체가
 미구현), 포트 bind 실패(기동 실패 = 프로세스 사망 → L1 process_down(agent) 소관, §1 원칙).
@@ -231,7 +233,6 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 
 ## 9. 잔여 논점
 
-- 이벤트 보존 기간/회전 정책(알람과 동일 30일 vs 감사 요건별 분리).
 - CMP 녹취 쓰기 실패(PRC-002) 훅 — fwrite 반환값 미검사 보강과 함께.
 - pmp/imp 변종 배포 시 SystemId overlay 자동 주입(배포기 통합).
 
@@ -239,6 +240,8 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 
 - [alarm_standardization.md](alarm_standardization.md) — 알람 모델 정본 (X.733 속성·code
   체계·활성키·재통지·이행)
+- [alarm_pipeline.md](alarm_pipeline.md) — 발생→전달→수집/보관→가시화 전 구간 절차 정본
+  (본 문서는 그중 L2 wire 구간)
 - [alarm_module_catalog.md](alarm_module_catalog.md) — 모듈별 자기감지 가능 조건 전수 카탈로그
   (현행 fm_catalog 대비 누락 알람/이벤트 후보)
 - [../api/cmp_media_api.md](../api/cmp_media_api.md) — envelope v2·이벤트 채널 신뢰성 규칙

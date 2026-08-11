@@ -68,7 +68,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   "probable_cause": "responseTimeExcessive",   // X.733 Annex 코드
   "mo_class": "service",               // managedObject class: software|service|equipment|host|network
   "check": "service_unresponsive", "target": "csp",   // 무엇을 점검할지(탐지) — 어느 프로세스는 여기서, 알람 type 엔 안 박음
-  "mo_instance": "cims/csp",           // (선택) 소스 instance 명시 — 없으면 target/host 로 런타임 합성
+  "mo_instance": "SIG_SVR_01/csp",     // (선택) 소스 instance 명시 — 없으면 target/host 로 런타임 합성 (§3.4(b) 소유 주체 루트)
   "threshold": null, "unit": null,
   "thresholds": null,                  // (선택) 단계 임계 {severity: value} — 예 {"minor":80,"major":90,"critical":95}
                                        //   도달한 최고 단계가 severity 가 되고, 승격/완화는 action=change 로 통지.
@@ -83,7 +83,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 ```
 - **type 은 조건 클래스, code 는 정의** (service_unresponsive / A-PRC-004). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
 - `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 perceived_severity 로 승격(critical/warning 표준 값 유효). 신규 major/minor/indeterminate 가능.
-- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4): service 규칙 = `cims/<target>`, agent 규칙 = `<host>/<module|disk|rtp>`. CMP 는 다중 미디어 노드(AA)를 개별 관측하므로 endpoint 별 `cims/cmp/<ip>:<port>` 로 합성.
+- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4(b) — 루트는 소유 주체 서버명/그룹명): agent 규칙 = `<서버명>/<module|disk|…>`, service 규칙 = 관측 신원 기준 — 노드 주소 관측 = `<서버명>/<모듈>`(CMP 다중 미디어 노드(AA)는 endpoint 소유 서버로 해석해 개별 발화), VIP 관측 = `<그룹명>/<모듈>`. 주소→서버명/그룹명 해석은 인벤토리가 정본.
 
 ### 3.2 이벤트 레코드(alert_log) 확장
 
@@ -134,10 +134,10 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
 | `A-PRC-001` | `process_down` | processingError | softwareError | software | `<host>/<module>` (전 모듈 — csp/cmp 포함) | critical | agent |
-| `A-PRC-004` | `service_unresponsive` | processingError | responseTimeExcessive | service | `cims/csp` · `cims/cmp/<ip>:<port>`(미디어 노드별) | major | oam-svc / oam |
-| `A-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `cims/db` (모듈 관점은 `cims/<mod>/<node>/db` — 자기보고 §4) | critical | oam-svc / oam / self |
-| `A-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `cims/rtp_ports` · `<host>/disk` · `<host>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | 단계 임계(disk·rtp: minor 80 / major 90 / critical 95, 승격=action change) · ha_flap warning | oam-svc·oam / agent |
-| `A-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<host>/<module>/config` · `cims/ha/g<gid>/<collection>`(HA fan-out) | warning | agent / oam |
+| `A-PRC-004` | `service_unresponsive` | processingError | responseTimeExcessive | service | `SIG_SVR_01/csp`(노드 주소 관측) · `<그룹명>/csp`(VIP 관측) — CMP 는 endpoint 소유 서버별 `MED_SVR_01/cmp` | major | oam-svc / oam |
+| `A-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `<관리그룹>/db`(OAM 관측 — 그룹 공통 신원) · 모듈 관점은 `<서버명>/<모듈>/db`(자기보고 §4) | critical | oam-svc / oam / self |
+| `A-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `MED_SVR_01/cmp/rtp_ports`(노드별 — 현행 전 endpoint 합산 mo 는 이행 대상) · `<서버명>/disk` · `<서버명>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | 단계 임계(disk·rtp: minor 80 / major 90 / critical 95, 승격=action change) · ha_flap warning | oam-svc·oam / agent |
+| `A-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<서버명>/<모듈>/config` · `<그룹명>/config/<collection>`(HA fan-out) | warning | agent / oam |
 
 `A-PRC-003` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
 agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.
@@ -162,7 +162,7 @@ vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분�
 
 - **정의 코드** `<STREAM>-<DOMAIN>-<NNN>` — 예: `A-PRC-001` process_down, `A-COM-001` connection_lost(DB), `E-STC-001` process_started.
   - `STREAM` = **A**(알람) | **E**(이벤트) — 스트림 소속이 코드에서 즉독된다(vIBCF 의 A/F/S 스트림 문자 관례와 동형).
-  - **시스템/서비스 네임스페이스는 코드에 넣지 않는다** — 상위 NMS 통합 시 시스템(CIMS vs 타 시스템) 구분은 northbound 매핑·연동 계약의 소관(§7.3)이고, CIMS 내부에서는 mo_instance(`cims/...`)와 스트림 레코드의 서비스 컨텍스트가 이미 보유한다. 타 서비스 pack 의 카탈로그는 descriptor 소속으로 구분되며, 교차 노출이 실제로 필요해지면 그때 pack 접두를 도입한다(선제 도입 ❌).
+  - **시스템/서비스 네임스페이스는 코드에 넣지 않는다** — 상위 NMS 통합 시 시스템(CIMS vs 타 시스템) 구분은 northbound 매핑·연동 계약의 소관(§7.3)이고, CIMS 내부에서는 스트림 레코드의 서비스 컨텍스트가 이미 보유한다(mo_instance 도 같은 원칙으로 시스템 접두 없이 서버명/그룹명 루트 — §3.4(b)). 타 서비스 pack 의 카탈로그는 descriptor 소속으로 구분되며, 교차 노출이 실제로 필요해지면 그때 pack 접두를 도입한다(선제 도입 ❌).
   - `DOMAIN` = 알람은 eventType 약어: **PRC**(processingError) · **COM**(communications) · **QOS**(qualityOfService) · **EQP**(equipment) · **ENV**(environmental). X.736 보안 알람 클래스(security_violation — 기능 카탈로그 제안) 채택 시 **SEC** 추가(eventType 은 X.736 계열). **이벤트**의 DOMAIN 은 kind 약어 **STC**(stateChange)/**AUD**(audit).
   - `NNN` = 3자리 **무의미 일련**(스트림+도메인 내). 결번은 재사용하지 않는다.
 - **분류(클래스)를 코드에 인코딩하지 않는다** — 정의 코드에 클래스 번호를 내장하는 dotted
@@ -208,8 +208,23 @@ vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분�
 
 **(b) 발생 소스 (managedObject + detected-by)** — 알람이 "무엇에서/어디서" 났는지 표준화.
 - `mo_class`: software | service | equipment | host | network (managedObjectClass).
-- `mo_instance`: DN-유사 경로. service 규칙 = `cims/<target>` · agent 규칙 = `<host>/<module|disk|rtp>` · 자기보고 = `cims/<module>/<node>[/<component>]`. (계층: `<service|host>/<component>[/<instance>]`) **발생 노드/호스트는 mo_instance 가 유일 보유자다** — detected_by 에 중복하지 않는다.
-- `detected_by`: 탐지 주체 **클래스** — `agent` | `self` | `oam-svc`(분리 배포) | `oam`(단일 프로세스 `--role all` 대행, HA fan-out drift 등 OAM 자체 판정). 인스턴스 접미(`agent:<host>`·`self:<node>`)는 두지 않는다 — 노드는 mo_instance 와 (자기보고는 wire 의) envelope `hdr.node` 가 보유하고, detected_by 는 ① 발행 주체별 open-state **소유 파티션**(복원·스윕·stale close 의 scope 필터) ② **감지 계층 식별**(아래 표, correlatedNotifications 상관 근거) 에 쓰인다. 고장 객체(mo_instance)와 탐지 주체가 다를 수 있음(예: db_down 은 oam-svc 탐지, 객체는 cims/db).
+- `mo_instance`: DN-유사 경로. **루트 = 고장 객체의 소유 주체(서버명 또는 HA 그룹명)** —
+  시스템 네임스페이스(`cims/`)는 쓰지 않는다(코드에 시스템 접두를 넣지 않는 §3.4(a)와 같은
+  원칙 — 시스템 구분은 northbound 매핑·레코드 컨텍스트 소관). vIBCF POD 의
+  `서버명/프로세스명` 경로 관례와 동형(§7.2).
+  | 객체 소유 | 형식 | 예 |
+  |---|---|---|
+  | 노드(호스트) 자원 | `<서버명>/<자원>` | `SIG_SVR_01/disk` · `SIG_SVR_01/ntp` · `SIG_SVR_01/ha/<svc>` |
+  | 노드 위 모듈(+내부 객체·외부 의존 연결) | `<서버명>/<모듈>[/<component>]` | `SIG_SVR_01/csp` · `SIG_SVR_01/csp/db` · `MED_SVR_01/cmp/rtp` · `SIG_SVR_01/csp/peer/<대국>` |
+  | **그룹 소유 객체** (A/S 이중화) | `<그룹명>/<객체>` | `csp-g1/vip`(무보유/이중보유) · `csp-g1/config/<collection>`(fan-out drift) · `csp-g1/csp`(VIP 관측 L3 응답성) |
+  판별식: **절체와 무관하게 지속되는 조건 = 그룹 소유**(그룹 루트), 특정 노드의
+  사실(keepalived 미설치·절체 래치·ha_flap)은 HA 관련이라도 서버 루트. L3 는 관측 주소의
+  신원을 따른다 — VIP 관측 = 그룹 루트, 노드 주소 관측 = 서버 루트(비 HA 배포는 자연히
+  서버 루트). 서버명·그룹명 어휘는 인벤토리(자동 배포 YAML)가 정본이며 두 네임스페이스는
+  겹치지 않아야 한다. 자기보고(L2)는 `<서버명>/<모듈>[/<component>]`(서버명 = envelope
+  `hdr.node`). **발생 노드/호스트는 mo_instance 가 유일 보유자다** — detected_by 에
+  중복하지 않는다.
+- `detected_by`: 탐지 주체 **클래스** — `agent` | `self` | `oam-svc`(분리 배포) | `oam`(단일 프로세스 `--role all` 대행, HA fan-out drift 등 OAM 자체 판정). 인스턴스 접미(`agent:<host>`·`self:<node>`)는 두지 않는다 — 노드는 mo_instance 와 (자기보고는 wire 의) envelope `hdr.node` 가 보유하고, detected_by 는 ① 발행 주체별 open-state **소유 파티션**(복원·스윕·stale close 의 scope 필터) ② **감지 계층 식별**(아래 표, correlatedNotifications 상관 근거) 에 쓰인다. 고장 객체(mo_instance)와 탐지 주체가 다를 수 있음(예: db_down 은 oam-svc 탐지, 객체는 DB). mo 루트가 서버명/그룹명으로 통일되면서 open-state 소유 파티션의 키는 **detected_by 가 유일**하다 — 구현의 구 mo 접두(`cims/*`) scope 필터는 구 레코드 read 흡수용으로만 남는다.
 
 **감지 주체 3계층** — 모듈 상태는 서로 다른 사실을 보는 세 주체가 나눠 감지하며, 한 주체의
 관측을 다른 계층의 의미로 쓰지 않는다(원격 probe 무응답 ≠ 프로세스 사망).
@@ -218,7 +233,7 @@ vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분�
 |---|---|---|---|
 | **L1 프로세스 생존** | agent (`agent`) | 노드 로컬 프로세스의 기동/종료 — 모듈을 배포·실행하는 주체가 생존도 판정 (ha_service_model §1 "판정은 노드 로컬") | `A-PRC-001` process_down (**전 모듈**) · 이벤트 `process_died`(전이 관측 — SIGKILL 등으로 모듈 자기보고가 유실되는 종료 보완) |
 | **L2 모듈 내부 상태** | 모듈 자기보고 (`self`) | 살아 있는 프로세스의 내부 이상 — DB 연결·자원 풀·스토어 | `A-COM-001` · `A-QOS-002` · `A-PRC-002` · 이벤트 `process_started`/`process_stopping` ([alarm_self_reporting.md](alarm_self_reporting.md)) |
-| **L3 서비스 응답성** | OAM 원격 probe (`oam-svc`/`oam`) | 살아 있어도 응답하지 못하는 상태 — hang·과부하 (STATS 무응답, DB SELECT 실패) | `A-PRC-004` service_unresponsive · `A-COM-001`(`cims/db`) |
+| **L3 서비스 응답성** | OAM 원격 probe (`oam-svc`/`oam`) | 살아 있어도 응답하지 못하는 상태 — hang·과부하 (STATS 무응답, DB SELECT 실패) | `A-PRC-004` service_unresponsive · `A-COM-001`(`<관리그룹>/db`) |
 
 호스트 자원(disk)·HA 전이 빈도(ha_flap)·설정 정합(config drift)은 agent 원시 metric 을 OAM 이
 평가하는 기존 경로(detected_by=`agent`)이고, HA fan-out drift 는 OAM 자체 판정(`oam`)이다.
@@ -350,6 +365,11 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
   동일 관례).
 - detected_by 인스턴스 접미(`agent:<host>`·`self:<node>`)는 구 레코드에만 남는다 — read·scope
   필터는 클래스 매칭(`self` = `self`·`self:*` 접두)으로 양쪽을 흡수하고, 신규 기록은 클래스만 쓴다.
+- **mo 루트 개편**(`cims/...` → 서버명/그룹명 루트, §3.4(b))은 활성키 개편이다 — 구 mo 로
+  열린 활성 알람은 스윕이 이행 종결(close)하고 지속 조건을 새 mo 로 재발화한다(CMP endpoint
+  재편 stale close 와 동일 관례). 구 레코드 이력은 무수정(read 시 그대로), open-state 소유
+  파티션 필터는 detected_by 로 일원화하되 구 mo 접두(`cims/*`) 필터를 구 레코드 흡수용으로
+  병행한다. 콘솔 토폴로지의 mo 매칭(`activeSevByMo`)도 새 규약으로 갱신한다.
 
 ## 7. 벤치마크 — 다른 통신 서버/규격의 알람 코드 정의
 
@@ -412,7 +432,7 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
 | A0012~14 | CPU/DISK/MEM 단계 임계 | QOS-001(disk 구현·cpu/mem/load 후보) — 대응 |
 | A0023 | Manual Block 지속 | 전이=`node_maintenance` 이벤트·잔존=redundancy_degraded(MAINTENANCE reason) — 대응(모델 분담 상이) |
 | A0030·A0089 | 큐 full/사용률 | QOS-002 `log_queue` 계열 — 부분 대응(SIP 수신 큐는 관측 지점 없음, psip 소관) |
-| A0041~43 | NTP Delay/Offset/Status | threshold_crossed 1클래스 통합 — 기능 카탈로그 공통 `ntp` + 모듈 카탈로그 AGENT 행 |
+| A0041~43 | NTP Delay/Offset/Status | 2정의 분리 — Delay/Offset=threshold_crossed(A-QOS-003 단계 임계)·Status=connection_lost(A-COM-014 동기 상실, X.733 lossOfSynchronisation) — 기능 카탈로그 공통 `ntp` + 모듈 카탈로그 AGENT 행 |
 | A0057 | 과부하 drop | QOS-005 overload — 대응(감지 로직 선행 필요) |
 | A0058 | CPS 임계 | 카운터 전무(`cps_limit` 파싱만·소비 0 — `CspRouteMap.cpp:52`) — **기능 카탈로그 편입**(CSCF `cps`) |
 | A0059 | 세션 사용률 임계 | 분자 기성(`CallMap::GetCount`)·분모(상한 설정) 부재 + STATS active_calls 상시 0 결함(`DbManager.cpp:658` 스텁) — **기능 카탈로그 편입**(CSCF `sessions`) |

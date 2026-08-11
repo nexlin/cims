@@ -3,7 +3,8 @@
 공통,알람,A-PRC-004,service_unresponsive,major,,,프로세스 생존인데 서비스/제어 응답 불능(hang),Service {module} is not responding ({fails} consecutive probe timeouts),외견상 정상이나 처리 정지 — 호처리 영향 가능,부하·스레드 상태 확인(process_down 동반 여부)·필요 시 재기동,vIBCF A0086
 공통,알람,A-PRC-005,crash_loop,major,,,재기동 반복 소진 또는 기동 반복 실패(한 번도 못 뜸),Process {module} is crash-looping: {count} restarts within {window}s,불안정 지속 — 자동 복구 무한 루프,직전 변경(배포/설정) 회귀 검토·코어/기동 로그 확인,X.733
 공통,알람,A-QOS-001,threshold_crossed,minor~critical(단계),,host/<res>,호스트 자원(CPU/MEM/DISK/load) 사용률 단계 임계,"{resource} usage is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",추가 부하 시 처리 실패·OOM/디스크 고갈 위험,원인 프로세스 식별·정리/증설·보존기간 조정(디스크),vIBCF A0012~14
-공통,알람,A-QOS-003,threshold_crossed,minor~major(단계),,ntp,NTP 시각 동기 이상(offset/delay 임계·동기 상실),NTP synchronization lost or offset {observed}ms exceeds threshold {threshold}ms,알람 시각·CDR·녹취·로그 상관의 정합 붕괴,NTP 서버 연동/데몬 상태 확인·시각원 점검,vIBCF A0041~43
+공통,알람,A-QOS-003,threshold_crossed,minor~major(단계),,ntp,NTP offset/delay 단계 임계 초과(동기는 유지),"NTP {metric} is {observed}ms (MAJ:{maj}, MIN:{min})",시각 정밀도 열화 — 알람 시각·CDR·녹취·로그 상관 왜곡 진행,NTP 서버 연동/네트워크 지연 확인·시각원 점검,vIBCF A0041~42
+공통,알람,A-COM-014,connection_lost,major,NTP,ntp,NTP 시각원 동기 상실(unsynchronized·시각원 도달 불가),"NTP synchronization lost (source {server}, {detail})",시각 표류 진행 — 알람 시각·CDR·녹취·로그 상관의 정합 붕괴,NTP 데몬/서버 연동 상태 확인·시각원 점검,vIBCF A0043 / X.733(lossOfSynchronisation)
 공통,알람,A-PRC-006,storage_failure,major,,service_log,서비스 로그(flow/msg) 기록 실패 지속,"Service log writes failing on {path} ({errno}, {count} consecutive)",호 추적/장애 분석 불가(무성 유실),로그 볼륨/권한/마운트 확인,X.733
 공통,알람,A-PRC-007,config_invalid,major,,config,설정 결함·미설정·참조 무결성 위반으로 기능 비활성/오동작,Invalid configuration {key}: {detail} — function disabled or misbehaving,일부 기능이 조용히 꺼진 채 운영,설정 정본 대조·재적재/재기동,X.733
 공통,알람,A-PRC-003,config_out_of_sync,warning,,config,배포 정본 대비 실행 설정 드리프트,"Running config drifted from deployment baseline (expected {expected}, actual {actual})",의도치 않은 동작·절체/재기동 시 동작 변화,드리프트 원인 확인 후 재실체화 또는 정본 갱신,3GPP 32.111
@@ -15,7 +16,7 @@
 공통,알람,A-COM-001,connection_lost,critical,DB,db,서비스 DB 연결 두절,"DB connection lost (host={host}, port={port}, db={db})",DB 의존 기능 전면 저하(가입자/설정/이력),연결성·DB 서버·인증 확인,vIBCF A0003(연결 축)
 공통,이벤트,E-STC-001,lifecycle,-,,,event=process_started. 기능 프로세스 기동 완료,Process {module} started on {node} (version {version}),,,X.731
 공통,이벤트,E-STC-002,lifecycle,-,,,event=process_stopping. graceful 종료 시작,Process {module} stopping (graceful shutdown initiated),,,X.731
-공통,이벤트,E-AUD-001,config_changed,-,,,"event=config_reloaded. 설정 재적재 완료(반영 범위, 건수)",Configuration reloaded: {scope} ({count} entries applied),,,X.730
+공통,이벤트,E-STC-008,config_changed,-,,,"event=config_reloaded. 설정 재적재 완료(반영 범위, 건수) — 시스템 반영(actor 없음, kind=stateChange)",Configuration reloaded: {scope} ({count} entries applied),,,X.730
 공통,이벤트,E-STC-003,ha_transition,-,,,"event=ha_role_changed. HA 역할 전이(active↔standby, from/to)",HA role changed: {from} -> {to} (service {svc}),,,vIBCF S3003
 공통,이벤트,E-STC-004,ha_transition,-,,,"event=ha_switchover. 절체 사건(group, from, to) + 계획 절체 실패",HA switchover on group {group}: {from} -> {to} ({result}),,,vIBCF S3001~3
 공통,이벤트,E-AUD-002,admin_action,-,,,event=node_maintenance. 운영 개입 전이(수동 차단/정지/해제·HA 판정 얼림),Node maintenance {action} on {node} by {actor},,,vIBCF A0023
@@ -25,7 +26,7 @@ CSCF,알람,A-COM-002,connection_lost,critical,CSC,csc,가입자 원천(CSC — 
 CSCF,알람,A-PRC-011,storage_failure,major,DB,db/reload,가입자/프로파일 재적재 실패 지속(연결은 정상),Subscriber/profile reload from DB failing ({error}; last success {last_ok}),stale 데이터로 서비스 — 프로비저닝 미반영,쿼리 실패 원인(권한/스키마) 확인·수동 재동기,TS 24.229(HSS 상당)
 CSCF,알람,A-PRC-012,listener_unavailable,critical,,listener/<proto:port>,SIP 접속점(UDP/TCP/TLS) 개설 실패·TLS 인증서 로드 실패,SIP listener unavailable: {proto}:{port} ({error}),해당 접속점 수용 불가(일부 단말/대국 접속 단절),포트 점유/인증서/설정 확인 — 접속점마다 개별 발화,TS 24.229
 CSCF,알람,A-COM-003,connection_lost,major,PEER,peer/<node>,인접 노드(타 CSCF/트렁크/게이트웨이) keepalive(OPTIONS) 무응답,Peer {peer} unreachable: OPTIONS keepalive timeout ({fails} consecutive),해당 경로 호 소통 불가 — 죽은 경로로 라우팅 지속 위험,대국 상태/네트워크 확인·라우팅 우회 확인,vIBCF A0061·F400E·타입80
-CSCF,알람,A-COM-004,connection_lost,major,DNS,dns,DNS/ENUM 해석 실패 지속,"DNS/ENUM resolution failing (server={server}, {fails} consecutive)",도메인 기반 라우팅·번호 변환 불가,리졸버/DNS 서버 상태 확인,TS 24.229
+CSCF,알람,A-COM-004,connection_lost,major,DNS,dns,DNS/ENUM 해석 기능 상실 — 리졸버 무응답·해석 실패 지속(원인 불문),"DNS/ENUM resolution failing (server={server}, {fails} consecutive)",도메인 기반 라우팅·번호 변환 불가,리졸버/DNS 서버 상태 확인,TS 24.229
 CSCF,알람,A-QOS-006,threshold_crossed,minor~critical(단계),,calls/success_rate,호 성공률 하한 단계 임계 — 최종 응답 코드별 카운터 기반(로컬 타임아웃 합성 응답 포함 필수),"Call success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",다수 호 실패 진행 중 — 원인 불문 서비스 품질 저하,실패 응답 코드 분포·flow 로그로 원인 축 식별,vIBCF A0075~77
 CSCF,알람,A-QOS-007,threshold_crossed,minor~critical(단계),,reg/success_rate,등록 성공률 하한/등록 실패 급증,"Registration success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",단말 대량 이탈·착신 불가 확산,인증 실패/원천 장애/네트워크 축 구분,vIBCF A0075 준용(REGISTER 축)
 CSCF,알람,A-QOS-008,threshold_crossed,minor~critical(단계),,sessions,동시 세션 사용률 단계 임계(수용 상한 대비),"Concurrent session usage is {observed}% of limit {max} (CRI:{crit}, MAJ:{maj}, MIN:{min})",상한 도달 시 신규 호 전면 거절,유입 조절·용량 증설·상한 재산정,vIBCF A0059
@@ -38,7 +39,7 @@ CSCF,이벤트,E-AUD-006,config_changed,-,,,event=subscriber_config_changed. 가
 CSCF,이벤트,E-STC-005,mode_transition,-,,,event=db_fallback_changed. 원천 장애로 폴백 모드 진입/해제,DB fallback mode {action} ({reason}),,,X.731
 IBCF,알람,A-COM-005,connection_lost,critical,PEER,peer/<ic>,상호접속 대국(타 사업자 IBCF/MSS) keepalive(OPTIONS) 무응답,Interconnect peer {peer} unreachable: OPTIONS keepalive timeout — NNI route down,해당 NNI 경로 전면 불통 — 사업자간 소통 단절,대국사 확인·경로 우회·차단 여부 확인 — 대국마다 개별 발화,TS 29.165 / vIBCF A0061
 IBCF,알람,A-QOS-012,threshold_crossed,minor~critical(단계),PEER,peer/<ic>/success_rate,대국별 호 성공률/응답률 하한,"Call success rate toward peer {peer} is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",특정 대국 방향 품질 저하 — 대국 측 이상 조기 검출,대국별 실패 코드 분포 확인·대국사 통보,vIBCF A0075~77
-IBCF,알람,A-QOS-013,threshold_crossed,minor~major(단계),PEER,peer/<ic>/reason/<code>,대국별 특정 실패 응답(503/486/408 등) 급증,Failure response {code} toward peer {peer} surging: {count} in {window}s,특정 실패 모드 진행(대국 과부하·번호 오류 등),해당 reason 의 호 이력/추적으로 원인 규명,vIBCF A0084
+IBCF,알람,A-QOS-013,threshold_crossed,minor~major(단계),PEER,peer/<ic>/reason/<code>,대국별 특정 실패 응답(503/486/408 등) 급증,"Failure response {code} toward peer {peer} surging: {count} in {window}s (MAJ:{maj}, MIN:{min})",특정 실패 모드 진행(대국 과부하·번호 오류 등),해당 reason 의 호 이력/추적으로 원인 규명,vIBCF A0084
 IBCF,알람,A-QOS-014,threshold_crossed,minor~major(단계),PEER,peer/<ic>/rtt,대국별 신호 RTT 임계,Signaling RTT to peer {peer} is {observed}ms (threshold {threshold}ms),경로 지연 — 체감 품질 저하·타임아웃 전조,전송망 상태 확인,vIBCF A0083
 IBCF,알람,A-COM-006,connection_lost,critical,CMP,cmp,경계 미디어 릴레이(CMP — TrGW 역할) 제어 두절,Border media relay (CMP) control lost (endpoint {ep}),경계 호 미디어 수립 전면 불가,릴레이 프로세스/제어 채널 확인,TS 29.165(Ix)
 IBCF,알람,A-SEC-002,security_violation,major,,fraud,사기 호/스캐너/비인가 트래픽 탐지 급증(경계 특성),Fraud/scanner traffic detected: {count} suspicious requests in {window}s (top source {ip}),부정 사용(toll fraud)·자원 잠식 진행 가능,소스 차단·패턴 갱신·유입 경로 확인,X.736
@@ -46,13 +47,13 @@ IBCF,이벤트,E-AUD-007,admin_action,-,PEER,,event=peer_blocked. 대국 수동 
 IBCF,이벤트,E-STC-006,availability_transition,-,PEER,,event=peer_state_changed. 대국 가용 상태 전이(alive↔dead),Peer {peer} state changed: {from} -> {to},,,X.731
 TAS,알람,A-PRC-013,storage_failure,critical,,cdr,CDR(호 이력) 기록 실패 지속,"CDR write failures persist on {path} ({errno}, {count} records affected)",호 이력 유실 — 정산/분쟁 대응 근거 상실·법적 문제,호 이력 볼륨/기록 경로 확인·유실 구간 산정,vIBCF A0090
 TAS,알람,A-COM-007,connection_lost,major,CMP,cmp,미디어서버(CMP — MRF 역할) 제어 두절(안내방송/녹취/컨퍼런스용),Media server (CMP) control lost — announcement/recording/conference unavailable (endpoint {ep}),미디어 의존 부가기능 전면 불가,MRF 상태/제어 채널 확인,TS 23.333(MRF 상당)
-TAS,알람,A-QOS-015,threshold_crossed,minor~major(단계),,svc/failure_rate,부가서비스 로직 실행 실패율 임계(전환·착신전환·발신제한 등 적용 실패),"Supplementary service failure rate is {observed}% (service {svc}, threshold {threshold}%)",가입자 체감 기능 오동작 확산,실패 서비스 유형 분포·설정/원천 데이터 확인,TS 24.229(AS)
+TAS,알람,A-QOS-015,threshold_crossed,minor~major(단계),,svc/failure_rate,부가서비스 로직 실행 실패율 임계(전환·착신전환·발신제한 등 적용 실패),"Supplementary service failure rate is {observed}% (service {svc}, MAJ:{maj}, MIN:{min})",가입자 체감 기능 오동작 확산,실패 서비스 유형 분포·설정/원천 데이터 확인,TS 24.229(AS)
 TAS,이벤트,E-AUD-008,config_changed,-,,,event=service_config_changed. 부가서비스 설정 변경 감사,Supplementary service configuration changed ({service}) by {actor},,,X.740
 PTT-AS,알람,A-COM-008,connection_lost,critical,CMP,cmp,미디어평면(CMP — floor 제어 담당) 두절,Media plane (CMP) lost — floor control unavailable (endpoint {ep}),그룹콜·발언권 제어 전면 불가,미디어평면 상태/제어 채널 확인,TS 23.379
 PTT-AS,알람,A-COM-009,connection_lost,major,CSC,csc/<svc>,그룹/설정/신원 관리 서버(GMS/CMS/IdMS) 연동 두절,Management server {svc} (CSC) connection lost (host={host}),프로비저닝·affiliation·인증 갱신 정지,관리 서버 상태 확인 — 서버마다 개별 발화,TS 23.379
 PTT-AS,알람,A-PRC-014,state_out_of_sync,major,CMP,group_ctx/<gid>,그룹 컨텍스트(정원·우선순위·로스터) 미디어평면 정합 실패 지속,Group context sync with media plane failing (group {gid}),통화는 되나 정책이 옛 값인 무성 장애,재수립 실패 원인 확인·수동 재동기 — 그룹마다 개별 발화,TS 24.380
 PTT-AS,알람,A-COM-010,delivery_failed,major,,floor/<gid>,floor 제어 메시지 전달 실패 지속(암호화 실패 포함),"Floor control message delivery failing (group {gid}, {count} consecutive, {reason})",그룹 발언권 마비(미디어는 지속될 수 있음),키/암호화 컨텍스트·전달 경로 확인,TS 24.380
-PTT-AS,알람,A-QOS-016,threshold_crossed,minor~critical(단계),,group/setup_success_rate,그룹콜 수립 성공률 하한,Group call setup success rate is {observed}% (threshold {threshold}%),그룹 통신 품질 저하 확산,실패 단계(시그널링/미디어/floor) 구분,vIBCF A0075 준용
+PTT-AS,알람,A-QOS-016,threshold_crossed,minor~critical(단계),,group/setup_success_rate,그룹콜 수립 성공률 하한,"Group call setup success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",그룹 통신 품질 저하 확산,실패 단계(시그널링/미디어/floor) 구분,vIBCF A0075 준용
 PTT-AS,알람,A-QOS-017,threshold_crossed,critical,,emergency,긴급/임박위험 호 처리 실패 발생(낮은 임계 — 소수 건도 즉시),Emergency call handling failed: {count} emergency/imminent-peril calls failed in {window}s,인명 직결 기능 실패 — 최우선 대응,실패 호 즉시 추적·우선처리 경로 점검,TS 23.379(우선 처리)
 PTT-AS,알람,A-QOS-018,resource_exhausted,major,,affiliation,affiliation/그룹 수용 한계 도달,Affiliation/group capacity reached ({used}/{max}),신규 그룹 가입/활성화 거절,수용 상한·부하 분산 확인,TS 24.379
 PTT-AS,알람,A-PRC-015,cert_expiring,warning,,kms,보안키(KMS) 자재 만료 임박/획득 실패,KMS key material expires in {days} days or acquisition failed,암호화 그룹 통신 불능 예고,키 갱신 경로/KMS 연동 확인,TS 33.180
@@ -65,8 +66,8 @@ MRF,알람,A-COM-011,connection_lost,major,CSP,csp,제어 주체(CSP — AS/CSCF
 MRF,알람,A-COM-012,delivery_failed,major,CSP,csp/events,제어 주체(CSP)로의 이벤트 통지 적체/유실 지속,"Event delivery to controller (CSP) backlogged: {pending} pending, {dropped} dropped",미디어 사건이 호 제어에 미반영,적체 원인(ack 유실·상대 미학습) 확인,vIBCF F500C~E(지속 축)
 MRF,알람,A-QOS-020,resource_leak,minor,,sessions,고아 세션 누적/강제 회수 지속,Orphan sessions accumulating: {count} force-reclaimed in {window},제어 정합 이상 신호 — 자원 서서히 잠식,제어 주체 장애/유실 이벤트 여부 확인,vIBCF F5005
 MRF,알람,A-PRC-016,state_out_of_sync,major,CSP,sessions/sync,제어 주체(CSP)와 세션 집합 불일치 지속(재조정 불능),"Session set out of sync with controller (CSP): {orphans} orphans, reconcile failing",orphan 누적·포트 잠식·호 이력 왜곡,재조정(reconcile) 실패 원인 확인,vIBCF F5006
-MRF,알람,A-QOS-021,threshold_crossed,minor~major(단계),,media/no_flow,활성 세션 중 미디어 무흐름 비율 임계,No-media sessions at {observed}% of active sessions (threshold {threshold}%),NAT/방화벽/경로 문제로 무음 호 확산,미디어 경로·latch 상태 확인,vIBCF F5008·A0078
-MRF,알람,A-QOS-022,threshold_crossed,minor~major(단계),,media/quality,미디어 품질(패킷 손실/지터) 임계,"Media quality degraded: packet loss {loss}%, jitter {jitter}ms (thresholds {loss_thr}%/{jit_thr}ms)",체감 품질 저하 확산,전송망/부하 상태 확인,RFC 3550(RTCP) / vIBCF A0079
+MRF,알람,A-QOS-021,threshold_crossed,minor~major(단계),,media/no_flow,활성 세션 중 미디어 무흐름 비율 임계,"No-media sessions at {observed}% of active sessions (MAJ:{maj}, MIN:{min})",NAT/방화벽/경로 문제로 무음 호 확산,미디어 경로·latch 상태 확인,vIBCF F5008·A0078
+MRF,알람,A-QOS-022,threshold_crossed,minor~major(단계),,media/quality,미디어 품질(패킷 손실/지터) 임계,"Media quality degraded: {metric} is {observed}{unit} (MAJ:{maj}, MIN:{min})",체감 품질 저하 확산,전송망/부하 상태 확인,RFC 3550(RTCP) / vIBCF A0079
 MRF,알람,A-PRC-017,storage_failure,critical,,record,녹취 저장 실패 지속,Recording write failures persist on {path} ({errno}),법적 보존 의무 유실,녹취 볼륨/마운트/권한 확인·유실 구간 산정,X.733
 MRF,알람,A-PRC-002,storage_failure,major,,fd_store,메시지 미디어(FD/파일) 스토어 저장·접근 실패,"FD/file store write or access failure ({path}, {errno})",MCData 수신분 유실,스토어 볼륨/마운트 확인,TS 23.282
 MRF,알람,A-COM-013,delivery_failed,major,,floor_tx,floor/SRTCP 송신 실패 지속(키/암호화 오류),"Floor/SRTCP transmit failures persist (group {gid}, {reason})",암호화 그룹의 floor 제어 전면 불능,키 자재/암호화 컨텍스트 확인,TS 24.380
