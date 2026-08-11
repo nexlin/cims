@@ -7,8 +7,10 @@ oam_app 이 같은 코어를 호출해 동작 무변경. agent 계열(disk_high/
 생존의 전 모듈 정본, 감지 L1) 평가는 base(oam_app) 잔류 — transition/emit 코어를 여기서
 함께 쓴다. 감지 3계층은 표준화 §3.4(b).
 
-open-state: state = { akey("code@mo_instance"): alarm_id } — 호출 프로세스가 보유.
-서비스 계열의 mo_instance 는 'cims/<target>' 접두 — restore_open_state 의 scope 분리 기준.
+open-state: state = { akey("code@mo_instance"): {'alarm_id','severity','detected_by'} } —
+호출 프로세스가 보유. 소유 파티션의 키는 detected_by 가 유일하다 (표준화 §3.4(b)·
+파이프라인 §4.3) — 구 mo 접두(cims/*) 판정은 detected_by 없는 구 레코드 흡수용으로만 남는다.
+mo_instance 루트는 소유 주체(서버명/그룹명) — 관측 주소의 신원 해석은 build_mo_root_resolver.
 """
 
 import time
@@ -30,6 +32,10 @@ def _entry_severity(v):
     return v.get('severity') if isinstance(v, dict) else None
 
 
+def _entry_detected_by(v):
+    return v.get('detected_by') if isinstance(v, dict) else None
+
+
 class _Safe(dict):
     def __missing__(self, k):  # 템플릿에 없는 키는 빈 문자열 (KeyError 방지)
         return ''
@@ -39,37 +45,46 @@ def fmt(tmpl: str, **kw) -> str:
     return (tmpl or '').format_map(_Safe(kw))
 
 
-def _is_service_akey(akey: str) -> bool:
+def _is_legacy_service_akey(akey: str) -> bool:
+    """구 mo 루트(cims/*) — detected_by 없는 구 레코드의 파티션 폴백 판정 전용."""
     mo = akey.split('@', 1)[1] if '@' in akey else ''
     return mo.startswith('cims/')
 
 
+def partition_of(detected_by: str, akey: str) -> str:
+    """open-state 소유 파티션 판정 — 키는 detected_by 가 유일 (표준화 §3.4(b)·
+    파이프라인 §4.3). 구 레코드의 인스턴스 접미(self:<node>·agent:<host>)는 클래스
+    매칭으로, detected_by 부재 구 레코드는 mo 접두(cims/*)로 흡수한다."""
+    db = detected_by or ''
+    if db == 'self' or db.startswith('self:'):
+        return 'self'
+    if db in ('oam-svc', 'oam'):
+        return 'service'
+    if db == 'agent' or db.startswith('agent:'):
+        return 'agent'
+    return 'service' if _is_legacy_service_akey(akey) else 'agent'
+
+
 def restore_open_state(service_log_dir: str, scope: str = 'all', days: int = 30,
                        log=None) -> dict:
-    """기동 시 활성 알람 복원. scope: 'service'=cims/* 만, 'agent'=cims/* 제외,
-    'self'=모듈 자기보고(detected_by=self)만, 'all'=자기보고 제외 전부.
+    """기동 시 활성 알람 복원. scope: 'service'=OAM 관측 계열(oam-svc/oam),
+    'agent'=agent 계열, 'self'=모듈 자기보고, 'all'=자기보고 제외 전부(role=all 대행).
     분리 배포에서 base/oam-svc/FM ingest 가 각자 소유 계열만 추적하도록 나눈다 —
-    자기보고 계열은 mo 접두가 아니라 발화 주체(detected_by)로 구분한다
-    (alarm_self_reporting.md §5). detected_by 는 주체 클래스(표준화 §3.4(b)) —
-    구 레코드의 인스턴스 접미(self:<node>)는 클래스 매칭으로 흡수한다."""
+    파티션 판정은 partition_of (detected_by 일원화)."""
     from services import alert_log
     state: dict = {}
     if not service_log_dir:
         return state
     try:
         meta = alert_log.compute_open_state(service_log_dir, days=days, with_meta=True)
-        def _is_self(m):
-            db = m.get('detected_by') or ''
-            return db == 'self' or db.startswith('self:')
-        if scope == 'self':
-            meta = {k: m for k, m in meta.items() if _is_self(m)}
-        else:
-            meta = {k: m for k, m in meta.items() if not _is_self(m)}
-            if scope == 'service':
-                meta = {k: m for k, m in meta.items() if _is_service_akey(k)}
-            elif scope == 'agent':
-                meta = {k: m for k, m in meta.items() if not _is_service_akey(k)}
-        restored = {k: {'alarm_id': m['alarm_id'], 'severity': m.get('perceived_severity')}
+        if scope in ('self', 'service', 'agent'):
+            meta = {k: m for k, m in meta.items()
+                    if partition_of(m.get('detected_by'), k) == scope}
+        else:   # 'all' — 자기보고(self)는 FM ingest 가 자체 복원
+            meta = {k: m for k, m in meta.items()
+                    if partition_of(m.get('detected_by'), k) != 'self'}
+        restored = {k: {'alarm_id': m['alarm_id'], 'severity': m.get('perceived_severity'),
+                        'detected_by': m.get('detected_by') or ''}
                     for k, m in meta.items()}
         state.update(restored)
         if restored and log:
@@ -136,7 +151,7 @@ def transition(state: dict, service_log_dir: str, rule: dict, mo_instance: str,
     sev = rule.get('perceived_severity', 'warning')
     if is_open and cur is None:
         alarm_id = f"{akey}@{int(time.time())}"
-        state[akey] = {'alarm_id': alarm_id, 'severity': sev}
+        state[akey] = {'alarm_id': alarm_id, 'severity': sev, 'detected_by': detected_by}
         emit_alarm(service_log_dir, 'open', rule, mo_instance, detected_by, msg_open, alarm_id,
                    threshold_info=threshold_info)
         if log:
@@ -144,7 +159,7 @@ def transition(state: dict, service_log_dir: str, rule: dict, mo_instance: str,
     elif is_open and cur is not None:
         alarm_id = _entry_alarm_id(cur)
         cur_sev = _entry_severity(cur)
-        state[akey] = {'alarm_id': alarm_id, 'severity': sev}
+        state[akey] = {'alarm_id': alarm_id, 'severity': sev, 'detected_by': detected_by}
         if cur_sev and sev != cur_sev:
             trend = 'moreSevere' if _sev_rank(sev) > _sev_rank(cur_sev) else 'lessSevere'
             emit_alarm(service_log_dir, 'change', rule, mo_instance, detected_by, msg_open,
@@ -200,6 +215,65 @@ def close_legacy_code(state: dict, service_log_dir: str, rule: dict, old_code: s
     return n
 
 
+def close_migrated_keys(state: dict, service_log_dir: str, detected_by: str, match,
+                        reason: str, log=None) -> int:
+    """이행 종결 — match(akey) 인 활성키를 원 akey(code·mo 그대로)로 close 발행.
+    코드·mo 루트가 함께 바뀐 이행(표준화 §6 — 활성키 자체가 바뀜)에 쓴다. 지속
+    조건은 다음 평가/동기화가 현행 code@mo 로 재발화한다. 종결 건수 반환."""
+    n = 0
+    for akey in [k for k in list(state) if match(k)]:
+        alarm_id = _entry_alarm_id(state.pop(akey))
+        code, _, mo = akey.partition('@')
+        emit_alarm(service_log_dir, 'close', {'code': code}, mo, detected_by, reason, alarm_id)
+        n += 1
+        if log:
+            log.log_info(f"[alarm] MIGRATE-CLOSE {akey}")
+    return n
+
+
+def build_mo_root_resolver(config):
+    """관측 주소 → 소유 주체 루트(서버명/그룹명) 해석기 (표준화 §3.4(b)).
+    VIP 관측 = 그룹명, 노드 주소 관측 = 서버명(agent 등록 신원). 어휘의 정본은
+    인벤토리 — 여기서는 그 실체화본(ha_groups VIP·agent 등록 IP/인터페이스)으로
+    해석하고, 해석 불가 주소는 주소 그대로 루트로 쓴다(비표준 배포 폴백).
+    스토어 적재 비용이 있으므로 스윕당 1회 생성한다."""
+    vip_to_group: dict = {}
+    addr_to_server: dict = {}
+    try:
+        from services import file_store, ha_lookup
+        for g in ha_lookup.ha_groups_all(config):
+            name = g.get('name') or f"g{g.get('id')}"
+            for vip in ha_lookup.group_vip_set(g):
+                vip_to_group.setdefault(vip, name)
+        for a in file_store.load_all(file_store.domain_dir(config, 'agents')):
+            name = a.get('name') or str(a.get('id'))
+            if a.get('ip'):
+                addr_to_server.setdefault(str(a['ip']), name)
+            for itf in (a.get('interfaces') or []):
+                if isinstance(itf, dict) and itf.get('ip'):
+                    addr_to_server.setdefault(str(itf['ip']), name)
+    except Exception:
+        pass
+
+    def resolve(addr) -> str:
+        addr = str(addr or '')
+        return vip_to_group.get(addr) or addr_to_server.get(addr) or addr
+    return resolve
+
+
+def mgmt_mo_root(config) -> str:
+    """관리평면 공통 신원 — OAM 관측 객체(DB 등)의 mo 루트 (<관리그룹>, 표준화 §3.3).
+    관리 HA 그룹(oam 패키지 호스팅) 이름을 쓰고, 비 HA 배포는 OAM SystemId."""
+    try:
+        from services import ha_lookup
+        g = ha_lookup.ha_group_for_package(config, 'oam')
+        if g and g.get('name'):
+            return str(g['name'])
+    except Exception:
+        pass
+    return config.get('SystemId', 'oam')
+
+
 def eval_service_rule(rule: dict, ctx: dict, rtp_threshold: int = 80) -> bool:
     chk = rule.get('check')
     if chk == 'service_unresponsive':
@@ -212,25 +286,44 @@ def eval_service_rule(rule: dict, ctx: dict, rtp_threshold: int = 80) -> bool:
     return False
 
 
+def _mo_module_segment(akey: str) -> str:
+    """akey 의 mo 두 번째 세그먼트(모듈) — <루트>/<모듈>[/...] 규약 (표준화 §3.4(b))."""
+    mo = akey.split('@', 1)[1] if '@' in akey else ''
+    seg = mo.split('/')
+    return seg[1] if len(seg) > 1 else ''
+
+
 def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                         detected_by: str = 'oam-svc', rtp_threshold: int = 80, log=None):
     """서비스 계열 규칙 1회 평가 — CSP/CMP UDP probe + DB 체크 + RTP 사용률.
     probe 헬퍼는 handlers.stats 공유(3s 캐시). 규칙은 service_registry(코어 + descriptor).
 
-    CMP 는 전 미디어 노드 개별 평가(AA 다중 노드) — service_unresponsive(target=cmp)는
-    endpoint 마다 mo_instance='cims/cmp/<ip>:<port>' 로 발화해 어느 노드가 무응답인지
-    식별한다. RTP 사용률은 전 노드 합산. MediaServer.Endpoints/CmpIp 미설정이면
-    CMP 관측 비활성(cmp 계열 규칙 skip)."""
+    mo 는 관측 신원으로 런타임 합성한다 (표준화 §3.4(b) 소유 주체 루트) — 노드 주소
+    관측 = <서버명>/<모듈>, VIP 관측 = <그룹명>/<모듈>, OAM 관측 객체(DB) =
+    <관리그룹>/db. CMP 는 전 미디어 노드 개별 평가(AA 다중 노드) — probe 는
+    endpoint 소유 서버별 <서버명>/cmp 로, RTP 사용률도 노드별 <서버명>/cmp/rtp_ports
+    로 발화한다(전 노드 합산 아님). MediaServer.Endpoints/CmpIp 미설정이면 CMP 관측
+    비활성(cmp 계열 규칙 skip). descriptor 의 mo_instance 명시값이 있으면 그대로 쓴다."""
     from services import service_registry
     from handlers.stats import (_get_csp_stats, _get_db,
                                 _media_endpoints, _probe_cmp)
+    resolve = build_mo_root_resolver(config)
     csp = _get_csp_stats(config)
+    csp_addr = (config.get('CspNotify') or {}).get('Ip', '127.0.0.1')
     cmp_configured = bool(((config.get('MediaServer') or {}).get('Endpoints'))
                           or config.get('CmpIp'))
-    cmp_nodes = []          # [(mo_suffix, stats dict)]
+    cmp_nodes = []          # [(mo_root, port, stats dict)]
     if cmp_configured:
-        cmp_nodes = [(f"{ip}:{port}", _probe_cmp(ip, port))
-                     for ip, port in _media_endpoints(config)]
+        raw = [(ip, port, _probe_cmp(ip, port)) for ip, port in _media_endpoints(config)]
+        root_count: dict = {}
+        for ip, _port, _stats in raw:
+            root_count[resolve(ip)] = root_count.get(resolve(ip), 0) + 1
+        for ip, port, stats in raw:
+            root = resolve(ip)
+            # 같은 서버의 다중 endpoint — 루트에 포트 접미로 활성키 충돌 방지 (예외 배치)
+            if root_count[root] > 1:
+                root = f"{root}:{port}"
+            cmp_nodes.append((root, port, stats))
     try:
         conn = _get_db(config)
         try:
@@ -241,67 +334,84 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
             conn.close()
     except Exception:
         db_ok = False
-    total = sum((s.get('rtp_ports_total', 0) or 0) for _, s in cmp_nodes)
-    used = sum((s.get('rtp_ports_used', 0) or 0) for _, s in cmp_nodes)
-    pct = int(round(used / total * 100)) if total > 0 else 0
-    ctx = {'csp': csp, 'db_ok': db_ok, 'rtp_pct': pct}
+    total = sum((s.get('rtp_ports_total', 0) or 0) for _, _, s in cmp_nodes)
+    used = sum((s.get('rtp_ports_used', 0) or 0) for _, _, s in cmp_nodes)
+    agg_pct = int(round(used / total * 100)) if total > 0 else 0
+    ctx = {'csp': csp, 'db_ok': db_ok, 'rtp_pct': agg_pct}
     rules = [r for r in service_registry.alert_rules(config) if r.get('scope') != 'agent']
+    # 코드/mo 루트 이행 종결 (표준화 §6) — 구 mo(cims/*) 활성키는 code·mo 가 함께
+    # 바뀌어 어떤 현행 평가에도 안 잡힌다. 원 akey 로 종결하고, 지속 조건은 아래
+    # 평가가 현행 code@mo 로 재발화. cims/ha/* 는 drift 스위퍼 소유라 제외.
+    close_migrated_keys(
+        state, service_log_dir, detected_by,
+        lambda k: '@cims/' in k and not k.split('@', 1)[1].startswith('cims/ha/'),
+        "알람 코드/mo 루트 이행 종결 — 지속 조건은 현행 정의 코드로 재발행", log=log)
     for r in rules:
+        chk = r.get('check')
         thr = r.get('threshold', rtp_threshold)
-        base_mo = r.get('mo_instance') or f"cims/{r.get('target', '')}"
-        # 규칙 code 교체 이행(표준화 §6) — check 개정(process_down probe →
-        # service_unresponsive)으로 code 가 바뀐 규칙의 구 code 활성키를 **이 규칙의
-        # mo 공간으로 한정해** 종결한다. 구 code(PRC-001)는 agent module_down 으로
-        # 존속하므로 code 전량 종결(close_legacy_code)은 <host>/<module> akey 를
-        # 오종결한다 — targeted 만 허용. 지속 조건은 아래 평가가 새 code 로 재발화.
-        for old in service_registry.legacy_check_codes(r.get('check')):
-            if old == r.get('code'):
-                continue
-            for akey in [k for k in list(state)
-                         if k == f"{old}@{base_mo}" or k.startswith(f"{old}@{base_mo}/")]:
-                mo = akey.split('@', 1)[1]
-                alarm_id = _entry_alarm_id(state.pop(akey))
-                emit_alarm(service_log_dir, 'close', {**r, 'code': old}, mo, detected_by,
-                           f"규칙 코드 교체({old}→{r.get('code')}) 이행 종결 — "
-                           f"지속 조건은 새 코드로 재발화", alarm_id)
-                if log:
-                    log.log_info(f"[alarm] MIGRATE-CLOSE {akey} → {r.get('code')}")
-        if r.get('check') == 'service_unresponsive' and r.get('target') == 'cmp':
-            for suffix, stats in cmp_nodes:
-                mo = f"{base_mo}/{suffix}"
+        code = r.get('code')
+        if chk == 'service_unresponsive' and r.get('target') == 'cmp':
+            cur_mo = set()
+            for root, _port, stats in cmp_nodes:
+                mo = r.get('mo_instance') or f"{root}/cmp"
+                cur_mo.add(mo)
                 transition(state, service_log_dir, r, mo, detected_by,
                            not bool(stats),
-                           fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr),
-                           fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr), log=log)
-            # 평가 대상에서 이탈한 인스턴스의 open 알람은 영영 안 닫히므로 여기서 close:
-            # ①구 집계 인스턴스(cims/cmp) ②endpoint 목록에서 제거된 노드(cims/cmp/<ip>:<port>).
-            cur_mo = {f"{base_mo}/{suffix}" for suffix, _ in cmp_nodes}
-            code = r.get('code')
-            stale = [k for k in list(state)
-                     if (k == f"{code}@{base_mo}"
-                         or (k.startswith(f"{code}@{base_mo}/")
-                             and k.split('@', 1)[1] not in cur_mo))]
-            for akey in stale:
+                           fmt(r.get('msg_open'), mo=mo, threshold=thr),
+                           fmt(r.get('msg_close'), mo=mo, threshold=thr), log=log)
+            # 평가 대상에서 이탈한 인스턴스(endpoint 제거/신원 재해석)의 open 은 영영
+            # 안 닫히므로 close. 같은 code 의 csp probe 계열과는 모듈 세그먼트로 구분.
+            for akey in [k for k in list(state)
+                         if k.startswith(f"{code}@") and _mo_module_segment(k) == 'cmp'
+                         and k.split('@', 1)[1] not in cur_mo]:
                 mo = akey.split('@', 1)[1]
                 transition(state, service_log_dir, r, mo, detected_by, False, '',
-                           fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr)
+                           fmt(r.get('msg_close'), mo=mo, threshold=thr)
                            or f"{mo} 관측 대상 제외 — 정리", log=log)
             continue
-        if r.get('check') == 'rtp_pct_gte' and not cmp_nodes:
-            continue    # CMP 관측 비활성 — 사용률 평가 불가
-        mo = base_mo
-        rr, is_open = r, eval_service_rule(r, ctx, rtp_threshold)
-        if r.get('check') == 'rtp_pct_gte' and isinstance(r.get('thresholds'), dict):
-            # 단계 임계 — 도달 단계가 rule severity 가 되고, 승격/완화는 transition 의
-            # change 경로로 흐른다.
-            sev, sthr = staged_severity(r, pct)
-            rr = {**r, 'perceived_severity': sev} if sev else r
-            is_open = sev is not None
-            if sthr is not None:
-                thr = int(sthr)
-        msg_open = fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr)
-        msg_close = fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr)
-        tinfo = ({'observed': pct, 'threshold': thr, 'unit': r.get('unit') or '%'}
-                 if r.get('check') == 'rtp_pct_gte' else None)
-        transition(state, service_log_dir, rr, mo, detected_by, is_open, msg_open, msg_close,
-                   threshold_info=tinfo, log=log)
+        if chk == 'rtp_pct_gte':
+            if not cmp_nodes:
+                continue    # CMP 관측 비활성 — 사용률 평가 불가
+            cur_mo = set()
+            for root, _port, stats in cmp_nodes:
+                node_total = stats.get('rtp_ports_total', 0) or 0
+                node_used = stats.get('rtp_ports_used', 0) or 0
+                if node_total <= 0:
+                    continue    # probe 실패/무관측 — 판정 보류 (표준화 §3.4(d))
+                pct = int(round(node_used / node_total * 100))
+                mo = r.get('mo_instance') or f"{root}/cmp/rtp_ports"
+                cur_mo.add(mo)
+                rr, is_open, thr_n = r, pct >= int(thr), thr
+                if isinstance(r.get('thresholds'), dict):
+                    # 단계 임계 — 도달 단계가 rule severity, 승격/완화는 change 경로.
+                    sev, sthr = staged_severity(r, pct)
+                    rr = {**r, 'perceived_severity': sev} if sev else r
+                    is_open = sev is not None
+                    if sthr is not None:
+                        thr_n = int(sthr)
+                tinfo = {'observed': pct, 'threshold': thr_n, 'unit': r.get('unit') or '%'}
+                transition(state, service_log_dir, rr, mo, detected_by, is_open,
+                           fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr_n),
+                           fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr_n),
+                           threshold_info=tinfo, log=log)
+            # 관측이 전무(전 probe 실패)하면 아무 판정도 하지 않는다 (표준화 §3.4(d)) —
+            # stale 정리는 실제 관측된 노드가 있을 때만.
+            if cur_mo:
+                for akey in [k for k in list(state)
+                             if k.startswith(f"{code}@") and k.split('@', 1)[1] not in cur_mo]:
+                    mo = akey.split('@', 1)[1]
+                    transition(state, service_log_dir, r, mo, detected_by, False, '',
+                               f"{mo} 관측 대상 제외 — 정리", log=log)
+            continue
+        # 단일 인스턴스 규칙 — 관측 신원으로 mo 합성
+        if chk == 'service_unresponsive':
+            mo = r.get('mo_instance') or f"{resolve(csp_addr)}/{r.get('target', 'csp')}"
+        elif chk == 'db_down':
+            mo = r.get('mo_instance') or f"{mgmt_mo_root(config)}/db"
+        else:
+            mo = r.get('mo_instance') or f"{mgmt_mo_root(config)}/{r.get('target', '')}"
+        is_open = eval_service_rule(r, ctx, rtp_threshold)
+        msg_open = fmt(r.get('msg_open'), mo=mo, threshold=thr)
+        msg_close = fmt(r.get('msg_close'), mo=mo, threshold=thr)
+        transition(state, service_log_dir, r, mo, detected_by, is_open, msg_open, msg_close,
+                   log=log)

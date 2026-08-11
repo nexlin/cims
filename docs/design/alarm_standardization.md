@@ -38,7 +38,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
   **oam-svc** sweeper 가 발화(`oam_svc_app.py`, `detected_by='oam-svc'`; `--role all` 단일 프로세스
   에서만 base 가 대행 `detected_by='oam'`), **agent 계열**(disk/module)은 base(`oam_app.py`
   `_sweep_alerts`→`_eval_agent_rule`) 잔류. 기동 시 open-state 복원도 소유 계열별
-  (`restore_open_state` — 서비스=`cims/*` mo, agent=그 외).
+  (`restore_open_state` — 파티션 판정은 detected_by, §3.4(b)).
 - **이벤트 레코드** (`ems/core/oam/src/services/alert_log.py`, `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl`):
   `{ ts, type, severity, action(open|close), message }`
 - **API** (`ems/core/oam/src/handlers/alerts.py`): `GET /alerts`, `/types`, `/summary`, `/rules`.
@@ -127,21 +127,23 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 
 기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스**로 정규화.
 어느 프로세스/리소스/호스트인지는 `source.mo_instance`, 심각도/임계/원인은 **rule 속성**(클래스 정체성 아님).
-`code` 는 각 클래스 대표 정의의 정의 코드(§3.4(a) 번호 승계 — 구현 현행 wire 는 구 포맷
-`CIMS-` 접두). 한 클래스의 여러 rule 이 서로 다른 정의인 경우(QOS-001 의 rtp_ports·ha_flap
-등)는 정의 코드 이행 시 각자의 코드를 받는다.
+`code` 는 정의 코드(§3.4(a)). 한 클래스의 여러 rule 이 서로 다른 정의인 경우는 각자의
+코드를 갖는다 — threshold_crossed 의 disk=`A-QOS-001`·ha_flap=`A-QOS-023`(공통)·
+RTP 사용률=`A-QOS-024`(MRF, 노드별 발화).
 
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
 | `A-PRC-001` | `process_down` | processingError | softwareError | software | `<host>/<module>` (전 모듈 — csp/cmp 포함) | critical | agent |
 | `A-PRC-004` | `service_unresponsive` | processingError | responseTimeExcessive | service | `SIG_SVR_01/csp`(노드 주소 관측) · `<그룹명>/csp`(VIP 관측) — CMP 는 endpoint 소유 서버별 `MED_SVR_01/cmp` | major | oam-svc / oam |
 | `A-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `<관리그룹>/db`(OAM 관측 — 그룹 공통 신원) · 모듈 관점은 `<서버명>/<모듈>/db`(자기보고 §4) | critical | oam-svc / oam / self |
-| `A-QOS-001` | `threshold_crossed` | qualityOfService | thresholdCrossed / storageCapacityProblem / resourceAtOrNearingCapacity | service·host | `MED_SVR_01/cmp/rtp_ports`(노드별 — 현행 전 endpoint 합산 mo 는 이행 대상) · `<서버명>/disk` · `<서버명>/ha/<svc>`(check=ha_flap, 전이 빈도 임계) | 단계 임계(disk·rtp: minor 80 / major 90 / critical 95, 승격=action change) · ha_flap warning | oam-svc·oam / agent |
+| `A-QOS-001` | `threshold_crossed` | qualityOfService | storageCapacityProblem | host | `<서버명>/disk` (호스트 자원 — cpu/mem/load 확장 시 rule 만 추가) | 단계 임계(minor 80 / major 90 / critical 95, 승격=action change) | agent |
+| `A-QOS-023` | `threshold_crossed` | qualityOfService | thresholdCrossed | service | `<서버명>/ha/<svc>` (check=ha_flap — keepalived 전이 빈도 임계) | warning | agent |
+| `A-QOS-024` | `threshold_crossed` | qualityOfService | resourceAtOrNearingCapacity | service | `MED_SVR_01/cmp/rtp_ports` (노드별 발화 — check=rtp_pct_gte) | 단계 임계(minor 80 / major 90 / critical 95) | oam-svc / oam |
 | `A-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<서버명>/<모듈>/config` · `<그룹명>/config/<collection>`(HA fan-out) | warning | agent / oam |
 
 `A-PRC-003` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
 agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.
-`ha_flap`(QOS-001 rule) 은 agent 가 cims-notify 로그에서 집계한 `metric.ha_transitions`
+`ha_flap`(A-QOS-023) 은 agent 가 cims-notify 로그에서 집계한 `metric.ha_transitions`
 (최근 10분 keepalived 전이 수, 기본 임계 6회)로 VIP flap 을 노출한다 — 전이 개별 건은
 §3.6 대로 이벤트(로그)일 뿐이며, 알람은 빈도 임계 초과라는 *조건*이다.
 
@@ -188,7 +190,7 @@ vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분�
   구 클래스 코드 하나가 여러 정의로 갈라지는 경우(threshold_crossed 의 rtp/ha_flap rule,
   storage_failure 로 넓힐 CDR·녹취 등)의 잔여 발화는 이행 시 rule/mo 별로 각자의 정의
   코드에 매핑한다.
-- **구현 현행 wire/저장/rule 은 구 포맷 `CIMS-<DOMAIN>-<SEQ>`(서비스 접두 + 클래스 단위 코드)를 사용 중** — 정의 코드 이행은 구현 채택 시점에 `_CODE_REVISIONS` 로 수행한다(구 코드는 read 시 alias, 열린 알람은 스윕 이행 종결 후 현행 코드로 재발행 — 아래 "코드는 불변" 절차와 동일).
+- **wire/저장/rule/fm_catalog 는 flat 정의 코드를 사용한다.** 구 포맷 `CIMS-<DOMAIN>-<SEQ>`(서비스 접두 + 클래스 단위 코드)는 `_CODE_REVISIONS` alias 로 read/수신 시 흡수되고, 구 코드로 열려 있던 알람은 스윕이 이행 종결 후 현행 코드로 재발행한다(아래 "코드는 불변" 절차). 구 `CIMS-QOS-001` 이 갈라진 정의는 rule 의 check 가 배정한다 — disk=`A-QOS-001`·ha_flap=`A-QOS-023`·rtp 사용률=`A-QOS-024`.
 - 코드 카탈로그 = descriptor 의 alert_rules 클래스 집합(코어 + 서비스) + 모듈 자기보고 등록분. `GET /alerts/catalog` 로 노출.
 
 **코드 문법 규칙 (신설 시 준수)**:
@@ -202,9 +204,10 @@ vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분�
 - **코드는 불변** — northbound 연동 전에 한해 개정 가능하며, 개정은
   `service_registry._CODE_REVISIONS`(옛→현행)에 기록한다. 옛 code 규칙은 read 시 alias,
   옛 code 로 열려 있던 활성 알람은 스윕이 이행 종결(close)하고 지속 조건은 현행 code 로
-  재발행한다(`alarm_sweeper.close_legacy_code`). 개정 이력: `CIMS-CFG-001`→`CIMS-PRC-003`
-  (CFG 는 DOMAIN=eventType 약어 규칙 위반 — processingError 의 PRC 로 정정. 구 포맷
-  `CIMS-` 접두 자체의 새 포맷 이행은 채택 시 같은 메커니즘으로 수행).
+  재발행한다(`alarm_sweeper.close_legacy_code` — 활성키(mo)까지 함께 바뀐 이행은
+  `close_migrated_keys` 가 원 akey 로 종결). 개정 이력: ①`CIMS-CFG-001`→PRC 정정
+  (CFG 는 DOMAIN=eventType 약어 규칙 위반) ②구 클래스 코드 `CIMS-*` 전체 → flat
+  정의 코드 `A-*` (위 번호 승계 표).
 
 **(b) 발생 소스 (managedObject + detected-by)** — 알람이 "무엇에서/어디서" 났는지 표준화.
 - `mo_class`: software | service | equipment | host | network (managedObjectClass).
@@ -358,18 +361,16 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
 - `severity` 읽는 곳은 `perceived_severity ?? severity` 로 폴백 → 점진 전환.
 - 규칙은 `event_type`/`probable_cause` 누락 시 기본값(processingError/—) 부여하는 정규화 헬퍼로 흡수(데이터 미보강 descriptor 안전).
 - 옛 per-process type(`csp_down`/`cmp_down`/`module_down`)은 read 시 `process_down` 클래스 + `source.mo_instance` 로 매핑하는 alias 표로 흡수 → 기존 이력/배너 무중단.
-- probe 계열 규칙의 code 교체(csp/cmp 규칙 `CIMS-PRC-001`→`CIMS-PRC-004` — 구 wire 포맷)는
-  **코드 개정이 아니다** — PRC-001 은 process_down 으로 존속하므로 `_CODE_REVISIONS` 를 쓰지
-  않고, 스윕이 구 활성키(`CIMS-PRC-001@cims/csp`·`@cims/cmp/<ip>:<port>`)를 이행 종결(close)
-  하고 지속 조건은 `CIMS-PRC-004` 로 재발화한다 (CMP endpoint 재편 시 stale mo 강제 close 와
-  동일 관례).
 - detected_by 인스턴스 접미(`agent:<host>`·`self:<node>`)는 구 레코드에만 남는다 — read·scope
   필터는 클래스 매칭(`self` = `self`·`self:*` 접두)으로 양쪽을 흡수하고, 신규 기록은 클래스만 쓴다.
-- **mo 루트 개편**(`cims/...` → 서버명/그룹명 루트, §3.4(b))은 활성키 개편이다 — 구 mo 로
-  열린 활성 알람은 스윕이 이행 종결(close)하고 지속 조건을 새 mo 로 재발화한다(CMP endpoint
-  재편 stale close 와 동일 관례). 구 레코드 이력은 무수정(read 시 그대로), open-state 소유
-  파티션 필터는 detected_by 로 일원화하되 구 mo 접두(`cims/*`) 필터를 구 레코드 흡수용으로
-  병행한다. 콘솔 토폴로지의 mo 매칭(`activeSevByMo`)도 새 규약으로 갱신한다.
+- **mo 루트 개편**(구 `cims/...` → 서버명/그룹명 루트, §3.4(b))은 활성키 개편이다 — 구 mo 로
+  열린 활성 알람은 스윕이 이행 종결(close, `alarm_sweeper.close_migrated_keys` — 정의 코드
+  이행과 한 번에)하고 지속 조건을 현행 code@mo 로 재발화한다. 구 wire(구 모듈 + 신 OAM
+  배포 스큐)는 FM ingest 가 수신 시 현행 코드·서버명 루트로 정규화해 흡수한다. 구 레코드
+  이력은 무수정(read 시 그대로), open-state 소유 파티션 판정은 detected_by 로 일원화
+  (`alarm_sweeper.partition_of`)하되 detected_by 없는 구 레코드만 mo 접두(`cims/*`)로
+  폴백한다. 콘솔 토폴로지는 서버명 루트(모듈 칩 — component 알람 포함)와 그룹 루트
+  (시스템 카드)로 매칭하고 `cims/<모듈>` 은 구 레코드 흡수로만 남는다.
 
 ## 7. 벤치마크 — 다른 통신 서버/규격의 알람 코드 정의
 

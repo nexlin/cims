@@ -221,14 +221,11 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         USER_ID_LIST regList;
         gclsUserMap.GetRegisteredUsers( regList );
         int regUsers = (int)regList.size();
-        // active_calls: DB 기반 정확한 수 (B2BUA + Proxy 모두 포함)
-        int activeCalls = 0;
+        // active_calls: CallMap 실측 (call log 가 파일 기반으로 바뀐 뒤
+        //   GetActiveVoipCallCount 는 상시 0 인 레거시 no-op — DB 연결 여부와 무관하게
+        //   메모리 다이얼로그 수가 유일한 실측이다. 세션 사용률 임계(A-QOS-008)의 분자.
         bool dbConnected = gclsDbManager.IsConnected();
-        if ( dbConnected ) {
-            activeCalls = gclsDbManager.GetActiveVoipCallCount();
-        } else {
-            activeCalls = gclsCallMap.GetCount();
-        }
+        int activeCalls = gclsCallMap.GetCount();
 
         std::ostringstream oss;
         oss << "{\"status\":\"OK\"" << ",\"registered_users\":" << regUsers << ",\"active_calls\":" << activeCalls

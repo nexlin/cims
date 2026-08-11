@@ -146,8 +146,13 @@ bool PCmpServer::startServer() {
             if (access(cands[i].c_str(), R_OK) == 0) { catalog = cands[i]; break; }
         }
         if (catalog.empty()) catalog = cands[0];  // 부재 시 FmReporter 가 로그로 드러냄
-        gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec);
-        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName + "/" + _systemId);
+        gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec,
+                            [](EnumFmLogLevel level, const std::string& msg) {
+                                if (level == FM_LOG_ERROR) { LOG_ERROR("FmReporter", "%s", msg.c_str()); }
+                                else if (level == FM_LOG_DEBUG) { LOG_DEBUG("FmReporter", "%s", msg.c_str()); }
+                                else { LOG_INFO("FmReporter", "%s", msg.c_str()); }
+                            });
+        gclsFmReporter.SendEvent("process_started", "stateChange", _systemId + "/" + _nodeName);
         _fmMonitorThread = std::thread([this]() { this->fmMonitorLoop(); });
     }
     return true;
@@ -155,9 +160,9 @@ bool PCmpServer::startServer() {
 
 // FM 자기보고 — 자원 풀 고갈 전이 감시 (1s). AlarmOpen/Close 는 멱등(같은 상태 재호출
 // no-op)이라 매초 판정해도 통지는 전이 시에만 나간다. 완전 고갈(할당 불가) 조건만 자기보고
-// 하고, 사용률 임계는 OAM sweeper(rtp_pct_gte, cims/rtp_ports)가 담당 — 역할 분담.
+// 하고, 사용률 임계는 OAM sweeper(rtp_pct_gte)가 담당 — 역할 분담.
 void PCmpServer::fmMonitorLoop() {
-    const std::string moBase = "cims/" + _nodeName + "/" + _systemId;
+    const std::string moBase = _systemId + "/" + _nodeName;   // <서버명>/<모듈> (표준화 §3.4(b))
     while (_running) {
         msleep(1000);
         if (!_running) break;
@@ -181,11 +186,12 @@ void PCmpServer::fmMonitorLoop() {
             std::string mo = moBase + "/" + p.comp;
             if (p.freeN == 0) {
                 SimpleJson::JsonNode params;
+                params.Set("pool", p.comp);
                 params.Set("used", p.total);
                 params.Set("total", p.total);
-                gclsFmReporter.AlarmOpen("CIMS-QOS-002", mo, params);
+                gclsFmReporter.AlarmOpen("A-QOS-002", mo, params);
             } else {
-                gclsFmReporter.AlarmClose("CIMS-QOS-002", mo);
+                gclsFmReporter.AlarmClose("A-QOS-002", mo);
             }
         }
     }
@@ -193,7 +199,7 @@ void PCmpServer::fmMonitorLoop() {
 
 void PCmpServer::stopServer() {
     if (gclsFmReporter.IsEnabled())
-        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName + "/" + _systemId);
+        gclsFmReporter.SendEvent("process_stopping", "stateChange", _systemId + "/" + _nodeName);
     _running = false;
     // 리액터 스레드 정지 (epoll_wait 1s timeout 내 종료)
     _reactorRunning = false;
@@ -2028,6 +2034,15 @@ void PCmpServer::timeoutLoop() {
             p.Set("reason", a.reason);
             p.Set("held_sec", a.heldSec);
             emitEvent("RELAY_ABORTED", p, a.sesid, a.svc);
+            // FM 감사 이벤트 (E-AUD-011) — 운영자 모르게 미디어가 절단되는 동작의 감사.
+            if (gclsFmReporter.IsEnabled()) {
+                SimpleJson::JsonNode fmParams;
+                fmParams.Set("sid", a.sid);
+                fmParams.Set("reason", a.reason);
+                fmParams.Set("held", a.heldSec);
+                gclsFmReporter.SendEvent("session_reclaimed", "audit",
+                                         _systemId + "/" + _nodeName, fmParams);
+            }
         }
 
         // Stale 그룹 세션 정리 (공유 RTP에 패킷이 없는 그룹)

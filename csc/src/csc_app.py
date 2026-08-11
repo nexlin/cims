@@ -327,12 +327,16 @@ if __name__ == '__main__':
             log=logger)
         _fm_db_probe = None
         if _fm:
-            _fm.send_event('process_started', mo=f'cims/csc/{_system_id}')
-            _db_mo = f'cims/csc/{_system_id}/db'
+            # mo 는 서버명 루트 <node>/<module>[/<component>] (표준화 §3.4(b)).
+            _fm.send_event('process_started', mo=f'{_system_id}/csc')
+            _db_mo = f'{_system_id}/csc/db'
+            _db_cfg = config.get('CimsDatabase') or {}
+            _db_params = {'host': _db_cfg.get('Host', ''), 'port': _db_cfg.get('Port', ''),
+                          'db': _db_cfg.get('Database', '')}
             _fm_db_probe = fm_reporter.DbHealthProbe(
                 lambda: config.get('CimsDatabase') or {},
-                lambda up: (_fm.alarm_close('CIMS-COM-001', _db_mo) if up
-                            else _fm.alarm_open('CIMS-COM-001', _db_mo)),
+                lambda up: (_fm.alarm_close('A-COM-001', _db_mo) if up
+                            else _fm.alarm_open('A-COM-001', _db_mo, params=_db_params)),
                 log=logger)
             _fm_db_probe.start()
 
@@ -349,7 +353,7 @@ if __name__ == '__main__':
 
         logger.log_info('==================== stop (SIGTERM) ====================')
         if _fm:
-            _fm.send_event('process_stopping', mo=f'cims/csc/{_system_id}')
+            _fm.send_event('process_stopping', mo=f'{_system_id}/csc')
             time.sleep(1)          # ack/재전송 1회 여유 (best-effort)
             if _fm_db_probe:
                 _fm_db_probe.stop()

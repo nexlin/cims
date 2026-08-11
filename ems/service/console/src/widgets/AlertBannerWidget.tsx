@@ -1,25 +1,14 @@
 // CIMS 위젯 — 심각 알람 배너. 표준 알람 스트림(/alerts)의 활성 critical/major 만 표시 —
 // sweeper/자기보고의 open/close/ack 상태와 항상 일치한다 (자체 임계 판정 없음).
-// 정상이면 렌더 안 함.
-import { useState, useEffect, useCallback } from 'react'
-import { alertsApi, type AlertEvent } from '@core/api/alerts'
+// 정상이면 렌더 안 함. 데이터는 전역 알람 store 구독 (alarm_pipeline.md §8.2 구독 1원화).
 import type { WidgetDef } from '@core/widgets/types'
-import { computeActive } from './ActiveAlarmsWidget'
+import { severityOf, useAlarms } from '@core/widgets/useAlarms'
 
 const BANNER_SEV = new Set(['critical', 'major'])
 
 function AlertBannerWidget() {
-  const [events, setEvents] = useState<AlertEvent[]>([])
-
-  const load = useCallback(() => {
-    alertsApi.list({ days: 7, limit: 1000 })
-      .then(r => setEvents(r.events))
-      .catch(() => {})
-  }, [])
-  useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv) }, [load])
-
-  const severe = computeActive(events)
-    .filter(a => BANNER_SEV.has(a.perceived_severity || a.severity || ''))
+  const { active } = useAlarms()
+  const severe = active.filter(a => BANNER_SEV.has(severityOf(a)))
   if (severe.length === 0) return null
   return (
     <div style={{

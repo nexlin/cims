@@ -85,3 +85,51 @@ def list_values(root: str, subdir: str, field: str = 'type', days: int = 30) -> 
         if v:
             values.add(v)
     return sorted(values)
+
+
+def purge_old(root: str, subdir: str, retain_days: int) -> int:
+    """보존 기간을 넘긴 일별 파일 삭제 (파이프라인 §6.2 보존 스위퍼).
+
+    파일 날짜(YYYY/MM/DD.jsonl 경로) 기준 — retain_days 초과 일자 파일을 지우고
+    비게 된 월/연 디렉터리를 정리한다. retain_days <= 0 은 무제한(no-op).
+    삭제 파일 수 반환."""
+    if not root or retain_days <= 0:
+        return 0
+    base = os.path.join(root, subdir)
+    if not os.path.isdir(base):
+        return 0
+    cutoff = (datetime.now() - timedelta(days=retain_days)).date()
+    removed = 0
+    for ydir in sorted(os.listdir(base)):
+        ypath = os.path.join(base, ydir)
+        if not (os.path.isdir(ypath) and ydir.isdigit()):
+            continue
+        for mdir in sorted(os.listdir(ypath)):
+            mpath = os.path.join(ypath, mdir)
+            if not (os.path.isdir(mpath) and mdir.isdigit()):
+                continue
+            for fname in sorted(os.listdir(mpath)):
+                if not fname.endswith('.jsonl'):
+                    continue
+                day = fname[:-6]
+                if not day.isdigit():
+                    continue
+                try:
+                    fdate = datetime(int(ydir), int(mdir), int(day)).date()
+                except ValueError:
+                    continue
+                if fdate < cutoff:
+                    try:
+                        os.remove(os.path.join(mpath, fname))
+                        removed += 1
+                    except OSError:
+                        pass
+            try:
+                os.rmdir(mpath)
+            except OSError:
+                pass
+        try:
+            os.rmdir(ypath)
+        except OSError:
+            pass
+    return removed

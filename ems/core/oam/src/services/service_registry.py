@@ -31,7 +31,7 @@ _CORE_CONTROLLABLE = {'console'}
 # 알람 표준화(X.733/32.111, docs/design/alarm_standardization.md): type=조건클래스, 객체는 source.
 # scope='agent' → sweeper 가 online agent 별로 평가, mo_instance 는 런타임 합성(<host>/disk, <host>/<module>).
 _CORE_ALERT_RULES = [
-    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'perceived_severity': 'warning',
+    {'type': 'threshold_crossed', 'code': 'A-QOS-001', 'perceived_severity': 'warning',
      'event_type': 'qualityOfService', 'probable_cause': 'storageCapacityProblem', 'mo_class': 'host',
      'check': 'disk_high', 'scope': 'agent', 'unit': '%', 'metric': '디스크 사용률',
      # 단계 임계 (X.733 severity 승격 — 도달 단계가 severity, 승격/완화는 action=change)
@@ -39,20 +39,27 @@ _CORE_ALERT_RULES = [
      'msg_open': '{mo} 디스크 사용률 {pct}% ({threshold}% 초과)', 'msg_close': '{mo} 디스크 사용률 {pct}% (정상)',
      'effect': '디스크 용량 임계 근접 — 로그/녹취 적재 실패 위험',
      'recommended_action': '사용량 원인 파악, 오래된 파일/로그 정리, 용량 증설'},
-    {'type': 'process_down', 'code': 'CIMS-PRC-001', 'perceived_severity': 'critical',
+    {'type': 'process_down', 'code': 'A-PRC-001', 'perceived_severity': 'critical',
      'event_type': 'processingError', 'probable_cause': 'softwareError', 'mo_class': 'software',
      'check': 'module_down', 'scope': 'agent', 'metric': '프로세스 가용성',
      'msg_open': '{mo} 프로세스 응답 없음', 'msg_close': '{mo} 정상화',
      'effect': '해당 호스트의 모듈 기능 중단',
      'recommended_action': '프로세스 재기동, 로그/코어 확인, HA 절체 점검'},
-    {'type': 'config_out_of_sync', 'code': 'CIMS-PRC-003', 'perceived_severity': 'warning',
+    {'type': 'config_out_of_sync', 'code': 'A-PRC-003', 'perceived_severity': 'warning',
      'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software',
      'check': 'config_drift', 'scope': 'agent', 'metric': '배포 설정 정합',
      'msg_open': '{mo} 노드 설정 파일이 배포 기록과 불일치 (node={actual}, 기대={expected})',
      'msg_close': '{mo} 배포 설정 정합 회복',
      'effect': '모듈이 OAM 기록과 다른 설정(포트 등)으로 동작 — 게이트웨이 프록시/HA 헬스 오동작 위험',
      'recommended_action': '해당 배포 설정 재적용(update_config)으로 노드 파일 정렬, 수기 편집 여부 확인'},
-    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'perceived_severity': 'warning',
+    {'type': 'connection_lost', 'code': 'A-COM-015', 'perceived_severity': 'critical',
+     'event_type': 'communications', 'probable_cause': 'communicationsSubsystemFailure',
+     'mo_class': 'host', 'check': 'agent_lost', 'scope': 'agent', 'metric': '노드 관측성',
+     'msg_open': 'Agent on {host} unreachable — node observation lost',
+     'msg_close': 'Agent on {host} reachable again',
+     'effect': '노드 관측 불능 — 그 노드의 agent 계열 알람은 판정 불가(두절이 정상 해소로 위장되지 않도록 별도 알람)',
+     'recommended_action': '노드 전원/네트워크/agent 프로세스 확인'},
+    {'type': 'threshold_crossed', 'code': 'A-QOS-023', 'perceived_severity': 'warning',
      'event_type': 'qualityOfService', 'probable_cause': 'thresholdCrossed', 'mo_class': 'service',
      'check': 'ha_flap', 'scope': 'agent', 'threshold': 6, 'unit': '회/10분', 'metric': 'HA 전이 빈도',
      'msg_open': '{mo} keepalived 상태 전이 {count}회/10분 ({threshold}회 이상) — VIP flap 의심',
@@ -65,38 +72,51 @@ _CORE_ALERT_RULES = [
 # service_unresponsive 는 check 개정 이행 규칙(_CHECK_REVISIONS)이 명시값을 폐기하고 오므로
 # 메시지·runbook 까지 기본값으로 보유한다.
 _ALERT_CLASS_DEFAULTS = {
-    'service_unresponsive': {'type': 'service_unresponsive', 'code': 'CIMS-PRC-004',
+    'service_unresponsive': {'type': 'service_unresponsive', 'code': 'A-PRC-004',
                      'event_type': 'processingError', 'probable_cause': 'responseTimeExcessive',
                      'mo_class': 'service', 'perceived_severity': 'major', 'metric': '서비스 응답성',
                      'msg_open': '{mo} 관리 프로브(STATS) 무응답', 'msg_close': '{mo} 응답 정상화',
                      'effect': '제어/관측 불가 — hang·과부하 의심, 호처리 영향 가능',
                      'recommended_action': '프로세스 상태·부하 확인(process_down 동반 여부), 필요 시 재기동'},
-    'module_down':  {'type': 'process_down', 'code': 'CIMS-PRC-001', 'event_type': 'processingError',
+    'module_down':  {'type': 'process_down', 'code': 'A-PRC-001', 'event_type': 'processingError',
                      'probable_cause': 'softwareError', 'mo_class': 'software', 'perceived_severity': 'critical'},
-    'db_down':      {'type': 'connection_lost', 'code': 'CIMS-COM-001', 'event_type': 'communications',
+    'db_down':      {'type': 'connection_lost', 'code': 'A-COM-001', 'event_type': 'communications',
                      'probable_cause': 'communicationsSubsystemFailure', 'mo_class': 'service', 'perceived_severity': 'critical'},
-    'rtp_pct_gte':  {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
+    'rtp_pct_gte':  {'type': 'threshold_crossed', 'code': 'A-QOS-024', 'event_type': 'qualityOfService',
                      'probable_cause': 'resourceAtOrNearingCapacity', 'mo_class': 'service', 'perceived_severity': 'warning'},
-    'disk_high':    {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
+    'disk_high':    {'type': 'threshold_crossed', 'code': 'A-QOS-001', 'event_type': 'qualityOfService',
                      'probable_cause': 'storageCapacityProblem', 'mo_class': 'host', 'perceived_severity': 'warning'},
-    'config_drift': {'type': 'config_out_of_sync', 'code': 'CIMS-PRC-003', 'event_type': 'processingError',
+    'config_drift': {'type': 'config_out_of_sync', 'code': 'A-PRC-003', 'event_type': 'processingError',
                      'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software', 'perceived_severity': 'warning'},
-    'ha_flap':      {'type': 'threshold_crossed', 'code': 'CIMS-QOS-001', 'event_type': 'qualityOfService',
+    'ha_flap':      {'type': 'threshold_crossed', 'code': 'A-QOS-023', 'event_type': 'qualityOfService',
                      'probable_cause': 'thresholdCrossed', 'mo_class': 'service', 'perceived_severity': 'warning'},
 }
 
 # 옛 per-process/리소스 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.
 _OLD_TYPE_ALIAS = {
-    'csp_down': ('process_down', 'CIMS-PRC-001'), 'cmp_down': ('process_down', 'CIMS-PRC-001'),
-    'module_down': ('process_down', 'CIMS-PRC-001'), 'db_down': ('connection_lost', 'CIMS-COM-001'),
-    'rtp_high': ('threshold_crossed', 'CIMS-QOS-001'), 'disk_high': ('threshold_crossed', 'CIMS-QOS-001'),
+    'csp_down': ('process_down', 'A-PRC-001'), 'cmp_down': ('process_down', 'A-PRC-001'),
+    'module_down': ('process_down', 'A-PRC-001'), 'db_down': ('connection_lost', 'A-COM-001'),
+    'rtp_high': ('threshold_crossed', 'A-QOS-024'), 'disk_high': ('threshold_crossed', 'A-QOS-001'),
 }
 
 # 코드 개정 이력 — 옛 code → 현행 code. 코드는 불변이 원칙(§3.4 코드 문법 — NMS 사전 키)
-# 이며, northbound 연동 전에 한해 개정 가능. CFG 는 DOMAIN=eventType 약어 규칙 위반이라
-# PRC(processingError) 로 정정. 옛 code 규칙/활성 알람은 read 시 alias + 스윕 이행 종결
-# (alarm_sweeper.close_legacy_code) 로 흡수.
-_CODE_REVISIONS = {'CIMS-CFG-001': 'CIMS-PRC-003'}
+# 이며, northbound 연동 전에 한해 개정 가능. 옛 code 규칙/활성 알람은 read 시 alias +
+# 스윕 이행 종결(alarm_sweeper.close_legacy_code/close_migrated_keys) 로 흡수.
+# - CIMS-CFG-001: CFG 는 DOMAIN=eventType 약어 규칙 위반 — PRC 로 정정 (구 개정 이력).
+# - CIMS-<DOMAIN>-<SEQ> 클래스 코드 → flat 정의 코드 A-<DOMAIN>-NNN (표준화 §3.4(a)
+#   번호 승계). 구 CIMS-QOS-001 이 여러 정의로 갈라진 rtp/ha_flap rule 은 check 기반
+#   기본값(_ALERT_CLASS_DEFAULTS — A-QOS-024/A-QOS-023)이 배정하고, 이 dict 는 구
+#   레코드 read alias 의 대표 정의(disk, A-QOS-001)로만 쓴다.
+_CODE_REVISIONS = {
+    'CIMS-CFG-001': 'A-PRC-003',
+    'CIMS-PRC-001': 'A-PRC-001',
+    'CIMS-PRC-002': 'A-PRC-002',
+    'CIMS-PRC-003': 'A-PRC-003',
+    'CIMS-PRC-004': 'A-PRC-004',
+    'CIMS-COM-001': 'A-COM-001',
+    'CIMS-QOS-001': 'A-QOS-001',
+    'CIMS-QOS-002': 'A-QOS-002',
+}
 
 # check 개정 — 감지 3계층 분리(표준화 §3.4(b)): 구 probe check 'process_down' 은 프로세스
 # 생존이 아니라 관리 응답성을 보므로 'service_unresponsive' 클래스로 개정. 규칙 **정체성**이
@@ -111,7 +131,14 @@ _CHECK_REVISION_DROP = ('type', 'code', 'event_type', 'probable_cause', 'mo_clas
 # check 개정으로 규칙의 code 가 교체된 경우의 옛 code — 스윕의 **targeted** 이행 종결용.
 # 코드 개정(_CODE_REVISIONS)이 아니다: 옛 code 가 다른 규칙(module_down)으로 존속하므로
 # code 전량 종결(close_legacy_code)을 쓰면 안 되고, 해당 규칙의 mo 공간으로 한정한다.
+# (현행 잔여분(probe 계열 CIMS-PRC-001)은 구 mo(cims/*)에만 존재 — mo 루트 이행 종결
+# (sweep_service_rules 의 close_migrated_keys)이 함께 흡수하므로 별도 스윕은 없다.)
 _CHECK_LEGACY_CODES = {'service_unresponsive': ('CIMS-PRC-001',)}
+
+
+def current_code(code: str) -> str:
+    """옛 code → 현행 정의 코드 alias (read/수신 정규화용). 미개정 code 는 그대로."""
+    return _CODE_REVISIONS.get(code or '', code)
 
 
 def legacy_codes(code: str) -> list:
@@ -126,13 +153,21 @@ def legacy_check_codes(check: str) -> tuple:
 
 def normalize_alert_rule(r: dict) -> dict:
     """규칙에 표준 알람 필드(type 클래스/code/event_type/probable_cause/mo_class/perceived_severity)를 채움.
-    명시값 우선, 없으면 check 기반 기본값. severity→perceived_severity 하위호환."""
+    명시값 우선, 없으면 check 기반 기본값. severity→perceived_severity 하위호환.
+    저장된 descriptor 의 구 포맷 잔재(code 'CIMS-*', mo_instance 'cims/*')는 read 시
+    폐기해 현행 기본값/런타임 mo 합성이 적용되게 한다 (표준화 §6 — store 는 무수정)."""
     out = dict(r)
     new_chk = _CHECK_REVISIONS.get(out.get('check'))
     if new_chk:
         out['check'] = new_chk
         for k in _CHECK_REVISION_DROP:
             out.pop(k, None)
+    # 구 포맷 이행 — 클래스 코드는 check 기본값이 정의 코드를 배정(QOS-001 분할 대응),
+    # 구 mo 루트(cims/*)는 스윕의 관측 신원 합성이 대체.
+    if str(out.get('code') or '').startswith('CIMS-') and out.get('check') in _ALERT_CLASS_DEFAULTS:
+        out.pop('code', None)
+    if str(out.get('mo_instance') or '').startswith('cims/'):
+        out.pop('mo_instance', None)
     for k, v in _ALERT_CLASS_DEFAULTS.get(out.get('check'), {}).items():
         out.setdefault(k, v)
     # 옛 type 슬러그(csp_down 등) → 클래스/코드 보정
@@ -144,7 +179,7 @@ def normalize_alert_rule(r: dict) -> dict:
         out['perceived_severity'] = out['severity']
     out.setdefault('perceived_severity', 'warning')
     out.setdefault('severity', out['perceived_severity'])  # 구 reader 호환
-    out.setdefault('type', 'event'); out.setdefault('code', 'CIMS-GEN-000')
+    out.setdefault('type', 'event'); out.setdefault('code', 'A-GEN-000')
     out['code'] = _CODE_REVISIONS.get(out['code'], out['code'])   # 개정된 옛 code 보정
     out.setdefault('event_type', 'processingError'); out.setdefault('probable_cause', '')
     out.setdefault('mo_class', 'service')

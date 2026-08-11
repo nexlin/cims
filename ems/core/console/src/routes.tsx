@@ -20,6 +20,7 @@ import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import AutoDeployPage from './pages/AutoDeployPage'
+import AlarmCatalogPage from './pages/AlarmCatalogPage'
 import HaServicesPage from './pages/HaServicesPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
@@ -72,6 +73,8 @@ const CORE_SECTIONS: RouteSection[] = [
     routes: [
       { path: '/alerts/active',  title: '활성 알람',        component: ActiveAlarmsPage },
       { path: '/alerts/history', title: '알람·이벤트 이력', component: AlertsPage },
+      // 코드 사전 (rule + 모듈 자기보고 병합 — alarm_pipeline.md §8.1)
+      { path: '/alerts/catalog', title: '알람 카탈로그',    component: AlarmCatalogPage },
     ],
   },
   // ── 관리(admin) ──

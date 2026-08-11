@@ -1,21 +1,20 @@
 // 코어 위젯 — 시스템 형상(구성도) + 상태. HA 그룹(AS/AA)/단독(SA)별로 VIP→멤버 노드→**설치된** 모듈
 // 구성을 그리고, 각 서버/모듈 상태색을 **활성 알람 등급**으로 구동(offline/critical/major 🔴,
 // minor/warning 🟡, 정상 🟢, 설치만 되고 미기동 ⚪).
-// 서비스 무지(범용 인프라). 자체 폴링 15s. 비관리자/오류 시 빈.
-import { useState, useEffect, useCallback } from 'react'
+// 서비스 무지(범용 인프라). 형상 폴링 15s, 알람은 전역 store 구독. 비관리자/오류 시 빈.
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../../api/ha_groups'
 import { deploymentApi, type Agent } from '../../api/deployment'
-import { alertsApi, type AlertEvent } from '../../api/alerts'
 import { externalSystemsApi, type ExternalSystem, type ProbeResult } from '../../api/external_systems'
 import { depEffectiveStatus } from '../../pages/deploy/deployHelpers'
+import { activeSevByMo as storeSevByMo, useAlarms } from '../useAlarms'
 import type { WidgetDef } from '../types'
 
 const EXT_TYPE_LABEL: Record<string, string> = {
   db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
 }
 
-const SEV_RANK: Record<string, number> = { critical: 4, major: 3, minor: 2, warning: 1 }
 const C_RED = '#e74c3c', C_AMBER = '#f59e0b', C_GREEN = '#22c55e', C_GRAY = '#9aa5b4', C_BLUE = '#3498db'
 // EMS 관례 — 단일문자 상태/설정 배지 (A/S, M/B). hover 시 title 로 풀워드.
 const STATE_BADGE = {
@@ -32,24 +31,8 @@ const MODE_BADGE: Record<string, { t: string; c: string }> = {
   AS: { t: 'AS', c: '#3498db' }, AA: { t: 'AA', c: '#27ae60' }, SA: { t: 'SA', c: '#95a5a6' },
 }
 
-// 활성 알람 → mo_instance별 최고 등급 맵.
-function activeSevByMo(events: AlertEvent[]): Map<string, number> {
-  const asc = [...events].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
-  const open: Record<string, AlertEvent> = {}
-  for (const ev of asc) {
-    const k = ev.alarm_id ? ev.alarm_id.replace(/@\d+$/, '') : ev.type
-    if (ev.action === 'open') open[k] = ev
-    else if (ev.action === 'close') delete open[k]
-  }
-  const m = new Map<string, number>()
-  for (const ev of Object.values(open)) {
-    const mo = ev.source?.mo_instance
-    if (!mo) continue
-    const r = SEV_RANK[ev.perceived_severity || ev.severity || ''] ?? 1
-    m.set(mo, Math.max(m.get(mo) ?? 0, r))
-  }
-  return m
-}
+// 활성 알람 → mo_instance별 최고 등급 맵 — 전역 store 의 activeSevByMo 사용
+// (접기 규율 §8.3 1원화, 이 위젯 서열: critical=4 … indeterminate=0).
 
 // 노드가 담는 모듈 = **설치된** 모듈. running 은 실측 기동 여부 — 설치만 되고 안 뜬
 // 모듈(AS 대기 노드의 cold 모듈 등)도 회색 칩으로 보인다.
@@ -64,7 +47,12 @@ function chipTint(rank: number, running: boolean): string {
 }
 
 function ModuleChip({ host, module, running, sevByMo }: { host: string; module: string; running: boolean; sevByMo: Map<string, number> }) {
-  const rank = Math.max(sevByMo.get(`${host}/${module}`) ?? 0, sevByMo.get(`cims/${module}`) ?? 0)
+  // mo 규약: <서버명>/<모듈>[/<component>] (표준화 §3.4(b)) — component 알람도 모듈 칩에 귀속.
+  // cims/<모듈> 은 구 레코드 흡수용.
+  let rank = sevByMo.get(`cims/${module}`) ?? 0
+  for (const [mo, r] of sevByMo) {
+    if (mo === `${host}/${module}` || mo.startsWith(`${host}/${module}/`)) rank = Math.max(rank, r)
+  }
   const col = sevColor(rank, running)
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '2px 8px',
@@ -76,8 +64,8 @@ function ModuleChip({ host, module, running, sevByMo }: { host: string; module: 
 }
 
 function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number>; onClick: () => void }) {
-  // 노드 등급 = offline → critical, 아니면 host/모듈 알람 최고 등급.
-  // 서비스 레벨 알람(cims/<모듈>)은 **기동 중인** 모듈에만 귀속 — 정지된 대기 노드까지 물들지 않게.
+  // 노드 등급 = offline → critical, 아니면 host(서버명 루트)/모듈 알람 최고 등급.
+  // 구 레코드(cims/<모듈>)는 **기동 중인** 모듈에만 귀속 — 정지된 대기 노드까지 물들지 않게.
   let rank = n.online ? 0 : 4
   for (const [mo, r] of sevByMo) {
     if (mo.split('/')[0] === n.host) rank = Math.max(rank, r)
@@ -160,15 +148,16 @@ function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: P
 function SystemTopologyWidget() {
   const navigate = useNavigate()
   const [systems, setSystems] = useState<Sys[]>([])
-  const [sevByMo, setSevByMo] = useState<Map<string, number>>(new Map())
   const [ext, setExt] = useState<ExternalSystem[]>([])
   const [extStatus, setExtStatus] = useState<Map<number, ProbeResult>>(new Map())
+  // 알람은 전역 store 구독 (alarm_pipeline.md §8.2 — 개별 fetch 제거)
+  const { active } = useAlarms()
+  const sevByMo = useMemo(() => storeSevByMo(active), [active])
 
   const load = useCallback(async () => {
     try {
-      const [groups, agents, deps, alerts, extList] = await Promise.all([
+      const [groups, agents, deps, extList] = await Promise.all([
         haGroupsApi.list(), deploymentApi.listAgents(), deploymentApi.listDeployments(),
-        alertsApi.list({ days: 7, limit: 1000 }).then(r => r.events).catch(() => [] as AlertEvent[]),
         externalSystemsApi.list().catch(() => [] as ExternalSystem[]),
       ])
       setExt(extList.filter(s => s.enabled))
@@ -226,7 +215,6 @@ function SystemTopologyWidget() {
         sys.push({ key: `a${a.id}`, name: a.name, mode: 'SA', nodes: [node(a.id, undefined, a.status === 'online')] })
       }
       setSystems(sys)
-      setSevByMo(activeSevByMo(alerts))
     } catch { setSystems([]) }
   }, [])
 
@@ -234,7 +222,11 @@ function SystemTopologyWidget() {
   if (systems.length === 0 && ext.length === 0) return null
 
   const sysRank = (s: Sys): number => {
+    // 그룹 소유 알람(<그룹명>/<객체> — VIP·fan-out drift 등)은 시스템 카드에 귀속 (표준화 §3.4(b)).
     let r = 0
+    for (const [mo, rr] of sevByMo) {
+      if (mo.split('/')[0] === s.name) r = Math.max(r, rr)
+    }
     for (const n of s.nodes) {
       if (!n.online) r = Math.max(r, 4)
       for (const [mo, rr] of sevByMo) {

@@ -14,7 +14,6 @@ include_directories(
 add_executable(cmdp
    PMain.cpp
    PCmdpServer.cpp
-   FmReporter.cpp
    PMsrpParser.cpp
    PMsrpSession.cpp
    PMsrpConnection.cpp

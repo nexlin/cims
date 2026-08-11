@@ -2,21 +2,36 @@
   "alarms": [
     {
       "type": "connection_lost",
-      "code": "CIMS-COM-001",
-      "perceived_severity": "major",
+      "code": "A-COM-001",
+      "perceived_severity": "critical",
       "event_type": "communications",
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "service",
       "metric": "CSC DB 연결",
-      "msg_open": "{mo} CSC 의 DB 연결 두절 (probe 연속 실패)",
-      "msg_close": "{mo} CSC 의 DB 연결 정상화",
+      "msg_open": "DB connection lost (host={host}, port={port}, db={db})",
+      "msg_close": "DB connection restored ({mo})",
       "effect": "가입자/조직 CRUD·MCPTT(GMS/CMS) 조회 실패 — 관리 API 5xx",
       "recommended_action": "DB 서버 상태·네트워크·계정 확인, csc.json CimsDatabase 설정 점검"
     }
   ],
   "events": [
-    { "type": "process_started", "kind": "stateChange", "msg": "{mo} CSC 기동 완료" },
-    { "type": "process_stopping", "kind": "stateChange", "msg": "{mo} CSC 종료 시작" },
-    { "type": "config_change", "kind": "audit", "msg": "{mo} 설정 변경" }
+    {
+      "type": "process_started",
+      "code": "E-STC-001",
+      "kind": "stateChange",
+      "msg": "Process started: {mo}"
+    },
+    {
+      "type": "process_stopping",
+      "code": "E-STC-002",
+      "kind": "stateChange",
+      "msg": "Process stopping (graceful): {mo}"
+    },
+    {
+      "type": "config_change",
+      "code": "E-AUD-006",
+      "kind": "audit",
+      "msg": "Configuration changed: {mo}"
+    }
   ]
 }

@@ -270,7 +270,12 @@ int ServiceMain() {
         }
         if ( strCatalog.empty() ) strCatalog = arrCands[0];  // 부재 시 FmReporter 가 로그로 드러냄
         gclsFmReporter.Init( gclsSetup.m_strFmOamIp, gclsSetup.m_iFmOamPort, sysId, "csp", strCatalog,
-                             gclsSetup.m_iFmSyncSec );
+                             gclsSetup.m_iFmSyncSec, []( EnumFmLogLevel eLevel, const std::string &strMsg ) {
+                                 CLog::Print( eLevel == FM_LOG_ERROR   ? LOG_ERROR
+                                              : eLevel == FM_LOG_DEBUG ? LOG_DEBUG
+                                                                       : LOG_INFO,
+                                              "FmReporter: %s", strMsg.c_str() );
+                             } );
     }
 
     // Phase 1.D-2 — Redis register state replication (optional, cold-mode if not configured)
@@ -279,8 +284,18 @@ int ServiceMain() {
     }
 
     // [FIX] Wire Connection Callback and Start Monitor
+    //   미디어평면 전체 두절/복구 전이는 자기보고 알람으로도 노출 (A-COM-007 — IBCF/TAS/
+    //   PTT-AS 의 CMP 두절 요구를 대표 정의 하나로 수렴, 기능 카탈로그 §3 중복 발화 금지).
     gclsCmpClient.SetConnectionCallback(
-        []( bool bConnected ) { gclsGroupCallService.OnCmpStatusChanged( bConnected ); } );
+        [mo = sysId + "/csp/cmp"]( bool bConnected ) {
+            gclsGroupCallService.OnCmpStatusChanged( bConnected );
+            if ( gclsFmReporter.IsEnabled() ) {
+                if ( bConnected )
+                    gclsFmReporter.AlarmClose( "A-COM-007", mo );
+                else
+                    gclsFmReporter.AlarmOpen( "A-COM-007", mo );
+            }
+        } );
 
     // 부분 장애(일부 CMP endpoint DEAD) — 그 노드로 pin 된 호를 능동 종료(BYE). key 접두사로 분기:
     //   "cmp_sess_" = VoLTE relay session_id → CallMap 양 leg BYE, 그 외 = PTT group_id → 그룹 멤버 BYE.
@@ -308,15 +323,19 @@ int ServiceMain() {
                                      gclsSetup.m_strDbName, gclsSetup.m_iDbPort ) ) {
             CLog::Print( LOG_ERROR, "DB Connect failed — check csp.json Database section" );
         }
-        // DB 연결 상태 자기보고 — 전이 시 CIMS-COM-001 open/close.
+        // DB 연결 상태 자기보고 — 전이 시 A-COM-001 open/close.
         //   probe 는 전용 연결이라 쿼리 경로와 무간섭. Connect 실패여도 접속 정보는 저장돼 판정 가능.
-        //   mo 는 노드별 분리 (cims/csp/<node>/db — HA 다중 CSP 의 활성키 충돌 방지).
+        //   mo 는 서버명 루트 (<node>/csp/db — 표준화 §3.4(b), HA 다중 CSP 의 활성키 충돌 방지).
         if ( gclsFmReporter.IsEnabled() ) {
-            gclsDbManager.StartHealthProbe( [mo = "cims/csp/" + sysId + "/db"]( bool bUp ) {
+            SimpleJson::JsonNode nodeDbParams;
+            nodeDbParams.Set( "host", gclsSetup.m_strDbHost );
+            nodeDbParams.Set( "port", gclsSetup.m_iDbPort );
+            nodeDbParams.Set( "db", gclsSetup.m_strDbName );
+            gclsDbManager.StartHealthProbe( [mo = sysId + "/csp/db", nodeDbParams]( bool bUp ) {
                 if ( bUp )
-                    gclsFmReporter.AlarmClose( "CIMS-COM-001", mo );
+                    gclsFmReporter.AlarmClose( "A-COM-001", mo );
                 else
-                    gclsFmReporter.AlarmOpen( "CIMS-COM-001", mo );
+                    gclsFmReporter.AlarmOpen( "A-COM-001", mo, nodeDbParams );
             } );
         }
     }
@@ -361,7 +380,7 @@ int ServiceMain() {
         return -1;
     }
     CLog::Print( LOG_SYSTEM, "SipServer started successfully." );
-    gclsFmReporter.SendEvent( "process_started", "stateChange", "cims/csp/" + gclsFmReporter.Node() );
+    gclsFmReporter.SendEvent( "process_started", "stateChange", gclsFmReporter.Node() + "/csp" );
 
     // SIGUSR1: agent 가 jsonl 쓰기 직후 보내는 reload 시그널.
     //   핸들러에서는 플래그만 세팅, 실제 reload 는 메인 루프에서 수행.
@@ -512,7 +531,7 @@ int ServiceMain() {
             gclsSetup.Read();
         }
     }
-    gclsFmReporter.SendEvent( "process_stopping", "stateChange", "cims/csp/" + gclsFmReporter.Node() );
+    gclsFmReporter.SendEvent( "process_stopping", "stateChange", gclsFmReporter.Node() + "/csp" );
     gclsDbManager.StopHealthProbe();
     gclsCallMap.StopCallAll();
     gclsTransCallMap.StopCallAll();

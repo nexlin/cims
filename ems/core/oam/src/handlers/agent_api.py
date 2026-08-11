@@ -860,10 +860,10 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                 if not mod:
                     continue
                 event_log.record_event(base, {
-                    'type': 'process_died', 'kind': 'stateChange',
+                    'type': 'process_died', 'code': 'E-STC-009', 'kind': 'stateChange',
                     'source': {'mo_class': 'software', 'mo_instance': f'{host}/{mod}',
                                'detected_by': 'agent'},
-                    'message': f'{host}/{mod} 프로세스 소멸 (agent 전이 관측)',
+                    'message': f'Process {mod} died on {host} (termination observed)',
                     'params': {'module': mod},
                 })
         try:

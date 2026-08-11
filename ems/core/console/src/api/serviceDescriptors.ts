@@ -11,13 +11,13 @@ export interface ServiceModule {
 
 export interface AlertRule {
   type: string                  // 조건 클래스 (process_down/connection_lost/threshold_crossed)
-  code?: string                 // 알람 코드 (CIMS-PRC-001 …)
+  code?: string                 // 알람 정의 코드 (A-PRC-001 …)
   perceived_severity?: string   // critical|major|minor|warning|indeterminate
   severity?: string             // 구 호환
   event_type?: string           // communications|qualityOfService|processingError|equipment|environmental
   probable_cause?: string       // X.733 Annex
   mo_class?: string             // software|service|equipment|host|network
-  mo_instance?: string          // cims/csp 등 (service 규칙)
+  mo_instance?: string          // 명시 시 고정 소스 — 비우면 관측 신원으로 런타임 합성 (표준화 §3.4(b))
   check?: string                // 평가 방식
   target?: string
   threshold?: number

@@ -34,6 +34,11 @@ async def handle_events(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     config = kwargs.get('config', {})
     if handler_args.method.upper() != 'GET':
         return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+    # 전 엔드포인트 인증 (파이프라인 §7)
+    from handlers.auth import require_auth
+    _token, autherr = require_auth(handler_args)
+    if autherr:
+        return autherr
     base = _service_log_dir(config)
     parts = _path_parts(handler_args.full_path)
     qs = handler_args.query_params or {}

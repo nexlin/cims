@@ -536,6 +536,66 @@ body {
 }
 .toast--ok  { background: #166534; color: #fff; }
 .toast--err { background: var(--danger); color: #fff; }
+/* 알람 전이 토스트 — critical/major open·승격만, 수동 닫기 (alarm_pipeline.md §8.2) */
+.toast--alarm {
+  background: var(--danger);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+}
+.toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: .75;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.toast-close:hover { opacity: 1; }
+
+/* ── 헤더 알람 인디케이터·드로어 (alarm_pipeline.md §8.2) ───────── */
+.alarm-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--shell-border);
+  background: transparent;
+  color: var(--header-fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+.alarm-indicator:hover { background: var(--sidebar-hover); }
+.alarm-indicator .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.alarm-drawer {
+  position: fixed;
+  top: var(--header-h);
+  right: 0;
+  bottom: 0;
+  width: 380px;
+  max-width: 90vw;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+}
+.alarm-drawer-body { flex: 1; overflow-y: auto; }
+.alarm-drawer-row {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
 
 @keyframes slide-in {
   from { transform: translateX(40px); opacity: 0; }

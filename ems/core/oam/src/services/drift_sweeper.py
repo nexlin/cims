@@ -10,7 +10,7 @@ drift 발견 시 alert_log 에 1건 기록 + (optional) auto-resync.
 - 비교 자체는 agent proxy GET 으로 현재 jsonl 읽음 — drift 없으면 alert 안 냄
 - drift 있을 시:
     * 표준 알람 발화 (alarm_standardization.md) — 클래스 config_out_of_sync/CIMS-PRC-003,
-      객체 mo_instance='cims/ha/g<group_id>/<collection>' (alarm_sweeper.transition 코어)
+      객체 mo_instance='<그룹명>/config/<collection>' (alarm_sweeper.transition 코어)
     * auto_resync=True 면 master records 로 다른 멤버에 PUT (배포)
     * drift 해소 시 Cleared(close)
 - 구 포맷(type='config_drift::g<id>::<coll>', code/alarm_id 없음)의 미해소 open 은
@@ -212,10 +212,10 @@ _UNKNOWN_STREAK: dict = {}    # akey -> 연속 '판정 불가'(all_ok=False) 횟
 _UNKNOWN_LIMIT = 3            # 이 횟수 연속이면 열린 알람을 판정불가 사유로 종료
 
 # HA fan-out drift 알람 정의 — 표준화 §3.5: 클래스는 조건(config_out_of_sync), 객체는
-# source.mo_instance. agent 계열 노드파일 드리프트(CIMS-PRC-003, <host>/<module>/config)와
-# 같은 조건 클래스이며 객체만 다르다 (cims/ha/g<gid>/<collection>).
+# source.mo_instance. agent 계열 노드파일 드리프트(A-PRC-003, <host>/<module>/config)와
+# 같은 조건 클래스·정의이며 객체만 다르다 (<그룹명>/config/<collection> — 그룹 소유 객체).
 _DRIFT_RULE = {
-    'type': 'config_out_of_sync', 'code': 'CIMS-PRC-003', 'perceived_severity': 'warning',
+    'type': 'config_out_of_sync', 'code': 'A-PRC-003', 'perceived_severity': 'warning',
     'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError',
     'mo_class': 'software', 'metric': 'HA fan-out 정합',
     'effect': 'HA 멤버 간 런타임 컬렉션 불일치 — 절체 시 동작 상이 위험',
@@ -225,19 +225,33 @@ _DRIFT_RULE = {
 _OLD_PREFIX = 'config_drift::'    # 구 포맷 akey(type) — 이행 종결 대상
 
 
-def _mo_instance(gid, coll: str) -> str:
-    return f"cims/ha/g{gid}/{coll}"
+def _mo_instance(r: dict) -> str:
+    """<그룹명>/config/<collection> — 그룹 소유 객체 루트 (표준화 §3.4(b)).
+    그룹명 부재(구 레코드/무명 그룹)는 g<gid> 폴백."""
+    root = r.get('ha_group_name') or f"g{r.get('ha_group_id')}"
+    return f"{root}/config/{r['collection']}"
 
 
-def _akey(gid, coll: str) -> str:
-    return f"{_DRIFT_RULE['code']}@{_mo_instance(gid, coll)}"
+def _akey(r: dict) -> str:
+    return f"{_DRIFT_RULE['code']}@{_mo_instance(r)}"
 
 
-def _drift_prefix_keys(state_keys) -> list:
-    from services import service_registry
-    codes = [_DRIFT_RULE['code']] + service_registry.legacy_codes(_DRIFT_RULE['code'])
-    prefixes = tuple([f"{c}@cims/ha/" for c in codes] + [_OLD_PREFIX])
-    return [k for k in state_keys if k.startswith(prefixes)]
+def drift_open_keys(meta: dict) -> list:
+    """드리프트 소유 활성키 필터 — 현행(code=A-PRC-003 · detected_by=oam ·
+    mo '<그룹명>/config/<coll>')과 구 포맷(CIMS-PRC-003/CIMS-CFG-001@cims/ha/…,
+    config_drift::…) 둘 다. meta 는 compute_open_state(with_meta=True) 결과.
+    agent 계열 노드파일 드리프트(같은 code, detected_by=agent)와는 detected_by 로
+    구분한다 (파이프라인 §4.3 — 파티션 키는 detected_by 가 유일)."""
+    cur = _DRIFT_RULE['code']
+    out = []
+    for k, m in meta.items():
+        db = (m.get('detected_by') or '') if isinstance(m, dict) else ''
+        mo = k.split('@', 1)[1] if '@' in k else ''
+        if k.startswith(_OLD_PREFIX) or mo.startswith('cims/ha/'):
+            out.append(k)
+        elif k.startswith(f"{cur}@") and db == 'oam' and '/config/' in mo:
+            out.append(k)
+    return out
 
 
 def _reseed_if_empty(open_state: dict, service_log_dir: str) -> None:
@@ -247,13 +261,13 @@ def _reseed_if_empty(open_state: dict, service_log_dir: str) -> None:
     실패했거나 프로세스가 교체되면 "이미 열려 있는 알람"을 없다고 보고 open 을
     중복 발행한다 — close 는 1건만 뒤따르므로 앞선 open 이 영구 미해소로 남는다
     (2026-07-07 사례). 스윕마다 비었을 때만 도므로 정상 경로에서는 비용이 없다.
-    구 포맷 키(config_drift::…)도 함께 재도출해 이행 종결이 걸리게 한다."""
+    구 포맷 키(config_drift::…, cims/ha/…)도 함께 재도출해 이행 종결이 걸리게 한다."""
     if open_state or not service_log_dir:
         return
     try:
-        st = alert_log.compute_open_state(service_log_dir, days=90)
-        for k in _drift_prefix_keys(st.keys()):
-            open_state[k] = st[k]
+        meta = alert_log.compute_open_state(service_log_dir, days=90, with_meta=True)
+        for k in drift_open_keys(meta):
+            open_state[k] = meta[k]
     except Exception:
         pass
 
@@ -304,16 +318,15 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
     # 고아 reap — 이번 스윕의 비교 대상(모든 row, all_ok 무관)에 더 이상 없는 open 키는
     # 그룹 삭제/컬렉션 제거/배포 재구성으로 재평가가 불가능해진 알람 → close 발행.
     # (all_ok=False row 도 universe 에 포함되므로 proxy 일시 실패로 오닫힘 없음.)
-    universe = {_akey(r['ha_group_id'], r['collection']) for r in scan_results}
+    universe = {_akey(r) for r in scan_results}
     for akey in [k for k in list(open_state) if k not in universe]:
         _close(open_state, service_log_dir, akey,
                f"HA drift 대상 소멸 (그룹/컬렉션 제거) — {akey.split('@', 1)[1]}")
         counts['closed'] += 1
     for r in scan_results:
-        gid = r['ha_group_id']
         coll = r['collection']
-        akey = _akey(gid, coll)
-        mo = _mo_instance(gid, coll)
+        akey = _akey(r)
+        mo = _mo_instance(r)
         if not r.get('all_ok'):
             # proxy 실패는 drift 판정 보류. 다만 무기한 보류하면 이미 열린 알람이
             # 영원히 닫히지 않는다 (universe 에는 남아 orphan reap 도 안 걸림).

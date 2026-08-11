@@ -57,6 +57,22 @@
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
           "help": "그룹 공통 — 절체해도 같은 경로를 읽어야 하므로 멤버 간 동일해야 한다(공유 스토리지 하위 권장)."
+        },
+        {
+          "key": "ServiceLogging.AlertRetainDays",
+          "label": "알람 스트림 보존일",
+          "type": "number",
+          "default": 180,
+          "restart": true,
+          "help": "알람 스트림(alerts/) 일별 파일 보존 기간. 0 = 무제한. 90일 미만은 open-state replay 윈도 보호를 위해 90 으로 클램프."
+        },
+        {
+          "key": "ServiceLogging.EventRetainDays",
+          "label": "이벤트 스트림 보존일",
+          "type": "number",
+          "default": 365,
+          "restart": true,
+          "help": "이벤트 스트림(events/) 일별 파일 보존 기간(감사 요건 — service_control/auth_audit 포함). 0 = 무제한."
         }
       ],
       "scope": "service"

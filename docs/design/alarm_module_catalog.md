@@ -35,7 +35,8 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
 | 컬럼 | 의미 | 값 규약 |
 |---|---|---|
 | `구분` | 알람 / 이벤트 | X.733 알람 vs X.730/731/740 통지 — 표준화 §3.6 의 스트림 분리 |
-| `type` | 조건 클래스 슬러그 | §2.3 의 20클래스 중 하나 — 클래스의 식별자(클래스는 코드를 갖지 않는다, 표준화 §3.4(a)). 프로세스명·리소스명·임계를 넣지 않는다(표준화 §3.5). **정의 코드**(`A-<DOMAIN>-NNN` — 사전/POD/NMS 키, 알람·이벤트 공통)는 기능 카탈로그([alarm_function_catalog.csv](alarm_function_catalog.csv))가 정본이며, 본 CSV 행이 구현 채택될 때 대응 정의 코드를 확정해 fm_catalog/rule 에 탑재한다. **구현 현행 wire 는 구 포맷 `CIMS-<DOMAIN>-<SEQ>` 클래스 코드** — 정의 코드 이행은 표준화 §3.4(a). 이벤트 행의 type 은 wire 정의 슬러그 — 성격 클래스·정의 코드 배정은 표준화 §3.6 을 따른다 |
+| `code` | 대응 정의 코드 | 정본은 [alarm_function_catalog.csv](alarm_function_catalog.csv). 여러 행(모듈/객체)이 같은 code 를 가질 수 있다(활성키는 mo 로 분리). `(미배정)` = 기능 카탈로그에 정의 없음(후속 판단 대상) |
+| `type` | 조건 클래스 슬러그 | §2.3 의 20클래스 중 하나 — 클래스의 식별자(클래스는 코드를 갖지 않는다, 표준화 §3.4(a)). 프로세스명·리소스명·임계를 넣지 않는다(표준화 §3.5). **정의 코드**(`A-<DOMAIN>-NNN` — 사전/POD/NMS 키, 알람·이벤트 공통)는 기능 카탈로그([alarm_function_catalog.csv](alarm_function_catalog.csv))가 정본이며, 본 CSV 행이 구현 채택될 때 대응 정의 코드를 확정해 fm_catalog/rule 에 탑재한다(구현분은 flat 정의 코드 사용 — 구 `CIMS-*` 는 read alias 로만 흡수, 표준화 §3.4(a)). 이벤트 행의 type 은 wire 정의 슬러그 — 성격 클래스·정의 코드 배정은 표준화 §3.6 을 따른다 |
 | `severity` | perceivedSeverity | critical/major/minor/warning/indeterminate. **이벤트는 `-`** (통지는 severity 없음) |
 | `source_system` | **발신 노드**(호스트/논리 노드) | CSV 값은 대표 배치의 노드 예시이며, 실제 값은 모듈 SystemId(= FM envelope `hdr.node`) |
 | `instance` | **발신 모듈** | CSP/CMP/CMDP/CSC/AGENT/OAM/OAM-SVC |
@@ -126,13 +127,13 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 | `observability_lost` | **관측·자기보고 파이프라인의 공백·오염·무력화** (통신 두절 제외) | metric blackout, ip -j 빈 배열 위장, 카탈로그 무력화(UNKNOWN_CODE), 관측 대상 공백, 스위퍼 비활성 |
 | `cert_expiring` | **인증서 수명 위험** (만료 임박·회전 실패) | agent mTLS 만료 임박, 회전 실패 |
 
-- **기존 구현 코드와의 관계**: 구현 현행 wire 는 구 포맷 클래스 단위 코드
-  `CIMS-<DOMAIN>-<SEQ>` 7종(COM-001·QOS-001·QOS-002·PRC-001·PRC-002·PRC-003·PRC-004)을
-  쓴다 — flat **정의 코드**(`A-<DOMAIN>-NNN`, 기능 카탈로그 정본) 이행이 채택 시
-  동반된다(§3.4(a) `_CODE_REVISIONS` — 각 클래스의 대표 정의가 구 번호를 승계).
-  `storage_failure` 는 구 type `resource_failure` 의 개명(정의를 "영속 저장소 실패"로 좁힌
-  것 — 모듈 fm_catalog.json 의 type 문자열과 descriptor 는 채택 시점에 함께 이행). 나머지
-  클래스는 본 체계에서 신설한 것이다 — 구현 채택 시 표준화 §3.3 매핑 표에 편입한다.
+- **기존 구현 코드와의 관계**: wire/rule/fm_catalog 는 flat **정의 코드**
+  (`A-<DOMAIN>-NNN`, 기능 카탈로그 정본)를 쓴다. 구 포맷 클래스 단위 코드
+  (`CIMS-<DOMAIN>-<SEQ>` 7종)는 `_CODE_REVISIONS` read alias + 스윕 이행 종결로
+  흡수됐다(§3.4(a) — 각 클래스의 대표 정의가 구 번호를 승계, 구 QOS-001 의 분할은
+  ha_flap=A-QOS-023·rtp 사용률=A-QOS-024). `storage_failure` 는 구 type
+  `resource_failure` 의 개명(정의를 "영속 저장소 실패"로 좁힌 것). 미구현 클래스는
+  구현 채택 시 표준화 §3.3 매핑 표에 편입한다.
 - **경계 규칙** (혼동 잦은 쌍):
   - `connection_lost` vs `delivery_failed`: 연결/생존 신호 자체가 끊기면 전자, 채널은
     살아 있는데 그 위의 전달이 실패·적체하면 후자.
@@ -162,8 +163,8 @@ CSV 컬럼이 wire/저장 레코드의 `source.mo_instance` 를 구성한다
       SIG_SVR_01/csp                          ← 이벤트 등 component 도 비움
 ```
 
-구현 현행 wire/저장은 구 형식(`cims/<instance>/<source_system>/...`) — 전환은 표준화 §6
-mo 루트 개편 규율(스윕 이행 종결 + 재발화)을 따른다.
+구 wire 형식(`cims/<instance>/<source_system>/...`)은 수신/read 시 현행 형식으로
+정규화해 흡수한다(표준화 §6 mo 루트 개편 규율 — 스윕 이행 종결 + 재발화 완료).
 
 - 활성 알람 식별키는 `(정의 코드, mo_instance)` 다. 같은 클래스(type)를 여러 조건에
   재사용하는 행들은 `component` 컬럼(§2.2)이 행과 활성키를 분리한다 — 컬럼 불변식 위반 =
@@ -368,9 +369,9 @@ MsrpWorkerCount 사실상 무효(`:589,593,789` — 리액터 사망 판정은 �
 호출자 0건**(영구 미발화 — CSV 는 `후보` 로 분류하고 행에 예외임을 명시. "카탈로그 선언과
 CSV `구현` 행 일치" 규약(§4)의 현행 유일 예외). 원인: csp 런타임 설정 CUD 가 OAM 으로
 이관돼 잔재만 남음. 배선처는 CSC 가 실제 소유한 CUD(가입자/그룹/조직 — admin 13 + org 5
-= 18개 지점 실측) + mo 규약 교정(`cims/csp/config/*` 오기재 →
-`<서버명>/csc/config/<entity>`) + entity 어휘 신설(현행 `_CONFIG_EVENT_BY_ENTITY` 는
-listener/trunk/route/access — CSP 잔재).
+= 18개 지점 실측) + entity 어휘 신설(현행 `_CONFIG_EVENT_BY_ENTITY` 는
+listener/trunk/route/access — CSP 잔재). mo 는 `<서버명>/csc/config/<entity>` 로
+교정 완료.
 
 **자기보고 대상이 아닌 것**: 통화이력/flow API(CSC 미서빙 — OAM 소관), FM 채널 자기장애,
 요청 단위 4xx/5xx(PKCE/토큰/XCAP 인가 실패 등), 소켓 backlog/메모리(호스트 소관),
@@ -445,13 +446,13 @@ oam-svc 는 별도 감지 로직이 없다 — base 코어(`alarm_sweeper`)를 �
 계열 sweeper + FM ingest)만 다르다. `--role all` 에서는 base 가 대행(detected_by=`oam`).
 
 **최대 발견 — "알람 없음"이 "감지 불능"을 뜻하게 되는 침묵 실패**:
-1. **agent 관측 auto-close 의 실제 범위**: close 조건은 "offline" 이 아니라 "이번 스윕
-   `active` 집합에 없음"이다(`oam_app.py:1336-1345`) — agent offline·**metric 만 정지**
-   (hb 정상, `:1327-1329` `if not metric: continue`)·규칙별 데이터 미보고(cfg_hashes/
-   ha_transitions 부재)·cold_skip 이 **전부 `msg_close`("정상화")로 close** 된다. 노드
-   사망도 관측 열화도 "전 알람 해소"로 보인다. → `connection_lost`(대상 AGENT) +
-   `observability_lost`(metric blackout) 신설 + auto-close 를 판정 불가 의미로
-   재정의(메시지 분리).
+1. **agent 관측 두절**: 두절 노드(offline·metric 전무)는 `A-COM-015`
+   connection_lost(`<서버명>/agent`, check=agent_lost)가 열리고 그 노드의 열린 agent
+   알람은 "판정 불가" 메시지로 종결된다(파이프라인 §9 — 노드 사망이 전 알람 해소로
+   위장되지 않음. agent 스토어 공백이면 무판정). 잔여 사각: **stale metric**(hb 정상 +
+   metric 갱신 정지 — jsonl_last 가 옛 metric 을 계속 반환)과 규칙별 데이터
+   미보고(cfg_hashes/ha_transitions 부재)·cold_skip 은 여전히 `msg_close`("정상화")로
+   close — `observability_lost`(metric blackout, N주기 stale 전이) 신설이 남은 과제.
 2. **리스 상실/획득 실패**: read-only 강등 + **base sweeper 10종 전부 정지**가 로그로만
    남는다(`oam_app.py:625-636`, 게이트 `:1559-1578`). 단 정지 범위는 base 한정 — oam-svc
    서비스 알람(service_unresponsive/connection_lost/threshold_crossed)은 리스 게이트가 없어 계속 발화한다. →
@@ -485,9 +486,7 @@ miss 즉시 open — DB probe 3연속 표준과 불일치) + `_probe_cmp` 가 co
 `msg_close`("정상화") 우선(폴백 문구 거의 미사용 — 설정 소실이 알람 정리로 위장)
 ④agent 계열 `restore_open_state` 실패 시 drift 의 `_reseed_if_empty` 등가 자가복구 없음 +
 **복원 창 불일치**(기본 30일 vs drift 90일) — 30일+ 지속 알람은 재기동 시 중복 open·앞선
-open 영구 미해소 ⑤offline 자동 close 가 `msg_close`(정상화 문구)를 그대로 사용 — 오해
-유발 ⑥RTP 사용률이 전 endpoint 합산 — 노드별 고갈 은폐(service_unresponsive 는 노드별인데 threshold_crossed 만
-집계) ⑦분리 배포 시 base·oam-svc 가 같은 alerts jsonl 동시 append(`_write_lock` 은
+open 영구 미해소 ⑦분리 배포 시 base·oam-svc 가 같은 alerts jsonl 동시 append(`_write_lock` 은
 프로세스 로컬 — 교차 프로세스 무보호) ⑧cert_rotate_pending 이 한 번 set 되면 재평가 skip —
 agent 미호출 시 재시도·에스컬레이션·흔적 없음.
 

@@ -108,6 +108,12 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
     # query string 은 full_path 가 아니라 query_params dict 로 전달된다 (이미 URL-decode).
     qs = handler_args.query_params or {}
 
+    # 전 엔드포인트 인증 (파이프라인 §7) — 콘솔은 공용 api client 가 토큰을 동봉한다.
+    from handlers.auth import require_auth
+    token, autherr = require_auth(handler_args)
+    if autherr:
+        return autherr
+
     # 알람 승인(ack)/코멘트 — P1 라이프사이클 (32.111 acknowledgeAlarms/setComment).
     # alarm_id 에 '/'(mo_instance) 있어 body 로 전달.
     if method == 'POST' and parts and parts[0] in ('ack', 'comment'):
@@ -116,11 +122,10 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
             aid = (body.get('alarm_id') or '').strip()
             if not aid:
                 return HandlerResult(status=400, body={'error': 'alarm_id required'})
-            try:
-                from handlers.auth import extract_token
-                user = (extract_token(handler_args) or {}).get('login_id') or 'operator'
-            except Exception:
-                user = 'operator'
+            # actor 필수 — X.740 감사추적은 주체 불명(폴백 기명)을 허용하지 않는다.
+            user = (token or {}).get('login_id')
+            if not user:
+                return HandlerResult(status=401, body={'error': '토큰에 사용자 식별이 없습니다'})
             from datetime import datetime as _dt
             akey = aid.rsplit('@', 1)[0]            # code@mo_instance
             code = akey.split('@', 1)[0]

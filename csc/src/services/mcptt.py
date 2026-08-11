@@ -693,8 +693,9 @@ def audit_config_change(db_cfg: dict, actor: str, actor_ip: str,
         message = f"{actor}({actor_ip}) {entity}/{entity_id} {action}"
         r = _fm.get()
         if r is not None:
+            # mo 는 발신 주체(csc) 서버명 루트 — <node>/csc/config/<entity> (표준화 §3.4(b)).
             r.send_event('config_change', kind='audit',
-                         mo=f"cims/csp/config/{entity}", params=params, message=message)
+                         mo=f"{r.node}/csc/config/{entity}", params=params, message=message)
         else:
             logger.log_info(f"audit_config_change (fm 비활성): {message}")
     except Exception as e:

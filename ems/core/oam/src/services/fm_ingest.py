@@ -12,7 +12,9 @@
 활성 알람의 SoT 는 모듈, 여기는 미러 — 통지 유실·양측 재기동은 FM_SYNC 가 수렴시킨다.
 활성키/alarm_id/재통지 의미는 alarm_standardization.md §3.4 그대로 (transition 코어 재사용).
 detected_by = 'self' (주체 클래스만 — 발신 노드는 envelope hdr.node 와 mo_instance
-(cims/<module>/<node>[/<component>], 노드 필수)가 보유. 표준화 §3.4(b)).
+(<서버명>/<module>[/<component>], 서버명 = hdr.node)가 보유. 표준화 §3.4(b)).
+구 wire(코드 CIMS-*, mo cims/<module>/<node>[/...])는 수신 시 현행 정의 코드·서버명
+루트로 정규화해 흡수한다 (배포 스큐 — 구 모듈 + 신 OAM 구간).
 
 신뢰성 (cmp_media_api.md §8 과 동일 계약):
   - ack = 동일 trans_id 의 type:"response" (발신측 재전송 1s×5).
@@ -43,6 +45,25 @@ FM_CMDS = ('FM_REGISTER', 'FM_ALARM', 'FM_EVENT', 'FM_SYNC')
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec='seconds')
+
+
+def _current_code(code):
+    """구 wire 코드(CIMS-*) → 현행 정의 코드 alias (표준화 §3.4(a) — 배포 스큐 흡수)."""
+    if not code:
+        return code
+    from services import service_registry
+    return service_registry.current_code(code)
+
+
+def _normalize_mo(mo):
+    """구 wire mo(cims/<module>/<node>[/<comp>]) → 현행 서버명 루트
+    (<node>/<module>[/<comp>], 표준화 §3.4(b)). 현행 형식은 그대로 통과."""
+    if not mo or not mo.startswith('cims/'):
+        return mo
+    seg = mo.split('/')
+    if len(seg) >= 3:
+        return '/'.join([seg[2], seg[1]] + seg[3:])
+    return mo
 
 
 class FmIngest:
@@ -102,16 +123,19 @@ class FmIngest:
             db = m.get('detected_by') or ''
             if db != 'self' and not db.startswith('self:'):
                 continue
-            # 발신 노드 — 구 레코드는 detected_by 접미(self:<node>), 현행은 mo_instance
-            # 규칙 cims/<module>/<node>[/...] 의 3번째 세그먼트 (envelope hdr.node 와
-            # 동일 값 — 모듈이 mo 를 SystemId 로 구성). 도출 불가 시 mo 자체를 노드
-            # 키로 두면 sync 부재 → stale 종결로 자가 정리된다.
+            # 발신 노드 — 구 레코드는 detected_by 접미(self:<node>), 현행 mo 루트는
+            # 서버명(= envelope hdr.node) 이므로 첫 세그먼트. 구 mo 형식
+            # (cims/<module>/<node>[/...])만 3번째 세그먼트. 도출 불가 시 mo 자체를
+            # 노드 키로 두면 sync 부재 → stale 종결로 자가 정리된다.
             mo = akey.split('@', 1)[1] if '@' in akey else ''
             if db.startswith('self:'):
                 node = db.split(':', 1)[1]
             else:
                 seg = mo.split('/')
-                node = seg[2] if len(seg) >= 3 else (mo or akey)
+                if seg and seg[0] == 'cims':
+                    node = seg[2] if len(seg) >= 3 else (mo or akey)
+                else:
+                    node = seg[0] if seg and seg[0] else (mo or akey)
             self.state[akey] = {'alarm_id': m['alarm_id'],
                                 'severity': m.get('perceived_severity')}
             ent = self.nodes.setdefault(node, {'boot_id': None, 'module': '',
@@ -207,8 +231,8 @@ class FmIngest:
 
     def _on_alarm(self, node: str, ent: dict, hdr: dict, payload: dict):
         action = payload.get('action')
-        code = payload.get('code')
-        mo = payload.get('mo_instance')
+        code = _current_code(payload.get('code'))
+        mo = _normalize_mo(payload.get('mo_instance'))
         if action not in ('open', 'close') or not code or not mo:
             return self._resp_err(hdr, 'BAD_REQUEST', 'action/code/mo_instance required')
         rule = (self.catalogs.get(node) or {}).get('alarms', {}).get(code)
@@ -233,12 +257,13 @@ class FmIngest:
             return self._resp_err(hdr, 'BAD_REQUEST', 'type required')
         from services import event_log
         cat = (self.catalogs.get(node) or {}).get('events', {}).get(etype) or {}
-        # mo 규칙: cims/<module>/<node>[/<component>] — 노드 필수 (자기보고 §4).
-        mo = payload.get('mo_instance') or f"cims/{ent.get('module') or node}/{node}"
+        # mo 규칙: <서버명>/<module>[/<component>] — 서버명 = hdr.node (자기보고 §4).
+        mo = _normalize_mo(payload.get('mo_instance')) \
+            or f"{node}/{ent.get('module') or node}"
         params = payload.get('params') or {}
         from services.alarm_sweeper import fmt
         message = payload.get('message') or fmt(cat.get('msg', ''), **{**params, 'mo': mo}) or etype
-        event_log.record_event(self.dir, {
+        rec = {
             'ts': payload.get('ts') or _now_iso(),
             'type': etype,
             'kind': payload.get('kind') or cat.get('kind') or 'stateChange',
@@ -246,7 +271,10 @@ class FmIngest:
                        'mo_instance': mo, 'detected_by': 'self'},
             'message': message,
             'params': params,
-        })
+        }
+        if cat.get('code'):
+            rec['code'] = cat['code']   # 이벤트 정의 코드 (표준화 §3.6 — type 슬러그는 유지)
+        event_log.record_event(self.dir, rec)
         return None
 
     def _on_sync(self, node: str, ent: dict, payload: dict):
@@ -286,9 +314,10 @@ class FmIngest:
         cat = (self.catalogs.get(node) or {}).get('alarms', {})
         want = {}
         for a in active:
-            code, mo = a.get('code'), a.get('mo_instance')
+            code = _current_code(a.get('code'))
+            mo = _normalize_mo(a.get('mo_instance'))
             if code and mo and code in cat:
-                want[f"{code}@{mo}"] = a
+                want[f"{code}@{mo}"] = {**a, 'code': code, 'mo_instance': mo}
         for akey in sorted(want.keys() - ent['akeys']):
             a = want[akey]
             rule = cat[a['code']]
@@ -349,6 +378,11 @@ class FmIngest:
         alarms = {}
         for a in (row.get('alarms') or []):
             if isinstance(a, dict) and a.get('code'):
+                a = dict(a)
+                # 구 카탈로그(구 모듈/보존본) 흡수 — 코드 개정 alias + 클래스 개명.
+                a['code'] = _current_code(a['code'])
+                if a.get('type') == 'resource_failure':
+                    a['type'] = 'storage_failure'
                 alarms[a['code']] = a
         events = {}
         for e in (row.get('events') or []):
@@ -388,7 +422,8 @@ class FmIngest:
 
 def module_catalogs(service_log_dir: str) -> list:
     """등록된 모듈 카탈로그 목록 ({ServiceLogDir}/fm_catalog/ 보존본) — /alerts/catalog 병합
-    + ingest 재기동 복원용."""
+    + ingest 재기동 복원용. 구 모듈이 남긴 보존본의 구 코드/클래스명은 read 시 현행으로
+    정규화한다 (모듈 재등록 시 파일도 현행으로 교체됨)."""
     import glob
     import os
     out = []
@@ -401,6 +436,11 @@ def module_catalogs(service_log_dir: str) -> list:
             with open(path, 'r', encoding='utf-8') as f:
                 row = json.load(f)
             if isinstance(row, dict) and row.get('node'):
+                for a in (row.get('alarms') or []):
+                    if isinstance(a, dict) and a.get('code'):
+                        a['code'] = _current_code(a['code'])
+                        if a.get('type') == 'resource_failure':
+                            a['type'] = 'storage_failure'
                 out.append(row)
         except Exception:
             continue

@@ -46,11 +46,14 @@ def _audit_service_action(config: dict, actor: str, actor_ip: str,
         sl = (config or {}).get('ServiceLogging', {})
         base = sl.get('Dir', '') or (config or {}).get(
             'ServiceLogDir', (config or {}).get('MsgLogDir', ''))
+        # mo 루트 = 제어 대상 모듈이 도는 노드 신원 — 이 핸들러는 OAM 동거 노드의
+        # 서비스를 제어하므로 OAM SystemId 를 쓴다 (표준화 §3.4(b) 소유 주체 루트).
         event_log.record_event(base, {
-            'type': 'service_control', 'kind': 'audit',
-            'source': {'mo_class': 'software', 'mo_instance': f'cims/{service}',
+            'type': 'service_control', 'code': 'E-AUD-003', 'kind': 'audit',
+            'source': {'mo_class': 'software',
+                       'mo_instance': f"{(config or {}).get('SystemId', 'oam')}/{service}",
                        'detected_by': 'oam'},
-            'message': f"{actor}({actor_ip}) {service} {action}",
+            'message': f"Service {service} {action} by {actor} from {actor_ip}",
             'params': {'actor': actor, 'actor_ip': actor_ip, 'action': action,
                        'reason': (reason or '')[:512] or None},
         })

@@ -1,21 +1,31 @@
 {
   "alarms": [
     {
-      "type": "resource_failure",
-      "code": "CIMS-PRC-002",
+      "type": "storage_failure",
+      "code": "A-PRC-002",
       "perceived_severity": "major",
       "event_type": "processingError",
       "probable_cause": "storageCapacityProblem",
       "mo_class": "software",
       "metric": "MCData FD 스토어",
-      "msg_open": "{mo} FD 스토어 저장 실패 — 수신 SDS/FD 유실 중",
-      "msg_close": "{mo} FD 스토어 저장 정상화",
+      "msg_open": "FD/file store write failure ({path}) — incoming SDS/FD being lost",
+      "msg_close": "FD/file store write restored ({mo})",
       "effect": "대용량 SDS/FD 수신분 저장 실패 — MSRP_ABORTED(store_error) 로 세션 중단",
       "recommended_action": "스토어 디렉토리 권한/마운트/디스크 용량 확인 (McDataFd.Dir)"
     }
   ],
   "events": [
-    { "type": "process_started", "kind": "stateChange", "msg": "{mo} CMDP 기동 완료" },
-    { "type": "process_stopping", "kind": "stateChange", "msg": "{mo} CMDP 종료 시작" }
+    {
+      "type": "process_started",
+      "code": "E-STC-001",
+      "kind": "stateChange",
+      "msg": "Process started: {mo}"
+    },
+    {
+      "type": "process_stopping",
+      "code": "E-STC-002",
+      "kind": "stateChange",
+      "msg": "Process stopping (graceful): {mo}"
+    }
   ]
 }

@@ -142,15 +142,20 @@ bool PCmdpServer::startServer() {
             if (access(cands[i].c_str(), R_OK) == 0) { catalog = cands[i]; break; }
         }
         if (catalog.empty()) catalog = cands[0];  // 부재 시 FmReporter 가 로그로 드러냄
-        gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec);
-        gclsFmReporter.SendEvent("process_started", "stateChange", "cims/" + _nodeName + "/" + _systemId);
+        gclsFmReporter.Init(_fmOamIp, _fmOamPort, _systemId, _nodeName, catalog, _fmSyncSec,
+                            [](EnumFmLogLevel level, const std::string& msg) {
+                                if (level == FM_LOG_ERROR) { LOG_ERROR("FmReporter", "%s", msg.c_str()); }
+                                else if (level == FM_LOG_DEBUG) { LOG_DEBUG("FmReporter", "%s", msg.c_str()); }
+                                else { LOG_INFO("FmReporter", "%s", msg.c_str()); }
+                            });
+        gclsFmReporter.SendEvent("process_started", "stateChange", _systemId + "/" + _nodeName);
     }
     return true;
 }
 
 void PCmdpServer::stopServer() {
     if (gclsFmReporter.IsEnabled())
-        gclsFmReporter.SendEvent("process_stopping", "stateChange", "cims/" + _nodeName + "/" + _systemId);
+        gclsFmReporter.SendEvent("process_stopping", "stateChange", _systemId + "/" + _nodeName);
     _running = false;
     _reactorRunning = false;
     for (auto& r : _reactors) {
@@ -740,14 +745,16 @@ void PCmdpServer::finishRecvSession(PMsrpSession* s) {
     if (!_fdStore.Store(binContent, body, ct, name, mime, s->_groupId, s->_caller, fileId)) {
         LOG_ERROR("PCmdpServer", "session=%s store failed", s->_sessionId.c_str());
         // FM 자기보고 — 저장 실패 전이 (성공 경로가 close, AlarmOpen/Close 는 멱등)
-        gclsFmReporter.AlarmOpen("CIMS-PRC-002", _fmStoreMo);
+        SimpleJson::JsonNode fmParams;
+        fmParams.Set("path", _fdStore.BaseDir());
+        gclsFmReporter.AlarmOpen("A-PRC-002", _fmStoreMo, fmParams);
         SimpleJson::JsonNode p;
         p.Set("session_id", s->_sessionId);
         p.Set("reason", "store_error");
         emitEvent("MSRP_ABORTED", p, s->_sesid);
         return;
     }
-    gclsFmReporter.AlarmClose("CIMS-PRC-002", _fmStoreMo);
+    gclsFmReporter.AlarmClose("A-PRC-002", _fmStoreMo);
 
     _statRecvMessages++;
     SimpleJson::JsonNode p;
@@ -1011,7 +1018,7 @@ void PCmdpServer::loadConfig() {
         if (fm.Has("OamPort")) _fmOamPort = (int)fm.GetInt("OamPort", 9010);
         if (fm.Has("SyncSec")) _fmSyncSec = (int)fm.GetInt("SyncSec", 60);
     }
-    _fmStoreMo = "cims/" + _nodeName + "/" + _systemId + "/fd_store";
+    _fmStoreMo = _systemId + "/" + _nodeName + "/fd_store";   // <서버명>/<모듈>/<component> (표준화 §3.4(b))
 
     // 스토어 미설정 시 ServiceLogging.Dir 기반 기본 경로 (csc 기본값과 동일 규칙)
     if (!_fdStore.IsEnabled() && !_serviceLogDir.empty())

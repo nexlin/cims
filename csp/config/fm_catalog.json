@@ -2,20 +2,43 @@
   "alarms": [
     {
       "type": "connection_lost",
-      "code": "CIMS-COM-001",
-      "perceived_severity": "major",
+      "code": "A-COM-001",
+      "perceived_severity": "critical",
       "event_type": "communications",
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "service",
       "metric": "CSP DB 연결",
-      "msg_open": "{mo} CSP 의 DB 연결 두절 (probe 연속 실패)",
-      "msg_close": "{mo} CSP 의 DB 연결 정상화",
+      "msg_open": "DB connection lost (host={host}, port={port}, db={db})",
+      "msg_close": "DB connection restored ({mo})",
       "effect": "가입자/그룹 DB 조회·호이력 기록 실패 — 신규 등록/호 설정 기능 저하 (파일 fallback 범위로 축소)",
       "recommended_action": "DB 서버 상태·네트워크·계정 확인, csp.json Database 설정 점검"
+    },
+    {
+      "type": "connection_lost",
+      "code": "A-COM-007",
+      "perceived_severity": "critical",
+      "event_type": "communications",
+      "probable_cause": "communicationsSubsystemFailure",
+      "mo_class": "service",
+      "metric": "CSP-CMP 제어 채널",
+      "msg_open": "Media plane (CMP) control lost — media setup/announcement/recording/floor control unavailable",
+      "msg_close": "Media plane (CMP) control restored ({mo})",
+      "effect": "경계/부가/그룹콜 미디어 기능 전면 불가 — 미디어 수립·안내방송/녹취·발언권 제어 (IBCF/TAS/PTT-AS 역할 합집합)",
+      "recommended_action": "CMP 프로세스/제어 채널(UDP 9001 계열)·네트워크 확인"
     }
   ],
   "events": [
-    { "type": "process_started", "kind": "stateChange", "msg": "{mo} CSP 기동 완료" },
-    { "type": "process_stopping", "kind": "stateChange", "msg": "{mo} CSP 종료 시작" }
+    {
+      "type": "process_started",
+      "code": "E-STC-001",
+      "kind": "stateChange",
+      "msg": "Process started: {mo}"
+    },
+    {
+      "type": "process_stopping",
+      "code": "E-STC-002",
+      "kind": "stateChange",
+      "msg": "Process stopping (graceful): {mo}"
+    }
   ]
 }

@@ -149,7 +149,7 @@ export default function ServiceDescriptorsPage() {
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '—'}</td>
                         <td>{r.type}</td>
                         <td><span className={`badge ${sev === 'critical' || sev === 'major' ? 'badge--red' : sev === 'indeterminate' ? 'badge--blue' : 'badge--yellow'}`}>{sev}</span></td>
-                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.mo_instance || (r.target ? `cims/${r.target}` : '—')}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.mo_instance || (r.target ? `(관측 신원)/${r.target}` : '—')}</td>
                       </tr>
                       )
                     })}

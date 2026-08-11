@@ -111,7 +111,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
         <section>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <b style={{ fontSize: 13 }}>알람 규칙 ({rules.length})</b>
-            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: 'service_unresponsive', code: 'CIMS-PRC-004', perceived_severity: 'major', event_type: 'processingError', mo_class: 'service', check: 'service_unresponsive' }])}>＋ 규칙</Btn></span>
+            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: 'service_unresponsive', code: 'A-PRC-004', perceived_severity: 'major', event_type: 'processingError', mo_class: 'service', check: 'service_unresponsive' }])}>＋ 규칙</Btn></span>
           </div>
           {rules.map((r, i) => (
             <div key={i} style={rowCard}>
@@ -121,7 +121,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
                   onChange={e => upRule(i, { type: e.target.value })}>
                   {ALARM_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
                 <Field label="code"><input className="form-input" style={{ ...inp, width: 110 }} value={r.code ?? ''}
-                  onChange={e => upRule(i, { code: e.target.value })} placeholder="CIMS-PRC-001" /></Field>
+                  onChange={e => upRule(i, { code: e.target.value })} placeholder="A-PRC-001" /></Field>
                 <Field label="심각도"><select className="form-input" style={{ ...inp, width: 100 }} value={r.perceived_severity ?? r.severity ?? 'warning'}
                   onChange={e => upRule(i, { perceived_severity: e.target.value })}>
                   {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
@@ -141,7 +141,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
                   onChange={e => upRule(i, { mo_class: e.target.value })}>
                   {MO_CLASSES.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
                 <Field label="mo_instance" hint="(소스, service)"><input className="form-input" style={{ ...inp, width: 120 }} value={r.mo_instance ?? ''}
-                  onChange={e => upRule(i, { mo_instance: e.target.value })} placeholder="cims/csp" /></Field>
+                  onChange={e => upRule(i, { mo_instance: e.target.value })} placeholder="비우면 관측 신원으로 합성" /></Field>
                 {(r.check === 'service_unresponsive' || r.check === 'process_down') && (
                   <Field label="target" hint="(모듈명)"><input className="form-input" style={{ ...inp, width: 80 }} value={r.target ?? ''}
                     onChange={e => upRule(i, { target: e.target.value })} /></Field>)}

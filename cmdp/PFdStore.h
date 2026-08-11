@@ -19,6 +19,7 @@ class PFdStore {
 public:
     void Init(const std::string& dir) { _dir = dir; }
     bool IsEnabled() const { return !_dir.empty(); }
+    const std::string& BaseDir() const { return _dir; }
 
     /**
      * @brief 수신 완료 메시지 저장.

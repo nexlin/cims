@@ -962,9 +962,10 @@ if __name__ == '__main__':
 
         # ── Alert sweeper ───────────────────────────────────────────────
         # 코어(emit/transition/서비스 규칙 평가)는 services.alarm_sweeper 공용.
-        # 서비스 계열(csp_down/cmp_down/db_down/rtp_high)은 oam-svc 소유
+        # 서비스 계열(service_unresponsive/db_down/rtp_pct_gte)은 oam-svc 소유
         # (oam_base_service_split §4) — base 는 role=all(단일 프로세스)에서만 대행 평가하고,
-        # role=base 는 agent 계열(disk_high/module_down)만 평가한다(CSP/CMP probe·DB 미접속).
+        # role=base 는 agent 계열(disk_high/module_down/config_drift/ha_flap)만 평가한다
+        # (CSP/CMP probe·DB 미접속).
         from services import alarm_sweeper
         ALERT_SWEEP_INTERVAL = int(config.get('AlertSweepSec', 30))
         ALERT_RTP_THRESHOLD = int(config.get('AlertRtpThresholdPct', 80))
@@ -1132,10 +1133,17 @@ if __name__ == '__main__':
             return res
 
         def _sweep_agent_alerts(agent_rules: list):
-            """per-agent 규칙(disk/module)을 online agent 별로 평가. 관측 불가 시 자동 close."""
+            """per-agent 규칙(disk/module)을 online agent 별로 평가.
+
+            관측 두절 규율(파이프라인 §9): 관측이 끊긴 노드의 알람을 정상 해소로
+            위장하지 않는다 — 두절 노드의 열린 agent 알람은 "판정 불가"로 종결하고
+            노드 두절 알람(A-COM-015, check=agent_lost)을 연다. 관측 대상이 0건
+            (agent 스토어 공백 — 절체 직후 standby 등)이면 아무 판정도 하지 않는다."""
             from handlers.agents import _agent_load_all, _deploy_load_all, _metric_root
             from services import file_store
-            agents = _agent_load_all(config)
+            agents = [a for a in _agent_load_all(config) if a.get('status') != 'revoked']
+            if not agents:
+                return
             deps = _deploy_load_all(config)
             mroot = _metric_root(config)
             cold_skip, cold_must_run = _cold_module_ha_sets()
@@ -1169,24 +1177,61 @@ if __name__ == '__main__':
                     except Exception:
                         pass
             active = set()
+            observed_hosts = set()   # 이번 스윕에서 관측(metric)이 있었던 호스트
             for ag in agents:
+                host = ag.get('name') or str(ag.get('id'))
                 if ag.get('status') != 'online':
                     continue
-                host = ag.get('name') or str(ag.get('id'))
                 metric = file_store.jsonl_last(mroot, str(ag['id']))
                 if not metric:
                     continue
+                observed_hosts.add(host)
                 for r in agent_rules:
+                    if r.get('check') == 'agent_lost':
+                        continue    # 두절 규칙은 아래 별도 판정
                     for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, cold_skip, cold_must_run, expected_cfg):
                         active.add(f"{r.get('code')}@{mo}")
                         rr = {**r, 'perceived_severity': sev} if sev else r
                         # detected_by 는 주체 클래스만(표준화 §3.4(b)) — 호스트는 mo 가 보유.
                         _transition(rr, mo, 'agent', is_open, msg_open, msg_close, tinfo)
-            # agent 알람(mo_instance 가 cims/ 가 아닌 host/…) 중 이번에 평가 안 된 것 = 관측 불가 → close.
             agent_rule_by_code = {r.get('code'): r for r in agent_rules}
-            for akey in list(_alert_open.keys()):
+            # 관측 두절 판정 (agent_lost) — 노드 두절 알람 open/close + 두절 노드의
+            # 잔여 알람 판정 불가 종결.
+            lost_rule = next((r for r in agent_rules if r.get('check') == 'agent_lost'), None)
+            lost_hosts = set()
+            if lost_rule is not None:
+                for ag in agents:
+                    host = ag.get('name') or str(ag.get('id'))
+                    mo = f"{host}/agent"
+                    akey = f"{lost_rule.get('code')}@{mo}"
+                    lost = host not in observed_hosts
+                    if lost:
+                        lost_hosts.add(host)
+                        active.add(akey)   # 아래 미평가 close 에서 제외
+                    _transition(lost_rule, mo, 'agent', lost,
+                                _fmt(lost_rule.get('msg_open'), mo=mo, host=host),
+                                _fmt(lost_rule.get('msg_close'), mo=mo, host=host))
+                for akey, ent in list(_alert_open.items()):
+                    if alarm_sweeper.partition_of(
+                            alarm_sweeper._entry_detected_by(ent), akey) != 'agent':
+                        continue
+                    mo_part = akey.split('@', 1)[1] if '@' in akey else ''
+                    if mo_part.split('/')[0] not in lost_hosts or akey in active:
+                        continue
+                    r = agent_rule_by_code.get(akey.split('@', 1)[0])
+                    if r:
+                        _transition(r, mo_part, 'agent', False, '',
+                                    f"{mo_part} 판정 불가 종결 — agent 관측 두절 "
+                                    f"(노드 두절 알람 {lost_rule.get('code')} 참조)")
+            # agent 파티션 알람 중 이번에 평가 안 된 것 = 관측 불가 → close.
+            # 자기 파티션(detected_by=agent)만 정리한다 (파이프라인 §4.3) — 서비스/drift
+            # 계열(oam-svc/oam)은 mo 루트가 같은 서버명/그룹명 어휘라 mo 로는 구분 불가.
+            for akey, ent in list(_alert_open.items()):
+                if alarm_sweeper.partition_of(alarm_sweeper._entry_detected_by(ent), akey) \
+                        != 'agent':
+                    continue
                 mo_part = akey.split('@', 1)[1] if '@' in akey else ''
-                if mo_part.startswith('cims/') or akey in active:
+                if akey in active:
                     continue
                 r = agent_rule_by_code.get(akey.split('@', 1)[0])
                 if r:
@@ -1226,8 +1271,6 @@ if __name__ == '__main__':
         DRIFT_AUTO_RESYNC     = bool(config.get('AutoResyncDrift', False))
         # 기동 시 open drift 알람을 alert_log 리플레이로 복원 — 빈 dict 로 시작하면
         # 재시작 이전에 열린 알람의 close 를 영원히 발행하지 못한다 (좀비).
-        # drift 이벤트는 alarm_id 없이 type(config_drift::g<id>::<coll>) 이 그대로
-        # akey 라 emit_drift_alerts 의 open_state 키와 포맷이 동일.
         _drift_open: dict = {}
         if _service_log:
             try:
@@ -1236,10 +1279,13 @@ if __name__ == '__main__':
                 # 창을 활성 알람 뷰(90일)와 맞춘다 — 기본 30일이면 30~90일 구간의
                 # 열린 알람을 서버가 잊어 중복 open 을 낸다. (스윕 중 재도출은
                 # drift_sweeper._reseed_if_empty 가 담당 — 여기 실패해도 자가복구)
-                # 표준 akey(CIMS-PRC-003@cims/ha/…, 옛 CIMS-CFG-001 포함)와 구 포맷(config_drift::…, 이행
-                # 종결 대상) 둘 다 복원한다.
-                _st = _alert_log.compute_open_state(_service_log, days=90)
-                _drift_open = {k: _st[k] for k in _ds._drift_prefix_keys(_st.keys())}
+                # 현행 akey(A-PRC-003@<그룹>/config/<coll>)와 구 포맷(cims/ha/…·
+                # CIMS-CFG-001·config_drift::…, 이행 종결 대상) 둘 다 복원한다.
+                _meta = _alert_log.compute_open_state(_service_log, days=90, with_meta=True)
+                _drift_open = {k: {'alarm_id': _meta[k]['alarm_id'],
+                                   'severity': _meta[k].get('perceived_severity'),
+                                   'detected_by': _meta[k].get('detected_by')}
+                               for k in _ds.drift_open_keys(_meta)}
                 if _drift_open:
                     logger.log_info(f"[drift-sweep] restored {len(_drift_open)} open drift alarm(s)")
             except Exception as e:
@@ -1362,6 +1408,31 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[metric-purge] error: {e}")
 
+        # ── 알람/이벤트 스트림 보존 (파이프라인 §6.2) — 일 1회 파일 날짜 기준 purge.
+        # 알람 보존은 open-state replay 윈도(90일)보다 작아지면 시드가 깨진다 — 90일
+        # 하한 클램프 (0 = 무제한).
+        _sl_cfg = config.get('ServiceLogging', {}) or {}
+        ALERT_RETAIN_DAYS = int(_sl_cfg.get('AlertRetainDays', 180))
+        EVENT_RETAIN_DAYS = int(_sl_cfg.get('EventRetainDays', 365))
+        if 0 < ALERT_RETAIN_DAYS < 90:
+            logger.log_warning(f"[retention] AlertRetainDays={ALERT_RETAIN_DAYS} < 90 — "
+                               f"open-state replay 윈도 보호를 위해 90 으로 클램프")
+            ALERT_RETAIN_DAYS = 90
+        RETENTION_SWEEP_INTERVAL = 86400
+
+        def _sweep_retention():
+            try:
+                from services import daily_jsonl
+                if not _service_log:
+                    return
+                na = daily_jsonl.purge_old(_service_log, 'alerts', ALERT_RETAIN_DAYS)
+                ne = daily_jsonl.purge_old(_service_log, 'events', EVENT_RETAIN_DAYS)
+                if na or ne:
+                    logger.log_info(f"[retention] purged alerts={na} (>{ALERT_RETAIN_DAYS}d) "
+                                    f"events={ne} (>{EVENT_RETAIN_DAYS}d)")
+            except Exception as e:
+                logger.log_error(f"[retention] error: {e}")
+
         logger.log_info(f"[agent-sweep] stale threshold={STALE_SEC}s, interval={SWEEP_INTERVAL}s")
         logger.log_info(f"[cert-sweep] rotate threshold={_AGENT_CERT_ROTATE_THRESHOLD_DAYS}d, "
                         f"interval={CERT_SWEEP_INTERVAL}s")
@@ -1393,6 +1464,7 @@ if __name__ == '__main__':
         _last_metric_purge = 0
         _last_ptt_index = 0
         _last_job_purge = 0
+        _last_retention = 0
         _last_ha_op_sweep = 0
         _last_ro_log = 0
         # 리스 재획득 주기 — 절체 직후 구 Active 가 물러나는 데 수 초 걸리므로 짧게.
@@ -1452,6 +1524,9 @@ if __name__ == '__main__':
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now
+            if _now - _last_retention >= RETENTION_SWEEP_INTERVAL:
+                _sweep_retention()
+                _last_retention = _now
             if _now - _last_ptt_index >= PTT_INDEX_INTERVAL:
                 _sweep_ptt_index()
                 _last_ptt_index = _now

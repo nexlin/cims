@@ -6,7 +6,7 @@ OAM 의 외부 관측(CSP/CMP UDP probe·DB SELECT·agent metric) 폴링 파생 
 알람 모델(X.733 속성·code 체계·활성키·재통지)은
 [alarm_standardization.md](alarm_standardization.md) 를 그대로 따르며, 여기서는 **발생 경로와
 wire 규격**을 정의한다. 구현: OAM 수신 = `ems/core/oam/src/services/fm_ingest.py`,
-발신 = csp/cmp/cmdp 의 `FmReporter.{h,cpp}` + `csc/src/services/fm_reporter.py` (§7).
+발신 = csp/cmp/cmdp 공용 `include/FmReporter.h` + `csc/src/services/fm_reporter.py` (§7).
 
 ## 1. 원칙
 
@@ -74,7 +74,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 ```jsonc
 { "boot_id": 1754805000, "seq": 17,
   "action": "open",                        // open | close
-  "code": "CIMS-COM-001", "type": "connection_lost",
+  "code": "A-COM-001", "type": "connection_lost",
   "mo_instance": "<node>/csp/db",          // code@mo_instance = 활성키 (표준화 §3.4 — 서버명 루트)
   "params": { "used": 20, "total": 20 },   // 카탈로그 msg 템플릿 치환 값
   "perceived_severity": "major",           // (선택) 카탈로그 기본 덮기
@@ -95,7 +95,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 **FM_SYNC** — 주기(기본 60s, FM_REGISTER 응답으로 OAM 이 지시):
 ```jsonc
 { "boot_id": 1754805000, "seq": 19,
-  "active": [ { "code": "CIMS-COM-001", "mo_instance": "<node>/csp/db",
+  "active": [ { "code": "A-COM-001", "mo_instance": "<node>/csp/db",
                 "open_ts": "2026-08-10T09:31:05" } ] }
 ```
 
@@ -121,7 +121,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 
 ```jsonc
 { "alarms": [ {
-    "type": "connection_lost", "code": "CIMS-COM-001",   // 조건 클래스 — 표준화 §3.5 그대로
+    "type": "connection_lost", "code": "A-COM-001",   // 정의 코드 — 표준화 §3.4(a)
     "perceived_severity": "major", "event_type": "communications",
     "probable_cause": "underlyingResourceUnavailable", "mo_class": "service",
     "msg_open": "{mo} DB 연결 풀 고갈 ({used}/{total})", "msg_close": "{mo} DB 연결 정상화",
@@ -130,14 +130,14 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
                 "msg": "{mo} 설정 재적재 ({rev})" } ] }
 ```
 
-- **같은 조건은 기존 code 재사용**(connection_lost=CIMS-COM-001 등) — 객체는 mo_instance 로
+- **같은 정의는 기존 code 재사용**(connection_lost(DB)=A-COM-001 등) — 객체는 mo_instance 로
   구분한다(§3.5: 새 객체 추가 = 코드 신설 없음). 새 *조건* 클래스만 코드를 신설한다.
 - sweeper 가 발화 중인 `code@mo` 공간과의 충돌은 등록 시 검증해 거부한다.
 - `mo_instance` 규칙: `<서버명>/<module>[/<component>]` — **서버명(= envelope `hdr.node`)
   루트, 알람·이벤트 공통** (표준화 §3.4(b) 소유 주체 루트 규약). detected_by 가 주체 클래스만
-  담으므로 발생 노드는 mo_instance 가 유일 보유자다. 구현 현행 wire/저장은 구 형식
-  `cims/<module>/<node>[/<component>]` — 전환은 정의 코드 이행과 함께(표준화 §6 mo 루트
-  개편 규율).
+  담으므로 발생 노드는 mo_instance 가 유일 보유자다. 구 wire 형식
+  (`cims/<module>/<node>[/<component>]`, 코드 `CIMS-*`)은 OAM ingest 가 수신 시 현행
+  형식으로 정규화해 흡수한다(배포 스큐 — 표준화 §6).
 - `detected_by`: **`self`** (주체 클래스 — 표준화 §3.4(b) 감지 3계층의 L2). 발신 노드는
   envelope `hdr.node`(wire)와 mo_instance 가 보유하므로 접미로 중복하지 않는다.
 - `perceived_severity` 는 통지 payload → 카탈로그 순으로 취하고, 둘 다 없으면
@@ -151,9 +151,9 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 
 | code | type(클래스) | eventType | 사용처 |
 |---|---|---|---|
-| `CIMS-COM-001` (재사용) | connection_lost | communications | CSP·CSC 의 DB 연결 두절 (`<서버명>/<mod>/db`) |
-| `CIMS-QOS-002` | resource_exhausted | qualityOfService | CMP 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member (`<서버명>/cmp/<pool>`). 사용률 임계는 OAM sweeper(QOS-001) 담당 — 역할 분담 |
-| `CIMS-PRC-002` | resource_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 후보: 녹취 쓰기 실패 |
+| `A-COM-001` (재사용) | connection_lost | communications | CSP·CSC 의 DB 연결 두절 (`<서버명>/<mod>/db`) |
+| `A-QOS-002` | resource_exhausted | qualityOfService | CMP 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member (`<서버명>/cmp/<pool>`). 사용률 임계는 OAM sweeper(A-QOS-024, 노드별) 담당 — 역할 분담 |
+| `A-PRC-002` | storage_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 후보: 녹취 쓰기 실패 |
 
 새 *조건* 클래스 후보(미구현): `overload`(CSP 제어평면 과부하 차단 발동 — 차단 로직 자체가
 미구현), 포트 bind 실패(기동 실패 = 프로세스 사망 → L1 process_down(agent) 소관, §1 원칙).
@@ -203,28 +203,29 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 3. **handlers**: `GET /events`·`/events/types` (`handlers/events.py`), `/alerts/catalog`
    모듈 카탈로그 병합(origin=rule|module:<module>). OAM 서비스 제어 감사
    (`service_control.py`)는 event_log 에 직접 기록(type=service_control, kind=audit).
-4. **모듈 발신** — C++ 는 `FmReporter.{h,cpp}` 모듈별 대칭 클론(CmdpClient 선례 — 로거만
-   CLog↔PLog 차이), Python 은 `csc/src/services/fm_reporter.py`. 공통: envelope 송신,
+4. **모듈 발신** — C++ 는 공용 header-only `include/FmReporter.h` (csp/cmp/cmdp 공유 —
+   모듈별 로거(CLog/PLog) 차이는 `Init` 의 로그 콜백 주입으로 흡수), Python 은
+   `csc/src/services/fm_reporter.py`. 공통: envelope 송신,
    boot_id/seq, ack 대기·1s×5 재전송 큐, sync 타이머, UNREGISTERED 재등록, **미등록 구간
    이벤트 버퍼(32건, 등록 시 flush)** — 부트 순서상 모듈이 OAM 보다 먼저 떠도
    process_started 가 유실되지 않는다. 각 모듈 설정은 config_template `fm` 섹션
    (`Fm.{Enable,OamIp,OamPort,SyncSec}`, csp 만 `Setup.Fm.*`; OamIp 는 `@OAM_IP@` 치환).
    - **csp**: DB 연결 probe(`CDbManager::StartHealthProbe` — 전용 연결 mysql_ping 10s,
-     3연속 실패 전이) → COM-001 `cims/csp/<node>/db`.
+     3연속 실패 전이) → A-COM-001 `<node>/csp/db`.
    - **cmp**: `fmMonitorLoop`(1s) 가 3개 풀(rtp/ptt_floor/ptt_member)의 완전 고갈 전이를
-     감시 → QOS-002 `cims/cmp/<node>/<pool>`. 변종(pmp/imp)은 SystemId overlay 로 node
+     감시 → A-QOS-002 `<node>/cmp/<pool>`. 변종(pmp/imp)은 SystemId overlay 로 node
      분리 필수 (미분리 시 활성키 충돌).
-   - **cmdp**: FD 스토어 저장 실패/성공 전이 → PRC-002 `cims/cmdp/<node>/fd_store`.
+   - **cmdp**: FD 스토어 저장 실패/성공 전이 → A-PRC-002 `<node>/cmdp/fd_store`.
    - **csc**: DB probe(`DbHealthProbe` — pymysql 전용 연결, csp 동형) → COM-001
-     `cims/csc/<node>/db`. `audit_config_change` 는 FM_EVENT(kind=audit) 발신.
+     `<node>/csc/db`. `audit_config_change` 는 FM_EVENT(kind=audit, `<node>/csc/config/<entity>`) 발신.
    - cmp/cmdp/csc 는 SIGTERM graceful stop 을 신설해 `process_stopping` 을 통지한다.
      한계: 전 스택 동시 정지에서 OAM 이 먼저 내려간 뒤의 종료 이벤트는 유실(수신자 부재).
 5. **콘솔**: AlertsPage 알람/이벤트 탭(`EventsSection`), `api/alerts.ts` `eventsApi`.
    AlertBannerWidget 은 `/alerts` 활성 critical/major 를 소비(자체 임계 판정 제거,
    `ActiveAlarmsWidget.computeActive` 공유).
-6. **drift_sweeper**: HA fan-out drift 를 표준 알람(CIMS-PRC-003,
-   `cims/ha/g<gid>/<collection>`, transition 코어)으로 발화. 구 포맷
-   (`config_drift::…`)·옛 code(CIMS-CFG-001) open 은 스윕에서 이행 종결 후
+6. **drift_sweeper**: HA fan-out drift 를 표준 알람(A-PRC-003,
+   `<그룹명>/config/<collection>`, transition 코어)으로 발화. 구 포맷
+   (`config_drift::…`·구 code·구 mo `cims/ha/…`) open 은 스윕에서 이행 종결 후
    현행 알람으로 재발행.
 
 ## 8. 향후 단계

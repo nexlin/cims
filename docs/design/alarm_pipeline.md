@@ -137,13 +137,13 @@ L1 수신부(`handlers/agent_api.py _metric`)는 `module_events` 를 event_log �
   쓰지 않는 이유는 self_reporting §4(단일 writer 리스와 쓰기 소유 충돌).
 - 일별 파일 분리가 회전 단위다.
 
-### 6.2 보존 정책 (확정 — 현행 공백 해소)
+### 6.2 보존 정책
 
-현행은 alerts/events 에 purge 가 없다(무한 증가 — metric 만 purge). 다음으로 확정한다:
-
-- **보존 스위퍼 신설**(일 1회): 파일 날짜 기준으로 알람 스트림 **180일**, 이벤트 스트림
-  **365일**(감사 요건 — service_control/auth_audit 포함) 초과 일자 파일 삭제.
+- **보존 스위퍼**(base 스윕 루프, 일 1회 — `daily_jsonl.purge_old`): 파일 날짜 기준으로
+  알람 스트림 **180일**, 이벤트 스트림 **365일**(감사 요건 — service_control/auth_audit
+  포함) 초과 일자 파일 삭제.
 - 설정: `ServiceLogging.{AlertRetainDays: 180, EventRetainDays: 365}` (0 = 무제한).
+  알람 보존일은 open-state replay 윈도 보호를 위해 90일 하한으로 클램프(§6.3).
 - fm_catalog 는 노드당 최신 1본이라 보존 대상 아님. 조회 API 의 `days` 클램프(≤90)는
   조회 상한일 뿐 보존과 무관하다.
 
@@ -170,11 +170,9 @@ OAM 재기동 시 `restore_open_state`(30일 replay, detected_by 파티션별)�
 | `GET /events` | `days`·`type`·`kind`·`limit` | 이벤트 레코드 desc |
 | `GET /events/types` | — | 이벤트 type 목록 |
 
-**인증 (확정 — 현행 공백 해소)**: 현행 alerts/events 핸들러는 무인증이다(토큰 없이 조회·
-ack·comment 가능 — ack 사용자만 best-effort 조회 후 `operator` 폴백). 다음으로 확정한다:
-**전 엔드포인트 `require_auth` 적용**, ack/comment 는 **토큰의 actor 를 필수**로 기록한다
-(폴백 기명 제거 — X.740 감사추적은 주체 불명을 허용하지 않는다). 콘솔은 이미 토큰을
-보내므로 화면 영향 없다.
+**인증**: 전 엔드포인트 `require_auth` — ack/comment 는 **토큰의 actor 를 필수**로
+기록한다(폴백 기명 없음 — X.740 감사추적은 주체 불명을 허용하지 않는다). 콘솔은 공용
+api client 가 토큰을 동봉한다.
 
 ## 8. 가시화 (콘솔 계약)
 
@@ -187,17 +185,17 @@ ack·comment 가능 — ack 사용자만 best-effort 조회 후 `operator` 폴�
 | 활성 알람 위젯 | `cims.active-alarms`(기본 대시보드 최상단) | `/alerts` | `computeActive` 접기 재사용 |
 | 배너 | AlertBanner(활성 위젯에 흡수) | `/alerts` | critical/major 만 |
 | 토폴로지 상태색 | SystemTopologyWidget | `/alerts` | mo_instance 별 최고 severity 로 노드/모듈 칩 채색 |
-| **알람 카탈로그(신설)** | 관리 화면 1식 | `/alerts/catalog` | 코드 사전 — code·type·severity·effect·recommended_action 열람(운영 사전·POD 의 화면 대응물). API 는 기성이나 UI 미노출 — 이행 대상 |
+| 알람 카탈로그 | `/alerts/catalog` (장애 메뉴) | `/alerts/catalog` | 코드 사전 — code·type·severity·effect·recommended_action 열람(운영 사전·POD 의 화면 대응물). rule + 모듈 등록분 병합 |
 
 ### 8.2 전역 통지 — 셸 상주 (어느 페이지에서든 보인다)
 
 알람 표시는 페이지가 아니라 **콘솔 셸(레이아웃) 소유**다 — 라우트 전환과 무관하게 상주한다.
 운영자가 어느 화면에 있든 신규 critical/major 를 놓치지 않는 것이 목적(NOC 알람 배너 관례).
 
-1. **전역 알람 store (구독 1원화)** — 셸 레벨 Provider 가 `/alerts` 를 주기 폴링(10s —
-   스윕 30s·FM push 실시간의 절충)하고 §8.3 접기 규율로 활성 상태를 유지한다. 위젯
-   (활성 알람·배너·토폴로지)도 개별 fetch 를 버리고 이 store 를 구독한다 — 표시 일관성 +
-   요청 수 절감.
+1. **전역 알람 store (구독 1원화)** — 셸 상주 모듈 싱글톤(`useAlarms`)이 `/alerts` 를
+   주기 폴링(10s — 스윕 30s·FM push 실시간의 절충)하고 §8.3 접기 규율(`foldActive`)로
+   활성 상태를 유지한다. 위젯(활성 알람·배너·토폴로지)도 개별 fetch 없이 이 store 를
+   구독한다 — 표시 일관성 + 요청 수 절감. 미로그인(토큰 부재) 시 폴링을 건너뛴다.
 2. **헤더 상시 인디케이터** — 활성 요약 배지(최고 severity 색 + 건수). 클릭 시 드로어
    (활성 알람 목록 + 최근 이벤트 탭 — ack/이동 가능). **0건이어도 회색 배지를 상시
    표시한다** — "표시 없음 = 정상"과 "표시 없음 = 표시 고장"을 구분(observability_lost 와
@@ -212,7 +210,7 @@ ack·comment 가능 — ack 사용자만 best-effort 조회 후 `operator` 폴�
 
 - **신규 판정은 alarm_id 기준 high-water mark** — 폴링 중복·재통지(×N)를 새 알람으로
   오인하지 않는다. 토스트/배지도 §8.3 판독 규율(접기·미지 action 무시)을 공유한다.
-- **전송 단계**: P0 = 위 폴링 구조(서버 무변경). P1 = SSE `GET /alerts/stream` — 수렴점
+- **전송 단계**: 현행 = 위 폴링 구조(서버 무변경). P1 = SSE `GET /alerts/stream` — 수렴점
   (§4.2)에 구독자 hook 을 달아 push, 폴링은 fallback 유지(재연결·프록시 대비). 단방향
   통지라 WebSocket 은 두지 않는다. OAM httpsrv 의 long-lived 응답 지원 확인이 선행.
 
@@ -234,7 +232,7 @@ ack·comment 가능 — ack 사용자만 best-effort 조회 후 `operator` 폴�
 | 모듈 재기동 | boot_id 변경 감지 → 첫 FM_SYNC 로 reconcile(소멸 조건은 close, 지속 조건은 새 occurrence) |
 | FM_SYNC 3회 연속 두절 | 해당 노드 self 알람 "판정 불가" 종결 — 생존·응답성은 L1/L3 가 별도 판정 |
 | OAM 재기동/절체 | restore_open_state 시드(§6.3) + 파티션별 재평가/sync 수렴. 스트림은 공유 스토리지라 절체 무손실 |
-| **agent 관측 두절** | **해당 노드 agent 파티션 알람을 "판정 불가" 종결하고 node 두절 알람(connection_lost, 대상 AGENT)을 연다** — 현행의 "agent offline 시 그 노드 열린 알람 자동 close"(노드 사망이 전 알람 해소로 위장되는 침묵 실패 — 모듈 카탈로그 OAM 절)는 이 규율로 정정한다 |
+| **agent 관측 두절** | 해당 노드 agent 파티션 알람을 "판정 불가" 종결하고 node 두절 알람(`A-COM-015` connection_lost, `<서버명>/agent`, check=agent_lost)을 연다 — 노드 사망이 전 알람 해소로 위장되지 않는다. agent 스토어 자체가 공백(절체 직후 standby)이면 무판정 |
 | 시각 정합 | 전 구간 ts 는 NTP 동기 전제 — 시각 이상은 그 자체가 알람(A-QOS-003/A-COM-014) |
 
 ## 10. 구현 이행 (현행 대비 갭)
@@ -242,19 +240,9 @@ ack·comment 가능 — ack 사용자만 best-effort 조회 후 `operator` 폴�
 카탈로그 구현 이행(기능 카탈로그 §6: 감지 주체 배정 → 선행 구현 → 모듈 카탈로그 등록 →
 fm_catalog/rule)과 별개로, 파이프라인 자체의 본 정본 대비 갭:
 
-1. **정의 코드 이행** — wire·저장·rule·fm_catalog.json 의 구 포맷(`CIMS-<DOMAIN>-<SEQ>`
-    클래스 코드)을 flat 정의 코드(`A-<DOMAIN>-NNN`)로 — `_CODE_REVISIONS` alias + 스윕
-   이행 종결(표준화 §3.4(a) 번호 승계 표). `storage_failure` 개명(구 `resource_failure`) 동반.
-   **mo 루트 개편**(`cims/...` → 서버명/그룹명 소유 주체 루트, 표준화 §3.4(b)·§6)도 같은
-   이행에서 수행 — 활성키가 함께 바뀌므로 두 번 나누지 않는다.
-2. **API 인증**(§7) — alerts/events 전 엔드포인트 require_auth + ack/comment actor 필수.
-3. **보존 스위퍼**(§6.2) — alerts 180일/events 365일 purge + 설정 키.
-4. **agent 두절 규율**(§9) — 자동 close 를 판정 불가 종결 + node 두절 알람으로 정정.
-5. **알람 카탈로그 화면**(§8.1) — `/alerts/catalog` 소비 UI 신설.
-6. **전역 통지**(§8.2) — 셸 상주 store/인디케이터/토스트 (P0 폴링) + 위젯 fetch 의 store
-   구독 전환. SSE 스트림은 P1.
-7. 구현 노트: FmReporter.cpp 3벌 동일 복제(csp/cmp/cmdp)는 공통화 후보,
-   `read_recent` 의 전량 적재는 보존 기간 확대 시 병목 후보 — 계약 무관, 이행 시 함께 검토.
+1. **SSE 스트림**(§8.2 P1) — `GET /alerts/stream` (수렴점 구독자 hook, 폴링 fallback 유지).
+2. 구현 노트: `read_recent` 의 전량 적재는 보존 기간 확대 시 병목 후보 — 계약 무관,
+   이행 시 함께 검토.
 
 ## 관련
 

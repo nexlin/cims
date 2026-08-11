@@ -5,6 +5,7 @@ import { setDevMode } from '../utils/devMode'
 import { getInitialTheme, applyTheme, type Theme } from '../theme'
 import { ROLE_LABELS, roleRank } from '../utils/permissions'
 import type { Role } from '../api/auth'
+import AlarmIndicator from './AlarmIndicator'
 
 interface HeaderProps {
   userName: string
@@ -32,6 +33,8 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
       {/* 페이지 위젯 편집 컨트롤 슬롯 — EditableLayout 이 portal 로 렌더 */}
       <div id="layout-edit-slot" className="app-header-editslot" />
       <div className="app-header-right">
+        {/* 알람 인디케이터 — 셸 상주, 0건도 회색 배지 상시 (alarm_pipeline.md §8.2) */}
+        <AlarmIndicator />
         <span className="app-header-user-name">{userName}</span>
         <span className={`badge ${roleRank(userRole) >= 4 ? 'badge--blue' : 'badge--gray'}`}>
           {ROLE_LABELS[userRole as Role] ?? userRole}
