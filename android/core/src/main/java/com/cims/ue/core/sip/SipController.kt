@@ -68,6 +68,12 @@ class SipController(private val config: SipAccountConfig) {
     private val _emergencyDenied = MutableSharedFlow<Int>(extraBufferCapacity = 8)
     val emergencyDenied: SharedFlow<Int> = _emergencyDenied.asSharedFlow()
 
+    /** 세션 긴급 상태 재광고(TS 24.379 §6.3.3.1.15/16) — (callId, active). CSP 가 in-call
+     *  상향/하향 시 멤버 leg 에 보내는 re-INVITE(mcptt-info emergency-ind)와, 조인/재조인
+     *  200 OK 에 동봉된 현재 상태를 [CimsCall] 이 관측해 올린다. */
+    private val _sessionEmergency = MutableSharedFlow<Pair<Int, Boolean>>(extraBufferCapacity = 8)
+    val sessionEmergency: SharedFlow<Pair<Int, Boolean>> = _sessionEmergency.asSharedFlow()
+
     /** REGISTER Contact 에 부가할 파라미터(예: MCData ICSI feature tag) — [register] 전에 설정.
      *  예: `;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"` */
     @Volatile var contactParams: String = ""
@@ -578,6 +584,10 @@ class SipController(private val config: SipAccountConfig) {
 
     internal fun onEmergencyUpgradeDenied(callId: Int) {
         _emergencyDenied.tryEmit(callId)
+    }
+
+    internal fun onSessionEmergencyAdvertised(callId: Int, active: Boolean) {
+        _sessionEmergency.tryEmit(callId to active)
     }
 
     /** MSRP 호 상태 — [dispatchCallState] 와 분리(전역 _call 미접촉, 호 수명만 관리). */

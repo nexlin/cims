@@ -55,6 +55,9 @@ public:
 	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );
 	bool AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp );
+	/** 200 OK 를 생성만 하고 전송하지 않는 2단계 API (CreateCall→StartCall 패턴) — 호출자가
+	 *  바디(multipart 등)를 부가한 뒤 m_clsSipStack.SendSipMessage() 로 전송한다. */
+	bool AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp, CSipMessage ** ppclsResponse );
 
 	bool HoldCall( const char * pszCallId, ERtpDirection eDirection = E_RTP_SEND );
 	bool ResumeCall( const char * pszCallId );
@@ -79,6 +82,9 @@ public:
 
 	// SipUserAgentSend.hpp
 	bool SendReInvite( const char * pszCallId, CSipCallRtp * pclsRtp );
+	/** ReINVITE 를 생성만 하고 전송하지 않는 2단계 API — 확립된 다이얼로그 전용. 호출자가
+	 *  바디(multipart 등)/헤더를 부가한 뒤 m_clsSipStack.SendSipMessage() 로 전송한다. */
+	bool CreateReInvite( const char * pszCallId, CSipCallRtp * pclsRtp, CSipMessage ** ppclsRequest );
 	bool SendNotify( const char * pszCallId, int iSipCode );
 	bool SendNotifyWithBody( const char * pszCallId, const char * pszEvent,
 	                         const char * pszContentType, const char * pszContentSubType,

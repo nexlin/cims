@@ -422,6 +422,30 @@ class PttController(
                 publish()
             }
         }
+        // 세션 긴급 상태 재광고 (TS 24.379 §6.3.3.1.15/16) — CSP 의 상향/하향 멤버 전파
+        //   re-INVITE 와 조인/재조인 200 OK 동봉. 수신측 세션 긴급 표시의 정본 신호 —
+        //   floor TAKEN emergency 비트(발언 시점)·경보 취소 정합(§4.3)은 보조로 유지.
+        scope.launch {
+            sip.sessionEmergency.collect { (cid, active) ->
+                val s = synchronized(lock) { sessionMap.values.firstOrNull { it.callId == cid } }
+                    ?: return@collect
+                if (active) {
+                    if (s.emergency) return@collect
+                    s.emergency = true
+                    feedback?.emergencyTone()
+                    _status.value = "🚨 [${s.groupId}] 긴급 통화"
+                    emit(PttEventKind.EMERGENCY_IN, s.groupId)
+                } else {
+                    // 개시자 자신은 cancelEmergency(자기 하향 re-INVITE)로만 해제 — 서버 전파는
+                    //   actor 를 제외하므로 여기 도달하는 false 는 타인 하향뿐이다(방어 가드).
+                    if (!s.emergency || s.emergencyMine) return@collect
+                    s.emergency = false
+                    _status.value = "[${s.groupId}] 긴급 해제"
+                    emit(PttEventKind.EMERGENCY_END, s.groupId)
+                }
+                publish()
+            }
+        }
         // 참가자 목록 — 정식 구독 경로(RFC 4575 conference 이벤트). NOTIFY 는 native 구독이
         // 200 으로 수용한 뒤 본문만 올려주므로 그룹 AoR(=conference focus)로 그룹을 식별한다.
         // 제휴 채널 전체를 구독하므로 **참여하지 않은 채널의 NOTIFY 도 온다** — 세션 유무와
@@ -1701,8 +1725,8 @@ class PttController(
             emit(PttEventKind.ALERT_IN, gid, peer = user)
         } else {
             removeAlert(gid, user)
-            // 세션 긴급 표시 un-latch — CSP 는 하향 re-INVITE 를 멤버에 전파하지 않으므로
-            // (mcptt_emergency_modes.md 로드맵) 경보 취소가 멤버에 닿는 유일한 해제 신호다.
+            // 세션 긴급 표시 un-latch — 정본 신호는 CSP 의 하향 재광고 re-INVITE(sessionEmergency)
+            // 이고, 경보 취소 정합은 재광고 유실 대비 보조 경로로 유지한다(§4.3).
             // 같은 그룹에 다른 활성 경보가 남아 있으면 유지한다.
             if (_alerts.value.none { it.groupId == gid }) {
                 synchronized(lock) {
@@ -1982,7 +2006,8 @@ class PttController(
                     s.otherSpeakStartMs = SystemClock.elapsedRealtime()
                 }
                 // CMP 는 긴급 tier 발언자의 TAKEN 에 emergency 비트를 방송 — 수신측 긴급 표시 latch
-                // (CSP 는 상향을 fan-out 하지 않으므로 이것이 in-call 수신 경로의 유일한 신호)
+                // (정본 신호는 CSP 의 상향 재광고 re-INVITE(sessionEmergency) — 이 비트는 재광고
+                //  유실·발언 선행 케이스를 덮는 보조 신호)
                 if ((ev.indicator ?: 0) and FloorIndicator.EMERGENCY != 0 && !s.emergency) {
                     s.emergency = true
                     feedback?.emergencyTone()

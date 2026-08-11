@@ -72,6 +72,12 @@ std::string CGroupCallService::GetOrIssueGroupSesId( const std::string &strGroup
 void CGroupCallService::RemoveGroupSesId( const std::string &strGroupId ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
     m_mapGroupSesId.erase( strGroupId );
+    // 세션 정체성이 끝나면 런타임 condition(긴급/임박)도 함께 끝난다 — 잔존 조건이 다음 세션의
+    //   fan-out(InviteMember 경로 포함)에 상속되는 것을 막는다.
+    if ( m_mapGroupCondition.erase( strGroupId ) ) {
+        m_mapGroupCondActor.erase( strGroupId );
+        CLog::Print( LOG_INFO, "RemoveGroupSesId: group(%s) 잔존 condition 정리 (세션 종료)", strGroupId.c_str() );
+    }
 }
 
 void CGroupCallService::OnGroupAborted( const std::string &strGroupId ) {
@@ -229,16 +235,41 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             return true;  // 403 응답 완료 — 호출측(dispatcher)이 중복 응답하지 않게 한다
         }
     }
+    int iPrevCond = 0;
+    bool bActiveSession = false;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
-        if ( iCond > 0 ) {
+        auto itPrev = m_mapGroupCondition.find( pszGroupId );
+        if ( itPrev != m_mapGroupCondition.end() ) iPrevCond = itPrev->second;
+        // 세션 활성 판정 = 이 그룹의 기존 호 존재 (이 INVITE 의 leg 등록은 아래에서 — 미포함).
+        //   InviteMember 의 stale-cache 가드와 동일 기준.
+        for ( const auto &kv : m_mapCallSession ) {
+            if ( kv.second.strGroupId == pszGroupId ) {
+                bActiveSession = true;
+                break;
+            }
+        }
+        if ( !bActiveSession ) {
+            // 새 세션 개시 — 직전 세션의 잔존 조건을 이번 개시 조건으로 리셋
+            if ( iCond > 0 ) {
+                m_mapGroupCondition[pszGroupId] = iCond;
+                m_mapGroupCondActor[pszGroupId] = pszCallerInfo;
+            } else {
+                m_mapGroupCondition.erase( pszGroupId );
+                m_mapGroupCondActor.erase( pszGroupId );
+            }
+        } else if ( iCond > iPrevCond ) {
+            // 활성 세션 조인 상향(예: normal 세션에 긴급 조인) — 조건 격상 + actor 교체.
+            //   기존 확립 멤버 재광고는 발신자 leg 확립 후 수행(아래 PropagateConditionToMembers).
             m_mapGroupCondition[pszGroupId] = iCond;
             m_mapGroupCondActor[pszGroupId] = pszCallerInfo;
-        } else {
-            m_mapGroupCondition.erase( pszGroupId );
-            m_mapGroupCondActor.erase( pszGroupId );
         }
+        // else: 활성 세션에 같거나 낮은 조건의 조인 → 세션 조건 유지. 조인은 하향이 아니다 —
+        //   하향(취소)은 개시자(actor)의 re-INVITE 만 가능(ApplyInCallCondition 권한 판정).
+        //   (종전엔 normal 조인이 무조건 erase 해 진행 중 긴급 상태가 소실됐다.)
     }
+    // 이 호가 참여하는 세션의 유효 조건 — 200 OK 동봉·전파 판단용
+    int iCondEff = ( bActiveSession && iCond <= iPrevCond ) ? iPrevCond : iCond;
 
     CLog::Print( LOG_INFO, "Processing Group Call GroupId(%s) Name(%s) Caller(%s) Priority(%d)", pszGroupId,
                  clsGroup._name.c_str(), pszCallerInfo, clsGroup._priority );
@@ -335,7 +366,27 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // MCPTT floor (TS 24.379/24.380): 200 OK 에 m=application(SharedFloorPort) 광고 →
         //   개시자가 floor dest 를 학습해 floor REQUEST 를 올바른 포트로 송신(명시적 GRANT).
         clsCallerRtp.m_iApplicationPort = iSharedFloorPort;
-        if ( !gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp ) ) {
+        // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
+        //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
+        //   (TS 24.379, §9-5 멤버 전파). normal 세션은 기존 단일 SDP 200 OK 그대로.
+        bool bAccepted;
+        if ( iCondEff > 0 ) {
+            CSipMessage *pclsOk = NULL;
+            bAccepted = gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp, &pclsOk );
+            if ( bAccepted ) {
+                std::string strCondActor = pszCallerInfo;
+                {
+                    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                    auto ita = m_mapGroupCondActor.find( pszGroupId );
+                    if ( ita != m_mapGroupCondActor.end() && !ita->second.empty() ) strCondActor = ita->second;
+                }
+                WrapInfoMultipart( pclsOk, BuildGroupInfoXml( clsGroup, pszCallerInfo, strCondActor, iCondEff ) );
+                bAccepted = gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk );
+            }
+        } else {
+            bAccepted = gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp );
+        }
+        if ( !bAccepted ) {
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
             return false;
         }
@@ -362,6 +413,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
         CLog::Print( LOG_INFO, "ProcessGroupCall: AcceptCall OK → Caller(%s) MemberPort(%d)", pszCallerInfo,
                      iCallerLocalAudio );
+
+        // 활성 세션 조인이 조건을 상향시켰으면(normal 세션에 긴급 조인) 기존 확립 멤버 leg 에
+        //   re-INVITE 재광고 — fan-out INVITE 는 미참여 멤버만 커버한다(참여 중 멤버는
+        //   InviteMember 가 조기 반환). (TS 24.379 §6.3.3.1.15, §9-5 멤버 전파)
+        if ( bActiveSession && iCond > iPrevCond ) PropagateConditionToMembers( pszGroupId, iCond, pszCallerInfo );
 
         // 개시자(caller)를 CMP floor/RTP 멤버로 등록.
         //   AcceptCall 만으로는 caller 가 CMP _members 에 없어 onRtpPacket 이 caller RTP 를
@@ -546,6 +602,8 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
                                      std::string( "{\"actor\":\"" ) + strMemberId + "\",\"by\":\"reinvite\"}" );
         CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
                      strMemberId.c_str(), iNewCond );
+        // 상향을 확립 멤버 leg 에 재광고 (TS 24.379 §6.3.3.1.15 — §9-5 멤버 전파)
+        PropagateConditionToMembers( strGroupId, iNewCond, strMemberId );
     } else {
         // 하향(취소): 개시자(actor)만 가능. 그 외 멤버의 취소 요청은 무시 (TS 24.379 authorized only).
         std::string strActor;
@@ -570,6 +628,9 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
         }
         CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
                      strTgt.c_str(), iNewCond );
+        // 하향(취소)도 확립 멤버 leg 에 재광고 — 수신 단말 세션 긴급 표시의 직접 un-latch 신호
+        //   (경보 취소 MESSAGE 정합은 보조로 유지, TS 24.379 §6.3.3.1.16)
+        PropagateConditionToMembers( strGroupId, iNewCond, strTgt );
     }
 }
 
@@ -1829,7 +1890,8 @@ void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, con
  *        Content-Type: application/vnd.3gpp.mcptt-info+xml
  */
 std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, const std::string &strUserId,
-                                                  const std::string &strCallerId, int iCondition ) {
+                                                  const std::string &strCallerId, int iCondition,
+                                                  bool bExplicitCondition ) {
     std::ostringstream oss;
 
     // session-type 은 그룹 유형(prearranged/chat/broadcast)에 따라 구동 (TS 24.379)
@@ -1841,10 +1903,11 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, c
         << "  <mcptt-Params>\r\n"
         << "    <session-type>" << strSessionType << "</session-type>\r\n";
     // condition 지시자 (TS 24.379) — session-type 과 직교. fan-out 으로 멤버 UE 에 긴급/임박 광고.
-    if ( iCondition >= 2 )
-        oss << "    <emergency-ind>true</emergency-ind>\r\n";
-    else if ( iCondition == 1 )
-        oss << "    <imminentperil-ind>true</imminentperil-ind>\r\n";
+    //   재광고(bExplicitCondition)는 false 값도 명시해 수신 단말이 하향을 un-latch 할 수 있게 한다.
+    if ( iCondition >= 2 || bExplicitCondition )
+        oss << "    <emergency-ind>" << ( iCondition >= 2 ? "true" : "false" ) << "</emergency-ind>\r\n";
+    if ( iCondition == 1 || bExplicitCondition )
+        oss << "    <imminentperil-ind>" << ( iCondition == 1 ? "true" : "false" ) << "</imminentperil-ind>\r\n";
     oss << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
         << "    <mcptt-calling-user-id>tel:" << strCallerId << "</mcptt-calling-user-id>\r\n"
         << "    <mcptt-calling-group-id>tel:" << clsGroup._id << "</mcptt-calling-group-id>\r\n"
@@ -2023,4 +2086,111 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     pclsInvite->m_iContentLength = (int)pclsInvite->m_strBody.size();
     pclsInvite->m_clsContentType.Set( "multipart", "mixed" );
     pclsInvite->m_clsContentType.InsertParam( "boundary", strBoundary.c_str() );
+}
+
+/**
+ * @brief 기존 바디(psip AddSdp 산출 SDP)를 유지한 채 mcptt-info part 를 앞세운 multipart/mixed 로
+ *        감싼다 (TS 24.379) — in-call 조건 재광고 re-INVITE·조인 200 OK 동봉용.
+ *        WrapMultipartBody 와 달리 SDP 에 floor 라인을 덧붙이지 않는다 (m= 구성은 psip AddSdp 가
+ *        dialog local RTP 로 이미 완결 — m= 라인 수가 바뀌면 단말 pjsua 가 미디어 수 불일치로 크래시).
+ */
+void CGroupCallService::WrapInfoMultipart( CSipMessage *pclsMessage, const std::string &strInfoXml ) {
+    if ( pclsMessage == NULL || pclsMessage->m_strBody.empty() || strInfoXml.empty() ) return;
+
+    // boundary 는 랜덤 hex — body 내 "mcptt" 등장과 충돌 방지 (RFC 2046 §5.1.1, WrapMultipartBody 동일)
+    struct timespec _ts;
+    clock_gettime( CLOCK_REALTIME, &_ts );
+    unsigned _uRnd = (unsigned)( _ts.tv_nsec ^ (uintptr_t)pclsMessage );
+    char _szBoundary[32];
+    snprintf( _szBoundary, sizeof( _szBoundary ), "mcptt_%08x%08x", (unsigned)_ts.tv_sec, _uRnd );
+    const std::string strBoundary = _szBoundary;
+    std::string strSdp = pclsMessage->m_strBody;
+
+    std::ostringstream oss;
+    oss << "--" << strBoundary << "\r\n"
+        << "Content-Type: application/vnd.3gpp.mcptt-info+xml\r\n"
+        << "Content-Length: " << strInfoXml.size() << "\r\n"
+        << "\r\n"
+        << strInfoXml << "\r\n";
+    oss << "--" << strBoundary << "\r\n"
+        << "Content-Type: application/sdp\r\n"
+        << "Content-Disposition: render\r\n"
+        << "Content-Length: " << strSdp.size() << "\r\n"
+        << "\r\n"
+        << strSdp << "\r\n";
+    oss << "--" << strBoundary << "--\r\n";
+
+    pclsMessage->m_strBody = oss.str();
+    pclsMessage->m_iContentLength = (int)pclsMessage->m_strBody.size();
+    pclsMessage->m_clsContentType.Set( "multipart", "mixed" );
+    pclsMessage->m_clsContentType.InsertParam( "boundary", strBoundary.c_str() );
+}
+
+/**
+ * @brief 진행 중 세션의 condition 변경을 확립 멤버 leg 에 re-INVITE 로 재광고
+ *        (TS 24.379 §6.3.3.1.15/16 — in-call 상향/하향·긴급 조인의 멤버 전파).
+ *        SDP 는 초기 오퍼와 동일 구성(audio=멤버 전용 포트 + m=application=그룹 floor 포트)으로
+ *        재산출되므로 미디어는 불변 — 단말은 mcptt-info 의 지시자만 반영한다.
+ *        수신 단말 pjsua 는 자동 200 OK 로 답하고, psip 은 그 응답을 EventReInviteResponse
+ *        (CSP 기본 no-op)로 격리하므로 기존 호 상태에 영향이 없다.
+ */
+int CGroupCallService::PropagateConditionToMembers( const std::string &strGroupId, int iCond,
+                                                    const std::string &strExcludeMemberId ) {
+    CspPttGroup clsGroup;
+    if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) == false ) return 0;
+
+    std::string strActor;
+    std::string strSharedIp;
+    int iFloorPort = 0;
+    std::vector<std::pair<std::string, std::string>> vecLegs;  // (callId, memberId)
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto ita = m_mapGroupCondActor.find( strGroupId );
+        if ( ita != m_mapGroupCondActor.end() ) strActor = ita->second;
+        auto itRtp = m_mapGroupRtp.find( strGroupId );
+        if ( itRtp != m_mapGroupRtp.end() ) {
+            strSharedIp = itRtp->second.strIp;
+            iFloorPort = itRtp->second.iFloorPort;
+        }
+        for ( const auto &kv : m_mapCallSession ) {
+            if ( kv.second.strGroupId != strGroupId || !kv.second.bEstablished ) continue;
+            if ( kv.second.strMemberId == strExcludeMemberId ) continue;
+            vecLegs.push_back( { kv.first, kv.second.strMemberId } );
+        }
+    }
+    if ( vecLegs.empty() || strSharedIp.empty() ) return 0;
+    if ( strActor.empty() ) strActor = strExcludeMemberId;
+
+    const CSipCodecEntry &clsSvcCodec = CSipCodecTable::GetTop();
+    int iSent = 0;
+    for ( const auto &leg : vecLegs ) {
+        int iAudioPort = 0, iVideoPort = 0;
+        if ( !GetOrAllocMemberPort( strGroupId, leg.second, iAudioPort, iVideoPort ) ) continue;
+
+        CSipCallRtp clsRtp;
+        clsRtp.SetIpPort( strSharedIp.c_str(), iAudioPort, SOCKET_COUNT_PER_MEDIA );
+        clsRtp.m_clsCodecList.push_back( clsSvcCodec.m_iPt );
+        clsRtp.m_iCodec = clsSvcCodec.m_iPt;
+        // floor 없는 세션(floor_control=off)은 application 포트 미설정 — AddSdp 가 상대 오퍼
+        // 미러(port 0)로 m= 수를 보존한다.
+        if ( clsGroup._floorControl != "off" && iFloorPort > 0 ) clsRtp.m_iApplicationPort = iFloorPort;
+
+        CSipMessage *pclsReq = NULL;
+        if ( !gclsUserAgent.CreateReInvite( leg.first.c_str(), &clsRtp, &pclsReq ) ) continue;
+
+        std::string strInfoXml = BuildGroupInfoXml( clsGroup, leg.second, strActor, iCond, true );
+        WrapInfoMultipart( pclsReq, strInfoXml );
+        // Resource-Priority — 초기 fan-out 과 동일 규칙 (RFC 4412/8101, mcpttp .0최저~.15최고)
+        if ( iCond >= 2 )
+            pclsReq->AddHeader( "Resource-Priority", "mcpttp.15" );
+        else if ( iCond == 1 )
+            pclsReq->AddHeader( "Resource-Priority", "mcpttp.8" );
+        else
+            pclsReq->AddHeader( "Resource-Priority", "mcpttp.0" );
+
+        if ( gclsUserAgent.m_clsSipStack.SendSipMessage( pclsReq ) ) iSent++;
+    }
+    CLog::Print( LOG_INFO, "PropagateConditionToMembers: group(%s) cond=%d actor(%s) → %d/%zu legs re-INVITE",
+                 strGroupId.c_str(), iCond, strActor.c_str(), iSent, vecLegs.size() );
+    return iSent;
 }

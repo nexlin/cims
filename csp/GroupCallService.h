@@ -152,8 +152,12 @@ private:
      * @param clsGroup PTT group info
      * @return XML string
      */
+    /** bExplicitCondition=true 면 emergency-ind/imminentperil-ind 를 true/false 로 항상 명시 —
+     *  in-call 조건 재광고 re-INVITE(하향=false 전파, TS 24.379 §6.3.3.1.15/16)용.
+     *  false(기본)면 활성 지시자만 실어 초기 INVITE 의 기존 형태를 유지한다. */
     static std::string BuildGroupInfoXml( const class CspPttGroup &clsGroup, const std::string &strUserId,
-                                          const std::string &strCallerId, int iCondition = 0 );
+                                          const std::string &strCallerId, int iCondition = 0,
+                                          bool bExplicitCondition = false );
 
     /**
      * @brief Build group member roster (application/resource-lists+xml, RFC 5366 +
@@ -183,6 +187,16 @@ private:
     static void WrapMultipartBody( class CSipMessage *pclsInvite, const std::string &strGroupXml,
                                    const std::string &strRosterXml, const std::string &strFloorIp, int iFloorPort,
                                    const std::string &strGroupUri = "", bool bNoFloorCtrl = false );
+
+    /** 기존 바디(psip AddSdp 산출 SDP)를 유지한 채 mcptt-info part 를 앞세운 multipart/mixed 로
+     *  감싼다 — in-call 조건 재광고 re-INVITE·조인 200 OK 동봉용(SDP 는 손대지 않는다). */
+    static void WrapInfoMultipart( class CSipMessage *pclsMessage, const std::string &strInfoXml );
+
+    /** 진행 중 세션의 condition 변경(상향/하향·긴급 조인)을 확립 멤버 leg 에 re-INVITE
+     *  (mcptt-info emergency-ind/imminentperil-ind 명시)로 재광고 (TS 24.379 §6.3.3.1.15/16).
+     *  strExcludeMemberId = 변경을 일으킨 멤버(자기 re-INVITE/INVITE 응답으로 이미 인지).
+     *  전송한 leg 수를 반환. */
+    int PropagateConditionToMembers( const std::string &strGroupId, int iCond, const std::string &strExcludeMemberId );
 
     bool m_bMonitorRunning;
     std::thread m_threadMonitor;

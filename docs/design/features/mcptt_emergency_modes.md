@@ -125,13 +125,28 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   4. fan-out INVITE의 `mcptt-info`에 `<emergency-ind>true` 광고(`BuildGroupInfoXml` 확장).
   5. 자원 우선순위: 송출 INVITE에 `Resource-Priority` 헤더(RFC 4412/8101) 부가 —
      emergency=`mcpttp.15` / imminent=`mcpttp.8` / normal=`mcpttp.0` (mcpttp 서열은 .0 최저~.15 최고).
+  6. **조인/재조인 200 OK 동봉**: 진행 중 조건(긴급/임박) 세션에 조인하면 200 OK 를
+     multipart(mcptt-info + SDP)로 보내 현재 `emergency-ind` 를 동봉 — 조인 단말이 개시자의
+     다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다. 활성 세션에
+     같거나 낮은 조건으로 조인해도 **세션 조건은 유지**된다(조인은 하향이 아니다 — 하향은
+     개시자의 취소 re-INVITE 만). 조건 리셋은 새 세션 개시 시에만, 세션 종료 시에도 정리
+     (`RemoveGroupSesId`). 활성 세션 조인이 조건을 상향시키면(normal 진행 중 긴급 조인)
+     기존 확립 멤버 leg 에도 re-INVITE 재광고(아래) — fan-out INVITE 는 미참여 멤버만 커버.
 - **업그레이드**: 진행 중 그룹콜에 re-INVITE(`emergency-ind=true`) → dispatcher `RecvRequest` 의
   **PTT 인지 분기** → 개시와 동일한 3중 인가(`IsInCallUpgradeAllowed`) 적용. 미인가 상향은
   **403 + mcptt-info(`emergency-ind=false`)** 로 거절(§6.3.3.1.14) — 재-INVITE 거절은 다이얼로그를
   깨지 않아 호는 normal 유지, 단말은 낙관 latch 를 되돌린다. 인가되면 `PTT_FLOOR_TIER`/
-  `PTT_GROUP_MODIFY`로 floor만 격상. **멤버 leg 재광고(re-INVITE/UPDATE)는 미구현**(§9) —
-  수신 단말은 floor TAKEN 의 emergency 비트로 상향을 인지(latch)한다.
-- **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀, 상태 클리어. 비권한자 취소 무시(규격). 하향도 멤버 leg 에 전파되지 않으므로 수신 단말 표시는 경보 취소 MESSAGE 로 정합한다(§4.3).
+  `PTT_GROUP_MODIFY`로 floor 격상 + **확립 멤버 leg 에 re-INVITE 재광고**
+  (`PropagateConditionToMembers`, TS 24.379 §6.3.3.1.15) — mcptt-info 의
+  `emergency-ind`/`imminentperil-ind` 를 true/false 로 **명시**하고 actor(변경 유발 멤버) leg 는
+  제외한다. SDP 는 초기 오퍼와 동일 구성(audio=멤버 전용 포트 + m=application=floor 포트)으로
+  재산출되어 미디어 불변 — psip 2단계 API(`CreateReInvite` 생성 → mcptt-info multipart 부가 →
+  전송, `AcceptCall` 2단계도 동일 패턴)로 구현. 단말 pjsua 의 자동 200 OK 응답은 psip
+  `EventReInviteResponse`(CSP no-op)로 격리된다.
+- **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀,
+  상태 클리어. 비권한자 취소 무시(규격). 하향도 확립 멤버 leg 에 re-INVITE(`emergency-ind=false`)
+  재광고(§6.3.3.1.16) — 수신 단말 세션 긴급 표시의 정본 해제 신호(경보 취소 MESSAGE 정합은
+  보조, §4.3).
 - **imminent peril**: 동일 경로의 `imminentperil-ind`, tier=IMMINENT. capability 는
   `emergency_call` 공통 게이트를 따른다.
 
@@ -160,12 +175,15 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **단말 403 폴백**: 긴급 개시 INVITE 가 403 이면 같은 그룹으로 normal 재발신(호 자체는 보존),
   in-call 상향 re-INVITE 가 403(`emergency-ind=false` 본문)이면 낙관 latch 를 되돌린다
   (`SipController.emergencyDenied` — tsx 원문 관측, 재-INVITE 거절은 CallState 불변이라 별도 이벤트).
-- **수신측 세션 긴급 표시와의 정합**: 수신 단말의 in-call 긴급 표시(`session.emergency`)는
-  floor TAKEN 의 emergency 비트로 latch 된다(CSP 는 상향/하향 re-INVITE 를 멤버에 전파하지
-  않음 — §9). 경보 취소 수신 시 같은 그룹에 잔여 활성 경보가 없으면 이 latch 도 함께
-  해제한다(비개시자 한정). UI 는 두 배너를 별개 신호로 **동시 표시**한다 — 경보 배너(주황·📢·
-  발신자 표기)와 세션 긴급 배너(`EmergencyBanner`, 빨강 깜빡임·🚨·그룹 표기 "긴급 통화")로 시각
-  구분. 비개시자 배너에는 로컬 [닫기](표시 latch 만 해제)를 둔다 — 취소 MESSAGE 유실 대비 탈출구.
+- **수신측 세션 긴급 표시와의 정합**: 수신 단말의 in-call 긴급 표시(`session.emergency`)의
+  **정본 신호는 CSP 의 조건 재광고** — 상향/하향 re-INVITE(멤버 전파)와 조인/재조인 200 OK
+  동봉(§4.2)을 tsx 원문에서 파싱해(`SipController.sessionEmergency`) latch/un-latch 한다
+  (un-latch 는 비개시자 한정 — 개시자는 자기 취소로만 해제). 보조 신호 2종을 유지한다:
+  ①floor TAKEN 의 emergency 비트 latch(재광고 유실·발언 선행 케이스) ②경보 취소 수신 시
+  같은 그룹에 잔여 활성 경보가 없으면 latch 해제(비개시자 한정). UI 는 두 배너를 별개 신호로
+  **동시 표시**한다 — 경보 배너(주황·📢·발신자 표기)와 세션 긴급 배너(`EmergencyBanner`,
+  빨강 깜빡임·🚨·그룹 표기 "긴급 통화")로 시각 구분. 비개시자 배너에는 로컬 [닫기](표시
+  latch 만 해제)를 둔다 — 취소 신호 유실 대비 탈출구.
 
 ### 4.4 상태/로깅
 
@@ -236,10 +254,13 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 UE(개시자) ──INVITE(mcptt-info: session-type=prearranged, emergency-ind=true)──▶ CSP
   CSP: capability/권한 게이트 → in-progress emergency 설정
   CSP ──ADD/PTT_GROUP_MODIFY{emergency=1, initiator tier=emergency}──▶ CMP
-  CSP ──fan-out INVITE(mcptt-info: emergency-ind=true)──▶ 멤버들
+  CSP ──200 OK(multipart: mcptt-info emergency-ind=true + SDP)──▶ UE(개시자)
+  CSP ──fan-out INVITE(mcptt-info: emergency-ind=true)──▶ 미참여 멤버들
+  CSP ──re-INVITE(mcptt-info: emergency-ind=true)──▶ 참여 중(확립) 멤버들   ← §6.3.3.1.15 멤버 전파
   CMP: 개시자 FLOOR_REQUEST → tier=emergency → 기존 발언자 REVOKE(reason=emergency_preempt) → GRANT
-  ... 통화 ...
+  ... 통화 ... (이후 조인/재조인 200 OK 에도 emergency-ind=true 동봉)
 UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TIER normal → 상태 해제
+  CSP ──re-INVITE(mcptt-info: emergency-ind=false)──▶ 확립 멤버들 (un-latch)  ← §6.3.3.1.16
 ```
 
 ---
@@ -255,14 +276,7 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
 4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
    인원을 골라 서버가 개시하는 dispatcher 입구는 미착수.
-5. **in-call 상태 변경의 멤버 전파**: 상향/하향 시 CSP 가 멤버 leg 에 re-INVITE/UPDATE 로
-   `emergency-ind` 를 재광고하는 규격 동작(§8 흐름, TS 24.379 §6.3.3.1.15/16) 미구현. 현재
-   수신 단말은 상향=floor TAKEN emergency 비트 latch, 하향=경보 취소 MESSAGE 정합(§4.3)으로
-   대신한다. psip `SendReInvite` 가 SDP 전용이라 mcptt-info multipart 부가 확장이 선행 과제.
-   같은 뿌리: **UE 주도 조인/재조인의 200 OK 에도 현재 `emergency-ind` 를 동봉해야 한다** —
-   현재는 미동봉이라 긴급 진행 중 재조인한 단말이 개시자의 다음 발언(floor TAKEN)까지 세션
-   긴급 표시를 갖지 못한다(실기기 검증에서 확인, 경보 배너는 별개 신호라 유지됨).
-6. **긴급 사설콜(emergency private call)**: 미구현 — 착수 시 프로파일 `PrivateCall > EmergencyCall
+5. **긴급 사설콜(emergency private call)**: 미구현 — 착수 시 프로파일 `PrivateCall > EmergencyCall
    > MCPTTPrivateRecipient`(entry-info `UsePreConfigured`/`LocallyDetermined`)와 `ruleset`
    `allow-emergency-private-call` 이 규격 자리(TS 24.379 §6.2.8.3).
 
@@ -273,10 +287,12 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 - DB: `sql/cims_schema.sql` (`ptt_groups.emergency_call`/`emergency_alert`,
   `ptt_user_profile` — `sql/migrate_ptt_user_profile_v2.sql`)
 - CMP: `cmp/PMcpttGroup.{h,cpp}`(tier·선점·로깅), `cmp/PCmpServer.cpp`(명령 파싱)
-- CSP: `csp/McpttInfo.{h,cpp}`(파서), `csp/ModuleDispatcher.cpp`(EventIncomingCall/EventReInvite/EventMessage·in-call 403·경보 스트립·ad-hoc 인가), `csp/GroupCallService.cpp`(condition·`IsConditionInitAuthorized`·fan-out·descriptor), `csp/CmpClient.cpp`(필드 전송), `csp/CspPttGroup.{h,cpp}`·`csp/CspUser.h`(`CspUserProfile`)·`csp/DbManager.cpp`(`SelectUserProfile`), `csp/CallDir.h`(이벤트)
+- CSP: `csp/McpttInfo.{h,cpp}`(파서), `csp/ModuleDispatcher.cpp`(EventIncomingCall/EventReInvite/EventMessage·in-call 403·경보 스트립·ad-hoc 인가), `csp/GroupCallService.cpp`(condition·`IsConditionInitAuthorized`·fan-out·descriptor·`PropagateConditionToMembers`(멤버 전파)·`WrapInfoMultipart`(조인 200 OK 동봉)), `csp/CmpClient.cpp`(필드 전송), `csp/CspPttGroup.{h,cpp}`·`csp/CspUser.h`(`CspUserProfile`)·`csp/DbManager.cpp`(`SelectUserProfile`), `csp/CallDir.h`(이벤트)
+- psip: `ext/psip/SipUserAgent`(2단계 API — `CreateReInvite`·`AcceptCall(…, CSipMessage**)`: 생성/전송 분리로 mcptt-info multipart 부가 지점 제공)
 - CSC: `csc/src/services/mcptt.py`(XCAP DB연동), `csc/src/handlers/admin.py`(CRUD·user 프로파일)
 - 콘솔: `ems/core/console/src/api/{groups,users}.ts`, `.../pages/PttGroupsWorkbenchPage.tsx`,
   `ems/service/console/src/pages/ProvisioningWorkbenchPage.tsx`(MCPTT 프로파일 행)
-- 단말: `android/ptt-client/.../PttController.kt`(SOS 대상 결정·403 폴백·user-profile 파싱),
-  `ChannelStore.kt`(lastPrimary), `android/core/.../sip/{SipController,CimsCall}.kt`(emergencyDenied)
+- 단말: `android/ptt-client/.../PttController.kt`(SOS 대상 결정·403 폴백·user-profile 파싱·
+  세션 긴급 latch), `ChannelStore.kt`(lastPrimary),
+  `android/core/.../sip/{SipController,CimsCall}.kt`(emergencyDenied·sessionEmergency 관측)
 - 문서: 본 문서 + `docs/design/features/ptt_flows.md` 갱신

@@ -47,6 +47,37 @@ bool CSipUserAgent::SendReInvite(const char *pszCallId, CSipCallRtp *pclsRtp) {
 
 /**
  * @ingroup SipUserAgent
+ * @brief ReINVITE 메시지를 생성만 하고 전송하지 않는다 (2단계 API, CreateCall→StartCall 패턴).
+ *        확립된 다이얼로그에서만 생성한다. 호출자가 바디(multipart 등)/헤더를 부가한 뒤
+ *        m_clsSipStack.SendSipMessage() 로 전송한다.
+ * @param pszCallId SIP Call-ID
+ * @param pclsRtp		local RTP 정보 저장 객체 (NULL 이면 현재 local RTP 유지)
+ * @param ppclsRequest 생성된 ReINVITE 메시지 (전송 책임은 호출자)
+ * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
+ */
+bool CSipUserAgent::CreateReInvite(const char *pszCallId, CSipCallRtp *pclsRtp,
+                                   CSipMessage **ppclsRequest) {
+  SIP_DIALOG_MAP::iterator itMap;
+  CSipMessage *pclsRequest = NULL;
+
+  if (ppclsRequest == NULL) return false;
+  *ppclsRequest = NULL;
+
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end() && itMap->second.m_sttStartTime.tv_sec != 0) {
+    if (pclsRtp) itMap->second.SetLocalRtp(pclsRtp);
+    pclsRequest = itMap->second.CreateInvite();
+  }
+  m_clsDialogMutex.release();
+
+  *ppclsRequest = pclsRequest;
+
+  return pclsRequest != NULL;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief Blind Transfer 에서 사용되는 NOTIFY 메시지를 전송한다.
  * @param pszCallId SIP Call-ID
  * @param iSipCode	INVITE 응답 메시지의 SIP status code

@@ -180,6 +180,18 @@ class CimsCall : Call {
             if (msg.startsWith("SIP/2.0 403") && msg.contains("emergency-ind>false")) {
                 owner.onEmergencyUpgradeDenied(id)
             }
+            // 세션 긴급 상태 재광고 (TS 24.379 §6.3.3.1.15/16) — CSP 가 in-call 상향/하향 시
+            //   멤버 leg 에 보내는 re-INVITE(mcptt-info emergency-ind)와, 조인/재조인 200 OK 에
+            //   동봉된 현재 상태. rdata 는 수신 원문만이므로 "INVITE " = 수신 re-INVITE(UAS),
+            //   "SIP/2.0 200" = 내 INVITE 의 응답(UAC). 403 재광고(위)와 겹치지 않는다.
+            if ((msg.startsWith("INVITE ") || msg.startsWith("SIP/2.0 200")) && msg.contains("mcptt-info")) {
+                when {
+                    Regex("<emergency-ind>\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(msg) ->
+                        owner.onSessionEmergencyAdvertised(id, true)
+                    Regex("<emergency-ind>\\s*false", RegexOption.IGNORE_CASE).containsMatchIn(msg) ->
+                        owner.onSessionEmergencyAdvertised(id, false)
+                }
+            }
             // 참가자 변경 in-dialog NOTIFY (RFC 4575 conference-info) → 참가자 목록 갱신
             // ※ pjsip 다이얼로그는 evsub 미소유 NOTIFY 에 500 을 응답하지만, invite usage 의
             //   tsx 이벤트로 원문은 전달되므로 여기서 본문을 읽는다(응답코드와 무관).

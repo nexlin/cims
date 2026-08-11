@@ -275,11 +275,30 @@ bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRt
  */
 bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
-	SIP_DIALOG_MAP::iterator		itMap;
-	bool	bRes = false;
 	CSipMessage * pclsMessage = NULL;
 
-	if( pclsRtp == NULL ) return false;
+	if( AcceptCall( pszCallId, pclsRtp, &pclsMessage ) == false ) return false;
+
+	return m_clsSipStack.SendSipMessage( pclsMessage );
+}
+
+/**
+ * @ingroup SipUserAgent
+ * @brief 수신된 통화를 수락하는 200 OK 를 생성만 하고 전송하지 않는다 (2단계 API,
+ *        CreateCall→StartCall 패턴). 호출자가 바디(multipart 등)를 부가한 뒤
+ *        m_clsSipStack.SendSipMessage() 로 전송한다.
+ * @param pszCallId SIP Call-ID
+ * @param pclsRtp		local RTP 정보 저장 객체
+ * @param ppclsResponse 생성된 200 OK 메시지 (전송 책임은 호출자)
+ * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
+ */
+bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp, CSipMessage ** ppclsResponse )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	CSipMessage * pclsMessage = NULL;
+
+	if( pclsRtp == NULL || ppclsResponse == NULL ) return false;
+	*ppclsResponse = NULL;
 
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( pszCallId );
@@ -298,19 +317,14 @@ bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 
 				delete itMap->second.m_pclsInvite;
 				itMap->second.m_pclsInvite = NULL;
-
-				bRes = true;
 			}
 		}
 	}
 	m_clsDialogMutex.release();
 
-	if( pclsMessage )
-	{
-		return m_clsSipStack.SendSipMessage( pclsMessage );
-	}
+	*ppclsResponse = pclsMessage;
 
-	return bRes;
+	return pclsMessage != NULL;
 }
 
 /**
