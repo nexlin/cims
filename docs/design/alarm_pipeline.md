@@ -71,7 +71,7 @@ OAM 자체판정 (drift 등) ── (OAM 내부) ──────────�
 
 | 경로 | 전송 | 규격 정본 | 신뢰성 |
 |---|---|---|---|
-| **L2 FM push** | UDP `FmIngest.Ip:Port`(기본 0.0.0.0:9010), envelope v2, cmd `FM_REGISTER/FM_ALARM/FM_EVENT/FM_SYNC` | self_reporting §3 (payload·boot_id/seq·카탈로그 등록) | ack(trans_id 매칭 response) 미수신 시 1s×5 재전송, 유실은 FM_SYNC(60s)가 수렴. 데이터그램 4KB 상한 |
+| **L2 FM push** | UDP `FmIngest.Ip:Port`(기본 0.0.0.0:9010), envelope v2, cmd `FM_REGISTER/FM_ALARM/FM_EVENT/FM_SYNC` | self_reporting §3 (payload·boot_id/seq·카탈로그 등록) | ack(trans_id 매칭 response) 미수신 시 1s×5 재전송, 유실은 FM_SYNC(60s)가 수렴. 데이터그램 발신 32KB/수신 64KB 상한(FM_REGISTER 카탈로그 전문 수용 — self_reporting §3.2) |
 | **L1 agent 보고** | HTTPS `POST /api/agent/metric`(2s)·`/heartbeat`(2s), `X-Agent-Token` | [../api/agent_api.md](../api/agent_api.md). 알람성 필드: `modules[]`(생존)·`module_events[]`(process_died 전이)·`cfg_hashes`(drift)·`ha_transitions`(flap)·`mounts`/자원 | best-effort 주기 보고 — 유실은 다음 tick 이 흡수(전이성 `module_events` 는 발생 tick 1회라 유실 가능 — L1 알람은 상태 기반이라 무영향, 이벤트만 결손) |
 | **L3 probe** | OAM → 모듈 STATS UDP probe·DB SELECT (rule 의 check 정의) | descriptor `alert_rules`(표준화 §3.1 스키마) | 주기 스윕(`AlertSweepSec` 30s) 재평가 자체가 수렴 |
 | **OAM 내부** | 함수 호출(sweeper→transition) | — | 재평가 수렴 |

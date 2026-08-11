@@ -199,5 +199,68 @@ class TestFmWireNormalize(unittest.TestCase):
                 self.assertIn(e.get('code'), cat, f"{m} event {e.get('type')}")
 
 
+class TestSipStatsSelfReport(unittest.TestCase):
+    """CSP SIP 통계 자기보고 — 카탈로그 선언 + 단계 severity 경로 (fm_ingest).
+
+    payload perceived_severity 우선(자기보고 §4)과 승격 시 action=change
+    (표준화 §3.4(d)), FM_SYNC reconcile 의 단계 보존을 검증한다."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix='fm_sipstats_')
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _ingest(self):
+        from services.fm_ingest import FmIngest
+        ing = FmIngest({'FmIngest': {}}, self.dir)
+        node = 'SIG_SVR_01'
+        ing.catalogs[node] = ing._index_catalog({
+            'node': node, 'module': 'csp',
+            'alarms': [{'code': 'A-QOS-006', 'type': 'threshold_crossed',
+                        'perceived_severity': 'minor',
+                        'msg_open': 'Call success rate is {observed}%',
+                        'msg_close': 'recovered'}]})
+        ent = ing.nodes.setdefault(node, {'boot_id': 1, 'module': 'csp',
+                                          'akeys': set(), 'seq': {}, 'last_sync': 0})
+        return ing, node, ent
+
+    def test_csp_fm_catalog_declares_sip_stats_codes(self):
+        p = os.path.join(_REPO, 'csp', 'config', 'fm_catalog.json')
+        with open(p, encoding='utf-8') as f:
+            d = json.load(f)
+        codes = {a['code']: a for a in d['alarms']}
+        for c in ('A-QOS-006', 'A-QOS-007', 'A-QOS-009', 'A-QOS-011'):
+            self.assertIn(c, codes, f"csp fm_catalog 에 {c} 미선언")
+            self.assertEqual(codes[c]['type'], 'threshold_crossed', c)
+
+    def test_payload_severity_and_escalation_change(self):
+        ing, node, ent = self._ingest()
+        mo = f'{node}/csp/calls/success_rate'
+        akey = f'A-QOS-006@{mo}'
+        rule = ing.catalogs[node]['alarms']['A-QOS-006']
+        ing._transition(node, ent, rule, mo, True,
+                        params={'observed': '85.0'}, severity='minor')
+        self.assertEqual(ing.state[akey]['severity'], 'minor')
+        ing._transition(node, ent, rule, mo, True,
+                        params={'observed': '60.0'}, severity='major')
+        self.assertEqual(ing.state[akey]['severity'], 'major')
+        recs = [r for r in alert_log.read_recent(self.dir, days=1)
+                if r.get('alarm_id', '').startswith(akey)]
+        self.assertEqual(sorted(r['action'] for r in recs), ['change', 'open'])
+        chg = next(r for r in recs if r['action'] == 'change')
+        self.assertEqual(chg['trend_indication'], 'moreSevere')
+        self.assertEqual(chg['perceived_severity'], 'major')
+
+    def test_reconcile_preserves_staged_severity(self):
+        ing, node, ent = self._ingest()
+        mo = f'{node}/csp/calls/success_rate'
+        akey = f'A-QOS-006@{mo}'
+        ing._reconcile(node, ent, [{'code': 'A-QOS-006', 'mo_instance': mo,
+                                    'perceived_severity': 'critical',
+                                    'params': {'observed': '40.0'}}])
+        self.assertEqual(ing.state[akey]['severity'], 'critical')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

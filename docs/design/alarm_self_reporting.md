@@ -108,6 +108,11 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 - **유실 수렴**: FM_ALARM 이 5회 재전송 후 폐기돼도 모듈 활성목록에는 남으므로 다음 FM_SYNC 가
   open 을 복구한다. close 유실도 sync 가 정리한다. 이벤트는 best-effort(P0 — 유실 허용,
   필요 시 P1 에서 모듈측 ring buffer 재송).
+- **패킷 상한**: FM 채널 datagram 은 발신 32KB(`FmReporter` `kFmMaxPacket`, csc
+  `fm_reporter.py`) / OAM 수신 64KB(`fm_ingest`) — FM_REGISTER 가 카탈로그 전문을 실으므로
+  CMP 미디어 채널의 4KB(envelope §1.2)로는 알람 수 종부터 등록이 영구 실패한다. FM_SYNC
+  active 배열도 같은 상한. 배포 스큐 주의: 4KB 초과 카탈로그는 수신측(OAM)을 먼저 올려야
+  등록된다.
 
 ## 4. 카탈로그 — 모듈이 코드 옆에 선언
 
@@ -143,7 +148,10 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 - `perceived_severity` 는 통지 payload → 카탈로그 순으로 취하고, 둘 다 없으면
   **indeterminate** 로 발화한다 (X.733 — 미지정을 warning 으로 임의 판정하지 않음).
 - 활성 알람에 severity 가 달라진 open 재통지가 오면 **action=change** 로 기록된다
-  (표준화 §3.4(d) notifyChangedAlarm — transition 코어 공통 동작).
+  (표준화 §3.4(d) notifyChangedAlarm — transition 코어 공통 동작). 단계 임계 자기보고가
+  이 경로를 쓴다: FmReporter 는 같은 (code, mo) 라도 severity 가 다르면 재통지하고,
+  FM_SYNC/FM_REGISTER 의 active 항목에도 `perceived_severity` 를 실어 유실·재기동 후
+  reconcile 시 현재 단계가 보존된다.
 - 자기보고 클래스의 임계/발화 조건은 **모듈 설정 소유** — 콘솔 카탈로그에는 read-only 로 노출
   (descriptor `alert_rules` 는 OAM 평가 규칙 전용으로 유지, 혼합하지 않음).
 
@@ -154,6 +162,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 | `A-COM-001` (재사용) | connection_lost | communications | CSP·CSC 의 DB 연결 두절 (`<서버명>/<mod>/db`) |
 | `A-QOS-002` | resource_exhausted | qualityOfService | CMP 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member (`<서버명>/cmp/<pool>`). 사용률 임계는 OAM sweeper(A-QOS-024, 노드별) 담당 — 역할 분담 |
 | `A-PRC-002` | storage_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 후보: 녹취 쓰기 실패 |
+| `A-QOS-006/007/009/011` | threshold_crossed | qualityOfService | CSP SIP 신호 통계 — 호/등록 성공률·신규 INVITE CPS·SIP 수신 이상 (`<서버명>/csp/{calls/success_rate, reg/success_rate, cps, sip/rx_error}`). 윈도우/단계 임계는 `Setup.SipStats.*`(모듈 설정 소유), 통지가 `perceived_severity` 를 동반 — 단계 승격/완화는 open 재통지(action=change) |
 
 새 *조건* 클래스 후보(미구현): `overload`(CSP 제어평면 과부하 차단 발동 — 차단 로직 자체가
 미구현), 포트 bind 실패(기동 실패 = 프로세스 사망 → L1 process_down(agent) 소관, §1 원칙).
@@ -211,7 +220,10 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
    process_started 가 유실되지 않는다. 각 모듈 설정은 config_template `fm` 섹션
    (`Fm.{Enable,OamIp,OamPort,SyncSec}`, csp 만 `Setup.Fm.*`; OamIp 는 `@OAM_IP@` 치환).
    - **csp**: DB 연결 probe(`CDbManager::StartHealthProbe` — 전용 연결 mysql_ping 10s,
-     3연속 실패 전이) → A-COM-001 `<node>/csp/db`.
+     3연속 실패 전이) → A-COM-001 `<node>/csp/db`. SIP 신호 통계는 psip 스택
+     카운터(`CSipStackCounter` — 수신 요청·최종응답 수신/송신·파싱 실패, 로컬 합성
+     408/660 포함)를 `SipStatsMonitor`(메인 루프 tick)가 `Setup.SipStats.EvalSec` 윈도우로
+     차분 평가 → A-QOS-006/007/009/011 (단계 severity 동반, monitor 명령 `sip_stats`).
    - **cmp**: `fmMonitorLoop`(1s) 가 3개 풀(rtp/ptt_floor/ptt_member)의 완전 고갈 전이를
      감시 → A-QOS-002 `<node>/cmp/<pool>`. 변종(pmp/imp)은 SystemId overlay 로 node
      분리 필수 (미분리 시 활성키 충돌).

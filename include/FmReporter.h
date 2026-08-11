@@ -42,6 +42,7 @@ struct FmActiveAlarm {
     std::string strCode;              // 알람 정의 코드 (fm_catalog.json 의 code)
     std::string strMo;                // managedObjectInstance (예: SIG_SVR_01/csp/db — 서버명 루트)
     std::string strOpenTs;            // 발생 시각 (ISO8601)
+    std::string strSeverity;          // 단계 임계 알람의 현재 severity (빈 값 = 카탈로그 기본)
     SimpleJson::JsonNode nodeParams;  // msg 템플릿 치환 값
 };
 
@@ -126,26 +127,43 @@ public:
     }
 
     void AlarmOpen( const std::string &strCode, const std::string &strMo, const SimpleJson::JsonNode &nodeParams ) {
+        AlarmOpen( strCode, strMo, nodeParams, "" );
+    }
+
+    // severity 동반 open — 단계 임계(staged) 알람용. 이미 open 이라도 severity 가 다르면
+    //   재통지한다 (OAM transition 이 action=change/moreSevere|lessSevere 로 기록 —
+    //   표준화 §3.4(d)). 빈 severity 는 카탈로그 기본값 사용(기존 동작).
+    void AlarmOpen( const std::string &strCode, const std::string &strMo, const SimpleJson::JsonNode &nodeParams,
+                    const std::string &strSeverity ) {
         if ( !m_bRunning ) return;
         std::string strAkey = strCode + "@" + strMo;
         {
             std::lock_guard<std::mutex> lock( m_mutex );
-            if ( m_mapActive.find( strAkey ) != m_mapActive.end() ) return;  // 이미 open — 전이 아님
-            FmActiveAlarm clsActive;
-            clsActive.strCode = strCode;
-            clsActive.strMo = strMo;
-            clsActive.strOpenTs = FmNowIso();
-            clsActive.nodeParams = nodeParams;
-            m_mapActive[strAkey] = clsActive;
+            std::map<std::string, FmActiveAlarm>::iterator it = m_mapActive.find( strAkey );
+            if ( it != m_mapActive.end() ) {
+                if ( it->second.strSeverity == strSeverity ) return;  // 이미 같은 상태 — 전이 아님
+                it->second.strSeverity = strSeverity;                 // 승격/완화 — open_ts 는 유지
+                it->second.nodeParams = nodeParams;
+            } else {
+                FmActiveAlarm clsActive;
+                clsActive.strCode = strCode;
+                clsActive.strMo = strMo;
+                clsActive.strOpenTs = FmNowIso();
+                clsActive.strSeverity = strSeverity;
+                clsActive.nodeParams = nodeParams;
+                m_mapActive[strAkey] = clsActive;
+            }
         }
         SimpleJson::JsonNode nodePayload;
         nodePayload.Set( "action", "open" );
         nodePayload.Set( "code", strCode );
         nodePayload.Set( "mo_instance", strMo );
+        if ( !strSeverity.empty() ) nodePayload.Set( "perceived_severity", strSeverity );
         if ( nodeParams.type == SimpleJson::JSON_OBJECT ) nodePayload.Set( "params", nodeParams );
         nodePayload.Set( "ts", FmNowIso() );
         SendFm( "FM_ALARM", nodePayload );
-        Log( FM_LOG_INFO, "ALARM OPEN %s", strAkey.c_str() );
+        Log( FM_LOG_INFO, "ALARM OPEN %s%s%s", strAkey.c_str(), strSeverity.empty() ? "" : " sev=",
+             strSeverity.c_str() );
     }
 
     void AlarmClose( const std::string &strCode, const std::string &strMo ) {
@@ -195,7 +213,10 @@ private:
     static const int kFmRetryIntervalSec = 1;   // ack 미수신 재전송 간격 (cmp_media_api.md §8)
     static const int kFmMaxAttempts = 5;        // 재전송 상한 — 초과 시 폐기 (FM_SYNC 가 수렴)
     static const int kFmRegisterRetrySec = 5;   // 미등록 상태의 FM_REGISTER 재시도 간격
-    static const size_t kFmMaxPacket = 4096;    // envelope v2 §1.2 — datagram 4KB 상한
+    // FM 채널 datagram 상한 — FM_REGISTER 가 카탈로그 전량을 실으므로 CMP 미디어 채널의
+    //   4KB(envelope v2 §1.2)로는 알람 수 종부터 등록이 영구 실패한다. FM 채널은 32KB
+    //   (OAM fm_ingest recv 는 64KB — OAM 을 먼저 올려야 4KB 초과 등록이 수신된다).
+    static const size_t kFmMaxPacket = 32768;
     static const size_t kFmEventQueueMax = 32;  // 미등록 구간 이벤트 버퍼 상한
 
     CFmReporter()
@@ -319,6 +340,7 @@ private:
                 nodeItem.Set( "code", it->second.strCode );
                 nodeItem.Set( "mo_instance", it->second.strMo );
                 nodeItem.Set( "open_ts", it->second.strOpenTs );
+                if ( !it->second.strSeverity.empty() ) nodeItem.Set( "perceived_severity", it->second.strSeverity );
                 if ( it->second.nodeParams.type == SimpleJson::JSON_OBJECT )
                     nodeItem.Set( "params", it->second.nodeParams );
                 nodeActive.Add( nodeItem );
@@ -340,6 +362,7 @@ private:
                 nodeItem.Set( "code", it->second.strCode );
                 nodeItem.Set( "mo_instance", it->second.strMo );
                 nodeItem.Set( "open_ts", it->second.strOpenTs );
+                if ( !it->second.strSeverity.empty() ) nodeItem.Set( "perceived_severity", it->second.strSeverity );
                 if ( it->second.nodeParams.type == SimpleJson::JSON_OBJECT )
                     nodeItem.Set( "params", it->second.nodeParams );
                 nodeActive.Add( nodeItem );

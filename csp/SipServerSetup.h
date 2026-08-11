@@ -254,6 +254,23 @@ public:
     int m_iFmOamPort;          // OAM FM ingest UDP 포트 (기본 9010)
     int m_iFmSyncSec;          // FM_SYNC 주기 초기값 (FM_REGISTER 응답의 sync_interval_sec 가 덮음)
 
+    // ================================================================
+    // SIP 신호 통계/품질 알람 — Setup.SipStats.* (임계는 모듈 설정 소유 —
+    //   alarm_self_reporting.md §4; A-QOS-006/007/009/011, 평가는 SipStatsMonitor).
+    //   율 하한/CPS 상한의 단계값 0 = 해당 단계 미사용. 전 필드 SIGUSR1 리로드 반영.
+    int m_iSipStatsEvalSec;           // EvalSec 평가 윈도우 초 (기본 60, 0=평가 off — 카운터는 항상 동작)
+    int m_iSipStatsMinFinals;         // MinFinals 율 평가 최소 표본 (윈도우 내 최종응답 수, 기본 20)
+    int m_iSipStatsCallRateMinor;     // 호 성공률 하한 % — minor (기본 90)
+    int m_iSipStatsCallRateMajor;     // 호 성공률 하한 % — major (기본 70)
+    int m_iSipStatsCallRateCritical;  // 호 성공률 하한 % — critical (기본 50)
+    int m_iSipStatsRegRateMinor;      // 등록 성공률 하한 % — minor (기본 90)
+    int m_iSipStatsRegRateMajor;      // 등록 성공률 하한 % — major (기본 70)
+    int m_iSipStatsRegRateCritical;   // 등록 성공률 하한 % — critical (기본 50)
+    int m_iSipStatsCpsMinor;          // 신규 INVITE 유입 CPS 상한 — minor (기본 0=off, 수용량 종속)
+    int m_iSipStatsCpsMajor;          // CPS 상한 — major (기본 0=off)
+    int m_iSipStatsCpsCritical;       // CPS 상한 — critical (기본 0=off)
+    int m_iSipStatsRxErrorMinor;      // SIP 파싱 실패 급증 임계 (윈도우당 건수, 기본 10, 0=off)
+
     // MCData C-plane 정책 — Setup.McData.*
     //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.
     //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).

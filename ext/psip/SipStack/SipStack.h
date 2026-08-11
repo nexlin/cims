@@ -22,6 +22,7 @@
 #include "SipStackDefine.h"
 #include "SipTcp.h"
 #include "SipStatusCode.h"
+#include "SipStackCounter.h"
 #include "SipICTList.h"
 #include "SipNICTList.h"
 #include "SipISTList.h"
@@ -136,6 +137,11 @@ public:
 
 	CSipMutex m_clsUdpRecvMutex;	// SIP �޽��� ���� ���ؽ�
 	CSipStackSetup	m_clsSetup;		// SIP stack ����
+
+	/** SIP 신호 카운터 — 수신 요청/최종응답(수신·송신)/파싱 실패 누적 (SipStackCounter.h).
+	 *  증가 지점은 RecvSipMessage/RecvResponse/SendSipMessage 안 수렴점 — 소비자는
+	 *  GetSnapshot() 차분으로 윈도우 통계를 얻는다. */
+	CSipStackCounter m_clsCounter;
 
 	CThreadList			m_clsTcpThreadList;
 	/** TCP worker pool 초기화 여부 — Start(정적 TCP 포트) 또는 AddTcpListener(런타임 추가)의

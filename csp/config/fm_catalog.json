@@ -25,6 +25,58 @@
       "msg_close": "Media plane (CMP) control restored ({mo})",
       "effect": "경계/부가/그룹콜 미디어 기능 전면 불가 — 미디어 수립·안내방송/녹취·발언권 제어 (IBCF/TAS/PTT-AS 역할 합집합)",
       "recommended_action": "CMP 프로세스/제어 채널(UDP 9001 계열)·네트워크 확인"
+    },
+    {
+      "type": "threshold_crossed",
+      "code": "A-QOS-006",
+      "perceived_severity": "minor",
+      "event_type": "qualityOfService",
+      "probable_cause": "thresholdCrossed",
+      "mo_class": "service",
+      "metric": "호 성공률 (INVITE 최종응답 유효율 — 로컬 합성 408/660 포함, 단계 임계는 통지 severity)",
+      "msg_open": "Call success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",
+      "msg_close": "Call success rate recovered ({mo})",
+      "effect": "다수 호 실패 진행 중 — 원인 불문 서비스 품질 저하",
+      "recommended_action": "실패 응답 코드 분포(params top_code)·flow 로그로 원인 축 식별, 원천(DB/CSC/CMP)·대국 상태 확인"
+    },
+    {
+      "type": "threshold_crossed",
+      "code": "A-QOS-007",
+      "perceived_severity": "minor",
+      "event_type": "qualityOfService",
+      "probable_cause": "thresholdCrossed",
+      "mo_class": "service",
+      "metric": "등록 성공률 (REGISTER 최종응답 유효율 — 챌린지 401/407/423 제외)",
+      "msg_open": "Registration success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",
+      "msg_close": "Registration success rate recovered ({mo})",
+      "effect": "단말 대량 이탈·착신 불가 확산",
+      "recommended_action": "인증 실패/원천(DB·CSC) 장애/네트워크 축 구분, 실패 코드 분포 확인"
+    },
+    {
+      "type": "threshold_crossed",
+      "code": "A-QOS-009",
+      "perceived_severity": "minor",
+      "event_type": "qualityOfService",
+      "probable_cause": "thresholdCrossed",
+      "mo_class": "service",
+      "metric": "신규 INVITE 유입 rate (CPS — 상한 단계 임계, 기본 off)",
+      "msg_open": "Signaling inflow is {observed} CPS (CRI:{crit}, MAJ:{maj}, MIN:{min})",
+      "msg_close": "Signaling inflow returned below threshold ({mo})",
+      "effect": "처리 지연·과부하 진입 전조",
+      "recommended_action": "유입원 확인·과부하 제어 준비, 수용량 대비 임계(SipStats.Cps*) 적정성 점검"
+    },
+    {
+      "type": "threshold_crossed",
+      "code": "A-QOS-011",
+      "perceived_severity": "minor",
+      "event_type": "qualityOfService",
+      "probable_cause": "thresholdCrossed",
+      "mo_class": "service",
+      "metric": "SIP 수신 이상 (파싱 실패 건수/윈도우 — 소스 IP 동반)",
+      "msg_open": "SIP receive errors surging: {count} malformed/invalid messages in {window}s (top source {ip})",
+      "msg_close": "SIP receive errors subsided ({mo})",
+      "effect": "피어 오동작/공격/호환성 문제 진행",
+      "recommended_action": "소스 IP 분포 확인·차단/억제 검토 (params ip/top_count)"
     }
   ],
   "events": [

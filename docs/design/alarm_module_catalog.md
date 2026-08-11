@@ -196,12 +196,12 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 모듈별로 �
 
 ### 5.0 전 모듈 공통 제약·클래스 통일 원칙
 
-- **FM_REGISTER 4KB 상한 (후보 채택의 선행 조건)**: FmReporter 는 4096B 초과 패킷을
-  전송하지 않는데(`cmdp/FmReporter.cpp:263-266` — cmp/csp 동형) FM_REGISTER 에는 카탈로그
-  전문이 실린다. 현행 알람 엔트리 1건이 ~530-630B 라 **알람 6~7종부터 등록 자체가 영구
-  실패**하고, 등록 실패 시 이벤트 버퍼(32건)에 갇혀 자기보고가 전면 중단된다. CSV 후보를
-  채택하려면 카탈로그 분할 전송·필드 축약·상한 상향 중 하나가 먼저다. FM_SYNC 의 active
-  배열도 같은 상한을 받는다.
+- **FM 채널 패킷 상한 = 발신 32KB / OAM 수신 64KB**: FM_REGISTER 에는 카탈로그 전문이
+  실린다 — 알람 엔트리 1건이 ~530-630B 라 CMP 미디어 채널의 4KB(envelope §1.2)로는 알람
+  6~7종부터 등록이 영구 실패하므로 FM 채널은 상한을 분리 상향했다(`include/FmReporter.h`
+  `kFmMaxPacket`, csc `fm_reporter.py`, OAM `fm_ingest.py` 수신 64KB). FM_SYNC 의 active
+  배열도 같은 상한을 받는다. 배포 스큐 주의: 4KB 초과 카탈로그는 수신측(OAM)을 먼저
+  올려야 등록된다.
 - **클래스 배정은 §2.3 type 체계가 정본** — 같은 조건 = 한 클래스(표준화 §3.5), 감지
   주체가 달라도 클래스는 같다(공유 store 접근 불가 = AGENT/OAM 모두 `storage_failure`,
   승격 부적격 = AGENT 노드 자격/OAM 그룹 제외 모두 `redundancy_degraded`). 자기 listen
@@ -214,8 +214,12 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 모듈별로 �
 
 ### 5.1 CSP
 
-**현행**: 알람 1종(connection_lost — DB 두절) + 이벤트 2종(process_started/stopping).
-fm_catalog.json 선언과 구현이 일치한다.
+**현행**: 알람 6종(connection_lost — DB·CMP 두절 / threshold_crossed — 호·등록 성공률,
+신규 INVITE CPS, SIP 수신 이상) + 이벤트 2종(process_started/stopping). fm_catalog.json
+선언과 구현이 일치한다. SIP 통계 축은 psip 스택 카운터(`CSipStackCounter` — 수신 요청·
+최종응답 수신/송신·파싱 실패, **와이어에 없는 로컬 합성 408/660 포함**: `RecvResponse`
+팬아웃 계측)를 `SipStatsMonitor` 가 `Setup.SipStats.*` 윈도우/단계 임계로 평가해
+발화한다(단계 승격/완화 = severity 동반 open 재통지 → OAM change, monitor 명령 `sip_stats`).
 
 **자기보고 대상이 아닌 것 (경계 확정)**
 - **SIP 수신 소켓 버퍼 overflow / 스레드풀 포화**: 프로세스 내부 관측 지점이 없다(커널·psip
@@ -225,49 +229,47 @@ fm_catalog.json 선언과 구현이 일치한다.
   요구로 승격 — 분자(`CallMap::GetCount`)는 기성, 상한 설정 신설이 선행(표준화 §7.2.1 A0059).
 - **TLS 인증서 만료 예고**: 모듈·스택에 X509 notAfter 검사가 없다. 파일 기준 검사는
   agent/OAM 경로가 적절(리스너 개설 실패는 별개로 CSV 에 있음).
-- **CMP/CMDP 요청 단건 타임아웃**, per-call 실패, 파싱 실패: 일회성 → 알람 부적합. 부하
-  지표로 쓰려면 율 카운터 신설이 선행.
+- **CMP/CMDP 요청 단건 타임아웃**, per-call 실패: 일회성 → 알람 부적합. 부하 지표로
+  쓰려면 율 카운터 신설이 선행. (SIP 파싱 실패·호별 실패는 율 임계로 전이화해 구현 —
+  A-QOS-011/006 행 참조.)
 
 **동반 발견 결함** (알람화와 별개로 수정 대상)
-1. **SIGUSR1/mtime scalar 설정 재적재가 항상 무동작** — 무인자 `CSipServerSetup::Read()`
-   (`SipServerSetup.cpp:573-584`)가 JSON 설정 파일을 `CXmlElement::ParseFile` 로 읽어 항상
-   false 를 반환하고, 호출자(`CspServer.cpp:446`, `:512`)는 반환값을 버린다(로그 0).
-   jsonl 컬렉션 reload 경로는 정상.
-2. CMP 응답 status≠OK 가 무로그 실패(`CmpClient.cpp:584-593`) — 포화 미탐 구간의 실패 원인
+1. CMP 응답 status≠OK 가 무로그 실패(`CmpClient.cpp:584-593`) — 포화 미탐 구간의 실패 원인
    규명 불가. 최소 로그 + status code 기록 필요.
-3. `CCscInterface::Start()` 가 bind 결과와 무관하게 true 반환(`CscInterface.cpp:44-50`) —
+2. `CCscInterface::Start()` 가 bind 결과와 무관하게 true 반환(`CscInterface.cpp:44-50`) —
    `CspServer.cpp:355` 의 체크가 무의미. 잘못된 bind IP 의 무통보 INADDR_ANY fallback
    (`:102-105`)도 동반.
-4. CDR/flow 로그 쓰기 실패 전 지점 silent + `m_ulDroppedLogs` 카운터 소비자 0. CDR 은 공용
+3. CDR/flow 로그 쓰기 실패 전 지점 silent + `m_ulDroppedLogs` 카운터 소비자 0. CDR 은 공용
    쓰기 헬퍼가 없어 append `fopen` 11개 지점 개별 산재(CSV `call_dir` 행) — 실패 카운터
    신설 = 12곳 통합.
-5. fm_catalog.json 의 connection_lost(DB) `effect` 가 "파일 fallback 범위로 축소"라고 서술하나, 런타임
+4. fm_catalog.json 의 connection_lost(DB) `effect` 가 "파일 fallback 범위로 축소"라고 서술하나, 런타임
    fallback 전환이 실제로 없다(기동 시 1회 평가) — 문구 정정 또는 전환 구현 중 하나가 필요.
-6. route `max_concurrent_calls`/`cps_limit` 가 파싱만 되고 사용처 없음
+5. route `max_concurrent_calls`/`cps_limit` 가 파싱만 되고 사용처 없음
    (`CspRouteMap.cpp:51-52`) — 과부하 알람의 선행 조건과 연관.
-7. **CmpClient/CmdpClient `Init` 실패가 기동을 막지 않으면서 keepalive 도 안 뜬다**
+6. **CmpClient/CmdpClient `Init` 실패가 기동을 막지 않으면서 keepalive 도 안 뜬다**
    (`CmpClient.cpp:152-166`+`:180-183`, `CmdpClient.cpp:75-92`) — CMP/CMDP 두절 알람의
    판정 루프 자체가 소멸하는 전제 붕괴(CSV `cmp_ctrl`/`cmdp_ctrl` 행).
-8. 그룹 60s 재적재가 두 곳에서 중복 실행(`CspServer.cpp:499-505` + `GroupCallService.cpp:
+7. 그룹 60s 재적재가 두 곳에서 중복 실행(`CspServer.cpp:499-505` + `GroupCallService.cpp:
    1090-1098`). 가입자(`LoadAllUsers`)는 주기 호출자가 아예 없다 — 기동 1회 + CSC_RESTART 뿐.
-9. jsonl 파일 부재를 "정상 빈 배열"로 취급(`CspConfigCache.cpp:75-85`) + 런타임 reload 에
+8. jsonl 파일 부재를 "정상 빈 배열"로 취급(`CspConfigCache.cpp:75-85`) + 런타임 reload 에
    sanity 게이트 없음 — 오배포 한 번에 listeners/routes 전량 소거 가능(CSV
    `config/collections` 행).
-10. **STATS `active_calls` 가 DB 연결 시 상시 0** — `GetActiveVoipCallCount()` 가 `return 0`
+9. **STATS `active_calls` 가 DB 연결 시 상시 0** — `GetActiveVoipCallCount()` 가 `return 0`
     스텁(`DbManager.cpp:658-660`)인데 `CscInterface.cpp:226-231` 이 DB 연결 시 이 값을 사용
     (미연결 시에만 `CallMap::GetCount()`). OAM 은 call.json 스캔으로 덮어써(`stats.py:642-646`)
     콘솔에선 안 보이는 결함 — 세션 사용률 알람(기능 카탈로그 CSCF `sessions`)의 선수정.
-11. **CMsgLogger 는 CSP 내 죽은 코드** — `gclsMsgLogger` 호출자가 csp/ 안에 0건(인스턴스
+10. **CMsgLogger 는 CSP 내 죽은 코드** — `gclsMsgLogger` 호출자가 csp/ 안에 0건(인스턴스
     정의만, 실사용은 재설계 예정인 cwrtc 뿐). 구 CSV 의 msg_log 쓰기 실패 행은 이 사유로
     제거(발생 불가 조건).
-12. `LogSecurity()`/security.jsonl 이 dead code(`SipMessageLogger.cpp:81-103` — 호출처 0) +
+11. `LogSecurity()`/security.jsonl 이 dead code(`SipMessageLogger.cpp:81-103` — 호출처 0) +
     toll-fraud 603 은 `SuppressNetworkSource` 로 flow/msg 의도적 억제(`ModuleDispatcher.cpp:
     284-301`) — 보안 관측이 텍스트 로그 요약 1줄뿐(기능 카탈로그 security_violation 의 관측 공백).
-13. **Max-Forwards 검사 부재** — 수신 검사·483 응답 없음(`SIP_TOO_MANY_HOPS` 사용처 0) +
+12. **Max-Forwards 검사 부재** — 수신 검사·483 응답 없음(`SIP_TOO_MANY_HOPS` 사용처 0) +
     송신 시 부재면 무조건 70 세팅(`SipStackComm.hpp:581-583`) — 루프 방지 무력화(규격 결함).
-14. **로컬 합성 응답(트랜잭션 타임아웃 408)은 flow 에 절대 남지 않는다** — Timer B/C 만료 시
-    psip 이 합성해 자기주입(`SipICTList.cpp:190-231`), 와이어 미송신. 거절 사유의 flow
-    `detail` 코드화·호 카운터 설계 시 반드시 포함(표준화 §7.2.2 채용 2건).
+13. **로컬 합성 응답(트랜잭션 타임아웃 408)은 flow 에 절대 남지 않는다** — Timer B/C 만료 시
+    psip 이 합성해 자기주입(`SipICTList.cpp:190-231`), 와이어 미송신. 호 카운터는 포함
+    완료(`CSipStackCounter` — `RecvResponse` 팬아웃 계측이 합성 408/660 을 통과시킴,
+    A-QOS-006 행). flow `detail` 사유 코드화는 잔여(표준화 §7.2.2 채용 1).
 
 **구현 우선순위** (훅 비용 대비 가치)
 

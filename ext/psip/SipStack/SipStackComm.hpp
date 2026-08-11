@@ -58,6 +58,9 @@ bool CSipStack::SendSipMessage( CSipMessage * pclsMessage )
 			{
 				if( m_clsIST.Insert( pclsMessage ) )
 				{
+					// 송신 최종응답 카운터 — 트랜잭션 삽입 성공 시 1회 (IST 계층 재전송 미계수)
+					if( pclsMessage->m_iStatusCode >= CSipStackCounter::FINAL_MIN )
+						m_clsCounter.OnSendFinal( pclsMessage->m_clsCSeq.m_strMethod.c_str(), pclsMessage->m_iStatusCode );
 					Send( pclsMessage, false );
 					--pclsMessage->m_iUseCount;
 					return true;
@@ -67,6 +70,8 @@ bool CSipStack::SendSipMessage( CSipMessage * pclsMessage )
 			{
 				if( m_clsNIST.Insert( pclsMessage ) )
 				{
+					if( pclsMessage->m_iStatusCode >= CSipStackCounter::FINAL_MIN )
+						m_clsCounter.OnSendFinal( pclsMessage->m_clsCSeq.m_strMethod.c_str(), pclsMessage->m_iStatusCode );
 					Send( pclsMessage, false );
 					--pclsMessage->m_iUseCount;
 					return true;
@@ -78,6 +83,8 @@ bool CSipStack::SendSipMessage( CSipMessage * pclsMessage )
 	}
 	else
 	{
+		if( pclsMessage->IsRequest() == false && pclsMessage->m_iStatusCode >= CSipStackCounter::FINAL_MIN )
+			m_clsCounter.OnSendFinal( pclsMessage->m_clsCSeq.m_strMethod.c_str(), pclsMessage->m_iStatusCode );
 		Send( pclsMessage, false );
 
 		if( pclsMessage->m_iUseCount == 0 )
@@ -111,6 +118,10 @@ bool CSipStack::RecvSipMessage( int iThreadId, CSipMessage * pclsMessage )
 			{
 				if( m_clsIST.Insert( pclsMessage ) )
 				{
+					// 수신 요청 카운터 — 트랜잭션 삽입 성공 후(재전송 미계수). 신규/re-INVITE 는
+					//   To tag 유무로 구분 (신규 INVITE 가 CPS 의 분자).
+					if( pclsMessage->IsMethod( SIP_METHOD_INVITE ) )
+						m_clsCounter.OnRecvInvite( pclsMessage->m_clsTo.SelectParam( SIP_TAG ) == false );
 					RecvRequest( iThreadId, pclsMessage );
 					--pclsMessage->m_iUseCount;
 					return true;
@@ -120,6 +131,10 @@ bool CSipStack::RecvSipMessage( int iThreadId, CSipMessage * pclsMessage )
 			{
 				if( m_clsNIST.Insert( pclsMessage ) )
 				{
+					if( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) )
+						m_clsCounter.OnRecvRegister();
+					else
+						m_clsCounter.OnRecvOtherRequest();
 					RecvRequest( iThreadId, pclsMessage );
 					--pclsMessage->m_iUseCount;
 					return true;
@@ -162,6 +177,13 @@ bool CSipStack::RecvSipMessage( int iThreadId, CSipMessage * pclsMessage )
 
 		if( pclsMessage->IsRequest() )
 		{
+			// stateless 모드 — 트랜잭션 dedup 없이 원시 계수 (재전송 포함)
+			if( pclsMessage->IsMethod( SIP_METHOD_INVITE ) )
+				m_clsCounter.OnRecvInvite( pclsMessage->m_clsTo.SelectParam( SIP_TAG ) == false );
+			else if( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) )
+				m_clsCounter.OnRecvRegister();
+			else if( pclsMessage->IsMethod( SIP_METHOD_ACK ) == false )
+				m_clsCounter.OnRecvOtherRequest();
 			RecvRequest( iThreadId, pclsMessage );
 		}
 		else
@@ -198,6 +220,9 @@ bool CSipStack::RecvSipMessage( int iThreadId, const char * pszBuf, int iBufLen,
 
 	if( pclsMessage->Parse( pszBuf, iBufLen ) == -1 )
 	{
+		// SIP 수신 이상 카운터 — 파싱 실패는 무응답 폐기라 여기가 유일한 관측 지점
+		//   (소스 IP 동반 집계 — A-QOS-011 rx_error 의 원천)
+		m_clsCounter.OnParseError( pszIp );
 		delete pclsMessage;
 		return false;
 	}
@@ -217,6 +242,7 @@ bool CSipStack::RecvSipMessage( int iThreadId, const char * pszBuf, int iBufLen,
 
 		if( bDelete )
 		{
+			m_clsCounter.OnSecurityDrop();
 			delete pclsMessage;
 			return false;
 		}

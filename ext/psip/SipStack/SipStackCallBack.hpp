@@ -121,6 +121,12 @@ void CSipStack::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	SIP_STACK_CALLBACK_LIST::iterator itList;
 
+	// 수신 최종응답 카운터 — 와이어 응답(트랜잭션 dedup 후)과 트랜잭션 로컬 합성 응답
+	//   (408 Timer B/Ring timeout, 660 connect error)이 전부 이 팬아웃을 지난다.
+	//   합성 응답은 와이어에 없어 flow 로그 사각 — 성공률 집계에 여기 포함이 필수.
+	if( pclsMessage->m_iStatusCode >= CSipStackCounter::FINAL_MIN )
+		m_clsCounter.OnRecvFinal( pclsMessage->m_clsCSeq.m_strMethod.c_str(), pclsMessage->m_iStatusCode );
+
 	for( itList = m_clsCallBackList.begin(); itList != m_clsCallBackList.end(); ++itList )
 	{
 		if( (*itList)->RecvResponse( iThreadId, pclsMessage ) ) break;

@@ -108,6 +108,18 @@ CSipServerSetup::CSipServerSetup()
       m_strFmOamIp( "127.0.0.1" ),
       m_iFmOamPort( 9010 ),
       m_iFmSyncSec( 60 ),
+      m_iSipStatsEvalSec( 60 ),
+      m_iSipStatsMinFinals( 20 ),
+      m_iSipStatsCallRateMinor( 90 ),
+      m_iSipStatsCallRateMajor( 70 ),
+      m_iSipStatsCallRateCritical( 50 ),
+      m_iSipStatsRegRateMinor( 90 ),
+      m_iSipStatsRegRateMajor( 70 ),
+      m_iSipStatsRegRateCritical( 50 ),
+      m_iSipStatsCpsMinor( 0 ),
+      m_iSipStatsCpsMajor( 0 ),
+      m_iSipStatsCpsCritical( 0 ),
+      m_iSipStatsRxErrorMinor( 10 ),
       m_iMaxSdsCplaneBytes( 0 ),
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
@@ -320,6 +332,25 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( fm.Has( "OamIp" ) ) m_strFmOamIp = fm.GetString( "OamIp" );
                 if ( fm.Has( "OamPort" ) ) m_iFmOamPort = (int)fm.GetInt( "OamPort" );
                 if ( fm.Has( "SyncSec" ) ) m_iFmSyncSec = (int)fm.GetInt( "SyncSec" );
+            }
+
+            // SIP 신호 통계/품질 알람 (SipStatsMonitor — A-QOS-006/007/009/011)
+            if ( setup.Has( "SipStats" ) ) {
+                SimpleJson::JsonNode st = setup.Get( "SipStats" );
+                if ( st.Has( "EvalSec" ) ) m_iSipStatsEvalSec = (int)st.GetInt( "EvalSec" );
+                if ( st.Has( "MinFinals" ) ) m_iSipStatsMinFinals = (int)st.GetInt( "MinFinals" );
+                if ( st.Has( "CallRateMinor" ) ) m_iSipStatsCallRateMinor = (int)st.GetInt( "CallRateMinor" );
+                if ( st.Has( "CallRateMajor" ) ) m_iSipStatsCallRateMajor = (int)st.GetInt( "CallRateMajor" );
+                if ( st.Has( "CallRateCritical" ) )
+                    m_iSipStatsCallRateCritical = (int)st.GetInt( "CallRateCritical" );
+                if ( st.Has( "RegRateMinor" ) ) m_iSipStatsRegRateMinor = (int)st.GetInt( "RegRateMinor" );
+                if ( st.Has( "RegRateMajor" ) ) m_iSipStatsRegRateMajor = (int)st.GetInt( "RegRateMajor" );
+                if ( st.Has( "RegRateCritical" ) )
+                    m_iSipStatsRegRateCritical = (int)st.GetInt( "RegRateCritical" );
+                if ( st.Has( "CpsMinor" ) ) m_iSipStatsCpsMinor = (int)st.GetInt( "CpsMinor" );
+                if ( st.Has( "CpsMajor" ) ) m_iSipStatsCpsMajor = (int)st.GetInt( "CpsMajor" );
+                if ( st.Has( "CpsCritical" ) ) m_iSipStatsCpsCritical = (int)st.GetInt( "CpsCritical" );
+                if ( st.Has( "RxErrorMinor" ) ) m_iSipStatsRxErrorMinor = (int)st.GetInt( "RxErrorMinor" );
             }
 
             // MCData C-plane 정책 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응)
@@ -572,6 +603,13 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
  */
 bool CSipServerSetup::Read() {
     if ( m_strFileName.length() == 0 ) return false;
+
+    // JSON 설정은 전체 재파싱 경로(overlay 병합 포함)로 위임 — scalar 리로드(SIGUSR1/mtime)가
+    //   타는 이 경로가 JSON 파일을 XML 파서로 읽어 항상 무동작이던 결함의 수정.
+    //   bootstrap 성 필드는 재반영돼도 기존 객체에 미적용(CspServer 리로드 주석과 동일 한계).
+    if ( m_strFileName.substr( m_strFileName.find_last_of( "." ) + 1 ) == "json" ) {
+        return Read( m_strFileName.c_str() );
+    }
 
     CXmlElement clsXml;
 

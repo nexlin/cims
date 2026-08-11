@@ -67,6 +67,7 @@ CCallDir gclsCallDir;
 #include "SipCodecTable.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
+#include "SipStatsMonitor.h"
 #include "SipUri.h"
 #include "SipUserAgentVersion.h"
 #include "SubscriptionManager.h"
@@ -484,6 +485,9 @@ int ServiceMain() {
                 }
             }
         }
+
+        // SIP 신호 통계 — EvalSec 윈도우 경과 시 성공률/CPS/수신 이상 평가 (A-QOS-006/007/009/011)
+        gclsSipStatsMonitor.Poll( time( NULL ) );
 
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );

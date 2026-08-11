@@ -18,7 +18,7 @@ import time
 _RETRY_SEC = 1            # ack 미수신 재전송 간격 (cmp_media_api.md §8)
 _MAX_ATTEMPTS = 5         # 재전송 상한 — 초과 시 폐기 (FM_SYNC 가 수렴)
 _REGISTER_RETRY_SEC = 5   # 미등록 상태의 FM_REGISTER 재시도 간격
-_MAX_PACKET = 4096        # envelope v2 §1.2
+_MAX_PACKET = 32768       # FM 채널 상한 — FM_REGISTER 카탈로그 성장 대비 (FmReporter.h 와 동일)
 _EVENT_QUEUE_MAX = 32     # 미등록 구간 이벤트 버퍼 상한 (등록 시 flush)
 
 _INSTANCE = None          # init() 이 채우는 프로세스 싱글턴 (mcptt audit 등에서 get())

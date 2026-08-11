@@ -414,7 +414,7 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
 | severity | CLEARED+MINOR/MAJOR/CRITICAL "가변", 단계 임계 70/80/90 을 설명 템플릿에 명시(`CPU load is A% (CRI:B,MAJ:C,MIN:D)`) | thresholds 단계(80/90/95) + action=change + threshold_info(§3.2) | 동형 — 관측값·임계 동반 표기는 threshold_info 로 이미 수용 |
 | 발생 위치 | `서버명/프로세스명`·`서버명/DISK/파티션명` 경로 | mo_instance DN-유사 경로(§3.4(b)) | 동형 |
 | **조치사항** | **전 알람 코드에 다단계 조치 절차**(확인 경로·설정 파일·해제 메뉴까지) | effect/recommended_action 선택 필드(§7.1) — 현행 카탈로그는 1줄 수준 | **채용** — 카탈로그(fm_catalog·rule)의 recommended_action 을 절차 수준으로 강화하고 콘솔 상세에 노출. POD 문서 산출물(코드별 1페이지) 자체가 운영 이관 규격이라는 점도 참고(카탈로그 CSV → POD 생성 후보) |
-| 감시 항목 | NTP 3종(Delay/Offset/Status), 성공률(SuccessFailError), CPS/세션/채널 과부하 세분, Manual Block 상태 알람, 절체 알림(S3001~5) | NTP 없음, 성공률/CPS/세션 카운터 없음(§7.2.1 실사), overload 1클래스, 수동 개입은 node_maintenance 이벤트+redundancy_degraded reason, ha_switchover 이벤트 후보 | **채용 확정**: NTP·호/등록 성공률·CPS·세션 사용률·SIP 수신 이상 급증을 기능 관점 필요 알람으로 편입 — 정본은 [alarm_function_catalog.csv](alarm_function_catalog.csv)(구현 무관 요구 카탈로그). Manual Block·절체 알림은 기존 이벤트/reason 대응(§7.2.1 A0023·A0063) |
+| 감시 항목 | NTP 3종(Delay/Offset/Status), 성공률(SuccessFailError), CPS/세션/채널 과부하 세분, Manual Block 상태 알람, 절체 알림(S3001~5) | NTP 없음, 세션 상한 부재(§7.2.1 실사). **호/등록 성공률·CPS·SIP 수신 이상은 CSP L2 자기보고로 구현**(A-QOS-006/007/009/011 — 응답코드별 스택 카운터, 로컬 합성 408/660 포함) | **채용 확정**: NTP·호/등록 성공률·CPS·세션 사용률·SIP 수신 이상 급증을 기능 관점 필요 알람으로 편입 — 정본은 [alarm_function_catalog.csv](alarm_function_catalog.csv)(구현 무관 요구 카탈로그). 성공률/CPS/수신 이상은 구현 완료(모듈 카탈로그 CSP 행), NTP·세션 사용률은 잔여. Manual Block·절체 알림은 기존 이벤트/reason 대응(§7.2.1 A0023·A0063) |
 
 > vIBCF POD 원문의 A0000 "메시지 설명"이 CPU 문구로 오기재된 것 등 원문 결함은 변환본에
 > 그대로 보존했다(원문 보존 원칙).
@@ -435,14 +435,14 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
 | A0030·A0089 | 큐 full/사용률 | QOS-002 `log_queue` 계열 — 부분 대응(SIP 수신 큐는 관측 지점 없음, psip 소관) |
 | A0041~43 | NTP Delay/Offset/Status | 2정의 분리 — Delay/Offset=threshold_crossed(A-QOS-003 단계 임계)·Status=connection_lost(A-COM-014 동기 상실, X.733 lossOfSynchronisation) — 기능 카탈로그 공통 `ntp` + 모듈 카탈로그 AGENT 행 |
 | A0057 | 과부하 drop | QOS-005 overload — 대응(감지 로직 선행 필요) |
-| A0058 | CPS 임계 | 카운터 전무(`cps_limit` 파싱만·소비 0 — `CspRouteMap.cpp:52`) — **기능 카탈로그 편입**(CSCF `cps`) |
+| A0058 | CPS 임계 | **구현** — 신규 INVITE 유입 CPS 단계 임계(A-QOS-009, CSP 자기보고 `SipStatsMonitor` + 스택 카운터). route 별 `cps_limit` 강제는 별개 미구현(`CspRouteMap.cpp:52`) |
 | A0059 | 세션 사용률 임계 | 분자 기성(`CallMap::GetCount`)·분모(상한 설정) 부재 + STATS active_calls 상시 0 결함(`DbManager.cpp:658` 스텁) — **기능 카탈로그 편입**(CSCF `sessions`) |
 | A0063 | HA 절체 | 사건=`ha_switchover`/`ha_role_changed` 이벤트·비정상 빈도=ha_flap 알람 — 대응(vIBCF 는 절체 자체가 알람) |
-| A0075~77 | 성공률/소통률/완료율 하한 | 카운터·주기 집계 전무. 현행 파일 사후 산출(OAM `stats.py:937-990`)은 분모 결함 — 조기 거절(403/404/480/603/500)이 call.json 미생성(`ModuleDispatcher.cpp:972` 단일 기록점) + end_reason `normal\|error` 2치 — **기능 카탈로그 편입**(CSCF `calls/success_rate`·IBCF 대국별) |
+| A0075~77 | 성공률/소통률/완료율 하한 | **구현(전체 축)** — 응답코드별 스택 카운터(`CSipStackCounter` — INVITE/REGISTER 최종응답 수신+송신, 조기 거절·로컬 합성 408/660 포함) 기반 호/등록 성공률 단계 임계(A-QOS-006/007, CSP 자기보고). **대국별 축(A-QOS-012~014)은 잔여** — peer 상관(`RouteRuntime` 슬롯 기성·채우는 주체 부재) 선행 필요. OAM 파일 사후 산출(`stats.py:937-990`)의 분모 결함(조기 거절 call.json 미생성 + end_reason 2치)은 카운터 축과 별개로 잔존 |
 | A0078·79 | 미디어 시간/Kbps 하한 | 기능 카탈로그 MRF `media/no_flow`·`media/quality` 로 수용(관측 카운터 신설 선행) |
-| A0081 | SIP syntax 오류 | 파싱 실패가 완전 침묵(무응답 delete — `SipStackComm.hpp:199-203`, 카운터 0) — **기능 카탈로그 편입**(CSCF/IBCF `sip/rx_error`) |
+| A0081 | SIP syntax 오류 | **구현** — 파싱 실패 카운터+소스 IP 집계(구 침묵 폐기 지점 `SipStackComm.hpp` 계측) → 윈도우 급증 임계 A-QOS-011(CSP 자기보고) |
 | A0083 | RTT 임계 | 기능 카탈로그 IBCF `peer/<n>/rtt` 로 수용(대국별 축 — vIBCF 관례 채용) |
-| A0084 | SIP 실패 reason 별 임계 | 응답코드별 카운터(성공률과 공통 선행) 완성 후 params/대국별 행으로 수용 — 기능 카탈로그 IBCF `peer/<n>/reason` |
+| A0084 | SIP 실패 reason 별 임계 | 공통 선행(응답코드별 카운터)은 구현 완료 — A-QOS-006 params 가 최다 실패 코드(top_code)를 동반. 대국별 행(기능 카탈로그 IBCF `peer/<n>/reason`, A-QOS-013)은 peer 상관 선행 후 수용 |
 | A0085 | HA 설정 변경 | `node_maintenance`(HA 얼림·오버라이드) 이벤트 — 대응 |
 | A0086 | 프로세스 hang | PRC-004(L3 probe + zombie readiness) — 대응 |
 | A0087·88 | NFV 인프라(GM/VM Host) 연동 | 해당 기능 없음(최근접 `ext/<system>` probe) — 비대상 |

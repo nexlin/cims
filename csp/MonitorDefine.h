@@ -12,6 +12,8 @@
 
 #define MC_SIP_STACK_COUNT_LIST "sip_stack_count_list"
 
+#define MC_SIP_STATS "sip_stats"
+
 #define MC_STOP "stop"
 
 #endif

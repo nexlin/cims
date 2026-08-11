@@ -338,6 +338,142 @@
       "scope": "system"
     },
     {
+      "key": "sip_stats",
+      "title": "SIP 신호 통계/품질 알람",
+      "description": "SIP 응답코드별 카운터 기반 호/등록 성공률·CPS·수신 이상 감시 (A-QOS-006/007/009/011, FM 자기보고 발화). 성공률에는 와이어에 없는 로컬 합성 응답(트랜잭션 타임아웃 408 등)이 포함된다. 율 하한/CPS 상한의 단계값 0 = 해당 단계 미사용.",
+      "fields": [
+        {
+          "key": "Setup.SipStats.EvalSec",
+          "label": "평가 윈도우 (초)",
+          "type": "int",
+          "default": 60,
+          "min": 0,
+          "max": 3600,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "성공률/CPS/수신 이상의 평가 주기. 0 이면 평가 중지 (카운터 집계는 계속)."
+        },
+        {
+          "key": "Setup.SipStats.MinFinals",
+          "label": "율 평가 최소 표본",
+          "type": "int",
+          "default": 20,
+          "min": 1,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "advanced": true,
+          "help": "윈도우 내 최종응답 수(분모)가 이보다 적으면 판정하지 않음 — 저트래픽 소표본 잡음 억제."
+        },
+        {
+          "key": "Setup.SipStats.CallRateMinor",
+          "label": "호 성공률 하한 % (minor)",
+          "type": "int",
+          "default": 90,
+          "min": 0,
+          "max": 100,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "INVITE 최종응답 유효율(2xx/3xx + 486/487/603, 챌린지 제외)이 미달하면 minor."
+        },
+        {
+          "key": "Setup.SipStats.CallRateMajor",
+          "label": "호 성공률 하한 % (major)",
+          "type": "int",
+          "default": 70,
+          "min": 0,
+          "max": 100,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": ""
+        },
+        {
+          "key": "Setup.SipStats.CallRateCritical",
+          "label": "호 성공률 하한 % (critical)",
+          "type": "int",
+          "default": 50,
+          "min": 0,
+          "max": 100,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": ""
+        },
+        {
+          "key": "Setup.SipStats.RegRateMinor",
+          "label": "등록 성공률 하한 % (minor)",
+          "type": "int",
+          "default": 90,
+          "min": 0,
+          "max": 100,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "REGISTER 최종응답 유효율(2xx, 챌린지/423 제외)이 미달하면 minor."
+        },
+        {
+          "key": "Setup.SipStats.RegRateMajor",
+          "label": "등록 성공률 하한 % (major)",
+          "type": "int",
+          "default": 70,
+          "min": 0,
+          "max": 100,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": ""
+        },
+        {
+          "key": "Setup.SipStats.RegRateCritical",
+          "label": "등록 성공률 하한 % (critical)",
+          "type": "int",
+          "default": 50,
+          "min": 0,
+          "max": 100,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": ""
+        },
+        {
+          "key": "Setup.SipStats.CpsMinor",
+          "label": "신규 INVITE CPS 상한 (minor)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "윈도우 평균 신규 INVITE/초가 도달하면 발화. 0 = 미사용 (수용량에 맞춰 설정)."
+        },
+        {
+          "key": "Setup.SipStats.CpsMajor",
+          "label": "신규 INVITE CPS 상한 (major)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": ""
+        },
+        {
+          "key": "Setup.SipStats.CpsCritical",
+          "label": "신규 INVITE CPS 상한 (critical)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": ""
+        },
+        {
+          "key": "Setup.SipStats.RxErrorMinor",
+          "label": "SIP 파싱 실패 급증 임계 (건/윈도우)",
+          "type": "int",
+          "default": 10,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "윈도우 내 SIP 파싱 실패 건수가 도달하면 minor (최다 소스 IP 동반). 0 = 미사용."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "xcap",
       "title": "XCAP / CSC 연동 (UE↔CSC)",
       "description": "MCPTT 단말이 그룹문서/사용자 프로파일/서비스 설정을 취득하는 CSC XCAP(MCPTT) 서버. CSP 는 xcap-diff NOTIFY 의 xcap-root URL 로 이 주소를 광고한다.",

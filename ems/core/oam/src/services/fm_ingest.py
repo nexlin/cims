@@ -30,7 +30,8 @@ import time
 from collections import OrderedDict
 from datetime import datetime
 
-_MAX_DGRAM = 4096          # envelope v2 §1.2 — 데이터그램 최대 4KB
+_MAX_DGRAM = 65535         # FM 채널 상한 — FM_REGISTER 가 카탈로그 전량을 실으므로 4KB 로는
+                           # 알람 수 종부터 등록이 잘린다. 발신측(FmReporter) 송신 상한은 32KB.
 _DEDUP_MAX = 1024          # (node, trans_id) 응답 캐시 크기
 _STALE_SYNC_MISSES = 3     # sync 연속 누락 임계 — 초과 시 판정 불가 종결 (표준화 §3.4(d))
 
@@ -322,7 +323,8 @@ class FmIngest:
             a = want[akey]
             rule = cat[a['code']]
             self._transition(node, ent, rule, a['mo_instance'], True,
-                             params=a.get('params') or {})
+                             params=a.get('params') or {},
+                             severity=a.get('perceived_severity'))
         for akey in sorted(ent['akeys'] - want.keys()):
             code, mo = akey.split('@', 1)
             rule = cat.get(code)

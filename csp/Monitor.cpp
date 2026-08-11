@@ -8,6 +8,7 @@
 #include "ServerService.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
+#include "SipStatsMonitor.h"
 #include "SipTcp.h"
 #include "UserMap.h"
 
@@ -42,6 +43,8 @@ bool CMonitor::RecvRequest( const char *pszRequest, CMonitorString &strResponse 
         gclsUserAgent.GetServerString( strResponse );
     } else if ( !strcmp( pszRequest, MC_SIP_STACK_COUNT_LIST ) ) {
         gclsUserAgent.m_clsSipStack.GetString( strResponse );
+    } else if ( !strcmp( pszRequest, MC_SIP_STATS ) ) {
+        gclsSipStatsMonitor.GetString( strResponse );
     }
 #ifdef _DEBUG
     else if ( !strcmp( pszRequest, MC_STOP ) ) {
