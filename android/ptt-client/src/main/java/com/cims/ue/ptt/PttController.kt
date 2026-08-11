@@ -961,7 +961,11 @@ class PttController(
         val peers = members.map { bareId(it) }.filter { it.isNotBlank() && it != me }.distinct()
         if (peers.isEmpty()) { _status.value = "애드혹: 대상 없음"; return }
         // 사용자 단위 ad hoc 개시 인가 (프로파일) — 서버(403)가 최종 판정이나 UX 를 위해 선차단.
-        if (_userProfile.value?.allowAdhocCall == false) { _status.value = "애드혹: 개시 권한 없음"; return }
+        if (_userProfile.value?.allowAdhocCall == false) {
+            _status.value = "애드혹: 개시 권한 없음"
+            feedback?.blocked("애드혹 개시 권한이 없습니다")
+            return
+        }
         // 임시 ID = adhoc-<발신자>-<epoch초> — 가입자 번호(숫자)·편성 그룹(접두사 예약)과 충돌 불가.
         val gid = "adhoc-${me.trimStart('+')}-${System.currentTimeMillis() / 1000}"
         joinGroupCall(gid, members = peers.map { McpttXml.ResourceEntry("tel:$it") })
@@ -1592,10 +1596,17 @@ class PttController(
     private fun emergencyTargetGroup(): String? {
         val p = _userProfile.value
         if (p != null && p.emergencyGroupMode == "DedicatedGroup") {
-            return p.emergencyGroupId
-                ?: run { _status.value = "긴급: 전용 긴급그룹 미지정 — 관리자에게 문의"; null }
+            return p.emergencyGroupId ?: run {
+                _status.value = "긴급: 전용 긴급그룹 미지정 — 관리자에게 문의"
+                feedback?.blocked("긴급 불가: 전용 긴급그룹 미지정 — 관리자에게 문의")
+                null
+            }
         }
-        return _selectedGroup.value ?: run { _status.value = "긴급: 대상 그룹 없음"; null }
+        return _selectedGroup.value ?: run {
+            _status.value = "긴급: 대상 그룹 없음"
+            feedback?.blocked("긴급 불가: 대상 그룹 없음")
+            null
+        }
     }
 
     /** 미인가 긴급콜 403 (TS 24.379 §6.3.3.1.14) — 성립 전 거절된 긴급 개시를 normal 재발신으로

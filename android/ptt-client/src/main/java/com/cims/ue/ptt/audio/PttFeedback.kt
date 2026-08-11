@@ -17,7 +17,19 @@ import android.os.VibratorManager
  */
 class PttFeedback(context: Context) {
 
+    private val appContext = context.applicationContext
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     private val tone = runCatching { ToneGenerator(AudioManager.STREAM_VOICE_CALL, TONE_VOLUME) }.getOrNull()
+
+    /** 차단/불발 통지 — 거부음 + 어느 화면에서든 보이는 토스트. 상태줄 문구는 다른 상태
+     *  메시지에 금방 덮여 사실상 안 보인다(실기기 검증 확인) — 실패는 명시적으로 알린다. */
+    fun blocked(msg: String) {
+        denyTone()
+        mainHandler.post {
+            runCatching { android.widget.Toast.makeText(appContext, msg, android.widget.Toast.LENGTH_LONG).show() }
+        }
+    }
 
     private val vibrator: Vibrator? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
