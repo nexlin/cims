@@ -332,6 +332,15 @@ class PttService : Service() {
     private var activeConfig: com.cims.ue.core.config.SipAccountConfig? = null
 
     fun ensureRegistered() {
+        // 컨트롤러 생성이 check-then-act 라 스레드 경합 시 통째로 이중 생성된다 — SSO 자동설정의
+        // IO 코루틴 경로와 Activity/onStartCommand 의 메인 경로가 동시 진입하면 계정·SipController
+        // 가 2벌 뜨고, pjsip 수신(fan-out INVITE·NOTIFY)은 먼저 등록된 계정으로/UI 는 마지막
+        // 컨트롤러로 갈라져 착신 무반응·로스터 불갱신이 된다(08-11 MF52 실측: 6ms 간격 이중 계정).
+        // 메인 스레드로 직렬화해 경합을 제거한다.
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            mainHandler.post { ensureRegistered() }
+            return
+        }
         val store = ConfigStore(this)
         // 로그아웃 상태(계정 없음, 수동 모드 아님) — 캐시 설정이 남아 있어도 등록하지 않고 종료.
         // 로그아웃 브로드캐스트 유실 후 START_STICKY/키 경로 재기동의 stale 재등록 방지 안전망.
