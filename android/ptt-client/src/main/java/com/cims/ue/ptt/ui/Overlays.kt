@@ -7,6 +7,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,9 +50,9 @@ fun EmergencyBanner(e: GroupCallState, ctl: PttController?, modifier: Modifier =
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("🚨 긴급 — ${e.groupId}", color = Color.White,
+            Text("🚨 긴급 통화 — ${e.groupId}", color = Color.White,
                 fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text(if (e.emergencyMine) "내가 개시 — 상황 종료 시 해제하세요" else "긴급 상황 수신 중",
+            Text(if (e.emergencyMine) "내가 개시 — 상황 종료 시 해제하세요" else "긴급 통화 수신 중",
                 color = Color.White, fontSize = 11.sp)
         }
         if (e.emergencyMine) {
@@ -66,18 +67,20 @@ fun EmergencyBanner(e: GroupCallState, ctl: PttController?, modifier: Modifier =
 }
 
 /** 수신 긴급경보 배너 — 통화 없는 위험 통지(TS 24.379 emergency alert).
- *  발신자의 취소 MESSAGE 로 자동 해제되고, [닫기] 는 이 단말의 표시만 지운다. */
+ *  발신자의 취소 MESSAGE 로 자동 해제되고, [닫기] 는 이 단말의 표시만 지운다.
+ *  세션 긴급 배너(빨강 깜빡임·그룹 표기)와의 시각 구분: 주황 계열·📢·사람 표기. */
 @Composable
 fun AlertBanner(a: ActiveAlert, groupName: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier.fillMaxWidth().padding(vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Ct.RedDim)
+            .background(Ct.AmberDim)
+            .border(1.dp, Ct.Amber, RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("🚨 긴급경보 — ${a.userId}", color = Ct.Red,
+            Text("📢 긴급경보 — ${a.userId}", color = Ct.Amber,
                 fontSize = 14.sp, fontWeight = FontWeight.Bold)
             Text(groupName, color = Color.White, fontSize = 11.sp)
         }

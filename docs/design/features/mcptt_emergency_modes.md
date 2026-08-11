@@ -163,9 +163,9 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **수신측 세션 긴급 표시와의 정합**: 수신 단말의 in-call 긴급 표시(`session.emergency`)는
   floor TAKEN 의 emergency 비트로 latch 된다(CSP 는 상향/하향 re-INVITE 를 멤버에 전파하지
   않음 — §9). 경보 취소 수신 시 같은 그룹에 잔여 활성 경보가 없으면 이 latch 도 함께
-  해제한다(비개시자 한정). UI 는 같은 그룹의 경보 배너가 떠 있으면 세션 긴급
-  배너(`EmergencyBanner`)를 숨겨 중복 표시를 막고, 비개시자 배너에는 로컬 [닫기](표시 latch 만
-  해제)를 둔다 — 취소 MESSAGE 유실 대비 탈출구.
+  해제한다(비개시자 한정). UI 는 두 배너를 별개 신호로 **동시 표시**한다 — 경보 배너(주황·📢·
+  발신자 표기)와 세션 긴급 배너(`EmergencyBanner`, 빨강 깜빡임·🚨·그룹 표기 "긴급 통화")로 시각
+  구분. 비개시자 배너에는 로컬 [닫기](표시 latch 만 해제)를 둔다 — 취소 MESSAGE 유실 대비 탈출구.
 
 ### 4.4 상태/로깅
 

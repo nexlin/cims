@@ -257,8 +257,8 @@ private fun HomeScaffold(
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         // 긴급 상태 — 어느 탭에서든 최상단 붉은 점멸 배너. 같은 그룹의 수신 경보 배너가
         // 떠 있으면 중복 표시라 숨긴다 (SOS = 경보 + 긴급콜 동시 발신).
+        // 세션 긴급 배너 — 경보 배너와 별개 신호라 겹쳐도 둘 다 표시(시각 구분: 빨강 깜빡/주황).
         st.emergencySession
-            ?.takeIf { e -> st.alerts.none { !it.mine && it.groupId == e.groupId } }
             ?.let { e -> EmergencyBanner(e, st.ctl, Modifier.padding(horizontal = 16.dp)) }
         // 수신 긴급경보 — 통화 없는 위험 통지(발신자·그룹). 발신측 취소로 자동 해제.
         st.alerts.filterNot { it.mine }.forEach { a ->
