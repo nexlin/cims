@@ -7,6 +7,10 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
 용도는 두 가지다: ① 현행 감지 대비 **누락 알람 후보의 식별** ② 운영/NMS 연동용 알람
 사전(dictionary)의 원천.
 
+기능(IMS 역할) 관점에서 **무엇이 필요한가**의 요구 정본은
+[alarm_function_catalog.md](alarm_function_catalog.md) 가 별도로 담당한다 — 본 카탈로그는
+그 요구를 구현할 때의 감지 주체·코드 근거·구현 현황 추적 축이다.
+
 ## 1. 범위 원칙
 
 - **행의 소속 = 감지 주체.** 모듈이 **대상(mo)** 인 알람 전체 목록이 아니라, 그 모듈이
@@ -31,20 +35,19 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
 | 컬럼 | 의미 | 값 규약 |
 |---|---|---|
 | `구분` | 알람 / 이벤트 | X.733 알람 vs X.730/731/740 통지 — 표준화 §3.6 의 스트림 분리 |
-| `code` | 알람 클래스 코드(카탈로그 식별자) | `<SERVICE>-<DOMAIN>-<SEQ>` (표준화 §3.4(a)). 이벤트는 `-`(코드 없음). 전 클래스가 §2.3 체계에서 코드를 보유한다(신규 클래스는 예약 코드 — 구현 채택 시 그대로 사용) |
-| `type` | 조건 클래스 슬러그 | code 와 1:1, §2.3 의 20클래스 중 하나. 프로세스명·리소스명·임계를 넣지 않는다(표준화 §3.5) |
+| `type` | 조건 클래스 슬러그 | §2.3 의 20클래스 중 하나 — 클래스의 식별자(클래스는 코드를 갖지 않는다, 표준화 §3.4(a)). 프로세스명·리소스명·임계를 넣지 않는다(표준화 §3.5). **정의 코드**(`A-<DOMAIN>-NNN` — 사전/POD/NMS 키, 알람·이벤트 공통)는 기능 카탈로그([alarm_function_catalog.csv](alarm_function_catalog.csv))가 정본이며, 본 CSV 행이 구현 채택될 때 대응 정의 코드를 확정해 fm_catalog/rule 에 탑재한다. **구현 현행 wire 는 구 포맷 `CIMS-<DOMAIN>-<SEQ>` 클래스 코드** — 정의 코드 이행은 표준화 §3.4(a). 이벤트 행의 type 은 wire 정의 슬러그 — 성격 클래스·정의 코드 배정은 표준화 §3.6 을 따른다 |
 | `severity` | perceivedSeverity | critical/major/minor/warning/indeterminate. **이벤트는 `-`** (통지는 severity 없음) |
 | `source_system` | **발신 노드**(호스트/논리 노드) | CSV 값은 대표 배치의 노드 예시이며, 실제 값은 모듈 SystemId(= FM envelope `hdr.node`) |
 | `instance` | **발신 모듈** | CSP/CMP/CMDP/CSC/AGENT/OAM/OAM-SVC |
 | `index` | 해당 노드 내 발신 모듈의 인스턴스 번호 | 통상 `1`. 한 노드에 같은 모듈을 다중 기동하는 배치에서만 2 이상 |
 | `대상` | 알람이 가리키는 **외부 의존 객체의 인스턴스** | 아래 "대상 표기 규칙" 참조. 해당 객체가 없으면 **비움** |
-| `component` | mo_instance 의 **component 세그먼트** — 활성키 구분자 | 아래 §2.2 참조. 같은 (code, 모듈, 대상) 조합의 행이 여럿이면 **반드시 서로 달라야** 활성키가 충돌하지 않는다. `<ep>`·`<gid>` 등 꺾쇠는 런타임 인스턴스 치환 |
+| `component` | mo_instance 의 **component 세그먼트** — 활성키 구분자 | 아래 §2.2 참조. 같은 (type, 모듈, 대상) 조합의 행이 여럿이면 **반드시 서로 달라야** 활성키가 충돌하지 않는다. `<ep>`·`<gid>` 등 꺾쇠는 런타임 인스턴스 치환 |
 | `알람/이벤트 내용` | specificProblem — 무엇이 발생했는지 | 괄호 안은 메시지에 실릴 파라미터(`params` 치환값) |
 | `현재 구현 여부` | `구현` / `후보` / `후보(선행 필요)` | `후보(선행 필요)` = 감지 코드나 전이 지점 자체가 없어 **선행 구현 없이는 알람화 불가** |
 | `감지 방식 설명` | 어떤 관측으로 open/close 를 판정하는가 | 주기·임계·연속 실패 횟수 + 코드 위치(`파일:라인`). 이벤트는 `kind=stateChange\|audit` 를 앞에 표기 |
 
-같은 조건이면 기존 code 를 재사용하고 객체만 `대상`/`component` 로 구분하는 것이
-원칙이다(표준화 §3.5) — 그래서 "CMP 두절"과 "DB 두절"이 같은 `CIMS-COM-001` 로 나타난다.
+같은 조건이면 기존 클래스(type)를 재사용하고 객체만 `대상`/`component` 로 구분하는 것이
+원칙이다(표준화 §3.5) — 그래서 "CMP 두절"과 "DB 두절"이 같은 `connection_lost` 로 나타난다.
 
 ### 2.1 대상 표기 규칙 (★)
 
@@ -65,14 +68,16 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
 
 ### 2.2 component 컬럼 (★)
 
-활성 알람 식별키는 `(code, mo_instance)` 다. 같은 code 를 여러 내부 조건에 재사용하면
-(PRC-002 "쓰기 실패" 가 로그·CDR·녹취·스토어에 두루 쓰이듯) **component 세그먼트가 없을 때
-활성키가 충돌**한다 — 이를 CSV 차원에서 강제하기 위해 `component` 컬럼을 둔다.
+활성 알람 식별키는 `(정의 코드, mo_instance)` 다. 같은 클래스를 여러 내부 조건에 재사용하면
+(`storage_failure` "쓰기 실패" 가 로그·CDR·녹취·스토어에 두루 쓰이듯) **component 세그먼트가
+없을 때 mo 가 겹친다** — 행(=정의 후보)의 구분과 활성키 분리를 CSV 차원에서 강제하기 위해
+`component` 컬럼을 둔다.
 
 - 값은 mo_instance 의 마지막 세그먼트(들): `service_log`, `call_dir`, `db/query`,
   `cmp/<ep>`, `group_ctx/<gid>` 등. `<...>` 는 런타임 인스턴스 치환(개별 발화)을 뜻한다.
-- **불변식**: `구분=알람` 이고 code 가 같은 행들은 (모듈, 대상, component) 조합이 서로 달라야
-  한다. 유일한 의도적 예외는 CMDP `PRC-002 @ fd_store` 2행 — 트래픽 구동 감지(저장 실패)와
+- **불변식**: `구분=알람` 이고 type 이 같은 행들은 (모듈, 대상, component) 조합이 서로 달라야
+  한다 — 행이 곧 서로 다른 정의(코드 후보)임을 보장한다. 유일한 의도적 예외는 CMDP
+  `storage_failure @ fd_store` 2행 — 트래픽 구동 감지(저장 실패)와
   주기 probe(접근 불가)가 **같은 활성 알람의 상보 감지 경로**라 활성키를 공유한다(probe 가
   close 정본).
 - 대상(외부 객체)과 component 는 공존할 수 있다: `대상=DB, component=db/query` →
@@ -88,44 +93,46 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 
 **COM (communications) — 외부와의 소통**
 
-| code | type | 정의 (open 조건의 성격) | 대표 조건 |
-|---|---|---|---|
-| `CIMS-COM-001` | `connection_lost` | 피어/의존 시스템과의 **연결·keepalive·heartbeat·probe 두절** | DB 두절, CMP/CMDP/CSP 두절, Redis, 트렁크 peer, agent heartbeat 두절, FM_SYNC 두절, 외부 시스템 도달 불가 |
-| `CIMS-COM-002` | `delivery_failed` | 연결/채널은 있는데 **전달·통지·작업이 지속 실패·적체** | 이벤트 ack 소진, pending_events 적체, notify 미도달, floor 메시지 송수신 실패, job report 적체, 배포 job 적체 |
+| type | 정의 (open 조건의 성격) | 대표 조건 |
+|---|---|---|
+| `connection_lost` | 피어/의존 시스템과의 **연결·keepalive·heartbeat·probe 두절** | DB 두절, CMP/CMDP/CSP 두절, Redis, 트렁크 peer, agent heartbeat 두절, FM_SYNC 두절, 외부 시스템 도달 불가 |
+| `delivery_failed` | 연결/채널은 있는데 **전달·통지·작업이 지속 실패·적체** | 이벤트 ack 소진, pending_events 적체, notify 미도달, floor 메시지 송수신 실패, job report 적체, 배포 job 적체 |
 
 **QOS (qualityOfService) — 용량/자원**
 
-| code | type | 정의 | 대표 조건 |
-|---|---|---|---|
-| `CIMS-QOS-001` | `threshold_crossed` | 수치 지표의 **단계 임계 초과** (승격/완화 = change) | disk/cpu/mem/load/NIC/RTP 사용률, 모듈별 CPU·RSS, FD 파티션 |
-| `CIMS-QOS-002` | `resource_exhausted` | 자원 **고갈·포화로 신규 수용 불가** | 풀 완전 고갈, 연결 상한, fd 고갈, 로그 큐 포화, endpoint 포화, 발언 슬롯 초과 |
-| `CIMS-QOS-003` | `capacity_degraded` | **설정 대비 실효 용량 미달** (시스템이 갖춰야 할 용량을 못 갖춤) | 풀 부분/전량 bind 실패, epoll 미등록 소켓 잔류 |
-| `CIMS-QOS-004` | `resource_leak` | **회수 실패로 자원이 점진 누적·증식** | orphan/idle 회수 지속, PTT 그룹 미회수, 연결 누수, IdMS 스토어 무한 증식 |
-| `CIMS-QOS-005` | `overload` | **과부하 방어(차단/강등) 발동** | 제어평면 신규 요청 차단 |
+| type | 정의 | 대표 조건 |
+|---|---|---|
+| `threshold_crossed` | 수치 지표의 **단계 임계 초과** (승격/완화 = change) | disk/cpu/mem/load/NIC/RTP 사용률, 모듈별 CPU·RSS, FD 파티션 |
+| `resource_exhausted` | 자원 **고갈·포화로 신규 수용 불가** | 풀 완전 고갈, 연결 상한, fd 고갈, 로그 큐 포화, endpoint 포화, 발언 슬롯 초과 |
+| `capacity_degraded` | **설정 대비 실효 용량 미달** (시스템이 갖춰야 할 용량을 못 갖춤) | 풀 부분/전량 bind 실패, epoll 미등록 소켓 잔류 |
+| `resource_leak` | **회수 실패로 자원이 점진 누적·증식** | orphan/idle 회수 지속, PTT 그룹 미회수, 연결 누수, IdMS 스토어 무한 증식 |
+| `overload` | **과부하 방어(차단/강등) 발동** | 제어평면 신규 요청 차단 |
 
 **PRC (processingError) — 실행·저장·정합·이중화·관측**
 
-| code | type | 정의 | 대표 조건 |
-|---|---|---|---|
-| `CIMS-PRC-001` | `process_down` | 프로세스 소멸 (L1 — agent 관측) | 모듈 프로세스 사망 |
-| `CIMS-PRC-004` | `service_unresponsive` | 프로세스 생존인데 **서비스 응답 불능** (L3 원격 probe + 노드 로컬 readiness) | STATS 무응답, gateway upstream 무응답, 모듈 zombie |
-| `CIMS-PRC-005` | `worker_unavailable` | 프로세스 내부 **실행 단위·서브시스템 정지** (스레드/리액터/타이머/스위퍼/엔진) | RTP 리액터·제어 루프·MSRP 리액터 사망, 스위퍼 연속 실패, probe 스레드 사망, provision 엔진 불능 |
-| `CIMS-PRC-007` | `crash_loop` | **재기동/기동 반복 실패** (불안정 지속) | restart 소진, 한 번도 못 뜨는 start 반복 실패 |
-| `CIMS-PRC-006` | `listener_unavailable` | **자기 수신 접속점 불능** (listen 포트·소켓·수신 채널 개설 실패/상실) | SIP/HTTP 리스너, 제어 소켓, CSC 연동 포트, Monitor 포트, FM ingest |
-| `CIMS-PRC-002` | `storage_failure` | **영속 저장소 읽기/쓰기/접근 실패** (파일·DB·스토어 — 유실/기능 정지) | 로그/CDR/녹취/상태파일 쓰기 실패, FD·IdMS·파일 스토어, DB 쿼리/적재 실패, 공유 store(NAS) 접근 불가, 알람 스트림 자기 기록 |
-| `CIMS-PRC-008` | `config_invalid` | **설정 자체의 결함·미설정·무결성 위반**으로 기능 비활성/오동작 | 참조 무결성, 컬렉션 소실, 타이머 0, 시크릿 미설정, Data 게이트, 스키마 드리프트, TLS 비활성 |
-| `CIMS-PRC-003` | `config_out_of_sync` | **기대(배포 기록·정본·버전) vs 실제의 불일치** | config drift, HA fan-out drift, sync_txn 전파 실패, 버전 deferred, managed IP/route 소실, fleet misdirect |
-| `CIMS-PRC-009` | `state_out_of_sync` | 컴포넌트 간 **런타임 상태 정합 실패** | CSP↔CMP 세션집합 불일치, 그룹 컨텍스트 재수립 실패, 알람 open-state 복원 불일치 |
-| `CIMS-PRC-010` | `redundancy_degraded` | **이중화 실질 소실·승격 불가·절체 메커니즘 이상** | 절체 래치, 승격 부적격, keepalived 미설치/비활성/얼림, VIP 무보유/이중보유, ha_excluded, store 소유권 리스 상실 |
-| `CIMS-PRC-011` | `dependency_unavailable` | **필수 실행 의존물 부재** (도구/패키지/권한/플랫폼 기능) | cims-svc/priv 미발견, sudo 미등록, base deps, NAS flock 미제공 |
-| `CIMS-PRC-012` | `observability_lost` | **관측·자기보고 파이프라인의 공백·오염·무력화** (통신 두절 제외) | metric blackout, ip -j 빈 배열 위장, 카탈로그 무력화(UNKNOWN_CODE), 관측 대상 공백, 스위퍼 비활성 |
-| `CIMS-PRC-013` | `cert_expiring` | **인증서 수명 위험** (만료 임박·회전 실패) | agent mTLS 만료 임박, 회전 실패 |
+| type | 정의 | 대표 조건 |
+|---|---|---|
+| `process_down` | 프로세스 소멸 (L1 — agent 관측) | 모듈 프로세스 사망 |
+| `service_unresponsive` | 프로세스 생존인데 **서비스 응답 불능** (L3 원격 probe + 노드 로컬 readiness) | STATS 무응답, gateway upstream 무응답, 모듈 zombie |
+| `worker_unavailable` | 프로세스 내부 **실행 단위·서브시스템 정지** (스레드/리액터/타이머/스위퍼/엔진) | RTP 리액터·제어 루프·MSRP 리액터 사망, 스위퍼 연속 실패, probe 스레드 사망, provision 엔진 불능 |
+| `crash_loop` | **재기동/기동 반복 실패** (불안정 지속) | restart 소진, 한 번도 못 뜨는 start 반복 실패 |
+| `listener_unavailable` | **자기 수신 접속점 불능** (listen 포트·소켓·수신 채널 개설 실패/상실) | SIP/HTTP 리스너, 제어 소켓, CSC 연동 포트, Monitor 포트, FM ingest |
+| `storage_failure` | **영속 저장소 읽기/쓰기/접근 실패** (파일·DB·스토어 — 유실/기능 정지) | 로그/CDR/녹취/상태파일 쓰기 실패, FD·IdMS·파일 스토어, DB 쿼리/적재 실패, 공유 store(NAS) 접근 불가, 알람 스트림 자기 기록 |
+| `config_invalid` | **설정 자체의 결함·미설정·무결성 위반**으로 기능 비활성/오동작 | 참조 무결성, 컬렉션 소실, 타이머 0, 시크릿 미설정, Data 게이트, 스키마 드리프트, TLS 비활성 |
+| `config_out_of_sync` | **기대(배포 기록·정본·버전) vs 실제의 불일치** | config drift, HA fan-out drift, sync_txn 전파 실패, 버전 deferred, managed IP/route 소실, fleet misdirect |
+| `state_out_of_sync` | 컴포넌트 간 **런타임 상태 정합 실패** | CSP↔CMP 세션집합 불일치, 그룹 컨텍스트 재수립 실패, 알람 open-state 복원 불일치 |
+| `redundancy_degraded` | **이중화 실질 소실·승격 불가·절체 메커니즘 이상** | 절체 래치, 승격 부적격, keepalived 미설치/비활성/얼림, VIP 무보유/이중보유, ha_excluded, store 소유권 리스 상실 |
+| `dependency_unavailable` | **필수 실행 의존물 부재** (도구/패키지/권한/플랫폼 기능) | cims-svc/priv 미발견, sudo 미등록, base deps, NAS flock 미제공 |
+| `observability_lost` | **관측·자기보고 파이프라인의 공백·오염·무력화** (통신 두절 제외) | metric blackout, ip -j 빈 배열 위장, 카탈로그 무력화(UNKNOWN_CODE), 관측 대상 공백, 스위퍼 비활성 |
+| `cert_expiring` | **인증서 수명 위험** (만료 임박·회전 실패) | agent mTLS 만료 임박, 회전 실패 |
 
-- **기존 구현 코드와의 관계**: COM-001·QOS-001·QOS-002·PRC-001·PRC-003·PRC-004 는 기존
-  그대로. `CIMS-PRC-002` 는 type 을 `resource_failure`→**`storage_failure`** 로 개명한다
-  (code 유지 — 정의를 "영속 저장소 실패"로 좁힌 것. 모듈 fm_catalog.json 의 type 문자열과
-  descriptor 는 채택 시점에 함께 이행). 나머지(COM-002, QOS-003~005, PRC-005~013)는 본
-  체계에서 **예약**한 신규 코드다 — 구현 채택 시 그대로 쓰고 표준화 §3.3 매핑 표에 편입한다.
+- **기존 구현 코드와의 관계**: 구현 현행 wire 는 구 포맷 클래스 단위 코드
+  `CIMS-<DOMAIN>-<SEQ>` 7종(COM-001·QOS-001·QOS-002·PRC-001·PRC-002·PRC-003·PRC-004)을
+  쓴다 — flat **정의 코드**(`A-<DOMAIN>-NNN`, 기능 카탈로그 정본) 이행이 채택 시
+  동반된다(§3.4(a) `_CODE_REVISIONS` — 각 클래스의 대표 정의가 구 번호를 승계).
+  `storage_failure` 는 구 type `resource_failure` 의 개명(정의를 "영속 저장소 실패"로 좁힌
+  것 — 모듈 fm_catalog.json 의 type 문자열과 descriptor 는 채택 시점에 함께 이행). 나머지
+  클래스는 본 체계에서 신설한 것이다 — 구현 채택 시 표준화 §3.3 매핑 표에 편입한다.
 - **경계 규칙** (혼동 잦은 쌍):
   - `connection_lost` vs `delivery_failed`: 연결/생존 신호 자체가 끊기면 전자, 채널은
     살아 있는데 그 위의 전달이 실패·적체하면 후자.
@@ -155,8 +162,9 @@ cims / <instance> / <source_system> / <대상-키>[/<component>]  ← 대상 있
       cims/csp/SIG_SVR_01                          ← 이벤트 등 component 도 비움
 ```
 
-- 활성 알람 식별키는 `(code, mo_instance)` 다. 같은 code 를 여러 조건에 재사용하는 행들은
-  `component` 컬럼(§2.2)이 활성키를 분리한다 — 컬럼 불변식 위반 = 활성키 충돌.
+- 활성 알람 식별키는 `(정의 코드, mo_instance)` 다. 같은 클래스(type)를 여러 조건에
+  재사용하는 행들은 `component` 컬럼(§2.2)이 행과 활성키를 분리한다 — 컬럼 불변식 위반 =
+  활성키 충돌.
 - 노드 분리를 빠뜨리면 HA 다중 인스턴스에서 활성키가 충돌한다 (cmp 변종 pmp/imp 의
   SystemId overlay 필수 사유와 동일).
 - **AGENT/OAM 행의 mo 는 위 규칙이 아니라 sweeper 합성 규칙을 따른다** — agent 계열
@@ -172,7 +180,8 @@ cims / <instance> / <source_system> / <대상-키>[/<component>]  ← 대상 있
 - UTF-8, 헤더 1행. 쉼표를 포함하는 필드는 `"..."` 로 인용한다(엑셀/`csv` 모듈 호환).
 - 한 조건 = 한 행. 같은 조건의 객체 확장(endpoint·리스너 다수)은 행을 늘리지 않는다(§2.1).
 - 구현 상태(`현재 구현 여부`)는 코드 정본과 함께 갱신한다 — 후보가 구현되면 `구현` 으로
-  바꾸고 `code`/`severity` 를 확정값으로 채운다. 카탈로그 선언(`fm_catalog.json`)과 CSV 의
+  바꾸고 `severity` 를 확정값으로 채우며, 대응 **정의 코드**를 기능 카탈로그에서 확정해
+  fm_catalog/rule 에 탑재한다(§2 type 컬럼 규약). 카탈로그 선언(`fm_catalog.json`)과 CSV 의
   `구현` 행은 항상 일치해야 한다. 현행 유일 예외: CSC `config_change` — 카탈로그에
   선언됐으나 호출자 0건이라 CSV 는 `후보`(행에 예외 명시, §5.4).
 
@@ -193,21 +202,22 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 모듈별로 �
   승격 부적격 = AGENT 노드 자격/OAM 그룹 제외 모두 `redundancy_degraded`). 자기 listen
   포트 개설 실패는 connection 이 아니라 `listener_unavailable`, 단계 용량 임계는 감지
   주체가 self 여도 `threshold_crossed` 다.
-- **로그 계열 공통 3축**: 쓰기 실패(PRC-002 `service_log`) / 큐 포화·drop
-  (QOS-002 `log_queue` — fopen 성공인데 소비가 못 따라가는 축, 쓰기 실패 알람이 안 열리는
-  사각) / 설정 미설정(config_invalid) — 4개 모듈(csp/cmp/cmdp/csc)이 동형 구조라 CSV 도
-  같은 3분할을 쓴다.
+- **로그 계열 공통 3축**: 쓰기 실패(storage_failure `service_log`) / 큐 포화·drop
+  (resource_exhausted `log_queue` — fopen 성공인데 소비가 못 따라가는 축, 쓰기 실패 알람이
+  안 열리는 사각) / 설정 미설정(config_invalid) — 4개 모듈(csp/cmp/cmdp/csc)이 동형 구조라
+  CSV 도 같은 3분할을 쓴다.
 
 ### 5.1 CSP
 
-**현행**: 알람 1종(COM-001 DB 두절) + 이벤트 2종(process_started/stopping). fm_catalog.json
-선언과 구현이 일치한다.
+**현행**: 알람 1종(connection_lost — DB 두절) + 이벤트 2종(process_started/stopping).
+fm_catalog.json 선언과 구현이 일치한다.
 
 **자기보고 대상이 아닌 것 (경계 확정)**
 - **SIP 수신 소켓 버퍼 overflow / 스레드풀 포화**: 프로세스 내부 관측 지점이 없다(커널·psip
   영역) — host metric(agent) 소관.
-- **세션/트랜잭션/nonce/구독 맵 포화**: 상한·포화 분기가 없고 시간 기반 청소만 있다 — 크기
-  임계를 신설하기 전까지 알람화 불가.
+- **nonce/구독 맵 포화**: 상한·포화 분기가 없고 시간 기반 청소만 있다 — 크기 임계를
+  신설하기 전까지 알람화 불가. 세션/다이얼로그 축은 기능 카탈로그(CSCF `sessions`·`dialogs`)
+  요구로 승격 — 분자(`CallMap::GetCount`)는 기성, 상한 설정 신설이 선행(표준화 §7.2.1 A0059).
 - **TLS 인증서 만료 예고**: 모듈·스택에 X509 notAfter 검사가 없다. 파일 기준 검사는
   agent/OAM 경로가 적절(리스너 개설 실패는 별개로 CSV 에 있음).
 - **CMP/CMDP 요청 단건 타임아웃**, per-call 실패, 파싱 실패: 일회성 → 알람 부적합. 부하
@@ -226,7 +236,7 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 모듈별로 �
 4. CDR/flow 로그 쓰기 실패 전 지점 silent + `m_ulDroppedLogs` 카운터 소비자 0. CDR 은 공용
    쓰기 헬퍼가 없어 append `fopen` 11개 지점 개별 산재(CSV `call_dir` 행) — 실패 카운터
    신설 = 12곳 통합.
-5. fm_catalog.json 의 COM-001 `effect` 가 "파일 fallback 범위로 축소"라고 서술하나, 런타임
+5. fm_catalog.json 의 connection_lost(DB) `effect` 가 "파일 fallback 범위로 축소"라고 서술하나, 런타임
    fallback 전환이 실제로 없다(기동 시 1회 평가) — 문구 정정 또는 전환 구현 중 하나가 필요.
 6. route `max_concurrent_calls`/`cps_limit` 가 파싱만 되고 사용처 없음
    (`CspRouteMap.cpp:51-52`) — 과부하 알람의 선행 조건과 연관.
@@ -238,18 +248,33 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 모듈별로 �
 9. jsonl 파일 부재를 "정상 빈 배열"로 취급(`CspConfigCache.cpp:75-85`) + 런타임 reload 에
    sanity 게이트 없음 — 오배포 한 번에 listeners/routes 전량 소거 가능(CSV
    `config/collections` 행).
+10. **STATS `active_calls` 가 DB 연결 시 상시 0** — `GetActiveVoipCallCount()` 가 `return 0`
+    스텁(`DbManager.cpp:658-660`)인데 `CscInterface.cpp:226-231` 이 DB 연결 시 이 값을 사용
+    (미연결 시에만 `CallMap::GetCount()`). OAM 은 call.json 스캔으로 덮어써(`stats.py:642-646`)
+    콘솔에선 안 보이는 결함 — 세션 사용률 알람(기능 카탈로그 CSCF `sessions`)의 선수정.
+11. **CMsgLogger 는 CSP 내 죽은 코드** — `gclsMsgLogger` 호출자가 csp/ 안에 0건(인스턴스
+    정의만, 실사용은 재설계 예정인 cwrtc 뿐). 구 CSV 의 msg_log 쓰기 실패 행은 이 사유로
+    제거(발생 불가 조건).
+12. `LogSecurity()`/security.jsonl 이 dead code(`SipMessageLogger.cpp:81-103` — 호출처 0) +
+    toll-fraud 603 은 `SuppressNetworkSource` 로 flow/msg 의도적 억제(`ModuleDispatcher.cpp:
+    284-301`) — 보안 관측이 텍스트 로그 요약 1줄뿐(기능 카탈로그 security_violation 의 관측 공백).
+13. **Max-Forwards 검사 부재** — 수신 검사·483 응답 없음(`SIP_TOO_MANY_HOPS` 사용처 0) +
+    송신 시 부재면 무조건 70 세팅(`SipStackComm.hpp:581-583`) — 루프 방지 무력화(규격 결함).
+14. **로컬 합성 응답(트랜잭션 타임아웃 408)은 flow 에 절대 남지 않는다** — Timer B/C 만료 시
+    psip 이 합성해 자기주입(`SipICTList.cpp:190-231`), 와이어 미송신. 거절 사유의 flow
+    `detail` 코드화·호 카운터 설계 시 반드시 포함(표준화 §7.2.2 채용 2건).
 
 **구현 우선순위** (훅 비용 대비 가치)
 
 | 순위 | 항목 | 근거 |
 |---|---|---|
-| 1 | CMP endpoint 두절 + **포화** (COM-001·QOS-002 `cmp/<ep>`) | 두 전이 훅이 같은 함수에 기성(bLive/bSaturated) — 배선 각 2줄 |
+| 1 | CMP endpoint 두절 + **포화** (connection_lost·resource_exhausted `cmp/<ep>`) | 두 전이 훅이 같은 함수에 기성(bLive/bSaturated) — 배선 각 2줄 |
 | 2 | CMP/CMDP 제어 소켓 개설 실패 (`cmp_ctrl`/`cmdp_ctrl`) | 1순위·4순위의 판정 루프 존재 자체를 보장하는 전제 |
-| 3 | service_log/msg_log/CDR/상태파일 쓰기 실패 (PRC-002 component 4행) | 현재 완전 silent, 과금·이력 유실 |
-| 4 | CMDP 두절 (COM-001) | 콜백 배선 1곳 |
+| 3 | service_log/CDR/상태파일 쓰기 실패 (storage_failure component 3행) | 현재 완전 silent, 호 이력 유실 |
+| 4 | CMDP 두절 (connection_lost) | 콜백 배선 1곳 |
 | 5 | 리스너 개설/제거 실패 (listener_unavailable) | TLS 포함 접속점 상실 + 유령 리스너, reload 재평가로 전이 자연 |
 | 6 | CSC 연동 bind 실패 (listener_unavailable `csc_if`) | 결함 3 수정 동반 |
-| 7 | DB 쿼리 지속 실패·재적재 실패 (PRC-002 `db/*`) | COM-001 이 못 잡는 구간 |
+| 7 | DB 쿼리 지속 실패·재적재 실패 (storage_failure `db/*`) | connection_lost 가 못 잡는 구간 |
 | 8 | 설정 무결성 위반 + 컬렉션 0건 전이 (config_invalid) | 산재 지점 1클래스 통합 + 오배포 방어 |
 | 9 | 세션 정합 불일치·그룹 컨텍스트 재수립 실패 | 훅 기성(digest 대조·60s 재평가) — 무성 장애 관측 |
 | 10 | 워커 스레드 watchdog (worker_unavailable) | L1/L3 공통 사각 — 스레드별 lastTick 신설 |
@@ -257,11 +282,11 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 모듈별로 �
 
 ### 5.2 CMP
 
-**현행**: 알람 1종(QOS-002 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member 풀별) + 이벤트 2종.
+**현행**: 알람 1종(resource_exhausted — 자원 풀 완전 고갈, rtp/ptt_floor/ptt_member 풀별) + 이벤트 2종.
 
 **자기보고 대상이 아닌 것**: 코덱/믹서 이상(CMP 는 투명 relay — 코덱·믹싱 코드 자체가 없음,
 PT 는 헤더 1바이트 스탬프), HA 역할 전이(All-Active — keepalived/standby 코드 없음, 절체
-관측은 CSP CmpClient 소관), 사용률 단계 임계(OAM sweeper QOS-001 역할 분담), floor 타이머
+관측은 CSP CmpClient 소관), 사용률 단계 임계(OAM sweeper threshold_crossed 역할 분담), floor 타이머
 만료·대기열 Deny(정상 규격 동작), 디스크 여유(agent 소관).
 `config_reloaded` 이벤트도 N/A — **런타임 설정 재적재 경로 자체가 없다**(SIGHUP/SIGUSR1
 핸들러 없음, 전 필드 restart 요구).
@@ -272,8 +297,8 @@ PT 는 헤더 1바이트 스탬프), HA 역할 전이(All-Active — keepalived/
    `ServiceLogging.*`/`SystemId`/`Fm.*` 는 원본을 재파싱(`:1692-1697` `root2`) — 배포본
    config.json 의 해당 키가 **전부 무시**된다. `Fm.Enable/OamIp` 무시 시 자기보고 자체가
    켜지지 않는다(카탈로그 전체의 전제 붕괴 — 최우선 수정).
-2. QOS-002 의 relay 분모가 설정값(`_rtpPoolSize`, `:168`)이라 실측 풀과 불일치 — 전량 bind
-   실패에도 rtp_pool 은 QOS-002 가 열린다(capacity_degraded 상황의 오분류). `total<=0`
+2. resource_exhausted 의 relay 분모가 설정값(`_rtpPoolSize`, `:168`)이라 실측 풀과 불일치 —
+   전량 bind 실패에도 rtp_pool 은 resource_exhausted 가 열린다(capacity_degraded 상황의 오분류). `total<=0`
    판정 제외(`:180`) 사각은 실측 크기를 쓰는 **ptt 2풀 한정**. params 는 항상
    `used=total`(`:184-185`)로 렌더.
 3. `writeMsgLine` 에만 `_serviceLogDir` 빈값 가드 누락(`:2171` — `logFlow` `:2206` 은 있음)
@@ -292,15 +317,15 @@ PT 는 헤더 1바이트 스탬프), HA 역할 전이(All-Active — keepalived/
 
 **우선순위**: ⓪결함 1(overlay — 자기보고 전제) ①`SessionTimeout<=0` 판정
 (config_invalid `config/timers` — floor·sweeper·재전송 전체 정지) ②풀 부분 bind 실패
-(capacity_degraded) + epoll 잔류 ③flow/msg 쓰기 실패 + log_queue 분리(PRC-002·QOS-002)
-④녹취 쓰기/인덱스 실패(PRC-002 — self_reporting §9 후보 그대로) ⑤리액터·제어 스레드 사망
+(capacity_degraded) + epoll 잔류 ③flow/msg 쓰기 실패 + log_queue 분리(storage_failure·resource_exhausted)
+④녹취 쓰기/인덱스 실패(storage_failure — self_reporting §9 후보 그대로) ⑤리액터·제어 스레드 사망
 (worker_unavailable ×2) ⑥CSP 이벤트 적체(`csp/events` — pending_events 기성 카운터,
 무수신 행은 선행 필요) ⑦sweeper 회수 지속·PTT 그룹 미회수(resource_leak ×2)
 ⑧floor SRTCP tx/rx(그룹 단위 — 카운터 일부 기성).
 
 ### 5.3 CMDP
 
-**현행**: 알람 1종(PRC-002 FD 스토어 저장 실패) + 이벤트 2종. 현행 PRC-002 의 한계 3건이
+**현행**: 알람 1종(storage_failure — FD 스토어 저장 실패) + 이벤트 2종. 현행 구현의 한계 3건이
 핵심 — **트래픽 구동 판정**(무트래픽 구간 미탐·stale), **write 결과 미검사**(ENOSPC 시
 meta 만 성공해 `Store()` true → **close 오발화**, `PFdStore.cpp:71-83`), **params 미탑재**
 (errno/path — `AlarmOpen` params 오버로드 기성인데 미사용).
@@ -325,17 +350,17 @@ MsrpWorkerCount 사실상 무효(`:589,593,789` — 리액터 사망 판정은 �
 ⑧`kMaxConnections` 하드코딩(`:31`)·accept4 실패 카운터 없음(`:570-576`)
 ⑨SIGTERM 만 등록 + 등록이 startServer 이후(`PMain.cpp:31→:37`).
 
-**우선순위**: ①제어 무수신 타이머(COM-001 `csp` — CSP 가 3s HEARTBEAT 를 보내오므로
+**우선순위**: ①제어 무수신 타이머(connection_lost `csp` — CSP 가 3s HEARTBEAT 를 보내오므로
 `_lastCtrlRxAt` 1줄 + timeoutLoop 평가로 성립, 무트래픽 커버·최저 비용.
 `csp_control_peer_changed` 이벤트가 같은 훅에서 무료) ②리액터 사망(worker/msrp — 결함
-④의 무로그 skip 분기 포함) ③서비스 로그 쓰기 실패 + log_queue(PRC-002·QOS-002)
-④CSP ack 소진(COM-001 `csp/events` — 트래픽 구동 축) ⑤스토어 무트래픽 probe + ENOSPC
-결함 수정 ⑥스토어 용량 임계(QOS-001 — NAS 라 host metric 미커버) ⑦연결 누수(idle 회수
-신설 — 연결 포화 행의 선행) ⑧MSRP 연결 포화·fd 고갈(QOS-002 ×2).
+④의 무로그 skip 분기 포함) ③서비스 로그 쓰기 실패 + log_queue(storage_failure·resource_exhausted)
+④CSP ack 소진(delivery_failed `csp/events` — 트래픽 구동 축) ⑤스토어 무트래픽 probe + ENOSPC
+결함 수정 ⑥스토어 용량 임계(threshold_crossed — NAS 라 host metric 미커버) ⑦연결 누수(idle 회수
+신설 — 연결 포화 행의 선행) ⑧MSRP 연결 포화·fd 고갈(resource_exhausted ×2).
 
 ### 5.4 CSC
 
-**현행**: 알람 1종(COM-001 DB probe) + 이벤트 3종 — 단 `config_change` 는 **선언만 있고
+**현행**: 알람 1종(connection_lost — DB probe) + 이벤트 3종 — 단 `config_change` 는 **선언만 있고
 호출자 0건**(영구 미발화 — CSV 는 `후보` 로 분류하고 행에 예외임을 명시. "카탈로그 선언과
 CSV `구현` 행 일치" 규약(§4)의 현행 유일 예외). 원인: csp 런타임 설정 CUD 가 OAM 으로
 이관돼 잔재만 남음. 배선처는 CSC 가 실제 소유한 CUD(가입자/그룹/조직 — admin 13 + org 5
@@ -361,11 +386,11 @@ CLI 는 ImportError 로 실행 불가·runtime_root CWD 폴백으로 엉뚱한 �
 ⑥`KMS_MASTER_SECRET` 설정 항목 자체가 없어 재기동마다 랜덤(설정 교정 불가 — 코드 수정
 선행) ⑦admin CUD 가 in-memory USERS/GROUPS 미갱신·GMS PUT 이 DB 미반영(재기동 시 소실) —
 주기 재적재가 장애 대응 겸 정합 수단 ⑧`_get_db` 2곳 산재 ⑨DB probe 의 `import pymysql`
-이 run() 내부 — vendor 누락 시 스레드 즉사·COM-001 영구 무알람 + Host 빈값 전환 시 open
+이 run() 내부 — vendor 누락 시 스레드 즉사·connection_lost 영구 무알람 + Host 빈값 전환 시 open
 고착 ⑩`/api/v1/users/me` 는 handlers/users.py 부재로 항상 ImportError 500 ⑪죽은 코드
 다수(config_cache/notify_config_change/HttpClient/ha_lookup).
 
-**우선순위**: ①HTTP 리스너 사망(listener_unavailable) ②CSP/PSP notify 미도달(COM-001 —
+**우선순위**: ①HTTP 리스너 사망(listener_unavailable) ②CSP/PSP notify 미도달(delivery_failed —
 무성 장애, open 훅 기성·close 는 CSC 측 응답 소비 경로 신설 필요) ③`config/data`·
 `config/auth`·`config/logging`(config_invalid 3행 — ②의 원인 축이기도 함) ④service_log
 쓰기 실패 + log_queue ⑤DB 쿼리 지속 실패·스키마 드리프트 ⑥IdMS 스토어 쓰기 실패 + 무한
@@ -406,7 +431,7 @@ vIBCF/TrGW POD 대조(표준화 §7.2)를 근거로 **후보(선행 필요)** �
 in-memory — agent 재기동 후 첫 tick·2s 창 내 죽었다 살면 유실 ⑨`_fail_bump` 는 `was_up`
 전제 — 한 번도 뜬 적 없는 모듈의 start 반복 실패는 crash_loop 미카운트(CSV `start` 행 분리
 사유) ⑩latch heartbeat 에 `latched` bool 만 — `latched_at`/사유 미전달(알람 메시지 재료
-부족) ⑪module config.json 파싱 실패 시 hash 보고 생략 — 깨진 설정이 PRC-003 무알람 통과
+부족) ⑪module config.json 파싱 실패 시 hash 보고 생략 — 깨진 설정이 config_out_of_sync 무알람 통과
 ⑫maintenance(EXCLUDE_NODE) 파일은 TTL 없음(planned_release 만 180s 자가치유) — 해제 망각이
 영구 부적격.
 
@@ -425,7 +450,7 @@ oam-svc 는 별도 감지 로직이 없다 — base 코어(`alarm_sweeper`)를 �
    재정의(메시지 분리).
 2. **리스 상실/획득 실패**: read-only 강등 + **base sweeper 10종 전부 정지**가 로그로만
    남는다(`oam_app.py:625-636`, 게이트 `:1559-1578`). 단 정지 범위는 base 한정 — oam-svc
-   서비스 알람(PRC-004/COM-001/QOS-001)은 리스 게이트가 없어 계속 발화한다. →
+   서비스 알람(service_unresponsive/connection_lost/threshold_crossed)은 리스 게이트가 없어 계속 발화한다. →
    `redundancy_degraded`(store/lease) 신설(+ NAS flock no-op 는
    `dependency_unavailable`(store/lock) 별행 — 펜싱 부재 = 손상 위험 상시라는 다른
    의미의 sticky 조건).
@@ -457,7 +482,7 @@ miss 즉시 open — DB probe 3연속 표준과 불일치) + `_probe_cmp` 가 co
 ④agent 계열 `restore_open_state` 실패 시 drift 의 `_reseed_if_empty` 등가 자가복구 없음 +
 **복원 창 불일치**(기본 30일 vs drift 90일) — 30일+ 지속 알람은 재기동 시 중복 open·앞선
 open 영구 미해소 ⑤offline 자동 close 가 `msg_close`(정상화 문구)를 그대로 사용 — 오해
-유발 ⑥RTP 사용률이 전 endpoint 합산 — 노드별 고갈 은폐(PRC-004 는 노드별인데 QOS-001 만
+유발 ⑥RTP 사용률이 전 endpoint 합산 — 노드별 고갈 은폐(service_unresponsive 는 노드별인데 threshold_crossed 만
 집계) ⑦분리 배포 시 base·oam-svc 가 같은 alerts jsonl 동시 append(`_write_lock` 은
 프로세스 로컬 — 교차 프로세스 무보호) ⑧cert_rotate_pending 이 한 번 set 되면 재평가 skip —
 agent 미호출 시 재시도·에스컬레이션·흔적 없음.
@@ -465,6 +490,7 @@ agent 미호출 시 재시도·에스컬레이션·흔적 없음.
 ## 관련
 
 - [alarm_module_catalog.csv](alarm_module_catalog.csv) — **목록 정본**
+- [alarm_function_catalog.md](alarm_function_catalog.md) — IMS 기능 관점 필요 알람/이벤트 **요구 정본**(구현 무관)
 - [alarm_standardization.md](alarm_standardization.md) — 알람 모델·감지 3계층·code 체계 정본
 - [alarm_self_reporting.md](alarm_self_reporting.md) — 자기보고(FM push) 경로·wire 규격 정본
 - [vibcf_pod_alarms.md](vibcf_pod_alarms.md) — 사내 vIBCF/TrGW POD 변환 참고자료 (대조·채용
