@@ -16,12 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipStack
- * @brief SIP stack ¿¡ callback ÀÎÅÍÆäÀÌ½º¸¦ Ãß°¡ÇÑ´Ù.
- * @param pclsCallBack SIP stack ÀÇ callback ÀÎÅÍÆäÀÌ½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP stack ì— callback ì¸í„°í˜ì´ìŠ¤ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipStack::AddCallBack( ISipStackCallBack * pclsCallBack )
 {
 	if( pclsCallBack == NULL ) return false;
@@ -46,12 +41,7 @@ bool CSipStack::AddCallBack( ISipStackCallBack * pclsCallBack )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP stack ¿¡ callback ÀÎÅÍÆäÀÌ½º¸¦ »èÁ¦ÇÑ´Ù.
- * @param pclsCallBack SIP stack ÀÇ callback ÀÎÅÍÆäÀÌ½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP stack ì— callback ì¸í„°í˜ì´ìŠ¤ë¥¼ ì‚­ì œí•œë‹¤.
 bool CSipStack::DeleteCallBack( ISipStackCallBack * pclsCallBack )
 {
 	SIP_STACK_CALLBACK_LIST::iterator	it;
@@ -70,23 +60,13 @@ bool CSipStack::DeleteCallBack( ISipStackCallBack * pclsCallBack )
 	return bFound;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP stack ÀÇ º¸¾È ±â´ÉÀ» ¼öÇàÇÒ callback ÀÎÅÍÆäÀÌ½º¸¦ µî·ÏÇÑ´Ù.
- * @param pclsSecurityCallBack 
- */
+// SIP stack ì˜ ë³´ì•ˆ ê¸°ëŠ¥ì„ ìˆ˜í–‰í•  callback ì¸í„°í˜ì´ìŠ¤ë¥¼ ë“±ë¡í•œë‹¤.
 void CSipStack::SetSecurityCallBack( ISipStackSecurityCallBack * pclsSecurityCallBack )
 {
 	m_pclsSecurityCallBack = pclsSecurityCallBack;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼ö½ÅµÈ ¿äÃ» SIP ¸Ş½ÃÁö¿¡ ´ëÇÑ callback ¸Ş¼Òµå¸¦ È£ÃâÇÑ´Ù.
- *				¸¸¾à ¿äÃ» SIP ¸Ş½ÃÁö¸¦ Ã³¸®ÇÒ callback ÀÌ Á¸ÀçÇÏÁö ¾ÊÀ¸¸é 501 ÀÀ´ä ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
- * @param iThreadId		¾²·¹µå ¾ÆÀÌµğ ( 0 ºÎÅÍ ¾²·¹µå °³¼ö )
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- */
+// ìˆ˜ì‹ ëœ ìš”ì²­ SIP ë©”ì‹œì§€ì— ëŒ€í•œ callback ë©”ì†Œë“œë¥¼ í˜¸ì¶œí•œë‹¤. ë§Œì•½ ìš”ì²­ SIP ë©”ì‹œì§€ë¥¼ ì²˜ë¦¬í•  callback ì´ ì¡´ì¬í•˜ì§€ ì•Šìœ¼ë©´ 501 ì‘ë‹µ ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
 void CSipStack::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	SIP_STACK_CALLBACK_LIST::iterator itList;
@@ -111,12 +91,7 @@ void CSipStack::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼ö½ÅµÈ ÀÀ´ä SIP ¸Ş½ÃÁö¿¡ ´ëÇÑ callback ¸Ş¼Òµå¸¦ È£ÃâÇÑ´Ù.
- * @param iThreadId		¾²·¹µå ¾ÆÀÌµğ ( 0 ºÎÅÍ ¾²·¹µå °³¼ö )
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- */
+// ìˆ˜ì‹ ëœ ì‘ë‹µ SIP ë©”ì‹œì§€ì— ëŒ€í•œ callback ë©”ì†Œë“œë¥¼ í˜¸ì¶œí•œë‹¤.
 void CSipStack::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	SIP_STACK_CALLBACK_LIST::iterator itList;
@@ -133,12 +108,7 @@ void CSipStack::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief Àü¼Û SIP ¸Ş½ÃÁö¿¡ ´ëÇÑ timeout callback ¸Ş¼Òµå¸¦ È£ÃâÇÑ´Ù.
- * @param iThreadId		¾²·¹µå ¾ÆÀÌµğ ( 0 ºÎÅÍ ¾²·¹µå °³¼ö )
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- */
+// ì „ì†¡ SIP ë©”ì‹œì§€ì— ëŒ€í•œ timeout callback ë©”ì†Œë“œë¥¼ í˜¸ì¶œí•œë‹¤.
 void CSipStack::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 {
 	SIP_STACK_CALLBACK_LIST::iterator itList;
@@ -149,13 +119,7 @@ void CSipStack::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP/TLS ¼¼¼Ç Á¾·á¿¡ ´ëÇÑ callback ¸Ş¼Òµå¸¦ È£ÃâÇÑ´Ù.
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Æ÷Æ® ¹øÈ£
- * @param eTransport ÇÁ·ÎÅäÄİ
- */
+// TCP/TLS ì„¸ì…˜ ì¢…ë£Œì— ëŒ€í•œ callback ë©”ì†Œë“œë¥¼ í˜¸ì¶œí•œë‹¤.
 void CSipStack::TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport )
 {
 	SIP_STACK_CALLBACK_LIST::iterator itList;
@@ -166,11 +130,7 @@ void CSipStack::TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTra
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå Á¾·á ÀÌº¥Æ®¸¦ Àü´ŞÇÑ´Ù.
- * @param iThreadId ¾²·¹µå ¾ÆÀÌµğ ( 0 ºÎÅÍ ¾²·¹µå °³¼ö )
- */
+// ì“°ë ˆë“œ ì¢…ë£Œ ì´ë²¤íŠ¸ë¥¼ ì „ë‹¬í•œë‹¤.
 void CSipStack::ThreadEnd( int iThreadId )
 {
 	SIP_STACK_CALLBACK_LIST::iterator itList;

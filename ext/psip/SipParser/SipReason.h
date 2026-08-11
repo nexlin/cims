@@ -21,10 +21,7 @@
 
 #include "SipParameterList.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP Reason Çì´õ¸¦ ÆÄ½ÌÇÏ°í »ı¼ºÇÏ´Â Å¬·¡½º
- */
+// SIP Reason í—¤ë”ë¥¼ íŒŒì‹±í•˜ê³  ìƒì„±í•˜ëŠ” í´ë˜ìŠ¤
 class CSipReason : public CSipParameterList
 {
 public:

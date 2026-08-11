@@ -38,13 +38,7 @@ CTcpSessionInfo::~CTcpSessionInfo()
 	Clear();
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ÆÐÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket		ÆÐÅ¶
- * @param iPacketLen	ÆÐÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpSessionInfo::Send( const char * pszPacket, int iPacketLen )
 {
 	bool bRes = false;
@@ -82,13 +76,7 @@ bool CTcpSessionInfo::Send( const char * pszPacket, int iPacketLen )
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP Àü¼Û/¼ö½Å¿¡ ´ëÇÑ ·Î±×¸¦ Ãâ·ÂÇÑ´Ù.
- * @param pszPacket		ÆÐÅ¶
- * @param iPacketLen	ÆÐÅ¶ ±æÀÌ
- * @param bSend				Àü¼Û ¿©ºÎ
- */
+// TCP ì „ì†¡/ìˆ˜ì‹ ì— ëŒ€í•œ ë¡œê·¸ë¥¼ ì¶œë ¥í•œë‹¤.
 void CTcpSessionInfo::Log( const char * pszPacket, int iPacketLen, bool bSend )
 {
 	const char * pszFunction = "TcpSend";
@@ -132,10 +120,7 @@ void CTcpSessionInfo::Log( const char * pszPacket, int iPacketLen, bool bSend )
 	}
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¼¼¼Ç Á¤º¸¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ì„¸ì…˜ ì •ë³´ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CTcpSessionInfo::Clear()
 {
 	m_clsMutex.acquire();
@@ -182,13 +167,7 @@ CTcpStackSessionList::~CTcpStackSessionList()
 	}
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- * @param iThreadIndex	thread index
- * @param iPollFdMax TCP ¼¼¼Ç °³¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 bool CTcpStackSessionList::Init( int iThreadIndex, int iPollFdMax )
 {
 	m_iPollFdMax = iPollFdMax;
@@ -217,12 +196,7 @@ bool CTcpStackSessionList::Init( int iThreadIndex, int iPollFdMax )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼ÒÄÏÀ» Ãß°¡ÇÑ´Ù.
- * @param hSocket TCP ¼ÒÄÏ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì†Œì¼“ì„ ì¶”ê°€í•œë‹¤.
 bool CTcpStackSessionList::Insert( Socket hSocket )
 {
 	if( m_iPoolFdCount >= m_iPollFdMax ) return false;
@@ -233,12 +207,7 @@ bool CTcpStackSessionList::Insert( Socket hSocket )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ Ãß°¡ÇÑ´Ù.
- * @param clsTcpComm	TCP ¼¼¼Ç Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì¶”ê°€í•œë‹¤.
 int CTcpStackSessionList::Insert( CTcpComm & clsTcpComm )
 {
 	if( m_iPoolFdCount >= m_iPollFdMax )
@@ -261,12 +230,7 @@ int CTcpStackSessionList::Insert( CTcpComm & clsTcpComm )
 	return m_iPoolFdCount - 1;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param iIndex		TCP ¼¼¼Ç ÀÎµ¦½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpStackSessionList::Delete( int iIndex )
 {
 	if( iIndex >= m_iPoolFdCount || iIndex < 0 ) return false;
@@ -288,10 +252,7 @@ bool CTcpStackSessionList::Delete( int iIndex )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ðµç TCP ¼¼¼Ç Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- */
+// ëª¨ë“  TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 void CTcpStackSessionList::DeleteAll( )
 {
 	for( int i = 0; i < m_iPoolFdCount; ++i )
@@ -303,14 +264,7 @@ void CTcpStackSessionList::DeleteAll( )
 	m_iPoolFdCount = 0;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼ö½Å timeout ÀÌ ¹ß»ýÇÑ TCP ¼¼¼ÇÀ» Á¾·á½ÃÅ²´Ù.
- * @param iTimeout	TCP ¼ö½Å timeout ½Ã°£ (ÃÊ´ÜÀ§)
- * @param iNoPacketTimeout	TCP ¿¬°á ÈÄ, ÆÐÅ¶ÀÌ ¼ö½ÅµÇÁö ¾ÊÀº °æ¿ìÀÇ timeout ½Ã°£ (ÃÊ´ÜÀ§)
- * @param BeforeDelete	»èÁ¦ÇÏ±â Àü¿¡ È£ÃâÇÏ´Â callback ÇÔ¼ö
- * @param pclsArg				ÀÀ¿ë ÇÁ·Î±×·¥ º¯¼ö
- */
+// TCP ìˆ˜ì‹  timeout ì´ ë°œìƒí•œ TCP ì„¸ì…˜ì„ ì¢…ë£Œì‹œí‚¨ë‹¤.
 void CTcpStackSessionList::DeleteTimeout( int iTimeout, int iNoPacketTimeout
 	, void (*BeforeDelete)( CTcpStackSessionList * pclsSessionList, int iIndex, void * pclsArg ), void * pclsArg )
 {
@@ -342,27 +296,13 @@ void CTcpStackSessionList::DeleteTimeout( int iTimeout, int iNoPacketTimeout
 	}
 }
 
-/**
- * @ingroup TcpStack
- * @brief Æ¯Á¤ ¼¼¼Ç¿¡ ÆÐÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param iIndex			¼¼¼Ç ÀÎµ¦½º
- * @param pszPacket		ÆÐÅ¶
- * @param iPacketLen	ÆÐÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŠ¹ì • ì„¸ì…˜ì— íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStackSessionList::Send( int iIndex, const char * pszPacket, int iPacketLen )
 {
 	return m_pclsSession[iIndex].Send( pszPacket, iPacketLen );
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ðµç ¼¼¼Ç¿¡ ÆÐÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket		ÆÐÅ¶
- * @param iPacketLen	ÆÐÅ¶ ±æÀÌ
- * @param pclsCallBack	¼¼¼Çº°·Î Àü¼Û À¯¹«¸¦ °áÁ¤ÇÏ´Â callback °´Ã¼
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  ì„¸ì…˜ì— íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStackSessionList::SendAll( const char * pszPacket, int iPacketLen, ITcpStackCallBack * pclsCallBack )
 {
 	for( int i = 1; i < m_iPoolFdCount; ++i )
@@ -379,16 +319,7 @@ bool CTcpStackSessionList::SendAll( const char * pszPacket, int iPacketLen, ITcp
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ðµç ¼¼¼Ç¿¡ ÆÐÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket		ÆÐÅ¶
- * @param iPacketLen	ÆÐÅ¶ ±æÀÌ
- * @param pclsCallBack	¼¼¼Çº°·Î Àü¼Û À¯¹«¸¦ °áÁ¤ÇÏ´Â callback °´Ã¼
- * @param iThreadIndex	Àü¼ÛÇÏÁö ¾ÊÀ» ¼¼¼ÇÀÇ ¾²·¹µå ÀÎµ¦½º
- * @param iSessionIndex Àü¼ÛÇÏÁö ¾ÊÀ» ¼¼¼Ç ÀÎµ¦½º
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  ì„¸ì…˜ì— íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStackSessionList::SendAllExcept( const char * pszPacket, int iPacketLen, ITcpStackCallBack * pclsCallBack, int iThreadIndex, int iSessionIndex )
 {
 	for( int i = 1; i < m_iPoolFdCount; ++i )
@@ -407,12 +338,7 @@ bool CTcpStackSessionList::SendAllExcept( const char * pszPacket, int iPacketLen
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param iIndex			¼¼¼Ç ¼ø¹ø
- * @param clsTcpComm	¼¼¼Ç ÀÎµ¦½º
- */
+// ì„¸ì…˜ ì •ë³´ë¥¼ ì €ìž¥í•œë‹¤.
 void CTcpStackSessionList::Insert( int iIndex, CTcpComm & clsTcpComm )
 {
 	time_t	iTime;
@@ -443,11 +369,7 @@ void CTcpStackSessionList::Insert( int iIndex, CTcpComm & clsTcpComm )
 		, iIndex, m_pclsSession[iIndex].m_strIp.c_str(), m_pclsSession[iIndex].m_iPort, clsTcpComm.m_bClient ? "true" : "false" );
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¼¼¼Ç ¼ÒÄÏ Á¤º¸¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- * @param iIndex ¼¼¼Ç ÀÎµ¦½º
- */
+// ì„¸ì…˜ ì†Œì¼“ ì •ë³´ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CTcpStackSessionList::ClearFd( int iIndex )
 {
 	m_pclsSession[iIndex].m_clsMutex.acquire();

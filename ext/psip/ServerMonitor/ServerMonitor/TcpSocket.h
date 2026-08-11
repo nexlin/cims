@@ -23,10 +23,7 @@
 
 #define TCP_TIMEOUT	10
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ¸í·É ÀúÀå Å¬·¡½º
- */
+// ëª¨ë‹ˆí„°ë§ ëª…ë ¹ ì €ì¥ í´ë˜ìŠ¤
 class CMonitorCommand
 {
 public:
@@ -37,10 +34,7 @@ public:
 
 typedef std::list< CMonitorCommand > MONITOR_COMMAND_LIST;
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ Å¬¶óÀÌ¾ğÆ®
- */
+// ëª¨ë‹ˆí„°ë§ í´ë¼ì´ì–¸íŠ¸
 class CTcpSocket
 {
 public:

@@ -27,11 +27,7 @@
 #include "Monitor.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipLoadBalancer
- * @brief C++ SIP stack À» ÀÌ¿ëÇÑ ÇÑ±¹Çü IP-PBX
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// C++ SIP stack ì„ ì´ìš©í•œ í•œêµ­í˜• IP-PBX
 int ServiceMain( )
 {
 	if( gclsSetup.Read( GetConfigFileName() ) == false )
@@ -47,8 +43,8 @@ int ServiceMain( )
 
 	if( gclsSetup.m_strLocalIp.empty() )
 	{
-		// N°³ÀÇ IPÁÖ¼Ò¸¦ »ç¿ëÇÏ´Â È£½ºÆ®¿¡¼­´Â SIP ÇÁ·ÎÅäÄİ·Î »ç¿ëÇÒ IPÁÖ¼Ò¸¦ Á÷Á¢ ÀÔ·ÂÇØ ÁÖ¼¼¿ä.
-		// Vmware µîÀ» »ç¿ëÇÏ´Â °æ¿ì N°³ÀÇ IPÁÖ¼Ò°¡ È£½ºÆ®¿¡ Á¸ÀçÇÕ´Ï´Ù.
+		// Nê°œì˜ IPì£¼ì†Œë¥¼ ì‚¬ìš©í•˜ëŠ” í˜¸ìŠ¤íŠ¸ì—ì„œëŠ” SIP í”„ë¡œí† ì½œë¡œ ì‚¬ìš©í•  IPì£¼ì†Œë¥¼ ì§ì ‘ ì…ë ¥í•´ ì£¼ì„¸ìš”.
+		// Vmware ë“±ì„ ì‚¬ìš©í•˜ëŠ” ê²½ìš° Nê°œì˜ IPì£¼ì†Œê°€ í˜¸ìŠ¤íŠ¸ì— ì¡´ì¬í•©ë‹ˆë‹¤.
 		GetLocalIp( clsSetup.m_strLocalIp );
 		gclsSetup.m_strLocalIp = clsSetup.m_strLocalIp;
 	}
@@ -113,13 +109,7 @@ int ServiceMain( )
 }
 
 
-/**
- * @ingroup SipLoadBalancer
- * @brief C++ SIP stack À» ÀÌ¿ëÇÑ SIP ·Îµå¹ë·±¼­
- * @param argc 
- * @param argv 
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// C++ SIP stack ì„ ì´ìš©í•œ SIP ë¡œë“œë°¸ëŸ°ì„œ
 int main( int argc, char * argv[] )
 {
 	CServerService clsService;

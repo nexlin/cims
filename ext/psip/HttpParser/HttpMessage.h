@@ -24,10 +24,7 @@
 #include "HttpHeader.h"
 #include "HttpUri.h"
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¸Ş½ÃÁö Å¬·¡½º
- */
+// HTTP ë©”ì‹œì§€ í´ë˜ìŠ¤
 class CHttpMessage
 {
 public:
@@ -50,7 +47,7 @@ public:
 	bool SetRequest( const char * pszMethod, CHttpUri * pclsUri, const char * pszUserAgent = NULL );
 	bool IsRequest( );
 
-	/** HTTP ¸Ş¼Òµå ( GET, POST ) */
+	// HTTP ë©”ì†Œë“œ ( GET, POST )
 	std::string		m_strHttpMethod;
 
 	/** HTTP request URI */
@@ -59,22 +56,22 @@ public:
 	/** HTTP version ( HTTP/1.1 ) */
 	std::string		m_strHttpVersion;
 
-	/** HTTP ÀÀ´ä ÄÚµå. HTTP ÀÀ´ä ¸Ş½ÃÁöÀÎ °æ¿ì¿¡¸¸ 0 º¸´Ù Å« °ªÀ» °¡Áö°í ÀÖ´Ù. */
+	// HTTP ì‘ë‹µ ì½”ë“œ. HTTP ì‘ë‹µ ë©”ì‹œì§€ì¸ ê²½ìš°ì—ë§Œ 0 ë³´ë‹¤ í° ê°’ì„ ê°€ì§€ê³  ìˆë‹¤.
 	int						m_iStatusCode;
 
-	/** HTTP ÀÀ´ä ¸Ş½ÃÁö */
+	// HTTP ì‘ë‹µ ë©”ì‹œì§€
 	std::string		m_strReasonPhrase;
 
-	/** HTTP Content-Type Çì´õÀÇ °ª */
+	// HTTP Content-Type í—¤ë”ì˜ ê°’
 	std::string		m_strContentType;
 
-	/** HTTP Content-Length Çì´õÀÇ °ª */
+	// HTTP Content-Length í—¤ë”ì˜ ê°’
 	int							m_iContentLength;
 
-	/** body ÀÇ chunked ¿©ºÎ */
+	// body ì˜ chunked ì—¬ë¶€
 	bool						m_bChunked;
 
-	/** HTTP Çì´õ ¸®½ºÆ® */
+	// HTTP í—¤ë” ë¦¬ìŠ¤íŠ¸
 	HTTP_HEADER_LIST		m_clsHeaderList;
 
 	/** HTTP body */

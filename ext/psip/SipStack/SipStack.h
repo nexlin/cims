@@ -38,15 +38,9 @@
 
 typedef std::list< ISipStackCallBack * > SIP_STACK_CALLBACK_LIST;
 
-/**
- * @defgroup SipStack SipStack
- * SIP Stack ���̺귯��
- */
+// SipStack
 
-/**
- * @ingroup SipStack
- * @brief SIP stack Ŭ����
- */
+// SIP stack 클래스
 class CSipStack
 {
 public:
@@ -126,17 +120,17 @@ public:
 	bool Send( CSipMessage * pclsMessage, bool bCheckMessage = true );
 	bool Send( const char * pszMessage, const char * pszIp, unsigned short iPort, ESipTransport eTransport );
 
-	bool	m_bStopEvent;						// SIP stack thread ���� �̺�Ʈ
-	bool	m_bStackThreadRun;			// SIP stack thread �� ���� �߿� �ִ°�?
+	bool	m_bStopEvent;						// SIP stack thread 종료 이벤트
+	bool	m_bStackThreadRun;			// SIP stack thread 가 실행 중에 있는가?
 
 	/** 기본 UDP 소켓 — 하위 호환(Send 경로에서 사용).
 	 *  다중 리스너 환경에서는 m_vecUdpListeners[0].m_hSocket 과 동일.
 	 *  리스너 제거 시 alias 를 다른 살아있는 리스너로 이동하거나 INVALID_SOCKET. */
 	Socket m_hUdpSocket;
-	Socket m_hTcpSocket;					// TCP SIP �޽����� ���� ���� ���� �ڵ�
+	Socket m_hTcpSocket;					// TCP SIP 메시지를 위한 서버 소켓 핸들
 
-	CSipMutex m_clsUdpRecvMutex;	// SIP �޽��� ���� ���ؽ�
-	CSipStackSetup	m_clsSetup;		// SIP stack ����
+	CSipMutex m_clsUdpRecvMutex;	// SIP 메시지 수신 뮤텍스
+	CSipStackSetup	m_clsSetup;		// SIP stack 설정
 
 	/** SIP 신호 카운터 — 수신 요청/최종응답(수신·송신)/파싱 실패 누적 (SipStackCounter.h).
 	 *  증가 지점은 RecvSipMessage/RecvResponse/SendSipMessage 안 수렴점 — 소비자는
@@ -152,7 +146,7 @@ public:
 	CTcpConnectMap	m_clsTcpConnectMap;
 
 #ifdef USE_TLS
-	Socket m_hTlsSocket;					// TLS SIP �޽����� ���� ���� ���� �ڵ�
+	Socket m_hTlsSocket;					// TLS SIP 메시지를 위한 서버 소켓 핸들
 
 	CThreadList			m_clsTlsThreadList;
 	CTcpSocketMap		m_clsTlsSocketMap;
@@ -161,11 +155,11 @@ public:
 
 private:
 	bool	 m_bStarted;
-	int		 m_iUdpThreadRunCount;	// UDP ���� ������ ����
-	int		 m_iTcpThreadRunCount;	// TCP ���� ������ ����
+	int		 m_iUdpThreadRunCount;	// UDP 수신 쓰레드 개수
+	int		 m_iTcpThreadRunCount;	// TCP 수신 쓰레드 개수
 
 	CSipMutex m_clsMutex;
-	CSipMutex m_clsUdpSendMutex;	// SIP �޽��� ���� ���ؽ�
+	CSipMutex m_clsUdpSendMutex;	// SIP 메시지 전송 뮤텍스
 
 	CSipICTList		m_clsICT;
 	CSipNICTList	m_clsNICT;

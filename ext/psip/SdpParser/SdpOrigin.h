@@ -21,10 +21,7 @@
 
 #include <string>
 
-/**
- * @ingroup SdpParser
- * @brief SDP origin À» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SDP origin ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSdpOrigin
 {
 public:

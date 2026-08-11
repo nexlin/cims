@@ -21,20 +21,17 @@
 
 #include <string>
 
-/**
- * @ingroup SipParser
- * @brief CSeq Çì´õ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// CSeq í—¤ë”ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipCSeq
 {
 public:
 	CSipCSeq();
 	~CSipCSeq();
 
-	/** SEQ ¹øÈ£ */
+	// SEQ ë²ˆí˜¸
 	int					m_iDigit;
 
-	/** SIP ¸Ş¼Òµå */
+	// SIP ë©”ì†Œë“œ
 	std::string	m_strMethod;
 
 	int Parse( const char * pszText, int iTextLen );

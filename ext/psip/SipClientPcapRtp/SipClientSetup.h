@@ -28,46 +28,46 @@ public:
 	CSipClientSetup();
 	~CSipClientSetup();
 
-	/** SIP Åë½ÅÀ» À§ÇÑ UDP Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ UDP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iUdpPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ ·ÎÄÃ IP ÁÖ¼Ò */
+	// SIP í†µì‹ ì„ ìœ„í•œ ë¡œì»¬ IP ì£¼ì†Œ
 	std::string	m_strLocalIp;
 
-	/** SIP ¼­¹ö IP ÁÖ¼Ò */
+	// SIP ì„œë²„ IP ì£¼ì†Œ
 	std::string	m_strSipServerIp;
 
-	/** SIP ¼­¹ö Æ÷Æ® ¹øÈ£ */
+	// SIP ì„œë²„ í¬íŠ¸ ë²ˆí˜¸
 	int					m_iSipServerPort;
 
-	/** SIP µµ¸ŞÀÎ */
+	// SIP ë„ë©”ì¸
 	std::string	m_strSipDomain;
 
-	/** SIP »ç¿ëÀÚ ¾ÆÀÌµğ */
+	// SIP ì‚¬ìš©ì ì•„ì´ë””
 	std::string	m_strSipUserId;
 
-	/** SIP ºñ¹Ğ¹øÈ£ */
+	// SIP ë¹„ë°€ë²ˆí˜¸
 	std::string	m_strSipPassWord;
 
-	/** SIP Åë½Å ÇÁ·ÎÅäÄİ */
+	// SIP í†µì‹  í”„ë¡œí† ì½œ
 	ESipTransport	m_eSipTransport;
 
-	/** TLS SIP Åë½ÅÀ» À§ÇÑ ÀÎÁõ¼­¿Í °³ÀÎÅ°¸¦ ÀúÀåÇÑ PEM ÆÄÀÏ °æ·Î */
+	// TLS SIP í†µì‹ ì„ ìœ„í•œ ì¸ì¦ì„œì™€ ê°œì¸í‚¤ë¥¼ ì €ì¥í•œ PEM íŒŒì¼ ê²½ë¡œ
 	std::string		m_strPemFile;
 
-	/** RTP ¸¦ ÀĞ¾î¼­ Àü¼ÛÇÒ pcap ÆÄÀÏ full path */
+	// RTP ë¥¼ ì½ì–´ì„œ ì „ì†¡í•  pcap íŒŒì¼ full path
 	std::string		m_strPcapFile;
 
-	/** pcap ÆÄÀÏ¿¡¼­ ÀĞÀ» RTP ¸ñÀûÁö IP ÁÖ¼Ò */
+	// pcap íŒŒì¼ì—ì„œ ì½ì„ RTP ëª©ì ì§€ IP ì£¼ì†Œ
 	std::string		m_strPcapRtpDestIp;
 
-	/** pcap ÆÄÀÏ¿¡¼­ ÀĞÀ» RTP ¸ñÀûÁö Æ÷Æ® ¹øÈ£ */
+	// pcap íŒŒì¼ì—ì„œ ì½ì„ RTP ëª©ì ì§€ í¬íŠ¸ ë²ˆí˜¸
 	int						m_iPcapRtpDestPort;
 
-	/** pcap ÆÄÀÏ¿¡¼­ ÀĞÀº SRTP ¸¦ º¹È£È­ÇÏ±â À§ÇÑ ¾ÏÈ£È­ ¾Ë°í¸®Áò (¿¹: AES_CM_128_HMAC_SHA1_80 ) */
+	// pcap íŒŒì¼ì—ì„œ ì½ì€ SRTP ë¥¼ ë³µí˜¸í™”í•˜ê¸° ìœ„í•œ ì•”í˜¸í™” ì•Œê³ ë¦¬ì¦˜ (ì˜ˆ: AES_CM_128_HMAC_SHA1_80 )
 	std::string		m_strPcapSrtpCrypto;
 
-	/** pcap ÆÄÀÏ¿¡¼­ ÀĞÀº SRTP ¸¦ º¹È£È­ÇÏ±â À§ÇÑ ¾ÏÈ£È­ Å° */
+	// pcap íŒŒì¼ì—ì„œ ì½ì€ SRTP ë¥¼ ë³µí˜¸í™”í•˜ê¸° ìœ„í•œ ì•”í˜¸í™” í‚¤
 	std::string		m_strPcapSrtpKey;
 
 	bool Read( const char * pszFileName );

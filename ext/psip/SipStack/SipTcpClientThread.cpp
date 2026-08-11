@@ -33,12 +33,7 @@ public:
 	std::string m_strSourceIp;  // R5.b''': outbound connect 시 bind 할 로컬 source IP (빈 값이면 OS 자동)
 };
 
-/**
- * @ingroup SipStack
- * @brief TCP Ŭ���̾�Ʈ ���� ������ ���� ������ �Լ�
- * @param lpParameter CThreadListEntry ��ü�� ������
- * @returns 0 �� �����Ѵ�.
- */
+// TCP 클라이언트 세션 연결을 위한 쓰레드 함수
 THREAD_API SipTcpClientThread( LPVOID lpParameter )
 {
 	CSipTcpClientArg * pclsArg = (CSipTcpClientArg *)lpParameter;
@@ -144,20 +139,12 @@ THREAD_API SipTcpClientThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP �������ݷ� SIP �޽��� ���� �� SIP ���� �̺�Ʈ�� ó���ϴ� Thread Pool �� �����Ѵ�.
- * @param pclsSipStack	SIP stack ������
- * @param pszIp					SIP �޽����� ������ IP �ּ�
- * @param iPort					SIP �޽����� ������ ��Ʈ ��ȣ
- * @param pclsSipMessage	������ SIP �޽���
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// TCP 프로토콜로 SIP 메시지 수신 및 SIP 수신 이벤트를 처리하는 Thread Pool 을 시작한다.
 bool StartSipTcpClientThread( CSipStack * pclsSipStack, const char * pszIp, int iPort, CSipMessage * pclsSipMessage )
 {
 	if( pclsSipStack->m_clsTcpConnectMap.Insert( pszIp, iPort ) == false )
 	{
-		// �̹� TCP ���� ���� �߿� �����Ƿ� ���ο� TCP ���� ����õ����� �ʴ´�.
+		// 이미 TCP 세션 연결 중에 있으므로 새로운 TCP 세션 연결시도하지 않는다.
 		pclsSipStack->m_clsTcpConnectMap.Insert( pszIp, iPort, pclsSipMessage );
 		return true;
 	}

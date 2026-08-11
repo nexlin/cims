@@ -20,12 +20,7 @@
 #include "RtpDirection.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipUserAgent
- * @brief enum direction À» ¹®ÀÚ¿­·Î ¸®ÅÏÇÑ´Ù.
- * @param eDirection enum direction
- * @returns enum direction À» ¹®ÀÚ¿­·Î ¸®ÅÏÇÑ´Ù.
- */
+// enum direction ì„ ë¬¸ìì—´ë¡œ ë¦¬í„´í•œë‹¤.
 const char * GetRtpDirectionString( ERtpDirection eDirection )
 {
 	switch( eDirection )
@@ -44,12 +39,7 @@ const char * GetRtpDirectionString( ERtpDirection eDirection )
 	return "sendrecv";
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ¹®ÀÚ¿­ direction À» enum direction À¸·Î ¸®ÅÏÇÑ´Ù.
- * @param pszDirection ¹®ÀÚ¿­ direction
- * @returns ¹®ÀÚ¿­ direction À» enum direction À¸·Î ¸®ÅÏÇÑ´Ù.
- */
+// ë¬¸ìì—´ direction ì„ enum direction ìœ¼ë¡œ ë¦¬í„´í•œë‹¤.
 ERtpDirection GetRtpDirectionEnum( const char * pszDirection )
 {
 	if( !strcmp( pszDirection, "sendrecv" ) )

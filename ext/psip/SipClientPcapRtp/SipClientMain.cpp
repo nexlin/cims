@@ -33,13 +33,7 @@ void StopCall()
 	gstrInviteId.clear();
 }
 
-/**
- * @ingroup SipClient
- * @brief SIP Å¬¶óÀÌ¾ğÆ®
- * @param argc 
- * @param argv 
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP í´ë¼ì´ì–¸íŠ¸
 int main( int argc, char * argv[] )
 {
 	if( argc != 2 )
@@ -76,11 +70,11 @@ int main( int argc, char * argv[] )
 	clsServerInfo.m_iLoginTimeout = 600;
 	//clsServerInfo.m_iNatTimeout = 10;
 
-	// »ï¼º 070 ¼­ºñ½º ·Î±×ÀÎ½Ã User-Agent Çì´õ¿¡ Æ¯¼öÇÑ ¹®ÀÚ¿­ÀÌ Æ÷ÇÔµÇÁö ¾ÊÀ¸¸é 480 ÀÀ´äÀÌ ¼ö½ÅµÈ´Ù.
-	// ¾Æ·¡¿Í °°ÀÌ Acrobits À¸·Î User-Agent Çì´õ°¡ ½ÃÀÛÇÏ¸é Á¤»óÀûÀ¸·Î 401 ÀÀ´äÀ» ¼ö½ÅÇÑ´Ù.
+	// ì‚¼ì„± 070 ì„œë¹„ìŠ¤ ë¡œê·¸ì¸ì‹œ User-Agent í—¤ë”ì— íŠ¹ìˆ˜í•œ ë¬¸ìì—´ì´ í¬í•¨ë˜ì§€ ì•Šìœ¼ë©´ 480 ì‘ë‹µì´ ìˆ˜ì‹ ëœë‹¤.
+	// ì•„ë˜ì™€ ê°™ì´ Acrobits ìœ¼ë¡œ User-Agent í—¤ë”ê°€ ì‹œì‘í•˜ë©´ ì •ìƒì ìœ¼ë¡œ 401 ì‘ë‹µì„ ìˆ˜ì‹ í•œë‹¤.
 	//clsSetup.m_strUserAgent = "Acrobits";
 
-	// Expires Çì´õ¿¡ 300 À» ÀÔ·ÂÇÏ°í ½ÍÀ¸¸é ¾Æ·¡¿Í °°ÀÌ ¼³Á¤ÇÏ¸é µÈ´Ù.
+	// Expires í—¤ë”ì— 300 ì„ ì…ë ¥í•˜ê³  ì‹¶ìœ¼ë©´ ì•„ë˜ì™€ ê°™ì´ ì„¤ì •í•˜ë©´ ëœë‹¤.
 	// clsServerInfo.m_iLoginTimeout = 300;
 
 	clsSetup.m_iLocalUdpPort = gclsSetupFile.m_iUdpPort;
@@ -97,10 +91,10 @@ int main( int argc, char * argv[] )
 		clsSetup.m_strCertFile = gclsSetupFile.m_strPemFile;
 	}
 
-	// Via Çì´õ ¹× Contact Çì´õ¿¡ ·ÎÄÃ ¼ö½Å Æ÷Æ® ¹øÈ£¸¦ ¼³Á¤ÇÏ°í ½ÍÀ¸¸é ¾Æ·¡¿Í °°ÀÌ ¼³Á¤ÇÏ¸é µÈ´Ù.
+	// Via í—¤ë” ë° Contact í—¤ë”ì— ë¡œì»¬ ìˆ˜ì‹  í¬íŠ¸ ë²ˆí˜¸ë¥¼ ì„¤ì •í•˜ê³  ì‹¶ìœ¼ë©´ ì•„ë˜ì™€ ê°™ì´ ì„¤ì •í•˜ë©´ ëœë‹¤.
 	// clsSetup.m_bUseContactListenPort = true;
 
-	// UDP ¼ö½Å ¾²·¹µåÀÇ ±âº» °³¼ö´Â 1°³ÀÌ´Ù. ÀÌ¸¦ ¼öÁ¤ÇÏ·Á¸é CSipStackSetup.m_iUdpThreadCount ¸¦ ¼öÁ¤ÇÏ¸é µÈ´Ù.
+	// UDP ìˆ˜ì‹  ì“°ë ˆë“œì˜ ê¸°ë³¸ ê°œìˆ˜ëŠ” 1ê°œì´ë‹¤. ì´ë¥¼ ìˆ˜ì •í•˜ë ¤ë©´ CSipStackSetup.m_iUdpThreadCount ë¥¼ ìˆ˜ì •í•˜ë©´ ëœë‹¤.
 
 	gclsUserAgent.InsertRegisterInfo( clsServerInfo );
 

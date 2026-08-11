@@ -32,12 +32,7 @@ CSipCallDumpSetup::~CSipCallDumpSetup()
 }
 
 
-/**
- * @ingroup SipCallDump
- * @brief ¼³Á¤ ÆÄÀÏÀ» ÀĞ¾î¼­ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszFileName ¼³Á¤ ÆÄÀÏ full path
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì„ ì½ì–´ì„œ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CSipCallDumpSetup::Read( const char * pszFileName )
 {
 	CXmlElement clsXml, * pclsElement;
@@ -79,11 +74,7 @@ bool CSipCallDumpSetup::Read( const char * pszFileName )
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ¼öÁ¤µÈ ¼³Á¤ ÆÄÀÏÀ» ÀĞ´Â´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìˆ˜ì •ëœ ì„¤ì • íŒŒì¼ì„ ì½ëŠ”ë‹¤.
 bool CSipCallDumpSetup::Read( )
 {
 	if( m_strFileName.length() == 0 ) return false;
@@ -98,12 +89,7 @@ bool CSipCallDumpSetup::Read( )
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ¼³Á¤ ÆÄÀÏÀÇ Á¤º¸ Áß¿¡¼­ ½Ç½Ã°£À¸·Î º¯°æ °¡´ÉÇÑ Ç×¸ñÀ» ´Ù½Ã ÀúÀåÇÑ´Ù.
- * @param clsXml ¼³Á¤ ÆÄÀÏÀÇ ³»¿ëÀ» ÀúÀåÇÑ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì˜ ì •ë³´ ì¤‘ì—ì„œ ì‹¤ì‹œê°„ìœ¼ë¡œ ë³€ê²½ ê°€ëŠ¥í•œ í•­ëª©ì„ ë‹¤ì‹œ ì €ì¥í•œë‹¤.
 bool CSipCallDumpSetup::Read( CXmlElement & clsXml )
 {
 	CXmlElement * pclsElement;
@@ -145,7 +131,7 @@ bool CSipCallDumpSetup::Read( CXmlElement & clsXml )
 	}
 	m_clsMutex.release();
 
-	// ·Î±×
+	// ë¡œê·¸
 	pclsElement = clsXml.SelectElement( "Log" );
 	if( pclsElement )
 	{
@@ -188,11 +174,7 @@ bool CSipCallDumpSetup::Read( CXmlElement & clsXml )
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ¼³Á¤ÆÄÀÏÀÌ ¼öÁ¤µÇ¾ú´ÂÁö È®ÀÎÇÑ´Ù.
- * @returns ¼³Á¤ÆÄÀÏÀÌ ¼öÁ¤µÇ¾úÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì •íŒŒì¼ì´ ìˆ˜ì •ë˜ì—ˆëŠ”ì§€ í™•ì¸í•œë‹¤.
 bool CSipCallDumpSetup::IsChange()
 {
 	struct stat	clsStat;
@@ -205,12 +187,7 @@ bool CSipCallDumpSetup::IsChange()
 	return false;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief TCP ¿¡¼­ »ç¿ëÇÏ´Â SIP Æ÷Æ® ¹øÈ£ÀÎÁö °Ë»çÇÑ´Ù.
- * @param iPort	Æ÷Æ® ¹øÈ£
- * @returns TCP ¿¡¼­ »ç¿ëÇÏ´Â SIP Æ÷Æ® ¹øÈ£ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—ì„œ ì‚¬ìš©í•˜ëŠ” SIP í¬íŠ¸ ë²ˆí˜¸ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool CSipCallDumpSetup::IsTcpSipPort( int iPort )
 {
 	PORT_MAP::iterator itPM;
@@ -227,10 +204,7 @@ bool CSipCallDumpSetup::IsTcpSipPort( int iPort )
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ¼³Á¤ÆÄÀÏÀÇ ÀúÀå ½Ã°£À» ÀúÀåÇÑ´Ù.
- */
+// ì„¤ì •íŒŒì¼ì˜ ì €ì¥ ì‹œê°„ì„ ì €ì¥í•œë‹¤.
 void CSipCallDumpSetup::SetFileSizeTime( )
 {
 	struct stat	clsStat;

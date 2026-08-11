@@ -23,7 +23,7 @@
 
 CLogInDlg gclsLogInDlg;
 
-// CLogInDlg ��ȭ �����Դϴ�.
+// CLogInDlg 대화 상자입니다.
 
 IMPLEMENT_DYNAMIC(CLogInDlg, CDialog)
 
@@ -53,7 +53,7 @@ BEGIN_MESSAGE_MAP(CLogInDlg, CDialog)
 END_MESSAGE_MAP()
 
 
-// CLogInDlg �޽��� ó�����Դϴ�.
+// CLogInDlg 메시지 처리기입니다.
 
 BOOL CLogInDlg::OnInitDialog()
 {
@@ -81,7 +81,7 @@ BOOL CLogInDlg::OnInitDialog()
 	UpdateData( FALSE );
 
 	return TRUE;  // return TRUE unless you set the focus to a control
-	// ����: OCX �Ӽ� �������� FALSE�� ��ȯ�ؾ� �մϴ�.
+	// 예외: OCX 속성 페이지는 FALSE를 반환해야 합니다.
 }
 
 void CLogInDlg::OnBnClickedOk()

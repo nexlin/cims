@@ -24,10 +24,7 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup TcpStack
- * @brief TCP Å¬¶óÀÌ¾ğÆ® ¾²·¹µå ½ÇÇà ÀÎÀÚ
- */
+// TCP í´ë¼ì´ì–¸íŠ¸ ì“°ë ˆë“œ ì‹¤í–‰ ì¸ì
 class CTcpClientArg
 {
 public:
@@ -39,22 +36,17 @@ public:
 	{
 	}
 
-	/** TCP ¼­¹ö IP ÁÖ¼Ò */
+	// TCP ì„œë²„ IP ì£¼ì†Œ
 	std::string	m_strIp;
 
-	/** TCP ¼­¹ö Æ÷Æ® ¹øÈ£ */
+	// TCP ì„œë²„ í¬íŠ¸ ë²ˆí˜¸
 	int			m_iPort;
 
 	/** TCP stack */
 	CTcpStack * m_pclsStack;
 };
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°á Thread
- * @param lpParameter CTcpClientArg °´Ã¼
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²° Thread
 THREAD_API TcpClientThread( LPVOID lpParameter )
 {
 	CTcpClientArg * pclsArg = (CTcpClientArg *)lpParameter;
@@ -147,14 +139,7 @@ THREAD_API TcpClientThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°á Thread ¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pszIp			TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort			TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param pclsStack TCP stack
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²° Thread ë¥¼ ì‹œì‘í•œë‹¤.
 bool StartTcpClientThread( const char * pszIp, int iPort, CTcpStack * pclsStack )
 {
 	CTcpClientArg * pclsArg = new CTcpClientArg();

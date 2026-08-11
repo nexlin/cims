@@ -21,17 +21,14 @@
 
 #include "SipParameterList.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP Accept-Encoding, Accept-Language Çì´õ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP Accept-Encoding, Accept-Language í—¤ë”ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipAcceptData : public CSipParameterList
 {
 public:
 	CSipAcceptData();
 	~CSipAcceptData();
 
-	/** ÀÌ¸§ */
+	// ì´ë¦„
 	std::string		m_strName;
 
 	int Parse( const char * pszText, int iTextLen );
@@ -39,7 +36,7 @@ public:
 	void Clear();
 };
 
-/** Accept-Encoding/Accept-Language Çì´õ ¸®½ºÆ® */
+// Accept-Encoding/Accept-Language í—¤ë” ë¦¬ìŠ¤íŠ¸
 typedef std::list< CSipAcceptData > SIP_ACCEPT_DATA_LIST;
 
 int ParseSipAcceptData( SIP_ACCEPT_DATA_LIST & clsList, const char * pszText, int iTextLen );

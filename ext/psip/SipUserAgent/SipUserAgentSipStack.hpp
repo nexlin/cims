@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ¿äÃ» ¸Þ½ÃÁö ¼ö½Å callback method
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Þ½ÃÁö
- * @returns SIP ¿äÃ» ¸Þ½ÃÁö¸¦ Ã³¸®ÇÑ °æ¿ì true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ìš”ì²­ ë©”ì‹œì§€ ìˆ˜ì‹  callback method
 bool CSipUserAgent::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	if( pclsMessage->IsMethod( SIP_METHOD_INVITE ) )
@@ -67,13 +61,7 @@ bool CSipUserAgent::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å callback method
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ÀÀ´ä ¸Þ½ÃÁö
- * @returns SIP ÀÀ´ä ¸Þ½ÃÁö¸¦ Ã³¸®ÇÑ °æ¿ì true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  callback method
 bool CSipUserAgent::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	if( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) )
@@ -116,13 +104,7 @@ bool CSipUserAgent::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ¸Þ½ÃÁö Àü¼Û timeout callback method
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ÀÀ´ä ¸Þ½ÃÁö
- * @returns SIP ÀÀ´ä ¸Þ½ÃÁö¸¦ Ã³¸®ÇÑ °æ¿ì true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ ì „ì†¡ timeout callback method
 bool CSipUserAgent::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 {
 	std::string	strCallId;
@@ -136,13 +118,7 @@ bool CSipUserAgent::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief TCP/TLS ¼¼¼Ç Á¾·á ÀÌº¥Æ® ÇÚµé·¯
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Æ÷Æ® ¹øÈ£
- * @param eTransport ÇÁ·ÎÅäÄÝ
- */
+// TCP/TLS ì„¸ì…˜ ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipUserAgent::TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport )
 {
 	SIP_SERVER_INFO_LIST::iterator	it;
@@ -158,11 +134,7 @@ void CSipUserAgent::TcpSessionEnd( const char * pszIp, int iPort, ESipTransport 
 	m_clsRegisterMutex.release();
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ¾²·¹µå Á¾·á ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId ¾²·¹µå ¹øÈ£
- */
+// SIP ì“°ë ˆë“œ ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipUserAgent::ThreadEnd( int iThreadId )
 {
 	if( m_pclsCallBack ) m_pclsCallBack->EventThreadEnd( iThreadId );

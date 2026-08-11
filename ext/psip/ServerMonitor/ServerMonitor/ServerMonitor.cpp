@@ -38,40 +38,40 @@
 
 BEGIN_MESSAGE_MAP(CServerMonitorApp, CWinAppEx)
 	ON_COMMAND(ID_APP_ABOUT, &CServerMonitorApp::OnAppAbout)
-	// Ç¥ÁØ ÆÄÀÏÀ» ±âÃÊ·Î ÇÏ´Â ¹®¼­ ¸í·ÉÀÔ´Ï´Ù.
+	// í‘œì¤€ íŒŒì¼ì„ ê¸°ì´ˆë¡œ í•˜ëŠ” ë¬¸ì„œ ëª…ë ¹ì…ë‹ˆë‹¤.
 	ON_COMMAND(ID_FILE_NEW, &CWinAppEx::OnFileNew)
 	ON_COMMAND(ID_FILE_OPEN, &CWinAppEx::OnFileOpen)
 END_MESSAGE_MAP()
 
 #include "ServerMonitorAbout.hpp"
 
-// CServerMonitorApp »ı¼º
+// CServerMonitorApp ìƒì„±
 
 CServerMonitorApp::CServerMonitorApp()
 {
 
 	m_bHiColorIcons = TRUE;
 
-	// TODO: ¿©±â¿¡ »ı¼º ÄÚµå¸¦ Ãß°¡ÇÕ´Ï´Ù.
-	// InitInstance¿¡ ¸ğµç Áß¿äÇÑ ÃÊ±âÈ­ ÀÛ¾÷À» ¹èÄ¡ÇÕ´Ï´Ù.
+	// TODO: ì—¬ê¸°ì— ìƒì„± ì½”ë“œë¥¼ ì¶”ê°€í•©ë‹ˆë‹¤.
+	// InitInstanceì— ëª¨ë“  ì¤‘ìš”í•œ ì´ˆê¸°í™” ì‘ì—…ì„ ë°°ì¹˜í•©ë‹ˆë‹¤.
 }
 
-// À¯ÀÏÇÑ CServerMonitorApp °³Ã¼ÀÔ´Ï´Ù.
+// ìœ ì¼í•œ CServerMonitorApp ê°œì²´ì…ë‹ˆë‹¤.
 
 CServerMonitorApp theApp;
 
 
-// CServerMonitorApp ÃÊ±âÈ­
+// CServerMonitorApp ì´ˆê¸°í™”
 
 BOOL CServerMonitorApp::InitInstance()
 {
-	// ÀÀ¿ë ÇÁ·Î±×·¥ ¸Å´ÏÆä½ºÆ®°¡ ComCtl32.dll ¹öÀü 6 ÀÌ»óÀ» »ç¿ëÇÏ¿© ºñÁÖ¾ó ½ºÅ¸ÀÏÀ»
-	// »ç¿ëÇÏµµ·Ï ÁöÁ¤ÇÏ´Â °æ¿ì, Windows XP »ó¿¡¼­ ¹İµå½Ã InitCommonControlsEx()°¡ ÇÊ¿äÇÕ´Ï´Ù. 
-	// InitCommonControlsEx()¸¦ »ç¿ëÇÏÁö ¾ÊÀ¸¸é Ã¢À» ¸¸µé ¼ö ¾ø½À´Ï´Ù.
+	// ì‘ìš© í”„ë¡œê·¸ë¨ ë§¤ë‹ˆí˜ìŠ¤íŠ¸ê°€ ComCtl32.dll ë²„ì „ 6 ì´ìƒì„ ì‚¬ìš©í•˜ì—¬ ë¹„ì£¼ì–¼ ìŠ¤íƒ€ì¼ì„
+	// ì‚¬ìš©í•˜ë„ë¡ ì§€ì •í•˜ëŠ” ê²½ìš°, Windows XP ìƒì—ì„œ ë°˜ë“œì‹œ InitCommonControlsEx()ê°€ í•„ìš”í•©ë‹ˆë‹¤.
+	// InitCommonControlsEx()ë¥¼ ì‚¬ìš©í•˜ì§€ ì•Šìœ¼ë©´ ì°½ì„ ë§Œë“¤ ìˆ˜ ì—†ìŠµë‹ˆë‹¤.
 	INITCOMMONCONTROLSEX InitCtrls;
 	InitCtrls.dwSize = sizeof(InitCtrls);
-	// ÀÀ¿ë ÇÁ·Î±×·¥¿¡¼­ »ç¿ëÇÒ ¸ğµç °ø¿ë ÄÁÆ®·Ñ Å¬·¡½º¸¦ Æ÷ÇÔÇÏµµ·Ï
-	// ÀÌ Ç×¸ñÀ» ¼³Á¤ÇÏ½Ê½Ã¿À.
+	// ì‘ìš© í”„ë¡œê·¸ë¨ì—ì„œ ì‚¬ìš©í•  ëª¨ë“  ê³µìš© ì»¨íŠ¸ë¡¤ í´ë˜ìŠ¤ë¥¼ í¬í•¨í•˜ë„ë¡
+	// ì´ í•­ëª©ì„ ì„¤ì •í•˜ì‹­ì‹œì˜¤.
 	InitCtrls.dwICC = ICC_WIN95_CLASSES;
 	InitCommonControlsEx(&InitCtrls);
 
@@ -83,7 +83,7 @@ BOOL CServerMonitorApp::InitInstance()
 		return FALSE;
 	}
 
-	// OLE ¶óÀÌºê·¯¸®¸¦ ÃÊ±âÈ­ÇÕ´Ï´Ù.
+	// OLE ë¼ì´ë¸ŒëŸ¬ë¦¬ë¥¼ ì´ˆê¸°í™”í•©ë‹ˆë‹¤.
 	if (!AfxOleInit())
 	{
 		AfxMessageBox(IDP_OLE_INIT_FAILED);
@@ -91,7 +91,7 @@ BOOL CServerMonitorApp::InitInstance()
 	}
 	AfxEnableControlContainer();
 
-	// XML ÆÄÀÏÀ» ÀĞ´Â´Ù.
+	// XML íŒŒì¼ì„ ì½ëŠ”ë‹¤.
 	char szXmlFileName[1024];
 
 	_snprintf( szXmlFileName, sizeof(szXmlFileName), "%s\\%s", CDirectory::GetProgramDirectory(), XML_FILENAME );
@@ -102,7 +102,7 @@ BOOL CServerMonitorApp::InitInstance()
 	}
 	
 	SetRegistryKey(_T("ServerMonitor"));
-	LoadStdProfileSettings(0);  // MRU¸¦ Æ÷ÇÔÇÏ¿© Ç¥ÁØ INI ÆÄÀÏ ¿É¼ÇÀ» ·ÎµåÇÕ´Ï´Ù.
+	LoadStdProfileSettings(0);  // MRUë¥¼ í¬í•¨í•˜ì—¬ í‘œì¤€ INI íŒŒì¼ ì˜µì…˜ì„ ë¡œë“œí•©ë‹ˆë‹¤.
 
 	gclsSetup.GetFile();
 
@@ -128,18 +128,18 @@ BOOL CServerMonitorApp::InitInstance()
 	theApp.GetTooltipManager()->SetTooltipParams(AFX_TOOLTIP_TYPE_ALL,
 		RUNTIME_CLASS(CMFCToolTipCtrl), &ttParams);
 
-	// ÀÀ¿ë ÇÁ·Î±×·¥ÀÇ ¹®¼­ ÅÛÇÃ¸´À» µî·ÏÇÕ´Ï´Ù. ¹®¼­ ÅÛÇÃ¸´Àº
-	//  ¹®¼­, ÇÁ·¹ÀÓ Ã¢ ¹× ºä »çÀÌÀÇ ¿¬°á ¿ªÇÒÀ» ÇÕ´Ï´Ù.
+	// ì‘ìš© í”„ë¡œê·¸ë¨ì˜ ë¬¸ì„œ í…œí”Œë¦¿ì„ ë“±ë¡í•©ë‹ˆë‹¤. ë¬¸ì„œ í…œí”Œë¦¿ì€
+	//  ë¬¸ì„œ, í”„ë ˆì„ ì°½ ë° ë·° ì‚¬ì´ì˜ ì—°ê²° ì—­í• ì„ í•©ë‹ˆë‹¤.
 	CMultiDocTemplate* pDocTemplate;
 	pDocTemplate = new CMultiDocTemplate(IDR_ServerMonitTYPE,
 		RUNTIME_CLASS(CServerMonitorDoc),
-		RUNTIME_CLASS(CChildFrame), // »ç¿ëÀÚ ÁöÁ¤ MDI ÀÚ½Ä ÇÁ·¹ÀÓÀÔ´Ï´Ù.
+		RUNTIME_CLASS(CChildFrame), // ì‚¬ìš©ì ì§€ì • MDI ìì‹ í”„ë ˆì„ì…ë‹ˆë‹¤.
 		RUNTIME_CLASS(CServerMonitorView));
 	if (!pDocTemplate)
 		return FALSE;
 	AddDocTemplate(pDocTemplate);
 
-	// ÁÖ MDI ÇÁ·¹ÀÓ Ã¢À» ¸¸µì´Ï´Ù.
+	// ì£¼ MDI í”„ë ˆì„ ì°½ì„ ë§Œë“­ë‹ˆë‹¤.
 	CMainFrame* pMainFrame = new CMainFrame;
 	if (!pMainFrame || !pMainFrame->LoadFrame(IDR_MAINFRAME))
 	{
@@ -147,20 +147,20 @@ BOOL CServerMonitorApp::InitInstance()
 		return FALSE;
 	}
 	m_pMainWnd = pMainFrame;
-	// Á¢¹Ì»ç°¡ ÀÖÀ» °æ¿ì¿¡¸¸ DragAcceptFiles¸¦ È£ÃâÇÕ´Ï´Ù.
-	//  MDI ÀÀ¿ë ÇÁ·Î±×·¥¿¡¼­´Â m_pMainWnd¸¦ ¼³Á¤ÇÑ ÈÄ ¹Ù·Î ÀÌ·¯ÇÑ È£ÃâÀÌ ¹ß»ıÇØ¾ß ÇÕ´Ï´Ù.
+	// ì ‘ë¯¸ì‚¬ê°€ ìˆì„ ê²½ìš°ì—ë§Œ DragAcceptFilesë¥¼ í˜¸ì¶œí•©ë‹ˆë‹¤.
+	//  MDI ì‘ìš© í”„ë¡œê·¸ë¨ì—ì„œëŠ” m_pMainWndë¥¼ ì„¤ì •í•œ í›„ ë°”ë¡œ ì´ëŸ¬í•œ í˜¸ì¶œì´ ë°œìƒí•´ì•¼ í•©ë‹ˆë‹¤.
 
 
-	// Ç¥ÁØ ¼Ğ ¸í·É, DDE, ÆÄÀÏ ¿­±â¿¡ ´ëÇÑ ¸í·ÉÁÙÀ» ±¸¹® ºĞ¼®ÇÕ´Ï´Ù.
+	// í‘œì¤€ ì…¸ ëª…ë ¹, DDE, íŒŒì¼ ì—´ê¸°ì— ëŒ€í•œ ëª…ë ¹ì¤„ì„ êµ¬ë¬¸ ë¶„ì„í•©ë‹ˆë‹¤.
 	CCommandLineInfo cmdInfo;
 	ParseCommandLine(cmdInfo);
 
 
-	// ¸í·ÉÁÙ¿¡ ÁöÁ¤µÈ ¸í·ÉÀ» µğ½ºÆĞÄ¡ÇÕ´Ï´Ù.
-	// ÀÀ¿ë ÇÁ·Î±×·¥ÀÌ /RegServer, /Register, /Unregserver ¶Ç´Â /Unregister·Î ½ÃÀÛµÈ °æ¿ì FALSE¸¦ ¹İÈ¯ÇÕ´Ï´Ù.
+	// ëª…ë ¹ì¤„ì— ì§€ì •ëœ ëª…ë ¹ì„ ë””ìŠ¤íŒ¨ì¹˜í•©ë‹ˆë‹¤.
+	// ì‘ìš© í”„ë¡œê·¸ë¨ì´ /RegServer, /Register, /Unregserver ë˜ëŠ” /Unregisterë¡œ ì‹œì‘ëœ ê²½ìš° FALSEë¥¼ ë°˜í™˜í•©ë‹ˆë‹¤.
 	if (!ProcessShellCommand(cmdInfo))
 		return FALSE;
-	// ÁÖ Ã¢ÀÌ ÃÊ±âÈ­µÇ¾úÀ¸¹Ç·Î ÀÌ¸¦ Ç¥½ÃÇÏ°í ¾÷µ¥ÀÌÆ®ÇÕ´Ï´Ù.
+	// ì£¼ ì°½ì´ ì´ˆê¸°í™”ë˜ì—ˆìœ¼ë¯€ë¡œ ì´ë¥¼ í‘œì‹œí•˜ê³  ì—…ë°ì´íŠ¸í•©ë‹ˆë‹¤.
 	pMainFrame->ShowWindow(m_nCmdShow);
 	pMainFrame->UpdateWindow();
 
@@ -172,14 +172,14 @@ BOOL CServerMonitorApp::InitInstance()
 	return TRUE;
 }
 
-// ´ëÈ­ »óÀÚ¸¦ ½ÇÇàÇÏ±â À§ÇÑ ÀÀ¿ë ÇÁ·Î±×·¥ ¸í·ÉÀÔ´Ï´Ù.
+// ëŒ€í™” ìƒìë¥¼ ì‹¤í–‰í•˜ê¸° ìœ„í•œ ì‘ìš© í”„ë¡œê·¸ë¨ ëª…ë ¹ì…ë‹ˆë‹¤.
 void CServerMonitorApp::OnAppAbout()
 {
 	CAboutDlg aboutDlg;
 	aboutDlg.DoModal();
 }
 
-// CServerMonitorApp »ç¿ëÀÚ ÁöÁ¤ ·Îµå/ÀúÀå ¸Ş¼­µå
+// CServerMonitorApp ì‚¬ìš©ì ì§€ì • ë¡œë“œ/ì €ì¥ ë©”ì„œë“œ
 
 void CServerMonitorApp::PreLoadState()
 {
@@ -198,4 +198,4 @@ void CServerMonitorApp::SaveCustomState()
 {
 }
 
-// CServerMonitorApp ¸Ş½ÃÁö Ã³¸®±â
+// CServerMonitorApp ë©”ì‹œì§€ ì²˜ë¦¬ê¸°

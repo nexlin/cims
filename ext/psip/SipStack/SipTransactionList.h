@@ -27,10 +27,7 @@
 
 class CSipStack;
 
-/**
- * @ingroup SipStack
- * @brief SIP transaction List Å¬·¡½º
- */
+// SIP transaction List í´ë˜ìŠ¤
 class CSipTransactionList
 {
 public:

@@ -26,10 +26,7 @@
 
 CEchoSipServerSetup gclsSetup;
 
-/**
- * @ingroup EchoSipServer
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CEchoSipServerSetup::CEchoSipServerSetup() : m_iUdpPort(5060), m_iUdpThreadCount(10)
 	, m_iTcpPort(5060), m_iTcpThreadCount(10), m_iTcpCallBackThreadCount(0), m_iTcpRecvTimeout(SIP_TCP_RECV_TIMEOUT)
 	, m_iTlsPort(0), m_iTlsAcceptTimeout(SIP_TLS_ACCEPT_TIMEOUT)
@@ -38,27 +35,19 @@ CEchoSipServerSetup::CEchoSipServerSetup() : m_iUdpPort(5060), m_iUdpThreadCount
 {
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CEchoSipServerSetup::~CEchoSipServerSetup()
 {
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief ¼³Á¤ ÆÄÀÏÀ» ÀĞ¾î¼­ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszFileName ¼³Á¤ ÆÄÀÏ full path
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì„ ì½ì–´ì„œ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CEchoSipServerSetup::Read( const char * pszFileName )
 {
 	CXmlElement clsXml, * pclsElement;
 
 	if( clsXml.ParseFile( pszFileName ) == false ) return false;
 
-	// SIP ¼³Á¤
+	// SIP ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Sip" );
 	if( pclsElement == NULL ) return false;
 
@@ -74,7 +63,7 @@ bool CEchoSipServerSetup::Read( const char * pszFileName )
 	pclsElement->SelectElementData( "CertFile", m_strCertFile );
 	pclsElement->SelectElementData( "CaCertFile", m_strCaCertFile );
 
-	// ·Î±×
+	// ë¡œê·¸
 	pclsElement = clsXml.SelectElement( "Log" );
 	if( pclsElement == NULL ) return false;
 
@@ -88,11 +77,7 @@ bool CEchoSipServerSetup::Read( const char * pszFileName )
 	return true;
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief ¼öÁ¤µÈ ¼³Á¤ ÆÄÀÏÀ» ÀĞ´Â´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìˆ˜ì •ëœ ì„¤ì • íŒŒì¼ì„ ì½ëŠ”ë‹¤.
 bool CEchoSipServerSetup::Read( )
 {
 	if( m_strFileName.length() == 0 ) return false;
@@ -107,16 +92,12 @@ bool CEchoSipServerSetup::Read( )
 	return true;
 }
 
-/**
- * @brief ¼³Á¤ ÆÄÀÏÀÇ Á¤º¸ Áß¿¡¼­ ½Ç½Ã°£À¸·Î º¯°æ °¡´ÉÇÑ Ç×¸ñÀ» ´Ù½Ã ÀúÀåÇÑ´Ù.
- * @param clsXml ¼³Á¤ ÆÄÀÏÀÇ ³»¿ëÀ» ÀúÀåÇÑ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì˜ ì •ë³´ ì¤‘ì—ì„œ ì‹¤ì‹œê°„ìœ¼ë¡œ ë³€ê²½ ê°€ëŠ¥í•œ í•­ëª©ì„ ë‹¤ì‹œ ì €ì¥í•œë‹¤.
 bool CEchoSipServerSetup::Read( CXmlElement & clsXml )
 {
 	CXmlElement * pclsElement;
 
-	// ·Î±×
+	// ë¡œê·¸
 	pclsElement = clsXml.SelectElement( "Log" );
 	if( pclsElement ) 
 	{
@@ -149,11 +130,7 @@ bool CEchoSipServerSetup::Read( CXmlElement & clsXml )
 	return true;
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief ¼³Á¤ÆÄÀÏÀÌ ¼öÁ¤µÇ¾ú´ÂÁö È®ÀÎÇÑ´Ù.
- * @returns ¼³Á¤ÆÄÀÏÀÌ ¼öÁ¤µÇ¾úÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì •íŒŒì¼ì´ ìˆ˜ì •ë˜ì—ˆëŠ”ì§€ í™•ì¸í•œë‹¤.
 bool CEchoSipServerSetup::IsChange()
 {
 	struct stat	clsStat;
@@ -166,10 +143,7 @@ bool CEchoSipServerSetup::IsChange()
 	return false;
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief ¼³Á¤ÆÄÀÏÀÇ ÀúÀå ½Ã°£À» ÀúÀåÇÑ´Ù.
- */
+// ì„¤ì •íŒŒì¼ì˜ ì €ì¥ ì‹œê°„ì„ ì €ì¥í•œë‹¤.
 void CEchoSipServerSetup::SetFileSizeTime( )
 {
 	struct stat	clsStat;

@@ -41,14 +41,7 @@ CXmlSearch::~CXmlSearch()
 {
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÑ´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszAttrName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param iIndex		Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é ¾ÖÆ®¸®ºäÆ®ÀÇ °ªÀ» ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 const char * CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -60,15 +53,7 @@ const char * CXmlSearch::SelectAttribute( const char * pszName, const char * psz
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÑ´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszAttrName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param strValue	¾ÖÆ®¸®ºäÆ® °ª
- * @param iIndex		Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 bool CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName, std::string & strValue, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -80,15 +65,7 @@ bool CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÏ¿© int º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszAttrName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param iValue		¾ÖÆ®¸®ºäÆ® °ª
- * @param iIndex		Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•˜ì—¬ int ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName, int & iValue, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -100,15 +77,7 @@ bool CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÏ¿© bool º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszAttrName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param bValue		¾ÖÆ®¸®ºäÆ® °ª
- * @param iIndex		Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•˜ì—¬ bool ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName, bool & bValue, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -120,14 +89,7 @@ bool CXmlSearch::SelectAttribute( const char * pszName, const char * pszAttrName
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸ğµç ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ ³»¿ëÀ» ÀúÀåÇÑ´Ù.
- * @param pszName		Element ÀÌ¸§
- * @param strData		Elemnet ÀÇ ³»¿ëÀ» ÀúÀåÇÒ º¯¼ö
- * @param iIndex		Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ë‚´ìš©ì„ ì €ì¥í•œë‹¤.
 bool CXmlSearch::SelectElementData( const char * pszName, std::string & strData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -140,14 +102,7 @@ bool CXmlSearch::SelectElementData( const char * pszName, std::string & strData,
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸ğµç ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ Á¤¼ö ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName Element ÀÌ¸§
- * @param iData	Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex	Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ì •ìˆ˜ ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlSearch::SelectElementData( const char * pszName, int & iData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -161,14 +116,7 @@ bool CXmlSearch::SelectElementData( const char * pszName, int & iData, const int
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸ğµç ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ bool ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName Element ÀÌ¸§
- * @param bData		Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex	Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ bool ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlSearch::SelectElementData( const char * pszName, bool & bData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -181,15 +129,7 @@ bool CXmlSearch::SelectElementData( const char * pszName, bool & bData, const in
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸ğµç ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ ³»¿ëÀ» ÀúÀåÇÑ´Ù.
- * @param pszName		Element ÀÌ¸§
- * @param pszChildName ÇÏÀ§ Element ÀÌ¸§
- * @param strData		Elemnet ÀÇ ³»¿ëÀ» ÀúÀåÇÒ º¯¼ö
- * @param iIndex		Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ë‚´ìš©ì„ ì €ì¥í•œë‹¤.
 bool CXmlSearch::SelectElementData( const char * pszName, const char * pszChildName, std::string & strData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, pszChildName, iIndex );
@@ -202,15 +142,7 @@ bool CXmlSearch::SelectElementData( const char * pszName, const char * pszChildN
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸ğµç ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ Á¤¼ö ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszChildName ÇÏÀ§ element ÀÌ¸§
- * @param iData		ÇÏÀ§ Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex		ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ì •ìˆ˜ ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlSearch::SelectElementData( const char * pszName, const char * pszChildName, int & iData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, pszChildName, iIndex );
@@ -223,15 +155,7 @@ bool CXmlSearch::SelectElementData( const char * pszName, const char * pszChildN
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸ğµç ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ bool ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszChildName ÇÏÀ§ element ÀÌ¸§
- * @param bData		ÇÏÀ§ Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex		ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ bool ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlSearch::SelectElementData( const char * pszName, const char * pszChildName, bool & bData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, pszChildName, iIndex );
@@ -244,14 +168,7 @@ bool CXmlSearch::SelectElementData( const char * pszName, const char * pszChildN
 	return false;
 }
 
-/**
- * @brief N °³ÀÇ tag ¿Í ÀÏÄ¡ÇÏ´Â element ÀÇ °ªÀ» °Ë»öÇÑ´Ù.
- * @param iIndex ¼ø¹ø. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù. 2 ¸¦ ÀÔ·ÂÇÏ¸é ¼¼¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù.
- * @param strData °Ë»öµÈ µ¥ÀÌÅÍ ÀúÀå º¯¼ö
- * @param iNameCount ÀÌ¸§ °³¼ö
- * @param ... ÀÌ¸§
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// N ê°œì˜ tag ì™€ ì¼ì¹˜í•˜ëŠ” element ì˜ ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 bool CXmlSearch::SelectElementData( const int iIndex, std::string & strData, int iNameCount, ... )
 {
 	if( iIndex < 0 ) return false;
@@ -270,14 +187,7 @@ bool CXmlSearch::SelectElementData( const int iIndex, std::string & strData, int
 	return false;
 }
 
-/**
- * @brief N °³ÀÇ tag ¿Í ÀÏÄ¡ÇÏ´Â element ÀÇ °ªÀ» °Ë»öÇÑ´Ù.
- * @param iIndex ¼ø¹ø. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù. 2 ¸¦ ÀÔ·ÂÇÏ¸é ¼¼¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù.
- * @param iData °Ë»öµÈ µ¥ÀÌÅÍ ÀúÀå º¯¼ö
- * @param iNameCount ÀÌ¸§ °³¼ö
- * @param ... ÀÌ¸§
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// N ê°œì˜ tag ì™€ ì¼ì¹˜í•˜ëŠ” element ì˜ ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 bool CXmlSearch::SelectElementData( const int iIndex, int & iData, int iNameCount, ... )
 {
 	if( iIndex < 0 ) return false;
@@ -296,14 +206,7 @@ bool CXmlSearch::SelectElementData( const int iIndex, int & iData, int iNameCoun
 	return false;
 }
 
-/**
- * @brief N °³ÀÇ tag ¿Í ÀÏÄ¡ÇÏ´Â element ÀÇ °ªÀ» °Ë»öÇÑ´Ù.
- * @param iIndex ¼ø¹ø. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù. 2 ¸¦ ÀÔ·ÂÇÏ¸é ¼¼¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù.
- * @param bData °Ë»öµÈ µ¥ÀÌÅÍ ÀúÀå º¯¼ö
- * @param iNameCount ÀÌ¸§ °³¼ö
- * @param ... ÀÌ¸§
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// N ê°œì˜ tag ì™€ ì¼ì¹˜í•˜ëŠ” element ì˜ ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 bool CXmlSearch::SelectElementData( const int iIndex, bool & bData, int iNameCount, ... )
 {
 	if( iIndex < 0 ) return false;
@@ -322,13 +225,7 @@ bool CXmlSearch::SelectElementData( const int iIndex, bool & bData, int iNameCou
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML ÀÇ ¸ğµç ÇÏÀ§ element Áß¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú ÀÏÄ¡ÇÏ´Â element ¸¦ °Ë»öÇÑ´Ù.
- * @param pszName ÀÌ¸§
- * @param iIndex ¼ø¹ø. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù. 2 ¸¦ ÀÔ·ÂÇÏ¸é ¼¼¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù.
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// XML ì˜ ëª¨ë“  í•˜ìœ„ element ì¤‘ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ì¼ì¹˜í•˜ëŠ” element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlSearch::SelectElement( const char * pszName, const int iIndex )
 {
 	int iCount = 0;
@@ -338,14 +235,7 @@ CXmlElement * CXmlSearch::SelectElement( const char * pszName, const int iIndex 
 	return SelectElement( &m_clsElementList, pszName, iIndex, iCount );
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML ÀÇ ¸ğµç ÇÏÀ§ element Áß¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú ÀÏÄ¡ÇÏ´Â element ¸¦ °Ë»öÇÑ´Ù.
- * @param pszName Element ÀÌ¸§
- * @param pszChildName ÇÏÀ§ Element ÀÌ¸§
- * @param iIndex ¼ø¹ø. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù. 2 ¸¦ ÀÔ·ÂÇÏ¸é ¼¼¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù.
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// XML ì˜ ëª¨ë“  í•˜ìœ„ element ì¤‘ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ì¼ì¹˜í•˜ëŠ” element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 
 CXmlElement * CXmlSearch::SelectElement( const char * pszName, const char * pszChildName, const int iIndex )
 {
@@ -356,13 +246,7 @@ CXmlElement * CXmlSearch::SelectElement( const char * pszName, const char * pszC
 	return SelectElement( &m_clsElementList, pszName, pszChildName, iIndex, iCount );
 }
 
-/**
- * @brief N °³ÀÇ tag ¿Í ÀÏÄ¡ÇÏ´Â element ¸¦ °Ë»öÇÑ´Ù.
- * @param iIndex ¼ø¹ø. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù. 2 ¸¦ ÀÔ·ÂÇÏ¸é ¼¼¹øÂ° °Ë»öµÈ element ¸¦ °Ë»öÇÑ´Ù.
- * @param iNameCount ÀÌ¸§ °³¼ö
- * @param ... ÀÌ¸§
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// N ê°œì˜ tag ì™€ ì¼ì¹˜í•˜ëŠ” element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlSearch::SelectElement( const int iIndex, int iNameCount, ... )
 {
 	if( iIndex < 0 ) return NULL;
@@ -374,15 +258,7 @@ CXmlElement * CXmlSearch::SelectElement( const int iIndex, int iNameCount, ... )
 	return SelectElement( &m_clsElementList, clsNameList, 0, iIndex, iCount );
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML ÀÇ ¸ğµç ÇÏÀ§ element Áß¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú ÀÏÄ¡ÇÏ´Â element ¸¦ °Ë»öÇÑ´Ù.
- * @param pclsList	element ¸®½ºÆ®
- * @param pszName		ÀÌ¸§
- * @param iIndex		¼ø¹ø
- * @param iCount		ÇöÀç °Ë»öµÈ ÀÌ¸§ °³¼ö
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// XML ì˜ ëª¨ë“  í•˜ìœ„ element ì¤‘ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ì¼ì¹˜í•˜ëŠ” element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlSearch::SelectElement( XML_ELEMENT_LIST * pclsList, const char * pszName, const int iIndex, int & iCount )
 {
 	XML_ELEMENT_LIST::iterator	itEL;
@@ -412,16 +288,7 @@ CXmlElement * CXmlSearch::SelectElement( XML_ELEMENT_LIST * pclsList, const char
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML ÀÇ ¸ğµç ÇÏÀ§ element Áß¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú ÀÏÄ¡ÇÏ´Â element ¸¦ °Ë»öÇÑ´Ù.
- * @param pclsList	element ¸®½ºÆ®
- * @param pszName		ÀÌ¸§
- * @param pszChildName ÇÏÀ§ ÀÌ¸§
- * @param iIndex		¼ø¹ø
- * @param iCount		ÇöÀç °Ë»öµÈ ÀÌ¸§ °³¼ö
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// XML ì˜ ëª¨ë“  í•˜ìœ„ element ì¤‘ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ì¼ì¹˜í•˜ëŠ” element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlSearch::SelectElement( XML_ELEMENT_LIST * pclsList, const char * pszName, const char * pszChildName, const int iIndex, int & iCount )
 {
 	XML_ELEMENT_LIST::iterator	itEL;
@@ -450,15 +317,7 @@ CXmlElement * CXmlSearch::SelectElement( XML_ELEMENT_LIST * pclsList, const char
 	return NULL;
 }
 
-/**
- * @brief N °³ÀÇ tag ¿Í ÀÏÄ¡ÇÏ´Â element ¸¦ °Ë»öÇÑ´Ù.
- * @param pclsList		element ¸®½ºÆ®
- * @param clsNameList °Ë»ö ÀÌ¸§ ¸®½ºÆ®. »óÀ§ tag ÀÌ¸§ºÎÅÍ ÇÏÀ§ tag ÀÌ¸§À¸·Î ¼ø¼­´ë·Î ÀúÀåµÇ¾î¾ß ÇÑ´Ù.
- * @param iNameIndex	°Ë»ö ÀÌ¸§ ¸®½ºÆ®¿¡¼­ ÇöÀç °Ë»öÇÒ ÀÌ¸§ ÀÎµ¦½º
- * @param iIndex			¼ø¹ø
- * @param iCount			ÇöÀç °Ë»öµÈ ÀÌ¸§ °³¼ö
- * @returns °Ë»öµÇ¸é ÇØ´ç element ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// N ê°œì˜ tag ì™€ ì¼ì¹˜í•˜ëŠ” element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlSearch::SelectElement( XML_ELEMENT_LIST * pclsList, XML_NAME_LIST & clsNameList, int iNameIndex, const int iIndex, int & iCount )
 {
 	XML_ELEMENT_LIST::iterator	itEL;

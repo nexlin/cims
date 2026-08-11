@@ -23,10 +23,7 @@
 #include "MonitorString.h"
 #include <vector>
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP ¼­¹ö Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// SIP ì„œë²„ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CSipServerInfo
 {
 public:
@@ -41,10 +38,7 @@ public:
 
 typedef std::vector< CSipServerInfo > SIP_SERVER_LIST;
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP ¼­¹ö ¸Ê ÀúÀå Å¬·¡½º
- */
+// SIP ì„œë²„ ë§µ ì €ì¥ í´ë˜ìŠ¤
 class CSipServerMap
 {
 public:

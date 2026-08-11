@@ -20,29 +20,17 @@
 #include "SdpOrigin.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpOrigin::CSdpOrigin()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpOrigin::~CSdpOrigin()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP origin ÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP origin ÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP origin ÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP origin ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpOrigin::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -71,13 +59,7 @@ int CSdpOrigin::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP origin ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP origin ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP origin ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpOrigin::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -91,10 +73,7 @@ int CSdpOrigin::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpOrigin::Clear()
 {
 	m_strUserName.clear();
@@ -105,11 +84,7 @@ void CSdpOrigin::Clear()
 	m_strUnicastAddress.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- * @return µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë°ì´í„°ê°€ ì¡´ì¬í•˜ë©´ false ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSdpOrigin::Empty()
 {
 	if( m_strUserName.empty() || m_strSessId.empty() || m_strSessVersion.empty() ) return true;

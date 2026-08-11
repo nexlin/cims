@@ -23,16 +23,7 @@
 
 #ifdef USE_TLS
 
-/**
- * @brief SIP �޽����� TCP ���ǿ� �����ϰ� ������ ��, TCP �������� �����Ѵ�.
- * @param hSocket TCP ����
- * @param psttSsl SSL ����
- * @param pszIp		������ IP �ּ�
- * @param iPort		������ ��Ʈ ��ȣ
- * @param pclsMessage SIP �޽���
- * @param iLocalTlsPort ���� TLS ��Ʈ ��ȣ. ���� TLS listen port ��ȣ�� Contact �� ����ϴ� ��쿡 �Է��Ѵ�.
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 메시지를 TCP 세션에 적합하게 수정한 후, TCP 세션으로 전송한다.
 bool SipTlsSend( Socket hSocket, SSL * psttSsl, const char * pszIp, int iPort, CSipMessage * pclsMessage, int iLocalTlsPort )
 {
 	std::string	strTcpIp;
@@ -43,7 +34,7 @@ bool SipTlsSend( Socket hSocket, SSL * psttSsl, const char * pszIp, int iPort, C
 	{
 		if( pclsMessage->IsRequest() )
 		{
-			// LG IP-PBX �� REGISTER �� ��, INVITE �� �����ϱ� ���ؼ��� listen port �� ����ؾ� �Ǿ ������.
+			// LG IP-PBX 에 REGISTER 한 후, INVITE 를 수신하기 위해서는 listen port 를 사용해야 되어서 수정함.
 			if( pclsMessage->SetTopViaTransPort( E_SIP_TLS, iLocalTlsPort ) )
 			{
 				pclsMessage->MakePacket();

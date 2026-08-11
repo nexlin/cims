@@ -21,7 +21,7 @@
 
 #include "SipPlatformDefine.h"
 
-// ºü¸¥ SIP ¸Ş½ÃÁö ÆÄ½Ì ±â´ÉÀ» »ç¿ëÇÏ·Á¸é ÁÖ¼®À» ÇØÁ¦ÇÏ¶ó.
+// ë¹ ë¥¸ SIP ë©”ì‹œì§€ íŒŒì‹± ê¸°ëŠ¥ì„ ì‚¬ìš©í•˜ë ¤ë©´ ì£¼ì„ì„ í•´ì œí•˜ë¼.
 #define PARSE_FAST
 
 #define SIP_MESSAGE_MAX_LEN				8192
@@ -60,8 +60,5 @@
 
 #endif
 
-/**
- * @defgroup SipParser SipParser
- * SIP ¸Ş½ÃÁö ÆÄ¼­/»ı¼º ¶óÀÌºê·¯¸®
- */
+// SipParser
 

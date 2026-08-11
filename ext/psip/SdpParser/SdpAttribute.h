@@ -26,10 +26,7 @@
 #include "SipParameterList.h"
 #endif
 
-/**
- * @ingroup SdpParser
- * @brief SDP attribute ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º.
- */
+// SDP attribute ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤.
 class CSdpAttribute
 {
 public:
@@ -37,10 +34,10 @@ public:
 	CSdpAttribute( const char * pszName, const char * pszValue );
 	~CSdpAttribute();
 
-	/** attribute ÀÌ¸§ */
+	// attribute ì´ë¦„
 	std::string	m_strName;		
 
-	/** attribute °ª */
+	// attribute ê°’
 	std::string	m_strValue;		
 
 	int Parse( const char * pszText, int iTextLen );

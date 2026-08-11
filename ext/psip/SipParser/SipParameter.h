@@ -23,20 +23,17 @@
 #include <list>
 #include "SipTransport.h"
 
-/**
- * @ingroup SipParser
- * @brief parameter Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// parameter ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipParameter
 {
 public:
 	CSipParameter();
 	~CSipParameter();
 
-	/** ÀÌ¸§ */
+	// ì´ë¦„
 	std::string	m_strName;
 
-	/** °ª */
+	// ê°’
 	std::string	m_strValue;
 
 	int Parse( const char * pszText, int iTextLen );
@@ -44,7 +41,7 @@ public:
 	void Clear();
 };
 
-/** parameter ¸®½ºÆ® */
+// parameter ë¦¬ìŠ¤íŠ¸
 typedef std::list< CSipParameter > SIP_PARAMETER_LIST;
 
 int ParseSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszText, int iTextLen );

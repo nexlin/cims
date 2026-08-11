@@ -29,13 +29,7 @@ CSipChallenge::~CSipChallenge()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipChallenge Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipChallenge í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipChallenge::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -113,13 +107,7 @@ int CSipChallenge::Parse( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipChallenge::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -151,10 +139,7 @@ int CSipChallenge::ToString( char * pszText, int iTextSize )
 	return iLen + iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipChallenge::Clear()
 {
 	m_strType.clear();
@@ -167,16 +152,7 @@ void CSipChallenge::Clear()
 	m_strQop.clear();
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP challenge ¹®ÀÚ¿­¿¡ ÀÌ¸§, °ªÀ» ÀúÀåÇÑ´Ù.
- * @param pszText		SIP chanllenge ¹®ÀÚ¿­
- * @param iTextPos	SIP chanllenge ¹®ÀÚ¿­ º¯¼öÀÇ ¾²±â À§Ä¡
- * @param iTextSize SIP chanllenge ¹®ÀÚ¿­ º¯¼ö Å©±â
- * @param pszName		ÀÌ¸§
- * @param strValue	°ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP challenge ë¬¸ìì—´ì— ì´ë¦„, ê°’ì„ ì €ì¥í•œë‹¤.
 bool CSipChallenge::SetString( char * pszText, int & iTextPos, int iTextSize, const char * pszName, std::string & strValue )
 {
 	if( strValue.empty() ) return true;
@@ -197,16 +173,7 @@ bool CSipChallenge::SetString( char * pszText, int & iTextPos, int iTextSize, co
 	return true;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP challenge ¹®ÀÚ¿­¿¡ ÀÌ¸§, " °¡ Æ÷ÇÔµÈ °ªÀ» ÀúÀåÇÑ´Ù.
- * @param pszText		SIP chanllenge ¹®ÀÚ¿­
- * @param iTextPos	SIP chanllenge ¹®ÀÚ¿­ º¯¼öÀÇ ¾²±â À§Ä¡
- * @param iTextSize SIP chanllenge ¹®ÀÚ¿­ º¯¼ö Å©±â
- * @param pszName		ÀÌ¸§
- * @param strValue	°ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP challenge ë¬¸ìì—´ì— ì´ë¦„, " ê°€ í¬í•¨ëœ ê°’ì„ ì €ì¥í•œë‹¤.
 bool CSipChallenge::SetQuoteString( char * pszText, int & iTextPos, int iTextSize, const char * pszName, std::string & strValue )
 {
 	if( strValue.empty() ) return true;
@@ -227,14 +194,7 @@ bool CSipChallenge::SetQuoteString( char * pszText, int & iTextPos, int iTextSiz
 	return true;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP challenge ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿©¼­ challenge ¸®½ºÆ®¿¡ ÀúÀåÇÑ´Ù.
- * @param clsList		challenge ¸®½ºÆ®
- * @param pszText		SIP challenge ¹®ÀÚ¿­
- * @param iTextLen	SIP challenge ¹®ÀÚ¿­ ±æÀÌ 
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP challenge ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ì„œ challenge ë¦¬ìŠ¤íŠ¸ì— ì €ì¥í•œë‹¤.
 int ParseSipChallenge( SIP_CHALLENGE_LIST & clsList, const char * pszText, int iTextLen )
 {
 	int iPos;

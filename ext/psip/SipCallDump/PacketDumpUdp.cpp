@@ -23,16 +23,7 @@
 #include "IpFragmentMap.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipCallDump
- * @brief UDP ÆÐÅ¶À» ºÐ¼®ÇÑ´Ù.
- * @param psttPcap			pcap_t Æ÷ÀÎÅÍ
- * @param psttHeader		pcap_pkthdr Æ÷ÀÎÅÍ
- * @param pszData				ÆÐÅ¶
- * @param psttIp4Header IPv4 Çì´õ
- * @param iIpPos				IP Çì´õ À§Ä¡
- * @param iIpHeaderLen	IP Çì´õ ±æÀÌ
- */
+// UDP íŒ¨í‚·ì„ ë¶„ì„í•œë‹¤.
 void PacketDumpUdp( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_char * pszData, Ip4Header * psttIp4Header, int iIpPos, int iIpHeaderLen )
 {
 	UdpHeader * psttUdpHeader = (UdpHeader *)( pszData + iIpPos + iIpHeaderLen );
@@ -48,7 +39,7 @@ void PacketDumpUdp( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_
 	{
 		bool bEnd;
 
-		// fragment Ã³¸®
+		// fragment ì²˜ë¦¬
 		if( gclsIpFragmentMap.Insert( psttIp4Header, (char *)pszData + iIpPos + iIpHeaderLen, psttHeader->caplen - ( iIpPos + iIpHeaderLen ), bEnd ) )
 		{
 			if( bEnd == false ) return;

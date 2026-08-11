@@ -22,10 +22,7 @@
 #include "WinAudio.h"
 #include "SipUdp.h"
 
-/**
- * @ingroup SipClientMFC
- * @brief RTP ¿Àµğ¿À Àü¼Û ¹× ¼ö½Å ¾²·¹µå
- */
+// RTP ì˜¤ë””ì˜¤ ì „ì†¡ ë° ìˆ˜ì‹  ì“°ë ˆë“œ
 class CAudioThread : public IWinAudioCallBack
 {
 public:

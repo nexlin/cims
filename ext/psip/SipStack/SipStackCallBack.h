@@ -21,98 +21,44 @@
 
 #include "SipStackDefine.h"
 
-/**
- * @ingroup SipStack
- * @brief SIP stack callback ÀÎÅÍÆäÀÌ½º
- */
+// SIP stack callback ì¸í„°í˜ì´ìŠ¤
 class ISipStackCallBack
 {
 public:
 	virtual ~ISipStackCallBack(){};
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP ¿äÃ» ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
-	 * @param iThreadId		UDP ¾²·¹µå ¹øÈ£
-	 * @param pclsMessage SIP ¿äÃ» ¸Ş½ÃÁö
-	 * @returns SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// SIP ìš”ì²­ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual bool RecvRequest( int iThreadId, CSipMessage * pclsMessage ) = 0;
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
-	 * @param iThreadId		UDP ¾²·¹µå ¹øÈ£
-	 * @param pclsMessage SIP ÀÀ´ä ¸Ş½ÃÁö
-	 * @returns SIP ÀÀ´ä ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// SIP ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual bool RecvResponse( int iThreadId, CSipMessage * pclsMessage ) = 0;
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP ¸Ş½ÃÁö Àü¼Û timeout ÀÌº¥Æ® ÇÚµé·¯
-	 * @param iThreadId		UDP ¾²·¹µå ¹øÈ£
-	 * @param pclsMessage SIP ÀÀ´ä ¸Ş½ÃÁö
-	 * @returns SIP ÀÀ´ä ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// SIP ë©”ì‹œì§€ ì „ì†¡ timeout ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual bool SendTimeout( int iThreadId, CSipMessage * pclsMessage ) = 0;
 
-	/**
-	 * @ingroup SipStack
-	 * @brief TCP/TLS ¼¼¼Ç Á¾·á ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pszIp IP ÁÖ¼Ò
-	 * @param iPort Æ÷Æ® ¹øÈ£
-	 * @param eTransport ÇÁ·ÎÅäÄİ
-	 */
+	// TCP/TLS ì„¸ì…˜ ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual void TcpSessionEnd( const char * pszIp, int iPort, ESipTransport eTransport ){};
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP ¸Ş½ÃÁö ¼ö½Å ¾²·¹µå°¡ Á¾·áµÊÀ» ¾Ë·ÁÁÖ´Â ÀÌº¥Æ® ÇÚµé·¯
-	 * @param iThreadId UDP ¾²·¹µå ¹øÈ£
-	 */
+	// SIP ë©”ì‹œì§€ ìˆ˜ì‹  ì“°ë ˆë“œê°€ ì¢…ë£Œë¨ì„ ì•Œë ¤ì£¼ëŠ” ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual void ThreadEnd( int iThreadId ){};
 };
 
-/**
- * @ingroup SipStack
- * @brief SIP stack º¸¾È callback ÀÎÅÍÆäÀÌ½º
- */
+// SIP stack ë³´ì•ˆ callback ì¸í„°í˜ì´ìŠ¤
 class ISipStackSecurityCallBack
 {
 public:
 	virtual ~ISipStackSecurityCallBack(){};
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP stack ¿¡¼­ Çã¿ëÇÏ´Â SIP User Agent ÀÎ°¡?
-	 * @param pszSipUserAgent SIP UserAgent Çì´õ
-	 * @returns SIP stack ¿¡¼­ Çã¿ëÇÏ´Â SIP User Agent ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ÇÑ´Ù.
-	 */
+	// SIP stack ì—ì„œ í—ˆìš©í•˜ëŠ” SIP User Agent ì¸ê°€?
 	virtual bool IsAllowUserAgent( const char * pszSipUserAgent ) = 0;
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP stack ¿¡¼­ Çã¿ëÇÏÁö ¾Ê´Â SIP User Agent ÀÎ°¡?
-	 * @param pszSipUserAgent SIP UserAgent Çì´õ
-	 * @returns SIP stack ¿¡¼­ Çã¿ëÇÏÁö ¾Ê´Â SIP User Agent ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ÇÑ´Ù.
-	 */
+	// SIP stack ì—ì„œ í—ˆìš©í•˜ì§€ ì•ŠëŠ” SIP User Agent ì¸ê°€?
 	virtual bool IsDenyUserAgent( const char * pszSipUserAgent ) = 0;
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP stack ¿¡¼­ Çã¿ëÇÏ´Â IP ÁÖ¼ÒÀÎ°¡?
-	 * @param pszIp Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
-	 * @returns SIP stack ¿¡¼­ Çã¿ëÇÏ´Â IP ÁÖ¼ÒÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// SIP stack ì—ì„œ í—ˆìš©í•˜ëŠ” IP ì£¼ì†Œì¸ê°€?
 	virtual bool IsAllowIp( const char * pszIp ) = 0;
 
-	/**
-	 * @ingroup SipStack
-	 * @brief SIP stack ¿¡¼­ Çã¿ëÇÏÁö ¾Ê´Â IP ÁÖ¼ÒÀÎ°¡?
-	 * @param pszIp Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
-	 * @returns SIP stack ¿¡¼­ Çã¿ëÇÏÁö ¾Ê´Â IP ÁÖ¼ÒÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// SIP stack ì—ì„œ í—ˆìš©í•˜ì§€ ì•ŠëŠ” IP ì£¼ì†Œì¸ê°€?
 	virtual bool IsDenyIp( const char * pszIp ) = 0;
 };
 

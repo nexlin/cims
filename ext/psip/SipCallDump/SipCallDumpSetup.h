@@ -28,10 +28,7 @@
 
 typedef std::map< int, int > PORT_MAP;
 
-/**
- * @ingroup SipCallDump
- * @brief ¼³Á¤ ÆÄÀÏÀ» ÀĞ¾î¼­ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// ì„¤ì • íŒŒì¼ì„ ì½ì–´ì„œ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipCallDumpSetup
 {
 public:
@@ -44,22 +41,22 @@ public:
 	bool IsChange();
 	bool IsTcpSipPort( int iPort );
 
-	// ÆĞÅ¶ ´ıÇÁ ¼³Á¤
-	std::string	m_strPacketDevice;	// pcap_open ÀÇ 1¹øÂ° ÀÎÀÚ°ª - ÆĞÅ¶ Ä¸Ã³ µğ¹ÙÀÌ½º ÀÌ¸§
-	int		m_iPacketSnapLen;					// pcap_open ÀÇ 2¹øÂ° ÀÎÀÚ°ª
-	int		m_iPacketReadTimeout;			// pcap_open ÀÇ 4¹øÂ° ÀÎÀÚ°ª
-	std::string m_strPacketFolder;	// pcap ÆÄÀÏÀ» ÀúÀåÇÒ Æú´õ full path
+	// íŒ¨í‚· ë¤í”„ ì„¤ì •
+	std::string	m_strPacketDevice;	// pcap_open ì˜ 1ë²ˆì§¸ ì¸ìê°’ - íŒ¨í‚· ìº¡ì²˜ ë””ë°”ì´ìŠ¤ ì´ë¦„
+	int		m_iPacketSnapLen;					// pcap_open ì˜ 2ë²ˆì§¸ ì¸ìê°’
+	int		m_iPacketReadTimeout;			// pcap_open ì˜ 4ë²ˆì§¸ ì¸ìê°’
+	std::string m_strPacketFolder;	// pcap íŒŒì¼ì„ ì €ì¥í•  í´ë” full path
 
 	// RTP
-	int		m_iRtpRecvTimeout;				// RTP ¼ö½Å timeout ½Ã°£ - ¿©±â¿¡ ÁöÁ¤µÈ ½Ã°£µ¿¾È RTP °¡ ¼ö½ÅµÇÁö ¾Ê¾Ò´Ù¸é ÅëÈ­ Á¾·á Ã³¸®ÇÑ´Ù.
+	int		m_iRtpRecvTimeout;				// RTP ìˆ˜ì‹  timeout ì‹œê°„ - ì—¬ê¸°ì— ì§€ì •ëœ ì‹œê°„ë™ì•ˆ RTP ê°€ ìˆ˜ì‹ ë˜ì§€ ì•Šì•˜ë‹¤ë©´ í†µí™” ì¢…ë£Œ ì²˜ë¦¬í•œë‹¤.
 
 private:
 	bool Read( CXmlElement & clsXml );
 	void SetFileSizeTime( );
 
-	std::string	m_strFileName;	// ¼³Á¤ ÆÄÀÏ ÀÌ¸§
-	time_t			m_iFileTime;		// ¼³Á¤ ÆÄÀÏ ÀúÀå ½Ã°£
-	int					m_iFileSize;		// ¼³Á¤ ÆÄÀÏ Å©±â
+	std::string	m_strFileName;	// ì„¤ì • íŒŒì¼ ì´ë¦„
+	time_t			m_iFileTime;		// ì„¤ì • íŒŒì¼ ì €ì¥ ì‹œê°„
+	int					m_iFileSize;		// ì„¤ì • íŒŒì¼ í¬ê¸°
 
 	// TCP
 	PORT_MAP	m_clsTcpPortMap;

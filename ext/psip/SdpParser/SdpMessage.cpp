@@ -20,29 +20,17 @@
 #include "SdpMessage.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpMessage::CSdpMessage()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpMessage::~CSdpMessage()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP ¸Ş½ÃÁöÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP ¸Ş½ÃÁöÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP ¸Ş½ÃÁöÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP ë©”ì‹œì§€ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpMessage::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -184,13 +172,7 @@ int CSdpMessage::Parse( const char * pszText, int iTextLen )
 	return iPos;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP ¸Ş½ÃÁöÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP ¸Ş½ÃÁöÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP ë©”ì‹œì§€ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpMessage::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -317,10 +299,7 @@ int CSdpMessage::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpMessage::Clear()
 {
 	m_strVersion.clear();
@@ -341,13 +320,7 @@ void CSdpMessage::Clear()
 	m_clsMediaList.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¹Ìµğ¾î¸¦ °Ë»öÇÑ´Ù.
- * @param pszMediaName	¹Ìµğ¾î ÀÌ¸§
- * @param ppclsMedia		¹Ìµğ¾î °´Ã¼ÀÇ Æ÷ÀÎÅÍ ÀúÀå º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë¯¸ë””ì–´ë¥¼ ê²€ìƒ‰í•œë‹¤.
 bool CSdpMessage::SelectMedia( const char * pszMediaName, CSdpMedia ** ppclsMedia )
 {
 	SDP_MEDIA_LIST::iterator	itList;

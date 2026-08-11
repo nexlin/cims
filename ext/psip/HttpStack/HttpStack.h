@@ -24,10 +24,7 @@
 #include "WebSocketPacket.h"
 #include "HttpStackCallBack.h"
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ¼­¹öÀÇ °¢ ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// HTTP ì„œë²„ì˜ ê° ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CHttpStackSession : public ITcpSessionApp
 {
 public:
@@ -40,10 +37,7 @@ public:
 	std::string				m_strUserAgent;
 };
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ¼­¹ö Å¬·¡½º
- */
+// HTTP ì„œë²„ í´ë˜ìŠ¤
 class CHttpStack : public ITcpStackCallBack
 {
 public:

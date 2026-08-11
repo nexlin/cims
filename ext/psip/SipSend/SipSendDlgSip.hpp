@@ -22,93 +22,47 @@ LRESULT CSipSendDlg::OnSipMessage( WPARAM wParam, LPARAM lParam )
 	return 0;
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP REGISTER ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pclsInfo	SIP REGISTER ÀÀ´ä ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ IP-PBX Á¤º¸ ÀúÀå °´Ã¼
- * @param iStatus		SIP REGISTER ÀÀ´ä ÄÚµå
- */
+// SIP REGISTER ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipSendDlg::EventRegister( CSipServerInfo * pclsInfo, int iStatus )
 {
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP ÅëÈ­ ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pszFrom		SIP From »ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pszTo			SIP To »ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP í†µí™” ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipSendDlg::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp )
 {
 	gclsSipUserAgent.StopCall( pszCallId, SIP_BUSY_HERE );
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP Ring / Session Progress ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ÀÀ´ä ÄÚµå
- * @param pclsRtp			RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP Ring / Session Progress ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipSendDlg::EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp )
 {
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP ÅëÈ­ ¿¬°á ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP í†µí™” ì—°ê²° ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipSendDlg::EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP ÅëÈ­ Á¾·á ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ÀÀ´ä ÄÚµå. INVITE ¿¡ ´ëÇÑ ¿À·ù ÀÀ´äÀ¸·Î ÀüÈ­°¡ Á¾·áµÈ °æ¿ì, INVITE ÀÇ ÀÀ´ä ÄÚµå¸¦ ÀúÀåÇÑ´Ù.
- */
+// SIP í†µí™” ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipSendDlg::EventCallEnd( const char * pszCallId, int iSipStatus )
 {
 	
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP ¿äÃ» ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		UDP ¾²·¹µå ¹øÈ£
- * @param pclsMessage SIP ¿äÃ» ¸Ş½ÃÁö
- * @returns SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ìš”ì²­ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipSendDlg::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	return false;
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		UDP ¾²·¹µå ¹øÈ£
- * @param pclsMessage SIP ÀÀ´ä ¸Ş½ÃÁö
- * @returns SIP ÀÀ´ä ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipSendDlg::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	return false;
 }
 
-/**
- * @ingroup SipSpeed
- * @brief SIP ¸Ş½ÃÁö Àü¼Û timeout ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		UDP ¾²·¹µå ¹øÈ£
- * @param pclsMessage SIP ÀÀ´ä ¸Ş½ÃÁö
- * @returns SIP ÀÀ´ä ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ ì „ì†¡ timeout ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipSendDlg::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 {
 	return false;

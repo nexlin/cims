@@ -25,10 +25,7 @@
 #include <map>
 #include <pcap.h>
 
-/**
- * @ingroup SipCallDump
- * @brief SDP ¿¡ ÀúÀåµÈ RTP ¼¼¼Ç Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// SDP ì— ì €ì¥ëœ RTP ì„¸ì…˜ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CSipRtpInfo
 {
 public:
@@ -45,10 +42,7 @@ public:
 	uint16_t		m_iPort;
 };
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ÅëÈ­ ¼¼¼Ç Á¤º¸¸¦ ÀúÀå Å¬·¡½º
- */
+// SIP í†µí™” ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥ í´ë˜ìŠ¤
 class CSipCallInfo
 {
 public:
@@ -71,10 +65,7 @@ public:
 // key = SIP Call-ID
 typedef std::map< std::string, CSipCallInfo > SIP_CALL_MAP;
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ÅëÈ­ ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶
- */
+// SIP í†µí™” ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” ìë£Œêµ¬ì¡°
 class CSipCallMap
 {
 public:

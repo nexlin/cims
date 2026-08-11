@@ -24,32 +24,26 @@
 #include <list>
 #include <string>
 
-/**
- * @ingroup SipStack
- * @brief SIP ¼ö½Å ¸Ş½ÃÁö¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP ìˆ˜ì‹  ë©”ì‹œì§€ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipQueueEntry
 {
 public:
-	/** SIP ¼ö½Å ¸Ş½ÃÁö */
+	// SIP ìˆ˜ì‹  ë©”ì‹œì§€
 	std::string m_strBuf;
 
-	/** SIP ¸Ş½ÃÁö Àü¼Û IP ÁÖ¼Ò */
+	// SIP ë©”ì‹œì§€ ì „ì†¡ IP ì£¼ì†Œ
 	std::string m_strIp;
 
-	/** SIP ¸Ş½ÃÁö Àü¼Û IP ÁÖ¼Ò */
+	// SIP ë©”ì‹œì§€ ì „ì†¡ IP ì£¼ì†Œ
 	unsigned short m_sPort;
 
-	/** SIP ¸Ş½ÃÁö Àü¼Û ÇÁ·ÎÅäÄİ */
+	// SIP ë©”ì‹œì§€ ì „ì†¡ í”„ë¡œí† ì½œ
 	ESipTransport m_eTransport;
 };
 
 typedef std::list< CSipQueueEntry * > SIP_QUEUE;
 
-/**
- * @ingroup SipStack
- * @brief SIP ¼ö½Å ¸Ş½ÃÁö ¸®½ºÆ®¸¦ ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶ Å¬·¡½º
- */
+// SIP ìˆ˜ì‹  ë©”ì‹œì§€ ë¦¬ìŠ¤íŠ¸ë¥¼ ì €ì¥í•˜ëŠ” ìë£Œêµ¬ì¡° í´ë˜ìŠ¤
 class CSipQueue
 {
 public:

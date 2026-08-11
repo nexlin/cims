@@ -23,12 +23,7 @@
 #include "RtpHeader.h"
 #include "G711.h"
 
-/**
- * @ingroup SipClientMFC
- * @brief RTP audio ¼ö½Å ¾²·¹µå
- * @param lpParameter CAudioThread °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// RTP audio ìˆ˜ì‹  ì“°ë ˆë“œ
 THREAD_API AudioRtpRecvThread( LPVOID lpParameter )
 {
 	CAudioThread * pclsThread = (CAudioThread *)lpParameter;
@@ -72,11 +67,7 @@ CAudioThread::~CAudioThread()
 {
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ¿Àµð¿À µð¹ÙÀÌ½º¸¦ ½ÃÀÛÇÏ°í ¿Àµð¿À RTP Æ÷Æ® »ý¼º ¹× ¿Àµð¿À RTP ¼ö½Å ¾²·¹µå¸¦ ½ÃÀÛÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì˜¤ë””ì˜¤ ë””ë°”ì´ìŠ¤ë¥¼ ì‹œìž‘í•˜ê³  ì˜¤ë””ì˜¤ RTP í¬íŠ¸ ìƒì„± ë° ì˜¤ë””ì˜¤ RTP ìˆ˜ì‹  ì“°ë ˆë“œë¥¼ ì‹œìž‘í•œë‹¤.
 bool CAudioThread::Start()
 {
 	if( m_iPort > 0 )
@@ -113,18 +104,14 @@ bool CAudioThread::Start()
 	return true;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ¿Àµð¿À RTP ¼ö½Å ¾²·¹µå¸¦ Á¾·áÇÏ°í RTP Æ÷Æ®¸¦ ÇØÁ¦ÇÑ ÈÄ, ¿Àµð¿À µð¹ÙÀÌ½º¸¦ ÁßÁöÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì˜¤ë””ì˜¤ RTP ìˆ˜ì‹  ì“°ë ˆë“œë¥¼ ì¢…ë£Œí•˜ê³  RTP í¬íŠ¸ë¥¼ í•´ì œí•œ í›„, ì˜¤ë””ì˜¤ ë””ë°”ì´ìŠ¤ë¥¼ ì¤‘ì§€í•œë‹¤.
 bool CAudioThread::Stop()
 {
 	if( m_bStop ) return true;
 
 	m_bStop = true;
 
-	// RTP ¼ö½Å ¾²·¹µå°¡ Á¾·áÇÒ ¶§±îÁö 1ÃÊ µ¿¾È ´ë±âÇÑ´Ù.
+	// RTP ìˆ˜ì‹  ì“°ë ˆë“œê°€ ì¢…ë£Œí•  ë•Œê¹Œì§€ 1ì´ˆ ë™ì•ˆ ëŒ€ê¸°í•œë‹¤.
 	for( int i = 0; i < 50; ++i )
 	{
 		if( m_bThreadRun == false ) break;
@@ -148,12 +135,7 @@ bool CAudioThread::Stop()
 	return true;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief RTP ÆÐÅ¶À» Àü¼ÛÇÒ ¸ñÀûÁö Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param pszDestIp ¸ñÀûÁö IP ÁÖ¼Ò
- * @param iDestPort ¸ñÀûÁö Æ÷Æ® ¹øÈ£
- */
+// RTP íŒ¨í‚·ì„ ì „ì†¡í•  ëª©ì ì§€ ì •ë³´ë¥¼ ì €ìž¥í•œë‹¤.
 void CAudioThread::SetDestIpPort( const char * pszDestIp, int iDestPort )
 {
 	m_strDestIp = pszDestIp;
@@ -164,12 +146,7 @@ void CAudioThread::SetDestIpPort( const char * pszDestIp, int iDestPort )
 #endif
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief PC ¸¶ÀÌÅ©¿¡¼­ ³ìÀ½µÈ PCM À½¿øÀ» ¼ö½Å ÀÌº¥Æ® callback
- * @param parrPcm PCM ¹öÆÛ
- * @param iPcmLen PCM ¹öÆÛ Å©±â
- */
+// PC ë§ˆì´í¬ì—ì„œ ë…¹ìŒëœ PCM ìŒì›ì„ ìˆ˜ì‹  ì´ë²¤íŠ¸ callback
 void CAudioThread::EventInPcm( const int16_t * parrPcm, int iPcmLen )
 {
 	if( m_strDestIp.empty() == false && m_iDestPort > 0 )

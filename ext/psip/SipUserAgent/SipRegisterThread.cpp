@@ -21,12 +21,7 @@
 #include <time.h>
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ¼­¹ö¿¡ ÁÖ±âÀûÀ¸·Î REGISTER ¸Ş½ÃÁö¸¦ Àü¼ÛÇÏ´Â ¾²·¹µå
- * @param lpParameter CSipUserAgent °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì„œë²„ì— ì£¼ê¸°ì ìœ¼ë¡œ REGISTER ë©”ì‹œì§€ë¥¼ ì „ì†¡í•˜ëŠ” ì“°ë ˆë“œ
 THREAD_API SipRegisterThread( LPVOID lpParameter )
 {
 	CSipUserAgent * pclsSipUserAgent = (CSipUserAgent *)lpParameter;
@@ -96,12 +91,7 @@ THREAD_API SipRegisterThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ¼­¹ö¿¡ ÁÖ±âÀûÀ¸·Î REGISTER ¸Ş½ÃÁö¸¦ Àü¼ÛÇÏ´Â ¾²·¹µå¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pclsSipUserAgent CSipUserAgent °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì„œë²„ì— ì£¼ê¸°ì ìœ¼ë¡œ REGISTER ë©”ì‹œì§€ë¥¼ ì „ì†¡í•˜ëŠ” ì“°ë ˆë“œë¥¼ ì‹œì‘í•œë‹¤.
 bool StartSipRegisterThread( CSipUserAgent * pclsSipUserAgent )
 {
 	return StartThread( "SipRegisterThread", SipRegisterThread, pclsSipUserAgent );

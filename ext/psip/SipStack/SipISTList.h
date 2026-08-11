@@ -22,10 +22,7 @@
 #include "SipInviteTransaction.h"
 #include "SipTransactionList.h"
 
-/**
- * @ingroup SipStack
- * @brief INVITE SERVER TRANSACTION List ≈¨∑°Ω∫
- */
+// INVITE SERVER TRANSACTION List ÌÅ¥ÎûòÏä§
 class CSipISTList : public CSipTransactionList
 {
 public:

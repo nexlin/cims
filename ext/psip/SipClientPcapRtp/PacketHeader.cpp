@@ -21,12 +21,7 @@
 #include <stdio.h>
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipCallDump
- * @brief UDP ÆĞÅ¶ÀÎÁö °Ë»çÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @returns UDP ÆĞÅ¶ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// UDP íŒ¨í‚·ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool IsUdpPacket( Ip4Header * psttIp4Header )
 {
 	if( ( psttIp4Header->ver_ihl & 0xF0 ) == 0x40 )
@@ -49,12 +44,7 @@ bool IsUdpPacket( Ip4Header * psttIp4Header )
 	return false;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief TCP ÆĞÅ¶ÀÎÁö °Ë»çÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @returns TCP ÆĞÅ¶ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP íŒ¨í‚·ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool IsTcpPacket( Ip4Header * psttIp4Header )
 {
 	if( ( psttIp4Header->ver_ihl & 0xF0 ) == 0x40 )
@@ -81,12 +71,7 @@ bool IsTcpPacket( Ip4Header * psttIp4Header )
 	return false;
 }
 
-/** IP Çì´õ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- * @ingroup SipCallDump
- * @brief IP Çì´õ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @returns IP Çì´õ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// IP í—¤ë” ê¸¸ì´ë¥¼ ë¦¬í„´í•œë‹¤.
 int GetIpHeaderLength( Ip4Header * psttIp4Header )
 {
 	if( ( psttIp4Header->ver_ihl & 0xF0 ) == 0x40 )
@@ -101,36 +86,19 @@ int GetIpHeaderLength( Ip4Header * psttIp4Header )
 	return 0;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief network order IP ÁÖ¼Ò¸¦ ¹®ÀÚ¿­ IP ÁÖ¼Ò¿¡ ÀúÀåÇÑ´Ù.
- * @param iIp			IP ÁÖ¼Ò
- * @param pszIp		[out] IP ÁÖ¼Ò ÀúÀå º¯¼ö
- * @param iIpSize pszIp º¯¼öÀÇ Å©±â
- */
+// network order IP ì£¼ì†Œë¥¼ ë¬¸ìì—´ IP ì£¼ì†Œì— ì €ì¥í•œë‹¤.
 void GetIpString( uint32_t iIp, char * pszIp, int iIpSize )
 {
 	snprintf( pszIp, iIpSize, "%d.%d.%d.%d", iIp & 0xFF, ( iIp >> 8 ) & 0xFF, ( iIp >> 16 ) & 0xFF, ( iIp >> 24 ) & 0xFF );
 }
 
-/**
- * @ingroup SipCallDump
- * @brief TCP Çì´õ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param psttTcpHeader TCP Çì´õ
- * @returns TCP Çì´õ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP í—¤ë” ê¸¸ì´ë¥¼ ë¦¬í„´í•œë‹¤.
 int GetTcpHeaderLength( TcpHeader * psttTcpHeader )
 {
 	return ( ( psttTcpHeader->hlen >> 4 ) & 0x0F ) * 4;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief RTP ÆĞÅ¶ÀÎÁö °Ë»çÇÑ´Ù.
- * @param pszUdpBody	UDP body
- * @param iUdpBodyLen UDP body ±æÀÌ
- * @returns RTP ÆĞÅ¶ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// RTP íŒ¨í‚·ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool IsRtpPacket( char * pszUdpBody, int iUdpBodyLen )
 {
 	if( (uint8_t)pszUdpBody[0] == 0x80 || (uint8_t)pszUdpBody[0] == 0x81 )
@@ -141,13 +109,7 @@ bool IsRtpPacket( char * pszUdpBody, int iUdpBodyLen )
 	return false;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ¸Ş½ÃÁöÀÎÁö °Ë»çÇÑ´Ù.
- * @param pszUdpBody	UDP body
- * @param iUdpBodyLen UDP body ±æÀÌ
- * @returns SIP ÆĞÅ¶ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool IsSipPacket( char * pszUdpBody, int iUdpBodyLen )
 {
 	if( !strncmp( pszUdpBody, "INVITE ", 7 ) || 

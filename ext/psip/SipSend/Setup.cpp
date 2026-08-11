@@ -29,11 +29,7 @@ CSetup::~CSetup()
 {
 }
 
-/**
- * @ingroup SipSpeed
- * @brief ¼³Á¤ ÆÄÀÏÀ» ÀĞ¾î¼­ ¸â¹öº¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @return ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì„ ì½ì–´ì„œ ë©¤ë²„ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CSetup::Get()
 {
 	if( GetFile() == false ) return false;
@@ -51,11 +47,7 @@ bool CSetup::Get()
 	return true;
 }
 
-/**
- * @ingroup SipSpeed
- * @brief ¸â¹öº¯¼ö¸¦ ¼³Á¤ ÆÄÀÏ·Î ÀúÀåÇÑ´Ù.
- * @return ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ë³€ìˆ˜ë¥¼ ì„¤ì • íŒŒì¼ë¡œ ì €ì¥í•œë‹¤.
 bool CSetup::Put()
 {
 	PutString( ST_SIP_SERVER_IP, m_strSipServerIp.c_str() );
@@ -73,11 +65,7 @@ bool CSetup::Put()
 	return bRes;
 }
 
-/**
- * @ingroup SipSpeed
- * @brief ¼³Á¤ ÆÄÀÏÀ» ÀĞ¾î¼­ Å°/°ª ÀÚ·á±¸Á¶¿¡ ÀúÀåÇÑ´Ù.
- * @return ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì„ ì½ì–´ì„œ í‚¤/ê°’ ìë£Œêµ¬ì¡°ì— ì €ì¥í•œë‹¤.
 bool CSetup::GetFile()
 {
 	FILE	* fd = fopen( SETUP_FILENAME, "r" );
@@ -132,11 +120,7 @@ bool CSetup::GetFile()
 	return true;
 }
 
-/**
- * @ingroup SipSpeed
- * @brief Å°/°ª ÀÚ·á±¸Á¶¸¦ ¼³Á¤ ÆÄÀÏ¿¡ ÀúÀåÇÑ´Ù.
- * @return ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í‚¤/ê°’ ìë£Œêµ¬ì¡°ë¥¼ ì„¤ì • íŒŒì¼ì— ì €ì¥í•œë‹¤.
 bool CSetup::PutFile()
 {
 	FILE	* fd = fopen( SETUP_FILENAME, "w" );

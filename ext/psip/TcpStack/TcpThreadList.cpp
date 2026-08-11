@@ -34,10 +34,7 @@ CTcpThreadInfo::~CTcpThreadInfo()
 	Close();
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¼ÒÄÏÀ» Á¾·áÇÑ´Ù.
- */
+// ì†Œì¼“ì„ ì¢…ë£Œí•œë‹¤.
 void CTcpThreadInfo::Close()
 {
 	if( m_hSend != INVALID_SOCKET )
@@ -61,12 +58,7 @@ CTcpThreadList::~CTcpThreadList()
 {
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå ¸®½ºÆ®¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pclsStack	CTcpStack °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ë¦¬ìŠ¤íŠ¸ë¥¼ ì‹œì‘í•œë‹¤.
 bool CTcpThreadList::Create( CTcpStack * pclsStack )
 {
 	if( pclsStack->m_clsSetup.m_iMaxSocketPerThread <= 0 )
@@ -75,7 +67,7 @@ bool CTcpThreadList::Create( CTcpStack * pclsStack )
 		return false;
 	}
 
-	// pipe ¿¬»êÀ» ¼öÇàÇØ¾ß ÇÏ¹Ç·Î 1°³ Ãß°¡ÇÑ´Ù.
+	// pipe ì—°ì‚°ì„ ìˆ˜í–‰í•´ì•¼ í•˜ë¯€ë¡œ 1ê°œ ì¶”ê°€í•œë‹¤.
 	m_iMaxSocketPerThread = pclsStack->m_clsSetup.m_iMaxSocketPerThread + 1;
 	m_pclsStack = pclsStack;
 
@@ -101,10 +93,7 @@ bool CTcpThreadList::Create( CTcpStack * pclsStack )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå ¸®½ºÆ®¸¦ Á¾·áÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ë¦¬ìŠ¤íŠ¸ë¥¼ ì¢…ë£Œí•œë‹¤.
 void CTcpThreadList::Destroy()
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -117,13 +106,7 @@ void CTcpThreadList::Destroy()
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå¿¡ ¸í·ÉÀ» Àü¼ÛÇÑ´Ù.
- * @param pszData				¸í·É
- * @param iDataLen			pszData ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œì— ëª…ë ¹ì„ ì „ì†¡í•œë‹¤.
 bool CTcpThreadList::SendCommand( const char * pszData, int iDataLen )
 {
 	bool	bRes = false, bFound = false;
@@ -132,7 +115,7 @@ bool CTcpThreadList::SendCommand( const char * pszData, int iDataLen )
 
 	m_clsMutex.acquire();
 
-	// ¼ÒÄÏÀ» ÃÖ¼Ò »ç¿ëÇÏ´Â ¾²·¹µå¸¦ °Ë»öÇÑ´Ù.
+	// ì†Œì¼“ì„ ìµœì†Œ ì‚¬ìš©í•˜ëŠ” ì“°ë ˆë“œë¥¼ ê²€ìƒ‰í•œë‹¤.
 	for( itTL = m_clsList.begin(); itTL != m_clsList.end(); ++itTL )
 	{
 		if( iMinCount > (*itTL)->m_clsSessionList.m_iPoolFdCount )
@@ -167,14 +150,7 @@ bool CTcpThreadList::SendCommand( const char * pszData, int iDataLen )
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ÁöÁ¤µÈ ¾²·¹µå ¹øÈ£ÀÇ ¾²·¹µå·Î ¸í·ÉÀ» Àü¼ÛÇÑ´Ù.
- * @param pszData				¸í·É
- * @param iDataLen			pszData ±æÀÌ
- * @param iThreadIndex	¾²·¹µå ÀÎµ¦½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì§€ì •ëœ ì“°ë ˆë“œ ë²ˆí˜¸ì˜ ì“°ë ˆë“œë¡œ ëª…ë ¹ì„ ì „ì†¡í•œë‹¤.
 bool CTcpThreadList::SendCommand( const char * pszData, int iDataLen, int iThreadIndex )
 {
 	bool	bRes = false;
@@ -194,12 +170,7 @@ bool CTcpThreadList::SendCommand( const char * pszData, int iDataLen, int iThrea
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ğµç ¾²·¹µå¿¡ ¸í·ÉÀ» Àü´ŞÇÑ´Ù.
- * @param pszData		¸í·É
- * @param iDataLen	pszData ±æÀÌ
- */
+// ëª¨ë“  ì“°ë ˆë“œì— ëª…ë ¹ì„ ì „ë‹¬í•œë‹¤.
 void CTcpThreadList::SendCommandAll( const char * pszData, int iDataLen )
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -212,14 +183,7 @@ void CTcpThreadList::SendCommandAll( const char * pszData, int iDataLen )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸í·ÉÀ» ¼ö½ÅÇÑ´Ù.
- * @param hSocket		pipe ¼ö½Å ÇÚµé
- * @param pszData		¸í·É ÀúÀå º¯¼ö
- * @param iDataSize pszData º¯¼ö Å©±â
- * @returns ¼ö½ÅÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª…ë ¹ì„ ìˆ˜ì‹ í•œë‹¤.
 int CTcpThreadList::RecvCommand( Socket hSocket, char * pszData, int iDataSize )
 {
 	int	n;
@@ -233,15 +197,7 @@ int CTcpThreadList::RecvCommand( Socket hSocket, char * pszData, int iDataSize )
 	return n;
 }
 
-/**
- * @ingroup TcpStack
- * @brief Æ¯Á¤ ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param iThreadIndex	TCP ¾²·¹µå ¹øÈ£
- * @param iSessionIndex TCP ¼¼¼Ç ¹øÈ£
- * @param pszPacket			ÆĞÅ¶
- * @param iPacketLen		ÆĞÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŠ¹ì • ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpThreadList::Send( int iThreadIndex, int iSessionIndex, const char * pszPacket, int iPacketLen )
 {
 	bool bRes = false;
@@ -261,14 +217,7 @@ bool CTcpThreadList::Send( int iThreadIndex, int iSessionIndex, const char * psz
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ğµç ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket			ÆĞÅ¶
- * @param iPacketLen		ÆĞÅ¶ ±æÀÌ
- * @param pclsCallBack	¼¼¼Çº°·Î Àü¼Û À¯¹«¸¦ °áÁ¤ÇÏ´Â callback °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpThreadList::SendAll( const char * pszPacket, int iPacketLen, ITcpStackCallBack * pclsCallBack )
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -283,16 +232,7 @@ bool CTcpThreadList::SendAll( const char * pszPacket, int iPacketLen, ITcpStackC
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ğµç ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket			ÆĞÅ¶
- * @param iPacketLen		ÆĞÅ¶ ±æÀÌ
- * @param pclsCallBack	¼¼¼Çº°·Î Àü¼Û À¯¹«¸¦ °áÁ¤ÇÏ´Â callback °´Ã¼
- * @param iThreadIndex	Àü¼ÛÇÏÁö ¾ÊÀ» ¼¼¼ÇÀÇ ¾²·¹µå ÀÎµ¦½º
- * @param iSessionIndex Àü¼ÛÇÏÁö ¾ÊÀ» ¼¼¼Ç ÀÎµ¦½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpThreadList::SendAllExcept( const char * pszPacket, int iPacketLen, ITcpStackCallBack * pclsCallBack, int iThreadIndex, int iSessionIndex )
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -309,10 +249,7 @@ bool CTcpThreadList::SendAllExcept( const char * pszPacket, int iPacketLen, ITcp
 
 typedef std::list< int > THREAD_INDEX_LIST;
 
-/**
- * @ingroup TcpStack
- * @brief TCP Å¬¶óÀÌ¾ğÆ®¿Í ¿¬°áµÇÁö ¾ÊÀº ¾²·¹µå¸¦ »èÁ¦ÇÑ´Ù.
- */
+// TCP í´ë¼ì´ì–¸íŠ¸ì™€ ì—°ê²°ë˜ì§€ ì•Šì€ ì“°ë ˆë“œë¥¼ ì‚­ì œí•œë‹¤.
 void CTcpThreadList::DeleteNoUseThread()
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -336,7 +273,7 @@ void CTcpThreadList::DeleteNoUseThread()
 
 	if( clsDeleteList.size() > 0 )
 	{
-		// ÃÊ±â ½ÇÇà ¾²·¹µå °³¼ö¸¸Å­Àº À¯ÁöµÇ¾î¾ß ÇÑ´Ù.
+		// ì´ˆê¸° ì‹¤í–‰ ì“°ë ˆë“œ ê°œìˆ˜ë§Œí¼ì€ ìœ ì§€ë˜ì–´ì•¼ í•œë‹¤.
 		if( m_pclsStack->m_clsSetup.m_iThreadInitCount > iUseCount )
 		{
 			int iDeleteCount = m_pclsStack->m_clsSetup.m_iThreadInitCount - iUseCount;
@@ -369,12 +306,7 @@ void CTcpThreadList::DeleteNoUseThread()
 	}
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param iThreadIndex ¾²·¹µå ÀÎµ¦½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ¼º°øÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpThreadList::DeleteThread( int iThreadIndex )
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -388,7 +320,7 @@ bool CTcpThreadList::DeleteThread( int iThreadIndex )
 	{
 		if( (*itTL)->m_iIndex == iThreadIndex )
 		{
-			// ¾²·¹µå¿¡¼­ ÀÚ·á±¸Á¶¸¦ »ç¿ëÇÏ¹Ç·Î ¾²·¹µå Á¾·áÇÒ ¶§¿¡ »èÁ¦ÇÑ´Ù.
+			// ì“°ë ˆë“œì—ì„œ ìë£Œêµ¬ì¡°ë¥¼ ì‚¬ìš©í•˜ë¯€ë¡œ ì“°ë ˆë“œ ì¢…ë£Œí•  ë•Œì— ì‚­ì œí•œë‹¤.
 			// delete *itTL;
 			m_clsList.erase( itTL );
 			bRes = true;
@@ -415,11 +347,7 @@ bool CTcpThreadList::DeleteThread( int iThreadIndex )
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå Á¤º¸¸¦ ÇÏ³ªÀÇ ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf ¾²·¹µå Á¤º¸¸¦ ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- */
+// ì“°ë ˆë“œ ì •ë³´ë¥¼ í•˜ë‚˜ì˜ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CTcpThreadList::GetString( CMonitorString & strBuf )
 {
 	TCP_THREAD_LIST::iterator	itTL;
@@ -434,11 +362,7 @@ void CTcpThreadList::GetString( CMonitorString & strBuf )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå¸¦ Ãß°¡ÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œë¥¼ ì¶”ê°€í•œë‹¤.
 bool CTcpThreadList::AddThread()
 {
 	if( m_pclsStack->m_clsSetup.m_iThreadMaxCount != 0 )
@@ -493,14 +417,7 @@ bool CTcpThreadList::AddThread()
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå¿¡ ¸í·ÉÀ» Àü¼ÛÇÑ´Ù.
- * @param hSocket		pipe Àü¼Û ÇÚµé
- * @param pszData		¸í·É
- * @param iDataLen	pszData ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œì— ëª…ë ¹ì„ ì „ì†¡í•œë‹¤.
 bool CTcpThreadList::_SendCommand( Socket hSocket, const char * pszData, int iDataLen )
 {
 	int	n;
@@ -518,11 +435,7 @@ bool CTcpThreadList::_SendCommand( Socket hSocket, const char * pszData, int iDa
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¾²·¹µå °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ê°œìˆ˜ë¥¼ ë¦¬í„´í•œë‹¤.
 int CTcpThreadList::GetCount()
 {
 	int iCount = 0;
@@ -534,11 +447,7 @@ int CTcpThreadList::GetCount()
 	return iCount;
 }
 
-/**
- * @ingroup TcpStack
- * @brief »õ·Î »ç¿ëÇÒ ¾²·¹µå ¹øÈ£¸¦ °¡Á®¿Â´Ù.
- * @returns »õ·Î »ç¿ëÇÒ ¾²·¹µå ¹øÈ£¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìƒˆë¡œ ì‚¬ìš©í•  ì“°ë ˆë“œ ë²ˆí˜¸ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 int CTcpThreadList::GetThreadIndex()
 {
 	int iThreadIndex = 0;
@@ -563,12 +472,7 @@ int CTcpThreadList::GetThreadIndex()
 	return iThreadIndex;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¾²·¹µå ¹øÈ£°¡ »ç¿ëÁßÀÎÁö °Ë»çÇÑ´Ù.
- * @param iThreadIndex ¾²·¹µå ¹øÈ£
- * @returns ¾²·¹µå ¹øÈ£°¡ »ç¿ëÁßÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ë²ˆí˜¸ê°€ ì‚¬ìš©ì¤‘ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool CTcpThreadList::SelectThreadIndex( int iThreadIndex )
 {
 	TCP_THREAD_LIST::iterator itTL;

@@ -22,20 +22,17 @@
 #include <string>
 #include <list>
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP í—¤ë” ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipHeader
 {
 public:
 	CSipHeader();
 	~CSipHeader();
 
-	/** ÀÌ¸§ */
+	// ì´ë¦„
 	std::string	m_strName;
 
-	/** °ª */
+	// ê°’
 	std::string	m_strValue;
 
 	int Parse( const char * pszText, int iTextLen );

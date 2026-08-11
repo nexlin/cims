@@ -22,7 +22,7 @@
 #include "TcpSocket.h"
 #include "MonitorSetup.h"
 
-// CSendCommandDlg ´ëÈ­ »óÀÚÀÔ´Ï´Ù.
+// CSendCommandDlg ëŒ€í™” ìƒìì…ë‹ˆë‹¤.
 
 IMPLEMENT_DYNAMIC(CSendCommandDlg, CDialog)
 
@@ -48,7 +48,7 @@ BEGIN_MESSAGE_MAP(CSendCommandDlg, CDialog)
 END_MESSAGE_MAP()
 
 
-// CSendCommandDlg ¸Ş½ÃÁö Ã³¸®±âÀÔ´Ï´Ù.
+// CSendCommandDlg ë©”ì‹œì§€ ì²˜ë¦¬ê¸°ì…ë‹ˆë‹¤.
 
 void CSendCommandDlg::OnBnClickedOk()
 {
@@ -94,5 +94,5 @@ BOOL CSendCommandDlg::OnInitDialog()
 	}
 
 	return TRUE;  // return TRUE unless you set the focus to a control
-	// ¿¹¿Ü: OCX ¼Ó¼º ÆäÀÌÁö´Â FALSE¸¦ ¹İÈ¯ÇØ¾ß ÇÕ´Ï´Ù.
+	// ì˜ˆì™¸: OCX ì†ì„± í˜ì´ì§€ëŠ” FALSEë¥¼ ë°˜í™˜í•´ì•¼ í•©ë‹ˆë‹¤.
 }

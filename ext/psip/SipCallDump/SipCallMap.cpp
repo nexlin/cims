@@ -33,12 +33,7 @@ CSipCallInfo::CSipCallInfo() : m_psttPcap(NULL), m_iInviteTime(0), m_iCancelTime
 {
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SDP ¸Þ½ÃÁö¸¦ RTP Á¤º¸¿¡ ÀúÀåÇÑ´Ù.
- * @param pclsSdp			SDP ¸Þ½ÃÁö
- * @param clsRtpInfo	RTP Á¤º¸
- */
+// SDP ë©”ì‹œì§€ë¥¼ RTP ì •ë³´ì— ì €ìž¥í•œë‹¤.
 static void SetRtpInfo( CSdpMessage * pclsSdp, CSipRtpInfo & clsRtpInfo )
 {
 	bool bFound = false;
@@ -54,20 +49,14 @@ static void SetRtpInfo( CSdpMessage * pclsSdp, CSipRtpInfo & clsRtpInfo )
 
 	clsRtpInfo.m_iPort = pclsMedia->m_iPort;
 	
-	// media ¿¡ connection Á¤º¸°¡ Á¸ÀçÇÏ¸é ÀÌ¸¦ RTP ¼¼¼ÇÀÇ IP ÁÖ¼Ò·Î ¼³Á¤ÇÑ´Ù.
+	// media ì— connection ì •ë³´ê°€ ì¡´ìž¬í•˜ë©´ ì´ë¥¼ RTP ì„¸ì…˜ì˜ IP ì£¼ì†Œë¡œ ì„¤ì •í•œë‹¤.
 	if( pclsMedia->m_clsConnection.Empty() == false )
 	{
 		clsRtpInfo.m_strIp = pclsMedia->m_clsConnection.m_strAddr;
 	}
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ¸Þ½ÃÁö¿¡¼­ SDP ¸Þ½ÃÁö¸¦ °¡Á®¿Â´Ù.
- * @param clsMessage	SIP ¸Þ½ÃÁö
- * @param clsSdp			[out] SDP ¸Þ½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì—ì„œ SDP ë©”ì‹œì§€ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 static bool GetSdp( CSipMessage & clsMessage, CSdpMessage & clsSdp )
 {
 	if( clsMessage.m_iContentLength > 0 )
@@ -96,16 +85,7 @@ CSipCallMap::~CSipCallMap()
 {
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ÆÐÅ¶À» ÀúÀåÇÑ´Ù.
- * @param psttPcap		ÆÐÅ¶ Ä¸Ã³ ÁßÀÎ pcap ±¸Á¶Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @param psttHeader	ÆÐÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData			ÆÐÅ¶ Ä¸Ã³ÇÑ ÆÐÅ¶
- * @param pszUdpBody	UDP body
- * @param iUdpBodyLen UDP body ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP íŒ¨í‚·ì„ ì €ìž¥í•œë‹¤.
 bool CSipCallMap::Insert( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const	u_char * pszData, const char * pszUdpBody, int iUdpBodyLen )
 {
 	CSipMessage clsMessage;
@@ -121,15 +101,7 @@ bool CSipCallMap::Insert( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, co
 	return Insert( psttPcap, psttHeader, pszData, &clsMessage );
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ÆÐÅ¶À» ÀúÀåÇÑ´Ù.
- * @param psttPcap		ÆÐÅ¶ Ä¸Ã³ ÁßÀÎ pcap ±¸Á¶Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @param psttHeader	ÆÐÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData			ÆÐÅ¶ Ä¸Ã³ÇÑ ÆÐÅ¶
- * @param pclsMessage	SIP ¸Þ½ÃÁö °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP íŒ¨í‚·ì„ ì €ìž¥í•œë‹¤.
 bool CSipCallMap::Insert( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_char * pszData, CSipMessage * pclsMessage )
 {
 	if( pclsMessage->IsRequest() )
@@ -175,14 +147,7 @@ bool CSipCallMap::Insert( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, co
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief RTP ÆÐÅ¶À» ÀúÀåÇÑ´Ù.
- * @param pszCallId		SIP Call-ID
- * @param psttHeader	ÆÐÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData			ÆÐÅ¶ Ä¸Ã³ÇÑ ÆÐÅ¶
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// RTP íŒ¨í‚·ì„ ì €ìž¥í•œë‹¤.
 bool CSipCallMap::Insert( const char * pszCallId, struct pcap_pkthdr * psttHeader, const u_char * pszData )
 {
 	SIP_CALL_MAP::iterator itMap;
@@ -200,12 +165,7 @@ bool CSipCallMap::Insert( const char * pszCallId, struct pcap_pkthdr * psttHeade
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÅëÈ­ Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszCallId SIP Call-ID
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í†µí™” ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CSipCallMap::Delete( const char * pszCallId )
 {
 	SIP_CALL_MAP::iterator itMap;
@@ -223,10 +183,7 @@ bool CSipCallMap::Delete( const char * pszCallId )
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ¸ðµç ÅëÈ­ Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- */
+// ëª¨ë“  í†µí™” ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 void CSipCallMap::DeleteAll( )
 {
 	SIP_CALL_MAP::iterator itMap, itNext;
@@ -242,16 +199,7 @@ void CSipCallMap::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP INVITE ¿äÃ» ¸Þ½ÃÁö Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param psttPcap		ÆÐÅ¶ Ä¸Ã³ ÁßÀÎ pcap ±¸Á¶Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @param psttHeader	ÆÐÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData			ÆÐÅ¶ Ä¸Ã³ÇÑ ÆÐÅ¶
- * @param pclsMessage SIP ¸Þ½ÃÁö
- * @param pclsSdp			SDP ¸Þ½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP INVITE ìš”ì²­ ë©”ì‹œì§€ ì •ë³´ë¥¼ ì €ìž¥í•œë‹¤.
 bool CSipCallMap::InsertInvite( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_char * pszData, CSipMessage * pclsMessage, CSdpMessage * pclsSdp )
 {
 	SIP_CALL_MAP::iterator itMap;
@@ -316,7 +264,7 @@ bool CSipCallMap::InsertInvite( pcap_t * psttPcap, struct pcap_pkthdr * psttHead
 	}
 	else
 	{
-		// ReINVITE µµ ÀúÀåÇÑ´Ù.
+		// ReINVITE ë„ ì €ìž¥í•œë‹¤.
 		pcap_dump( (u_char *)itMap->second.m_psttPcap, psttHeader, pszData );
 
 		bRes = true;
@@ -326,15 +274,7 @@ bool CSipCallMap::InsertInvite( pcap_t * psttPcap, struct pcap_pkthdr * psttHead
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP INVITE ÀÀ´ä ¸Þ½ÃÁö Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param psttHeader	ÆÐÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData			ÆÐÅ¶ Ä¸Ã³ÇÑ ÆÐÅ¶
- * @param pclsMessage SIP ¸Þ½ÃÁö
- * @param pclsSdp			SDP ¸Þ½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP INVITE ì‘ë‹µ ë©”ì‹œì§€ ì •ë³´ë¥¼ ì €ìž¥í•œë‹¤.
 bool CSipCallMap::InsertInviteResponse( struct pcap_pkthdr * psttHeader, const u_char * pszData, CSipMessage * pclsMessage, CSdpMessage * pclsSdp )
 {
 	SIP_CALL_MAP::iterator itMap;
@@ -353,7 +293,7 @@ bool CSipCallMap::InsertInviteResponse( struct pcap_pkthdr * psttHeader, const u
 	{
 		if( itMap->second.m_iStartTime == 0 )
 		{
-			// ReINVITE ÀÀ´äÀ» Ã³¸®ÇÏÁö ¾Ê´Â´Ù.
+			// ReINVITE ì‘ë‹µì„ ì²˜ë¦¬í•˜ì§€ ì•ŠëŠ”ë‹¤.
 			time( &itMap->second.m_iStartTime );
 
 			if( itMap->second.m_clsToRtp.m_iPort )
@@ -376,14 +316,7 @@ bool CSipCallMap::InsertInviteResponse( struct pcap_pkthdr * psttHeader, const u
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief INVITE ¿äÃ»/ÀÀ´äÀ» Á¦¿ÜÇÑ SIP ÆÐÅ¶À» ÀúÀåÇÑ´Ù.
- * @param psttHeader	ÆÐÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData			ÆÐÅ¶ Ä¸Ã³ÇÑ ÆÐÅ¶
- * @param pclsMessage SIP ¸Þ½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// INVITE ìš”ì²­/ì‘ë‹µì„ ì œì™¸í•œ SIP íŒ¨í‚·ì„ ì €ìž¥í•œë‹¤.
 bool CSipCallMap::Insert( struct pcap_pkthdr * psttHeader, const u_char * pszData, CSipMessage * pclsMessage )
 {
 	SIP_CALL_MAP::iterator itMap;
@@ -442,11 +375,7 @@ bool CSipCallMap::Insert( struct pcap_pkthdr * psttHeader, const u_char * pszDat
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÀÚ·á±¸Á¶¿¡¼­ »èÁ¦ÇÑ´Ù.
- * @param itMap »èÁ¦ ´ë»ó iterator
- */
+// ìžë£Œêµ¬ì¡°ì—ì„œ ì‚­ì œí•œë‹¤.
 void CSipCallMap::Erase( SIP_CALL_MAP::iterator & itMap )
 {
 	gclsRtpMap.Delete( itMap->second.m_clsFromRtp.m_strIp.c_str(), itMap->second.m_clsFromRtp.m_iPort );

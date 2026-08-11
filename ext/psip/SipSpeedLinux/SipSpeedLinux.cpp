@@ -35,7 +35,7 @@ int main( int argc, char * argv[] )
 
 	if( gclsSetup.Read( pszSetupFileName ) == false ) return 0;
 
-	// SipStack À» ½ÃÀÛÇÑ´Ù.
+	// SipStack ì„ ì‹œì‘í•œë‹¤.
 	CSipStackSetup clsSetup;
 	CSipServerInfo clsInfo;
 	CSipClient clsCallBack;
@@ -108,10 +108,10 @@ int main( int argc, char * argv[] )
 	clsRoute.m_strDestIp = gclsSetup.m_strSipServerIp;
 	clsRoute.m_iDestPort = gclsSetup.m_iSipServerPort;
 
-	// ÅëÈ­ ¿¬°á Å×½ºÆ®
+	// í†µí™” ì—°ê²° í…ŒìŠ¤íŠ¸
 	for( int i = 0; i < gclsSetup.m_iCallTotalCount; ++i )
 	{
-		// µ¿½Ã ÅëÈ­ °³¼ö°¡ ¼³Á¤µÈ °³¼ö¿Í °°°Å³ª Å« °æ¿ì¿¡´Â ´ë±âÇÑ´Ù.
+		// ë™ì‹œ í†µí™” ê°œìˆ˜ê°€ ì„¤ì •ëœ ê°œìˆ˜ì™€ ê°™ê±°ë‚˜ í° ê²½ìš°ì—ëŠ” ëŒ€ê¸°í•œë‹¤.
 		while( gclsSipUserAgent.GetCallCount() >= gclsSetup.m_iCallConcurrentCount )
 		{
 			MiliSleep(20);
@@ -123,7 +123,7 @@ int main( int argc, char * argv[] )
 		}
 	}
 
-	// ¸ğµç ÅëÈ­°¡ Á¾·áµÉ ¶§±îÁö ´ë±âÇÑ´Ù.
+	// ëª¨ë“  í†µí™”ê°€ ì¢…ë£Œë  ë•Œê¹Œì§€ ëŒ€ê¸°í•œë‹¤.
 	while( gclsSipUserAgent.GetCallCount() > 0 )
 	{
 		MiliSleep(20);

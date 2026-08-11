@@ -23,12 +23,7 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief SIP Å¥¿¡¼­ SIP ¸Ş½ÃÁö¸¦ °¡Á®¿Í¼­ ÆÄ½Ì ¹× callback Ã³¸®ÇÏ´Â ¾²·¹µå
- * @param lpParameter SIP stack °´Ã¼
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP íì—ì„œ SIP ë©”ì‹œì§€ë¥¼ ê°€ì ¸ì™€ì„œ íŒŒì‹± ë° callback ì²˜ë¦¬í•˜ëŠ” ì“°ë ˆë“œ
 THREAD_API SipQueueThread( LPVOID lpParameter )
 {
 	CSipStack * pclsSipStack = (CSipStack *)lpParameter;
@@ -55,12 +50,7 @@ THREAD_API SipQueueThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP Å¥¿¡¼­ SIP ¸Ş½ÃÁö¸¦ °¡Á®¿Í¼­ ÆÄ½Ì ¹× callback Ã³¸®ÇÏ´Â ¾²·¹µå¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pclsSipStack SIP stack °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP íì—ì„œ SIP ë©”ì‹œì§€ë¥¼ ê°€ì ¸ì™€ì„œ íŒŒì‹± ë° callback ì²˜ë¦¬í•˜ëŠ” ì“°ë ˆë“œë¥¼ ì‹œì‘í•œë‹¤.
 bool StartSipQueueThread( CSipStack * pclsSipStack )
 {
 	return StartThread( "SipQueueThread", SipQueueThread, pclsSipStack );

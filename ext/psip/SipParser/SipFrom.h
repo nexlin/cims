@@ -22,10 +22,7 @@
 #include "SipParameterList.h"
 #include "SipUri.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP From/To/Contact/Route/Record-Route Çì´õ Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// SIP From/To/Contact/Route/Record-Route í—¤ë” ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CSipFrom : public CSipParameterList
 {
 public:
@@ -46,7 +43,7 @@ public:
 	bool Empty();
 };
 
-/** SIP From Çì´õ ¸®½ºÆ® */
+// SIP From í—¤ë” ë¦¬ìŠ¤íŠ¸
 typedef std::list< CSipFrom > SIP_FROM_LIST;
 
 int ParseSipFrom( SIP_FROM_LIST & clsList, const char * pszText, int iTextLen );

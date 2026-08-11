@@ -30,13 +30,7 @@ CSipCredential::~CSipCredential()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipCredential Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipCredential í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipCredential::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -126,13 +120,7 @@ int CSipCredential::Parse( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipCredential::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -165,10 +153,7 @@ int CSipCredential::ToString( char * pszText, int iTextSize )
 	return iLen + iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipCredential::Clear()
 {
 	m_strType.clear();
@@ -184,13 +169,7 @@ void CSipCredential::Clear()
 	m_strNonceCount.clear();
 }
 
-/**
- * @brief SIP credential ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿©¼­ credential ¸®½ºÆ®¿¡ ÀúÀåÇÑ´Ù.
- * @param clsList credential ¸®½ºÆ®
- * @param pszText credential ¹®ÀÚ¿­
- * @param iTextLen credential ¹®ÀÚ¿­ ±æÀÌ 
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP credential ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ì„œ credential ë¦¬ìŠ¤íŠ¸ì— ì €ì¥í•œë‹¤.
 int ParseSipCredential( SIP_CREDENTIAL_LIST & clsList, const char * pszText, int iTextLen )
 {
 	int iPos;

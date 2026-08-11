@@ -27,14 +27,7 @@ CSdpAttributeCrypto::~CSdpAttributeCrypto()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP ÀÇ crypto attribute ÀÇ ³»¿ëÀ» ÆÄ½ÌÇÑ´Ù.
- *				"1 AES_CM_128_HMAC_SHA1_80 inline:7s65riA38OlE4U5OepU5zgaoMvzOL19nSQqeursI"
- * @param pszText		crypto attribute ³»¿ë
- * @param iTextLen	crypto attribute ³»¿ëÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP ì˜ crypto attribute ì˜ ë‚´ìš©ì„ íŒŒì‹±í•œë‹¤. "1 AES_CM_128_HMAC_SHA1_80 inline:7s65riA38OlE4U5OepU5zgaoMvzOL19nSQqeursI"
 int CSdpAttributeCrypto::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -83,13 +76,7 @@ int CSdpAttributeCrypto::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP crypto attribute ³»¿ë ¹®ÀÚ¿­À» »ı¼ºÇÑ´Ù.
- * @param pszText		SDP crypto attribute ³»¿ë ¹®ÀÚ¿­ ÀúÀå º¯¼ö
- * @param iTextSize SDP crypto attribute ³»¿ë ¹®ÀÚ¿­ ÀúÀå º¯¼ö Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP crypto attribute ë‚´ìš© ë¬¸ìì—´ì„ ìƒì„±í•œë‹¤.
 int CSdpAttributeCrypto::ToString( char * pszText, int iTextSize )
 {
 	if( Empty() ) return -1;
@@ -104,10 +91,7 @@ int CSdpAttributeCrypto::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­ ½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™” ì‹œí‚¨ë‹¤.
 void CSdpAttributeCrypto::Clear()
 {
 	m_strTag.clear();
@@ -116,11 +100,7 @@ void CSdpAttributeCrypto::Clear()
 	m_strText.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief »ç¿ëÇÒ ¼ö ÀÖ´Â crypto Á¤º¸ÀÎÁö °Ë»çÇÑ´Ù.
- * @returns »ç¿ëÇÒ ¼ö ÀÖ´Â crypto Á¤º¸°¡ ÀúÀåµÇ¾î ÀÖÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì‚¬ìš©í•  ìˆ˜ ìˆëŠ” crypto ì •ë³´ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool CSdpAttributeCrypto::Empty()
 {
 	if( m_strTag.empty() || m_strCryptoSuite.empty() || m_strKey.empty() ) return true;

@@ -23,10 +23,7 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup XmlParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CXmlElement::CXmlElement( const char * pszName )
 {
 	if( pszName )
@@ -35,10 +32,7 @@ CXmlElement::CXmlElement( const char * pszName )
 	}
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CXmlElement::~CXmlElement()
 {
 }
@@ -53,13 +47,7 @@ CXmlElement::~CXmlElement()
 #define XML_ELEMENT_CDATA				7
 #define XML_ELEMENT_DECLARATION	8
 
-/**
- * @ingroup XmlParser
- * @brief XML ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿©¼­ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		XML ¹®ÀÚ¿­
- * @param iTextLen	XML ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ XML ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// XML ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ì„œ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CXmlElement::Parse( const char * pszText, int iTextLen )
 {
 	int		iPos, iStartPos = -1, iLen;
@@ -243,26 +231,13 @@ int CXmlElement::Parse( const char * pszText, int iTextLen )
 	return iPos;
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿©¼­ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param strText XML ¹®ÀÚ¿­
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ XML ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// XML ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ì„œ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CXmlElement::Parse( std::string & strText )
 {
 	return Parse( strText.c_str(), (int)strText.length() );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸â¹ö º¯¼ö¿¡ ÀúÀåµÈ °ªÀ» ÀÌ¿ëÇÏ¿©¼­ XML ¹®ÀÚ¿­À» »ı¼ºÇÑ´Ù.
- * @param pszText			XML ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize		XML ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼öÀÇ Å©±â
- * @param bUseTab			TAB ¹®ÀÚ¸¦ »ç¿ëÇÏ´Â°¡? ÇÏÀ§ element ½ÃÀÛ½Ã TAB ¹®ÀÚ¸¦ ³Ö¾îÁÖ°í ½ÍÀ¸¸é true ¸¦ ÀÔ·ÂÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ÀÔ·ÂÇÑ´Ù.
- * @param	iDepth			XML ÇÏÀ§ element ±íÀÌ. ¸Ç À§ÀÇ XML element ´Â 0 ÀÌ°í ±× ÇÏÀ§ element ´Â 1 ÀÌ´Ù.
- * @returns »ı¼ºµÈ XML ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ì„ ì´ìš©í•˜ì—¬ì„œ XML ë¬¸ìì—´ì„ ìƒì„±í•œë‹¤.
 int CXmlElement::ToString( char * pszText, int iTextSize, bool bUseTab, int iDepth )
 {
 	int iLen = 0, n;
@@ -322,13 +297,7 @@ int CXmlElement::ToString( char * pszText, int iTextSize, bool bUseTab, int iDep
 	return iLen;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸â¹ö º¯¼ö¿¡ ÀúÀåµÈ °ªÀ» ÀÌ¿ëÇÏ¿©¼­ XML ¹®ÀÚ¿­À» »ı¼ºÇÑ´Ù.
- * @param strText XML ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param bUseTab			TAB ¹®ÀÚ¸¦ »ç¿ëÇÏ´Â°¡? ÇÏÀ§ element ½ÃÀÛ½Ã TAB ¹®ÀÚ¸¦ ³Ö¾îÁÖ°í ½ÍÀ¸¸é true ¸¦ ÀÔ·ÂÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ÀÔ·ÂÇÑ´Ù.
- * @param	iDepth			XML ÇÏÀ§ element ±íÀÌ. ¸Ç À§ÀÇ XML element ´Â 0 ÀÌ°í ±× ÇÏÀ§ element ´Â 1 ÀÌ´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ì„ ì´ìš©í•˜ì—¬ì„œ XML ë¬¸ìì—´ì„ ìƒì„±í•œë‹¤.
 void CXmlElement::ToString( std::string & strText, bool bUseTab, int iDepth )
 {
 	if( bUseTab )
@@ -393,10 +362,7 @@ void CXmlElement::ToString( std::string & strText, bool bUseTab, int iDepth )
 	}
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CXmlElement::Clear( )
 {
 	m_strName.clear();
@@ -405,12 +371,7 @@ void CXmlElement::Clear( )
 	m_clsElementList.clear();
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML ÆÄÀÏÀ» ÀĞ¾î¼­ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszFileName		XML ÆÄÀÏ ÀÌ¸§
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// XML íŒŒì¼ì„ ì½ì–´ì„œ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::ParseFile( const char * pszFileName )
 {
 	FILE * fd;
@@ -432,13 +393,7 @@ bool CXmlElement::ParseFile( const char * pszFileName )
 	return true;
 }
 
-/**
- * @ingroup XmlParser
- * @brief XML À» ÆÄÀÏ¿¡ ÀúÀåÇÑ´Ù.
- * @param pszFileName		XML ÆÄÀÏ ÀÌ¸§
- * @param bUseTab			TAB ¹®ÀÚ¸¦ »ç¿ëÇÏ´Â°¡? ÇÏÀ§ element ½ÃÀÛ½Ã TAB ¹®ÀÚ¸¦ ³Ö¾îÁÖ°í ½ÍÀ¸¸é true ¸¦ ÀÔ·ÂÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ÀÔ·ÂÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// XML ì„ íŒŒì¼ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::WriteFile( const char * pszFileName, bool bUseTab )
 {
 	FILE * fd;
@@ -455,12 +410,7 @@ bool CXmlElement::WriteFile( const char * pszFileName, bool bUseTab )
 	return true;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÑ´Ù.
- * @param pszName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @returns ¼º°øÇÏ¸é ¾ÖÆ®¸®ºäÆ®ÀÇ °ªÀ» ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 const char * CXmlElement::SelectAttribute( const char * pszName )
 {
 	XML_ATTRIBUTE_MAP::iterator	itAM;
@@ -474,12 +424,7 @@ const char * CXmlElement::SelectAttribute( const char * pszName )
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÑ´Ù. °ªÀÇ ¾Õ, µÚ °ø¹éÀ» Á¦°ÅÇÑ ¹®ÀÚ¿­ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param pszName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @returns ¼º°øÇÏ¸é ¾ÖÆ®¸®ºäÆ®ÀÇ °ªÀ» ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•œë‹¤. ê°’ì˜ ì•, ë’¤ ê³µë°±ì„ ì œê±°í•œ ë¬¸ìì—´ì˜ í¬ì¸í„°ë¥¼ ë¦¬í„´í•œë‹¤.
 const char * CXmlElement::SelectAttributeTrim( const char * pszName )
 {
 	XML_ATTRIBUTE_MAP::iterator	itAM;
@@ -494,13 +439,7 @@ const char * CXmlElement::SelectAttributeTrim( const char * pszName )
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param strValue	¾ÖÆ®¸®ºäÆ® °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 bool CXmlElement::SelectAttribute( const char * pszName, std::string & strValue )
 {
 	XML_ATTRIBUTE_MAP::iterator	itAM;
@@ -517,13 +456,7 @@ bool CXmlElement::SelectAttribute( const char * pszName, std::string & strValue 
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÑ´Ù. °Ë»ö¿¡ ¼º°øÇÏ¸é °ªÀÇ ¿ŞÂÊ, ¿À¸¥ÂÊ °ø¹éÀ» Á¦°ÅÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param strValue	¾ÖÆ®¸®ºäÆ® °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•œë‹¤. ê²€ìƒ‰ì— ì„±ê³µí•˜ë©´ ê°’ì˜ ì™¼ìª½, ì˜¤ë¥¸ìª½ ê³µë°±ì„ ì œê±°í•œë‹¤.
 bool CXmlElement::SelectAttributeTrim( const char * pszName, std::string & strValue )
 {
 	XML_ATTRIBUTE_MAP::iterator	itAM;
@@ -541,13 +474,7 @@ bool CXmlElement::SelectAttributeTrim( const char * pszName, std::string & strVa
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÏ¿© int º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param iValue		¾ÖÆ®¸®ºäÆ® °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•˜ì—¬ int ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::SelectAttribute( const char * pszName, int & iValue )
 {
 	iValue = 0;
@@ -562,13 +489,7 @@ bool CXmlElement::SelectAttribute( const char * pszName, int & iValue )
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÏ¿© int64_t º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param iValue		¾ÖÆ®¸®ºäÆ® °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•˜ì—¬ int64_t ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::SelectAttribute( const char * pszName, int64_t & iValue )
 {
 	iValue = 0;
@@ -583,13 +504,7 @@ bool CXmlElement::SelectAttribute( const char * pszName, int64_t & iValue )
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÏ¿© bool º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param bValue		¾ÖÆ®¸®ºäÆ® °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•˜ì—¬ bool ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::SelectAttribute( const char * pszName, bool & bValue )
 {
 	bValue = false;
@@ -604,13 +519,7 @@ bool CXmlElement::SelectAttribute( const char * pszName, bool & bValue )
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¿¡ ÇØ´çÇÏ´Â °ªÀ» °Ë»öÇÏ¿© double º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param dbValue		¾ÖÆ®¸®ºäÆ® °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ì— í•´ë‹¹í•˜ëŠ” ê°’ì„ ê²€ìƒ‰í•˜ì—¬ double ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::SelectAttribute( const char * pszName, double & dbValue )
 {
 	dbValue = 0.0;
@@ -625,13 +534,7 @@ bool CXmlElement::SelectAttribute( const char * pszName, double & dbValue )
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÑ´Ù.
- * @param pszName		ÇÏÀ§ Element ÀÌ¸§
- * @param iIndex		ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é ÇÏÀ§ Element °´Ã¼ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlElement::SelectElement( const char * pszName, const int iIndex )
 {
 	XML_ELEMENT_LIST::iterator	itEL;
@@ -655,12 +558,7 @@ CXmlElement * CXmlElement::SelectElement( const char * pszName, const int iIndex
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÑ´Ù.
- * @param iIndex ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é ÇÏÀ§ Element °´Ã¼ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•œë‹¤.
 CXmlElement * CXmlElement::SelectElement( const int iIndex )
 {
 	XML_ELEMENT_LIST::iterator	itEL;
@@ -681,13 +579,7 @@ CXmlElement * CXmlElement::SelectElement( const int iIndex )
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ Element ¸®½ºÆ®¿¡ ÀúÀåÇÑ´Ù.
- * @param pszName		ÇÏÀ§ Element ÀÌ¸§
- * @param clsList		ÇÏÀ§ Element ¸¦ ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ Element ë¦¬ìŠ¤íŠ¸ì— ì €ì¥í•œë‹¤.
 bool CXmlElement::SelectElementList( const char * pszName, XML_ELEMENT_LIST & clsList )
 {
 	XML_ELEMENT_LIST::iterator	itEL;
@@ -707,13 +599,7 @@ bool CXmlElement::SelectElementList( const char * pszName, XML_ELEMENT_LIST & cl
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ÀÇ °ª ¹®ÀÚ¿­ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ÇÏÀ§ Element ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é ÇØ´ç Element ÀÇ °ª ¹®ÀÚ¿­ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù. 
- */
+// í•˜ìœ„ Element ì˜ ê°’ ë¬¸ìì—´ì˜ í¬ì¸í„°ë¥¼ ë¦¬í„´í•œë‹¤.
 const char * CXmlElement::GetElementData( const char * pszName, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -725,13 +611,7 @@ const char * CXmlElement::GetElementData( const char * pszName, const int iIndex
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ÀÇ °ª ¹®ÀÚ¿­ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ÇÏÀ§ Element ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é ÇØ´ç Element ÀÇ °ª ¹®ÀÚ¿­ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù. 
- */
+// í•˜ìœ„ Element ì˜ ê°’ ë¬¸ìì—´ì˜ í¬ì¸í„°ë¥¼ ë¦¬í„´í•œë‹¤.
 const char * CXmlElement::GetElementDataTrim( const char * pszName, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -744,14 +624,7 @@ const char * CXmlElement::GetElementDataTrim( const char * pszName, const int iI
 	return NULL;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ ³»¿ëÀ» ÀúÀåÇÑ´Ù.
- * @param pszName		ÇÏÀ§ Element ÀÌ¸§
- * @param strData		ÇÏÀ§ Elemnet ÀÇ ³»¿ëÀ» ÀúÀåÇÒ º¯¼ö
- * @param iIndex		ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ë‚´ìš©ì„ ì €ì¥í•œë‹¤.
 bool CXmlElement::SelectElementData( const char * pszName, std::string & strData, const int iIndex )
 {
 	strData.clear();
@@ -766,14 +639,7 @@ bool CXmlElement::SelectElementData( const char * pszName, std::string & strData
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ ³»¿ëÀ» ÀúÀåÇÑ´Ù. °Ë»ö¿¡ ¼º°øÇÏ¸é ³»¿ëÀÇ ¿ŞÂÊ, ¿À¸¥ÂÊ °ø¹éÀ» Á¦°ÅÇÑ´Ù.
- * @param pszName		ÇÏÀ§ Element ÀÌ¸§
- * @param strData		ÇÏÀ§ Elemnet ÀÇ ³»¿ëÀ» ÀúÀåÇÒ º¯¼ö
- * @param iIndex		ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ë‚´ìš©ì„ ì €ì¥í•œë‹¤. ê²€ìƒ‰ì— ì„±ê³µí•˜ë©´ ë‚´ìš©ì˜ ì™¼ìª½, ì˜¤ë¥¸ìª½ ê³µë°±ì„ ì œê±°í•œë‹¤.
 bool CXmlElement::SelectElementTrimData( const char * pszName, std::string & strData, const int iIndex )
 {
 	strData.clear();
@@ -789,14 +655,7 @@ bool CXmlElement::SelectElementTrimData( const char * pszName, std::string & str
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ Á¤¼ö ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iData		ÇÏÀ§ Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ì •ìˆ˜ ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlElement::SelectElementData( const char * pszName, int & iData, const int iIndex )
 {
 	iData = 0;
@@ -811,14 +670,7 @@ bool CXmlElement::SelectElementData( const char * pszName, int & iData, const in
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ 64bit Á¤¼ö ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iData		ÇÏÀ§ Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ 64bit ì •ìˆ˜ ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlElement::SelectElementData( const char * pszName, int64_t & iData, const int iIndex )
 {
 	iData = 0;
@@ -833,14 +685,7 @@ bool CXmlElement::SelectElementData( const char * pszName, int64_t & iData, cons
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ bool ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param bData		ÇÏÀ§ Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ bool ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlElement::SelectElementData( const char * pszName, bool & bData, const int iIndex )
 {
 	bData = false;
@@ -855,14 +700,7 @@ bool CXmlElement::SelectElementData( const char * pszName, bool & bData, const i
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ °Ë»öÇÏ¿©¼­ double ³»¿ëÀ» °¡Á®¿Â´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param dbData	ÇÏÀ§ Element ÀÇ °ªÀ» ÀúÀåÇÏ´Â º¯¼ö
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ double ë‚´ìš©ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CXmlElement::SelectElementData( const char * pszName, double & dbData, const int iIndex )
 {
 	dbData = 0.0;
@@ -877,62 +715,37 @@ bool CXmlElement::SelectElementData( const char * pszName, double & dbData, cons
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief Element ÀÌ¸§À» ¸®ÅÏÇÑ´Ù.
- * @returns Element ÀÌ¸§À» ¸®ÅÏÇÑ´Ù.
- */
+// Element ì´ë¦„ì„ ë¦¬í„´í•œë‹¤.
 const char * CXmlElement::GetName()
 {
 	return m_strName.c_str();
 }
 
-/**
- * @ingroup XmlParser
- * @brief Element ³»¿ëÀ» ¸®ÅÏÇÑ´Ù.
- * @returns Element ³»¿ëÀ» ¸®ÅÏÇÑ´Ù.
- */
+// Element ë‚´ìš©ì„ ë¦¬í„´í•œë‹¤.
 const char * CXmlElement::GetData()
 {
 	return m_strData.c_str();
 }
 
-/**
- * @ingroup XmlParser
- * @brief Element ³»¿ëÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns 
- */
+// Element ë‚´ìš©ì´ ì¡´ì¬í•˜ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CXmlElement::IsDataEmpty()
 {
 	return m_strData.empty();
 }
 
-/**
- * @ingroup XmlParser
- * @brief Element ÀÌ¸§À» ¼³Á¤ÇÑ´Ù.
- * @param pszName Element ÀÌ¸§
- */
+// Element ì´ë¦„ì„ ì„¤ì •í•œë‹¤.
 void CXmlElement::SetName( const char * pszName )
 {
 	m_strName = pszName;
 }
 
-/**
- * @ingroup XmlParser
- * @brief Element ³»¿ëÀ» ÀúÀåÇÑ´Ù.
- * @param pszData Element ³»¿ë
- */
+// Element ë‚´ìš©ì„ ì €ì¥í•œë‹¤.
 void CXmlElement::SetData( const char * pszData )
 {
 	m_strData = pszData;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName			ÇÏÀ§ Element ÀÌ¸§
- * @param pclsElement ÇÏÀ§ Element ÀÇ element;
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, CXmlElement * pclsElement )
 {
 	CXmlElement clsElement( pszName );
@@ -942,12 +755,7 @@ void CXmlElement::InsertElementData( const char * pszName, CXmlElement * pclsEle
 	m_clsElementList.push_back( clsElement );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param pszData ÇÏÀ§ Element ÀÇ data °ª
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, const char * pszData )
 {
 	CXmlElement clsElement( pszName );
@@ -969,23 +777,13 @@ void CXmlElement::InsertElementData( const char * pszName, const char * pszData 
 	m_clsElementList.push_back( clsElement );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param strData ÇÏÀ§ Element ÀÇ data °ª
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, std::string & strData )
 {
 	InsertElementData( pszName, strData.c_str() );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iData		ÇÏÀ§ Element ÀÇ data °ª
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, int iData )
 {
 	char szData[11];
@@ -995,12 +793,7 @@ void CXmlElement::InsertElementData( const char * pszName, int iData )
 	InsertElementData( pszName, szData );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iData		ÇÏÀ§ Element ÀÇ data °ª
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, int64_t iData )
 {
 	char szData[21];
@@ -1010,23 +803,13 @@ void CXmlElement::InsertElementData( const char * pszName, int64_t iData )
 	InsertElementData( pszName, szData );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param bData		ÇÏÀ§ Element ÀÇ data °ª
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, bool bData )
 {
 	InsertElementData( pszName, bData ? "true" : "false" );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param dbData	ÇÏÀ§ Element ÀÇ data °ª
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElementData( const char * pszName, double dbData )
 {
 	char szData[51];
@@ -1036,24 +819,13 @@ void CXmlElement::InsertElementData( const char * pszName, double dbData )
 	InsertElementData( pszName, szData );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¸¦ Ãß°¡ÇÑ´Ù.
- * @param pclsElement ÇÏÀ§ Element
- */
+// í•˜ìœ„ Element ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertElement( CXmlElement * pclsElement )
 {
 	m_clsElementList.push_back( *pclsElement );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú µ¿ÀÏÇÑ Element ÀÇ ³»¿ëÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param pszData ÇÏÀ§ Element ÀÇ data °ª
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @returns ÇÏÀ§ Element ³»¿ë ¼öÁ¤¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ë™ì¼í•œ Element ì˜ ë‚´ìš©ì„ ìˆ˜ì •í•œë‹¤.
 bool CXmlElement::UpdateElementData( const char * pszName, const char * pszData, const int iIndex )
 {
 	CXmlElement * pclsElement = SelectElement( pszName, iIndex );
@@ -1066,27 +838,13 @@ bool CXmlElement::UpdateElementData( const char * pszName, const char * pszData,
 	return false;
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú µ¿ÀÏÇÑ Element ÀÇ ³»¿ëÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param strData ÇÏÀ§ Element ÀÇ data °ª
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @returns ÇÏÀ§ Element ³»¿ë ¼öÁ¤¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ë™ì¼í•œ Element ì˜ ë‚´ìš©ì„ ìˆ˜ì •í•œë‹¤.
 bool CXmlElement::UpdateElementData( const char * pszName, std::string & strData, const int iIndex )
 {
 	return UpdateElementData( pszName, strData.c_str(), iIndex );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú µ¿ÀÏÇÑ Element ÀÇ ³»¿ëÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iData 
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @returns ÇÏÀ§ Element ³»¿ë ¼öÁ¤¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ë™ì¼í•œ Element ì˜ ë‚´ìš©ì„ ìˆ˜ì •í•œë‹¤.
 bool CXmlElement::UpdateElementData( const char * pszName, int iData, const int iIndex )
 {
 	char szData[11];
@@ -1096,14 +854,7 @@ bool CXmlElement::UpdateElementData( const char * pszName, int iData, const int 
 	return UpdateElementData( pszName, szData, iIndex );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú µ¿ÀÏÇÑ Element ÀÇ ³»¿ëÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param iData		ÇÏÀ§ Element ÀÇ data °ª
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @returns ÇÏÀ§ Element ³»¿ë ¼öÁ¤¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ë™ì¼í•œ Element ì˜ ë‚´ìš©ì„ ìˆ˜ì •í•œë‹¤.
 bool CXmlElement::UpdateElementData( const char * pszName, int64_t iData, const int iIndex )
 {
 	char szData[21];
@@ -1113,27 +864,13 @@ bool CXmlElement::UpdateElementData( const char * pszName, int64_t iData, const 
 	return UpdateElementData( pszName, szData, iIndex );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú µ¿ÀÏÇÑ Element ÀÇ ³»¿ëÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param bData		ÇÏÀ§ Element ÀÇ data °ª
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @returns ÇÏÀ§ Element ³»¿ë ¼öÁ¤¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ë™ì¼í•œ Element ì˜ ë‚´ìš©ì„ ìˆ˜ì •í•œë‹¤.
 bool CXmlElement::UpdateElementData( const char * pszName, bool bData, const int iIndex )
 {
 	return UpdateElementData( pszName, bData ? "true" : "false", iIndex );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ÇÏÀ§ Element ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú µ¿ÀÏÇÑ Element ÀÇ ³»¿ëÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName ÇÏÀ§ Element ÀÌ¸§
- * @param dbData	ÇÏÀ§ Element ÀÇ data °ª
- * @param iIndex	ÇÏÀ§ Element ÀÎµ¦½º. 0 À» ÀÔ·ÂÇÏ¸é Ã¹¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÏ°í 1 À» ÀÔ·ÂÇÏ¸é µÎ¹øÂ° °Ë»öµÈ ÇÏÀ§ Element ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @returns ÇÏÀ§ Element ³»¿ë ¼öÁ¤¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ìœ„ Element ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ë™ì¼í•œ Element ì˜ ë‚´ìš©ì„ ìˆ˜ì •í•œë‹¤.
 bool CXmlElement::UpdateElementData( const char * pszName, double dbData, const int iIndex )
 {
 	char szData[51];
@@ -1143,12 +880,7 @@ bool CXmlElement::UpdateElementData( const char * pszName, double dbData, const 
 	return UpdateElementData( pszName, szData, iIndex );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ® ÀÌ¸§ÀÌ Á¸ÀçÇÏÁö ¾ÊÀ¸¸é ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÏ°í ¾ÖÆ®¸®ºäÆ® ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é ÇØ´ç °ªÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param pszValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ ì´ë¦„ì´ ì¡´ì¬í•˜ì§€ ì•Šìœ¼ë©´ ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•˜ê³  ì• íŠ¸ë¦¬ë·°íŠ¸ ì´ë¦„ì´ ì¡´ì¬í•˜ë©´ í•´ë‹¹ ê°’ì„ ìˆ˜ì •í•œë‹¤.
 void CXmlElement::InsertAttribute( const char * pszName, const char * pszValue )
 {
 	XML_ATTRIBUTE_MAP::iterator itMap;
@@ -1164,23 +896,13 @@ void CXmlElement::InsertAttribute( const char * pszName, const char * pszValue )
 	}
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param strValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertAttribute( const char * pszName, std::string & strValue )
 {
 	InsertAttribute( pszName, strValue.c_str() );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param iValue		¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertAttribute( const char * pszName, int iValue )
 {
 	char szValue[11];
@@ -1190,12 +912,7 @@ void CXmlElement::InsertAttribute( const char * pszName, int iValue )
 	InsertAttribute( pszName, szValue );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param iValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertAttribute( const char * pszName, int64_t iValue )
 {
 	char szValue[21];
@@ -1205,23 +922,13 @@ void CXmlElement::InsertAttribute( const char * pszName, int64_t iValue )
 	InsertAttribute( pszName, szValue );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param bValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertAttribute( const char * pszName, bool bValue )
 {
 	InsertAttribute( pszName, bValue ? "true" : "false" );
 }
 
-/**
- * @ingroup XmlParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù.
- * @param pszName ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param dbValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤.
 void CXmlElement::InsertAttribute( const char * pszName, double dbValue )
 {
 	char szValue[51];
@@ -1231,21 +938,13 @@ void CXmlElement::InsertAttribute( const char * pszName, double dbValue )
 	InsertAttribute( pszName, szValue );
 }
 
-/**
- * @ingroup XmlParser
- * @brief element list ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns element list ÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// element list ì˜ í¬ì¸í„°ë¥¼ ë¦¬í„´í•œë‹¤.
 XML_ELEMENT_LIST * CXmlElement::GetElementList()
 {
 	return &m_clsElementList;
 }
 
-/**
- * @brief ÀÔ·ÂµÈ ¹®ÀÚ¿­À» bool ·Î º¯È¯ÇÏ¿©¼­ ¸®ÅÏÇÑ´Ù.
- * @param pszData ¹®ÀÚ¿­
- * @returns ÀÔ·ÂµÈ ¹®ÀÚ¿­ÀÌ true ÀÌ°Å³ª yes ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì…ë ¥ëœ ë¬¸ìì—´ì„ bool ë¡œ ë³€í™˜í•˜ì—¬ì„œ ë¦¬í„´í•œë‹¤.
 bool CXmlElement::GetBoolean( const char * pszData )
 {
 	if( !strcasecmp( pszData, "true" ) || !strcasecmp( pszData, "yes" ) )

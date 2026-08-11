@@ -32,12 +32,7 @@ CTcpStackSetup::~CTcpStackSetup()
 {
 }
 
-/**
- * @ingroup TcpStack
- * @brief XML element ¿¡¼­ TCP stack ¼³Á¤ »çÇ×À» °¡Á®¿Â´Ù.
- * @param clsXml XML element
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// XML element ì—ì„œ TCP stack ì„¤ì • ì‚¬í•­ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CTcpStackSetup::Parse( CXmlElement & clsXml )
 {
 	clsXml.SelectElementData( "ListenIp", m_strListenIp );

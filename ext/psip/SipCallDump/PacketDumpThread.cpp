@@ -25,12 +25,7 @@
 #include "PacketDump.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipCallDump
- * @brief ÆĞÅ¶ ´ıÇÁ ¾²·¹µå
- * @param lpParameter 
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// íŒ¨í‚· ë¤í”„ ì“°ë ˆë“œ
 THREAD_API PacketDumpThread( LPVOID lpParameter )
 {
 	pcap_t	* psttPcap = NULL;
@@ -90,7 +85,7 @@ START_PCAP:
 
 			psttIp4Header = (Ip4Header *)( pszData + iIpPos );
 
-			// IPv4 ¸¸ °Ë»çÇÑ´Ù.
+			// IPv4 ë§Œ ê²€ì‚¬í•œë‹¤.
 			if( ( psttIp4Header->ver_ihl & 0xF0 ) != 0x40 ) continue;
 
 			iIpHeaderLen = GetIpHeaderLength( psttIp4Header );
@@ -117,7 +112,7 @@ START_PCAP:
 			{
 				if( iPacketCount > 0 )
 				{
-					// ¿¡·¯°¡ ¹ß»ıÇÏ¿´Áö¸¸ ±âÁ¸¿¡ ¼ö½ÅµÈ ÆĞÅ¶µéÀÌ ÀÖ´Ù¸é pcap À» ´Ù½Ã ½ÃÀÛÇÑ´Ù.
+					// ì—ëŸ¬ê°€ ë°œìƒí•˜ì˜€ì§€ë§Œ ê¸°ì¡´ì— ìˆ˜ì‹ ëœ íŒ¨í‚·ë“¤ì´ ìˆë‹¤ë©´ pcap ì„ ë‹¤ì‹œ ì‹œì‘í•œë‹¤.
 					bRestartPcap = true;
 					iPacketCount = 0;
 				}
@@ -141,11 +136,7 @@ FUNC_END:
 	return 0;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÆĞÅ¶ ´ıÇÁ ¾²·¹µå¸¦ ½ÃÀÛÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŒ¨í‚· ë¤í”„ ì“°ë ˆë“œë¥¼ ì‹œì‘í•œë‹¤.
 bool StartPacketDumpThread( )
 {
 	return StartThread( "PacketDumpThread", PacketDumpThread, NULL );

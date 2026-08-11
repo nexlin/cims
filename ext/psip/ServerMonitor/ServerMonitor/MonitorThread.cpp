@@ -23,12 +23,7 @@
 static bool gbRun = false;
 static bool gbStop = false;
 
-/**
- * @ingroup ServerMonitor
- * @brief ╦П╢оем╦╣ ╟А╟З фпе╤ю╩ ╪Ж╫его╢б ╬╡╥╧╣Е
- * @param lpParameter 
- * @returns 0 ю╩ ╦╝еогя╢ы.
- */
+// К╙╗К▀┬М└╟К╖│ Й╡╟ЙЁ╪ М▄╗М┌╥Л²└ Л┬≤Л▀═М∙≤К┼■ Л⌠╟К═┬К⌠°
 DWORD WINAPI MonitorThread( LPVOID lpParameter )
 {
 	gbRun = true;
@@ -54,11 +49,7 @@ DWORD WINAPI MonitorThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ╦П╢оем╦╣ ╟А╟З фпе╤ю╩ ╪Ж╫его╢б ╬╡╥╧╣Е╦╕ ╫цюшгя╢ы.
- * @returns ╪╨╟Ьго╦И true ╦╕ ╦╝еого╟М ╫гфпго╦И false ╦╕ ╦╝еогя╢ы.
- */
+// К╙╗К▀┬М└╟К╖│ Й╡╟ЙЁ╪ М▄╗М┌╥Л²└ Л┬≤Л▀═М∙≤К┼■ Л⌠╟К═┬К⌠°К╔╪ Л▀°Л·▒М∙°К▀╓.
 bool StartMonitorThread( )
 {
 	if( gbRun ) return false;
@@ -70,19 +61,13 @@ bool StartMonitorThread( )
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ╦П╢оем╦╣ ╟А╟З фпе╤ю╩ ╪Ж╫его╢б ╬╡╥╧╣Е╦╕ а╬╥А╫це╡╢ы.
- */
+// К╙╗К▀┬М└╟К╖│ Й╡╟ЙЁ╪ М▄╗М┌╥Л²└ Л┬≤Л▀═М∙≤К┼■ Л⌠╟К═┬К⌠°К╔╪ Л╒┘Кё▄Л▀°М┌╗К▀╓.
 void StopMonitorThread( )
 {
 	gbStop = true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ╦П╢оем╦╣ ╟А╟З фпе╤ю╩ ╪Ж╫его╢б ╬╡╥╧╣Е╟║ а╬╥Агр ╤╖╠НаЖ ╢К╠Бгя╢ы.
- */
+// К╙╗К▀┬М└╟К╖│ Й╡╟ЙЁ╪ М▄╗М┌╥Л²└ Л┬≤Л▀═М∙≤К┼■ Л⌠╟К═┬К⌠°Й╟─ Л╒┘Кё▄М∙═ К∙▄Й╧▄Л╖─ К▄─Й╦╟М∙°К▀╓.
 void WaitStopMonitorThread( )
 {
 	while( gbRun )

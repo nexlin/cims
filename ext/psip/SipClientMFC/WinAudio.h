@@ -24,10 +24,7 @@
 
 #define PCM_OUT_BUF_COUNT	10
 
-/**
- * @ingroup SipClientMFC
- * @brief ¿Àµğ¿À ÀÔ·Â callback ÀÎÅÍÆäÀÌ½º
- */
+// ì˜¤ë””ì˜¤ ì…ë ¥ callback ì¸í„°í˜ì´ìŠ¤
 class IWinAudioCallBack
 {
 public:
@@ -36,10 +33,7 @@ public:
 	virtual void EventInPcm( const int16_t * parrPcm, int iPcmLen ) = 0;
 };
 
-/**
- * @ingroup SipClientMFC
- * @brief À©µµ¿ì ¿Àµğ¿À ÀÔ·Â/Ãâ·Â Ã³¸® Å¬·¡½º
- */
+// ìœˆë„ìš° ì˜¤ë””ì˜¤ ì…ë ¥/ì¶œë ¥ ì²˜ë¦¬ í´ë˜ìŠ¤
 class CWinAudio
 {
 public:

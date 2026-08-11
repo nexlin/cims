@@ -22,11 +22,11 @@
 	#error "PCH¿¡ ´ëÇØ ÀÌ ÆÄÀÏÀ» Æ÷ÇÔÇÏ±â Àü¿¡ 'stdafx.h'¸¦ Æ÷ÇÔÇÕ´Ï´Ù."
 #endif
 
-#include "resource.h"       // ÁÖ ±âÈ£ÀÔ´Ï´Ù.
+#include "resource.h"       // ì£¼ ê¸°í˜¸ì…ë‹ˆë‹¤.
 
 
 // CServerMonitorApp:
-// ÀÌ Å¬·¡½ºÀÇ ±¸Çö¿¡ ´ëÇØ¼­´Â ServerMonitor.cppÀ» ÂüÁ¶ÇÏ½Ê½Ã¿À.
+// ì´ í´ë˜ìŠ¤ì˜ êµ¬í˜„ì— ëŒ€í•´ì„œëŠ” ServerMonitor.cppì„ ì°¸ì¡°í•˜ì‹­ì‹œì˜¤.
 //
 
 class CServerMonitorApp : public CWinAppEx
@@ -35,11 +35,11 @@ public:
 	CServerMonitorApp();
 
 
-// ÀçÁ¤ÀÇÀÔ´Ï´Ù.
+// ì¬ì •ì˜ì…ë‹ˆë‹¤.
 public:
 	virtual BOOL InitInstance();
 
-// ±¸ÇöÀÔ´Ï´Ù.
+// êµ¬í˜„ì…ë‹ˆë‹¤.
 	UINT  m_nAppLook;
 	BOOL  m_bHiColorIcons;
 

@@ -29,11 +29,7 @@
 
 bool gbFork = true;
 
-/**
- * @ingroup EchoSipServer
- * @brief ÅëÈ­ ¼ö½Å½Ã ÇØ´ç ÅëÈ­¸¦ Àü´ŞÇØ ÁÖ´Â ¼­ºñ½º
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í†µí™” ìˆ˜ì‹ ì‹œ í•´ë‹¹ í†µí™”ë¥¼ ì „ë‹¬í•´ ì£¼ëŠ” ì„œë¹„ìŠ¤
 int ServiceMain( )
 {
 #ifdef WIN32
@@ -53,8 +49,8 @@ int ServiceMain( )
 
 	if( gclsSetup.m_strLocalIp.empty() )
 	{
-		// N°³ÀÇ IPÁÖ¼Ò¸¦ »ç¿ëÇÏ´Â È£½ºÆ®¿¡¼­´Â SIP ÇÁ·ÎÅäÄİ·Î »ç¿ëÇÒ IPÁÖ¼Ò¸¦ Á÷Á¢ ÀÔ·ÂÇØ ÁÖ¼¼¿ä.
-		// Vmware µîÀ» »ç¿ëÇÏ´Â °æ¿ì N°³ÀÇ IPÁÖ¼Ò°¡ È£½ºÆ®¿¡ Á¸ÀçÇÕ´Ï´Ù.
+		// Nê°œì˜ IPì£¼ì†Œë¥¼ ì‚¬ìš©í•˜ëŠ” í˜¸ìŠ¤íŠ¸ì—ì„œëŠ” SIP í”„ë¡œí† ì½œë¡œ ì‚¬ìš©í•  IPì£¼ì†Œë¥¼ ì§ì ‘ ì…ë ¥í•´ ì£¼ì„¸ìš”.
+		// Vmware ë“±ì„ ì‚¬ìš©í•˜ëŠ” ê²½ìš° Nê°œì˜ IPì£¼ì†Œê°€ í˜¸ìŠ¤íŠ¸ì— ì¡´ì¬í•©ë‹ˆë‹¤.
 		GetLocalIp( clsSetup.m_strLocalIp );
 		gclsSetup.m_strLocalIp = clsSetup.m_strLocalIp;
 	}
@@ -115,13 +111,7 @@ int ServiceMain( )
 	return 0;
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief ÅëÈ­ ¼ö½Å½Ã ÇØ´ç ÅëÈ­¸¦ Àü´ŞÇØ ÁÖ´Â ¼­ºñ½º
- * @param argc 
- * @param argv 
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í†µí™” ìˆ˜ì‹ ì‹œ í•´ë‹¹ í†µí™”ë¥¼ ì „ë‹¬í•´ ì£¼ëŠ” ì„œë¹„ìŠ¤
 int main( int argc, char * argv[] )
 {
 	CServerService clsService;

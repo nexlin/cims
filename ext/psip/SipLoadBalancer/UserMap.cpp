@@ -27,12 +27,7 @@ CUserInfo::CUserInfo() : m_iSipServerPort(5060), m_iPort(0), m_eTransport(E_SIP_
 {
 }
 
-/**
- * @brief ÀÔ·ÂµÈ SIP ¼­¹ö Á¤º¸¿Í ÀÏÄ¡ÇÏ´ÂÁö °Ë»çÇÑ´Ù.
- * @param pszIp SIP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort SIP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @returns ÀÏÄ¡ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì…ë ¥ëœ SIP ì„œë²„ ì •ë³´ì™€ ì¼ì¹˜í•˜ëŠ”ì§€ ê²€ì‚¬í•œë‹¤.
 bool CUserInfo::EqualSipServer( const char * pszIp, int iPort )
 {
 	if( !strcmp( m_strSipServerIp.c_str(), pszIp ) && m_iSipServerPort == iPort ) return true;
@@ -48,12 +43,7 @@ CUserMap::~CUserMap()
 {
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP ¸Ş½ÃÁö·Î SIP Å¬¶óÀÌ¾ğÆ® Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param pclsRequest SIP ¸Ş½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ë¡œ SIP í´ë¼ì´ì–¸íŠ¸ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 bool CUserMap::Insert( CSipMessage * pclsRequest )
 {
 	bool								bRes = true;
@@ -101,13 +91,7 @@ bool CUserMap::Insert( CSipMessage * pclsRequest )
 }
 
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP ¸Ş½ÃÁö°ú °ü·ÃµÈ SIP Å¬¶óÀÌ¾ğÆ® Á¤º¸¸¦ °¡Á®¿Â´Ù.
- * @param pclsRequest SIP ¸Ş½ÃÁö
- * @param clsUserInfo SIP Å¬¶óÀÌ¾ğÆ® Á¤º¸ ÀúÀå º¯¼ö
- * @returns °Ë»öµÇ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ê³¼ ê´€ë ¨ëœ SIP í´ë¼ì´ì–¸íŠ¸ ì •ë³´ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool CUserMap::Select( CSipMessage * pclsRequest, CUserInfo & clsUserInfo )
 {
 	bool								bRes = true;
@@ -134,12 +118,7 @@ bool CUserMap::Select( CSipMessage * pclsRequest, CUserInfo & clsUserInfo )
 	return bRes;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP ¼­¹öÀÇ IP ÁÖ¼Ò/Æ÷Æ® ¹øÈ£¸¦ °¡Áö°í ÀÖ´Â SIP Å¬¶óÀÌ¾ğÆ®¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszIp SIP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort SIP ¼­¹ö Æ÷Æ® ¹øÈ£
- */
+// SIP ì„œë²„ì˜ IP ì£¼ì†Œ/í¬íŠ¸ ë²ˆí˜¸ë¥¼ ê°€ì§€ê³  ìˆëŠ” SIP í´ë¼ì´ì–¸íŠ¸ë¥¼ ì‚­ì œí•œë‹¤.
 void CUserMap::DeleteSipServer( const char * pszIp, int iPort )
 {
 	USER_MAP::iterator	itMap, itNext;
@@ -163,11 +142,7 @@ LOOP_START:
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µ¿ë ¹®ÀÚ¿­À» »ı¼ºÇÑ´Ù. 
- * @param strBuf ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µ¿ë ¹®ÀÚ¿­ º¯¼ö
- */
+// ìë£Œêµ¬ì¡° ëª¨ë‹ˆí„°ë§ìš© ë¬¸ìì—´ì„ ìƒì„±í•œë‹¤.
 void CUserMap::GetString( CMonitorString & strBuf )
 {
 	USER_MAP::iterator	itMap;

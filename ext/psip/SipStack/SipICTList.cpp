@@ -22,29 +22,18 @@
 #include "TimeUtility.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipICTList::CSipICTList() : m_iTimerD(32000)
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipICTList::~CSipICTList()
 {
 	DeleteAll();
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Client Transaction List ¿¡ SIP ¸Ş½ÃÁö¸¦ Ãß°¡ÇÑ´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Invite Client Transaction List ì— SIP ë©”ì‹œì§€ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipICTList::Insert( CSipMessage * pclsMessage )
 {
 	std::string strKey;
@@ -72,7 +61,7 @@ bool CSipICTList::Insert( CSipMessage * pclsMessage )
 						{
 							if( itMap->second->m_pclsResponse && itMap->second->m_pclsResponse->m_iStatusCode == SIP_UNAUTHORIZED )
 							{
-								// INVITE ¿¡ ´ëÇÑ ÀÀ´ä ¸Ş½ÃÁö°¡ 401 ÀÎ ACK ¸Ş½ÃÁö¸¦ ¼ö½ÅÇÏ¸é Transaction À» ¹Ù·Î »èÁ¦ÇÑ´Ù.
+								// INVITE ì— ëŒ€í•œ ì‘ë‹µ ë©”ì‹œì§€ê°€ 401 ì¸ ACK ë©”ì‹œì§€ë¥¼ ìˆ˜ì‹ í•˜ë©´ Transaction ì„ ë°”ë¡œ ì‚­ì œí•œë‹¤.
 								delete itMap->second;
 								m_clsMap.erase( itMap );
 							}
@@ -130,7 +119,7 @@ bool CSipICTList::Insert( CSipMessage * pclsMessage )
 				itMap->second->m_pclsResponse = pclsMessage;
 				itMap->second->m_iStatusCode = pclsMessage->m_iStatusCode;
 
-				// TCP,TLS connect error ÀÌ¸é transaction »èÁ¦¸¦ À§ÇØ¼­ stop time À» ¼³Á¤ÇÑ´Ù.
+				// TCP,TLS connect error ì´ë©´ transaction ì‚­ì œë¥¼ ìœ„í•´ì„œ stop time ì„ ì„¤ì •í•œë‹¤.
 				if( pclsMessage->m_iStatusCode == SIP_CONNECT_ERROR )
 				{
 					gettimeofday( &itMap->second->m_sttStopTime, NULL );
@@ -139,8 +128,8 @@ bool CSipICTList::Insert( CSipMessage * pclsMessage )
 				bRes = true;
 			}
 
-			// 180/183 ÀÀ´ä ¸Ş½ÃÁö¸¦ ¼ö½ÅÇÑ ÈÄ, 200 OK ¸¦ ¼ö½ÅÇÏÁö ¸ø ÇÑ °æ¿ì ICT ¿¡¼­ »èÁ¦ÇÏ±â À§ÇÑ ±â´É
-			// 200 OK ¸¦ ¼ö½ÅÇÏ°í ACK ¸¦ Àü¼ÛÇÏÁö ¾ÊÀº °æ¿ì ICT ¿¡¼­ »èÁ¦ÇÏ±â À§ÇÑ ±â´É
+			// 180/183 ì‘ë‹µ ë©”ì‹œì§€ë¥¼ ìˆ˜ì‹ í•œ í›„, 200 OK ë¥¼ ìˆ˜ì‹ í•˜ì§€ ëª» í•œ ê²½ìš° ICT ì—ì„œ ì‚­ì œí•˜ê¸° ìœ„í•œ ê¸°ëŠ¥
+			// 200 OK ë¥¼ ìˆ˜ì‹ í•˜ê³  ACK ë¥¼ ì „ì†¡í•˜ì§€ ì•Šì€ ê²½ìš° ICT ì—ì„œ ì‚­ì œí•˜ê¸° ìœ„í•œ ê¸°ëŠ¥
 			if( itMap->second->m_sttRingTime.tv_sec == 0 )
 			{
 				gettimeofday( &itMap->second->m_sttRingTime, NULL );
@@ -157,11 +146,7 @@ bool CSipICTList::Insert( CSipMessage * pclsMessage )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Client Transaction List ¿¡¼­ ÀçÀü¼ÛÇÒ Ç×¸ñÀº ÀçÀü¼ÛÇÏ°í »èÁ¦ÇÒ Ç×¸ñÀº »èÁ¦ÇÏ°í Timeout µÈ Ç×¸ñÀº Timeout Ã³¸®ÇÑ´Ù.
- * @param psttTime ½ÇÇàÇÑ ½Ã°£
- */
+// Invite Client Transaction List ì—ì„œ ì¬ì „ì†¡í•  í•­ëª©ì€ ì¬ì „ì†¡í•˜ê³  ì‚­ì œí•  í•­ëª©ì€ ì‚­ì œí•˜ê³  Timeout ëœ í•­ëª©ì€ Timeout ì²˜ë¦¬í•œë‹¤.
 void CSipICTList::Execute( struct timeval * psttTime )
 {
 	INVITE_TRANSACTION_MAP::iterator	itMap, itNext;
@@ -236,10 +221,7 @@ DELETE_TRANSACTION:
 	clsResponseList.clear();
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Client Transaction List ÀÇ ¸ğµç Ç×¸ñÀ» »èÁ¦ÇÑ´Ù.
- */
+// Invite Client Transaction List ì˜ ëª¨ë“  í•­ëª©ì„ ì‚­ì œí•œë‹¤.
 void CSipICTList::DeleteAll( )
 {
 	INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -254,11 +236,7 @@ void CSipICTList::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Client Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns Invite Client Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Invite Client Transaction List ì˜ í¬ê¸°ë¥¼ ë¦¬í„´í•œë‹¤.
 int CSipICTList::GetSize( )
 {
 	int iSize;
@@ -270,11 +248,7 @@ int CSipICTList::GetSize( )
 	return iSize;
 }
 
-/**
- * @ingroup SipStack
- * @brief ICT ¿¡ ÀúÀåµÈ SIP Call-ID µéÀ» ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf SIP Call-ID µéÀ» ÀúÀåÇÒ º¯¼ö
- */
+// ICT ì— ì €ì¥ëœ SIP Call-ID ë“¤ì„ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CSipICTList::GetString( CMonitorString & strBuf )
 {
 	INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -289,21 +263,13 @@ void CSipICTList::GetString( CMonitorString & strBuf )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Timer D °ªÀ» ¼öÁ¤ÇÑ´Ù.
- * @param iMiliSecond Timer D °ª ( milisecond ´ÜÀ§ )
- */
+// Timer D ê°’ì„ ìˆ˜ì •í•œë‹¤.
 void CSipICTList::SetTimerD( int iMiliSecond )
 {
 	m_iTimerD = iMiliSecond;
 }
 
-/**
- * @ingroup SipStack
- * @brief transcation map À» °¡Á®¿Â´Ù.
- * @param clsMap [out] transcation map À» ÀúÀåÇÒ º¯¼ö
- */
+// transcation map ì„ ê°€ì ¸ì˜¨ë‹¤.
 void CSipICTList::GetTransactionMap( INVITE_TRANSACTION_MAP & clsMap )
 {
 	m_clsMutex.acquire();

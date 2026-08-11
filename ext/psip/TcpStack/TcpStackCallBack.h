@@ -21,55 +21,25 @@
 
 #include "TcpSessionList.h"
 
-/**
- * @ingroup TcpStack
- * @brief CTcpStack À» »ç¿ëÇÏ´Â ÀÀ¿ë callback ÀÎÅÍÆäÀÌ½º
- */
+// CTcpStack ì„ ì‚¬ìš©í•˜ëŠ” ì‘ìš© callback ì¸í„°í˜ì´ìŠ¤
 class ITcpStackCallBack
 {
 public:
 	virtual ~ITcpStackCallBack(){};
 
-	/**
-	 * @ingroup TcpStack
-	 * @brief TCP Å¬¶óÀÌ¾ğÆ®°¡ ¿¬°á ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
-	 * @return TCP Å¬¶óÀÌ¾ğÆ® ¿¬°áÀ» Çã¿ëÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// TCP í´ë¼ì´ì–¸íŠ¸ê°€ ì—°ê²° ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual bool InComingConnected( CTcpSessionInfo * pclsSessionInfo ) = 0;
 
-	/**
-	 * @ingroup TcpStack
-	 * @brief TCP Å¬¶óÀÌ¾ğÆ® ¼¼¼ÇÀÌ Á¾·á ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
-	 */
+	// TCP í´ë¼ì´ì–¸íŠ¸ ì„¸ì…˜ì´ ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual void SessionClosed( CTcpSessionInfo * pclsSessionInfo ) = 0;
 
-	/**
-	 * @ingroup TcpStack
-	 * @brief TCP ÆĞÅ¶ ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pszPacket				¼ö½Å ÆĞÅ¶
-	 * @param iPacketLen			¼ö½Å ÆĞÅ¶ ±æÀÌ
-	 * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
-	 * @returns TCP ¼¼¼ÇÀ» À¯ÁöÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// TCP íŒ¨í‚· ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual bool RecvPacket( char * pszPacket, int iPacketLen, CTcpSessionInfo * pclsSessionInfo ) = 0;
 
-	/**
-	 * @ingroup TcpStack
-	 * @brief SendAll ·Î Àü¼ÛÇØµµ µÇ´Â ¼¼¼ÇÀÎÁö °Ë»çÇÑ´Ù.
-	 * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
-	 * @returns SendAll ·Î Àü¼ÛÇØµµ µÇ´Â ¼¼¼ÇÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// SendAll ë¡œ ì „ì†¡í•´ë„ ë˜ëŠ” ì„¸ì…˜ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 	virtual bool IsSendAll( CTcpSessionInfo * pclsSessionInfo ){ return false; };
 
-	/**
-	 * @ingroup TcpStack
-	 * @brief SendAll ·Î Àü¼ÛÇÒ ¶§¿¡ ¼¼¼Ç´ç Send ÇÔ¼ö È£ÃâÈÄ, È£ÃâµÇ´Â ÀÌº¥Æ® ÇÚµé·¯
-	 * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
-	 * @param pszPacket				Àü¼ÛÇÑ ÆĞÅ¶
-	 * @param iPacketLen			Àü¼Û ÆĞÅ¶ ±æÀÌ
-	 */
+	// SendAll ë¡œ ì „ì†¡í•  ë•Œì— ì„¸ì…˜ë‹¹ Send í•¨ìˆ˜ í˜¸ì¶œí›„, í˜¸ì¶œë˜ëŠ” ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 	virtual void AfterSendAllPerSession( CTcpSessionInfo * pclsSessionInfo, const char * pszPacket, int iPacketLen ){};
 };
 

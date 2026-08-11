@@ -29,13 +29,7 @@ CSipCSeq::~CSipCSeq()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipCSeq Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipCSeq í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipCSeq::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -71,13 +65,7 @@ int CSipCSeq::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipCSeq::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -86,13 +74,7 @@ int CSipCSeq::ToString( char * pszText, int iTextSize )
 	return snprintf( pszText, iTextSize, "%d %s", m_iDigit, m_strMethod.c_str() );
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP CSeq Çì´õ Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param iDigit		CSeq ¼ıÀÚ
- * @param pszMethod SIP ¸Ş¼Òµå
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP CSeq í—¤ë” ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 bool CSipCSeq::Set( int iDigit, const char * pszMethod )
 {
 	if( iDigit < 0 || pszMethod == NULL ) return false;
@@ -103,21 +85,14 @@ bool CSipCSeq::Set( int iDigit, const char * pszMethod )
 	return true;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipCSeq::Clear()
 {
 	m_iDigit = -1;
 	m_strMethod.clear();
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ë³€ìˆ˜ê°€ ì €ì¥ë˜ì–´ ìˆì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSipCSeq::Empty()
 {
 	if( m_iDigit == -1 ) return true;

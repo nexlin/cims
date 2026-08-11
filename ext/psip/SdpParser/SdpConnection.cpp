@@ -21,29 +21,17 @@
 #include <stdlib.h>
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpConnection::CSdpConnection() : m_iMulticastTtl(-1), m_iMulticastNum(-1)
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpConnection::~CSdpConnection()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP connection ÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP connection ÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP connection ÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP connection ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpConnection::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -69,13 +57,7 @@ int CSdpConnection::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP connection ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP connection ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP connection ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpConnection::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -98,10 +80,7 @@ int CSdpConnection::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpConnection::Clear()
 {
 	m_strNetType.clear();
@@ -111,11 +90,7 @@ void CSdpConnection::Clear()
 	m_iMulticastNum = -1;
 }
 
-/**
- * @ingroup SdpParser
- * @brief µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- * @return µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë°ì´í„°ê°€ ì¡´ì¬í•˜ë©´ false ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSdpConnection::Empty()
 {
 	if( m_strNetType.empty() || m_strAddrType.empty() || m_strAddr.empty() ) return true;

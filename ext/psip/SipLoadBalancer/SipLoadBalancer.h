@@ -19,8 +19,8 @@
 #ifndef _SIP_LOAD_BALANCER_H_
 #define _SIP_LOAD_BALANCER_H_
 
-// MS À©µµ¿ì ¼­ºñ½º ¼±¾ğ
-#define SERVICE_NAME								"SipLoadBalancer"		// ¼­ºñ½º ÀÌ¸§
+// MS ìœˆë„ìš° ì„œë¹„ìŠ¤ ì„ ì–¸
+#define SERVICE_NAME								"SipLoadBalancer"		// ì„œë¹„ìŠ¤ ì´ë¦„
 #define SERVICE_DISPLAY_NAME				"SipLoadBalancer"
 #define SERVICE_DESCRIPTION_STRING	"SipLoadBalancer - made by Yee Young Han"
 

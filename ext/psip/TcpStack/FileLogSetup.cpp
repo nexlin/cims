@@ -21,13 +21,7 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup TcpStack
- * @brief Xml element ÀÇ ¼³Á¤°ªµé·Î CFileLog ¸¦ ½ÃÀÛÇÑ´Ù.
- * @param clsFileLog CFileLog °´Ã¼
- * @param clsElement Xml elment
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Xml element ì˜ ì„¤ì •ê°’ë“¤ë¡œ CFileLog ë¥¼ ì‹œì‘í•œë‹¤.
 bool SetupFileLog( CFileLog & clsFileLog, CXmlElement & clsElement )
 {
 	std::string strTemp;

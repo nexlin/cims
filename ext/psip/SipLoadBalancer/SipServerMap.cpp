@@ -27,13 +27,7 @@ CSipServerInfo::CSipServerInfo() : m_iPort(5060), m_bUse(true), m_bDelete(false)
 {
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ÀÔ·ÂµÈ IP ÁÖ¼Ò ¹× Æ÷Æ® ¹øÈ£°¡ SIP ¼­¹ö Á¤º¸¿Í ÀÏÄ¡ÇÏ´ÂÁö °Ë»çÇÑ´Ù.
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Æ÷Æ® ¹øÈ£
- * @returns ÀÔ·Â‰é Á¤º¸°¡ SIP ¼­¹ö Á¤º¸¿Í ÀÏÄ¡ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì…ë ¥ëœ IP ì£¼ì†Œ ë° í¬íŠ¸ ë²ˆí˜¸ê°€ SIP ì„œë²„ ì •ë³´ì™€ ì¼ì¹˜í•˜ëŠ”ì§€ ê²€ì‚¬í•œë‹¤.
 bool CSipServerInfo::Equal( const char * pszIp, int iPort )
 {
 	if( !strcmp( m_strIp.c_str(), pszIp ) && m_iPort == iPort ) return true;
@@ -49,20 +43,13 @@ CSipServerMap::~CSipServerMap()
 {
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP ¼­¹ö Á¤º¸¸¦ ¸®½ºÆ®¿¡ Ãß°¡ÇÑ´Ù.
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Æ÷Æ® ¹øÈ£
- * @param bUse	»ç¿ë À¯¹«
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì„œë²„ ì •ë³´ë¥¼ ë¦¬ìŠ¤íŠ¸ì— ì¶”ê°€í•œë‹¤.
 bool CSipServerMap::Insert( const char * pszIp, int iPort, bool bUse )
 {
 	if( pszIp == NULL || strlen(pszIp) == 0 ) return false;
 	if( iPort <= 0 || iPort > 65535 ) return false;
 
-	// ÀÌ¹Ì ¸®½ºÆ®¿¡ Á¸ÀçÇÏ¸é Ãß°¡ÇÏÁö ¾Ê´Â´Ù.
+	// ì´ë¯¸ ë¦¬ìŠ¤íŠ¸ì— ì¡´ì¬í•˜ë©´ ì¶”ê°€í•˜ì§€ ì•ŠëŠ”ë‹¤.
 	if( Select( pszIp, iPort, bUse ) ) return true;
 
 	CSipServerInfo clsInfo;
@@ -78,12 +65,7 @@ bool CSipServerMap::Insert( const char * pszIp, int iPort, bool bUse )
 	return true;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief Á¢¼ÓÇÒ SIP ¼­¹ö Á¤º¸¸¦ °¡Á®¿Â´Ù.
- * @param clsInfo SIP ¼­¹ö Á¤º¸¸¦ ÀúÀåÇÏ´Â º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì ‘ì†í•  SIP ì„œë²„ ì •ë³´ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool CSipServerMap::SelectNext( CSipServerInfo & clsInfo )
 {
 	bool bRes = false;
@@ -107,13 +89,7 @@ bool CSipServerMap::SelectNext( CSipServerInfo & clsInfo )
 	return bRes;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ÀÔ·ÂµÈ IP ÁÖ¼Ò, Æ÷Æ®¹øÈ£¿Í ÀÏÄ¡ÇÏ´Â SIP ¼­¹ö Á¤º¸°¡ Á¸ÀçÇÏ´ÂÁö °Ë»çÇÑ´Ù.
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Æ÷Æ® ¹øÈ£
- * @returns SIP ¼­¹ö°¡ °Ë»öµÇ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì…ë ¥ëœ IP ì£¼ì†Œ, í¬íŠ¸ë²ˆí˜¸ì™€ ì¼ì¹˜í•˜ëŠ” SIP ì„œë²„ ì •ë³´ê°€ ì¡´ì¬í•˜ëŠ”ì§€ ê²€ì‚¬í•œë‹¤.
 bool CSipServerMap::Select( const char * pszIp, int iPort )
 {
 	SIP_SERVER_LIST::iterator itList;
@@ -133,14 +109,7 @@ bool CSipServerMap::Select( const char * pszIp, int iPort )
 	return bFound;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ÀÔ·ÂµÈ IP ÁÖ¼Ò, Æ÷Æ®¹øÈ£¿Í ÀÏÄ¡ÇÏ´Â SIP ¼­¹ö Á¤º¸°¡ Á¸ÀçÇÏ¸é »ç¿ë À¯¹« ¹× »èÁ¦ À¯¹«¸¦ ¾÷µ¥ÀÌÆ®ÇÑ´Ù.
- * @param pszIp IP ÁÖ¼Ò
- * @param iPort Æ÷Æ® ¹øÈ£
- * @param bUse	»ç¿ë À¯¹«
- * @returns SIP ¼­¹ö°¡ °Ë»öµÇ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì…ë ¥ëœ IP ì£¼ì†Œ, í¬íŠ¸ë²ˆí˜¸ì™€ ì¼ì¹˜í•˜ëŠ” SIP ì„œë²„ ì •ë³´ê°€ ì¡´ì¬í•˜ë©´ ì‚¬ìš© ìœ ë¬´ ë° ì‚­ì œ ìœ ë¬´ë¥¼ ì—…ë°ì´íŠ¸í•œë‹¤.
 bool CSipServerMap::Select( const char * pszIp, int iPort, bool bUse )
 {
 	SIP_SERVER_LIST::iterator itList;
@@ -162,10 +131,7 @@ bool CSipServerMap::Select( const char * pszIp, int iPort, bool bUse )
 	return bFound;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¸ğµç SIP ¼­¹ö Á¤º¸¿¡ »èÁ¦ Ç¥½Ã¸¦ ÇÑ´Ù.
- */
+// ëª¨ë“  SIP ì„œë²„ ì •ë³´ì— ì‚­ì œ í‘œì‹œë¥¼ í•œë‹¤.
 void CSipServerMap::SetDeleteAll( )
 {
 	SIP_SERVER_LIST::iterator itList;
@@ -178,10 +144,7 @@ void CSipServerMap::SetDeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief »èÁ¦ Ç¥½Ã°¡ µÈ SIP ¼­¹ö¸¦ »èÁ¦ÇÑ´Ù.
- */
+// ì‚­ì œ í‘œì‹œê°€ ëœ SIP ì„œë²„ë¥¼ ì‚­ì œí•œë‹¤.
 void CSipServerMap::DeleteIfSet( )
 {
 	SIP_SERVER_LIST::iterator itList, itNext;
@@ -213,11 +176,7 @@ LOOP_START:
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µ¿ë ¹®ÀÚ¿­À» »ı¼ºÇÑ´Ù. 
- * @param strBuf ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µ¿ë ¹®ÀÚ¿­ º¯¼ö
- */
+// ìë£Œêµ¬ì¡° ëª¨ë‹ˆí„°ë§ìš© ë¬¸ìì—´ì„ ìƒì„±í•œë‹¤.
 void CSipServerMap::GetString( CMonitorString & strBuf )
 {
 	SIP_SERVER_LIST::iterator itList;

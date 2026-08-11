@@ -46,14 +46,7 @@ bool GetSipCallRoute( CSipCallRoute & clsRoute )
 	return false;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP ¼­¹ö Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param joSipServerInfo java SipServerInfo °´Ã¼
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì„œë²„ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_InsertRegisterInfo( JNIEnv * env, jclass, jobject joSipServerInfo )
 {
 	CSipServerInfo clsSipServerInfo;
@@ -65,14 +58,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_InsertRegisterInfo( JNIEnv
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP stack À» ½ÃÀÛÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param joSipStackSetup java SipStackSetup °´Ã¼
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP stack ì„ ì‹œì‘í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_Start( JNIEnv * env, jclass jcSipUserAgent, jobject joSipStackSetup )
 {
 	if( gclsClass.Init( env ) == false )
@@ -108,13 +94,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_Start( JNIEnv * env, jclas
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP stack À» Á¾·áÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP stack ì„ ì¢…ë£Œí•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_Stop( JNIEnv * env, jclass )
 {
 	gclsUserAgent.Stop();
@@ -122,16 +102,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_Stop( JNIEnv * env, jclass
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief ÀüÈ­ ÅëÈ­ ¿äÃ»ÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param strFrom					¹ß½ÅÀÚ ¾ÆÀÌµğ
- * @param strTo						¼ö½ÅÀÚ ¾ÆÀÌµğ
- * @param joSipCallRtp		RTP Á¤º¸
- * @returns ¼º°øÇÏ¸é SIP call-id ¸¦ ÀúÀåÇÑ ¹®ÀÚ¿­ °´Ã¼¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// ì „í™” í†µí™” ìš”ì²­í•œë‹¤.
 JNIEXPORT jstring JNICALL Java_com_esip_SipUserAgent_StartCall( JNIEnv * env, jclass, jstring jsFrom, jstring jsTo, jobject joSipCallRtp )
 {
 	std::string	strFrom, strTo, strCallId;
@@ -165,15 +136,7 @@ JNIEXPORT jstring JNICALL Java_com_esip_SipUserAgent_StartCall( JNIEnv * env, jc
 	return jsCallId;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief ÀüÈ­ ÅëÈ­¸¦ Á¾·áÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param strCallId				SIP call-id
- * @param iSipCode				SIP status code
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì „í™” í†µí™”ë¥¼ ì¢…ë£Œí•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_StopCall( JNIEnv * env, jclass, jstring jsCallId, jint iSipCode )
 {
 	std::string	strCallId;
@@ -189,15 +152,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_StopCall( JNIEnv * env, jc
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief ÅëÈ­ ¿äÃ»À» ¼ö¶ôÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param strCallId				SIP call-id
- * @param joSipCallRtp		RTP Á¤º¸
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í†µí™” ìš”ì²­ì„ ìˆ˜ë½í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_AcceptCall( JNIEnv * env, jclass, jstring jsCallId, jobject joSipCallRtp )
 {
 	std::string	strCallId;
@@ -215,15 +170,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_AcceptCall( JNIEnv * env, 
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief Blind transfer ¸¦ ½ÇÇàÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param strCallId				SIP call-id
- * @param jsTo						ÅëÈ­ Àü´ŞÀ» ¹ŞÀ» ¾ÆÀÌµğ
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Blind transfer ë¥¼ ì‹¤í–‰í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_TransferCallBlind( JNIEnv * env, jclass, jstring jsCallId, jstring jsTo )
 {
 	std::string	strCallId, strTo;
@@ -240,15 +187,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_TransferCallBlind( JNIEnv 
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief Screened / Unscreened transfer ¸¦ ½ÇÇàÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param strCallId				SIP call-id
- * @param jsToCallId			ÅëÈ­ Àü´ŞÀ» ¹ŞÀ» SIP Call-ID
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Screened / Unscreened transfer ë¥¼ ì‹¤í–‰í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_TransferCall( JNIEnv * env, jclass, jstring jsCallId, jstring jsToCallId )
 {
 	std::string	strCallId, strToCallId;
@@ -265,15 +204,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_TransferCall( JNIEnv * env
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief ReINVITE ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param strCallId				SIP call-id
- * @param joSipCallRtp		RTP Á¤º¸
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ReINVITE ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_SendReInvite( JNIEnv * env, jclass, jstring jsCallId, jobject joSipCallRtp )
 {
 	std::string	strCallId;
@@ -291,16 +222,7 @@ JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_SendReInvite( JNIEnv * env
 	return JNI_TRUE;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief text ±â¹İ SMS ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
- * @param env							JNIEnv
- * @param jcSipUserAgent	java SipUserAgent Å¬·¡½º
- * @param jsFrom					¹ß½ÅÀÚ ¾ÆÀÌµğ
- * @param jsTo						¼ö½ÅÀÚ ¾ÆÀÌµğ
- * @param jsText					ÅØ½ºÆ® ¸Ş½ÃÁö
- * @returns ¼º°øÇÏ¸é JNI_TRUE ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é JNI_FALSE ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// text ê¸°ë°˜ SMS ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
 JNIEXPORT jboolean JNICALL Java_com_esip_SipUserAgent_SendSms( JNIEnv * env, jclass, jstring jsFrom, jstring jsTo, jstring jsText )
 {
 	std::string	strFrom, strTo, strText;

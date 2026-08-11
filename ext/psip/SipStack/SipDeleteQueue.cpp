@@ -22,27 +22,17 @@
 CSipDeleteQueue gclsSipDeleteQueue;
 extern time_t giTime;
 
-/**
- * @ingroup SipStack
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipDeleteQueue::CSipDeleteQueue()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipDeleteQueue::~CSipDeleteQueue()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ÀÏÁ¤ ½Ã°£ ÈÄ¿¡ »èÁ¦ÇÒ SIP ¸Ş½ÃÁö¸¦ ÀúÀåÇÑ´Ù.
- * @param pclsMessage ¸¸·áµÈ SIP ¸Ş½ÃÁö
- */
+// ì¼ì • ì‹œê°„ í›„ì— ì‚­ì œí•  SIP ë©”ì‹œì§€ë¥¼ ì €ì¥í•œë‹¤.
 void CSipDeleteQueue::Insert( CSipMessage * pclsMessage )
 {
 	if( pclsMessage->m_iUseCount == 0 )
@@ -61,10 +51,7 @@ void CSipDeleteQueue::Insert( CSipMessage * pclsMessage )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief ´ë±â ½Ã°£ÀÌ ÃÊ°úÇÑ SIP ¸Ş½ÃÁö¸¦ »èÁ¦ÇÑ´Ù.
- */
+// ëŒ€ê¸° ì‹œê°„ì´ ì´ˆê³¼í•œ SIP ë©”ì‹œì§€ë¥¼ ì‚­ì œí•œë‹¤.
 void CSipDeleteQueue::DeleteTimeout( )
 {
 	int			iCount;
@@ -88,10 +75,7 @@ void CSipDeleteQueue::DeleteTimeout( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief ´ë±â SIP ¸Ş½ÃÁö¸¦ ¸ğµÎ »èÁ¦ÇÑ´Ù.
- */
+// ëŒ€ê¸° SIP ë©”ì‹œì§€ë¥¼ ëª¨ë‘ ì‚­ì œí•œë‹¤.
 void CSipDeleteQueue::DeleteAll( )
 {
 	SIP_DELETE_QUEUE::iterator	it;
@@ -105,11 +89,7 @@ void CSipDeleteQueue::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief		ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ SIP ¸Ş½ÃÁöÀÇ °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ SIP ¸Ş½ÃÁöÀÇ °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìë£Œêµ¬ì¡°ì— ì €ì¥ëœ SIP ë©”ì‹œì§€ì˜ ê°œìˆ˜ë¥¼ ë¦¬í„´í•œë‹¤.
 int CSipDeleteQueue::GetSize()
 {
 	int iSize;

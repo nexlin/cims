@@ -22,10 +22,7 @@
 #include <string>
 #include <list>
 
-/**
- * @ingroup HttpParser
- * @brief SIP Çì´õ Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP í—¤ë” ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CHttpHeader
 {
 public:
@@ -39,10 +36,10 @@ public:
 	void Set( const char * pszName, const char * pszValue );
 	void Clear();
 
-	/** ÀÌ¸§ */
+	// ì´ë¦„
 	std::string	m_strName;
 
-	/** °ª */
+	// ê°’
 	std::string	m_strValue;
 };
 

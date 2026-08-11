@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief Replaces ¸¦ Æ÷ÇÔÇÑ ¹®ÀÚ¿­¿¡¼­ SIP Call-ID ¸¦ °¡Á®¿Â´Ù.
- * @param pszValue	Replaces ¸¦ Æ÷ÇÔÇÑ ¹®ÀÚ¿­
- * @param strReferToCallId SIP Call-ID ¸¦ ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Replaces ë¥¼ í¬í•¨í•œ ë¬¸ìì—´ì—ì„œ SIP Call-ID ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool GetCallIdFromReferTo( const char * pszValue, std::string & strReferToCallId )
 {
 	const char * pszPos, * pszNext;
@@ -46,13 +40,7 @@ bool GetCallIdFromReferTo( const char * pszValue, std::string & strReferToCallId
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP REFER ¿äÃ» ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµğ
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Ş½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP REFER ìš”ì²­ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipUserAgent::RecvReferRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	CSipMessage * pclsResponse = NULL;
@@ -171,13 +159,7 @@ bool CSipUserAgent::RecvReferRequest( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP REFER ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµğ
- * @param pclsMessage ¼ö½ÅµÈ SIP ÀÀ´ä ¸Ş½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP REFER ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipUserAgent::RecvReferResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	std::string	strCallId;

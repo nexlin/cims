@@ -16,12 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ·Î±×ÀÎ Á¤º¸¸¦ Ãß°¡ÇÑ´Ù.
- * @param clsInfo SIP ·Î±×ÀÎ Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë¡œê·¸ì¸ ì •ë³´ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipUserAgent::InsertRegisterInfo( CSipServerInfo & clsInfo )
 {
 	if( clsInfo.m_strIp.empty() ) return false;
@@ -54,12 +49,7 @@ bool CSipUserAgent::InsertRegisterInfo( CSipServerInfo & clsInfo )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ·Î±×ÀÎ Á¤º¸¸¦ ¼öÁ¤ÇÑ´Ù.
- * @param clsInfo SIP ·Î±×ÀÎ Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë¡œê·¸ì¸ ì •ë³´ë¥¼ ìˆ˜ì •í•œë‹¤.
 bool CSipUserAgent::UpdateRegisterInfo( CSipServerInfo & clsInfo )
 {
 	if( clsInfo.m_strIp.empty() ) return false;
@@ -83,12 +73,7 @@ bool CSipUserAgent::UpdateRegisterInfo( CSipServerInfo & clsInfo )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ·Î±×ÀÎ Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param clsInfo clsInfo SIP ·Î±×ÀÎ Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë¡œê·¸ì¸ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CSipUserAgent::DeleteRegisterInfo( CSipServerInfo & clsInfo )
 {
 	if( clsInfo.m_strIp.empty() ) return false;
@@ -122,10 +107,7 @@ bool CSipUserAgent::DeleteRegisterInfo( CSipServerInfo & clsInfo )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ¸ğµç SIP ·Î±×ÀÎ Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- */
+// ëª¨ë“  SIP ë¡œê·¸ì¸ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 void CSipUserAgent::DeleteRegisterInfoAll( )
 {
 	m_clsRegisterMutex.acquire();
@@ -133,10 +115,7 @@ void CSipUserAgent::DeleteRegisterInfoAll( )
 	m_clsRegisterMutex.release();
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ·Î±×¾Æ¿ôÇÑ´Ù.
- */
+// ë¡œê·¸ì•„ì›ƒí•œë‹¤.
 void CSipUserAgent::DeRegister( )
 {
 	SIP_SERVER_INFO_LIST::iterator	it;

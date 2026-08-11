@@ -25,16 +25,7 @@
 #include "SipCallDumpSetup.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipCallDump
- * @brief TCP ÆÐÅ¶À» ºÐ¼®ÇÑ´Ù.
- * @param psttPcap			pcap_t Æ÷ÀÎÅÍ
- * @param psttHeader		pcap_pkthdr Æ÷ÀÎÅÍ
- * @param pszData				ÆÐÅ¶
- * @param psttIp4Header IPv4 Çì´õ
- * @param iIpPos				IP Çì´õ À§Ä¡
- * @param iIpHeaderLen	IP Çì´õ ±æÀÌ
- */
+// TCP íŒ¨í‚·ì„ ë¶„ì„í•œë‹¤.
 void PacketDumpTcp( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_char * pszData, Ip4Header * psttIp4Header, int iIpPos, int iIpHeaderLen )
 {
 	TcpHeader * psttTcpHeader = (TcpHeader *)( pszData + iIpPos + iIpHeaderLen );
@@ -51,7 +42,7 @@ void PacketDumpTcp( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_
 	uint16_t sSrcPort = ntohs( psttTcpHeader->sport );
 	uint16_t sDstPort = ntohs( psttTcpHeader->dport );
 
-	// ¼³Á¤ ÆÄÀÏ¿¡ ¼³Á¤µÈ SIP Æ÷Æ® ¹øÈ£°¡ ¾Æ´Ï¸é ¹«½ÃÇÑ´Ù.
+	// ì„¤ì • íŒŒì¼ì— ì„¤ì •ëœ SIP í¬íŠ¸ ë²ˆí˜¸ê°€ ì•„ë‹ˆë©´ ë¬´ì‹œí•œë‹¤.
 	if( gclsSetup.IsTcpSipPort( sSrcPort ) == false && gclsSetup.IsTcpSipPort( sDstPort ) == false ) return;
 
 	int iTcpHeaderLen = GetTcpHeaderLength( psttTcpHeader );
@@ -59,10 +50,10 @@ void PacketDumpTcp( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const u_
 	char * pszTcpBody = (char *)( pszData + iTcpBodyPos );
 	int iTcpBodyLen = psttHeader->caplen - iTcpBodyPos;
 
-	// TCP body len ÀÌ 0 ÀÌ¸é ¹«½ÃÇÑ´Ù.
+	// TCP body len ì´ 0 ì´ë©´ ë¬´ì‹œí•œë‹¤.
 	if( iTcpBodyLen <= 0 ) return;
 
-	// IP fragment µÈ TCP packet Àº ÇöÀç ¹öÀü¿¡¼­´Â ¹«½ÃÇÑ´Ù.
+	// IP fragment ëœ TCP packet ì€ í˜„ìž¬ ë²„ì „ì—ì„œëŠ” ë¬´ì‹œí•œë‹¤.
 
 	if( IsSipPacket( pszTcpBody, iTcpBodyLen ) )
 	{

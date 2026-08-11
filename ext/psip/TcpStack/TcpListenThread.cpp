@@ -25,12 +25,7 @@
 
 static bool gbTcpListenThreadRun = false;
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼­¹ö ¾²·¹µå
- * @param lpParameter CTcpStack °´Ã¼
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„œë²„ ì“°ë ˆë“œ
 THREAD_API TcpListenThread( LPVOID lpParameter )
 {
 	CTcpStack * pclsStack = (CTcpStack *)lpParameter;
@@ -106,11 +101,7 @@ THREAD_API TcpListenThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP listen ¾²·¹µå°¡ ½ÇÇàÁßÀÎ°¡?
- * @returns TCP listen ¾²·¹µå°¡ ½ÇÇàÁßÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP listen ì“°ë ˆë“œê°€ ì‹¤í–‰ì¤‘ì¸ê°€?
 bool IsTcpListenThreadRun()
 {
 	return gbTcpListenThreadRun;

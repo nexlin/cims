@@ -23,50 +23,23 @@
 
 class CHttpStackSession;
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ¼­¹ö callback ÀÎÅÍÆäÀÌ½º
- */
+// HTTP ì„œë²„ callback ì¸í„°í˜ì´ìŠ¤
 class IHttpStackCallBack
 {
 public:
 	IHttpStackCallBack(){};
 	virtual ~IHttpStackCallBack(){};
 
-	/**
-	 * @ingroup HttpStack
-	 * @brief HTTP ¿äÃ» ¼ö½Å ÀÌº¥Æ® callback
-	 * @param pclsRequest		HTTP ¿äÃ» ¸Ş½ÃÁö
-	 * @param pclsResponse	HTTP ÀÀ´ä ¸Ş½ÃÁö - ÀÀ¿ë¿¡¼­ ÀúÀåÇÑ´Ù.
-	 * @returns ÀÀ¿ë¿¡¼­ HTTP ÀÀ´ä ¸Ş½ÃÁö¸¦ Á¤»óÀûÀ¸·Î »ı¼ºÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// HTTP ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ callback
 	virtual bool RecvHttpRequest( CHttpMessage * pclsRequest, CHttpMessage * pclsResponse ) = 0;
 
-	/**
-	 * @ingroup HttpStack
-	 * @brief WebSocket Å¬¶óÀÌ¾ğÆ® TCP ¿¬°á ½ÃÀÛ ÀÌº¥Æ® callback
-	 * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
-	 * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
-	 */
+	// WebSocket í´ë¼ì´ì–¸íŠ¸ TCP ì—°ê²° ì‹œì‘ ì´ë²¤íŠ¸ callback
 	virtual void WebSocketConnected( const char * pszClientIp, int iClientPort ) = 0;
 
-	/**
-	 * @ingroup HttpStack
-	 * @brief WebSocket Å¬¶óÀÌ¾ğÆ® TCP ¿¬°á Á¾·á ÀÌº¥Æ® callback
-	 * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
-	 * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
-	 */
+	// WebSocket í´ë¼ì´ì–¸íŠ¸ TCP ì—°ê²° ì¢…ë£Œ ì´ë²¤íŠ¸ callback
 	virtual void WebSocketClosed( const char * pszClientIp, int iClientPort ) = 0;
 
-	/**
-	 * @ingroup HttpStack
-	 * @brief WebSocket Å¬¶óÀÌ¾ğÆ® µ¥ÀÌÅÍ ¼ö½Å ÀÌº¥Æ® callback
-	 * @param pszClientIp WebSocket Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
-	 * @param iClientPort WebSocket Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
-	 * @param strData			WebSocket Å¬¶óÀÌ¾ğÆ®°¡ Àü¼ÛÇÑ µ¥ÀÌÅÍ
-	 * @param pclsSession	HTTP ¼¼¼Ç Á¤º¸
-	 * @returns WebSocket Å¬¶óÀÌ¾ğÆ® ¿¬°áÀ» À¯ÁöÇÏ·Á¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// WebSocket í´ë¼ì´ì–¸íŠ¸ ë°ì´í„° ìˆ˜ì‹  ì´ë²¤íŠ¸ callback
 	virtual bool WebSocketData( const char * pszClientIp, int iClientPort, std::string & strData, CHttpStackSession * pclsSession ) = 0;
 };
 

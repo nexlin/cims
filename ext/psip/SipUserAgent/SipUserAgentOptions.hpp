@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP OPTIONS ¿äÃ» ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµğ
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Ş½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP OPTIONS ìš”ì²­ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipUserAgent::RecvOptionsRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	CSipMessage * pclsResponse = NULL;

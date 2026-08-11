@@ -25,26 +25,20 @@
 
 #define SIP_DELETE_TIME	5
 
-/**
- * @ingroup SipStack
- * @brief ¸¸·áµÈ SIP ¸Ş½ÃÁö¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// ë§Œë£Œëœ SIP ë©”ì‹œì§€ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipDeleteInfo
 {
 public:
-	/** ¸¸·áµÈ SIP ¸Ş½ÃÁö */
+	// ë§Œë£Œëœ SIP ë©”ì‹œì§€
 	CSipMessage  * m_pclsMessage;
 
-	/** »èÁ¦Àü ´ë±â ½Ã°£ */
+	// ì‚­ì œì „ ëŒ€ê¸° ì‹œê°„
 	time_t				 m_iDeleteTime;
 };
 
 typedef std::list< CSipDeleteInfo > SIP_DELETE_QUEUE;
 
-/**
- * @ingroup SipStack
- * @brief ¸¸·áµÈ SIP ¸Ş½ÃÁö¸¦ ÀúÀåÇÑ ÈÄ, ÀÏÁ¤ ½Ã°£ ÈÄ¿¡ »èÁ¦ÇÏ´Â Å¬·¡½º
- */
+// ë§Œë£Œëœ SIP ë©”ì‹œì§€ë¥¼ ì €ì¥í•œ í›„, ì¼ì • ì‹œê°„ í›„ì— ì‚­ì œí•˜ëŠ” í´ë˜ìŠ¤
 class CSipDeleteQueue
 {
 public:

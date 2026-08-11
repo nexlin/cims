@@ -21,10 +21,7 @@
 
 #include "SipParameterList.h"
 
-/**
- * @ingroup SipParser
- * @brief Content-Type À» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// Content-Type ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipContentType : public CSipParameterList
 {
 public:

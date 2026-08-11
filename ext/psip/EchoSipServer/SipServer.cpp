@@ -33,12 +33,7 @@ CSipServer::~CSipServer()
 {
 }
 
-/**
- * @ingroup EchoSipServer
- * @brief SIP ������ �����Ѵ�.
- * @param clsSetup SIP stack ���� �׸��� ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 서버를 시작한다.
 bool CSipServer::Start( CSipStackSetup & clsSetup )
 {
 	if( gclsUserAgent.Start( clsSetup, this, NULL ) == false ) return false;

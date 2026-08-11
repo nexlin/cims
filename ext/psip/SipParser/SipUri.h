@@ -21,32 +21,29 @@
 
 #include "SipParameter.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP URI Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP URI ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipUri
 {
 public:
 	CSipUri();
 	~CSipUri();
 
-	/** ÇÁ·ÎÅäÄİ ÀÌ¸§ */
+	// í”„ë¡œí† ì½œ ì´ë¦„
 	std::string	m_strProtocol;
 
-	/** »ç¿ëÀÚ ¾ÆÀÌµğ ¶Ç´Â ÀüÈ­¹øÈ£ */
+	// ì‚¬ìš©ì ì•„ì´ë”” ë˜ëŠ” ì „í™”ë²ˆí˜¸
 	std::string	m_strUser;
 
-	/** È£½ºÆ® ÀÌ¸§ ¶Ç´Â IP ÁÖ¼Ò */
+	// í˜¸ìŠ¤íŠ¸ ì´ë¦„ ë˜ëŠ” IP ì£¼ì†Œ
 	std::string	m_strHost;
 
-	/** È£½ºÆ® Æ÷Æ® ¹øÈ£ */
+	// í˜¸ìŠ¤íŠ¸ í¬íŠ¸ ë²ˆí˜¸
 	int					m_iPort;
 
-	/** SIP URI parameter ¸®½ºÆ® */
+	// SIP URI parameter ë¦¬ìŠ¤íŠ¸
 	SIP_PARAMETER_LIST m_clsUriParamList;
 
-	/** Header ¸®½ºÆ®. ? ÀÌÈÄ¿¡ ÀúÀåµÈ parameter ¸®½ºÆ® */
+	// Header ë¦¬ìŠ¤íŠ¸. ? ì´í›„ì— ì €ì¥ëœ parameter ë¦¬ìŠ¤íŠ¸
 	SIP_PARAMETER_LIST m_clsHeaderList;
 
 	int Parse( const char * pszText, int iTextLen );

@@ -28,13 +28,7 @@ CSipAcceptData::~CSipAcceptData()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipAcceptData Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipAcceptData í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipAcceptData::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -75,13 +69,7 @@ int CSipAcceptData::Parse( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipAcceptData::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -97,23 +85,14 @@ int CSipAcceptData::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipAcceptData::Clear()
 {
 	m_strName.clear();
 	ClearParam();
 }
 
-/**
- * @brief SIP Accept-Data Çì´õ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param clsList		Accept-Data ¸®½ºÆ®
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP Accept-Data í—¤ë”ë¥¼ íŒŒì‹±í•œë‹¤.
 int ParseSipAcceptData( SIP_ACCEPT_DATA_LIST & clsList, const char * pszText, int iTextLen )
 {
 	int iPos, iCurPos = 0;

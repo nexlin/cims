@@ -24,16 +24,16 @@ class CChildFrame : public CMDIChildWndEx
 public:
 	CChildFrame();
 
-// Æ¯¼ºÀÔ´Ï´Ù.
+// íŠ¹ì„±ì…ë‹ˆë‹¤.
 public:
 
-// ÀÛ¾÷ÀÔ´Ï´Ù.
+// ì‘ì—…ì…ë‹ˆë‹¤.
 public:
 
-// ÀçÁ¤ÀÇÀÔ´Ï´Ù.
+// ì¬ì •ì˜ì…ë‹ˆë‹¤.
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 
-// ±¸ÇöÀÔ´Ï´Ù.
+// êµ¬í˜„ì…ë‹ˆë‹¤.
 public:
 	virtual ~CChildFrame();
 #ifdef _DEBUG
@@ -41,7 +41,7 @@ public:
 	virtual void Dump(CDumpContext& dc) const;
 #endif
 
-// »ı¼ºµÈ ¸Ş½ÃÁö ¸Ê ÇÔ¼ö
+// ìƒì„±ëœ ë©”ì‹œì§€ ë§µ í•¨ìˆ˜
 protected:
 	DECLARE_MESSAGE_MAP()
 public:

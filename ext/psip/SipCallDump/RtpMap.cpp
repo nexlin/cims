@@ -36,15 +36,7 @@ CRtpMap::~CRtpMap()
 {
 }
 
-/**
- * @ingroup SipCallDump
- * @brief RTP ÆĞÅ¶À» ÀúÀåÇÑ´Ù.
- * @param psttHeader		ÆĞÅ¶ Ä¸Ã³ÇÑ Çì´õ
- * @param pszData				ÆĞÅ¶ Ä¸Ã³ÇÑ ÆĞÅ¶
- * @param psttIpHeader	IP Çì´õ
- * @param psttUdpHeader UDP Çì´õ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// RTP íŒ¨í‚·ì„ ì €ì¥í•œë‹¤.
 bool CRtpMap::Insert( struct pcap_pkthdr * psttHeader, const u_char * pszData, Ip4Header * psttIpHeader, UdpHeader * psttUdpHeader )
 {
 	RTP_MAP::iterator itMap;
@@ -72,14 +64,7 @@ bool CRtpMap::Insert( struct pcap_pkthdr * psttHeader, const u_char * pszData, I
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief RTP ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param pszIp			RTP IP ÁÖ¼Ò
- * @param iPort			RTP Æ÷Æ® ¹øÈ£
- * @param pszCallId SIP Call-ID
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// RTP ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 bool CRtpMap::Insert( const char * pszIp, int iPort, const char * pszCallId )
 {
 	RTP_MAP::iterator itMap;
@@ -105,13 +90,7 @@ bool CRtpMap::Insert( const char * pszIp, int iPort, const char * pszCallId )
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief RTP ¼¼¼Ç Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszIp			RTP IP ÁÖ¼Ò
- * @param iPort			RTP Æ÷Æ® ¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// RTP ì„¸ì…˜ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CRtpMap::Delete( const char * pszIp, int iPort )
 {
 	RTP_MAP::iterator itMap;
@@ -152,11 +131,7 @@ bool CRtpMap::Select( const char * pszIp, int iPort, CRtpInfo & clsInfo )
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief timeout µÈ RTP ¼¼¼Ç °ü·Ã SIP Call-ID ¸®½ºÆ®¸¦ °¡Á®¿Â´Ù.
- * @param clsCallIdList [out] timeout µÈ RTP ¼¼¼Ç °ü·Ã SIP Call-ID ¸®½ºÆ®
- */
+// timeout ëœ RTP ì„¸ì…˜ ê´€ë ¨ SIP Call-ID ë¦¬ìŠ¤íŠ¸ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 void CRtpMap::SelectTimeout( STRING_LIST & clsCallIdList )
 {
 	RTP_MAP::iterator itMap;
@@ -175,13 +150,7 @@ void CRtpMap::SelectTimeout( STRING_LIST & clsCallIdList )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÀÚ·á±¸Á¶ ÀúÀå¿ë Å°¸¦ »ı¼ºÇÑ´Ù.
- * @param pszIp		IP ÁÖ¼Ò
- * @param iPort		Æ÷Æ® ¹øÈ£
- * @param strKey	Å°
- */
+// ìë£Œêµ¬ì¡° ì €ì¥ìš© í‚¤ë¥¼ ìƒì„±í•œë‹¤.
 void CRtpMap::GetKey( const char * pszIp, int iPort, std::string & strKey )
 {
 	uint32_t iIp = inet_addr( pszIp );
@@ -190,13 +159,7 @@ void CRtpMap::GetKey( const char * pszIp, int iPort, std::string & strKey )
 	GetKey( iIp, sPort, strKey );
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÀÚ·á±¸Á¶ ÀúÀå¿ë Å°¸¦ »ı¼ºÇÑ´Ù.
- * @param iIp			IP ÁÖ¼Ò
- * @param sPort		Æ÷Æ® ¹øÈ£
- * @param strKey	Å°
- */
+// ìë£Œêµ¬ì¡° ì €ì¥ìš© í‚¤ë¥¼ ìƒì„±í•œë‹¤.
 void CRtpMap::GetKey( uint32_t iIp, uint16_t sPort, std::string & strKey )
 {
 	char	szKey[21];

@@ -32,14 +32,7 @@ CHttpClient::~CHttpClient()
 {
 }
 
-/**
- * @ingroup HttpStack
- * @brief	HTTP GET ¸í·ÉÀ» ½ÇÇàÇÑ´Ù.
- * @param pszUrl								HTTP URL (¿¹:http://www.naver.com)
- * @param strOutputContentType	¼ö½Å Content-Type
- * @param strOutputBody					¼ö½Å body
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP GET ëª…ë ¹ì„ ì‹¤í–‰í•œë‹¤.
 bool CHttpClient::DoGet( const char * pszUrl, std::string & strOutputContentType, std::string & strOutputBody )
 {
 	strOutputContentType.clear();
@@ -77,16 +70,7 @@ bool CHttpClient::DoGet( const char * pszUrl, std::string & strOutputContentType
 	return false;
 }
 
-/**
- * @ingroup HttpStack
- * @brief	HTTP GET ¸í·ÉÀ» ½ÇÇàÇÑ´Ù.
- * @param pszUrl								HTTP URL (¿¹:http://wsf.cdyne.com/WeatherWS/Weather.asmx)
- * @param pszInputContentType		Àü¼Û Content-Type
- * @param pszInputBody					Àü¼Û body
- * @param strOutputContentType	¼ö½Å Content-Type
- * @param strOutputBody					¼ö½Å body
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP GET ëª…ë ¹ì„ ì‹¤í–‰í•œë‹¤.
 bool CHttpClient::DoGet( const char * pszUrl, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody )
 {
 	strOutputContentType.clear();
@@ -134,32 +118,13 @@ bool CHttpClient::DoGet( const char * pszUrl, const char * pszInputContentType, 
 	return false;
 }
 
-/**
- * @ingroup HttpStack
- * @brief	HTTP POST ¸í·ÉÀ» ½ÇÇàÇÑ´Ù.
- * @param pszUrl								HTTP URL (¿¹:http://wsf.cdyne.com/WeatherWS/Weather.asmx)
- * @param pszInputContentType		Àü¼Û Content-Type
- * @param pszInputBody					Àü¼Û body
- * @param strOutputContentType	¼ö½Å Content-Type
- * @param strOutputBody					¼ö½Å body
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP POST ëª…ë ¹ì„ ì‹¤í–‰í•œë‹¤.
 bool CHttpClient::DoPost( const char * pszUrl, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody )
 {
 	return DoPost( pszUrl, NULL, pszInputContentType, pszInputBody, strOutputContentType, strOutputBody );
 }
 
-/**
- * @ingroup HttpStack
- * @brief	HTTP POST ¸í·ÉÀ» ½ÇÇàÇÑ´Ù.
- * @param pszUrl								HTTP URL (¿¹:http://wsf.cdyne.com/WeatherWS/Weather.asmx)
- * @param pclsHeaderList				Àü¼Û Çì´õ¿¡ Æ÷ÇÔµÉ Çì´õ Ç×¸ñ ¸®½ºÆ®
- * @param pszInputContentType		Àü¼Û Content-Type
- * @param pszInputBody					Àü¼Û body
- * @param strOutputContentType	¼ö½Å Content-Type
- * @param strOutputBody					¼ö½Å body
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP POST ëª…ë ¹ì„ ì‹¤í–‰í•œë‹¤.
 bool CHttpClient::DoPost( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody )
 {
 	strOutputContentType.clear();
@@ -212,30 +177,13 @@ bool CHttpClient::DoPost( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList
 	return false;
 }
 
-/**
- * @ingroup HttpClientApi
- * @brief HTTP POST ±â¹ÝÀ¸·Î SOAP ¸í·ÉÀ» ½ÇÇàÇÑ´Ù.
- * @param pszUrl				HTTP URL (¿¹:http://wsf.cdyne.com/WeatherWS/Weather.asmx)
- * @param pszSoapAction HTTP SOAPAction Çì´õ¿¡ ÀúÀåµÉ ¹®ÀÚ¿­ (¿¹:http://ws.cdyne.com/WeatherWS/GetWeatherInformation)
- * @param pszInputBody	Àü¼Û body
- * @param strOutputBody ¼ö½Å body
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP POST ê¸°ë°˜ìœ¼ë¡œ SOAP ëª…ë ¹ì„ ì‹¤í–‰í•œë‹¤.
 bool CHttpClient::DoSoap( const char * pszUrl, const char * pszSoapAction, const char * pszInputBody, std::string & strOutputBody )
 {
 	return DoSoap( pszUrl, pszSoapAction, "text/xml;charset=UTF-8", pszInputBody, strOutputBody );
 }
 
-/**
- * @ingroup HttpClientApi
- * @brief HTTP POST ±â¹ÝÀ¸·Î SOAP ¸í·ÉÀ» ½ÇÇàÇÑ´Ù.
- * @param pszUrl				HTTP URL (¿¹:http://wsf.cdyne.com/WeatherWS/Weather.asmx)
- * @param pszSoapAction HTTP SOAPAction Çì´õ¿¡ ÀúÀåµÉ ¹®ÀÚ¿­ (¿¹:http://ws.cdyne.com/WeatherWS/GetWeatherInformation)
- * @param pszInputContentType	HTTP Content-Type
- * @param pszInputBody	Àü¼Û body
- * @param strOutputBody ¼ö½Å body
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP POST ê¸°ë°˜ìœ¼ë¡œ SOAP ëª…ë ¹ì„ ì‹¤í–‰í•œë‹¤.
 bool CHttpClient::DoSoap( const char * pszUrl, const char * pszSoapAction, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputBody )
 {
 	std::string strOutputContentType;
@@ -255,34 +203,19 @@ bool CHttpClient::DoSoap( const char * pszUrl, const char * pszSoapAction, const
 	return DoPost( pszUrl, NULL, pszInputContentType, pszInputBody, strOutputContentType, strOutputBody );
 }
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å timeout ½Ã°£À» ¼³Á¤ÇÑ´Ù.
- * @param iRecvTimeout HTTP ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å timeout ½Ã°£ (ÃÊ´ÜÀ§)
- */
+// HTTP ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  timeout ì‹œê°„ì„ ì„¤ì •í•œë‹¤.
 void CHttpClient::SetRecvTimeout( int iRecvTimeout )
 {
 	m_iRecvTimeout = iRecvTimeout;
 }
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ÀÀ´ä status code ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns HTTP ÀÀ´ä status code ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ì‘ë‹µ status code ë¥¼ ë¦¬í„´í•œë‹¤.
 int CHttpClient::GetStatusCode()
 {
 	return m_iStatusCode;
 }
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ¼­¹ö¿¡ ¿¬°áÇÏ¿©¼­ HTTP ¿äÃ» ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ ÈÄ, HTTP ÀÀ´ä ¸Þ½ÃÁö¸¦ ¼ö½ÅÇÑ´Ù.
- * @param pclsUri				HTTP request URI
- * @param pclsRequest		HTTP request
- * @param pclsPacket		HTTP response ¸¦ ÀúÀåÇÒ ÆÐÅ¶ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ì„œë²„ì— ì—°ê²°í•˜ì—¬ì„œ HTTP ìš”ì²­ ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œ í›„, HTTP ì‘ë‹µ ë©”ì‹œì§€ë¥¼ ìˆ˜ì‹ í•œë‹¤.
 bool CHttpClient::Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttpPacket * pclsPacket )
 {
 	char * pszBuf = NULL;
@@ -320,7 +253,7 @@ bool CHttpClient::Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttp
 
 	CLog::Print( LOG_NETWORK, "TcpConnect(%s:%d) success", pclsUri->m_strHost.c_str(), pclsUri->m_iPort );
 
-	// https ÇÁ·ÎÅäÄÝÀÌ¸é TLS ·Î ¿¬°áÇÑ´Ù.
+	// https í”„ë¡œí† ì½œì´ë©´ TLS ë¡œ ì—°ê²°í•œë‹¤.
 	if( !strcmp( pclsUri->m_strProtocol.c_str(), "https" ) )
 	{
 		if( SSLConnect( hSocket, &psttSsl ) == false )
@@ -406,7 +339,7 @@ FUNC_END:
 		pszBuf = NULL;
 	}
 
-	// 3XX ÀÀ´ä¿¡¼­ Location Çì´õ°¡ Á¸ÀçÇÏ¸é ÇØ´ç URL ·Î ´Ù½Ã ½ÃµµÇÑ´Ù.
+	// 3XX ì‘ë‹µì—ì„œ Location í—¤ë”ê°€ ì¡´ìž¬í•˜ë©´ í•´ë‹¹ URL ë¡œ ë‹¤ì‹œ ì‹œë„í•œë‹¤.
 	if( pclsResponse->m_iStatusCode / 100 == 3 )
 	{
 		CHttpHeader * pclsHeader = pclsResponse->GetHeader( "Location" );

@@ -32,10 +32,7 @@ CTcpSessionListInfo::CTcpSessionListInfo() : m_iPort(0)
 
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼¼¼Ç Á¤º¸¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ì„¸ì…˜ ì •ë³´ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CTcpSessionListInfo::Clear()
 {
 	m_strIp.clear();
@@ -57,12 +54,7 @@ CTcpSessionList::~CTcpSessionList(void)
 	if( m_psttPollFd ) free( m_psttPollFd );
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- * @param iPollFdMax TCP ¼¼¼Ç °³¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 bool CTcpSessionList::Init( int iPollFdMax )
 {
 	m_iPollFdMax = iPollFdMax;
@@ -88,12 +80,7 @@ bool CTcpSessionList::Init( int iPollFdMax )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼ÒÄÏÀ» Ãß°¡ÇÑ´Ù.
- * @param hSocket TCP ¼ÒÄÏ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì†Œì¼“ì„ ì¶”ê°€í•œë‹¤.
 bool CTcpSessionList::Insert( Socket hSocket )
 {
 	if( m_iPoolFdCount >= m_iPollFdMax ) return false;
@@ -104,13 +91,7 @@ bool CTcpSessionList::Insert( Socket hSocket )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ Ãß°¡ÇÑ´Ù.
- * @param clsTcpComm	TCP ¼¼¼Ç Á¤º¸ ÀúÀå °´Ã¼
- * @param psttSsl			SSL ¼¼¼Ç Á¤º¸ ÀúÀå ±¸Á¶Ã¼ - SSL ¼¼¼ÇÀÎ °æ¿ì¸¸ ÀúÀåÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CTcpSessionList::Insert( CTcpComm & clsTcpComm, SSL * psttSsl )
 {
 	time_t	iTime;
@@ -155,13 +136,7 @@ bool CTcpSessionList::Insert( CTcpComm & clsTcpComm, SSL * psttSsl )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param iIndex		TCP ¼¼¼Ç ÀÎµ¦½º
- * @param pclsEntry	TCP ¾²·¹µå Á¤º¸ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpSessionList::Delete( int iIndex, CThreadListEntry * pclsEntry )
 {
 	if( iIndex >= m_iPoolFdCount || iIndex < 0 ) return false;
@@ -197,11 +172,7 @@ bool CTcpSessionList::Delete( int iIndex, CThreadListEntry * pclsEntry )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¸ðµç TCP ¼¼¼Ç Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param pclsEntry	TCP ¾²·¹µå Á¤º¸ °´Ã¼
- */
+// ëª¨ë“  TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 void CTcpSessionList::DeleteAll( CThreadListEntry * pclsEntry )
 {
 	for( int i = 0; i < m_iPoolFdCount; ++i )
@@ -228,12 +199,7 @@ void CTcpSessionList::DeleteAll( CThreadListEntry * pclsEntry )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼ö½Å timeout ÀÌ ¹ß»ýÇÑ TCP ¼¼¼ÇÀ» Á¾·á½ÃÅ²´Ù.
- * @param iTimeout	TCP ¼ö½Å timeout ½Ã°£ (ÃÊ´ÜÀ§)
- * @param pclsEntry TCP ¾²·¹µå Á¤º¸
- */
+// TCP ìˆ˜ì‹  timeout ì´ ë°œìƒí•œ TCP ì„¸ì…˜ì„ ì¢…ë£Œì‹œí‚¨ë‹¤.
 void CTcpSessionList::DeleteTimeout( int iTimeout, CThreadListEntry * pclsEntry )
 {
 	time_t	iTime;

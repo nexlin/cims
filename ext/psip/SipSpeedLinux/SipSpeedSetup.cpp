@@ -40,7 +40,7 @@ bool CSipSpeedSetup::Read( const char * pszFileName )
 		return false;
 	}
 
-	// SIP ¼­¹ö ¼³Á¤
+	// SIP ì„œë²„ ì„¤ì •
 	pclsElement = clsXml.SelectElement( "SipServer" );
 	if( pclsElement == NULL )
 	{
@@ -52,7 +52,7 @@ bool CSipSpeedSetup::Read( const char * pszFileName )
 	pclsElement->SelectElementData( "Port", m_iSipServerPort );
 	pclsElement->SelectElementData( "Domain", m_strSipDomain );
 
-	// ¹ß½ÅÀÚ ¼³Á¤
+	// ë°œì‹ ìž ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Caller" );
 	if( pclsElement == NULL )
 	{
@@ -63,7 +63,7 @@ bool CSipSpeedSetup::Read( const char * pszFileName )
 	pclsElement->SelectElementData( "Id", m_strCallerId );
 	pclsElement->SelectElementData( "PassWord", m_strCallerPassWord );
 
-	// ¼ö½ÅÀÚ ¼³Á¤
+	// ìˆ˜ì‹ ìž ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Callee" );
 	if( pclsElement == NULL ) 
 	{
@@ -74,7 +74,7 @@ bool CSipSpeedSetup::Read( const char * pszFileName )
 	pclsElement->SelectElementData( "Id", m_strCalleeId );
 	pclsElement->SelectElementData( "PassWord", m_strCalleePassWord );
 
-	// Å×½ºÆ® ¼³Á¤
+	// í…ŒìŠ¤íŠ¸ ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Test" );
 	if( pclsElement == NULL )
 	{

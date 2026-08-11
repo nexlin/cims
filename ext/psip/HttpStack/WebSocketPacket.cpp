@@ -29,13 +29,7 @@ CWebSocketPacket::~CWebSocketPacket()
 {
 }
 
-/**
- * @ingroup HttpStack
- * @brief WebSocket ÆĞÅ¶À» ÀúÀåÇÑ´Ù.
- * @param pszPacket		ÆĞÅ¶
- * @param iPacketLen	ÆĞÅ¶ ±æÀÌ
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// WebSocket íŒ¨í‚·ì„ ì €ì¥í•œë‹¤.
 bool CWebSocketPacket::AddPacket( const char * pszPacket, int iPacketLen )
 {
 	m_strBuf.append( pszPacket, iPacketLen );
@@ -43,13 +37,7 @@ bool CWebSocketPacket::AddPacket( const char * pszPacket, int iPacketLen )
 	return true;
 }
 
-/**
- * @ingroup HttpStack
- * @brief WebSocket ¼ö½Å µ¥ÀÌÅÍ¸¦ °¡Á®¿Â´Ù.
- * @param clsHeader WebSocket Çì´õ Á¤º¸ ÀúÀå °´Ã¼
- * @param strData		WebSocket ¼ö½Å µ¥ÀÌÅÍ
- * @returns WebSocket ¼ö½Å µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// WebSocket ìˆ˜ì‹  ë°ì´í„°ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool CWebSocketPacket::GetData( CWebSocketPacketHeader & clsHeader, std::string & strData )
 {
 	strData.clear();

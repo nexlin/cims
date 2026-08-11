@@ -28,9 +28,7 @@ extern bool gbAndroidDebug;
 void AndroidDebugLog( const char * fmt, ... );
 void AndroidErrorLog( const char * fmt, ... );
 
-/**
- * @brief SIP stack ÀÇ ·Î±×¸¦ DDMS ·Î±×·Î Ãâ·ÂÇÏ´Â Å¬·¡½º
- */
+// SIP stack ì˜ ë¡œê·¸ë¥¼ DDMS ë¡œê·¸ë¡œ ì¶œë ¥í•˜ëŠ” í´ë˜ìŠ¤
 class LogCallBack : public ILogCallBack
 {
 public:

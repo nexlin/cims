@@ -300,15 +300,7 @@ unsigned char ulaw2alaw( unsigned char uval )
 	return ((uval & 0x80) ? (0xD5 ^ (_u2a[0xFF ^ uval] - 1)) : (0x55 ^ (_u2a[0x7F ^ uval] - 1)));
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief PCM À» Ulaw ·Î º¯È¯ÇÑ´Ù.
- * @param pszPCM		PCM º¯¼ö
- * @param iPcmLen		PCM º¯¼ö ±æÀÌ (320)
- * @param pszUlaw		Ulaw º¯¼ö
- * @param iUlawLen	Ulaw º¯¼ö ±æÀÌ
- * @returns Ulaw ·Î º¯È¯ÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// PCM ì„ Ulaw ë¡œ ë³€í™˜í•œë‹¤.
 int PcmToUlaw( const char * pszPCM, int iPcmLen, char * pszUlaw, int iUlawLen )
 {
 	int iCount = iPcmLen >> 1;
@@ -323,15 +315,7 @@ int PcmToUlaw( const char * pszPCM, int iPcmLen, char * pszUlaw, int iUlawLen )
 	return iCount;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief PCM À» Alaw ·Î º¯È¯ÇÑ´Ù.
- * @param pszPcm		PCM º¯¼ö
- * @param iPcmLen		PCM º¯¼ö ±æÀÌ (320)
- * @param pszAlaw		Alaw º¯¼ö
- * @param iAlawLen	Alaw º¯¼ö ±æÀÌ
- * @returns Alaw ·Î º¯È¯ÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// PCM ì„ Alaw ë¡œ ë³€í™˜í•œë‹¤.
 int PcmToAlaw( const char * pszPcm, int iPcmLen, char * pszAlaw, int iAlawLen )
 {
 	int iCount = iPcmLen >> 1;
@@ -346,15 +330,7 @@ int PcmToAlaw( const char * pszPcm, int iPcmLen, char * pszAlaw, int iAlawLen )
 	return iCount;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief Ulaw ¸¦ PCM À¸·Î º¯È¯ÇÑ´Ù.
- * @param pszUlaw		Ulaw º¯¼ö
- * @param iUlawLen	Ulaw º¯¼ö ±æÀÌ
- * @param pszPCM		PCM º¯¼ö
- * @param iPcmLen		PCM º¯¼ö ±æÀÌ
- * @returns PCM À¸·Î º¯È¯ÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Ulaw ë¥¼ PCM ìœ¼ë¡œ ë³€í™˜í•œë‹¤.
 int UlawToPcm( const char * pszUlaw, int iUlawLen, char * pszPCM, int iPcmLen )
 {
 	const BYTE * pszSource = (LPBYTE)pszUlaw;
@@ -368,15 +344,7 @@ int UlawToPcm( const char * pszUlaw, int iUlawLen, char * pszPCM, int iPcmLen )
 	return iUlawLen << 1;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief Alaw ¸¦ PCM À¸·Î º¯È¯ÇÑ´Ù.
- * @param pszAlaw		Alaw º¯¼ö
- * @param iAlawLen	Alaw º¯¼ö ±æÀÌ
- * @param pszPcm		PCM º¯¼ö
- * @param iPcmLen		PCM º¯¼ö ±æÀÌ
- * @returns PCM À¸·Î º¯È¯ÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Alaw ë¥¼ PCM ìœ¼ë¡œ ë³€í™˜í•œë‹¤.
 int AlawToPcm( const char * pszAlaw, int iAlawLen, char * pszPcm, int iPcmLen )
 {
 	const BYTE * pszSource = (LPBYTE)pszAlaw;

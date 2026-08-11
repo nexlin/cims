@@ -20,29 +20,17 @@
 #include "SdpTime.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpTime::CSdpTime()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpTime::~CSdpTime()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP time ÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP time ÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP time ÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP time ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpTime::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -71,13 +59,7 @@ int CSdpTime::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP time ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP time ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP time ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpTime::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -100,10 +82,7 @@ int CSdpTime::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpTime::Clear()
 {
 	m_strStartTime.clear();
@@ -111,11 +90,7 @@ void CSdpTime::Clear()
 	m_clsRepeatTimeList.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- * @return µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë°ì´í„°ê°€ ì¡´ì¬í•˜ë©´ false ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSdpTime::Empty()
 {
 	if( m_strStartTime.empty() || m_strStopTime.empty() ) return true;

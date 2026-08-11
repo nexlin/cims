@@ -23,10 +23,7 @@
 #include "SipMessage.h"
 #include <map>
 
-/**
- * @ingroup SimpleSipServer
- * @brief SIP Å¬¶óÀÌ¾ğÆ® Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// SIP í´ë¼ì´ì–¸íŠ¸ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CUserInfo
 {
 public:
@@ -36,10 +33,7 @@ public:
 
 typedef std::map< std::string, CUserInfo > USER_MAP;
 
-/**
- * @ingroup SimpleSipServer
- * @brief ·Î±×ÀÎÇÑ »ç¿ëÀÚµéÀÇ Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// ë¡œê·¸ì¸í•œ ì‚¬ìš©ìë“¤ì˜ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CUserMap
 {
 public:

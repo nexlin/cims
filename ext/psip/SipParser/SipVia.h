@@ -21,29 +21,26 @@
 
 #include "SipParameterList.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP Via Çì´õ ÀúÀå Å¬·¡½º
- */
+// SIP Via í—¤ë” ì €ì¥ í´ë˜ìŠ¤
 class CSipVia : public CSipParameterList
 {
 public:
 	CSipVia();
 	~CSipVia();
 
-	/** ÇÁ·ÎÅäÄİ ÀÌ¸§ ( SIP ) */
+	// í”„ë¡œí† ì½œ ì´ë¦„ ( SIP )
 	std::string	m_strProtocolName;
 
-	/** ÇÁ·ÎÅäÄİ ¹öÀü ( 2.0 ) */
+	// í”„ë¡œí† ì½œ ë²„ì „ ( 2.0 )
 	std::string	m_strProtocolVersion;
 
 	/** transport ( UDP ) */
 	std::string	m_strTransport;
 
-	/** È£½ºÆ® ÀÌ¸§ ¶Ç´Â IP ÁÖ¼Ò */
+	// í˜¸ìŠ¤íŠ¸ ì´ë¦„ ë˜ëŠ” IP ì£¼ì†Œ
 	std::string	m_strHost;
 
-	/** È£½ºÆ® Æ÷Æ® ¹øÈ£ */
+	// í˜¸ìŠ¤íŠ¸ í¬íŠ¸ ë²ˆí˜¸
 	int					m_iPort;
 
 	int Parse( const char * pszText, int iTextLen );

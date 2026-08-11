@@ -24,12 +24,7 @@
 
 time_t giTime = 0;
 
-/**
- * @ingroup SipStack
- * @brief ÁÖ±âÀûÀ¸·Î SIP stack À» ½ÇÇàÇÏ´Â ¾²·¹µå
- * @param lpParameter SIP stack °´Ã¼
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// ì£¼ê¸°ì ìœ¼ë¡œ SIP stack ì„ ì‹¤í–‰í•˜ëŠ” ì“°ë ˆë“œ
 THREAD_API SipStackThread( LPVOID lpParameter )
 {
 	CSipStack * pclsSipStack = (CSipStack *)lpParameter;
@@ -58,12 +53,7 @@ THREAD_API SipStackThread( LPVOID lpParameter )
 	return 0;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP stack thread ¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pclsSipStack SIP stack °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP stack thread ë¥¼ ì‹œì‘í•œë‹¤.
 bool StartSipStackThread( CSipStack * pclsSipStack )
 {
 	return StartThread( "SipStackThread", SipStackThread, pclsSipStack );

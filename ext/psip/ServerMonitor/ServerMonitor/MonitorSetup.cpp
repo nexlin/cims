@@ -30,12 +30,7 @@ CMonitorSetup::~CMonitorSetup()
 {
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ÆÄÀÏ¿¡¼­ ¸ğ´ÏÅÍ¸µ ¸í·ÉÀ» ÀĞ¾î¼­ ÀÚ·á±¸Á¶¿¡ ÀúÀåÇÑ´Ù.
- * @param pszFileName ÆÄÀÏ ÀÌ¸§
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŒŒì¼ì—ì„œ ëª¨ë‹ˆí„°ë§ ëª…ë ¹ì„ ì½ì–´ì„œ ìë£Œêµ¬ì¡°ì— ì €ì¥í•œë‹¤.
 bool CMonitorSetup::Read( const char * pszFileName )
 {
 	CXmlElement clsXml, * pclsRoot;
@@ -134,16 +129,16 @@ bool CMonitorSetup::Read( const char * pszFileName )
 
 			clsAttr.m_strName = strName;
 
-			// ¼ıÀÚ µîÀ» 3ÀÚ¸® ´ÜÀ§·Î , ¸¦ Ãß°¡ÇÏ¿©¼­ º¸¿©ÁÖ´Â ¾ÖÆ®¸®ºäÆ® °Ë»ç
+			// ìˆ«ì ë“±ì„ 3ìë¦¬ ë‹¨ìœ„ë¡œ , ë¥¼ ì¶”ê°€í•˜ì—¬ì„œ ë³´ì—¬ì£¼ëŠ” ì• íŠ¸ë¦¬ë·°íŠ¸ ê²€ì‚¬
 			if( !strcmp( strType.c_str(), "comma" ) )
 			{
 				clsAttr.m_eType = E_MAT_COMMA_SEP;
 			}
 
-			// ÁöÁ¤µÈ ¹®ÀÚ¿­ÀÌ Æ÷ÇÔµÈ °æ¿ì¸¸ ÇØ´ç ROW ¸¦ º¸¿©ÁÖ´Â ±â´É
+			// ì§€ì •ëœ ë¬¸ìì—´ì´ í¬í•¨ëœ ê²½ìš°ë§Œ í•´ë‹¹ ROW ë¥¼ ë³´ì—¬ì£¼ëŠ” ê¸°ëŠ¥
 			itAttribute->SelectAttribute( "showIfEqual", clsAttr.m_strShowIfEqual );
 
-			// ÁöÁ¤µÈ ¹®ÀÚ¿­ÀÌ Æ÷ÇÔµÇÁö ¾ÊÀº °æ¿ì¸¸ ÇØ´ç ROW ¸¦ º¸¿©ÁÖ´Â ±â´É
+			// ì§€ì •ëœ ë¬¸ìì—´ì´ í¬í•¨ë˜ì§€ ì•Šì€ ê²½ìš°ë§Œ í•´ë‹¹ ROW ë¥¼ ë³´ì—¬ì£¼ëŠ” ê¸°ëŠ¥
 			itAttribute->SelectAttribute( "showIfNotEqual", clsAttr.m_strShowIfNotEqual );
 
 			clsEntry.m_lstAttribute.push_back( clsAttr );
@@ -173,13 +168,7 @@ bool CMonitorSetup::Read( const char * pszFileName )
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸í·É¿¡ ÇØ´çÇÏ´Â ¸ğ´ÏÅÍ¸µ ¸í·É ÀúÀå °´Ã¼¸¦ °Ë»öÇÑ´Ù.
- * @param pszCommand	¸í·É ¹®ÀÚ¿­
- * @param clsEntry		¸ğ´ÏÅÍ¸µ ¸í·É ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª…ë ¹ì— í•´ë‹¹í•˜ëŠ” ëª¨ë‹ˆí„°ë§ ëª…ë ¹ ì €ì¥ ê°ì²´ë¥¼ ê²€ìƒ‰í•œë‹¤.
 bool CMonitorSetup::Select( const char * pszCommand, CMonitorEntry & clsEntry )
 {
 	MONITOR_LIST::iterator	itCommand;
@@ -196,21 +185,13 @@ bool CMonitorSetup::Select( const char * pszCommand, CMonitorEntry & clsEntry )
 	return false;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ¸í·É °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¸ğ´ÏÅÍ¸µ ¸í·É °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë‹ˆí„°ë§ ëª…ë ¹ ê°œìˆ˜ë¥¼ ë¦¬í„´í•œë‹¤.
 int CMonitorSetup::GetCount( )
 {
 	return m_clsList.size();
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ´ÙÀ½ Àü¼Û ¸ğ´ÏÅÍ¸µ ¸í·ÉÀ» °¡Á®¿Â´Ù.
- * @returns ´ÙÀ½ Àü¼Û ¸ğ´ÏÅÍ¸µ ¸í·ÉÀ» ¸®ÅÏÇÑ´Ù.
- */
+// ë‹¤ìŒ ì „ì†¡ ëª¨ë‹ˆí„°ë§ ëª…ë ¹ì„ ê°€ì ¸ì˜¨ë‹¤.
 const char * CMonitorSetup::GetNextCommand( )
 {
 	if( m_clsList.size() == 0 ) return "";
@@ -230,11 +211,7 @@ const char * CMonitorSetup::GetNextCommand( )
 	return m_clsList[m_iCurrentCommandIndex].m_strCommand.c_str();
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¿¡·¯ ¸Ş½ÃÁö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¿¡·¯ ¸Ş½ÃÁö¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì—ëŸ¬ ë©”ì‹œì§€ë¥¼ ë¦¬í„´í•œë‹¤.
 const char * CMonitorSetup::GetErrorMessage( )
 {
 	return m_strErrorMessage.c_str();

@@ -24,12 +24,7 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup TcpStack
- * @brief pipe ¸¦ »ç¿ëÇÏÁö ¾Ê´Â TCP ¼¼¼Ç ¾²·¹µå ÇÔ¼ö - m_bUseThreadPipe °¡ false ÀÏ ¶§¿¡ »ç¿ëµÈ´Ù.
- * @param lpParameter CThreadListEntry °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// pipe ë¥¼ ì‚¬ìš©í•˜ì§€ ì•ŠëŠ” TCP ì„¸ì…˜ ì“°ë ˆë“œ í•¨ìˆ˜ - m_bUseThreadPipe ê°€ false ì¼ ë•Œì— ì‚¬ìš©ëœë‹¤.
 THREAD_API TcpNoPipeThread( LPVOID lpParameter )
 {
 	CTcpNoPipeThreadArg * pclsArg = (CTcpNoPipeThreadArg *)lpParameter;
@@ -63,7 +58,7 @@ THREAD_API TcpNoPipeThread( LPVOID lpParameter )
 	{
 		if( pclsStack->m_pclsCallBack->InComingConnected( &clsSessionInfo ) == false )
 		{
-			// Çã¿ëµÇÁö ¾Ê´Â TCP ¿¬°áÀÌ¸é TCP ¿¬°á Á¾·á½ÃÅ²´Ù.
+			// í—ˆìš©ë˜ì§€ ì•ŠëŠ” TCP ì—°ê²°ì´ë©´ TCP ì—°ê²° ì¢…ë£Œì‹œí‚¨ë‹¤.
 			CLog::Print( LOG_INFO, "not allowed TCP session(%s:%d)", clsSessionInfo.m_strIp.c_str(), clsSessionInfo.m_iPort );
 		}
 		else

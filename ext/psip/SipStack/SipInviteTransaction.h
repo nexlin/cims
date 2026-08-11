@@ -21,10 +21,7 @@
 
 #include "SipStackDefine.h"
 
-/**
- * @ingroup SipStack
- * @brief SIP INVITE TRANSACTION Å¬·¡½º
- */
+// SIP INVITE TRANSACTION í´ë˜ìŠ¤
 class CSipInviteTransaction
 {
 public:
@@ -32,28 +29,28 @@ public:
 	~CSipInviteTransaction();
 
 public:
-	/** SIP ¿äÃ» ¸Ş½ÃÁö */
+	// SIP ìš”ì²­ ë©”ì‹œì§€
 	CSipMessage * m_pclsRequest;
 
-	/** SIP ÀÀ´ä ¸Ş½ÃÁö */
+	// SIP ì‘ë‹µ ë©”ì‹œì§€
 	CSipMessage * m_pclsResponse;
 
-	/** ACK ¸Ş½ÃÁö */
+	// ACK ë©”ì‹œì§€
 	CSipMessage * m_pclsAck;
 
-	/** SIP ¿äÃ» ¸Ş½ÃÁö Àü¼Û/¼ö½Å ½Ã°£ */
+	// SIP ìš”ì²­ ë©”ì‹œì§€ ì „ì†¡/ìˆ˜ì‹  ì‹œê°„
 	struct timeval m_sttStartTime;
 
-	/** SIP transaction ¸¸·á ½Ã°£ */
+	// SIP transaction ë§Œë£Œ ì‹œê°„
 	struct timeval m_sttStopTime;
 
-	/** 180/183 ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ½Ã°£ */
+	// 180/183 ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì‹œê°„
 	struct timeval m_sttRingTime;
 
-	/** ÀçÀü¼Û °³¼ö */
+	// ì¬ì „ì†¡ ê°œìˆ˜
 	int	m_iReSendCount;
 
-	/** ÃÖÁ¾ SIP ÀÀ´ä ÄÚµå */
+	// ìµœì¢… SIP ì‘ë‹µ ì½”ë“œ
 	int m_iStatusCode;
 };
 

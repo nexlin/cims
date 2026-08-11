@@ -24,10 +24,7 @@
 #include "MonitorString.h"
 #include <map>
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP Å¬¶óÀÌ¾ğÆ® Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// SIP í´ë¼ì´ì–¸íŠ¸ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CUserInfo
 {
 public:
@@ -42,13 +39,10 @@ public:
 	ESipTransport m_eTransport;
 };
 
-// key ´Â user_id ÀÌ´Ù.
+// key ëŠ” user_id ì´ë‹¤.
 typedef std::map< std::string, CUserInfo > USER_MAP;
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP Å¬¶óÀÌ¾ğÆ® ¸Ê ÀúÀå Å¬·¡½º
- */
+// SIP í´ë¼ì´ì–¸íŠ¸ ë§µ ì €ì¥ í´ë˜ìŠ¤
 class CUserMap
 {
 public:

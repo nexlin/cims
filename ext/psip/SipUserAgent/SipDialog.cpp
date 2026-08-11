@@ -24,10 +24,7 @@
 #include "Log.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipUserAgent
- * @brief ������
- */
+// 생성자
 CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP)
 	, m_iOutboundLocalPort(-1)
 	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
@@ -41,19 +38,12 @@ CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m
 	memset( &m_sttEndTime, 0, sizeof(m_sttEndTime) );
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief �Ҹ���.
- */
+// 소멸자.
 CSipDialog::~CSipDialog()
 {
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief INVITE �޽����� �����Ѵ�.
- * @returns �����ϸ� INVITE �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// INVITE 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateInvite( )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_INVITE );
@@ -85,12 +75,7 @@ CSipMessage * CSipDialog::CreateInvite( )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ACK �޽����� �����Ѵ�.
- * @param iStatusCode SIP INVITE ���� �ڵ�
- * @returns �����ϸ� ACK �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// ACK 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateAck( int iStatusCode )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_ACK );
@@ -110,11 +95,7 @@ CSipMessage * CSipDialog::CreateAck( int iStatusCode )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief CANCEL �޽����� �����Ѵ�.
- * @returns �����ϸ� CANCEL �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// CANCEL 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateCancel( )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_CANCEL );
@@ -131,11 +112,7 @@ CSipMessage * CSipDialog::CreateCancel( )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief BYE �޽����� �����Ѵ�.
- * @returns �����ϸ� BYE �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// BYE 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateBye( )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_BYE );
@@ -144,11 +121,7 @@ CSipMessage * CSipDialog::CreateBye( )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief NOTIFY �޽����� �����Ѵ�.
- * @returns �����ϸ� NOTIFY �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// NOTIFY 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateNotify( )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_NOTIFY );
@@ -157,11 +130,7 @@ CSipMessage * CSipDialog::CreateNotify( )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief REFER �޽����� �����Ѵ�.
- * @returns �����ϸ� REFER �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// REFER 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateRefer( )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_REFER );
@@ -170,11 +139,7 @@ CSipMessage * CSipDialog::CreateRefer( )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief PRACK �޽����� �����Ѵ�.
- * @returns �����ϸ� PRACK �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// PRACK 메시지를 생성한다.
 CSipMessage * CSipDialog::CreatePrack( )
 {
 	if( m_iRSeq == -1 ) return NULL;
@@ -191,11 +156,7 @@ CSipMessage * CSipDialog::CreatePrack( )
 	return pclsMessage;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief INFO �޽����� �����Ѵ�.
- * @returns �����ϸ� PRACK �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// INFO 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateInfo( )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_INFO );
@@ -242,12 +203,7 @@ bool CSipDialog::HasRemoteApplicationMedia( )
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP �޽����� SDP �޽����� �߰��Ѵ�.
- * @param pclsMessage SDP �޽����� �߰��� SIP �޽��� ��ü
- * @returns true �� �����Ѵ�.
- */
+// SIP 메시지에 SDP 메시지를 추가한다.
 bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 {
 	char	szSdp[4096];
@@ -373,12 +329,7 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief local RTP ������ �����Ѵ�.
- * @param pclsRtp RTP ������ ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// local RTP 정보를 저장한다.
 bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 {
 	if( pclsRtp == NULL ) return false;
@@ -412,17 +363,12 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief remote RTP ������ �����Ѵ�.
- * @param pclsRtp RTP ������ ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// remote RTP 정보를 저장한다.
 bool CSipDialog::SetRemoteRtp( CSipCallRtp * pclsRtp )
 {
 	if( pclsRtp == NULL ) return false;
 
-	// ReINVITE ���� hold �� ��� IP �ּҰ� 0.0.0.0 ���� ���ŵǾ Transfer �� ���� ���������� SDP IP �ּҰ� ���޵��� �ʱ� ���ؼ� ������.
+	// ReINVITE 에서 hold 인 경우 IP 주소가 0.0.0.0 으로 수신되어서 Transfer 할 때에 정상적으로 SDP IP 주소가 전달되지 않기 위해서 수정함.
 	if( strcmp( pclsRtp->m_strIp.c_str(), "0.0.0.0" ) )
 	{
 		m_strRemoteRtpIp = pclsRtp->m_strIp;
@@ -454,12 +400,7 @@ bool CSipDialog::SetRemoteRtp( CSipCallRtp * pclsRtp )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief my SIP Ŭ���̾�Ʈ�� RTP ������ �����´�.
- * @param pclsRtp SIP Ŭ���̾�Ʈ�� RTP ������ ������ ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// my SIP 클라이언트의 RTP 정보를 가져온다.
 bool CSipDialog::SelectLocalRtp( CSipCallRtp * pclsRtp )
 {
 	if( pclsRtp == NULL ) return false;
@@ -476,12 +417,7 @@ bool CSipDialog::SelectLocalRtp( CSipCallRtp * pclsRtp )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Ŭ���̾�Ʈ�� RTP ������ �����´�.
- * @param pclsRtp SIP Ŭ���̾�Ʈ�� RTP ������ ������ ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 클라이언트의 RTP 정보를 가져온다.
 bool CSipDialog::SelectRemoteRtp( CSipCallRtp * pclsRtp )
 {
 	if( pclsRtp == NULL ) return false;
@@ -498,11 +434,7 @@ bool CSipDialog::SelectRemoteRtp( CSipCallRtp * pclsRtp )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief CDR ���� ��ü�� �����͸� �����Ѵ�.
- * @param pclsCdr CDR ���� ��ü
- */
+// CDR 정보 객체에 데이터를 저장한다.
 void CSipDialog::GetCdr( CSipCdr * pclsCdr )
 {
 	if( m_bSendCall )
@@ -512,7 +444,7 @@ void CSipDialog::GetCdr( CSipCdr * pclsCdr )
 	}
 	else
 	{
-		// CSipDialog �� From, To �� SipUserAgent �� SIP ��û �޽����� �����ϴ� ���忡�� ����Ǿ� �����Ƿ� CDR �� ���ؼ��� �ݴ�� ������ �ش�.
+		// CSipDialog 의 From, To 는 SipUserAgent 가 SIP 요청 메시지를 전송하는 입장에서 저장되어 있으므로 CDR 을 위해서는 반대로 저장해 준다.
 		pclsCdr->m_strFromId = m_strToId;
 		pclsCdr->m_strToId = m_strFromId;
 	}
@@ -523,11 +455,7 @@ void CSipDialog::GetCdr( CSipCdr * pclsCdr )
 	pclsCdr->m_sttEndTime = m_sttEndTime;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��ȭ ����� Dialog �ΰ�?
- * @returns ��ȭ ����� Dialog �̸� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 통화 연결된 Dialog 인가?
 bool CSipDialog::IsConnected( )
 {
 	if( m_sttStartTime.tv_sec != 0 && m_sttEndTime.tv_sec == 0 ) return true;
@@ -535,12 +463,7 @@ bool CSipDialog::IsConnected( )
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief Dialog ���� ����ϴ� �ڵ����� �˻��Ѵ�.
- * @param iCodec �ڵ� payload type
- * @returns Dialog ���� ����ϴ� �ڵ��̸� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// Dialog 에서 사용하는 코덱인지 검사한다.
 bool CSipDialog::IsUseCodec( int iCodec )
 {
 	// 코덱 테이블(CSipCodecTable) 등재 PT 만 사용 — 구 정적 화이트리스트(0/3/4/8/18/96/98/99)는
@@ -590,12 +513,7 @@ int CSipDialog::FindRemotePayloadType( const char * pszEncoding )
 	return -1;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ��û �޽����� �����Ѵ�.
- * @param pszSipMethod SIP �޼ҵ�
- * @returns �����ϸ� SIP ��û �޽����� �����ϰ� �׷��� ������ NULL �� �����Ѵ�.
- */
+// SIP 요청 메시지를 생성한다.
 CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 {
 	CSipMessage * pclsMessage = new CSipMessage();
@@ -691,7 +609,7 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 
 	if( m_clsRouteList.size() > 0 )
 	{
-		// ���ŵ� Record-Route �� �����ϸ� �̸� Route �� ���Խ�Ų��.
+		// 수신된 Record-Route 가 존재하면 이를 Route 에 포함시킨다.
 		pclsMessage->m_clsRouteList = m_clsRouteList;
 	}
 	else

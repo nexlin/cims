@@ -21,10 +21,7 @@
 
 #include <jni.h>
 
-/**
- * @ingroup AndroidSipStack
- * @brief java ¿¡¼­ »ç¿ëÇÏ´Â Å¬·¡½º ¹× callback ¸Ş¼Òµå ÀúÀå Å¬·¡½º
- */
+// java ì—ì„œ ì‚¬ìš©í•˜ëŠ” í´ë˜ìŠ¤ ë° callback ë©”ì†Œë“œ ì €ì¥ í´ë˜ìŠ¤
 class CAndroidClass
 {
 public:

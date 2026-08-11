@@ -31,12 +31,7 @@ CSipServer::~CSipServer()
 {
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief SIP ¼­¹ö¸¦ ½ÃÀÛÇÑ´Ù.
- * @param clsSetup SIP stack ¼³Á¤ Ç×¸ñÀ» ÀúÀåÇÑ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì„œë²„ë¥¼ ì‹œì‘í•œë‹¤.
 bool CSipServer::Start( CSipStackSetup & clsSetup )
 {
 	gclsSipStack.AddCallBack( this );
@@ -46,28 +41,19 @@ bool CSipServer::Start( CSipStackSetup & clsSetup )
 	return true;
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief SIP stack À» Á¾·áÇÑ´Ù. 
- */
+// SIP stack ì„ ì¢…ë£Œí•œë‹¤.
 void CSipServer::Stop( )
 {
 	gclsSipStack.Stop();
 	gclsSipStack.Final();
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief SIP ¿äÃ» ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		¾²·¹µå ¾ÆÀÌµğ
- * @param pclsMessage SIP ¿äÃ» ¸Ş½ÃÁö
- * @returns SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ìš”ì²­ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipServer::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	if( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) )
 	{
-		// ¸ğµç Å¬¶óÀÌ¾ğÆ®ÀÇ ·Î±×ÀÎÀ» Çã¿ëÇÑ´Ù.
+		// ëª¨ë“  í´ë¼ì´ì–¸íŠ¸ì˜ ë¡œê·¸ì¸ì„ í—ˆìš©í•œë‹¤.
 		CSipFrom clsContact;
 
 		gclsUserMap.Insert( pclsMessage, &clsContact );
@@ -93,7 +79,7 @@ bool CSipServer::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 
 		if( gclsUserMap.Select( strToId.c_str(), clsUserInfo ) == false )
 		{
-			// TO »ç¿ëÀÚ°¡ Á¸ÀçÇÏÁö ¾ÊÀ¸¸é 404 NOT FOUND ·Î ÀÀ´äÇÑ´Ù.
+			// TO ì‚¬ìš©ìê°€ ì¡´ì¬í•˜ì§€ ì•Šìœ¼ë©´ 404 NOT FOUND ë¡œ ì‘ë‹µí•œë‹¤.
 			CSipMessage * pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_NOT_FOUND );
 			if( pclsResponse )
 			{
@@ -103,7 +89,7 @@ bool CSipServer::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 		}
 		else
 		{
-			// TO »ç¿ëÀÚ·Î SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Àü´ŞÇÑ´Ù.
+			// TO ì‚¬ìš©ìë¡œ SIP ìš”ì²­ ë©”ì‹œì§€ë¥¼ ì „ë‹¬í•œë‹¤.
 			SIP_VIA_LIST::iterator itVia = pclsMessage->m_clsViaList.begin();
 			if( itVia != pclsMessage->m_clsViaList.end() )
 			{
@@ -141,19 +127,13 @@ bool CSipServer::RecvRequest( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief SIP ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		¾²·¹µå ¾ÆÀÌµğ
- * @param pclsMessage SIP ÀÀ´ä ¸Ş½ÃÁö
- * @returns SIP ÀÀ´ä ¸Ş½ÃÁö¸¦ Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipServer::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	CSipMessage * pclsResponse = new CSipMessage();
 	if( pclsResponse )
 	{
-		// SIP ¿äÃ» ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ È£½ºÆ®·Î Àü´ŞÇÑ´Ù.
+		// SIP ìš”ì²­ ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œ í˜¸ìŠ¤íŠ¸ë¡œ ì „ë‹¬í•œë‹¤.
 		*pclsResponse = *pclsMessage;
 		pclsResponse->m_clsViaList.pop_front();
 
@@ -171,13 +151,7 @@ bool CSipServer::RecvResponse( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief SIP ¸Ş½ÃÁö Àü¼Û timeout callback method
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµğ
- * @param pclsMessage ¼ö½ÅµÈ SIP ÀÀ´ä ¸Ş½ÃÁö
- * @returns SIP ÀÀ´ä ¸Ş½ÃÁö¸¦ Ã³¸®ÇÑ °æ¿ì true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ ì „ì†¡ timeout callback method
 bool CSipServer::SendTimeout( int iThreadId, CSipMessage * pclsMessage )
 {
 	return false;

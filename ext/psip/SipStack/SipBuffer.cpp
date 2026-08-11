@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include "MemoryDebug.h"
 
-/** ³»ºÎ º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù. */ 
+// ë‚´ë¶€ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 CSipBuffer::CSipBuffer() : m_pszBuf(NULL), m_iBufLen(0)
 {
 }
@@ -32,13 +32,7 @@ CSipBuffer::~CSipBuffer()
 	if( m_pszBuf ) delete [] m_pszBuf;
 }
 
-/** 
- * @ingroup SipStack
- * @brief	³»ºÎ ¹öÆÛ¿¡ µ¥ÀÌÅ¸¸¦ Ãß°¡ÇÑ´Ù. 
- * @param	pszBuf	ÀÔ·ÂÇÒ µ¥ÀÌÅ¸
- * @param	iLen		ÀÔ·ÂÇÒ µ¥ÀÌÅ¸ÀÇ ±æÀÌ
- * @return	¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÑ´Ù. ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë‚´ë¶€ ë²„í¼ì— ë°ì´íƒ€ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipBuffer::AddBuf( const char * pszBuf, int iLen )
 {
 	if( m_pszBuf == NULL )
@@ -63,13 +57,7 @@ bool CSipBuffer::AddBuf( const char * pszBuf, int iLen )
 	return true;
 }
 
-/** 
- * @ingroup SipStack
- * @brief	³»ºÎ ¹öÆÛ¿¡¼­ SIP ¸Ş½ÃÁö¸¦ ÃßÃâÇÑ´Ù. 
- * @param	ppszBuf	ÃßÃâÇÑ SIP ¸Ş½ÃÁöÀÇ Æ÷ÀÎÅÍ¸¦ ÀúÀåÇÒ º¯¼ö
- * @param	piLen		ÃßÃâÇÑ SIP ¸Ş½ÃÁöÀÇ ±æÀÌ
- * @return	¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÑ´Ù. ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë‚´ë¶€ ë²„í¼ì—ì„œ SIP ë©”ì‹œì§€ë¥¼ ì¶”ì¶œí•œë‹¤.
 bool CSipBuffer::GetSipMessage( char ** ppszBuf, int * piLen )
 {
 	int		i, iLen = 0, iContentLength = -1, iBodyLength = 0;
@@ -83,7 +71,7 @@ bool CSipBuffer::GetSipMessage( char ** ppszBuf, int * piLen )
 	*ppszBuf = NULL;
 	*piLen = 0;
 
-	// ¸Ç ¾ÕÀÇ °ø¹éÀº ¹«½ÃÇÑ´Ù.
+	// ë§¨ ì•ì˜ ê³µë°±ì€ ë¬´ì‹œí•œë‹¤.
 	for( i = 0; i < m_iBufLen; ++i )
 	{
 		if( m_pszBuf[i] != ' ' && m_pszBuf[i] != '\t' && m_pszBuf[i] != '\r' && m_pszBuf[i] != '\n' )
@@ -165,12 +153,7 @@ bool CSipBuffer::GetSipMessage( char ** ppszBuf, int * piLen )
 	return true;
 }
 
-/** 
- * @ingroup SipStack
- * @brief ³»ºÎ ¹öÆÛ¸¦ ¿ŞÂÊÀ¸·Î ÀÌµ¿ÇÑ´Ù. SIP ¸Ş½ÃÁö¸¦ Ã³¸®ÇÑ ÈÄ¿¡ È£ÃâÇÏ¸é µÈ´Ù.
- * @param	iLen	ÀÌµ¿ÇÒ ±æÀÌ
- * @return	¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÑ´Ù. ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë‚´ë¶€ ë²„í¼ë¥¼ ì™¼ìª½ìœ¼ë¡œ ì´ë™í•œë‹¤. SIP ë©”ì‹œì§€ë¥¼ ì²˜ë¦¬í•œ í›„ì— í˜¸ì¶œí•˜ë©´ ëœë‹¤.
 bool CSipBuffer::ShiftBuf( int iLen )
 {
 	if( iLen > m_iBufLen ) return false;
@@ -181,10 +164,7 @@ bool CSipBuffer::ShiftBuf( int iLen )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ³»ºÎ º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë‚´ë¶€ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipBuffer::Clear()
 {
 	if( m_pszBuf )

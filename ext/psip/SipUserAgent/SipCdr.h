@@ -22,32 +22,29 @@
 #include <string>
 #include "SipUdp.h"
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP CDR Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP CDR ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipCdr
 {
 public:
 	CSipCdr();
 	~CSipCdr();
 
-	/** SIP From Çì´õ¿¡ ÀúÀåµÇ´Â »ç¿ëÀÚ ¾ÆÀÌµğ */
+	// SIP From í—¤ë”ì— ì €ì¥ë˜ëŠ” ì‚¬ìš©ì ì•„ì´ë””
 	std::string	m_strFromId;
 
-	/** SIP To Çì´õ¿¡ ÀúÀåµÇ´Â »ç¿ëÀÚ ¾ÆÀÌµğ */
+	// SIP To í—¤ë”ì— ì €ì¥ë˜ëŠ” ì‚¬ìš©ì ì•„ì´ë””
 	std::string	m_strToId;
 
 	/** SIP Call-ID */
 	std::string m_strCallId;
 
-	/** INVITE Àü¼Û/¼ö½Å ½Ã°£ */
+	// INVITE ì „ì†¡/ìˆ˜ì‹  ì‹œê°„
 	struct timeval m_sttInviteTime;
 
-	/** ÅëÈ­ ½ÃÀÛ ½Ã°£ */
+	// í†µí™” ì‹œì‘ ì‹œê°„
 	struct timeval m_sttStartTime;
 
-	/** ÅëÈ­ Á¾·á ½Ã°£ */
+	// í†µí™” ì¢…ë£Œ ì‹œê°„
 	struct timeval m_sttEndTime;
 };
 

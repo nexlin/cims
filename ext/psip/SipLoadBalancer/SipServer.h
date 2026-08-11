@@ -21,15 +21,9 @@
 
 #include "SipStack.h"
 
-/**
- * @defgroup SipLoadBalancer SipLoadBalancer
- * SIP Stack À» ÀÌ¿ëÇÑ ÃÊ°£´Ü SIP ¼­¹ö ¿¹Á¦ ÇÁ·Î±×·¥
- */
+// SipLoadBalancer
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SIP Stack À» ÀÌ¿ëÇÑ ÃÊ°£´Ü SIP ¼­¹ö Å¬·¡½º
- */
+// SIP Stack ì„ ì´ìš©í•œ ì´ˆê°„ë‹¨ SIP ì„œë²„ í´ë˜ìŠ¤
 class CSipServer : public ISipStackCallBack
 {
 public:

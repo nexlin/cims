@@ -29,13 +29,7 @@ CSipFrom::~CSipFrom()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipFrom Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipFrom í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipFrom::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -103,13 +97,7 @@ int CSipFrom::Parse( const char * pszText, int iTextLen )
 	return iRet + iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipFrom::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -139,10 +127,7 @@ int CSipFrom::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief tag ¸¦ Ãß°¡ÇÑ´Ù.
- */
+// tag ë¥¼ ì¶”ê°€í•œë‹¤.
 void CSipFrom::InsertTag()
 {
 	char szTag[SIP_TAG_MAX_SIZE];
@@ -152,10 +137,7 @@ void CSipFrom::InsertTag()
 	InsertParam( SIP_TAG, szTag );
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipFrom::Clear()
 {
 	m_strDisplayName.clear();
@@ -163,24 +145,13 @@ void CSipFrom::Clear()
 	ClearParam();
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ë³€ìˆ˜ê°€ ì €ì¥ë˜ì–´ ìˆì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSipFrom::Empty()
 {
 	return m_clsUri.Empty();
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipFrom °´Ã¼ ¸®½ºÆ®¿¡ ÀúÀåÇÑ´Ù.
- * @param clsList CSipFrom °´Ã¼ ¸®½ºÆ®
- * @param pszText ÆÄ½ÌÇÒ ¹®ÀÚ¿­
- * @param iTextLen ÆÄ½ÌÇÒ ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipFrom ê°ì²´ ë¦¬ìŠ¤íŠ¸ì— ì €ì¥í•œë‹¤.
 int ParseSipFrom( SIP_FROM_LIST & clsList, const char * pszText, int iTextLen )
 {
 	int iPos, iCurPos = 0;

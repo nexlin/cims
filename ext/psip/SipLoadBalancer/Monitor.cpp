@@ -35,12 +35,7 @@ CMonitor::~CMonitor()
 {
 }
 
-/**
- * @brief ¼­¹ö ¸ğ´ÏÅÍ¸µ ¿äÃ» ¸í·É ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszRequest	¿äÃ» ¸í·É ¹®ÀÚ¿­
- * @param strResponse ÀÀ´ä ¹®ÀÚ¿­ ÀúÀå º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„œë²„ ëª¨ë‹ˆí„°ë§ ìš”ì²­ ëª…ë ¹ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CMonitor::RecvRequest( const char * pszRequest, CMonitorString & strResponse )
 {
 	if( !strcmp( pszRequest, MC_SIP_SERVER_MAP_LIST ) )
@@ -63,11 +58,7 @@ bool CMonitor::RecvRequest( const char * pszRequest, CMonitorString & strRespons
 	return true;
 }
 
-/**
- * @brief Çã¿ëµÈ Å¬¶óÀÌ¾ğÆ®ÀÎ°¡?
- * @param pszIp Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @returns Çã¿ëµÈ Å¬¶óÀÌ¾ğÆ®ÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í—ˆìš©ëœ í´ë¼ì´ì–¸íŠ¸ì¸ê°€?
 bool CMonitor::IsMonitorIp( const char * pszIp )
 {
 	return gclsSetup.IsMonitorIp( pszIp );

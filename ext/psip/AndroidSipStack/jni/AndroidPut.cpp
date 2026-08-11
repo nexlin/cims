@@ -20,16 +20,7 @@
 #include "AndroidLog.h"
 #include <string.h>
 
-/**
- * @ingroup AndroidSipStack
- * @brief java °´Ã¼ÀÇ ¹®ÀÚ¿­ ¸â¹ö º¯¼ö¿¡ °ªÀ» ÀÔ·ÂÇÑ´Ù.
- * @param env				JNIEnv
- * @param jObject		java °´Ã¼
- * @param jClass		java Å¬·¡½º
- * @param pszName		java °´Ã¼ÀÇ ¹®ÀÚ¿­ ¸â¹ö º¯¼ö ÀÌ¸§
- * @param pszValue	ÀúÀåÇÒ ¹®ÀÚ¿­
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// java ê°ì²´ì˜ ë¬¸ìžì—´ ë©¤ë²„ ë³€ìˆ˜ì— ê°’ì„ ìž…ë ¥í•œë‹¤.
 bool PutString( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName, const char * pszValue )
 {
 	jstring strValue = env->NewStringUTF( pszValue );
@@ -53,16 +44,7 @@ bool PutString( JNIEnv * env, jobject jObject, jclass jClass, const char * pszNa
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief java °´Ã¼ÀÇ Á¤¼ö ¸â¹ö º¯¼ö¿¡ °ªÀ» ÀÔ·ÂÇÑ´Ù.
- * @param env				JNIEnv
- * @param jObject		java °´Ã¼
- * @param jClass		java Å¬·¡½º
- * @param pszName		java °´Ã¼ÀÇ Á¤¼ö ¸â¹ö º¯¼ö ÀÌ¸§
- * @param iValue		ÀúÀåÇÒ Á¤¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// java ê°ì²´ì˜ ì •ìˆ˜ ë©¤ë²„ ë³€ìˆ˜ì— ê°’ì„ ìž…ë ¥í•œë‹¤.
 bool PutInt( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName, int iValue )
 {
 	jfieldID fid = env->GetFieldID( jClass, pszName, "I" );

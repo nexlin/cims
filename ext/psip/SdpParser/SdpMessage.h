@@ -26,15 +26,9 @@
 typedef std::list< std::string > SDP_EMAIL_LIST;
 typedef std::list< std::string > SDP_PHONE_LIST;
 
-/**
- * @defgroup SdpParser SdpParser
- * SDP ¸Ş½ÃÁö ÆÄ½Ì/»ı¼º ¶óÀÌºê·¯¸®
- */
+// SdpParser
 
-/**
- * @ingroup SdpParser
- * @brief SDP message ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SDP message ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSdpMessage
 {
 public:

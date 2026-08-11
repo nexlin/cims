@@ -36,7 +36,7 @@ bool CSipClientSetup::Read( const char * pszFileName )
 
 	if( clsXml.ParseFile( pszFileName ) == false ) return false;
 
-	// SIP ¼³Á¤
+	// SIP ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Sip" );
 	if( pclsElement == NULL ) return false;
 
@@ -49,7 +49,7 @@ bool CSipClientSetup::Read( const char * pszFileName )
 		GetLocalIp( m_strLocalIp );
 	}
 
-	// SIP ¼­¹ö ¼³Á¤
+	// SIP ì„œë²„ ì„¤ì •
 	pclsElement = clsXml.SelectElement( "SipServer" );
 	if( pclsElement == NULL ) return false;
 
@@ -88,7 +88,7 @@ bool CSipClientSetup::Read( const char * pszFileName )
 		return false;
 	}
 
-	// ¿Àµð¿À ¼³Á¤
+	// ì˜¤ë””ì˜¤ ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Audio" );
 	if( pclsElement == NULL ) return false;
 

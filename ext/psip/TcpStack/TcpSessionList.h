@@ -29,20 +29,14 @@
 class CTcpComm;
 class ITcpStackCallBack;
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼¼¼Çº°·Î ÀÀ¿ë¿¡¼­ »ç¿ëÇÒ º¯¼ö¸¦ À§ÇÑ ÀÎÅÍÆäÀÌ½º
- */
+// TCP ì„¸ì…˜ë³„ë¡œ ì‘ìš©ì—ì„œ ì‚¬ìš©í•  ë³€ìˆ˜ë¥¼ ìœ„í•œ ì¸í„°í˜ì´ìŠ¤
 class ITcpSessionApp
 {
 public:
 	virtual ~ITcpSessionApp(){};
 };
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¾²·¹µå º°·Î °ü¸®ÇÏ´Â TCP ¼¼¼Ç Á¤º¸
- */
+// TCP ì“°ë ˆë“œ ë³„ë¡œ ê´€ë¦¬í•˜ëŠ” TCP ì„¸ì…˜ ì •ë³´
 class CTcpSessionInfo
 {
 public:
@@ -63,7 +57,7 @@ public:
 
 	time_t				m_iConnectTime;
 	time_t				m_iRecvTime;
-	time_t				m_iSendTime;	// Å¬¶óÀÌ¾ğÆ®·Î ¿¬°áµÈ °æ¿ì¸¸ ¼³Á¤ÇÑ´Ù.
+	time_t				m_iSendTime;	// í´ë¼ì´ì–¸íŠ¸ë¡œ ì—°ê²°ëœ ê²½ìš°ë§Œ ì„¤ì •í•œë‹¤.
 
 	int						m_iThreadIndex;
 	int						m_iSessionIndex;
@@ -71,10 +65,7 @@ public:
 	ITcpSessionApp * m_pclsApp;
 };
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¾²·¹µå º°·Î °ü¸®ÇÏ´Â TCP ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º - m_bUseThreadPipe °¡ true ÀÏ ¶§¿¡ »ç¿ëµÈ´Ù.
- */
+// TCP ì“°ë ˆë“œ ë³„ë¡œ ê´€ë¦¬í•˜ëŠ” TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤ - m_bUseThreadPipe ê°€ true ì¼ ë•Œì— ì‚¬ìš©ëœë‹¤.
 class CTcpStackSessionList
 {
 public:

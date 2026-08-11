@@ -19,10 +19,7 @@
 #ifndef _RTP_DIRECTION_H_
 #define _RTP_DIRECTION_H_
 
-/**
- * @ingroup SipUserAgent
- * @brief RTP Àü¼Û/¼ö½Å
- */
+// RTP ì „ì†¡/ìˆ˜ì‹ 
 enum ERtpDirection
 {
 	E_RTP_SEND_RECV = 0,

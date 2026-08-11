@@ -19,21 +19,21 @@
 #pragma once
 #include "afxwin.h"
 
-// CSipSetupDlg ´ëÈ­ »óÀÚÀÔ´Ï´Ù.
+// CSipSetupDlg ëŒ€í™” ìƒìì…ë‹ˆë‹¤.
 
 class CSipSetupDlg : public CDialog
 {
 	DECLARE_DYNAMIC(CSipSetupDlg)
 
 public:
-	CSipSetupDlg(CWnd* pParent = NULL);   // Ç¥ÁØ »ı¼ºÀÚÀÔ´Ï´Ù.
+	CSipSetupDlg(CWnd* pParent = NULL);   // í‘œì¤€ ìƒì„±ìì…ë‹ˆë‹¤.
 	virtual ~CSipSetupDlg();
 
-// ´ëÈ­ »óÀÚ µ¥ÀÌÅÍÀÔ´Ï´Ù.
+// ëŒ€í™” ìƒì ë°ì´í„°ì…ë‹ˆë‹¤.
 	enum { IDD = IDD_SIPSETUPDLG };
 
 protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV Áö¿øÀÔ´Ï´Ù.
+	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV ì§€ì›ì…ë‹ˆë‹¤.
 
 	DECLARE_MESSAGE_MAP()
 public:

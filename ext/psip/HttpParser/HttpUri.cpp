@@ -28,13 +28,7 @@ CHttpUri::~CHttpUri()
 {
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP URI ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		HTTP URI ¹®ÀÚ¿­
- * @param iTextLen	HTTP URI ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ °³¼ö¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// HTTP URI ë¥¼ íŒŒì‹±í•œë‹¤.
 int CHttpUri::Parse( const char * pszText, int iTextLen )
 {
 	char cType = 0;
@@ -101,10 +95,7 @@ int CHttpUri::Parse( const char * pszText, int iTextLen )
 	return -1;
 }
 
-/**
- * @ingroup HttpParser
- * @brief ³»ºÎ º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë‚´ë¶€ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CHttpUri::Clear()
 {
 	m_strProtocol.clear();

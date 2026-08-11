@@ -58,12 +58,7 @@ static void CALLBACK waveInProc( HWAVEIN hWaveIn, UINT uMsg, DWORD dwInstance, D
 	}
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ¿Àµğ¿À ÀÔ·Â/Ãâ·ÂÀ» ½ÃÀÛÇÑ´Ù.
- * @param pclsCallBack ¿Àµğ¿À ÀÔ·Â callback °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì˜¤ë””ì˜¤ ì…ë ¥/ì¶œë ¥ì„ ì‹œì‘í•œë‹¤.
 bool CWinAudio::Open( IWinAudioCallBack * pclsCallBack )
 {
 	if( m_hWaveOut && m_hWaveIn ) return true;
@@ -133,11 +128,7 @@ bool CWinAudio::Open( IWinAudioCallBack * pclsCallBack )
 	return true;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ¿Àµğ¿À ÀÔ·Â/Ãâ·ÂÀ» ÁßÁöÇÑ´Ù.
- * @returns true ¸®ÅÏÇÑ´Ù.
- */
+// ì˜¤ë””ì˜¤ ì…ë ¥/ì¶œë ¥ì„ ì¤‘ì§€í•œë‹¤.
 bool CWinAudio::Close( )
 {
 	if( m_hWaveOut )
@@ -168,13 +159,7 @@ bool CWinAudio::Close( )
 	return true;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ¿Àµğ¿À¸¦ Ãâ·ÂÇÑ´Ù.
- * @param parrPcm	PCM ¹öÆÛ
- * @param iPcmLen PCM ¹öÆÛ Å©±â
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì˜¤ë””ì˜¤ë¥¼ ì¶œë ¥í•œë‹¤.
 bool CWinAudio::OutPcm( const int16_t * parrPcm, int iPcmLen )
 {
 	bool bFound = false;
@@ -205,13 +190,7 @@ bool CWinAudio::OutPcm( const int16_t * parrPcm, int iPcmLen )
 	return true;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ½ºÇÇÄ¿ Ãâ·Â ¹× ¸¶ÀÌÅ© ÀÔ·Â PCM À½¿øÀ» raw ÆÄÀÏ·Î ÀúÀåÇÑ´Ù.
- * @param pszOutFileName	½ºÇÇÄ¿ Ãâ·Â PCM À½¿ø ÀúÀå¿ë raw ÆÄÀÏ full path
- * @param pszInFileName		¸¶ÀÌÅ© ÀÔ·Â PCM À½¿ø ÀúÀå¿ë raw ÆÄÀÏ full path
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìŠ¤í”¼ì»¤ ì¶œë ¥ ë° ë§ˆì´í¬ ì…ë ¥ PCM ìŒì›ì„ raw íŒŒì¼ë¡œ ì €ì¥í•œë‹¤.
 bool CWinAudio::Record( const char * pszOutFileName, const char * pszInFileName )
 {
 	m_psttOutFile = fopen( pszOutFileName, "wb" );
@@ -231,12 +210,7 @@ bool CWinAudio::Record( const char * pszOutFileName, const char * pszInFileName 
 	return true;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief ¸¶ÀÌÅ© ÀÔ·Â PCM À½¿øÀ» raw ÆÄÀÏ¿¡ ÀúÀåÇÑ´Ù.
- * @param parrPcm ÀÔ·Â PCM À½¿ø
- * @param iPcmLen ÀÔ·Â PCM À½¿ø ±æÀÌ
- */
+// ë§ˆì´í¬ ì…ë ¥ PCM ìŒì›ì„ raw íŒŒì¼ì— ì €ì¥í•œë‹¤.
 void CWinAudio::WriteInFile( const int16_t * parrPcm, int iPcmLen )
 {
 	if( m_psttInFile )

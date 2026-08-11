@@ -29,13 +29,7 @@ CHttpPacket::~CHttpPacket()
 {
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ÇÁ·ÎÅäÄİ ±â¹İÀ¸·Î ¼ö½ÅÇÑ ÆĞÅ¶À» ÀúÀåÇÏ°í ÆÄ½ÌÇÑ´Ù.
- * @param pszPacket		ÆĞÅ¶
- * @param iPacketLen	ÆĞÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP í”„ë¡œí† ì½œ ê¸°ë°˜ìœ¼ë¡œ ìˆ˜ì‹ í•œ íŒ¨í‚·ì„ ì €ì¥í•˜ê³  íŒŒì‹±í•œë‹¤.
 bool CHttpPacket::AddPacket( const char * pszPacket, int iPacketLen )
 {
 	m_strBuf.append( pszPacket, iPacketLen );
@@ -114,11 +108,7 @@ bool CHttpPacket::AddPacket( const char * pszPacket, int iPacketLen )
 	return true;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP body ¸¦ ¸ğµÎ °¡Á®¿Ô´ÂÁö °Ë»çÇÑ´Ù.
- * @returns HTTP body ¸¦ ¸ğµÎ °¡Á®¿Â °æ¿ì true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP body ë¥¼ ëª¨ë‘ ê°€ì ¸ì™”ëŠ”ì§€ ê²€ì‚¬í•œë‹¤.
 bool CHttpPacket::IsCompleted( )
 {
 	if( m_eStatus == H_HPS_BODY_END ) return true;
@@ -126,10 +116,7 @@ bool CHttpPacket::IsCompleted( )
 	return false;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¸Ş½ÃÁö °´Ã¼¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// HTTP ë©”ì‹œì§€ ê°ì²´ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CHttpPacket::ClearMessage( )
 {
 	m_clsMessage.Clear();
@@ -137,21 +124,13 @@ void CHttpPacket::ClearMessage( )
 	m_iChunkedLen = -1;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¸Ş½ÃÁö °´Ã¼¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns HTTP ¸Ş½ÃÁö °´Ã¼¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ë©”ì‹œì§€ ê°ì²´ë¥¼ ë¦¬í„´í•œë‹¤.
 CHttpMessage * CHttpPacket::GetHttpMessage( )
 {
 	return &m_clsMessage;
 }
 
-/**
- * @ingroup HttpParser
- * @brief Chunked header ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @returns Chunked header °¡ ¸ğµÎ ÆÄ½ÌµÇ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Chunked header ë¥¼ íŒŒì‹±í•œë‹¤.
 bool CHttpPacket::ParseChunkedHeader( )
 {
 	const char * pszBuf = m_strBuf.c_str();
@@ -172,7 +151,7 @@ bool CHttpPacket::ParseChunkedHeader( )
 			{
 				if( iBufLen >= ( i + 3 ) )
 				{
-					// chunked length ÀÌ 0 ÀÎ °æ¿ì body ÀÇ \r\n ±îÁö ¼ö½ÅµÇ¾î¾ß Á¤»óÀ¸·Î Ã³¸®ÇÑ´Ù.
+					// chunked length ì´ 0 ì¸ ê²½ìš° body ì˜ \r\n ê¹Œì§€ ìˆ˜ì‹ ë˜ì–´ì•¼ ì •ìƒìœ¼ë¡œ ì²˜ë¦¬í•œë‹¤.
 					m_strBuf.erase( 0, i + 3 );
 					m_eStatus = H_HPS_BODY_END;
 
@@ -194,11 +173,7 @@ bool CHttpPacket::ParseChunkedHeader( )
 	return false;
 }
 
-/**
- * @ingroup HttpParser
- * @brief Chunked body ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @returns Chunked body °¡ ¸ğµÎ ÆÄ½ÌµÇ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Chunked body ë¥¼ íŒŒì‹±í•œë‹¤.
 bool CHttpPacket::ParseChunkedBody( )
 {
 	const char * pszBuf = m_strBuf.c_str();

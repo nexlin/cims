@@ -38,12 +38,7 @@ static void BeforeDelete( CTcpStackSessionList * pclsSessionList, int iIndex, vo
 	pclsStack->m_pclsCallBack->SessionClosed( &pclsSessionList->m_pclsSession[iIndex] );
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼¼¼ÇÀ» À§ÇÑ ¾²·¹µå ÇÔ¼ö
- * @param lpParameter CThreadListEntry °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- * @returns 0 À» ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ì„ ìœ„í•œ ì“°ë ˆë“œ í•¨ìˆ˜
 THREAD_API TcpPipeThread( LPVOID lpParameter )
 {
 	CTcpThreadInfo * pclsThreadInfo = (CTcpThreadInfo *)lpParameter;
@@ -67,12 +62,12 @@ THREAD_API TcpPipeThread( LPVOID lpParameter )
 
 		if( pclsSessionList->m_psttPollFd[0].revents & POLLIN )
 		{
-			// »õ·Î¿î TCP ¼¼¼ÇÀ» ÀÚ·á±¸Á¶¿¡ Ãß°¡ÇÑ´Ù.
+			// ìƒˆë¡œìš´ TCP ì„¸ì…˜ì„ ìë£Œêµ¬ì¡°ì— ì¶”ê°€í•œë‹¤.
 			if( CTcpThreadList::RecvCommand( pclsSessionList->m_psttPollFd[0].fd, (char *)&clsTcpComm, sizeof(clsTcpComm) ) == sizeof(clsTcpComm) )
 			{
 				if( clsTcpComm.m_hSocket == INVALID_SOCKET )
 				{
-					// Á¾·á ½ÅÈ£ ¼ö½Å
+					// ì¢…ë£Œ ì‹ í˜¸ ìˆ˜ì‹ 
 					bDeleteThreadInfo = true;
 					break;
 				}
@@ -95,7 +90,7 @@ THREAD_API TcpPipeThread( LPVOID lpParameter )
 						iIndex = pclsSessionList->Insert( clsTcpComm );
 						if( iIndex == -1 )
 						{
-							// »õ·Î¿î TCP ¼¼¼ÇÀ» ÀÚ·á±¸Á¶¿¡ ½ÇÆĞÇÏ¸é TCP ¼¼¼ÇÀ» Á¾·áÇÏ°í ¿À·ù Ã³¸®ÇÑ´Ù.
+							// ìƒˆë¡œìš´ TCP ì„¸ì…˜ì„ ìë£Œêµ¬ì¡°ì— ì‹¤íŒ¨í•˜ë©´ TCP ì„¸ì…˜ì„ ì¢…ë£Œí•˜ê³  ì˜¤ë¥˜ ì²˜ë¦¬í•œë‹¤.
 							clsTcpComm.Close();
 							if( clsTcpComm.m_bClient )
 							{
@@ -104,7 +99,7 @@ THREAD_API TcpPipeThread( LPVOID lpParameter )
 						}
 						else if( clsTcpComm.m_bClient )
 						{
-							// TCP Å¬¶óÀÌ¾ğÆ®·Î ¼­¹ö¿¡ ¿¬°áµÈ °æ¿ì, TCP Å¬¶óÀÌ¾ğÆ® Á¤º¸¸¦ ÀúÀåÇÏ°í ¹öÆÛ¸µµÈ ÆĞÅ¶µéÀ» Àü¼ÛÇÑ´Ù.
+							// TCP í´ë¼ì´ì–¸íŠ¸ë¡œ ì„œë²„ì— ì—°ê²°ëœ ê²½ìš°, TCP í´ë¼ì´ì–¸íŠ¸ ì •ë³´ë¥¼ ì €ì¥í•˜ê³  ë²„í¼ë§ëœ íŒ¨í‚·ë“¤ì„ ì „ì†¡í•œë‹¤.
 							pclsStack->m_clsClientMap.SetConnected( clsTcpComm.m_szIp, clsTcpComm.m_iPort, pclsThreadInfo->m_iIndex, iIndex );
 
 							SEND_PACKET_LIST clsSendPacketList;
@@ -119,10 +114,10 @@ THREAD_API TcpPipeThread( LPVOID lpParameter )
 						}
 						else
 						{
-							// TCP ¼­¹ö·Î½á Å¬¶óÀÌ¾ğÆ®°¡ ¿¬°áµÇ¸é Å¬¶óÀÌ¾ğÆ® ¿¬°á½Ã ÃÖÃÊ ÀÌº¥Æ® Ã³¸®¸¦ À§ÇÑ callback À» È£ÃâÇÑ´Ù.
+							// TCP ì„œë²„ë¡œì¨ í´ë¼ì´ì–¸íŠ¸ê°€ ì—°ê²°ë˜ë©´ í´ë¼ì´ì–¸íŠ¸ ì—°ê²°ì‹œ ìµœì´ˆ ì´ë²¤íŠ¸ ì²˜ë¦¬ë¥¼ ìœ„í•œ callback ì„ í˜¸ì¶œí•œë‹¤.
 							if( pclsStack->m_pclsCallBack->InComingConnected( &pclsSessionList->m_pclsSession[iIndex] ) == false )
 							{
-								// Çã¿ëµÇÁö ¾Ê´Â TCP ¿¬°áÀÌ¸é TCP ¿¬°á Á¾·á½ÃÅ²´Ù.
+								// í—ˆìš©ë˜ì§€ ì•ŠëŠ” TCP ì—°ê²°ì´ë©´ TCP ì—°ê²° ì¢…ë£Œì‹œí‚¨ë‹¤.
 								CLog::Print( LOG_INFO, "not allowed TCP session(%s:%d)", clsTcpComm.m_szIp, clsTcpComm.m_iPort );
 								DeleteSession( pclsSessionList, pclsStack, iIndex );
 							}

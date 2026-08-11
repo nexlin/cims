@@ -21,15 +21,9 @@
 
 #include "SipUserAgent.h"
 
-/**
- * @defgroup EchoSipServer EchoSipServer
- * ÅëÈ­ ¼ö½Å½Ã ÇØ´ç ÅëÈ­¸¦ Àü´ŞÇØ ÁÖ´Â ¼­ºñ½º
- */
+// EchoSipServer
 
-/**
- * @ingroup EchoSipServer
- * @brief ÅëÈ­ ¼ö½Å½Ã ÇØ´ç ÅëÈ­¸¦ Àü´ŞÇØ ÁÖ´Â ¼­ºñ½º
- */
+// í†µí™” ìˆ˜ì‹ ì‹œ í•´ë‹¹ í†µí™”ë¥¼ ì „ë‹¬í•´ ì£¼ëŠ” ì„œë¹„ìŠ¤
 class CSipServer : public ISipUserAgentCallBack, ISipStackCallBack
 {
 public:

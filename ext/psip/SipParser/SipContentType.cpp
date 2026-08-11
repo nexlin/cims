@@ -30,13 +30,7 @@ CSipContentType::~CSipContentType()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipContentType Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipContentType í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipContentType::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -86,13 +80,7 @@ int CSipContentType::Parse( const char * pszText, int iTextLen )
 	return iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipContentType::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -108,10 +96,7 @@ int CSipContentType::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipContentType::Clear()
 {
 	m_strType.clear();
@@ -119,11 +104,7 @@ void CSipContentType::Clear()
 	ClearParam();
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ë³€ìˆ˜ê°€ ì €ì¥ë˜ì–´ ìˆì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSipContentType::Empty()
 {
 	if( m_strType.empty() || m_strSubType.empty() ) return true;
@@ -131,12 +112,7 @@ bool CSipContentType::Empty()
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief Content-Type À» ¼³Á¤ÇÑ´Ù.
- * @param pszType			type
- * @param pszSubType	subtype
- */
+// Content-Type ì„ ì„¤ì •í•œë‹¤.
 void CSipContentType::Set( const char * pszType, const char * pszSubType )
 {
 	if( pszType == NULL || pszSubType == NULL ) return;
@@ -145,13 +121,7 @@ void CSipContentType::Set( const char * pszType, const char * pszSubType )
 	m_strSubType = pszSubType;
 }
 
-/**
- * @ingroup SipParser
- * @brief Content-Type ÀÌ µ¿ÀÏÇÑÁö °Ë»çÇÑ´Ù. 
- * @param pszType			type
- * @param pszSubType	subtype
- * @returns Content-Type ÀÌ µ¿ÀÏÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Content-Type ì´ ë™ì¼í•œì§€ ê²€ì‚¬í•œë‹¤.
 bool CSipContentType::IsEqual( const char * pszType, const char * pszSubType )
 {
 	if( pszType == NULL || pszSubType == NULL ) return false;
@@ -161,13 +131,7 @@ bool CSipContentType::IsEqual( const char * pszType, const char * pszSubType )
 	return false;
 }
 
-/**
- * @brief SIP Content-Type Çì´õ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param clsList		Content-Type ¸®½ºÆ®
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP Content-Type í—¤ë”ë¥¼ íŒŒì‹±í•œë‹¤.
 int ParseSipContentType( SIP_CONTENT_TYPE_LIST & clsList, const char * pszText, int iTextLen )
 {
 	int iPos, iCurPos = 0;

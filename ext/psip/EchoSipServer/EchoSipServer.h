@@ -19,8 +19,8 @@
 #ifndef _ECHO_SIP_SERVER_H_
 #define _ECHO_SIP_SERVER_H_
 
-// MS À©µµ¿ì ¼­ºñ½º ¼±¾ğ
-#define SERVICE_NAME								"EchoSipServer"		// ¼­ºñ½º ÀÌ¸§
+// MS ìœˆë„ìš° ì„œë¹„ìŠ¤ ì„ ì–¸
+#define SERVICE_NAME								"EchoSipServer"		// ì„œë¹„ìŠ¤ ì´ë¦„
 #define SERVICE_DISPLAY_NAME				"EchoSipServer"
 #define SERVICE_DESCRIPTION_STRING	"Echo SIP Server - made by Yee Young Han"
 

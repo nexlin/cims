@@ -29,12 +29,7 @@ CUserMap::~CUserMap()
 {
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief ·Î±×ÀÎµÈ Å¬¶óÀÌ¾ğÆ® Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param pclsMessage SIP REGISTER ¸Ş½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë¡œê·¸ì¸ëœ í´ë¼ì´ì–¸íŠ¸ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 bool CUserMap::Insert( CSipMessage * pclsMessage, CSipFrom * pclsContact  )
 {
 	CUserInfo			clsInfo;
@@ -77,13 +72,7 @@ bool CUserMap::Insert( CSipMessage * pclsMessage, CSipFrom * pclsContact  )
 	return true;
 }
 
-/**
- * @ingroup SimpleSipServer
- * @brief »ç¿ëÀÚ ID ¿¡ ÇØ´çÇÏ´Â Á¤º¸¸¦ °Ë»öÇÑ´Ù.
- * @param pszUserId »ç¿ëÀÚ ID
- * @param clsInfo		»ç¿ëÀÚ Á¤º¸¸¦ ÀúÀåÇÒ º¯¼ö
- * @returns »ç¿ëÀÚ ID °¡ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì‚¬ìš©ì ID ì— í•´ë‹¹í•˜ëŠ” ì •ë³´ë¥¼ ê²€ìƒ‰í•œë‹¤.
 bool CUserMap::Select( const char * pszUserId, CUserInfo & clsInfo )
 {
 	bool bRes = false;

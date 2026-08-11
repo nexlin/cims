@@ -28,37 +28,37 @@ public:
 	CSipClientSetup();
 	~CSipClientSetup();
 
-	/** SIP Åë½ÅÀ» À§ÇÑ UDP Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ UDP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iUdpPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ ·ÎÄÃ IP ÁÖ¼Ò */
+	// SIP í†µì‹ ì„ ìœ„í•œ ë¡œì»¬ IP ì£¼ì†Œ
 	std::string	m_strLocalIp;
 
-	/** SIP ¼­¹ö IP ÁÖ¼Ò */
+	// SIP ì„œë²„ IP ì£¼ì†Œ
 	std::string	m_strSipServerIp;
 
-	/** SIP ¼­¹ö Æ÷Æ® ¹øÈ£ */
+	// SIP ì„œë²„ í¬íŠ¸ ë²ˆí˜¸
 	int					m_iSipServerPort;
 
-	/** SIP µµ¸ŞÀÎ */
+	// SIP ë„ë©”ì¸
 	std::string	m_strSipDomain;
 
-	/** SIP »ç¿ëÀÚ ¾ÆÀÌµğ */
+	// SIP ì‚¬ìš©ì ì•„ì´ë””
 	std::string	m_strSipUserId;
 
-	/** SIP ºñ¹Ğ¹øÈ£ */
+	// SIP ë¹„ë°€ë²ˆí˜¸
 	std::string	m_strSipPassWord;
 
-	/** SIP Åë½Å ÇÁ·ÎÅäÄİ */
+	// SIP í†µì‹  í”„ë¡œí† ì½œ
 	ESipTransport	m_eSipTransport;
 
-	/** TLS SIP Åë½ÅÀ» À§ÇÑ ÀÎÁõ¼­¿Í °³ÀÎÅ°¸¦ ÀúÀåÇÑ PEM ÆÄÀÏ °æ·Î */
+	// TLS SIP í†µì‹ ì„ ìœ„í•œ ì¸ì¦ì„œì™€ ê°œì¸í‚¤ë¥¼ ì €ì¥í•œ PEM íŒŒì¼ ê²½ë¡œ
 	std::string		m_strPemFile;
 
-	/** ½ºÇÇÄ¿ µğ¹ÙÀÌ½º ÀÌ¸§ */
+	// ìŠ¤í”¼ì»¤ ë””ë°”ì´ìŠ¤ ì´ë¦„
 	std::string		m_strSpeaker;
 
-	/** ¸¶ÀÌÅ© µğ¹ÙÀÌ½º ÀÌ¸§ */
+	// ë§ˆì´í¬ ë””ë°”ì´ìŠ¤ ì´ë¦„
 	std::string		m_strMic;
 
 	bool Read( const char * pszFileName );

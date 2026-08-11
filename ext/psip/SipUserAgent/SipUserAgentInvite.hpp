@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP INVITE ��û �޽��� ���� �̺�Ʈ �ڵ鷯
- * @param iThreadId		SIP stack �� UDP ������ ���̵�
- * @param pclsMessage ���ŵ� SIP ��û �޽���
- * @returns ���������� ó���ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP INVITE 요청 메시지 수신 이벤트 핸들러
 bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	std::string	strCallId;
@@ -45,7 +39,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		return true;
 	}
 
-	// ReINVITE ���� �˻��Ѵ�.
+	// ReINVITE 인지 검사한다.
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( strCallId );
 	if( itMap != m_clsDialogMap.end() )
@@ -75,7 +69,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		return true;
 	}
 
-	// ���ο� INVITE �� ���
+	// 새로운 INVITE 인 경우
 	SipMakeTag( szTag, sizeof(szTag) );
 
 	if( m_pclsCallBack )
@@ -94,7 +88,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		pclsResponse = NULL;
 	}
 
-	// Dialog �� �����Ѵ�.
+	// Dialog 를 생성한다.
 	CSipDialog	clsDialog( &m_clsSipStack );
 	bool bError = false;
 
@@ -134,7 +128,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 	}
 	clsDialog.m_bSendCall = false;
 
-	// Dialog �� �����Ѵ�.
+	// Dialog 를 저장한다.
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( strCallId );
 	if( itMap == m_clsDialogMap.end() )
@@ -166,13 +160,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP INVITE ���� �޽��� ���� �̺�Ʈ �ڵ鷯
- * @param iThreadId		SIP stack �� UDP ������ ���̵�
- * @param pclsMessage ���ŵ� SIP ��û �޽���
- * @returns ���������� ó���ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP INVITE 응답 메시지 수신 이벤트 핸들러
 bool CSipUserAgent::RecvInviteResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	if( pclsMessage->m_iStatusCode == SIP_TRYING ) return true;

@@ -24,60 +24,56 @@
 #include <string>
 #include <list>
 
-/**
- * @ingroup EchoSipServer
- * @brief EchoSipServer ¼³Á¤ ÆÄÀÏÀÇ ³»¿ëÀ» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// EchoSipServer ì„¤ì • íŒŒì¼ì˜ ë‚´ìš©ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CEchoSipServerSetup
 {
 public:
 	CEchoSipServerSetup();
 	~CEchoSipServerSetup();
 
-	/** SIP Åë½ÅÀ» À§ÇÑ UDP Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ UDP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iUdpPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ ·ÎÄÃ IP ÁÖ¼Ò */
+	// SIP í†µì‹ ì„ ìœ„í•œ ë¡œì»¬ IP ì£¼ì†Œ
 	std::string	m_strLocalIp;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ UDP ¼ö½Å ¾²·¹µå °³¼ö */
+	// SIP í†µì‹ ì„ ìœ„í•œ UDP ìˆ˜ì‹  ì“°ë ˆë“œ ê°œìˆ˜
 	int					m_iUdpThreadCount;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TCP Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ TCP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iTcpPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TCP ¼ö½Å ¾²·¹µå °³¼ö */
+	// SIP í†µì‹ ì„ ìœ„í•œ TCP ìˆ˜ì‹  ì“°ë ˆë“œ ê°œìˆ˜
 	int					m_iTcpThreadCount;
 
-	/** SIP ¸Ş½ÃÁö ¼ö½Å callback Ã³¸®¸¦ À§ÇÑ TCP ¾²·¹µå °³¼ö. 
-			º» °³¼ö°¡ 0 ÀÌ¸é TCP ¼ö½Å ¾²·¹µå¿¡¼­ callback À» È£ÃâÇÏ°í 0 º¸´Ù Å©¸é tcp callback ¾²·¹µå¿¡¼­ callback À» È£ÃâÇÑ´Ù. */
+	// SIP ë©”ì‹œì§€ ìˆ˜ì‹  callback ì²˜ë¦¬ë¥¼ ìœ„í•œ TCP ì“°ë ˆë“œ ê°œìˆ˜. ë³¸ ê°œìˆ˜ê°€ 0 ì´ë©´ TCP ìˆ˜ì‹  ì“°ë ˆë“œì—ì„œ callback ì„ í˜¸ì¶œí•˜ê³  0 ë³´ë‹¤ í¬ë©´ tcp callback ì“°ë ˆë“œì—ì„œ callback ì„ í˜¸ì¶œí•œë‹¤.
 	int					m_iTcpCallBackThreadCount;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TCP ¼ö½Å ÃÖ´ë ´ë±â ½Ã°£ ( ÃÊ´ÜÀ§ ) */
+	// SIP í†µì‹ ì„ ìœ„í•œ TCP ìˆ˜ì‹  ìµœëŒ€ ëŒ€ê¸° ì‹œê°„ ( ì´ˆë‹¨ìœ„ )
 	int					m_iTcpRecvTimeout;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TLS Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ TLS í¬íŠ¸ ë²ˆí˜¸
 	int					m_iTlsPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TLS handshake timeout ½Ã°£ (ÃÊ´ÜÀ§) */
+	// SIP í†µì‹ ì„ ìœ„í•œ TLS handshake timeout ì‹œê°„ (ì´ˆë‹¨ìœ„)
 	int					m_iTlsAcceptTimeout;
 
-	/** TLS ÇÁ·ÎÅäÄİÀ» À§ÇÑ ¼­¹ö ÀÎÁõ¼­ + Å°¸¦ Æ÷ÇÔÇÑ PEM ÆÄÀÏ full path */ 
+	// TLS í”„ë¡œí† ì½œì„ ìœ„í•œ ì„œë²„ ì¸ì¦ì„œ + í‚¤ë¥¼ í¬í•¨í•œ PEM íŒŒì¼ full path
 	std::string	m_strCertFile;
 
-	/** TLS ¼¼¼ÇÀ¸·Î ¿¬°áÇÑ Å¬¶óÀÌ¾ğÆ® ÀÎÁõÀ» À§ÇÑ ÀÎÁõ ±â°ü ÀÎÁõ¼­ PEM ÆÄÀÏ */
+	// TLS ì„¸ì…˜ìœ¼ë¡œ ì—°ê²°í•œ í´ë¼ì´ì–¸íŠ¸ ì¸ì¦ì„ ìœ„í•œ ì¸ì¦ ê¸°ê´€ ì¸ì¦ì„œ PEM íŒŒì¼
 	std::string m_strCaCertFile;
 
 	// ================================================================
-	// ·Î±× ±â´É
+	// ë¡œê·¸ ê¸°ëŠ¥
 
-	/** ·Î±× Æú´õ */
+	// ë¡œê·¸ í´ë”
 	std::string	m_strLogFolder;
 
-	/** ·Î±× ·¹º§ */
+	// ë¡œê·¸ ë ˆë²¨
 	int					m_iLogLevel;
 
-	/** ·Î±× ÆÄÀÏÀÇ ÃÖ´ë Å©±â */
+	// ë¡œê·¸ íŒŒì¼ì˜ ìµœëŒ€ í¬ê¸°
 	int					m_iLogMaxSize;
 
 	bool Read( const char * pszFileName );
@@ -89,9 +85,9 @@ private:
 	bool Read( CXmlElement & clsXml );
 	void SetFileSizeTime( );
 
-	std::string	m_strFileName;	// ¼³Á¤ ÆÄÀÏ ÀÌ¸§
-	time_t			m_iFileTime;		// ¼³Á¤ ÆÄÀÏ ÀúÀå ½Ã°£
-	int					m_iFileSize;		// ¼³Á¤ ÆÄÀÏ Å©±â
+	std::string	m_strFileName;	// ì„¤ì • íŒŒì¼ ì´ë¦„
+	time_t			m_iFileTime;		// ì„¤ì • íŒŒì¼ ì €ì¥ ì‹œê°„
+	int					m_iFileSize;		// ì„¤ì • íŒŒì¼ í¬ê¸°
 };
 
 extern CEchoSipServerSetup gclsSetup;

@@ -30,13 +30,7 @@ CSipUri::~CSipUri()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief Uri ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipUri Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Uri ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipUri í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipUri::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -90,13 +84,7 @@ int CSipUri::Parse( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipUri::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -145,10 +133,7 @@ int CSipUri::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipUri::Clear()
 {
 	m_strProtocol.clear();
@@ -159,11 +144,7 @@ void CSipUri::Clear()
 	m_clsHeaderList.clear();
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ë³€ìˆ˜ê°€ ì €ì¥ë˜ì–´ ìˆì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSipUri::Empty()
 {
 	if( m_strProtocol.empty() || m_strHost.empty() ) return true;
@@ -171,22 +152,13 @@ bool CSipUri::Empty()
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief uri param À» Ãß°¡ÇÑ´Ù.
- * @param pszName		param ÀÌ¸§
- * @param pszValue	param °ª
- */
+// uri param ì„ ì¶”ê°€í•œë‹¤.
 void CSipUri::InsertParam( const char * pszName, const char * pszValue )
 {
 	InsertSipParameter( m_clsUriParamList, pszName, pszValue );
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP URI ¿¡ transport tag ¸¦ Ãß°¡ÇÑ´Ù.
- * @param eTransport ÇÁ·ÎÅäÄİ
- */
+// SIP URI ì— transport tag ë¥¼ ì¶”ê°€í•œë‹¤.
 void CSipUri::InsertTransport( ESipTransport eTransport )
 {
 	if( eTransport == E_SIP_TCP )
@@ -199,11 +171,7 @@ void CSipUri::InsertTransport( ESipTransport eTransport )
 	}
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP URI ¿¡¼­ Àü¼Û ÇÁ·ÎÅäÄİÀ» °¡Á®¿Â´Ù.
- * @returns Àü¼Û ÇÁ·ÎÅäÄİÀ» ¸®ÅÏÇÑ´Ù.
- */
+// SIP URI ì—ì„œ ì „ì†¡ í”„ë¡œí† ì½œì„ ê°€ì ¸ì˜¨ë‹¤.
 ESipTransport CSipUri::SelectTransport( )
 {
 	std::string	strValue;
@@ -230,14 +198,7 @@ ESipTransport CSipUri::SelectTransport( )
 	return E_SIP_UDP;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¿¡ ÀÔ·ÂµÈ µ¥ÀÌÅÍ¸¦ ÀúÀåÇÑ´Ù.
- * @param pszProtocol ÇÁ·ÎÅäÄİ
- * @param pszUser			»ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pszHost			µµ¸ŞÀÎ ÀÌ¸§ ¶Ç´Â IP ÁÖ¼Ò
- * @param iPort				Æ÷Æ® ¹øÈ£
- */
+// ë©¤ë²„ ë³€ìˆ˜ì— ì…ë ¥ëœ ë°ì´í„°ë¥¼ ì €ì¥í•œë‹¤.
 void CSipUri::Set( const char * pszProtocol, const char * pszUser, const char * pszHost, int iPort )
 {
 	if( pszProtocol )
@@ -269,13 +230,7 @@ void CSipUri::Set( const char * pszProtocol, const char * pszUser, const char * 
 	}
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP URI ÀÇ ÇÁ·ÎÅäÄİÀ» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP URI ì˜ í”„ë¡œí† ì½œì„ íŒŒì‹±í•œë‹¤.
 int CSipUri::ParseProtocol( const char * pszText, int iTextLen )
 {
 	for( int iPos = 0; iPos < iTextLen; ++iPos )
@@ -290,13 +245,7 @@ int CSipUri::ParseProtocol( const char * pszText, int iTextLen )
 	return -1;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP URI ÀÇ »ç¿ëÀÚ ¾ÆÀÌµğ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP URI ì˜ ì‚¬ìš©ì ì•„ì´ë””ë¥¼ íŒŒì‹±í•œë‹¤.
 int CSipUri::ParseUser( const char * pszText, int iTextLen )
 {
 	for( int iPos = 0; iPos < iTextLen; ++iPos )
@@ -311,13 +260,7 @@ int CSipUri::ParseUser( const char * pszText, int iTextLen )
 	return -1;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP URI ÀÇ È£½ºÆ®¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP URI ì˜ í˜¸ìŠ¤íŠ¸ë¥¼ íŒŒì‹±í•œë‹¤.
 int CSipUri::ParseHost( const char * pszText, int iTextLen )
 {
 	int iPos, iPortPos = -1;

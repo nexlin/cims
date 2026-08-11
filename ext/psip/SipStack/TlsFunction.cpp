@@ -40,14 +40,7 @@ static SSL_METHOD * gpsttClientMeth;
 static bool gbStartSslServer = false;
 static CSipMutex * garrMutex = NULL;
 
-/**
- * @ingroup SipStack
- * @brief SSL ���̺귯���� multi-thread ���� ����� �� �ֱ� ���� Lock/Unlock function
- * @param mode	CRYPTO_LOCK / CRYPTO_UNLOCK
- * @param n			������ ���̵�
- * @param file 
- * @param line 
- */
+// SSL 라이브러리를 multi-thread 에서 사용할 수 있기 위한 Lock/Unlock function
 static void SSLLockingFunction( int mode, int n, const char * file, int line )
 {
 	if( mode & CRYPTO_LOCK )
@@ -60,11 +53,7 @@ static void SSLLockingFunction( int mode, int n, const char * file, int line )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL ���̺귯���� multi-thread ���� ����� �� �ֱ� ���� ID function
- * @returns ���� ������ ID �� �����Ѵ�.
- */
+// SSL 라이브러리를 multi-thread 에서 사용할 수 있기 위한 ID function
 static unsigned long SSLIdFunction( )
 {
 #ifdef WIN32
@@ -74,11 +63,7 @@ static unsigned long SSLIdFunction( )
 #endif
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL ���̺귯���� multi-thread ������� �����Ѵ�.
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SSL 라이브러리를 multi-thread 기반으로 시작한다.
 bool SSLStart( )
 {
 	if( garrMutex )
@@ -108,11 +93,7 @@ bool SSLStart( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL ���̺귯���� ������Ų��.
- * @returns true �� �����Ѵ�.
- */
+// SSL 라이브러리를 중지시킨다.
 static bool SSLStop( )
 {
 	CRYPTO_set_id_callback(NULL);
@@ -132,13 +113,7 @@ static void SSLPrintError( )
 	CLog::Print( ERR_print_errors_fp );
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL ���� ���̺귯���� �����Ѵ�.
- * @param szCertFile		���� ������ �� ����Ű ����
- * @param szCaCertFile	CA ������ ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SSL 서버 라이브러리를 시작한다.
 bool SSLServerStart( const char * szCertFile, const char * szCaCertFile )
 {
 	int	n;
@@ -207,11 +182,7 @@ bool SSLServerStart( const char * szCertFile, const char * szCaCertFile )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL ���� ���̺귯���� �����Ѵ�.
- * @returns true �� �����Ѵ�.
- */
+// SSL 서버 라이브러리를 종료한다.
 bool SSLServerStop( )
 {
 	if( gbStartSslServer )
@@ -236,11 +207,7 @@ bool SSLServerStop( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL Ŭ���̾�Ʈ ���̺귯���� �����Ѵ�.
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SSL 클라이언트 라이브러리를 시작한다.
 bool SSLClientStart( )
 {
 	if( SSLStart() == false ) return false;
@@ -257,11 +224,7 @@ bool SSLClientStart( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL Ŭ���̾�Ʈ ���̺귯���� �����Ѵ�.
- * @returns true �� �����Ѵ�.
- */
+// SSL 클라이언트 라이브러리를 종료한다.
 bool SSLClientStop( )
 {
 	if( gbStartSslServer )
@@ -280,10 +243,7 @@ bool SSLClientStop( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ���μ����� ����� ���� ���������� �����Ͽ��� openssl �޸� ������ ������� �ʴ´�. 
- */
+// 프로세스가 종료될 때에 최종적으로 실행하여서 openssl 메모리 누수를 출력하지 않는다.
 void SSLFinal()
 {
 	SSLStop();
@@ -301,12 +261,7 @@ void SSLFinal()
 #endif
 }
 
-/**
- * @brief SSL ������ �����Ѵ�.
- * @param iFd				Ŭ���̾�Ʈ TCP ���� �ڵ�
- * @param ppsttSsl	SSL ����ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SSL 세션을 연결한다.
 bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
 {
 	SSL * psttSsl;
@@ -337,16 +292,7 @@ bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief Ŭ���̾�Ʈ SSL ���� ��û�� ����Ѵ�.
- * @param iFd								Ŭ���̾�Ʈ TCP ���� �ڵ�
- * @param ppsttSsl					SSL ����ü
- * @param bCheckClientCert	Ŭ���̾�Ʈ �������� Ȯ���� ���ΰ�?
- * @param iVerifyDepth			the maximum depth for the certificate chain verification that shall be allowed for ssl
- * @param iAcceptTimeout		SSL ���� ��û ó�� �ִ� �ð� ( ms ���� )
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 클라이언트 SSL 접속 요청을 허용한다.
 // ── R5.c: per-listener SSL_CTX helpers ─────────────────────────
 SSL_CTX * SSLServerCtxCreate( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile )
 {
@@ -515,8 +461,8 @@ bool SSLAccept( Socket iFd, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyD
 #endif
 	}
 
-	// QQQ : SSL ���������� �ƴ� ��쿡 �޸� ������ �߻��ϹǷ� �Ʒ��� ����
-	//     : ���� ������. �� ���� ����� ����Ͽ��� ��.
+	// QQQ : SSL 프로토콜이 아닌 경우에 메모리 에러가 발생하므로 아래와 같이
+	//     : 막아 놓았음. 더 좋은 방법을 모색하여야 함.
 	try
 	{
 		if( bCheckClientCert )
@@ -562,14 +508,7 @@ bool SSLAccept( Socket iFd, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyD
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL �������ݷ� ��Ŷ�� �����Ѵ�.
- * @param ssl			SSL ����ü
- * @param szBuf		���� ��Ŷ
- * @param iBufLen ���� ��Ŷ ũ��
- * @returns ���� ��Ŷ ũ�⸦ �����Ѵ�.
- */
+// SSL 프로토콜로 패킷을 전송한다.
 int SSLSend( SSL * ssl, const char * szBuf, int iBufLen )
 {
 	int		n;	
@@ -594,25 +533,13 @@ int SSLSend( SSL * ssl, const char * szBuf, int iBufLen )
 	return iBufLen;
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL �������ݷ� ���ŵ� ��Ŷ�� �д´�.
- * @param ssl			SSL ����ü
- * @param szBuf		���� ��Ŷ ���� ����
- * @param iBufLen ���� ��Ŷ ���� ���� ũ��
- * @returns �����ϸ� ����� �����ϰ� �����ϸ� 0 �Ǵ� ������ �����Ѵ�.
- */
+// SSL 프로토콜로 수신된 패킷을 읽는다.
 int SSLRecv( SSL * ssl, char * szBuf, int iBufLen )
 {
 	return SSL_read( ssl, szBuf, iBufLen );
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL ������ �����Ѵ�.
- * @param ssl	SSL ����ü
- * @returns true �� �����Ѵ�.
- */
+// SSL 세션을 종료한다.
 bool SSLClose( SSL * ssl )
 {
 	if( ssl ) 
@@ -624,10 +551,7 @@ bool SSLClose( SSL * ssl )
 }
 
 #ifdef WIN32
-/**
- * @ingroup SipStack
- * @brief SSL �������� ���Ǵ� cipher list �� �α׷� ����Ѵ�.
- */
+// SSL 서버에서 사용되는 cipher list 를 로그로 출력한다.
 void SSLPrintLogServerCipherList( )
 {
 	if( gpsttServerCtx == NULL )
@@ -644,10 +568,7 @@ void SSLPrintLogServerCipherList( )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief SSL Ŭ���̾�Ʈ���� ���Ǵ� cipher list �� �α׷� ����Ѵ�.
- */
+// SSL 클라이언트에서 사용되는 cipher list 를 로그로 출력한다.
 void SSLPrintLogClientCipherList( )
 {
 	if( gpsttClientCtx == NULL )

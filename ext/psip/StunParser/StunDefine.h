@@ -19,7 +19,7 @@
 #ifndef _STUN_DEFINE_H_
 #define _STUN_DEFINE_H_
 
-// STUN ¸Þ½ÃÁö Å¸ÀÔ
+// STUN ë©”ì‹œì§€ íƒ€ìž…
 #define STUN_MT_REQUEST						0x0000
 #define STUN_MT_RESPONSE_SUCCESS	0x0100
 #define STUN_MT_RESPONSE_ERROR		0x0110

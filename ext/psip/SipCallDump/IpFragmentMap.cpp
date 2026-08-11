@@ -65,15 +65,7 @@ CIpFragmentInfo::~CIpFragmentInfo()
 	m_clsList.clear();
 }
 
-/**
- * @ingroup SipCallDump
- * @brief fragment µÈ ÆĞÅ¶À» ÀúÀåÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @param pszIpBody			IP body
- * @param iIpBodyLen		IP body len
- * @param bEnd					[out] ¸ğµç fragment ÆĞÅ¶ÀÌ ¼ö½ÅµÇ¾úÀ¸¸é true °¡ ÀúÀåµÈ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// fragment ëœ íŒ¨í‚·ì„ ì €ì¥í•œë‹¤.
 bool CIpFragmentInfo::Insert( Ip4Header * psttIp4Header, char * pszIpBody, int iIpBodyLen, bool & bEnd )
 {
 	uint16_t sFlags = ntohs(psttIp4Header->flags_fo);
@@ -125,7 +117,7 @@ bool CIpFragmentInfo::Insert( Ip4Header * psttIp4Header, char * pszIpBody, int i
 		{
 			if( pclsData->m_sFragmentOffset == (*itList)->m_sFragmentOffset )
 			{
-				// µ¿ÀÏÇÑ Fragment Offset ÀÌ¸é ÀúÀåÇÏÁö ¾Ê´Â´Ù.
+				// ë™ì¼í•œ Fragment Offset ì´ë©´ ì €ì¥í•˜ì§€ ì•ŠëŠ”ë‹¤.
 				delete pclsData;
 				bFound = true;
 				break;
@@ -172,12 +164,7 @@ bool CIpFragmentInfo::Insert( Ip4Header * psttIp4Header, char * pszIpBody, int i
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief fragment µÈ ÆĞÅ¶µéÀ» ÇÕÃÄ¼­ ÇÏ³ªÀÇ IP ÆĞÅ¶À¸·Î »ı¼ºÇÑ´Ù.
- * @param pclsPacket [out] ÇÏ³ªÀÇ IP ÆĞÅ¶ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// fragment ëœ íŒ¨í‚·ë“¤ì„ í•©ì³ì„œ í•˜ë‚˜ì˜ IP íŒ¨í‚·ìœ¼ë¡œ ìƒì„±í•œë‹¤.
 bool CIpFragmentInfo::GetPacket( CIpPacket * pclsPacket )
 {
 	IP_FRAGMENT_DATA_LIST::iterator itList;
@@ -219,15 +206,7 @@ CIpFragmentMap::~CIpFragmentMap()
 {
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÀÚ·á±¸Á¶¿¡ fragment µÈ ÆĞÅ¶À» ÀúÀåÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @param pszIpBody			IP body
- * @param iIpBodyLen		IP body len
- * @param bEnd					[out] ¸ğµç fragment ÆĞÅ¶ÀÌ ¼ö½ÅµÇ¾úÀ¸¸é true °¡ ÀúÀåµÈ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìë£Œêµ¬ì¡°ì— fragment ëœ íŒ¨í‚·ì„ ì €ì¥í•œë‹¤.
 bool CIpFragmentMap::Insert( Ip4Header * psttIp4Header, char * pszIpBody, int iIpBodyLen, bool & bEnd )
 {
 	if( psttIp4Header->flags_fo == 0 ) return false;
@@ -262,13 +241,7 @@ bool CIpFragmentMap::Insert( Ip4Header * psttIp4Header, char * pszIpBody, int iI
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ÀÚ·á±¸Á¶¿¡¼­ fragment ÆĞÅ¶ °ü·Ã Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @param pclsPacket		[out] »èÁ¦ÇÑ fragment ÆĞÅ¶µéÀ» ÇÕÃÄ¼­ ÇÏ³ªÀÇ IP ÆĞÅ¶À¸·Î ÀúÀåµÈ °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìë£Œêµ¬ì¡°ì—ì„œ fragment íŒ¨í‚· ê´€ë ¨ ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CIpFragmentMap::Delete( Ip4Header * psttIp4Header, CIpPacket * pclsPacket )
 {
 	bool bRes = false;
@@ -298,10 +271,7 @@ bool CIpFragmentMap::Delete( Ip4Header * psttIp4Header, CIpPacket * pclsPacket )
 	return bRes;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief 60ÃÊ ÀÌ»ó Áö³­ fragment ÆĞÅ¶µéÀ» »èÁ¦ÇÑ´Ù.
- */
+// 60ì´ˆ ì´ìƒ ì§€ë‚œ fragment íŒ¨í‚·ë“¤ì„ ì‚­ì œí•œë‹¤.
 void CIpFragmentMap::DeleteTimeout()
 {
 	IP_FRAGMENT_MAP::iterator itMap, itNext;
@@ -329,10 +299,7 @@ LOOP_START:
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipCallDump
- * @brief ¸ğµç fragment ÆĞÅ¶µéÀ» »èÁ¦ÇÑ´Ù.
- */
+// ëª¨ë“  fragment íŒ¨í‚·ë“¤ì„ ì‚­ì œí•œë‹¤.
 void CIpFragmentMap::DeleteAll()
 {
 	IP_FRAGMENT_MAP::iterator itMap, itNext;
@@ -346,12 +313,7 @@ void CIpFragmentMap::DeleteAll()
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipCallDump
- * @brief Å°¸¦ »ı¼ºÇÑ´Ù.
- * @param psttIp4Header IPv4 Çì´õ
- * @param strKey				Å° ÀúÀå º¯¼ö
- */
+// í‚¤ë¥¼ ìƒì„±í•œë‹¤.
 void CIpFragmentMap::GetKey( Ip4Header * psttIp4Header, std::string & strKey )
 {
 	char	szKey[32];

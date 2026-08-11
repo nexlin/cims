@@ -24,10 +24,7 @@
 #include <vector>
 #include <utility>
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP �α��� ������ �����ϴ� Ŭ����
- */
+// SIP 로그인 정보를 저장하는 클래스
 class CSipServerInfo
 {
 public:
@@ -39,22 +36,22 @@ public:
 	void Update( CSipServerInfo & clsInfo );
 	void ClearLogin();
 
-	/** SIP ������ IP �ּ� */
+	// SIP 서버의 IP 주소
 	std::string		m_strIp;
 
-	/** SIP ������ ��Ʈ ��ȣ */
+	// SIP 서버의 포트 번호
 	int						m_iPort;
 
-	/** SIP ������ ������ */
+	// SIP 서버의 도메인
 	std::string		m_strDomain;
 
-	/** �α��� ���̵� */
+	// 로그인 아이디
 	std::string		m_strUserId;
 
-	/** ���� ���̵� */
+	// 인증 아이디
 	std::string		m_strAuthId;
 
-	/** �α��� ��й�ȣ */
+	// 로그인 비밀번호
 	std::string		m_strPassWord;
 
 	/** P-Preferred-Identity 헤더 값 (비어있으면 추가 안함) */
@@ -66,13 +63,13 @@ public:
 	/** Contact feature tag 목록 — {name, value} 쌍. value 빈 문자열이면 플래그 파라미터 */
 	std::vector<std::pair<std::string,std::string>> m_vecContactFeatureTags;
 
-	/** �α��� ���� �ð� (�ʴ���) */
+	// 로그인 만료 시간 (초단위)
 	int						m_iLoginTimeout;
 
 	/** transport */
 	ESipTransport	m_eTransport;
 
-	/** NAT ���� �ð� (�ʴ���) */
+	// NAT 만료 시간 (초단위)
 	int						m_iNatTimeout;
 
 	bool					m_bLogin;

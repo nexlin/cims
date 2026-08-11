@@ -16,16 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ��ȭ ��û �޽����� �����Ѵ�.
- * @param pszFrom		�߽��� ���̵�
- * @param pszTo			������ ���̵�
- * @param pclsRtp		local RTP ���� ���� ��ü
- * @param pclsRoute SIP �޽��� ������ �ּ� ���� ��ü
- * @param strCallId ������ INVITE �޽����� Call-ID �� ����� ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 통화 요청 메시지를 전송한다.
 bool CSipUserAgent::StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId )
 {
 	if( pszFrom == NULL || pszTo == NULL ) return false;
@@ -63,16 +54,7 @@ bool CSipUserAgent::StartCall( const char * pszFrom, const char * pszTo, CSipCal
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��ȭ�� �����Ѵ�. 
- *				��ȭ ��û�� ������ ������� ������ ��ȭ ��� �޽����� �����Ѵ�.
- *				��ȭ ����Ǿ����� ��ȭ ���� �޽����� �����Ѵ�.
- *				��ȭ ������ ��� ��ȭ ���� ���� �޽����� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param iSipCode	��ȭ ��û�� ������ ���� ������ SIP status code
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 통화를 종료한다. 통화 요청을 보내고 연결되지 않으면 통화 취소 메시지를 전송한다. 통화 연결되었으면 통화 종료 메시지를 전송한다. 통화 수락인 경우 통화 거절 응답 메시지를 전송한다.
 bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -125,13 +107,7 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ���� ��ȯ�Ѵ�.
- * @param pszCallId		SIP Call-ID
- * @param pszForward	���� ��ȯ ��ȭ��ȣ
- * @returns ���� ��ȯ�� �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 착신 전환한다.
 bool CSipUserAgent::StopCall( const char * pszCallId, const char * pszForward )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -163,13 +139,7 @@ bool CSipUserAgent::StopCall( const char * pszCallId, const char * pszForward )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief 183 ���� �޽����� �����Ѵ�. SIP Ŭ���̾�Ʈ���� 183 ���� �޽����� ������ ���� ���ȴ�.
- * @param pszCallId SIP Call-ID
- * @param pclsRtp		local RTP ���� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 183 응답 메시지를 전송한다. SIP 클라이언트에서 183 응답 메시지를 전송할 때에 사용된다.
 bool CSipUserAgent::RingCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -214,14 +184,7 @@ bool CSipUserAgent::RingCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ��ȭ ��û�� ���� Ring / Session Progress ���� �޽����� �����Ѵ�. IP-PBX ���� Ring / Session Progress �޽����� ������ ���� ���ȴ�.
- * @param pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ���� �ڵ�
- * @param pclsRtp			local RTP ���� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 통화 요청에 대한 Ring / Session Progress 응답 메시지를 전송한다. IP-PBX 에서 Ring / Session Progress 메시지를 전달할 때에 사용된다.
 bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -266,13 +229,7 @@ bool CSipUserAgent::RingCall( const char * pszCallId, int iSipStatus, CSipCallRt
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ���ŵ� ��ȭ�� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param pclsRtp		local RTP ���� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 수신된 통화를 수락한다.
 bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 	CSipMessage * pclsMessage = NULL;
@@ -327,13 +284,7 @@ bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp, C
 	return pclsMessage != NULL;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��ȭ hold ��û �޽����� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param eDirection	�̵�� direction
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 통화 hold 요청 메시지를 전송한다.
 bool CSipUserAgent::HoldCall( const char * pszCallId, ERtpDirection eDirection )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -358,12 +309,7 @@ bool CSipUserAgent::HoldCall( const char * pszCallId, ERtpDirection eDirection )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��ȭ resume ��û �޽����� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 통화 resume 요청 메시지를 전송한다.
 bool CSipUserAgent::ResumeCall( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -388,11 +334,7 @@ bool CSipUserAgent::ResumeCall( const char * pszCallId )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief	��ȭ ������ �����Ѵ�.
- * @returns ��ȭ ������ �����Ѵ�.
- */
+// 통화 개수를 리턴한다.
 int CSipUserAgent::GetCallCount( )
 {
 	int iCallCount;
@@ -404,11 +346,7 @@ int CSipUserAgent::GetCallCount( )
 	return iCallCount;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��� ��ȭ�� SIP Call-ID �� ����Ʈ�� �����Ѵ�.
- * @param clsList SIP Call-ID �� ������ ����
- */
+// 모든 통화의 SIP Call-ID 를 리스트에 저장한다.
 void CSipUserAgent::GetCallIdList( SIP_CALL_ID_LIST & clsList )
 {
 	SIP_DIALOG_MAP::iterator	itMap;
@@ -423,10 +361,7 @@ void CSipUserAgent::GetCallIdList( SIP_CALL_ID_LIST & clsList )
 	m_clsDialogMutex.release();
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��� ��ȭ�� �����Ų��.
- */
+// 모든 통화를 종료시킨다.
 void CSipUserAgent::StopCallAll( )
 {
 	SIP_CALL_ID_LIST	clsList;
@@ -440,22 +375,7 @@ void CSipUserAgent::StopCallAll( )
 	}
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP INVITE �޽����� �����ϰ� Dialog �� �����Ѵ�. �� �޼ҵ�� SIP INVITE �޽����� ���������� �ʴ´�. 
- *				�� �޼ҵ�� ������ SIP INVITE �޽����� �����Ϸ��� StartCall( const char * pszCallId, CSipMessage * pclsInvite ) �޼ҵ带 �����ؾ� �Ѵ�.
- *				�� �޼ҵ尡 ���ߵ� ������ StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId ) �� ȣ���� ��,
- *				���� ���α׷����� ������ SIP Call-ID �� �ڷᱸ���� �����ϱ� ���� SIP INVITE ���� �޽����� �����ϸ� ���� ���α׷����� �ش� ��ȭ ������
- *				�ڷᱸ���� ��� ���������� ó������ �� �ϱ� ������ �̸� �����ϱ� ���ؼ� SIP INVITE �޽����� SIP Dialog �� �����Ͽ��� SIP Call-ID ��
- *				���� ���α׷��� �����Ͽ� ���� ���α׷� �ڷᱸ���� ������ ��, SIP INVITE �޽����� �����ϱ� �����̴�.
- * @param pszFrom		�߽��� ���̵�
- * @param pszTo			������ ���̵�
- * @param pclsRtp		local RTP ���� ���� ��ü
- * @param pclsRoute SIP �޽��� ������ �ּ� ���� ��ü
- * @param strCallId ������ INVITE �޽����� Call-ID �� ����� ����
- * @param ppclsInvite	������ SIP INVITE �޽����� ����� ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP INVITE 메시지를 생성하고 Dialog 에 저장한다. 본 메소드는 SIP INVITE 메시지를 전송하지는 않는다. 본 메소드로 생성된 SIP INVITE 메시지를 전송하려면 StartCall( const char * pszCallId, CSipMessage * pclsInvite ) 메소드를 실행해야 한다. 본 메소드가 개발된 이유는 StartCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId ) 을 호출한 후, 응용 프로그램에서 생성된 SIP Call-ID 를 자료구조에 저장하기 전에 SIP INVITE 응답 메시지를 수신하면 응용 프로그램에서 해당 통화 정보가 자료구조에 없어서 정상적으로 처리하지 못 하기 때문에 이를 방지하기 위해서 SIP INVITE 메시지와 SIP Dialog 를 생성하여서 SIP Call-ID 를 응용 프로그램에 전달하여 응용 프로그램 자료구조에 저장한 후, SIP INVITE 메시지를 전송하기 위함이다.
 bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipCallRoute * pclsRoute, std::string & strCallId, CSipMessage ** ppclsInvite,
                                  const char * pszOverrideDomain )
 {
@@ -537,13 +457,7 @@ bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCa
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief CreateCall �޼ҵ�� ������ INVITE �޽����� �����Ѵ�.
- * @param pszCallId		SIP Call-ID
- * @param pclsInvite	SIP INVITE �޽���
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// CreateCall 메소드로 생성된 INVITE 메시지를 전송한다.
 bool CSipUserAgent::StartCall( const char * pszCallId, CSipMessage * pclsInvite )
 {
 	if( pszCallId == NULL || pclsInvite == NULL ) return false;
@@ -557,13 +471,7 @@ bool CSipUserAgent::StartCall( const char * pszCallId, CSipMessage * pclsInvite 
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief Blind transfer �� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param pszTo			��ȭ ������ ���� ���̵�
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// Blind transfer 를 실행한다.
 bool CSipUserAgent::TransferCallBlind( const char * pszCallId, const char * pszTo )
 {
 	if( pszCallId == NULL || pszTo == NULL ) return false;
@@ -593,13 +501,7 @@ bool CSipUserAgent::TransferCallBlind( const char * pszCallId, const char * pszT
 	return m_clsSipStack.SendSipMessage( pclsMessage );
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief Screened / Unscreened transfer �� �����Ѵ�.
- * @param pszCallId		SIP Call-ID
- * @param pszToCallId	��ȭ ������ ���� SIP Call-ID
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// Screened / Unscreened transfer 를 실행한다.
 bool CSipUserAgent::TransferCall( const char * pszCallId, const char * pszToCallId )
 {
 	if( pszCallId == NULL || pszToCallId == NULL ) return false;

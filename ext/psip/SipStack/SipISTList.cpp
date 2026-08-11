@@ -22,28 +22,17 @@
 #include "TimeUtility.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipISTList::CSipISTList()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipISTList::~CSipISTList()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Server Transaction List ¿¡ SIP ¸Ş½ÃÁö¸¦ Ãß°¡ÇÑ´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Invite Server Transaction List ì— SIP ë©”ì‹œì§€ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipISTList::Insert( CSipMessage * pclsMessage )
 {
 	std::string strKey;
@@ -66,14 +55,14 @@ bool CSipISTList::Insert( CSipMessage * pclsMessage )
 				{
 					if( itMap->second->m_pclsRequest->IsEqualCallIdSeq( pclsMessage ) )
 					{
-						// 2014³â4¿ù3ÀÏ ÀÌÀü ¹öÀü¿¡¼­´Â SIP Call-ID ¸¸ ºñ±³ÇÏ¿´Áö¸¸ ¾Æ·¡ÀÇ ACK °¡ NULL ÀÎÁö ±¸ºĞÇÏ´Â ±â´É ¶§¹®¿¡ Á¤»óÀûÀ¸·Î µ¿ÀÛÇÏ¿´À½.
-						// ¸¸¾à ¾Æ·¡ÀÇ ±â´ÉÀÌ ¾ø¾ú´Ù¸é 2°³ÀÇ ReINVITE ¿¡ ´ëÇÑ ACK ¸¦ ¼ö½ÅÇÏ¿´À» ¶§¿¡ Ã¹¹øÂ° ReINVITE ¿¡¸¸ ACK ¸¦ 2¹ø ÀúÀåÇÏ¿©¼­
-						// µÎ¹øÂ° ReINVITE ¿¡ ´ëÇÑ ACK °¡ ¼ö½ÅµÇÁö ¾ÊÀ» °ÍÀ¸·Î ¿Àµ¿ÀÛÇÒ ¼ö ÀÖ½À´Ï´Ù.
+						// 2014ë…„4ì›”3ì¼ ì´ì „ ë²„ì „ì—ì„œëŠ” SIP Call-ID ë§Œ ë¹„êµí•˜ì˜€ì§€ë§Œ ì•„ë˜ì˜ ACK ê°€ NULL ì¸ì§€ êµ¬ë¶„í•˜ëŠ” ê¸°ëŠ¥ ë•Œë¬¸ì— ì •ìƒì ìœ¼ë¡œ ë™ì‘í•˜ì˜€ìŒ.
+						// ë§Œì•½ ì•„ë˜ì˜ ê¸°ëŠ¥ì´ ì—†ì—ˆë‹¤ë©´ 2ê°œì˜ ReINVITE ì— ëŒ€í•œ ACK ë¥¼ ìˆ˜ì‹ í•˜ì˜€ì„ ë•Œì— ì²«ë²ˆì§¸ ReINVITE ì—ë§Œ ACK ë¥¼ 2ë²ˆ ì €ì¥í•˜ì—¬ì„œ
+						// ë‘ë²ˆì§¸ ReINVITE ì— ëŒ€í•œ ACK ê°€ ìˆ˜ì‹ ë˜ì§€ ì•Šì„ ê²ƒìœ¼ë¡œ ì˜¤ë™ì‘í•  ìˆ˜ ìˆìŠµë‹ˆë‹¤.
 						if( itMap->second->m_pclsAck == NULL )
 						{
 							if( itMap->second->m_pclsResponse && itMap->second->m_pclsResponse->m_iStatusCode == SIP_UNAUTHORIZED )
 							{
-								// INVITE ¿¡ ´ëÇÑ ÀÀ´ä ¸Ş½ÃÁö°¡ 401 ÀÎ ACK ¸Ş½ÃÁö¸¦ ¼ö½ÅÇÏ¸é Transaction À» ¹Ù·Î »èÁ¦ÇÑ´Ù.
+								// INVITE ì— ëŒ€í•œ ì‘ë‹µ ë©”ì‹œì§€ê°€ 401 ì¸ ACK ë©”ì‹œì§€ë¥¼ ìˆ˜ì‹ í•˜ë©´ Transaction ì„ ë°”ë¡œ ì‚­ì œí•œë‹¤.
 								delete itMap->second;
 								m_clsMap.erase( itMap );
 							}
@@ -119,7 +108,7 @@ bool CSipISTList::Insert( CSipMessage * pclsMessage )
 			{
 				if( itMap->second->m_pclsResponse && itMap->second->m_pclsResponse->m_iStatusCode == SIP_UNAUTHORIZED )
 				{
-					// INVITE ¿¡ ´ëÇÑ ÀÀ´ä ¸Ş½ÃÁö°¡ 401 ÀÎ ACK ¸Ş½ÃÁö¸¦ ¼ö½ÅÇÏ¸é Transaction À» ¹Ù·Î »èÁ¦ÇÑ´Ù.
+					// INVITE ì— ëŒ€í•œ ì‘ë‹µ ë©”ì‹œì§€ê°€ 401 ì¸ ACK ë©”ì‹œì§€ë¥¼ ìˆ˜ì‹ í•˜ë©´ Transaction ì„ ë°”ë¡œ ì‚­ì œí•œë‹¤.
 					delete itMap->second;
 					m_clsMap.erase( itMap );	
 				}
@@ -174,11 +163,7 @@ bool CSipISTList::Insert( CSipMessage * pclsMessage )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Server Transaction List ¿¡¼­ »èÁ¦ÇÒ Ç×¸ñÀº »èÁ¦ÇÏ°í ACK ¸¦ ¼ö½ÅÇÏÁö ¸ø ÇÑ Ç×¸ñÀº ÀÀ´ä ¸Ş½ÃÁö¸¦ ÀçÀü¼ÛÇØ ÁØ´Ù.
- * @param psttTime ½ÇÇàÇÑ ½Ã°£
- */
+// Invite Server Transaction List ì—ì„œ ì‚­ì œí•  í•­ëª©ì€ ì‚­ì œí•˜ê³  ACK ë¥¼ ìˆ˜ì‹ í•˜ì§€ ëª» í•œ í•­ëª©ì€ ì‘ë‹µ ë©”ì‹œì§€ë¥¼ ì¬ì „ì†¡í•´ ì¤€ë‹¤.
 void CSipISTList::Execute( struct timeval * psttTime )
 {
 	INVITE_TRANSACTION_MAP::iterator	itMap, itNext;
@@ -212,7 +197,7 @@ LOOP_START:
 				{
 					memcpy( &itMap->second->m_sttStopTime, psttTime, sizeof(itMap->second->m_sttStopTime) );
 
-					// INVITE ÀÀ´ä ¸Ş½ÃÁö·Î 200 OK ¸¦ Àü¼ÛÇÏ°í ÀÌ¿¡ ´ëÇÑ ACK ¸¦ ¼ö½ÅÇÏÁö ¸ø ÇÑ °æ¿ì timeout Ã³¸®ÇÑ´Ù.
+					// INVITE ì‘ë‹µ ë©”ì‹œì§€ë¡œ 200 OK ë¥¼ ì „ì†¡í•˜ê³  ì´ì— ëŒ€í•œ ACK ë¥¼ ìˆ˜ì‹ í•˜ì§€ ëª» í•œ ê²½ìš° timeout ì²˜ë¦¬í•œë‹¤.
 					if( itMap->second->m_iStatusCode == 200 )
 					{
 						clsResponseList.push_back( itMap->second->m_pclsResponse );
@@ -235,10 +220,7 @@ LOOP_START:
 	clsResponseList.clear();
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Server Transaction List ÀÇ ¸ğµç Ç×¸ñÀ» »èÁ¦ÇÑ´Ù.
- */
+// Invite Server Transaction List ì˜ ëª¨ë“  í•­ëª©ì„ ì‚­ì œí•œë‹¤.
 void CSipISTList::DeleteAll( )
 {
 	INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -253,11 +235,7 @@ void CSipISTList::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Server Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns Invite Server Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Invite Server Transaction List ì˜ í¬ê¸°ë¥¼ ë¦¬í„´í•œë‹¤.
 int CSipISTList::GetSize( )
 {
 	int iSize;
@@ -269,11 +247,7 @@ int CSipISTList::GetSize( )
 	return iSize;
 }
 
-/**
- * @ingroup SipStack
- * @brief IST ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ SIP Call-ID µéÀ» ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf SIP Call-ID µéÀ» ÀúÀåÇÒ ¹®ÀÚ¿­
- */
+// IST ìë£Œêµ¬ì¡°ì— ì €ì¥ëœ SIP Call-ID ë“¤ì„ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CSipISTList::GetString( CMonitorString & strBuf )
 {
 	INVITE_TRANSACTION_MAP::iterator	itMap;

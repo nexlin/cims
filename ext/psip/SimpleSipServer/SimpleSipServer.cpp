@@ -18,25 +18,19 @@
 
 #include "SipServer.h"
 
-/**
- * @ingroup SimpleSipServer
- * @brief C++ SIP stack À» ÀÌ¿ëÇÑ ÃÊ°£´Ü SIP ¼­¹ö
- * @param argc 
- * @param argv 
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// C++ SIP stack ì„ ì´ìš©í•œ ì´ˆê°„ë‹¨ SIP ì„œë²„
 int main( int argc, char * argv[] )
 {
 	CSipStackSetup clsSetup;
 
-	// N°³ÀÇ IPÁÖ¼Ò¸¦ »ç¿ëÇÏ´Â È£½ºÆ®¿¡¼­´Â SIP ÇÁ·ÎÅäÄİ·Î »ç¿ëÇÒ IPÁÖ¼Ò¸¦ Á÷Á¢ ÀÔ·ÂÇØ ÁÖ¼¼¿ä.
-	// Vmware µîÀ» »ç¿ëÇÏ´Â °æ¿ì N°³ÀÇ IPÁÖ¼Ò°¡ È£½ºÆ®¿¡ Á¸ÀçÇÕ´Ï´Ù.
+	// Nê°œì˜ IPì£¼ì†Œë¥¼ ì‚¬ìš©í•˜ëŠ” í˜¸ìŠ¤íŠ¸ì—ì„œëŠ” SIP í”„ë¡œí† ì½œë¡œ ì‚¬ìš©í•  IPì£¼ì†Œë¥¼ ì§ì ‘ ì…ë ¥í•´ ì£¼ì„¸ìš”.
+	// Vmware ë“±ì„ ì‚¬ìš©í•˜ëŠ” ê²½ìš° Nê°œì˜ IPì£¼ì†Œê°€ í˜¸ìŠ¤íŠ¸ì— ì¡´ì¬í•©ë‹ˆë‹¤.
 	GetLocalIp( clsSetup.m_strLocalIp );
 
-	// SIP ¼­¹öÀÇ listen port ·Î »ç¿ëÇÒ UDP Æ÷Æ® ¹øÈ£¸¦ ³Ö¾îÁÖ¼¼¿ä.
+	// SIP ì„œë²„ì˜ listen port ë¡œ ì‚¬ìš©í•  UDP í¬íŠ¸ ë²ˆí˜¸ë¥¼ ë„£ì–´ì£¼ì„¸ìš”.
 	clsSetup.m_iLocalUdpPort = 5060;
 
-	// UDP ¼ö½Å ¾²·¹µåÀÇ ±âº» °³¼ö´Â 1°³ÀÌ´Ù. ÀÌ¸¦ ¼öÁ¤ÇÏ·Á¸é CSipStackSetup.m_iUdpThreadCount ¸¦ ¼öÁ¤ÇÏ¸é µÈ´Ù.
+	// UDP ìˆ˜ì‹  ì“°ë ˆë“œì˜ ê¸°ë³¸ ê°œìˆ˜ëŠ” 1ê°œì´ë‹¤. ì´ë¥¼ ìˆ˜ì •í•˜ë ¤ë©´ CSipStackSetup.m_iUdpThreadCount ë¥¼ ìˆ˜ì •í•˜ë©´ ëœë‹¤.
 
 	if( gclsSipServer.Start( clsSetup ) == false )
 	{

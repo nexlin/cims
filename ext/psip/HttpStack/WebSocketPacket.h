@@ -21,20 +21,14 @@
 
 #include <string>
 
-/**
- * @ingroup HttpStack
- * @brief WebSocket Çì´õ Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// WebSocket í—¤ë” ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CWebSocketPacketHeader
 {
 public:
 	uint8_t	m_iOpCode;
 };
 
-/**
- * @ingroup HttpStack
- * @brief WebSocket ÆĞÅ¶ ÆÄ½Ì Å¬·¡½º
- */
+// WebSocket íŒ¨í‚· íŒŒì‹± í´ë˜ìŠ¤
 class CWebSocketPacket
 {
 public:

@@ -16,11 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief Dialog ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µÀ» À§ÇÑ ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param strBuf ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µÀ» À§ÇÑ ¹®ÀÚ¿­ º¯¼ö
- */
+// Dialog ìë£Œêµ¬ì¡° ëª¨ë‹ˆí„°ë§ì„ ìœ„í•œ ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 void CSipUserAgent::GetDialogString( CMonitorString & strBuf )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -76,11 +72,7 @@ void CSipUserAgent::GetDialogString( CMonitorString & strBuf )
 	m_clsDialogMutex.release();
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief IP-PBX ·Î±×ÀÎ ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µÀ» À§ÇÑ ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param strBuf ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µÀ» À§ÇÑ ¹®ÀÚ¿­ º¯¼ö
- */
+// IP-PBX ë¡œê·¸ì¸ ìë£Œêµ¬ì¡° ëª¨ë‹ˆí„°ë§ì„ ìœ„í•œ ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 void CSipUserAgent::GetServerString( CMonitorString & strBuf )
 {
 	SIP_SERVER_INFO_LIST::iterator	itList;

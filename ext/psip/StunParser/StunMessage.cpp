@@ -61,13 +61,7 @@ CStunMessage::~CStunMessage()
 {
 }
 
-/**
- * @ingroup StunParser
- * @brief STUN ÆĞÅ¶À» ÆÄ½ÌÇÏ¿© ³»ºÎ º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		STUN ÆĞÅ¶
- * @param iTextLen	STUN ÆĞÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// STUN íŒ¨í‚·ì„ íŒŒì‹±í•˜ì—¬ ë‚´ë¶€ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CStunMessage::Parse( const char * pszText, int iTextLen )
 {
 	int iPos = 0, n;
@@ -93,13 +87,7 @@ int CStunMessage::Parse( const char * pszText, int iTextLen )
 	return iPos;
 }
 
-/**
- * @ingroup StunParser
- * @brief ³»ºÎ º¯¼ö¿¡ ÀúÀåµÈ °ªÀ¸·Î STUN ÆĞÅ¶À» »ı¼ºÇÑ´Ù.
- * @param pszText		[out] STUN ÆĞÅ¶
- * @param iTextSize	[in] STUN ÆĞÅ¶ Å©±â
- * @returns ¼º°øÇÏ¸é STUN ÆĞÅ¶À» ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë‚´ë¶€ ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ìœ¼ë¡œ STUN íŒ¨í‚·ì„ ìƒì„±í•œë‹¤.
 int CStunMessage::ToString( char * pszText, int iTextSize )
 {
 	int iLen = 0, n;
@@ -185,10 +173,7 @@ int CStunMessage::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup StunParser
- * @brief ³»ºÎ º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë‚´ë¶€ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CStunMessage::Clear()
 {
 	m_clsHeader.Clear();
@@ -196,12 +181,7 @@ void CStunMessage::Clear()
 	m_strPassword.clear();
 }
 
-/**
- * @ingroup StunParser
- * @brief ÀÀ´ä STUN ¸Ş½ÃÁö¸¦ »ı¼ºÇÑ´Ù.
- * @param bSuccess ¼º°ø ÀÀ´äÀÌ¸é true ¸¦ ÀÔ·ÂÇÏ°í ½ÇÆĞ ÀÀ´äÀÌ¸é false ¸¦ ÀÔ·ÂÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é STUN ÀÀ´ä ¸Ş¼¼ÁöÀÇ Æ÷ÀÎÅÍ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// ì‘ë‹µ STUN ë©”ì‹œì§€ë¥¼ ìƒì„±í•œë‹¤.
 CStunMessage * CStunMessage::CreateResponse( bool bSuccess )
 {
 	CStunMessage * pclsResponse = new CStunMessage();

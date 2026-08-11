@@ -26,10 +26,7 @@
 #include <vector>
 #include <string>
 
-/**
- * @ingroup SipStack
- * @brief TCP �����忡 TCP ������ ������ ���� ���Ǵ� Ŭ����
- */
+// TCP 쓰레드에 TCP 세션을 전달할 때에 사용되는 클래스
 class CTcpComm
 {
 public:
@@ -62,7 +59,7 @@ public:
 	}
 
 	Socket	m_hSocket;
-	char		m_szIp[INET6_ADDRSTRLEN];	// ��Ŷ���� ���۵ǹǷ� std::string �� ����� �� ����.
+	char		m_szIp[INET6_ADDRSTRLEN];	// 패킷으로 전송되므로 std::string 을 사용할 수 없다.
 	int			m_iPort;
 	SSL			* m_psttSsl;
 #ifdef USE_TLS
@@ -75,10 +72,7 @@ private:
 	char		m_cUseTimeout;
 };
 
-/**
- * @ingroup SipStack
- * @brief TCP ������ ���� �����ϴ� TCP ���� ����
- */
+// TCP 쓰레드 별로 관리하는 TCP 세션 정보
 class CTcpSessionListInfo
 {
 public:
@@ -103,10 +97,7 @@ public:
 typedef std::vector< CTcpSessionListInfo > SESSION_LIST;
 class CSipStack;
 
-/**
- * @ingroup SipStack
- * @brief TCP ������ ���� �����ϴ� TCP ���� ������ �����ϴ� Ŭ����
- */
+// TCP 쓰레드 별로 관리하는 TCP 세션 정보를 저장하는 클래스
 class CTcpSessionList
 {
 public:

@@ -19,15 +19,12 @@
 #ifndef _SIP_BUFFER_H_
 #define _SIP_BUFFER_H_
 
-// TCP ±â¹İ SIP ¸Ş½ÃÁö ¼ö½Å ¹öÆÛ ÃÖ´ë Å©±â = openssl ÀÇ SSL_read ÇÔ¼öÀÇ ÃÖ´ë ¹öÆÛ Å©±â
+// TCP ê¸°ë°˜ SIP ë©”ì‹œì§€ ìˆ˜ì‹  ë²„í¼ ìµœëŒ€ í¬ê¸° = openssl ì˜ SSL_read í•¨ìˆ˜ì˜ ìµœëŒ€ ë²„í¼ í¬ê¸°
 #define SIP_MAX_BUF_SIZE	16384
 
 #include "SipUdp.h"
 
-/** 
- * @ingroup SipStack
- * @brief SIP TCP ¹öÆÛ¸¦ °ü¸®ÇÏ´Â Å¬·¡½º 
- */
+// SIP TCP ë²„í¼ë¥¼ ê´€ë¦¬í•˜ëŠ” í´ë˜ìŠ¤
 class CSipBuffer
 {
 public:

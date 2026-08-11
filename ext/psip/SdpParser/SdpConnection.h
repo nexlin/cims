@@ -21,10 +21,7 @@
 
 #include <string>
 
-/**
- * @ingroup SdpParser
- * @brief SDP connection À» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SDP connection ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSdpConnection
 {
 public:

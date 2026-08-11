@@ -46,7 +46,7 @@ bool GetRtpPacket( pcap_t * psttPcap, char * pszRtpPacket, int * piRtpPacketLen 
 
 		psttIp4Header = (Ip4Header *)( pszData + iIpPos );
 
-		// IPv4 ¸¸ °Ë»çÇÑ´Ù.
+		// IPv4 ë§Œ ê²€ì‚¬í•œë‹¤.
 		if( ( psttIp4Header->ver_ihl & 0xF0 ) != 0x40 ) continue;
 
 		iIpHeaderLen = GetIpHeaderLength( psttIp4Header );

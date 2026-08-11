@@ -20,29 +20,17 @@
 #include "SdpBandWidth.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpBandWidth::CSdpBandWidth()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpBandWidth::~CSdpBandWidth()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP bandwitdh ÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP bandwitdh ÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP bandwitdh ÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP bandwitdh ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpBandWidth::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -68,13 +56,7 @@ int CSdpBandWidth::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP bandwitdh ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP bandwitdh ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP bandwitdh ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpBandWidth::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -83,21 +65,14 @@ int CSdpBandWidth::ToString( char * pszText, int iTextSize )
 	return snprintf( pszText, iTextSize, "%s:%s", m_strType.c_str(), m_strBandWidth.c_str() );
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpBandWidth::Clear()
 {
 	m_strType.clear();
 	m_strBandWidth.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- * @return µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë°ì´í„°ê°€ ì¡´ì¬í•˜ë©´ false ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSdpBandWidth::Empty()
 {
 	if( m_strType.empty() || m_strBandWidth.empty() ) return true;

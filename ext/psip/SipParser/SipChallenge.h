@@ -21,10 +21,7 @@
 
 #include "SipParameter.h"
 
-/**
- * @ingroup SipParser
- * @brief WWW-Authenticate, Proxy-Authenticate Çì´õ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// WWW-Authenticate, Proxy-Authenticate í—¤ë”ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipChallenge
 {
 public:
@@ -55,7 +52,7 @@ public:
 	/** qop */
 	std::string	m_strQop;
 
-	/** parameter ¸®½ºÆ® */
+	// parameter ë¦¬ìŠ¤íŠ¸
 	SIP_PARAMETER_LIST m_clsParamList;
 
 	int Parse( const char * pszText, int iTextLen );
@@ -66,7 +63,7 @@ public:
 	static bool SetQuoteString( char * pszText, int & iTextPos, int iTextSize, const char * pszName, std::string & strValue );
 };
 
-/** WWW-Authenticate/Proxy-Authenticate Çì´õ ¸®½ºÆ® */
+// WWW-Authenticate/Proxy-Authenticate í—¤ë” ë¦¬ìŠ¤íŠ¸
 typedef std::list< CSipChallenge > SIP_CHALLENGE_LIST;
 
 int ParseSipChallenge( SIP_CHALLENGE_LIST & clsList, const char * pszText, int iTextLen );

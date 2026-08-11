@@ -21,24 +21,24 @@
 
 class CServerMonitorView : public CListView
 {
-protected: // serialization¿¡¼­¸¸ ¸¸µé¾îÁı´Ï´Ù.
+protected: // serializationì—ì„œë§Œ ë§Œë“¤ì–´ì§‘ë‹ˆë‹¤.
 	CServerMonitorView();
 	DECLARE_DYNCREATE(CServerMonitorView)
 
-// Æ¯¼ºÀÔ´Ï´Ù.
+// íŠ¹ì„±ì…ë‹ˆë‹¤.
 public:
 	CServerMonitorDoc* GetDocument() const;
 
-// ÀÛ¾÷ÀÔ´Ï´Ù.
+// ì‘ì—…ì…ë‹ˆë‹¤.
 public:
 
-// ÀçÁ¤ÀÇÀÔ´Ï´Ù.
+// ì¬ì •ì˜ì…ë‹ˆë‹¤.
 public:
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 protected:
-	virtual void OnInitialUpdate(); // »ı¼º ÈÄ Ã³À½ È£ÃâµÇ¾ú½À´Ï´Ù.
+	virtual void OnInitialUpdate(); // ìƒì„± í›„ ì²˜ìŒ í˜¸ì¶œë˜ì—ˆìŠµë‹ˆë‹¤.
 
-// ±¸ÇöÀÔ´Ï´Ù.
+// êµ¬í˜„ì…ë‹ˆë‹¤.
 public:
 	virtual ~CServerMonitorView();
 #ifdef _DEBUG
@@ -49,7 +49,7 @@ public:
 protected:
 	bool	m_bInit;
 
-// »ı¼ºµÈ ¸Ş½ÃÁö ¸Ê ÇÔ¼ö
+// ìƒì„±ëœ ë©”ì‹œì§€ ë§µ í•¨ìˆ˜
 protected:
 	afx_msg void OnFilePrintPreview();
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
@@ -60,7 +60,7 @@ public:
 	afx_msg void OnNMDblclk(NMHDR *pNMHDR, LRESULT *pResult);
 };
 
-#ifndef _DEBUG  // ServerMonitorView.cppÀÇ µğ¹ö±× ¹öÀü
+#ifndef _DEBUG  // ServerMonitorView.cppì˜ ë””ë²„ê·¸ ë²„ì „
 inline CServerMonitorDoc* CServerMonitorView::GetDocument() const
    { return reinterpret_cast<CServerMonitorDoc*>(m_pDocument); }
 #endif

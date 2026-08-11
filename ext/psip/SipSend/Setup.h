@@ -33,10 +33,7 @@
 
 typedef std::map< std::string, std::string > SETUP_MAP;
 
-/**
- * @ingroup SipSpeed
- * @brief ¼³Á¤ ÆÄÀÏ ÀúÀå/ÀĞ±â Å¬·¡½º
- */
+// ì„¤ì • íŒŒì¼ ì €ì¥/ì½ê¸° í´ë˜ìŠ¤
 class CSetup
 {
 public:

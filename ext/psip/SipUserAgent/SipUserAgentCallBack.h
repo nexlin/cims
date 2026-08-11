@@ -19,7 +19,7 @@
 #ifndef _SIP_USER_AGENT_CALLBACK_H_
 #define _SIP_USER_AGENT_CALLBACK_H_
 
-// �������� SDP �̵�� ����Ʈ�� ������ ���� ���ȴ�.
+// 응용으로 SDP 미디어 리스트를 전달할 때에 사용된다.
 #define USE_MEDIA_LIST
 
 #include "SipStackDefine.h"
@@ -29,10 +29,7 @@
 
 typedef std::list< int > CODEC_LIST;
 
-/**
- * @ingroup SipUserAgent
- * @brief RTP ���� ���� Ŭ����
- */
+// RTP 정보 저장 클래스
 class CSipCallRtp
 {
 public:
@@ -46,157 +43,76 @@ public:
 	int GetVideoPort( );
 	int GetApplicationPort( );
 
-	/** IP �ּ� */
+	// IP 주소
 	std::string	m_strIp;
 
-	/** ��Ʈ ��ȣ */
+	// 포트 번호
 	int					m_iPort;
 
-	/** MCPTT floor control(m=application) ��Ʈ ��������. >0 �̸� GetApplicationPort ��ȯ��. */
+	// MCPTT floor control(m=application) 포트. >0 이면 GetApplicationPort 가 이 값을 반환.
 	int					m_iApplicationPort;
 
-	/** ���õ� �ڵ� ��ȣ */
+	// 선택된 코덱 번호
 	int					m_iCodec;
 
-	/** ����/���� */
+	// 전송/수신
 	ERtpDirection	m_eDirection;
 
-	/** ��ü �ڵ� ����Ʈ */
+	// 전체 코덱 리스트
 	CODEC_LIST	m_clsCodecList;
 
 #ifdef USE_MEDIA_LIST
-	/** ��ü �̵�� ����Ʈ */
+	// 전체 미디어 리스트
 	SDP_MEDIA_LIST	m_clsMediaList;
 #endif
 };
 
-/**
- * @ingroup SipUserAgent
- * @brief CSipUserAgent �� �̺�Ʈ�� ���� ���α׷����� �����ϴ� callback �������̽�
- */
+// CSipUserAgent 의 이벤트를 응용 프로그램으로 전달하는 callback 인터페이스
 class ISipUserAgentCallBack
 {
 public:
 	virtual ~ISipUserAgentCallBack(){};
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP REGISTER ���� �޽��� ���� �̺�Ʈ �ڵ鷯
-	 * @param pclsInfo	SIP REGISTER ���� �޽����� ������ IP-PBX ���� ���� ��ü
-	 * @param iStatus		SIP REGISTER ���� �ڵ�
-	 */
+	// SIP REGISTER 응답 메시지 수신 이벤트 핸들러
 	virtual void EventRegister( CSipServerInfo * pclsInfo, int iStatus ) = 0;
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ��ȭ ��û ���ſ� ���� ���� Ȯ�� �̺�Ʈ �ڵ鷯
-	 * @param pclsMessage	SIP INVITE ��û �޽���
-	 * @return ������ �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
-	 */
+	// SIP 통화 요청 수신에 대한 인증 확인 이벤트 핸들러
 	virtual bool EventIncomingRequestAuth( CSipMessage * pclsMessage ){ return true; };
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ��ȭ ��û ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId	SIP Call-ID
-	 * @param pszFrom		SIP From ����� ���̵�
-	 * @param pszTo			SIP To ����� ���̵�
-	 * @param pclsRtp		RTP ���� ���� ��ü
-	 */
+	// SIP 통화 요청 수신 이벤트 핸들러
 	virtual void EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage = NULL ) = 0;
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP Ring / Session Progress ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId		SIP Call-ID
-	 * @param iSipStatus	SIP ���� �ڵ�
-	 * @param pclsRtp			RTP ���� ���� ��ü
-	 */
+	// SIP Ring / Session Progress 수신 이벤트 핸들러
 	virtual void EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp ) = 0;
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ��ȭ ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId	SIP Call-ID
-	 * @param pclsRtp		RTP ���� ���� ��ü
-	 */
+	// SIP 통화 연결 이벤트 핸들러
 	virtual void EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp ) = 0;
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ��ȭ ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId		SIP Call-ID
-	 * @param iSipStatus	SIP ���� �ڵ�. INVITE �� ���� ���� �������� ��ȭ�� ����� ���, INVITE �� ���� �ڵ带 �����Ѵ�.
-	 */
+	// SIP 통화 종료 이벤트 핸들러
 	virtual void EventCallEnd( const char * pszCallId, int iSipStatus ) = 0;
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ReINVITE ���� �̺�Ʈ �ڵ鷯
-	 * @param pszCallId				SIP Call-ID
-	 * @param pclsRemoteRtp		���� RTP ���� ���� ��ü
-	 * @param pclsLocalRtp		�� RTP ���� ���� ��ü
-	 */
+	// SIP ReINVITE 수신 이벤트 핸들러
 	virtual void EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp ){};
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ReINVITE ���� �޽��� ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId	SIP Call-ID
-	 * @param iSipStatus	SIP ���� �ڵ�
-	 * @param pclsRemoteRtp		���� RTP ���� ���� ��ü
-	 */
+	// SIP ReINVITE 응답 메시지 수신 이벤트 핸들러
 	virtual void EventReInviteResponse( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRemoteRtp ){};
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP PRACK ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId	SIP Call-ID
-	 * @param pclsRtp		RTP ���� ���� ��ü
-	 */
+	// SIP PRACK 수신 이벤트 핸들러
 	virtual void EventPrack( const char * pszCallId, CSipCallRtp * pclsRtp ){};
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief Screened / Unscreened Transfer ��û ���� �̺�Ʈ �ڵ鷯
-	 * @param pszCallId					SIP Call-ID
-	 * @param pszReferToCallId	��ȭ�� ���޵� SIP Call-ID
-	 * @param bScreenedTransfer Screened Transfer �̸� true �� �Էµǰ� Unscreened Transfer �̸� false �� �Էµȴ�.
-	 * @returns ��û�� �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
-	 */
+	// Screened / Unscreened Transfer 요청 수신 이벤트 핸들러
 	virtual bool EventTransfer( const char * pszCallId, const char * pszReferToCallId, bool bScreenedTransfer ){ return false; };
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief Blind Transfer ��û ���� �̺�Ʈ �ڵ鷯
-	 * @param pszCallId			SIP Call-ID
-	 * @param pszReferToId	��ȭ�� ���޵� ����� ���̵�
-	 * @returns ��û�� �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
-	 */
+	// Blind Transfer 요청 수신 이벤트 핸들러
 	virtual bool EventBlindTransfer( const char * pszCallId, const char * pszReferToId ){ return false; };
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP ��ȭ ���� ���� ���� �̺�Ʈ �ڵ鷯
-	 * @param	pszCallId		SIP Call-ID
-	 * @param iSipStatus	SIP ���� �ڵ�.
-	 */
+	// SIP 통화 전달 응답 수신 이벤트 핸들러
 	virtual void EventTransferResponse( const char * pszCallId, int iSipStatus ){};
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP MESSAGE ���� �̺�Ʈ �ڵ鷯
-	 * @param pszFrom		SIP From ����� ���̵�
-	 * @param pszTo			SIP To ����� ���̵�
-	 * @param pclsMessage	SIP �޽���
-	 */
+	// SIP MESSAGE 수신 이벤트 핸들러
 	virtual bool EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage ){ return false; };
 
-	/**
-	 * @ingroup SipUserAgent
-	 * @brief SIP �޽��� ���� �����尡 ������� �˷��ִ� �̺�Ʈ �ڵ鷯
-	 * @param iThreadId UDP ������ ��ȣ
-	 */
+	// SIP 메시지 수신 쓰레드가 종료됨을 알려주는 이벤트 핸들러
 	virtual void EventThreadEnd( int iThreadId ){};
 };
 

@@ -22,10 +22,7 @@
 #include "SipPlatformDefine.h"
 #include "SipUdp.h"
 
-/**
- * @ingroup RtpApi
- * @brief RTP Çì´õ¸¦ ÀúÀåÇÏ´Â ±¸Á¶Ã¼
- */
+// RTP í—¤ë”ë¥¼ ì €ì¥í•˜ëŠ” êµ¬ì¡°ì²´
 typedef struct _RtpHeader_
 {
   uint8_t		cFlags;				// version + padding + extension
@@ -34,161 +31,97 @@ typedef struct _RtpHeader_
   uint32_t	iTimeStamp;   // timestamp
   uint32_t  ssrc;					// synchronization source
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief RTP ¹öÀü Á¤º¸¸¦ °¡Á®¿Â´Ù.
-	 * @returns RTP ¹öÀü Á¤º¸¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+  // RTP ë²„ì „ ì •ë³´ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 	inline uint8_t GetVersion() 
 	{
 		return cFlags >> 6; 
 	}
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief RTP ¹öÀü Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
-	 * @param cVersion RTP ¹öÀü Á¤º¸
-	 */
+  // RTP ë²„ì „ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 	inline void SetVersion( uint8_t cVersion )
   {    
 		cFlags = (cVersion << 6) | (cFlags & 0x3F);
   }
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief Padding À» ¸®ÅÏÇÑ´Ù.
-	 * @returns Padding À» ¸®ÅÏÇÑ´Ù.
-	 */
+  // Padding ì„ ë¦¬í„´í•œë‹¤.
 	inline uint8_t GetPadding() 
 	{ 
 		return (cFlags >> 5) & 0x1; 
 	}
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief Padding À» ÀúÀåÇÑ´Ù.
-	 * @param cPadding Padding
-	 */
+  // Padding ì„ ì €ì¥í•œë‹¤.
 	inline void SetPadding( uint8_t cPadding ) 
   { 
 		cFlags = (cPadding << 5) | (cFlags & 0xDF);
   }
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief Extension ¸¦ ¸®ÅÏÇÑ´Ù.
-	 * @returns Extension ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+  // Extension ë¥¼ ë¦¬í„´í•œë‹¤.
 	inline uint8_t GetExtension() 
 	{ 
 		return (cFlags >> 4) & 0x01;
 	}
     
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief Extension À» ÀúÀåÇÑ´Ù.
-	 * @param cExt Extension
-	 */
+	// Extension ì„ ì €ì¥í•œë‹¤.
 	inline void SetExtension( uint8_t cExt )
   {
 		cFlags = (cExt << 4) | (cFlags & 0xEF);
   }
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief CSRC count ¸¦ ¸®ÅÏÇÑ´Ù.
-	 * @returns CSRC count ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+  // CSRC count ë¥¼ ë¦¬í„´í•œë‹¤.
 	inline uint8_t GetCC() 
 	{ 
 		return cFlags & 0x0F;
 	}
     
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief CSRC count ¸¦ ÀúÀåÇÑ´Ù.
-	 * @param cCC CSRC count
-	 */
+	// CSRC count ë¥¼ ì €ì¥í•œë‹¤.
 	inline void SetCC( uint8_t cCC )
   {
 		cFlags = cCC | (cFlags & 0xF0);
   }
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief Marker ¸¦ ¸®ÅÏÇÑ´Ù.
-	 * @returns Marker ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+  // Marker ë¥¼ ë¦¬í„´í•œë‹¤.
 	inline uint8_t GetMarker() 
 	{ 
 		return cMpt >> 7; 
 	}
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief Marker ¸¦ ÀúÀåÇÑ´Ù.
-	 * @param cMarker Marker
-	 */
+  // Marker ë¥¼ ì €ì¥í•œë‹¤.
 	inline void SetMarker( uint8_t cMarker )
   {
 		cMpt = (cMarker << 7) | (cMpt & 0x7F);
   }
 
-  /**
-	 * @ingroup SipClientMFC
-	 * @brief Payload type À» ¸®ÅÏÇÑ´Ù.
-	 * @returns Payload type À» ¸®ÅÏÇÑ´Ù.
-	 */
+  // Payload type ì„ ë¦¬í„´í•œë‹¤.
 	inline uint8_t GetPT() 
 	{ 
 		return cMpt & 0x7F;
 	}
     
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief Payload type À» ÀúÀåÇÑ´Ù.
-	 * @param cPT Payload type
-	 */
+	// Payload type ì„ ì €ì¥í•œë‹¤.
 	inline void SetPT( uint8_t cPT )
   {
 		cMpt = cPT | (cMpt & 0x80);
   }
 
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief Sequence number ¸¦ ¸®ÅÏÇÑ´Ù.
-	 * @returns Sequence number ¸¦ ¸®ÅÏÇÑ´Ù.
-	 */
+	// Sequence number ë¥¼ ë¦¬í„´í•œë‹¤.
 	inline uint16_t GetSeq( )
 	{
 		return ntohs(sSeq);
 	}
 
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief Sequence number ¸¦ ÀúÀåÇÑ´Ù.
-	 * @param sSeqIn Sequence number
-	 */
+	// Sequence number ë¥¼ ì €ì¥í•œë‹¤.
 	void SetSeq( uint16_t sSeqIn )
 	{
 		sSeq = htons(sSeqIn);
 	}
 
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief Timestamp À» ¸®ÅÏÇÑ´Ù.
-	 * @returns Timestamp À» ¸®ÅÏÇÑ´Ù.
-	 */
+	// Timestamp ì„ ë¦¬í„´í•œë‹¤.
 	inline uint32_t GetTimeStamp( )
 	{
 		return ntohl(iTimeStamp);
 	}
 
-	/**
-	 * @ingroup SipClientMFC
-	 * @brief Timestamp À» ÀúÀåÇÑ´Ù.
-	 * @param iTime Timestamp
-	 */
+	// Timestamp ì„ ì €ì¥í•œë‹¤.
 	void SetTimeStamp( uint32_t iTime )
 	{
 		iTimeStamp = htonl( iTime );

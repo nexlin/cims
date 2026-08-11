@@ -28,13 +28,7 @@
 
 bool gbAndroidDebug = false;
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP stack ÀÇ ·Î±×¸¦ DDMS ·Î±×·Î Ãâ·ÂÇÑ´Ù.
- * @param eLevel ·Î±× ·¹º§
- * @param fmt		 ·Î±× ¹®ÀÚ¿­
- * @param				 ·Î±× ¹®ÀÚ¿­ º¯¼ö 
- */
+// SIP stack ì˜ ë¡œê·¸ë¥¼ DDMS ë¡œê·¸ë¡œ ì¶œë ¥í•œë‹¤.
 void LogCallBack::Print( EnumLogLevel eLevel, const char * fmt, ... )
 {
 	char	szBuf[LOG_MAX_SIZE];
@@ -57,12 +51,7 @@ void LogCallBack::Print( EnumLogLevel eLevel, const char * fmt, ... )
 #endif
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief ¾Èµå·ÎÀÌµå µğ¹ö±× ·Î±×¸¦ Ãâ·ÂÇÑ´Ù.
- * @param fmt ·Î±× ¹®ÀÚ¿­
- * @param		·Î±× ¹®ÀÚ¿­ º¯¼ö
- */
+// ì•ˆë“œë¡œì´ë“œ ë””ë²„ê·¸ ë¡œê·¸ë¥¼ ì¶œë ¥í•œë‹¤.
 void AndroidDebugLog( const char * fmt, ... )
 {
 	char	szBuf[LOG_MAX_SIZE];
@@ -78,12 +67,7 @@ void AndroidDebugLog( const char * fmt, ... )
 #endif
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief ¾Èµå·ÎÀÌµå ¿¡·¯ ·Î±×¸¦ Ãâ·ÂÇÑ´Ù.
- * @param fmt ·Î±× ¹®ÀÚ¿­
- * @param		·Î±× ¹®ÀÚ¿­ º¯¼ö
- */
+// ì•ˆë“œë¡œì´ë“œ ì—ëŸ¬ ë¡œê·¸ë¥¼ ì¶œë ¥í•œë‹¤.
 void AndroidErrorLog( const char * fmt, ... )
 {
 	char	szBuf[LOG_MAX_SIZE];

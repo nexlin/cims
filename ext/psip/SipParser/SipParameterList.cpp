@@ -28,13 +28,7 @@ CSipParameterList::~CSipParameterList()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Header °¡ , ·Î ±¸ºĞµÇ¾î¼­ N °³ ÀúÀåµÇ´Â SIP Header ÀÇ parameter list ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		parameter ¸®½ºÆ® ¹®ÀÚ¿­
- * @param iTextLen	parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP Header ê°€ , ë¡œ êµ¬ë¶„ë˜ì–´ì„œ N ê°œ ì €ì¥ë˜ëŠ” SIP Header ì˜ parameter list ë¥¼ íŒŒì‹±í•œë‹¤.
 int CSipParameterList::HeaderListParamParse( const char * pszText, int iTextLen )
 {
 	int iCurPos = 0, iPos;
@@ -59,13 +53,7 @@ int CSipParameterList::HeaderListParamParse( const char * pszText, int iTextLen 
 	return iCurPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ® ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿©¼­ parameter ¸®½ºÆ® °´Ã¼¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		parameter ¸®½ºÆ® ¹®ÀÚ¿­
- * @param iTextLen	parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ì„œ parameter ë¦¬ìŠ¤íŠ¸ ê°ì²´ì— ì €ì¥í•œë‹¤.
 int CSipParameterList::ParamParse( const char * pszText, int iTextLen )
 {
 	CSipParameter clsParam;
@@ -78,13 +66,7 @@ int CSipParameterList::ParamParse( const char * pszText, int iTextLen )
 	return iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ® °´Ã¼¸¦ parameter ¸®½ºÆ® ¹®ÀÚ¿­·Î Á¦ÀÛÇÑ´Ù.
- * @param pszText		parameter ¸®½ºÆ® ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ Å©±â
- * @returns parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ ê°ì²´ë¥¼ parameter ë¦¬ìŠ¤íŠ¸ ë¬¸ìì—´ë¡œ ì œì‘í•œë‹¤.
 int CSipParameterList::ParamToString( char * pszText, int iTextSize )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -102,13 +84,7 @@ int CSipParameterList::ParamToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter list ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú °ªÀ» ÀúÀåÇÑ´Ù.
- * @param pszName		parameter ÀÌ¸§
- * @param pszValue	parameter °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter list ì—ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ê°’ì„ ì €ì¥í•œë‹¤.
 bool CSipParameterList::InsertParam( const char * pszName, const char * pszValue )
 {
 	if( pszName == NULL ) return false;
@@ -123,13 +99,7 @@ bool CSipParameterList::InsertParam( const char * pszName, const char * pszValue
 	return true;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter list ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§¿¡ ´ëÇÑ °ªÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName		parameter ÀÌ¸§
- * @param pszValue	parameter °ª
- * @returns parameter ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter list ì—ì„œ ì…ë ¥ëœ ì´ë¦„ì— ëŒ€í•œ ê°’ì„ ìˆ˜ì •í•œë‹¤.
 bool CSipParameterList::UpdateParam( const char * pszName, const char * pszValue )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -146,13 +116,7 @@ bool CSipParameterList::UpdateParam( const char * pszName, const char * pszValue
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter list ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§À» °Ë»öÇÑ´Ù.
- * @param pszName		parameter ÀÌ¸§
- * @param strValue	parameter °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns parameter ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter list ì—ì„œ ì…ë ¥ëœ ì´ë¦„ì„ ê²€ìƒ‰í•œë‹¤.
 bool CSipParameterList::SelectParam( const char * pszName, std::string & strValue )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -169,12 +133,7 @@ bool CSipParameterList::SelectParam( const char * pszName, std::string & strValu
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter list ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§À» °Ë»öÇÑ´Ù.
- * @param pszName parameter ÀÌ¸§
- * @returns parameter ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter list ì—ì„œ ì…ë ¥ëœ ì´ë¦„ì„ ê²€ìƒ‰í•œë‹¤.
 bool CSipParameterList::SelectParam( const char * pszName )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -190,12 +149,7 @@ bool CSipParameterList::SelectParam( const char * pszName )
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter list ¿¡¼­ ÀÔ·ÂµÈ ÀÌ¸§À» °Ë»öÇÑ´Ù.
- * @param pszName parameter ÀÌ¸§
- * @returns parameter ÀÌ¸§ÀÌ Á¸ÀçÇÏ¸é ÇØ´ç °ªÀ» ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// parameter list ì—ì„œ ì…ë ¥ëœ ì´ë¦„ì„ ê²€ìƒ‰í•œë‹¤.
 const char * CSipParameterList::SelectParamValue( const char * pszName )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -211,10 +165,7 @@ const char * CSipParameterList::SelectParamValue( const char * pszName )
 	return NULL;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter list ¸¦ »èÁ¦ÇÑ´Ù.
- */
+// parameter list ë¥¼ ì‚­ì œí•œë‹¤.
 void CSipParameterList::ClearParam()
 {
 	m_clsParamList.clear();

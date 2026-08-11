@@ -30,11 +30,7 @@
 
 std::string gstrPcapFileName;
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ÅëÈ­º° ÆĞÅ¶ ´ıÇÁÇÏ´Â ¼­ºñ½º
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í†µí™”ë³„ íŒ¨í‚· ë¤í”„í•˜ëŠ” ì„œë¹„ìŠ¤
 int ServiceMain( )
 {
 #ifdef WIN32
@@ -63,7 +59,7 @@ int ServiceMain( )
 
 		if( iSecond == 60 )
 		{
-			// timeout µÈ RTP ¼¼¼ÇÀÌ Á¸ÀçÇÏ¸é ÇØ´ç ÅëÈ­ Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
+			// timeout ëœ RTP ì„¸ì…˜ì´ ì¡´ì¬í•˜ë©´ í•´ë‹¹ í†µí™” ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 			STRING_LIST clsSipCallIdList;
 			STRING_LIST::iterator itSL;
 
@@ -88,7 +84,7 @@ int ServiceMain( )
 		sleep(1);
 	}
 
-	// PacketDumpThread °¡ Á¾·áÇÒ ¶§±îÁö ´ë±âÇÑ´Ù.
+	// PacketDumpThread ê°€ ì¢…ë£Œí•  ë•Œê¹Œì§€ ëŒ€ê¸°í•œë‹¤.
 	sleep(1);
 
 	gclsCallMap.DeleteAll();
@@ -100,13 +96,7 @@ int ServiceMain( )
 	return 0;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief SIP ÅëÈ­º° ÆĞÅ¶ ´ıÇÁÇÏ´Â ¼­ºñ½º
- * @param argc 
- * @param argv 
- * @returns Á¤»ó Á¾·áÇÏ¸é 0 À» ¸®ÅÏÇÏ°í ¿À·ù°¡ ¹ß»ıÇÏ¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í†µí™”ë³„ íŒ¨í‚· ë¤í”„í•˜ëŠ” ì„œë¹„ìŠ¤
 int main( int argc, char * argv[] )
 {
 	CServerService clsService;

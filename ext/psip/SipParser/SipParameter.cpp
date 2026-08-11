@@ -28,13 +28,7 @@ CSipParameter::~CSipParameter()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief Parameter ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipParameter Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Parameter ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipParameter í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipParameter::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -82,13 +76,7 @@ int CSipParameter::Parse( const char * pszText, int iTextLen )
 	return -1;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipParameter::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -103,24 +91,14 @@ int CSipParameter::ToString( char * pszText, int iTextSize )
 	return snprintf( pszText, iTextSize, "%s=%s", m_strName.c_str(), m_strValue.c_str() );
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipParameter::Clear()
 {
 	m_strName.clear();
 	m_strValue.clear();
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ® ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿©¼­ parameter ¸®½ºÆ® °´Ã¼¿¡ ÀúÀåÇÑ´Ù.
- * @param clsList		parameter ¸®½ºÆ® °´Ã¼
- * @param pszText		parameter ¸®½ºÆ® ¹®ÀÚ¿­
- * @param iTextLen	parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ì„œ parameter ë¦¬ìŠ¤íŠ¸ ê°ì²´ì— ì €ì¥í•œë‹¤.
 int ParseSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszText, int iTextLen )
 {
 	CSipParameter clsParam;
@@ -133,14 +111,7 @@ int ParseSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszText, int i
 	return iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ®¿¡¼­ parameter ÀÌ¸§¿¡ ´ëÇÑ °ªÀ» °Ë»öÇÑ´Ù.
- * @param clsList		parameter ¸®½ºÆ® °´Ã¼
- * @param pszName		parameter ÀÌ¸§
- * @param strValue	parameter °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ì—ì„œ parameter ì´ë¦„ì— ëŒ€í•œ ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 bool SearchSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName, std::string & strValue )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -157,13 +128,7 @@ bool SearchSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName, std
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ®¿¡¼­ parameter ÀÌ¸§¿¡ ´ëÇÑ °ªÀ» °Ë»öÇÑ´Ù.
- * @param clsList		parameter ¸®½ºÆ® °´Ã¼
- * @param pszName		parameter ÀÌ¸§
- * @returns ¼º°øÇÏ¸é parameter °ªÀ» ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ì—ì„œ parameter ì´ë¦„ì— ëŒ€í•œ ê°’ì„ ê²€ìƒ‰í•œë‹¤.
 const char * SearchSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -179,14 +144,7 @@ const char * SearchSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszN
 	return NULL;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ®¿¡ paramter ¸¦ Ãß°¡ÇÑ´Ù.
- * @param clsList		parameter ¸®½ºÆ® °´Ã¼
- * @param pszName		parameter ÀÌ¸§
- * @param pszValue	parameter °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ì— paramter ë¥¼ ì¶”ê°€í•œë‹¤.
 bool InsertSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName, const char * pszValue )
 {
 	if( pszName == NULL ) return false;
@@ -201,14 +159,7 @@ bool InsertSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName, con
 	return true;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ®¿¡ paramter ¸¦ ¼öÁ¤ÇÑ´Ù.
- * @param clsList		parameter ¸®½ºÆ® °´Ã¼
- * @param pszName		parameter ÀÌ¸§
- * @param pszValue	parameter °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ì— paramter ë¥¼ ìˆ˜ì •í•œë‹¤.
 bool UpdateSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName, const char * pszValue )
 {
 	SIP_PARAMETER_LIST::iterator	itList;
@@ -226,14 +177,7 @@ bool UpdateSipParameter( SIP_PARAMETER_LIST & clsList, const char * pszName, con
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief parameter ¸®½ºÆ® °´Ã¼¸¦ parameter ¸®½ºÆ® ¹®ÀÚ¿­·Î Á¦ÀÛÇÑ´Ù.
- * @param clsList		parameter ¸®½ºÆ® °´Ã¼
- * @param pszText		parameter ¸®½ºÆ® ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ Å©±â
- * @returns parameter ¸®½ºÆ® ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// parameter ë¦¬ìŠ¤íŠ¸ ê°ì²´ë¥¼ parameter ë¦¬ìŠ¤íŠ¸ ë¬¸ìì—´ë¡œ ì œì‘í•œë‹¤.
 int MakeSipParameterString( SIP_PARAMETER_LIST & clsList, char * pszText, int iTextSize )
 {
 	SIP_PARAMETER_LIST::iterator	itList;

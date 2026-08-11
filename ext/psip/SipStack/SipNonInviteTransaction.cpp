@@ -20,20 +20,14 @@
 #include "SipDeleteQueue.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipNonInviteTransaction::CSipNonInviteTransaction() : m_pclsRequest(NULL), m_pclsResponse(NULL), m_iReSendCount(0)
 {
 	memset( &m_sttStartTime, 0, sizeof(m_sttStartTime) );
 	memset( &m_sttStopTime, 0, sizeof(m_sttStopTime) );
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipNonInviteTransaction::~CSipNonInviteTransaction()
 {
 	if( m_pclsRequest ) gclsSipDeleteQueue.Insert( m_pclsRequest );

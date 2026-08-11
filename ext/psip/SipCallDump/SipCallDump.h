@@ -19,8 +19,8 @@
 #ifndef _SIP_CALL_DUMP_H_
 #define _SIP_CALL_DUMP_H_
 
-// MS À©µµ¿ì ¼­ºñ½º ¼±¾ğ
-#define SERVICE_NAME								"SipCallDump"		// ¼­ºñ½º ÀÌ¸§
+// MS ìœˆë„ìš° ì„œë¹„ìŠ¤ ì„ ì–¸
+#define SERVICE_NAME								"SipCallDump"		// ì„œë¹„ìŠ¤ ì´ë¦„
 #define SERVICE_DISPLAY_NAME				"SipCallDump"
 #define SERVICE_DESCRIPTION_STRING	"SipCallDump - made by Yee Young Han"
 

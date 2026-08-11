@@ -21,20 +21,12 @@
 #include <stdlib.h>
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpAttribute::CSdpAttribute()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param pszValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ìƒì„±ì
 CSdpAttribute::CSdpAttribute( const char * pszName, const char * pszValue )
 {
 	if( pszName )
@@ -48,21 +40,12 @@ CSdpAttribute::CSdpAttribute( const char * pszName, const char * pszValue )
 	}
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpAttribute::~CSdpAttribute()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP attribute ÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP attribute ÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP attribute ÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP attribute ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpAttribute::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -88,13 +71,7 @@ int CSdpAttribute::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP attribute ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP attribute ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP attribute ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpAttribute::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -110,20 +87,14 @@ int CSdpAttribute::ToString( char * pszText, int iTextSize )
 	}
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpAttribute::Clear()
 {
 	m_strName.clear();
 	m_strValue.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief µ¥ÀÌÅÍ°¡ Á¸ÀçÇÏ¸é false ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë°ì´í„°ê°€ ì¡´ì¬í•˜ë©´ false ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSdpAttribute::Empty()
 {
 	if( m_strName.empty() ) return true;
@@ -131,11 +102,7 @@ bool CSdpAttribute::Empty()
 	return false;
 }
 
-/**
- * @ingroup SdpParser
- * @brief payload type À» ¸®ÅÏÇÑ´Ù.
- * @returns payload type À» ¸®ÅÏÇÑ´Ù.
- */
+// payload type ì„ ë¦¬í„´í•œë‹¤.
 int CSdpAttribute::GetPayLoadType()
 {
 	if( strcmp( m_strName.c_str(), "rtpmap" ) && strcmp( m_strName.c_str(), "fmtp" ) ) return -1;
@@ -163,12 +130,7 @@ int CSdpAttribute::GetPayLoadType()
 	return -1;
 }
 
-/**
- * @ingroup SdpParser
- * @brief encoding name À» °¡Á®¿Â´Ù.
- * @param strName encoding name À» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÀûÀ¸·Î encoding name ¸¦ °¡Á®¿À¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// encoding name ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool CSdpAttribute::GetEncodingName( std::string & strName )
 {
 	strName.clear();
@@ -196,12 +158,7 @@ bool CSdpAttribute::GetEncodingName( std::string & strName )
 }
 
 #if 0
-/**
- * @ingroup SdpParser
- * @brief SDP attribute ÀÇ value ¸¦ ÆÄ½ÌÇÏ¿©¼­ clsParamList °´Ã¼¿¡ ÀúÀåÇÑ´Ù.
- * @param clsParamList parameter list ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP attribute ì˜ value ë¥¼ íŒŒì‹±í•˜ì—¬ì„œ clsParamList ê°ì²´ì— ì €ì¥í•œë‹¤.
 bool CSdpAttribute::GetParameterList( CSipParameterList & clsParamList )
 {
 	clsParamList.ClearParam();

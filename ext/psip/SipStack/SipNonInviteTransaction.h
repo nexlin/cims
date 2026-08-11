@@ -21,10 +21,7 @@
 
 #include "SipStackDefine.h"
 
-/**
- * @ingroup SipStack
- * @brief SIP NON INVITE TRANSACTION Å¬·¡½º
- */
+// SIP NON INVITE TRANSACTION í´ë˜ìŠ¤
 class CSipNonInviteTransaction
 {
 public:
@@ -32,19 +29,19 @@ public:
 	~CSipNonInviteTransaction();
 
 public:
-	/** SIP ¿äÃ» ¸Ş½ÃÁö */
+	// SIP ìš”ì²­ ë©”ì‹œì§€
 	CSipMessage * m_pclsRequest;
 
-	/** SIP ÀÀ´ä ¸Ş½ÃÁö */
+	// SIP ì‘ë‹µ ë©”ì‹œì§€
 	CSipMessage * m_pclsResponse;
 
-	/** SIP ¿äÃ» ¸Ş½ÃÁö Àü¼Û/¼ö½Å ½Ã°£ */
+	// SIP ìš”ì²­ ë©”ì‹œì§€ ì „ì†¡/ìˆ˜ì‹  ì‹œê°„
 	struct timeval m_sttStartTime;
 
-	/** SIP transaction ¸¸·á ½Ã°£ */
+	// SIP transaction ë§Œë£Œ ì‹œê°„
 	struct timeval m_sttStopTime;
 
-	/** ÀçÀü¼Û °³¼ö */
+	// ì¬ì „ì†¡ ê°œìˆ˜
 	int	m_iReSendCount;
 };
 

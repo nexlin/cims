@@ -29,13 +29,7 @@ CSipCallId::~CSipCallId()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipCallId Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipCallId í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipCallId::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -61,13 +55,7 @@ int CSipCallId::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief Call-ID ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Call-ID ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipCallId::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -82,11 +70,7 @@ int CSipCallId::ToString( char * pszText, int iTextSize )
 	}
 }
 
-/**
- * @ingroup SipParser
- * @brief Call-ID ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param strText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- */
+// Call-ID ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 void CSipCallId::ToString( std::string & strText )
 {
 	strText = m_strName;
@@ -98,32 +82,20 @@ void CSipCallId::ToString( std::string & strText )
 	}
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipCallId::Clear()
 {
 	m_strName.clear();
 	m_strHost.clear();
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- * @return ¸â¹öº¯¼ö°¡ ÀúÀåµÇ¾î ÀÖÁö ¾ÊÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë©¤ë²„ë³€ìˆ˜ê°€ ì €ì¥ë˜ì–´ ìˆì§€ ì•Šìœ¼ë©´ true ë¥¼ ë¦¬í„´í•˜ê³  ê·¸ë ‡ì§€ ì•Šìœ¼ë©´ false ë¥¼ ë¦¬í„´í•œë‹¤.
 bool CSipCallId::Empty()
 {
 	return m_strName.empty();
 }
 
-/**
- * @ingroup SipParser
- * @brief Call-ID °¡ µ¿ÀÏÇÑÁö °Ë»çÇÑ´Ù.
- * @param pclsCallId ºñ±³ÇÒ Call-ID
- * @returns Call-ID °¡ µ¿ÀÏÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Call-ID ê°€ ë™ì¼í•œì§€ ê²€ì‚¬í•œë‹¤.
 bool CSipCallId::IsEqual( CSipCallId * pclsCallId )
 {
 	if( pclsCallId == NULL ) return false;
@@ -133,11 +105,7 @@ bool CSipCallId::IsEqual( CSipCallId * pclsCallId )
 	return false;
 }
 
-/**
- * @ingroup SipParser
- * @brief »õ·Î¿î Call-ID ¸¦ »ı¼ºÇÑ´Ù.
- * @param pszHost È£½ºÆ® ÀÌ¸§ ¶Ç´Â IP ÁÖ¼Ò
- */
+// ìƒˆë¡œìš´ Call-ID ë¥¼ ìƒì„±í•œë‹¤.
 void CSipCallId::Make( const char * pszHost )
 {
 	char	szName[SIP_CALL_ID_NAME_MAX_SIZE];

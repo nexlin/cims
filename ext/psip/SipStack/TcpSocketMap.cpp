@@ -38,15 +38,7 @@ CTcpSocketMap::~CTcpSocketMap()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief Å¬¶óÀÌ¾ğÆ® Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param pszIp		Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort		Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param hSocket TCP ¼ÒÄÏ
- * @param psttSsl	SSL ±¸Á¶Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í´ë¼ì´ì–¸íŠ¸ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 bool CTcpSocketMap::Insert( const char * pszIp, int iPort, Socket hSocket, SSL * psttSsl )
 {
 	std::string	strKey;
@@ -72,14 +64,7 @@ bool CTcpSocketMap::Insert( const char * pszIp, int iPort, Socket hSocket, SSL *
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£¿Í ¿¬°üµÈ TCP ¼ÒÄÏ ÇÚµéÀ» °Ë»öÇÑ´Ù.
- * @param pszIp		Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort		Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param hSocket TCP ¼ÒÄÏÀ» ÀúÀåÇÒ º¯¼ö
- * @returns °Ë»ö¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í´ë¼ì´ì–¸íŠ¸ IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ì™€ ì—°ê´€ëœ TCP ì†Œì¼“ í•¸ë“¤ì„ ê²€ìƒ‰í•œë‹¤.
 bool CTcpSocketMap::Select( const char * pszIp, int iPort, Socket & hSocket )
 {
 	bool	bRes = false;
@@ -101,15 +86,7 @@ bool CTcpSocketMap::Select( const char * pszIp, int iPort, Socket & hSocket )
 }
 
 #ifdef USE_TLS
-/**
- * @ingroup SipStack
- * @brief TLS ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
- * @param pszIp					Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort					Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param pclsMessage		SIP ¸Ş½ÃÁö
- * @param iLocalTlsPort	·ÎÄÃ Æ÷Æ® ¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TLS ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
 bool CTcpSocketMap::SendTls( const char * pszIp, int iPort, CSipMessage * pclsMessage, int iLocalTlsPort )
 {
 	bool	bRes = false;
@@ -137,15 +114,7 @@ bool CTcpSocketMap::SendTls( const char * pszIp, int iPort, CSipMessage * pclsMe
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief TLS ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
- * @param pszIp				Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort				Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param pszMessage	 SIP ¸Ş½ÃÁö
- * @param iMessageSize SIP ¸Ş½ÃÁö ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TLS ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
 bool CTcpSocketMap::SendTls( const char * pszIp, int iPort, const char * pszMessage, int iMessageSize )
 {
 	bool	bRes = false;
@@ -174,13 +143,7 @@ bool CTcpSocketMap::SendTls( const char * pszIp, int iPort, const char * pszMess
 }
 #endif
 
-/**
- * @ingroup SipStack
- * @brief ÀÚ·á±¸Á¶¿¡¼­ Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò¿Í Æ÷Æ®¹øÈ£¿¡ ÇØ´çÇÏ´Â Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszIp Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìë£Œêµ¬ì¡°ì—ì„œ í´ë¼ì´ì–¸íŠ¸ IP ì£¼ì†Œì™€ í¬íŠ¸ë²ˆí˜¸ì— í•´ë‹¹í•˜ëŠ” ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpSocketMap::Delete( const char * pszIp, int iPort )
 {
 	bool	bRes = false;
@@ -201,10 +164,7 @@ bool CTcpSocketMap::Delete( const char * pszIp, int iPort )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief ÀÚ·á±¸Á¶¸¦ ÃÊ±âÈ­ÇÑ´Ù.
- */
+// ìë£Œêµ¬ì¡°ë¥¼ ì´ˆê¸°í™”í•œë‹¤.
 void CTcpSocketMap::DeleteAll( )
 {
 	m_clsMutex.acquire();
@@ -212,11 +172,7 @@ void CTcpSocketMap::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼¼¼ÇµéÀÇ Á¤º¸¸¦ ÇÏ³ªÀÇ ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf TCP ¼¼¼ÇµéÀÇ Á¤º¸¸¦ ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- */
+// TCP ì„¸ì…˜ë“¤ì˜ ì •ë³´ë¥¼ í•˜ë‚˜ì˜ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CTcpSocketMap::GetString( CMonitorString & strBuf )
 {
 	TCP_SOCKET_MAP::iterator	it;
@@ -231,13 +187,7 @@ void CTcpSocketMap::GetString( CMonitorString & strBuf )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£·Î ÀÚ·á±¸Á¶ÀÇ Å°¸¦ »ı¼ºÇÏ¿© ÀúÀåÇÑ´Ù.
- * @param pszIp		Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort		Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param strKey TCP/TLS ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶ÀÇ Å° ÀúÀå º¯¼ö
- */
+// í´ë¼ì´ì–¸íŠ¸ IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ë¡œ ìë£Œêµ¬ì¡°ì˜ í‚¤ë¥¼ ìƒì„±í•˜ì—¬ ì €ì¥í•œë‹¤.
 void CTcpSocketMap::GetKey( const char * pszIp, int iPort, std::string & strKey )
 {
 	char	szKey[51];

@@ -25,10 +25,7 @@
 #include <list>
 #include <map>
 
-/**
- * @ingroup SipCallDump
- * @brief IP Header ¸¦ Æ÷ÇÔÇÑ ÆĞÅ¶À» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// IP Header ë¥¼ í¬í•¨í•œ íŒ¨í‚·ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CIpPacket
 {
 public:
@@ -39,10 +36,7 @@ public:
 	int				m_iPacketLen;
 };
 
-/**
- * @ingroup SipCallDump
- * @brief ÇÏ³ªÀÇ IP Fragment µÈ ÆĞÅ¶À» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// í•˜ë‚˜ì˜ IP Fragment ëœ íŒ¨í‚·ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CIpFragmentData
 {
 public:
@@ -57,10 +51,7 @@ public:
 
 typedef std::list< CIpFragmentData * > IP_FRAGMENT_DATA_LIST;
 
-/**
- * @ingroup SipCallDump
- * @brief ID °¡ ÀÏÄ¡ÇÏ´Â IP Fragment µÈ ÆĞÅ¶À» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// ID ê°€ ì¼ì¹˜í•˜ëŠ” IP Fragment ëœ íŒ¨í‚·ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CIpFragmentInfo
 {
 public:
@@ -78,10 +69,7 @@ public:
 
 typedef std::map< std::string, CIpFragmentInfo * > IP_FRAGMENT_MAP;
 
-/**
- * @ingroup SipCallDump
- * @brief IP Fragment µÈ ÆĞÅ¶À» IP ¹× ID ¸¦ ±âÁØÀ¸·Î ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶
- */
+// IP Fragment ëœ íŒ¨í‚·ì„ IP ë° ID ë¥¼ ê¸°ì¤€ìœ¼ë¡œ ì €ì¥í•˜ëŠ” ìë£Œêµ¬ì¡°
 class CIpFragmentMap
 {
 public:

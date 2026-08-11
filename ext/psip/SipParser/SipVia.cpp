@@ -30,13 +30,7 @@ CSipVia::~CSipVia()
 {
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipVia Å¬·¡½ºÀÇ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipVia í´ë˜ìŠ¤ì˜ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 int CSipVia::Parse( const char * pszText, int iTextLen )
 {
 	if( pszText == NULL || iTextLen <= 0 ) return -1;
@@ -59,13 +53,7 @@ int CSipVia::Parse( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ¸Ş½ÃÁö¿¡ Æ÷ÇÔµÈ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- * @param iTextSize	pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀÛ¼ºÇÑ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í¬í•¨ëœ ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 int CSipVia::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -89,10 +77,7 @@ int CSipVia::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SipParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSipVia::Clear()
 {
 	m_strProtocolName.clear();
@@ -104,12 +89,7 @@ void CSipVia::Clear()
 	ClearParam();
 }
 
-/**
- * @brief ¹®ÀÚ¿­¿¡¼­ ÇÁ·ÎÅäÄİ ¹× ÇÁ·ÎÅäÄİ ¹öÀüÀ» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë¬¸ìì—´ì—ì„œ í”„ë¡œí† ì½œ ë° í”„ë¡œí† ì½œ ë²„ì „ì„ íŒŒì‹±í•œë‹¤.
 int CSipVia::ParseSentProtocol( const char * pszText, int iTextLen )
 {
 	int		iPos, iPrevPos = -1;
@@ -151,12 +131,7 @@ int CSipVia::ParseSentProtocol( const char * pszText, int iTextLen )
 	return -1;
 }
 
-/**
- * @brief Àü¼Û È£½ºÆ® Á¤º¸¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		Àü¼Û È£½ºÆ® Á¤º¸ ¹®ÀÚ¿­
- * @param iTextLen	Àü¼Û È£½ºÆ® Á¤º¸ ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì „ì†¡ í˜¸ìŠ¤íŠ¸ ì •ë³´ë¥¼ íŒŒì‹±í•œë‹¤.
 int CSipVia::ParseSentBy( const char * pszText, int iTextLen )
 {
 	int		iPos, iPortPos = -1;
@@ -227,14 +202,7 @@ int CSipVia::ParseSentBy( const char * pszText, int iTextLen )
 	return iPos;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Çì´õ ¹®ÀÚ¿­À» ÆÄ½ÌÇÏ¿© CSipVia °´Ã¼ ¸®½ºÆ®¿¡ ÀúÀåÇÑ´Ù.
- * @param clsList CSipVia °´Ã¼ ¸®½ºÆ®
- * @param pszText ÆÄ½ÌÇÒ ¹®ÀÚ¿­
- * @param iTextLen ÆÄ½ÌÇÒ ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ÀÇ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP í—¤ë” ë¬¸ìì—´ì„ íŒŒì‹±í•˜ì—¬ CSipVia ê°ì²´ ë¦¬ìŠ¤íŠ¸ì— ì €ì¥í•œë‹¤.
 int ParseSipVia( SIP_VIA_LIST & clsList, const char * pszText, int iTextLen )
 {
 	int iPos, iCurPos = 0;

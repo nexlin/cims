@@ -27,10 +27,7 @@ CThreadListEntry::CThreadListEntry() : m_hSend(INVALID_SOCKET), m_hRecv(INVALID_
 
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼ÒÄÏÀ» Á¾·áÇÑ´Ù.
- */
+// ì†Œì¼“ì„ ì¢…ë£Œí•œë‹¤.
 void CThreadListEntry::Close()
 {
 	if( m_hSend != INVALID_SOCKET )
@@ -46,10 +43,7 @@ void CThreadListEntry::Close()
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼ÒÄÏ »ç¿ë °³¼ö¸¦ Áõ°¡½ÃÅ²´Ù.
- */
+// ì†Œì¼“ ì‚¬ìš© ê°œìˆ˜ë¥¼ ì¦ê°€ì‹œí‚¨ë‹¤.
 void CThreadListEntry::IncreaseSocketCount( bool bLock )
 {
 	if( bLock ) gclsMutex.acquire();
@@ -57,10 +51,7 @@ void CThreadListEntry::IncreaseSocketCount( bool bLock )
 	if( bLock ) gclsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼ÒÄÏ »ç¿ë °³¼ö¸¦ °¨¼Ò½ÃÅ²´Ù.
- */
+// ì†Œì¼“ ì‚¬ìš© ê°œìˆ˜ë¥¼ ê°ì†Œì‹œí‚¨ë‹¤.
 void CThreadListEntry::DecreaseSocketCount( bool bLock )
 {
 	if( bLock ) gclsMutex.acquire();
@@ -76,15 +67,7 @@ CThreadList::~CThreadList()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå ¸®½ºÆ®¸¦ ½ÃÀÛÇÑ´Ù.
- * @param iThreadCount		»ı¼ºÇÒ ¾²·¹µå °³¼ö
- * @param iThreadMaxCount	ÃÖ´ë ¾²·¹µå °³¼ö
- * @param pThreadProc			¾²·¹µå ÇÔ¼ö
- * @param pUser						»ç¿ëÀÚ Á¤ÀÇ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ë¦¬ìŠ¤íŠ¸ë¥¼ ì‹œì‘í•œë‹¤.
 #ifdef WIN32
 bool CThreadList::Init( int iThreadCount, int iThreadMaxCount, LPTHREAD_START_ROUTINE pThreadProc, void * pUser )
 #else
@@ -106,10 +89,7 @@ bool CThreadList::Init( int iThreadCount, int iThreadMaxCount, void *(*pThreadPr
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå ¸®½ºÆ®¸¦ Á¾·áÇÑ´Ù.
- */
+// ì“°ë ˆë“œ ë¦¬ìŠ¤íŠ¸ë¥¼ ì¢…ë£Œí•œë‹¤.
 void CThreadList::Final()
 {
 	THREAD_LIST::iterator	it;
@@ -123,12 +103,7 @@ void CThreadList::Final()
 	m_clsList.clear();
 }
 
-/**
- * @ingroup SipStack
- * @brief ÇÏ³ªÀÇ ¾²·¹µå¿¡¼­ Ã³¸®ÇÏ´Â ÃÖ´ë ¼ÒÄÏ °³¼ö¸¦ ¼³Á¤ÇÑ´Ù.
- * @param iMaxSocketPerThread ÇÏ³ªÀÇ ¾²·¹µå¿¡¼­ Ã³¸®ÇÏ´Â ÃÖ´ë ¼ÒÄÏ °³¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// í•˜ë‚˜ì˜ ì“°ë ˆë“œì—ì„œ ì²˜ë¦¬í•˜ëŠ” ìµœëŒ€ ì†Œì¼“ ê°œìˆ˜ë¥¼ ì„¤ì •í•œë‹¤.
 bool CThreadList::SetMaxSocketPerThread( int iMaxSocketPerThread )
 {
 	if( iMaxSocketPerThread <= 0 ) return false;
@@ -138,16 +113,7 @@ bool CThreadList::SetMaxSocketPerThread( int iMaxSocketPerThread )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå¿¡ ¸í·ÉÀ» Àü¼ÛÇÑ´Ù.
- * @param pszData				¸í·É
- * @param iDataLen			pszData ±æÀÌ
- * @param iThreadIndex	¸í·ÉÀ» Àü¼ÛÇÒ ¾²·¹µå ÀÎµ¦½º
- *											-1 À» ÀÔ·ÂÇÏ¸é ÃÖ´ë ¼ÒÄÏ °³¼ö¸¦ ³ÑÁö ¾ÊÀº ¾²·¹µå¿¡ ¸í·ÉÀÌ Àü¼ÛµÈ´Ù.
- * @param piThreadIndex	½ÇÁ¦ Àü¼ÛµÈ ¾²·¹µå ÀÎµ¦½º¸¦ ÀúÀåÇÏ´Â º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œì— ëª…ë ¹ì„ ì „ì†¡í•œë‹¤.
 bool CThreadList::SendCommand( const char * pszData, int iDataLen, int iThreadIndex, int * piThreadIndex )
 {
 	bool	bRes = false, bFound = false;
@@ -173,7 +139,7 @@ bool CThreadList::SendCommand( const char * pszData, int iDataLen, int iThreadIn
 		THREAD_LIST::iterator	it;
 		int iMinCount = 2000000000;
 
-		// ¼ÒÄÏÀ» ÃÖ¼Ò »ç¿ëÇÏ´Â ¾²·¹µå¸¦ °Ë»öÇÑ´Ù.
+		// ì†Œì¼“ì„ ìµœì†Œ ì‚¬ìš©í•˜ëŠ” ì“°ë ˆë“œë¥¼ ê²€ìƒ‰í•œë‹¤.
 		for( it = m_clsList.begin(), iThreadIndex = 0; it != m_clsList.end(); ++it, ++iThreadIndex )
 		{
 			if( iMinCount > (*it)->m_iSocketCount )
@@ -219,14 +185,7 @@ bool CThreadList::SendCommand( const char * pszData, int iDataLen, int iThreadIn
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¸í·ÉÀ» ¼ö½ÅÇÑ´Ù.
- * @param hSocket		pipe ¼ö½Å ÇÚµé
- * @param pszData		¸í·É ÀúÀå º¯¼ö
- * @param iDataSize pszData º¯¼ö Å©±â
- * @returns ¼ö½ÅÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª…ë ¹ì„ ìˆ˜ì‹ í•œë‹¤.
 int CThreadList::RecvCommand( Socket hSocket, char * pszData, int iDataSize )
 {
 	int	n;
@@ -240,11 +199,7 @@ int CThreadList::RecvCommand( Socket hSocket, char * pszData, int iDataSize )
 	return n;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå Á¤º¸¸¦ ÇÏ³ªÀÇ ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf ¾²·¹µå Á¤º¸¸¦ ÀúÀåÇÒ ¹®ÀÚ¿­ º¯¼ö
- */
+// ì“°ë ˆë“œ ì •ë³´ë¥¼ í•˜ë‚˜ì˜ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CThreadList::GetString( CMonitorString & strBuf )
 {
 	THREAD_LIST::iterator	it;
@@ -257,11 +212,7 @@ void CThreadList::GetString( CMonitorString & strBuf )
 	}
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå¸¦ Ãß°¡ÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œë¥¼ ì¶”ê°€í•œë‹¤.
 bool CThreadList::AddThread()
 {
 	if( (int)m_clsList.size() >= m_iThreadMaxCount )
@@ -314,14 +265,7 @@ bool CThreadList::AddThread()
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå¿¡ ¸í·ÉÀ» Àü¼ÛÇÑ´Ù.
- * @param hSocket		pipe Àü¼Û ÇÚµé
- * @param pszData		¸í·É
- * @param iDataLen	pszData ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì“°ë ˆë“œì— ëª…ë ¹ì„ ì „ì†¡í•œë‹¤.
 bool CThreadList::_SendCommand( Socket hSocket, const char * pszData, int iDataLen )
 {
 	int	n;

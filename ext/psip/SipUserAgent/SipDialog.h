@@ -23,38 +23,35 @@
 #include "SipMessage.h"
 #include "SipUserAgentCallBack.h"
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Dialog ������ �����ϴ� Ŭ����
- */
+// SIP Dialog 정보를 저장하는 클래스
 class CSipDialog
 {
 public:
 	CSipDialog( CSipStack * pclsSipStack );
 	~CSipDialog();
 
-	/** SIP From ����� ����Ǵ� ����� ���̵� */
+	// SIP From 헤더에 저장되는 사용자 아이디
 	std::string	m_strFromId;
 
-	/** SIP From ����� ����Ǵ� tag */
+	// SIP From 헤더에 저장되는 tag
 	std::string	m_strFromTag;
 
-	/** SIP To ����� ����Ǵ� ����� ���̵� */
+	// SIP To 헤더에 저장되는 사용자 아이디
 	std::string	m_strToId;
 
-	/** SIP To ����� ����Ǵ� tag */
+	// SIP To 헤더에 저장되는 tag
 	std::string	m_strToTag;
 
 	/** SIP Call-ID */
 	std::string m_strCallId;
 
-	/** SIP Top Via ����� branch */
+	// SIP Top Via 헤더의 branch
 	std::string m_strViaBranch;
 
-	/** SIP CSeq ����� ��ȣ */
+	// SIP CSeq 헤더의 번호
 	int					m_iSeq;
 
-	/** SIP CSeq ����� ���� ��ȣ ( PRACK ������ ������ �޽����� ���ؼ� ���� ) */
+	// SIP CSeq 헤더의 다음 번호 ( PRACK 다음에 전송할 메시지를 위해서 사용됨 )
 	int					m_iNextSeq;
 
 	/** 가장 최근 송신한 INVITE 의 CSeq 번호. ACK/CANCEL 은 RFC 3261 상 자신이 ACK/CANCEL
@@ -64,13 +61,13 @@ public:
 	 *  이를 막기 위해 INVITE 송신 시 그 CSeq 를 보관해 ACK/CANCEL 이 재사용한다. */
 	int					m_iInviteSeq;
 
-	/** SIP ��û �޽����� ������ IP �ּ� */
+	// SIP 요청 메시지를 전송할 IP 주소
 	std::string	m_strContactIp;
 
-	/** SIP ��û �޽����� ������ ��Ʈ ��ȣ */
+	// SIP 요청 메시지를 전송할 포트 번호
 	int					m_iContactPort;
 
-	/** SIP ��û �޽����� ������ transport */
+	// SIP 요청 메시지를 전송할 transport
 	ESipTransport	m_eTransport;
 
 	/** Per-dialog override domain for From/To/Request-URI.
@@ -89,13 +86,13 @@ public:
 	 *  <=0 → 전역 CSipStackSetup::GetLocalPort(transport) fallback. */
 	int			m_iOutboundLocalPort;
 
-	/** local RTP IP �ּ� */
+	// local RTP IP 주소
 	std::string	m_strLocalRtpIp;
 
-	/** local RTP ��Ʈ ��ȣ */
+	// local RTP 포트 번호
 	int					m_iLocalRtpPort;
 
-	/** local MCPTT floor control (m=application) port. -1 �̸� SDP �� floor media �̻���. */
+	// local MCPTT floor control (m=application) 포트. -1 이면 SDP 에 floor media 미사용.
 	int					m_iLocalApplicationPort;
 
 	/** local RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
@@ -106,10 +103,10 @@ public:
 	SDP_MEDIA_LIST	m_clsLocalMediaList;
 #endif
 
-	/** remote RTP IP �ּ� */
+	// remote RTP IP 주소
 	std::string	m_strRemoteRtpIp;
 
-	/** remote RTP ��Ʈ ��ȣ */
+	// remote RTP 포트 번호
 	int					m_iRemoteRtpPort;
 
 	/** remote RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
@@ -120,12 +117,12 @@ public:
 	SDP_MEDIA_LIST	m_clsRemoteMediaList;
 #endif
 
-	/** �ڵ� */
+	// 코덱
 	int					m_iCodec;
 
 	CODEC_LIST	m_clsCodecList;
 
-	/** SIP ��û �޽����� ����� Request Uri */
+	// SIP 요청 메시지에 저장될 Request Uri
 	std::string	m_strContactUri;
 
 	/** RSeq */
@@ -134,22 +131,22 @@ public:
 	/** 100rel */
 	bool				m_b100rel;
 
-	/** INVITE ����/���� �ð� */
+	// INVITE 전송/수신 시간
 	struct timeval m_sttInviteTime;
 
-	/** CANCEL ���� �ð� */
+	// CANCEL 전송 시간
 	struct timeval m_sttCancelTime;
 
-	/** ��ȭ ���� �ð� */
+	// 통화 시작 시간
 	struct timeval m_sttStartTime;
 
-	/** ��ȭ ���� �ð� */
+	// 통화 종료 시간
 	struct timeval m_sttEndTime;
 
-	/** ���ŵ� INVITE �޽��� */
+	// 수신된 INVITE 메시지
 	CSipMessage * m_pclsInvite;
 
-	/** ���ŵ� INVITE �޽����� ����� Record-Route ����Ʈ�� ������ Route ����Ʈ */
+	// 수신된 INVITE 메시지에 저장된 Record-Route 리스트로 생성한 Route 리스트
 	SIP_FROM_LIST	m_clsRouteList;
 
 	CSipStack		* m_pclsSipStack;
@@ -157,7 +154,7 @@ public:
 	/** SDP session version */
 	int	m_iSessionVersion;
 
-	/** �߽� ��ȭ�ΰ�? */
+	// 발신 전화인가?
 	bool m_bSendCall;
 
 	CSipMessage * CreateInvite( );

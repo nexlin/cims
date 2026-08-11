@@ -22,59 +22,56 @@
 #include "StringMap.h"
 #include "XmlElement.h"
 
-/**
- * @ingroup SipLoadBalancer
- * @brief SipLoadBalancer ¼³Á¤ ÆÄÀÏÀÇ ³»¿ëÀ» ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SipLoadBalancer ì„¤ì • íŒŒì¼ì˜ ë‚´ìš©ì„ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipServerSetup
 {
 public:
 	CSipServerSetup();
 	~CSipServerSetup();
 
-	/** SIP Åë½ÅÀ» À§ÇÑ UDP Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ UDP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iUdpPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ ·ÎÄÃ IP ÁÖ¼Ò */
+	// SIP í†µì‹ ì„ ìœ„í•œ ë¡œì»¬ IP ì£¼ì†Œ
 	std::string	m_strLocalIp;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ UDP ¼ö½Å ¾²·¹µå °³¼ö */
+	// SIP í†µì‹ ì„ ìœ„í•œ UDP ìˆ˜ì‹  ì“°ë ˆë“œ ê°œìˆ˜
 	int					m_iUdpThreadCount;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TCP Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ TCP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iTcpPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TCP ¼ö½Å ¾²·¹µå °³¼ö */
+	// SIP í†µì‹ ì„ ìœ„í•œ TCP ìˆ˜ì‹  ì“°ë ˆë“œ ê°œìˆ˜
 	int					m_iTcpThreadCount;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TCP ¼ö½Å ÃÖ´ë ´ë±â ½Ã°£ ( ÃÊ´ÜÀ§ ) */
+	// SIP í†µì‹ ì„ ìœ„í•œ TCP ìˆ˜ì‹  ìµœëŒ€ ëŒ€ê¸° ì‹œê°„ ( ì´ˆë‹¨ìœ„ )
 	int					m_iTcpRecvTimeout;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TLS Æ÷Æ® ¹øÈ£ */
+	// SIP í†µì‹ ì„ ìœ„í•œ TLS í¬íŠ¸ ë²ˆí˜¸
 	int					m_iTlsPort;
 
-	/** SIP Åë½ÅÀ» À§ÇÑ TLS handshake timeout ½Ã°£ (ÃÊ´ÜÀ§) */
+	// SIP í†µì‹ ì„ ìœ„í•œ TLS handshake timeout ì‹œê°„ (ì´ˆë‹¨ìœ„)
 	int					m_iTlsAcceptTimeout;
 
-	/** TLS ÇÁ·ÎÅäÄİÀ» À§ÇÑ ¼­¹ö ÀÎÁõ¼­ + Å°¸¦ Æ÷ÇÔÇÑ PEM ÆÄÀÏ full path */ 
+	// TLS í”„ë¡œí† ì½œì„ ìœ„í•œ ì„œë²„ ì¸ì¦ì„œ + í‚¤ë¥¼ í¬í•¨í•œ PEM íŒŒì¼ full path
 	std::string	m_strCertFile;
 
-	/** ·Î±× Æú´õ */
+	// ë¡œê·¸ í´ë”
 	std::string	m_strLogFolder;
 
-	/** ·Î±× ·¹º§ */
+	// ë¡œê·¸ ë ˆë²¨
 	int					m_iLogLevel;
 
-	/** ·Î±× ÆÄÀÏÀÇ ÃÖ´ë Å©±â */
+	// ë¡œê·¸ íŒŒì¼ì˜ ìµœëŒ€ í¬ê¸°
 	int					m_iLogMaxSize;
 
-	/** ¸ğ´ÏÅÍ¸µ TCP Æ÷Æ® ¹øÈ£ */
+	// ëª¨ë‹ˆí„°ë§ TCP í¬íŠ¸ ë²ˆí˜¸
 	int					m_iMonitorPort;
 
-	/** ¸ğ´ÏÅÍ¸µ TCP Æ÷Æ®¿¡ Á¢¼Ó Çã¿ëÇÒ IP ÁÖ¼Ò ¸®½ºÆ® */
+	// ëª¨ë‹ˆí„°ë§ TCP í¬íŠ¸ì— ì ‘ì† í—ˆìš©í•  IP ì£¼ì†Œ ë¦¬ìŠ¤íŠ¸
 	CStringMap		 m_clsMonitorIpMap;
 
-	/** SIP transaction list ¿¡ ÀúÀåÇÏÁö ¾ÊÀ» SIP User Agent ¸Ê */
+	// SIP transaction list ì— ì €ì¥í•˜ì§€ ì•Šì„ SIP User Agent ë§µ
 	CStringMap		 m_clsDenySipUserAgentMap;
 
 	bool Read( const char * pszFileName );
@@ -87,9 +84,9 @@ private:
 	bool ReadSipServer( CXmlElement & clsXml );
 	void SetFileSizeTime( );
 
-	std::string	m_strFileName;	// ¼³Á¤ ÆÄÀÏ ÀÌ¸§
-	time_t			m_iFileTime;		// ¼³Á¤ ÆÄÀÏ ÀúÀå ½Ã°£
-	int					m_iFileSize;		// ¼³Á¤ ÆÄÀÏ Å©±â
+	std::string	m_strFileName;	// ì„¤ì • íŒŒì¼ ì´ë¦„
+	time_t			m_iFileTime;		// ì„¤ì • íŒŒì¼ ì €ì¥ ì‹œê°„
+	int					m_iFileSize;		// ì„¤ì • íŒŒì¼ í¬ê¸°
 };
 
 extern CSipServerSetup gclsSetup;

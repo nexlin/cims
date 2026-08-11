@@ -34,20 +34,13 @@ static int	giCallId;
 static std::string gstrSystemId;
 static char garrChar[64];
 
-/**
- * @ingroup SipParser
- * @brief ´Ù¸¥ ½Ã½ºÅÛ°ú ±¸ºĞµÇ´Â ÇöÀç ½Ã½ºÅÛÀÇ À¯ÀÏÇÑ °ªÀ» ¼³Á¤ÇÑ´Ù.
- * @param pszId ÇöÀç ½Ã½ºÅÛÀÇ À¯ÀÏÇÑ °ª
- */
+// ë‹¤ë¥¸ ì‹œìŠ¤í…œê³¼ êµ¬ë¶„ë˜ëŠ” í˜„ì¬ ì‹œìŠ¤í…œì˜ ìœ ì¼í•œ ê°’ì„ ì„¤ì •í•œë‹¤.
 void SipSetSystemId( const char * pszId )
 {
 	gstrSystemId = pszId;
 }
 
-/**
- * @ingroup SipParser
- * @brief byte ·Î ±¸¼ºµÈ º¯¼ö¸¦ ¾ËÆÄºªÀ¸·Î ±¸¼ºµÈ ¹®ÀÚ¿­·Î º¯È¯ÇÏ±â À§ÇÑ ¸ÅÇÎ Å×ÀÌºíÀ» »ı¼ºÇÑ´Ù.
- */
+// byte ë¡œ êµ¬ì„±ëœ ë³€ìˆ˜ë¥¼ ì•ŒíŒŒë²³ìœ¼ë¡œ êµ¬ì„±ëœ ë¬¸ìì—´ë¡œ ë³€í™˜í•˜ê¸° ìœ„í•œ ë§¤í•‘ í…Œì´ë¸”ì„ ìƒì„±í•œë‹¤.
 static void InitRandomString()
 {
 	struct timeval sttTime;
@@ -71,12 +64,7 @@ static void InitRandomString()
 	garrChar[iPos++] = '-';
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP From/To tag ¿¡ »ç¿ëÇÒ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszTag		SIP From/To tag ¿¡ »ç¿ëÇÒ ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTagSize	pszTag º¯¼öÀÇ Å©±â
- */
+// SIP From/To tag ì— ì‚¬ìš©í•  ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 void SipMakeTag( char * pszTag, int iTagSize )
 {
 	int		iTag;
@@ -97,12 +85,7 @@ void SipMakeTag( char * pszTag, int iTagSize )
 	snprintf( pszTag, iTagSize, "%d", iTag );
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Via branch ¿¡ »ç¿ëÇÒ ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszBranch		SIP Via branch ¿¡ »ç¿ëÇÒ ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iBranchSize	pszBranch º¯¼öÀÇ Å©±â
- */
+// SIP Via branch ì— ì‚¬ìš©í•  ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 void SipMakeBranch( char * pszBranch, int iBranchSize )
 {
 	int		iBranch;
@@ -146,12 +129,7 @@ void SipMakeBranch( char * pszBranch, int iBranchSize )
 	}
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP Call-ID ¿¡ »ç¿ëÇÒ name ¹®ÀÚ¿­À» ÀÛ¼ºÇÑ´Ù.
- * @param pszCallId		SIP Call-ID ¿¡ »ç¿ëÇÒ name ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iCallIdSize	pszCallId º¯¼öÀÇ Å©±â
- */
+// SIP Call-ID ì— ì‚¬ìš©í•  name ë¬¸ìì—´ì„ ì‘ì„±í•œë‹¤.
 void SipMakeCallIdName( char * pszCallId, int iCallIdSize )
 {
 	int		iCallId;
@@ -195,14 +173,7 @@ void SipMakeCallIdName( char * pszCallId, int iCallIdSize )
 	}
 }
 
-/**
- * @ingroup SipParser
- * @brief ÀÔ·Â ¹®ÀÚ¿­À» Ãâ·ÂÇÒ ¼ö ÀÖ´Â 64°³ÀÇ ¹®ÀÚµé·Î º¯È¯ÇÏ¿©¼­ Ãâ·Â ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param pszInput		ÀÔ·Â ¹®ÀÚ¿­
- * @param iInputSize	ÀÔ·Â ¹®ÀÚ¿­ Å©±â
- * @param pszOutput		Ãâ·Â ¹®ÀÚ¿­
- * @param iOutputSize	Ãâ·Â ¹®ÀÚ¿­ Å©±â
- */
+// ì…ë ¥ ë¬¸ìì—´ì„ ì¶œë ¥í•  ìˆ˜ ìˆëŠ” 64ê°œì˜ ë¬¸ìë“¤ë¡œ ë³€í™˜í•˜ì—¬ì„œ ì¶œë ¥ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 bool SipMakePrintString( const unsigned char * pszInput, int iInputSize, char * pszOutput, int iOutputSize )
 {
 	if( garrChar[0] == '\0' )
@@ -252,12 +223,7 @@ bool SipMakePrintString( const unsigned char * pszInput, int iInputSize, char * 
 	return true;
 }
 
-/**
- * @ingroup SipParser
- * @brief Æò¹®À» MD5 ¹®ÀÚ¿­·Î º¯È¯ÇÑ´Ù.
- * @param pszInput Æò¹®
- * @param szResult MD5 ¹®ÀÚ¿­ ÀúÀå º¯¼ö
- */
+// í‰ë¬¸ì„ MD5 ë¬¸ìì—´ë¡œ ë³€í™˜í•œë‹¤.
 void SipMd5String21( char * pszInput, char szResult[22] )
 {
 	unsigned char szDigest[16];
@@ -267,11 +233,7 @@ void SipMd5String21( char * pszInput, char szResult[22] )
 	SipMakePrintString( szDigest, 16, szResult, 22 );
 }
 
-/**
- * @ingroup SipParser
- * @brief [] ·Î µÑ·¯½×ÀÎ IPv6 ÁÖ¼Ò¿¡¼­ [] ¸¦ Á¦°ÅÇÑ´Ù.
- * @param strHost IP ÁÖ¼Ò
- */
+// [] ë¡œ ë‘˜ëŸ¬ìŒ“ì¸ IPv6 ì£¼ì†Œì—ì„œ [] ë¥¼ ì œê±°í•œë‹¤.
 void SipIpv6Parse( std::string & strHost )
 {
 	int iLen = (int)strHost.length();

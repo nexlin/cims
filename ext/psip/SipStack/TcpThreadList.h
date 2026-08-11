@@ -25,10 +25,7 @@
 #include <string>
 #include "MonitorString.h"
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå ¸®½ºÆ®¿¡ Æ÷ÇÔµÇ´Â ÇÏ³ªÀÇ ¾²·¹µå Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// ì“°ë ˆë“œ ë¦¬ìŠ¤íŠ¸ì— í¬í•¨ë˜ëŠ” í•˜ë‚˜ì˜ ì“°ë ˆë“œ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CThreadListEntry
 {
 public:
@@ -36,10 +33,10 @@ public:
 
 	void Close();
 
-	Socket	m_hSend;				// ¼Û½Å pipe
-	Socket	m_hRecv;				// ¼ö½Å pipe
-	int			m_iSocketCount;	// ¼ÒÄÏ °³¼ö
-	void		* m_pUser;			// »ç¿ëÀÚ Á¤ÀÇ º¯¼ö
+	Socket	m_hSend;				// ì†¡ì‹  pipe
+	Socket	m_hRecv;				// ìˆ˜ì‹  pipe
+	int			m_iSocketCount;	// ì†Œì¼“ ê°œìˆ˜
+	void		* m_pUser;			// ì‚¬ìš©ì ì •ì˜ ë³€ìˆ˜
 
 	void IncreaseSocketCount( bool bLock = true );
 	void DecreaseSocketCount( bool bLock = true );
@@ -47,10 +44,7 @@ public:
 
 typedef std::vector< CThreadListEntry * > THREAD_LIST;
 
-/**
- * @ingroup SipStack
- * @brief ¾²·¹µå ¸®½ºÆ® ÀÚ·á±¸Á¶
- */
+// ì“°ë ˆë“œ ë¦¬ìŠ¤íŠ¸ ìë£Œêµ¬ì¡°
 class CThreadList
 {
 public:

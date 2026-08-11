@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP NOTIFY ��û �޽��� ���� �̺�Ʈ �ڵ鷯
- * @param iThreadId		SIP stack �� UDP ������ ���̵�
- * @param pclsMessage ���ŵ� SIP ��û �޽���
- * @returns ���������� ó���ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP NOTIFY 요청 메시지 수신 이벤트 핸들러
 bool CSipUserAgent::RecvNotifyRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	std::string	strCallId;

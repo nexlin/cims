@@ -22,7 +22,7 @@
 #include "Setup.h"
 #include "SipTransport.h"
 
-// CSipSetupDlg ´ëÈ­ »óÀÚÀÔ´Ï´Ù.
+// CSipSetupDlg ëŒ€í™” ìƒìì…ë‹ˆë‹¤.
 
 IMPLEMENT_DYNAMIC(CSipSetupDlg, CDialog)
 
@@ -96,10 +96,10 @@ BOOL CSipSetupDlg::OnInitDialog()
 	UpdateData(FALSE);
 
 	return TRUE;  // return TRUE unless you set the focus to a control
-	// ¿¹¿Ü: OCX ¼Ó¼º ÆäÀÌÁö´Â FALSE¸¦ ¹İÈ¯ÇØ¾ß ÇÕ´Ï´Ù.
+	// ì˜ˆì™¸: OCX ì†ì„± í˜ì´ì§€ëŠ” FALSEë¥¼ ë°˜í™˜í•´ì•¼ í•©ë‹ˆë‹¤.
 }
 
-// CSipSetupDlg ¸Ş½ÃÁö Ã³¸®±âÀÔ´Ï´Ù.
+// CSipSetupDlg ë©”ì‹œì§€ ì²˜ë¦¬ê¸°ì…ë‹ˆë‹¤.
 
 void CSipSetupDlg::OnBnClickedOk()
 {

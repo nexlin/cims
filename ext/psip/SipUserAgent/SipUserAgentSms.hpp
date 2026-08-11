@@ -16,15 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief text ��� SMS �޽����� �����Ѵ�.
- * @param pszFrom		�߽��� ���̵�
- * @param pszTo			������ ���̵�
- * @param pszText		SMS �޽���
- * @param pclsRoute SIP �޽��� ������ �ּ� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// text 기반 SMS 메시지를 전송한다.
 bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute )
 {
 	return SendSms( pszFrom, pszTo, pszText, pclsRoute, NULL );

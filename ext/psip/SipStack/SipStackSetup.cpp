@@ -26,10 +26,7 @@
 #include "Random.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief ������
- */
+// 생성자
 CSipStackSetup::CSipStackSetup() : m_iLocalUdpPort(SIP_UDP_PORT), m_iUdpThreadCount(1)
 	, m_iLocalTcpPort(0), m_iLocalTlsPort(0)
 	, m_iTcpThreadCount(1), m_iTcpCallBackThreadCount(0), m_iTcpMaxSocketPerThread(SIP_TCP_MAX_SOCKET_PER_THREAD)
@@ -42,19 +39,12 @@ CSipStackSetup::CSipStackSetup() : m_iLocalUdpPort(SIP_UDP_PORT), m_iUdpThreadCo
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief �Ҹ���
- */
+// 소멸자
 CSipStackSetup::~CSipStackSetup()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ���� �׸��� ��ȿ���� �˻��Ѵ�.
- * @returns ���� �׸��� ��ȿ�ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 설정 항목의 유효성을 검사한다.
 bool CSipStackSetup::Check( )
 {
 	if( m_strLocalIp.empty() ) 
@@ -63,7 +53,7 @@ bool CSipStackSetup::Check( )
 		return false;
 	}
 
-	// UDP ���� ���� ����
+	// UDP 관련 설정 점검
 	if( m_iLocalUdpPort < 0 || m_iLocalUdpPort > 65535 ) m_iLocalUdpPort = 0;
 
 	if( m_iUdpThreadCount <= 0 ) 
@@ -77,7 +67,7 @@ bool CSipStackSetup::Check( )
 		m_iUdpThreadCount = 0;
 	}
 
-	// TCP ���� ���� ����
+	// TCP 관련 설정 점검
 	if( m_iLocalTcpPort < 0 || m_iLocalTcpPort > 65535 ) m_iLocalTcpPort = 0;
 	if( m_iLocalTlsPort < 0 || m_iLocalTlsPort > 65535 ) m_iLocalTlsPort = 0;
 
@@ -115,7 +105,7 @@ bool CSipStackSetup::Check( )
 		m_iTcpConnectTimeout = SIP_TCP_CONNECT_TIMEOUT;
 	}
 
-	// TLS ���� ���� ����
+	// TLS 관련 설정 점검
 	if( m_iTlsAcceptTimeout < 0 ) m_iTlsAcceptTimeout = 0;
 
 	if( m_bTlsClient )
@@ -138,7 +128,7 @@ bool CSipStackSetup::Check( )
 		m_strUserAgent = SIP_USER_AGENT;
 	}
 
-	// SIP stack ���� ����
+	// SIP stack 설정 점검
 	if( m_iStackExecutePeriod <= 0 )
 	{
 		m_iStackExecutePeriod = 20;
@@ -185,11 +175,7 @@ bool CSipStackSetup::Check( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief ���� �������ݿ� ���� ���� ��Ʈ ��ȣ�� �����Ѵ�.
- * @returns ���� �������ݿ� ���� ���� ��Ʈ ��ȣ�� �����Ѵ�.
- */
+// 전송 프로토콜에 대한 로컬 포트 번호를 리턴한다.
 int CSipStackSetup::GetLocalPort( ESipTransport eTransport )
 {
 	switch( eTransport )

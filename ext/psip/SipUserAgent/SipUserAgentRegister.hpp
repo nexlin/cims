@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP REGISTER ÀÀ´ä ¸Þ½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId		SIP stack ÀÇ UDP ¾²·¹µå ¾ÆÀÌµð
- * @param pclsMessage ¼ö½ÅµÈ SIP ¿äÃ» ¸Þ½ÃÁö
- * @returns Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP REGISTER ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessage )
 {
 	SIP_SERVER_INFO_LIST::iterator itSL;
@@ -66,7 +60,7 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 			{
 				if( itSL->m_bAuth )
 				{
-					// ÀÎÁõ Á¤º¸¸¦ Æ÷ÇÔÇÑ REGISTER ¸Þ½ÃÁö¿¡ ´ëÇÑ ÀÀ´äÀÎ °æ¿ì ·Î±×ÀÎ ¿À·ù Ã³¸®ÇÑ´Ù.
+					// ì¸ì¦ ì •ë³´ë¥¼ í¬í•¨í•œ REGISTER ë©”ì‹œì§€ì— ëŒ€í•œ ì‘ë‹µì¸ ê²½ìš° ë¡œê·¸ì¸ ì˜¤ë¥˜ ì²˜ë¦¬í•œë‹¤.
 					goto CLEAR_LOGIN;
 				}
 				else

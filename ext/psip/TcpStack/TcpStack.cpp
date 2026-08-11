@@ -32,13 +32,7 @@ CTcpStack::~CTcpStack()
 {
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP stack À» ½ÃÀÛÇÑ´Ù.
- * @param pclsSetup			TCP stack ¼³Á¤
- * @param pclsCallBack	TCP stack callback
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP stack ì„ ì‹œì‘í•œë‹¤.
 bool CTcpStack::Start( CTcpStackSetup * pclsSetup, ITcpStackCallBack * pclsCallBack )
 {
 	if( pclsSetup == NULL || pclsCallBack == NULL ) return false;
@@ -94,11 +88,7 @@ bool CTcpStack::Start( CTcpStackSetup * pclsSetup, ITcpStackCallBack * pclsCallB
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP stack À» ÁßÁöÇÑ´Ù.
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP stack ì„ ì¤‘ì§€í•œë‹¤.
 bool CTcpStack::Stop( )
 {
 	m_bStop = true;
@@ -109,7 +99,7 @@ bool CTcpStack::Stop( )
 	}
 	else
 	{
-		// TCP ¾²·¹µå°¡ Á¾·áµÉ ¶§±îÁö ÃÖ´ë 2ÃÊ ´ë±âÇÑ´Ù.
+		// TCP ì“°ë ˆë“œê°€ ì¢…ë£Œë  ë•Œê¹Œì§€ ìµœëŒ€ 2ì´ˆ ëŒ€ê¸°í•œë‹¤.
 		for( int i = 0; i < 100; ++i )
 		{
 			if( m_clsSessionMap.GetCount() == 0 ) break;
@@ -117,7 +107,7 @@ bool CTcpStack::Stop( )
 		}
 	}
 
-	// TCP listen ¾²·¹µå°¡ Á¾·áµÉ ¶§±îÁö ÃÖ´ë 2ÃÊ ´ë±âÇÑ´Ù.
+	// TCP listen ì“°ë ˆë“œê°€ ì¢…ë£Œë  ë•Œê¹Œì§€ ìµœëŒ€ 2ì´ˆ ëŒ€ê¸°í•œë‹¤.
 	for( int i = 0; i < 100; ++i )
 	{
 		if( IsTcpListenThreadRun() == false )	break;
@@ -143,16 +133,7 @@ bool CTcpStack::Stop( )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief Æ¯Á¤ ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszIp				IP ÁÖ¼Ò
- * @param iPort				Æ÷Æ® ¹øÈ£
- * @param pszPacket		ÆĞÅ¶
- * @param iPacketLen	ÆĞÅ¶ ±æÀÌ
- * @param bConnectIfNoSession	TCP ¼¼¼ÇÀÌ Á¸ÀçÇÏÁö ¾ÊÀ¸¸é »õ·Î¿î TCP ¼¼¼ÇÀ» ¿¬°áÇÑ ÈÄ, ÆĞÅ¶À» Àü¼ÛÇÏ´Â°¡?
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŠ¹ì • ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStack::Send( const char * pszIp, int iPort, const char * pszPacket, int iPacketLen, bool bConnectIfNoSession )
 {
 	if( m_clsSetup.m_bUseThreadPipe )
@@ -162,22 +143,14 @@ bool CTcpStack::Send( const char * pszIp, int iPort, const char * pszPacket, int
 
 	if( m_clsSessionMap.Send( pszIp, iPort, pszPacket, iPacketLen ) == false )
 	{
-		// m_clsSessionMap ¿¡ Á¸ÀçÇÏÁö ¾ÊÀ¸¹Ç·Î TCP connect ÇÏ°í TcpNoPipeThread ¸¦ »ı¼ºÇÏ´Â °úÁ¤À» ½ÇÇàÇÑ´Ù.
+		// m_clsSessionMap ì— ì¡´ì¬í•˜ì§€ ì•Šìœ¼ë¯€ë¡œ TCP connect í•˜ê³  TcpNoPipeThread ë¥¼ ìƒì„±í•˜ëŠ” ê³¼ì •ì„ ì‹¤í–‰í•œë‹¤.
 		return m_clsClientMap.Send( pszIp, iPort, pszPacket, iPacketLen, bConnectIfNoSession );
 	}
 
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief Æ¯Á¤ ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param iThreadIndex	TCP ¾²·¹µå ¹øÈ£
- * @param iSessionIndex TCP ¼¼¼Ç ¹øÈ£
- * @param pszPacket			ÆĞÅ¶
- * @param iPacketLen		ÆĞÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŠ¹ì • ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStack::Send( int iThreadIndex, int iSessionIndex, const char * pszPacket, int iPacketLen )
 {
 	if( m_clsSetup.m_bUseThreadPipe )
@@ -188,13 +161,7 @@ bool CTcpStack::Send( int iThreadIndex, int iSessionIndex, const char * pszPacke
 	return m_clsSessionMap.Send( iThreadIndex, pszPacket, iPacketLen );
 }
 
-/**
- * @ingroup TcpStack
- * @brief ¸ğµç ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket			ÆĞÅ¶
- * @param iPacketLen		ÆĞÅ¶ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë“  ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStack::SendAll( const char * pszPacket, int iPacketLen )
 {
 	if( m_clsSetup.m_bUseThreadPipe )
@@ -205,15 +172,7 @@ bool CTcpStack::SendAll( const char * pszPacket, int iPacketLen )
 	return m_clsSessionMap.SendAll( pszPacket, iPacketLen, m_pclsCallBack );
 }
 
-/**
- * @ingroup TcpStack
- * @brief Æ¯Á¤ ¼¼¼ÇÀ» Á¦¿ÜÇÑ ¸ğµç ¼¼¼Ç¿¡ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù.
- * @param pszPacket			ÆĞÅ¶
- * @param iPacketLen		ÆĞÅ¶ ±æÀÌ
- * @param iThreadIndex	Àü¼ÛÇÏÁö ¾ÊÀ» ¼¼¼ÇÀÇ ¾²·¹µå ÀÎµ¦½º
- * @param iSessionIndex Àü¼ÛÇÏÁö ¾ÊÀ» ¼¼¼Ç ÀÎµ¦½º
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// íŠ¹ì • ì„¸ì…˜ì„ ì œì™¸í•œ ëª¨ë“  ì„¸ì…˜ì— TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤.
 bool CTcpStack::SendAllExcept( const char * pszPacket, int iPacketLen, int iThreadIndex, int iSessionIndex )
 {
 	if( m_clsSetup.m_bUseThreadPipe )

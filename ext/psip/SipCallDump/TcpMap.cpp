@@ -78,7 +78,7 @@ bool CTcpInfo::Insert( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const
 		{
 			if( (*itTL)->m_iSeq == iSeq )
 			{
-				// µ¿ÀÏÇÑ SEQ ´Â ÀúÀåÇÏÁö ¾Ê´Â´Ù.
+				// ë™ì¼í•œ SEQ ëŠ” ì €ìž¥í•˜ì§€ ì•ŠëŠ”ë‹¤.
 				return true;
 			}
 			else if( (*itTL)->m_iSeq > iSeq )
@@ -156,7 +156,7 @@ void CTcpInfo::CheckSip( pcap_t * psttPcap )
 
 		if( clsMessage.Parse( strData.c_str(), strData.length() ) > 0 )
 		{
-			// N °³ÀÇ TCP ÆÐÅ¶À» ÇÏ³ªÀÇ ÆÐÅ¶À¸·Î ÀúÀåÇÑ´Ù.
+			// N ê°œì˜ TCP íŒ¨í‚·ì„ í•˜ë‚˜ì˜ íŒ¨í‚·ìœ¼ë¡œ ì €ìž¥í•œë‹¤.
 			u_char * pszPacket = (u_char *)malloc( iPacketLen );
 			if( pszPacket )
 			{
@@ -178,11 +178,11 @@ void CTcpInfo::CheckSip( pcap_t * psttPcap )
 					}
 				}
 
-				// pcap packet Çì´õ¸¦ ¼öÁ¤ÇÑ´Ù.
+				// pcap packet í—¤ë”ë¥¼ ìˆ˜ì •í•œë‹¤.
 				sttHeader.caplen = iPacketLen;
 				sttHeader.len = iPacketLen;
 
-				// IP Çì´õ¸¦ ¼öÁ¤ÇÑ´Ù.
+				// IP í—¤ë”ë¥¼ ìˆ˜ì •í•œë‹¤.
 				int iIpPos = 14;
 
 				if( pszPacket[12] == 0x81 )
@@ -245,7 +245,7 @@ bool CTcpMap::Insert( pcap_t * psttPcap, struct pcap_pkthdr * psttHeader, const 
 	{
 		CSipMessage clsMessage;
 
-		// ÇÏ³ªÀÇ TCP ÆÐÅ¶¿¡ SIP ¸Þ½ÃÁö°¡ ¸ðµÎ Á¸ÀçÇÏ¸é ÀÚ·á±¸Á¶¿¡ ÀúÀåÇÏÁö ¾Ê°í CallMap ¿¡ ÀúÀåÇÑ´Ù.
+		// í•˜ë‚˜ì˜ TCP íŒ¨í‚·ì— SIP ë©”ì‹œì§€ê°€ ëª¨ë‘ ì¡´ìž¬í•˜ë©´ ìžë£Œêµ¬ì¡°ì— ì €ìž¥í•˜ì§€ ì•Šê³  CallMap ì— ì €ìž¥í•œë‹¤.
 		if( clsMessage.Parse( (const char *)(pszData + iBodyPos), iBodyLen ) > 0 )
 		{
 			return gclsCallMap.Insert( psttPcap, psttHeader, pszData, &clsMessage );

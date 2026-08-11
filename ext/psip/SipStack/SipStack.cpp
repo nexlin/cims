@@ -29,10 +29,7 @@
 #include "SipStackCallBack.hpp"
 #include "SipStackComm.hpp"
 
-/**
- * @ingroup SipStack
- * @brief ������ - ���� ������ �ʱ�ȭ��Ű�� transaction list �� SIP stack �� �����Ų��.
- */
+// 생성자 - 내부 변수를 초기화시키고 transaction list 와 SIP stack 을 연결시킨다.
 CSipStack::CSipStack()
 {
 	m_bStopEvent = false;
@@ -62,20 +59,12 @@ CSipStack::CSipStack()
 	m_pclsSecurityCallBack = NULL;
 }
 
-/**
- * @ingroup SipStack
- * @brief �Ҹ���
- */
+// 소멸자
 CSipStack::~CSipStack()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP stack �� �����Ѵ�. SIP stack ������� network ���� �����带 �����Ѵ�.
- * @param clsSetup SIP stack ���� �׸� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP stack 을 시작한다. SIP stack 쓰레드와 network 수신 쓰레드를 시작한다.
 bool CSipStack::Start( CSipStackSetup & clsSetup )
 {
 	if( m_bStarted || m_bStopEvent ) return false;
@@ -274,11 +263,7 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP stack �� ������Ų��.
- * @returns �����ϸ� true �� �����ϰ� SIP stack �� ������� �ʾҰų� ���� �̺�Ʈ ó�� ���̸� false �� �����Ѵ�.
- */
+// SIP stack 을 중지시킨다.
 bool CSipStack::Stop( )
 {
 	if( m_bStarted == false || m_bStopEvent ) return false;
@@ -292,13 +277,7 @@ bool CSipStack::Stop( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP stack �� �����Ѵ�.
- *				SIP stack �� �����ϴ� Transaction List �� �ֱ������� �����Ͽ��� Re-Transmit �Ǵ� Timeout ���� ó���ϱ� ���ؼ� �� �Լ��� 20ms �������� ȣ���� �־�� �Ѵ�.
- * @param psttTime ���� �ð�
- * @returns true �� �����Ѵ�.
- */
+// SIP stack 을 실행한다. SIP stack 이 관리하는 Transaction List 를 주기적으로 점검하여서 Re-Transmit 또는 Timeout 등을 처리하기 위해서 본 함수를 20ms 간격으로 호출해 주어야 한다.
 bool CSipStack::Execute( struct timeval * psttTime )
 {
 	m_clsICT.Execute( psttTime );
@@ -309,11 +288,7 @@ bool CSipStack::Execute( struct timeval * psttTime )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief UDP SIP �޽��� ���� ������ ������ ������Ų��.
- * @param iThreadId UDP SIP �޽��� ���� ������ ������ ������Ű�� ���� UDP SIP �޽��� ���� ������ ������ ������ ����
- */
+// UDP SIP 메시지 수신 쓰레드 개수를 증가시킨다.
 void CSipStack::IncreateUdpThreadCount( int & iThreadId )
 {
 	m_clsMutex.acquire();
@@ -322,10 +297,7 @@ void CSipStack::IncreateUdpThreadCount( int & iThreadId )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief UDP SIP �޽��� ���� ������ ������ ���ҽ�Ų��.
- */
+// UDP SIP 메시지 수신 쓰레드 개수를 감소시킨다.
 void CSipStack::DecreateUdpThreadCount()
 {
 	m_clsMutex.acquire();
@@ -333,11 +305,7 @@ void CSipStack::DecreateUdpThreadCount()
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP SIP �޽��� ���� ������ ������ ������Ų��.
- * @param iThreadId UDP SIP �޽��� ���� ������ ������ ������Ű�� ���� UDP SIP �޽��� ���� ������ ������ ������ ����
- */
+// TCP SIP 메시지 수신 쓰레드 개수를 증가시킨다.
 void CSipStack::IncreateTcpThreadCount( int & iThreadId )
 {
 	m_clsMutex.acquire();
@@ -346,10 +314,7 @@ void CSipStack::IncreateTcpThreadCount( int & iThreadId )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP SIP �޽��� ���� ������ ������ ���ҽ�Ų��.
- */
+// TCP SIP 메시지 수신 쓰레드 개수를 감소시킨다.
 void CSipStack::DecreateTcpThreadCount()
 {
 	m_clsMutex.acquire();
@@ -357,11 +322,7 @@ void CSipStack::DecreateTcpThreadCount()
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Transaction List �� ������ ���ڿ��� �����Ѵ�.
- * @param strBuf		���ڿ� ����
- */
+// Transaction List 의 정보를 문자열에 저장한다.
 void CSipStack::GetString( CMonitorString & strBuf )
 {
 	strBuf.Clear();
@@ -373,20 +334,13 @@ void CSipStack::GetString( CMonitorString & strBuf )
 	strBuf.AddRow( gclsSipDeleteQueue.GetSize() );
 }
 
-/**
- * @ingroup SipStack
- * @brief Invite Client Transaction ������ ���ڿ��� �����Ѵ�.
- * @param strBuf ���ڿ� ����
- */
+// Invite Client Transaction 정보를 문자열에 저장한다.
 void CSipStack::GetICTString( CMonitorString & strBuf )
 {
 	m_clsICT.GetString( strBuf );
 }
 
-/**
- * @ingroup SipStack
- * @brief ���μ����� ����� ���� ���������� �����Ͽ��� openssl �޸� ������ ������� �ʴ´�. 
- */
+// 프로세스가 종료될 때에 최종적으로 실행하여서 openssl 메모리 누수를 출력하지 않는다.
 void CSipStack::Final()
 {
 #ifdef USE_TLS
@@ -394,10 +348,7 @@ void CSipStack::Final()
 #endif
 }
 
-/**
- * @ingroup SipStack
- * @brief ��� SIP transaction �� �����Ѵ�.
- */
+// 모든 SIP transaction 을 삭제한다.
 void CSipStack::DeleteAllTransaction()
 {
 	m_clsICT.DeleteAll();
@@ -408,29 +359,20 @@ void CSipStack::DeleteAllTransaction()
 	gclsSipDeleteQueue.DeleteAll();
 }
 
-/**
- * @ingroup SipStack
- * @brief ICT transcation map �� �����´�.
- * @param clsMap [out] transcation map ���� ����
- */
+// ICT transcation map 을 가져온다.
 void CSipStack::GetICTMap( INVITE_TRANSACTION_MAP & clsMap )
 {
 	m_clsICT.GetTransactionMap( clsMap );
 }
 
-/**
- * @ingroup SipStack
- * @brief UDP SIP �޽��� ���� �����忡 ���� SIP �޽����� �����ϰ� SIP stack �����忡 ���� �̺�Ʈ�� ������ ��, ��� �����尡 ������ ������ ����� ��,
- *				���� �ڵ��� �����Ų��.
- * @returns true �� �����Ѵ�.
- */
+// UDP SIP 메시지 수신 쓰레드에 종료 SIP 메시지를 전송하고 SIP stack 쓰레드에 종료 이벤트를 설정한 후, 모든 쓰레드가 종료할 때까지 대기한 후, 소켓 핸들을 종료시킨다.
 bool CSipStack::_Stop( )
 {
 	m_bStopEvent = true;
 
 	if( m_clsSetup.m_iLocalUdpPort > 0 )
 	{
-		// SIP �޽��� ���� �����尡 N �� ����ǹǷ� N �� ����ϴ� ���� �����ϱ� ���� �ڵ��̴�.
+		// SIP 메시지 수신 쓰레드가 N 개 실행되므로 N 초 대기하는 것을 방지하기 위한 코드이다.
 		Socket hSocket = UdpSocket();
 
 		if( hSocket != INVALID_SOCKET )
@@ -446,7 +388,7 @@ bool CSipStack::_Stop( )
 
 	gclsSipQueue.BroadCast();
 
-	// ��� �����尡 ������ ������ ����Ѵ�.
+	// 모든 쓰레드가 종료할 때까지 대기한다.
 	while( m_iUdpThreadRunCount > 0 || m_iTcpThreadRunCount > 0 || m_bStackThreadRun || GetTcpConnectingCount() > 0 )
 	{
 		MiliSleep( 20 );
@@ -519,11 +461,7 @@ bool CSipStack::_Stop( )
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP/TLS ���� �������� ������ ������ �����Ѵ�.
- * @returns TCP/TLS ���� �������� ������ ������ �����Ѵ�.
- */
+// TCP/TLS 연결 진행중인 쓰레드 개수를 리턴한다.
 int CSipStack::GetTcpConnectingCount( )
 {
 	int iCount = m_clsTcpConnectMap.GetSize();

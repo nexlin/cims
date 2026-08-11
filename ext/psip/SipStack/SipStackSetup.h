@@ -19,10 +19,7 @@
 #ifndef _SIP_STACK_SETUP_H_
 #define _SIP_STACK_SETUP_H_
 
-/**
- * @ingroup SipStack
- * @brief SIP stack ���� Ŭ����
- */
+// SIP stack 설정 클래스
 class CSipStackSetup
 {
 public:
@@ -32,81 +29,80 @@ public:
 	bool Check( );
 	int GetLocalPort( ESipTransport eTransport );
 
-	/** SIP �޽����� ����Ǵ� ���� IP �ּ� */
+	// SIP 메시지에 저장되는 로컬 IP 주소
 	std::string m_strLocalIp;
 
-	/** SIP �޽��� ����/���ſ� UDP ��Ʈ ��ȣ */
+	// SIP 메시지 전송/수신용 UDP 포트 번호
 	int					m_iLocalUdpPort;
 
-	/** SIP �޽��� ���ſ� UDP ������ ���� */
+	// SIP 메시지 수신용 UDP 쓰레드 개수
 	int					m_iUdpThreadCount;
 
-	/** SIP �޽��� ����/���ſ� TCP ��Ʈ ��ȣ */
+	// SIP 메시지 전송/수신용 TCP 포트 번호
 	int					m_iLocalTcpPort;
 
-	/** SIP �޽��� ����/���ſ� TLS ��Ʈ ��ȣ */
+	// SIP 메시지 전송/수신용 TLS 포트 번호
 	int					m_iLocalTlsPort;
 
-	/** SIP �޽��� ���ſ� TCP ������ ���� */
+	// SIP 메시지 수신용 TCP 쓰레드 개수
 	int					m_iTcpThreadCount;
 
-	/** SIP �޽��� ���� callback ó���� ���� TCP ������ ����. 
-			�� ������ 0 �̸� TCP ���� �����忡�� callback �� ȣ���ϰ� 0 ���� ũ�� tcp callback �����忡�� callback �� ȣ���Ѵ�. */
+	// SIP 메시지 수신 callback 처리를 위한 TCP 쓰레드 개수. 본 개수가 0 이면 TCP 수신 쓰레드에서 callback 을 호출하고 0 보다 크면 tcp callback 쓰레드에서 callback 을 호출한다.
 	int					m_iTcpCallBackThreadCount;
 
-	/** SIP �޽��� ���ſ� TCP ������ �ϳ��� ���Ե� �� �ִ� �ִ� ���� ���� */
+	// SIP 메시지 수신용 TCP 쓰레드 하나에 포함될 수 있는 최대 소켓 개수
 	int					m_iTcpMaxSocketPerThread;
 
-	/** SIP �޽��� ���ſ� TCP ������ ���� ��� �ð� (�ʴ���) */
+	// SIP 메시지 수신용 TCP 소켓의 수신 대기 시간 (초단위)
 	int					m_iTcpRecvTimeout;
 
-	/** TCP ���� ���� timeout �ð� (�ʴ���) */
+	// TCP 세션 연결 timeout 시간 (초단위)
 	int					m_iTcpConnectTimeout;
 
-	/** TLS ���� handshake ��� �ð� (�ʴ���) */
+	// TLS 세션 handshake 대기 시간 (초단위)
 	int					m_iTlsAcceptTimeout;
 
-	/** TLS ������ ���� ���� ������ + ����Ű�� ������ PEM ���� */
+	// TLS 세션을 위한 서버 인증서 + 개인키를 포함한 PEM 파일
 	std::string	m_strCertFile;
 
-	/** TLS �������� ������ Ŭ���̾�Ʈ ������ ���� ���� ��� ������ PEM ���� */
+	// TLS 세션으로 연결한 클라이언트 인증을 위한 인증 기관 인증서 PEM 파일
 	std::string m_strCaCertFile;
 
-	/** SIP UserAgent ����� ����� ���ڿ� */
+	// SIP UserAgent 헤더에 저장될 문자열
 	std::string	m_strUserAgent;
 
 	/** SIP domain for URI construction (From, To host, P-Asserted-Identity).
 	 *  If empty, m_strLocalIp is used as fallback. */
 	std::string m_strDomain;
 
-	/** SIP �޽����� ������ ���� compact form ���� �������� ���� */
+	// SIP 메시지를 생성할 때에 compact form 으로 생성할지 설정
 	bool				m_bUseSipCompactForm;
 
-	/** SIP stack ���� �ֱ� (ms ����) */
+	// SIP stack 실행 주기 (ms 단위)
 	int					m_iStackExecutePeriod;
 
-	/** timer D ����ð� (ms ����) */
+	// timer D 만료시간 (ms 단위)
 	int					m_iTimerD;
 
-	/** timer J ����ð� (ms ����) */
+	// timer J 만료시간 (ms 단위)
 	int					m_iTimerJ;
 
-	/** IPv6 ��� ���� */
+	// IPv6 사용 유무
 	bool				m_bIpv6;
 
-	/** Stateful SIP stack �ΰ�? */
+	// Stateful SIP stack 인가?
 	bool				m_bStateful;
 
-	/** TLS Ŭ���̾�Ʈ�� ����ϴ°�? SIP Ŭ���̾�Ʈ���� TLS ������ ������� �ʰ� TLS Ŭ���̾�Ʈ�� ����ϴ� ��� true �� �����Ѵ�. */
+	// TLS 클라이언트만 사용하는가? SIP 클라이언트에서 TLS 서버는 사용하지 않고 TLS 클라이언트만 사용하는 경우 true 로 설정한다.
 	bool				m_bTlsClient;
 
-	/** SIP ��û �޽����� ������ ���� Contact ����� ���� ��Ʈ ��ȣ�� ����ϴ� ��� true �� �����Ѵ�. */
+	// SIP 요청 메시지를 전송할 때에 Contact 헤더에 수신 포트 번호를 사용하는 경우 true 로 설정한다.
 	bool				m_bUseContactListenPort;
 
-	/** SIP REGISTER �� ������ ��, ������ 401 ������ Authenticate �� �����Ͽ��� ���� �ֱ��� SIP REGISTER �޽����� ������ ���� ����ϴ� ��� true �� �����Ѵ�. */
+	// SIP REGISTER 를 전송한 후, 수신한 401 응답의 Authenticate 를 저장하여서 다음 주기의 SIP REGISTER 메시지를 생성할 때에 사용하는 경우 true 로 설정한다.
 	bool				m_bUseRegisterSession;
 
-	/** INVITE ���Ž� 100 Trying �� �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�. */
+	// INVITE 수신시 100 Trying 을 전송하면 true 로 설정하고 그렇지 않으면 false 로 설정한다.
 	bool				m_bSendTrying;
 };
 

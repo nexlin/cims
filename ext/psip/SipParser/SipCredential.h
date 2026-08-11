@@ -21,10 +21,7 @@
 
 #include "SipParameter.h"
 
-/**
- * @ingroup SipParser
- * @brief Authorization, Proxy-Authorization Çì´õ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// Authorization, Proxy-Authorization í—¤ë”ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipCredential
 {
 public:
@@ -64,7 +61,7 @@ public:
 	/** nc */
 	std::string	m_strNonceCount;
 
-	/** parameter ¸®½ºÆ® */
+	// parameter ë¦¬ìŠ¤íŠ¸
 	SIP_PARAMETER_LIST m_clsParamList;
 
 	int Parse( const char * pszText, int iTextLen );
@@ -72,7 +69,7 @@ public:
 	void Clear();
 };
 
-/** SIP Authorization/Proxy-Authorization Çì´õ ¸®½ºÆ® */
+// SIP Authorization/Proxy-Authorization í—¤ë” ë¦¬ìŠ¤íŠ¸
 typedef std::list< CSipCredential > SIP_CREDENTIAL_LIST;
 
 int ParseSipCredential( SIP_CREDENTIAL_LIST & clsList, const char * pszText, int iTextLen );

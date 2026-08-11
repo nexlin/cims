@@ -34,13 +34,7 @@ CTcpSocket::~CTcpSocket()
 {
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ¼­¹ö Æ÷Æ®¿¡ ¿¬°áÇÑ´Ù.
- * @param pszIp ¼­¹ö IP ÁÖ¼Ò
- * @param iPort ¼­¹ö Æ÷Æ® ¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë‹ˆí„°ë§ ì„œë²„ í¬íŠ¸ì— ì—°ê²°í•œë‹¤.
 bool CTcpSocket::Connect( const char * pszIp, int iPort )
 {
 	m_clsMutex.Lock();
@@ -55,11 +49,7 @@ bool CTcpSocket::Connect( const char * pszIp, int iPort )
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ¼­¹ö Æ÷Æ®¿¡ ¿¬°áÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë‹ˆí„°ë§ ì„œë²„ í¬íŠ¸ì— ì—°ê²°í•œë‹¤.
 bool CTcpSocket::Connect( )
 {
 	if( m_hSocket != INVALID_SOCKET ) return false;
@@ -73,10 +63,7 @@ bool CTcpSocket::Connect( )
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¼­¹ö ¿¬°áÀ» Á¾·áÇÑ´Ù.
- */
+// ì„œë²„ ì—°ê²°ì„ ì¢…ë£Œí•œë‹¤.
 void CTcpSocket::Close( )
 {
 	if( m_hSocket != INVALID_SOCKET )
@@ -90,11 +77,7 @@ void CTcpSocket::Close( )
 	}
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¼ö½Å ÀÌº¥Æ®¸¦ ´ë±âÇÑ´Ù.
- * @returns ¼ö½Å ÀÌº¥Æ®°¡ ¹ß»ıÇÏ¸é ¾ç¼ö¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é 0 ¶Ç´Â -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// ìˆ˜ì‹  ì´ë²¤íŠ¸ë¥¼ ëŒ€ê¸°í•œë‹¤.
 int CTcpSocket::Poll( )
 {
 	if( m_hSocket == INVALID_SOCKET ) return -1;
@@ -106,11 +89,7 @@ int CTcpSocket::Poll( )
 	return poll( arrPoll, 1, 100 );
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief TCP ¼¼¼ÇÀÌ ¿¬°áµÇ¾î ÀÖ´Â°¡?
- * @returns TCP ¼¼¼ÇÀÌ ¿¬°áµÇ¾î ÀÖÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„¸ì…˜ì´ ì—°ê²°ë˜ì–´ ìˆëŠ”ê°€?
 bool CTcpSocket::IsConnected()
 {
 	if( m_hSocket == INVALID_SOCKET ) return false;
@@ -118,11 +97,7 @@ bool CTcpSocket::IsConnected()
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ °á°ú¸¦ ¼ö½ÅÇÏ°í È­¸é¿¡ º¸¿©ÁØ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë‹ˆí„°ë§ ê²°ê³¼ë¥¼ ìˆ˜ì‹ í•˜ê³  í™”ë©´ì— ë³´ì—¬ì¤€ë‹¤.
 bool CTcpSocket::Receive( )
 {
 	int		iPacketLen, n, iRecvLen = 0, iLen;
@@ -150,7 +125,7 @@ bool CTcpSocket::Receive( )
 				iLen = iPacketLen - iRecvLen;
 			}
 
-			// -1 ÀÌ ¸®ÅÏµÈ´Ù. Network ºÎÇÏ°¡ ¹ß»ıÇÏ¿©¼­ timeout µÇ´Â °Í °°´Ù.
+			// -1 ì´ ë¦¬í„´ëœë‹¤. Network ë¶€í•˜ê°€ ë°œìƒí•˜ì—¬ì„œ timeout ë˜ëŠ” ê²ƒ ê°™ë‹¤.
 			n = TcpRecv( m_hSocket, szPacket, iLen, TCP_TIMEOUT );
 			if( n <= 0 )
 			{
@@ -221,14 +196,7 @@ bool CTcpSocket::Receive( )
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸í·ÉÀ» Ãß°¡ÇÑ´Ù.
- * @param pszCommand ¸í·É
- * @param pclsListCtrl ¸í·É °á°ú¸¦ ¼ö½ÅÇÒ CListCtrl
- * @param clsEntry			¸ğ´ÏÅÍ¸µ ¸í·É Á¤º¸ ÀúÀå °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª…ë ¹ì„ ì¶”ê°€í•œë‹¤.
 bool CTcpSocket::AddCommand( const char * pszCommand, CListCtrl * pclsListCtrl, CMonitorEntry & clsEntry )
 {
 	if( m_hSocket == INVALID_SOCKET ) return false;
@@ -246,13 +214,7 @@ bool CTcpSocket::AddCommand( const char * pszCommand, CListCtrl * pclsListCtrl, 
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸í·ÉÀ» »èÁ¦ÇÑ´Ù.
- * @param pszCommand ¸í·É
- * @param pclsListCtrl ¸í·É °á°ú¸¦ ¼ö½ÅÇÒ CListCtrl
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª…ë ¹ì„ ì‚­ì œí•œë‹¤.
 bool CTcpSocket::DeleteCommand( const char * pszCommand, CListCtrl * pclsListCtrl )
 {
 	MONITOR_COMMAND_LIST::iterator	itList;
@@ -282,11 +244,7 @@ bool CTcpSocket::DeleteCommand( const char * pszCommand, CListCtrl * pclsListCtr
 	return bRes;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ¸í·ÉÀ» ¿äÃ»ÇÑ´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë‹ˆí„°ë§ ëª…ë ¹ì„ ìš”ì²­í•œë‹¤.
 bool CTcpSocket::Execute()
 {
 	int iSendCount;
@@ -335,12 +293,7 @@ bool CTcpSocket::Execute()
 	return true;
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸í·ÉÀ» Àü¼ÛÇÑ´Ù.
- * @param pszCommand ¸í·É ¹®ÀÚ¿­
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª…ë ¹ì„ ì „ì†¡í•œë‹¤.
 bool CTcpSocket::SendCommand( const char * pszCommand )
 {
 	std::string strCommand = pszCommand;
@@ -394,16 +347,7 @@ static void CommaSepString( std::string & strText )
 	}
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ °á°ú¸¦ ¸®½ºÆ® ºä¿¡ º¸¿©ÁØ´Ù.
- * @param pszBuf			¸ğ´ÏÅÍ¸µ °á°ú ¹®ÀÚ¿­
- * @param clsCommand	ÇöÀç ¸í·É ÀúÀå °´Ã¼
- * @param iPos				¸ğ´ÏÅÍ¸µ °á°ú ¹®ÀÚ¿­ÀÇ ÀÌÀü À§Ä¡
- * @param i						¸ğ´ÏÅÍ¸µ °á°ú ¹®ÀÚ¿­ÀÇ ÇöÀç À§Ä¡
- * @param iRow				¸®½ºÆ® ºäÀÇ row
- * @param iColumn			¸®½ºÆ® ºäÀÇ column
- */
+// ëª¨ë‹ˆí„°ë§ ê²°ê³¼ë¥¼ ë¦¬ìŠ¤íŠ¸ ë·°ì— ë³´ì—¬ì¤€ë‹¤.
 void CTcpSocket::SetItemText( const char * pszBuf, CMonitorCommand & clsCommand, int & iPos, int & i, int iRow, int iColumn, bool & bDeleteRow )
 {
 	std::string strText, strSearch;
@@ -414,7 +358,7 @@ void CTcpSocket::SetItemText( const char * pszBuf, CMonitorCommand & clsCommand,
 	EMonitorAttributeType eType = clsCommand.m_clsEntry.GetType( iColumn );
 	if( eType == E_MAT_COMMA_SEP )
 	{
-		// 100000 -> 100,000 À¸·Î ¼öÁ¤ÇÑ´Ù.
+		// 100000 -> 100,000 ìœ¼ë¡œ ìˆ˜ì •í•œë‹¤.
 		CommaSepString( strText );
 	}
 
@@ -469,12 +413,7 @@ void CTcpSocket::SetItemText( const char * pszBuf, CMonitorCommand & clsCommand,
 	}
 }
 
-/**
- * @ingroup ServerMonitor
- * @brief ¼ö½ÅµÈ ¸ğ´ÏÅÍ¸µ °á°ú¸¦ ÆÄ½ÌÇÏ¿©¼­ CListCtrl ¿¡ º¸¿©ÁØ´Ù.
- * @param pszBuf ¼ö½ÅµÈ ¸ğ´ÏÅÍ¸µ °á°ú
- * @param clsCommand ¸ğ´ÏÅÍ¸µ ¸í·É ÀúÀå °´Ã¼
- */
+// ìˆ˜ì‹ ëœ ëª¨ë‹ˆí„°ë§ ê²°ê³¼ë¥¼ íŒŒì‹±í•˜ì—¬ì„œ CListCtrl ì— ë³´ì—¬ì¤€ë‹¤.
 void CTcpSocket::ParseRecvData( const char * pszBuf, CMonitorCommand & clsCommand )
 {
 	int	iPos = 0, iRow = 0, iColumn = 0;

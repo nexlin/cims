@@ -22,28 +22,17 @@
 #include "TimeUtility.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipNISTList::CSipNISTList() : m_iTimerJ(32000)
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipNISTList::~CSipNISTList()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Server Transaction List ¿¡ SIP ¸Ş½ÃÁö¸¦ Ãß°¡ÇÑ´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Non-Invite Server Transaction List ì— SIP ë©”ì‹œì§€ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipNISTList::Insert( CSipMessage * pclsMessage )
 {
 	std::string strKey;
@@ -113,11 +102,7 @@ bool CSipNISTList::Insert( CSipMessage * pclsMessage )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Server Transaction List ¿¡¼­ ÀçÀü¼ÛÇÒ Ç×¸ñ¿¡¼­ »èÁ¦ÇÒ Ç×¸ñÀ» »èÁ¦ÇÑ´Ù.
- * @param psttTime ½ÇÇàÇÑ ½Ã°£
- */
+// Non-Invite Server Transaction List ì—ì„œ ì¬ì „ì†¡í•  í•­ëª©ì—ì„œ ì‚­ì œí•  í•­ëª©ì„ ì‚­ì œí•œë‹¤.
 void CSipNISTList::Execute( struct timeval * psttTime )
 {
 	NON_INVITE_TRANSACTION_MAP::iterator	itMap, itNext;
@@ -146,10 +131,7 @@ LOOP_START:
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Server Transaction List ÀÇ ¸ğµç Ç×¸ñÀ» »èÁ¦ÇÑ´Ù.
- */
+// Non-Invite Server Transaction List ì˜ ëª¨ë“  í•­ëª©ì„ ì‚­ì œí•œë‹¤.
 void CSipNISTList::DeleteAll( )
 {
 	NON_INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -164,11 +146,7 @@ void CSipNISTList::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Server Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns Non-Invite Server Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Non-Invite Server Transaction List ì˜ í¬ê¸°ë¥¼ ë¦¬í„´í•œë‹¤.
 int CSipNISTList::GetSize( )
 {
 	int iSize;
@@ -180,11 +158,7 @@ int CSipNISTList::GetSize( )
 	return iSize;
 }
 
-/**
- * @ingroup SipStack
- * @brief NIST ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ SIP Call-ID µéÀ» ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf SIP Call-ID µéÀ» ÀúÀåÇÒ ¹®ÀÚ¿­
- */
+// NIST ìë£Œêµ¬ì¡°ì— ì €ì¥ëœ SIP Call-ID ë“¤ì„ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CSipNISTList::GetString( CMonitorString & strBuf )
 {
 	NON_INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -199,11 +173,7 @@ void CSipNISTList::GetString( CMonitorString & strBuf )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Timer J °ªÀ» ¼öÁ¤ÇÑ´Ù.
- * @param iMiliSecond Timer J °ª ( milisecond ´ÜÀ§ )
- */
+// Timer J ê°’ì„ ìˆ˜ì •í•œë‹¤.
 void CSipNISTList::SetTimerJ( int iMiliSecond )
 {
 	m_iTimerJ = iMiliSecond;

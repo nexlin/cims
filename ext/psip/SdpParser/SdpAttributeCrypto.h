@@ -21,10 +21,7 @@
 
 #include <string>
 
-/**
- * @ingroup SdpParser
- * @brief crypto attribute ÆÄ½Ì Å¬·¡½º
- */
+// crypto attribute íŒŒì‹± í´ë˜ìŠ¤
 class CSdpAttributeCrypto
 {
 public:

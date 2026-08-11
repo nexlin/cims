@@ -33,13 +33,7 @@ CTcpConnectMap::~CTcpConnectMap()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼­¹ö¿¡ Á¢¼ÓÁß Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @returns ÀúÀå¿¡ ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„œë²„ì— ì ‘ì†ì¤‘ ì •ë³´ë¥¼ ì €ì¥í•œë‹¤.
 bool CTcpConnectMap::Insert( const char * pszIp, int iPort )
 {
 	bool bRes = false;
@@ -90,14 +84,7 @@ bool CTcpConnectMap::Insert( const char * pszIp, int iPort )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼­¹ö¿¡ Á¢¼ÓÇÑ ÈÄ, Àü¼ÛÇÒ SIP ¸Ş½ÃÁö¸¦ ÀúÀåÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param pclsMessage SIP ¸Ş½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„œë²„ì— ì ‘ì†í•œ í›„, ì „ì†¡í•  SIP ë©”ì‹œì§€ë¥¼ ì €ì¥í•œë‹¤.
 bool CTcpConnectMap::Insert( const char * pszIp, int iPort, CSipMessage * pclsMessage )
 {
 	bool bRes = false;
@@ -119,14 +106,7 @@ bool CTcpConnectMap::Insert( const char * pszIp, int iPort, CSipMessage * pclsMe
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼­¹ö·Î Àü¼ÛÇÒ SIP ¸Ş½ÃÁö ¸®½ºÆ®¸¦ °Ë»öÇÑ ÈÄ, ÇØ´ç Á¤º¸¸¦ ÀÚ·á±¸Á¶¿¡¼­ »èÁ¦ÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param clsList TCP ¼­¹ö·Î Àü¼ÛÇÒ SIP ¸Ş½ÃÁö ¸®½ºÆ® ÀúÀåÀ» À§ÇÑ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„œë²„ë¡œ ì „ì†¡í•  SIP ë©”ì‹œì§€ ë¦¬ìŠ¤íŠ¸ë¥¼ ê²€ìƒ‰í•œ í›„, í•´ë‹¹ ì •ë³´ë¥¼ ìë£Œêµ¬ì¡°ì—ì„œ ì‚­ì œí•œë‹¤.
 bool CTcpConnectMap::Delete( const char * pszIp, int iPort, SIP_MESSAGE_LIST & clsList )
 {
 	bool bRes = false;
@@ -148,13 +128,7 @@ bool CTcpConnectMap::Delete( const char * pszIp, int iPort, SIP_MESSAGE_LIST & c
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ¼­¹ö·Î Àü¼ÛÇÒ SIP ¸Ş½ÃÁö ¸®½ºÆ® ¹× ÇØ´ç Á¤º¸¸¦ ÀÚ·á±¸Á¶¿¡¼­ »èÁ¦ÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„œë²„ë¡œ ì „ì†¡í•  SIP ë©”ì‹œì§€ ë¦¬ìŠ¤íŠ¸ ë° í•´ë‹¹ ì •ë³´ë¥¼ ìë£Œêµ¬ì¡°ì—ì„œ ì‚­ì œí•œë‹¤.
 bool CTcpConnectMap::Delete( const char * pszIp, int iPort )
 {
 	bool bRes = false;
@@ -187,11 +161,7 @@ bool CTcpConnectMap::Delete( const char * pszIp, int iPort )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ °³¼ö¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ìë£Œêµ¬ì¡°ì— ì €ì¥ëœ ê°œìˆ˜ë¥¼ ë¦¬í„´í•œë‹¤.
 int CTcpConnectMap::GetSize()
 {
 	int iSize;
@@ -203,21 +173,13 @@ int CTcpConnectMap::GetSize()
 	return iSize;
 }
 
-/**
- * @ingroup SipStack
- * @brief stateful ¿©ºÎ¸¦ ¼³Á¤ÇÑ´Ù.
- * @param bStateful stateful ÀÌ¸é true ÀÌ´Ù.
- */
+// stateful ì—¬ë¶€ë¥¼ ì„¤ì •í•œë‹¤.
 void CTcpConnectMap::SetStateful( bool bStateful )
 {
 	m_bStateful = bStateful;
 }
 
-/**
- * @ingroup SipStack
- * @brief ÀÚ·á±¸Á¶ ¸ğ´ÏÅÍ¸µ ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param strBuf ¹®ÀÚ¿­ º¯¼ö
- */
+// ìë£Œêµ¬ì¡° ëª¨ë‹ˆí„°ë§ ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 void CTcpConnectMap::GetString( CMonitorString & strBuf )
 {
 	TCP_CONNECT_MAP::iterator	itMap;
@@ -233,12 +195,7 @@ void CTcpConnectMap::GetString( CMonitorString & strBuf )
 	m_clsMutex.release();
 }
 
-/**
- * @brief Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò¿Í Æ÷Æ® ¹øÈ£·Î ÀÚ·á±¸Á¶ÀÇ Å°¸¦ »ı¼ºÇÏ¿© ÀúÀåÇÑ´Ù.
- * @param pszIp		Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @param iPort		Å¬¶óÀÌ¾ğÆ® Æ÷Æ® ¹øÈ£
- * @param strKey TCP/TLS ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶ÀÇ Å° ÀúÀå º¯¼ö
- */
+// í´ë¼ì´ì–¸íŠ¸ IP ì£¼ì†Œì™€ í¬íŠ¸ ë²ˆí˜¸ë¡œ ìë£Œêµ¬ì¡°ì˜ í‚¤ë¥¼ ìƒì„±í•˜ì—¬ ì €ì¥í•œë‹¤.
 void CTcpConnectMap::GetKey( const char * pszIp, int iPort, std::string & strKey )
 {
 	char	szKey[51];

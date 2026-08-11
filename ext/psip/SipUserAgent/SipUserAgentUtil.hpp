@@ -16,13 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Call-ID �� ��ȭ�� �˻��� ��, �˻��� ����� peer RTP ������ �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param pclsRtp		peer RTP ������ ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP Call-ID 로 통화를 검색한 후, 검색된 결과로 peer RTP 정보를 저장한다.
 bool CSipUserAgent::GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -73,13 +67,7 @@ bool CSipUserAgent::GetRemotePayloadTypes( const char * pszCallId, const char * 
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Call-ID �� ��ȭ�� �˻��� ��, �˻��� ����� peer ���̵� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param strToId		peer ���̵� ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP Call-ID 로 통화를 검색한 후, 검색된 결과로 peer 아이디를 저장한다.
 bool CSipUserAgent::GetToId( const char * pszCallId, std::string & strToId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -99,13 +87,7 @@ bool CSipUserAgent::GetToId( const char * pszCallId, std::string & strToId )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Call-ID �� ��ȭ�� �˻��� ��, �˻��� ����� my ���̵� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param strFromId		my ���̵� ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP Call-ID 로 통화를 검색한 후, 검색된 결과로 my 아이디를 저장한다.
 bool CSipUserAgent::GetFromId( const char * pszCallId, std::string & strFromId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -125,13 +107,7 @@ bool CSipUserAgent::GetFromId( const char * pszCallId, std::string & strFromId )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Call-ID �� ��ȭ�� �˻��� ��, �˻��� ����� ��ȭ ������ Contact ������ CSipCallRoute ��ü�� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param pclsRoute ��ȭ ������ Contact ������ ������ ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP Call-ID 로 통화를 검색한 후, 검색된 결과로 전화 상대방의 Contact 정보를 CSipCallRoute 객체에 저장한다.
 bool CSipUserAgent::GetContact( const char * pszCallId, CSipCallRoute * pclsRoute )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -151,13 +127,7 @@ bool CSipUserAgent::GetContact( const char * pszCallId, CSipCallRoute * pclsRout
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Call-ID �� ��ȭ�� �˻��� ��, �˻��� ����� CDR ������ �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param pclsCdr		CDR ���� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP Call-ID 로 통화를 검색한 후, 검색된 결과의 CDR 정보를 저장한다.
 bool CSipUserAgent::GetCdr( const char * pszCallId, CSipCdr * pclsCdr )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -175,15 +145,7 @@ bool CSipUserAgent::GetCdr( const char * pszCallId, CSipCdr * pclsCdr )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP INVITE �޽����� ������ ���, �ش� SIP INVITE �޽������� ��� �̸��� �˻��Ͽ��� �̿� ���� ���� �����Ѵ�.
- *				��� ����� �˻��ϴ� ���� �ƴϰ� CSipMessage �� m_clsHeaderList �� ����� ����� �˻��Ѵ�.
- * @param pszCallId			SIP Call-ID
- * @param pszHeaderName ��� �̸�
- * @param strValue			����� ���� ������ ����
- * @returns �˻��� �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// SIP INVITE 메시지를 수신한 경우, 해당 SIP INVITE 메시지에서 헤더 이름을 검색하여서 이에 대한 값을 리턴한다. 모든 헤더를 검색하는 것은 아니고 CSipMessage 의 m_clsHeaderList 에 저장된 헤더만 검색한다.
 bool CSipUserAgent::GetInviteHeaderValue( const char * pszCallId, const char * pszHeaderName, std::string & strValue )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -208,12 +170,7 @@ bool CSipUserAgent::GetInviteHeaderValue( const char * pszCallId, const char * p
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief Dialog �� RSeq ���� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns Dialog �� RSeq �� �����ϸ� RSeq ���� �����ϰ� �׷��� ������ -1 �� �����Ѵ�.
- */
+// Dialog 의 RSeq 값을 리턴한다.
 int CSipUserAgent::GetRSeq( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -230,12 +187,7 @@ int CSipUserAgent::GetRSeq( const char * pszCallId )
 	return iRSeq;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief Dialog �� RSeq ���� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param iRSeq RSeq ��
- */
+// Dialog 의 RSeq 값을 설정한다.
 void CSipUserAgent::SetRSeq( const char * pszCallId, int iRSeq )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -277,12 +229,7 @@ bool CSipUserAgent::SetCallDomain( const char * pszCallId, const char * pszDomai
 	return bFound;
 }
 
-/**
- * @brief ��ȭ�� ���� ��û ������ Ȯ���Ѵ�.
- * @param pszCallId SIP Call-ID
- * @param pszTo			SIP TO ���̵�
- * @returns ��ȭ�� ����Ǿ����� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 통화가 연결 요청 중인지 확인한다.
 bool CSipUserAgent::IsRingCall( const char * pszCallId, const char * pszTo )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -312,12 +259,7 @@ bool CSipUserAgent::IsRingCall( const char * pszCallId, const char * pszTo )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief 100rel ����� Ȱ��ȭ ������ �˻��Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns 100rel ����� Ȱ��ȭ�Ǿ� ������ true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 100rel 기능이 활성화 유무를 검색한다.
 bool CSipUserAgent::Is100rel( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -338,12 +280,7 @@ bool CSipUserAgent::Is100rel( const char * pszCallId )
 	return b100rel;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief hold ���� �˻��Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns hold �̸� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// hold 인지 검사한다.
 bool CSipUserAgent::IsHold( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -363,12 +300,7 @@ bool CSipUserAgent::IsHold( const char * pszCallId )
 	return bHold;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ��ȭ ����Ǿ����� �˻��Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns ��ȭ ����Ǿ����� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 통화 연결되었는지 검사한다.
 bool CSipUserAgent::IsConnected( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -388,12 +320,7 @@ bool CSipUserAgent::IsConnected( const char * pszCallId )
 	return bConnected;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP ��ȭ ��û INVITE �޽����� �˻��Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns �����ϸ� SIP ��ȭ ��û INVITE �޽����� �����ϰ� �����ϸ� NULL �� �����Ѵ�.
- */
+// SIP 통화 요청 INVITE 메시지를 검색한다.
 CSipMessage * CSipUserAgent::DeleteIncomingCall( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator		itMap;

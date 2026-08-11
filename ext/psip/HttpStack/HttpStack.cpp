@@ -37,13 +37,7 @@ CHttpStack::~CHttpStack()
 {
 }
 
-/**
- * @ingroup HttpStack
- * @brief HTTP ¼­¹ö¸¦ ½ÃÀÛÇÑ´Ù.
- * @param pclsSetup			¼³Á¤ °´Ã¼
- * @param pclsCallBack	callback °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ì„œë²„ë¥¼ ì‹œìž‘í•œë‹¤.
 bool CHttpStack::Start( CTcpStackSetup * pclsSetup, IHttpStackCallBack * pclsCallBack )
 {
 	if( pclsCallBack == NULL )
@@ -57,25 +51,12 @@ bool CHttpStack::Start( CTcpStackSetup * pclsSetup, IHttpStackCallBack * pclsCal
 	return m_clsTcpStack.Start( pclsSetup, this );
 }
 
-/**
- * @ingroup HttpStack
- * @brief 
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
 bool CHttpStack::Stop( )
 {
 	return m_clsTcpStack.Stop();
 }
 
-/**
- * @ingroup HttpStack
- * @brief WebSocket Å¬¶óÀÌ¾ðÆ®·Î µ¥ÀÌÅÍ¸¦ Àü¼ÛÇÑ´Ù.
- * @param pszClientIp WebSocket Å¬¶óÀÌ¾ðÆ® IP ÁÖ¼Ò
- * @param iClientPort WebSocket Å¬¶óÀÌ¾ðÆ® Æ÷Æ® ¹øÈ£
- * @param pszData			WebSocket À¸·Î Àü¼ÛÇÒ payload µ¥ÀÌÅÍ
- * @param iDataLen		WebSocket À¸·Î Àü¼ÛÇÒ payload µ¥ÀÌÅÍ ±æÀÌ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// WebSocket í´ë¼ì´ì–¸íŠ¸ë¡œ ë°ì´í„°ë¥¼ ì „ì†¡í•œë‹¤.
 bool CHttpStack::SendWebSocketPacket( const char * pszClientIp, int iClientPort, const char * pszData, int iDataLen )
 {
 	int iPacketLen = 0;
@@ -138,22 +119,13 @@ bool CHttpStack::SendWebSocketPacket( const char * pszClientIp, int iClientPort,
 	return bRes;
 }
 
-/**
- * @ingroup HttpStack
- * @brief HTTP Å¬¶óÀÌ¾ðÆ®°¡ ¿¬°á ÀÌº¥Æ® ÇÚµé·¯
- * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
- * @return HTTP Å¬¶óÀÌ¾ðÆ® ¿¬°áÀ» Çã¿ëÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP í´ë¼ì´ì–¸íŠ¸ê°€ ì—°ê²° ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CHttpStack::InComingConnected( CTcpSessionInfo * pclsSessionInfo )
 {
 	return true;
 }
 
-/**
- * @ingroup HttpStack
- * @brief HTTP Å¬¶óÀÌ¾ðÆ® ¼¼¼ÇÀÌ Á¾·á ÀÌº¥Æ® ÇÚµé·¯
- * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
- */
+// HTTP í´ë¼ì´ì–¸íŠ¸ ì„¸ì…˜ì´ ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CHttpStack::SessionClosed( CTcpSessionInfo * pclsSessionInfo )
 {
 	if( pclsSessionInfo->m_pclsApp )
@@ -167,14 +139,7 @@ void CHttpStack::SessionClosed( CTcpSessionInfo * pclsSessionInfo )
 	}
 }
 
-/**
- * @ingroup HttpStack
- * @brief TCP ÆÐÅ¶ ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszPacket				¼ö½Å ÆÐÅ¶
- * @param iPacketLen			¼ö½Å ÆÐÅ¶ ±æÀÌ
- * @param pclsSessionInfo ¼¼¼Ç Á¤º¸
- * @returns TCP ¼¼¼ÇÀ» À¯ÁöÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP íŒ¨í‚· ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CHttpStack::RecvPacket( char * pszPacket, int iPacketLen, CTcpSessionInfo * pclsSessionInfo )
 {
 	if( pclsSessionInfo->m_pclsApp == NULL )
@@ -191,7 +156,7 @@ bool CHttpStack::RecvPacket( char * pszPacket, int iPacketLen, CTcpSessionInfo *
 
 	if( pclsApp->m_bWebSocket )
 	{
-		// WebSocket ÇÁ·ÎÅäÄÝ
+		// WebSocket í”„ë¡œí† ì½œ
 		CWebSocketPacketHeader clsHeader;
 		std::string strData;
 
@@ -231,7 +196,7 @@ bool CHttpStack::RecvPacket( char * pszPacket, int iPacketLen, CTcpSessionInfo *
 	}
 	else
 	{
-		// HTTP ÇÁ·ÎÅäÄÝ
+		// HTTP í”„ë¡œí† ì½œ
 		if( pclsApp->m_clsHttpPacket.AddPacket( pszPacket, iPacketLen ) == false )
 		{
 			CLog::Print( LOG_ERROR, "%s m_clsPacket.AddPacket error", __FUNCTION__ );
@@ -256,7 +221,7 @@ bool CHttpStack::RecvPacket( char * pszPacket, int iPacketLen, CTcpSessionInfo *
 				pclsHeader = pclsRecv->GetHeader( "Upgrade" );
 				if( pclsHeader && !strcmp( pclsHeader->m_strValue.c_str(), "websocket" ) )
 				{
-					// WebSocket À» À§ÇÑ HTTP ¿äÃ»ÀÌ¸é ÀÀ¿ëÀ¸·Î callback È£ÃâÇÏÁö ¾Ê°í ÀÀ´ä ¸Þ½ÃÁö¸¦ Àü¼ÛÇÑ´Ù.
+					// WebSocket ì„ ìœ„í•œ HTTP ìš”ì²­ì´ë©´ ì‘ìš©ìœ¼ë¡œ callback í˜¸ì¶œí•˜ì§€ ì•Šê³  ì‘ë‹µ ë©”ì‹œì§€ë¥¼ ì „ì†¡í•œë‹¤.
 					if( MakeWebSocketResponse( pclsRecv, &clsSend ) == false )
 					{
 						return false;
@@ -325,13 +290,7 @@ bool CHttpStack::RecvPacket( char * pszPacket, int iPacketLen, CTcpSessionInfo *
 	return true;
 }
 
-/**
- * @ingroup HttpStack
- * @brief WebSocket ¿¬°áÀ» À§ÇÑ HTTP ¿äÃ» ¸Þ½ÃÁö¿¡ ´ëÇÑ HTTP ÀÀ´ä ¸Þ½ÃÁö¸¦ »ý¼ºÇÑ´Ù.
- * @param pclsRecv ¼ö½ÅµÈ HTTP ¿äÃ» ¸Þ½ÃÁö
- * @param pclsSend Àü¼ÛÇÒ HTTP ÀÀ´ä ¸Þ½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// WebSocket ì—°ê²°ì„ ìœ„í•œ HTTP ìš”ì²­ ë©”ì‹œì§€ì— ëŒ€í•œ HTTP ì‘ë‹µ ë©”ì‹œì§€ë¥¼ ìƒì„±í•œë‹¤.
 bool CHttpStack::MakeWebSocketResponse( CHttpMessage * pclsRecv, CHttpMessage * pclsSend )
 {
 	CHttpHeader * pclsHeader = pclsRecv->GetHeader( "Sec-WebSocket-Key" );

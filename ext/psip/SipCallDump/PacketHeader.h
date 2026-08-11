@@ -65,7 +65,7 @@ typedef struct _Ip4Header_
 {
 	uint8_t		ver_ihl;				// Version (4 bits) + Internet header length (4 bits)
 	uint8_t		tos;						// Type of service 
-	uint16_t	tlen;						// Total length = IPv4 header ¸¦ Æ÷ÇÔÇÑ ÆĞÅ¶ ±æÀÌ
+	uint16_t	tlen;						// Total length = IPv4 header ë¥¼ í¬í•¨í•œ íŒ¨í‚· ê¸¸ì´
 	uint16_t	identification; // Identification
 	uint16_t	flags_fo;				// Flags (3 bits) + Fragment offset (13 bits)
 	uint8_t		ttl;						// Time to live
@@ -84,7 +84,7 @@ typedef struct _Ip6Header_
 {
 	uint8_t		ver_ihl;
 	uint8_t		flow_level[3];
-	uint16_t	payload_length;		// Payload length : IPv6 header ¸¦ Á¦¿ÜÇÑ ÆĞÅ¶ ±æÀÌ
+	uint16_t	payload_length;		// Payload length : IPv6 header ë¥¼ ì œì™¸í•œ íŒ¨í‚· ê¸¸ì´
 	uint8_t		next_header;			// Protocol
 	uint8_t		hop_limit;
 	uint8_t		saddr[16];				// Source address
@@ -123,7 +123,7 @@ typedef struct _TcpHeader_
 	uint16_t dport;	// Destination port
 	uint32_t seqnum; // Sequence Number
 	uint32_t acknum; // Acknowledgement number
-	uint8_t	 hlen;		// Header length - »óÀ§ 4bit ¸¸ header ±æÀÌÀÌ´Ù.
+	uint8_t	 hlen;		// Header length - ìƒìœ„ 4bit ë§Œ header ê¸¸ì´ì´ë‹¤.
 	uint8_t	 flags;	// packet flags
 	uint16_t win;		// Window size
 	uint16_t crc;		// Header Checksum

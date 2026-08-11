@@ -21,7 +21,7 @@
 #include "SetupDlg.h"
 #include "LogInDlg.h"
 
-// CSetupDlg ´ëÈ­ »óÀÚÀÔ´Ï´Ù.
+// CSetupDlg ëŒ€í™” ìƒìì…ë‹ˆë‹¤.
 
 IMPLEMENT_DYNAMIC(CSetupDlg, CDialog)
 
@@ -48,7 +48,7 @@ BEGIN_MESSAGE_MAP(CSetupDlg, CDialog)
 END_MESSAGE_MAP()
 
 
-// CSetupDlg ¸Ş½ÃÁö Ã³¸®±âÀÔ´Ï´Ù.
+// CSetupDlg ë©”ì‹œì§€ ì²˜ë¦¬ê¸°ì…ë‹ˆë‹¤.
 
 void CSetupDlg::OnBnClickedOk()
 {

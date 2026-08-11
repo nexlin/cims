@@ -21,41 +21,23 @@
 #include <stdlib.h>
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSdpMedia::CSdpMedia() : m_iPort(-1), m_iNumOfPort(-1)
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief »ı¼ºÀÚ
- * @param pszMedia		¹Ìµğ¾î ÀÌ¸§ 
- * @param iPort				Æ÷Æ® ¹øÈ£
- * @param pszProtocol Àü¼Û ÇÁ·ÎÅäÄİ
- */
+// ìƒì„±ì
 CSdpMedia::CSdpMedia( const char * pszMedia, int iPort, const char * pszProtocol ) : 
 	m_strMedia(pszMedia), m_iPort(iPort), m_iNumOfPort(-1), m_strProtocol(pszProtocol)
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSdpMedia::~CSdpMedia()
 {
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP media ÀÇ value ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SDP media ÀÇ value ¹®ÀÚ¿­
- * @param iTextLen	SDP media ÀÇ value ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP media ì˜ value ë¬¸ìì—´ì„ íŒŒì‹±í•œë‹¤.
 int CSdpMedia::Parse( const char * pszText, int iTextLen )
 {
 	Clear();
@@ -84,13 +66,7 @@ int CSdpMedia::Parse( const char * pszText, int iTextLen )
 	return iTextLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP media ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÑ´Ù.
- * @param pszText		SDP media ÀÇ value ¹®ÀÚ¿­À» ÀúÀåÇÒ º¯¼ö
- * @param iTextSize pszText º¯¼öÀÇ Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SDP media ì˜ value ë¬¸ìì—´ì„ ì €ì¥í•œë‹¤.
 int CSdpMedia::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -163,10 +139,7 @@ int CSdpMedia::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¸â¹ö º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë©¤ë²„ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CSdpMedia::Clear()
 {
 	m_strMedia.clear();
@@ -180,11 +153,7 @@ void CSdpMedia::Clear()
 	m_clsAttributeList.clear();
 }
 
-/**
- * @ingroup SdpParser
- * @brief FMT ¸¦ Ãß°¡ÇÑ´Ù.
- * @param iPayLoadType payload type
- */
+// FMT ë¥¼ ì¶”ê°€í•œë‹¤.
 void CSdpMedia::AddFmt( int iPayLoadType )
 {
 	if( SelectFmt( iPayLoadType ) ) return;
@@ -196,12 +165,7 @@ void CSdpMedia::AddFmt( int iPayLoadType )
 	m_clsFmtList.push_back( szNum );
 }
 
-/**
- * @ingroup SdpParser
- * @brief FMT ¸®½ºÆ®¿¡ payload type ÀÌ Á¸ÀçÇÏ´ÂÁö È®ÀÎÇÑ´Ù. 
- * @param iPayLoadType payload type
- * @returns FMT ¸®½ºÆ®¿¡ payload type ÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// FMT ë¦¬ìŠ¤íŠ¸ì— payload type ì´ ì¡´ì¬í•˜ëŠ”ì§€ í™•ì¸í•œë‹¤.
 bool CSdpMedia::SelectFmt( int iPayLoadType )
 {
 	char	szNum[11];
@@ -220,12 +184,7 @@ bool CSdpMedia::SelectFmt( int iPayLoadType )
 	return false;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszName »èÁ¦ÇÒ ¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @returns ¾ÖÆ®¸®ºäÆ®¸¦ »èÁ¦ÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì‚­ì œí•œë‹¤.
 bool CSdpMedia::DeleteAttribute( const char * pszName )
 {
 	SDP_ATTRIBUTE_LIST::iterator	itAttr, itNext;
@@ -252,12 +211,7 @@ LOOP_START:
 	return bRes;
 }
 
-/**
- * @ingroup SdpParser
- * @brief FMT ¸®½ºÆ®¿¡ payload type ÀÌ Á¸ÀçÇÏ¸é ÇØ´ç payload type À» FMT ¸®½ºÆ® ¹× ¾ÖÆ®¸®ºäÆ®¿¡¼­ »èÁ¦ÇÑ´Ù.
- * @param iPayLoadType payload type
- * @returns FMT ¸®½ºÆ®¿¡ payload type ÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// FMT ë¦¬ìŠ¤íŠ¸ì— payload type ì´ ì¡´ì¬í•˜ë©´ í•´ë‹¹ payload type ì„ FMT ë¦¬ìŠ¤íŠ¸ ë° ì• íŠ¸ë¦¬ë·°íŠ¸ì—ì„œ ì‚­ì œí•œë‹¤.
 bool CSdpMedia::DeleteFmtAttribute( int iPayLoadType )
 {
 	SDP_ATTRIBUTE_LIST::iterator	itAttr, itNext;
@@ -303,12 +257,7 @@ LOOP_START:
 	return bRes;
 }
 
-/**
- * @ingroup SdpParser
- * @brief FMT ¸®½ºÆ®¿¡ payload type ÀÌ Á¸ÀçÇÏ¸é ÇØ´ç payload type À» FMT ¸®½ºÆ® ¹× ¾ÖÆ®¸®ºäÆ®ÀÇ ÃÖ»ó´ÜÀ¸·Î ÀÌµ¿ÇÑ´Ù.
- * @param iPayLoadType payload type
- * @returns FMT ¸®½ºÆ®¿¡ payload type ÀÌ Á¸ÀçÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// FMT ë¦¬ìŠ¤íŠ¸ì— payload type ì´ ì¡´ì¬í•˜ë©´ í•´ë‹¹ payload type ì„ FMT ë¦¬ìŠ¤íŠ¸ ë° ì• íŠ¸ë¦¬ë·°íŠ¸ì˜ ìµœìƒë‹¨ìœ¼ë¡œ ì´ë™í•œë‹¤.
 bool CSdpMedia::MakeTopFmtAttribute( int iPayLoadType )
 {
 	SDP_ATTRIBUTE_LIST::iterator	itAttr, itBegin;
@@ -323,7 +272,7 @@ bool CSdpMedia::MakeTopFmtAttribute( int iPayLoadType )
 		{
 			if( itFL == m_clsFmtList.begin() )
 			{
-				// ÀÔ·ÂÇÑ payload type ÀÌ top ÀÌ¸é º¯°æÇÒ ÇÊ¿ä°¡ ¾ø´Ù.
+				// ì…ë ¥í•œ payload type ì´ top ì´ë©´ ë³€ê²½í•  í•„ìš”ê°€ ì—†ë‹¤.
 				return true;
 			}
 
@@ -389,11 +338,7 @@ bool CSdpMedia::MakeTopFmtAttribute( int iPayLoadType )
 	return bRes;
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù. rtpmap ÀÌ¸é fmt ·Î Ãß°¡ÇÑ´Ù.
- * @param pclsAttr ¾ÖÆ®¸®ºäÆ® °´Ã¼
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤. rtpmap ì´ë©´ fmt ë¡œ ì¶”ê°€í•œë‹¤.
 void CSdpMedia::AddAttribute( CSdpAttribute * pclsAttr )
 {
 	if( !strcmp( pclsAttr->m_strName.c_str(), "rtpmap" ) )
@@ -404,12 +349,7 @@ void CSdpMedia::AddAttribute( CSdpAttribute * pclsAttr )
 	m_clsAttributeList.push_back( *pclsAttr );
 }
 
-/**
- * @ingroup SdpParser
- * @brief ¾ÖÆ®¸®ºäÆ®¸¦ Ãß°¡ÇÑ´Ù. rtpmap ÀÌ¸é fmt ·Î Ãß°¡ÇÑ´Ù.
- * @param pszName		¾ÖÆ®¸®ºäÆ® ÀÌ¸§
- * @param pszValue	¾ÖÆ®¸®ºäÆ® °ª
- */
+// ì• íŠ¸ë¦¬ë·°íŠ¸ë¥¼ ì¶”ê°€í•œë‹¤. rtpmap ì´ë©´ fmt ë¡œ ì¶”ê°€í•œë‹¤.
 void CSdpMedia::AddAttribute( const char * pszName, const char * pszValue )
 {
 	CSdpAttribute clsAttr( pszName, pszValue );
@@ -422,11 +362,7 @@ void CSdpMedia::AddAttribute( const char * pszName, const char * pszValue )
 	m_clsAttributeList.push_back( clsAttr );
 }
 
-/**
- * @ingroup SdpParser
- * @brief direction ¾ÖÆ®¸®ºä¸¦ ¼öÁ¤ÇÑ´Ù.
- * @param pszDirection direction
- */
+// direction ì• íŠ¸ë¦¬ë·°ë¥¼ ìˆ˜ì •í•œë‹¤.
 void CSdpMedia::SetDirection( const char * pszDirection )
 {
 	SDP_ATTRIBUTE_LIST::iterator	itAttr;
@@ -455,13 +391,7 @@ void CSdpMedia::SetDirection( const char * pszDirection )
 	}
 }
 
-/**
- * @ingroup SdpParser
- * @brief SDP media ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ °¢ Ç×¸ñÀ» ÀúÀåÇÑ´Ù.
- * @param pszData ¹®ÀÚ¿­
- * @param iLen		¹®ÀÚ¿­ ±æÀÌ
- * @param iType		SDP media ¹®ÀÚ¿­À» ÆÄ½ÌÇÑ ¹®ÀÚ¿­ ¹è¿­ÀÇ ÀÎµ¦½º
- */
+// SDP media ë¬¸ìì—´ì„ íŒŒì‹±í•œ ê° í•­ëª©ì„ ì €ì¥í•œë‹¤.
 void CSdpMedia::SetData( const char * pszData, int iLen, int iType )
 {
 	switch( iType )

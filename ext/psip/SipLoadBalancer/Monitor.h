@@ -21,9 +21,7 @@
 
 #include "MonitorCallBack.h"
 
-/**
- * @brief ╪╜╧Ж юз╥А╠╦а╤ ╦П╢оем╦╣ callback е╛╥║╫╨
- */
+// Л└°К╡└ Л·░Кё▄Й╣╛Л║╟ К╙╗К▀┬М└╟К╖│ callback М│╢К·≤Л┼╓
 class CMonitor : public IMonitorCallBack
 {
 public:

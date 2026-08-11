@@ -24,10 +24,7 @@
 
 #define STUN_HEADER_SIZE	20
 
-/**
- * @ingroup StunParser
- * @brief STUN Çì´õ ÀúÀå Å¬·¡½º
- */
+// STUN í—¤ë” ì €ì¥ í´ë˜ìŠ¤
 class CStunHeader
 {
 public:

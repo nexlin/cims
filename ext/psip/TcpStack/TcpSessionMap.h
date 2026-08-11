@@ -24,10 +24,7 @@
 
 typedef std::map< std::string, CTcpSessionInfo * > TCP_SESSION_MAP;
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º - m_bUseThreadPipe °¡ false ÀÏ ¶§¿¡ »ç¿ëµÇ´Â Å¬·¡½º
- */
+// TCP ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤ - m_bUseThreadPipe ê°€ false ì¼ ë•Œì— ì‚¬ìš©ë˜ëŠ” í´ë˜ìŠ¤
 class CTcpSessionMap
 {
 public:

@@ -25,12 +25,7 @@
 CSipClient gclsSipClient;
 extern JavaVM * gjVm;
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP REGISTER ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pclsInfo	SIP REGISTER ÀÀ´ä ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ IP-PBX Á¤º¸ ÀúÀå °´Ã¼
- * @param iStatus		SIP REGISTER ÀÀ´ä ÄÚµå
- */
+// SIP REGISTER ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventRegister( CSipServerInfo * pclsInfo, int iStatus )
 {
 	JNIEnv * env;
@@ -57,14 +52,7 @@ FUNC_END:
 	if( joSipServerInfo ) env->DeleteLocalRef( joSipServerInfo );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP ÅëÈ­ ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pszFrom		SIP From »ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pszTo			SIP To »ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP í†µí™” ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp )
 {
 	jstring jstrCallId = NULL, jstrFrom = NULL, jstrTo = NULL;
@@ -116,13 +104,7 @@ FUNC_END:
 	if( joSipCallRtp ) env->DeleteLocalRef( joSipCallRtp );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP Ring / Session Progress ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ÀÀ´ä ÄÚµå
- * @param pclsRtp			RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP Ring / Session Progress ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp )
 {
 	jstring jstrCallId = NULL;
@@ -161,12 +143,7 @@ FUNC_END:
 	if( joSipCallRtp ) env->DeleteLocalRef( joSipCallRtp );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP ÅëÈ­ ¿¬°á ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP í†µí™” ì—°ê²° ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 	jstring jstrCallId = NULL;
@@ -205,12 +182,7 @@ FUNC_END:
 	if( joSipCallRtp ) env->DeleteLocalRef( joSipCallRtp );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP ÅëÈ­ Á¾·á ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ÀÀ´ä ÄÚµå. INVITE ¿¡ ´ëÇÑ ¿À·ù ÀÀ´äÀ¸·Î ÀüÈ­°¡ Á¾·áµÈ °æ¿ì, INVITE ÀÇ ÀÀ´ä ÄÚµå¸¦ ÀúÀåÇÑ´Ù.
- */
+// SIP í†µí™” ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventCallEnd( const char * pszCallId, int iSipStatus )
 {
 	jstring jstrCallId = NULL;
@@ -231,13 +203,7 @@ FUNC_END:
 	if( jstrCallId ) env->DeleteLocalRef( jstrCallId );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP ReINVITE ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pclsRemoteRtp		»ó´ë¹æ RTP Á¤º¸ ÀúÀå °´Ã¼
- * @param pclsLocalRtp		³» RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP ReINVITE ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp )
 {
 	jstring jstrCallId = NULL;
@@ -293,12 +259,7 @@ FUNC_END:
 	if( joLocalRtp ) env->DeleteLocalRef( joLocalRtp );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP PRACK ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP PRACK ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventPrack( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 	jstring jstrCallId = NULL;
@@ -337,14 +298,7 @@ FUNC_END:
 	if( joSipCallRtp ) env->DeleteLocalRef( joSipCallRtp );
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief Screened / Unscreened Transfer ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszCallId					SIP Call-ID
- * @param pszReferToCallId	ÀüÈ­°¡ Àü´ŞµÉ SIP Call-ID
- * @param bScreenedTransfer Screened Transfer ÀÌ¸é true °¡ ÀÔ·ÂµÇ°í Unscreened Transfer ÀÌ¸é false °¡ ÀÔ·ÂµÈ´Ù.
- * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Screened / Unscreened Transfer ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipClient::EventTransfer( const char * pszCallId, const char * pszReferToCallId, bool bScreenedTransfer )
 {
 	jstring jstrCallId = NULL, jstrReferToCallId = NULL;
@@ -381,13 +335,7 @@ FUNC_END:
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief Blind Transfer ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszCallId			SIP Call-ID
- * @param pszReferToId	ÀüÈ­°¡ Àü´ŞµÉ »ç¿ëÀÚ ¾ÆÀÌµğ
- * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Blind Transfer ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipClient::EventBlindTransfer( const char * pszCallId, const char * pszReferToId )
 {
 	jstring jstrCallId = NULL, jstrReferToId = NULL;
@@ -418,14 +366,7 @@ FUNC_END:
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP MESSAGE ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszFrom			SIP ¸Ş½ÃÁö Àü¼Û ¾ÆÀÌµğ
- * @param pszTo				SIP ¸Ş½ÃÁö ¼ö½Å ¾ÆÀÌµğ
- * @param pclsMessage SIP ¸Ş½ÃÁö
- * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP MESSAGE ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipClient::EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage )
 {
 	if( pclsMessage->m_strBody.length() == 0 ) return false;
@@ -466,11 +407,7 @@ FUNC_END:
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief SIP ¸Ş½ÃÁö ¼ö½Å ¾²·¹µå°¡ Á¾·áµÊÀ» ¾Ë·ÁÁÖ´Â ÀÌº¥Æ® ÇÚµé·¯
- * @param iThreadId UDP ¾²·¹µå ¹øÈ£
- */
+// SIP ë©”ì‹œì§€ ìˆ˜ì‹  ì“°ë ˆë“œê°€ ì¢…ë£Œë¨ì„ ì•Œë ¤ì£¼ëŠ” ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClient::EventThreadEnd( int iThreadId )
 {
 	JNIEnv * env;

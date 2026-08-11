@@ -24,10 +24,7 @@
 
 typedef std::vector< std::string > XML_NAME_LIST;
 
-/**
- * @ingroup XmlParser
- * @brief XML ÀÇ ¸ğµç ÇÏÀ§ element ±îÁö Àç±ÍÀûÀ¸·Î °Ë»öÇÏ´Â ±â´ÉÀ» ¼öÇàÇÏ´Â Å¬·¡½º
- */
+// XML ì˜ ëª¨ë“  í•˜ìœ„ element ê¹Œì§€ ì¬ê·€ì ìœ¼ë¡œ ê²€ìƒ‰í•˜ëŠ” ê¸°ëŠ¥ì„ ìˆ˜í–‰í•˜ëŠ” í´ë˜ìŠ¤
 class CXmlSearch : public CXmlElement
 {
 public:

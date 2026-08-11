@@ -16,12 +16,7 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
-/**
- * @ingroup SipStack
- * @brief SIP stack �� SIP �޽����� �������� ������ SIP stack �� SIP �޽����� �����ϰ� SIP �޽����� ��Ʈ��ũ�� �����Ѵ�.
- * @param pclsMessage SIP �޽��� ���� ����ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP stack 에서 전송하는 SIP 메시지를 트랜잭션에 저장하고 네트워크로 전송한다.
 bool CSipStack::SendSipMessage( CSipMessage * pclsMessage )
 {
 	if( pclsMessage == NULL ) return false;
@@ -98,14 +93,7 @@ bool CSipStack::SendSipMessage( CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @ingroup SipStack
- * @brief ��Ʈ��ũ���� ���ŵ� SIP �޽����� SIP stack �� �����ϰ� callback �޼ҵ带 ȣ���Ͽ� ���뿡 �˷� �ش�.
- *				�� �޼ҵ忡�� true �� �����ϸ� ���������� CSipMessage �޸𸮸� �����ϰ� �׷��� ������ ȣ���� �κп��� CSipMessage �޸𸮸� ������ �־�� �Ѵ�.
- * @param iThreadId		������ ���̵� ( 0 ���� ������ ���� )
- * @param pclsMessage SIP �޽��� ���� ����ü
- * @returns SIP stack �� �����ϸ� true �� �����ϰ� �׷��� ������ false �� �����Ѵ�.
- */
+// 네트워크에서 수신된 SIP 메시지를 SIP stack 에 저장하고 callback 메소드를 호출하여 응용에 알려 준다. 본 메소드에서 true 를 리턴하면 내부적으로 CSipMessage 메모리를 관리하고 그렇지 않으면 호출한 부분에서 CSipMessage 메모리를 삭제해 주어야 한다.
 bool CSipStack::RecvSipMessage( int iThreadId, CSipMessage * pclsMessage )
 {
 	if( m_clsSetup.m_bStateful )
@@ -145,7 +133,7 @@ bool CSipStack::RecvSipMessage( int iThreadId, CSipMessage * pclsMessage )
 		{
 			if( pclsMessage->IsMethod( SIP_METHOD_INVITE ) )
 			{
-				// INVITE �޽����� ���� CANCEL �޽����� �����ϸ� �̸� SIP stack ���� �����Ѵ�.
+				// INVITE 메시지에 대한 CANCEL 메시지가 존재하면 이를 SIP stack 에서 삭제한다.
 				if( pclsMessage->m_iStatusCode >= 200 )
 				{
 					m_clsNICT.DeleteCancel( pclsMessage );
@@ -203,16 +191,7 @@ bool CSipStack::RecvSipMessage( int iThreadId, CSipMessage * pclsMessage )
 	return false;
 }
 
-/**
- * @brief ��Ʈ��ũ���� ������ SIP �޽����� �Ľ��� ��, SIP stack �� �Է��Ѵ�.
- * @param iThreadId		������ ��ȣ
- * @param pszBuf			��Ʈ��ũ���� ���ŵ� SIP �޽���
- * @param iBufLen			��Ʈ��ũ���� ���ŵ� SIP �޽����� ����
- * @param pszIp				IP �ּ�
- * @param iPort				��Ʈ ��ȣ
- * @param eTransport	Transport
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// 네트워크에서 수신한 SIP 메시지를 파싱한 후, SIP stack 에 입력한다.
 bool CSipStack::RecvSipMessage( int iThreadId, const char * pszBuf, int iBufLen, const char * pszIp, unsigned short iPort, ESipTransport eTransport )
 {
 	CSipMessage	* pclsMessage = new CSipMessage();
@@ -268,13 +247,7 @@ bool CSipStack::RecvSipMessage( int iThreadId, const char * pszBuf, int iBufLen,
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP �޽����� ��Ʈ��ũ�� �����Ѵ�.
- * @param pclsMessage		SIP �޽��� ���� ����ü
- * @param bCheckMessage	SIP �޽����� �˻��Ͽ��� �ʼ� ����� �߰�/�����ϴ°�?
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 메시지를 네트워크로 전송한다.
 bool CSipStack::Send( CSipMessage * pclsMessage, bool bCheckMessage )
 {
 	const char * pszIp = NULL;
@@ -429,15 +402,7 @@ bool CSipStack::Send( CSipMessage * pclsMessage, bool bCheckMessage )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP �������� ���ڿ��� �����Ѵ�.
- * @param pszMessage ������ ���ڿ�
- * @param pszIp ������ IP �ּ�
- * @param iPort ������ ��Ʈ ��ȣ
- * @param eTransport ��������
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 세션으로 문자열을 전송한다.
 bool CSipStack::Send( const char * pszMessage, const char * pszIp, unsigned short iPort, ESipTransport eTransport )
 {
 	if( pszMessage == NULL || pszIp == NULL ) return false;
@@ -475,11 +440,7 @@ bool CSipStack::Send( const char * pszMessage, const char * pszIp, unsigned shor
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief ������ SIP �޽������� �ʿ��� ����� �������� ���� ��� default ����� �����Ѵ�.
- * @param pclsMessage ������ SIP �޽���
- */
+// 전송할 SIP 메시지에서 필요한 헤더가 존재하지 않을 경우 default 헤더를 저장한다.
 void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 {
 	if( pclsMessage->IsRequest() )

@@ -22,10 +22,7 @@
 #include <string>
 #include <list>
 
-/**
- * @ingroup SdpParser
- * @brief SDP bandwitdh ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SDP bandwitdh ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSdpBandWidth
 {
 public:

@@ -19,16 +19,7 @@
 #include "AndroidGet.h"
 #include "AndroidLog.h"
 
-/**
- * @ingroup AndroidSipStack
- * @brief °´Ã¼ÀÇ ¸â¹ö ¹®ÀÚ¿­ º¯¼ö¿¡ ÀúÀåµÈ °ªÀ» °¡Á®¿Â´Ù.
- * @param env				JNIEnv
- * @param jObject		java °´Ã¼
- * @param jClass		java Å¬·¡½º
- * @param pszName		¸â¹ö ¹®ÀÚ¿­ º¯¼ö ÀÌ¸§
- * @param strOutput ¸â¹ö ¹®ÀÚ¿­ º¯¼öÀÇ °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ê°ì²´ì˜ ë©¤ë²„ ë¬¸ìì—´ ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool GetString( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName, std::string & strOutput )
 {
 	strOutput.clear();
@@ -61,16 +52,7 @@ bool GetString( JNIEnv * env, jobject jObject, jclass jClass, const char * pszNa
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief °´Ã¼ÀÇ ¸â¹ö Á¤¼ö º¯¼ö¿¡ ÀúÀåµÈ °ªÀ» °¡Á®¿Â´Ù.
- * @param env				JNIEnv
- * @param jObject		java °´Ã¼
- * @param jClass		java Å¬·¡½º
- * @param pszName		¸â¹ö Á¤¼ö º¯¼ö ÀÌ¸§
- * @param iOutput		¸â¹ö Á¤¼ö º¯¼öÀÇ °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ê°ì²´ì˜ ë©¤ë²„ ì •ìˆ˜ ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool GetInt( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName, int & iOutput )
 {
 	jfieldID fid = env->GetFieldID( jClass, pszName, "I" );
@@ -85,16 +67,7 @@ bool GetInt( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName,
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief °´Ã¼ÀÇ ¸â¹ö boolean º¯¼ö¿¡ ÀúÀåµÈ °ªÀ» °¡Á®¿Â´Ù.
- * @param env				JNIEnv
- * @param jObject		java °´Ã¼
- * @param jClass		java Å¬·¡½º
- * @param pszName		¸â¹ö boolean º¯¼ö ÀÌ¸§
- * @param bOutput		¸â¹ö boolean º¯¼öÀÇ °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ê°ì²´ì˜ ë©¤ë²„ boolean ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool GetBool( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName, bool & bOutput )
 {
 	jfieldID fid = env->GetFieldID( jClass, pszName, "Z" );
@@ -118,14 +91,7 @@ bool GetBool( JNIEnv * env, jobject jObject, jclass jClass, const char * pszName
 	return true;
 }
 
-/**
- * @ingroup AndroidSipStack
- * @brief java ¹®ÀÚ¿­ º¯¼ö¿¡ ÀúÀåµÈ °ªÀ» °¡Á®¿Â´Ù.
- * @param env				JNIEnv
- * @param js				java ¹®ÀÚ¿­ º¯¼ö
- * @param strOutput java ¹®ÀÚ¿­ º¯¼öÀÇ °ªÀ» ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// java ë¬¸ìì—´ ë³€ìˆ˜ì— ì €ì¥ëœ ê°’ì„ ê°€ì ¸ì˜¨ë‹¤.
 bool GetString( JNIEnv * env, jstring js, std::string & strOutput )
 {
 	strOutput.clear();

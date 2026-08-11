@@ -30,17 +30,14 @@
 #include "SipCallId.h"
 #include "SipContentType.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP �޽��� ������ �����ϴ� Ŭ����
- */
+// SIP 메시지 정보를 저장하는 클래스
 class CSipMessage
 {
 public:
 	CSipMessage();
 	~CSipMessage();
 
-	/** SIP �޼ҵ� ( INVITE, CANCEL, ACK, BYE, REFER �� ) */
+	// SIP 메소드 ( INVITE, CANCEL, ACK, BYE, REFER 등 )
 	std::string		m_strSipMethod;
 
 	/** SIP request URI */
@@ -49,90 +46,90 @@ public:
 	/** SIP version ( SIP/2.0 ) */
 	std::string		m_strSipVersion;
 
-	/** SIP ���� �ڵ�. SIP ���� �޽����� ��쿡�� 0 ���� ū ���� ������ �ִ�. */
+	// SIP 응답 코드. SIP 응답 메시지인 경우에만 0 보다 큰 값을 가지고 있다.
 	int						m_iStatusCode;
 
-	/** SIP ���� �޽��� */
+	// SIP 응답 메시지
 	std::string		m_strReasonPhrase;
 
-	/** SIP From ��� */
+	// SIP From 헤더
 	CSipFrom			m_clsFrom;
 
-	/** SIP To ��� */
+	// SIP To 헤더
 	CSipFrom			m_clsTo;
 
-	/** SIP Via ��� ����Ʈ */
+	// SIP Via 헤더 리스트
 	SIP_VIA_LIST	m_clsViaList;
 
-	/** SIP Contact ��� ����Ʈ */
+	// SIP Contact 헤더 리스트
 	SIP_FROM_LIST	m_clsContactList;
 
-	/** SIP Record-Route ��� ����Ʈ */
+	// SIP Record-Route 헤더 리스트
 	SIP_FROM_LIST	m_clsRecordRouteList;
 
-	/** SIP Route ��� ����Ʈ */
+	// SIP Route 헤더 리스트
 	SIP_FROM_LIST	m_clsRouteList;
 
 #ifdef USE_ACCEPT_HEADER
-	/** SIP Accept ��� ����Ʈ */
+	// SIP Accept 헤더 리스트
 	SIP_CONTENT_TYPE_LIST	m_clsAcceptList;
 
-	/** SIP Accept-Encoding ��� ����Ʈ */
+	// SIP Accept-Encoding 헤더 리스트
 	SIP_ACCEPT_DATA_LIST	m_clsAcceptEncodingList;
 
-	/** SIP Accept-Language ��� ����Ʈ */
+	// SIP Accept-Language 헤더 리스트
 	SIP_ACCEPT_DATA_LIST	m_clsAcceptLanguageList;
 #endif
 
-	/** SIP Authorization ��� ����Ʈ */
+	// SIP Authorization 헤더 리스트
 	SIP_CREDENTIAL_LIST		m_clsAuthorizationList;
 
-	/** SIP Www-Authenticate ��� ����Ʈ */
+	// SIP Www-Authenticate 헤더 리스트
 	SIP_CHALLENGE_LIST		m_clsWwwAuthenticateList;
 
-	/** SIP Proxy-Authorization ��� ����Ʈ */
+	// SIP Proxy-Authorization 헤더 리스트
 	SIP_CREDENTIAL_LIST		m_clsProxyAuthorizationList;
 
-	/** SIP Proxy-Authenticate ��� ����Ʈ */
+	// SIP Proxy-Authenticate 헤더 리스트
 	SIP_CHALLENGE_LIST		m_clsProxyAuthenticateList;
 
-	/** SIP ��� ����Ʈ. CSipMessage ���� �����Ͽ��� ������ ����� ������� �ʴ� ������� �����Ѵ�. */
+	// SIP 헤더 리스트. CSipMessage 에서 구분하여서 정의한 헤더에 저장되지 않는 헤더들을 저장한다.
 	SIP_HEADER_LIST				m_clsHeaderList;
 
-	/** SIP CSeq ��� */
+	// SIP CSeq 헤더
 	CSipCSeq				m_clsCSeq;
 
-	/** SIP Call-ID ��� */
+	// SIP Call-ID 헤더
 	CSipCallId			m_clsCallId;
 
-	/** SIP Content-Type ��� */
+	// SIP Content-Type 헤더
 	CSipContentType	m_clsContentType;
 
-	/** SIP Content-Length ����� �� */
+	// SIP Content-Length 헤더의 값
 	int							m_iContentLength;
 
-	/** SIP Expires ����� �� */
+	// SIP Expires 헤더의 값
 	int							m_iExpires;
 
-	/** SIP Max-Forwards ����� �� */
+	// SIP Max-Forwards 헤더의 값
 	int							m_iMaxForwards;
 
-	/** SIP User-Agent ��� */
+	// SIP User-Agent 헤더
 	std::string			m_strUserAgent;
 
-	/** SIP body �޽��� */
+	// SIP body 메시지
 	std::string			m_strBody;
 
-	/** ��Ʈ��ũ�� ������ SIP �޽��� */
+	// 네트워크로 전송할 SIP 메시지
 	std::string			m_strPacket;
 
-	/** ��Ʈ��ũ�� ����/���ŵ� SIP �޽����� transport */
+	// 네트워크로 전송/수신된 SIP 메시지의 transport
 	ESipTransport		m_eTransport;
 
-	/** SIP �޽����� ������ Ŭ���̾�Ʈ�� IP �ּ� */
+	// SIP 메시지를 전송한 클라이언트의 IP 주소
 	std::string			m_strClientIp;
 
-	/** SIP 메시지를 전송한 클라이언트의 포트 번호 */
+	// SIP 메시지를 전송한 클라이언트의 포트 번호
 	int							m_iClientPort;
 
 	/** 수신 리스너 식별자 (CSP v3 확장, 2026-04-22).
@@ -148,10 +145,10 @@ public:
 	std::string			m_strSendDestIp;
 	int							m_iSendDestPort;
 
-	/** SIP �޽����� compact form ���� �����ϴ��� ���� */
+	// SIP 메시지를 compact form 으로 생성하는지 설정
 	bool						m_bUseCompact;
 
-	/** ��ü ��� ���� */
+	// 객체 사용 개수
 	int8_t					m_iUseCount;
 
 	int Parse( const char * pszText, int iTextLen );

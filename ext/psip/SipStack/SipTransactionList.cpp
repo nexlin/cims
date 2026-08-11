@@ -41,23 +41,13 @@ CSipTransactionList::~CSipTransactionList()
 
 }
 
-/**
- * @ingroup SipStack
- * @brief Transaction List ¸¦ Æ÷ÇÔÇÑ CSipStack °´Ã¼ÀÇ Æ÷ÀÎÅÍ¸¦ ÀúÀåÇÑ´Ù. ÀçÀü¼Û ±â´ÉÀ» À§ÇØ¼­ CSipStack °´Ã¼°¡ ÇÊ¿äÇÏ´Ù.
- * @param pclsSipStack CSipStack °´Ã¼ÀÇ Æ÷ÀÎÅÍ
- */
+// Transaction List ë¥¼ í¬í•¨í•œ CSipStack ê°ì²´ì˜ í¬ì¸í„°ë¥¼ ì €ì¥í•œë‹¤. ì¬ì „ì†¡ ê¸°ëŠ¥ì„ ìœ„í•´ì„œ CSipStack ê°ì²´ê°€ í•„ìš”í•˜ë‹¤.
 void CSipTransactionList::SetSipStack( CSipStack * pclsSipStack )
 {
 	m_pclsSipStack = pclsSipStack;
 }
 
-/**
- * @ingroup SipStack
- * @brief Transaction List ¿¡ ÀúÀåÇÒ Å°¸¦ °¡Á®¿Â´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- * @param strKey			Transaction List ¿¡ ÀúÀåÇÒ Å°
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Transaction List ì— ì €ì¥í•  í‚¤ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool CSipTransactionList::GetKey( CSipMessage * pclsMessage, std::string & strKey )
 {
 	strKey.clear();
@@ -102,14 +92,7 @@ bool CSipTransactionList::GetKey( CSipMessage * pclsMessage, std::string & strKe
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief Transaction List ¿¡ ÀúÀåÇÒ Å°¸¦ °¡Á®¿Â´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- * @param pszMethod		SIP Via branch ·Î Å°¸¦ »ı¼ºÇÒ °æ¿ì »ç¿ëÇÒ SIP ¸Ş¼Òµå
- * @param strKey			Transaction List ¿¡ ÀúÀåÇÒ Å°
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Transaction List ì— ì €ì¥í•  í‚¤ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool CSipTransactionList::GetKey( CSipMessage * pclsMessage, const char * pszMethod, std::string & strKey )
 {
 	strKey.clear();

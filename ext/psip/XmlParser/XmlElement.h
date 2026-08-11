@@ -26,28 +26,15 @@
 
 class CXmlElement;
 
-/**
- * @ingroup XmlParser
- * @brief XML attribute map. key ´Â attribute ÀÌ¸§ÀÌ°í value ´Â attribute °ªÀÌ´Ù.
- */
+// XML attribute map. key ëŠ” attribute ì´ë¦„ì´ê³  value ëŠ” attribute ê°’ì´ë‹¤.
 typedef std::map< std::string, std::string > XML_ATTRIBUTE_MAP;
 
-/**
- * @ingroup XmlParser
- * @brief CXmlElement °´Ã¼ ¸®½ºÆ®
- */
+// CXmlElement ê°ì²´ ë¦¬ìŠ¤íŠ¸
 typedef std::list< CXmlElement > XML_ELEMENT_LIST;
 
-/**
- * @defgroup XmlParser XmlParser
- * Xml ÆÄ½Ì/»ı¼º ¶óÀÌºê·¯¸®
- * Xml ÆÄ½Ì/»ı¼º ¶óÀÌºê·¯¸®
- */
+// XmlParser
 
-/**
- * @ingroup XmlParser
- * @brief XML Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// XML ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CXmlElement
 {
 public:

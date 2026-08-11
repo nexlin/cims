@@ -25,17 +25,7 @@
 #include <time.h>
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief SIP �޽����� �Ľ��Ͽ��� SIP stack �� �Է��Ѵ�.
- * @param pclsSipStack SIP stack
- * @param iThreadId		UDP ������ ��ȣ
- * @param pszBuf			��Ʈ��ũ���� ���ŵ� SIP �޽���
- * @param iBufLen			��Ʈ��ũ���� ���ŵ� SIP �޽����� ����
- * @param pszIp				IP �ּ�
- * @param iPort				��Ʈ ��ȣ
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 메시지를 파싱하여서 SIP stack 에 입력한다.
 static bool SipMessageProcess( CSipStack * pclsSipStack, int iThreadId, const char * pszBuf, int iBufLen, const char * pszIp, unsigned short iPort )
 {
 	CLog::Print( LOG_NETWORK, "TcpRecv(%s:%d) \n[%.*s]", pszIp, iPort, iBufLen, pszBuf );
@@ -48,12 +38,7 @@ static bool SipMessageProcess( CSipStack * pclsSipStack, int iThreadId, const ch
 	return pclsSipStack->RecvSipMessage( iThreadId, pszBuf, iBufLen, pszIp, iPort, E_SIP_TCP );
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP ������ ���� ������ �Լ�
- * @param lpParameter CThreadListEntry ��ü�� ������
- * @returns 0 �� �����Ѵ�.
- */
+// TCP 세션을 위한 쓰레드 함수
 THREAD_API SipTcpThread( LPVOID lpParameter )
 {
 	CThreadListEntry * pclsEntry = (CThreadListEntry *)lpParameter;
@@ -137,12 +122,7 @@ FUNC_END:
 	return 0;
 }
 
-/** 
- * @ingroup SipStack
- * @brief TCP �������ݷ� SIP �޽��� ���� �� SIP ���� �̺�Ʈ�� ó���ϴ� ������ �Լ�
- * @param lpParameter SIP stack ������
- * @returns 0 �� �����Ѵ�.
- */
+// TCP 프로토콜로 SIP 메시지 수신 및 SIP 수신 이벤트를 처리하는 쓰레드 함수
 THREAD_API SipTcpListenThread( LPVOID lpParameter )
 {
 	CSipStack * pclsSipStack = (CSipStack *)lpParameter;
@@ -188,12 +168,7 @@ FUNC_END:
 	return 0;
 }
 
-/**
- * @ingroup SipStack
- * @brief TCP �������ݷ� SIP �޽��� ���� �� SIP ���� �̺�Ʈ�� ó���ϴ� Thread Pool �� �����Ѵ�.
- * @param pclsSipStack SIP stack ������
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// TCP 프로토콜로 SIP 메시지 수신 및 SIP 수신 이벤트를 처리하는 Thread Pool 을 시작한다.
 bool StartSipTcpListenThread( CSipStack * pclsSipStack )
 {
 	return StartThread( "SipTcpListenThread", SipTcpListenThread, pclsSipStack );

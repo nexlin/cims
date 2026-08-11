@@ -29,10 +29,7 @@
 
 class CTcpStack;
 
-/**
- * @ingroup TcpStack
- * @brief TCP �����忡 TCP ������ ������ ���� ���Ǵ� Ŭ���� - m_bUseThreadPipe �� true �� ���� ���ȴ�.
- */
+// TCP 쓰레드에 TCP 세션을 전달할 때에 사용되는 클래스 - m_bUseThreadPipe 가 true 일 때에 사용된다.
 class CTcpComm
 {
 public:
@@ -63,7 +60,7 @@ public:
 	}
 
 	Socket	m_hSocket;
-	char		m_szIp[INET6_ADDRSTRLEN];	// ��Ŷ���� ���۵ǹǷ� std::string �� ����� �� ����.
+	char		m_szIp[INET6_ADDRSTRLEN];	// 패킷으로 전송되므로 std::string 을 사용할 수 없다.
 	int			m_iPort;
 	SSL			* m_psttSsl;
 #ifdef USE_TLS
@@ -72,14 +69,11 @@ public:
 	SSL_CTX		* m_pSslCtx;
 #endif
 
-	/** TCP client �� ������ ����� ��쿡 true �̴�. */
+	// TCP client 로 서버에 연결된 경우에 true 이다.
 	bool		m_bClient;
 };
 
-/**
- * @ingroup TcpStack
- * @brief ������ ����Ʈ�� ���ԵǴ� �ϳ��� ������ ���� ���� Ŭ����
- */
+// 쓰레드 리스트에 포함되는 하나의 쓰레드 정보 저장 클래스
 class CTcpThreadInfo
 {
 public:
@@ -88,9 +82,9 @@ public:
 
 	void Close();
 
-	int				m_iIndex;				// ������ �ε���
-	Socket		m_hSend;				// �۽� pipe
-	Socket		m_hRecv;				// ���� pipe
+	int				m_iIndex;				// 쓰레드 인덱스
+	Socket		m_hSend;				// 송신 pipe
+	Socket		m_hRecv;				// 수신 pipe
 
 	CTcpStackSessionList	m_clsSessionList;
 	CTcpStack	* m_pclsStack;
@@ -98,10 +92,7 @@ public:
 
 typedef std::vector< CTcpThreadInfo * > TCP_THREAD_LIST;
 
-/**
- * @ingroup TcpStack
- * @brief ������ ����Ʈ �ڷᱸ��
- */
+// 쓰레드 리스트 자료구조
 class CTcpThreadList
 {
 public:

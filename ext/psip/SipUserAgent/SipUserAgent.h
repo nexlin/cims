@@ -40,7 +40,7 @@ public:
 	CSipUserAgent();
 	~CSipUserAgent();
 
-	// SipUserAgentLogin.hpp : �α��� ����
+	// SipUserAgentLogin.hpp : 로그인 관련
 	bool InsertRegisterInfo( CSipServerInfo & clsInfo );
 	bool UpdateRegisterInfo( CSipServerInfo & clsInfo );
 	bool DeleteRegisterInfo( CSipServerInfo & clsInfo );

@@ -30,13 +30,7 @@ CHttpMessage::~CHttpMessage()
 {
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¸Ş½ÃÁö¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­
- * @param iTextLen	HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ °³¼ö¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ë©”ì‹œì§€ë¥¼ íŒŒì‹±í•œë‹¤.
 int CHttpMessage::Parse( const char * pszText, int iTextLen )
 {
 	int iCurPos;
@@ -60,13 +54,7 @@ int CHttpMessage::Parse( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¸Ş½ÃÁöÀÇ Çì´õ¸¦ ÆÄ½ÌÇÑ´Ù.
- * @param pszText		HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­
- * @param iTextLen	HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ¹®ÀÚ¿­ °³¼ö¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ë©”ì‹œì§€ì˜ í—¤ë”ë¥¼ íŒŒì‹±í•œë‹¤.
 int CHttpMessage::ParseHeader( const char * pszText, int iTextLen )
 {
 	if( pszText == NULL || iTextLen <= 4 ) return -1;
@@ -125,10 +113,7 @@ int CHttpMessage::ParseHeader( const char * pszText, int iTextLen )
 	return iCurPos;
 }
 
-/**
- * @ingroup HttpParser
- * @brief ³»ºÎ º¯¼ö¸¦ ÃÊ±âÈ­½ÃÅ²´Ù.
- */
+// ë‚´ë¶€ ë³€ìˆ˜ë¥¼ ì´ˆê¸°í™”ì‹œí‚¨ë‹¤.
 void CHttpMessage::Clear()
 {
 	m_strHttpMethod.clear();
@@ -142,13 +127,7 @@ void CHttpMessage::Clear()
 	m_strBody.clear();
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­À» »ı¼ºÇÑ´Ù.
- * @param pszText		HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­ ÀúÀå º¯¼ö
- * @param iTextSize HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­ ÀúÀå º¯¼ö Å©±â
- * @returns ¼º°øÇÏ¸é ÀúÀåµÈ HTTP ¸Ş½ÃÁö ¹®ÀÚ¿­ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é -1 À» ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ë©”ì‹œì§€ ë¬¸ìì—´ì„ ìƒì„±í•œë‹¤.
 int CHttpMessage::ToString( char * pszText, int iTextSize )
 {
 	if( pszText == NULL || iTextSize <= 0 ) return -1;
@@ -201,13 +180,7 @@ int CHttpMessage::ToString( char * pszText, int iTextSize )
 	return iLen;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP Çì´õ ÀÚ·á±¸Á¶¿¡ ÀÌ¸§°ú °ªÀ» Ãß°¡ÇÑ´Ù.
- * @param pszName		HTTP Çì´õ ÀÌ¸§
- * @param pszValue	HTTP Çì´õ °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP í—¤ë” ìë£Œêµ¬ì¡°ì— ì´ë¦„ê³¼ ê°’ì„ ì¶”ê°€í•œë‹¤.
 bool CHttpMessage::AddHeader( const char * pszName, const char * pszValue )
 {
 	if( pszName == NULL || pszValue == NULL ) return false;
@@ -219,13 +192,7 @@ bool CHttpMessage::AddHeader( const char * pszName, const char * pszValue )
 	return true;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP Çì´õ ÀÚ·á±¸Á¶¿¡ ÀÌ¸§°ú °ªÀ» Ãß°¡ÇÑ´Ù.
- * @param pszName HTTP Çì´õ ÀÌ¸§
- * @param iValue	HTTP Çì´õ °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP í—¤ë” ìë£Œêµ¬ì¡°ì— ì´ë¦„ê³¼ ê°’ì„ ì¶”ê°€í•œë‹¤.
 bool CHttpMessage::AddHeader( const char * pszName, int iValue )
 {
 	char szValue[11];
@@ -235,13 +202,7 @@ bool CHttpMessage::AddHeader( const char * pszName, int iValue )
 	return AddHeader( pszName, szValue );
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP Çì´õ ÀÚ·á±¸Á¶¿¡¼­ ÀÌ¸§À» °Ë»öÇÑ ÈÄ, ÇØ´ç Çì´õ°¡ Á¸ÀçÇÏ¸é °ªÀ» ¼öÁ¤ÇÑ´Ù.
- * @param pszName		HTTP Çì´õ ÀÌ¸§
- * @param pszValue	HTTP Çì´õ °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP í—¤ë” ìë£Œêµ¬ì¡°ì—ì„œ ì´ë¦„ì„ ê²€ìƒ‰í•œ í›„, í•´ë‹¹ í—¤ë”ê°€ ì¡´ì¬í•˜ë©´ ê°’ì„ ìˆ˜ì •í•œë‹¤.
 bool CHttpMessage::UpdateHeader( const char * pszName, const char * pszValue )
 {
 	HTTP_HEADER_LIST::iterator itList;
@@ -258,13 +219,7 @@ bool CHttpMessage::UpdateHeader( const char * pszName, const char * pszValue )
 	return false;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP Çì´õ ÀÚ·á±¸Á¶¿¡¼­ ÀÌ¸§À» °Ë»öÇÑ ÈÄ, ÇØ´ç Çì´õ°¡ Á¸ÀçÇÏ¸é °ªÀ» ¼öÁ¤ÇÏ°í Á¸ÀçÇÏÁö ¾ÊÀ¸¸é »õ·Î Ãß°¡ÇÑ´Ù.
- * @param pszName		HTTP Çì´õ ÀÌ¸§
- * @param pszValue	HTTP Çì´õ °ª
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP í—¤ë” ìë£Œêµ¬ì¡°ì—ì„œ ì´ë¦„ì„ ê²€ìƒ‰í•œ í›„, í•´ë‹¹ í—¤ë”ê°€ ì¡´ì¬í•˜ë©´ ê°’ì„ ìˆ˜ì •í•˜ê³  ì¡´ì¬í•˜ì§€ ì•Šìœ¼ë©´ ìƒˆë¡œ ì¶”ê°€í•œë‹¤.
 bool CHttpMessage::ReplaceHeader( const char * pszName, const char * pszValue )
 {
 	if( UpdateHeader( pszName, pszValue ) == false )
@@ -275,12 +230,7 @@ bool CHttpMessage::ReplaceHeader( const char * pszName, const char * pszValue )
 	return true;
 }
 
-/**
- * @ingroup HttpParser
- * @brief Çì´õ ¸®½ºÆ®¸¦ °Ë»öÇÏ¿©¼­ ÀÔ·ÂµÈ ÀÌ¸§°ú ÀÏÄ¡ÇÏ´Â Çì´õ¸¦ ¸®ÅÏÇÑ´Ù.
- * @param pszName Çì´õ ÀÌ¸§
- * @returns Çì´õ ¸®½ºÆ®¿¡ Á¸ÀçÇÏ¸é Çì´õ °´Ã¼¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é NULL À» ¸®ÅÏÇÑ´Ù.
- */
+// í—¤ë” ë¦¬ìŠ¤íŠ¸ë¥¼ ê²€ìƒ‰í•˜ì—¬ì„œ ì…ë ¥ëœ ì´ë¦„ê³¼ ì¼ì¹˜í•˜ëŠ” í—¤ë”ë¥¼ ë¦¬í„´í•œë‹¤.
 CHttpHeader * CHttpMessage::GetHeader( const char * pszName )
 {
 	HTTP_HEADER_LIST::iterator	itList;
@@ -296,14 +246,7 @@ CHttpHeader * CHttpMessage::GetHeader( const char * pszName )
 	return NULL;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¿äÃ» ¸Ş½ÃÁö¿¡ ±âº»ÀûÀ¸·Î ÀÔ·ÂµÇ¾î¾ß ÇÒ ³»¿ëÀ» Ãß°¡ÇÑ´Ù.
- * @param pszMethod HTTP ¸Ş¼Òµå
- * @param pclsUri		HTTP URI
- * @param pszUserAgent	HTTP User Agent Çì´õ¿¡ ÀúÀåµÉ ¹®ÀÚ¿­
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ìš”ì²­ ë©”ì‹œì§€ì— ê¸°ë³¸ì ìœ¼ë¡œ ì…ë ¥ë˜ì–´ì•¼ í•  ë‚´ìš©ì„ ì¶”ê°€í•œë‹¤.
 bool CHttpMessage::SetRequest( const char * pszMethod, CHttpUri * pclsUri, const char * pszUserAgent )
 {
 	m_strHttpMethod = pszMethod;
@@ -339,11 +282,7 @@ bool CHttpMessage::SetRequest( const char * pszMethod, CHttpUri * pclsUri, const
 	return true;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ¿äÃ» ¸Ş½ÃÁöÀÎÁö °Ë»çÇÑ´Ù.
- * @returns HTTP ¿äÃ» ¸Ş½ÃÁöÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP ìš”ì²­ ë©”ì‹œì§€ì¸ì§€ ê²€ì‚¬í•œë‹¤.
 bool CHttpMessage::IsRequest( )
 {
 	if( m_strHttpMethod.empty() == false ) return true;
@@ -351,13 +290,7 @@ bool CHttpMessage::IsRequest( )
 	return false;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP status line À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		HTTP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP status line ì„ íŒŒì‹±í•œë‹¤.
 int CHttpMessage::ParseStatusLine( const char * pszText, int iTextLen )
 {
 	int		iPos, iStartPos = -1;
@@ -403,13 +336,7 @@ int CHttpMessage::ParseStatusLine( const char * pszText, int iTextLen )
 	return -1;
 }
 
-/**
- * @ingroup HttpParser
- * @brief HTTP request line À» ÆÄ½ÌÇÑ´Ù.
- * @param pszText		SIP Çì´õÀÇ °ªÀ» ÀúÀåÇÑ ¹®ÀÚ¿­
- * @param iTextLen	pszText ¹®ÀÚ¿­ÀÇ ±æÀÌ
- * @returns ¼º°øÇÏ¸é ÆÄ½ÌÇÑ ±æÀÌ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é -1 ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// HTTP request line ì„ íŒŒì‹±í•œë‹¤.
 int CHttpMessage::ParseRequestLine( const char * pszText, int iTextLen )
 {
 	int		iPos, iStartPos = -1;

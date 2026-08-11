@@ -21,20 +21,17 @@
 
 #include <string>
 
-/**
- * @ingroup SipParser
- * @brief SIP Call-ID Çì´õ¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// SIP Call-ID í—¤ë”ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CSipCallId
 {
 public:
 	CSipCallId();
 	~CSipCallId();
 
-	/** »ç¿ëÀÚ ¾ÆÀÌµğ */
+	// ì‚¬ìš©ì ì•„ì´ë””
 	std::string m_strName;
 
-	/** È£½ºÆ® ÀÌ¸§ ¶Ç´Â IP ÁÖ¼Ò */
+	// í˜¸ìŠ¤íŠ¸ ì´ë¦„ ë˜ëŠ” IP ì£¼ì†Œ
 	std::string m_strHost;
 
 	int Parse( const char * pszText, int iTextLen );

@@ -26,10 +26,7 @@
 
 typedef std::list< CSipMessage * > SIP_MESSAGE_LIST;
 
-/**
- * @ingroup SipStack
- * @brief TCP/TLS ¿¬°á ÁøÇà ÁßÀÎ °æ¿ì¿¡ Àü¼Û ¿äÃ»ÇÑ SIP ¸Ş½ÃÁö¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// TCP/TLS ì—°ê²° ì§„í–‰ ì¤‘ì¸ ê²½ìš°ì— ì „ì†¡ ìš”ì²­í•œ SIP ë©”ì‹œì§€ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CTcpConnectInfo
 {
 public:
@@ -42,10 +39,7 @@ public:
 // key = ip:port
 typedef std::map< std::string, CTcpConnectInfo > TCP_CONNECT_MAP;
 
-/**
- * @ingroup SipStack
- * @brief TCP/TLS ¿¬°á ÁøÇà ÁßÀÎ Á¤º¸¸¦ ÀúÀåÇÏ´Â Å¬·¡½º
- */
+// TCP/TLS ì—°ê²° ì§„í–‰ ì¤‘ì¸ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” í´ë˜ìŠ¤
 class CTcpConnectMap
 {
 public:

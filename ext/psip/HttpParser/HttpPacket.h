@@ -21,10 +21,7 @@
 
 #include "HttpMessage.h"
 
-/**
- * @ingroup HttpParser
- * @brief HTTP ÇÁ·ÎÅäÄİ ÆÄ½Ì ´Ü°è
- */
+// HTTP í”„ë¡œí† ì½œ íŒŒì‹± ë‹¨ê³„
 enum EHttpPacketStatus
 {
 	H_HPS_HEADER = 0,
@@ -32,10 +29,7 @@ enum EHttpPacketStatus
 	H_HPS_BODY_END
 };
 
-/**
- * @ingroup HttpParser
- * @brief ¼ö½ÅµÈ HTTP ÇÁ·ÎÅäÄİ ÆĞÅ¶À» ÀúÀåÇÏ°í ÆÄ½ÌÇÏ´Â Å¬·¡½º
- */
+// ìˆ˜ì‹ ëœ HTTP í”„ë¡œí† ì½œ íŒ¨í‚·ì„ ì €ì¥í•˜ê³  íŒŒì‹±í•˜ëŠ” í´ë˜ìŠ¤
 class CHttpPacket
 {
 public:

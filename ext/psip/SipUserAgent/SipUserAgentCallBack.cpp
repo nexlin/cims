@@ -19,13 +19,7 @@
 #include "SipUserAgent.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipUserAgent
- * @brief RTP IP/Port �� �����Ѵ�.
- * @param pszIp IP �ּ�
- * @param iPort Port ��ȣ
- * @param iSocketCountPerMedia �̵��� �����ϴ� ���� ����
- */
+// RTP IP/Port 를 수정한다.
 void CSipCallRtp::SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia )
 {
 	m_strIp = pszIp;
@@ -48,11 +42,7 @@ void CSipCallRtp::SetIpPort( const char * pszIp, int iPort, int iSocketCountPerM
 #endif
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief RTP ����/���� ������ �����Ѵ�.
- * @param eDirection RTP ����/���� ����
- */
+// RTP 전송/수신 방향을 설정한다.
 void CSipCallRtp::SetDirection( ERtpDirection eDirection )
 {
 	m_eDirection = eDirection;
@@ -68,11 +58,7 @@ void CSipCallRtp::SetDirection( ERtpDirection eDirection )
 #endif
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief �̵�� ������ �����Ѵ�.
- * @returns �̵�� ������ �����Ѵ�.
- */
+// 미디어 개수를 리턴한다.
 int CSipCallRtp::GetMediaCount( )
 {
 	int iCount = 1;
@@ -85,11 +71,7 @@ int CSipCallRtp::GetMediaCount( )
 	return iCount;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief �̵�� ����Ʈ���� audio media �� �˻��� ��, audio media �� ���� ��Ʈ ��ȣ�� �����Ѵ�.
- * @returns �����ϸ� audio media �� ���� ��Ʈ ��ȣ�� �����ϰ� �����ϸ� -1 �� �����Ѵ�.
- */
+// 미디어 리스트에서 audio media 를 검색한 후, audio media 에 대한 포트 번호를 리턴한다.
 int CSipCallRtp::GetAudioPort( )
 {
 	int iPort = -1;
@@ -110,11 +92,7 @@ int CSipCallRtp::GetAudioPort( )
 	return iPort;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief �̵�� ����Ʈ���� video media �� �˻��� ��, video media �� ���� ��Ʈ ��ȣ�� �����Ѵ�.
- * @returns �����ϸ� video media �� ���� ��Ʈ ��ȣ�� �����ϰ� �����ϸ� -1 �� �����Ѵ�.
- */
+// 미디어 리스트에서 video media 를 검색한 후, video media 에 대한 포트 번호를 리턴한다.
 int CSipCallRtp::GetVideoPort( )
 {
 	int iPort = -1;
@@ -142,7 +120,7 @@ int CSipCallRtp::GetVideoPort( )
  */
 int CSipCallRtp::GetApplicationPort( )
 {
-	// ���������� ������ floor ��Ʈ�� ������ �켱 (media list �̻�� �۽� ��ο�).
+	// 명시 설정된 floor 포트가 우선 (media list 파싱값보다 신뢰).
 	if( m_iApplicationPort > 0 ) return m_iApplicationPort;
 
 	int iPort = -1;

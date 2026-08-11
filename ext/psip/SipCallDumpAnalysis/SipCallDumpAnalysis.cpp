@@ -70,7 +70,7 @@ int main( int argc, char * argv[] )
 
 		psttIp4Header = (Ip4Header *)( pszData + iIpPos );
 
-		// IPv4 ¸¸ °Ë»çÇÑ´Ù.
+		// IPv4 ë§Œ ê²€ì‚¬í•œë‹¤.
 		if( ( psttIp4Header->ver_ihl & 0xF0 ) != 0x40 ) continue;
 
 		iIpHeaderLen = GetIpHeaderLength( psttIp4Header );

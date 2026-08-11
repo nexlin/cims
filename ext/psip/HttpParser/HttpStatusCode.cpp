@@ -19,12 +19,7 @@
 #include "HttpStatusCode.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup HttpParser
- * @brief HTTP status code ¿¡ ÇØ´çÇÏ´Â ¹®ÀÚ¿­À» ¸®ÅÏÇÑ´Ù.
- * @param iSipCode HTTP status code
- * @returns HTTP status code ¿¡ ÇØ´çÇÏ´Â ¹®ÀÚ¿­À» ¸®ÅÏÇÑ´Ù.
- */
+// HTTP status code ì— í•´ë‹¹í•˜ëŠ” ë¬¸ìì—´ì„ ë¦¬í„´í•œë‹¤.
 const char * GetReasonPhrase( int iSipCode )
 {
 	switch( iSipCode )

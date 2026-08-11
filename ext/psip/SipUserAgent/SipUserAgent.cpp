@@ -46,30 +46,17 @@
 #include "SipUserAgentPrack.hpp"
 #include "SipUserAgentOptions.hpp"
 
-/**
- * @ingroup SipUserAgent
- * @brief ������
- */
+// 생성자
 CSipUserAgent::CSipUserAgent() : m_bStopEvent(false), m_pclsCallBack(NULL), m_iSeq(0), m_bStart(false)
 {
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief �Ҹ���
- */
+// 소멸자
 CSipUserAgent::~CSipUserAgent()
 {
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP stack �� �����ϰ� SIP �α��� �����带 �����Ѵ�.
- * @param clsSetup	SIP stack ���� ��ü
- * @param pclsCallBack	SIP UserAgent callback ��ü
- * @param pclsSecurityCallBack	SIP stack ���� callback ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP stack 을 시작하고 SIP 로그인 쓰레드를 시작한다.
 bool CSipUserAgent::Start( CSipStackSetup & clsSetup, ISipUserAgentCallBack * pclsCallBack, ISipStackSecurityCallBack * pclsSecurityCallBack )
 {
 	if( m_bStart ) return false;
@@ -88,11 +75,7 @@ bool CSipUserAgent::Start( CSipStackSetup & clsSetup, ISipUserAgentCallBack * pc
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP stack �� �����ϰ� SIP �α��� �����带 �����Ѵ�.
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP stack 을 종료하고 SIP 로그인 쓰레드를 종료한다.
 bool CSipUserAgent::Stop( )
 {
 	if( m_bStart == false ) return false;
@@ -110,7 +93,7 @@ bool CSipUserAgent::Stop( )
 		{
 			iCount = 0;
 
-			// �α��ε� ������ ����Ѵ�.
+			// 로그인된 개수를 계산한다.
 			for( it = m_clsRegisterList.begin(); it != m_clsRegisterList.end(); ++it )
 			{
 				if( it->m_bLogin ) ++iCount;
@@ -125,7 +108,7 @@ bool CSipUserAgent::Stop( )
 	m_bStopEvent = true;
 	m_clsSipStack.Stop();
 
-	// SipRegisterThread �� ������ ������ ����Ѵ�.
+	// SipRegisterThread 가 종료할 때까지 대기한다.
 	for( int i = 0; i < 100; ++i )
 	{
 		if( m_bStopEvent == false ) break;
@@ -143,12 +126,7 @@ bool CSipUserAgent::Stop( )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief CSipDialog ���� SIP INVITE �޽����� �����Ͽ� �����Ѵ�.
- * @param clsDialog ��ȭ ���� ���� ��ü
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// CSipDialog 에서 SIP INVITE 메시지를 생성하여 전송한다.
 bool CSipUserAgent::SendInvite( CSipDialog & clsDialog )
 {
 	if( clsDialog.m_strFromId.empty() || clsDialog.m_strToId.empty() ) return false;
@@ -199,12 +177,7 @@ bool CSipUserAgent::SendInvite( CSipDialog & clsDialog )
 	return true;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Dialog �� ��ȭ ���� ������ �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns �����ϸ� true �� �����ϰ� �������� ������ false �� �����Ѵ�.
- */
+// SIP Dialog 에 통화 종료 정보를 저장한다.
 bool CSipUserAgent::SetCallEnd( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator			itMap;
@@ -222,12 +195,7 @@ bool CSipUserAgent::SetCallEnd( const char * pszCallId )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Dialog �� �����Ѵ�.
- * @param pszCallId SIP Call-ID
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP Dialog 를 삭제한다.
 bool CSipUserAgent::Delete( const char * pszCallId )
 {
 	SIP_DIALOG_MAP::iterator			itMap;
@@ -245,11 +213,7 @@ bool CSipUserAgent::Delete( const char * pszCallId )
 	return bRes;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP Dialog �� �����Ѵ�.
- * @param itMap dialog map iterator
- */
+// SIP Dialog 를 삭제한다.
 void CSipUserAgent::Delete( SIP_DIALOG_MAP::iterator & itMap )
 {
 	if( itMap->second.m_pclsInvite )
@@ -261,15 +225,7 @@ void CSipUserAgent::Delete( SIP_DIALOG_MAP::iterator & itMap )
 	m_clsDialogMap.erase( itMap );
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP INVITE ���� �޽����� ���Ե� ������ CSipDialog �� �����Ѵ�.
- * @param strCallId		SIP Call-ID
- * @param pclsMessage SIP INVITE ���� �޽���
- * @param pclsRtp			remote RTP ���� ���� ��ü
- * @param bReINVITE		ReINVITE ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP INVITE 응답 메시지에 포함된 정보를 CSipDialog 에 저장한다.
 bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
@@ -422,13 +378,13 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 	{
 		m_clsSipStack.SendSipMessage( pclsInvite );
 
-		// ���� ������ ������ INVITE �޽����� ������ ���, �������� callback ȣ������ �ʴ´�.
+		// 인증 정보를 포함한 INVITE 메시지를 전송한 경우, 응용으로 callback 호출하지 않는다.
 		return false;
 	}
 
 	if( bStopCall )
 	{
-		// CANCEL ���� ��, INVITE 200 OK �����Ͽ����� BYE �� �����Ѵ�.
+		// CANCEL 전송 후, INVITE 200 OK 수신하였으면 BYE 를 전송한다.
 		StopCall( strCallId.c_str() );
 		return false;
 	}
@@ -436,13 +392,7 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 	return bFound;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP �޽������� RTP ������ �����´�.
- * @param pclsMessage SIP �޽���
- * @param clsRtp			RTP ���� ���� ����
- * @returns �����ϸ� true �� �����ϰ� �����ϸ� false �� �����Ѵ�.
- */
+// SIP 메시지에서 RTP 정보를 가져온다.
 bool CSipUserAgent::GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsRtp )
 {
 	// For multipart/mixed bodies (e.g. OMA PoC group INVITE), extract the application/sdp part
@@ -613,11 +563,7 @@ bool CSipUserAgent::GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsR
 	return false;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief SIP CSeq ����� ������ ��ȣ�� �����Ѵ�.
- * @returns SIP CSeq ����� ������ ��ȣ�� �����Ѵ�.
- */
+// SIP CSeq 헤더에 저장할 번호를 리턴한다.
 int CSipUserAgent::GetSeqNum( )
 {
 	int iSeq;
@@ -635,10 +581,7 @@ int CSipUserAgent::GetSeqNum( )
 	return iSeq;
 }
 
-/**
- * @ingroup SipUserAgent
- * @brief ���μ����� ����� ���� ���������� �����Ͽ��� openssl �޸� ������ ������� �ʴ´�. 
- */
+// 프로세스가 종료될 때에 최종적으로 실행하여서 openssl 메모리 누수를 출력하지 않는다.
 void CSipUserAgent::Final()
 {
 	m_clsSipStack.Final();

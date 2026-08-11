@@ -22,11 +22,7 @@
 #include "SipPlatformDefine.h"
 #include <string>
 
-/**
- * @ingroup StunParser
- * @brief STUN ÆĞÅ¶ ÀÎÄÚµù Å¬·¡½º
- *				¼ıÀÚ, ¹®ÀÚ¿­ µîÀ» STUN ÆĞÅ¶¿¡ ÀúÀåÇÑ´Ù.
- */
+// STUN íŒ¨í‚· ì¸ì½”ë”© í´ë˜ìŠ¤ ìˆ«ì, ë¬¸ìì—´ ë“±ì„ STUN íŒ¨í‚·ì— ì €ì¥í•œë‹¤.
 class CStunEncode
 {
 public:

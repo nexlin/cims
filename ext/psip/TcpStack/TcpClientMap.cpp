@@ -39,12 +39,7 @@ CTcpClientMap::~CTcpClientMap()
 {
 }
 
-/**
- * @ingroup TcpStack
- * @brief CTcpStack °´Ã¼¸¦ ¼³Á¤ÇÑ´Ù.
- * @param pclsStack CTcpStack °´Ã¼
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// CTcpStack ê°ì²´ë¥¼ ì„¤ì •í•œë‹¤.
 bool CTcpClientMap::Create( CTcpStack * pclsStack )
 {
 	m_pclsStack = pclsStack;
@@ -52,16 +47,7 @@ bool CTcpClientMap::Create( CTcpStack * pclsStack )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¼­¹ö¿¡ ¿¬°áÇÏ¿©¼­ TCP ÆĞÅ¶À» Àü¼ÛÇÑ´Ù. ÀÌ¹Ì ¿¬°áµÈ TCP ¼­¹ö¿¡´Â TCP ÆĞÅ¶¸¸ Àü¼ÛÇÑ´Ù.
- * @param pszIp				TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort				TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param pszPacket		ÆĞÅ¶
- * @param iPacketLen	ÆĞÅ¶ ±æÀÌ
- * @param bConnectIfNoSession	TCP ¼¼¼ÇÀÌ Á¸ÀçÇÏÁö ¾ÊÀ¸¸é »õ·Î¿î TCP ¼¼¼ÇÀ» ¿¬°áÇÑ ÈÄ, ÆĞÅ¶À» Àü¼ÛÇÏ´Â°¡?
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì„œë²„ì— ì—°ê²°í•˜ì—¬ì„œ TCP íŒ¨í‚·ì„ ì „ì†¡í•œë‹¤. ì´ë¯¸ ì—°ê²°ëœ TCP ì„œë²„ì—ëŠ” TCP íŒ¨í‚·ë§Œ ì „ì†¡í•œë‹¤.
 bool CTcpClientMap::Send( const char * pszIp, int iPort, const char * pszPacket, int iPacketLen, bool bConnectIfNoSession )
 {
 	bool bRes = false;
@@ -77,7 +63,7 @@ bool CTcpClientMap::Send( const char * pszIp, int iPort, const char * pszPacket,
 	{
 		if( itMap->second.m_bTrying )
 		{
-			// TCP connect ÁøÇà ÁßÀÌ¸é Àü¼ÛµÈ ÆĞÅ¶À» ÀÚ·á±¸Á¶¿¡ ÀúÀåÇÑ´Ù.
+			// TCP connect ì§„í–‰ ì¤‘ì´ë©´ ì „ì†¡ëœ íŒ¨í‚·ì„ ìë£Œêµ¬ì¡°ì— ì €ì¥í•œë‹¤.
 			std::string * pstrPacket = new std::string();
 			if( pstrPacket )
 			{
@@ -88,7 +74,7 @@ bool CTcpClientMap::Send( const char * pszIp, int iPort, const char * pszPacket,
 		}
 		else
 		{
-			// TCP connected »óÅÂÀÌ¸é ÇØ´ç ¼ÒÄÏÀ¸·Î Àü¼ÛÇÏ±â À§ÇÑ Á¤º¸¸¦ ¼³Á¤ÇÑ´Ù.
+			// TCP connected ìƒíƒœì´ë©´ í•´ë‹¹ ì†Œì¼“ìœ¼ë¡œ ì „ì†¡í•˜ê¸° ìœ„í•œ ì •ë³´ë¥¼ ì„¤ì •í•œë‹¤.
 			clsIndex = itMap->second.m_clsIndex;
 			bRes = true;
 		}
@@ -126,13 +112,7 @@ bool CTcpClientMap::Send( const char * pszIp, int iPort, const char * pszPacket,
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°á Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @returns true ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²° ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpClientMap::Delete( const char * pszIp, int iPort )
 {
 	SEND_PACKET_LIST clsSendPacketList;
@@ -148,14 +128,7 @@ bool CTcpClientMap::Delete( const char * pszIp, int iPort )
 	return true;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°á ÈÄ, Àü¼ÛÇÒ ÆĞÅ¶ ¸®½ºÆ®¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszIp		TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort		TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param clsList TCP ¿¬°á ÈÄ, Àü¼ÛÇÒ ÆĞÅ¶ ¸®½ºÆ® ÀúÀå º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²° í›„, ì „ì†¡í•  íŒ¨í‚· ë¦¬ìŠ¤íŠ¸ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpClientMap::DeleteSendPacketList( const char * pszIp, int iPort, SEND_PACKET_LIST & clsList )
 {
 	bool bRes = false;
@@ -178,15 +151,7 @@ bool CTcpClientMap::DeleteSendPacketList( const char * pszIp, int iPort, SEND_PA
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°áµÊÀ¸·Î ¼³Á¤ÇÑ´Ù.
- * @param pszIp					TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort					TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param iThreadIndex	TCP ¾²·¹µå ¹øÈ£
- * @param iSessionIndex TCP ¼¼¼Ç ¹øÈ£ ( TCP ¾²·¹µå ³»ÀÇ ¼¼¼Ç ¹øÈ£ )
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²°ë¨ìœ¼ë¡œ ì„¤ì •í•œë‹¤.
 bool CTcpClientMap::SetConnected( const char * pszIp, int iPort, int iThreadIndex, int iSessionIndex )
 {
 	bool bRes = false;
@@ -209,15 +174,7 @@ bool CTcpClientMap::SetConnected( const char * pszIp, int iPort, int iThreadInde
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°áÀ» ÀúÀåÇÑ´Ù.
- * @param pszIp					TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort					TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param iThreadIndex	TCP ¾²·¹µå ¹øÈ£
- * @param iSessionIndex TCP ¼¼¼Ç ¹øÈ£ ( TCP ¾²·¹µå ³»ÀÇ ¼¼¼Ç ¹øÈ£ )
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²°ì„ ì €ì¥í•œë‹¤.
 bool CTcpClientMap::Insert( const char * pszIp, int iPort, int iThreadIndex, int iSessionIndex )
 {
 	bool bRes = false;
@@ -243,14 +200,7 @@ bool CTcpClientMap::Insert( const char * pszIp, int iPort, int iThreadIndex, int
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¿¬°á Á¤º¸¸¦ »èÁ¦ÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param clsList TCP ¿¬°á ÈÄ, Àü¼ÛÇÒ ÆĞÅ¶ ¸®½ºÆ® ÀúÀå¿ë º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// TCP ì—°ê²° ì •ë³´ë¥¼ ì‚­ì œí•œë‹¤.
 bool CTcpClientMap::Delete( const char * pszIp, int iPort, SEND_PACKET_LIST & clsList )
 {
 	bool bRes = false;
@@ -272,13 +222,7 @@ bool CTcpClientMap::Delete( const char * pszIp, int iPort, SEND_PACKET_LIST & cl
 	return bRes;
 }
 
-/**
- * @ingroup TcpStack
- * @brief ÀÚ·á±¸Á¶ÀÇ Å°¸¦ »ı¼ºÇÑ´Ù.
- * @param pszIp TCP ¼­¹ö IP ÁÖ¼Ò
- * @param iPort TCP ¼­¹ö Æ÷Æ® ¹øÈ£
- * @param strKey ÀÚ·á±¸Á¶ÀÇ Å°¸¦ ÀúÀåÇÒ º¯¼ö
- */
+// ìë£Œêµ¬ì¡°ì˜ í‚¤ë¥¼ ìƒì„±í•œë‹¤.
 void CTcpClientMap::GetKey( const char * pszIp, int iPort, std::string & strKey )
 {
 	char szPort[6];

@@ -26,13 +26,7 @@
 
 CSipServerSetup gclsSetup;
 
-/**
- * @brief XML ¿¡ ÀúÀåµÈ element ¸®½ºÆ®¸¦ ¹®ÀÚ¿­ ¸Ê ÀÚ·á±¸Á¶¿¡ ÀúÀåÇÑ´Ù.
- * @param pclsElement		¸®½ºÆ®¸¦ ÀúÀåÇÑ XML element
- * @param pszTagName		¹®ÀÚ¿­ ¸®½ºÆ® tag ÀÌ¸§
- * @param pszSubTagName ¹®ÀÚ¿­ ¸®½ºÆ®ÀÇ Ç×¸ñ tag ÀÌ¸§
- * @param clsMap				¹®ÀÚ¿­ ¸Ê ÀÚ·á±¸Á¶
- */
+// XML ì— ì €ì¥ëœ element ë¦¬ìŠ¤íŠ¸ë¥¼ ë¬¸ìì—´ ë§µ ìë£Œêµ¬ì¡°ì— ì €ì¥í•œë‹¤.
 void InsertStringMap( CXmlElement * pclsElement, const char * pszTagName, const char * pszSubTagName, CStringMap & clsMap )
 {
 	CXmlElement * pclsClient;
@@ -55,10 +49,7 @@ void InsertStringMap( CXmlElement * pclsElement, const char * pszTagName, const 
 	}
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipServerSetup::CSipServerSetup() : m_iUdpPort(5060), m_iUdpThreadCount(10)
 	, m_iTcpPort(5060), m_iTcpThreadCount(10), m_iTcpRecvTimeout(300)
 	, m_iTlsPort(5061), m_iTlsAcceptTimeout(10)
@@ -67,27 +58,19 @@ CSipServerSetup::CSipServerSetup() : m_iUdpPort(5060), m_iUdpThreadCount(10)
 {
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipServerSetup::~CSipServerSetup()
 {
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼³Á¤ ÆÄÀÏÀ» ÀĞ¾î¼­ ¸â¹ö º¯¼ö¿¡ ÀúÀåÇÑ´Ù.
- * @param pszFileName ¼³Á¤ ÆÄÀÏ full path
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì„ ì½ì–´ì„œ ë©¤ë²„ ë³€ìˆ˜ì— ì €ì¥í•œë‹¤.
 bool CSipServerSetup::Read( const char * pszFileName )
 {
 	CXmlElement clsXml, * pclsElement;
 
 	if( clsXml.ParseFile( pszFileName ) == false ) return false;
 
-	// SIP ¼³Á¤
+	// SIP ì„¤ì •
 	pclsElement = clsXml.SelectElement( "Sip" );
 	if( pclsElement == NULL ) 
 	{
@@ -107,7 +90,7 @@ bool CSipServerSetup::Read( const char * pszFileName )
 
 	if( ReadSipServer( clsXml ) == false ) return false;
 
-	// ·Î±×
+	// ë¡œê·¸
 	pclsElement = clsXml.SelectElement( "Log" );
 	if( pclsElement == NULL ) 
 	{
@@ -117,7 +100,7 @@ bool CSipServerSetup::Read( const char * pszFileName )
 
 	pclsElement->SelectElementData( "Folder", m_strLogFolder );
 
-	// ¸ğ´ÏÅÍ¸µ
+	// ëª¨ë‹ˆí„°ë§
 	pclsElement = clsXml.SelectElement( "Monitor" );
 	if( pclsElement ) 
 	{
@@ -132,11 +115,7 @@ bool CSipServerSetup::Read( const char * pszFileName )
 	return true;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼³Á¤ ÆÄÀÏ¿¡¼­ ½Ç½Ã°£À¸·Î ¼öÁ¤ °¡´ÉÇÑ Ç×¸ñÀ» ÀĞ´Â´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì—ì„œ ì‹¤ì‹œê°„ìœ¼ë¡œ ìˆ˜ì • ê°€ëŠ¥í•œ í•­ëª©ì„ ì½ëŠ”ë‹¤.
 bool CSipServerSetup::Read( )
 {
 	CXmlElement clsXml;
@@ -150,16 +129,12 @@ bool CSipServerSetup::Read( )
 	return true;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼³Á¤ ÆÄÀÏ¿¡¼­ SIP ¼­¹ö ¸®½ºÆ®¸¦ Á¦¿ÜÇÑ ½Ç½Ã°£À¸·Î ¼öÁ¤ °¡´ÉÇÑ Ç×¸ñÀ» ÀĞ´Â´Ù.
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì—ì„œ SIP ì„œë²„ ë¦¬ìŠ¤íŠ¸ë¥¼ ì œì™¸í•œ ì‹¤ì‹œê°„ìœ¼ë¡œ ìˆ˜ì • ê°€ëŠ¥í•œ í•­ëª©ì„ ì½ëŠ”ë‹¤.
 bool CSipServerSetup::Read( CXmlElement & clsXml )
 {
 	CXmlElement * pclsElement;
 
-	// ·Î±×
+	// ë¡œê·¸
 	pclsElement = clsXml.SelectElement( "Log" );
 	if( pclsElement ) 
 	{
@@ -189,7 +164,7 @@ bool CSipServerSetup::Read( CXmlElement & clsXml )
 		CLog::SetMaxLogSize( m_iLogMaxSize );
 	}
 
-	// ¸ğ´ÏÅÍ¸µ
+	// ëª¨ë‹ˆí„°ë§
 	m_clsMonitorIpMap.DeleteAll();
 
 	pclsElement = clsXml.SelectElement( "Monitor" );
@@ -198,7 +173,7 @@ bool CSipServerSetup::Read( CXmlElement & clsXml )
 		InsertStringMap( pclsElement, "ClientIpList", "ClientIp", m_clsMonitorIpMap );
 	}
 
-	// º¸¾È
+	// ë³´ì•ˆ
 	m_clsDenySipUserAgentMap.DeleteAll();
 
 	pclsElement = clsXml.SelectElement( "Security" );
@@ -210,12 +185,7 @@ bool CSipServerSetup::Read( CXmlElement & clsXml )
 	return true;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼³Á¤ ÆÄÀÏ¿¡¼­ SipServer Á¤º¸¸¦ ÀĞ¾î¼­ SipServerMap ¿¡ ÀúÀåÇÑ´Ù.
- * @param clsXml ¼³Á¤ÆÄÀÏÀ» ÀĞÀº XML °´Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì • íŒŒì¼ì—ì„œ SipServer ì •ë³´ë¥¼ ì½ì–´ì„œ SipServerMap ì— ì €ì¥í•œë‹¤.
 bool CSipServerSetup::ReadSipServer( CXmlElement & clsXml )
 {
 	CXmlElement * pclsElement;
@@ -257,22 +227,13 @@ bool CSipServerSetup::ReadSipServer( CXmlElement & clsXml )
 	return true;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¸ğ´ÏÅÍ¸µ Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼ÒÀÎ°¡?
- * @param pszIp		Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼Ò
- * @returns ¸ğ´ÏÅÍ¸µ Å¬¶óÀÌ¾ğÆ® IP ÁÖ¼ÒÀÌ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ëª¨ë‹ˆí„°ë§ í´ë¼ì´ì–¸íŠ¸ IP ì£¼ì†Œì¸ê°€?
 bool CSipServerSetup::IsMonitorIp( const char * pszIp )
 {
 	return m_clsMonitorIpMap.Select( pszIp );
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼³Á¤ÆÄÀÏÀÌ ¼öÁ¤µÇ¾ú´ÂÁö È®ÀÎÇÑ´Ù.
- * @returns ¼³Á¤ÆÄÀÏÀÌ ¼öÁ¤µÇ¾úÀ¸¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ì„¤ì •íŒŒì¼ì´ ìˆ˜ì •ë˜ì—ˆëŠ”ì§€ í™•ì¸í•œë‹¤.
 bool CSipServerSetup::IsChange()
 {
 	struct stat	clsStat;
@@ -285,10 +246,7 @@ bool CSipServerSetup::IsChange()
 	return false;
 }
 
-/**
- * @ingroup SipLoadBalancer
- * @brief ¼³Á¤ÆÄÀÏÀÇ ÀúÀå ½Ã°£À» ÀúÀåÇÑ´Ù.
- */
+// ì„¤ì •íŒŒì¼ì˜ ì €ì¥ ì‹œê°„ì„ ì €ì¥í•œë‹¤.
 void CSipServerSetup::SetFileSizeTime( )
 {
 	struct stat	clsStat;

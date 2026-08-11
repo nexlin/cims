@@ -24,28 +24,22 @@
 #include <list>
 #include <map>
 
-/**
- * @ingroup TcpStack
- * @brief TCP ¾²·¹µå Á¤º¸
- */
+// TCP ì“°ë ˆë“œ ì •ë³´
 class CTcpClientIndex
 {
 public:
 	CTcpClientIndex();
 
-	/** TCP ¾²·¹µå ¹øÈ£ */
+	// TCP ì“°ë ˆë“œ ë²ˆí˜¸
 	int		m_iThreadIndex;
 
-	/** TCP ¾²·¹µå ³»ÀÇ ¼¼¼Ç ¹øÈ£ */
+	// TCP ì“°ë ˆë“œ ë‚´ì˜ ì„¸ì…˜ ë²ˆí˜¸
 	int		m_iSessionIndex;
 };
 
 typedef std::list< std::string * > SEND_PACKET_LIST;
 
-/**
- * @ingroup TcpStack
- * @brief TCP Å¬¶óÀÌ¾ğÆ® Á¤º¸
- */
+// TCP í´ë¼ì´ì–¸íŠ¸ ì •ë³´
 class CTcpClientInfo
 {
 public:
@@ -60,10 +54,7 @@ typedef std::map< std::string, CTcpClientInfo > TCP_CLIENT_MAP;
 
 class CTcpStack;
 
-/**
- * @ingroup TcpStack
- * @brief TCP Å¬¶óÀÌ¾ğÆ®·Î ¿¬°áÇÏ¿©¼­ TCP ÆĞÅ¶À» Àü¼ÛÇÏ´Â Å¬·¡½º
- */
+// TCP í´ë¼ì´ì–¸íŠ¸ë¡œ ì—°ê²°í•˜ì—¬ì„œ TCP íŒ¨í‚·ì„ ì „ì†¡í•˜ëŠ” í´ë˜ìŠ¤
 class CTcpClientMap
 {
 public:

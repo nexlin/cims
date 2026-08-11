@@ -26,10 +26,7 @@
 #include "TlsFunction.h"
 #include "MonitorString.h"
 
-/**
- * @ingroup SipStack
- * @brief TCP/TLS ¼¼¼Ç Á¤º¸
- */
+// TCP/TLS ì„¸ì…˜ ì •ë³´
 class CTcpSocketInfo
 {
 public:
@@ -44,10 +41,7 @@ public:
 
 typedef std::map< std::string, CTcpSocketInfo > TCP_SOCKET_MAP;
 
-/**
- * @ingroup SipStack
- * @brief TCP/TLS ¼¼¼Ç Á¤º¸¸¦ ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶
- */
+// TCP/TLS ì„¸ì…˜ ì •ë³´ë¥¼ ì €ì¥í•˜ëŠ” ìë£Œêµ¬ì¡°
 class CTcpSocketMap
 {
 public:

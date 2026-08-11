@@ -25,11 +25,7 @@
 
 typedef std::list< CStunAttribute > STUN_ATTRIBUTE_LIST;
 
-/**
- * @ingroup StunParser
- * @brief STUN ÆÐÅ¶ ÀúÀå Å¬·¡½º
- *				º» Å¬·¡½º¿¡´Â STUN Çì´õ¿Í STUN ¾ÖÆ®¸®ºäÆ® ¸®½ºÆ®°¡ Æ÷ÇÔµÇ¾î ÀÖ´Ù.
- */
+// STUN íŒ¨í‚· ì €ìž¥ í´ëž˜ìŠ¤ ë³¸ í´ëž˜ìŠ¤ì—ëŠ” STUN í—¤ë”ì™€ STUN ì• íŠ¸ë¦¬ë·°íŠ¸ ë¦¬ìŠ¤íŠ¸ê°€ í¬í•¨ë˜ì–´ ìžˆë‹¤.
 class CStunMessage
 {
 public:

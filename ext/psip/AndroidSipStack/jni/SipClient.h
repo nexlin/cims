@@ -22,17 +22,9 @@
 #include "SipUserAgent.h"
 #include "jni.h"
 
-/**
- * @defgroup AndroidSipStack AndroidSipStack
- * SIP Stack À» ÀÌ¿ëÇÑ SIP Å¬¶óÀÌ¾ğÆ® ¿¹Á¦ ÇÁ·Î±×·¥
- * SipUserAgent ¶óÀÌºê·¯¸®¸¦ ÀÌ¿ëÇÏ¿©¼­ SIP stack À» °£Á¢ÀûÀ¸·Î »ç¿ëÇÑ´Ù.
- * SIP ¼­¹ö¿¡ ·Î±×ÀÎÇÏ¿© ÅëÈ­ ¿äÃ»/Ãë¼Ò, ÅëÈ­ Á¾·á, ÅëÈ­ ¼ö½Å/¼ö¶ô/°ÅÀı ±â´ÉÀ» ¼öÇàÇÑ´Ù.
- */
+// AndroidSipStack
 
-/**
- * @ingroup AndroidSipStack
- * @brief ¾Èµå·ÎÀÌµå¿ë SIP stack ÀÌº¥Æ® Å¬·¡½º
- */
+// ì•ˆë“œë¡œì´ë“œìš© SIP stack ì´ë²¤íŠ¸ í´ë˜ìŠ¤
 class CSipClient : public ISipUserAgentCallBack
 {
 public:

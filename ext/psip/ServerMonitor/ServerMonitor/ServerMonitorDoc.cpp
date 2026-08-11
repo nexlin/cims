@@ -34,11 +34,11 @@ BEGIN_MESSAGE_MAP(CServerMonitorDoc, CDocument)
 END_MESSAGE_MAP()
 
 
-// CServerMonitorDoc »ı¼º/¼Ò¸ê
+// CServerMonitorDoc ìƒì„±/ì†Œë©¸
 
 CServerMonitorDoc::CServerMonitorDoc()
 {
-	// TODO: ¿©±â¿¡ ÀÏÈ¸¼º »ı¼º ÄÚµå¸¦ Ãß°¡ÇÕ´Ï´Ù.
+	// TODO: ì—¬ê¸°ì— ì¼íšŒì„± ìƒì„± ì½”ë“œë¥¼ ì¶”ê°€í•©ë‹ˆë‹¤.
 
 }
 
@@ -65,16 +65,16 @@ void CServerMonitorDoc::Serialize(CArchive& ar)
 {
 	if (ar.IsStoring())
 	{
-		// TODO: ¿©±â¿¡ ÀúÀå ÄÚµå¸¦ Ãß°¡ÇÕ´Ï´Ù.
+		// TODO: ì—¬ê¸°ì— ì €ì¥ ì½”ë“œë¥¼ ì¶”ê°€í•©ë‹ˆë‹¤.
 	}
 	else
 	{
-		// TODO: ¿©±â¿¡ ·Îµù ÄÚµå¸¦ Ãß°¡ÇÕ´Ï´Ù.
+		// TODO: ì—¬ê¸°ì— ë¡œë”© ì½”ë“œë¥¼ ì¶”ê°€í•©ë‹ˆë‹¤.
 	}
 }
 
 
-// CServerMonitorDoc Áø´Ü
+// CServerMonitorDoc ì§„ë‹¨
 
 #ifdef _DEBUG
 void CServerMonitorDoc::AssertValid() const
@@ -89,4 +89,4 @@ void CServerMonitorDoc::Dump(CDumpContext& dc) const
 #endif //_DEBUG
 
 
-// CServerMonitorDoc ¸í·É
+// CServerMonitorDoc ëª…ë ¹

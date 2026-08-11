@@ -28,16 +28,7 @@ CSipQueue::~CSipQueue()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP ¼ö½Å ¸Ş½ÃÁö¸¦ ÀúÀåÇÑ´Ù.
- * @param pszBuf			SIP ¼ö½Å ¸Ş½ÃÁö
- * @param iBufLen			SIP ¼ö½Å ¸Ş½ÃÁö ±æÀÌ
- * @param pszIp				SIP Àü¼Û IP ÁÖ¼Ò
- * @param sPort				SIP Àü¼Û Æ÷Æ® ¹øÈ£
- * @param eTransport	SIP Àü¼Û ÇÁ·ÎÅäÄİ
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ìˆ˜ì‹  ë©”ì‹œì§€ë¥¼ ì €ì¥í•œë‹¤.
 bool CSipQueue::Insert( const char * pszBuf, int iBufLen, const char * pszIp, unsigned short sPort, ESipTransport eTransport )
 {
 	CSipQueueEntry * pclsEntry = new CSipQueueEntry();
@@ -56,12 +47,7 @@ bool CSipQueue::Insert( const char * pszBuf, int iBufLen, const char * pszIp, un
 	return true;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP ¼ö½Å ¸Ş½ÃÁö¸¦ °¡Á®¿Â´Ù.
- * @param ppclsEntry SIP ¼ö½Å ¸Ş½ÃÁö¸¦ ÀúÀåÇÒ º¯¼ö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ìˆ˜ì‹  ë©”ì‹œì§€ë¥¼ ê°€ì ¸ì˜¨ë‹¤.
 bool CSipQueue::Select( CSipQueueEntry ** ppclsEntry )
 {
 	bool bRes = false;
@@ -83,10 +69,7 @@ bool CSipQueue::Select( CSipQueueEntry ** ppclsEntry )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP ¼ö½Å ¸Ş½ÃÁö¸¦ ´ë±âÇÏ´Â ¾²·¹µå¸¦ ¸ğµÎ ±ú¿î´Ù.
- */
+// SIP ìˆ˜ì‹  ë©”ì‹œì§€ë¥¼ ëŒ€ê¸°í•˜ëŠ” ì“°ë ˆë“œë¥¼ ëª¨ë‘ ê¹¨ìš´ë‹¤.
 void CSipQueue::BroadCast( )
 {
 	m_clsMutex.broadcast();

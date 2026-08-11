@@ -33,7 +33,7 @@ BEGIN_MESSAGE_MAP(CChildFrame, CMDIChildWndEx)
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
-// CChildFrame »ı¼º/¼Ò¸ê
+// CChildFrame ìƒì„±/ì†Œë©¸
 
 CChildFrame::CChildFrame()
 {
@@ -52,7 +52,7 @@ BOOL CChildFrame::PreCreateWindow(CREATESTRUCT& cs)
 	return TRUE;
 }
 
-// CChildFrame Áø´Ü
+// CChildFrame ì§„ë‹¨
 
 #ifdef _DEBUG
 void CChildFrame::AssertValid() const
@@ -66,11 +66,11 @@ void CChildFrame::Dump(CDumpContext& dc) const
 }
 #endif //_DEBUG
 
-// CChildFrame ¸Ş½ÃÁö Ã³¸®±â
+// CChildFrame ë©”ì‹œì§€ ì²˜ë¦¬ê¸°
 
 void CChildFrame::OnDestroy()
 {
-	// ¾Æ·¡ÀÇ ¸Ş¼Òµå¸¦ È£ÃâÇÏ¸é child frame À» Á¾·áÇÒ ¶§¿¡ ¹«ÇÑ ´ë±âÇÏ¿©¼­ window °¡ ¸ØÃá´Ù.
+	// ì•„ë˜ì˜ ë©”ì†Œë“œë¥¼ í˜¸ì¶œí•˜ë©´ child frame ì„ ì¢…ë£Œí•  ë•Œì— ë¬´í•œ ëŒ€ê¸°í•˜ì—¬ì„œ window ê°€ ë©ˆì¶˜ë‹¤.
 	//WaitStopMonitorThread();
 
 	CMDIChildWndEx::OnDestroy();

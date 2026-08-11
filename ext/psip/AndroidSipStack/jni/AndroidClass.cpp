@@ -30,14 +30,10 @@ CAndroidClass::~CAndroidClass()
 {
 }
 
-/**
- * @brief Java ¿¡¼­ »ý¼ºµÈ Å¬·¡½º Á¤º¸¸¦ ÀúÀåÇÏ°í callback Á¤º¸¸¦ ÀúÀåÇÑ´Ù.
- * @param env JNIEnv
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆÐÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Java ì—ì„œ ìƒì„±ëœ í´ëž˜ìŠ¤ ì •ë³´ë¥¼ ì €ìž¥í•˜ê³  callback ì •ë³´ë¥¼ ì €ìž¥í•œë‹¤.
 bool CAndroidClass::Init( JNIEnv * env )
 {
-	// Å¬·¡½º Á¤º¸ ÀúÀå
+	// í´ëž˜ìŠ¤ ì •ë³´ ì €ìž¥
 	m_jcSipUserAgent = env->FindClass( "com/esip/SipUserAgent" );
 	if( m_jcSipUserAgent == NULL )
 	{
@@ -65,7 +61,7 @@ bool CAndroidClass::Init( JNIEnv * env )
 
 	m_jcSipCallRtp = (jclass)env->NewGlobalRef( m_jcSipCallRtp );
 
-	// callback Á¤º¸ ÀúÀå
+	// callback ì •ë³´ ì €ìž¥
 	m_jmEventRegister = env->GetStaticMethodID( m_jcSipUserAgent, "EventRegister", "(Lcom/esip/SipServerInfo;I)V" );
 	if( m_jmEventRegister == NULL )
 	{

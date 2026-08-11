@@ -21,10 +21,7 @@
 
 #include <string>
 
-/**
- * @ingroup HttpParser
- * @brief HTTP URL ÆÄ¼­ Å¬·¡½º
- */
+// HTTP URL íŒŒì„œ í´ë˜ìŠ¤
 class CHttpUri
 {
 public:
@@ -34,16 +31,16 @@ public:
 	int Parse( const char * pszText, int iTextLen );
 	void Clear();
 
-	/** ÇÁ·ÎÅäÄİ */
+	// í”„ë¡œí† ì½œ
 	std::string m_strProtocol;
 
-	/** È£½ºÆ® µµ¸ŞÀÎ ¶Ç´Â IP ÁÖ¼Ò */
+	// í˜¸ìŠ¤íŠ¸ ë„ë©”ì¸ ë˜ëŠ” IP ì£¼ì†Œ
 	std::string m_strHost;
 
-	/** Æ÷Æ® ¹øÈ£ */
+	// í¬íŠ¸ ë²ˆí˜¸
 	int					m_iPort;
 
-	/** °æ·Î */
+	// ê²½ë¡œ
 	std::string m_strPath;
 };
 

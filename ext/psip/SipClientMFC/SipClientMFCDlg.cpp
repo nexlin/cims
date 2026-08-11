@@ -306,12 +306,7 @@ void CSipClientMFCDlg::SetLog( const char * fmt, ... )
 	UpdateData(FALSE);
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP REGISTER ÀÀ´ä ¸Ş½ÃÁö ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pclsInfo	SIP REGISTER ÀÀ´ä ¸Ş½ÃÁö¸¦ Àü¼ÛÇÑ IP-PBX Á¤º¸ ÀúÀå °´Ã¼
- * @param iStatus		SIP REGISTER ÀÀ´ä ÄÚµå
- */
+// SIP REGISTER ì‘ë‹µ ë©”ì‹œì§€ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClientMFCDlg::EventRegister( CSipServerInfo * pclsInfo, int iStatus )
 {
 	if( pclsInfo->m_bLogin && iStatus == SIP_OK )
@@ -328,14 +323,7 @@ void CSipClientMFCDlg::EventRegister( CSipServerInfo * pclsInfo, int iStatus )
 	SetLog( "%s status(%d)", __FUNCTION__, iStatus );
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP ÅëÈ­ ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pszFrom		SIP From »ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pszTo			SIP To »ç¿ëÀÚ ¾ÆÀÌµğ
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP í†µí™” ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClientMFCDlg::EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp )
 {
 	if( m_strCallId.empty() == false )
@@ -355,24 +343,13 @@ void CSipClientMFCDlg::EventIncomingCall( const char * pszCallId, const char * p
 	SetLog( "%s (%s)", __FUNCTION__, pszFrom );
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP Ring / Session Progress ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ÀÀ´ä ÄÚµå
- * @param pclsRtp			RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP Ring / Session Progress ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClientMFCDlg::EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp )
 {
 	SetLog( "%s (%d)", __FUNCTION__, iSipStatus );
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP ÅëÈ­ ¿¬°á ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pclsRtp		RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP í†µí™” ì—°ê²° ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClientMFCDlg::EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp )
 {
 	m_clsAudioThread.SetDestIpPort( pclsRtp->m_strIp.c_str(), pclsRtp->m_iPort );
@@ -384,12 +361,7 @@ void CSipClientMFCDlg::EventCallStart( const char * pszCallId, CSipCallRtp * pcl
 	SetLog( "%s", __FUNCTION__ );
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP ÅëÈ­ Á¾·á ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId		SIP Call-ID
- * @param iSipStatus	SIP ÀÀ´ä ÄÚµå. INVITE ¿¡ ´ëÇÑ ¿À·ù ÀÀ´äÀ¸·Î ÀüÈ­°¡ Á¾·áµÈ °æ¿ì, INVITE ÀÇ ÀÀ´ä ÄÚµå¸¦ ÀúÀåÇÑ´Ù.
- */
+// SIP í†µí™” ì¢…ë£Œ ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClientMFCDlg::EventCallEnd( const char * pszCallId, int iSipStatus )
 {
 	m_clsAudioThread.Stop();
@@ -403,50 +375,24 @@ void CSipClientMFCDlg::EventCallEnd( const char * pszCallId, int iSipStatus )
 	SetLog( "%s (%d)", __FUNCTION__, iSipStatus );
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP ReINVITE ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param	pszCallId	SIP Call-ID
- * @param pclsRemoteRtp		»ó´ë¹æ RTP Á¤º¸ ÀúÀå °´Ã¼
- * @param pclsLocalRtp		³» RTP Á¤º¸ ÀúÀå °´Ã¼
- */
+// SIP ReINVITE ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 void CSipClientMFCDlg::EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp )
 {
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief Screened / Unscreened Transfer ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszCallId					SIP Call-ID
- * @param pszReferToCallId	ÀüÈ­°¡ Àü´ŞµÉ SIP Call-ID
- * @param bScreenedTransfer Screened Transfer ÀÌ¸é true °¡ ÀÔ·ÂµÇ°í Unscreened Transfer ÀÌ¸é false °¡ ÀÔ·ÂµÈ´Ù.
- * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Screened / Unscreened Transfer ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipClientMFCDlg::EventTransfer( const char * pszCallId, const char * pszReferToCallId, bool bScreenedTransfer )
 {
 	return false;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief Blind Transfer ¿äÃ» ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszCallId			SIP Call-ID
- * @param pszReferToId	ÀüÈ­°¡ Àü´ŞµÉ »ç¿ëÀÚ ¾ÆÀÌµğ
- * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Blind Transfer ìš”ì²­ ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipClientMFCDlg::EventBlindTransfer( const char * pszCallId, const char * pszReferToId )
 {
 	return false;
 }
 
-/**
- * @ingroup SipClientMFC
- * @brief SIP MESSAGE ¼ö½Å ÀÌº¥Æ® ÇÚµé·¯
- * @param pszFrom			SIP ¸Ş½ÃÁö Àü¼Û ¾ÆÀÌµğ
- * @param pszTo				SIP ¸Ş½ÃÁö ¼ö½Å ¾ÆÀÌµğ
- * @param pclsMessage SIP ¸Ş½ÃÁö
- * @returns ¿äÃ»À» ¼ö¶ôÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP MESSAGE ìˆ˜ì‹  ì´ë²¤íŠ¸ í•¸ë“¤ëŸ¬
 bool CSipClientMFCDlg::EventMessage( const char * pszFrom, const char * pszTo, CSipMessage * pclsMessage )
 {
 	return false;

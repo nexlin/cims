@@ -39,7 +39,7 @@ BEGIN_MESSAGE_MAP(CServerMonitorView, CListView)
 	ON_NOTIFY_REFLECT(NM_DBLCLK, &CServerMonitorView::OnNMDblclk)
 END_MESSAGE_MAP()
 
-// CServerMonitorView »ý¼º/¼Ò¸ê
+// CServerMonitorView ìƒì„±/ì†Œë©¸
 
 CServerMonitorView::CServerMonitorView() : m_bInit(false)
 {
@@ -96,7 +96,7 @@ void CServerMonitorView::OnContextMenu(CWnd* pWnd, CPoint point)
 }
 
 
-// CServerMonitorView Áø´Ü
+// CServerMonitorView ì§„ë‹¨
 
 #ifdef _DEBUG
 void CServerMonitorView::AssertValid() const
@@ -109,7 +109,7 @@ void CServerMonitorView::Dump(CDumpContext& dc) const
 	CListView::Dump(dc);
 }
 
-CServerMonitorDoc* CServerMonitorView::GetDocument() const // µð¹ö±×µÇÁö ¾ÊÀº ¹öÀüÀº ÀÎ¶óÀÎÀ¸·Î ÁöÁ¤µË´Ï´Ù.
+CServerMonitorDoc* CServerMonitorView::GetDocument() const // ë””ë²„ê·¸ë˜ì§€ ì•Šì€ ë²„ì „ì€ ì¸ë¼ì¸ìœ¼ë¡œ ì§€ì •ë©ë‹ˆë‹¤.
 {
 	ASSERT(m_pDocument->IsKindOf(RUNTIME_CLASS(CServerMonitorDoc)));
 	return (CServerMonitorDoc*)m_pDocument;
@@ -117,7 +117,7 @@ CServerMonitorDoc* CServerMonitorView::GetDocument() const // µð¹ö±×µÇÁö ¾ÊÀº ¹ö
 #endif //_DEBUG
 
 
-// CServerMonitorView ¸Þ½ÃÁö Ã³¸®±â
+// CServerMonitorView ë©”ì‹œì§€ ì²˜ë¦¬ê¸°
 
 void CServerMonitorView::OnDestroy()
 {

@@ -22,28 +22,17 @@
 #include "TimeUtility.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipStack
- * @brief »ı¼ºÀÚ
- */
+// ìƒì„±ì
 CSipNICTList::CSipNICTList()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief ¼Ò¸êÀÚ
- */
+// ì†Œë©¸ì
 CSipNICTList::~CSipNICTList()
 {
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Client Transaction List ¿¡ SIP ¸Ş½ÃÁö¸¦ Ãß°¡ÇÑ´Ù.
- * @param pclsMessage SIP ¸Ş½ÃÁö ÀúÀå ±¸Á¶Ã¼
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Non-Invite Client Transaction List ì— SIP ë©”ì‹œì§€ë¥¼ ì¶”ê°€í•œë‹¤.
 bool CSipNICTList::Insert( CSipMessage * pclsMessage )
 {
 	std::string strKey;
@@ -105,11 +94,7 @@ bool CSipNICTList::Insert( CSipMessage * pclsMessage )
 	return bRes;
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Client Transaction List ¿¡¼­ ÀçÀü¼ÛÇÒ Ç×¸ñÀ» ÀçÀü¼ÛÇÏ°í timeout µÈ Ç×¸ñÀº timeout Ã³¸®ÇÑ´Ù.
- * @param psttTime ½ÇÇàÇÑ ½Ã°£
- */
+// Non-Invite Client Transaction List ì—ì„œ ì¬ì „ì†¡í•  í•­ëª©ì„ ì¬ì „ì†¡í•˜ê³  timeout ëœ í•­ëª©ì€ timeout ì²˜ë¦¬í•œë‹¤.
 void CSipNICTList::Execute( struct timeval * psttTime )
 {
 	NON_INVITE_TRANSACTION_MAP::iterator	itMap, itNext;
@@ -147,7 +132,7 @@ DELETE_TRANSACTION:
 						CSipMessage * pclsResponse = itMap->second->m_pclsRequest->CreateResponse( SIP_REQUEST_TIME_OUT );
 						if( pclsResponse )
 						{
-							// 408 ÀÀ´ä¿¡ ´ëÇÑ SIP REGISTER ¸¦ ÀÀ¿ë¿¡¼­ Á¤»óÀûÀ¸·Î Ã³¸®ÇÏ±â À§ÇÑ ±â´É
+							// 408 ì‘ë‹µì— ëŒ€í•œ SIP REGISTER ë¥¼ ì‘ìš©ì—ì„œ ì •ìƒì ìœ¼ë¡œ ì²˜ë¦¬í•˜ê¸° ìœ„í•œ ê¸°ëŠ¥
 							if( itMap->second->m_pclsRequest->m_strClientIp.empty() )
 							{
 								SIP_FROM_LIST::iterator itList = itMap->second->m_pclsRequest->m_clsRouteList.begin();
@@ -185,10 +170,7 @@ DELETE_TRANSACTION:
 	clsResponseList.clear();
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Client Transaction List ÀÇ ¸ğµç Ç×¸ñÀ» »èÁ¦ÇÑ´Ù.
- */
+// Non-Invite Client Transaction List ì˜ ëª¨ë“  í•­ëª©ì„ ì‚­ì œí•œë‹¤.
 void CSipNICTList::DeleteAll( )
 {
 	NON_INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -203,11 +185,7 @@ void CSipNICTList::DeleteAll( )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief Non-Invite Client Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- * @returns Non-Invite Client Transaction List ÀÇ Å©±â¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// Non-Invite Client Transaction List ì˜ í¬ê¸°ë¥¼ ë¦¬í„´í•œë‹¤.
 int CSipNICTList::GetSize( )
 {
 	int iSize;
@@ -219,11 +197,7 @@ int CSipNICTList::GetSize( )
 	return iSize;
 }
 
-/**
- * @ingroup SipStack
- * @brief NICT ÀÚ·á±¸Á¶¿¡ ÀúÀåµÈ SIP Call-ID µéÀ» ¹®ÀÚ¿­¿¡ ÀúÀåÇÑ´Ù.
- * @param strBuf SIP Call-ID µéÀ» ÀúÀåÇÒ ¹®ÀÚ¿­
- */
+// NICT ìë£Œêµ¬ì¡°ì— ì €ì¥ëœ SIP Call-ID ë“¤ì„ ë¬¸ìì—´ì— ì €ì¥í•œë‹¤.
 void CSipNICTList::GetString( CMonitorString & strBuf )
 {
 	NON_INVITE_TRANSACTION_MAP::iterator	itMap;
@@ -238,12 +212,7 @@ void CSipNICTList::GetString( CMonitorString & strBuf )
 	m_clsMutex.release();
 }
 
-/**
- * @ingroup SipStack
- * @brief SIP ¸Ş½ÃÁö¿¡ ÇØ´çÇÏ´Â CANCEL ¸Ş½ÃÁö¸¦ °Ë»öÇØ¼­ »èÁ¦ÇÑ´Ù.
- * @param pclsMessage		SIP ¸Ş½ÃÁö
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ½ÇÆĞÇÏ¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// SIP ë©”ì‹œì§€ì— í•´ë‹¹í•˜ëŠ” CANCEL ë©”ì‹œì§€ë¥¼ ê²€ìƒ‰í•´ì„œ ì‚­ì œí•œë‹¤.
 bool CSipNICTList::DeleteCancel( CSipMessage * pclsMessage )
 {
 	std::string strKey;

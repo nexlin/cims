@@ -20,14 +20,7 @@
 #include "PcapUtility.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipCallDump
- * @brief µğ¹ÙÀÌ½º ¼³¸í¿¡ ´ëÇÑ µğ¹ÙÀÌ½º ÀÌ¸§À» °Ë»öÇÑ´Ù.
- * @param pszDeviceDesscription µğ¹ÙÀÌ½º ¼³¸í
- * @param pszDeviceName					µğ¹ÙÀÌ½º ÀÌ¸§À» ÀúÀåÇÒ º¯¼ö
- * @param iDeviceNameSize				pszDeviceName º¯¼ö Å©±â
- * @returns ¼º°øÇÏ¸é true ¸¦ ¸®ÅÏÇÏ°í ±×·¸Áö ¾ÊÀ¸¸é false ¸¦ ¸®ÅÏÇÑ´Ù.
- */
+// ë””ë°”ì´ìŠ¤ ì„¤ëª…ì— ëŒ€í•œ ë””ë°”ì´ìŠ¤ ì´ë¦„ì„ ê²€ìƒ‰í•œë‹¤.
 bool GetDeviceName( const char * pszDeviceDesscription, char * pszDeviceName, int iDeviceNameSize )
 {
 	pcap_if_t * psttAllDevice = NULL;
@@ -73,10 +66,7 @@ bool GetDeviceName( const char * pszDeviceDesscription, char * pszDeviceName, in
 	return true;
 }
 
-/**
- * @ingroup SipCallDump
- * @brief µğ¹ÙÀÌ½º ÀÌ¸§À» Ãâ·ÂÇÑ´Ù.
- */
+// ë””ë°”ì´ìŠ¤ ì´ë¦„ì„ ì¶œë ¥í•œë‹¤.
 void PrintDeviceName()
 {
 	pcap_if_t * psttAllDevice = NULL;

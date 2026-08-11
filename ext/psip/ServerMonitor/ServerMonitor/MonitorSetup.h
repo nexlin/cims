@@ -22,20 +22,14 @@
 #include <vector>
 #include <list>
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ÄÃ·³ º¸¿©ÁÖ´Â ¹æ¹ı
- */
+// ëª¨ë‹ˆí„°ë§ ì»¬ëŸ¼ ë³´ì—¬ì£¼ëŠ” ë°©ë²•
 enum EMonitorAttributeType
 {
 	E_MAT_NULL = 0,
 	E_MAT_COMMA_SEP
 };
 
-/**
- * @ingroup ServerMonitor
- * @brief ÇÏ³ªÀÇ ¸ğ´ÏÅÍ¸µ ÄÃ·³ Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// í•˜ë‚˜ì˜ ëª¨ë‹ˆí„°ë§ ì»¬ëŸ¼ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CMonitorAttribute
 {
 public:
@@ -51,10 +45,7 @@ public:
 
 typedef std::vector< CMonitorAttribute > MONITOR_ATTRIBUTE_LIST;
 
-/**
- * @ingroup ServerMonitor
- * @brief ÇÏ³ªÀÇ ¸ğ´ÏÅÍ¸µ ¸í·É Á¤º¸ ÀúÀå Å¬·¡½º
- */
+// í•˜ë‚˜ì˜ ëª¨ë‹ˆí„°ë§ ëª…ë ¹ ì •ë³´ ì €ì¥ í´ë˜ìŠ¤
 class CMonitorEntry
 {
 public:
@@ -101,10 +92,7 @@ public:
 typedef std::vector<CMonitorEntry> MONITOR_LIST;
 typedef std::vector<std::string> SEND_COMMAND_LIST;
 
-/**
- * @ingroup ServerMonitor
- * @brief ¸ğ´ÏÅÍ¸µ ¸í·ÉÀ» ÀúÀåÇÏ´Â ÀÚ·á±¸Á¶ Å¬·¡½º
- */
+// ëª¨ë‹ˆí„°ë§ ëª…ë ¹ì„ ì €ì¥í•˜ëŠ” ìë£Œêµ¬ì¡° í´ë˜ìŠ¤
 class CMonitorSetup
 {
 public:

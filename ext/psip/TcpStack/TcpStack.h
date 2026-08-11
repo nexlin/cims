@@ -26,10 +26,7 @@
 #include "TcpStackCallBack.h"
 #include "TcpStackSetup.h"
 
-/**
- * @ingroup TcpStack
- * @brief TCP listen / connect ¹× ¼ö½Å/Àü¼Û Å¬·¡½º
- */
+// TCP listen / connect ë° ìˆ˜ì‹ /ì „ì†¡ í´ë˜ìŠ¤
 class CTcpStack
 {
 public:

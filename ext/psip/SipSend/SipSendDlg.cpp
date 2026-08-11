@@ -218,13 +218,13 @@ void CSipSendDlg::OnBnClickedStartSipStack()
 		return;
 	}
 
-	// À¯È¿ÇÏÁö ¾Ê´Â ÀÔ·Â°ªÀ» ¼öÁ¤ÇÑ´Ù.
+	// ìœ íš¨í•˜ì§€ ì•ŠëŠ” ì…ë ¥ê°’ì„ ìˆ˜ì •í•œë‹¤.
 	if( m_strSipDomain.IsEmpty() ) m_strSipDomain = m_strSipServerIp;
 	if( m_iSipServerPort <= 0 || m_iSipServerPort > 65535 ) m_iSipServerPort = 5060;
 
 	UpdateData(FALSE);
 
-	// ¼³Á¤ ÆÄÀÏ¿¡ ÀúÀåÇÑ´Ù.
+	// ì„¤ì • íŒŒì¼ì— ì €ì¥í•œë‹¤.
 	gclsSetup.m_strSipServerIp = m_strSipServerIp;
 	gclsSetup.m_iSipServerPort = m_iSipServerPort;
 	gclsSetup.m_strSipDomain = m_strSipDomain;
@@ -234,7 +234,7 @@ void CSipSendDlg::OnBnClickedStartSipStack()
 	gclsSetup.m_bChangeViaBranch = m_bChangeViaBranch ? true : false;
 	gclsSetup.Put();
 
-	// SipStack À» ½ÃÀÛÇÑ´Ù.
+	// SipStack ì„ ì‹œì‘í•œë‹¤.
 	CSipStackSetup clsSetup;
 	
 	GetLocalIp( clsSetup.m_strLocalIp );
@@ -313,7 +313,7 @@ void CSipSendDlg::OnBnClickedSend()
 		szText[iPos++] = 0x0a;
 	}
 
-	// Content-Length ¸¦ ¼öÁ¤ÇÑ´Ù.
+	// Content-Length ë¥¼ ìˆ˜ì •í•œë‹¤.
 	CSipMessage clsMessage;
 
 	clsMessage.Parse( szText, iPos );
@@ -333,13 +333,13 @@ void CSipSendDlg::OnBnClickedSend()
 
 	if( m_bChangeCallId )
 	{
-		// Call-ID ¸¦ ¼öÁ¤ÇÑ´Ù.
+		// Call-ID ë¥¼ ìˆ˜ì •í•œë‹¤.
 		clsMessage.m_clsCallId.m_strName.append( szRand );
 	}
 
 	if( m_bChangeViaBranch )
 	{
-		// Via top branch ¸¦ ¼öÁ¤ÇÑ´Ù.
+		// Via top branch ë¥¼ ìˆ˜ì •í•œë‹¤.
 		SIP_VIA_LIST::iterator itVL = clsMessage.m_clsViaList.begin();
 		if( itVL != clsMessage.m_clsViaList.end() )
 		{

@@ -20,12 +20,7 @@
 #include "SipTransport.h"
 #include "MemoryDebug.h"
 
-/**
- * @ingroup SipParser
- * @brief SIP transport ÇÁ·ÎÅäÄİ¿¡ ´ëÇÑ ¹®ÀÚ¿­À» ¸®ÅÏÇÑ´Ù.
- * @param eTransport SIP transport
- * @returns SIP transport ÇÁ·ÎÅäÄİ¿¡ ´ëÇÑ ¹®ÀÚ¿­À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP transport í”„ë¡œí† ì½œì— ëŒ€í•œ ë¬¸ìì—´ì„ ë¦¬í„´í•œë‹¤.
 const char * SipGetTransport( ESipTransport eTransport )
 {
 	if( eTransport == E_SIP_UDP )
@@ -46,12 +41,7 @@ const char * SipGetTransport( ESipTransport eTransport )
 	return S_SIP_UDP;
 }
 
-/**
- * @ingroup SipParser
- * @brief SIP ÇÁ·ÎÅäÄİ¿¡ ´ëÇÑ ¹®ÀÚ¿­À» ¸®ÅÏÇÑ´Ù.
- * @param eTransport SIP transport
- * @returns SIP ÇÁ·ÎÅäÄİ¿¡ ´ëÇÑ ¹®ÀÚ¿­À» ¸®ÅÏÇÑ´Ù.
- */
+// SIP í”„ë¡œí† ì½œì— ëŒ€í•œ ë¬¸ìì—´ì„ ë¦¬í„´í•œë‹¤.
 const char * SipGetProtocol( ESipTransport eTransport )
 {
 	if( eTransport == E_SIP_TLS )

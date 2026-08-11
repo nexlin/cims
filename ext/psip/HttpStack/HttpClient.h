@@ -21,10 +21,7 @@
 
 #include "HttpPacket.h"
 
-/**
- * @ingroup HttpStack
- * @brief HTTP Ε¬¶σΐΜΎπΖ® Ε¬·΅½Ί
- */
+// HTTP ν΄λΌμ΄μ–ΈνΈ ν΄λμ¤
 class CHttpClient
 {
 public:
