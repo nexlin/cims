@@ -91,6 +91,16 @@ public:
 	// SIP 통화 종료 이벤트 핸들러
 	virtual void EventCallEnd( const char * pszCallId, int iSipStatus ) = 0;
 
+	/** 서버가 먼저 거는 in-dialog 요청(세션 갱신·만료 BYE)의 **현재 도달 주소**를 응용에 묻는다.
+	 *  다이얼로그가 기억한 주소는 요청 수신 당시의 소스라, NAT 뒤 단말에서는 이미 죽어 있을 수
+	 *  있다 (대형 INVITE 를 TCP 로 승격해 보낸 뒤 그 연결이 닫힌 경우 등). 응용이 등록 바인딩
+	 *  (IP·포트·transport 한 세트)을 알고 있으면 채우고 true 를 리턴한다. false 면 psip 은
+	 *  다이얼로그가 기억한 주소를 그대로 쓴다.
+	 *  @param pszCallId  대상 다이얼로그의 Call-ID
+	 *  @param pszPeerId  상대(원격) 사용자 ID — 응용의 등록 자료구조 조회 키 */
+	virtual bool EventGetLegDest( const char * pszCallId, const char * pszPeerId,
+		std::string & strIp, int & iPort, ESipTransport & eTransport ){ return false; };
+
 	// SIP ReINVITE 수신 이벤트 핸들러
 	virtual void EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp ){};
 

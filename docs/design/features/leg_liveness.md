@@ -176,6 +176,7 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 
 | 규율 | 이유 |
 |---|---|
+| 갱신·만료 요청은 **등록 바인딩(latch) 주소**로 보낸다 | 다이얼로그가 기억한 주소는 요청 **수신 당시의 소스**다. 단말은 큰 INVITE(multipart mcptt-info+SDP)를 TCP 로 승격해 보내는데, 그 연결은 곧 닫히고 NAT 뒤라 서버가 다시 열 수 없다 — 그 주소로 갱신을 보내면 도달하지 못하고 단말이 규격대로 세션을 끊는다(§10, `cause=408`). psip 은 요청 생성 직전 `EventGetLegDest` 로 현재 도달 주소를 응용에 묻고, 응답이 있으면 다이얼로그의 목적지·transport 를 그 값으로 갱신한다. Record-Route 가 있는(프록시 경유) 다이얼로그는 손대지 않는다 |
 | SDP offer 는 직전과 **동일한 `o=` 세션 버전**으로 만든다 | RFC 4028 §7.4 의 "변경 없음" 표시. 현재 `CSipDialog::AddSdp()` 는 호출마다 `++m_iSessionVersion` 하므로 갱신 경로에서는 증가를 억제해야 한다 |
 | 갱신 2xx 에는 `Session-Expires` 를 **항상 echo** 한다 | 빠지면 상대가 타이머 해제로 해석한다(§7.2). psip 의 re-INVITE 자동 200 OK 생성 지점(`SipUserAgentInvite.hpp` `RecvInviteRequest`)이 싣는다 |
 | 수신 갱신에 대한 **answer 도 `o=` 를 유지**한다 | §7.4 는 answer 에도 "변경 없음" 표시를 요구한다 — 상대 offer 가 무변경일 때 answer 의 세션 버전도 올리지 않는다 |
@@ -221,6 +222,9 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 | 서버(CSP) | `SE/2` + INVITE 트랜잭션 Timer B(≈32초) | ≈ 122초 |
 | 단말 | `SE − min(32, SE/3)` | ≈ 148초 |
 
+실측은 이보다 빠를 수 있다 — 프로세스가 죽은 단말은 소켓이 닫혀 갱신 요청이 즉시 전송 오류로
+떨어지므로 트랜잭션 수명을 다 기다리지 않는다 (실기기 강제종료 56초).
+
 **부하** — leg 당 갱신 1회 왕복 / (SE/2). 40명 그룹·SE=180 이면 초당 약 0.44 트랜잭션(0.9 메시지)로,
 CSP 의 정상 호처리량 대비 무시할 수준이다.
 
@@ -256,6 +260,8 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | psip | `SipUserAgentCall.hpp` `AcceptCall`·`CreateCall`, `SipUserAgent.cpp` `SendInvite` | 2xx 에 협상 결과, 송신 INVITE 에 `Supported: timer`·`Session-Expires`·`Min-SE` |
 | psip | `SipUserAgent.cpp` `SetInviteResponse` | 2xx 수신 시 타이머 확정 / 422 는 `Min-SE` 반영 1회 재시도(§7.3) / 갱신의 408·481 은 세션 사망 표시(§10) |
 | psip | `SipUserAgentSipStack.hpp` `SendTimeout` | 현행 유지 — 갱신 무응답이 곧 `EventCallEnd(SIP_GONE)` |
+| psip | `SipUserAgentCallBack.h` `EventGetLegDest` (신규 콜백) | 서버 발신 in-dialog 요청의 현재 도달 주소를 응용에 묻는다. 기본 구현은 `false`(기존 동작 유지)라 다른 psip 사용자는 영향 없다. 콜백은 **다이얼로그 락 밖**에서 호출한다(psip 규약 — CheckSessionTimer 는 선별→조회→생성 3단계) |
+| CSP | `ModuleDispatcher::EventGetLegDest` | 등록 단말이면 `UserMap` 의 latch (IP·포트·transport 한 세트)를 돌려준다 — fan-out INVITE·NOTIFY 가 쓰는 것과 동일 출처. 미등록(제휴 노드 등)이면 false |
 | CSP | `SipServerSetup` | `Setup.Sip.SessionTimer` 설정 파싱([§8](#8-값과-지연)) |
 | CSP | `ModuleDispatcher::Start` | UA 기동 직후 `SetSessionTimer()` 주입 |
 | CSP | `CspServer.cpp` 주기 루프 | 1초 tick 에서 `gclsUserAgent.CheckSessionTimer()` 호출 |
@@ -298,7 +304,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | S2 | 빌드 | 통과 |
 | 루프백 | psip UA 를 UAS 로 띄우고 원시 UDP 소켓이 단말을 흉내내는 시험 — 라이브 서비스와 무관한 127.0.0.1 포트만 사용 | 아래 2 시나리오 통과 |
 | S3 | `S3-SCN-PTT-SMOKE`·`S3-SCN-VOIP-SMOKE` 회귀 — 갱신 re-INVITE 가 스모크 호를 깨지 않을 것 | 미실시 |
-| 실기기 | ① private call 중 상대 앱 **강제종료** → 남은 단말의 통화가 자동 종료되는지 + 종료 사유 ② ad-hoc 3인에서 1인 강제종료 → 로스터 NOTIFY·잔여 1인 해제 ③ 그룹콜 장시간 유지(갱신 3회 이상) 중 **음성 끊김·floor 이상 없음**(귀 확인) ④ 강제종료 후 CMP STATS 의 `member_used` 반납 확인 ⑤ 기내 모드 전환(망 소실)로 동일 감지 ⑥ 단말이 `Supported: timer` 를 실제로 광고하는지(pjsua 기본값 확인) | 미실시 |
+| 실기기 | 아래 표 | 4항목 통과, 잔여 3 |
 
 **루프백 시험 결과** (세션 간격 90초 = 규격 하한으로 시험)
 
@@ -306,6 +312,16 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 |---|---|
 | 서버가 갱신자 | 200 OK = `Session-Expires: 90;refresher=uas` + `Require: timer` / 갱신 re-INVITE 가 **+45초**(간격의 절반)에 `Supported: timer`·`Session-Expires: 90;refresher=uac` 로 도착 / **SDP `o=` 세션 버전 불변** / 단말 무응답 시 **+34초**(트랜잭션 수명)에 `EventCallEnd(408)` → teardown |
 | 단말이 갱신자 (`refresher=uac` 요구) | 서버가 역할을 뒤집지 않고 `Require: timer` 동봉(§9 Table 2 MUST) / 갱신 미수신 시 **+60초**(= 90 − min(32, 30))에 **BYE 송신** + `EventCallEnd(408)` → teardown |
+
+**실기기 검증** (PTT 앱 pjsua2, 사내 단말 2대 · SE=180)
+
+| 항목 | 결과 |
+|---|---|
+| 협상 | 앱 INVITE = `Supported: replaces, 100rel, timer, …` + `Session-Expires: 1800` + `Min-SE: 90` → 서버 200 OK = `Session-Expires: 180;refresher=uas` + `Require: timer` (규격대로 값만 낮추고 갱신자는 서버) — **앱 변경 없이 동작** |
+| 갱신 도달 | 개시 leg 은 앱이 TCP 로 승격해 보내므로 다이얼로그 주소가 곧 죽는다 → 등록 latch 로 목적지 교정(`…:27060(TCP) → …:22622(UDP)`) 후 정상 도달, 앱이 2xx 응답 |
+| 통화 유지 | 갱신 3회(6 트랜잭션) 이상 통과, 5분+ 유지, `cause=408` 종료 0건 |
+| **강제종료 감지** | 상대 단말 앱 force-stop(BYE 없음) → **56초** 만에 `SessionTimer expired` → `EventCallEnd(408)` → `PTT_LEAVE` → conference NOTIFY → 남은 단말 로스터 **구성원 (2)→(1)**, CMP `member_used` 반납 |
+| 잔여 | ① 장시간 통화 중 음성·floor 이상 없음(귀 확인) ② private call(1:1) 강제종료 ③ 기내 모드 — 모두 사람 조작 필요 |
 
 ## 14. 후속 과제
 

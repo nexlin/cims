@@ -1172,6 +1172,23 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     }
 }
 
+bool CModuleDispatcher::EventGetLegDest( const char *pszCallId, const char *pszPeerId, std::string &strIp, int &iPort,
+                                         ESipTransport &eTransport ) {
+    (void)pszCallId;
+    if ( pszPeerId == NULL || *pszPeerId == '\0' ) return false;
+
+    // 등록 단말이면 latch 된 실제 도달 주소를 준다. 미등록(제휴 노드 등)이면 false —
+    //   psip 이 다이얼로그가 기억한 주소를 그대로 쓴다(기존 동작 보존).
+    CUserInfo clsUserInfo;
+    if ( !gclsUserMap.Select( pszPeerId, clsUserInfo ) ) return false;
+    if ( clsUserInfo.m_strIp.empty() || clsUserInfo.m_iPort <= 0 ) return false;
+
+    strIp = clsUserInfo.m_strIp;
+    iPort = clsUserInfo.m_iPort;
+    eTransport = clsUserInfo.m_eTransport;
+    return true;
+}
+
 void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) {
     // 세션 갱신 re-INVITE (RFC 4028) — 선언 미디어가 직전과 동일하면 미디어 재협상이 아니다.
     //   CMP 재호출·NAT 재평가를 생략한다 (leg_liveness.md §6.3). psip 이 200 OK 를 이미

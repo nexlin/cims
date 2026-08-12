@@ -196,6 +196,8 @@ private:
 	void SessionTimerAddToResponse( CSipDialog & clsDialog, CSipMessage * pclsResponse );
 	void SessionTimerAddToRequest( CSipDialog & clsDialog, CSipMessage * pclsRequest, bool bInitial );
 	void SessionTimerOnResponse( CSipDialog & clsDialog, CSipMessage * pclsMessage );
+	void SessionTimerApplyDest( const std::string & strCallId, CSipDialog & clsDialog,
+		const std::string & strIp, int iPort, ESipTransport eTransport );
 
 	int GetSeqNum( );
 
