@@ -247,6 +247,32 @@ Agent.status
                         online  ←→  offline  (heartbeat 끊김 → offline)
 ```
 
+### 의도(status) vs 실측(live_state) — 실측이 화면의 정본
+
+`Deployment.status` 는 **의도**다(job 이 확정한다). 실제 프로세스 생존은 agent metric 의
+`live_modules` 스냅샷에서 온 **`live_state`**(`up`/`down`/`None`)이고, 콘솔은 실측이
+확정적이면 그것을 먼저 그린다(`depEffectiveStatus`).
+
+**실측은 과도 상태(`deploying`)에서도 계산한다.** 종전에는 status 가 `running`/`stopped`
+일 때만 계산해서, 배포 job 이 큐에 갇히면 프로세스가 멀쩡히 도는데도 화면이 영원히
+"배포 중" 이었다(실측 사고). 과도 상태는 끝나지 않을 수 있다는 것을 전제해야 한다 —
+실측을 감추면 운영자가 현실을 볼 통로가 없어진다. `pending`(아직 그 노드에 없음)과
+`removed` 만 제외한다.
+
+**과도 상태에는 시한이 있다.** `sweep_stuck_deploying`(60초 주기)이 `deploying` 고착을
+실제 상태로 정정한다 — 마지막 job 이 성공/실패로 끝났거나 사라졌으면 즉시, 아직
+queued/running 이면 5분이 지나고 실측이 확정적일 때만. 진행 중인 배포를 성급히 뒤집지
+않으면서, 영구 고착은 없앤다.
+
+### job 큐 인덱스는 캐시다
+
+agent 별 대기 job 목록(`job_index/<agent_id>`)은 픽업 시 전수 스캔을 피하려는 **캐시**이지
+정본이 아니다. 정본은 `control/jobs/*` 파일이다. 인덱스가 어긋나면(등록 실패 등)
+그 agent 에게 내린 **모든 job 이 조용히 무시**되므로, 신선도를 `jobs/.seq`(마지막 발급 id)
+로 O(1) 판정해 불일치 시 재구축한다. 종전에는 인덱스 **파일이 없을 때만** 재구축해서,
+`queued: []` 로 어긋난 인덱스가 영구히 자기복구되지 않았다(실측: start job 이 큐에 갇혀
+배포가 `deploying` 고착).
+
 ## 6. 보안
 
 - Enrollment 토큰: 1회용, 생성 시점에 전달

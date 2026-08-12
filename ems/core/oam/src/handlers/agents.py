@@ -491,28 +491,50 @@ def _job_index_dir(config):
     return file_store.domain_dir(config, _JOB_INDEX_DOMAIN)
 
 
-def _job_index_load(config, agent_id: int) -> "list | None":
-    """[job_id...] 또는 None(인덱스 없음 → 재구축 필요)."""
+# 인덱스 신선도 구간 확인의 상한 — 이보다 크면 전수 재구축이 더 싸다.
+_JOB_INDEX_GAP_MAX = 200
+
+
+def _jobs_seq(config) -> int:
+    """jobs 도메인이 마지막으로 발급한 id (`.seq`). 인덱스 **신선도 판정용 O(1) 읽기**.
+
+    job 은 발급(next_id → .seq 증가) → 저장 → 인덱스 등록 순서라, 인덱스에 기록해 둔
+    seq 가 현재 .seq 와 다르면 **그 사이에 만들어진 job 이 인덱스에 없다**는 뜻이다."""
+    try:
+        with open(os.path.join(_job_dir(config), '.seq')) as f:
+            v = f.read().strip()
+        return int(v) if v.lstrip('-').isdigit() else -1
+    except Exception:
+        return -1
+
+
+def _job_index_load(config, agent_id: int) -> "tuple[list | None, int]":
+    """(ids, seq) — ids 가 None 이면 인덱스 부재/손상(재구축 필요), seq 는 기록된 신선도."""
     try:
         rec = file_store.load(_job_index_dir(config), int(agent_id))
     except Exception:
-        return None
+        return None, -1
     if not isinstance(rec, dict):
-        return None
+        return None, -1
     ids = rec.get('queued')
-    return [int(x) for x in ids] if isinstance(ids, list) else None
+    seq = rec.get('seq')
+    return ([int(x) for x in ids] if isinstance(ids, list) else None,
+            int(seq) if isinstance(seq, int) else -1)
 
 
-def _job_index_save(config, agent_id: int, ids: list) -> None:
+def _job_index_save(config, agent_id: int, ids: list, seq: "int | None" = None) -> None:
+    """인덱스는 **캐시**다 — 저장에 실패해도 다음 픽에서 seq 불일치로 재구축된다."""
     try:
         file_store.save(_job_index_dir(config), int(agent_id),
-                        {'id': int(agent_id), 'queued': sorted({int(x) for x in ids})})
+                        {'id': int(agent_id), 'queued': sorted({int(x) for x in ids}),
+                         'seq': _jobs_seq(config) if seq is None else int(seq)})
     except Exception as e:
-        logger.log_warning(f"[job-index] agent#{agent_id} 저장 실패(무해, 다음에 재구축): {e}")
+        logger.log_warning(f"[job-index] agent#{agent_id} 저장 실패 — 다음 픽에서 "
+                           f"seq 불일치로 자동 재구축된다: {e}")
 
 
 def _job_index_add(config, agent_id: int, jid: int) -> None:
-    ids = _job_index_load(config, agent_id)
+    ids, _seq = _job_index_load(config, agent_id)
     if ids is None:
         ids = _job_index_rebuild(config, agent_id)
     _job_index_save(config, agent_id, list(ids) + [jid])
@@ -560,6 +582,76 @@ def _job_create(config, agent_id: int, job_type: str, params: dict,
 
 
 _JOB_TERMINAL = ('succeeded', 'failed', 'cancelled', 'canceled', 'timeout')
+
+
+def sweep_stuck_deploying(config, stale_sec: int = 300) -> int:
+    """`deploying` 에 고착된 배포 기록을 실제 상태로 정정한다. 정정 건수 반환.
+
+    `deploying` 은 **과도 상태**다 — job 이 끝나면 그 결과가 status 를 확정한다. 그런데
+    끝났다는 보고가 유실되거나(자기 업그레이드 중 재기동), job 이 아예 실행되지 못하면
+    (인덱스 어긋남 등) **영원히 과도 상태로 남는다**. 그러면 콘솔은 실제로 도는 모듈을
+    "배포 중" 으로 계속 표시하고, 운영자는 현실을 볼 통로가 없다(실측).
+
+    정정은 **근거가 확실할 때만** 한다:
+      - 마지막 job 이 성공/실패로 끝났다 → 그 결과로 확정(성공은 실측이 있으면 실측 우선)
+      - 마지막 job 이 사라졌다(purge 등) → 실측으로 확정
+      - job 이 아직 queued/running 이면 **건드리지 않는다** — 진짜 진행 중일 수 있다.
+        단 stale_sec 이 지나도록 그대로면 실측이 있을 때만 정정한다(진행 중이라는 근거가
+        시간이 갈수록 약해지므로).
+    """
+    from datetime import datetime as _dt, timedelta as _td
+    fixed = 0
+    try:
+        rows = _deploy_load_all(config)
+    except Exception as e:
+        logger.log_warning(f"[deploy-sweep] 배포 목록 조회 실패: {e}")
+        return 0
+    rows = [r for r in rows if (r.get('status') or '') == 'deploying']
+    if not rows:
+        return 0
+    _enrich_deploy(rows, config)                  # live_state 채우기(실측)
+    now = _dt.now()
+    for r in rows:
+        live = r.get('live_state')
+        jid = r.get('last_job_id')
+        job = None
+        if jid:
+            try:
+                job = _job_load(config, int(jid))
+            except Exception:
+                job = None
+        jstatus = (job or {}).get('status')
+        decided = None
+        why = ''
+        if job is None:
+            decided = {'up': 'running', 'down': 'stopped'}.get(live)
+            why = f'job#{jid} 없음'
+        elif jstatus == 'succeeded':
+            decided = {'up': 'running', 'down': 'stopped'}.get(live) or 'running'
+            why = f'job#{jid} 성공'
+        elif jstatus == 'failed':
+            decided = 'failed'
+            why = f'job#{jid} 실패'
+        elif jstatus in ('queued', 'running'):
+            # 진행 중 — stale 이고 실측이 있을 때만 정정한다.
+            ts = str(job.get('update_time') or job.get('create_time') or '')
+            try:
+                old = _dt.fromisoformat(ts) < now - _td(seconds=stale_sec)
+            except Exception:
+                old = False
+            if old and live in ('up', 'down'):
+                decided = 'running' if live == 'up' else 'stopped'
+                why = f'job#{jid} {jstatus} {stale_sec}s 초과 + 실측 {live}'
+        if not decided or decided == r.get('status'):
+            continue
+        try:
+            _deploy_update(config, r['id'], {'status': decided})
+            fixed += 1
+            logger.log_info(f"[deploy-sweep] deployment#{r['id']} "
+                            f"({r.get('process_name')}) deploying → {decided} ({why})")
+        except Exception as e:
+            logger.log_warning(f"[deploy-sweep] deployment#{r.get('id')} 정정 실패: {e}")
+    return fixed
 
 
 def purge_old_jobs(config, retain_days: int = 2, retain_count: int = 200) -> int:
@@ -618,10 +710,37 @@ def _job_pick_pending(config, agent_id: int, limit: int = 10) -> list:
     """
     from datetime import datetime as _dt
     now_iso = _dt.now().isoformat(timespec='seconds')
-    # 인덱스 우선 — 없으면 1회 재구축(그 뒤부터는 인덱스만 읽는다).
-    ids = _job_index_load(config, agent_id)
-    if ids is None:
-        ids = _job_index_rebuild(config, agent_id)
+    # 인덱스는 **캐시**이지 정본이 아니다(정본 = control/jobs/*). 어긋나면 그 agent 의 job 이
+    # 전부 조용히 무시되므로(실측: start job 이 큐에 갇혀 배포가 deploying 고착) 스스로
+    # 복구해야 한다. 다만 **전수 스캔으로 복구하면 인덱스를 둔 이유가 사라진다**.
+    #
+    # job id 는 `.seq` 에서 단조 발급되므로, 인덱스에 적어둔 seq 이후 구간
+    # `(idx_seq, cur_seq]` 이 곧 "인덱스가 모르는 job 후보" 다 — 그 몇 건만 확인해 흡수한다.
+    # `.seq` 는 jobs 도메인 **공용**이라 다른 agent 의 job 만 늘어도 불일치가 나는데, 그때는
+    # 구간 확인이 전부 miss 로 끝나고 seq 만 갱신된다(전수 스캔 없음).
+    ids, idx_seq = _job_index_load(config, agent_id)
+    cur_seq = _jobs_seq(config)
+    if ids is None or idx_seq < 0:
+        ids = _job_index_rebuild(config, agent_id)          # 부재/손상 — 1회 전수
+    elif cur_seq >= 0 and idx_seq != cur_seq:
+        gap = cur_seq - idx_seq
+        if gap < 0 or gap > _JOB_INDEX_GAP_MAX:
+            # seq 가 되돌아갔거나(store 교체·이관) 구간이 과도하게 크다 → 전수가 안전·저렴.
+            logger.log_warning(f"[job-index] agent#{agent_id} seq 구간 이상"
+                               f"(index={idx_seq} store={cur_seq}) — 전수 재구축")
+            ids = _job_index_rebuild(config, agent_id)
+        else:
+            add = []
+            for jid in range(idx_seq + 1, cur_seq + 1):
+                j = _job_load(config, jid)
+                if (j and j.get('agent_id') == agent_id
+                        and j.get('status') == 'queued' and j.get('id')):
+                    add.append(int(j['id']))
+            if add:
+                logger.log_info(f"[job-index] agent#{agent_id} 인덱스 누락 {add} 흡수 "
+                                f"(seq {idx_seq}→{cur_seq})")
+            ids = sorted(set(list(ids) + add))
+            _job_index_save(config, agent_id, ids, seq=cur_seq)
     pending, stale = [], []
     for jid in sorted(ids):
         j = _job_load(config, jid)
@@ -3116,11 +3235,17 @@ def _enrich_deploy(rows, config):
             ag = agent_cache[aid]
             r['agent_name'] = ag.get('name')
             # 실측 프로세스 상태 — agent metric 의 live_modules 스냅샷과 대조.
-            # status(배포기록=의도)와 달리 실제 프로세스 생존을 반영 (metric 주기 지연).
-            # online + 보고 있음 + 설치됨(비 pending) 일 때만 판정, 그 외 None(모름).
+            # status(배포기록=**의도**)와 달리 실제 프로세스 생존을 반영 (metric 주기 지연).
+            #
+            # **과도 상태(deploying)에서도 판정한다.** 종전엔 status 가 running/stopped 일
+            # 때만 계산해서, 배포 job 이 큐에 갇히면 프로세스가 멀쩡히 도는데도 화면이
+            # 영원히 "배포 중" 이었다(실측). 과도 상태가 끝나지 않을 수 있다는 걸 전제해야
+            # 한다 — 실측을 감추면 운영자가 현실을 볼 통로가 없어진다.
+            # pending(미설치)은 제외 — 아직 그 노드에 없으므로 "없음" 이 정상이라 down 이
+            # 의미를 갖지 않는다. removed 도 제외.
             lm = ag.get('live_modules')
             if (ag.get('status') == 'online' and isinstance(lm, list)
-                    and r.get('status') in ('running', 'stopped')):
+                    and r.get('status') in ('running', 'stopped', 'deploying', 'failed')):
                 names = {str(x.get('name', '')).lower() for x in lm if isinstance(x, dict)}
                 proc = (r.get('process_name') or r.get('package_name') or '').lower()
                 r['live_state'] = ('up' if proc in names else 'down') if proc else None

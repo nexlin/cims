@@ -145,8 +145,11 @@ def _assert_runtime_mount(config):
             # 새 빈 store 를 만들지 않고 **기존 로컬 store 로 뜬다** → 콘솔이 살아 있어
             # 운영자가 설정을 고치거나 이관을 실행할 수 있다. 이 노드는 공유 store 를 쓸 수
             # 없으므로 agent preflight 가 승격 자격에서 제외한다(정상).
-            config['CimsRuntimeDir'] = local
-            config.pop('CimsRuntimeMount', None)
+            # 리로드가 파일값(마운트 경로)으로 되돌리면 없는 경로를 store 로 쓰게 된다 —
+            # 런타임 override 로 못박는다(services/config_reload).
+            from services import config_reload as _cr
+            _cr.runtime_set(config, 'CimsRuntimeDir', local)
+            _cr.runtime_unset(config, 'CimsRuntimeMount')
             print(f'[oam-mount] ⚠ CimsRuntimeMount={mp} 미마운트 — 대상 store 는 비어 있고 '
                   f'로컬 store 가 있으므로 **로컬로 기동**합니다: {local}\n'
                   f'  마운트를 붙인 뒤 콘솔 HA > 공유 store 에서 "이 경로로 이관" 을 실행하세요. '
@@ -445,11 +448,11 @@ if __name__ == '__main__':
             try:
                 newc = load_config()
                 if newc:
-                    config.clear()
-                    config.update(newc)
+                    from services import config_reload as _cr
+                    kept = _cr.apply_reload(config, newc)
                     auth.init(config)
-                    logger.log_info('[reload] SIGUSR1 — config 재적용 '
-                                    '(bind/기동 캡처 항목은 재기동 필요)')
+                    logger.log_info(f'[reload] SIGUSR1 — config 재적용 '
+                                    f'(런타임 확정값 {kept}건 보존, bind 항목은 재기동 필요)')
                 else:
                     logger.log_warning('[reload] SIGUSR1 — 재로드 실패(빈 설정), 기존 유지')
             except Exception as e:
@@ -569,7 +572,7 @@ if __name__ == '__main__':
         else:
             logger.log_info("Mgmt.Cidr 미설정 — agent 자율 mgmt 도출만. 명시 권장.")
         # config 에 정규화된 mgmt_net 캐시 (handlers 가 사용 가능).
-        config['_mgmt_net'] = _mgmt_net
+        config['_mgmt_net'] = _mgmt_net        # `_` 접두 = 리로드 보존(config_reload)
 
         # 비어 있으면 **노드 로컬**로 해석 — 부트스트랩 직후엔 공유 마운트가 없는 것이
         # 정상이다(붙이는 수단이 이 OAM 이 서빙하는 콘솔이다). services/paths 참조.
@@ -712,7 +715,7 @@ if __name__ == '__main__':
         from handlers.console_static import (resolve_console_static_dir,
                                              CIMS_CONSOLE_STATIC_HANDLER_LIST)
         _console_dir = resolve_console_static_dir(config, _COMPONENT_ROOT)
-        config['_ConsoleStaticDir'] = _console_dir
+        config['_ConsoleStaticDir'] = _console_dir   # `_` 접두 = 리로드 보존(config_reload)
         if _console_dir:
             logger.log_info(f'[console-static] serving console SPA from {_console_dir}')
         else:
@@ -1370,6 +1373,8 @@ if __name__ == '__main__':
         JOB_RETAIN_DAYS       = int(config.get('JobRetentionDays', 2))
         JOB_RETAIN_COUNT      = int(config.get('JobRetentionCount', 200))
         JOB_PURGE_INTERVAL    = 600
+        # 과도 상태(deploying) 고착 정정 — job 보고 유실·큐 정체를 실측으로 되돌린다.
+        DEPLOY_SWEEP_INTERVAL = 60
         METRIC_PURGE_INTERVAL = int(config.get('MetricPurgeSweepSec', 3600))
 
         _ptt_index_last_n = [-1]
@@ -1396,6 +1401,15 @@ if __name__ == '__main__':
                                     f"(보존 {JOB_RETAIN_DAYS}d / 최대 {JOB_RETAIN_COUNT}건)")
             except Exception as e:
                 logger.log_error(f"[job-purge] error: {e}")
+
+        def _sweep_stuck_deploying():
+            try:
+                from handlers.agents import sweep_stuck_deploying
+                n = sweep_stuck_deploying(config)
+                if n > 0:
+                    logger.log_info(f"[deploy-sweep] 고착 deploying {n}건 실제 상태로 정정")
+            except Exception as e:
+                logger.log_error(f"[deploy-sweep] error: {e}")
 
         def _sweep_metric_purge():
             try:
@@ -1465,6 +1479,7 @@ if __name__ == '__main__':
         _last_ptt_index = 0
         _last_job_purge = 0
         _last_retention = 0
+        _last_deploy_sweep = 0
         _last_ha_op_sweep = 0
         _last_ro_log = 0
         # 리스 재획득 주기 — 절체 직후 구 Active 가 물러나는 데 수 초 걸리므로 짧게.
@@ -1521,6 +1536,9 @@ if __name__ == '__main__':
             if _now - _last_job_purge >= JOB_PURGE_INTERVAL:
                 _sweep_job_purge()
                 _last_job_purge = _now
+            if _now - _last_deploy_sweep >= DEPLOY_SWEEP_INTERVAL:
+                _sweep_stuck_deploying()
+                _last_deploy_sweep = _now
             if _now - _last_metric_purge >= METRIC_PURGE_INTERVAL:
                 _sweep_metric_purge()
                 _last_metric_purge = _now
