@@ -23,6 +23,22 @@ export interface VipBinding {
   memberIfaces?: { [serverId: number]: string } // 멤버 agent_id → iface name
 }
 
+// 그룹 공통 마운트 — agent.mounts 와 같은 모양 (mounted 는 멤버별이라 여기 없음).
+export interface GroupMount {
+  target: string                                // 마운트 위치 (예: /mnt/cims-log)
+  source: string                                // 예: 121.161.164.105:/home/cbm/NAS/log
+  fstype: string                                // nfs | nfs4 | cifs | ext4 | ...
+  options?: string
+}
+
+export type MountOp = {
+  op: 'add' | 'del'
+  target: string
+  fstype?: string
+  source?: string
+  options?: string
+}
+
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived vrrp_instance / vrrp_script 가 사용.
 // 모듈별 값(프로세스 감시·절체 모드)은 ModuleSpec(패키지 설정)으로 이관됨.
 export interface RestartLimit {
@@ -150,6 +166,9 @@ export interface HaGroup {
   auth_pass: string
   note?: string
   vip_bindings?: VipBinding[]
+  // 그룹 공통 마운트 선언 (전 멤버 동일 — 모듈 로그 수집용 NAS 등). 멤버별 실제 적용
+  // 여부는 agent.mounts 와 대조해 판정한다(선언에 있는데 멤버에 없으면 미적용).
+  mounts?: GroupMount[]
   shared_store?: HaSharedStore                    // 공유 store (미설정 = 이중화 대상 아님)
   // 선언(`requires_leader_lease`) 전제 미충족으로 **HA 편입에서 제외된** 모듈과 사유.
   // 예: {oam: 'no_shared_store'} — 공유 store 가 없으면 관리평면은 절체 대상이 아니다.
@@ -201,6 +220,14 @@ export const haGroupsApi = {
       shared_store: HaSharedStore; runtime_dir: string; detail: string
       jobs: { agent_id: number; process_name: string; job_type: string; job_id: number }[]
     }>(`/ha-groups/${id}/shared-store/migrate`, { mount_point }),
+
+  // 그룹 공통 마운트 — 선언 갱신 + 전 멤버 fan-out 적용. 오프라인/실패 멤버가 있어도
+  // 선언은 갱신되고 results 로 개별 사유가 온다 (콘솔이 '미적용'으로 표시 → 재적용).
+  applyMounts: (id: number, mounts: MountOp[]) =>
+    api.post<{
+      group_id: number; mounts: number; applied: number
+      results: Array<{ agent_id: number; name: string; ok: boolean; rc?: number; error?: string }>
+    }>(`/ha-groups/${id}/apply-mounts`, { mounts }),
 
   listMembers:  (id: number)                =>
     api.get<{ members: HaMember[] }>(`/ha-groups/${id}/members`).then(r => r.members),

@@ -1265,6 +1265,10 @@ async def handle_ha_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerRe
         if sub == 'shared-store' and member == 'migrate' and method == 'POST':
             return await _migrate_shared_store(gid, handler_args.body, config)
 
+        # 그룹 공통 마운트 선언 + 전 멤버 일괄 적용 — admin.
+        if sub == 'apply-mounts' and method == 'POST':
+            return await _apply_group_mounts(gid, handler_args, config)
+
         # 노드 유지보수(EXCLUDE_NODE) 토글 (AS 전용) — admin.
         if sub == 'maintenance' and method == 'POST':
             return await _maintenance_group(gid, handler_args.body, config)
@@ -1347,6 +1351,8 @@ def _serialize_group(g: dict, config: dict,
     members = _attach_derived_role(members)
     out['members'] = _attach_member_names(members, config)
     out.setdefault('vip_bindings', [])
+    # 그룹 공통 마운트 선언 (전 멤버 동일) — 멤버별 실제 적용 여부는 agent.mounts 로 대조.
+    out.setdefault('mounts', [])
     out['service_intent'] = dict(out.get('service_intent') or {})
     out['module_specs'] = dict(out.get('module_specs') or {})
     # 옛 record (failover_options 미존재) 도 UI 가 매번 채울 필요 없도록 default 응답에 포함.
@@ -2251,6 +2257,98 @@ async def _apply_group(gid: int, config):
         return HandlerResult(status=404, body={'error': 'Group not found'})
     count = _enqueue_update_ha_for_members(gid, config)
     return HandlerResult(status=202, body={'group_id': gid, 'jobs_queued': count})
+
+
+def _merge_group_mounts(declared: list, ops: list) -> list:
+    """그룹 마운트 선언에 op 반영 (key=target). agent 쪽 _reconcile_stored_mounts 와 같은 규칙."""
+    by_target = {}
+    for m in (declared or []):
+        if isinstance(m, dict) and (m.get('target') or '').strip():
+            by_target[m['target'].strip()] = {k: v for k, v in m.items() if k != 'op'}
+    for m in ops:
+        tgt = (m.get('target') or '').strip()
+        if not tgt:
+            continue
+        if (m.get('op') or 'add').lower() == 'add':
+            by_target[tgt] = {k: v for k, v in m.items() if k != 'op'}
+        else:
+            by_target.pop(tgt, None)
+    return list(by_target.values())
+
+
+async def _apply_group_mounts(gid: int, handler_args, config):
+    """그룹 공통 마운트 — 선언(group.mounts) 갱신 + 전 멤버 일괄 적용.
+
+    서버별 [마운트 관리]가 노드 하나를 고치는 통로라면 이쪽은 **그룹이 공통으로 갖는
+    마운트**(모듈 로그를 한곳에 모으는 NAS 등)를 한 번에 세운다. 노드마다 같은 값을
+    반복 입력하던 것을 없애는 게 목적이라, 개별 통로는 그대로 둔다(예외 구성용).
+
+    선언을 그룹 레코드에 남기는 이유: 오프라인이라 빠진 멤버·나중에 편입된 멤버를
+    콘솔이 '미적용'으로 짚어낼 수 있다. 선언이 없으면 무엇이 공통이어야 하는지 판정할
+    근거가 없어 드리프트가 보이지 않는다.
+
+    body: {"mounts": [{op:'add'|'del', fstype?, source?, target, options?}, ...]}
+    """
+    from handlers.agents import (_agent_load, _agent_proxy_call, _parse_body,
+                                 _reconcile_stored_mounts)
+    g = _ha_load(config, gid)
+    if not g:
+        return HandlerResult(status=404, body={'error': 'Group not found'})
+
+    body = _parse_body(handler_args) or {}
+    ops_in = body.get('mounts')
+    if not ops_in or not isinstance(ops_in, list):
+        return HandlerResult(status=400, body={'error': 'no_operations'})
+    ops = []
+    for m in ops_in:
+        if not isinstance(m, dict):
+            return HandlerResult(status=400, body={'error': 'invalid_mount_entry'})
+        op  = (m.get('op') or 'add').lower()
+        tgt = (m.get('target') or '').strip()
+        if op not in ('add', 'del') or not tgt:
+            return HandlerResult(status=400, body={'error': 'op_and_target_required'})
+        if op == 'add' and not (m.get('source') or '').strip():
+            return HandlerResult(status=400, body={'error': 'source_required', 'target': tgt})
+        entry = {'op': op, 'target': tgt}
+        if op == 'add':
+            entry.update({'fstype':  (m.get('fstype') or 'nfs').strip(),
+                          'source':  m['source'].strip(),
+                          'options': (m.get('options') or 'defaults').strip()})
+        ops.append(entry)
+
+    results = []
+    for mem in (g.get('members') or []):
+        aid = mem.get('agent_id')
+        row = await asyncio.to_thread(_agent_load, config, aid)
+        name = (row or {}).get('name') or f'agent-{aid}'
+        if not row:
+            results.append({'agent_id': aid, 'name': name, 'ok': False, 'error': 'agent_not_found'})
+            continue
+        if row.get('status') != 'online':
+            # 오프라인 멤버는 건너뛴다 — 선언은 남으므로 콘솔이 '미적용'으로 표시하고
+            # 나중에 [재적용]으로 따라잡는다.
+            results.append({'agent_id': aid, 'name': name, 'ok': False, 'error': 'agent_offline'})
+            continue
+        status, resp = await asyncio.to_thread(
+            _agent_proxy_call, 'POST', row, '/apply-mounts', None, {'mounts': ops}, 45, config)
+        if status == 200 and (resp or {}).get('ok', True):
+            await asyncio.to_thread(_reconcile_stored_mounts, config, aid, ops)
+            results.append({'agent_id': aid, 'name': name, 'ok': True,
+                            'rc': (resp or {}).get('rc', 0)})
+        else:
+            detail = (resp or {}).get('stderr') or (resp or {}).get('stdout') \
+                or (resp or {}).get('error') or f'status={status}'
+            results.append({'agent_id': aid, 'name': name, 'ok': False,
+                            'rc': (resp or {}).get('rc'), 'error': str(detail)[:300]})
+
+    # 일부 멤버가 실패해도 선언은 갱신한다 — 성공한 멤버를 되돌리는 게 더 나쁘고,
+    # 콘솔이 멤버별 적용 상태를 보여주므로 무엇이 남았는지 드러난다.
+    g['mounts'] = _merge_group_mounts(g.get('mounts') or [], ops)
+    file_store.save(_ha_dir(config), gid, g)
+    return HandlerResult(status=200,
+                         body={'group_id': gid, 'mounts': len(g['mounts']),
+                               'applied': sum(1 for r in results if r['ok']),
+                               'results': results})
 
 
 async def _remove_member(gid: int, aid: int, config):

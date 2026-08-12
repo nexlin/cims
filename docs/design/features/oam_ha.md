@@ -848,7 +848,7 @@ sudo ./install.sh --join \
 따라가지 않아 빈 콘솔이 되므로 **이관**이 필요하다. 이 작업은 콘솔 한 번의 조작으로 끝난다:
 
 ```text
-HA 그룹 상세 편집 > 공유 store > 경로 입력 > [이 경로로 이관]
+시스템 > 시스템/인프라 > (좌측 트리에서 시스템 선택) > 공유 store > 경로 입력 > [이 경로로 이관]
   → POST /api/v1/ha-groups/{id}/shared-store/migrate  {mount_point}
 ```
 

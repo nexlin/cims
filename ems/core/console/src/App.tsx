@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { MenuProvider } from './contexts/MenuContext'
 import { ToastProvider } from './components/Toast'
@@ -88,6 +88,14 @@ function CustomPageHost() {
     seed={{ id: layoutId, title, widgets: [] }} />
 }
 
+// 옛 HA 상세 편집(/deploy/services?group=N) → 시스템/인프라의 같은 그룹 인스펙터.
+// 쿼리를 보존해야 북마크가 원래 보던 그룹으로 그대로 떨어진다.
+function HaServicesRedirect() {
+  const [params] = useSearchParams()
+  const gid = params.get('group')
+  return <Navigate to={gid ? `/deploy/servers?group=${gid}` : '/deploy/servers'} replace />
+}
+
 function RouteGuard({ children, route }: { children: React.ReactNode; route: RouteDef }) {
   const { user } = useAuth()
   const devMode = useDevMode()
@@ -166,6 +174,10 @@ function Shell() {
               <Route path="/" element={<Navigate to={HOME_PATH} replace />} />
               {/* 옛 경로 호환 — 알람 이력은 /alerts/history 로 이전 */}
               <Route path="/dashboard/alerts" element={<Navigate to="/alerts/history" replace />} />
+              {/* 옛 경로 호환 — 자동 배포는 시스템 → 릴리스 그룹으로 이전 */}
+              <Route path="/deploy/auto-deploy" element={<Navigate to="/release/auto-deploy" replace />} />
+              {/* 옛 경로 호환 — HA 상세 편집은 시스템/인프라 그룹 인스펙터로 흡수됨 */}
+              <Route path="/deploy/services" element={<HaServicesRedirect />} />
               {FLAT_ROUTES.map(r => (
                 <Route
                   key={r.path}

@@ -93,7 +93,7 @@ HANDLER_LIST = (
     VERIFICATION_HANDLER_LIST +      # /api/v1/verification/* (S1~S6)
     CIMS_BUILD_HANDLER_LIST +        # /api/v1/build/*  (cims.sh build/pkg/release/clean + manifest)
     AGENTS_HANDLER_LIST +            # /api/v1/agents,packages,deployments/*
-    CIMS_HA_GROUPS_HANDLER_LIST +    # /api/v1/ha-groups/* (HaServicesPage primary)
+    CIMS_HA_GROUPS_HANDLER_LIST +    # /api/v1/ha-groups/* (ServersPage 그룹 인스펙터)
     AGENT_API_HANDLER_LIST +         # /api/agent/*  (Agent → CSC enroll/heartbeat/report)
     MODULES_HANDLER_LIST +           # /api/v1/deployments/<id>/collection/*
     SERVICE_CONTROL_HANDLER_LIST     # /api/v1/services/<name>/<start|stop|restart> (TB-CSC 만)

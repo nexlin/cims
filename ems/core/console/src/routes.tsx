@@ -21,7 +21,6 @@ import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import AutoDeployPage from './pages/AutoDeployPage'
 import AlarmCatalogPage from './pages/AlarmCatalogPage'
-import HaServicesPage from './pages/HaServicesPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
@@ -91,16 +90,10 @@ const CORE_SECTIONS: RouteSection[] = [
         apis: ['nodes.list', 'nodes.metrics'] },
       // ↑ RBAC: 페이지 진입 operator+. 탭1(시스템/서버 구성)·탭2(패키지 설치)·탭4(패키지 제어)는
       //   조회만 가능, 변이는 admin 세션 또는 admin 패스워드 승격. 탭3(패키지 설정)=operator 편집.
-      // 자동 배포 — 인벤토리/블루프린트 YAML 로 agent 설치~모듈 설치를 일괄 수행.
-      //   위 4탭이 수동 경로, 이쪽이 선언적 경로. 좌측 서버 트리를 쓰지 않고 실행이 수 분
-      //   걸리므로(run 이력·재개·롤백) 탭이 아니라 독립 페이지다.
-      { path: '/deploy/auto-deploy',      title: '자동 배포',     component: AutoDeployPage,      adminOnly: true },
+      //   (위 4탭이 수동 설치 경로 — 선언적 일괄 경로는 관리>릴리스>자동 배포)
       { path: '/deploy/external-systems', title: '외부 시스템',   component: ExternalSystemsPage, adminOnly: true },
       { path: '/deploy/console-accounts', title: '콘솔 계정',     component: ConsoleAccountsPage, adminOnly: true },
       { path: '/deploy/packages',         title: '패키지',        component: PackagesPage,        adminOnly: true },
-      // HA 상세 편집 — ServersPage(시스템/인프라) 인스펙터가 HA 를 인라인 편집하므로
-      // 사이드바 leaf 에서는 숨김(중복 제거). route 는 ServersPage 의 deep-link(?group=)용 유지.
-      { path: '/deploy/services',  title: 'HA 상세 편집',  component: HaServicesPage,  adminOnly: true, hidden: true },
     ],
   },
   {
@@ -117,6 +110,10 @@ const CORE_SECTIONS: RouteSection[] = [
       { path: '/release/verify',          title: '검증',         component: VerificationV2Page, adminOnly: true, devOnly: true },
       { path: '/release/verify-history',  title: '검증 이력',     component: VerificationHistoryPage, adminOnly: true, devOnly: true },
       { path: '/release/package',         title: '패키징',       component: ServicesPage, adminOnly: true, devOnly: true },
+      // 자동 배포 — 인벤토리/블루프린트 YAML 로 agent 설치~모듈 설치를 일괄 수행 (검증·패키징의
+      //   다음 단계). 시스템>시스템/인프라 탭이 수동 경로, 이쪽이 선언적 경로. 좌측 서버 트리를
+      //   쓰지 않고 실행이 수 분 걸리므로(run 이력·재개·롤백) 탭이 아니라 독립 페이지다.
+      { path: '/release/auto-deploy',     title: '자동 배포',     component: AutoDeployPage, adminOnly: true, devOnly: true },
     ],
   },
   {

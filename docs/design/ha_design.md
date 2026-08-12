@@ -574,30 +574,37 @@ cims.sh 는 **개발 단계 도구**:
 
 배포본 운영자는 cims.sh 호출 안 함 — agent/bin/cims-* 만 사용.
 
-### 11.6 Console UI 흐름 — HaServicesPage (운영자가 ha.json 직접 편집 X)
+### 11.6 Console UI 흐름 — ServersPage 그룹 인스펙터 (운영자가 ha.json 직접 편집 X)
 
-운영자는 `/deploy/services` (Console "서버 + HA") 에서 서비스(=HA 그룹/standalone)
-단위로 inline 편집 — 각 노드의 ha.json 은 CSC + cims_agent 가 자동 생성/분배.
+운영자는 `관리 > 시스템 > 시스템/인프라`(`/deploy/servers`) 좌측 트리에서 시스템(=HA 그룹)
+을 고르고 우측 인스펙터에서 편집한다 — 각 노드의 ha.json 은 OAM + cims_agent 가 자동
+생성/분배. 인스펙터는 영역별 `[▶ 적용]` 을 갖는다(메타 / 절체 조건 / 멤버 Master /
+VIP Bindings) — 그 영역의 변경만 backend 로 push 한다. 그 아래 **마운트(그룹 공통)** 와
+**공유 store** 가 그룹 스코프 자원으로 이어진다.
 
 데이터 모델 (sql/migrate_ha_groups.sql + sql/migrate_ha_services_wiring.sql +
 sql/migrate_ha_groups_vip_nullable.sql):
 - `ha_groups`: id / name / mode(active_standby|all_active) / **vip (nullable, legacy)** /
   vrid(자동) / vip_mask / auth_pass / note / **vip_bindings_json** (slot 별 VIP + 멤버 iface 매핑)
+  / **mounts** (그룹 공통 마운트 선언 — 멤버 전체에 같은 경로)
 - `ha_group_members`: group_id + agent_id (`uk_agent` UNIQUE — 1 agent = 1
   group) + priority + role(master|backup)
 - `cims_agent`: + **interfaces_json** (heartbeat 보고) + **service_ip_rows_json**
-  (운영자 iface→slot 매핑)
+  (운영자 iface→slot 매핑) + **mounts** (그 노드에 실제 적용된 마운트 — 그룹 선언과 대조해
+  멤버별 적용 여부 판정)
 
-> standalone 서비스 = ha_group 미배정 agent (음수 id `-agent.id` 로 frontend 매핑)
+> HA 그룹에 속하지 않은 서버는 좌측 트리에 단독 노드로 서고, 그룹 스코프 자원
+> (VIP·그룹 마운트·공유 store)은 갖지 않는다.
 
 ### 11.7 적용 흐름 — Apply API + multi-VIP rendering
 
-운영자가 VipPanel / ServiceIpPanel 의 `[적용]` 클릭 시:
-
-| 패널 | 진입점 | 결과 |
+| 화면 영역 | 진입점 | 결과 |
 |---|---|---|
-| VipPanel | `POST /api/v1/ha-groups/{id}/apply` | 멤버 전원에 `update_ha` job 큐잉 — 각 agent 가 ha.json 갱신 + `cims-ha config && apply` (keepalived reload) |
-| ServiceIpPanel | `POST /api/v1/agents/{id}/apply-ip-config` | 단일 agent 에 `apply_ip_config` job — `ip addr add <ip>/<mask> dev <iface>` per row (secondary IP, idempotent) |
+| VIP Bindings `[▶ 적용]` | `PUT /api/v1/ha-groups/{id}` (`vip_bindings`) | 저장 후 멤버 전원에 `update_ha` job 자동 큐잉 |
+| VIP Bindings `[↻ 재적용]` | `POST /api/v1/ha-groups/{id}/apply` | 값 변경 없이 멤버 전원 재렌더 — 각 agent 가 ha.json 갱신 + `cims-ha config && apply` (keepalived reload). 재설치·복구된 노드 따라잡기용 |
+| 마운트(그룹 공통) `[＋]`/`[삭제]`/`[↻ 재적용]` | `POST /api/v1/ha-groups/{id}/apply-mounts` | 선언(`group.mounts`) 갱신 + 멤버별 sync REST `/apply-mounts` fan-out (fstab 영속). 오프라인 멤버는 결과에 사유가 오고 선언만 남아 다음 재적용에서 따라잡는다 |
+| 서버 `[네트워크]` 탭 IP/라우팅 | `POST /api/v1/agents/{id}/apply-ip-config` | 단일 agent 에 `apply_ip_config` — `ip addr add <ip>/<mask> dev <iface>` per row (secondary IP, idempotent) |
+| 서버 `[네트워크]` 탭 마운트 | `POST /api/v1/agents/{id}/apply-mounts` | 단일 agent 마운트 — 그룹 공통에서 벗어나는 **노드별 예외**용 |
 
 **multi-VIP rendering** (한 vrrp_instance 에 N VIP):
 - `vip_bindings_json` 의 각 binding 이 `services.<group_name>.vips[]` 한 entry
@@ -605,13 +612,12 @@ sql/migrate_ha_groups_vip_nullable.sql):
 - agent 별 iface 는 `binding.memberIfaces[agent_id]` 또는 service 의 `interface` field
 - 한 group 내 모든 binding 은 같은 iface 사용 (제약 — 다중 iface 필요 시 그룹 분할)
 
-**config_template ip 메타**:
-패키지 `config_template.json` 의 field 에 다음 attribute 추가하면 SLOT_MAP hardcoded 대체:
-```json
-{ "key": "Setup.Sip.LocalIp", "type": "string",
-  "ip_scope": "service", "ip_slot": "SIP", "ip_port": 5060, "ip_proto": "udp" }
-```
-미설정 시 `ems/core/console SLOT_MAP` 의 hardcoded fallback 사용 (csp/cmp/psp 등).
+**용도(slot) 입력**:
+VIP 의 네트워크·마스크는 멤버 서버의 **서비스 IP 용도(slot)** 에서 자동 매핑되므로, 운영자는
+서버 인스펙터 `[네트워크]` 탭에서 IP 별 용도를 먼저 적는다(자유 입력). 용도로 표현되지 않는
+구성(멤버 IP 와 다른 서브넷, 멤버별 전용 NIC)은 VIP Bindings 의 `[수동 입력]` 으로 IP·iface 를
+직접 지정한다. 패키지 `config_template.json` 의 `ip_scope`/`ip_slot` 메타는 현재 콘솔이 소비
+하지 않는다 (권장 용도 힌트를 렌더하던 화면이 제거됨).
 
 모듈 ha_capability (각 모듈 pkg.json):
 - `csp/psp/isp/csc` → `active_standby`

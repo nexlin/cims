@@ -1380,8 +1380,8 @@ GET /api/v1/recordings/{id}/video   → video/mp4
 
 ## 15. 배포 관리 API
 
-콘솔 메뉴 `/deploy/services` (primary — 서버 + HA inline) · `/deploy/packages` (패키지) ·
-`/deploy/servers` (advanced — 서버 Inspector) 가 사용.
+콘솔 메뉴 `/deploy/servers` (primary — 시스템/인프라: 서버·HA 그룹 인라인 편집) ·
+`/deploy/packages` (패키지) 가 사용.
 **N.1 패키지 = 사용자가 업로드한 배포본 tarball** (`csc.json:Packages.Dir` 보관, `agents.py::_create_package`).
 **14. 빌드 API 의 packages = `cims.sh pkg` 산출물** (`build/dist/packages/`). 두 디렉토리는 코드 레벨 분리.
 
@@ -1412,9 +1412,11 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | POST | `/agents/{id}/apply-ip-config` | service_ip_rows[] 을 `apply_ip_config` job 으로 큐잉 (ServiceIpPanel [적용]) |
 | GET | `/agents/{id}/metrics` | 최근 리소스 메트릭 |
 
-응답 필드 (HaServicesPage 용):
+응답 필드 (콘솔 시스템/인프라 용):
 - `interfaces` — agent heartbeat 보고 `[{name, ip, mask}]` (None = 아직 보고 전)
 - `service_ip_rows` — 운영자 설정 iface→slot 매핑 `[{iface, ip, mask, slot, status?}]`
+- `mounts` — 이 노드에 적용된 마운트 `[{target, source, fstype, options, mounted}]`
+  (그룹 공통 마운트 선언과 대조해 멤버별 적용 여부를 판정)
 - `ha_group` — HA 그룹 ref `{id, name, mode, role}` (없으면 null = standalone)
 
 ### 15.3 배포 (`/api/v1/deployments`)
@@ -1545,7 +1547,8 @@ Collection API 상세는 `api/collection_api.md`. Agent 프로토콜은 `api/age
 | GET | `/ha-groups/{id}/members` | 멤버 목록 |
 | POST | `/ha-groups/{id}/members` | 멤버 추가 `{agent_id, role?, priority?}` (1 agent = 1 group UNIQUE) |
 | DELETE | `/ha-groups/{id}/members/{agent_id}` | 멤버 제거 |
-| POST | `/ha-groups/{id}/apply` | 데이터 변경 없이 멤버에 `update_ha` job 강제 큐잉 (VipPanel [적용]) |
+| POST | `/ha-groups/{id}/apply` | 데이터 변경 없이 멤버에 `update_ha` job 강제 큐잉 (VIP Bindings `[↻ 재적용]`) |
+| POST | `/ha-groups/{id}/apply-mounts` | 그룹 공통 마운트 — 선언(`group.mounts`) 갱신 + 멤버 fan-out. body `{mounts:[{op:'add'\|'del', target, source?, fstype?, options?}]}` → `{group_id, mounts, applied, results[{agent_id, name, ok, rc?, error?}]}`. 오프라인·실패 멤버가 있어도 선언은 갱신(콘솔이 '미적용' 표시 → 재적용으로 따라잡음) |
 | GET | `/ha-groups/{id}/packages/{pkg}/sync` | 그룹×패키지 공통 설정 **정합 판정 + 표시용 실효값**(읽기 전용, operator) — `{status, reason, auto_sync, active_agent_id, compared_to, drift[], deferred[], members[{…, values:{key:{v, src}}}]}`. 판정·표시 모두 서버 소유(자동 교정과 동일 규칙). `src` = `overlay`/`injected`/`default` |
 | PUT | `/ha-groups/{id}/packages/{pkg}/config` | 그룹 공통(scope=service) 설정 저장 (operator) — body `{values, target_deployment_id?, queue_update?}`. 스위치 ON=전 멤버 / OFF=target 필수 |
 | PUT | `/ha-groups/{id}/packages/{pkg}/auto-sync` | 자동 동기화 스위치 (operator) — body `{enabled}`. ON 전환 시 즉시 정합 1회 |

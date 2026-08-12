@@ -10,7 +10,6 @@
 
 import { useState } from 'react'
 import { btnPrimary, btnSecondary } from './styles'
-import type { ServiceRow } from './types'
 import type { HaSharedStore } from '../../api/ha_groups'
 
 const EMPTY: HaSharedStore = { mount_point: '' }
@@ -23,8 +22,8 @@ function validate(v: HaSharedStore): string[] {
 }
 
 /** 모든 멤버에 **공통으로** 존재하는 마운트 지점만 후보다 — 한쪽에만 있으면 절체가 깨진다. */
-function commonMounts(svc: ServiceRow): Array<{ target: string; fstype: string }> {
-  const lists = (svc.servers || []).map(s => s.mountTargets || [])
+function commonMounts(lists: Array<Array<{ target: string; fstype: string }>>):
+    Array<{ target: string; fstype: string }> {
   if (!lists.length || lists.some(l => l.length === 0)) return []
   const first = lists[0]
   return first
@@ -32,29 +31,33 @@ function commonMounts(svc: ServiceRow): Array<{ target: string; fstype: string }
     .map(m => ({ target: m.target, fstype: m.fstype }))
 }
 
-export function SharedStorePanel({ svc, onChange, onMigrate }: {
-  svc: ServiceRow
+export function SharedStorePanel({ sharedStore, haExcluded, memberMountTargets, onChange, onMigrate }: {
+  sharedStore?: HaSharedStore | null
+  /** 전제 미충족으로 HA 편입에서 빠진 모듈 {module: 사유} */
+  haExcluded?: Record<string, string>
+  /** 멤버별 **실제** 마운트 목록 (agent 보고) — 공통 항목만 후보로 제시한다. */
+  memberMountTargets: Array<Array<{ target: string; fstype: string }>>
   onChange: (v: HaSharedStore | Record<string, never>) => void
   /** 이관 실행 — 경로 저장 + oam 설정 갱신 + 정지/복사/기동까지 서버가 처리. */
   onMigrate?: (mountPoint: string) => void
 }) {
-  const cur = svc.sharedStore
+  const cur = sharedStore
   const [draft, setDraft] = useState<HaSharedStore>(cur ? { ...EMPTY, ...cur } : EMPTY)
   const [dirty, setDirty] = useState(false)
   const errs = validate(draft)
   const lbl = { fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }
   const inp = { width: '100%', fontSize: 12, padding: '3px 6px' }
 
-  const excluded = Object.entries(svc.haExcluded || {})
-  const mounts = commonMounts(svc)
+  const excluded = Object.entries(haExcluded || {})
+  const mounts = commonMounts(memberMountTargets)
   return (
     <div style={{ fontSize: 12 }}>
       <div style={{ color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
         관리평면(OAM) 데이터를 <b>양 노드가 같이 마운트한 공유 경로</b>에 두고, VIP 를 가진
         노드만 씁니다(소유권 리스). 미설정이면 데이터가 노드별로 따로 있어 이중화되지 않습니다.
         <br />
-        마운트는 먼저 <b>시스템/인프라 &gt; 서버 &gt; 마운트 관리</b> 에서 양 노드에 같은 경로로
-        추가하세요 — 여기서는 그 경로를 지정만 합니다.
+        마운트는 먼저 위의 <b>[마운트 (그룹 공통)]</b> 에서 추가하세요 — 전 멤버에 같은 경로로
+        한 번에 걸립니다. 여기서는 그 경로를 지정만 합니다.
       </div>
       {/* 선언 집행 결과 — 전제 미충족으로 HA 편입에서 빠진 모듈. 조용히 빠지면 운영자는
           이중화가 되는 줄 알기 때문에 여기서 이유를 명시한다. */}

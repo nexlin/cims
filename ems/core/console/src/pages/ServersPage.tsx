@@ -1,14 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
 } from '../api/deployment'
-import { haGroupsApi, type HaGroup, type VipBinding,
+import { haGroupsApi, type HaGroup, type VipBinding, type MountOp, type HaSharedStore,
          type FailoverOptions, FAILOVER_DEFAULTS,
          type ModuleSpec, MODULE_SPEC_DEFAULT, type SafetyClass } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { MountPanel } from './ha/MountPanel'
+import { GroupMountPanel } from './ha/GroupMountPanel'
+import { SharedStorePanel } from './ha/SharedStorePanel'
 import { NetTuningPanel } from './ha/NetTuningPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { ApiError } from '../api/client'
@@ -696,6 +698,10 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
   // A/S 실측 결과 — 멤버 agent.id → 관측된 VIP 보유 상태. checkVipHolders() 가 채움.
   const [vipObs, setVipObs] = useState<Record<number, 'active' | 'standby' | 'fail'>>({})
   const [vipChecking, setVipChecking] = useState(false)
+  // 그룹 공통 마운트 fan-out 진행 중 — 버튼 중복 클릭 차단.
+  const [mountApplying, setMountApplying] = useState(false)
+  // VIP 행 수동 입력 — 슬롯(용도) 자동 매핑으로 표현 안 되는 구성(다른 서브넷·전용 iface)용.
+  const [vipManual, setVipManual] = useState(false)
   // group prop 이 바뀌면 (다른 group 선택 또는 reload) state 재설정.
   useEffect(() => {
     setEditName(group.name)
@@ -753,6 +759,22 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
       show('VIP 적용됨', 'ok'); await onReload()
     } catch (e) { show((e as Error).message, 'err') }
   }
+  // 값 변경 없는 재렌더 — 재설치·복구된 노드가 그룹의 VIP 설정을 따라잡게 한다.
+  async function reapplyVip() {
+    try {
+      const r = await haGroupsApi.apply(group.id)
+      show(`VIP 재적용 — 멤버 ${r.jobs_queued}대에 keepalived 재렌더 큐잉`, 'ok')
+      await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  // VIP 를 실제로 들고 있는 멤버 이름 — heartbeat 의 interfaces[] 대조 (iface 매핑과 무관하게
+  // IP 로만 판정한다. 매핑이 비었다고 미보유로 읽으면 실제 보유 노드를 놓친다).
+  function vipHolders(ip: string): string[] {
+    if (!ip) return []
+    return memberAgents
+      .filter(m => (m.agent?.interfaces || []).some(x => x.ip === ip))
+      .map(m => (m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`))
+  }
   async function applyMembers() {
     // Master 선택 변경 → 해당 멤버 priority=100, 나머지=90. AS 에만 의미.
     if (!masterChanged || editMasterAid === null) return
@@ -764,6 +786,33 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
         }
       }
       show('멤버 적용됨', 'ok'); await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  // ── 그룹 공통 마운트 — 선언 갱신 + 전 멤버 fan-out (오프라인 멤버는 결과에 사유) ──
+  async function applyGroupMounts(ops: MountOp[], label: string) {
+    setMountApplying(true)
+    try {
+      const r = await haGroupsApi.applyMounts(group.id, ops)
+      const failed = r.results.filter(x => !x.ok)
+      if (failed.length === 0) show(`${label} — 멤버 ${r.applied}대 적용 (fstab 영속)`, 'ok')
+      else show(`${label} — ${r.applied}대 적용 / ${failed.length}대 실패: ` +
+                failed.map(f => `${f.name}(${f.error})`).join(', '), 'err')
+      await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setMountApplying(false) }
+  }
+  // ── 공유 store (관리평면 데이터 이중화) — 경로 저장 / 이관 실행 ──
+  async function saveSharedStore(v: HaSharedStore | Record<string, never>) {
+    try {
+      await haGroupsApi.update(group.id, { shared_store: v as HaSharedStore })
+      show('공유 store 경로 저장됨', 'ok'); await onReload()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
+  async function migrateSharedStore(mountPoint: string) {
+    try {
+      const r = await haGroupsApi.migrateSharedStore(group.id, mountPoint)
+      show(`공유 store 이관 개시 — ${r.detail || r.runtime_dir}`, 'ok')
+      await onReload()
     } catch (e) { show((e as Error).message, 'err') }
   }
   // ── A/S 실측 — 멤버별 health-check (sync REST) 로 실제 VIP 보유(Active) 여부 관측 ──
@@ -840,7 +889,8 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
   }
   function beginAddBinding() {
     const newBid = Math.max(0, ...editBindings.map(b => b.bid)) + 1
-    const defaultSlot = availableSlots[0] || ''
+    // 수동 입력 모드에서는 용도를 붙이지 않는다 — IP·iface 를 직접 지정하는 행이다.
+    const defaultSlot = vipManual ? '' : (availableSlots[0] || '')
     const info = defaultSlot ? slotSubnetInfo(defaultSlot) : { prefix: null, mask: 24, conflict: false }
     setEditBindings([...editBindings, {
       bid: newBid, slot: defaultSlot,
@@ -1043,13 +1093,31 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
         {/* VIP Bindings */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>VIP Bindings ({editBindings.length})</div>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+            {/* 수동 입력 — 용도(slot) 자동 매핑으로 표현 안 되는 구성(멤버 IP 와 다른 서브넷,
+                멤버별 전용 iface)을 위해 IP·iface 를 직접 지정한다. */}
+            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex',
+                            alignItems: 'center', gap: 4, cursor: 'pointer' }}
+                   title="용도 자동 매핑 대신 IP·멤버 iface 직접 입력 (다른 서브넷·전용 NIC 구성)">
+              <input type="checkbox" checked={vipManual}
+                     onChange={e => setVipManual(e.target.checked)} />
+              수동 입력
+            </label>
             <button className="btn btn--sm" onClick={beginAddBinding}
-                    disabled={availableSlots.length === 0 || bindingEditMode !== null}
-                    title={availableSlots.length === 0
-                      ? '먼저 멤버 서버의 [네트워크] 탭에서 IP 의 용도를 입력하세요'
+                    disabled={(!vipManual && availableSlots.length === 0) || bindingEditMode !== null}
+                    title={(!vipManual && availableSlots.length === 0)
+                      ? '먼저 멤버 서버의 [네트워크] 탭에서 IP 의 용도를 입력하세요 (또는 [수동 입력])'
                       : '새 VIP 행 추가 (편집 모드 — 저장 후 [▶ 적용] 로 backend 반영)'}>
               + VIP 추가
+            </button>
+            {/* 값 변경 없이 keepalived 만 다시 렌더 — 노드가 재설치·복구된 뒤 VIP 설정을
+                따라잡게 하는 통로. update 는 값이 바뀌어야 job 이 나간다. */}
+            <button className="btn btn--sm" onClick={reapplyVip}
+                    disabled={vipDirty || bindingEditMode !== null}
+                    title={vipDirty
+                      ? '먼저 [▶ 적용] 으로 변경을 저장하세요'
+                      : '저장된 VIP 설정을 전 멤버 keepalived 에 다시 내려보냄 (값 변경 없음)'}>
+              ↻ 재적용
             </button>
             <button className="btn btn--sm btn--primary" onClick={applyVipBindings}
                     disabled={!vipDirty || bindingEditMode !== null}
@@ -1073,7 +1141,10 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
           <table className="data-table" style={{ margin: 0, fontSize: 12 }}>
             <thead>
               <tr><th>용도</th><th>VIP (네트워크 + host)</th><th>mask</th>
-                  <th>멤버 iface</th><th style={{ width: 100 }}>액션</th></tr>
+                  <th>멤버 iface</th>
+                  <th style={{ width: 120 }}
+                      title="이 VIP 를 실제로 들고 있는 멤버 (heartbeat 관측, ≤30s 지연)">보유</th>
+                  <th style={{ width: 100 }}>액션</th></tr>
             </thead>
             <tbody>
               {editBindings.map(b => {
@@ -1089,6 +1160,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                       <td style={{ fontFamily: 'monospace' }}>{b.ip || '—'}</td>
                       <td>{b.mask || 24}</td>
                       <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceStr}</td>
+                      <td><VipHolderCell holders={vipHolders(b.ip)} /></td>
                       <td>
                         <button className="btn btn--sm" style={{ fontSize: 10, padding: '1px 5px' }}
                                 disabled={bindingEditMode !== null}
@@ -1101,19 +1173,25 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                     </tr>
                   )
                 }
-                // edit mode
+                // edit mode — 수동 입력이면 IP/mask/멤버 iface 를 직접 지정, 아니면 용도 기반 자동 매핑.
+                const manualOk = !!b.ip.trim()
                 return (
                   <tr key={b.bid} style={{ background: 'var(--warn-soft)' }}>
                     <td>
                       <select className="form-input" value={b.slot}
                               onChange={e => changeBindingSlot(b.bid, e.target.value)}
                               style={{ width: 110, fontSize: 11, padding: 2 }}>
-                        <option value="">(용도 선택)</option>
+                        <option value="">{vipManual ? '(용도 없음)' : '(용도 선택)'}</option>
                         {availableSlots.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </td>
                     <td>
-                      {info?.prefix ? (
+                      {vipManual ? (
+                        <input className="form-input" value={b.ip}
+                               onChange={e => updateBinding(b.bid, { ip: e.target.value })}
+                               placeholder="121.161.164.140"
+                               style={{ width: 130, fontSize: 11, padding: 2, fontFamily: 'monospace' }} />
+                      ) : info?.prefix ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
                           <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{info.prefix}</span>
                           <input className="form-input" value={host}
@@ -1125,16 +1203,45 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                       ) : (
                         <span style={{ fontSize: 11, color: '#e67e22' }}>
                           {b.slot ? (info?.conflictDetail || '용도의 멤버 IP 가 같은 네트워크 아님')
-                                  : '(용도 선택 필요)'}
+                                  : '(용도 선택 필요 — 또는 [수동 입력])'}
                         </span>
                       )}
                     </td>
-                    <td style={{ fontFamily: 'monospace' }}>{b.mask || 24}</td>
-                    <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceStr}</td>
+                    <td style={{ fontFamily: 'monospace' }}>
+                      {vipManual ? (
+                        <input className="form-input" type="number" min={8} max={32}
+                               value={b.mask || 24}
+                               onChange={e => updateBinding(b.bid, { mask: Number(e.target.value) || 24 })}
+                               style={{ width: 55, fontSize: 11, padding: 2 }} />
+                      ) : (b.mask || 24)}
+                    </td>
+                    <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {vipManual ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {memberAgents.map(m => (
+                            <span key={m.agent_id} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                              <span style={{ width: 54, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`}
+                              </span>
+                              <input className="form-input"
+                                     value={b.memberIfaces?.[m.agent_id] || ''}
+                                     onChange={e => updateBinding(b.bid, {
+                                       memberIfaces: { ...(b.memberIfaces || {}),
+                                                       [m.agent_id]: e.target.value },
+                                     })}
+                                     placeholder="ens3"
+                                     style={{ width: 60, fontSize: 11, padding: 2,
+                                              fontFamily: 'monospace' }} />
+                            </span>
+                          ))}
+                        </div>
+                      ) : ifaceStr}
+                    </td>
+                    <td><VipHolderCell holders={[]} editing /></td>
                     <td>
                       <button className="btn btn--sm btn--primary"
                               style={{ fontSize: 10, padding: '1px 5px' }}
-                              disabled={!b.slot || !host || !info?.prefix}
+                              disabled={vipManual ? !manualOk : (!b.slot || !host || !info?.prefix)}
                               onClick={() => setBindingEditMode(null)}>저장</button>
                       <button className="btn btn--sm btn--danger"
                               style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}
@@ -1148,11 +1255,57 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
         )}
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
           VIP 의 네트워크/마스크 는 멤버의 용도(service IP) 에서 자동 매핑 — host (마지막 옥텟) 만 입력.
-          상세 (수동 IP 입력) → <Link to={`/deploy/services?group=${group.id}`}>📋 상세 편집</Link>.
+          다른 서브넷·전용 NIC 구성은 [수동 입력] 으로 IP·iface 직접 지정.
         </div>
+
+        {/* 그룹 공통 마운트 — 멤버 전체에 같은 경로. 모듈 로그 수집처(NAS) 등. */}
+        <div style={{ marginTop: 20 }}>
+          <GroupMountPanel
+            declared={group.mounts || []}
+            members={memberAgents.map(m => ({
+              id: m.agent_id,
+              name: m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`,
+              online: m.agent?.status === 'online',
+              mounts: m.agent?.mounts || [],
+            }))}
+            applying={mountApplying}
+            onApply={applyGroupMounts}
+          />
+        </div>
+
+        {/* 공유 store — AS 만 (관리평면 데이터 이중화 전제). 미설정이면 oam 이 HA 편입에서 빠진다. */}
+        {group.mode === 'active_standby' && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>공유 store (관리평면 데이터)</div>
+            <SharedStorePanel
+              sharedStore={group.shared_store}
+              haExcluded={group.ha_excluded}
+              memberMountTargets={memberAgents.map(m => (m.agent?.mount_targets || [])
+                .map(t => ({ target: t.target, fstype: t.fstype })))}
+              onChange={saveSharedStore}
+              onMigrate={migrateSharedStore}
+            />
+          </div>
+        )}
       </div>
     </>
   )
+}
+
+// VIP 보유 멤버 셀 — heartbeat 관측(≤30s 지연). 정확히 1명이 정상, 0명은 이동 중/미적용,
+// 2명 이상은 split-brain 의심이라 색으로 구분한다.
+function VipHolderCell({ holders, editing }: { holders: string[]; editing?: boolean }) {
+  if (editing) return <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
+  if (holders.length === 1) {
+    return <span title="이 VIP 를 실제로 보유 (heartbeat 관측)"
+                 style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● {holders[0]}</span>
+  }
+  if (holders.length === 0) {
+    return <span title="어느 멤버도 이 VIP 를 갖고 있지 않음 — 미적용이거나 이동 중"
+                 style={{ fontSize: 11, color: '#e67e22' }}>○ 미할당</span>
+  }
+  return <span title={`동시 보유: ${holders.join(', ')} — split-brain 의심`}
+               style={{ fontSize: 11, color: '#c0392b', fontWeight: 600 }}>⚠ {holders.length}곳 보유</span>
 }
 
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
