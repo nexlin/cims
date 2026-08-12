@@ -19,7 +19,7 @@
 // SIP INVITE 요청 메시지 수신 이벤트 핸들러
 bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage )
 {
-	std::string	strCallId;
+	std::string	strCallId, strLocalTag;
 	bool	bReINVITE = false;
 	CSipCallRtp clsRtp, clsLocalRtp;
 	char	szTag[SIP_TAG_MAX_SIZE];
@@ -39,19 +39,51 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		return true;
 	}
 
+	// 요청 세션 간격이 로컬 최소치 미만인가 — 거절할 요청은 갱신으로 계산하지 않는다 (§6/§9).
+	bool bSessionTooSmall = SessionTimerIsTooSmall( pclsMessage );
+
 	// ReINVITE 인지 검사한다.
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( strCallId );
 	if( itMap != m_clsDialogMap.end() )
 	{
 		bReINVITE = true;
-		itMap->second.SetRemoteRtp( &clsRtp );
-		itMap->second.SelectLocalRtp( &clsLocalRtp );
+		strLocalTag = itMap->second.m_strFromTag;
+
+		if( bSessionTooSmall == false )
+		{
+			// 미디어 무변경(순수 세션 갱신) 판정 — 반드시 SetRemoteRtp 로 덮어쓰기 전에 한다.
+			CSipCallRtp clsPrevRtp;
+			itMap->second.SelectRemoteRtp( &clsPrevRtp );
+			itMap->second.m_bLastReInviteMediaSame = ( clsPrevRtp.m_strIp == clsRtp.m_strIp &&
+				clsPrevRtp.m_iPort == clsRtp.m_iPort &&
+				clsPrevRtp.GetAudioPort() == clsRtp.GetAudioPort() &&
+				clsPrevRtp.GetVideoPort() == clsRtp.GetVideoPort() &&
+				clsPrevRtp.GetApplicationPort() == clsRtp.GetApplicationPort() );
+
+			// 세션 갱신 (RFC 4028 §7.2) — 목적과 무관하게 in-dialog re-INVITE 는 갱신 효과를 갖는다.
+			SessionTimerOnRequest( itMap->second, pclsMessage );
+			itMap->second.m_iLastRefreshTime = time( NULL );
+
+			itMap->second.SetRemoteRtp( &clsRtp );
+			itMap->second.SelectLocalRtp( &clsLocalRtp );
+		}
 	}
 	m_clsDialogMutex.release();
 
 	if( bReINVITE )
 	{
+		if( bSessionTooSmall )
+		{
+			pclsResponse = pclsMessage->CreateResponse( SIP_SESSION_INTERVAL_TOO_SMALL, strLocalTag.c_str() );
+			if( pclsResponse )
+			{
+				pclsResponse->AddHeader( "Min-SE", m_iSessionTimerMinSE );
+				m_clsSipStack.SendSipMessage( pclsResponse );
+			}
+			return true;
+		}
+
 		if( m_pclsCallBack ) m_pclsCallBack->EventReInvite( strCallId.c_str(), &clsRtp, &clsLocalRtp );
 
 		m_clsDialogMutex.acquire();
@@ -60,7 +92,13 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		{
 			itMap->second.SetLocalRtp( &clsLocalRtp );
 			pclsResponse = pclsMessage->CreateResponse( SIP_OK );
-			itMap->second.AddSdp( pclsResponse );
+			// 상대 offer 가 무변경(세션 갱신)이면 answer 도 "변경 없음"으로 표시해야 한다 —
+			//   SDP origin(o=) 세션 버전을 유지한다 (RFC 4028 §7.4).
+			itMap->second.AddSdp( pclsResponse, itMap->second.m_bLastReInviteMediaSame );
+
+			// 갱신 응답에도 Session-Expires 를 실어야 한다 — 빠지면 상대가 타이머 해제로
+			//   해석한다 (RFC 4028 §7.2).
+			SessionTimerAddToResponse( itMap->second, pclsResponse );
 		}
 		m_clsDialogMutex.release();
 
@@ -71,6 +109,18 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 
 	// 새로운 INVITE 인 경우
 	SipMakeTag( szTag, sizeof(szTag) );
+
+	// 요청 세션 간격이 로컬 최소치 미만이면 다이얼로그 생성 전에 422 + Min-SE (RFC 4028 §6/§9).
+	if( bSessionTooSmall )
+	{
+		pclsResponse = pclsMessage->CreateResponse( SIP_SESSION_INTERVAL_TOO_SMALL, szTag );
+		if( pclsResponse )
+		{
+			pclsResponse->AddHeader( "Min-SE", m_iSessionTimerMinSE );
+			m_clsSipStack.SendSipMessage( pclsResponse );
+		}
+		return true;
+	}
 
 	if( m_pclsCallBack )
 	{
@@ -101,6 +151,9 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 
 	clsDialog.m_strCallId = strCallId;
 	clsDialog.SetRemoteRtp( &clsRtp );
+
+	// 세션 타이머 협상 입력 보관 (RFC 4028 §9) — 확정은 AcceptCall 의 2xx 생성 시점.
+	SessionTimerOnRequest( clsDialog, pclsMessage );
 
 	pclsMessage->GetTopViaIpPort( clsDialog.m_strContactIp, clsDialog.m_iContactPort );
 

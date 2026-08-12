@@ -1062,9 +1062,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 pclsInvite->m_clsContactList.clear();
                 pclsInvite->m_clsContactList.push_back( clsContact );
             }
-            // Session timer (RFC 4028) — required by many MCPTT implementations
-            pclsInvite->AddHeader( "Session-Expires", "7200;refresher=uac" );
-            pclsInvite->AddHeader( "Min-SE", "180" );
+            // 세션 타이머(RFC 4028) 헤더는 psip UA 가 협상값으로 싣는다 (leg_liveness.md §5.2) —
+            //   여기서 따로 광고하면 갱신을 이행하지 않는 값이 그대로 나가 규격 위반이 된다.
             // 비디오 활성화 전달 (cwrtc가 SDP에 H.264 포함 여부 결정)
             if ( bVideoEnabled && iMemberVideoPort > 0 ) {
                 char szVideo[64];

@@ -87,6 +87,41 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 30 초 주기 체크에서 다음 cycle 부터 적용.",
           "help": "0 = 비활성. 마지막 SIP activity 이후 무응답 통화 자동 종료."
+        },
+        {
+          "key": "Setup.Sip.SessionTimer.Enable",
+          "label": "세션 타이머 (RFC 4028)",
+          "type": "bool",
+          "default": true,
+          "restart": true,
+          "help": "BYE 없이 사라진 leg(앱 강제종료·망 소실)을 주기 세션 갱신으로 감지해 정리한다."
+        },
+        {
+          "key": "Setup.Sip.SessionTimer.SessionExpires",
+          "label": "세션 간격 (s)",
+          "type": "int",
+          "default": 180,
+          "min": 90,
+          "restart": true,
+          "help": "제안 세션 간격. 규격 하한 90. 감지 지연 ≈ 간격/2 + 32초(서버 갱신 시)."
+        },
+        {
+          "key": "Setup.Sip.SessionTimer.MinSE",
+          "label": "최소 세션 간격 (s)",
+          "type": "int",
+          "default": 90,
+          "min": 90,
+          "restart": true,
+          "help": "이보다 작은 요청은 422(Session Interval Too Small) + Min-SE 로 거절."
+        },
+        {
+          "key": "Setup.Sip.SessionTimer.Refresher",
+          "label": "갱신 주체",
+          "type": "enum",
+          "values": [ "server", "ue" ],
+          "default": "server",
+          "restart": true,
+          "help": "server = 서버가 주기 re-INVITE(단말 지원 무관하게 감지). ue = 단말이 갱신, 서버는 만료 감시만."
         }
       ],
       "scope": "service"

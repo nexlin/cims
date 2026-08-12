@@ -34,6 +34,19 @@ typedef MAP< std::string, CSipDialog > SIP_DIALOG_MAP;
 
 typedef std::list< std::string > SIP_CALL_ID_LIST;
 
+// ── 세션 타이머 (RFC 4028) — docs/design/features/leg_liveness.md ──
+/** Session-Expires 절대 최소값 (RFC 4028 §4) */
+#define SIP_SESSION_TIMER_ABS_MIN	90
+/** INVITE 트랜잭션 수명(Timer B ≈ 32초) — 갱신 재시도 간격·만료 선행 시간의 상한 */
+#define SIP_SESSION_TIMER_TX_SEC	32
+
+/** 세션 갱신 주체 정책 — 규격상 뒤집을 수 없는 조합에서는 규격이 우선한다 (§9 Table 2). */
+enum ESessionRefresher
+{
+	E_SESSION_REFRESHER_LOCAL = 0,		// 우리(서버)가 갱신 — 단말 지원 여부와 무관하게 감지 가능
+	E_SESSION_REFRESHER_REMOTE = 1		// 상대(단말)가 갱신 — 서버는 만료 감시만
+};
+
 class CSipUserAgent : public ISipStackCallBack
 {
 public:
@@ -111,6 +124,13 @@ public:
 	 *  @returns Dialog 존재 시 true, 없으면 false */
 	bool SetCallDomain( const char * pszCallId, const char * pszDomain );
 
+	// SipUserAgentSessionTimer.hpp : 세션 타이머 (RFC 4028)
+	void SetSessionTimer( bool bEnable, int iSessionExpires, int iMinSE, int iRefresher );
+	void CheckSessionTimer( );
+	/** 직전에 수신한 re-INVITE 가 미디어 무변경(순수 세션 갱신)이었는가 —
+	 *  호출자가 불필요한 미디어 재협상(미디어 서버 재호출)을 생략하는 데 쓴다. */
+	bool IsSessionRefreshReInvite( const char * pszCallId );
+
 	bool IsRingCall( const char * pszCallId, const char * pszTo );
 	bool Is100rel( const char * pszCallId );
 	bool IsHold( const char * pszCallId );
@@ -167,6 +187,16 @@ private:
 	bool SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite );
 	bool GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsRtp );
 
+	// SipUserAgentSessionTimer.hpp : 세션 타이머 내부 절차
+	static bool SessionTimerHasOption( CSipMessage * pclsMessage, const char * pszHeader, const char * pszOption );
+	static int  SessionTimerGetExpires( CSipMessage * pclsMessage, std::string & strRefresher );
+	static int  SessionTimerGetMinSE( CSipMessage * pclsMessage );
+	void SessionTimerOnRequest( CSipDialog & clsDialog, CSipMessage * pclsMessage );
+	bool SessionTimerIsTooSmall( CSipMessage * pclsMessage );
+	void SessionTimerAddToResponse( CSipDialog & clsDialog, CSipMessage * pclsResponse );
+	void SessionTimerAddToRequest( CSipDialog & clsDialog, CSipMessage * pclsRequest, bool bInitial );
+	void SessionTimerOnResponse( CSipDialog & clsDialog, CSipMessage * pclsMessage );
+
 	int GetSeqNum( );
 
 	ISipUserAgentCallBack * m_pclsCallBack;
@@ -178,6 +208,12 @@ private:
 	CSipMutex						m_clsMutex;
 
 	bool								m_bStart;
+
+	// 세션 타이머 설정 (SetSessionTimer)
+	bool								m_bSessionTimer;
+	int									m_iSessionTimerSE;
+	int									m_iSessionTimerMinSE;
+	int									m_iSessionTimerRefresher;
 };
 
 #endif

@@ -45,9 +45,12 @@
 #include "SipUserAgentMessage.hpp"
 #include "SipUserAgentPrack.hpp"
 #include "SipUserAgentOptions.hpp"
+#include "SipUserAgentSessionTimer.hpp"
 
 // 생성자
 CSipUserAgent::CSipUserAgent() : m_bStopEvent(false), m_pclsCallBack(NULL), m_iSeq(0), m_bStart(false)
+	, m_bSessionTimer(false), m_iSessionTimerSE(SIP_SESSION_TIMER_ABS_MIN)
+	, m_iSessionTimerMinSE(SIP_SESSION_TIMER_ABS_MIN), m_iSessionTimerRefresher(E_SESSION_REFRESHER_LOCAL)
 {
 }
 
@@ -159,6 +162,9 @@ bool CSipUserAgent::SendInvite( CSipDialog & clsDialog )
 			pclsMessage = clsDialog.CreateInvite();
 			if( pclsMessage )
 			{
+				// 세션 타이머 제안 (RFC 4028 §7.1) — dialog 상태를 먼저 채운 뒤 맵에 넣는다.
+				SessionTimerAddToRequest( clsDialog, pclsMessage, true );
+
 				m_clsDialogMap.insert( SIP_DIALOG_MAP::value_type( clsDialog.m_strCallId, clsDialog ) );
 				bInsert = true;
 			}
@@ -304,6 +310,9 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 					bReInvite = true;
 				}
 
+				// 세션 타이머 협상 결과 반영 (RFC 4028 §7.2) — 초기 2xx·갱신 2xx 공통.
+				SessionTimerOnResponse( itMap->second, pclsMessage );
+
 				if( itMap->second.m_sttCancelTime.tv_sec > 0 )
 				{
 					bStopCall = true;
@@ -334,6 +343,32 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 					}
 				}
 			}
+			else if( m_bSessionTimer && pclsMessage->m_iStatusCode == SIP_SESSION_INTERVAL_TOO_SMALL )
+			{
+				// RFC 4028 §7.3 — 상대가 요구한 Min-SE 로 올려 새 트랜잭션으로 1회 재시도한다.
+				int iMinSE = SessionTimerGetMinSE( pclsMessage );
+				if( iMinSE > itMap->second.m_iPeerMinSE ) itMap->second.m_iPeerMinSE = iMinSE;
+
+				bool bInitial = ( itMap->second.m_sttStartTime.tv_sec == 0 );
+
+				if( itMap->second.m_iPeerMinSE > 0 && itMap->second.m_bSessionTimerRetried == false )
+				{
+					itMap->second.m_bSessionTimerRetried = true;
+					itMap->second.m_iSessionExpires = 0;		// Min-SE 반영해 재산출
+					if( bInitial ) itMap->second.m_strToTag.clear();
+
+					pclsInvite = itMap->second.CreateInvite( bInitial ? false : true );
+					if( pclsInvite ) SessionTimerAddToRequest( itMap->second, pclsInvite, bInitial );
+				}
+				else if( bInitial )
+				{
+					gettimeofday( &itMap->second.m_sttEndTime, NULL );
+				}
+				else
+				{
+					bReInvite = true;
+				}
+			}
 			else
 			{
 				if( itMap->second.m_sttStartTime.tv_sec == 0 )
@@ -361,6 +396,17 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 				else
 				{
 					bReInvite = true;
+
+					// RFC 4028 §10 — 세션 갱신 요청이 408/481 이면 세션이 죽은 것으로 확정하고
+					//   CheckSessionTimer 가 BYE + teardown 을 태운다.
+					if( m_bSessionTimer && itMap->second.m_iSessionExpires > 0 &&
+						( pclsMessage->m_iStatusCode == SIP_REQUEST_TIME_OUT ||
+						  pclsMessage->m_iStatusCode == SIP_CALL_TRANSACTION_DOES_NOT_EXIST ) )
+					{
+						itMap->second.m_bSessionTimerDead = true;
+					}
+					// 그 밖의 실패 응답은 m_iRefreshSentTime 을 유지해 다음 시도가 트랜잭션
+					//   수명(32초) 뒤에 오게 한다 — 연속 재시도 폭주 방지 (§10).
 				}
 			}
 		}

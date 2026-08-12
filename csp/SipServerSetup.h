@@ -129,6 +129,22 @@ public:
     int m_iStaleCallTimeout;
 
     // ================================================================
+    // 세션 타이머 (RFC 4028) — 비정상 종료 leg 감지.
+    //   docs/design/features/leg_liveness.md
+
+    /** 세션 타이머 사용 여부 */
+    bool m_bSessionTimer;
+
+    /** 제안 세션 간격(초). 규격 하한 90 미만은 psip 이 90 으로 clamp 한다 */
+    int m_iSessionExpires;
+
+    /** 로컬 최소 세션 간격(초) — 이보다 작은 요청은 422 + Min-SE 로 거절 */
+    int m_iSessionMinSE;
+
+    /** 갱신 주체 정책 — "server"(기본, 서버가 갱신) / "ue"(단말이 갱신) */
+    std::string m_strSessionRefresher;
+
+    // ================================================================
     // DB 연동 설정 (UserDataFolder / GroupDataFolder 가 비어 있을 때 사용)
 
     /** DB 서버 호스트 */

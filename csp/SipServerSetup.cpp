@@ -89,6 +89,10 @@ CSipServerSetup::CSipServerSetup()
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
       m_iStaleCallTimeout( 300 ),
+      m_bSessionTimer( true ),              // 비정상 종료 leg 감지 (RFC 4028) — 기본 활성
+      m_iSessionExpires( 180 ),
+      m_iSessionMinSE( 90 ),
+      m_strSessionRefresher( "server" ),
       m_iDbPort( 3306 ),
       m_iRedisPort( 0 ),
       m_strServiceMode( "both" ),
@@ -240,6 +244,15 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( sip.Has( "UserTimeout" ) ) m_iUserTimeout = (int)sip.GetInt( "UserTimeout" );
                 if ( sip.Has( "StaleCallTimeout" ) ) m_iStaleCallTimeout = (int)sip.GetInt( "StaleCallTimeout" );
                 if ( sip.Has( "SendOptionsPeriod" ) ) m_iSendOptionsPeriod = (int)sip.GetInt( "SendOptionsPeriod" );
+
+                // 세션 타이머 (RFC 4028) — docs/design/features/leg_liveness.md
+                if ( sip.Has( "SessionTimer" ) ) {
+                    SimpleJson::JsonNode st = sip.Get( "SessionTimer" );
+                    if ( st.Has( "Enable" ) ) m_bSessionTimer = ( st.Get( "Enable" ).AsString() == "true" );
+                    if ( st.Has( "SessionExpires" ) ) m_iSessionExpires = (int)st.GetInt( "SessionExpires" );
+                    if ( st.Has( "MinSE" ) ) m_iSessionMinSE = (int)st.GetInt( "MinSE" );
+                    if ( st.Has( "Refresher" ) ) m_strSessionRefresher = st.GetString( "Refresher" );
+                }
             }
 
             // 미디어서버 연동 설정 (2026-04-23 rename: RtpRelay → MediaServer).

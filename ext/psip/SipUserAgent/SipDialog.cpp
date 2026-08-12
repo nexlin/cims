@@ -31,6 +31,9 @@ CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
 	, m_iSessionVersion(0)
 	, m_bSendCall(true)
+	, m_iSessionExpires(0), m_bLocalRefresher(false), m_iLastRefreshTime(0), m_iRefreshSentTime(0)
+	, m_iPeerMinSE(0), m_iPeerSessionExpires(0), m_bPeerSupportsTimer(false)
+	, m_bSessionTimerDead(false), m_bSessionTimerRetried(false), m_bLastReInviteMediaSame(false)
 {
 	memset( &m_sttInviteTime, 0, sizeof(m_sttInviteTime) );
 	memset( &m_sttCancelTime, 0, sizeof(m_sttCancelTime) );
@@ -44,7 +47,8 @@ CSipDialog::~CSipDialog()
 }
 
 // INVITE 메시지를 생성한다.
-CSipMessage * CSipDialog::CreateInvite( )
+//   bKeepSdpVersion = 세션 갱신 re-INVITE — SDP 를 직전과 동일하게 유지한다 (RFC 4028 §7.4).
+CSipMessage * CSipDialog::CreateInvite( bool bKeepSdpVersion )
 {
 	CSipMessage * pclsMessage = CreateMessage( SIP_METHOD_INVITE );
 	if( pclsMessage == NULL ) return NULL;
@@ -70,7 +74,7 @@ CSipMessage * CSipDialog::CreateInvite( )
 		pclsMessage->AddHeader( "Require", "100rel" );
 	}
 
-	AddSdp( pclsMessage );
+	AddSdp( pclsMessage, bKeepSdpVersion );
 
 	return pclsMessage;
 }
@@ -204,7 +208,9 @@ bool CSipDialog::HasRemoteApplicationMedia( )
 }
 
 // SIP 메시지에 SDP 메시지를 추가한다.
-bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
+//   bKeepSdpVersion = 세션 갱신 offer — origin(o=) 의 세션 버전을 그대로 두어 "변경 없음"을
+//   표시한다 (RFC 4028 §7.4). 버전을 올리면 상대가 미디어 재협상으로 처리한다.
+bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 {
 	char	szSdp[4096];
 	int		iLen = 0;
@@ -215,7 +221,7 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage )
 		pszAddrType = "IP6";
 	}
 
-	++m_iSessionVersion;
+	if( bKeepSdpVersion == false ) ++m_iSessionVersion;
 
 	iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "v=0\r\n"
 					"o=CSS 4 %d IN %s %s\r\n"

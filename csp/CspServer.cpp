@@ -489,6 +489,10 @@ int ServiceMain() {
         // SIP 신호 통계 — EvalSec 윈도우 경과 시 성공률/CPS/수신 이상 평가 (A-QOS-006/007/009/011)
         gclsSipStatsMonitor.Poll( time( NULL ) );
 
+        // 세션 타이머 (RFC 4028) — 갱신 발사 / 만료 leg 회수.
+        //   비정상 종료(BYE 유실) leg 을 시한으로 정리한다 (leg_liveness.md).
+        gclsUserAgent.CheckSessionTimer();
+
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );
 

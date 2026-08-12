@@ -272,6 +272,9 @@ bool CSipUserAgent::AcceptCall( const char * pszCallId, CSipCallRtp * pclsRtp, C
 
 				itMap->second.AddSdp( pclsMessage );
 
+				// 세션 타이머 협상 결과를 2xx 에 싣는다 (RFC 4028 §9).
+				SessionTimerAddToResponse( itMap->second, pclsMessage );
+
 				delete itMap->second.m_pclsInvite;
 				itMap->second.m_pclsInvite = NULL;
 			}
@@ -441,6 +444,9 @@ bool CSipUserAgent::CreateCall( const char * pszFrom, const char * pszTo, CSipCa
 			pclsMessage = clsDialog.CreateInvite();
 			if( pclsMessage )
 			{
+				// 세션 타이머 제안 (RFC 4028 §7.1) — dialog 상태를 먼저 채운 뒤 맵에 넣는다.
+				SessionTimerAddToRequest( clsDialog, pclsMessage, true );
+
 				m_clsDialogMap.insert( SIP_DIALOG_MAP::value_type( clsDialog.m_strCallId, clsDialog ) );
 				bInsert = true;
 			}

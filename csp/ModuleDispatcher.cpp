@@ -80,6 +80,12 @@ bool CModuleDispatcher::Start( CSipStackSetup &clsSetup ) {
     // UserAgent 시작 (내부적으로 CSipStack 시작 + UserAgent 를 콜백 등록)
     if ( gclsUserAgent.Start( clsSetup, this, this ) == false ) return false;
 
+    // 세션 타이머 (RFC 4028) — BYE 없이 사라진 leg 의 시한 회수.
+    //   docs/design/features/leg_liveness.md. 점검 tick 은 CspServer 주기 루프가 돌린다.
+    gclsUserAgent.SetSessionTimer(
+        gclsSetup.m_bSessionTimer, gclsSetup.m_iSessionExpires, gclsSetup.m_iSessionMinSE,
+        gclsSetup.m_strSessionRefresher == "ue" ? E_SESSION_REFRESHER_REMOTE : E_SESSION_REFRESHER_LOCAL );
+
     // 콜백 순서를 [ModuleDispatcher, CSipUserAgent] 로 재배치
     // → Proxy INVITE 를 ModuleDispatcher 가 먼저 가로챌 수 있음
     gclsUserAgent.m_clsSipStack.DeleteCallBack( &gclsUserAgent );
@@ -1167,6 +1173,14 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
 }
 
 void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) {
+    // 세션 갱신 re-INVITE (RFC 4028) — 선언 미디어가 직전과 동일하면 미디어 재협상이 아니다.
+    //   CMP 재호출·NAT 재평가를 생략한다 (leg_liveness.md §6.3). psip 이 200 OK 를 이미
+    //   같은 SDP 로 응답하므로 여기서 할 일이 없다.
+    if ( gclsUserAgent.IsSessionRefreshReInvite( pszCallId ) ) {
+        CLog::Print( LOG_DEBUG, "EventReInvite: session refresh (media unchanged) — CallId(%s)", pszCallId );
+        return;
+    }
+
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         // 재협상 leg 의 새 원격 RTP 주소를 CMP 에 MODIFY — 수신(A) leg=peer0, 발신(B) leg=peer1.
