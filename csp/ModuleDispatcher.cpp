@@ -536,7 +536,14 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
 
     if ( strcmp( clsUserInfo.m_strIp.c_str(), strIp.c_str() ) || clsUserInfo.m_iPort != iPort ) {
         if ( CCscfModule::CheckAuthrization( pclsMessage ) == false ) return false;
-        gclsUserMap.SetIpPort( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), strIp.c_str(), iPort );
+        // UserMap::Insert 와 **별개의 두 번째 latch 경로**다 — 같은 규율(UDP 소스 한정)을 적용한다.
+        //   TCP 로 온 요청(대형 INVITE 승격 후 같은 다이얼로그의 ACK/BYE 등)의 소스 포트로 덮으면
+        //   그 포트에는 UDP 매핑이 없어 이후 서버 발신이 전량 폐기된다(08-12 실측: 마지막 이탈
+        //   NOTIFY 가 TCP 포트로 UDP 발송돼 유실 → 접속 인원 stale). 근거는 UserMap.cpp Insert() 주석.
+        if ( pclsMessage->m_eTransport == E_SIP_UDP ) {
+            gclsUserMap.SetIpPort( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), strIp.c_str(), iPort,
+                                   pclsMessage->m_eTransport );
+        }
     }
 
     return true;

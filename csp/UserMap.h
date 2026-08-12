@@ -98,7 +98,10 @@ public:
     bool SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList );
     bool Delete( const char *pszUserId );
 
-    bool SetIpPort( const char *pszUserId, const char *pszIp, int iPort );
+    /** 도달 주소 갱신 — (IP, 포트, transport) 는 한 세트이므로 항상 함께 옮긴다.
+     *  셋 중 하나만 바꾸면 "TCP 포트에 UDP 발송" 같은 불일치가 생겨 NAT 이 전량 폐기한다.
+     *  호출자는 UDP 소스에서만 갱신할 것 (근거: Insert() 주석의 latch 규율). */
+    bool SetIpPort( const char *pszUserId, const char *pszIp, int iPort, ESipTransport eTransport );
 
     void DeleteTimeout( int iTimeout );
     void DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList );

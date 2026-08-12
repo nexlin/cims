@@ -239,16 +239,18 @@ bool CUserMap::Delete( const char *pszUserId ) {
     return bRes;
 }
 
-bool CUserMap::SetIpPort( const char *pszUserId, const char *pszIp, int iPort ) {
+bool CUserMap::SetIpPort( const char *pszUserId, const char *pszIp, int iPort, ESipTransport eTransport ) {
     bool bRes = false;
     USER_MAP::iterator itMap;
 
     m_clsMutex.acquire();
     itMap = m_clsMap.find( pszUserId );
     if ( itMap != m_clsMap.end() ) {
+        // 세 값은 한 세트 — transport 를 빼고 갱신하면 이전 transport 로 새 포트에 보내게 된다.
         itMap->second.m_strIp = pszIp;
         itMap->second.m_iPort = iPort;
-        CLog::Print( LOG_DEBUG, "user(%s) ip(%s) port(%d)", pszUserId, pszIp, iPort );
+        itMap->second.m_eTransport = eTransport;
+        CLog::Print( LOG_DEBUG, "user(%s) ip(%s) port(%d) transport(%d)", pszUserId, pszIp, iPort, eTransport );
         bRes = true;
     }
     m_clsMutex.release();
