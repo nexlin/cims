@@ -4375,7 +4375,13 @@ def job_process_control(params: dict, job_type: str) -> tuple:
     # cold-spare standby — 실제 기동은 스킵 (current flip/prev-stop 은 이미 수행 →
     # 승격 시 notify/watchdog 이 신 버전으로 기동). supervised 에는 desired-state 로
     # 등록해 VIP 취득 후 watchdog 백스톱이 동작하게 한다.
-    if job_type in ("start", "restart") and _cold_standby_module(svc):
+    # 억제는 **아직 안 도는 모듈을 새로 켜는 것**에만 적용한다. 이미 이 노드에서 돌고
+    # 있으면 운영자의 start/restart 는 "그 프로세스를 갈아끼워라" 는 뜻이므로 존중한다.
+    #   실측 사고: 관리평면 자기보존으로 oam 이 비-마스터 노드에서 살아 있는데, 재기동
+    #   요청이 여기서 억제돼 **깨진 프로세스를 되살릴 방법이 없었다**(설정 리로드로 콘솔
+    #   경로가 지워진 상태였고, 재기동만이 복구 통로였다). 억제의 목적은 "cold 모듈이
+    #   마스터 아닌 곳에서 새로 뜨는 것" 방지이지, 도는 것을 못 고치게 만드는 게 아니다.
+    if job_type in ("start", "restart") and _cold_standby_module(svc) and not _pgrep_module(svc):
         _mark_supervised(svc, launch_path)
         # cold 모듈은 마스터에서만 reconcile 로 기동한다. 이 노드는 마스터가 아니라 직접
         # 기동을 억제한다. **실제로 아무것도 안 켰으므로 위에서 찍은 op_grace 를 되돌린다** —
@@ -5239,7 +5245,18 @@ def main():
                     help="동기 REST 서버 포트 (0 = 비활성)")
     ap.add_argument("--enroll-only", action="store_true",
                     help="enrollment 만 수행 후 종료 (heartbeat / sync server 시작 안 함)")
+    ap.add_argument("--clear-holds", metavar="SERVICE",
+                    help="절체 홀드(래치·재기동 카운터·desired stop) 해제 후 종료 — "
+                         "**관리평면 밖의 복구 통로**. 정규 경로는 콘솔이 내리는 "
+                         "ha_clear_holds job 이지만, 양 노드가 모두 래치되면 그 콘솔이 "
+                         "뜨지 못해(cold 모듈은 마스터에서만 기동) 해제 수단 자체가 사라진다"
+                         "(실측: 두 노드 순차 소진 → 전면 정지, 파일 수동 삭제 외 방법 없음).")
     args = ap.parse_args()
+    # 홀드 해제는 OAM 없이 로컬에서 끝난다 — --oam-url 요구 전에 처리한다.
+    if args.clear_holds:
+        rc, out, err = job_ha_clear_holds({"service": args.clear_holds})
+        print(out or err or "", flush=True)
+        return rc
     if not args.oam_url:
         print("[agent] --oam-url (또는 --csc-url) 필수")
         return 1

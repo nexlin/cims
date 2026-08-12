@@ -17,6 +17,11 @@
      모듈이 스스로 발급하면 부트스트랩 순환이 생긴다: oam 은 자기 기동 끝자락에 만들어서,
      그 사이 뜬 oam-svc 가 평문으로 bind 하고 다시 확인하지 않는다 → 게이트웨이(https 고정)
      프록시가 전면 실패 ([oam_ha.md](../features/oam_ha.md) §5.2)
+   - **홀드 해제 CLI**: `cims_agent.py --clear-holds <service>` — 절체 래치·재기동
+     카운터·desired stop 을 로컬에서 해제하고 종료한다. 정규 경로는 콘솔의
+     `ha_clear_holds` job 이지만 **양 노드가 모두 래치되면 그 콘솔이 못 뜬다**(cold 모듈은
+     마스터에서만 기동) — 관리평면 밖의 복구 통로가 필요하다
+     ([oam_ha.md](../features/oam_ha.md) §5.3)
    - **base deps 보증기** (job 아님, 300초 루프): vendor deb(keepalived·NFS 클라이언트·공유 lib) 설치를 **백그라운드**에서 보증한다. 옛 구조는 heartbeat 루프 직전에 동기로 호출해, dpkg OS 락(`unattended-upgrade` 가 새 서버에서 수 분 점유)을 기다리는 동안 agent 가 **pending 으로 고착**했다(실측 102초). 상태 판정은 `cims-priv base-deps-status`(설치 없이 조회만, 락 무관)
    - **keepalived 설치 보증기** (job 아님, 상태 기반 60초 루프): ha.json 에 VIP 서비스가 있는데(무장) keepalived 패키지가 없으면 `install → config → apply` 를 재시도한다. 설치를 시도하는 주체가 `update_ha` job 뿐이면, 한 번 실패하고 이벤트가 소진됐을 때 **아무도 다시 시도하지 않아** VIP 주인이 영영 없고 cold 모듈(관리평면 포함)이 어디서도 기동하지 못한다(실측). 실패 원인은 대개 일시적이다 — 우분투 `unattended-upgrade` 가 수 분간 dpkg 를 점유(실측 14:21~14:28). 평가 루프를 막지 않도록 전용 스레드에서 돈다
    - `migrate_oam_store`: **관리 store 를 공유 마운트(NAS)로 이관** — 마운트·write 확인 → 모듈 정지 → 복사(`_secrets`·`cert` 제외, target 에 없는 항목만=멱등) → `config.json` 기록 → 기동. OAM 은 자기 store 를 자기가 옮길 수 없어 agent 가 주체다. 실패 시 **구 설정으로 되돌려 기동** ([oam_ha.md](../features/oam_ha.md) §9.4)

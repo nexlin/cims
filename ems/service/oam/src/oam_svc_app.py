@@ -188,10 +188,10 @@ if __name__ == '__main__':
             try:
                 newc = load_config()
                 if newc:
-                    config.clear()
-                    config.update(newc)
+                    from services import config_reload as _cr
+                    kept = _cr.apply_reload(config, newc)
                     auth.init(config)
-                    logger.log_info('[reload] SIGUSR1 — config 재적용 '
+                    logger.log_info(f'[reload] SIGUSR1 — config 재적용 ({kept}건 런타임 보존) '
                                     '(bind/기동 캡처 항목은 재기동 필요)')
                 else:
                     logger.log_warning('[reload] SIGUSR1 — 재로드 실패(빈 설정), 기존 유지')
