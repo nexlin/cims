@@ -762,6 +762,18 @@ class PttController(
             audioRouter?.setInCall(false)
             sip.setDeviceAudioBoost(1f, 1f)
         }
+        // 이탈 시 로스터에서 본인 제거 — 미참여 채널의 접속 인원은 "나 외의" 참여자다.
+        //   나가는 순간의 마지막 이탈 NOTIFY 는 통화 다이얼로그 teardown 과 겹쳐 앱까지 못
+        //   오는 경우가 있어(특히 마지막 이탈자 — 08-11 W999 실측), 그 NOTIFY 에 의존하면
+        //   본인이 로스터에 남아 접속 인원이 stale(1) 로 박제된다. 수신에 의존하지 않고
+        //   나가는 즉시 본인을 지운다.
+        synchronized(lock) {
+            rosterMap[gid]?.let { m ->
+                val next = m.toMutableMap().apply { remove(bareId(mcpttId)) }
+                rosterMap[gid] = next.toMap()
+            }
+        }
+        publishRosters()
         // 세션 종료 시점은 서버측 구독이 사라진 채 발견된 실측 지점이다(단말이 구독은 살아있다고
         // 믿는 동안 서버엔 없어 로스터가 죽는다). 확인을 무효화해 아래 sync 가 즉시 재확인하게 한다 —
         // 살아 있으면 in-dialog 갱신으로 흡수되므로 비용이 없고, 죽었으면 여기서 되살아난다.
@@ -1124,13 +1136,21 @@ class PttController(
             val s = sessionMap[groupId]
             val base = if (full) mutableMapOf() else (s?.participants ?: rosterMap[groupId]?.toMutableMap()
                 ?: mutableMapOf())
+            var selfDisconnected = false
             for (m in userRe.findAll(xml)) {
                 val id = bareId(m.groupValues[1])
                 if (id.isBlank()) continue
                 val status = stRe.find(m.groupValues[2])?.groupValues?.get(1) ?: "connected"
-                if (status.equals("disconnected", ignoreCase = true)) base.remove(id) else base[id] = status
+                if (status.equals("disconnected", ignoreCase = true)) {
+                    base.remove(id)
+                    if (id == bareId(mcpttId)) selfDisconnected = true
+                } else base[id] = status
             }
-            if (s != null) base[bareId(mcpttId)] = "connected"   // 참여 중이면 본인은 항상 포함
+            // 참여 중이면 본인은 항상 포함 — 단, 이 NOTIFY 가 본인 이탈을 명시하면 재추가하지
+            // 않는다. 나가기 직후의 마지막 NOTIFY 가 onCallEnded(세션 제거)보다 먼저 처리되는
+            // 레이스에서 본인이 되살아나고, 이후 NOTIFY 가 없어 접속 인원이 stale 로 박제된다
+            // (08-11 실측: 나간 단말만 1·2 로 남음 — 구독 복구 전엔 이 NOTIFY 를 못 받아 잠복).
+            if (s != null && !selfDisconnected) base[bareId(mcpttId)] = "connected"
             s?.participants = base
             rosterMap[groupId] = base.toMap()
         }
