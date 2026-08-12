@@ -981,8 +981,11 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             // 선탑재 Route 제거 — NAT 도달 주소는 SendDest 오버라이드로 헤더 노출 없이
             // 라우팅한다 (reg-event NOTIFY 의 Route 제거와 동일 원칙).
             pclsInvite->m_clsRouteList.clear();
+            // 도달 주소는 (IP, 포트, transport) 한 세트 — transport 누락 시 스택 기본값(UDP)으로
+            //   나가 TCP 바인딩 주소에 UDP 를 쏘게 되고 NAT 이 폐기한다(fan-out 전량 408).
             pclsInvite->m_strSendDestIp = clsRoute.m_strDestIp;
             pclsInvite->m_iSendDestPort = clsRoute.m_iDestPort;
+            pclsInvite->m_eTransport = clsRoute.m_eTransport;
 
             // To: 는 개인 AOR 유지 (cwrtc가 WS 클라이언트를 찾는 데 필요)
             // 그룹 식별은 Contact(isfocus), P-Called-Party-ID, XML body로 전달

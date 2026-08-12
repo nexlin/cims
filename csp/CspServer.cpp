@@ -793,8 +793,12 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         bRegistered = gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo );
     }
     if ( clsUserInfo.m_strIp.empty() == false ) {
+        // 도달 주소는 (IP, 포트, transport) 한 세트다 — transport 를 빠뜨리면 스택이 기본값(UDP)
+        //   으로 전송해 TCP 바인딩 주소에 UDP 를 쏘게 되고, NAT 매핑이 프로토콜별로 분리돼 있어
+        //   전량 폐기된다(NOTIFY 불달 → 로스터 stale).
         pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
         pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
+        pMsg->m_eTransport = clsUserInfo.m_eTransport;
     }
 
     time_t tRemaining = ( sub.tStartTime + sub.iExpires ) - time( NULL );
@@ -889,9 +893,11 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
 
     CUserInfo clsUserInfo;
     if ( gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo ) ) {
-        // Route 헤더 없이 등록 바인딩으로 직접 전송 (SendNotifyToSubscriber 와 동일)
+        // Route 헤더 없이 등록 바인딩으로 직접 전송 (SendNotifyToSubscriber 와 동일).
+        //   transport 도 함께 — 주소와 transport 는 한 세트다(위 함수 주석 참조).
         pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
         pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
+        pMsg->m_eTransport = clsUserInfo.m_eTransport;
     }
 
     pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"

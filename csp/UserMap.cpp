@@ -109,13 +109,21 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
         // SIP REGISTER 를 제외한 요청에서 IP 주소 또는 포트 번호가 변경된 경우, m_iLoginTimeout 를 0 으로 저장하지 않기
         // 위해서 각 멤버별로 저장함
         //
-        // 단, latch(received/rport)는 UDP 도달 주소를 추적한다 — 단말이 대형 요청을 RFC 3261
-        // §18.1.1 로 TCP 승격해 보내는 경우(예: multipart 조인 INVITE), 그 TCP 소스 포트로
-        // latch 를 덮으면 서버 발신(NOTIFY·fan-out INVITE, UDP)이 TCP 플로우 주소로 나가
-        // NAT 미매핑으로 전량 유실된다(08-11 실측: 통화 구간 NOTIFY 불달 → 로스터 stale).
-        // REGISTER 는 등록 바인딩의 정의이므로 transport 그대로 신뢰하고, 비REGISTER 는
-        // UDP 소스일 때만 갱신한다.
-        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) || pclsMessage->m_eTransport == E_SIP_UDP ) {
+        // 서버→UE 도달 주소(latch)는 **상시 살아 있는 경로**여야 한다 — 서버가 먼저 거는
+        // 요청(fan-out INVITE·NOTIFY)의 목적지이기 때문이다. 송신 transport 는 이 값을 그대로
+        // 따르므로(CspServer/GroupCallService 의 SendDest 3곳), 여기에 무엇이 담기느냐가
+        // 도달 가능성을 결정한다.
+        //
+        // 단말이 대형 요청을 RFC 3261 §18.1.1 로 TCP 승격하면 그 다이얼로그의 후속(ACK/BYE)·
+        // 재-REGISTER(RFC 5626 ;ob 플로우 재사용)까지 같은 TCP 로 오지만, 그 TCP 연결은
+        // 유휴 타이머로 곧 닫힌다(pjsip 실측). 닫힌 뒤 그 주소로는 서버가 도달할 수 없다 —
+        // NAT 뒤 단말에 서버가 TCP 를 새로 걸 수는 없기 때문이다. 반면 UDP 등록 플로우는
+        // keepalive 로 상시 유지된다. 그래서 latch 갱신은 UDP 소스로 한정한다(REGISTER 도
+        // 예외 아님 — 0.2.84 에서 REGISTER 예외로 오염 재발 실측).
+        //
+        // 최초 등록(작은 REGISTER)은 UDP 라 삽입 시 UDP latch 가 수립되고, 이후 UDP 갱신·
+        // keepalive 로 유지된다. TCP 로 온 REGISTER 는 바인딩 수명·Contact 만 갱신한다(아래).
+        if ( pclsMessage->m_eTransport == E_SIP_UDP ) {
             itMap->second.m_strIp = clsInfo.m_strIp;
             itMap->second.m_iPort = clsInfo.m_iPort;
             itMap->second.m_eTransport = clsInfo.m_eTransport;
