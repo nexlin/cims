@@ -320,8 +320,14 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | 협상 | 앱 INVITE = `Supported: replaces, 100rel, timer, …` + `Session-Expires: 1800` + `Min-SE: 90` → 서버 200 OK = `Session-Expires: 180;refresher=uas` + `Require: timer` (규격대로 값만 낮추고 갱신자는 서버) — **앱 변경 없이 동작** |
 | 갱신 도달 | 개시 leg 은 앱이 TCP 로 승격해 보내므로 다이얼로그 주소가 곧 죽는다 → 등록 latch 로 목적지 교정(`…:27060(TCP) → …:22622(UDP)`) 후 정상 도달, 앱이 2xx 응답 |
 | 통화 유지 | 갱신 3회(6 트랜잭션) 이상 통과, 5분+ 유지, `cause=408` 종료 0건 |
-| **강제종료 감지** | 상대 단말 앱 force-stop(BYE 없음) → **56초** 만에 `SessionTimer expired` → `EventCallEnd(408)` → `PTT_LEAVE` → conference NOTIFY → 남은 단말 로스터 **구성원 (2)→(1)**, CMP `member_used` 반납 |
-| 잔여 | ① 장시간 통화 중 음성·floor 이상 없음(귀 확인) ② private call(1:1) 강제종료 ③ 기내 모드 — 모두 사람 조작 필요 |
+| **강제종료 감지 (그룹콜)** | 상대 단말 앱 force-stop(BYE 없음) → **56초** 만에 `SessionTimer expired` → `EventCallEnd(408)` → `PTT_LEAVE` → conference NOTIFY → 남은 단말 로스터 **구성원 (2)→(1)**, CMP `member_used` 반납 |
+| **강제종료 감지 (private 1:1)** | 착신 단말 force-stop → 갱신 무응답(INVITE 재전송 10회) → Timer B 만료에 `SessionTimer expired` → `PTT_LEAVE` → **잔여 1인 해제**(`private(...) — 상대 leg 1 개 종료(BYE)`) → 남은 단말이 **BYE 에 200 OK 응답**(통화 정리 확증) → CMP 그룹 회수. 강제종료로부터 **75초** |
+| 잔여 | ① 장시간 통화 중 음성·floor 이상 없음(귀 확인) ② 기내 모드 — 사람 조작 필요 |
+
+**순서 보장** — 잔여 leg 으로 나가는 teardown BYE 는 항상 **교정된 주소**로 간다. 죽은 leg 의
+판정은 `SE/2 + Timer B`(≈122초)인데 살아있는 leg 의 첫 갱신은 `SE/2`(≈90초)라, teardown 이
+발동하는 시점엔 그 leg 의 목적지가 이미 latch 로 교정돼 있다([§6.3](#63-갱신-re-invite-규율)).
+private 실측이 이를 확인했다(살아남은 leg `…:47734(TCP) → …:22622(UDP)` 교정 후 BYE 도달).
 
 ## 14. 후속 과제
 
