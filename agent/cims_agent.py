@@ -836,9 +836,47 @@ def collect_metrics() -> dict:
 #  On-demand health check (sync REST /health-check)
 # ──────────────────────────────────────────────────────────────
 
+def _held_vips() -> list:
+    """이 노드가 **실제로 보유한** VIP — [{iface, ip, mask}]. 두 근거의 합집합:
+
+      ① ha.json 의 서비스 VIP 가 이 노드에 붙어 있는지 — 절체 판정(_current_role)·
+         cold 게이트와 **같은 기준**이라 실측이 agent 의 자기 판정과 어긋나지 않는다.
+         VIP 가 primary 로 붙는 경우(멤버 IP 와 다른 서브넷·/32)도 잡힌다.
+      ② secondary 플래그 — ha.json 밖에서 부여된 VIP 도 놓치지 않는다.
+
+    iproute2 는 addr_info 의 secondary 를 **boolean 키**(`"secondary": true`)로 낸다 —
+    flags 배열에는 들어가지 않는다. 배열 형태도 함께 보되 판정을 그것에만 걸지 않는다.
+    """
+    ha_vips = set()
+    for s in (_read_ha_json_nofail().get("services") or {}).values():
+        if isinstance(s, dict):
+            ha_vips.update(_service_vips(s))
+    rows = _ip_json(["addr"], "addr")
+    if rows is None:
+        return []
+    out = []
+    for f in rows:
+        iname = f.get("ifname") or ""
+        if not iname or iname == "lo":
+            continue
+        for a in (f.get("addr_info") or []):
+            if a.get("family") != "inet":
+                continue
+            ip = a.get("local")
+            if not ip:
+                continue
+            secondary = a.get("secondary") is True or "secondary" in (a.get("flags") or [])
+            if secondary or ip in ha_vips or (a.get("label") or "").endswith(":vrrp"):
+                out.append({"iface": iname, "ip": ip, "mask": a.get("prefixlen")})
+    return out
+
+
 def _health_check_ha() -> dict:
     """keepalived service 상태 + VIP 부여 여부 + journal tail."""
     out = {"keepalived_installed": False, "keepalived_active": False, "vips": []}
+    # VIP 보유는 keepalived 설치·기동과 **독립으로** 먼저 본다 — 설치가 실패했는데 VIP 는
+    # 남아 있는(또는 그 반대) 상태를 실측이 있는 그대로 보여야 한다.
+    out["vips"] = _held_vips()
     # binary 존재 확인 — purge 후엔 systemctl 만으론 (unit cache) 미설치 판별 불가.
     try:
         r = subprocess.run(["which", "keepalived"], capture_output=True, text=True, timeout=2)
@@ -857,22 +895,6 @@ def _health_check_ha() -> dict:
         return out
     except Exception as e:
         out["error"] = str(e); return out
-    # ip addr 에서 secondary (VIP) 식별 — keepalived 가 add 한 VIP 는 보통 secondary 플래그.
-    try:
-        r = subprocess.run(["ip", "-j", "addr"], capture_output=True, text=True, timeout=3)
-        ifaces = json.loads(r.stdout or "[]")
-        for f in ifaces:
-            iname = f.get("ifname") or ""
-            if iname == "lo": continue
-            for a in (f.get("addr_info") or []):
-                if a.get("family") != "inet": continue
-                flags = (a.get("flags") or [])
-                # secondary 플래그가 있거나 keepalived label 이 있는 IP
-                if "secondary" in flags or (a.get("label") or "").endswith(":vrrp"):
-                    out["vips"].append({"iface": iname, "ip": a.get("local"),
-                                         "mask": a.get("prefixlen")})
-    except Exception as e:
-        out["ip_addr_error"] = str(e)
     # systemctl status (sudo 불필요, 마지막 log lines + Active state 포함)
     try:
         r = subprocess.run(["systemctl", "status", "keepalived", "--no-pager", "-n", "15"],

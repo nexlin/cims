@@ -156,7 +156,7 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
   - ⚠ OAM `agent_api.py _metric()` 가 record 를 필드 화이트리스트로 저장 — **신규 metric 필드는 화이트리스트 추가 필수**(미추가 시 버려짐). 조회는 `jsonl_tail_recent`(tail-read, 2초 시계열 풀파싱 금지).
 - OAM 가 `POST /metric` 수신 → `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` append.
 - retention: `_sweep_metric_purge` 가 `MetricRetentionDays`(기본 3일) 초과 일별 파일 삭제.
-- Console 시각화: ServersPage 메트릭 모달 + HaServicesPage 멤버별 cpu/mem/disk sparkline (공유 `MetricTrend`).
+- Console 시각화: ServersPage 의 서버 메트릭 모달 + 인스펙터 cpu/mem/disk sparkline (`MetricTrend`).
 
 ### 10.2 모듈 프로세스 탐지
 
@@ -169,7 +169,12 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 
 ### 10.3 On-demand Health Check (`GET /health-check`)
 
-- `scope=ha`: `keepalived` active 여부 + VIP 부여(`ip -j addr` secondary) + `journalctl` tail.
+- `scope=ha`: `keepalived` active 여부 + VIP 부여(`_held_vips`) + `journalctl` tail.
+  VIP 판정은 **① ha.json 서비스 VIP 가 이 노드에 붙어 있는지**(절체 판정 `_current_role`·
+  cold 게이트와 같은 기준 — 멤버 IP 와 다른 서브넷·`/32` VIP 도 잡힘) **∪ ② `ip -j addr` 의
+  secondary 주소**다. iproute2 JSON 은 secondary 를 addr_info 의 boolean 키(`"secondary": true`)
+  로 내므로 flags 배열만 보면 **항상 빈 목록**이 된다. keepalived 미설치여도 VIP 스캔은
+  수행한다 — 설치 실패인데 VIP 는 남은(또는 그 반대) 상태를 실측이 그대로 보여야 한다.
 - `scope=modules`: 모듈별 running/pid/cpu/mem/uptime (`_health_check_modules`).
 - `scope=all`: 위 둘 + 기본 시스템 metric.
 - **verdict** `healthy` / `partial` / `broken` + `issues[]` 자동 산출 (예: keepalived inactive).
