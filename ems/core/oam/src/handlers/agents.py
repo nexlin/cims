@@ -4576,17 +4576,75 @@ CIMS_AGENT_ADMIN_HANDLER_LIST = (
 #  이 모듈이 제공하는 엔드포인트 중 **노드 사양·자원 사용률 조회(읽기)만** 선언한다.
 #  등록/승인/삭제/제어/패키지/배포/sync/drift 같은 내부 운영 API 는 외부 공유 대상이 아니므로 선언하지
 #  않는다 (docs/design/features/api_docs.md §5). module=None — base OAM 상주라 항상 가용.
+_AUTH_MONITOR = {'scheme': 'bearer', 'role': 'monitor', 'token_from': 'POST /api/v1/auth/login'}
+
+_ERR_COMMON = [
+    {'status': 401, 'when': 'Authorization 헤더 없음 / 토큰 만료', 'body': {'error': 'unauthorized'}},
+    {'status': 403, 'when': '권한 등급 미달', 'body': {'error': 'forbidden'}},
+]
+
 CIMS_AGENT_API_DOCS = [
     {'id': 'nodes.list', 'module': None, 'method': 'GET', 'path': '/api/v1/agents',
      'summary': '노드 목록 + 사양·상태 (hostname/ip/OS, cpu_cores·memory_mb·disk_gb, 최근 heartbeat)',
-     'params': [], 'response': '{items:[{id, name, status, hostname, ip_address, os_info, '
-                               'cpu_cores, memory_mb, disk_gb, agent_version, last_heartbeat, ...}]}',
-     'auth': 'Bearer JWT (monitor)'},
+     'params': [],
+     'response': '{items:[{id, name, status, hostname, ip_address, os_info, cpu_cores, memory_mb, '
+                 'disk_gb, agent_version, last_heartbeat, ...}]}',
+     'response_fields': [
+         {'name': 'items[].id', 'type': 'integer', 'desc': '노드 id — nodes.metrics 의 path 파라미터'},
+         {'name': 'items[].name', 'type': 'string', 'desc': '노드 이름 (등록 시 지정)'},
+         {'name': 'items[].status', 'type': 'string', 'enum': ['online', 'offline', 'pending'],
+          'desc': 'heartbeat 기반 상태'},
+         {'name': 'items[].hostname', 'type': 'string', 'desc': 'OS hostname'},
+         {'name': 'items[].ip_address', 'type': 'string', 'desc': '관리 IP'},
+         {'name': 'items[].os_info', 'type': 'string', 'desc': 'OS 배포판/커널 문자열'},
+         {'name': 'items[].cpu_cores', 'type': 'integer', 'unit': '코어', 'desc': '논리 코어 수'},
+         {'name': 'items[].memory_mb', 'type': 'integer', 'unit': 'MB', 'desc': '총 메모리'},
+         {'name': 'items[].disk_gb', 'type': 'integer', 'unit': 'GB', 'desc': '총 디스크'},
+         {'name': 'items[].agent_version', 'type': 'string', 'desc': '설치된 agent 버전'},
+         {'name': 'items[].last_heartbeat', 'type': 'string', 'desc': 'ISO8601 — 마지막 heartbeat 수신 시각'},
+         {'name': 'items[].last_metric', 'type': 'string', 'desc': 'ISO8601 — 마지막 자원 수집 시각'},
+     ],
+     'example': {'items': [{'id': 1, 'name': 'csc01', 'status': 'online', 'hostname': 'csc01',
+                            'ip_address': '10.0.1.11', 'os_info': 'Ubuntu 24.04 / 6.8.0',
+                            'cpu_cores': 8, 'memory_mb': 16384, 'disk_gb': 200,
+                            'agent_version': '0.2.62',
+                            'last_heartbeat': '2026-07-30T09:12:03',
+                            'last_metric': '2026-07-30T09:12:00'}]},
+     'errors': list(_ERR_COMMON),
+     'notes': ['응답에는 운영용 필드(승인 상태·enrollment 등)도 함께 오지만, 사용량 연동에 필요한 것은 '
+               '위 필드다.',
+               'enrollment 토큰은 생성 직후에만 반환되고 목록에서는 마스킹된다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
     {'id': 'nodes.metrics', 'module': None, 'method': 'GET', 'path': '/api/v1/agents/{id}/metrics',
      'summary': '노드 자원 사용률 시계열 (CPU/메모리/디스크/load, 프로세스·인터페이스·마운트별)',
-     'params': [{'name': 'id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '노드 id (agents.list 의 id)'}],
+     'params': [{'name': 'id', 'in': 'path', 'type': 'integer', 'required': True,
+                 'desc': '노드 id (nodes.list 의 items[].id)'}],
      'response': '{items:[{ts, cpu_pct, mem_pct, disk_pct, load_avg, processes[], per_iface[], mounts[]}]}',
-     'auth': 'Bearer JWT (monitor)'},
+     'response_fields': [
+         {'name': 'items[].ts', 'type': 'string', 'desc': 'ISO8601 — 수집 시각 (오래된 것부터)'},
+         {'name': 'items[].cpu_pct', 'type': 'number', 'unit': '%', 'desc': 'CPU 사용률'},
+         {'name': 'items[].mem_pct', 'type': 'number', 'unit': '%', 'desc': '메모리 사용률'},
+         {'name': 'items[].disk_pct', 'type': 'number', 'unit': '%', 'desc': '루트 파일시스템 사용률'},
+         {'name': 'items[].load_avg', 'type': 'number', 'desc': '1분 load average'},
+         {'name': 'items[].processes[]', 'type': 'object',
+          'desc': '감시 대상 프로세스별 상태 (name/pid/cpu_pct/rss_mb)'},
+         {'name': 'items[].per_iface[]', 'type': 'object',
+          'desc': '네트워크 인터페이스별 송수신량 (iface/rx_bps/tx_bps)'},
+         {'name': 'items[].mounts[]', 'type': 'object',
+          'desc': '마운트별 디스크 사용량 (path/used_gb/total_gb/pct)'},
+     ],
+     'example': {'items': [{'ts': '2026-07-30T09:10:00', 'cpu_pct': 12.4, 'mem_pct': 38.1,
+                            'disk_pct': 22.0, 'load_avg': 0.35,
+                            'processes': [{'name': 'csc', 'pid': 1234, 'cpu_pct': 3.1, 'rss_mb': 210}],
+                            'per_iface': [{'iface': 'eth0', 'rx_bps': 812000, 'tx_bps': 430000}],
+                            'mounts': [{'path': '/', 'used_gb': 44, 'total_gb': 200, 'pct': 22.0}]}]},
+     'errors': _ERR_COMMON + [
+         {'status': 404, 'when': '해당 id 의 노드 없음', 'body': {'error': 'not_found'}},
+     ],
+     'notes': ['최근 120개 표본 / 최대 7일 범위를 반환한다 (수집 주기에 따라 구간이 달라진다).',
+               '표본이 없으면 items 는 빈 배열이다 (오류 아님).'],
+     'auth': dict(_AUTH_MONITOR)},
 ]
 
 # 인증 없이 누구나 받을 수 있는 배포용 정적 에셋

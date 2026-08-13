@@ -59,7 +59,7 @@ export const cimsManifest: ServiceManifest = {
         { path: '/service/abnormal-sessions', title: '비정상 세션 이력', component: AbnormalSessionsPage, requiredRole: 'monitor',
           apis: ['flow.abnormal-sessions'] },
         { path: '/service/register-flow',     title: '메세지 이력', component: RegisterFlowPage,     requiredRole: 'monitor',
-          apis: ['flow.register', 'flow.register.list', 'flow.body'] },
+          apis: ['flow.user', 'flow.register', 'flow.register.list', 'flow.body'] },
       ],
     },
     // ── 성능 (ops) — 통계(KPI/카운터). FCAPS Performance. ──

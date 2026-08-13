@@ -221,38 +221,134 @@ CIMS_ORG_HANDLER_LIST = [
 # ── API 문서 (개발자 모드) ──────────────────────────────────────────────────
 #  이 모듈이 제공하는 엔드포인트의 자기기술. OAM 의 handlers/api_docs.py 가 수집한다.
 #  csc 미설치 환경에서는 이 파일이 없으므로 수집에서 자연히 빠진다.
+_AUTH_MONITOR = {'scheme': 'bearer', 'role': 'monitor', 'token_from': 'POST /api/v1/auth/login'}
+_AUTH_MANAGER = {'scheme': 'bearer', 'role': 'manager', 'token_from': 'POST /api/v1/auth/login'}
+
+_ERR_COMMON = [
+    {'status': 401, 'when': 'Authorization 헤더 없음 / 토큰 만료', 'body': {'error': 'unauthorized'}},
+    {'status': 403, 'when': '권한 등급 미달', 'body': {'error': 'forbidden'}},
+]
+
+_ORG_FIELDS = [
+    {'name': 'id', 'type': 'integer', 'desc': '조직 surrogate id (batch 삭제의 ids)'},
+    {'name': 'code', 'type': 'string', 'desc': '조직 코드 — 가입자 org_id 가 참조하는 값'},
+    {'name': 'code_path', 'type': 'string', 'desc': '루트부터의 코드 경로 (정렬 기준)'},
+    {'name': 'name', 'type': 'string', 'desc': '조직명'},
+    {'name': 'parent_id', 'type': 'integer', 'desc': '상위 조직 id (루트는 null)'},
+    {'name': '(그 외)', 'type': 'object',
+     'desc': '상세 조회(csc.orgs.get)는 SELECT * 라 스키마에 추가된 컬럼도 함께 온다'},
+    {'name': 'sort_order', 'type': 'integer', 'desc': '같은 depth 내 표시 순서'},
+]
+
+_ORG_EXAMPLE = {'id': 3, 'code': 'D110', 'code_path': 'D100/D110', 'name': '운영팀',
+                'parent_id': 1, 'sort_order': 10}
+
 CIMS_ORG_API_DOCS = [
     {'id': 'csc.orgs.list', 'module': 'csc', 'method': 'GET', 'path': '/api/v1/organizations',
-     'summary': '조직 목록 (계층 코드 체계)',
-     'params': [], 'response': '{organizations[]}', 'auth': 'Bearer JWT (monitor)'},
-    {'id': 'csc.orgs.create', 'module': 'csc', 'method': 'POST', 'path': '/api/v1/organizations',
-     'summary': '조직 생성',
-     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
-                 'desc': '{code, name, parent_code?, ...}'}],
-     'response': '{id, code}', 'auth': 'Bearer JWT (manager)'},
+     'summary': '조직 목록 (계층 코드 체계, code_path 순 정렬)',
+     'params': [],
+     'response': '{organizations[]}',
+     'response_fields': [{'name': 'organizations[].' + f['name'],
+                          **{k: v for k, v in f.items() if k != 'name'}} for f in _ORG_FIELDS],
+     'example': {'organizations': [{'id': 1, 'code': 'D100', 'code_path': 'D100', 'name': '본사',
+                                    'parent_id': None, 'sort_order': 0}, _ORG_EXAMPLE]},
+     'errors': list(_ERR_COMMON),
+     'notes': ['정렬은 code_path → sort_order → name 이라 배열 그대로 트리 순서로 그릴 수 있다.',
+               '트리 구조는 parent_id 로 재구성한다 (code_path 로도 가능).'],
+     'auth': dict(_AUTH_MONITOR)},
+
     {'id': 'csc.orgs.get', 'module': 'csc', 'method': 'GET', 'path': '/api/v1/organizations/{org_id}',
      'summary': '조직 1건 상세',
-     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'}],
-     'response': '조직 객체', 'auth': 'Bearer JWT (monitor)'},
-    {'id': 'csc.orgs.update', 'module': 'csc', 'method': 'PUT', 'path': '/api/v1/organizations/{org_id}',
-     'summary': '조직 수정',
-     'params': [
-         {'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'},
-         {'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '변경 필드'},
+     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True,
+                 'desc': '조직 id (숫자). **코드가 아니다**'}],
+     'response': '조직 객체 (organizations[] 항목과 동일)',
+     'response_fields': list(_ORG_FIELDS),
+     'example': dict(_ORG_EXAMPLE),
+     'errors': _ERR_COMMON + [{'status': 404, 'when': '없는 조직', 'body': {'error': 'Not found'}}],
+     'notes': [],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'csc.orgs.create', 'module': 'csc', 'method': 'POST', 'path': '/api/v1/organizations',
+     'summary': '조직 생성 (code_path 자동 계산)',
+     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
+                 'desc': '{code(필수), name(필수), parent_id?, sort_order?}'}],
+     'response': '{id, code, code_path}',
+     'response_fields': [
+         {'name': 'id', 'type': 'integer', 'desc': '생성된 조직 id'},
+         {'name': 'code', 'type': 'string', 'desc': '조직 코드'},
+         {'name': 'code_path', 'type': 'string', 'desc': '계산된 코드 경로'},
      ],
-     'response': '{id}', 'auth': 'Bearer JWT (manager)'},
-    {'id': 'csc.orgs.delete', 'module': 'csc', 'method': 'DELETE', 'path': '/api/v1/organizations/{org_id}',
+     'example': {'id': 7, 'code': 'D120', 'code_path': 'D100/D120'},
+     'errors': _ERR_COMMON + [
+         {'status': 400, 'when': 'JSON 본문 없음', 'body': {'error': 'Body required'}},
+         {'status': 400, 'when': 'code 또는 name 누락', 'body': {'error': 'code, name 필수'}},
+     ],
+     'notes': ['성공 시 **201** 이다.', 'code_path 는 서버가 parent 를 따라 계산한다 — 직접 보내지 않는다.'],
+     'auth': dict(_AUTH_MANAGER)},
+
+    {'id': 'csc.orgs.update', 'module': 'csc', 'method': 'PUT', 'path': '/api/v1/organizations/{org_id}',
+     'summary': '조직 수정 (전달한 필드만 변경)',
+     'params': [
+         {'name': 'org_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '조직 id (숫자)'},
+         {'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '변경할 필드만'},
+     ],
+     'response': '{id}',
+     'response_fields': [{'name': 'id', 'type': 'string', 'desc': '수정된 조직 식별자'}],
+     'example': {'id': '3'},
+     'errors': _ERR_COMMON + [
+         {'status': 400, 'when': 'JSON 본문 없음', 'body': {'error': 'Body required'}},
+         {'status': 400, 'when': '변경할 필드 없음', 'body': {'error': '변경할 필드가 없습니다'}},
+     ],
+     'notes': ['parent_id 를 바꾸면 하위 조직의 code_path 도 함께 갱신된다.'],
+     'auth': dict(_AUTH_MANAGER)},
+
+    {'id': 'csc.orgs.delete', 'module': 'csc', 'method': 'DELETE',
+     'path': '/api/v1/organizations/{org_id}',
      'summary': '조직 삭제',
-     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'}],
-     'response': '{id}', 'auth': 'Bearer JWT (manager)'},
+     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True,
+                 'desc': '조직 id (숫자)'}],
+     'response': '{id}',
+     'response_fields': [{'name': 'id', 'type': 'string', 'desc': '삭제된 조직 식별자'}],
+     'example': {'id': '3'},
+     'errors': _ERR_COMMON + [{'status': 404, 'when': '없는 조직', 'body': {'error': 'Not found'}}],
+     'notes': ['**하위 조직은 함께 삭제되지 않고 parent_id 가 NULL 이 되어 루트로 올라간다.**',
+               '소속 가입자가 있는 조직을 지우면 그 가입자의 org_id 는 참조가 끊긴다 — 먼저 이동시킬 것.'],
+     'auth': dict(_AUTH_MANAGER)},
+
     {'id': 'csc.orgs.batch-delete', 'module': 'csc', 'method': 'DELETE',
      'path': '/api/v1/organizations/batch',
      'summary': '조직 일괄 삭제',
-     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '{ids: [int]}'}],
-     'response': '{deleted}', 'auth': 'Bearer JWT (manager)'},
+     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True, 'desc': '{ids: [정수]}'}],
+     'response': '{deleted}',
+     'response_fields': [{'name': 'deleted', 'type': 'integer', 'unit': '건', 'desc': '삭제 건수'}],
+     'example': {'deleted': 2},
+     'errors': _ERR_COMMON + [
+         {'status': 400, 'when': 'ids 누락', 'body': {'error': 'ids 필요'}},
+     ],
+     'notes': ['가입자 일괄 삭제와 달리 errors 배열이 없다 — 삭제된 개수만 돌려준다.',
+               '단건 삭제와 같이 하위 조직은 루트로 올라간다.',
+               '경로가 /organizations/{org_id} 와 겹치므로 batch 라는 예약어를 쓴다.'],
+     'auth': dict(_AUTH_MANAGER)},
+
     {'id': 'csc.orgs.users', 'module': 'csc', 'method': 'GET',
      'path': '/api/v1/organizations/{org_id}/users',
      'summary': '조직 소속 가입자 목록',
-     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '조직 코드/ID'}],
-     'response': '{users[]}', 'auth': 'Bearer JWT (monitor)'},
+     'params': [{'name': 'org_id', 'in': 'path', 'type': 'string', 'required': True,
+                 'desc': '조직 id (숫자) — 서버가 코드로 변환한다'}],
+     'response': '{org_id, org_code, users[]}',
+     'response_fields': [
+         {'name': 'org_id', 'type': 'string', 'desc': '요청한 조직 식별자'},
+         {'name': 'org_code', 'type': 'string', 'desc': '해석된 조직 코드'},
+         {'name': 'users[].id', 'type': 'integer', 'desc': '가입자 id'},
+         {'name': 'users[].name', 'type': 'string', 'desc': '이름'},
+         {'name': 'users[].login_id', 'type': 'string', 'desc': '단말 로그인 ID'},
+     ],
+     'example': {'org_id': '3', 'org_code': 'D110',
+                 'users': [{'id': 11, 'name': '홍길동', 'login_id': 'test001'}]},
+     'errors': _ERR_COMMON + [
+         {'status': 404, 'when': '없는 조직', 'body': {'error': 'Organization not found'}},
+     ],
+     'notes': ['**직속 소속만** 반환한다 — 하위 조직은 포함되지 않는다.',
+               '번호(가입) 정보까지 필요하면 csc.users.list 를 쓴다.'],
+     'auth': dict(_AUTH_MONITOR)},
 ]

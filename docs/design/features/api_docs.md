@@ -26,9 +26,16 @@
 | `method` | HTTP 메서드 |
 | `path` | `/api/v1` 을 포함한 전체 경로. path 파라미터는 `{name}` |
 | `summary` | 한 줄 설명 |
-| `params` | `[{name, in(query\|path\|body), type, required, enum?, desc}]` |
-| `response` | 응답 요약 (전체 JSON 스키마는 미도입) |
-| `auth` | 필요 권한 (예: `'Bearer JWT (monitor)'`) |
+| `params` | 요청 파라미터 `[{name, in(query\|path\|body), type, required, enum?, desc}]` |
+| `response` | 응답 한 줄 요약 (구조는 `response_fields`) |
+| `response_fields` | **응답 필드 표** `[{name, type, unit?, enum?, desc}]`. `name` 은 `a.b[].c`(배열) · `a.b{}`(맵) 표기로 중첩을 표현 |
+| `example` | **합성** 응답 예시 (실제 가입자·번호 금지). 스트리밍 응답은 생략 |
+| `errors` | 오류 응답 `[{status, when, body?}]` — 공통 401/403 은 `_ERR_COMMON` 재사용 |
+| `notes` | 기본값·제약·성능 주의 `[문자열]` |
+| `auth` | `{scheme, role, token_from, note?}` — **토큰 발급 경로까지** 명시 |
+
+각 모듈 파일 상단에 `_AUTH_MONITOR`/`_AUTH_MANAGER`, `_ERR_COMMON` 을 두고 재사용한다 (모듈 간 공유 없음 —
+분리 배포에서 서로 import 할 수 없으므로 의도적으로 파일별 정의).
 
 선언 위치 (= 구현 위치):
 
@@ -41,8 +48,8 @@
 | `csc/src/handlers/admin.py` | `CIMS_ADMIN_API_DOCS` | `csc` | `/users*` · `/ptt/groups*` (CRUD) |
 | `csc/src/handlers/org.py` | `CIMS_ORG_API_DOCS` | `csc` | `/organizations*` (CRUD) |
 
-현재 선언 수: base 2건(노드 사양·사용률), oam-svc 29건(stats 13 · recording 6 · flow 10),
-csc 25건(admin 18 · org 7) = **56건**.
+현재 선언 수: base 2건(노드 사양·사용률), oam-svc 32건(stats 13 · recording 6 · flow 13),
+csc 25건(admin 18 · org 7) = **59건**. 응답 필드는 전 항목에 채워져 있다.
 
 ### 무엇을 선언하고 무엇을 안 하나 (범위 정책)
 
@@ -111,8 +118,13 @@ GET /api/v1/api-docs   가용 모듈의 API 문서 전체 → { modules[], count
 
 - `ems/core/console/src/api/apiDocs.ts` — `loadApiDocs()` 가 `/api-docs` 를 받아 `id → ApiDoc` Map 으로
   준다. 한 화면에 배지가 여럿이므로 **in-flight 프라미스를 공유**해 요청은 페이지당 1회.
-- `ems/core/console/src/components/WidgetApiBadge.tsx` — 개발자 모드 전용 배지 + 모달. 메서드 배지·경로·
-  제공 모듈·요약, 펼치면 파라미터 표·응답·인증·id, `경로`/`curl` 복사.
+- `ems/core/console/src/components/WidgetApiBadge.tsx` — 개발자 모드 전용 배지 + 모달. 행 머리에 메서드
+  배지·경로·제공 모듈·요약, `상세`를 펼치면 **4개 섹션**:
+  - **요청** — 경로 블록, curl 예시(path 파라미터는 `<name>` 자리표시자, body 있으면 `-d` 포함), 파라미터 표
+  - **응답** — 한 줄 요약, 응답 필드 표(필드·타입·단위·설명), 합성 예시 JSON
+  - **오류** — status · 조건 · 본문
+  - **비고** — 기본값·제약·성능 주의 + 인증(권한·토큰 발급 경로) + id
+  - 경로·curl·예시는 **내용을 먼저 보여주고** 옆의 `[복사]` 로 담는다 (클릭 즉시 복사하지 않는다).
   - **개발자 모드 OFF 면 조회 자체를 하지 않는다** (평시 트래픽 0).
   - 위젯에 `apis` 선언이 없거나 문서 0건이면 **배지를 렌더하지 않는다** (모듈 미설치/미가용 포함).
 - 배선 두 곳:
@@ -142,6 +154,8 @@ GET /api/v1/api-docs   가용 모듈의 API 문서 전체 → { modules[], count
   에 선언을 두고 `csc/src/handlers/api_docs.py` 에서 합친다.
 - 라우트 테이블과 선언을 대조하는 CI 체크 (선언 누락·경로 오타 탐지) + **위젯 `apis` id 가 백엔드
   선언에 존재하는지** 대조 (오타가 조용히 누락되는 것 방지).
-- 콘솔이 호출하지 않는 선언(현재 `flow.list` · `recording.list` · `recording.delete` ·
-  `recording.audio` · `stats.service.summary`)은 배지에 안 뜬다 — `/api-docs` 응답에는 있으므로 인계에는
-  포함된다.
+- 콘솔이 호출하지 않는 선언(현재 `flow.list` · `flow.messages` · `flow.ptt-sessions` ·
+  `recording.list` · `recording.delete` · `recording.audio` · `stats.service.summary`)은 배지에 안 뜬다 —
+  `/api-docs` 응답에는 있으므로 인계에는 포함된다.
+- 스트리밍 응답(`recording.segment.audio` · `recording.audio`)은 `example` 이 없다 — 본문이 바이너리라
+  JSON 예시가 성립하지 않는다.

@@ -12,6 +12,29 @@ export interface ApiDocParam {
   desc?: string
 }
 
+// 응답 필드 1개. name 은 `a.b[].c`(배열) / `a.b{}`(맵) 표기로 중첩을 표현한다.
+export interface ApiDocField {
+  name: string
+  type?: string
+  unit?: string
+  enum?: string[]
+  desc?: string
+}
+
+export interface ApiDocError {
+  status: number
+  when?: string
+  body?: unknown
+}
+
+// 인증 — 구조화된 형태. 구 선언(문자열)도 렌더러가 그대로 표시한다.
+export interface ApiDocAuth {
+  scheme?: string
+  role?: string
+  token_from?: string
+  note?: string
+}
+
 export interface ApiDoc {
   id: string
   module: string | null      // 'csc' | 'oam-svc' | null(base 상주)
@@ -19,8 +42,12 @@ export interface ApiDoc {
   path: string               // /api/v1 포함 전체 경로
   summary?: string
   params?: ApiDocParam[]
-  response?: string
-  auth?: string
+  response?: string          // 한 줄 요약 (구조는 response_fields)
+  response_fields?: ApiDocField[]
+  example?: unknown          // 합성 응답 예시 (실데이터 금지)
+  errors?: ApiDocError[]
+  notes?: string[]           // 기본값·제약·성능 주의
+  auth?: ApiDocAuth | string
 }
 
 export interface ApiDocsResponse {
