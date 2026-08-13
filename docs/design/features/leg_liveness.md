@@ -8,7 +8,7 @@
 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) · [ue_nat_traversal.md](ue_nat_traversal.md) ·
 [api/cmp_media_api.md](../../api/cmp_media_api.md)
 
-> **상태**: 설계 정본. 구현은 [§10](#10-구현-배치) 배치대로 착수한다.
+> **상태**: 구현·배포 완료(csp 0.2.89). 실기기 검증 6항목 전부 통과 — [§13](#13-검증).
 
 ## 1. 문제
 
@@ -304,7 +304,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | S2 | 빌드 | 통과 |
 | 루프백 | psip UA 를 UAS 로 띄우고 원시 UDP 소켓이 단말을 흉내내는 시험 — 라이브 서비스와 무관한 127.0.0.1 포트만 사용 | 아래 2 시나리오 통과 |
 | S3 | `S3-SCN-PTT-SMOKE`·`S3-SCN-VOIP-SMOKE` 회귀 — 갱신 re-INVITE 가 스모크 호를 깨지 않을 것 | 미실시 |
-| 실기기 | 아래 표 | 4항목 통과, 잔여 3 |
+| 실기기 | 아래 표 | **6항목 전부 통과** |
 
 **루프백 시험 결과** (세션 간격 90초 = 규격 하한으로 시험)
 
@@ -322,7 +322,8 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | 통화 유지 | 갱신 3회(6 트랜잭션) 이상 통과, 5분+ 유지, `cause=408` 종료 0건 |
 | **강제종료 감지 (그룹콜)** | 상대 단말 앱 force-stop(BYE 없음) → **56초** 만에 `SessionTimer expired` → `EventCallEnd(408)` → `PTT_LEAVE` → conference NOTIFY → 남은 단말 로스터 **구성원 (2)→(1)**, CMP `member_used` 반납 |
 | **강제종료 감지 (private 1:1)** | 착신 단말 force-stop → 갱신 무응답(INVITE 재전송 10회) → Timer B 만료에 `SessionTimer expired` → `PTT_LEAVE` → **잔여 1인 해제**(`private(...) — 상대 leg 1 개 종료(BYE)`) → 남은 단말이 **BYE 에 200 OK 응답**(통화 정리 확증) → CMP 그룹 회수. 강제종료로부터 **75초** |
-| 잔여 | ① 장시간 통화 중 음성·floor 이상 없음(귀 확인) ② 기내 모드 — 사람 조작 필요 |
+| **장시간 통화 무해성** | 6분간 갱신 **4회** 전부 성공. 단말 pjsip 이 매회 `received updated media offer` → `SDP negotiation done: Success` → **`stream #0 (audio) unchanged`** 로 처리 — 스트림을 재생성하지 않는다([§6.3](#63-갱신-re-invite-규율) `o=` 고정 규율의 효과). 갱신 시각의 오디오 스트림 재시작 0회, 코덱(AMR-WB sendrecv) 유지 |
+| **망 소실 (기내 모드)** | 착신 단말 기내 모드 ON → 갱신 무응답 → **35초** 만에 `SessionTimer expired` → `PTT_LEAVE` → conference NOTIFY(`disconnected/deleted`) → 남은 단말 UI 가 **접속 중 1 / 오프라인 1** 로 갱신. 기내 모드 OFF 후 **47초**에 재등록(UDP latch 정상) + 자동 재조인으로 완전 복구 |
 
 **순서 보장** — 잔여 leg 으로 나가는 teardown BYE 는 항상 **교정된 주소**로 간다. 죽은 leg 의
 판정은 `SE/2 + Timer B`(≈122초)인데 살아있는 leg 의 첫 갱신은 `SE/2`(≈90초)라, teardown 이
