@@ -89,7 +89,6 @@ CSipServerSetup::CSipServerSetup()
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
       m_iStaleCallTimeout( 300 ),
-      m_bAllowTcpFlowSwitch( false ),  // 등록 flow 전환 시 TCP 는 불허 (§4.4)
       m_bSessionTimer( true ),         // 비정상 종료 leg 감지 (RFC 4028) — 기본 활성
       m_iSessionExpires( 180 ),
       m_iSessionMinSE( 90 ),
@@ -245,8 +244,6 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( sip.Has( "UserTimeout" ) ) m_iUserTimeout = (int)sip.GetInt( "UserTimeout" );
                 if ( sip.Has( "StaleCallTimeout" ) ) m_iStaleCallTimeout = (int)sip.GetInt( "StaleCallTimeout" );
                 if ( sip.Has( "SendOptionsPeriod" ) ) m_iSendOptionsPeriod = (int)sip.GetInt( "SendOptionsPeriod" );
-                if ( sip.Has( "AllowTcpFlowSwitch" ) )
-                    m_bAllowTcpFlowSwitch = ( sip.Get( "AllowTcpFlowSwitch" ).AsString() == "true" );
 
                 // 세션 타이머 (RFC 4028) — docs/design/features/leg_liveness.md
                 if ( sip.Has( "SessionTimer" ) ) {

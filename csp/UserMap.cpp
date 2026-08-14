@@ -161,6 +161,20 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
                 return true;
             }
 
+            // 같은 transport 의 기존 바인딩은 **교체**한다 — 한 단말은 한 transport 에 살아있는
+            //   경로가 하나뿐이므로, 새 등록이 온 시점에 그 transport 의 옛 경로는 무효다.
+            //   (UDP 는 연결이 없어 죽음을 감지할 수 없으므로 이 규칙이 유일한 회수 수단이다.
+            //    스트림은 sweep 의 flow 생존 판정이 추가로 회수한다.)
+            //   ⚠ 멀티 디바이스를 지원하게 되면 이 규칙을 instance-id 기준으로 완화해야 한다
+            //     (registration_binding_set.md §4).
+            for ( size_t k = clsList.size(); k > 0; --k ) {
+                if ( clsList[k - 1].m_eTransport != clsInfo.m_eTransport ) continue;
+                CLog::Print( LOG_DEBUG, "user(%s) binding replaced (%s:%d:%d → %s:%d:%d)", strUserId.c_str(),
+                             clsList[k - 1].m_strIp.c_str(), clsList[k - 1].m_iPort, clsList[k - 1].m_eTransport,
+                             clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport );
+                clsList.erase( clsList.begin() + ( k - 1 ) );
+            }
+
             if ( clsList.size() >= MAX_BINDING_PER_USER ) {
                 size_t iOldest = 0;
                 for ( size_t k = 1; k < clsList.size(); ++k ) {
@@ -384,9 +398,18 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
         // 만료는 **바인딩 단위**다 — 한 flow 가 만료돼도 다른 flow 로 등록이 살아 있을 수 있다.
         for ( size_t i = clsList.size(); i > 0; --i ) {
             const CUserInfo &clsBind = clsList[i - 1];
-            if ( iTime > ( clsBind.m_iLoginTime + clsBind.m_iLoginTimeout + iTimeout ) ) {
-                CLog::Print( LOG_DEBUG, "user(%s) binding expired (%s:%d:%d)", itMap->first.c_str(),
-                             clsBind.m_strIp.c_str(), clsBind.m_iPort, clsBind.m_eTransport );
+            const bool bTimeout = iTime > ( clsBind.m_iLoginTime + clsBind.m_iLoginTimeout + iTimeout );
+            // RFC 5626 — **flow 실패는 바인딩 무효**다. 스트림 transport 는 연결 생존을 스택에
+            //   물어 죽은 경로를 즉시 회수한다. 등록 만료만 기다리면 Expires+grace(우리 배치
+            //   기준 최대 ~77분) 동안 유령 바인딩이 남아 운영 조회·통지에 노출된다.
+            //   UDP 는 연결 개념이 없어 판정 대상이 아니다 — 같은 transport 재등록으로 교체된다.
+            const bool bFlowDead = ( clsBind.m_eTransport != E_SIP_UDP ) &&
+                                   !gclsUserAgent.m_clsSipStack.IsFlowAlive( clsBind.m_strIp.c_str(), clsBind.m_iPort,
+                                                                             clsBind.m_eTransport );
+            if ( bTimeout || bFlowDead ) {
+                CLog::Print( LOG_DEBUG, "user(%s) binding removed (%s:%d:%d) — %s", itMap->first.c_str(),
+                             clsBind.m_strIp.c_str(), clsBind.m_iPort, clsBind.m_eTransport,
+                             bTimeout ? "expired" : "flow dead" );
                 // 마지막으로 남았던(가장 최근 등록) 바인딩을 통지용으로 보존한다 —
                 //   reg-event NOTIFY 는 삭제 직전 바인딩으로 목적지와 본문을 만든다.
                 if ( !bRemoved || clsBind.m_iLoginTime > clsLastRemoved.m_iLoginTime ) {

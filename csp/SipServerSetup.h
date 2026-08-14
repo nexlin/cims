@@ -136,11 +136,6 @@ public:
     //   docs/design/features/leg_liveness.md
 
     /** 세션 타이머 사용 여부 */
-    /** 등록 flow 전환(sip_tls_signaling.md §4.4)에서 **TCP 로의 전환**을 허용할지.
-     *  기본 false — TCP 는 대형 요청 승격으로 우발 발생하는 유일한 transport 라, 이를 허용하면
-     *  승격 오염 방어가 무너진다. 단말을 의도적으로 TCP 등록으로 옮길 때만 켠다. */
-    bool m_bAllowTcpFlowSwitch;
-
     bool m_bSessionTimer;
 
     /** 제안 세션 간격(초). 규격 하한 90 미만은 psip 이 90 으로 clamp 한다 */

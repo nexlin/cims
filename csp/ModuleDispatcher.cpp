@@ -542,15 +542,12 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
 
     if ( strcmp( clsUserInfo.m_strIp.c_str(), strIp.c_str() ) || clsUserInfo.m_iPort != iPort ) {
         if ( CCscfModule::CheckAuthrization( pclsMessage ) == false ) return false;
-        // UserMap::Insert 와 **별개의 두 번째 latch 경로**다 — 같은 규율(등록 flow 와 같은
-        //   transport 에서 온 요청만 갱신)을 적용한다. 승격 TCP 로 온 요청(대형 INVITE 이후 같은
-        //   다이얼로그의 ACK/BYE 등)의 소스 포트로 덮으면 그 포트에는 등록 flow 가 없어 이후 서버
-        //   발신이 전량 유실된다(08-12 실측: 마지막 이탈 NOTIFY 가 TCP 포트로 UDP 발송돼 유실 →
-        //   접속 인원 stale). 근거는 UserMap.cpp Insert() 주석.
-        if ( pclsMessage->m_eTransport == clsUserInfo.m_eTransport ) {
-            gclsUserMap.SetIpPort( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), strIp.c_str(), iPort,
-                                   pclsMessage->m_eTransport );
-        }
+        // 비REGISTER 요청의 주소 변경 감지 — 그 transport 의 **기존 바인딩만** 옮긴다.
+        //   바인딩을 만들 권한은 등록에만 있으므로(RFC 3261 §10), 승격 TCP 로 온 요청은 해당
+        //   transport 의 바인딩이 없어 자연히 무시된다 — 종전의 transport 일치 가드는
+        //   SetIpPort 안의 판정과 중복이라 제거했다(registration_binding_set.md §3).
+        gclsUserMap.SetIpPort( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), strIp.c_str(), iPort,
+                               pclsMessage->m_eTransport );
     } else {
         // 저장된 도달 경로 그대로 도착한 요청 = 그 latch 가 아직 살아 있다는 근거 (진단용).
         gclsUserMap.TouchFlow( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), pclsMessage->m_eTransport );

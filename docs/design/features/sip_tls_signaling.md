@@ -174,70 +174,33 @@ flow 가 UDP 하나뿐이라 대리 표현으로 정확히 일치하기 때문�
 
 | 상황 | 현재 |
 |---|---|
-| **주소 변경** (NAT rebind·망 전환, transport 동일) | 규칙 ①([§4.3](#43-갱신-규칙--수신-transport-가-저장-transport-와-같을-때))로 추종 |
-| **전환** (UDP 엔트리 존재 + TLS REGISTER) | 규칙 ②([§4.4](#44-전환-규칙--새-transport-가-tcp-가-아닐-때))로 등록 flow 교체 |
+| **주소 변경** (NAT rebind·망 전환, transport 동일) | 바인딩 집합으로 추종 |
+| **전환** (UDP 엔트리 존재 + TLS REGISTER) | 규칙 ②([§4.3](#43-갱신-자격--등록된-flow-에서-온-요청만))로 등록 flow 교체 |
 | **승격 TCP** (대형 요청 이후의 ACK/BYE·재-REGISTER) | 차단 — 등록 flow 를 바꾸지 못한다 |
 
 이 규칙들이 없으면 운영자에게 보이는 증상은 "등록 실패"가 아니라 더 나쁘다 — 단말은 200 OK 를
 받아 등록됨으로 표시되고 **발신도 되는데**, 착신·통지가 안 되고 통화가 세션 타이머 주기로 끊긴다.
 서버 발신 목적지만 죽은 주소를 가리키기 때문이다.
 
-### 4.3 갱신 규칙 — 수신 transport 가 저장 transport 와 같을 때
+### 4.3 갱신 자격 — 등록된 flow 에서 온 요청만
 
-**규칙 ①.** 갱신 자격은 **등록에 쓰인 flow 에서 온 요청**에 한한다. 그 판정을 수신 transport 와
-저장 transport 의 일치로 근사한다 — 승격 TCP 는 등록 flow 와 transport 가 다르므로 걸러지고,
-등록 flow 는 단말 keepalive 로 유지되므로 통과한다. 갱신 경로 두 곳에 동일하게 적용된다.
+CSP 는 가입자당 **바인딩 집합**을 갖고, 각 바인딩이 도달 경로(flow) 하나다
+([registration_binding_set.md](registration_binding_set.md) 가 정본).
 
-| 저장 \ 수신 | UDP | TCP (승격) | TLS |
-|---|---|---|---|
-| UDP | 갱신 | 차단 | 차단 |
-| TCP | 차단 | 갱신 | 차단 |
-| TLS | 차단 | 차단 | 갱신 |
-
-저장=UDP 행은 "UDP 소스만 갱신"과 동치다 — UDP 로만 등록하는 배치에서는 관찰 가능한 동작이
-달라지지 않는다.
-
-"UDP 이거나 저장과 동일" 형태의 OR 규칙은 채택하지 않는다 — 저장=TLS 인데 UDP 요청 하나로
-latch 가 UDP 주소로 덮이는 downgrade 구멍이 생기고, 저장=UDP 에서는 기여하는 바가 없다.
-
-**관측**: latch 로그는 수신값과 갱신 판정 후 저장값을 함께 출력한다
-(`user(..) is updated (ip:port:transport) latch(ip:port:transport)`) — 가드에 막히면 둘이
-달라지므로 저장 상태는 `latch(...)` 쪽을 본다. 저장 flow 로 요청이 도착한 시각은
-`CUserInfo::m_iLastSeenTime` 에 기록된다(진단용 — 판정에는 쓰지 않는다).
-
-### 4.4 전환 규칙 — 새 transport 가 TCP 가 아닐 때
-
-**규칙 ②.** 규칙 ①만으로는 전환(저장 UDP ≠ 수신 TLS)이 영구 차단된다. 판별 근거는 다음이다.
-
-> **우발적으로 나타날 수 있는 transport 는 TCP 뿐이다.** 크기 초과 승격의 목적지는 TCP 이고,
-> TLS 는 단말 설정 없이는 나타나지 않는다.
-
-규칙: **인증된 REGISTER 이고 새 transport 가 TCP 가 아니면** latch 를 새 flow 로 교체한다.
-TCP 로의 전환이 필요해지면 설정 스위치로 연다(기본 비활성).
-
-메서드만으로 판별하는 규칙("REGISTER 면 허용")은 채택하지 않는다 — RFC 5626 `;ob` 플로우 재사용
-때문에 재-REGISTER 도 승격 TCP 로 도착하므로 승격 오염을 걸러내지 못한다(실측 확인).
-
-| 시나리오 | 규칙 ①+② 결과 |
+| 규율 | 내용 |
 |---|---|
-| UDP → TLS 전환 | 허용 |
-| TLS → UDP 롤백 | 허용 |
-| 승격 TCP 재-REGISTER | 차단 (현 동작 보존) |
-| TLS 단말의 rebind 추종 | 허용 |
-| 저장 TLS 에 UDP 요청 | 차단 |
+| 생성 권한 | **REGISTER 만** 새 바인딩을 만든다(RFC 3261 §10). 대형 요청 승격 후의 ACK/BYE 는 새 경로로 보여도 등록된 flow 가 아니므로 무시된다 |
+| 주소 이동 | 비REGISTER 요청의 소스 변경은 **그 transport 의 기존 바인딩**만 옮긴다 |
+| 선택 | 서버 발신은 **살아있는 바인딩 중 최신**. 생존은 psip 소켓맵에 직접 질의(`CSipStack::IsFlowAlive`) — transport 종류로 추측하지 않는다 |
+| 만료 | 바인딩 단위. 마지막 바인딩이 사라질 때만 등록 해제로 통지 |
 
-### 4.5 불일치 transport REGISTER 는 수명을 갱신한다
+승격 TCP 로 온 재-REGISTER 는 바인딩이 되지만, 그 연결이 닫히면 생존 판정에서 탈락하므로
+도달 주소를 오염시키지 않는다. transport 전환(UDP 등록 단말의 TLS 재등록)도 **새 바인딩 추가**로
+자연히 성립한다 — 별도 판별 규칙이 필요 없다.
 
-가드에 막힌 REGISTER 도 바인딩 수명·Contact 는 갱신한다. "수명 갱신까지 거부해 만료 sweep 으로
-자가복구시키자"는 안은 **채택하지 않는다.**
-
-규칙 ②가 정당한 전환을 흡수하므로, 남는 불일치는 **승격 TCP 재-REGISTER**(RFC 5626 `;ob` 플로우
-재사용)뿐이다. 그 단말은 UDP 등록 flow 로 멀쩡히 살아 있고 latch 도 옳다 — 여기서 수명 갱신을
-거부하면 **살아있는 단말을 등록 만료로 삭제**하게 된다. 즉 자가복구가 필요한 상태가 아니라
-정상 상태다.
-
-전환 경로가 막혀 latch 가 stale 이 되는 구간은 규칙 ②로 사라졌고, 그래도 남는 이상은
-`CUserInfo::m_iLastSeenTime`(저장 flow 로 요청이 마지막에 도착한 시각)으로 관측한다.
+**관측**: latch 로그는 수신값과 바인딩 수를 함께 출력한다
+(`user(..) is updated (ip:port:transport) bindings(N)`), 새 경로가 등록되면
+`binding added (...) — total N`, 경로가 옮겨지면 `binding moved → ...` 이 남는다.
 
 ### 4.6 정본 구조 — flow 단위 바인딩 집합
 
