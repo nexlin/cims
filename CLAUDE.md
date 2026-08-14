@@ -147,8 +147,8 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [mcptt_csp_cmp_roadmap_contract.md](docs/design/features/mcptt_csp_cmp_roadmap_contract.md) — 로드맵 기능(private call·dual/multi-talker·pre-established 등) CSP↔CMP 연동 메시지 규격, Call Control/Media Plane 2파트 분담 계약
 - [mcdata_messaging.md](docs/design/features/mcdata_messaging.md) — MCData 그룹 메시징(SDS) — TS 24.282 그룹 SDS·TS 24.481 그룹별 게이트·disposition
 - [ue_nat_traversal.md](docs/design/features/ue_nat_traversal.md) — 단말 NAT traversal (시그널링·미디어 leg 포트·목적지 latch·정책)
-- [registration_binding_set.md](docs/design/features/registration_binding_set.md) — 등록 바인딩 집합 (AoR 당 주소 1칸 → flow 단위 바인딩 집합, 생존 판정으로 transport 추측 대체 — 설계 정본, 구현 착수 전)
-- [sip_tls_signaling.md](docs/design/features/sip_tls_signaling.md) — SIP TLS 시그널링 (transport 별 도달 모델 = 목적지 주소 vs 연결 열쇠, latch 갱신 규율, 접속점 개설 실패 격리·A-PRC-012, 단말 전환 계획 — 서버측 구현 완료, 단말 미구현)
+- [registration_binding_set.md](docs/design/features/registration_binding_set.md) — 등록 바인딩 집합 (AoR 당 도달 경로 여러 개, flow 생존 판정으로 선택 — transport 혼합 운용의 토대. 정리 정책 3계기)
+- [sip_tls_signaling.md](docs/design/features/sip_tls_signaling.md) — SIP 시그널링 transport (UDP/TCP/TLS **단말 선택** 지원. transport 별 도달 모델 = 목적지 주소 vs 연결 열쇠, 접속점 개설 실패 격리·A-PRC-012, 인증서 운영=상용 게이트)
 - [leg_liveness.md](docs/design/features/leg_liveness.md) — 비정상 종료 leg 감지 (SIP 세션 타이머 RFC 4028 — BYE 없이 사라진 leg 의 시한 회수. 설계 정본, 구현 착수 전)
 - [recording.md](docs/design/features/recording.md) — 녹취 구조 (슬롯 트랙·믹스/단독 재생·PTT 세션 이력 UI)
 - [flow_logging.md](docs/design/features/flow_logging.md) — SIP/Flow 로깅 (sesid 규칙·5분 버킷)

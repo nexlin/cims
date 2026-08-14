@@ -1,17 +1,20 @@
-# SIP TLS 시그널링 — transport 별 도달 모델과 TLS 전환 설계
+# SIP 시그널링 transport — 도달 모델과 UDP/TCP/TLS 선택 지원
 
-단말(UE)의 SIP 시그널링을 **TLS 로 운반**하는 배치의 정본 문서다. 미디어(RTP)는 대상이 아니다 —
-계속 UDP 를 쓴다. 핵심 주제는 두 가지다: ①연결지향 transport 에서 **서버→UE 도달 주소(latch)의
-의미가 UDP 와 다르다**는 점, ②그 차이 때문에 현재 latch 갱신 규율이 TLS 배치에서 성립하지 않는다는
-점이다.
+단말(UE)이 SIP 시그널링 transport 를 **UDP·TCP·TLS 중에서 고르는** 배치의 정본 문서다. 특정
+transport 로 **일괄 전환하는 것이 목표가 아니다** — 서버는 세 transport 를 동시에 청취하고, 어떤
+조합으로 등록해도 도달한다. 미디어(RTP)는 대상이 아니다 — 계속 UDP 를 쓴다.
+
+핵심 주제는 둘이다: ①연결지향 transport 에서 **서버→UE 도달 주소의 의미가 UDP 와 다르다**는 점,
+②그래서 도달 주소를 transport 종류로 추측할 수 없고 **경로(flow)의 생존으로 판정**해야 한다는 점.
 
 관련 문서: [ue_nat_traversal.md](ue_nat_traversal.md) · [leg_liveness.md](leg_liveness.md) ·
 [sip_runtime_config.md](sip_runtime_config.md) · [modules/csp.md](../modules/csp.md) ·
 [android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md)
 
-> **상태**: 서버·단말 모두 TLS 등록·통화가 성립한다(실기기 실측). 남은 것은 **인증서 운영
-> 방침**([§8](#8-인증서-운영-요건-미정)) — 현재는 자가서명 인증서에 단말 검증을 끈 랩 구성이라
-> 상용 배치 전에 CA·검증·갱신 체계를 세워야 한다. 전환은 가입자 단위로 진행할 수 있다.
+> **상태**: 서버는 세 transport 를 동시에 서비스하며 혼합 운용을 실측했다(001=UDP·002=TLS 동거,
+> 그룹콜 성립). 단말도 TLS 등록·통화가 된다. 남은 것은 **①단말 선택 모델**(프로비저닝이 가용
+> transport 목록을 내리고 단말이 고르는 형태 — [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다))과
+> **②인증서 운영 방침**([§8](#8-인증서-운영-요건-미정), 상용 게이트)이다.
 
 ## 1. 범위와 전제
 
@@ -20,8 +23,9 @@
 | 대상 | UE ↔ CSP access edge 의 SIP 시그널링 |
 | 비대상 | RTP/RTCP(계속 UDP), floor control(RTCP APP), MSRP |
 | 표준 배치 | `lb-access-tls :5061` ([02_deployment.md](../02_deployment.md)) |
-| 전환 단위 | **가입자 단위** — `{volte,ptt}_subscriptions.sip_transport`(NULL=서비스 설정). 계정 하나씩 옮기며 관찰할 수 있다 |
-| 현재 배치 | 전 단말 UDP 등록. `local_nodes.jsonl` = UDP primary + TCP:15060 2행 |
+| **선택 주체** | **단말**. 서버는 가용 transport 를 제공하고 강제하지 않는다([§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다)) |
+| 혼합 운용 | 전제이자 정상 상태다 — 같은 그룹에 UDP 단말과 TLS 단말이 함께 있어도 서버가 각 단말의 등록 경로로 보낸다(실측) |
+| 현재 배치 | `local_nodes.jsonl` = UDP:15060 + TCP:15060 + TLS:15061(랩 인증서). 실기기 001=UDP / 002=TLS |
 
 ## 2. transport 별 도달 모델 — latch 의 의미가 다르다
 
@@ -139,9 +143,9 @@ if ( … && tdata->dest_info.addr.entry[0].type == PJSIP_TRANSPORT_UDP)   // 진
 flow 가 UDP 하나뿐이라 대리 표현으로 정확히 일치하기 때문이다. TLS 배치에서는 그 대리 표현이
 어긋난다.
 
-### 3.3 TLS 전환으로 소멸하는 문제군
+### 3.3 TLS 를 고른 단말에서 소멸하는 문제군
 
-| 문제 | TLS 전환 후 |
+| 문제 | TLS 를 고른 단말 |
 |---|---|
 | 승격 TCP 소스로 latch 오염 | 소멸 — 오염원 자체가 없음 |
 | 임시 TCP 사망으로 서버가 그 주소에 도달 불가 | 소멸 — 연결이 하나뿐이고 유지됨 |
@@ -170,17 +174,17 @@ flow 가 UDP 하나뿐이라 대리 표현으로 정확히 일치하기 때문�
 | terminated NOTIFY | `csp/CspServer.cpp` `SendTerminatedNotify` | 이탈 통지 유실 |
 | 세션 갱신 re-INVITE / 만료 BYE | `csp/ModuleDispatcher.cpp` `EventGetLegDest` | **통화가 세션 타이머 주기에 절단** (단말이 `cause=408` BYE) |
 
-### 4.2 stream 등록 단말에서 깨지는 지점
+### 4.2 스트림 등록 단말에서 무엇이 달라지는가
 
-| 상황 | 현재 |
+| 상황 | 처리 |
 |---|---|
-| **주소 변경** (NAT rebind·망 전환, transport 동일) | 바인딩 집합으로 추종 |
-| **전환** (UDP 엔트리 존재 + TLS REGISTER) | 규칙 ②([§4.3](#43-갱신-자격--등록된-flow-에서-온-요청만))로 등록 flow 교체 |
-| **승격 TCP** (대형 요청 이후의 ACK/BYE·재-REGISTER) | 차단 — 등록 flow 를 바꾸지 못한다 |
+| 주소 변경 (NAT rebind·망 전환, transport 동일) | 같은 transport 재등록으로 바인딩 교체 |
+| transport 변경 (단말이 다른 것을 고름) | 새 바인딩 추가. 옛 경로는 flow 실패 또는 만료로 회수 |
+| 승격 TCP (대형 요청 이후의 ACK/BYE) | 바인딩을 만들지 않는다 — 생성은 등록의 권한이다 |
 
-이 규칙들이 없으면 운영자에게 보이는 증상은 "등록 실패"가 아니라 더 나쁘다 — 단말은 200 OK 를
-받아 등록됨으로 표시되고 **발신도 되는데**, 착신·통지가 안 되고 통화가 세션 타이머 주기로 끊긴다.
-서버 발신 목적지만 죽은 주소를 가리키기 때문이다.
+이 규율이 없으면 증상은 "등록 실패"가 아니라 더 나쁘다 — 단말은 200 OK 를 받아 등록됨으로
+표시되고 **발신도 되는데**, 착신·통지가 안 되고 통화가 세션 타이머 주기로 끊긴다. 서버 발신
+목적지만 죽은 경로를 가리키기 때문이다.
 
 ### 4.3 갱신 자격 — 등록된 flow 에서 온 요청만
 
@@ -202,7 +206,7 @@ CSP 는 가입자당 **바인딩 집합**을 갖고, 각 바인딩이 도달 경
 (`user(..) is updated (ip:port:transport) bindings(N)`), 새 경로가 등록되면
 `binding added (...) — total N`, 경로가 옮겨지면 `binding moved → ...` 이 남는다.
 
-### 4.6 정본 구조 — flow 단위 바인딩 집합
+### 4.4 도달 경로 구조 — 바인딩 집합
 
 (IP, 포트)는 연결의 **대리키**일 뿐 연결 자체가 아니다. 그래서 두 한계가 남는다.
 
@@ -294,20 +298,44 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 | 서버 인증서 검증 | `TlsConfig.verifyServer = false` — 자가서명 인증서 배치 전제. CA 배포 방침이 서면 `caListFile`/`caBuf` 를 채우고 켠다([§8](#8-인증서-운영-요건-미정)) |
 | 계정 설정 | 프로비저닝의 `sip.transport`/`sip.port` 를 그대로 registrar·proxy URI 에 반영(`;transport=tls`) |
 
-### 7.1 전환 단위 — 가입자 단위 override
+### 7.1 선택 모델 — 단말이 고르고 서버는 가용 목록을 준다
 
-`{volte,ptt}_subscriptions.sip_transport`(`UDP`/`TCP`/`TLS`, NULL=서비스 설정)가 우선한다.
-CSC `/provisioning/me` 가 이 값을 단말 프로파일의 `sip.transport` 로 내리고, **TLS 로 해석되면
-포트도 서비스의 `tls_port`** 로 바꾼다 — 같은 포트로 평문과 TLS 를 겸하지 않기 때문이다.
+**단말이 transport 를 자유롭게 고른다.** 서버는 강제하지 않는다 — 세 transport 를 동시에 청취하고,
+단말이 등록해 온 경로가 그대로 그 단말의 도달 경로(바인딩)가 된다
+([registration_binding_set.md](registration_binding_set.md)).
 
-| 설정 | 위치 |
+그래서 프로비저닝은 "하나의 transport 를 지정"하는 것이 아니라 **가용 목록과 기본값을 알려주는**
+역할이어야 한다. transport 마다 포트가 다르기 때문에 목록에 포트가 함께 실린다 — 같은 포트로
+평문과 TLS 를 겸하지 않는다.
+
+```json
+"sip": {
+  "host": "121.161.164.45",
+  "domain": "ptt.mnc033.mcc450.3gppnetwork.org",
+  "transports": [ { "transport": "UDP", "port": 15060 },
+                  { "transport": "TCP", "port": 15060 },
+                  { "transport": "TLS", "port": 15061 } ],
+  "default": "UDP"
+}
+```
+
+| 설정 | 역할 |
 |---|---|
-| 가입자 override | `{volte,ptt}_subscriptions.sip_transport` (`sql/migrate_subscription_transport.sql`) |
-| 서비스 기본 transport | `Provisioning.Services.{kind}.transport` |
-| TLS 포트 | `Provisioning.Services.{kind}.tls_port` (CSP 의 `protocol=TLS` local_node `bind_port` 와 일치) |
+| `Provisioning.Services.{kind}.{port,tls_port}` | 가용 목록의 transport 별 포트 (CSP 의 `local_nodes` bind_port 와 일치) |
+| `Provisioning.Services.{kind}.transport` | 서비스 기본값 |
+| `{volte,ptt}_subscriptions.sip_transport` | **가입자 기본값**(NULL=서비스 기본값). 강제가 아니라 권장값이며, 단말이 바꿀 수 있다 |
 
-단말은 **프로비저닝을 재취득해야** 전환이 반영된다(부팅 자동시작 경로에서 재취득 — 수동 실행은
-캐시 설정을 쓴다).
+#### 미구현 — 선택을 실제로 가능하게 하는 데 필요한 것
+
+| 항목 | 현재 | 필요 |
+|---|---|---|
+| 프로비저닝 응답 | `sip.transport` + `sip.port` **단일 값** | 위 `transports` 목록 추가(단일 필드는 기본값으로 유지 — 구 APK 호환) |
+| 앱 설정 모델 | `SipAccountConfig` 가 `serverPort` **하나**만 보유 | transport 별 포트를 알아야 한다. 지금은 앱에서 transport 만 바꾸면 포트가 따라가지 않는다 |
+| 앱 UI | transport 선택 화면 **없음** | 선택 + 저장 + 재등록 |
+| 반영 시점 | 프로비저닝 재취득은 **부팅 자동시작 경로에서만**(수동 실행은 캐시 사용) | 설정 변경 즉시 재등록 |
+
+서버측은 추가 작업이 없다 — 바인딩 집합이 transport 무관이고, 단말이 경로를 바꾸면 새 바인딩으로
+자연히 반영된다(옛 경로는 같은 transport 재등록 교체 또는 flow 실패로 회수).
 
 ## 8. 인증서 운영 요건 (미정)
 
@@ -319,29 +347,22 @@ CSC `/provisioning/me` 가 이 값을 단말 프로파일의 `sip.transport` 로
 | 갱신 | 만료 전 교체 절차. 무중단 교체는 T1·T2 수정에 종속 |
 | 감시 | 만료 임박 알람 — 인증서 만료는 전 단말 동시 등록 불가로 이어지는 단일 장애점 |
 
-## 9. 구현 계획
+## 9. 남은 과제
 
-각 단계는 그 단계 끝에서 검증 가능한 단위로 나눈다.
+transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의미가-다르다))·서버 접속점
+([§6](#6-서버-구현-상태))·단말 TLS([§7](#7-단말-구현-상태))·바인딩 구조
+([registration_binding_set.md](registration_binding_set.md))는 구현·실측 완료다.
 
-latch 갱신·전환 규칙([§4](#4-latch-갱신-규칙))·서버 접속점([§6](#6-서버-구현-상태))·단말
-([§7](#7-단말-구현-상태))은 구현·실측 완료다. 시험 클라이언트는 `cspsim -transport tls`.
-남은 단계는 다음과 같다.
-
-| 단계 | 작업 | 검증 | 산출 |
+| # | 과제 | 성격 | 검증 |
 |---|---|---|---|
-| **3. 인증서 운영** | [§8](#8-인증서-운영-요건-미정) 결정 — 사설 CA·검증 정책·갱신·만료 감시 | 단말 `verifyServer=true` 로 등록 성립 | csc/console + 단말 |
-| **4. 구조** | [§4.6](#46-정본-구조--flow-단위-바인딩-집합) flow 단위 바인딩 집합 | — | 설계 문서 선행 |
+| 1 | **단말 선택 모델**([§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다)) — 프로비저닝 `transports` 목록 + 앱의 transport 별 포트 보유 + 선택 UI | 기능 (csc + 앱) | 세 transport 를 앱에서 골라 각각 등록·통화 |
+| 2 | **인증서 운영**([§8](#8-인증서-운영-요건-미정)) — 사설 CA·검증 정책·갱신·만료 감시 | **상용 게이트** | 단말 `verifyServer=true` 로 등록 성립 |
 
-의존 관계:
+1과 2는 독립이다. 다만 단말이 TLS 를 실제로 고르게 하려면(1) 그 TLS 가 신뢰 가능해야(2) 하므로,
+상용 배치에서는 2가 선행한다. 랩·시험 배치에서는 1만으로 진행할 수 있다.
 
-```
-3단계 (인증서 운영) ──▶ 4단계 (구조)
-```
-
-**cspsim TLS 클라이언트화가 순서상 중요하다** — psip 에 클라이언트 TLS 경로(`SSLClientStart`,
-`StartSipTlsClientThread`, 클라이언트 연결로의 인바운드 요청 수신)가 이미 있으므로, `cspsim` 에
-TLS 설정 필드와 목적지 transport 지정을 추가하면 **단말 빌드 트랙 없이 서버측 전 구간을 실측**할
-수 있다. 가장 비싼 의존(3단계)을 검증 경로에서 분리한다.
+시험 클라이언트는 `cspsim -transport {udp,tcp,tls}` 다 — 단말 빌드 없이 서버측 전 구간을 실측할
+수 있고, 한 계정을 여러 경로로 등록시켜 바인딩 집합도 만들 수 있다.
 
 ## 10. 검증 시나리오
 
