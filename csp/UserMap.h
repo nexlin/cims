@@ -20,6 +20,7 @@
 #define _USER_MAP_H_
 
 #include <map>
+#include <vector>
 
 #include "CspUser.h"
 #include "SipMessage.h"
@@ -86,7 +87,12 @@ public:
     int m_iRegisterCSeq;
 };
 
-typedef std::map<std::string, CUserInfo> USER_MAP;
+/** 한 가입자(AoR)의 등록 바인딩 목록 — 도달 경로(flow) 하나가 원소 하나다.
+ *  키는 (IP, 포트, transport) 이며 스트림 transport 에서는 psip 소켓맵 키와 같은 값이다.
+ *  정본 설계: docs/design/features/registration_binding_set.md */
+typedef std::vector<CUserInfo> USER_BINDING_LIST;
+
+typedef std::map<std::string, USER_BINDING_LIST> USER_MAP;
 
 /**
  * @ingroup CspServer
@@ -123,6 +129,19 @@ public:
     void GetString( CMonitorString &strBuf );
 
 private:
+    /** 살아있는 바인딩 중 가장 최근 것의 인덱스. 살아있는 것이 없으면 가장 최근 바인딩.
+     *  생존 판정은 스트림 transport 만 스택에 묻는다(UDP 는 연결 개념이 없어 항상 살아있는
+     *  것으로 취급하고 등록 만료에 맡긴다) — registration_binding_set.md §2.1.
+     *  호출 전 m_clsMutex 를 잡고 있어야 한다. */
+    static size_t _pickBinding( const USER_BINDING_LIST &clsList );
+
+    /** (IP, 포트, transport) 가 같은 바인딩의 인덱스. 없으면 npos. */
+    static size_t _findBinding( const USER_BINDING_LIST &clsList, const std::string &strIp, int iPort,
+                                ESipTransport eTransport );
+
+    /** 가입자당 바인딩 상한 — 죽은 flow 가 만료 전에 누적되는 것을 막는다(초과 시 최고령 제거). */
+    static const size_t MAX_BINDING_PER_USER = 8;
+
     USER_MAP m_clsMap;
     CSipMutex m_clsMutex;
 };

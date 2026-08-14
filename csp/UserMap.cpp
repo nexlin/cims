@@ -46,6 +46,38 @@ void CUserInfo::GetCallRoute( CSipCallRoute &clsRoute ) {
     clsRoute.m_eTransport = m_eTransport;
 }
 
+size_t CUserMap::_findBinding( const USER_BINDING_LIST &clsList, const std::string &strIp, int iPort,
+                               ESipTransport eTransport ) {
+    for ( size_t i = 0; i < clsList.size(); ++i ) {
+        if ( clsList[i].m_iPort == iPort && clsList[i].m_eTransport == eTransport && clsList[i].m_strIp == strIp )
+            return i;
+    }
+    return (size_t)-1;
+}
+
+size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList ) {
+    size_t iBest = 0, iNewest = 0;
+    bool bFoundAlive = false;
+
+    for ( size_t i = 0; i < clsList.size(); ++i ) {
+        if ( clsList[i].m_iLoginTime > clsList[iNewest].m_iLoginTime ) iNewest = i;
+
+        // 스트림 transport 는 연결이 살아있어야 도달한다 — 죽은 flow 로 보내면 신규 연결 시도가
+        //   되어 NAT 뒤 상대에게는 실패한다. 스택에 직접 묻는다(추측하지 않는다).
+        if ( !gclsUserAgent.m_clsSipStack.IsFlowAlive( clsList[i].m_strIp.c_str(), clsList[i].m_iPort,
+                                                       clsList[i].m_eTransport ) )
+            continue;
+
+        if ( !bFoundAlive || clsList[i].m_iLoginTime > clsList[iBest].m_iLoginTime ) {
+            iBest = i;
+            bFoundAlive = true;
+        }
+    }
+
+    // 살아있는 바인딩이 없으면 가장 최근 것 — 도달은 실패하겠지만 종전 동작과 같고 무해하다.
+    return bFoundAlive ? iBest : iNewest;
+}
+
 CUserMap::CUserMap() {
 }
 
@@ -104,71 +136,69 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
     m_clsMutex.acquire();
     itMap = m_clsMap.find( strUserId );
     if ( itMap == m_clsMap.end() ) {
-        m_clsMap.insert( USER_MAP::value_type( strUserId, clsInfo ) );
+        // 신규 가입자 — 바인딩 1개로 시작한다. (메서드 무관: 인증된 비REGISTER 요청도 여기로
+        //   들어온다 — CscfModule::CheckAuthrization)
+        USER_BINDING_LIST clsList;
+        clsList.push_back( clsInfo );
+        m_clsMap.insert( USER_MAP::value_type( strUserId, clsList ) );
         CLog::Print( LOG_DEBUG, "user(%s) is inserted (%s:%d:%d) group(%s)", strUserId.c_str(), clsInfo.m_strIp.c_str(),
                      clsInfo.m_iPort, clsInfo.m_eTransport, clsInfo.m_strGroupId.c_str() );
     } else {
-        // SIP REGISTER 를 제외한 요청에서 IP 주소 또는 포트 번호가 변경된 경우, m_iLoginTimeout 를 0 으로 저장하지 않기
-        // 위해서 각 멤버별로 저장함
-        //
-        // 서버→UE 도달 주소(latch)는 **상시 살아 있는 경로**여야 한다 — 서버가 먼저 거는
-        // 요청(fan-out INVITE·NOTIFY·세션 갱신)의 목적지이기 때문이다. 송신 transport 는 이 값을
-        // 그대로 따르므로, 여기에 무엇이 담기느냐가 도달 가능성을 결정한다.
-        //
-        // 단말이 대형 요청을 RFC 3261 §18.1.1 로 TCP 승격하면 그 다이얼로그의 후속(ACK/BYE)·
-        // 재-REGISTER(RFC 5626 ;ob 플로우 재사용)까지 같은 TCP 로 오지만, 그 연결은 아무도
-        // 유지하지 않아 유휴 타이머로 곧 닫힌다(pjsip 실측). 닫힌 뒤 그 주소로는 서버가 도달할
-        // 수 없다 — NAT 뒤 단말에 서버가 연결을 새로 걸 수는 없기 때문이다.
-        //
-        // 그래서 갱신 자격은 **등록에 쓰인 flow 와 같은 flow 에서 온 요청**에 한한다. 그 판정을
-        // 수신 transport 와 저장 transport 의 일치로 근사한다 — 승격 TCP 는 등록 flow(UDP·TLS)와
-        // transport 가 다르므로 걸러지고, 등록 flow 는 단말 keepalive 로 유지되므로 통과한다.
-        // (메서드 기준 "REGISTER 면 허용"은 0.2.84 에서 오염 재발 실측 — ;ob 재사용으로 재-
-        //  REGISTER 도 승격 TCP 로 오기 때문에 판별자가 되지 못한다.)
-        //
-        // 규칙② — 등록 flow **전환**(예: UDP 등록 단말을 TLS 로 옮기는 프로비저닝 변경)은
-        //   허용해야 한다. 그러지 않으면 전환한 계정의 latch 가 죽은 옛 주소에 영구히 묶인다.
-        //   판별자: **우발적으로 나타날 수 있는 transport 는 TCP 뿐**이다(크기 초과 승격).
-        //   TLS 는 단말 설정 없이는 나타나지 않으므로, 인증된 REGISTER 가 TCP 아닌 transport 로
-        //   오면 그건 의도된 전환이다. 메서드만 보는 규칙("REGISTER 면 허용")은 ;ob 플로우
-        //   재사용 때문에 승격 TCP 재-REGISTER 를 걸러내지 못한다(0.2.84 실측).
-        //   REGISTER 는 이 지점 이전에 Digest 인증을 통과한다(CscfModule).
-        const bool bSameFlow = ( pclsMessage->m_eTransport == itMap->second.m_eTransport );
-        const bool bFlowSwitch = !bSameFlow && pclsMessage->IsMethod( SIP_METHOD_REGISTER ) &&
-                                 ( pclsMessage->m_eTransport != E_SIP_TCP || gclsSetup.m_bAllowTcpFlowSwitch );
-        if ( bSameFlow || bFlowSwitch ) {
-            if ( bFlowSwitch ) {
-                CLog::Print( LOG_SYSTEM, "user(%s) registration flow switched: %s:%d:%d → %s:%d:%d", strUserId.c_str(),
-                             itMap->second.m_strIp.c_str(), itMap->second.m_iPort, itMap->second.m_eTransport,
-                             clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport );
+        USER_BINDING_LIST &clsList = itMap->second;
+        size_t iIdx = _findBinding( clsList, clsInfo.m_strIp, clsInfo.m_iPort, clsInfo.m_eTransport );
+
+        if ( iIdx == (size_t)-1 ) {
+            // 새 도달 경로다. **REGISTER 만 바인딩을 만든다**(RFC 3261 §10 — 바인딩 생성은 등록의
+            //   권한이다). 비REGISTER 요청(대형 INVITE 승격 후의 ACK/BYE 등)은 새 경로로 보여도
+            //   등록되지 않은 flow 이므로 무시한다 — 종전의 transport 가드가 하던 일을 권한 구분이
+            //   대신한다.
+            //   등록으로 들어온 flow 는 그대로 추가한다: 승격 TCP 로 온 재-REGISTER 도 바인딩이
+            //   되지만, 그 연결이 닫히면 _pickBinding 의 생존 판정에서 탈락하므로 도달 주소를
+            //   오염시키지 않는다. transport 종류로 추측할 필요가 없어진다
+            //   (registration_binding_set.md §2).
+            if ( !pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
+                m_clsMutex.release();
+                return true;
             }
-            itMap->second.m_strIp = clsInfo.m_strIp;
-            itMap->second.m_iPort = clsInfo.m_iPort;
-            itMap->second.m_eTransport = clsInfo.m_eTransport;
-            itMap->second.m_iLastSeenTime = clsInfo.m_iLoginTime;
-        }
-        itMap->second.m_strGroupId = clsInfo.m_strGroupId;
-        // 재등록 갱신 — REGISTER 에서만 capability·Contact 재평가 (비REGISTER 갱신은 Contact 미포함)
-        //   ⚠ 위 가드에 막힌 REGISTER 도 수명은 연장한다 = 주소가 stale 인 바인딩이 만료 sweep 에
-        //     걸리지 않는다. 수명 연장까지 막으면 승격 TCP 로 재-REGISTER 가 반복되는 구간에서
-        //     살아있는 단말이 삭제되므로, 실측 후 결정한다 (sip_tls_signaling.md §4.5).
-        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
-            // 바인딩 수명 연장 — 재등록이 만료시각을 리셋해야 sweep 에 의한 유령 만료가 없다
-            itMap->second.m_iLoginTime = clsInfo.m_iLoginTime;
-            itMap->second.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
-            itMap->second.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
-            if ( clsInfo.m_strContactUri.empty() == false ) {
-                itMap->second.m_strContactUri = clsInfo.m_strContactUri;
-                itMap->second.m_clsContactParamList = clsInfo.m_clsContactParamList;
+
+            if ( clsList.size() >= MAX_BINDING_PER_USER ) {
+                size_t iOldest = 0;
+                for ( size_t k = 1; k < clsList.size(); ++k ) {
+                    if ( clsList[k].m_iLoginTime < clsList[iOldest].m_iLoginTime ) iOldest = k;
+                }
+                CLog::Print( LOG_DEBUG, "user(%s) binding cap — drop oldest (%s:%d:%d)", strUserId.c_str(),
+                             clsList[iOldest].m_strIp.c_str(), clsList[iOldest].m_iPort,
+                             clsList[iOldest].m_eTransport );
+                clsList.erase( clsList.begin() + iOldest );
             }
-            itMap->second.m_iRegisterCSeq = clsInfo.m_iRegisterCSeq;
+            clsList.push_back( clsInfo );
+            iIdx = clsList.size() - 1;
+            CLog::Print( LOG_SYSTEM, "user(%s) binding added (%s:%d:%d) — total %d", strUserId.c_str(),
+                         clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport, (int)clsList.size() );
+        } else {
+            clsList[iIdx].m_iLastSeenTime = clsInfo.m_iLoginTime;
         }
 
-        // 앞의 (ip:port:transport) 는 **수신값**, latch() 는 갱신 판정 후의 **저장값**이다.
-        //   가드에 막히면 둘이 달라진다 — 저장 상태는 반드시 latch() 쪽을 봐야 한다.
-        CLog::Print( LOG_DEBUG, "user(%s) is updated (%s:%d:%d) latch(%s:%d:%d) group(%s)", strUserId.c_str(),
-                     clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport, itMap->second.m_strIp.c_str(),
-                     itMap->second.m_iPort, itMap->second.m_eTransport, clsInfo.m_strGroupId.c_str() );
+        CUserInfo &clsBind = clsList[iIdx];
+        // 그룹(조직)은 가입자 단위 속성이므로 전 바인딩에 반영한다.
+        for ( size_t k = 0; k < clsList.size(); ++k ) clsList[k].m_strGroupId = clsInfo.m_strGroupId;
+
+        // 재등록 갱신 — REGISTER 에서만 capability·Contact 재평가 (비REGISTER 갱신은 Contact 미포함)
+        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
+            // 바인딩 수명은 그 바인딩만 연장한다 — 다른 flow 의 만료를 대신 늦추지 않는다.
+            clsBind.m_iLoginTime = clsInfo.m_iLoginTime;
+            clsBind.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
+            clsBind.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
+            if ( clsInfo.m_strContactUri.empty() == false ) {
+                clsBind.m_strContactUri = clsInfo.m_strContactUri;
+                clsBind.m_clsContactParamList = clsInfo.m_clsContactParamList;
+            }
+            clsBind.m_iRegisterCSeq = clsInfo.m_iRegisterCSeq;
+        }
+
+        CLog::Print( LOG_DEBUG, "user(%s) is updated (%s:%d:%d) bindings(%d) group(%s)", strUserId.c_str(),
+                     clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport, (int)clsList.size(),
+                     clsInfo.m_strGroupId.c_str() );
     }
     m_clsMutex.release();
 
@@ -188,8 +218,9 @@ bool CUserMap::Select( const char *pszUserId, CUserInfo &clsInfo ) {
 
     m_clsMutex.acquire();
     itMap = m_clsMap.find( pszUserId );
-    if ( itMap != m_clsMap.end() ) {
-        clsInfo = itMap->second;
+    if ( itMap != m_clsMap.end() && !itMap->second.empty() ) {
+        // 소비자는 "이 가입자에게 보낼 도달 정보 하나"를 원한다 — 여기서 고른다.
+        clsInfo = itMap->second[_pickBinding( itMap->second )];
         bRes = true;
     }
     m_clsMutex.release();
@@ -231,7 +262,9 @@ bool CUserMap::SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList ) {
 
     m_clsMutex.acquire();
     for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        if ( !strcmp( pszGroupId, itMap->second.m_strGroupId.c_str() ) ) {
+        if ( itMap->second.empty() ) continue;
+        // 그룹은 가입자 단위 속성 — 어느 바인딩을 봐도 같다.
+        if ( !strcmp( pszGroupId, itMap->second[0].m_strGroupId.c_str() ) ) {
             clsList.push_back( itMap->first );
         }
     }
@@ -269,8 +302,10 @@ void CUserMap::TouchFlow( const char *pszUserId, ESipTransport eTransport ) {
 
     m_clsMutex.acquire();
     itMap = m_clsMap.find( pszUserId );
-    if ( itMap != m_clsMap.end() && itMap->second.m_eTransport == eTransport ) {
-        time( &itMap->second.m_iLastSeenTime );
+    if ( itMap != m_clsMap.end() ) {
+        for ( size_t i = 0; i < itMap->second.size(); ++i ) {
+            if ( itMap->second[i].m_eTransport == eTransport ) time( &itMap->second[i].m_iLastSeenTime );
+        }
     }
     m_clsMutex.release();
 }
@@ -282,12 +317,18 @@ bool CUserMap::SetIpPort( const char *pszUserId, const char *pszIp, int iPort, E
     m_clsMutex.acquire();
     itMap = m_clsMap.find( pszUserId );
     if ( itMap != m_clsMap.end() ) {
-        // 세 값은 한 세트 — transport 를 빼고 갱신하면 이전 transport 로 새 포트에 보내게 된다.
-        itMap->second.m_strIp = pszIp;
-        itMap->second.m_iPort = iPort;
-        itMap->second.m_eTransport = eTransport;
-        CLog::Print( LOG_DEBUG, "user(%s) ip(%s) port(%d) transport(%d)", pszUserId, pszIp, iPort, eTransport );
-        bRes = true;
+        // 비REGISTER 요청의 주소 변경 감지 경로다 — 바인딩을 **만들지는 않고**(생성은 등록의
+        //   권한) 같은 transport 의 기존 바인딩 주소만 옮긴다. NAT rebind 후 첫 요청이 REGISTER 가
+        //   아닌 경우의 도달을 살리는 용도.
+        for ( size_t i = 0; i < itMap->second.size(); ++i ) {
+            if ( itMap->second[i].m_eTransport != eTransport ) continue;
+            itMap->second[i].m_strIp = pszIp;
+            itMap->second[i].m_iPort = iPort;
+            time( &itMap->second[i].m_iLastSeenTime );
+            CLog::Print( LOG_DEBUG, "user(%s) binding moved → %s:%d:%d", pszUserId, pszIp, iPort, eTransport );
+            bRes = true;
+            break;
+        }
     }
     m_clsMutex.release();
 
@@ -336,9 +377,30 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
 
     m_clsMutex.acquire();
     for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ) {
-        if ( iTime > ( itMap->second.m_iLoginTime + itMap->second.m_iLoginTimeout + iTimeout ) ) {
+        USER_BINDING_LIST &clsList = itMap->second;
+        CUserInfo clsLastRemoved;
+        bool bRemoved = false;
+
+        // 만료는 **바인딩 단위**다 — 한 flow 가 만료돼도 다른 flow 로 등록이 살아 있을 수 있다.
+        for ( size_t i = clsList.size(); i > 0; --i ) {
+            const CUserInfo &clsBind = clsList[i - 1];
+            if ( iTime > ( clsBind.m_iLoginTime + clsBind.m_iLoginTimeout + iTimeout ) ) {
+                CLog::Print( LOG_DEBUG, "user(%s) binding expired (%s:%d:%d)", itMap->first.c_str(),
+                             clsBind.m_strIp.c_str(), clsBind.m_iPort, clsBind.m_eTransport );
+                // 마지막으로 남았던(가장 최근 등록) 바인딩을 통지용으로 보존한다 —
+                //   reg-event NOTIFY 는 삭제 직전 바인딩으로 목적지와 본문을 만든다.
+                if ( !bRemoved || clsBind.m_iLoginTime > clsLastRemoved.m_iLoginTime ) {
+                    clsLastRemoved = clsBind;
+                    bRemoved = true;
+                }
+                clsList.erase( clsList.begin() + ( i - 1 ) );
+            }
+        }
+
+        // 마지막 바인딩이 사라지면 등록 해제다 — 그때만 가입자를 제거하고 통지 대상으로 넘긴다.
+        if ( clsList.empty() ) {
             CLog::Print( LOG_DEBUG, "user(%s) is deleted - timeout", itMap->first.c_str() );
-            clsDeletedInfoList.push_back( std::make_pair( itMap->first, itMap->second ) );
+            clsDeletedInfoList.push_back( std::make_pair( itMap->first, clsLastRemoved ) );
             itMap = m_clsMap.erase( itMap );
         } else {
             ++itMap;
@@ -363,22 +425,20 @@ void CUserMap::SendOptions() {
 
     m_clsMutex.acquire();
     for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        if ( itMap->second.m_iSendOptionsTime == 0 ) {
-            if ( ( iTime - itMap->second.m_iLoginTime ) < gclsSetup.m_iSendOptionsPeriod ) {
-                continue;
-            }
-        } else {
-            if ( ( iTime - itMap->second.m_iSendOptionsTime ) < gclsSetup.m_iSendOptionsPeriod ) {
-                continue;
-            }
+        // keepalive 는 바인딩(도달 경로) 단위 — 목적은 그 경로의 NAT 매핑 유지다.
+        //   전 바인딩을 대상으로 하되 주기는 바인딩별로 센다.
+        bool bDue = false;
+        for ( size_t i = 0; i < itMap->second.size(); ++i ) {
+            CUserInfo &clsBind = itMap->second[i];
+            time_t iRef = clsBind.m_iSendOptionsTime == 0 ? clsBind.m_iLoginTime : clsBind.m_iSendOptionsTime;
+            if ( ( iTime - iRef ) < gclsSetup.m_iSendOptionsPeriod ) continue;
+
+            clsBind.m_iSendOptionsTime = iTime;
+            ++clsBind.m_iOptionsSeq;
+            if ( clsBind.m_iOptionsSeq > 10000000 ) clsBind.m_iOptionsSeq = 1;
+            bDue = true;
         }
-
-        itMap->second.m_iSendOptionsTime = iTime;
-
-        ++itMap->second.m_iOptionsSeq;
-        if ( itMap->second.m_iOptionsSeq > 10000000 ) itMap->second.m_iOptionsSeq = 1;
-
-        clsList.push_back( itMap->first );
+        if ( bDue ) clsList.push_back( itMap->first );
     }
     m_clsMutex.release();
 
@@ -447,10 +507,13 @@ void CUserMap::GetString( CMonitorString &strBuf ) {
 
     m_clsMutex.acquire();
     for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        strBuf.AddCol( itMap->first );
-        strBuf.AddCol( itMap->second.m_strIp, itMap->second.m_iPort );
-        strBuf.AddCol( itMap->second.m_iLoginTime );
-        strBuf.AddRow( itMap->second.m_iLoginTimeout );
+        // 바인딩마다 한 행 — 가입자가 여러 도달 경로를 가질 수 있다.
+        for ( size_t i = 0; i < itMap->second.size(); ++i ) {
+            strBuf.AddCol( itMap->first );
+            strBuf.AddCol( itMap->second[i].m_strIp, itMap->second[i].m_iPort );
+            strBuf.AddCol( itMap->second[i].m_iLoginTime );
+            strBuf.AddRow( itMap->second[i].m_iLoginTimeout );
+        }
     }
     m_clsMutex.release();
 }

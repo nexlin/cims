@@ -70,6 +70,17 @@ public:
 	/** TCP 리스너를 런타임에 추가. 성공 시 outId 에 실제 할당된 ID 반환.
 	 *  iExtId: CSP 쪽 논리 ID. 0 이면 내부 auto-assign.
 	 *  strBindIp 가 빈 문자열이면 stack 의 m_strLocalIp 사용. */
+	/** (ip, port, transport) 로 식별되는 flow 가 지금 살아 있는지.
+	 *
+	 *  스트림 transport(TCP/TLS)에서 이 3원소는 **연결을 찾는 열쇠**다 — 소켓맵에 그 키의
+	 *  연결이 있으면 그 주소로 보낸 요청은 기존 연결로 도달하고, 없으면 신규 연결 시도가 되어
+	 *  NAT 뒤 상대에게는 실패한다. 응용이 도달 가능성을 **추측하지 않고 조회**할 수 있게 한다.
+	 *
+	 *  UDP 는 연결 개념이 없어 판정 대상이 아니므로 항상 true 를 반환한다 — 그 경로의 생존은
+	 *  응용이 최근 수신 시각(등록 갱신·keepalive)으로 판정한다.
+	 */
+	bool IsFlowAlive( const char * pszIp, int iPort, ESipTransport eTransport );
+
 	bool AddTcpListener( int iExtId, const char* pszBindIp, int iPort, int& outId );
 	bool RemoveTcpListener( int iExtId );
 	void GetTcpListenerInfo( std::vector<CSipStackTcpListener*>& outList );

@@ -820,6 +820,27 @@ void CSipStack::_RefreshPrimaryTcpSocketLocked()
 	}
 }
 
+bool CSipStack::IsFlowAlive( const char * pszIp, int iPort, ESipTransport eTransport )
+{
+	if( pszIp == NULL || pszIp[0] == '\0' || iPort <= 0 ) return false;
+
+	Socket hSocket;
+
+	if( eTransport == E_SIP_TCP )
+	{
+		return m_clsTcpSocketMap.Select( pszIp, iPort, hSocket );
+	}
+#ifdef USE_TLS
+	if( eTransport == E_SIP_TLS )
+	{
+		return m_clsTlsSocketMap.Select( pszIp, iPort, hSocket );
+	}
+#endif
+
+	// UDP — 연결이 없으므로 스택은 판정할 수 없다. 응용의 최근 수신 시각 판정에 맡긴다.
+	return true;
+}
+
 bool CSipStack::AddTcpListener( int iExtId, const char* pszBindIp, int iPort, int& outId )
 {
 	if( !m_bStarted ) return false;
