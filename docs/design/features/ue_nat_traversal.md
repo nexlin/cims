@@ -5,7 +5,8 @@
 검증망에서 NAT 뒤 단말을 정식 지원**한다.
 
 관련 문서: [modules/csp.md](../modules/csp.md) · [modules/cmp.md](../modules/cmp.md) ·
-[sip_tls_signaling.md](sip_tls_signaling.md) · [api/cmp_media_api.md](../../api/cmp_media_api.md)
+[sip_tls_signaling.md](sip_tls_signaling.md) · [registration_binding_set.md](registration_binding_set.md) ·
+[api/cmp_media_api.md](../../api/cmp_media_api.md)
 
 > **진행 중 미해결 이슈**: PTT 그룹콜 조인 크래시(UE pjsua `med_prov_cnt` assert) + 발언 무음은
 > [ptt_join_crash_and_silence.md](ptt_join_crash_and_silence.md) 참조 (UE 측 결함, 서버 결백).
