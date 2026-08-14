@@ -93,6 +93,11 @@ public:
     bool Start();
     void Stop();
 
+    /** 시그널링 transport 선택 (기본 UDP). TLS 면 스택을 TLS 클라이언트로 기동한다 —
+     *  등록·발신 목적지가 모두 이 transport 로 나가고, 서버 발신(fan-out INVITE·NOTIFY·
+     *  세션 갱신)은 그 연결로 되돌아온다. Start() 전에 호출할 것. */
+    void SetTransport(ESipTransport e) { m_eTransport = e; }
+
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }
     void SetCscHost(const std::string& h, int p, bool tls) { m_strCscHost = h; m_iCscPort = p; m_bCscTls = tls; }
@@ -131,6 +136,8 @@ public:
     int          m_iLocalPort;
     bool         m_bPttMode;
     std::string  m_strGroupId;
+    /** 시그널링 transport — 등록 목적지(CSipServerInfo)와 스택 기동 모드에 함께 반영된다. */
+    ESipTransport m_eTransport = E_SIP_UDP;
     // MCPTT condition (TS 24.379): 0=normal/1=imminent/2=emergency. >0 이면 그룹 INVITE 의
     // mcptt-info 에 emergency-ind/imminentperil-ind 를 실어 긴급 개시(키업)를 시뮬레이트.
     int          m_iEmergencyCond = 0;

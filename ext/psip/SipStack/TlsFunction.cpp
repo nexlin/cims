@@ -221,7 +221,14 @@ bool SSLClientStart( )
 {
 	if( SSLStart() == false ) return false;
 
+	// 버전 유연 메서드를 쓴다 — TLSv1_client_method() 는 **TLS 1.0 전용**이라 최신 서버와
+	//   handshake 가 성립하지 않는다(OpenSSL 3 기본 보안수준에서 거절). SSLServerStart 는
+	//   이미 TLS_client_method() 를 쓰고 있어, 서버 겸용 프로세스에서만 우연히 정상이었다.
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	gpsttClientMeth = TLS_client_method();
+#else
 	gpsttClientMeth = TLSv1_client_method();
+#endif
 	if( (gpsttClientCtx = SSL_CTX_new( gpsttClientMeth )) == NULL )
 	{
 		CLog::Print( LOG_ERROR, "SSL_CTX_new error - client" );
@@ -283,8 +290,12 @@ bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
 	try
 	{
 		SSL_set_fd( psttSsl, (int)iFd );
-		if( SSL_connect( psttSsl ) == -1 )
+		int iRet = SSL_connect( psttSsl );
+		if( iRet != 1 )
 		{
+			CLog::Print( LOG_ERROR, "[SSL] SSL_connect error(ret=%d, err=%d)", iRet,
+			             SSL_get_error( psttSsl, iRet ) );
+			SSLPrintError( );
 			SSL_free( psttSsl );
 			return false;
 		}

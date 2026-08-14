@@ -743,6 +743,16 @@
           "restart": true
         },
         {
+          "key": "Setup.Sip.AllowTcpFlowSwitch",
+          "label": "등록 flow 전환 시 TCP 허용",
+          "group": "sip_fallback",
+          "type": "bool",
+          "default": false,
+          "hidden": true,
+          "restart": false,
+          "help": "등록 transport 를 TCP 로 바꾸는 재등록을 허용한다. 기본 false — TCP 는 대형 요청 승격으로 우발 발생하는 유일한 transport라, 허용하면 승격 오염 방어가 무너진다."
+        },
+        {
           "key": "Setup.Sip.TlsPort",
           "label": "TLS Port (fallback)",
           "group": "sip_fallback",

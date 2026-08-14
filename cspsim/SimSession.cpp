@@ -291,7 +291,7 @@ SimSession::SimSession(int id,
     m_clsServerInfo.m_strUserId      = m_strUser;
     m_clsServerInfo.m_strAuthId      = m_strAuthId.empty() ? m_strUser : m_strAuthId;
     m_clsServerInfo.m_strPassWord    = m_strPwd;
-    m_clsServerInfo.m_eTransport     = E_SIP_UDP;
+    m_clsServerInfo.m_eTransport     = E_SIP_UDP;  // Start() 에서 m_eTransport 로 확정
     m_clsServerInfo.m_iPort          = m_iServerPort;
     m_clsServerInfo.m_iLoginTimeout  = 600;
     // 3GPP IMS 헤더 — 실제 단말과 동일한 패턴
@@ -340,6 +340,15 @@ bool SimSession::Start() {
             m_stats.iRegFail++;
             return false;
         }
+    }
+
+    // transport 반영 — 등록 목적지와 스택 기동 모드는 한 세트다.
+    //   TLS 는 서버 리스너를 열지 않는 **클라이언트 전용**으로 기동한다(m_iLocalTlsPort=0 유지):
+    //   psip 이 SSLClientStart + TLS worker pool 을 초기화하고, 서버가 먼저 거는 요청도
+    //   이 클라이언트 연결로 수신한다.
+    m_clsServerInfo.m_eTransport = m_eTransport;
+    if (m_eTransport == E_SIP_TLS) {
+        m_clsSetup.m_bTlsClient = true;
     }
 
     if (!m_bNoRegister) {

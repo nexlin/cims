@@ -126,9 +126,22 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
         // (메서드 기준 "REGISTER 면 허용"은 0.2.84 에서 오염 재발 실측 — ;ob 재사용으로 재-
         //  REGISTER 도 승격 TCP 로 오기 때문에 판별자가 되지 못한다.)
         //
-        // ⚠ 이 규칙은 transport **전환**(UDP 등록 단말이 TLS 로 재등록)을 차단한다. 전환 허용
-        //   규칙은 미구현 — docs/design/features/sip_tls_signaling.md §4.4 참조.
-        if ( pclsMessage->m_eTransport == itMap->second.m_eTransport ) {
+        // 규칙② — 등록 flow **전환**(예: UDP 등록 단말을 TLS 로 옮기는 프로비저닝 변경)은
+        //   허용해야 한다. 그러지 않으면 전환한 계정의 latch 가 죽은 옛 주소에 영구히 묶인다.
+        //   판별자: **우발적으로 나타날 수 있는 transport 는 TCP 뿐**이다(크기 초과 승격).
+        //   TLS 는 단말 설정 없이는 나타나지 않으므로, 인증된 REGISTER 가 TCP 아닌 transport 로
+        //   오면 그건 의도된 전환이다. 메서드만 보는 규칙("REGISTER 면 허용")은 ;ob 플로우
+        //   재사용 때문에 승격 TCP 재-REGISTER 를 걸러내지 못한다(0.2.84 실측).
+        //   REGISTER 는 이 지점 이전에 Digest 인증을 통과한다(CscfModule).
+        const bool bSameFlow = ( pclsMessage->m_eTransport == itMap->second.m_eTransport );
+        const bool bFlowSwitch = !bSameFlow && pclsMessage->IsMethod( SIP_METHOD_REGISTER ) &&
+                                 ( pclsMessage->m_eTransport != E_SIP_TCP || gclsSetup.m_bAllowTcpFlowSwitch );
+        if ( bSameFlow || bFlowSwitch ) {
+            if ( bFlowSwitch ) {
+                CLog::Print( LOG_SYSTEM, "user(%s) registration flow switched: %s:%d:%d → %s:%d:%d", strUserId.c_str(),
+                             itMap->second.m_strIp.c_str(), itMap->second.m_iPort, itMap->second.m_eTransport,
+                             clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport );
+            }
             itMap->second.m_strIp = clsInfo.m_strIp;
             itMap->second.m_iPort = clsInfo.m_iPort;
             itMap->second.m_eTransport = clsInfo.m_eTransport;

@@ -305,6 +305,8 @@ static void PrintUsage(const char* pszBin) {
     printf("  -domain      <domain>    SIP 도메인 (default: csp)\n");
     printf("  -password    <pwd>       패스워드 (default: 1234)\n");
     printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
+    printf("  -transport   <udp|tcp|tls> 시그널링 transport (default: udp)\n");
+    printf("                             tls 는 서버 인증서를 검증하지 않는다(랩 자가서명 수용)\n");
     printf("  -group       <group_id>  PTT 그룹 ID (default: 1000)\n");
     printf("  -scenario    <name>      자동 시나리오:\n");
     printf("                             register     - 등록만\n");
@@ -677,6 +679,8 @@ int main(int argc, char* argv[])
     std::string strDomain     = GetArg(argc, argv, "-domain",     "csp");
     std::string strPassword   = GetArg(argc, argv, "-password",   "1234");
     std::string strMode       = GetArg(argc, argv, "-mode",       "volte");
+    // 시그널링 transport — udp(기본)|tcp|tls. TLS 는 스택을 TLS 클라이언트로 기동한다.
+    std::string strTransport  = GetArg(argc, argv, "-transport",  "udp");
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
@@ -847,6 +851,11 @@ int main(int argc, char* argv[])
             bPttMode,
             strGroupId
         );
+        if (strTransport == "tls" || strTransport == "TLS") {
+            s->SetTransport(E_SIP_TLS);
+        } else if (strTransport == "tcp" || strTransport == "TCP") {
+            s->SetTransport(E_SIP_TCP);
+        }
         s->SetNoRegister(bNoRegister);
         s->SetNoXcap(bNoXcap);
         if (!strCscIp.empty()) s->SetCscHost(strCscIp, iCscPort, bCscTls);
