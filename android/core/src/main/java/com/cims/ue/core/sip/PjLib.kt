@@ -7,6 +7,7 @@ import org.pjsip.pjsua2.Endpoint
 import org.pjsip.pjsua2.EpConfig
 import org.pjsip.pjsua2.LogEntry
 import org.pjsip.pjsua2.LogWriter
+import org.pjsip.pjsua2.TlsConfig
 import org.pjsip.pjsua2.TransportConfig
 import org.pjsip.pjsua2.pjsip_transport_type_e
 
@@ -97,12 +98,29 @@ object PjLib {
             )
         }.onFailure { Log.w(TAG, "TCP transport create failed (UDP-only fallback)", it) }
 
+        // TLS transport — 계정 설정이 transport=tls 일 때 사용한다(프로비저닝이 서비스/가입자
+        //   단위로 지정). 네이티브에 TLS 가 없으면(구 .so) 생성이 실패하므로 경고만 남기고
+        //   UDP/TCP 로 계속한다.
+        //   verifyServer=false: 현재 배치는 사설/자가서명 인증서라 CA 검증을 켤 수 없다.
+        //   CA 배포 방침이 서면 caListFile(또는 caBuf)를 채우고 true 로 올린다
+        //   (docs/design/features/sip_tls_signaling.md §8).
+        runCatching {
+            endpoint.transportCreate(
+                pjsip_transport_type_e.PJSIP_TRANSPORT_TLS,
+                TransportConfig().apply {
+                    port = 0
+                    tlsConfig = TlsConfig().apply { verifyServer = false }
+                },
+            )
+            Log.i(TAG, "TLS transport created")
+        }.onFailure { Log.w(TAG, "TLS transport create failed (평문 transport 만 사용)", it) }
+
         endpoint.libStart()
         ep = endpoint
         booted = true
         bootEpoch += 1
         threadEpoch.set(bootEpoch)            // libInit 가 boot 스레드를 등록함
-        Log.i(TAG, "PJSIP started — state=${endpoint.libGetState()}, SIP UDP+TCP transport up")
+        Log.i(TAG, "PJSIP started — state=${endpoint.libGetState()}, SIP UDP+TCP(+TLS) transport up")
 
         logRegisteredCodecs()
     }

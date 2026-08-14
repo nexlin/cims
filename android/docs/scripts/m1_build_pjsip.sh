@@ -42,9 +42,11 @@ cat > pjlib/include/pj/config_site.h <<'EOF'
 #define PJMEDIA_HAS_ILBC_CODEC   0
 #define PJMEDIA_HAS_G722_CODEC   0
 
-/* 5) M4 전 보안전송 off (UDP only) */
+/* 5) 시그널링 TLS 활성 (docs/design/features/sip_tls_signaling.md §7).
+      OpenSSL 정적 링크 — configure-android 의 --with-ssl 가 경로를 준다.
+      미디어 SRTP 는 별개 과제라 계속 off. */
 #define PJMEDIA_HAS_SRTP          0
-#define PJSIP_HAS_TLS_TRANSPORT   0
+#define PJSIP_HAS_TLS_TRANSPORT   1
 
 /* 6) NAT: RTP keepalive(empty RTP) — 청취 전용(무송신) 구간에도 주기 송신해
       하향 NAT 매핑·CMP latch 유지 (ue_nat_traversal.md §7.1). 주기=PJMEDIA_STREAM_KA_INTERVAL(기본 5s) */
@@ -1817,7 +1819,12 @@ fi
 echo "=== [3] configure-android + make (arm64-v8a) ==="
 export APP_PLATFORM=28
 export TARGET_ABI=arm64-v8a
-./configure-android --use-ndk-cflags 2>&1 | tail -30
+# TLS transport 는 OpenSSL 을 요구한다. 안드로이드용 정적 빌드 경로(m1_build_openssl.sh 산출)를
+#   --with-ssl 로 넘긴다. 부재 시 configure 가 TLS 를 조용히 끄므로 존재를 먼저 확인한다.
+OPENSSL_PREFIX=${OPENSSL_PREFIX:-$HOME/opt/openssl-android-arm64}
+test -f "$OPENSSL_PREFIX/lib/libssl.a" || {
+  echo "!! OpenSSL for Android 없음: $OPENSSL_PREFIX (m1_build_openssl.sh 먼저 실행)"; exit 1; }
+./configure-android --use-ndk-cflags --with-ssl="$OPENSSL_PREFIX" 2>&1 | tail -30
 make dep 2>&1 | tail -3
 make clean >/dev/null 2>&1 || true
 make -j"$(nproc)" 2>&1 | tail -15

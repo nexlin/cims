@@ -9,10 +9,9 @@
 [sip_runtime_config.md](sip_runtime_config.md) · [modules/csp.md](../modules/csp.md) ·
 [android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md)
 
-> **상태**: 서버측은 구현·실측 완료다 — TLS 접속점 개설(재기동·무중단 추가 양쪽,
-> [§6](#6-서버-구현-상태))과 latch 갱신·전환 규칙([§4](#4-latch-갱신-규칙)). 시험 클라이언트는
-> `cspsim -transport tls`. **남은 것은 단말**([§7](#7-단말-구현-상태))이며, 단말이 TLS 를
-> 지원하지 않으므로 실배치는 여전히 UDP 등록이다.
+> **상태**: 서버·단말 모두 TLS 등록·통화가 성립한다(실기기 실측). 남은 것은 **인증서 운영
+> 방침**([§8](#8-인증서-운영-요건-미정)) — 현재는 자가서명 인증서에 단말 검증을 끈 랩 구성이라
+> 상용 배치 전에 CA·검증·갱신 체계를 세워야 한다. 전환은 가입자 단위로 진행할 수 있다.
 
 ## 1. 범위와 전제
 
@@ -21,7 +20,7 @@
 | 대상 | UE ↔ CSP access edge 의 SIP 시그널링 |
 | 비대상 | RTP/RTCP(계속 UDP), floor control(RTCP APP), MSRP |
 | 표준 배치 | `lb-access-tls :5061` ([02_deployment.md](../02_deployment.md)) |
-| 전환 단위 | 서비스(`Provisioning.Services.{ptt,volte}`) — 가입자 단위 전환은 미지원([§7](#7-단말-구현-상태)) |
+| 전환 단위 | **가입자 단위** — `{volte,ptt}_subscriptions.sip_transport`(NULL=서비스 설정). 계정 하나씩 옮기며 관찰할 수 있다 |
 | 현재 배치 | 전 단말 UDP 등록. `local_nodes.jsonl` = UDP primary + TCP:15060 2행 |
 
 ## 2. transport 별 도달 모델 — latch 의 의미가 다르다
@@ -321,15 +320,30 @@ fallback 키(`Setup.Sip.TlsPort`·`CertFile`·`TlsAcceptTimeout`)는 `csp/config
 
 ## 7. 단말 구현 상태
 
-**미구현이다.** 프로비저닝 필드만 바꾸면 되는 상태가 아니다.
+TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 
-| 항목 | 현재 | 필요 작업 |
-|---|---|---|
-| pjproject 빌드 | `config_site.h` 에 `PJSIP_HAS_TLS_TRANSPORT 0` (`android/docs/scripts/m1_build_pjsip.sh`) | 1 로 전환 |
-| OpenSSL | `configure-android` 에 `--with-ssl` 없음 | OpenSSL for Android 확보 후 지정, `.so` 재빌드 + SWIG |
-| transport 생성 | `android/core/.../sip/PjLib.kt` 가 UDP+TCP 만 `transportCreate` | TLS transport 생성 + `TlsConfig`(CA·verify 정책) |
-| 계정 설정 | `SipController` 가 `;transport=<udp/tcp/tls>` 를 registrar/proxy URI 에 반영 — 문자열 경로는 이미 준비됨 | 변경 불필요 |
-| 프로비저닝 | `csc/src/services/mcptt.py` `_provision_service` 의 `transport` 는 **서비스 단위**(`Provisioning.Services.{kind}`) | 점진 전환을 원하면 가입자 단위 override 신설 |
+| 항목 | 내용 |
+|---|---|
+| OpenSSL | android-arm64 정적 빌드(`android/docs/scripts/m1_build_openssl.sh` → `$HOME/opt/openssl-android-arm64`) |
+| pjproject | `config_site.h` 의 `PJSIP_HAS_TLS_TRANSPORT 1` + `configure-android --with-ssl=<prefix>` (`m1_build_pjsip.sh`). SWIG 산출물은 불변 — `.so` 만 교체된다 |
+| transport 생성 | `PjLib.kt` 가 UDP·TCP 에 이어 TLS transport 를 만든다. 실패해도 평문 transport 로 계속한다(구 `.so` 호환) |
+| 서버 인증서 검증 | `TlsConfig.verifyServer = false` — 자가서명 인증서 배치 전제. CA 배포 방침이 서면 `caListFile`/`caBuf` 를 채우고 켠다([§8](#8-인증서-운영-요건-미정)) |
+| 계정 설정 | 프로비저닝의 `sip.transport`/`sip.port` 를 그대로 registrar·proxy URI 에 반영(`;transport=tls`) |
+
+### 7.1 전환 단위 — 가입자 단위 override
+
+`{volte,ptt}_subscriptions.sip_transport`(`UDP`/`TCP`/`TLS`, NULL=서비스 설정)가 우선한다.
+CSC `/provisioning/me` 가 이 값을 단말 프로파일의 `sip.transport` 로 내리고, **TLS 로 해석되면
+포트도 서비스의 `tls_port`** 로 바꾼다 — 같은 포트로 평문과 TLS 를 겸하지 않기 때문이다.
+
+| 설정 | 위치 |
+|---|---|
+| 가입자 override | `{volte,ptt}_subscriptions.sip_transport` (`sql/migrate_subscription_transport.sql`) |
+| 서비스 기본 transport | `Provisioning.Services.{kind}.transport` |
+| TLS 포트 | `Provisioning.Services.{kind}.tls_port` (CSP 의 `protocol=TLS` local_node `bind_port` 와 일치) |
+
+단말은 **프로비저닝을 재취득해야** 전환이 반영된다(부팅 자동시작 경로에서 재취득 — 수동 실행은
+캐시 설정을 쓴다).
 
 ## 8. 인증서 운영 요건 (미정)
 
@@ -345,19 +359,19 @@ fallback 키(`Setup.Sip.TlsPort`·`CertFile`·`TlsAcceptTimeout`)는 `csp/config
 
 각 단계는 그 단계 끝에서 검증 가능한 단위로 나눈다.
 
-latch 갱신·전환 규칙([§4](#4-latch-갱신-규칙))과 서버측 TLS 접속점 개설([§6](#6-서버-구현-상태))은
-구현·실측 완료다. 시험 클라이언트는 `cspsim -transport tls` 로 확보되어 있다. 남은 단계는
-다음과 같다.
+latch 갱신·전환 규칙([§4](#4-latch-갱신-규칙))·서버 접속점([§6](#6-서버-구현-상태))·단말
+([§7](#7-단말-구현-상태))은 구현·실측 완료다. 시험 클라이언트는 `cspsim -transport tls`.
+남은 단계는 다음과 같다.
 
 | 단계 | 작업 | 검증 | 산출 |
 |---|---|---|---|
-| **3. 단말** | [§7](#7-단말-구현-상태) 전 항목 + [§8](#8-인증서-운영-요건-미정) 방침 + 가입자 단위 transport | 서버가 2단계로 검증된 상태에서 실패를 단말로 국지화. 절전 시나리오 포함 | android 빌드 트랙 |
+| **3. 인증서 운영** | [§8](#8-인증서-운영-요건-미정) 결정 — 사설 CA·검증 정책·갱신·만료 감시 | 단말 `verifyServer=true` 로 등록 성립 | csc/console + 단말 |
 | **4. 구조** | [§4.6](#46-정본-구조--flow-단위-바인딩-집합) flow 단위 바인딩 집합 | — | 설계 문서 선행 |
 
 의존 관계:
 
 ```
-3단계 (단말) ──▶ 4단계 (구조)
+3단계 (인증서 운영) ──▶ 4단계 (구조)
 ```
 
 **cspsim TLS 클라이언트화가 순서상 중요하다** — psip 에 클라이언트 TLS 경로(`SSLClientStart`,

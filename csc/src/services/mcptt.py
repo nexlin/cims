@@ -1723,7 +1723,7 @@ def _country_code_of(msisdn: str) -> str:
     return d[:2] if d[:2] in _E164_CC2 else d[:3]
 
 def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
-                       sip_password: str = "") -> dict:
+                       sip_password: str = "", sip_transport: str = "") -> dict:
     svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
     account = {
         "msisdn": sid,
@@ -1735,12 +1735,19 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     }
     if kind == "ptt":
         account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
+    # transport 는 가입자 override(subscriptions.sip_transport) 우선, 없으면 서비스 설정.
+    #   TLS 전환을 계정 단위로 진행하기 위한 것이다(서비스 단위만 있으면 전 단말 동시 전환뿐).
+    #   TLS 로 해석되면 접속 포트도 tls_port 로 바꾼다 — 같은 포트로는 평문/TLS 를 겸하지 않는다.
+    transport = (sip_transport or svc.get('transport', 'UDP') or 'UDP').upper()
+    port = int(svc.get('port', 5060))
+    if transport == 'TLS':
+        port = int(svc.get('tls_port') or port)
     profile = {
         "kind": kind,
         "sip": {
             "host": svc.get('host') or host_ip,     # 빈값 → 요청 Host(올인원). 다중노드면 CSP/PSP VIP.
-            "port": int(svc.get('port', 5060)),
-            "transport": svc.get('transport', 'UDP'),
+            "port": port,
+            "transport": transport,
             "domain": svc.get('domain') or IDMS_DOMAIN,
         },
         "account": account,
@@ -1793,9 +1800,19 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                     break
             if user_id is not None:
                 for t, kind in (('volte_subscriptions', 'volte'), ('ptt_subscriptions', 'ptt')):
-                    cur.execute(f"SELECT id, imsi, auth_id, passwd FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
-                    for sid, imsi, auth_id, passwd in cur.fetchall():
-                        services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip, passwd or ''))
+                    # sip_transport 는 가입자 단위 override (migrate_subscription_transport.sql).
+                    #   구 스키마(컬럼 부재) DB 에서도 동작하도록 실패 시 기존 질의로 폴백한다.
+                    try:
+                        cur.execute(f"SELECT id, imsi, auth_id, passwd, sip_transport FROM {t} "
+                                    "WHERE user_id=%s ORDER BY id", (user_id,))
+                        rows = cur.fetchall()
+                    except Exception:
+                        cur.execute(f"SELECT id, imsi, auth_id, passwd FROM {t} WHERE user_id=%s ORDER BY id",
+                                    (user_id,))
+                        rows = [(r[0], r[1], r[2], r[3], None) for r in cur.fetchall()]
+                    for sid, imsi, auth_id, passwd, transport in rows:
+                        services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip,
+                                                          passwd or '', transport or ''))
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None
