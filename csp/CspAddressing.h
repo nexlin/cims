@@ -3,6 +3,9 @@
 
 #include <string>
 
+#include "SipFrom.h"
+#include "SipTransport.h"
+
 /**
  * CspAddressing — CSP 가 외부에 advertise 하는 로컬 주소 helper 레이어 (R5.a + R5.b).
  *
@@ -24,6 +27,22 @@
  */
 
 namespace CspAddressing {
+
+    /** 자기 Contact 를 채운다 — **(호스트, 포트, transport) 는 한 세트**다.
+     *
+     *  Contact 는 상대가 in-dialog 요청(BYE·re-INVITE·SUBSCRIBE 갱신)을 보낼 목적지다.
+     *  포트만 그 transport 의 리스너로 적고 transport 파라미터를 빠뜨리면, 상대는
+     *  RFC 3261 §19.1.1 에 따라 **UDP 로 해석**해 평문으로 그 포트에 보낸다 — TLS 리스너
+     *  포트에는 UDP 소켓이 없어 그 요청은 조용히 유실된다(실측: TLS leg 의 BYE 가 사라져
+     *  세션 타이머가 회수할 때까지 상대 단말 화면에 참여자가 남았다).
+     *
+     *  psip 의 자동 Contact(SipStackComm) 는 이 규칙을 이미 지킨다. 응용이 Contact 를 직접
+     *  구성할 때(그룹 AoR user·isfocus 파라미터 등)도 같은 규칙을 쓰도록 여기로 모은다.
+     *
+     *  @param eTransport 그 메시지가 **실제로 나가는** transport (leg latch·요청 수신 transport).
+     *  @param pszUser    Contact URI 의 user 부분 (NULL/빈값이면 host only — 실망 형태).
+     */
+    void FillSelfContact( CSipFrom &clsContact, ESipTransport eTransport, const char *pszUser = NULL );
 
     /** SIP Contact / From / Call-ID host 생성에 사용할 로컬 주소.
      *  @param inbound_listener_id psip 수신 listener 의 extId (GetCurrentInboundListenerId()

@@ -536,11 +536,12 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
             pclsUnsubResp->AddHeader( "Allow", SIP_ALLOW_METHODS );
             pclsUnsubResp->AddHeader( "Expires", 0 );
             pclsUnsubResp->AddHeader( "Supported", "path,100rel,precondition" );
+            // 단말이 구독 갱신·해지를 보낼 목적지 — 응답이 나가는 transport(=요청이 온 transport)를
+            //   포트와 함께 싣는다. 빠뜨리면 상대가 UDP 로 해석해 TLS 포트에 평문을 보낸다.
             CSipFrom clsSelfContact;
-            clsSelfContact.m_clsUri.m_strProtocol = "sip";
+            CspAddressing::FillSelfContact( clsSelfContact, pclsMessage->m_eTransport );
             const int iListenerId = GetCurrentInboundListenerId();
-            clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
-            clsSelfContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
+            if ( iListenerId > 0 ) clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
             pclsUnsubResp->m_clsContactList.push_back( clsSelfContact );
             gclsUserAgent.m_clsSipStack.SendSipMessage( pclsUnsubResp );
         }
@@ -620,11 +621,12 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         pclsResponse->AddHeader( "Supported", "path,100rel,precondition" );
         // dialog Contact = 서버 자기 주소 (user 없음 — 실망 형태)
         {
+            // 단말이 구독 갱신·해지를 보낼 목적지 — 응답이 나가는 transport(=요청이 온 transport)를
+            //   포트와 함께 싣는다. 빠뜨리면 상대가 UDP 로 해석해 TLS 포트에 평문을 보낸다.
             CSipFrom clsSelfContact;
-            clsSelfContact.m_clsUri.m_strProtocol = "sip";
+            CspAddressing::FillSelfContact( clsSelfContact, pclsMessage->m_eTransport );
             const int iListenerId = GetCurrentInboundListenerId();
-            clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
-            clsSelfContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
+            if ( iListenerId > 0 ) clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
             pclsResponse->m_clsContactList.push_back( clsSelfContact );
         }
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );

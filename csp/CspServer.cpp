@@ -782,15 +782,6 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     // Max-Forwards
     pMsg->m_iMaxForwards = 70;
 
-    // Contact = 서버 자기 주소 (user 없음 — 실망 형태, 예: <sip:scscf11.ims...>)
-    {
-        CSipFrom clsSelfContact;
-        clsSelfContact.m_clsUri.m_strProtocol = "sip";
-        clsSelfContact.m_clsUri.m_strHost = strLocalIp;
-        clsSelfContact.m_clsUri.m_iPort = iLocalPort;
-        pMsg->m_clsContactList.push_back( clsSelfContact );
-    }
-
     // 전송 목적지 = 등록 바인딩(received/rport latch). Route 헤더는 싣지 않는다 —
     //   실망 NOTIFY 에는 Route 가 없으며, NAT 도달은 dest 오버라이드로 처리.
     //   등록 삭제 후 통지(unregistered/expired)는 UserMap 조회가 실패하므로
@@ -810,6 +801,15 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
         pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
         pMsg->m_eTransport = clsUserInfo.m_eTransport;
+    }
+
+    // Contact = 서버 자기 주소 (user 없음 — 실망 형태, 예: <sip:scscf11.ims...>).
+    //   단말이 구독 갱신·해지를 보낼 목적지이므로, **이 메시지가 나가는 transport** 를 포트와
+    //   함께 싣는다(송신 transport 가 확정된 이 지점 이후여야 한다).
+    {
+        CSipFrom clsSelfContact;
+        CspAddressing::FillSelfContact( clsSelfContact, pMsg->m_eTransport );
+        pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
     time_t tRemaining = ( sub.tStartTime + sub.iExpires ) - time( NULL );
@@ -893,15 +893,6 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     pMsg->m_clsCSeq.Set( iSeq, "NOTIFY" );
     pMsg->m_iMaxForwards = 70;
 
-    // Contact = 서버 자기 주소 (user 없음 — SendNotifyToSubscriber 와 동일)
-    {
-        CSipFrom clsSelfContact;
-        clsSelfContact.m_clsUri.m_strProtocol = "sip";
-        clsSelfContact.m_clsUri.m_strHost = strLocalIp;
-        clsSelfContact.m_clsUri.m_iPort = iLocalPort;
-        pMsg->m_clsContactList.push_back( clsSelfContact );
-    }
-
     CUserInfo clsUserInfo;
     if ( gclsUserMap.Select( sub.strUserId.c_str(), clsUserInfo ) ) {
         // Route 헤더 없이 등록 바인딩으로 직접 전송 (SendNotifyToSubscriber 와 동일).
@@ -909,6 +900,13 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
         pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
         pMsg->m_eTransport = clsUserInfo.m_eTransport;
+    }
+
+    // Contact = 서버 자기 주소 — 송신 transport 확정 후 구성 (SendNotifyToSubscriber 와 동일 규칙)
+    {
+        CSipFrom clsSelfContact;
+        CspAddressing::FillSelfContact( clsSelfContact, pMsg->m_eTransport );
+        pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
     pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"

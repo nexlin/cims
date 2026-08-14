@@ -7,6 +7,7 @@
 #include <ctime>
 #include <set>
 
+#include "CspAddressing.h"
 #include "CspServiceMap.h"
 #include "DbManager.h"
 #include "GroupMap.h"
@@ -1051,13 +1052,12 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             // (기존: AddHeader 원문 헤더로 도메인형 Contact 를 추가 → 리스트는 비어 있어
             //  스택 자동 Contact 와 중복 2개가 되고, 실단말이 INVITE 를 폐기하는 원인)
             {
+                // Contact 는 멤버가 BYE·re-INVITE 를 보낼 목적지다 — 이 leg 의 transport 를
+                //   포트와 함께 실어야 한다(CspAddressing::FillSelfContact 주석 참조).
                 CSipFrom clsContact;
-                clsContact.m_clsUri.m_strProtocol = "sip";
-                clsContact.m_clsUri.m_strUser = pszGroupId;
-                clsContact.m_clsUri.m_strHost =
-                    !clsRoute.m_strOutboundLocalIp.empty() ? clsRoute.m_strOutboundLocalIp : gclsSetup.m_strLocalIp;
-                clsContact.m_clsUri.m_iPort =
-                    clsRoute.m_iOutboundLocalPort > 0 ? clsRoute.m_iOutboundLocalPort : gclsSetup.m_iUdpPort;
+                CspAddressing::FillSelfContact( clsContact, clsRoute.m_eTransport, pszGroupId );
+                if ( !clsRoute.m_strOutboundLocalIp.empty() )
+                    clsContact.m_clsUri.m_strHost = clsRoute.m_strOutboundLocalIp;
                 clsContact.InsertParam( "isfocus", "" );
                 pclsInvite->m_clsContactList.clear();
                 pclsInvite->m_clsContactList.push_back( clsContact );

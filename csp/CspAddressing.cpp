@@ -13,6 +13,23 @@ namespace CspAddressing {
         return n.bind_ip;
     }
 
+    void FillSelfContact( CSipFrom &clsContact, ESipTransport eTransport, const char *pszUser ) {
+        // 포트는 그 transport 의 리스너 포트여야 한다 — 평문 포트에 TLS 를, TLS 포트에 평문을
+        //   광고하면 상대의 in-dialog 요청이 도달하지 못한다.
+        int iPort = gclsSetup.m_iUdpPort;
+        if ( eTransport == E_SIP_TCP && gclsSetup.m_iTcpPort > 0 )
+            iPort = gclsSetup.m_iTcpPort;
+        else if ( eTransport == E_SIP_TLS && gclsSetup.m_iTlsPort > 0 )
+            iPort = gclsSetup.m_iTlsPort;
+
+        clsContact.m_clsUri.m_strProtocol = "sip";
+        if ( pszUser && *pszUser ) clsContact.m_clsUri.m_strUser = pszUser;
+        clsContact.m_clsUri.m_strHost = gclsSetup.m_strLocalIp;
+        clsContact.m_clsUri.m_iPort = iPort;
+        // UDP 는 기본값이라 생략해도 무해하지만, 명시하면 상대 스택이 추측하지 않는다.
+        clsContact.m_clsUri.InsertTransport( eTransport );
+    }
+
     std::string GetLocalSipAddress( int inbound_listener_id ) {
         if ( inbound_listener_id > 0 ) {
             LocalNodeInfo n = gclsLocalNodeMap.GetByIntId( inbound_listener_id );
