@@ -114,14 +114,22 @@ static void SSLPrintError( )
 }
 
 // SSL 서버 라이브러리를 시작한다.
-bool SSLServerStart( const char * szCertFile, const char * szCaCertFile )
+bool SSLServerStart( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile )
 {
 	int	n;
 
 	if( szCertFile == NULL ) return false;
 	if( IsExistFile( szCertFile ) == false )
 	{
-		CLog::Print( LOG_ERROR, "cert file is not found" );
+		CLog::Print( LOG_ERROR, "cert file(%s) is not found", szCertFile );
+		return false;
+	}
+
+	// 키 파일 미지정이면 인증서 파일에서 읽는다(cert+key 결합 PEM). 별도 파일 지정 시 존재 확인.
+	const char * pszKey = ( szKeyFile && szKeyFile[0] ) ? szKeyFile : szCertFile;
+	if( IsExistFile( pszKey ) == false )
+	{
+		CLog::Print( LOG_ERROR, "key file(%s) is not found", pszKey );
 		return false;
 	}
 
@@ -153,9 +161,10 @@ bool SSLServerStart( const char * szCertFile, const char * szCaCertFile )
 		return false;
 	}
 
-	if( ( n = SSL_CTX_use_PrivateKey_file( gpsttServerCtx, szCertFile, SSL_FILETYPE_PEM ) ) <= 0 )
+	if( ( n = SSL_CTX_use_PrivateKey_file( gpsttServerCtx, pszKey, SSL_FILETYPE_PEM ) ) <= 0 )
 	{
-		CLog::Print( LOG_ERROR, "SSL_CTX_use_PrivateKey_file error(%d)", n );
+		CLog::Print( LOG_ERROR, "SSL_CTX_use_PrivateKey_file(%s) error(%d) — 키가 없는 인증서 파일이면 "
+		                        "KeyFile 을 지정하거나 cert+key 결합 PEM 을 쓴다", pszKey, n );
 		return false;
 	}
 	
@@ -357,6 +366,11 @@ SSL_CTX * SSLServerCtxCreate( const char * szCertFile, const char * szKeyFile, c
 void SSLServerCtxFree( SSL_CTX * ctx )
 {
 	if( ctx ) SSL_CTX_free( ctx );
+}
+
+bool SSLServerIsStarted( )
+{
+	return gpsttServerCtx != NULL;
 }
 
 bool SSLAcceptWithCtx( Socket iFd, SSL_CTX * ctx, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout )

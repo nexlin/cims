@@ -149,6 +149,10 @@ public:
 	Socket m_hTlsSocket;					// TLS SIP 메시지를 위한 서버 소켓 핸들
 
 	CThreadList			m_clsTlsThreadList;
+	/** TLS worker pool 초기화 여부 — Start(정적 TLS 포트/클라이언트) 또는 AddTlsListener(런타임
+	 *  추가)의 지연 초기화에서 true. m_bTcpThreadListInit 과 같은 목적이다: pool 부재 상태로
+	 *  리스너만 추가하면 accept 직후 SendCommand 가 실패해 연결을 즉시 닫는다. */
+	bool						m_bTlsThreadListInit;
 	CTcpSocketMap		m_clsTlsSocketMap;
 	CTcpConnectMap	m_clsTlsConnectMap;
 #endif

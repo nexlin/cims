@@ -210,11 +210,17 @@ int ServiceMain() {
             if ( !tlsPrimary.tls_cert_path.empty() ) {
                 gclsSetup.m_strCertFile = tlsPrimary.tls_cert_path;
             }
+            // 키 경로는 인증서와 별개다 — 이걸 빠뜨리면 스택이 인증서 파일에서 키를 읽으려다
+            //   실패한다(키 없는 cert 파일이면 TLS 접속점 개설 불가).
+            if ( !tlsPrimary.tls_key_path.empty() ) {
+                gclsSetup.m_strKeyFile = tlsPrimary.tls_key_path;
+            }
             if ( !tlsPrimary.tls_ca_path.empty() ) {
                 gclsSetup.m_strCaCertFile = tlsPrimary.tls_ca_path;
             }
-            CLog::Print( LOG_SYSTEM, "primary local_node '%s' (TLS) → TlsPort=%d cert=%s", tlsPrimary.name.c_str(),
-                         gclsSetup.m_iTlsPort, gclsSetup.m_strCertFile.c_str() );
+            CLog::Print( LOG_SYSTEM, "primary local_node '%s' (TLS) → TlsPort=%d cert=%s key=%s",
+                         tlsPrimary.name.c_str(), gclsSetup.m_iTlsPort, gclsSetup.m_strCertFile.c_str(),
+                         gclsSetup.m_strKeyFile.empty() ? "<cert 파일에서>" : gclsSetup.m_strKeyFile.c_str() );
         }
     }
 
@@ -224,6 +230,7 @@ int ServiceMain() {
     clsSetup.m_iLocalTlsPort = gclsSetup.m_iTlsPort;
     clsSetup.m_iTlsAcceptTimeout = gclsSetup.m_iTlsAcceptTimeout;
     clsSetup.m_strCertFile = gclsSetup.m_strCertFile;
+    clsSetup.m_strKeyFile = gclsSetup.m_strKeyFile;
     clsSetup.m_strCaCertFile = gclsSetup.m_strCaCertFile;
 
     clsSetup.m_strUserAgent = "csp_";

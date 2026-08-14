@@ -31,7 +31,13 @@
 
 bool SSLStart( );
 
-bool SSLServerStart( const char * szCertFile, const char * szCaCertFile );
+/** 전역 서버/클라이언트 SSL_CTX 를 만든다. szKeyFile 이 NULL/빈 값이면 szCertFile 에서
+ *  개인키를 읽는다(cert+key 결합 PEM). */
+bool SSLServerStart( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile );
+
+/** 전역(stack-global) 서버 SSL_CTX 가 준비되어 있는지. 리스너별 인증서 없이 추가되는 TLS
+ *  리스너는 이 ctx 를 쓰므로, 없으면 handshake 가 전부 실패한다. */
+bool SSLServerIsStarted( );
 bool SSLServerStop( );
 
 bool SSLClientStart( );

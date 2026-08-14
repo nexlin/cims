@@ -64,6 +64,9 @@ public:
 
 	// TLS 세션을 위한 서버 인증서 + 개인키를 포함한 PEM 파일
 	std::string	m_strCertFile;
+	/** TLS 개인키 파일. 비우면 m_strCertFile 에서 읽는다(cert+key 결합 PEM).
+	 *  인증서와 키를 별도 파일로 두는 배치에서 필요하다. */
+	std::string	m_strKeyFile;
 
 	// TLS 세션으로 연결한 클라이언트 인증을 위한 인증 기관 인증서 PEM 파일
 	std::string m_strCaCertFile;

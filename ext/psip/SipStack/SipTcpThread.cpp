@@ -157,6 +157,8 @@ THREAD_API SipTcpListenThread( LPVOID lpParameter )
 
 			if( pclsSipStack->m_clsTcpThreadList.SendCommand( (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )
 			{
+				CLog::Print( LOG_ERROR, "%s: SendCommand failed (TCP worker pool) — close %s:%d",
+				             __FUNCTION__, clsTcpComm.m_szIp, clsTcpComm.m_iPort );
 				closesocket( hConnFd );
 			}
 		}
@@ -219,6 +221,8 @@ THREAD_API SipTcpListenerThread( LPVOID lpParameter )
 			if( pclsSipStack->m_clsTcpThreadList.SendCommand(
 			        (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )
 			{
+				CLog::Print( LOG_ERROR, "%s: SendCommand failed (TCP worker pool) — close %s:%d",
+				             __FUNCTION__, clsTcpComm.m_szIp, clsTcpComm.m_iPort );
 				closesocket( hConnFd );
 			}
 		}

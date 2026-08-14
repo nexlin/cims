@@ -9,11 +9,11 @@
 [sip_runtime_config.md](sip_runtime_config.md) · [modules/csp.md](../modules/csp.md) ·
 [android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md)
 
-> **상태**: latch 갱신 규칙([§4.3](#43-갱신-규칙--수신-transport-가-저장-transport-와-같을-때))은
-> CSP 에 구현되어 있다. transport 전환 규칙([§4.4](#44-전환-규칙--새-transport-가-tcp-가-아닐-때))과
-> 자가복구([§4.5](#45-자가복구--판단-보류))는 미구현이다. 서버는 **재기동 경로로만** TLS 리스너를
-> 올릴 수 있고 무중단 추가 경로에 결함 2건이 있다([§6.2](#62-결함)). 단말은 pjproject 빌드에서
-> TLS 가 비활성이라 **미구현**이다([§7](#7-단말-구현-상태)). 실배치 `local_nodes.jsonl` 에 TLS 행은 없다.
+> **상태**: 서버는 TLS 접속점을 **재기동·무중단 추가 양쪽으로** 개설할 수 있다
+> ([§6](#6-서버-구현-상태)). latch 갱신 규칙([§4.3](#43-갱신-규칙--수신-transport-가-저장-transport-와-같을-때))도
+> 구현되어 있다. 미구현은 transport 전환 규칙([§4.4](#44-전환-규칙--새-transport-가-tcp-가-아닐-때))·
+> 자가복구([§4.5](#45-자가복구--판단-보류))·**단말**([§7](#7-단말-구현-상태))이다. 단말이 TLS 를
+> 지원하지 않으므로 실배치는 여전히 UDP 등록이다.
 
 ## 1. 범위와 전제
 
@@ -279,18 +279,25 @@ TLS 는 도달 신뢰성을 높이지만 실패의 성질을 바꾼다. 배치 �
 | 부트 배선 | `csp/CspServer.cpp` 가 primary TLS 행에서 `Setup.Sip.TlsPort`/`CertFile`/`CaCertFile` 주입 → `CSipStack::Start` 가 리스너·SSL·worker pool 생성 |
 | 도달 소켓 재사용 | accept 소켓을 `m_clsTlsSocketMap` 에 (IP:포트) 키로 보관 → 서버 발신이 그 연결을 재사용 |
 | 타이머 정합 | 서버 유휴 종료 600초 > UE keepalive 90초 |
+| 무중단 추가 | 런타임에 TLS 행을 추가하면 worker pool 을 지연 초기화해 접속점을 연다. 리스너별 인증서가 없으면 stack-global ctx 를 그 자리에서 기동하고, 그것도 불가하면 리스너를 만들지 않는다(조용히 죽는 리스너 금지) |
+| 인증서·키 분리 | `tls_cert_path`/`tls_key_path` 를 부트 경로와 런타임 경로가 **같은 의미로** 사용한다. 키 미지정이면 인증서 파일에서 읽는다(cert+key 결합 PEM) |
 
-### 6.2 결함
+### 6.2 접속점 개설 실패의 처리
 
-| ID | 내용 | 위치 | 증상 |
-|---|---|---|---|
-| **T1** | `AddTlsListener` 가 `m_clsTlsThreadList` 를 초기화하지 않는다. pool 초기화는 `Start()` 안에만 있다 | `ext/psip/SipStack/SipStack.cpp` | 런타임 hot-add 된 TLS 리스너는 accept 후 `SendCommand` 실패로 **즉시 close, 로그 없음**. 리스너 추가 성공 로그만 남아 정상으로 보인다. TCP 에서 동일 결함을 수정한 전례가 있다 |
-| **T2** | 부트에 TLS primary 가 없으면 `SSLServerStart` 가 실행되지 않아 전역 server/client ctx 가 NULL | `ext/psip/SipStack/SipStack.cpp`, `TlsFunction.cpp` | hot-add 행에 `tls_cert_path` 가 없으면 `SSL_new(NULL)` 실패. 아웃바운드 TLS 클라이언트 연결도 불가 |
-| **T3** | 부트가 primary TLS/TCP 리스너를 만들고 `ListenerManager` 가 같은 행을 다시 add (중복 스킵 블록이 제거된 상태) | `csp/CspListenerManager.cpp`, `csp/CspServer.cpp` | 두 번째 bind 실패. 기능 영향은 없으나 reload 마다 에러 로그가 남는지 확인·정리 필요 |
-| **T4** | `SipTlsListenerThread` 가 `SendCommand` 실패 시 무로그로 close | `ext/psip/SipStack/SipTlsThread.cpp` | T1 류 결함의 진단 불가 |
+**TLS·TCP 접속점 개설 실패는 그 접속점만 비활성으로 격리한다.** 인증서 오타 하나로 UDP·TCP 까지
+내려가면 SIP 서버 전체가 기동하지 못하고 감독자 재시작 루프에 빠진다(실측). 실패해도 나머지
+transport 는 서비스를 계속하고, 실패 사실은 로그와 알람으로 드러낸다.
 
-**따라서 현 코드에서 TLS 는 재기동을 거쳐야만 정상 경로(`Start`)로 올라온다.** 무중단 추가는
-T1·T2 수정이 선행되어야 성립한다.
+| 신호 | 내용 |
+|---|---|
+| 로그 | `SSLServerStart() error — TLS 접속점(<port>) 비활성, 나머지 transport 는 계속` 등, 실패 지점별 ERROR |
+| 알람 | **A-PRC-012 `listener_unavailable`**(major) — mo = `<node>/csp/listener/<proto>:<port>`, params = protocol·bind_ip·port. 접속점이 열리면 close. 카탈로그 정의는 `csp/config/fm_catalog.json` |
+| accept 인계 실패 | worker pool 미초기화·포화로 수락한 연결을 닫을 때 ERROR 로그를 남긴다(무로그 close 금지 — 클라이언트에는 "handshake 직전 끊김"으로만 보인다) |
+
+**제약**: 부트스트랩이 만든 TCP/TLS primary 리스너(id=0)는 `ListenerManager` 소유가 아니라
+**런타임 제거가 불가**하다 — `local_nodes` 에서 행을 지워도 다음 재기동까지 유지된다.
+`ListenerManager` 는 부트스트랩이 이미 바인딩한 접속점을 add 대상에서 제외한다(중복 bind 실패와
+그로 인한 오탐 알람 방지).
 
 ### 6.3 설정
 
@@ -334,11 +341,11 @@ fallback 키(`Setup.Sip.TlsPort`·`CertFile`·`TlsAcceptTimeout`)는 `csp/config
 
 각 단계는 그 단계 끝에서 검증 가능한 단위로 나눈다.
 
-규칙 ①([§4.3](#43-갱신-규칙--수신-transport-가-저장-transport-와-같을-때))은 구현되어 있다. 남은 단계는 다음과 같다.
+규칙 ①([§4.3](#43-갱신-규칙--수신-transport-가-저장-transport-와-같을-때))과 서버측 TLS 접속점
+개설([§6](#6-서버-구현-상태))은 구현되어 있다. 남은 단계는 다음과 같다.
 
 | 단계 | 작업 | 검증 | 산출 |
 |---|---|---|---|
-| **1. TLS 리스너 기동** | T1·T2 수정, T4 로그 추가, T3 확인·정리, 랩 인증서 + `local_nodes` TLS 행 | `openssl s_client` 로 handshake 성립 + 즉시 close 없음을 **재기동 경로·hot-add 경로 양쪽**에서 | psip `SipStack.cpp`·`SipTlsThread.cpp` |
 | **2. latch 추종 실증** | cspsim TLS 클라이언트화(선행) → 규칙 ②([§4.4](#44-전환-규칙--새-transport-가-tcp-가-아닐-때)) + [§4.5](#45-자가복구--판단-보류) 결정 | [§10](#10-검증-시나리오) 전 시나리오 | `cspsim/SipClientSetup.*`, `csp/UserMap.*` |
 | **3. 단말** | [§7](#7-단말-구현-상태) 전 항목 + [§8](#8-인증서-운영-요건-미정) 방침 + 가입자 단위 transport | 서버가 2단계로 검증된 상태에서 실패를 단말로 국지화. 절전 시나리오 포함 | android 빌드 트랙 |
 | **4. 구조** | [§4.6](#46-정본-구조--flow-단위-바인딩-집합) flow 단위 바인딩 집합 | — | 설계 문서 선행 |
@@ -346,9 +353,9 @@ fallback 키(`Setup.Sip.TlsPort`·`CertFile`·`TlsAcceptTimeout`)는 `csp/config
 의존 관계:
 
 ```
-1단계 (TLS 기동) ──▶ 2단계 (추종 실증) ──▶ 3단계 (단말) ──▶ 4단계 (구조)
-                          ▲
-                          └── cspsim TLS 클라이언트화
+2단계 (추종 실증) ──▶ 3단계 (단말) ──▶ 4단계 (구조)
+     ▲
+     └── cspsim TLS 클라이언트화
 ```
 
 **cspsim TLS 클라이언트화가 순서상 중요하다** — psip 에 클라이언트 TLS 경로(`SSLClientStart`,
@@ -368,7 +375,7 @@ TLS 설정 필드와 목적지 transport 지정을 추가하면 **단말 빌드 
 | 6 | UDP 등록 상태에서 TLS 재등록 (전환) | 즉시 도달 — 규칙 ② 검증 |
 | 7 | UDP 계정의 승격 TCP 오염 차단 | 회귀 확인 (과도기 필수) |
 | 8 | 절전(doze) 구간 통과 | [§5](#5-실패-모드의-변화) 의 로컬 종료 발현 여부 |
-| 9 | TLS 리스너 hot-add | handshake 성립 (T1·T2 검증) |
+| 9 | TLS 리스너 hot-add / 잘못된 인증서로 부트 | handshake 성립 / 서버는 뜨고 TLS 만 비활성 + A-PRC-012 open |
 
 진단 시 목적지 판정은 `Target=` 표기가 아니라 직후의 `UdpSend`/`TcpSend`/`TlsSend` NETWORK 로그를
 정본으로 본다. latch 갱신 로그의 transport 값은 **수신값**이므로 저장 상태 판정에 쓸 수 없다

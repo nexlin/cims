@@ -80,6 +80,9 @@ public:
 
     /** TLS 프로토콜을 위한 서버 인증서 + 키를 포함한 PEM 파일 full path */
     std::string m_strCertFile;
+    /** TLS 개인키 파일 (local_nodes 의 tls_key_path). 비면 인증서 파일에서 읽는다 —
+     *  즉 cert+key 결합 PEM 이어야 한다. */
+    std::string m_strKeyFile;
 
     /** TLS 세션으로 연결한 클라이언트 인증을 위한 인증 기관 인증서 PEM 파일 */
     std::string m_strCaCertFile;

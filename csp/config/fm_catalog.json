@@ -77,6 +77,19 @@
       "msg_close": "SIP receive errors subsided ({mo})",
       "effect": "피어 오동작/공격/호환성 문제 진행",
       "recommended_action": "소스 IP 분포 확인·차단/억제 검토 (params ip/top_count)"
+    },
+    {
+      "type": "listener_unavailable",
+      "code": "A-PRC-012",
+      "perceived_severity": "major",
+      "event_type": "processingError",
+      "probable_cause": "configurationOrCustomizationError",
+      "mo_class": "service",
+      "metric": "SIP 리스너 개설",
+      "msg_open": "SIP listener open failed ({protocol} {bind_ip}:{port})",
+      "msg_close": "SIP listener restored ({mo})",
+      "effect": "해당 접속점만 서비스 불가 — 그 transport 로 등록/호 설정 불가. 다른 transport 는 정상",
+      "recommended_action": "포트 점유·바인드 IP 확인. TLS 면 인증서/키 파일 경로와 짝(cert+key)·권한·만료 확인 (local_nodes 의 tls_cert_path/tls_key_path)"
     }
   ],
   "events": [

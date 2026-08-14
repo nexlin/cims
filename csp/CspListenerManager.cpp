@@ -1,6 +1,7 @@
 #include "CspListenerManager.h"
 
 #include "CspConfigCache.h"
+#include "FmReporter.h"
 #include "Log.h"
 #include "SipServerSetup.h"
 #include "SipStack.h"
@@ -9,6 +10,25 @@
 extern CSipUserAgent gclsUserAgent;
 
 CCspListenerManager gclsListenerManager;
+
+// A-PRC-012 listener_unavailable — 접속점(proto:port) 단위 알람.
+//   mo 는 리스너 접속점 (<node>/csp/listener/<proto>:<port>). 개설 실패 시 open,
+//   같은 접속점이 개설되면 close — reload 마다 재평가되므로 open/close 가 자연스럽다.
+static void _listenerAlarm( const std::string &protocol, const std::string &bindIp, int port, bool bOpen ) {
+    if ( !gclsFmReporter.IsEnabled() ) return;
+
+    char szMo[160];
+    snprintf( szMo, sizeof( szMo ), "%s/csp/listener/%s:%d", gclsFmReporter.Node().c_str(), protocol.c_str(), port );
+    if ( bOpen ) {
+        SimpleJson::JsonNode nodeParams;
+        nodeParams.Set( "protocol", protocol );
+        nodeParams.Set( "bind_ip", bindIp );
+        nodeParams.Set( "port", port );
+        gclsFmReporter.AlarmOpen( "A-PRC-012", szMo, nodeParams );
+    } else {
+        gclsFmReporter.AlarmClose( "A-PRC-012", szMo );
+    }
+}
 
 std::string CCspListenerManager::_normalizeProtocol( const std::string &protocol ) const {
     std::string p;
@@ -22,6 +42,9 @@ bool CCspListenerManager::_shouldManage( const std::string &protocol ) const {
     return !_normalizeProtocol( protocol ).empty();
 }
 
+// 부트스트랩(Start 가 만든 primary, id=0)이 이미 그 접속점을 점유했는지.
+//   ListenerManager 가 만든 리스너는 id != 0 이므로 여기에 걸리지 않는다 — R6 의 flapping
+//   (자기 리스너를 desired 에서 제외 → 삭제 대상 오판) 이 재발하지 않는 이유다.
 bool CCspListenerManager::_isAlreadyBound( const std::string &protocol, const std::string &ip, int port ) const {
     auto ipMatch = [&]( const std::string &existIp ) {
         if ( ip == "0.0.0.0" || ip.empty() ) return true;
@@ -33,20 +56,20 @@ bool CCspListenerManager::_isAlreadyBound( const std::string &protocol, const st
         std::vector<CSipStackUdpListener *> v;
         gclsUserAgent.m_clsSipStack.GetUdpListenerInfo( v );
         for ( auto *e : v ) {
-            if ( e && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
+            if ( e && e->m_iId == 0 && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
         }
     } else if ( protocol == "TCP" ) {
         std::vector<CSipStackTcpListener *> v;
         gclsUserAgent.m_clsSipStack.GetTcpListenerInfo( v );
         for ( auto *e : v ) {
-            if ( e && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
+            if ( e && e->m_iId == 0 && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
         }
 #ifdef USE_TLS
     } else if ( protocol == "TLS" ) {
         std::vector<CSipStackTlsListener *> v;
         gclsUserAgent.m_clsSipStack.GetTlsListenerInfo( v );
         for ( auto *e : v ) {
-            if ( e && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
+            if ( e && e->m_iId == 0 && e->m_iPort == port && ipMatch( e->m_strBindIp ) ) return true;
         }
 #endif
     }
@@ -177,9 +200,21 @@ bool CCspListenerManager::Sync() {
 
     for ( const auto &d : desired ) {
         if ( managedIds.find( d.id ) != managedIds.end() ) continue;
+        // 부트스트랩이 이미 같은 접속점을 열어 둔 경우(TCP/TLS primary — Start 가 생성) add 를
+        //   시도하면 bind 가 반드시 실패한다. 그 실패를 알람(A-PRC-012)으로 올리면 정상 동작
+        //   중인 접속점에 상시 오탐이 걸리므로, 여기서 걸러내고 정상으로 간주한다.
+        //   ⚠ 부트스트랩 리스너는 ListenerManager 소유가 아니라 런타임 제거가 불가하다
+        //     (행을 지워도 다음 재기동까지 유지된다).
+        if ( _isAlreadyBound( d.protocol, d.bindIp, d.port ) ) {
+            CLog::Print( LOG_INFO, "ListenerManager: skip id=%d %s %s:%d — bootstrap 이 이미 바인딩", d.id,
+                         d.protocol.c_str(), d.bindIp.c_str(), d.port );
+            _listenerAlarm( d.protocol, d.bindIp, d.port, false );
+            continue;
+        }
         int iOutId = 0;
         if ( _addListenerToStack( d, iOutId ) ) {
             stillManaged.push_back( d );
+            _listenerAlarm( d.protocol, d.bindIp, d.port, false );
             if ( d.protocol == "UDP" ) {
                 CLog::Print( LOG_SYSTEM, "ListenerManager: added id=%d %s %s:%d threads=%d", d.id, d.protocol.c_str(),
                              d.bindIp.c_str(), d.port, d.threadCount );
@@ -190,6 +225,7 @@ bool CCspListenerManager::Sync() {
         } else {
             CLog::Print( LOG_ERROR, "ListenerManager: add failed id=%d %s %s:%d", d.id, d.protocol.c_str(),
                          d.bindIp.c_str(), d.port );
+            _listenerAlarm( d.protocol, d.bindIp, d.port, true );
         }
     }
 

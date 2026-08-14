@@ -253,6 +253,10 @@ THREAD_API SipTlsListenerThread( LPVOID lpParameter )
 			if( pclsSipStack->m_clsTlsThreadList.SendCommand(
 			        (char *)&clsTcpComm, sizeof(clsTcpComm) ) == false )
 			{
+				// worker pool 미초기화/포화 — 수락한 연결을 닫는다. 무로그로 닫으면 클라이언트에는
+				// "handshake 직전 끊김" 으로만 보여 원인 추적이 불가능하다.
+				CLog::Print( LOG_ERROR, "%s: SendCommand failed (TLS worker pool) — close %s:%d",
+				             __FUNCTION__, clsTcpComm.m_szIp, clsTcpComm.m_iPort );
 				closesocket( hConnFd );
 			}
 		}

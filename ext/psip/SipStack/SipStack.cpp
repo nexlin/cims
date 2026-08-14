@@ -39,6 +39,7 @@ CSipStack::CSipStack()
 
 #ifdef USE_TLS
 	m_hTlsSocket = INVALID_SOCKET;
+	m_bTlsThreadListInit = false;
 #endif
 
 	m_bStarted = false;
@@ -122,89 +123,113 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 		pTcpPrimary->m_bIpv6    = m_clsSetup.m_bIpv6;
 		pTcpPrimary->m_pclsStack = this;
 
+		// TLS 와 동일 정책 — 접속점 개설 실패는 그 접속점만 비활성으로 격리한다.
+		//   (포트 선점·권한 문제로 TCP 만 실패해도 UDP 서비스는 유지되어야 한다)
 		if( !_StartTcpListenerLocked( pTcpPrimary ) )
 		{
-			CLog::Print( LOG_ERROR, "TcpListen(%d) error", m_clsSetup.m_iLocalTcpPort );
+			CLog::Print( LOG_ERROR, "TcpListen(%d) error — TCP 접속점 비활성, 나머지 transport 는 계속",
+			             m_clsSetup.m_iLocalTcpPort );
 			delete pTcpPrimary;
-			_Stop();
-			return false;
+			pTcpPrimary = NULL;
 		}
 
-		m_clsTcpThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
-		if( m_clsTcpThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTcpThread, this ) == false )
+		if( pTcpPrimary )
 		{
-			CLog::Print( LOG_ERROR, "m_clsTcpThreadList.Init() error" );
+			m_clsTcpThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
+			if( m_clsTcpThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTcpThread, this ) == false )
+			{
+				CLog::Print( LOG_ERROR, "m_clsTcpThreadList.Init() error — TCP 접속점 비활성" );
+				closesocket( pTcpPrimary->m_hSocket );
+				delete pTcpPrimary;
+				pTcpPrimary = NULL;
+			}
+			else
+			{
+				m_bTcpThreadListInit = true;
+			}
+		}
+
+		if( pTcpPrimary && StartSipTcpListenThreadForListener( pTcpPrimary ) == false )
+		{
+			CLog::Print( LOG_ERROR, "StartSipTcpListenThreadForListener() error — TCP 접속점 비활성" );
 			closesocket( pTcpPrimary->m_hSocket );
 			delete pTcpPrimary;
-			_Stop();
-			return false;
+			pTcpPrimary = NULL;
 		}
-		m_bTcpThreadListInit = true;
 
-		if( StartSipTcpListenThreadForListener( pTcpPrimary ) == false )
+		if( pTcpPrimary )
 		{
-			CLog::Print( LOG_ERROR, "StartSipTcpListenThreadForListener() error" );
-			closesocket( pTcpPrimary->m_hSocket );
-			delete pTcpPrimary;
-			_Stop();
-			return false;
+			m_clsTcpListenerMutex.acquire();
+			m_vecTcpListeners.push_back( pTcpPrimary );
+			m_hTcpSocket = pTcpPrimary->m_hSocket;
+			m_clsTcpListenerMutex.release();
 		}
-
-		m_clsTcpListenerMutex.acquire();
-		m_vecTcpListeners.push_back( pTcpPrimary );
-		m_hTcpSocket = pTcpPrimary->m_hSocket;
-		m_clsTcpListenerMutex.release();
 	}
 
 #ifdef USE_TLS
 	if( m_clsSetup.m_iLocalTlsPort > 0 )
 	{
-		if( SSLServerStart( m_clsSetup.m_strCertFile.c_str(), m_clsSetup.m_strCaCertFile.c_str() ) == false )
+		// TLS 접속점 개설 실패는 **그 접속점만 서비스 불가**로 격리한다 — 여기서 _Stop() 하면
+		// 인증서 오타 하나로 UDP·TCP 까지 내려가 SIP 서버 전체가 뜨지 못한다(실측: 기동 실패 →
+		// SIGABRT → 감독자 재시작 루프). 응용은 Start 이후 GetTlsListenerInfo() 로 개설 여부를
+		// 확인해 알람(A-PRC-012 listener_unavailable)을 올린다.
+		bool bTlsReady = SSLServerStart( m_clsSetup.m_strCertFile.c_str(), m_clsSetup.m_strKeyFile.c_str(),
+		                                 m_clsSetup.m_strCaCertFile.c_str() );
+		if( bTlsReady == false )
 		{
-			CLog::Print( LOG_ERROR, "SSLServerStart() error" );
-			_Stop();
-			return false;
+			CLog::Print( LOG_ERROR, "SSLServerStart() error — TLS 접속점(%d) 비활성, 나머지 transport 는 계속",
+			             m_clsSetup.m_iLocalTlsPort );
 		}
 
 		// R3: primary TLS 리스너를 vector 기반으로 생성.
-		CSipStackTlsListener * pTlsPrimary = new CSipStackTlsListener();
-		pTlsPrimary->m_iId       = 0;
-		pTlsPrimary->m_strBindIp = m_clsSetup.m_strLocalIp;
-		pTlsPrimary->m_iPort     = m_clsSetup.m_iLocalTlsPort;
-		pTlsPrimary->m_bIpv6     = m_clsSetup.m_bIpv6;
-		pTlsPrimary->m_pclsStack = this;
-
-		if( !_StartTlsListenerLocked( pTlsPrimary ) )
+		CSipStackTlsListener * pTlsPrimary = bTlsReady ? new CSipStackTlsListener() : NULL;
+		if( pTlsPrimary )
 		{
-			CLog::Print( LOG_ERROR, "TcpListen(%d) error", m_clsSetup.m_iLocalTlsPort );
-			delete pTlsPrimary;
-			_Stop();
-			return false;
+			pTlsPrimary->m_iId       = 0;
+			pTlsPrimary->m_strBindIp = m_clsSetup.m_strLocalIp;
+			pTlsPrimary->m_iPort     = m_clsSetup.m_iLocalTlsPort;
+			pTlsPrimary->m_bIpv6     = m_clsSetup.m_bIpv6;
+			pTlsPrimary->m_pclsStack = this;
+
+			if( !_StartTlsListenerLocked( pTlsPrimary ) )
+			{
+				CLog::Print( LOG_ERROR, "TcpListen(%d) error — TLS 접속점 비활성", m_clsSetup.m_iLocalTlsPort );
+				delete pTlsPrimary;
+				pTlsPrimary = NULL;
+			}
 		}
 
-		m_clsTlsThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
-		if( m_clsTlsThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTlsThread, this ) == false )
+		if( pTlsPrimary )
 		{
-			CLog::Print( LOG_ERROR, "m_clsTlsThreadList.Init() error" );
+			m_clsTlsThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
+			if( m_clsTlsThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTlsThread, this ) == false )
+			{
+				CLog::Print( LOG_ERROR, "m_clsTlsThreadList.Init() error — TLS 접속점 비활성" );
+				closesocket( pTlsPrimary->m_hSocket );
+				delete pTlsPrimary;
+				pTlsPrimary = NULL;
+			}
+			else
+			{
+				m_bTlsThreadListInit = true;
+			}
+		}
+
+		if( pTlsPrimary && StartSipTlsListenThreadForListener( pTlsPrimary ) == false )
+		{
+			CLog::Print( LOG_ERROR, "StartSipTlsListenThreadForListener() error — TLS 접속점 비활성" );
 			closesocket( pTlsPrimary->m_hSocket );
 			delete pTlsPrimary;
-			_Stop();
-			return false;
+			pTlsPrimary = NULL;
 		}
 
-		if( StartSipTlsListenThreadForListener( pTlsPrimary ) == false )
+		if( pTlsPrimary )
 		{
-			CLog::Print( LOG_ERROR, "StartSipTlsListenThreadForListener() error" );
-			closesocket( pTlsPrimary->m_hSocket );
-			delete pTlsPrimary;
-			_Stop();
-			return false;
+			m_clsTlsListenerMutex.acquire();
+			m_vecTlsListeners.push_back( pTlsPrimary );
+			m_hTlsSocket = pTlsPrimary->m_hSocket;
+			m_clsTlsListenerMutex.release();
 		}
-
-		m_clsTlsListenerMutex.acquire();
-		m_vecTlsListeners.push_back( pTlsPrimary );
-		m_hTlsSocket = pTlsPrimary->m_hSocket;
-		m_clsTlsListenerMutex.release();
 	}
 	else if( m_clsSetup.m_bTlsClient )
 	{
@@ -222,6 +247,7 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 			_Stop();
 			return false;
 		}
+		m_bTlsThreadListInit = true;
 	}
 #endif
 
@@ -450,6 +476,7 @@ bool CSipStack::_Stop( )
 	m_clsTlsListenerMutex.release();
 
 	m_clsTlsThreadList.Final();
+	m_bTlsThreadListInit = false;
 	m_clsTlsSocketMap.DeleteAll();
 	SSLServerStop();
 #endif
@@ -936,6 +963,43 @@ bool CSipStack::AddTlsListener( int iExtId, const char* pszBindIp, int iPort,
                                 int& outId )
 {
 	if( !m_bStarted ) return false;
+
+	// 스택이 TLS 없이(Start 시 m_iLocalTlsPort=0, m_bTlsClient=false) 기동했으면 TLS worker pool 이
+	// 미초기화 상태다. 이대로 리스너만 추가하면 accept 후 SendCommand 가 실패해 연결을 즉시
+	// 닫는(수락 후 무응답 종료) 결함이 되므로 여기서 지연 초기화한다. AddTcpListener 와 동일.
+	if( m_bTlsThreadListInit == false )
+	{
+		int iThreadCount = m_clsSetup.m_iTcpThreadCount > 0 ? m_clsSetup.m_iTcpThreadCount : 1;
+		m_clsTlsThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
+		if( m_clsTlsThreadList.Init( iThreadCount, iThreadCount, SipTlsThread, this ) == false )
+		{
+			CLog::Print( LOG_ERROR, "AddTlsListener: TlsThreadList.Init() error ip=%s port=%d",
+			             pszBindIp ? pszBindIp : "", iPort );
+			return false;
+		}
+		m_bTlsThreadListInit = true;
+	}
+
+	// 리스너별 인증서가 없으면 handshake 는 stack-global SSL_CTX 를 쓰는데, 그 ctx 는 Start 의
+	// 정적 TLS 경로(m_iLocalTlsPort>0)에서만 만들어진다. 없는 채로 리스너를 올리면 bind 는
+	// 성공하고 handshake 만 전부 실패한다 — 여기서 stack-global 인증서로 기동을 시도하고,
+	// 그것도 없으면 리스너를 만들지 않는다(조용히 죽는 리스너보다 명시적 실패가 낫다).
+	if( ( pszCertFile == NULL || *pszCertFile == '\0' ) && SSLServerIsStarted() == false )
+	{
+		if( m_clsSetup.m_strCertFile.empty() ||
+		    SSLServerStart( m_clsSetup.m_strCertFile.c_str(), m_clsSetup.m_strKeyFile.c_str(),
+		                    m_clsSetup.m_strCaCertFile.c_str() ) == false )
+		{
+			CLog::Print( LOG_ERROR,
+			             "AddTlsListener: no certificate — per-listener cert 미지정이고 stack-global "
+			             "cert(%s) 로도 SSL 기동 실패. ip=%s port=%d",
+			             m_clsSetup.m_strCertFile.empty() ? "<none>" : m_clsSetup.m_strCertFile.c_str(),
+			             pszBindIp ? pszBindIp : "", iPort );
+			return false;
+		}
+		CLog::Print( LOG_INFO, "AddTlsListener: stack-global SSL context started (cert=%s)",
+		             m_clsSetup.m_strCertFile.c_str() );
+	}
 
 	CSipStackTlsListener * pListener = new CSipStackTlsListener();
 	pListener->m_iId       = (iExtId != 0) ? iExtId : (++m_iNextTlsListenerExtId);
