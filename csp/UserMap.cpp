@@ -30,10 +30,12 @@ CUserMap gclsUserMap;
 
 CUserInfo::CUserInfo()
     : m_iPort( 0 ),
+      m_eTransport( E_SIP_UDP ),
       m_iLoginTime( 0 ),
       m_iLoginTimeout( 3600 ),
       m_iOptionsSeq( 0 ),
       m_iSendOptionsTime( 0 ),
+      m_iLastSeenTime( 0 ),
       m_bMcDataMsrp( false ),
       m_iRegisterCSeq( 0 ) {
 }
@@ -110,26 +112,33 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
         // 위해서 각 멤버별로 저장함
         //
         // 서버→UE 도달 주소(latch)는 **상시 살아 있는 경로**여야 한다 — 서버가 먼저 거는
-        // 요청(fan-out INVITE·NOTIFY)의 목적지이기 때문이다. 송신 transport 는 이 값을 그대로
-        // 따르므로(CspServer/GroupCallService 의 SendDest 3곳), 여기에 무엇이 담기느냐가
-        // 도달 가능성을 결정한다.
+        // 요청(fan-out INVITE·NOTIFY·세션 갱신)의 목적지이기 때문이다. 송신 transport 는 이 값을
+        // 그대로 따르므로, 여기에 무엇이 담기느냐가 도달 가능성을 결정한다.
         //
         // 단말이 대형 요청을 RFC 3261 §18.1.1 로 TCP 승격하면 그 다이얼로그의 후속(ACK/BYE)·
-        // 재-REGISTER(RFC 5626 ;ob 플로우 재사용)까지 같은 TCP 로 오지만, 그 TCP 연결은
-        // 유휴 타이머로 곧 닫힌다(pjsip 실측). 닫힌 뒤 그 주소로는 서버가 도달할 수 없다 —
-        // NAT 뒤 단말에 서버가 TCP 를 새로 걸 수는 없기 때문이다. 반면 UDP 등록 플로우는
-        // keepalive 로 상시 유지된다. 그래서 latch 갱신은 UDP 소스로 한정한다(REGISTER 도
-        // 예외 아님 — 0.2.84 에서 REGISTER 예외로 오염 재발 실측).
+        // 재-REGISTER(RFC 5626 ;ob 플로우 재사용)까지 같은 TCP 로 오지만, 그 연결은 아무도
+        // 유지하지 않아 유휴 타이머로 곧 닫힌다(pjsip 실측). 닫힌 뒤 그 주소로는 서버가 도달할
+        // 수 없다 — NAT 뒤 단말에 서버가 연결을 새로 걸 수는 없기 때문이다.
         //
-        // 최초 등록(작은 REGISTER)은 UDP 라 삽입 시 UDP latch 가 수립되고, 이후 UDP 갱신·
-        // keepalive 로 유지된다. TCP 로 온 REGISTER 는 바인딩 수명·Contact 만 갱신한다(아래).
-        if ( pclsMessage->m_eTransport == E_SIP_UDP ) {
+        // 그래서 갱신 자격은 **등록에 쓰인 flow 와 같은 flow 에서 온 요청**에 한한다. 그 판정을
+        // 수신 transport 와 저장 transport 의 일치로 근사한다 — 승격 TCP 는 등록 flow(UDP·TLS)와
+        // transport 가 다르므로 걸러지고, 등록 flow 는 단말 keepalive 로 유지되므로 통과한다.
+        // (메서드 기준 "REGISTER 면 허용"은 0.2.84 에서 오염 재발 실측 — ;ob 재사용으로 재-
+        //  REGISTER 도 승격 TCP 로 오기 때문에 판별자가 되지 못한다.)
+        //
+        // ⚠ 이 규칙은 transport **전환**(UDP 등록 단말이 TLS 로 재등록)을 차단한다. 전환 허용
+        //   규칙은 미구현 — docs/design/features/sip_tls_signaling.md §4.4 참조.
+        if ( pclsMessage->m_eTransport == itMap->second.m_eTransport ) {
             itMap->second.m_strIp = clsInfo.m_strIp;
             itMap->second.m_iPort = clsInfo.m_iPort;
             itMap->second.m_eTransport = clsInfo.m_eTransport;
+            itMap->second.m_iLastSeenTime = clsInfo.m_iLoginTime;
         }
         itMap->second.m_strGroupId = clsInfo.m_strGroupId;
         // 재등록 갱신 — REGISTER 에서만 capability·Contact 재평가 (비REGISTER 갱신은 Contact 미포함)
+        //   ⚠ 위 가드에 막힌 REGISTER 도 수명은 연장한다 = 주소가 stale 인 바인딩이 만료 sweep 에
+        //     걸리지 않는다. 수명 연장까지 막으면 승격 TCP 로 재-REGISTER 가 반복되는 구간에서
+        //     살아있는 단말이 삭제되므로, 실측 후 결정한다 (sip_tls_signaling.md §4.5).
         if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
             // 바인딩 수명 연장 — 재등록이 만료시각을 리셋해야 sweep 에 의한 유령 만료가 없다
             itMap->second.m_iLoginTime = clsInfo.m_iLoginTime;
@@ -142,8 +151,11 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
             itMap->second.m_iRegisterCSeq = clsInfo.m_iRegisterCSeq;
         }
 
-        CLog::Print( LOG_DEBUG, "user(%s) is updated (%s:%d:%d) group(%s)", strUserId.c_str(), clsInfo.m_strIp.c_str(),
-                     clsInfo.m_iPort, clsInfo.m_eTransport, clsInfo.m_strGroupId.c_str() );
+        // 앞의 (ip:port:transport) 는 **수신값**, latch() 는 갱신 판정 후의 **저장값**이다.
+        //   가드에 막히면 둘이 달라진다 — 저장 상태는 반드시 latch() 쪽을 봐야 한다.
+        CLog::Print( LOG_DEBUG, "user(%s) is updated (%s:%d:%d) latch(%s:%d:%d) group(%s)", strUserId.c_str(),
+                     clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport, itMap->second.m_strIp.c_str(),
+                     itMap->second.m_iPort, itMap->second.m_eTransport, clsInfo.m_strGroupId.c_str() );
     }
     m_clsMutex.release();
 
@@ -237,6 +249,17 @@ bool CUserMap::Delete( const char *pszUserId ) {
     m_clsMutex.release();
 
     return bRes;
+}
+
+void CUserMap::TouchFlow( const char *pszUserId, ESipTransport eTransport ) {
+    USER_MAP::iterator itMap;
+
+    m_clsMutex.acquire();
+    itMap = m_clsMap.find( pszUserId );
+    if ( itMap != m_clsMap.end() && itMap->second.m_eTransport == eTransport ) {
+        time( &itMap->second.m_iLastSeenTime );
+    }
+    m_clsMutex.release();
 }
 
 bool CUserMap::SetIpPort( const char *pszUserId, const char *pszIp, int iPort, ESipTransport eTransport ) {

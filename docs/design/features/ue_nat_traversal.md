@@ -5,7 +5,7 @@
 검증망에서 NAT 뒤 단말을 정식 지원**한다.
 
 관련 문서: [modules/csp.md](../modules/csp.md) · [modules/cmp.md](../modules/cmp.md) ·
-[api/cmp_media_api.md](../../api/cmp_media_api.md)
+[sip_tls_signaling.md](sip_tls_signaling.md) · [api/cmp_media_api.md](../../api/cmp_media_api.md)
 
 > **진행 중 미해결 이슈**: PTT 그룹콜 조인 크래시(UE pjsua `med_prov_cnt` assert) + 발언 무음은
 > [ptt_join_crash_and_silence.md](ptt_join_crash_and_silence.md) 참조 (UE 측 결함, 서버 결백).
@@ -33,7 +33,7 @@ NAT latch 는 신원 판정이 아닌 **송신 목적지 학습**으로 축소�
 | 등록 바인딩 | Contact URI 원문은 에코/reginfo 전용. 실제 도달 주소는 top Via 의 received/rport(`GetTopViaIpPort`)를 `CUserInfo::m_strIp/m_iPort/m_eTransport` 로 저장 | `csp/UserMap.cpp`, `csp/UserMap.h` |
 | 인바운드 라우팅 | R-URI = 등록 Contact URI(target refresh), 실제 전송 목적지는 `m_strSendDestIp/m_iSendDestPort` + **`m_eTransport`** 오버라이드(latch 주소) — 사설 Contact 여도 도달 | `csp/GroupCallService.cpp`, `csp/CspServer.cpp` |
 | **도달 주소 = (IP, 포트, transport) 한 세트** | NAT 매핑은 프로토콜별로 분리돼 있어 TCP 바인딩 주소로 UDP 를 보내면 전량 폐기된다. SendDest 를 설정하는 모든 지점(fan-out INVITE·NOTIFY 2종)이 transport 를 함께 전달한다 | `csp/GroupCallService.cpp` `InviteMember`, `csp/CspServer.cpp` `SendNotifyToSubscriber`/`SendTerminatedNotify` |
-| **latch 갱신 규율** | 서버가 먼저 거는 요청의 목적지이므로 **상시 살아 있는 경로**여야 한다 → 갱신은 **UDP 소스로 한정**(REGISTER 도 예외 아님). 단말이 대형 요청을 TCP 승격하면 그 다이얼로그의 ACK/BYE·재-REGISTER 까지 TCP 로 오지만 그 연결은 유휴 타이머로 닫히고, 닫힌 뒤엔 NAT 뒤 단말에 서버가 TCP 를 새로 걸 수 없다. UDP 등록 플로우는 keepalive 로 상시 유지. **갱신 경로는 정확히 둘** — 등록(`Insert`)과 모든 수신 요청의 주소 변경 감지(`SetIpPort`) — 이며 둘 다 같은 규율을 적용한다 | `csp/UserMap.cpp` `Insert`/`SetIpPort`, `csp/ModuleDispatcher.cpp` `EventIncomingRequestAuth` |
+| **latch 갱신 규율** | 서버가 먼저 거는 요청의 목적지이므로 **상시 살아 있는 경로**여야 한다 → 갱신 자격은 **등록에 쓰인 flow 에서 온 요청**에 한하며, 그 판정을 **수신 transport == 저장 transport** 로 근사한다(REGISTER 도 예외 아님). 단말이 대형 요청을 TCP 승격하면 그 다이얼로그의 ACK/BYE·재-REGISTER 까지 TCP 로 오지만 그 연결은 아무도 유지하지 않아 유휴 타이머로 닫히고, 닫힌 뒤엔 NAT 뒤 단말에 서버가 연결을 새로 걸 수 없다. 등록 flow(UDP·TLS)는 단말 keepalive 로 상시 유지된다. **갱신 경로는 정확히 둘** — 등록(`Insert`)과 모든 수신 요청의 주소 변경 감지(`SetIpPort`) — 이며 둘 다 같은 규율을 적용한다. transport **전환**(UDP 등록 단말의 TLS 재등록)은 이 규율에 막히며, 전환 규칙은 [sip_tls_signaling.md §4.4](sip_tls_signaling.md#44-전환-규칙--새-transport-가-tcp-가-아닐-때) 에 설계만 있고 미구현이다 | `csp/UserMap.cpp` `Insert`/`SetIpPort`, `csp/ModuleDispatcher.cpp` `EventIncomingRequestAuth` |
 | TCP/TLS | 등록에 쓰인 accept 소켓을 (IP:port) 키로 재사용. 인바운드 요청도 기존 연결로 송신 (RFC 5626 유사, flow-token 없음). 연결이 닫히면 맵에서 제거되고 이후 그 주소로의 TCP 송신은 신규 연결 시도가 되어 NAT 뒤 단말에는 실패한다 — 위 latch 규율의 근거 | `ext/psip/SipStack/SipStackComm.hpp`, `SipTcpThread.cpp` |
 | UE keepalive | 등록 단말 대상 주기 OPTIONS (`Setup.Sip.SendOptionsPeriod`, 기본 0=비활성). NAT 배치에서는 활성 필수 ([§7](#7-운영-요건)) | `csp/UserMap.cpp` `SendOptions` |
 

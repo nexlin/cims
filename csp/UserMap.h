@@ -62,6 +62,11 @@ public:
     /** OPTIONS 메시지 전송 시간 */
     time_t m_iSendOptionsTime;
 
+    /** 저장된 도달 경로(latch)로 마지막으로 요청이 도착한 시각.
+     *  수신 소스가 저장값과 일치할 때만 갱신되므로, "이 latch 가 아직 살아 있는가" 의 근거가 된다.
+     *  stale latch 진단용 — 판정 로직에는 아직 쓰지 않는다. */
+    time_t m_iLastSeenTime;
+
     /** Call Pickup 을 위한 그룹 아이디 */
     std::string m_strGroupId;
 
@@ -100,8 +105,13 @@ public:
 
     /** 도달 주소 갱신 — (IP, 포트, transport) 는 한 세트이므로 항상 함께 옮긴다.
      *  셋 중 하나만 바꾸면 "TCP 포트에 UDP 발송" 같은 불일치가 생겨 NAT 이 전량 폐기한다.
-     *  호출자는 UDP 소스에서만 갱신할 것 (근거: Insert() 주석의 latch 규율). */
+     *  호출자는 **수신 transport 가 저장 transport 와 같을 때만** 갱신할 것
+     *  (근거: Insert() 주석의 latch 규율). */
     bool SetIpPort( const char *pszUserId, const char *pszIp, int iPort, ESipTransport eTransport );
+
+    /** 저장된 도달 경로로 요청이 도착했음을 기록한다 (m_iLastSeenTime).
+     *  수신 transport 가 저장 transport 와 다르면 무시한다 — 그 요청은 latch 의 생존 근거가 아니다. */
+    void TouchFlow( const char *pszUserId, ESipTransport eTransport );
 
     void DeleteTimeout( int iTimeout );
     void DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList );
