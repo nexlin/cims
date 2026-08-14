@@ -1408,6 +1408,24 @@ def _build_group_list(config) -> list:
     return [_serialize_group(g, config, deps, defaults, agents) for g in groups]
 
 
+def _log_dir_follows_mount(cur_dir: str, mnt: str) -> bool:
+    """이관이 `ServiceLogging.Dir` 을 마운트 하위로 옮겨도 되는가.
+
+    로그 경로는 콘솔에서 운영자가 지정할 수 있는 키라 무조건 덮으면 남의 선택을 지운다.
+    그래서 **파생값일 때만** 따라 옮긴다:
+      - 비어 있음            → 옮긴다 (부트스트랩이 값을 못 남긴 경우)
+      - `…/service_log`      → 옮긴다 (부트스트랩이 만든 노드 로컬 파생값)
+      - 이미 마운트 하위     → 두다 (정상 — 값이 흔들리지 않게)
+      - 그 외 임의 경로      → 두다 (운영자가 고른 위치를 존중)
+    """
+    cur = (cur_dir or '').rstrip('/')
+    if not cur:
+        return True
+    if cur == mnt or cur.startswith(mnt.rstrip('/') + '/'):
+        return False                      # 이미 마운트 하위 = 이관이 손댈 이유 없음
+    return os.path.basename(cur) == 'service_log'
+
+
 async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResult:
     """POST /ha-groups/{id}/shared-store/migrate — 관리 store 를 공유 마운트로 이관.
 
@@ -1496,6 +1514,17 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         logger.log_warning(f"[ha-group] group#{gid} 이관 대상 노드를 특정하지 못해 "
                            f"deployment#{_mig_target_id} 로 진행합니다(복사 누락 방지)")
 
+    # 이미 store 가 target 에 있으면 **복사할 것이 없다** — 같은 mount_point 로 다시 호출한
+    # 경우(= 설정 재적용)다. 그대로 `migrate_oam_store` 를 태우면 agent 가 "source 와 target 이
+    # 같습니다"로 거부해 **config.json 재기록(5단계)까지 건너뛴다** — 파생 경로를 고치려고
+    # 재호출했는데 정작 store 를 든 노드만 안 고쳐지는 함정. 이 경우 전 멤버를 `update_config`
+    # 로 돌려 설정만 재적용한다(모듈 정지 없음 = 무중단).
+    _already_migrated = os.path.realpath(file_store.runtime_root(config)) == \
+        os.path.realpath(target_dir)
+    if _already_migrated:
+        logger.log_info(f"[ha-group] group#{gid} store 가 이미 {target_dir} — "
+                        f"복사 생략, 설정만 재적용(update_config)")
+
     # ── 2)~4) 배포별 overlay 병합 + job 큐잉
     jobs: list = []
     for dep in targets:
@@ -1503,6 +1532,24 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         overlay = dict(cur)
         overlay['CimsRuntimeDir'] = target_dir
         overlay['CimsRuntimeMount'] = mnt
+        # ── store 파생 키도 함께 옮긴다 ────────────────────────────────────────
+        # 이관은 "store 를 이 위치로 옮긴다" 는 뜻이므로 store 에서 유도되는 값이 뒤에
+        # 남으면 안 된다. 여기서 갱신하지 않아 실제로 깨졌던 것들:
+        #   · Packages.Dir 이 이관 전 로컬 경로에 머물러, 절체한 노드에서 패키지 파일을
+        #     못 찾아 `/agent-bundle.tar.gz` 404 → agent·모듈 설치/업그레이드 전면 불가.
+        #   · ServiceLogging.Dir 이 로컬에 머물러, 운영자가 매 설치마다 콘솔에서 손으로
+        #     공유 경로로 되돌려야 했다.
+        # 파생 기준이 서로 다르다 (oam_ha.md §4.1):
+        #   · Packages.Dir       = store 의 일부  → **store(=target_dir)** 하위
+        #   · ServiceLogging.Dir = store 가 아님  → **마운트(=mnt)** 하위
+        #     (append-only 관측 데이터라 양 노드 동시 write 가 무해하고, store 이관·스냅샷에
+        #      대용량 로그가 딸려가면 안 된다)
+        # `Packages.Dir` 은 패키지를 서빙하는 base oam 만의 키다(oam-svc 템플릿엔 없다) —
+        # 선언 없는 키를 overlay 에 심으면 콘솔 설정화면에 유령 항목·드리프트로 보인다.
+        if (dep.get('process_name') or '').lower().strip() == 'oam':
+            overlay['Packages.Dir'] = f'{target_dir}/pkg_files'
+        if _log_dir_follows_mount(str(cur.get('ServiceLogging.Dir') or ''), mnt):
+            overlay['ServiceLogging.Dir'] = f'{mnt}/service_log'
         updated = _deploy_update(config, dep['id'], {'config': overlay}) or dep
         _enrich_deploy([updated], config)
         pkg = _pkg_load(config, updated.get('package_id'))
@@ -1523,7 +1570,7 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         # 판정은 hostname 우선(정확), 없으면 status=running (배포기록 기준). 둘 다 못 찾으면
         # 아래에서 첫 배포를 대상으로 삼는다 — 아무도 대상이 아니면 복사가 조용히 빠져
         # 절체 시 빈 콘솔이 되므로, 대상 0건은 허용하지 않는다.
-        if updated['id'] == _mig_target_id:
+        if updated['id'] == _mig_target_id and not _already_migrated:
             params['module'] = (updated.get('process_name') or '').lower().strip()
             params['source_dir'] = file_store.runtime_root(config)
             params['target_dir'] = target_dir
@@ -1541,8 +1588,18 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
     _enqueue_update_ha_for_members(gid, config)   # 공유 store 반영 → HA 편입 재렌더
     return HandlerResult(status=202, body={
         'shared_store': store, 'runtime_dir': target_dir, 'jobs': jobs,
-        'detail': ('이관을 시작했습니다. store 를 들고 있는 노드의 OAM 이 정지 → 복사 → '
-                   '재기동되므로 콘솔이 30초 내외 끊깁니다. 돌아오면 새 경로로 동작합니다.'),
+        # 함께 옮겨간 store 파생 경로 — 운영자가 "로그가 어디로 갔나" 를 응답만 보고 알 수 있게.
+        'derived_paths': {
+            'Packages.Dir': f'{target_dir}/pkg_files',
+            'ServiceLogging.Dir': f'{mnt}/service_log',
+        },
+        'already_migrated': _already_migrated,
+        'detail': ('store 가 이미 이 위치에 있어 복사 없이 설정만 재적용합니다 '
+                   '(모듈 정지 없음). 패키지 저장소·서비스 로그 경로가 현재 store/마운트 '
+                   '기준으로 정정됩니다.') if _already_migrated else
+                  ('이관을 시작했습니다. store 를 들고 있는 노드의 OAM 이 정지 → 복사 → '
+                   '재기동되므로 콘솔이 30초 내외 끊깁니다. 돌아오면 새 경로로 동작합니다. '
+                   '패키지 저장소와 서비스 로그 경로도 함께 이동합니다.'),
     })
 
 

@@ -1506,7 +1506,11 @@ def job_migrate_oam_store(params: dict) -> tuple:
         return 3, "\n".join(log), f"{reason} — 구 설정으로 되돌려 기동했습니다(rc={rc_b}) {err_b or ''}"
 
     # ── 4) 복사 — target 에 store 가 있으면 운영자 결정 없이는 진행하지 않는다
-    skip = {"_secrets", "cert"}
+    #   service_log 는 store 가 아니다 (oam_ha.md §4.1) — 마운트에 붙는 append-only 관측
+    #   데이터라 store 스냅샷에 딸려가면 안 된다. 제외하지 않으면 이관 때마다
+    #   `<store>/service_log` 에 사본이 쌓이고(실측), 대용량 로그가 **모듈 정지 창**을
+    #   로그 크기에 비례해 늘린다. 이관 전 로컬 로그는 기동 후 7)에서 새 위치로 합친다.
+    skip = {"_secrets", "cert", "service_log"}
     copied = []
     try:
         os.makedirs(dst, exist_ok=True)
@@ -1548,7 +1552,51 @@ def job_migrate_oam_store(params: dict) -> tuple:
     log.append(f"start rc={rc_b}")
     if rc_b != 0:
         return 3, "\n".join(log), f"이관은 됐지만 기동 실패(rc={rc_b}): {(err_b or out_b or '').strip()[:200]}"
+
+    # ── 7) 이관 전 로컬 로그 합류 — **기동 후, 백그라운드**
+    #   부트스트랩 시점엔 공유 마운트가 없어(붙이는 수단이 이 OAM 의 콘솔이다) 로그가 노드
+    #   로컬에 쌓인다. 이관으로 로그 경로가 마운트 하위로 바뀌면 그 이전 로그가 콘솔 조회
+    #   범위 밖에 남으므로 새 위치로 옮겨 연속성을 살린다. 정지 창을 늘리지 않도록 기동
+    #   **뒤에**, 그리고 job 을 붙들지 않도록 전용 스레드에서 수행한다 (로그는 시간축 분할
+    #   구조라 나중에 합쳐도 안전).
+    new_log_dir = str((params.get("config") or {}).get("ServiceLogging.Dir") or "").rstrip("/")
+    old_log_dir = os.path.join(src, "service_log")
+    if new_log_dir and os.path.isdir(old_log_dir) \
+            and os.path.abspath(new_log_dir) != os.path.abspath(old_log_dir):
+        threading.Thread(target=_merge_service_logs, args=(old_log_dir, new_log_dir),
+                         daemon=True, name="agent-logmerge").start()
+        log.append(f"service_log 합류 시작(백그라운드): {old_log_dir} → {new_log_dir}")
     return 0, "\n".join(log), ""
+
+
+def _merge_service_logs(src_dir: str, dst_dir: str) -> None:
+    """이관 전 로컬 서비스 로그를 새 로그 루트로 합친다 (백그라운드, best-effort).
+
+    로그는 `YYYY/MM/DD/HH/<...>.jsonl` 로 시간축 분할돼 있어 상대경로 그대로 옮기면 겹치지
+    않는다. 예외는 **이관 시각이 걸친 5분 버킷** 하나뿐인데, 그 파일은 신 위치에서 이미
+    쓰이고 있으므로 **목적지가 있으면 건너뛴다**(신 파일이 정본 — 구 파일의 그 5분치는 남는다).
+    원본은 지우지 않는다 — 합류가 부분 실패해도 원본에서 다시 시도할 수 있어야 한다.
+    """
+    moved = skipped = failed = 0
+    try:
+        for root, _dirs, files in os.walk(src_dir):
+            rel = os.path.relpath(root, src_dir)
+            out = dst_dir if rel == "." else os.path.join(dst_dir, rel)
+            for fn in files:
+                sp, dp = os.path.join(root, fn), os.path.join(out, fn)
+                try:
+                    if os.path.exists(dp):
+                        skipped += 1
+                        continue
+                    os.makedirs(out, exist_ok=True)
+                    shutil.copy2(sp, dp)
+                    moved += 1
+                except Exception:
+                    failed += 1
+        print(f"[agent][store] service_log 합류 완료: {src_dir} → {dst_dir} "
+              f"(복사 {moved} / 기존유지 {skipped} / 실패 {failed})", flush=True)
+    except Exception as e:
+        print(f"[agent][store] service_log 합류 실패(무시): {e}", flush=True)
 
 
 def job_update_config(params: dict, oam_url: str = "", session_token: str = "") -> tuple:

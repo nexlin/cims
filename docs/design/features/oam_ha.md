@@ -174,6 +174,29 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 - `ServiceLogging.Dir`(서비스 로그·alert 이력)은 지금처럼 같은 NAS 유지 — append-only 관측
   데이터라 두 노드가 동시에 써도 무해하다. 관리 store 와 성격이 다르다.
 
+#### 경로 파생 규칙 — 무엇이 store 를 따라가고 무엇이 마운트에 붙는가
+
+경로 설정은 **하나도 독립 값이 아니다.** 전부 store 또는 마운트에서 유도되며, 유도 기준이
+서로 다르다. 기준을 섞으면 이관 후 한쪽만 옛 위치에 남는다.
+
+| 키 | 파생 기준 | 마운트 있음 | 마운트 없음(부트스트랩 직후) |
+|---|---|---|---|
+| `Packages.Dir` | **store** — 패키지는 store 의 일부(§4.0) | `{CimsRuntimeDir}/pkg_files` | `{노드 로컬 store}/pkg_files` |
+| `ServiceLogging.Dir` | **마운트** — store 가 아님(위 항목) | `{CimsRuntimeMount}/service_log` | `{노드 로컬 runtime}/service_log` |
+
+- 파생값을 **저장은 한다**(콘솔이 실제 적용값을 그려야 하므로 — 폴백은 화면에 안 보인다).
+  대신 **이관이 함께 갱신**한다(§9.2). 저장만 하고 갱신하지 않으면 원본(`CimsRuntimeDir`)만
+  움직이고 파생이 뒤에 남는다.
+- 그래서 **store 복사에서 `service_log` 는 제외**한다. 포함하면 (a) 마운트 파생인 로그가
+  store 스냅샷에 딸려가 `<store>/service_log` 사본이 이관마다 쌓이고, (b) 대용량 로그가
+  모듈 정지 창을 로그 크기에 비례해 늘린다. 이관 전 노드 로컬 로그는 **기동 후 백그라운드로**
+  새 위치에 합친다(정지 창 무영향, 시간축 분할이라 나중에 합쳐도 안전).
+- 패키지 **레코드**는 절대경로를 정본으로 두지 않는다 — 파일명을 정본으로 보고 현재
+  `Packages.Dir` 에서 찾는다(`resolve_pkg_file`). 레코드에 이관 시점 절대경로가 박히면
+  절체한 노드에서 그 경로가 없어 "패키지 미등록"(= `/agent-bundle.tar.gz` 404, agent·모듈
+  설치/업그레이드 전면 불가)이 된다. 파일명 기준이면 store 가 다시 옮겨져도 레코드 이관이
+  필요 없다.
+
 **수용하는 위험**: NAS 가 SPOF 다. NAS 가 죽으면 관리평면(+ 같은 그룹의 csc)이 멈춘다.
 통화 서비스(CSP/CMP)는 별 그룹이고 NAS 와 무관하다. 이미 서비스 로그가 NAS 의존이므로
 **새로운 종류의 SPOF 는 아니다**. 블록 복제로 이 SPOF 를 없애는 선택지는 여유 블록 장치가
@@ -857,9 +880,10 @@ sudo ./install.sh --join \
 | # | 동작 |
 |---|---|
 | 1 | 그룹에 `shared_store` 저장 — 이 시점부터 oam/oam-svc 가 HA 편입 대상(§6.3) |
-| 2 | 멤버의 oam/oam-svc 배포 overlay 에 `CimsRuntimeDir`(=`<mount>/runtime`)·`CimsRuntimeMount` 병합 — **현재 store 에 기록**되므로 3의 복사에 함께 실려 신 store 와 일관해진다 |
+| 2 | 멤버의 oam/oam-svc 배포 overlay 에 `CimsRuntimeDir`(=`<mount>/runtime`)·`CimsRuntimeMount` **+ store 파생 경로**(`Packages.Dir`=`<store>/pkg_files`, `ServiceLogging.Dir`=`<mount>/service_log` — §4.1) 병합 — **현재 store 에 기록**되므로 3의 복사에 함께 실려 신 store 와 일관해진다. 로그 경로는 운영자가 콘솔에서 지정할 수 있는 키라 **파생값일 때만** 따라 옮긴다(빈 값 또는 `…/service_log`; 이미 마운트 하위거나 운영자가 고른 다른 위치는 그대로) |
 | 3 | store 를 들고 있는 노드(`status=running`)에 `migrate_oam_store` job |
 | 4 | 나머지 멤버는 `update_config` 만 — 그 노드는 같은 공유 store 를 읽게 된다 |
+| — | **store 가 이미 target 에 있으면**(같은 mount_point 로 재호출 = 설정 재적용) 복사 없이 **전 멤버 `update_config`** — 모듈 정지가 없어 무중단이다. 이 분기가 없으면 agent 가 "source 와 target 이 같습니다"로 거부하면서 config.json 재기록(아래 5)까지 건너뛰어, 파생 경로를 정정하려고 재호출했는데 정작 store 를 든 노드만 안 고쳐진다. 파생 규칙(§4.1)을 뒤늦게 도입한 기존 사이트의 **정규 교정 경로**가 이것이다 |
 
 agent 가 하는 일 (`job_migrate_oam_store`) — **OAM 은 자기 store 를 자기가 옮길 수 없다**
 (복사 중 자기가 떠 있으면 write 가 섞이고, 자기를 멈추면 이어서 지시할 통로가 없다). agent 는
@@ -869,7 +893,8 @@ OAM 수명과 무관하고 이미 그 모듈의 lifecycle 을 소유하므로 �
 1. 전제 확인 — target_mount 가 실제 마운트인지 + write 가능한지
    (실패하면 모듈을 건드리지 않고 즉시 실패 — 가용성 손실 없음)
 2. op grace 표시 — watchdog·reconcile 이 복사 중 끼어들지 않게
-3. 모듈 정지 → 4. 복사 → 5. config.json 기록 → 6. 모듈 기동
+3. 모듈 정지 → 4. 복사(_secrets·cert·service_log 제외) → 5. config.json 기록 → 6. 모듈 기동
+7. (기동 후, 백그라운드) 이관 전 노드 로컬 service_log 를 새 로그 루트로 합류
 ```
 
 - **source 가 항상 이긴다 — 묻지 않는다.** 이관은 "지금 도는 OAM 의 store 를 이 위치로

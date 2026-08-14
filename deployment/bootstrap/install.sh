@@ -395,16 +395,18 @@ if join:
 # 관리 store 경로 — 이중화면 공유 마운트 하위. 미지정 시 노드 로컬 runtime(단일 노드 기본).
 store = (os.environ.get('STORE_DIR') or '').strip() or (jp.get('runtime_dir') or '').strip() \
         or os.environ['RUNTIME_DIR']
+mount = (os.environ.get('STORE_MOUNT') or '').strip() or (jp.get('runtime_mount') or '').strip()
 # 서비스 로그 루트 — **구체값을 반드시 기록한다** (CimsRuntimeDir 과 같은 규칙).
 #   비워두면 모듈은 코드 폴백으로 노드 로컬을 쓰는데, **콘솔은 그 폴백을 알 수 없어**
 #   템플릿 기본값(사이트 값 = 공유 경로)을 그리게 된다 — 화면과 실제가 갈린다. 설정
 #   화면은 실제 적용값이 기준이어야 하므로, 설치 시점에 정해 overlay 에 남긴다.
-#   공유 스토리지는 부트스트랩 시점에 아직 없다(붙이는 수단이 이 OAM 의 콘솔이다) —
-#   따라서 기본은 노드 로컬이고, 마운트 후 콘솔/이관이 공유 경로로 바꾼다.
+#   기준은 store 가 아니라 **마운트**다 (oam_ha.md §4.1) — 로그는 store 가 아니라
+#   마운트에 붙는 append-only 관측 데이터라, store 이관·스냅샷에 딸려가면 안 된다.
+#   마운트를 모르는 첫 부트스트랩(붙이는 수단이 이 OAM 의 콘솔이다)에서는 노드 로컬이고,
+#   마운트 후에는 이관이 공유 경로로 바꾼다(`_migrate_shared_store`).
 if not (d.get('ServiceLogging') or {}).get('Dir'):
     d.setdefault('ServiceLogging', {})['Dir'] = os.path.join(
-        os.environ['RUNTIME_DIR'], 'service_log')
-mount = (os.environ.get('STORE_MOUNT') or '').strip() or (jp.get('runtime_mount') or '').strip()
+        mount or os.environ['RUNTIME_DIR'], 'service_log')
 d['CimsRuntimeDir'] = store
 if mount:
     d['CimsRuntimeMount'] = mount       # mount guard — 마운트 없으면 기동 거부

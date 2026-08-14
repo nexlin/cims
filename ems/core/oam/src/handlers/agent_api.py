@@ -888,13 +888,17 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
 # ──────────────────────────────────────────────────────────────
 
 async def _package_download(pkg_id: int, config: dict) -> HandlerResult:
-    from handlers.agents import _pkg_load
+    from handlers.agents import _pkg_load, resolve_pkg_file
     pkg = _pkg_load(config, pid=pkg_id)
     if not pkg:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    path = pkg.get("file_path") or ""
-    if not os.path.isfile(path):
-        return HandlerResult(status=500, body={"error": "file_missing", "path": path},
+    # 경로는 현재 `Packages.Dir` 기준으로 푼다 — 레코드의 절대경로는 store 이관 전 값일 수
+    # 있고, 그 경우 이관·절체 후 노드에서 파일을 못 찾아 모듈 설치가 전면 실패한다.
+    path = resolve_pkg_file(config, pkg)
+    if not path:
+        return HandlerResult(status=500,
+                             body={"error": "file_missing", "path": pkg.get("file_path") or "",
+                                   "file_name": pkg.get("file_name") or ""},
                              media_type="application/json")
     with open(path, "rb") as f:
         data = f.read()

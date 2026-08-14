@@ -822,6 +822,31 @@ def _resolve_pkg_paths(config: dict) -> tuple:
     return active, backup
 
 
+def resolve_pkg_file(config: dict, row: dict) -> str:
+    """패키지 레코드의 **실제 파일 경로** — 기록된 절대경로가 아니라 현재 `Packages.Dir`
+    기준으로 푼다. 찾지 못하면 빈 문자열.
+
+    `Packages.Dir` 은 store 파생값(`{CimsRuntimeDir}/pkg_files`, oam_ha.md §4.0)이라 store
+    이관과 함께 움직인다. 반면 레코드에는 등록 시점의 절대경로가 박히므로, 이관 뒤(특히
+    **절체해 다른 노드에서 읽을 때**)에는 그 경로가 없어 "패키지 미등록"이 된다 — 파일은
+    공유 store 에 그대로 있는데도. 실측 사고: 이관 후 standby 로 절체하면 `/agent-bundle.tar.gz`
+    가 404 가 되어 agent·모듈 설치/업그레이드가 전면 불가.
+
+    그래서 **파일명을 정본으로 보고 현재 저장소에서 찾는다.** 이러면 store 가 다시 옮겨져도
+    레코드 이관이 필요 없다. 옛 레코드(`file_name` 없음)는 `file_path` 의 basename 으로 같은
+    규칙에 태우고, 그래도 없으면 기록된 절대경로를 그대로 쓴다(단일 노드 legacy 보존).
+    """
+    fname = str(row.get("file_name") or "").strip() \
+        or os.path.basename(str(row.get("file_path") or "").strip())
+    if fname:
+        pkg_dir, _ = _resolve_pkg_paths(config)
+        cand = os.path.join(pkg_dir, fname)
+        if os.path.isfile(cand):
+            return cand
+    legacy = str(row.get("file_path") or "").strip()
+    return legacy if legacy and os.path.isfile(legacy) else ""
+
+
 def _parse_body(handler_args: HandlerArgs) -> dict:
     body = handler_args.body
     if body is None: return {}
@@ -1939,6 +1964,9 @@ def _pkg_upsert(config, name: str, version: str, fpath: str, fsize: int,
         'name': name,
         'version': version,
         'file_path': fpath,
+        # 파일명이 위치의 정본 — 경로는 `Packages.Dir` 로 푼다 (resolve_pkg_file).
+        # file_path 는 등록 시점 절대경로라 store 이관 후 무효해질 수 있어 참고용으로만 남긴다.
+        'file_name': os.path.basename(fpath),
         'file_size': fsize,
         'sha256': fsha,
         'description': full_desc,
@@ -2190,7 +2218,7 @@ async def _delete_package(pid: int, config):
 
     # 실제 파일을 백업 디렉토리로 이동 (재업로드 시 충돌 방지)
     _, backup_dir = _resolve_pkg_paths(config)
-    moved = await asyncio.to_thread(_move_to_backup, row.get("file_path") or "", backup_dir)
+    moved = await asyncio.to_thread(_move_to_backup, resolve_pkg_file(config, row), backup_dir)
     if moved:
         logger.log_info(f"[pkg-delete] id={pid} {row.get('name')}-{row.get('version')} "
                         f"→ backup: {moved}")
@@ -3988,12 +4016,13 @@ def _latest_agent_pkg_path(config: dict) -> str | None:
     """패키지 저장소의 최신 agent tarball 경로 (없으면 None)."""
     pkgs_dir = file_store.domain_dir(config, "packages")
     items = file_store.load_all(pkgs_dir) if os.path.isdir(pkgs_dir) else []
-    agent_pkgs = [p for p in items if p.get("name") == "agent" and p.get("file_path")
-                  and os.path.isfile(p.get("file_path") or "")]
+    # 경로는 현재 `Packages.Dir` 로 푼다 — 레코드의 절대경로는 이관 전 값일 수 있다.
+    agent_pkgs = [(p, resolve_pkg_file(config, p)) for p in items if p.get("name") == "agent"]
+    agent_pkgs = [(p, fp) for p, fp in agent_pkgs if fp]
     if not agent_pkgs:
         return None
-    agent_pkgs.sort(key=lambda p: p.get("uploaded_at") or "", reverse=True)
-    return agent_pkgs[0]["file_path"]
+    agent_pkgs.sort(key=lambda t: t[0].get("uploaded_at") or "", reverse=True)
+    return agent_pkgs[0][1]
 
 
 def _read_agent_pkg_member(config: dict, member: str) -> bytes | None:

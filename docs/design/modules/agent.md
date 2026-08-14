@@ -24,7 +24,7 @@
      ([oam_ha.md](../features/oam_ha.md) §5.3)
    - **base deps 보증기** (job 아님, 300초 루프): vendor deb(keepalived·NFS 클라이언트·공유 lib) 설치를 **백그라운드**에서 보증한다. 옛 구조는 heartbeat 루프 직전에 동기로 호출해, dpkg OS 락(`unattended-upgrade` 가 새 서버에서 수 분 점유)을 기다리는 동안 agent 가 **pending 으로 고착**했다(실측 102초). 상태 판정은 `cims-priv base-deps-status`(설치 없이 조회만, 락 무관)
    - **keepalived 설치 보증기** (job 아님, 상태 기반 60초 루프): ha.json 에 VIP 서비스가 있는데(무장) keepalived 패키지가 없으면 `install → config → apply` 를 재시도한다. 설치를 시도하는 주체가 `update_ha` job 뿐이면, 한 번 실패하고 이벤트가 소진됐을 때 **아무도 다시 시도하지 않아** VIP 주인이 영영 없고 cold 모듈(관리평면 포함)이 어디서도 기동하지 못한다(실측). 실패 원인은 대개 일시적이다 — 우분투 `unattended-upgrade` 가 수 분간 dpkg 를 점유(실측 14:21~14:28). 평가 루프를 막지 않도록 전용 스레드에서 돈다
-   - `migrate_oam_store`: **관리 store 를 공유 마운트(NAS)로 이관** — 마운트·write 확인 → 모듈 정지 → 복사(`_secrets`·`cert` 제외, target 에 없는 항목만=멱등) → `config.json` 기록 → 기동. OAM 은 자기 store 를 자기가 옮길 수 없어 agent 가 주체다. 실패 시 **구 설정으로 되돌려 기동** ([oam_ha.md](../features/oam_ha.md) §9.4)
+   - `migrate_oam_store`: **관리 store 를 공유 마운트(NAS)로 이관** — 마운트·write 확인 → 모듈 정지 → 복사(`_secrets`·`cert`·`service_log` 제외, source 가 항상 이긴다 — 기존 target 은 `.stale-<시각>` 보관) → `config.json` 기록 → 기동 → (백그라운드) 이관 전 로컬 `service_log` 를 새 로그 루트로 합류. `service_log` 를 복사에서 빼는 이유는 로그가 store 가 아니라 **마운트** 파생이고([oam_ha.md](../features/oam_ha.md) §4.1), store 스냅샷에 대용량 로그가 딸려가면 모듈 정지 창이 로그 크기에 비례해 늘기 때문. OAM 은 자기 store 를 자기가 옮길 수 없어 agent 가 주체다. 실패 시 **구 설정으로 되돌려 기동** ([oam_ha.md](../features/oam_ha.md) §9.4)
    - `set_oam_url`: **OAM 접속 주소 재지정** — 새 주소로 `/health` 도달 확인 후 `<state-dir>/oam_url` 기록 + self-restart. 도달 불가 시 미변경·실패(이중화 전환 시 fleet 단절 방지)
    - `uninstall`: install_path 제거
    - `upgrade_agent`: 신 버전을 `agent/<신버전>/` 에 전개 → `current` flip → execv self-restart
