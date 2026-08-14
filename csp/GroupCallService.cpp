@@ -1792,6 +1792,13 @@ std::string CGroupCallService::BuildConferenceInfoBody(
     //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대는 ①다이얼로그가 없어 NOTIFY 가
     //    성립하지 않고 ②참가자 명단에 실리면 '아직 참여하지 않은 초대 대상'이 참여자로 표시된다.
     std::vector<std::pair<std::string, std::string>> vecLegs;
+    // 로스터는 **사용자 단위**다 — RFC 4575 는 참가자당 <user> 하나이고, 그 사람의 단말들은
+    //   그 안의 <endpoint> 로 표현한다. leg 단위로 만들면 재조인 과도기에 같은 사용자가 여러 번
+    //   실려(실측: 로스터[3] = 001·002·001) 수신측에서 상태가 뒤집힐 수 있다.
+    //   vecUsers 는 등장 순서를 보존하고, mapUserLegs 는 그 사용자의 확립 leg 수다 — 2 이상은
+    //   재조인 잔존 leg(정리되지 않은 세션)의 징후이므로 경고로 드러낸다.
+    std::vector<std::string> vecUsers;
+    std::map<std::string, int> mapUserLegs;
     int iVersion = 0;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
@@ -1803,11 +1810,25 @@ std::string CGroupCallService::BuildConferenceInfoBody(
 
         for ( const auto &kv : m_mapCallSession ) {
             if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
+                // leg 목록은 leg 단위 유지 — NOTIFY 는 다이얼로그(leg)마다 보내야 한다.
                 vecLegs.push_back( std::make_pair( kv.first, kv.second.strMemberId ) );
+                if ( mapUserLegs.find( kv.second.strMemberId ) == mapUserLegs.end() )
+                    vecUsers.push_back( kv.second.strMemberId );
+                mapUserLegs[kv.second.strMemberId]++;
             }
         }
     }
     if ( pvecLegsOut ) *pvecLegsOut = vecLegs;
+
+    // 같은 사용자에 확립 leg 가 둘 이상 = 재조인 과정에서 이전 leg 가 정리되지 않은 상태.
+    //   로스터는 사용자 단위로 합쳐 내보내지만, 원인은 세션 정리 쪽이므로 관측 가능하게 남긴다.
+    for ( const auto &kv : mapUserLegs ) {
+        if ( kv.second > 1 )
+            CLog::Print( LOG_INFO,
+                         "BuildConferenceInfoBody: Group(%s) user(%s) has %d established legs — "
+                         "재조인 잔존 leg 의심",
+                         strGroupId.c_str(), kv.first.c_str(), kv.second );
+    }
 
     // 2. Build conference-info+xml body (RFC 4575)
     //    F-09: 참가자 NOTIFY 는 항상 state="full"(변경 반영 후 현재 로스터 스냅샷) — partial 증분은
@@ -1818,24 +1839,18 @@ std::string CGroupCallService::BuildConferenceInfoBody(
     std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
     std::ostringstream oss;
 
-    std::vector<std::string> vecAllMembers;
-    {
-        std::unique_lock<std::recursive_mutex> lock( m_mutex );
-        for ( const auto &kv : m_mapCallSession ) {
-            if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
-                vecAllMembers.push_back( kv.second.strMemberId );
-            }
-        }
-    }
     bool bChangedInRoster = false;
     oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
         << "<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\"\r\n"
         << "  entity=\"sip:" << strGroupId << "@" << strMcpttDomain << "\"\r\n"
         << "  state=\"full\" version=\"" << iVersion << "\">\r\n"
         << "  <users>\r\n";
-    for ( const auto &strMember : vecAllMembers ) {
+    for ( const auto &strMember : vecUsers ) {
         bool bChanged = ( strMember == strChangedUser );
         if ( bChanged ) bChangedInRoster = true;
+        // 같은 사용자의 확립 leg 가 둘 이상이면(재조인 과도기의 잔존 leg) 하나로 합친다 —
+        //   참가자 상태는 사용자 단위 하나여야 한다. 진짜 멀티 디바이스를 지원하게 되면
+        //   여기서 단말별 <endpoint> 로 확장한다.
         oss << "    <user entity=\"sip:" << strMember << "@" << strMcpttDomain << "\" state=\""
             << ( bChanged ? strJoining : "full" ) << "\">\r\n"
             << "      <endpoint entity=\"sip:" << strMember << "@" << strMcpttDomain << "\">\r\n"
