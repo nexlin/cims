@@ -12,6 +12,7 @@ import { useState } from 'react'
 import type { AgentMount } from '../../api/deployment'
 import type { GroupMount, MountOp } from '../../api/ha_groups'
 import { ImeSafeInput } from './ImeSafeInput'
+import { MOUNT_DEFAULTS } from './helpers'
 import { btnSmall, btnDanger } from './styles'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
@@ -62,12 +63,16 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
   const [options, setOptions] = useState('defaults')
 
   const beginAdd = () => {
-    setAddOpen(true); setFstype('nfs'); setSource(''); setTarget(''); setOptions('defaults')
+    setAddOpen(true); setFstype(MOUNT_DEFAULTS.fstype)
+    setSource(''); setTarget(''); setOptions(MOUNT_DEFAULTS.options)
   }
+  // 빈칸은 placeholder 로 보여준 기본값으로 채운다 — 대부분의 노드가 같은 NAS 를 같은
+  // 경로로 붙이므로, 표준 구성이면 [＋ 마운트 추가] → [전 멤버에 추가] 두 번이면 끝난다.
   const commitAdd = () => {
-    const t = target.trim(), s = source.trim()
-    if (!t || !s) return
-    onApply([{ op: 'add', fstype, source: s, target: t, options: options.trim() || 'defaults' }],
+    const t = target.trim()  || MOUNT_DEFAULTS.target
+    const s = source.trim()  || MOUNT_DEFAULTS.source
+    const o = options.trim() || MOUNT_DEFAULTS.options
+    onApply([{ op: 'add', fstype: fstype || MOUNT_DEFAULTS.fstype, source: s, target: t, options: o }],
             `그룹 마운트 += ${s} → ${t}`)
     setAddOpen(false)
   }
@@ -153,13 +158,13 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
           {addOpen ? (
             <tr style={{ background: 'var(--warn-soft)' }}>
               <td style={{ padding: '4px 8px' }}>
-                <ImeSafeInput value={target} onCommit={setTarget} placeholder="/mnt/cims-log"
+                <ImeSafeInput value={target} onCommit={setTarget} placeholder={MOUNT_DEFAULTS.target}
                               style={{ width: '95%', padding: '2px 6px', fontSize: 12,
                                        border: '1px solid #e67e22', borderRadius: 3 }} />
               </td>
               <td style={{ padding: '4px 8px' }}>
                 <ImeSafeInput value={source} onCommit={setSource}
-                              placeholder="121.161.164.105:/home/cbm/NAS/log"
+                              placeholder={MOUNT_DEFAULTS.source}
                               style={{ width: '95%', padding: '2px 6px', fontSize: 12,
                                        border: '1px solid #e67e22', borderRadius: 3 }} />
               </td>
@@ -171,13 +176,16 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
                 </select>
               </td>
               <td style={{ padding: '4px 8px' }}>
-                <ImeSafeInput value={options} onCommit={setOptions} placeholder="defaults"
+                <ImeSafeInput value={options} onCommit={setOptions} placeholder={MOUNT_DEFAULTS.options}
                               style={{ width: '95%', padding: '2px 6px', fontSize: 12,
                                        border: '1px solid var(--border)', borderRadius: 3 }} />
               </td>
               <td colSpan={2} style={{ padding: '4px 8px' }}>
-                <button onClick={commitAdd} style={btnSmall()}
-                        disabled={!source.trim() || !target.trim() || applying}>전 멤버에 추가</button>
+                {/* 빈칸이어도 활성 — 그대로 누르면 위 placeholder 값이 그대로 적용된다. */}
+                <button onClick={commitAdd} style={btnSmall()} disabled={applying}
+                        title={(!source.trim() || !target.trim())
+                          ? `빈칸은 기본값으로 적용 — ${MOUNT_DEFAULTS.source} → ${MOUNT_DEFAULTS.target}`
+                          : '전 멤버에 이 마운트를 추가'}>전 멤버에 추가</button>
                 <button onClick={() => setAddOpen(false)} style={btnSmall()}>취소</button>
               </td>
             </tr>
