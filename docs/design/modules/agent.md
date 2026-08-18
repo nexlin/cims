@@ -162,10 +162,10 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 
 `collect_metrics()` 와 `_health_check_modules()` 는 공유 `_pgrep_module(name)` 로 모듈 프로세스를 찾는다:
 
-1. `pgrep -a <name>` — C++ 데몬(csp/cmp/isp/cwrtc, comm 매칭).
-2. `pgrep -af <stem>_app.py` — python 데몬(csc/oam/oam-svc, comm 이 `python3` 라 1)로 안 잡힘). 패키지명은 하이픈을 가질 수 있으나(`oam-svc`) python 엔트리포인트 파일명은 언더스코어(`oam_svc_app.py`)이므로 `<stem>` 은 모듈명의 하이픈을 언더스코어로 정규화한 값이다.
+1. `pgrep -ax <name>` — C++ 데몬(csp/cmp/isp, comm 정확 매칭).
+2. `pgrep -af <stem>_app.py` — python 데몬(csc/oam/oam-svc, comm 이 `python3` 라 1)로 안 잡힘). 패키지명은 하이픈을 가질 수 있으나(`oam-svc`) python 엔트리포인트 파일명은 언더스코어(`oam_svc_app.py`)이므로 `<stem>` 은 모듈명의 하이픈을 언더스코어로 정규화한 값이다. `-f` 매칭 결과 중 명령이 `pgrep` 자신인 프로세스는 제외한다 — 같은 호스트의 다른 agent 가 동시에 돌린 같은 패턴의 pgrep 을 잡으면 유령 "실행 중"→다음 tick 소멸로 `process_died` 오탐이 나기 때문.
 
-탐지 대상 = **설치된 모듈**(`modules/<module>/`) ∪ 기본 집합 − 비데몬(`agent`/`console`). 설치 모듈을 동적 enumerate 하므로 isp 등 기본 집합 밖 모듈도 누락 없이 보고 → OAM 의 `module_down` alert 오탐 방지.
+탐지 대상 = **agent 가 설치한 모듈만**(설치 루트 enumerate ∪ `supervised.json`) − 비데몬(`agent`/`console`). 고정 기본 집합은 두지 않는다 — pgrep 은 호스트 전역이라 미설치 모듈까지 감시하면 동거 프로세스 오귀속·유령 전이(`process_died` 오탐)의 원천이 된다. 설치 모듈을 동적 enumerate 하므로 isp 등 변종 모듈도 누락 없이 보고 → OAM 의 `module_down` alert 오탐 방지.
 
 ### 10.3 On-demand Health Check (`GET /health-check`)
 

@@ -624,18 +624,19 @@ def collect_per_mount() -> list:
     return rows
 
 
-# 전환 안전망(설치 루트 enumerate 실패 시) 기본 데몬 집합.
-_DEFAULT_METRIC_MODULES = ("csp", "cmp", "csc", "cwrtc")
 # 자기 이름/`<name>_app.py` 로 식별 불가한 모듈 — module 보고에서 제외 (오탐 방지).
 #   agent = 자신(liveness 는 heartbeat/online 으로 판정), console = nginx/vite (프로세스명 무관).
 _NON_DAEMON_MODULES = {"agent", "console"}
 
 
 def _metric_module_names() -> list:
-    """metric 의 modules 보고 대상 = 설치된 모듈(modules/<module>/) ∪ 기본 집합.
-    OAM 의 module_down alert 가 이 실행 집합과 deployment(status=running) 를 비교하므로,
-    설치된 모듈을 빠짐없이 보고해야 isp 등 기본 집합 밖 모듈의 오탐(false down)을 막는다."""
-    names = set(_DEFAULT_METRIC_MODULES)
+    """metric 의 modules 보고 대상 = **agent 가 설치한 모듈만** (설치 루트 enumerate
+    ∪ supervised.json). 고정 기본 집합(csp/cmp/csc 상시 포함)은 두지 않는다 — pgrep 은
+    호스트 전역이라 미설치 모듈까지 감시하면 동거 프로세스 오귀속·유령 전이
+    (process_died 오탐)의 원천이 된다. OAM 의 module_down alert 는 이 실행 집합과
+    deployment(status=running) 를 비교하므로, 설치된 모듈을 빠짐없이 보고해야
+    isp 등 변종 모듈의 오탐(false down)을 막는다."""
+    names = set()
     try:
         for nm in os.listdir(DEFAULT_INSTALL_ROOT):
             if os.path.isdir(os.path.join(DEFAULT_INSTALL_ROOT, nm)):
@@ -668,7 +669,14 @@ def _pgrep_module(name: str):
         for line in r.stdout.splitlines():
             parts = line.split(maxsplit=1)
             if parts and parts[0].isdigit():
-                return int(parts[0]), (parts[1] if len(parts) > 1 else "")
+                cmd = parts[1] if len(parts) > 1 else ""
+                # -f 매칭은 **동시 실행 중인 다른 pgrep**(같은 패턴을 인자로 가진, 다른
+                # agent 의 폴링)을 잡을 수 있다 — pgrep 은 자기 자신만 제외하므로 형제
+                # pgrep 이 유령 "실행 중"→다음 tick 소멸로 보여 process_died 오탐을 낳는다.
+                # 매칭 프로세스의 명령이 pgrep 이면 모듈이 아니다 — 제외.
+                if os.path.basename(cmd.split()[0] if cmd else "") == "pgrep":
+                    continue
+                return int(parts[0]), cmd
     return None
 
 
