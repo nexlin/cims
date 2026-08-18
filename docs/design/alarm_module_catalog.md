@@ -36,7 +36,7 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
 |---|---|---|
 | `구분` | 알람 / 이벤트 | X.733 알람 vs X.730/731/740 통지 — 표준화 §3.6 의 스트림 분리 |
 | `code` | 대응 정의 코드 | 정본은 [alarm_function_catalog.csv](alarm_function_catalog.csv). 여러 행(모듈/객체)이 같은 code 를 가질 수 있다(활성키는 mo 로 분리). `(미배정)` = 기능 카탈로그에 정의 없음(후속 판단 대상) |
-| `type` | 조건 클래스 슬러그 | §2.3 의 20클래스 중 하나 — 클래스의 식별자(클래스는 코드를 갖지 않는다, 표준화 §3.4(a)). 프로세스명·리소스명·임계를 넣지 않는다(표준화 §3.5). **정의 코드**(`A-<DOMAIN>-NNN` — 사전/POD/NMS 키, 알람·이벤트 공통)는 기능 카탈로그([alarm_function_catalog.csv](alarm_function_catalog.csv))가 정본이며, 본 CSV 행이 구현 채택될 때 대응 정의 코드를 확정해 fm_catalog/rule 에 탑재한다(구현분은 flat 정의 코드 사용 — 구 `CIMS-*` 는 read alias 로만 흡수, 표준화 §3.4(a)). 이벤트 행의 type 은 wire 정의 슬러그 — 성격 클래스·정의 코드 배정은 표준화 §3.6 을 따른다 |
+| `type` | 조건 클래스 슬러그 | §2.3 의 21클래스 중 하나 — 클래스의 식별자(클래스는 코드를 갖지 않는다, 표준화 §3.4(a)). 프로세스명·리소스명·임계를 넣지 않는다(표준화 §3.5). **정의 코드**(`A-<DOMAIN>-NNN` — 사전/POD/NMS 키, 알람·이벤트 공통)는 기능 카탈로그([alarm_function_catalog.csv](alarm_function_catalog.csv))가 정본이며, 본 CSV 행이 구현 채택될 때 대응 정의 코드를 확정해 fm_catalog/rule 에 탑재한다(구현분은 flat 정의 코드 사용 — 구 `CIMS-*` 는 read alias 로만 흡수, 표준화 §3.4(a)). 이벤트 행의 type 은 wire 정의 슬러그 — 성격 클래스·정의 코드 배정은 표준화 §3.6 을 따른다 |
 | `severity` | perceivedSeverity | critical/major/minor/warning/indeterminate. **이벤트는 `-`** (통지는 severity 없음) |
 | `source_system` | **발신 노드**(호스트/논리 노드) | CSV 값은 대표 배치의 노드 예시이며, 실제 값은 모듈 SystemId(= FM envelope `hdr.node`) |
 | `instance` | **발신 모듈** | CSP/CMP/CMDP/CSC/AGENT/OAM/OAM-SVC |
@@ -87,7 +87,7 @@ CSV 는 각 모듈이 **스스로 인지(감지)해 발생시킬 수 있는** �
 
 ### 2.3 type 체계 — 조건 클래스 카탈로그 (★)
 
-알람 `type` 은 아래 **20개 조건 클래스**만 쓴다. 분류 기준은 **조건의 성격**(무엇이
+알람 `type` 은 아래 **21개 조건 클래스**만 쓴다. 분류 기준은 **조건의 성격**(무엇이
 일어나고 있는가)이지 객체·원인·영향이 아니다 — 객체는 `대상`/`component`(mo), 원인은
 probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 먼저 이 표에서 흡수처를
 찾고, 어느 성격에도 맞지 않을 때만 클래스를 신설한다.
@@ -126,6 +126,12 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 | `dependency_unavailable` | **필수 실행 의존물 부재** (도구/패키지/권한/플랫폼 기능) | cims-svc/priv 미발견, sudo 미등록, base deps, NAS flock 미제공 |
 | `observability_lost` | **관측·자기보고 파이프라인의 공백·오염·무력화** (통신 두절 제외) | metric blackout, ip -j 빈 배열 위장, 카탈로그 무력화(UNKNOWN_CODE), 관측 대상 공백, 스위퍼 비활성 |
 | `cert_expiring` | **인증서 수명 위험** (만료 임박·회전 실패) | agent mTLS 만료 임박, 회전 실패 |
+
+**SEC (X.736 Security Alarm) — 보안**
+
+| type | 정의 | 대표 조건 |
+|---|---|---|
+| `security_violation` | **보안 이상 징후의 급증**(인증 실패 폭주·사기 호/스캐너·비인가 트래픽) — 율 임계 기반 open/close. 보안 알람은 X.733 계열과 통지 성격(대응 주체·민감도)이 달라 `threshold_crossed` 로 흡수하지 않는다(기능 카탈로그 §4) | 인증 실패 급증(A-SEC-001), fraud/스캐너 탐지(A-SEC-002) — 미구현 |
 
 - **기존 구현 코드와의 관계**: wire/rule/fm_catalog 는 flat **정의 코드**
   (`A-<DOMAIN>-NNN`, 기능 카탈로그 정본)를 쓴다. 구 포맷 클래스 단위 코드

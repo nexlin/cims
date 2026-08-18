@@ -158,14 +158,14 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 코드는 **정의 코드** 한 층위만 갖는다 — 알람/이벤트 **정의**(카탈로그 행 — "이 알람이
 무엇인가")당 1개. 운영 사전(dictionary)·코드별 조치서(POD)·상위 NMS 연동(RFC 3877
 alarmModelIndex 의 대응물)의 키다. 조건 **클래스**(분류 축)는 코드를 갖지 않는다 —
-`type` 슬러그가 클래스의 식별자다(알람 20종 = 모듈 카탈로그 §2.3, 이벤트 9종 = §3.6).
+`type` 슬러그가 클래스의 식별자다(알람 21종 = 모듈 카탈로그 §2.3, 이벤트 9종 = §3.6).
 vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분류 — 코드 아님) 분리와
 동형(§7.2).
 
 - **정의 코드** `<STREAM>-<DOMAIN>-<NNN>` — 예: `A-PRC-001` process_down, `A-COM-001` connection_lost(DB), `E-STC-001` process_started.
   - `STREAM` = **A**(알람) | **E**(이벤트) — 스트림 소속이 코드에서 즉독된다(vIBCF 의 A/F/S 스트림 문자 관례와 동형).
   - **시스템/서비스 네임스페이스는 코드에 넣지 않는다** — 상위 NMS 통합 시 시스템(CIMS vs 타 시스템) 구분은 northbound 매핑·연동 계약의 소관(§7.3)이고, CIMS 내부에서는 스트림 레코드의 서비스 컨텍스트가 이미 보유한다(mo_instance 도 같은 원칙으로 시스템 접두 없이 서버명/그룹명 루트 — §3.4(b)). 타 서비스 pack 의 카탈로그는 descriptor 소속으로 구분되며, 교차 노출이 실제로 필요해지면 그때 pack 접두를 도입한다(선제 도입 ❌).
-  - `DOMAIN` = 알람은 eventType 약어: **PRC**(processingError) · **COM**(communications) · **QOS**(qualityOfService) · **EQP**(equipment) · **ENV**(environmental). X.736 보안 알람 클래스(security_violation — 기능 카탈로그 제안) 채택 시 **SEC** 추가(eventType 은 X.736 계열). **이벤트**의 DOMAIN 은 kind 약어 **STC**(stateChange)/**AUD**(audit).
+  - `DOMAIN` = 알람은 eventType 약어: **PRC**(processingError) · **COM**(communications) · **QOS**(qualityOfService) · **SEC**(X.736 보안 알람 계열 — security_violation 클래스, 모듈 카탈로그 §2.3) · **EQP**(equipment) · **ENV**(environmental). **이벤트**의 DOMAIN 은 kind 약어 **STC**(stateChange)/**AUD**(audit).
   - `NNN` = 3자리 **무의미 일련**(스트림+도메인 내). 결번은 재사용하지 않는다.
 - **분류(클래스)를 코드에 인코딩하지 않는다** — 정의 코드에 클래스 번호를 내장하는 dotted
   형식(`<클래스코드>.<NN>`)은 정의의 클래스 재배정(분류 정정 — 예: NTP 를 다른 클래스로)이
@@ -314,7 +314,7 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
 | 축 | 알람 | 이벤트 |
 |---|---|---|
 | 도메인 | eventType 약어 (PRC/COM/QOS/EQP/ENV/SEC) | **kind 약어** — **STC**(stateChange) / **AUD**(audit) |
-| 클래스(type) | 조건 클래스 20종 (모듈 카탈로그 §2.3) | 성격 클래스 9종 (아래) — 코드 없음, 슬러그가 식별자 |
+| 클래스(type) | 조건 클래스 21종 (모듈 카탈로그 §2.3) | 성격 클래스 9종 (아래) — 코드 없음, 슬러그가 식별자 |
 | 정의 | 정의 코드 `A-<DOMAIN>-NNN` — 카탈로그 행 | 정의 코드 `E-<STC\|AUD>-NNN` + 정의 슬러그(wire type — `event=` 표기, 정의당 유일) |
 | 인스턴스 | mo_instance | mo_instance |
 
