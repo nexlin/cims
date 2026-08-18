@@ -85,6 +85,7 @@ export default function ServersPage() {
     groupName: string; serverName: string;
     enrollment_token: string; install_command: string;
   } | null>(null)
+  const [upgradeModal, setUpgradeModal] = useState<{ dep: Deployment } | null>(null)
   const [deployModal, setDeployModal]       = useState<{ agent: Agent } | null>(null)
   const [metricsFor, setMetricsFor]         = useState<Agent | null>(null)
   const [healthCheckFor, setHealthCheckFor] = useState<Agent | null>(null)
@@ -273,6 +274,14 @@ export default function ServersPage() {
       show((e as Error).message, 'err')
     }
   }
+  // 모듈 업그레이드 — 버전 선택은 모달에서. 실행은 서버의 단일 액션
+  //   (`POST /deployments/{id}/upgrade`)에 위임한다: 버전 전환과 job 큐잉을 콘솔이 두 번에
+  //   나눠 하면 그 사이 실패했을 때 레코드만 새 버전을 가리키는 어긋남이 남고, 되돌리는
+  //   것도 답이 아니다 — 전환이 컬렉션 SoT 를 대상 스키마로 정렬한 뒤라 역방향 이관으로
+  //   복구되지 않는다(새 스키마가 없앤 필드는 사라진다).
+  function upgradeDeployment(d: Deployment) {
+    setUpgradeModal({ dep: d })
+  }
   async function rollbackDeployment(d: Deployment) {
     const target = d.prev_install_path
     const targetVer = d.prev_package_version
@@ -438,6 +447,7 @@ export default function ServersPage() {
                   onHealthCheck={setHealthCheckFor}
                   onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
                   onJob={queueJob}
+                  onUpgradeDep={upgradeDeployment}
                   onRollback={rollbackDeployment}
                   onRemoveDep={removeDeployment} />
               </fieldset>
@@ -512,6 +522,9 @@ export default function ServersPage() {
       {deployModal &&
         <DeploymentCreateModal agent={deployModal.agent} packages={packages}
           onClose={() => setDeployModal(null)} onDone={load} />}
+      {upgradeModal &&
+        <DeploymentUpgradeModal dep={upgradeModal.dep} packages={packages}
+          onClose={() => setUpgradeModal(null)} onDone={load} />}
       {metricsFor &&
         <MetricsModal agent={metricsFor} onClose={() => setMetricsFor(null)} />}
       {healthCheckFor &&
@@ -1629,7 +1642,7 @@ type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
                           onApprove, onRevoke, onRemove, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
-                          onAddDeploy, onJob, onRollback, onRemoveDep }: {
+                          onAddDeploy, onJob, onUpgradeDep, onRollback, onRemoveDep }: {
   agent: Agent
   // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈 파일 배치),
   // control=패키지 제어 (프로세스 start/stop/restart)
@@ -1647,6 +1660,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
   onHealthCheck: (a: Agent) => void
   onAddDeploy: () => void
   onJob: (d: Deployment, jt: JobType) => void
+  onUpgradeDep: (d: Deployment) => void
   onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
 }) {
@@ -1768,7 +1782,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
                             onToggle={() => toggleSection('modules')}>
             <ModulesTab agent={a} deployments={deployments} packages={packages} packagesAvailable={packages.length > 0}
               onAddDeploy={onAddDeploy}
-              onJob={onJob} onRollback={onRollback} onRemoveDep={onRemoveDep} />
+              onJob={onJob} onUpgrade={onUpgradeDep} onRollback={onRollback} onRemoveDep={onRemoveDep} />
           </InspectorSection>
         )}
         {mode === 'control' && (
@@ -1914,13 +1928,14 @@ function InspectorSection({ title, expanded, onToggle, children }: {
 }
 
 function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
-                     onAddDeploy, onJob, onRollback, onRemoveDep }: {
+                     onAddDeploy, onJob, onUpgrade, onRollback, onRemoveDep }: {
   agent: Agent
   deployments: Deployment[]
   packages: SipPackage[]
   packagesAvailable: boolean
   onAddDeploy: () => void
   onJob: (d: Deployment, jt: JobType) => void
+  onUpgrade: (d: Deployment) => void
   onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
 }) {
@@ -1938,14 +1953,14 @@ function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
               <th>설명</th>
               <th>모듈 · 버전</th>
               <th>상태</th>
-              <th style={{ width: 220 }}>작업</th>
+              <th style={{ width: 300 }}>작업</th>
             </tr>
           </thead>
           <tbody>
             {deployments.map(d => (
-              <DeploymentRow key={d.id} dep={d} agent={a}
+              <DeploymentRow key={d.id} dep={d} agent={a} packages={packages}
                 desc={pkgDesc.get(d.package_name || '') ?? null}
-                onJob={onJob} onRollback={onRollback}
+                onJob={onJob} onUpgrade={onUpgrade} onRollback={onRollback}
                 onRemove={onRemoveDep} />
             ))}
           </tbody>
@@ -1961,12 +1976,14 @@ function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
   )
 }
 
-// [패키지 설치] 탭 모듈 행 — 파일 배치 작업만 (설치/재설치/롤백/삭제).
+// [패키지 설치] 탭 모듈 행 — 파일 배치 작업만 (설치/재설치/업그레이드/롤백/삭제).
 // 프로세스 start/stop/restart 는 [패키지 제어] 탭, 설정은 [패키지 설정] 탭.
-function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
+function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRollback, onRemove }: {
   dep: Deployment; agent: Agent
+  packages: SipPackage[]
   desc: string | null
   onJob: (d: Deployment, jt: JobType) => void
+  onUpgrade: (d: Deployment) => void
   onRollback: (d: Deployment) => void
   onRemove: (d: Deployment) => void
 }) {
@@ -1979,6 +1996,13 @@ function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
   const notInstalled = d.status === 'pending'
   // 버전 단위 설치: 이전 버전 경로가 보존돼 있을 때만 롤백 가능
   const canRollback = online && (d.status === 'running' || d.status === 'stopped') && !!d.prev_install_path
+  // 업그레이드 대상 = 같은 모듈의 다른 버전 패키지. 설치 전(pending)은 [설치] 가 할 일이라 제외.
+  // **실행 중이면 불가** — 서버도 거부하지만(우회 없음), 눌러보고 알게 하지 않는다.
+  //   정지가 곧 "서비스에서 뺐다"는 확인 절차다. A/A(cmp·cmdp)는 active/standby 개념이
+  //   없어 이 전제가 두 노드 동시 다운을 막는 유일한 장치다.
+  const upCands = packages.filter(p => p.name === d.package_name && p.id !== d.package_id)
+  const isRunning = shown === 'running'
+  const canUpgrade = online && !notInstalled && !isRunning && upCands.length > 0
   const histTip = (d.install_history || [])
     .map(h => `v${h.version || '?'} ${h.at} ${h.install_path}`).join('\n')
   return (
@@ -2005,6 +2029,13 @@ function DeploymentRow({ dep: d, agent, desc, onJob, onRollback, onRemove }: {
             onClick={() => onJob(d, 'install')}>
             {notInstalled ? '설치' : '재설치'}
           </button>
+          <button className="btn btn--sm" disabled={!canUpgrade}
+            title={!online ? 'agent 오프라인'
+              : notInstalled ? '아직 설치 전 — [설치] 를 먼저 하세요'
+              : isRunning ? '실행 중에는 업그레이드할 수 없습니다 — [패키지 제어] 에서 정지 후 진행하세요'
+              : upCands.length === 0 ? `${d.package_name} 의 다른 버전 패키지가 없음 (릴리스에 업로드 필요)`
+              : `버전을 골라 업그레이드 (등록됨: ${upCands.map(p => 'v' + p.version).join(', ')})`}
+            onClick={() => onUpgrade(d)}>↑ 업그레이드</button>
           <button className="btn btn--sm" disabled={!canRollback}
             title={canRollback
               ? `이전 버전으로 롤백 (v${d.prev_package_version || '?'} · ${d.prev_install_path})`
@@ -2822,6 +2853,92 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
         ) : (
           <button className="btn btn--primary" onClick={onClose}>닫기</button>
         )}
+      </div>
+    </Modal>
+  )
+}
+
+// 모듈 업그레이드 모달 — 등록된 버전 중에서 **골라서** 올린다.
+// 실행 중인 모듈은 애초에 열리지 않는다(버튼이 비활성) — 서버도 409 로 거부한다.
+function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
+  dep: Deployment
+  packages: SipPackage[]
+  onClose: () => void
+  onDone: () => Promise<void> | void
+}) {
+  const { show } = useToast()
+  // 후보 = 같은 모듈의 다른 버전. 정렬은 [모듈 추가] 와 같은 규칙(최근 업로드순) —
+  // 제품 전반의 '최신' 정의와 일치시킨다(semver 비교가 아니다).
+  const cands = useMemo(() => packages
+    .filter(p => p.name === d.package_name && p.id !== d.package_id)
+    .sort((a, b) => {
+      const ta = a.uploaded_at ? Date.parse(a.uploaded_at) : 0
+      const tb = b.uploaded_at ? Date.parse(b.uploaded_at) : 0
+      if (tb !== ta) return tb - ta
+      return b.id - a.id
+    }), [packages, d.package_name, d.package_id])
+  const [pkgId, setPkgId] = useState<number>(cands[0]?.id ?? 0)
+  const [busy, setBusy] = useState(false)
+  const target = cands.find(p => p.id === pkgId) || null
+
+  async function run(force?: boolean) {
+    if (!target) return
+    setBusy(true)
+    try {
+      const r = await deploymentApi.upgradeDeployment(d.id, target.id, force)
+      show(`업그레이드 큐 등록 (#${r.job_id}) v${r.from_version} → v${r.to_version}`
+           + (force ? ' — 순서 가드 우회' : ''), 'ok')
+      await onDone(); onClose()
+    } catch (e) {
+      // 관리평면 순서(standby 먼저)는 운영자가 사정을 알고 뒤집을 수 있는 **권고**다.
+      // 반면 '실행 중'(module_running)은 우회 수단을 주지 않는다 — 정지가 언제나 가능하다.
+      if (e instanceof ApiError && e.status === 409 && e.data?.error === 'upgrade_order_active_first') {
+        if (confirm(`${(e as Error).message}\n\n그래도 강행할까요? (순서 가드 우회)`)) {
+          setBusy(false); return run(true)
+        }
+        show('취소됨 — 안전한 순서 유지', 'err')
+      } else {
+        show((e as Error).message, 'err')
+      }
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <Modal title={`${d.package_name} 업그레이드`} onClose={onClose} width={520}>
+      <div style={{ fontSize: 13, marginBottom: 12 }}>
+        <div style={{ color: 'var(--text-muted)' }}>
+          {d.process_name} · 현재 <b>v{d.package_version}</b>
+        </div>
+      </div>
+      {cands.length === 0 ? (
+        <div className="empty">
+          등록된 다른 버전이 없습니다 — [관리 &gt; 릴리스] 에 먼저 업로드하세요.
+        </div>
+      ) : (
+        <>
+          <label style={{ display: 'block', fontSize: 12, marginBottom: 4 }}>올릴 버전</label>
+          <select className="input" style={{ width: '100%' }} value={pkgId}
+                  onChange={e => setPkgId(Number(e.target.value))}>
+            {cands.map((p, i) => (
+              <option key={p.id} value={p.id}>
+                v{p.version}{i === 0 ? '  (최신 업로드)' : ''}
+                {p.uploaded_at ? `  — ${fmtRelTime(p.uploaded_at)}` : ''}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.7 }}>
+            · 파일만 설치되고 <b>자동으로 시작하지 않습니다</b> — 확인 후 [패키지 제어] 에서 시작하세요.<br />
+            · 설정은 이관됩니다(collection + 배포 설정). 새 항목은 기본값.<br />
+            · 구 버전(v{d.package_version})은 보존되어 곧바로 <b>⤺ 롤백</b> 할 수 있습니다.
+          </div>
+        </>
+      )}
+      <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button className="btn btn--sm" onClick={onClose}>취소</button>
+        <button className="btn btn--sm btn--primary" disabled={!target || busy}
+          onClick={() => run()}>
+          {busy ? '진행 중…' : target ? `v${target.version} 로 업그레이드` : '업그레이드'}
+        </button>
       </div>
     </Modal>
   )

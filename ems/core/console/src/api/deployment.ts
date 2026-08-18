@@ -550,6 +550,14 @@ export const deploymentApi = {
   queueJob: (id: number, job_type: JobType, extra?: Record<string, unknown>, force?: boolean) =>
     api.post<{ job_id: number; status: string }>(`/deployments/${id}/job`,
       { job_type, extra, ...(force ? { force: true } : {}) }),
+  // 모듈 버전 전환 + 설치·재기동을 **서버가 한 번에** 수행 (rollback 과 대칭).
+  // package_id 생략 시 같은 모듈의 최근 업로드 패키지. 전환은 가드 통과 후에만 일어나므로
+  // 콘솔이 실패를 되돌릴 필요가 없다 (되돌려도 컬렉션 스키마는 복구되지 않는다).
+  upgradeDeployment: (id: number, package_id?: number, force?: boolean) =>
+    api.post<{ ok: boolean; job_id: number; from_version: string | null
+               to_version: string | null; package_id: number }>(
+      `/deployments/${id}/upgrade`,
+      { ...(package_id ? { package_id } : {}), ...(force ? { force: true } : {}) }),
   rollbackDeployment: (id: number, target?: { install_path?: string; version?: string }) =>
     api.post<{ ok: boolean; job_ids: number[]; restart_job_id: number;
                install_path: string; version: string | null }>(

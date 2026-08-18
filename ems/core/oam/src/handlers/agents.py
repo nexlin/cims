@@ -2317,6 +2317,8 @@ async def handle_deployments(handler_args: HandlerArgs, kwargs: dict) -> Handler
             if method == "DELETE": return await _delete_deployment(did, config)
         elif len(tail) == 2 and tail[1] == "job" and method == "POST":
             return await _queue_job(handler_args, did, config)
+        elif len(tail) == 2 and tail[1] == "upgrade" and method == "POST":
+            return await _upgrade_deployment(handler_args, did, config)
         elif len(tail) == 2 and tail[1] == "rollback" and method == "POST":
             return await _rollback_deployment(handler_args, did, config)
         elif len(tail) == 2 and tail[1] == "config":
@@ -3466,6 +3468,59 @@ async def _create_deployment(handler_args: HandlerArgs, config):
     return HandlerResult(status=201, body=_created, media_type="application/json")
 
 
+async def _after_package_switch(config, did: int, dep: dict,
+                                new_pkg_id, old_pkg_id) -> None:
+    """배포의 대상 패키지가 바뀐 뒤 따라와야 하는 정합 작업 (버전 업/다운 공통).
+
+    **호출 전에 되돌릴 수 없는 작업임을 전제**한다 — 컬렉션 SoT 를 대상 스키마로 정렬하며,
+    새 스키마가 필드를 없앴다면 그 값은 사라진다(역방향 이관으로 복구되지 않는다).
+    그래서 이 함수는 "업그레이드를 실제로 진행한다"가 확정된 뒤에만 불러야 한다
+    (가드·검증은 그 앞에서 끝내라 — `_upgrade_deployment` 참조).
+    """
+    # P5 — 컬렉션 SoT 를 대상 버전 schema 로 정합(멱등·예외 무해).
+    try:
+        from services import collection_schema
+        newp = await asyncio.to_thread(_pkg_load, config, new_pkg_id)
+        oldp = await asyncio.to_thread(_pkg_load, config, old_pkg_id) if old_pkg_id else None
+        if newp and (not oldp or newp.get("name") == oldp.get("name")):
+            def _tmpl(p):
+                t = (p or {}).get("config_template")
+                return t if isinstance(t, dict) else _safe_json((p or {}).get("config_template_json"))
+            new_tmpl = _tmpl(newp); old_tmpl = _tmpl(oldp) if oldp else None
+            new_ver = (new_tmpl or {}).get("version")
+            owner = newp.get("name")
+            if new_tmpl and owner and new_ver is not None:
+                migrated = await asyncio.to_thread(
+                    collection_schema.migrate_module_collections,
+                    config, owner, old_tmpl, new_tmpl, new_ver)
+                if migrated:
+                    logger.log_info(f"runtime store v2 P5: '{owner}' 컬렉션 schema 정합 v{new_ver}: {migrated}")
+    except Exception as _e:
+        logger.log_warning(f"runtime store v2 P5 schema 정합 skip: {_e}")
+    # 실효 포트 전파 — 버전 전환으로 template default 포트가 바뀌면 게이트웨이
+    # 라우트/HA 헬스포트가 추종 (deployment config 변경 경로와 동일).
+    try:
+        newp = await asyncio.to_thread(_pkg_load, config, new_pkg_id)
+        oldp = await asyncio.to_thread(_pkg_load, config, old_pkg_id) if old_pkg_id else None
+        old_port = effective_server_port(config, oldp, dep.get("config"))
+        new_port = effective_server_port(config, newp, dep.get("config"))
+        if new_port and new_port != old_port:
+            _meta = (newp or {}).get("meta") if isinstance(newp, dict) else None
+            gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
+            if gw_routes and dep.get("process_name"):
+                import handlers.gateway as _gw
+                _host = effective_gateway_host(config, newp, dep.get("config")) or "127.0.0.1"
+                await asyncio.to_thread(_gw.register_module_routes, config,
+                                        dep["process_name"], _host,
+                                        int(new_port), gw_routes)
+            from handlers.ha_groups import enqueue_update_ha_for_agent
+            n = await asyncio.to_thread(enqueue_update_ha_for_agent, dep.get("agent_id"), config)
+            logger.log_info(f"[deploy-update] dep={did} 실효포트 {old_port}->{new_port} "
+                            f"(pkg 전환): gateway 재등록={'O' if gw_routes else 'X'}, update_ha {n}건")
+    except Exception as e:
+        logger.log_warning(f"[deploy-update] 포트 변경 전파 실패(dep={did}): {e}")
+
+
 async def _update_deployment(handler_args: HandlerArgs, did: int, config):
     body = _parse_body(handler_args)
     patches: dict = {}
@@ -3489,50 +3544,8 @@ async def _update_deployment(handler_args: HandlerArgs, did: int, config):
     r = await asyncio.to_thread(_deploy_update, config, did, patches)
     if not r:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")
-    # P5 — 버전 전환 시 컬렉션 SoT 를 대상 버전 schema 로 정합(멱등·예외 무해).
     if "package_id" in patches and patches["package_id"] != _old_pkg_id:
-        try:
-            from services import collection_schema
-            newp = await asyncio.to_thread(_pkg_load, config, patches["package_id"])
-            oldp = await asyncio.to_thread(_pkg_load, config, _old_pkg_id) if _old_pkg_id else None
-            if newp and (not oldp or newp.get("name") == oldp.get("name")):
-                def _tmpl(p):
-                    t = (p or {}).get("config_template")
-                    return t if isinstance(t, dict) else _safe_json((p or {}).get("config_template_json"))
-                new_tmpl = _tmpl(newp); old_tmpl = _tmpl(oldp) if oldp else None
-                new_ver = (new_tmpl or {}).get("version")
-                owner = newp.get("name")
-                if new_tmpl and owner and new_ver is not None:
-                    migrated = await asyncio.to_thread(
-                        collection_schema.migrate_module_collections,
-                        config, owner, old_tmpl, new_tmpl, new_ver)
-                    if migrated:
-                        logger.log_info(f"runtime store v2 P5: '{owner}' 컬렉션 schema 정합 v{new_ver}: {migrated}")
-        except Exception as _e:
-            logger.log_warning(f"runtime store v2 P5 schema 정합 skip: {_e}")
-    # 실효 포트 전파 — package_id 전환으로 template default 포트가 바뀌면
-    # 게이트웨이 라우트/HA 헬스포트가 추종 (deployment config 변경 경로와 동일).
-    if "package_id" in patches and patches["package_id"] != _old_pkg_id:
-        try:
-            newp = await asyncio.to_thread(_pkg_load, config, patches["package_id"])
-            oldp = await asyncio.to_thread(_pkg_load, config, _old_pkg_id) if _old_pkg_id else None
-            old_port = effective_server_port(config, oldp, r.get("config"))
-            new_port = effective_server_port(config, newp, r.get("config"))
-            if new_port and new_port != old_port:
-                _meta = (newp or {}).get("meta") if isinstance(newp, dict) else None
-                gw_routes = ((_meta or {}).get("gateway") or {}).get("routes") or []
-                if gw_routes and r.get("process_name"):
-                    import handlers.gateway as _gw
-                    _host = effective_gateway_host(config, newp, r.get("config")) or "127.0.0.1"
-                    await asyncio.to_thread(_gw.register_module_routes, config,
-                                            r["process_name"], _host,
-                                            int(new_port), gw_routes)
-                from handlers.ha_groups import enqueue_update_ha_for_agent
-                n = await asyncio.to_thread(enqueue_update_ha_for_agent, r.get("agent_id"), config)
-                logger.log_info(f"[deploy-update] dep={did} 실효포트 {old_port}->{new_port} "
-                                f"(pkg 전환): gateway 재등록={'O' if gw_routes else 'X'}, update_ha {n}건")
-        except Exception as e:
-            logger.log_warning(f"[deploy-update] 포트 변경 전파 실패(dep={did}): {e}")
+        await _after_package_switch(config, did, r, patches["package_id"], _old_pkg_id)
     _enrich_deploy([r], config)
     return HandlerResult(status=200, body=_deployment_to_json(r), media_type="application/json")
 
@@ -3828,6 +3841,129 @@ async def _queue_job(handler_args: HandlerArgs, did: int, config):
         await asyncio.to_thread(_deploy_update, config, did,
                                 {'status': transition[job_type], 'last_job_id': job_id})
     return HandlerResult(status=202, body={"job_id": job_id, "status": "queued"},
+                         media_type="application/json")
+
+
+async def _upgrade_deployment(handler_args: HandlerArgs, did: int, config):
+    """POST /deployments/{id}/upgrade — 모듈을 다른 버전으로 전환 + 설치·재기동.
+
+    body (선택): { "package_id": int, "force": bool }
+      package_id 미지정 시 **같은 모듈의 최근 업로드 패키지**(현재 버전 제외)를 고른다.
+
+    `/rollback` 과 대칭인 단일 액션이다. 콘솔에서 "패키지 전환(PUT) → upgrade job(POST)"
+    두 번으로 나누면 그 사이에서 실패했을 때 **레코드만 새 버전을 가리키는** 어긋남이 남고,
+    되돌리려 해도 패키지 전환이 컬렉션 SoT 를 대상 스키마로 정렬한 뒤라 **역방향 이관으로
+    복구되지 않는다**(새 스키마가 없앤 필드는 사라진다). 그래서 **검증·가드를 모두 통과한
+    뒤에야** 전환하고, 전환과 job 큐잉을 서버가 한 번에 끝낸다.
+    """
+    body = _parse_body(handler_args)
+    dep = await asyncio.to_thread(_deploy_load, config, did)
+    if not dep:
+        return HandlerResult(status=404, body={"error": "deployment_not_found"},
+                             media_type="application/json")
+    _enrich_deploy([dep], config)
+    cur_pkg_id = dep.get("package_id")
+    mod = dep.get("package_name")
+
+    # ── 대상 패키지 결정 (변경 전 검증을 모두 여기서 끝낸다)
+    target_id = body.get("package_id")
+    if target_id is None:
+        cands = [p for p in await asyncio.to_thread(_pkg_load_all, config)
+                 if p.get("name") == mod and p.get("id") != cur_pkg_id]
+        cands.sort(key=lambda p: (str(p.get("uploaded_at") or ""), p.get("id") or 0), reverse=True)
+        if not cands:
+            return HandlerResult(status=400,
+                                 body={"error": "no_upgrade_target",
+                                       "hint": f"'{mod}' 의 다른 버전 패키지가 등록돼 있지 않습니다"},
+                                 media_type="application/json")
+        target = cands[0]
+    else:
+        try:
+            target = await asyncio.to_thread(_pkg_load, config, int(target_id))
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={"error": "invalid_package_id"},
+                                 media_type="application/json")
+        if not target:
+            return HandlerResult(status=404, body={"error": "package_not_found"},
+                                 media_type="application/json")
+        if target.get("name") != mod:
+            return HandlerResult(status=400,
+                                 body={"error": "package_module_mismatch",
+                                       "hint": f"배포 모듈은 '{mod}' 인데 패키지는 '{target.get('name')}' 입니다"},
+                                 media_type="application/json")
+    if target.get("id") == cur_pkg_id:
+        return HandlerResult(status=400,
+                             body={"error": "same_version",
+                                   "hint": f"이미 v{dep.get('package_version')} 입니다 — 같은 버전 재설치는 install 을 쓰세요"},
+                             media_type="application/json")
+
+    # ── 전제 (1) 실행 중이면 **업그레이드하지 않는다 — 우회 없음.**
+    #   A/S 는 standby 가 이미 정지라 이 전제가 "standby 먼저" 를 자연히 강제하고,
+    #   A/A(cmp·cmdp — active/standby 개념이 없다)는 운영자가 한 대를 명시적으로 빼야만
+    #   올릴 수 있게 된다. 이 전제가 없으면 A/A 두 노드를 연달아 눌러 **동시에 내려가는
+    #   것을 아무도 막지 못한다**(순서 가드는 oam/oam-svc 전용이라 A/A 를 못 본다).
+    #   force 를 열어두지 않는 이유: "돌고 있는 채로 올려야만 하는" 상황이 없다 — 정지는
+    #   언제나 가능하고, 그게 서비스에서 빼는 유일한 확인 절차다.
+    #   판정은 실측(live_state) 우선 — 레코드 status 는 의도라 실제와 어긋날 수 있다.
+    _live = dep.get("live_state")
+    _running = (_live == "up") if _live in ("up", "down") else (dep.get("status") == "running")
+    if _running:
+        return HandlerResult(status=409,
+                             body={"error": "module_running",
+                                   "detail": (f"'{mod}' 이(가) 실행 중입니다. 업그레이드는 "
+                                              f"**정지 상태에서만** 가능합니다 — [패키지 제어] 에서 "
+                                              f"정지해 서비스에서 뺀 뒤 올리고, 확인 후 다시 시작하세요. "
+                                              f"(이중화 구성이면 한 번에 한 노드씩)")},
+                             media_type="application/json")
+
+    # ── 전제 (2) 관리평면 순서 — 정지 상태라도 ACTIVE 쪽을 먼저 올리면 안 된다.
+    #   여기엔 force 를 남긴다: "standby 먼저" 는 안전한 **순서** 권고라 운영자가 사정을
+    #   알고 뒤집을 수 있지만, (1) 의 정지 전제는 뒤집을 이유가 없다.
+    if not body.get("force"):
+        _g = await asyncio.to_thread(_plane_upgrade_order_guard, config, dep)
+        if _g:
+            return HandlerResult(status=409, body={"error": "upgrade_order_active_first",
+                                                   "detail": _g},
+                                 media_type="application/json")
+
+    # ── 여기서부터 되돌리지 않는다 (컬렉션 스키마 정합 포함)
+    r = await asyncio.to_thread(_deploy_update, config, did, {"package_id": target["id"]})
+    if not r:
+        return HandlerResult(status=404, body={"error": "deployment_not_found"},
+                             media_type="application/json")
+    await _after_package_switch(config, did, r, target["id"], cur_pkg_id)
+    _enrich_deploy([r], config)
+
+    sf = r.get("service_functions")
+    if isinstance(sf, str):
+        sf = _split_csv(sf)
+    cfg = r.get("config") if isinstance(r.get("config"), (dict, list)) else _safe_json(r.get("config_json"))
+    if isinstance(cfg, dict) or cfg is None:
+        try:
+            cfg = _materialize_deploy_config(config, target, cfg)
+        except Exception as _e:
+            logger.log_warning(f"upgrade config materialize skip (dep={did}): {_e}")
+    params = {
+        "deployment_id": did,
+        "package_id": target["id"],
+        "package_name": target.get("name"),
+        "package_version": target.get("version"),
+        "process_name": r.get("process_name"),
+        "service_functions": sf or [],
+        "install_path": r.get("install_path"),
+        "config": cfg,
+        "extra": {},
+    }
+    job_id = await asyncio.to_thread(_job_create, config, r["agent_id"], "upgrade", params)
+    await asyncio.to_thread(_deploy_update, config, did,
+                            {"status": "deploying", "last_job_id": job_id})
+    logger.log_info(f"[deploy-upgrade] dep={did} ({mod}) v{dep.get('package_version')} "
+                    f"→ v{target.get('version')} job#{job_id}")
+    return HandlerResult(status=202,
+                         body={"ok": True, "job_id": job_id,
+                               "from_version": dep.get("package_version"),
+                               "to_version": target.get("version"),
+                               "package_id": target["id"]},
                          media_type="application/json")
 
 

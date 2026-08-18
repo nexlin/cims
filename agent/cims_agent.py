@@ -4884,16 +4884,25 @@ def execute_job(job: dict, oam_url: str, session_token: str, agent_name: str,
         if jt == "install":
             rc, out, err = job_install(params, oam_url, session_token)
         elif jt == "upgrade":
-            # upgrade = 신 파일 설치 + 재기동(신 코드 로드). install 만 하면 구 프로세스가
-            #   구 코드를 계속 실행한다(파일만 교체). restart 는 job_process_control 경유 →
-            #   oam self-upgrade preflight(D3)/rollback(D4) 안전장치 그대로 적용.
+            # upgrade = 신 파일 설치 + **직전 실행 상태 보존**.
+            #   돌고 있었으면 재기동한다 — 파일만 갈아끼우면 구 프로세스가 구 코드를 계속
+            #   실행하기 때문이다(restart 는 job_process_control 경유라 oam self-upgrade 의
+            #   preflight(D3)/rollback(D4) 안전장치가 그대로 걸린다).
+            #   **정지 상태였으면 켜지 않는다.** 정지는 운영자의 의도이고(A/A 는 트래픽을
+            #   뺀 상태, A/S standby 는 cold 가 정상), 업그레이드가 그 의도를 뒤집으면
+            #   A/A 에서 내려둔 노드가 제멋대로 서비스에 복귀한다. 기동은 별도 start 로.
+            #   (`current` flip 은 job_install 이 이미 하므로 나중 start 가 신 버전을 띄운다.)
+            _up_proc = (params.get("process_name") or params.get("package_name") or "").lower().strip()
+            _was_running = bool(_up_proc) and _pgrep_module(_up_proc) is not None
             rc, out, err = job_install(params, oam_url, session_token)
-            if rc == 0:
+            if rc == 0 and _was_running:
                 rc_r, out_r, err_r = job_process_control(params, "restart")
                 out = (out or "") + f"\n[upgrade→restart] rc={rc_r} {(out_r or '')[-300:]}"
                 if rc_r != 0:
                     rc = rc_r
                     err = (err or "") + f" [restart] {(err_r or '')[-300:]}"
+            elif rc == 0:
+                out = (out or "") + "\n[upgrade] 정지 상태 유지 — 기동은 별도 start (설치·current flip 완료)"
         elif jt == "upgrade_agent":
             rc, out, err = job_upgrade_agent(oam_url, session_token, agent_name)
         elif jt == "rollback_agent":
