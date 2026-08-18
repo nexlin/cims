@@ -79,6 +79,8 @@ export interface AlertRule {
   mo_class?: string
   mo_instance?: string
   metric: string
+  target?: string               // probe 계열 대상 모듈 (csp/cmp) — 같은 code 규칙 구분 축
+  check?: string
   condition: string
   threshold: number | null
   thresholds?: Record<string, number> | null   // 단계 임계 {severity: value}

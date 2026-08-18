@@ -16,6 +16,7 @@ import { SERVICE_MANIFESTS } from './services/registry'
 
 import { DASHBOARD_LAYOUT } from './widgets/layouts'
 import AlertsPage from './pages/AlertsPage'
+import ActiveAlarmsPage from './pages/ActiveAlarmsPage'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
@@ -40,9 +41,6 @@ export const IS_PROD_CONSOLE = CONSOLE_TARGET === 'prod'
 // (정확한 import.meta.env.X 구문 — vite 빌드 시 리터럴 치환 → 상수 조건 → 서비스 코드 DCE)
 export const IS_BASE_CONSOLE = import.meta.env.VITE_CONSOLE_PROFILE === 'base'
 const BASE_PROFILE_SECTION_KEYS = new Set(['system', 'release'])
-
-// 활성 알람 뷰 (해소된 알람 숨김). 이력 뷰는 AlertsPage 기본.
-const ActiveAlarmsPage = () => <AlertsPage openOnly />
 
 // ── 범용 OAM 코어 섹션 (서비스 무지) ──────────────────────────────
 const CORE_SECTIONS: RouteSection[] = [

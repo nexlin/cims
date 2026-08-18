@@ -179,13 +179,13 @@ api client 가 토큰을 동봉한다.
 
 | 뷰 | 라우트/위젯 | 소비 API | 내용 |
 |---|---|---|---|
-| 활성 알람 | `/alerts/active` | `/alerts`(openOnly 접기) | 열린 알람 목록 — ack/comment 조작 |
-| 알람·이벤트 이력 | `/alerts/history` | `/alerts`·`/events` | 알람 탭 + 이벤트 탭(type/kind 필터) — 스트림을 화면에서도 분리(표준화 §3.6) |
+| 활성 알람 | `/alerts/active` | 전역 알람 store(`useAlarms` — `/alerts` 폴링 + `/alerts/stream` 라이브) | 심각도 타일(클릭 필터)+열린 알람 목록 — 행 전개 상세(표준 필드·관측값·코멘트), ack/comment 인라인 조작. 대시보드 위젯·헤더 배지와 같은 fold 라 표시 일관 |
+| 알람·이벤트 이력 | `/alerts/history` | `/alerts`·`/events` | 기록 탐색기. 알람 탭: open/close 페어링 행(코드·클래스·소스·감지 주체 컬럼, severity 변경 이력·재통지 ×N·관측값은 행 전개), 심각도/코드/클래스/텍스트 필터, 일별 발생량, 코드별 통계(접힘), CSV, 더 보기 페이징. **필터는 전부 클라이언트** — 서버 type 필터는 type 없는 ack/comment 레코드를 떨어뜨려 승인 표시가 소실된다. 이벤트 탭: 같은 (type·소스·kind) 연속 발생을 한 행으로 접기(×N, 전개 시 개별 통지), code 컬럼, kind/type/텍스트 필터, CSV — 스트림을 화면에서도 분리(표준화 §3.6) |
 | 활성 알람 위젯 | `cims.active-alarms`(기본 대시보드 1단) | `/alerts`(+ `/alerts/stream` 라이브) | severity 요약 타일(6단계)+활성 목록. `foldActive` 접기 재사용, 타일 클릭 필터, ack 인라인. 배너 역할 흡수(critical/major 강조) |
 | 최근 이벤트 위젯 | `cims.recent-events`(기본 대시보드 2단) | `/events`(+ `/alerts/stream` 라이브) | kind 요약 타일(STC/AUD)+이벤트 목록(code/mo/message/ts). 알람과 분리된 스트림 표시(§3.6) |
 | 배너 | AlertBanner(활성 위젯에 흡수) | `/alerts` | critical/major 만 |
 | 토폴로지 상태색 | SystemTopologyWidget | `/alerts` | mo_instance 별 최고 severity 로 노드/모듈 칩 채색 |
-| 알람 카탈로그 | `/alerts/catalog` (장애 메뉴) | `/alerts/catalog` | 코드 사전 — code·type·severity·effect·recommended_action 열람(운영 사전·POD 의 화면 대응물). rule + 모듈 등록분 병합 |
+| 알람 카탈로그 | `/alerts/catalog` (장애 메뉴) | `/alerts/catalog`·`/alerts/rules` | 코드 사전 — code·type·severity·effect·recommended_action 열람(운영 사전·POD 의 화면 대응물). rule + 모듈 등록분 병합. 하단에 활성 평가 규칙 표(대상 target·조건·임계·점검 주기 — 정의 화면의 관심사라 이력 페이지가 아닌 여기) |
 
 ### 8.2 전역 통지 — 셸 상주 (어느 페이지에서든 보인다)
 

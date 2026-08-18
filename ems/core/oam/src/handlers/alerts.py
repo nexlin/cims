@@ -67,6 +67,9 @@ def _alert_rules(config: dict) -> dict:
             'mo_class': r.get('mo_class'),
             'mo_instance': r.get('mo_instance'),
             'metric': r.get('metric') or r.get('type'),
+            # target/check — 같은 code 의 probe 규칙(csp/cmp)을 화면에서 구분할 유일한 축.
+            'target': r.get('target'),
+            'check': r.get('check'),
             'condition': _condition_text(r),
             'threshold': r.get('threshold'),
             'thresholds': r.get('thresholds'),
