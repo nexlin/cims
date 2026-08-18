@@ -22,6 +22,7 @@ import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import AutoDeployPage from './pages/AutoDeployPage'
 import AlarmCatalogPage from './pages/AlarmCatalogPage'
+import AlarmAnalysisPage from './pages/AlarmAnalysisPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
@@ -70,6 +71,8 @@ const CORE_SECTIONS: RouteSection[] = [
     routes: [
       { path: '/alerts/active',  title: '활성 알람',        component: ActiveAlarmsPage },
       { path: '/alerts/history', title: '알람·이벤트 이력', component: AlertsPage },
+      // 코드별/유형별 집계·분포·추이 — 이력(개별 라이프사이클 열람)과 역할 분리
+      { path: '/alerts/analysis', title: '유형별 분석',      component: AlarmAnalysisPage },
       // 코드 사전 (rule + 모듈 자기보고 병합 — alarm_pipeline.md §8.1)
       { path: '/alerts/catalog', title: '알람 카탈로그',    component: AlarmCatalogPage },
     ],

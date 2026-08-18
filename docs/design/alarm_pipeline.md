@@ -180,7 +180,8 @@ api client 가 토큰을 동봉한다.
 | 뷰 | 라우트/위젯 | 소비 API | 내용 |
 |---|---|---|---|
 | 활성 알람 | `/alerts/active` | 전역 알람 store(`useAlarms` — `/alerts` 폴링 + `/alerts/stream` 라이브) | 심각도 타일(클릭 필터)+열린 알람 목록 — 행 전개 상세(표준 필드·관측값·코멘트), ack/comment 인라인 조작. 대시보드 위젯·헤더 배지와 같은 fold 라 표시 일관 |
-| 알람·이벤트 이력 | `/alerts/history` | `/alerts`·`/events` | 기록 탐색기. 알람 탭: open/close 페어링 행(코드·클래스·소스·감지 주체 컬럼, severity 변경 이력·재통지 ×N·관측값은 행 전개), 심각도/코드/클래스/텍스트 필터, 일별 발생량, 코드별 통계(접힘), CSV, 더 보기 페이징. **필터는 전부 클라이언트** — 서버 type 필터는 type 없는 ack/comment 레코드를 떨어뜨려 승인 표시가 소실된다. 이벤트 탭: 같은 (type·소스·kind) 연속 발생을 한 행으로 접기(×N, 전개 시 개별 통지), code 컬럼, kind/type/텍스트 필터, CSV — 스트림을 화면에서도 분리(표준화 §3.6) |
+| 알람·이벤트 이력 | `/alerts/history` | `/alerts`·`/events` | 기록 탐색기 — 개별 라이프사이클 열람 전용(집계·분포는 통계 분석 소관). 알람 탭: open/close 페어링 행(코드·클래스·소스·감지 주체 컬럼, severity 변경 이력·재통지 ×N·관측값은 행 전개), 심각도/코드/클래스/텍스트 필터, CSV. **필터는 전부 클라이언트** — 서버 type 필터는 type 없는 ack/comment 레코드를 떨어뜨려 승인 표시가 소실된다. 이벤트 탭: 같은 (type·소스·kind) 연속 발생을 한 행으로 접기(×N, 전개 시 개별 통지), code 컬럼, kind/type/텍스트 필터, CSV — 스트림을 화면에서도 분리(표준화 §3.6). **목록은 화면 내 고정 + 페이지 내비게이션**(툴바·컬럼 헤더·페이저 상시 노출, 표 영역만 내부 스크롤, 페이지 스크롤 누적 없음) |
+| 유형별 분석 | `/alerts/analysis` | `/alerts/summary`·`/events` | 기간 창 집계·분포·추이 전용 뷰. 알람 탭: summary 만 소비(레코드 미수신 — 서버가 open/close 페어링) — KPI 타일(발생/해소/미해소/평균 지속)+심각도 분포 막대(발생 가중)+일별 발생량+**코드별 분석 표**(비중 막대·평균 지속·현재 상태)+**유형(클래스)별 분석 표**+CSV. 이벤트 탭: 레코드 클라이언트 집계 — kind 타일+일별 통지량+유형별/소스별 표+CSV |
 | 활성 알람 위젯 | `cims.active-alarms`(기본 대시보드 1단) | `/alerts`(+ `/alerts/stream` 라이브) | severity 요약 타일(6단계)+활성 목록. `foldActive` 접기 재사용, 타일 클릭 필터, ack 인라인. 배너 역할 흡수(critical/major 강조) |
 | 최근 이벤트 위젯 | `cims.recent-events`(기본 대시보드 2단) | `/events`(+ `/alerts/stream` 라이브) | kind 요약 타일(STC/AUD)+이벤트 목록(code/mo/message/ts). 알람과 분리된 스트림 표시(§3.6) |
 | 배너 | AlertBanner(활성 위젯에 흡수) | `/alerts` | critical/major 만 |

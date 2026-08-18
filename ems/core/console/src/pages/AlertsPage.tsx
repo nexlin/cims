@@ -1,17 +1,20 @@
 // 알람·이벤트 이력 — 기록 탐색기 (alarm_pipeline.md §8.3 판독 규율로 open/close 페어링).
-//   활성 알람 뷰는 ActiveAlarmsPage(store 라이브), 코드 사전·평가 규칙은 AlarmCatalogPage 소관 —
-//   여기는 기간 창 안의 알람 라이프사이클(발생→변경→해소)과 이벤트 스트림 열람 전용.
+//   활성 알람 뷰는 ActiveAlarmsPage(store 라이브), 코드 사전·평가 규칙은 AlarmCatalogPage,
+//   코드별/유형별 집계·분포는 AlarmAnalysisPage 소관 — 여기는 기간 창 안의 알람
+//   라이프사이클(발생→변경→해소)과 이벤트 스트림 열람 전용.
+//   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { alertsApi, eventsApi, type AlertEvent, type AlertSummaryResponse, type EventRecord } from '../api/alerts'
+import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
+import { DaysButtons, Pager } from '../components/ListControls'
 import {
   alarmTypeLabel, eventTypeLabel, EVENT_KIND_LABEL, sevBadgeClass, severityOf,
-  fmtTime, formatSec, durationBetween, downloadCsv,
+  fmtTime, durationBetween, downloadCsv,
 } from '../utils/alarmLabels'
 
-const PAGE_SIZE = 100
+const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
 
 // ── 알람 스트림 접기 (§8.3) ──────────────────────────────────────────────────
@@ -92,54 +95,6 @@ function pairEvents(events: AlertEvent[]): AlertRow[] {
   return rows.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''))
 }
 
-function DailyBars({ data }: { data: { date: string; opens: number }[] }) {
-  if (data.length === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</div>
-  const max = Math.max(1, ...data.map(d => d.opens))
-  const H = 36
-  return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: H + 14 }}>
-      {data.map((d, i) => {
-        const h = d.opens > 0 ? Math.max(2, Math.round((d.opens / max) * H)) : 1
-        const mmdd = d.date.slice(5).replace('-', '/')
-        // 30/90일 범위에서 모든 날짜 라벨을 찍으면 겹쳐 읽을 수 없음 — 적정 간격만 표기
-        const labelEvery = data.length > 60 ? 7 : data.length > 21 ? 3 : 1
-        const showLabel = i % labelEvery === 0 || i === data.length - 1
-        return (
-          <div key={d.date} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}
-            title={`${d.date}: ${d.opens}건`}>
-            <div style={{
-              width: '100%',
-              height: h,
-              background: d.opens > 0 ? 'var(--danger)' : 'var(--border)',
-              borderRadius: 2,
-              opacity: d.opens > 0 ? 0.85 : 0.4,
-            }} />
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap',
-                          overflow: 'visible', visibility: showLabel ? 'visible' : 'hidden' }}>
-              {mmdd}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
-  return (
-    <>
-      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>기간:</span>
-      {[1, 7, 30, 90].map(d => (
-        <button key={d}
-          className={`btn btn--sm ${days === d ? 'btn--primary' : 'btn--ghost'}`}
-          onClick={() => onChange(d)}>
-          {d === 1 ? '오늘' : `${d}일`}
-        </button>
-      ))}
-    </>
-  )
-}
-
 // 상세 항목 한 줄 — 값 없으면 렌더 생략
 function DetailItem({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null
@@ -155,27 +110,21 @@ function DetailItem({ label, value }: { label: string; value?: string | null }) 
 function AlarmsSection() {
   const { show } = useToast()
   const [events, setEvents] = useState<AlertEvent[]>([])
-  const [summary, setSummary] = useState<AlertSummaryResponse | null>(null)
   const [days, setDays] = useState(7)
   const [sevFilter, setSevFilter] = useState('')
   const [codeFilter, setCodeFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [q, setQ] = useState('')
   const [showResolved, setShowResolved] = useState(true)
-  const [showStats, setShowStats] = useState(false)
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [visible, setVisible] = useState(PAGE_SIZE)
+  const [page, setPage] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [list, sum] = await Promise.all([
-        alertsApi.list({ days, limit: FETCH_LIMIT }),
-        alertsApi.summary(days),
-      ])
+      const list = await alertsApi.list({ days, limit: FETCH_LIMIT })
       setEvents(list.events)
-      setSummary(sum)
     } catch (e: unknown) {
       show(String(e), 'err')
     } finally {
@@ -184,7 +133,7 @@ function AlarmsSection() {
   }, [days, show])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setVisible(PAGE_SIZE) }, [days, sevFilter, codeFilter, typeFilter, q, showResolved])
+  useEffect(() => { setPage(0) }, [days, sevFilter, codeFilter, typeFilter, q, showResolved])
 
   const allRows = useMemo(() => pairEvents(events), [events])
   const codes = useMemo(() => [...new Set(allRows.map(r => r.code).filter(Boolean) as string[])].sort(), [allRows])
@@ -204,7 +153,8 @@ function AlarmsSection() {
   }, [allRows, sevFilter, codeFilter, typeFilter, q, showResolved])
 
   const openCount = rows.filter(r => r.action === 'open' && !r.resolved_at).length
-  const occurredCount = rows.filter(r => !r.preWindow).length
+  const pageStart = Math.min(page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1)) * PAGE_SIZE
+  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE)
 
   const ackAlarm = useCallback(async (alarmId?: string) => {
     if (!alarmId) return
@@ -230,7 +180,7 @@ function AlarmsSection() {
 
   return (
     <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
         <DaysButtons days={days} onChange={setDays} />
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
         <select className="form-input" value={sevFilter} onChange={e => setSevFilter(e.target.value)} style={{ width: 110 }}>
@@ -257,70 +207,9 @@ function AlarmsSection() {
         <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
       </div>
 
-      <div style={{ display: 'flex', gap: 12 }}>
-        <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>기간 내 발생</div>
-          <div style={{ fontSize: 24, fontWeight: 700 }}>{occurredCount}</div>
-        </div>
-        <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>미해소 (창 기준)</div>
-          <div style={{ fontSize: 24, fontWeight: 700, color: openCount > 0 ? 'var(--danger)' : 'var(--text)' }}>{openCount}</div>
-        </div>
-        <div style={{ flex: 2, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>일별 발생량</div>
-          <DailyBars data={summary?.daily || []} />
-        </div>
-      </div>
-
-      {summary && summary.by_type.length > 0 && (
-        <div className="panel">
-          <button className="btn btn--ghost btn--sm"
-                  style={{ width: '100%', textAlign: 'left', padding: '10px 16px', fontWeight: 600, fontSize: 13 }}
-                  onClick={() => setShowStats(v => !v)}>
-            {showStats ? '▾' : '▸'} 코드별 통계 (최근 {summary.days}일 · {summary.by_type.length}종)
-          </button>
-          {showStats && (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th style={{ width: 110 }}>코드</th>
-                  <th style={{ width: 130 }}>클래스</th>
-                  <th style={{ width: 170 }}>소스</th>
-                  <th style={{ width: 70, textAlign: 'right' }}>발생</th>
-                  <th style={{ width: 70, textAlign: 'right' }}>해소</th>
-                  <th style={{ width: 90 }}>현재 상태</th>
-                  <th style={{ width: 130, textAlign: 'right' }}>평균 지속</th>
-                  <th>마지막 이벤트</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.by_type.map((s, i) => (
-                  <tr key={s.key || `${s.type}-${i}`}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{s.code || '-'}</td>
-                    <td>{alarmTypeLabel(s.type)}</td>
-                    <td><code style={{ fontSize: 11 }}>{s.mo_instance || '-'}</code></td>
-                    <td style={{ textAlign: 'right' }}>{s.opens}</td>
-                    <td style={{ textAlign: 'right' }}>{s.resolved}</td>
-                    <td>
-                      {s.currently_open
-                        ? <span className="badge badge--red">OPEN</span>
-                        : <span style={{ color: 'var(--text-muted)' }}>정상</span>}
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      {s.avg_duration_sec != null ? formatSec(Math.round(s.avg_duration_sec)) : '-'}
-                    </td>
-                    <td className="ts">{s.last_ts ? fmtTime(s.last_ts) : '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      <div className="panel">
-        <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
-          알람 이력 ({rows.length}건)
+      <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
+          알람 이력 ({rows.length}건{openCount > 0 && <span style={{ color: 'var(--danger)' }}> · 미해소 {openCount}</span>})
           {events.length >= FETCH_LIMIT && (
             <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
@@ -333,6 +222,7 @@ function AlarmsSection() {
           <div className="empty">기록된 알람 없음</div>
         ) : (
           <>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -348,10 +238,10 @@ function AlarmsSection() {
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, visible).map((r, i) => {
+                {pageRows.map((r, i) => {
                   const isOpen = r.action === 'open' && !r.resolved_at
                   const sev = severityOf(r)
-                  const key = `${r.ts}-${r.alarm_id || r.type}-${i}`
+                  const key = `${r.ts}-${r.alarm_id || r.type}-${pageStart + i}`
                   const open = expanded === key
                   const lastChange = r.changes?.[r.changes.length - 1]
                   return [
@@ -408,13 +298,8 @@ function AlarmsSection() {
                 })}
               </tbody>
             </table>
-            {rows.length > visible && (
-              <div style={{ padding: 10, textAlign: 'center' }}>
-                <button className="btn btn--ghost btn--sm" onClick={() => setVisible(v => v + PAGE_SIZE * 2)}>
-                  더 보기 ({rows.length - visible}건 남음)
-                </button>
-              </div>
-            )}
+            </div>
+            <Pager page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
           </>
         )}
       </div>
@@ -524,7 +409,7 @@ function EventsSection() {
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [visible, setVisible] = useState(PAGE_SIZE)
+  const [page, setPage] = useState(0)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -539,7 +424,7 @@ function EventsSection() {
   }, [days, show])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => { setVisible(PAGE_SIZE) }, [days, filterType, filterKind, q])
+  useEffect(() => { setPage(0) }, [days, filterType, filterKind, q])
 
   const types = useMemo(() => [...new Set(events.map(e => e.type).filter(Boolean))].sort(), [events])
 
@@ -555,6 +440,8 @@ function EventsSection() {
   }, [events, filterType, filterKind, q])
 
   const groups = useMemo(() => groupEvents(filtered), [filtered])
+  const pageStart = Math.min(page, Math.max(0, Math.ceil(groups.length / PAGE_SIZE) - 1)) * PAGE_SIZE
+  const pageGroups = groups.slice(pageStart, pageStart + PAGE_SIZE)
 
   const exportCsv = () => {
     downloadCsv(`events_${days}d.csv`,
@@ -564,7 +451,7 @@ function EventsSection() {
 
   return (
     <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
         <DaysButtons days={days} onChange={setDays} />
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
         <select className="form-input" value={filterKind} onChange={e => setFilterKind(e.target.value)} style={{ width: 120 }}>
@@ -583,8 +470,8 @@ function EventsSection() {
         <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
       </div>
 
-      <div className="panel">
-        <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
+      <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
           이벤트 이력 ({filtered.length}건 · {groups.length}묶음)
           {events.length >= FETCH_LIMIT && (
             <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
@@ -598,6 +485,7 @@ function EventsSection() {
           <div className="empty">기록된 이벤트 없음</div>
         ) : (
           <>
+            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -610,9 +498,9 @@ function EventsSection() {
                 </tr>
               </thead>
               <tbody>
-                {groups.slice(0, visible).map((g, gi) => {
+                {pageGroups.map((g, gi) => {
                   const n = g.items.length
-                  const key = `${g.key}-${g.first.ts}-${gi}`
+                  const key = `${g.key}-${g.first.ts}-${pageStart + gi}`
                   const open = expanded === key
                   const ev = g.first
                   return [
@@ -667,13 +555,8 @@ function EventsSection() {
                 })}
               </tbody>
             </table>
-            {groups.length > visible && (
-              <div style={{ padding: 10, textAlign: 'center' }}>
-                <button className="btn btn--ghost btn--sm" onClick={() => setVisible(v => v + PAGE_SIZE * 2)}>
-                  더 보기 ({groups.length - visible}묶음 남음)
-                </button>
-              </div>
-            )}
+            </div>
+            <Pager page={page} count={groups.length} pageSize={PAGE_SIZE} onPage={setPage} unit="묶음" />
           </>
         )}
       </div>
@@ -682,11 +565,13 @@ function EventsSection() {
 }
 
 // ── 페이지 ───────────────────────────────────────────────────────────────────
+//   화면 내 고정 레이아웃 — 탭/툴바/컬럼 헤더/페이저는 항상 보이고 표 영역만 내부 스크롤.
+//   (100vh − 콘텐츠 헤더·서브탭·본문 패딩 ≈ 135px)
 export default function AlertsPage() {
   const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
   return (
-    <div className="page">
-      <div className="tab-nav">
+    <div className="page" style={{ height: 'calc(100vh - 135px)', minHeight: 480 }}>
+      <div className="tab-nav" style={{ flex: 'none' }}>
         <button className={`tab-btn ${tab === 'alarms' ? 'tab-btn--active' : ''}`}
                 onClick={() => setTab('alarms')}>알람</button>
         <button className={`tab-btn ${tab === 'events' ? 'tab-btn--active' : ''}`}
