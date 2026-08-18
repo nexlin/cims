@@ -154,9 +154,13 @@ bool SSLServerStart( const char * szCertFile, const char * szKeyFile, const char
 		return false;
 	}
 
-	if( SSL_CTX_use_certificate_file( gpsttServerCtx, szCertFile, SSL_FILETYPE_PEM ) <= 0 )
+	// 체인 파일 로딩 — PEM 의 첫 인증서를 서버 인증서로, 나머지를 중간 CA 체인으로 등록해
+	//   핸드셰이크 Certificate 목록에 함께 실어 보낸다. use_certificate_file 은 첫 인증서만
+	//   등록해 중간 CA 가 상대에게 전달되지 않았다(상대가 발급자를 찾지 못해 검증 실패).
+	//   인증서 1장뿐인 PEM 에서는 동작이 동일하다.
+	if( SSL_CTX_use_certificate_chain_file( gpsttServerCtx, szCertFile ) <= 0 )
 	{
-		CLog::Print( LOG_ERROR, "SSL_CTX_use_certificate_file error" );
+		CLog::Print( LOG_ERROR, "SSL_CTX_use_certificate_chain_file error" );
 		SSLPrintError( );
 		return false;
 	}
@@ -336,9 +340,10 @@ SSL_CTX * SSLServerCtxCreate( const char * szCertFile, const char * szKeyFile, c
 		return NULL;
 	}
 
-	if( SSL_CTX_use_certificate_file( ctx, szCertFile, SSL_FILETYPE_PEM ) <= 0 )
+	// 체인 파일 로딩 — 중간 CA 를 PEM 뒤에 이어붙이면 상대에게 함께 전달된다(위 SSLServerStart 주석 참조).
+	if( SSL_CTX_use_certificate_chain_file( ctx, szCertFile ) <= 0 )
 	{
-		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: use_certificate_file('%s') error", szCertFile );
+		CLog::Print( LOG_ERROR, "SSLServerCtxCreate: use_certificate_chain_file('%s') error", szCertFile );
 		SSLPrintError();
 		SSL_CTX_free( ctx );
 		return NULL;

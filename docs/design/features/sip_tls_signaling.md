@@ -14,7 +14,7 @@ transport 로 **일괄 전환하는 것이 목표가 아니다** — 서버는 �
 > **상태**: 서버는 세 transport 를 동시에 서비스하며 혼합 운용을 실측했다(001=UDP·002=TLS 동거,
 > 그룹콜 성립). 단말도 TLS 등록·통화가 된다. 남은 것은 **①단말 선택 모델**(프로비저닝이 가용
 > transport 목록을 내리고 단말이 고르는 형태 — [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다))과
-> **②인증서 운영 방침**([§8](#8-인증서-운영-요건-미정), 상용 게이트)이다.
+> **②인증서 운영 방침**([§8](#8-인증서-운영), 상용 게이트)이다.
 
 ## 1. 범위와 전제
 
@@ -295,7 +295,7 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 | OpenSSL | android-arm64 정적 빌드(`android/docs/scripts/m1_build_openssl.sh` → `$HOME/opt/openssl-android-arm64`) |
 | pjproject | `config_site.h` 의 `PJSIP_HAS_TLS_TRANSPORT 1` + `configure-android --with-ssl=<prefix>` (`m1_build_pjsip.sh`). SWIG 산출물은 불변 — `.so` 만 교체된다 |
 | transport 생성 | `PjLib.kt` 가 UDP·TCP 에 이어 TLS transport 를 만든다. 실패해도 평문 transport 로 계속한다(구 `.so` 호환) |
-| 서버 인증서 검증 | `TlsConfig.verifyServer = false` — 자가서명 인증서 배치 전제. CA 배포 방침이 서면 `caListFile`/`caBuf` 를 채우고 켠다([§8](#8-인증서-운영-요건-미정)) |
+| 서버 인증서 검증 | `TlsConfig.verifyServer = false` — **검증 결과를 집행하지 않는다**. pjsip 은 체인·신원 검사를 수행해 `verify_status` 에 기록하지만, 이 플래그가 꺼져 있으면 실패를 무시하고 연결을 유지한다(`sip_transport_tls.c` 의 `verify_status && verify_server` 판정). 서버측 CA 전환은 끝났으므로 남은 것은 `caBuf` 에 CA 를 넣고 이 플래그를 올리는 것뿐이다([§8.5](#85-남은-결정--상용-게이트)) |
 | 계정 설정 | 프로비저닝의 가용 목록에서 고른 transport·포트를 registrar·proxy URI 에 반영(`;transport=tls`). 선택 모델은 [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다) |
 
 ### 7.1 선택 모델 — 단말이 고르고 서버는 가용 목록을 준다
@@ -350,15 +350,99 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 서버측은 추가 작업이 없다 — 바인딩 집합이 transport 무관이고, 단말이 경로를 바꾸면 새 바인딩으로
 자연히 반영된다(옛 경로는 같은 transport 재등록 교체 또는 flow 실패로 회수).
 
-## 8. 인증서 운영 요건 (미정)
+## 8. 인증서 운영
 
-| 항목 | 결정 필요 사항 |
+### 8.1 PKI 구조 — 단말 대면 전용 사설 CA
+
+```
+CIMS Service CA  (자가서명, RSA 4096, 10년, 단말 대면 전용)
+   └─ CSP 서버 인증서  (RSA 2048, 2년, EKU=serverAuth, CA:FALSE)
+        SAN = IP:<CSP 접속 주소>, IP:<관리망 주소>, DNS:csp.cims.local
+```
+
+**중간 CA 를 두지 않는 1단 구조**다. X.509·TLS 규격은 중간 CA 를 요구하지 않으며(중간 필수는
+공인 CA 대상 CA/Browser Forum 정책), 사설망 규모에서 루트가 leaf 를 직접 서명하는 것은 정상 구성이다.
+대가로 루트 개인키를 발급 작업에 쓰게 되므로 키 파일 권한을 `600` 으로 제한한다.
+
+관리평면(OAM↔agent mTLS)의 `CIMS Agent CA` 와는 **별도 CA** 다. 관리평면 신뢰 앵커를 사용자 기기로
+내보내지 않기 위한 격리이며, 단말 대면 인증서(CSP 15061, 향후 CSC 4430)는 이 Service CA 로 묶는다.
+
+### 8.2 서버는 체인을 전송한다
+
+psip 은 `SSL_CTX_use_certificate_chain_file()` 로 인증서를 적재한다 — PEM 의 첫 인증서를 서버
+인증서로, 뒤에 이어붙인 인증서를 중간 CA 체인으로 등록해 핸드셰이크 `Certificate` 목록에 함께
+싣는다. 인증서 1장뿐인 PEM 에서는 동작이 동일하다.
+
+`tls_cert_path` 는 leaf + CA 를 이어붙인 체인 PEM 을 가리키고, 키는 `tls_key_path` 로 분리한다.
+중간 CA 를 도입하거나 고객사 PKI 에서 인증서를 받아오면 그 중간 인증서를 이 파일에 추가하면 된다.
+
+### 8.3 발급 절차
+
+```bash
+umask 077
+# 1) 사설 CA (10년)
+openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+  -keyout cims-service-ca.key -out cims-service-ca.crt \
+  -subj "/C=KR/O=CIMS/CN=CIMS Service CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign"
+
+# 2) 서버 키 + CSR
+openssl req -newkey rsa:2048 -sha256 -nodes -keyout csp.key -out csp.csr \
+  -subj "/C=KR/O=CIMS/CN=<CSP 접속 주소>"
+
+# 3) SAN·용도 확장 — HA 를 쓰면 VIP 주소를 반드시 포함한다
+cat > csp-ext.cnf <<'EXT'
+basicConstraints = critical, CA:FALSE
+keyUsage         = critical, digitalSignature, keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName   = IP:<CSP 접속 주소>, IP:<관리망 주소>, DNS:csp.cims.local
+EXT
+
+# 4) CA 서명 (2년) → 5) 체인 PEM 조립
+openssl x509 -req -in csp.csr -CA cims-service-ca.crt -CAkey cims-service-ca.key \
+  -CAcreateserial -out csp.crt -days 730 -sha256 -extfile csp-ext.cnf
+cat csp.crt cims-service-ca.crt > csp-chain.pem
+chmod 600 cims-service-ca.key csp.key
+```
+
+### 8.4 교체 절차 — 리스너 재개설이 필요하다
+
+⚠️ **인증서·키 경로는 기동 캡처 항목이다.** `local_nodes` 를 갱신하고 SIGUSR1 을 보내면 새 경로는
+읽히지만, bind 주소·포트가 그대로면 `ListenerManager` 가 `skip … bootstrap 이 이미 바인딩` 으로
+리스너를 다시 열지 않아 **옛 SSL 컨텍스트가 유지된다.** 반영에는 CSP 재기동이 필요하다.
+
+교체는 단말을 만지기 전에 서버측만으로 검증할 수 있다.
+
+```bash
+openssl verify -CAfile cims-service-ca.crt csp.crt          # 체인
+diff <(openssl x509 -in csp.crt -noout -modulus | sha256sum) \
+     <(openssl rsa  -in csp.key -noout -modulus | sha256sum)  # 키↔인증서 짝
+
+# 교체·재기동 후 — 체인 전송 장수 / 체인·신원 검증
+openssl s_client -connect <IP>:15061 -showcerts </dev/null | grep -c "BEGIN CERTIFICATE"
+openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
+        -verify_return_error -verify_ip <IP> -brief </dev/null
+openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
+        -verify_return_error -verify_hostname wrong.example -brief </dev/null   # 실패해야 정상
+```
+
+마지막 대조군이 중요하다 — 통과해 버리면 신원 검사가 집행되지 않는다는 뜻이다.
+
+`verifyServer=false` 단말은 인증서가 무엇이든 접속하므로, 서버 인증서 교체는 **기존 단말에 무영향**
+이다(재기동에 따른 재등록만 발생). 따라서 서버측 전환을 먼저 끝내고 단말은 점진 전환할 수 있다.
+
+### 8.5 남은 결정 — 상용 게이트
+
+| 항목 | 상태 |
 |---|---|
-| 발급 | 사설 CA 운영 여부, CN/SAN (단말이 서버를 IP 로 지칭하는지 FQDN 인지) |
-| 배포 | 서버 인증서 경로·권한, 단말 CA 신뢰 저장소 주입 방식 |
-| 검증 정책 | 단말의 서버 인증서 검증 on/off, 서버의 클라이언트 인증서 요구 여부(`tls_verify_peer`) |
-| 갱신 | 만료 전 교체 절차. 무중단 교체는 T1·T2 수정에 종속 |
-| 감시 | 만료 임박 알람 — 인증서 만료는 전 단말 동시 등록 불가로 이어지는 단일 장애점 |
+| 단말 CA 주입 + `verifyServer=true` | **미적용**. `caBuf` 에 CA PEM(여러 인증서 모두 적재됨) + `caListFile`·`certFile`·`privKeyFile` 은 비워야 한다 |
+| CA 배포 경로 | **APK 동봉이 정본.** 프로비저닝(CSC 4430)은 자신도 자가서명 + `allowInsecureTls=true` 라 신뢰의 최초 씨앗을 그 채널로 받으면 의미가 반감된다 |
+| 클라이언트 인증서(상호 TLS) | 미채택. 단말 인증은 SIP Digest 가 담당. 채택 시 `tls_verify_peer=true` + CA 파일 지정이 필요(psip 은 CA 미설정 시 `CertificateRequest` 를 보내지 않는다) |
+| FQDN 전환 | 미결. 전환 시 프로비저닝 `host`·인증서 SAN·DNS 등록 세 개를 동시에 맞춰야 한다 |
+| 갱신 | leaf 2년. 무중단 교체는 재기동이 필요하다(§8.4) |
+| 폐기 | CRL/OCSP 배포 경로 없음(air-gapped) → **짧은 유효기간 + 정기 교체**로 대체 |
+| 감시 | 만료 임박 알람 미구현 — 인증서 만료는 전 단말 동시 등록 불가의 단일 장애점. `A-PRC-009 cert_expiring` 패턴 확장 대상 |
 
 ## 9. 남은 과제
 
@@ -369,7 +453,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | # | 과제 | 성격 | 검증 |
 |---|---|---|---|
 | 1 | **단말 선택 모델**([§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다)) — 프로비저닝 `transports` 목록 + 앱의 transport 별 포트 보유 + 선택 UI | 기능 (csc + 앱) | 세 transport 를 앱에서 골라 각각 등록·통화 |
-| 2 | **인증서 운영**([§8](#8-인증서-운영-요건-미정)) — 사설 CA·검증 정책·갱신·만료 감시 | **상용 게이트** | 단말 `verifyServer=true` 로 등록 성립 |
+| 2 | **단말 서버 인증서 검증**([§8.5](#85-남은-결정--상용-게이트)) — CA 를 APK 에 동봉하고 `verifyServer=true`. 서버측 사설 CA 전환은 완료 | **상용 게이트** | 단말 `verifyServer=true` 로 등록 성립 |
 
 1과 2는 독립이다. 다만 단말이 TLS 를 실제로 고르게 하려면(1) 그 TLS 가 신뢰 가능해야(2) 하므로,
 상용 배치에서는 2가 선행한다. 랩·시험 배치에서는 1만으로 진행할 수 있다.
@@ -407,9 +491,10 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `ext/psip/SipStack/SipStack.cpp` | 리스너 생성·pool 초기화 (T1·T2) |
 | `ext/psip/SipStack/SipTlsThread.cpp` | TLS accept·worker (T1·T4) |
 | `ext/psip/SipStack/SipTlsClientThread.cpp` | 아웃바운드 TLS 클라이언트 |
-| `ext/psip/SipStack/TlsFunction.cpp` | SSL ctx 생성·accept·connect |
+| `ext/psip/SipStack/TlsFunction.cpp` | SSL ctx 생성·accept·connect. 인증서는 체인 파일로 적재(§8.2), 클라이언트 인증서 요구는 CA 설정 시에만 |
 | `ext/psip/SipStack/TcpSocketMap.cpp` | 연결 재사용 맵 (TCP·TLS 공용) |
 | `ext/psip/SipStack/SipStackComm.hpp` | 송신 transport 분기, 수신 Via 각인 |
-| `android/docs/scripts/m1_build_pjsip.sh` | UE pjproject 빌드 (TLS 비활성 상태) |
+| `android/docs/scripts/m1_build_pjsip.sh` | UE pjproject 빌드 (OpenSSL 3.0.15 정적 + `PJSIP_HAS_TLS_TRANSPORT`) |
 | `android/core/.../sip/PjLib.kt` | UE transport 생성 |
-| `csc/src/services/mcptt.py` | 프로비저닝 `transport` 제공 |
+| `csc/src/services/mcptt.py` | 프로비저닝 가용 transport 목록 제공(§7.1) |
+| `/home/cims/certs/` | `cims-service-ca.{crt,key}` · `csp.{crt,key}` · `csp-chain.pem` (키 권한 600) |
