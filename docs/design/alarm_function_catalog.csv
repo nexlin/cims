@@ -16,6 +16,10 @@
 공통,알람,A-COM-001,connection_lost,critical,DB,db,서비스 DB 연결 두절,"DB connection lost (host={host}, port={port}, db={db})",DB 의존 기능 전면 저하(가입자/설정/이력),연결성·DB 서버·인증 확인,vIBCF A0003(연결 축)
 공통,알람,A-QOS-023,threshold_crossed,warning,,ha/<svc>,keepalived(VIP) 상태 전이 빈도 임계 — VIP flap 의심(전이 개별 건은 이벤트),HA transitions for {svc}: {count} in last 10min (threshold {threshold}),VIP 반복 이동 — 해당 서비스 간헐 단절,헬스체크 포트/모듈 상태·keepalived notify 로그 점검,vIBCF A0063 / X.733
 공통,알람,A-COM-015,connection_lost,critical,AGENT,agent,관리 에이전트(노드) 관측 두절 — heartbeat/metric 무수신,Agent on {node} unreachable — node observation lost,노드 관측 불능 — 그 노드의 L1 알람은 판정 불가(두절을 정상 해소로 위장하지 않기 위한 별도 알람 — 파이프라인 §9),노드 전원/네트워크/agent 프로세스 확인,X.733 / 파이프라인 §9
+공통,알람,A-PRC-021,listener_unavailable,minor,,monitor,운영 조회(monitor) 접속점 개설 실패 — 모듈 공통 운영 인터페이스(상태/세션 조회) 영구 불가,Monitor listener unavailable: {port} ({error}),운영 조회·진단 불가(서비스 영향 없음),포트 점유/설정 확인,X.733
+공통,알람,A-PRC-022,storage_failure,major,DB,db/query,DB 쿼리 지속 실패(권한/스키마/락 — 연결 probe 는 정상),"DB queries failing ({error}, {count} consecutive) — connection alive",연결 알람 없이 DB 의존 기능 실질 실패(A-COM-001 상보),권한/스키마/락 원인 확인,X.733
+공통,알람,A-QOS-028,threshold_crossed,minor,,host/iface/<name>,NIC 오류 카운터(rx/tx errors) 증가율 임계,NIC {iface} error rate is {observed}/s (threshold {threshold}),전송 품질 저하 진행(케이블/드라이버/스위치 이상),링크/드라이버/스위치 포트 점검 — 인터페이스마다 개별 발화,X.733
+공통,알람,A-QOS-029,threshold_crossed,minor~major(단계),,proc/<module>,모듈 프로세스 자원(CPU/RSS) 단계 임계 — 호스트 축(A-QOS-001)과 별개,"Process {module} resource usage: {metric} {observed} (MAJ:{maj}, MIN:{min})",해당 모듈 처리 지연·OOM kill 전조,원인(누수/부하) 확인 — 모듈마다 개별 발화,X.733
 공통,이벤트,E-STC-001,lifecycle,-,,,event=process_started. 기능 프로세스 기동 완료,Process {module} started on {node} (version {version}),,,X.731
 공통,이벤트,E-STC-002,lifecycle,-,,,event=process_stopping. graceful 종료 시작,Process {module} stopping (graceful shutdown initiated),,,X.731
 공통,이벤트,E-STC-009,lifecycle,-,,,event=process_died. 프로세스 소멸 전이 관측 — SIGKILL 등 자기보고(process_stopping) 유실 종료의 보완(L1 관측),Process {module} died on {node} (termination observed),,,X.731
@@ -37,6 +41,9 @@ CSCF,알람,A-QOS-009,threshold_crossed,minor~critical(단계),,cps,신호 유�
 CSCF,알람,A-QOS-010,resource_exhausted,major,,dialogs,다이얼로그/트랜잭션 자원 고갈,Dialog/transaction resources exhausted ({used}/{max}),신규 호 수용 불가,세션 누수/폭주 원인 확인,vIBCF F4009·F400A
 CSCF,알람,A-QOS-011,threshold_crossed,minor,,sip/rx_error,SIP 수신 이상(파싱 실패·규격 위반) 급증 — 경계(IBCF) 접속점 포함,SIP receive errors surging: {count} malformed/invalid messages in {window}s (top source {ip}),피어 오동작/공격/호환성 문제 진행,소스 IP 분포 확인·차단/억제 검토,vIBCF A0081·F4002
 CSCF,알람,A-SEC-001,security_violation,major,,auth,인증 실패 급증(크리덴셜 스터핑/무차별 대입 의심),Authentication failure surge: {count} failures in {window}s (top source {ip}),계정 탈취 시도 진행 가능,소스 분포 확인·차단·계정 보호,X.736
+CSCF,알람,A-PRC-020,listener_unavailable,major,CSC,csc_if,가입자/그룹 변경 통지 수신 접속점(UDP) 개설 실패,Subscriber-notify listener unavailable: {port} ({error}),프로비저닝 변경이 시그널링에 미반영(stale 데이터로 서비스),포트 점유/설정 확인,TS 24.229(HSS 상당)
+CSCF,알람,A-PRC-023,storage_failure,major,,state_files,실시간 가입자/호 상태 파일 기록 실패,Realtime state file writes failing ({path}: {errno}),콘솔 실시간 현황 정지(호 처리는 정상 — 무성 관측 공백),상태 파일 볼륨/권한 확인,X.733
+CSCF,알람,A-COM-017,connection_lost,minor,REDIS,redis,등록 상태 복제 저장소(Redis) 연결 두절 — HA 등록 인계 불능(cold-mode 강등),"Registration replication store (Redis) connection lost (host={host}, port={port})",절체 시 등록 상태 미인계(재등록 강제),Redis 서버/인증/네트워크 확인,X.733
 CSCF,이벤트,E-AUD-005,config_changed,-,,,"event=listener_changed. SIP 접속점 추가/제거(proto, port) — 무중단 변경",SIP listener {action}: {proto}:{port},,,X.740
 CSCF,이벤트,E-AUD-006,config_changed,-,,,event=subscriber_config_changed. 가입자/그룹 설정 변경 반영(원천 통지 기인),"Subscriber/group configuration updated ({entity}, {count} entries)",,,X.740
 CSCF,이벤트,E-STC-005,mode_transition,-,,,event=db_fallback_changed. 원천 장애로 폴백 모드 진입/해제,DB fallback mode {action} ({reason}),,,X.731
@@ -51,6 +58,7 @@ IBCF,이벤트,E-STC-006,availability_transition,-,PEER,,event=peer_state_change
 TAS,알람,A-PRC-013,storage_failure,critical,,cdr,CDR(호 이력) 기록 실패 지속,"CDR write failures persist on {path} ({errno}, {count} records affected)",호 이력 유실 — 정산/분쟁 대응 근거 상실·법적 문제,호 이력 볼륨/기록 경로 확인·유실 구간 산정,vIBCF A0090
 TAS,알람,A-COM-007,connection_lost,major~critical,CMP,cmp,미디어서버(CMP — MRF 역할) 제어 두절(안내방송/녹취/컨퍼런스용) — CSP 동거 배치의 CMP 두절 수렴 발화 대표 정의(A-COM-006/A-COM-008 흡수: 전체 두절 critical·endpoint 단위 major),Media plane (CMP) control lost — media setup/announcement/recording/floor control unavailable,미디어 의존 기능 전면 불가 — 경계 미디어·안내방송/녹취/컨퍼런스·그룹콜 발언권 제어(IBCF/TAS/PTT-AS 역할 합집합),CMP 프로세스/제어 채널 상태 확인,TS 23.333(MRF 상당)
 TAS,알람,A-QOS-015,threshold_crossed,minor~major(단계),,svc/failure_rate,부가서비스 로직 실행 실패율 임계(전환·착신전환·발신제한 등 적용 실패),"Supplementary service failure rate is {observed}% (service {svc}, MAJ:{maj}, MIN:{min})",가입자 체감 기능 오동작 확산,실패 서비스 유형 분포·설정/원천 데이터 확인,TS 24.229(AS)
+TAS,알람,A-PRC-019,listener_unavailable,critical,,media_ctrl/<plane>,미디어평면 제어 접속점(CMP/CMDP 제어 소켓) 개설 실패 — 두절 판정(A-COM-007 계열) 이전 단계의 자기 결함,Media-plane control socket unavailable: {plane} ({error}),미디어 제어 전면 불가 + 두절 감시 자체 미기동(침묵 위험) — 평면(cmp/cmdp)마다 개별 발화,소켓/포트 점유·설정 확인 후 재기동,X.733
 TAS,이벤트,E-AUD-008,config_changed,-,,,event=service_config_changed. 부가서비스 설정 변경 감사,Supplementary service configuration changed ({service}) by {actor},,,X.740
 PTT-AS,알람,A-COM-008,connection_lost,critical,CMP,cmp,미디어평면(CMP — floor 제어 담당) 두절 — CSP 동거 배치에서는 A-COM-007 로 수렴 발화(수록 원칙 참조),Media plane (CMP) lost — floor control unavailable (endpoint {ep}),그룹콜·발언권 제어 전면 불가,미디어평면 상태/제어 채널 확인,TS 23.379
 PTT-AS,알람,A-COM-009,connection_lost,major,CSC,csc/<svc>,그룹/설정/신원 관리 서버(GMS/CMS/IdMS) 연동 두절,Management server {svc} (CSC) connection lost (host={host}),프로비저닝·affiliation·인증 갱신 정지,관리 서버 상태 확인 — 서버마다 개별 발화,TS 23.379
@@ -60,6 +68,8 @@ PTT-AS,알람,A-QOS-016,threshold_crossed,minor~critical(단계),,group/setup_su
 PTT-AS,알람,A-QOS-017,threshold_crossed,critical,,emergency,긴급/임박위험 호 처리 실패 발생(낮은 임계 — 소수 건도 즉시),Emergency call handling failed: {count} emergency/imminent-peril calls failed in {window}s,인명 직결 기능 실패 — 최우선 대응,실패 호 즉시 추적·우선처리 경로 점검,TS 23.379(우선 처리)
 PTT-AS,알람,A-QOS-018,resource_exhausted,major,,affiliation,affiliation/그룹 수용 한계 도달,Affiliation/group capacity reached ({used}/{max}),신규 그룹 가입/활성화 거절,수용 상한·부하 분산 확인,TS 24.379
 PTT-AS,알람,A-PRC-015,cert_expiring,warning,,kms,보안키(KMS) 자재 만료 임박/획득 실패,KMS key material expires in {days} days or acquisition failed,암호화 그룹 통신 불능 예고,키 갱신 경로/KMS 연동 확인,TS 33.180
+PTT-AS,알람,A-COM-016,connection_lost,major,CMDP,cmdp,MCData 미디어평면(CMDP) 두절 — 대용량 SDS/FD 전면 실패,"MCData media plane (CMDP) connection lost (host={host}, port={port})",대용량 SDS(MSRP)·FD 수발신 전면 실패,CMDP 프로세스/제어 채널 확인,TS 23.282
+PTT-AS,알람,A-PRC-024,storage_failure,major,,group_dir,그룹 정본 파일 적재 실패(DB fallback 모드),Group directory load failing ({path}: {error}),그룹 서비스 전면 불가(fallback 모드에서 정본 상실),그룹 파일 디렉터리/권한 확인,TS 24.481
 PTT-AS,이벤트,E-STC-007,mode_transition,-,,,"event=emergency_mode_changed. 그룹/사용자 긴급 모드 진입/해제(gid, uri)","Emergency mode {action} (group {gid}, user {uri})",,,TS 23.379
 PTT-AS,이벤트,E-AUD-009,config_changed,-,,,event=affiliation_changed. 그룹 affiliation 변경 반영,"Affiliation updated (group {gid}, {count} members)",,,TS 24.379
 PTT-AS,이벤트,E-AUD-010,config_changed,-,,,event=regroup_changed. ad-hoc/regroup 생성·해제,"Regroup {action} (group {gid}, {scope})",,,TS 23.379
@@ -76,5 +86,28 @@ MRF,알람,A-PRC-017,storage_failure,critical,,record,녹취 저장 실패 지�
 MRF,알람,A-PRC-002,storage_failure,major,,fd_store,메시지 미디어(FD/파일) 스토어 저장·접근 실패,"FD/file store write or access failure ({path}, {errno})",MCData 수신분 유실,스토어 볼륨/마운트 확인,TS 23.282
 MRF,알람,A-COM-013,delivery_failed,major,,floor_tx,floor/SRTCP 송신 실패 지속(키/암호화 오류),"Floor/SRTCP transmit failures persist (group {gid}, {reason})",암호화 그룹의 floor 제어 전면 불능,키 자재/암호화 컨텍스트 확인,TS 24.380
 MRF,알람,A-PRC-018,worker_unavailable,critical,,worker/<name>,미디어 리액터/제어 루프/타이머 실행 단위 정지,Worker {name} stalled: no heartbeat for {secs}s — relay/control loop stopped,포트는 살아있는데 무중계·무제어(외부 무증상),해당 실행 단위 재기동(프로세스 재기동),X.733
+MRF,알람,A-QOS-025,resource_exhausted,minor,,slots/<gid>,발언 슬롯 상한 초과(멤버 수 > 슬롯) — 상향 SSRC 슬롯 충돌 지속,Talker slots exceeded on group {gid} ({members}/{slots}) — SSRC slot collision,수신 단말이 동시 송신자 구분 불가·녹취 트랙 오염,그룹 정원/슬롯 상한 조정 — 그룹마다 개별 발화,TS 24.380
+MRF,알람,A-QOS-026,resource_exhausted,major,,fds,접속 수용 실패 지속(fd 고갈 — EMFILE/ENFILE),MSRP accept failing: fd exhausted ({count} in {window}s),신규 미디어 접속 전면 불가(+hot spin CPU 포화 동반),fd 상한/누수 확인·프로세스 재기동,TS 23.282 / X.733
 MRF,이벤트,E-AUD-011,corrective_action,-,,,event=session_reclaimed. 세션 강제 회수(운영자 모르게 미디어 절단되는 동작의 감사),Session {sid} force-reclaimed ({reason}),,,X.740
 MRF,이벤트,E-AUD-012,config_changed,-,,,event=resource_config_changed. 미디어 자원 구성 변경(endpoint/풀 증감),Media resource configuration changed ({detail}),,,X.740
+MRF,이벤트,E-STC-010,availability_transition,-,CSP,,event=csp_control_peer_changed. 제어 피어(CSP) 소스 변경 관측(재기동/절체),Control peer (CSP) changed: {old} -> {new},,,X.731
+CSC,알람,A-PRC-025,listener_unavailable,critical,,http/<port>,가입자/MCPTT API HTTP 접속점 불능(개설 실패·수신 스레드 사망 — 프로세스는 생존),CSC HTTP listener unavailable: {port} ({error}),IdMS/GMS/CMS/XCAP·프로비저닝 API 전면 불가,포트 점유/기동 로그 확인 — 접속점마다 개별 발화,TS 24.482/24.481(IdMS/GMS 상당)
+CSC,알람,A-COM-018,delivery_failed,major,CSP,notify/<target>,가입자/그룹 변경 통지(notify) 미도달 지속,Change-notify delivery to {target} failing ({count} consecutive),변경이 시그널링(CSP)에 미반영 — stale 운영(무성 장애),대상 도달성/포트 확인 — 대상마다 개별 발화,TS 24.229(HSS 상당 통지)
+CSC,알람,A-PRC-026,storage_failure,major,,idms_store,IdMS 토큰/코드 스토어 기록 실패,IdMS store writes failing ({path}: {error}),토큰 발급 외견 성공·refresh 전량 실패(로그인 반복 강제)·회수 실패 시 구 토큰 잔존(보안),스토어 볼륨/권한 확인,TS 24.482
+CSC,알람,A-QOS-027,resource_leak,minor,,idms_store/entries,IdMS 토큰/코드 스토어 무한 증식(만료분 미회수),IdMS store growing unbounded ({entries} entries),디스크/조회 성능 점진 잠식,만료 엔트리 정리(GC) 실행·주기화,TS 24.482
+CSC,알람,A-PRC-027,storage_failure,major,,file_store,가입자/그룹 파일 스토어 기록 실패(그룹 JSON·FD 업로드),File store writes failing ({path}: {error}),그룹 정본 파일 미갱신(CSP fallback 오염)·FD 업로드 실패,스토어 볼륨/권한 확인,TS 24.481 / TS 23.282
+CSC,이벤트,E-AUD-013,corrective_action,-,CSP,,event=csp_resync_sent. 기동 시 CSP 전량 재동기 요청(CSC_RESTART) 발신,Full resync requested to CSP ({reason}),,,X.740
+관리,알람,A-PRC-028,storage_failure,major~critical,,store,공유 스토리지(NAS) 접근 실패(마운트 소실·쓰기 불가),Shared store access failing ({reason}),관리평면 정본 저장 불능 — HA 승격 부적격·배포/알람 보관 정지,마운트/NAS/권한 확인 — 노드(agent)와 OAM 양쪽에서 감지,X.733
+관리,알람,A-PRC-029,dependency_unavailable,critical,,tooling,노드 필수 도구(cims-svc/cims-priv/cims-ha) 미발견·권한 미등록,Node tooling unavailable: {tool} ({detail}),모듈 기동/IP 조작/HA 제어 전면 불능,설치본/sudoers 등록 확인,X.733
+관리,알람,A-PRC-030,listener_unavailable,critical,,http/<port>,관리 API(OAM/oam-svc) HTTP 접속점 불능(bind 실패·스레드 사망 — 백그라운드 스위퍼는 지속),OAM HTTP listener unavailable: {port} ({error}),콘솔/API 전면 502 — 알람 발화는 지속되나 가시화 불가,포트 점유/기동 로그 확인,X.733
+관리,알람,A-PRC-031,dependency_unavailable,warning,,store/lock,공유 스토리지 잠금(flock) 미보장 — 소유권 펜싱 부재(상시 조건),Store lock (flock) not enforced on shared storage,이중 기동 시 정본 손상 위험 상시·리스 영구 read-only 수렴,스토리지 잠금 지원 확인(NFS 옵션)·대체 펜싱 적용,X.733
+관리,알람,A-PRC-032,storage_failure,major,,alerts/stream,알람/이벤트 스트림 자기 기록 실패,Alert stream writes failing ({path}: {errno}),open 레코드 유실 — 콘솔/이력에 영구 미표시(관측 공백),스트림 볼륨/NAS 상태 확인,X.733
+관리,알람,A-PRC-033,state_out_of_sync,warning,,alerts/restore,알람 open-state 복원 창 불일치(장기 지속 알람 재기동 시 중복 open),Alert open-state restore window mismatch ({window}d vs {drift}d),장기 알람의 재기동 후 중복 open·이력 왜곡,복원 창 정합·중복 정리,X.733
+관리,알람,A-COM-019,delivery_failed,major,,reports,job report 전달 적체(재시도 소진 — pending 큐 누적),Job report delivery backlogged ({pending} pending),배포/작업 결과가 OAM 에 미도달(성공/실패 판정 불가),OAM 도달성 확인·큐 소진 감시,X.733
+관리,알람,A-COM-020,connection_lost,major,,fm_sync/<node>,모듈 자기보고(FM_SYNC) 두절 — 판정 불가 종결 후 두절 상태 자체의 알람,FM self-reporting from {node} lost ({misses} sync misses),해당 노드 L2 알람 판정 불가 — 침묵을 정상으로 오인 위험(A-COM-015 와 상보),모듈 FmReporter/경로 확인 — 노드마다 개별 발화,X.733 / 파이프라인 §9
+관리,알람,A-COM-021,delivery_failed,major,AGENT,jobs/<agent>,배포 job 적체(queued/running 무기한 — 회수 타임아웃 부재),"Deploy jobs to {agent} stalled ({count} queued, oldest {age}s)",배포/제어가 해당 노드에 무기한 미집행,agent 상태/큐 회수 확인 — agent 마다 개별 발화,X.733
+관리,알람,A-COM-022,connection_lost,major,,ext/<system>,등록 외부 시스템 도달 불가(TCP probe 실패 지속),External system {system} unreachable ({fails} consecutive probes),해당 연동 기능 불가,대상 시스템/경로 확인 — 시스템마다 개별 발화,X.733
+관리,이벤트,E-STC-011,lifecycle,-,,,event=module_restarted. watchdog/HA reconcile 에 의한 모듈 자동 재기동,Module {module} auto-restarted by {actor} ({reason}),,,X.731
+관리,이벤트,E-STC-012,availability_transition,-,AGENT,,event=node_state_changed. agent 관측 두절/복귀 전이(offline↔online — A-COM-015 알람과 쌍),Node {node} state changed: {from} -> {to},,,X.731
+관리,이벤트,E-AUD-014,job_result,-,,,"event=deployment_failed. 노드 배포/업그레이드 실패·자동 롤백(rc, sha 불일치, rolled_back)",Deployment on {node} failed: {detail} ({rolled_back}),,,X.740
+관리,이벤트,E-AUD-015,job_result,-,AGENT,,"event=deploy_job. 배포/프로비저닝 job 결과(job_type, agent, result)",Deploy job {job} on {agent}: {result},,,X.740

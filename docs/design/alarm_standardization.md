@@ -498,7 +498,7 @@ F5xxx(eMP/TGAS ≈ 미디어평면) 압축 대조: 자원 부족(F5002/F5011)=QO
 - 매핑은 별도 테이블(code↔int OID)로 관리 — CIMS 내부 모델은 문자열 code 유지, northbound 게이트웨이에서 변환.
 
 ## 관련
-- [alarm_function_catalog.md](alarm_function_catalog.md) — IMS 기능(CSCF/IBCF/TAS/PTT-AS/MRF) 관점 필요 알람/이벤트 요구 카탈로그(구현 무관 정본)
+- [alarm_function_catalog.md](alarm_function_catalog.md) — 기능(CSCF/IBCF/TAS/PTT-AS/MRF/CSC + 관리평면) 관점 필요 알람/이벤트 요구 카탈로그(구현 무관 정본·정의 코드 채번 정본)
 - [alarm_self_reporting.md](alarm_self_reporting.md) — 모듈 자기보고(FM push) 경로 — 본 모델 위의 발생 경로 확장 + 이벤트 스트림
 - `console_platform.md` (Service Descriptor: modules/alert_rules/data_sources) · `features/monitoring.md`
 - 3GPP TS 32.111-2 (Alarm IRP) · ITU-T X.733 (Alarm reporting) · IETF RFC 3877 (Alarm MIB) · ONAP VES (fault) / ETSI NFV · Project Clearwater (IMS 알람 사례)
