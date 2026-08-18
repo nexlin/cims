@@ -166,19 +166,9 @@ valid_target() {
 
 valid_nospace() { [[ -n "$1" && ! "$1" =~ [[:space:]] ]] || { err "invalid (empty/contains space): '$1'"; return 1; }; }
 
-# cims 내부 dpkg 직렬화 — agent job worker 가 module/ha 레인으로 병렬 실행되므로
-# 우리 쪽 dpkg 호출(keepalived / NFS·CIFS 클라이언트 / base deps)이 겹칠 수 있다.
-# dpkg 는 동시 실행 불가라 **락을 잡은 채로** 실행해 줄을 세운다(대기만 하고 놓으면 무의미).
-# flock 이 없거나 타임아웃이면 그대로 실행 — 뒤의 재시도·backoff 가 경합을 담당한다.
-_CIMS_DPKG_LOCK="/var/lock/cims-dpkg.lock"
-
-_cims_dpkg() {                     # _cims_dpkg <cmd...> — 락 보유 상태로 실행
-    if command -v flock >/dev/null 2>&1; then
-        flock -w 300 "$_CIMS_DPKG_LOCK" "$@"
-    else
-        "$@"
-    fi
-}
+# 패키지 판정(_pkg_*)과 dpkg 직렬화(_cims_dpkg)는 lib/pkgstate.sh 가 정본 — cims-ha 와
+# 규칙을 공유한다. 한쪽만 고친 판정이 반대편에서 재발하는 것을 구조로 막는다.
+source "$SELF_DIR/../lib/pkgstate.sh"
 
 # cims-ha 가 dpkg 구간에 만든 policy-rc.d(exit 101) 잔재 제거.
 #   상위(agent)가 타임아웃으로 cims-ha 를 **kill** 하면 스크립트의 trap 이 실행되지 않아
@@ -220,9 +210,9 @@ ensure_fs_client() {
         info "$helper 미설치 — vendor offline 설치 ($vdir)"
         # 우리 쪽 다른 dpkg 작업(keepalived 설치 등)과 겹치지 않게 락을 잡고 실행한다 —
         # agent job worker 가 module/ha 레인으로 병렬 실행되므로 동시 호출이 가능하다.
-        if ! _cims_dpkg dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1; then
+        if ! _cims_dpkg dpkg -i --force-confmiss --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1; then
             _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y --fix-broken install >/dev/null 2>&1 || true
-            _cims_dpkg dpkg -i --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1 || {
+            _cims_dpkg dpkg -i --force-confmiss --force-confnew --force-overwrite "$vdir"/*.deb >/tmp/cims-priv.err 2>&1 || {
                 err "$fstype client vendor 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"
                 return 1
             }
@@ -314,9 +304,13 @@ do_net_sysctl() {
 # 여기에도 같은 방식으로 적용한다 — 한쪽만 고치면 agent 재시작·fresh 노드에서 재발한다.
 _KA_MASKED_BY_US=0
 
-_priv_pkg_ok() {   # 상태 기반 판정 — 실행 성공(-v)이 아니라 dpkg 상태가 정본
-    [[ "$(dpkg-query -W -f='${Status}' "$1" 2>/dev/null)" == "install ok installed" ]]
-}
+# 실행 성공(-v)이 아니라 dpkg 상태가 정본 — 공유 라이브러리 위임.
+#   _priv_pkg_ok      = 등록 여부
+#   _priv_pkg_healthy = 등록 + **소유 파일 무결**(dpkg -V)
+# 완비 판정은 healthy 로 한다. 등록만 보면 "설치됐는데 파일이 지워진" 노드를 정상으로
+# 넘겨 재설치가 영영 skip 된다(실측 사고 — keepalived conffile 유실로 기동 불가).
+_priv_pkg_ok()      { _pkg_ok "$1"; }
+_priv_pkg_healthy() { _pkg_healthy "$1"; }
 
 _priv_mask_ka() {
     if [[ "$(systemctl is-enabled keepalived 2>/dev/null)" == "masked" ]]; then
@@ -339,7 +333,9 @@ _priv_dpkg_install() {
     local try out rc
     # 락 대기는 cims-ha 와 같은 기조 — unattended-upgrade 가 수 분간 점유한다(실측).
     for ((try = 1; try <= 5; try++)); do
-        out=$(_cims_dpkg dpkg -i --force-confnew --force-overwrite "$@" 2>&1); rc=$?
+        # --force-confmiss: 삭제된 conffile 복원. dpkg 는 기본적으로 conffile 삭제를
+        # 관리자 의도로 보고 되돌리지 않는다 — 그래서 재설치를 해도 안 살아난다(실측).
+        out=$(_cims_dpkg dpkg -i --force-confmiss --force-confnew --force-overwrite "$@" 2>&1); rc=$?
         [[ $rc -eq 0 ]] && return 0
         # 정확 문구만 락으로 본다 — 부분일치(`lock`)는 'block' 같은 무관한 출력도 잡는다.
         if printf '%s' "$out" | grep -qiE 'dpkg frontend lock|Could not get lock|lock .* (is )?held by|dpkg status database is locked|another process (is )?using'; then
@@ -357,8 +353,7 @@ do_base_deps_status() {   # 0=완비, 1=미완비. vendor deb 의 Package 들이
     for d in "$VENDOR_DIR"/*/*.deb; do
         [[ -e "$d" ]] || continue
         name=$(dpkg-deb -f "$d" Package 2>/dev/null) || continue
-        dpkg-query -W -f='${Status}' "$name" 2>/dev/null | grep -q "install ok installed" \
-            || missing+=" $name"
+        _pkg_healthy "$name" || missing+=" $name"
     done
     if [[ -n "$missing" ]]; then
         info "base deps 미완비:$missing"
@@ -373,7 +368,7 @@ do_ensure_base_deps() {
     "$IP_CMD" -j addr >/dev/null 2>&1                                   || need=1
     # 상태 기반 — iF(half-configured) 도 "미완비" 로 잡힌다. 실행 성공 여부로 판정하면
     # 공유 라이브러리 갱신 순간에 실패해 불필요한 재설치 루프를 만든다.
-    _priv_pkg_ok keepalived                                            || need=1
+    _priv_pkg_healthy keepalived                                       || need=1
     { command -v mount.nfs >/dev/null 2>&1 || [[ -x /sbin/mount.nfs ]]; } || need=1
     if [[ $need -eq 0 ]]; then
         ok "base deps 정상 (ip/keepalived/mount.nfs — 설치 불필요)"
@@ -393,7 +388,7 @@ do_ensure_base_deps() {
         info "keepalived half-configured(iF) — dpkg --configure 로 복구 시도"
         _cims_dpkg dpkg --configure -a >/dev/null 2>&1 || true
     fi
-    if _priv_pkg_ok keepalived && "$IP_CMD" -j addr >/dev/null 2>&1 \
+    if _priv_pkg_healthy keepalived && "$IP_CMD" -j addr >/dev/null 2>&1 \
        && { command -v mount.nfs >/dev/null 2>&1 || [[ -x /sbin/mount.nfs ]]; }; then
         _priv_unmask_ka
         ok "base deps 복구 완료 (configure 만으로 해소 — 재설치 불필요)"

@@ -200,5 +200,20 @@ CSC 는 결과에 따라 다음을 자동 처리:
 | `collect_log` | 로그 일부 반환 | `log_path` |
 | `apply_ip_config` | service IP/route 적용 (cims-priv) — sync REST `/apply-ip-config` 와 동일 경로 | `service_ip_rows[]`, `routes[]` |
 | `apply_mounts` | 마운트 적용 (cims-priv mount-add/del → `/etc/fstab` 영속) — sync REST `/apply-mounts` | `mounts[]` (`{op,fstype,source,target,options?}`) |
+| `update_ha` | HA 구성 반영 — `<prefix>/run/keepalived/ha.json` 기록 후 `cims-ha` 실행 | `ha_json` (`ha_intent` 포함 — 아래) |
+
+### `update_ha` 의 `ha_intent`
+
+`ha_json.ha_intent` 가 agent 의 동작을 결정한다. **파괴적 동작(무장 해제)은 명시적
+의도에서만** 일어난다 — 배포 진행 중의 미정 상태가 해제를 유발하지 않게.
+
+| `ha_intent` | OAM 이 보내는 상황 | agent 동작 |
+|---|---|---|
+| `armed` | AS 그룹 + VIP 렌더됨 | `cims-ha install → config → apply`. 서비스별 실제 무장은 `services.<svc>.enabled` 가 정한다 |
+| `disarmed` | AA 그룹(keepalived 미사용), 그룹 이탈·삭제 | `cims-ha disarm` — CIMS 소유 HA 구성만 제거. **keepalived 패키지는 보존** |
+| `unknown` | AS 인데 VIP 미설정 등 아직 미정 | **no-op** — ha.json 만 기록하고 현 상태 보존 |
+
+필드가 없는 구 OAM 호환: `services` 가 있으면 `armed`, 비어 있으면 `unknown` 으로 본다
+(안전측 — 해제하지 않는다).
 
 > ⚠️ 모듈은 `/opt/cims-agent/modules/<module>/<ver>/` (agent/ 트리 밖) 에 설치된다. `upgrade_agent`/`rollback_agent` 는 `agent/current` 심볼릭만 flip 하므로 모듈 바이너리에 영향이 없다. agent·state·run·sub-script 가 버전 트리 밖에 있어야 하는 영속(durability) 제약은 `docs/design/02_deployment.md` §2 참조.

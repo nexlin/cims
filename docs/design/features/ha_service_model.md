@@ -74,7 +74,7 @@ HA 의 책임은 **모듈/노드 이상 시 서비스를 다른 노드로 넘기
 | | Active/Standby | All-Active |
 |---|---|---|
 | VIP | 있음 (단일/다중 VIP, 한 vrrp_instance) | **없음** |
-| keepalived | 사용 | 미사용 (렌더 시 services 비어 cims-ha uninstall) |
+| keepalived | 사용 | 미사용 (`ha_intent=disarmed` → `cims-ha disarm`; 패키지는 보존) |
 | verdict / eligible / 절체 | **적용** | 미적용 |
 | 승격 grace / 계획 절체 | 적용 | 미적용 |
 | 장애 시 트래픽 분산 | VIP 이관 (keepalived) | **CSP hash ring 제외** (ha_design.md §7) |

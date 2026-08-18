@@ -930,6 +930,27 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         if ha_excluded: entry['ha_excluded'] = ha_excluded
         services[group['name']] = entry
 
+    # ── 의도(intent) — agent 가 파괴적 동작(무장 해제)을 판단하는 **유일한** 근거 ──
+    #   armed    = VIP 가 렌더된 AS 그룹. 서비스별 실제 무장은 services.*.enabled 가 정한다
+    #              (미개시 그룹이면 enabled=false 로 내려가고 agent 는 keepalived 정지 유지)
+    #   disarmed = AA 그룹 — keepalived 의도적 미사용 (ha_service_model.md §3)
+    #   unknown  = AS 인데 VIP 가 아직 설정되지 않음 등 **미정** → agent 는 현 상태 보존
+    #
+    # 옛 계약은 "services 공백 = 해제" 하나였다. 그래서 "AA 라 안 쓴다"(해제)와 "AS 인데
+    # VIP 가 아직 없다"(미정)가 같은 신호가 됐고, 배포 진행 중의 미정 상태가 갓 enroll 한
+    # 노드로 해제를 내려보내 설치 중이던 keepalived 와 경쟁했다 — 패키지 제거는 dpkg 락에
+    # 막혀 실패했는데 파일 삭제만 성공해, 관리평면(cold 모듈)이 어느 노드에서도 뜨지
+    # 못했다(실측 사고). 미지 상태에서는 파괴하지 않는다.
+    if services:
+        ha_intent = "armed"
+    elif group.get('mode') == 'all_active':
+        ha_intent = "disarmed"
+    else:
+        ha_intent = "unknown"
+        logger.log_info(
+            f"[ha-render] group#{group.get('id')}({group.get('name')}) agent#{agent_id} — "
+            f"VIP 미설정으로 services 공백. ha_intent=unknown (현 상태 보존, 해제하지 않음)")
+
     # local_ip / peer_ip 은 VRRP advertise 가 송신되는 interface 의 IP 여야 함.
     # interface=svc 인데 agent.ip_address=mgmt 망이면 split brain 발생.
     local_ip = _iface_ip(agent_row, default_iface) or agent_row.get('ip_address') or "127.0.0.1"
@@ -938,6 +959,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         peer_ip = _iface_ip(peer_row, default_iface) or peer_row.get('ip_address') or ''
 
     return {
+        "ha_intent":     ha_intent,
         "node_name":     agent_row.get('name') or f"agent-{agent_id}",
         "interface":     default_iface,
         "local_ip":      local_ip,
@@ -1078,7 +1100,8 @@ def _enqueue_disarm_for_agent(agent_id: int, config: dict) -> int:
 
     그룹 렌더는 현 멤버 기준이라 이탈한 agent 는 재렌더 대상에서 빠지고, 노드에는
     구 vrid/VIP 로 무장된 keepalived 가 영구 잔존한다 (유령 VIP·vrid 충돌 경로).
-    agent 의 job_update_ha 는 services 가 비면 cims-ha uninstall 로 정리한다.
+    agent 의 job_update_ha 는 ha_intent=disarmed 를 받으면 cims-ha disarm 으로 정리한다
+    (CIMS 소유 HA 구성만 제거 — keepalived 패키지는 base 의존성이라 보존).
     다른 그룹 소속이 남아 있으면 (1 agent = 1 group 이라 정상 흐름에선 없음)
     그 그룹의 정상 재렌더로 대신한다. 큐잉된 job 수 반환."""
     for g in _ha_load_all(config):
@@ -1089,6 +1112,9 @@ def _enqueue_disarm_for_agent(agent_id: int, config: dict) -> int:
     if not a:
         return 0
     ha_json = {
+        # 진짜 해제 신호 — 이 경로에서만 agent 가 CIMS 소유 HA 구성을 제거한다.
+        # (keepalived 패키지는 base 의존성이라 보존 — 제거는 노드 철거에서만.)
+        "ha_intent":     "disarmed",
         "node_name":     a.get('name') or f"agent-{agent_id}",
         "interface":     "",
         "local_ip":      a.get('ip_address') or "",
@@ -1105,6 +1131,10 @@ def _enqueue_disarm_for_agent(agent_id: int, config: dict) -> int:
         "install_path": f"/opt/cims/{a.get('name', 'agent')}",
         "ha_json": ha_json,
     })
+    # 해제는 드물게 일어나야 하는 파괴적 조작이다. 정상 배포 중에 찍히면 그 자체가
+    # 이상 신호이므로 항상 남긴다 (호출부 세 곳 모두 여기를 지난다).
+    logger.log_info(f"[ha-group] agent#{agent_id}({a.get('name')}) disarm 큐잉 "
+                    f"— ha_intent=disarmed (그룹 이탈·삭제)")
     return 1
 
 

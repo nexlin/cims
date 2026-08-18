@@ -230,3 +230,39 @@ per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가
 - 네트워크 FS(nfs/nfs4/cifs)는 `_netdev,nofail` 강제 — 마운트 실패/지연이 부팅을 막지 않음.
 - 시스템 경로(`/etc`,`/usr`,`/var`,`/home` 등) 보호(거부). `mount-del` 은 umount(`-l` fallback)+fstab 라인 제거.
 - agent heartbeat 가 `collect_mounts()`(fstab cims-managed + `mounted` 상태) 보고 → Console MountPanel 표시.
+
+### 11.3 패키지 소유 — 설치는 base, 무장은 구성
+
+호스트 패키지(keepalived, nfs/cifs 클라이언트, iproute2 등 vendor deb)의 **생애주기 소유자는
+`cims-priv` 하나**다. `do_ensure_base_deps` 가 agent 기동마다 전 노드에 균일 설치하고, 노드가
+그 기능을 쓰는지와 무관하게 **제거하지 않는다**. 기능을 안 써서 의존성이 빠진 노드가 생기는
+버그(예: HA 미사용 노드에 `libmnl0` 누락 → `ip` 깨짐)를 원천 차단하기 위함이다.
+
+| 계층 | 주체 | 책임 | 패키지 제거 |
+|---|---|---|---|
+| L1 노드 base | `cims-priv do_ensure_base_deps` (agent 기동마다) | vendor deb 균일 설치 + 무결성 복구 | **안 함** |
+| L2 HA 무장/해제 | `cims-ha apply` / `cims-ha disarm` (`job_update_ha`) | conf·unit·스크립트 스테이징, keepalived 기동/정지 | **안 함** |
+| L3 노드 철거 | `uninstall.sh` → `cims-ha purge` | CIMS 소유 구성 제거 후 패키지 제거 | **여기서만** |
+
+**소유 경계** — `cims-ha` 가 `/etc/keepalived` 에서 만들고 지우는 것은 아래뿐이다
+(`_ha_staged_pairs`/`_ha_owned_paths` 가 단일 정의, apply 와 disarm 이 같은 목록을 쓴다):
+
+```
+/etc/keepalived/keepalived.conf      /etc/keepalived/bin/{cims-health,cims-notify}
+/etc/keepalived/ha.json              /etc/systemd/system/cims@.service
+                                     /etc/sysctl.d/99-cims-ha.conf
+```
+
+배포판 conffile(`keepalived.conf.sample`, `keepalived.config-opts`)은 **불가침**이다. 디렉토리를
+통째로 지우면 패키지는 dpkg 상 `ii` 로 남은 채 그 conffile 만 사라지고, keepalived 가
+`Unable to read build config options file` 로 즉사한다.
+
+**판정** — 멱등 short-circuit 은 dpkg 등록 상태만으로 하지 않는다. `lib/pkgstate.sh` 의
+`_pkg_healthy` = 등록(`install ok installed`) + **소유 파일 무결**(`dpkg -V` 무출력). 등록만 보면
+"설치됐는데 파일이 지워진" 노드를 정상으로 넘겨 복구 기회가 영영 오지 않는다. 파일이 없으면
+재설치가 아니라 `dpkg -i --force-confmiss` 로 **누락 conffile 을 복원**한다 (dpkg 는 기본적으로
+conffile 삭제를 관리자 의도로 보고 되돌리지 않는다).
+
+**직렬화** — dpkg·apt 호출은 예외 없이 `_cims_dpkg`(`/var/lock/cims-dpkg.lock`)를 경유하고,
+`cims-ha` 는 진입부에서 `/var/lock/cims-ha.lock` 을 잡아 서브커맨드 전체를 임계구역으로 만든다.
+설치(L1)와 해제(L2)가 겹치면 한쪽은 락에 막혀 실패하는데 파일 조작만 성공해 반쪽 상태가 된다.

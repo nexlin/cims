@@ -98,12 +98,21 @@ _ha_unmask_if_masked() {
     fi
 }
 
-# ── 패키지 상태 판정 (상태 기반, 멱등) ────────────────────────────────────
-_ha_pkg_status() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null || echo "not-installed"
-}
-_ha_pkg_ok() {
-    [[ "$(_ha_pkg_status "$1")" == "install ok installed" ]]
+# ── 패키지 상태 판정 (lib/pkgstate.sh 위임) ───────────────────────────────
+# _ha_pkg_ok      = dpkg 등록 여부
+# _ha_pkg_healthy = 등록 + **소유 파일 무결**(dpkg -V)
+# 멱등 short-circuit 은 반드시 healthy 로 판정한다 — ok 만 보면 "등록은 됐는데 파일이
+# 지워진" 패키지를 영원히 복구하지 못한다(실측 사고).
+_ha_pkg_status()  { _pkg_status "$1"; }
+_ha_pkg_ok()      { _pkg_ok "$1"; }
+_ha_pkg_healthy() { _pkg_healthy "$1"; }
+
+# 누락 파일 목록을 로그로 흘린다 — 원인 규명에 그대로 쓰인다.
+_ha_pkg_files_missing_report() {
+    local l
+    while IFS= read -r l; do
+        [[ -n $l ]] && warn "  $l"
+    done < <(_pkg_files_missing "$1" | head -10)
 }
 # iF (half-configured / Failed-config) — 재설치가 아니라 configure 완료가 정답.
 _ha_pkg_half_configured() {
@@ -152,25 +161,10 @@ _ha_install_backoff_active() {
 }
 
 # ── cims 내부 dpkg 직렬화 ────────────────────────────────────────────────
-# agent job worker 가 **레인 2개**(module/ha)로 병렬 실행되므로, keepalived 설치(ha 레인)와
-# NFS/CIFS 클라이언트 설치(apply_mounts, module 레인)가 동시에 dpkg 를 잡을 수 있다.
-# dpkg 는 동시 실행이 불가하므로 둘 중 하나가 실패한다 → 우리 쪽 호출끼리는 먼저 줄을 세운다.
-# (외부 unattended-upgrade 와의 경합은 별개로 아래 재시도·backoff 가 담당한다.)
-# dpkg 는 동시 실행 불가라 **락을 잡은 채로** 실행해 줄을 세운다(대기만 하고 놓으면 무의미).
-_CIMS_DPKG_LOCK="/var/lock/cims-dpkg.lock"
-
-_cims_dpkg() {                     # _cims_dpkg <cmd...> — 락 보유 상태로 실행
-    # cims-ha 는 `sudo -n cims-ha` 로 호출되어 이미 root 다. 그때는 sudo 를 덧붙이지
-    # 않는다 — sudoers 허용목록은 cims-priv/cims-ha 두 항목뿐이라 새 sudo 대상을
-    # 늘리지 않는 편이 안전하다(비root 실행은 기존 sudo 경로와 동일하게 동작).
-    local pre=()
-    [[ ${EUID:-$(id -u)} -eq 0 ]] || pre=(sudo)
-    if command -v flock >/dev/null 2>&1; then
-        "${pre[@]}" flock -w 300 "$_CIMS_DPKG_LOCK" "$@"
-    else
-        "${pre[@]}" "$@"
-    fi
-}
+# _cims_dpkg / _pkg_* 는 lib/pkgstate.sh 가 정본 — cims-priv 와 판정·락을 공유한다
+# (한쪽만 고친 규칙이 반대편에서 재발하지 않도록). dpkg·apt 호출은 **예외 없이**
+# _cims_dpkg 를 경유한다. 우회한 호출이 install 레인과 경합해 조용히 실패하고,
+# 그 뒤의 파일 삭제만 성공해 패키지를 반쪽 상태로 만든 사고가 있었다.
 
 # dpkg -i 를 락 경합에 견디게 실행. rc 0 이면 성공, 아니면 마지막 rc.
 #   $@ = deb 파일들
@@ -206,7 +200,9 @@ _ha_vendor_missing_deps() {           # $@ = deb 파일들 — stdout 에 누락
 _ha_dpkg_install() {
     local try rc out
     for ((try = 1; try <= _DPKG_LOCK_TRIES; try++)); do
-        out=$(_cims_dpkg dpkg -i --force-confnew --force-overwrite "$@" 2>&1)
+        # --force-confmiss: 삭제된 conffile 복원 — dpkg 기본 동작은 "관리자가 지운
+        # conffile 은 되돌리지 않는다" 라 재설치만으로는 복구되지 않는다(실측).
+        out=$(_cims_dpkg dpkg -i --force-confmiss --force-confnew --force-overwrite "$@" 2>&1)
         rc=$?
         [[ $rc -eq 0 ]] && { printf '%s\n' "$out" | tail -3; return 0; }
         # 락 판정은 **정확한 문구**로만. 옛 패턴 `lock|frontend|being used by` 는 부분일치라
@@ -245,6 +241,56 @@ _ha_post_install_fixups() {
 # 버전 디렉토리(agent/<ver>/bin) 대신 이 고정 경로를 keepalived.conf 가 참조 —
 # agent 업그레이드(current flip)에 안전 + enable_script_security(root 소유 요구) 통과.
 HA_STAGE_BIN="/etc/keepalived/bin"
+
+# ── CIMS 소유 경로 — apply 가 설치하고 disarm/purge 가 제거하는 **유일한** 목록 ──
+# 소유 경계를 코드로 고정한다. /etc/keepalived 는 keepalived 패키지의 디렉토리이고
+# 그 안에서 CIMS 소유는 keepalived.conf / ha.json / bin/ 뿐이다. 배포판 conffile
+# (keepalived.conf.sample, keepalived.config-opts)은 **불가침** — 과거 uninstall 이
+# `rm -rf /etc/keepalived` 로 디렉토리를 통째로 지워 그 conffile 을 날렸고, 패키지는
+# dpkg 상 `ii` 로 남아 keepalived 가 "Unable to read build config options file" 로
+# 기동 불가가 됐다(실측 사고 — 관리평면 전면 정지).
+#
+# _ha_staged_pairs 가 정본이고 _ha_owned_paths 는 그 목적지에서 파생된다 —
+# apply(설치)와 disarm(제거)의 대칭을 사람 기억이 아니라 구조로 보장한다.
+_ha_staged_pairs() {               # <원본>:<설치 경로>
+    printf '%s\n' \
+        "$HA_OUT/keepalived.conf:/etc/keepalived/keepalived.conf" \
+        "$HA_JSON:/etc/keepalived/ha.json" \
+        "$SCRIPT_DIR/cims-health:$HA_STAGE_BIN/cims-health" \
+        "$SCRIPT_DIR/cims-notify:$HA_STAGE_BIN/cims-notify" \
+        "$HA_OUT/cims@.service:/etc/systemd/system/cims@.service"
+}
+
+_ha_owned_paths() {
+    _ha_staged_pairs | cut -d: -f2
+    # 스테이징 쌍이 아니지만 apply 가 만드는 파일 — 대칭을 위해 함께 나열.
+    echo "/etc/sysctl.d/99-cims-ha.conf"
+}
+
+# CIMS 소유 경로만 제거. 패키지 소유 파일·디렉토리는 절대 건드리지 않는다.
+_ha_remove_owned() {
+    local p
+    while IFS= read -r p; do
+        [[ -e $p || -L $p ]] || continue
+        sudo rm -f "$p" 2>/dev/null || true
+    done < <(_ha_owned_paths)
+    # bin/ 은 우리가 만든 디렉토리 — 비었을 때만 회수. /etc/keepalived 는 패키지 소유라
+    # 남는 것이 정상이다.
+    sudo rmdir "$HA_STAGE_BIN" 2>/dev/null || true
+}
+
+# 기동 실패 진단 — job 결과로 그대로 올라가 콘솔에서 원인이 보이게 한다.
+_ha_report_keepalived_failure() {
+    err "  unit: active=$(systemctl is-active keepalived 2>&1) enabled=$(systemctl is-enabled keepalived 2>&1)"
+    if ! _ha_pkg_healthy keepalived; then
+        err "  패키지 소유 파일 누락 (dpkg -V keepalived):"
+        _ha_pkg_files_missing_report keepalived
+    fi
+    local l
+    while IFS= read -r l; do
+        [[ -n $l ]] && err "  $l"
+    done < <(sudo journalctl -u keepalived -n 15 --no-pager 2>/dev/null | tail -15)
+}
 
 # 단일 keepalived.conf.tpl + ha.json.services 반복 → out/keepalived.conf
 _ha_render_keepalived() {
@@ -444,19 +490,48 @@ cmd_ha() {
 
     case "$sub" in
         install)
-            # ── 멱등 설치 (상태 기반 판정) ─────────────────────────────────────
+            # ── 멱등 설치 (상태 + 무결성 판정) ─────────────────────────────────
             # 판정을 `keepalived -v` **실행 성공**으로 하면 안 된다: 공유 라이브러리가 갱신되는
             # 순간에 실패해 "강제 재설치" 로 넘어가고, 그 재설치가 락 경합에 걸려 매 회차
             # 90초를 태우는 루프가 된다(실측 사고). 표준(구성관리 도구의 package 리소스)대로
             # **패키지 관리자 상태**로 판정하고, 실행 가능 여부는 별도 헬스체크로 분리한다.
+            # 다만 등록 상태만으로는 부족하다 — 소유 파일이 지워진 패키지도 `ii` 로 남는다.
+            # dpkg -V 를 함께 봐서 "등록됐지만 파일 없음" 을 **복구 대상**으로 분류한다.
             local vendor_dir="$SCRIPT_DIR/../vendor/keepalived"
             local base_dir="$SCRIPT_DIR/../vendor/base"
             _ha_policy_rc_stale_clear   # 구버전(policy-rc.d 방식)이 남긴 전역 차단 파일 회수
-            if _ha_pkg_ok keepalived; then
-                ok "keepalived 설치 정상 (dpkg: install ok installed)"
+            if _ha_pkg_healthy keepalived; then
+                ok "keepalived 설치 정상 (dpkg 등록 + 소유 파일 무결)"
                 _ha_install_fail_clear
                 keepalived -v >/dev/null 2>&1 \
                     || warn "패키지는 정상인데 실행 실패 — 의존성 확인 필요(설치 재시도는 하지 않음)"
+            elif _ha_pkg_ok keepalived; then
+                # 등록은 됐는데 소유 파일이 없다. dpkg 상태만 보던 옛 판정은
+                # 이걸 "정상"으로 보고 재설치를 skip 했고, keepalived 는 영영 기동하지
+                # 못했다(실측 사고). 정답은 재설치가 아니라 **누락 파일 복원**이다.
+                warn "keepalived 등록됐으나 소유 파일 누락 — 복구 시도"
+                _ha_pkg_files_missing_report keepalived
+                # 복구도 dpkg unpack 이라 postinst 가 데몬을 켠다. conf 가 아직 없으면
+                # systemd 90초 타임아웃 → configure 실패 → iF 로 갇힌다. 설치와 동일하게
+                # mask 로 감싼다.
+                _ha_mask_on
+                if ls "$vendor_dir"/*.deb >/dev/null 2>&1 \
+                   && _pkg_repair_from_deb keepalived "$vendor_dir"/*.deb; then
+                    _ha_mask_off
+                    _ha_install_fail_clear
+                    ok "keepalived 소유 파일 복구 완료 (vendor deb, --force-confmiss)"
+                elif _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y --reinstall \
+                         -o Dpkg::Options::=--force-confmiss install keepalived >/dev/null 2>&1 \
+                     && _ha_pkg_healthy keepalived; then
+                    _ha_mask_off
+                    _ha_install_fail_clear
+                    ok "keepalived 소유 파일 복구 완료 (apt --reinstall)"
+                else
+                    _ha_mask_off
+                    err "keepalived 소유 파일 복구 실패 — 수동 확인 필요: dpkg -V keepalived"
+                    _ha_install_fail_mark
+                    return 1
+                fi
             elif _ha_install_backoff_active; then
                 # 반복 실패 억제 — systemd StartLimit / k8s CrashLoopBackOff 계열.
                 # 조용히 성공으로 넘기지 않는다(그러면 keepalived 없이 VIP 적용 성공으로
@@ -543,7 +618,8 @@ cmd_ha() {
                     ok "keepalived 설치 완료 (vendor): $(keepalived -v 2>&1 | head -1)"
                 else
                     info "keepalived 설치 (apt fallback) — sudo + 인터넷 필요"
-                    sudo apt-get -o DPkg::Lock::Timeout=100 update || warn "apt-get update 실패 — 캐시로 진행"
+                    _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 update \
+                        || warn "apt-get update 실패 — 캐시로 진행"
                     if ! _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y install keepalived; then
                         err "apt-get install keepalived 실패"
                         _ha_mask_off
@@ -603,14 +679,10 @@ cmd_ha() {
             # 무접촉. 배포/서비스(start/stop) 이벤트마다 재렌더가 전파되므로 apply 가
             # 멱등이어야 잦은 호출이 VRRP 상태(MASTER/VIP)를 흔들지 않는다.
             local _hachanged=0 _pair _src _dst
-            for _pair in "$out:/etc/keepalived/keepalived.conf" \
-                         "$HA_JSON:/etc/keepalived/ha.json" \
-                         "$SCRIPT_DIR/cims-health:$HA_STAGE_BIN/cims-health" \
-                         "$SCRIPT_DIR/cims-notify:$HA_STAGE_BIN/cims-notify" \
-                         "$unit:/etc/systemd/system/cims@.service"; do
+            while IFS= read -r _pair; do
                 _src="${_pair%%:*}"; _dst="${_pair#*:}"
                 cmp -s "$_src" "$_dst" 2>/dev/null || { _hachanged=1; break; }
-            done
+            done < <(_ha_staged_pairs)
 
             # health/notify 스크립트 + ha.json 스테이징 — root:root 고정 경로.
             #   · conf 의 script/notify 가 ${HA_STAGE_BIN} 을 참조 (버전 트리 비의존)
@@ -654,18 +726,51 @@ cmd_ha() {
             elif [[ $_hachanged -eq 0 ]] && systemctl is-active --quiet keepalived; then
                 ok "변경 없음 — keepalived 무접촉 (이미 적용된 구성)"
             elif systemctl is-active --quiet keepalived; then
-                sudo systemctl reload keepalived
+                sudo systemctl reload keepalived \
+                    || warn "reload 실패 — restart 로 승격하지 않는다(무의미한 절체 유발). 아래 사후검증에 맡긴다"
                 ok "keepalived reload — 구성 변경 반영 (VRRP 상태 유지, cold_modules 절체는 cims-notify → cims-svc)"
             else
-                sudo systemctl start keepalived
+                if ! sudo systemctl start keepalived; then
+                    err "keepalived 기동 실패 — VIP 주인이 없으면 cold 모듈(관리평면 포함)이 어느 노드에서도 기동하지 않습니다"
+                    _ha_report_keepalived_failure
+                    return 1
+                fi
                 ok "keepalived 기동 + ip_nonlocal_bind 적용 완료 (cold_modules 절체는 cims-notify → cims-svc)"
+            fi
+            # ── 사후검증 ─────────────────────────────────────────────────
+            # 무장 렌더(vrrp_instance 존재)인데 데몬이 active 가 아니면 apply 는 실패다.
+            # 옛 동작은 기동 명령 이후를 확인하지 않아, 기동 직후 죽는 경우(패키지 파손 등)를
+            # 성공으로 보고했다 — 콘솔은 "적용 완료", 실제로는 관리평면 전면 정지(실측).
+            if grep -q '^vrrp_instance' /etc/keepalived/keepalived.conf 2>/dev/null \
+               && ! systemctl is-active --quiet keepalived; then
+                err "apply 사후검증 실패 — vrrp_instance 가 렌더됐는데 keepalived 가 active 아님"
+                _ha_report_keepalived_failure
+                return 1
             fi
             ;;
         start)  sudo systemctl start  keepalived ;;
         stop)   sudo systemctl stop   keepalived ;;
         status) systemctl status keepalived --no-pager || true ;;
-        uninstall)
-            # agent uninstall 대칭 — install 이 시스템에 깐 것을 모두 제거.
+        disarm)
+            # ── L2 무장 해제 — 패키지는 남기고 CIMS 소유 구성만 제거 ─────────────
+            # HA 그룹에서 빠진 노드·그룹 삭제 시 호출(job_update_ha 의 ha_intent=disarmed).
+            # keepalived 는 **base 의존성**이라 전 노드에 균일 설치돼 있는 것이 정상
+            # 상태이고(cims-priv base-deps), 여기서 패키지를 건드리면 설치 레인과의 경합·
+            # conffile 유실로 이어진다. 패키지 제거는 노드 철거(`cims-ha purge`)에서만 한다.
+            info "HA 무장 해제 — keepalived 정지 + CIMS 소유 구성 제거 (패키지는 보존)"
+            _ha_prune_stale_instances        # 인자 없음 → 모든 cims@ instance disable
+            sudo systemctl stop keepalived 2>/dev/null || true
+            sudo systemctl disable keepalived 2>/dev/null || true
+            _ha_remove_owned
+            sudo systemctl daemon-reload 2>/dev/null || true
+            rm -rf "$HA_OUT" 2>/dev/null || true
+            ok "HA 무장 해제 완료 (keepalived 패키지·배포판 conffile 보존)"
+            ;;
+        purge|uninstall)
+            # ── L3 노드 철거 — install 대칭. uninstall.sh 에서만 호출한다 ─────────
+            # 순서가 핵심이다: **CIMS 소유 파일을 먼저 지우고 그 다음 패키지를 제거**한다.
+            # 반대로 하던 옛 동작은, 패키지 제거가 실패해도 뒤이은 `rm -rf /etc/keepalived`
+            # 가 실행돼 배포판 conffile 만 날아가고 패키지는 `ii` 로 남았다(실측 사고).
             # 정책: vendor offline 으로 깔린 keepalived + deps 는 apt repo 와 버전 불일치라
             #       apt-get purge 가 broken deps 만든다 (libsnmp40t64 vendor only 등).
             #       → vendor *.deb 의 package list 추출 후 dpkg -P 로 직접 제거 (apt 안 거침).
@@ -690,38 +795,51 @@ cmd_ha() {
             # vendor list 없으면 keepalived 만 — apt 설치 시나리오 fallback.
             [[ ${#pkgs[@]} -eq 0 ]] && pkgs=(keepalived)
 
-            # systemd HA instance enable 심볼릭링크 전체 disable + template 제거 (apply 대칭).
+            # ① 우리 것 먼저 — systemd instance/template + CIMS 소유 파일.
             _ha_prune_stale_instances        # 인자 없음 → 모든 cims@ instance disable
-            sudo rm -f /etc/systemd/system/cims@.service 2>/dev/null || true
-            sudo systemctl daemon-reload 2>/dev/null || true
-
-            if ! command -v keepalived >/dev/null 2>&1 && ! dpkg -s "${pkgs[0]}" >/dev/null 2>&1; then
-                info "keepalived 미설치 — skip"
-                sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
-                return 0
-            fi
             info "keepalived service stop"
             sudo systemctl stop keepalived 2>/dev/null || true
             sudo systemctl disable keepalived 2>/dev/null || true
+            _ha_remove_owned
+            sudo systemctl daemon-reload 2>/dev/null || true
+            rm -rf "$HA_OUT" 2>/dev/null || true
 
+            if ! command -v keepalived >/dev/null 2>&1 && ! dpkg -s "${pkgs[0]}" >/dev/null 2>&1; then
+                ok "keepalived 미설치 — CIMS 소유 HA 구성만 제거하고 종료"
+                return 0
+            fi
+
+            # ② 패키지 제거 — 반드시 락을 경유한다. 우회하면 설치 레인과 경합해 조용히
+            #    실패하고, 호출부는 제거된 줄 안다.
             info "dpkg -P (vendor packages: ${pkgs[*]})"
             # --force-all: deps chain 무시하고 강제 제거. broken state 의 host 도 정리 가능.
-            if sudo dpkg -P --force-all "${pkgs[@]}" 2>&1 | tail -5; then
+            if _cims_dpkg dpkg -P --force-all "${pkgs[@]}" >/tmp/cims-ha-purge.log 2>&1; then
                 ok "vendor packages purged via dpkg -P"
             else
+                tail -5 /tmp/cims-ha-purge.log 2>/dev/null || true
                 warn "dpkg -P 일부 실패 — apt-get fallback (마지막 수단)"
-                sudo apt-get -y --fix-broken install 2>/dev/null || true
-                sudo apt-get -y purge "${pkgs[@]}" 2>/dev/null || true
+                _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y --fix-broken install >/dev/null 2>&1 || true
+                _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y purge "${pkgs[@]}" >/dev/null 2>&1 || true
             fi
-            sudo rm -rf /etc/keepalived "$HA_DIR/out" 2>/dev/null || true
-            ok "keepalived + vendor deps + /etc/keepalived + out/ 제거"
+            # ③ 제거 검증 — 남아 있으면 실패로 보고한다. 조용히 성공으로 넘기면 "제거됐다"는
+            #    오해 위에서 재설치·재배포가 엉킨다.
+            if _ha_pkg_ok keepalived; then
+                err "keepalived 패키지가 남아 있음 ($(_ha_pkg_status keepalived)) — 수동 정리 필요"
+                err "  sudo dpkg -P --force-all ${pkgs[*]}"
+                return 1
+            fi
+            # 패키지가 사라지면 /etc/keepalived 는 dpkg 가 정리한다. 빈 디렉토리만 회수.
+            sudo rmdir /etc/keepalived 2>/dev/null || true
+            ok "keepalived + vendor deps + CIMS 소유 HA 구성 제거"
             ;;
         help|*)
             cat <<EOF
 사용법: cims-ha <subcommand>
 
-  install         keepalived 패키지 설치 (vendor deb 우선, apt fallback)
-  uninstall       keepalived + deps + /etc/keepalived + cims@ instance/template 제거 (install 대칭)
+  install         keepalived 패키지 설치·무결성 복구 (vendor deb 우선, apt fallback)
+  disarm          HA 무장 해제 — keepalived 정지 + CIMS 소유 구성만 제거 (패키지 보존)
+  purge           노드 철거 — CIMS 소유 구성 제거 후 keepalived + vendor deps 제거
+                  (install 대칭. uninstall 은 purge 의 별칭)
   config          ha.json + 템플릿 → out/{keepalived.conf, cims@.service} 생성 (dry-run)
   check           keepalived -t syntax 검증
   apply           out/* → /etc/keepalived/ + /etc/systemd/system/ + daemon-reload +

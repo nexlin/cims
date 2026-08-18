@@ -5,4 +5,5 @@
 - S1-FRONTEND-TYPECHECK  : tsc -b --noEmit
 - S1-CPP-FORMAT          : clang-format --dry-run --Werror (csp/.clang-format)
 - S1-UNIT-VERIFY-LIB     : python3 -m unittest tests.test_verify_lib
+- S1-UNIT-HA-INTENT      : python3 -m unittest tests.test_ha_intent
 """

@@ -748,6 +748,28 @@ TCP 접속을 시도한다(크로스노드 시각 비교 없음, §15). 판정 �
 승격되면 `role=all` 로 떠서 **게이트웨이 프록시를 아예 마운트하지 않아**(`oam_app.py`:
 `role=all` 은 서비스 핸들러 in-process) 승격 직후 서비스 API 가 전면 장애났다.
 
+### 6.7 무장/해제 의도 — 미정에서는 파괴하지 않는다
+
+OAM 이 멤버에게 내리는 `update_ha` 는 `ha_json.ha_intent` 로 의도를 **명시**한다. agent 는 이
+값으로만 파괴적 동작을 판단한다.
+
+| `ha_intent` | 렌더 조건 (`_render_ha_for_agent`) | agent 동작 |
+|---|---|---|
+| `armed` | AS 그룹 + VIP 렌더됨 (`services` 있음) | `cims-ha install → config → apply` |
+| `disarmed` | AA 그룹(§3 — keepalived 미사용), 또는 `_enqueue_disarm_for_agent`(그룹 이탈·삭제) | `cims-ha disarm` |
+| `unknown` | AS 인데 VIP 미설정 등 미정 | **no-op** (현 상태 보존) |
+
+옛 계약은 "`services` 공백 = 해제" 하나였다. 그래서 **"AA 라 안 쓴다"(해제)와 "AS 인데 VIP 가
+아직 없다"(미정)가 같은 신호**가 됐고, 배포 진행 중의 미정 상태가 갓 enroll 한 노드로 해제를
+내려보냈다. 그 해제가 같은 배포의 keepalived 설치와 겹쳐, 패키지 제거는 dpkg 락에 막혀 실패한
+채 파일 삭제만 성공했고 — 패키지는 `ii` 인데 conffile 이 없는 상태가 되어 keepalived 가 기동
+불가, Control 그룹에 MASTER 가 없어 cold 모듈인 `oam`/`oam-svc`/`csc` 가 어느 노드에서도 뜨지
+못했다. 미지 상태에서는 아무것도 하지 않는 것이 정답이다.
+
+`disarmed` 도 **keepalived 패키지는 남긴다** — 패키지는 전 노드 공통 base 의존성이고
+(`modules/agent.md` §11.3), 제거는 노드 철거(`cims-ha purge`)에서만 한다. 해제 큐잉은 정상
+배포에서 나오면 안 되는 신호라 OAM 이 항상 로그를 남긴다(`[ha-group] agent#N … disarm 큐잉`).
+
 ## 7. 계획 절체 — 신 Active 가 이어받는다 (D7)
 
 관리평면의 계획 절체는 **source 가 자기 자신을 정지시키는** 유일한 경우다. 자동 장애 절체는

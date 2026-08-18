@@ -671,9 +671,12 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
    재렌더를 태운다 (그룹 구성 → 설치 → 서비스 시작 순서 전체에서 자동 추종;
    apply 가 멱등이라 렌더 결과가 같으면 keepalived 무접촉).
    **그룹 이탈 disarm** — 그룹 삭제·멤버 제거(교체 포함)로 그룹에서 빠진 agent 에는
-   빈 `services` 의 ha.json 이 푸시되고(`_enqueue_disarm_for_agent`), agent 가
-   `cims-ha uninstall` 로 keepalived 를 해제한다 — 이탈 노드에 구 vrid/VIP 무장이
-   잔존하지 않는다 (유령 VIP 차단).
+   `ha_intent="disarmed"` 인 ha.json 이 푸시되고(`_enqueue_disarm_for_agent`), agent 가
+   `cims-ha disarm` 으로 무장을 해제한다 — 이탈 노드에 구 vrid/VIP 무장이 잔존하지
+   않는다 (유령 VIP 차단). 해제는 **CIMS 소유 구성만** 지우고 keepalived 패키지는
+   남긴다 (패키지는 전 노드 공통 base 의존성 — `modules/agent.md` §11.3).
+   파괴는 `ha_intent` 가 명시적으로 `disarmed` 일 때만 일어나며, 미정(`unknown`)이면
+   agent 는 아무것도 하지 않는다 (`api/agent_api.md` §update_ha).
    **개시 국면 선착 방지** — AS 그룹이 무장 렌더로 전환되는데 아직 아무 멤버도
    VIP 를 보유하지 않았으면(최초 개시·전면 재기동), **운영자가 start 한(record
    running) 멤버**의 update_ha 를 먼저 큐잉하고 나머지 멤버는 job `not_before`
@@ -687,7 +690,9 @@ install 정책 (csc/src/handlers/agents.py:_create_deployment):
    큐잉 (params.ha_json — install_path 는 구 agent 호환 잔재, 신 agent 는 무시)
 3. cims_agent heartbeat 시 job 회수 → `job_update_ha`:
    - `<prefix>/run/keepalived/ha.json` 갱신 (버전 트리 밖 — agent 업그레이드 무관)
-   - `cims-ha --ha-dir <그 경로> install + config + apply` 자동 실행 (sudo 권한 필요)
+   - `ha_intent` 에 따라 분기 (sudo 권한 필요):
+     `armed` → `cims-ha --ha-dir <그 경로> install + config + apply` /
+     `disarmed` → `cims-ha disarm` / `unknown` → no-op
      · 템플릿은 실행 중인 cims-ha 번들(`agent/current/keepalived/`)에서 해석
      · apply 가 cims-health/cims-notify + ha.json 을 `/etc/keepalived/{bin/,}` 에
        **root:root 로 스테이징** — keepalived.conf 는 이 고정 경로만 참조.

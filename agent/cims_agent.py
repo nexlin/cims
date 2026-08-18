@@ -1876,7 +1876,10 @@ def job_update_ha(params: dict) -> tuple:
         이 우연히 flat 레이아웃의 <prefix>/agent/keepalived/ 에 떨어져 동작했으나,
         agent 버전화 이후 그 위치는 템플릿 없는 잔재 디렉토리라 cims-ha config 가
         실패했다 — keepalived 갱신 불능의 원인.)
-      - ha_json: dict — OAM 이 ha_groups + members 로부터 render 한 내용
+      - ha_json: dict — OAM 이 ha_groups + members 로부터 render 한 내용.
+        `ha_intent` 로 의도를 명시한다: "armed"(무장) / "disarmed"(해제). 필드가 없는
+        구 OAM 은 services 유무로 추정하되 **공백은 unknown 으로 보고 아무것도 하지
+        않는다** (배포 중간 상태가 파괴를 트리거하지 못하게).
 
     ha.json 은 버전 트리 밖 <prefix>/run/keepalived/ 에 기록 (agent 업그레이드
     무관 영속 — managed_ips/supervised 와 동일 위치 규칙). 템플릿은 cims-ha 가
@@ -1905,22 +1908,40 @@ def job_update_ha(params: dict) -> tuple:
     except Exception as e:
         return 2, "", f"write ha.json failed: {e}"
 
-    # services 비면 keepalived 의도적 미사용 (all_active + VIP null + vip_bindings=[]) —
-    # 기존 설치본 있으면 cims-ha uninstall 으로 정리 (health-check 가 inactive issue 안 잡도록).
+    # ── 의도(intent) 판정 — 미지(unknown)와 해제(disarmed)를 구분한다 ──────────
+    #   armed    → install → config → apply
+    #   disarmed → cims-ha disarm (CIMS 소유 구성만 제거, keepalived 패키지는 보존)
+    #   unknown  → **아무것도 하지 않는다** (ha.json 만 기록하고 현 상태 보존)
+    # 옛 동작은 services 공백 하나로 "해제 의도" 를 단정했다. 그런데 배포가 진행 중인
+    # 노드의 공백은 "아직 정해지지 않음" 이지 "쓰지 않음" 이 아니다. 그 오독 탓에 갓
+    # enroll 한 노드로 해제가 내려가 같은 배포가 설치 중이던 keepalived 와 경쟁했고,
+    # 패키지 제거는 락에 막혀 실패했는데 파일 삭제만 성공해 관리평면이 어느 노드에서도
+    # 뜨지 못했다(실측 사고). 파괴는 **명시적 의도**에서만 수행한다.
     services = ha_json.get("services") or {}
-    if not services:
+    intent = str(ha_json.get("ha_intent") or "").strip().lower()
+    if intent not in ("armed", "disarmed"):
+        # 구 OAM 호환 — 필드가 없으면 services 유무로 추정하되 공백은 unknown(안전측).
+        intent = "armed" if services else "unknown"
+
+    if intent == "unknown":
+        return 0, "\n".join([
+            f"ha.json updated: {ha_path}",
+            "ha_intent 미지 (services 공백 + 명시 해제 신호 없음) — 현 상태 보존, no-op",
+        ]), ""
+
+    if intent == "disarmed":
         msgs = [f"ha.json updated: {ha_path}",
-                "ha.json.services empty — keepalived intentionally disabled"]
+                "ha_intent=disarmed — HA 무장 해제 (keepalived 패키지는 보존)"]
         cims_ha = _resolve_cims_ha()
         ha_dir_local = os.path.dirname(ha_path)
         if cims_ha:
             try:
-                r = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir_local, "uninstall"],
+                r = subprocess.run(["sudo", "-n", cims_ha, "--ha-dir", ha_dir_local, "disarm"],
                                     capture_output=True, text=True, timeout=120)
-                msgs.append(f"cims-ha uninstall rc={r.returncode}"
+                msgs.append(f"cims-ha disarm rc={r.returncode}"
                            + (f" err={(r.stderr or r.stdout).strip()[-200:]}" if r.returncode != 0 else ""))
             except Exception as e:
-                msgs.append(f"cims-ha uninstall exception: {e}")
+                msgs.append(f"cims-ha disarm exception: {e}")
         return 0, "\n".join(msgs), ""
 
     # cims-ha install + config + apply — sudoers 화이트리스트의 dev dist canonical 사용
@@ -1972,7 +1993,9 @@ def job_update_ha(params: dict) -> tuple:
                                 capture_output=True, text=True, timeout=60)
             if r2.returncode != 0:
                 err_txt = (r2.stderr or r2.stdout).strip()
-                msgs.append(f"cims-ha apply rc={r2.returncode} err={err_txt[-200:]}")
+                # apply 실패는 keepalived 기동 실패 진단(unit 상태·dpkg -V·journal tail)을
+                # 함께 싣는다 — 200자로 자르면 정작 원인 줄이 잘려나간다(실측).
+                msgs.append(f"cims-ha apply rc={r2.returncode} err={err_txt[-1200:]}")
                 # sudo 미등록(dev)만 graceful — 그 외 rc!=0 은 실제 적용 실패.
                 if "password is required" not in err_txt and "sudo:" not in err_txt:
                     failed = f"cims-ha apply rc={r2.returncode}"

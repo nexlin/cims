@@ -349,7 +349,7 @@ echo "이 작업은 CIMS agent (name='$AGENT_NAME') 를 완전히 제거합니�
 echo "  • 실행 중인 agent process 종료 + user systemd unit 제거"
 echo "  • state/, sub-scripts (init/update/uninstall/setup-sudoers), agent/ 삭제"
 echo "  • /etc/sudoers.d/cims-priv 제거 (sudo 비번 1회)"
-echo "  • cims-ha install 이 깐 keepalived 일괄 제거 (NOPASSWD cims-ha)"
+echo "  • keepalived + vendor deps 제거 (cims-ha purge)"
 if [[ \$keep_modules -ne 1 ]]; then
     echo "  • agent 가 띄운 모듈 (csp/cmp/cwrtc/csc/console/phone/cspsim) 도 정지 + modules/ 삭제"
 fi
@@ -429,11 +429,13 @@ if pgrep -f "cims_agent.py.*--name $AGENT_NAME" >/dev/null 2>&1; then
     kill -0 "\$PID" 2>/dev/null && kill -9 "\$PID" 2>/dev/null || true
 fi
 
-# 3. cims-ha uninstall — install 대칭 (keepalived + autoremove deps purge). (root 직접)
+# 3. cims-ha purge — install 대칭 (CIMS 소유 HA 구성 제거 후 keepalived + deps purge).
+#    노드 철거는 패키지까지 지우는 **유일한** 경로다 — HA 운영 중의 무장 해제(disarm)는
+#    패키지를 보존한다(설치 레인과 경합해 conffile 이 유실된 사고 이후 분리).
 if [[ -x ./agent/current/bin/cims-ha ]] && command -v keepalived >/dev/null 2>&1; then
-    echo "→ cims-ha uninstall (keepalived + deps purge)"
-    ./agent/current/bin/cims-ha uninstall 2>&1 || \\
-        echo "  ⚠ cims-ha uninstall 실패 — 수동 정리: apt-get -y purge keepalived && apt-get -y autoremove --purge"
+    echo "→ cims-ha purge (keepalived + deps 제거)"
+    ./agent/current/bin/cims-ha purge 2>&1 || \\
+        echo "  ⚠ cims-ha purge 실패 — 수동 정리: apt-get -y purge keepalived && apt-get -y autoremove --purge"
 fi
 
 # 4. sudoers 제거 + linger 해제 안내 (자동 해제는 안 함 — 다른 user service 가능성). (root 직접)

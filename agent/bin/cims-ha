@@ -2,14 +2,33 @@
 # agent/bin/cims-ha — CIMS HA (keepalived + systemd unit) 운영 도구
 #
 # 사용법:
-#   cims-ha install         keepalived 패키지 설치 (vendor deb 우선, apt fallback)
-#   cims-ha uninstall       keepalived + autoremove deps + /etc/keepalived 제거
+#   cims-ha install         keepalived 패키지 설치·무결성 복구 (vendor deb 우선, apt fallback)
+#   cims-ha disarm          HA 무장 해제 — CIMS 소유 구성만 제거 (패키지 보존)
+#   cims-ha purge           노드 철거 — 구성 제거 + keepalived/vendor deps 제거 (uninstall 별칭)
 #   cims-ha config          ha.json + 템플릿 → out/{keepalived.conf, cims@.service}
 #   cims-ha check           keepalived -t syntax 검증
 #   cims-ha apply           /etc/keepalived/ + /etc/systemd/system/ 배포
 #   cims-ha start|stop|status   systemctl 래퍼
 
 set -euo pipefail
+
+# ── 전역 상호배제 ─────────────────────────────────────────────────────────
+# cims-ha 는 dpkg·systemd 유닛·/etc/keepalived 를 동시에 만진다. 호출 주체가 여럿이라
+# (HA 레인 job, uninstall.sh, 운영자 수동 실행) 겹치면 서로의 중간 상태를 밟는다.
+# 실측 사고: 설치가 진행 중일 때 다른 회차의 제거가 끼어들어, 패키지 제거는 락에 막혀
+# 실패했는데 파일 삭제만 성공해 keepalived 가 기동 불가가 됐다.
+# 자기 자신을 락 안에서 재실행한다 — 서브커맨드 전체가 임계구역이 된다.
+_CIMS_HA_LOCK="/var/lock/cims-ha.lock"
+if [[ -z "${CIMS_HA_LOCKED:-}" ]] && command -v flock >/dev/null 2>&1; then
+    export CIMS_HA_LOCKED=1
+    _lock_rc=0
+    # -E 75: 락 획득 실패를 서브커맨드 실패와 구분 (그대로 두면 rc=1 과 섞인다).
+    flock -w 300 -E 75 "$_CIMS_HA_LOCK" "$0" "$@" || _lock_rc=$?
+    if [[ $_lock_rc -eq 75 ]]; then
+        echo "[ERROR] cims-ha 락 획득 실패 (300s) — 다른 cims-ha 가 실행 중" >&2
+    fi
+    exit $_lock_rc
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -43,6 +62,8 @@ warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()     { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 header()  { echo -e "\n${BOLD}$*${NC}"; }
 
+# 패키지 판정·dpkg 직렬화는 cims-priv 와 공유 (lib/pkgstate.sh 가 정본).
+source "$SCRIPT_DIR/../lib/pkgstate.sh"
 source "$SCRIPT_DIR/../lib/ha.sh"
 
 cmd_ha "$@"
