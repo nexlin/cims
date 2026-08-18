@@ -130,8 +130,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [alarm_standardization.md](docs/design/alarm_standardization.md) — 알람 표준화
 - [alarm_self_reporting.md](docs/design/alarm_self_reporting.md) — 모듈 알람/이벤트 자기보고(FM push) 경로
 - [alarm_pipeline.md](docs/design/alarm_pipeline.md) — 알람/이벤트 파이프라인 — 발생→전달→수집/보관→가시화 전 구간 절차·연동 계약 정본
-- [alarm_module_catalog.md](docs/design/alarm_module_catalog.md) — 모듈 자기감지(L2) 알람/이벤트 카탈로그 설명서 (목록 정본 = [alarm_module_catalog.csv](docs/design/alarm_module_catalog.csv))
-- [alarm_function_catalog.md](docs/design/alarm_function_catalog.md) — 기능(CSCF/IBCF/TAS/PTT-AS/MRF/CSC + 관리평면) 관점 필요 알람/이벤트 **요구 카탈로그** — 구현 무관 정본·정의 코드 채번 정본 (목록 = [alarm_function_catalog.csv](docs/design/alarm_function_catalog.csv))
+- [alarm_catalog.md](docs/design/alarm_catalog.md) — 알람/이벤트 카탈로그 설명서 — 정의 행(기능 관점 **요구**·정의 코드 채번 정본) + 감지 행(모듈 자기감지 **구현 추적**)의 단일 목록 (목록 정본 = [alarm_catalog.csv](docs/design/alarm_catalog.csv))
 - [vibcf_pod_alarms.md](docs/design/vibcf_pod_alarms.md) — 사내 vIBCF/TrGW POD 알람/Fault 카탈로그 변환 참고자료 (CIMS 대조 = alarm_standardization §7.2)
 - [runtime_store_design.md](docs/design/runtime_store_design.md) / [runtime_store_v2_module_namespacing.md](docs/design/runtime_store_v2_module_namespacing.md) — 런타임 스토어
 

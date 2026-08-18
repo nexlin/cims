@@ -337,7 +337,7 @@ class FmIngest:
 
     def _check_stale(self):
         """sync 연속 누락 노드의 자기보고 활성 알람을 판정 불가로 종결 (표준화 §3.4(d)).
-        프로세스 생존은 L1(agent process_down)이, 응답성은 L3(service_unresponsive)가
+        프로세스 생존은 L1(agent process_down)이, 응답성은 L3(process_unresponsive)가
         별도 판정한다 (표준화 §3.4(b))."""
         limit = self.sync_sec * _STALE_SYNC_MISSES
         now = time.time()

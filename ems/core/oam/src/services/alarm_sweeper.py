@@ -1,6 +1,6 @@
 """알람 sweeper 공용 코어 (알람 표준화 X.733/32.111 — alarm_standardization.md).
 
-소유권(oam_base_service_split §4): 서비스 계열 규칙(service_unresponsive(csp/cmp probe)/
+소유권(oam_base_service_split §4): 서비스 계열 규칙(process_unresponsive(csp/cmp probe)/
 db_down/rtp_pct_gte, scope != 'agent')의 평가·발화는 **oam-svc** 소유 — CSP/CMP probe·DB
 접속이 서비스 관측 설정(oam-svc config)과 함께 움직인다. 단일 프로세스(--role all)에서는
 oam_app 이 같은 코어를 호출해 동작 무변경. agent 계열(disk_high/module_down — 프로세스
@@ -276,7 +276,7 @@ def mgmt_mo_root(config) -> str:
 
 def eval_service_rule(rule: dict, ctx: dict, rtp_threshold: int = 80) -> bool:
     chk = rule.get('check')
-    if chk == 'service_unresponsive':
+    if chk == 'process_unresponsive':
         # 원격 probe(STATS) 무응답 — 프로세스 생존(process_down, agent L1)과 별개 조건.
         return not bool(ctx.get(rule.get('target')))
     if chk == 'db_down':
@@ -350,7 +350,7 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
         chk = r.get('check')
         thr = r.get('threshold', rtp_threshold)
         code = r.get('code')
-        if chk == 'service_unresponsive' and r.get('target') == 'cmp':
+        if chk == 'process_unresponsive' and r.get('target') == 'cmp':
             cur_mo = set()
             for root, _port, stats in cmp_nodes:
                 mo = r.get('mo_instance') or f"{root}/cmp"
@@ -404,7 +404,7 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                                f"{mo} 관측 대상 제외 — 정리", log=log)
             continue
         # 단일 인스턴스 규칙 — 관측 신원으로 mo 합성
-        if chk == 'service_unresponsive':
+        if chk == 'process_unresponsive':
             mo = r.get('mo_instance') or f"{resolve(csp_addr)}/{r.get('target', 'csp')}"
         elif chk == 'db_down':
             mo = r.get('mo_instance') or f"{mgmt_mo_root(config)}/db"

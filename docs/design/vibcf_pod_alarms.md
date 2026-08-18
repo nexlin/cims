@@ -3,7 +3,7 @@
 > 사내 타 시스템 **vIBCF/TrGW** 의 POD(알람/장애 메시지 정의서) v1.1.2 를 md 로 변환한
 > **참고자료**다. 원본: `vIBCF_POD_1.1.2.docx` (원문 보존 변환 — CIMS 알람 체계의 정본이
 > 아니며, CIMS 정본은 [alarm_standardization.md](alarm_standardization.md) ·
-> [alarm_module_catalog.md](alarm_module_catalog.md) 다. 대조 관점은 표준화 §7.2 참조).
+> [alarm_catalog.md](alarm_catalog.md) 다. 대조 관점은 표준화 §7.2 참조).
 
 
 ## 제 1장  ALARM / FAULT 메시지 설명

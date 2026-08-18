@@ -282,7 +282,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | CSP 로그 | 협상 결과 1줄(`session timer: leg=<callId> se=<n> refresher=<local\|remote>`), 갱신 발사·수신, 만료/실패 판정(`session_timer_expired` / `session_refresh_failed`) |
 | Flow 로그 | 갱신 re-INVITE 는 기존 SIP flow 에 그대로 남는다. 폭주 방지를 위해 갱신 성공은 DEBUG, 실패·만료만 INFO |
 | 종료 사유 | CDR·PTT 세션 이력의 종료 사유를 BYE(`normal`)와 구분해 `timeout` 으로 남긴다 |
-| FM 이벤트 | 세션 타이머 만료 teardown 은 운영자 모르게 통화가 끊기는 동작이므로 감사 이벤트로 보고한다 (`session_reclaimed` 계열과 동형 — [alarm_module_catalog.md](../alarm_module_catalog.md) 등록 대상) |
+| FM 이벤트 | 세션 타이머 만료 teardown 은 운영자 모르게 통화가 끊기는 동작이므로 감사 이벤트로 보고한다 (`session_reclaimed` 계열과 동형 — [alarm_catalog.md](../alarm_catalog.md) 감지 행 등록 대상) |
 
 ## 12. 호환성·리스크
 

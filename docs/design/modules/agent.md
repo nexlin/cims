@@ -187,10 +187,10 @@ OAM `_sweep_alerts` 가 평가. 규칙은 service descriptor(`service_registry.a
 | scope | type | check | 설명 |
 |---|---|---|---|
 | core | `disk_high` | disk_pct ≥ threshold(기본 90%) | online agent 별 |
-| core | `process_down` (check=module_down) | deployment(status=running) 모듈이 metric 실행 집합에 없음 | online agent 별, **전 모듈 정본** — csp/cmp 포함 (감지 L1, 표준화 §3.4(b)). 원격 probe 무응답은 별개 조건(`service_unresponsive`) |
+| core | `process_down` (check=module_down) | deployment(status=running) 모듈이 metric 실행 집합에 없음 | online agent 별, **전 모듈 정본** — csp/cmp 포함 (감지 L1, 표준화 §3.4(b)). 원격 probe 무응답은 별개 조건(`process_unresponsive`) |
 | core | `config_drift` | metric.cfg_hashes[모듈] ≠ 배포기록 실체화본 hash | online agent 별, 배포(status=running/stopped) 단위. 미보고(구 agent) 시 미평가 — 오탐 없음 |
 | core | `ha_flap` | metric.ha_transitions[svc] ≥ threshold(기본 6회/10분) | online agent 별. flap 정지 시 윈도 만료로 자동 close |
-| service(CIMS) | `service_unresponsive` | CSP/CMP STATS 무응답 — 프로세스 생존과 별개 조건(hang·과부하), 생존은 L1 process_down | 중앙 poll (oam-svc) |
+| service(CIMS) | `process_unresponsive` | CSP/CMP STATS 무응답 — 프로세스 생존과 별개 조건(hang·과부하), 생존은 L1 process_down | 중앙 poll (oam-svc) |
 | service(CIMS) | `connection_lost` | DB 연결 실패 | 중앙 |
 | service(CIMS) | `threshold_crossed` | RTP 포트 사용률 ≥ threshold | 중앙 |
 

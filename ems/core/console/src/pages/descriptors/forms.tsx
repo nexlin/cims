@@ -29,10 +29,11 @@ function Btn({ onClick, children, danger, disabled }: { onClick: () => void; chi
 
 const SHAPES = ['time-bar', 'kpi', 'distribution', 'table'] as const
 const SHAPE_LABEL: Record<string, string> = { 'time-bar': '시계열 차트', kpi: 'KPI', distribution: '분포', table: '표' }
-// process_down(probe) 은 service_unresponsive 로 개정 — 서버가 read 시 이행(check 개정).
-const CHECKS = ['service_unresponsive', 'db_down', 'rtp_pct_gte', 'disk_high', 'module_down']
+// 구 probe check(process_down/service_unresponsive)는 process_unresponsive 로 개정 —
+// 서버가 read 시 이행(check 개정).
+const CHECKS = ['process_unresponsive', 'db_down', 'rtp_pct_gte', 'disk_high', 'module_down']
 // 알람 표준화(X.733/32.111)
-const ALARM_CLASSES = ['process_down', 'service_unresponsive', 'connection_lost', 'threshold_crossed']
+const ALARM_CLASSES = ['process_down', 'process_unresponsive', 'connection_lost', 'threshold_crossed']
 const SEVERITIES = ['critical', 'major', 'minor', 'warning', 'indeterminate']
 const EVENT_TYPES = ['processingError', 'communications', 'qualityOfService', 'equipment', 'environmental']
 const MO_CLASSES = ['software', 'service', 'host', 'equipment', 'network']
@@ -111,7 +112,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
         <section>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
             <b style={{ fontSize: 13 }}>알람 규칙 ({rules.length})</b>
-            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: 'service_unresponsive', code: 'A-PRC-004', perceived_severity: 'major', event_type: 'processingError', mo_class: 'service', check: 'service_unresponsive' }])}>＋ 규칙</Btn></span>
+            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: 'process_unresponsive', code: 'A-PRC-004', perceived_severity: 'major', event_type: 'processingError', mo_class: 'service', check: 'process_unresponsive' }])}>＋ 규칙</Btn></span>
           </div>
           {rules.map((r, i) => (
             <div key={i} style={rowCard}>
@@ -142,7 +143,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
                   {MO_CLASSES.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
                 <Field label="mo_instance" hint="(소스, service)"><input className="form-input" style={{ ...inp, width: 120 }} value={r.mo_instance ?? ''}
                   onChange={e => upRule(i, { mo_instance: e.target.value })} placeholder="비우면 관측 신원으로 합성" /></Field>
-                {(r.check === 'service_unresponsive' || r.check === 'process_down') && (
+                {(r.check === 'process_unresponsive' || r.check === 'service_unresponsive' || r.check === 'process_down') && (
                   <Field label="target" hint="(모듈명)"><input className="form-input" style={{ ...inp, width: 80 }} value={r.target ?? ''}
                     onChange={e => upRule(i, { target: e.target.value })} /></Field>)}
                 {(r.check === 'rtp_pct_gte' || r.check === 'disk_high') && (

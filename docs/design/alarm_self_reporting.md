@@ -12,7 +12,7 @@ wire 규격**을 정의한다. 구현: OAM 수신 = `ems/core/oam/src/services/f
 
 - **보완이지 대체가 아니다.** 죽은 프로세스는 자기보고를 못 한다 — 감지 3계층(표준화 §3.4(b))
   중 프로세스 생존(L1 — agent 관측 process_down)·서비스 응답성(L3 — OAM probe
-  service_unresponsive)·호스트 자원(agent metric)은 기존 관측을 유지한다. 자기보고는
+  process_unresponsive)·호스트 자원(agent metric)은 기존 관측을 유지한다. 자기보고는
   "프로세스 생존 ≠ 정상"(표준화 §3.6)의 나머지 절반, 즉 **모듈 내부 상태(L2)** 를 채운다.
 - **표준 근거**: 3GPP TS 32.111-2 Alarm IRP 의 notification push(NE→Manager) +
   alarm synchronization. 카탈로그(alarmModel)와 발생(alarmActive)의 분리는 RFC 3877 구조 —
@@ -181,7 +181,7 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
   open 을 싣는다(새 occurrence).
 - **관측 두절**: FM_SYNC 3회 연속 누락 시 해당 node 의 self 활성 알람을 "판정 불가" 사유로
   close 한다(표준화 §3.4(d), drift 스위퍼 3회 임계와 동일 관례). 프로세스 생존은 L1(agent
-  process_down)이, 서비스 응답성은 L3(service_unresponsive)가 별도 판정한다.
+  process_down)이, 서비스 응답성은 L3(process_unresponsive)가 별도 판정한다.
 - **OAM 재기동**: alert_log replay(restore_open_state)로 복원한다. self 계열 복원을 위해
   `compute_open_state` 가 detected_by 를 함께 반환하도록 확장하고, base/oam-svc 소유 분리
   scope 를 mo-prefix 기반에서 **detected_by 기반**으로 일반화한다. 이후 sync 로 수렴.
@@ -255,8 +255,8 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
   체계·활성키·재통지·이행)
 - [alarm_pipeline.md](alarm_pipeline.md) — 발생→전달→수집/보관→가시화 전 구간 절차 정본
   (본 문서는 그중 L2 wire 구간)
-- [alarm_module_catalog.md](alarm_module_catalog.md) — 모듈별 자기감지 가능 조건 전수 카탈로그
-  (현행 fm_catalog 대비 누락 알람/이벤트 후보)
+- [alarm_catalog.md](alarm_catalog.md) — 알람/이벤트 카탈로그 (감지 행 = 모듈별 자기감지
+  가능 조건 전수 — 현행 fm_catalog 대비 누락 알람/이벤트 후보)
 - [../api/cmp_media_api.md](../api/cmp_media_api.md) — envelope v2·이벤트 채널 신뢰성 규칙
 - [features/oam_base_service_split.md](features/oam_base_service_split.md) — 소유 분리 /
   [features/oam_ha.md](features/oam_ha.md) — 관리평면 VIP

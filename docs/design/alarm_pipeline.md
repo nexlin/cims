@@ -13,8 +13,7 @@
 | 문서 | 축 | 담는 것 |
 |---|---|---|
 | [alarm_standardization.md](alarm_standardization.md) | 모델 | X.733 속성·severity·정의 코드 체계·감지 3계층·재통지 규율 |
-| [alarm_function_catalog.md](alarm_function_catalog.md)/.csv | 요구(what) | 기능(IMS 역할) 관점 필요 알람/이벤트 — 구현 무관 정본 |
-| [alarm_module_catalog.md](alarm_module_catalog.md)/.csv | 구현(how·현황) | 모듈 자기감지 전수 목록 — 감지 방식·코드 근거·구현 추적 |
+| [alarm_catalog.md](alarm_catalog.md)/.csv | 요구(what) + 구현(how·현황) | 정의 행 = 기능 관점 필요 알람/이벤트(구현 무관·채번 정본) / 감지 행 = 모듈 자기감지 전수 — 감지 방식·코드 근거·구현 추적 |
 | [alarm_self_reporting.md](alarm_self_reporting.md) | L2 wire | 자기보고(FM push) envelope·카탈로그 등록·동기화 규격 |
 | **본 문서** | **절차(end-to-end)** | 발생→전달→수집→보관→가시화 구간별 계약·책임 주체·수렴 보장 |
 
@@ -48,7 +47,7 @@ OAM 자체판정 (drift 등) ── (OAM 내부) ──────────�
 |---|---|---|---|---|
 | **L1 `agent`** | 노드 로컬 — 프로세스 생존, 호스트 자원, 설정 해시, HA 전이 | **OAM**(agent 는 원시 관측만 보고) | process_down·threshold_crossed(host)·config_out_of_sync·ha_flap + `process_died` 이벤트 | agent 가 metric 에 관측 필드 동봉 → OAM `_eval_agent_rule` 이 rule 평가·전이 |
 | **L2 `self`** | 모듈 내부 — DB 연결, 자원 풀, 스토어, 내부 상태 | **모듈**(전이 판정까지 모듈 소관) | fm_catalog 등재 알람 + 이벤트 | 모듈이 open/close 전이 시점에 FM_ALARM/FM_EVENT 발신 (조건·임계는 모듈 설정 소유) |
-| **L3 `oam-svc`/`oam`** | 원격 응답성 — STATS probe, DB SELECT, RTP 사용률 | **OAM**(sweeper rule) | service_unresponsive·connection_lost(db)·threshold_crossed(rtp) | 주기 스윕(30s)이 probe 후 전이 |
+| **L3 `oam-svc`/`oam`** | 원격 응답성 — STATS probe, DB SELECT, RTP 사용률 | **OAM**(sweeper rule) | process_unresponsive·connection_lost(db)·threshold_crossed(rtp) | 주기 스윕(30s)이 probe 후 전이 |
 | **OAM 자체 (`oam`)** | 관리평면 정합 — HA fan-out drift 등 | **OAM** | config_out_of_sync(HA) | drift sweeper 가 판정·전이 |
 
 - **판정은 감지 주체 소관, 기록은 OAM 소관.** L2 만 전이 판정이 모듈에 있고(활성 알람 SoT =
@@ -62,8 +61,8 @@ OAM 자체판정 (drift 등) ── (OAM 내부) ──────────�
 - 활성키 = `(code, mo_instance)`, `alarm_id` = occurrence — 표준화 §3.4(c).
 - 재통지·severity 변경(action=change)·판정 불가 종결·관측 공백 0건 무판정 — 표준화 §3.4(d).
 - 알람 = 지속 조건(open/close), 정상 전이·감사 = 이벤트(kind=stateChange|audit) — 표준화 §3.6.
-- 요구 정의의 목록 정본 = [alarm_function_catalog.csv](alarm_function_catalog.csv). 구현 채택 시
-  감지 주체 배정 → 모듈 카탈로그 등록 → fm_catalog/rule 등재 순(기능 카탈로그 §6).
+- 요구 정의의 목록 정본 = [alarm_catalog.csv](alarm_catalog.csv) 정의 행. 구현 채택 시
+  감지 주체 배정 → 감지 행 등록 → fm_catalog/rule 등재 순(카탈로그 §11).
 
 ## 4. 내부 연동 규격 (전달 계약)
 
@@ -251,7 +250,7 @@ api client 가 토큰을 동봉한다.
 
 ## 10. 구현 이행 (현행 대비 갭)
 
-카탈로그 구현 이행(기능 카탈로그 §6: 감지 주체 배정 → 선행 구현 → 모듈 카탈로그 등록 →
+카탈로그 구현 이행(카탈로그 §11: 감지 주체 배정 → 선행 구현 → 감지 행 등록 →
 fm_catalog/rule)과 별개로, 파이프라인 자체의 본 정본 대비 갭:
 
 1. **SSE 스트림**(§8.2 P1) — `GET /alerts/stream` (수렴점 구독자 hook, 폴링 fallback 유지).
@@ -262,7 +261,7 @@ fm_catalog/rule)과 별개로, 파이프라인 자체의 본 정본 대비 갭:
 
 - [alarm_standardization.md](alarm_standardization.md) — 알람 모델 정본
 - [alarm_self_reporting.md](alarm_self_reporting.md) — L2 자기보고 wire 정본
-- [alarm_function_catalog.md](alarm_function_catalog.md) — 요구 카탈로그 / [alarm_module_catalog.md](alarm_module_catalog.md) — 구현 추적
+- [alarm_catalog.md](alarm_catalog.md) — 알람/이벤트 카탈로그 (정의 행 = 요구·채번 정본 / 감지 행 = 구현 추적)
 - [../api/agent_api.md](../api/agent_api.md) — L1 agent↔OAM API / [../api/cmp_media_api.md](../api/cmp_media_api.md) — envelope v2
 - [features/oam_base_service_split.md](features/oam_base_service_split.md) — 소유 분리 / [features/oam_ha.md](features/oam_ha.md) — 관리평면 VIP·공유 스토리지
 - 3GPP TS 32.111-2 · RFC 3877 · ITU-T X.733/X.730/X.731/X.740

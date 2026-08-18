@@ -10,7 +10,9 @@ Covers (모듈 직접 호출 — 서버 미기동):
     close_migrated_keys 이행 종결.
   - fm_ingest: 구 wire mo(cims/<module>/<node>[/...]) 정규화, 복원 시 서버명 루트
     node 도출, 구 코드 카탈로그 인덱스 alias.
-  - 정의 코드 정합: 코드에서 쓰는 전 코드가 기능 카탈로그 CSV(정본)에 존재.
+  - 정의 코드 정합: 코드에서 쓰는 전 코드가 알람 카탈로그 CSV(정본)의 정의 행에 존재.
+  - 카탈로그 CSV 불변식(alarm_catalog.md §8): 정의 code 유일, 감지 code 의 정의 존재,
+    정의-감지 블록 연속 배치·구분 일치, 알람 감지 행 활성키 후보 유일.
 
 sys.path 는 ems/core/oam/{src,vendor} — test_stats_probe.py 와 동일.
 """
@@ -35,10 +37,16 @@ from services import alarm_sweeper, alert_log, service_registry  # noqa: E402
 from services.fm_ingest import _current_code, _normalize_mo      # noqa: E402
 
 
+_CATALOG_CSV = os.path.join(_REPO, 'docs', 'design', 'alarm_catalog.csv')
+
+
+def _catalog_rows():
+    with open(_CATALOG_CSV, encoding='utf-8') as f:
+        return list(csv.DictReader(f))
+
+
 def _catalog_codes():
-    path = os.path.join(_REPO, 'docs', 'design', 'alarm_function_catalog.csv')
-    with open(path, encoding='utf-8') as f:
-        return {row['code'] for row in csv.DictReader(f)}
+    return {row['code'] for row in _catalog_rows() if row['행'] == '정의'}
 
 
 class TestCodeRevisions(unittest.TestCase):
@@ -46,7 +54,7 @@ class TestCodeRevisions(unittest.TestCase):
         cat = _catalog_codes()
         for old, new in service_registry._CODE_REVISIONS.items():
             self.assertTrue(old.startswith('CIMS-'), old)
-            self.assertIn(new, cat, f"{old}→{new} 가 기능 카탈로그에 없음")
+            self.assertIn(new, cat, f"{old}→{new} 가 카탈로그 정의 행에 없음")
 
     def test_current_code_alias(self):
         self.assertEqual(service_registry.current_code('CIMS-COM-001'), 'A-COM-001')
@@ -59,6 +67,20 @@ class TestCodeRevisions(unittest.TestCase):
             self.assertIn(d['code'], cat, f"check={chk} 기본 code {d['code']}")
         for r in service_registry._CORE_ALERT_RULES:
             self.assertIn(r['code'], cat, f"core rule {r.get('check')}")
+
+    def test_check_rename_service_to_process_unresponsive(self):
+        """구 check/type 'service_unresponsive' → 'process_unresponsive' 개명 이행."""
+        out = service_registry.normalize_alert_rule(
+            {'check': 'service_unresponsive', 'type': 'service_unresponsive',
+             'code': 'A-PRC-004', 'target': 'csp'})
+        self.assertEqual(out['check'], 'process_unresponsive')
+        self.assertEqual(out['type'], 'process_unresponsive')
+        self.assertEqual(out['code'], 'A-PRC-004')
+        self.assertEqual(out['target'], 'csp')
+        # check 없이 구 type 만 있는 레코드/규칙도 alias 로 보정
+        out = service_registry.normalize_alert_rule({'type': 'service_unresponsive'})
+        self.assertEqual(out['type'], 'process_unresponsive')
+        self.assertEqual(out['code'], 'A-PRC-004')
 
     def test_qos001_split_by_check(self):
         """구 CIMS-QOS-001 이 3정의로 분할 — 저장된 구 코드는 check 기본값이 배정."""
@@ -260,6 +282,54 @@ class TestSipStatsSelfReport(unittest.TestCase):
                                     'perceived_severity': 'critical',
                                     'params': {'observed': '40.0'}}])
         self.assertEqual(ing.state[akey]['severity'], 'critical')
+
+
+class TestCatalogCsvInvariants(unittest.TestCase):
+    """alarm_catalog.csv 불변식 (alarm_catalog.md §8)."""
+
+    # 의도적 활성키 공유: 상보 감지 경로 (alarm_catalog.md §3.2)
+    _ACTIVE_KEY_EXCEPTION = ('storage_failure', 'CMDP', '', 'fd_store')
+
+    def test_definition_codes_unique(self):
+        codes = [r['code'] for r in _catalog_rows() if r['행'] == '정의']
+        dup = {c for c in codes if codes.count(c) > 1}
+        self.assertFalse(dup, f"정의 code 중복: {sorted(dup)}")
+
+    def test_detection_codes_have_definition(self):
+        defs = _catalog_codes()
+        for r in _catalog_rows():
+            if r['행'] == '감지':
+                self.assertIn(r['code'], defs, f"감지 행 {r['code']} 의 정의 없음")
+
+    def test_detection_block_follows_definition(self):
+        """감지 행은 자기 정의 행 바로 아래 연속 블록 + 구분 일치."""
+        cur = None
+        for i, r in enumerate(_catalog_rows(), 2):
+            if r['행'] == '정의':
+                cur = (r['code'], r['구분'])
+            else:
+                self.assertIsNotNone(cur, f"행 {i}: 정의 행 없이 감지 행")
+                self.assertEqual(r['code'], cur[0],
+                                 f"행 {i}: 감지 {r['code']} 가 정의 {cur[0]} 블록 밖")
+                self.assertEqual(r['구분'], cur[1], f"행 {i}: 구분 불일치")
+
+    def test_alarm_detection_active_key_candidates_unique(self):
+        """자기보고 모듈(L2)의 알람 감지 행 (instance, 대상, component) 유일.
+
+        AGENT/OAM 행은 sweeper 합성 규칙(§7)이라 불변식 밖 — 같은 정의의 원인 축을
+        행으로 분리한다(OAM A-PRC-003 config/<collection> 4행).
+        """
+        seen = {}
+        for i, r in enumerate(_catalog_rows(), 2):
+            if r['행'] != '감지' or r['구분'] != '알람':
+                continue
+            if r['instance'] not in ('CSP', 'CMP', 'CMDP', 'CSC'):
+                continue
+            key = (r['type'], r['instance'], r['대상'], r['component'])
+            if key == self._ACTIVE_KEY_EXCEPTION:
+                continue
+            self.assertNotIn(key, seen, f"행 {i}: 활성키 후보 충돌 {key} (행 {seen.get(key)})")
+            seen[key] = i
 
 
 if __name__ == '__main__':

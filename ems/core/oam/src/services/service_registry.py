@@ -69,12 +69,12 @@ _CORE_ALERT_RULES = [
 ]
 
 # 알람 클래스 기본값 — check → 표준 분류 필드. 규칙에 명시값 있으면 우선(setdefault).
-# service_unresponsive 는 check 개정 이행 규칙(_CHECK_REVISIONS)이 명시값을 폐기하고 오므로
+# process_unresponsive 는 check 개정 이행 규칙(_CHECK_REVISIONS)이 명시값을 폐기하고 오므로
 # 메시지·runbook 까지 기본값으로 보유한다.
 _ALERT_CLASS_DEFAULTS = {
-    'service_unresponsive': {'type': 'service_unresponsive', 'code': 'A-PRC-004',
+    'process_unresponsive': {'type': 'process_unresponsive', 'code': 'A-PRC-004',
                      'event_type': 'processingError', 'probable_cause': 'responseTimeExcessive',
-                     'mo_class': 'service', 'perceived_severity': 'major', 'metric': '서비스 응답성',
+                     'mo_class': 'service', 'perceived_severity': 'major', 'metric': '프로세스 응답성',
                      'msg_open': '{mo} 관리 프로브(STATS) 무응답', 'msg_close': '{mo} 응답 정상화',
                      'effect': '제어/관측 불가 — hang·과부하 의심, 호처리 영향 가능',
                      'recommended_action': '프로세스 상태·부하 확인(process_down 동반 여부), 필요 시 재기동'},
@@ -92,11 +92,14 @@ _ALERT_CLASS_DEFAULTS = {
                      'probable_cause': 'thresholdCrossed', 'mo_class': 'service', 'perceived_severity': 'warning'},
 }
 
-# 옛 per-process/리소스 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.
+# 옛 per-process/리소스·개명 전 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.
+# service_unresponsive 는 클래스 슬러그 개명(→process_unresponsive — 'service_' 접두가
+# 서비스 감시로 오독됨, 실체는 프로세스 생존+무응답. process_down 과 대칭).
 _OLD_TYPE_ALIAS = {
     'csp_down': ('process_down', 'A-PRC-001'), 'cmp_down': ('process_down', 'A-PRC-001'),
     'module_down': ('process_down', 'A-PRC-001'), 'db_down': ('connection_lost', 'A-COM-001'),
     'rtp_high': ('threshold_crossed', 'A-QOS-024'), 'disk_high': ('threshold_crossed', 'A-QOS-001'),
+    'service_unresponsive': ('process_unresponsive', 'A-PRC-004'),
 }
 
 # 코드 개정 이력 — 옛 code → 현행 code. 코드는 불변이 원칙(§3.4 코드 문법 — NMS 사전 키)
@@ -119,11 +122,14 @@ _CODE_REVISIONS = {
 }
 
 # check 개정 — 감지 3계층 분리(표준화 §3.4(b)): 구 probe check 'process_down' 은 프로세스
-# 생존이 아니라 관리 응답성을 보므로 'service_unresponsive' 클래스로 개정. 규칙 **정체성**이
+# 생존이 아니라 관리 응답성을 보므로 'process_unresponsive' 클래스로 개정. 규칙 **정체성**이
 # 바뀌는 케이스라, 저장된 descriptor 의 구 클래스 명시값(type/code/severity/메시지·runbook)은
 # read 시 폐기하고 새 클래스 기본값을 적용한다 — target/mo_instance 는 유지.
 # (프로세스 생존의 process_down/PRC-001 은 agent module_down 정본으로 존속.)
-_CHECK_REVISIONS = {'process_down': 'service_unresponsive'}
+# 구 'service_unresponsive' 는 같은 규칙의 개명 전 check 명 — 정체성 동일하나 명시값이
+# 구 슬러그를 담고 있어 같은 개정 경로(기본값 재적용)로 흡수한다.
+_CHECK_REVISIONS = {'process_down': 'process_unresponsive',
+                    'service_unresponsive': 'process_unresponsive'}
 _CHECK_REVISION_DROP = ('type', 'code', 'event_type', 'probable_cause', 'mo_class',
                         'perceived_severity', 'severity', 'metric', 'msg_open', 'msg_close',
                         'effect', 'recommended_action')
@@ -133,7 +139,7 @@ _CHECK_REVISION_DROP = ('type', 'code', 'event_type', 'probable_cause', 'mo_clas
 # code 전량 종결(close_legacy_code)을 쓰면 안 되고, 해당 규칙의 mo 공간으로 한정한다.
 # (현행 잔여분(probe 계열 CIMS-PRC-001)은 구 mo(cims/*)에만 존재 — mo 루트 이행 종결
 # (sweep_service_rules 의 close_migrated_keys)이 함께 흡수하므로 별도 스윕은 없다.)
-_CHECK_LEGACY_CODES = {'service_unresponsive': ('CIMS-PRC-001',)}
+_CHECK_LEGACY_CODES = {'process_unresponsive': ('CIMS-PRC-001',)}
 
 
 def current_code(code: str) -> str:

@@ -145,7 +145,7 @@
 > agent supervised(HA 자동복구)와 이중 제어가 될 수 있어 배포 환경에선 상태조회 용도로만 쓴다.
 
 **알람 sweeper 분리** (`services/alarm_sweeper.py` 공용 코어):
-- **서비스 계열**(`service_unresponsive`(csp/cmp probe)/`connection_lost`(db)/`threshold_crossed`(rtp),
+- **서비스 계열**(`process_unresponsive`(csp/cmp probe)/`connection_lost`(db)/`threshold_crossed`(rtp),
   scope≠`agent`) 평가·발화 = **oam-svc** (`detected_by='oam-svc'`) — probe 대상·DB 가 oam-svc
   설정이므로. `--role all` 에서는 base 가 대행 평가(`detected_by='oam'`).
 - **agent 계열**(disk/`process_down`(module_down — 전 모듈, csp/cmp 포함), scope=`agent`,
@@ -322,7 +322,7 @@ base conf 생성(`gen_default_config`) 대상이 아니다 — `config.json` 에
 `_coerce_object_list`), (3) 소비자(`stats._media_endpoints` 가 문자열/`{ip,port}` dict 모두 수용).
 **CMP 관측은 전 노드 평가**(AA 다중 노드): 대시보드
 health 위젯은 전 노드 probe 집계(up = any 노드 응답, 카운터는 합산)이고, 알람 sweeper 의
-`service_unresponsive(target=cmp)` 는 endpoint 마다 `mo_instance='cims/cmp/<ip>:<port>'` 로 개별
+`process_unresponsive(target=cmp)` 는 endpoint 마다 `mo_instance='cims/cmp/<ip>:<port>'` 로 개별
 발화한다. `Endpoints`/`CmpIp` 미설정이면 CMP 관측 비활성(cmp 계열 규칙 skip).
 
 > **주의 — 이름은 같지만 평면이 다르다.** 여기 oam-svc 의 `MediaServer.Endpoints` 는 **관측(STATS

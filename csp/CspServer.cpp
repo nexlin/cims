@@ -293,7 +293,7 @@ int ServiceMain() {
 
     // [FIX] Wire Connection Callback and Start Monitor
     //   미디어평면 전체 두절/복구 전이는 자기보고 알람으로도 노출 (A-COM-007 — IBCF/TAS/
-    //   PTT-AS 의 CMP 두절 요구를 대표 정의 하나로 수렴, 기능 카탈로그 §3 중복 발화 금지).
+    //   PTT-AS 의 CMP 두절 요구를 대표 정의 하나로 수렴, 알람 카탈로그 §5 중복 발화 금지).
     gclsCmpClient.SetConnectionCallback(
         [mo = sysId + "/csp/cmp"]( bool bConnected ) {
             gclsGroupCallService.OnCmpStatusChanged( bConnected );

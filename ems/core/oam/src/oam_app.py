@@ -965,7 +965,7 @@ if __name__ == '__main__':
 
         # ── Alert sweeper ───────────────────────────────────────────────
         # 코어(emit/transition/서비스 규칙 평가)는 services.alarm_sweeper 공용.
-        # 서비스 계열(service_unresponsive/db_down/rtp_pct_gte)은 oam-svc 소유
+        # 서비스 계열(process_unresponsive/db_down/rtp_pct_gte)은 oam-svc 소유
         # (oam_base_service_split §4) — base 는 role=all(단일 프로세스)에서만 대행 평가하고,
         # role=base 는 agent 계열(disk_high/module_down/config_drift/ha_flap)만 평가한다
         # (CSP/CMP probe·DB 미접속).
@@ -1075,7 +1075,7 @@ if __name__ == '__main__':
                     if dep.get('status') != 'running' and not (must and dep.get('status') == 'stopped'):
                         continue
                     # 프로세스 생존은 agent 관측이 전 모듈 정본(감지 L1 — 표준화 §3.4(b)).
-                    # 원격 probe 무응답은 별개 조건(service_unresponsive)이라 여기서 제외하지 않는다.
+                    # 원격 probe 무응답은 별개 조건(process_unresponsive)이라 여기서 제외하지 않는다.
                     if not proc:
                         continue
                     # 비데몬(별도 프로세스 없음) 모듈은 module_down 대상 아님 — agent 가 metric.modules

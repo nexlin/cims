@@ -14,7 +14,7 @@
  * @brief SIP 신호 카운터 — 수신 요청 / 최종응답(수신·송신, 응답코드별) / 파싱 실패 누적.
  *
  * 응답코드별 성공률·CPS·수신 이상 감시의 관측 원천이다 (CIMS 기능 알람
- * A-QOS-006/007/009/011 — docs/design/alarm_function_catalog.csv, 평가는 응용 소관).
+ * A-QOS-006/007/009/011 — docs/design/alarm_catalog.csv, 평가는 응용 소관).
  *
  * 증가 지점 (스택 안 수렴점):
  *   - 수신 요청: CSipStack::RecvSipMessage — 트랜잭션 삽입 성공 후 (재전송 미포함)
