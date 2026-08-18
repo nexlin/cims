@@ -19,6 +19,7 @@ class ConfigStore(context: Context) {
         transport = runCatching {
             SipAccountConfig.Transport.valueOf(prefs.getString(K_TRANSPORT, "UDP").orEmpty())
         }.getOrDefault(SipAccountConfig.Transport.UDP),
+        transports = decodeTransports(prefs.getString(K_TRANSPORTS, "").orEmpty()),
         domain = prefs.getString(K_DOMAIN, "").orEmpty(),
         msisdn = prefs.getString(K_MSISDN, "").orEmpty(),
         imsi = prefs.getString(K_IMSI, "").orEmpty(),
@@ -36,6 +37,7 @@ class ConfigStore(context: Context) {
             putString(K_HOST, c.serverHost)
             putInt(K_PORT, c.serverPort)
             putString(K_TRANSPORT, c.transport.name)
+            putString(K_TRANSPORTS, encodeTransports(c.transports))
             putString(K_DOMAIN, c.domain)
             putString(K_MSISDN, c.msisdn)
             putString(K_IMSI, c.imsi)
@@ -51,6 +53,53 @@ class ConfigStore(context: Context) {
     }
 
     fun isProvisioned(): Boolean = load().isComplete()
+
+    /**
+     * 프로비저닝 결과 저장 — **사용자가 고른 transport 는 유지**한다. 서버가 주는 transport 는
+     * 강제가 아니라 기본값(권장)이고 선택권은 단말에 있다(sip_tls_signaling.md §7.1).
+     * 선택값이 새 가용 목록에서 사라졌으면(서버가 그 transport 를 내렸다) 서버 기본값으로 강등하고
+     * 선택 표시도 지운다 — 도달 불가한 경로를 붙들고 있지 않기 위함.
+     * 사용자가 고른 적이 없으면 서버 기본값을 그대로 따른다.
+     */
+    fun saveProvisioned(fresh: SipAccountConfig) {
+        if (isTransportUserSet()) {
+            val chosen = load().transport
+            if (fresh.transports.any { it.transport == chosen }) {
+                save(fresh.withTransport(chosen))
+                return
+            }
+            setTransportUserSet(false)
+        }
+        save(fresh)
+    }
+
+    /** 사용자가 설정 화면에서 고른 transport 저장 — 이후 프로비저닝 재취득에도 유지된다. */
+    fun saveTransportChoice(t: SipAccountConfig.Transport) {
+        save(load().withTransport(t))
+        setTransportUserSet(true)
+    }
+
+    /** 사용자가 transport 를 직접 고른 적이 있는가(= 서버 기본값보다 우선). */
+    fun isTransportUserSet(): Boolean = prefs.getBoolean(K_TRANSPORT_USER, false)
+
+    private fun setTransportUserSet(on: Boolean) {
+        prefs.edit().putBoolean(K_TRANSPORT_USER, on).apply()
+    }
+
+    /** 가용 목록 직렬화 — "UDP:15060,TCP:15060,TLS:15061" (SharedPreferences 에 목록형이 없다). */
+    private fun encodeTransports(l: List<SipAccountConfig.TransportEndpoint>): String =
+        l.joinToString(",") { "${it.transport.name}:${it.port}" }
+
+    private fun decodeTransports(s: String): List<SipAccountConfig.TransportEndpoint> =
+        s.split(',').mapNotNull { e ->
+            val kv = e.split(':')
+            if (kv.size != 2) return@mapNotNull null
+            val t = runCatching {
+                SipAccountConfig.Transport.valueOf(kv[0].trim().uppercase())
+            }.getOrNull() ?: return@mapNotNull null
+            val port = kv[1].trim().toIntOrNull()?.takeIf { it in 1..65535 } ?: return@mapNotNull null
+            SipAccountConfig.TransportEndpoint(t, port)
+        }
 
     /** 로그아웃 — 프로비저닝된 계정/서버 설정 전부 제거(캐시 자격증명으로 재등록되지 않게). */
     fun clear() {
@@ -72,6 +121,8 @@ class ConfigStore(context: Context) {
         const val K_HOST = "host"
         const val K_PORT = "port"
         const val K_TRANSPORT = "transport"
+        const val K_TRANSPORTS = "transports"          // 서버 알림 가용 목록
+        const val K_TRANSPORT_USER = "transport_user"  // 사용자 직접 선택 표시
         const val K_DOMAIN = "domain"
         const val K_MSISDN = "msisdn"
         const val K_IMSI = "imsi"

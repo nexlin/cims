@@ -19,8 +19,14 @@ package com.cims.ue.core.config
  */
 data class SipAccountConfig(
     val serverHost: String = "",        // CSP IP/FQDN  (예: 121.161.164.47)
-    val serverPort: Int = 5060,         // SIP 포트      (예: 15060)
+    /** 접속 포트 — **[transport] 의 포트**다(예: 15060). transport 마다 포트가 다르므로 둘은 항상
+     *  같이 움직여야 한다. 직접 대입하지 말고 [withTransport] 로 바꾼다. */
+    val serverPort: Int = 5060,
     val transport: Transport = Transport.UDP,
+    /** 서버가 알린 가용 transport 목록(프로비저닝 `sip.transports`). 단말은 이 중에서 고른다 —
+     *  서버는 세 transport 를 동시에 청취하며 강제하지 않는다(sip_tls_signaling.md §7.1).
+     *  빈 목록 = 목록을 모르는 구 서버 응답/미프로비저닝 상태(선택 UI 를 띄우지 않는다). */
+    val transports: List<TransportEndpoint> = emptyList(),
     val domain: String = "",            // 홈/서비스 도메인 (예: ims.mnc033.mcc450.3gppnetwork.org)
     val msisdn: String = "",            // 전화번호(공개 ID / AOR user part)
     val imsi: String = "",              // IMSI — Digest username(IMPI) 합성용 (IMSI@domain)
@@ -55,5 +61,23 @@ data class SipAccountConfig(
         (imsi.isNotBlank() || authId.isNotBlank()) &&   // Digest username 확보 (msisdn 폴백 금지 — 없으면 즉시 403)
         password.isNotBlank()
 
+    /**
+     * 가용 목록에서 [t] 를 선택 — transport 와 **포트를 함께** 갱신한다. transport 만 바꾸면
+     * 옛 포트에 새 프로토콜로 붙어 등록이 실패한다(같은 포트로 평문/TLS 를 겸하지 않는다).
+     * 목록에 없는 transport(구 서버 응답 등)면 포트를 유지한 채 transport 만 바꾼다.
+     */
+    fun withTransport(t: Transport): SipAccountConfig =
+        copy(transport = t, serverPort = transports.firstOrNull { it.transport == t }?.port ?: serverPort)
+
+    /**
+     * 계정 재생성(프로세스 재시작)이 필요한 차이인가 — 가용 목록은 선택지 표시용이라 제외한다.
+     * 서버가 목록만 늘려도 재시작하지 않기 위함.
+     */
+    fun sameRegistration(other: SipAccountConfig?): Boolean =
+        other != null && copy(transports = emptyList()) == other.copy(transports = emptyList())
+
     enum class Transport { UDP, TCP, TLS }
+
+    /** transport ↔ 그 transport 의 접속 포트 쌍. 같은 포트로 평문과 TLS 를 겸하지 않으므로 쌍으로 다룬다. */
+    data class TransportEndpoint(val transport: Transport, val port: Int)
 }

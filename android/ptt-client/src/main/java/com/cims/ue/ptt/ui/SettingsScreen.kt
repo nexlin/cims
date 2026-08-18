@@ -96,6 +96,7 @@ fun SettingsScreen(
             GainRow("마이크 게인", "무전 송신 음량 보강 (상대가 듣는 크기)", st.micGain) {
                 st.ctl?.setAudioGain(st.spkGain, it)
             }
+            TransportRow(svc)
         }
 
         // ── 채널 설정: 하드웨어 버튼 ──
@@ -124,6 +125,10 @@ fun SettingsScreen(
         SectionLabel("기타")
         SectionCard(padding = 4) {
             NavRow("그룹 목록 새로고침", "CSC 에서 다시 조회") { st.ctl?.loadGroups() }
+            Divider()
+            NavRow("서버 설정 다시 받기", "CSC 에서 접속 정보(포트·전송 프로토콜 목록) 재취득") {
+                svc?.refreshProvisioning()
+            }
             Divider()
             val context = androidx.compose.ui.platform.LocalContext.current
             val ver = androidx.compose.runtime.remember {
@@ -210,5 +215,49 @@ private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
         }
         Text("›", color = Ct.TextFaint, fontSize = 18.sp)
         Spacer(Modifier.width(2.dp))
+    }
+}
+
+/**
+ * 설정 행 — SIP 전송 프로토콜 선택. 서버가 프로비저닝으로 알린 **가용 목록**에서 고른다
+ * (서버는 UDP/TCP/TLS 를 동시에 청취하며 강제하지 않는다 — sip_tls_signaling.md §7.1).
+ * transport 마다 포트가 다르므로(같은 포트로 평문/TLS 를 겸하지 않는다) 선택 시 포트도 함께 바뀌고,
+ * 새 경로로 등록하려면 계정을 다시 만들어야 하므로 [PttService.ensureRegistered] 의 재시작 경로를 탄다.
+ * 선택지가 2개 미만이면(목록을 안 주는 구 서버/미프로비저닝) 행을 숨긴다.
+ */
+@Composable
+private fun TransportRow(svc: PttService?) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val store = androidx.compose.runtime.remember { com.cims.ue.core.config.ConfigStore(context) }
+    // 저장 설정은 SharedPreferences — 변경 알림이 없으므로 서비스의 configTick 을 구독해 다시 읽는다.
+    //   remember 로 한 번만 읽으면 "서버 설정 다시 받기" 후에도 옛 목록이 남는다.
+    val tick = svc?.configTick?.collectAsState()?.value ?: 0
+    val cfg = androidx.compose.runtime.remember(tick) { store.load() }
+    val eps = cfg.transports
+    if (eps.size < 2) return
+    Divider()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text("SIP 전송 프로토콜", color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text("서버 접속 방식 — 바꾸면 앱이 재시작되며 새 경로로 등록합니다",
+            color = Ct.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            eps.forEach { ep ->
+                val on = ep.transport == cfg.transport
+                Box(
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(if (on) Ct.Mint else Ct.GrayDim)
+                        .clickable(enabled = !on) {
+                            store.saveTransportChoice(ep.transport)
+                            svc?.bumpConfigTick()
+                            svc?.ensureRegistered()      // 설정 변경 감지 → un-REGISTER 후 재시작
+                        }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                ) {
+                    Text("${ep.transport.name} · ${ep.port}",
+                        color = if (on) Ct.OnMint else Ct.TextDim,
+                        fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }

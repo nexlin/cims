@@ -1,5 +1,6 @@
 package com.cims.ue.core.provision
 
+import com.cims.ue.core.config.SipAccountConfig
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -163,11 +164,25 @@ class ProvisioningClient(
             val s = arr.getJSONObject(i)
             val sip = s.getJSONObject("sip")
             val acc = s.getJSONObject("account")
+            // 가용 transport 목록 — 서버가 알린 선택지. 목록이 없거나 항목이 온전치 않으면
+            //   그 항목만 버린다(빈 목록 = 구 서버 → 단말은 단일 필드로만 동작).
+            val tpArr = sip.optJSONArray("transports") ?: JSONArray()
+            val transports = (0 until tpArr.length()).mapNotNull { k ->
+                val t = tpArr.getJSONObject(k)
+                val tp = runCatching {
+                    SipAccountConfig.Transport.valueOf(t.optString("transport").uppercase())
+                }.getOrNull()
+                val port = t.optInt("port", 0)
+                if (tp != null && port in 1..65535) SipAccountConfig.TransportEndpoint(tp, port) else null
+            }
+            // 기본값 = sip.default(신규) → sip.transport(구 서버 호환).
+            val defaultTransport = sip.optString("default", "").ifBlank { sip.optString("transport", "UDP") }
             ServiceProfile(
                 kind = s.getString("kind"),
                 sipHost = sip.getString("host"),
                 sipPort = sip.optInt("port", 5060),
-                transport = sip.optString("transport", "UDP"),
+                transport = defaultTransport,
+                transports = transports,
                 domain = sip.getString("domain"),
                 msisdn = acc.optString("msisdn", ""),
                 imsi = acc.optString("imsi", ""),

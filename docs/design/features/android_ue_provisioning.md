@@ -77,14 +77,21 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   "services": [
     {
       "kind": "volte",
-      "sip":     { "host": "<CSP host>", "port": 5060, "transport": "UDP",
+      "sip":     { "host": "<CSP host>", "port": 15060, "transport": "UDP",
+                   "transports": [ { "transport": "UDP", "port": 15060 },
+                                   { "transport": "TCP", "port": 15060 },
+                                   { "transport": "TLS", "port": 15061 } ],
+                   "default": "UDP",
                    "domain": "ims.mnc033.mcc450.3gppnetwork.org" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000001",
                    "authId": "", "sipPassword": "1234" }
     },
     {
       "kind": "ptt",
-      "sip":     { "host": "<PSP host>", "port": 5060, "transport": "UDP",
+      "sip":     { "host": "<PSP host>", "port": 15060, "transport": "UDP",
+                   "transports": [ { "transport": "UDP", "port": 15060 },
+                                   { "transport": "TCP", "port": 15060 } ],
+                   "default": "UDP",
                    "domain": "ptt.mnc033.mcc450.3gppnetwork.org" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
                    "authId": "", "sipPassword": null, "mcpttId": "tel:+821300000001" }
@@ -94,7 +101,12 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 ```
 
 필드 규칙:
-- `sip.host/port/transport/domain`: 단말이 접속할 **서비스별 시그널링 서버**. VoLTE=CSP, PTT=PSP (다를 수 있음).
+- `sip.host/domain`: 단말이 접속할 **서비스별 시그널링 서버**. VoLTE=CSP, PTT=PSP (다를 수 있음).
+- `sip.transports`/`sip.default`: **가용 transport 목록과 기본값(권장)** — 단말이 이 중에서 고른다.
+  transport 마다 포트가 다르므로 목록에 포트가 함께 실린다(같은 포트로 평문과 TLS 를 겸하지 않는다).
+  TLS 포트 미설정(`tls_port=0`)이면 TLS 항목이 실리지 않는다. 선택·유지·반영 규칙은
+  [sip_tls_signaling.md §7.1](sip_tls_signaling.md) 이 정본.
+- `sip.port`/`sip.transport`: **기본값의 유효 쌍** — 목록을 모르는 구 APK 가 이 두 필드만 읽으므로 유지된다.
 - `account.imsi`: Digest username = `imsi@sip.domain`(서버 CscfModule 강제). 서비스별로 다를 수 있음.
 - `account.msisdn`: 공개 ID(AOR user part). `authId`: 전체 IMPI 직접지정(보통 빈값 → imsi@domain 합성).
 - `account.sipPassword`: **서비스 가입(subscription) 비번**(`*_subscriptions.passwd`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — CSP 는 이 비번으로 REGISTER Digest 를 검증한다. 단말은 이 값을 우선 사용하고, `null`/생략일 때만 로그인 비번으로 폴백.
@@ -153,7 +165,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
    - 조회: 로그인 msisdn 으로 person(`user_id`) 확인 → 그 person 의 `volte_subscriptions`+`ptt_subscriptions`
      전 서비스를 반환(로그인 1회로 보유 서비스 모두). 계정: id(msisdn)/imsi/auth_id.
    - 사용자: `users.name` → displayName.
-2. **시그널링 도메인/주소** ← CSC 설정 `Provisioning.Services.<kind>` `{host,port,transport,domain}`.
+2. **시그널링 도메인/주소** ← CSC 설정 `Provisioning.Services.<kind>`
+   `{host,port,tcp_port,tls_port,transport,domain}`. 포트 3개가 가용 transport 목록으로 조립된다
+   (`tcp_port=0`→평문 포트 공용, `tls_port=0`→TLS 미광고).
    `host` 빈값이면 요청 Host(=UE 가 접속한 CSC IP)를 사용(올인원 기본). 다중 노드면 volte=CSP,
    ptt=PSP 대표/VIP 주소로 채운다.
    (표준 `access_services` 는 CSP 컬렉션이라 CSC 가 직접 못 읽으므로, 시그널링 매핑은 CSC 설정으로 둔다.
@@ -185,11 +199,20 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   (제목+현재값 요약), 항목 탭 = 편집 다이얼로그(텍스트/라디오), 변경 즉시 저장·재등록(별도 저장 버튼 없음).
 - **SSO 자동 구성 상태에선 전 항목 읽기 전용**(흐림 처리) — 값의 SoT 는 CIMS 프로비저닝이며 앱
   진입 시 재프로비저닝이 덮어쓰므로 편집을 허용하지 않는다.
+- **예외: 전송 프로토콜** — 서버가 가용 목록을 2개 이상 알렸으면 SSO 상태에서도 고를 수 있다.
+  선택지는 그 목록으로 한정되고(라벨 = `TLS · 15061`), 고른 값은 재프로비저닝에도 유지된다.
+  transport 는 서버가 강제하는 값이 아니라 단말이 고르는 값이기 때문이다
+  ([sip_tls_signaling.md §7.1](sip_tls_signaling.md) 정본).
 - **수동 설정 모드**(구성 카테고리 스위치, `ConfigStore.isManual`): 테스트용으로 켜면
   ①SSO 재프로비저닝(GATE·SipService autostart)이 저장값을 덮어쓰지 않고 ②전 항목 편집 가능.
   끄면 즉시 재프로비저닝으로 서버 값 복원(실패 시 다음 진입에서 복원). GATE "수동 설정 (고급)"
   진입(프로비저닝 실패/계정 없음 fallback)도 같은 화면(standalone, 완료/취소 버튼)이며 수동 모드를 켠다.
 - CIMS 계정이 아예 없는 단말은 수동 구성으로 동작(스위치 없이 편집 가능).
+
+**ptt-client** 는 수동 설정 화면을 두지 않고 설정 탭에 두 항목만 노출한다 — `통신 설정` 의
+**SIP 전송 프로토콜**(가용 목록에서 선택, 2개 미만이면 행 숨김)과 `기타` 의 **서버 설정 다시 받기**
+(`/provisioning/me` 재취득 — 포트·가용 목록·비번 최신화). 전송 프로토콜을 바꾸면 계정을 다시 만들어야
+하므로 un-REGISTER 후 프로세스가 재시작되고(2초) 참여 채널은 자동 복원된다.
 
 ## 6. 미해결/후속
 

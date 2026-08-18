@@ -111,7 +111,7 @@
     {
       "key": "provisioning",
       "title": "자동 프로비저닝 (단말 접속 정보)",
-      "description": "단말이 로그인 후 GET /provisioning/me 로 받아가는 서비스별 시그널링 접속 정보 (android_ue_provisioning.md §3). CSC 는 CSP 의 local_nodes/access_services 를 직접 읽을 수 없으므로, 단말에 내려줄 SIP 주소/포트/도메인을 여기에 따로 선언한다 — CSP 의 수신 포트를 바꾸면 이 값도 같이 맞춰야 단말이 새 포트로 등록한다.",
+      "description": "단말이 로그인 후 GET /provisioning/me 로 받아가는 서비스별 시그널링 접속 정보 (android_ue_provisioning.md §3). CSC 는 CSP 의 local_nodes/access_services 를 직접 읽을 수 없으므로, 단말에 내려줄 SIP 주소/포트/도메인을 여기에 따로 선언한다 — CSP 의 수신 포트를 바꾸면 이 값도 같이 맞춰야 단말이 새 포트로 등록한다. 포트는 transport 별로 선언하고 단말에는 가용 transport 목록으로 내려간다 — 단말이 그 중 하나를 고르므로 transport 설정은 강제가 아니라 기본값(권장)이다.",
       "fields": [
         {
           "key": "Provisioning.CountryCode",
@@ -141,14 +141,24 @@
           "help": "CSP 의 VoLTE 수신 local_node bind_port 와 일치해야 한다."
         },
         {
+          "key": "Provisioning.Services.volte.tcp_port",
+          "label": "VoLTE SIP TCP 포트",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 65535,
+          "restart": true,
+          "help": "0/미설정 = 평문 포트 공용(CSP 가 UDP/TCP 를 같은 포트로 청취하는 기본 구성). TCP 를 다른 포트로 분리 운용할 때만 지정한다. 단말 가용 transport 목록에 이 포트가 실린다."
+        },
+        {
           "key": "Provisioning.Services.volte.tls_port",
           "label": "VoLTE SIP TLS 포트",
           "type": "int",
-          "default": 5061,
-          "min": 1,
+          "default": 0,
+          "min": 0,
           "max": 65535,
           "restart": true,
-          "help": "transport 가 TLS 로 해석될 때 쓰는 포트. 평문 포트와 겸용하지 않는다. CSP 의 protocol=TLS local_node bind_port 와 일치해야 한다. 가입자 단위 override(subscriptions.sip_transport)에도 이 값이 적용된다."
+          "help": "0/미설정 = 단말에 TLS 를 광고하지 않는다(TLS local_node 를 만들기 전 기본). 평문 포트와 겸용하지 않으므로 CSP 의 protocol=TLS local_node bind_port 를 그대로 넣는다. 미설정인데 기본 transport 가 TLS 면 목록의 첫 항목으로 강등된다."
         },
         {
           "key": "Provisioning.Services.volte.transport",
@@ -190,14 +200,24 @@
           "help": "PSP(또는 CSP) 의 PTT 수신 local_node bind_port 와 일치해야 한다."
         },
         {
+          "key": "Provisioning.Services.ptt.tcp_port",
+          "label": "PTT SIP TCP 포트",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 65535,
+          "restart": true,
+          "help": "0/미설정 = 평문 포트 공용(CSP 가 UDP/TCP 를 같은 포트로 청취하는 기본 구성). TCP 를 다른 포트로 분리 운용할 때만 지정한다. 단말 가용 transport 목록에 이 포트가 실린다."
+        },
+        {
           "key": "Provisioning.Services.ptt.tls_port",
           "label": "PTT SIP TLS 포트",
           "type": "int",
-          "default": 5061,
-          "min": 1,
+          "default": 0,
+          "min": 0,
           "max": 65535,
           "restart": true,
-          "help": "transport 가 TLS 로 해석될 때 쓰는 포트. 평문 포트와 겸용하지 않는다. CSP 의 protocol=TLS local_node bind_port 와 일치해야 한다. 가입자 단위 override(subscriptions.sip_transport)에도 이 값이 적용된다."
+          "help": "0/미설정 = 단말에 TLS 를 광고하지 않는다(TLS local_node 를 만들기 전 기본). 평문 포트와 겸용하지 않으므로 CSP 의 protocol=TLS local_node bind_port 를 그대로 넣는다. 미설정인데 기본 transport 가 TLS 면 목록의 첫 항목으로 강등된다."
         },
         {
           "key": "Provisioning.Services.ptt.transport",

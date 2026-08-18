@@ -64,6 +64,13 @@ class PttService : Service() {
     /** 문자 저장 변경 틱 — UI 재조회 트리거(MessageStore 자체엔 변경 알림이 없음). */
     val messageTick: kotlinx.coroutines.flow.StateFlow<Int> = _messageTick
 
+    private val _configTick = kotlinx.coroutines.flow.MutableStateFlow(0)
+    /** 접속 설정 변경 틱 — 프로비저닝 재취득·transport 선택으로 ConfigStore 가 바뀔 때 증가.
+     *  설정 화면이 구독해 가용 transport 목록·선택 상태를 다시 읽는다(SharedPreferences 는 변경 알림이 없다). */
+    val configTick: kotlinx.coroutines.flow.StateFlow<Int> = _configTick
+
+    fun bumpConfigTick() { _configTick.value++ }
+
     /** 그룹 문자(MCData SDS) 발신 + 로컬 스레드 저장 — msgId 보존(delivered 통지 대사용).
      *  MSRP(미디어평면) 경로는 수 초 걸리고 실패 가능 → PENDING 으로 시작(결과는 sendResult 반영). */
     fun sendGroupMessage(groupId: String, text: String) {
@@ -324,9 +331,18 @@ class PttService : Service() {
                 loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),
                 countryCode = prof.countryCode.orEmpty(),
             )
-            ConfigStore(this).save(cfg)
+            // 사용자가 고른 transport 는 유지하며 저장한다 — 서버 transport 는 기본값(권장)이고
+            //   선택권은 단말에 있다(ConfigStore.saveProvisioned).
+            ConfigStore(this).saveProvisioned(cfg)
+            bumpConfigTick()          // 설정 화면이 새 가용 목록을 다시 읽게 한다
         }
         ensureRegistered()
+    }
+
+    /** 서버 설정 재취득(설정 화면 사용자 조작) — 가용 transport 목록·포트·비번을 최신화하고,
+     *  등록에 영향이 있으면 [ensureRegistered] 가 재시작 경로로 반영한다. */
+    fun refreshProvisioning() {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) { ssoAutoConfigure() }
     }
 
     private var activeConfig: com.cims.ue.core.config.SipAccountConfig? = null
@@ -351,11 +367,12 @@ class PttService : Service() {
         }
         val cfg = store.load()
         if (!cfg.isComplete()) { update("CIMS-McPtt", "로그인 필요"); return }
-        if (controller != null && activeConfig == cfg) {        // 동일 설정 → 그대로(토큰만 보강)
+        // 가용 transport 목록만 바뀐 경우는 등록에 영향이 없다 — sameRegistration 이 그것만 걸러낸다.
+        if (controller != null && cfg.sameRegistration(activeConfig)) {   // 동일 설정 → 그대로(토큰만 보강)
             controller?.let { injectSsoToken(it) }
             return
         }
-        // 설정 변경(포트/비번) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
+        // 설정 변경(포트/비번/전송 프로토콜) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
         // Endpoint/LogWriter 수명 지뢰라 로그아웃과 동일하게 프로세스 재시작이 정석:
         // un-REGISTER 송신 여유(2s) 후 killProcess → 접근성/START_STICKY 재기동 →
         // 새 설정 첫 부팅 + 참여 채널 자동 복원(ChannelStore).

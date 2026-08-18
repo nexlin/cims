@@ -144,9 +144,11 @@ class SipService : Service() {
             if (controller?.hasAccount() == true) controller?.reregister() else ensureRegistered()
             return START_STICKY
         }
-        // 부팅/SSO 자동시작: 설정이 비어 있고 공유 계정이 있으면 프로비저닝으로 자동 구성 후 등록.
+        // 부팅/SSO 자동시작: 공유 계정이 있으면 프로비저닝으로 최신 구성을 받고 등록한다(PTT 와 동일).
+        //   ⚠ 예전에는 "설정이 비어 있을 때만" 받았다 — 한 번 채워진 뒤에는 서버가 포트/가용 transport
+        //   목록을 바꿔도 단말이 영구히 몰랐다. 수동 설정 모드는 ssoAutoConfigure 안에서 걸러진다.
         val autostart = intent?.getBooleanExtra("autostart", false) == true
-        if (autostart && !ConfigStore(this).load().isComplete()) {
+        if (autostart && com.cims.ue.core.account.SsoProvisioner.hasAccount(this)) {
             scope.launch(kotlinx.coroutines.Dispatchers.IO) { ssoAutoConfigure() }
         }
         ensureRegistered()
@@ -177,7 +179,9 @@ class SipService : Service() {
             loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),  // sipPassword=null → 공유 로그인 비번 재사용
             countryCode = prof.countryCode.orEmpty(),
         )
-        ConfigStore(this).save(cfg)
+        // 사용자가 고른 transport 는 유지하며 저장한다 — 서버 transport 는 기본값(권장)이고
+        //   선택권은 단말에 있다(ConfigStore.saveProvisioned).
+        ConfigStore(this).saveProvisioned(cfg)
         ensureRegistered()
     }
 
@@ -199,8 +203,9 @@ class SipService : Service() {
             updateNotification("CIMS Phone", "로그인 필요")
             return
         }
-        if (controller != null && activeConfig == cfg) return   // 동일 설정 → 그대로
-        // 설정 변경(포트/비번 등) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
+        // 가용 transport 목록만 바뀐 경우는 등록에 영향이 없다 — sameRegistration 이 그것만 걸러낸다.
+        if (controller != null && cfg.sameRegistration(activeConfig)) return   // 동일 설정 → 그대로
+        // 설정 변경(포트/비번/전송 프로토콜 등) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
         // Endpoint/LogWriter 수명 지뢰라 로그아웃과 동일하게 프로세스 재시작이 정석:
         // un-REGISTER 송신 여유(2s) 후 killProcess → START_STICKY 재기동 → 새 설정 첫 부팅.
         controller?.let {

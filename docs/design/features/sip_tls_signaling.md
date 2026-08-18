@@ -296,7 +296,7 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 | pjproject | `config_site.h` 의 `PJSIP_HAS_TLS_TRANSPORT 1` + `configure-android --with-ssl=<prefix>` (`m1_build_pjsip.sh`). SWIG 산출물은 불변 — `.so` 만 교체된다 |
 | transport 생성 | `PjLib.kt` 가 UDP·TCP 에 이어 TLS transport 를 만든다. 실패해도 평문 transport 로 계속한다(구 `.so` 호환) |
 | 서버 인증서 검증 | `TlsConfig.verifyServer = false` — 자가서명 인증서 배치 전제. CA 배포 방침이 서면 `caListFile`/`caBuf` 를 채우고 켠다([§8](#8-인증서-운영-요건-미정)) |
-| 계정 설정 | 프로비저닝의 `sip.transport`/`sip.port` 를 그대로 registrar·proxy URI 에 반영(`;transport=tls`) |
+| 계정 설정 | 프로비저닝의 가용 목록에서 고른 transport·포트를 registrar·proxy URI 에 반영(`;transport=tls`). 선택 모델은 [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다) |
 
 ### 7.1 선택 모델 — 단말이 고르고 서버는 가용 목록을 준다
 
@@ -319,20 +319,33 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 }
 ```
 
+`sip.port`/`sip.transport` 단일 필드는 **기본값의 유효 쌍**으로 함께 남는다 — 목록을 모르는 구 APK 가
+이 두 필드만 읽기 때문이다. 목록이 없는 응답을 받은 단말은 선택 UI 를 숨기고 단일 필드로만 동작한다.
+
 | 설정 | 역할 |
 |---|---|
-| `Provisioning.Services.{kind}.{port,tls_port}` | 가용 목록의 transport 별 포트 (CSP 의 `local_nodes` bind_port 와 일치) |
+| `Provisioning.Services.{kind}.port` | 평문 포트. UDP 항목의 포트이며, `tcp_port` 미설정 시 TCP 도 이 값을 쓴다(CSP 는 UDP/TCP 를 같은 포트로 청취) |
+| `Provisioning.Services.{kind}.tcp_port` | TCP 를 다른 포트로 분리 운용할 때만 지정. `0`/미설정 = 평문 포트 공용 |
+| `Provisioning.Services.{kind}.tls_port` | TLS 포트. **`0`/미설정 = 목록에 TLS 를 넣지 않는다** — TLS `local_node` 를 만들기 전에 죽은 선택지를 광고하지 않기 위함 |
 | `Provisioning.Services.{kind}.transport` | 서비스 기본값 |
 | `{volte,ptt}_subscriptions.sip_transport` | **가입자 기본값**(NULL=서비스 기본값). 강제가 아니라 권장값이며, 단말이 바꿀 수 있다 |
 
-#### 미구현 — 선택을 실제로 가능하게 하는 데 필요한 것
+각 포트는 CSP `local_nodes` 의 `bind_port` 와 일치해야 한다 — CSC 는 CSP 가 실제로 무엇을 청취
+중인지 조회하지 않고 위 설정을 그대로 내려보낸다. 기본값이 목록에 없으면(예: `sip_transport=TLS`
+인데 `tls_port` 미설정) **목록의 첫 항목으로 강등**한다. 도달 불가한 기본값을 내리지 않는다.
 
-| 항목 | 현재 | 필요 |
-|---|---|---|
-| 프로비저닝 응답 | `sip.transport` + `sip.port` **단일 값** | 위 `transports` 목록 추가(단일 필드는 기본값으로 유지 — 구 APK 호환) |
-| 앱 설정 모델 | `SipAccountConfig` 가 `serverPort` **하나**만 보유 | transport 별 포트를 알아야 한다. 지금은 앱에서 transport 만 바꾸면 포트가 따라가지 않는다 |
-| 앱 UI | transport 선택 화면 **없음** | 선택 + 저장 + 재등록 |
-| 반영 시점 | 프로비저닝 재취득은 **부팅 자동시작 경로에서만**(수동 실행은 캐시 사용) | 설정 변경 즉시 재등록 |
+#### 단말의 선택 — 저장·유지·반영
+
+| 단계 | 동작 |
+|---|---|
+| 선택 | 설정 화면이 가용 목록만 선택지로 띄운다(항목 라벨 = `TLS · 15061`). 선택지가 2개 미만이면 행을 숨긴다 |
+| 저장 | `ConfigStore.saveTransportChoice()` — `SipAccountConfig.withTransport()` 가 **transport 와 포트를 함께** 바꾼다. transport 만 바꾸면 옛 포트에 새 프로토콜로 붙어 등록이 실패한다 |
+| 유지 | 사용자 선택 표시가 남아 **프로비저닝 재취득이 선택을 덮지 않는다**(`ConfigStore.saveProvisioned()`). 선택한 transport 가 새 가용 목록에서 사라지면 서버 기본값으로 강등하고 표시도 지운다 |
+| 반영 | 설정 변경 경로를 그대로 탄다 — un-REGISTER → 2초 후 프로세스 재시작 → 새 계정으로 첫 등록 + 참여 채널 자동 복원. 계정 재생성이 필요하므로(registrar/proxy URI 가 transport·포트를 품는다) 재등록만으로는 부족하다. **가용 목록만 바뀐 경우는 재시작하지 않는다**(`sameRegistration()`) |
+| 재취득 | 부팅 자동시작 시 항상 재취득한다(VoLTE·PTT 동일). PTT 설정의 `서버 설정 다시 받기` 로 사용자가 즉시 최신화할 수도 있다 |
+
+수동 설정 모드(전 항목 직접 입력, 시험용)는 그대로 남는다 — 자동 구성을 끄지 않고 transport 만
+고르는 경로가 위 선택이고, 수동 모드는 프로비저닝 자체를 중지시키는 별개 축이다.
 
 서버측은 추가 작업이 없다 — 바인딩 집합이 transport 무관이고, 단말이 경로를 바꾸면 새 바인딩으로
 자연히 반영된다(옛 경로는 같은 transport 재등록 교체 또는 flow 실패로 회수).

@@ -220,7 +220,10 @@ private fun App(
     when (screen) {
         // CIMS-Phone 는 자체 로그인 없음 — CIMS 공유 계정으로 자동 구성(SSO). 계정 없으면 CIMS 앱 로그인 유도.
         Screen.GATE -> SsoGateScreen(
-            onProvisioned = { c -> store.setManual(false); store.save(c); config = c; screen = Screen.HOME },
+            onProvisioned = { c ->
+                // saveProvisioned = 사용자가 고른 transport 유지(서버 값은 기본값/권장).
+                store.setManual(false); store.saveProvisioned(c); config = store.load(); screen = Screen.HOME
+            },
             onManual = { store.setManual(true); screen = Screen.CONFIG },
         )
         Screen.CONFIG -> SettingsScreen(
@@ -2177,7 +2180,7 @@ private fun SettingsScreen(
                                 }
                             }.getOrNull()
                             reprovisioning = false
-                            cfg?.let(onApply)
+                            cfg?.let { store.saveProvisioned(it); onApply(store.load()) }
                         }
                     }
                 }
@@ -2196,7 +2199,24 @@ private fun SettingsScreen(
             PrefTextRow("서버 주소", config.serverHost, manual) { onApply(config.copy(serverHost = it)) }
             PrefTextRow("SIP 포트", if (config.serverPort > 0) config.serverPort.toString() else "", manual,
                 digitsOnly = true) { onApply(config.copy(serverPort = it.toIntOrNull() ?: 0)) }
-            PrefChoiceRow("전송 프로토콜", config.transport, manual) { onApply(config.copy(transport = it)) }
+            // 전송 프로토콜 — **SSO 자동 구성 상태에서도 고를 수 있다.** 서버가 알린 가용 목록이 곧
+            //   선택지이고, 서버 설정은 강제가 아니라 기본값(권장)이다(sip_tls_signaling.md §7.1).
+            //   목록을 안 주는 구 서버면 수동 모드에서만 편집(전 항목 노출, 포트는 위 행에서 직접 입력).
+            val tpOptions = config.transports.map { it.transport }
+            PrefChoiceRow(
+                title = "전송 프로토콜",
+                value = config.transport,
+                enabled = manual || tpOptions.size >= 2,
+                options = tpOptions.ifEmpty { SipAccountConfig.Transport.entries.toList() },
+                labelOf = { t ->
+                    config.transports.firstOrNull { it.transport == t }?.let { "${t.name} · ${it.port}" } ?: t.name
+                },
+            ) { t ->
+                // 선택 즉시 저장 — transport 와 포트가 함께 바뀌고, 사용자 선택 표시가 남아
+                //   다음 프로비저닝 재취득에도 유지된다(ConfigStore.saveTransportChoice).
+                store.saveTransportChoice(t)
+                onApply(store.load())
+            }
             PrefTextRow("서비스 도메인", config.domain, manual) { onApply(config.copy(domain = it)) }
 
             PrefCategory("계정")
@@ -2341,17 +2361,19 @@ private fun PrefChoiceRow(
     title: String,
     value: SipAccountConfig.Transport,
     enabled: Boolean,
+    options: List<SipAccountConfig.Transport>,
+    labelOf: (SipAccountConfig.Transport) -> String = { it.name },
     onChange: (SipAccountConfig.Transport) -> Unit,
 ) {
     var choosing by remember { mutableStateOf(false) }
-    PrefRow(title, value.name, enabled, onClick = { choosing = true })
+    PrefRow(title, labelOf(value), enabled, onClick = { choosing = true })
     if (choosing) {
         AlertDialog(
             onDismissRequest = { choosing = false },
             title = { Text(title) },
             text = {
                 Column {
-                    SipAccountConfig.Transport.entries.forEach { t ->
+                    options.forEach { t ->
                         Row(
                             Modifier
                                 .fillMaxWidth()
@@ -2360,7 +2382,7 @@ private fun PrefChoiceRow(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             RadioButton(selected = value == t, onClick = { onChange(t); choosing = false })
-                            Text(t.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(labelOf(t), style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }

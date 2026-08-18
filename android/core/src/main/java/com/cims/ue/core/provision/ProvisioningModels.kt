@@ -41,7 +41,10 @@ data class ServiceProfile(
     val kind: String,                 // "volte" | "ptt"
     val sipHost: String,
     val sipPort: Int,
-    val transport: String,            // UDP/TCP/TLS
+    val transport: String,            // UDP/TCP/TLS — 서버 권장 기본값(`sip.default`)
+    /** 가용 transport 목록(`sip.transports`) — 단말이 이 중에서 고른다. 목록을 안 주는 구 서버
+     *  응답이면 **빈 목록**이 되고, 단말은 선택 UI 를 숨긴 채 단일 필드([transport]/[sipPort])로 동작한다. */
+    val transports: List<SipAccountConfig.TransportEndpoint> = emptyList(),
     val domain: String,
     val msisdn: String,
     val imsi: String,
@@ -67,6 +70,7 @@ data class ServiceProfile(
             serverPort = sipPort,
             transport = runCatching { SipAccountConfig.Transport.valueOf(transport.uppercase()) }
                 .getOrDefault(SipAccountConfig.Transport.UDP),
+            transports = transports,
             domain = domain,
             msisdn = msisdn,
             imsi = imsi,

@@ -89,7 +89,7 @@ PSP_NOTIFY_PORT = 4421
 # 자동 프로비저닝(/provisioning/me, android_ue_provisioning.md §3) —
 #   서비스 kind 별 시그널링 서버/도메인. host 빈값이면 요청 Host(=UE 가 접속한 IP) 사용(올인원 기본).
 #   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 지정.
-PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,transport,domain}, "ptt":{...}}}
+PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,tcp_port,tls_port,transport,domain}, "ptt":{...}}}
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
 
@@ -1735,19 +1735,35 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     }
     if kind == "ptt":
         account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
-    # transport 는 가입자 override(subscriptions.sip_transport) 우선, 없으면 서비스 설정.
-    #   TLS 전환을 계정 단위로 진행하기 위한 것이다(서비스 단위만 있으면 전 단말 동시 전환뿐).
-    #   TLS 로 해석되면 접속 포트도 tls_port 로 바꾼다 — 같은 포트로는 평문/TLS 를 겸하지 않는다.
-    transport = (sip_transport or svc.get('transport', 'UDP') or 'UDP').upper()
-    port = int(svc.get('port', 5060))
-    if transport == 'TLS':
-        port = int(svc.get('tls_port') or port)
+    # 가용 transport 목록 — 서버는 세 transport 를 동시에 청취하며 강제하지 않는다. 단말이 이 중
+    #   하나를 고르고, 고른 경로가 그 단말의 도달 경로(바인딩)가 된다(sip_tls_signaling.md §7.1).
+    #   transport 마다 포트가 다르므로 목록에 포트를 함께 싣는다 — 같은 포트로 평문/TLS 를 겸하지
+    #   않는다. tcp_port 미설정 = 평문 포트 공용(CSP 는 UDP/TCP 를 같은 포트로 청취).
+    #   ⚠ 각 포트는 CSP local_nodes 의 bind_port 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다).
+    plain_port = int(svc.get('port', 5060))
+    tls_port = int(svc.get('tls_port') or 0)
+    transports = [
+        {"transport": "UDP", "port": plain_port},
+        {"transport": "TCP", "port": int(svc.get('tcp_port') or plain_port)},
+    ]
+    if tls_port:
+        transports.append({"transport": "TLS", "port": tls_port})
+    # 기본값(권장) = 가입자 override(subscriptions.sip_transport) 우선, 없으면 서비스 설정.
+    #   강제가 아니라 권장값이며 단말이 목록에서 바꿀 수 있다. 목록에 없으면(예: TLS 포트 미설정)
+    #   첫 항목으로 강등한다 — 도달 불가한 기본값을 내리지 않는다.
+    default = (sip_transport or svc.get('transport', 'UDP') or 'UDP').upper()
+    if not any(t['transport'] == default for t in transports):
+        default = transports[0]['transport']
+    default_port = next(t['port'] for t in transports if t['transport'] == default)
     profile = {
         "kind": kind,
         "sip": {
             "host": svc.get('host') or host_ip,     # 빈값 → 요청 Host(올인원). 다중노드면 CSP/PSP VIP.
-            "port": port,
-            "transport": transport,
+            # port/transport = 기본값의 유효 쌍. 목록을 모르는 구 단말이 이 두 필드만 읽으므로 유지한다.
+            "port": default_port,
+            "transport": default,
+            "transports": transports,
+            "default": default,
             "domain": svc.get('domain') or IDMS_DOMAIN,
         },
         "account": account,
