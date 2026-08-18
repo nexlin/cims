@@ -98,18 +98,25 @@ object PjLib {
             )
         }.onFailure { Log.w(TAG, "TCP transport create failed (UDP-only fallback)", it) }
 
-        // TLS transport — 계정 설정이 transport=tls 일 때 사용한다(프로비저닝이 서비스/가입자
-        //   단위로 지정). 네이티브에 TLS 가 없으면(구 .so) 생성이 실패하므로 경고만 남기고
-        //   UDP/TCP 로 계속한다.
-        //   verifyServer=false: 현재 배치는 사설/자가서명 인증서라 CA 검증을 켤 수 없다.
-        //   CA 배포 방침이 서면 caListFile(또는 caBuf)를 채우고 true 로 올린다
-        //   (docs/design/features/sip_tls_signaling.md §8).
+        // TLS transport — 계정 설정이 transport=tls 일 때 사용한다(단말이 가용 목록에서 고른다).
+        //   네이티브에 TLS 가 없으면(구 .so) 생성이 실패하므로 경고만 남기고 UDP/TCP 로 계속한다.
+        //
+        //   verifyServer=true: 서버 인증서 검증을 **집행**한다. 앵커는 APK 동봉 사설 CA
+        //   (CimsTrustStore). 검사 자체는 이 플래그와 무관하게 항상 수행되고 verify_status 에
+        //   기록되며, 이 플래그가 실패 시 연결을 끊을지를 결정한다(sip_transport_tls.c 의
+        //   `verify_status && verify_server` 판정). 끄면 체인·신원 실패를 알고도 무시한다 =
+        //   도청은 막지만 중간자는 막지 못한다.
+        //   ⚠ caListFile/certFile/privKeyFile 이 설정되면 caBuf 가 무시된다(pjsua2 계약) — 비워둔다.
+        //   서버 인증서 요건·발급 절차는 docs/design/features/sip_tls_signaling.md §8.
         runCatching {
             endpoint.transportCreate(
                 pjsip_transport_type_e.PJSIP_TRANSPORT_TLS,
                 TransportConfig().apply {
                     port = 0
-                    tlsConfig = TlsConfig().apply { verifyServer = false }
+                    tlsConfig = TlsConfig().apply {
+                        caBuf = CimsTrustStore.CA_BUNDLE
+                        verifyServer = true
+                    }
                 },
             )
             Log.i(TAG, "TLS transport created")

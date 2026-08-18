@@ -11,10 +11,11 @@ transport 로 **일괄 전환하는 것이 목표가 아니다** — 서버는 �
 [sip_runtime_config.md](sip_runtime_config.md) · [modules/csp.md](../modules/csp.md) ·
 [android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md)
 
-> **상태**: 서버는 세 transport 를 동시에 서비스하며 혼합 운용을 실측했다(001=UDP·002=TLS 동거,
-> 그룹콜 성립). 단말도 TLS 등록·통화가 된다. 남은 것은 **①단말 선택 모델**(프로비저닝이 가용
-> transport 목록을 내리고 단말이 고르는 형태 — [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다))과
-> **②인증서 운영 방침**([§8](#8-인증서-운영), 상용 게이트)이다.
+> **상태**: 서버는 세 transport 를 동시에 서비스하고 단말이 가용 목록에서 고른다
+> ([§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다)). 혼합 운용 실측 완료(001=UDP·002=TLS
+> 동거, 그룹콜 성립). 인증서는 **사설 CA 기반**이며 단말이 서버 인증서를 **검증한다**
+> ([§8](#8-인증서-운영)) — 신뢰하지 않는 인증서는 등록이 거절된다(`PJSIP_TLS_ECERTVERIF`).
+> 남은 것은 단말 대면 나머지 평면(CSC 4430)의 검증 활성과 인증서 갱신·감시 운영이다([§8.5](#85-운영-잔여-항목)).
 
 ## 1. 범위와 전제
 
@@ -295,7 +296,7 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 | OpenSSL | android-arm64 정적 빌드(`android/docs/scripts/m1_build_openssl.sh` → `$HOME/opt/openssl-android-arm64`) |
 | pjproject | `config_site.h` 의 `PJSIP_HAS_TLS_TRANSPORT 1` + `configure-android --with-ssl=<prefix>` (`m1_build_pjsip.sh`). SWIG 산출물은 불변 — `.so` 만 교체된다 |
 | transport 생성 | `PjLib.kt` 가 UDP·TCP 에 이어 TLS transport 를 만든다. 실패해도 평문 transport 로 계속한다(구 `.so` 호환) |
-| 서버 인증서 검증 | `TlsConfig.verifyServer = false` — **검증 결과를 집행하지 않는다**. pjsip 은 체인·신원 검사를 수행해 `verify_status` 에 기록하지만, 이 플래그가 꺼져 있으면 실패를 무시하고 연결을 유지한다(`sip_transport_tls.c` 의 `verify_status && verify_server` 판정). 서버측 CA 전환은 끝났으므로 남은 것은 `caBuf` 에 CA 를 넣고 이 플래그를 올리는 것뿐이다([§8.5](#85-남은-결정--상용-게이트)) |
+| 서버 인증서 검증 | `TlsConfig.verifyServer = true` + `caBuf = CimsTrustStore.CA_BUNDLE`(APK 동봉 사설 CA). 검사 자체는 플래그와 무관하게 항상 수행돼 `verify_status` 에 기록되고, 이 플래그가 **실패 시 연결을 끊을지**를 결정한다(`sip_transport_tls.c` 의 `verify_status && verify_server`). 실패 시 transport shutdown → 등록 503 `PJSIP_TLS_ECERTVERIF`. ⚠ `caListFile`/`certFile`/`privKeyFile` 이 설정되면 `caBuf` 가 무시된다 |
 | 계정 설정 | 프로비저닝의 가용 목록에서 고른 transport·포트를 registrar·proxy URI 에 반영(`;transport=tls`). 선택 모델은 [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다) |
 
 ### 7.1 선택 모델 — 단말이 고르고 서버는 가용 목록을 준다
@@ -432,12 +433,14 @@ openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
 `verifyServer=false` 단말은 인증서가 무엇이든 접속하므로, 서버 인증서 교체는 **기존 단말에 무영향**
 이다(재기동에 따른 재등록만 발생). 따라서 서버측 전환을 먼저 끝내고 단말은 점진 전환할 수 있다.
 
-### 8.5 남은 결정 — 상용 게이트
+### 8.5 운영 잔여 항목
 
 | 항목 | 상태 |
 |---|---|
-| 단말 CA 주입 + `verifyServer=true` | **미적용**. `caBuf` 에 CA PEM(여러 인증서 모두 적재됨) + `caListFile`·`certFile`·`privKeyFile` 은 비워야 한다 |
-| CA 배포 경로 | **APK 동봉이 정본.** 프로비저닝(CSC 4430)은 자신도 자가서명 + `allowInsecureTls=true` 라 신뢰의 최초 씨앗을 그 채널로 받으면 의미가 반감된다 |
+| 단말 CA 주입 + `verifyServer=true` | **적용됨**(`CimsTrustStore.CA_BUNDLE` → `caBuf`). 음성 대조군까지 실측 — 미신뢰 인증서는 503 `PJSIP_TLS_ECERTVERIF` 로 거절된다 |
+| CA 배포 경로 | **APK 동봉.** 프로비저닝(CSC 4430)은 자신도 자가서명 + `allowInsecureTls=true` 라 신뢰의 최초 씨앗을 그 채널로 받으면 의미가 반감된다 |
+| CSC(4430) 검증 | **미적용** — 앱이 `allowInsecureTls=true`. 같은 Service CA 로 CSC 인증서를 발급하면 앵커 추가 없이 정리된다 |
+| CA 교체(무중단) | `CA_BUNDLE` 에 신규 CA 를 추가한 APK 선배포 → 서버 인증서 교체 → 다음 배포에서 구 CA 제거 |
 | 클라이언트 인증서(상호 TLS) | 미채택. 단말 인증은 SIP Digest 가 담당. 채택 시 `tls_verify_peer=true` + CA 파일 지정이 필요(psip 은 CA 미설정 시 `CertificateRequest` 를 보내지 않는다) |
 | FQDN 전환 | 미결. 전환 시 프로비저닝 `host`·인증서 SAN·DNS 등록 세 개를 동시에 맞춰야 한다 |
 | 갱신 | leaf 2년. 무중단 교체는 재기동이 필요하다(§8.4) |
@@ -450,13 +453,14 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 ([§6](#6-서버-구현-상태))·단말 TLS([§7](#7-단말-구현-상태))·바인딩 구조
 ([registration_binding_set.md](registration_binding_set.md))는 구현·실측 완료다.
 
+단말 선택 모델([§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다))과 서버 인증서 검증
+([§8](#8-인증서-운영))도 구현·실측 완료다. 남은 것은 운영 항목이다.
+
 | # | 과제 | 성격 | 검증 |
 |---|---|---|---|
-| 1 | **단말 선택 모델**([§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다)) — 프로비저닝 `transports` 목록 + 앱의 transport 별 포트 보유 + 선택 UI | 기능 (csc + 앱) | 세 transport 를 앱에서 골라 각각 등록·통화 |
-| 2 | **단말 서버 인증서 검증**([§8.5](#85-남은-결정--상용-게이트)) — CA 를 APK 에 동봉하고 `verifyServer=true`. 서버측 사설 CA 전환은 완료 | **상용 게이트** | 단말 `verifyServer=true` 로 등록 성립 |
-
-1과 2는 독립이다. 다만 단말이 TLS 를 실제로 고르게 하려면(1) 그 TLS 가 신뢰 가능해야(2) 하므로,
-상용 배치에서는 2가 선행한다. 랩·시험 배치에서는 1만으로 진행할 수 있다.
+| 1 | **CSC(4430) 검증 활성** — 앱이 `allowInsecureTls=true` 로 붙는다. 같은 Service CA 로 CSC 인증서를 발급하면 앵커 추가 없이 정리된다 | 보안 | 프로비저닝·MCPTT API 가 검증 하에 동작 |
+| 2 | **인증서 갱신·만료 감시**([§8.5](#85-운영-잔여-항목)) — leaf 2년, 교체에 CSP 재기동 필요, 만료 알람 미구현 | 운영 | 만료 임박 알람 발생 + 무중단 교체 |
+| 3 | **FQDN 전환**(선택) — 프로비저닝 `host`·인증서 SAN·DNS 등록 3개 동시 정합 | 구성 | FQDN 으로 등록 성립 |
 
 시험 클라이언트는 `cspsim -transport {udp,tcp,tls}` 다 — 단말 빌드 없이 서버측 전 구간을 실측할
 수 있고, 한 계정을 여러 경로로 등록시켜 바인딩 집합도 만들 수 있다.
@@ -474,6 +478,8 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | 7 | UDP 계정의 승격 TCP 오염 차단 | 회귀 확인 (과도기 필수) |
 | 8 | 절전(doze) 구간 통과 | [§5](#5-실패-모드의-변화) 의 로컬 종료 발현 여부 |
 | 9 | TLS 리스너 hot-add / 잘못된 인증서로 부트 | handshake 성립 / 서버는 뜨고 TLS 만 비활성 + A-PRC-012 open |
+| 10 | **서버 인증서 검증(정상)** | 단말 로그 `CA certificates loaded from buffer (cnt=N)` + 등록 200 |
+| 11 | **서버 인증서 검증(음성 대조군)** — 리스너를 CA 서명이 아닌 인증서로 교체 | 등록 **503 `PJSIP_TLS_ECERTVERIF`** + TLS 연결 미성립. 통과해 버리면 검증이 집행되지 않는다는 뜻 |
 
 진단 시 목적지 판정은 `Target=` 표기가 아니라 직후의 `UdpSend`/`TcpSend`/`TlsSend` NETWORK 로그를
 정본으로 본다. latch 갱신 로그의 transport 값은 **수신값**이므로 저장 상태 판정에 쓸 수 없다
@@ -495,6 +501,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `ext/psip/SipStack/TcpSocketMap.cpp` | 연결 재사용 맵 (TCP·TLS 공용) |
 | `ext/psip/SipStack/SipStackComm.hpp` | 송신 transport 분기, 수신 Via 각인 |
 | `android/docs/scripts/m1_build_pjsip.sh` | UE pjproject 빌드 (OpenSSL 3.0.15 정적 + `PJSIP_HAS_TLS_TRANSPORT`) |
-| `android/core/.../sip/PjLib.kt` | UE transport 생성 |
+| `android/core/.../sip/PjLib.kt` | UE transport 생성 + 서버 인증서 검증 설정 |
+| `android/core/.../sip/CimsTrustStore.kt` | UE 신뢰 앵커(APK 동봉 사설 CA PEM). CA 교체 시 여기에 추가 |
 | `csc/src/services/mcptt.py` | 프로비저닝 가용 transport 목록 제공(§7.1) |
 | `/home/cims/certs/` | `cims-service-ca.{crt,key}` · `csp.{crt,key}` · `csp-chain.pem` (키 권한 600) |
