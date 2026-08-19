@@ -29,6 +29,20 @@
 static SSL_CTX	* gpsttServerCtx = NULL;
 static SSL_CTX	* gpsttClientCtx = NULL;
 
+/** gpsttServerCtx 교체·참조 획득을 직렬화한다 — 무중단 인증서 교체(SSLServerCtxReload)가
+ *  accept 스레드와 동시에 일어나기 때문이다. 핸드셰이크당 한 번 잠그는 비용은 무시할 수준. */
+static CSipMutex gclsServerCtxMutex;
+
+/** SSL_CTX 참조 카운트 증가 (OpenSSL 1.1 이전은 CRYPTO_add). */
+static void _SslCtxUpRef( SSL_CTX * psttCtx )
+{
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	SSL_CTX_up_ref( psttCtx );
+#else
+	CRYPTO_add( &psttCtx->references, 1, CRYPTO_LOCK_SSL_CTX );
+#endif
+}
+
 #if OPENSSL_VERSION_NUMBER >= 0x10000003L
 static const SSL_METHOD	* gpsttServerMeth;
 static const SSL_METHOD * gpsttClientMeth;
@@ -202,11 +216,13 @@ bool SSLServerStop( )
 	{
 		SSLStop();
 
+		gclsServerCtxMutex.acquire();
 		if( gpsttServerCtx )
 		{
 			SSL_CTX_free( gpsttServerCtx );
 			gpsttServerCtx = NULL;
 		}
+		gclsServerCtxMutex.release();
 
 		if( gpsttClientCtx )
 		{
@@ -384,6 +400,45 @@ void SSLServerCtxFree( SSL_CTX * ctx )
 	if( ctx ) SSL_CTX_free( ctx );
 }
 
+SSL_CTX * SSLServerCtxAcquire( )
+{
+	SSL_CTX * psttCtx = NULL;
+
+	gclsServerCtxMutex.acquire();
+	psttCtx = gpsttServerCtx;
+	if( psttCtx ) _SslCtxUpRef( psttCtx );
+	gclsServerCtxMutex.release();
+
+	return psttCtx;
+}
+
+bool SSLServerCtxReload( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile )
+{
+	// 새 ctx 를 먼저 완성한다 — 파일 오타·권한 문제로 실패하면 기존 인증서를 그대로 유지해야 한다
+	//   (교체 실패가 접속점 중단으로 번지지 않게).
+	SSL_CTX * psttNew = SSLServerCtxCreate( szCertFile, szKeyFile, szCaCertFile );
+	if( psttNew == NULL )
+	{
+		CLog::Print( LOG_ERROR, "SSLServerCtxReload: 새 ctx 생성 실패 — 기존 인증서 유지 (cert=%s)",
+		             szCertFile ? szCertFile : "" );
+		return false;
+	}
+
+	SSL_CTX * psttOld = NULL;
+	gclsServerCtxMutex.acquire();
+	psttOld = gpsttServerCtx;
+	gpsttServerCtx = psttNew;
+	gclsServerCtxMutex.release();
+
+	// 우리 참조만 해제한다. 이미 맺어진 연결의 SSL 객체와 지금 핸드셰이크 중인 SSLServerCtxAcquire
+	//   보유분이 각자 참조를 들고 있어, 실제 소멸은 마지막 사용자가 끝난 뒤다 → **무중단**.
+	if( psttOld ) SSL_CTX_free( psttOld );
+
+	CLog::Print( LOG_SYSTEM, "SSLServerCtxReload: TLS 인증서 교체 완료 — 기존 연결 유지, 새 핸드셰이크부터 적용 (cert=%s key=%s)",
+	             szCertFile ? szCertFile : "", ( szKeyFile && szKeyFile[0] ) ? szKeyFile : "<same as cert>" );
+	return true;
+}
+
 bool SSLServerIsStarted( )
 {
 	return gpsttServerCtx != NULL;
@@ -391,10 +446,27 @@ bool SSLServerIsStarted( )
 
 bool SSLAcceptWithCtx( Socket iFd, SSL_CTX * ctx, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout )
 {
-	SSL_CTX * pUse = ctx ? ctx : gpsttServerCtx;
+	// 전역 ctx 로 폴백하는 경우 **참조를 획득해서** 쓴다 — 무중단 교체(SSLServerCtxReload)가
+	//   포인터를 바꾸고 옛 ctx 를 해제하는 사이에 SSL_new 가 dangling 을 잡는 것을 막는다.
+	//   SSL_new 가 성공하면 그 SSL 이 자기 참조를 들고 있으므로 여기서 우리 참조는 놓는다.
+	SSL_CTX * pUse = ctx;
+	bool bOwnRef = false;
+	if( pUse == NULL )
+	{
+		pUse = SSLServerCtxAcquire();
+		bOwnRef = ( pUse != NULL );
+	}
 	SSL * psttSsl;
 
-	if( (psttSsl = SSL_new( pUse )) == NULL )
+	if( pUse == NULL )
+	{
+		CLog::Print( LOG_ERROR, "SSLAcceptWithCtx: server ctx is null" );
+		return false;
+	}
+
+	psttSsl = SSL_new( pUse );
+	if( bOwnRef ) SSL_CTX_free( pUse );
+	if( psttSsl == NULL )
 	{
 		CLog::Print( LOG_ERROR, "SSLAcceptWithCtx: SSL_new() error" );
 		return false;
@@ -464,7 +536,15 @@ bool SSLAccept( Socket iFd, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyD
 {
 	SSL * psttSsl;
 
-	if( (psttSsl = SSL_new( gpsttServerCtx )) == NULL )
+	SSL_CTX * pCtx = SSLServerCtxAcquire();
+	if( pCtx == NULL )
+	{
+		CLog::Print( LOG_ERROR, "SSLAccept: server ctx is null" );
+		return false;
+	}
+	psttSsl = SSL_new( pCtx );
+	SSL_CTX_free( pCtx );
+	if( psttSsl == NULL )
 	{
 		CLog::Print( LOG_ERROR, "SSL_new() error" );
 	  return false;

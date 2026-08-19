@@ -95,6 +95,13 @@ public:
 	                     int& outId );
 	bool RemoveTlsListener( int iExtId );
 	void GetTlsListenerInfo( std::vector<CSipStackTlsListener*>& outList );
+
+	/** 전역 서버 TLS 인증서를 **무중단 교체**한다(소켓 유지, 재기동 없음).
+	 *  bootstrap 으로 개설된 TLS 접속점(Start 시 m_iLocalTlsPort 경로)은 런타임 제거가 불가해
+	 *  종래에는 인증서 갱신에 프로세스 재기동이 필요했다. 이 경로는 ctx 만 갈아끼우므로
+	 *  이미 맺어진 연결은 유지되고 새 핸드셰이크부터 새 인증서가 쓰인다.
+	 *  실패 시 기존 인증서를 유지하고 false. 성공 시 m_clsSetup 의 경로도 새 값으로 갱신한다. */
+	bool ReloadTlsServerCert( const char* pszCertFile, const char* pszKeyFile, const char* pszCaCertFile );
 #endif
 
 	bool Execute( struct timeval * psttTime );

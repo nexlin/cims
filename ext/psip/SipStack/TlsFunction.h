@@ -53,6 +53,16 @@ void SSLFinal();
 SSL_CTX * SSLServerCtxCreate( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile );
 void SSLServerCtxFree( SSL_CTX * ctx );
 
+/** 전역(stack-global) 서버 ctx 의 **참조를 획득**한다. 사용 후 SSLServerCtxFree 로 해제.
+ *  무중단 교체(SSLServerCtxReload)와 경합해도 dangling 을 잡지 않도록 하는 유일한 안전 경로다. */
+SSL_CTX * SSLServerCtxAcquire( );
+
+/** 전역 서버 ctx 를 새 인증서로 **무중단 교체**한다.
+ *  이미 맺어진 TLS 연결은 각자 SSL 객체가 옛 ctx 를 참조해 그대로 유지되고, **새 핸드셰이크만**
+ *  새 인증서를 쓴다. 소켓을 닫지 않으므로 등록·통화가 끊기지 않는다.
+ *  새 ctx 생성이 실패하면 기존 인증서를 유지하고 false 를 돌려준다(교체 실패 ≠ 접속점 중단). */
+bool SSLServerCtxReload( const char * szCertFile, const char * szKeyFile, const char * szCaCertFile );
+
 /** 지정된 ctx 로 accept. ctx 가 NULL 이면 기본 global server ctx 사용. */
 bool SSLAcceptWithCtx( Socket iFd, SSL_CTX * ctx, SSL ** ppsttSsl, bool bCheckClientCert, int iVerifyDepth, int iAcceptTimeout );
 

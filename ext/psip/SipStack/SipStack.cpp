@@ -1112,4 +1112,21 @@ void CSipStack::GetTlsListenerInfo( std::vector<CSipStackTlsListener*>& outList 
 	outList = m_vecTlsListeners;
 	m_clsTlsListenerMutex.release();
 }
+
+bool CSipStack::ReloadTlsServerCert( const char * pszCertFile, const char * pszKeyFile, const char * pszCaCertFile )
+{
+	if( pszCertFile == NULL || pszCertFile[0] == '\0' )
+	{
+		CLog::Print( LOG_ERROR, "ReloadTlsServerCert: cert 경로가 비어 있다" );
+		return false;
+	}
+
+	if( SSLServerCtxReload( pszCertFile, pszKeyFile, pszCaCertFile ) == false ) return false;
+
+	// 성공분만 설정에 반영한다 — 실패 시 옛 경로가 남아야 다음 비교가 다시 교체를 시도한다.
+	m_clsSetup.m_strCertFile   = pszCertFile;
+	m_clsSetup.m_strKeyFile    = pszKeyFile ? pszKeyFile : "";
+	m_clsSetup.m_strCaCertFile = pszCaCertFile ? pszCaCertFile : "";
+	return true;
+}
 #endif // USE_TLS

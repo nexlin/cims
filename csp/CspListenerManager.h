@@ -65,6 +65,9 @@ private:
     bool _addListenerToStack( const ManagedInfo &m, int &outId );
     /** protocol 에 맞는 psip RemoveXxxListener 호출. */
     bool _removeListenerFromStack( const ManagedInfo &m );
+    /** bootstrap 이 연 TLS 접속점의 인증서가 바뀌었으면 **무중단 교체**한다(재기동 불필요).
+     *  ListenerManager 소유가 아니어서 remove+add 가 불가한 접속점을 위한 경로. */
+    void _reloadBootstrapTlsCertIfChanged( const ManagedInfo &d );
 };
 
 extern CCspListenerManager gclsListenerManager;

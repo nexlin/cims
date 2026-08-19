@@ -418,11 +418,31 @@ cat csp.crt cims-service-ca.crt > csp-chain.pem
 chmod 600 cims-service-ca.key csp.key
 ```
 
-### 8.4 교체 절차 — 리스너 재개설이 필요하다
+### 8.4 교체 절차 — 무중단이다 (재기동 불필요)
 
-⚠️ **인증서·키 경로는 기동 캡처 항목이다.** `local_nodes` 를 갱신하고 SIGUSR1 을 보내면 새 경로는
-읽히지만, bind 주소·포트가 그대로면 `ListenerManager` 가 `skip … bootstrap 이 이미 바인딩` 으로
-리스너를 다시 열지 않아 **옛 SSL 컨텍스트가 유지된다.** 반영에는 CSP 재기동이 필요하다.
+`local_nodes` 의 `tls_cert_path`/`tls_key_path` 를 갱신하고 SIGUSR1 을 보내면 **소켓을 닫지 않고
+인증서만 갈아끼운다.** 이미 맺어진 TLS 연결은 각자 SSL 객체가 옛 `SSL_CTX` 를 참조해 그대로
+유지되고, **새 핸드셰이크부터** 새 인증서를 쓴다. 등록·통화가 끊기지 않는다.
+
+동작 구조:
+
+| 계층 | 역할 |
+|---|---|
+| `SSLServerCtxReload()` (psip) | 새 ctx 를 **먼저 완성**한 뒤 전역 포인터를 뮤텍스 아래에서 교체하고 옛 ctx 의 자기 참조만 해제. 실제 소멸은 마지막 사용자가 끝난 뒤 |
+| `SSLServerCtxAcquire()` (psip) | accept 경로가 전역 ctx 를 쓸 때 **참조를 획득**한다. 교체와 경합해도 dangling 을 잡지 않는 유일한 안전 경로 |
+| `CSipStack::ReloadTlsServerCert()` | 위를 감싸고 성공분만 `m_clsSetup` 경로에 반영(실패 시 옛 경로 유지 → 다음 Sync 가 재시도) |
+| `CspListenerManager::Sync()` | bootstrap 접속점의 인증서 경로 변경을 감지해 위를 호출 |
+
+**bind 주소·포트가 바뀌면** 여전히 리스너 재개설이 필요하다 — 그 경우 ListenerManager 소유
+접속점은 remove+add(hot rebind)로 처리되고, bootstrap 접속점은 런타임 제거가 불가하므로 재기동이
+필요하다. 즉 **인증서만 바뀔 때가 무중단**이다(갱신 주기의 실제 사례).
+
+교체가 실패하면(경로 오타·권한·키 불일치) **옛 인증서로 계속 서비스한다** — 접속점을 내리지 않고
+`ERROR` 로그만 남기며, 설정값을 갱신하지 않으므로 다음 Sync 가 다시 시도한다.
+
+⚠️ **`_reloadBootstrapTlsCertIfChanged()` 는 `Sync()` 가 `m_mutex` 를 잡은 상태로 호출된다.** 그 안에서
+`CheckCertExpiry()`(같은 뮤텍스)를 부르면 메인 스레드가 자기 교착에 빠져 SIGUSR1·세션 타이머·등록
+만료 sweep 이 **전부 정지한다**(실측 확인). 만료 재평가는 호출부가 `Sync()` 뒤에 수행한다.
 
 교체는 단말을 만지기 전에 서버측만으로 검증할 수 있다.
 
@@ -455,7 +475,7 @@ openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
 | CA 교체(무중단) | `CA_BUNDLE` 에 신규 CA 를 추가한 APK 선배포 → 서버 인증서 교체 → 다음 배포에서 구 CA 제거 |
 | 클라이언트 인증서(상호 TLS) | 미채택. 단말 인증은 SIP Digest 가 담당. 채택 시 `tls_verify_peer=true` + CA 파일 지정이 필요(psip 은 CA 미설정 시 `CertificateRequest` 를 보내지 않는다) |
 | FQDN 전환 | 미결. 전환 시 프로비저닝 `host`·인증서 SAN·DNS 등록 세 개를 동시에 맞춰야 한다 |
-| 갱신 | leaf 2년. 무중단 교체는 재기동이 필요하다(§8.4) |
+| 갱신 | leaf 2년. **무중단 교체 가능**([§8.4](#84-교체-절차--무중단이다-재기동-불필요)) — 소켓 유지, 기존 연결 보존, 새 핸드셰이크부터 적용 |
 | 폐기 | CRL/OCSP 배포 경로 없음(air-gapped) → **짧은 유효기간 + 정기 교체**로 대체 |
 | 감시 | **구현됨** — `A-PRC-009 cert_expiring`(접속점 단위). CSP 가 기동 직후·SIGUSR1 reload·1시간 주기로 평가하고, **파일 안의 전 인증서 중 가장 이른 만료**를 기준으로 삼는다(체인 PEM 이면 CA 만료도 걸린다). **30일 이하 warning / 7일 이하 critical**, 임계 초과면 close 로 자연 회수. 만료된 인증서는 로드가 되므로 A-PRC-012(개설 실패)로는 잡히지 않는다 — 별 축이 필요한 이유 |
 
@@ -471,7 +491,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | # | 과제 | 성격 | 검증 |
 |---|---|---|---|
 | 1 | ~~CSC 검증~~ — 서버·앱 양측 완료([§8.5](#85-운영-잔여-항목)). 단말이 붙는 두 평면(CSP 15061 · CSC 4421/4430)이 모두 **같은 앵커 하나**로 검증된다 | — | 완료 |
-| 2 | **무중단 교체** — 인증서 경로가 기동 캡처 항목이라 교체에 CSP 재기동(전 transport 순단)이 필요하다. `SSL_CTX` 를 새로 만들어 리스너 컨텍스트만 교체하면 기존 연결은 옛 인증서로 유지되고 새 핸드셰이크만 새 인증서를 받아 **무중단**이 된다. 만료 감시가 붙었으므로 시한 여유는 확보돼 있다 | 운영 | 통화 중 인증서 교체 → 끊김 0 |
+| 2 | ~~무중단 교체~~ — 구현·실측 완료([§8.4](#84-교체-절차--무중단이다-재기동-불필요)). 인증서 교체 3회를 관통해 동일 TLS 연결이 유지되고 그 위에서 그룹콜이 성립했다 | — | 완료 |
 | 3 | **FQDN 전환**(선택) — 프로비저닝 `host`·인증서 SAN·DNS 등록 3개 동시 정합 | 구성 | FQDN 으로 등록 성립 |
 
 시험 클라이언트는 `cspsim -transport {udp,tcp,tls}` 다 — 단말 빌드 없이 서버측 전 구간을 실측할
@@ -509,7 +529,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `ext/psip/SipStack/SipStack.cpp` | 리스너 생성·pool 초기화 (T1·T2) |
 | `ext/psip/SipStack/SipTlsThread.cpp` | TLS accept·worker (T1·T4) |
 | `ext/psip/SipStack/SipTlsClientThread.cpp` | 아웃바운드 TLS 클라이언트 |
-| `ext/psip/SipStack/TlsFunction.cpp` | SSL ctx 생성·accept·connect. 인증서는 체인 파일로 적재(§8.2), 클라이언트 인증서 요구는 CA 설정 시에만 |
+| `ext/psip/SipStack/TlsFunction.cpp` | SSL ctx 생성·accept·connect. 인증서는 체인 파일로 적재(§8.2), 무중단 교체(`SSLServerCtxReload`)와 참조 획득(`SSLServerCtxAcquire`), 클라이언트 인증서 요구는 CA 설정 시에만 |
 | `ext/psip/SipStack/TcpSocketMap.cpp` | 연결 재사용 맵 (TCP·TLS 공용) |
 | `ext/psip/SipStack/SipStackComm.hpp` | 송신 transport 분기, 수신 Via 각인 |
 | `android/docs/scripts/m1_build_pjsip.sh` | UE pjproject 빌드 (OpenSSL 3.0.15 정적 + `PJSIP_HAS_TLS_TRANSPORT`) |

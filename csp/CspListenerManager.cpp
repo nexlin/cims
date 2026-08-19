@@ -223,6 +223,10 @@ bool CCspListenerManager::Sync() {
         if ( _isAlreadyBound( d.protocol, d.bindIp, d.port ) ) {
             CLog::Print( LOG_INFO, "ListenerManager: skip id=%d %s %s:%d — bootstrap 이 이미 바인딩", d.id,
                          d.protocol.c_str(), d.bindIp.c_str(), d.port );
+            // 인증서만 바뀐 경우는 재기동 없이 반영한다 — 부트스트랩 접속점은 remove+add 로
+            //   재개설할 수 없으므로 종래에는 갱신에 프로세스 재기동이 필요했다. ctx 만 갈아끼우면
+            //   이미 맺어진 연결은 유지되고 새 핸드셰이크부터 새 인증서를 쓴다.
+            _reloadBootstrapTlsCertIfChanged( d );
             _listenerAlarm( d.protocol, d.bindIp, d.port, false );
             continue;
         }
@@ -252,6 +256,32 @@ void CCspListenerManager::GetManagedIds( std::vector<int> &out ) {
     std::lock_guard<std::mutex> lk( m_mutex );
     out.clear();
     for ( const auto &m : m_vecManaged ) out.push_back( m.id );
+}
+
+void CCspListenerManager::_reloadBootstrapTlsCertIfChanged( const ManagedInfo &d ) {
+    if ( d.protocol != "TLS" || d.tlsCertPath.empty() ) return;
+
+    // 현재 적용된 값은 psip 설정이 정본이다 — ReloadTlsServerCert 가 성공하면 그 값이 갱신되므로
+    //   같은 경로로 두 번 교체하지 않는다.
+    CSipStackSetup &clsSetup = gclsUserAgent.m_clsSipStack.m_clsSetup;
+    if ( clsSetup.m_strCertFile == d.tlsCertPath && clsSetup.m_strKeyFile == d.tlsKeyPath &&
+         clsSetup.m_strCaCertFile == d.tlsCaPath )
+        return;
+
+    CLog::Print( LOG_SYSTEM, "ListenerManager: TLS 인증서 무중단 교체 시도 %s:%d — '%s' → '%s'", d.bindIp.c_str(),
+                 d.port, clsSetup.m_strCertFile.c_str(), d.tlsCertPath.c_str() );
+
+    if ( gclsUserAgent.m_clsSipStack.ReloadTlsServerCert( d.tlsCertPath.c_str(), d.tlsKeyPath.c_str(),
+                                                          d.tlsCaPath.c_str() ) == false ) {
+        // 실패해도 접속점은 옛 인증서로 계속 서비스한다. 설정값을 갱신하지 않으므로 다음 Sync 가 재시도.
+        CLog::Print( LOG_ERROR, "ListenerManager: TLS 인증서 교체 실패 — 기존 인증서 유지 (cert=%s)",
+                     d.tlsCertPath.c_str() );
+        return;
+    }
+    // ⚠ 여기서 CheckCertExpiry() 를 부르면 안 된다 — 이 함수는 Sync() 가 m_mutex 를 **잡은 상태**로
+    //   호출되고 CheckCertExpiry 도 같은 m_mutex 를 잡는다(std::mutex 는 재귀 아님) → 메인 스레드
+    //   자기 교착. 실측으로 확인: 교착 후 SIGUSR1·세션 타이머·등록 만료 sweep 이 전부 정지했다.
+    //   새 인증서의 만료 재평가는 호출부(CspServer 의 reload 블록)가 Sync() **뒤에** 수행한다.
 }
 
 // ──────────────────────────────────────────────────────────────
