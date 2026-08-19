@@ -4364,6 +4364,16 @@ def _agent_proxy_call(method: str, agent: dict, path: str,
     except urllib.error.HTTPError as e:
         try: b = json.loads(e.read().decode("utf-8"))
         except Exception: b = {"error": f"HTTP {e.code}"}
+        # **agent 의 인증 실패를 그대로 올려보내지 않는다.** agent 의 401/403 은 "이 agent 가
+        # 이 토큰을 모른다"는 뜻이지 "콘솔 사용자의 세션이 만료됐다"가 아니다. 그런데 콘솔
+        # api client 는 401 을 보면 토큰을 지우고 새로고침한다 — 운영자가 영문도 모르고
+        # 로그아웃당한다(실측: agent 레코드의 ip_address 가 loopback 이라 엉뚱한 노드에
+        # 물어봐 401 → 점검 누를 때마다 로그인 화면). 상류 게이트웨이 실패로 감싼다.
+        if e.code in (401, 403):
+            return 502, {"error": "agent_auth_failed",
+                         "detail": f"agent 가 요청을 거부했습니다 (HTTP {e.code}) — "
+                                   f"agent 주소/토큰 불일치 가능. 콘솔 세션과는 무관합니다.",
+                         "agent_status": e.code, "agent_body": b}
         return e.code, b
     except Exception as e:
         return 0, {"error": str(e)}

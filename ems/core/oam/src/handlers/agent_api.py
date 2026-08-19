@@ -353,7 +353,12 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
     # 호스트 정보 수집
     info = {
         "hostname":      (body.get("hostname") or "").strip()[:128],
-        "ip_address":    handler_args.client_ip,
+        # 요청 출발지 — **잠정값**이다. 부트스트랩 노드는 자기 OAM 에 loopback 으로
+        # 등록해 `127.0.0.1` 이 잡히는데, 그건 "나 자신"이라 OAM 이 다른 노드에서
+        # 돌 때 엉뚱한 곳을 가리킨다. 그런 값은 아예 두지 않고, 첫 heartbeat 의
+        # mgmt 보고가 정본으로 채운다(2초 내).
+        "ip_address":    ("" if _is_loopback(handler_args.client_ip)
+                          else handler_args.client_ip),
         "os_info":       (body.get("os_info") or "").strip()[:255],
         "cpu_cores":     int(body.get("cpu_cores") or 0),
         "memory_mb":     int(body.get("memory_mb") or 0),
@@ -458,6 +463,20 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
 #  /heartbeat — 주기 상태 보고 + pending job 조회
 # ──────────────────────────────────────────────────────────────
 
+def _is_loopback(ip) -> bool:
+    """OAM→agent 도달 주소로 쓸 수 없는 주소인가. loopback 은 "나 자신"이라 OAM 이
+    어느 노드에서 돌든 자기 노드를 가리킨다 — 다른 노드의 agent 를 지목할 수 없다.
+    (IPv4 127.0.0.0/8 · IPv6 ::1 둘 다.)"""
+    ip = str(ip or "").strip()
+    if not ip:
+        return False
+    import ipaddress as _ip
+    try:
+        return _ip.ip_address(ip).is_loopback
+    except ValueError:
+        return ip.startswith("127.")
+
+
 def _normalize_interface_roles(ifaces: list, config: dict, agent: dict | None) -> list:
     """interfaces 의 role 정규화.
 
@@ -520,6 +539,22 @@ async def _heartbeat(handler_args: HandlerArgs, config: dict, agent: dict) -> Ha
         patches['sync_port'] = sync_port
     if isinstance(ifaces, list):
         patches['interfaces'] = _normalize_interface_roles(ifaces, config, agent)
+        # **OAM → agent 도달 주소를 agent 보고로 추종한다.**
+        #   이 값(`ip_address`)은 OAM 이 그 노드의 sync REST 로 붙을 때 쓰는 주소다.
+        #   enroll 의 client_ip(요청 출발지) 한 번으로 고정하면 틀어지는 경우가 있다 —
+        #   부트스트랩 노드는 자기 OAM 에 loopback 으로 등록해 `127.0.0.1` 이 박히고,
+        #   그러면 OAM 이 **어디서 돌든 자기 노드**를 가리켜 엉뚱한 agent 에 물어본다
+        #   (실측: 점검 클릭 → 다른 노드 agent 가 토큰 거부 → 401). 다중 NIC·NAT 도 같은 함정.
+        #   판정은 **agent 원본 보고의 mgmt 플래그**를 쓴다. agent 의 detect_mgmt_ip 가
+        #   "OAM 으로 나가는 경로의 내 주소"를 계산하고 **VIP 를 잡고 있으면 그 NIC 의
+        #   고정 주소로 보정**하므로 절체와 무관한 값이다. (정규화본은 Mgmt.Cidr 안의 VIP
+        #   까지 mgmt 로 표시하므로 여기서는 쓰지 않는다.)
+        _mg = next((str(i.get('ip') or '').strip() for i in ifaces
+                    if isinstance(i, dict) and i.get('mgmt') and i.get('ip')), '')
+        if _mg and not _is_loopback(_mg) and _mg != agent.get('ip_address'):
+            patches['ip_address'] = _mg
+            logger.log_info(f"[agent] #{agent.get('id')}({agent.get('name')}) 도달 주소 갱신: "
+                            f"{agent.get('ip_address')} → {_mg} (mgmt 보고 추종)")
     if isinstance(routes, list):
         patches['routes'] = routes
     if isinstance(mounts, list):
