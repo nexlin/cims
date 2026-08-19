@@ -854,7 +854,11 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
             sl = (config or {}).get('ServiceLogging', {})
             base = sl.get('Dir', '') or (config or {}).get(
                 'ServiceLogDir', (config or {}).get('MsgLogDir', ''))
-            host = agent.get('name') or str(agent.get('id'))
+            # mo_instance 는 활성 알람/이벤트 식별키다 — 불변 id 루트 (표준화 §3.4(b)).
+            # 사람이 읽는 message 에는 그 시점의 이름을 함께 남긴다.
+            from services import alarm_sweeper as _asw
+            host = _asw.server_mo_root(agent)
+            host_name = str(agent.get('name') or '').strip() or host
             for ev in module_events:
                 mod = str((ev.get('module') if isinstance(ev, dict) else '') or '').strip()
                 if not mod:
@@ -863,7 +867,7 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                     'type': 'process_died', 'code': 'E-STC-009', 'kind': 'stateChange',
                     'source': {'mo_class': 'software', 'mo_instance': f'{host}/{mod}',
                                'detected_by': 'agent'},
-                    'message': f'Process {mod} died on {host} (termination observed)',
+                    'message': f'Process {mod} died on {host_name} (termination observed)',
                     'params': {'module': mod},
                 })
         try:

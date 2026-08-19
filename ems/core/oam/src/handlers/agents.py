@@ -1185,6 +1185,21 @@ async def _update_agent(handler_args: HandlerArgs, aid: int, config):
         patches['service_ip_rows'] = body.get('service_ip_rows')
     if not patches:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
+    # 이름은 **표시 라벨**이다 — 시스템은 agent_id 로만 동작하므로(identifier_model.md)
+    # 개명에 딸린 보상 동작은 없다. 다만 사람이 서버를 이름으로 지목하는 이상 유일해야
+    # 한다(생성에는 있던 검사가 수정에는 빠져 있어 중복을 만들 수 있었다).
+    if "name" in patches:
+        nm = str(patches["name"] or "").strip()
+        if not nm:
+            return HandlerResult(status=400, body={"error": "name_required"},
+                                 media_type="application/json")
+        dup = await asyncio.to_thread(_agent_load, config, None, nm)
+        if dup and dup.get("id") != aid:
+            return HandlerResult(status=409,
+                                 body={"error": "conflict",
+                                       "detail": f"agent name '{nm}' already exists"},
+                                 media_type="application/json")
+        patches["name"] = nm
     row = await asyncio.to_thread(_agent_update, config, aid, patches)
     if not row:
         return HandlerResult(status=404, body={"error": "not_found"}, media_type="application/json")

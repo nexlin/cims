@@ -1041,7 +1041,12 @@ if __name__ == '__main__':
             threshold_info 는 임계 계열의 {observed, threshold, unit}, severity 는 단계
             임계(thresholds) 도달 단계 (단일 임계/비임계 규칙은 None = rule 기본값)."""
             chk = rule.get('check')
-            host = agent.get('name') or str(agent.get('id'))
+            # mo_instance 는 활성 알람 식별키의 절반(akey = code@mo_instance)이다 —
+            # 가변 이름을 넣으면 서버 이름을 바꾼 순간 열린 알람을 같은 키로 못 찾아
+            # 영영 닫히지 않고 새 이름으로 중복이 열린다. 키는 불변 id 루트로 두고,
+            # 사람이 읽는 문구(host=)에만 이름을 쓴다 (표준화 §3.4(b) DN + userLabel).
+            host = alarm_sweeper.server_mo_root(agent)                  # 식별(불변)
+            host_name = str(agent.get('name') or '').strip() or host    # 표시
             res = []
             if chk == 'disk_high':
                 disk = metric.get('disk_pct')
@@ -1058,7 +1063,7 @@ if __name__ == '__main__':
                 else:
                     is_open = disk >= thr
                 mo = f"{host}/disk"
-                kw = dict(mo=mo, host=host, pct=disk, threshold=thr)
+                kw = dict(mo=mo, host=host_name, pct=disk, threshold=thr)
                 tinfo = {'observed': disk, 'threshold': thr, 'unit': rule.get('unit') or '%'}
                 res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             elif chk == 'module_down':
@@ -1087,7 +1092,7 @@ if __name__ == '__main__':
                     if (agent.get('id'), proc) in cold_skip:
                         continue
                     mo = f"{host}/{proc}"
-                    kw = dict(mo=mo, host=host, module=proc)
+                    kw = dict(mo=mo, host=host_name, module=proc)
                     res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
             elif chk == 'config_drift':
                 # 노드 실파일 hash (agent 보고) vs 배포기록 실체화본 hash — 불일치 = 드리프트.
@@ -1106,7 +1111,7 @@ if __name__ == '__main__':
                     if not proc or not got or not exp:
                         continue        # 미보고 모듈/기대값 산출 실패 — 판정 보류
                     mo = f"{host}/{proc}/config"
-                    kw = dict(mo=mo, host=host, module=proc, expected=exp, actual=got)
+                    kw = dict(mo=mo, host=host_name, module=proc, expected=exp, actual=got)
                     res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
             elif chk == 'ha_flap':
                 # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
@@ -1130,7 +1135,7 @@ if __name__ == '__main__':
                     else:
                         is_open = cnt >= thr
                     mo = f"{host}/ha/{svc}"
-                    kw = dict(mo=mo, host=host, svc=svc, count=cnt, threshold=thr_svc)
+                    kw = dict(mo=mo, host=host_name, svc=svc, count=cnt, threshold=thr_svc)
                     tinfo = {'observed': cnt, 'threshold': thr_svc, 'unit': rule.get('unit') or '회/10분'}
                     res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             return res
@@ -1182,7 +1187,7 @@ if __name__ == '__main__':
             active = set()
             observed_hosts = set()   # 이번 스윕에서 관측(metric)이 있었던 호스트
             for ag in agents:
-                host = ag.get('name') or str(ag.get('id'))
+                host = alarm_sweeper.server_mo_root(ag)
                 if ag.get('status') != 'online':
                     continue
                 metric = file_store.jsonl_last(mroot, str(ag['id']))
@@ -1204,7 +1209,8 @@ if __name__ == '__main__':
             lost_hosts = set()
             if lost_rule is not None:
                 for ag in agents:
-                    host = ag.get('name') or str(ag.get('id'))
+                    host = alarm_sweeper.server_mo_root(ag)
+                    host_name = str(ag.get('name') or '').strip() or host
                     mo = f"{host}/agent"
                     akey = f"{lost_rule.get('code')}@{mo}"
                     lost = host not in observed_hosts
@@ -1212,8 +1218,8 @@ if __name__ == '__main__':
                         lost_hosts.add(host)
                         active.add(akey)   # 아래 미평가 close 에서 제외
                     _transition(lost_rule, mo, 'agent', lost,
-                                _fmt(lost_rule.get('msg_open'), mo=mo, host=host),
-                                _fmt(lost_rule.get('msg_close'), mo=mo, host=host))
+                                _fmt(lost_rule.get('msg_open'), mo=mo, host=host_name),
+                                _fmt(lost_rule.get('msg_close'), mo=mo, host=host_name))
                 for akey, ent in list(_alert_open.items()):
                     if alarm_sweeper.partition_of(
                             alarm_sweeper._entry_detected_by(ent), akey) != 'agent':

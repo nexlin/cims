@@ -55,7 +55,7 @@ class RenderIntentTest(unittest.TestCase):
         self._td.cleanup()
 
     def _render(self, mode, vip_bindings):
-        group = {"id": 1, "name": "Control", "mode": mode, "vrid": 51,
+        group = {"id": 1, "name": getattr(self, "_name", "Control"), "mode": mode, "vrid": 51,
                  "vip_mask": 24, "auth_pass": "x", "members": self.members}
         return self.hg._render_ha_for_agent(group, self.members, 1,
                                             self.agent, self.peer, vip_bindings, self.cfg)
@@ -63,7 +63,21 @@ class RenderIntentTest(unittest.TestCase):
     def test_as_with_vip_is_armed(self):
         r = self._render("active_standby", [{"slot": "svc", "ip": "10.0.0.9"}])
         self.assertEqual(r["ha_intent"], "armed")
-        self.assertIn("Control", r["services"])
+        # 서비스 키는 **불변 id 파생**이다 — 이름이 아니다 (identifier_model.md §5.1).
+        self.assertIn("g1", r["services"])
+        self.assertNotIn("Control", r["services"])
+        # 이름은 표시용 라벨로만 실린다 (키가 아님 — §4).
+        self.assertEqual(r["services"]["g1"]["name"], "Control")
+
+    def test_service_key_survives_rename(self):
+        """이름을 바꿔도 서비스 키가 그대로여야 한다 — rename 이 재키잉이 되면
+        옛 키의 절체 래치가 사라져 노드가 검증 없이 승격 후보로 되돌아온다."""
+        binding = [{"slot": "svc", "ip": "10.0.0.9"}]
+        before = self._render("active_standby", binding)
+        self._name = "제어 시스템"          # 이름만 변경 (id 동일)
+        after = self._render("active_standby", binding)
+        self.assertEqual(list(before["services"]), list(after["services"]))
+        self.assertEqual(after["services"]["g1"]["name"], "제어 시스템")
 
     def test_all_active_is_disarmed(self):
         # AA 는 VIP 를 쓰지 않는다 — keepalived 의도적 미사용 (ha_service_model.md §3).

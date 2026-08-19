@@ -199,6 +199,20 @@ export default function ServersPage() {
     try { await deploymentApi.revokeAgent(a.id); show(`${a.name} 폐기`, 'ok'); await load() }
     catch (e) { show((e as Error).message, 'err') }
   }
+  // 서버 이름 변경 — **라벨만 바꾼다.** 배포·job·메트릭·알람 식별은 전부 agent_id 라
+  //   개명에 딸린 보상 동작이 없다 (identifier_model.md). 노드 로컬의 state.json·systemd
+  //   `--name` 은 설치 시점 값이라 옛 이름으로 남지만 인증·보고는 토큰과 id 로 하므로 무해.
+  async function renameAgent(a: Agent) {
+    const next = prompt(`서버 이름을 입력하세요 (#${a.id})`, a.name || '')
+    if (next === null) return
+    const nm = next.trim()
+    if (!nm || nm === a.name) return
+    try {
+      await deploymentApi.updateAgent(a.id, { name: nm })
+      show(`이름 변경: ${a.name} → ${nm}`, 'ok')
+      await load()
+    } catch (e) { show((e as Error).message, 'err') }
+  }
   async function removeAgent(a: Agent) {
     if (!confirm(`Agent "${a.name}" 을 삭제할까요? 관련 deployment 도 같이 제거됨`)) return
     try { await deploymentApi.deleteAgent(a.id); show('삭제됨', 'ok'); await load() }
@@ -440,6 +454,7 @@ export default function ServersPage() {
                   onApprove={approveAgent}
                   onRevoke={revokeAgent}
                   onRemove={removeAgent}
+                  onRename={renameAgent}
                   onUpgrade={upgradeAgent}
                   onRestart={restartAgent}
                   onRollbackAgent={rollbackAgent}
@@ -1641,7 +1656,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
 function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
-                          onApprove, onRevoke, onRemove, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
+                          onApprove, onRevoke, onRemove, onRename, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
                           onAddDeploy, onJob, onUpgradeDep, onRollback, onRemoveDep }: {
   agent: Agent
   // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈 파일 배치),
@@ -1653,6 +1668,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
   onApprove: (a: Agent) => void
   onRevoke: (a: Agent) => void
   onRemove: (a: Agent) => void
+  onRename: (a: Agent) => void
   onUpgrade: (a: Agent) => void
   onRestart: (a: Agent) => void
   onRollbackAgent: (a: Agent) => void
@@ -1701,6 +1717,11 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
           {agentDisplayName(a.name) !== a.name && (
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.name}</span>
           )}
+          {/* 이름은 표시 라벨이다 — 시스템은 #id 로 동작하므로 바꿔도 파급이 없다
+              (identifier_model.md). 그래서 별도 확인·경고 없이 바로 고친다. */}
+          <button className="btn btn--sm btn--ghost" style={{ padding: '0 6px' }}
+                  title="서버 이름 변경 (표시용 — 시스템은 #id 로 동작)"
+                  onClick={() => onRename(a)}>✎</button>
           <span className="tag" style={{
             background: sc.bar, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
           }}>{a.status}</span>

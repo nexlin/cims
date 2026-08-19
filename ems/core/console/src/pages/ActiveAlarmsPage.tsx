@@ -82,7 +82,7 @@ export default function ActiveAlarmsPage() {
     const needle = q.trim().toLowerCase()
     return active.filter(a => {
       if (sevFilter && severityOf(a) !== sevFilter) return false
-      if (needle && ![a.code, a.type, a.message, a.source?.mo_instance]
+      if (needle && ![a.code, a.type, a.message, a.source?.mo_instance, a.source?.mo_label]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
@@ -164,7 +164,8 @@ export default function ActiveAlarmsPage() {
                     <td><span className={`badge ${sevBadgeClass(severityOf(a))}`}>{severityOf(a)}</span></td>
                     <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code || '-'}</td>
                     <td>{alarmTypeLabel(a.type)}</td>
-                    <td><code style={{ fontSize: 11 }}>{a.source?.mo_instance || '-'}</code></td>
+                    <td><code style={{ fontSize: 11 }} title={a.source?.mo_instance || ''}>
+                      {a.source?.mo_label || a.source?.mo_instance || '-'}</code></td>
                     <td>
                       {a.message}
                       {(a.occurrences ?? 1) > 1 && (

@@ -1876,6 +1876,52 @@ def job_update_module_spec(params: dict) -> tuple:
     return 0, f"service.json updated: {path}", ""
 
 
+def _ha_keyed_state() -> tuple:
+    """서비스 키 단위 상태 파일 — 재키잉 시 통째로 따라가야 하는 목록.
+    run/ha/* = 휘발(판정) · state/ha/* = 영속(운영자 의도·절체 래치).
+    `.json` 이 붙는 것과 붙지 않는 마커를 구분한다(planned_release·maintenance 는 마커).
+    (경로 상수가 이 함수보다 아래에서 정의되므로 호출 시점에 구성한다.)"""
+    return (
+        (_HA_RUN_DIR,     "verdict",         ".json"),
+        (_HA_RUN_DIR,     "role",            ".json"),
+        (_HA_RUN_DIR,     "promotion",       ".json"),
+        (_HA_PERSIST_DIR, "latch",           ".json"),
+        (_HA_PERSIST_DIR, "planned_release", ""),
+        (_HA_PERSIST_DIR, "maintenance",     ""),
+    )
+
+
+def _migrate_ha_service_keys(mapping: dict) -> list:
+    """HA 서비스 키가 바뀔 때 그 키로 만들어진 상태 파일을 새 키로 옮긴다.
+
+    mapping: {옛키: 신키}. **멱등** — 원본이 없으면 건너뛰고, 목적지가 이미 있으면
+    덮지 않는다(신 키가 이미 정본이라는 뜻이므로 옛 파일은 잔재다).
+    옮긴 항목 목록 반환(로그용).
+
+    `/var/log/cims-ha/notify_<키>.log` 는 root 소유라 여기서 다루지 않는다 — 옛 로그는
+    그 자리에 남고 새 키로 새 로그가 시작된다(이력 보존, 상관은 콘솔이 그룹 id 로 한다).
+    """
+    moved = []
+    for old_k, new_k in (mapping or {}).items():
+        old_k, new_k = str(old_k).strip(), str(new_k).strip()
+        if not old_k or not new_k or old_k == new_k:
+            continue
+        for base, sub, ext in _ha_keyed_state():
+            src = os.path.join(base, sub, f"{old_k}{ext}")
+            dst = os.path.join(base, sub, f"{new_k}{ext}")
+            try:
+                if not os.path.exists(src) or os.path.exists(dst):
+                    continue
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                os.replace(src, dst)
+                moved.append(f"{sub}/{old_k}->{new_k}")
+            except Exception as e:
+                print(f"[agent][ha] 재키잉 실패({sub}: {old_k}->{new_k}): {e}", flush=True)
+    if moved:
+        print(f"[agent][ha] 서비스 키 재키잉: {', '.join(moved)}", flush=True)
+    return moved
+
+
 def job_update_ha(params: dict) -> tuple:
     """<prefix>/run/keepalived/ha.json 갱신 + cims-ha config|apply 자동 실행.
 
@@ -1908,6 +1954,12 @@ def job_update_ha(params: dict) -> tuple:
         ha_json["cims_user"] = getpass.getuser()
     except Exception:
         pass
+    # ── 재키잉 — ha.json 을 쓰기 **전에** 상태 파일을 옮긴다 (identifier_model.md §6).
+    #   순서가 뒤집히면 새 track_script(`cims-health <신키>`)가 아직 없는 verdict 를 찾아
+    #   rc1 을 내고 `interval × fall` 만에 VIP 가 이양된다. 그리고 절체 래치가 옛 키에
+    #   남아 "이 노드는 절체당했다" 는 표시가 사라진다 — 검증 없이 승격 후보로 되돌아온다.
+    _migrated = _migrate_ha_service_keys(params.get("key_migration") or {})
+
     ha_path = os.path.join(_PREFIX, "run", "keepalived", "ha.json")
     try:
         os.makedirs(os.path.dirname(ha_path), exist_ok=True)
@@ -1931,14 +1983,17 @@ def job_update_ha(params: dict) -> tuple:
         # 구 OAM 호환 — 필드가 없으면 services 유무로 추정하되 공백은 unknown(안전측).
         intent = "armed" if services else "unknown"
 
+    _mig_msg = [f"재키잉: {', '.join(_migrated)}"] if _migrated else []
+
     if intent == "unknown":
         return 0, "\n".join([
             f"ha.json updated: {ha_path}",
+            *_mig_msg,
             "ha_intent 미지 (services 공백 + 명시 해제 신호 없음) — 현 상태 보존, no-op",
         ]), ""
 
     if intent == "disarmed":
-        msgs = [f"ha.json updated: {ha_path}",
+        msgs = [f"ha.json updated: {ha_path}", *_mig_msg,
                 "ha_intent=disarmed — HA 무장 해제 (keepalived 패키지는 보존)"]
         cims_ha = _resolve_cims_ha()
         ha_dir_local = os.path.dirname(ha_path)
@@ -1955,7 +2010,7 @@ def job_update_ha(params: dict) -> tuple:
     # cims-ha install + config + apply — sudoers 화이트리스트의 dev dist canonical 사용
     # ha.json 위치는 install_path 별로 다르므로 --ha-dir 인자로 전달.
     # install 은 keepalived 미설치 시 vendor deb 으로 자동 설치 (idempotent: ha.sh 내부 short-circuit).
-    msgs = [f"ha.json updated: {ha_path}"]
+    msgs = [f"ha.json updated: {ha_path}", *_mig_msg]
     cims_ha = _resolve_cims_ha()
     ha_dir = os.path.dirname(ha_path)
     failed = ""      # 실패 사유 — dev graceful skip(sudo 미등록)과 구분해 정직하게 보고

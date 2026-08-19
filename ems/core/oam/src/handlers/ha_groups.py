@@ -680,6 +680,25 @@ def _compute_master_aid(members: list) -> int | None:
     ).get('agent_id') if members else None
 
 
+def ha_service_key(group: dict) -> str:
+    """그룹의 **HA 서비스 키** — 불변 id 파생 (identifier_model.md §5.1).
+
+    이 키는 ha.json 의 services 키이자 keepalived 식별자(`VI_<KEY>`·`check_<key>`)이고,
+    agent 의 상태 파일명(`run/ha/verdict/<key>.json`, `state/ha/latch/<key>.json` …)이다.
+    **이름을 쓰면 rename 이 곧 재키잉**이 되어 옛 이름의 상태가 남고 새 이름으로는 빈
+    상태에서 판정이 시작된다 — HA 에서는 그것이 절체 래치 소실로 직결된다. 그래서 키는
+    바뀌지 않는 `group.id` 에서만 유도하고, 이름은 표시용 라벨로만 함께 싣는다(entry.name).
+
+    `g` 접두는 운영자가 keepalived.conf·로그에서 이 토큰이 무엇인지 알아보게 하기 위한
+    것이고, 식별에 기여하는 값은 id 뿐이다."""
+    return f"g{group['id']}"
+
+
+def _legacy_ha_service_key(group: dict) -> str:
+    """이 그룹이 **이전에 쓰던** 서비스 키 = 그룹 이름. 재키잉 대응표(§6) 산출용."""
+    return str(group.get('name') or '').strip()
+
+
 def _render_ha_for_agent(group: dict, members: list, agent_id: int,
                          agent_row: dict, peer_row: dict | None,
                          vip_bindings: list | None = None,
@@ -903,7 +922,8 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
             if shared_store: entry['shared_store'] = shared_store
             if console_modules: entry['console_modules'] = console_modules
             if ha_excluded: entry['ha_excluded'] = ha_excluded
-            services[group['name']] = entry
+            entry['name'] = group.get('name') or ''   # 표시용 라벨 (키 아님 — §4)
+            services[ha_service_key(group)] = entry
     elif group.get('vip') and group['vip'] not in ('', '0.0.0.0'):
         # legacy 단일 vip
         entry = {
@@ -928,7 +948,8 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
         if shared_store: entry['shared_store'] = shared_store
         if console_modules: entry['console_modules'] = console_modules
         if ha_excluded: entry['ha_excluded'] = ha_excluded
-        services[group['name']] = entry
+        entry['name'] = group.get('name') or ''   # 표시용 라벨 (키 아님 — §4)
+        services[ha_service_key(group)] = entry
 
     # ── 의도(intent) — agent 가 파괴적 동작(무장 해제)을 판단하는 **유일한** 근거 ──
     #   armed    = VIP 가 렌더된 AS 그룹. 서비스별 실제 무장은 services.*.enabled 가 정한다
@@ -1079,6 +1100,11 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
             f"[ha-group] group#{group_id} 개시 국면 — 선행 멤버 {sorted(stagger_first)} 먼저, "
             f"나머지 update_ha {_STAGGER_DELAY_SEC}s 지연 (선착 노드 Active 보장)")
 
+    # 옛 키(그룹 이름) → 신 키(id 파생). 이행이 끝난 노드에서는 옛 경로가 없어 no-op.
+    _legacy = _legacy_ha_service_key(group)
+    _cur = ha_service_key(group)
+    key_migration = {_legacy: _cur} if _legacy and _legacy != _cur else {}
+
     enqueued = 0
     for aid, ha_json in renders:
         agent = agents.get(aid) or {}
@@ -1087,6 +1113,11 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
             # <prefix>/run/keepalived/ 에 기록한다 (agent job_update_ha 참조).
             "install_path": f"/opt/cims/{agent.get('name','agent')}",
             "ha_json": ha_json,
+            # 재키잉 대응표 — 옛 키(그룹 이름)로 만들어진 상태 파일을 신 키(id 파생)로
+            # 옮기라는 지시 (identifier_model.md §6). agent 는 ha.json 을 쓰기 **전에**
+            # 이동해야 새 track_script 가 처음부터 자기 verdict 를 찾고, 절체 래치가
+            # 보존된다. 대상이 이미 없으면 no-op 이라 매 렌더에 실어도 무해하다.
+            "key_migration": key_migration,
         }
         delayed = bool(stagger_first) and aid not in stagger_first
         _job_create(config, aid, 'update_ha', params,
@@ -1740,6 +1771,18 @@ async def _update_group(gid: int, body, config):
             'error': 'mode_change_not_allowed',
             'hint': '시스템 유형 (mode) 은 생성 후 변경 불가. 삭제 후 재생성으로 변경하세요.',
         })
+    # 그룹 이름은 **표시 라벨**이다 — HA 서비스 키는 `g<id>` 라(ha_service_key) 개명이
+    # keepalived·상태 파일·이력 어디에도 파급되지 않는다. 형식 제약도 없다(공백·한글 허용).
+    # 다만 사람이 그룹을 이름으로 지목하므로 비지 않고 유일해야 한다.
+    if 'name' in body:
+        _nm = str(body.get('name') or '').strip()
+        if not _nm:
+            return HandlerResult(status=400, body={'error': 'name_required'})
+        for _g in _ha_load_all(config):
+            if _g.get('id') != gid and str(_g.get('name') or '').strip() == _nm:
+                return HandlerResult(status=409, body={
+                    'error': 'conflict', 'detail': f"group name '{_nm}' already exists"})
+        body = {**body, 'name': _nm}
     for k in ('name', 'vip', 'auth_pass', 'note'):
         if k in body:
             existing[k] = body[k]
@@ -1968,7 +2011,8 @@ async def _control_group(gid: int, body, config):
                 aid = m.get('agent_id')
                 if aid is None or aid == base:
                     continue
-                await asyncio.to_thread(_jc, config, aid, 'ha_clear_holds', {'service': g.get('name')})
+                await asyncio.to_thread(_jc, config, aid, 'ha_clear_holds',
+                                                {'service': ha_service_key(g)})
                 n_clr += 1
         logger.log_info(f"[ha-group] group#{gid} 일괄 시작 — 의도 running {daemon_mods}, "
                         f"update_ha {n_ha}, start job {n_job}(cold 은 마스터#{base}만), "
@@ -2034,7 +2078,7 @@ async def _maintenance_group(gid: int, body, config):
     if not any(m.get('agent_id') == aid for m in (g.get('members') or [])):
         return HandlerResult(status=404, body={'error': 'agent not a group member'})
     from handlers.agents import _job_create
-    svc = g.get('name')
+    svc = ha_service_key(g)
     _job_create(config, aid, 'ha_maintenance', {'service': svc, 'on': on})
     logger.log_info(f"[ha-group] group#{gid} 유지보수 {'set' if on else 'clear'} — "
                     f"agent#{aid} svc={svc} (EXCLUDE_NODE)")
@@ -2128,7 +2172,9 @@ async def _failover_group(gid: int, body, config):
     # 관측 유예는 모든 op 에 공통 적용된다(관측 불가 ≠ 롤백 사유).
     _self_orch = 'oam' in {str(m).lower() for m in (g.get('service_intent') or {})}
     op = {
-        'id': oid, 'group_id': gid, 'service': g.get('name'),
+        # 이력의 상관 키도 불변 id 파생 — rename 을 견딘다 (identifier_model.md §4).
+        # 표시용 이름은 group_id 로 그때그때 해석한다.
+        'id': oid, 'group_id': gid, 'service': ha_service_key(g),
         'source_agent_id': active_aid, 'target_agent_id': target_aid,
         'state': 'RELEASING', 'release_sent': False, 'clear_sent': False,
         'self_orchestrated': _self_orch,
@@ -2142,7 +2188,7 @@ async def _failover_group(gid: int, body, config):
     # 시점에 타겟에서 지운다. (RELEASE 로 VIP 가 넘어가기 전에 도착하도록 먼저 큐잉.)
     try:
         from handlers.agents import _job_create
-        _job_create(config, target_aid, 'ha_clear_holds', {'service': g.get('name')})
+        _job_create(config, target_aid, 'ha_clear_holds', {'service': ha_service_key(g)})
     except Exception as e:
         logger.log_warning(f"[ha-op] operation#{oid} target#{target_aid} clear_holds 큐잉 실패: {e}")
     # 즉시 첫 스텝 구동(202 응답 전 release job 큐잉 — 이후는 sweep 이 이어감).
@@ -2170,7 +2216,7 @@ def _advance_ha_operation(config, op: dict) -> bool:
     g = _ha_load(config, gid)
     if not g:
         op['state'] = 'FAILED'; op['error'] = 'group_deleted'; return True
-    svc = op.get('service') or g.get('name')
+    svc = op.get('service') or ha_service_key(g)
     src, tgt = op.get('source_agent_id'), op.get('target_agent_id')
     now = datetime.now()
     def _age(field):

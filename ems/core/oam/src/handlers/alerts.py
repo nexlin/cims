@@ -243,6 +243,18 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         type_filter = qp('type')
 
         events = alert_log.read_recent(base, days=days, type_filter=type_filter, limit=limit)
+        # 표시용 이름 부착 — mo_instance 는 불변 id 루트(`a<id>`/`g<id>`)라 그대로는
+        # 못 읽는다. 조회 시점에 해석하므로 이름을 바꿔도 **과거 레코드까지 현재 이름**
+        # 으로 보인다(식별은 id, 표시는 이름 — 표준화 §3.4(b) DN + userLabel).
+        try:
+            from services import alarm_sweeper
+            _label = alarm_sweeper.build_mo_label_resolver(config)
+            for ev in events:
+                src = ev.get('source')
+                if isinstance(src, dict) and src.get('mo_instance'):
+                    src['mo_label'] = _label(src['mo_instance'])
+        except Exception:
+            pass
         return HandlerResult(status=200, body={
             'days': days,
             'count': len(events),

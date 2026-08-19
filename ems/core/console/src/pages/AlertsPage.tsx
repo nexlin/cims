@@ -146,7 +146,7 @@ function AlarmsSection() {
       if (sevFilter && severityOf(r) !== sevFilter) return false
       if (codeFilter && r.code !== codeFilter) return false
       if (typeFilter && r.type !== typeFilter) return false
-      if (needle && ![r.code, r.type, r.message, r.source?.mo_instance, r.source?.detected_by]
+      if (needle && ![r.code, r.type, r.message, r.source?.mo_instance, r.source?.mo_label, r.source?.detected_by]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
@@ -260,7 +260,8 @@ function AlarmsSection() {
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</td>
                       <td>{alarmTypeLabel(r.type)}</td>
-                      <td><code style={{ fontSize: 11 }}>{r.source?.mo_instance || '-'}</code></td>
+                      <td><code style={{ fontSize: 11 }} title={r.source?.mo_instance || ''}>
+                        {r.source?.mo_label || r.source?.mo_instance || '-'}</code></td>
                       <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.source?.detected_by || '-'}</td>
                       <td>
                         {r.message}

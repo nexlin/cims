@@ -231,9 +231,22 @@ def close_migrated_keys(state: dict, service_log_dir: str, detected_by: str, mat
     return n
 
 
+def server_mo_root(agent) -> str:
+    """서버(agent)의 mo 루트 — **불변 id 파생** (표준화 §3.4(b), identifier_model.md).
+    mo_instance 는 활성 알람 식별키의 절반이라 가변 이름을 넣으면 서버 이름을 바꾼
+    순간 열린 알람을 같은 키로 찾지 못해 영영 닫히지 않는다. 사람이 읽는 이름은
+    표시 계층이 id 로 해석해 붙인다(`mo_label`)."""
+    return f"a{(agent or {}).get('id')}"
+
+
+def group_mo_root(group) -> str:
+    """서버 그룹의 mo 루트 — 불변 id 파생. HA 서비스 키와 같은 어휘(`g<id>`)."""
+    return f"g{(group or {}).get('id')}"
+
+
 def build_mo_root_resolver(config):
-    """관측 주소 → 소유 주체 루트(서버명/그룹명) 해석기 (표준화 §3.4(b)).
-    VIP 관측 = 그룹명, 노드 주소 관측 = 서버명(agent 등록 신원). 어휘의 정본은
+    """관측 주소 → 소유 주체 루트(**id 파생**) 해석기 (표준화 §3.4(b)).
+    VIP 관측 = 그룹 루트(`g<id>`), 노드 주소 관측 = 서버 루트(`a<id>`). 어휘의 정본은
     인벤토리 — 여기서는 그 실체화본(ha_groups VIP·agent 등록 IP/인터페이스)으로
     해석하고, 해석 불가 주소는 주소 그대로 루트로 쓴다(비표준 배포 폴백).
     스토어 적재 비용이 있으므로 스윕당 1회 생성한다."""
@@ -242,16 +255,16 @@ def build_mo_root_resolver(config):
     try:
         from services import file_store, ha_lookup
         for g in ha_lookup.ha_groups_all(config):
-            name = g.get('name') or f"g{g.get('id')}"
+            root = group_mo_root(g)
             for vip in ha_lookup.group_vip_set(g):
-                vip_to_group.setdefault(vip, name)
+                vip_to_group.setdefault(vip, root)
         for a in file_store.load_all(file_store.domain_dir(config, 'agents')):
-            name = a.get('name') or str(a.get('id'))
+            root = server_mo_root(a)
             if a.get('ip'):
-                addr_to_server.setdefault(str(a['ip']), name)
+                addr_to_server.setdefault(str(a['ip']), root)
             for itf in (a.get('interfaces') or []):
                 if isinstance(itf, dict) and itf.get('ip'):
-                    addr_to_server.setdefault(str(itf['ip']), name)
+                    addr_to_server.setdefault(str(itf['ip']), root)
     except Exception:
         pass
 
@@ -261,14 +274,41 @@ def build_mo_root_resolver(config):
     return resolve
 
 
+def build_mo_label_resolver(config):
+    """mo 루트(`a<id>`/`g<id>`) → 사람이 읽는 이름. 표시 전용 (§3.4(b) userLabel).
+    조회 시점에 해석하므로 이름이 바뀌면 과거 레코드의 표시도 현재 이름을 따른다."""
+    names: dict = {}
+    try:
+        from services import file_store, ha_lookup
+        for g in ha_lookup.ha_groups_all(config):
+            if g.get('name'):
+                names[group_mo_root(g)] = str(g['name'])
+        for a in file_store.load_all(file_store.domain_dir(config, 'agents')):
+            if a.get('name'):
+                names[server_mo_root(a)] = str(a['name'])
+    except Exception:
+        pass
+
+    def label(mo) -> str:
+        """mo_instance 전체를 받아 루트만 이름으로 치환한 표시 문자열을 돌려준다."""
+        mo = str(mo or '')
+        if not mo:
+            return mo
+        root, sep, rest = mo.partition('/')
+        nm = names.get(root)
+        return f"{nm}{sep}{rest}" if nm else mo
+    return label
+
+
 def mgmt_mo_root(config) -> str:
-    """관리평면 공통 신원 — OAM 관측 객체(DB 등)의 mo 루트 (<관리그룹>, 표준화 §3.3).
-    관리 HA 그룹(oam 패키지 호스팅) 이름을 쓰고, 비 HA 배포는 OAM SystemId."""
+    """관리평면 공통 신원 — OAM 관측 객체(DB 등)의 mo 루트 (표준화 §3.3).
+    관리 HA 그룹(oam 패키지 호스팅)의 **id 파생 루트**를 쓰고, 비 HA 배포는 OAM SystemId
+    (그룹이 없으면 바뀔 이름 자체가 없다)."""
     try:
         from services import ha_lookup
         g = ha_lookup.ha_group_for_package(config, 'oam')
-        if g and g.get('name'):
-            return str(g['name'])
+        if g and g.get('id') is not None:
+            return group_mo_root(g)
     except Exception:
         pass
     return config.get('SystemId', 'oam')

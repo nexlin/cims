@@ -6,6 +6,9 @@ export type PerceivedSeverity = 'critical' | 'major' | 'minor' | 'warning' | 'in
 export interface AlertSource {
   mo_class?: string
   mo_instance?: string
+  /** 표시용 — mo_instance 의 id 루트(a<id>/g<id>)를 현재 이름으로 해석한 값.
+   *  식별은 mo_instance(불변), 화면 표기는 이 값 (표준화 §3.4(b)). */
+  mo_label?: string
   detected_by?: string
 }
 

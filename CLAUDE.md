@@ -132,6 +132,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [alarm_pipeline.md](docs/design/alarm_pipeline.md) — 알람/이벤트 파이프라인 — 발생→전달→수집/보관→가시화 전 구간 절차·연동 계약 정본
 - [alarm_catalog.md](docs/design/alarm_catalog.md) — 알람/이벤트 카탈로그 설명서 — 정의 행(기능 관점 **요구**·정의 코드 채번 정본) + 감지 행(모듈 자기감지 **구현 추적**)의 단일 목록 (목록 정본 = [alarm_catalog.csv](docs/design/alarm_catalog.csv))
 - [vibcf_pod_alarms.md](docs/design/vibcf_pod_alarms.md) — 사내 vIBCF/TrGW POD 알람/Fault 카탈로그 변환 참고자료 (CIMS 대조 = alarm_standardization §7.2)
+- [identifier_model.md](docs/design/identifier_model.md) — 식별자 모델 — 동작은 불변 id 로, 표시는 name 으로. 이름은 어떤 키(파일명·설정 식별자·알람 상관 키)에도 쓰지 않는다 + 재키잉 절차
 - [runtime_store_design.md](docs/design/runtime_store_design.md) / [runtime_store_v2_module_namespacing.md](docs/design/runtime_store_v2_module_namespacing.md) — 런타임 스토어
 
 **design/modules/** (컴포넌트별 상세)

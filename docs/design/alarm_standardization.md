@@ -83,7 +83,10 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 ```
 - **type 은 조건 클래스, code 는 정의** (process_unresponsive / A-PRC-004). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
 - `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 perceived_severity 로 승격(critical/warning 표준 값 유효). 신규 major/minor/indeterminate 가능.
-- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4(b) — 루트는 소유 주체 서버명/그룹명): agent 규칙 = `<서버명>/<module|disk|…>`, service 규칙 = 관측 신원 기준 — 노드 주소 관측 = `<서버명>/<모듈>`(CMP 다중 미디어 노드(AA)는 endpoint 소유 서버로 해석해 개별 발화), VIP 관측 = `<그룹명>/<모듈>`. 주소→서버명/그룹명 해석은 인벤토리가 정본.
+- managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4(b) — 루트는 소유 주체의 **불변 식별자**): agent 규칙 = `a<서버id>/<module|disk|…>`, service 규칙 = 관측 신원 기준 — 노드 주소 관측 = `a<서버id>/<모듈>`(CMP 다중 미디어 노드(AA)는 endpoint 소유 서버로 해석해 개별 발화), VIP 관측 = `g<그룹id>/<모듈>`. 주소→소유 주체 해석은 인벤토리가 정본(`alarm_sweeper.build_mo_root_resolver`).
+  - **왜 이름이 아니라 id 인가** — `mo_instance` 는 활성 알람 식별키의 절반(§3.4(a) "활성 알람 식별키 = (정의 코드, mo_instance)")이다. 여기에 운영자가 바꿀 수 있는 이름이 들어가면 서버/그룹을 개명한 순간 열린 알람을 같은 키로 찾지 못해 **영영 닫히지 않고 새 이름으로 중복이 열린다**. X.733/3GPP 도 식별자(DN)와 표시 이름(userLabel)을 나눈다 — 이 규약은 그 분리를 따른다. 식별자 모델 일반 규칙은 [identifier_model.md](identifier_model.md).
+  - **표시** — 사람이 읽는 자리에는 이름을 쓴다. `msg_open`/`msg_close` 의 `{host}` 는 그 시점의 이름으로 렌더되고, 조회 API 가 `source.mo_label`(루트를 **현재** 이름으로 해석)을 함께 실어 콘솔이 그것을 표기한다(`mo_instance` 는 tooltip·검색어로 유지). 조회 시점 해석이라 개명하면 과거 레코드의 표시도 현재 이름을 따른다.
+  - 모듈 자기보고(§FM)의 루트는 **모듈이 선언한 자기 node 신원**(`SystemId`)이고 OAM 의 서버 이름과 무관하다 — 개명의 영향을 받지 않으므로 이 규약의 대상 밖이다.
 
 ### 3.2 이벤트 레코드(alert_log) 확장
 
