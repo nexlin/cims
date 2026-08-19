@@ -1,6 +1,7 @@
 package com.cims.ue.core.provision
 
 import com.cims.ue.core.config.SipAccountConfig
+import com.cims.ue.core.net.CimsTls
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -22,12 +23,13 @@ import java.util.concurrent.TimeUnit
  */
 class ProvisioningClient(
     private val csc: CscEndpoint,
-    allowInsecureTls: Boolean = false,
 ) {
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .apply { if (allowInsecureTls) insecure(this) }
+        // CIMS 사설 CA 로 서버 인증서를 검증한다(CimsTls). 이 채널로 로그인 비번·SIP 접속 정보가
+        //   오가므로 검증을 끄면 중간자에게 그대로 넘어간다.
+        .apply { CimsTls.apply(this) }
         .build()
 
     /** IdMS PKCE 로그인 → 토큰. */
@@ -204,15 +206,4 @@ class ProvisioningClient(
     /** JSON 명시적 null 안전 문자열 추출 — org.json optString 은 명시적 null 을 "null" 문자열로 만든다. */
     private fun JSONObject.stringOrNull(name: String): String? =
         if (isNull(name)) null else optString(name, null)
-
-    private fun insecure(b: OkHttpClient.Builder) {
-        val tm = object : javax.net.ssl.X509TrustManager {
-            override fun checkClientTrusted(c: Array<out java.security.cert.X509Certificate>?, a: String?) {}
-            override fun checkServerTrusted(c: Array<out java.security.cert.X509Certificate>?, a: String?) {}
-            override fun getAcceptedIssuers() = arrayOf<java.security.cert.X509Certificate>()
-        }
-        val ctx = javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), java.security.SecureRandom()) }
-        b.sslSocketFactory(ctx.socketFactory, tm)
-        b.hostnameVerifier { _, _ -> true }
-    }
 }

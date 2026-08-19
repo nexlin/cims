@@ -28,7 +28,7 @@ class CimsAuthenticator(private val context: Context) : AbstractAccountAuthentic
             if (!refresh.isNullOrEmpty()) {
                 try {
                     val ep = CimsAccounts.cscEndpoint(am, account)
-                    val ts = ProvisioningClient(ep, allowInsecureTls = true)
+                    val ts = ProvisioningClient(ep)
                         .refresh(refresh, CimsAccounts.scopeFor(authTokenType))
                     token = ts.accessToken
                     if (!ts.refreshToken.isNullOrEmpty()) am.setPassword(account, ts.refreshToken) // 회전 반영

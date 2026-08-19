@@ -20,12 +20,12 @@ object SsoProvisioner {
         val token = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
         val ep = CimsAccounts.cscEndpoint(am, account)
         return try {
-            ProvisioningClient(ep, allowInsecureTls = true).fetchProfile(token)
+            ProvisioningClient(ep).fetchProfile(token)
         } catch (e: Exception) {
             // 캐시된 토큰이 만료됐을 수 있음 → 무효화 후 1회 재시도
             CimsAccounts.invalidate(am, token)
             val retry = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
-            runCatching { ProvisioningClient(ep, allowInsecureTls = true).fetchProfile(retry) }.getOrNull()
+            runCatching { ProvisioningClient(ep).fetchProfile(retry) }.getOrNull()
         }
     }
 
@@ -44,11 +44,11 @@ object SsoProvisioner {
         val token = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
         val ep = CimsAccounts.cscEndpoint(am, account)
         try {
-            ProvisioningClient(ep, allowInsecureTls = true).fetchDirectory(token, knownEtag, service)
+            ProvisioningClient(ep).fetchDirectory(token, knownEtag, service)
         } catch (e: Exception) {
             CimsAccounts.invalidate(am, token)
             val retry = CimsAccounts.blockingToken(am, account, CimsAccounts.TOKEN_PROVISIONING) ?: return null
-            runCatching { ProvisioningClient(ep, allowInsecureTls = true).fetchDirectory(retry, knownEtag, service) }
+            runCatching { ProvisioningClient(ep).fetchDirectory(retry, knownEtag, service) }
                 .getOrNull()
         }
     }.getOrNull()

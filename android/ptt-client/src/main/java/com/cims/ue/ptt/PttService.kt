@@ -386,7 +386,7 @@ class PttService : Service() {
         // msisdn 은 프로비저닝에 따라 "+8250..."/"8250..." 혼재 — tel: URI 로 정규화(+ 중복 방지)
         val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
         val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
-        val c = PttController(cfg, mcpttId, csc, allowInsecureTls = true).also { _controller.value = it; activeConfig = cfg }
+        val c = PttController(cfg, mcpttId, csc).also { _controller.value = it; activeConfig = cfg }
         c.feedback = com.cims.ue.ptt.audio.PttFeedback(this)
         c.volumeStore = com.cims.ue.ptt.audio.GroupVolumeStore(this)
         c.channelStore = ChannelStore(this)         // 참여 채널 영속 — 재시작 자동 재조인

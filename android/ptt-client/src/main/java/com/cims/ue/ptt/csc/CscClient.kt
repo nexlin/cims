@@ -28,12 +28,11 @@ import java.util.concurrent.TimeUnit
 class CscClient(
     private val cfg: CscConfig,
     /** 개발 서버 자체서명 인증서 허용(운영 금지). */
-    allowInsecureTls: Boolean = false,
 ) {
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
-        .apply { if (allowInsecureTls) insecure(this) }
+        .apply { com.cims.ue.core.net.CimsTls.apply(this) }   // CIMS 사설 CA 로 서버 인증서 검증
         .build()
 
     // ── IdMS (OAuth2 PKCE, S256) ──
@@ -177,15 +176,4 @@ class CscClient(
         Request.Builder().url(url).addHeader("Authorization", "Bearer $token")
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
-
-    private fun insecure(b: OkHttpClient.Builder) {
-        val tm = object : javax.net.ssl.X509TrustManager {
-            override fun checkClientTrusted(c: Array<out java.security.cert.X509Certificate>?, a: String?) {}
-            override fun checkServerTrusted(c: Array<out java.security.cert.X509Certificate>?, a: String?) {}
-            override fun getAcceptedIssuers() = arrayOf<java.security.cert.X509Certificate>()
-        }
-        val ctx = javax.net.ssl.SSLContext.getInstance("TLS").apply { init(null, arrayOf(tm), java.security.SecureRandom()) }
-        b.sslSocketFactory(ctx.socketFactory, tm)
-        b.hostnameVerifier { _, _ -> true }
-    }
 }

@@ -451,7 +451,7 @@ openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
 | 단말 CA 주입 + `verifyServer=true` | **적용됨**(`CimsTrustStore.CA_BUNDLE` → `caBuf`). 음성 대조군까지 실측 — 미신뢰 인증서는 503 `PJSIP_TLS_ECERTVERIF` 로 거절된다 |
 | CA 배포 경로 | **APK 동봉.** 프로비저닝(CSC 4430)은 자신도 자가서명 + `allowInsecureTls=true` 라 신뢰의 최초 씨앗을 그 채널로 받으면 의미가 반감된다 |
 | CSC(4421·4430) 서버 인증서 | **적용됨** — Service CA 발급, `runtime/cert` 배치. openssl(체인·IP 신원·틀린 이름 대조) + 검증을 켠 클라이언트로 로그인→토큰→프로비저닝 전 구간 실측. OAM 게이트웨이는 업스트림 TLS 를 검증하지 않으므로(`gateway.py` `_ssl_param`) 관리 경로 무영향 |
-| CSC 검증 — **앱측** | **미적용** — 앱이 `allowInsecureTls=true`(core 5곳 + ptt-client 1곳). `insecure()` 를 `CimsTrustStore.CA_BUNDLE` 기반 TrustManager 로 교체하면 **앵커 추가 없이** 끝난다. 이 채널로 로그인 비밀번호와 SIP 접속 정보가 오가므로 우선순위가 높다 |
+| CSC 검증 — **앱측** | **적용됨** — `core/net/CimsTls` 가 `CimsTrustStore.CA_BUNDLE` 로 신뢰 관리자를 만들어 OkHttp 에 설치한다. `allowInsecureTls` 스위치와 중복 `insecure()` 구현 2벌은 **제거**했다(전 인증서 통과 + 호스트명 검사 무력화였다). 앵커는 SIP 평면과 동일하므로 추가 배포가 없었다. 앵커 생성 실패 시 예외 — 조용히 검증을 끄지 않는다 |
 | CA 교체(무중단) | `CA_BUNDLE` 에 신규 CA 를 추가한 APK 선배포 → 서버 인증서 교체 → 다음 배포에서 구 CA 제거 |
 | 클라이언트 인증서(상호 TLS) | 미채택. 단말 인증은 SIP Digest 가 담당. 채택 시 `tls_verify_peer=true` + CA 파일 지정이 필요(psip 은 CA 미설정 시 `CertificateRequest` 를 보내지 않는다) |
 | FQDN 전환 | 미결. 전환 시 프로비저닝 `host`·인증서 SAN·DNS 등록 세 개를 동시에 맞춰야 한다 |
@@ -470,7 +470,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 
 | # | 과제 | 성격 | 검증 |
 |---|---|---|---|
-| 1 | **CSC 검증 — 앱측** — 서버 인증서는 Service CA 로 전환 완료. 남은 것은 앱의 `insecure()` 를 CA 신뢰로 교체하는 것 | 보안 | 프로비저닝·MCPTT API 가 검증 하에 동작 + 미신뢰 인증서 거절(대조군) |
+| 1 | ~~CSC 검증~~ — 서버·앱 양측 완료([§8.5](#85-운영-잔여-항목)). 단말이 붙는 두 평면(CSP 15061 · CSC 4421/4430)이 모두 **같은 앵커 하나**로 검증된다 | — | 완료 |
 | 2 | **무중단 교체** — 인증서 경로가 기동 캡처 항목이라 교체에 CSP 재기동(전 transport 순단)이 필요하다. `SSL_CTX` 를 새로 만들어 리스너 컨텍스트만 교체하면 기존 연결은 옛 인증서로 유지되고 새 핸드셰이크만 새 인증서를 받아 **무중단**이 된다. 만료 감시가 붙었으므로 시한 여유는 확보돼 있다 | 운영 | 통화 중 인증서 교체 → 끊김 0 |
 | 3 | **FQDN 전환**(선택) — 프로비저닝 `host`·인증서 SAN·DNS 등록 3개 동시 정합 | 구성 | FQDN 으로 등록 성립 |
 

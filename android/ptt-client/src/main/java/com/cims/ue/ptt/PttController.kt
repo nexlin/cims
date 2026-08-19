@@ -107,7 +107,6 @@ class PttController(
     /** MCPTT ID (tel: URI, 예 "tel:+82571900001") — CSC userUri·calling-user-id. */
     val mcpttId: String,
     private val cscConfig: CscConfig? = null,
-    private val allowInsecureTls: Boolean = false,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -337,7 +336,7 @@ class PttController(
     private val _status = MutableStateFlow("대기")
     val status: StateFlow<String> = _status.asStateFlow()
 
-    private var csc: CscClient? = cscConfig?.let { CscClient(it, allowInsecureTls) }
+    private var csc: CscClient? = cscConfig?.let { CscClient(it) }
     @Volatile private var token: TokenSet? = null
     /** CSC 토큰 보유 여부 — 서비스의 SSO 주입 중복 방지용(주입은 [setAccessToken]). */
     val hasAccessToken: Boolean get() = token != null

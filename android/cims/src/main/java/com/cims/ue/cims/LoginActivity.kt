@@ -108,7 +108,7 @@ class LoginActivity : ComponentActivity() {
         Thread {
             try {
                 val ep = CscEndpoint(host = host.trim(), port = port)
-                val ts = ProvisioningClient(ep, allowInsecureTls = true).login(user.trim(), password)
+                val ts = ProvisioningClient(ep).login(user.trim(), password)
                 val refresh = ts.refreshToken
                     ?: throw IllegalStateException("서버가 refresh_token 을 발급하지 않음")
 
