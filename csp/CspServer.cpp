@@ -435,6 +435,7 @@ int ServiceMain() {
     //   R6 (2026-06-08): 부트스트랩 UDP 바인딩을 제거했으므로 이 Sync 가 primary 포함 모든
     //   SIP 리스너를 올린다. 이후 SIGUSR1 reload 시 Sync 가 포트 변경분을 remove+add 로 재바인딩.
     gclsListenerManager.Sync();
+    gclsListenerManager.CheckCertExpiry();   // 기동 시점 판정 (A-PRC-009)
     // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
     //   bind 와 무관하게 식별값만 갱신). + UDP 리스너 미바인딩 시 fail-fast.
     {
@@ -483,6 +484,7 @@ int ServiceMain() {
             gclsAclPolicyEngine.Sync();
             gclsAccessServiceMap_Sync_compat();
             gclsListenerManager.Sync();
+            gclsListenerManager.CheckCertExpiry();   // 경로 변경 반영 (A-PRC-009)
             // R6 (2026-06-08): 무중단 포트 변경 — primary 포트가 바뀌었으면 identity fallback 도 추종.
             {
                 LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();
@@ -538,6 +540,12 @@ int ServiceMain() {
             } else if ( gclsSetup.m_strGroupDataFolder.length() > 0 ) {
                 gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
             }
+        }
+        // TLS 인증서 만료 임박 점검 (1시간) — A-PRC-009.
+        //   만료된 인증서는 **로드는 되므로** A-PRC-012(개설 실패)로 잡히지 않는다. 그런데 단말이
+        //   서버 인증서를 검증하는 이상 만료는 전 단말 동시 등록 불가의 단일 장애점이다.
+        if ( iSecond % 3600 == 0 ) {
+            gclsListenerManager.CheckCertExpiry();
         }
         if ( iSecond == 3600 ) {
             iSecond = 0;

@@ -30,6 +30,14 @@ public:
     /** 디버그용: 현재 관리 중인 리스너 ID 목록 (hashed int). */
     void GetManagedIds( std::vector<int> &out );
 
+    /** TLS 인증서 만료 임박 점검 → A-PRC-009 cert_expiring (접속점 단위).
+     *
+     *  인증서 만료는 검증을 켠 단말 **전부가 동시에** 등록 불가가 되는 단일 장애점이고,
+     *  파일은 로드 가능하므로 A-PRC-012(개설 실패)로는 잡히지 않는다. 그래서 남은 기간을
+     *  주기적으로 본다. 파일 안의 인증서를 전부 읽어 **가장 이른 만료**를 기준으로 삼는다
+     *  (체인 PEM 이면 CA 만료도 함께 걸린다). 임계 이상이면 close — 교체하면 자연 회수된다. */
+    void CheckCertExpiry();
+
 private:
     struct ManagedInfo {
         int id;  // record.id 의 UUID 를 hash 한 안정적 int
@@ -44,6 +52,9 @@ private:
 
     std::mutex m_mutex;
     std::vector<ManagedInfo> m_vecManaged;
+    /** Sync 에서 관측한 TLS 인증서 (경로, "proto:port") — 만료 점검 대상.
+     *  bootstrap 이 이미 열어 ListenerManager 소유가 아닌 접속점도 포함한다(그 인증서도 만료된다). */
+    std::vector<std::pair<std::string, std::string>> m_vecTlsCert;
 
     /** protocol 을 대문자로 정규화. 미지원 프로토콜(WS/WSS 등) 이면 빈 문자열. */
     std::string _normalizeProtocol( const std::string &protocol ) const;

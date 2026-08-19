@@ -1,5 +1,10 @@
 #include "CspListenerManager.h"
 
+#include <openssl/asn1.h>
+#include <openssl/bio.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
 #include "CspConfigCache.h"
 #include "FmReporter.h"
 #include "Log.h"
@@ -165,6 +170,16 @@ bool CCspListenerManager::Sync() {
 
     std::lock_guard<std::mutex> lk( m_mutex );
 
+    // 만료 점검 대상 갱신 — bootstrap 소유(아래 skip 대상)까지 포함해 desired 전체에서 모은다.
+    //   그 접속점의 인증서도 똑같이 만료되고, 오히려 런타임 교체가 불가해 더 위험하다.
+    m_vecTlsCert.clear();
+    for ( const auto &d : desired ) {
+        if ( d.protocol != "TLS" || d.tlsCertPath.empty() ) continue;
+        char szKey[64];
+        snprintf( szKey, sizeof( szKey ), "%s:%d", d.protocol.c_str(), d.port );
+        m_vecTlsCert.emplace_back( d.tlsCertPath, std::string( szKey ) );
+    }
+
     // R6 (2026-06-08): id 만으로 비교하던 옛 diff 는 같은 레코드의 포트/IP 만 바뀌면(=id 동일)
     //   "변화 없음"으로 보고 재바인딩하지 않았다 → 무중단 포트 변경 불가의 원인.
     //   이제 bind 파라미터(port/ip/protocol/threads/cert)까지 비교해, 바뀐 리스너는 remove+add.
@@ -237,4 +252,84 @@ void CCspListenerManager::GetManagedIds( std::vector<int> &out ) {
     std::lock_guard<std::mutex> lk( m_mutex );
     out.clear();
     for ( const auto &m : m_vecManaged ) out.push_back( m.id );
+}
+
+// ──────────────────────────────────────────────────────────────
+//  TLS 인증서 만료 점검 (A-PRC-009 cert_expiring)
+// ──────────────────────────────────────────────────────────────
+//  임계는 agent mTLS 회전 임계(30일)와 맞춘다 — 운영자가 두 평면을 같은 감각으로 다루게.
+static const int CERT_EXPIRY_WARN_DAYS = 30;
+static const int CERT_EXPIRY_CRIT_DAYS = 7;
+
+/** 인증서 파일 안의 **전 인증서 중 가장 이른 만료**까지 남은 일수. 읽기/파싱 실패 시 false.
+ *  체인 PEM(leaf+CA)이면 CA 만료도 함께 걸린다 — leaf 만 보면 CA 가 먼저 죽는 구성을 놓친다. */
+static bool _certEarliestDaysLeft( const std::string &strPath, int &iDaysLeft, std::string &strNotAfter ) {
+    BIO *pBio = BIO_new_file( strPath.c_str(), "r" );
+    if ( pBio == NULL ) return false;
+
+    bool bFound = false;
+    X509 *pX509 = NULL;
+    while ( ( pX509 = PEM_read_bio_X509( pBio, NULL, NULL, NULL ) ) != NULL ) {
+        const ASN1_TIME *pNotAfter = X509_get0_notAfter( pX509 );
+        int iDay = 0, iSec = 0;
+        if ( pNotAfter != NULL && ASN1_TIME_diff( &iDay, &iSec, NULL, pNotAfter ) == 1 ) {
+            if ( !bFound || iDay < iDaysLeft ) {
+                iDaysLeft = iDay;
+                // 사람이 읽는 만료 시각 — 알람 params 로 실어 보낸다.
+                BIO *pMem = BIO_new( BIO_s_mem() );
+                if ( pMem != NULL ) {
+                    char szBuf[64] = { 0 };
+                    if ( ASN1_TIME_print( pMem, pNotAfter ) == 1 ) {
+                        int n = BIO_read( pMem, szBuf, (int)sizeof( szBuf ) - 1 );
+                        if ( n > 0 ) strNotAfter.assign( szBuf, (size_t)n );
+                    }
+                    BIO_free( pMem );
+                }
+                bFound = true;
+            }
+        }
+        X509_free( pX509 );
+    }
+    BIO_free( pBio );
+    return bFound;
+}
+
+void CCspListenerManager::CheckCertExpiry() {
+    if ( !gclsFmReporter.IsEnabled() ) return;
+
+    std::vector<std::pair<std::string, std::string>> vecCert;
+    {
+        std::lock_guard<std::mutex> lk( m_mutex );
+        vecCert = m_vecTlsCert;
+    }
+
+    for ( const auto &clsCert : vecCert ) {
+        int iDaysLeft = 0;
+        std::string strNotAfter;
+        if ( !_certEarliestDaysLeft( clsCert.first, iDaysLeft, strNotAfter ) ) {
+            // 읽기 실패는 만료로 단정하지 않는다 — 개설 실패 축은 A-PRC-012 가 이미 본다.
+            CLog::Print( LOG_ERROR, "CheckCertExpiry: 인증서를 읽을 수 없음 (%s) — 만료 판정 생략",
+                         clsCert.first.c_str() );
+            continue;
+        }
+
+        char szMo[192];
+        snprintf( szMo, sizeof( szMo ), "%s/csp/cert/%s", gclsFmReporter.Node().c_str(), clsCert.second.c_str() );
+
+        if ( iDaysLeft > CERT_EXPIRY_WARN_DAYS ) {
+            gclsFmReporter.AlarmClose( "A-PRC-009", szMo );  // 교체하면 자연 회수
+            continue;
+        }
+
+        SimpleJson::JsonNode nodeParams;
+        nodeParams.Set( "listener", clsCert.second );
+        nodeParams.Set( "path", clsCert.first );
+        nodeParams.Set( "not_after", strNotAfter );
+        nodeParams.Set( "days_left", iDaysLeft );
+        nodeParams.Set( "threshold", CERT_EXPIRY_WARN_DAYS );
+        const char *pszSeverity = ( iDaysLeft <= CERT_EXPIRY_CRIT_DAYS ) ? "critical" : "warning";
+        gclsFmReporter.AlarmOpen( "A-PRC-009", szMo, nodeParams, pszSeverity );
+        CLog::Print( LOG_SYSTEM, "cert_expiring: %s (%s) — %d일 남음, severity=%s", clsCert.second.c_str(),
+                     clsCert.first.c_str(), iDaysLeft, pszSeverity );
+    }
 }

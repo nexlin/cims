@@ -79,6 +79,19 @@
       "recommended_action": "소스 IP 분포 확인·차단/억제 검토 (params ip/top_count)"
     },
     {
+      "type": "cert_expiring",
+      "code": "A-PRC-009",
+      "perceived_severity": "warning",
+      "event_type": "processingError",
+      "probable_cause": "thresholdCrossed",
+      "mo_class": "service",
+      "metric": "TLS 인증서 잔여 유효기간",
+      "msg_open": "TLS certificate for {listener} expires in {days_left} days (threshold {threshold}, notAfter {not_after})",
+      "msg_close": "TLS certificate for {mo} is within validity threshold",
+      "effect": "만료 시 서버 인증서를 검증하는 단말 전부가 동시에 등록 불가 — 접속점 단위 단일 장애점. 만료 전에는 서비스 영향 없음",
+      "recommended_action": "인증서 재발급 후 local_nodes 의 tls_cert_path 갱신. ⚠ 인증서 경로는 기동 캡처 항목이라 SIGUSR1 만으로는 반영되지 않고 CSP 재기동이 필요하다. 잔여 7일 이하면 critical 로 상향된다"
+    },
+    {
       "type": "listener_unavailable",
       "code": "A-PRC-012",
       "perceived_severity": "major",
