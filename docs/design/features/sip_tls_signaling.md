@@ -366,7 +366,18 @@ CIMS Service CA  (자가서명, RSA 4096, 10년, 단말 대면 전용)
 대가로 루트 개인키를 발급 작업에 쓰게 되므로 키 파일 권한을 `600` 으로 제한한다.
 
 관리평면(OAM↔agent mTLS)의 `CIMS Agent CA` 와는 **별도 CA** 다. 관리평면 신뢰 앵커를 사용자 기기로
-내보내지 않기 위한 격리이며, 단말 대면 인증서(CSP 15061, 향후 CSC 4430)는 이 Service CA 로 묶는다.
+내보내지 않기 위한 격리이며, **단말 대면 인증서는 이 Service CA 로 묶는다** — CSP 15061 과
+CSC(4421 관리·4430 단말, 인증서 한 장 공용)가 모두 여기서 발급된다. 단말에 심는 앵커가 하나로 유지된다.
+
+CSC 인증서는 **버전무관 `<install>/../runtime/cert/server.{crt,key}`** 에 둔다. csc 는 이 경로를
+버전 디렉터리보다 먼저 찾으므로(`csc_app.py`) 모듈 업그레이드에도 살아남는다 — 버전 디렉터리
+(`current/csc/cert/`)에만 두면 업그레이드가 패키지 자가서명 인증서로 되돌려 놓는다.
+
+> agent 에는 노드 인증서 자동 발급 체계가 있다(`agent/lib/cert.sh` — 그룹 CA 서명, SAN 추종 재발급,
+> 기동 전 `ensure_node_cert` 보증). 배포된 agent 0.2.80 에는 아직 이 파일이 없어 **잠들어 있다.**
+> 나중에 agent 를 올렸을 때 재발급으로 덮이지 않도록, CSC 인증서 SAN 은 그 체계가 요구하는 목록
+> (`DNS:<hostname>`, `IP:127.0.0.1`, 노드 IPv4 전부, VIP)의 **상위집합**으로 발급해 두었다.
+> 장기적으로는 그룹 CA 를 Service CA 로 통일해 발급·갱신을 이 체계에 맡기는 것이 옳다.
 
 ### 8.2 서버는 체인을 전송한다
 
@@ -439,7 +450,8 @@ openssl s_client -connect <IP>:15061 -CAfile cims-service-ca.crt \
 |---|---|
 | 단말 CA 주입 + `verifyServer=true` | **적용됨**(`CimsTrustStore.CA_BUNDLE` → `caBuf`). 음성 대조군까지 실측 — 미신뢰 인증서는 503 `PJSIP_TLS_ECERTVERIF` 로 거절된다 |
 | CA 배포 경로 | **APK 동봉.** 프로비저닝(CSC 4430)은 자신도 자가서명 + `allowInsecureTls=true` 라 신뢰의 최초 씨앗을 그 채널로 받으면 의미가 반감된다 |
-| CSC(4430) 검증 | **미적용** — 앱이 `allowInsecureTls=true`. 같은 Service CA 로 CSC 인증서를 발급하면 앵커 추가 없이 정리된다 |
+| CSC(4421·4430) 서버 인증서 | **적용됨** — Service CA 발급, `runtime/cert` 배치. openssl(체인·IP 신원·틀린 이름 대조) + 검증을 켠 클라이언트로 로그인→토큰→프로비저닝 전 구간 실측. OAM 게이트웨이는 업스트림 TLS 를 검증하지 않으므로(`gateway.py` `_ssl_param`) 관리 경로 무영향 |
+| CSC 검증 — **앱측** | **미적용** — 앱이 `allowInsecureTls=true`(core 5곳 + ptt-client 1곳). `insecure()` 를 `CimsTrustStore.CA_BUNDLE` 기반 TrustManager 로 교체하면 **앵커 추가 없이** 끝난다. 이 채널로 로그인 비밀번호와 SIP 접속 정보가 오가므로 우선순위가 높다 |
 | CA 교체(무중단) | `CA_BUNDLE` 에 신규 CA 를 추가한 APK 선배포 → 서버 인증서 교체 → 다음 배포에서 구 CA 제거 |
 | 클라이언트 인증서(상호 TLS) | 미채택. 단말 인증은 SIP Digest 가 담당. 채택 시 `tls_verify_peer=true` + CA 파일 지정이 필요(psip 은 CA 미설정 시 `CertificateRequest` 를 보내지 않는다) |
 | FQDN 전환 | 미결. 전환 시 프로비저닝 `host`·인증서 SAN·DNS 등록 세 개를 동시에 맞춰야 한다 |
@@ -458,7 +470,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 
 | # | 과제 | 성격 | 검증 |
 |---|---|---|---|
-| 1 | **CSC(4430) 검증 활성** — 앱이 `allowInsecureTls=true` 로 붙는다. 같은 Service CA 로 CSC 인증서를 발급하면 앵커 추가 없이 정리된다 | 보안 | 프로비저닝·MCPTT API 가 검증 하에 동작 |
+| 1 | **CSC 검증 — 앱측** — 서버 인증서는 Service CA 로 전환 완료. 남은 것은 앱의 `insecure()` 를 CA 신뢰로 교체하는 것 | 보안 | 프로비저닝·MCPTT API 가 검증 하에 동작 + 미신뢰 인증서 거절(대조군) |
 | 2 | **인증서 갱신·만료 감시**([§8.5](#85-운영-잔여-항목)) — leaf 2년, 교체에 CSP 재기동 필요, 만료 알람 미구현 | 운영 | 만료 임박 알람 발생 + 무중단 교체 |
 | 3 | **FQDN 전환**(선택) — 프로비저닝 `host`·인증서 SAN·DNS 등록 3개 동시 정합 | 구성 | FQDN 으로 등록 성립 |
 
