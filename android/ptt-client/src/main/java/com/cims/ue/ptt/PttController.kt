@@ -257,8 +257,10 @@ class PttController(
     //   affiliation 을 TTL 절반마다 재-PUBLISH 하는 것과 같은 형태다.
     private val confirmedRosters = mutableMapOf<String, Long>() // groupId → 마지막 확인/재확인 시각(ms)
     private val pendingRosters = mutableMapOf<String, Long>()   // groupId → 최초 SUBSCRIBE 발행 시각(ms)
-    private var gmsConfirmedAt = 0L                             // xcap-diff(GMS) 마지막 확인/재확인 시각(ms)
-    private var gmsPendingAt = 0L                               // GMS 최초 SUBSCRIBE 발행 시각(ms)
+    // xcap-diff 구독은 **문서 축마다 하나**다 — 서버 PSI 가 축별로 다르고(sip:gms_psi=편성,
+    //   sip:cms_psi=사용자 프로파일·시스템 설정), CSP 는 SUBSCRIBE 의 Request-URI 로 축을 가른다.
+    private val xcapConfirmedAt = mutableMapOf<String, Long>()  // kind → 마지막 확인/재확인 시각(ms)
+    private val xcapPendingAt = mutableMapOf<String, Long>()    // kind → 최초 SUBSCRIBE 발행 시각(ms)
     private val rosterMap = mutableMapOf<String, Map<String, String>>()  // groupId → 접속 인원(미조인 포함)
 
     private val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
@@ -452,7 +454,13 @@ class PttController(
         scope.launch {
             sip.incomingMessage.collect { im ->
                 if (im.contentType.contains("xcap-diff", ignoreCase = true)) {
-                    synchronized(lock) { gmsPendingAt = 0L; gmsConfirmedAt = SystemClock.elapsedRealtime() }
+                    // 어느 축의 구독이 확인됐는지는 notifier 신원(From = 서버 PSI)이 정본이다 —
+                    //   본문은 변경 문서가 없으면 빈 xcap-diff 라 축을 알 수 없다.
+                    val kind = if (bareId(im.fromUri) == "${XCAP_CMS}_psi") XCAP_CMS else XCAP_GMS
+                    synchronized(lock) {
+                        xcapPendingAt.remove(kind)
+                        xcapConfirmedAt[kind] = SystemClock.elapsedRealtime()
+                    }
                     runCatching { onXcapDiff(im.body) }
                     return@collect
                 }
@@ -488,7 +496,8 @@ class PttController(
                 if (r is RegState.Registered) {
                     affiliateAll()
                     syncRosterSubs()   // 편성 채널 전체 로스터 구독 (미조인 채널 인원 표시)
-                    subscribeGms(true) // 편성 변경 push (관리자 변경 즉시 반영)
+                    subscribeXcap(XCAP_GMS, true) // 편성 변경 push (관리자 변경 즉시 반영)
+                    subscribeXcap(XCAP_CMS, true) // 사용자 프로파일·시스템 설정 변경 push
                     maybeRestoreChannels()
                 } else {
                     // 등록이 끊기면 서버측 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다.
@@ -659,50 +668,71 @@ class PttController(
         confirmedRosters.clear()
         pendingRosters.clear()
         rosterMap.clear()
-        gmsConfirmedAt = 0L
-        gmsPendingAt = 0L
+        xcapConfirmedAt.clear()
+        xcapPendingAt.clear()
     }
 
-    /** GMS 문서 변경 구독 (RFC 5875 xcap-diff) — 서버 PSI 하나에 대한 단일 구독.
-     *  관리자가 편성(멤버·우선순위·채널 추가/삭제)을 바꾸면 서버가 밀어준다. */
-    private fun subscribeGms(on: Boolean) {
+    /** XCAP 문서 변경 구독 (RFC 5875 xcap-diff) — 축마다 서버 PSI 하나에 대한 단일 구독.
+     *  [XCAP_GMS]=편성(멤버·우선순위·채널 추가/삭제), [XCAP_CMS]=사용자 프로파일·시스템 설정.
+     *  관리자가 그 문서를 바꾸면 서버가 변경 통지를 밀어준다.
+     *
+     *  멱등·재확인 규율은 로스터 구독과 같다([subscribeRoster] 주석이 근거를 담는다) —
+     *  확인 신호는 **그 축의 NOTIFY 도착**이고, 확인 없이 [SUB_CONFIRM_TIMEOUT_MS] 가 지나면
+     *  재발행 대상으로 되돌린다. */
+    private fun subscribeXcap(kind: String, on: Boolean) {
         val now = SystemClock.elapsedRealtime()
         synchronized(lock) {
             if (on) {
-                if (gmsConfirmedAt != 0L) {
-                    if (now - gmsConfirmedAt < SUB_REASSERT_MS) return   // 아직 유효
-                    gmsConfirmedAt = now                                 // 재확인 발행
+                val confirmedAt = xcapConfirmedAt[kind]
+                if (confirmedAt != null) {
+                    if (now - confirmedAt < SUB_REASSERT_MS) return   // 아직 유효
+                    xcapConfirmedAt[kind] = now                       // 재확인 발행
                 } else {
-                    if (gmsPendingAt != 0L && now - gmsPendingAt < SUB_CONFIRM_TIMEOUT_MS) return
-                    gmsPendingAt = now
+                    val at = xcapPendingAt[kind]
+                    if (at != null && now - at < SUB_CONFIRM_TIMEOUT_MS) return
+                    xcapPendingAt[kind] = now
                 }
             } else {
-                if (gmsConfirmedAt == 0L && gmsPendingAt == 0L) return
-                gmsConfirmedAt = 0L
-                gmsPendingAt = 0L
+                val wasConfirmed = xcapConfirmedAt.remove(kind) != null
+                val wasPending = xcapPendingAt.remove(kind) != null
+                if (!wasConfirmed && !wasPending) return   // 걸어둔 적 없는 구독 — 해지 불필요
             }
         }
-        runCatching { sip.subscribeXcapDiff(gmsPsiAor(), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
+        runCatching { sip.subscribeXcapDiff(xcapPsiAor(kind), if (on) SipController.CONF_SUB_EXPIRES_SEC else 0) }
             .onFailure {
-                Log.w(TAG, "gms 구독($on) 실패: ${it.message}")
-                synchronized(lock) { if (on) gmsPendingAt = 0L }
+                Log.w(TAG, "$kind 구독($on) 실패: ${it.message}")
+                synchronized(lock) { if (on) xcapPendingAt.remove(kind) }
             }
     }
 
-    private fun gmsPsiAor() = "sip:gms_psi@${sipConfig.domain}"
+    /** 서버 PSI — CSP 는 SUBSCRIBE Request-URI 의 `gms`/`cms` 로 이벤트 축을 판별한다. */
+    private fun xcapPsiAor(kind: String) = "sip:${kind}_psi@${sipConfig.domain}"
+
+    /** 그 축의 구독이 서버 확인된 상태인가 — 확인됐다면 문서 변경은 NOTIFY 로 온다. */
+    private fun xcapConfirmed(kind: String) = synchronized(lock) { xcapConfirmedAt.containsKey(kind) }
 
     /** xcap-diff NOTIFY — "어느 문서가 바뀌었다"는 신호만 온다. 실제 내용은 XCAP HTTP 로 재조회.
      *
      *  본문 예: `<document new-etag=".." sel="org.openmobilealliance.groups/users/tel:{나}/tel:{그룹}"/>`
-     *  `loadGroups()` 는 편성 집합 자체의 변화(채널 추가/삭제)를 반영하고, 이어서 제휴·로스터 구독까지
-     *  다시 맞춘다. 바뀐 그룹은 문서까지 재조회한다(둘 다 ETag 캐시라 실제 변화 없으면 저렴). */
+     *
+     *  GMS 축이면 `loadGroups()` 가 편성 집합 자체의 변화(채널 추가/삭제)를 반영하고, 이어서
+     *  제휴·로스터 구독까지 다시 맞춘다. 바뀐 그룹은 문서까지 재조회한다(둘 다 ETag 캐시라
+     *  실제 변화 없으면 저렴). CMS 축이면 sel 이 가리키는 설정 문서만 재조회한다 — 구독 수립
+     *  직후 초기 NOTIFY 에도 user-profile·service-config 두 sel 이 함께 실려 온다(CSP). */
     private fun onXcapDiff(xml: String) {
-        val changed = Regex("sel=\"([^\"]+)\"").findAll(xml)
-            .map { it.groupValues[1] }
+        val sels = Regex("sel=\"([^\"]+)\"").findAll(xml).map { it.groupValues[1] }.toList()
+        val changed = sels
             .filter { it.contains("openmobilealliance.groups", ignoreCase = true) }
             .mapNotNull { it.substringAfterLast("tel:").takeIf { g -> g.isNotBlank() } }
-            .toList()
-        Log.i(TAG, "xcap-diff NOTIFY — 변경 그룹 $changed")
+        val profileChanged = sels.any { it.contains("mcptt.user-profile", ignoreCase = true) }
+        val svcCfgChanged = sels.any { it.contains("mcptt.service-config", ignoreCase = true) }
+        Log.i(TAG, "xcap-diff NOTIFY — 편성 $changed / 프로파일 $profileChanged / 시스템설정 $svcCfgChanged")
+        if (profileChanged) loadUserProfile()
+        if (svcCfgChanged) loadServiceConfig()
+        if (changed.isEmpty() && (profileChanged || svcCfgChanged)) {
+            _status.value = "설정 변경 통지"   // CMS 축 — 편성은 건드리지 않는다
+            return
+        }
         _status.value = if (changed.isEmpty()) "편성 변경 통지" else "편성 변경: ${changed.joinToString()}"
         loadGroups()
         changed.forEach { loadGroupDetail(it) }
@@ -920,7 +950,13 @@ class PttController(
     /** 등록 상태에서 희망 집합 전체를 보장 — 등록 성공·그룹 목록 적재·주기 루프에서 호출. */
     private fun affiliateAll() {
         if (regState.value !is RegState.Registered) return
-        desiredAffiliations().forEach { ensureAffiliated(it) }
+        val want = desiredAffiliations()
+        // 동시 제휴 상한(TS 24.484 N2)은 **서버가 강제**한다 — 앱이 임의로 잘라내면 어느 채널을
+        //   버릴지 정책 없이 fan-out 을 잃는다. 초과는 근거만 남기고 요청은 그대로 보낸다.
+        val n2 = _serviceConfig.value?.maxAffiliations ?: 0
+        if (n2 > 0 && want.size > n2)
+            Log.w(TAG, "편성 채널 ${want.size}개 > 시스템 상한 N2=$n2 — 초과분은 서버가 거절할 수 있다")
+        want.forEach { ensureAffiliated(it) }
     }
 
     // ── 그룹콜 참여/이탈 ──
@@ -1014,6 +1050,13 @@ class PttController(
     fun startPrivateCall(peer: String, fullDuplex: Boolean = false) {
         val target = bareId(peer)
         if (target.isBlank() || target == bareId(mcpttId)) return
+        // 시스템 정책 게이트 (TS 24.484 allow-private-call) — 서버(403)가 최종 판정이나, 발신 전에
+        //   알리는 편이 정확하다. 착신은 막지 않는다(서버가 이미 성립시킨 세션은 받는다).
+        if (!svcAllows { it.allowPrivateCall }) {
+            _status.value = "1:1 통화: 시스템 정책으로 비활성"
+            feedback?.blocked("1:1 통화가 허용되지 않습니다")
+            return
+        }
         val s = synchronized(lock) {
             if (sessionMap.containsKey(target)) return            // 이미 그 상대와 세션 중
             Session(target).also {
@@ -1192,7 +1235,14 @@ class PttController(
                 _status.value = "그룹 ${list.size}개"
             }
             .onFailure { _status.value = "그룹 조회 실패: ${it.message}" }
-        loadUserProfile()
+        // 설정 문서(user-profile·service-config)는 cms 구독이 있으면 NOTIFY 로 온다 — 목록 갱신
+        //   계기마다 재조회하지 않는다. 편성 변경 NOTIFY 는 그룹마다 1건씩 오므로 그대로 두면
+        //   설정 GET 이 그룹 수만큼 증폭된다(실측: g001~g003 → 각 3회). 구독이 없거나 죽었을
+        //   때만 이 계기가 폴백으로 취득한다.
+        if (!xcapConfirmed(XCAP_CMS)) {
+            loadUserProfile()
+            loadServiceConfig()
+        }
     }
 
     /** 사용자 MCPTT 프로파일 (TS 24.484) — SOS 대상 결정 모드·전용 긴급그룹·개시 인가. */
@@ -1206,13 +1256,24 @@ class PttController(
 
     private val _userProfile = MutableStateFlow<UserProfile?>(null)
     val userProfile: StateFlow<UserProfile?> = _userProfile.asStateFlow()
+    private var userProfileEtag: String? = null
 
-    /** user-profile 문서 조회 — 실패해도 치명 아님(서버 게이트가 최종 판정, 앱은 현행 동작 유지). */
+    /** user-profile 문서 조회 — 실패해도 치명 아님(서버 게이트가 최종 판정, 앱은 현행 동작 유지).
+     *  ETag(If-None-Match) 캐시 — 변경 통지·그룹 목록 갱신마다 불려도 내용이 같으면 304 로 끝난다. */
     fun loadUserProfile() = scope.launch {
         val c = csc ?: return@launch
         val t = token?.accessToken ?: return@launch
-        runCatching { withContext(Dispatchers.IO) { c.getUserProfile(t, mcpttId) } }
-            .onSuccess { doc -> doc.body?.let { _userProfile.value = parseUserProfile(it) } }
+        runCatching { withContext(Dispatchers.IO) { c.getUserProfile(t, mcpttId, userProfileEtag) } }
+            .onSuccess { doc ->
+                if (doc.notModified) return@onSuccess
+                doc.body?.let { body ->
+                    val p = parseUserProfile(body)
+                    _userProfile.value = p
+                    userProfileEtag = doc.etag
+                    Log.i(TAG, "user-profile 적재 — 긴급대상=${p.emergencyGroupMode}/${p.emergencyGroupId}" +
+                        " 인가(긴급콜·경보·애드혹)=${p.allowEmergencyCall}/${p.allowEmergencyAlert}/${p.allowAdhocCall}")
+                }
+            }
             .onFailure { Log.d(TAG, "user-profile 조회 실패(프로파일 없이 동작): ${it.message}") }
     }
 
@@ -1232,6 +1293,59 @@ class PttController(
             allowAdhocCall = flag("cims:allow-adhoc-group-call"),
         )
     }
+
+    /** 시스템 서비스 설정 (TS 24.484 service-config) — **시스템 전역** 정책이다. 사용자별 인가는
+     *  [UserProfile] 의 ruleset 이며, 규격상 시스템 정책이 사용자 인가를 넓히지는 못하므로 두 축은
+     *  AND 로 적용한다([svcAllows]). 문서 미수신이면 게이트를 걸지 않는다(서버가 최종 판정). */
+    data class ServiceConfig(
+        val allowPrivateCall: Boolean,
+        val allowEmergencyCall: Boolean,
+        val allowAlert: Boolean,
+        val allowTransmitRequest: Boolean,
+        val maxAffiliations: Int,          // on-network N2 상한 (0=미지정)
+    )
+
+    private val _serviceConfig = MutableStateFlow<ServiceConfig?>(null)
+    /** 시스템 서비스 설정 (TS 24.484). null = 아직 수신하지 못함. */
+    val serviceConfig: StateFlow<ServiceConfig?> = _serviceConfig.asStateFlow()
+    private var serviceConfigEtag: String? = null
+
+    /** service-config 문서 조회 — user-profile 과 같은 규율(실패 무해 · ETag 캐시). */
+    fun loadServiceConfig() = scope.launch {
+        val c = csc ?: return@launch
+        val t = token?.accessToken ?: return@launch
+        runCatching { withContext(Dispatchers.IO) { c.getServiceConfig(t, mcpttId, serviceConfigEtag) } }
+            .onSuccess { doc ->
+                if (doc.notModified) return@onSuccess
+                doc.body?.let { body ->
+                    val cfg = parseServiceConfig(body)
+                    _serviceConfig.value = cfg
+                    serviceConfigEtag = doc.etag
+                    Log.i(TAG, "service-config 적재 — 1:1=${cfg.allowPrivateCall} 긴급콜=${cfg.allowEmergencyCall}" +
+                        " 경보=${cfg.allowAlert} 발언요청=${cfg.allowTransmitRequest} N2=${cfg.maxAffiliations}")
+                }
+            }
+            .onFailure { Log.d(TAG, "service-config 조회 실패(시스템 설정 없이 동작): ${it.message}") }
+    }
+
+    private fun parseServiceConfig(xml: String): ServiceConfig {
+        fun flag(tag: String) =
+            Regex("<$tag>\\s*(true|false)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toBoolean() ?: true
+        fun num(tag: String) =
+            Regex("<$tag>\\s*(\\d+)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toIntOrNull()
+        return ServiceConfig(
+            allowPrivateCall = flag("allow-private-call"),
+            allowEmergencyCall = flag("allow-emergency-call"),
+            allowAlert = flag("allow-alert"),
+            allowTransmitRequest = flag("allow-transmit-request"),
+            // on-network 값이 더 구체적이라 우선한다 — 이 단말은 항상 on-network 다.
+            maxAffiliations = num("max-on-network-affiliations-N2") ?: num("max-affiliations-N2") ?: 0,
+        )
+    }
+
+    /** 시스템 정책 질의 — 문서 미수신(null)이면 **허용**으로 본다(서버 게이트가 최종 판정). */
+    private fun svcAllows(pick: (ServiceConfig) -> Boolean): Boolean =
+        _serviceConfig.value?.let(pick) ?: true
 
     /** 그룹 문서(TS 24.481, GMS XCAP) 조회 — 채널 상세 진입 시 호출. ETag(If-None-Match) 캐시. */
     fun loadGroupDetail(groupId: String) = scope.launch {
@@ -1613,6 +1727,14 @@ class PttController(
      * normal 재발신 폴백(개시)·latch 복원(상향)한다.
      */
     fun startEmergency() {
+        // 개시 인가 — 사용자 인가(ruleset allow-emergency-group-call)와 시스템 정책
+        //   (allow-emergency-call)의 AND. 서버도 미인가를 403 으로 거절하나(normal 폴백),
+        //   개시 전에 알리는 편이 정확하다.
+        if (_userProfile.value?.allowEmergencyCall == false || !svcAllows { it.allowEmergencyCall }) {
+            _status.value = "긴급: 개시 권한 없음"
+            feedback?.blocked("긴급통화 개시 권한이 없습니다")
+            return
+        }
         val s = primarySession()
         if (s == null) {
             val gid = emergencyTargetGroup() ?: return
@@ -1692,6 +1814,13 @@ class PttController(
     /** 긴급경보 MESSAGE 발신/취소 — SOS 개시/해제와 한 쌍 (TS 24.379 emergency alert).
      *  통화(INVITE)와 독립 경로라 호 성립 여부와 무관하게 신원·그룹이 전파된다. */
     private fun sendAlert(groupId: String, activate: Boolean) {
+        // 활성 인가 — 사용자 인가(allow-activate-emergency-alert)와 시스템 정책(allow-alert)의 AND.
+        //   취소(activate=false)는 막지 않는다 — 이미 걸린 경보의 회수는 언제나 허용한다.
+        if (activate && (_userProfile.value?.allowEmergencyAlert == false || !svcAllows { it.allowAlert })) {
+            _status.value = "긴급경보: 권한 없음"
+            feedback?.blocked("긴급경보 권한이 없습니다")
+            return
+        }
         runCatching {
             sip.sendRequest(
                 method = "MESSAGE",
@@ -1796,6 +1925,11 @@ class PttController(
             }
             publish()
             return
+        }
+        // 시스템 정책이 발언 요청을 막았다면 floor 요청은 어차피 Deny 다 (TS 24.484 on-network
+        //   allow-transmit-request) — 요청을 보내지 않고 거부음으로 알린다.
+        if (!svcAllows { it.allowTransmitRequest }) {
+            feedback?.denyTone(); _status.value = "발언 요청: 시스템 정책으로 비활성"; return
         }
         // Floor Taken 이 Permission=0 을 실어 온 세션(broadcast 그룹·ambient 청취 leg)은
         // 요청해봐야 Deny 뿐이다 — 요청 자체를 막고 이유를 알린다(TS 24.380 §6.3.4.4.2-3d).
@@ -2126,6 +2260,10 @@ class PttController(
          *  수렴시킨다 — 서버가 구독을 잃어도 최대 이 시간 안에 복구된다.
          *  `SipController.CONF_SUB_EXPIRES_SEC`(3600s)보다 충분히 짧게 둔다. */
         private const val SUB_REASSERT_MS = 600_000L
+
+        /** xcap-diff 문서 축 — 서버 PSI 이름(`{kind}_psi`)·CSP 이벤트 판별 키와 같은 문자열. */
+        private const val XCAP_GMS = "gms"
+        private const val XCAP_CMS = "cms"
 
         /** MSRP INVITE 발신 → 200 OK(a=path) 대기 시한. */
         private const val MSRP_INVITE_TIMEOUT_MS = 15_000L
