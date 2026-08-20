@@ -49,15 +49,19 @@ data class ServiceProfile(
     val msisdn: String,
     val imsi: String,
     val authId: String = "",
-    val sipPassword: String? = null,  // null 이면 로그인 비번 재사용
+    /** SIP Digest H(A1)=MD5(IMPI:realm:pw) hex32 — 평문 비번 없이 response 계산(sip_access_security.md §4.7).
+     *  있으면 [sipPassword] 보다 우선. 구 서버 응답이면 null. */
+    val sipHa1: String? = null,
+    val sipPassword: String? = null,  // 과도기 평문(passwd 소거 후 항상 null). null 이면 로그인 비번 재사용
     val mcpttId: String? = null,      // PTT 전용
     /** MCData C-plane SDS payload 상한(byte) — 초과 시 MSRP 미디어평면 발신(TS 24.282 §9.2.1.1).
      *  0/미수신 = 무제한(항상 C-plane MESSAGE). 서버 `services[].mcdata.maxPayloadSdsCplaneBytes`. */
     val maxPayloadSdsCplaneBytes: Int = 0,
 ) {
     /**
-     * 이 서비스 프로파일을 [SipAccountConfig] 로 매핑. SIP Digest 비번은 [sipPassword] 우선,
-     * 없으면 [loginPassword](로그인 비번) 재사용. [countryCode] = 프로비저닝 응답 홈 국가코드.
+     * 이 서비스 프로파일을 [SipAccountConfig] 로 매핑. SIP Digest 자료는 [sipHa1](H(A1)) 최우선,
+     * 평문은 [sipPassword] 우선·없으면 [loginPassword](로그인 비번) 재사용.
+     * [countryCode] = 프로비저닝 응답 홈 국가코드.
      */
     fun toSipAccountConfig(
         loginId: String,
@@ -77,6 +81,7 @@ data class ServiceProfile(
             displayName = displayName,
             loginId = loginId,
             authId = authId,
+            sipHa1 = sipHa1?.takeIf { it.isNotBlank() }.orEmpty(),
             password = sipPassword?.takeIf { it.isNotBlank() } ?: loginPassword,
             countryCode = countryCode,
             maxPayloadSdsCplaneBytes = maxPayloadSdsCplaneBytes,

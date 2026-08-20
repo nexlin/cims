@@ -33,6 +33,9 @@ data class SipAccountConfig(
     val displayName: String = "",       // 이름
     val loginId: String = "",           // 로그인 ID (CSC 등)
     val authId: String = "",            // 전체 IMPI 직접 지정(고급). 비우면 imsi@domain 합성
+    /** SIP Digest H(A1)=MD5(IMPI:realm:pw) hex32 — 프로비저닝 수신(sipHa1). 있으면 [password] 보다
+     *  우선해 PJSIP_CRED_DATA_DIGEST 로 response 를 계산한다(평문 비번 불요, sip_access_security.md §4.7). */
+    val sipHa1: String = "",
     val password: String = "",
     val expiresSec: Int = 3600,         // 희망 등록 주기(서버는 200 OK 에서 3600 하드코딩으로 덮어씀)
     val countryCode: String = "",       // 홈 국가코드(digits, 예 "82") — 프로비저닝 수신, 번호 로컬 표기용(표시 전용)
@@ -59,7 +62,7 @@ data class SipAccountConfig(
         domain.isNotBlank() &&
         msisdn.isNotBlank() &&
         (imsi.isNotBlank() || authId.isNotBlank()) &&   // Digest username 확보 (msisdn 폴백 금지 — 없으면 즉시 403)
-        password.isNotBlank()
+        (sipHa1.isNotBlank() || password.isNotBlank())  // Digest 자료 — H(A1) 또는 평문 비번
 
     /**
      * 가용 목록에서 [t] 를 선택 — transport 와 **포트를 함께** 갱신한다. transport 만 바꾸면

@@ -189,6 +189,7 @@ class ProvisioningClient(
                 msisdn = acc.optString("msisdn", ""),
                 imsi = acc.optString("imsi", ""),
                 authId = acc.optString("authId", ""),
+                sipHa1 = acc.stringOrNull("sipHa1"),
                 sipPassword = acc.stringOrNull("sipPassword"),
                 mcpttId = acc.stringOrNull("mcpttId"),
                 maxPayloadSdsCplaneBytes = s.optJSONObject("mcdata")

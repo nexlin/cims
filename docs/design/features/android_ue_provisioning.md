@@ -115,7 +115,8 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   `MD5(imsi@domain:realm:password)`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — 단말은 이 값을
   pjsip `PJSIP_CRED_DATA_DIGEST` 자격으로 넣어 원문 없이 response 를 계산한다.
 - `account.sipPassword`: 과도기 평문(`*_subscriptions.passwd`). DB 의 평문이 소거되면 항상 `null`.
-  단말은 `sipHa1` → `sipPassword` → 로그인 비번(으로 ha1 계산) 순으로 쓴다.
+  단말은 `sipHa1`(DIGEST cred) → 평문 cred(`sipPassword` → 로그인 비번) 순으로 쓴다 — 평문 cred 는
+  pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면

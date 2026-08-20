@@ -26,6 +26,7 @@ class ConfigStore(context: Context) {
         displayName = prefs.getString(K_NAME, "").orEmpty(),
         loginId = prefs.getString(K_LOGIN, "").orEmpty(),
         authId = prefs.getString(K_AUTH, "").orEmpty(),
+        sipHa1 = prefs.getString(K_HA1, "").orEmpty(),
         password = prefs.getString(K_PW, "").orEmpty(),
         expiresSec = prefs.getInt(K_EXPIRES, 3600),
         countryCode = prefs.getString(K_CC, "").orEmpty(),
@@ -44,6 +45,7 @@ class ConfigStore(context: Context) {
             putString(K_NAME, c.displayName)
             putString(K_LOGIN, c.loginId)
             putString(K_AUTH, c.authId)
+            putString(K_HA1, c.sipHa1)
             putString(K_PW, c.password)
             putInt(K_EXPIRES, c.expiresSec)
             putString(K_CC, c.countryCode)
@@ -129,6 +131,7 @@ class ConfigStore(context: Context) {
         const val K_NAME = "name"
         const val K_LOGIN = "login"
         const val K_AUTH = "auth"
+        const val K_HA1 = "ha1"
         const val K_PW = "pw"
         const val K_EXPIRES = "expires"
         const val K_CC = "cc"

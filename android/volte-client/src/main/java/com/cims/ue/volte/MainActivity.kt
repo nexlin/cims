@@ -2217,20 +2217,22 @@ private fun SettingsScreen(
                 store.saveTransportChoice(t)
                 onApply(store.load())
             }
-            PrefTextRow("서비스 도메인", config.domain, manual) { onApply(config.copy(domain = it)) }
+            // 도메인/IMSI/IMPI/비번 수동 편집은 프로비저닝 H(A1)(IMPI:realm:pw 결박)을 무효화하므로
+            // 함께 소거한다 — 남겨두면 ha1 이 우선해 편집한 값이 인증에 반영되지 않는다.
+            PrefTextRow("서비스 도메인", config.domain, manual) { onApply(config.copy(domain = it, sipHa1 = "")) }
 
             PrefCategory("계정")
             PrefTextRow("이름", config.displayName, manual) { onApply(config.copy(displayName = it)) }
             PrefTextRow("내 번호 (MSISDN)", config.msisdn, manual) { onApply(config.copy(msisdn = it)) }
-            PrefTextRow("IMSI", config.imsi, manual, digitsOnly = true) { onApply(config.copy(imsi = it)) }
+            PrefTextRow("IMSI", config.imsi, manual, digitsOnly = true) { onApply(config.copy(imsi = it, sipHa1 = "")) }
             PrefTextRow("SIP 비밀번호", config.password, manual, isPassword = true) {
-                onApply(config.copy(password = it))
+                onApply(config.copy(password = it, sipHa1 = ""))
             }
 
             PrefCategory("고급")
             PrefTextRow("인증 ID (전체 IMPI)", config.authId, manual,
                 summaryOverride = config.authId.ifBlank { "미지정 — IMSI@도메인 자동 합성" }) {
-                onApply(config.copy(authId = it))
+                onApply(config.copy(authId = it, sipHa1 = ""))
             }
             Text(
                 "공개 ID(MSISDN)와 인증 ID(IMSI@도메인)는 다른 값입니다. 서버는 Digest username 으로 " +

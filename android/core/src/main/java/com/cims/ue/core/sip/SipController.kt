@@ -24,6 +24,7 @@ import org.pjsip.pjsua2.SipTxOption
 import org.pjsip.PjCamera2
 import org.pjsip.pjsua2.pjmedia_dir
 import org.pjsip.pjsua2.pjmedia_vid_dev_std_index
+import org.pjsip.pjsua2.pjsip_cred_data_type
 import org.pjsip.pjsua2.pjsip_status_code
 import org.pjsip.pjsua2.pjsua_stun_use
 import java.util.concurrent.ConcurrentHashMap
@@ -694,9 +695,20 @@ class SipController(private val config: SipAccountConfig) {
         ac.natConfig.mediaStunUse = pjsua_stun_use.PJSUA_STUN_USE_DISABLED
 
         // Digest: username = IMPI(IMSI@domain), realm="*"(challenge realm echo — 도메인 오타/불일치 무한401 회피, §3.3)
+        // 자료는 H(A1) 우선(PJSIP_CRED_DATA_DIGEST, sip_access_security.md §4.7) — 평문 비번 없이
+        // response 를 계산하므로 서버 passwd 소거 후에도 인증된다. H(A1) 은 서버 realm 에 결박된
+        // 값이라 challenge realm 을 따라가지 못한다 — 없을 때만 평문 cred(그때 계산)로 폴백.
+        val hasHa1 = c.sipHa1.isNotBlank()
         ac.sipConfig.authCreds.add(
-            AuthCredInfo("digest", "*", c.digestUsername, 0, c.password),
+            if (hasHa1) {
+                AuthCredInfo("digest", "*", c.digestUsername,
+                    pjsip_cred_data_type.PJSIP_CRED_DATA_DIGEST, c.sipHa1)
+            } else {
+                AuthCredInfo("digest", "*", c.digestUsername,
+                    pjsip_cred_data_type.PJSIP_CRED_DATA_PLAIN_PASSWD, c.password)
+            },
         )
+        Log.i(TAG, "auth cred: ${if (hasHa1) "ha1(digest)" else "plain-passwd"} user=${c.digestUsername}")
 
         // Contact 부가 파라미터(capability feature tag 등) — 서버가 MSRP 배포 대상 판정에 사용
         if (contactParams.isNotBlank()) ac.sipConfig.contactParams = contactParams
