@@ -24,7 +24,8 @@ import pymysql.cursors
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services.mcptt import (notify_csp, refresh_group_members, DEFAULT_USER_PROFILE,
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
-                            get_service_config, update_service_config_cache)
+                            get_service_config, update_service_config_cache,
+                            get_service_config_xml)
 from services import admin_auth
 
 # ──────────────────────────────────────────────────────────────
@@ -728,8 +729,11 @@ async def _put_mcptt_service_config(body, config):
 
     # 캐시 갱신 — service-config 문서 ETag 는 내용 파생이라 다음 XCAP GET 이 새 값·새 ETag 를 받는다.
     update_service_config_cache(new_cfg)
-    # 전역 설정이라 통지 대상이 특정 가입자가 아니다 — CSP 의 cms 구독자 전원 push 는 후속
-    #   (SERVICE_CONFIG_CHANGED). 그때까지 단말은 목록 갱신·재로그인 계기의 폴백 재조회로 반영한다.
+    # 전역 문서라 특정 가입자 통지가 아니다 — CSP 가 cms 구독자 **전원**에게 xcap-diff NOTIFY 를
+    #   push 한다(SERVICE_CONFIG_CHANGED). uri 는 대상 개념이 없어 빈 값.
+    # ETag 는 RFC 7232 형식(따옴표 포함) — CSP 의 UDP JSON 파서는 단순 추출이라 따옴표를 벗겨 보낸다.
+    _, etag = get_service_config_xml(None)
+    notify_csp("SERVICE_CONFIG_CHANGED", "", "PUT", etag=(etag or "").strip('"'))
     return HandlerResult(status=200, body=dict(new_cfg, exists=True))
 
 
@@ -1677,7 +1681,7 @@ CIMS_ADMIN_API_DOCS = [
      'errors': _ERR_COMMON + [{'status': 400, 'when': '정수 아님 / 허용 범위 초과',
                                'body': {'error': 'max_affiliations_n2: 1~1000 범위를 벗어났습니다'}}],
      'notes': ['XCAP service-config 문서로 즉시 반영된다(ETag 는 내용 파생).',
-               '단말 반영은 목록 갱신·재로그인 계기의 재조회다 — cms 구독자 전원 push 는 후속.',
+               'CSP 가 cms 구독자 전원에게 xcap-diff NOTIFY 를 push 해(SERVICE_CONFIG_CHANGED) 단말이 곧바로 재조회한다.',
                '단말은 이 값을 user-profile 의 사용자 인가와 AND 로 게이트한다.'],
      'auth': dict(_AUTH_MANAGER)},
 ]

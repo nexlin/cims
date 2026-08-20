@@ -288,6 +288,11 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         // Phase C 이후: 동적 설정은 agent → jsonl → SIGUSR1 경로로만 반영.
         // 이 이벤트는 Phase B 이전의 HTTP pull 경로용으로 더 이상 수신하지 않음.
         CLog::Print( LOG_DEBUG, "CscInterface: ignoring deprecated event %s (use SIGUSR1 path)", strEvent.c_str() );
+    } else if ( strEvent == "SERVICE_CONFIG_CHANGED" ) {
+        // 시스템 전역 정책(service-config) 변경 — cms 구독자 전원에게 재조회 통지.
+        //   CSP 는 이 문서를 소비하지 않으므로(서빙은 CSC XCAP) 캐시 갱신 없이 중계만 한다.
+        extern void SendServiceConfigNotify( const std::string &etag );
+        SendServiceConfigNotify( strEtag );
     } else if ( strEvent == "USER_CHANGED" ) {
         extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
         SendSipNotify( strUri, strEtag, strAction );

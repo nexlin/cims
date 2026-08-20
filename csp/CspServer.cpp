@@ -1034,6 +1034,21 @@ void SendSipNotify( const std::string &uri, const std::string &etag, const std::
 }
 
 /**
+ * @brief SERVICE_CONFIG_CHANGED: service-config(TS 24.484)는 시스템 전역 문서 1건이라
+ *   특정 사용자가 아니라 cms 구독자 **전원**에게 xcap-diff NOTIFY 를 보낸다.
+ *   본문은 cms 공통(BuildXcapDiffBody)이라 user-profile sel 도 함께 실리지만, 단말의
+ *   ETag 캐시(If-None-Match)가 변화 없는 문서를 304 로 거르므로 무해하다.
+ */
+void SendServiceConfigNotify( const std::string &etag ) {
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByEvent( "cms", subList );
+    CLog::Print( LOG_INFO, "SendServiceConfigNotify: subs=%d ETag=%s", (int)subList.size(), etag.c_str() );
+    for ( auto &sub : subList ) {
+        SendNotifyToSubscriber( sub, etag, "" );
+    }
+}
+
+/**
  * @brief C2: 가입자의 affiliation 상태 변경 시 그 가입자의 "affiliation"(presence) 구독자에게
  *   affiliation-info NOTIFY 를 푸시한다. RecvRequestPublish(affiliate/de-affiliate) 에서 호출.
  */

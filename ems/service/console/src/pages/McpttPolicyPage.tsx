@@ -132,9 +132,9 @@ export default function McpttPolicyPage() {
       </div>
 
       <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-        저장하면 XCAP <code>service-config</code> 문서가 즉시 새 값·새 ETag 로 바뀝니다. 단말 반영은
-        채널 목록 갱신·재로그인 계기의 재조회이며, 변경 즉시 전 단말에 밀어주는 push(cms 구독자 전원
-        통지)는 후속 과제입니다.
+        저장하면 XCAP <code>service-config</code> 문서가 즉시 새 값·새 ETag 로 바뀌고, 서버가 cms
+        구독 중인 전 단말에 변경을 push 해 곧바로 재조회·반영됩니다. 구독이 없는 단말은 채널 목록
+        갱신·재로그인 계기에 반영됩니다.
       </div>
     </div>
   )

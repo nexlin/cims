@@ -64,6 +64,14 @@ public:
                                      std::list<SubscriptionInfo> &outList );
 
     /**
+     * @brief 이벤트 종별 전체 구독 조회 — 시스템 전역 문서 변경(service-config 등)의
+     *   전원 통지에 사용. 자원/사용자 키가 없는 유일한 조회라 전체 순회다.
+     * @param strEventType 이벤트 종별 ("cms" 등)
+     * @param outList      결과
+     */
+    void GetSubscriptionsByEvent( const std::string &strEventType, std::list<SubscriptionInfo> &outList );
+
+    /**
      * @brief Get a single subscription by Call-ID (returns false if not found)
      */
     bool GetSubscriptionByCallId( const std::string &strCallId, SubscriptionInfo &outInfo );

@@ -366,8 +366,9 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   이며, PUT 이 DB UPSERT + 캐시 갱신을 함께 하므로 다음 XCAP GET 이 곧 새 값이다.
   service-config 은 **시스템 전역 문서 1건**이라 가입자별 오버라이드를 두지 않는다 — 사용자 단위
   인가는 `user-profile` 의 `ruleset` 이 규격 자리이고, 단말이 두 축을 AND 로 게이트한다.
-  ⚠ 전역 변경을 cms 구독자 **전원**에게 미는 push(`SERVICE_CONFIG_CHANGED` + CSP 의 이벤트별 구독자
-  조회)는 후속이다. 그때까지 단말 반영 계기는 목록 갱신·재로그인의 폴백 재조회다.
+  전역 변경은 CSC 가 `SERVICE_CONFIG_CHANGED` 를 발행하고 CSP 가 cms 구독자 **전원**에게
+  xcap-diff NOTIFY 를 push 한다(`GetSubscriptionsByEvent("cms")` — 전역 문서라 사용자/자원 키가
+  없는 유일한 전체 조회). 구독이 없는 단말은 목록 갱신·재로그인 계기의 재조회로 반영된다.
 - **S3 변경통지**: 가입자(번호) CRUD 시 `notify_csp("USER_CHANGED")` → CSP `SendSipNotify`(user_change)
   → CMS 구독자에 xcap-diff NOTIFY(user-profile/service-config sel).
 - **단말 소비**: PTT 단말은 `sip:cms_psi@<domain>` 으로 cms 축을 구독하고 NOTIFY 의 sel 대로 두 문서를
