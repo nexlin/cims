@@ -19,6 +19,8 @@
 #ifndef _CSP_USER_H_
 #define _CSP_USER_H_
 
+#include <strings.h>
+
 #include <algorithm>
 #include <map>
 #include <string>
@@ -62,8 +64,22 @@ public:
     // SIP 인증용 아이디 (IMS 등에서 전화번호와 분리된 단말기 고유 ID. 없으면 m_strId와 동일시함)
     std::string m_strAuthId;
 
-    // SIP 비밀번호
+    // SIP 비밀번호 (평문). 가입자 경로는 m_strHa1 로 전환되어 과도기 fallback 으로만 남는다.
+    //   원격 노드(peer) outbound 인증 자격(ModuleDispatcher 의 RouteConfig.auth_password)은 계속 사용.
     std::string m_strPassWord;
+
+    // SIP Digest H(A1) = MD5(impi:realm:password) — 인증 자료 SoT (sip_access_security.md §4).
+    //   비어 있으면 m_strPassWord 로 종전 계산(과도기).
+    std::string m_strHa1;
+
+    // 채널 정책 (sip_access_security.md §3.1) — DB sip_transport ENUM('UDP','TCP','TLS') / NULL.
+    //   "TLS" 만 서버가 집행한다(비-TLS 채널의 이 신원 요청은 403). 나머지는 프로비저닝 힌트.
+    std::string m_strSipTransport;
+
+    /** TLS 채널 강제 대상 가입자인가 (sip_transport=TLS). */
+    bool requiresTls() const {
+        return strcasecmp( m_strSipTransport.c_str(), "TLS" ) == 0;
+    }
 
     // v3 (2026-04-22): 서비스 귀속을 name 기반 참조로 이전.
     //   - m_strServiceRef = access_services.name (빈 문자열이면 REGISTER 거부)

@@ -29,7 +29,7 @@ CSipQueue::~CSipQueue()
 }
 
 // SIP 수신 메시지를 저장한다.
-bool CSipQueue::Insert( const char * pszBuf, int iBufLen, const char * pszIp, unsigned short sPort, ESipTransport eTransport )
+bool CSipQueue::Insert( const char * pszBuf, int iBufLen, const char * pszIp, unsigned short sPort, ESipTransport eTransport, int iListenerId )
 {
 	CSipQueueEntry * pclsEntry = new CSipQueueEntry();
 	if( pclsEntry == NULL ) return false;
@@ -38,6 +38,7 @@ bool CSipQueue::Insert( const char * pszBuf, int iBufLen, const char * pszIp, un
 	pclsEntry->m_strIp = pszIp;
 	pclsEntry->m_sPort = sPort;
 	pclsEntry->m_eTransport = eTransport;
+	pclsEntry->m_iListenerId = iListenerId;
 
 	m_clsMutex.acquire();
 	m_clsList.push_back( pclsEntry );

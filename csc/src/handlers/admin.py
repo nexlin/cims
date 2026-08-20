@@ -18,6 +18,8 @@ Routes (prefix-matched):
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
+import hashlib
+
 import pymysql
 import pymysql.cursors
 
@@ -27,6 +29,7 @@ from services.mcptt import (notify_csp, refresh_group_members, DEFAULT_USER_PROF
                             get_service_config, update_service_config_cache,
                             get_service_config_xml)
 from services import admin_auth
+from services.mcptt import logger as _logger
 
 # ──────────────────────────────────────────────────────────────
 #  DB helper
@@ -191,7 +194,7 @@ async def _list_users(config):
 
             # 1 query for all volte_subscriptions
             cur.execute(
-                "SELECT id, user_id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
                 "FROM volte_subscriptions ORDER BY user_id, id"
             )
             call_subs_by_user: dict = {}
@@ -204,7 +207,7 @@ async def _list_users(config):
 
             # 1 query for all ptt_subscriptions
             cur.execute(
-                "SELECT id, user_id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
                 "FROM ptt_subscriptions ORDER BY user_id, id"
             )
             ptt_subs_by_user: dict = {}
@@ -260,7 +263,7 @@ async def _get_user(person_id: str, config):
 
             # call subscriptions
             cur.execute(
-                "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
                 "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -273,7 +276,7 @@ async def _get_user(person_id: str, config):
 
             # ptt subscriptions
             cur.execute(
-                "SELECT id, service_ref, imsi, dnd, forward_id, register_time, logout_time "
+                "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
                 "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -460,7 +463,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
-                f"SELECT id, service_ref, imsi, dnd, forward_id, "
+                f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
                 f"       register_time, logout_time "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
@@ -471,6 +474,60 @@ async def _list_subscriptions(person_id: str, svc: str, config):
                 s['register_time'] = _dt(s['register_time'])
                 s['logout_time']   = _dt(s['logout_time'])
     return HandlerResult(status=200, body={'subscriptions': subs})
+
+
+# ── SIP Digest 인증 자료 (sip_access_security.md §4) ─────────────────────────
+#   CSC 가 인증 자료의 유일한 쓰기 주체(HSS 역할). 저장 형식은 H(A1) 이고 평문 passwd 는
+#   요청 본문에만 존재한다. H(A1) 은 (imsi, 서비스 domain/realm) 에 결박되므로 그 둘이 바뀌면
+#   passwd 재입력 없이는 갱신할 수 없다(400).
+#   과도기: passwd 컬럼에도 같이 쓴다 — 단말/시험도구의 ha1 소비 배포(§4.7 ①~③) 전까지.
+#   passwd 값 소거·DROP 단계에서 이 쓰기를 제거한다.
+
+_SIP_TRANSPORTS = ('UDP', 'TCP', 'TLS')
+_HAS_HA1_COL = None   # 과도기 컬럼 프로브 캐시 (프로세스 수명). None=미확인
+
+
+def _has_ha1_column(cur) -> bool:
+    """subscriptions.ha1 존재 여부 — migrate_subscription_ha1.sql 미적용 DB 에서는 ha1 을 쓰지 않고
+    passwd 만 저장한다(CSP 도 같은 프로브로 passwd fallback). 한 번 확인하면 캐시한다."""
+    global _HAS_HA1_COL
+    if _HAS_HA1_COL is None:
+        cur.execute("SHOW COLUMNS FROM volte_subscriptions LIKE 'ha1'")
+        _HAS_HA1_COL = cur.fetchone() is not None
+        if not _HAS_HA1_COL:
+            _logger.log_warning("subscriptions.ha1 column absent — migrate_subscription_ha1.sql 미적용, passwd 만 저장")
+    return _HAS_HA1_COL
+
+
+def _service_realm(service_ref):
+    """access_services.name → (domain, realm). realm = auth_realm ?? domain (CSP EffectiveRealm 과 동일).
+    서비스 정의는 OAM 스토어(config cache 'service') 에 있다. 미해석이면 None."""
+    if not service_ref:
+        return None
+    from services import config_cache as _cfg
+    cache = _cfg.CONFIG_CACHE
+    if cache is None:
+        return None
+    for r in cache.get_all('service') or []:
+        if r.get('name') == service_ref:
+            domain = r.get('domain') or ''
+            return domain, (r.get('auth_realm') or domain)
+    return None
+
+
+def _digest_ha1(imsi: str, domain: str, realm: str, passwd: str) -> str:
+    return hashlib.md5(f"{imsi}@{domain}:{realm}:{passwd}".encode('utf-8')).hexdigest()
+
+
+def _parse_sip_transport(body):
+    """body.sip_transport → 'UDP'|'TCP'|'TLS'|None. 잘못된 값은 ValueError."""
+    v = body.get('sip_transport')
+    if v in (None, ''):
+        return None
+    v = str(v).strip().upper()
+    if v not in _SIP_TRANSPORTS:
+        raise ValueError(v)
+    return v
 
 
 async def _add_subscription(person_id: str, svc: str, body, config):
@@ -490,21 +547,39 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     # P8: auth_id 제거 — imsi 필수
     if not imsi:
         return HandlerResult(status=400, body={'error': 'imsi required'})
-    passwd     = body.get('passwd', '')
+    passwd     = body.get('passwd', '') or ''
+    try:
+        sip_transport = _parse_sip_transport(body)
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS'})
     dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
+
+    ha1 = ''
+    if passwd:
+        realm = _service_realm(service_ref)
+        if realm is None:
+            return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
+        ha1 = _digest_ha1(imsi, realm[0], realm[1], passwd)
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
-            cur.execute(
-                f"INSERT INTO {table} (id, user_id, service_ref, imsi, passwd, dnd, forward_id) "
-                f"VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (msisdn, person_id, service_ref, imsi, passwd, dnd, forward_id)
-            )
+            if _has_ha1_column(cur):
+                cur.execute(
+                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, passwd, ha1, sip_transport, dnd, forward_id) "
+                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (msisdn, person_id, service_ref, imsi, passwd, ha1, sip_transport, dnd, forward_id)
+                )
+            else:
+                cur.execute(
+                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, passwd, sip_transport, dnd, forward_id) "
+                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (msisdn, person_id, service_ref, imsi, passwd, sip_transport, dnd, forward_id)
+                )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
 
@@ -513,34 +588,58 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
     if not isinstance(body, dict):
         return HandlerResult(status=400, body={'error': 'JSON body required'})
 
-    passwd     = body.get('passwd', '')
+    passwd     = body.get('passwd') or ''
     dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
-
-    # service_ref/imsi 는 부분 업데이트 — 키가 있을 때만 반영
-    fields = ["passwd=%s", "dnd=%s", "forward_id=%s"]
-    values = [passwd, dnd, forward_id]
-    if 'service_ref' in body:
-        sid = body.get('service_ref')
-        if sid in (None, '', 0, '0'):
-            fields.append("service_ref=NULL")
-        else:
-            fields.append("service_ref=%s"); values.append(str(sid).strip())
-    if 'imsi' in body:
-        imsi = (body.get('imsi') or '').strip() or None
-        fields.append("imsi=%s"); values.append(imsi)
-    values.extend([msisdn, person_id])
+    try:
+        sip_transport = _parse_sip_transport(body)
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS'})
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            cur.execute(f"SELECT imsi, service_ref FROM {table} WHERE id=%s AND user_id=%s", (msisdn, person_id))
+            cur_row = cur.fetchone()
+            if cur_row is None:
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+
+            # 부분 업데이트 — service_ref/imsi 는 키가 있을 때만, passwd 는 값이 있을 때만 반영 (P1-d)
+            new_imsi = cur_row['imsi']
+            new_ref  = cur_row['service_ref']
+            fields = ["dnd=%s", "forward_id=%s"]
+            values = [dnd, forward_id]
+            if 'service_ref' in body:
+                sid = body.get('service_ref')
+                new_ref = None if sid in (None, '', 0, '0') else str(sid).strip()
+                fields.append("service_ref=%s"); values.append(new_ref)
+            if 'imsi' in body:
+                new_imsi = (body.get('imsi') or '').strip() or None
+                fields.append("imsi=%s"); values.append(new_imsi)
+            if 'sip_transport' in body:
+                fields.append("sip_transport=%s"); values.append(sip_transport)
+
+            # H(A1) 결박 — imsi/service_ref 가 바뀌면 기존 ha1 은 무효다. 서버는 원문을 모르므로
+            #   passwd 동시 입력을 요구한다 (§4.3).
+            binding_changed = (new_imsi != cur_row['imsi']) or (new_ref != cur_row['service_ref'])
+            if binding_changed and not passwd:
+                return HandlerResult(status=400, body={'error': 'passwd required when imsi or service_ref changes (ha1 rebinding)'})
+            if passwd:
+                if not new_imsi:
+                    return HandlerResult(status=400, body={'error': 'imsi required to derive ha1'})
+                realm = _service_realm(new_ref)
+                if realm is None:
+                    return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
+                if _has_ha1_column(cur):
+                    fields.append("ha1=%s"); values.append(_digest_ha1(new_imsi, realm[0], realm[1], passwd))
+                fields.append("passwd=%s"); values.append(passwd)
+            values.extend([msisdn, person_id])
+
             cur.execute(
                 f"UPDATE {table} SET {', '.join(fields)} "
                 f"WHERE id=%s AND user_id=%s",
                 values
             )
-            if cur.rowcount == 0:
-                return HandlerResult(status=404, body={'error': 'Subscription not found'})
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
     return HandlerResult(status=200, body={'id': msisdn})
 
@@ -1268,6 +1367,8 @@ _USER_FIELDS = [
     {'name': 'ptt_subscriptions[]', 'type': 'object', 'desc': 'PTT 번호 목록 (아래 가입 필드)'},
     {'name': '*_subscriptions[].id', 'type': 'string', 'desc': '번호(MSISDN)'},
     {'name': '*_subscriptions[].imsi', 'type': 'string', 'desc': 'SIM IMSI — 인증 username 의 user 파트'},
+    {'name': '*_subscriptions[].sip_transport', 'type': 'string',
+     'desc': '채널 정책 — TLS=서버 집행 / UDP·TCP=프로비저닝 힌트 / null=단말 선택'},
     {'name': '*_subscriptions[].service_ref', 'type': 'string', 'desc': '소속 서비스명 (도메인 결정)'},
     {'name': '*_subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
     {'name': '*_subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
@@ -1281,10 +1382,10 @@ _USER_EXAMPLE = {
     'id': 11, 'name': '홍길동', 'title': '팀장', 'login_id': 'test001', 'org_id': 'D110',
     'email': 'gildong@example.com', 'details': '', 'reject_id': [],
     'call_subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
-                            'service_ref': 'volte', 'dnd': False, 'forward_id': '',
+                            'service_ref': 'volte', 'sip_transport': None, 'dnd': False, 'forward_id': '',
                             'register_time': '2026-07-30T08:40:11', 'logout_time': None}],
     'ptt_subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
-                           'service_ref': 'mcptt', 'dnd': False, 'forward_id': '',
+                           'service_ref': 'mcptt', 'sip_transport': 'TLS', 'dnd': False, 'forward_id': '',
                            'register_time': '2026-07-30T08:40:12', 'logout_time': None}],
     'create_time': '2026-05-02T10:00:00', 'update_time': '2026-07-29T17:20:00',
 }
@@ -1444,13 +1545,15 @@ CIMS_ADMIN_API_DOCS = [
          {'name': 'subscriptions[].id', 'type': 'string', 'desc': '번호(MSISDN)'},
          {'name': 'subscriptions[].imsi', 'type': 'string', 'desc': 'SIM IMSI'},
          {'name': 'subscriptions[].service_ref', 'type': 'string', 'desc': '소속 서비스명'},
+         {'name': 'subscriptions[].sip_transport', 'type': 'string',
+          'desc': '채널 정책 — TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=프로비저닝 힌트 / null=단말 선택'},
          {'name': 'subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
          {'name': 'subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
          {'name': 'subscriptions[].register_time', 'type': 'string', 'desc': '최근 등록 시각'},
          {'name': 'subscriptions[].logout_time', 'type': 'string', 'desc': '최근 로그아웃 시각'},
      ],
      'example': {'subscriptions': [{'id': '01000000001', 'imsi': '450050000000001',
-                                    'service_ref': 'volte', 'dnd': False, 'forward_id': '',
+                                    'service_ref': 'volte', 'sip_transport': None, 'dnd': False, 'forward_id': '',
                                     'register_time': '2026-07-30T08:40:11', 'logout_time': None}]},
      'errors': _ERR_COMMON + [{'status': 404, 'when': '없는 가입자', 'body': {'error': 'User not found'}}],
      'notes': ['**경로가 `/subscriptions` 가 아니라 `/call` · `/ptt` 다.**',
@@ -1465,7 +1568,7 @@ CIMS_ADMIN_API_DOCS = [
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,
           'enum': ['call', 'ptt'], 'desc': '가입 종류'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
-          'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, dnd?, forward_id?}'},
+          'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, passwd?, sip_transport?(UDP|TCP|TLS), dnd?, forward_id?}'},
      ],
      'response': '{id}',
      'response_fields': [{'name': 'id', 'type': 'string', 'desc': '추가된 번호(MSISDN)'}],
@@ -1474,9 +1577,16 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'JSON 본문 없음', 'body': {'error': 'JSON body required'}},
          {'status': 400, 'when': 'id 누락', 'body': {'error': 'id (MSISDN) is required'}},
          {'status': 400, 'when': 'imsi 누락', 'body': {'error': 'imsi required'}},
+         {'status': 400, 'when': 'passwd 가 있는데 service_ref 가 비었거나 미정의 서비스',
+          'body': {'error': 'service_ref required to derive ha1 (unknown service)'}},
+         {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS'}},
          {'status': 404, 'when': '없는 가입자', 'body': {'error': 'User not found'}},
      ],
-     'notes': ['성공 시 **201** 이다.', 'imsi 는 SIP 인증 username 의 user 파트로 쓰여 필수다.'],
+     'notes': ['성공 시 **201** 이다.', 'imsi 는 SIP 인증 username 의 user 파트로 쓰여 필수다.',
+               'passwd 는 저장되지 않는다 — H(A1)=MD5(imsi@domain:realm:passwd) 로 변환되어 `ha1` 에 저장된다 '
+               '(realm = 서비스 auth_realm ?? domain). 따라서 passwd 를 줄 때는 service_ref 가 해석되어야 한다.',
+               'sip_transport=TLS 는 **서버가 집행**한다 — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 전부 403. '
+               'UDP/TCP 는 단말 프로비저닝 힌트일 뿐이고 null 이면 단말이 transport 를 고른다.'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.subs.update', 'module': 'csc', 'method': 'PUT',
@@ -1495,9 +1605,15 @@ CIMS_ADMIN_API_DOCS = [
      'example': {'id': '01000000001'},
      'errors': _ERR_COMMON + [
          {'status': 400, 'when': 'JSON 본문 없음', 'body': {'error': 'JSON body required'}},
+         {'status': 400, 'when': 'imsi 또는 service_ref 가 바뀌는데 passwd 미전송',
+          'body': {'error': 'passwd required when imsi or service_ref changes (ha1 rebinding)'}},
+         {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS'}},
          {'status': 404, 'when': '없는 가입자/번호'},
      ],
-     'notes': ['dnd 는 "Y"/"1"/"true"/"on" 같은 문자열도 참으로 해석된다 ("false"/"0" 은 거짓).'],
+     'notes': ['dnd 는 "Y"/"1"/"true"/"on" 같은 문자열도 참으로 해석된다 ("false"/"0" 은 거짓).',
+               'passwd 는 변경할 때만 전송한다 — 미전송/빈값이면 기존 ha1 이 유지된다.',
+               'H(A1) 은 (imsi, 서비스 domain/realm) 에 결박된다. imsi 나 service_ref 를 바꾸는 요청은 passwd 를 함께 보내야 한다.',
+               'sip_transport 는 키가 있을 때만 반영 — null/빈값이면 정책 해제(단말 선택).'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.subs.delete', 'module': 'csc', 'method': 'DELETE',

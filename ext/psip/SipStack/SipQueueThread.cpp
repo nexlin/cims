@@ -36,8 +36,12 @@ THREAD_API SipQueueThread( LPVOID lpParameter )
 	{
 		if( gclsSipQueue.Select( &pclsEntry ) )
 		{
+			// 수신 스레드의 listener id 를 이 스레드의 thread-local 로 복원 — 응용(inbound_policy)과
+			//   SipStackComm 의 m_iListenerId 세팅이 수신 경로와 무관하게 같은 값을 본다.
+			t_iCurrentListenerId = pclsEntry->m_iListenerId;
 			pclsSipStack->RecvSipMessage( iThreadId, pclsEntry->m_strBuf.c_str(), (int)pclsEntry->m_strBuf.length()
 				, pclsEntry->m_strIp.c_str(), pclsEntry->m_sPort, pclsEntry->m_eTransport );
+			t_iCurrentListenerId = 0;
 
 			delete pclsEntry;
 			pclsEntry = NULL;

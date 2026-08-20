@@ -82,6 +82,7 @@ public:
                const std::string& strAuthId,
                const std::string& strDomain,
                const std::string& strPwd,
+               const std::string& strHa1,
                const std::string& strServerIp,
                int iServerPort,
                const std::string& strLocalIp,
@@ -130,6 +131,7 @@ public:
     std::string  m_strAuthId;
     std::string  m_strDomain;
     std::string  m_strPwd;
+    std::string  m_strHa1;   // H(A1) — 비어 있지 않으면 m_strPwd 대신 Digest 응답 계산에 사용
     std::string  m_strServerIp;
     int          m_iServerPort;
     std::string  m_strLocalIp;

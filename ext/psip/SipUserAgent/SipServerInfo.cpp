@@ -41,10 +41,29 @@ bool CSipServerInfo::Equal( const char * pszIp, int iPort, ESipTransport eTransp
 	return false;
 }
 
+/**
+ * @brief H(A1) 을 만든다 — m_strHa1 이 있으면 그대로, 없으면 MD5(username:realm:password).
+ */
+void CSipServerInfo::MakeA1( const CSipCredential & clsCredential, char * pszA1, int iA1Size )
+{
+	if( m_strHa1.empty() == false )
+	{
+		snprintf( pszA1, iA1Size, "%s", m_strHa1.c_str() );
+		return;
+	}
+
+	char szMd5[33];
+
+	snprintf( pszA1, iA1Size, "%s:%s:%s", clsCredential.m_strUserName.c_str(), clsCredential.m_strRealm.c_str(), m_strPassWord.c_str() );
+	SipMd5String( pszA1, szMd5 );
+	snprintf( pszA1, iA1Size, "%s", szMd5 );
+}
+
 void CSipServerInfo::Update( CSipServerInfo & clsInfo )
 {
 	m_strDomain = clsInfo.m_strDomain;
 	m_strPassWord = clsInfo.m_strPassWord;
+	m_strHa1 = clsInfo.m_strHa1;
 	m_iLoginTimeout = clsInfo.m_iLoginTimeout;
 }
 
@@ -257,9 +276,7 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 		clsCredential.m_strNonceCount = szNonceCount;
 		clsCredential.m_strCnonce = "1";
 
-		snprintf( szA1, sizeof(szA1), "%s:%s:%s", clsCredential.m_strUserName.c_str(), clsCredential.m_strRealm.c_str(), m_strPassWord.c_str() );
-		SipMd5String( szA1, szMd5 );
-		snprintf( szA1, sizeof(szA1), "%s", szMd5 );
+		MakeA1( clsCredential, szA1, sizeof(szA1) );
 		
 		if( !strcmp( clsCredential.m_strQop.c_str(), "auth-int" ) )
 		{
@@ -283,9 +300,7 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 	}
 	else
 	{
-		snprintf( szA1, sizeof(szA1), "%s:%s:%s", clsCredential.m_strUserName.c_str(), clsCredential.m_strRealm.c_str(), m_strPassWord.c_str() );
-		SipMd5String( szA1, szMd5 );
-		snprintf( szA1, sizeof(szA1), "%s", szMd5 );
+		MakeA1( clsCredential, szA1, sizeof(szA1) );
 		
 		snprintf( szA2, sizeof(szA2), "%s:%s", pclsRequest->m_strSipMethod.c_str(), clsCredential.m_strUri.c_str() );
 		SipMd5String( szA2, szMd5 );

@@ -767,7 +767,9 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 | m_strId | string | 사용자 ID (MSISDN) |
 | m_strName | string | 표시 이름 |
 | m_strAuthId | string | SIP 인증 ID |
-| m_strPassWord | string | SIP 인증 비밀번호 |
+| m_strHa1 | string | SIP Digest H(A1)=MD5(imsi@domain:realm:password) — 인증 자료 SoT (DB `ha1`, JSON `ha1`) |
+| m_strPassWord | string | 평문 비밀번호 — `m_strHa1` 이 비었을 때만 종전 계산에 쓰는 과도기 fallback (peer outbound 인증에는 계속 사용) |
+| m_strSipTransport | string | 채널 정책 (DB `sip_transport`, JSON `sip_transport`). `TLS` 면 비-TLS 채널의 이 신원 요청은 403 — [sip_access_security.md §3](../features/sip_access_security.md) |
 | m_bDnd | bool | 착신거부 (DND) |
 | m_strForward | string | 착신전환 번호 |
 | m_vecReject | vector | 개별 착신거부 목록 |

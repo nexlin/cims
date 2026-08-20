@@ -137,9 +137,9 @@ def seed(ctx: VerifyContext) -> ItemResult:
     voip_auth = f"{sub['voip_imsi']}@{VOLTE_DOMAIN}" if sub["voip_imsi"] else ""
     ptt_auth  = f"{sub['ptt_imsi']}@{MCPTT_DOMAIN}"  if sub["ptt_imsi"]  else ""
     ctx.state.update({
-        "VOIP_USER": sub["voip_user"], "VOIP_PWD": sub["voip_pwd"],
+        "VOIP_USER": sub["voip_user"], "VOIP_PWD": sub["voip_pwd"], "VOIP_HA1": sub.get("voip_ha1", ""),
         "VOIP_AUTH": voip_auth, "VOIP_DOM": VOLTE_DOMAIN,
-        "PTT_USER":  sub["ptt_user"],  "PTT_PWD":  sub["ptt_pwd"],
+        "PTT_USER":  sub["ptt_user"],  "PTT_PWD":  sub["ptt_pwd"], "PTT_HA1": sub.get("ptt_ha1", ""),
         "PTT_AUTH":  ptt_auth,  "PTT_DOM":  MCPTT_DOMAIN,
         "PTT_GROUP": sub["ptt_group"],
     })

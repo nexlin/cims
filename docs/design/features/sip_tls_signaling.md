@@ -329,7 +329,7 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 | `Provisioning.Services.{kind}.tcp_port` | TCP 를 다른 포트로 분리 운용할 때만 지정. `0`/미설정 = 평문 포트 공용 |
 | `Provisioning.Services.{kind}.tls_port` | TLS 포트. **`0`/미설정 = 목록에 TLS 를 넣지 않는다** — TLS `local_node` 를 만들기 전에 죽은 선택지를 광고하지 않기 위함 |
 | `Provisioning.Services.{kind}.transport` | 서비스 기본값 |
-| `{volte,ptt}_subscriptions.sip_transport` | **가입자 기본값**(NULL=서비스 기본값). 강제가 아니라 권장값이며, 단말이 바꿀 수 있다 |
+| `{volte,ptt}_subscriptions.sip_transport` | **가입자 기본값**(NULL=서비스 기본값). `UDP`/`TCP` 는 권장값이며 단말이 바꿀 수 있다. **`TLS` 는 서버가 집행하는 채널 정책** — 목록이 TLS 하나로 좁혀지고(`sip.enforced=true`) 비-TLS 채널의 요청은 403 ([sip_access_security.md §3](sip_access_security.md)) |
 
 각 포트는 CSP `local_nodes` 의 `bind_port` 와 일치해야 한다 — CSC 는 CSP 가 실제로 무엇을 청취
 중인지 조회하지 않고 위 설정을 그대로 내려보낸다. 기본값이 목록에 없으면(예: `sip_transport=TLS`

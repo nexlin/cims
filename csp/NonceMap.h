@@ -12,7 +12,6 @@
 #include <sys/time.h>
 #endif
 
-#define PRIVATE_KEY "hotyoungsipserver"
 
 class CNonceInfo {
 public:

@@ -25,7 +25,8 @@
 struct DbSubscriber {
     std::string id;           // MSISDN (e.g. +821357007001)
     std::string authId;       // Digest auth_id
-    std::string password;
+    std::string password;     // 평문 (과도기 fallback — ha1 이 비어 있을 때만 의미)
+    std::string ha1;          // SIP Digest H(A1) (sip_access_security.md §4) — 우선 사용
     std::string serviceType;  // "volte" or "ptt"
 };
 
@@ -72,12 +73,13 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     mysql_set_character_set(pMysql, "utf8mb4");
 
     // v3 (2026-04-22): domain 은 CLI 인자 (-domain) 로 결정.
-    //   DB 쿼리는 id / imsi / passwd 만. authId 는 SimSession 생성 시 imsi+@+strDomain 으로 조립.
+    //   DB 쿼리는 id / imsi / passwd / ha1. authId 는 SimSession 생성 시 imsi+@+strDomain 으로 조립.
+    //   인증 자료는 ha1 우선(원문 없이 response 계산), 비어 있으면 passwd (과도기).
     //   (sub.authId 는 imsi 만 담아 뒀다가 상위에서 완성)
     // VoIP 가입자
     if (strFilterMode.empty() || strFilterMode == "volte") {
         const char* sql =
-            "SELECT cu.id, COALESCE(cu.imsi,''), cu.passwd "
+            "SELECT cu.id, COALESCE(cu.imsi,''), cu.passwd, COALESCE(cu.ha1,'') "
             "FROM volte_subscriptions cu "
             "ORDER BY cu.id";
         if (mysql_query(pMysql, sql) == 0) {
@@ -90,6 +92,7 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     std::string imsi = row[1] ? row[1] : "";
                     sub.authId = imsi;   // domain 은 상위에서 붙임
                     sub.password    = row[2] ? row[2] : "";
+                    sub.ha1         = row[3] ? row[3] : "";
                     sub.serviceType = "volte";
                     vecOut.push_back(sub);
                 }
@@ -103,14 +106,14 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
         std::string sql;
         if (!strGroupId.empty()) {
             // group_id(멤버) 는 surrogate ptt_groups.id → mcptt_group_id 식별자로 JOIN
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, COALESCE(pu.ha1,'') "
                   "FROM ptt_subscriptions pu "
                   "JOIN ptt_group_members gm ON gm.user_id = pu.id "
                   "JOIN ptt_groups g ON g.id = gm.group_id "
                   "WHERE g.mcptt_group_id='" + strGroupId + "' "
                   "ORDER BY gm.priority, pu.id";
         } else {
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, COALESCE(pu.ha1,'') "
                   "FROM ptt_subscriptions pu "
                   "ORDER BY pu.id";
         }
@@ -124,6 +127,7 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     std::string imsi = row[1] ? row[1] : "";
                     sub.authId = imsi;   // domain 은 상위에서 붙임
                     sub.password    = row[2] ? row[2] : "";
+                    sub.ha1         = row[3] ? row[3] : "";
                     sub.serviceType = "ptt";
                     vecOut.push_back(sub);
                 }
@@ -304,6 +308,8 @@ static void PrintUsage(const char* pszBin) {
     printf("  -auth_id     <auth_id>   Digest 인증 ID (PTT E.164는 자동 유도)\n");
     printf("  -domain      <domain>    SIP 도메인 (default: csp)\n");
     printf("  -password    <pwd>       패스워드 (default: 1234)\n");
+    printf("  -ha1         <hex32>     SIP Digest H(A1) — 지정 시 -password 대신 이 값으로 response 계산\n");
+    printf("                             (-db 모드는 DB 의 ha1 을 자동 사용, 비어 있으면 passwd)\n");
     printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
     printf("  -transport   <udp|tcp|tls> 시그널링 transport (default: udp)\n");
     printf("                             tls 는 서버 인증서를 검증하지 않는다(랩 자가서명 수용)\n");
@@ -678,6 +684,7 @@ int main(int argc, char* argv[])
     std::string strExplicitAuthId = GetArg(argc, argv, "-auth_id", "");
     std::string strDomain     = GetArg(argc, argv, "-domain",     "csp");
     std::string strPassword   = GetArg(argc, argv, "-password",   "1234");
+    std::string strHa1        = GetArg(argc, argv, "-ha1",        "");
     std::string strMode       = GetArg(argc, argv, "-mode",       "volte");
     // 시그널링 transport — udp(기본)|tcp|tls. TLS 는 스택을 TLS 클라이언트로 기동한다.
     std::string strTransport  = GetArg(argc, argv, "-transport",  "udp");
@@ -799,7 +806,7 @@ int main(int argc, char* argv[])
     for (int i = 0; i < iCount; i++) {
         int iLocalPort = (iLocalBasePort > 0) ? iLocalBasePort + (i * 2) : 0;
 
-        std::string strUser, strAuthId, strPwd;
+        std::string strUser, strAuthId, strPwd, strSesHa1;
         if (bDbMode && i < (int)vecDbSubs.size()) {
             // DB 모드: v3 — authId 는 DB 의 imsi + CLI -domain 으로 조립
             strUser   = vecDbSubs[i].id;
@@ -809,9 +816,11 @@ int main(int argc, char* argv[])
                 strAuthId = vecDbSubs[i].authId;  // 이미 @ 포함(레거시)이거나 빈 값
             }
             strPwd    = vecDbSubs[i].password;
+            strSesHa1 = vecDbSubs[i].ha1;
         } else {
             strUser = MakeUserId(strStartUser, i);
             strPwd  = strPassword;
+            strSesHa1 = strHa1;
             if (!strExplicitAuthId.empty() && i > 0) {
                 std::string base = strExplicitAuthId;
                 size_t atPos = base.find('@');
@@ -846,6 +855,7 @@ int main(int argc, char* argv[])
             strAuthId,
             strDomain,
             strPwd,
+            strSesHa1,
             strServerIp, iServerPort,
             strLocalIp,  iLocalPort,
             bPttMode,

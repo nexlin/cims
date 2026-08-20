@@ -35,6 +35,7 @@ public:
 	bool Equal( const char * pszIp, int iPort, ESipTransport eTransport );
 	void Update( CSipServerInfo & clsInfo );
 	void ClearLogin();
+	void MakeA1( const CSipCredential & clsCredential, char * pszA1, int iA1Size );
 
 	// SIP 서버의 IP 주소
 	std::string		m_strIp;
@@ -53,6 +54,10 @@ public:
 
 	// 로그인 비밀번호
 	std::string		m_strPassWord;
+
+	/** SIP Digest H(A1)=MD5(authId:realm:password) hex(32). 비어 있지 않으면 m_strPassWord 대신
+	 *  이 값으로 response 를 계산한다 — 원문 비밀번호 없이 등록하는 클라이언트용. */
+	std::string		m_strHa1;
 
 	/** P-Preferred-Identity 헤더 값 (비어있으면 추가 안함) */
 	std::string		m_strPPreferredIdentity;

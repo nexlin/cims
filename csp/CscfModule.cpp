@@ -83,15 +83,29 @@ bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std:
     return true;
 }
 
-bool CCscfModule::CheckAuthorizationResponse( const char *pszUserName, const char *pszRealm, const char *pszNonce,
-                                              const char *pszUri, const char *pszResponse, const char *pszPassWord,
-                                              const char *pszMethod, const char *pszQop, const char *pszNc,
-                                              const char *pszCnonce ) {
+/**
+ * @brief 가입자의 H(A1) 을 돌려준다 — 저장값(ha1) 우선, 비어 있으면 평문 passwd 로 종전 계산(과도기).
+ *
+ * H(A1) = MD5(impi:realm:password). sip_access_security.md §4.2 의 배포 순서 계약 ①~③ 구간에서
+ * 양쪽 형식을 흡수한다. 둘 다 비어 있으면 빈 문자열(인증 불가).
+ */
+std::string CCscfModule::EffectiveHa1( const CspUser &clsUser, const std::string &strImpi,
+                                       const std::string &strRealm ) {
+    if ( !clsUser.m_strHa1.empty() ) return clsUser.m_strHa1;
+    if ( clsUser.m_strPassWord.empty() ) return "";
+    char szMd5[33];
+    std::string strA1 = strImpi + ":" + strRealm + ":" + clsUser.m_strPassWord;
+    SipMd5String( strA1.c_str(), szMd5 );
+    return szMd5;
+}
+
+bool CCscfModule::CheckAuthorizationResponse( const char *pszHa1, const char *pszNonce, const char *pszUri,
+                                              const char *pszResponse, const char *pszMethod, const char *pszQop,
+                                              const char *pszNc, const char *pszCnonce ) {
     char szA1[301], szA2[201], szMd5[33], szResponse[1024];
 
-    snprintf( szA1, sizeof( szA1 ), "%s:%s:%s", pszUserName, pszRealm, pszPassWord );
-    SipMd5String( szA1, szMd5 );
-    snprintf( szA1, sizeof( szA1 ), "%s", szMd5 );
+    // H(A1) 은 저장값을 그대로 쓴다 — 평문 비밀번호는 이 경로에 없다 (sip_access_security.md §4.5).
+    snprintf( szA1, sizeof( szA1 ), "%s", pszHa1 );
 
     snprintf( szA2, sizeof( szA2 ), "%s:%s", pszMethod, pszUri );
     SipMd5String( szA2, szMd5 );
@@ -108,7 +122,8 @@ bool CCscfModule::CheckAuthorizationResponse( const char *pszUserName, const cha
     snprintf( szResponse, sizeof( szResponse ), "%s", szMd5 );
 
     if ( strcmp( szResponse, pszResponse ) ) {
-        CLog::Print( LOG_ERROR, "response[%s] is not correct. correct response is [%s]", pszResponse, szResponse );
+        // 정답 해시는 기록하지 않는다 — 실패 사실만 남긴다.
+        CLog::Print( LOG_ERROR, "response[%s] is not correct", pszResponse );
         return false;
     }
     return true;
@@ -162,13 +177,27 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential
         return E_AUTH_ERROR;
     }
 
+    // P1-a: 단말이 보낸 realm 을 신뢰하지 않는다 — 저장된 H(A1) 은 서버 realm 에 결박되어 있으므로
+    //   불일치면 서버 realm 로 다시 챌린지한다 (sip_access_security.md §4.3/§4.6).
+    const std::string strRealm = CCspServiceMap::EffectiveRealm( svc );
+    if ( pclsCredential->m_strRealm != strRealm ) {
+        CLog::Print( LOG_INFO, "Auth rechallenge: realm mismatch user=%s (got=%s, expected=%s)", pszFromId,
+                     pclsCredential->m_strRealm.c_str(), strRealm.c_str() );
+        return E_AUTH_REALM_MISMATCH;
+    }
+
+    const std::string strHa1 = EffectiveHa1( clsXmlUser, strExpectedUser, strRealm );
+    if ( strHa1.empty() ) {
+        CLog::Print( LOG_ERROR, "Auth reject: user=%s has no credential (ha1/passwd empty)", pszFromId );
+        return E_AUTH_ERROR;
+    }
+
     const char *pszQop = pclsCredential->m_strQop.empty() ? NULL : pclsCredential->m_strQop.c_str();
     const char *pszNc = pclsCredential->m_strNonceCount.empty() ? NULL : pclsCredential->m_strNonceCount.c_str();
     const char *pszCnonce = pclsCredential->m_strCnonce.empty() ? NULL : pclsCredential->m_strCnonce.c_str();
 
-    if ( CheckAuthorizationResponse( pclsCredential->m_strUserName.c_str(), pclsCredential->m_strRealm.c_str(),
-                                     pclsCredential->m_strNonce.c_str(), pclsCredential->m_strUri.c_str(),
-                                     pclsCredential->m_strResponse.c_str(), clsXmlUser.m_strPassWord.c_str(), pszMethod,
+    if ( CheckAuthorizationResponse( strHa1.c_str(), pclsCredential->m_strNonce.c_str(),
+                                     pclsCredential->m_strUri.c_str(), pclsCredential->m_strResponse.c_str(), pszMethod,
                                      pszQop, pszNc, pszCnonce ) == false )
         return E_AUTH_ERROR;
 
@@ -203,6 +232,12 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
             SendUnAuthorizedResponse( pclsMessage, "", true );
+            return false;
+        case E_AUTH_REALM_MISMATCH: {
+            // 가입자의 서비스 realm 로 재챌린지 (stale 아님 — 자격 증명이 틀린 게 아니라 realm 이 틀렸다)
+            ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
+            SendUnAuthorizedResponse( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : "" );
+        }
             return false;
         case E_AUTH_USER_NOT_FOUND:
             // 미가입 계정 요청 — REGISTER 경로와 동일하게 소스 NETWORK 덤프 억제 (스캐너).
@@ -244,11 +279,48 @@ bool CCscfModule::SendResponse( CSipMessage *pclsMessage, int iStatusCode ) {
 }
 
 // ──────────────────────────────────────────────────────────────
+//  채널 정책 게이트 (sip_access_security.md §3 — TS 33.203 Annex O)
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * @brief 가입자 채널 정책(sip_transport=TLS)을 요청 채널과 대조한다.
+ *
+ * TLS 정책 가입자의 신원(From user)으로 비-TLS 채널에서 온 요청은 **인증보다 먼저** 403 으로
+ * 거부한다 — 유효한 Digest 가 붙어 있어도, REGISTER 여도 같다(정책은 협상이 아니라
+ * 프로비저닝으로 확정되므로 평문 재협상 REGISTER 를 받아줄 이유가 없다). 오류 응답은 이
+ * 함수의 대상이 아니다(요청만 들어온다).
+ *
+ * 미가입 신원은 통과시킨다 — 정책이 없으니 위반도 없고, 존재 여부는 뒤의 인증 경로가
+ * 기존 규칙(403 + 소스 억제)으로 처리한다.
+ *
+ * @returns 통과면 true. 위반이면 403 을 보내고 false.
+ */
+bool CCscfModule::CheckChannelPolicy( CSipMessage *pclsMessage ) {
+    CspUser clsUser;
+    const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+    if ( gclsCspUserMap.Select( strUser.c_str(), clsUser ) == false ) return true;
+    if ( !clsUser.requiresTls() || pclsMessage->m_eTransport == E_SIP_TLS ) return true;
+
+    // 반복 위반(스캔/오설정)은 소스 단위로 로그를 억제한다 — 미가입 403 경로와 같은 계약.
+    if ( !CLog::IsNetworkSourceSuppressed( pclsMessage->m_strClientIp.c_str() ) )
+        CLog::Print(
+            LOG_INFO, "channel policy violation user=%s transport=%s src=%s:%d method=%s → 403, 소스 로그 %d초 억제",
+            strUser.c_str(), pclsMessage->m_eTransport == E_SIP_TCP ? "TCP" : "UDP", pclsMessage->m_strClientIp.c_str(),
+            pclsMessage->m_iClientPort, pclsMessage->m_strSipMethod.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
+    CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+    if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    return false;
+}
+
+// ──────────────────────────────────────────────────────────────
 //  OnSipRequest — REGISTER, SUBSCRIBE 처리
 // ──────────────────────────────────────────────────────────────
 
 bool CCscfModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) ) {
+        // 채널 정책 게이트 — 챌린지보다 앞. 비-REGISTER 는 EventIncomingRequestAuth 가 같은 검사를 한다.
+        if ( CheckChannelPolicy( pclsMessage ) == false ) return true;
         return RecvRequestRegister( iThreadId, pclsMessage );
     } else if ( pclsMessage->IsMethod( "SUBSCRIBE" ) ) {
         return RecvRequestSubscribe( iThreadId, pclsMessage );
@@ -296,6 +368,12 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
             SendUnAuthorizedResponse( pclsMessage, strRegRealm, true );  // F-07: stale=true
+            return true;
+        case E_AUTH_REALM_MISMATCH: {
+            // 가입자 서비스의 realm 로 재챌린지 — Request-URI host 로 고른 strRegRealm 과 다를 수 있다
+            ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
+            SendUnAuthorizedResponse( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm );
+        }
             return true;
         case E_AUTH_USER_NOT_FOUND:
             // 미가입 계정 REGISTER = 인터넷 노출 리스너의 계정 무차별 대입 스캐너 신호.

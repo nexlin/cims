@@ -39,6 +39,9 @@ public:
 
 	// SIP 메시지 전송 프로토콜
 	ESipTransport m_eTransport;
+
+	// 수신 listener id (0 = 미지정). 큐 소비 스레드가 thread-local 로 복원한다.
+	int m_iListenerId;
 };
 
 typedef std::list< CSipQueueEntry * > SIP_QUEUE;
@@ -50,7 +53,7 @@ public:
 	CSipQueue();
 	~CSipQueue();
 
-	bool Insert( const char * pszBuf, int iBufLen, const char * pszIp, unsigned short sPort, ESipTransport eTransport );
+	bool Insert( const char * pszBuf, int iBufLen, const char * pszIp, unsigned short sPort, ESipTransport eTransport, int iListenerId = 0 );
 	bool Select( CSipQueueEntry ** ppclsEntry );
 	void BroadCast( );
 

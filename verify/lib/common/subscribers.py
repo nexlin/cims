@@ -66,18 +66,18 @@ def select_subscribers(db_cfg: dict, voip_count: int = 1, ptt_count: int = 1) ->
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id,passwd,imsi,service_ref FROM volte_subscriptions "
+            "SELECT id,passwd,imsi,service_ref,COALESCE(ha1,'') FROM volte_subscriptions "
             "WHERE id LIKE '+%' AND passwd<>'' AND service_ref<>'' AND imsi<>'' "
             "ORDER BY id"
         )
         r = pick_start_subscriber(list(cur.fetchall()), voip_count)
         if r:
             out.update({"voip_user": r[0], "voip_pwd": r[1] or "",
-                        "voip_imsi": r[2] or "", "voip_ref": r[3] or ""})
+                        "voip_imsi": r[2] or "", "voip_ref": r[3] or "", "voip_ha1": r[4] or ""})
 
         # PTT: 그룹 멤버 + imsi 숫자 형식 우선
         cur.execute(
-            "SELECT s.id, s.passwd, s.imsi, s.service_ref, g.mcptt_group_id AS group_id "
+            "SELECT s.id, s.passwd, s.imsi, s.service_ref, g.mcptt_group_id AS group_id, COALESCE(s.ha1,'') "
             "FROM ptt_subscriptions s "
             "JOIN ptt_group_members m ON m.user_id = s.id "
             "JOIN ptt_groups g ON g.id = m.group_id "
@@ -94,18 +94,18 @@ def select_subscribers(db_cfg: dict, voip_count: int = 1, ptt_count: int = 1) ->
         if r:
             out.update({"ptt_user": r[0], "ptt_pwd": r[1] or "",
                         "ptt_imsi": r[2] or "", "ptt_ref": r[3] or "",
-                        "ptt_group": r[4]})
+                        "ptt_group": r[4], "ptt_ha1": r[5] or ""})
         else:
             # fallback: 첫 가입자 + 첫 그룹
             cur.execute(
-                "SELECT id,passwd,imsi,service_ref FROM ptt_subscriptions "
+                "SELECT id,passwd,imsi,service_ref,COALESCE(ha1,'') FROM ptt_subscriptions "
                 "WHERE id LIKE '+%' AND passwd<>'' AND service_ref<>'' AND imsi<>'' "
                 "ORDER BY id"
             )
             r = pick_start_subscriber(list(cur.fetchall()), ptt_count)
             if r:
                 out.update({"ptt_user": r[0], "ptt_pwd": r[1] or "",
-                            "ptt_imsi": r[2] or "", "ptt_ref": r[3] or ""})
+                            "ptt_imsi": r[2] or "", "ptt_ref": r[3] or "", "ptt_ha1": r[4] or ""})
             cur.execute("SELECT mcptt_group_id FROM ptt_groups ORDER BY mcptt_group_id LIMIT 1")
             r = cur.fetchone()
             if r:

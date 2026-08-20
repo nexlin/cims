@@ -30,16 +30,20 @@
 #include "MemoryDebug.h"
 
 // SIP 메시지를 파싱하여서 SIP stack 에 입력한다.
-static bool SipMessageProcess( CSipStack * pclsSipStack, int iThreadId, const char * pszBuf, int iBufLen, const char * pszIp, unsigned short iPort )
+static bool SipMessageProcess( CSipStack * pclsSipStack, int iThreadId, const char * pszBuf, int iBufLen, const char * pszIp, unsigned short iPort, int iListenerId )
 {
 	CLog::Print( LOG_NETWORK, "TlsRecv(%s:%d) \n[%.*s]", pszIp, iPort, iBufLen, pszBuf );
 
 	if( pclsSipStack->m_clsSetup.m_iTcpCallBackThreadCount > 0 )
 	{
-		return gclsSipQueue.Insert( pszBuf, iBufLen, pszIp, iPort, E_SIP_TLS );
+		return gclsSipQueue.Insert( pszBuf, iBufLen, pszIp, iPort, E_SIP_TLS, iListenerId );
 	}
 
-	return pclsSipStack->RecvSipMessage( iThreadId, pszBuf, iBufLen, pszIp, iPort, E_SIP_TLS );
+	// 연결을 수락한 listener id 를 UDP 경로와 같은 thread-local 로 노출 (inbound_policy 평가용)
+	t_iCurrentListenerId = iListenerId;
+	bool bRes = pclsSipStack->RecvSipMessage( iThreadId, pszBuf, iBufLen, pszIp, iPort, E_SIP_TLS );
+	t_iCurrentListenerId = 0;
+	return bRes;
 }
 
 // TLS 세션을 위한 쓰레드 함수
@@ -133,7 +137,7 @@ CLOSE_SESSION:
 
 			while( clsSessionList.m_clsList[i].m_clsSipBuf.GetSipMessage( &pszBuf, &iBufLen ) )
 			{
-				SipMessageProcess( pclsSipStack, iThreadId, pszBuf, iBufLen, clsSessionList.m_clsList[i].m_strIp.c_str(), clsSessionList.m_clsList[i].m_iPort );
+				SipMessageProcess( pclsSipStack, iThreadId, pszBuf, iBufLen, clsSessionList.m_clsList[i].m_strIp.c_str(), clsSessionList.m_clsList[i].m_iPort, clsSessionList.m_clsList[i].m_iListenerId );
 				clsSessionList.m_clsList[i].m_clsSipBuf.ShiftBuf( iBufLen );
 			}
 		}
@@ -247,6 +251,7 @@ THREAD_API SipTlsListenerThread( LPVOID lpParameter )
 			if( hConnFd == INVALID_SOCKET ) continue;
 
 			clsTcpComm.m_hSocket = hConnFd;
+			clsTcpComm.m_iListenerId = pListener->m_iId;
 			// R5.c: listener 의 per-listener SSL_CTX 를 worker 로 전달 (NULL 이면 stack-global)
 			clsTcpComm.m_pSslCtx = pListener->m_pSslCtx;
 

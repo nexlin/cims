@@ -31,9 +31,9 @@ class CTcpComm
 {
 public:
 #ifdef USE_TLS
-	CTcpComm() : m_iPort(0), m_psttSsl(NULL), m_pSslCtx(NULL), m_cUseTimeout(1)
+	CTcpComm() : m_iPort(0), m_psttSsl(NULL), m_pSslCtx(NULL), m_iListenerId(0), m_cUseTimeout(1)
 #else
-	CTcpComm() : m_iPort(0), m_psttSsl(NULL), m_cUseTimeout(1)
+	CTcpComm() : m_iPort(0), m_psttSsl(NULL), m_iListenerId(0), m_cUseTimeout(1)
 #endif
 	{
 		m_szIp[0] = '\0';
@@ -67,6 +67,9 @@ public:
 	 *  NULL 이면 worker 는 global gpsttServerCtx 사용 (하위 호환). */
 	SSL_CTX		* m_pSslCtx;
 #endif
+	/** 이 연결을 수락한 listener 의 id (0 = 레거시 단일 리스너). 연결 수명 동안 불변이며
+	 *  수신 메시지의 m_iListenerId 로 전파된다 (UDP 의 thread-local 과 같은 역할). */
+	int			m_iListenerId;
 
 private:
 	char		m_cUseTimeout;
@@ -92,6 +95,9 @@ public:
 	time_t				m_iRecvTime;
 
 	bool					m_bUseTimeout;
+
+	/** 연결을 수락한 listener id (CTcpComm::m_iListenerId). */
+	int						m_iListenerId;
 };
 
 typedef std::vector< CTcpSessionListInfo > SESSION_LIST;

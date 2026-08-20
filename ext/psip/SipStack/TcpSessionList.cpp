@@ -27,7 +27,7 @@ CTcpSessionListInfo::CTcpSessionListInfo() : m_iPort(0)
 #ifdef USE_TLS
 , m_psttSsl(NULL)
 #endif
-, m_iConnectTime(0), m_iRecvTime(0), m_bUseTimeout(true)
+, m_iConnectTime(0), m_iRecvTime(0), m_bUseTimeout(true), m_iListenerId(0)
 {
 
 }
@@ -42,6 +42,7 @@ void CTcpSessionListInfo::Clear()
 
 	m_iConnectTime = 0;
 	m_iRecvTime = 0;
+	m_iListenerId = 0;
 }
 
 CTcpSessionList::CTcpSessionList( CSipStack * pclsSipStack, ESipTransport eTransport ) : m_psttPollFd(NULL), m_iPollFdMax(0), m_iPoolFdCount(0)
@@ -107,6 +108,7 @@ bool CTcpSessionList::Insert( CTcpComm & clsTcpComm, SSL * psttSsl )
 				TcpSetPollIn( m_psttPollFd[i], clsTcpComm.m_hSocket );
 				m_clsList[i].m_strIp = clsTcpComm.m_szIp;
 				m_clsList[i].m_iPort = clsTcpComm.m_iPort;
+				m_clsList[i].m_iListenerId = clsTcpComm.m_iListenerId;
 				m_clsList[i].m_iConnectTime = iTime;
 				m_clsList[i].m_iRecvTime = iTime;
 
@@ -124,6 +126,7 @@ bool CTcpSessionList::Insert( CTcpComm & clsTcpComm, SSL * psttSsl )
 	TcpSetPollIn( m_psttPollFd[m_iPoolFdCount], clsTcpComm.m_hSocket );
 	m_clsList[m_iPoolFdCount].m_strIp = clsTcpComm.m_szIp;
 	m_clsList[m_iPoolFdCount].m_iPort = clsTcpComm.m_iPort;
+	m_clsList[m_iPoolFdCount].m_iListenerId = clsTcpComm.m_iListenerId;
 	m_clsList[m_iPoolFdCount].m_iConnectTime = iTime;
 	m_clsList[m_iPoolFdCount].m_iRecvTime = iTime;
 

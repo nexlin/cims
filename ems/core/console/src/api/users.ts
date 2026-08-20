@@ -1,5 +1,7 @@
 import { api } from './client'
 
+export type SipTransport = 'UDP' | 'TCP' | 'TLS'
+
 export interface Subscription {
   id: string          // MSISDN of this line
   auth_id?: string    // legacy — P8 에서 제거됨(백엔드 미반환). imsi 로 대체.
@@ -9,6 +11,8 @@ export interface Subscription {
   service_ref?: string | null   // 소속 서비스(access_services.name, 예: volte/mcptt) — 도메인 결정
   service_id?: number | null    // (구) 숫자 service_id 호환
   imsi?: string | null          // SIM IMSI — 인증 username 의 user 파트. 번호 add 시 필수.
+  // 채널 정책 — TLS=서버 집행(비-TLS 채널의 이 번호 요청은 REGISTER 포함 403) / UDP·TCP=프로비저닝 힌트 / null=단말 선택
+  sip_transport?: SipTransport | null
   register_time?: string | null
   logout_time?: string | null
   mcptt_profile?: McpttProfile | null   // PTT 번호에만 (상세 응답 동봉, 미설정=null → 기본값)
@@ -48,6 +52,14 @@ export type UserInput = {
   login_id?: string; passwd?: string   // 단말 IdMS 로그인 자격 (passwd 는 변경 시에만 전송)
 }
 
+// Excel 가져오기 결과. credentials = password 칸을 비워 난수로 생성된 행 — 서버는 H(A1) 만 저장하므로
+//   이 응답이 원문 비밀번호를 보는 유일한 기회다.
+export interface ImportResult {
+  total: number; created_users: number; created_voip: number; created_ptt: number
+  errors: Array<{ row: number; sheet: string; error: string }>
+  credentials?: Array<{ sheet: string; row: number; msisdn: string; password: string }>
+}
+
 const enc = (s: string) => encodeURIComponent(s)
 
 export const usersApi = {
@@ -58,7 +70,7 @@ export const usersApi = {
   delete:      (id: number)                                  => api.delete<{id:number}>(`/users/${id}`),
   batchDelete: (ids: number[])                               => api.delete<{deleted:number, errors:Array<{id:number,error:string}>}>('/users/batch', {ids}),
 
-  importExcel: (base64: string)                              => api.post<{total:number, created_users:number, created_voip:number, created_ptt:number, errors:Array<{row:number,sheet:string,error:string}>}>('/users/import', {file_base64: base64}),
+  importExcel: (base64: string)                              => api.post<ImportResult>('/users/import', {file_base64: base64}),
   templateUrl: '/api/v1/users/import/template',
 
   addSub:     (pid: number, svc: 'call'|'ptt', sub: Partial<Subscription>)              => api.post<{id:string}>(`/users/${pid}/${svc}`, sub),

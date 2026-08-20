@@ -265,6 +265,7 @@ SimSession::SimSession(int id,
                        const std::string& strAuthId,
                        const std::string& strDomain,
                        const std::string& strPwd,
+                       const std::string& strHa1,
                        const std::string& strServerIp,
                        int iServerPort,
                        const std::string& strLocalIp,
@@ -272,7 +273,7 @@ SimSession::SimSession(int id,
                        bool bPttMode,
                        const std::string& strGroupId)
     : m_iId(id), m_strUser(strUser), m_strAuthId(strAuthId),
-      m_strDomain(strDomain), m_strPwd(strPwd),
+      m_strDomain(strDomain), m_strPwd(strPwd), m_strHa1(strHa1),
       m_strServerIp(strServerIp), m_iServerPort(iServerPort),
       m_strLocalIp(strLocalIp), m_iLocalPort(iLocalPort),
       m_bPttMode(bPttMode), m_strGroupId(strGroupId),
@@ -291,6 +292,7 @@ SimSession::SimSession(int id,
     m_clsServerInfo.m_strUserId      = m_strUser;
     m_clsServerInfo.m_strAuthId      = m_strAuthId.empty() ? m_strUser : m_strAuthId;
     m_clsServerInfo.m_strPassWord    = m_strPwd;
+    m_clsServerInfo.m_strHa1         = m_strHa1;
     m_clsServerInfo.m_eTransport     = E_SIP_UDP;  // Start() 에서 m_eTransport 로 확정
     m_clsServerInfo.m_iPort          = m_iServerPort;
     m_clsServerInfo.m_iLoginTimeout  = 600;

@@ -1768,14 +1768,17 @@ def _country_code_of(msisdn: str) -> str:
     return d[:2] if d[:2] in _E164_CC2 else d[:3]
 
 def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
-                       sip_password: str = "", sip_transport: str = "") -> dict:
+                       sip_password: str = "", sip_transport: str = "", sip_ha1: str = "") -> dict:
     svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
     account = {
         "msisdn": sid,
         "imsi": imsi or "",
         "authId": auth_id or "",        # 빈값이면 단말이 imsi@domain 합성
-        # SIP Digest 비번 = 서비스 가입(subscription) 비번. CIMS 로그인(IdMS) 비번과 별개 —
-        # CSP 는 이 비번으로 REGISTER 를 검증한다. 비어 있으면 단말이 로그인 비번으로 폴백.
+        # SIP Digest 자료 (sip_access_security.md §4.7). sipHa1 = H(A1)=MD5(imsi@domain:realm:pw) —
+        #   단말은 이것만으로 response 를 계산한다(pjsip PJSIP_CRED_DATA_DIGEST). CIMS 로그인(IdMS)
+        #   비번과 별개. sipPassword(평문)는 과도기 — DB passwd 가 소거되면 항상 null 이 된다.
+        #   둘 다 null 이면 단말이 로그인 비번으로 ha1 을 계산한다.
+        "sipHa1": sip_ha1 or None,
         "sipPassword": sip_password or None,
     }
     if kind == "ptt":
@@ -1797,6 +1800,13 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     #   강제가 아니라 권장값이며 단말이 목록에서 바꿀 수 있다. 목록에 없으면(예: TLS 포트 미설정)
     #   첫 항목으로 강등한다 — 도달 불가한 기본값을 내리지 않는다.
     default = (sip_transport or svc.get('transport', 'UDP') or 'UDP').upper()
+    # 채널 정책 집행 (sip_access_security.md §3.1): sip_transport=TLS 는 힌트가 아니라 서버가
+    #   집행하는 정책이다 — 비-TLS 채널의 이 신원 요청은 403. 단말이 고를 수 없으므로 목록을
+    #   TLS 하나로 좁히고 enforced 를 표시한다. TLS 포트 미설정이면 도달 경로가 없어 좁히지 못한다
+    #   (운영 오설정 — 단말은 403 을 받는다).
+    enforced = (sip_transport or '').upper() == 'TLS' and bool(tls_port)
+    if enforced:
+        transports = [t for t in transports if t['transport'] == 'TLS']
     if not any(t['transport'] == default for t in transports):
         default = transports[0]['transport']
     default_port = next(t['port'] for t in transports if t['transport'] == default)
@@ -1809,6 +1819,7 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
             "transport": default,
             "transports": transports,
             "default": default,
+            "enforced": enforced,   # true = 서버가 이 transport 를 집행(다른 채널 403)
             "domain": svc.get('domain') or IDMS_DOMAIN,
         },
         "account": account,
@@ -1864,16 +1875,21 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                     # sip_transport 는 가입자 단위 override (migrate_subscription_transport.sql).
                     #   구 스키마(컬럼 부재) DB 에서도 동작하도록 실패 시 기존 질의로 폴백한다.
                     try:
-                        cur.execute(f"SELECT id, imsi, auth_id, passwd, sip_transport FROM {t} "
+                        cur.execute(f"SELECT id, imsi, auth_id, passwd, sip_transport, ha1 FROM {t} "
                                     "WHERE user_id=%s ORDER BY id", (user_id,))
                         rows = cur.fetchall()
                     except Exception:
-                        cur.execute(f"SELECT id, imsi, auth_id, passwd FROM {t} WHERE user_id=%s ORDER BY id",
-                                    (user_id,))
-                        rows = [(r[0], r[1], r[2], r[3], None) for r in cur.fetchall()]
-                    for sid, imsi, auth_id, passwd, transport in rows:
+                        try:
+                            cur.execute(f"SELECT id, imsi, auth_id, passwd, sip_transport FROM {t} "
+                                        "WHERE user_id=%s ORDER BY id", (user_id,))
+                            rows = [(r[0], r[1], r[2], r[3], r[4], '') for r in cur.fetchall()]
+                        except Exception:
+                            cur.execute(f"SELECT id, imsi, auth_id, passwd FROM {t} WHERE user_id=%s ORDER BY id",
+                                        (user_id,))
+                            rows = [(r[0], r[1], r[2], r[3], None, '') for r in cur.fetchall()]
+                    for sid, imsi, auth_id, passwd, transport, ha1 in rows:
                         services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip,
-                                                          passwd or '', transport or ''))
+                                                          passwd or '', transport or '', ha1 or ''))
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None

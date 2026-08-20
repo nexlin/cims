@@ -462,9 +462,16 @@ Content-Type: application/json
 |------|------|------|--------|------|
 | `id` | string | Y | - | MSISDN (E.164 형식, `+` 국가코드 포함) |
 | `auth_id` | string | N | id와 동일 | SIP Digest 인증 ID |
-| `passwd` | string | Y | - | SIP Digest 비밀번호 |
+| `passwd` | string | Y | - | SIP Digest 비밀번호 — **저장되지 않는다.** `ha1=MD5(imsi@domain:realm:passwd)` 로 변환해 저장(realm = 서비스 `auth_realm ?? domain`). 따라서 `service_ref` 가 해석되어야 한다(400) |
+| `sip_transport` | string | N | null | 채널 정책 `UDP`/`TCP`/`TLS`. **`TLS` 는 서버가 집행** — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 403. `UDP`/`TCP` 는 단말 프로비저닝 힌트, null 은 단말 선택 |
 | `dnd` | boolean | N | false | 방해금지 모드 |
 | `forward_id` | string | N | "" | 착신전환 번호 (E.164 형식) |
+
+> 변경(PUT) 시 `passwd` 는 바꿀 때만 보낸다 — 미전송/빈값이면 기존 `ha1` 이 유지된다. `ha1` 은
+> (imsi, 서비스 domain/realm) 에 결박되므로 **`imsi` 나 `service_ref` 를 바꾸는 요청은 `passwd` 를
+> 함께 보내야 한다**(400 `passwd required when imsi or service_ref changes (ha1 rebinding)`).
+> 서비스의 `domain`/`auth_realm` 변경은 그 서비스 전 가입자의 `ha1` 을 무효화한다 — 전 가입자
+> 비밀번호 재설정 없이는 바꾸지 않는다([sip_access_security.md §4.3](../design/features/sip_access_security.md)).
 
 **curl 예시:**
 ```bash
@@ -929,7 +936,9 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | id | VARCHAR(32) | N | - | PK | MSISDN (E.164 형식) |
 | user_id | INT | N | - | FK → users.id ON DELETE CASCADE | 소유자 |
 | auth_id | VARCHAR(128) | Y | id와 동일 | - | SIP 인증 ID (IMPI) |
-| passwd | VARCHAR(64) | N | - | - | SIP Digest 비밀번호 |
+| ha1 | CHAR(32) | N | '' | - | SIP Digest H(A1)=MD5(imsi@domain:realm:password) — 인증 자료 SoT |
+| passwd | VARCHAR(128) | N | '' | - | 평문 (과도기 — ha1 이행 후 소거·DROP 예정) |
+| sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행 / UDP·TCP=힌트 / NULL=단말 선택) |
 | dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
 | forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 (E.164) |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
@@ -942,7 +951,9 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | id | VARCHAR(32) | N | - | PK | MSISDN (E.164 형식) |
 | user_id | INT | N | - | FK → users.id ON DELETE CASCADE | 소유자 |
 | auth_id | VARCHAR(128) | Y | - | - | IMPI (3GPP 형식) |
-| passwd | VARCHAR(64) | N | - | - | SIP Digest 비밀번호 |
+| ha1 | CHAR(32) | N | '' | - | SIP Digest H(A1) — 인증 자료 SoT |
+| passwd | VARCHAR(128) | N | '' | - | 평문 (과도기 — 소거·DROP 예정) |
+| sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행) |
 | dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
 | forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |

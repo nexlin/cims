@@ -521,6 +521,13 @@ bool CModuleDispatcher::EventIncomingRequestAuth( CSipMessage *pclsMessage ) {
         }
     }
 
+    // 채널 정책 게이트 (sip_access_security.md §3.2) — 인증·주소 변경 판정보다 앞.
+    //   TLS 정책 가입자의 신원으로 평문 채널에서 온 요청은 유효한 Digest 가 있어도 403.
+    //   TLS 채널이면 아래 기존 판정으로 계속: 등록된 TLS 바인딩과 일치 → TouchFlow,
+    //   새 TLS 연결 → Digest 재인증 후 SetIpPort (TLS→TLS 이동만 성립 — 다른 transport
+    //   바인딩은 없으므로 SetIpPort 가 자연히 무시한다).
+    if ( CCscfModule::CheckChannelPolicy( pclsMessage ) == false ) return false;
+
     CspUser clsCspUser;
     bool bCspUserFound = gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsCspUser );
 

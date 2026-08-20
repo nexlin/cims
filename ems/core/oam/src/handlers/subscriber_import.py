@@ -17,6 +17,7 @@ RBAC: manager+ (변경 작업). 템플릿 GET 도 manager+ (csc 정책과 동일
 import asyncio
 import base64
 import io
+import secrets
 from urllib.parse import urlparse, unquote
 from pathlib import PurePath
 
@@ -136,11 +137,12 @@ def _users_template() -> HandlerResult:
     ws1.append(['name', 'org_code', 'details', 'reject_ids'])
     ws1.append(['홍길동', 'DEV_01', '개발1팀', '+8210001,+8210002'])
     ws2 = wb.create_sheet('volte_subscriptions')
+    # password 를 비우면 행별 난수 비밀번호를 생성해 결과(credentials)로만 돌려준다 — 고정 기본값은 없다.
     ws2.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd', 'forward_id'])
-    ws2.append(['홍길동', '+821357007100', '', '450033100000100', '123456', 'N', ''])
+    ws2.append(['홍길동', '+821357007100', 'volte', '450033100000100', '', 'N', ''])
     ws3 = wb.create_sheet('ptt_subscriptions')
     ws3.append(['name', 'msisdn', 'service_ref', 'imsi', 'password', 'dnd'])
-    ws3.append(['홍길동', '+82571900100', '', '450033100000100', '123456', 'N'])
+    ws3.append(['홍길동', '+82571900100', 'mcptt', '450033100000100', '', 'N'])
     return _xlsx_result(wb, 'cims_import_template.xlsx')
 
 
@@ -169,7 +171,9 @@ def _xlsx_result(wb, filename: str) -> HandlerResult:
 def _do_users_import(file_bytes: bytes, token: str, base: str):
     import openpyxl
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes))
-    result = {'created_users': 0, 'created_voip': 0, 'created_ptt': 0, 'errors': []}
+    # credentials = 비밀번호를 비워 난수로 생성한 행. 이 응답이 원문을 보는 유일한 기회다 —
+    #   CSC 는 H(A1) 만 저장하므로 이후에는 복구할 수 없다.
+    result = {'created_users': 0, 'created_voip': 0, 'created_ptt': 0, 'errors': [], 'credentials': []}
 
     r = _get(base, '/api/v1/users', token)
     if r.status_code != 200:
@@ -227,10 +231,14 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
             pid = _ensure_user(name, i, sheet)
             if not pid:
                 continue
+            passwd = _cell_str(rd.get('password'))
+            generated = not passwd
+            if generated:
+                passwd = secrets.token_urlsafe(9)   # 12자 URL-safe 난수
             sub = {
                 'id': msisdn,
                 'imsi': _cell_str(rd.get('imsi')) or msisdn.lstrip('+'),
-                'passwd': _cell_str(rd.get('password')) or '123456',
+                'passwd': passwd,
                 'dnd': _cell_str(rd.get('dnd')).upper() in ('Y', 'YES', '1', 'TRUE'),
             }
             sref = _cell_str(rd.get('service_ref'))
@@ -241,6 +249,8 @@ def _do_users_import(file_bytes: bytes, token: str, base: str):
             rr = _post(base, f'/api/v1/users/{pid}/{svc}', token, sub)
             if rr.status_code in (200, 201):
                 result[key] += 1
+                if generated:
+                    result['credentials'].append({'sheet': sheet, 'row': i, 'msisdn': msisdn, 'password': passwd})
             else:
                 result['errors'].append({'row': i, 'sheet': sheet, 'error': f'HTTP {rr.status_code} {rr.text[:80]}'})
 

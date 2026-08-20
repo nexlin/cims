@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
-import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile } from '@core/api/users'
+import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type ImportResult } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
 import OrgTreePanel from '@core/components/OrgTreePanel'
@@ -545,7 +545,21 @@ function SvcBadge({ svc }: { svc: 'call' | 'ptt' }) {
   return <span className={`badge ${svc === 'call' ? 'badge--blue' : 'badge--green'}`} style={{ fontSize: 9 }}>{svc === 'call' ? 'VoLTE' : 'McPTT'}</span>
 }
 
-interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; dnd: boolean; forward_id: string }
+interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; dnd: boolean; forward_id: string }
+
+// 채널 정책 선택 — 값의 의미는 Subscription.sip_transport 주석 참조
+const TRANSPORT_OPTS: Array<{ v: SipTransport | ''; label: string }> = [
+  { v: '', label: '자유' }, { v: 'UDP', label: 'UDP' }, { v: 'TCP', label: 'TCP' }, { v: 'TLS', label: 'TLS (강제)' },
+]
+function TransportSelect({ value, onChange }: { value: SipTransport | '' | null | undefined; onChange: (v: SipTransport | '') => void }) {
+  return <select className="form-input" title="TLS=서버 집행(비-TLS 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택" value={value || ''} onChange={e => onChange(e.target.value as SipTransport | '')}>
+    {TRANSPORT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
+  </select>
+}
+function TransportBadge({ v }: { v?: SipTransport | null }) {
+  if (!v) return <span className="ts">자유</span>
+  return <span className={`badge ${v === 'TLS' ? 'badge--red' : 'badge--blue'}`} style={{ fontSize: 9 }} title={v === 'TLS' ? '서버 집행 — 비-TLS 채널 요청 403' : '프로비저닝 힌트'}>{v}</span>
+}
 
 // ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+PTT 통합) ──
 function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: UserSummary; catalog: ServiceCat[]; canWrite: boolean; highlight?: string; onReload: () => void }) {
@@ -556,7 +570,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
   ]
   const svcVal = (c: ServiceCat) => `${c.svc}:${c.ref}`
   const rk = (svc: 'call' | 'ptt', msisdn: string) => `${svc}:${msisdn}`
-  const newAdd = (): AddNum => ({ id: '', imsi: '', svcCat: catalog[0] ? svcVal(catalog[0]) : 'call:volte', passwd: '123456', dnd: false, forward_id: '' })
+  const newAdd = (): AddNum => ({ id: '', imsi: '', svcCat: catalog[0] ? svcVal(catalog[0]) : 'call:volte', passwd: '', sip_transport: '', dnd: false, forward_id: '' })
 
   const [editKey, setEditKey] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Subscription>>({})
@@ -565,10 +579,12 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
 
   function startEdit(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
     setAdding(false); setEditKey(rk(r.svc, r.sub.id))
-    setEditForm({ imsi: r.sub.imsi || '', service_ref: r.sub.service_ref || '', passwd: '', dnd: r.sub.dnd, forward_id: r.sub.forward_id })
+    setEditForm({ imsi: r.sub.imsi || '', service_ref: r.sub.service_ref || '', passwd: '', sip_transport: r.sub.sip_transport || null, dnd: r.sub.dnd, forward_id: r.sub.forward_id })
   }
   async function saveEdit(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
+    // passwd 는 변경 시에만 전송. imsi/service_ref 가 바뀌면 서버가 passwd 를 요구한다(H(A1) 결박).
     const d: Partial<Subscription> = { ...editForm }; if (!d.passwd) delete d.passwd
+    if (!d.passwd && ((d.imsi || '') !== (r.sub.imsi || '') || (d.service_ref || '') !== (r.sub.service_ref || ''))) { show('IMSI/서비스 변경 시 비밀번호를 함께 입력해야 합니다 (H(A1) 재결박)', 'err'); return }
     try { await usersApi.updateSub(user.id, r.svc, r.sub.id, d); show('수정', 'ok'); setEditKey(null); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
@@ -580,8 +596,9 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
   async function add() {
     if (!addForm.id) { show('MSISDN 필수', 'err'); return }
     if (!addForm.imsi) { show('IMSI 필수', 'err'); return }
+    if (!addForm.passwd) { show('비밀번호 필수', 'err'); return }
     const [svc, ref] = addForm.svcCat.split(':') as ['call' | 'ptt', string]
-    const body: Partial<Subscription> = { id: addForm.id, imsi: addForm.imsi, service_ref: ref, passwd: addForm.passwd, dnd: addForm.dnd, forward_id: addForm.forward_id }
+    const body: Partial<Subscription> = { id: addForm.id, imsi: addForm.imsi, service_ref: ref, passwd: addForm.passwd, sip_transport: addForm.sip_transport || null, dnd: addForm.dnd, forward_id: addForm.forward_id }
     try { await usersApi.addSub(user.id, svc, body); show('추가', 'ok'); setAdding(false); setAddForm(newAdd()); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
@@ -599,13 +616,14 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
             <th style={{ width: 140 }}>MSISDN</th>
             <th style={{ width: 100 }}>비밀번호</th>
             <th>IMSI</th>
+            <th style={{ width: 96 }} title="TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택">채널</th>
             <th style={{ width: 56, textAlign: 'center' }}>DND</th>
             <th style={{ width: 110 }}>착신전환</th>
             <th style={{ width: 110 }}></th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && !adding && <tr><td colSpan={7} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 ＋ 번호 추가</td></tr>}
+          {rows.length === 0 && !adding && <tr><td colSpan={8} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 ＋ 번호 추가</td></tr>}
           {rows.map(r => {
             const ed = editKey === rk(r.svc, r.sub.id)
             const isCall = r.svc === 'call'
@@ -620,6 +638,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 <td><strong>{r.sub.id}</strong></td>
                 <td>{ed ? <input className="form-input" type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
                 <td>{ed ? <input className="form-input" placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</td>
+                <td>{ed ? <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} /> : <TransportBadge v={r.sub.sip_transport} />}</td>
                 <td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</td>
                 <td>{!isCall ? <span className="ts">—</span> : ed ? <input className="form-input" placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</td>
                 <td className="actions">
@@ -640,8 +659,9 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 {catalog.map(c => <option key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</option>)}
               </select></td>
               <td><input className="form-input" placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></td>
-              <td><input className="form-input" type="password" placeholder="암호" value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
+              <td><input className="form-input" type="password" placeholder="암호 *" value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
               <td><input className="form-input" placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></td>
+              <td><TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} /></td>
               <td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="ts">—</span>}</td>
               <td>{addIsCall ? <input className="form-input" placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</td>
               <td className="actions">
@@ -676,7 +696,8 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
   const [serviceRef, setServiceRef] = useState(svcCatalog[0]?.ref || (svc === 'call' ? 'volte' : 'mcptt'))
   const [msisdn, setMsisdn] = useState('')
   const [imsi, setImsi] = useState('')
-  const [passwd, setPasswd] = useState('123456')
+  const [passwd, setPasswd] = useState('')
+  const [sipTransport, setSipTransport] = useState<SipTransport | ''>('')
   const [dnd, setDnd] = useState(false)
   const [forwardId, setForwardId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -686,7 +707,8 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
     if (!pick) { show('가입자 선택 필수', 'err'); return }
     if (!msisdn) { show('MSISDN 필수', 'err'); return }
     if (!imsi) { show('IMSI 필수', 'err'); return }
-    const body: Partial<Subscription> = { id: msisdn, imsi, service_ref: serviceRef, passwd, dnd, forward_id: forwardId }
+    if (!passwd) { show('비밀번호 필수', 'err'); return }
+    const body: Partial<Subscription> = { id: msisdn, imsi, service_ref: serviceRef, passwd, sip_transport: sipTransport || null, dnd, forward_id: forwardId }
     setBusy(true)
     try { await usersApi.addSub(Number(pick.value), svc, body); show('번호 추가', 'ok'); onAdded() }
     catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
@@ -715,7 +737,8 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
         </Field>
         <Field label="MSISDN *" w={150}><input className="form-input" placeholder={isCall ? '+8213…' : '+825…'} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
         <Field label="IMSI *" w={170}><input className="form-input" placeholder="SIM IMSI" value={imsi} onChange={e => setImsi(e.target.value)} /></Field>
-        <Field label="암호" w={120}><input className="form-input" type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
+        <Field label="암호 *" w={120}><input className="form-input" type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
+        <Field label="채널" w={110}><TransportSelect value={sipTransport} onChange={setSipTransport} /></Field>
         {isCall && <Field label="DND" w={56}><input type="checkbox" checked={dnd} onChange={e => setDnd(e.target.checked)} style={{ marginTop: 6 }} /></Field>}
         {isCall && <Field label="착신전환" w={130}><input className="form-input" placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -730,7 +753,7 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
 // ── 통합 Excel import 모달 (사용자+VoLTE+PTT) ──
 function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { show } = useToast()
-  const [result, setResult] = useState<{ total: number; created_users: number; created_voip: number; created_ptt: number; errors: Array<{ row: number; sheet: string; error: string }> } | null>(null)
+  const [result, setResult] = useState<ImportResult | null>(null)
   const [busy, setBusy] = useState(false)
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; if (!f) return
@@ -765,6 +788,17 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
               {result.errors.length > 0 && (
                 <div style={{ marginTop: 8, color: 'var(--danger)', fontSize: 12 }}>
                   {result.errors.map((er, i) => <div key={i}>[{er.sheet}] 행 {er.row}: {er.error}</div>)}
+                </div>
+              )}
+              {(result.credentials?.length ?? 0) > 0 && (
+                <div style={{ marginTop: 10, fontSize: 12 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>생성된 비밀번호 <span className="ts" style={{ fontWeight: 400 }}>— 서버는 H(A1) 만 저장하므로 지금 기록하지 않으면 복구할 수 없습니다</span></div>
+                  <div className="table-wrap" style={{ maxHeight: 220, overflow: 'auto' }}>
+                    <table className="data-table" style={{ fontSize: 12 }}>
+                      <thead><tr><th>시트</th><th>행</th><th>MSISDN</th><th>비밀번호</th></tr></thead>
+                      <tbody>{result.credentials!.map((c, i) => <tr key={i}><td>{c.sheet}</td><td>{c.row}</td><td>{c.msisdn}</td><td><code>{c.password}</code></td></tr>)}</tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>

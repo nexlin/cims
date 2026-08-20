@@ -160,6 +160,13 @@ private:
 
     bool Reconnect();
     bool ExecuteQuery( const std::string &strSql );
+
+    /** 과도기 컬럼(ha1 — sip_access_security.md §4.2) 존재 여부. Connect 시 1회 프로브.
+     *  마이그레이션이 아직 적용되지 않은 DB 에서도 가입자 적재가 깨지지 않도록 SELECT 식을 바꾼다. */
+    bool m_bHasHa1Column = false;
+    void ProbeSchema();
+    /** 컬럼이 있으면 COALESCE(식,'') 아니면 '' — SELECT 열 위치를 고정한 채 값만 비운다 */
+    std::string Ha1Col( const char *pszAlias ) const;
     MYSQL_RES *ExecuteSelect( const std::string &strSql );
 
     void HealthProbeLoop();

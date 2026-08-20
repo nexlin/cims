@@ -4,11 +4,11 @@
 #include <sys/time.h>
 #endif
 
+#include <openssl/rand.h>
 #include <time.h>
 
 #include "MemoryDebug.h"
 #include "NonceMap.h"
-#include "SipMd5.h"
 #include "TimeUtility.h"
 
 CNonceMap gclsNonceMap;
@@ -24,21 +24,16 @@ CNonceMap::CNonceMap() {
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
 bool CNonceMap::GetNewValue( char *pszNonce, int iNonceSize ) {
-    char szNonce[60], szMd5[33];
+    char szNonce[33];
     bool bFound = false;
 
     if ( iNonceSize < 33 ) return false;
 
-    struct timeval sttTime;
-
-    gettimeofday( &sttTime, NULL );
-
+    // nonce = CSPRNG 16 바이트의 hex (RFC 7616 §3.3 — 예측 불가 값). 시각·고정 상수 유도는 쓰지 않는다.
     for ( int i = 0;; ++i ) {
-        snprintf( szNonce, sizeof( szNonce ), "%d::%u.%06u::%s", i, (unsigned int)sttTime.tv_sec,
-                  (unsigned int)sttTime.tv_usec, PRIVATE_KEY );
-
-        SipMd5String( szNonce, szMd5 );
-        snprintf( szNonce, sizeof( szNonce ), "%s", szMd5 );
+        unsigned char arrRand[16];
+        if ( RAND_bytes( arrRand, sizeof( arrRand ) ) != 1 ) return false;
+        for ( size_t j = 0; j < sizeof( arrRand ); ++j ) snprintf( szNonce + j * 2, 3, "%02x", arrRand[j] );
 
         m_clsMutex.acquire();
         NONCE_MAP::const_iterator it = m_clsMap.find( szNonce );

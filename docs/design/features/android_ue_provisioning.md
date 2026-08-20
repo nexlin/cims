@@ -84,17 +84,16 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
                    "default": "UDP",
                    "domain": "ims.mnc033.mcc450.3gppnetwork.org" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000001",
-                   "authId": "", "sipPassword": "1234" }
+                   "authId": "", "sipHa1": "5f4dcc3b5aa765d61d8327deb882cf99", "sipPassword": null }
     },
     {
       "kind": "ptt",
-      "sip":     { "host": "<PSP host>", "port": 15060, "transport": "UDP",
-                   "transports": [ { "transport": "UDP", "port": 15060 },
-                                   { "transport": "TCP", "port": 15060 } ],
-                   "default": "UDP",
+      "sip":     { "host": "<PSP host>", "port": 15061, "transport": "TLS",
+                   "transports": [ { "transport": "TLS", "port": 15061 } ],
+                   "default": "TLS", "enforced": true,
                    "domain": "ptt.mnc033.mcc450.3gppnetwork.org" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
-                   "authId": "", "sipPassword": null, "mcpttId": "tel:+821300000001" }
+                   "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
     }
   ]
 }
@@ -107,9 +106,16 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   TLS 포트 미설정(`tls_port=0`)이면 TLS 항목이 실리지 않는다. 선택·유지·반영 규칙은
   [sip_tls_signaling.md §7.1](sip_tls_signaling.md) 이 정본.
 - `sip.port`/`sip.transport`: **기본값의 유효 쌍** — 목록을 모르는 구 APK 가 이 두 필드만 읽으므로 유지된다.
+- `sip.enforced`: `true` 면 서버가 그 transport 를 **집행**한다(가입자 `sip_transport=TLS` —
+  [sip_access_security.md §3](sip_access_security.md)). 목록은 TLS 하나로 좁혀지고, 다른 채널의 요청은
+  REGISTER 포함 403 이다. `false` 면 목록 안에서 단말이 고른다.
 - `account.imsi`: Digest username = `imsi@sip.domain`(서버 CscfModule 강제). 서비스별로 다를 수 있음.
 - `account.msisdn`: 공개 ID(AOR user part). `authId`: 전체 IMPI 직접지정(보통 빈값 → imsi@domain 합성).
-- `account.sipPassword`: **서비스 가입(subscription) 비번**(`*_subscriptions.passwd`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — CSP 는 이 비번으로 REGISTER Digest 를 검증한다. 단말은 이 값을 우선 사용하고, `null`/생략일 때만 로그인 비번으로 폴백.
+- `account.sipHa1`: **서비스 가입(subscription) 의 SIP Digest H(A1)**(`*_subscriptions.ha1` =
+  `MD5(imsi@domain:realm:password)`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — 단말은 이 값을
+  pjsip `PJSIP_CRED_DATA_DIGEST` 자격으로 넣어 원문 없이 response 를 계산한다.
+- `account.sipPassword`: 과도기 평문(`*_subscriptions.passwd`). DB 의 평문이 소거되면 항상 `null`.
+  단말은 `sipHa1` → `sipPassword` → 로그인 비번(으로 ha1 계산) 순으로 쓴다.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면

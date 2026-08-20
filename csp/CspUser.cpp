@@ -45,6 +45,8 @@ void CspUser::clear() {
     m_strName.clear();
     m_strAuthId.clear();
     m_strPassWord.clear();
+    m_strHa1.clear();
+    m_strSipTransport.clear();
     m_bDnd = false;
     m_strOrganizationId.clear();
     m_vecReject.clear();
@@ -90,6 +92,8 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     }
 
     if ( jsonUser.Has( "passwd" ) ) clsUser.m_strPassWord = jsonUser.GetString( "passwd" );
+    if ( jsonUser.Has( "ha1" ) ) clsUser.m_strHa1 = jsonUser.GetString( "ha1" );
+    if ( jsonUser.Has( "sip_transport" ) ) clsUser.m_strSipTransport = jsonUser.GetString( "sip_transport" );
     if ( jsonUser.Has( "org_id" ) ) clsUser.m_strOrganizationId = jsonUser.GetString( "org_id" );
     if ( jsonUser.Has( "service_type" ) ) clsUser.m_strServiceType = jsonUser.GetString( "service_type" );
 
