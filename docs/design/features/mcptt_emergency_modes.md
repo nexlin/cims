@@ -202,6 +202,9 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   `entry-info`+`uri-entry`(SOS 대상 결정, TS 24.484)와 `ruleset`(`allow-emergency-group-call`·
   `allow-activate/cancel-emergency-alert`). ad hoc 인가는 규격 요소가 없어 `cims:` 확장
   네임스페이스(`cims:allow-adhoc-group-call`)로 노출. ETag 는 내용 파생(변경 시 자동 갱신).
+- **시스템 축 게이트**(`mcptt_service_config` — TS 24.484 service-config): `allow-emergency-call`·
+  `allow-alert` 이 위 사용자 인가와 **AND** 로 겹친다(단말 선차단 · 콘솔 `구성 > MCPTT 정책`).
+  그룹 축(`emergency_call`/`emergency_alert`)·사용자 축(ruleset)·시스템 축 셋이 모두 허용해야 열린다.
 - **admin 프로파일 API**: `GET/PUT /api/v1/users/:pid/ptt/:msisdn/profile` — UPSERT + 캐시 갱신 +
   `USER_CHANGED` notify. `DedicatedGroup` 의 `emergency_group_id` 는 존재 그룹만 수용(400).
   사용자 상세(`GET /users/:pid`)의 ptt 행에 `mcptt_profile` 동봉.

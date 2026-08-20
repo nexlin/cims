@@ -178,6 +178,28 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
   COMMENT='사용자 MCPTT 프로파일 (SOS 대상 결정 모드·전용 긴급그룹·개시 인가)';
 
 -- ─────────────────────────────────────────────
+--  MCPTT 시스템 서비스 설정 (TS 24.484 service-config — 시스템 전역 1건)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS mcptt_service_config (
+    id                         TINYINT     NOT NULL DEFAULT 1
+        COMMENT '단일 행 고정(1) — service-config 은 시스템 전역 문서 1건이다(사용자별은 ptt_user_profile)',
+    allow_private_call         TINYINT(1)  NOT NULL DEFAULT 1 COMMENT 'allow-private-call — 1:1 통화 발신 허용',
+    allow_emergency_call       TINYINT(1)  NOT NULL DEFAULT 1 COMMENT 'allow-emergency-call — 긴급통화 허용(사용자 인가와 AND)',
+    allow_alert                TINYINT(1)  NOT NULL DEFAULT 1 COMMENT 'allow-alert — 긴급경보 허용(사용자 인가와 AND)',
+    allow_transmit_request     TINYINT(1)  NOT NULL DEFAULT 1 COMMENT 'on-network allow-transmit-request — floor(발언권) 요청 허용',
+    allow_create_delete_group  TINYINT(1)  NOT NULL DEFAULT 1 COMMENT 'allow-create-delete-group — 사용자 그룹 생성/삭제 허용',
+    max_affiliations_n2        SMALLINT    NOT NULL DEFAULT 10
+        COMMENT 'N2 — 동시 제휴(편성) 채널 상한. XML 의 max-affiliations-N2 · on-network max-on-network-affiliations-N2 에 같은 값',
+    num_levels_group_hierarchy TINYINT     NOT NULL DEFAULT 3 COMMENT 'num-levels-group-hierarchy',
+    num_levels_user_hierarchy  TINYINT     NOT NULL DEFAULT 3 COMMENT 'num-levels-user-hierarchy',
+    update_time                DATETIME    DEFAULT NULL,
+    PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='MCPTT 시스템 서비스 설정 (TS 24.484 service-config — 시스템 전역 1건)';
+
+INSERT IGNORE INTO mcptt_service_config (id, update_time) VALUES (1, NOW());
+
+-- ─────────────────────────────────────────────
 --  MCPTT affiliation 상태 (TS 24.379 §9)
 -- ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ptt_affiliations (

@@ -22,7 +22,9 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services.mcptt import notify_csp, refresh_group_members, DEFAULT_USER_PROFILE, update_user_profile_cache
+from services.mcptt import (notify_csp, refresh_group_members, DEFAULT_USER_PROFILE,
+                            update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
+                            get_service_config, update_service_config_cache)
 from services import admin_auth
 
 # ──────────────────────────────────────────────────────────────
@@ -632,6 +634,106 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
 
 
 # ──────────────────────────────────────────────────────────────
+#  MCPTT 시스템 서비스 설정 (mcptt_service_config — TS 24.484 service-config)
+# ──────────────────────────────────────────────────────────────
+
+_SVC_CFG_BASE = '/api/v1/mcptt/service-config'
+
+_SVC_CFG_BOOLS = ('allow_private_call', 'allow_emergency_call', 'allow_alert',
+                  'allow_transmit_request', 'allow_create_delete_group')
+#  숫자 항목의 수용 범위 — 규격이 상한을 정하지 않으므로 운영상 무의미한 값만 걸러낸다.
+_SVC_CFG_INTS = {'max_affiliations_n2': (1, 1000),
+                 'num_levels_group_hierarchy': (1, 10),
+                 'num_levels_user_hierarchy': (1, 10)}
+
+
+async def handle_mcptt_service_config(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """GET/PUT /api/v1/mcptt/service-config — **시스템 전역** MCPTT 정책 1건(단일 행 id=1).
+
+    사용자별 인가는 여기가 아니라 /users/:pid/ptt/:msisdn/profile(user-profile) 이다. 여기서 바꾼
+    값은 XCAP service-config 문서로 나가고 단말이 시스템 정책 게이트로 소비한다
+    (docs/design/features/android_ue_client.md §7).
+    """
+    config = kwargs.get('config', {})
+    method = handler_args.method.upper()
+
+    payload, err = admin_auth.require_role(handler_args, 'monitor' if method == 'GET' else 'manager')
+    if err:
+        return err
+
+    try:
+        if method == 'GET':
+            return await _get_mcptt_service_config(config)
+        if method == 'PUT':
+            return await _put_mcptt_service_config(handler_args.body, config)
+        return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+    except Exception as e:
+        logger.log_error(f"[ADMIN] mcptt service-config error: {e}")
+        return HandlerResult(status=500, body={'error': str(e)})
+
+
+async def _get_mcptt_service_config(config):
+    """현재 값 — DB 행이 없으면(마이그레이션 전) 코드 기본값을 exists=false 로 돌려준다."""
+    cols = list(_SVC_CFG_BOOLS) + list(_SVC_CFG_INTS)
+    row = None
+    try:
+        with _get_db(config) as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT {', '.join(cols)}, update_time "
+                            "FROM mcptt_service_config WHERE id=1")
+                row = cur.fetchone()
+    except Exception as e:
+        logger.log_info(f"[ADMIN] mcptt_service_config 조회 실패(마이그레이션 전?): {e}")
+
+    if row:
+        cfg = {k: bool(row[k]) for k in _SVC_CFG_BOOLS}
+        cfg.update({k: int(row[k]) for k in _SVC_CFG_INTS})
+        cfg['update_time'] = _dt(row['update_time'])
+        cfg['exists'] = True
+    else:
+        cfg = dict(SERVICE_CONFIG_DEFAULTS)
+        cfg['update_time'] = None
+        cfg['exists'] = False
+    return HandlerResult(status=200, body=cfg)
+
+
+async def _put_mcptt_service_config(body, config):
+    """전 항목 UPSERT — 부분 갱신이 아니라 누락 항목은 현재 값을 유지한다(콘솔이 전체를 보낸다)."""
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+
+    cur_cfg = get_service_config()
+    new_cfg = {}
+    for k in _SVC_CFG_BOOLS:
+        new_cfg[k] = bool(body[k]) if k in body else bool(cur_cfg.get(k, True))
+    for k, (lo, hi) in _SVC_CFG_INTS.items():
+        raw = body.get(k, cur_cfg.get(k, SERVICE_CONFIG_DEFAULTS[k]))
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            return HandlerResult(status=400, body={'error': f'{k}: 정수가 아닙니다'})
+        if not lo <= val <= hi:
+            return HandlerResult(status=400, body={'error': f'{k}: {lo}~{hi} 범위를 벗어났습니다'})
+        new_cfg[k] = val
+
+    cols = list(_SVC_CFG_BOOLS) + list(_SVC_CFG_INTS)
+    vals = [1 if new_cfg[k] else 0 for k in _SVC_CFG_BOOLS] + [new_cfg[k] for k in _SVC_CFG_INTS]
+    upd = ', '.join(f"{c}=VALUES({c})" for c in cols)
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO mcptt_service_config (id, {', '.join(cols)}, update_time) "
+                f"VALUES (1, {', '.join(['%s'] * len(cols))}, NOW()) "
+                f"ON DUPLICATE KEY UPDATE {upd}, update_time=NOW()", vals)
+
+    # 캐시 갱신 — service-config 문서 ETag 는 내용 파생이라 다음 XCAP GET 이 새 값·새 ETag 를 받는다.
+    update_service_config_cache(new_cfg)
+    # 전역 설정이라 통지 대상이 특정 가입자가 아니다 — CSP 의 cms 구독자 전원 push 는 후속
+    #   (SERVICE_CONFIG_CHANGED). 그때까지 단말은 목록 갱신·재로그인 계기의 폴백 재조회로 반영한다.
+    return HandlerResult(status=200, body=dict(new_cfg, exists=True))
+
+
+# ──────────────────────────────────────────────────────────────
 #  PTT Groups handler
 # ──────────────────────────────────────────────────────────────
 
@@ -1132,6 +1234,7 @@ async def _remove_member(group_id: str, user_id: str, config):
 CIMS_ADMIN_HANDLER_LIST = [
     (_USERS_BASE,    handle_users,      {}),
     (_GROUPS_BASE,   handle_ptt_groups, {}),
+    (_SVC_CFG_BASE,  handle_mcptt_service_config, {}),
     # call_logs는 csc_flow.py의 파일시스템 기반 API로 이동
 ]
 
@@ -1219,6 +1322,27 @@ _GROUP_EXAMPLE = {
     'floor_policy': 'single', 'max_talkers': 0,
     'session_start': None, 'session_end': None, 'created_at': '2026-05-10T09:00:00',
 }
+
+_SVC_CFG_FIELDS = [
+    {'name': 'allow_private_call', 'type': 'boolean', 'desc': 'allow-private-call — 1:1 통화 발신 허용'},
+    {'name': 'allow_emergency_call', 'type': 'boolean', 'desc': 'allow-emergency-call — 긴급통화 허용(사용자 인가와 AND)'},
+    {'name': 'allow_alert', 'type': 'boolean', 'desc': 'allow-alert — 긴급경보 허용(사용자 인가와 AND)'},
+    {'name': 'allow_transmit_request', 'type': 'boolean', 'desc': 'on-network allow-transmit-request — 발언권 요청 허용'},
+    {'name': 'allow_create_delete_group', 'type': 'boolean', 'desc': 'allow-create-delete-group — 사용자 그룹 생성/삭제 허용'},
+    {'name': 'max_affiliations_n2', 'type': 'integer', 'desc': 'N2 — 동시 제휴(편성) 채널 상한 (1~1000)'},
+    {'name': 'num_levels_group_hierarchy', 'type': 'integer', 'desc': 'num-levels-group-hierarchy (1~10)'},
+    {'name': 'num_levels_user_hierarchy', 'type': 'integer', 'desc': 'num-levels-user-hierarchy (1~10)'},
+    {'name': 'update_time', 'type': 'string', 'desc': '마지막 변경 시각(ISO) — 행 부재면 null'},
+    {'name': 'exists', 'type': 'boolean', 'desc': 'DB 행 존재 여부 (false=코드 기본값 응답)'},
+]
+
+_SVC_CFG_EXAMPLE = {
+    'allow_private_call': True, 'allow_emergency_call': True, 'allow_alert': True,
+    'allow_transmit_request': True, 'allow_create_delete_group': True,
+    'max_affiliations_n2': 10, 'num_levels_group_hierarchy': 3, 'num_levels_user_hierarchy': 3,
+    'update_time': '2026-08-19T18:00:00', 'exists': True,
+}
+
 
 CIMS_ADMIN_API_DOCS = [
     {'id': 'csc.users.list', 'module': 'csc', 'method': 'GET', 'path': '/api/v1/users',
@@ -1528,4 +1652,32 @@ CIMS_ADMIN_API_DOCS = [
      'notes': ['진행 중 세션에 참여하고 있으면 그 세션에서도 이탈 처리된다.'],
      'auth': {'scheme': 'bearer', 'role': 'operator', 'token_from': 'POST /api/v1/auth/login',
               'note': '소유자 검사 — manager+ 는 전체 허용'}},
+
+    # ── MCPTT 시스템 정책 (TS 24.484 service-config) ──────────────────────────
+    {'id': 'csc.mcptt.service-config.get', 'module': 'csc', 'method': 'GET',
+     'path': '/api/v1/mcptt/service-config',
+     'summary': 'MCPTT 시스템 서비스 설정 조회 (전역 1건)',
+     'params': [],
+     'response': '설정 객체',
+     'response_fields': list(_SVC_CFG_FIELDS),
+     'example': dict(_SVC_CFG_EXAMPLE),
+     'errors': list(_ERR_COMMON),
+     'notes': ['시스템 전역 1건이다 — 사용자별 인가는 GET /api/v1/users/{person_id}/ptt/{msisdn}/profile.',
+               'exists=false 는 DB 행 부재(마이그레이션 전)이며 값은 코드 기본값이다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'csc.mcptt.service-config.update', 'module': 'csc', 'method': 'PUT',
+     'path': '/api/v1/mcptt/service-config',
+     'summary': 'MCPTT 시스템 서비스 설정 변경',
+     'params': [{'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
+                 'desc': '설정 객체(부분 전송 시 누락 항목은 현재 값 유지)'}],
+     'response': '반영된 설정 객체',
+     'response_fields': list(_SVC_CFG_FIELDS),
+     'example': dict(_SVC_CFG_EXAMPLE),
+     'errors': _ERR_COMMON + [{'status': 400, 'when': '정수 아님 / 허용 범위 초과',
+                               'body': {'error': 'max_affiliations_n2: 1~1000 범위를 벗어났습니다'}}],
+     'notes': ['XCAP service-config 문서로 즉시 반영된다(ETag 는 내용 파생).',
+               '단말 반영은 목록 갱신·재로그인 계기의 재조회다 — cms 구독자 전원 push 는 후속.',
+               '단말은 이 값을 user-profile 의 사용자 인가와 AND 로 게이트한다.'],
+     'auth': dict(_AUTH_MANAGER)},
 ]

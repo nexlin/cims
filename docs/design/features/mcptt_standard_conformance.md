@@ -34,7 +34,7 @@
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 표준 클레임(`sub`/`iss`/`iat`) + nonce | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
-| S4 | service-config 동적화(기본값 + 가입자별 override) | CSC | TS 24.484 §10.3 | ✅ 정합 |
+| S4 | service-config (전역 정책 SoT + 문서 산출) | CSC | TS 24.484 §10.3 | ✅ 정합 |
 | S5 | KMS 가입자별 키 프로비저닝 | CSC | TS 33.180 §F | ⚠ 구조적 정합(참 ECCSI/SAKKE 후속) |
 
 > **interop 최소 조건 = F1**(+ C4) — 단말 `FloorCodec` 규약과 1:1 정합. S5 의 참값 ECCSI/SAKKE
@@ -359,10 +359,21 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 
 ### CMS (TS 24.484)
 - user-profile XML(`urn:3gpp:ns:mcpttUserProfile:1.0`), self-access 권한, ETag.
-- **S4 service-config 동적화**: `SERVICE_CONFIG_DEFAULTS` + 가입자별 `USERS[uri]['service_config']`
-  override 로 생성(`get_service_config_xml`). 내용 파생 ETag 라 값 변경 시 자동 갱신.
+- **S4 service-config**: 값의 SoT 는 DB `mcptt_service_config` **단일 행**(id=1)이다. 기동 시
+  `load_shared_data` 가 `SERVICE_CONFIG` 캐시로 읽고, `get_service_config_xml` 이 그 캐시를 XML 로
+  산출한다(내용 파생 ETag — 값이 바뀌면 자동 갱신). 편집은 관리 API
+  `GET/PUT /api/v1/mcptt/service-config`(monitor 조회 / manager 변경)와 콘솔 **구성 > MCPTT 정책**
+  이며, PUT 이 DB UPSERT + 캐시 갱신을 함께 하므로 다음 XCAP GET 이 곧 새 값이다.
+  service-config 은 **시스템 전역 문서 1건**이라 가입자별 오버라이드를 두지 않는다 — 사용자 단위
+  인가는 `user-profile` 의 `ruleset` 이 규격 자리이고, 단말이 두 축을 AND 로 게이트한다.
+  ⚠ 전역 변경을 cms 구독자 **전원**에게 미는 push(`SERVICE_CONFIG_CHANGED` + CSP 의 이벤트별 구독자
+  조회)는 후속이다. 그때까지 단말 반영 계기는 목록 갱신·재로그인의 폴백 재조회다.
 - **S3 변경통지**: 가입자(번호) CRUD 시 `notify_csp("USER_CHANGED")` → CSP `SendSipNotify`(user_change)
   → CMS 구독자에 xcap-diff NOTIFY(user-profile/service-config sel).
+- **단말 소비**: PTT 단말은 `sip:cms_psi@<domain>` 으로 cms 축을 구독하고 NOTIFY 의 sel 대로 두 문서를
+  `If-None-Match` 재조회한 뒤, 사용자별 인가(`user-profile` 의 `ruleset`)와 시스템 정책
+  (`service-config`)을 **AND** 로 게이트한다(발신·개시만, 착신은 서버 판정). 소비 지점 표는
+  [android_ue_client.md §7](android_ue_client.md) "CMS 문서 소비".
 
 ### KMS (TS 33.180 §F)
 - **S5 가입자별 프로비저닝**: `KmsInit`(KMS 공개 인증서) + `KmsKeyProv`(가입자별 KmsKeySet —

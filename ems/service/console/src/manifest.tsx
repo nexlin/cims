@@ -20,6 +20,7 @@ import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
 import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
 import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
+import McpttPolicyPage from './pages/McpttPolicyPage'
 import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
@@ -105,6 +106,8 @@ export const cimsManifest: ServiceManifest = {
                  'csc.ptt-groups.update', 'csc.ptt-groups.delete',
                  'csc.ptt-groups.members.list', 'csc.ptt-groups.members.add',
                  'csc.ptt-groups.members.remove', 'csc.users.list', 'csc.orgs.list'] },
+        { path: '/subscribers/mcptt-policy',  title: 'MCPTT 정책',     component: McpttPolicyPage, requiredRole: 'monitor',
+          apis: ['csc.mcptt.service-config.get', 'csc.mcptt.service-config.update'] },
         { path: '/deploy/service-defs',       title: '서비스 정의',     component: ServiceDescriptorsPage, adminOnly: true },
       ],
     },

@@ -65,19 +65,24 @@ AUTH_CODE_TTL = 60               # 60초
 ACCESS_TOKEN_TTL = 3600          # 1시간
 REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
 
-# S4: service-config 기본값 (TS 24.484). 하드코딩 리터럴 대신 dict 로 두어 config 로 덮어쓰고
-#   가입자별(USERS[uri]['service_config']) 오버라이드를 허용한다. load_shared_data 에서 config 반영.
+# S4: service-config (TS 24.484) — 값의 SoT 는 DB `mcptt_service_config` **단일 행**이고, 아래
+#   기본값은 그 행이 없을 때(마이그레이션 전) 쓰는 폴백이다. 키는 DB 컬럼·관리 API JSON 과 같은
+#   언더스코어 표기이며 하이픈 표기는 XML 산출 시점에만 쓴다(get_service_config_xml).
+#   service-config 은 **시스템 전역 문서 1건**이라 가입자별 오버라이드를 두지 않는다 — 사용자 단위
+#   인가는 ptt_user_profile(ruleset)이 정본이고, 단말이 두 축을 AND 로 게이트한다
+#   (docs/design/features/android_ue_client.md §7 "CMS 문서 소비").
 SERVICE_CONFIG_DEFAULTS = {
-    "num-levels-group-hierarchy": 3,
-    "num-levels-user-hierarchy": 3,
-    "max-affiliations-N2": 10,
-    "allow-create-delete-group": True,
-    "allow-private-call": True,
-    "allow-emergency-call": True,
-    "allow-alert": True,
-    "allow-transmit-request": True,
-    "max-on-network-affiliations-N2": 10,
+    "allow_private_call": True,
+    "allow_emergency_call": True,
+    "allow_alert": True,
+    "allow_transmit_request": True,
+    "allow_create_delete_group": True,
+    "max_affiliations_n2": 10,
+    "num_levels_group_hierarchy": 3,
+    "num_levels_user_hierarchy": 3,
 }
+# DB 사본 — load_shared_data 가 채우고 admin PUT 이 갱신한다(update_service_config_cache).
+SERVICE_CONFIG = dict(SERVICE_CONFIG_DEFAULTS)
 
 CSP_NOTIFY_IP = "127.0.0.1"
 CSP_NOTIFY_PORT = 4421
@@ -239,6 +244,30 @@ def load_shared_data(config):
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
                         logger.log_info(f"ptt_user_profile load skipped (pre-migration?): {pe}")
+
+                    # MCPTT 시스템 서비스 설정 (TS 24.484 service-config) — 단일 행(id=1).
+                    #   행/테이블 부재는 기본값 유지 = 현행 동작(전부 허용).
+                    try:
+                        cur.execute(
+                            "SELECT allow_private_call, allow_emergency_call, allow_alert, "
+                            "allow_transmit_request, allow_create_delete_group, max_affiliations_n2, "
+                            "num_levels_group_hierarchy, num_levels_user_hierarchy "
+                            "FROM mcptt_service_config WHERE id=1")
+                        row = cur.fetchone()
+                        if row:
+                            SERVICE_CONFIG.update({
+                                "allow_private_call": bool(row['allow_private_call']),
+                                "allow_emergency_call": bool(row['allow_emergency_call']),
+                                "allow_alert": bool(row['allow_alert']),
+                                "allow_transmit_request": bool(row['allow_transmit_request']),
+                                "allow_create_delete_group": bool(row['allow_create_delete_group']),
+                                "max_affiliations_n2": int(row['max_affiliations_n2']),
+                                "num_levels_group_hierarchy": int(row['num_levels_group_hierarchy']),
+                                "num_levels_user_hierarchy": int(row['num_levels_user_hierarchy']),
+                            })
+                            logger.log_info(f"Loaded MCPTT service config: {SERVICE_CONFIG}")
+                    except Exception as se:
+                        logger.log_info(f"mcptt_service_config load skipped (pre-migration?): {se}")
 
                     # IdMS 로그인 계정(login_id) — MCPTT ID 는 ptt(없으면 volte) msisdn 에서 tel:+ 파생.
                     LOGIN_ACCOUNTS.clear()
@@ -994,6 +1023,16 @@ def update_user_profile_cache(ptt_id, profile):
         PTT_PROFILES[ptt_id] = profile
 
 
+def get_service_config():
+    """MCPTT 시스템 서비스 설정 (TS 24.484) — DB 사본의 복제본을 준다(호출자 수정 방지)."""
+    return dict(SERVICE_CONFIG)
+
+
+def update_service_config_cache(cfg):
+    """admin PUT 반영 — service-config ETag 는 내용 파생이라 값이 바뀌면 자동 갱신된다."""
+    SERVICE_CONFIG.update(cfg)
+
+
 def get_user_profile_xml(user_uri):
     """MCPTT user profile 문서 (TS 24.484) — SOS 대상 결정(MCPTTGroupInitiation entry-info)과
     사용자 단위 개시 인가(ruleset)를 DB(ptt_user_profile)에서 산출. ad hoc 인가는 규격에 요소가
@@ -1053,30 +1092,36 @@ def get_user_profile_xml(user_uri):
     return xml, _content_etag(xml)
 
 def get_service_config_xml(user_uri):
-    # S4: 동적 생성 — SERVICE_CONFIG_DEFAULTS 에 가입자별 오버라이드(USERS[uri]['service_config'])를
-    #   덮어써 사용자/시스템별 정책을 반영한다. ETag 는 내용 파생이라 값이 바뀌면 자동 갱신.
-    cfg = dict(SERVICE_CONFIG_DEFAULTS)
-    user = USERS.get(user_uri) or {}
-    over = user.get('service_config') if isinstance(user.get('service_config'), dict) else None
-    if over:
-        cfg.update(over)
+    """MCPTT service config 문서 (TS 24.484) — **시스템 전역** 설정 1건을 XML 로 산출한다.
+
+    값의 SoT 는 DB `mcptt_service_config`(단일 행)이고 SERVICE_CONFIG 가 그 사본이다. 사용자마다
+    달라지지 않으므로 user_uri 는 호출자 인가(self-access 검증)에만 쓰인다 — 가입자별 오버라이드는
+    규격 근거가 없어 두지 않으며, 사용자 단위 인가는 user-profile 의 ruleset 이 정본이다.
+    ETag 는 내용 파생이라 값이 바뀌면 자동 갱신되고, 단말은 xcap-diff(cms) NOTIFY 로 재조회한다.
+    """
+    cfg = SERVICE_CONFIG
 
     def _b(k):  # bool → "true"/"false"
-        return "true" if cfg.get(k) else "false"
+        return "true" if cfg.get(k, SERVICE_CONFIG_DEFAULTS[k]) else "false"
 
+    def _i(k):
+        return int(cfg.get(k, SERVICE_CONFIG_DEFAULTS[k]))
+
+    # N2 는 전체·on-network 두 자리에 같은 값을 싣는다 — 이 시스템은 항상 on-network 다.
+    n2 = _i('max_affiliations_n2')
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <mcptt-service-config xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <num-levels-group-hierarchy>{int(cfg.get('num-levels-group-hierarchy', 3))}</num-levels-group-hierarchy>
-  <num-levels-user-hierarchy>{int(cfg.get('num-levels-user-hierarchy', 3))}</num-levels-user-hierarchy>
-  <max-affiliations-N2>{int(cfg.get('max-affiliations-N2', 10))}</max-affiliations-N2>
-  <allow-create-delete-group>{_b('allow-create-delete-group')}</allow-create-delete-group>
-  <allow-private-call>{_b('allow-private-call')}</allow-private-call>
-  <allow-emergency-call>{_b('allow-emergency-call')}</allow-emergency-call>
-  <allow-alert>{_b('allow-alert')}</allow-alert>
+  <num-levels-group-hierarchy>{_i('num_levels_group_hierarchy')}</num-levels-group-hierarchy>
+  <num-levels-user-hierarchy>{_i('num_levels_user_hierarchy')}</num-levels-user-hierarchy>
+  <max-affiliations-N2>{n2}</max-affiliations-N2>
+  <allow-create-delete-group>{_b('allow_create_delete_group')}</allow-create-delete-group>
+  <allow-private-call>{_b('allow_private_call')}</allow-private-call>
+  <allow-emergency-call>{_b('allow_emergency_call')}</allow-emergency-call>
+  <allow-alert>{_b('allow_alert')}</allow-alert>
   <on-network>
-    <allow-transmit-request>{_b('allow-transmit-request')}</allow-transmit-request>
-    <max-on-network-affiliations-N2>{int(cfg.get('max-on-network-affiliations-N2', 10))}</max-on-network-affiliations-N2>
+    <allow-transmit-request>{_b('allow_transmit_request')}</allow-transmit-request>
+    <max-on-network-affiliations-N2>{n2}</max-on-network-affiliations-N2>
   </on-network>
 </mcptt-service-config>"""
     return xml, _content_etag(xml)
