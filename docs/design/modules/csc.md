@@ -448,6 +448,17 @@ UE                          IdMS (CSC:4430)
 }
 ```
 
+**토큰 저장 (영속성 규칙):**
+
+- access/id 토큰 = **JWT(서명 검증)** — 서버에 저장하지 않는다. CSC 재기동과 무관하게 만료까지 유효.
+- **refresh 토큰 = file_store** (`{CimsRuntimeDir}/refresh_tokens/`, auth code 도 동일 루트) — 갱신 시
+  회전(rotated_to)·회수 기록. `CimsRuntimeDir` 는 **버전 무관 영속 경로**여야 한다: 버전 디렉터리나
+  개발 트리 경로를 주면 업그레이드마다 저장소가 갈려 단말 refresh 가 "not found" 로 실패하고
+  **전 단말 재로그인**이 필요해진다(SIP 평면은 Digest 라 무관 — CSC 평면만 죽는다).
+  미설정(빈 값)이면 csc_app 이 인증서(runtime/cert)와 같은 규칙으로 설치 트리의
+  `modules/csc/runtime` 을 유도한다(oam/oam-svc 와 동일). 만료·회수 토큰은 기동 60초 후 + 6시간
+  주기로 삭제한다.
+
 ### 4.2 GMS (Group Management Service)
 
 XCAP 기반 그룹 관리.

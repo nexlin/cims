@@ -413,6 +413,15 @@
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
           "help": "CSP·CMP 와 동일 경로여야 함 (CSC msg.jsonl 등 기록)."
+        },
+        {
+          "key": "CimsRuntimeDir",
+          "label": "IdMS 토큰 store",
+          "type": "path",
+          "default": "",
+          "hidden": true,
+          "restart": true,
+          "help": "refresh 토큰·auth code 의 file_store 루트 — **버전 무관 영속**이어야 한다(버전/개발 트리 경로면 업그레이드마다 소실 → 전 단말 재로그인). 비우면 설치 트리에서 modules/csc/runtime 을 유도한다."
         }
       ],
       "scope": "service"

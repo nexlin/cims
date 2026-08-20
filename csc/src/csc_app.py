@@ -238,6 +238,16 @@ if __name__ == '__main__':
 
         DynamicRouteProc.set_request_hooks(pre=None, post=_post_hook)
 
+        # ── IdMS file_store 루트 (CimsRuntimeDir) — **버전 무관** 경로 보증 ──
+        #   refresh 토큰·auth code 가 여기 산다. 버전 디렉터리/개발 트리 경로면 업그레이드마다
+        #   저장소가 갈려 단말 refresh 가 "not found" 로 죽고 전 단말 재로그인이 필요해진다
+        #   (08-20 실측). 미설정이면 인증서(runtime/cert)와 같은 규칙으로 모듈 루트
+        #   (modules/csc/runtime)를 유도한다 — oam/oam-svc 와 동일.
+        if not config.get('CimsRuntimeDir'):
+            config['CimsRuntimeDir'] = os.path.normpath(
+                os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime'))
+            logger.log_info(f"CimsRuntimeDir 미설정 — 모듈 runtime 유도: {config['CimsRuntimeDir']}")
+
         # Adjust relative data paths
         if 'Data' in config:
             for key in ['User', 'Group']:
@@ -347,9 +357,20 @@ if __name__ == '__main__':
         _signal.signal(_signal.SIGTERM, lambda _s, _f: _stop_evt.set())
 
         # OAM 분리 Phase 3b — sweeper (agent/cert/alert/sync_txn/drift) 는 oam_app.py
-        # 책임. csc 는 가입자 CRUD + MCPTT signaling 만 — 백그라운드 작업 없음.
+        # 책임. csc 는 가입자 CRUD + MCPTT signaling 만 — 백그라운드 작업은 IdMS 토큰
+        # 위생(만료/회수분 삭제)뿐이다. 정리 부재로 refresh_tokens/ 가 수천 파일로
+        # 누적되던 것을 회수(기동 직후 1회 + 6시간 주기).
+        from services.mcptt import storage as _idms_storage
+        _IDMS_CLEAN_SEC = 6 * 3600
+        _idms_clean_at = time.time() + 60          # 기동 60초 후 첫 정리
         while not _stop_evt.wait(1):
-            pass
+            if time.time() >= _idms_clean_at:
+                _idms_clean_at = time.time() + _IDMS_CLEAN_SEC
+                try:
+                    _idms_storage.cleanup_expired_tokens()
+                    _idms_storage.cleanup_expired_codes()
+                except Exception as _ce:
+                    logger.log_error(f"IdMS token cleanup: {_ce}")
 
         logger.log_info('==================== stop (SIGTERM) ====================')
         if _fm:
