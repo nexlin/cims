@@ -522,8 +522,15 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     if ( strReqUriUser.empty() && !pclsMessage->m_clsTo.m_clsUri.m_strUser.empty() ) {
         strReqUriUser = pclsMessage->m_clsTo.m_clsUri.m_strUser;
         bAffiliation = gclsGroupMap.Contains( strReqUriUser.c_str() );
-        CLog::Print( LOG_INFO, "SUBSCRIBE refresh without state — resource restored from To URI (%s, user=%s)",
-                     strReqUriUser.c_str(), strFromId.c_str() );
+        // 복원 자원으로 이벤트도 재유도 — 위 분류는 R-URI(dialog remote target — 자원이 아님)
+        //   기준이라 기본값(gms)으로 흘렀다. gms/cms 는 Event 헤더가 공통(xcap-diff)이라 자원
+        //   이름만이 근거다. cms 가 gms 로 저장되면 사용자별 cms 조회(USER_CHANGED)와 이벤트별
+        //   전원 조회(SERVICE_CONFIG_CHANGED)가 모두 이 구독을 놓친다.
+        if ( bAffiliation ) strEventType = "conference";
+        else if ( strReqUriUser.find( "cms" ) != std::string::npos ) strEventType = "cms";
+        else if ( strReqUriUser.find( "gms" ) != std::string::npos ) strEventType = "gms";
+        CLog::Print( LOG_INFO, "SUBSCRIBE refresh without state — resource restored from To URI (%s, user=%s, event=%s)",
+                     strReqUriUser.c_str(), strFromId.c_str(), strEventType.c_str() );
     }
 
     int iExpires = pclsMessage->GetExpires();
