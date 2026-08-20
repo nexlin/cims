@@ -13,6 +13,7 @@ from glob import glob
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 from ...common.cspsim import run_cspsim
+from ...common.subscribers import cred_args
 from ._helpers import target_ip, local_ip_args
 
 
@@ -39,7 +40,7 @@ def scn_subscribe(ctx: VerifyContext) -> ItemResult:
         "-no-db", "-mode", "ptt", "-scenario", "subscribe",
         "-count", "1", "-duration", "3", "-ip", _tgt,
         "-user", s["PTT_USER"], "-domain", s["PTT_DOM"],
-        "-password", s["PTT_PWD"],
+        *cred_args(s, "PTT", 1),
     ]
     if s.get("PTT_AUTH"):
         args += ["-auth_id", s["PTT_AUTH"]]

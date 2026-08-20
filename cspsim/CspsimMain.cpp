@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <dirent.h>
 #include <fstream>
+#include <map>
 #include <mariadb/mysql.h>
 
 #include "SimSession.h"
@@ -199,6 +200,51 @@ static std::string DerivePttAuthId(const std::string& strUser, const std::string
     return std::string("45033") + strUser.substr(1) + "@" + strDomain;
 }
 
+// ─────────────────────────────────────────────
+//  단말별 자격 파일 (-creds, sip_access_security.md §4.7)
+// ─────────────────────────────────────────────
+// JSONL — 한 줄 = 한 단말: {"user":"+82...","ha1":"<hex32>","authId":"...","password":"..."}
+//   · user (필수)      : 전개된 사용자 ID 와 정확 일치하는 매칭 키
+//   · ha1 / password   : 둘 중 하나 필수 — ha1 우선(원문 없이 response 계산)
+//   · authId (선택)    : '@' 없으면 -domain 을 붙여 조립(DB 모드와 동일 규칙)
+// "같은 비밀번호 구간" 없이 -count 전개 단말 각각에 자기 자격을 준다.
+struct UserCred {
+    std::string authId;
+    std::string password;
+    std::string ha1;
+};
+
+static bool LoadCredsFile(const std::string& strPath, std::map<std::string, UserCred>& mapOut) {
+    std::ifstream ifs(strPath);
+    if (!ifs.is_open()) {
+        printf("[CREDS] 자격 파일 열기 실패: %s\n", strPath.c_str());
+        return false;
+    }
+    std::string line;
+    int iLine = 0;
+    while (std::getline(ifs, line)) {
+        iLine++;
+        size_t p = line.find_first_not_of(" \t\r\n");
+        if (p == std::string::npos || line[p] == '#') continue;   // 공백/주석
+        SimpleJson::JsonNode node = SimpleJson::JsonNode::Parse(line);
+        std::string strUser = node.GetString("user");
+        UserCred cred;
+        cred.authId   = node.GetString("authId");
+        cred.password = node.GetString("password");
+        cred.ha1      = node.GetString("ha1");
+        if (strUser.empty() || (cred.ha1.empty() && cred.password.empty())) {
+            printf("[CREDS] %s:%d — user 또는 자격(ha1/password) 누락\n", strPath.c_str(), iLine);
+            return false;
+        }
+        mapOut[strUser] = cred;
+    }
+    if (mapOut.empty()) {
+        printf("[CREDS] 자격 파일에 항목이 없음: %s\n", strPath.c_str());
+        return false;
+    }
+    return true;
+}
+
 static std::string GetLocalIp() {
     int sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (sock < 0) return "127.0.0.1";
@@ -310,6 +356,8 @@ static void PrintUsage(const char* pszBin) {
     printf("  -password    <pwd>       패스워드 (default: 1234)\n");
     printf("  -ha1         <hex32>     SIP Digest H(A1) — 지정 시 -password 대신 이 값으로 response 계산\n");
     printf("                             (-db 모드는 DB 의 ha1 을 자동 사용, 비어 있으면 passwd)\n");
+    printf("  -creds       <file>      단말별 자격 파일(JSONL: user/ha1/authId/password)\n");
+    printf("                             -count 전개 단말 각각의 자격 — 파일에 없는 user 는 즉시 중단\n");
     printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
     printf("  -transport   <udp|tcp|tls> 시그널링 transport (default: udp)\n");
     printf("                             tls 는 서버 인증서를 검증하지 않는다(랩 자가서명 수용)\n");
@@ -685,6 +733,7 @@ int main(int argc, char* argv[])
     std::string strDomain     = GetArg(argc, argv, "-domain",     "csp");
     std::string strPassword   = GetArg(argc, argv, "-password",   "1234");
     std::string strHa1        = GetArg(argc, argv, "-ha1",        "");
+    std::string strCredsFile  = GetArg(argc, argv, "-creds",      "");
     std::string strMode       = GetArg(argc, argv, "-mode",       "volte");
     // 시그널링 transport — udp(기본)|tcp|tls. TLS 는 스택을 TLS 클라이언트로 기동한다.
     std::string strTransport  = GetArg(argc, argv, "-transport",  "udp");
@@ -752,6 +801,23 @@ int main(int argc, char* argv[])
                 iCount = (int)vecDbSubs.size();
             }
         }
+    }
+
+    // 단말별 자격 파일 (-creds) — 전개될 user 전원이 파일에 있는지 세션 기동 전 일괄 선검증.
+    //   조용한 fallback 은 "같은 비밀번호 구간" 함정을 침묵 속에 되살리므로 누락은 즉시 중단.
+    std::map<std::string, UserCred> mapCreds;
+    if (!strCredsFile.empty()) {
+        if (!LoadCredsFile(strCredsFile, mapCreds)) return 1;
+        for (int i = 0; i < iCount; i++) {
+            std::string u = (bDbMode && i < (int)vecDbSubs.size())
+                          ? vecDbSubs[i].id : MakeUserId(strStartUser, i);
+            if (mapCreds.find(u) == mapCreds.end()) {
+                printf("[CREDS] 자격 파일에 user=%s 항목이 없음 — 중단\n", u.c_str());
+                return 1;
+            }
+        }
+        printf("[CREDS] 자격 파일 로드: %s (%d항목, 전개 %d명 커버)\n",
+               strCredsFile.c_str(), (int)mapCreds.size(), iCount);
     }
 
     // 시나리오 선택
@@ -847,6 +913,17 @@ int main(int argc, char* argv[])
                     strAuthId = strUser;
                 }
             }
+        }
+
+        // 단말별 자격 파일 override — 전원 커버는 위에서 선검증됨.
+        if (!mapCreds.empty()) {
+            const UserCred& cred = mapCreds[strUser];
+            if (!cred.authId.empty()) {
+                strAuthId = (cred.authId.find('@') == std::string::npos)
+                          ? cred.authId + "@" + strDomain : cred.authId;
+            }
+            if (!cred.password.empty()) strPwd = cred.password;
+            if (!cred.ha1.empty())      strSesHa1 = cred.ha1;
         }
 
         SimSession* s = new SimSession(

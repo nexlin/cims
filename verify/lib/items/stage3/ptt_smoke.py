@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
-from ...common.subscribers import MCPTT_DOMAIN
+from ...common.subscribers import MCPTT_DOMAIN, cred_args
 from ._helpers import run_scenario
 
 
@@ -30,7 +30,9 @@ def ptt_smoke(ctx: VerifyContext) -> ItemResult:
         "-count", "5", "-duration", "10", "-ip", ctx.sim_ip,
         "-user", s.get("PTT_USER", ""),
         "-domain", s.get("PTT_DOM", MCPTT_DOMAIN),
-        "-password", s.get("PTT_PWD", ""),
+        # 단말별 자격 파일(-no-db -creds) 우선 — 시드 창을 그대로 전개한다.
+        # 창 미확보 시 -password 폴백(DB 모드 — -user 는 무시되고 DB 첫 N 행 사용).
+        *cred_args(s, "PTT", 5),
         "-group", s.get("PTT_GROUP", ""),
     ]
     return run_scenario(ctx, "S3-SCN-PTT-SMOKE",

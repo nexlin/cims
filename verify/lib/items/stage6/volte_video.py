@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
+from ...common.subscribers import cred_args
 from ._helpers import run_scenario, target_ip, local_ip_args
 
 
@@ -21,7 +22,7 @@ def scn_volte_video(ctx: VerifyContext) -> ItemResult:
         "-no-db", "-mode", "volte", "-scenario", "call",
         "-count", "2", "-duration", "5", "-ip", _tgt,
         "-user", s["VOIP_USER"], "-domain", s["VOIP_DOM"],
-        "-password", s["VOIP_PWD"],
+        *cred_args(s, "VOIP", 2),
     ]
     args += local_ip_args(_tgt)
     if s.get("VOIP_AUTH"):

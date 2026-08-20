@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
-from ...common.subscribers import VOLTE_DOMAIN
+from ...common.subscribers import VOLTE_DOMAIN, cred_args
 from ._helpers import run_scenario
 
 
@@ -23,7 +23,8 @@ def voip_smoke(ctx: VerifyContext) -> ItemResult:
         "-count", "2", "-duration", "5", "-ip", ctx.sim_ip,
         "-user", s.get("VOIP_USER", ""),
         "-domain", s.get("VOIP_DOM", VOLTE_DOMAIN),
-        "-password", s.get("VOIP_PWD", ""),
+        # 단말별 자격 파일(-creds) 우선 — 자격 파일의 authId 가 -auth_id 전개를 대체한다.
+        *cred_args(s, "VOIP", 2),
     ]
     if s.get("VOIP_AUTH"):
         args += ["-auth_id", s["VOIP_AUTH"]]

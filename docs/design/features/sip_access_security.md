@@ -239,9 +239,9 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 | 소비자 | 동작 |
 |---|---|
 | `/provisioning/me` | `account.sipHa1` (H(A1)) + `account.sipPassword` (과도기 — DB `passwd` 가 소거되면 항상 `null`). 단말은 `sipHa1` 우선 |
-| Android UE | pjsip cred 를 `PJSIP_CRED_DATA_DIGEST`(ha1) 로 설정한다. `sipHa1`/`sipPassword` 둘 다 없으면 로그인 비번으로 ha1 을 계산 — **단말 앱의 sipHa1 소비 배포가 `passwd` 소거(⑤)에 선행**한다 (이 서버에는 android 소스가 없어 앱 변경은 별도) |
-| cspsim | `-db` 모드는 DB `ha1` 우선(비면 `passwd`), CLI `-ha1 <hex32>` 로 직접 지정. psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받는다. `-password` 는 유지(직접 계산) |
-| verify 하네스 | `subscribers.py` 가 `ha1` 을 함께 조회해 시드 `VOIP_HA1`/`PTT_HA1` 로 싣는다. 시험 항목은 아직 `-password` 를 쓴다 — 여러 단말을 `-user 시작번호 -count N` 으로 펼치는 구조가 "같은 비밀번호 구간" 에 의존하기 때문. `passwd` 소거(⑤) 전에 cspsim 에 단말별 자격 파일 입력을 추가하고 항목을 전환해야 한다 (**잔여**) |
+| Android UE | `sipHa1` 수신 시 pjsip cred 를 `PJSIP_CRED_DATA_DIGEST`(ha1) 로 설정한다(`android/core` SipController — cred realm 은 `*` 유지, pjsip 이 DIGEST cred 의 algorithm 미지정을 MD5 로 기본화). `sipHa1` 이 없으면 평문 cred(`sipPassword` → 로그인 비번) 폴백 — H(A1) 은 realm 에 결박된 값이라 challenge realm 추종이 필요한 상황은 평문 경로만 흡수한다. 수동 설정에서 도메인/IMSI/IMPI/비번을 편집하면 결박이 깨진 저장 ha1 을 함께 소거한다 |
+| cspsim | `-db` 모드는 DB `ha1` 우선(비면 `passwd`), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받는다. `-password` 는 유지(직접 계산) |
+| verify 하네스 | `subscribers.py` 가 "번호 연속 + 전원 `ha1` 보유" 창(window)을 골라 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다("같은 비밀번호 구간" 의존 소멸. `-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 없는 구 DB 는 "전원 동일 비밀번호" 창 + `-password` 로 폴백 |
 
 **배포 순서가 계약이다**:
 ① 스키마 — `migrate_subscription_transport.sql` + `migrate_subscription_ha1.sql` (컬럼 추가만,
@@ -289,8 +289,6 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 강제한다. 현재 ②(코드)까지 반영되어 있고 ①·③~⑥ 은 운영 절차다.
 
 잔여 항목:
-- verify 시험 항목의 단말별 H(A1) 입력(cspsim 자격 파일) — §4.7 표 참조. ⑤ 의 선행 조건.
-- Android UE 의 `sipHa1` 소비(`PJSIP_CRED_DATA_DIGEST`) — ⑤ 의 선행 조건.
 - 채널 정책 반복 위반 이벤트 채번(§3.3) + S3/S4 자동화 시나리오(§6 V1~V8).
 - cspsim 의 call 시나리오가 `-transport` 를 무시하고 INVITE 를 UDP 로 보낸다(등록만 transport 를 따른다) —
   TCP/TLS **호** 회귀(V5 의 호 부분)는 cspsim 보완 전까지 UDP 로만 성립. 같은 맥락에서 CSP 의
