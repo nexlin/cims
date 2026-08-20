@@ -33,7 +33,7 @@ CSipStackSetup::CSipStackSetup() : m_iLocalUdpPort(SIP_UDP_PORT), m_iUdpThreadCo
 	, m_iTcpRecvTimeout(SIP_TCP_RECV_TIMEOUT), m_iTcpConnectTimeout(SIP_TCP_CONNECT_TIMEOUT)
 	, m_iTlsAcceptTimeout(SIP_TLS_ACCEPT_TIMEOUT), m_bUseSipCompactForm(false), m_iStackExecutePeriod(20)
 	, m_iTimerD(32000), m_iTimerJ(32000), m_bIpv6(false)
-	, m_bStateful(true), m_bTlsClient(false), m_bUseContactListenPort(false)
+	, m_bStateful(true), m_bTlsClient(false), m_bTcpClient(false), m_bUseContactListenPort(false)
 	, m_bUseRegisterSession(false)
 	, m_bSendTrying(true)
 {
@@ -108,11 +108,11 @@ bool CSipStackSetup::Check( )
 	// TLS 관련 설정 점검
 	if( m_iTlsAcceptTimeout < 0 ) m_iTlsAcceptTimeout = 0;
 
-	if( m_bTlsClient )
+	if( m_bTlsClient || m_bTcpClient )
 	{
 		if( m_iTcpThreadCount == 0 )
 		{
-			CLog::Print( LOG_ERROR, "%s m_iTcpThreadCount(%d) is invalid because m_clsSetup.m_bTlsClient is true", __FUNCTION__, m_iTcpThreadCount );
+			CLog::Print( LOG_ERROR, "%s m_iTcpThreadCount(%d) is invalid because m_clsSetup.m_bTlsClient/m_bTcpClient is true", __FUNCTION__, m_iTcpThreadCount );
 			return false;
 		}
 

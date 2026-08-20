@@ -165,6 +165,20 @@ bool CSipStack::Start( CSipStackSetup & clsSetup )
 			m_clsTcpListenerMutex.release();
 		}
 	}
+	else if( m_clsSetup.m_bTcpClient )
+	{
+		// TCP 클라이언트 전용 — 리스너 없이 worker pool 만 기동한다 (m_bTlsClient 와 대칭).
+		//   없으면 SipTcpClientThread 가 연결 소켓을 SendCommand 로 넘기지 못해 즉시 닫고,
+		//   첫 요청만 나간 뒤 응답(401 등)을 영영 받지 못한다.
+		m_clsTcpThreadList.SetMaxSocketPerThread( m_clsSetup.m_iTcpMaxSocketPerThread );
+		if( m_clsTcpThreadList.Init( m_clsSetup.m_iTcpThreadCount, m_clsSetup.m_iTcpThreadCount, SipTcpThread, this ) == false )
+		{
+			CLog::Print( LOG_ERROR, "m_clsTcpThreadList.Init() error (tcp client)" );
+			_Stop();
+			return false;
+		}
+		m_bTcpThreadListInit = true;
+	}
 
 #ifdef USE_TLS
 	if( m_clsSetup.m_iLocalTlsPort > 0 )

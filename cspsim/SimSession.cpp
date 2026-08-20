@@ -351,6 +351,8 @@ bool SimSession::Start() {
     m_clsServerInfo.m_eTransport = m_eTransport;
     if (m_eTransport == E_SIP_TLS) {
         m_clsSetup.m_bTlsClient = true;
+    } else if (m_eTransport == E_SIP_TCP) {
+        m_clsSetup.m_bTcpClient = true;   // TCP 도 클라이언트 전용 — worker pool 만 기동
     }
 
     if (!m_bNoRegister) {

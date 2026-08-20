@@ -99,6 +99,10 @@ public:
 	// TLS 클라이언트만 사용하는가? SIP 클라이언트에서 TLS 서버는 사용하지 않고 TLS 클라이언트만 사용하는 경우 true 로 설정한다.
 	bool				m_bTlsClient;
 
+	// TCP 클라이언트만 사용하는가? TCP 리스너(m_iLocalTcpPort) 없이 TCP 로 발신·수신하려면 true.
+	//   m_bTlsClient 와 같은 역할 — TCP worker pool 을 기동해 연결된 소켓의 응답/요청을 수신한다.
+	bool				m_bTcpClient;
+
 	// SIP 요청 메시지를 전송할 때에 Contact 헤더에 수신 포트 번호를 사용하는 경우 true 로 설정한다.
 	bool				m_bUseContactListenPort;
 

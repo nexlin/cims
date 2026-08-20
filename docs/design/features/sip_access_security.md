@@ -292,6 +292,12 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 - verify 시험 항목의 단말별 H(A1) 입력(cspsim 자격 파일) — §4.7 표 참조. ⑤ 의 선행 조건.
 - Android UE 의 `sipHa1` 소비(`PJSIP_CRED_DATA_DIGEST`) — ⑤ 의 선행 조건.
 - 채널 정책 반복 위반 이벤트 채번(§3.3) + S3/S4 자동화 시나리오(§6 V1~V8).
+- cspsim 의 call 시나리오가 `-transport` 를 무시하고 INVITE 를 UDP 로 보낸다(등록만 transport 를 따른다) —
+  TCP/TLS **호** 회귀(V5 의 호 부분)는 cspsim 보완 전까지 UDP 로만 성립. 같은 맥락에서 CSP 의
+  `Service-Route` 에 `;transport=` 파라미터가 없어(RFC 3608/TS 24.229) TLS 등록 단말이 route 를 따라갈 때
+  transport 를 잃는다 — [sip_tls_signaling.md](sip_tls_signaling.md) 쪽 보완 항목.
+- `/provisioning/me` 의 `enforced`/TLS 목록 축소는 CSC `Provisioning.Services.*.tls_port` 가 설정된 환경에서만
+  드러난다(미설정이면 TLS 항목 자체가 없다).
 
 ## 8. 로드맵 (P2~P4)
 
