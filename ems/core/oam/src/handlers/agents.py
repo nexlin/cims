@@ -260,10 +260,28 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             # base(로컬 경로)가 Dir 만 되돌려, "store 가 마운트 하위가 아님" guard 에 걸려
             # OAM 이 기동을 거부했다(자가복구가 되돌려 콘솔은 살아남음).
             # overlay 에 값이 없을 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
-            if _module_holds_lease(config, pkg_file) \
-                    and config.get("CimsRuntimeDir") \
-                    and not str(out.get("CimsRuntimeDir") or "").strip():
-                out["CimsRuntimeDir"] = config["CimsRuntimeDir"]
+            if _module_holds_lease(config, pkg_file):
+                # store 경로 3종을 **함께** 준다 — 하나만 주면 그 노드가 반쪽 설정으로 뜬다.
+                #   · CimsRuntimeDir   원본(store 루트)
+                #   · CimsRuntimeMount mount guard 기준. **없으면 guard 가 꺼진다**
+                #     (키 미설정이면 검사 자체를 건너뛴다 — oam_app._assert_runtime_mount).
+                #     그러면 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를
+                #     만드는 것을 막는 장치가 사라진다.
+                #   · Packages.Dir     store 파생값(oam_ha.md §4.1). 없으면 패키지 oam.json 의
+                #     상대경로("packages")로 폴백해 **버전 디렉터리**를 보므로, 그 노드가
+                #     Active 가 되는 순간 패키지를 못 찾는다(`/agent-bundle.tar.gz` 404 =
+                #     agent·모듈 설치/업그레이드 전면 불가).
+                # 템플릿에 선언된 키만 준다 — oam-svc 에는 `Packages.Dir` 이 없다(패키지 서빙은
+                # base oam 만의 일). 선언 없는 키를 심으면 설정화면에 유령 항목·드리프트가 된다.
+                _tkeys = _template_key_set(tmpl)
+                for _k, _v in (("CimsRuntimeDir",   config.get("CimsRuntimeDir")),
+                               ("CimsRuntimeMount", config.get("CimsRuntimeMount")),
+                               ("Packages.Dir",     (config.get("Packages") or {}).get("Dir"))):
+                    if not _v or str(out.get(_k) or "").strip():
+                        continue        # 값 없음 / overlay 명시값 있음(이관을 무력화하지 않는다)
+                    if _k != "CimsRuntimeDir" and _k not in _tkeys:
+                        continue
+                    out[_k] = _v
             if (config.get("Mgmt") or {}).get("Cidr"):
                 out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
             if not out.get("ServiceLogging.Dir"):

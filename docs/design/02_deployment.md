@@ -96,6 +96,7 @@ agent 와 모든 모듈은 **버전 디렉토리를 병렬로 보존**하고, �
 cims-bootstrap/
 ├── install.sh            # sudo ./install.sh [--prefix /opt/cims-agent] [--port 4419]
 │                         #   [--admin-pass PW] [--no-systemd] [--no-start]
+│                         #   [--mount-src nas.example:/export/cims]
 ├── packages/             # oam / console / agent tarball 3종 (서비스 모듈 미포함)
 └── README.md
 ```
@@ -311,9 +312,14 @@ store)과 `ServiceLogging.Dir`(서비스 로그)이 그렇다. 부트스트랩 �
 (실측: 서비스 로그 기록 실패가 분당 400건씩 17분, 그 로그가 진짜 원인을 덮었다).
 
 두 키 모두 **패키지 기본값은 빈 값**이고, 비었을 때 노드 로컬로 해석한다
-(`services/paths.py` — `local_runtime_dir` 하위). 공유 경로는 마운트를 붙인 뒤 배포
-overlay 가 정한다. 로그는 로컬로라도 남긴다 — 비워서 로깅을 끄면 부트스트랩 노드의
-진단 통로가 사라진다.
+(`services/paths.py` — `local_runtime_dir` 하위). 공유 경로는 언제나 **배포 overlay** 가
+정한다 — 패키지에는 들어가지 않는다. 로그는 로컬로라도 남긴다 — 비워서 로깅을 끄면
+부트스트랩 노드의 진단 통로가 사라진다.
+
+overlay 에 공유 경로가 들어가는 시점은 둘이다: **설치 시점**(부트스트랩 `[6/7]` 이 공유
+스토리지 원본과 붙일 위치를 받아 fstype·store·로그 경로를 유도하고, 마운트가 없으면
+붙인다 — agent 와 같은 엔진 `cims-priv mount-add`. 전제를 패키지 전개 전에 검사하고 어긋나면
+중단), 또는 **나중에 콘솔 이관**(단일 → 이중화 전환). 자세한 조건은 `features/oam_ha.md` §9.4.
 
 
 모듈 설정은 두 층이다. **노드 종속 값(경로·포트·시크릿·계정)은 언제나 overlay 가 정한다.**

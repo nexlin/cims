@@ -954,5 +954,264 @@ class TestEffectiveScope(unittest.TestCase):
         self.assertEqual(colls, {"routes"})
 
 
+class TestDerivedSharedStore(_R4Case):
+    """공유 store = oam/oam-svc **배포설정에서 유도** — 그룹은 저장하지 않는다.
+
+    옛 구조는 그룹 레코드에 같은 사실을 따로 적어서, 어긋남을 막는 가드를 또 써야 했다.
+    (부트스트랩이 설치 시점에 store 를 잡으면 그룹은 그 사실을 모른 채 oam 을 HA 에서
+    빼버렸다 — 실제 결함.)
+    """
+
+    TPL_OAM = {"version": 1, "sections": [
+        {"key": "store", "title": "관리 store", "scope": "system", "fields": [
+            {"key": "CimsRuntimeDir",   "type": "path", "default": ""},
+            {"key": "CimsRuntimeMount", "type": "path", "default": ""},
+            {"key": "Packages.Dir",     "type": "path", "default": ""},
+        ]}]}
+    # oam-svc 에는 `Packages.Dir` 이 없다 — 패키지 서빙은 base oam 만의 일.
+    TPL_SVC = {"version": 1, "sections": [
+        {"key": "store", "title": "관리 store", "scope": "system", "fields": [
+            {"key": "CimsRuntimeDir",   "type": "path", "default": ""},
+            {"key": "CimsRuntimeMount", "type": "path", "default": ""},
+        ]}]}
+
+    def _seed_lease_descriptor(self):
+        """oam/oam-svc = 리스 보유 모듈 — 주입/전제 판정의 근거."""
+        from services import file_store
+        file_store.save(file_store.domain_dir(self.config, "services"), 1, {
+            "id": "cims", "modules": [
+                {"name": "oam",     "safety": {"requires_leader_lease": True}},
+                {"name": "oam-svc", "safety": {"requires_leader_lease": True}},
+            ]})
+
+    def _seed_store_dep(self, did, aid, proc, mount, pid=None, tpl=None):
+        from services import file_store
+        pid = pid if pid is not None else (21 if proc == "oam" else 22)
+        file_store.save(file_store.domain_dir(self.config, "packages"), pid, {
+            "id": pid, "name": proc, "version": "0.1.0",
+            "config_template": tpl or (self.TPL_OAM if proc == "oam" else self.TPL_SVC),
+            "meta": {"shared_identity": True}})
+        cfg = {}
+        if mount:
+            cfg = {"CimsRuntimeMount": mount, "CimsRuntimeDir": mount + "/runtime"}
+        file_store.save(file_store.domain_dir(self.config, "deployments"), did, {
+            "id": did, "agent_id": aid, "package_id": pid, "process_name": proc,
+            "install_path": "/opt/x", "config": cfg})
+
+    # ── 유도 ────────────────────────────────────────────────────────────────
+    def test_derived_when_all_members_agree(self):
+        from handlers.ha_groups import _derived_shared_store
+        g = self._seed_as_group()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/cims")
+        self.assertEqual(_derived_shared_store(self.config, g),
+                         {"mount_point": "/mnt/cims"})
+
+    def test_not_derived_when_one_member_local(self):
+        """한 노드만 공유면 절체가 성립하지 않는다 — 공유로 보지 않는다."""
+        from handlers.ha_groups import _derived_shared_store
+        g = self._seed_as_group()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "")
+        self.assertEqual(_derived_shared_store(self.config, g), {})
+
+    def test_not_derived_when_paths_differ(self):
+        from handlers.ha_groups import _derived_shared_store
+        g = self._seed_as_group()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/other")
+        self.assertEqual(_derived_shared_store(self.config, g), {})
+
+    def test_trailing_slash_is_not_a_difference(self):
+        from handlers.ha_groups import _derived_shared_store
+        from services import file_store
+        g = self._seed_as_group()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/cims/")
+        self.assertEqual(_derived_shared_store(self.config, g),
+                         {"mount_point": "/mnt/cims"})
+        del file_store
+
+    def test_removed_deployment_ignored(self):
+        """삭제된 배포가 유도를 깨지 않는다."""
+        from handlers.ha_groups import _derived_shared_store
+        from services import file_store
+        g = self._seed_as_group()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/cims")
+        d = file_store.domain_dir(self.config, "deployments")
+        row = file_store.load(d, 6); row["status"] = "removed"; row["config"] = {}
+        file_store.save(d, 6, row)
+        self.assertEqual(_derived_shared_store(self.config, g),
+                         {"mount_point": "/mnt/cims"})
+
+    def test_legacy_group_record_is_fallback_only(self):
+        """전환기 — 유도 불가 + 옛 그룹 저장값 있으면 그것을 쓴다(HA 편입 유지)."""
+        from handlers.ha_groups import _derived_shared_store
+        from services import file_store
+        g = self._seed_as_group()
+        g["shared_store"] = {"mount_point": "/nas/legacy"}
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        self._seed_store_dep(5, 10, "oam", "")
+        self.assertEqual(_derived_shared_store(self.config, g),
+                         {"mount_point": "/nas/legacy"})
+        # 배포설정이 채워지면 유도가 이긴다 (폴백 경로를 더 이상 타지 않는다)
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self.assertEqual(_derived_shared_store(self.config, g),
+                         {"mount_point": "/mnt/cims"})
+
+    # ── 전제 게이트 ─────────────────────────────────────────────────────────
+    def test_lease_precondition_follows_derived_value(self):
+        from handlers.ha_groups import _lease_precondition_unmet
+        from services import file_store
+        g = self._seed_as_group()
+        # 리스 보유 선언 — descriptor 대신 그룹 명세로(운영자 명시가 descriptor 보다 우선).
+        g["module_specs"] = {"oam": {"safety": {"requires_leader_lease": True}}}
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        self._seed_store_dep(5, 10, "oam", "")
+        self._seed_store_dep(6, 11, "oam", "")
+        self.assertEqual(_lease_precondition_unmet(g, "oam", self.config),
+                         "no_shared_store")
+        # 부트스트랩/이관이 배포설정을 채우면 그룹 조작 없이 편입된다
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/cims")
+        self.assertIsNone(_lease_precondition_unmet(g, "oam", self.config))
+
+    # ── 주입 (agents._materialize_deploy_config) ────────────────────────────
+    def _materialize(self, pid, overlay):
+        from handlers.agents import _materialize_deploy_config, _pkg_load
+        return _materialize_deploy_config(self.config, _pkg_load(self.config, pid), overlay)
+
+    def test_store_paths_injected_together(self):
+        """Mount 가 빠지면 그 노드의 mount guard 가 꺼지고, Packages.Dir 이 빠지면
+        절체 후 패키지를 못 찾는다 — 셋을 함께 준다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "")
+        # CimsRuntimeDir 은 file_store 루트라 tmpdir 그대로 둔다(바꾸면 그 경로를 만든다).
+        self.config["CimsRuntimeMount"] = "/mnt/cims"
+        self.config["Packages"] = {"Dir": "/mnt/cims/runtime/pkg_files"}
+        eff = self._materialize(21, {})
+        self.assertEqual(eff.get("CimsRuntimeDir"), self.config["CimsRuntimeDir"])
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
+        self.assertEqual(eff.get("Packages.Dir"), "/mnt/cims/runtime/pkg_files")
+
+    def test_injection_is_template_gated(self):
+        """선언 없는 키는 심지 않는다 — oam-svc 에 Packages.Dir 이 생기면 유령 항목."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(6, 11, "oam-svc", "")
+        self.config["CimsRuntimeMount"] = "/mnt/cims"
+        self.config["Packages"] = {"Dir": "/mnt/cims/runtime/pkg_files"}
+        eff = self._materialize(22, {})
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
+        self.assertNotIn("Packages.Dir", eff)
+
+    def test_overlay_wins_over_injection(self):
+        """이관이 overlay 에 넣은 새 경로를 base 값이 되돌리면 안 된다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "")
+        self.config["CimsRuntimeMount"] = "/mnt/old"
+        self.config["Packages"] = {"Dir": "/mnt/old/runtime/pkg_files"}
+        eff = self._materialize(21, {"CimsRuntimeMount": "/mnt/new",
+                                     "Packages.Dir": "/mnt/new/runtime/pkg_files"})
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/new")
+        self.assertEqual(eff.get("Packages.Dir"), "/mnt/new/runtime/pkg_files")
+
+    def test_non_lease_module_gets_no_store_paths(self):
+        """서비스 모듈은 리스 획득 코드가 없다 — 경로를 주면 펜싱 없는 두 번째 writer."""
+        from services import file_store
+        file_store.save(file_store.domain_dir(self.config, "services"), 1, {
+            "id": "cims", "modules": [{"name": "csc", "safety": {}}]})
+        file_store.save(file_store.domain_dir(self.config, "packages"), 23, {
+            "id": 23, "name": "csc", "version": "0.1.0",
+            "config_template": self.TPL_OAM, "meta": {"shared_identity": True}})
+        self.config["CimsRuntimeMount"] = "/mnt/cims"
+        self.config["Packages"] = {"Dir": "/mnt/cims/runtime/pkg_files"}
+        eff = self._materialize(23, {})
+        self.assertNotIn("CimsRuntimeMount", eff)
+        self.assertNotIn("Packages.Dir", eff)
+
+
+class TestBootstrapConfigShape(_FsCase):
+    """부트스트랩이 쓰는 `config.json` 형태 == agent 가 쓰는 실체화본.
+
+    두 writer 가 다른 형태를 쓰면 드리프트 판정(`deploy_config_hash`)이 영구히 어긋나
+    **설치 직후부터 A-PRC-003 이 뜬다** (실측: overlay 10키 vs 실체화본 13키 — 템플릿
+    기본값 `Server.Role`·`ServiceLogging.{Alert,Event}RetainDays` 누락).
+    부트스트랩은 `템플릿 기본값 + overlay` 를 쓴다(install.sh). 이 테스트는 그 규칙이
+    `_materialize_deploy_config` 와 **같은 결과**를 내는지를 지킨다 — 새 주입 키가 생기고
+    부트스트랩이 그것을 안 쓰면 여기서 깨진다.
+    """
+
+    OAM_TPL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "ems", "core", "oam", "config", "config_template.json")
+
+    # install.sh 가 config.json 에 쓰는 키 (부트스트랩 overlay `ov`)
+    BOOTSTRAP_KEYS = {
+        "Server.Ip", "Server.Port", "CimsRuntimeDir", "Packages.Dir",
+        "CimsAuth.JwtSecret", "CimsAuth.BuiltinAccounts", "Server.Role",
+        "Server.CertSans", "CimsRuntimeMount", "Server.AgentOamUrl",
+        "Mgmt.Cidr", "ServiceLogging.Dir",
+    }
+
+    def _bootstrap_shape(self, tpl, overlay):
+        """install.sh 의 병합 규칙 — 빈 default 제외, overlay 의 빈 값은 default 를 안 지운다."""
+        out = {}
+        for sec in tpl.get("sections") or []:
+            for f in sec.get("fields") or []:
+                k, d = f.get("key"), f.get("default")
+                if k and d is not None and d != "" and d != []:
+                    out[k] = d
+        for k, v in overlay.items():
+            if v is None or v == "":
+                continue
+            out[k] = v
+        return out
+
+    def test_bootstrap_shape_equals_materialized(self):
+        import json as _json
+        from services import file_store
+        from handlers.agents import _materialize_deploy_config
+        with open(self.OAM_TPL) as f:
+            tpl = _json.load(f)
+        # 부트스트랩이 쓰는 overlay (값은 형태 비교용 — 실제 사이트 값과 무관)
+        overlay = {
+            "Server.Ip": "0.0.0.0", "Server.Port": 4419, "Server.Role": "base",
+            "CimsRuntimeDir": "/mnt/cims/runtime", "CimsRuntimeMount": "/mnt/cims",
+            "Packages.Dir": "/mnt/cims/runtime/pkg_files",
+            "ServiceLogging.Dir": "/mnt/cims/service_log",
+            "CimsAuth.JwtSecret": "s3cr3t",
+            "CimsAuth.BuiltinAccounts": [{"login_id": "admin"}],
+            "Server.AgentOamUrl": "https://10.0.0.1:4419",
+            "Mgmt.Cidr": "10.0.0.0/24", "Server.CertSans": [],
+        }
+        pkg = {"id": 1, "name": "oam", "version": "0.1.0",
+               "config_template": tpl, "meta": {"shared_identity": True}}
+        file_store.save(file_store.domain_dir(self.config, "packages"), 1, pkg)
+        # 주입원(살아있는 OAM 의 값) — overlay 가 이미 갖고 있으므로 no-op 이어야 한다.
+        self.config["CimsRuntimeMount"] = "/mnt/cims"
+        self.config["Packages"] = {"Dir": "/mnt/cims/runtime/pkg_files"}
+        self.config["Mgmt"] = {"Cidr": "10.0.0.0/24"}
+
+        want = self._bootstrap_shape(tpl, overlay)
+        got = _materialize_deploy_config(self.config, pkg, overlay)
+        # 키 집합이 같아야 한다 — 다르면 부트스트랩이 그 키를 안 써서 드리프트가 난다.
+        self.assertEqual(sorted(got), sorted(want),
+                         "부트스트랩 config.json 형태가 실체화본과 다르다 — "
+                         "install.sh 의 config.json 기록에 누락된 키가 있다")
+        self.assertEqual(got, want)
+
+    def test_bootstrap_keys_cover_injected_keys(self):
+        """주입 대상 키는 전부 부트스트랩 overlay 에도 있어야 한다.
+
+        주입은 '살아있는 OAM 의 값' 을 넣는 것이라, 부트스트랩 노드(자기 자신이 원본)가
+        그 키를 안 쓰면 실체화본에만 생겨 형태가 갈라진다.
+        """
+        injected = {"CimsAuth.JwtSecret", "CimsRuntimeDir", "CimsRuntimeMount",
+                    "Packages.Dir", "Mgmt.Cidr", "ServiceLogging.Dir",
+                    "CimsAuth.BuiltinAccounts"}
+        self.assertEqual(injected - self.BOOTSTRAP_KEYS, set(),
+                         "주입 키가 부트스트랩 overlay 에 없다 — install.sh 의 ov 에 추가하라")
+
+
 if __name__ == "__main__":
     unittest.main()

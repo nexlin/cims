@@ -1514,7 +1514,8 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > 그룹의 VIP 와 비교하면 전원이 어긋남으로 잡혀 그 그룹 절체까지 막힌다. VIP 가 아닌
 > 주소로 OAM 에 보고하는 agent 가 있으면 거부된다(응답 `agents[]`에 `{agent_id,name,oam_url}`).
 > 그대로 절체하면 구 Active 주소가 죽어 fleet 전체가 단절되고, 콘솔에는 전 노드 offline·모듈
-> 상태 고착으로 보인다(실측). 해결은 `POST /api/v1/agents/oam-url` (콘솔 `⇢ OAM 주소 VIP 전환`).
+> 상태 고착으로 보인다(실측). 해결은 `POST /api/v1/agents/{id}/oam-url`(서버 1대) 또는
+> `POST /api/v1/agents/oam-url`(전 agent) — 콘솔 `시스템/서버 구성 > 서버 > OAM 접속 주소`.
 > `force: true` 로 우회 가능. 판정 근거는 agent heartbeat 의 `oam_url` 보고값이며,
 > `GET /api/v1/agents` 의 `oam_url` 과 그룹 조회의 `agents_not_on_vip[]` 로도 노출된다.
 

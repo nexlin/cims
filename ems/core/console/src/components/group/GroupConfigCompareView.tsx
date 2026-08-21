@@ -27,7 +27,7 @@ import { haGroupsApi, type HaGroup, type GroupPkgSync,
          type GroupPkgSyncMember } from '../../api/ha_groups'
 import ModuleConfigEditor from '../module/ModuleConfigEditor'
 import {
-  SectionBlock, defaultValue, serviceScopeKeys, fieldValueEq, type FieldValue,
+  SectionBlock, StoreMigrateFooter, defaultValue, serviceScopeKeys, fieldValueEq, type FieldValue,
 } from '../module/ModuleConfigModal'
 
 interface Props {
@@ -531,7 +531,13 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                 <SectionBlock key={`${baseAgentId}:${sec.key}`} section={sec}
                   values={formValues} initial={formInitial} changed={changed}
                   onChange={(k, v) => setFormValues(p => ({ ...p, [k]: v }))}
-                  onReset={(k) => setFormValues(p => ({ ...p, [k]: formInitial[k] }))} />
+                  onReset={(k) => setFormValues(p => ({ ...p, [k]: formInitial[k] }))}
+                  footer={sec.key === 'store'
+                    ? <StoreMigrateFooter groupId={group.id}
+                        mountPoint={String(formValues['CimsRuntimeMount'] ?? '')}
+                        dirty={changed.has('CimsRuntimeMount') || changed.has('CimsRuntimeDir')}
+                        onDone={load} />
+                    : undefined} />
               ))}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
                 <button className="btn btn--primary" onClick={() => void saveForm()}

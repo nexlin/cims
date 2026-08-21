@@ -4,14 +4,14 @@ import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
 } from '../api/deployment'
-import { haGroupsApi, type HaGroup, type VipBinding, type MountOp, type HaSharedStore,
+import { haGroupsApi, type HaGroup, type VipBinding, type MountOp,
          type FailoverOptions, FAILOVER_DEFAULTS,
          type ModuleSpec, MODULE_SPEC_DEFAULT, type SafetyClass } from '../api/ha_groups'
 import { ServiceIpPanel } from './ha/ServiceIpPanel'
 import { MountPanel } from './ha/MountPanel'
 import { GroupMountPanel } from './ha/GroupMountPanel'
-import { SharedStorePanel } from './ha/SharedStorePanel'
 import { NetTuningPanel } from './ha/NetTuningPanel'
+import { OamUrlPanel } from './ha/OamUrlPanel'
 import { splitPrefixHost } from './ha/helpers'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
@@ -165,6 +165,24 @@ export default function ServersPage() {
   )
   // 전역 VIP IP 집합 — 모든 HA group vip_bindings 의 IP. keepalived 가 관리하는 부동 IP 라
   // ServiceIpPanel 에서 망/용도 편집 불가, 'VIP' 표시만 (서버 고정 IP 아님).
+  // 관리평면 VIP — agent 가 OAM 에 접속할 주소의 권장값. 판정 기준은 백엔드
+  // `_agents_not_on_vip` 와 같다: **oam 을 호스팅하는 AS 그룹**만 본다 (Signaling 처럼
+  // oam 이 없는 그룹의 VIP 와 비교하면 전원이 어긋남으로 잡힌다 — 실측).
+  const mgmtVip = useMemo(() => {
+    const oamAgentIds = new Set(deployments
+      .filter(d => (d.process_name || '').toLowerCase() === 'oam' && d.status !== 'removed')
+      .map(d => d.agent_id))
+    for (const g of haGroups) {
+      if (g.mode !== 'active_standby') continue
+      if (!(g.members || []).some(m => oamAgentIds.has(m.agent_id))) continue
+      const binds = g.vip_bindings || []
+      const admin = binds.find(b => /admin|oam|mgmt/i.test(b.slot || ''))
+      const ip = ((admin || binds[0])?.ip || g.vip || '').trim()
+      if (ip) return ip
+    }
+    return null
+  }, [haGroups, deployments])
+
   const vipIps = useMemo(
     () => new Set(haGroups.flatMap(g => (g.vip_bindings || []).map(b => b.ip)).filter(Boolean)),
     [haGroups]
@@ -451,6 +469,7 @@ export default function ServersPage() {
                   deployments={depsByAgent.get(selectedAgent.id) || []}
                   packages={packages}
                   vipIps={vipIps}
+                  mgmtVip={mgmtVip}
                   onApprove={approveAgent}
                   onRevoke={revokeAgent}
                   onRemove={removeAgent}
@@ -828,20 +847,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
       await onReload()
     } catch (e) { show((e as Error).message, 'err') }
     finally { setMountApplying(false) }
-  }
-  // ── 공유 store (관리평면 데이터 이중화) — 경로 저장 / 이관 실행 ──
-  async function saveSharedStore(v: HaSharedStore | Record<string, never>) {
-    try {
-      await haGroupsApi.update(group.id, { shared_store: v as HaSharedStore })
-      show('공유 store 경로 저장됨', 'ok'); await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
-  }
-  async function migrateSharedStore(mountPoint: string) {
-    try {
-      const r = await haGroupsApi.migrateSharedStore(group.id, mountPoint)
-      show(`공유 store 이관 개시 — ${r.detail || r.runtime_dir}`, 'ok')
-      await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
   }
   // ── A/S 실측 — 멤버별 health-check (sync REST) 로 실제 VIP 보유(Active) 여부 관측 ──
   // 설정상 role(M/B) 과 달리, 절체 직후엔 실제 VIP 보유 멤버가 바뀔 수 있어 on-demand 로 확인.
@@ -1301,20 +1306,8 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
           />
         </div>
 
-        {/* 공유 store — AS 만 (관리평면 데이터 이중화 전제). 미설정이면 oam 이 HA 편입에서 빠진다. */}
-        {group.mode === 'active_standby' && (
-          <div style={{ marginTop: 20 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>공유 store (관리평면 데이터)</div>
-            <SharedStorePanel
-              sharedStore={group.shared_store}
-              haExcluded={group.ha_excluded}
-              memberMountTargets={memberAgents.map(m => (m.agent?.mount_targets || [])
-                .map(t => ({ target: t.target, fstype: t.fstype })))}
-              onChange={saveSharedStore}
-              onMigrate={migrateSharedStore}
-            />
-          </div>
-        )}
+        {/* 공유 store 는 이 탭에 없다 — oam/oam-svc 의 [패키지 설정] > 관리 store 로 귀속.
+            HA 편입 여부는 그 값에서 유도되고, 미충족 사유는 [패키지 제어] 탭 배너가 알린다. */}
       </div>
     </>
   )
@@ -1655,7 +1648,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
 
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
-function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
+function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVip,
                           onApprove, onRevoke, onRemove, onRename, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
                           onAddDeploy, onJob, onUpgradeDep, onRollback, onRemoveDep }: {
   agent: Agent
@@ -1665,6 +1658,8 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
   deployments: Deployment[]
   packages: SipPackage[]
   vipIps?: Set<string>
+  /** 관리평면(oam 호스팅) 그룹의 VIP — OAM 접속 주소 권장값 */
+  mgmtVip?: string | null
   onApprove: (a: Agent) => void
   onRevoke: (a: Agent) => void
   onRemove: (a: Agent) => void
@@ -1793,7 +1788,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps,
             </InspectorSection>
             <InspectorSection title="네트워크" expanded={openSections.has('network')}
                               onToggle={() => toggleSection('network')}>
-              <NetworkTab agent={a} vipIps={vipIps} />
+              <NetworkTab agent={a} vipIps={vipIps} mgmtVip={mgmtVip} />
             </InspectorSection>
           </>
         )}
@@ -2207,7 +2202,8 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
         const lines = list.slice(0, 6).map(a => `  · ${a.name} → ${a.oam_url}`).join('\n')
         if (window.confirm(
             `${(e as Error).message}\n\n${lines}\n\n` +
-            `지금 'OAM 주소 VIP 전환' 을 실행할까요? (취소 = 아무것도 하지 않음)`)) {
+            `지금 전 agent 의 OAM 주소를 VIP 로 바꿀까요? (취소 = 아무것도 하지 않음)\n` +
+            `개별 서버만 바꾸려면 [시스템/서버 구성] > 서버 > OAM 접속 주소 를 쓰세요.`)) {
           setBusy(null)
           await doRetargetOamUrl()
           return
@@ -2310,14 +2306,6 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
                 title="그룹 서비스 중지 — 의도를 stopped 로 두고 비무장(VIP 내려감) + 전 모듈 정지.">
           ■ 일괄 중지
         </button>
-        {isAS && (group.vip_bindings?.length || group.vip) && (
-          <button className="btn btn--sm" disabled={!!busy}
-                  style={{ marginLeft: 'auto' }}
-                  onClick={() => doRetargetOamUrl()}
-                  title="전 agent 가 OAM 을 VIP 로 보게 전환. 각 agent 가 도달 확인 후에만 적용(실패해도 fleet 무단절).">
-            ⇢ OAM 주소 VIP 전환
-          </button>
-        )}
         {isAS && (
           <button className="btn btn--sm" disabled={!!busy || group.active_agent_id == null}
                   onClick={() => doFailover()}
@@ -2365,7 +2353,8 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           <div style={{ marginTop: 4 }}>
             이대로 절체하면 구 Active 주소가 죽어 그 agent 들이 OAM 과 단절됩니다 —
             콘솔에는 전 노드 offline, 모듈 상태는 절체 직전 값으로 고착돼 보입니다.
-            위 <b>[⇢ OAM 주소 VIP 전환]</b> 을 먼저 실행하세요.
+            <b>[시스템/서버 구성] &gt; 서버 &gt; OAM 접속 주소</b> 에서 먼저 전환하세요
+            (그 자리의 [전체 적용] 이 전 agent 를 한 번에 바꿉니다).
           </div>
           <div style={{ marginTop: 4, opacity: 0.85 }}>
             {group.agents_not_on_vip!.slice(0, 6).map(a => `${a.name} → ${a.oam_url}`).join(' / ')}
@@ -2447,7 +2436,9 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
   )
 }
 
-function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }) {
+function NetworkTab({ agent: a, vipIps, mgmtVip }: {
+  agent: Agent; vipIps?: Set<string>; mgmtVip?: string | null
+}) {
   const { show } = useToast()
   const [applying, setApplying] = useState(false)
 
@@ -2490,6 +2481,27 @@ function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }
     finally { setApplying(false) }
   }
 
+  // OAM 접속 주소 — 이 주소는 그 노드 agent 의 설정이다(보내는 주체가 agent).
+  // agent 가 새 주소로 /health 도달 확인 후에만 적용하므로, VIP 가 아직 없을 때 눌러도
+  // fleet 이 끊기지 않는다(job 이 실패로 남을 뿐). oam_ha.md §9.4.1
+  async function onApplyOamUrl(url: string) {
+    setApplying(true)
+    try {
+      const r = await deploymentApi.retargetAgentOamUrl(a.id, url)
+      show(`OAM 주소 전환 큐잉 — ${a.name} → ${r.url} (도달 확인 후 적용)`, 'ok')
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setApplying(false) }
+  }
+
+  async function onApplyOamUrlAll(url: string) {
+    setApplying(true)
+    try {
+      const r = await deploymentApi.retargetOamUrl(url)
+      show(`OAM 주소 전환 큐잉 — ${r.jobs.length}개 agent (${r.url})`, 'ok')
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setApplying(false) }
+  }
+
   async function onApplyNetTuning(tuning: AgentNetTuning, label: string) {
     setApplying(true)
     try {
@@ -2517,6 +2529,14 @@ function NetworkTab({ agent: a, vipIps }: { agent: Agent; vipIps?: Set<string> }
       mounts={a.mounts || []}
       applying={applying}
       onApply={onApplyMounts}
+    />
+    <OamUrlPanel
+      title={`${a.name} — OAM 접속 주소 (agent → OAM)`}
+      current={a.oam_url}
+      vipCandidate={mgmtVip}
+      applying={applying}
+      onApply={onApplyOamUrl}
+      onApplyAll={onApplyOamUrlAll}
     />
     <NetTuningPanel
       title={`${a.name} — 네트워크 튜닝 (RPS / sysctl)`}

@@ -250,6 +250,53 @@ def _normalize_shared_store(raw) -> dict:
     return {'mount_point': mp or '/'}
 
 
+def _derived_shared_store(config: dict, group: dict) -> dict:
+    """공유 store — **oam/oam-svc 배포설정에서 유도**한다. 그룹에 별도 선언을 두지 않는다.
+
+    공유 store 는 그 모듈의 설정(`CimsRuntimeMount`)이고, 그룹은 그것을 **읽기만** 한다.
+    같은 사실을 그룹 레코드에도 적으면 두 곳이 어긋날 수 있고, 어긋남을 막는 코드를 또
+    써야 한다(그게 옛 구조였다 — 그룹 PUT 의 409 + "설정을 함께 맞추세요" 안내문).
+
+    성립 조건: 그룹에 배포된 oam/oam-svc **전부**가 같은 비어있지 않은 `CimsRuntimeMount`
+    를 갖는다. 값이 같다는 것만으로 충분하다 — 그 경로가 실제 마운트인지는 노드가 스스로
+    집행한다(OAM mount guard 는 마운트 없이 기동을 거부하고, agent 승격 preflight 는
+    마운트·write 가능 여부를 확인한다). 여기서 heartbeat 관측(`mount_targets`)까지 보면
+    보고가 잠깐 stale 해질 때마다 HA 편입이 흔들리므로 **선언만 본다.**
+
+    반환: `{'mount_point': …}` 또는 `{}`(= 공유 store 없음 → 노드별 로컬).
+    """
+    if not config:
+        return _normalize_shared_store(group.get('shared_store'))   # 유도 불가 — 저장값
+    from handlers.agents import _deploy_load_all, _pkg_load, _materialize_deploy_config
+    aids = {m.get('agent_id') for m in (group.get('members') or [])}
+    mounts: set = set()
+    for d in _deploy_load_all(config):
+        if d.get('agent_id') not in aids or d.get('status') == 'removed':
+            continue
+        if (d.get('process_name') or '').lower().strip() not in ('oam', 'oam-svc'):
+            continue
+        try:
+            eff = _materialize_deploy_config(config, _pkg_load(config, d.get('package_id')),
+                                             d.get('config')) or {}
+        except Exception:
+            eff = d.get('config') if isinstance(d.get('config'), dict) else {}
+        mounts.add(str(eff.get('CimsRuntimeMount') or '').strip().rstrip('/'))
+    if len(mounts) == 1:
+        got = _normalize_shared_store({'mount_point': mounts.pop()})
+        if got:
+            return got
+    # 전환기 폴백 — 유도가 비었는데 옛 그룹 레코드에 값이 있으면 그것을 쓴다. 업그레이드만으로
+    # 동작 중인 사이트의 oam 이 HA 편입에서 빠지는 것을 막는다. `CimsRuntimeMount` 가 배포설정에
+    # 들어가면(주입/이관/부트스트랩) 이 경로는 더 이상 타지 않는다.
+    legacy = _normalize_shared_store(group.get('shared_store'))
+    if legacy:
+        logger.log_warning(
+            f"[ha-group] group#{group.get('id')} 공유 store 를 배포설정에서 유도하지 못해 "
+            f"그룹 저장값({legacy['mount_point']})을 사용합니다 — oam/oam-svc 배포설정의 "
+            f"`CimsRuntimeMount` 를 이 경로로 맞추세요(멤버 간 동일해야 함).")
+    return legacy
+
+
 def _mount_point_unverified(config: dict, group: dict, store: dict) -> dict:
     """공유 store 의 `mount_point` 가 **각 멤버의 실제 마운트**인지 확인.
 
@@ -341,40 +388,7 @@ def _agents_not_on_vip(config: dict, group: dict, all_agents: list | None = None
     return out
 
 
-def _store_path_conflicts(config: dict, group: dict, store: dict) -> list:
-    """공유 store 경로와 **실제 배포설정이 어긋난** oam/oam-svc 목록.
-
-    그룹에 공유 store 만 지정하고 배포설정(`CimsRuntimeDir`)은 노드 로컬로 남겨두면,
-    oam/oam-svc 는 HA 편입되지만(절체 대상) 데이터는 노드마다 따로 있다 — 절체하면 신
-    Active 가 **빈 콘솔**로 뜬다. 정확히 과거 사고 상태이므로 만들 수 없게 막는다.
-
-    반환: [{agent_id, process_name, runtime_dir}] — 비어 있으면 정합.
-    """
-    from handlers.agents import _deploy_load_all, _pkg_load, _materialize_deploy_config
-    mnt = (store or {}).get('mount_point') or ''
-    if not mnt:
-        return []
-    aids = {m.get('agent_id') for m in (group.get('members') or [])}
-    bad = []
-    for d in _deploy_load_all(config):
-        mod = (d.get('process_name') or '').lower().strip()
-        if d.get('agent_id') not in aids or d.get('status') == 'removed':
-            continue
-        if mod not in ('oam', 'oam-svc'):
-            continue
-        try:
-            pkg = _pkg_load(config, d.get('package_id'))
-            eff = _materialize_deploy_config(config, pkg, d.get('config')) or {}
-        except Exception:
-            eff = d.get('config') if isinstance(d.get('config'), dict) else {}
-        rt = str(eff.get('CimsRuntimeDir') or '').rstrip('/')
-        if not rt or not (rt == mnt or rt.startswith(mnt + '/')):
-            bad.append({'agent_id': d.get('agent_id'), 'process_name': mod,
-                        'runtime_dir': rt or '(미지정 — 노드 로컬)'})
-    return bad
-
-
-def _lease_precondition_unmet(group: dict, mod: str) -> "str | None":
+def _lease_precondition_unmet(group: dict, mod: str, config: dict = None) -> "str | None":
     """`requires_leader_lease` 선언의 **집행** — 전제 미충족 사유. 충족이면 None.
 
     `safety.requires_leader_lease` 는 "이 모듈은 단일 writer 자원(관리 store)을 소유하므로
@@ -391,7 +405,7 @@ def _lease_precondition_unmet(group: dict, mod: str) -> "str | None":
         return None
     if group.get('mode') != 'active_standby':
         return None                     # 절체가 없는 모드 — 전제 불필요
-    if not _normalize_shared_store(group.get('shared_store')):
+    if not _derived_shared_store(config, group):
         return 'no_shared_store'        # 공유 store 미설정 → 상태가 노드에 묶여 있다
     return None
 
@@ -730,7 +744,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
 
     # cims-health 가 lookup 하는 port/proto — running 의도 모듈의 배포로 유도.
     # 대표 헬스 모듈 선정에서도 전제 미충족 모듈은 제외한다(제외 모듈은 HA 관리 대상이 아님).
-    _allowed_health = {m for m in intent_running if not _lease_precondition_unmet(group, m)}
+    _allowed_health = {m for m in intent_running if not _lease_precondition_unmet(group, m, config)}
     h_port, h_proto, h_module = _infer_health_port_proto(agent_id, config, allowed=_allowed_health) if config else (None, None, None)
 
     failover_options = _normalize_failover_options(group.get('failover_options'))
@@ -780,7 +794,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
     ha_excluded: dict = {}
     _kept: list = []
     for _m in daemon_mods:
-        _why = _lease_precondition_unmet(group, _m)
+        _why = _lease_precondition_unmet(group, _m, config)
         if _why:
             ha_excluded[_m] = _why
         else:
@@ -863,7 +877,7 @@ def _render_ha_for_agent(group: dict, members: list, agent_id: int,
 
     # 공유 store — 그룹 스코프(양 노드 동일 경로). agent 는 마운트를 조작하지 않고
     # 승격 전 **마운트·write 가능 여부만 확인**한다(마운트는 fstab 이 영속).
-    shared_store = _normalize_shared_store(group.get('shared_store'))
+    shared_store = _derived_shared_store(config, group)
 
     # running 의도 daemon 모듈이 없고 헬스포트도 없으면 미개시/빈 서버 — vrrp_instance
     # 를 내리지 않는다 (enabled=false → cims-ha 렌더 스킵 + keepalived 정지 유지).
@@ -1412,6 +1426,13 @@ def _serialize_group(g: dict, config: dict,
     members = _attach_derived_role(members)
     out['members'] = _attach_member_names(members, config)
     out.setdefault('vip_bindings', [])
+    # 공유 store 는 **저장 필드가 아니라 유도값**이다 — oam/oam-svc 배포설정의
+    # `CimsRuntimeMount` 를 읽는다. 콘솔은 이 값을 상태로만 표시한다(편집은 oam 설정에서).
+    _ds = _derived_shared_store(config, out)
+    if _ds:
+        out['shared_store'] = _ds
+    else:
+        out.pop('shared_store', None)
     # 그룹 공통 마운트 선언 (전 멤버 동일) — 멤버별 실제 적용 여부는 agent.mounts 로 대조.
     out.setdefault('mounts', [])
     out['service_intent'] = dict(out.get('service_intent') or {})
@@ -1427,7 +1448,7 @@ def _serialize_group(g: dict, config: dict,
                           for d in _group_member_daemon_deps(out, config,
                                                               all_deps, health_defaults)
                           if d.get('process_name')}):
-            _why = _lease_precondition_unmet(out, _m)
+            _why = _lease_precondition_unmet(out, _m, config)
             if _why:
                 _excl[_m] = _why
         out['ha_excluded'] = _excl
@@ -1496,7 +1517,7 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
     쉽고(설정을 먼저 바꾸면 빈 콘솔, 프로세스를 SSH 로 죽이면 watchdog 이 되살림),
     무엇보다 OAM 은 **자기 store 를 자기가 옮길 수 없다**. 그래서:
 
-      1. 그룹에 `shared_store` 저장 (이 시점부터 oam/oam-svc 가 HA 편입 대상)
+      1. (그룹 레코드에는 쓰지 않는다 — 공유 store 는 배포 overlay 가 정본)
       2. 그룹 멤버의 oam/oam-svc 배포 overlay 에 `CimsRuntimeDir`/`CimsRuntimeMount` 병합
          → **현재 store 에 기록**되므로 3단계 복사에 함께 실려 간다(신 store 와 일관)
       3. store 를 들고 있는 노드(현재 oam 이 running 인 노드)에 `migrate_oam_store` job
@@ -1543,10 +1564,9 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
             'error': 'no_oam_deployment',
             'detail': '이 그룹 멤버에 oam/oam-svc 배포가 없습니다. 먼저 설치하세요.'})
 
-    # ── 1) 그룹에 공유 store 저장
-    g['shared_store'] = store
-    file_store.save(_ha_dir(config), gid, g)
-    logger.log_info(f"[ha-group] group#{gid} 공유 store 설정 → {mnt}")
+    # 그룹 레코드에는 쓰지 않는다 — 공유 store 는 아래 2)에서 배포 overlay 에 들어가고
+    # 그룹은 그것을 읽는다(`_derived_shared_store`). 두 곳에 적으면 어긋난다.
+    logger.log_info(f"[ha-group] group#{gid} 공유 store → {mnt} (배포설정에 반영)")
 
     # 이관(복사) 대상 1건 선정 — 이 OAM 이 도는 노드의 oam 배포.
     import socket as _sock
@@ -1735,7 +1755,6 @@ async def _create_group(body, config):
         'name': name,
         'mode': mode,
         'vip': vip,
-        'shared_store': _normalize_shared_store(body.get('shared_store')),
         'vrid': vrid,
         'vip_mask': vip_mask,
         'auth_pass': auth_pass,
@@ -1807,37 +1826,18 @@ async def _update_group(gid: int, body, config):
     if 'service_intent' in body:
         existing['service_intent'] = _normalize_service_intent(body.get('service_intent'))
     if 'shared_store' in body:
-        # 공유 store — 그룹 스코프. 잘못된 형식은 미사용({})으로 정규화되므로 저장 후
-        # 렌더가 store 단계를 건너뛴다(조용한 부분 적용 방지 = 값이 응답에 그대로 보임).
-        _new_store = _normalize_shared_store(body.get('shared_store'))
-        # 경로만 저장하고 실제 데이터를 옮기지 않으면 **절체 시 빈 콘솔**이 된다
-        # (HA 편입은 되는데 store 는 노드별 로컬). 그 상태를 만들 수 없게 막고
-        # 이관 경로(POST .../shared-store/migrate)로 안내한다 — oam_ha.md §9.4.
-        if _new_store:
-            _mv = _mount_point_unverified(config, existing, _new_store)
-            if _mv['bad']:
-                _lines = '; '.join(
-                    f"{b['name']}: 실제 마운트 {b['available'] or '(없음)'}" for b in _mv['bad'])
-                return HandlerResult(status=400, body={
-                    'error': 'not_a_mount_point',
-                    'detail': (f"'{_new_store['mount_point']}' 는 마운트 지점이 아닙니다. "
-                               f"mount guard 는 /proc/mounts 와 **정확히 일치**하는 경로만 "
-                               f"통과시킵니다(하위 디렉터리는 불가) — 지금 저장하면 OAM 이 "
-                               f"기동을 거부합니다. {_lines}. 마운트 지점을 고르고, store 위치는 "
-                               f"그 하위 경로로 지정하세요."),
-                    'nodes': _mv['bad']})
-            _bad = _store_path_conflicts(config, existing, _new_store)
-            if _bad:
-                _who = ', '.join(f"agent#{b['agent_id']} {b['process_name']}"
-                                 f"({b['runtime_dir']})" for b in _bad)
-                return HandlerResult(status=409, body={
-                    'error': 'store_path_not_shared',
-                    'detail': (f"공유 store 경로만 저장하면 이 모듈들의 관리 데이터가 아직 "
-                               f"노드 로컬에 있어, 절체 시 빈 콘솔이 됩니다: {_who}. "
-                               f"'이 경로로 이관' 을 사용하세요 — 경로 저장·배포설정 갱신·"
-                               f"데이터 복사·재기동을 한 번에 처리합니다."),
-                    'conflicts': _bad})
-        existing['shared_store'] = _new_store
+        # 공유 store 는 **그룹이 저장하는 값이 아니다** — oam/oam-svc 배포설정의
+        # `CimsRuntimeMount` 가 정본이고 그룹은 그것을 읽는다(`_derived_shared_store`).
+        # 그룹에도 적으면 두 곳이 어긋나고, 어긋남을 막는 가드를 또 써야 한다(옛 구조).
+        # 경로를 바꾸는 것은 데이터 이동을 수반하므로 이관이 담당한다.
+        return HandlerResult(status=400, body={
+            'error': 'shared_store_not_group_scoped',
+            'detail': ("공유 store 경로는 그룹이 아니라 oam/oam-svc 모듈 설정입니다 "
+                       "(`CimsRuntimeMount`). 최초 지정은 부트스트랩 설치 시 "
+                       "(--runtime-mount / 대화식 [6/7]), 이후 변경은 "
+                       "POST /ha-groups/{id}/shared-store/migrate 로 하세요 — 경로 변경은 "
+                       "데이터 이동을 수반합니다. 그룹 응답의 shared_store 는 읽기 전용 "
+                       "유도값입니다.")})
     module_specs_changed = False
     if 'module_specs' in body and isinstance(body.get('module_specs'), dict):
         existing['module_specs'] = {
@@ -2145,7 +2145,9 @@ async def _failover_group(gid: int, body, config):
                 'detail': (f"{len(_stray)}개 agent 가 VIP 가 아닌 주소로 OAM 에 보고하고 "
                            f"있습니다. 이대로 절체하면 그 agent 들은 구 Active 주소가 죽어 "
                            f"OAM 과 단절되고, 콘솔에는 전 노드 offline·모듈 상태 고착으로 "
-                           f"보입니다. 먼저 'OAM 주소 VIP 전환' 을 실행하세요."),
+                           f"보입니다. 먼저 각 서버의 OAM 접속 주소를 VIP 로 바꾸세요 "
+                           f"(콘솔 시스템/서버 구성 > 서버 > OAM 접속 주소, 또는 "
+                           f"POST /agents/oam-url)."),
                 'agents': _stray})
 
     from services import ha_lookup

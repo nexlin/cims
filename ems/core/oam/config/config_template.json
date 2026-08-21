@@ -78,6 +78,62 @@
       "scope": "service"
     },
     {
+      "key": "store",
+      "title": "관리 store",
+      "description": "관리 데이터(서버·그룹·배포·계정)·패키지 파일이 놓이는 위치. 공유 스토리지(NAS)에 두면 절체해도 같은 데이터를 본다. 경로 변경은 데이터 이동을 수반하므로 저장이 아니라 이관으로 한다 (docs/design/features/oam_ha.md §4·§9.4).",
+      "scope": "service",
+      "fields": [
+        {
+          "key": "CimsRuntimeDir",
+          "label": "런타임 store",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "file_store 루트(deployments·packages·gateway_routes). 버전 무관 영속."
+        },
+        {
+          "key": "CimsRuntimeMount",
+          "label": "런타임 마운트 지점",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "관리 store 가 공유 스토리지(NAS)에 있을 때의 마운트 지점. 설정 시 OAM 은 기동 전 이 경로가 실제 마운트인지 확인하고, 아니면 기동을 거부한다(마운트 없이 떠서 로컬 디스크에 두 번째 store 를 만드는 것 방지). 단일 노드는 비움."
+        },
+        {
+          "key": "Packages.Dir",
+          "label": "패키지 저장소",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "store 파생값(`{런타임 store}/pkg_files`) — 이관이 함께 옮긴다. store 와 따로 두면 절체한 노드에서 패키지를 못 찾는다(`/agent-bundle.tar.gz` 404 = agent·모듈 설치/업그레이드 불가)."
+        }
+      ]
+    },
+    {
+      "key": "mgmt",
+      "title": "관리망 · agent 접속",
+      "description": "agent 가 OAM 에 접속할 주소와 관리망 대역. 이미 설치된 agent 의 주소는 각 서버 화면에서 바꾼다(보내는 주체가 그 노드의 agent 이므로).",
+      "scope": "service",
+      "fields": [
+        {
+          "key": "Server.AgentOamUrl",
+          "label": "Agent→OAM URL (신규 설치용)",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "새로 설치되는 agent 가 받는 초기 접속 주소 — install-command 에 박히고, OAM 서버 인증서 SAN 에도 이 host 가 들어간다. 이중화면 VIP 로 둔다(그러면 재설치·복구된 노드가 자동으로 VIP 를 보고 시작한다). 이미 설치된 agent 의 주소는 이 값이 아니라 그 노드의 설정이다 — 시스템/서버 구성 > 서버 > OAM 접속 주소 에서 바꾼다."
+        },
+        {
+          "key": "Mgmt.Cidr",
+          "label": "관리망 CIDR",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "help": "관리(mgmt) 망 대역 — 기동 시 Agent→OAM URL 의 host 가 이 대역 안인지 검사해 경고한다."
+        }
+      ]
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 비노출 인프라 값. 부트스트랩/agent 가 채움. upgrade 시 deployment overlay 로 보존.",
@@ -112,54 +168,6 @@
           "hidden": true,
           "restart": true,
           "help": "서버 인증서 SAN 에 넣을 추가 IP/호스트명 (VIP·피어 노드·별칭). AgentOamUrl 의 host 와 hostname·127.0.0.1 은 자동 포함. 부족하면 그룹 CA 로 재발급된다."
-        },
-        {
-          "key": "Server.AgentOamUrl",
-          "label": "Agent→OAM URL",
-          "group": "paths",
-          "type": "string",
-          "default": "",
-          "hidden": true,
-          "restart": true,
-          "help": "agent/install-command 가 쓰는 OAM 주소(mgmt:bind포트)."
-        },
-        {
-          "key": "Mgmt.Cidr",
-          "label": "관리망 CIDR",
-          "group": "paths",
-          "type": "string",
-          "default": "",
-          "hidden": true,
-          "restart": false
-        },
-        {
-          "key": "CimsRuntimeDir",
-          "label": "런타임 store",
-          "group": "paths",
-          "type": "path",
-          "default": "",
-          "hidden": true,
-          "restart": true,
-          "help": "file_store 루트(deployments·packages·gateway_routes). 버전 무관 영속."
-        },
-        {
-          "key": "CimsRuntimeMount",
-          "label": "런타임 마운트 지점",
-          "group": "paths",
-          "type": "path",
-          "default": "",
-          "hidden": true,
-          "restart": true,
-          "help": "관리 store 가 공유 스토리지(NAS)에 있을 때의 마운트 지점. 설정 시 OAM 은 기동 전 이 경로가 실제 마운트인지 확인하고, 아니면 기동을 거부한다(마운트 없이 떠서 로컬 디스크에 두 번째 store 를 만드는 것 방지). 단일 노드는 비움."
-        },
-        {
-          "key": "Packages.Dir",
-          "label": "패키지 저장소",
-          "group": "paths",
-          "type": "path",
-          "default": "",
-          "hidden": true,
-          "restart": true
         }
       ],
       "scope": "system"

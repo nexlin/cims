@@ -23,6 +23,20 @@
 #     --admin-pass PW  내장 admin 비밀번호 설정 (기본 1234 — 상용은 변경 권장)
 #     --server-name N  OAM 호스트(이 서버) 표시 이름 (기본 hostname)
 #     --mgmt-ip IP     관리(mgmt) IP — agent↔OAM 통신 기준 (AgentOamUrl/Mgmt.Cidr; 기본 첫 global IP)
+#     --runtime-mount DIR  관리 store 를 공유 스토리지(NAS)에 둘 때의 **마운트 지점**.
+#                          지정하면 관리 데이터·패키지 파일·서비스 로그가 처음부터 이 하위에
+#                          놓여 이중화 전환 시 이관이 필요 없다. 미지정 = 노드 로컬.
+#                          (대화식 설치에서는 [6/7] 에서 묻는다)
+#     --runtime-dir DIR    관리 store 경로 (기본: <마운트>/runtime). 마운트 하위여야 한다.
+#   공유 스토리지:
+#     --mount-src SRC      마운트 원본 (서버의 **export 경로**). 예 nas.example:/export/cims
+#                          이것만 주면 /mnt/cims 에 붙이고(fstab 영속, _netdev,nofail 자동)
+#                          store 는 /mnt/cims/runtime, 로그는 /mnt/cims/service_log.
+#                          파일시스템은 원본 형태로 유도 (host:/path→nfs4, //host/share→cifs).
+#     --mount DIR          붙일 위치를 /mnt/cims 아닌 곳으로. 이것을 주면 store 는 자동
+#                          승계하지 않는다(= 마운트만 하고 store 는 로컬).
+#     --mount-fstype T     유도값 override — nfs4|nfs|cifs|ext4|xfs|btrfs
+#     --mount-opts O       추가 마운트 옵션 (기본 defaults)
 #     --no-systemd     systemd 미사용 (start 스크립트 생성)
 #     --no-start       설치만 하고 기동하지 않음
 #     --no-agent       이 서버의 agent 자동 설치/기동 생략
@@ -31,9 +45,8 @@
 #     --join                  합류 모드 (peer 에서 그룹 공통 신원 수령, OAM 미기동)
 #     --peer-url URL          기존 OAM 주소 (예: https://121.161.164.140:4419)
 #     --join-token TOKEN      1회용 합류 토큰 (콘솔/API: POST /api/v1/ha/join-token)
-#     --runtime-dir DIR       관리 store 경로 (공유 마운트 하위)
-#     --runtime-mount DIR     공유 store 마운트 지점 (mount guard 기준)
-#   옵션 없이 실행하면 설치 경로/포트/admin 비밀번호를 단계별로 묻는다.
+#     (store 위치는 위 --runtime-mount/--runtime-dir — 미지정 시 peer 값을 계승)
+#   옵션 없이 실행하면 설치 경로/포트/관리 store/admin 비밀번호를 단계별로 묻는다.
 #   제거: sudo <prefix>/uninstall-base.sh [--yes]
 #     --user USER      서비스 사용자 (기본: sudo 호출자) — agent/OAM 프로세스 소유자
 set -euo pipefail
@@ -52,6 +65,15 @@ PEER_URL=""         # 기존 OAM 주소 (신원 수령 + agent enroll 대상)
 JOIN_TOKEN=""       # 1회용 합류 토큰
 STORE_DIR=""        # 관리 store 경로 (공유 마운트 하위) — CimsRuntimeDir
 STORE_MOUNT=""      # 공유 store 마운트 지점 — CimsRuntimeMount (mount guard 기준)
+# 마운트 생성 — **store 위치와는 별개 결정**이다. NAS 를 붙이되 관리 store 는 노드 로컬에
+# 두는 구성도 유효하다(로그만 NAS 로 보내는 단일 노드 등). 마운트 자체는 새로 구현하지 않고
+# agent 의 마운트 관리와 같은 엔진(cims-priv mount-add)을 쓴다 — 규칙(_netdev,nofail 강제·
+# NFS 클라이언트 offline 설치·fstab idempotent 갱신)이 한 곳에만 있게.
+MNT_TARGET=""       # 마운트 지점 (미지정 = 원본에서 유도, 원본도 없으면 마운트 안 함)
+MNT_TARGET_EXPLICIT=""   # --mount 로 지점을 명시했나 (= store 자동 승계 안 함)
+MNT_SRC=""          # 마운트 원본 (예: 10.0.0.5:/export/cims, //nas/share)
+MNT_FSTYPE=""       # nfs4|nfs|cifs|ext4|... (미지정 시 nfs4)
+MNT_OPTS=""         # 추가 옵션 (기본 defaults; _netdev,nofail 는 자동 추가)
 # 서비스 사용자 — sudo 호출자 (agent/OAM 프로세스 소유자. 모듈 설치 경로 쓰기 주체)
 SVC_USER="${SUDO_USER:-$(id -un)}"
 
@@ -71,6 +93,10 @@ while [[ $# -gt 0 ]]; do
         --join-token)   JOIN_TOKEN="$2"; shift 2 ;;
         --runtime-dir)  STORE_DIR="$2"; shift 2 ;;
         --runtime-mount) STORE_MOUNT="$2"; shift 2 ;;
+        --mount)        MNT_TARGET="$2"; MNT_TARGET_EXPLICIT=1; shift 2 ;;
+        --mount-src)    MNT_SRC="$2"; shift 2 ;;
+        --mount-fstype) MNT_FSTYPE="$2"; shift 2 ;;
+        --mount-opts)   MNT_OPTS="$2"; shift 2 ;;
         --user)       SVC_USER="$2"; shift 2 ;;
         -h|--help)    grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "알 수 없는 옵션: $1"; exit 1 ;;
@@ -112,6 +138,164 @@ for c in python3 tar openssl; do
     command -v "$c" >/dev/null || { err "$c 필요 — 설치 후 재시도"; exit 1; }
 done
 
+# ── 관리 store 위치 — 마운트 후보 제시 + 전제 검사 ────────────────────────────
+#   `CimsRuntimeMount` 이 설정되면 OAM 은 기동 **전에** 그 경로가 실제 마운트인지 확인하고
+#   아니면 기동을 거부한다(oam_app._assert_runtime_mount → exit 3, oam_ha.md §4.3). 그 거부가
+#   설치 **후**에 일어나면 "부트스트랩은 끝났는데 콘솔이 없는" 상태가 되고, 설정을 고칠 통로가
+#   그 콘솔이라 되돌릴 수도 없다. 그래서 같은 조건을 **설치 전에** 여기서 본다.
+
+# /proc/mounts 의 실제 마운트 후보 — 의사(pseudo) 파일시스템·루트 제외. 네트워크 파일시스템
+# (NAS)을 먼저 보여준다: 공유 store 의 정상 구성이기 때문이다.
+_store_mount_candidates() {
+    local dev tgt fs rest net="" oth=""
+    while read -r dev tgt fs rest; do
+        [[ "$tgt" == "/" ]] && continue
+        case "$fs" in
+            proc|sysfs|devtmpfs|devpts|tmpfs|securityfs|pstore|bpf) continue ;;
+            debugfs|tracefs|mqueue|hugetlbfs|configfs|fusectl|efivarfs) continue ;;
+            autofs|binfmt_misc|squashfs|overlay|ramfs|rpc_pipefs|rootfs) continue ;;
+            selinuxfs|cgroup|cgroup2|fuse.snapfuse|fuse.portal|fuse.gvfsd-fuse) continue ;;
+        esac
+        case "$fs" in
+            nfs|nfs4|cifs|smb3|smbfs|glusterfs|ceph|lustre|beegfs|fuse.sshfs)
+                net+="    $tgt ($fs)"$'\n' ;;
+            *)  oth+="    $tgt ($fs)"$'\n' ;;
+        esac
+    done < /proc/mounts
+    printf '%s%s' "$net" "$oth"
+}
+
+# 마운트 원본에서 **파일시스템만** 유도한다.
+#   `nas.example:/export/cims` → nfs4,  `//nas/cims` → cifs
+# **마운트 지점은 유도하지 않는다.** 서버의 export 경로와 이 노드에 붙일 위치는 무관하다
+# (실측: export 가 `/home/<user>/NAS` 같은 경로인데 그걸 지점으로 쓰면 cims-priv 의 보호 경로 규칙에
+#  걸려 `/home/*` 는 거부된다). 지점은 따로 받고 기본값을 제시한다.
+DEFAULT_MNT_TARGET=/mnt/cims
+# 선택 가능한 파일시스템 — `cims-priv valid_fstype` 의 허용 목록과 같아야 한다.
+MNT_FSTYPE_CHOICES="nfs4/nfs/cifs/ext4/ext3/xfs/btrfs"
+mount_fstype_from_src() {
+    case "$1" in
+        //*/*)  echo cifs ;;
+        *:/*)   echo nfs4 ;;
+        *)      return 1 ;;
+    esac
+}
+
+# 마운트 지점이 이미 붙어 있는가 (/proc/mounts 와 **정확히 일치**).
+store_is_mounted() {
+    awk -v m="${1%/}" '$2 == m { f = 1 } END { exit !f }' /proc/mounts 2>/dev/null
+}
+
+# 실제 마운트 — **agent 의 마운트 관리와 같은 엔진**(`cims-priv mount-add`)을 쓴다.
+#   그쪽이 fstab idempotent 갱신(`# cims-managed` 태그) · 네트워크 FS 의 `_netdev,nofail`
+#   강제 · NFS/CIFS 클라이언트 vendor deb offline 설치 · mkdir · mount 를 이미 다 한다.
+#   여기서 규칙을 다시 쓰면 두 구현이 갈라진다(한쪽만 고친 것이 반대편에서 재발).
+#   cims-priv 는 agent tarball 안에 있으므로 필요한 만큼만 임시로 펼쳐 실행한다.
+# $1=fstype $2=source $3=target $4=options
+store_mount_now() {
+    local fstype="$1" source="$2" target="$3" opts="${4:-defaults}"
+    [[ -n "$AGT_TAR" && -f "$AGT_TAR" ]] || {
+        err "agent tarball 을 찾을 수 없어 마운트를 수행할 수 없습니다 (packages/agent-*.tar.gz)"
+        return 1
+    }
+    local tmp
+    tmp="$(mktemp -d)"
+    # bin(cims-priv) + lib(pkgstate.sh: dpkg 직렬화) + vendor(오프라인 FS 클라이언트) + pkg.json
+    if ! tar xzf "$AGT_TAR" -C "$tmp" \
+            agent/bin agent/lib agent/vendor agent/pkg.json 2>/dev/null; then
+        # 구 tarball 레이아웃 대비 — 최소한 bin/lib 만이라도 (vendor 없으면 클라이언트 기설치 전제)
+        tar xzf "$AGT_TAR" -C "$tmp" agent/bin agent/lib 2>/dev/null || {
+            err "agent tarball 전개 실패 — 마운트 수행 불가"; rm -rf "$tmp"; return 1; }
+    fi
+    info "마운트 수행: $source → $target ($fstype,$opts + _netdev,nofail 자동)"
+    if bash "$tmp/agent/bin/cims-priv" mount-add "$fstype" "$source" "$target" "$opts"; then
+        rm -rf "$tmp"
+        store_is_mounted "$target" && return 0
+        err "mount-add 는 성공했는데 $target 이 마운트로 보이지 않습니다 — findmnt 로 확인하세요"
+        return 1
+    fi
+    rm -rf "$tmp"
+    err "마운트 실패 — fstab 항목은 남습니다(nofail 이라 부팅에는 영향 없음)."
+    # **원본 경로 오타를 여기서 알려준다.** 서버가 주는 이유("No such file or directory")만으로는
+    # 무엇이 없는지 알 수 없다 — 실제 export 목록을 보여주면 바로 고칠 수 있다(실측: export 는
+    # export 경로가 아닌 값을 원본으로 적어 실패). nfs 클라이언트는 위 mount-add 가
+    # 이미 설치했으므로 showmount 가 여기서는 쓸 수 있다.
+    case "$fstype" in
+        nfs|nfs4)
+            local _h="${source%%:*}"
+            if command -v showmount >/dev/null 2>&1 && [[ -n "$_h" && "$_h" != "$source" ]]; then
+                err "  $_h 가 실제로 export 하는 경로:"
+                showmount -e "$_h" 2>&1 | sed 's/^/    /' >&2 \
+                    || err "    (조회 실패 — 서버 주소·방화벽·nfs-server 상태 확인)"
+                err "  → 원본을 위 목록의 경로로 맞추세요 (예: $_h:<위 경로>)."
+            fi
+            ;;
+    esac
+    return 1
+}
+
+# 전제 검사. $1=마운트 지점 $2=store 경로 $3=1 이면 err/0 이면 warn 으로 출력.
+# 반환 0=사용 가능, 1=불가 (중단 여부는 호출자가 결정 — 대화식은 재입력, 옵션은 중단).
+store_mount_check() {
+    local mp="${1%/}" sd="${2%/}" as_err="${3:-1}"
+    local -a probs=() warns=()
+    local m probe_dir opts
+    # 원인이 겹치면 메시지가 서로를 가린다(마운트가 없으면 쓰기 실패·fstab 부재는 당연한
+    # 결과다). 그래서 **선행 조건이 깨지면 거기서 멈추고** 그것만 보고한다.
+    _say() {
+        for m in "$@"; do
+            if [[ "$as_err" == "1" ]]; then err "$m"; else warn "$m"; fi
+        done
+    }
+
+    # ① 형식 — 절대경로, '..' 불가.
+    if [[ "$mp" != /* || "$mp" == *".."* ]]; then
+        _say "마운트 지점은 절대경로여야 하고 '..' 를 포함할 수 없습니다: $mp"
+        return 1
+    fi
+    # ② /proc/mounts 와 **정확히 일치**하는 마운트인가. 하위 디렉터리(…/oam_store 같은)를
+    #    지정하면 mount guard 가 기동을 거부한다 — 실측 사고.
+    if ! store_is_mounted "$mp"; then
+        _say "'$mp' 가 마운트되지 않았습니다. 현재 마운트:
+$(_store_mount_candidates)"
+        return 1
+    fi
+    # ③ store 경로는 마운트 하위여야 한다 (guard 가 같은 조건을 본다). 어긋나면 아래 쓰기
+    #    확인의 대상 경로 자체가 무의미하므로 여기서 멈춘다.
+    if [[ -n "$sd" && "$sd" != "$mp" && "$sd" != "$mp"/* ]]; then
+        _say "관리 store 경로가 마운트 하위가 아닙니다: $sd (마운트 $mp) — OAM 이 기동을 거부합니다."
+        return 1
+    fi
+    # ④ 서비스 계정이 쓸 수 있는가. 존재하는 최상위 조상에서 확인한다 — OAM 은 그 아래를
+    #    makedirs 로 만든다. 못 쓰면 store 생성 실패로 기동에 실패한다(공유 마운트 구성에서는
+    #    노드 로컬 폴백을 하지 않는다 — file_store.runtime_root).
+    probe_dir="${sd:-$mp}"
+    while [[ "$probe_dir" != "$mp" && ! -d "$probe_dir" ]]; do
+        probe_dir="$(dirname "$probe_dir")"
+    done
+    if ! runuser -u "$SVC_USER" -- /bin/sh -c \
+            'touch "$1" 2>/dev/null && rm -f "$1"' sh \
+            "$probe_dir/.cims-store-write-test.$$" 2>/dev/null; then
+        probs+=("서비스 계정 '$SVC_USER' 이 '$probe_dir' 에 쓸 수 없습니다 — NAS export 권한/소유 uid 를 맞추세요.")
+    fi
+    # ⑤ fstab 영속 — 재부팅 후 마운트가 없으면 그때 OAM 이 기동을 거부한다. 치명은 아니지만
+    #    조용히 두면 다음 재부팅에 콘솔을 잃으므로 경고한다.
+    if ! awk -v m="$mp" '!/^[[:space:]]*#/ && $2 == m { f = 1 } END { exit !f }' \
+            /etc/fstab 2>/dev/null; then
+        warns+=("'$mp' 가 /etc/fstab 에 없습니다 — 재부팅하면 마운트가 없고 OAM 이 기동을 거부합니다. '_netdev,nofail' 로 영속화하세요.")
+    else
+        opts=$(awk -v m="$mp" '!/^[[:space:]]*#/ && $2 == m { print $4; exit }' /etc/fstab 2>/dev/null)
+        case ",$opts," in
+            *,nofail,*) : ;;
+            *) warns+=("fstab 의 '$mp' 옵션에 nofail 이 없습니다 (${opts:-?}) — NAS 가 늦으면 부팅이 지연/실패할 수 있습니다. '_netdev,nofail' 권장.") ;;
+        esac
+    fi
+
+    if (( ${#warns[@]} )); then for m in "${warns[@]}"; do warn "$m"; done; fi
+    if (( ${#probs[@]} )); then _say "${probs[@]}"; return 1; fi
+    return 0
+}
+
 # ── 대화식 초기 설정 (tty + --batch 미지정 시) ────────────────────
 #    각 항목은 명령행 옵션으로 지정했으면 건너뛴다.
 PORT_GIVEN=0; PREFIX_GIVEN=0
@@ -124,14 +308,14 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     echo "── CIMS base 초기 설정 (Enter = 기본값) ─────────────────────"
     # [1] 설치 경로
     if [[ $PREFIX_GIVEN -eq 0 ]]; then
-        read -r -p "  [1/6] 설치 경로 [$PREFIX]: " _in
+        read -r -p "  [1/7] 설치 경로 [$PREFIX]: " _in
         [[ -n "$_in" ]] && PREFIX="$_in"
     fi
     # [2] OAM bind 포트 — OAM 이 실제 listen(비root → 1024~65535). 브라우저는 https://<IP>:<포트>.
     #     (443 포트 생략 접속은 시스템/인프라의 포트 redirect 기능으로 별도 — 부트스트랩 영역 아님)
     if [[ $PORT_GIVEN -eq 0 ]]; then
         while :; do
-            read -r -p "  [2/6] OAM bind 포트 [$PORT]: " _in
+            read -r -p "  [2/7] OAM bind 포트 [$PORT]: " _in
             [[ -z "$_in" ]] && break
             if [[ "$_in" =~ ^[0-9]+$ ]] && (( _in >= 1024 && _in <= 65535 )); then
                 PORT="$_in"; break
@@ -142,7 +326,7 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     # [3] 서버 명 (이 OAM 호스트의 표시 이름)
     if [[ -z "$SERVER_NAME" ]]; then
         _name_def=$(hostname -s 2>/dev/null || hostname)
-        read -r -p "  [3/6] 서버 명 [$_name_def]: " _in
+        read -r -p "  [3/7] 서버 명 [$_name_def]: " _in
         SERVER_NAME="${_in:-$_name_def}"
     fi
     # [4] 관리(mgmt) IP — agent↔OAM 통신 기준. 후보 IP 제시.
@@ -151,21 +335,58 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
         [[ -z "$_cands" ]] && _cands=$(hostname -I 2>/dev/null)
         _ip_def=$(echo $_cands | awk '{print $1}')
         echo "        후보 IP: ${_cands:-(감지 실패 — 직접 입력)}"
-        read -r -p "  [4/6] 관리(mgmt) IP [${_ip_def:-직접입력}]: " _in
+        read -r -p "  [4/7] 관리(mgmt) IP [${_ip_def:-직접입력}]: " _in
         MGMT_IP="${_in:-$_ip_def}"
     fi
     # [5] admin 비밀번호 최초 등록 (필수 — 미입력 시 반복)
     if [[ -z "$ADMIN_PASS" ]]; then
         while :; do
-            read -r -s -p "  [5/6] admin 비밀번호 (최초 등록, 4자 이상): " _p1; echo
+            read -r -s -p "  [5/7] admin 비밀번호 (최초 등록, 4자 이상): " _p1; echo
             if [[ ${#_p1} -lt 4 ]]; then echo "      4자 이상 입력하세요"; continue; fi
             read -r -s -p "        비밀번호 확인: " _p2; echo
             [[ "$_p1" == "$_p2" ]] && { ADMIN_PASS="$_p1"; break; }
             echo "      일치하지 않습니다 — 다시 입력"
         done
     fi
-    # [6] 로컬 agent 자동 설치
-    read -r -p "  [6/6] 이 서버의 agent 자동 설치/기동 [Y/n]: " _in
+    # [6] 공유 스토리지 — 원본 + 붙일 위치. 파일시스템·옵션·store 경로는 유도한다.
+    #     지점을 원본에서 유도하지 않는 이유는 위 헬퍼 주석 참조(서버 export 경로와 무관).
+    #     비우면 노드 로컬. 옵션으로 이미 지정했으면 묻지 않는다.
+    if [[ -z "$MNT_SRC" && -z "$MNT_TARGET" && -z "$STORE_MOUNT" && -z "$STORE_DIR" ]]; then
+        while :; do
+            read -r -p "  [6/7] 공유 스토리지 (예: nas.example:/export/cims) [Enter=노드 로컬]: " _in
+            [[ -z "$_in" ]] && break
+            if ! _fsdef=$(mount_fstype_from_src "$_in"); then
+                echo "        형식을 알 수 없습니다 — 'host:/export경로' 또는 '//host/share' 로"
+                echo "        입력하거나, Enter 로 노드 로컬을 선택하세요."
+                continue
+            fi
+            read -r -p "        이 서버에 붙일 위치 [$DEFAULT_MNT_TARGET]: " _mp
+            _mp="${_mp:-$DEFAULT_MNT_TARGET}"; _mp="${_mp%/}"
+            if [[ "$_mp" != /* || "$_mp" == *".."* ]]; then
+                echo "        절대경로여야 하고 '..' 는 쓸 수 없습니다."
+                continue
+            fi
+            # 파일시스템 — 원본 형태에서 유도한 값이 기본(Enter 로 수락)이지만 고를 수 있다.
+            # 허용 목록은 `cims-priv valid_fstype` 과 같아야 한다 — 여기서 걸러야 mount-add
+            # 단계까지 가서 실패하지 않는다.
+            while :; do
+                read -r -p "        파일시스템 [$_fsdef] ($MNT_FSTYPE_CHOICES): " _fs
+                _fs="${_fs:-$_fsdef}"
+                case "$_fs" in
+                    nfs4|nfs|cifs|ext4|ext3|xfs|btrfs) break ;;
+                    *) echo "        지원하지 않는 파일시스템: $_fs ($MNT_FSTYPE_CHOICES)" ;;
+                esac
+            done
+            MNT_SRC="$_in"; MNT_FSTYPE="$_fs"; MNT_TARGET="$_mp"
+            STORE_MOUNT="$_mp"; STORE_DIR="$_mp/runtime"
+            echo "        → $MNT_SRC 를 $MNT_TARGET 에 $MNT_FSTYPE 로 붙이고,"
+            echo "          관리 store 를 $STORE_DIR, 서비스 로그를 $MNT_TARGET/service_log 에 둡니다."
+            echo "          (시크릿·인증서는 항상 노드 로컬. 옵션은 defaults+_netdev,nofail)"
+            break
+        done
+    fi
+    # [7] 로컬 agent 자동 설치
+    read -r -p "  [7/7] 이 서버의 agent 자동 설치/기동 [Y/n]: " _in
     [[ "$_in" == n* || "$_in" == N* ]] && DO_AGENT=0
     echo ""
     echo "── 설치 요약 ────────────────────────────────────────────────"
@@ -175,6 +396,16 @@ if [[ $BATCH -eq 0 ]] && { [[ -t 0 ]] || [[ -n "${CIMS_INSTALL_FORCE_INTERACTIVE
     echo "    관리(mgmt) IP : ${MGMT_IP:-(미지정)}"
     echo "    admin 비밀번호: (입력됨)"
     echo "    서비스 사용자 : $SVC_USER"
+    if [[ -n "$MNT_TARGET" ]]; then
+        if [[ -n "$MNT_SRC" ]]; then
+            echo "    마운트        : $MNT_SRC → $MNT_TARGET ($MNT_FSTYPE,${MNT_OPTS:-defaults})"
+        else
+            echo "    마운트        : $MNT_TARGET (이미 마운트됨 — 그대로 사용)"
+        fi
+    else
+        echo "    마운트        : 없음"
+    fi
+    echo "    관리 store    : ${STORE_DIR:-(노드 로컬)}"
     echo "    로컬 agent    : $([[ $DO_AGENT -eq 1 ]] && echo 설치 || echo 생략)"
     read -r -p "  진행할까요? [Y/n]: " _in
     [[ "$_in" == n* || "$_in" == N* ]] && { echo "중단"; exit 1; }
@@ -212,6 +443,71 @@ done
 _ver() { basename "$1" .tar.gz | sed 's/^[a-z]*-//'; }
 OAM_VER=$(_ver "$OAM_TAR"); AGT_VER=$(_ver "$AGT_TAR")
 info "설치 구성: oam-base $OAM_VER (console 동봉) / agent $AGT_VER → $PREFIX (HTTPS :$PORT)"
+
+# ── 마운트 생성 → 관리 store 전제 검사 (패키지 전개 **전**) ──────────────────
+#   마운트를 "미리 해두라" 고 요구하지 않는다. 요구하면 `CimsRuntimeMount` 만 기록된 채
+#   끝나고, OAM 은 mount guard 로 기동을 거부하며(oam_ha.md §4.3) 그 설정을 고칠 통로가
+#   바로 그 콘솔이라 되돌릴 수도 없다. 여기서 붙인다. 전개 전이라 실패해도 설치 흔적이
+#   남지 않는다(fstab 항목은 nofail 이라 무해하고, 고쳐서 다시 실행하면 그대로 쓰인다).
+
+# 파일시스템은 원본에서 유도, 지점은 기본값 — 대화식과 플래그가 같은 규칙을 쓴다.
+if [[ -z "$MNT_TARGET" && -n "$MNT_SRC" ]]; then
+    MNT_TARGET="$DEFAULT_MNT_TARGET"
+fi
+if [[ -z "$MNT_FSTYPE" && -n "$MNT_SRC" ]]; then
+    MNT_FSTYPE=$(mount_fstype_from_src "$MNT_SRC" || echo nfs4)
+fi
+# `--runtime-mount` 만 준 경우 = 그 경로를 마운트 지점으로도 본다.
+if [[ -z "$MNT_TARGET" && -n "$STORE_MOUNT" ]]; then
+    MNT_TARGET="${STORE_MOUNT%/}"
+fi
+# `--mount-src` 만 준 경우 = store 도 그 하위에 둔다(흔한 경우가 옵션 하나로 끝나게).
+# 마운트만 하고 store 는 로컬로 두려면 `--mount` 를 쓴다(--runtime-mount 를 주지 않는다).
+if [[ -z "$STORE_MOUNT" && -n "$MNT_SRC" && -z "$MNT_TARGET_EXPLICIT" ]]; then
+    STORE_MOUNT="$MNT_TARGET"
+fi
+
+# ① 마운트 — store 위치와 무관하게 요청됐으면 붙인다.
+if [[ -n "$MNT_TARGET" ]]; then
+    if store_is_mounted "$MNT_TARGET"; then
+        ok "마운트 확인: $MNT_TARGET (이미 붙어 있음)"
+    else
+        if [[ -z "$MNT_SRC" ]]; then
+            err "'$MNT_TARGET' 이 마운트되지 않았고 마운트 원본도 없습니다."
+            err "  → --mount-src <원본> [--mount-fstype nfs4] 로 지정하거나, 먼저 마운트한 뒤"
+            err "     다시 실행하세요."
+            exit 1
+        fi
+        store_mount_now "${MNT_FSTYPE:-nfs4}" "$MNT_SRC" \
+                        "$MNT_TARGET" "${MNT_OPTS:-defaults}" || {
+            err "마운트 실패 — 설치를 중단합니다(패키지 전개 전)."
+            exit 1
+        }
+        ok "마운트 완료: $MNT_SRC → $MNT_TARGET (fstab 영속)"
+    fi
+fi
+
+# ② 관리 store 를 마운트 하위에 두기로 했으면 전제를 검사한다.
+#   `--runtime-mount` 만 주면 store 경로가 노드 로컬로 남아 마운트 하위가 아니게 되고 guard
+#   가 기동을 거부한다 — 마운트 하위로 유도한다. 합류 모드는 store 경로를 peer 값으로
+#   계승하므로(`.join_params.runtime_dir`) 유도하지 않는다: peer 의 store 가 `<마운트>/runtime`
+#   이 아닐 수 있어 두 노드가 서로 다른 store 를 보게 된다.
+if [[ $JOIN -eq 0 && -n "$STORE_MOUNT" && -z "$STORE_DIR" ]]; then
+    STORE_DIR="${STORE_MOUNT%/}/runtime"
+fi
+if [[ $JOIN -eq 0 && -n "$STORE_MOUNT" ]]; then
+    # store 디렉터리를 만들고 서비스 계정 소유로 — OAM 은 비root 로 여기에 write 한다.
+    # 마운트 루트 자체의 소유권은 건드리지 않는다(NAS export 정책 존중).
+    mkdir -p "$STORE_DIR" 2>/dev/null || true
+    chown -R "$SVC_USER":"$(id -gn "$SVC_USER")" "$STORE_DIR" 2>/dev/null || true
+    store_mount_check "$STORE_MOUNT" "$STORE_DIR" 1 || {
+        err "관리 store 전제 미충족 — 설치를 중단합니다(패키지 전개 전)."
+        err "  NFS 라면 export 옵션(rw, no_root_squash 또는 anonuid/all_squash 로 '$SVC_USER'"
+        err "  uid 매핑)을 확인하세요. 마운트는 유지되므로 고친 뒤 다시 실행하면 됩니다."
+        exit 1
+    }
+    ok "관리 store: $STORE_DIR (마운트 $STORE_MOUNT) — 이관 없이 처음부터 이 경로로 동작"
+fi
 
 # ── 레이아웃 (버전 단위 설치 + current 심볼릭 — agent 배포 체계와 동일, 모듈은 modules/ 하위) ──
 MODULES_DIR="$PREFIX/modules"
@@ -327,6 +623,26 @@ with open(os.path.join(sd, '.join_params'), 'w') as f:
 print(f"  신원 전개 완료: {sd} (jwt_secret / ca / agent_mtls)")
 PYJOIN
     ok "그룹 공통 신원 수령 완료 — 이 노드는 peer 와 같은 토큰·CA 를 사용"
+    # 합류 노드의 실효 store 위치 = 명시 옵션 > peer 계승값. peer 가 공유 store 를 쓰면
+    # **이 노드에도 같은 경로가 마운트돼 있어야** 절체가 성립하므로 여기서 확인한다.
+    # 합류 노드는 OAM 을 기동하지 않으므로(DO_START=0) 미충족이 즉시 사고는 아니다 —
+    # 설치는 계속하고 경고만 남긴다(마운트를 붙이면 그대로 사용 가능).
+    _jp="$RUNTIME_DIR/_secrets/.join_params"
+    _eff_mnt="$STORE_MOUNT"; _eff_dir="$STORE_DIR"
+    for _k in mount dir; do
+        [[ "$_k" == mount && -n "$_eff_mnt" ]] && continue
+        [[ "$_k" == dir   && -n "$_eff_dir" ]] && continue
+        _v=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('runtime_'+sys.argv[2]) or '')" \
+             "$_jp" "$_k" 2>/dev/null || true)
+        [[ "$_k" == mount ]] && _eff_mnt="$_v" || _eff_dir="$_v"
+    done
+    if [[ -n "$_eff_mnt" ]]; then
+        if store_mount_check "$_eff_mnt" "$_eff_dir" 0; then
+            ok "공유 store 확인: $_eff_dir (마운트 $_eff_mnt)"
+        else
+            warn "이 노드는 아직 공유 store 를 쓸 수 없습니다 — 마운트를 붙인 뒤 모듈을 기동하세요. 그때까지 승격 자격에서 제외됩니다."
+        fi
+    fi
     # 합류 노드는 OAM 을 기동하지 않는다 — cold standby 이고, 승격 시 agent 의 reconcile 이
     # 볼륨 인수 후 기동한다. 여기서 띄우면 마운트 없이 떠 로컬 store 를 만들 수 있다.
     DO_START=0
@@ -354,7 +670,7 @@ fi
 chmod 600 "$JWT_SECRET_FILE"
 PY=python3 OAM_ROOT="$OAM_ROOT" RUNTIME_DIR="$RUNTIME_DIR" PORT="$PORT" \
 JWT_SECRET="$(cat "$JWT_SECRET_FILE")" MGMT_IP="$MGMT_IP" \
-STORE_DIR="$STORE_DIR" STORE_MOUNT="$STORE_MOUNT" JOIN="$JOIN" \
+STORE_DIR="$STORE_DIR" STORE_MOUNT="$STORE_MOUNT" MNT_TARGET="$MNT_TARGET" JOIN="$JOIN" \
 JOIN_PARAMS_FILE="$SECRETS_DIR/.join_params" \
 ADMIN_PASS="$ADMIN_PASS" OAM_OVERLAY_FILE="$OAM_OVERLAY_FILE" python3 - <<'PYEOF'
 import hashlib, json, os
@@ -402,11 +718,15 @@ mount = (os.environ.get('STORE_MOUNT') or '').strip() or (jp.get('runtime_mount'
 #   화면은 실제 적용값이 기준이어야 하므로, 설치 시점에 정해 overlay 에 남긴다.
 #   기준은 store 가 아니라 **마운트**다 (oam_ha.md §4.1) — 로그는 store 가 아니라
 #   마운트에 붙는 append-only 관측 데이터라, store 이관·스냅샷에 딸려가면 안 된다.
-#   마운트를 모르는 첫 부트스트랩(붙이는 수단이 이 OAM 의 콘솔이다)에서는 노드 로컬이고,
-#   마운트 후에는 이관이 공유 경로로 바꾼다(`_migrate_shared_store`).
+#   그래서 기준은 `MNT_TARGET`(설치가 붙인/확인한 마운트)이다 — store 를 노드 로컬로 두고
+#   마운트만 붙인 구성(`--mount` 만 지정)에서도 로그는 마운트를 따라간다. store 의 마운트
+#   (`STORE_MOUNT`)나 peer 계승값은 그 다음 순위.
+#   마운트가 아예 없는 부트스트랩에서는 노드 로컬이고, 나중에 마운트를 붙이면 이관이
+#   공유 경로로 바꾼다(`_migrate_shared_store`).
+log_mount = (os.environ.get('MNT_TARGET') or '').strip() or mount
 if not (d.get('ServiceLogging') or {}).get('Dir'):
     d.setdefault('ServiceLogging', {})['Dir'] = os.path.join(
-        mount or os.environ['RUNTIME_DIR'], 'service_log')
+        log_mount or os.environ['RUNTIME_DIR'], 'service_log')
 d['CimsRuntimeDir'] = store
 if mount:
     d['CimsRuntimeMount'] = mount       # mount guard — 마운트 없으면 기동 거부
@@ -453,15 +773,41 @@ ovf = os.environ.get('OAM_OVERLAY_FILE')
 if ovf:
     json.dump(ov, open(ovf, 'w'), ensure_ascii=False)
 
-# ── 첫 기동용 overlay 를 **패키지 파일이 아니라 config.json 에** 쓴다 ──────────
-#   `oam.json` 은 패키지 기본값이고 노드 값은 overlay(config.json)가 정한다 — 그것이
-#   콘솔 설치 경로가 쓰는 메커니즘이고 `load_config()` 도 그렇게 병합한다. 부트스트랩만
-#   패키지 파일을 직접 고치면 **같은 버전인데 노드마다 내용이 달라진다**(실측: 부트스트랩
-#   노드는 정상, 콘솔 설치 노드는 패키지 기본값 그대로 → 빌드 머신 경로로 기동하다 크래시).
-#   두 경로가 같은 메커니즘을 쓰도록 여기서도 overlay 로만 쓴다.
-json.dump(ov, open(os.path.join(os.environ['OAM_ROOT'], 'oam', 'config.json'), 'w'),
+# ── 첫 기동용 설정을 **패키지 파일이 아니라 config.json 에** 쓴다 ──────────────
+#   `oam.json` 은 패키지 기본값이고 노드 값은 config.json 이 정한다 — 그것이 콘솔 설치
+#   경로가 쓰는 메커니즘이고 `load_config()` 도 그렇게 병합한다. 부트스트랩만 패키지 파일을
+#   직접 고치면 **같은 버전인데 노드마다 내용이 달라진다**(실측: 부트스트랩 노드는 정상,
+#   콘솔 설치 노드는 패키지 기본값 그대로 → 빌드 머신 경로로 기동하다 크래시).
+#
+#   **형태도 agent 가 쓰는 것과 같아야 한다 = 실체화본**(템플릿 기본값 병합 + overlay).
+#   agent 의 install/update_config 는 OAM 이 `_materialize_deploy_config` 로 만든 실체화본을
+#   기록하고, 드리프트 판정(`deploy_config_hash`)도 그 형태를 기준으로 한다. 부트스트랩만
+#   overlay 원본을 쓰면 두 형태가 영구히 어긋나 **설치 직후부터 A-PRC-003(설정 불일치)이
+#   뜬다** — 실측: overlay 10키(hash 609e2a84ca4e) vs 실체화본 13키(eff2bacec6c4), 차이는
+#   템플릿 기본값 `Server.Role`·`ServiceLogging.{Alert,Event}RetainDays`.
+#   여기서 같은 형태로 쓰면 어긋날 일이 없어진다(정합 job·스윕으로 뒤늦게 맞출 필요 없음).
+#   병합 규칙은 OAM `_template_defaults` 와 동일: 빈 default(None/''/[])는 '미설정'
+#   시맨틱이라 제외하고, overlay 의 빈 값은 default 를 지우지 않는다.
+#   **배포 레코드에는 계속 sparse overlay(`ov`)만 보낸다** — 레코드는 운영자 의도의 SoT 이고
+#   템플릿 기본값이 굳으면 다음 버전의 기본값 변경을 따라가지 못한다.
+eff = {}
+_tplp = os.path.join(os.environ['OAM_ROOT'], 'oam', 'config', 'config_template.json')
+try:
+    _t = json.load(open(_tplp))
+    for _s in (_t.get('sections') or []):
+        for _f in (_s.get('fields') or []):
+            _k, _dv = _f.get('key'), _f.get('default')
+            if _k and _dv is not None and _dv != '' and _dv != []:
+                eff[_k] = _dv
+except Exception as _e:
+    print(f'  ⚠ config_template 읽기 실패({_e}) — overlay 만 기록(설정 불일치 알람 가능)')
+for _k, _v in ov.items():
+    if _v is None or _v == '':
+        continue
+    eff[_k] = _v
+json.dump(eff, open(os.path.join(os.environ['OAM_ROOT'], 'oam', 'config.json'), 'w'),
           ensure_ascii=False, indent=2)
-print('  config.json (deployment overlay) 기록 — oam.json 은 패키지 기본값 유지')
+print(f'  config.json 기록 — 실체화본 {len(eff)}키 (템플릿 기본값 + 노드 overlay {len(ov)}키)')
 PYEOF
 
 # ── uninstall 스크립트 생성 (install 의 대칭 — 언제든 단독 실행 가능) ──────

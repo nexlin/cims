@@ -9,6 +9,7 @@ import {
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 import StringListInput from './StringListInput'
 import { ObjectListEditor } from './ObjectListEditor'
+import { haGroupsApi } from '../../api/ha_groups'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -294,7 +295,13 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                     <SectionBlock key={sec.key} section={sec} values={values}
                       initial={initial} changed={changed}
                       onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
-                      onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))} />
+                      onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
+                      footer={sec.key === 'store'
+                        ? <StoreMigrateFooter groupId={ha?.group_id ?? null}
+                            mountPoint={String(values['CimsRuntimeMount'] ?? '')}
+                            dirty={changed.has('CimsRuntimeMount') || changed.has('CimsRuntimeDir')}
+                            onDone={onDone} />
+                        : undefined} />
                   ))}
                   {isPending ? (
                     <div style={{
@@ -477,7 +484,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   )
 }
 
-export function SectionBlock({ section, values, initial, changed, onChange, onReset }: {
+export function SectionBlock({ section, values, initial, changed, onChange, onReset, footer }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -489,6 +496,8 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   changed: Set<string>
   onChange: (key: string, v: FieldValue) => void
   onReset: (key: string) => void
+  /** 섹션 하단 액션 — 저장만으로는 적용되지 않는 값(관리 store 경로 등)의 정규 경로. */
+  footer?: React.ReactNode
 }) {
   // 인프라 section 은 기본 접힘 (헤더 클릭으로 펼침) — 모든 필드는 노출.
   const [collapsed, setCollapsed] = useState(!!section.hidden)
@@ -576,6 +585,73 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
               </div>
             </div>
           ))}
+          {footer}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 관리 store 섹션 하단 — 경로 변경의 정규 경로.
+ *
+ * `CimsRuntimeMount`/`CimsRuntimeDir` 은 **저장으로 적용되는 키가 아니다.** 저장하면
+ * `update_config` 만 돌아 경로만 바뀌고 데이터는 따라가지 않는다 → 새 경로에 빈 store 가
+ * 생기거나(마운트 없으면) mount guard 가 기동을 거부한다. 데이터를 옮기는 것은 이관
+ * (`migrate_oam_store` job: 정지 → 복사 → 기록 → 기동)뿐이므로 그 버튼을 여기 둔다.
+ * 최초 지정은 부트스트랩 설치가 담당하므로(oam_ha.md §9.4) 보통 이 버튼은 쓰지 않는다.
+ */
+export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
+  groupId: number | null
+  mountPoint: string
+  dirty: boolean
+  onDone?: () => void | Promise<void>
+}) {
+  const { show } = useToast()
+  const [busy, setBusy] = useState(false)
+  const mp = mountPoint.trim().replace(/\/+$/, '')
+
+  async function migrate() {
+    if (!groupId) return
+    if (!window.confirm(
+        `관리 데이터를 이 경로로 이관합니다.\n\n  ${mp}/runtime\n\n` +
+        `OAM 이 정지 → 복사 → 재기동되므로 콘솔이 30초 내외 끊깁니다.\n` +
+        `대상에 이전 데이터가 있으면 .stale-<시각> 으로 보관하고 덮어씁니다.\n\n진행할까요?`)) return
+    setBusy(true)
+    try {
+      const r = await haGroupsApi.migrateSharedStore(groupId, mp)
+      show(`관리 store 이관 개시 — ${r.detail || r.runtime_dir}`, 'ok')
+      await onDone?.()
+    } catch (e) { show((e as Error).message, 'err') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div style={{
+      marginTop: 12, padding: '8px 10px', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
+      background: '#fff8e1', border: '1px solid #ffe08a',
+    }}>
+      <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
+      않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
+      거부합니다. 이관은 정지 → 복사 → 기동을 한 번에 처리합니다. 이 값은 <b>멤버 간
+      동일해야</b> 하므로 공통 설정입니다 — 최초 지정은 부트스트랩 설치가 담당합니다.
+      {groupId ? (
+        <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn--sm btn--primary" disabled={busy || !mp}
+                  onClick={migrate}
+                  title="현재 입력된 마운트 지점으로 관리 store 를 이관 (콘솔 30초 단절)">
+            {busy ? '이관 요청 중…' : `⇢ ${mp || '(마운트 지점)'} 으로 이관`}
+          </button>
+          {dirty && (
+            <span style={{ color: '#b26a00' }}>
+              편집한 값이 있습니다 — 저장 대신 이 버튼을 쓰세요.
+            </span>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
+          이관은 HA 그룹 멤버에서만 실행할 수 있습니다 (이관 대상 노드 선정이 그룹 기준).
+          단일 노드는 부트스트랩 재설치 또는 그룹 편성 후 실행하세요.
         </div>
       )}
     </div>

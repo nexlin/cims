@@ -229,13 +229,43 @@
       "scope": "service"
     },
     {
+      "key": "store",
+      "title": "관리 store",
+      "description": "관리 데이터(서버·그룹·배포·계정)·패키지 파일이 놓이는 위치. 공유 스토리지(NAS)에 두면 절체해도 같은 데이터를 본다. 경로 변경은 데이터 이동을 수반하므로 저장이 아니라 이관으로 한다 (docs/design/features/oam_ha.md §4·§9.4).",
+      "scope": "service",
+      "fields": [
+        {
+          "key": "CimsRuntimeDir",
+          "label": "런타임 store",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "file_store 루트. base 와 같은 경로를 본다 (ptt_index 등 서비스 인덱스)."
+        },
+        {
+          "key": "CimsRuntimeMount",
+          "label": "런타임 마운트 지점",
+          "type": "path",
+          "default": "",
+          "restart": true,
+          "help": "관리 store 가 공유 스토리지(NAS)에 있을 때의 마운트 지점. 단일 노드는 비움."
+        }
+      ]
+    },
+    {
       "key": "_infra",
       "title": "Infrastructure (내부 전용)",
       "description": "UI 비노출 인프라 값. 배포 시 base 가 주입(그룹 공통 신원·store 경로). csc 의 _infra 와 같은 관용.",
       "hidden": true,
       "groups": [
-        { "key": "secrets", "title": "시크릿" },
-        { "key": "paths", "title": "런타임 경로" }
+        {
+          "key": "secrets",
+          "title": "시크릿"
+        },
+        {
+          "key": "paths",
+          "title": "런타임 경로"
+        }
       ],
       "fields": [
         {
@@ -248,26 +278,6 @@
           "hidden": true,
           "restart": true,
           "help": "base 가 SoT — 배포 시 자동 주입. 게이트웨이 프록시 토큰 검증에 쓰인다."
-        },
-        {
-          "key": "CimsRuntimeDir",
-          "label": "런타임 store",
-          "group": "paths",
-          "type": "path",
-          "default": "",
-          "hidden": true,
-          "restart": true,
-          "help": "file_store 루트. base 와 같은 경로를 본다 (ptt_index 등 서비스 인덱스)."
-        },
-        {
-          "key": "CimsRuntimeMount",
-          "label": "런타임 마운트 지점",
-          "group": "paths",
-          "type": "path",
-          "default": "",
-          "hidden": true,
-          "restart": true,
-          "help": "관리 store 가 공유 스토리지(NAS)에 있을 때의 마운트 지점. 단일 노드는 비움."
         }
       ],
       "scope": "system"

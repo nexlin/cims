@@ -174,6 +174,46 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 - `ServiceLogging.Dir`(서비스 로그·alert 이력)은 지금처럼 같은 NAS 유지 — append-only 관측
   데이터라 두 노드가 동시에 써도 무해하다. 관리 store 와 성격이 다르다.
 
+#### 공유 store 는 **oam 모듈 설정이다** — 그룹은 읽기만 한다
+
+정본은 oam/oam-svc 배포설정의 `CimsRuntimeMount` 하나다. 그룹 레코드에 별도 선언을 두지
+않는다 — 같은 사실을 두 곳에 적으면 어긋나고, 어긋남을 막는 코드를 또 써야 한다.
+
+```text
+정본:  oam/oam-svc 배포설정 CimsRuntimeMount        ← 부트스트랩(설치 시) 또는 이관
+                    │
+        유도(_derived_shared_store)
+                    ↓
+판정:  그룹의 "이 모듈이 절체 대상인가" (requires_leader_lease 전제)
+        + ha.json services.<svc>.shared_store (agent 승격 preflight)
+```
+
+- **성립 조건**: 그룹에 배포된 oam/oam-svc 전부가 같은 비어있지 않은 `CimsRuntimeMount`.
+  값이 같다는 것만 본다 — 그 경로가 실제 마운트인지는 노드가 스스로 집행한다(mount
+  guard §4.3, agent 승격 preflight §4.2). heartbeat 관측까지 판정에 넣으면 보고가 잠깐
+  stale 해질 때마다 HA 편입이 흔들린다.
+- **`scope=service`(공통 설정)** 이다 — 멤버 간 반드시 동일해야 하는 값이므로 서버별 개별
+  설정으로 두면 안 된다(개별로 두면 한쪽만 바뀌어도 경고가 없고, 절체하면 다른 store 를 본다).
+  편집 창구는 **그룹 > 패키지 설정 > oam > 관리 store** 하나이고, R4 자동 교정이 ACTIVE 기준으로
+  STANDBY 를 맞춘다. `Packages.Dir`(store 파생)·`ServiceLogging.Dir`(마운트 파생)도 같은 이유로
+  공통이다. **서버 그룹 탭(시스템/서버 구성)에는 공유 store 화면이 없다** — 그 탭은 마운트·IP 처럼
+  노드별 자원만 다룬다.
+- **그룹 API 는 `shared_store` 를 저장하지 않는다.** GET 응답의 `shared_store` 는 읽기 전용
+  유도값이고, PUT 으로 보내면 400 `shared_store_not_group_scoped` 다. 경로 변경은 데이터
+  이동을 수반하므로 이관(§9.4)이 유일한 경로다.
+- **주입** — 두 번째 노드에 oam/oam-svc 를 설치하면 살아있는 OAM 의 값이 배포설정에
+  주입된다(`_materialize_deploy_config`, overlay 에 값이 없을 때만). store 경로 3종을
+  **함께** 준다:
+
+  | 키 | 빠뜨리면 |
+  |---|---|
+  | `CimsRuntimeDir` | 패키지 기본값으로 기동 (설치 시 409 로 차단) |
+  | `CimsRuntimeMount` | **그 노드의 mount guard 가 꺼진다** — 키가 없으면 검사를 건너뛰므로, 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를 만든다 |
+  | `Packages.Dir` | 패키지 `oam.json` 의 상대경로로 폴백해 **버전 디렉터리**를 본다 → 그 노드가 Active 가 되는 순간 `/agent-bundle.tar.gz` 404 (agent·모듈 설치/업그레이드 전면 불가) |
+
+  `Packages.Dir` 은 **템플릿에 선언된 모듈에만** 준다 — oam-svc 에는 없다(패키지 서빙은
+  base oam 만). 선언 없는 키를 심으면 설정화면에 유령 항목·드리프트가 된다.
+
 #### 경로 파생 규칙 — 무엇이 store 를 따라가고 무엇이 마운트에 붙는가
 
 경로 설정은 **하나도 독립 값이 아니다.** 전부 store 또는 마운트에서 유도되며, 유도 기준이
@@ -182,7 +222,12 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 | 키 | 파생 기준 | 마운트 있음 | 마운트 없음(부트스트랩 직후) |
 |---|---|---|---|
 | `Packages.Dir` | **store** — 패키지는 store 의 일부(§4.0) | `{CimsRuntimeDir}/pkg_files` | `{노드 로컬 store}/pkg_files` |
-| `ServiceLogging.Dir` | **마운트** — store 가 아님(위 항목) | `{CimsRuntimeMount}/service_log` | `{노드 로컬 runtime}/service_log` |
+| `ServiceLogging.Dir` | **마운트** — store 가 아님(위 항목) | `{마운트}/service_log` | `{노드 로컬 runtime}/service_log` |
+
+`ServiceLogging.Dir` 의 기준은 **실제 마운트**이지 store 의 마운트가 아니다 — 마운트만 붙이고
+관리 store 는 노드 로컬로 둔 구성(부트스트랩 `--mount` 만 지정)에서도 로그는 마운트를 따라간다.
+부트스트랩은 그래서 `CimsRuntimeMount`(= store 의 마운트, 없을 수 있음)가 아니라 붙인 마운트를
+기준으로 이 값을 정한다.
 
 - 파생값을 **저장은 한다**(콘솔이 실제 적용값을 그려야 하므로 — 폴백은 화면에 안 보인다).
   대신 **이관이 함께 갱신**한다(§9.2). 저장만 하고 갱신하지 않으면 원본(`CimsRuntimeDir`)만
@@ -882,7 +927,8 @@ sudo ./install.sh --join \
 
 1. 공유 store 마운트 확인 — 이 서버에 상대 노드와 **같은 경로**가 붙어 있어야 한다
    (콘솔 시스템/인프라 > 서버 > 마운트 관리 로 추가하면 fstab 에 영속)
-2. HA 그룹에 이 서버를 멤버로 추가 + **공유 store** 설정 (그룹 편집 → "공유 store")
+2. HA 그룹에 이 서버를 멤버로 추가 (공유 store 는 **설정하지 않는다** — 아래 3의
+   배포설정 `CimsRuntimeMount` 에서 유도된다)
 3. 이 서버에 `oam`/`oam-svc` 패키지 설치 — 배포설정에 그룹 공통 신원이 자동 주입된다(§5)
 4. 그룹 서비스 시작 → VIP 보유 노드에서만 OAM 이 뜬다
 5. 전 agent 를 VIP 로 재지정 — `POST /api/v1/agents/oam-url`(§8). 각 agent 가 도달 확인 후 전환
@@ -893,7 +939,7 @@ sudo ./install.sh --join \
 따라가지 않아 빈 콘솔이 되므로 **이관**이 필요하다. 이 작업은 콘솔 한 번의 조작으로 끝난다:
 
 ```text
-시스템 > 시스템/인프라 > (좌측 트리에서 시스템 선택) > 공유 store > 경로 입력 > [이 경로로 이관]
+시스템 > 시스템/인프라 > (그룹 선택) > 패키지 설정 > oam > 관리 store > [이 경로로 이관]
   → POST /api/v1/ha-groups/{id}/shared-store/migrate  {mount_point}
 ```
 
@@ -942,10 +988,84 @@ oam/oam-svc 배포설정 `CimsRuntimeDir` 이 그 마운트 하위가 아니면 
 절체 시 빈 콘솔이 되는데, 이는 정확히 과거 사고 상태다. 콘솔은 이 응답을 받으면 이관을
 권하고 동의 시 그대로 이어서 실행한다(막다른 골목을 만들지 않는다).
 
-**기본 경로는 "옵션 없는 install.sh + 콘솔 클릭"** 이다. 부트스트랩은 노드 로컬 store 로
-설치되고(옵션 불필요), 이중화는 나중에 콘솔에서 이 이관 한 번으로 전환한다 — 설치 절차에
-특별한 인자를 요구하지 않는다는 뜻이다. 처음부터 공유 마운트를 가리키고 싶으면
-`--runtime-mount`/`--runtime-dir` 도 있지만(§9.2) 필수가 아니다.
+**store 위치를 정하는 경로는 둘이고, 이관은 그중 하나다.**
+
+| | 언제 | 어떻게 | 결과 |
+|---|---|---|---|
+| **설치 시점** | 신규 설치 (마운트가 이미 있어도, 아직 없어도) | 부트스트랩이 두 가지를 순서대로 묻는다 (아래), 또는 `--mount*`/`--runtime-mount` | store·패키지·서비스 로그가 **처음부터** 그 하위. 이관 불필요 |
+| **이관** | 단일 노드로 운영 중이거나, NAS 를 나중에 붙였다 | 콘솔 `[이 경로로 이관]`(위 표) | 정지 → 복사 → 기동 (콘솔 30초 단절) |
+
+**설치 시점에 묻는 것은 두 줄이다** — 서버의 export 경로와, 이 노드에 붙일 위치.
+파일시스템·옵션·store 경로·로그 경로는 거기서 유도한다.
+
+```text
+[6/7] 공유 스토리지 (예: nas.example:/export/cims) [Enter=노드 로컬]:
+        이 서버에 붙일 위치 [/mnt/cims]:                          ← 보통 Enter
+        파일시스템 [nfs4] (nfs4/nfs/cifs/ext4/ext3/xfs/btrfs):    ← 유도값이 기본, 고를 수 있다
+        → … 를 /mnt/cims 에 nfs4 로 붙이고, 관리 store 를 /mnt/cims/runtime,
+          서비스 로그를 /mnt/cims/service_log 에 둡니다.
+```
+
+파일시스템 허용 목록은 `cims-priv valid_fstype` 과 같고 프롬프트에서 검증한다 — 오타가
+`mount-add` 까지 내려가 실패하지 않게. 기본값은 원본 형태에서 유도한다.
+
+| 유도 | 규칙 |
+|---|---|
+| 파일시스템 **기본값** | `host:/path` → `nfs4`, `//host/share` → `cifs` (변경 가능) |
+| 마운트 옵션 | 항상 `defaults` + `_netdev,nofail`(cims-priv 가 강제) |
+| `CimsRuntimeDir` | `{붙일 위치}/runtime` |
+| `Packages.Dir` | `{store}/pkg_files` |
+| `ServiceLogging.Dir` | `{붙일 위치}/service_log` |
+
+**붙일 위치를 export 경로에서 유도하지 않는다.** 서버가 어디에 두고 export 하는지와 이 노드의
+어디에 붙일지는 무관하다 — 실측에서 export 가 `/export/cims` 처럼 임의 경로였고, 그것을 지점으로 쓰면
+`cims-priv` 의 보호 경로 규칙(`/home/*` 거부)에 걸린다. 기본값 `/mnt/cims` 를 제시하고 받는다.
+
+원본 경로를 틀리면 서버는 `No such file or directory` 만 준다(무엇이 없는지 알 수 없다).
+그래서 NFS 마운트 실패 시 **`showmount -e` 로 실제 export 목록을 출력**한다 — 그 자리에서
+고칠 수 있게. (nfs 클라이언트는 직전 `mount-add` 가 이미 설치했다.)
+
+비우면 노드 로컬이고 더 묻지 않는다. **마운트만 하고 store 는 로컬**로 두려면 `--mount` 를
+쓴다(그때는 store 를 자동 승계하지 않는다. 로그는 그래도 마운트를 따라간다).
+
+**마운트를 "미리 해두라" 고 요구하지 않는다.** 마운트 지점이 아직 붙어 있지 않으면
+인스톨러가 원본·파일시스템·옵션을 물어 **직접 마운트**한다. 그 일은 새로 구현하지 않고
+agent 의 마운트 관리와 **같은 엔진**(`cims-priv mount-add`)을 쓴다 — fstab idempotent
+갱신(`# cims-managed` 태그)·네트워크 FS 의 `_netdev,nofail` 강제·NFS/CIFS 클라이언트 vendor
+deb offline 설치·mkdir·mount 가 이미 거기 있다. 규칙을 두 번 쓰면 한쪽만 고친 것이 반대편에서
+재발한다. `cims-priv` 는 agent tarball 안에 있어 필요한 만큼만 임시로 펼쳐 실행한다.
+
+비대화식(`--batch`·자동화)도 같은 규칙이다: `--mount-src nas.example:/export/cims`
+하나로 위치(`/mnt/cims` 기본)·타입·store 가 정해진다. `--mount`/`--mount-fstype`/`--mount-opts`/`--runtime-mount`
+/`--runtime-dir` 은 유도값 override 다. 마운트가 없는데 원본도 없으면 **중단한다** — 그대로
+진행하면 `CimsRuntimeMount` 만 기록된 채 OAM 이 mount guard 로 기동을 거부한다.
+
+마운트 뒤 `<store>` 디렉터리를 만들어 서비스 계정 소유로 바꾼다(마운트 루트 자체의 소유권은
+건드리지 않는다 — NAS export 정책 존중). 그다음 **전제를 검사한다**(`store_mount_check`):
+OAM 의 mount guard(§4.3)와 같은 조건을 **패키지 전개 전에** 보고, 어긋나면 중단한다. 검사가
+설치 후로 밀리면 "부트스트랩은 끝났는데 콘솔이 없는" 상태가 되고, 설정을 고칠 통로가 바로
+그 콘솔이라 되돌릴 수도 없다. 중단해도 설치 흔적은 없다(fstab 항목은 `nofail` 이라 무해하고,
+권한만 고쳐 다시 실행하면 그대로 쓰인다).
+
+| 검사 | 위반 시 |
+|---|---|
+| 절대경로 · `..` 불가 | 중단 |
+| `/proc/mounts` 와 **정확히 일치**하는 마운트인가 (하위 디렉터리 지정은 guard 가 거부) | 마운트 원본이 있으면 **붙인다**, 없으면 중단 + 현재 마운트 목록 제시 |
+| store 경로가 마운트 하위인가 | 중단 |
+| 서비스 계정이 쓸 수 있는가 (존재하는 최상위 조상에서 확인) | 중단 |
+| `/etc/fstab` 에 있고 `nofail` 인가 | 경고 — 재부팅 시 마운트가 없으면 그때 guard 가 기동을 거부한다 |
+
+대화식에서는 위반이 **경고**로 나오고 재입력을 받는다(Enter = 노드 로컬). 옵션으로 준 값은
+운영자가 방금 지정한 것이므로 **오류로 중단**한다. `--runtime-mount` 만 주면 store 경로를
+`<마운트>/runtime` 으로 유도한다 — 유도하지 않으면 store 가 노드 로컬에 남아 "마운트 하위가
+아님" 으로 guard 가 기동을 거부한다. 합류 모드는 유도하지 않는다(peer 의 store 경로가
+`<마운트>/runtime` 이 아닐 수 있어, 유도하면 두 노드가 서로 다른 store 를 본다).
+
+합류 노드(§9.2)는 실효 값(명시 옵션 > peer 계승)으로 같은 검사를 하되 **경고만** 하고 설치를
+계속한다 — OAM 을 기동하지 않으므로(cold standby) 즉시 사고가 아니고, 마운트를 붙이면 그대로
+쓸 수 있다.
+
+시크릿·인증서(`_secrets/`·`cert/`)는 이 지정과 무관하게 **항상 노드 로컬**이다(§5).
 
 이관 대상(복사를 수행할 노드)은 **1건이 반드시 선정된다**: hostname 일치 → `status=running`
 → 첫 배포 순. 대상 0건을 허용하면 경로만 바뀌고 복사가 조용히 빠져 절체 시 빈 콘솔이 된다.
@@ -965,7 +1085,25 @@ oam/oam-svc 배포설정 `CimsRuntimeDir` 이 그 마운트 하위가 아니면 
 | **보고** | agent 가 heartbeat 에 자기 `oam_url` 을 싣는다. OAM 은 그것을 agent 레코드에 보관하고 `GET /agents` 로 노출한다 — 이 값 없이는 어긋남을 감지할 수 없다 |
 | **경고** | 그룹 조회 응답 `agents_not_on_vip[]`(VIP 가 아닌 주소로 보고하는 agent). 콘솔 HA 화면이 붉은 배너로 "이대로 절체하면 단절된다" 를 표시 |
 | **차단** | `POST /ha-groups/{id}/failover` 가 사전 점검해 **409 `agents_not_one_vip`** 로 거부. 콘솔은 사유와 대상을 보여주고 **전환을 바로 실행**할 수 있게 한다. `force: true` 로 우회 가능 |
-| **실행** | 콘솔 `[⇢ OAM 주소 VIP 전환]` → `POST /agents/oam-url {url}`. 각 agent 가 새 주소로 `/health` **도달 확인 후에만** 적용하므로, VIP 가 아직 없을 때 눌러도 fleet 이 끊기지 않는다 |
+| **실행** | 콘솔 **시스템/서버 구성 > 서버 > OAM 접속 주소** — `POST /agents/{id}/oam-url`(그 서버만) 또는 `[전체 적용]` → `POST /agents/oam-url`(전 agent). 각 agent 가 새 주소로 `/health` **도달 확인 후에만** 적용하므로, VIP 가 아직 없을 때 눌러도 fleet 이 끊기지 않는다 |
+
+**이 주소는 agent 의 설정이다 — 서버 단위로 노출한다.** heartbeat·job 결과를 **보내는
+주체가 각 노드의 agent** 이고(받는 주체는 OAM 하나), 값도 그 노드에 있다
+(`<state-dir>/oam_url` > systemd unit `--oam-url`, `resolve_oam_url`). 그래서 OAM 쪽에
+"fleet 이 따라야 할 선언" 을 따로 두지 않는다 — 그런 선언을 두면 같은 사실이 두 곳에 생기고
+수렴 데몬이 필요해진다. 화면은 그 값이 있는 자리에 둔다: **서버 화면에 현재 보고 주소 +
+편집**, 그리고 같은 자리에 전 agent 일괄 적용(같은 설정의 대량 편집).
+
+`Server.AgentOamUrl`(oam 설정 > 관리망·agent 접속)은 선언이 아니라 **신규 설치 agent 가
+받는 초기 주소**다 — install-command 에 박히고 서버 인증서 SAN 에도 들어간다. 이 값을 VIP 로
+두면 재설치·복구된 노드가 자동으로 VIP 를 보고 시작하므로, 수렴 데몬 없이도 어긋남이
+재발하지 않는다.
+
+**절체 판정은 이 주소와 무관하다.** vrrp_script(`cims-health`)는 네트워크 요청을 하지 않고
+같은 노드의 `run/ha/verdict/<svc>.json` 만 읽는다(§4.4·ha_service_model §9). 주소가 틀려도
+VIP 는 옮겨가고 모듈은 뜬다 — 깨지는 것은 **관리 가시성**이다(신 Active 가 heartbeat 를 한
+건도 받지 못해 전 노드 offline 으로 보인다). 그래서 절체를 막는 것은 "HA 가 안 되기 때문"이
+아니라 "절체 후 되돌릴 통로가 사라지기 때문"이다.
 
 **판정은 관리평면(oam)을 호스팅하는 그룹에서만** 한다. agent 는 OAM 주소 하나만 보므로,
 Signaling·Media 처럼 oam 이 없는 그룹의 VIP 와 비교하면 전원이 "어긋남" 으로 잡혀 **그 그룹의
@@ -990,6 +1128,26 @@ loopback(`127.0.0.1`)도 어긋남으로 본다 — 그 노드 자신의 OAM 을
 OAM 이 agent 레코드에 보관하고 `GET /agents` 로 노출하며, 콘솔 HA 화면이 **"절체 래치 —
 승격 불가: <노드>"** 를 사유와 함께 표시한다. 해제는 기존 경로(모듈 start/restart 또는
 홀드 해제)를 쓴다.
+
+## 9.4.3 노드 설정 파일 형태 — writer 가 둘이면 안 된다
+
+`<install>/<pkg>/config.json` 은 두 경로가 쓴다: **부트스트랩**(install.sh)과 **agent**
+(`job_install`/`job_update_config`, OAM 이 `_materialize_deploy_config` 로 만든 값). 그리고
+드리프트 판정(`deploy_config_hash` → A-PRC-003)의 기준은 **실체화본**이다.
+
+그래서 두 writer 는 **같은 형태**를 써야 한다. 부트스트랩이 overlay 원본만 쓰던 동안은
+설치 직후부터 영구히 어긋났다 — 실측: overlay 10키(`609e2a84ca4e`) vs 실체화본 13키
+(`eff2bacec6c4`), 차이는 템플릿 기본값 `Server.Role`·`ServiceLogging.{Alert,Event}RetainDays`.
+정합 job 을 뒤늦게 태우는 것은 증상 처리다(설치마다 재발). 부트스트랩도 **템플릿 기본값을
+병합해** 쓴다.
+
+| | 형태 | 이유 |
+|---|---|---|
+| 노드 파일 `config.json` | **실체화본** (템플릿 기본값 + overlay) | 모듈이 읽는 완전한 유효설정. 판정 기준과 동일해야 한다 |
+| 배포 레코드 `deployment.config` | **sparse overlay** | 운영자 의도의 SoT. 기본값이 굳으면 다음 버전의 기본값 변경을 못 따라간다 |
+
+이 등가성은 테스트로 지킨다(`tests/test_put_config_sync.py::TestBootstrapConfigShape`) —
+새 주입 키가 생기고 부트스트랩이 그것을 쓰지 않으면 실패한다.
 
 ## 9.5 설정 자가 복구 — "설정 하나로 콘솔을 잃을 수 없다"
 

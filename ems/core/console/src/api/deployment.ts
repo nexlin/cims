@@ -546,6 +546,10 @@ export const deploymentApi = {
   retargetOamUrl: (url: string) =>
     api.post<{ url: string; jobs: { agent_id: number; job_id: number }[] }>(
       '/agents/oam-url', { url }),
+  // 한 agent 만 재지정 — 이 주소는 그 노드 agent 의 설정이므로 서버 단위 편집이 기본이다.
+  retargetAgentOamUrl: (agentId: number, url: string) =>
+    api.post<{ url: string; jobs: { agent_id: number; job_id: number }[] }>(
+      `/agents/${agentId}/oam-url`, { url }),
   // force: 안전 가드(관리평면 업그레이드 순서·단일 writer 동시 기동) 우회 — 운영자 확인 후에만.
   queueJob: (id: number, job_type: JobType, extra?: Record<string, unknown>, force?: boolean) =>
     api.post<{ job_id: number; status: string }>(`/deployments/${id}/job`,
