@@ -125,6 +125,26 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **MCData media plane 서비스 설정 문서** | TS 24.484 | ✗ (provisioning 채널 재사용) |
 | **MCVideo** | TS 24.281 | ✗ |
 
+### R4-1. CMS 문서함 — UE 겹 2종 미서빙 (규격 순정 단말 interop 갭)
+
+TS 24.484 의 CMS 문서는 4겹(기기 초기/기기/사용자/시스템 + OMA 그룹)인데, CIMS 는 사용자·시스템·
+그룹 3종만 서빙한다. 기기 겹 2종의 역할은 자체 `GET /provisioning/me` 가 흡수했다
+([android_ue_provisioning.md](android_ue_provisioning.md) — VoLTE 병행 구성·SIP 자격 배포(ISIM 대체)·
+transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단말에는 문제가 없으나, **규격 순서대로
+부트스트랩하는 외부 MCX 단말은 첫 요청(ue-init-config)에서 404** 를 만난다(고객사 단말 실측, 08-13).
+
+| AUID | 규격 | 상태 |
+|---|---|---|
+| `org.3gpp.mcptt.ue-init-config` | TS 24.484 (로그인 전 — IdMS/KMS/CMS/GMS 주소·참여 서버) | ✅ 서빙 (`handle_ue_init_config` — 익명 GET·전역 문서·ETag). 요소 집합은 외부 단말의 실소비 항목 확인에 따라 조정 여지 |
+| `org.3gpp.mcptt.ue-config` | TS 24.484 (기기 단위 파라미터) | ✗ 미서빙 (일부 항목은 user-profile XML·provisioning/me 에 분산 — 외부 단말이 요구하면 착수) |
+
+**확정 방침 = 병행 서빙**: 자체 단말은 `/provisioning/me`(전화+무전 병행·자격 배포 — 규격 문서에
+없는 요구), 외부 규격 단말은 규격 문서함 — 각 단말은 자기가 구현한 경로만 탄다(대체 아님).
+서빙 규칙: **SoT 공유**(산출이 `Provisioning.Services.*`/`IdMs.*` 를 읽는다 — 별도 상수 금지),
+**익명 GET**(로그인 전 문서라 토큰이 없다 — 내용은 공개 주소뿐), base URL 은 요청 Host 에서 유도
+(openid-configuration 과 동일 규칙). 외부 단말의 SIP 등록 자격 전달은 규격 밖(ISIM 몫)이라
+문서함과 별개로 합의가 필요하다.
+
 ### R5. 시그널링 세부 (RFC/구독) — 부분 미반영
 
 - **NOTIFY 최종 실패(timeout/481) 시 구독 종료** (RFC 6665 MUST) — 미구현 (§C5 참조)

@@ -35,12 +35,14 @@ MCPTT 단말 로그인 + 토큰 발급.
 
 ## 3. CMS (Configuration Management Server)
 
-MCPTT 단말별 설정 (user profile, service config).
+MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전 부트스트랩 — XUI 는 UE
+인스턴스 ID, 무검증), 나머지는 Bearer 토큰 + 본인 문서만(403). 전부 ETag/If-None-Match 지원.
 
-| Method | Path |
-|---|---|
-| GET  | `/org.3gpp.mcptt.ue-init-config/users/{user}/ue-init-config/` |
-| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config/` |
+| Method | Path | 인증 |
+|---|---|---|
+| GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
+| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 |
+| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
 
 ---
 

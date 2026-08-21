@@ -1126,6 +1126,40 @@ def get_service_config_xml(user_uri):
 </mcptt-service-config>"""
     return xml, _content_etag(xml)
 
+def get_ue_init_config_xml(base_url):
+    """MCPTT UE 초기 설정 문서 (TS 24.484 ue-init-config) — **로그인 전** 부트스트랩.
+
+    규격 순정 단말이 부트스트랩 첫 단계에서 받는 문서로, 내용은 "MC 시스템에 접속하는 법"
+    (IdMS/KMS/CMS/GMS 주소·참여 MCPTT 서버)이다. 시스템 전역 문서라 사용자와 무관하고,
+    값은 전부 기존 설정(SoT)에서 읽는다 — Provisioning.Services.ptt / IdMs.* (별도 상수 금지,
+    conformance §R4-1). base_url 은 요청 Host 에서 유도(openid-configuration 과 같은 규칙) —
+    단말이 접속해 온 그 주소가 곧 각 평면의 주소다(단일 진입점 토폴로지).
+
+    ⚠ 요소 집합은 외부(고객사) 단말이 실제 소비하는 항목 확인에 따라 조정 여지가 있다
+    (interop 확인 질문 ② 대기) — 구조는 유지하고 요소만 보태는 방향으로.
+    """
+    ptt = (PROVISIONING.get('Services') or {}).get('ptt', {}) if isinstance(PROVISIONING, dict) else {}
+    domain = (ptt.get('domain') or IDMS_DOMAIN).strip()
+    # 참여 MCPTT 서버(시그널링): 설정 host 우선, 빈값이면 단말이 접속해 온 호스트(base_url 의 host부).
+    sip_host = (ptt.get('host') or '').strip() or base_url.split('://', 1)[-1].split(':', 1)[0]
+    sip_port = int(ptt.get('port') or 15060)
+
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<mcptt-UE-initial-configuration xmlns="urn:3gpp:ns:mcpttUEInitConfig:1.0" name="CIMS">
+  <on-network>
+    <IdMS-auth-endpoint>{base_url}/idms/authreq</IdMS-auth-endpoint>
+    <IdMS-token-endpoint>{base_url}/idms/tokenreq</IdMS-token-endpoint>
+    <CMS-XCAP-root-URI>{base_url}</CMS-XCAP-root-URI>
+    <GMS-XCAP-root-URI>{base_url}</GMS-XCAP-root-URI>
+    <KMS-URI>{base_url}/keymanagement/identity/v1</KMS-URI>
+    <mcptt-domain>{domain}</mcptt-domain>
+    <participating-MCPTT-server>sip:{domain}</participating-MCPTT-server>
+    <MCPTT-server-address>{sip_host}:{sip_port}</MCPTT-server-address>
+  </on-network>
+</mcptt-UE-initial-configuration>"""
+    return xml, _content_etag(xml)
+
+
 def get_kms_init_xml(user_uri):
     now = datetime.datetime.now(datetime.timezone.utc)
     valid_from = now.isoformat()
@@ -1592,6 +1626,28 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
         return HandlerResult(status=500, body=str(e))
 
 # CMS: User Profile
+# CMS: UE 초기 설정 (로그인 전 부트스트랩)
+async def handle_ue_init_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    # GET /org.3gpp.mcptt.ue-init-config/users/{XUI}/{docname}
+    #
+    # **익명 GET** — 로그인 전 문서라 토큰이 없다(규격 순서상 인증보다 앞 단계). 내용이
+    #   공개 주소뿐이라 민감도도 없다. XUI 는 UE 인스턴스 ID(UUID 등) — 사용자 신원이
+    #   아니므로 검증하지 않고, 어떤 XUI/문서명이 와도 같은 전역 문서를 준다.
+    if args.method != 'GET':
+        return HandlerResult(status=405)
+
+    host = (args.headers.get('host') or args.headers.get('Host') or f"{IDMS_DOMAIN}:{_MCPTT_PORT}").strip()
+    xml, etag = get_ue_init_config_xml(f"https://{host}")
+
+    if_none_match = args.headers.get('if-none-match', '')
+    if if_none_match and if_none_match == etag:
+        return HandlerResult(status=304)
+    logger.log_info(f"[CMS] UE init config served (host={host})")
+    return HandlerResult(status=200, body=xml,
+                         media_type='application/vnd.3gpp.mcptt-ue-init-config+xml',
+                         headers={'Etag': etag})
+
+
 async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /org.3gpp.mcptt.user-profile/users/{user_id}/user-profile
     # (로깅은 pi_http post_hook 에서 자동 처리)
@@ -2000,6 +2056,7 @@ CSC_HANDLER_LIST = [
     # GMS — list: GET /users/{user_uri}  |  CRUD: /users/{user_uri}/{group_uri}
     ("/org.openmobilealliance.groups/users", handle_group_management, {}),
     # CMS (3GPP TS 24.484)
+    ("/org.3gpp.mcptt.ue-init-config/users", handle_ue_init_config, {}),  # 로그인 전 — 익명
     ("/org.3gpp.mcptt.user-profile/users",   handle_user_profile,   {}),
     ("/org.3gpp.mcptt.service-config/users", handle_service_config,  {}),
     # KMS (3GPP TS 33.180 / MIKEY-SAKKE)
