@@ -487,7 +487,7 @@ void SimSession::SendSubscribe(const std::string& strPsi,
     pMsg->m_iContentLength = (int)strBody.size();
 
     // Route to server
-    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, m_eTransport);
 
     printf("[%d] SUBSCRIBE %s Call-ID=%s\n", m_iId, strPsi.c_str(), szCallId);
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
@@ -539,7 +539,7 @@ void SimSession::SubscribeConference(const std::string &strGroupId) {
            strLocalIp.c_str(), iLocalPort);
   pMsg->AddHeader("Contact", szContact);
 
-  pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+  pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, m_eTransport);
 
   printf("[%d] SUBSCRIBE conference group=%s Call-ID=%s\n", m_iId,
          strGroupId.c_str(), szCallId);
@@ -598,7 +598,7 @@ void SimSession::SubscribeReg()
              m_strUser.c_str(), strLocalIp.c_str(), iLocalPort);
     pMsg->AddHeader("Contact", szContact);
 
-    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, m_eTransport);
 
     m_bRegSubscribed = true;
     printf("[%d] SUBSCRIBE reg-event Call-ID=%s\n", m_iId, szCallId);
@@ -646,7 +646,7 @@ void SimSession::SendUnsubscribe(const std::string& strPsi,
              m_strUser.c_str(), strLocalIp.c_str(), m_iLocalPort);
     pMsg->AddHeader("Contact", szContact);
 
-    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, m_eTransport);
 
     printf("[%d] UNSUBSCRIBE %s Call-ID=%s CSeq=%d\n", m_iId, strPsi.c_str(), strCallId.c_str(), iSeq);
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
@@ -737,7 +737,7 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
     pMsg->m_strBody = strBody;
     pMsg->m_iContentLength = (int)strBody.size();
 
-    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, E_SIP_UDP);
+    pMsg->AddRoute(m_strServerIp.c_str(), m_iServerPort, m_eTransport);
 
     printf("[%d] %s group=%s Call-ID=%s\n", m_iId, bDeaffiliate ? "DE-AFFILIATE" : "AFFILIATE",
            m_strGroupId.c_str(), szCallId);
@@ -776,7 +776,7 @@ void SimSession::StartCall(const std::string& strTarget) {
 
     clsRoute.m_strDestIp  = m_strServerIp;
     clsRoute.m_iDestPort  = m_iServerPort;
-    clsRoute.m_eTransport = E_SIP_UDP;
+    clsRoute.m_eTransport = m_eTransport;  // 등록과 같은 transport 로 발신 (TCP/TLS 호 회귀)
 
     std::string strDst = strTarget.empty() ? m_strServerIp : strTarget;
     m_stats.tCallStart = NowMs();

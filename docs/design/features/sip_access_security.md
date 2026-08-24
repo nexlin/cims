@@ -293,9 +293,10 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 - `S3-SCN-REALM-MISMATCH`(V7): REGISTER→401 챌린지로 서버 realm/nonce 를 얻어 **틀린 realm** Digest 로
   재전송 → 401 재챌린지(response 검증 전 realm 대조)를 확인한다.
 
-V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 이미 커버한다. V5 의 **호** 부분·TCP/TLS 호 회귀는
-cspsim 이 INVITE 를 UDP 로만 보내는 한계(§7)로 미성립, V6(이행 스크립트 멱등)·V8(`/provisioning/me`)은
-스크립트/CSC 경로라 별도다. 반복 위반 알람은 A-SEC-003 으로 채번·구현되어 있다(§3.3).
+V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
+cspsim 이 이제 call INVITE 를 세션 transport 로 보내(§7 보완 완료) UDP/TCP/TLS 전 조합에서 성립한다.
+V6(이행 스크립트 멱등)·V8(`/provisioning/me`)은 스크립트/CSC 경로라 별도다. 반복 위반 알람은
+A-SEC-003 으로 채번·구현되어 있다(§3.3).
 
 ## 7. 배포 순서와 잔여
 
@@ -304,11 +305,10 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 강제한다. 현재 ②(코드)까지 반영되어 있고 ①·③~⑥ 은 운영 절차다.
 
 잔여 항목:
-- V3~V6·V8 의 자동화(V1·V2·V7 은 S3 검증 항목으로 자동화 완료 — §6). V5 의 TCP/TLS 호는 아래 cspsim 한계에 걸린다.
-- cspsim 의 call 시나리오가 `-transport` 를 무시하고 INVITE 를 UDP 로 보낸다(등록만 transport 를 따른다) —
-  TCP/TLS **호** 회귀(V5 의 호 부분)는 cspsim 보완 전까지 UDP 로만 성립. 같은 맥락에서 CSP 의
-  `Service-Route` 에 `;transport=` 파라미터가 없어(RFC 3608/TS 24.229) TLS 등록 단말이 route 를 따라갈 때
-  transport 를 잃는다 — [sip_tls_signaling.md](sip_tls_signaling.md) 쪽 보완 항목.
+- V3~V6·V8 의 자동화(V1·V2·V7 은 S3 검증 항목으로 자동화 완료 — §6).
+- CSP 의 `Service-Route` 에 `;transport=` 파라미터가 없어(RFC 3608/TS 24.229) TLS 등록 단말이 route 를
+  따라갈 때 transport 를 잃는다 — [sip_tls_signaling.md](sip_tls_signaling.md) 쪽 보완 항목. (cspsim 의
+  call INVITE 가 세션 transport 를 따르지 않던 한계는 해소 — UDP/TCP/TLS 호가 dev 스택에서 실측 성립.)
 - `/provisioning/me` 의 `enforced`/TLS 목록 축소는 CSC `Provisioning.Services.*.tls_port` 가 설정된 환경에서만
   드러난다(미설정이면 TLS 항목 자체가 없다).
 
