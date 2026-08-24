@@ -216,6 +216,22 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential
     return E_AUTH_OK;
 }
 
+/**
+ * @brief 비-REGISTER 요청의 챌린지 realm — 요청자(From) 가입자의 서비스 realm.
+ *   REGISTER 는 Request-URI host 가 등록 도메인이라 그걸로 서비스를 고르지만, 비-REGISTER 의
+ *   Request-URI 는 착신(PSI/상대)이라 요청자 신원과 무관하다. 챌린지 realm 이 검증 realm
+ *   (CheckAuthorization 의 EffectiveRealm(가입자 서비스)) 과 어긋나면 단말이 서버 챌린지를 그대로
+ *   echo 해도 P1-a realm 대조에서 재챌린지로 빠져 요청이 성립하지 않는다 — 두 곳의 기준을 같게 둔다.
+ *   미가입/서비스 미결 신원은 "" (SendUnAuthorizedResponse 의 volte fallback).
+ */
+static std::string ChallengeRealmForRequester( CSipMessage *pclsMessage ) {
+    CspUser clsUser;
+    if ( gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsUser ) == false ) return "";
+    if ( clsUser.m_strServiceRef.empty() ) return "";
+    ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
+    return svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : "";
+}
+
 bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     SIP_CREDENTIAL_LIST::iterator itCL = pclsMessage->m_clsAuthorizationList.begin();
 
@@ -224,7 +240,7 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
                                  itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
-        SendUnAuthorizedResponse( pclsMessage );
+        SendUnAuthorizedResponse( pclsMessage, ChallengeRealmForRequester( pclsMessage ) );
         return false;
     }
 
@@ -234,7 +250,7 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage, "", true );
+            SendUnAuthorizedResponse( pclsMessage, ChallengeRealmForRequester( pclsMessage ), true );
             return false;
         case E_AUTH_REALM_MISMATCH: {
             // 가입자의 서비스 realm 로 재챌린지 (stale 아님 — 자격 증명이 틀린 게 아니라 realm 이 틀렸다)
