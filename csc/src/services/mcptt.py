@@ -1057,7 +1057,7 @@ def get_user_profile_xml(user_uri):
         return "true" if prof.get(k, True) else "false"
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<mcptt-user-profile xmlns="urn:3gpp:ns:mcpttUserProfile:1.0"
+<mcptt-user-profile xmlns="urn:3gpp:mcptt:user-profile:1.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xmlns:cims="urn:cims:mcptt:ext:1.0"
   user-profile-index="1">
@@ -1133,34 +1133,59 @@ def get_service_config_xml(user_uri):
     return xml, _content_etag(xml)
 
 def get_ue_init_config_xml(base_url):
-    """MCPTT UE 초기 설정 문서 (TS 24.484 ue-init-config) — **로그인 전** 부트스트랩.
+    """MCS UE 초기 설정 문서 (TS 24.484 §7.2) — **로그인 전** 부트스트랩, 시스템 전역 1건.
 
-    규격 순정 단말이 부트스트랩 첫 단계에서 받는 문서로, 내용은 "MC 시스템에 접속하는 법"
-    (IdMS/KMS/CMS/GMS 주소·참여 MCPTT 서버)이다. 시스템 전역 문서라 사용자와 무관하고,
-    값은 전부 기존 설정(SoT)에서 읽는다 — Provisioning.Services.ptt / IdMs.* (별도 상수 금지,
-    conformance §R4-1). base_url 은 요청 Host 에서 유도(openid-configuration 과 같은 규칙) —
-    단말이 접속해 온 그 주소가 곧 각 평면의 주소다(단일 진입점 토폴로지).
-
-    ⚠ 요소 집합은 외부(고객사) 단말이 실제 소비하는 항목 확인에 따라 조정 여지가 있다
-    (interop 확인 질문 ② 대기) — 구조는 유지하고 요소만 보태는 방향으로.
+    구조·요소명·네임스페이스는 §7.2.2.3 XSD 정본을 그대로 따른다 — <on-network> 는
+    xs:sequence 라 **요소 순서가 강제**되고 나열 요소 전부 필수(minOccurs 기본 1)다.
+    값은 전부 SoT(Provisioning.Services.ptt / IdMs / 요청 Host)에서 산출한다 (§R4-1).
+    - Timers = floor 절차 타이머(TS 24.380: T100 release/T101 request/T103 end-of-media/
+      T104 queue-pos/T132 queued-granted 사용자 행동, 초 단위) — 보수적 기본값.
+    - GMS-URI = GMS 구독 프록시 **PSI** (§7.2.2.7-5) — 우리 gms_psi AoR 그대로.
+    - HPLMN PLMN 은 도메인(mncXXX.mccYYY)에서 유도, con-ref 는 APN/DNN 명(우리는 명목값).
     """
     ptt = (PROVISIONING.get('Services') or {}).get('ptt', {}) if isinstance(PROVISIONING, dict) else {}
     domain = (ptt.get('domain') or IDMS_DOMAIN).strip()
-    # 참여 MCPTT 서버(시그널링): 설정 host 우선, 빈값이면 단말이 접속해 온 호스트(base_url 의 host부).
-    sip_host = (ptt.get('host') or '').strip() or base_url.split('://', 1)[-1].split(':', 1)[0]
-    sip_port = int(ptt.get('port') or 15060)
+
+    # PLMN = MCC+MNC — 도메인 표기 ptt.mncXXX.mccYYY.… 에서 유도 (실패 시 명목값)
+    import re as _re
+    m = _re.search(r'mnc(\d+)\.mcc(\d+)', domain)
+    plmn = (m.group(2) + m.group(1).lstrip('0')) if m else '00101'
 
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<mcptt-UE-initial-configuration xmlns="urn:3gpp:ns:mcpttUEInitConfig:1.0" name="CIMS">
+<mcptt-UE-initial-configuration xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0" domain="{domain}">
+  <name>CIMS</name>
   <on-network>
-    <IdMS-auth-endpoint>{base_url}/idms/authreq</IdMS-auth-endpoint>
-    <IdMS-token-endpoint>{base_url}/idms/tokenreq</IdMS-token-endpoint>
-    <CMS-XCAP-root-URI>{base_url}</CMS-XCAP-root-URI>
+    <Timers>
+      <T100>4</T100>
+      <T101>4</T101>
+      <T103>4</T103>
+      <T104>4</T104>
+      <T132>6</T132>
+    </Timers>
+    <HPLMN PLMN="{plmn}">
+      <service>
+        <MCPTT-to-con-ref>internet</MCPTT-to-con-ref>
+        <MC-common-core-to-con-ref>internet</MC-common-core-to-con-ref>
+        <MC-ID-to-con-ref>internet</MC-ID-to-con-ref>
+      </service>
+    </HPLMN>
+    <App-Server-Info>
+      <idms-auth-endpoint>{base_url}/idms/authreq</idms-auth-endpoint>
+      <idms-token-endpoint>{base_url}/idms/tokenreq</idms-token-endpoint>
+      <http-proxy></http-proxy>
+      <gms>{base_url}</gms>
+      <cms>{base_url}</cms>
+      <kms>{base_url}/keymanagement/identity/v1</kms>
+      <tls-tunnel-auth-method>
+        <mutual-authentication>false</mutual-authentication>
+      </tls-tunnel-auth-method>
+    </App-Server-Info>
+    <GMS-URI>sip:gms_psi@{domain}</GMS-URI>
+    <group-creation-XUI>{base_url}</group-creation-XUI>
     <GMS-XCAP-root-URI>{base_url}</GMS-XCAP-root-URI>
-    <KMS-URI>{base_url}/keymanagement/identity/v1</KMS-URI>
-    <mcptt-domain>{domain}</mcptt-domain>
-    <participating-MCPTT-server>sip:{domain}</participating-MCPTT-server>
-    <MCPTT-server-address>{sip_host}:{sip_port}</MCPTT-server-address>
+    <CMS-XCAP-root-URI>{base_url}</CMS-XCAP-root-URI>
+    <integrity-protection-enabled>false</integrity-protection-enabled>
+    <confidentiality-protection-enabled>false</confidentiality-protection-enabled>
   </on-network>
 </mcptt-UE-initial-configuration>"""
     return xml, _content_etag(xml)

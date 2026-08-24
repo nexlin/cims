@@ -100,13 +100,17 @@ def main():
     check(bool(hdr.get('etag')), "ETag 존재")
 
     # ── Step 2: 문서에서 다음 단계 주소 파싱 (하드코딩 금지 — 사슬 검증의 핵심) ──
-    print("Step 2  광고 주소 파싱")
-    auth_ep  = xml_text(body, 'IdMS-auth-endpoint')
-    token_ep = xml_text(body, 'IdMS-token-endpoint')
+    print("Step 2  광고 주소 파싱 (TS 24.484 §7.2.2.3 요소명)")
+    auth_ep  = xml_text(body, 'idms-auth-endpoint')
+    token_ep = xml_text(body, 'idms-token-endpoint')
     cms_root = xml_text(body, 'CMS-XCAP-root-URI')
     gms_root = xml_text(body, 'GMS-XCAP-root-URI')
-    domain   = xml_text(body, 'mcptt-domain')
-    check(all([auth_ep, token_ep, cms_root, gms_root, domain]), f"필수 요소 5종 (domain={domain})")
+    m = re.search(r'domain="([^"]+)"', body)
+    domain = m.group(1) if m else ''
+    gms_psi = xml_text(body, 'GMS-URI')
+    check(all([auth_ep, token_ep, cms_root, gms_root, domain]), f"필수 요소 (domain={domain})")
+    check(bool(re.search(r'xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0"', body)), "규격 네임스페이스")
+    check(gms_psi.startswith('sip:gms_psi@'), f"GMS-URI = 구독 프록시 PSI ({gms_psi})")
 
     # ── Step 3: 파싱한 IdMS 로 PKCE 로그인 ──
     print("Step 3  IdMS PKCE 로그인 (파싱한 엔드포인트로)")

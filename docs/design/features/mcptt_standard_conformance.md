@@ -135,7 +135,7 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 
 | AUID | 규격 | 상태 |
 |---|---|---|
-| `org.3gpp.mcptt.ue-init-config` | TS 24.484 (로그인 전 — IdMS/KMS/CMS/GMS 주소·참여 서버) | ✅ 서빙 (`handle_ue_init_config` — 익명 GET·전역 문서·ETag). 요소 집합은 외부 단말의 실소비 항목 확인에 따라 조정 여지 |
+| `org.3gpp.mcptt.ue-init-config` | TS 24.484 §7.2 (로그인 전 — IdMS/KMS/CMS/GMS 주소·참여 서버) | ✅ 서빙 — **§7.2.2.3 XSD 정본 스키마 그대로**(ns `urn:3gpp:mcptt:mcpttUEinitConfig:1.0`, on-network sequence 필수 요소 전부, GMS-URI=gms_psi PSI). 익명 GET·전역 문서·ETag |
 | `org.3gpp.mcptt.ue-config` | TS 24.484 (기기 단위 파라미터) | ✗ 미서빙 (일부 항목은 user-profile XML·provisioning/me 에 분산 — 외부 단말이 요구하면 착수) |
 
 **확정 방침 = 병행 서빙**: 자체 단말은 `/provisioning/me`(전화+무전 병행·자격 배포 — 규격 문서에
@@ -378,7 +378,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   → `SendSipNotify`(group_change) → GMS 구독자에 **xcap-diff NOTIFY**.
 
 ### CMS (TS 24.484)
-- user-profile XML(`urn:3gpp:ns:mcpttUserProfile:1.0`), self-access 권한, ETag.
+- user-profile XML(ns = 규격 §8.3.2.4 정본 `urn:3gpp:mcptt:user-profile:1.0`), self-access 권한(신원 표기 tel:/sip:/sip:@도메인 관용), ETag.
 - **S4 service-config**: 값의 SoT 는 DB `mcptt_service_config` **단일 행**(id=1)이다. 기동 시
   `load_shared_data` 가 `SERVICE_CONFIG` 캐시로 읽고, `get_service_config_xml` 이 그 캐시를 XML 로
   산출한다(내용 파생 ETag — 값이 바뀌면 자동 갱신). 편집은 관리 API
