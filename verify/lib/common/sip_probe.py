@@ -104,6 +104,29 @@ def probe_register(server_ip: str, server_port: int, user: str, domain: str,
         sock.close()
 
 
+def probe_register_offer(server_ip: str, server_port: int, user: str, domain: str,
+                         local_ip: str, security_client: str, via_host: str = "",
+                         via_port: int = 0, local_port: int = 0, timeout: float = 3.0) -> tuple:
+    """초기 REGISTER(무인증)에 `Security-Client` + `Require/Proxy-Require: sec-agree` 를 실어 보내고
+    (첫 최종 응답 코드, `Security-Server` 헤더 값) 을 돌려준다 (sip_access_security.md §8.3).
+
+    via_host/via_port 를 주면 top Via sent-by 를 실소스와 다르게 꾸민다 — 서버의 NAT 판정(동적 겹:
+    sent-by ≠ received/rport → ipsec-3gpp 제외)을 재현한다. Contact 도 같은 값을 쓴다.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind((local_ip, local_port))
+        lp = sock.getsockname()[1]
+        extra = [f"Security-Client: {security_client}", "Require: sec-agree", "Proxy-Require: sec-agree"]
+        msg = _register_lines(user, domain, via_host or local_ip, via_port or lp, _callid(local_ip),
+                              _tag(), 1, _branch(), extra=extra)
+        _send(sock, (server_ip, server_port), msg)
+        code, raw = _recv_final(sock, time.time() + timeout)
+        return code, _header(raw, "Security-Server") if raw else ""
+    finally:
+        sock.close()
+
+
 def probe_nonregister(server_ip: str, server_port: int, user: str, domain: str,
                       local_ip: str, method: str = "MESSAGE", local_port: int = 0,
                       timeout: float = 3.0) -> int:

@@ -21,6 +21,7 @@
 
 #include "SipMessage.h"
 #include "SipStack.h"
+#include "SipIpsec.h"
 #include <vector>
 #include <utility>
 #include <stdint.h>
@@ -80,6 +81,12 @@ public:
 	uint64_t			m_iAkaSqnMs;
 	/** 직전 REGISTER 가 auts(재동기) 를 실었다 — 이어지는 401 은 실패가 아니라 새 챌린지다 */
 	bool					m_bAkaResyncSent;
+	/** 마지막 AKA 계산의 CK/IK (16B 이진) — IPsec SA 키 (sip_access_security.md §8.3). TLS 위에서는 쓰지 않는다 */
+	std::string		m_strAkaCk;
+	std::string		m_strAkaIk;
+	/** IMS AKA + IPsec 단말 (§8.3). m_clsIpsec.m_bEnabled 면 sec-agree 를 켜고 Security-Client 에 ipsec-3gpp 를
+	 *  제안한다(tls 는 제안하지 않는다 — 단말이 IPsec 만 할 수 있으면 서버의 tls-only 목록에 스스로 중단). */
+	CSipIpsecClient	m_clsIpsec;
 
 	/** P-Preferred-Identity 헤더 값 (비어있으면 추가 안함) */
 	std::string		m_strPPreferredIdentity;

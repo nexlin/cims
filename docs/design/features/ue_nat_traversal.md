@@ -115,6 +115,10 @@ CSP 는 판정 결과를 자원할당 명령에 leg 단위로 전달한다
 - `RELAY_ADD`/`RELAY_MODIFY`: `remote_nat`(0/1) + `remote_sig_ip`(그 leg 의 SIP 실소스 IP)
 - `PTT_JOIN`: `user_nat`(0/1) + `user_sig_ip`
 
+IPsec(P4, [sip_access_security.md §8.3](sip_access_security.md#83-p4--ims-aka--ipsec-본문-67--구현-반영))과는
+상호배제다 — ESP transport mode 는 NAT 를 지나지 못하므로 `ipsec-3gpp` 를 제시하는 access service 는
+`media_nat_mode=off` 여야 하고, 그 위에 등록 시 단말 단위 NAT 감지(Via sent-by ≠ received/rport)가 한 겹 더 선다.
+
 nat 필드 생략 = 0 (no-NAT). CMP 에는 NAT 전역 설정이 없다 — **latch 자격은 오로지
 제어평면이 leg 단위로 부여**하며, no-NAT leg 는 latch 코드 경로 자체가 비활성이다.
 

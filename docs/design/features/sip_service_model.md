@@ -98,6 +98,7 @@ CSP 가 수신하는 bind 포트. `edge` 분류를 가진다.
 | `edge` | `access` (UE 수신) / `peering` (IMS 피어링) / `mgmt` (관리) |
 | `bind_ip`, `bind_port`, `protocol` | 기본 transport |
 | `tls_*` | TLS 전용 (protocol=TLS 일 때) |
+| `client_port` | protocol=IPSEC 일 때 — `bind_port`=port_ps(보호 서버 포트, UDP+TCP 공용), `client_port`=port_pc(보호 발신 포트). 노드당 하나 — [sip_access_security.md §8.3](sip_access_security.md#83-p4--ims-aka--ipsec-본문-67--구현-반영) |
 | `tags[]` | 자유 태그 (예: `volte`, `peering-kt`) |
 
 ### 2-2. RemoteNode
@@ -281,6 +282,7 @@ UE 가 직접 REGISTER 하는 서비스 도메인.
 | `server_identity_uri` | (optional) OPTIONS/keepalive 등에서 서버 From identity 를 IMS 규격(`sip:cspserver@<domain>`)으로 조립할 때 사용. 미지정 시 service.domain 기반 자동 조립. 저장 위치는 `access_services.jsonl` file-store (SQL 테이블 아님). |
 | `media_nat_mode` | `off`(기본) / `auto` / `force` — 단말 NAT 미디어 정책. leg 별 판정 결과를 CMP 자원할당 명령에 전달 ([ue_nat_traversal.md](ue_nat_traversal.md) §4) |
 | `latch_ip_guard` | `strict`(기본) / `off` — NAT latch 소스 IP 를 그 leg 의 SIP 실소스로 제한 (스푸핑 방어) |
+| `sec_mechanisms[]` | `["tls"]`(기본) / `["tls","ipsec-3gpp"]` — 가입자에게 제시할 RFC 3329 보안 메커니즘. `ipsec-3gpp` 는 AKA 가입자에게만, `media_nat_mode=off` 일 때만 유효(위반이면 `ipsec-3gpp` 무시 + ERROR) — [sip_access_security.md §8.3](sip_access_security.md#83-p4--ims-aka--ipsec-본문-67--구현-반영) |
 | `priority` | 같은 domain 중복 시 먼저 매칭될 순서 |
 
 ---

@@ -4,6 +4,7 @@
 #include "SipMd5.h"
 #include "SipAka.h"
 #include "StringUtility.h"
+#include "Log.h"
 #include "MemoryDebug.h"
 
 CSipServerInfo::CSipServerInfo() : m_iPort(5060), m_iLoginTimeout(3600)
@@ -66,6 +67,10 @@ void CSipServerInfo::Update( CSipServerInfo & clsInfo )
 	m_strPassWord = clsInfo.m_strPassWord;
 	m_strHa1 = clsInfo.m_strHa1;
 	m_bSecAgree = clsInfo.m_bSecAgree;
+	m_clsIpsec.m_bEnabled = clsInfo.m_clsIpsec.m_bEnabled;
+	m_clsIpsec.m_strAlg = clsInfo.m_clsIpsec.m_strAlg;
+	m_clsIpsec.m_strEalg = clsInfo.m_clsIpsec.m_strEalg;
+	m_clsIpsec.m_iPortBase = clsInfo.m_clsIpsec.m_iPortBase;
 	m_strSecurityClient = clsInfo.m_strSecurityClient;
 	m_strSecurityVerifyOverride = clsInfo.m_strSecurityVerifyOverride;
 	m_strAkaK = clsInfo.m_strAkaK;
@@ -139,6 +144,20 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 
 	// RFC 3329 sec-agree: 초기 REGISTER 에 제안 목록 + Require/Proxy-Require, 챌린지를 받은 뒤의
 	//   REGISTER 에는 서버 목록을 Security-Verify 로 그대로 echo 한다(강등 방지 — 서버가 원본과 대조).
+	if( m_clsIpsec.m_bEnabled )
+	{
+		// IPsec (§8.3): 제안할 포트쌍·SPI 를 준비하고(리스너 개방) 그것으로 Security-Client 를 만든다.
+		//   재인증에도 새 포트쌍·SPI 를 제안한다 (TS 33.203 §7.4.1a).
+		std::string strError;
+		if( m_clsIpsec.EnsureNext( pclsSipStack, strError ) == false )
+		{
+			CLog::Print( LOG_ERROR, "ipsec(ue): %s — REGISTER not sent", strError.c_str() );
+			delete pclsRequest;
+			return NULL;
+		}
+		m_bSecAgree = true;
+		m_strSecurityClient = m_clsIpsec.SecurityClient();
+	}
 	if( m_bSecAgree )
 	{
 		pclsRequest->AddHeader( "Security-Client", m_strSecurityClient.empty() ? "tls" : m_strSecurityClient.c_str() );
@@ -166,6 +185,23 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 	if( pclsResponse )
 	{
 		m_bAuth = AddAuth( pclsRequest, pclsResponse );
+
+		// IPsec (§8.3): 401 의 Security-Server(ipsec-3gpp) + 방금 계산한 CK/IK 로 SA 셋을 설치하고,
+		//   답안 REGISTER 는 새 port_uc 에서 보낸다 (Via 자기주소 → 그 리스너 소켓, SA 1).
+		if( m_clsIpsec.m_bEnabled && m_bAuth && m_strAkaCk.size() == 16 && m_strAkaIk.size() == 16 )
+		{
+			std::string strError;
+			if( m_clsIpsec.OnChallenge( pclsSipStack, m_strSecurityServer, m_strIp, m_strAkaCk, m_strAkaIk,
+			                            m_iLoginTimeout + 30, strError ) == false )
+			{
+				CLog::Print( LOG_ERROR, "ipsec(ue): sa setup failed (%s) — REGISTER not sent", strError.c_str() );
+				delete pclsRequest;
+				return NULL;
+			}
+			char szBranch[SIP_BRANCH_MAX_SIZE];
+			SipMakeBranch( szBranch, sizeof( szBranch ) );
+			pclsRequest->AddVia( pclsSipStack->m_clsSetup.m_strLocalIp.c_str(), m_clsIpsec.SendPortForAnswer(), szBranch );
+		}
 
 		/* 
 		std::string	strToTag;
@@ -300,6 +336,8 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 		{
 			strPassword = clsAka.strRes;
 		}
+		m_strAkaCk = clsAka.strCk;
+		m_strAkaIk = clsAka.strIk;
 		std::string strA1 = clsCredential.m_strUserName + ":" + clsCredential.m_strRealm + ":" + strPassword;
 		char szAkaMd5[33];
 		SipMd5Buffer( (const unsigned char *)strA1.data(), (int)strA1.size(), szAkaMd5 );

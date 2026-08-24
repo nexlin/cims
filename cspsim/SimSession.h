@@ -115,6 +115,16 @@ public:
       m_clsServerInfo.m_iAkaSqnMs = sqnMs;
     }
 
+    /** IMS AKA + IPsec 단말 (sip_access_security.md §8.3). sec-agree 를 켜고 Security-Client 에
+     * ipsec-3gpp(단말 spi/port) 만 제안한다. -aka_k/-aka_opc 필수, transport udp. 세션당 스택이
+     * 하나이므로 보호 포트쌍은 로컬 포트+1/+2 (재인증마다 +2). */
+    void SetIpsec(bool b, const std::string &alg, const std::string &ealg) {
+      m_clsServerInfo.m_clsIpsec.m_bEnabled = b;
+      if (!alg.empty()) m_clsServerInfo.m_clsIpsec.m_strAlg = alg;
+      if (!ealg.empty()) m_clsServerInfo.m_clsIpsec.m_strEalg = ealg;
+      if (b) m_clsServerInfo.m_bSecAgree = true;
+    }
+
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }
     void SetCscHost(const std::string& h, int p, bool tls) { m_strCscHost = h; m_iCscPort = p; m_bCscTls = tls; }

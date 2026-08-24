@@ -37,6 +37,7 @@ bool CCspLocalNodeMap::Sync() {
             n.bind_ip = row.GetString( "bind_ip", "0.0.0.0" );
             n.bind_port = (int)row.GetInt( "bind_port", 0 );
             n.protocol = row.GetString( "protocol", "UDP" );
+            n.client_port = (int)row.GetInt( "client_port", 0 );
             n.thread_count = (int)row.GetInt( "thread_count", 0 );
             n.enabled = _boolish( row.GetString( "enabled" ), true );
             n.is_primary = _boolish( row.GetString( "is_primary" ), false );
@@ -80,11 +81,65 @@ LocalNodeInfo CCspLocalNodeMap::GetById( const std::string &id ) const {
     return LocalNodeInfo();
 }
 
+/** IPsec 접속점 n 의 역할 id 가 listenerIntId 와 같으면 그 역할 */
+static EIpsecListenerRole _ipsecRoleOf( const LocalNodeInfo &n, int recordIntId, int listenerIntId ) {
+    if ( !n.IsIpsec() ) return IPSEC_LISTENER_NONE;
+    static const EIpsecListenerRole arr[3] = { IPSEC_LISTENER_SERVER_UDP, IPSEC_LISTENER_SERVER_TCP,
+                                               IPSEC_LISTENER_CLIENT_UDP };
+    for ( int i = 0; i < 3; ++i )
+        if ( CspIpsecListenerIntId( recordIntId, arr[i] ) == listenerIntId ) return arr[i];
+    return IPSEC_LISTENER_NONE;
+}
+
 LocalNodeInfo CCspLocalNodeMap::GetByIntId( int listenerIntId ) const {
     if ( listenerIntId <= 0 ) return LocalNodeInfo();
     std::lock_guard<std::mutex> lk( m_mutex );
     for ( const auto &kv : m_byName ) {
-        if ( CspUuidToIntId( kv.second.id ) == listenerIntId ) return kv.second;
+        const int iRec = CspUuidToIntId( kv.second.id );
+        if ( iRec == listenerIntId ) return kv.second;
+        if ( _ipsecRoleOf( kv.second, iRec, listenerIntId ) != IPSEC_LISTENER_NONE ) return kv.second;
+    }
+    return LocalNodeInfo();
+}
+
+EIpsecListenerRole CCspLocalNodeMap::GetIpsecRole( int listenerIntId ) const {
+    if ( listenerIntId <= 0 ) return IPSEC_LISTENER_NONE;
+    std::lock_guard<std::mutex> lk( m_mutex );
+    for ( const auto &kv : m_byName ) {
+        EIpsecListenerRole e = _ipsecRoleOf( kv.second, CspUuidToIntId( kv.second.id ), listenerIntId );
+        if ( e != IPSEC_LISTENER_NONE ) return e;
+    }
+    return IPSEC_LISTENER_NONE;
+}
+
+int CCspLocalNodeMap::GetListenerPort( int listenerIntId ) const {
+    if ( listenerIntId <= 0 ) return 0;
+    std::lock_guard<std::mutex> lk( m_mutex );
+    for ( const auto &kv : m_byName ) {
+        const int iRec = CspUuidToIntId( kv.second.id );
+        if ( iRec == listenerIntId ) return kv.second.bind_port;
+        EIpsecListenerRole e = _ipsecRoleOf( kv.second, iRec, listenerIntId );
+        if ( e == IPSEC_LISTENER_CLIENT_UDP ) return kv.second.client_port;
+        if ( e != IPSEC_LISTENER_NONE ) return kv.second.bind_port;
+    }
+    return 0;
+}
+
+int CCspLocalNodeMap::ToRecordIntId( int listenerIntId ) const {
+    if ( listenerIntId <= 0 ) return listenerIntId;
+    std::lock_guard<std::mutex> lk( m_mutex );
+    for ( const auto &kv : m_byName ) {
+        const int iRec = CspUuidToIntId( kv.second.id );
+        if ( _ipsecRoleOf( kv.second, iRec, listenerIntId ) != IPSEC_LISTENER_NONE ) return iRec;
+    }
+    return listenerIntId;
+}
+
+LocalNodeInfo CCspLocalNodeMap::GetIpsecNode() const {
+    std::lock_guard<std::mutex> lk( m_mutex );
+    for ( const auto &kv : m_byName ) {  // map 은 name 사전식
+        const LocalNodeInfo &n = kv.second;
+        if ( n.enabled && n.IsIpsec() && n.edge == "access" ) return n;
     }
     return LocalNodeInfo();
 }

@@ -19,6 +19,7 @@
 #include "UserMap.h"
 
 #include "CspAddressing.h"
+#include "IpsecSaSet.h"
 #include "Log.h"
 #include "MemoryDebug.h"
 #include "SipParserDefine.h"
@@ -38,13 +39,28 @@ CUserInfo::CUserInfo()
       m_iLastSeenTime( 0 ),
       m_bMcDataMsrp( false ),
       m_iRegisterCSeq( 0 ),
-      m_bIntegrityProtected( false ) {
+      m_bIntegrityProtected( false ),
+      m_iSaReqId( 0 ),
+      m_iSendPort( 0 ),
+      m_iSendListenerId( 0 ) {
 }
 
 void CUserInfo::GetCallRoute( CSipCallRoute &clsRoute ) {
     clsRoute.m_strDestIp = m_strIp;
-    clsRoute.m_iDestPort = m_iPort;
+    clsRoute.m_iDestPort = GetSendPort();
     clsRoute.m_eTransport = m_eTransport;
+    if ( m_iSendListenerId > 0 ) {
+        // IPsec: 서버 요청은 port_pc 소켓에서 (UE ip, port_us) 로 — Via 자기주소가 그 소켓을 고른다 (SA 3)
+        clsRoute.m_strOutboundLocalIp = CspAddressing::GetLocalSipAddress( m_iSendListenerId );
+        clsRoute.m_iOutboundLocalPort = CspAddressing::GetLocalSipPort( m_iSendListenerId, 0 );
+    }
+}
+
+/** 바인딩이 사라질 때 결부 SA 셋을 회수한다 (유예 = 마지막 응답이 SA 위로 나갈 시간) */
+static void _releaseBindingSa( const CUserInfo &clsBind, const char *pszWhy ) {
+    if ( clsBind.m_iSaReqId == 0 ) return;
+    CLog::Print( LOG_DEBUG, "ipsec: binding gone (%s) → release reqid=0x%x", pszWhy, clsBind.m_iSaReqId );
+    gclsIpsecSaSetMap.Release( clsBind.m_iSaReqId, IPSEC_RELEASE_GRACE_SEC );
 }
 
 size_t CUserMap::_findBinding( const USER_BINDING_LIST &clsList, const std::string &strIp, int iPort,
@@ -92,7 +108,8 @@ CUserMap::~CUserMap() {
  * @param pclsXmlUser	XML 에 저장된 사용자 정보
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
-bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bIntegrityProtected ) {
+bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bIntegrityProtected,
+                       const CUserInfo *pclsIpsec ) {
     CUserInfo clsInfo;
     std::string strUserId;
     USER_MAP::iterator itMap;
@@ -109,6 +126,11 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
 
     clsInfo.m_eTransport = pclsMessage->m_eTransport;
     clsInfo.m_bIntegrityProtected = bIntegrityProtected;
+    if ( pclsIpsec ) {
+        clsInfo.m_iSaReqId = pclsIpsec->m_iSaReqId;
+        clsInfo.m_iSendPort = pclsIpsec->m_iSendPort;
+        clsInfo.m_iSendListenerId = pclsIpsec->m_iSendListenerId;
+    }
     time( &clsInfo.m_iLoginTime );
 
     clsInfo.m_strGroupId = pclsXmlUser->m_strOrganizationId;
@@ -174,6 +196,9 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
                 CLog::Print( LOG_DEBUG, "user(%s) binding replaced (%s:%d:%d → %s:%d:%d)", strUserId.c_str(),
                              clsList[k - 1].m_strIp.c_str(), clsList[k - 1].m_iPort, clsList[k - 1].m_eTransport,
                              clsInfo.m_strIp.c_str(), clsInfo.m_iPort, clsInfo.m_eTransport );
+                // 재인증으로 새 SA 셋을 확정한 경우 구 셋은 IpsecSaSet 이 retiring 으로 회수한다 — 여기서는
+                //   다른 셋(재인증이 아닌 교체)만 회수
+                if ( clsList[k - 1].m_iSaReqId != clsInfo.m_iSaReqId ) _releaseBindingSa( clsList[k - 1], "replaced" );
                 clsList.erase( clsList.begin() + ( k - 1 ) );
             }
 
@@ -185,6 +210,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
                 CLog::Print( LOG_DEBUG, "user(%s) binding cap — drop oldest (%s:%d:%d)", strUserId.c_str(),
                              clsList[iOldest].m_strIp.c_str(), clsList[iOldest].m_iPort,
                              clsList[iOldest].m_eTransport );
+                _releaseBindingSa( clsList[iOldest], "cap" );
                 clsList.erase( clsList.begin() + iOldest );
             }
             clsList.push_back( clsInfo );
@@ -205,6 +231,12 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
             clsBind.m_iLoginTime = clsInfo.m_iLoginTime;
             clsBind.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
             clsBind.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
+            if ( pclsIpsec ) {
+                // 같은 flow 의 재등록 — 재인증이면 새 SA 셋으로 결부가 바뀐다 (구 셋은 IpsecSaSet 이 retiring)
+                clsBind.m_iSaReqId = clsInfo.m_iSaReqId;
+                clsBind.m_iSendPort = clsInfo.m_iSendPort;
+                clsBind.m_iSendListenerId = clsInfo.m_iSendListenerId;
+            }
             if ( clsInfo.m_strContactUri.empty() == false ) {
                 clsBind.m_strContactUri = clsInfo.m_strContactUri;
                 clsBind.m_clsContactParamList = clsInfo.m_clsContactParamList;
@@ -320,6 +352,7 @@ bool CUserMap::Delete( const char *pszUserId ) {
     m_clsMutex.acquire();
     itMap = m_clsMap.find( pszUserId );
     if ( itMap != m_clsMap.end() ) {
+        for ( size_t i = 0; i < itMap->second.size(); ++i ) _releaseBindingSa( itMap->second[i], "unregistered" );
         m_clsMap.erase( itMap );
         CLog::Print( LOG_DEBUG, "user(%s) is deleted", pszUserId );
         bRes = true;
@@ -354,6 +387,9 @@ bool CUserMap::SetIpPort( const char *pszUserId, const char *pszIp, int iPort, E
         //   아닌 경우의 도달을 살리는 용도.
         for ( size_t i = 0; i < itMap->second.size(); ++i ) {
             if ( itMap->second[i].m_eTransport != eTransport ) continue;
+            // IPsec 바인딩은 SA selector 가 (ip, port_uc) 를 고정한다 — 다른 주소의 요청은 게이트가 이미
+            //   거절했고, 옮기면 SA 와 어긋난다
+            if ( itMap->second[i].m_iSaReqId != 0 ) continue;
             itMap->second[i].m_strIp = pszIp;
             itMap->second[i].m_iPort = iPort;
             time( &itMap->second[i].m_iLastSeenTime );
@@ -434,6 +470,7 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
                     clsLastRemoved = clsBind;
                     bRemoved = true;
                 }
+                _releaseBindingSa( clsBind, bTimeout ? "expired" : "flow dead" );
                 clsList.erase( clsList.begin() + ( i - 1 ) );
             }
         }
@@ -494,7 +531,13 @@ void CUserMap::SendOptions() {
         if ( pclsMessage == NULL ) break;
 
         pclsMessage->m_strSipMethod = SIP_METHOD_OPTIONS;
-        pclsMessage->m_clsReqUri.Set( SIP_PROTOCOL, itList->c_str(), clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort );
+        pclsMessage->m_clsReqUri.Set( SIP_PROTOCOL, itList->c_str(), clsUserInfo.m_strIp.c_str(),
+                                      clsUserInfo.GetSendPort() );
+        if ( clsUserInfo.m_iSendListenerId > 0 ) {
+            // IPsec: port_pc 소켓에서 port_us 로 (SA 3) — Via 자기주소로 소켓을 고른다
+            pclsMessage->AddVia( CspAddressing::GetLocalSipAddress( clsUserInfo.m_iSendListenerId ).c_str(),
+                                 CspAddressing::GetLocalSipPort( clsUserInfo.m_iSendListenerId, 0 ) );
+        }
 
         // R6: From URI 는 access_services 의 server_identity_uri 기반으로 생성.
         //   volte 서비스 default. helper 가 URI 문자열 ("sip:cspserver@domain") 반환 →
@@ -519,7 +562,7 @@ void CUserMap::SendOptions() {
         pclsMessage->m_clsCallId.Make( strCallIdHost.c_str() );
 
         pclsMessage->m_clsCSeq.Set( clsUserInfo.m_iOptionsSeq, SIP_METHOD_OPTIONS );
-        pclsMessage->AddRoute( clsUserInfo.m_strIp.c_str(), clsUserInfo.m_iPort );
+        pclsMessage->AddRoute( clsUserInfo.m_strIp.c_str(), clsUserInfo.GetSendPort() );
 
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsMessage );
     }

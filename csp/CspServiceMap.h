@@ -26,6 +26,9 @@ struct ServiceInfo {
     // 단말 NAT 미디어 정책 (docs/design/features/ue_nat_traversal.md §4)
     std::string media_nat_mode;  // off(기본) | auto | force
     std::string latch_ip_guard;  // strict(기본) | off
+    /** sec_mechanisms[] 에 ipsec-3gpp — IMS AKA+IPsec(P4, sip_access_security.md §8.3) 제시 허용.
+     *  media_nat_mode≠off 와는 상호배제 (로드 시 무시 + ERROR). tls 는 항상 제시된다. */
+    bool sec_ipsec = false;
     int priority = 100;
     bool enabled = true;
     std::vector<std::string> allowed_local_node_refs;  // v3: LocalNode name 참조 (SOT)

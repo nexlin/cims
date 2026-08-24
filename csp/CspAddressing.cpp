@@ -40,8 +40,9 @@ namespace CspAddressing {
 
     int GetLocalSipPort( int inbound_listener_id, int fallback_port ) {
         if ( inbound_listener_id > 0 ) {
-            LocalNodeInfo n = gclsLocalNodeMap.GetByIntId( inbound_listener_id );
-            if ( n.IsValid() && n.bind_port > 0 ) return n.bind_port;
+            // IPsec 접속점의 client 역할 리스너는 client_port — 역할별 포트는 LocalNodeMap 이 안다
+            const int iPort = gclsLocalNodeMap.GetListenerPort( inbound_listener_id );
+            if ( iPort > 0 ) return iPort;
         }
         return fallback_port;
     }

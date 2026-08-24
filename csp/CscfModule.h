@@ -26,6 +26,8 @@ enum ECheckAuthResult {
 /**
  * @brief CSCF Module — REGISTER, SUBSCRIBE 처리, 인증
  */
+struct SecAgreeIpsecOffer;  // SecAgree.h
+
 class CCscfModule : public IModule {
 public:
     const char *GetName() const override {
@@ -54,12 +56,15 @@ public:
     // IMS AKA (sip_access_security.md §8.2, RFC 3310 / TS 33.203 Annex X)
     //   AV 를 CSC 에서 받아 401 (nonce=base64(RAND‖AUTN), algorithm=AKAv1-MD5) 을 보낸다.
     //   strRandPrevHex/strAutsHex 가 있으면 재동기(AUTS) 요청이다. CSC 미도달은 504, AUTS 불일치·미가입은 403.
+    //   pclsIpsec: 단말의 ipsec-3gpp 제안(받아들인 것) — AV 의 CK/IK 로 임시 SA 셋을 설치하고 그 파라미터를 실은
+    //   Security-Server 를 401 에 동봉한다 (sip_access_security.md §8.3). NULL 이면 pszSecurityServer 그대로.
     static bool SendAkaChallenge( CSipMessage *pclsMessage, const CspUser &clsUser, const std::string &strRealm,
                                   bool bStale = false, const char *pszSecurityServer = NULL,
-                                  const std::string &strRandPrevHex = "", const std::string &strAutsHex = "" );
+                                  const std::string &strRandPrevHex = "", const std::string &strAutsHex = "",
+                                  const SecAgreeIpsecOffer *pclsIpsec = NULL );
     /** From 가입자의 체계에 맞는 REGISTER 챌린지 — aka 면 SendAkaChallenge, 아니면 Digest 401. */
     static bool SendRegisterChallenge( CSipMessage *pclsMessage, const std::string &strRealm, bool bStale,
-                                       const char *pszSecurityServer );
+                                       const char *pszSecurityServer, const SecAgreeIpsecOffer *pclsIpsec = NULL );
 
     // REGISTER 인증 체크 (EventIncomingRequestAuth에서 사용)
     static bool CheckAuthrization( CSipMessage *pclsMessage );

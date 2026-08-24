@@ -6,6 +6,7 @@
 #include <openssl/x509.h>
 
 #include "CspConfigCache.h"
+#include "CspLocalNodeMap.h"
 #include "FmReporter.h"
 #include "Log.h"
 #include "SipServerSetup.h"
@@ -39,7 +40,7 @@ std::string CCspListenerManager::_normalizeProtocol( const std::string &protocol
     std::string p;
     p.reserve( protocol.size() );
     for ( char c : protocol ) p.push_back( ( c >= 'a' && c <= 'z' ) ? (char)( c - 'a' + 'A' ) : c );
-    if ( p == "UDP" || p == "TCP" || p == "TLS" ) return p;
+    if ( p == "UDP" || p == "TCP" || p == "TLS" || p == "IPSEC" ) return p;
     return std::string();  // WS/WSS 등 psip 미지원
 }
 
@@ -146,6 +147,32 @@ bool CCspListenerManager::Sync() {
         m.threadCount = iThreads;
 
         if ( m.port <= 0 || m.id == 0 ) continue;
+
+        // IPsec 접속점(sip_access_security.md §8.3) — 보호 포트쌍 하나가 psip 리스너 셋으로 열린다:
+        //   port_ps UDP + port_ps TCP (단말 요청 수신, SA 1/2) + port_pc UDP (서버 발신 소켓, SA 3/4).
+        //   각 리스너의 int id 는 레코드 id 에 역할 태그를 얹은 값 — 수신 메시지의 m_iListenerId 로
+        //   "보호 서버 포트로 왔는가" 를 판정하고(게이트), 발신은 Via=bind_ip:port_pc 로 그 소켓을 고른다.
+        if ( m.protocol == "IPSEC" ) {
+            const int iClientPort = (int)row.GetInt( "client_port", 0 );
+            if ( iClientPort <= 0 || iClientPort == m.port ) {
+                CLog::Print( LOG_ERROR,
+                             "ListenerManager: IPSEC id=%d %s:%d — client_port 가 없거나 bind_port 와 같다. skip", m.id,
+                             m.bindIp.c_str(), m.port );
+                continue;
+            }
+            ManagedInfo ps = m, pt = m, pc = m;
+            ps.id = CspIpsecListenerIntId( m.id, IPSEC_LISTENER_SERVER_UDP );
+            ps.protocol = "UDP";
+            pt.id = CspIpsecListenerIntId( m.id, IPSEC_LISTENER_SERVER_TCP );
+            pt.protocol = "TCP";
+            pc.id = CspIpsecListenerIntId( m.id, IPSEC_LISTENER_CLIENT_UDP );
+            pc.protocol = "UDP";
+            pc.port = iClientPort;
+            desired.push_back( ps );
+            desired.push_back( pt );
+            desired.push_back( pc );
+            continue;
+        }
 
         // R6 (2026-06-08): 옛 "_isAlreadyBound → skip" 블록 제거.
         //   부트스트랩 UDP 바인딩을 없앤 뒤로는 ListenerManager 가 primary 포함 모든 SIP 리스너를

@@ -1192,7 +1192,7 @@ bool CModuleDispatcher::EventGetLegDest( const char *pszCallId, const char *pszP
     if ( clsUserInfo.m_strIp.empty() || clsUserInfo.m_iPort <= 0 ) return false;
 
     strIp = clsUserInfo.m_strIp;
-    iPort = clsUserInfo.m_iPort;
+    iPort = clsUserInfo.GetSendPort();  // IPsec 바인딩은 port_us
     eTransport = clsUserInfo.m_eTransport;
     return true;
 }

@@ -2,11 +2,12 @@
 
 UE↔CSP 접속 구간의 보안 체계를 3GPP TS 33.203 정합 구조로 끌어올리는 설계 정본이다.
 이 문서는 도입 로드맵(P0~P4) 중 **P0(채널 정책 게이트)**·**P1(인증 자료 경계 재편)**·
-**P2(Sec-Agree 협상)**·**P3(IMS AKA over TLS)** 의 상세 설계를 담는다. P4(IMS AKA+IPsec)는
-[§8 로드맵](#8-로드맵-p2p4) 에 자리만 둔다.
+**P2(Sec-Agree 협상)**·**P3(IMS AKA over TLS)**·**P4(IMS AKA+IPsec)** 의 상세 설계를 담는다.
 
 > **상태**: P0·P1·P2·P3 구현 반영(P2·P3 = 서버·CSC·cspsim·verify. Android UE 는 sec-agree 헤더(pjsip 패치)와
-> AKA 자격(`/provisioning/me` `account.aka` → pjsip AKA cred) 연결이 단말 쪽 후속). [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
+> AKA 자격(`/provisioning/me` `account.aka` → pjsip AKA cred) 연결이 단말 쪽 후속). P4 = 서버(CSP)·psip/cspsim·
+> agent·CSC·verify 구현 반영 — 범위 고정: Annex M 미포함(NAT 와 두 겹 상호배제), psip/cspsim 한정. 실설치 검증
+> (S3-SCN-IPSEC-LIVE)은 `CAP_NET_ADMIN`·IPSEC LocalNode·AKA 마이그레이션이 있는 환경에서만 돈다. [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
 > 반영 — CSC 는 `passwd` 컬럼에 쓰지 않고 `/provisioning/me` 의 `sipPassword` 는 항상 `null` 이다.
 > 값 소거(⑤-c)는 배포 환경별 운영 절차, ⑥ 컬럼 DROP 은 `sql/migrate_subscription_drop_passwd.sql`
 > (후속 릴리스 — CSP/cspsim 이 `passwd` 를 SELECT 하지 않게 된 뒤 적용).
@@ -24,7 +25,7 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 | SIP Digest (평문) | TS 33.203 Annex N | UDP/TCP | 현행 |
 | SIP Digest + TLS | Annex N+O | TLS/TCP | 현행(게이트 없음) → **P0 에서 완성**, 협상·강등 방지는 **P2** |
 | IMS AKA + TLS | Annex X | TLS | **P3 — 구현 반영**([§8.2](#82-p3--ims-aka-over-tls-annex-x--구현-반영)) |
-| IMS AKA + IPsec | 본문 §6~7 | UDP/TCP (SA 공용) | P4 |
+| IMS AKA + IPsec | 본문 §6~7 | UDP/TCP (SA 공용) | **P4 — 구현 반영**([§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영)), NAT(Annex M) 미포함 |
 
 이 문서의 두 단계가 기대는 표준 조항:
 
@@ -298,7 +299,13 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 | V15 | AKA 가입자의 TLS REGISTER — 401(`algorithm=AKAv1-MD5`, nonce=base64(RAND‖AUTN)) → RES 답안 | 200, `Service-Route` `;transport=tls` |
 | V16 | 틀린 K(AUTN MAC 불일치) — 단말이 빈 `response` 로 보고 | 403 |
 | V17 | 단말 SQN_MS 가 앞서 있음 — `auts` 동봉 → 서버 재동기 → 새 401 → 답안 | 200, DB `sqn` = SQN_MS+1 |
-| V18 | AKA 가입자의 UDP REGISTER (sip_transport 와 무관) | 403 — Annex X 는 TLS 위에서만 |
+| V18 | AKA 가입자의 UDP REGISTER (sip_transport 와 무관, `Security-Client` 없음) | 403 — 보호 채널 밖. (sec-agree 제안을 실은 초기 REGISTER 는 협상 부트스트랩이라 통과한다 — V19) |
+| V19 | AKA 가입자의 `ipsec-3gpp` 제안 + NAT 흔적(top Via `sent-by` 사설 IP ≠ 실소스) 초기 REGISTER | 401 의 `Security-Server` 에 `ipsec-3gpp` 없음(`tls` 만) + `ipsec: nat detected` 로그. 같은 가입자의 제안 없는 UDP REGISTER 는 403. 환경에 IPSEC LocalNode·CSP ipsec 가용이 있으면 NAT 흔적 없는 제안은 `ipsec-3gpp` 첫 항목(양성 대조) — 커널 특권 불필요 |
+| V20 | Digest 가입자의 `ipsec-3gpp` 제안 | `Security-Server` 에 `tls` 만 — 커널 특권 불필요 |
+| V21 | AKA 가입자 cspsim `-ipsec` 등록 — 401(`Security-Server` ipsec-3gpp spi/port) → ESP 위 답안 | 200 (`ipsec(ue): registered over SA`), 서버 로그 `ipsec: sa set established` |
+| V22 | `Security-Verify` 변조(`-sec_verify`) | 494 + 임시 SA 회수 — 등록 실패 |
+| V23 | 해제(`Expires: 0`) | 200, 단말·서버 SA 회수 로그 |
+| V24 | `sec_mechanisms` 에 `ipsec-3gpp` 이면서 `media_nat_mode≠off` 인 access service | 로드 시 `ipsec-3gpp` 무시 + ERROR (서비스 유지) — CSP 로그로 확인(수동) |
 
 **V1·V2·V7 은 S3 검증 항목으로 자동화되어 있다** — 원시 SIP 프로브(`verify/lib/common/sip_probe.py`):
 - `S3-SCN-CHANNEL-POLICY`(V1·V2): 대상 가입자 `sip_transport` 를 DB 에서 `TLS` 로 올리고 CSP 4421
@@ -322,6 +329,11 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
   본다. psip/cspsim 의 OpenSSL Milenage 는 `tests/psip_aka_test.cpp` 가 같은 벡터로 검증한다. 전제(마이그레이션
   미적용·`AuC.Kek`/`InternalApi.Token` 미설정)가 없으면 SKIP.
 
+- `S3-SCN-IPSEC`(V19·V20): `sip_probe.probe_register_offer` 가 `Security-Client: ipsec-3gpp;…` 를 실은 초기 REGISTER 를
+  보내고 `Security-Server` 를 읽는다(Via sent-by 를 꾸며 NAT 판정을 재현). V19 는 시드 가입자를 AKA 로 잠시 올렸다가
+  복원한다(AKA 컬럼이 없으면 V19 만 생략). `S3-SCN-IPSEC-LIVE`(V21~V23): cspsim `-ipsec -aka_k …` 를 구동해 단말
+  로그로 판정한다 — IPSEC LocalNode·CSP `ipsec: available`·cspsim `cap_net_admin`·AKA 마이그레이션이 없으면 SKIP.
+
 V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
 cspsim 이 이제 call INVITE 를 세션 transport 로 보내(§7 보완 완료) UDP/TCP/TLS 전 조합에서 성립한다.
 V6(이행 스크립트 멱등)·V8(`/provisioning/me`)은 스크립트/CSC 경로라 별도다. 반복 위반 알람은
@@ -342,7 +354,7 @@ P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재�
 - V3~V6·V8 의 자동화(V1·V2·V7·V9~V12·V14~V18 은 S3 검증 항목으로 자동화 완료 — §6).
 - Android UE 의 AKA: `/provisioning/me` `account.aka` 를 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 연결하는
   단말 작업. 콘솔 프로비저닝 화면의 `auth_scheme`/K/OPc 입력(현재는 API 로만).
-- AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec) 에서 SA 키로 소비한다.
+- AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec, [§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영)) 에서 SA 키로 소비한다.
 - Android UE 의 sec-agree(§8.1) — pjsip 이 `Security-*` 헤더를 만들지 않으므로 단말 쪽 패치가 선행 조건이다.
   그때까지 `Setup.SecAgree.Require` 는 false(제안하는 단말만 협상)로 둔다.
 - 494 급증(협상 실패 반복)의 알람 채번 — A-SEC-003(게이트 403)과 같은 계열로 채번할 후보.
@@ -351,7 +363,7 @@ P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재�
 
 ## 8. 로드맵 (P2~P4)
 
-상세 설계는 각 단계 착수 시 이 문서를 확장한다. 여기서는 범위·선행 조건·핵심 결정만 적는다.
+P2·P3·P4 모두 구현 반영.
 
 ### 8.1 P2 — Sec-Agree (RFC 3329) — 구현 반영
 
@@ -391,7 +403,7 @@ UE                                   CSP
 | 대조 통과 | 200, 바인딩 `m_bIntegrityProtected=true` | 3GPP integrity-protected 상당 내부 플래그 |
 
 대조는 **인증 뒤**에 둔다 — 미인증 요청이 494 로 발급 상태를 흔들지 못하게 한다. 서버 목록은
-도입 시점 기준 `tls` 뿐이다(`ipsec-3gpp` 는 P4 에서 파라미터와 함께 추가). 등록 해제(`Expires: 0`)
+`tls` 뿐이다(`ipsec-3gpp` 는 P4 — [§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영) — 에서 파라미터와 함께 추가). 등록 해제(`Expires: 0`)
 시 발급 기록을 지운다.
 
 **게이트 합류** (`CCscfModule::CheckChannelPolicy`): TLS 강제의 근거가 둘이 된다 — 정책 축
@@ -512,19 +524,186 @@ POST /internal/aka/av            Authorization: Bearer <InternalApi.Token>
 **검증**: §6 V14~V18, `S3-SCN-AKA`. 단위: `csc/src/tests/test_milenage.py`(TS 35.208 세트 1~3)·`test_auc.py`,
 `tests/psip_aka_test.cpp`.
 
-### 8.3 P4 — IMS AKA + IPsec (본문 §6~7)
+### 8.3 P4 — IMS AKA + IPsec (본문 §6~7) — 구현 반영
 
-**착수 게이트: 3GPP 액세스(UICC 단말) 직접 interop 요구가 확정될 때만.** 그 요구가 없으면
-P3 까지가 자가망 구조에서 표준이 제공하는 최대치다.
+3GPP 액세스(UICC 단말)와의 직접 interop 을 위한 **표준 완결 단계**다 — 자가망 단말에는 P3(Annex X) 가 같은 보호
+수준을 주므로, 이 단계의 가치는 보안 강화가 아니라 표준 조합 표(§1)의 마지막 칸을 채우는 데 있다. 아래 네 결정으로
+범위를 닫는다.
 
-- P2 협상에 `ipsec-3gpp` 추가(spi-c/spi-s, port-c/port-s, alg 파라미터).
-- 등록 절차 중 CK/IK 로 **커널 XFRM 에 ESP transport mode SA 4개(2쌍)** 를 동적
-  프로그래밍(netlink), 보호 포트쌍(port_ps/port_pc)은 **UDP·TCP 공용** — 같은 포트에
-  UDP 소켓+TCP 리스너를 함께 연다. SA 수명은 등록 수명 결부, 탈등록·만료 시 회수.
-- 운영 비용이 네 조합 중 최대: `CAP_NET_ADMIN` 특권(agent/배포 계약 변경), HA 절체 시
-  SA 재프로그래밍, 장애 시 커널 상태 잔류 청소.
+| 축 | 결정 | 근거 |
+|---|---|---|
+| NAT | **Annex M(UDP 캡슐화 ESP) 미포함.** ESP transport mode 만. NAT 뒤 단말은 IPsec 대상이 아니며 access service 단위로 상호배제한다(아래 "NAT 상호배제 — 두 겹") | transport mode ESP 는 NAT 를 지나지 못하고(ESP 에는 포트가 없어 NAT 가 다중화 못 하고 SA selector 가 어긋난다) 실패가 **무증상 폐기**로 나타난다. 표준도 NAT 통과를 본문 밖(Annex M)에 둔다 |
+| 알고리즘 | 무결성 `hmac-sha-1-96`(선호)·`hmac-md5-96`, 암호 `aes-cbc`·`null`. `des-ede3-cbc` 는 제시하지 않는다 | TS 33.203 §6.3 — 무결성 두 알고리즘은 UE/P-CSCF 필수이고 커널(XFRM)이 둘 다 제공하므로 비용이 없다. 3DES 는 폐기 방향 |
+| 단말 | psip/cspsim(소프트-USIM) 한정. Android(pjsip) 는 범위 밖 | pjsip 은 IPsec SA 를 만들지 않는다 — 단말 쪽 별도 구현이며 이 단계의 검증 대상은 서버·프로토콜 정합이다 |
+| transport | UDP 가 검증 프로파일. TCP 는 같은 보호 포트쌍 위에서 규격상 허용되며 psip 의 발신 소스포트 bind 가 잔여 | TS 33.203 §7.1 — 보호 포트쌍은 UDP·TCP 공용 |
+
+**체계와 메커니즘의 분리 (§8.2 결정 유지).** 인증 체계(`auth_scheme`)는 프로비저닝이 정하고, 채널 보호 메커니즘
+(`tls` | `ipsec-3gpp`)은 RFC 3329 협상이 정한다. IPsec 은 AKA 의 CK/IK 없이는 성립하지 않으므로 `ipsec-3gpp` 는
+**AKA 가입자에게만 제시**된다 — Digest 가입자가 제안하면 `Security-Server` 에는 `tls` 만 실린다. 따라서 가입자
+스키마는 바뀌지 않는다. `CspUser::requiresTls()` 는 `requiresProtectedChannel()` 로 일반화된다: AKA 가입자의 요청은
+**TLS 연결 또는 이 등록에 결부된 SA** 위에서만 받는다(§3 게이트). `sip_transport=TLS` 정책 축은 Digest 가입자용으로
+그대로다.
+
+**SA 모델 (TS 33.203 §7.1).** 노드 고정 보호 포트쌍 (port_ps, port_pc) 과 단말 포트쌍 (port_uc, port_us) 사이에
+단방향 ESP transport-mode SA 4개(2쌍). SPI 는 **수신 측**이 고른다.
+
+| SA | 방향 | 실리는 것 | SPI | 선택 주체 |
+|---|---|---|---|---|
+| 1 | UE:port_uc → CSP:port_ps | UE 요청 | spi_ps | CSP |
+| 2 | CSP:port_ps → UE:port_uc | UE 요청에 대한 응답 | spi_uc | UE |
+| 3 | CSP:port_pc → UE:port_us | CSP 요청(INVITE·NOTIFY·OPTIONS·MESSAGE) | spi_us | UE |
+| 4 | UE:port_us → CSP:port_pc | CSP 요청에 대한 응답 | spi_pc | CSP |
+
+키 확장(TS 33.203 §6.3): IK_esp = IK(`hmac-md5-96`, 128 bit) / IK ‖ IK[0..31](`hmac-sha-1-96`, 160 bit);
+CK_esp = CK(`aes-cbc`, 128 bit) / 없음(`null`). SA 수명 = 부여 만료(`Expires`) + 30 s(§7.4 — 늦은 재등록 응답 창).
+보호 포트쌍은 모든 단말이 공유하고 단말은 (IP, 포트, SPI) 로 갈린다. `Security-Client` 의 `spi-c/spi-s/port-c/port-s`
+는 단말 값(spi_uc/spi_us/port_uc/port_us), `Security-Server` 의 같은 파라미터는 서버 값(spi_pc/spi_ps/port_pc/port_ps)이다.
+
+**절차**
+
+```
+UE (soft-USIM: K/OPc)                  CSP (P/S-CSCF, 한 프로세스)                        CSC (HSS/AuC)
+ │ REGISTER (비보호 포트 5060, 무인증)   │                                                    │
+ │  Security-Client: ipsec-3gpp; alg=hmac-sha-1-96; ealg=aes-cbc;                         │
+ │    spi-c=spi_uc; spi-s=spi_us; port-c=port_uc; port-s=port_us  (, tls)                 │
+ │  Require/Proxy-Require: sec-agree     │                                                    │
+ │─────────────────────────────────────▶│ NAT 판정(top Via sent-by vs received/rport)         │
+ │                                      │ auth_scheme=aka → POST /internal/aka/av ──────────▶│
+ │                                      │◀──────────── {rand,autn,xres,ck,ik} ───────────────│
+ │                                      │ spi_ps/spi_pc 할당 · (alg,ealg)=단말 최고 선호 ∩ 서버 │
+ │                                      │ CK/IK 확장 키로 **임시 SA 4개 + 정책 커널 설치**       │
+ │ 401  WWW-Authenticate: Digest algorithm=AKAv1-MD5, nonce=base64(RAND‖AUTN)   (ck/ik 없음)│
+ │      Security-Server: ipsec-3gpp; q=0.2; alg=…; ealg=…; spi-c=spi_pc; spi-s=spi_ps;     │
+ │                       port-c=port_pc; port-s=port_ps,  tls; q=0.1                        │
+ │◀─────────────────────────────────────│                                                    │
+ │ Milenage → RES·CK·IK, 자기 SA 4개 설치                                                      │
+ │ REGISTER  (UE:port_uc → CSP:port_ps, ESP 위)                                               │
+ │  Authorization: Digest … algorithm=AKAv1-MD5, response=…, integrity-protected="yes"       │
+ │  Security-Client(동일) / Security-Verify(401 의 Security-Server echo)                       │
+ │─────────────────────────────────────▶│ RES 대조 → 수신 listener=port_ps ∧ 소스=(UE ip, port_uc) │
+ │                                      │  ∧ Verify 바이트 대조 → 임시 SA **확정**(수명=expires+30) │
+ │ 200 OK  (CSP:port_ps → UE:port_uc, ESP 위)                                                 │
+ │  Service-Route: <sip:<bind_ip>:port_ps;transport=udp;lr>                                  │
+ │◀─────────────────────────────────────│ 바인딩: 식별 (UE ip, port_uc) · 서버 발신 목적지 (UE ip, port_us) │
+```
+
+이후 CSP 가 거는 요청은 port_pc 소켓에서 (UE ip, port_us) 로 나가고(SA 3) 응답은 SA 4 로 돌아온다. 단말 요청은
+계속 SA 1/2 다. 서버는 401 을 보내기 **전에** SA 를 설치한다 — 단말의 답안 REGISTER 가 401 직후 ESP 로 도착한다.
+
+**서버 규칙** (§8.1 표에 얹는다 — 같은 `RecvRequestRegister` 경로):
+
+| 상황 | 동작 | 근거 |
+|---|---|---|
+| AKA 가입자의 **평문** 초기 REGISTER 에 `Security-Client` 가 있음 | 게이트 통과 → 챌린지 (그 401 이 `ipsec-3gpp` 또는 `tls` 목록을 싣는다) | RFC 3329 §2.2 / TS 33.203 §7.2 — 협상의 초기 REGISTER 는 비보호 채널로 온다(IPsec 부트스트랩). 제안 없는 평문 REGISTER 와 모든 비-REGISTER 는 종전대로 403 |
+| 초기 REGISTER 가 `ipsec-3gpp` 제안, 가입자 `auth_scheme=digest` | `Security-Server` 에 `tls` 만 (SA 미설치) | IPsec 키는 AKA 의 CK/IK — §1 조합 표 밖 |
+| `ipsec-3gpp` 제안인데 **NAT 감지**(top Via `sent-by` ≠ `received` 또는 포트 ≠ `rport`) | `tls` 만 + 로그 `ipsec: nat detected user=… sent-by=… received=…` | Annex M 미지원 — 협상 단계에서 갈라야 무증상 폐기를 피한다. 공통 메커니즘이 없으면 단말이 스스로 중단한다(RFC 3329 §2.3) |
+| `ipsec-3gpp` 제안인데 이 노드에 보호 포트쌍(IPSEC LocalNode)이 없거나 기동 자기점검에서 SA 설치 불가 | `tls` 만 + ERROR 로그(억제 1회) | 접속점 부재 = 제시 불가 |
+| 제안 파라미터 불량(spi/port 결측·중복, 지원 alg/ealg 없음) | 494 + `Security-Server` | RFC 3329 §2.2 — 협상 재시작 |
+| AV 발급 뒤 SA 설치 실패(커널 오류) | 504 + 임시 상태 회수 | HSS 미도달과 같은 "재시도" 부류(§8.2) |
+| 보호 포트로 온 답안 REGISTER: 인증 통과 ∧ 수신 listener=port_ps ∧ 소스=(ip, port_uc) 가 임시 SA 셋과 일치 ∧ Verify 대조 통과 | 200, SA 확정, 바인딩 `m_eProtection=ipsec` | TS 24.229 §5.2.2.1 — `integrity-protected="yes"` 판정 |
+| 답안 REGISTER 가 비보호 포트로 옴 (협상은 ipsec) | 494 + 임시 SA 회수 | 협상 결과 불이행 — §8.1 "negotiated tls but not on TLS" 규칙의 일반화 |
+| `Security-Verify` 불일치 | 494 + 새 `Security-Server` + 임시 SA 회수 | 강등/변조 |
+| 임시 SA 에 `Setup.Ipsec.TempSaTimeoutSec`(기본 32 = 64×T1) 안에 답안 없음 | 임시 SA 회수 + 발급 기록 삭제 | TS 24.229 §5.2.2.1 P-CSCF 임시 SA 처리 |
+| 등록 갱신 — 챌린지 없이 답안(nonce 재사용, nc 증가) 통과 | SA 수명 연장(`XFRM_MSG_UPDSA`) | §7.4 — 재인증 없는 갱신은 SA 유지 |
+| 재인증 갱신 — 새 401(새 AV) | 새 SA 셋(새 spi 4개)을 임시 설치, 답안은 **새 SA 위로**. 확정 시 구 SA 는 새 SA 위 첫 요청 수신 후(또는 잔여 수명) 회수 | TS 33.203 §7.4.1a / TS 24.229 §5.2.2.1 |
+| 해제(`Expires: 0`) | 200 OK 송신 뒤 SA 회수(응답 전송 유예 2 s) | §7.4 |
+| 바인딩 만료(`CUserMap::DeleteTimeout`) | SA 회수(커널 hard lifetime 이 이중 안전장치) | |
+| 비-REGISTER | AKA 가입자 요청은 TLS 결부 flow **또는** 결부 SA(listener=port_ps ∧ (ip, port_uc)) 위에서만 통과, 밖이면 403 — §3 게이트·§8.2 규칙의 일반화 | Annex O / 본문 §7 |
+
+채널-신원 결속: SA selector 가 (UE ip, 포트) 이므로 커널이 "이 SPI 로 복호된 패킷의 소스가 selector 와 같다" 를
+보장한다 — §3.2 의 (ip, port) 대리키 판정이 IPsec 에서는 **암호학적 결속**이 된다. §8.4 의 잔여는 TLS 에만 남는다.
+
+**NAT 상호배제 — 두 겹**
+
+| 겹 | 위치 | 규칙 |
+|---|---|---|
+| 정적(설정) | access service `sec_mechanisms` 로드(`CCspServiceMap::Sync`) | `ipsec-3gpp ∈ sec_mechanisms` ⇒ `media_nat_mode = off`. 위반이면 **`ipsec-3gpp` 만 무시 + ERROR** — 서비스(등록)는 살아 있고 `tls` 만 제시한다. 설정 오류가 가입자 등록을 끊지 않도록 한다 |
+| 동적(등록) | `RecvRequestRegister` 의 `Security-Server` 발급 직전 | 초기 REGISTER 의 NAT 판정(위 표) — 서비스가 허용해도 **그 단말**이 NAT 뒤면 `ipsec-3gpp` 를 빼고 제시 |
+
+정적 겹만으로 부족한 이유: 정책은 서비스 단위, NAT 는 단말 단위다 — "NAT 없음" 서비스에도 공유기 뒤 단말이
+들어올 수 있다. `latch_ip_guard` 는 미디어 latch 규칙이라 무관하다. 시그널링 NAT 처리(Via received/rport 각인,
+[ue_nat_traversal.md §2](ue_nat_traversal.md))는 IPsec 등록에도 그대로 돌지만 NAT 가 없으므로 항등이다.
+
+**설정**
+
+| 위치 | 키 | 의미 |
+|---|---|---|
+| LocalNode(`local_nodes.jsonl`) | `protocol=IPSEC`, `edge=access`, `bind_ip`, `bind_port`(=port_ps), `client_port`(=port_pc) | 보호 포트쌍 접속점 하나(노드당 하나). CSP 는 `bind_port` 에 **UDP 소켓 + TCP 리스너**를, `client_port` 에 발신용 UDP 소켓(+TCP 소스 bind)을 연다. 개설 실패는 [sip_tls_signaling.md §6.2](sip_tls_signaling.md) 의 접속점 격리·A-PRC-012 와 같은 계약 |
+| AccessService(`access_services.jsonl`) | `sec_mechanisms: ["tls"]`(기본) \| `["tls","ipsec-3gpp"]` | 이 서비스 가입자에게 제시할 메커니즘. `ipsec-3gpp` 는 노드에 IPSEC LocalNode 가 있고(`inbound_policy=restricted` 면 `allowed_local_node_refs` 에 포함) `media_nat_mode=off` 일 때만 유효 |
+| `Setup.Ipsec.SpiMin` / `SpiMax` | 기본 `0x10000000` ~ `0x1FFFFFFF` | 이 노드가 고르는 spi_ps/spi_pc 범위(수신 측 고유, 사용 중 값 회피) |
+| `Setup.Ipsec.ReqIdBase` | 기본 `0x43490000` | 이 프로세스가 만든 XFRM state/policy 의 소유 표식 — reqid ∈ [Base, Base+0xFFFF]. 기동·종료 시 그 범위를 일괄 회수. (XFRM `mark` 는 **패킷 매칭 조건**이라 표식으로 쓸 수 없다 — mark 0 인 SIP 패킷이 SA 에 걸리지 않는다) |
+| `Setup.Ipsec.TempSaTimeoutSec` | 기본 32 | 임시 SA 유예 |
+| `Setup.Ipsec.EalgPreference` | `aes-cbc`(기본) \| `null` | 단말 제안 q 가 동률일 때 서버 선호 |
+
+`Setup.Ipsec.*`·`sec_mechanisms` 는 SIGUSR1 재로드(다음 REGISTER 부터). IPSEC LocalNode 의 포트 변경은 살아있는 SA
+를 무효화하므로 **재기동** 항목이다.
+
+**커널 프로그래밍 — `ext/psip/SipStack/XfrmSa.{h,cpp}`** (CSP 와 psip UA 가 같이 쓴다 — 서버·단말의 SA 코드가 하나)
+
+- 순수 netlink(`NETLINK_XFRM`, libnl 미사용): `XFRM_MSG_NEWSA`(proto ESP, mode transport, spi, src/dst,
+  `XFRMA_ALG_AUTH_TRUNC` `hmac(sha1)`/`hmac(md5)` trunc 96, `XFRMA_ALG_CRYPT` `cbc(aes)`/`ecb(cipher_null)`,
+  replay window 32, hard lifetime = expires+30, reqid = SA 셋 id) + `XFRM_MSG_NEWPOLICY`(dir in/out, selector = src/dst
+  ip+포트+proto, template ESP transport reqid). selector 의 포트는 proto 가 있어야 유효하므로 **SA 하나당 정책
+  둘(udp, tcp)** — 등록당 state 4 + policy 8. 연장은 `XFRM_MSG_UPDSA`/`UPDPOLICY`, 회수는 `DELSA`/`DELPOLICY`.
+  기동·종료 시 전역 flush 가 아니라 state/policy 를 덤프해 **reqid 범위로 걸러 일괄 삭제**(같은 호스트의 다른 IPsec
+  사용자와 공존). 서버·단말이 같은 코드를 쓴다 — 양쪽 모두 "내 서버포트/내 클라이언트포트 ↔ 상대" 로 대칭이다.
+- 특권: `CAP_NET_ADMIN` **파일 capability**. 모듈은 agent(user systemd unit, 비특권)가 기동하므로 unit 의
+  `AmbientCapabilities` 로는 줄 수 없다 — agent 가 csp/cspsim 설치·기동(current flip)마다 `sudo -n cims-priv
+  setcap-net-admin <bin>`(sudoers 화이트리스트의 기존 특권 헬퍼, 대상은 csp/cspsim 실행 파일로 한정)을 호출한다.
+  파일이 교체되면 capability 가 사라지므로 매번 다시 건다. 소스 트리(`cims.sh`)에서는 `sudo setcap cap_net_admin+ep
+  build/bin/csp`(cspsim 도)가 수동 절차다. 특권이 없거나 IPSEC LocalNode 가 없으면 기동 시 자기점검(reqid 범위 회수 +
+  더미 셋 설치·삭제)이 실패 → `ipsec-3gpp is not offered` 로그, `tls` 만 제시 — 기동은 계속된다.
+- HA 절체: SA 는 복제하지 않는다. 절체 뒤 단말의 보호 트래픽은 새 활성 노드의 커널이 버리고, 단말은 등록 갱신 실패
+  → 초기 등록(비보호 포트)으로 복귀한다(TS 24.229 §5.1.1.5 의 단말 복구) — [ha_service_model.md](ha_service_model.md)
+  의 재등록 모델과 같다.
+
+**CSC / 프로비저닝**: 스키마 변경 없음. `/provisioning/me` 의 `services[].sip.security` 에 서비스의 `sec_mechanisms`
+(`["tls"]` | `["tls","ipsec-3gpp"]`)를 싣고, `ipsec-3gpp` 가 있으면 `sip.ipsec={port_ps, port_pc}`(IPSEC LocalNode 에서).
+AKA 가입자는 `enforced=true` 그대로(보호 채널 강제). 콘솔 access service 편집 화면에 `sec_mechanisms` 다중선택 +
+`media_nat_mode≠off` 와의 상호배제 검증(저장 거부).
+
+**단말 (psip / cspsim)**
+
+- psip `SipIpsec.{h,cpp}`(`CSipIpsecClient`, `CSipServerInfo::m_clsIpsec`): REGISTER 를 만들 때마다 제안할 포트쌍
+  (port_uc/port_us — 스택 로컬 포트+1 부터 2씩, 다중 UDP 리스너(R5.b)로 런타임 개방)과 SPI 둘(난수)을 준비해
+  `Security-Client` 에 `ipsec-3gpp` 만 싣는다(sec-agree 자동 활성). 401 의 `Security-Server` 에서 서버 spi/port 를
+  파싱하고 `AddAuth` 의 AKA 계산이 남긴 CK/IK(`m_strAkaCk/m_strAkaIk`)로 `XfrmSa` 에 SA 4개를 설치한 뒤, 답안
+  REGISTER 에 Via = port_uc 를 명시해 그 리스너 소켓에서 보낸다(SA 1). 200 OK 에 스택 식별 포트를 port_uc 로 바꿔 이후
+  모든 요청(INVITE·BYE·갱신·해제)이 SA 위로 나가게 하고, 구 셋이 있으면 회수한다(재인증 = **새 포트쌍·새 SPI**,
+  TS 33.203 §7.4.1a — 같은 포트를 재제안하는 단말은 서버 커널 정책 충돌로 504 를 받는다). 해제 200 OK·등록 실패 시
+  전부 회수하고 식별 포트를 복원한다. Verify 변조는 `m_strSecurityVerifyOverride` 그대로.
+- cspsim `-ipsec`(+`-ipsec_alg hmac-sha-1-96|hmac-md5-96`, `-ipsec_ealg aes-cbc|null`), `-aka_k/-aka_opc` 필수,
+  `-transport udp`. 세션당 스택이 하나라 단말마다 포트쌍이 분리된다.
+
+**CSC / 프로비저닝 값의 출처**: `csc.json Provisioning.Services.<kind>.sec_mechanisms`(기본 `["tls"]`) 와
+`ipsec_port_ps`/`ipsec_port_pc` — CSP 의 access service·IPSEC LocalNode 와 일치시키는 것은 운영 계약이다(csc 는 CSP
+를 조회하지 않는다, `tls_port` 와 같은 규칙). 포트쌍이 없으면 `ipsec-3gpp` 를 목록에서 뺀다.
+
+**검증**: §6 V19·V20 = `S3-SCN-IPSEC`(order 55, 커널 특권 불필요), V21~V23 = `S3-SCN-IPSEC-LIVE`(order 56, cspsim
+`-ipsec` — IPSEC LocalNode·CSP `ipsec: available`·cspsim `cap_net_admin`·AKA 마이그레이션이 없으면 SKIP).
+단위: `tests/psip_xfrm_test.cpp`(키 확장 벡터 + netlink 메시지 인코딩, 특권이 있으면 실설치 왕복까지).
+
+**구현 위치**
+
+| # | 항목 | 위치 |
+|---|---|---|
+| P4-1 | XFRM 모듈(netlink) — 셋 설치/연장/회수, reqid 범위 일괄 회수, 자기점검, 시험 훅 | `ext/psip/SipStack/XfrmSa.{h,cpp}`, `tests/psip_xfrm_test.cpp` |
+| P4-2 | IPSEC LocalNode → psip 리스너 셋(port_ps UDP/TCP + port_pc UDP, 역할 태그 int id `CspIpsecListenerIntId`), 역할별 포트·역조회, inbound_policy 대조 정규화 | `csp/CspLocalNodeMap.{h,cpp}`, `csp/CspListenerManager.cpp`, `csp/CspAddressing.cpp`, `csp/CspServiceMap.cpp` |
+| P4-3 | Sec-Agree: `SelectIpsecOffer`(제안 파싱·(alg,ealg) 선택)·`BuildIpsecServerList`·`Issue(user, list)`; `EvaluateIpsecOffer`(AKA·서비스·가용·NAT 판정) → `SendAkaChallenge` 가 임시 셋 설치 후 401; 답안의 보호 포트·SA 대조·Verify(확정 셋 원문 폴백) | `csp/SecAgree.{h,cpp}`, `csp/CscfModule.{h,cpp}` |
+| P4-4 | SA 셋 생명주기 `CIpsecSaSetMap`(임시→확정→연장→retiring→회수, sweep) + 바인딩 결부(`CUserInfo::m_iSaReqId/m_iSendPort/m_iSendListenerId`, 바인딩 소멸 훅) | `csp/IpsecSaSet.{h,cpp}`, `csp/UserMap.{h,cpp}`, `csp/CspServer.cpp`(Init/Sweep/Shutdown) |
+| P4-5 | 게이트: 보호 포트 요청은 결부 SA 일치, 평문은 정책(TLS ∨ AKA)+협상 축 — AKA 의 `Security-Client` 초기 REGISTER 만 통과; 서버 발신 (ip, port_us) via port_pc(`GetCallRoute` outbound local, NOTIFY/OPTIONS Via) | `csp/CscfModule.cpp` `CheckChannelPolicy`, `csp/UserMap.cpp`, `csp/CspServer.cpp`, `csp/ModuleDispatcher.cpp` |
+| P4-6 | 설정: LocalNode `protocol=IPSEC`+`client_port`, access service `sec_mechanisms`(NAT 상호배제), `Setup.Ipsec.*` | `csp/config/config_template.json`, `csp/SipServerSetup.{h,cpp}`, `csp/CspServiceMap.{h,cpp}` |
+| P4-7 | 특권: `cims-priv setcap-net-admin <bin>` + agent 가 csp/cspsim 설치·기동 flip 마다 호출 | `agent/bin/cims-priv`, `agent/cims_agent.py` `_grant_ipsec_capability` |
+| P4-8 | CSC `/provisioning/me` `sip.security`/`sip.ipsec` | `csc/src/services/mcptt.py` |
+| P4-9 | 단말: `CSipIpsecClient`(포트쌍·SPI 제안, SA 설치, 식별 포트 전환, 회수), 등록 흐름 훅, cspsim 옵션 | `ext/psip/SipUserAgent/SipIpsec.{h,cpp}`, `SipServerInfo.{h,cpp}`, `SipUserAgentRegister.hpp`, `cspsim/SimSession.h`, `cspsim/CspsimMain.cpp` |
+| P4-10 | verify `S3-SCN-IPSEC`/`S3-SCN-IPSEC-LIVE` + `sip_probe.probe_register_offer` | `verify/lib/items/stage3/scn_ipsec.py`, `verify/lib/common/sip_probe.py` |
+
+잔여: psip TCP 발신 소스포트 bind(보호 포트쌍 위 TCP 는 UDP 검증 뒤), 실설치 검증(S3-SCN-IPSEC-LIVE — dev 는 `cims`
+계정에 `CAP_NET_ADMIN`·unprivileged userns 모두 없어 SKIP), 비-REGISTER 게이트의 "등록 유지 중 비보호 요청 403" 자동화
+(cspsim register 시나리오가 즉시 해제한다), Android(범위 밖).
 
 ### 8.4 psip 확장 (단계 무관)
 
 TLS 연결 핸들/세션 ID 의 응용 노출 — §3.2 게이트의 (ip,port) 대리키 판정을 암호학적
-결속으로 승격해 NAT 포트 재사용 오일치 잔여 위험을 제거한다. P2~P4 어느 단계와도 독립.
+결속으로 승격해 NAT 포트 재사용 오일치 잔여 위험을 제거한다. P2~P4 어느 단계와도 독립 — IPsec 등록([§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영))은
+SA selector 가 이 결속을 커널에서 제공하므로 대상이 아니다.

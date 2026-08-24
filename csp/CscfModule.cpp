@@ -15,12 +15,15 @@
 #include "Base64.h"
 #include "CscAvClient.h"
 #include "CspAddressing.h"
+#include "CspConfigCache.h"  // CspUuidToIntId
+#include "CspLocalNodeMap.h"
 #include "CspPttGroup.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
 #include "DbManager.h"
 #include "GroupCallService.h"
 #include "GroupMap.h"
+#include "IpsecSaSet.h"
 #include "Log.h"
 #include "McpttInfo.h"  // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
 #include "NonceMap.h"
@@ -144,7 +147,7 @@ static std::string AkaHa1( const std::string &strUser, const std::string &strRea
 
 bool CCscfModule::SendAkaChallenge( CSipMessage *pclsMessage, const CspUser &clsUser, const std::string &strRealm,
                                     bool bStale, const char *pszSecurityServer, const std::string &strRandPrevHex,
-                                    const std::string &strAutsHex ) {
+                                    const std::string &strAutsHex, const SecAgreeIpsecOffer *pclsIpsec ) {
     CscAv clsAv;
     const ECscAvResult eRes =
         gclsCscAvClient.Request( clsUser.m_strId, clsUser.m_strServiceType, strRandPrevHex, strAutsHex, clsAv );
@@ -184,6 +187,26 @@ bool CCscfModule::SendAkaChallenge( CSipMessage *pclsMessage, const CspUser &cls
     if ( Base64Encode( strRandAutn.data(), (int)strRandAutn.size(), strNonce ) == false ) return false;
     gclsNonceMap.InsertAka( strNonce, clsUser.m_strId, clsAv.strRandHex, clsAv.strXresHex );
 
+    // ipsec-3gpp (§8.3): AV 의 IK/CK 로 임시 SA 셋을 **401 을 보내기 전에** 커널에 설치하고, 서버 spi/port 를 실은
+    //   Security-Server 를 발급한다 — 단말의 답안 REGISTER 가 401 직후 ESP 로 도착한다.
+    std::string strIpsecServerList;
+    if ( pclsIpsec ) {
+        std::string strIk, strCk, strError;
+        CIpsecSaSetInfo clsSet;
+        if ( !HexToBytes( clsAv.strIkHex, strIk ) || !HexToBytes( clsAv.strCkHex, strCk ) ||
+             !gclsIpsecSaSetMap.CreateTemp( clsUser.m_strId, *pclsIpsec, pclsMessage->m_strClientIp, strIk, strCk,
+                                            clsSet, strError ) ) {
+            CLog::Print( LOG_ERROR, "ipsec: temp sa set failed user=%s (%s) → 504", clsUser.m_strId.c_str(),
+                         strError.empty() ? "ik/ck decode" : strError.c_str() );
+            return SendResponseStatic( pclsMessage, SIP_SERVER_TIME_OUT );
+        }
+        strIpsecServerList = BuildIpsecServerList( *pclsIpsec, clsSet.clsSet.iSpiLocalC, clsSet.clsSet.iSpiLocalS,
+                                                   clsSet.clsSet.iLocalPortC, clsSet.clsSet.iLocalPortS );
+        gclsSecAgreeMap.Issue( clsUser.m_strId, strIpsecServerList );
+        gclsIpsecSaSetMap.SetSecurityServer( clsSet.iReqId, strIpsecServerList );
+        pszSecurityServer = strIpsecServerList.c_str();
+    }
+
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
     if ( pclsResponse == NULL ) return false;
     pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
@@ -206,13 +229,14 @@ bool CCscfModule::SendAkaChallenge( CSipMessage *pclsMessage, const CspUser &cls
 }
 
 bool CCscfModule::SendRegisterChallenge( CSipMessage *pclsMessage, const std::string &strRealm, bool bStale,
-                                         const char *pszSecurityServer ) {
+                                         const char *pszSecurityServer, const SecAgreeIpsecOffer *pclsIpsec ) {
     CspUser clsUser;
     if ( gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsUser ) && clsUser.isAka() ) {
-        // Annex X: AKA 는 TLS 위에서만 — 채널 정책 게이트(requiresTls)가 앞에서 걸러 여기는 항상 TLS 다.
+        // 보호 채널: TLS(Annex X) 위이거나, sec-agree 제안을 실은 평문 초기 REGISTER(IPsec 부트스트랩·RFC 3329 §2.2)
+        //   — 채널 정책 게이트가 그 둘만 통과시킨다.
         ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
         const std::string strUserRealm = svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRealm;
-        return SendAkaChallenge( pclsMessage, clsUser, strUserRealm, bStale, pszSecurityServer );
+        return SendAkaChallenge( pclsMessage, clsUser, strUserRealm, bStale, pszSecurityServer, "", "", pclsIpsec );
     }
     return SendUnAuthorizedResponse( pclsMessage, strRealm, bStale, pszSecurityServer );
 }
@@ -431,7 +455,7 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     {
         CspUser clsProv;
         if ( gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsProv ) && clsProv.isAka() ) {
-            CLog::Print( LOG_INFO, "CheckAuthrization: aka user(%s) %s outside registered TLS flow (%s:%d) → 403",
+            CLog::Print( LOG_INFO, "CheckAuthrization: aka user(%s) %s outside registered protected flow (%s:%d) → 403",
                          clsProv.m_strId.c_str(), pclsMessage->m_strSipMethod.c_str(),
                          pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
             CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
@@ -524,11 +548,31 @@ bool CCscfModule::CheckChannelPolicy( CSipMessage *pclsMessage ) {
     const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( gclsCspUserMap.Select( strUser.c_str(), clsUser ) == false ) return true;
     if ( pclsMessage->m_eTransport == E_SIP_TLS ) return true;
-    // TLS 강제의 두 근거가 같은 게이트로 합류한다 (sip_access_security.md §8.1): 정책 축(sip_transport=TLS)
-    //   과 협상 결과 축(sec-agree 로 tls 를 결부한 등록이 살아있음 — RFC 3329 협상 후 평문 요청은 강등).
-    const bool bPolicy = clsUser.requiresTls();
-    const bool bNegotiated = !bPolicy && gclsUserMap.IsIntegrityProtected( strUser.c_str() );
-    if ( !bPolicy && !bNegotiated ) return true;
+
+    const char *pszReason = NULL;
+    const EIpsecListenerRole eRole = gclsLocalNodeMap.GetIpsecRole( pclsMessage->m_iListenerId );
+    if ( eRole == IPSEC_LISTENER_SERVER_UDP || eRole == IPSEC_LISTENER_SERVER_TCP ) {
+        // IPsec 보호 서버 포트(port_ps)로 온 요청 — 이 신원에 결부된(또는 답안 중인 임시) SA 의 (UE ip, port_uc)
+        //   여야 한다. 커널이 SA selector 로 소스를 보증하므로 대리키가 아니라 암호학적 결속이다 (§8.3).
+        if ( gclsIpsecSaSetMap.MatchEstablished( strUser, pclsMessage->m_strClientIp, pclsMessage->m_iClientPort ) )
+            return true;
+        if ( pclsMessage->IsMethod( SIP_METHOD_REGISTER ) &&
+             gclsIpsecSaSetMap.MatchTemp( strUser, pclsMessage->m_strClientIp, pclsMessage->m_iClientPort ) )
+            return true;
+        pszReason = "ipsec: outside bound SA";
+    } else {
+        // TLS 강제의 두 근거가 같은 게이트로 합류한다 (sip_access_security.md §8.1): 정책 축(sip_transport=TLS ∨
+        //   aka)과 협상 결과 축(sec-agree 로 보호 채널을 결부한 등록이 살아있음 — 협상 후 평문 요청은 강등).
+        const bool bPolicy = clsUser.requiresTls();
+        const bool bNegotiated = !bPolicy && gclsUserMap.IsIntegrityProtected( strUser.c_str() );
+        if ( !bPolicy && !bNegotiated ) return true;
+        // AKA 가입자의 초기 REGISTER 는 sec-agree 제안을 실어 평문으로 온다 (RFC 3329 §2.2 / TS 33.203 §7.2 —
+        //   IPsec 부트스트랩, 답안은 SA 위로). 제안 없는 평문 REGISTER 와 모든 비-REGISTER 는 종전대로 403.
+        if ( clsUser.isAka() && pclsMessage->IsMethod( SIP_METHOD_REGISTER ) &&
+             ParseSecAgree( pclsMessage ).bHasClient )
+            return true;
+        pszReason = bPolicy ? "policy" : "sec-agree";
+    }
 
     // 반복 위반 계수 (A-SEC-003) — 소스 로그 억제와 무관하게 전 건. SipStatsMonitor 가
     // 평가 윈도우당 건수를 Setup.SipStats.ChannelPolicyMajor 임계로 발화/해소한다.
@@ -540,8 +584,7 @@ bool CCscfModule::CheckChannelPolicy( CSipMessage *pclsMessage ) {
             LOG_INFO,
             "channel policy violation user=%s transport=%s src=%s:%d method=%s (%s) → 403, 소스 로그 %d초 억제",
             strUser.c_str(), pclsMessage->m_eTransport == E_SIP_TCP ? "TCP" : "UDP", pclsMessage->m_strClientIp.c_str(),
-            pclsMessage->m_iClientPort, pclsMessage->m_strSipMethod.c_str(), bPolicy ? "policy" : "sec-agree",
-            SIP_SCAN_SUPPRESS_TTL_SEC );
+            pclsMessage->m_iClientPort, pclsMessage->m_strSipMethod.c_str(), pszReason, SIP_SCAN_SUPPRESS_TTL_SEC );
     CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
     if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
@@ -568,6 +611,45 @@ bool CCscfModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
 // ──────────────────────────────────────────────────────────────
 //  REGISTER 처리
 // ──────────────────────────────────────────────────────────────
+
+/** ipsec-3gpp 제안 평가 (sip_access_security.md §8.3 서버 규칙) — 받지 않는 사유를 로그로 남기고 bValid=false 를
+ *  돌려준다. AKA 가입자·서비스 sec_mechanisms 허용·이 노드의 IPsec 접속점 가용·NAT 아님 이 모두 성립해야 받는다. */
+static SecAgreeIpsecOffer EvaluateIpsecOffer( CSipMessage *pclsMessage, const std::string &strUser,
+                                              const std::string &strClient ) {
+    bool bAny = false;
+    SecAgreeIpsecOffer o = SelectIpsecOffer( strClient, gclsSetup.m_strIpsecEalgPreference, bAny );
+    if ( !bAny ) return o;
+    const char *pszWhy = NULL;
+    CspUser clsUser;
+    if ( !o.bValid ) {
+        pszWhy = "no supported alg/ealg or bad spi/port";
+    } else if ( !gclsCspUserMap.Select( strUser.c_str(), clsUser ) || !clsUser.isAka() ) {
+        pszWhy = "digest subscriber";  // IPsec 키는 AKA 의 CK/IK — 조합 표(§1) 밖
+    } else if ( !gclsServiceMap.GetForUser( strUser, clsUser.m_strServiceType ).sec_ipsec ) {
+        pszWhy = "service does not offer ipsec-3gpp";
+    } else if ( !gclsIpsecSaSetMap.IsAvailable() ) {
+        pszWhy = "ipsec unavailable on this node";
+    } else if ( pclsMessage->m_clsViaList.empty() ) {
+        pszWhy = "no Via";
+    } else {
+        // NAT 판정 (동적 겹) — top Via sent-by 와 실소스가 다르면 ESP transport mode 는 도달하지 않는다 (Annex M
+        // 미지원).
+        //   협상 단계에서 갈라야 무증상 폐기를 피한다.
+        const CSipVia &v = pclsMessage->m_clsViaList.front();
+        const int iViaPort = v.m_iPort > 0 ? v.m_iPort : 5060;
+        if ( v.m_strHost != pclsMessage->m_strClientIp || iViaPort != pclsMessage->m_iClientPort ) {
+            CLog::Print( LOG_INFO, "ipsec: nat detected user=%s sent-by=%s:%d received=%s:%d", strUser.c_str(),
+                         v.m_strHost.c_str(), iViaPort, pclsMessage->m_strClientIp.c_str(),
+                         pclsMessage->m_iClientPort );
+            pszWhy = "nat detected";
+        }
+    }
+    if ( pszWhy ) {
+        CLog::Print( LOG_INFO, "ipsec: offer declined user=%s (%s) → tls only", strUser.c_str(), pszWhy );
+        o.bValid = false;
+    }
+    return o;
+}
 
 bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     if ( pclsMessage->m_iExpires > 0 && gclsSetup.m_iMinRegisterTimeout != 0 ) {
@@ -606,9 +688,14 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             return SendSecAgreeReject( pclsMessage, SIP_EXTENSION_REQUIRED, strFromUser, "policy requires sec-agree" );
         }
     }
-    // 챌린지(401)에 실을 서버 목록 — 단말이 제안했을 때만 (협상 미사용 단말에는 싣지 않는다)
+    // 챌린지(401)에 실을 서버 목록 — 단말이 제안했을 때만 (협상 미사용 단말에는 싣지 않는다).
+    //   ipsec-3gpp 제안(§8.3)은 AKA 가입자·서비스 허용·접속점 가용·NAT 아님 일 때만 받고, 그때는 AV 를 받은 뒤
+    //   SendAkaChallenge 가 임시 SA 셋과 함께 목록을 발급한다. 아니면 tls 만.
+    SecAgreeIpsecOffer clsIpsecOffer;
+    if ( clsSA.bHasClient ) clsIpsecOffer = EvaluateIpsecOffer( pclsMessage, strFromUser, clsSA.strClient );
+    const SecAgreeIpsecOffer *pclsIpsec = clsIpsecOffer.bValid ? &clsIpsecOffer : NULL;
     std::string strSecServer;
-    if ( clsSA.bHasClient ) strSecServer = gclsSecAgreeMap.Issue( strFromUser );
+    if ( clsSA.bHasClient && pclsIpsec == NULL ) strSecServer = gclsSecAgreeMap.Issue( strFromUser );
     const char *pszSecServer = strSecServer.empty() ? NULL : strSecServer.c_str();
 
     // 3GPP pre-auth: 첫 REGISTER 의 빈 Authorization(nonce/response 없음)은 IMPI 광고일 뿐
@@ -618,7 +705,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
                                  itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
         // 체계는 가입자 프로비저닝(auth_scheme)이 정한다 — aka 면 CSC AV 로 AKA 챌린지 (§8.2)
-        return SendRegisterChallenge( pclsMessage, strRegRealm, false, pszSecServer );
+        return SendRegisterChallenge( pclsMessage, strRegRealm, false, pszSecServer, pclsIpsec );
     }
 
     CspUser clsUser;
@@ -629,20 +716,20 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendRegisterChallenge( pclsMessage, strRegRealm, true, pszSecServer );  // F-07: stale=true
+            SendRegisterChallenge( pclsMessage, strRegRealm, true, pszSecServer, pclsIpsec );  // F-07: stale=true
             return true;
         case E_AUTH_REALM_MISMATCH: {
             // 가입자 서비스의 realm 로 재챌린지 — Request-URI host 로 고른 strRegRealm 과 다를 수 있다
             ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
             SendRegisterChallenge( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm, false,
-                                   pszSecServer );
+                                   pszSecServer, pclsIpsec );
         }
             return true;
         case E_AUTH_AKA_RESYNC: {
             // RFC 3310 §3.4 / TS 33.102 §6.3.5: AUTS 로 CSC 의 SQN 을 재동기하고 새 AV 로 다시 챌린지
             ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
             SendAkaChallenge( pclsMessage, clsUser, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm,
-                              false, pszSecServer, strResyncRand, strResyncAuts );
+                              false, pszSecServer, strResyncRand, strResyncAuts, pclsIpsec );
         }
             return true;
         case E_AUTH_USER_NOT_FOUND:
@@ -668,21 +755,57 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     // 인증을 통과한 REGISTER 의 sec-agree 대조 — 보호 채널 위여야 하고 Security-Verify 가 발급 원문과 같아야
     //   한다. 인증 뒤에 두는 이유: 미인증 요청이 494 로 발급 상태를 흔들지 못하게 한다.
     bool bIntegrityProtected = false;
+    bool bIpsecRegister = false;
+    CIpsecSaSetInfo clsIpsecSet;
     if ( clsSA.Requested() ) {
         if ( !clsSA.bHasVerify ) {
             gclsSecAgreeMap.Issue( strFromUser );
+            gclsIpsecSaSetMap.ReleaseTemp( strFromUser );
             return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
                                        "Security-Verify absent" );
         }
-        if ( pclsMessage->m_eTransport != E_SIP_TLS ) {
-            return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
-                                       "negotiated tls but request not on TLS" );
-        }
-        const ESecAgreeVerify eVerify = gclsSecAgreeMap.Verify( strFromUser, clsSA.strVerify );
-        if ( eVerify != E_SECAGREE_OK ) {
-            return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
-                                       eVerify == E_SECAGREE_MISMATCH ? "Security-Verify mismatch (bidding-down)"
-                                                                      : "no negotiation in progress" );
+        if ( SecAgreeListIsIpsec( clsSA.strVerify ) ) {
+            // 협상 결과 ipsec-3gpp (§8.3) — 답안은 보호 서버 포트(port_ps)로, 이 신원의 임시(첫 답안) 또는 확정(갱신)
+            //   셋의 (UE ip, port_uc) 에서 와야 한다. 커널 selector 가 소스를 보증한다.
+            const EIpsecListenerRole eRole = gclsLocalNodeMap.GetIpsecRole( pclsMessage->m_iListenerId );
+            const bool bProtectedPort = ( eRole == IPSEC_LISTENER_SERVER_UDP || eRole == IPSEC_LISTENER_SERVER_TCP );
+            const bool bOnSet =
+                bProtectedPort && ( gclsIpsecSaSetMap.MatchTemp( strFromUser, pclsMessage->m_strClientIp,
+                                                                 pclsMessage->m_iClientPort, &clsIpsecSet ) ||
+                                    gclsIpsecSaSetMap.MatchEstablished( strFromUser, pclsMessage->m_strClientIp,
+                                                                        pclsMessage->m_iClientPort, &clsIpsecSet ) );
+            if ( !bOnSet ) {
+                gclsIpsecSaSetMap.ReleaseTemp( strFromUser );
+                return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                           bProtectedPort ? "ipsec: request outside this identity's SA"
+                                                          : "negotiated ipsec-3gpp but request not on protected port" );
+            }
+            // Verify 대조 — 발급 기록(nonce 수명)이 사라진 뒤의 갱신 REGISTER 는 확정 셋이 기억하는 원문과 대조한다
+            ESecAgreeVerify eVerify = gclsSecAgreeMap.Verify( strFromUser, clsSA.strVerify );
+            if ( eVerify == E_SECAGREE_NONE && clsIpsecSet.bEstablished && !clsIpsecSet.strSecurityServer.empty() ) {
+                std::string v = clsSA.strVerify;
+                v.erase( 0, v.find_first_not_of( " \t" ) );
+                v.erase( v.find_last_not_of( " \t" ) + 1 );
+                if ( v == clsIpsecSet.strSecurityServer ) eVerify = E_SECAGREE_OK;
+            }
+            if ( eVerify != E_SECAGREE_OK ) {
+                gclsIpsecSaSetMap.ReleaseTemp( strFromUser );
+                return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                           eVerify == E_SECAGREE_MISMATCH ? "Security-Verify mismatch (bidding-down)"
+                                                                          : "no negotiation in progress" );
+            }
+            bIpsecRegister = true;
+        } else {
+            if ( pclsMessage->m_eTransport != E_SIP_TLS ) {
+                return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                           "negotiated tls but request not on TLS" );
+            }
+            const ESecAgreeVerify eVerify = gclsSecAgreeMap.Verify( strFromUser, clsSA.strVerify );
+            if ( eVerify != E_SECAGREE_OK ) {
+                return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                           eVerify == E_SECAGREE_MISMATCH ? "Security-Verify mismatch (bidding-down)"
+                                                                          : "no negotiation in progress" );
+            }
         }
         bIntegrityProtected = true;
     }
@@ -695,6 +818,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         bool bHadBinding = gclsUserMap.Select( strUserId.c_str(), clsRegInfo );
         gclsUserMap.Delete( strUserId.c_str() );
         gclsSecAgreeMap.Delete( strUserId );
+        gclsIpsecSaSetMap.ReleaseUser( strUserId, IPSEC_RELEASE_GRACE_SEC );  // 200 OK 가 SA 위로 나간 뒤 회수
         // DB logout_time 갱신 + CspUserMap 캐시 업데이트
         gclsCspUserMap.unregisterUser( strUserId );
         // PTT 그룹콜 세션 정리 (활성 호 있으면 BYE + DB 갱신)
@@ -714,10 +838,35 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
     // REGISTER
     const bool bRefresh = gclsUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str() );
-    if ( gclsUserMap.Insert( pclsMessage, &clsUser, bIntegrityProtected ) ) {
+
+    // IPsec 등록: 임시 셋 확정(수명 = expires+30, TS 33.203 §7.4) 또는 확정 셋 연장 → 바인딩에 결부.
+    //   서버 발신은 (UE ip, port_us) 로, IPsec 접속점의 client 역할(port_pc) 소켓에서 (SA 3).
+    CUserInfo clsIpsecBind;
+    const CUserInfo *pclsIpsecBind = NULL;
+    if ( bIpsecRegister ) {
+        const int iReqExpires = pclsMessage->GetExpires();
+        const int iLifetime = ( iReqExpires > 0 ? iReqExpires : 3600 ) + IPSEC_SA_LIFETIME_GRACE_SEC;
+        const bool bOk = clsIpsecSet.bEstablished
+                             ? gclsIpsecSaSetMap.Extend( clsIpsecSet.iReqId, iLifetime )
+                             : gclsIpsecSaSetMap.Establish( strFromUser, clsIpsecSet.iReqId, iLifetime );
+        if ( !bOk ) {
+            CLog::Print( LOG_ERROR, "ipsec: sa set %s failed user=%s reqid=0x%x → 504",
+                         clsIpsecSet.bEstablished ? "extend" : "establish", strFromUser.c_str(), clsIpsecSet.iReqId );
+            gclsIpsecSaSetMap.Release( clsIpsecSet.iReqId, 0 );
+            return SendResponse( pclsMessage, SIP_SERVER_TIME_OUT );
+        }
+        const LocalNodeInfo clsIpsecNode = gclsLocalNodeMap.GetIpsecNode();
+        clsIpsecBind.m_iSaReqId = clsIpsecSet.iReqId;
+        clsIpsecBind.m_iSendPort = clsIpsecSet.clsSet.iRemotePortS;
+        clsIpsecBind.m_iSendListenerId =
+            CspIpsecListenerIntId( CspUuidToIntId( clsIpsecNode.id ), IPSEC_LISTENER_CLIENT_UDP );
+        pclsIpsecBind = &clsIpsecBind;
+    }
+    if ( gclsUserMap.Insert( pclsMessage, &clsUser, bIntegrityProtected, pclsIpsecBind ) ) {
         if ( bIntegrityProtected )
-            CLog::Print( LOG_INFO, "sec-agree: user=%s registered integrity-protected (tls) src=%s:%d",
-                         strFromUser.c_str(), pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
+            CLog::Print( LOG_INFO, "sec-agree: user=%s registered integrity-protected (%s) src=%s:%d",
+                         strFromUser.c_str(), bIpsecRegister ? "ipsec-3gpp" : "tls", pclsMessage->m_strClientIp.c_str(),
+                         pclsMessage->m_iClientPort );
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 

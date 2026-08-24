@@ -1075,6 +1075,25 @@ def _runtime_install_path(params: dict) -> str:
     return legacy
 
 
+def _grant_ipsec_capability(module_root: str, install_path: str) -> str:
+    """csp/cspsim 실행 파일에 CAP_NET_ADMIN 파일 capability 를 건다 (cims-priv setcap-net-admin,
+    sip_access_security.md §8.3 — IMS AKA+IPsec 의 커널 XFRM SA 프로그래밍). 파일이 교체되는
+    설치/기동마다 다시 걸어야 한다. 특권이 없어도 모듈은 기동한다(ipsec-3gpp 미제시) — 실패는
+    로그만. 반환: 로그용 짧은 문자열."""
+    name = os.path.basename((module_root or "").rstrip("/"))
+    if name not in ("csp", "cspsim"):
+        return ""
+    binp = os.path.join(install_path, "bin", name)
+    if not os.path.isfile(binp):
+        return ""
+    rc, out, err = _run_cims_priv("setcap-net-admin", binp, timeout=20)
+    if rc == 0:
+        return " cap_net_admin"
+    print(f"[agent] {name}: CAP_NET_ADMIN 부여 실패 rc={rc} ({(err or out).strip()[:120]}) — "
+          f"IPsec(ipsec-3gpp) 미제시로 기동", flush=True)
+    return ""
+
+
 def _flip_current(module_root: str, version_dir: str) -> str:
     """`<module_root>/current` 심볼릭을 version_dir 로 (재)지정 — 활성 버전 통로.
 
@@ -1396,6 +1415,7 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
     if module_root:
         if _flip_current(module_root, install_path):
             flipped = " current->" + os.path.basename(install_path)
+        flipped += _grant_ipsec_capability(module_root, install_path)
 
     pruned = ""
     if module_root and install_path != legacy_path:
@@ -4500,6 +4520,7 @@ def job_process_control(params: dict, job_type: str) -> tuple:
         if os.path.islink(cur_path) or os.path.exists(cur_path):
             prev_vdir = os.path.realpath(cur_path)
         _flip_current(module_root, install_path)
+        _grant_ipsec_capability(module_root, install_path)
 
     # stale-stop: 타겟 버전 밖에서 도는 인스턴스(구버전)를 먼저 stop → 포트 바인드 충돌
     # 방지. current 통로에선 신·구 명령 경로가 같으므로 /proc/<pid>/exe 실경로로 식별한다.

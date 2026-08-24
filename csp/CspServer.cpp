@@ -55,6 +55,7 @@ CCallDir gclsCallDir;
 #include "FmReporter.h"
 #include "GroupCallService.h"
 #include "GroupMap.h"
+#include "IpsecSaSet.h"
 #include "Log.h"
 #include "McDataMediaService.h"
 #include "MemoryDebug.h"
@@ -437,6 +438,8 @@ int ServiceMain() {
     //   SIP 리스너를 올린다. 이후 SIGUSR1 reload 시 Sync 가 포트 변경분을 remove+add 로 재바인딩.
     gclsListenerManager.Sync();
     gclsListenerManager.CheckCertExpiry();   // 기동 시점 판정 (A-PRC-009)
+    // IMS AKA+IPsec (P4) — 잔류 SA 회수 + 자기점검. IPSEC 접속점이 없거나 특권이 없으면 ipsec-3gpp 미제시.
+    gclsIpsecSaSetMap.Init();
     // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
     //   bind 와 무관하게 식별값만 갱신). + UDP 리스너 미바인딩 시 fail-fast.
     {
@@ -502,6 +505,9 @@ int ServiceMain() {
         // 세션 타이머 (RFC 4028) — 갱신 발사 / 만료 leg 회수.
         //   비정상 종료(BYE 유실) leg 을 시한으로 정리한다 (leg_liveness.md).
         gclsUserAgent.CheckSessionTimer();
+
+        // IPsec SA 셋 — 임시 유예·retiring·해제 유예·수명 만료 회수 (sip_access_security.md §8.3)
+        gclsIpsecSaSetMap.Sweep( time( NULL ) );
 
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );
@@ -570,6 +576,7 @@ int ServiceMain() {
     }
     gclsUserAgent.Stop();
     gclsUserAgent.Final();
+    gclsIpsecSaSetMap.Shutdown();  // 커널 SA 잔류 방지 (재기동 시 Init 이 reqid 범위로 재회수하기도 한다)
     gclsFmReporter.Stop();  // 호 소진 대기 동안 pending 재전송 유지 후 종료
     CLog::Print( LOG_SYSTEM, "CspServer is terminated" );
     CLog::Release();
@@ -809,8 +816,13 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         //   으로 전송해 TCP 바인딩 주소에 UDP 를 쏘게 되고, NAT 매핑이 프로토콜별로 분리돼 있어
         //   전량 폐기된다(NOTIFY 불달 → 로스터 stale).
         pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
-        pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
+        pMsg->m_iSendDestPort = clsUserInfo.GetSendPort();
         pMsg->m_eTransport = clsUserInfo.m_eTransport;
+        if ( clsUserInfo.m_iSendListenerId > 0 && !pMsg->m_clsViaList.empty() ) {
+            // IPsec: port_pc 소켓에서 port_us 로 (SA 3) — Via 자기주소가 그 소켓을 고른다
+            pMsg->m_clsViaList.front().m_strHost = CspAddressing::GetLocalSipAddress( clsUserInfo.m_iSendListenerId );
+            pMsg->m_clsViaList.front().m_iPort = CspAddressing::GetLocalSipPort( clsUserInfo.m_iSendListenerId, 0 );
+        }
     }
 
     // Contact = 서버 자기 주소 (user 없음 — 실망 형태, 예: <sip:scscf11.ims...>).
@@ -908,8 +920,13 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         // Route 헤더 없이 등록 바인딩으로 직접 전송 (SendNotifyToSubscriber 와 동일).
         //   transport 도 함께 — 주소와 transport 는 한 세트다(위 함수 주석 참조).
         pMsg->m_strSendDestIp = clsUserInfo.m_strIp;
-        pMsg->m_iSendDestPort = clsUserInfo.m_iPort;
+        pMsg->m_iSendDestPort = clsUserInfo.GetSendPort();
         pMsg->m_eTransport = clsUserInfo.m_eTransport;
+        if ( clsUserInfo.m_iSendListenerId > 0 && !pMsg->m_clsViaList.empty() ) {
+            // IPsec: port_pc 소켓에서 port_us 로 (SA 3) — Via 자기주소가 그 소켓을 고른다
+            pMsg->m_clsViaList.front().m_strHost = CspAddressing::GetLocalSipAddress( clsUserInfo.m_iSendListenerId );
+            pMsg->m_clsViaList.front().m_iPort = CspAddressing::GetLocalSipPort( clsUserInfo.m_iSendListenerId, 0 );
+        }
     }
 
     // Contact = 서버 자기 주소 — 송신 transport 확정 후 구성 (SendNotifyToSubscriber 와 동일 규칙)

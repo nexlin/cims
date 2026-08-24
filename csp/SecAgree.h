@@ -16,7 +16,8 @@
 #include "SipMessage.h"
 #include "SipMutex.h"
 
-/** 서버 제안 목록 (Security-Server). 도입 시점 기준 tls 뿐 — ipsec-3gpp 는 P4 에서 추가한다. */
+/** 서버 제안 목록 (Security-Server) 의 기본값 — tls. ipsec-3gpp 는 AV 를 받은 뒤 파라미터와 함께
+ *  BuildIpsecServerList 로 만들어 Issue(user, list) 한다 (§8.3, P4). */
 #define SEC_AGREE_SERVER_LIST "tls;q=0.1"
 
 /** 요청의 sec-agree 헤더 요약 */
@@ -37,6 +38,29 @@ struct SecAgreeRequest {
 
 SecAgreeRequest ParseSecAgree( CSipMessage *pclsMessage );
 
+/** Security-Client 의 ipsec-3gpp 제안 하나 (RFC 3329 §2.2 + TS 33.203 §7.2 파라미터, 단말 관점 값) */
+struct SecAgreeIpsecOffer {
+    bool bValid = false;
+    std::string strAlg;   // hmac-sha-1-96 | hmac-md5-96
+    std::string strEalg;  // aes-cbc | null
+    uint32_t iSpiC = 0;   // spi_uc
+    uint32_t iSpiS = 0;   // spi_us
+    int iPortC = 0;       // port_uc
+    int iPortS = 0;       // port_us
+    double dQ = 1.0;
+};
+
+/** Security-Client 목록에서 서버가 지원하는 최선의 ipsec-3gpp 제안 — q 높은 것, 동률이면 hmac-sha-1-96 우선,
+ *  그 다음 strEalgPref. 없으면 bValid=false. bAnyIpsec: (지원 불가 포함) ipsec-3gpp 제안이 있었는가 */
+SecAgreeIpsecOffer SelectIpsecOffer( const std::string &strClient, const std::string &strEalgPref, bool &bAnyIpsec );
+
+/** ipsec-3gpp 서버 목록 — 선택된 alg/ealg 에 서버 spi/port 를 실어 첫 항목으로, tls 를 뒤에 */
+std::string BuildIpsecServerList( const SecAgreeIpsecOffer &clsOffer, uint32_t iSpiPc, uint32_t iSpiPs, int iPortPc,
+                                  int iPortPs );
+
+/** 목록(발급 원문 = Security-Verify echo)의 첫 메커니즘이 ipsec-3gpp 인가 — 협상 결과 판정 */
+bool SecAgreeListIsIpsec( const std::string &strList );
+
 enum ESecAgreeVerify {
     E_SECAGREE_NONE = 0,  // 이 신원에 발급한 서버 목록이 없다 (협상 없이 Security-Verify 만 옴)
     E_SECAGREE_OK,
@@ -50,8 +74,10 @@ enum ESecAgreeVerify {
  */
 class CSecAgreeMap {
 public:
-    /** 챌린지에 실을 서버 목록을 발급·보관한다 (재발급은 덮어쓴다). */
+    /** 챌린지에 실을 서버 목록을 발급·보관한다 (재발급은 덮어쓴다). 기본 = tls 뿐 */
     std::string Issue( const std::string &strUser );
+    /** 목록을 지정해 발급 (ipsec-3gpp 파라미터 포함 목록) */
+    std::string Issue( const std::string &strUser, const std::string &strList );
     ESecAgreeVerify Verify( const std::string &strUser, const std::string &strVerify );
     void Delete( const std::string &strUser );
     void DeleteTimeout( int iSecond );

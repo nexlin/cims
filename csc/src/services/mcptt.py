@@ -1907,6 +1907,16 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     if not any(t['transport'] == default for t in transports):
         default = transports[0]['transport']
     default_port = next(t['port'] for t in transports if t['transport'] == default)
+    # 채널 보호 메커니즘 (RFC 3329 sec-agree, sip_access_security.md §8.3): 서비스가 제시하는 목록.
+    #   ipsec-3gpp(IMS AKA+IPsec)면 보호 포트쌍(port_ps/port_pc — CSP IPSEC local_node)도 싣는다.
+    #   ⚠ csc.json Provisioning.Services.<kind>.sec_mechanisms / ipsec_port_ps / ipsec_port_pc 는
+    #     CSP access_services.sec_mechanisms / IPSEC local_node 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다).
+    security = [str(m) for m in (svc.get('sec_mechanisms') or ['tls'])]
+    ipsec = None
+    if 'ipsec-3gpp' in security and int(svc.get('ipsec_port_ps') or 0):
+        ipsec = {"port_ps": int(svc.get('ipsec_port_ps')), "port_pc": int(svc.get('ipsec_port_pc') or 0)}
+    elif 'ipsec-3gpp' in security:
+        security = [m for m in security if m != 'ipsec-3gpp']   # 포트쌍 미설정 = 도달 경로 없음
     profile = {
         "kind": kind,
         "sip": {
@@ -1918,6 +1928,8 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
             "default": default,
             "enforced": enforced,   # true = 서버가 이 transport 를 집행(다른 채널 403)
             "domain": svc.get('domain') or IDMS_DOMAIN,
+            "security": security,   # RFC 3329 제시 목록 — ["tls"] | ["tls","ipsec-3gpp"]
+            **({"ipsec": ipsec} if ipsec else {}),
         },
         "account": account,
     }

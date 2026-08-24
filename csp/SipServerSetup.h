@@ -297,6 +297,15 @@ public:
     //   (정책 = 협상의 하한). false(기본)는 단말이 제안할 때만 협상한다(sec-agree 미지원 단말 수용).
     bool m_bSecAgreeRequire;
 
+    // IMS AKA + IPsec — Setup.Ipsec.* (sip_access_security.md §8.3, P4)
+    //   SpiMin/Max: 이 노드가 고르는 spi_ps/spi_pc 범위. ReqIdBase: XFRM state/policy 소유 표식 [Base, Base+0xFFFF].
+    //   TempSaTimeoutSec: 401 뒤 답안 REGISTER 유예(64×T1). EalgPreference: 단말 제안 동률 시 서버 선호.
+    uint32_t m_iIpsecSpiMin;
+    uint32_t m_iIpsecSpiMax;
+    uint32_t m_iIpsecReqIdBase;
+    int m_iIpsecTempSaTimeoutSec;
+    std::string m_strIpsecEalgPreference;
+
     // MCData C-plane 정책 — Setup.McData.*
     //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.
     //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).

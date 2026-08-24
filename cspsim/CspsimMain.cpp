@@ -380,6 +380,10 @@ static void PrintUsage(const char* pszBin) {
     printf("  -sec_verify  <값>        [시험] Security-Verify 를 echo 대신 이 "
            "값으로 전송 (강등 변조 → 서버 494)\n");
     printf("                             -count 전개 단말 각각의 자격 — 파일에 없는 user 는 즉시 중단\n");
+    printf("  -ipsec                   IMS AKA + IPsec (TS 33.203 §7) — Security-Client 에 "
+           "ipsec-3gpp 제안, 401 뒤 커널 SA 설치 (CAP_NET_ADMIN, -aka_k 필수)\n");
+    printf("  -ipsec_alg   <alg>       hmac-sha-1-96(기본)|hmac-md5-96\n");
+    printf("  -ipsec_ealg  <ealg>      aes-cbc(기본)|null\n");
     printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
     printf("  -transport   <udp|tcp|tls> 시그널링 transport (default: udp)\n");
     printf("                             tls 는 서버 인증서를 검증하지 않는다(랩 자가서명 수용)\n");
@@ -771,6 +775,11 @@ int main(int argc, char* argv[])
     //   확인용).
     bool bSecAgree = HasFlag(argc, argv, "-sec_agree");
     std::string strSecVerify = GetArg(argc, argv, "-sec_verify", "");
+    // IMS AKA + IPsec (sip_access_security.md §8.3) — Security-Client 에 ipsec-3gpp 만
+    //   제안하고 401 의 서버 파라미터 + AKA CK/IK 로 커널 SA 4개를 설치한다. CAP_NET_ADMIN 필요.
+    bool bIpsec = HasFlag(argc, argv, "-ipsec");
+    std::string strIpsecAlg = GetArg(argc, argv, "-ipsec_alg", "hmac-sha-1-96");
+    std::string strIpsecEalg = GetArg(argc, argv, "-ipsec_ealg", "aes-cbc");
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
@@ -985,8 +994,10 @@ int main(int argc, char* argv[])
         } else if (strTransport == "tcp" || strTransport == "TCP") {
             s->SetTransport(E_SIP_TCP);
         }
-        if (bSecAgree)
+        if (bSecAgree || bIpsec)
           s->SetSecAgree(true, strSecVerify);
+        if (bIpsec)
+          s->SetIpsec(true, strIpsecAlg, strIpsecEalg);
         if (!strSesAkaK.empty())
           s->SetAka(strSesAkaK, strSesAkaOpc, (uint64_t)ullSesAkaSqn);
         s->SetNoRegister(bNoRegister);

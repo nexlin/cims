@@ -12,6 +12,7 @@
 #   sudo -n cims-priv route-del <dest_cidr> <via> <dev>
 #   sudo -n cims-priv keepalived-unmask               # 설치 중단으로 남은 mask 잔재 해제
 #   sudo -n cims-priv policy-rc-clear                 # 구버전이 남긴 policy-rc.d 잔재 제거
+#   sudo -n cims-priv setcap-net-admin <bin>          # csp/cspsim 에 CAP_NET_ADMIN (IMS AKA+IPsec XFRM)
 #   sudo -n cims-priv version
 #
 # ip-add 는 항상 'label <iface>:cims' 를 부여 — collect_interfaces 가 label 로
@@ -71,6 +72,25 @@ valid_rps_mask() {
 }
 
 # ── 액션 ────────────────────────────────────────────
+# CAP_NET_ADMIN 파일 capability — IMS AKA+IPsec(sip_access_security.md §8.3)의 커널 XFRM SA 프로그래밍.
+#   대상은 csp/cspsim 실행 파일뿐(basename 고정, 일반 파일, '..' 없음). 파일이 교체(업그레이드)되면
+#   capability 가 사라지므로 agent 가 설치/기동마다 다시 건다. setcap 이 없으면 rc=4.
+do_setcap_net_admin() {
+    local path="$1"
+    [[ "$path" == /* && "$path" != *..* ]] || { err "setcap-net-admin: absolute path without '..' required"; exit 2; }
+    local base; base="$(basename "$path")"
+    [[ "$base" == "csp" || "$base" == "cspsim" ]] || { err "setcap-net-admin: only csp/cspsim binaries"; exit 2; }
+    [[ -f "$path" && ! -L "$path" ]] || { err "setcap-net-admin: not a regular file: $path"; exit 2; }
+    local setcap_cmd; setcap_cmd="$(command -v setcap 2>/dev/null || true)"
+    [[ -n "$setcap_cmd" ]] || { err "setcap not installed (libcap2-bin)"; exit 4; }
+    if "$setcap_cmd" cap_net_admin+ep "$path"; then
+        ok "cap_net_admin+ep $path"
+    else
+        err "setcap failed: $path"
+        exit 3
+    fi
+}
+
 do_ip_add() {
     local iface="$1" cidr="$2"
     valid_iface "$iface" || exit 2
@@ -488,6 +508,10 @@ case "${1:-}" in
         [[ $# -eq 1 ]] || { err "usage: cims-priv policy-rc-clear"; exit 1; }
         do_policy_rc_clear
         ;;
+    setcap-net-admin)
+        [[ $# -eq 2 ]] || { err "usage: cims-priv setcap-net-admin <bin>"; exit 1; }
+        do_setcap_net_admin "$2"
+        ;;
     net-sysctl)
         [[ $# -eq 3 ]] || { err "usage: cims-priv net-sysctl <key> <value>"; exit 1; }
         do_net_sysctl "$2" "$3"
@@ -508,7 +532,7 @@ case "${1:-}" in
         echo "cims-priv ${_priv_ver:-unknown}"
         ;;
     *)
-        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|version} ..."
+        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|setcap-net-admin|version} ..."
         exit 1
         ;;
 esac

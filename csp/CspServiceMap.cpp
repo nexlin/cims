@@ -40,6 +40,21 @@ bool CCspServiceMap::Sync() {
             std::string en = row.GetString( "enabled" );
             s.enabled = ( en != "false" && en != "0" );
 
+            // sec_mechanisms[] — ipsec-3gpp 는 ESP transport mode 라 NAT 와 상호배제 (§8.3 정적 겹)
+            SimpleJson::JsonNode mechs = row.Get( "sec_mechanisms" );
+            if ( mechs.type == SimpleJson::JSON_ARRAY ) {
+                for ( size_t j = 0; j < mechs.Size(); ++j ) {
+                    if ( mechs.At( j ).AsString() == "ipsec-3gpp" ) s.sec_ipsec = true;
+                }
+            }
+            if ( s.sec_ipsec && s.media_nat_mode != "off" ) {
+                CLog::Print( LOG_ERROR,
+                             "AccessServiceMap: service '%s' offers ipsec-3gpp with media_nat_mode=%s — ESP transport "
+                             "mode cannot traverse NAT; ipsec-3gpp ignored (set media_nat_mode=off)",
+                             s.name.c_str(), s.media_nat_mode.c_str() );
+                s.sec_ipsec = false;
+            }
+
             // v3: allowed_local_node_refs (string name 배열) — LocalNodeMap 으로 int id 파생.
             SimpleJson::JsonNode refs = row.Get( "allowed_local_node_refs" );
             if ( refs.type == SimpleJson::JSON_ARRAY ) {
@@ -136,8 +151,10 @@ bool CCspServiceMap::IsInboundAllowed( const ServiceInfo &svc, int listenerIntId
     if ( !svc.enabled ) return false;
     if ( svc.inbound_policy != "restricted" ) return true;  // "any" 또는 미지정 → 허용
     if ( listenerIntId <= 0 ) return false;                 // listener 모름 + restricted → 거절
+    // IPsec 접속점의 역할 리스너(port_ps UDP/TCP)는 레코드 id 로 정규화해 대조한다
+    const int iRecordId = gclsLocalNodeMap.ToRecordIntId( listenerIntId );
     for ( int lid : svc.listeners ) {
-        if ( lid == listenerIntId ) return true;
+        if ( lid == listenerIntId || lid == iRecordId ) return true;
     }
     return false;
 }

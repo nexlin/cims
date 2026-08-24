@@ -69,6 +69,59 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 REGISTER 부터 적용.",
           "help": "RFC 3329 보안 메커니즘 협상. false = 단말이 Security-Client 를 보낼 때만 협상(미지원 단말 수용). true = sip_transport=TLS 정책 가입자의 협상 없는 초기 REGISTER 를 421 Extension Required 로 거절(정책이 협상의 하한). Security-Verify 불일치는 설정과 무관하게 항상 494."
+        },
+        {
+          "key": "Setup.Ipsec.SpiMin",
+          "label": "IPsec SPI 범위 시작",
+          "type": "string",
+          "default": "0x10000000",
+          "advanced": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 협상부터 적용.",
+          "help": "IMS AKA+IPsec(sip_access_security.md §8.3) — 이 노드가 고르는 spi_ps/spi_pc 범위. 16진/10진."
+        },
+        {
+          "key": "Setup.Ipsec.SpiMax",
+          "label": "IPsec SPI 범위 끝",
+          "type": "string",
+          "default": "0x1FFFFFFF",
+          "advanced": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "Setup.Ipsec.ReqIdBase",
+          "label": "IPsec XFRM reqid 기준",
+          "type": "string",
+          "default": "0x43490000",
+          "advanced": true,
+          "restart": true,
+          "help": "이 프로세스가 만든 커널 XFRM state/policy 의 소유 표식 [Base, Base+0xFFFF] — 기동·종료 시 이 범위를 일괄 회수한다. 같은 호스트의 다른 IPsec 사용자와 겹치지 않게."
+        },
+        {
+          "key": "Setup.Ipsec.TempSaTimeoutSec",
+          "label": "IPsec 임시 SA 유예 (s)",
+          "type": "int",
+          "default": 32,
+          "min": 5,
+          "advanced": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "401 뒤 답안 REGISTER 가 이 시간 안에 안 오면 임시 SA 셋을 회수 (64×T1, TS 24.229 §5.2.2.1)."
+        },
+        {
+          "key": "Setup.Ipsec.EalgPreference",
+          "label": "IPsec 암호 알고리즘 선호",
+          "type": "enum",
+          "options": [
+            "aes-cbc",
+            "null"
+          ],
+          "default": "aes-cbc",
+          "advanced": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "단말 제안 q 가 동률일 때 서버가 고르는 ealg. 무결성은 hmac-sha-1-96 우선(둘 다 TS 33.203 §6.3 필수)."
         }
       ],
       "scope": "service"
@@ -1023,11 +1076,13 @@
               "UDP",
               "TCP",
               "TLS",
+              "IPSEC",
               "WS",
               "WSS"
             ],
             "default": "UDP",
-            "required": true
+            "required": true,
+            "help": "IPSEC = IMS AKA+IPsec 보호 포트쌍(sip_access_security.md §8.3): bind_port=port_ps(UDP+TCP 공용 보호 서버 포트), client_port=port_pc(보호 발신 포트). 노드당 하나. 포트 변경은 살아있는 SA 를 무효화하므로 재기동."
           },
           {
             "key": "thread_count",
@@ -1037,6 +1092,16 @@
             "min": 1,
             "max": 32,
             "help": "이 리스너의 UDP 수신 스레드 수. 0 또는 미지정 시 Setup.Sip.UdpThreadCount 로 fallback. TCP/TLS 는 R3+ 확장 대상."
+          },
+          {
+            "key": "client_port",
+            "label": "IPsec 보호 발신 포트 (port_pc)",
+            "type": "int",
+            "default": 0,
+            "min": 0,
+            "max": 65535,
+            "advanced": true,
+            "help": "protocol=IPSEC 전용. 서버가 단말로 거는 요청의 소스 포트(SA 3/4). bind_port 와 달라야 한다."
           },
           {
             "key": "tls_cert_path",
@@ -1998,6 +2063,15 @@
             ],
             "default": "strict",
             "help": "strict=latch 소스 IP 가 그 leg 의 SIP 시그널링 실소스 IP 와 일치할 때만 허용(스푸핑 방어). CGN 등 시그널링/미디어 공인 IP 상이 환경만 off."
+          },
+          {
+            "key": "sec_mechanisms",
+            "label": "보안 메커니즘 (RFC 3329)",
+            "type": "string_list",
+            "default": [
+              "tls"
+            ],
+            "help": "이 서비스 가입자에게 제시할 채널 보호 메커니즘. tls 는 항상. ipsec-3gpp(IMS AKA+IPsec, sip_access_security.md §8.3)는 AKA 가입자에게만 제시되며 노드에 IPSEC Local Node 가 있어야 한다. ESP transport mode 는 NAT 를 지나지 못하므로 media_nat_mode 가 off 일 때만 유효(아니면 무시 + ERROR)."
           },
           {
             "key": "allowed_local_node_refs",

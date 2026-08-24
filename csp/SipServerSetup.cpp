@@ -126,6 +126,11 @@ CSipServerSetup::CSipServerSetup()
       m_iSipStatsRxErrorMinor( 10 ),
       m_iSipStatsChannelPolicyMajor( 10 ),
       m_bSecAgreeRequire( false ),
+      m_iIpsecSpiMin( 0x10000000 ),
+      m_iIpsecSpiMax( 0x1FFFFFFF ),
+      m_iIpsecReqIdBase( 0x43490000 ),
+      m_iIpsecTempSaTimeoutSec( 32 ),
+      m_strIpsecEalgPreference( "aes-cbc" ),
       m_iMaxSdsCplaneBytes( 0 ),
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
@@ -379,6 +384,22 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
             if ( setup.Has( "SecAgree" ) ) {
                 SimpleJson::JsonNode sa = setup.Get( "SecAgree" );
                 if ( sa.Has( "Require" ) ) m_bSecAgreeRequire = ( sa.GetString( "Require" ) == "true" );
+            }
+
+            // IMS AKA + IPsec (P4) — 16진/10진 모두 허용
+            if ( setup.Has( "Ipsec" ) ) {
+                SimpleJson::JsonNode ip = setup.Get( "Ipsec" );
+                auto u32 = []( const std::string &v, uint32_t d ) -> uint32_t {
+                    if ( v.empty() ) return d;
+                    return (uint32_t)strtoul( v.c_str(), NULL, 0 );
+                };
+                if ( ip.Has( "SpiMin" ) ) m_iIpsecSpiMin = u32( ip.GetString( "SpiMin" ), m_iIpsecSpiMin );
+                if ( ip.Has( "SpiMax" ) ) m_iIpsecSpiMax = u32( ip.GetString( "SpiMax" ), m_iIpsecSpiMax );
+                if ( ip.Has( "ReqIdBase" ) ) m_iIpsecReqIdBase = u32( ip.GetString( "ReqIdBase" ), m_iIpsecReqIdBase );
+                if ( ip.Has( "TempSaTimeoutSec" ) ) m_iIpsecTempSaTimeoutSec = (int)ip.GetInt( "TempSaTimeoutSec" );
+                if ( ip.Has( "EalgPreference" ) ) m_strIpsecEalgPreference = ip.GetString( "EalgPreference" );
+                if ( m_iIpsecTempSaTimeoutSec < 5 ) m_iIpsecTempSaTimeoutSec = 5;
+                if ( m_strIpsecEalgPreference != "null" ) m_strIpsecEalgPreference = "aes-cbc";
             }
 
             // MCData C-plane 정책 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응)

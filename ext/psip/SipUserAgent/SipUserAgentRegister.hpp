@@ -42,9 +42,11 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 				if( itSL->m_iLoginTimeout == 0 )
 				{
 					itSL->ClearLogin();
+					itSL->m_clsIpsec.Teardown( &m_clsSipStack );
 				}
 				else
 				{
+					itSL->m_clsIpsec.OnRegistered( &m_clsSipStack );
 					itSL->m_bLogin = true;
 					time( &itSL->m_iLoginTime );
 					itSL->m_iResponseTime = itSL->m_iLoginTime;
@@ -79,7 +81,8 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 					}
 
 					CSipMessage * pclsRequest = itSL->CreateRegister( &m_clsSipStack, pclsMessage );
-					m_clsSipStack.SendSipMessage( pclsRequest );
+					if( pclsRequest ) m_clsSipStack.SendSipMessage( pclsRequest );
+					else goto CLEAR_LOGIN;
 				}
 			}
 			else if( iStatusCode == SIP_INTERVAL_TOO_BRIEF )
@@ -106,6 +109,7 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 			{
 CLEAR_LOGIN:
 				itSL->ClearLogin();
+				itSL->m_clsIpsec.Teardown( &m_clsSipStack );
 				time( &itSL->m_iNextSendTime );
 				itSL->m_iNextSendTime += 60;
 				if( m_pclsCallBack ) m_pclsCallBack->EventRegister( &(*itSL), iStatusCode );
