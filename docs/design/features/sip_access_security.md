@@ -281,10 +281,21 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 | V7 | realm 불일치 Authorization | 401 재챌린지 (V5 이후 상시 회귀) |
 | V8 | `/provisioning/me` 의 `sipHa1` 로 단말 등록 | 정상 — 평문 필드 부재 확인 포함 |
 
-V1/V2 는 cspsim `-transport udp` + TLS 정책 가입자로 재현한다(별도 옵션 불필요 — 게이트가 REGISTER 부터
-막는다). V2 의 "인증보다 먼저" 는 Authorization 없는 평문 INVITE 의 첫 최종응답이 401 이 아니라 403 인
-것으로 판정한다. V7 은 서버 nonce 로 틀린 realm 의 유효 Digest 를 만드는 원시 SIP 프로브로 재현한다.
-자동화 항목(S3/S4)은 **잔여**다. 반복 위반 알람은 A-SEC-003 으로 채번·구현되어 있다(§3.3).
+**V1·V2·V7 은 S3 검증 항목으로 자동화되어 있다** — 원시 SIP 프로브(`verify/lib/common/sip_probe.py`):
+- `S3-SCN-CHANNEL-POLICY`(V1·V2): 대상 가입자 `sip_transport` 를 DB 에서 `TLS` 로 올리고 CSP 4421
+  `USER_CHANGED` 통지로 캐시를 갱신(`ReloadFromDb`)한 뒤, UDP REGISTER→403(V1)·UDP MESSAGE→403(V2)을
+  확인하고 원값으로 되돌린다(자기복원). 정책 부여 전 같은 프로브가 401 인 대조를 함께 실어 403 이
+  게이트임을 증명한다. **V2 를 INVITE 가 아닌 MESSAGE 로 재현하는 이유**: dev 의 `TestEnvOpenTermination`
+  이 착신이 로컬 가입자/그룹인 INVITE 를 게이트 앞에서 통과시키고(수신통화 허용), SDP 없는 INVITE 는
+  미디어 협상에서 488 로 조기 거절되어 게이트에 도달하지 않는다 — MESSAGE 는 두 우회를 피해 게이트를
+  직접 탄다(상용은 flag off 라 INVITE 도 게이트 대상). "인증보다 먼저" 는 첫 최종응답이 401 이 아니라
+  403 인 것으로 판정한다.
+- `S3-SCN-REALM-MISMATCH`(V7): REGISTER→401 챌린지로 서버 realm/nonce 를 얻어 **틀린 realm** Digest 로
+  재전송 → 401 재챌린지(response 검증 전 realm 대조)를 확인한다.
+
+V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 이미 커버한다. V5 의 **호** 부분·TCP/TLS 호 회귀는
+cspsim 이 INVITE 를 UDP 로만 보내는 한계(§7)로 미성립, V6(이행 스크립트 멱등)·V8(`/provisioning/me`)은
+스크립트/CSC 경로라 별도다. 반복 위반 알람은 A-SEC-003 으로 채번·구현되어 있다(§3.3).
 
 ## 7. 배포 순서와 잔여
 
@@ -293,7 +304,7 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 강제한다. 현재 ②(코드)까지 반영되어 있고 ①·③~⑥ 은 운영 절차다.
 
 잔여 항목:
-- §6 V1~V8 의 S3/S4 자동화 시나리오. (반복 위반 알람은 A-SEC-003 으로 구현 — §3.3.)
+- V3~V6·V8 의 자동화(V1·V2·V7 은 S3 검증 항목으로 자동화 완료 — §6). V5 의 TCP/TLS 호는 아래 cspsim 한계에 걸린다.
 - cspsim 의 call 시나리오가 `-transport` 를 무시하고 INVITE 를 UDP 로 보낸다(등록만 transport 를 따른다) —
   TCP/TLS **호** 회귀(V5 의 호 부분)는 cspsim 보완 전까지 UDP 로만 성립. 같은 맥락에서 CSP 의
   `Service-Route` 에 `;transport=` 파라미터가 없어(RFC 3608/TS 24.229) TLS 등록 단말이 route 를 따라갈 때

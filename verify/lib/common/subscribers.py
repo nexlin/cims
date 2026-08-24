@@ -167,3 +167,43 @@ def select_subscribers(db_cfg: dict, voip_count: int = 1, ptt_count: int = 1) ->
         try: conn.close()
         except Exception: pass
     return out
+
+
+# ─────────────────────────────────────────────────────────────
+# 채널 정책 프로브용 — sip_transport 정책 읽기/쓰기 (S3 게이트 검증)
+# ─────────────────────────────────────────────────────────────
+def get_transport_policy(db_cfg: dict, table: str, user: str):
+    """`table`(volte_subscriptions|ptt_subscriptions) 의 user 행 sip_transport 반환.
+
+    행이 없으면 None, 값이 NULL 이면 '' 반환 (구분 필요 — 복원 시 NULL 로 되돌린다).
+    """
+    if not db_cfg or not user:
+        return None
+    conn = _db.connect(db_cfg)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT sip_transport FROM {table} WHERE id=%s", (user,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return row[0] if row[0] is not None else ""
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def set_transport_policy(db_cfg: dict, table: str, user: str, value) -> bool:
+    """user 행 sip_transport 를 value 로 설정. value=None 이면 NULL 로 되돌린다."""
+    if not db_cfg or not user:
+        return False
+    conn = _db.connect(db_cfg)
+    try:
+        cur = conn.cursor()
+        if value is None or value == "":
+            cur.execute(f"UPDATE {table} SET sip_transport=NULL WHERE id=%s", (user,))
+        else:
+            cur.execute(f"UPDATE {table} SET sip_transport=%s WHERE id=%s", (value, user))
+        return cur.rowcount >= 0
+    finally:
+        try: conn.close()
+        except Exception: pass
