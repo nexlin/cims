@@ -106,6 +106,15 @@ public:
       m_clsServerInfo.m_strSecurityVerifyOverride = verifyOverride;
     }
 
+    /** IMS AKA 소프트-USIM (sip_access_security.md §8.2). k/opc hex32, sqnMs =
+     * 단말 초기 SQN_MS (0 이면 첫 챌린지부터 수용, 큰 값이면 SQN 이탈 → AUTS
+     * 재동기 경로 재현). */
+    void SetAka(const std::string &k, const std::string &opc, uint64_t sqnMs) {
+      m_clsServerInfo.m_strAkaK = k;
+      m_clsServerInfo.m_strAkaOpc = opc;
+      m_clsServerInfo.m_iAkaSqnMs = sqnMs;
+    }
+
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }
     void SetCscHost(const std::string& h, int p, bool tls) { m_strCscHost = h; m_iCscPort = p; m_bCscTls = tls; }

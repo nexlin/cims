@@ -770,6 +770,7 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 | m_strHa1 | string | SIP Digest H(A1)=MD5(imsi@domain:realm:password) — 인증 자료 SoT (DB `ha1`, JSON `ha1`) |
 | m_strPassWord | string | 평문 비밀번호 — `m_strHa1` 이 비었을 때만 종전 계산에 쓰는 과도기 fallback (peer outbound 인증에는 계속 사용) |
 | m_strSipTransport | string | 채널 정책 (DB `sip_transport`, JSON `sip_transport`). `TLS` 면 비-TLS 채널의 이 신원 요청은 403(RFC 3329 sec-agree 로 tls 를 결부한 등록도 같은 게이트, `Setup.SecAgree.Require` 로 정책 가입자에 협상 강제) — [sip_access_security.md §3](../features/sip_access_security.md) |
+| m_strAuthScheme | string | 인증 체계 (DB `auth_scheme`, JSON `auth_scheme`) — `digest`(기본) / `aka`(IMS AKA over TLS: REGISTER 챌린지를 CSC AV(`CscAvClient`)로 만들고 `AKAv1-MD5` 로 검증, TLS 채널 강제 대상) — [sip_access_security.md §8.2](../features/sip_access_security.md) |
 | m_bDnd | bool | 착신거부 (DND) |
 | m_strForward | string | 착신전환 번호 |
 | m_vecReject | vector | 개별 착신거부 목록 |

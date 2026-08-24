@@ -1859,7 +1859,7 @@ def _country_code_of(msisdn: str) -> str:
     return d[:2] if d[:2] in _E164_CC2 else d[:3]
 
 def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
-                       sip_transport: str = "", sip_ha1: str = "") -> dict:
+                       sip_transport: str = "", sip_ha1: str = "", aka: dict = None) -> dict:
     svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
     account = {
         "msisdn": sid,
@@ -1871,7 +1871,13 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         #   sipHa1 도 없으면 단말이 로그인 비번으로 ha1 을 계산한다.
         "sipHa1": sip_ha1 or None,
         "sipPassword": None,
+        # 인증 체계 (sip_access_security.md §8.2). aka 면 소프트-K 프로비저닝 — 단말이 USIM 역할이므로
+        #   K/OPc 원문이 여기(토큰 인증 + TLS 채널)로만 내려간다. sipHa1 은 aka 에서 의미 없다.
+        "authScheme": "aka" if aka else "digest",
     }
+    if aka:
+        account["sipHa1"] = None
+        account["aka"] = {"k": aka.get("k", ""), "opc": aka.get("opc", ""), "amf": aka.get("amf", "8000")}
     if kind == "ptt":
         account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
     # 가용 transport 목록 — 서버는 세 transport 를 동시에 청취하며 강제하지 않는다. 단말이 이 중
@@ -1965,22 +1971,37 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                 for t, kind in (('volte_subscriptions', 'volte'), ('ptt_subscriptions', 'ptt')):
                     # sip_transport 는 가입자 단위 override (migrate_subscription_transport.sql).
                     #   구 스키마(컬럼 부재) DB 에서도 동작하도록 실패 시 기존 질의로 폴백한다.
+                    #   AKA 열(auth_scheme/k_enc/opc_enc/amf)은 migrate_subscription_aka.sql 이후에만 — 같은 폴백 사슬.
                     try:
-                        cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1 FROM {t} "
-                                    "WHERE user_id=%s ORDER BY id", (user_id,))
+                        cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1, auth_scheme, k_enc, opc_enc, amf "
+                                    f"FROM {t} WHERE user_id=%s ORDER BY id", (user_id,))
                         rows = cur.fetchall()
                     except Exception:
                         try:
-                            cur.execute(f"SELECT id, imsi, auth_id, sip_transport FROM {t} "
+                            cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1 FROM {t} "
                                         "WHERE user_id=%s ORDER BY id", (user_id,))
-                            rows = [(r[0], r[1], r[2], r[3], '') for r in cur.fetchall()]
+                            rows = [(r[0], r[1], r[2], r[3], r[4], 'digest', '', '', '') for r in cur.fetchall()]
                         except Exception:
-                            cur.execute(f"SELECT id, imsi, auth_id FROM {t} WHERE user_id=%s ORDER BY id",
-                                        (user_id,))
-                            rows = [(r[0], r[1], r[2], None, '') for r in cur.fetchall()]
-                    for sid, imsi, auth_id, transport, ha1 in rows:
+                            try:
+                                cur.execute(f"SELECT id, imsi, auth_id, sip_transport FROM {t} "
+                                            "WHERE user_id=%s ORDER BY id", (user_id,))
+                                rows = [(r[0], r[1], r[2], r[3], '', 'digest', '', '', '') for r in cur.fetchall()]
+                            except Exception:
+                                cur.execute(f"SELECT id, imsi, auth_id FROM {t} WHERE user_id=%s ORDER BY id",
+                                            (user_id,))
+                                rows = [(r[0], r[1], r[2], None, '', 'digest', '', '', '') for r in cur.fetchall()]
+                    for sid, imsi, auth_id, transport, ha1, scheme, k_enc, opc_enc, amf in rows:
+                        aka = None
+                        if scheme == 'aka' and k_enc and opc_enc:
+                            try:
+                                from services.auc import auc as _auc
+                                k, opc = _auc.decrypt_keys(k_enc, opc_enc)
+                                aka = {"k": k.hex(), "opc": opc.hex(), "amf": amf or "8000"}
+                            except Exception as e:
+                                logger.log_error(f"[provisioning/me] aka key material unavailable for {sid}: {e}")
+                                aka = {"k": "", "opc": "", "amf": amf or "8000"}
                         services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip,
-                                                          transport or '', ha1 or ''))
+                                                          transport or '', ha1 or '', aka))
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None

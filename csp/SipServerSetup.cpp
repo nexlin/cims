@@ -130,6 +130,11 @@ CSipServerSetup::CSipServerSetup()
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
       m_strXcapScheme( "https" ),
+      m_strCscHost( "" ),
+      m_iCscPort( 4421 ),
+      m_strCscScheme( "https" ),
+      m_strCscInternalToken( "" ),
+      m_iCscTimeoutMs( 2000 ),
       m_bRoleCscf( true ),
       m_bRoleTas( true ),
       m_bRolePttAs( true ),
@@ -391,6 +396,16 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( xcap.Has( "Host" ) ) m_strXcapHost = xcap.GetString( "Host" );
                 if ( xcap.Has( "Port" ) ) m_iXcapPort = (int)xcap.GetInt( "Port" );
                 if ( xcap.Has( "Scheme" ) ) m_strXcapScheme = xcap.GetString( "Scheme" );
+            }
+
+            // CSC 내부 API (IMS AKA AV — sip_access_security.md §8.2)
+            if ( setup.Has( "Csc" ) ) {
+                SimpleJson::JsonNode csc = setup.Get( "Csc" );
+                if ( csc.Has( "Host" ) ) m_strCscHost = csc.GetString( "Host" );
+                if ( csc.Has( "Port" ) ) m_iCscPort = (int)csc.GetInt( "Port" );
+                if ( csc.Has( "Scheme" ) ) m_strCscScheme = csc.GetString( "Scheme" );
+                if ( csc.Has( "InternalToken" ) ) m_strCscInternalToken = csc.GetString( "InternalToken" );
+                if ( csc.Has( "TimeoutMs" ) ) m_iCscTimeoutMs = (int)csc.GetInt( "TimeoutMs" );
             }
 
             if ( setup.Has( "ConfigJsonlDir" ) ) m_strConfigJsonlDir = setup.GetString( "ConfigJsonlDir" );

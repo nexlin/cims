@@ -108,6 +108,10 @@ if __name__ == '__main__':
     from handlers.org            import CIMS_ORG_HANDLER_LIST
     # 자기 API 문서 — 분리 배포에서 OAM 이 import 로 읽을 수 없으므로 직접 서비스한다.
     from handlers.api_docs       import CSC_API_DOCS_HANDLER_LIST
+    # AuC — IMS AKA 인증 벡터 발급자 (sip_access_security.md §8.2). 내부 AV API 는 admin 서버(4421)에
+    #   붙지만 /api/v1 밖이라 OAM 게이트웨이가 프록시하지 않는다(CSP 직접 호출 전용).
+    from handlers.auc_api        import CSC_AUC_HANDLER_LIST
+    from services.auc            import auc as _auc
 
     admin_server = None
     mcptt_server = None
@@ -116,6 +120,7 @@ if __name__ == '__main__':
 
         config = load_config()
         admin_auth.init(config)
+        _auc.init(config)
 
         # ── SIGUSR1 = 배포 config reload (agent job_update_config 규약) ──
         # 핸들러가 없으면 파이썬 기본 동작(프로세스 종료)이라 update_config 가 CSC 를
@@ -131,6 +136,7 @@ if __name__ == '__main__':
                     from services import config_reload as _cr
                     kept = _cr.apply_reload(config, newc)
                     admin_auth.init(config)
+                    _auc.init(config)
                     apply_config(config)
                     logger.log_info(f'[reload] SIGUSR1 — config 재적용 ({kept}건 런타임 보존) '
                                     '(bind/기동 캡처 항목은 재기동 필요)')
@@ -300,7 +306,7 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in (CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
-                                     + CSC_API_DOCS_HANDLER_LIST)
+                                     + CSC_API_DOCS_HANDLER_LIST + CSC_AUC_HANDLER_LIST)
         ])
         admin_server.start()
         logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4421)}")

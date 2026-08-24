@@ -14,6 +14,7 @@ enum ECheckAuthResult {
     E_AUTH_ERROR,           // 가입자 존재 — 자격 증명/정책 불일치 (실단말 가능성, 로그 유지)
     E_AUTH_USER_NOT_FOUND,  // 미가입 계정 — 계정 무차별 대입 스캐너 신호 (소스 로그 억제 대상)
     E_AUTH_REALM_MISMATCH,  // Authorization.realm ≠ 서비스 realm — 서버 realm 로 401 재챌린지 (stale 아님)
+    E_AUTH_AKA_RESYNC,      // IMS AKA: 단말이 auts 를 보냈다 — CSC 재동기 후 새 챌린지 (RFC 3310 §3.4)
 };
 
 // 미가입 계정 무차별 대입 소스의 NETWORK 덤프 억제 시간 (toll-fraud INVITE 603 경로와 동일 값)
@@ -43,9 +44,22 @@ public:
     static bool CheckAuthorizationResponse( const char *pszHa1, const char *pszNonce, const char *pszUri,
                                             const char *pszResponse, const char *pszMethod, const char *pszQop,
                                             const char *pszNc, const char *pszCnonce );
+    //   pstrResyncRand/pstrResyncAuts: E_AUTH_AKA_RESYNC 일 때 직전 챌린지 RAND(hex) 와 단말 AUTS(hex) 를 돌려준다.
     static ECheckAuthResult CheckAuthorization( CSipCredential *pclsCredential, const char *pszFromId,
-                                                const char *pszMethod, CspUser &clsXmlUser );
+                                                const char *pszMethod, CspUser &clsXmlUser,
+                                                std::string *pstrResyncRand = NULL,
+                                                std::string *pstrResyncAuts = NULL );
     static std::string EffectiveHa1( const CspUser &clsUser, const std::string &strImpi, const std::string &strRealm );
+
+    // IMS AKA (sip_access_security.md §8.2, RFC 3310 / TS 33.203 Annex X)
+    //   AV 를 CSC 에서 받아 401 (nonce=base64(RAND‖AUTN), algorithm=AKAv1-MD5) 을 보낸다.
+    //   strRandPrevHex/strAutsHex 가 있으면 재동기(AUTS) 요청이다. CSC 미도달은 504, AUTS 불일치·미가입은 403.
+    static bool SendAkaChallenge( CSipMessage *pclsMessage, const CspUser &clsUser, const std::string &strRealm,
+                                  bool bStale = false, const char *pszSecurityServer = NULL,
+                                  const std::string &strRandPrevHex = "", const std::string &strAutsHex = "" );
+    /** From 가입자의 체계에 맞는 REGISTER 챌린지 — aka 면 SendAkaChallenge, 아니면 Digest 401. */
+    static bool SendRegisterChallenge( CSipMessage *pclsMessage, const std::string &strRealm, bool bStale,
+                                       const char *pszSecurityServer );
 
     // REGISTER 인증 체크 (EventIncomingRequestAuth에서 사용)
     static bool CheckAuthrization( CSipMessage *pclsMessage );
@@ -57,6 +71,7 @@ private:
     bool RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage );
 
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
+    static bool SendResponseStatic( CSipMessage *pclsMessage, int iStatusCode );
     /** RFC 3329 협상 거절 — 494(대조 실패/제안 없음) 또는 421(정책상 협상 필수) + 새 Security-Server. */
     bool SendSecAgreeReject( CSipMessage *pclsMessage, int iStatusCode, const std::string &strUser,
                              const char *pszReason );

@@ -76,9 +76,18 @@ public:
     //   "TLS" 만 서버가 집행한다(비-TLS 채널의 이 신원 요청은 403). 나머지는 프로비저닝 힌트.
     std::string m_strSipTransport;
 
-    /** TLS 채널 강제 대상 가입자인가 (sip_transport=TLS). */
+    // 인증 체계 (sip_access_security.md §8.2) — DB auth_scheme 'digest'(기본) | 'aka'. Cx 의
+    //   SIP-Authentication-Scheme 상당: 챌린지 체계는 협상이 아니라 프로비저닝으로 확정된다(TS 33.203 Annex P.4).
+    std::string m_strAuthScheme;
+
+    /** IMS AKA 가입자인가. */
+    bool isAka() const {
+        return strcasecmp( m_strAuthScheme.c_str(), "aka" ) == 0;
+    }
+
+    /** TLS 채널 강제 대상 가입자인가 — sip_transport=TLS 정책, 또는 IMS AKA(Annex X — TLS 위에서만 성립). */
     bool requiresTls() const {
-        return strcasecmp( m_strSipTransport.c_str(), "TLS" ) == 0;
+        return strcasecmp( m_strSipTransport.c_str(), "TLS" ) == 0 || isAka();
     }
 
     // v3 (2026-04-22): 서비스 귀속을 name 기반 참조로 이전.

@@ -334,6 +334,38 @@
       "scope": "service"
     },
     {
+      "key": "auc",
+      "title": "AuC — IMS AKA 인증 벡터 (CSP 내부 API)",
+      "description": "가입자 auth_scheme=aka 의 K/OPc 보관 키와 CSP 가 AV 를 요청할 때 쓰는 모듈 간 공유 토큰 (sip_access_security.md §8.2). 둘 다 configure 가 채운다 — Kek 는 한 번 정해지면 바꾸지 않는다(바꾸면 보관된 K/OPc 를 복호할 수 없어 AKA 가입자 전원 재프로비저닝).",
+      "fields": [
+        {
+          "key": "AuC.Kek",
+          "label": "K/OPc 보관 암호화 키 (KEK)",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@AUC_KEK@",
+          "secret": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "hex32 또는 임의 문자열(SHA-256 으로 정규화). 비면 AKA 프로비저닝·AV 발급이 503 으로 거부된다(평문 보관 fallback 없음).",
+          "scope": "system"
+        },
+        {
+          "key": "InternalApi.Token",
+          "label": "CSP↔CSC 내부 API 토큰",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@INTERNAL_TOKEN@",
+          "secret": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "POST /internal/aka/av 의 Bearer 토큰. csp.json Setup.Csc.InternalToken 과 같은 값이어야 한다(configure 가 함께 렌더). 비면 내부 API 가 503.",
+          "scope": "system"
+        }
+      ],
+      "scope": "system"
+    },
+    {
       "key": "idms_runtime",
       "title": "IdMs / KMS (런타임 파라미터)",
       "description": "JWT/KMS 엔드포인트 및 TTL. 시크릿은 _infra 에 별도 저장.",

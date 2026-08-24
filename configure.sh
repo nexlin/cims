@@ -278,9 +278,19 @@ fi
 if [[ -z "$CIMS_JWT_SECRET" ]]; then
     CIMS_JWT_SECRET="$(openssl rand -base64 32 2>/dev/null || echo 'cims_jwt_secret_change_me')"
 fi
-# CSC↔CSP 내부 API shared secret (loopback only + header token 2중 보호용)
+# CSC↔CSP 내부 API shared secret — csc.json InternalApi.Token = csp.json Setup.Csc.InternalToken
+#   (POST /internal/aka/av 의 Bearer, sip_access_security.md §8.2). 두 파일이 한 configure 에서 같은 값으로 렌더된다.
 if [[ -z "${INTERNAL_TOKEN:-}" ]]; then
     INTERNAL_TOKEN="$(openssl rand -hex 24 2>/dev/null || echo 'csc_internal_token_change_me')"
+fi
+# AuC KEK — AKA 가입자 K/OPc 보관 암호화 키. JWT 시크릿과 달리 **재생성하면 안 된다**(보관된 K/OPc 를
+#   복호할 수 없게 된다) → 기존 csc.json 의 AuC.Kek 를 이어받고, 없을 때만 새로 만든다.
+if [[ -z "${AUC_KEK:-}" && -f "$DIST_DIR/csc/config/csc.json" ]]; then
+    AUC_KEK="$(python3 -c 'import json,sys; print((json.load(open(sys.argv[1])).get("AuC") or {}).get("Kek") or "")' \
+        "$DIST_DIR/csc/config/csc.json" 2>/dev/null || true)"
+fi
+if [[ -z "${AUC_KEK:-}" ]]; then
+    AUC_KEK="$(openssl rand -hex 16 2>/dev/null || echo '')"
 fi
 
 echo ""
@@ -362,6 +372,7 @@ apply_template() {
         -e "s|@IDMS_JWT_SECRET@|${IDMS_JWT_SECRET}|g" \
         -e "s|@CIMS_JWT_SECRET@|${CIMS_JWT_SECRET}|g" \
         -e "s|@INTERNAL_TOKEN@|${INTERNAL_TOKEN}|g" \
+        -e "s|@AUC_KEK@|${AUC_KEK}|g" \
         -e "s|@MSG_LOG_DIR@|${MSG_LOG_DIR}|g" \
         -e "s|@SERVICE_LOG_DIR@|${SERVICE_LOG_DIR}|g" \
         -e "s|@RECORD_DIR@|${RECORD_DIR}|g" \
@@ -385,7 +396,7 @@ apply_config_template() {
     DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
     VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" \
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
-    INTERNAL_TOKEN="$INTERNAL_TOKEN" \
+    INTERNAL_TOKEN="$INTERNAL_TOKEN" AUC_KEK="$AUC_KEK" \
     MSG_LOG_DIR="$MSG_LOG_DIR" SERVICE_LOG_DIR="$SERVICE_LOG_DIR" \
     RECORD_DIR="$RECORD_DIR" DIST_DIR="$DIST_DIR" \
     python3 - "$src" "$dst" <<'PY'

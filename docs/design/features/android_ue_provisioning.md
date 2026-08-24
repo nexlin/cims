@@ -114,6 +114,10 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - `account.sipHa1`: **서비스 가입(subscription) 의 SIP Digest H(A1)**(`*_subscriptions.ha1` =
   `MD5(imsi@domain:realm:password)`). CIMS 로그인(IdMS `users.passwd`)과 **별개 자격증명** — 단말은 이 값을
   pjsip `PJSIP_CRED_DATA_DIGEST` 자격으로 넣어 원문 없이 response 를 계산한다.
+- `account.authScheme`: `digest`(기본) | `aka`. `aka` 면 `account.aka = {k, opc, amf}`(hex) 가 함께 오고 `sipHa1` 은
+  `null` — **소프트-K 프로비저닝**(단말이 USIM 역할, [sip_access_security.md §8.2](sip_access_security.md)). 단말은 이
+  값을 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 넣어 `AKAv1-MD5` 챌린지에 답하고, 그 가입은 TLS 로만 등록한다
+  (Android 연결은 후속). 서버가 키를 못 풀면(`AuC.Kek` 불일치) `k`/`opc` 가 빈 문자열로 온다.
 - `account.sipPassword`: 항상 `null`(서버가 평문을 배포하지 않는다 — 키는 단말 호환으로 유지).
   단말은 `sipHa1`(DIGEST cred) → 평문 cred(`sipPassword` → 로그인 비번) 순으로 쓴다 — 평문 cred 는
   pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.

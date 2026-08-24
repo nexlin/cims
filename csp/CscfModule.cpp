@@ -6,11 +6,14 @@
 
 #include "CscfModule.h"
 
+#include <openssl/evp.h>
 #include <time.h>
 
 #include <map>
 #include <mutex>
 
+#include "Base64.h"
+#include "CscAvClient.h"
 #include "CspAddressing.h"
 #include "CspPttGroup.h"
 #include "CspServiceMap.h"
@@ -28,6 +31,7 @@
 #include "SipStackThread.h"   // GetCurrentInboundListenerId()
 #include "SipStatsMonitor.h"  // AddChannelPolicyViolation (A-SEC-003)
 #include "SipUtility.h"
+#include "StringUtility.h"
 #include "SubscriptionManager.h"
 #include "UserMap.h"
 
@@ -104,6 +108,115 @@ bool CCscfModule::SendSecAgreeReject( CSipMessage *pclsMessage, int iStatusCode,
     return true;
 }
 
+// ──────────────────────────────────────────────────────────────
+//  IMS AKA (sip_access_security.md §8.2 — RFC 3310, TS 33.203 Annex X, TS 24.229 §5.4.1.2)
+// ──────────────────────────────────────────────────────────────
+
+static bool HexToBytes( const std::string &strHex, std::string &strOut ) {
+    if ( strHex.size() % 2 ) return false;
+    strOut.clear();
+    for ( size_t i = 0; i < strHex.size(); i += 2 ) {
+        unsigned int v = 0;
+        if ( sscanf( strHex.substr( i, 2 ).c_str(), "%2x", &v ) != 1 ) return false;
+        strOut.push_back( (char)v );
+    }
+    return true;
+}
+
+static std::string BytesToHex( const std::string &strBytes ) {
+    std::string strOut;
+    char sz[3];
+    for ( size_t i = 0; i < strBytes.size(); ++i ) {
+        snprintf( sz, sizeof( sz ), "%02x", (unsigned char)strBytes[i] );
+        strOut += sz;
+    }
+    return strOut;
+}
+
+/** RFC 3310 §3.2: H(A1) = MD5(username ":" realm ":" RES) — RES 는 이진(바이너리) 그대로. hex(32) 반환. */
+static std::string AkaHa1( const std::string &strUser, const std::string &strRealm, const std::string &strResBytes ) {
+    std::string strA1 = strUser + ":" + strRealm + ":" + strResBytes;
+    unsigned char md[EVP_MAX_MD_SIZE];
+    unsigned int n = 0;
+    if ( EVP_Digest( strA1.data(), strA1.size(), md, &n, EVP_md5(), NULL ) != 1 ) return "";
+    return BytesToHex( std::string( (const char *)md, n ) );
+}
+
+bool CCscfModule::SendAkaChallenge( CSipMessage *pclsMessage, const CspUser &clsUser, const std::string &strRealm,
+                                    bool bStale, const char *pszSecurityServer, const std::string &strRandPrevHex,
+                                    const std::string &strAutsHex ) {
+    CscAv clsAv;
+    const ECscAvResult eRes =
+        gclsCscAvClient.Request( clsUser.m_strId, clsUser.m_strServiceType, strRandPrevHex, strAutsHex, clsAv );
+    switch ( eRes ) {
+        case E_CSC_AV_OK:
+            break;
+        case E_CSC_AV_AUTS_INVALID:
+            // 재동기 요청의 MAC-S 가 틀렸다 — 단말 K 불일치 (TS 24.229 §5.4.1.2.2: 403)
+            CLog::Print( LOG_ERROR, "AKA resync rejected user=%s (AUTS invalid) → 403", clsUser.m_strId.c_str() );
+            return SendResponseStatic( pclsMessage, SIP_FORBIDDEN );
+        case E_CSC_AV_SCHEME_MISMATCH: {
+            // CSC 는 이 가입자를 digest 로 안다(캐시 불일치) — 캐시를 갱신하고 그 체계로 다시 챌린지한다.
+            CLog::Print( LOG_ERROR, "AKA AV scheme mismatch user=%s — reload cache", clsUser.m_strId.c_str() );
+            gclsCspUserMap.ReloadFromDb( clsUser.m_strId );
+            CspUser clsNow;
+            if ( gclsCspUserMap.Select( clsUser.m_strId.c_str(), clsNow ) && !clsNow.isAka() )
+                return SendUnAuthorizedResponse( pclsMessage, strRealm, bStale, pszSecurityServer );
+            return SendResponseStatic( pclsMessage, SIP_FORBIDDEN );
+        }
+        case E_CSC_AV_UNKNOWN_SUB:
+            CLog::Print( LOG_ERROR, "AKA AV: CSC unknown subscriber user=%s → 403", clsUser.m_strId.c_str() );
+            return SendResponseStatic( pclsMessage, SIP_FORBIDDEN );
+        case E_CSC_AV_UNAVAILABLE:
+        default:
+            // HSS 미도달 상당 — 단말이 재시도할 수 있게 504 (TS 24.229 §5.4.1.2.1)
+            CLog::Print( LOG_ERROR, "AKA AV unavailable user=%s → 504", clsUser.m_strId.c_str() );
+            return SendResponseStatic( pclsMessage, SIP_SERVER_TIME_OUT );
+    }
+
+    std::string strRand, strAutn;
+    if ( !HexToBytes( clsAv.strRandHex, strRand ) || !HexToBytes( clsAv.strAutnHex, strAutn ) ) {
+        CLog::Print( LOG_ERROR, "AKA AV decode error user=%s", clsUser.m_strId.c_str() );
+        return SendResponseStatic( pclsMessage, SIP_SERVER_TIME_OUT );
+    }
+    std::string strNonce;
+    const std::string strRandAutn = strRand + strAutn;
+    if ( Base64Encode( strRandAutn.data(), (int)strRandAutn.size(), strNonce ) == false ) return false;
+    gclsNonceMap.InsertAka( strNonce, clsUser.m_strId, clsAv.strRandHex, clsAv.strXresHex );
+
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
+    if ( pclsResponse == NULL ) return false;
+    pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
+
+    // WWW-Authenticate: Digest realm, nonce=base64(RAND‖AUTN), algorithm=AKAv1-MD5, qop="auth" (RFC 3310 §3.1,
+    //   TS 24.229 §5.4.1.2.1). P/S-CSCF 가 한 프로세스라 ik/ck 파라미터는 밖으로 내지 않는다(P-CSCF 가 제거하는 값).
+    CSipChallenge clsChallenge;
+    clsChallenge.m_strType = "Digest";
+    clsChallenge.m_strRealm = strRealm;
+    clsChallenge.m_strNonce = strNonce;
+    clsChallenge.m_strAlgorithm = "AKAv1-MD5";
+    clsChallenge.m_strQop = "auth";
+    if ( bStale ) clsChallenge.m_strStale = "true";
+    pclsResponse->m_clsWwwAuthenticateList.push_back( clsChallenge );
+    if ( pszSecurityServer ) pclsResponse->AddHeader( "Security-Server", pszSecurityServer );
+    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    CLog::Print( LOG_INFO, "AKA challenge user=%s realm=%s%s%s", clsUser.m_strId.c_str(), strRealm.c_str(),
+                 clsAv.bResynced ? " (resynced)" : "", bStale ? " stale" : "" );
+    return true;
+}
+
+bool CCscfModule::SendRegisterChallenge( CSipMessage *pclsMessage, const std::string &strRealm, bool bStale,
+                                         const char *pszSecurityServer ) {
+    CspUser clsUser;
+    if ( gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsUser ) && clsUser.isAka() ) {
+        // Annex X: AKA 는 TLS 위에서만 — 채널 정책 게이트(requiresTls)가 앞에서 걸러 여기는 항상 TLS 다.
+        ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
+        const std::string strUserRealm = svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRealm;
+        return SendAkaChallenge( pclsMessage, clsUser, strUserRealm, bStale, pszSecurityServer );
+    }
+    return SendUnAuthorizedResponse( pclsMessage, strRealm, bStale, pszSecurityServer );
+}
+
 /**
  * @brief 가입자의 H(A1) 을 돌려준다 — 저장값(ha1) 우선, 비어 있으면 평문 passwd 로 종전 계산(과도기).
  *
@@ -151,15 +264,30 @@ bool CCscfModule::CheckAuthorizationResponse( const char *pszHa1, const char *ps
 }
 
 ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential, const char *pszFromId,
-                                                  const char *pszMethod, CspUser &clsXmlUser ) {
+                                                  const char *pszMethod, CspUser &clsXmlUser,
+                                                  std::string *pstrResyncRand, std::string *pstrResyncAuts ) {
     if ( pclsCredential->m_strUserName.empty() ) return E_AUTH_ERROR;
     // RFC 7616: qop 사용 시 nonce 는 nc 증가와 함께 재사용 가능 (실제 IMS 망 동일).
     //   여기서는 존재만 확인(삭제 안 함)하고, 해시 검증 통과 후 CheckAndUpdateNc 로 replay 차단.
     //   qop 미사용(레거시) credential 은 기존대로 1회용 삭제.
     const bool bQop = !pclsCredential->m_strQop.empty();
-    if ( gclsNonceMap.Select( pclsCredential->m_strNonce.c_str(), !bQop ) == false )
+    CNonceInfo clsNonce;
+    if ( gclsNonceMap.SelectInfo( pclsCredential->m_strNonce.c_str(), clsNonce, !bQop ) == false )
         return E_AUTH_NONCE_NOT_FOUND;
     if ( gclsCspUserMap.Select( pszFromId, clsXmlUser ) == false ) return E_AUTH_USER_NOT_FOUND;
+
+    // Annex P.4 — 체계 고착: 챌린지 체계(nonce)와 가입자 체계가 다르면 답안을 받지 않는다.
+    //   (프로비저닝 변경 직후의 교차 답안, 또는 다른 신원에게 발급된 AKA nonce 의 재사용)
+    if ( clsNonce.m_bAka != clsXmlUser.isAka() ) {
+        CLog::Print( LOG_ERROR, "Auth reject: user=%s scheme changed (nonce=%s, subscriber=%s)", pszFromId,
+                     clsNonce.m_bAka ? "aka" : "digest", clsXmlUser.isAka() ? "aka" : "digest" );
+        return E_AUTH_ERROR;
+    }
+    if ( clsNonce.m_bAka && clsNonce.m_strUser != pszFromId ) {
+        CLog::Print( LOG_ERROR, "Auth reject: user=%s answered a nonce issued to %s", pszFromId,
+                     clsNonce.m_strUser.c_str() );
+        return E_AUTH_ERROR;
+    }
 
     // v3 (2026-04-22): 가입자의 service_ref 가 비어있으면 REGISTER 거부
     if ( clsXmlUser.m_strServiceRef.empty() ) {
@@ -207,7 +335,46 @@ ECheckAuthResult CCscfModule::CheckAuthorization( CSipCredential *pclsCredential
         return E_AUTH_REALM_MISMATCH;
     }
 
-    const std::string strHa1 = EffectiveHa1( clsXmlUser, strExpectedUser, strRealm );
+    std::string strHa1;
+    if ( clsNonce.m_bAka ) {
+        // IMS AKA (RFC 3310) — algorithm 은 챌린지의 AKAv1-MD5 그대로여야 한다.
+        if ( strcasecmp( pclsCredential->m_strAlgorithm.c_str(), "AKAv1-MD5" ) != 0 ) {
+            CLog::Print( LOG_ERROR, "Auth reject: user=%s AKA answer with algorithm='%s'", pszFromId,
+                         pclsCredential->m_strAlgorithm.c_str() );
+            return E_AUTH_ERROR;
+        }
+        // auts (RFC 3310 §3.4): 단말의 SQN 이탈 보고 — 재동기 후 새 챌린지. response 는 빈 비밀번호로 계산되므로
+        //   검증하지 않는다(AUTS 의 MAC-S 가 단말을 인증한다 — CSC 가 검증).
+        for ( SIP_PARAMETER_LIST::iterator it = pclsCredential->m_clsParamList.begin();
+              it != pclsCredential->m_clsParamList.end(); ++it ) {
+            if ( strcasecmp( it->m_strName.c_str(), "auts" ) == 0 ) {
+                std::string strAutsB64;
+                DeQuoteString( it->m_strValue, strAutsB64 );
+                std::string strAuts( GetBase64DecodeLength( (int)strAutsB64.size() ) + 1, '\0' );
+                const int iLen =
+                    Base64Decode( strAutsB64.c_str(), (int)strAutsB64.size(), &strAuts[0], (int)strAuts.size() );
+                if ( iLen != 14 ) {
+                    CLog::Print( LOG_ERROR, "Auth reject: user=%s auts length %d (expect 14)", pszFromId, iLen );
+                    return E_AUTH_ERROR;
+                }
+                strAuts.resize( iLen );
+                if ( pstrResyncRand ) *pstrResyncRand = clsNonce.m_strRandHex;
+                if ( pstrResyncAuts ) *pstrResyncAuts = BytesToHex( strAuts );
+                CLog::Print( LOG_INFO, "AKA resync requested user=%s", pszFromId );
+                return E_AUTH_AKA_RESYNC;
+            }
+        }
+        if ( pclsCredential->m_strResponse.empty() ) {
+            // 빈 response + auts 없음 = 단말이 AUTN MAC 실패를 보고 (TS 24.229 §5.1.1.5.3) → 403
+            CLog::Print( LOG_ERROR, "Auth reject: user=%s reported AUTN MAC failure (empty response)", pszFromId );
+            return E_AUTH_ERROR;
+        }
+        std::string strXres;
+        if ( !HexToBytes( clsNonce.m_strXresHex, strXres ) ) return E_AUTH_ERROR;
+        strHa1 = AkaHa1( strExpectedUser, strRealm, strXres );
+    } else {
+        strHa1 = EffectiveHa1( clsXmlUser, strExpectedUser, strRealm );
+    }
     if ( strHa1.empty() ) {
         CLog::Print( LOG_ERROR, "Auth reject: user=%s has no credential (ha1/passwd empty)", pszFromId );
         return E_AUTH_ERROR;
@@ -257,6 +424,22 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
     //   (RecvRequestRegister 와 동일 가드 — 첫 챌린지에 stale=true 가 붙는 버그 방지)
     const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
                                  itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
+
+    // IMS AKA 가입자 (sip_access_security.md §8.2): 비-REGISTER 요청은 등록이 결부한 TLS flow 위에서만 유효하다
+    //   (TS 33.203 Annex O/X — 보호 채널 밖의 요청은 받지 않는다). 여기는 그 flow 와 어긋난(또는 미등록) 요청만
+    //   들어오므로 Digest 챌린지 대신 403 — 단말은 그 연결에서 다시 REGISTER 해야 한다.
+    {
+        CspUser clsProv;
+        if ( gclsCspUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsProv ) && clsProv.isAka() ) {
+            CLog::Print( LOG_INFO, "CheckAuthrization: aka user(%s) %s outside registered TLS flow (%s:%d) → 403",
+                         clsProv.m_strId.c_str(), pclsMessage->m_strSipMethod.c_str(),
+                         pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
+            CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+            if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+            return false;
+        }
+    }
+
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
         SendUnAuthorizedResponse( pclsMessage, ChallengeRealmForRequester( pclsMessage ) );
         return false;
@@ -308,6 +491,10 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
 // ──────────────────────────────────────────────────────────────
 
 bool CCscfModule::SendResponse( CSipMessage *pclsMessage, int iStatusCode ) {
+    return SendResponseStatic( pclsMessage, iStatusCode );
+}
+
+bool CCscfModule::SendResponseStatic( CSipMessage *pclsMessage, int iStatusCode ) {
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
     if ( pclsResponse == NULL ) return false;
 
@@ -430,22 +617,32 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
                                  itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
-        return SendUnAuthorizedResponse( pclsMessage, strRegRealm, false, pszSecServer );
+        // 체계는 가입자 프로비저닝(auth_scheme)이 정한다 — aka 면 CSC AV 로 AKA 챌린지 (§8.2)
+        return SendRegisterChallenge( pclsMessage, strRegRealm, false, pszSecServer );
     }
 
     CspUser clsUser;
-    ECheckAuthResult eRes = CheckAuthorization( &( *itCL ), pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(),
-                                                pclsMessage->m_strSipMethod.c_str(), clsUser );
+    std::string strResyncRand, strResyncAuts;
+    ECheckAuthResult eRes =
+        CheckAuthorization( &( *itCL ), pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(),
+                            pclsMessage->m_strSipMethod.c_str(), clsUser, &strResyncRand, &strResyncAuts );
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage, strRegRealm, true, pszSecServer );  // F-07: stale=true
+            SendRegisterChallenge( pclsMessage, strRegRealm, true, pszSecServer );  // F-07: stale=true
             return true;
         case E_AUTH_REALM_MISMATCH: {
             // 가입자 서비스의 realm 로 재챌린지 — Request-URI host 로 고른 strRegRealm 과 다를 수 있다
             ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
-            SendUnAuthorizedResponse( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm,
-                                      false, pszSecServer );
+            SendRegisterChallenge( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm, false,
+                                   pszSecServer );
+        }
+            return true;
+        case E_AUTH_AKA_RESYNC: {
+            // RFC 3310 §3.4 / TS 33.102 §6.3.5: AUTS 로 CSC 의 SQN 을 재동기하고 새 AV 로 다시 챌린지
+            ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
+            SendAkaChallenge( pclsMessage, clsUser, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm,
+                              false, pszSecServer, strResyncRand, strResyncAuts );
         }
             return true;
         case E_AUTH_USER_NOT_FOUND:

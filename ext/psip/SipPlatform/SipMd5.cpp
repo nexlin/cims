@@ -301,6 +301,23 @@ static void MD5Final( unsigned char digest[16], MD5_CTX * context )
  * @param pszPlainText 평문 문자열
  * @param szMd5 MD5 문자열 저장 변수
  */
+void SipMd5Buffer( const unsigned char * pszInput, int iLen, char szMd5[33] )
+{
+	MD5_CTX context;
+	unsigned char digest[16];
+	int		i;
+
+	MD5Init( &context );
+	MD5Update( &context, (unsigned char *)pszInput, (unsigned int)iLen );
+	MD5Final( digest, &context );
+
+	for (i = 0; i < 16; i++)
+	{
+		sprintf( szMd5 + i * 2, "%02x", digest[i] );
+	}
+	szMd5[32] = '\0';
+}
+
 void SipMd5String( const char * pszPlainText, char szMd5[33] )
 {
 	MD5_CTX context;

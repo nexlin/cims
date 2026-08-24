@@ -324,6 +324,16 @@ public:
     std::string m_strXcapScheme;
 
     // ================================================================
+    // CSC 내부 API (S-CSCF ↔ HSS/AuC — IMS AKA AV, sip_access_security.md §8.2) — Setup.Csc.*
+    //   Host 비면 Xcap.Host → LocalIp 순 fallback. InternalToken 은 csc.json InternalApi.Token 과 같은 값
+    //   (configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 는 504.
+    std::string m_strCscHost;
+    int m_iCscPort;
+    std::string m_strCscScheme;
+    std::string m_strCscInternalToken;
+    int m_iCscTimeoutMs;
+
+    // ================================================================
     // 런타임 설정 jsonl 디렉토리 (agent 관리)
     std::string m_strConfigJsonlDir;  // agent 관리 config/ 디렉토리
 

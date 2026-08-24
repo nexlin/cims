@@ -203,15 +203,21 @@ static std::string DerivePttAuthId(const std::string& strUser, const std::string
 // ─────────────────────────────────────────────
 //  단말별 자격 파일 (-creds, sip_access_security.md §4.7)
 // ─────────────────────────────────────────────
-// JSONL — 한 줄 = 한 단말: {"user":"+82...","ha1":"<hex32>","authId":"...","password":"..."}
-//   · user (필수)      : 전개된 사용자 ID 와 정확 일치하는 매칭 키
-//   · ha1 / password   : 둘 중 하나 필수 — ha1 우선(원문 없이 response 계산)
-//   · authId (선택)    : '@' 없으면 -domain 을 붙여 조립(DB 모드와 동일 규칙)
+// JSONL — 한 줄 = 한 단말:
+// {"user":"+82...","ha1":"<hex32>","authId":"...","password":"...","k":"<hex32>","opc":"<hex32>","sqn":"0"}
+//   · user (필수)         : 전개된 사용자 ID 와 정확 일치하는 매칭 키
+//   · ha1 / password / k  : 셋 중 하나 필수 — ha1 우선(원문 없이 response 계산)
+//                           k+opc 는 IMS AKA(sip_access_security.md §8.2)
+//   · authId (선택)       : '@' 없으면 -domain 을 붙여 조립(DB 모드와 같다)
 // "같은 비밀번호 구간" 없이 -count 전개 단말 각각에 자기 자격을 준다.
 struct UserCred {
     std::string authId;
     std::string password;
     std::string ha1;
+    std::string
+        k; // IMS AKA K (hex32) — 있으면 AKAv1-MD5 챌린지에 Milenage 로 답한다
+    std::string opc; // IMS AKA OPc (hex32)
+    std::string sqn; // 단말 초기 SQN_MS (10진, 선택)
 };
 
 static bool LoadCredsFile(const std::string& strPath, std::map<std::string, UserCred>& mapOut) {
@@ -232,9 +238,14 @@ static bool LoadCredsFile(const std::string& strPath, std::map<std::string, User
         cred.authId   = node.GetString("authId");
         cred.password = node.GetString("password");
         cred.ha1      = node.GetString("ha1");
-        if (strUser.empty() || (cred.ha1.empty() && cred.password.empty())) {
-            printf("[CREDS] %s:%d — user 또는 자격(ha1/password) 누락\n", strPath.c_str(), iLine);
-            return false;
+        cred.k = node.GetString("k");
+        cred.opc = node.GetString("opc");
+        cred.sqn = node.GetString("sqn");
+        if (strUser.empty() ||
+            (cred.ha1.empty() && cred.password.empty() && cred.k.empty())) {
+          printf("[CREDS] %s:%d — user 또는 자격(ha1/password/k) 누락\n",
+                 strPath.c_str(), iLine);
+          return false;
         }
         mapOut[strUser] = cred;
     }
@@ -356,7 +367,13 @@ static void PrintUsage(const char* pszBin) {
     printf("  -password    <pwd>       패스워드 (default: 1234)\n");
     printf("  -ha1         <hex32>     SIP Digest H(A1) — 지정 시 -password 대신 이 값으로 response 계산\n");
     printf("                             (-db 모드는 DB 의 ha1 을 자동 사용, 비어 있으면 passwd)\n");
-    printf("  -creds       <file>      단말별 자격 파일(JSONL: user/ha1/authId/password)\n");
+    printf("  -creds       <file>      단말별 자격 파일(JSONL: "
+           "user/ha1/authId/password/k/opc/sqn)\n");
+    printf("  -aka_k       <hex32>     IMS AKA K — 지정 시 AKAv1-MD5 챌린지에 "
+           "Milenage 로 답한다 (TLS 필수)\n");
+    printf("  -aka_opc     <hex32>     IMS AKA OPc\n");
+    printf("  -aka_sqn     <n>         단말 초기 SQN_MS (기본 0. 큰 값이면 SQN "
+           "이탈 → AUTS 재동기 경로 재현)\n");
     printf(
         "  -sec_agree               RFC 3329 sec-agree 협상 (Security-Client: "
         "tls → 401 Security-Server → Security-Verify echo)\n");
@@ -739,6 +756,12 @@ int main(int argc, char* argv[])
     std::string strPassword   = GetArg(argc, argv, "-password",   "1234");
     std::string strHa1        = GetArg(argc, argv, "-ha1",        "");
     std::string strCredsFile  = GetArg(argc, argv, "-creds",      "");
+    // IMS AKA 소프트-USIM (sip_access_security.md §8.2) — -creds 의 k/opc/sqn
+    // 이 우선한다.
+    std::string strAkaK = GetArg(argc, argv, "-aka_k", "");
+    std::string strAkaOpc = GetArg(argc, argv, "-aka_opc", "");
+    unsigned long long ullAkaSqn =
+        strtoull(GetArg(argc, argv, "-aka_sqn", "0").c_str(), NULL, 10);
     std::string strMode       = GetArg(argc, argv, "-mode",       "volte");
     // 시그널링 transport — udp(기본)|tcp|tls. TLS 는 스택을 TLS 클라이언트로 기동한다.
     std::string strTransport  = GetArg(argc, argv, "-transport",  "udp");
@@ -927,6 +950,8 @@ int main(int argc, char* argv[])
         }
 
         // 단말별 자격 파일 override — 전원 커버는 위에서 선검증됨.
+        std::string strSesAkaK = strAkaK, strSesAkaOpc = strAkaOpc;
+        unsigned long long ullSesAkaSqn = ullAkaSqn;
         if (!mapCreds.empty()) {
             const UserCred& cred = mapCreds[strUser];
             if (!cred.authId.empty()) {
@@ -935,6 +960,12 @@ int main(int argc, char* argv[])
             }
             if (!cred.password.empty()) strPwd = cred.password;
             if (!cred.ha1.empty())      strSesHa1 = cred.ha1;
+            if (!cred.k.empty()) {
+              strSesAkaK = cred.k;
+              strSesAkaOpc = cred.opc;
+            }
+            if (!cred.sqn.empty())
+              ullSesAkaSqn = strtoull(cred.sqn.c_str(), NULL, 10);
         }
 
         SimSession* s = new SimSession(
@@ -956,6 +987,8 @@ int main(int argc, char* argv[])
         }
         if (bSecAgree)
           s->SetSecAgree(true, strSecVerify);
+        if (!strSesAkaK.empty())
+          s->SetAka(strSesAkaK, strSesAkaOpc, (uint64_t)ullSesAkaSqn);
         s->SetNoRegister(bNoRegister);
         s->SetNoXcap(bNoXcap);
         if (!strCscIp.empty()) s->SetCscHost(strCscIp, iCscPort, bCscTls);

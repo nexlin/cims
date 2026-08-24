@@ -23,6 +23,7 @@
 #include "SipStack.h"
 #include <vector>
 #include <utility>
+#include <stdint.h>
 
 // SIP 로그인 정보를 저장하는 클래스
 class CSipServerInfo
@@ -69,6 +70,16 @@ public:
 	std::string		m_strSecurityServer;
 	/** 시험 전용 — 비어있지 않으면 echo 대신 이 값을 Security-Verify 로 보낸다(강등 변조 재현) */
 	std::string		m_strSecurityVerifyOverride;
+
+	/** IMS AKA 소프트-USIM (sip_access_security.md §8.2, RFC 3310 AKAv1-MD5). m_strAkaK 가 비어있지 않으면
+	 *  algorithm=AKAv1-MD5 챌린지에 Milenage 로 답한다(RES 가 Digest password). MAC 실패면 빈 response,
+	 *  SQN 이탈이면 auts 를 실어 재동기를 요청한다. K/OPc 는 hex32. */
+	std::string		m_strAkaK;
+	std::string		m_strAkaOpc;
+	/** 단말 SQN_MS — 마지막으로 받아들인 챌린지 SQN(TS 33.102 §6.3.3). 시험에서는 큰 값을 넣어 재동기를 유도한다. */
+	uint64_t			m_iAkaSqnMs;
+	/** 직전 REGISTER 가 auts(재동기) 를 실었다 — 이어지는 401 은 실패가 아니라 새 챌린지다 */
+	bool					m_bAkaResyncSent;
 
 	/** P-Preferred-Identity 헤더 값 (비어있으면 추가 안함) */
 	std::string		m_strPPreferredIdentity;

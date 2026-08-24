@@ -2,11 +2,12 @@
 #include "SipServerInfo.h"
 #include "SipUtility.h"
 #include "SipMd5.h"
+#include "SipAka.h"
 #include "StringUtility.h"
 #include "MemoryDebug.h"
 
 CSipServerInfo::CSipServerInfo() : m_iPort(5060), m_iLoginTimeout(3600)
-	, m_bSecAgree(false), m_eTransport(E_SIP_UDP), m_iNatTimeout(0)
+	, m_bSecAgree(false), m_iAkaSqnMs(0), m_bAkaResyncSent(false), m_eTransport(E_SIP_UDP), m_iNatTimeout(0)
 	, m_iNextSendTime(0), m_iSeqNo(0), m_bAuth(false), m_bDelete(false)
 {
 	ClearLogin();
@@ -67,6 +68,9 @@ void CSipServerInfo::Update( CSipServerInfo & clsInfo )
 	m_bSecAgree = clsInfo.m_bSecAgree;
 	m_strSecurityClient = clsInfo.m_strSecurityClient;
 	m_strSecurityVerifyOverride = clsInfo.m_strSecurityVerifyOverride;
+	m_strAkaK = clsInfo.m_strAkaK;
+	m_strAkaOpc = clsInfo.m_strAkaOpc;
+	m_iAkaSqnMs = clsInfo.m_iAkaSqnMs;
 	m_iLoginTimeout = clsInfo.m_iLoginTimeout;
 }
 
@@ -267,6 +271,41 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 	char	szA1[1024], szA2[1024], szMd5[33], szResponse[1024];
 	const char * pszQop = pclsChallenge->m_strQop.c_str();
 
+	// IMS AKA (RFC 3310 AKAv1-MD5): nonce=base64(RAND‖AUTN) 를 Milenage 로 풀어 RES 를 password 로 쓴다.
+	//   · AUTN MAC 실패 → 빈 response, auts 없음 (TS 24.229 §5.1.1.5.3 — 서버가 403)
+	//   · SQN 이탈    → auts 동봉, response 는 빈 password 로 계산 (RFC 3310 §3.4) → 서버가 재동기 후 새 401
+	std::string strAkaA1Override;   // 비어있지 않으면 MakeA1 대신 이 값(hex32)을 A1 로 쓴다
+	bool bAkaEmptyResponse = false;
+	m_bAkaResyncSent = false;
+	if( strncasecmp( pclsChallenge->m_strAlgorithm.c_str(), "AKAv1-MD5", 9 ) == 0 )
+	{
+		if( m_strAkaK.empty() ) return false;   // AKA 자격이 없는데 AKA 챌린지 — 답할 수 없다
+		CSipAkaResult clsAka;
+		if( SipAkaCompute( m_strAkaK, m_strAkaOpc, pclsChallenge->m_strNonce, m_iAkaSqnMs, clsAka ) == false ) return false;
+		std::string strPassword;
+		if( clsAka.bMacOk == false )
+		{
+			bAkaEmptyResponse = true;
+		}
+		else if( clsAka.bSqnOk == false )
+		{
+			CSipParameter clsAuts;
+			clsAuts.m_strName = "auts";
+			clsAuts.m_strValue = "\"" + clsAka.strAutsB64 + "\"";
+			clsCredential.m_clsParamList.push_back( clsAuts );
+			m_bAkaResyncSent = true;
+			// password 빈값
+		}
+		else
+		{
+			strPassword = clsAka.strRes;
+		}
+		std::string strA1 = clsCredential.m_strUserName + ":" + clsCredential.m_strRealm + ":" + strPassword;
+		char szAkaMd5[33];
+		SipMd5Buffer( (const unsigned char *)strA1.data(), (int)strA1.size(), szAkaMd5 );
+		strAkaA1Override = szAkaMd5;
+	}
+
 	if( pclsChallenge->m_strQop.empty() == false && !strncmp( pszQop, "auth", 4 ) )
 	{
 		STRING_LIST clsQopList;
@@ -293,7 +332,8 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 		clsCredential.m_strNonceCount = szNonceCount;
 		clsCredential.m_strCnonce = "1";
 
-		MakeA1( clsCredential, szA1, sizeof(szA1) );
+		if( strAkaA1Override.empty() ) MakeA1( clsCredential, szA1, sizeof(szA1) );
+		else snprintf( szA1, sizeof(szA1), "%s", strAkaA1Override.c_str() );
 		
 		if( !strcmp( clsCredential.m_strQop.c_str(), "auth-int" ) )
 		{
@@ -317,7 +357,8 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 	}
 	else
 	{
-		MakeA1( clsCredential, szA1, sizeof(szA1) );
+		if( strAkaA1Override.empty() ) MakeA1( clsCredential, szA1, sizeof(szA1) );
+		else snprintf( szA1, sizeof(szA1), "%s", strAkaA1Override.c_str() );
 		
 		snprintf( szA2, sizeof(szA2), "%s:%s", pclsRequest->m_strSipMethod.c_str(), clsCredential.m_strUri.c_str() );
 		SipMd5String( szA2, szMd5 );
@@ -328,6 +369,8 @@ bool CSipServerInfo::AddAuth( CSipMessage * pclsRequest, const CSipChallenge * p
 
 		clsCredential.m_strResponse = szMd5;
 	}
+
+	if( bAkaEmptyResponse ) clsCredential.m_strResponse.clear();
 
 	if( iStatusCode == SIP_PROXY_AUTHENTICATION_REQUIRED )
 	{

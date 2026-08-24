@@ -26,9 +26,9 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | 도메인 | 테이블 | 정의 파일 | 비고 |
 |---|---|---|---|
 | **가입자** | `users` | cims_schema.sql + migrate_add_email.sql + migrate_users_title.sql | 개인 (name/email/org_id/title/details) — `title`=직함, GMS 그룹문서 `cims:user-title` 로 UE 전달 |
-| | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql | VoLTE MSISDN, SIP 인증(`ha1` SoT, `sip_transport` 채널 정책), dnd/forward |
+| | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | VoLTE MSISDN, SIP 인증(`ha1` SoT, `auth_scheme`/AKA 자료(`k_enc`/`opc_enc`/`sqn`/`amf`), `sip_transport` 채널 정책), dnd/forward |
 | | `user_rejects` | cims_schema.sql | VoLTE 착신거부 목록 |
-| | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql | MCPTT ID, IMPI 인증(`ha1` SoT, `sip_transport` 채널 정책) |
+| | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | MCPTT ID, IMPI 인증(`ha1` SoT, `auth_scheme`/AKA 자료, `sip_transport` 채널 정책) |
 | | `ptt_user_profile` | cims_schema.sql + migrate_ptt_user_profile_v2.sql | 사용자 MCPTT 프로파일(TS 24.484) — SOS 대상 결정 모드/전용 긴급그룹·개시 인가 3종 ([mcptt_emergency_modes.md](features/mcptt_emergency_modes.md) §2) |
 | | `mcptt_service_config` | cims_schema.sql + migrate_mcptt_service_config.sql | MCPTT **시스템 전역** 서비스 설정(TS 24.484 service-config) — **단일 행 id=1**. 1:1/긴급/경보/발언요청/그룹생성 허용 + N2 상한. 편집=`PUT /api/v1/mcptt/service-config`(콘솔 구성>MCPTT 정책), 단말이 user-profile 인가와 AND 로 게이트 |
 | | `users.login_id/password/role` | migrate_auth.sql | 콘솔 인증(가입자와 동일 신원). `role` RBAC ([mcptt_authorization.md](features/mcptt_authorization.md)) |

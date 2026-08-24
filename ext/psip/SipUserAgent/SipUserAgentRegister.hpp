@@ -65,13 +65,14 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 			}
 			else if( iStatusCode == SIP_UNAUTHORIZED || iStatusCode == SIP_PROXY_AUTHENTICATION_REQUIRED )
 			{
-				if( itSL->m_bAuth )
+				if( itSL->m_bAuth && itSL->m_bAkaResyncSent == false )
 				{
 					// 인증 정보를 포함한 REGISTER 메시지에 대한 응답인 경우 로그인 오류 처리한다.
 					goto CLEAR_LOGIN;
 				}
 				else
 				{
+					// (AKA) 직전 REGISTER 가 auts 를 실었으면 이 401 은 재동기 후의 새 챌린지다 (RFC 3310 §3.4)
 					if( m_clsSipStack.m_clsSetup.m_bUseRegisterSession )
 					{
 						itSL->SetChallenge( pclsMessage );

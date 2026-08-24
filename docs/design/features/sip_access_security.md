@@ -1,12 +1,12 @@
-# SIP 접속 보안 — 채널 정책 게이트(P0) + 인증 자료 경계(P1) + 보안 메커니즘 협상(P2)
+# SIP 접속 보안 — 채널 정책 게이트(P0) + 인증 자료 경계(P1) + 보안 메커니즘 협상(P2) + IMS AKA over TLS(P3)
 
 UE↔CSP 접속 구간의 보안 체계를 3GPP TS 33.203 정합 구조로 끌어올리는 설계 정본이다.
 이 문서는 도입 로드맵(P0~P4) 중 **P0(채널 정책 게이트)**·**P1(인증 자료 경계 재편)**·
-**P2(Sec-Agree 협상)** 의 상세 설계를 담는다. P3(AKA over TLS)·P4(IMS AKA+IPsec)는
+**P2(Sec-Agree 협상)**·**P3(IMS AKA over TLS)** 의 상세 설계를 담는다. P4(IMS AKA+IPsec)는
 [§8 로드맵](#8-로드맵-p2p4) 에 자리만 둔다.
 
-> **상태**: P0·P1·P2 구현 반영(P2 = 서버·cspsim·verify. Android UE 의 sec-agree 헤더는 pjsip 패치가
-> 선행 조건이라 단말 쪽 후속). [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
+> **상태**: P0·P1·P2·P3 구현 반영(P2·P3 = 서버·CSC·cspsim·verify. Android UE 는 sec-agree 헤더(pjsip 패치)와
+> AKA 자격(`/provisioning/me` `account.aka` → pjsip AKA cred) 연결이 단말 쪽 후속). [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
 > 반영 — CSC 는 `passwd` 컬럼에 쓰지 않고 `/provisioning/me` 의 `sipPassword` 는 항상 `null` 이다.
 > 값 소거(⑤-c)는 배포 환경별 운영 절차, ⑥ 컬럼 DROP 은 `sql/migrate_subscription_drop_passwd.sql`
 > (후속 릴리스 — CSP/cspsim 이 `passwd` 를 SELECT 하지 않게 된 뒤 적용).
@@ -23,7 +23,7 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 |---|---|---|---|
 | SIP Digest (평문) | TS 33.203 Annex N | UDP/TCP | 현행 |
 | SIP Digest + TLS | Annex N+O | TLS/TCP | 현행(게이트 없음) → **P0 에서 완성**, 협상·강등 방지는 **P2** |
-| IMS AKA + TLS | Annex X | TLS/TCP | P3 |
+| IMS AKA + TLS | Annex X | TLS | **P3 — 구현 반영**([§8.2](#82-p3--ims-aka-over-tls-annex-x--구현-반영)) |
 | IMS AKA + IPsec | 본문 §6~7 | UDP/TCP (SA 공용) | P4 |
 
 이 문서의 두 단계가 기대는 표준 조항:
@@ -53,6 +53,10 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 | 쓰기 경로 | CSC `_add_subscription`/`_update_subscription` (`csc/src/handlers/admin.py`) — 요청 본문의 `passwd` 를 H(A1) 로 변환 | 평문은 요청 본문에만 |
 | 단말 전달 | `/provisioning/me` 응답 `services[].account.sipHa1` (`csc/src/services/mcptt.py`) | H(A1) (`sipPassword` 는 항상 `null`) |
 | 시험 도구 | cspsim `-db`(DB `ha1` 우선) / `-ha1 <hex>`, verify 시드 `VOIP_HA1`/`PTT_HA1` | H(A1) |
+| **AKA** DB SoT | `*_subscriptions.auth_scheme`/`k_enc`/`opc_enc`/`sqn`/`amf` (`sql/migrate_subscription_aka.sql`) | K/OPc 는 CSC `AuC.Kek` 로 **암호화 보관**, SQN 은 CSC 만 갱신 |
+| **AKA** 발급자 | CSC `services/auc/` — `POST /internal/aka/av` (§8.2) | AV(RAND·AUTN·XRES·CK·IK)만 나간다 |
+| **AKA** CSP 메모리 | `CNonceInfo` (nonce=base64(RAND‖AUTN) 에 XRES·발급 신원 결부, nonce 수명) | XRES — 검증 직후 폐기 |
+| **AKA** 단말 전달 | `/provisioning/me` `account.aka{k,opc,amf}` (`authScheme:"aka"`) — 소프트-K | 평문 K/OPc(토큰 인증 + TLS 채널 전제) |
 
 Digest 경로의 부수 규칙: nonce 는 OpenSSL `RAND_bytes` 16 바이트 hex(`csp/NonceMap.cpp`), 단말이
 보낸 realm 은 서비스 realm 과 대조해 불일치면 401 재챌린지, 인증 실패 로그는 정답 해시를 남기지
@@ -183,8 +187,9 @@ ALTER TABLE ptt_subscriptions
 - `passwd` 컬럼은 이행 검증(전 조합 등록 회귀) 후 **값 소거 → 후속 마이그레이션에서 DROP**
   한다(`sql/migrate_subscription_drop_passwd.sql` — CSP/cspsim 의 `passwd` SELECT 제거 릴리스에서
   적용). CSP 는 `ha1` 우선, 비어 있으면 `passwd` 로 종전 계산을 한다.
-- AKA 용 컬럼(`auth_scheme`, `k`, `opc`, `sqn`)은 P3 에서 추가한다 — P1 스키마에 선반영하지
-  않는다(빈 자리를 늘리지 않는다).
+- AKA 용 컬럼(`auth_scheme`, `k_enc`, `opc_enc`, `sqn`, `amf`)은 `sql/migrate_subscription_aka.sql` 이
+  추가한다([§8.2](#82-p3--ims-aka-over-tls-annex-x--구현-반영)) — CSP/CSC 는 `auth_scheme` 컬럼을 같은 방식으로
+  프로브해 미적용 DB 에서는 전 가입자를 digest 로 취급한다.
 
 ### 4.3 H(A1) 의 결박과 재키잉 — 운영 계약
 
@@ -209,7 +214,7 @@ CSP↔CSC 의 인증 자료 교환을 scheme 별 AV 계약으로 정의한다. *
 ```
 AV 요청:  { impi, scheme }
 digest →  { realm, ha1 }                          // P1: DB 컬럼 (ha1 + 서비스 realm)
-aka    →  { rand, autn, xres, ck, ik }            // P3: CSC HTTP API — SQN 단일 발급자
+aka    →  { rand, autn, xres, ck, ik }            // P3: CSC HTTP API POST /internal/aka/av — SQN 단일 발급자 (§8.2)
 ```
 
 - Digest: CSP `DbManager` 의 SELECT 가 `passwd` 대신 `ha1` 을 읽고, `CspUser` 는
@@ -289,6 +294,11 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 | V11 | `Require: sec-agree` 만 있고 `Security-Client` 없음 | 494 |
 | V12 | 협상 후 `Security-Verify` 생략 | 494 |
 | V13 | `Setup.SecAgree.Require=true` 에서 TLS 정책 가입자의 협상 없는 초기 REGISTER | 421 + `Security-Server` (설정 의존 — 수동) |
+| V14 | CSC 내부 AV API — 토큰 없음 / 발급 / AUTS 재동기 / AUTS 변조 | 401 / 200(XRES·MAC-A 가 K·OPc·SQN 과 정합, SQN+1) / 200 `resynced` + DB `sqn`=SQN_MS+1 / 422 |
+| V15 | AKA 가입자의 TLS REGISTER — 401(`algorithm=AKAv1-MD5`, nonce=base64(RAND‖AUTN)) → RES 답안 | 200, `Service-Route` `;transport=tls` |
+| V16 | 틀린 K(AUTN MAC 불일치) — 단말이 빈 `response` 로 보고 | 403 |
+| V17 | 단말 SQN_MS 가 앞서 있음 — `auts` 동봉 → 서버 재동기 → 새 401 → 답안 | 200, DB `sqn` = SQN_MS+1 |
+| V18 | AKA 가입자의 UDP REGISTER (sip_transport 와 무관) | 403 — Annex X 는 TLS 위에서만 |
 
 **V1·V2·V7 은 S3 검증 항목으로 자동화되어 있다** — 원시 SIP 프로브(`verify/lib/common/sip_probe.py`):
 - `S3-SCN-CHANNEL-POLICY`(V1·V2): 대상 가입자 `sip_transport` 를 DB 에서 `TLS` 로 올리고 CSP 4421
@@ -305,6 +315,12 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
   REGISTER → 401 → `Security-Verify` 재-REGISTER 를 수행한다. 연결을 유지한 채 UDP MESSAGE 프로브로
   게이트 합류(403)를 보고, `Expires: 0` 으로 해제한 뒤 401 복원을 확인한다. 변조/제안 없음/Verify
   생략은 각각 새 연결에서 494 를 본다(등록이 성립하지 않으므로 잔여 없음). V13 은 설정 의존이라 수동.
+- `S3-SCN-AKA`(V14~V18): 시드 VoLTE 가입자를 TS 35.208 시험 K/OPc 로 `auth_scheme=aka` 프로비저닝(CSC 와
+  같은 keystore 형식으로 DB 직접 기록 + `USER_CHANGED`)한 뒤 내부 AV API → UDP 게이트 → TLS AKA 등록/해제 →
+  틀린 K → SQN 재동기 순으로 보고, 원 인증 자료(5 컬럼)를 복원한다. 단말 계산(`sip_probe.aka_answer`)은
+  CSC 의 Milenage(`csc/src/services/auc/milenage.py`)를 소프트-USIM 으로 빌려 CSP↔CSC↔단말 세 변의 정합을
+  본다. psip/cspsim 의 OpenSSL Milenage 는 `tests/psip_aka_test.cpp` 가 같은 벡터로 검증한다. 전제(마이그레이션
+  미적용·`AuC.Kek`/`InternalApi.Token` 미설정)가 없으면 SKIP.
 
 V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
 cspsim 이 이제 call INVITE 를 세션 transport 로 보내(§7 보완 완료) UDP/TCP/TLS 전 조합에서 성립한다.
@@ -314,11 +330,19 @@ A-SEC-003 으로 채번·구현되어 있다(§3.3).
 ## 7. 배포 순서와 잔여
 
 P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip_transport` 컬럼을 읽으므로
-`migrate_subscription_transport.sql` 이 CSP 기동의 선행 조건이다(`ha1` 은 프로브로 흡수). P1 은 배포 순서 계약(§4.7 ①~⑥)이 단계를
+`migrate_subscription_transport.sql` 이 CSP 기동의 선행 조건이다(`ha1`·`auth_scheme` 은 프로브로 흡수 —
+`migrate_subscription_aka.sql` 미적용 DB 에서는 AKA 가입자가 없을 뿐 기동·Digest 는 그대로다). P1 은 배포 순서 계약(§4.7 ①~⑥)이 단계를
 강제한다. 현재 ②(ha1 소비)·⑤(passwd 미기록·`sipPassword` null) 코드가 반영되어 있고, ①·③·⑤-c(값 소거)는 배포 환경별 운영 절차, ⑥ 은 `sql/migrate_subscription_drop_passwd.sql`(후속 릴리스)이다.
 
+P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재실행(`csc.json AuC.Kek`·
+`InternalApi.Token`, `csp.json Setup.Csc.*` 렌더 — **`AuC.Kek` 는 기존 값을 이어받는다**, 바꾸면 보관된 K/OPc
+전량 복호 불가) → CSC·CSP 재기동 → 가입자 `auth_scheme=aka` + `k`/`opc` 프로비저닝(CSC API).
+
 잔여 항목:
-- V3~V6·V8 의 자동화(V1·V2·V7 은 S3 검증 항목으로 자동화 완료 — §6).
+- V3~V6·V8 의 자동화(V1·V2·V7·V9~V12·V14~V18 은 S3 검증 항목으로 자동화 완료 — §6).
+- Android UE 의 AKA: `/provisioning/me` `account.aka` 를 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 연결하는
+  단말 작업. 콘솔 프로비저닝 화면의 `auth_scheme`/K/OPc 입력(현재는 API 로만).
+- AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec) 에서 SA 키로 소비한다.
 - Android UE 의 sec-agree(§8.1) — pjsip 이 `Security-*` 헤더를 만들지 않으므로 단말 쪽 패치가 선행 조건이다.
   그때까지 `Setup.SecAgree.Require` 는 false(제안하는 단말만 협상)로 둔다.
 - 494 급증(협상 실패 반복)의 알람 채번 — A-SEC-003(게이트 403)과 같은 계열로 채번할 후보.
@@ -393,20 +417,100 @@ cspsim `-sec_agree`(+`-sec_verify <값>` 강등 변조 재현). Android UE 는 p
 
 **검증**: §6 V9~V13, `S3-SCN-SEC-AGREE`.
 
-### 8.2 P3 — IMS AKA over TLS (Annex X)
+### 8.2 P3 — IMS AKA over TLS (Annex X) — 구현 반영
 
-**IPsec 없이 AKA 를 도입하는 표준 경로.** 상호 인증·키 신선도를 TLS 채널 위에서 얻는다.
-P0 게이트(TLS 강제)가 선행 조건이다.
+**IPsec 없이 AKA 를 도입하는 표준 경로.** 상호 인증·키 신선도를 TLS 채널 위에서 얻는다. P0 게이트(TLS 강제)가
+선행 조건이며, CSC 가 HSS/AuC 로 승격되어 인증 벡터(AV)의 **단일 발급자**가 된다.
 
-- **CSC(AuC 승격)**: Milenage(TS 35.205/206) 구현 + 스키마 `auth_scheme`/`k`/`opc`(암호화
-  보관)/`sqn` + **AV HTTP API**(§4.4 aka 항의 물리화 — SQN 증가·AV 소모·AUTS 재동기는
-  CSC 단일 발급자). k/opc 는 어떤 API 응답에도 원문 노출하지 않는다(AV 만 나간다).
-- **CSP**: Annex P.4 판별 — `Authorization` 의 `integrity-protected="tls-connected"` +
-  `algorithm=AKAv2-SHA-256` → AKA 분기. 401 nonce=base64(RAND‖AUTN), 검증 RES==XRES,
-  AUTS 수신 시 CSC 재동기 요청. **scheme 은 등록 단위 고착**("shall not change").
-- **단말**: soft-K 프로비저닝(K/OPc — TLS 프로비저닝 채널 전제). pjsip 은 Digest-AKA 와
-  Milenage 를 내장하므로 응답 계산은 기성 경로다. cspsim 에 AKA 응답 계산 추가.
-- 검증 핵심 3종: AKA 등록 성공 / AUTN MAC 실패(단말 중단) / SQN 이탈 → AUTS 재동기.
+**체계 결정 — 협상이 아니라 프로비저닝.** Cx 의 `SIP-Authentication-Scheme` 처럼 가입자 행의 `auth_scheme`
+(`digest`|`aka`)이 CSP 의 챌린지 체계를 정한다. Annex P.4 의 "판별" 은 이 값과 단말 답안의 `algorithm` 을
+대조하는 것으로 환원되고, "shall not change" 는 nonce 에 체계를 기록해 두고 답안의 체계와 다르면 거부하는
+것으로 고착된다. 프로파일은 3GPP 가 IMS 에 지정한 **AKAv1-MD5**(RFC 3310, TS 24.229 §5.1.1.5.1 — pjsip 등
+실단말이 구현하는 알고리즘)이다. AKAv1 의 약점(RES 만으로 응답)은 TLS 가 채널을 보호하므로 Annex X 조합
+안에서 문제가 되지 않는다. AKA 가입자는 `sip_transport` 값과 무관하게 **TLS 채널 강제 대상**이다
+(`CspUser::requiresTls()` = `sip_transport=TLS` ∨ `auth_scheme=aka` — §3 게이트가 그대로 집행).
+
+```
+UE (soft-USIM: K/OPc)          CSP (S-CSCF)                          CSC (HSS/AuC)
+ │ REGISTER (TLS, 무인증)        │                                       │
+ │─────────────────────────────▶│ auth_scheme=aka → POST /internal/aka/av│
+ │                              │──────────────────────────────────────▶│ SELECT … FOR UPDATE
+ │                              │  {av:{rand,autn,xres,ck,ik}}           │ SQN_HE+1, RAND 신선, Milenage
+ │ 401  WWW-Authenticate:       │◀──────────────────────────────────────│
+ │   Digest realm, algorithm=AKAv1-MD5, qop="auth",                     │
+ │   nonce=base64(RAND‖AUTN)    │  nonce→(XRES, 신원) 보관 (CNonceMap)   │
+ │◀─────────────────────────────│                                       │
+ │ Milenage: AK=f5, SQN=AUTN⊕AK, XMAC=f1 ?= MAC, SQN>SQN_MS ?           │
+ │ REGISTER  Authorization: Digest … algorithm=AKAv1-MD5,               │
+ │   response=MD5-Digest(H(A1)=MD5(impi:realm:RES))                     │
+ │─────────────────────────────▶│ H(A1)=MD5(impi:realm:XRES) 로 대조     │
+ │ 200 OK  Service-Route ;transport=tls                                 │
+ │◀─────────────────────────────│                                       │
+```
+
+예외 흐름(RFC 3310 §3.4, TS 24.229 §5.1.1.5.3 / §5.4.1.2.2):
+
+| 단말 상황 | 단말 답안 | CSP |
+|---|---|---|
+| AUTN MAC 불일치(K 다름) | `response=""`, `auts` 없음 | 403 |
+| SQN 이탈(SQN ≤ SQN_MS) | `auts="base64((SQN_MS⊕AK*)‖MAC-S)"` + 빈 password 로 계산한 response | CSC 에 `{rand, auts}` 재동기 요청 → SQN_HE := SQN_MS → 새 AV 로 **다시 401** (단말은 그 401 을 실패가 아닌 새 챌린지로 처리) |
+| AUTS 의 MAC-S 불일치 | — | 403 (`auts_invalid`) |
+
+**CSC — AuC (`csc/src/services/auc/`)**
+
+- `milenage.py`: TS 35.205/206 f1·f1*·f2·f3·f4·f5·f5* (순수 python AES-128 `aes128.py` — vendor 에 암호 라이브러리가
+  없다). `keystore.py`: K/OPc 보관 형식 `v1:<iv><ct><hmac>`(AES-128-CTR + HMAC-SHA256, KEK = `csc.json AuC.Kek`,
+  hex32 또는 SHA-256 정규화). `auc.py`: 발급·재동기(행 잠금 트랜잭션, `sqn` 갱신은 여기서만).
+- 스키마(`sql/migrate_subscription_aka.sql`, volte/ptt 동일): `auth_scheme ENUM('digest','aka') DEFAULT 'digest'`,
+  `k_enc`/`opc_enc VARCHAR(160)`, `sqn BIGINT UNSIGNED`(48-bit SQN_HE), `amf CHAR(4) DEFAULT '8000'`.
+- 프로비저닝(`admin.py` POST/PUT `…/{kind}[/{msisdn}]`): `auth_scheme`, `k`(hex32), `opc`(hex32) 또는 `op`(→ OPc
+  유도), `amf`. 키를 넣으면 `sqn=0`. `aka` 로 바꾸는데 보관 키가 없으면 400. 조회는 `auth_scheme`·
+  `aka_provisioned` 만 — **K/OPc 원문은 어떤 API 응답에도 없다.** KEK 미설정이면 503(평문 보관 fallback 없음).
+- 내부 AV API(`handlers/auc_api.py`, admin 서버 4421 — `/api/v1` 밖이라 OAM 게이트웨이가 프록시하지 않는다):
+
+```
+POST /internal/aka/av            Authorization: Bearer <InternalApi.Token>
+{ "msisdn": "+82…", "service": "volte"|"ptt"|"", "rand": "<hex32>", "auts": "<hex28>" }   // rand/auts 는 재동기만
+200 { "scheme":"aka", "msisdn", "service", "resynced":bool, "av": { "rand","autn","xres","ck","ik" } }   // hex
+401 토큰 불일치 · 404 unknown_subscriber · 409 scheme_mismatch|keys_not_provisioned · 422 auts_invalid ·
+500 key_material(KEK 불일치) · 503 auc_disabled|schema_not_migrated
+```
+
+  토큰은 configure 가 `csc.json InternalApi.Token` 과 `csp.json Setup.Csc.InternalToken` 에 같은 값으로 렌더한다
+  (`@INTERNAL_TOKEN@`). `AuC.Kek`(`@AUC_KEK@`)는 JWT 시크릿과 달리 **재생성하지 않는다** — configure 는 기존
+  `csc.json` 값을 이어받고 없을 때만 만든다.
+- SQN 관리(TS 33.102 Annex C): 발급마다 `SQN_HE+1`, 재동기는 AUTS 의 MAC-S(AMF*=0000) 검증 후 `SQN_HE := SQN_MS`.
+  단말(소프트-USIM)은 `SQN > SQN_MS` 단조 규칙으로 신선도를 판정한다(배열/윈도우 없음 — 단일 단말 전제).
+
+**CSP (`csp/CscfModule.cpp`, `csp/CscAvClient.{h,cpp}`, `csp/NonceMap.{h,cpp}`)**
+
+| 상황 | 동작 |
+|---|---|
+| 초기/재 REGISTER 챌린지 | `SendRegisterChallenge` — From 가입자가 `aka` 면 `SendAkaChallenge`(CSC AV → nonce=base64(RAND‖AUTN), `algorithm=AKAv1-MD5`, `qop="auth"`, `CNonceMap::InsertAka(nonce, 신원, RAND, XRES)`), 아니면 Digest 401 |
+| CSC 미도달·미설정·타임아웃 | 504 Server Time-out (HSS 미도달 상당 — 단말 재시도) |
+| CSC 409(캐시 불일치) | 가입자 캐시 `ReloadFromDb` 후 그 체계로 재챌린지 |
+| 답안 검증 | nonce 의 체계 ≠ 가입자 체계 → 403(고착) · nonce 발급 신원 ≠ From → 403 · `algorithm≠AKAv1-MD5` → 403 · `auts` 있음 → `E_AUTH_AKA_RESYNC`(CSC 재동기 → 새 401) · `response` 비고 `auts` 없음 → 403(MAC 실패 보고) · H(A1)=MD5(impi:realm:XRES 이진) 로 Digest 대조, qop/nc 재사용 규칙은 Digest 와 동일 |
+| 비-REGISTER | 등록이 결부한 TLS flow(ip,port) 위의 요청은 종전대로 통과(`TouchFlow`). 그 flow 밖(미등록·새 연결)의 AKA 가입자 요청은 Digest 챌린지 대신 **403** — 단말은 그 연결에서 REGISTER 부터(Annex O/X) |
+| 채널 | `requiresTls()` 가 `aka` 를 포함하므로 UDP/TCP 의 AKA 신원 요청은 REGISTER 포함 403(§3 게이트, A-SEC-003 계수 동일) |
+| ik/ck | P/S-CSCF 가 한 프로세스라 401 에 싣지 않는다(P-CSCF 가 제거하는 파라미터). TLS 위에서는 소비처가 없다 |
+
+설정 `Setup.Csc.{Host,Port,Scheme,InternalToken,TimeoutMs}`(config_template `csc_internal`, SIGUSR1 재로드).
+`Host` 비면 `Setup.Xcap.Host` → LocalIp. DB 는 `auth_scheme` 컬럼을 프로브(`CDbManager::m_bHasAkaColumns`)해
+미적용이면 전원 digest.
+
+**단말**
+
+- psip `SipAka.{h,cpp}`(OpenSSL AES) + `CSipServerInfo::m_strAkaK/m_strAkaOpc/m_iAkaSqnMs`: `AddAuth` 가
+  `AKAv1-MD5` 챌린지에 Milenage 로 답한다(MAC 실패 → 빈 response, SQN 이탈 → `auts` + `m_bAkaResyncSent` 로
+  다음 401 을 새 챌린지로 처리). K 도 등록 자격이다(`SipRegisterThread`).
+- cspsim `-aka_k`/`-aka_opc`/`-aka_sqn`(초기 SQN_MS — 큰 값으로 재동기 재현), `-creds` JSONL 의 `k`/`opc`/`sqn`.
+  `-transport tls` 필수.
+- `/provisioning/me`: `account.authScheme` (`digest`|`aka`), `aka` 면 `account.aka={k,opc,amf}` 와 `sipHa1:null`.
+  소프트-K 프로비저닝 — 단말이 USIM 역할이므로 K 원문이 토큰 인증 + TLS 채널로 내려간다(이 채널의 신뢰가 전제).
+  Android 는 pjsip AKA 자격 연결이 후속.
+
+**검증**: §6 V14~V18, `S3-SCN-AKA`. 단위: `csc/src/tests/test_milenage.py`(TS 35.208 세트 1~3)·`test_auc.py`,
+`tests/psip_aka_test.cpp`.
 
 ### 8.3 P4 — IMS AKA + IPsec (본문 §6~7)
 

@@ -92,11 +92,24 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_ERROR,
                      "[DB] subscriptions.ha1 column absent — migrate_subscription_ha1.sql 미적용. Digest 는 passwd "
                      "fallback 으로 동작한다 (sip_access_security.md §4.7 ①)" );
+    // AKA (auth_scheme/k_enc/opc_enc/sqn/amf) — 미적용이면 전 가입자 digest 로 취급 (INFO — 선택 기능).
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'auth_scheme'" );
+    m_bHasAkaColumns = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasAkaColumns )
+        CLog::Print( LOG_INFO,
+                     "[DB] subscriptions.auth_scheme column absent — migrate_subscription_aka.sql 미적용. IMS AKA "
+                     "가입자 없음(전원 digest)" );
 }
 
 std::string CDbManager::Ha1Col( const char *pszAlias ) const {
     if ( !m_bHasHa1Column ) return "''";
     return std::string( "COALESCE(" ) + pszAlias + ".ha1,'')";
+}
+
+std::string CDbManager::AuthSchemeCol( const char *pszAlias ) const {
+    if ( !m_bHasAkaColumns ) return "'digest'";
+    return std::string( "COALESCE(" ) + pszAlias + ".auth_scheme,'digest')";
 }
 
 void CDbManager::Disconnect() {
@@ -249,9 +262,8 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     std::string strSql =
         "SELECT cu.id, u.name, u.org_id, cu.passwd, cu.dnd, cu.forward_id, u.id AS person_id, "
         "       COALESCE(cu.service_ref,''), COALESCE(cu.imsi,''), " +
-        Ha1Col( "cu" ) +
-        ", COALESCE(cu.sip_transport,'') "
-        "FROM volte_subscriptions cu JOIN users u ON cu.user_id = u.id "
+        Ha1Col( "cu" ) + ", COALESCE(cu.sip_transport,''), " + AuthSchemeCol( "cu" ) +
+        " FROM volte_subscriptions cu JOIN users u ON cu.user_id = u.id "
         "WHERE cu.id='" +
         Escape( strUserId ) + "'";
 
@@ -267,9 +279,8 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
         strSql =
             "SELECT pu.id, u.name, u.org_id, pu.passwd, pu.dnd, pu.forward_id, u.id AS person_id, "
             "       COALESCE(pu.service_ref,''), COALESCE(pu.imsi,''), " +
-            Ha1Col( "pu" ) +
-            ", COALESCE(pu.sip_transport,'') "
-            "FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
+            Ha1Col( "pu" ) + ", COALESCE(pu.sip_transport,''), " + AuthSchemeCol( "pu" ) +
+            " FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
             "WHERE pu.id='" +
             Escape( strUserId ) + "'";
 
@@ -297,6 +308,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     clsUser.m_strImsi = row[8] ? row[8] : "";
     clsUser.m_strHa1 = row[9] ? row[9] : "";
     clsUser.m_strSipTransport = row[10] ? row[10] : "";
+    clsUser.m_strAuthScheme = row[11] ? row[11] : "digest";
     clsUser._loadTime = time( nullptr );
 
     mysql_free_result( pRes );
@@ -474,8 +486,8 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
                                  "SELECT s.id, u.name, u.org_id, s.passwd, s.dnd, s.forward_id, u.id, "
                                  "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
                                  "       " ) +
-                             Ha1Col( "s" ) + ", COALESCE(s.sip_transport, '') FROM " + aTables[i] +
-                             " s JOIN users u ON s.user_id = u.id";
+                             Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + " FROM " +
+                             aTables[i] + " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES *pRes = ExecuteSelect( strSql );
         if ( !pRes ) continue;
@@ -494,6 +506,7 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
             clsUser.m_strImsi = row[8] ? row[8] : "";
             clsUser.m_strHa1 = row[9] ? row[9] : "";
             clsUser.m_strSipTransport = row[10] ? row[10] : "";
+            clsUser.m_strAuthScheme = row[11] ? row[11] : "digest";
             clsUser._loadTime = time( nullptr );
             if ( !clsUser.m_strId.empty() ) {
                 clsMap.Insert( clsUser );

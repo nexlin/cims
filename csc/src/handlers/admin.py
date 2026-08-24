@@ -29,6 +29,7 @@ from services.mcptt import (notify_csp, refresh_group_members, DEFAULT_USER_PROF
                             get_service_config, update_service_config_cache,
                             get_service_config_xml)
 from services import admin_auth
+from services.auc import auc as _auc
 from services.mcptt import logger as _logger
 
 # ──────────────────────────────────────────────────────────────
@@ -193,9 +194,10 @@ async def _list_users(config):
                 rejects_by_user.setdefault(r['user_id'], []).append(r['reject_id'])
 
             # 1 query for all volte_subscriptions
+            aka_cols = _aka_select_extra(cur)
             cur.execute(
                 "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                "FROM volte_subscriptions ORDER BY user_id, id"
+                f"{aka_cols} FROM volte_subscriptions ORDER BY user_id, id"
             )
             call_subs_by_user: dict = {}
             for s in cur.fetchall():
@@ -208,7 +210,7 @@ async def _list_users(config):
             # 1 query for all ptt_subscriptions
             cur.execute(
                 "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                "FROM ptt_subscriptions ORDER BY user_id, id"
+                f"{aka_cols} FROM ptt_subscriptions ORDER BY user_id, id"
             )
             ptt_subs_by_user: dict = {}
             for s in cur.fetchall():
@@ -262,9 +264,10 @@ async def _get_user(person_id: str, config):
             row['reject_id'] = [r['reject_id'] for r in cur.fetchall()]
 
             # call subscriptions
+            aka_cols = _aka_select_extra(cur)
             cur.execute(
                 "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                "FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
+                f"{aka_cols} FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             call_subs = cur.fetchall()
@@ -277,7 +280,7 @@ async def _get_user(person_id: str, config):
             # ptt subscriptions
             cur.execute(
                 "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                "FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
+                f"{aka_cols} FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             ptt_subs = cur.fetchall()
@@ -464,7 +467,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
                 f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
-                f"       register_time, logout_time "
+                f"       register_time, logout_time {_aka_select_extra(cur)} "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -518,6 +521,63 @@ def _digest_ha1(imsi: str, domain: str, realm: str, passwd: str) -> str:
     return hashlib.md5(f"{imsi}@{domain}:{realm}:{passwd}".encode('utf-8')).hexdigest()
 
 
+# ── IMS AKA 인증 자료 (sip_access_security.md §8.2 — P3) ─────────────────────────
+#   auth_scheme 'digest'(기본) | 'aka'. aka 는 k(hex32) + opc(hex32) 또는 op(hex32) 를 요청 본문으로
+#   받아 AuC.Kek 로 암호화 보관한다(services/auc). 평문 K/OPc 는 어떤 응답에도 나가지 않는다 —
+#   조회는 auth_scheme 과 aka_provisioned(키 보관 여부)만. 키를 바꾸면 SQN 은 0 으로 되돌린다.
+
+_AUTH_SCHEMES = ('digest', 'aka')
+
+
+def _aka_select_extra(cur) -> str:
+    """목록/단건 SELECT 에 덧붙일 AKA 열 — 마이그레이션 미적용 DB 면 빈 문자열."""
+    if not _auc.has_aka_columns(cur):
+        return ""
+    return ", auth_scheme, (k_enc<>'') AS aka_provisioned"
+
+
+def _parse_auth_scheme(body):
+    """body.auth_scheme → 'digest'|'aka'|None(미지정). 잘못된 값은 ValueError."""
+    v = body.get('auth_scheme')
+    if v in (None, ''):
+        return None
+    v = str(v).strip().lower()
+    if v not in _AUTH_SCHEMES:
+        raise ValueError(v)
+    return v
+
+
+def _aka_fields(cur, body, scheme, stored_has_keys: bool):
+    """POST/PUT 공통 — AKA 컬럼 (fields, values) 또는 오류 HandlerResult.
+
+    scheme=='aka' 인데 저장 키도 본문 키도 없으면 400. 키가 본문에 오면 sqn=0 리셋.
+    컬럼 부재(마이그레이션 미적용) DB 에서 aka 를 요구하면 400.
+    """
+    fields, values = [], []
+    k_hex, opc_hex, op_hex = body.get('k'), body.get('opc'), body.get('op')
+    has_body_keys = bool(k_hex or opc_hex or op_hex)
+    if scheme is None and not has_body_keys and 'amf' not in body:
+        return fields, values
+    if not _auc.has_aka_columns(cur):
+        return HandlerResult(status=400, body={'error': 'AKA columns absent — sql/migrate_subscription_aka.sql not applied'})
+    if scheme is not None:
+        fields.append("auth_scheme=%s"); values.append(scheme)
+    if has_body_keys:
+        try:
+            k_enc, opc_enc = _auc.provision_keys(k_hex or '', opc_hex or '', op_hex or '')
+        except _auc.AucError as e:
+            return HandlerResult(status=e.status, body={'error': e.code, 'detail': e.detail})
+        fields += ["k_enc=%s", "opc_enc=%s", "sqn=%s"]; values += [k_enc, opc_enc, 0]
+    if 'amf' in body:
+        try:
+            fields.append("amf=%s"); values.append(_auc.parse_amf(body.get('amf')))
+        except _auc.AucError as e:
+            return HandlerResult(status=e.status, body={'error': e.code, 'detail': e.detail})
+    if scheme == 'aka' and not has_body_keys and not stored_has_keys:
+        return HandlerResult(status=400, body={'error': 'k and opc (or op) required for auth_scheme=aka'})
+    return fields, values
+
+
 def _parse_sip_transport(body):
     """body.sip_transport → 'UDP'|'TCP'|'TLS'|None. 잘못된 값은 ValueError."""
     v = body.get('sip_transport')
@@ -554,6 +614,10 @@ async def _add_subscription(person_id: str, svc: str, body, config):
     dnd        = _coerce_dnd(body.get('dnd', False))
     forward_id = body.get('forward_id', '')
     table      = _sub_table(svc)
+    try:
+        auth_scheme = _parse_auth_scheme(body)
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'auth_scheme must be one of digest/aka'})
 
     ha1 = ''
     if passwd:
@@ -567,11 +631,16 @@ async def _add_subscription(person_id: str, svc: str, body, config):
             cur.execute("SELECT id FROM users WHERE id=%s", (person_id,))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'User not found'})
+            aka = _aka_fields(cur, body, auth_scheme, stored_has_keys=False)
+            if isinstance(aka, HandlerResult):
+                return aka
+            aka_cols = ''.join(', ' + f.split('=')[0] for f in aka[0])
+            aka_ph = ',%s' * len(aka[1])
             if _has_ha1_column(cur):
                 cur.execute(
-                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id) "
-                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id)
+                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id{aka_cols}) "
+                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{aka_ph})",
+                    (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *aka[1])
                 )
             else:
                 cur.execute(
@@ -595,13 +664,21 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
         sip_transport = _parse_sip_transport(body)
     except ValueError:
         return HandlerResult(status=400, body={'error': 'sip_transport must be one of UDP/TCP/TLS'})
+    try:
+        auth_scheme = _parse_auth_scheme(body)
+    except ValueError:
+        return HandlerResult(status=400, body={'error': 'auth_scheme must be one of digest/aka'})
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute(f"SELECT imsi, service_ref FROM {table} WHERE id=%s AND user_id=%s", (msisdn, person_id))
+            cur.execute(f"SELECT imsi, service_ref {_aka_select_extra(cur)} FROM {table} WHERE id=%s AND user_id=%s",
+                        (msisdn, person_id))
             cur_row = cur.fetchone()
             if cur_row is None:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            aka = _aka_fields(cur, body, auth_scheme, stored_has_keys=bool(cur_row.get('aka_provisioned')))
+            if isinstance(aka, HandlerResult):
+                return aka
 
             # 부분 업데이트 — service_ref/imsi 는 키가 있을 때만, passwd 는 값이 있을 때만 반영 (P1-d)
             new_imsi = cur_row['imsi']
@@ -633,6 +710,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                     fields.append("ha1=%s"); values.append(_digest_ha1(new_imsi, realm[0], realm[1], passwd))
                 else:
                     fields.append("passwd=%s"); values.append(passwd)
+            fields += aka[0]; values += aka[1]
             values.extend([msisdn, person_id])
 
             cur.execute(
@@ -1369,6 +1447,10 @@ _USER_FIELDS = [
     {'name': '*_subscriptions[].imsi', 'type': 'string', 'desc': 'SIM IMSI — 인증 username 의 user 파트'},
     {'name': '*_subscriptions[].sip_transport', 'type': 'string',
      'desc': '채널 정책 — TLS=서버 집행 / UDP·TCP=프로비저닝 힌트 / null=단말 선택'},
+    {'name': '*_subscriptions[].auth_scheme', 'type': 'string',
+     'desc': '인증 체계 — digest(SIP Digest, ha1) / aka(IMS AKA over TLS — TLS 채널 집행). 마이그레이션 전 DB 는 생략'},
+    {'name': '*_subscriptions[].aka_provisioned', 'type': 'boolean',
+     'desc': 'AKA K/OPc 보관 여부 (값 자체는 어떤 API 로도 나가지 않는다)'},
     {'name': '*_subscriptions[].service_ref', 'type': 'string', 'desc': '소속 서비스명 (도메인 결정)'},
     {'name': '*_subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
     {'name': '*_subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
@@ -1568,7 +1650,8 @@ CIMS_ADMIN_API_DOCS = [
          {'name': 'kind', 'in': 'path', 'type': 'string', 'required': True,
           'enum': ['call', 'ptt'], 'desc': '가입 종류'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
-          'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, passwd?, sip_transport?(UDP|TCP|TLS), dnd?, forward_id?}'},
+          'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, passwd?, sip_transport?(UDP|TCP|TLS), '
+                  'auth_scheme?(digest|aka), k?(hex32), opc?(hex32)|op?(hex32), amf?(hex4), dnd?, forward_id?}'},
      ],
      'response': '{id}',
      'response_fields': [{'name': 'id', 'type': 'string', 'desc': '추가된 번호(MSISDN)'}],
@@ -1580,13 +1663,18 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'passwd 가 있는데 service_ref 가 비었거나 미정의 서비스',
           'body': {'error': 'service_ref required to derive ha1 (unknown service)'}},
          {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS'}},
+         {'status': 400, 'when': 'auth_scheme=aka 인데 k/opc(op) 없음', 'body': {'error': 'k and opc (or op) required for auth_scheme=aka'}},
+         {'status': 400, 'when': 'k/opc/op/amf 형식 오류', 'body': {'error': 'bad_key_material'}},
+         {'status': 503, 'when': 'AKA 키 입력인데 csc.json AuC.Kek 미설정', 'body': {'error': 'auc_disabled'}},
          {'status': 404, 'when': '없는 가입자', 'body': {'error': 'User not found'}},
      ],
      'notes': ['성공 시 **201** 이다.', 'imsi 는 SIP 인증 username 의 user 파트로 쓰여 필수다.',
                'passwd 는 저장되지 않는다 — H(A1)=MD5(imsi@domain:realm:passwd) 로 변환되어 `ha1` 에 저장된다 '
                '(realm = 서비스 auth_realm ?? domain). 따라서 passwd 를 줄 때는 service_ref 가 해석되어야 한다.',
                'sip_transport=TLS 는 **서버가 집행**한다 — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 전부 403. '
-               'UDP/TCP 는 단말 프로비저닝 힌트일 뿐이고 null 이면 단말이 transport 를 고른다.'],
+               'UDP/TCP 는 단말 프로비저닝 힌트일 뿐이고 null 이면 단말이 transport 를 고른다.',
+               'auth_scheme=aka(IMS AKA over TLS) 는 k + opc(또는 op → OPc 유도) 를 함께 보낸다. K/OPc 는 AuC.Kek 로 '
+               '암호화 보관되고 어떤 API 응답에도 나가지 않는다. AKA 가입자는 sip_transport 와 무관하게 TLS 채널만 허용된다.'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.subs.update', 'module': 'csc', 'method': 'PUT',
@@ -1613,7 +1701,9 @@ CIMS_ADMIN_API_DOCS = [
      'notes': ['dnd 는 "Y"/"1"/"true"/"on" 같은 문자열도 참으로 해석된다 ("false"/"0" 은 거짓).',
                'passwd 는 변경할 때만 전송한다 — 미전송/빈값이면 기존 ha1 이 유지된다.',
                'H(A1) 은 (imsi, 서비스 domain/realm) 에 결박된다. imsi 나 service_ref 를 바꾸는 요청은 passwd 를 함께 보내야 한다.',
-               'sip_transport 는 키가 있을 때만 반영 — null/빈값이면 정책 해제(단말 선택).'],
+               'sip_transport 는 키가 있을 때만 반영 — null/빈값이면 정책 해제(단말 선택).',
+               'auth_scheme/k/opc(op)/amf 는 키가 있을 때만 반영. k 나 opc 를 바꾸면 SQN 이 0 으로 리셋된다. '
+               'aka 로 바꾸는데 보관된 키가 없으면 k/opc 를 같이 보내야 한다(400).'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.subs.delete', 'module': 'csc', 'method': 'DELETE',

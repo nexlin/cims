@@ -567,6 +567,70 @@
       "scope": "service"
     },
     {
+      "key": "csc_internal",
+      "title": "CSC 내부 API (S-CSCF ↔ HSS/AuC — IMS AKA 인증 벡터)",
+      "description": "가입자 auth_scheme=aka 의 REGISTER 챌린지에 쓸 AV(RAND/AUTN/XRES)를 CSC 에서 받아오는 경로 (sip_access_security.md §8.2, Cx MAR/MAA 상당). Digest 가입자에게는 쓰이지 않는다.",
+      "fields": [
+        {
+          "key": "Setup.Csc.Host",
+          "label": "CSC 주소",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@CSC_IP@",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "CSC admin 서버 IP/호스트명. 비우면 Setup.Xcap.Host, 그것도 비면 CSP 자기 IP."
+        },
+        {
+          "key": "Setup.Csc.Port",
+          "label": "CSC admin 포트",
+          "type": "int",
+          "default": 4421,
+          "min": 1,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "csc.json Server.Port (내부 API /internal/aka/av 가 붙는 admin 서버)."
+        },
+        {
+          "key": "Setup.Csc.Scheme",
+          "label": "스킴",
+          "type": "enum",
+          "options": [
+            "https",
+            "http"
+          ],
+          "default": "https",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "CSC admin 서버가 TLS(cert 존재) 면 https."
+        },
+        {
+          "key": "Setup.Csc.InternalToken",
+          "label": "내부 API 토큰",
+          "type": "string",
+          "default": "",
+          "deploy_value": "@INTERNAL_TOKEN@",
+          "secret": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "csc.json InternalApi.Token 과 같은 값(configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 가 504 로 거부된다."
+        },
+        {
+          "key": "Setup.Csc.TimeoutMs",
+          "label": "AV 요청 타임아웃(ms)",
+          "type": "int",
+          "default": 2000,
+          "min": 200,
+          "max": 30000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "CSC 응답 대기 상한. 초과 시 그 REGISTER 는 504 Server Time-out."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "log",
       "title": "로깅",
       "fields": [

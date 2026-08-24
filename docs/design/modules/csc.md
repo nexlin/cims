@@ -17,6 +17,7 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 | MCPTT GMS | 그룹 관리 서비스 (XCAP) |
 | MCPTT CMS | 사용자 설정 관리 서비스 (XCAP) |
 | MCPTT KMS | 키 관리 서비스 (MIKEY-SAKKE) |
+| AuC (IMS AKA) | HSS/AuC 역할 — 가입자 K/OPc 암호화 보관(`AuC.Kek`), Milenage AV 발급·SQN·AUTS 재동기(`services/auc/`), CSP 내부 API `POST /internal/aka/av`(`InternalApi.Token`) — [sip_access_security.md §8.2](../features/sip_access_security.md) |
 | CSP 실시간 연동 | UDP 알림으로 가입자/그룹 변경 즉시 반영 |
 | 통화 이력/녹취 | 서비스 로그 조회, 녹취 파일 재생 |
 | 통계/모니터링 | 시스템 상태, 서비스 통계 |
@@ -25,7 +26,7 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 
 | 서버 | 포트 | 용도 |
 |------|------|------|
-| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API |
+| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 AV API(`/internal/aka/av`, `/api/v1` 밖 — 게이트웨이 미프록시) |
 | MCPTT Service Server | 4430 (HTTPS) | 단말용 IdMS/GMS/CMS/KMS |
 
 ### 1.3 프로세스 구성

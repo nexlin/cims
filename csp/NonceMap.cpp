@@ -75,6 +75,34 @@ bool CNonceMap::Select( const char *pszNonce, bool bDelete ) {
     return bFound;
 }
 
+void CNonceMap::InsertAka( const std::string &strNonce, const std::string &strUser, const std::string &strRandHex,
+                           const std::string &strXresHex ) {
+    CNonceInfo clsInfo;
+    time( &clsInfo.m_iTime );
+    clsInfo.m_bAka = true;
+    clsInfo.m_strUser = strUser;
+    clsInfo.m_strRandHex = strRandHex;
+    clsInfo.m_strXresHex = strXresHex;
+    m_clsMutex.acquire();
+    m_clsMap[strNonce] = clsInfo;
+    m_clsMutex.release();
+}
+
+bool CNonceMap::SelectInfo( const char *pszNonce, CNonceInfo &clsInfo, bool bDelete ) {
+    bool bFound = false;
+
+    m_clsMutex.acquire();
+    NONCE_MAP::iterator it = m_clsMap.find( pszNonce );
+    if ( it != m_clsMap.end() ) {
+        bFound = true;
+        clsInfo = it->second;
+        if ( bDelete ) m_clsMap.erase( it );
+    }
+    m_clsMutex.release();
+
+    return bFound;
+}
+
 /**
  * @ingroup CspServer
  * @brief 해시 검증 통과 후 nc(nonce count) 재사용 검사 — RFC 7616 nonce 재사용 지원.

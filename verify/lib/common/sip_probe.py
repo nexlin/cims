@@ -11,6 +11,7 @@ cspsim 은 call 시나리오에서 `-transport` 를 무시하고 INVITE 를 UDP 
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import socket
 import ssl
@@ -327,3 +328,132 @@ class SecAgreeTlsSession:
         out["second_security_server"] = _header(raw2, "Security-Server")
         out["service_route"] = _header(raw2, "Service-Route")
         return out
+
+
+# ── IMS AKA over TLS (sip_access_security.md §8.2, P3) — 소프트-USIM 원시 프로브 ─────────────────
+
+def _csc_auc_modules():
+    """csc 의 Milenage 구현을 소프트-USIM 으로 빌려 쓴다 (csc/src/services/auc). 단말 계산의 독립 참조가
+    아니라 같은 코드지만, 서버(CSP)가 검증하는 XRES 는 CSC 가 그 코드로 만들고 단말 답안은 여기서 만들므로
+    CSP↔CSC↔단말 세 변의 정합(nonce 조립·H(A1)=MD5(impi:realm:RES 이진)·AUTS)이 검증된다.
+    cspsim(psip SipAka.cpp — OpenSSL) 경로는 별도 C++ 하네스(tests/psip_aka_test.cpp)가 같은 벡터로 본다."""
+    import importlib
+    import sys
+    repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    p = os.path.join(repo, "csc", "src")
+    if p not in sys.path:
+        sys.path.insert(0, p)
+    return importlib.import_module("services.auc.milenage")
+
+
+def aka_answer(k_hex: str, opc_hex: str, nonce_b64: str, sqn_ms: int) -> dict:
+    """챌린지 nonce=base64(RAND‖AUTN) 에 대한 단말 계산.
+
+    반환: {"mac_ok", "sqn_ok", "sqn", "res"(bytes), "auts_b64"(sqn 이탈 시), "rand"(bytes)}.
+    """
+    import base64
+    m = _csc_auc_modules()
+    raw = base64.b64decode(nonce_b64)
+    rand, autn = raw[:16], raw[16:32]
+    k, opc = bytes.fromhex(k_hex), bytes.fromhex(opc_hex)
+    mil = m.Milenage(k, opc)
+    res, ak = mil.f2_f5(rand)
+    sqn = bytes(a ^ b for a, b in zip(autn[:6], ak))
+    amf, mac = autn[6:8], autn[8:]
+    mac_a, _ = mil.f1_f1star(rand, sqn, amf)
+    out = {"mac_ok": mac_a == mac, "sqn_ok": False, "sqn": int.from_bytes(sqn, "big"),
+           "res": res, "auts_b64": "", "rand": rand}
+    if not out["mac_ok"]:
+        return out
+    out["sqn_ok"] = out["sqn"] > sqn_ms
+    if not out["sqn_ok"]:
+        sqn_ms_b = m.sqn_to_bytes(sqn_ms)
+        _, mac_s = mil.f1_f1star(rand, sqn_ms_b, b"\x00\x00")
+        auts = bytes(a ^ b for a, b in zip(sqn_ms_b, mil.f5star(rand))) + mac_s
+        out["auts_b64"] = base64.b64encode(auts).decode()
+    return out
+
+
+def aka_auts_hex(k_hex: str, opc_hex: str, rand: bytes, sqn_ms: int) -> str:
+    """서버 내부 AV API(재동기) 시험용 — 단말이 만들 AUTS 를 hex 로."""
+    m = _csc_auc_modules()
+    mil = m.Milenage(bytes.fromhex(k_hex), bytes.fromhex(opc_hex))
+    sqn_ms_b = m.sqn_to_bytes(sqn_ms)
+    _, mac_s = mil.f1_f1star(rand, sqn_ms_b, b"\x00\x00")
+    return (bytes(a ^ b for a, b in zip(sqn_ms_b, mil.f5star(rand))) + mac_s).hex()
+
+
+def _akav1_response(user: str, realm: str, res: bytes, method: str, uri: str,
+                    nonce: str, cnonce: str = "1", nc: str = "00000001") -> str:
+    """RFC 3310 AKAv1-MD5 + qop=auth: H(A1)=MD5(user:realm:RES 이진)."""
+    ha1 = hashlib.md5(f"{user}:{realm}:".encode() + res).hexdigest()
+    ha2 = hashlib.md5(f"{method}:{uri}".encode()).hexdigest()
+    return hashlib.md5(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}".encode()).hexdigest()
+
+
+class AkaTlsSession(SecAgreeTlsSession):
+    """TLS 위 IMS AKA 등록/해제 (AKAv1-MD5, RFC 3310 / TS 24.229 §5.1.1.5.1)."""
+
+    def _aka_flow(self, user: str, domain: str, auth_user: str, k_hex: str, opc_hex: str,
+                  sqn_ms: int, expires: int) -> dict:
+        call_id, from_tag = _callid(self.local_ip), _tag()
+        msg1 = _register_lines(user, domain, self.local_ip, self.local_port, call_id, from_tag, 1,
+                               _branch(), transport="TLS", expires=expires)
+        self._send(msg1)
+        code1, raw1 = _recv_final_stream(self.sock, time.time() + self.timeout)
+        ch = _parse_challenge(raw1)
+        out = {"first": code1, "algorithm": ch.get("algorithm", ""), "second": 0, "resync": False,
+               "third": 0, "service_route": "", "sqn": 0}
+        if code1 != 401:
+            return out
+        self.server_realm = ch.get("realm", "")
+        uri = f"sip:{domain}"
+
+        def answer(nonce: str, cseq_n: int) -> tuple:
+            ans = aka_answer(k_hex, opc_hex, nonce, sqn_ms)
+            params = ""
+            if not ans["mac_ok"]:
+                resp = ""                                   # MAC 실패 보고 — 빈 response, auts 없음
+            elif not ans["sqn_ok"]:
+                resp = _akav1_response(auth_user, self.server_realm, b"", "REGISTER", uri, nonce)
+                params = f', auts="{ans["auts_b64"]}"'      # 빈 password 로 계산 + auts
+            else:
+                resp = _akav1_response(auth_user, self.server_realm, ans["res"], "REGISTER", uri, nonce)
+            auth = (f'Authorization: Digest username="{auth_user}", realm="{self.server_realm}", '
+                    f'nonce="{nonce}", uri="{uri}", response="{resp}", algorithm=AKAv1-MD5, '
+                    f'cnonce="1", nc=00000001, qop=auth{params}')
+            msg = _register_lines(user, domain, self.local_ip, self.local_port, call_id, from_tag, cseq_n,
+                                  _branch(), auth_header=auth, transport="TLS", expires=expires)
+            self._send(msg)
+            code, raw = _recv_final_stream(self.sock, time.time() + self.timeout)
+            return ans, code, raw
+
+        ans, code2, raw2 = answer(ch.get("nonce", ""), 2)
+        out["second"] = code2
+        out["sqn"] = ans["sqn"]
+        out["service_route"] = _header(raw2, "Service-Route")
+        if ans["mac_ok"] and not ans["sqn_ok"] and code2 == 401:
+            # 재동기 후 새 챌린지 — 서버 SQN 은 SQN_MS+1 이라 이제 신선하다
+            out["resync"] = True
+            ch3 = _parse_challenge(raw2)
+            ans3, code3, raw3 = answer(ch3.get("nonce", ""), 3)
+            out["third"] = code3
+            out["sqn"] = ans3["sqn"]
+            out["service_route"] = _header(raw3, "Service-Route")
+        return out
+
+    def register_aka(self, user: str, domain: str, auth_user: str, k_hex: str, opc_hex: str,
+                     sqn_ms: int = 0, expires: int = 60) -> dict:
+        """1차 REGISTER(무인증) → 401(AKA 챌린지) → 답안 REGISTER → 최종 코드.
+
+        sqn_ms 가 챌린지 SQN 이상이면 단말은 auts 를 보내고(재동기), 서버의 두 번째 401 에 다시 답한다.
+        k_hex 가 서버 K 와 다르면 AUTN MAC 이 틀려 빈 response 를 보낸다(서버 403 기대).
+        반환: {"first","algorithm","second","resync","third","service_route","sqn"}.
+        """
+        return self._aka_flow(user, domain, auth_user, k_hex, opc_hex, sqn_ms, expires)
+
+    def unregister_aka(self, user: str, domain: str, auth_user: str, k_hex: str, opc_hex: str,
+                       sqn_ms: int = 0) -> int:
+        """Expires: 0 등록 해제 — 해제도 AKA 답안이 필요하다. 최종 코드."""
+        r = self._aka_flow(user, domain, auth_user, k_hex, opc_hex, sqn_ms, 0)
+        return r["third"] if r["resync"] else r["second"]

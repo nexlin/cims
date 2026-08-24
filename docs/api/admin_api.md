@@ -464,6 +464,8 @@ Content-Type: application/json
 | `auth_id` | string | N | id와 동일 | SIP Digest 인증 ID |
 | `passwd` | string | Y | - | SIP Digest 비밀번호 — **저장되지 않는다.** `ha1=MD5(imsi@domain:realm:passwd)` 로 변환해 저장(realm = 서비스 `auth_realm ?? domain`). 따라서 `service_ref` 가 해석되어야 한다(400) |
 | `sip_transport` | string | N | null | 채널 정책 `UDP`/`TCP`/`TLS`. **`TLS` 는 서버가 집행** — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 403. `UDP`/`TCP` 는 단말 프로비저닝 힌트, null 은 단말 선택 |
+| `auth_scheme` | string | N | `digest` | 인증 체계 `digest`(SIP Digest, `ha1`) / `aka`(IMS AKA over TLS — `sip_transport` 와 무관하게 TLS 채널만 허용). 마이그레이션(`migrate_subscription_aka.sql`) 전 DB 에서는 400 |
+| `k` / `opc` / `op` / `amf` | string | aka 면 Y | - / `8000` | IMS AKA 자료(hex32 / hex32 / hex32 → OPc 유도 / hex4). **저장 형식은 CSC `AuC.Kek` 암호화**이며 어떤 응답에도 원문이 나가지 않는다(조회는 `auth_scheme`·`aka_provisioned`). 키를 넣으면 SQN 이 0 으로 리셋. `AuC.Kek` 미설정이면 503 |
 | `dnd` | boolean | N | false | 방해금지 모드 |
 | `forward_id` | string | N | "" | 착신전환 번호 (E.164 형식) |
 
@@ -472,6 +474,20 @@ Content-Type: application/json
 > 함께 보내야 한다**(400 `passwd required when imsi or service_ref changes (ha1 rebinding)`).
 > 서비스의 `domain`/`auth_realm` 변경은 그 서비스 전 가입자의 `ha1` 을 무효화한다 — 전 가입자
 > 비밀번호 재설정 없이는 바꾸지 않는다([sip_access_security.md §4.3](../design/features/sip_access_security.md)).
+> `auth_scheme=aka` 로 바꾸는 PUT 은 보관된 키가 없으면 `k`/`opc`(또는 `op`)를 함께 보내야 한다(400).
+
+**내부 AV API (CSP → CSC, Cx MAR/MAA 상당 — [sip_access_security.md §8.2](../design/features/sip_access_security.md))**
+
+콘솔 경로가 아니다 — admin 서버(4421)에 붙지만 `/api/v1` 밖이라 OAM 게이트웨이가 프록시하지 않고, 관리자 JWT 가
+아니라 모듈 간 공유 토큰(`csc.json InternalApi.Token` = `csp.json Setup.Csc.InternalToken`)으로 인증한다.
+
+```
+POST /internal/aka/av            Authorization: Bearer <InternalApi.Token>
+{ "msisdn": "+82…", "service": "volte"|"ptt"|"", "rand": "<hex32>", "auts": "<hex28>" }   // rand/auts 는 AUTS 재동기 때만
+200 { "scheme":"aka", "msisdn", "service", "resynced":bool, "av": { "rand","autn","xres","ck","ik" } }   // hex
+401 토큰 불일치 · 404 unknown_subscriber · 409 scheme_mismatch|keys_not_provisioned · 422 auts_invalid ·
+500 key_material(KEK 불일치) · 503 auc_disabled|schema_not_migrated
+```
 
 **curl 예시:**
 ```bash
@@ -939,6 +955,10 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | ha1 | CHAR(32) | N | '' | - | SIP Digest H(A1)=MD5(imsi@domain:realm:password) — 인증 자료 SoT |
 | passwd | VARCHAR(128) | N | '' | - | 평문 (과도기 — ha1 이행 후 소거·DROP 예정) |
 | sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행 / UDP·TCP=힌트 / NULL=단말 선택) |
+| auth_scheme | ENUM('digest','aka') | N | 'digest' | - | 인증 체계 — CSP 챌린지 체계 선택(aka=IMS AKA over TLS, TLS 채널 강제) — migrate_subscription_aka.sql |
+| k_enc / opc_enc | VARCHAR(160) | N | '' | - | AKA K/OPc — CSC `AuC.Kek` 암호화 보관(`v1:<iv><ct><hmac>`), CSC 만 읽는다 |
+| sqn | BIGINT UNSIGNED | N | 0 | - | AKA SQN_HE(48-bit) — CSC 단일 발급자만 갱신(AV 발급 +1, AUTS 재동기) |
+| amf | CHAR(4) | N | '8000' | - | AKA AMF hex4 |
 | dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
 | forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 (E.164) |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
@@ -954,6 +974,10 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | ha1 | CHAR(32) | N | '' | - | SIP Digest H(A1) — 인증 자료 SoT |
 | passwd | VARCHAR(128) | N | '' | - | 평문 (과도기 — 소거·DROP 예정) |
 | sip_transport | ENUM('UDP','TCP','TLS') | Y | NULL | - | 채널 정책 (TLS=서버 집행) |
+| auth_scheme | ENUM('digest','aka') | N | 'digest' | - | 인증 체계 — CSP 챌린지 체계 선택(aka=IMS AKA over TLS, TLS 채널 강제) — migrate_subscription_aka.sql |
+| k_enc / opc_enc | VARCHAR(160) | N | '' | - | AKA K/OPc — CSC `AuC.Kek` 암호화 보관(`v1:<iv><ct><hmac>`), CSC 만 읽는다 |
+| sqn | BIGINT UNSIGNED | N | 0 | - | AKA SQN_HE(48-bit) — CSC 단일 발급자만 갱신(AV 발급 +1, AUTS 재동기) |
+| amf | CHAR(4) | N | '8000' | - | AKA AMF hex4 |
 | dnd | TINYINT(1) | N | 0 | - | 방해금지 (0=off, 1=on) |
 | forward_id | VARCHAR(32) | Y | '' | - | 착신전환 번호 |
 | register_time | DATETIME | Y | NULL | - | 최근 SIP REGISTER 시각 |
