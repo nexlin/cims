@@ -879,12 +879,18 @@ def _content_etag(content: str) -> str:
 
 
 def _norm_mcptt_uri(u: str) -> str:
-    """MCPTT URI 정규화(비교용) — scheme(sip:/tel:) 제거 + 소문자."""
+    """MCPTT URI 정규화(비교용) — scheme(sip:/tel:) 제거 + @도메인 제거 + 소문자.
+
+    도메인 제거는 **단일 PTT 도메인 전제의 절충**이다: 외부 규격 단말은 신원을 sip: 완전형
+    (sip:user@domain)으로 쓰는데, 우리 토큰/DB 는 tel: 형(도메인 없음)이라 도메인을 남기면
+    본인 문서 접근이 403 으로 오탐된다. 사용자부(E.164)가 시스템에서 유일하므로 안전.
+    다중 도메인 연동(타 시스템 상호접속)을 하게 되면 도메인 인지 비교로 재설계할 것."""
     s = (u or '').strip().lower()
     for p in ('sip:', 'tel:'):
         if s.startswith(p):
-            return s[len(p):]
-    return s
+            s = s[len(p):]
+            break
+    return s.split('@', 1)[0]
 
 
 def _uri_eq(a: str, b: str) -> bool:
@@ -1670,7 +1676,10 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         return HandlerResult(status=403, body="Forbidden: cannot access another user's profile")
 
     logger.log_info(f"[CMS] User Profile: {user_uri}")
-    xml, etag = get_user_profile_xml(user_uri)
+    # 문서 생성은 **토큰의 정본 신원**으로 — 경로 XUI 는 표기 변형(sip:user@domain 완전형 등)일
+    #   수 있고 USERS 키는 tel: 정본이라, 원문 조회는 본인인데도 404 가 난다(시뮬레이터 실측).
+    #   본인 확인(_uri_eq)을 통과했으므로 두 표기는 동일 인물이다.
+    xml, etag = get_user_profile_xml(token_payload.get('mcptt_id'))
 
     if xml:
         if_none_match = args.headers.get('if-none-match', '')
