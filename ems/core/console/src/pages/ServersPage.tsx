@@ -12,6 +12,8 @@ import { MountPanel } from './ha/MountPanel'
 import { GroupMountPanel } from './ha/GroupMountPanel'
 import { NetTuningPanel } from './ha/NetTuningPanel'
 import { OamUrlPanel } from './ha/OamUrlPanel'
+import type { PendingMount } from '../api/deployment'
+import type { GroupMount } from '../api/ha_groups'
 import { splitPrefixHost } from './ha/helpers'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
@@ -81,7 +83,10 @@ export default function ServersPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set())  // -1 = standalone
 
   const [systemModalOpen, setSystemModalOpen] = useState(false)
+  // [+ 멤버 추가] 선택 단계 (마운트 여부·위치) — 확정 시 createGroupMember 가 만든다.
+  const [memberDraft, setMemberDraft] = useState<{ group: HaGroup; serverName: string } | null>(null)
   const [pendingMember, setPendingMember] = useState<{
+    appliedMounts?: PendingMount[]
     groupName: string; serverName: string;
     enrollment_token: string; install_command: string;
   } | null>(null)
@@ -182,6 +187,27 @@ export default function ServersPage() {
     }
     return null
   }, [haGroups, deployments])
+
+  // 마운트 기본값 제안 — 이 설치가 **이미 쓰고 있는** cims-managed 마운트를 읽어 온다.
+  // 새 저장소를 만들지 않는다(값의 정본은 각 노드 fstab 이고 agent 가 heartbeat 로 보고).
+  // oam 을 호스팅하는 노드의 것을 우선 — 관리 store 가 놓인 마운트가 설치의 기준이다.
+  const mountSuggestion = useMemo<PendingMount | null>(() => {
+    const oamAgentIds = new Set(deployments
+      .filter(d => (d.process_name || '').toLowerCase() === 'oam' && d.status !== 'removed')
+      .map(d => d.agent_id))
+    const pick = (list: Agent[]) => {
+      for (const a of list) {
+        for (const m of a.mounts || []) {
+          if (m.target && m.source && m.fstype) {
+            return { fstype: m.fstype, source: m.source, target: m.target,
+                     options: m.options || 'defaults' }
+          }
+        }
+      }
+      return null
+    }
+    return pick(agents.filter(a => oamAgentIds.has(a.id))) ?? pick(agents)
+  }, [agents, deployments])
 
   const vipIps = useMemo(
     () => new Set(haGroups.flatMap(g => (g.vip_bindings || []).map(b => b.ip)).filter(Boolean)),
@@ -349,17 +375,25 @@ export default function ServersPage() {
       await load()
     } catch (e) { show((e as Error).message, 'err') }
   }
-  async function addMemberToGroup(g: HaGroup) {
-    // HaServicesPage 의 addServer 와 동일한 동선 — 새 agent 자동 생성 + 그룹 가입.
+  // [+ 멤버 추가] — 바로 만들지 않고 **선택 단계**를 띄운다. 이 경로로 들어오는 서버는
+  // (AA 는 이 경로가 유일하다) 며칠 뒤에 추가될 수도 있어, 그룹 선언을 조용히 상속하면
+  // 운영자가 "이 서버는 마운트가 되는가" 를 알 방법이 없다. 그래서 그 자리에서 묻는다.
+  function addMemberToGroup(g: HaGroup) {
     const existing = (g.members || []).length
-    const nm = `${g.name}-${String(existing + 1).padStart(2, '0')}`
+    setMemberDraft({ group: g, serverName: `${g.name}-${String(existing + 1).padStart(2, '0')}` })
+  }
+
+  // 선택 완료 → agent 생성 + 승인 + 그룹 가입. mounts=null 이면 "마운트하지 않음"(명시).
+  async function createGroupMember(g: HaGroup, nm: string, mounts: PendingMount[]) {
     try {
-      const r = await deploymentApi.createAgent(nm, '')
+      const r = await deploymentApi.createAgent(nm, '', mounts)
       await deploymentApi.approveAgent(r.id)
       await haGroupsApi.addMember(g.id, { agent_id: r.id, role: 'backup', priority: 90 })
+      setMemberDraft(null)
       setPendingMember({
         groupName: g.name, serverName: nm,
         enrollment_token: r.enrollment_token, install_command: r.install_command,
+        appliedMounts: mounts,
       })
       // 새 멤버 자동 선택 + 트리에서 그룹 펼침 — InstallSection 즉시 노출.
       setSelection({ kind: 'agent', id: r.id })
@@ -538,6 +572,7 @@ export default function ServersPage() {
       {systemModalOpen &&
         <SystemCreateModal
           saAgents={agents.filter(a => !a.ha_group && (a.status === 'online' || a.status === 'approved'))}
+          mountSuggestion={mountSuggestion}
           onClose={() => setSystemModalOpen(false)}
           onDone={load}
           onCreated={(firstAgentId) => {
@@ -551,6 +586,14 @@ export default function ServersPage() {
               })
             }
           }} />}
+      {memberDraft && (
+        <AddMemberModal
+          group={memberDraft.group}
+          serverName={memberDraft.serverName}
+          mountSuggestion={memberDraft.group.mounts?.[0] ?? mountSuggestion}
+          onClose={() => setMemberDraft(null)}
+          onSubmit={(nm, mounts) => createGroupMember(memberDraft.group, nm, mounts)} />
+      )}
       {pendingMember &&
         <PendingMemberModal info={pendingMember} onClose={() => setPendingMember(null)} />}
       {deployModal &&
@@ -2342,26 +2385,11 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           </div>
         )
       })()}
-      {/* agent 주소가 VIP 가 아니면 절체 후 fleet 이 단절된다 — 조용히 두면 정상인 줄 안다.
-          절체 성공했는데 콘솔에 전 노드 offline·모듈 상태 고착으로 보이는 실측 사고. */}
-      {isAS && (group.agents_not_on_vip?.length || 0) > 0 && (
-        <div role="alert" style={{
-          marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
-          background: '#7c2d12', color: '#fff', lineHeight: 1.6,
-        }}>
-          <b>agent {group.agents_not_on_vip!.length}개가 VIP 가 아닌 주소로 OAM 에 보고 중</b>
-          <div style={{ marginTop: 4 }}>
-            이대로 절체하면 구 Active 주소가 죽어 그 agent 들이 OAM 과 단절됩니다 —
-            콘솔에는 전 노드 offline, 모듈 상태는 절체 직전 값으로 고착돼 보입니다.
-            <b>[시스템/서버 구성] &gt; 서버 &gt; OAM 접속 주소</b> 에서 먼저 전환하세요
-            (그 자리의 [전체 적용] 이 전 agent 를 한 번에 바꿉니다).
-          </div>
-          <div style={{ marginTop: 4, opacity: 0.85 }}>
-            {group.agents_not_on_vip!.slice(0, 6).map(a => `${a.name} → ${a.oam_url}`).join(' / ')}
-            {group.agents_not_on_vip!.length > 6 ? ' …' : ''}
-          </div>
-        </div>
-      )}
+      {/* agent 의 OAM 접속 주소 어긋남 배너는 여기 없다 — 이 탭은 프로세스 제어다.
+          그리고 개시 전에는 어느 노드도 VIP 를 갖지 않아 전 agent 가 노드 IP 로 보고하는
+          것이 정상인데, 그때도 붉게 떠서 상시 경고가 되어 신호가 무의미했다.
+          지금은 **VIP 가 실제로 붙은 뒤에만** 판정해 알람(A-PRC-003, mo=`a<id>/agent`)으로
+          올린다. 값 확인·변경은 [시스템/서버 구성] > 서버 > OAM 접속 주소. */}
       {group.failover_op && (
         <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
                       border: '1px solid ' + (group.failover_op.error ? '#e57373' : '#90caf9'),
@@ -2680,8 +2708,103 @@ function Field({ label, value }: { label: string; value: string }) {
 //  Modals
 // ──────────────────────────────────────────────────────────────
 
+/**
+ * [+ 멤버 추가] 선택 단계 — 서버 이름 + **마운트 여부·위치**.
+ *
+ * 이 경로로 들어오는 서버는 그룹 생성과 며칠 떨어질 수 있다(AA 는 이 경로가 유일하다).
+ * 그룹 선언을 조용히 상속하면 운영자는 "이 서버는 마운트가 되는가" 를 알 방법이 없고,
+ * 그래서 마운트 없는 노드가 조용히 생긴다(실측: Media(AA) 두 노드가 그렇게 돼 서비스 로그를
+ * 쓰지 못했다). 기본값은 그룹 선언 → 없으면 이 설치가 이미 쓰는 마운트로 채우고, **확인은
+ * 그 자리에서 받는다.** 체크를 끄면 "마운트하지 않음"으로 명시 저장돼 상속으로 뒤집히지 않는다.
+ */
+function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit }: {
+  group: HaGroup
+  serverName: string
+  mountSuggestion?: PendingMount | GroupMount | null
+  onClose: () => void
+  onSubmit: (name: string, mounts: PendingMount[]) => Promise<void> | void
+}) {
+  const [name, setName] = useState(serverName)
+  const sug = mountSuggestion
+  const [mountOn, setMountOn] = useState(!!sug)
+  const [mnt, setMnt] = useState<PendingMount>(sug
+    ? { fstype: sug.fstype, source: sug.source, target: sug.target,
+        options: sug.options || 'defaults' }
+    : { fstype: 'nfs4', source: '', target: '/mnt/cims', options: 'defaults' })
+  const [busy, setBusy] = useState(false)
+  const mntValid = !!mnt.source.trim() && mnt.target.trim().startsWith('/') && !!mnt.fstype
+  const fromGroup = !!group.mounts?.length
+
+  return (
+    <Modal title={`${group.name} — 멤버 추가`} onClose={onClose} width={620}>
+      <div className="form-grid">
+        <label>서버 이름 *</label>
+        <input className="form-input" value={name} disabled={busy}
+               onChange={e => setName(e.target.value)} />
+        <label style={{ gridColumn: '1 / -1', borderTop: '1px solid #eee',
+                        paddingTop: 10, marginTop: 4 }}>
+          <input type="checkbox" checked={mountOn} disabled={busy}
+                 onChange={e => setMountOn(e.target.checked)} />
+          {' '}공유 스토리지 마운트를 함께 적용
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
+          </span>
+        </label>
+        {mountOn ? (
+          <>
+            <label>원본 *</label>
+            <input className="form-input" value={mnt.source} disabled={busy}
+                   placeholder="예: nas.example:/export/cims"
+                   onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
+            <label>붙일 위치 *</label>
+            <input className="form-input" value={mnt.target} disabled={busy}
+                   placeholder="/mnt/cims"
+                   onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
+            <label>파일시스템 *</label>
+            <select className="form-input" value={mnt.fstype} disabled={busy}
+                    onChange={e => setMnt(m => ({ ...m, fstype: e.target.value }))}>
+              {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
+                <option key={f} value={f}>{f}</option>
+              ))}
+            </select>
+            <label style={{ gridColumn: '1 / -1', fontSize: 11,
+                            color: mntValid ? 'var(--text-muted)' : '#c0392b' }}>
+              {mntValid
+                ? <>{fromGroup && <>기본값은 <b>이 그룹의 마운트 선언</b>입니다. </>}
+                   등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
+                   defaults+_netdev,nofail) 로 마운트되고 [마운트 관리]에 표시됩니다.
+                   실패해도 서버 등록은 유지됩니다.</>
+                : <>원본과 붙일 위치(절대경로)를 입력하세요.</>}
+            </label>
+          </>
+        ) : (
+          <label style={{ gridColumn: '1 / -1', fontSize: 11, color: '#b26a00' }}>
+            이 서버는 <b>마운트 없이</b> 등록됩니다 — 공유 store·서비스 로그를 쓰는 모듈이라면
+            나중에 [마운트 관리]에서 직접 추가해야 합니다.
+          </label>
+        )}
+      </div>
+      <div className="modal-footer" style={{ marginTop: 16 }}>
+        <button className="btn" onClick={onClose} disabled={busy}>취소</button>
+        <button className="btn btn--primary" disabled={busy || !name.trim() || (mountOn && !mntValid)}
+                onClick={async () => {
+                  setBusy(true)
+                  try {
+                    await onSubmit(name.trim(), mountOn
+                      ? [{ ...mnt, target: mnt.target.trim().replace(/\/+$/, '') }]
+                      : [])   // [] = 마운트하지 않음(명시) — 그룹 선언 상속 안 함
+                  } finally { setBusy(false) }
+                }}>
+          {busy ? '추가 중…' : '추가'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 function PendingMemberModal({ info, onClose }: {
-  info: { groupName: string; serverName: string; enrollment_token: string; install_command: string }
+  info: { groupName: string; serverName: string; enrollment_token: string; install_command: string
+          appliedMounts?: PendingMount[] }
   onClose: () => void
 }) {
   const { show } = useToast()
@@ -2697,6 +2820,19 @@ function PendingMemberModal({ info, onClose }: {
       <div style={{ color: '#2ecc71', marginBottom: 10 }}>
         ✓ <b>{info.serverName}</b> 그룹 멤버로 등록됨. 다음 명령을 대상 서버에서 실행:
       </div>
+      {/* 직전 단계에서 확정한 마운트를 되짚어 보여준다 — 설치 명령을 돌리기 전에
+          "이 서버는 마운트가 되는가" 가 화면에 남아 있어야 한다. */}
+      {info.appliedMounts?.length ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.6 }}>
+          등록 직후 자동 마운트: {info.appliedMounts.map(m =>
+            <code key={m.target}>{m.source} → {m.target} ({m.fstype})</code>)
+            .reduce((a, b) => <>{a}, {b}</>)}
+        </div>
+      ) : (
+        <div style={{ fontSize: 12, color: '#b26a00', marginBottom: 10, lineHeight: 1.6 }}>
+          이 서버는 <b>마운트 없이</b> 등록됩니다 — 필요하면 [마운트 관리]에서 추가하세요.
+        </div>
+      )}
       <div style={{ position: 'relative' }}>
         <pre style={{
           background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
@@ -2718,13 +2854,15 @@ function PendingMemberModal({ info, onClose }: {
 
 type SystemMode = 'active_standby' | 'all_active' | 'standalone'
 
-function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
+function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggestion }: {
   onClose: () => void
   onDone: () => Promise<void> | void
   onCreated: (firstAgentId: number | null) => void
   // 그룹 미소속(standalone) 서버 — AS 멤버로 기존 서버 편입 가능 (부트스트랩
   // 호스트처럼 이미 enroll 된 서버를 두 번째 서버와 A/S 로 묶는 시나리오)
   saAgents: Agent[]
+  /** 이 설치가 이미 쓰고 있는 공유 마운트 — 기본값 제안용. 없으면 마운트 행을 끈다. */
+  mountSuggestion?: PendingMount | null
 }) {
   const { show } = useToast()
   const [name, setName] = useState('')
@@ -2736,6 +2874,19 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
   // 생성 결과 — Standalone 1건, AS 2건, AA 0건 (이후 그룹에서 추가)
   const [results, setResults] = useState<Array<{ name: string; enrollment_token: string; install_command: string }> | null>(null)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
+  // 공유 마운트 자동 적용 — 이 설치가 이미 쓰는 마운트가 있으면 기본 ON.
+  //   마운트를 별도 작업으로 두면 운영자가 잊고, 그 노드는 공유 store 를 못 써 승격
+  //   부적격이 된다(실측: 계획 절체가 원본을 내려놓은 뒤에야 드러나 관리평면 단절).
+  const [mountOn, setMountOn] = useState(!!mountSuggestion)
+  const [mnt, setMnt] = useState<PendingMount>(mountSuggestion
+    ?? { fstype: 'nfs4', source: '', target: '/mnt/cims', options: 'defaults' })
+  const mntValid = !!mnt.source.trim() && mnt.target.trim().startsWith('/') && !!mnt.fstype
+  // AA 는 이 모달에서 **서버를 만들지 않는다**(그룹만 생성, 멤버는 이후 [+ 멤버 추가]).
+  // 붙일 대상이 없으므로 마운트 입력을 노출하지 않는다 — 채워도 적용될 곳이 없어
+  // "등록 직후 붙습니다" 가 거짓이 된다. AA 의 마운트는 [+ 멤버 추가] 단계가 묻는다.
+  const showMount = mode !== 'all_active'
+  const pendingMounts = showMount && mountOn && mntValid
+    ? [{ ...mnt, target: mnt.target.trim().replace(/\/+$/, '') }] : []
 
   async function create() {
     const base = name.trim()
@@ -2744,7 +2895,8 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
     try {
       let firstAgentId: number | null = null
       if (mode === 'standalone') {
-        const r = await deploymentApi.createAgent(base, '')
+        // standalone 은 그룹이 없어 선언을 둘 곳이 agent 뿐이다.
+        const r = await deploymentApi.createAgent(base, '', pendingMounts)
         await deploymentApi.approveAgent(r.id)
         firstAgentId = r.id
         setResults([{ name: base, enrollment_token: r.enrollment_token, install_command: r.install_command }])
@@ -2765,6 +2917,8 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
             groupMembers.push({ agent_id: slots[i], role, priority })
           } else {
             const nm = `${base}-${String(i + 1).padStart(2, '0')}`
+            // 그룹 소속 멤버는 agent 에 복제하지 않는다 — 아래 그룹 생성의 `mounts` 선언을
+            // enroll 이 읽는다(단일 SoT). [+ 멤버 추가]로 늘어나는 멤버도 같은 선언을 쓴다.
             const r = await deploymentApi.createAgent(nm, '')
             await deploymentApi.approveAgent(r.id)
             memberAgents.push({ name: nm, enrollment_token: r.enrollment_token, install_command: r.install_command })
@@ -2780,6 +2934,9 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
           // auth_pass — active_standby 만 의미 (VRRP 인증). all_active 는 keepalived 미사용이라 빈값.
           auth_pass: mode === 'active_standby' ? authPass : '',
           members: groupMembers,
+          // 그룹에도 선언을 남긴다 — [마운트 (그룹 공통)] 이 '선언 vs 멤버 적용' 을
+          // 대조하는 근거다. 선언이 없으면 나중에 편입된 멤버의 미적용을 짚을 수 없다.
+          ...(pendingMounts.length ? { mounts: pendingMounts } : {}),
         })
         setResults(memberAgents)
       }
@@ -2843,12 +3000,54 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents }: {
               ))}
             </>
           )}
+          {/* 공유 마운트 — 등록 직후 자동 적용. 마운트를 별도 작업으로 두면 운영자가 잊고,
+              그 노드는 공유 store 를 못 써 승격 부적격이 된다(실측: 계획 절체가 원본을
+              내려놓은 뒤에야 드러나 관리평면이 끊겼다). 기본값은 이 설치가 이미 쓰는 마운트. */}
+          {showMount && (
+          <label style={{ gridColumn: '1 / -1', borderTop: '1px solid #eee', paddingTop: 10, marginTop: 4 }}>
+            <input type="checkbox" checked={mountOn} disabled={creating}
+                   onChange={e => setMountOn(e.target.checked)} />
+            {' '}공유 스토리지 마운트를 함께 적용
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
+            </span>
+          </label>
+          )}
+          {showMount && mountOn && (
+            <>
+              <label>원본 *</label>
+              <input className="form-input" value={mnt.source} disabled={creating}
+                placeholder="예: nas.example:/export/cims"
+                onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
+              <label>붙일 위치 *</label>
+              <input className="form-input" value={mnt.target} disabled={creating}
+                placeholder="/mnt/cims"
+                onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
+              <label>파일시스템 *</label>
+              <select className="form-input" value={mnt.fstype} disabled={creating}
+                onChange={e => setMnt(m => ({ ...m, fstype: e.target.value }))}>
+                {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+              <label style={{ gridColumn: '1 / -1', fontSize: 11, color: mntValid ? 'var(--text-muted)' : '#c0392b' }}>
+                {mntValid
+                  ? <>등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
+                     defaults+_netdev,nofail) 로 마운트하고 콘솔 [마운트 관리]에 표시됩니다.
+                     마운트가 실패해도 서버 등록은 유지됩니다.</>
+                  : <>원본과 붙일 위치(절대경로)를 입력하세요 — 비우면 마운트를 적용하지 않습니다.</>}
+              </label>
+            </>
+          )}
           <label style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
             선택: <b>{modeLabel}</b>
             {mode === 'active_standby' && memberSel.every(v => v === 0) &&
               <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
             {mode === 'active_standby' && memberSel.some(v => v > 0) &&
               <> · 기존 서버는 install-command 없이 즉시 편입되고 HA 설정이 자동 재적용됩니다</>}
+            {mode === 'all_active' &&
+              <> · 서버는 생성되지 않습니다 — 그룹 생성 후 <b>[+ 멤버 추가]</b> 로 한 대씩
+                 추가하고, <b>마운트는 그 단계에서</b> 선택합니다</>}
           </label>
         </div>
       ) : results.length === 0 ? (

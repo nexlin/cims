@@ -199,7 +199,10 @@ export interface HaGroupInput {
   auth_pass: string
   note?: string
   vip_bindings?: VipBinding[]
-  shared_store?: HaSharedStore
+  // shared_store 는 입력이 아니다 — oam/oam-svc 배포설정(`CimsRuntimeMount`)에서 유도되고
+  // PUT 으로 보내면 400 `shared_store_not_group_scoped` 다. 응답의 값은 읽기 전용 유도값.
+  /** 그룹 공통 마운트 선언 — 멤버 적용 여부는 agent.mounts 로 대조. */
+  mounts?: GroupMount[]
   failover_options?: FailoverOptions
   service_intent?: Record<string, 'running' | 'stopped'>
   module_specs?: Record<string, ModuleSpec>

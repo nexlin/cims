@@ -88,6 +88,14 @@ export interface AgentHaGroupRef {
   role: 'master' | 'backup'
 }
 
+/** 등록 시 자동 적용할 마운트 선언 — cims-priv mount-add 인자와 1:1. */
+export interface PendingMount {
+  fstype: string
+  source: string
+  target: string
+  options?: string
+}
+
 // HaServicesPage 용 — agent heartbeat 보고 인터페이스
 export interface NetIface {
   name: string
@@ -149,6 +157,8 @@ export interface Agent {
   mount_targets?: Array<{ target: string; fstype: string; source: string }> | null
   /** 이 agent 가 실제로 보고하는 OAM 주소 (heartbeat 보고값). VIP 와 다르면 절체 후 단절된다. */
   oam_url?: string | null
+  /** 등록 시 자동 적용할 마운트 선언 ("시스템 추가" 입력). 재설치에도 따라온다. */
+  pending_mounts?: PendingMount[] | null
   /** HA 판정 요약 {svc: {...}} — latched=true 면 그 노드는 승격 불가(운영자 해제 필요). */
   ha_state?: Record<string, {
     role?: string; state?: string; eligible?: boolean
@@ -467,9 +477,15 @@ export const deploymentApi = {
   // agents
   listAgents:    () => api.get<{ items: Agent[] }>('/agents').then(r => r.items),
   getAgent:      (id: number) => api.get<Agent>(`/agents/${id}`),
-  createAgent:   (name: string, note?: string) =>
-    api.post<AgentCreateResult>('/agents', { name, note }),
-  updateAgent:   (id: number, body: { name?: string; note?: string; service_ip_rows?: ServiceIpRow[] | null }) =>
+  // pending_mounts — 등록(enroll) 직후 자동 적용할 마운트 선언. "시스템 추가" 에서 받는다.
+  //   서버별 [마운트 관리]와 같은 경로로 집행되므로(cims-priv → fstab `# cims-managed`)
+  //   콘솔 마운트 화면에 자동으로 표시된다.
+  //   `pending_mounts: []` 는 "마운트하지 않음"(명시) 이고 **인자를 생략**하면 미지정
+  //   (소속 그룹 선언 상속)이다 — 뜻이 다르므로 빈 배열도 그대로 보낸다.
+  createAgent:   (name: string, note?: string, pending_mounts?: PendingMount[]) =>
+    api.post<AgentCreateResult>('/agents', { name, note, ...(pending_mounts ? { pending_mounts } : {}) }),
+  updateAgent:   (id: number, body: { name?: string; note?: string; service_ip_rows?: ServiceIpRow[] | null;
+                                      pending_mounts?: PendingMount[] | null }) =>
     api.put<Agent>(`/agents/${id}`, body),
   deleteAgent:   (id: number) => api.delete<null>(`/agents/${id}`),
   approveAgent:  (id: number) => api.post<{ ok: boolean }>(`/agents/${id}/approve`, {}),

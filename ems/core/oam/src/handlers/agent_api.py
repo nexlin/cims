@@ -427,6 +427,50 @@ async def _enroll(handler_args: HandlerArgs, config: dict) -> HandlerResult:
     except Exception as e:
         logger.log_warning(f"[enroll] ha sync trigger failed for agent {row['id']}: {e}")
 
+    # ── 등록 직후 마운트 자동 적용 ────────────────────────────────────────────
+    # "시스템 추가" 에서 받은 선언(`pending_mounts`)을 여기서 집행한다. 운영자가 마운트를
+    # 따로 누르는 것을 잊어 **모듈은 다 들어갔는데 마운트만 없는 노드**가 되는 것을 막는다
+    # (실측: 그 노드는 공유 store 를 못 써 승격 부적격이 되고, 계획 절체가 원본을 내려놓은
+    # 뒤에야 드러나 관리평면이 약 1분 끊겼다).
+    #
+    # 경로는 서버별 [마운트 관리]와 **동일**하다 — `apply_mounts` job → `cims-priv mount-add`
+    # → fstab `# cims-managed`. 그래서 콘솔 마운트 화면에 자동으로 `● mounted` 로 뜬다
+    # (`collect_mounts` 가 그 태그만 읽고 heartbeat 로 올린다). 직접 `mount` 를 쓰면 표시도
+    # 영속도 안 된다(실측: 손으로 붙인 노드는 fstab 에 흔적이 없어 콘솔에 아무것도 안 보였다).
+    #
+    # 선언은 **지우지 않는다** — 재설치 시 다시 적용돼야 하고, mount-add 는 멱등이다.
+    # 실패는 enroll 을 막지 않는다: NAS 가 안 붙어도 agent 는 등록돼야 그 노드를 콘솔에서
+    # 고칠 수 있다(부트스트랩은 전개 전이라 즉시 중단이 맞지만, 등록된 노드는 성격이 다르다).
+    try:
+        _pm = row.get('pending_mounts')
+        if not isinstance(_pm, list):
+            # 레코드에 선언이 **아예 없는** 경우만 소속 그룹 선언으로 폴백한다(구 레코드·API·
+            # 블루프린트 경로). `[]` 는 "마운트하지 않음" 이라는 운영자 명시이므로 폴백하지
+            # 않는다 — 콘솔에서 체크를 끈 것이 상속으로 뒤집히면 안 된다.
+            def _group_mounts():
+                from services import file_store
+                from handlers.ha_groups import _ha_dir
+                for g in file_store.load_all(_ha_dir(config)):
+                    if any(m.get('agent_id') == row['id'] for m in (g.get('members') or [])):
+                        ms = g.get('mounts')
+                        if isinstance(ms, list) and ms:
+                            return ms
+                return []
+            _pm = await asyncio.to_thread(_group_mounts)
+        if isinstance(_pm, list) and _pm:
+            from handlers.agents import _job_create
+            _mounts = [{'op': 'add', 'fstype': m.get('fstype'), 'source': m.get('source'),
+                        'target': m.get('target'), 'options': m.get('options') or 'defaults'}
+                       for m in _pm if isinstance(m, dict) and m.get('target')]
+            if _mounts:
+                _jid = await asyncio.to_thread(_job_create, config, row['id'],
+                                               'apply_mounts', {'mounts': _mounts})
+                logger.log_info(f"[enroll] agent {row['id']} 마운트 자동 적용 job#{_jid} 큐잉 "
+                                f"({len(_mounts)}건: {', '.join(m['target'] for m in _mounts)})")
+    except Exception as e:
+        logger.log_warning(f"[enroll] agent {row['id']} 마운트 자동 적용 큐잉 실패: {e} "
+                           f"— 등록은 정상. 콘솔 [마운트 관리]에서 수동 적용 필요")
+
     resp_body = {
         "agent_id": row["id"],
         "name": row["name"],

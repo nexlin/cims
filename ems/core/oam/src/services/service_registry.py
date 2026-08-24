@@ -45,6 +45,18 @@ _CORE_ALERT_RULES = [
      'msg_open': '{mo} 프로세스 응답 없음', 'msg_close': '{mo} 정상화',
      'effect': '해당 호스트의 모듈 기능 중단',
      'recommended_action': '프로세스 재기동, 로그/코어 확인, HA 절체 점검'},
+    # agent 가 VIP 아닌 주소로 OAM 에 보고 — 절체하면 그 agent 가 OAM 과 단절된다(fleet
+    # misdirect). **VIP 가 실제로 붙은 뒤에만** 판정한다(_agents_not_on_vip) — 개시 전에는
+    # 전 agent 가 노드 IP 로 보고하는 것이 정상이라, 그때 잡으면 상시 경고가 되어 무의미하다.
+    # 절체 자체는 정상 동작하므로(HA 판정은 노드 로컬) 잃는 것은 **관리 가시성**이다.
+    {'type': 'config_out_of_sync', 'code': 'A-PRC-003', 'perceived_severity': 'warning',
+     'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError',
+     'mo_class': 'software', 'check': 'oam_url_misdirect', 'scope': 'agent',
+     'metric': 'OAM 접속 주소 정합',
+     'msg_open': '{mo} agent 가 VIP 아닌 주소로 OAM 에 보고 (보고={actual}, 기대=VIP {expected})',
+     'msg_close': '{mo} OAM 접속 주소 정상 (VIP)',
+     'effect': '절체 후 이 서버가 OAM 과 단절 — 콘솔에 offline·모듈 상태 고착',
+     'recommended_action': '시스템/서버 구성 > 서버 > OAM 접속 주소 에서 VIP 로 전환'},
     {'type': 'config_out_of_sync', 'code': 'A-PRC-003', 'perceived_severity': 'warning',
      'event_type': 'processingError', 'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software',
      'check': 'config_drift', 'scope': 'agent', 'metric': '배포 설정 정합',

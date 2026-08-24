@@ -5,8 +5,11 @@
 //  같은 값을 반복 입력하는 것이 실제 운영의 부담이었다. 그래서 **그룹이 선언을 갖고**
 //  적용은 fan-out 한다. 노드별 예외는 서버 인스펙터의 [마운트 관리]가 계속 담당한다.
 //
-//  선언(group.mounts) 과 멤버 실제 상태(agent.mounts + heartbeat mounted) 를 대조해
-//  멤버별 ●/◐/✕ 를 표시한다 — 오프라인이라 빠진 멤버, 나중에 편입된 멤버가 드러난다.
+//  **표시는 멤버 실측의 집계 하나다.** 그룹에 별도 선언을 두고 그것을 따로 그리지 않는다 —
+//  같은 사실이 두 곳에 생기고 화면에도 두 기능처럼 보인다. 행 = 멤버들이 실제로 가진 마운트
+//  (agent.mounts, fstab `# cims-managed` + heartbeat `mounted`)의 합집합이고, 어떤 멤버에
+//  없으면 그 자리가 ✕ 로 드러난다(오프라인이라 빠진 멤버·나중에 편입된 멤버).
+//  버튼은 **작업**이다: 전 멤버에 추가 / 없는 멤버에만 적용 / 전 멤버에서 제거.
 // ──────────────────────────────────────────────────────────────
 import { useState } from 'react'
 import type { AgentMount } from '../../api/deployment'
@@ -92,8 +95,38 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
     })), `그룹 마운트 재적용 (${declared.length}건)`)
   }
 
-  const laggingCount = declared.reduce(
-    (n, d) => n + members.filter(m => memberState(m, d.target) !== 'mounted').length, 0)
+  // 행 = **멤버 실측의 합집합**. 그룹이 따로 선언을 갖지 않는다 — 서버 탭에 붙을 수 있는
+  // 것을 여기서 모아 보여주는 것이 전부다(같은 사실을 두 곳에 두면 어긋나고, 화면에도
+  // 두 기능처럼 보인다). `declared` 는 이전 그룹 적용 작업의 기록이라 target 만 합쳐
+  // "전에 적용했는데 지금 아무 멤버에도 없는" 항목이 사라지지 않게 한다.
+  const rows: GroupMount[] = []
+  const seen = new Set<string>()
+  const push = (target: string, source: string, fstype: string, options?: string) => {
+    if (!target || seen.has(target)) return
+    seen.add(target)
+    rows.push({ target, source, fstype, options: options || 'defaults' })
+  }
+  for (const mem of members) {
+    for (const am of mem.mounts || []) push(am.target, am.source || '', am.fstype || '', am.options)
+  }
+  for (const d of declared) push(d.target, d.source, d.fstype, d.options)
+
+  // 어떤 멤버에 없으면 미적용 — 판정 기준이 '선언' 이 아니라 '동료 멤버가 가졌는지' 다.
+  const lagging = (target: string) =>
+    members.filter(m => memberState(m, target) !== 'mounted')
+  const laggingCount = rows.reduce((n, r) => n + lagging(r.target).length, 0)
+
+  // 없는 멤버에만 적용 — 전 멤버 재적용보다 좁은 작업(이미 붙은 노드는 건드리지 않는다).
+  const applyToLagging = (m: GroupMount) => {
+    const miss = lagging(m.target)
+    if (!miss.length) return
+    if (!m.source || !m.fstype) {
+      alert(`${m.target}: 멤버 보고에 source/유형이 없어 적용할 수 없습니다.`); return
+    }
+    onApply([{ op: 'add', target: m.target, source: m.source,
+               fstype: m.fstype, options: m.options || 'defaults' }],
+            `미적용 멤버에 적용 (${miss.map(x => x.name).join(', ')}) = ${m.source} → ${m.target}`)
+  }
 
   return (
     <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
@@ -130,13 +163,14 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
           </tr>
         </thead>
         <tbody>
-          {declared.length === 0 && !addOpen && (
+          {rows.length === 0 && !addOpen && (
             <tr><td colSpan={6} style={{ padding: 8, color: 'var(--text-muted)' }}>
               (그룹 공통 마운트 없음 — 아래 [＋ 마운트 추가])
             </td></tr>
           )}
-          {declared.map(m => (
-            <tr key={m.target}>
+          {rows.map(m => (
+            <tr key={m.target}
+                style={lagging(m.target).length ? { background: 'var(--warn-soft)' } : undefined}>
               <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{m.target}</td>
               <td style={{ padding: '4px 8px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{m.source}</td>
               <td style={{ padding: '4px 8px' }}>{m.fstype}</td>
@@ -150,7 +184,13 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
                                 state={memberState(mem, m.target)} />
                     ))}
               </td>
-              <td style={{ padding: '4px 8px' }}>
+              <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
+                {lagging(m.target).length > 0 && (
+                  <button onClick={() => applyToLagging(m)} style={btnSmall()} disabled={applying}
+                          title={`이 마운트가 없는 멤버에만 적용: ${lagging(m.target).map(x => x.name).join(', ')}`}>
+                    없는 멤버에 적용
+                  </button>
+                )}
                 <button onClick={() => removeMount(m)} style={btnDanger()} disabled={applying}>삭제</button>
               </td>
             </tr>

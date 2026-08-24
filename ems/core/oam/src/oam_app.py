@@ -1035,7 +1035,8 @@ if __name__ == '__main__':
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
                              deps: list,
                              cold_skip: set, cold_must_run: set = frozenset(),
-                             expected_cfg: dict | None = None) -> list:
+                             expected_cfg: dict | None = None,
+                             misdirect: dict | None = None) -> list:
             """scope='agent' 규칙을 한 agent 최신 metric 으로 평가.
             반환: (mo_instance, is_open, msg_open, msg_close, threshold_info, severity) 목록 —
             threshold_info 는 임계 계열의 {observed, threshold, unit}, severity 는 단계
@@ -1113,6 +1114,16 @@ if __name__ == '__main__':
                     mo = f"{host}/{proc}/config"
                     kw = dict(mo=mo, host=host_name, module=proc, expected=exp, actual=got)
                     res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
+            elif chk == 'oam_url_misdirect':
+                # VIP 가 실제로 붙은 뒤에만 채워지는 맵(_agents_not_on_vip 가 그렇게 조여져
+                # 있다). 여기 없으면 정상이거나 판정 불가 → close 경로(미평가 아님).
+                mis = (misdirect or {}).get(agent.get('id'))
+                mo = f"{host}/agent"
+                kw = dict(mo=mo, host=host_name,
+                          actual=(mis or {}).get('oam_url', '-'),
+                          expected=(mis or {}).get('vip', '-'))
+                res.append((mo, mis is not None, _fmt(rule.get('msg_open'), **kw),
+                            _fmt(rule.get('msg_close'), **kw), None, None))
             elif chk == 'ha_flap':
                 # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
                 # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.
@@ -1184,6 +1195,25 @@ if __name__ == '__main__':
                             deploy_config_hash(config, _pkgs[pid], dep.get('config'))
                     except Exception:
                         pass
+            # OAM 접속 주소 어긋남 — 스윕당 1회 계산. `_agents_not_on_vip` 는 **VIP 가 실제로
+            # 붙은 그룹에서만** 목록을 준다(개시 전 상시 경고 방지). 관리평면을 호스팅하는
+            # 그룹만 대상이라 fleet 전체가 한 그룹의 VIP 로 판정된다.
+            misdirect: dict = {}
+            if any(r.get('check') == 'oam_url_misdirect' for r in agent_rules):
+                try:
+                    from handlers.ha_groups import _agents_not_on_vip
+                    from services import ha_lookup as _hl
+                    for g in _hl.ha_groups_all(config):
+                        if g.get('mode') != 'active_standby':
+                            continue
+                        _vips = sorted(_hl.group_vip_set(g) or [])
+                        for a in _agents_not_on_vip(config, g, agents, deps):
+                            misdirect[a['agent_id']] = {
+                                'oam_url': a.get('oam_url') or '-',
+                                'vip': _vips[0] if _vips else '-'}
+                except Exception as e:
+                    logger.log_warning(f"[alert] oam_url 어긋남 판정 skip: {e}")
+
             active = set()
             observed_hosts = set()   # 이번 스윕에서 관측(metric)이 있었던 호스트
             for ag in agents:
@@ -1197,7 +1227,7 @@ if __name__ == '__main__':
                 for r in agent_rules:
                     if r.get('check') == 'agent_lost':
                         continue    # 두절 규칙은 아래 별도 판정
-                    for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, cold_skip, cold_must_run, expected_cfg):
+                    for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, cold_skip, cold_must_run, expected_cfg, misdirect):
                         active.add(f"{r.get('code')}@{mo}")
                         rr = {**r, 'perceived_severity': sev} if sev else r
                         # detected_by 는 주체 클래스만(표준화 §3.4(b)) — 호스트는 mo 가 보유.
@@ -1470,8 +1500,11 @@ if __name__ == '__main__':
         HA_OP_SWEEP_INTERVAL = int(config.get('HaOpSweepSec', 2))
         def _sweep_ha_ops():
             try:
-                from handlers.ha_groups import sweep_ha_operations
+                from handlers.ha_groups import sweep_ha_operations, sweep_pending_arm
                 sweep_ha_operations(config)
+                # 순차 무장 보류 해제 — 선행 멤버의 VIP 보유를 확인하면 나머지를 무장.
+                # 절체 op 와 같은 짧은 주기를 쓴다(둘 다 VIP 관측이 트리거).
+                sweep_pending_arm(config)
             except Exception as e:
                 logger.log_warning(f"[ha-op] sweep 실패: {e}")
 

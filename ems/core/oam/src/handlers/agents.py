@@ -967,6 +967,9 @@ def _agent_to_json(r: dict, ha_group: dict | None = None) -> dict:
         "mount_targets":   r.get("mount_targets") if isinstance(r.get("mount_targets"), list) else None,
         # 서버별 네트워크 튜닝 desired-state ({sysctl:{...}, rps:[...]}). apply 시 저장.
         "net_tuning":      r.get("net_tuning") if isinstance(r.get("net_tuning"), dict) else None,
+        # 등록(enroll) 시 자동 적용할 마운트 선언 — "시스템 추가" 에서 받은 의도.
+        # install-command 재발급·재설치에도 따라오도록 레코드에 남긴다.
+        "pending_mounts":  r.get("pending_mounts") if isinstance(r.get("pending_mounts"), list) else None,
     }
 
 
@@ -1098,6 +1101,42 @@ async def _get_agent(aid: int, config):
                          media_type="application/json")
 
 
+def _normalize_pending_mounts(raw) -> list:
+    """등록 시 자동 적용할 마운트 선언 정규화 — `[{fstype, source, target, options}]`.
+
+    **빈 배열은 유효한 값**이다 — "이 서버는 마운트하지 않음"(운영자 명시). 레코드에 키가
+    아예 없는 것(미지정 → 소속 그룹 선언 상속)과 구분된다.
+
+    "시스템 추가" 에서 받은 의도를 agent 레코드에 남긴다. enroll 이 성공하면 그 즉시
+    `apply_mounts` job 으로 집행한다(agent_api._enroll) — 운영자가 마운트를 따로 누르는 것을
+    잊어 **모듈은 다 들어갔는데 마운트만 없는 노드**가 되는 것을 막는다(실측: 그 노드는 공유
+    store 를 못 써 절체 대상에서 빠지고, 계획 절체가 원본을 내려놓은 뒤에야 그 사실이 드러났다).
+
+    레코드에 남기는 이유는 install-command 재발급·재설치에도 의도가 따라와야 하기 때문이다.
+    집행은 서버별 [마운트 관리]와 **같은 경로**(`job_apply_mounts` → `cims-priv mount-add`)라
+    fstab 에 `# cims-managed` 로 남고, 그래서 콘솔 마운트 화면에 그대로 표시된다
+    (`collect_mounts` 가 그 태그만 읽는다). 직접 `mount` 를 쓰면 표시도 영속도 안 된다.
+    """
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for m in raw:
+        if not isinstance(m, dict):
+            continue
+        tgt = str(m.get('target') or '').strip().rstrip('/')
+        src = str(m.get('source') or '').strip()
+        fst = str(m.get('fstype') or '').strip()
+        opt = str(m.get('options') or '').strip() or 'defaults'
+        # cims-priv 가 거부할 값을 레코드에 굳히지 않는다 — 저장 시점에 걸러야 job 이
+        # 조용히 실패하지 않는다.
+        if not (tgt.startswith('/') and '..' not in tgt) or not src or not fst:
+            continue
+        if fst not in ('nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'):
+            continue
+        out.append({'fstype': fst, 'source': src, 'target': tgt, 'options': opt})
+    return out
+
+
 async def _create_agent(handler_args: HandlerArgs, config):
     """Agent 레코드 생성 + enrollment_token 발급 → install-agent.sh 에 전달용."""
     body = _parse_body(handler_args)
@@ -1108,6 +1147,8 @@ async def _create_agent(handler_args: HandlerArgs, config):
     if await asyncio.to_thread(_agent_load, config, None, name):
         return HandlerResult(status=409, body={"error": "conflict", "detail": f"agent name '{name}' already exists"},
                              media_type="application/json")
+    _pending_mounts = (_normalize_pending_mounts(body.get('pending_mounts'))
+                       if 'pending_mounts' in body else None)
     enroll_token = secrets.token_hex(24)
     ttl_sec = _enrollment_token_ttl_sec(config)
     now_dt = datetime.now()
@@ -1126,6 +1167,11 @@ async def _create_agent(handler_args: HandlerArgs, config):
             'status': 'pending',
             'note': body.get('note'),
         }
+        # 키가 오면 **빈 배열도 저장**한다. `[]` = "마운트하지 않음"(운영자 명시)이고
+        # 키 없음 = "미지정"(그룹 선언 상속)이라 뜻이 다르다 — 체크를 끈 것이 상속으로
+        # 뒤집히면 안 된다.
+        if _pending_mounts is not None:
+            row['pending_mounts'] = _pending_mounts
         return _agent_save(config, row)
 
     row = await asyncio.to_thread(_do_create)
@@ -1201,6 +1247,9 @@ async def _update_agent(handler_args: HandlerArgs, aid: int, config):
     # HaServicesPage 운영자가 설정한 iface→slot 매핑 (서비스 IP rows)
     if "service_ip_rows" in body:
         patches['service_ip_rows'] = body.get('service_ip_rows')
+    # 등록 시 자동 적용할 마운트 선언 — install-command 재발급 전에 고칠 수 있어야 한다.
+    if "pending_mounts" in body:
+        patches['pending_mounts'] = _normalize_pending_mounts(body.get('pending_mounts'))
     if not patches:
         return HandlerResult(status=400, body={"error": "no_updatable_fields"}, media_type="application/json")
     # 이름은 **표시 라벨**이다 — 시스템은 agent_id 로만 동작하므로(identifier_model.md)

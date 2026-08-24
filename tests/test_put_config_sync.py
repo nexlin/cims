@@ -1213,5 +1213,357 @@ class TestBootstrapConfigShape(_FsCase):
                          "주입 키가 부트스트랩 overlay 에 없다 — install.sh 의 ov 에 추가하라")
 
 
+class TestEnrollAutoMount(_FsCase):
+    """등록(enroll) 직후 마운트 자동 적용 — "시스템 추가" 의 선언을 그 자리에서 집행.
+
+    마운트를 별도 작업으로 두면 운영자가 잊고, 그 노드는 공유 store 를 못 써 **승격
+    부적격**이 된다(실측: 계획 절체가 원본을 내려놓은 뒤에야 드러나 관리평면 약 1분 단절).
+    집행 경로는 서버별 [마운트 관리]와 동일(`apply_mounts` → `cims-priv mount-add` →
+    fstab `# cims-managed`) — 그래서 콘솔 마운트 화면에 자동으로 표시된다.
+    """
+
+    def _create_agent(self, name, pending_mounts=None):
+        from handlers.agents import _create_agent
+        from httpsrv.handler import HandlerArgs
+        body = {"name": name}
+        if pending_mounts is not None:
+            body["pending_mounts"] = pending_mounts
+        ha = HandlerArgs(method="POST", full_path="/api/v1/agents",
+                         client_ip="10.0.0.9", client_port=0, body=body)
+        return asyncio.run(_create_agent(ha, self.config))
+
+    def _enroll(self, token):
+        from handlers.agent_api import _enroll
+        from httpsrv.handler import HandlerArgs
+        ha = HandlerArgs(method="POST", full_path="/api/agent/enroll",
+                         client_ip="10.0.0.9", client_port=0,
+                         body={"enrollment_token": token, "hostname": "n1"})
+        return asyncio.run(_enroll(ha, self.config))
+
+    def _jobs(self, aid):
+        from services import file_store
+        return [j for j in file_store.load_all(file_store.domain_dir(self.config, "jobs"))
+                if j.get("agent_id") == aid]
+
+    MNT = [{"fstype": "nfs4", "source": "nas.example:/export/cims",
+            "target": "/mnt/cims", "options": "defaults"}]
+
+    def test_enroll_queues_apply_mounts(self):
+        r = self._create_agent("n1", self.MNT)
+        self.assertEqual(r.status, 201)
+        aid, tok = r.body["id"], r.body["enrollment_token"]
+        self.assertEqual(r.body["pending_mounts"], self.MNT)
+        self.assertEqual(self._jobs(aid), [])          # 등록 전에는 job 없음
+        er = self._enroll(tok)
+        self.assertEqual(er.status, 200)
+        jobs = [j for j in self._jobs(aid) if j.get("job_type") == "apply_mounts"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["params"]["mounts"],
+                         [{"op": "add", "fstype": "nfs4",
+                           "source": "nas.example:/export/cims",
+                           "target": "/mnt/cims", "options": "defaults"}])
+
+    def test_no_declaration_no_job(self):
+        """선언이 없으면 아무 것도 하지 않는다 — 기존 동작 불변."""
+        r = self._create_agent("n2")
+        er = self._enroll(r.body["enrollment_token"])
+        self.assertEqual(er.status, 200)
+        self.assertEqual([j for j in self._jobs(r.body["id"])
+                          if j.get("job_type") == "apply_mounts"], [])
+
+    def test_declaration_survives_reenroll(self):
+        """재설치(재 enroll)에도 선언이 남아 다시 적용된다 — mount-add 는 멱등."""
+        from handlers.agents import _agent_update
+        r = self._create_agent("n3", self.MNT)
+        aid = r.body["id"]
+        self._enroll(r.body["enrollment_token"])
+        _agent_update(self.config, aid, {"enrollment_token": "tok-again"})
+        self._enroll("tok-again")
+        self.assertEqual(len([j for j in self._jobs(aid)
+                              if j.get("job_type") == "apply_mounts"]), 2)
+
+    def test_group_declaration_used_when_agent_has_none(self):
+        """[+ 멤버 추가] 경로 — agent 에 선언이 없으면 **소속 그룹 선언**을 쓴다.
+
+        AA 는 그 경로가 유일하고(모달은 서버를 안 만든다), AS 도 3번째 멤버부터는 그 경로다.
+        멤버마다 마운트를 다시 입력하게 하면 결국 잊는다(실측: Media(AA) 두 노드가 마운트
+        없이 재설치돼 서비스 로그를 못 썼다).
+        """
+        from services import file_store
+        r = self._create_agent("m1")                     # 선언 없이 생성
+        aid = r.body["id"]
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 7, {
+            "id": 7, "name": "Media", "mode": "all_active",
+            "members": [{"agent_id": aid, "role": "backup", "priority": 90}],
+            "mounts": [{"target": "/mnt/cims", "source": "nas.example:/export/cims",
+                        "fstype": "nfs", "options": "defaults"}]})
+        er = self._enroll(r.body["enrollment_token"])
+        self.assertEqual(er.status, 200)
+        jobs = [j for j in self._jobs(aid) if j.get("job_type") == "apply_mounts"]
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["params"]["mounts"][0]["target"], "/mnt/cims")
+        self.assertEqual(jobs[0]["params"]["mounts"][0]["op"], "add")
+
+    def test_agent_declaration_wins_over_group(self):
+        """agent 선언이 있으면 그것을 쓴다 — standalone·예외 구성용."""
+        from services import file_store
+        r = self._create_agent("m2", self.MNT)
+        aid = r.body["id"]
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 8, {
+            "id": 8, "name": "G", "mode": "all_active",
+            "members": [{"agent_id": aid}],
+            "mounts": [{"target": "/mnt/other", "source": "x:/y", "fstype": "nfs"}]})
+        self._enroll(r.body["enrollment_token"])
+        jobs = [j for j in self._jobs(aid) if j.get("job_type") == "apply_mounts"]
+        self.assertEqual(jobs[0]["params"]["mounts"][0]["target"], "/mnt/cims")
+
+    def test_explicit_empty_blocks_group_inheritance(self):
+        """`pending_mounts: []` = "마운트하지 않음"(명시) — 그룹 선언으로 뒤집히지 않는다.
+
+        [+ 멤버 추가]에서 체크를 끈 경우다. 미지정(키 없음)과 뜻이 달라야 한다 — 끈 것이
+        조용히 상속되면 운영자 의도와 반대로 마운트된다.
+        """
+        from services import file_store
+        r = self._create_agent("m4", [])                 # 명시적 없음
+        aid = r.body["id"]
+        self.assertEqual(r.body["pending_mounts"], [])   # 키가 저장돼야 한다
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 10, {
+            "id": 10, "name": "G3", "mode": "all_active",
+            "members": [{"agent_id": aid}],
+            "mounts": [{"target": "/mnt/cims", "source": "nas.example:/export/cims",
+                        "fstype": "nfs"}]})
+        self._enroll(r.body["enrollment_token"])
+        self.assertEqual([j for j in self._jobs(aid)
+                          if j.get("job_type") == "apply_mounts"], [])
+
+    def test_group_without_declaration_no_job(self):
+        """그룹에도 선언이 없으면 무동작 — 조용히 엉뚱한 값을 붙이지 않는다."""
+        from services import file_store
+        r = self._create_agent("m3")
+        aid = r.body["id"]
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 9, {
+            "id": 9, "name": "G2", "mode": "all_active", "members": [{"agent_id": aid}]})
+        self._enroll(r.body["enrollment_token"])
+        self.assertEqual([j for j in self._jobs(aid)
+                          if j.get("job_type") == "apply_mounts"], [])
+
+    def test_invalid_declaration_dropped_at_save(self):
+        """cims-priv 가 거부할 값은 레코드에 굳히지 않는다 — job 이 조용히 실패하지 않게."""
+        bad = [
+            {"fstype": "nfs4", "source": "s:/x", "target": "relative"},      # 절대경로 아님
+            {"fstype": "nfs4", "source": "s:/x", "target": "/a/../b"},       # .. 포함
+            {"fstype": "nfs4", "source": "",     "target": "/mnt/a"},        # source 없음
+            {"fstype": "zzz",  "source": "s:/x", "target": "/mnt/b"},        # 미지원 fstype
+            {"fstype": "nfs",  "source": "s:/x", "target": "/mnt/ok"},       # 유효
+        ]
+        r = self._create_agent("n4", bad)
+        self.assertEqual(r.body["pending_mounts"],
+                         [{"fstype": "nfs", "source": "s:/x",
+                           "target": "/mnt/ok", "options": "defaults"}])
+
+
+class TestSequencedArming(_R4Case):
+    """순차 무장 — 선행 멤버가 VIP 를 잡은 것을 확인한 뒤 나머지를 무장.
+
+    개시 국면에 양쪽 keepalived 를 동시에 켜면 선거가 priority 가 아니라 "누가 먼저
+    track_script 를 통과하나" 로 결정된다(`nopreempt` 가 VRRP 의 우선순위 규칙을 끈다).
+    실측: 0.18초 차이로 동시 무장 → priority 90 노드가 Active.
+    원인은 발동 조건이 서비스 키를 **그룹 이름**으로 찾은 것 — 실제 키는 `g<id>` 라
+    항상 None → 블록 통째로 스킵. 이 테스트가 그 회귀를 막는다.
+    """
+
+    def _armed_group(self, gid=1, member_agent_ids=(10, 11)):
+        """무장(service_intent running) + VIP binding 있는 AS 그룹 + 멤버별 csp 배포."""
+        from services import file_store
+        self._seed_pkg(1, "csp")
+        for i, aid in enumerate(member_agent_ids):
+            self._seed_agent_hb(aid, f"n{aid}", [f"10.0.0.{aid}"])
+            self._seed_deployment(100 + i, aid, 1, config={})
+            d = file_store.domain_dir(self.config, "deployments")
+            row = file_store.load(d, 100 + i)
+            row.update({"process_name": "csp", "status": "running"})
+            file_store.save(d, 100 + i, row)
+        g = self._seed_as_group(gid=gid, member_agent_ids=member_agent_ids)
+        # 렌더가 요구하는 필드 (keepalived vrrp_instance)
+        g.update({"vrid": 51, "vip_mask": 24, "auth_pass": "pw",
+                  "service_intent": {"csp": "running"}})
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), gid, g)
+        return g
+
+    def _jobs_of(self, aid, jt="update_ha"):
+        from services import file_store
+        return [j for j in file_store.load_all(file_store.domain_dir(self.config, "jobs"))
+                if j.get("agent_id") == aid and j.get("job_type") == jt]
+
+    def _group(self, gid=1):
+        from services import file_store
+        return file_store.load(file_store.domain_dir(self.config, "ha_groups"), gid)
+
+    def _enqueue(self, gid=1, prefer=None):
+        from handlers.ha_groups import _enqueue_update_ha_for_members
+        return _enqueue_update_ha_for_members(gid, self.config, prefer)
+
+    # ── 보류가 실제로 걸린다 (옛 버그: 서비스 키 오조회로 항상 스킵) ──────────
+    def test_only_leader_armed_and_peer_held(self):
+        self._armed_group()
+        n = self._enqueue(prefer={10})
+        self.assertEqual(n, 1, "선행 1대만 무장돼야 한다")
+        self.assertEqual(len(self._jobs_of(10)), 1)
+        self.assertEqual(self._jobs_of(11), [], "나머지는 job 자체가 없어야 한다")
+        pend = self._group().get("pending_arm")
+        self.assertEqual(pend["leaders"], [10])
+        self.assertEqual(pend["peers"], [11])
+
+    def test_master_is_leader_when_not_specified(self):
+        """일괄 시작 — prefer 미지정이면 priority 최대(지정 마스터)가 선행."""
+        self._armed_group()                       # priority 100(=10) / 99(=11)
+        self._enqueue()
+        self.assertEqual(self._group()["pending_arm"]["leaders"], [10])
+
+    # ── 확인되면 해제 ────────────────────────────────────────────────────────
+    def test_peer_armed_after_leader_holds_vip(self):
+        from handlers.ha_groups import sweep_pending_arm
+        self._armed_group()
+        self._enqueue(prefer={10})
+        # 아직 아무도 VIP 없음 → 보류 유지
+        self.assertEqual(sweep_pending_arm(self.config), 0)
+        self.assertIsNotNone(self._group().get("pending_arm"))
+        self.assertEqual(self._jobs_of(11), [])
+        # 선행이 VIP 를 잡았다고 관측 → 해제
+        self._seed_agent_hb(10, "n10", ["10.0.0.10", self.VIP])
+        self.assertEqual(sweep_pending_arm(self.config), 1)
+        self.assertIsNone(self._group().get("pending_arm"))
+        self.assertEqual(len(self._jobs_of(11)), 1, "나머지가 무장돼야 한다")
+
+    def test_timeout_arms_peer_anyway(self):
+        """상한 초과 — 서비스가 아예 안 뜨는 것보다 낫다. 대신 경고를 남긴다."""
+        from services import file_store
+        from handlers.ha_groups import sweep_pending_arm
+        self._armed_group()
+        self._enqueue(prefer={10})
+        g = self._group()
+        g["pending_arm"]["deadline"] = "2020-01-01T00:00:00"
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        self.assertEqual(sweep_pending_arm(self.config), 1)
+        self.assertIsNone(self._group().get("pending_arm"))
+        self.assertEqual(len(self._jobs_of(11)), 1)
+
+    def test_other_member_holding_vip_releases_hold(self):
+        """선행이 아닌 노드가 이미 VIP 를 잡았다 = 보류가 무의미 → 즉시 해제."""
+        from handlers.ha_groups import sweep_pending_arm
+        self._armed_group()
+        self._enqueue(prefer={10})
+        self._seed_agent_hb(11, "n11", ["10.0.0.11", self.VIP])
+        self.assertEqual(sweep_pending_arm(self.config), 1)
+        self.assertIsNone(self._group().get("pending_arm"))
+
+    # ── 보류하지 않는 경우 ───────────────────────────────────────────────────
+    def test_no_hold_when_someone_holds_vip(self):
+        """운영 중 재렌더([적용]·[재적용]) — 붙어 있는 VIP 를 흔들지 않는다."""
+        self._armed_group()
+        self._seed_agent_hb(10, "n10", ["10.0.0.10", self.VIP])
+        n = self._enqueue()
+        self.assertEqual(n, 2, "전원 즉시 무장")
+        self.assertIsNone(self._group().get("pending_arm"))
+
+    def test_no_hold_when_unarmed(self):
+        """미개시 그룹 — keepalived 를 켜지 않으므로 순서가 의미 없다."""
+        from services import file_store
+        self._armed_group()
+        g = self._group()
+        g["service_intent"] = {}                  # 무장 해제
+        file_store.save(file_store.domain_dir(self.config, "ha_groups"), 1, g)
+        n = self._enqueue()
+        self.assertEqual(n, 2)
+        self.assertIsNone(self._group().get("pending_arm"))
+
+    def test_stale_hold_is_cleared_on_non_staggered_render(self):
+        """보류를 남긴 채 조건이 바뀌면 걷는다 — 안 걷으면 그 멤버가 영구 미무장."""
+        self._armed_group()
+        self._enqueue(prefer={10})
+        self.assertIsNotNone(self._group().get("pending_arm"))
+        self._seed_agent_hb(10, "n10", ["10.0.0.10", self.VIP])   # 보유자 생김
+        self._enqueue()
+        self.assertIsNone(self._group().get("pending_arm"))
+
+
+class TestOamUrlMisdirect(_R4Case):
+    """OAM 접속 주소 어긋남 판정 — **VIP 가 실제로 붙은 뒤에만**.
+
+    개시 전에는 어느 노드도 VIP 를 갖지 않아 전 agent 가 노드 IP 로 보고하는 것이 정상이다.
+    그때도 어긋남으로 잡으면 설치 직후부터 상시 경고가 되어 신호가 무의미해진다(옛 콘솔
+    배너가 그 상태였다). VIP 보유가 관측된 뒤에야 "이대로 절체하면 단절" 이 참이 된다.
+    """
+
+    def _oam_group(self, vip_holder=None):
+        """oam 을 호스팅하는 AS 그룹 + agent 2대. vip_holder 가 있으면 그 노드가 VIP 보유."""
+        from services import file_store
+        self._seed_pkg(1, "oam")
+        for i, aid in enumerate((10, 11)):
+            self._seed_agent_hb(aid, f"n{aid}",
+                                [f"10.0.0.{aid}"] + ([self.VIP] if aid == vip_holder else []))
+            d = file_store.domain_dir(self.config, "deployments")
+            self._seed_deployment(200 + i, aid, 1, config={})
+            row = file_store.load(d, 200 + i)
+            row.update({"process_name": "oam", "status": "running"})
+            file_store.save(d, 200 + i, row)
+        return self._seed_as_group(member_agent_ids=(10, 11))
+
+    def _set_oam_url(self, aid, url):
+        from services import file_store
+        d = file_store.domain_dir(self.config, "agents")
+        row = file_store.load(d, aid); row["oam_url"] = url
+        file_store.save(d, aid, row)
+
+    def _misdirected(self, g):
+        from handlers.ha_groups import _agents_not_on_vip
+        return sorted(a["agent_id"] for a in _agents_not_on_vip(self.config, g))
+
+    def test_no_verdict_before_vip_is_held(self):
+        """개시 전 — 아무도 VIP 를 갖지 않으면 판정하지 않는다(오탐 차단)."""
+        g = self._oam_group(vip_holder=None)
+        self._set_oam_url(10, "https://10.0.0.10:4419")   # 노드 IP = 개시 전 정상
+        self._set_oam_url(11, "https://10.0.0.10:4419")
+        self.assertEqual(self._misdirected(g), [])
+
+    def test_detected_once_vip_is_held(self):
+        """VIP 가 붙은 뒤 — 노드 IP 로 보고하는 agent 가 어긋남으로 잡힌다."""
+        g = self._oam_group(vip_holder=10)
+        self._set_oam_url(10, "https://10.0.0.10:4419")   # 노드 IP → 어긋남
+        self._set_oam_url(11, f"https://{self.VIP}:4419") # VIP → 정상
+        self.assertEqual(self._misdirected(g), [10])
+
+    def test_all_on_vip_is_clean(self):
+        g = self._oam_group(vip_holder=10)
+        for aid in (10, 11):
+            self._set_oam_url(aid, f"https://{self.VIP}:4419")
+        self.assertEqual(self._misdirected(g), [])
+
+    def test_loopback_counts_as_misdirect(self):
+        """loopback 은 그 노드 자신의 OAM — Active 가 바뀌면 역시 끊긴다."""
+        g = self._oam_group(vip_holder=10)
+        self._set_oam_url(10, "https://127.0.0.1:4419")
+        self._set_oam_url(11, f"https://{self.VIP}:4419")
+        self.assertEqual(self._misdirected(g), [10])
+
+    def test_no_report_is_not_judged(self):
+        """구 버전 agent(보고 없음)는 판정 유보 — 오알람 없음."""
+        g = self._oam_group(vip_holder=10)
+        self._set_oam_url(11, f"https://{self.VIP}:4419")
+        self.assertEqual(self._misdirected(g), [])        # 10 은 oam_url 없음
+
+    def test_non_oam_group_is_skipped(self):
+        """oam 이 없는 그룹(Signaling·Media)의 VIP 와 비교하면 전원 어긋남으로 잡혀
+        그 그룹의 절체까지 막힌다 — 판정 대상이 아니다."""
+        from services import file_store
+        g = self._oam_group(vip_holder=10)
+        d = file_store.domain_dir(self.config, "deployments")
+        for did in (200, 201):                            # oam → csp 로 바꿔 호스팅 해제
+            row = file_store.load(d, did); row["process_name"] = "csp"
+            file_store.save(d, did, row)
+        self._set_oam_url(10, "https://10.0.0.10:4419")
+        self.assertEqual(self._misdirected(g), [])
+
+
 if __name__ == "__main__":
     unittest.main()

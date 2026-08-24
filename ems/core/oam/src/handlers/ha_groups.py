@@ -355,6 +355,11 @@ def _agents_not_on_vip(config: dict, group: dict, all_agents: list | None = None
     Signaling·Media 처럼 oam 이 없는 그룹의 VIP 와 비교하면 전원이 "어긋남" 으로 잡혀
     그 그룹의 절체까지 막힌다(실측). 그런 그룹은 절체해도 OAM 주소와 무관하다.
 
+    **VIP 가 실제로 붙어 있을 때만 판정한다.** 개시 전(무장 전)에는 어느 노드도 VIP 를 갖지
+    않으므로 전 agent 가 노드 IP 로 보고하는 것이 정상이다 — 그때 어긋남으로 잡으면 설치
+    직후부터 상시 경고가 떠서 신호가 무의미해진다(콘솔 배너가 그 상태였다). VIP 를 가진
+    노드가 관측된 뒤에야 "이대로 절체하면 단절" 이 참이 된다.
+
     그룹에 VIP 가 없으면(단일 노드) 대상이 아니다. 보고가 없는 agent(구 버전)는 판정 유보.
     반환: [{agent_id, name, oam_url}] — 비어 있으면 전원 정상.
     """
@@ -364,6 +369,10 @@ def _agents_not_on_vip(config: dict, group: dict, all_agents: list | None = None
     if not vips:
         return []
     if not _group_hosts_oam(config, group, all_deps):
+        return []
+    # VIP 를 실제로 보유한 멤버가 관측되지 않으면 판정하지 않는다(위 docstring).
+    obs = ha_lookup.vip_observation(config, group) or {}
+    if not any(v is True for v in (obs.get('observed') or {}).values()):
         return []
     out = []
     # `all_agents` 를 넘기면 재조회하지 않는다 — 여러 그룹을 직렬화할 때 그룹마다 전 agent 를
@@ -1027,7 +1036,11 @@ def _agents_with_started_modules(members: list, config: dict) -> set:
 # 개시 국면에서 나머지 멤버 update_ha 를 미루는 시간 — 선행 멤버가 arm→VIP 선점→MASTER
 # 승격을 마치기까지의 worst case(job 회수 + apply + 승격 ~수초)를 덮는 값. 이 창 동안
 # 피어는 미무장이라 초기 개시 중 단일 장애점이지만, 개시 직후 1회뿐이라 수용한다.
-_STAGGER_DELAY_SEC = 75
+# 순차 무장 — 선행 노드가 VIP 를 잡은 것을 **확인한 뒤** 나머지를 무장한다.
+# 고정 지연이 아니다: 지연으로 두면 (a) 선행이 그 시간을 넘기면 아무도 VIP 가 없는 채로
+# 나머지가 무장돼 경합이 그대로 재현되고, (b) 선행이 7초에 끝나도 나머지가 남은 시간을
+# 놀아 이중화 공백이 길어진다. 아래는 **포기 시점**이지 대기 시간이 아니다.
+_ARM_CONFIRM_TIMEOUT_SEC = 90
 
 
 def _enqueue_update_ha_for_members(group_id: int, config: dict,
@@ -1078,16 +1091,25 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
         renders.append((m['agent_id'],
                         _render_ha_for_agent(group, members, m['agent_id'], agent, peer, vip_bindings, config)))
 
-    # 개시 국면 선착 방지 — AS 그룹이 무장 렌더되는데 아직 아무도 VIP 를 보유하지
-    # 않았다면(최초 개시·전면 재기동), **기준 멤버에게 먼저** update_ha 를 내리고 나머지는
-    # not_before 로 지연시킨다. 동시에 뿌리면 양쪽 keepalived 가 함께 콜드스타트해 우선순위
-    # 높은 노드(놀던 standby 여도)가 선착하는데, 기준 멤버 먼저 arm → VIP 선점 → nopreempt
-    # 로 유지되어 "운영자가 start 누른 노드가 Active" 가 보장된다. 기준 멤버 =
-    # prefer_first(호출부 명시 — 서버별/개별 start 시 그 노드) > record running 멤버 >
-    # 지정 마스터. VIP 보유자가 이미 있으면(운영 중 재렌더) 지연 없음(apply 멱등).
+    # ── 순차 무장 (개시 국면 선착 방지) ──────────────────────────────────────
+    # AS 그룹이 무장 렌더되는데 아직 아무도 VIP 를 보유하지 않았다면(최초 개시·전면 재기동)
+    # **선행 멤버만** 무장하고 나머지는 보류한다. 동시에 뿌리면 양쪽 keepalived 가 함께
+    # 콜드스타트하고, 선거는 priority 가 아니라 **누가 먼저 track_script 를 통과하나**로
+    # 결정된다(`nopreempt` 가 VRRP 의 '높은 우선순위가 이긴다' 규칙을 끄기 때문). 선행이
+    # 검진에서 한 번만 밀리면 그대로 뒤집힌다 — 실측: 0.18초 차이로 동시 무장, priority 90
+    # 노드가 Active.
+    #   선행 = prefer_first(호출부 명시 — 개별 start 시 그 노드) > record running 멤버 >
+    #          지정 마스터(priority 최대)
+    #   보류 해제 = **선행이 VIP 를 실제로 잡은 것을 확인**한 뒤 (sweep_ha_operations →
+    #          _sweep_pending_arm). 고정 지연이 아니다(위 상수 주석).
+    #   VIP 보유자가 이미 있으면(운영 중 재렌더·적용) 보류 없음 — apply 는 멱등이고
+    #   붙어 있는 VIP 를 흔들지 않는다.
     stagger_first: set = set()
     if group.get('mode') == 'active_standby' and len(renders) >= 2:
-        armed = any(((hj.get('services') or {}).get(group.get('name')) or {}).get('enabled')
+        # 서비스 키는 **id 파생**(`g<id>`)이다. 그룹 이름으로 찾으면 항상 None 이라
+        # 이 블록이 통째로 죽는다(실측: 그래서 순차 무장이 한 번도 발동하지 않았다).
+        _svc = ha_service_key(group)
+        armed = any(((hj.get('services') or {}).get(_svc) or {}).get('enabled')
                     for _, hj in renders)
         if armed:
             from services import ha_lookup
@@ -1099,20 +1121,36 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
                 else:
                     started = _agents_with_started_modules(members, config)
                     firsts = [aid for aid, _ in renders if aid in started]
-                if not firsts:
+                # 선행이 **정확히 1대**가 아니면 판별력이 없다 → 지정 마스터로 좁힌다.
+                # (0대: 전면 재기동 직후. 2대 이상: 이전 실행의 running 기록이 양쪽에 남은
+                #  흔한 상태 — 그때 좁히지 않으면 `len(firsts) < len(renders)` 가 거짓이 되어
+                #  순차 무장이 조용히 스킵되고 경합으로 되돌아간다. `[적용]`·`[재적용]`
+                #  경로가 정확히 그 상태로 들어온다.)
+                if len(firsts) != 1:
                     ma = _compute_master_aid(members)
                     firsts = [ma] if ma is not None else []
                 if firsts and len(firsts) < len(renders):
                     stagger_first = set(firsts)
 
-    not_before = None
     if stagger_first:
         from datetime import datetime, timedelta
-        not_before = (datetime.now() + timedelta(seconds=_STAGGER_DELAY_SEC)) \
-            .isoformat(timespec='seconds')
+        _pending = sorted(aid for aid, _ in renders if aid not in stagger_first)
+        group['pending_arm'] = {
+            'leaders': sorted(stagger_first),
+            'peers': _pending,
+            'since': datetime.now().isoformat(timespec='seconds'),
+            'deadline': (datetime.now()
+                         + timedelta(seconds=_ARM_CONFIRM_TIMEOUT_SEC)).isoformat(timespec='seconds'),
+        }
+        file_store.save(_ha_dir(config), group_id, group)
         logger.log_info(
-            f"[ha-group] group#{group_id} 개시 국면 — 선행 멤버 {sorted(stagger_first)} 먼저, "
-            f"나머지 update_ha {_STAGGER_DELAY_SEC}s 지연 (선착 노드 Active 보장)")
+            f"[ha-arm] group#{group_id} 순차 무장 — 선행 {sorted(stagger_first)} 먼저 무장, "
+            f"나머지 {_pending} 보류(선행 VIP 확인 후 해제, 상한 {_ARM_CONFIRM_TIMEOUT_SEC}s)")
+    elif group.get('pending_arm'):
+        # 이번 렌더가 순차 대상이 아니다(누군가 VIP 보유 중·비무장·단일 멤버) →
+        # 남아 있던 보류를 걷는다. 보류를 남기면 그 멤버가 영구 미무장으로 방치된다.
+        group.pop('pending_arm', None)
+        file_store.save(_ha_dir(config), group_id, group)
 
     # 옛 키(그룹 이름) → 신 키(id 파생). 이행이 끝난 노드에서는 옛 경로가 없어 no-op.
     _legacy = _legacy_ha_service_key(group)
@@ -1133,9 +1171,11 @@ def _enqueue_update_ha_for_members(group_id: int, config: dict,
             # 보존된다. 대상이 이미 없으면 no-op 이라 매 렌더에 실어도 무해하다.
             "key_migration": key_migration,
         }
-        delayed = bool(stagger_first) and aid not in stagger_first
-        _job_create(config, aid, 'update_ha', params,
-                    not_before=not_before if delayed else None)
+        if stagger_first and aid not in stagger_first:
+            # 보류 — job 을 만들지 않는다. `update_ha` 가 keepalived 를 켜는 주체이므로
+            # job 을 안 보내는 것 = "이 노드는 아직 무장하지 않는다". 해제는 sweep 이 한다.
+            continue
+        _job_create(config, aid, 'update_ha', params)
         enqueued += 1
     return enqueued
 
@@ -1762,6 +1802,17 @@ async def _create_group(body, config):
         'vip_bindings': vip_bindings or [],
         'failover_options': failover_options,
         # 신규 그룹은 미개시(빈 의도) — 서비스 시작 시 무장. 모듈 명세는 default.
+        # 그룹 공통 마운트 선언 — 집행은 [마운트 (그룹 공통)] 또는 멤버 enroll 시
+        # (agent.pending_mounts). 선언이 있어야 나중에 편입된 멤버의 미적용을 짚을 수 있다.
+        'mounts': [
+            {'target': str(m.get('target') or '').strip().rstrip('/'),
+             'source': str(m.get('source') or '').strip(),
+             'fstype': str(m.get('fstype') or 'nfs').strip(),
+             'options': str(m.get('options') or 'defaults').strip()}
+            for m in (body.get('mounts') or [])
+            if isinstance(m, dict) and str(m.get('target') or '').strip().startswith('/')
+            and str(m.get('source') or '').strip()
+        ] if isinstance(body.get('mounts'), list) else [],
         'service_intent': _normalize_service_intent(body.get('service_intent')),
         'module_specs': {
             str(k).strip().lower(): _normalize_module_spec(v)
@@ -2311,6 +2362,94 @@ def _advance_ha_operation(config, op: dict) -> bool:
 
 # 종결 operation 을 이 시간(초) 뒤 정리 — 콘솔에서 결과 확인할 여유.
 _OP_RETENTION_SEC = 600
+
+
+def _arm_pending_peers(config, group: dict, reason: str) -> int:
+    """보류 중인 멤버를 실제로 무장 — 보류를 걷고 그 멤버들에게만 `update_ha` 를 큐잉.
+
+    `_enqueue_update_ha_for_members` 를 다시 부르지 않는다 — 그 함수는 "아무도 VIP 를
+    보유하지 않았는가" 를 다시 보고 또 보류를 세울 수 있어(선행이 아직 관측 전이면) 순환이
+    된다. 여기서는 렌더만 재사용해 대상 멤버에게 직접 내린다.
+    """
+    from handlers.agents import _agent_load, _job_create
+    gid = group.get('id')
+    pend = group.get('pending_arm') or {}
+    peers = [int(a) for a in (pend.get('peers') or [])]
+    group.pop('pending_arm', None)
+    file_store.save(_ha_dir(config), gid, group)
+    if not peers:
+        return 0
+    members = list(group.get('members') or [])
+    vip_bindings = group.get('vip_bindings') or []
+    agents = {}
+    for m in members:
+        a = _agent_load(config, aid=m.get('agent_id'))
+        if a:
+            agents[m['agent_id']] = {'id': a.get('id'), 'name': a.get('name'),
+                                     'ip_address': a.get('ip_address'),
+                                     'interfaces': a.get('interfaces') or []}
+    _legacy = _legacy_ha_service_key(group)
+    _cur = ha_service_key(group)
+    key_migration = {_legacy: _cur} if _legacy and _legacy != _cur else {}
+    n = 0
+    for aid in peers:
+        agent = agents.get(aid)
+        if not agent:
+            continue
+        peer = next((agents.get(o['agent_id']) for o in members
+                     if o.get('agent_id') != aid and agents.get(o['agent_id'])), None)
+        ha_json = _render_ha_for_agent(group, members, aid, agent, peer, vip_bindings, config)
+        _job_create(config, aid, 'update_ha', {
+            'install_path': f"/opt/cims/{agent.get('name','agent')}",
+            'ha_json': ha_json,
+            'key_migration': key_migration,
+        })
+        n += 1
+    logger.log_info(f"[ha-arm] group#{gid} 보류 해제 — {peers} 무장 큐잉 ({reason})")
+    return n
+
+
+def sweep_pending_arm(config) -> int:
+    """순차 무장 보류 해제 — 선행 멤버가 **VIP 를 실제로 잡은 것을 확인하면** 나머지를 무장.
+
+    개시 국면에 양쪽 keepalived 를 동시에 켜면 선거가 priority 가 아니라 "누가 먼저
+    track_script 를 통과하나" 로 결정된다(`nopreempt` 가 우선순위 규칙을 끈다). 그래서
+    선행만 먼저 켜고, **사실(VIP 보유)** 을 보고 나머지를 켠다.
+
+    상한(`_ARM_CONFIRM_TIMEOUT_SEC`)을 넘기면 나머지를 무장하고 **경고를 남긴다** — 서비스가
+    아예 안 뜨는 것보다 낫지만, 조용히 넘어가면 "기준 멤버가 Active" 라는 약속이 깨진 것을
+    아무도 모른다(그게 이전 동작이었다).
+    """
+    from datetime import datetime
+    from services import ha_lookup
+    n = 0
+    for group in _ha_load_all(config):
+        pend = group.get('pending_arm')
+        if not isinstance(pend, dict) or not pend.get('peers'):
+            continue
+        leaders = {int(a) for a in (pend.get('leaders') or [])}
+        obs = ha_lookup.vip_observation(config, group) or {}
+        observed = obs.get('observed') or {}
+        if any(observed.get(aid) is True for aid in leaders):
+            n += _arm_pending_peers(config, group, '선행 멤버 VIP 보유 확인')
+            continue
+        # 선행이 아닌 노드가 VIP 를 갖고 있다 = 이미 승격이 일어났다(선행 실패·수동 개입).
+        # 보류를 유지할 이유가 없다 — 그 노드가 Active 이고 나머지가 대기여야 한다.
+        if any(v is True for aid, v in observed.items() if aid not in leaders):
+            n += _arm_pending_peers(config, group, '다른 멤버가 VIP 보유 — 보류 무의미')
+            continue
+        try:
+            over = datetime.now() > datetime.fromisoformat(pend.get('deadline'))
+        except Exception:
+            over = True
+        if over:
+            logger.log_warning(
+                f"[ha-arm] group#{group.get('id')}({group.get('name')}) 선행 멤버 "
+                f"{sorted(leaders)} 가 {_ARM_CONFIRM_TIMEOUT_SEC}s 안에 VIP 를 잡지 못했다 — "
+                f"나머지를 무장해 서비스를 개시한다. **기준 멤버가 Active 라는 보장이 깨진 "
+                f"상태**이니 그 노드의 승격 자격(verdict reason_codes)을 확인하라.")
+            n += _arm_pending_peers(config, group, f'상한 {_ARM_CONFIRM_TIMEOUT_SEC}s 초과')
+    return n
 
 
 def sweep_ha_operations(config) -> int:
