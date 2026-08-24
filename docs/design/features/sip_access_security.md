@@ -5,8 +5,10 @@ UE↔CSP 접속 구간의 보안 체계를 3GPP TS 33.203 정합 구조로 끌�
 상세 설계를 담는다. P2(Sec-Agree)·P3(AKA over TLS)·P4(IMS AKA+IPsec)는 [§8 로드맵](#8-로드맵-p2p4)
 에 자리만 둔다.
 
-> **상태**: P0·P1 구현 반영. 인증 자료 이행은 [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의
-> ②~④ 구간(과도기 fallback 동작) — `passwd` 값 소거·DROP(⑤·⑥)은 전 조합 등록 회귀 후 후속 작업.
+> **상태**: P0·P1 구현 반영. [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
+> 반영 — CSC 는 `passwd` 컬럼에 쓰지 않고 `/provisioning/me` 의 `sipPassword` 는 항상 `null` 이다.
+> 값 소거(⑤-c)는 배포 환경별 운영 절차, ⑥ 컬럼 DROP 은 `sql/migrate_subscription_drop_passwd.sql`
+> (후속 릴리스 — CSP/cspsim 이 `passwd` 를 SELECT 하지 않게 된 뒤 적용).
 
 관련 문서: [sip_tls_signaling.md](sip_tls_signaling.md) · [registration_binding_set.md](registration_binding_set.md) ·
 [ue_nat_traversal.md](ue_nat_traversal.md) · [../modules/csp.md](../modules/csp.md) ·
@@ -44,11 +46,11 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 | 구간 | 위치 | 형태 |
 |---|---|---|
 | DB SoT | `volte_subscriptions.ha1` / `ptt_subscriptions.ha1` (`sql/cims_schema.sql`, CHAR(32)) | **H(A1)** |
-| 과도기 | 같은 테이블 `passwd` — CSC 가 ha1 과 함께 쓰고, CSP 는 ha1 이 비었을 때만 읽는다 | 평문 (소거·DROP 예정) |
+| 과도기 | 같은 테이블 `passwd` — CSC 는 더 쓰지 않고(구 스키마 fallback 제외), CSP 는 ha1 이 비었을 때만 읽는다 | 평문 (값 소거 → 후속 릴리스 DROP) |
 | CSP 메모리 | `CspUser::m_strHa1` (`csp/CspUser.h`) — 전 가입자 캐시 | H(A1) |
 | 검증 지점 | `CCscfModule::CheckAuthorizationResponse` (`csp/CscfModule.cpp`) — 저장 H(A1) 로 response 합성 | H(A1) 소비 |
 | 쓰기 경로 | CSC `_add_subscription`/`_update_subscription` (`csc/src/handlers/admin.py`) — 요청 본문의 `passwd` 를 H(A1) 로 변환 | 평문은 요청 본문에만 |
-| 단말 전달 | `/provisioning/me` 응답 `services[].account.sipHa1` (`csc/src/services/mcptt.py`) | H(A1) (`sipPassword` 는 과도기 병행) |
+| 단말 전달 | `/provisioning/me` 응답 `services[].account.sipHa1` (`csc/src/services/mcptt.py`) | H(A1) (`sipPassword` 는 항상 `null`) |
 | 시험 도구 | cspsim `-db`(DB `ha1` 우선) / `-ha1 <hex>`, verify 시드 `VOIP_HA1`/`PTT_HA1` | H(A1) |
 
 Digest 경로의 부수 규칙: nonce 는 OpenSSL `RAND_bytes` 16 바이트 hex(`csp/NonceMap.cpp`), 단말이
@@ -178,7 +180,8 @@ ALTER TABLE ptt_subscriptions
   (멱등 — `ha1=''` 행만 대상). 서비스 정의(domain/auth_realm)는 DB 가 아니라 OAM 스토어에 있으므로
   `--services-json <services.json>` 또는 `--service NAME=DOMAIN[:REALM]` 로 받는다. `--dry-run` 지원.
 - `passwd` 컬럼은 이행 검증(전 조합 등록 회귀) 후 **값 소거 → 후속 마이그레이션에서 DROP**
-  한다. 과도기 동안 CSP 는 `ha1` 우선, 비어 있으면 `passwd` 로 종전 계산을 한다.
+  한다(`sql/migrate_subscription_drop_passwd.sql` — CSP/cspsim 의 `passwd` SELECT 제거 릴리스에서
+  적용). CSP 는 `ha1` 우선, 비어 있으면 `passwd` 로 종전 계산을 한다.
 - AKA 용 컬럼(`auth_scheme`, `k`, `opc`, `sqn`)은 P3 에서 추가한다 — P1 스키마에 선반영하지
   않는다(빈 자리를 늘리지 않는다).
 
@@ -242,7 +245,7 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 
 | 소비자 | 동작 |
 |---|---|
-| `/provisioning/me` | `account.sipHa1` (H(A1)) + `account.sipPassword` (과도기 — DB `passwd` 가 소거되면 항상 `null`). 단말은 `sipHa1` 우선 |
+| `/provisioning/me` | `account.sipHa1` (H(A1)). `account.sipPassword` 는 항상 `null`(평문 미배포 — 키는 단말 호환으로 유지). 단말은 `sipHa1` 우선, 없으면 로그인 비번으로 ha1 계산 |
 | Android UE | `sipHa1` 수신 시 pjsip cred 를 `PJSIP_CRED_DATA_DIGEST`(ha1) 로 설정한다(`android/core` SipController — cred realm 은 `*` 유지, pjsip 이 DIGEST cred 의 algorithm 미지정을 MD5 로 기본화). `sipHa1` 이 없으면 평문 cred(`sipPassword` → 로그인 비번) 폴백 — H(A1) 은 realm 에 결박된 값이라 challenge realm 추종이 필요한 상황은 평문 경로만 흡수한다. 수동 설정에서 도메인/IMSI/IMPI/비번을 편집하면 결박이 깨진 저장 ha1 을 함께 소거한다 |
 | cspsim | `-db` 모드는 DB `ha1` 우선(비면 `passwd`), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받는다. `-password` 는 유지(직접 계산) |
 | verify 하네스 | `subscribers.py` 가 "번호 연속 + 전원 `ha1` 보유" 창(window)을 골라 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다("같은 비밀번호 구간" 의존 소멸. `-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 없는 구 DB 는 "전원 동일 비밀번호" 창 + `-password` 로 폴백 |
@@ -302,7 +305,7 @@ A-SEC-003 으로 채번·구현되어 있다(§3.3).
 
 P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip_transport` 컬럼을 읽으므로
 `migrate_subscription_transport.sql` 이 CSP 기동의 선행 조건이다(`ha1` 은 프로브로 흡수). P1 은 배포 순서 계약(§4.7 ①~⑥)이 단계를
-강제한다. 현재 ②(코드)까지 반영되어 있고 ①·③~⑥ 은 운영 절차다.
+강제한다. 현재 ②(ha1 소비)·⑤(passwd 미기록·`sipPassword` null) 코드가 반영되어 있고, ①·③·⑤-c(값 소거)는 배포 환경별 운영 절차, ⑥ 은 `sql/migrate_subscription_drop_passwd.sql`(후속 릴리스)이다.
 
 잔여 항목:
 - V3~V6·V8 의 자동화(V1·V2·V7 은 S3 검증 항목으로 자동화 완료 — §6).

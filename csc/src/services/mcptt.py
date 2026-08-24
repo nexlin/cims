@@ -216,13 +216,14 @@ def load_shared_data(config):
             with conn:
                 with conn.cursor() as cur:
                     for table in ('volte_subscriptions', 'ptt_subscriptions'):
-                        cur.execute(f"SELECT id, passwd FROM {table}")
+                        # SIP Digest passwd 는 로그인 자격이 아니다(소거됨, sip_access_security.md §4.7 ⑤).
+                        #   IdMS 로그인 = users.login_id/passwd(LOGIN_ACCOUNTS) — 여기서는 신원 목록만 싣는다.
+                        cur.execute(f"SELECT id FROM {table}")
                         for row in cur.fetchall():
                             uid = row['id']
-                            pw  = row['passwd'] or ''
                             uri = f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}"
                             if uri not in USERS:
-                                USERS[uri] = {"password": pw, "name": uid, "msisdn": uid,
+                                USERS[uri] = {"password": None, "name": uid, "msisdn": uid,
                                               "profile_etag": "etag_" + uri}
                                 logger.log_info(f"Loaded DB User: {uri}")
 
@@ -1336,8 +1337,8 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     elif user_name in USERS:
         expected_pw = USERS[user_name].get("password")
         mcptt_id = user_name
-    if expected_pw is None:
-        logger.log_error(f"[IdMS] Auth Req Failed: login_id {user_name} not found")
+    if not expected_pw:
+        logger.log_error(f"[IdMS] Auth Req Failed: login_id {user_name} not found (or no login credential)")
         return HandlerResult(status=401,
             body={"error": "access_denied", "error_description": "사용자를 찾을 수 없습니다"},
             media_type="application/json")
@@ -1858,7 +1859,7 @@ def _country_code_of(msisdn: str) -> str:
     return d[:2] if d[:2] in _E164_CC2 else d[:3]
 
 def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: str,
-                       sip_password: str = "", sip_transport: str = "", sip_ha1: str = "") -> dict:
+                       sip_transport: str = "", sip_ha1: str = "") -> dict:
     svc = (PROVISIONING.get('Services') or {}).get(kind, {}) if isinstance(PROVISIONING, dict) else {}
     account = {
         "msisdn": sid,
@@ -1866,10 +1867,10 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         "authId": auth_id or "",        # 빈값이면 단말이 imsi@domain 합성
         # SIP Digest 자료 (sip_access_security.md §4.7). sipHa1 = H(A1)=MD5(imsi@domain:realm:pw) —
         #   단말은 이것만으로 response 를 계산한다(pjsip PJSIP_CRED_DATA_DIGEST). CIMS 로그인(IdMS)
-        #   비번과 별개. sipPassword(평문)는 과도기 — DB passwd 가 소거되면 항상 null 이 된다.
-        #   둘 다 null 이면 단말이 로그인 비번으로 ha1 을 계산한다.
+        #   비번과 별개. sipPassword 는 항상 null(§4.7 ⑤ — 평문 미배포, 키는 단말 호환으로 유지).
+        #   sipHa1 도 없으면 단말이 로그인 비번으로 ha1 을 계산한다.
         "sipHa1": sip_ha1 or None,
-        "sipPassword": sip_password or None,
+        "sipPassword": None,
     }
     if kind == "ptt":
         account["mcpttId"] = sid if sid.startswith(("tel:", "sip:")) else f"tel:{sid}"
@@ -1965,21 +1966,21 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                     # sip_transport 는 가입자 단위 override (migrate_subscription_transport.sql).
                     #   구 스키마(컬럼 부재) DB 에서도 동작하도록 실패 시 기존 질의로 폴백한다.
                     try:
-                        cur.execute(f"SELECT id, imsi, auth_id, passwd, sip_transport, ha1 FROM {t} "
+                        cur.execute(f"SELECT id, imsi, auth_id, sip_transport, ha1 FROM {t} "
                                     "WHERE user_id=%s ORDER BY id", (user_id,))
                         rows = cur.fetchall()
                     except Exception:
                         try:
-                            cur.execute(f"SELECT id, imsi, auth_id, passwd, sip_transport FROM {t} "
+                            cur.execute(f"SELECT id, imsi, auth_id, sip_transport FROM {t} "
                                         "WHERE user_id=%s ORDER BY id", (user_id,))
-                            rows = [(r[0], r[1], r[2], r[3], r[4], '') for r in cur.fetchall()]
+                            rows = [(r[0], r[1], r[2], r[3], '') for r in cur.fetchall()]
                         except Exception:
-                            cur.execute(f"SELECT id, imsi, auth_id, passwd FROM {t} WHERE user_id=%s ORDER BY id",
+                            cur.execute(f"SELECT id, imsi, auth_id FROM {t} WHERE user_id=%s ORDER BY id",
                                         (user_id,))
-                            rows = [(r[0], r[1], r[2], r[3], None, '') for r in cur.fetchall()]
-                    for sid, imsi, auth_id, passwd, transport, ha1 in rows:
+                            rows = [(r[0], r[1], r[2], None, '') for r in cur.fetchall()]
+                    for sid, imsi, auth_id, transport, ha1 in rows:
                         services.append(_provision_service(kind, sid, imsi or '', auth_id or '', host_ip,
-                                                          passwd or '', transport or '', ha1 or ''))
+                                                          transport or '', ha1 or ''))
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None

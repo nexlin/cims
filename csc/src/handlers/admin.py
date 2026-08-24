@@ -480,8 +480,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
 #   CSC 가 인증 자료의 유일한 쓰기 주체(HSS 역할). 저장 형식은 H(A1) 이고 평문 passwd 는
 #   요청 본문에만 존재한다. H(A1) 은 (imsi, 서비스 domain/realm) 에 결박되므로 그 둘이 바뀌면
 #   passwd 재입력 없이는 갱신할 수 없다(400).
-#   과도기: passwd 컬럼에도 같이 쓴다 — 단말/시험도구의 ha1 소비 배포(§4.7 ①~③) 전까지.
-#   passwd 값 소거·DROP 단계에서 이 쓰기를 제거한다.
+#   passwd 컬럼에는 쓰지 않는다(§4.7 ⑤) — ha1 미적용 구 스키마 DB 에서만 passwd 저장 fallback.
 
 _SIP_TRANSPORTS = ('UDP', 'TCP', 'TLS')
 _HAS_HA1_COL = None   # 과도기 컬럼 프로브 캐시 (프로세스 수명). None=미확인
@@ -570,9 +569,9 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             if _has_ha1_column(cur):
                 cur.execute(
-                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, passwd, ha1, sip_transport, dnd, forward_id) "
-                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (msisdn, person_id, service_ref, imsi, passwd, ha1, sip_transport, dnd, forward_id)
+                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id) "
+                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id)
                 )
             else:
                 cur.execute(
@@ -632,7 +631,8 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                     return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
                 if _has_ha1_column(cur):
                     fields.append("ha1=%s"); values.append(_digest_ha1(new_imsi, realm[0], realm[1], passwd))
-                fields.append("passwd=%s"); values.append(passwd)
+                else:
+                    fields.append("passwd=%s"); values.append(passwd)
             values.extend([msisdn, person_id])
 
             cur.execute(
