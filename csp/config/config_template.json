@@ -576,6 +576,16 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
           "help": "윈도우 내 채널 정책(TLS 강제) 게이트 403 건수가 도달하면 major (최다 소스 IP 동반, A-SEC-003). 0 = 미사용."
+        },
+        {
+          "key": "Setup.SipStats.SecAgreeRejectMajor",
+          "label": "sec-agree 협상 거절 반복 임계 (건/윈도우)",
+          "type": "int",
+          "default": 10,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "윈도우 내 RFC 3329 sec-agree 거절(494 변조·제안없음·Verify 생략 / 421 정책상 협상 필수) 건수가 도달하면 major (최다 소스 IP 동반, A-SEC-004). 0 = 미사용."
         }
       ],
       "scope": "service"

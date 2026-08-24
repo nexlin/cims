@@ -31,6 +31,9 @@ public:
 	int					m_iPort;
 	CSipMessage * m_pclsSipMessage;
 	std::string m_strSourceIp;  // R5.b''': outbound connect 시 bind 할 로컬 source IP (빈 값이면 OS 자동)
+	int					m_iSourcePort;  // IPsec 보호 포트쌍: Via 포트가 CSipStack::AddTcpSourcePort 집합에 있으면 그 포트 (0=OS 자동)
+
+	CSipTcpClientArg() : m_pclsSipStack(NULL), m_iPort(0), m_pclsSipMessage(NULL), m_iSourcePort(0) {}
 };
 
 // TCP 클라이언트 세션 연결을 위한 쓰레드 함수
@@ -44,8 +47,9 @@ THREAD_API SipTcpClientThread( LPVOID lpParameter )
 
 	CLog::Print( LOG_DEBUG, "%s(%s:%d) start", __FUNCTION__, pclsArg->m_strIp.c_str(), pclsArg->m_iPort );
 
-	// R5.b''': Via[0] 또는 per-route 로 선택된 source IP 로 bind 후 connect
+	// R5.b''': Via[0] 또는 per-route 로 선택된 source IP (+ 보호 포트쌍이면 source 포트) 로 bind 후 connect
 	Socket hSocket = TcpConnectFrom( pclsArg->m_strSourceIp.empty() ? NULL : pclsArg->m_strSourceIp.c_str(),
+	                                 pclsArg->m_iSourcePort,
 	                                 pclsArg->m_strIp.c_str(), pclsArg->m_iPort,
 	                                 pclsArg->m_pclsSipStack->m_clsSetup.m_iTcpConnectTimeout );
 	if( hSocket != INVALID_SOCKET )
@@ -87,7 +91,8 @@ THREAD_API SipTcpClientThread( LPVOID lpParameter )
 	}
 	else
 	{
-		CLog::Print( LOG_ERROR, "TcpConnect(%s:%d) error", pclsArg->m_strIp.c_str(), pclsArg->m_iPort );
+		CLog::Print( LOG_ERROR, "TcpConnect(%s:%d) error (src %s:%d)", pclsArg->m_strIp.c_str(), pclsArg->m_iPort,
+		             pclsArg->m_strSourceIp.c_str(), pclsArg->m_iSourcePort );
 	}
 
 	if( bRes == false )
@@ -161,10 +166,12 @@ bool StartSipTcpClientThread( CSipStack * pclsSipStack, const char * pszIp, int 
 	pclsArg->m_iPort = iPort;
 	pclsArg->m_pclsSipMessage = pclsSipMessage;
 
-	// R5.b''': Via[0] host 가 유효하면 outbound source IP 로 bind
+	// R5.b''': Via[0] host 가 유효하면 outbound source IP 로 bind. Via[0] 포트가 보호 포트쌍(AddTcpSourcePort)
+	//   이면 소스 포트도 bind — 커널 IPsec selector 가 (ip, port_uc|port_pc) 로 잡힌다.
 	if( pclsSipMessage && !pclsSipMessage->m_clsViaList.empty() )
 	{
 		pclsArg->m_strSourceIp = pclsSipMessage->m_clsViaList.front().m_strHost;
+		pclsArg->m_iSourcePort = pclsSipStack->SelectTcpSourcePort( pclsSipMessage );
 	}
 
 	++pclsArg->m_pclsSipMessage->m_iUseCount;

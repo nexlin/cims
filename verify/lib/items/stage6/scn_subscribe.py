@@ -27,7 +27,7 @@ from ._helpers import target_ip, local_ip_args
 )
 def scn_subscribe(ctx: VerifyContext) -> ItemResult:
     s = ctx.state
-    missing = [k for k in ("PTT_USER", "PTT_DOM", "PTT_PWD") if not s.get(k)]
+    missing = [k for k in ("PTT_USER", "PTT_DOM", "PTT_HA1") if not s.get(k)]
     if missing:
         return ItemResult(
             id="S6-SCN-SUBSCRIBE", name="SUBSCRIBE/NOTIFY e2e",

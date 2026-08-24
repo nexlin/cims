@@ -35,6 +35,7 @@
 #include "TcpConnectMap.h"
 
 #include <vector>
+#include <set>
 
 typedef std::list< ISipStackCallBack * > SIP_STACK_CALLBACK_LIST;
 
@@ -65,6 +66,15 @@ public:
 
 	/** 현재 등록된 UDP 리스너 스냅샷 (디버그/모니터링). */
 	void GetUdpListenerInfo( std::vector<CSipStackUdpListener*>& outList );
+
+	// ── 발신 TCP 소스 포트 bind (IMS AKA+IPsec 보호 포트쌍, TS 33.203 §7.1) ──────────
+	/** 요청의 Via 자기주소 포트가 이 집합에 있으면 새 TCP 연결을 그 포트에서 connect 한다(SO_REUSEADDR).
+	 *  단말은 port_uc, 서버는 port_pc 를 등록한다 — 커널 SA selector 가 (ip, 포트) 로 잡히므로
+	 *  소스 포트가 맞아야 ESP 로 나간다. UDP 는 Via 매칭 리스너 소켓이 같은 역할을 한다(R5.b'). */
+	void AddTcpSourcePort( int iPort );
+	void RemoveTcpSourcePort( int iPort );
+	/** 요청의 Via[0] 포트가 등록돼 있으면 그 포트, 아니면 0 (OS 자동) */
+	int SelectTcpSourcePort( CSipMessage * pclsMessage );
 
 	// ── TCP 다중 리스너 hot-reload API (R3) ─────────────────────────
 	/** TCP 리스너를 런타임에 추가. 성공 시 outId 에 실제 할당된 ID 반환.
@@ -162,6 +172,8 @@ public:
 	bool						m_bTcpThreadListInit;
 	CTcpSocketMap		m_clsTcpSocketMap;
 	CTcpConnectMap	m_clsTcpConnectMap;
+	std::set<int>		m_setTcpSourcePort;  // AddTcpSourcePort — 발신 connect 소스 포트 bind 집합
+	CSipMutex				m_clsTcpSourcePortMutex;
 
 #ifdef USE_TLS
 	Socket m_hTlsSocket;					// TLS SIP 메시지를 위한 서버 소켓 핸들

@@ -26,8 +26,8 @@
 struct DbSubscriber {
     std::string id;           // MSISDN (e.g. +821357007001)
     std::string authId;       // Digest auth_id
-    std::string password;     // 평문 (과도기 fallback — ha1 이 비어 있을 때만 의미)
-    std::string ha1;          // SIP Digest H(A1) (sip_access_security.md §4) — 우선 사용
+    std::string password;     // 평문 — CLI/-creds 전용 (DB 에는 없다: passwd 컬럼 DROP, sip_access_security.md §4.7 ⑥)
+    std::string ha1;          // SIP Digest H(A1) (sip_access_security.md §4) — DB 모드의 유일한 Digest 자격
     std::string serviceType;  // "volte" or "ptt"
 };
 
@@ -74,13 +74,13 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     mysql_set_character_set(pMysql, "utf8mb4");
 
     // v3 (2026-04-22): domain 은 CLI 인자 (-domain) 로 결정.
-    //   DB 쿼리는 id / imsi / passwd / ha1. authId 는 SimSession 생성 시 imsi+@+strDomain 으로 조립.
-    //   인증 자료는 ha1 우선(원문 없이 response 계산), 비어 있으면 passwd (과도기).
+    //   DB 쿼리는 id / imsi / ha1. authId 는 SimSession 생성 시 imsi+@+strDomain 으로 조립.
+    //   인증 자료는 ha1 (원문 없이 response 계산) — passwd 컬럼은 없다(§4.7 ⑥). ha1 이 비면 등록 불가.
     //   (sub.authId 는 imsi 만 담아 뒀다가 상위에서 완성)
     // VoIP 가입자
     if (strFilterMode.empty() || strFilterMode == "volte") {
         const char* sql =
-            "SELECT cu.id, COALESCE(cu.imsi,''), cu.passwd, COALESCE(cu.ha1,'') "
+            "SELECT cu.id, COALESCE(cu.imsi,''), COALESCE(cu.ha1,'') "
             "FROM volte_subscriptions cu "
             "ORDER BY cu.id";
         if (mysql_query(pMysql, sql) == 0) {
@@ -92,8 +92,7 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     sub.id       = row[0] ? row[0] : "";
                     std::string imsi = row[1] ? row[1] : "";
                     sub.authId = imsi;   // domain 은 상위에서 붙임
-                    sub.password    = row[2] ? row[2] : "";
-                    sub.ha1         = row[3] ? row[3] : "";
+                    sub.ha1         = row[2] ? row[2] : "";
                     sub.serviceType = "volte";
                     vecOut.push_back(sub);
                 }
@@ -107,14 +106,14 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
         std::string sql;
         if (!strGroupId.empty()) {
             // group_id(멤버) 는 surrogate ptt_groups.id → mcptt_group_id 식별자로 JOIN
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, COALESCE(pu.ha1,'') "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), COALESCE(pu.ha1,'') "
                   "FROM ptt_subscriptions pu "
                   "JOIN ptt_group_members gm ON gm.user_id = pu.id "
                   "JOIN ptt_groups g ON g.id = gm.group_id "
                   "WHERE g.mcptt_group_id='" + strGroupId + "' "
                   "ORDER BY gm.priority, pu.id";
         } else {
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), pu.passwd, COALESCE(pu.ha1,'') "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), COALESCE(pu.ha1,'') "
                   "FROM ptt_subscriptions pu "
                   "ORDER BY pu.id";
         }
@@ -127,8 +126,7 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     sub.id       = row[0] ? row[0] : "";
                     std::string imsi = row[1] ? row[1] : "";
                     sub.authId = imsi;   // domain 은 상위에서 붙임
-                    sub.password    = row[2] ? row[2] : "";
-                    sub.ha1         = row[3] ? row[3] : "";
+                    sub.ha1         = row[2] ? row[2] : "";
                     sub.serviceType = "ptt";
                     vecOut.push_back(sub);
                 }
@@ -366,7 +364,7 @@ static void PrintUsage(const char* pszBin) {
     printf("  -domain      <domain>    SIP 도메인 (default: csp)\n");
     printf("  -password    <pwd>       패스워드 (default: 1234)\n");
     printf("  -ha1         <hex32>     SIP Digest H(A1) — 지정 시 -password 대신 이 값으로 response 계산\n");
-    printf("                             (-db 모드는 DB 의 ha1 을 자동 사용, 비어 있으면 passwd)\n");
+    printf("                             (-db 모드는 DB 의 ha1 을 사용 — 비어 있으면 등록 불가)\n");
     printf("  -creds       <file>      단말별 자격 파일(JSONL: "
            "user/ha1/authId/password/k/opc/sqn)\n");
     printf("  -aka_k       <hex32>     IMS AKA K — 지정 시 AKAv1-MD5 챌린지에 "
@@ -389,7 +387,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             tls 는 서버 인증서를 검증하지 않는다(랩 자가서명 수용)\n");
     printf("  -group       <group_id>  PTT 그룹 ID (default: 1000)\n");
     printf("  -scenario    <name>      자동 시나리오:\n");
-    printf("                             register     - 등록만\n");
+    printf("                             register     - 등록만 (-hold <secs> 로 등록 유지 후 해제)\n");
     printf("                             subscribe    - 등록 + GMS/CMS 구독 (PTT)\n");
     printf("                             call         - 등록 + 짝끼리 통화\n");
     printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
@@ -439,6 +437,10 @@ static int  g_iPreemptBy = 0;     // -preempt_by N: 선점자 세션 인덱스 (
 static bool g_bNoConfSub = false;  // -no_conf_sub: conference 구독 skip (구 APK 재현)
 static std::string g_strXcapRoot; // -xcap_root: SUBSCRIBE 후 XCAP 문서 능동 GET (Phase 3D 검증)
 
+// -hold <secs>: register 시나리오가 등록을 유지하는 시간 — 등록 유지 중 외부 프로브(비보호 요청 403 등)를
+//   받기 위한 창. 0 이면 종전대로 등록 직후 해제. (RunScenario 시그니처를 늘리지 않으려 파일 정적)
+static int g_iRegisterHoldSec = 0;
+
 static void RunScenario(std::vector<SimSession*>& sessions,
                         ESimScenario eScenario,
                         int iCallDuration,
@@ -476,7 +478,16 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         usleep(30000);
     }
 
-    if (eScenario == E_SCENARIO_REGISTER) return;
+    if (eScenario == E_SCENARIO_REGISTER) {
+        if (g_iRegisterHoldSec > 0) {
+            // 마커 "[Scenario] registration held Ns" 는 verify(S3-SCN-IPSEC-LIVE V25)가 프로브 시점으로 읽는다
+            printf("[Scenario] registration held %ds — probes may run now\n", g_iRegisterHoldSec);
+            fflush(stdout);
+            sleep(g_iRegisterHoldSec);
+            printf("[Scenario] registration hold done\n");
+        }
+        return;
+    }
 
     // 2. PTT: GMS/CMS SUBSCRIBE
     if (eScenario == E_SCENARIO_SUBSCRIBE ||
@@ -783,6 +794,7 @@ int main(int argc, char* argv[])
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
+    g_iRegisterHoldSec         = atoi(GetArg(argc, argv, "-hold", "0").c_str());
     // 지속 호 부하 모델 (2026-06-01): -cps 호 도착률(/초), -ht per-call 보유시간(초),
     //   -calls 총 발신 호수. -cps>0 이면 call 시나리오가 1/cps 간격 발신 + HT 후 개별 종료.
     int iCps                   = atoi(GetArg(argc, argv, "-cps",           "0").c_str());

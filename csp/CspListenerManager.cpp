@@ -85,7 +85,12 @@ bool CCspListenerManager::_isAlreadyBound( const std::string &protocol, const st
 bool CCspListenerManager::_addListenerToStack( const ManagedInfo &m, int &outId ) {
     const char *pszIp = m.bindIp.empty() ? NULL : m.bindIp.c_str();
     if ( m.protocol == "UDP" ) {
-        return gclsUserAgent.m_clsSipStack.AddUdpListener( m.id, pszIp, m.port, m.threadCount, outId );
+        if ( !gclsUserAgent.m_clsSipStack.AddUdpListener( m.id, pszIp, m.port, m.threadCount, outId ) ) return false;
+        // IPsec 접속점의 client 역할(port_pc): 서버 발신 TCP 연결도 이 포트에서 맺어야 SA 3 selector 에 걸린다
+        //   (TS 33.203 §7.1 — Via=port_pc 인 요청의 connect 소스 포트, sip_access_security.md §8.3).
+        if ( gclsLocalNodeMap.GetIpsecRole( m.id ) == IPSEC_LISTENER_CLIENT_UDP )
+            gclsUserAgent.m_clsSipStack.AddTcpSourcePort( m.port );
+        return true;
     } else if ( m.protocol == "TCP" ) {
         return gclsUserAgent.m_clsSipStack.AddTcpListener( m.id, pszIp, m.port, outId );
 #ifdef USE_TLS
@@ -101,6 +106,8 @@ bool CCspListenerManager::_addListenerToStack( const ManagedInfo &m, int &outId 
 
 bool CCspListenerManager::_removeListenerFromStack( const ManagedInfo &m ) {
     if ( m.protocol == "UDP" ) {
+        if ( gclsLocalNodeMap.GetIpsecRole( m.id ) == IPSEC_LISTENER_CLIENT_UDP )
+            gclsUserAgent.m_clsSipStack.RemoveTcpSourcePort( m.port );
         return gclsUserAgent.m_clsSipStack.RemoveUdpListener( m.id );
     } else if ( m.protocol == "TCP" ) {
         return gclsUserAgent.m_clsSipStack.RemoveTcpListener( m.id );

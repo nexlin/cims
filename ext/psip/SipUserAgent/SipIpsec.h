@@ -1,11 +1,17 @@
 /*
- * SipIpsec — 단말측 IMS AKA + IPsec (sip_access_security.md §8.3, TS 33.203 §7, TS 24.229 §5.1.1)
+ * SipIpsec — 단말측 IMS AKA + IPsec (sip_access_security.md §8.3, TS 33.203 §7,
+ * TS 24.229 §5.1.1)
  *
- * 등록마다 보호 포트쌍(port_uc/port_us)과 SPI 둘을 고르고 Security-Client 에 ipsec-3gpp 로 제안한다.
- * 401 의 Security-Server(ipsec-3gpp — 서버 spi/port)와 AKA 의 CK/IK 로 SA 4개를 커널(XfrmSa)에 설치한
- * 뒤 답안 REGISTER 를 port_uc 에서 보낸다. 확정(200 OK) 되면 스택의 식별 포트를 port_uc 로 바꿔 이후
- * 모든 요청이 그 소켓(SA 1)에서 나가게 한다. 재인증은 **새 포트쌍·새 SPI** 로 제안하고(§7.4.1a) 구 셋은
- * 200 OK 뒤 회수한다. 포트쌍은 스택의 UDP 리스너로 런타임에 연다. CAP_NET_ADMIN 필요.
+ * 등록마다 보호 포트쌍(port_uc/port_us)과 SPI 둘을 고르고 Security-Client 에
+ * ipsec-3gpp 로 제안한다. 401 의 Security-Server(ipsec-3gpp — 서버 spi/port)와
+ * AKA 의 CK/IK 로 SA 4개를 커널(XfrmSa)에 설치한 뒤 답안 REGISTER 를 port_uc
+ * 에서 서버 port_ps 로 보낸다(SA 1 — 목적지 포트는 ServerPort()). 확정(200 OK)
+ * 되면 스택의 식별 포트를 port_uc 로 바꿔 이후 모든 요청이 그 소켓(SA 1)에서
+ * 나가게 한다. 재인증은 **새 포트쌍·새 SPI** 로 제안하고(§7.4.1a) 구 셋은 200
+ * OK 뒤 회수한다. 포트쌍은 스택의 UDP 리스너로 런타임에 연다. TCP 면 port_us 에
+ * TCP 리스너(서버 발신 연결 수신, SA 3)를 더 열고 port_uc 를 스택의 발신 소스
+ * 포트 (CSipStack::AddTcpSourcePort)로 등록해 단말 발신 연결이 port_uc →
+ * port_ps 로 맺힌다(§7.1). CAP_NET_ADMIN 필요.
  */
 #ifndef _SIP_IPSEC_H_
 #define _SIP_IPSEC_H_
@@ -14,6 +20,7 @@
 
 #include <string>
 
+#include "SipTransport.h"
 #include "XfrmSa.h"
 
 class CSipStack;
@@ -26,6 +33,8 @@ struct CSipIpsecPair {
     uint32_t iSpiS = 0;
     int iExtIdC = 0;  // 스택 UDP 리스너 ext id
     int iExtIdS = 0;
+    bool bTcp =
+        false; // TCP: port_us TCP 리스너(iExtIdS) + port_uc 소스 포트 등록
     bool Valid() const {
         return iPortC > 0 && iPortS > 0;
     }
@@ -38,6 +47,9 @@ public:
     std::string m_strEalg = XFRM_ENC_AES_CBC;
     /** 포트쌍 시작 — 0 이면 스택 로컬 포트 + 1. 재인증마다 +2 */
     int m_iPortBase = 0;
+    /** 등록 transport (CSipServerInfo::m_eTransport) — UDP/TCP. TLS 는 IPsec 과
+     * 조합하지 않는다 */
+    ESipTransport m_eTransport = E_SIP_UDP;
 
     /** 제안할 포트쌍/SPI 를 준비한다 (리스너 개방). 이미 준비돼 있으면 그대로. */
     bool EnsureNext( CSipStack *pclsStack, std::string &strError );
@@ -49,6 +61,9 @@ public:
                       const std::string &strCk, const std::string &strIk, int iLifetimeSec, std::string &strError );
     /** 답안 REGISTER 의 Via 포트 (pending 셋의 port_uc). 0 = pending 없음 */
     int SendPortForAnswer() const;
+    /** 요청 목적지 서버 포트 port_ps — 답안 중이면 pending, 등록 뒤면 현행 셋의
+     * 값. 0 = SA 없음(서버 기본 포트로) */
+    int ServerPort() const;
     /** 200 OK: pending → 현행, 구 셋 회수, 스택 식별 포트 = port_uc */
     void OnRegistered( CSipStack *pclsStack );
     /** 등록 실패/해제/종료: 전부 회수, 스택 식별 포트 복원 */
@@ -63,6 +78,7 @@ private:
     bool m_bPendingInstalled = false, m_bCurInstalled = false;
     int m_iPairSeq = 0;
     int m_iOrigLocalPort = 0;
+    int m_iOrigLocalTcpPort = 0;
 
     bool _openPair( CSipStack *pclsStack, CSipIpsecPair &clsPair, std::string &strError );
     void _closePair( CSipStack *pclsStack, CSipIpsecPair &clsPair );

@@ -132,7 +132,6 @@ def realm_mismatch(ctx: VerifyContext) -> ItemResult:
     domain = s.get("VOIP_DOM", VOLTE_DOMAIN)
     auth_user = s.get("VOIP_AUTH", "") or user
     ha1 = s.get("VOIP_HA1", "")
-    pwd = s.get("VOIP_PWD", "")
     ctx.w("### S3-SCN-REALM-MISMATCH — realm 대조 재챌린지 (V7)")
     if not user:
         ctx.w("- [SKIP] VOIP_USER 미준비 (S3-SEED 선행)")
@@ -142,7 +141,7 @@ def realm_mismatch(ctx: VerifyContext) -> ItemResult:
 
     res = sip_probe.probe_register_wrong_realm(
         ctx.sim_ip, _CSP_SIP_PORT, user, domain,
-        auth_user=auth_user, ha1_hex=ha1, password=pwd, local_ip=ctx.sim_ip)
+        auth_user=auth_user, ha1_hex=ha1, password="", local_ip=ctx.sim_ip)
 
     first_ok = (res["first"] == 401)
     second_ok = (res["second"] == 401)

@@ -64,12 +64,13 @@ public:
     // SIP 인증용 아이디 (IMS 등에서 전화번호와 분리된 단말기 고유 ID. 없으면 m_strId와 동일시함)
     std::string m_strAuthId;
 
-    // SIP 비밀번호 (평문). 가입자 경로는 m_strHa1 로 전환되어 과도기 fallback 으로만 남는다.
-    //   원격 노드(peer) outbound 인증 자격(ModuleDispatcher 의 RouteConfig.auth_password)은 계속 사용.
+    // SIP 비밀번호 (평문). DB 가입자 경로에서는 읽지 않는다(passwd 컬럼 DROP — sip_access_security.md §4.7 ⑥).
+    //   남은 소비자: 원격 노드(peer) outbound 인증 자격(ModuleDispatcher 의 RouteConfig.auth_password)과
+    //   JSON 파일 fallback(csp/User/*.json 의 "passwd").
     std::string m_strPassWord;
 
     // SIP Digest H(A1) = MD5(impi:realm:password) — 인증 자료 SoT (sip_access_security.md §4).
-    //   비어 있으면 m_strPassWord 로 종전 계산(과도기).
+    //   DB 가입자는 이 값만으로 인증한다. 비어 있으면 m_strPassWord (JSON 파일 fallback 에서만 채워진다).
     std::string m_strHa1;
 
     // 채널 정책 (sip_access_security.md §3.1) — DB sip_transport ENUM('UDP','TCP','TLS') / NULL.

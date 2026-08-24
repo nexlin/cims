@@ -116,8 +116,7 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 	pclsRequest->m_clsCSeq.m_iDigit = m_iSeqNo;
 	pclsRequest->m_clsCSeq.m_strMethod = SIP_METHOD_REGISTER;
 
-	// Route
-	pclsRequest->AddRoute( m_strIp.c_str(), m_iPort, m_eTransport );
+	// Route 는 인증 처리 뒤에 — IPsec 이면 답안부터 서버 보호 포트 port_ps 로 (아래)
 
 	// Call-Id
 	if( m_clsCallId.Empty() )
@@ -149,6 +148,7 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 		// IPsec (§8.3): 제안할 포트쌍·SPI 를 준비하고(리스너 개방) 그것으로 Security-Client 를 만든다.
 		//   재인증에도 새 포트쌍·SPI 를 제안한다 (TS 33.203 §7.4.1a).
 		std::string strError;
+		m_clsIpsec.m_eTransport = m_eTransport;
 		if( m_clsIpsec.EnsureNext( pclsSipStack, strError ) == false )
 		{
 			CLog::Print( LOG_ERROR, "ipsec(ue): %s — REGISTER not sent", strError.c_str() );
@@ -217,6 +217,10 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 		++m_iNonceCount;
 		m_bAuth = AddAuth( pclsRequest, &m_clsChallenge, m_iChallengeStatusCode, m_iNonceCount );
 	}
+
+	// Route — IPsec 답안/등록 유지 중이면 서버 보호 포트 port_ps (TS 33.203 §7.1, SA 1), 아니면 서버 기본 포트
+	const int iIpsecServerPort = m_clsIpsec.ServerPort();
+	pclsRequest->AddRoute( m_strIp.c_str(), iIpsecServerPort > 0 ? iIpsecServerPort : m_iPort, m_eTransport );
 
 	pclsRequest->m_eTransport = m_eTransport;
 

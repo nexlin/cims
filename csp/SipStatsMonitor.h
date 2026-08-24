@@ -17,8 +17,9 @@ class CMonitorString;
  * @brief SIP 신호 통계 감시 — 스택 카운터(CSipStack::m_clsCounter)를 평가 윈도우
  *        (Setup.SipStats.EvalSec) 단위로 차분해 호/등록 성공률·신규 INVITE CPS·SIP 수신
  *        이상을 단계 임계로 평가하고 FM 자기보고(L2)로 발화/해소한다. 채널 정책 게이트
- *        403 계수(AddChannelPolicyViolation)도 같은 윈도우에서 급증 임계로 평가한다.
- *        A-QOS-006/007/009/011·A-SEC-003 — 임계는 모듈 설정 소유
+ *        403 계수(AddChannelPolicyViolation)와 sec-agree 협상 거절(494/421) 계수
+ *        (AddSecAgreeReject)도 같은 윈도우에서 급증 임계로 평가한다.
+ *        A-QOS-006/007/009/011·A-SEC-003/004 — 임계는 모듈 설정 소유
  *        (docs/design/alarm_self_reporting.md §4).
  *
  *        율 산식 (윈도우 내 INVITE/REGISTER 최종응답 — 수신+송신 합산. 수신에는 와이어에
@@ -45,6 +46,10 @@ public:
      *  스레드에서 호출. 소스 로그 억제와 무관하게 전 건 계수, 소스 IP 상위 추적) */
     void AddChannelPolicyViolation( const char *pszIp );
 
+    /** sec-agree 협상 거절(494/421) 계수 (A-SEC-004 — CscfModule::SendSecAgreeReject 가 SIP worker
+     *  스레드에서 호출. 변조·제안 없음·Verify 생략·정책 위반 전 건, 소스 IP 상위 추적) */
+    void AddSecAgreeReject( const char *pszIp );
+
 private:
     struct RateResult {
         uint64_t ulFinals;     // 분모 (제외 코드 차감 후)
@@ -65,17 +70,29 @@ private:
     void FireRateAlarm( const char *pszCode, const char *pszComponent, const RateResult &clsRate, int iMinFinals,
                         int iMinor, int iMajor, int iCritical, int iWindowSec );
 
-    static const int VIOLATION_SRC_MAX = 32;  // 채널 정책 위반 소스 IP 추적 상한 (평가 시 리셋)
+    static const int VIOLATION_SRC_MAX = 32;  // 보안 위반 소스 IP 추적 상한 (평가 시 리셋)
+
+    /** 보안 위반 소스 계수기 — SIP worker 스레드(Add) ↔ 메인 루프(Drain, 윈도우 리셋).
+     *  A-SEC-003(채널 정책 403)·A-SEC-004(sec-agree 494/421) 가 같은 모양을 쓴다. */
+    struct SourceCounter {
+        std::mutex clsMutex;
+        uint64_t ulTotal = 0;                    // 누적 (monitor 노출용)
+        uint64_t ulWindow = 0;                   // 현재 윈도우 계수 (평가 시 리셋)
+        std::map<std::string, uint64_t> mapSrc;  // 윈도우 소스별 계수
+
+        void Add( const char *pszIp );
+        void Reset();
+        /** 윈도우 계수를 꺼내고 리셋 — 최다 소스와 그 건수 동반 */
+        uint64_t Drain( std::string &strTopSrc, uint64_t &ulTopCount );
+        uint64_t Total();
+    };
 
     std::mutex m_clsMutex;  // 최근 윈도우 결과 보호 — Poll(메인 루프) ↔ GetString(monitor 스레드)
     CSipStackCounter::Snapshot m_clsPrev;
     time_t m_tLastEval;  // 0 = 기준 스냅샷 미확보 (평가 off 포함)
 
-    // 채널 정책 위반 계수 — SIP worker 스레드(Add) ↔ 메인 루프(Evaluate 드레인)
-    std::mutex m_clsViolationMutex;
-    uint64_t m_ulChannelPolicyTotal;                        // 누적 (monitor 노출용)
-    uint64_t m_ulChannelPolicyWindow;                       // 현재 윈도우 계수 (평가 시 리셋)
-    std::map<std::string, uint64_t> m_mapChannelPolicySrc;  // 윈도우 소스별 계수
+    SourceCounter m_clsChannelPolicy;   // 채널 정책 게이트 403 (A-SEC-003)
+    SourceCounter m_clsSecAgreeReject;  // sec-agree 협상 거절 494/421 (A-SEC-004)
 
     // 최근 윈도우 결과 (monitor 노출용)
     int m_iLastWindowSec;
@@ -86,6 +103,8 @@ private:
     std::string m_strLastTopSrc;
     uint64_t m_ulLastChannelPolicy;
     std::string m_strLastViolationTopSrc;
+    uint64_t m_ulLastSecAgreeReject;
+    std::string m_strLastSecAgreeTopSrc;
 };
 
 extern CSipStatsMonitor gclsSipStatsMonitor;

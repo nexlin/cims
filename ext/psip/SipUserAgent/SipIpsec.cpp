@@ -84,6 +84,22 @@ bool CSipIpsecClient::_openPair( CSipStack *pclsStack, CSipIpsecPair &clsPair, s
         strError = "listener open failed port_us=" + std::to_string( clsPair.iPortS );
         return false;
     }
+    if (m_eTransport == E_SIP_TCP) {
+      // TCP (TS 33.203 §7.1): 서버 발신 연결은 port_pc → port_us 로 오므로
+      // port_us 에 TCP 리스너, 단말 발신 연결은
+      //   port_uc → port_ps 로 맺어야 SA 1 selector 에 걸리므로 port_uc 를 스택
+      //   발신 소스 포트로 등록한다.
+      if (!pclsStack->AddTcpListener(clsPair.iExtIdS, pszIp, clsPair.iPortS,
+                                     iOut)) {
+        pclsStack->RemoveUdpListener(clsPair.iExtIdC);
+        pclsStack->RemoveUdpListener(clsPair.iExtIdS);
+        strError = "tcp listener open failed port_us=" +
+                   std::to_string(clsPair.iPortS);
+        return false;
+      }
+      pclsStack->AddTcpSourcePort(clsPair.iPortC);
+      clsPair.bTcp = true;
+    }
     return true;
 }
 
@@ -92,6 +108,10 @@ void CSipIpsecClient::_closePair( CSipStack *pclsStack, CSipIpsecPair &clsPair )
     if ( pclsStack ) {
         pclsStack->RemoveUdpListener( clsPair.iExtIdC );
         pclsStack->RemoveUdpListener( clsPair.iExtIdS );
+        if (clsPair.bTcp) {
+          pclsStack->RemoveTcpListener(clsPair.iExtIdS);
+          pclsStack->RemoveTcpSourcePort(clsPair.iPortC);
+        }
     }
     clsPair = CSipIpsecPair();
 }
@@ -111,6 +131,8 @@ bool CSipIpsecClient::EnsureNext( CSipStack *pclsStack, std::string &strError ) 
     if ( !m_bEnabled ) return true;
     if ( m_clsNext.Valid() ) return true;
     if ( m_iOrigLocalPort == 0 ) m_iOrigLocalPort = pclsStack->m_clsSetup.m_iLocalUdpPort;
+    if (m_iOrigLocalTcpPort == 0)
+      m_iOrigLocalTcpPort = pclsStack->m_clsSetup.m_iLocalTcpPort;
     return _openPair( pclsStack, m_clsNext, strError );
 }
 
@@ -162,6 +184,11 @@ bool CSipIpsecClient::OnChallenge( CSipStack *pclsStack, const std::string &strS
     m_bPendingInstalled = true;
     m_clsPending = m_clsNext;
     m_clsNext = CSipIpsecPair();
+    // TCP 재인증: 서버 port_ps 로의 기존 연결은 구 port_uc 에서 맺힌 것 —
+    // 맵에서 떼어 답안이 새 port_uc 에서 새
+    //   연결을 열게 한다 (구 연결은 구 SA 회수 뒤 수신 타임아웃으로 닫힌다).
+    if (m_eTransport == E_SIP_TCP && m_bCurInstalled)
+      pclsStack->m_clsTcpSocketMap.Delete(strServerIp.c_str(), iPortPs);
     CLog::Print( LOG_INFO, "ipsec(ue): sa set installed uc=%d us=%d ↔ %s ps=%d pc=%d alg=%s ealg=%s",
                  m_clsPending.iPortC, m_clsPending.iPortS, strServerIp.c_str(), iPortPs, iPortPc, strAlg.c_str(),
                  strEalg.c_str() );
@@ -170,6 +197,14 @@ bool CSipIpsecClient::OnChallenge( CSipStack *pclsStack, const std::string &strS
 
 int CSipIpsecClient::SendPortForAnswer() const {
     return m_bPendingInstalled ? m_clsPending.iPortC : 0;
+}
+
+int CSipIpsecClient::ServerPort() const {
+  if (m_bPendingInstalled)
+    return m_clsPendingSet.iRemotePortS;
+  if (m_bCurInstalled)
+    return m_clsCurSet.iRemotePortS;
+  return 0;
 }
 
 void CSipIpsecClient::OnRegistered( CSipStack *pclsStack ) {
@@ -182,9 +217,14 @@ void CSipIpsecClient::OnRegistered( CSipStack *pclsStack ) {
     m_clsCur = m_clsPending;
     m_bPendingInstalled = false;
     m_clsPending = CSipIpsecPair();
-    // 이후 모든 요청은 port_uc 에서 (Via 자기주소 → 그 리스너 소켓, SA 1)
+    // 이후 모든 요청은 port_uc 에서 (Via 자기주소 → UDP 는 그 리스너 소켓, TCP
+    // 는 그 소스 포트의 연결, SA 1)
     pclsStack->m_clsSetup.m_iLocalUdpPort = m_clsCur.iPortC;
-    CLog::Print( LOG_INFO, "ipsec(ue): registered over SA — identity port → %d", m_clsCur.iPortC );
+    if (m_clsCur.bTcp)
+      pclsStack->m_clsSetup.m_iLocalTcpPort = m_clsCur.iPortC;
+    CLog::Print(LOG_INFO,
+                "ipsec(ue): registered over SA — identity port → %d (%s)",
+                m_clsCur.iPortC, m_clsCur.bTcp ? "tcp" : "udp");
 }
 
 void CSipIpsecClient::Teardown( CSipStack *pclsStack ) {
@@ -194,4 +234,6 @@ void CSipIpsecClient::Teardown( CSipStack *pclsStack ) {
     _closePair( pclsStack, m_clsCur );
     _closePair( pclsStack, m_clsNext );
     if ( pclsStack && m_iOrigLocalPort > 0 ) pclsStack->m_clsSetup.m_iLocalUdpPort = m_iOrigLocalPort;
+    if (pclsStack && m_iOrigLocalTcpPort > 0)
+      pclsStack->m_clsSetup.m_iLocalTcpPort = m_iOrigLocalTcpPort;
 }

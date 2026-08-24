@@ -254,8 +254,8 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 |---|---|
 | `/provisioning/me` | `account.sipHa1` (H(A1)). `account.sipPassword` 는 항상 `null`(평문 미배포 — 키는 단말 호환으로 유지). 단말은 `sipHa1` 우선, 없으면 로그인 비번으로 ha1 계산 |
 | Android UE | `sipHa1` 수신 시 pjsip cred 를 `PJSIP_CRED_DATA_DIGEST`(ha1) 로 설정한다(`android/core` SipController — cred realm 은 `*` 유지, pjsip 이 DIGEST cred 의 algorithm 미지정을 MD5 로 기본화). `sipHa1` 이 없으면 평문 cred(`sipPassword` → 로그인 비번) 폴백 — H(A1) 은 realm 에 결박된 값이라 challenge realm 추종이 필요한 상황은 평문 경로만 흡수한다. 수동 설정에서 도메인/IMSI/IMPI/비번을 편집하면 결박이 깨진 저장 ha1 을 함께 소거한다 |
-| cspsim | `-db` 모드는 DB `ha1` 우선(비면 `passwd`), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받고, 등록 스레드는 비밀번호가 비어도 ha1 이 있으면 자격으로 인정한다(passwd 소거 후 ha1 단독 등록). `-password` 는 유지(직접 계산) |
-| verify 하네스 | `subscribers.py` 가 "번호 연속 + 전원 `ha1` 보유" 창(window)을 골라 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다("같은 비밀번호 구간" 의존 소멸. `-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 없는 구 DB 는 "전원 동일 비밀번호" 창 + `-password` 로 폴백 |
+| cspsim | `-db` 모드는 DB `ha1`(평문 컬럼은 없다 — 비면 등록 불가), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받고, 등록 스레드는 비밀번호가 비어도 ha1 이 있으면 자격으로 인정한다(passwd 소거 후 ha1 단독 등록). `-password` 는 유지(직접 계산) |
+| verify 하네스 | `subscribers.py` 가 "번호 연속 + 전원 `ha1` 보유" 창(window)을 골라 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다(`-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 이 빈 가입자는 시드 대상이 아니고 `-password` 폴백은 없다 |
 
 **배포 순서가 계약이다**:
 ① 스키마 — `migrate_subscription_transport.sql` + `migrate_subscription_ha1.sql` (컬럼 추가만,
@@ -265,8 +265,11 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 ③ `migrate_subscription_ha1.py` 로 기존 행 ha1 일괄 계산 →
 ④ 전 조합 등록 회귀(§6) →
 ⑤ `passwd` 값 소거(CSC 의 `passwd` 병행 쓰기 제거 + `/provisioning/me` 의 `sipPassword` 항상 null) →
-⑥ (후속 릴리스) 컬럼 DROP.
-②~④ 사이에는 과도기 fallback(§4.2)이 양쪽 형식을 흡수한다.
+⑥ 컬럼 DROP — `sql/migrate_subscription_drop_passwd.sql`(멱등). 현행 코드는 `passwd` 컬럼을 읽지도 쓰지도
+않는다(CSP `DbManager` SELECT·cspsim `-db`·CSC admin·verify 시드 전부 `ha1` 단독) — DB 가입자의 Digest 자격은
+`ha1` 뿐이며 `ha1` 컬럼이 없는 DB 에서는 CSP 가 ERROR 로그와 함께 인증 불가, CSC 는 자격 저장을 503
+`schema_not_migrated` 로 거부한다. 평문 경로는 JSON 파일 fallback(`csp/User`)과 cspsim CLI/`-creds` 의 `password`
+에만 남는다.
 
 ## 5. 범위 밖 (이 설계가 바꾸지 않는 것)
 
@@ -306,6 +309,8 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 | V22 | `Security-Verify` 변조(`-sec_verify`) | 494 + 임시 SA 회수 — 등록 실패 |
 | V23 | 해제(`Expires: 0`) | 200, 단말·서버 SA 회수 로그 |
 | V24 | `sec_mechanisms` 에 `ipsec-3gpp` 이면서 `media_nat_mode≠off` 인 access service | 로드 시 `ipsec-3gpp` 무시 + ERROR (서비스 유지) — CSP 로그로 확인(수동) |
+| V25 | IPsec 등록 유지 중(cspsim `-hold`) 같은 신원의 비보호 포트(5060) MESSAGE / 제안 없는 REGISTER | 둘 다 403 — 보호 채널 밖(비-REGISTER 는 flow 밖 403, REGISTER 는 정책 게이트) |
+| V26 | cspsim `-ipsec -transport tcp` 등록 | 200 + `registered over SA … (tcp)` — 단말 발신 연결이 port_uc → port_ps 로 맺힘(소스포트 bind), 서버 발신은 port_pc → port_us |
 
 **V1·V2·V7 은 S3 검증 항목으로 자동화되어 있다** — 원시 SIP 프로브(`verify/lib/common/sip_probe.py`):
 - `S3-SCN-CHANNEL-POLICY`(V1·V2): 대상 가입자 `sip_transport` 를 DB 에서 `TLS` 로 올리고 CSP 4421
@@ -331,7 +336,7 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 
 - `S3-SCN-IPSEC`(V19·V20): `sip_probe.probe_register_offer` 가 `Security-Client: ipsec-3gpp;…` 를 실은 초기 REGISTER 를
   보내고 `Security-Server` 를 읽는다(Via sent-by 를 꾸며 NAT 판정을 재현). V19 는 시드 가입자를 AKA 로 잠시 올렸다가
-  복원한다(AKA 컬럼이 없으면 V19 만 생략). `S3-SCN-IPSEC-LIVE`(V21~V23): cspsim `-ipsec -aka_k …` 를 구동해 단말
+  복원한다(AKA 컬럼이 없으면 V19 만 생략). `S3-SCN-IPSEC-LIVE`(V21~V23·V25·V26): cspsim `-ipsec -aka_k …` 를 구동해 단말
   로그로 판정한다 — IPSEC LocalNode·CSP `ipsec: available`·cspsim `cap_net_admin`·AKA 마이그레이션이 없으면 SKIP.
 
 V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
@@ -344,7 +349,7 @@ A-SEC-003 으로 채번·구현되어 있다(§3.3).
 P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip_transport` 컬럼을 읽으므로
 `migrate_subscription_transport.sql` 이 CSP 기동의 선행 조건이다(`ha1`·`auth_scheme` 은 프로브로 흡수 —
 `migrate_subscription_aka.sql` 미적용 DB 에서는 AKA 가입자가 없을 뿐 기동·Digest 는 그대로다). P1 은 배포 순서 계약(§4.7 ①~⑥)이 단계를
-강제한다. 현재 ②(ha1 소비)·⑤(passwd 미기록·`sipPassword` null) 코드가 반영되어 있고, ①·③·⑤-c(값 소거)는 배포 환경별 운영 절차, ⑥ 은 `sql/migrate_subscription_drop_passwd.sql`(후속 릴리스)이다.
+강제한다. ②(ha1 소비)·⑤(passwd 미기록·`sipPassword` null)·⑥(코드의 `passwd` 컬럼 의존 제거) 코드가 반영되어 있고, ①·③·⑤-c(값 소거)·⑥ 스크립트(`sql/migrate_subscription_drop_passwd.sql`) 적용은 배포 환경별 운영 절차다 — 이 릴리스의 CSP 는 `passwd` 를 SELECT 하지 않으므로 DROP 은 코드 배포 뒤 언제든 적용할 수 있다.
 
 P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재실행(`csc.json AuC.Kek`·
 `InternalApi.Token`, `csp.json Setup.Csc.*` 렌더 — **`AuC.Kek` 는 기존 값을 이어받는다**, 바꾸면 보관된 K/OPc
@@ -357,7 +362,6 @@ P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재�
 - AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec, [§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영)) 에서 SA 키로 소비한다.
 - Android UE 의 sec-agree(§8.1) — pjsip 이 `Security-*` 헤더를 만들지 않으므로 단말 쪽 패치가 선행 조건이다.
   그때까지 `Setup.SecAgree.Require` 는 false(제안하는 단말만 협상)로 둔다.
-- 494 급증(협상 실패 반복)의 알람 채번 — A-SEC-003(게이트 403)과 같은 계열로 채번할 후보.
 - `/provisioning/me` 의 `enforced`/TLS 목록 축소는 CSC `Provisioning.Services.*.tls_port` 가 설정된 환경에서만
   드러난다(미설정이면 TLS 항목 자체가 없다).
 
@@ -420,6 +424,13 @@ id 0 이라 transport 별 Setup 포트로 폴백). 없으면 route 를 따르는
 **설정**: `Setup.SecAgree.Require`(bool, 기본 false, SIGUSR1 재로드). false 는 단말이 제안할 때만
 협상한다 — sec-agree 를 못 만드는 단말(현 Android pjsip)을 수용하는 운영값. `Security-Verify`
 불일치 494 는 설정과 무관하게 항상이다.
+
+**관측**: 거절은 `sec-agree reject user=<id> transport=<t> src=<ip>:<port> → 494|421 (<사유>)` 로그. 반복 거절
+(강등 공격/단말 오설정 탐지)은 **A-SEC-004**(`security_violation`, X.736 — [alarm_catalog](../../alarm_catalog.md))
+알람이다: `SendSecAgreeReject` 의 494/421 전 건을 `SipStatsMonitor` 가 A-SEC-003 과 같은 소스 계수기로 세고
+(소스 IP 상위 32), `Setup.SipStats.EvalSec` 윈도우당 건수가 `Setup.SipStats.SecAgreeRejectMajor`(기본 10, 0=off)
+이상이면 major 발화(mo `<서버명>/csp/sec_agree`, params count/window/ip/top_count), 미만 윈도우에서 해소한다.
+monitor `sip_stats` 에 누적 `sec_agree_reject` 와 `window sec_agree_reject` 가 노출된다.
 
 **클라이언트**: psip `CSipServerInfo::m_bSecAgree`(+`m_strSecurityClient`/`m_strSecurityServer`/
 `m_strSecurityVerifyOverride`) — REGISTER 에 `Security-Client`/`Require`/`Proxy-Require` 를 싣고,
@@ -668,20 +679,33 @@ AKA 가입자는 `enforced=true` 그대로(보호 채널 강제). 콘솔 access 
   (port_uc/port_us — 스택 로컬 포트+1 부터 2씩, 다중 UDP 리스너(R5.b)로 런타임 개방)과 SPI 둘(난수)을 준비해
   `Security-Client` 에 `ipsec-3gpp` 만 싣는다(sec-agree 자동 활성). 401 의 `Security-Server` 에서 서버 spi/port 를
   파싱하고 `AddAuth` 의 AKA 계산이 남긴 CK/IK(`m_strAkaCk/m_strAkaIk`)로 `XfrmSa` 에 SA 4개를 설치한 뒤, 답안
-  REGISTER 에 Via = port_uc 를 명시해 그 리스너 소켓에서 보낸다(SA 1). 200 OK 에 스택 식별 포트를 port_uc 로 바꿔 이후
-  모든 요청(INVITE·BYE·갱신·해제)이 SA 위로 나가게 하고, 구 셋이 있으면 회수한다(재인증 = **새 포트쌍·새 SPI**,
-  TS 33.203 §7.4.1a — 같은 포트를 재제안하는 단말은 서버 커널 정책 충돌로 504 를 받는다). 해제 200 OK·등록 실패 시
-  전부 회수하고 식별 포트를 복원한다. Verify 변조는 `m_strSecurityVerifyOverride` 그대로.
+  REGISTER 에 Via = port_uc 를 명시해 그 리스너 소켓에서 **서버 port_ps 로**(Route 목적지 = `ServerPort()`) 보낸다
+  (SA 1). 200 OK 에 스택 식별 포트를 port_uc 로 바꿔 이후 모든 요청(INVITE·BYE·갱신·해제)이 SA 위로 port_ps 를 향해
+  나가게 하고, 구 셋이 있으면 회수한다(재인증 = **새 포트쌍·새 SPI**, TS 33.203 §7.4.1a — 같은 포트를 재제안하는
+  단말은 서버 커널 정책 충돌로 504 를 받는다). 해제 200 OK·등록 실패 시 전부 회수하고 식별 포트를 복원한다. Verify
+  변조는 `m_strSecurityVerifyOverride` 그대로.
+- **TCP 위 보호 포트쌍**(§7.1): 커널 SA selector 가 (ip, 포트) 로 잡히므로 TCP 연결의 소스 포트가 맞아야 ESP 로
+  나간다. psip 스택에 발신 소스 포트 집합(`CSipStack::AddTcpSourcePort` — 요청의 Via 포트가 집합에 있으면 새 연결을
+  그 포트에서 `SO_REUSEADDR` 로 bind 후 connect, `TcpConnectFrom(srcIp, srcPort, …)`)을 두고, 단말은 port_uc 를,
+  서버는 IPsec 접속점의 port_pc 를(`CspListenerManager` 가 client 역할 리스너 개설 시) 등록한다. 단말은 port_us 에
+  TCP 리스너를 더 열어 서버 발신 연결(port_pc → port_us, SA 3)을 받고, 재인증 시 port_ps 로의 기존 연결(구 port_uc)을
+  연결 맵에서 떼어 답안이 새 port_uc 에서 새 연결을 열게 한다. TCP LISTEN 소켓이 있는 포트는 Linux 가 소스로 bind
+  하지 못하게 하므로 port_ps/port_us 는 수신 전용, port_uc/port_pc 는 UDP 리스너 + TCP 발신만이다
+  (`tests/psip_tcp_srcport_test.cpp`).
 - cspsim `-ipsec`(+`-ipsec_alg hmac-sha-1-96|hmac-md5-96`, `-ipsec_ealg aes-cbc|null`), `-aka_k/-aka_opc` 필수,
-  `-transport udp`. 세션당 스택이 하나라 단말마다 포트쌍이 분리된다.
+  `-transport udp|tcp`. 세션당 스택이 하나라 단말마다 포트쌍이 분리된다. 등록 뒤 요청 목적지는 `EventRegister(200)`
+  에서 SA 셋의 port_ps 로 바뀐다(`SimSession::RoutePort()`). `-scenario register -hold <secs>` 는 등록을 그 시간
+  유지한 뒤 해제한다 — 유지 창에 외부 프로브(V25)를 건다.
 
 **CSC / 프로비저닝 값의 출처**: `csc.json Provisioning.Services.<kind>.sec_mechanisms`(기본 `["tls"]`) 와
 `ipsec_port_ps`/`ipsec_port_pc` — CSP 의 access service·IPSEC LocalNode 와 일치시키는 것은 운영 계약이다(csc 는 CSP
 를 조회하지 않는다, `tls_port` 와 같은 규칙). 포트쌍이 없으면 `ipsec-3gpp` 를 목록에서 뺀다.
 
-**검증**: §6 V19·V20 = `S3-SCN-IPSEC`(order 55, 커널 특권 불필요), V21~V23 = `S3-SCN-IPSEC-LIVE`(order 56, cspsim
-`-ipsec` — IPSEC LocalNode·CSP `ipsec: available`·cspsim `cap_net_admin`·AKA 마이그레이션이 없으면 SKIP).
-단위: `tests/psip_xfrm_test.cpp`(키 확장 벡터 + netlink 메시지 인코딩, 특권이 있으면 실설치 왕복까지).
+**검증**: §6 V19·V20 = `S3-SCN-IPSEC`(order 55, 커널 특권 불필요), V21~V23·V25·V26 = `S3-SCN-IPSEC-LIVE`(order 56,
+cspsim `-ipsec` — IPSEC LocalNode·CSP `ipsec: available`·cspsim `cap_net_admin`·AKA 마이그레이션이 없으면 SKIP.
+V25 는 `-hold 6` 유지 창에서 `run_cspsim(on_line=…)` 이 `registration held` 마커에 반응해 비보호 포트로 프로브한다).
+단위: `tests/psip_xfrm_test.cpp`(키 확장 벡터 + netlink 메시지 인코딩, 특권이 있으면 실설치 왕복까지),
+`tests/psip_tcp_srcport_test.cpp`(TCP 소스 포트 bind — 지정 포트 connect·같은 포트 연속 connect·UDP 리스너 공존).
 
 **구현 위치**
 
@@ -695,12 +719,12 @@ AKA 가입자는 `enforced=true` 그대로(보호 채널 강제). 콘솔 access 
 | P4-6 | 설정: LocalNode `protocol=IPSEC`+`client_port`, access service `sec_mechanisms`(NAT 상호배제), `Setup.Ipsec.*` | `csp/config/config_template.json`, `csp/SipServerSetup.{h,cpp}`, `csp/CspServiceMap.{h,cpp}` |
 | P4-7 | 특권: `cims-priv setcap-net-admin <bin>` + agent 가 csp/cspsim 설치·기동 flip 마다 호출 | `agent/bin/cims-priv`, `agent/cims_agent.py` `_grant_ipsec_capability` |
 | P4-8 | CSC `/provisioning/me` `sip.security`/`sip.ipsec` | `csc/src/services/mcptt.py` |
-| P4-9 | 단말: `CSipIpsecClient`(포트쌍·SPI 제안, SA 설치, 식별 포트 전환, 회수), 등록 흐름 훅, cspsim 옵션 | `ext/psip/SipUserAgent/SipIpsec.{h,cpp}`, `SipServerInfo.{h,cpp}`, `SipUserAgentRegister.hpp`, `cspsim/SimSession.h`, `cspsim/CspsimMain.cpp` |
+| P4-9 | 단말: `CSipIpsecClient`(포트쌍·SPI 제안, SA 설치, port_ps 라우팅, 식별 포트 전환, 회수, TCP 리스너/소스포트), 등록 흐름 훅, cspsim 옵션(`-ipsec`, `-hold`, `RoutePort()`) | `ext/psip/SipUserAgent/SipIpsec.{h,cpp}`, `SipServerInfo.{h,cpp}`, `SipUserAgentRegister.hpp`, `cspsim/SimSession.{h,cpp}`, `cspsim/CspsimMain.cpp` |
+| P4-11 | psip 발신 TCP 소스 포트 bind — 스택 집합(`AddTcpSourcePort/SelectTcpSourcePort`), 플랫폼 `TcpConnectFrom(srcIp, srcPort, …)`, 클라 스레드 적용, 서버 port_pc 등록 | `ext/psip/SipStack/SipStack.{h,cpp}`, `SipTcpClientThread.cpp`, `ext/psip/SipPlatform/SipTcp.{h,cpp}`, `csp/CspListenerManager.cpp`, `tests/psip_tcp_srcport_test.cpp` |
 | P4-10 | verify `S3-SCN-IPSEC`/`S3-SCN-IPSEC-LIVE` + `sip_probe.probe_register_offer` | `verify/lib/items/stage3/scn_ipsec.py`, `verify/lib/common/sip_probe.py` |
 
-잔여: psip TCP 발신 소스포트 bind(보호 포트쌍 위 TCP 는 UDP 검증 뒤), 실설치 검증(S3-SCN-IPSEC-LIVE — dev 는 `cims`
-계정에 `CAP_NET_ADMIN`·unprivileged userns 모두 없어 SKIP), 비-REGISTER 게이트의 "등록 유지 중 비보호 요청 403" 자동화
-(cspsim register 시나리오가 즉시 해제한다), Android(범위 밖).
+잔여: 실설치 검증(S3-SCN-IPSEC-LIVE V21~V26 — dev 는 `cims` 계정에 `CAP_NET_ADMIN`·unprivileged userns 모두 없어
+SKIP. TCP 재인증의 구 연결은 구 SA 회수 뒤 수신 타임아웃으로 닫히는 것까지 실측 대상), Android(범위 밖).
 
 ### 8.4 psip 확장 (단계 무관)
 

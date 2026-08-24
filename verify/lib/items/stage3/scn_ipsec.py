@@ -8,8 +8,10 @@ S3-SCN-IPSEC (V19·V20 — 커널 특권 불필요): 초기 REGISTER 의 `Securi
     환경에 IPSEC Local Node + CSP `ipsec: available` 이 있으면 NAT 흔적 없는 제안이 `ipsec-3gpp` 를
     받는 양성 대조를 함께 본다. AKA 컬럼(migrate_subscription_aka.sql)·AuC 설정이 없으면 V19 는 생략.
 
-S3-SCN-IPSEC-LIVE (V21~V23 — cspsim `-ipsec`, CAP_NET_ADMIN 필요): 전제(AKA 환경·IPSEC Local Node·
+S3-SCN-IPSEC-LIVE (V21~V23·V25·V26 — cspsim `-ipsec`, CAP_NET_ADMIN 필요): 전제(AKA 환경·IPSEC Local Node·
 cspsim capability·CSP ipsec 가용)가 없으면 SKIP.
+  · V25 등록 유지 중(`-hold`) 비보호 포트(5060)로 온 같은 신원의 MESSAGE / 제안 없는 REGISTER → 403 (게이트).
+  · V26 `-transport tcp` — 보호 포트쌍 위 TCP(port_uc → port_ps 소스포트 bind) 등록 200.
 """
 from __future__ import annotations
 
@@ -172,7 +174,7 @@ def ipsec_offer(ctx: VerifyContext) -> ItemResult:
 @verify_item(
     id="S3-SCN-IPSEC-LIVE",
     stage=3, category="시나리오",
-    name="IMS AKA+IPsec 등록 (cspsim -ipsec: SA 위 200 / Verify 변조 494 / 해제 회수 — V21~V23)",
+    name="IMS AKA+IPsec 등록 (cspsim -ipsec: SA 위 200 / 유지 중 비보호 403 / Verify 변조 494 / 해제 회수 / TCP — V21~V26)",
     depends_on=["S3-SEED"],
     presets=["stage3-full", "pipeline-full"],
     side_effects=["sim-call", "db-write"], timeout_s=120,
@@ -182,8 +184,8 @@ def ipsec_live(ctx: VerifyContext) -> ItemResult:
     s = ctx.state
     user = s.get("VOIP_USER", "")
     domain = s.get("VOIP_DOM", VOLTE_DOMAIN)
-    rid, rname = "S3-SCN-IPSEC-LIVE", "IMS AKA+IPsec 등록 (V21~V23)"
-    ctx.w("### S3-SCN-IPSEC-LIVE — IMS AKA+IPsec 등록 (V21~V23)")
+    rid, rname = "S3-SCN-IPSEC-LIVE", "IMS AKA+IPsec 등록 (V21~V26)"
+    ctx.w("### S3-SCN-IPSEC-LIVE — IMS AKA+IPsec 등록 (V21~V26)")
 
     def skip(reason: str) -> ItemResult:
         ctx.w(f"- [SKIP] {reason}")
@@ -218,18 +220,37 @@ def ipsec_live(ctx: VerifyContext) -> ItemResult:
             "-aka_k", _K, "-aka_opc", _OPC, "-ipsec"]
     if s.get("VOIP_AUTH"):
         base += ["-auth_id", s["VOIP_AUTH"]]
+
+    # V25 — 등록 유지 창(-hold)에서 비보호 포트로 프로브. cspsim 의 "registration held" 마커에 반응한다.
+    held: dict = {}
+
+    def on_line(line: str) -> None:
+        if "registration held" in line and "msg" not in held:
+            held["msg"] = sip_probe.probe_nonregister(ctx.sim_ip, _CSP_SIP_PORT, user, domain, ctx.sim_ip)
+            held["reg"] = sip_probe.probe_register(ctx.sim_ip, _CSP_SIP_PORT, user, domain, ctx.sim_ip)
+
     try:
         _write_row(db_cfg, user, ("aka", ks.encrypt(kek, bytes.fromhex(_K)),
                                   ks.encrypt(kek, bytes.fromhex(_OPC)), 0, "8000"))
         notify_csp_event("USER_CHANGED", uri=f"tel:{user}", action="PUT", ip=ctx.sim_ip)
         time.sleep(1.0)
-        rc, out = run_cspsim(ctx.repo_root, base, timeout=60)
+        rc, out = run_cspsim(ctx.repo_root, base + ["-hold", "6"], timeout=75, on_line=on_line)
         chk("V21 cspsim -ipsec 등록 (SA 설치 → 답안 → 200)", rc == 0 and "registered over SA" in out,
             f"rc={rc}", "rc=0 + 'registered over SA'")
+        chk("V25a 등록 유지 중 비보호 포트 MESSAGE", held.get("msg") == 403, str(held.get("msg") or "무응답/미실행"),
+            "403 (보호 채널 밖)")
+        chk("V25b 등록 유지 중 비보호 포트 제안 없는 REGISTER", held.get("reg") == 403,
+            str(held.get("reg") or "무응답/미실행"), "403 (게이트)")
         chk("V23 해제 후 단말 SA 회수", "sa set released" in out, "로그", "'sa set released'")
         rc, out = run_cspsim(ctx.repo_root, base + ["-sec_verify", "tls;q=0.1"], timeout=60)
         chk("V22 Security-Verify 변조", rc != 0 or "registered over SA" not in out, f"rc={rc}",
             "등록 실패 (서버 494)")
+        base_tcp = [a for a in base if a != "udp"]
+        base_tcp[base_tcp.index("-transport") + 1:base_tcp.index("-transport") + 1] = ["tcp"]
+        rc, out = run_cspsim(ctx.repo_root, base_tcp, timeout=60)
+        chk("V26 -transport tcp 등록 (port_uc → port_ps 소스포트 bind, SA 위 200)",
+            rc == 0 and "registered over SA" in out and "(tcp)" in out, f"rc={rc}",
+            "rc=0 + 'registered over SA … (tcp)'")
     except Exception as e:
         checks.append(False)
         lines.append(f"- [FAIL] 예외: {type(e).__name__}: {e}")

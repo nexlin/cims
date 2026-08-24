@@ -1,6 +1,8 @@
 import { api } from './client'
 
 export type SipTransport = 'UDP' | 'TCP' | 'TLS'
+// 인증 체계 (sip_access_security.md §8.2) — digest=SIP Digest(H(A1)) / aka=IMS AKA(K/OPc, 보호 채널 강제)
+export type AuthScheme = 'digest' | 'aka'
 
 export interface Subscription {
   id: string          // MSISDN of this line
@@ -13,6 +15,12 @@ export interface Subscription {
   imsi?: string | null          // SIM IMSI — 인증 username 의 user 파트. 번호 add 시 필수.
   // 채널 정책 — TLS=서버 집행(비-TLS 채널의 이 번호 요청은 REGISTER 포함 403) / UDP·TCP=프로비저닝 힌트 / null=단말 선택
   sip_transport?: SipTransport | null
+  // 인증 체계 — 응답은 auth_scheme + aka_provisioned(K/OPc 보관 여부)만. K/OPc 는 입력 전용(응답에 절대 미포함),
+  //   보내면 SQN 이 0 으로 리셋된다. AKA 컬럼 미적용 DB 에서는 두 키가 응답에 없다.
+  auth_scheme?: AuthScheme
+  aka_provisioned?: boolean
+  k?: string        // hex32, 입력 전용
+  opc?: string      // hex32, 입력 전용
   register_time?: string | null
   logout_time?: string | null
   mcptt_profile?: McpttProfile | null   // PTT 번호에만 (상세 응답 동봉, 미설정=null → 기본값)

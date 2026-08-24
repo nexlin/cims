@@ -92,6 +92,19 @@
       "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 가입자 sip_transport 정책과 단말 TLS 프로비저닝 확인"
     },
     {
+      "type": "security_violation",
+      "code": "A-SEC-004",
+      "perceived_severity": "major",
+      "event_type": "securityServiceOrMechanismViolation",
+      "probable_cause": "unauthorizedAccessAttempt",
+      "mo_class": "service",
+      "metric": "sec-agree 협상 거절 반복 (RFC 3329 494/421 건수/윈도우 — 소스 IP 동반)",
+      "msg_open": "Security agreement rejections surging: {count} sec-agree failures (494/421) in {window}s (top source {ip})",
+      "msg_close": "Security agreement rejections subsided ({mo})",
+      "effect": "보안 메커니즘 강등(Security-Verify 변조) 시도 또는 단말 대량 오설정(제안 없음·Verify 생략) 진행 — 거절 요청 자체는 494/421 로 차단 중",
+      "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 단말의 Security-Client/Verify 구현과 Setup.SecAgree.Require 정책 확인"
+    },
+    {
       "type": "cert_expiring",
       "code": "A-PRC-009",
       "perceived_severity": "warning",

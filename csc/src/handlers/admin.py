@@ -483,22 +483,26 @@ async def _list_subscriptions(person_id: str, svc: str, config):
 #   CSC 가 인증 자료의 유일한 쓰기 주체(HSS 역할). 저장 형식은 H(A1) 이고 평문 passwd 는
 #   요청 본문에만 존재한다. H(A1) 은 (imsi, 서비스 domain/realm) 에 결박되므로 그 둘이 바뀌면
 #   passwd 재입력 없이는 갱신할 수 없다(400).
-#   passwd 컬럼에는 쓰지 않는다(§4.7 ⑤) — ha1 미적용 구 스키마 DB 에서만 passwd 저장 fallback.
+#   passwd 컬럼은 없다(§4.7 ⑥ DROP) — ha1 컬럼이 없는(마이그레이션 미적용) DB 에서는 자격 저장을 거부한다(503).
 
 _SIP_TRANSPORTS = ('UDP', 'TCP', 'TLS')
-_HAS_HA1_COL = None   # 과도기 컬럼 프로브 캐시 (프로세스 수명). None=미확인
+_HAS_HA1_COL = None   # 컬럼 프로브 캐시 (프로세스 수명). None=미확인
 
 
 def _has_ha1_column(cur) -> bool:
-    """subscriptions.ha1 존재 여부 — migrate_subscription_ha1.sql 미적용 DB 에서는 ha1 을 쓰지 않고
-    passwd 만 저장한다(CSP 도 같은 프로브로 passwd fallback). 한 번 확인하면 캐시한다."""
+    """subscriptions.ha1 존재 여부 — migrate_subscription_ha1.sql 미적용 DB 에서는 자격을 저장할 곳이 없다
+    (평문 passwd 컬럼은 DROP 됐다, §4.7 ⑥). 한 번 확인하면 캐시한다."""
     global _HAS_HA1_COL
     if _HAS_HA1_COL is None:
         cur.execute("SHOW COLUMNS FROM volte_subscriptions LIKE 'ha1'")
         _HAS_HA1_COL = cur.fetchone() is not None
         if not _HAS_HA1_COL:
-            _logger.log_warning("subscriptions.ha1 column absent — migrate_subscription_ha1.sql 미적용, passwd 만 저장")
+            _logger.log_warning("subscriptions.ha1 column absent — migrate_subscription_ha1.sql 미적용, SIP 자격 저장 불가")
     return _HAS_HA1_COL
+
+
+_HA1_SCHEMA_ERROR = {'error': 'schema_not_migrated',
+                     'detail': 'subscriptions.ha1 column absent — sql/migrate_subscription_ha1.sql not applied'}
 
 
 def _service_realm(service_ref):
@@ -636,18 +640,13 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 return aka
             aka_cols = ''.join(', ' + f.split('=')[0] for f in aka[0])
             aka_ph = ',%s' * len(aka[1])
-            if _has_ha1_column(cur):
-                cur.execute(
-                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id{aka_cols}) "
-                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{aka_ph})",
-                    (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *aka[1])
-                )
-            else:
-                cur.execute(
-                    f"INSERT INTO {table} (id, user_id, service_ref, imsi, passwd, sip_transport, dnd, forward_id) "
-                    f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (msisdn, person_id, service_ref, imsi, passwd, sip_transport, dnd, forward_id)
-                )
+            if not _has_ha1_column(cur):
+                return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
+            cur.execute(
+                f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id{aka_cols}) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{aka_ph})",
+                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *aka[1])
+            )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
 
@@ -706,10 +705,9 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                 realm = _service_realm(new_ref)
                 if realm is None:
                     return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
-                if _has_ha1_column(cur):
-                    fields.append("ha1=%s"); values.append(_digest_ha1(new_imsi, realm[0], realm[1], passwd))
-                else:
-                    fields.append("passwd=%s"); values.append(passwd)
+                if not _has_ha1_column(cur):
+                    return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
+                fields.append("ha1=%s"); values.append(_digest_ha1(new_imsi, realm[0], realm[1], passwd))
             fields += aka[0]; values += aka[1]
             values.extend([msisdn, person_id])
 
@@ -1664,6 +1662,8 @@ CIMS_ADMIN_API_DOCS = [
           'body': {'error': 'service_ref required to derive ha1 (unknown service)'}},
          {'status': 400, 'when': 'sip_transport 값 오류', 'body': {'error': 'sip_transport must be one of UDP/TCP/TLS'}},
          {'status': 400, 'when': 'auth_scheme=aka 인데 k/opc(op) 없음', 'body': {'error': 'k and opc (or op) required for auth_scheme=aka'}},
+         {'status': 503, 'when': 'subscriptions.ha1 컬럼 없음 (migrate_subscription_ha1.sql 미적용 — 자격 저장처 부재)',
+          'body': {'error': 'schema_not_migrated'}},
          {'status': 400, 'when': 'k/opc/op/amf 형식 오류', 'body': {'error': 'bad_key_material'}},
          {'status': 503, 'when': 'AKA 키 입력인데 csc.json AuC.Kek 미설정', 'body': {'error': 'auc_disabled'}},
          {'status': 404, 'when': '없는 가입자', 'body': {'error': 'User not found'}},

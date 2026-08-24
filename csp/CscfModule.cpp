@@ -32,7 +32,7 @@
 #include "SipServer.h"
 #include "SipServerSetup.h"
 #include "SipStackThread.h"   // GetCurrentInboundListenerId()
-#include "SipStatsMonitor.h"  // AddChannelPolicyViolation (A-SEC-003)
+#include "SipStatsMonitor.h"  // AddChannelPolicyViolation (A-SEC-003) / AddSecAgreeReject (A-SEC-004)
 #include "SipUtility.h"
 #include "StringUtility.h"
 #include "SubscriptionManager.h"
@@ -104,6 +104,8 @@ bool CCscfModule::SendSecAgreeReject( CSipMessage *pclsMessage, int iStatusCode,
     // 협상 재시작 — 새 서버 목록을 함께 준다 (494/421 모두 Security-Server 동봉, RFC 3329 §2.2/§2.3).
     const std::string strServer = gclsSecAgreeMap.Issue( strUser );
     pclsResponse->AddHeader( "Security-Server", strServer.c_str() );
+    // 반복 거절 계수 (A-SEC-004) — SipStatsMonitor 가 윈도우당 건수를 Setup.SipStats.SecAgreeRejectMajor 로 평가
+    gclsSipStatsMonitor.AddSecAgreeReject( pclsMessage->m_strClientIp.c_str() );
     CLog::Print( LOG_INFO, "sec-agree reject user=%s transport=%d src=%s:%d → %d (%s)", strUser.c_str(),
                  pclsMessage->m_eTransport, pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort, iStatusCode,
                  pszReason );
@@ -242,10 +244,11 @@ bool CCscfModule::SendRegisterChallenge( CSipMessage *pclsMessage, const std::st
 }
 
 /**
- * @brief 가입자의 H(A1) 을 돌려준다 — 저장값(ha1) 우선, 비어 있으면 평문 passwd 로 종전 계산(과도기).
+ * @brief 가입자의 H(A1) 을 돌려준다 — 저장값(ha1) 우선, 비어 있으면 평문 passwd 로 계산.
  *
- * H(A1) = MD5(impi:realm:password). sip_access_security.md §4.2 의 배포 순서 계약 ①~③ 구간에서
- * 양쪽 형식을 흡수한다. 둘 다 비어 있으면 빈 문자열(인증 불가).
+ * H(A1) = MD5(impi:realm:password). DB 가입자는 ha1 만 실린다(passwd 컬럼은 읽지 않는다 —
+ * sip_access_security.md §4.7 ⑥); passwd 경로는 JSON 파일 fallback(csp/User) 전용이다.
+ * 둘 다 비어 있으면 빈 문자열(인증 불가).
  */
 std::string CCscfModule::EffectiveHa1( const CspUser &clsUser, const std::string &strImpi,
                                        const std::string &strRealm ) {

@@ -90,8 +90,9 @@ void CDbManager::ProbeSchema() {
     if ( pRes ) mysql_free_result( pRes );
     if ( !m_bHasHa1Column )
         CLog::Print( LOG_ERROR,
-                     "[DB] subscriptions.ha1 column absent — migrate_subscription_ha1.sql 미적용. Digest 는 passwd "
-                     "fallback 으로 동작한다 (sip_access_security.md §4.7 ①)" );
+                     "[DB] subscriptions.ha1 column absent — migrate_subscription_ha1.sql 미적용. DB 가입자는 H(A1) "
+                     "이 없어 Digest 인증이 성립하지 않는다 (평문 passwd 는 더 이상 읽지 않는다 — "
+                     "sip_access_security.md §4.7 ⑥)" );
     // AKA (auth_scheme/k_enc/opc_enc/sqn/amf) — 미적용이면 전 가입자 digest 로 취급 (INFO — 선택 기능).
     pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'auth_scheme'" );
     m_bHasAkaColumns = pRes && mysql_num_rows( pRes ) > 0;
@@ -260,7 +261,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     // Try call users first (query by subscription MSISDN = id)
     //  v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
     std::string strSql =
-        "SELECT cu.id, u.name, u.org_id, cu.passwd, cu.dnd, cu.forward_id, u.id AS person_id, "
+        "SELECT cu.id, u.name, u.org_id, cu.dnd, cu.forward_id, u.id AS person_id, "
         "       COALESCE(cu.service_ref,''), COALESCE(cu.imsi,''), " +
         Ha1Col( "cu" ) + ", COALESCE(cu.sip_transport,''), " + AuthSchemeCol( "cu" ) +
         " FROM volte_subscriptions cu JOIN users u ON cu.user_id = u.id "
@@ -277,7 +278,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
 
         // Try PTT users
         strSql =
-            "SELECT pu.id, u.name, u.org_id, pu.passwd, pu.dnd, pu.forward_id, u.id AS person_id, "
+            "SELECT pu.id, u.name, u.org_id, pu.dnd, pu.forward_id, u.id AS person_id, "
             "       COALESCE(pu.service_ref,''), COALESCE(pu.imsi,''), " +
             Ha1Col( "pu" ) + ", COALESCE(pu.sip_transport,''), " + AuthSchemeCol( "pu" ) +
             " FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
@@ -299,16 +300,15 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     clsUser.m_strServiceType = strServiceType;
     clsUser.m_strName = row[1] ? row[1] : "";
     clsUser.m_strOrganizationId = row[2] ? row[2] : "";
-    clsUser.m_strPassWord = row[3] ? row[3] : "";
-    clsUser.m_bDnd = row[4] ? ( atoi( row[4] ) != 0 ) : false;
-    clsUser.m_strForward = row[5] ? row[5] : "";
-    // row[6] = person_id (users.id) used for reject list lookup
-    std::string strPersonId = row[6] ? row[6] : strUserId;
-    clsUser.m_strServiceRef = row[7] ? row[7] : "";
-    clsUser.m_strImsi = row[8] ? row[8] : "";
-    clsUser.m_strHa1 = row[9] ? row[9] : "";
-    clsUser.m_strSipTransport = row[10] ? row[10] : "";
-    clsUser.m_strAuthScheme = row[11] ? row[11] : "digest";
+    clsUser.m_bDnd = row[3] ? ( atoi( row[3] ) != 0 ) : false;
+    clsUser.m_strForward = row[4] ? row[4] : "";
+    // row[5] = person_id (users.id) used for reject list lookup
+    std::string strPersonId = row[5] ? row[5] : strUserId;
+    clsUser.m_strServiceRef = row[6] ? row[6] : "";
+    clsUser.m_strImsi = row[7] ? row[7] : "";
+    clsUser.m_strHa1 = row[8] ? row[8] : "";
+    clsUser.m_strSipTransport = row[9] ? row[9] : "";
+    clsUser.m_strAuthScheme = row[10] ? row[10] : "digest";
     clsUser._loadTime = time( nullptr );
 
     mysql_free_result( pRes );
@@ -483,7 +483,7 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
     for ( int i = 0; i < 2; ++i ) {
         // v3 (2026-04-22): service_id INT → service_ref VARCHAR (access_services.name 참조)
         std::string strSql = std::string(
-                                 "SELECT s.id, u.name, u.org_id, s.passwd, s.dnd, s.forward_id, u.id, "
+                                 "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id, "
                                  "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
                                  "       " ) +
                              Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + " FROM " +
@@ -499,14 +499,13 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
             clsUser.m_strServiceType = aTypes[i];
             clsUser.m_strName = row[1] ? row[1] : "";
             clsUser.m_strOrganizationId = row[2] ? row[2] : "";
-            clsUser.m_strPassWord = row[3] ? row[3] : "";
-            clsUser.m_bDnd = row[4] ? ( atoi( row[4] ) != 0 ) : false;
-            clsUser.m_strForward = row[5] ? row[5] : "";
-            clsUser.m_strServiceRef = row[7] ? row[7] : "";
-            clsUser.m_strImsi = row[8] ? row[8] : "";
-            clsUser.m_strHa1 = row[9] ? row[9] : "";
-            clsUser.m_strSipTransport = row[10] ? row[10] : "";
-            clsUser.m_strAuthScheme = row[11] ? row[11] : "digest";
+            clsUser.m_bDnd = row[3] ? ( atoi( row[3] ) != 0 ) : false;
+            clsUser.m_strForward = row[4] ? row[4] : "";
+            clsUser.m_strServiceRef = row[6] ? row[6] : "";
+            clsUser.m_strImsi = row[7] ? row[7] : "";
+            clsUser.m_strHa1 = row[8] ? row[8] : "";
+            clsUser.m_strSipTransport = row[9] ? row[9] : "";
+            clsUser.m_strAuthScheme = row[10] ? row[10] : "digest";
             clsUser._loadTime = time( nullptr );
             if ( !clsUser.m_strId.empty() ) {
                 clsMap.Insert( clsUser );

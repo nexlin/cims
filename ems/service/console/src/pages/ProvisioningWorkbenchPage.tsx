@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
-import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type ImportResult } from '@core/api/users'
+import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
 import OrgTreePanel from '@core/components/OrgTreePanel'
@@ -545,7 +545,36 @@ function SvcBadge({ svc }: { svc: 'call' | 'ptt' }) {
   return <span className={`badge ${svc === 'call' ? 'badge--blue' : 'badge--green'}`} style={{ fontSize: 9 }}>{svc === 'call' ? 'VoLTE' : 'McPTT'}</span>
 }
 
-interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; dnd: boolean; forward_id: string }
+interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string; dnd: boolean; forward_id: string }
+
+// 인증 체계 (sip_access_security.md §8.2) — aka 는 K/OPc(hex32) 를 CSC AuC 가 암호화 보관, 보호 채널(TLS/IPsec) 강제.
+//   K/OPc 는 응답에 오지 않는다(aka_provisioned 로 보관 여부만) — 입력 시에만 전송, 전송하면 SQN 0 리셋.
+const HEX32 = /^[0-9a-fA-F]{32}$/
+function AuthSelect({ value, onChange }: { value: AuthScheme | undefined; onChange: (v: AuthScheme) => void }) {
+  return <select className="form-input" title="digest=SIP Digest(H(A1)) / aka=IMS AKA(K/OPc — 보호 채널 강제)" value={value || 'digest'} onChange={e => onChange(e.target.value as AuthScheme)}>
+    <option value="digest">Digest</option><option value="aka">AKA</option>
+  </select>
+}
+function AuthBadge({ sub }: { sub: Subscription }) {
+  if (sub.auth_scheme !== 'aka') return <span className="ts">Digest</span>
+  return <span className={`badge ${sub.aka_provisioned ? 'badge--green' : 'badge--red'}`} style={{ fontSize: 9 }}
+    title={sub.aka_provisioned ? 'IMS AKA — K/OPc 보관됨, 보호 채널(TLS/IPsec) 강제' : 'IMS AKA — K/OPc 미보관(등록 불가)'}>AKA{sub.aka_provisioned ? '' : ' ⚠'}</span>
+}
+// K/OPc 입력 — 편집 시 비우면 보관 키 유지(aka_provisioned 일 때). 둘 다 hex32.
+function AkaKeyInputs({ k, opc, keep, onChange }: { k: string; opc: string; keep?: boolean; onChange: (k: string, opc: string) => void }) {
+  return <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 3 }}>
+    <input className="form-input" placeholder={keep ? 'K (미변경)' : 'K hex32 *'} value={k} onChange={e => onChange(e.target.value.trim(), opc)} style={{ fontFamily: 'monospace', fontSize: 11 }} />
+    <input className="form-input" placeholder={keep ? 'OPc (미변경)' : 'OPc hex32 *'} value={opc} onChange={e => onChange(k, e.target.value.trim())} style={{ fontFamily: 'monospace', fontSize: 11 }} />
+  </div>
+}
+// 입력 검증 + 전송 본문의 AKA 필드. 오류면 문자열 반환.
+function akaBody(scheme: AuthScheme, k: string, opc: string, stored: boolean): { err?: string; fields: Partial<Subscription> } {
+  const fields: Partial<Subscription> = { auth_scheme: scheme }
+  if (scheme !== 'aka') return { fields }
+  if (!k && !opc) return stored ? { fields } : { err: 'AKA 는 K/OPc(hex32) 입력이 필요합니다', fields }
+  if (!HEX32.test(k) || !HEX32.test(opc)) return { err: 'K/OPc 는 32자리 16진수여야 합니다', fields }
+  return { fields: { ...fields, k, opc } }
+}
 
 // 채널 정책 선택 — 값의 의미는 Subscription.sip_transport 주석 참조
 const TRANSPORT_OPTS: Array<{ v: SipTransport | ''; label: string }> = [
@@ -570,7 +599,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
   ]
   const svcVal = (c: ServiceCat) => `${c.svc}:${c.ref}`
   const rk = (svc: 'call' | 'ptt', msisdn: string) => `${svc}:${msisdn}`
-  const newAdd = (): AddNum => ({ id: '', imsi: '', svcCat: catalog[0] ? svcVal(catalog[0]) : 'call:volte', passwd: '', sip_transport: '', dnd: false, forward_id: '' })
+  const newAdd = (): AddNum => ({ id: '', imsi: '', svcCat: catalog[0] ? svcVal(catalog[0]) : 'call:volte', passwd: '', sip_transport: '', auth_scheme: 'digest', k: '', opc: '', dnd: false, forward_id: '' })
 
   const [editKey, setEditKey] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Subscription>>({})
@@ -579,12 +608,17 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
 
   function startEdit(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
     setAdding(false); setEditKey(rk(r.svc, r.sub.id))
-    setEditForm({ imsi: r.sub.imsi || '', service_ref: r.sub.service_ref || '', passwd: '', sip_transport: r.sub.sip_transport || null, dnd: r.sub.dnd, forward_id: r.sub.forward_id })
+    setEditForm({ imsi: r.sub.imsi || '', service_ref: r.sub.service_ref || '', passwd: '', sip_transport: r.sub.sip_transport || null, auth_scheme: r.sub.auth_scheme || 'digest', k: '', opc: '', dnd: r.sub.dnd, forward_id: r.sub.forward_id })
   }
   async function saveEdit(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
     // passwd 는 변경 시에만 전송. imsi/service_ref 가 바뀌면 서버가 passwd 를 요구한다(H(A1) 결박).
     const d: Partial<Subscription> = { ...editForm }; if (!d.passwd) delete d.passwd
     if (!d.passwd && ((d.imsi || '') !== (r.sub.imsi || '') || (d.service_ref || '') !== (r.sub.service_ref || ''))) { show('IMSI/서비스 변경 시 비밀번호를 함께 입력해야 합니다 (H(A1) 재결박)', 'err'); return }
+    // AKA: 체계 변경/키 갱신만 전송 (키는 입력했을 때만 — 비우면 보관 키 유지)
+    const aka = akaBody(d.auth_scheme || 'digest', d.k || '', d.opc || '', !!r.sub.aka_provisioned)
+    if (aka.err) { show(aka.err, 'err'); return }
+    delete d.k; delete d.opc; delete d.auth_scheme
+    if ((aka.fields.auth_scheme || 'digest') !== (r.sub.auth_scheme || 'digest') || aka.fields.k) Object.assign(d, aka.fields)
     try { await usersApi.updateSub(user.id, r.svc, r.sub.id, d); show('수정', 'ok'); setEditKey(null); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
@@ -596,9 +630,12 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
   async function add() {
     if (!addForm.id) { show('MSISDN 필수', 'err'); return }
     if (!addForm.imsi) { show('IMSI 필수', 'err'); return }
-    if (!addForm.passwd) { show('비밀번호 필수', 'err'); return }
+    if (!addForm.passwd && addForm.auth_scheme !== 'aka') { show('비밀번호 필수', 'err'); return }
+    const aka = akaBody(addForm.auth_scheme, addForm.k, addForm.opc, false)
+    if (aka.err) { show(aka.err, 'err'); return }
     const [svc, ref] = addForm.svcCat.split(':') as ['call' | 'ptt', string]
-    const body: Partial<Subscription> = { id: addForm.id, imsi: addForm.imsi, service_ref: ref, passwd: addForm.passwd, sip_transport: addForm.sip_transport || null, dnd: addForm.dnd, forward_id: addForm.forward_id }
+    const body: Partial<Subscription> = { id: addForm.id, imsi: addForm.imsi, service_ref: ref, sip_transport: addForm.sip_transport || null, dnd: addForm.dnd, forward_id: addForm.forward_id, ...aka.fields }
+    if (addForm.passwd) body.passwd = addForm.passwd
     try { await usersApi.addSub(user.id, svc, body); show('추가', 'ok'); setAdding(false); setAddForm(newAdd()); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
@@ -617,13 +654,14 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
             <th style={{ width: 100 }}>비밀번호</th>
             <th>IMSI</th>
             <th style={{ width: 96 }} title="TLS=서버 집행(비-TLS 채널 요청 403) / UDP·TCP=단말 힌트 / 자유=단말 선택">채널</th>
+            <th style={{ width: 150 }} title="Digest=SIP Digest(H(A1)) / AKA=IMS AKA(K/OPc — CSC AuC 암호화 보관, 보호 채널 강제)">인증</th>
             <th style={{ width: 56, textAlign: 'center' }}>DND</th>
             <th style={{ width: 110 }}>착신전환</th>
             <th style={{ width: 110 }}></th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && !adding && <tr><td colSpan={8} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 ＋ 번호 추가</td></tr>}
+          {rows.length === 0 && !adding && <tr><td colSpan={9} className="empty-cell" style={{ padding: 12 }}>번호 없음 — 아래 ＋ 번호 추가</td></tr>}
           {rows.map(r => {
             const ed = editKey === rk(r.svc, r.sub.id)
             const isCall = r.svc === 'call'
@@ -639,6 +677,10 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 <td>{ed ? <input className="form-input" type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
                 <td>{ed ? <input className="form-input" placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</td>
                 <td>{ed ? <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} /> : <TransportBadge v={r.sub.sip_transport} />}</td>
+                <td>{ed ? <>
+                  <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
+                  {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
+                </> : <AuthBadge sub={r.sub} />}</td>
                 <td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</td>
                 <td>{!isCall ? <span className="ts">—</span> : ed ? <input className="form-input" placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</td>
                 <td className="actions">
@@ -659,9 +701,13 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 {catalog.map(c => <option key={svcVal(c)} value={svcVal(c)}>{c.ref} ({c.svc === 'call' ? 'VoLTE' : 'McPTT'})</option>)}
               </select></td>
               <td><input className="form-input" placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></td>
-              <td><input className="form-input" type="password" placeholder="암호 *" value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
+              <td><input className="form-input" type="password" placeholder={addForm.auth_scheme === 'aka' ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
               <td><input className="form-input" placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></td>
               <td><TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} /></td>
+              <td>
+                <AuthSelect value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
+                {addForm.auth_scheme === 'aka' && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
+              </td>
               <td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="ts">—</span>}</td>
               <td>{addIsCall ? <input className="form-input" placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</td>
               <td className="actions">
@@ -698,6 +744,9 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
   const [imsi, setImsi] = useState('')
   const [passwd, setPasswd] = useState('')
   const [sipTransport, setSipTransport] = useState<SipTransport | ''>('')
+  const [authScheme, setAuthScheme] = useState<AuthScheme>('digest')
+  const [akaK, setAkaK] = useState('')
+  const [akaOpc, setAkaOpc] = useState('')
   const [dnd, setDnd] = useState(false)
   const [forwardId, setForwardId] = useState('')
   const [busy, setBusy] = useState(false)
@@ -707,8 +756,11 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
     if (!pick) { show('가입자 선택 필수', 'err'); return }
     if (!msisdn) { show('MSISDN 필수', 'err'); return }
     if (!imsi) { show('IMSI 필수', 'err'); return }
-    if (!passwd) { show('비밀번호 필수', 'err'); return }
-    const body: Partial<Subscription> = { id: msisdn, imsi, service_ref: serviceRef, passwd, sip_transport: sipTransport || null, dnd, forward_id: forwardId }
+    if (!passwd && authScheme !== 'aka') { show('비밀번호 필수', 'err'); return }
+    const aka = akaBody(authScheme, akaK, akaOpc, false)
+    if (aka.err) { show(aka.err, 'err'); return }
+    const body: Partial<Subscription> = { id: msisdn, imsi, service_ref: serviceRef, sip_transport: sipTransport || null, dnd, forward_id: forwardId, ...aka.fields }
+    if (passwd) body.passwd = passwd
     setBusy(true)
     try { await usersApi.addSub(Number(pick.value), svc, body); show('번호 추가', 'ok'); onAdded() }
     catch (e: unknown) { show(String(e), 'err') } finally { setBusy(false) }
@@ -737,8 +789,10 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
         </Field>
         <Field label="MSISDN *" w={150}><input className="form-input" placeholder={isCall ? '+8213…' : '+825…'} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
         <Field label="IMSI *" w={170}><input className="form-input" placeholder="SIM IMSI" value={imsi} onChange={e => setImsi(e.target.value)} /></Field>
-        <Field label="암호 *" w={120}><input className="form-input" type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
+        <Field label={authScheme === 'aka' ? '암호' : '암호 *'} w={120}><input className="form-input" type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
         <Field label="채널" w={110}><TransportSelect value={sipTransport} onChange={setSipTransport} /></Field>
+        <Field label="인증" w={100}><AuthSelect value={authScheme} onChange={setAuthScheme} /></Field>
+        {authScheme === 'aka' && <Field label="K / OPc *" w={300}><AkaKeyInputs k={akaK} opc={akaOpc} onChange={(k, opc) => { setAkaK(k); setAkaOpc(opc) }} /></Field>}
         {isCall && <Field label="DND" w={56}><input type="checkbox" checked={dnd} onChange={e => setDnd(e.target.checked)} style={{ marginTop: 6 }} /></Field>}
         {isCall && <Field label="착신전환" w={130}><input className="form-input" placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

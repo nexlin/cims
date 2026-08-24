@@ -125,6 +125,7 @@ CSipServerSetup::CSipServerSetup()
       m_iSipStatsCpsCritical( 0 ),
       m_iSipStatsRxErrorMinor( 10 ),
       m_iSipStatsChannelPolicyMajor( 10 ),
+      m_iSipStatsSecAgreeRejectMajor( 10 ),
       m_bSecAgreeRequire( false ),
       m_iIpsecSpiMin( 0x10000000 ),
       m_iIpsecSpiMax( 0x1FFFFFFF ),
@@ -378,6 +379,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( st.Has( "RxErrorMinor" ) ) m_iSipStatsRxErrorMinor = (int)st.GetInt( "RxErrorMinor" );
                 if ( st.Has( "ChannelPolicyMajor" ) )
                     m_iSipStatsChannelPolicyMajor = (int)st.GetInt( "ChannelPolicyMajor" );
+                if ( st.Has( "SecAgreeRejectMajor" ) )
+                    m_iSipStatsSecAgreeRejectMajor = (int)st.GetInt( "SecAgreeRejectMajor" );
             }
 
             // RFC 3329 sec-agree (P2)

@@ -255,8 +255,9 @@ class TestSipStatsSelfReport(unittest.TestCase):
         for c in ('A-QOS-006', 'A-QOS-007', 'A-QOS-009', 'A-QOS-011'):
             self.assertIn(c, codes, f"csp fm_catalog 에 {c} 미선언")
             self.assertEqual(codes[c]['type'], 'threshold_crossed', c)
-        self.assertIn('A-SEC-003', codes, 'csp fm_catalog 에 A-SEC-003 미선언')
-        self.assertEqual(codes['A-SEC-003']['type'], 'security_violation')
+        for c in ('A-SEC-003', 'A-SEC-004'):
+            self.assertIn(c, codes, f'csp fm_catalog 에 {c} 미선언')
+            self.assertEqual(codes[c]['type'], 'security_violation', c)
 
     def test_payload_severity_and_escalation_change(self):
         ing, node, ent = self._ingest()

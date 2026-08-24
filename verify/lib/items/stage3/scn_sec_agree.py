@@ -60,15 +60,14 @@ def sec_agree(ctx: VerifyContext) -> ItemResult:
     domain = s.get("VOIP_DOM", VOLTE_DOMAIN)
     auth_user = s.get("VOIP_AUTH", "") or user
     ha1 = s.get("VOIP_HA1", "")
-    pwd = s.get("VOIP_PWD", "")
     rid, rname = "S3-SCN-SEC-AGREE", "sec-agree 협상 (V9~V12)"
     ctx.w("### S3-SCN-SEC-AGREE — RFC 3329 sec-agree 협상 (V9~V12)")
     if not user:
         ctx.w("- [SKIP] VOIP_USER 미준비 (S3-SEED 선행)")
         ctx.w()
         return ItemResult(id=rid, name=rname, status=ItemStatus.SKIP, detail="VOIP_USER 미준비", stage=3)
-    if not (ha1 or pwd):
-        ctx.w("- [SKIP] 자격 없음 (VOIP_HA1/VOIP_PWD)")
+    if not ha1:
+        ctx.w("- [SKIP] 자격 없음 (VOIP_HA1)")
         ctx.w()
         return ItemResult(id=rid, name=rname, status=ItemStatus.SKIP, detail="자격 없음", stage=3)
 
@@ -84,7 +83,7 @@ def sec_agree(ctx: VerifyContext) -> ItemResult:
     sess = None
     try:
         sess = sip_probe.SecAgreeTlsSession(ctx.sim_ip, tls_port, ctx.sim_ip)
-        r = sess.register(user, domain, auth_user, ha1, pwd)
+        r = sess.register(user, domain, auth_user, ha1, "")
         chk("V9 초기 REGISTER(Security-Client/Require)", r["first"] == 401 and bool(r["security_server"]),
             f"{r['first'] or '무응답'} Security-Server={r['security_server'] or '없음'}", "401 + Security-Server")
         chk("V9 재-REGISTER(Security-Verify echo, TLS)", r["second"] == 200,
@@ -93,7 +92,7 @@ def sec_agree(ctx: VerifyContext) -> ItemResult:
             r["service_route"] or "없음", ";transport=tls 포함")
         gate = sip_probe.probe_nonregister(ctx.sim_ip, _CSP_SIP_PORT, user, domain, ctx.sim_ip)
         chk("V9 협상 등록 유지 중 UDP MESSAGE", gate == 403, f"{gate or '무응답'}", "403 (협상 결과의 게이트 합류)")
-        u = sess.register(user, domain, auth_user, ha1, pwd, expires=0)
+        u = sess.register(user, domain, auth_user, ha1, "", expires=0)
         chk("V9 등록 해제(Expires 0, Security-Verify)", u["second"] == 200, f"{u['second'] or '무응답'}", "200")
         after = sip_probe.probe_nonregister(ctx.sim_ip, _CSP_SIP_PORT, user, domain, ctx.sim_ip)
         chk("V9 해제 후 UDP MESSAGE", after == 401, f"{after or '무응답'}", "401 (게이트 복원)")
@@ -113,7 +112,7 @@ def sec_agree(ctx: VerifyContext) -> ItemResult:
         try:
             sx = sip_probe.SecAgreeTlsSession(ctx.sim_ip, tls_port, ctx.sim_ip)
             try:
-                rx = sx.register(user, domain, auth_user, ha1, pwd, **kwargs)
+                rx = sx.register(user, domain, auth_user, ha1, "", **kwargs)
             finally:
                 sx.close()
             got = rx[key]

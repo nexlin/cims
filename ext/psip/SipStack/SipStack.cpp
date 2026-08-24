@@ -855,6 +855,34 @@ bool CSipStack::IsFlowAlive( const char * pszIp, int iPort, ESipTransport eTrans
 	return true;
 }
 
+void CSipStack::AddTcpSourcePort( int iPort )
+{
+	if( iPort <= 0 ) return;
+	m_clsTcpSourcePortMutex.acquire();
+	m_setTcpSourcePort.insert( iPort );
+	m_clsTcpSourcePortMutex.release();
+	CLog::Print( LOG_INFO, "AddTcpSourcePort %d", iPort );
+}
+
+void CSipStack::RemoveTcpSourcePort( int iPort )
+{
+	m_clsTcpSourcePortMutex.acquire();
+	m_setTcpSourcePort.erase( iPort );
+	m_clsTcpSourcePortMutex.release();
+}
+
+int CSipStack::SelectTcpSourcePort( CSipMessage * pclsMessage )
+{
+	if( pclsMessage == NULL || pclsMessage->IsRequest() == false || pclsMessage->m_clsViaList.empty() ) return 0;
+	const int iViaPort = pclsMessage->m_clsViaList.front().m_iPort;
+	if( iViaPort <= 0 ) return 0;
+	int iRes = 0;
+	m_clsTcpSourcePortMutex.acquire();
+	if( m_setTcpSourcePort.find( iViaPort ) != m_setTcpSourcePort.end() ) iRes = iViaPort;
+	m_clsTcpSourcePortMutex.release();
+	return iRes;
+}
+
 bool CSipStack::AddTcpListener( int iExtId, const char* pszBindIp, int iPort, int& outId )
 {
 	if( !m_bStarted ) return false;

@@ -160,6 +160,10 @@ public:
     std::string  m_strHa1;   // H(A1) — 비어 있지 않으면 m_strPwd 대신 Digest 응답 계산에 사용
     std::string  m_strServerIp;
     int          m_iServerPort;
+    // IPsec 등록(-ipsec) 뒤 요청 목적지 = 서버 보호 포트 port_ps (EventRegister 200 에서 UA 의 SA 셋에서 얻음).
+    //   0 이면 m_iServerPort. TS 33.203 §7.1 — 단말 요청은 port_uc → port_ps (SA 1).
+    int          m_iRoutePort = 0;
+    int          RoutePort() const { return m_iRoutePort > 0 ? m_iRoutePort : m_iServerPort; }
     std::string  m_strLocalIp;
     int          m_iLocalPort;
     bool         m_bPttMode;

@@ -164,6 +164,7 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 | `A-PRC-002` | storage_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 후보: 녹취 쓰기 실패 |
 | `A-QOS-006/007/009/011` | threshold_crossed | qualityOfService | CSP SIP 신호 통계 — 호/등록 성공률·신규 INVITE CPS·SIP 수신 이상 (`<서버명>/csp/{calls/success_rate, reg/success_rate, cps, sip/rx_error}`). 윈도우/단계 임계는 `Setup.SipStats.*`(모듈 설정 소유), 통지가 `perceived_severity` 를 동반 — 단계 승격/완화는 open 재통지(action=change) |
 | `A-SEC-003` | security_violation | securityServiceOrMechanismViolation (X.736) | CSP 채널 정책(TLS 강제) 위반 반복 — 게이트 403 건수의 윈도우 급증 (`<서버명>/csp/channel_policy`, 소스 IP 동반). 임계는 `Setup.SipStats.ChannelPolicyMajor`(기본 10, 0=off), 단일 단계 major — 평가는 SipStatsMonitor 동일 윈도우 |
+| `A-SEC-004` | security_violation | securityServiceOrMechanismViolation (X.736) | CSP sec-agree(RFC 3329) 협상 거절 반복 — 494(변조·제안 없음·Verify 생략)/421(정책상 협상 필수) 건수의 윈도우 급증 (`<서버명>/csp/sec_agree`, 소스 IP 동반). 임계는 `Setup.SipStats.SecAgreeRejectMajor`(기본 10, 0=off), 단일 단계 major — A-SEC-003 과 같은 소스 계수기·윈도우 |
 
 새 *조건* 클래스 후보(미구현): `overload`(CSP 제어평면 과부하 차단 발동 — 차단 로직 자체가
 미구현), 포트 bind 실패(기동 실패 = 프로세스 사망 → L1 process_down(agent) 소관, §1 원칙).

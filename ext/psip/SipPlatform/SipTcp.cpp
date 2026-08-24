@@ -102,6 +102,11 @@ bool GetIpByName( const char * szHostName, char * szIp, int iLen )
  */
 Socket TcpConnectFrom( const char * pszSrcIp, const char * pszIp, int iPort, int iTimeout )
 {
+	return TcpConnectFrom( pszSrcIp, 0, pszIp, iPort, iTimeout );
+}
+
+Socket TcpConnectFrom( const char * pszSrcIp, int iSrcPort, const char * pszIp, int iPort, int iTimeout )
+{
 	char		szIp[INET6_ADDRSTRLEN];
 	Socket	fd;
 
@@ -118,6 +123,7 @@ Socket TcpConnectFrom( const char * pszSrcIp, const char * pszIp, int iPort, int
 	}
 
 	bool bHaveSrc = ( pszSrcIp && *pszSrcIp && strcmp(pszSrcIp, "0.0.0.0") != 0 );
+	if( iSrcPort > 0 ) bHaveSrc = true;  // 소스 포트만 지정되면 IP 는 INADDR_ANY 로 bind
 	bool bIpv6 = ( strstr( szIp, ":" ) != NULL );
 
 #ifndef WINXP
@@ -130,8 +136,14 @@ Socket TcpConnectFrom( const char * pszSrcIp, const char * pszIp, int iPort, int
 			struct sockaddr_in6 src;
 			memset( &src, 0, sizeof(src) );
 			src.sin6_family = AF_INET6;
-			src.sin6_port = 0;
-			inet_pton( AF_INET6, pszSrcIp, &src.sin6_addr );
+			src.sin6_port = htons( iSrcPort > 0 ? iSrcPort : 0 );
+			if( pszSrcIp && *pszSrcIp && strcmp(pszSrcIp, "0.0.0.0") != 0 ) inet_pton( AF_INET6, pszSrcIp, &src.sin6_addr );
+			else src.sin6_addr = in6addr_any;
+			if( iSrcPort > 0 )
+			{
+				const int on = 1;
+				setsockopt( fd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on) );
+			}
 			if( bind( fd, (struct sockaddr*)&src, sizeof(src) ) == SOCKET_ERROR )
 			{
 				closesocket( fd );
@@ -167,12 +179,21 @@ Socket TcpConnectFrom( const char * pszSrcIp, const char * pszIp, int iPort, int
 			struct sockaddr_in src;
 			memset( &src, 0, sizeof(src) );
 			src.sin_family = AF_INET;
-			src.sin_port = 0;
+			src.sin_port = htons( iSrcPort > 0 ? iSrcPort : 0 );
+			src.sin_addr.s_addr = INADDR_ANY;
+			if( pszSrcIp && *pszSrcIp && strcmp(pszSrcIp, "0.0.0.0") != 0 )
+			{
 #ifdef WINXP
-			src.sin_addr.s_addr = inet_addr( pszSrcIp );
+				src.sin_addr.s_addr = inet_addr( pszSrcIp );
 #else
-			inet_pton( AF_INET, pszSrcIp, &src.sin_addr.s_addr );
+				inet_pton( AF_INET, pszSrcIp, &src.sin_addr.s_addr );
 #endif
+			}
+			if( iSrcPort > 0 )
+			{
+				const int on = 1;
+				setsockopt( fd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on) );
+			}
 			if( bind( fd, (struct sockaddr*)&src, sizeof(src) ) == SOCKET_ERROR )
 			{
 				closesocket( fd );
