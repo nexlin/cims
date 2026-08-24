@@ -275,7 +275,7 @@ public:
 
     // ================================================================
     // SIP 신호 통계/품질 알람 — Setup.SipStats.* (임계는 모듈 설정 소유 —
-    //   alarm_self_reporting.md §4; A-QOS-006/007/009/011, 평가는 SipStatsMonitor).
+    //   alarm_self_reporting.md §4; A-QOS-006/007/009/011·A-SEC-003, 평가는 SipStatsMonitor).
     //   율 하한/CPS 상한의 단계값 0 = 해당 단계 미사용. 전 필드 SIGUSR1 리로드 반영.
     int m_iSipStatsEvalSec;           // EvalSec 평가 윈도우 초 (기본 60, 0=평가 off — 카운터는 항상 동작)
     int m_iSipStatsMinFinals;         // MinFinals 율 평가 최소 표본 (윈도우 내 최종응답 수, 기본 20)
@@ -289,6 +289,8 @@ public:
     int m_iSipStatsCpsMajor;          // CPS 상한 — major (기본 0=off)
     int m_iSipStatsCpsCritical;       // CPS 상한 — critical (기본 0=off)
     int m_iSipStatsRxErrorMinor;      // SIP 파싱 실패 급증 임계 (윈도우당 건수, 기본 10, 0=off)
+    int m_iSipStatsChannelPolicyMajor;  // 채널 정책(TLS 강제) 위반 반복 임계 (윈도우당 게이트 403 건수, 기본 10, 0=off
+                                        // — A-SEC-003)
 
     // MCData C-plane 정책 — Setup.McData.*
     //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.

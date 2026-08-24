@@ -6,9 +6,11 @@
 
 #include "CscfModule.h"
 
+#include <time.h>
+
 #include <map>
 #include <mutex>
-#include <time.h>
+
 #include "CspAddressing.h"
 #include "CspPttGroup.h"
 #include "CspServiceMap.h"
@@ -22,7 +24,8 @@
 #include "SipMd5.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
-#include "SipStackThread.h"  // GetCurrentInboundListenerId()
+#include "SipStackThread.h"   // GetCurrentInboundListenerId()
+#include "SipStatsMonitor.h"  // AddChannelPolicyViolation (A-SEC-003)
 #include "SipUtility.h"
 #include "SubscriptionManager.h"
 #include "UserMap.h"
@@ -300,6 +303,10 @@ bool CCscfModule::CheckChannelPolicy( CSipMessage *pclsMessage ) {
     const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( gclsCspUserMap.Select( strUser.c_str(), clsUser ) == false ) return true;
     if ( !clsUser.requiresTls() || pclsMessage->m_eTransport == E_SIP_TLS ) return true;
+
+    // 반복 위반 계수 (A-SEC-003) — 소스 로그 억제와 무관하게 전 건. SipStatsMonitor 가
+    // 평가 윈도우당 건수를 Setup.SipStats.ChannelPolicyMajor 임계로 발화/해소한다.
+    gclsSipStatsMonitor.AddChannelPolicyViolation( pclsMessage->m_strClientIp.c_str() );
 
     // 반복 위반(스캔/오설정)은 소스 단위로 로그를 억제한다 — 미가입 403 경로와 같은 계약.
     if ( !CLog::IsNetworkSourceSuppressed( pclsMessage->m_strClientIp.c_str() ) )

@@ -1,8 +1,10 @@
 #ifndef _SIP_STATS_MONITOR_H_
 #define _SIP_STATS_MONITOR_H_
 
+#include <stdint.h>
 #include <time.h>
 
+#include <map>
 #include <mutex>
 #include <string>
 
@@ -14,8 +16,10 @@ class CMonitorString;
  * @ingroup CspServer
  * @brief SIP 신호 통계 감시 — 스택 카운터(CSipStack::m_clsCounter)를 평가 윈도우
  *        (Setup.SipStats.EvalSec) 단위로 차분해 호/등록 성공률·신규 INVITE CPS·SIP 수신
- *        이상을 단계 임계로 평가하고 FM 자기보고(L2)로 발화/해소한다.
- *        A-QOS-006/007/009/011 — 임계는 모듈 설정 소유 (docs/design/alarm_self_reporting.md §4).
+ *        이상을 단계 임계로 평가하고 FM 자기보고(L2)로 발화/해소한다. 채널 정책 게이트
+ *        403 계수(AddChannelPolicyViolation)도 같은 윈도우에서 급증 임계로 평가한다.
+ *        A-QOS-006/007/009/011·A-SEC-003 — 임계는 모듈 설정 소유
+ *        (docs/design/alarm_self_reporting.md §4).
  *
  *        율 산식 (윈도우 내 INVITE/REGISTER 최종응답 — 수신+송신 합산. 수신에는 와이어에
  *        나가지 않는 트랜잭션 로컬 합성 응답(408 Timer B/Ring timeout, 660 connect error)이
@@ -37,6 +41,10 @@ public:
     /** monitor 명령(sip_stats) — 누적 카운터 + 최근 윈도우 평가 결과 */
     void GetString( CMonitorString &strBuf );
 
+    /** 채널 정책 게이트 403 계수 (A-SEC-003 — CscfModule::CheckChannelPolicy 가 SIP worker
+     *  스레드에서 호출. 소스 로그 억제와 무관하게 전 건 계수, 소스 IP 상위 추적) */
+    void AddChannelPolicyViolation( const char *pszIp );
+
 private:
     struct RateResult {
         uint64_t ulFinals;     // 분모 (제외 코드 차감 후)
@@ -57,9 +65,17 @@ private:
     void FireRateAlarm( const char *pszCode, const char *pszComponent, const RateResult &clsRate, int iMinFinals,
                         int iMinor, int iMajor, int iCritical, int iWindowSec );
 
+    static const int VIOLATION_SRC_MAX = 32;  // 채널 정책 위반 소스 IP 추적 상한 (평가 시 리셋)
+
     std::mutex m_clsMutex;  // 최근 윈도우 결과 보호 — Poll(메인 루프) ↔ GetString(monitor 스레드)
     CSipStackCounter::Snapshot m_clsPrev;
     time_t m_tLastEval;  // 0 = 기준 스냅샷 미확보 (평가 off 포함)
+
+    // 채널 정책 위반 계수 — SIP worker 스레드(Add) ↔ 메인 루프(Evaluate 드레인)
+    std::mutex m_clsViolationMutex;
+    uint64_t m_ulChannelPolicyTotal;                        // 누적 (monitor 노출용)
+    uint64_t m_ulChannelPolicyWindow;                       // 현재 윈도우 계수 (평가 시 리셋)
+    std::map<std::string, uint64_t> m_mapChannelPolicySrc;  // 윈도우 소스별 계수
 
     // 최근 윈도우 결과 (monitor 노출용)
     int m_iLastWindowSec;
@@ -68,6 +84,8 @@ private:
     double m_dLastCps;
     uint64_t m_ulLastParseError;
     std::string m_strLastTopSrc;
+    uint64_t m_ulLastChannelPolicy;
+    std::string m_strLastViolationTopSrc;
 };
 
 extern CSipStatsMonitor gclsSipStatsMonitor;

@@ -504,6 +504,16 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
           "help": "윈도우 내 SIP 파싱 실패 건수가 도달하면 minor (최다 소스 IP 동반). 0 = 미사용."
+        },
+        {
+          "key": "Setup.SipStats.ChannelPolicyMajor",
+          "label": "채널 정책 위반 반복 임계 (건/윈도우)",
+          "type": "int",
+          "default": 10,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 윈도우부터 적용.",
+          "help": "윈도우 내 채널 정책(TLS 강제) 게이트 403 건수가 도달하면 major (최다 소스 IP 동반, A-SEC-003). 0 = 미사용."
         }
       ],
       "scope": "service"

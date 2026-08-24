@@ -123,9 +123,13 @@ else:
 
 - 로그: `channel policy violation user=<id> transport=<t> src=<ip>:<port>` — 기존 바인딩
   로그(`binding added`/`binding moved`) 관례를 따른다.
-- 반복 위반은 이벤트 후보다(스캔/오설정 탐지). 채번은 구현 시
-  [alarm_catalog](../alarm_catalog.md) 절차를 따르고, 미가입 계정 403 의 소스 로그 억제
-  (`csp/CscfModule.cpp`)와 같은 방식의 폭주 억제를 둔다.
+- 반복 위반(스캔/오설정 탐지)은 **A-SEC-003**(`security_violation`, X.736) 알람이다
+  ([alarm_catalog](../alarm_catalog.md)). 게이트 403 을 `SipStatsMonitor` 가 소스 로그 억제와
+  무관하게 전 건 계수(소스 IP 상위 32 동반)하고, `Setup.SipStats.EvalSec` 윈도우당 건수가
+  `Setup.SipStats.ChannelPolicyMajor`(기본 10, 0=off) 이상이면 major 발화
+  (mo `<서버명>/csp/channel_policy`, params count/window/ip/top_count), 미만 윈도우에서
+  해소한다. 폭주 억제는 미가입 계정 403 과 같은 소스 단위 로그 억제(`csp/CscfModule.cpp`)가
+  담당한다 — 계수·알람은 억제와 독립이다.
 
 ### 3.4 구현 위치
 
@@ -280,7 +284,7 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 V1/V2 는 cspsim `-transport udp` + TLS 정책 가입자로 재현한다(별도 옵션 불필요 — 게이트가 REGISTER 부터
 막는다). V2 의 "인증보다 먼저" 는 Authorization 없는 평문 INVITE 의 첫 최종응답이 401 이 아니라 403 인
 것으로 판정한다. V7 은 서버 nonce 로 틀린 realm 의 유효 Digest 를 만드는 원시 SIP 프로브로 재현한다.
-자동화 항목(S3/S4)과 반복 위반 이벤트 채번([alarm_catalog](../alarm_catalog.md))은 **잔여**다.
+자동화 항목(S3/S4)은 **잔여**다. 반복 위반 알람은 A-SEC-003 으로 채번·구현되어 있다(§3.3).
 
 ## 7. 배포 순서와 잔여
 
@@ -289,7 +293,7 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 강제한다. 현재 ②(코드)까지 반영되어 있고 ①·③~⑥ 은 운영 절차다.
 
 잔여 항목:
-- 채널 정책 반복 위반 이벤트 채번(§3.3) + S3/S4 자동화 시나리오(§6 V1~V8).
+- §6 V1~V8 의 S3/S4 자동화 시나리오. (반복 위반 알람은 A-SEC-003 으로 구현 — §3.3.)
 - cspsim 의 call 시나리오가 `-transport` 를 무시하고 INVITE 를 UDP 로 보낸다(등록만 transport 를 따른다) —
   TCP/TLS **호** 회귀(V5 의 호 부분)는 cspsim 보완 전까지 UDP 로만 성립. 같은 맥락에서 CSP 의
   `Service-Route` 에 `;transport=` 파라미터가 없어(RFC 3608/TS 24.229) TLS 등록 단말이 route 를 따라갈 때

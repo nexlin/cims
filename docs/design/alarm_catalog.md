@@ -164,7 +164,7 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 
 | type | 정의 | 대표 조건 |
 |---|---|---|
-| `security_violation` | **보안 이상 징후의 급증**(인증 실패 폭주·사기 호/스캐너·비인가 트래픽) — 율 임계 기반 open/close. 보안 알람은 X.733 계열과 통지 성격(대응 주체·민감도)이 달라 `threshold_crossed` 로 흡수하지 않는다 | 인증 실패 급증(A-SEC-001), fraud/스캐너 탐지(A-SEC-002) — 미구현 |
+| `security_violation` | **보안 이상 징후의 급증**(인증 실패 폭주·사기 호/스캐너·비인가 트래픽·채널 정책 위반) — 율 임계 기반 open/close. 보안 알람은 X.733 계열과 통지 성격(대응 주체·민감도)이 달라 `threshold_crossed` 로 흡수하지 않는다 | 채널 정책 위반 반복(A-SEC-003 — CSP 자기보고 구현), 인증 실패 급증(A-SEC-001)·fraud/스캐너 탐지(A-SEC-002 — 미구현) |
 
 - **기존 구현 코드와의 관계**: wire/rule/fm_catalog 는 flat **정의 코드**
   (`A-<DOMAIN>-NNN`, 정의 행이 채번 정본)를 쓴다. 구 포맷 클래스 단위 코드
@@ -332,8 +332,9 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
   발생/수집 구간 공백은 공통 A-PRC-010 이 보유). `deployment_failed`/`deploy_job` 은
   이벤트 `job_result` 클래스의 첫 적용이다.
 - 보안 축: `security_violation`(X.736 Security Alarm — DOMAIN `SEC`, 정의 코드 `A-SEC-NNN`,
-  표준화 §3.4(a))은 A-SEC-001/002 가 근거인 클래스다(§4) — 구현 채택 시 표준화 §3.3 매핑
-  표에 편입한다(현재 미구현).
+  표준화 §3.4(a))은 A-SEC-001~003 이 속한 클래스다(§4). 첫 구현은 A-SEC-003(채널 정책
+  위반 반복 — CSP L2 자기보고, [자기보고 §4](alarm_self_reporting.md))이며, A-SEC-001/002
+  는 구현 채택 시 같은 경로로 편입한다.
 
 ## 10. 모듈별 메모 — 감지 행
 

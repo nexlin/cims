@@ -79,6 +79,19 @@
       "recommended_action": "소스 IP 분포 확인·차단/억제 검토 (params ip/top_count)"
     },
     {
+      "type": "security_violation",
+      "code": "A-SEC-003",
+      "perceived_severity": "major",
+      "event_type": "securityServiceOrMechanismViolation",
+      "probable_cause": "unauthorizedAccessAttempt",
+      "mo_class": "service",
+      "metric": "채널 정책(TLS 강제) 위반 반복 (게이트 403 건수/윈도우 — 소스 IP 동반)",
+      "msg_open": "Channel policy violations surging: {count} non-TLS requests for TLS-enforced identities in {window}s (top source {ip})",
+      "msg_close": "Channel policy violations subsided ({mo})",
+      "effect": "보호 채널(TLS) 우회 시도(스캔) 또는 단말 대량 오설정 진행 — 위반 요청 자체는 게이트가 403 으로 차단 중",
+      "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 가입자 sip_transport 정책과 단말 TLS 프로비저닝 확인"
+    },
+    {
       "type": "cert_expiring",
       "code": "A-PRC-009",
       "perceived_severity": "warning",

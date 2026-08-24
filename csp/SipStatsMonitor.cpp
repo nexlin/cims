@@ -12,7 +12,26 @@
 CSipStatsMonitor gclsSipStatsMonitor;
 
 CSipStatsMonitor::CSipStatsMonitor()
-    : m_tLastEval( 0 ), m_iLastWindowSec( 0 ), m_dLastCps( 0.0 ), m_ulLastParseError( 0 ) {
+    : m_tLastEval( 0 ),
+      m_ulChannelPolicyTotal( 0 ),
+      m_ulChannelPolicyWindow( 0 ),
+      m_iLastWindowSec( 0 ),
+      m_dLastCps( 0.0 ),
+      m_ulLastParseError( 0 ),
+      m_ulLastChannelPolicy( 0 ) {
+}
+
+void CSipStatsMonitor::AddChannelPolicyViolation( const char *pszIp ) {
+    std::lock_guard<std::mutex> lock( m_clsViolationMutex );
+    ++m_ulChannelPolicyTotal;
+    ++m_ulChannelPolicyWindow;
+    if ( pszIp == NULL || pszIp[0] == '\0' ) return;
+    std::map<std::string, uint64_t>::iterator it = m_mapChannelPolicySrc.find( pszIp );
+    if ( it != m_mapChannelPolicySrc.end() ) {
+        ++it->second;
+    } else if ( (int)m_mapChannelPolicySrc.size() < VIOLATION_SRC_MAX ) {
+        m_mapChannelPolicySrc[pszIp] = 1;
+    }
 }
 
 void CSipStatsMonitor::Poll( time_t tNow ) {
@@ -27,6 +46,11 @@ void CSipStatsMonitor::Poll( time_t tNow ) {
         gclsUserAgent.m_clsSipStack.m_clsCounter.GetSnapshot( m_clsPrev );
         std::map<std::string, uint64_t> mapDiscard;
         gclsUserAgent.m_clsSipStack.m_clsCounter.TakeParseErrorSources( mapDiscard );
+        {
+            std::lock_guard<std::mutex> lock( m_clsViolationMutex );
+            m_ulChannelPolicyWindow = 0;
+            m_mapChannelPolicySrc.clear();
+        }
         m_tLastEval = tNow;
         return;
     }
@@ -61,6 +85,24 @@ void CSipStatsMonitor::Evaluate( time_t tNow, int iWindowSec ) {
             ulTopSrcCount = it->second;
             strTopSrc = it->first;
         }
+    }
+
+    // 채널 정책 위반 윈도우 계수 드레인 (A-SEC-003)
+    uint64_t ulViolation = 0;
+    std::string strViolationTopSrc;
+    uint64_t ulViolationTopCount = 0;
+    {
+        std::lock_guard<std::mutex> lock( m_clsViolationMutex );
+        ulViolation = m_ulChannelPolicyWindow;
+        m_ulChannelPolicyWindow = 0;
+        for ( std::map<std::string, uint64_t>::iterator it = m_mapChannelPolicySrc.begin();
+              it != m_mapChannelPolicySrc.end(); ++it ) {
+            if ( it->second > ulViolationTopCount ) {
+                ulViolationTopCount = it->second;
+                strViolationTopSrc = it->first;
+            }
+        }
+        m_mapChannelPolicySrc.clear();
     }
 
     // 호 — 챌린지(401/407) 제외, 유효 = 2xx/3xx + 사용자 행위 결과(486/487/603)
@@ -119,6 +161,20 @@ void CSipStatsMonitor::Evaluate( time_t tNow, int iWindowSec ) {
         } else {
             gclsFmReporter.AlarmClose( "A-QOS-011", strRxMo );
         }
+
+        // 채널 정책 위반 반복 (게이트 403 급증 — 단일 단계 major, sip_access_security.md §3.3)
+        const std::string strPolicyMo = gclsFmReporter.Node() + "/csp/channel_policy";
+        int iPolicyThreshold = gclsSetup.m_iSipStatsChannelPolicyMajor;
+        if ( iPolicyThreshold > 0 && ulViolation >= (uint64_t)iPolicyThreshold ) {
+            SimpleJson::JsonNode nodeParams;
+            nodeParams.Set( "count", (int)ulViolation );
+            nodeParams.Set( "window", iWindowSec );
+            nodeParams.Set( "ip", strViolationTopSrc.empty() ? "-" : strViolationTopSrc.c_str() );
+            if ( ulViolationTopCount > 0 ) nodeParams.Set( "top_count", (int)ulViolationTopCount );
+            gclsFmReporter.AlarmOpen( "A-SEC-003", strPolicyMo, nodeParams, "major" );
+        } else {
+            gclsFmReporter.AlarmClose( "A-SEC-003", strPolicyMo );
+        }
     }
 
     std::lock_guard<std::mutex> lock( m_clsMutex );
@@ -128,6 +184,8 @@ void CSipStatsMonitor::Evaluate( time_t tNow, int iWindowSec ) {
     m_dLastCps = dCps;
     m_ulLastParseError = clsDelta.ulParseError;
     m_strLastTopSrc = strTopSrc;
+    m_ulLastChannelPolicy = ulViolation;
+    m_strLastViolationTopSrc = strViolationTopSrc;
 }
 
 void CSipStatsMonitor::CloseAll() {
@@ -137,6 +195,7 @@ void CSipStatsMonitor::CloseAll() {
     gclsFmReporter.AlarmClose( "A-QOS-007", strBase + "reg/success_rate" );
     gclsFmReporter.AlarmClose( "A-QOS-009", strBase + "cps" );
     gclsFmReporter.AlarmClose( "A-QOS-011", strBase + "sip/rx_error" );
+    gclsFmReporter.AlarmClose( "A-SEC-003", strBase + "channel_policy" );
 }
 
 CSipStatsMonitor::RateResult CSipStatsMonitor::CalcRate( const CSipStackCounter::Snapshot &clsDelta,
@@ -213,6 +272,11 @@ void CSipStatsMonitor::GetString( CMonitorString &strBuf ) {
     strBuf.AddRow( (uint32_t)clsCur.ulParseError );
     strBuf.AddCol( "security_drop" );
     strBuf.AddRow( (uint32_t)clsCur.ulSecurityDrop );
+    {
+        std::lock_guard<std::mutex> lock( m_clsViolationMutex );
+        strBuf.AddCol( "channel_policy_violation" );
+        strBuf.AddRow( (uint32_t)m_ulChannelPolicyTotal );
+    }
 
     // 그룹×코드 누적 (0 은 생략) — "final <rx|tx> <INVITE|REGISTER|OTHER> <code>"
     static const char *arrGroupName[CSipStackCounter::E_GRP_MAX] = { "INVITE", "REGISTER", "OTHER" };
@@ -251,6 +315,10 @@ void CSipStatsMonitor::GetString( CMonitorString &strBuf ) {
         snprintf( szVal, sizeof( szVal ), "%u (top_src=%s)", (unsigned)m_ulLastParseError,
                   m_strLastTopSrc.empty() ? "-" : m_strLastTopSrc.c_str() );
         strBuf.AddCol( "window parse_error" );
+        strBuf.AddRow( szVal );
+        snprintf( szVal, sizeof( szVal ), "%u (top_src=%s)", (unsigned)m_ulLastChannelPolicy,
+                  m_strLastViolationTopSrc.empty() ? "-" : m_strLastViolationTopSrc.c_str() );
+        strBuf.AddCol( "window channel_policy" );
         strBuf.AddRow( szVal );
     }
 }

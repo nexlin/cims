@@ -89,7 +89,7 @@ CSipServerSetup::CSipServerSetup()
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
       m_iStaleCallTimeout( 300 ),
-      m_bSessionTimer( true ),         // 비정상 종료 leg 감지 (RFC 4028) — 기본 활성
+      m_bSessionTimer( true ),  // 비정상 종료 leg 감지 (RFC 4028) — 기본 활성
       m_iSessionExpires( 180 ),
       m_iSessionMinSE( 90 ),
       m_strSessionRefresher( "server" ),
@@ -124,6 +124,7 @@ CSipServerSetup::CSipServerSetup()
       m_iSipStatsCpsMajor( 0 ),
       m_iSipStatsCpsCritical( 0 ),
       m_iSipStatsRxErrorMinor( 10 ),
+      m_iSipStatsChannelPolicyMajor( 10 ),
       m_iMaxSdsCplaneBytes( 0 ),
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
@@ -347,7 +348,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( fm.Has( "SyncSec" ) ) m_iFmSyncSec = (int)fm.GetInt( "SyncSec" );
             }
 
-            // SIP 신호 통계/품질 알람 (SipStatsMonitor — A-QOS-006/007/009/011)
+            // SIP 신호 통계/품질 알람 (SipStatsMonitor — A-QOS-006/007/009/011·A-SEC-003)
             if ( setup.Has( "SipStats" ) ) {
                 SimpleJson::JsonNode st = setup.Get( "SipStats" );
                 if ( st.Has( "EvalSec" ) ) m_iSipStatsEvalSec = (int)st.GetInt( "EvalSec" );
@@ -364,6 +365,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( st.Has( "CpsMajor" ) ) m_iSipStatsCpsMajor = (int)st.GetInt( "CpsMajor" );
                 if ( st.Has( "CpsCritical" ) ) m_iSipStatsCpsCritical = (int)st.GetInt( "CpsCritical" );
                 if ( st.Has( "RxErrorMinor" ) ) m_iSipStatsRxErrorMinor = (int)st.GetInt( "RxErrorMinor" );
+                if ( st.Has( "ChannelPolicyMajor" ) )
+                    m_iSipStatsChannelPolicyMajor = (int)st.GetInt( "ChannelPolicyMajor" );
             }
 
             // MCData C-plane 정책 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응)
