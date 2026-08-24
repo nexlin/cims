@@ -85,6 +85,11 @@ public:
 
     /** 마지막 REGISTER 의 CSeq — reginfo <contact cseq=""> 용 */
     int m_iRegisterCSeq;
+
+    /** RFC 3329 sec-agree 협상(tls)을 거쳐 Security-Verify 대조까지 통과한 등록 —
+     *  3GPP 의 integrity-protected 상당 내부 플래그(sip_access_security.md §8.1). 이 바인딩이
+     *  살아있는 동안 그 신원은 채널 정책 게이트(§3)의 TLS 강제 대상이 된다. */
+    bool m_bIntegrityProtected;
 };
 
 /** 한 가입자(AoR)의 등록 바인딩 목록 — 도달 경로(flow) 하나가 원소 하나다.
@@ -103,7 +108,10 @@ public:
     CUserMap();
     ~CUserMap();
 
-    bool Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser );
+    /** bIntegrityProtected: 이 REGISTER 가 sec-agree 협상·대조를 통과했다 (바인딩에 플래그 결부). */
+    bool Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bIntegrityProtected = false );
+    /** 살아있는 바인딩 중 sec-agree 로 결부된 것이 하나라도 있는가 — 채널 정책 게이트의 판정 축. */
+    bool IsIntegrityProtected( const char *pszUserId );
     bool Select( const char *pszUserId, CUserInfo &clsInfo );
     bool Select( const char *pszUserId );
     bool SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList );

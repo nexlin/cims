@@ -60,6 +60,15 @@
           "min": 0,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 0 = 비활성. 양의 값이면 등록된 UE 에 주기적 OPTIONS."
+        },
+        {
+          "key": "Setup.SecAgree.Require",
+          "label": "sec-agree 협상 강제 (TLS 정책 가입자)",
+          "type": "bool",
+          "default": false,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 REGISTER 부터 적용.",
+          "help": "RFC 3329 보안 메커니즘 협상. false = 단말이 Security-Client 를 보낼 때만 협상(미지원 단말 수용). true = sip_transport=TLS 정책 가입자의 협상 없는 초기 REGISTER 를 421 Extension Required 로 거절(정책이 협상의 하한). Security-Verify 불일치는 설정과 무관하게 항상 494."
         }
       ],
       "scope": "service"

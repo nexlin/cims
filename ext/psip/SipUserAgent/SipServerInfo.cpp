@@ -6,7 +6,7 @@
 #include "MemoryDebug.h"
 
 CSipServerInfo::CSipServerInfo() : m_iPort(5060), m_iLoginTimeout(3600)
-	, m_eTransport(E_SIP_UDP), m_iNatTimeout(0)
+	, m_bSecAgree(false), m_eTransport(E_SIP_UDP), m_iNatTimeout(0)
 	, m_iNextSendTime(0), m_iSeqNo(0), m_bAuth(false), m_bDelete(false)
 {
 	ClearLogin();
@@ -64,6 +64,9 @@ void CSipServerInfo::Update( CSipServerInfo & clsInfo )
 	m_strDomain = clsInfo.m_strDomain;
 	m_strPassWord = clsInfo.m_strPassWord;
 	m_strHa1 = clsInfo.m_strHa1;
+	m_bSecAgree = clsInfo.m_bSecAgree;
+	m_strSecurityClient = clsInfo.m_strSecurityClient;
+	m_strSecurityVerifyOverride = clsInfo.m_strSecurityVerifyOverride;
 	m_iLoginTimeout = clsInfo.m_iLoginTimeout;
 }
 
@@ -128,6 +131,20 @@ CSipMessage * CSipServerInfo::CreateRegister( CSipStack * pclsSipStack, CSipMess
 	if( !m_strPAccessNetworkInfo.empty() )
 	{
 		pclsRequest->AddHeader( "P-Access-Network-Info", m_strPAccessNetworkInfo.c_str() );
+	}
+
+	// RFC 3329 sec-agree: 초기 REGISTER 에 제안 목록 + Require/Proxy-Require, 챌린지를 받은 뒤의
+	//   REGISTER 에는 서버 목록을 Security-Verify 로 그대로 echo 한다(강등 방지 — 서버가 원본과 대조).
+	if( m_bSecAgree )
+	{
+		pclsRequest->AddHeader( "Security-Client", m_strSecurityClient.empty() ? "tls" : m_strSecurityClient.c_str() );
+		pclsRequest->AddHeader( "Require", "sec-agree" );
+		pclsRequest->AddHeader( "Proxy-Require", "sec-agree" );
+		if( m_strSecurityServer.empty() == false )
+		{
+			const std::string & strVerify = m_strSecurityVerifyOverride.empty() ? m_strSecurityServer : m_strSecurityVerifyOverride;
+			pclsRequest->AddHeader( "Security-Verify", strVerify.c_str() );
+		}
 	}
 
 	m_bAuth = false;

@@ -46,6 +46,15 @@ namespace CspAddressing {
         return fallback_port;
     }
 
+    int GetLocalSipPortForTransport( int inbound_listener_id, ESipTransport transport ) {
+        int iFallback = gclsSetup.m_iUdpPort;
+        if ( transport == E_SIP_TLS && gclsSetup.m_iTlsPort > 0 )
+            iFallback = gclsSetup.m_iTlsPort;
+        else if ( transport == E_SIP_TCP && gclsSetup.m_iTcpPort > 0 )
+            iFallback = gclsSetup.m_iTcpPort;
+        return GetLocalSipPort( inbound_listener_id, iFallback );
+    }
+
     std::string GetLocalSipAddressForOutbound( const std::string &proto, const std::string &edge_preference ) {
         std::vector<LocalNodeInfo> all = gclsLocalNodeMap.GetAll();
 

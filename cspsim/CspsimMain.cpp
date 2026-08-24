@@ -357,6 +357,11 @@ static void PrintUsage(const char* pszBin) {
     printf("  -ha1         <hex32>     SIP Digest H(A1) — 지정 시 -password 대신 이 값으로 response 계산\n");
     printf("                             (-db 모드는 DB 의 ha1 을 자동 사용, 비어 있으면 passwd)\n");
     printf("  -creds       <file>      단말별 자격 파일(JSONL: user/ha1/authId/password)\n");
+    printf(
+        "  -sec_agree               RFC 3329 sec-agree 협상 (Security-Client: "
+        "tls → 401 Security-Server → Security-Verify echo)\n");
+    printf("  -sec_verify  <값>        [시험] Security-Verify 를 echo 대신 이 "
+           "값으로 전송 (강등 변조 → 서버 494)\n");
     printf("                             -count 전개 단말 각각의 자격 — 파일에 없는 user 는 즉시 중단\n");
     printf("  -mode        <volte|ptt> 단말 유형 (default: volte)\n");
     printf("  -transport   <udp|tcp|tls> 시그널링 transport (default: udp)\n");
@@ -737,6 +742,12 @@ int main(int argc, char* argv[])
     std::string strMode       = GetArg(argc, argv, "-mode",       "volte");
     // 시그널링 transport — udp(기본)|tcp|tls. TLS 는 스택을 TLS 클라이언트로 기동한다.
     std::string strTransport  = GetArg(argc, argv, "-transport",  "udp");
+    // RFC 3329 sec-agree 협상 (sip_access_security.md P2). -sec_verify <값> 은
+    // Security-Verify 를
+    //   서버 목록 echo 대신 그 값으로 보내 강등 변조를 재현한다(서버 494
+    //   확인용).
+    bool bSecAgree = HasFlag(argc, argv, "-sec_agree");
+    std::string strSecVerify = GetArg(argc, argv, "-sec_verify", "");
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
@@ -943,6 +954,8 @@ int main(int argc, char* argv[])
         } else if (strTransport == "tcp" || strTransport == "TCP") {
             s->SetTransport(E_SIP_TCP);
         }
+        if (bSecAgree)
+          s->SetSecAgree(true, strSecVerify);
         s->SetNoRegister(bNoRegister);
         s->SetNoXcap(bNoXcap);
         if (!strCscIp.empty()) s->SetCscHost(strCscIp, iCscPort, bCscTls);

@@ -1,11 +1,12 @@
-# SIP 접속 보안 — 채널 정책 게이트(P0) + 인증 자료 경계(P1)
+# SIP 접속 보안 — 채널 정책 게이트(P0) + 인증 자료 경계(P1) + 보안 메커니즘 협상(P2)
 
 UE↔CSP 접속 구간의 보안 체계를 3GPP TS 33.203 정합 구조로 끌어올리는 설계 정본이다.
-이 문서는 도입 로드맵(P0~P4) 중 **P0(채널 정책 게이트)** 와 **P1(인증 자료 경계 재편)** 의
-상세 설계를 담는다. P2(Sec-Agree)·P3(AKA over TLS)·P4(IMS AKA+IPsec)는 [§8 로드맵](#8-로드맵-p2p4)
-에 자리만 둔다.
+이 문서는 도입 로드맵(P0~P4) 중 **P0(채널 정책 게이트)**·**P1(인증 자료 경계 재편)**·
+**P2(Sec-Agree 협상)** 의 상세 설계를 담는다. P3(AKA over TLS)·P4(IMS AKA+IPsec)는
+[§8 로드맵](#8-로드맵-p2p4) 에 자리만 둔다.
 
-> **상태**: P0·P1 구현 반영. [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
+> **상태**: P0·P1·P2 구현 반영(P2 = 서버·cspsim·verify. Android UE 의 sec-agree 헤더는 pjsip 패치가
+> 선행 조건이라 단말 쪽 후속). [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
 > 반영 — CSC 는 `passwd` 컬럼에 쓰지 않고 `/provisioning/me` 의 `sipPassword` 는 항상 `null` 이다.
 > 값 소거(⑤-c)는 배포 환경별 운영 절차, ⑥ 컬럼 DROP 은 `sql/migrate_subscription_drop_passwd.sql`
 > (후속 릴리스 — CSP/cspsim 이 `passwd` 를 SELECT 하지 않게 된 뒤 적용).
@@ -21,7 +22,7 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 | 조합 | 근거 | transport | CIMS 도입 단계 |
 |---|---|---|---|
 | SIP Digest (평문) | TS 33.203 Annex N | UDP/TCP | 현행 |
-| SIP Digest + TLS | Annex N+O | TLS/TCP | 현행(게이트 없음) → **P0 에서 완성** |
+| SIP Digest + TLS | Annex N+O | TLS/TCP | 현행(게이트 없음) → **P0 에서 완성**, 협상·강등 방지는 **P2** |
 | IMS AKA + TLS | Annex X | TLS/TCP | P3 |
 | IMS AKA + IPsec | 본문 §6~7 | UDP/TCP (SA 공용) | P4 |
 
@@ -283,6 +284,11 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 | V6 | 이행 스크립트 멱등성(2회 실행) + `passwd` 미전송 PUT 후 재등록 | ha1 보존, 인증 유지 |
 | V7 | realm 불일치 Authorization | 401 재챌린지 (V5 이후 상시 회귀) |
 | V8 | `/provisioning/me` 의 `sipHa1` 로 단말 등록 | 정상 — 평문 필드 부재 확인 포함 |
+| V9 | sec-agree 정상 협상 — `Security-Client`+`Require` → 401(`Security-Server`) → TLS 위 `Security-Verify` echo | 200, `Service-Route` 에 `;transport=tls`. 등록 유지 중 같은 신원의 UDP 요청 403(게이트 합류), 해제 후 401 |
+| V10 | `Security-Verify` 변조(강등 시뮬레이션) | 494 + 새 `Security-Server` |
+| V11 | `Require: sec-agree` 만 있고 `Security-Client` 없음 | 494 |
+| V12 | 협상 후 `Security-Verify` 생략 | 494 |
+| V13 | `Setup.SecAgree.Require=true` 에서 TLS 정책 가입자의 협상 없는 초기 REGISTER | 421 + `Security-Server` (설정 의존 — 수동) |
 
 **V1·V2·V7 은 S3 검증 항목으로 자동화되어 있다** — 원시 SIP 프로브(`verify/lib/common/sip_probe.py`):
 - `S3-SCN-CHANNEL-POLICY`(V1·V2): 대상 가입자 `sip_transport` 를 DB 에서 `TLS` 로 올리고 CSP 4421
@@ -295,6 +301,10 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
   403 인 것으로 판정한다.
 - `S3-SCN-REALM-MISMATCH`(V7): REGISTER→401 챌린지로 서버 realm/nonce 를 얻어 **틀린 realm** Digest 로
   재전송 → 401 재챌린지(response 검증 전 realm 대조)를 확인한다.
+- `S3-SCN-SEC-AGREE`(V9~V12): `sip_probe.SecAgreeTlsSession` 이 TLS 연결 하나를 열어 두고 초기
+  REGISTER → 401 → `Security-Verify` 재-REGISTER 를 수행한다. 연결을 유지한 채 UDP MESSAGE 프로브로
+  게이트 합류(403)를 보고, `Expires: 0` 으로 해제한 뒤 401 복원을 확인한다. 변조/제안 없음/Verify
+  생략은 각각 새 연결에서 494 를 본다(등록이 성립하지 않으므로 잔여 없음). V13 은 설정 의존이라 수동.
 
 V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
 cspsim 이 이제 call INVITE 를 세션 transport 로 보내(§7 보완 완료) UDP/TCP/TLS 전 조합에서 성립한다.
@@ -309,9 +319,9 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 
 잔여 항목:
 - V3~V6·V8 의 자동화(V1·V2·V7 은 S3 검증 항목으로 자동화 완료 — §6).
-- CSP 의 `Service-Route` 에 `;transport=` 파라미터가 없어(RFC 3608/TS 24.229) TLS 등록 단말이 route 를
-  따라갈 때 transport 를 잃는다 — [sip_tls_signaling.md](sip_tls_signaling.md) 쪽 보완 항목. (cspsim 의
-  call INVITE 가 세션 transport 를 따르지 않던 한계는 해소 — UDP/TCP/TLS 호가 dev 스택에서 실측 성립.)
+- Android UE 의 sec-agree(§8.1) — pjsip 이 `Security-*` 헤더를 만들지 않으므로 단말 쪽 패치가 선행 조건이다.
+  그때까지 `Setup.SecAgree.Require` 는 false(제안하는 단말만 협상)로 둔다.
+- 494 급증(협상 실패 반복)의 알람 채번 — A-SEC-003(게이트 403)과 같은 계열로 채번할 후보.
 - `/provisioning/me` 의 `enforced`/TLS 목록 축소는 CSC `Provisioning.Services.*.tls_port` 가 설정된 환경에서만
   드러난다(미설정이면 TLS 항목 자체가 없다).
 
@@ -319,20 +329,69 @@ P0 의 게이트 자체는 DB 변경이 없지만, 이 릴리스의 CSP 는 `sip
 
 상세 설계는 각 단계 착수 시 이 문서를 확장한다. 여기서는 범위·선행 조건·핵심 결정만 적는다.
 
-### 8.1 P2 — Sec-Agree (RFC 3329)
+### 8.1 P2 — Sec-Agree (RFC 3329) — 구현 반영
 
-보안 메커니즘 협상과 강등(bidding-down) 방지. 초기 REGISTER 의 `Security-Client`(+
-`Require`/`Proxy-Require: sec-agree`) → 401 에 `Security-Server`(q값) → 보호 채널 위
-재-REGISTER 의 `Security-Verify` 를 서버 원본과 **바이트 대조**, 불일치면 494 로 재시작.
+보안 메커니즘 협상과 강등(bidding-down) 방지. TS 24.229 §5.1.1.5.1/§5.2.2 프로파일을 따른다
+(P/S-CSCF 가 한 프로세스이므로 `Security-Server` 는 S-CSCF 의 401 에 실린다).
 
-- 서버 목록은 도입 시점 기준 `tls` 뿐이다(`ipsec-3gpp` 는 P4 에서 추가). 협상이 tls 로
-  끝난 등록은 §3 게이트의 적용 대상이 된다 — 정책 축(`sip_transport`)과 협상 결과가
-  같은 게이트로 합류하고, 정책은 협상의 하한(제안 목록 제한)으로 남는다.
-- 협상 결과를 `integrity-protected` 상당의 **내부 플래그**로 등록 상태에 결부한다 —
-  P/S-CSCF 가 한 프로세스여도 이 계약을 두면 이후 역할 분리 배치와 Annex P.4 판별(P3)이
-  그대로 얹힌다.
-- 단말: pjsip 은 sec-agree 미지원 — 헤더 생성/echo 패치가 선행 조건. cspsim 도 동일 확장.
-- 검증 핵심: `Security-Server` 변조(강등 시뮬레이션) → `Security-Verify` 불일치 494.
+```
+UE                                   CSP
+ │ REGISTER (초기)                     │
+ │  Security-Client: tls               │
+ │  Require/Proxy-Require: sec-agree   │
+ │────────────────────────────────────▶│  ParseSecAgree → gclsSecAgreeMap.Issue(user)
+ │ 401 Unauthorized                    │
+ │  WWW-Authenticate: Digest …         │
+ │  Security-Server: tls;q=0.1         │
+ │◀────────────────────────────────────│
+ │ (TLS 연결 위) REGISTER              │
+ │  Authorization: Digest …            │
+ │  Security-Client / Require 반복     │
+ │  Security-Verify: tls;q=0.1  ← echo │
+ │────────────────────────────────────▶│  인증 통과 → transport==TLS 확인 →
+ │ 200 OK                              │  Verify(user, echo) 바이트 대조 →
+ │  Service-Route: <…:5061;transport=tls;lr>  바인딩 integrity-protected 결부
+ │◀────────────────────────────────────│
+```
+
+**서버 규칙** (`csp/SecAgree.{h,cpp}`, `CCscfModule::RecvRequestRegister`):
+
+| 상황 | 응답 | 근거 |
+|---|---|---|
+| `Require: sec-agree` 인데 `Security-Client`·`Security-Verify` 둘 다 없음 | 494 + `Security-Server` | RFC 3329 §2.2 — 협상할 재료가 없다 |
+| `Setup.SecAgree.Require=true` 이고 TLS 정책(`sip_transport=TLS`) 가입자가 협상 없이 초기 REGISTER | 421 + `Security-Server` | 정책이 협상의 하한 — 강등 진입 자체를 막는다 |
+| 초기 REGISTER 에 `Security-Client` | 401 에 `Security-Server: tls;q=0.1` 동봉, 발급 원문 보관(user 키, nonce 와 같은 수명) | TS 24.229 §5.2.2 |
+| 인증 통과한 재-REGISTER 에 sec-agree 헤더가 있는데 `Security-Verify` 없음 | 494 | RFC 3329 §2.1 — 협상 후 모든 REGISTER 는 Verify 동봉 |
+| 인증 통과했으나 **TLS 가 아닌** 채널 | 494 | 협상 결과(tls)를 지키지 않은 요청 |
+| `Security-Verify` ≠ 발급 원문(바이트 대조) 또는 발급 기록 없음 | 494 + 새 `Security-Server` | RFC 3329 §2.3 — 강등/변조 → 재시작 |
+| 대조 통과 | 200, 바인딩 `m_bIntegrityProtected=true` | 3GPP integrity-protected 상당 내부 플래그 |
+
+대조는 **인증 뒤**에 둔다 — 미인증 요청이 494 로 발급 상태를 흔들지 못하게 한다. 서버 목록은
+도입 시점 기준 `tls` 뿐이다(`ipsec-3gpp` 는 P4 에서 파라미터와 함께 추가). 등록 해제(`Expires: 0`)
+시 발급 기록을 지운다.
+
+**게이트 합류** (`CCscfModule::CheckChannelPolicy`): TLS 강제의 근거가 둘이 된다 — 정책 축
+(`sip_transport=TLS`)과 협상 결과 축(integrity-protected 바인딩이 살아있음,
+`CUserMap::IsIntegrityProtected`). 어느 쪽이든 비-TLS 채널의 그 신원 요청은 403 이며 로그가
+근거(`policy`/`sec-agree`)를 구분한다. 협상으로 TLS 를 결부한 단말이 평문으로 돌아오는 것이 곧
+강등이므로 REGISTER 도 예외가 아니다(TLS 재접속·재등록은 V3 경로).
+
+**Service-Route**: 스트림 transport 로 등록한 단말에는 `;transport=tcp|tls` 를 명시하고 포트는 그
+리스너의 것을 쓴다(`CspAddressing::GetLocalSipPortForTransport` — Setup 기동 primary TCP/TLS 리스너는
+id 0 이라 transport 별 Setup 포트로 폴백). 없으면 route 를 따르는 후속 요청이 UDP 로 강등되어 게이트에
+걸린다(RFC 3608/TS 24.229).
+
+**설정**: `Setup.SecAgree.Require`(bool, 기본 false, SIGUSR1 재로드). false 는 단말이 제안할 때만
+협상한다 — sec-agree 를 못 만드는 단말(현 Android pjsip)을 수용하는 운영값. `Security-Verify`
+불일치 494 는 설정과 무관하게 항상이다.
+
+**클라이언트**: psip `CSipServerInfo::m_bSecAgree`(+`m_strSecurityClient`/`m_strSecurityServer`/
+`m_strSecurityVerifyOverride`) — REGISTER 에 `Security-Client`/`Require`/`Proxy-Require` 를 싣고,
+응답(401/494/421)의 `Security-Server` 원문을 보관해 다음 REGISTER 의 `Security-Verify` 로 echo 한다.
+cspsim `-sec_agree`(+`-sec_verify <값>` 강등 변조 재현). Android UE 는 pjsip 이 이 헤더를 만들지
+않아 단말 패치가 선행 조건이다(§7 잔여).
+
+**검증**: §6 V9~V13, `S3-SCN-SEC-AGREE`.
 
 ### 8.2 P3 — IMS AKA over TLS (Annex X)
 

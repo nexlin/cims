@@ -292,6 +292,11 @@ public:
     int m_iSipStatsChannelPolicyMajor;  // 채널 정책(TLS 강제) 위반 반복 임계 (윈도우당 게이트 403 건수, 기본 10, 0=off
                                         // — A-SEC-003)
 
+    // RFC 3329 sec-agree — Setup.SecAgree.* (sip_access_security.md §8.1, P2)
+    //   Require: true 면 sip_transport=TLS 정책 가입자의 협상 없는 초기 REGISTER 를 421 로 거절한다
+    //   (정책 = 협상의 하한). false(기본)는 단말이 제안할 때만 협상한다(sec-agree 미지원 단말 수용).
+    bool m_bSecAgreeRequire;
+
     // MCData C-plane 정책 — Setup.McData.*
     //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.
     //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).

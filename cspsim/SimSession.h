@@ -98,6 +98,13 @@ public:
      *  등록·발신 목적지가 모두 이 transport 로 나가고, 서버 발신(fan-out INVITE·NOTIFY·
      *  세션 갱신)은 그 연결로 되돌아온다. Start() 전에 호출할 것. */
     void SetTransport(ESipTransport e) { m_eTransport = e; }
+    /** RFC 3329 sec-agree — REGISTER 에 Security-Client/Require 를 싣고 401 의
+     * Security-Server 를 Security-Verify 로 echo 한다. verifyOverride 가 있으면
+     * echo 대신 그 값(강등 변조 시험). */
+    void SetSecAgree(bool b, const std::string &verifyOverride) {
+      m_clsServerInfo.m_bSecAgree = b;
+      m_clsServerInfo.m_strSecurityVerifyOverride = verifyOverride;
+    }
 
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }

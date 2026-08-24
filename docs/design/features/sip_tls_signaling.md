@@ -253,6 +253,7 @@ TLS 는 도달 신뢰성을 높이지만 실패의 성질을 바꾼다. 배치 �
 | 타이머 정합 | 서버 유휴 종료 600초 > UE keepalive 90초 |
 | 무중단 추가 | 런타임에 TLS 행을 추가하면 worker pool 을 지연 초기화해 접속점을 연다. 리스너별 인증서가 없으면 stack-global ctx 를 그 자리에서 기동하고, 그것도 불가하면 리스너를 만들지 않는다(조용히 죽는 리스너 금지) |
 | 인증서·키 분리 | `tls_cert_path`/`tls_key_path` 를 부트 경로와 런타임 경로가 **같은 의미로** 사용한다. 키 미지정이면 인증서 파일에서 읽는다(cert+key 결합 PEM) |
+| Service-Route transport | 200 OK 의 `Service-Route` 가 TCP/TLS 등록에는 `;transport=tcp|tls` 와 **그 리스너의 포트**를 싣는다(RFC 3608/TS 24.229 — 없으면 route 를 따르는 후속 요청이 UDP 로 강등). Setup 기동 primary TCP/TLS 리스너(id 0)는 `CspAddressing::GetLocalSipPortForTransport` 가 transport 별 Setup 포트로 폴백 |
 
 ### 6.2 접속점 개설 실패의 처리
 

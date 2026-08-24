@@ -59,6 +59,17 @@ public:
 	 *  이 값으로 response 를 계산한다 — 원문 비밀번호 없이 등록하는 클라이언트용. */
 	std::string		m_strHa1;
 
+	/** RFC 3329 sec-agree (TS 24.229 §5.1.1.5.1 프로파일). true 면 REGISTER 에
+	 *  Security-Client + Require/Proxy-Require: sec-agree 를 싣고, 401 의 Security-Server 원문을
+	 *  보관했다가 다음 REGISTER 에 Security-Verify 로 그대로 echo 한다(서버가 바이트 대조). */
+	bool					m_bSecAgree;
+	/** 제안 목록 (Security-Client 값). 비면 "tls". */
+	std::string		m_strSecurityClient;
+	/** 서버가 401/494/421 에 실은 Security-Server 원문 */
+	std::string		m_strSecurityServer;
+	/** 시험 전용 — 비어있지 않으면 echo 대신 이 값을 Security-Verify 로 보낸다(강등 변조 재현) */
+	std::string		m_strSecurityVerifyOverride;
+
 	/** P-Preferred-Identity 헤더 값 (비어있으면 추가 안함) */
 	std::string		m_strPPreferredIdentity;
 

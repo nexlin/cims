@@ -54,6 +54,10 @@ namespace CspAddressing {
      *  @param inbound_listener_id psip 수신 listener 의 extId. 0 또는 매칭 실패 시 fallback.
      *  @param fallback_port 매칭 실패 시 반환값 (보통 gclsSetup.m_iUdpPort). */
     int GetLocalSipPort( int inbound_listener_id, int fallback_port );
+    /** 리스너의 SIP 포트 — transport 별 폴백. Setup 으로 기동한 primary TCP/TLS 리스너는 id 0(레거시)
+     *  이라 LocalNodeMap 조회가 안 되므로, 수신 transport 의 Setup 포트(Tcp/TlsPort)로 폴백한다
+     *  (UDP 포트로 폴백하면 Service-Route 같은 자기 주소가 "TLS 포트에 UDP 번호" 로 어긋난다). */
+    int GetLocalSipPortForTransport( int inbound_listener_id, ESipTransport transport );
 
     /** outbound forwarding 시 목적지 protocol/edge 에 맞는 local_node 선택.
      *  1차: enabled && protocol == proto && edge == edge_preference

@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import re
 import socket
+import ssl
 import time
 import uuid
 
@@ -60,19 +61,23 @@ def _send(sock: socket.socket, server: tuple, msg: str) -> None:
 
 def _register_lines(user: str, domain: str, local_ip: str, local_port: int,
                     call_id: str, from_tag: str, cseq: int, branch: str,
-                    auth_header: str = "") -> str:
+                    auth_header: str = "", transport: str = "UDP",
+                    expires: int = 60, extra: list | None = None) -> str:
     aor = f"sip:{user}@{domain}"
+    tr = transport.upper()
+    contact_tr = f";transport={tr.lower()}" if tr != "UDP" else ""
     lines = [
         f"REGISTER sip:{domain} SIP/2.0",
-        f"Via: SIP/2.0/UDP {local_ip}:{local_port};branch={branch};rport",
+        f"Via: SIP/2.0/{tr} {local_ip}:{local_port};branch={branch};rport",
         "Max-Forwards: 70",
         f"From: <{aor}>;tag={from_tag}",
         f"To: <{aor}>",
         f"Call-ID: {call_id}",
         f"CSeq: {cseq} REGISTER",
-        f"Contact: <sip:{user}@{local_ip}:{local_port}>",
-        "Expires: 60",
+        f"Contact: <sip:{user}@{local_ip}:{local_port}{contact_tr}>",
+        f"Expires: {expires}",
     ]
+    lines += list(extra or [])
     if auth_header:
         lines.append(auth_header)
     lines += ["Content-Length: 0", "", ""]
@@ -201,3 +206,124 @@ def probe_register_wrong_realm(server_ip: str, server_port: int, user: str,
         return out
     finally:
         sock.close()
+
+
+# ── RFC 3329 sec-agree (sip_access_security.md §8.1, P2) — TLS 위 원시 프로브 ─────────────────
+
+_HEADER_RE = re.compile(rb"^([A-Za-z\-]+):\s*(.*?)\r?$", re.MULTILINE)
+
+
+def _recv_final_stream(sock, deadline: float) -> tuple:
+    """스트림(TLS) 소켓에서 첫 최종 응답 1건 — 헤더 종료(CRLFCRLF)+Content-Length 만큼 읽는다."""
+    buf = b""
+    while time.time() < deadline:
+        sock.settimeout(max(deadline - time.time(), 0.1))
+        try:
+            chunk = sock.recv(65535)
+        except (socket.timeout, ssl.SSLError, OSError):
+            break
+        if not chunk:
+            break
+        buf += chunk
+        while True:
+            end = buf.find(b"\r\n\r\n")
+            if end < 0:
+                break
+            head = buf[:end + 4]
+            m = re.search(rb"Content-Length:\s*(\d+)", head, re.IGNORECASE)
+            clen = int(m.group(1)) if m else 0
+            if len(buf) < end + 4 + clen:
+                break
+            msg, buf = buf[:end + 4 + clen], buf[end + 4 + clen:]
+            sm = _STATUS_RE.search(msg)
+            if not sm:
+                continue
+            code = int(sm.group(1))
+            if code < 200:
+                continue
+            return code, msg
+    return 0, b""
+
+
+def _header(raw: bytes, name: str) -> str:
+    m = re.search((r"^" + re.escape(name) + r":\s*(.*?)\r?$").encode(), raw,
+                  re.IGNORECASE | re.MULTILINE)
+    return m.group(1).decode().strip() if m else ""
+
+
+class SecAgreeTlsSession:
+    """TLS 연결 하나를 열어 두고 sec-agree 등록 절차를 단계별로 수행한다.
+
+    `register(...)` 가 (1차 코드, 2차 코드, 1차 Security-Server, 2차 raw) 를 돌려주고, 연결은
+    close() 까지 유지된다 — 등록 바인딩이 살아있는 동안 다른 프로브(UDP MESSAGE → 403 게이트)를
+    끼워 넣기 위해서다. 서버 인증서는 검증하지 않는다(사설 CA/자가서명 dev).
+    """
+
+    def __init__(self, server_ip: str, tls_port: int, local_ip: str, timeout: float = 4.0):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw.bind((local_ip, 0))
+        raw.settimeout(timeout)
+        raw.connect((server_ip, tls_port))
+        self.sock = ctx.wrap_socket(raw, server_hostname=server_ip)
+        self.local_ip, self.local_port = self.sock.getsockname()[:2]
+        self.timeout = timeout
+        self.server_realm = ""
+
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+    def _send(self, msg: str) -> None:
+        self.sock.sendall(msg.replace("\n", "\r\n").encode())
+
+    def register(self, user: str, domain: str, auth_user: str, ha1_hex: str, password: str,
+                 security_client: str | None = "tls", require: bool = True,
+                 verify: str | None = "echo", expires: int = 60) -> dict:
+        """sec-agree 등록 절차.
+
+        security_client: 초기/재 REGISTER 의 Security-Client 값 (None = 헤더 생략).
+        require        : Require/Proxy-Require: sec-agree 동봉 여부.
+        verify         : 재-REGISTER 의 Security-Verify — "echo" = 1차 응답 Security-Server 그대로,
+                         None = 생략, 그 외 문자열 = 그 값(변조 재현).
+        반환: {"first", "second", "security_server", "second_security_server", "service_route"}.
+        """
+        sa = []
+        if security_client is not None:
+            sa.append(f"Security-Client: {security_client}")
+        if require:
+            sa += ["Require: sec-agree", "Proxy-Require: sec-agree"]
+        call_id, from_tag = _callid(self.local_ip), _tag()
+        msg1 = _register_lines(user, domain, self.local_ip, self.local_port, call_id, from_tag, 1,
+                               _branch(), transport="TLS", expires=expires, extra=sa)
+        self._send(msg1)
+        code1, raw1 = _recv_final_stream(self.sock, time.time() + self.timeout)
+        out = {"first": code1, "second": 0, "security_server": _header(raw1, "Security-Server"),
+               "second_security_server": "", "service_route": ""}
+        if code1 != 401:
+            return out
+        ch = _parse_challenge(raw1)
+        self.server_realm = ch.get("realm", "")
+        nonce = ch.get("nonce", "")
+        uri = f"sip:{domain}"
+        resp = _digest_response(auth_user, self.server_realm, password, ha1_hex, "REGISTER", uri, nonce)
+        auth = (f'Authorization: Digest username="{auth_user}", realm="{self.server_realm}", '
+                f'nonce="{nonce}", uri="{uri}", response="{resp}", algorithm=MD5')
+        sa2 = list(sa)
+        if verify == "echo":
+            if out["security_server"]:
+                sa2.append(f"Security-Verify: {out['security_server']}")
+        elif verify is not None:
+            sa2.append(f"Security-Verify: {verify}")
+        msg2 = _register_lines(user, domain, self.local_ip, self.local_port, call_id, from_tag, 2,
+                               _branch(), auth_header=auth, transport="TLS", expires=expires, extra=sa2)
+        self._send(msg2)
+        code2, raw2 = _recv_final_stream(self.sock, time.time() + self.timeout)
+        out["second"] = code2
+        out["second_security_server"] = _header(raw2, "Security-Server")
+        out["service_route"] = _header(raw2, "Service-Route")
+        return out

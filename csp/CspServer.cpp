@@ -62,6 +62,7 @@ CCallDir gclsCallDir;
 #include "Monitor.h"
 #include "NonceMap.h"
 #include "RedisStore.h"
+#include "SecAgree.h"
 #include "ServerService.h"
 #include "ServerUtility.h"
 #include "SipCodecTable.h"
@@ -504,6 +505,7 @@ int ServiceMain() {
 
         if ( iSecond % 10 == 0 ) {
             gclsNonceMap.DeleteTimeout( 1000 );
+            gclsSecAgreeMap.DeleteTimeout( 1000 );  // sec-agree 발급 목록 — nonce 와 같은 수명
 
             // 등록 만료 사용자 삭제 → DB logout_time 동기화 + PTT 세션 정리
             USER_INFO_LIST clsExpiredUsers;

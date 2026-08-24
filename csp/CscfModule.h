@@ -37,7 +37,9 @@ public:
     // 인증 헬퍼 (다른 모듈에서도 사용 가능)
     //   strRealmOverride: 서비스 엔티티에서 계산된 realm 전달. 비면 전역 AuthRealm 사용.
     static bool AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride = "", bool bStale = false );
-    static bool SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride = "", bool bStale = false );
+    //   pszSecurityServer: RFC 3329 협상 중이면 401 에 실을 Security-Server 목록 (NULL = 미동봉).
+    static bool SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride = "",
+                                          bool bStale = false, const char *pszSecurityServer = NULL );
     static bool CheckAuthorizationResponse( const char *pszHa1, const char *pszNonce, const char *pszUri,
                                             const char *pszResponse, const char *pszMethod, const char *pszQop,
                                             const char *pszNc, const char *pszCnonce );
@@ -55,6 +57,9 @@ private:
     bool RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage );
 
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
+    /** RFC 3329 협상 거절 — 494(대조 실패/제안 없음) 또는 421(정책상 협상 필수) + 새 Security-Server. */
+    bool SendSecAgreeReject( CSipMessage *pclsMessage, int iStatusCode, const std::string &strUser,
+                             const char *pszReason );
 };
 
 #endif

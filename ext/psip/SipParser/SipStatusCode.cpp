@@ -118,6 +118,8 @@ const char *SipGetReasonPhrase(int iSipCode) {
     return "Request Pending";
   case SIP_UNDECIPHERABLE:
     return "Undecipherable";
+  case SIP_SECURITY_AGREEMENT_REQUIRED:
+    return "Security Agreement Required";
   case SIP_INTERNAL_SERVER_ERROR:
     return "Internal Server Error";
   case SIP_NOT_IMPLEMENTED:

@@ -21,6 +21,7 @@
 #include "Log.h"
 #include "McpttInfo.h"  // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
 #include "NonceMap.h"
+#include "SecAgree.h"
 #include "SipMd5.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
@@ -76,12 +77,29 @@ bool CCscfModule::AddChallenge( CSipMessage *psttResponse, const std::string &st
     return true;
 }
 
-bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride, bool bStale ) {
+bool CCscfModule::SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride, bool bStale,
+                                            const char *pszSecurityServer ) {
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_UNAUTHORIZED );
     if ( pclsResponse == NULL ) return false;
 
     pclsResponse->AddHeader( "Allow", SIP_ALLOW_METHODS );
     AddChallenge( pclsResponse, strRealmOverride, bStale );
+    // RFC 3329 / TS 24.229 §5.2.2: 단말이 Security-Client 를 보냈으면 401 에 서버 목록을 싣는다.
+    if ( pszSecurityServer ) pclsResponse->AddHeader( "Security-Server", pszSecurityServer );
+    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    return true;
+}
+
+bool CCscfModule::SendSecAgreeReject( CSipMessage *pclsMessage, int iStatusCode, const std::string &strUser,
+                                      const char *pszReason ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
+    if ( pclsResponse == NULL ) return false;
+    // 협상 재시작 — 새 서버 목록을 함께 준다 (494/421 모두 Security-Server 동봉, RFC 3329 §2.2/§2.3).
+    const std::string strServer = gclsSecAgreeMap.Issue( strUser );
+    pclsResponse->AddHeader( "Security-Server", strServer.c_str() );
+    CLog::Print( LOG_INFO, "sec-agree reject user=%s transport=%d src=%s:%d → %d (%s)", strUser.c_str(),
+                 pclsMessage->m_eTransport, pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort, iStatusCode,
+                 pszReason );
     gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     return true;
 }
@@ -318,7 +336,12 @@ bool CCscfModule::CheckChannelPolicy( CSipMessage *pclsMessage ) {
     CspUser clsUser;
     const std::string &strUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( gclsCspUserMap.Select( strUser.c_str(), clsUser ) == false ) return true;
-    if ( !clsUser.requiresTls() || pclsMessage->m_eTransport == E_SIP_TLS ) return true;
+    if ( pclsMessage->m_eTransport == E_SIP_TLS ) return true;
+    // TLS 강제의 두 근거가 같은 게이트로 합류한다 (sip_access_security.md §8.1): 정책 축(sip_transport=TLS)
+    //   과 협상 결과 축(sec-agree 로 tls 를 결부한 등록이 살아있음 — RFC 3329 협상 후 평문 요청은 강등).
+    const bool bPolicy = clsUser.requiresTls();
+    const bool bNegotiated = !bPolicy && gclsUserMap.IsIntegrityProtected( strUser.c_str() );
+    if ( !bPolicy && !bNegotiated ) return true;
 
     // 반복 위반 계수 (A-SEC-003) — 소스 로그 억제와 무관하게 전 건. SipStatsMonitor 가
     // 평가 윈도우당 건수를 Setup.SipStats.ChannelPolicyMajor 임계로 발화/해소한다.
@@ -327,9 +350,11 @@ bool CCscfModule::CheckChannelPolicy( CSipMessage *pclsMessage ) {
     // 반복 위반(스캔/오설정)은 소스 단위로 로그를 억제한다 — 미가입 403 경로와 같은 계약.
     if ( !CLog::IsNetworkSourceSuppressed( pclsMessage->m_strClientIp.c_str() ) )
         CLog::Print(
-            LOG_INFO, "channel policy violation user=%s transport=%s src=%s:%d method=%s → 403, 소스 로그 %d초 억제",
+            LOG_INFO,
+            "channel policy violation user=%s transport=%s src=%s:%d method=%s (%s) → 403, 소스 로그 %d초 억제",
             strUser.c_str(), pclsMessage->m_eTransport == E_SIP_TCP ? "TCP" : "UDP", pclsMessage->m_strClientIp.c_str(),
-            pclsMessage->m_iClientPort, pclsMessage->m_strSipMethod.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
+            pclsMessage->m_iClientPort, pclsMessage->m_strSipMethod.c_str(), bPolicy ? "policy" : "sec-agree",
+            SIP_SCAN_SUPPRESS_TTL_SEC );
     CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
     if ( pclsResponse ) gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
@@ -375,13 +400,37 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     ServiceInfo svcReg = gclsServiceMap.GetByDomain( pclsMessage->m_clsReqUri.m_strHost );
     const std::string strRegRealm = ( svcReg.id > 0 ) ? CCspServiceMap::EffectiveRealm( svcReg )
                                                       : pclsMessage->m_clsReqUri.m_strHost;
+
+    // ── RFC 3329 sec-agree (TS 24.229 §5.1.1.5.1 프로파일, sip_access_security.md §8.1) ──
+    //   초기 REGISTER: Security-Client → 401 에 Security-Server 동봉(발급 보관).
+    //   재-REGISTER : 인증 통과 후 Security-Verify 를 발급 원문과 대조 + 보호 채널(TLS) 확인 → 통과 시
+    //                 바인딩에 integrity-protected 결부. 불일치·부재는 494 로 협상 재시작.
+    const std::string &strFromUser = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+    const SecAgreeRequest clsSA = ParseSecAgree( pclsMessage );
+    if ( clsSA.bRequire && !clsSA.bHasClient && !clsSA.bHasVerify ) {
+        // sec-agree 를 요구하면서 제안 목록이 없다 — 협상할 재료가 없다 (RFC 3329 §2.2)
+        return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                   "Require sec-agree without Security-Client" );
+    }
+    if ( gclsSetup.m_bSecAgreeRequire && !clsSA.Requested() ) {
+        // 정책(TLS 강제) 가입자는 협상 없는 등록을 받지 않는다 — 정책이 협상의 하한 (421 + 서버 목록)
+        CspUser clsPolicyUser;
+        if ( gclsCspUserMap.Select( strFromUser.c_str(), clsPolicyUser ) && clsPolicyUser.requiresTls() ) {
+            return SendSecAgreeReject( pclsMessage, SIP_EXTENSION_REQUIRED, strFromUser, "policy requires sec-agree" );
+        }
+    }
+    // 챌린지(401)에 실을 서버 목록 — 단말이 제안했을 때만 (협상 미사용 단말에는 싣지 않는다)
+    std::string strSecServer;
+    if ( clsSA.bHasClient ) strSecServer = gclsSecAgreeMap.Issue( strFromUser );
+    const char *pszSecServer = strSecServer.empty() ? NULL : strSecServer.c_str();
+
     // 3GPP pre-auth: 첫 REGISTER 의 빈 Authorization(nonce/response 없음)은 IMPI 광고일 뿐
     //   답안 제출이 아니다. 'Authorization 없음'과 동일하게 취급 — nonce 조회로 넘기면
     //   E_AUTH_NONCE_NOT_FOUND(F-07 stale=true) 경로로 빠져 첫 챌린지에 stale 이 붙는 버그가 됨.
     const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
                                  itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
-        return SendUnAuthorizedResponse( pclsMessage, strRegRealm );
+        return SendUnAuthorizedResponse( pclsMessage, strRegRealm, false, pszSecServer );
     }
 
     CspUser clsUser;
@@ -390,12 +439,13 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
     switch ( eRes ) {
         case E_AUTH_NONCE_NOT_FOUND:
-            SendUnAuthorizedResponse( pclsMessage, strRegRealm, true );  // F-07: stale=true
+            SendUnAuthorizedResponse( pclsMessage, strRegRealm, true, pszSecServer );  // F-07: stale=true
             return true;
         case E_AUTH_REALM_MISMATCH: {
             // 가입자 서비스의 realm 로 재챌린지 — Request-URI host 로 고른 strRegRealm 과 다를 수 있다
             ServiceInfo svc = gclsServiceMap.GetByName( clsUser.m_strServiceRef );
-            SendUnAuthorizedResponse( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm );
+            SendUnAuthorizedResponse( pclsMessage, svc.id > 0 ? CCspServiceMap::EffectiveRealm( svc ) : strRegRealm,
+                                      false, pszSecServer );
         }
             return true;
         case E_AUTH_USER_NOT_FOUND:
@@ -418,6 +468,28 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             break;
     }
 
+    // 인증을 통과한 REGISTER 의 sec-agree 대조 — 보호 채널 위여야 하고 Security-Verify 가 발급 원문과 같아야
+    //   한다. 인증 뒤에 두는 이유: 미인증 요청이 494 로 발급 상태를 흔들지 못하게 한다.
+    bool bIntegrityProtected = false;
+    if ( clsSA.Requested() ) {
+        if ( !clsSA.bHasVerify ) {
+            gclsSecAgreeMap.Issue( strFromUser );
+            return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                       "Security-Verify absent" );
+        }
+        if ( pclsMessage->m_eTransport != E_SIP_TLS ) {
+            return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                       "negotiated tls but request not on TLS" );
+        }
+        const ESecAgreeVerify eVerify = gclsSecAgreeMap.Verify( strFromUser, clsSA.strVerify );
+        if ( eVerify != E_SECAGREE_OK ) {
+            return SendSecAgreeReject( pclsMessage, SIP_SECURITY_AGREEMENT_REQUIRED, strFromUser,
+                                       eVerify == E_SECAGREE_MISMATCH ? "Security-Verify mismatch (bidding-down)"
+                                                                      : "no negotiation in progress" );
+        }
+        bIntegrityProtected = true;
+    }
+
     // UNREGISTER
     if ( pclsMessage->GetExpires() == 0 ) {
         std::string strUserId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
@@ -425,6 +497,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         CUserInfo clsRegInfo;
         bool bHadBinding = gclsUserMap.Select( strUserId.c_str(), clsRegInfo );
         gclsUserMap.Delete( strUserId.c_str() );
+        gclsSecAgreeMap.Delete( strUserId );
         // DB logout_time 갱신 + CspUserMap 캐시 업데이트
         gclsCspUserMap.unregisterUser( strUserId );
         // PTT 그룹콜 세션 정리 (활성 호 있으면 BYE + DB 갱신)
@@ -444,7 +517,10 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
     // REGISTER
     const bool bRefresh = gclsUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str() );
-    if ( gclsUserMap.Insert( pclsMessage, &clsUser ) ) {
+    if ( gclsUserMap.Insert( pclsMessage, &clsUser, bIntegrityProtected ) ) {
+        if ( bIntegrityProtected )
+            CLog::Print( LOG_INFO, "sec-agree: user=%s registered integrity-protected (tls) src=%s:%d",
+                         strFromUser.c_str(), pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_OK );
         if ( pclsResponse == NULL ) return false;
 
@@ -491,12 +567,17 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             //     단말이 다른 NIC/리스너로 REGISTER 했어도 그 리스너의 주소가 응답 자기 주소가 됨.
             const int iListenerId = GetCurrentInboundListenerId();
             const std::string strSipAddr = CspAddressing::GetLocalSipAddress( iListenerId );
-            const int iSipPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
+            const int iSipPort = CspAddressing::GetLocalSipPortForTransport( iListenerId, pclsMessage->m_eTransport );
             // Service-Route = S-CSCF(자기) 주소. host:port 만 사용 — 도메인을 user 파트에
             //   넣으면(sip:도메인@IP) 비표준이라 엄격한 UA 가 이 route 로 요청 생성 시
             //   오라우팅/거부할 수 있다 (RFC 3608 / TS 24.229).
-            snprintf( szServiceRoute, sizeof( szServiceRoute ), "<sip:%s:%d;lr>",
-                      strSipAddr.c_str(), iSipPort );
+            //   스트림 transport 로 등록한 단말에는 ;transport= 를 명시한다 — 없으면 route 를 따르는
+            //   후속 요청이 UDP 로 강등된다 (sip_tls_signaling.md §7; TLS 협상 등록은 게이트에 걸린다).
+            const char *pszRouteTransport = ( pclsMessage->m_eTransport == E_SIP_TLS )   ? ";transport=tls"
+                                            : ( pclsMessage->m_eTransport == E_SIP_TCP ) ? ";transport=tcp"
+                                                                                         : "";
+            snprintf( szServiceRoute, sizeof( szServiceRoute ), "<sip:%s:%d%s;lr>", strSipAddr.c_str(), iSipPort,
+                      pszRouteTransport );
             pclsResponse->AddHeader( "Service-Route", szServiceRoute );
         }
 

@@ -30,6 +30,13 @@ bool CSipUserAgent::RecvRegisterResponse( int iThreadId, CSipMessage * pclsMessa
 		{
 			int iStatusCode = pclsMessage->m_iStatusCode;
 
+			// RFC 3329: 응답(401/494/421)의 Security-Server 원문을 보관 — 다음 REGISTER 의 Security-Verify.
+			if( itSL->m_bSecAgree )
+			{
+				CSipHeader * pclsSecServer = pclsMessage->GetHeader( "Security-Server" );
+				if( pclsSecServer ) itSL->m_strSecurityServer = pclsSecServer->m_strValue;
+			}
+
 			if( iStatusCode == SIP_OK )
 			{
 				if( itSL->m_iLoginTimeout == 0 )

@@ -125,6 +125,7 @@ CSipServerSetup::CSipServerSetup()
       m_iSipStatsCpsCritical( 0 ),
       m_iSipStatsRxErrorMinor( 10 ),
       m_iSipStatsChannelPolicyMajor( 10 ),
+      m_bSecAgreeRequire( false ),
       m_iMaxSdsCplaneBytes( 0 ),
       m_strXcapHost( "" ),
       m_iXcapPort( 4430 ),
@@ -367,6 +368,12 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( st.Has( "RxErrorMinor" ) ) m_iSipStatsRxErrorMinor = (int)st.GetInt( "RxErrorMinor" );
                 if ( st.Has( "ChannelPolicyMajor" ) )
                     m_iSipStatsChannelPolicyMajor = (int)st.GetInt( "ChannelPolicyMajor" );
+            }
+
+            // RFC 3329 sec-agree (P2)
+            if ( setup.Has( "SecAgree" ) ) {
+                SimpleJson::JsonNode sa = setup.Get( "SecAgree" );
+                if ( sa.Has( "Require" ) ) m_bSecAgreeRequire = ( sa.GetString( "Require" ) == "true" );
             }
 
             // MCData C-plane 정책 (TS 24.484 <max-payload-size-sds-cplane-bytes> 대응)

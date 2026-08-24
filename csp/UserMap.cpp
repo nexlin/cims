@@ -37,7 +37,8 @@ CUserInfo::CUserInfo()
       m_iSendOptionsTime( 0 ),
       m_iLastSeenTime( 0 ),
       m_bMcDataMsrp( false ),
-      m_iRegisterCSeq( 0 ) {
+      m_iRegisterCSeq( 0 ),
+      m_bIntegrityProtected( false ) {
 }
 
 void CUserInfo::GetCallRoute( CSipCallRoute &clsRoute ) {
@@ -91,7 +92,7 @@ CUserMap::~CUserMap() {
  * @param pclsXmlUser	XML 에 저장된 사용자 정보
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
-bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
+bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bIntegrityProtected ) {
     CUserInfo clsInfo;
     std::string strUserId;
     USER_MAP::iterator itMap;
@@ -107,6 +108,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser ) {
     }
 
     clsInfo.m_eTransport = pclsMessage->m_eTransport;
+    clsInfo.m_bIntegrityProtected = bIntegrityProtected;
     time( &clsInfo.m_iLoginTime );
 
     clsInfo.m_strGroupId = pclsXmlUser->m_strOrganizationId;
@@ -259,6 +261,22 @@ bool CUserMap::Select( const char *pszUserId ) {
     }
     m_clsMutex.release();
 
+    return bRes;
+}
+
+bool CUserMap::IsIntegrityProtected( const char *pszUserId ) {
+    bool bRes = false;
+    m_clsMutex.acquire();
+    USER_MAP::iterator itMap = m_clsMap.find( pszUserId );
+    if ( itMap != m_clsMap.end() ) {
+        for ( size_t i = 0; i < itMap->second.size(); ++i ) {
+            if ( itMap->second[i].m_bIntegrityProtected ) {
+                bRes = true;
+                break;
+            }
+        }
+    }
+    m_clsMutex.release();
     return bRes;
 }
 
