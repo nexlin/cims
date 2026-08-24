@@ -247,7 +247,7 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 |---|---|
 | `/provisioning/me` | `account.sipHa1` (H(A1)). `account.sipPassword` 는 항상 `null`(평문 미배포 — 키는 단말 호환으로 유지). 단말은 `sipHa1` 우선, 없으면 로그인 비번으로 ha1 계산 |
 | Android UE | `sipHa1` 수신 시 pjsip cred 를 `PJSIP_CRED_DATA_DIGEST`(ha1) 로 설정한다(`android/core` SipController — cred realm 은 `*` 유지, pjsip 이 DIGEST cred 의 algorithm 미지정을 MD5 로 기본화). `sipHa1` 이 없으면 평문 cred(`sipPassword` → 로그인 비번) 폴백 — H(A1) 은 realm 에 결박된 값이라 challenge realm 추종이 필요한 상황은 평문 경로만 흡수한다. 수동 설정에서 도메인/IMSI/IMPI/비번을 편집하면 결박이 깨진 저장 ha1 을 함께 소거한다 |
-| cspsim | `-db` 모드는 DB `ha1` 우선(비면 `passwd`), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받는다. `-password` 는 유지(직접 계산) |
+| cspsim | `-db` 모드는 DB `ha1` 우선(비면 `passwd`), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받고, 등록 스레드는 비밀번호가 비어도 ha1 이 있으면 자격으로 인정한다(passwd 소거 후 ha1 단독 등록). `-password` 는 유지(직접 계산) |
 | verify 하네스 | `subscribers.py` 가 "번호 연속 + 전원 `ha1` 보유" 창(window)을 골라 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다("같은 비밀번호 구간" 의존 소멸. `-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 없는 구 DB 는 "전원 동일 비밀번호" 창 + `-password` 로 폴백 |
 
 **배포 순서가 계약이다**:

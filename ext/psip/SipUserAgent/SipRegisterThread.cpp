@@ -35,7 +35,9 @@ THREAD_API SipRegisterThread( LPVOID lpParameter )
 		pclsSipUserAgent->m_clsRegisterMutex.acquire();
 		for( itList = pclsSipUserAgent->m_clsRegisterList.begin(); itList != pclsSipUserAgent->m_clsRegisterList.end(); ++itList )
 		{
-			if( itList->m_strPassWord.empty() ) continue;
+			// 자격 없음 = 등록 skip. H(A1) 은 원문 비밀번호 없이도 유효한 자격이다
+			//   (sip_access_security.md §4.7 — DB passwd 소거 후 ha1 만 남는다).
+			if( itList->m_strPassWord.empty() && itList->m_strHa1.empty() ) continue;
 
 			if( itList->m_bLogin == false )
 			{
