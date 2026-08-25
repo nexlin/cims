@@ -86,6 +86,26 @@ agent 와 모든 모듈은 **버전 디렉토리를 병렬로 보존**하고, �
 > prune(최신 3개 유지) 전이라 실경로가 유효하며, prune 이후의 deleted-inode 잔재는 `lifecycle.sh`
 > `kill_deleted_inode_orphans <name>`(동일 이름 deleted-inode 만 kill)가 정리한다.
 
+> **CSP 계열(csp/psp/isp) start 판정·pidfile** (`lifecycle.sh _start_csp_variant`)
+> - **실효 접속점 정본 = `local_nodes.jsonl`.** 좀비 정리·포트 점유 판정은 csp.json `Setup.Sip.UdpPort`
+>   (identity fallback — 실제 bind 포트와 다를 수 있음)가 아니라 local_nodes 의 enabled 리스너
+>   실포트 전체(UDP/TCP/TLS)로 수행한다. 해석 순서는 CSP 와 동일: `Setup.ConfigJsonlDir` →
+>   install 루트 `config/` → 변종 내부 `config/`.
+> - **start 성공 = 자기 exe worker 생존 + primary 접속점 bind 확인**(폴링, 기본 20s —
+>   `CIMS_CSP_START_TIMEOUT`). 판정 시점에 pidfile 을 실제 **포트 소유 worker** 로 확정한다 —
+>   csp 는 daemonize fork 구조라 초기 pid($!)가 기동 중 소멸하고 다른 worker 가 서비스를 이어도
+>   pidfile 이 고아가 되지 않는다. 즉사(연속 무프로세스)는 타임아웃 전 조기 실패.
+> - **멱등 start**: pidfile 유실/사망이어도 자기 exe worker 가 primary 접속점을 물고 살아있으면
+>   그 pid 로 pidfile 을 승계하고 성공 반환 — 건강한 서비스를 죽였다 다시 띄우지 않는다.
+> - 자기 좀비 식별은 cmdline 패턴(`kill_stray`, 절대경로 직접 실행)과 `/proc/<pid>/exe` 대조
+>   (`_kill_own_exe_strays`, lifecycle 상대경로 기동) 두 축 — lifecycle 는 `cd` 후 `bin/<name>` 으로
+>   기동하므로 cmdline 패턴만으로는 자기 프로세스가 잡히지 않는다.
+> - **파일 capability 바이너리(csp `setcap cap_net_admin` — IMS AKA+IPsec)의 프로세스는 동일 uid 라도
+>   `/proc/<pid>/exe` 읽기·`ss -p` 소켓 귀속이 거부된다**(ptrace 접근 검사 — 대상 caps ⊆ 호출자 caps 요구).
+>   lifecycle 의 exe 식별·포트 귀속은 이때 동봉 `cims-priv` 의 읽기 전용 서브커맨드
+>   (`proc-exe`/`proc-pids-of`/`port-owner`, sudoers NOPASSWD)로 root 위임해 복원한다 — 위임 불가
+>   환경(sudoers 미구성 dev)은 미식별=보수적 no-op 으로 폴백.
+
 ## 2.1 상용(Private) 부트스트랩 — base 인스톨러
 
 상용 반입 절차의 1단계(서비스 모듈과 무관한 base 운영평면 설치)는 빌드 산출물

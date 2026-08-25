@@ -37,9 +37,10 @@ is_running() {
         return 1
     fi
     # exe 검증 (optional). $DIST_DIR/<name>/bin/<name> 가 존재하면 그것과 비교.
+    # capability 바이너리는 직접 readlink 가 거부 — _proc_exe 가 root 위임 폴백.
     local expected="$DIST_DIR/$name/bin/$name"
     if [[ -x "$expected" ]]; then
-        local exe; exe=$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)
+        local exe; exe=$(_proc_exe "$pid"); exe="${exe% (deleted)}"
         local want; want=$(readlink -f "$expected" 2>/dev/null || true)
         if [[ -n "$exe" && -n "$want" && "$exe" != "$want" ]]; then
             # pid 가 다른 binary 를 가리킴 — stale
@@ -56,7 +57,7 @@ kill_deleted_inode_orphans() {
     local name="$1"
     local pid exe
     for pid in $(pgrep -x "$name" 2>/dev/null || true); do
-        exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+        exe=$(_proc_exe "$pid")
         if [[ "$exe" == *"(deleted)" ]]; then
             warn "삭제된 바이너리로 실행 중인 좀비 $name 정리: pid=$pid ($exe)"
             kill -9 "$pid" 2>/dev/null || true
@@ -130,11 +131,10 @@ _kill_own_install_listener() {
     local pid
     local killed_any=0
     for pid in $port_pids; do
-        # readlink -f 가 deleted target 또는 권한 부족 시 non-zero 반환 → set -e
-        # 회피 위해 || true. tarball 풀어 inode 교체된 옛 process 의 exe 는
-        # '/path/to/bin (deleted)' 형태 → readlink -e/-f 모두 비워서 plain readlink
-        # 로 raw target 을 받고 ' (deleted)' suffix 만 trim.
-        local pid_exe; pid_exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+        # tarball 풀어 inode 교체된 옛 process 의 exe 는 '/path/to/bin (deleted)'
+        # 형태 — raw target 에서 ' (deleted)' suffix 만 trim. capability 바이너리는
+        # 직접 readlink 거부 → _proc_exe 가 root 위임 폴백.
+        local pid_exe; pid_exe=$(_proc_exe "$pid")
         local pid_exe_trim="${pid_exe% (deleted)}"
         if [[ -n "$pid_exe_trim" && "$pid_exe_trim" == "$exe_real" ]]; then
             warn "stale own-install listener 정리: pid=$pid (port=$port/$proto exe=$pid_exe)"
@@ -161,6 +161,212 @@ _kill_own_install_listener() {
             sleep 0.3; k=$(( k + 1 ))
         done
     fi
+}
+
+# ── 자기 exe 프로세스 헬퍼 ───────────────────────────────────
+# lifecycle 는 상대경로(cd 후 bin/<name>)로 기동하므로 cmdline 패턴(pgrep -f 절대경로)
+# 으로는 자기 프로세스가 잡히지 않는다 — /proc/<pid>/exe 대조가 정본. deleted-inode
+# 프로세스는 제외 (그쪽은 kill_deleted_inode_orphans 담당).
+#
+# ⚠ 파일 capability 바이너리(csp setcap cap_net_admin — IMS AKA+IPsec)의 프로세스는
+# ptrace 접근 검사(대상 caps ⊆ 호출자 caps)로 동일 uid 라도 /proc/<pid>/exe 읽기와
+# ss -p 소켓 귀속이 거부된다. 이때는 동봉 cims-priv(sudoers NOPASSWD, 읽기 전용
+# 서브커맨드)로 root 위임해 식별을 복원한다 — 위임 불가 환경(sudoers 미구성 dev 등)
+# 은 조용히 폴백 없이 종전 동작(미식별=보수적 no-op).
+_priv_bin() {
+    # sudoers 는 버전 실경로로 등재 — current 심볼릭 경유 호출은 매칭 안 되므로 해소.
+    local p; p=$(readlink -f "$SCRIPT_DIR/cims-priv" 2>/dev/null || true)
+    [[ -n "$p" && -x "$p" ]] && { echo "$p"; return 0; }
+    p=$(readlink -f "$SCRIPT_DIR/bin/cims-priv" 2>/dev/null || true)
+    [[ -n "$p" && -x "$p" ]] && echo "$p"
+    return 0
+}
+
+_proc_exe() {
+    # /proc/<pid>/exe 해석 — 직접 읽기 실패 시(capability 바이너리) root 위임.
+    local pid="$1" exe
+    exe=$(readlink "/proc/$pid/exe" 2>/dev/null || true)
+    if [[ -z "$exe" && -d "/proc/$pid" ]]; then
+        local priv; priv=$(_priv_bin)
+        [[ -n "$priv" ]] && exe=$(sudo -n "$priv" proc-exe "$pid" 2>/dev/null || true)
+    fi
+    echo "$exe"
+    return 0
+}
+
+_pids_by_exe() {
+    # bash 내장 -ef (device+inode 대조) — 프로세스마다 외부 readlink fork 는 반복
+    # 호출(start 게이트 폴링)에서 수 초씩 걸린다. inode 교체된 옛 버전 바이너리는
+    # 자연히 불일치 (그쪽은 kill_deleted_inode_orphans 담당).
+    local bin="$1" p
+    [[ -e "$bin" ]] || return 0
+    local found=0
+    for p in /proc/[0-9]*; do
+        [[ "$p/exe" -ef "$bin" ]] && { echo "${p##*/}"; found=1; }
+    done
+    # 직접 대조 무소득 → capability 바이너리 가능성 — root 위임 열거
+    if [[ $found -eq 0 ]]; then
+        local priv; priv=$(_priv_bin)
+        [[ -n "$priv" ]] && sudo -n "$priv" proc-pids-of "$bin" 2>/dev/null || true
+    fi
+    return 0
+}
+
+# 자기 exe 로 실행 중인 잔존 프로세스 정리 — SIGTERM → 짧게 wait → 잔존 SIGKILL.
+_kill_own_exe_strays() {
+    local bin="$1"
+    local pids; pids=$(_pids_by_exe "$bin")
+    [[ -z "$pids" ]] && return 0
+    warn "자기 install 잔존 프로세스 정리: $(basename "$bin") pid=$(echo $pids | tr '\n' ' ')"
+    kill $pids 2>/dev/null || true
+    local i=1 p left
+    while (( i <= 15 )); do
+        left=""
+        for p in $pids; do kill -0 "$p" 2>/dev/null && left="1"; done
+        [[ -z "$left" ]] && break
+        sleep 0.2; i=$(( i + 1 ))
+    done
+    for p in $pids; do
+        kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null || true
+    done
+    return 0
+}
+
+# ── CSP 계열 실효 리스너 (local_nodes.jsonl) ─────────────────
+# CSP 의 SIP 접속점 정본은 csp.json 이 아니라 local_nodes.jsonl 이다 — csp.json 의
+# Setup.Sip.UdpPort 는 identity fallback 일 뿐 실제 bind 포트가 아닐 수 있다 (stale
+# 5060 을 보고 15060 좀비를 못 죽이던 결함). 해석 순서는 CSP(SipServerSetup.cpp)와
+# 동일: Setup.ConfigJsonlDir → install 루트 config/ → 변종 내부 config/.
+_csp_local_nodes_path() {
+    local cfg="$1" name="$2"
+    local d
+    d=$("$PYBIN" -c "import json; print(json.load(open('$cfg')).get('Setup',{}).get('ConfigJsonlDir') or '')" 2>/dev/null || echo "")
+    local p
+    for p in "${d:+$d/local_nodes.jsonl}" "$DIST_DIR/config/local_nodes.jsonl" "$DIST_DIR/$name/config/local_nodes.jsonl"; do
+        [[ -n "$p" && -f "$p" ]] && { echo "$p"; return 0; }
+    done
+    echo ""
+    return 0
+}
+
+# enabled 리스너 전부를 "<proto> <port>" 줄로 출력 (proto = udp|tcp, TLS→tcp, dedup).
+_csp_listener_ports() {
+    local jsonl="$1"
+    [[ -n "$jsonl" && -f "$jsonl" ]] || return 0
+    "$PYBIN" - "$jsonl" <<'PY' 2>/dev/null || true
+import json, sys
+seen = set()
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if not line: continue
+    try: r = json.loads(line)
+    except Exception: continue
+    if not isinstance(r, dict) or not r.get("enabled"): continue
+    try: port = int(r.get("bind_port") or 0)
+    except Exception: continue
+    if not (0 < port < 65536): continue
+    proto = "udp" if str(r.get("protocol") or "UDP").upper() == "UDP" else "tcp"
+    if (proto, port) in seen: continue
+    seen.add((proto, port))
+    print(proto, port)
+PY
+}
+
+# primary(enabled) 리스너를 "<proto> <port>" 로 출력 — 없으면 첫 enabled, 그것도 없으면 빈 값.
+_csp_primary_listener() {
+    local jsonl="$1"
+    [[ -n "$jsonl" && -f "$jsonl" ]] || return 0
+    "$PYBIN" - "$jsonl" <<'PY' 2>/dev/null || true
+import json, sys
+first = None
+for line in open(sys.argv[1], encoding="utf-8"):
+    line = line.strip()
+    if not line: continue
+    try: r = json.loads(line)
+    except Exception: continue
+    if not isinstance(r, dict) or not r.get("enabled"): continue
+    try: port = int(r.get("bind_port") or 0)
+    except Exception: continue
+    if not (0 < port < 65536): continue
+    proto = "udp" if str(r.get("protocol") or "UDP").upper() == "UDP" else "tcp"
+    if r.get("is_primary"):
+        print(proto, port); break
+    if first is None: first = (proto, port)
+else:
+    if first: print(first[0], first[1])
+PY
+}
+
+# pidfile 을 실제 실행 worker 로 확정. owner(포트 소유 pid)가 자기 exe 면 그것,
+# 아니면 현 pidfile pid 가 자기 exe 로 살아있으면 유지, 둘 다 아니면 own-exe 스캔.
+_csp_sync_pidfile() {
+    local name="$1" bin="$2" owner="${3:-}"
+    local bin_real; bin_real=$(readlink -f "$bin" 2>/dev/null || true)
+    if [[ -n "$owner" && -n "$bin_real" ]]; then
+        local oexe; oexe=$(_proc_exe "$owner"); oexe="${oexe% (deleted)}"
+        if [[ "$oexe" == "$bin_real" ]]; then
+            [[ "$(read_pid "$name")" != "$owner" ]] && save_pid "$name" "$owner"
+            return 0
+        fi
+        # 소유자 identity 미해석(위임 불가 환경) — 포트는 우리 설정 포트이므로 소유자 채택
+        if [[ -z "$oexe" ]]; then
+            [[ "$(read_pid "$name")" != "$owner" ]] && save_pid "$name" "$owner"
+            return 0
+        fi
+    fi
+    local cur; cur="$(read_pid "$name")"
+    if [[ -n "$cur" && -n "$bin_real" ]] && kill -0 "$cur" 2>/dev/null; then
+        local cexe; cexe=$(_proc_exe "$cur"); cexe="${cexe% (deleted)}"
+        [[ "$cexe" == "$bin_real" ]] && return 0
+    fi
+    local adopt; adopt=$(_pids_by_exe "$bin" | head -1)
+    [[ -n "$adopt" ]] && save_pid "$name" "$adopt"
+    return 0
+}
+
+# ── CSP 계열 start 판정 게이트 ───────────────────────────────
+# 성공 = 자기 exe worker 생존 + primary 접속점 bind 확인. 판정 시점에 pidfile 을 실제
+# worker(포트 소유자)로 확정한다 — 초기 pid($!)가 기동 중 죽고 재fork worker 가 서비스를
+# 잇는 경우의 pidfile 고아 방지 (2026-08-25 csp 재기동 불안정의 원인). 포트 판정이
+# 불가한 환경(ss 부재/포트 미상)은 1s 생존 판정으로 폴백 (구 동작 — 도구는 베이스
+# 이미지 책임).
+_csp_start_gate() {
+    local name="$1" bin="$2" proto="$3" port="$4" timeout_s="${5:-20}"
+    local bin_real; bin_real=$(readlink -f "$bin" 2>/dev/null || true)
+    local probe=0
+    [[ -n "$port" ]] && command -v ss >/dev/null 2>&1 && probe=1
+    local i=0 dead=0 max=$(( timeout_s * 2 ))
+    while (( i < max )); do
+        local pids; pids=$(_pids_by_exe "$bin")
+        if [[ -z "$pids" ]]; then
+            # 기동 직후 exec 전 window 는 관대하게 — 1s 지나서도 2s 연속 무프로세스면 조기 실패
+            dead=$(( dead + 1 ))
+            if (( i >= 2 && dead >= 4 )); then return 1; fi
+        else
+            dead=0
+            if (( probe == 0 )); then
+                if (( i >= 2 )); then
+                    _csp_sync_pidfile "$name" "$bin" ""
+                    return 0
+                fi
+            else
+                local owner; owner=$(_pid_by_port "$port:$proto")
+                if [[ -n "$owner" ]]; then
+                    local oexe; oexe=$(_proc_exe "$owner"); oexe="${oexe% (deleted)}"
+                    # identity 확증 실패(oexe 비어있음 — 위임 불가 환경의 capability
+                    # 프로세스)는 성공 취급 — 우리 설정 포트가 bind 된 사실이 우선.
+                    if [[ -n "$oexe" && -n "$bin_real" && "$oexe" != "$bin_real" ]]; then
+                        warn "포트 $port($proto) 를 다른 프로세스가 점유 (pid=$owner exe=$oexe)"
+                        return 1
+                    fi
+                    _csp_sync_pidfile "$name" "$bin" "$owner"
+                    return 0
+                fi
+            fi
+        fi
+        sleep 0.5; i=$(( i + 1 ))
+    done
+    return 1
 }
 
 # ── deployment overlay 머지 ──────────────────────────────────
@@ -320,18 +526,72 @@ _start_csp_variant() {
     [[ ! -f "$_overlay" ]] && _overlay="$DIST_DIR/config.json"
     # pre-launch 단계는 best-effort — 어떤 이유로든 실패해도 start abort 안 함.
     _apply_overlay_to_module_config "$_overlay" "$cfg" || true
-    local sip_port; sip_port=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
+
+    # 실효 리스너 = local_nodes.jsonl (없으면 csp.json Setup.Sip.UdpPort 폴백 — dev 등)
+    local nodes; nodes="$(_csp_local_nodes_path "$cfg" "$name")"
+    local primary; primary="$(_csp_primary_listener "$nodes")"
+    if [[ -z "$primary" ]]; then
+        local _fp; _fp=$("$PYBIN" -c "import json; d=json.load(open('$cfg')); print(d['Setup']['Sip']['UdpPort'])" 2>/dev/null || echo 5060)
+        primary="udp $_fp"
+    fi
+    local proto="${primary%% *}" port="${primary##* }"
+
+    # pidfile 이 유실/사망이어도 자기 exe worker 가 primary 접속점을 물고 살아있으면
+    # 승계한다 — 죽여서 재기동하면 멀쩡한 서비스가 끊긴다 (worker 재fork 로 pidfile 이
+    # 고아가 된 케이스의 멱등 start).
+    if [[ -n "$port" ]] && command -v ss >/dev/null 2>&1; then
+        local _owner; _owner=$(_pid_by_port "$port:$proto")
+        if [[ -n "$_owner" ]]; then
+            local _breal; _breal=$(readlink -f "$bin" 2>/dev/null || true)
+            local _oexe; _oexe=$(_proc_exe "$_owner"); _oexe="${_oexe% (deleted)}"
+            if [[ -n "$_breal" && "$_oexe" == "$_breal" ]]; then
+                save_pid "$name" "$_owner"
+                warn "$upper 이미 실행 중 — 실행 worker 로 pidfile 승계 (pid=$_owner, ${proto}:$port)"
+                return 0
+            fi
+        fi
+    fi
+
     # 삭제된 바이너리로 떠있는 동일 모듈 좀비(경로 마이그레이션 잔재) 먼저 정리
     kill_deleted_inode_orphans "$name" || true
-    # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단
+    # 자기 install 의 좀비만 정리 — 다른 인스턴스 (PSP 127.0.0.3 등) 영향 차단.
+    # kill_stray(cmdline 패턴)는 절대경로 직접 실행 케이스, _kill_own_exe_strays(/proc
+    # exe 대조)는 lifecycle 상대경로 기동 케이스를 담당.
     kill_stray "$bin" || true
-    _kill_own_install_listener "$bin" "$sip_port" udp || true
-    info "$upper 시작..."
+    _kill_own_exe_strays "$bin" || true
+    # 실효 리스너 전 포트(UDP/TCP/TLS)의 자기 좀비 정리
+    if [[ -n "$nodes" ]]; then
+        local lproto lport
+        while read -r lproto lport; do
+            [[ -z "$lport" ]] && continue
+            _kill_own_install_listener "$bin" "$lport" "$lproto" || true
+        done < <(_csp_listener_ports "$nodes")
+    else
+        _kill_own_install_listener "$bin" "$port" "$proto" || true
+    fi
+    # 정리 직후 primary 포트 release 대기 — kill 직후 소켓 회수 전 bind 경합으로
+    # worker 가 abort(terminate)하던 경합창 회피.
+    if [[ -n "$port" ]] && command -v ss >/dev/null 2>&1; then
+        local _k=1
+        while (( _k <= 10 )); do
+            [[ -z "$(_pid_by_port "$port:$proto")" ]] && break
+            sleep 0.3; _k=$(( _k + 1 ))
+        done
+    fi
+
+    info "$upper 시작... (primary ${proto}:$port)"
     cd "$DIST_DIR/$name"
     bin/$name config/$name.json -n >> "$LOG_DIR/$name.log" 2>&1 &
     save_pid "$name" $!
-    sleep 1.0
-    is_running "$name" && ok "$upper 시작 완료 (pid=$(read_pid "$name"))" || { err "$upper 시작 실패"; tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'; return 1; }
+    if _csp_start_gate "$name" "$bin" "$proto" "$port" "${CIMS_CSP_START_TIMEOUT:-20}"; then
+        ok "$upper 시작 완료 (pid=$(read_pid "$name"), ${proto}:$port bound)"
+    else
+        err "$upper 시작 실패 — 리스너 ${proto}:$port 미개설/worker 소멸 (timeout ${CIMS_CSP_START_TIMEOUT:-20}s)"
+        tail -3 "$LOG_DIR/$name.log" | sed 's/^/  /'
+        local _vlog; _vlog=$(ls -t "$DIST_DIR/$name/log/${name}_"*.log 2>/dev/null | head -1)
+        [[ -n "$_vlog" ]] && tail -3 "$_vlog" | sed 's/^/  /'
+        return 1
+    fi
 }
 
 start_csp() { _start_csp_variant csp; }
@@ -833,14 +1093,22 @@ _pid_by_port() {
     port="${pp%%:*}"; proto="${pp##*:}"
     [[ -z $port ]] && return
     # ss -H: no header,  -lnp: listening + numeric + processes
+    # local 주소는 udp/tcp 모두 $4 (State Recv-Q Send-Q Local Peer Process) — 정확 포트
+    # 매치 (substring ~ 는 :15060 이 :150601 에도 걸린다).
     local line pid
     if [[ $proto == "udp" ]]; then
-        line=$(ss -Hulnp 2>/dev/null | awk -v p=":$port" '$5 ~ p {print; exit}')
+        line=$(ss -Hulnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print; exit}')
     else
-        line=$(ss -Htlnp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print; exit}')
+        line=$(ss -Htlnp 2>/dev/null | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {print; exit}')
     fi
     [[ -z $line ]] && return
     pid=$(echo "$line" | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2)
+    # 소켓은 보이는데 소유 pid 미표기 = capability 바이너리 프로세스(ss -p 귀속 거부)
+    # — root 위임으로 귀속 복원
+    if [[ -z $pid ]]; then
+        local priv; priv=$(_priv_bin)
+        [[ -n "$priv" ]] && pid=$(sudo -n "$priv" port-owner "$proto" "$port" 2>/dev/null | awk '{print $1}' || true)
+    fi
     echo "$pid"
 }
 
@@ -1050,7 +1318,9 @@ _restart_cleanup_strays() {
         all|tb) return 0 ;;                  # 묶음 처리 — 자체 stop 에서 처리
         csp|psp|isp|cmp|pmp|imp)
             local bin="$DIST_DIR/$svc/bin/$svc"
-            [[ -f "$bin" ]] && kill_stray "$bin" || true
+            # kill_stray = cmdline 패턴(절대경로 직접 실행), _kill_own_exe_strays =
+            # /proc exe 대조(lifecycle 상대경로 기동) — 둘 다 봐야 자기 좀비가 안 남는다.
+            [[ -f "$bin" ]] && { kill_stray "$bin" || true; _kill_own_exe_strays "$bin" || true; }
             ;;
         *) return 0 ;;
     esac

@@ -469,6 +469,46 @@ do_net_rps() {
     rm -f /tmp/cims-priv.err
 }
 
+# ── 프로세스 식별 (읽기 전용) ────────────────────────
+# 파일 capability(setcap cap_net_admin 등) 바이너리의 프로세스는 ptrace 접근 검사
+# (대상 caps ⊆ 호출자 caps)로 인해 동일 uid 라도 /proc/<pid>/exe 읽기·ss -p 소켓
+# 귀속이 거부된다 — lifecycle 의 좀비 정리·start 판정·pidfile 확정이 전부 실명한다.
+# root 위임으로 식별만 복원한다. 셋 다 시스템 상태를 변경하지 않는다.
+valid_pid() {
+    [[ "$1" =~ ^[0-9]{1,9}$ ]] || { err "invalid pid: $1"; return 1; }
+    return 0
+}
+
+do_proc_exe() {
+    local pid="$1"
+    valid_pid "$pid" || exit 2
+    readlink "/proc/$pid/exe" 2>/dev/null || true
+}
+
+do_proc_pids_of() {
+    local bin="$1"
+    [[ "$bin" == /* && -f "$bin" ]] || { err "invalid bin (절대경로 파일 아님): $bin"; exit 2; }
+    local real; real=$(readlink -f "$bin" 2>/dev/null) || exit 0
+    local p exe
+    for p in /proc/[0-9]*; do
+        exe=$(readlink "$p/exe" 2>/dev/null) || continue
+        [[ "${exe% (deleted)}" == "$real" ]] && echo "${p##*/}"
+    done
+    exit 0
+}
+
+do_port_owner() {
+    local proto="$1" port="$2"
+    [[ "$proto" == "udp" || "$proto" == "tcp" ]] || { err "invalid proto: $proto"; exit 2; }
+    [[ "$port" =~ ^[0-9]{1,5}$ ]] && (( port > 0 && port < 65536 )) || { err "invalid port: $port"; exit 2; }
+    local flag="-ulnp"; [[ "$proto" == "tcp" ]] && flag="-tlnp"
+    local pid
+    pid=$(ss -H "$flag" 2>/dev/null \
+          | awk -v pt="$port" 'match($4,/:([0-9]+)$/,m) && m[1]==pt {match($0,/pid=([0-9]+)/,p); if(p[1]){print p[1]; exit}}')
+    [[ -z "$pid" ]] && exit 0
+    echo "$pid $(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+}
+
 # ── dispatch ────────────────────────────────────────
 case "${1:-}" in
     ip-add)
@@ -523,6 +563,18 @@ case "${1:-}" in
     ensure-base-deps)
         do_ensure_base_deps
         ;;
+    proc-exe)
+        [[ $# -eq 2 ]] || { err "usage: cims-priv proc-exe <pid>"; exit 1; }
+        do_proc_exe "$2"
+        ;;
+    proc-pids-of)
+        [[ $# -eq 2 ]] || { err "usage: cims-priv proc-pids-of <bin>"; exit 1; }
+        do_proc_pids_of "$2"
+        ;;
+    port-owner)
+        [[ $# -eq 3 ]] || { err "usage: cims-priv port-owner <udp|tcp> <port>"; exit 1; }
+        do_port_owner "$2" "$3"
+        ;;
     version)
         # 버전은 agent 패키지와 항상 일치 — 옆 pkg.json(agent/pkg.json)을 단일 SoT 로 읽는다.
         # (하드코딩 시 agent bump 때마다 desync → 동적 조회로 자동 동기화. python 의존 회피.)
@@ -532,7 +584,7 @@ case "${1:-}" in
         echo "cims-priv ${_priv_ver:-unknown}"
         ;;
     *)
-        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|setcap-net-admin|version} ..."
+        err "usage: cims-priv {ip-add|ip-del|route-add|route-del|mount-add|mount-del|net-sysctl|net-rps|ensure-base-deps|setcap-net-admin|proc-exe|proc-pids-of|port-owner|version} ..."
         exit 1
         ;;
 esac
