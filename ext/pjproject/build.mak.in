@@ -42,6 +42,14 @@ export APP_THIRD_PARTY_EXT :=
 export APP_THIRD_PARTY_LIBS :=
 export APP_THIRD_PARTY_LIB_FILES :=
 
+# CIMS: IMS AKA (PJSIP_HAS_DIGEST_AKA_AUTH) — libmilenage 정적 링크
+APP_THIRD_PARTY_LIB_FILES += $(PJ_DIR)/third_party/lib/libmilenage-$(LIB_SUFFIX)
+ifeq ($(PJ_SHARED_LIBRARIES),)
+APP_THIRD_PARTY_LIBS += -lmilenage-$(TARGET_NAME)
+else
+APP_THIRD_PARTY_LIBS += -lmilenage
+endif
+
 ifneq (@ac_no_srtp@,1)
 ifneq (@ac_external_srtp@,0)
 # External SRTP library

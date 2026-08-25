@@ -411,7 +411,8 @@ class PttController(
         }
         // 미인가 in-call 긴급 상향 거절 (403 + emergency-ind=false, TS 24.379 §6.3.3.1.14) —
         //   재-INVITE 거절은 통화를 끊지 않으므로 낙관 latch 만 되돌린다. 선발신된 경보는 별개
-        //   기능(자체 게이트)이라 회수하지 않는다 — 취소는 사용자의 SOS 해제로.
+        //   기능(자체 게이트)이라 즉시 회수하지 않고, 프로파일 재조회로 경보 미인가까지 판명될
+        //   때만 로컬 표시를 회수한다 — [reconcileAlertAfterDenied].
         scope.launch {
             sip.emergencyDenied.collect { cid ->
                 val s = synchronized(lock) {
@@ -421,6 +422,7 @@ class PttController(
                 s.emergencyMine = false
                 _status.value = "[${s.groupId}] 긴급 상향 미인가"
                 publish()
+                reconcileAlertAfterDenied(s.groupId)
             }
         }
         // 세션 긴급 상태 재광고 (TS 24.379 §6.3.3.1.15/16) — CSP 의 상향/하향 멤버 전파
@@ -1047,7 +1049,7 @@ class PttController(
      *  사전 그룹편성·affiliation 불요(서버가 멤버십 게이트 우회). 세션 키=[peer](상대 번호).
      *  [fullDuplex]=true 면 mc_no_floor_ctrl 을 협상해 floor 없는 전이중(마이크 상시 개방)으로
      *  연다 — 서버 PTT_GROUP_ADD floor_control:"off". false 면 2인 floor(반이중 무전) 세션. */
-    fun startPrivateCall(peer: String, fullDuplex: Boolean = false) {
+    fun startPrivateCall(peer: String, fullDuplex: Boolean = false, emergency: Boolean = false) {
         val target = bareId(peer)
         if (target.isBlank() || target == bareId(mcpttId)) return
         // 시스템 정책 게이트 (TS 24.484 allow-private-call) — 서버(403)가 최종 판정이나, 발신 전에
@@ -1057,11 +1059,19 @@ class PttController(
             feedback?.blocked("1:1 통화가 허용되지 않습니다")
             return
         }
+        // 긴급 1:1 개시 인가 (allow-emergency-private-call) — 프로파일 명시 미인가만 선차단,
+        //   미수신(null)은 낙관 발신(서버 403 이 최종 판정 → handleEmergencyDenied 폴백).
+        if (emergency && _userProfile.value?.allowEmergencyPrivateCall == false) {
+            _status.value = "긴급 1:1: 개시 권한 없음"
+            feedback?.blocked("긴급 1:1 개시 권한이 없습니다")
+            return
+        }
         val s = synchronized(lock) {
             if (sessionMap.containsKey(target)) return            // 이미 그 상대와 세션 중
             Session(target).also {
                 it.privatePeer = true
                 it.fullDuplex = fullDuplex
+                if (emergency) { it.emergency = true; it.emergencyMine = true }
                 // 1:1 은 주채널을 점유하지 않는다 — 활성 1:1 이 있는 동안 PTT 키가 1:1 에
                 // 우선하는 규칙(talkSession)으로 발언을 라우팅하고, 끝나면 주채널로 복귀한다.
                 it.role = ChannelRole.NONE
@@ -1070,14 +1080,41 @@ class PttController(
         }
         // 편성 채널이 아니므로 channelStore/affiliation/roster 구독 없음 — 즉석 세션.
         val parts = listOf(SipBodyPart("application", "vnd.3gpp.mcptt-info+xml",
-            McpttXml.mcpttInfo(McpttXml.SessionType.PRIVATE, "tel:$target", mcpttId, "tel:$target")))
+            McpttXml.mcpttInfo(McpttXml.SessionType.PRIVATE, "tel:$target", mcpttId, "tel:$target",
+                emergency = if (emergency) true else null)))
         // C안: 멀티(mc_no_floor_ctrl 협상)여도 오디오는 반이중 규칙 — mic 은 PTT 게이트로만 연다.
         // 발신 call id 는 콜백으로 즉시 바인딩 — remote URI 파싱(bindCall) 의존을 없앤다
         // (미바인딩이면 PTT 게이트의 mic 결선이 스킵되어 TX 0 = 무음, 08-04 tcpdump 실측).
         sip.makeGroupCall(groupAor(target), parts, floorSdp(s)) { cid -> bindCall(target, cid) }
-        _status.value = if (fullDuplex) "1:1 통화 발신 $target" else "1:1 무전 발신 $target"
+        _status.value = when {
+            emergency -> "🚨 긴급 1:1 발신 $target"
+            fullDuplex -> "1:1 통화 발신 $target"
+            else -> "1:1 무전 발신 $target"
+        }
+        if (emergency) {
+            feedback?.emergencyTone()
+            emit(PttEventKind.EMERGENCY, target)
+        }
         emit(PttEventKind.JOIN, target)
         publish()
+    }
+
+    /** 긴급 1:1 개시 (TS 24.379 §11 emergency private call) — 대상 결정은 프로파일
+     *  MCPTTPrivateRecipient entry-info(TS 24.484): UsePreConfigured=사전 지정 수신자
+     *  (미지정이면 불발, 탭한 상대와 달라도 지정 수신자에게 고정), LocallyDetermined(기본)=
+     *  사용자가 고른 상대. 프로파일 미수신이면 고른 상대로 낙관 발신(서버가 최종 판정). */
+    fun startEmergencyPrivateCall(peer: String, fullDuplex: Boolean = false) {
+        val p = _userProfile.value
+        val target: String
+        if (p?.privateEmergencyMode == "UsePreConfigured") {
+            target = p.emergencyPrivateRecipient ?: run {
+                _status.value = "긴급 1:1: 지정 수신자 미지정 — 관리자에게 문의"
+                feedback?.blocked("긴급 1:1 불가: 지정 수신자 미지정 — 관리자에게 문의")
+                return
+            }
+            if (target != bareId(peer)) _status.value = "긴급 1:1: 지정 수신자($target)로 발신"
+        } else target = bareId(peer)
+        startPrivateCall(target, fullDuplex, emergency = true)
     }
 
     /** 1:1 private call 착신 자동 수락 — 세션 키=발신자 번호(mcptt-calling-user-id).
@@ -1245,13 +1282,16 @@ class PttController(
         }
     }
 
-    /** 사용자 MCPTT 프로파일 (TS 24.484) — SOS 대상 결정 모드·전용 긴급그룹·개시 인가. */
+    /** 사용자 MCPTT 프로파일 (TS 24.484) — SOS 대상 결정 모드·전용 긴급그룹·긴급 사설콜·개시 인가. */
     data class UserProfile(
         val emergencyGroupMode: String,   // DedicatedGroup | UseCurrentlySelectedGroup
         val emergencyGroupId: String?,    // 전용 긴급그룹 (bare id, DedicatedGroup 모드 대상)
         val allowEmergencyCall: Boolean,
         val allowEmergencyAlert: Boolean,
         val allowAdhocCall: Boolean,
+        val allowEmergencyPrivateCall: Boolean,   // allow-emergency-private-call (긴급 1:1 개시 인가)
+        val privateEmergencyMode: String,         // MCPTTPrivateRecipient: LocallyDetermined | UsePreConfigured
+        val emergencyPrivateRecipient: String?,   // 사전 지정 긴급 수신자 (bare id, UsePreConfigured 모드 대상)
     )
 
     private val _userProfile = MutableStateFlow<UserProfile?>(null)
@@ -1283,6 +1323,12 @@ class PttController(
         val mode = Regex("entry-info=\"([^\"]+)\"").find(giBlock)?.groupValues?.get(1) ?: "DedicatedGroup"
         val egid = Regex("<uri-entry>([^<]+)</uri-entry>").find(giBlock)?.groupValues?.get(1)
             ?.let { bareId(it) }?.takeIf { it.isNotBlank() }
+        // 긴급 사설콜 대상 결정 (PrivateCall > EmergencyCall > MCPTTPrivateRecipient)
+        val prBlock = Regex("<MCPTTPrivateRecipient>(.*?)</MCPTTPrivateRecipient>", RegexOption.DOT_MATCHES_ALL)
+            .find(xml)?.groupValues?.get(1) ?: ""
+        val pMode = Regex("entry-info=\"([^\"]+)\"").find(prBlock)?.groupValues?.get(1) ?: "LocallyDetermined"
+        val pRecip = Regex("<uri-entry>([^<]+)</uri-entry>").find(prBlock)?.groupValues?.get(1)
+            ?.let { bareId(it) }?.takeIf { it.isNotBlank() }
         fun flag(tag: String) =
             Regex("<$tag>\\s*(true|false)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toBoolean() ?: true
         return UserProfile(
@@ -1291,6 +1337,9 @@ class PttController(
             allowEmergencyCall = flag("allow-emergency-group-call"),
             allowEmergencyAlert = flag("allow-activate-emergency-alert"),
             allowAdhocCall = flag("cims:allow-adhoc-group-call"),
+            allowEmergencyPrivateCall = flag("allow-emergency-private-call"),
+            privateEmergencyMode = pMode,
+            emergencyPrivateRecipient = pRecip,
         )
     }
 
@@ -1779,15 +1828,43 @@ class PttController(
      *  플래그를 볼 수 있다. */
     private fun handleEmergencyDenied(callId: Int, code: Int) {
         if (code != 403) return
-        val gid = synchronized(lock) {
-            sessionMap.values.firstOrNull { it.callId == callId && it.emergency && it.emergencyMine }?.groupId
+        val s = synchronized(lock) {
+            sessionMap.values.firstOrNull { it.callId == callId && it.emergency && it.emergencyMine }
         } ?: return
+        val gid = s.groupId
         if (isAdhocId(gid)) return
+        if (s.privatePeer) {
+            // 긴급 1:1 미인가 — 일반 1:1 로 폴백. 1:1 은 그룹 경보 선발신이 없어 경보 정합 불요.
+            val fd = s.fullDuplex
+            _status.value = "[$gid] 긴급 1:1 미인가 — 일반 1:1 로 전환"
+            scope.launch {
+                delay(300)         // 거절 세션 teardown(onCallEnded) 정리 후 재발신
+                startPrivateCall(gid, fullDuplex = fd)
+            }
+            return
+        }
         _status.value = "[$gid] 긴급 미인가 — 일반 통화로 전환"
         scope.launch {
             delay(300)             // 거절 세션 teardown(onCallEnded) 정리 후 재발신
             joinGroupCall(gid)
         }
+        reconcileAlertAfterDenied(gid)
+    }
+
+    /** 콜 403 뒤 선발신 경보 정합 — 경보와 콜은 별개 게이트(서버: 경보 미인가=스트립·무전파,
+     *  TS 24.379 §6.3.3.1.13.2)라 일괄 자동회수는 틀리다. 프로파일을 재조회해 경보 인가까지
+     *  없다고 판명되면(=서버가 스트립해 아무도 받지 못한 유령 배너) 로컬 표시만 회수한다 —
+     *  서버에 활성 경보가 없으므로 취소 MESSAGE 는 보내지 않는다. 인가가 확인되면(실전파된
+     *  경보) 유지 — 해제는 사용자의 SOS 해제로. 재조회 실패 시도 유지(fail-open). */
+    private fun reconcileAlertAfterDenied(groupId: String) = scope.launch {
+        loadUserProfile().join()
+        if (_userProfile.value?.allowEmergencyAlert != false) return@launch
+        val me = bareId(mcpttId)
+        if (_alerts.value.none { it.groupId == groupId && it.userId == me && it.mine }) return@launch
+        removeAlert(groupId, me)
+        _status.value = "[$groupId] 긴급경보 미인가 — 표시 회수"
+        emit(PttEventKind.ALERT_END, groupId)
+        publish()
     }
 
     /** 긴급 해제 — 개시자만 유효(서버는 비개시자의 취소 re-INVITE 를 무시, TS 24.379). */

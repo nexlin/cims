@@ -334,12 +334,14 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
 
     std::string strSql =
         "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
-        "       emergency_group_mode, COALESCE(emergency_group_id,'') "
+        "       emergency_group_mode, COALESCE(emergency_group_id,''), "
+        "       allow_emergency_private_call, private_emergency_mode, "
+        "       COALESCE(emergency_private_recipient,'') "
         "FROM ptt_user_profile WHERE ptt_id='" +
         Escape( strUserId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
-    if ( !pRes ) return -1;  // 마이그레이션 전 테이블 부재 포함 — 호출측 fail-open
+    if ( !pRes ) return -1;  // 마이그레이션 전 테이블/컬럼 부재 포함 — 호출측 fail-open (v3 선행 적용)
 
     MYSQL_ROW row = mysql_fetch_row( pRes );
     if ( !row ) {
@@ -351,6 +353,9 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
     clsProfile.m_bAllowAdhocCall = row[2] ? ( atoi( row[2] ) != 0 ) : true;
     if ( row[3] && row[3][0] ) clsProfile.m_strEmergencyGroupMode = row[3];
     clsProfile.m_strEmergencyGroupId = row[4] ? row[4] : "";
+    clsProfile.m_bAllowEmergencyPrivateCall = row[5] ? ( atoi( row[5] ) != 0 ) : true;
+    if ( row[6] && row[6][0] ) clsProfile.m_strPrivateEmergencyMode = row[6];
+    clsProfile.m_strEmergencyPrivateRecipient = row[7] ? row[7] : "";
     mysql_free_result( pRes );
     return 1;
 }

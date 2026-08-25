@@ -191,6 +191,13 @@ class ProvisioningClient(
                 authId = acc.optString("authId", ""),
                 sipHa1 = acc.stringOrNull("sipHa1"),
                 sipPassword = acc.stringOrNull("sipPassword"),
+                authScheme = acc.optString("authScheme", "digest").ifBlank { "digest" },
+                akaK = acc.optJSONObject("aka")?.optString("k").orEmpty(),
+                akaOpc = acc.optJSONObject("aka")?.optString("opc").orEmpty(),
+                akaAmf = acc.optJSONObject("aka")?.optString("amf").orEmpty().ifBlank { "8000" },
+                secMechanisms = (sip.optJSONArray("security") ?: JSONArray()).let { sec ->
+                    (0 until sec.length()).map { k -> sec.optString(k) }.filter { it.isNotBlank() }
+                },
                 mcpttId = acc.stringOrNull("mcpttId"),
                 maxPayloadSdsCplaneBytes = s.optJSONObject("mcdata")
                     ?.optInt("maxPayloadSdsCplaneBytes", 0) ?: 0,

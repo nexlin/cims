@@ -94,6 +94,13 @@ struct pjsip_regc
     pjsip_host_port              via_addr;
     const void                  *via_tp;
 
+    /* CIMS sec-agree (RFC 3329, sip_access_security.md §8.1): 401 응답의
+     * Security-Server 목록을 Security-Verify 로 보관해 이후 모든 REGISTER
+     * (인증 재시도·갱신)에 echo 한다. hdr_list 에 Security-Client 가 있을
+     * 때(앱이 협상을 개시했을 때)만 동작한다.
+     */
+    pjsip_hdr                    sec_verify_list;
+
     /* Authorization sessions. */
     pjsip_auth_clt_sess          auth_sess;
 
@@ -163,6 +170,7 @@ PJ_DEF(pj_status_t) pjsip_regc_create( pjsip_endpoint *endpt, void *token,
     pj_list_init(&regc->hdr_list);
     pj_list_init(&regc->contact_hdr_list);
     pj_list_init(&regc->removed_contact_hdr_list);
+    pj_list_init(&regc->sec_verify_list);
 
     /* Done */
     *p_regc = regc;
@@ -516,7 +524,65 @@ PJ_DEF(pj_status_t) pjsip_regc_add_headers( pjsip_regc *regc,
     return PJ_SUCCESS;
 }
 
-static pj_status_t create_request(pjsip_regc *regc, 
+/* CIMS sec-agree: 요청에 Security-Client 가 있는가 (앱이 협상을 개시했는가) */
+static pj_bool_t regc_has_sec_client(const pjsip_msg *msg)
+{
+    const pj_str_t STR_SEC_CLIENT = { "Security-Client", 15 };
+    return pjsip_msg_find_hdr_by_name(msg, &STR_SEC_CLIENT, NULL) != NULL;
+}
+
+/* CIMS sec-agree: 401 응답의 Security-Server 원문을 Security-Verify 로 보관.
+ * 응답에 없으면 기존 보관을 유지한다(nonce 재발급 401 등). */
+static void regc_capture_sec_server(pjsip_regc *regc, const pjsip_msg *rsp)
+{
+    const pj_str_t STR_SEC_SERVER = { "Security-Server", 15 };
+    const pj_str_t STR_SEC_VERIFY = { "Security-Verify", 15 };
+    const pjsip_generic_string_hdr *h;
+
+    h = (const pjsip_generic_string_hdr*)
+        pjsip_msg_find_hdr_by_name(rsp, &STR_SEC_SERVER, NULL);
+    if (!h)
+        return;
+
+    pj_list_init(&regc->sec_verify_list);
+    while (h) {
+        pjsip_generic_string_hdr *v = pjsip_generic_string_hdr_create(
+            regc->pool, &STR_SEC_VERIFY, (pj_str_t*)&h->hvalue);
+        pj_list_push_back(&regc->sec_verify_list, v);
+        h = (const pjsip_generic_string_hdr*)
+            pjsip_msg_find_hdr_by_name(rsp, &STR_SEC_SERVER, h->next);
+    }
+}
+
+/* CIMS sec-agree: 보관된 Security-Verify 를 요청에 반영 (기존 echo 는 교체). */
+static void regc_add_sec_verify(pjsip_regc *regc, pjsip_tx_data *tdata)
+{
+    const pj_str_t STR_SEC_VERIFY = { "Security-Verify", 15 };
+    const pjsip_hdr *sv;
+
+    if (pj_list_empty(&regc->sec_verify_list))
+        return;
+    if (!regc_has_sec_client(tdata->msg))
+        return;
+
+    for (;;) {
+        pjsip_hdr *h = (pjsip_hdr*)
+            pjsip_msg_find_hdr_by_name(tdata->msg, &STR_SEC_VERIFY, NULL);
+        if (!h)
+            break;
+        pj_list_erase(h);
+    }
+
+    sv = regc->sec_verify_list.next;
+    while (sv != &regc->sec_verify_list) {
+        pjsip_msg_add_hdr(tdata->msg,
+                          (pjsip_hdr*) pjsip_hdr_clone(tdata->pool, sv));
+        sv = sv->next;
+    }
+    pjsip_tx_data_invalidate_msg(tdata);
+}
+
+static pj_status_t create_request(pjsip_regc *regc,
                                   pjsip_tx_data **p_tdata)
 {
     pj_status_t status;
@@ -573,6 +639,9 @@ static pj_status_t create_request(pjsip_regc *regc,
             hdr = hdr->next;
         }
     }
+
+    /* CIMS sec-agree: 협상 확립 후의 재등록(갱신)에도 Security-Verify 유지 */
+    regc_add_sec_verify(regc, tdata);
 
     /* Done. */
     *p_tdata = tdata;
@@ -1224,10 +1293,21 @@ static void regc_tsx_callback(void *token, pjsip_event *event)
         if (regc->_delete_flag != 0) {
             pjsip_auth_clt_set_parent(&regc->auth_sess, NULL);
         }
+
+        /* CIMS sec-agree: 401 의 Security-Server 보관 (RFC 3329) — 앱이
+         * Security-Client 로 협상을 개시한 경우만. */
+        if (tsx->last_tx && regc_has_sec_client(tsx->last_tx->msg))
+            regc_capture_sec_server(regc, rdata->msg_info.msg);
+
         status = pjsip_auth_clt_reinit_req( &regc->auth_sess,
-                                            rdata, 
-                                            tsx->last_tx,  
+                                            rdata,
+                                            tsx->last_tx,
                                             &tdata);
+
+        if (status == PJ_SUCCESS) {
+            /* CIMS sec-agree: 인증 재시도에 Security-Verify echo */
+            regc_add_sec_verify(regc, tdata);
+        }
 
         if (status == PJ_SUCCESS) {
             /* Need to unlock the regc temporarily while sending the message

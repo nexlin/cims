@@ -28,6 +28,12 @@ class ConfigStore(context: Context) {
         authId = prefs.getString(K_AUTH, "").orEmpty(),
         sipHa1 = prefs.getString(K_HA1, "").orEmpty(),
         password = prefs.getString(K_PW, "").orEmpty(),
+        authScheme = prefs.getString(K_AUTH_SCHEME, "digest").orEmpty().ifBlank { "digest" },
+        akaK = prefs.getString(K_AKA_K, "").orEmpty(),
+        akaOpc = prefs.getString(K_AKA_OPC, "").orEmpty(),
+        akaAmf = prefs.getString(K_AKA_AMF, "8000").orEmpty().ifBlank { "8000" },
+        secMechanisms = prefs.getString(K_SEC_MECH, "").orEmpty()
+            .split(',').map { it.trim() }.filter { it.isNotBlank() },
         expiresSec = prefs.getInt(K_EXPIRES, 3600),
         countryCode = prefs.getString(K_CC, "").orEmpty(),
         maxPayloadSdsCplaneBytes = prefs.getInt(K_SDS_CPLANE_MAX, 0),
@@ -47,6 +53,11 @@ class ConfigStore(context: Context) {
             putString(K_AUTH, c.authId)
             putString(K_HA1, c.sipHa1)
             putString(K_PW, c.password)
+            putString(K_AUTH_SCHEME, c.authScheme)
+            putString(K_AKA_K, c.akaK)
+            putString(K_AKA_OPC, c.akaOpc)
+            putString(K_AKA_AMF, c.akaAmf)
+            putString(K_SEC_MECH, c.secMechanisms.joinToString(","))
             putInt(K_EXPIRES, c.expiresSec)
             putString(K_CC, c.countryCode)
             putInt(K_SDS_CPLANE_MAX, c.maxPayloadSdsCplaneBytes)
@@ -133,6 +144,11 @@ class ConfigStore(context: Context) {
         const val K_AUTH = "auth"
         const val K_HA1 = "ha1"
         const val K_PW = "pw"
+        const val K_AUTH_SCHEME = "auth_scheme"        // digest | aka
+        const val K_AKA_K = "aka_k"                    // ⚠️ 평문 저장(개발용) — 운영은 Keystore 교체 대상(비번과 동일)
+        const val K_AKA_OPC = "aka_opc"
+        const val K_AKA_AMF = "aka_amf"
+        const val K_SEC_MECH = "sec_mech"              // 서버 제시 sec-agree 목록 CSV
         const val K_EXPIRES = "expires"
         const val K_CC = "cc"
         const val K_SDS_CPLANE_MAX = "sds_cplane_max"

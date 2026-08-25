@@ -53,6 +53,14 @@ data class ServiceProfile(
      *  있으면 [sipPassword] 보다 우선. 구 서버 응답이면 null. */
     val sipHa1: String? = null,
     val sipPassword: String? = null,  // 과도기 평문(passwd 소거 후 항상 null). null 이면 로그인 비번 재사용
+    /** 인증 체계(`account.authScheme`) — "digest" | "aka". aka 면 [akaK]/[akaOpc] 소프트-USIM 자격
+     *  (sip_access_security.md §8.2 — 토큰 인증 + TLS 채널로만 내려온다). */
+    val authScheme: String = "digest",
+    val akaK: String = "",
+    val akaOpc: String = "",
+    val akaAmf: String = "8000",
+    /** 서버 제시 채널 보호 목록(`sip.security`, RFC 3329) — ["tls"] | ["tls","ipsec-3gpp"]. */
+    val secMechanisms: List<String> = emptyList(),
     val mcpttId: String? = null,      // PTT 전용
     /** MCData C-plane SDS payload 상한(byte) — 초과 시 MSRP 미디어평면 발신(TS 24.282 §9.2.1.1).
      *  0/미수신 = 무제한(항상 C-plane MESSAGE). 서버 `services[].mcdata.maxPayloadSdsCplaneBytes`. */
@@ -83,6 +91,11 @@ data class ServiceProfile(
             authId = authId,
             sipHa1 = sipHa1?.takeIf { it.isNotBlank() }.orEmpty(),
             password = sipPassword?.takeIf { it.isNotBlank() } ?: loginPassword,
+            authScheme = authScheme,
+            akaK = akaK,
+            akaOpc = akaOpc,
+            akaAmf = akaAmf,
+            secMechanisms = secMechanisms,
             countryCode = countryCode,
             maxPayloadSdsCplaneBytes = maxPayloadSdsCplaneBytes,
         )

@@ -248,11 +248,12 @@ private fun ContactDetailView(
             Spacer(Modifier.height(14.dp))
             Text(m.name.ifBlank { m.number }, color = Ct.Text, fontSize = 21.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(26.dp))
-            // 액션 — 싱글(한 명씩)/멀티(동시 발화)/문자
+            // 액션 — 싱글(한 명씩)/멀티(동시 발화)/긴급(긴급 1:1)/문자
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly) {
                 RoundAction("싱글", Ct.Mint) { st.ctl?.startPrivateCall(peer, fullDuplex = false) }
                 RoundAction("멀티", Ct.Amber) { st.ctl?.startPrivateCall(peer, fullDuplex = true) }
+                RoundAction("긴급", Ct.Red) { st.ctl?.startEmergencyPrivateCall(peer) }
                 RoundAction("문자", Ct.TextDim) { onOpenThread(peer) }
             }
         }

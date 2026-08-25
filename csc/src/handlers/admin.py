@@ -296,7 +296,8 @@ async def _get_user(person_id: str, config):
                     ph = ','.join(['%s'] * len(ptt_subs))
                     cur.execute(
                         "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
-                        f"emergency_group_mode, emergency_group_id FROM ptt_user_profile WHERE ptt_id IN ({ph})",
+                        "emergency_group_mode, emergency_group_id, allow_emergency_private_call, "
+                        f"private_emergency_mode, emergency_private_recipient FROM ptt_user_profile WHERE ptt_id IN ({ph})",
                         [s['id'] for s in ptt_subs])
                     for p in cur.fetchall():
                         profiles[p['ptt_id']] = {
@@ -305,6 +306,9 @@ async def _get_user(person_id: str, config):
                             'allow_adhoc_call': bool(p['allow_adhoc_call']),
                             'emergency_group_mode': p['emergency_group_mode'],
                             'emergency_group_id': p['emergency_group_id'],
+                            'allow_emergency_private_call': bool(p['allow_emergency_private_call']),
+                            'private_emergency_mode': p['private_emergency_mode'],
+                            'emergency_private_recipient': p['emergency_private_recipient'],
                         }
                 except pymysql.Error:
                     pass
@@ -740,7 +744,8 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
 #  사용자 MCPTT 프로파일 (ptt_user_profile — TS 24.484 / TS 24.379 §6.3.3.1.13.2)
 # ──────────────────────────────────────────────────────────────
 
-_PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call')
+_PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call',
+                        'allow_emergency_private_call')
 
 
 async def _get_ptt_profile(person_id: str, msisdn: str, config):
@@ -751,13 +756,16 @@ async def _get_ptt_profile(person_id: str, msisdn: str, config):
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
             cur.execute(
                 "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
-                "emergency_group_mode, emergency_group_id "
+                "emergency_group_mode, emergency_group_id, "
+                "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient "
                 "FROM ptt_user_profile WHERE ptt_id=%s", (msisdn,))
             row = cur.fetchone()
     if row:
         prof = {k: bool(row[k]) for k in _PROFILE_BOOL_FIELDS}
         prof['emergency_group_mode'] = row['emergency_group_mode']
         prof['emergency_group_id'] = row['emergency_group_id']
+        prof['private_emergency_mode'] = row['private_emergency_mode']
+        prof['emergency_private_recipient'] = row['emergency_private_recipient']
         prof['exists'] = True
     else:
         prof = dict(DEFAULT_USER_PROFILE)
@@ -773,9 +781,14 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
     if mode not in ('DedicatedGroup', 'UseCurrentlySelectedGroup'):
         return HandlerResult(status=400, body={'error': 'invalid emergency_group_mode'})
     egid = (body.get('emergency_group_id') or '').strip() or None
+    pmode = (body.get('private_emergency_mode') or 'LocallyDetermined').strip()
+    if pmode not in ('LocallyDetermined', 'UsePreConfigured'):
+        return HandlerResult(status=400, body={'error': 'invalid private_emergency_mode'})
+    precip = (body.get('emergency_private_recipient') or '').strip() or None
     allow_call  = 1 if body.get('allow_emergency_call', True) else 0
     allow_alert = 1 if body.get('allow_emergency_alert', True) else 0
     allow_adhoc = 1 if body.get('allow_adhoc_call', True) else 0
+    allow_priv  = 1 if body.get('allow_emergency_private_call', True) else 0
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -786,16 +799,26 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
                 cur.execute("SELECT 1 FROM ptt_groups WHERE mcptt_group_id=%s", (egid,))
                 if cur.fetchone() is None:
                     return HandlerResult(status=400, body={'error': f'unknown emergency_group_id: {egid}'})
+            if precip:
+                cur.execute("SELECT 1 FROM ptt_subscriptions WHERE id=%s", (precip,))
+                if cur.fetchone() is None:
+                    return HandlerResult(status=400,
+                                         body={'error': f'unknown emergency_private_recipient: {precip}'})
             cur.execute(
                 "INSERT INTO ptt_user_profile (ptt_id, allow_emergency_call, allow_emergency_alert, "
-                "allow_adhoc_call, emergency_group_mode, emergency_group_id, update_time) "
-                "VALUES (%s,%s,%s,%s,%s,%s,NOW()) "
+                "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
+                "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient, "
+                "update_time) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()) "
                 "ON DUPLICATE KEY UPDATE allow_emergency_call=VALUES(allow_emergency_call), "
                 "allow_emergency_alert=VALUES(allow_emergency_alert), "
                 "allow_adhoc_call=VALUES(allow_adhoc_call), "
                 "emergency_group_mode=VALUES(emergency_group_mode), "
-                "emergency_group_id=VALUES(emergency_group_id), update_time=NOW()",
-                (msisdn, allow_call, allow_alert, allow_adhoc, mode, egid))
+                "emergency_group_id=VALUES(emergency_group_id), "
+                "allow_emergency_private_call=VALUES(allow_emergency_private_call), "
+                "private_emergency_mode=VALUES(private_emergency_mode), "
+                "emergency_private_recipient=VALUES(emergency_private_recipient), update_time=NOW()",
+                (msisdn, allow_call, allow_alert, allow_adhoc, mode, egid, allow_priv, pmode, precip))
 
     prof = {
         "allow_emergency_call": bool(allow_call),
@@ -803,6 +826,9 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
         "allow_adhoc_call": bool(allow_adhoc),
         "emergency_group_mode": mode,
         "emergency_group_id": egid,
+        "allow_emergency_private_call": bool(allow_priv),
+        "private_emergency_mode": pmode,
+        "emergency_private_recipient": precip,
     }
     update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")

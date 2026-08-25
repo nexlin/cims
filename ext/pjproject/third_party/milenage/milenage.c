@@ -32,10 +32,22 @@
  *
  *-----------------------------------------------------------------*/
 
-void f1    ( u8 k[16], u8 rand[16], u8 sqn[6], u8 amf[2], 
+void f1    ( u8 k[16], u8 rand[16], u8 sqn[6], u8 amf[2],
              u8 mac_a[8], u8 op[16] )
 {
   u8 op_c[16];
+
+  RijndaelKeySchedule( k );
+  ComputeOPc( op_c, op );
+  f1_opc( k, rand, sqn, amf, mac_a, op_c );
+} /* end of function f1 */
+
+
+/* CIMS: OPc 직접 입력 변형 — AuC/soft-USIM 계약은 OP 가 아니라 OPc 를 배포한다
+ * (sip_access_security.md §8.2). ComputeOPc(E_K(OP)^OP) 유도를 건너뛴다. */
+void f1_opc( u8 k[16], u8 rand[16], u8 sqn[6], u8 amf[2],
+             u8 mac_a[8], u8 op_c[16] )
+{
   u8 temp[16];
   u8 in1[16];
   u8 out1[16];
@@ -43,8 +55,6 @@ void f1    ( u8 k[16], u8 rand[16], u8 sqn[6], u8 amf[2],
   u8 i;
 
   RijndaelKeySchedule( k );
-
-  ComputeOPc( op_c, op );
 
   for (i=0; i<16; i++)
     rijndaelInput[i] = rand[i] ^ op_c[i];
@@ -80,7 +90,7 @@ void f1    ( u8 k[16], u8 rand[16], u8 sqn[6], u8 amf[2],
     mac_a[i] = out1[i];
 
   return;
-} /* end of function f1 */
+} /* end of function f1_opc */
 
 
   
@@ -97,14 +107,23 @@ void f2345 ( u8 k[16], u8 rand[16],
              u8 res[8], u8 ck[16], u8 ik[16], u8 ak[6], u8 op[16] )
 {
   u8 op_c[16];
+
+  RijndaelKeySchedule( k );
+  ComputeOPc( op_c, op );
+  f2345_opc( k, rand, res, ck, ik, ak, op_c );
+} /* end of function f2345 */
+
+
+/* CIMS: OPc 직접 입력 변형 — f1_opc 와 동일 취지. */
+void f2345_opc ( u8 k[16], u8 rand[16],
+                 u8 res[8], u8 ck[16], u8 ik[16], u8 ak[6], u8 op_c[16] )
+{
   u8 temp[16];
   u8 out[16];
   u8 rijndaelInput[16];
   u8 i;
 
   RijndaelKeySchedule( k );
-
-  ComputeOPc( op_c, op );
 
   for (i=0; i<16; i++)
     rijndaelInput[i] = rand[i] ^ op_c[i];
@@ -158,7 +177,7 @@ void f2345 ( u8 k[16], u8 rand[16],
     ik[i] = out[i];
 
   return;
-} /* end of function f2345 */
+} /* end of function f2345_opc */
 
   
 /*-------------------------------------------------------------------

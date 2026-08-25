@@ -182,12 +182,19 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
     emergency_group_mode  ENUM('DedicatedGroup','UseCurrentlySelectedGroup') NOT NULL DEFAULT 'DedicatedGroup'
         COMMENT 'SOS 대상 결정 (MCPTTGroupInitiation entry-info, TS 24.484)',
     emergency_group_id    VARCHAR(255) DEFAULT NULL COMMENT '전용 긴급그룹 (ptt_groups.mcptt_group_id) — DedicatedGroup 모드의 콜·경보 공통 대상. NULL=미지정(긴급 미인가)',
+    allow_emergency_private_call TINYINT(1) NOT NULL DEFAULT 1
+        COMMENT 'allow-emergency-private-call (TS 24.484 ruleset) — 긴급 사설콜 개시 인가',
+    private_emergency_mode ENUM('LocallyDetermined','UsePreConfigured') NOT NULL DEFAULT 'LocallyDetermined'
+        COMMENT '긴급 사설콜 대상 결정 (MCPTTPrivateRecipient entry-info, TS 24.484)',
+    emergency_private_recipient VARCHAR(64) DEFAULT NULL
+        COMMENT '사전 지정 긴급 수신자 (ptt_subscriptions.id) — UsePreConfigured 모드 대상. NULL=미지정(그 모드에선 미인가)',
     update_time           DATETIME     DEFAULT NULL,
     PRIMARY KEY (ptt_id),
     CONSTRAINT fk_pup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE,
-    CONSTRAINT fk_pup_emg_group FOREIGN KEY (emergency_group_id) REFERENCES ptt_groups (mcptt_group_id) ON DELETE SET NULL
+    CONSTRAINT fk_pup_emg_group FOREIGN KEY (emergency_group_id) REFERENCES ptt_groups (mcptt_group_id) ON DELETE SET NULL,
+    CONSTRAINT fk_pup_emg_priv FOREIGN KEY (emergency_private_recipient) REFERENCES ptt_subscriptions (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='사용자 MCPTT 프로파일 (SOS 대상 결정 모드·전용 긴급그룹·개시 인가)';
+  COMMENT='사용자 MCPTT 프로파일 (SOS 대상 결정 모드·전용 긴급그룹·긴급 사설콜·개시 인가)';
 
 -- ─────────────────────────────────────────────
 --  MCPTT 시스템 서비스 설정 (TS 24.484 service-config — 시스템 전역 1건)

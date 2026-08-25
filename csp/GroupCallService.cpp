@@ -543,6 +543,32 @@ bool CGroupCallService::GetGroupCallSession( const std::string &strCallId, std::
 
 bool CGroupCallService::IsConditionInitAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId,
                                                    std::string &strReason ) {
+    // 긴급 사설콜 (TS 24.379 §11): 합성 priv- 그룹은 그룹문서가 없어 capability·Dedicated 축이
+    //   공허 — 사용자 축(allow-emergency-private-call + MCPTTPrivateRecipient)이 유일 게이트.
+    //   UsePreConfigured 모드는 사전 지정 수신자와 착신자 일치까지 판정한다(그룹 긴급콜의
+    //   DedicatedGroup 대상 일치와 대칭).
+    if ( clsGroup._groupType == "private" ) {
+        CspUserProfile clsProf;
+        if ( gclsDbManager.SelectUserProfile( strUserId, clsProf ) < 0 ) return true;  // DB 불가 — fail-open
+        if ( !clsProf.m_bAllowEmergencyPrivateCall ) {
+            strReason = "user not authorised (private)";
+            return false;
+        }
+        if ( clsProf.m_strPrivateEmergencyMode == "UsePreConfigured" ) {
+            if ( clsProf.m_strEmergencyPrivateRecipient.empty() ) {
+                strReason = "preconfigured recipient not provisioned";
+                return false;
+            }
+            std::string strPeer;
+            for ( const auto &p : clsGroup._pusers )
+                if ( p && p->_id != strUserId ) { strPeer = p->_id; break; }
+            if ( clsProf.m_strEmergencyPrivateRecipient != strPeer ) {
+                strReason = "preconfigured-recipient mismatch";
+                return false;
+            }
+        }
+        return true;
+    }
     if ( !clsGroup._emergencyCall ) {
         strReason = "group capability";
         return false;

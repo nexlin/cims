@@ -698,17 +698,40 @@ class SipController(private val config: SipAccountConfig) {
         // 자료는 H(A1) 우선(PJSIP_CRED_DATA_DIGEST, sip_access_security.md §4.7) — 평문 비번 없이
         // response 를 계산하므로 서버 passwd 소거 후에도 인증된다. H(A1) 은 서버 realm 에 결박된
         // 값이라 challenge realm 을 따라가지 못한다 — 없을 때만 평문 cred(그때 계산)로 폴백.
+        // IMS AKA(sip_access_security.md §8.2): authScheme=aka 면 소프트-USIM 자격(K/OPc)으로
+        // AKAv1-MD5 챌린지에 답한다(PJSIP_CRED_DATA_EXT_AKA — pjsua2 가 AKA 콜백을 상시 연결,
+        // pjsip 패치 PJSIP_AKA_OP_IS_OPC 가 akaOp 를 OPc 로 소비). 서버는 AKA 신원의 비-TLS
+        // 등록을 403 으로 거절하므로 TLS transport 전제.
+        val isAka = c.authScheme.equals("aka", ignoreCase = true) && c.akaK.isNotBlank()
         val hasHa1 = c.sipHa1.isNotBlank()
         ac.sipConfig.authCreds.add(
-            if (hasHa1) {
-                AuthCredInfo("digest", "*", c.digestUsername,
+            when {
+                isAka -> AuthCredInfo("digest", "*", c.digestUsername,
+                    pjsip_cred_data_type.PJSIP_CRED_DATA_EXT_AKA, "").apply {
+                    akaK = c.akaK
+                    akaOp = c.akaOpc
+                    akaAmf = c.akaAmf
+                }
+                hasHa1 -> AuthCredInfo("digest", "*", c.digestUsername,
                     pjsip_cred_data_type.PJSIP_CRED_DATA_DIGEST, c.sipHa1)
-            } else {
-                AuthCredInfo("digest", "*", c.digestUsername,
+                else -> AuthCredInfo("digest", "*", c.digestUsername,
                     pjsip_cred_data_type.PJSIP_CRED_DATA_PLAIN_PASSWD, c.password)
             },
         )
-        Log.i(TAG, "auth cred: ${if (hasHa1) "ha1(digest)" else "plain-passwd"} user=${c.digestUsername}")
+        Log.i(TAG, "auth cred: ${if (isAka) "aka(K/OPc)" else if (hasHa1) "ha1(digest)" else "plain-passwd"} user=${c.digestUsername}")
+
+        // sec-agree 제안 (RFC 3329, sip_access_security.md §8.1) — TLS 접속 + 서버가 tls 메커니즘을
+        // 제시하는 경우만. 401 의 Security-Server 를 Security-Verify 로 echo 하는 쪽은 pjsip 패치
+        // (sip_reg.c)가 처리하므로 여기서는 제안 헤더만 싣는다. 협상 후 서버는 그 신원의 비-TLS
+        // 요청을 403 으로 거절한다(강등 방지 게이트 합류).
+        if (tp == "tls" && c.secMechanisms.any { it.equals("tls", ignoreCase = true) }) {
+            val hv = SipHeaderVector()
+            hv.add(SipHeader().apply { hName = "Security-Client"; hValue = "tls" })
+            hv.add(SipHeader().apply { hName = "Require"; hValue = "sec-agree" })
+            hv.add(SipHeader().apply { hName = "Proxy-Require"; hValue = "sec-agree" })
+            ac.regConfig.headers = hv
+            Log.i(TAG, "sec-agree 제안 활성 (Security-Client: tls)")
+        }
 
         // Contact 부가 파라미터(capability feature tag 등) — 서버가 MSRP 배포 대상 판정에 사용
         if (contactParams.isNotBlank()) ac.sipConfig.contactParams = contactParams

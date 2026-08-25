@@ -37,13 +37,21 @@
 - `emergency_group_id` — 전용 긴급그룹(`ptt_groups.mcptt_group_id` FK, 삭제 시 NULL). 콜·경보
   (`EmergencyAlert` entry) 공통 대상. **DedicatedGroup 모드에서 미지정이면 긴급 개시가 전부
   미인가**(403) — 콘솔이 지정을 필수화하고 미지정을 경고 배지로 표시한다.
+- `allow_emergency_private_call` — 긴급 사설콜 개시 인가 (TS 24.484 ruleset
+  `allow-emergency-private-call`, 기본 1). 사설콜은 그룹문서가 없어 capability 축이 공허 —
+  사용자 축이 유일 게이트(§7).
+- `private_emergency_mode` — 긴급 사설콜 대상 결정 (TS 24.484 `MCPTTPrivateRecipient` entry-info):
+  `LocallyDetermined`(기본, 발신자가 상대 지정) | `UsePreConfigured`(사전 지정 수신자 고정).
+- `emergency_private_recipient` — 사전 지정 긴급 수신자(`ptt_subscriptions.id` FK, 해지 시 NULL).
+  **UsePreConfigured 모드에서 미지정이면 긴급 사설콜 미인가**(403). 적용은
+  `sql/migrate_ptt_user_profile_v3.sql` — CSP/CSC 코드 배포보다 선행.
 - 행 부재 = 기본값(모드 DedicatedGroup·긴급그룹 미지정·인가 전부 허용)으로 판정.
 
 ad hoc 은 그룹 컬럼을 두지 않는다 — 임시 그룹은 비영속 in-memory(ephemeral)로만 존재하고(§6),
 판정 시점에 그룹이 없으므로 인가는 사용자(`allow_adhoc_call`)/시스템(`Setup.PttAdhocEnabled`)
 정책으로 건다.
 
-**미구현 (향후 과제, §9)**:
+**미구현 (향후 과제, §10)**:
 - in-progress 상태 DB 미러 — 현재 CSP 인메모리(`m_mapGroupCondition`) + events.jsonl 관측만.
   CSP 재기동 시 진행 중 긴급 상태는 소실된다.
 
@@ -175,6 +183,16 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **단말 403 폴백**: 긴급 개시 INVITE 가 403 이면 같은 그룹으로 normal 재발신(호 자체는 보존),
   in-call 상향 re-INVITE 가 403(`emergency-ind=false` 본문)이면 낙관 latch 를 되돌린다
   (`SipController.emergencyDenied` — tsx 원문 관측, 재-INVITE 거절은 CallState 불변이라 별도 이벤트).
+- **403 폴백 시 선발신 경보 정합**: 경보와 콜은 별개 게이트(서버: 경보 미인가=스트립·무전파)
+  라 콜 403 만으로 경보를 일괄 자동회수하지 않는다. 단말은 403 수신 시 user-profile 을
+  재조회(`reconcileAlertAfterDenied` — ETag 캐시라 저비용)해 **경보 인가까지 없다고 판명되면**
+  (=서버가 스트립해 아무도 받지 못한 유령 배너) 로컬 표시만 회수한다 — 서버에 활성 경보가
+  없으므로 취소 MESSAGE 는 보내지 않는다. 경보 인가가 확인되면(실전파된 경보) 유지 — 해제는
+  사용자의 SOS 해제로. 재조회 실패 시도 유지(fail-open).
+- **미인가 발신자 로컬 배너 정책(확정)**: 프로파일이 명시적으로 미인가면 발신 자체를 선차단
+  (`PttFeedback.blocked` 거부음+토스트)하고 로컬 경보 배너를 켜지 않는다 — 전파되지 않을
+  경보의 거짓 안심 상태를 만들지 않는다. 프로파일 미수신(null)이면 낙관 발신 유지(서버
+  게이트가 최종 판정, 사후 정합은 위 403 폴백 경로).
 - **수신측 세션 긴급 표시와의 정합**: 수신 단말의 in-call 긴급 표시(`session.emergency`)의
   **정본 신호는 CSP 의 조건 재광고** — 상향/하향 re-INVITE(멤버 전파)와 조인/재조인 200 OK
   동봉(§4.2)을 tsx 원문에서 파싱해(`SipController.sessionEmergency`) latch/un-latch 한다
@@ -199,14 +217,17 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **admin API**(`admin.py` group create/update): `emergency_call`·`emergency_alert` 수용 + INSERT/UPDATE.
 - **user profile XCAP**(`mcptt.py get_user_profile_xml`, CMS `/org.3gpp.mcptt.user-profile/...`):
   `ptt_user_profile` DB 연동 산출 — `MCPTT-group-call > EmergencyCall/EmergencyAlert` 의
-  `entry-info`+`uri-entry`(SOS 대상 결정, TS 24.484)와 `ruleset`(`allow-emergency-group-call`·
-  `allow-activate/cancel-emergency-alert`). ad hoc 인가는 규격 요소가 없어 `cims:` 확장
-  네임스페이스(`cims:allow-adhoc-group-call`)로 노출. ETag 는 내용 파생(변경 시 자동 갱신).
+  `entry-info`+`uri-entry`(SOS 대상 결정, TS 24.484)와 `PrivateCall > EmergencyCall >
+  MCPTTPrivateRecipient`(긴급 사설콜 대상 결정, §7), `ruleset`(`allow-emergency-group-call`·
+  `allow-activate/cancel-emergency-alert`·`allow-emergency-private-call`). ad hoc 인가는 규격
+  요소가 없어 `cims:` 확장 네임스페이스(`cims:allow-adhoc-group-call`)로 노출. ETag 는 내용
+  파생(변경 시 자동 갱신).
 - **시스템 축 게이트**(`mcptt_service_config` — TS 24.484 service-config): `allow-emergency-call`·
   `allow-alert` 이 위 사용자 인가와 **AND** 로 겹친다(단말 선차단 · 콘솔 `구성 > MCPTT 정책`).
   그룹 축(`emergency_call`/`emergency_alert`)·사용자 축(ruleset)·시스템 축 셋이 모두 허용해야 열린다.
 - **admin 프로파일 API**: `GET/PUT /api/v1/users/:pid/ptt/:msisdn/profile` — UPSERT + 캐시 갱신 +
-  `USER_CHANGED` notify. `DedicatedGroup` 의 `emergency_group_id` 는 존재 그룹만 수용(400).
+  `USER_CHANGED` notify. `DedicatedGroup` 의 `emergency_group_id` 는 존재 그룹만 수용(400),
+  `emergency_private_recipient` 는 존재 가입자만 수용(400).
   사용자 상세(`GET /users/:pid`)의 ptt 행에 `mcptt_profile` 동봉.
 - **notify_csp**: capability 변경은 `GROUP_CHANGED`로 전파(CSP lazy-reload), 프로파일 변경은
   `USER_CHANGED`(CSP 는 프로파일을 게이트 판정 시점에 DB 직조회하므로 별도 캐시 무효화 불요).
@@ -239,7 +260,35 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 ---
 
-## 7. 콘솔/관측
+## 7. 긴급 사설콜 (emergency private call, TS 24.379 §11)
+
+1:1 사설콜(`priv-<caller>-<callee>` 합성 그룹, 계약 §A.1)에 긴급 condition 을 얹는다 —
+그룹 긴급콜과 같은 condition 파이프(§4.2)를 그대로 타되, 인가 축이 다르다.
+
+- **인가 (CSP `IsConditionInitAuthorized` private 분기)**: 합성 그룹은 그룹문서가 없어
+  capability·Dedicated 축이 공허(`_emergencyCall=true` 합성, ad hoc 과 동일) — **사용자 축이
+  유일 게이트**. ①`allow_emergency_private_call` ②`UsePreConfigured` 모드면 사전 지정
+  수신자(`emergency_private_recipient`)와 착신자 일치까지 판정(그룹 긴급콜의 DedicatedGroup
+  대상 일치와 대칭 — 미지정/불일치 403). in-call 상향(re-INVITE)도 같은 분기를 탄다
+  (`IsInCallUpgradeAllowed` → 동일 함수).
+- **프로파일 문서 (TS 24.484)**: `PrivateCall > EmergencyCall > MCPTTPrivateRecipient` 의
+  `entry-info`(`LocallyDetermined`|`UsePreConfigured`)+`uri-entry`(지정 수신자), `ruleset`
+  `allow-emergency-private-call` — §5 참조.
+- **단말 (ptt-client)**: 연락처 상세 [긴급] 액션 → `startEmergencyPrivateCall(peer)` — 대상
+  결정은 entry-info 를 따른다(`UsePreConfigured`=지정 수신자로 고정·미지정 불발,
+  `LocallyDetermined`=고른 상대). INVITE 는 `session-type=private` + `emergency-ind=true`.
+  발신 즉시 낙관 latch(세션 긴급 배너+경고음), 403 이면 **일반 1:1 로 폴백**(그룹 긴급콜과
+  동일 패턴 — 1:1 은 그룹 경보 선발신이 없어 경보 정합은 불요). 프로파일 명시 미인가는
+  선차단(`blocked` 피드백), 미수신(null)은 낙관 발신.
+- **CMP**: 별도 처리 없음 — condition 상향 시 CSP 가 `PTT_FLOOR_TIER` 로 개시자 tier 를 올리는
+  기존 경로가 사설 2인 floor 세션에도 그대로 적용된다(full-duplex(floor off) 세션은 floor 가
+  없어 tier 무의미 — 시그널링·UI 축만 동작).
+- **경보(alert)와의 관계**: 긴급 사설콜은 그룹 경보 MESSAGE 를 선발신하지 않는다 — 경보는
+  그룹 대상 기능(§4.3)이고, 사설 긴급은 세션 condition 만 올린다.
+
+---
+
+## 8. 콘솔/관측
 
 - **그룹 편집(PttGroupsWorkbenchPage)**: capability 체크박스 — 긴급콜(condition 공통 게이트),
   긴급경보. (임박위험·ad-hoc 은 별도 축을 두지 않는다 — §2.)
@@ -251,7 +300,7 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 ---
 
-## 8. 메시지 흐름 (긴급 개시 예시)
+## 9. 메시지 흐름 (긴급 개시 예시)
 
 ```
 UE(개시자) ──INVITE(mcptt-info: session-type=prearranged, emergency-ind=true)──▶ CSP
@@ -268,7 +317,7 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 
 ---
 
-## 9. 미해결/결정 필요
+## 10. 미해결/결정 필요
 
 1. **floor 패킷 priority 필드**: 중앙판정으로 단일화 — tier 는 CSP 지시(`PTT_FLOOR_TIER`,
    긴급 개시자 한정)로만 변한다. REQUEST 의 Floor Indicator(emergency/imminent)는 **호 단위**
@@ -279,13 +328,12 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
 4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
    인원을 골라 서버가 개시하는 dispatcher 입구는 미착수.
-5. **긴급 사설콜(emergency private call)**: 미구현 — 착수 시 프로파일 `PrivateCall > EmergencyCall
-   > MCPTTPrivateRecipient`(entry-info `UsePreConfigured`/`LocallyDetermined`)와 `ruleset`
-   `allow-emergency-private-call` 이 규격 자리(TS 24.379 §6.2.8.3).
+5. **긴급 사설콜 콘솔 편집 UI**: 서버·단말·admin API 는 구현(§7) — 콘솔 프로파일 행의 사설
+   긴급 3필드(인가·모드·지정 수신자) 편집 입력은 미착수(API 는 수용).
 
 ---
 
-## 10. 관련 파일
+## 11. 관련 파일
 
 - DB: `sql/cims_schema.sql` (`ptt_groups.emergency_call`/`emergency_alert`,
   `ptt_user_profile` — `sql/migrate_ptt_user_profile_v2.sql`)

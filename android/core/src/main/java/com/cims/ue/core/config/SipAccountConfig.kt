@@ -37,6 +37,16 @@ data class SipAccountConfig(
      *  우선해 PJSIP_CRED_DATA_DIGEST 로 response 를 계산한다(평문 비번 불요, sip_access_security.md §4.7). */
     val sipHa1: String = "",
     val password: String = "",
+    /** 인증 체계(프로비저닝 `account.authScheme`) — "digest"(기본) | "aka"(IMS AKA, TLS 전용).
+     *  aka 면 [akaK]/[akaOpc] 가 소프트-USIM 자격이고 sipHa1/password 는 쓰이지 않는다
+     *  (sip_access_security.md §8.2 — 서버는 AKA 신원의 비-TLS 등록을 403 으로 거절한다). */
+    val authScheme: String = "digest",
+    val akaK: String = "",              // IMS AKA K (hex32)
+    val akaOpc: String = "",            // IMS AKA OPc (hex32) — pjsip 패치가 OPc 직접 소비(PJSIP_AKA_OP_IS_OPC)
+    val akaAmf: String = "8000",        // AMF (hex4)
+    /** 서버 제시 채널 보호 목록(프로비저닝 `sip.security`, RFC 3329) — "tls" 포함 + TLS 접속이면
+     *  REGISTER 에 sec-agree 를 제안한다(Security-Verify echo 는 pjsip sip_reg.c 패치가 처리). */
+    val secMechanisms: List<String> = emptyList(),
     val expiresSec: Int = 3600,         // 희망 등록 주기(서버는 200 OK 에서 3600 하드코딩으로 덮어씀)
     val countryCode: String = "",       // 홈 국가코드(digits, 예 "82") — 프로비저닝 수신, 번호 로컬 표기용(표시 전용)
     /** MCData C-plane SDS payload 상한(byte, 프로비저닝 수신) — 초과 시 MSRP 미디어평면 발신.
@@ -62,7 +72,8 @@ data class SipAccountConfig(
         domain.isNotBlank() &&
         msisdn.isNotBlank() &&
         (imsi.isNotBlank() || authId.isNotBlank()) &&   // Digest username 확보 (msisdn 폴백 금지 — 없으면 즉시 403)
-        (sipHa1.isNotBlank() || password.isNotBlank())  // Digest 자료 — H(A1) 또는 평문 비번
+        (sipHa1.isNotBlank() || password.isNotBlank() ||
+            (authScheme.equals("aka", ignoreCase = true) && akaK.isNotBlank()))  // 인증 자료 — H(A1)/평문/AKA K
 
     /**
      * 가용 목록에서 [t] 를 선택 — transport 와 **포트를 함께** 갱신한다. transport 만 바꾸면

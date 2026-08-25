@@ -120,7 +120,13 @@ PJ_DEF(pj_status_t) pjsip_auth_create_aka_response(
     /* Given key K and random challenge RAND, compute response RES,
      * confidentiality key CK, integrity key IK and anonymity key AK.
      */
+#if defined(PJSIP_AKA_OP_IS_OPC) && PJSIP_AKA_OP_IS_OPC
+    /* CIMS: ext.aka.op 는 OP 가 아니라 OPc (AuC/soft-USIM 배포 계약,
+     * sip_access_security.md §8.2) — ComputeOPc 유도 없는 변형을 쓴다. */
+    f2345_opc(k, chal_rand, res, ck, ik, ak, op);
+#else
     f2345(k, chal_rand, res, ck, ik, ak, op);
+#endif
 
     /* Compute sequence number SQN */
     for (i=0; i<PJSIP_AKA_SQNLEN; ++i)
@@ -128,7 +134,11 @@ PJ_DEF(pj_status_t) pjsip_auth_create_aka_response(
 
     /* Verify MAC in the challenge */
     /* Compute XMAC */
+#if defined(PJSIP_AKA_OP_IS_OPC) && PJSIP_AKA_OP_IS_OPC
+    f1_opc(k, chal_rand, sqn, amf, xmac, op);
+#else
     f1(k, chal_rand, sqn, amf, xmac, op);
+#endif
 
     if (pj_memcmp(chal_mac, xmac, PJSIP_AKA_MACLEN) != 0) {
         return PJSIP_EAUTHINNONCE;

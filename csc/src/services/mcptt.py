@@ -47,6 +47,9 @@ DEFAULT_USER_PROFILE = {
     "allow_adhoc_call": True,
     "emergency_group_mode": "DedicatedGroup",
     "emergency_group_id": None,
+    "allow_emergency_private_call": True,
+    "private_emergency_mode": "LocallyDetermined",
+    "emergency_private_recipient": None,
 }
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
@@ -231,7 +234,9 @@ def load_shared_data(config):
                     try:
                         cur.execute(
                             "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, "
-                            "allow_adhoc_call, emergency_group_mode, emergency_group_id "
+                            "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
+                            "allow_emergency_private_call, private_emergency_mode, "
+                            "emergency_private_recipient "
                             "FROM ptt_user_profile")
                         PTT_PROFILES.clear()
                         for r in cur.fetchall():
@@ -241,6 +246,9 @@ def load_shared_data(config):
                                 "allow_adhoc_call": bool(r['allow_adhoc_call']),
                                 "emergency_group_mode": r['emergency_group_mode'],
                                 "emergency_group_id": r['emergency_group_id'],
+                                "allow_emergency_private_call": bool(r['allow_emergency_private_call']),
+                                "private_emergency_mode": r['private_emergency_mode'],
+                                "emergency_private_recipient": r['emergency_private_recipient'],
                             }
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
@@ -1053,6 +1061,10 @@ def get_user_profile_xml(user_uri):
     mode = prof.get('emergency_group_mode') or 'DedicatedGroup'
     egid = prof.get('emergency_group_id')
     uri_entry = f"\n            <uri-entry>{_group_uri(egid)}</uri-entry>\n          " if egid else ""
+    # 긴급 사설콜 (TS 24.484 PrivateCall > EmergencyCall > MCPTTPrivateRecipient)
+    pmode = prof.get('private_emergency_mode') or 'LocallyDetermined'
+    precip = prof.get('emergency_private_recipient')
+    priv_uri_entry = f"\n              <uri-entry>tel:{precip}</uri-entry>\n            " if precip else ""
 
     def _b(k):
         return "true" if prof.get(k, True) else "false"
@@ -1080,6 +1092,11 @@ def get_user_profile_xml(user_uri):
     <PrivateCall>
       <MaxSimultaneousCallsN6>1</MaxSimultaneousCallsN6>
       <MaxCallsN7>1</MaxCallsN7>
+      <EmergencyCall>
+        <MCPTTPrivateRecipient>
+          <entry entry-info="{pmode}">{priv_uri_entry}</entry>
+        </MCPTTPrivateRecipient>
+      </EmergencyCall>
     </PrivateCall>
   </Common>
   <ruleset>
@@ -1088,6 +1105,7 @@ def get_user_profile_xml(user_uri):
         <allow-emergency-group-call>{_b('allow_emergency_call')}</allow-emergency-group-call>
         <allow-activate-emergency-alert>{_b('allow_emergency_alert')}</allow-activate-emergency-alert>
         <allow-cancel-emergency-alert>{_b('allow_emergency_alert')}</allow-cancel-emergency-alert>
+        <allow-emergency-private-call>{_b('allow_emergency_private_call')}</allow-emergency-private-call>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
       </actions>
     </rule>

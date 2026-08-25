@@ -662,6 +662,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsPriv._groupType = "private";
             clsPriv._requireAffiliation = false;  // 계약 §A.1 — 상대 MCPTT ID 직접 지정, 사전 편성 없음
             clsPriv._isAdhoc = true;              // 통화 종료 시 GroupMap 에서 제거(ephemeral)
+            clsPriv._emergencyCall = true;  // 그룹문서 없음 — capability 축 공허, 긴급은 사용자 축 게이트(IsConditionInitAuthorized private 분기)
             if ( clsPrivFmtpChk.iNoFloorCtrl ) clsPriv._floorControl = "off";
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszTo, 5, "participant", "" ) );

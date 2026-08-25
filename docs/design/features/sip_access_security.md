@@ -4,8 +4,8 @@ UE↔CSP 접속 구간의 보안 체계를 3GPP TS 33.203 정합 구조로 끌�
 이 문서는 도입 로드맵(P0~P4) 중 **P0(채널 정책 게이트)**·**P1(인증 자료 경계 재편)**·
 **P2(Sec-Agree 협상)**·**P3(IMS AKA over TLS)**·**P4(IMS AKA+IPsec)** 의 상세 설계를 담는다.
 
-> **상태**: P0·P1·P2·P3 구현 반영(P2·P3 = 서버·CSC·cspsim·verify. Android UE 는 sec-agree 헤더(pjsip 패치)와
-> AKA 자격(`/provisioning/me` `account.aka` → pjsip AKA cred) 연결이 단말 쪽 후속). P4 = 서버(CSP)·psip/cspsim·
+> **상태**: P0·P1·P2·P3 구현 반영(P2·P3 = 서버·CSC·cspsim·verify·**Android UE** — pjsip 패치(sec-agree echo·
+> AKA/OPc)와 `/provisioning/me` `account.aka`/`sip.security` 단말 연결 포함, §8.1·§8.2). P4 = 서버(CSP)·psip/cspsim·
 > agent·CSC·verify 구현 반영 — 범위 고정: Annex M 미포함(NAT 와 두 겹 상호배제), psip/cspsim 한정. 실설치 검증
 > (S3-SCN-IPSEC-LIVE)은 `CAP_NET_ADMIN`·IPSEC LocalNode·AKA 마이그레이션이 있는 환경에서만 돈다. [§4.7 배포 순서](#47-소비자-전환--프로비저닝시험-도구) 의 ⑤(코드)까지
 > 반영 — CSC 는 `passwd` 컬럼에 쓰지 않고 `/provisioning/me` 의 `sipPassword` 는 항상 `null` 이다.
@@ -368,11 +368,11 @@ P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재�
 잔여 항목:
 - V6 의 가입자 PUT 절반(관리 API 로 비밀번호 미포함 갱신 → ha1 보존) — 나머지 V 항목은 S3 로
   자동화 완료(§6).
-- Android UE 의 AKA: `/provisioning/me` `account.aka` 를 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 연결하는
-  단말 작업. (콘솔 프로비저닝 화면의 `auth_scheme`/K/OPc 입력은 구현되어 있다 — 번호 행 인증 열.)
+- Android UE 의 AKA·sec-agree 는 단말 연결까지 구현(§8.1 클라이언트·§8.2 Android UE 절 — pjsip 패치 +
+  `account.aka`/`sip.security` 소비). **실기기 등록 검증이 잔여** — AKA 계정 프로비저닝(`auth_scheme=aka`,
+  콘솔 번호 행 인증 열) 후 TLS 등록 200·비-TLS 403 확인. `Setup.SecAgree.Require` 는 구 APK 수용을 위해
+  false(제안하는 단말만 협상) 유지.
 - AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec, [§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영)) 에서 SA 키로 소비한다.
-- Android UE 의 sec-agree(§8.1) — pjsip 이 `Security-*` 헤더를 만들지 않으므로 단말 쪽 패치가 선행 조건이다.
-  그때까지 `Setup.SecAgree.Require` 는 false(제안하는 단말만 협상)로 둔다.
 - `/provisioning/me` 의 `enforced`/TLS 목록 축소는 CSC `Provisioning.Services.*.tls_port` 가 설정된 환경에서만
   드러난다(미설정이면 TLS 항목 자체가 없다).
 
@@ -446,8 +446,11 @@ monitor `sip_stats` 에 누적 `sec_agree_reject` 와 `window sec_agree_reject` 
 **클라이언트**: psip `CSipServerInfo::m_bSecAgree`(+`m_strSecurityClient`/`m_strSecurityServer`/
 `m_strSecurityVerifyOverride`) — REGISTER 에 `Security-Client`/`Require`/`Proxy-Require` 를 싣고,
 응답(401/494/421)의 `Security-Server` 원문을 보관해 다음 REGISTER 의 `Security-Verify` 로 echo 한다.
-cspsim `-sec_agree`(+`-sec_verify <값>` 강등 변조 재현). Android UE 는 pjsip 이 이 헤더를 만들지
-않아 단말 패치가 선행 조건이다(§7 잔여).
+cspsim `-sec_agree`(+`-sec_verify <값>` 강등 변조 재현). **Android UE**: pjproject `sip_reg.c` 패치가
+같은 규율을 구현 — 앱(`SipController`)이 TLS 접속 + 프로비저닝 `sip.security` 에 `tls` 가 있을 때
+`Security-Client: tls` + `(Proxy-)Require: sec-agree` 를 REGISTER 헤더로 싣고, regc 가 401 의
+`Security-Server` 를 보관해 인증 재시도·갱신 REGISTER 에 `Security-Verify` 로 echo 한다
+(Security-Client 가 있는 요청에서만 동작 — 구 APK/미제안 단말은 종전 그대로).
 
 **검증**: §6 V9~V13, `S3-SCN-SEC-AGREE`.
 
@@ -541,7 +544,13 @@ POST /internal/aka/av            Authorization: Bearer <InternalApi.Token>
   `-transport tls` 필수.
 - `/provisioning/me`: `account.authScheme` (`digest`|`aka`), `aka` 면 `account.aka={k,opc,amf}` 와 `sipHa1:null`.
   소프트-K 프로비저닝 — 단말이 USIM 역할이므로 K 원문이 토큰 인증 + TLS 채널로 내려간다(이 채널의 신뢰가 전제).
-  Android 는 pjsip AKA 자격 연결이 후속.
+- **Android UE**(`android/core`): `account.aka` 를 pjsip AKA cred 로 연결(`AuthCredInfo`
+  `PJSIP_CRED_DATA_EXT_AKA` + akaK/akaOp/akaAmf — pjsua2 가 AKA 콜백을 상시 결선). pjproject 패치
+  (`config_site.h` `PJSIP_HAS_DIGEST_AKA_AUTH` + `PJSIP_AKA_OP_IS_OPC`): AuC 는 OP 가 아니라 **OPc** 를
+  배포하므로 milenage 에 `f1_opc`/`f2345_opc`(ComputeOPc 생략) 를 신설해 `sip_auth_aka.c` 가 그것을 쓴다.
+  libmilenage 는 third_party 빌드·링크에 편입. **AUTS 재동기는 미구현** — pjsip 은 단말측 SQN 을 추적하지
+  않아(MAC 검증만) 재동기 계기가 없고, CSC AuC 가 단일 SQN 발급자라 서버측 SQN 이 뒤처질 일도 없다
+  (소프트-USIM 재동기 경로 검증은 psip/cspsim 이 담당).
 
 **검증**: §6 V14~V18, `S3-SCN-AKA`. 단위: `csc/src/tests/test_milenage.py`(TS 35.208 세트 1~3)·`test_auc.py`,
 `tests/psip_aka_test.cpp`.
