@@ -358,7 +358,7 @@ P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재�
 잔여 항목:
 - V3~V6·V8 의 자동화(V1·V2·V7·V9~V12·V14~V18 은 S3 검증 항목으로 자동화 완료 — §6).
 - Android UE 의 AKA: `/provisioning/me` `account.aka` 를 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 연결하는
-  단말 작업. 콘솔 프로비저닝 화면의 `auth_scheme`/K/OPc 입력(현재는 API 로만).
+  단말 작업. (콘솔 프로비저닝 화면의 `auth_scheme`/K/OPc 입력은 구현되어 있다 — 번호 행 인증 열.)
 - AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec, [§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영)) 에서 SA 키로 소비한다.
 - Android UE 의 sec-agree(§8.1) — pjsip 이 `Security-*` 헤더를 만들지 않으므로 단말 쪽 패치가 선행 조건이다.
   그때까지 `Setup.SecAgree.Require` 는 false(제안하는 단말만 협상)로 둔다.
@@ -723,8 +723,12 @@ V25 는 `-hold 6` 유지 창에서 `run_cspsim(on_line=…)` 이 `registration h
 | P4-11 | psip 발신 TCP 소스 포트 bind — 스택 집합(`AddTcpSourcePort/SelectTcpSourcePort`), 플랫폼 `TcpConnectFrom(srcIp, srcPort, …)`, 클라 스레드 적용, 서버 port_pc 등록 | `ext/psip/SipStack/SipStack.{h,cpp}`, `SipTcpClientThread.cpp`, `ext/psip/SipPlatform/SipTcp.{h,cpp}`, `csp/CspListenerManager.cpp`, `tests/psip_tcp_srcport_test.cpp` |
 | P4-10 | verify `S3-SCN-IPSEC`/`S3-SCN-IPSEC-LIVE` + `sip_probe.probe_register_offer` | `verify/lib/items/stage3/scn_ipsec.py`, `verify/lib/common/sip_probe.py` |
 
-잔여: 실설치 검증(S3-SCN-IPSEC-LIVE V21~V26 — dev 는 `cims` 계정에 `CAP_NET_ADMIN`·unprivileged userns 모두 없어
-SKIP. TCP 재인증의 구 연결은 구 SA 회수 뒤 수신 타임아웃으로 닫히는 것까지 실측 대상), Android(범위 밖).
+실설치 검증(S3-SCN-IPSEC-LIVE V21~V26)은 `CAP_NET_ADMIN` + IPSEC LocalNode 가 있는 환경에서 라이브로 통과한다
+(단말은 별도 netns 로 격리해 UE·서버 XFRM 충돌을 피한다 — XFRM state/policy 는 netns 단위): V21 SA 위 등록,
+V22 `Security-Verify` 변조 → 494 + 임시 SA 회수, V23 해제 → SA 회수, V25 등록 유지 중 비보호 포트 403,
+V26 TCP 위 등록(port_uc→port_ps 소스포트 bind). 자동화 항목은 dev 계정에 특권/userns 가 없으면 SKIP.
+
+잔여: TCP 재인증의 구 연결은 구 SA 회수 뒤 수신 타임아웃으로 닫히는 것까지 실측, Android(범위 밖).
 
 ### 8.4 psip 확장 (단계 무관)
 
