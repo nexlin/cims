@@ -101,6 +101,29 @@ PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,p
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
 
+# ue-init-config 규격 파라미터값 (config UeInitConfig.* — 주소류는 토폴로지 유도라 여기 없음).
+#   빈 dict 면 코드 기본값(_UE_INIT_DEFAULTS) — 설정 섹션이 없는 배포본(업그레이드 직후)도 종전 문서 그대로.
+UE_INIT_CONFIG = {}
+_UE_INIT_DEFAULTS = {
+    "Name": "CIMS",
+    "Timers": {"T100": 4, "T101": 4, "T103": 4, "T104": 4, "T132": 6},
+    "Hplmn": {"Plmn": "", "McpttConRef": "internet", "McCommonCoreConRef": "internet", "McIdConRef": "internet"},
+    "HttpProxy": "",
+    "TlsMutualAuthentication": False,
+    "IntegrityProtection": False,
+    "ConfidentialityProtection": False,
+    "GroupCreationXui": "",
+    "ServiceDetails": {"Mcptt": {"Enable": True, "ServerUri": ""},
+                       "McData": {"Enable": False, "ServerUri": ""}},
+}
+_UE_INIT_LAST_GOOD = {}      # base_url → (xml, etag): 설정값이 문서를 깨뜨렸을 때 유지할 마지막 정상 문서
+
+# IdMS 규격 로그인 폼(TS 24.482 §6.3.1) 입력칸 이름 — 외부 단말/SDK 가 헤드리스로 채울 때 찾는 name.
+IDMS_FORM_LOGIN_FIELD = "username"
+IDMS_FORM_PASSWORD_FIELD = "password"
+# authreq redirect_uri 허용 목록 (RFC 6749 §3.1.2.3 정확 일치). 비면 전부 허용.
+IDMS_REDIRECT_URI_ALLOW = []
+
 
 def _group_uri(gid: str) -> str:
     """mcptt_group_id 식별자 → GMS 그룹 URI.
@@ -157,6 +180,22 @@ def apply_config(config):
         ACCESS_TOKEN_TTL = int(idms_config['AccessTokenTtl'])
     if idms_config.get('RefreshTokenTtl'):
         REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
+
+    # 규격 로그인 폼 입력칸 이름 · redirect_uri 허용 목록 (둘 다 리로드 가능 — 다음 요청부터)
+    global IDMS_FORM_LOGIN_FIELD, IDMS_FORM_PASSWORD_FIELD, IDMS_REDIRECT_URI_ALLOW
+    IDMS_FORM_LOGIN_FIELD = str(idms_config.get('FormLoginField') or 'username').strip() or 'username'
+    IDMS_FORM_PASSWORD_FIELD = str(idms_config.get('FormPasswordField') or 'password').strip() or 'password'
+    allow = idms_config.get('RedirectUriAllow') or []
+    if isinstance(allow, str):                      # 콤마 구분 문자열도 수용
+        allow = [a for a in (s.strip() for s in allow.split(',')) if a]
+    IDMS_REDIRECT_URI_ALLOW = [str(a).strip() for a in allow if str(a).strip()]
+
+    # ue-init-config 규격 파라미터값 — 문서 ETag 가 내용 파생이라 값이 바뀌면 자동 갱신
+    global UE_INIT_CONFIG
+    UE_INIT_CONFIG = config.get('UeInitConfig') or {}
+    if not isinstance(UE_INIT_CONFIG, dict):
+        logger.log_error("[CMS] UeInitConfig 가 객체가 아님 — 기본값 사용")
+        UE_INIT_CONFIG = {}
 
     global CSP_NOTIFY_IP, CSP_NOTIFY_PORT, PSP_NOTIFY_IP, PSP_NOTIFY_PORT
     notify_cfg = config.get('CspNotify', {})
@@ -1151,63 +1190,136 @@ def get_service_config_xml(user_uri):
 </mcptt-service-config>"""
     return xml, _content_etag(xml)
 
+def _ue_init_cfg(*path, default=None):
+    """UeInitConfig.* 조회 — 설정 → 코드 기본값 순. 빈 문자열은 '미지정' 으로 취급(유도값 사용)."""
+    cur, dft = UE_INIT_CONFIG, _UE_INIT_DEFAULTS
+    for p in path:
+        cur = cur.get(p) if isinstance(cur, dict) else None
+        dft = dft.get(p) if isinstance(dft, dict) else None
+    if cur is None or (isinstance(cur, str) and not cur.strip()):
+        return dft if default is None else default
+    return cur
+
+
+def _xml_bool(v) -> str:
+    if isinstance(v, str):
+        return 'true' if v.strip().lower() in ('1', 'true', 'yes', 'on') else 'false'
+    return 'true' if bool(v) else 'false'
+
+
+def _xml_ubyte(v, dft) -> int:
+    """xs:unsignedByte — 정수 아니면 기본값, 범위는 0~255 로 절단."""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        n = int(dft)
+    return max(0, min(255, n))
+
+
+def _build_ue_init_config_xml(base_url: str) -> str:
+    """설정(UeInitConfig.*)과 토폴로지 유도값으로 ue-init-config 문서를 조립한다 (검사 전 원문)."""
+    import html as _html
+    import re as _re
+    esc = lambda s: _html.escape(str(s if s is not None else ''), quote=True)
+
+    ptt = (PROVISIONING.get('Services') or {}).get('ptt', {}) if isinstance(PROVISIONING, dict) else {}
+    domain = (ptt.get('domain') or IDMS_DOMAIN).strip()
+
+    # PLMN = MCC+MNC — 설정값 우선, 없으면 도메인 표기 ptt.mncXXX.mccYYY.… 에서 유도 (실패 시 명목값)
+    plmn = str(_ue_init_cfg('Hplmn', 'Plmn')).strip()
+    if not plmn:
+        m = _re.search(r'mnc(\d+)\.mcc(\d+)', domain)
+        plmn = (m.group(2) + m.group(1).lstrip('0')) if m else '00101'
+
+    timers = ''.join(
+        f"      <{t}>{_xml_ubyte(_ue_init_cfg('Timers', t), _UE_INIT_DEFAULTS['Timers'][t])}</{t}>\n"
+        for t in ('T100', 'T101', 'T103', 'T104', 'T132'))
+
+    group_creation_xui = str(_ue_init_cfg('GroupCreationXui')).strip() or base_url
+
+    # 계층③ 확장 요소 — <on-network><anyExt> 아래 *-Service-Details (§7.2.2.3 "can be added under anyExt").
+    #   Server-URI = participating function 의 PSI. 비우면 sip:{svc}_psi@도메인 (mcptt_psi 는 CSP 의
+    #   affiliation notifier PSI 그대로, mcdata_psi 는 명목값).
+    ext = ''
+    for elem, key, psi in (('MCPTT-Service-Details', 'Mcptt', 'mcptt_psi'),
+                           ('MCData-Service-Details', 'McData', 'mcdata_psi')):
+        if _xml_bool(_ue_init_cfg('ServiceDetails', key, 'Enable')) != 'true':
+            continue
+        uri = str(_ue_init_cfg('ServiceDetails', key, 'ServerUri')).strip() or f"sip:{psi}@{domain}"
+        ext += (f"      <{elem}>\n"
+                f"        <IPv6-Required>false</IPv6-Required>\n"
+                f"        <Server-URI>{esc(uri)}</Server-URI>\n"
+                f"      </{elem}>\n")
+    any_ext = f"    <anyExt>\n{ext}    </anyExt>\n" if ext else ''
+
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<mcptt-UE-initial-configuration xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0" domain="{esc(domain)}">
+  <name>{esc(_ue_init_cfg('Name'))}</name>
+  <on-network>
+    <Timers>
+{timers}    </Timers>
+    <HPLMN PLMN="{esc(plmn)}">
+      <service>
+        <MCPTT-to-con-ref>{esc(_ue_init_cfg('Hplmn', 'McpttConRef'))}</MCPTT-to-con-ref>
+        <MC-common-core-to-con-ref>{esc(_ue_init_cfg('Hplmn', 'McCommonCoreConRef'))}</MC-common-core-to-con-ref>
+        <MC-ID-to-con-ref>{esc(_ue_init_cfg('Hplmn', 'McIdConRef'))}</MC-ID-to-con-ref>
+      </service>
+    </HPLMN>
+    <App-Server-Info>
+      <idms-auth-endpoint>{esc(base_url)}/idms/authreq</idms-auth-endpoint>
+      <idms-token-endpoint>{esc(base_url)}/idms/tokenreq</idms-token-endpoint>
+      <http-proxy>{esc(_ue_init_cfg('HttpProxy', default=''))}</http-proxy>
+      <gms>{esc(base_url)}</gms>
+      <cms>{esc(base_url)}</cms>
+      <kms>{esc(base_url)}/keymanagement/identity/v1</kms>
+      <tls-tunnel-auth-method>
+        <mutual-authentication>{_xml_bool(_ue_init_cfg('TlsMutualAuthentication'))}</mutual-authentication>
+      </tls-tunnel-auth-method>
+    </App-Server-Info>
+    <GMS-URI>sip:gms_psi@{esc(domain)}</GMS-URI>
+    <group-creation-XUI>{esc(group_creation_xui)}</group-creation-XUI>
+    <GMS-XCAP-root-URI>{esc(base_url)}</GMS-XCAP-root-URI>
+    <CMS-XCAP-root-URI>{esc(base_url)}</CMS-XCAP-root-URI>
+    <integrity-protection-enabled>{_xml_bool(_ue_init_cfg('IntegrityProtection'))}</integrity-protection-enabled>
+    <confidentiality-protection-enabled>{_xml_bool(_ue_init_cfg('ConfidentialityProtection'))}</confidentiality-protection-enabled>
+{any_ext}  </on-network>
+</mcptt-UE-initial-configuration>"""
+
+
 def get_ue_init_config_xml(base_url):
     """MCS UE 초기 설정 문서 (TS 24.484 §7.2) — **로그인 전** 부트스트랩, 시스템 전역 1건.
 
     구조·요소명·네임스페이스는 §7.2.2.3 XSD 정본을 그대로 따른다 — <on-network> 는
     xs:sequence 라 **요소 순서가 강제**되고 나열 요소 전부 필수(minOccurs 기본 1)다.
-    값은 전부 SoT(Provisioning.Services.ptt / IdMs / 요청 Host)에서 산출한다 (§R4-1).
+    값은 3계층: ①주소류(IdMS/CMS/GMS/KMS/XCAP 루트·domain·PLMN·GMS-URI)는 토폴로지 SoT
+    (Provisioning.Services.ptt / IdMs / 요청 Host)에서 유도 ②규격 파라미터값(Timers·con-ref·
+    http-proxy·보호 플래그·group-creation-XUI·name)은 `UeInitConfig.*` 설정 ③확장 요소
+    (*-Service-Details)는 설정 on/off (§R4-1).
     - Timers = floor 절차 타이머(TS 24.380: T100 release/T101 request/T103 end-of-media/
-      T104 queue-pos/T132 queued-granted 사용자 행동, 초 단위) — 보수적 기본값.
+      T104 queue-pos/T132 queued-granted 사용자 행동, 초 단위).
     - GMS-URI = GMS 구독 프록시 **PSI** (§7.2.2.7-5) — 우리 gms_psi AoR 그대로.
-    - HPLMN PLMN 은 도메인(mncXXX.mccYYY)에서 유도, con-ref 는 APN/DNN 명(우리는 명목값).
+
+    산출물은 minidom 으로 well-formed 검사한다 — 설정값이 문서를 깨뜨리면(이론상 escape 로
+    막히지만) 경고를 남기고 **마지막 정상 문서**를 유지한다(없으면 기본값 문서).
     """
-    ptt = (PROVISIONING.get('Services') or {}).get('ptt', {}) if isinstance(PROVISIONING, dict) else {}
-    domain = (ptt.get('domain') or IDMS_DOMAIN).strip()
-
-    # PLMN = MCC+MNC — 도메인 표기 ptt.mncXXX.mccYYY.… 에서 유도 (실패 시 명목값)
-    import re as _re
-    m = _re.search(r'mnc(\d+)\.mcc(\d+)', domain)
-    plmn = (m.group(2) + m.group(1).lstrip('0')) if m else '00101'
-
-    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<mcptt-UE-initial-configuration xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0" domain="{domain}">
-  <name>CIMS</name>
-  <on-network>
-    <Timers>
-      <T100>4</T100>
-      <T101>4</T101>
-      <T103>4</T103>
-      <T104>4</T104>
-      <T132>6</T132>
-    </Timers>
-    <HPLMN PLMN="{plmn}">
-      <service>
-        <MCPTT-to-con-ref>internet</MCPTT-to-con-ref>
-        <MC-common-core-to-con-ref>internet</MC-common-core-to-con-ref>
-        <MC-ID-to-con-ref>internet</MC-ID-to-con-ref>
-      </service>
-    </HPLMN>
-    <App-Server-Info>
-      <idms-auth-endpoint>{base_url}/idms/authreq</idms-auth-endpoint>
-      <idms-token-endpoint>{base_url}/idms/tokenreq</idms-token-endpoint>
-      <http-proxy></http-proxy>
-      <gms>{base_url}</gms>
-      <cms>{base_url}</cms>
-      <kms>{base_url}/keymanagement/identity/v1</kms>
-      <tls-tunnel-auth-method>
-        <mutual-authentication>false</mutual-authentication>
-      </tls-tunnel-auth-method>
-    </App-Server-Info>
-    <GMS-URI>sip:gms_psi@{domain}</GMS-URI>
-    <group-creation-XUI>{base_url}</group-creation-XUI>
-    <GMS-XCAP-root-URI>{base_url}</GMS-XCAP-root-URI>
-    <CMS-XCAP-root-URI>{base_url}</CMS-XCAP-root-URI>
-    <integrity-protection-enabled>false</integrity-protection-enabled>
-    <confidentiality-protection-enabled>false</confidentiality-protection-enabled>
-  </on-network>
-</mcptt-UE-initial-configuration>"""
-    return xml, _content_etag(xml)
+    from xml.dom import minidom as _minidom
+    xml = _build_ue_init_config_xml(base_url)
+    try:
+        _minidom.parseString(xml.encode('utf-8'))
+    except Exception as e:
+        logger.log_error(f"[CMS] ue-init-config not well-formed ({e}) — UeInitConfig 설정 점검. "
+                         f"{'마지막 정상 문서 유지' if base_url in _UE_INIT_LAST_GOOD else '기본값 문서로 대체'}")
+        if base_url in _UE_INIT_LAST_GOOD:
+            return _UE_INIT_LAST_GOOD[base_url]
+        global UE_INIT_CONFIG
+        saved, UE_INIT_CONFIG = UE_INIT_CONFIG, {}
+        try:
+            xml = _build_ue_init_config_xml(base_url)
+        finally:
+            UE_INIT_CONFIG = saved
+    result = (xml, _content_etag(xml))
+    _UE_INIT_LAST_GOOD[base_url] = result
+    return result
 
 
 def get_kms_init_xml(user_uri):
@@ -1301,104 +1413,198 @@ def extract_token(auth_header: str) -> Optional[dict]:
 
 # --- Handlers ---
 
-# IdMS: Auth Req
-async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    # GET /idms/authreq?client_id=...
-    params = args.query_params
-    user_name = params.get('user_name')
-    # (로깅은 pi_http post_hook 에서 자동 처리)
-    user_password = params.get('user_password')
-    client_id = params.get('client_id', 'MCPTT_UE')
-    redirect_uri = params.get('redirect_uri')
-    state = params.get('state', '')
-    scope = params.get('scope', '')
-    nonce = params.get('nonce', '')   # S2b: OIDC nonce (id_token 에 반영)
+# ── IdMS: Auth Req — 두 말투 병행 (한 핸들러 안 분기) ──────────────────────────────
+#   ① 자체 단말: GET + user_name/user_password 쿼리 → 200 JSON {code,state,Location}
+#      (규격 폼 왕복을 생략한 간이형 — android/core ProvisioningClient·cspsim 이 쓴다).
+#   ② 규격 단말(TS 24.482 §6.3.1 / OIDC Core §3.1.2): GET(자격 없음) → 200 text/html 로그인 폼
+#      → POST(form-urlencoded: 입력칸 + hidden 문맥) → **302 Location: redirect_uri?code&state**.
+#      폼은 무상태 — OIDC 문맥(client_id·redirect_uri·state·scope·nonce·PKCE)을 hidden input 으로
+#      이월한다(서버 세션 없음). 입력칸 이름은 IdMs.FormLoginField/FormPasswordField (외부 SDK 의
+#      헤드리스 폼 자동화가 찾는 이름).
+#   두 경로는 검증(PKCE S256 필수·redirect_uri 허용목록)·인증(_authenticate)·코드 발급(_issue_auth_code)
+#   을 공유하고 응답 표현만 다르다.
 
-    # PKCE 파라미터 (필수)
-    code_challenge = params.get('code_challenge')
-    code_challenge_method = params.get('code_challenge_method', 'S256')
-    
-    # PKCE 필수 검증
-    if not code_challenge:
-        logger.log_error("[IdMS] Auth Req: code_challenge is required")
-        return HandlerResult(
-            status=400, 
-            body={
-                "error": "invalid_request", 
-                "error_description": "code_challenge is required (PKCE mandatory)"
-            }, 
-            media_type="application/json"
-        )
-    
-    # code_challenge_method 검증
-    if code_challenge_method != 'S256':
-        logger.log_error(f"[IdMS] Auth Req: unsupported code_challenge_method: {code_challenge_method}")
-        return HandlerResult(
-            status=400, 
-            body={
-                "error": "invalid_request", 
-                "error_description": "only S256 is supported for code_challenge_method"
-            }, 
-            media_type="application/json"
-        )
-    
-    logger.log_info(f"[IdMS] Auth Req: user={user_name}, client={client_id}, pkce=S256")
+_OIDC_CTX_KEYS = ('client_id', 'redirect_uri', 'state', 'scope', 'nonce',
+                  'code_challenge', 'code_challenge_method', 'response_type')
 
-    # 사용자 인증 — CIMS 로그인 ID(login_id) 우선. 토큰 sub=login_id, mcptt_id=규격 MCPTT ID(분리).
-    #   (DB 미연결 등으로 LOGIN_ACCOUNTS 가 비면 legacy: USERS(tel:+msisdn) 직접 로그인 호환.)
-    acct = LOGIN_ACCOUNTS.get(user_name)
+
+def _oidc_ctx(src: dict) -> dict:
+    """요청(query 또는 form)에서 OIDC 인증 요청 문맥만 추려 정규화한다."""
+    src = src if isinstance(src, dict) else {}
+    ctx = {k: str(src.get(k) or '') for k in _OIDC_CTX_KEYS}
+    ctx['client_id'] = ctx['client_id'] or 'MCPTT_UE'
+    ctx['code_challenge_method'] = ctx['code_challenge_method'] or 'S256'
+    return ctx
+
+
+def _redirect_uri_allowed(uri: str) -> bool:
+    """IdMs.RedirectUriAllow 가 비면 전부 허용, 있으면 정확 일치(RFC 6749 §3.1.2.3)."""
+    return (not IDMS_REDIRECT_URI_ALLOW) or (uri in IDMS_REDIRECT_URI_ALLOW)
+
+
+def _oidc_reject(desc: str) -> HandlerResult:
+    logger.log_error(f"[IdMS] Auth Req rejected: {desc}")
+    return HandlerResult(status=400, body={"error": "invalid_request", "error_description": desc},
+                         media_type="application/json")
+
+
+def _oidc_validate(ctx: dict, need_redirect: bool) -> Optional[HandlerResult]:
+    """OIDC/PKCE 요청 검증 — 실패 시 400 HandlerResult, 통과 시 None.
+    redirect_uri 는 폼 경로에선 필수(302 목적지), 자체 JSON 경로에선 선택(종전 호환)."""
+    if not ctx['code_challenge']:
+        return _oidc_reject("code_challenge is required (PKCE mandatory)")
+    if ctx['code_challenge_method'] != 'S256':
+        return _oidc_reject("only S256 is supported for code_challenge_method")
+    if ctx['response_type'] and ctx['response_type'] != 'code':
+        return _oidc_reject("only response_type=code is supported")
+    if need_redirect and not ctx['redirect_uri']:
+        return _oidc_reject("redirect_uri is required")
+    if ctx['redirect_uri'] and not _redirect_uri_allowed(ctx['redirect_uri']):
+        return _oidc_reject("redirect_uri is not registered")
+    return None
+
+
+def _authenticate(login_id: str, password: str):
+    """사용자 인증 — (mcptt_id, None) 또는 (None, 실패 사유).
+    CIMS 로그인 ID(login_id) 우선: 토큰 sub=login_id, mcptt_id=규격 MCPTT ID(분리).
+    (DB 미연결 등으로 LOGIN_ACCOUNTS 가 비면 legacy: USERS(tel:+msisdn) 직접 로그인 호환.)"""
+    acct = LOGIN_ACCOUNTS.get(login_id) if login_id else None
     expected_pw = None
-    mcptt_id = user_name
+    mcptt_id = login_id
     if acct is not None:
         expected_pw = acct.get("password")
-        mcptt_id = acct.get("mcptt_id") or user_name
-    elif user_name in USERS:
-        expected_pw = USERS[user_name].get("password")
-        mcptt_id = user_name
+        mcptt_id = acct.get("mcptt_id") or login_id
+    elif login_id in USERS:
+        expected_pw = USERS[login_id].get("password")
+        mcptt_id = login_id
     if not expected_pw:
-        logger.log_error(f"[IdMS] Auth Req Failed: login_id {user_name} not found (or no login credential)")
-        return HandlerResult(status=401,
-            body={"error": "access_denied", "error_description": "사용자를 찾을 수 없습니다"},
-            media_type="application/json")
-    if expected_pw != user_password:
-        logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {user_name}")
-        return HandlerResult(status=401,
-            body={"error": "access_denied", "error_description": "비밀번호가 올바르지 않습니다"},
-            media_type="application/json")
+        logger.log_error(f"[IdMS] Auth Req Failed: login_id {login_id} not found (or no login credential)")
+        return None, "사용자를 찾을 수 없습니다"
+    if expected_pw != password:
+        logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {login_id}")
+        return None, "비밀번호가 올바르지 않습니다"
+    return mcptt_id, None
 
-    # auth-code 생성
+
+def _issue_auth_code(login_id: str, mcptt_id: str, ctx: dict) -> str:
+    """auth-code 발급·영속 저장 — login_id(sub) 와 mcptt_id(서비스 신원) 분리 보관, PKCE 결박."""
     code = str(uuid.uuid4())
     now = int(time.time())
-
-    # auth-code 데이터 — login_id(sub) 와 mcptt_id(서비스 신원) 분리 보관.
-    auth_data = {
-        "login_id": user_name,
+    storage.save_auth_code(code, {
+        "login_id": login_id,
         "mcptt_id": mcptt_id,
-        "client_id": client_id,
-        "redirect_uri": redirect_uri,
-        "scope": scope,
-        "state": state,
+        "client_id": ctx['client_id'],
+        "redirect_uri": ctx['redirect_uri'] or None,
+        "scope": ctx['scope'],
+        "state": ctx['state'],
         "issued_at": now,
         "expires_at": now + AUTH_CODE_TTL,
         "used": False,
-        "nonce": nonce   # S2b: token 발급 시 id_token 에 반영
-    }
+        "nonce": ctx['nonce'],                  # S2b: token 발급 시 id_token 에 반영
+        "code_challenge": ctx['code_challenge'],
+        "code_challenge_method": ctx['code_challenge_method'],
+    })
+    return code
 
-    # PKCE 저장 (있으면)
-    if code_challenge:
-        auth_data["code_challenge"] = code_challenge
-        auth_data["code_challenge_method"] = code_challenge_method
-    
-    # 영속성 저장
-    storage.save_auth_code(code, auth_data)
-    
-    # 응답
-    response_data = {
-        "Location": redirect_uri,
-        "code": code,
-        "state": state
-    }
-    return HandlerResult(status=200, body=response_data, media_type="application/json")
+
+def _login_form_html(action_url: str, ctx: dict, error: str = '') -> str:
+    """규격 로그인 폼(TS 24.482 §6.3.1 "form data to prompt … username and password").
+    hidden 값·오류문은 전부 html.escape — 무상태(서버 세션 없음)."""
+    import html as _html
+    esc = lambda s: _html.escape(str(s or ''), quote=True)
+    hidden = ''.join(
+        f'    <input type="hidden" name="{esc(k)}" value="{esc(ctx[k])}">\n'
+        for k in _OIDC_CTX_KEYS if ctx.get(k))
+    err = f'  <p class="error" role="alert">{esc(error)}</p>\n' if error else ''
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CIMS MCX 로그인</title>
+<style>
+body{{font-family:sans-serif;margin:2em auto;max-width:22em;padding:0 1em}}
+label{{display:block;margin:.8em 0 .2em}} input[type=text],input[type=password]{{width:100%;padding:.5em;box-sizing:border-box}}
+button{{margin-top:1.2em;padding:.6em 1.4em}} .error{{color:#b00020}}
+</style>
+</head>
+<body>
+  <h1>MCX 로그인</h1>
+{err}  <form method="post" action="{esc(action_url)}" accept-charset="utf-8" autocomplete="off">
+{hidden}    <label for="cims-login">아이디 (MC ID)</label>
+    <input id="cims-login" type="text" name="{esc(IDMS_FORM_LOGIN_FIELD)}" autofocus required>
+    <label for="cims-password">비밀번호</label>
+    <input id="cims-password" type="password" name="{esc(IDMS_FORM_PASSWORD_FIELD)}" required>
+    <button type="submit">로그인</button>
+  </form>
+</body>
+</html>
+"""
+
+
+def _authreq_action_url(args: HandlerArgs) -> str:
+    """폼 action = 이 authreq 의 절대 URL (요청 Host 유도 — openid-configuration·ue-init-config 와 같은 규칙).
+    헤드리스 SDK 가 상대 경로를 못 풀 수 있어 절대 URL 로 준다."""
+    host = (args.headers.get('host') or args.headers.get('Host') or f"{IDMS_DOMAIN}:{_MCPTT_PORT}").strip()
+    return f"https://{host}/idms/authreq"
+
+
+async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    # (로깅은 pi_http post_hook 에서 자동 처리)
+    if args.method == 'POST':
+        # ② 규격 폼 제출 — form-urlencoded (controller 가 dict 로 파싱). 입력칸 이름은 설정값,
+        #    user_name/user_password 도 예비로 받는다(자체 도구가 POST 로 올 때).
+        form = args.body if isinstance(args.body, dict) else {}
+        ctx = _oidc_ctx(form)
+        bad = _oidc_validate(ctx, need_redirect=True)
+        if bad:
+            return bad
+        login_id = str(form.get(IDMS_FORM_LOGIN_FIELD) or form.get('user_name') or '').strip()
+        password = str(form.get(IDMS_FORM_PASSWORD_FIELD) or form.get('user_password') or '')
+        logger.log_info(f"[IdMS] Auth Req(form): user={login_id}, client={ctx['client_id']}, pkce=S256")
+        mcptt_id, why = _authenticate(login_id, password)
+        if not mcptt_id:
+            # 인증 실패 = 폼 재표시 + 오류(200) — 단말이 다시 채워 제출할 수 있게 문맥을 그대로 이월.
+            return HandlerResult(status=200, body=_login_form_html(_authreq_action_url(args), ctx, error=why),
+                                 media_type="text/html; charset=utf-8",
+                                 headers={"Cache-Control": "no-store"})
+        code = _issue_auth_code(login_id, mcptt_id, ctx)
+        q = {"code": code}
+        if ctx['state']:
+            q["state"] = ctx['state']
+        from urllib.parse import urlencode as _urlencode
+        sep = '&' if '?' in ctx['redirect_uri'] else '?'
+        location = f"{ctx['redirect_uri']}{sep}{_urlencode(q)}"
+        return HandlerResult(status=302, headers={"Location": location, "Cache-Control": "no-store"})
+
+    if args.method != 'GET':
+        return HandlerResult(status=405)
+
+    params = args.query_params or {}
+    ctx = _oidc_ctx(params)
+    if 'user_name' in params or 'user_password' in params:
+        # ① 자체 단말 간이형 — GET 에 자격이 실려 오면 폼 없이 바로 판정, 결과는 JSON.
+        bad = _oidc_validate(ctx, need_redirect=False)
+        if bad:
+            return bad
+        login_id = str(params.get('user_name') or '')
+        logger.log_info(f"[IdMS] Auth Req: user={login_id}, client={ctx['client_id']}, pkce=S256")
+        mcptt_id, why = _authenticate(login_id, str(params.get('user_password') or ''))
+        if not mcptt_id:
+            return HandlerResult(status=401, body={"error": "access_denied", "error_description": why},
+                                 media_type="application/json")
+        code = _issue_auth_code(login_id, mcptt_id, ctx)
+        return HandlerResult(status=200,
+                             body={"Location": ctx['redirect_uri'] or None, "code": code, "state": ctx['state']},
+                             media_type="application/json")
+
+    # ② 규격 OIDC Authentication Request(자격 없음) — 검증 후 200 + 로그인 폼.
+    bad = _oidc_validate(ctx, need_redirect=True)
+    if bad:
+        return bad
+    logger.log_info(f"[IdMS] Auth Req(form prompt): client={ctx['client_id']}, redirect_uri={ctx['redirect_uri']}")
+    return HandlerResult(status=200, body=_login_form_html(_authreq_action_url(args), ctx),
+                         media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-store"})
 
 # IdMS: Token Req
 async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:

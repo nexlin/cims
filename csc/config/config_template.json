@@ -428,6 +428,215 @@
           "default": 604800,
           "min": 600,
           "restart": true
+        },
+        {
+          "key": "IdMs.FormLoginField",
+          "label": "로그인 폼 — 아이디 입력칸 이름",
+          "type": "string",
+          "default": "username",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 폼 응답부터 반영.",
+          "help": "규격(TS 24.482 §6.3.1) 흐름의 HTML 로그인 폼에서 아이디 <input name>. 외부 MCX 단말/SDK 가 폼을 헤드리스로 채울 때 찾는 이름이라 단말 설정(credentialformLoginFieldname 류)과 일치해야 한다. 자체 단말의 GET+자격 JSON 경로에는 무관."
+        },
+        {
+          "key": "IdMs.FormPasswordField",
+          "label": "로그인 폼 — 비밀번호 입력칸 이름",
+          "type": "string",
+          "default": "password",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 폼 응답부터 반영.",
+          "help": "위와 같은 규칙의 비밀번호 <input name>."
+        },
+        {
+          "key": "IdMs.RedirectUriAllow",
+          "label": "redirect_uri 허용 목록",
+          "type": "string_list",
+          "default": [],
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 authreq 부터 집행.",
+          "help": "비우면 전부 허용(시험 기본). 채우면 authreq 의 redirect_uri 가 목록의 값과 **정확히 일치**(RFC 6749 §3.1.2.3)해야 하고 아니면 400. 상용 전환 시 자체 단말의 redirect_uri 와 외부 단말 것을 함께 등록하고 활성화한다."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "ue_init_config",
+      "title": "MCS UE 초기 설정 문서 (ue-init-config)",
+      "description": "규격 순정 MCX 단말이 로그인 전 익명으로 받아가는 TS 24.484 §7.2 문서의 **규격 파라미터값**. 주소류(IdMS/CMS/GMS/KMS/XCAP 루트·domain·PLMN·GMS-URI)는 토폴로지(Provisioning.Services.ptt / IdMs / 요청 Host)에서 자동 유도되므로 여기 없다 — 여기 값은 단말 동작 상수(floor 타이머·접속 참조·보호 플래그)와 확장 요소 on/off 다. 값이 바뀌면 문서 ETag 도 바뀌어 단말이 새 문서를 받는다.",
+      "fields": [
+        {
+          "key": "UeInitConfig.Name",
+          "label": "문서 이름 (<name>)",
+          "type": "string",
+          "default": "CIMS",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "UeInitConfig.Timers.T100",
+          "label": "T100 — floor release 재전송 (s)",
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 24.380 §7.2 Timers — 단말 floor 절차 타이머(초, unsignedByte)."
+        },
+        {
+          "key": "UeInitConfig.Timers.T101",
+          "label": "T101 — floor request 재전송 (s)",
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UeInitConfig.Timers.T103",
+          "label": "T103 — end of RTP media (s)",
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UeInitConfig.Timers.T104",
+          "label": "T104 — floor queue position request (s)",
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UeInitConfig.Timers.T132",
+          "label": "T132 — queued granted 사용자 행동 (s)",
+          "type": "int",
+          "default": 6,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UeInitConfig.Hplmn.Plmn",
+          "label": "HPLMN PLMN (MCC+MNC)",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "비우면 PTT 도메인(ptt.mncXXX.mccYYY…)에서 유도(예 45033). 도메인 표기가 규격형이 아닐 때만 직접 지정."
+        },
+        {
+          "key": "UeInitConfig.Hplmn.McpttConRef",
+          "label": "MCPTT-to-con-ref (APN/DNN)",
+          "type": "string",
+          "default": "internet",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "단말이 MCPTT 서비스에 붙을 때 쓸 PDN 연결 참조(APN 명). 사업자 전용 APN 이 있으면 그 이름."
+        },
+        {
+          "key": "UeInitConfig.Hplmn.McCommonCoreConRef",
+          "label": "MC-common-core-to-con-ref (APN/DNN)",
+          "type": "string",
+          "default": "internet",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UeInitConfig.Hplmn.McIdConRef",
+          "label": "MC-ID-to-con-ref (APN/DNN)",
+          "type": "string",
+          "default": "internet",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UeInitConfig.HttpProxy",
+          "label": "http-proxy URI",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "단말이 CMS/GMS/IdMS 접근에 경유할 HTTP 프록시. 보통 비움(직접 접속)."
+        },
+        {
+          "key": "UeInitConfig.TlsMutualAuthentication",
+          "label": "TLS 터널 상호인증 (mutual-authentication)",
+          "type": "bool",
+          "default": false,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "단말 인증서 기반 상호 TLS 요구 여부. CSC 는 현재 서버 인증서만 제시하므로 false 유지."
+        },
+        {
+          "key": "UeInitConfig.IntegrityProtection",
+          "label": "XML 무결성 보호 (integrity-protection-enabled)",
+          "type": "bool",
+          "default": false,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 33.180 XML 서명 보호. CSC 미구현 — false 유지."
+        },
+        {
+          "key": "UeInitConfig.ConfidentialityProtection",
+          "label": "XML 기밀성 보호 (confidentiality-protection-enabled)",
+          "type": "bool",
+          "default": false,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 33.180 XML 암호화 보호. CSC 미구현 — false 유지."
+        },
+        {
+          "key": "UeInitConfig.GroupCreationXui",
+          "label": "group-creation-XUI",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "단말이 그룹을 생성할 때 쓰는 XUI. 비우면 GMS XCAP 루트(요청 Host 유도)."
+        },
+        {
+          "key": "UeInitConfig.ServiceDetails.Mcptt.Enable",
+          "label": "MCPTT-Service-Details 포함",
+          "type": "bool",
+          "default": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "<on-network><anyExt> 확장 요소(§7.2.2.7 9~10). Server-URI = participating MCPTT function PSI."
+        },
+        {
+          "key": "UeInitConfig.ServiceDetails.Mcptt.ServerUri",
+          "label": "MCPTT Server-URI (PSI)",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "비우면 sip:mcptt_psi@<PTT 도메인> (CSP 의 MCPTT 서버 PSI)."
+        },
+        {
+          "key": "UeInitConfig.ServiceDetails.McData.Enable",
+          "label": "MCData-Service-Details 포함",
+          "type": "bool",
+          "default": false,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "MCData 를 규격 단말에 광고할 때만 켠다(§7.2.2.7 13~14)."
+        },
+        {
+          "key": "UeInitConfig.ServiceDetails.McData.ServerUri",
+          "label": "MCData Server-URI (PSI)",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "비우면 sip:mcdata_psi@<PTT 도메인> (명목값 — 켤 때 실제 PSI 로 맞춘다)."
         }
       ],
       "scope": "service"

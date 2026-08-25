@@ -197,13 +197,19 @@ if __name__ == '__main__':
                     return payload.get("login_id") or str(payload.get("sub", "")) or ""
             except Exception:
                 pass
-            # query string 'user_name' 또는 body 'login_id' (IdMS authreq 등)
+            # query string 'user_name' 또는 body 'login_id' (IdMS authreq 등).
+            #   규격 폼 POST 는 입력칸 이름이 설정값(IdMs.FormLoginField) — mcptt 모듈의 현재값을 본다.
             qp = handler_args.query_params or {}
             if qp.get("user_name"): return qp["user_name"]
             body = handler_args.body or {}
             if isinstance(body, dict):
                 if body.get("login_id"): return body["login_id"]
                 if body.get("user_name"): return body["user_name"]
+                try:
+                    from services import mcptt as _mcptt
+                    if body.get(_mcptt.IDMS_FORM_LOGIN_FIELD): return str(body[_mcptt.IDMS_FORM_LOGIN_FIELD])
+                except Exception:
+                    pass
             return ""
 
         def _post_hook(handler_args, base_path, handler_result):

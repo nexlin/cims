@@ -415,26 +415,29 @@ OAuth 2.0 PKCE 기반 단말 인증.
 
 | Method | Path | 설명 |
 |--------|------|------|
-| POST | `/idms/authreq` | Authorization Request (code_challenge) |
-| POST | `/idms/tokenreq` | Token Request (code_verifier) |
+| GET | `/idms/authreq` | Authorization Request — ① `user_name`/`user_password` 동반(자체 단말 간이형) → 200 JSON code ② 자격 없음(규격 OIDC 요청) → 200 HTML 로그인 폼 |
+| POST | `/idms/authreq` | 규격 로그인 폼 제출(form-urlencoded) → 302 `redirect_uri?code&state` / 실패 200 폼 재표시 |
+| POST | `/idms/tokenreq` | Token Request (code_verifier) — JSON·form-urlencoded |
 | GET | `/idms/introspect` | Token Introspection |
 
-**인증 흐름:**
+**인증 흐름 (두 말투 병행 — `handle_auth_req` 한 핸들러 안 분기, 검증·인증·코드 발급 공유):**
 
 ```
-UE                          IdMS (CSC:4430)
- │                            │
- │─── POST /idms/authreq ────→│  (client_id, redirect_uri,
- │    code_challenge,          │   code_challenge_method=S256)
- │    code_challenge_method    │
- │                            │
- │←── 302 redirect ──────────│  (auth_code)
- │                            │
- │─── POST /idms/tokenreq ──→│  (auth_code, code_verifier)
- │                            │
- │←── access_token, ─────────│  (JWT, expires_in, refresh_token)
- │    refresh_token            │
+[자체 단말 간이형]                          [규격 단말 — TS 24.482 §6.3.1 / OIDC Core §3.1.2]
+UE                    IdMS (CSC:4430)      UE                              IdMS (CSC:4430)
+ │─ GET /idms/authreq ──→│                   │─ GET /idms/authreq ──────────→│ (client_id, redirect_uri,
+ │  user_name,user_password│                  │   (자격 없음)                  │  code_challenge S256, state…)
+ │  client_id,redirect_uri│                   │←─ 200 text/html 로그인 폼 ────│ (hidden 문맥 이월, 무상태)
+ │  code_challenge S256   │                   │─ POST /idms/authreq ─────────→│ (form: username/password
+ │←─ 200 JSON {code,state}│                   │                                │  + hidden 문맥)
+ │                        │                   │←─ 302 Location: redirect_uri?code&state (실패=200 폼+오류)
+ │─ POST /idms/tokenreq ─→│ (code, verifier)  │─ POST /idms/tokenreq (form-urlencoded) ─→│
+ │←─ access/id/refresh ───│                   │←─ access/id/refresh ──────────│
 ```
+
+폼 입력칸 이름은 `IdMs.FormLoginField`/`IdMs.FormPasswordField`(기본 `username`/`password`),
+`redirect_uri` 허용목록은 `IdMs.RedirectUriAllow`(비면 전부 허용 — 상용 전 등록·활성). 규격 대비는
+[mcptt_standard_conformance.md §3](../features/mcptt_standard_conformance.md).
 
 **토큰 구조 (JWT):**
 

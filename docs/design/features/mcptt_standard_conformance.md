@@ -135,7 +135,7 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 
 | AUID | 규격 | 상태 |
 |---|---|---|
-| `org.3gpp.mcptt.ue-init-config` | TS 24.484 §7.2 (로그인 전 — IdMS/KMS/CMS/GMS 주소·참여 서버) | ✅ 서빙 — **§7.2.2.3 XSD 정본 스키마 그대로**(ns `urn:3gpp:mcptt:mcpttUEinitConfig:1.0`, on-network sequence 필수 요소 전부, GMS-URI=gms_psi PSI). 익명 GET·전역 문서·ETag |
+| `org.3gpp.mcptt.ue-init-config` | TS 24.484 §7.2 (로그인 전 — IdMS/KMS/CMS/GMS 주소·참여 서버) | ✅ 서빙 — **§7.2.2.3 XSD 정본 스키마 그대로**(ns `urn:3gpp:mcptt:mcpttUEinitConfig:1.0`, on-network sequence 필수 요소 전부, GMS-URI=gms_psi PSI, `<anyExt>` 에 `MCPTT-Service-Details`). 익명 GET·전역 문서·내용파생 ETag. 값은 아래 **3계층** |
 | `org.3gpp.mcptt.ue-config` | TS 24.484 (기기 단위 파라미터) | ✗ 미서빙 (일부 항목은 user-profile XML·provisioning/me 에 분산 — 외부 단말이 요구하면 착수) |
 
 **확정 방침 = 병행 서빙**: 자체 단말은 `/provisioning/me`(전화+무전 병행·자격 배포 — 규격 문서에
@@ -144,6 +144,20 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 **익명 GET**(로그인 전 문서라 토큰이 없다 — 내용은 공개 주소뿐), base URL 은 요청 Host 에서 유도
 (openid-configuration 과 동일 규칙). 외부 단말의 SIP 등록 자격 전달은 규격 밖(ISIM 몫)이라
 문서함과 별개로 합의가 필요하다.
+
+**ue-init-config 값의 3계층** — 상용은 고객사 단말 외 다른 규격 단말과도 호환돼야 하므로, 고객사
+필수 요소 외 규격 요소는 사용자지정으로 관리한다(`get_ue_init_config_xml`).
+
+| 계층 | 요소 | 출처 |
+|---|---|---|
+| ① 토폴로지 유도 | `domain`·PLMN(도메인 mnc/mcc)·idms-auth/token-endpoint·gms/cms/kms·GMS/CMS-XCAP-root-URI·GMS-URI(`sip:gms_psi@도메인`) | `Provisioning.Services.ptt.domain`/`IdMs.Domain`/요청 Host — 설정 항목 없음(자동) |
+| ② 규격 파라미터값 | `<name>`·Timers T100/T101/T103/T104/T132(TS 24.380 단말 floor 타이머, unsignedByte)·HPLMN PLMN 수동 지정·`*-to-con-ref`(APN/DNN)·`http-proxy`·`mutual-authentication`·`group-creation-XUI`·`integrity/confidentiality-protection-enabled` | csc `config_template.json` 섹션 **"MCS UE 초기 설정 문서"** = `UeInitConfig.*`(scope=service, `restart:false` — SIGUSR1 리로드, ETag 내용파생이라 자동 갱신). 빈 값 = 유도값/기본값 |
+| ③ 확장 요소 | `<on-network><anyExt>` 의 `MCPTT-Service-Details`(기본 on, Server-URI 기본 `sip:mcptt_psi@도메인` = CSP 의 MCPTT 서버 PSI) · `MCData-Service-Details`(기본 off) — `IPv6-Required` 는 false 고정 | `UeInitConfig.ServiceDetails.{Mcptt,McData}.{Enable,ServerUri}` |
+
+산출물은 값 `html.escape` 후 minidom well-formed 검사 — 실패하면 경고를 남기고 **마지막 정상
+문서**를 계속 서빙한다(설정 실수가 부트스트랩을 끊지 않게). 자유 XML 조각 주입(ExtraXml)은 두지
+않는다. 규격 사슬 회귀 = `tests/csc_bootstrap_conformance.py`, 생성기 단위시험 =
+`tests/csc_idms_authreq_unit.py` §A.
 
 ### R5. 시그널링 세부 (RFC/구독) — 부분 미반영
 
@@ -369,6 +383,21 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   token·introspection endpoint·`code_challenge_methods_supported=[S256]`·grant types·claims 광고.
 - **S2a access_token 클레임**: `sub`(=user)/`iss`/`iat`/`exp`/`aud`/`scope`(`create_tokens`).
 - **S2b nonce**: authreq `nonce` 저장(`handle_auth_req`) → id_token `nonce` 클레임 반영(OIDC Core §3.1.2.1).
+- **인증 요청 두 말투 병행**(`handle_auth_req` 한 핸들러 안 분기 — 검증·인증·코드 발급은 공유, 응답 표현만 다름):
+  - *자체 단말 간이형*: `GET /idms/authreq?user_name&user_password&…` → `200 JSON {code,state,Location}`.
+    규격 폼 왕복을 생략한 CIMS 앱·cspsim 경로(변경 없음).
+  - *규격 흐름*(TS 24.482 §6.3.1 / OIDC Core §3.1.2): 자격 없는 `GET`(OIDC Authentication Request) →
+    `200 text/html` 로그인 폼 → `POST`(form-urlencoded: 입력칸 + hidden 문맥) → **`302 Location:
+    redirect_uri?code&state`** → `POST /idms/tokenreq`(form-urlencoded) → JSON. 폼은 **무상태**(서버
+    세션 없음 — client_id·redirect_uri·state·scope·nonce·code_challenge(+method)·response_type 을
+    hidden input 으로 이월). 인증 실패 = 폼 재표시+오류(200). 입력칸 이름 = `IdMs.FormLoginField`/
+    `IdMs.FormPasswordField`(기본 `username`/`password` — 외부 SDK 의 헤드리스 폼 자동화가 찾는 이름,
+    벤더 설정과 맞춘다). 폼 `action` 은 요청 Host 유도 절대 URL.
+  - 공통 검증: PKCE S256 필수, `response_type` 은 있으면 `code`, 미지 scope 비거절,
+    **`redirect_uri` 허용목록 `IdMs.RedirectUriAllow`**(비면 전부 허용 — 상용 전 등록·활성, 정확 일치
+    RFC 6749 §3.1.2.3, 위반 400). 폼 경로는 redirect_uri 필수(302 목적지), 간이형은 선택(종전 호환).
+  - 회귀: 규격 사슬 `tests/csc_bootstrap_conformance.py` Step 3(간이형)·3b(규격), 오프라인 단위
+    `tests/csc_idms_authreq_unit.py` §B.
 - 보존: **PKCE S256 강제**(plain/누락 400), refresh 회전/취소.
 
 ### GMS (TS 24.481)

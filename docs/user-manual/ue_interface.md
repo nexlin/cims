@@ -258,6 +258,12 @@ GET https://<서버IP>:4430/idms/authreq?response_type=code&client_id=MCPTT_UE&r
 }
 ```
 
+> 위는 CIMS 단말용 **간이형**(자격을 GET 쿼리에 실어 JSON 으로 code 를 받는다)이다. 규격 순정 MCX
+> 단말(TS 24.482 §6.3.1)은 같은 `/idms/authreq` 를 **자격 없이 GET** 해 HTML 로그인 폼을 받고, 폼을
+> `POST`(form-urlencoded, 입력칸 `username`/`password`)해 **302 `Location: redirect_uri?code&state`** 로
+> code 를 받는다 — 두 말투를 한 endpoint 가 병행 서빙한다
+> ([mcptt_api.md §1](../api/mcptt_api.md)).
+
 **2단계: 토큰 교환 (POST /idms/tokenreq)**
 ```
 POST https://<서버IP>:4430/idms/tokenreq
