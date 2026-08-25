@@ -339,10 +339,20 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
   복원한다(AKA 컬럼이 없으면 V19 만 생략). `S3-SCN-IPSEC-LIVE`(V21~V23·V25·V26): cspsim `-ipsec -aka_k …` 를 구동해 단말
   로그로 판정한다 — IPSEC LocalNode·CSP `ipsec: available`·cspsim `cap_net_admin`·AKA 마이그레이션이 없으면 SKIP.
 
-V3·V4·V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
-cspsim 이 이제 call INVITE 를 세션 transport 로 보내(§7 보완 완료) UDP/TCP/TLS 전 조합에서 성립한다.
-V6(이행 스크립트 멱등)·V8(`/provisioning/me`)은 스크립트/CSC 경로라 별도다. 반복 위반 알람은
-A-SEC-003 으로 채번·구현되어 있다(§3.3).
+- `S3-SCN-TLS-REBIND`(V3)·`S3-SCN-MIXED-TRANSPORT`(V4): 순수 TLS Digest 등록(sec-agree 헤더 없이) —
+  V3 는 연결을 끊고 새 연결에서 재등록해 바인딩 이동을, V4 는 UDP 바인딩 유지 중 TLS 등록으로
+  혼합 공존(게이트 미작동)을 본다. dev TB 에 TLS 접속점이 없으면 항목이 임시 TLS local_node 를
+  추가(SIGUSR1 hot-add)하고 종료 시 제거한다(자기복원, dist csc 자가서명 cert 차용).
+- `S3-SCN-AKA-MIGRATE-IDEMPOTENT`(V6): `migrate_subscription_aka.sql` 2회 실행(둘 다 성공 —
+  컬럼 존재 시 no-op) + 시드 가입자 ha1 보존 + 재등록 401→200. 가입자 PUT 경유 ha1 보존은
+  CSC 관리 API 경로라 별도(§8.4 잔여).
+- `S3-SCN-PROVISIONING-HA1`(V8): IdMS PKCE 토큰(scope=`cims:provisioning`) → `/provisioning/me` 의
+  `sipHa1` 존재·평문 비밀번호 값 부재(`sipPassword` 키는 항상 null — §4.7 ⑤) → 그 ha1 로
+  REGISTER 401→200(단말 부트스트랩 등가). 시드 가입자의 로그인 계정(`users.login_id`)이 없으면 SKIP.
+
+V5(등록)는 기존 transport 별 등록 스모크가 커버하고, V5 의 **호** 부분(TCP/TLS 호 회귀)도
+cspsim 이 call INVITE 를 세션 transport 로 보내(§7 보완 완료) UDP/TCP/TLS 전 조합에서 성립한다.
+반복 위반 알람은 A-SEC-003 으로 채번·구현되어 있다(§3.3).
 
 ## 7. 배포 순서와 잔여
 
@@ -356,7 +366,8 @@ P3 의 배포 전제: `migrate_subscription_aka.sql` 적용 → `configure` 재�
 전량 복호 불가) → CSC·CSP 재기동 → 가입자 `auth_scheme=aka` + `k`/`opc` 프로비저닝(CSC API).
 
 잔여 항목:
-- V3~V6·V8 의 자동화(V1·V2·V7·V9~V12·V14~V18 은 S3 검증 항목으로 자동화 완료 — §6).
+- V6 의 가입자 PUT 절반(관리 API 로 비밀번호 미포함 갱신 → ha1 보존) — 나머지 V 항목은 S3 로
+  자동화 완료(§6).
 - Android UE 의 AKA: `/provisioning/me` `account.aka` 를 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 연결하는
   단말 작업. (콘솔 프로비저닝 화면의 `auth_scheme`/K/OPc 입력은 구현되어 있다 — 번호 행 인증 열.)
 - AKA 의 CK/IK 는 Annex X(TLS) 에서 쓰이지 않는다 — P4(IPsec, [§8.3](#83-p4--ims-aka--ipsec-본문-67--구현-반영)) 에서 SA 키로 소비한다.

@@ -855,6 +855,15 @@ int main(int argc, char* argv[])
             if (iCount <= 1 && !HasFlag(argc, argv, "-count")) {
                 iCount = (int)vecDbSubs.size();
             }
+        } else {
+            // -db 명시 요청의 조용한 fallback 금지 (-creds 선검증과 동일 원칙) —
+            //   빈 결과로 합성 계정(-user)에 넘어가면 미가입 REGISTER 가 침묵 속에
+            //   반복돼 "송신 전 hang" 으로 오인된다. ptt 는 -group 필터(기본 1000)가
+            //   DB 에 없는 그룹이면 0명이 되는 함정이 대표 사례.
+            printf("[DB] 가입자 로드 실패/0명 — 중단 (mode=%s", strMode.c_str());
+            if (bPttMode) printf(", group=%s — ptt 는 그룹 멤버만 로드, -group 확인", strGroupId.c_str());
+            printf(")\n");
+            return 1;
         }
     }
 

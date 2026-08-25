@@ -127,6 +127,51 @@ def probe_register_offer(server_ip: str, server_port: int, user: str, domain: st
         sock.close()
 
 
+def probe_register_auth(server_ip: str, server_port: int, user: str, domain: str,
+                        auth_user: str, ha1_hex: str, local_ip: str,
+                        expires: int = 60, deregister: bool = False,
+                        local_port: int = 0, timeout: float = 4.0) -> dict:
+    """UDP Digest 등록 절차 (401 챌린지 → ha1 응답). 같은 소켓(=같은 Contact)에서
+    수행하므로 deregister=True 면 등록한 바인딩을 그대로 해제한다(자기복원).
+
+    반환 {"first", "second", "dereg"} — dereg 는 해제 최종 응답(미수행 0).
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    out = {"first": 0, "second": 0, "dereg": 0}
+    try:
+        sock.bind((local_ip, local_port))
+        lp = sock.getsockname()[1]
+        call_id, from_tag = _callid(local_ip), _tag()
+
+        def _round(cseq: int, exp: int) -> tuple:
+            branch = _branch()
+            msg = _register_lines(user, domain, local_ip, lp, call_id, from_tag,
+                                  cseq, branch, expires=exp)
+            _send(sock, (server_ip, server_port), msg)
+            code, raw = _recv_final(sock, time.time() + timeout)
+            if code != 401:
+                return code, 0
+            ch = _parse_challenge(raw)
+            uri = f"sip:{domain}"
+            resp = _digest_response(auth_user, ch.get("realm", ""), "", ha1_hex,
+                                    "REGISTER", uri, ch.get("nonce", ""))
+            auth = (f'Authorization: Digest username="{auth_user}", realm="{ch.get("realm", "")}", '
+                    f'nonce="{ch.get("nonce", "")}", uri="{uri}", response="{resp}", algorithm=MD5')
+            msg2 = _register_lines(user, domain, local_ip, lp, call_id, from_tag,
+                                   cseq + 1, _branch(), auth_header=auth, expires=exp)
+            _send(sock, (server_ip, server_port), msg2)
+            code2, _ = _recv_final(sock, time.time() + timeout)
+            return code, code2
+
+        out["first"], out["second"] = _round(1, expires)
+        if deregister and out["second"] == 200:
+            c1, c2 = _round(3, 0)
+            out["dereg"] = c2 or c1
+        return out
+    finally:
+        sock.close()
+
+
 def probe_nonregister(server_ip: str, server_port: int, user: str, domain: str,
                       local_ip: str, method: str = "MESSAGE", local_port: int = 0,
                       timeout: float = 3.0) -> int:
