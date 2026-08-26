@@ -33,6 +33,9 @@ export interface McpttProfile {
   allow_adhoc_call: boolean         // ad hoc 개시 인가 (시스템 정책과 AND)
   emergency_group_mode: 'DedicatedGroup' | 'UseCurrentlySelectedGroup'  // SOS 대상 결정
   emergency_group_id: string | null // 전용 긴급그룹 (DedicatedGroup 모드의 콜·경보 대상)
+  allow_emergency_private_call: boolean  // 긴급 사설콜(1:1) 개시 인가 (TS 24.379 §11)
+  private_emergency_mode: 'LocallyDetermined' | 'UsePreConfigured'  // 긴급 사설콜 대상 결정
+  emergency_private_recipient: string | null // UsePreConfigured 의 지정 수신자 (PTT 번호 — 서버가 존재검증)
 }
 
 // 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.

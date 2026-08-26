@@ -293,8 +293,13 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **그룹 편집(PttGroupsWorkbenchPage)**: capability 체크박스 — 긴급콜(condition 공통 게이트),
   긴급경보. (임박위험·ad-hoc 은 별도 축을 두지 않는다 — §2.)
 - **사용자(ProvisioningWorkbench)**: 사용자 상세에 PTT 번호별 **MCPTT 프로파일 행** — SOS 대상
-  모드(`전용 긴급그룹`/`선택 그룹(주채널)`)·전용 긴급그룹 선택·인가 3종(긴급콜/경보/애드혹)
-  편집. `DedicatedGroup` 저장 시 긴급그룹 지정 필수화, 미지정은 "SOS 불발" 경고 배지.
+  모드(`전용 긴급그룹`/`선택 그룹(주채널)`)·전용 긴급그룹 선택·인가 4종(긴급콜/경보/애드혹/
+  긴급 사설콜) 편집. 긴급 사설콜 인가 시 **사설 대상**(`단말 선택 상대`/`사전지정 수신자`)과
+  `UsePreConfigured` 의 지정 수신자(PTT 번호 — 저장 시 서버 존재검증 400)까지 편집.
+  `DedicatedGroup` 저장 시 긴급그룹 지정 필수화(미지정은 "SOS 불발" 경고 배지),
+  `UsePreConfigured` 저장 시 수신자 필수화(미지정은 "긴급 사설콜 불발" 배지).
+  프로파일 PUT 은 **행 전체 교체**라 콘솔 폼은 항상 전체 행을 보낸다(부분 PUT 은 나머지
+  필드가 기본값으로 회귀 — raw API 호출 시 주의).
 - **PTT 세션 이력**: 진행 중/과거 emergency·imminent 에피소드, alert 발신 타임라인 표시(events.jsonl·floor.jsonl tier 활용).
 - **OAM stats**: 긴급콜/경보 카운터, 진행 중 긴급 그룹 수.
 
@@ -328,8 +333,6 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
 4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
    인원을 골라 서버가 개시하는 dispatcher 입구는 미착수.
-5. **긴급 사설콜 콘솔 편집 UI**: 서버·단말·admin API 는 구현(§7) — 콘솔 프로파일 행의 사설
-   긴급 3필드(인가·모드·지정 수신자) 편집 입력은 미착수(API 는 수용).
 
 ---
 

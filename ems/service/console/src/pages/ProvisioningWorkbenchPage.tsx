@@ -440,6 +440,12 @@ const MODE_LABEL: Record<McpttProfile['emergency_group_mode'], string> = {
   UseCurrentlySelectedGroup: '선택 그룹(주채널)',
 }
 
+// 긴급 사설콜(1:1) 대상 결정 — LocallyDetermined=단말이 고른 상대, UsePreConfigured=사전지정 수신자.
+const PRIV_MODE_LABEL: Record<McpttProfile['private_emergency_mode'], string> = {
+  LocallyDetermined: '단말 선택 상대',
+  UsePreConfigured: '사전지정 수신자',
+}
+
 function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string; canWrite: boolean }) {
   const { show } = useToast()
   const [prof, setProf] = useState<(McpttProfile & { exists?: boolean }) | null>(null)
@@ -460,7 +466,11 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
     if (form.emergency_group_mode === 'DedicatedGroup' && !form.emergency_group_id) {
       show('전용 긴급그룹 지정이 필요합니다 — 미지정이면 SOS 가 불발됩니다', 'err'); return
     }
-    try { await usersApi.updatePttProfile(pid, msisdn, form); show('저장', 'ok'); setEditing(false); load() }
+    if (form.private_emergency_mode === 'UsePreConfigured' && !form.emergency_private_recipient?.trim()) {
+      show('사전지정 수신자가 필요합니다 — 미지정이면 긴급 사설콜이 불발됩니다', 'err'); return
+    }
+    const body = { ...form, emergency_private_recipient: form.emergency_private_recipient?.trim() || null }
+    try { await usersApi.updatePttProfile(pid, msisdn, body); show('저장', 'ok'); setEditing(false); load() }
     catch (e: unknown) { show(String(e), 'err') }
   }
 
@@ -492,6 +502,25 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
           onChange={e => setForm({ ...form, allow_emergency_alert: e.target.checked })} /> 긴급경보</label>
         <label className="ts"><input type="checkbox" checked={form.allow_adhoc_call}
           onChange={e => setForm({ ...form, allow_adhoc_call: e.target.checked })} /> 애드혹</label>
+        <label className="ts"><input type="checkbox" checked={form.allow_emergency_private_call}
+          onChange={e => setForm({ ...form, allow_emergency_private_call: e.target.checked })} /> 긴급 사설콜</label>
+        {form.allow_emergency_private_call && (
+          <label className="ts">사설 대상
+            <select className="form-input" style={{ marginLeft: 4 }} value={form.private_emergency_mode}
+              onChange={e => setForm({ ...form, private_emergency_mode: e.target.value as McpttProfile['private_emergency_mode'] })}>
+              <option value="LocallyDetermined">{PRIV_MODE_LABEL.LocallyDetermined}</option>
+              <option value="UsePreConfigured">{PRIV_MODE_LABEL.UsePreConfigured}</option>
+            </select>
+          </label>
+        )}
+        {form.allow_emergency_private_call && form.private_emergency_mode === 'UsePreConfigured' && (
+          <label className="ts">수신자
+            <input className="form-input" style={{ marginLeft: 4, width: 140 }} placeholder="+82500000001"
+              title="지정 수신자의 PTT 번호 — 저장 시 서버가 존재검증(미존재 400)"
+              value={form.emergency_private_recipient || ''}
+              onChange={e => setForm({ ...form, emergency_private_recipient: e.target.value || null })} />
+          </label>
+        )}
         <IconBtn title="저장" tone="primary" onClick={save}><Check size={ICON} /></IconBtn>
         <IconBtn title="취소" onClick={() => setEditing(false)}><X size={ICON} /></IconBtn>
       </div>
@@ -511,6 +540,12 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
       {!prof.allow_emergency_call && <span className="badge badge--red" style={{ fontSize: 9 }}>긴급콜 차단</span>}
       {!prof.allow_emergency_alert && <span className="badge badge--red" style={{ fontSize: 9 }}>경보 차단</span>}
       {!prof.allow_adhoc_call && <span className="badge badge--red" style={{ fontSize: 9 }}>애드혹 차단</span>}
+      {!prof.allow_emergency_private_call && <span className="badge badge--red" style={{ fontSize: 9 }}>긴급 사설콜 차단</span>}
+      {prof.allow_emergency_private_call && prof.private_emergency_mode === 'UsePreConfigured' && (
+        prof.emergency_private_recipient
+          ? <span className="ts">사설수신자 <b>{prof.emergency_private_recipient}</b></span>
+          : <span className="badge badge--red" style={{ fontSize: 9 }}>사설수신자 미지정 — 긴급 사설콜 불발</span>
+      )}
       {!prof.exists && <span className="ts">(기본값)</span>}
       {canWrite && (
         <IconBtn title="편집" onClick={() => { setForm({
@@ -519,6 +554,9 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
           allow_adhoc_call: prof.allow_adhoc_call,
           emergency_group_mode: prof.emergency_group_mode,
           emergency_group_id: prof.emergency_group_id,
+          allow_emergency_private_call: prof.allow_emergency_private_call,
+          private_emergency_mode: prof.private_emergency_mode,
+          emergency_private_recipient: prof.emergency_private_recipient,
         }); setEditing(true) }}><Pencil size={ICON} /></IconBtn>
       )}
     </div>
