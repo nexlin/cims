@@ -255,9 +255,15 @@ if __name__ == '__main__':
         #   저장소가 갈려 단말 refresh 가 "not found" 로 죽고 전 단말 재로그인이 필요해진다
         #   (08-20 실측). 미설정이면 인증서(runtime/cert)와 같은 규칙으로 모듈 루트
         #   (modules/csc/runtime)를 유도한다 — oam/oam-svc 와 동일.
+        #   ⚠ 유도값은 반드시 runtime_set 으로 — 평대입하면 SIGUSR1 리로드(apply_reload 의
+        #   clear+update)가 파일에 없는 이 키를 지우고, file_store.runtime_root() 가 폴백
+        #   (ServiceLogging.Dir sibling '../runtime' = NAS /mnt/cims/runtime)으로 표류한다.
+        #   실측 사고(08-26): 리로드 한 번에 IdMS 스토어가 관리평면 공유 스토어로 옮겨가
+        #   기존 refresh 토큰 전멸("Refresh token not found") + 펜싱 없는 두 번째 writer.
+        from services import config_reload as _cfg_rt
         if not config.get('CimsRuntimeDir'):
-            config['CimsRuntimeDir'] = os.path.normpath(
-                os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime'))
+            _cfg_rt.runtime_set(config, 'CimsRuntimeDir', os.path.normpath(
+                os.path.join(_COMPONENT_ROOT, '..', '..', 'runtime')))
             logger.log_info(f"CimsRuntimeDir 미설정 — 모듈 runtime 유도: {config['CimsRuntimeDir']}")
 
         # Adjust relative data paths
@@ -266,6 +272,8 @@ if __name__ == '__main__':
                 val = config['Data'].get(key, '')
                 if val and not os.path.isabs(val):
                     config['Data'][key] = os.path.normpath(os.path.join(_COMPONENT_ROOT, val))
+            # 절대화된 Data 도 리로드가 파일의 상대경로로 되돌리지 않게 보존 (위 CimsRuntimeDir 와 동일 계기)
+            _cfg_rt.runtime_set(config, 'Data', config['Data'])
             load_shared_data(config)
 
         # [Test Support] Inject dummy data if empty so tests pass without real JSON files

@@ -460,7 +460,11 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
   개발 트리 경로를 주면 업그레이드마다 저장소가 갈려 단말 refresh 가 "not found" 로 실패하고
   **전 단말 재로그인**이 필요해진다(SIP 평면은 Digest 라 무관 — CSC 평면만 죽는다).
   미설정(빈 값)이면 csc_app 이 인증서(runtime/cert)와 같은 규칙으로 설치 트리의
-  `modules/csc/runtime` 을 유도한다(oam/oam-svc 와 동일). 만료·회수 토큰은 기동 60초 후 + 6시간
+  `modules/csc/runtime` 을 유도한다(oam/oam-svc 와 동일). 유도값은 **runtime override
+  (`config_reload.runtime_set`)로 등록**한다 — 평대입하면 SIGUSR1 리로드가 파일에 없는 키를
+  지우고 `file_store.runtime_root()` 폴백(ServiceLogging.Dir sibling `../runtime` — 공유 마운트면
+  **관리평면 NAS 스토어**)으로 표류해, 기존 refresh 토큰 전멸("not found" — 전 단말 자동갱신
+  불가)과 펜싱 없는 두 번째 writer 를 만든다(08-26 실측). 만료·회수 토큰은 기동 60초 후 + 6시간
   주기로 삭제한다.
 
 ### 4.2 GMS (Group Management Service)
