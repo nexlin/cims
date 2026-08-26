@@ -178,6 +178,24 @@ body {
 .widget-fixed > .panel { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .widget-fixed > * { width: 100%; }
 
+/* 위젯 루트가 단일 .panel 이 아니라 여러 블록(툴바 + 패널 등)을 쌓는 경우.
+   이게 없으면 내용 높이만 차지해서 **배치한 크기와 실제 보이는 크기가 달라진다**
+   (데이터가 없을 때 특히) — 칸을 채우고 내부 패널이 남은 높이를 가져가게 한다. */
+.widget-stack { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.widget-fixed > .widget-stack { flex: 1; }
+.widget-stack > .panel { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.widget-stack > .toolbar,
+.widget-stack > .tab-nav { flex: none; }
+
+/* 컨트롤 위젯(툴바·탭)이 위젯 루트일 때도 배치한 칸을 채운다 — 내용은 세로 중앙.
+   채우지 않으면 편집에서 잡은 칸과 실제 보이는 크기가 어긋난다. */
+.widget-fixed > .toolbar,
+.widget-fixed > .tab-nav { flex: 1; min-height: 0; align-items: center; }
+
+/* 위젯 본문의 스크롤 영역 — 내용이 넘치면 스크롤하고, 비었을 때 안내가 중앙에 오도록 flex 컬럼.
+   (block 이면 .empty 가 위쪽에 붙어 카드 아래가 휑하게 남는다) */
+.scroll-fill { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+
 .panel-header {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
@@ -306,7 +324,13 @@ body {
 }
 
 /* ── Empty state ───────────────────────────────────────────── */
-.empty { padding: 48px; text-align: center; color: var(--text-muted); }
+/* 빈 상태 안내("활성 알람 없음" 등) — 남은 영역 전체의 중앙에 둔다.
+   부모가 flex 컬럼이면 남은 공간을 채우고 그 안에서 중앙, 아니면 예전처럼 자연 높이. */
+.empty {
+  padding: 32px; text-align: center; color: var(--text-muted);
+  flex: 1 1 auto; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
+}
 .members-hint { font-size: 13px; }
 
 /* ── Member add row ────────────────────────────────────────── */
@@ -1177,15 +1201,64 @@ body {
 /* 편집 카드 chrome */
 .grid-widget {
   position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  container-type: inline-size;        /* 카드 폭에 따라 헤더 요소를 접기 위한 컨테이너 쿼리 기준 */
   border: 1px dashed var(--primary); border-radius: var(--radius); background: var(--surface);
 }
 .grid-drag-handle {
+  /* 카드 위에 **겹쳐** 뜬다 — 제목줄이 본문을 밀면 편집 화면이 실제 화면과 달라진다.
+     평소 반투명이라 아래 내용이 비치고, 마우스를 올리면 또렷해진다. */
+  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
   display: flex; align-items: center; gap: 4px; padding: 4px 6px; font-size: 11px;
+  min-width: 0;                       /* 자식(제목/id)이 줄어들 수 있게 — 없으면 버튼이 카드 밖으로 밀린다 */
   cursor: grab; touch-action: none; user-select: none;
-  border-bottom: 1px solid var(--border); background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  opacity: 0.5; transition: opacity 0.12s;
+}
+.grid-widget:hover > .grid-drag-handle,
+.grid-widget--dragging > .grid-drag-handle { opacity: 1; }
+/* 제목은 남는 폭을 먹고 넘치면 …, id 는 그 다음으로 줄어든다. 버튼은 항상 카드 안. */
+.grid-widget-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid-widget-id {
+  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text-muted); font-size: 11px;
+}
+/* 한 칸짜리 카드(분해된 지표 카드 등)에서는 id·크기배지를 접어 제목과 버튼에 자리를 준다. */
+@container (max-width: 300px) {
+  .grid-widget-id, .grid-size-badge { display: none; }
 }
 .grid-widget-body { flex: 1; min-height: 0; overflow: hidden; pointer-events: none; opacity: 0.85; }
+/* 컨트롤 위젯(조회 조건·탭)은 편집 중에도 눌러야 한다 — 탭을 바꿔가며 각 탭의 배치를 편집한다. */
+.grid-widget-body--live { pointer-events: auto; opacity: 1; }
 .grid-widget-body > * { height: 100%; width: 100%; }
+/* seed 개편 안내 배너 — 저장본이 옛 기본 배치를 고정하고 있을 때만(admin). */
+.seed-update-banner {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 10px; padding: 8px 12px; font-size: 12px;
+  border: 1px solid var(--primary); border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+/* 배치 단위 표시 이름(placement.title) — 위젯이 자체 제목을 안 그리는 경우(단일 지표 카드 등)와
+   같은 위젯을 여러 벌 놓고 구분해야 할 때 렌더러가 얹는 캡션. */
+.widget-caption {
+  flex: none; font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+  padding: 0 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 편집 카드 [⚙] 인스턴스 설정 패널 — 헤더 아래 popover(카드보다 클 수 있어 띄운다).
+   여는 동안만 카드가 overflow 를 풀어준다(.grid-widget--cfg) — 한 칸 카드에서도 안 잘리게. */
+.grid-widget--cfg { overflow: visible; z-index: 30; }
+.grid-config-panel {
+  position: absolute; top: 26px; left: 0; z-index: 31; min-width: 240px; max-width: 340px;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px; font-size: 11px; background: var(--surface);
+  border: 1px solid var(--primary); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+}
+.grid-config-row { display: flex; align-items: center; gap: 6px; }
+.grid-config-row > span { flex: none; width: 64px; color: var(--text-muted); }
+.grid-config-row > .form-input { flex: 1; min-width: 0; font-size: 11px; padding: 2px 6px; }
+
 .grid-size-badge {
   font-size: 10px; color: var(--text-muted);
   border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
@@ -1228,6 +1301,14 @@ body {
   background: color-mix(in srgb, var(--primary) 12%, transparent); border: 1px dashed var(--primary);
 }
 .grid-canvas--dragging { user-select: none; cursor: grabbing; }
+
+/* 미리보기 — 편집 중 저장 후 모습 확인. 제목줄·리사이즈 핸들·점선을 감추고 본문을 그대로 보여준다.
+   조작 요소가 사라지므로 드래그/리사이즈도 자연히 멈춘다. */
+.grid-canvas--preview .grid-drag-handle,
+.grid-canvas--preview .grid-rz,
+.grid-canvas--preview .grid-config-panel { display: none; }
+.grid-canvas--preview .grid-widget { border-color: transparent; }
+.grid-canvas--preview .grid-widget-body { pointer-events: auto; opacity: 1; }
 
 /* 좁은 화면 — grid 를 단일열로 collapse (콘솔 최초 media query, .grid-canvas 로 스코프).
    x/w 무시하고 DOM(=시각) 순서로 쌓고, 행 span → --h-rows 로 최소 높이 확보(행 = 화면 2%, ROW_H_VH 동기). 편집은 데스크톱 전용. */

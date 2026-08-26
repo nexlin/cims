@@ -2,15 +2,16 @@
 //   사전: GET /alerts/catalog — OAM 평가 규칙(origin=rule) + 모듈 자기보고 등록분
 //   (origin=module:*, fm_catalog 보존본이라 모듈 다운 중에도 표시). 운영 dictionary —
 //   code·type·severity·effect·recommended_action 열람 (vIBCF POD 의 화면 대응물).
-//   규칙: GET /alerts/rules — 스위퍼가 실제 평가 중인 조건(대상·임계·주기). 이력 화면이
-//   아니라 정의 화면의 관심사라 여기에 둔다.
+//   규칙: GET /alerts/rules — 스위퍼가 실제 평가 중인 조건(대상·임계·주기).
+//
+// 사전(조회)과 규칙(감지 설정)은 성격이 달라 **위젯 2개**로 나눈다 — 조회 API 도 서로 다르다.
 import { useEffect, useMemo, useState } from 'react'
 import { alertsApi, type AlarmCatalogItem, type AlertRulesResponse } from '../api/alerts'
 import { alarmTypeLabel, sevBadgeClass, severityOf } from '../utils/alarmLabels'
 
-export default function AlarmCatalogPage() {
+// ── 알람 코드 사전 (검색 + 표) ──────────────────────────────────────────
+export function AlarmCatalogTable() {
   const [items, setItems] = useState<AlarmCatalogItem[]>([])
-  const [rules, setRules] = useState<AlertRulesResponse | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
   const [q, setQ] = useState('')
@@ -19,8 +20,6 @@ export default function AlarmCatalogPage() {
     alertsApi.catalog()
       .then(r => { setItems(r.catalog); setLoaded(true) })
       .catch(e => { setError((e as Error).message); setLoaded(true) })
-    // 규칙은 부가 정보 — 실패해도 사전 표시엔 영향 없음.
-    alertsApi.rules().then(setRules).catch(() => setRules(null))
   }, [])
 
   const filtered = useMemo(() => {
@@ -33,7 +32,6 @@ export default function AlarmCatalogPage() {
   }, [items, q])
 
   return (
-    <div className="page">
       <div className="panel" style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>알람 카탈로그 ({filtered.length})</div>
@@ -81,8 +79,20 @@ export default function AlarmCatalogPage() {
           </table>
         )}
       </div>
+  )
+}
 
-      {rules && rules.rules.length > 0 && (
+// ── 활성 평가 규칙 (스위퍼가 실제로 보는 조건) ──────────────────────────
+export function AlarmRulesTable() {
+  const [rules, setRules] = useState<AlertRulesResponse | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    alertsApi.rules().then(setRules).catch(e => setErr((e as Error).message))
+  }, [])
+  if (err) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>규칙 조회 실패: {err}</div></div>
+  if (!rules) return <div className="panel"><div className="empty">로딩 중…</div></div>
+  if (rules.rules.length === 0) return <div className="panel"><div className="empty">등록된 평가 규칙 없음</div></div>
+  return (
         <div className="panel">
           <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)',
                         display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -127,7 +137,5 @@ export default function AlarmCatalogPage() {
             </tbody>
           </table>
         </div>
-      )}
-    </div>
   )
 }

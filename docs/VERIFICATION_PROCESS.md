@@ -137,15 +137,18 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 
 ## 1. Stage 별 상세
 
-### S1 — 정적 검사 (5 항목)
+### S1 — 정적 검사 (8 항목)
 
 | ID | 검사 | 도구 |
 |---|---|---|
 | S1-PY-SYNTAX | Python 문법 | `py_compile` (verify/+tests/+csc/+scripts/) |
-| S1-FRONTEND-LINT | TS/JS lint | `npx eslint` (ems/core/console) |
-| S1-FRONTEND-TYPECHECK | TS 타입 | `npx tsc -b --noEmit` |
+| S1-CONFIG-PORTABILITY | 배포 설정 이식성 | 빌드 머신 절대경로 금지 |
+| S1-FRONTEND-LINT | TS/JS lint | `npm run lint` (ems/core/console — @svc alias 로 서비스 팩 포함) |
+| S1-FRONTEND-TYPECHECK | TS 타입 | `npx tsc -b --noEmit` (ems/core/console) |
 | S1-CPP-FORMAT | C++ 포맷 | `clang-format --dry-run -Werror` |
-| S1-UNIT-VERIFY-LIB | verify.lib 단위 | `python3 -m unittest tests.test_verify_lib` (103 OK) |
+| S1-UNIT-VERIFY-LIB | verify.lib 단위 | `python3 -m unittest tests.test_verify_lib` |
+| S1-UNIT-HA-INTENT | HA 무장/해제 의도·소유 경계 | `python3 -m unittest tests.test_ha_intent` |
+| S1-UNIT-CONSOLE-LAYOUT | 콘솔 레이아웃 영속 계약 | `python3 -m unittest tests.test_console_layouts` |
 
 S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 

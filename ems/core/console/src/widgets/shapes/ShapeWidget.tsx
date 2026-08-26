@@ -1,26 +1,41 @@
 // 범용 shape 위젯 — 자기 shape 를 지원하는 데이터 소스를 dropdown 으로 선택 → fetch → 렌더.
-// config.source 로 기본 소스 영속, 운영자가 위젯 내에서 즉시 전환.
+// 기본 소스는 배치 설정(config.source, 편집기 [⚙])에 영속. 뷰에서의 전환은 일시적(탐색용).
+// 기간·단위는 같은 페이지에 `core.page-filter` 가 있으면 그쪽을 따르고(자기 컨트롤 접음),
+// 없으면 자기 컨트롤을 쓴다 — 한 페이지에 날짜 선택기가 여러 개 생기지 않게 하는 규칙(pageParams).
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import type { WidgetDef, WidgetProps } from '../types'
-import type { ShapeKind, ShapeData, SourceParams } from './types'
+import type { ShapeData, KpiData, SourceParams } from './types'
 import { SHAPE_LABELS, SHAPE_ADAPTER } from './types'
-import { sourcesForShape, useDataSourceCatalog, loadSource } from './sourceRegistry'
-import { TimeBarChart, KpiCards, DistributionBars, KvTable } from './renderers'
-
-const GRAN_LABELS: Record<string, string> = { '1h': '시간', '1d': '일', '1M': '월' }
+import { catalogSources, sourcesForShape, useDataSourceCatalog, loadSource } from './sourceRegistry'
+import { GRAN_LABELS, todayIso, useHasPageControl, usePageParam } from '../pageParams'
+import { TimeBarChart, StatValue, DistributionBars, KvTable } from './renderers'
 
 const RENDERERS = {
-  'time-bar': TimeBarChart, kpi: KpiCards, distribution: DistributionBars, table: KvTable,
+  'time-bar': TimeBarChart, stat: StatValue, distribution: DistributionBars, table: KvTable,
 } as const
+type WidgetShape = keyof typeof RENDERERS
 
-function ShapeWidgetBody({ shape, config }: { shape: ShapeKind; config?: Record<string, unknown> }) {
+// 지표 인덱스 — stat 은 소스의 kpi 계약에서 몇 번째 지표를 그릴지 config.item(0-based)으로 받는다.
+// 인덱스인 이유: 표시 이름은 데이터에서 오므로 항목 이름이 바뀌어도 화면은 항상 맞는다.
+function itemIndex(config?: Record<string, unknown>): number {
+  const n = Number(config?.item ?? 0)
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
+}
+
+function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Record<string, unknown> }) {
   // 소스 카탈로그 = Service Descriptor data_sources (백엔드 데이터 구동). 비동기 로드.
   const { sources: catalog, loading: catLoading, error: catError } = useDataSourceCatalog()
   const sources = useMemo(() => sourcesForShape(shape, catalog), [shape, catalog])
   const wanted = typeof config?.source === 'string' ? config.source as string : ''
   const [sourceId, setSourceId] = useState(wanted)
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [gran, setGran] = useState('1h')
+  // 기간·단위: 페이지 컨트롤이 있으면 버스 값, 없으면 자기 값. 훅은 항상 둘 다 호출(조건부 호출 금지).
+  const controlled = useHasPageControl('period')
+  const [busDate] = usePageParam('date')
+  const [busGran] = usePageParam('gran')
+  const [ownDate, setOwnDate] = useState(todayIso())
+  const [ownGran, setOwnGran] = useState('1h')
+  const date = controlled ? busDate : ownDate
+  const gran = controlled ? busGran : ownGran
   const [data, setData] = useState<ShapeData | null>(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
@@ -42,58 +57,107 @@ function ShapeWidgetBody({ shape, config }: { shape: ShapeKind; config?: Record<
     try {
       const raw = await loadSource(src, { date, granularity: gran } as SourceParams)
       const adapt = src[SHAPE_ADAPTER[shape]] as ((r: unknown) => ShapeData) | undefined
-      setData(adapt ? adapt(raw) : null)
+      const d = adapt ? adapt(raw) : null
+      // stat: 지표 묶음(KpiData)에서 지정한 하나만 남긴다 — 카드 하나에 값 하나.
+      setData(d && shape === 'stat'
+        ? { items: [(d as KpiData).items[itemIndex(config)]].filter(Boolean) } as ShapeData
+        : d)
     } catch (e) { setErr((e as Error).message); setData(null) }
     finally { setLoading(false) }
-  }, [src, shape, date, gran])
+  }, [src, shape, date, gran, config])
 
   useEffect(() => { void load() }, [load])
+
+  const body = catError ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ 소스 카탈로그: {catError}</div>
+    : catLoading && sources.length === 0 ? <div className="empty">소스 카탈로그 로딩 중...</div>
+    : !src ? <div className="empty">소스를 선택하세요</div>
+    : loading && !data ? <div className="empty">로딩 중...</div>
+    : err ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ {err}</div>
+    : data ? <Renderer data={data as never} />
+    : <div className="empty">데이터 없음</div>
+
+  // 지표 카드는 chrome 최소화 — 값만. 소스·지표는 편집 모드 [⚙] 에서 정한다.
+  if (shape === 'stat') {
+    return <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>{body}</div>
+  }
 
   return (
     <div className="panel" style={{ padding: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>{SHAPE_LABELS[shape]}</span>
-        <select className="form-input" value={sourceId} onChange={e => setSourceId(e.target.value)}
-                style={{ fontSize: 12, minWidth: 130 }}>
-          {sources.length === 0 && <option value="">{catLoading ? '소스 로딩…' : '(소스 없음)'}</option>}
-          {sources.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-        </select>
-        {src?.needsControls !== false && (
+        {/* 제목 — 배치에서 지정(config.title)한 이름이 우선. 소스가 고정된 화면에서는 소스명보다
+            "무엇을 그리는가"(호 시도 추이, 종료 사유 분포)가 읽기 쉽다. */}
+        <span style={{ fontWeight: 600, fontSize: 13 }}>
+          {typeof config?.title === 'string' && config.title ? config.title : SHAPE_LABELS[shape]}
+        </span>
+        {/* 소스 선택은 **여러 소스를 한 화면에서 갈아 보는 배치**(config.pickSource)에서만 노출한다.
+            대상별로 메뉴가 나뉜 화면(VoLTE 통계/PTT 통계)에서는 고른다는 개념 자체가 불필요하다.
+            폭 상한 — .form-input 이 width:100% 라 flex 행에서 남은 폭을 다 먹는다. */}
+        {config?.pickSource === true && (
+          <select className="form-input" value={sourceId} onChange={e => setSourceId(e.target.value)}
+                  style={{ fontSize: 12, minWidth: 130, maxWidth: 220, flex: '0 1 auto' }}>
+            {sources.length === 0 && <option value="">{catLoading ? '소스 로딩…' : '(소스 없음)'}</option>}
+            {sources.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        )}
+        {src?.needsControls !== false && (controlled ? (
+          // 페이지 컨트롤이 조건을 소유 — 값만 표기(중복 컨트롤 제거).
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            {date} · {GRAN_LABELS[gran] ?? gran}
+          </span>
+        ) : (
           <>
-            <input className="form-input" type="date" value={date} onChange={e => setDate(e.target.value)}
+            <input className="form-input" type="date" value={date} onChange={e => setOwnDate(e.target.value)}
                    style={{ width: 140, fontSize: 12 }} />
             {Object.entries(GRAN_LABELS).map(([g, lb]) => (
               <button key={g} className={`btn btn--sm ${gran === g ? 'btn--primary' : 'btn--ghost'}`}
-                      onClick={() => setGran(g)}>{lb}</button>
+                      onClick={() => setOwnGran(g)}>{lb}</button>
             ))}
           </>
-        )}
+        ))}
         <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => void load()}>↻</button>
       </div>
-      {catError ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ 소스 카탈로그: {catError}</div>
-        : catLoading && sources.length === 0 ? <div className="empty">소스 카탈로그 로딩 중...</div>
-        : !src ? <div className="empty">소스를 선택하세요</div>
-        : loading ? <div className="empty">로딩 중...</div>
-        : err ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ {err}</div>
-        : data ? <Renderer data={data as never} />
-        : <div className="empty">데이터 없음</div>}
+      {body}
     </div>
   )
 }
 
-// shape → WidgetDef 팩토리. 4개 코어(서비스 무관) shape 위젯을 생성.
-function makeShapeWidget(shape: ShapeKind, id: string, title: string): WidgetDef {
+// shape → WidgetDef 팩토리. 지표 묶음 위젯은 없다 — 지표는 stat 하나씩 놓는다.
+function makeShapeWidget(shape: WidgetShape, id: string, title: string): WidgetDef {
+  const sourceField = {
+    key: 'source', label: '데이터 소스', type: 'select' as const,
+    // 소스 목록은 런타임 카탈로그(descriptor) — 함수 옵션으로 편집기 [⚙] 에 그때그때 채운다.
+    options: () => sourcesForShape(shape, catalogSources()).map(s => ({ value: s.id, label: s.label })),
+  }
+  const itemField = {
+    key: 'item', label: '지표', type: 'select' as const,
+    // 앞에서 고른 소스가 선언한 지표 목록. 값은 인덱스.
+    options: (cfg?: Record<string, unknown>) => {
+      const all = sourcesForShape('stat', catalogSources())
+      const src = all.find(s => s.id === cfg?.source) ?? all[0]
+      return (src?.kpiItems ?? []).map((label, i) => ({ value: String(i), label }))
+    },
+  }
+  const pickField = {
+    key: 'pickSource', label: '소스 선택 노출', type: 'bool' as const,
+  }
+  const titleField = {
+    key: 'title', label: '제목', type: 'text' as const, placeholder: SHAPE_LABELS[shape],
+  }
   return {
-    id, title, category: 'view', defaultSize: { w: shape === 'kpi' ? 12 : 6 },
+    id, title,
+    category: shape === 'stat' ? 'metric' : 'view',
+    defaultSize: shape === 'stat' ? { w: 3, h: 7 } : { w: 6 },
+    usesPageParams: true,
+    configFields: shape === 'stat' ? [sourceField, itemField] : [sourceField, titleField, pickField],
     component: (p: WidgetProps) => <ShapeWidgetBody shape={shape} config={p.config} />,
   }
 }
 
 export const timeBarWidget      = makeShapeWidget('time-bar', 'shape.time-bar', '시계열 차트')
-export const kpiShapeWidget     = makeShapeWidget('kpi', 'shape.kpi', 'KPI 지표')
+export const statWidget         = makeShapeWidget('stat', 'shape.stat', '지표 (소스·항목 선택)')
 export const distributionWidget = makeShapeWidget('distribution', 'shape.distribution', '분포')
 export const tableShapeWidget   = makeShapeWidget('table', 'shape.table', '표')
 
 export const SHAPE_WIDGETS: WidgetDef[] = [
-  timeBarWidget, kpiShapeWidget, distributionWidget, tableShapeWidget,
+  statWidget, timeBarWidget, distributionWidget, tableShapeWidget,
 ]

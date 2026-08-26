@@ -1,12 +1,15 @@
-// 알람·이벤트 통계 분석 — 기간 창의 코드별/유형별 집계·분포·추이 전용 뷰.
-//   개별 라이프사이클 열람은 AlertsPage(이력), 활성 상태는 ActiveAlarmsPage 소관.
-//   알람 탭은 /alerts/summary 집계만 사용(레코드 미수신 — 서버가 open/close 페어링),
-//   이벤트 탭은 레코드를 받아 클라이언트에서 유형/소스별로 접는다.
-//   화면 내 고정 레이아웃 — 지표/추이는 상단 고정, 분석 표는 내부 스크롤.
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react'
+// 알람·이벤트 통계 분석 블록 — 기간 창의 코드별/유형별 집계·분포·추이.
+//   개별 라이프사이클 열람은 AlertsPage(이력), 활성 상태는 활성 알람 위젯 소관.
+//   알람은 /alerts/summary 집계만 사용(레코드 미수신 — 서버가 open/close 페어링),
+//   이벤트는 레코드를 받아 클라이언트에서 유형/소스별로 접는다.
+//
+// **블록 = 위젯 1개**로 나눠 배치한다(요약 타일 / 심각도 분포 / 일자별 추이 / 코드별 표 / 유형별 표).
+// 조회 일수는 `core.days-filter` 컨트롤 위젯이 페이지 파라미터 `days` 로 소유하고, 블록들은 그것을
+// 읽는다 — 같은 days 면 조회는 **1회**만 나간다(아래 공유 로더).
+import { useMemo, type ReactNode } from 'react'
 import { alertsApi, eventsApi, type AlertSummaryByType, type EventRecord } from '../api/alerts'
-import { useToast } from '../components/Toast'
-import { DaysButtons } from '../components/ListControls'
+import { usePageParam } from '../widgets/pageParams'
+import { makeSharedByKey } from '../widgets/sharedFetch'
 import { SEV_COLOR, SEV_RANK } from '../widgets/useAlarms'
 import {
   alarmTypeLabel, eventTypeLabel, EVENT_KIND_LABEL, sevBadgeClass,
@@ -98,13 +101,15 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
 }
 
 // 분석 표를 담는 패널 골격 — 제목 고정 + 표 내부 스크롤
-function TablePanel({ title, children }: { title: ReactNode; children: ReactNode }) {
+function TablePanel({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
     <div className="panel" style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
+      <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)',
+                    flex: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
         {title}
+        {action && <span style={{ marginLeft: 'auto', fontWeight: 400 }}>{action}</span>}
       </div>
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{children}</div>
+      <div className="scroll-fill">{children}</div>
     </div>
   )
 }
@@ -119,29 +124,52 @@ interface TypeAgg {
   last: string
 }
 
-function AlarmAnalysisSection() {
-  const { show } = useToast()
-  const [stats, setStats] = useState<AlertSummaryByType[]>([])
-  const [daily, setDaily] = useState<{ date: string; opens: number }[]>([])
-  const [days, setDays] = useState(7)
-  const [loading, setLoading] = useState(false)
+interface TypeAgg { type: string; codes: Set<string>; opens: number; resolved: number; open: number; last: string }
+interface EventAgg { key: string; kind?: string; code?: string; type: string; count: number; last: string }
+interface SourceAgg { source: string; count: number; last: string }
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const sum = await alertsApi.summary(days)
-      setStats(sum.by_type)
-      setDaily(sum.daily)
-    } catch (e: unknown) {
-      show(String(e), 'err')
-    } finally {
-      setLoading(false)
-    }
-  }, [days, show])
+const useAlarmSummaryRaw = makeSharedByKey(k => alertsApi.summary(Number(k)))
+const useEventListRaw = makeSharedByKey(k => eventsApi.list({ days: Number(k), limit: FETCH_LIMIT }))
 
-  useEffect(() => { load() }, [load])
+// 조회 일수 — 컨트롤 위젯이 없으면 기본 7일.
+function useDays(): string { return usePageParam('days')[0] || '7' }
 
-  const totals = useMemo(() => {
+function useAlarmSummary() {
+  const days = useDays()
+  const { data, loading, error, reload } = useAlarmSummaryRaw(days)
+  const stats: AlertSummaryByType[] = useMemo(() => data?.by_type ?? [], [data])
+  const daily = useMemo(() => data?.daily ?? [], [data])
+  return { days, stats, daily, loading, error, reload }
+}
+function useEventList() {
+  const days = useDays()
+  const { data, loading, error, reload } = useEventListRaw(days)
+  const events: EventRecord[] = useMemo(() => data?.events ?? [], [data])
+  return { days, events, loading, error, reload }
+}
+
+// 블록 공통 껍데기 — 제목 + 오류/로딩 표기.
+function Block({ title, loading, error, children, pad = true }: {
+  title?: ReactNode; loading?: boolean; error?: string; children: ReactNode; pad?: boolean
+}) {
+  return (
+    <div className="panel" style={{ padding: pad ? '10px 16px' : 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      {title && (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, flex: 'none',
+                      padding: pad ? 0 : '10px 16px 6px' }}>
+          {title}
+          {loading && <span style={{ marginLeft: 6 }}>· 갱신 중…</span>}
+          {error && <span style={{ marginLeft: 6, color: 'var(--danger)' }}>· 조회 실패</span>}
+        </div>
+      )}
+      {children}
+    </div>
+  )
+}
+
+// ── 알람 블록 ────────────────────────────────────────────────────────────────
+function useAlarmTotals(stats: AlertSummaryByType[]) {
+  return useMemo(() => {
     let opens = 0, resolved = 0, open = 0, durSum = 0, durN = 0
     const bySev: Record<string, number> = {}
     for (const s of stats) {
@@ -154,27 +182,48 @@ function AlarmAnalysisSection() {
     }
     return { opens, resolved, open, avgDur: durN > 0 ? durSum / durN : null, bySev }
   }, [stats])
+}
 
+// 요약 타일 — 같은 기간의 한 묶음이라 타일끼리는 쪼개지 않는다.
+export function AlarmTotalsBlock() {
+  const { stats, loading, error } = useAlarmSummary()
+  const totals = useAlarmTotals(stats)
+  return (
+    <Block loading={loading} error={error}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Tile label="기간 내 발생" value={totals.opens} />
+        <Tile label="해소" value={totals.resolved} />
+        <Tile label="미해소 (코드·소스)" value={totals.open} accent={totals.open > 0} />
+        <Tile label="평균 지속 (해소분)" value={totals.avgDur != null ? formatSec(Math.round(totals.avgDur)) : '—'} />
+      </div>
+    </Block>
+  )
+}
+
+export function AlarmSeverityDistBlock() {
+  const { stats, loading, error } = useAlarmSummary()
+  const totals = useAlarmTotals(stats)
+  return (
+    <Block title="심각도 분포 (발생 기준)" loading={loading} error={error}>
+      <SeverityDist bySev={totals.bySev} />
+    </Block>
+  )
+}
+
+export function AlarmDailyBlock() {
+  const { daily, loading, error } = useAlarmSummary()
+  return (
+    <Block title="일별 발생량" loading={loading} error={error}>
+      <DailyBars data={daily} />
+    </Block>
+  )
+}
+
+export function AlarmByCodeBlock() {
+  const { days, stats, loading, error } = useAlarmSummary()
   const byCode = useMemo(() =>
     [...stats].sort((a, b) => b.opens - a.opens || (b.last_ts || '').localeCompare(a.last_ts || '')), [stats])
-
-  const byType = useMemo(() => {
-    const m = new Map<string, TypeAgg>()
-    for (const s of stats) {
-      let t = m.get(s.type)
-      if (!t) { t = { type: s.type, codes: new Set(), opens: 0, resolved: 0, open: 0, last: '' }; m.set(s.type, t) }
-      if (s.code) t.codes.add(s.code)
-      t.opens += s.opens
-      t.resolved += s.resolved
-      if (s.currently_open) t.open++
-      if ((s.last_ts || '') > t.last) t.last = s.last_ts || ''
-    }
-    return [...m.values()].sort((a, b) => b.opens - a.opens || b.last.localeCompare(a.last))
-  }, [stats])
-
   const maxCodeOpens = Math.max(1, ...byCode.map(s => s.opens))
-  const maxTypeOpens = Math.max(1, ...byType.map(t => t.opens))
-
   const exportCsv = () => {
     downloadCsv(`alarm_stats_${days}d.csv`,
       ['코드', '클래스', '소스', '심각도', '발생', '해소', '현재 상태', '평균 지속(초)', '마지막 이벤트'],
@@ -184,40 +233,13 @@ function AlarmAnalysisSection() {
         s.avg_duration_sec != null ? Math.round(s.avg_duration_sec) : '', s.last_ts,
       ]))
   }
-
   return (
     <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <DaysButtons days={days} onChange={setDays} />
-        <button className="btn btn--ghost btn--sm" onClick={exportCsv} style={{ marginLeft: 'auto' }}
-                disabled={byCode.length === 0}>CSV</button>
-        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
-      </div>
-
-      <div style={{ display: 'flex', gap: 12, flex: 'none', flexWrap: 'wrap' }}>
-        <Tile label="기간 내 발생" value={totals.opens} />
-        <Tile label="해소" value={totals.resolved} />
-        <Tile label="미해소 (코드·소스)" value={totals.open} accent={totals.open > 0} />
-        <Tile label="평균 지속 (해소분)" value={totals.avgDur != null ? formatSec(Math.round(totals.avgDur)) : '—'} />
-        <div style={{ flex: 2, minWidth: 220, background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius)', padding: '10px 14px' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>심각도 분포 (발생 기준)</div>
-          <SeverityDist bySev={totals.bySev} />
-        </div>
-      </div>
-
-      <div style={{ flex: 'none', background: 'var(--surface)', border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius)', padding: '10px 16px' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>일별 발생량</div>
-        <DailyBars data={daily} />
-      </div>
-
-      {loading ? (
-        <div className="empty">로딩 중…</div>
-      ) : (
-        <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
-          <div style={{ flex: 3, minWidth: 0, display: 'flex' }}>
-            <TablePanel title={<>코드별 분석 ({byCode.length}종)</>}>
+      {loading && byCode.length === 0 ? <div className="panel"><div className="empty">로딩 중…</div></div>
+        : error ? <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div> : (
+            <TablePanel title={<>코드별 분석 ({byCode.length}종)</>}
+                        action={<button className="btn btn--ghost btn--sm" onClick={exportCsv}
+                                        disabled={byCode.length === 0}>CSV</button>}>
               {byCode.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
                 <table className="data-table">
                   <thead>
@@ -261,8 +283,30 @@ function AlarmAnalysisSection() {
                 </table>
               )}
             </TablePanel>
-          </div>
-          <div style={{ flex: 2, minWidth: 0, display: 'flex' }}>
+      )}
+    </>
+  )
+}
+
+export function AlarmByTypeBlock() {
+  const { stats, loading, error } = useAlarmSummary()
+  const byType = useMemo(() => {
+    const m = new Map<string, TypeAgg>()
+    for (const s of stats) {
+      let t = m.get(s.type)
+      if (!t) { t = { type: s.type, codes: new Set(), opens: 0, resolved: 0, open: 0, last: '' }; m.set(s.type, t) }
+      if (s.code) t.codes.add(s.code)
+      t.opens += s.opens
+      t.resolved += s.resolved
+      if (s.currently_open) t.open++
+      if ((s.last_ts || '') > t.last) t.last = s.last_ts || ''
+    }
+    return [...m.values()].sort((a, b) => b.opens - a.opens || b.last.localeCompare(a.last))
+  }, [stats])
+  const maxTypeOpens = Math.max(1, ...byType.map(t => t.opens))
+  if (loading && byType.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
+  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div>
+  return (
             <TablePanel title={<>유형(클래스)별 분석 ({byType.length}종)</>}>
               {byType.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
                 <table className="data-table">
@@ -293,43 +337,17 @@ function AlarmAnalysisSection() {
                 </table>
               )}
             </TablePanel>
-          </div>
-        </div>
-      )}
-    </>
   )
 }
 
-// ── 이벤트 탭 ────────────────────────────────────────────────────────────────
-interface EventAgg { key: string; kind?: string; code?: string; type: string; count: number; last: string }
-interface SourceAgg { source: string; count: number; last: string }
-
-function EventAnalysisSection() {
-  const { show } = useToast()
-  const [events, setEvents] = useState<EventRecord[]>([])
-  const [days, setDays] = useState(7)
-  const [loading, setLoading] = useState(false)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const list = await eventsApi.list({ days, limit: FETCH_LIMIT })
-      setEvents(list.events)
-    } catch (e: unknown) {
-      show(String(e), 'err')
-    } finally {
-      setLoading(false)
-    }
-  }, [days, show])
-
-  useEffect(() => { load() }, [load])
-
+// ── 이벤트 블록 ──────────────────────────────────────────────────────────────
+function useEventAggs() {
+  const { days, events, loading, error } = useEventList()
   const byKind = useMemo(() => {
     const m: Record<string, number> = {}
     for (const e of events) m[e.kind || '-'] = (m[e.kind || '-'] || 0) + 1
     return m
   }, [events])
-
   const byType = useMemo(() => {
     const m = new Map<string, EventAgg>()
     for (const e of events) {
@@ -341,7 +359,6 @@ function EventAnalysisSection() {
     }
     return [...m.values()].sort((a, b) => b.count - a.count || b.last.localeCompare(a.last))
   }, [events])
-
   const bySource = useMemo(() => {
     const m = new Map<string, SourceAgg>()
     for (const e of events) {
@@ -353,7 +370,6 @@ function EventAnalysisSection() {
     }
     return [...m.values()].sort((a, b) => b.count - a.count || b.last.localeCompare(a.last))
   }, [events])
-
   const daily = useMemo(() => {
     const m: Record<string, number> = {}
     for (const e of events) {
@@ -362,48 +378,51 @@ function EventAnalysisSection() {
     }
     return Object.entries(m).sort(([a], [b]) => a.localeCompare(b)).map(([date, opens]) => ({ date, opens }))
   }, [events])
+  return { days, events, byKind, byType, bySource, daily, loading, error }
+}
 
+export function EventTotalsBlock() {
+  const { events, byKind, byType, loading, error } = useEventAggs()
+  return (
+    <Block loading={loading} error={error}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <Tile label="총 통지" value={events.length} />
+        <Tile label="상태 변화" value={byKind['stateChange'] || 0} />
+        <Tile label="감사" value={byKind['audit'] || 0} />
+        <Tile label="유형 수" value={byType.length} />
+      </div>
+      {events.length >= FETCH_LIMIT && (
+        <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 6 }}>
+          최신 {FETCH_LIMIT}건만 집계 (기간을 좁히세요)
+        </div>
+      )}
+    </Block>
+  )
+}
+
+export function EventDailyBlock() {
+  const { daily, loading, error } = useEventAggs()
+  return (
+    <Block title="일별 통지량" loading={loading} error={error}>
+      <DailyBars data={daily} height={30} />
+    </Block>
+  )
+}
+
+export function EventByTypeBlock() {
+  const { days, byType, loading, error } = useEventAggs()
   const maxTypeCount = Math.max(1, ...byType.map(t => t.count))
-  const maxSrcCount = Math.max(1, ...bySource.map(t => t.count))
-
   const exportCsv = () => {
     downloadCsv(`event_stats_${days}d.csv`,
       ['분류', '코드', '유형', '건수', '마지막'],
       byType.map(t => [EVENT_KIND_LABEL[t.kind || ''] || t.kind || '', t.code || '', t.type, t.count, t.last]))
   }
-
+  if (loading && byType.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
+  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div>
   return (
-    <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <DaysButtons days={days} onChange={setDays} />
-        {events.length >= FETCH_LIMIT && (
-          <span style={{ fontSize: 11, color: 'var(--danger)' }}>
-            레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 집계됩니다
-          </span>
-        )}
-        <button className="btn btn--ghost btn--sm" onClick={exportCsv} style={{ marginLeft: 'auto' }}
-                disabled={byType.length === 0}>CSV</button>
-        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
-      </div>
-
-      <div style={{ display: 'flex', gap: 12, flex: 'none', flexWrap: 'wrap' }}>
-        <Tile label="총 통지" value={events.length} />
-        <Tile label="상태 변화" value={byKind['stateChange'] || 0} />
-        <Tile label="감사" value={byKind['audit'] || 0} />
-        <Tile label="유형 수" value={byType.length} />
-        <div style={{ flex: 3, minWidth: 260, background: 'var(--surface)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius)', padding: '10px 14px' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>일별 통지량</div>
-          <DailyBars data={daily} height={30} />
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="empty">로딩 중…</div>
-      ) : (
-        <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
-          <div style={{ flex: 3, minWidth: 0, display: 'flex' }}>
-            <TablePanel title={<>유형별 발생 ({byType.length}종)</>}>
+            <TablePanel title={<>유형별 발생 ({byType.length}종)</>}
+                        action={<button className="btn btn--ghost btn--sm" onClick={exportCsv}
+                                        disabled={byType.length === 0}>CSV</button>}>
               {byType.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
                 <table className="data-table">
                   <thead>
@@ -435,8 +454,15 @@ function EventAnalysisSection() {
                 </table>
               )}
             </TablePanel>
-          </div>
-          <div style={{ flex: 2, minWidth: 0, display: 'flex' }}>
+  )
+}
+
+export function EventBySourceBlock() {
+  const { bySource, loading, error } = useEventAggs()
+  const maxSrcCount = Math.max(1, ...bySource.map(t => t.count))
+  if (loading && bySource.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
+  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div>
+  return (
             <TablePanel title={<>소스별 발생 ({bySource.length}곳)</>}>
               {bySource.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (
                 <table className="data-table">
@@ -459,25 +485,5 @@ function EventAnalysisSection() {
                 </table>
               )}
             </TablePanel>
-          </div>
-        </div>
-      )}
-    </>
-  )
-}
-
-// ── 페이지 ───────────────────────────────────────────────────────────────────
-export default function AlarmAnalysisPage() {
-  const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
-  return (
-    <div className="page" style={{ height: 'calc(100vh - 135px)', minHeight: 520 }}>
-      <div className="tab-nav" style={{ flex: 'none' }}>
-        <button className={`tab-btn ${tab === 'alarms' ? 'tab-btn--active' : ''}`}
-                onClick={() => setTab('alarms')}>알람</button>
-        <button className={`tab-btn ${tab === 'events' ? 'tab-btn--active' : ''}`}
-                onClick={() => setTab('events')}>이벤트</button>
-      </div>
-      {tab === 'alarms' ? <AlarmAnalysisSection /> : <EventAnalysisSection />}
-    </div>
   )
 }

@@ -21,12 +21,11 @@ function ActivePttWidget() {
       <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
         PTT 활성 그룹 ({rows.length}건)
       </div>
+      {rows.length === 0 ? <div className="empty">활성 그룹 세션 없음</div> : (
       <table className="data-table">
         <thead><tr><th>그룹</th><th>발신자</th><th>상태</th><th>시작</th></tr></thead>
         <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={4} className="empty">활성 그룹 세션 없음</td></tr>
-          ) : rows.map(c => (
+          {rows.map(c => (
             <tr key={c.call_id} style={{ cursor: 'pointer' }}
               onClick={() => setFlowId(c.call_id)}
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
@@ -38,6 +37,7 @@ function ActivePttWidget() {
           ))}
         </tbody>
       </table>
+      )}
       {flowId && <FlowPage callId={flowId} callType="ptt" onClose={() => setFlowId(null)} />}
     </div>
   )

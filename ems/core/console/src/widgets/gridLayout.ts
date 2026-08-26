@@ -129,6 +129,33 @@ export function removeAt(items: WidgetPlacement[], index: number): WidgetPlaceme
   return compact(items.filter((_, i) => i !== index))
 }
 
+// 기하 아닌 속성(표시 이름) 갱신 — 배치가 안 바뀌므로 compaction 없음. 빈 문자열 = 지정 해제.
+export function setTitleAt(items: WidgetPlacement[], index: number, title: string): WidgetPlacement[] {
+  return items.map((p, i) => {
+    if (i !== index) return { ...p }
+    const next: WidgetPlacement = { ...p, title }
+    if (!title) delete next.title
+    return next
+  })
+}
+
+// 인스턴스 설정 patch(얕은 merge) — undefined 값은 키 제거. 배치 무변경이라 compaction 없음.
+export function setConfigAt(
+  items: WidgetPlacement[], index: number, patch: Record<string, unknown>,
+): WidgetPlacement[] {
+  return items.map((p, i) => {
+    if (i !== index) return { ...p }
+    const config: Record<string, unknown> = { ...(p.config ?? {}) }
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) delete config[k]
+      else config[k] = v
+    }
+    const next: WidgetPlacement = { ...p, config }
+    if (Object.keys(config).length === 0) delete next.config
+    return next
+  })
+}
+
 // legacy 높이(vh|px|auto) → 행 span 변환.
 export function heightToRows(h: number | undefined, defaultRows: number, vhToRows: (vh: number) => number): number {
   if (!h) return defaultRows                          // auto → 기본 span
@@ -139,23 +166,31 @@ export function heightToRows(h: number | undefined, defaultRows: number, vhToRow
 // legacy flow → grid migrate. 현재 flow 순서+폭으로 x/y 배정(합>12 wrap = 현행 렌더 규칙 재현),
 // vh 높이는 vhToRows 로 행 변환. 끝에 compact 안 함 — shelf-packing 으로 현재 외형 그대로 재현
 // (첫 편집 조작이 compact 를 돌려 자연 정착). getDefaultW/vhToRows 는 주입(순수성 유지).
+//
+// **높이 미지정(자동) 배치**는 grid 에 대응 개념이 없다. 상수를 박으면 편집 카드가 실제 화면과
+// 전혀 다른 크기로 잡히므로(통짜 페이지가 전부 30% 로 통일되던 원인), 지금 화면에 그려진 높이를
+// measureRows 로 받아 그 값으로 시작한다. 측정을 못 하면 그때만 기본값.
 export function flowToGrid(
   widgets: WidgetPlacement[],
   getDefaultW: (widgetId: string) => number | undefined,
   vhToRows: (vh: number) => number,
   defaultRows = DEFAULT_ROWS,
+  measureRows?: (index: number) => number | undefined,
 ): WidgetPlacement[] {
   let col = 0
   let rowTop = 0
   let rowMaxH = 0
   const out: WidgetPlacement[] = []
-  for (const p of widgets) {
+  widgets.forEach((p, i) => {
     const w = clamp(Math.round((p.w ?? getDefaultW(p.widgetId) ?? 12) * COL_SCALE), 1, GRID_COLS)  // 12-칸 기준 → 현재 칸수
-    const h = heightToRows(p.h, defaultRows, vhToRows)
+    // h 가 있으면 그 값이 정본(기존 동작 그대로). 없을 때만 실측 → 기본값 순으로 채운다.
+    const measured = p.h ? undefined : measureRows?.(i)
+    const h = p.h ? heightToRows(p.h, defaultRows, vhToRows)
+                  : Math.max(1, measured ?? defaultRows)
     if (col + w > GRID_COLS) { col = 0; rowTop += rowMaxH; rowMaxH = 0 }
     out.push({ ...p, x: col, y: rowTop, w, h })
     col += w
     rowMaxH = Math.max(rowMaxH, h)
-  }
+  })
   return out
 }

@@ -80,6 +80,8 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
   }
   if (m.kpi) {
     const c = m.kpi as KpiMap
+    // 지표 라벨(선언 순서) — stat 위젯의 [⚙] 지표 선택지. 데이터 도착 전에도 필요하다.
+    ds.kpiItems = c.items.map(it => it.label)
     ds.toKpi = (raw): KpiData => ({
       items: c.items.map(it => ({ label: it.label, value: applyFormat(getPath(raw, it.path), it.format), unit: it.unit })),
     })

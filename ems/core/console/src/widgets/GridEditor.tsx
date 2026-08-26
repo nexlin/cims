@@ -8,10 +8,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
-import type { WidgetPlacement } from './types'
+import type { WidgetConfigField, WidgetDef, WidgetPlacement } from './types'
 import {
   GRID_COLS, GRID_GAP, ROW_H_VH,
-  gridBox, moveItem, applyBox, removeAt,
+  gridBox, moveItem, applyBox, removeAt, setConfigAt, setTitleAt,
   clampX, clampY, clampW, clampH, type GridBox,
 } from './gridLayout'
 
@@ -30,6 +30,61 @@ const RESIZE_HANDLES: { dir: string; edges: Edges; cls: string }[] = [
   { dir: 'sw', edges: { b: true, l: true }, cls: 'grid-rz grid-rz-sw' },
 ]
 
+// 인스턴스 설정 패널 — 표시 이름(모든 위젯 공통) + WidgetDef.configFields 선언대로 그린 폼.
+// 위젯 본문은 편집 중 pointer-events 가 없으므로(미리보기), 인스턴스 설정은 이 카드 chrome 에서 만진다.
+// 카드보다 클 수 있어(작은 지표 카드) 헤더 아래로 띄우는 popover — 여는 동안만 카드 overflow 해제
+// (`.grid-widget--cfg`). 안 그러면 한 칸짜리 카드에서 패널이 잘려 안 보인다.
+function WidgetConfigPanel({ placement, def, onTitle, onConfig, onClose }: {
+  placement: WidgetPlacement
+  def?: WidgetDef
+  onTitle: (t: string) => void
+  onConfig: (patch: Record<string, unknown>) => void
+  onClose: () => void
+}) {
+  const fields = def?.configFields ?? []
+  const val = (f: WidgetConfigField) => placement.config?.[f.key]
+  return (
+    <div className="grid-config-panel" onPointerDown={e => e.stopPropagation()}>
+      <label className="grid-config-row">
+        <span>표시 이름</span>
+        <input className="form-input" value={placement.title ?? ''}
+               placeholder={def?.title ?? placement.widgetId}
+               onChange={e => onTitle(e.target.value)} />
+      </label>
+      {fields.map(f => {
+        const options = typeof f.options === 'function' ? f.options(placement.config) : (f.options ?? [])
+        return (
+          <label key={f.key} className="grid-config-row">
+            <span>{f.label}</span>
+            {f.type === 'select' ? (
+              <select className="form-input" value={String(val(f) ?? '')}
+                      onChange={e => onConfig({ [f.key]: e.target.value || undefined })}>
+                <option value="">(기본값)</option>
+                {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            ) : f.type === 'bool' ? (
+              <input type="checkbox" checked={!!val(f)}
+                     onChange={e => onConfig({ [f.key]: e.target.checked || undefined })} />
+            ) : (
+              <input className="form-input" type={f.type === 'number' ? 'number' : 'text'}
+                     value={String(val(f) ?? '')} placeholder={f.placeholder}
+                     onChange={e => {
+                       const raw = e.target.value
+                       if (!raw) return onConfig({ [f.key]: undefined })
+                       onConfig({ [f.key]: f.type === 'number' ? Number(raw) : raw })
+                     }} />
+            )}
+          </label>
+        )
+      })}
+      {fields.length === 0 && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>이 위젯은 배치 설정 항목이 없습니다.</div>
+      )}
+      <button className="btn btn--sm" onClick={onClose} style={{ alignSelf: 'flex-end' }}>닫기</button>
+    </div>
+  )
+}
+
 interface DragState {
   kind: 'move' | 'resize'
   key: number
@@ -42,9 +97,10 @@ interface DragState {
   dy: number
 }
 
-export function GridEditor({ widgets, gap = GRID_GAP, onChange }: {
+export function GridEditor({ widgets, gap = GRID_GAP, preview = false, onChange }: {
   widgets: WidgetPlacement[]
   gap?: number
+  preview?: boolean          // 미리보기 — 제목줄·핸들·점선을 감춰 저장 후 모습을 그대로 본다
   onChange: (widgets: WidgetPlacement[]) => void
 }) {
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -52,6 +108,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, onChange }: {
   const dragRef = useRef<DragState | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
+  const [cfgOpen, setCfgOpen] = useState<number | null>(null)   // [⚙] 설정 패널이 열린 카드 index
 
   const measure = () => {
     const el = canvasRef.current
@@ -146,7 +203,9 @@ export function GridEditor({ widgets, gap = GRID_GAP, onChange }: {
   const activeResize = drag?.kind === 'resize' ? drag.key : -1
 
   return (
-    <div ref={canvasRef} className={`grid-canvas grid-canvas--edit${drag ? ' grid-canvas--dragging' : ''}`}
+    <div ref={canvasRef}
+         className={`grid-canvas grid-canvas--edit${drag ? ' grid-canvas--dragging' : ''}`
+                    + `${preview ? ' grid-canvas--preview' : ''}`}
          style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
                   gridAutoRows: `${ROW_H_VH}vh`, gap: 0, alignItems: 'stretch',
                   ['--card-gap']: `${gap}px` } as CSSProperties}>
@@ -167,20 +226,40 @@ export function GridEditor({ widgets, gap = GRID_GAP, onChange }: {
         if (isResize) style.zIndex = 20
         return (
           <div key={`${p.widgetId}-${i}`}
-               className={`grid-widget${isMove || isResize ? ' grid-widget--dragging' : ''}`} style={style}>
+               className={`grid-widget${isMove || isResize ? ' grid-widget--dragging' : ''}`
+                          + `${cfgOpen === i ? ' grid-widget--cfg' : ''}`} style={style}>
             <div className="grid-drag-handle" onPointerDown={e => beginDrag('move', i, e)} title="드래그로 이동">
-              <b style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{def?.title ?? p.widgetId}</b>
-              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({p.widgetId})</span>
+              <b className="grid-widget-title">{p.title || def?.title || p.widgetId}</b>
+              <span className="grid-widget-id">({p.widgetId})</span>
+              {p.visibleWhen && (
+                <span className="grid-size-badge" style={{ color: 'var(--primary)' }}
+                      title={`${p.visibleWhen.param}=${p.visibleWhen.equals} 일 때만 표시(탭)`}>
+                  {p.visibleWhen.param}={p.visibleWhen.equals}
+                </span>
+              )}
               <span className="grid-size-badge" title="가로 % × 세로 %">
                 {Math.round(view.w / GRID_COLS * 100)}%×{Math.round(view.h * ROW_H_VH)}%
               </span>
               {/* 사용 API — 개발자 모드에서만. 배치하면서 이 위젯이 뭘 부르는지 바로 확인. */}
               <WidgetApiBadge ids={def?.apis} title={def?.title ?? p.widgetId} />
+              <button className="btn btn--sm" title="이 배치의 이름·설정"
+                      style={{ marginLeft: 'auto', position: 'relative', zIndex: 7 }}
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={() => setCfgOpen(o => (o === i ? null : i))}>⚙</button>
               <button className="btn btn--sm" title="제거"
-                      style={{ color: 'var(--danger)', marginLeft: 'auto', position: 'relative', zIndex: 7 }}
-                      onPointerDown={e => e.stopPropagation()} onClick={() => onChange(removeAt(widgets, i))}>✕</button>
+                      style={{ color: 'var(--danger)', position: 'relative', zIndex: 7 }}
+                      onPointerDown={e => e.stopPropagation()}
+                      onClick={() => { setCfgOpen(null); onChange(removeAt(widgets, i)) }}>✕</button>
             </div>
-            <div className="grid-widget-body">
+            {cfgOpen === i && (
+              <WidgetConfigPanel placement={p} def={def}
+                onTitle={t => onChange(setTitleAt(widgets, i, t))}
+                onConfig={patch => onChange(setConfigAt(widgets, i, patch))}
+                onClose={() => setCfgOpen(null)} />
+            )}
+            {/* 컨트롤 위젯은 편집 중에도 조작 가능 — 탭을 바꿔가며 그 탭의 배치를 편집해야 하므로.
+                (나머지 위젯 본문은 미리보기라 pointer-events 없음) */}
+            <div className={`grid-widget-body${def?.category === 'control' ? ' grid-widget-body--live' : ''}`}>
               {Comp ? <Comp config={p.config} />
                     : <div style={{ color: 'var(--danger)', fontSize: 12, padding: 8 }}>알 수 없는 위젯: {p.widgetId}</div>}
             </div>

@@ -21,12 +21,11 @@ function ActiveVoipWidget() {
       <div style={{ padding: '12px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)' }}>
         VoIP 활성 통화 ({rows.length}건)
       </div>
+      {rows.length === 0 ? <div className="empty">활성 통화 없음</div> : (
       <table className="data-table">
         <thead><tr><th>발신</th><th>착신</th><th>상태</th><th>시작</th></tr></thead>
         <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={4} className="empty">활성 통화 없음</td></tr>
-          ) : rows.map(c => (
+          {rows.map(c => (
             <tr key={c.call_id} style={{ cursor: 'pointer' }}
               onClick={() => setFlowId(c.call_id)}
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
@@ -38,6 +37,7 @@ function ActiveVoipWidget() {
           ))}
         </tbody>
       </table>
+      )}
       {flowId && <FlowPage callId={flowId} callType="volte" onClose={() => setFlowId(null)} />}
     </div>
   )

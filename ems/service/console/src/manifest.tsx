@@ -1,14 +1,15 @@
 // CIMS 서비스 pack — 콘솔 기여 매니페스트.
 //
 // 범용 OAM 코어(대시보드/패키징/배포/문서) 위에 CIMS 서비스 종속 nav 를 얹는다:
-//   가입자관리(조직/구성원/번호/PTT그룹) · 서비스(상태/VoLTE·PTT 이력) · 통계(VoLTE/PTT/SIP/CMP/CSC/HTTPS).
+//   가입자관리(조직/구성원/번호/PTT그룹) · 서비스(상태/VoLTE·PTT 이력) · 성능(VoLTE/PTT/메시지 통계).
 // 다른 서비스를 붙이려면 같은 형태의 manifest 를 만들어 services/registry.ts 에 등록.
 
 import { Users, TrendingUp, FileText } from 'lucide-react'
 import type { ServiceManifest } from '@core/nav-types'
 
 import { healthDotsWidget } from './widgets/HealthDotsWidget'
-import { kpiWidget } from './widgets/KpiWidget'
+import { STAT_CARD_WIDGETS, STAT_CARD_SPLITS } from './widgets/statCards'
+import { LEAK_RECLAIM_WIDGETS } from './widgets/leakReclaimWidgets'
 import { cspRolesWidget } from './widgets/CspRolesWidget'
 import { alertBannerWidget } from './widgets/AlertBannerWidget'
 import { activeAlarmsWidget } from './widgets/ActiveAlarmsWidget'
@@ -21,15 +22,13 @@ import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
 import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
-import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
-import ServiceDescriptorsPage from '@core/pages/ServiceDescriptorsPage'  // 코어 페이지 — '구성' 그룹에 배치
+import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
 import {
   SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
-  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_SIP_LAYOUT,
-  STATS_CMP_LAYOUT, STATS_CSC_LAYOUT, STATS_HTTPS_LAYOUT,
+  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_MESSAGES_LAYOUT, STATS_LEAK_LAYOUT,
 } from './layouts'
 
 // 출력 섹션 route = 합성 가능한 레이아웃 (고정 페이지 대체). 각 route 는 layout(seed) + layoutId 영속.
@@ -39,10 +38,14 @@ export const cimsManifest: ServiceManifest = {
   id: 'cims',
   label: 'CIMS',
   widgets: [
-    healthDotsWidget, kpiWidget, cspRolesWidget,
+    ...STAT_CARD_WIDGETS,          // 대시보드 현황 지표 — 서로 다른 축이라 지표 1개 = 위젯 1개
+    ...LEAK_RECLAIM_WIDGETS,       // 누수 회수(sweeper) 블록
+    healthDotsWidget, cspRolesWidget,
     alertBannerWidget, activeAlarmsWidget, recentEventsWidget, activeVoipWidget, activePttWidget,
     ...CIMS_OUTPUT_WIDGETS,
   ],
+  // 폐지한 묶음 위젯 → 부품 전개 (저장본이 옛 id 를 참조할 때만 쓰인다)
+  splits: { ...STAT_CARD_SPLITS },
   sections: [
     // ── 서비스 (ops) — 서비스 이용 현황(실시간) + 호·세션 이력. 대상(서비스 호/세션) 기준 묶음. ──
     {
@@ -75,12 +78,10 @@ export const cimsManifest: ServiceManifest = {
       routes: [
         { path: '/stats/volte', title: 'VoLTE 통계', layout: STATS_VOLTE_LAYOUT, layoutId: 'stats.volte', requiredRole: 'monitor' },
         { path: '/stats/ptt',   title: 'PTT 통계',   layout: STATS_PTT_LAYOUT,   layoutId: 'stats.ptt',   requiredRole: 'monitor' },
-        { path: '/stats/sip',   title: 'SIP 통계',   layout: STATS_SIP_LAYOUT,   layoutId: 'stats.sip',   requiredRole: 'monitor' },
-        { path: '/stats/cmp',   title: 'CMP 통계',   layout: STATS_CMP_LAYOUT,   layoutId: 'stats.cmp',   requiredRole: 'monitor' },
-        { path: '/stats/csc',   title: 'CSC 통계',   layout: STATS_CSC_LAYOUT,   layoutId: 'stats.csc',   requiredRole: 'monitor' },
-        { path: '/stats/https', title: 'HTTPS 통계', layout: STATS_HTTPS_LAYOUT, layoutId: 'stats.https', requiredRole: 'monitor' },
-        { path: '/stats/leak-reclaims', title: '누수 회수(sweeper)', component: LeakReclaimsPage, requiredRole: 'monitor',
-          apis: ['stats.leak-reclaims'] },
+        // 인터페이스별(SIP/CMP/CSC/HTTPS) 메시지 통계는 메뉴 4개가 아니라 한 화면에서 소스를 갈아 본다.
+        { path: '/stats/messages', title: '메시지 통계', layout: STATS_MESSAGES_LAYOUT, layoutId: 'stats.messages', requiredRole: 'monitor' },
+        { path: '/stats/leak-reclaims', title: '누수 회수(sweeper)', layout: STATS_LEAK_LAYOUT,
+          layoutId: 'stats.leak-reclaims', requiredRole: 'monitor' },
       ],
     },
     // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──
@@ -108,7 +109,8 @@ export const cimsManifest: ServiceManifest = {
                  'csc.ptt-groups.members.remove', 'csc.users.list', 'csc.orgs.list'] },
         { path: '/subscribers/mcptt-policy',  title: 'MCPTT 정책',     component: McpttPolicyPage, requiredRole: 'monitor',
           apis: ['csc.mcptt.service-config.get', 'csc.mcptt.service-config.update'] },
-        { path: '/deploy/service-defs',       title: '서비스 정의',     component: ServiceDescriptorsPage, adminOnly: true },
+        { path: '/deploy/service-defs',       title: '서비스 정의',
+          layout: SERVICE_DEFS_LAYOUT, layoutId: 'deploy.service-defs', adminOnly: true },
       ],
     },
   ],

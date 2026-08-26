@@ -1,6 +1,9 @@
 // 활성 알람 — 전역 알람 store(useAlarms, SSE 라이브) 구독 뷰 (alarm_pipeline.md §8.2).
-//   이력 페이지(AlertsPage)와 분리: 여기는 "지금 열린 알람" 만 — 심각도 타일 + 목록 +
-//   승인/코멘트 조작. 데이터는 store 하나(대시보드 위젯·헤더 배지와 동일 fold)라 표시 일관.
+//   이력 페이지(AlertsPage)와 분리: 여기는 "지금 열린 알람" 만 — 승인/코멘트 조작 포함.
+//   위젯 2개로 나눠 배치한다: **심각도 요약(타일 묶음)** 과 **목록**. 타일은 낱개로 쪼개지 않는다 —
+//   같은 축의 분포라 하나만 보면 "전체 중 얼마"인지 알 수 없기 때문(console_platform §3.1).
+//   둘을 잇는 건 배치가 아니라 페이지 파라미터 `sev` (타일이 쓰고 목록이 읽는다).
+//   데이터는 store 하나(대시보드 위젯·헤더 배지와 동일 fold)라 표시 일관.
 import { useMemo, useState } from 'react'
 import { alertsApi } from '../api/alerts'
 import { useToast } from '../components/Toast'
@@ -8,6 +11,7 @@ import { useAlarms, refreshAlarms, severityOf, type ActiveAlarm } from '../widge
 import {
   alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_ORDER,
 } from '../utils/alarmLabels'
+import { usePageParam } from '../widgets/pageParams'
 
 const SEV_TILE_LABEL: Record<string, string> = {
   critical: 'Critical', major: 'Major', minor: 'Minor', warning: 'Warning', indeterminate: 'Indeterminate',
@@ -65,18 +69,47 @@ function AlarmDetail({ a, onAck, onComment }: {
   )
 }
 
-export default function ActiveAlarmsPage() {
-  const { show } = useToast()
-  const { active, loaded, error, lastUpdated } = useAlarms()
-  const [sevFilter, setSevFilter] = useState('')
-  const [q, setQ] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
-
+// 심각도 요약 — 타일 묶음 하나가 최소 단위. 클릭 = 페이지 파라미터 `sev` 토글(같은 화면의 목록이 걸림).
+export function AlarmSeverityTiles() {
+  const { active } = useAlarms()
+  const [sevFilter, setSevFilter] = usePageParam('sev')
   const counts = useMemo(() => {
     const c: Record<string, number> = {}
     for (const a of active) c[severityOf(a)] = (c[severityOf(a)] || 0) + 1
     return c
   }, [active])
+  return (
+    <div style={{ display: 'flex', gap: 12, height: '100%', alignItems: 'stretch' }}>
+      {SEVERITY_ORDER.map(sev => {
+        const n = counts[sev] || 0
+        const on = sevFilter === sev
+        return (
+          <button key={sev} onClick={() => setSevFilter(on ? '' : sev)}
+            title={`${SEV_TILE_LABEL[sev]} ${n}건${on ? ' — 필터 해제' : n ? ' — 이 심각도만 보기' : ''}`}
+            style={{
+              flex: 1, textAlign: 'left', cursor: 'pointer', minWidth: 0,
+              background: 'var(--surface)', borderRadius: 'var(--radius)', padding: '12px 16px',
+              border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
+            }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{SEV_TILE_LABEL[sev]}</div>
+            <div style={{ fontSize: 24, fontWeight: 700,
+                          color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--danger)' : 'var(--text)' }}>
+              {n}
+            </div>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// 활성 알람 목록 — 검색 + 표 + 상세. 심각도 필터는 타일 위젯이 쓰는 페이지 파라미터를 읽는다.
+export function ActiveAlarmList() {
+  const { show } = useToast()
+  const { active, loaded, error, lastUpdated } = useAlarms()
+  const [sevFilter] = usePageParam('sev')
+  const [q, setQ] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
@@ -100,28 +133,7 @@ export default function ActiveAlarmsPage() {
   }
 
   return (
-    <div className="page">
-      {/* 심각도 타일 — 클릭 = 해당 단계 필터 토글 */}
-      <div style={{ display: 'flex', gap: 12 }}>
-        {SEVERITY_ORDER.map(sev => {
-          const n = counts[sev] || 0
-          const on = sevFilter === sev
-          return (
-            <button key={sev} onClick={() => setSevFilter(on ? '' : sev)}
-              style={{
-                flex: 1, textAlign: 'left', cursor: 'pointer',
-                background: 'var(--surface)', borderRadius: 'var(--radius)', padding: '12px 16px',
-                border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
-              }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{SEV_TILE_LABEL[sev]}</div>
-              <div style={{ fontSize: 24, fontWeight: 700,
-                            color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--danger)' : 'var(--text)' }}>
-                {n}
-              </div>
-            </button>
-          )
-        })}
-      </div>
+    <div className="widget-stack">
 
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <input className="search-input" style={{ width: 260 }} placeholder="코드/소스/메시지 검색"

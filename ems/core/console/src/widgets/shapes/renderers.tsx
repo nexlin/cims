@@ -40,6 +40,21 @@ export function KpiCards({ data }: { data: KpiData }) {
   )
 }
 
+// 지표 카드 — 값 하나. 카드가 자기 칸을 채우고 값은 세로 중앙.
+export function StatValue({ data }: { data: KpiData }) {
+  const k = data.items[0]
+  if (!k) return <div className="empty" style={{ fontSize: 12 }}>지표 없음</div>
+  return (
+    <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
+                  justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{k.label}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1 }}>
+        {k.value}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{k.unit}</span>
+      </div>
+    </div>
+  )
+}
+
 export function DistributionBars({ data }: { data: DistributionData }) {
   const { items, total } = data
   if (items.length === 0) return <div className="empty">데이터 없음</div>

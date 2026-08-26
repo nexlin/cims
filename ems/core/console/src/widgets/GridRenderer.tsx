@@ -1,14 +1,26 @@
 // 레이아웃 렌더러 — PageLayout 의 위젯 배치를 그린다. 두 배치 모드를 하위호환으로 지원:
 //  · 2D grid (placement 에 x/y): 12칸×N행 셀 그리드에 grid-column/grid-row 로 절대 배치.
 //  · legacy flow (x/y 없음): 12-col flow(합>12 wrap) — 기존 저장본/미편집 seed 가 그대로 렌더.
-// 위젯은 자체 chrome(패널/헤더)을 렌더 — 렌더러는 배치(span·좌표)만 담당.
+// 위젯은 자체 chrome(패널/헤더)을 렌더 — 렌더러는 배치(span·좌표)만 담당. 예외는 배치 단위 표시
+// 이름(placement.title, 편집기 [⚙] 에서 지정)뿐 — 이건 위젯이 모르는 값이라 렌더러가 캡션으로 얹는다.
 // registry 에 없는 위젯 id → fallback 카드(graceful, 레이아웃 안 깨짐).
 
 import type { CSSProperties } from 'react'
 import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
 import type { PageLayout } from './types'
-import { isGridLayout, gridBox, GRID_COLS, ROW_H_VH, GRID_GAP } from './gridLayout'
+import { compact, isGridLayout, gridBox, GRID_COLS, ROW_H_VH, GRID_GAP } from './gridLayout'
+import { isPlacementVisible, usePageParams } from './pageParams'
+import type { WidgetPlacement } from './types'
+
+// 조건부 표시(placement.visibleWhen) 평가 — 탭처럼 한 화면을 갈아끼우는 배치를 걸러낸다.
+// 숨긴 뒤 남은 배치는 compact 로 위로 당겨 빈 자리를 없앤다(grid 배치일 때).
+function useVisibleWidgets(widgets: WidgetPlacement[]): WidgetPlacement[] {
+  const params = usePageParams()
+  const shown = widgets.filter(p => isPlacementVisible(p, params))
+  if (shown.length === widgets.length) return widgets
+  return isGridLayout(shown) ? compact(shown) : shown
+}
 
 // legacy 높이 해석: 0/없음 = 자동, 1~100 = 화면 세로 비율(vh), >100 = 레거시 픽셀(하위호환).
 export function widgetHeightCss(h?: number): string | undefined {
@@ -25,9 +37,11 @@ function UnknownWidget({ id }: { id: string }) {
 }
 
 export function GridRenderer({ layout }: { layout: PageLayout }) {
-  return isGridLayout(layout.widgets)
-    ? <GridCanvas layout={layout} />
-    : <FlowGrid layout={layout} />
+  const widgets = useVisibleWidgets(layout.widgets)
+  const shown = widgets === layout.widgets ? layout : { ...layout, widgets }
+  return isGridLayout(shown.widgets)
+    ? <GridCanvas layout={shown} />
+    : <FlowGrid layout={shown} />
 }
 
 // ── 2D grid 렌더 ─────────────────────────────────────────────────────────
@@ -56,6 +70,7 @@ function GridCanvas({ layout }: { layout: PageLayout }) {
         return (
           <div key={`${p.widgetId}-${i}`} className="widget-fixed widget-api-host" style={style}>
             <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
+            {p.title && <div className="widget-caption">{p.title}</div>}
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
         )
@@ -81,6 +96,7 @@ function FlowGrid({ layout }: { layout: PageLayout }) {
                className={`${fixed ? 'widget-fixed ' : ''}widget-api-host`}
                style={{ gridColumn: `span ${span}`, minWidth: 0, ...hStyle }}>
             <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
+            {p.title && <div className="widget-caption">{p.title}</div>}
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
         )

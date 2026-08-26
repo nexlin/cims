@@ -254,7 +254,7 @@ export default function VolteHistoryPage() {
           </div>
 
           {/* 호 목록 — 헤더(고정)·본문(스크롤, 항목없어도 영역 유지)·테일(고정) 항상 표시 */}
-          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
+          <div className="scroll-fill" style={{ border: '1px solid var(--border)', borderRadius: 6 }}>
             <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr>

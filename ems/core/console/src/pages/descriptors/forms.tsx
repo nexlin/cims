@@ -39,7 +39,8 @@ const EVENT_TYPES = ['processingError', 'communications', 'qualityOfService', 'e
 const MO_CLASSES = ['software', 'service', 'host', 'equipment', 'network']
 
 // ════════════════════════════════════════════════════════════════
-//  서비스 정의 폼 (id/label + modules + alert_rules)
+//  서비스 정의 폼 — **id/label 만**. 모듈·알람 규칙·데이터 소스는 각각의 위젯에서
+//  항목 단위로 추가/편집/삭제한다(편집 경로 일원화).
 // ════════════════════════════════════════════════════════════════
 export function ServiceForm({ initial, onClose, onSaved }: {
   initial: ServiceDescriptor | null; onClose: () => void; onSaved: () => void
@@ -48,26 +49,13 @@ export function ServiceForm({ initial, onClose, onSaved }: {
   const isNew = !initial
   const [id, setId] = useState(initial?.id || '')
   const [label, setLabel] = useState(initial?.label || '')
-  const [modules, setModules] = useState<ServiceModule[]>(initial?.modules ? structuredClone(initial.modules) : [])
-  const [rules, setRules] = useState<AlertRule[]>(initial?.alert_rules ? structuredClone(initial.alert_rules) : [])
   const [saving, setSaving] = useState(false)
-
-  const upMod = (i: number, p: Partial<ServiceModule>) => setModules(ms => ms.map((m, k) => k === i ? { ...m, ...p } : m))
-  const upRule = (i: number, p: Partial<AlertRule>) => setRules(rs => rs.map((r, k) => k === i ? { ...r, ...p } : r))
 
   const save = async () => {
     if (!id.trim()) { show('id 가 필요합니다', 'err'); return }
-    if (modules.some(m => !m.name?.trim())) { show('모듈 이름은 필수입니다', 'err'); return }
     const doc: ServiceDescriptor = {
+      ...(initial ?? { modules: [] as ServiceModule[] }),
       id: id.trim(), label: label.trim() || id.trim(),
-      modules: modules.map(m => ({
-        name: m.name.trim(),
-        ...(m.port ? { port: Number(m.port) } : {}),
-        ...(m.proto ? { proto: m.proto } : {}),
-        ...(m.controllable ? { controllable: true } : {}),
-      })),
-      ...(rules.length ? { alert_rules: rules } : {}),
-      ...(initial?.data_sources ? { data_sources: initial.data_sources } : {}),  // 데이터 소스는 별도 편집 — 보존
     }
     setSaving(true)
     try { await serviceDescriptorsApi.put(doc.id, doc); show('서비스 정의 저장됨', 'ok'); onSaved(); onClose() }
@@ -76,102 +64,161 @@ export function ServiceForm({ initial, onClose, onSaved }: {
   }
 
   return (
-    <Modal title={isNew ? '새 서비스 정의' : `서비스 정의 편집 — ${initial!.id}`} onClose={onClose} width={720}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '70vh', overflowY: 'auto' }}>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Field label="서비스 id" hint="(예: cims)"><input className="form-input" style={inp} value={id}
-            disabled={!isNew} onChange={e => setId(e.target.value)} placeholder="myservice" /></Field>
-          <Field label="표시명"><input className="form-input" style={inp} value={label}
-            onChange={e => setLabel(e.target.value)} placeholder="My Service" /></Field>
+    <Modal title={isNew ? '새 서비스 정의' : `서비스 정의 — ${initial!.id}`} onClose={onClose} width={440}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Field label="서비스 id" hint="(예: cims — 만든 뒤 바꿀 수 없음)">
+          <input className="form-input" style={inp} value={id} disabled={!isNew}
+                 onChange={e => setId(e.target.value)} placeholder="myservice" />
+        </Field>
+        <Field label="표시명">
+          <input className="form-input" style={inp} value={label}
+                 onChange={e => setLabel(e.target.value)} placeholder="My Service" />
+        </Field>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          모듈 · 알람 규칙 · 데이터 소스는 각 위젯에서 항목별로 추가/편집합니다.
         </div>
+      </div>
+      <div className="modal-footer">
+        <Btn onClick={onClose} disabled={saving}>취소</Btn>
+        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+      </div>
+    </Modal>
+  )
+}
 
-        {/* 모듈 */}
-        <section>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-            <b style={{ fontSize: 13 }}>모듈 ({modules.length})</b>
-            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setModules(ms => [...ms, { name: '', proto: 'tcp' }])}>＋ 모듈</Btn></span>
-          </div>
-          {modules.map((m, i) => (
-            <div key={i} style={{ ...rowCard, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-              <Field label="이름"><input className="form-input" style={{ ...inp, width: 120 }} value={m.name}
-                onChange={e => upMod(i, { name: e.target.value })} /></Field>
-              <Field label="포트"><input className="form-input" style={{ ...inp, width: 80 }} type="number" value={m.port ?? ''}
-                onChange={e => upMod(i, { port: e.target.value ? Number(e.target.value) : undefined })} /></Field>
-              <Field label="proto"><select className="form-input" style={{ ...inp, width: 70 }} value={m.proto ?? ''}
-                onChange={e => upMod(i, { proto: e.target.value || undefined })}>
-                <option value="">—</option><option value="tcp">tcp</option><option value="udp">udp</option></select></Field>
-              <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 6 }}>
-                <input type="checkbox" checked={!!m.controllable} onChange={e => upMod(i, { controllable: e.target.checked })} />제어
-              </label>
-              <span style={{ marginLeft: 'auto', paddingBottom: 4 }}><Btn danger onClick={() => setModules(ms => ms.filter((_, k) => k !== i))}>✕</Btn></span>
-            </div>
-          ))}
-        </section>
+// 서비스 문서에서 배열 하나만 갈아끼워 저장 — 항목 단위 폼들의 공통 저장 경로.
+async function putWith(svc: ServiceDescriptor, patch: Partial<ServiceDescriptor>) {
+  await serviceDescriptorsApi.put(svc.id, { ...svc, ...patch })
+}
 
-        {/* 알람 규칙 */}
-        <section>
-          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-            <b style={{ fontSize: 13 }}>알람 규칙 ({rules.length})</b>
-            <span style={{ marginLeft: 'auto' }}><Btn onClick={() => setRules(rs => [...rs, { type: 'process_unresponsive', code: 'A-PRC-004', perceived_severity: 'major', event_type: 'processingError', mo_class: 'service', check: 'process_unresponsive' }])}>＋ 규칙</Btn></span>
-          </div>
-          {rules.map((r, i) => (
-            <div key={i} style={rowCard}>
+// ════════════════════════════════════════════════════════════════
+//  모듈 1건 폼
+// ════════════════════════════════════════════════════════════════
+export function ModuleForm({ svc, index, onClose, onSaved }: {
+  svc: ServiceDescriptor; index: number | null; onClose: () => void; onSaved: () => void
+}) {
+  const { show } = useToast()
+  const cur = index != null ? svc.modules[index] : null
+  const [m, setM] = useState<ServiceModule>(cur ? structuredClone(cur) : { name: '', proto: 'tcp' })
+  const [saving, setSaving] = useState(false)
+  const up = (p: Partial<ServiceModule>) => setM(v => ({ ...v, ...p }))
+
+  const save = async () => {
+    if (!m.name?.trim()) { show('모듈 이름은 필수입니다', 'err'); return }
+    const item: ServiceModule = {
+      name: m.name.trim(),
+      ...(m.port ? { port: Number(m.port) } : {}),
+      ...(m.proto ? { proto: m.proto } : {}),
+      ...(m.controllable ? { controllable: true } : {}),
+    }
+    const modules = index != null
+      ? svc.modules.map((x, i) => (i === index ? item : x))
+      : [...svc.modules, item]
+    setSaving(true)
+    try { await putWith(svc, { modules }); show('모듈 저장됨', 'ok'); onSaved(); onClose() }
+    catch (e) { show((e as Error).message, 'err') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={index == null ? `모듈 추가 — ${svc.id}` : `모듈 편집 — ${cur?.name}`} onClose={onClose} width={460}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+        <Field label="이름"><input className="form-input" style={{ ...inp, width: 140 }} value={m.name}
+          onChange={e => up({ name: e.target.value })} /></Field>
+        <Field label="포트"><input className="form-input" style={{ ...inp, width: 90 }} type="number" value={m.port ?? ''}
+          onChange={e => up({ port: e.target.value ? Number(e.target.value) : undefined })} /></Field>
+        <Field label="proto"><select className="form-input" style={{ ...inp, width: 80 }} value={m.proto ?? ''}
+          onChange={e => up({ proto: e.target.value || undefined })}>
+          <option value="">—</option><option value="tcp">tcp</option><option value="udp">udp</option></select></Field>
+        <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4, paddingBottom: 6 }}>
+          <input type="checkbox" checked={!!m.controllable} onChange={e => up({ controllable: e.target.checked })} />제어
+        </label>
+      </div>
+      <div className="modal-footer">
+        <Btn onClick={onClose} disabled={saving}>취소</Btn>
+        <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>
+      </div>
+    </Modal>
+  )
+}
+
+// ════════════════════════════════════════════════════════════════
+//  알람 규칙 1건 폼
+// ════════════════════════════════════════════════════════════════
+export function AlertRuleForm({ svc, index, onClose, onSaved }: {
+  svc: ServiceDescriptor; index: number | null; onClose: () => void; onSaved: () => void
+}) {
+  const { show } = useToast()
+  const list = svc.alert_rules || []
+  const cur = index != null ? list[index] : null
+  const [r, setR] = useState<AlertRule>(cur ? structuredClone(cur) : {
+    type: 'process_unresponsive', code: 'A-PRC-004', perceived_severity: 'major',
+    event_type: 'processingError', mo_class: 'service', check: 'process_unresponsive',
+  })
+  const [saving, setSaving] = useState(false)
+  const up = (p: Partial<AlertRule>) => setR(v => ({ ...v, ...p }))
+
+  const save = async () => {
+    const rules = index != null ? list.map((x, i) => (i === index ? r : x)) : [...list, r]
+    setSaving(true)
+    try { await putWith(svc, { alert_rules: rules }); show('알람 규칙 저장됨', 'ok'); onSaved(); onClose() }
+    catch (e) { show((e as Error).message, 'err') }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title={index == null ? `알람 규칙 추가 — ${svc.id}` : `알람 규칙 편집 — ${cur?.code || cur?.type}`}
+           onClose={onClose} width={720}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '65vh', overflowY: 'auto' }}>
               {/* 1행: 클래스 / 코드 / 심각도 / check */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <Field label="클래스(type)"><select className="form-input" style={{ ...inp, width: 130 }} value={r.type}
-                  onChange={e => upRule(i, { type: e.target.value })}>
+                  onChange={e => up({ type: e.target.value })}>
                   {ALARM_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
                 <Field label="code"><input className="form-input" style={{ ...inp, width: 110 }} value={r.code ?? ''}
-                  onChange={e => upRule(i, { code: e.target.value })} placeholder="A-PRC-001" /></Field>
+                  onChange={e => up({ code: e.target.value })} placeholder="A-PRC-001" /></Field>
                 <Field label="심각도"><select className="form-input" style={{ ...inp, width: 100 }} value={r.perceived_severity ?? r.severity ?? 'warning'}
-                  onChange={e => upRule(i, { perceived_severity: e.target.value })}>
+                  onChange={e => up({ perceived_severity: e.target.value })}>
                   {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}</select></Field>
                 <Field label="check"><select className="form-input" style={{ ...inp, width: 120 }} value={r.check ?? ''}
-                  onChange={e => upRule(i, { check: e.target.value })}>
+                  onChange={e => up({ check: e.target.value })}>
                   {CHECKS.map(c => <option key={c} value={c}>{c}</option>)}</select></Field>
-                <span style={{ marginLeft: 'auto', paddingBottom: 4 }}><Btn danger onClick={() => setRules(rs => rs.filter((_, k) => k !== i))}>✕</Btn></span>
               </div>
               {/* 2행: event_type / probable_cause / mo_class / mo_instance / 조건부 target·threshold */}
               <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <Field label="event_type"><select className="form-input" style={{ ...inp, width: 140 }} value={r.event_type ?? 'processingError'}
-                  onChange={e => upRule(i, { event_type: e.target.value })}>
+                  onChange={e => up({ event_type: e.target.value })}>
                   {EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Field>
                 <Field label="probable_cause"><input className="form-input" style={{ ...inp, width: 160 }} value={r.probable_cause ?? ''}
-                  onChange={e => upRule(i, { probable_cause: e.target.value })} placeholder="softwareError" /></Field>
+                  onChange={e => up({ probable_cause: e.target.value })} placeholder="softwareError" /></Field>
                 <Field label="mo_class"><select className="form-input" style={{ ...inp, width: 100 }} value={r.mo_class ?? 'service'}
-                  onChange={e => upRule(i, { mo_class: e.target.value })}>
+                  onChange={e => up({ mo_class: e.target.value })}>
                   {MO_CLASSES.map(m => <option key={m} value={m}>{m}</option>)}</select></Field>
                 <Field label="mo_instance" hint="(소스, service)"><input className="form-input" style={{ ...inp, width: 120 }} value={r.mo_instance ?? ''}
-                  onChange={e => upRule(i, { mo_instance: e.target.value })} placeholder="비우면 관측 신원으로 합성" /></Field>
+                  onChange={e => up({ mo_instance: e.target.value })} placeholder="비우면 관측 신원으로 합성" /></Field>
                 {(r.check === 'process_unresponsive' || r.check === 'service_unresponsive' || r.check === 'process_down') && (
                   <Field label="target" hint="(모듈명)"><input className="form-input" style={{ ...inp, width: 80 }} value={r.target ?? ''}
-                    onChange={e => upRule(i, { target: e.target.value })} /></Field>)}
+                    onChange={e => up({ target: e.target.value })} /></Field>)}
                 {(r.check === 'rtp_pct_gte' || r.check === 'disk_high') && (
                   <Field label="threshold"><input className="form-input" style={{ ...inp, width: 80 }} type="number" value={r.threshold ?? ''}
-                    onChange={e => upRule(i, { threshold: e.target.value ? Number(e.target.value) : undefined })} /></Field>)}
+                    onChange={e => up({ threshold: e.target.value ? Number(e.target.value) : undefined })} /></Field>)}
               </div>
               {/* 3행: metric / 메시지 */}
               <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                 <Field label="metric(표시명)"><input className="form-input" style={{ ...inp, width: 120 }} value={r.metric ?? ''}
-                  onChange={e => upRule(i, { metric: e.target.value })} /></Field>
+                  onChange={e => up({ metric: e.target.value })} /></Field>
                 <Field label="발생 메시지" hint="({mo} 치환)"><input className="form-input" style={{ ...inp, width: 200 }} value={r.msg_open ?? ''}
-                  onChange={e => upRule(i, { msg_open: e.target.value })} /></Field>
+                  onChange={e => up({ msg_open: e.target.value })} /></Field>
                 <Field label="해제 메시지"><input className="form-input" style={{ ...inp, width: 160 }} value={r.msg_close ?? ''}
-                  onChange={e => upRule(i, { msg_close: e.target.value })} /></Field>
+                  onChange={e => up({ msg_close: e.target.value })} /></Field>
               </div>
               {/* 4행: effect / recommended_action (운영 runbook) */}
               <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
                 <Field label="영향(effect)"><input className="form-input" style={{ ...inp, width: 240 }} value={r.effect ?? ''}
-                  onChange={e => upRule(i, { effect: e.target.value })} /></Field>
+                  onChange={e => up({ effect: e.target.value })} /></Field>
                 <Field label="권장 조치(action)"><input className="form-input" style={{ ...inp, width: 240 }} value={r.recommended_action ?? ''}
-                  onChange={e => upRule(i, { recommended_action: e.target.value })} /></Field>
+                  onChange={e => up({ recommended_action: e.target.value })} /></Field>
               </div>
-            </div>
-          ))}
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            ※ 데이터 소스는 카드의 "데이터 소스" 섹션에서 별도 편집 (이 폼에선 보존만).
-          </div>
-        </section>
       </div>
       <div className="modal-footer">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>

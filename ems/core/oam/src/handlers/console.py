@@ -82,6 +82,11 @@ async def handle_console(handler_args: HandlerArgs, kwargs: dict) -> HandlerResu
                 doc = {'id': lid, 'title': body.get('title'), 'widgets': body['widgets']}
                 if isinstance(body.get('gap'), (int, float)):   # 카드 간 간격(px) 보존
                     doc['gap'] = body['gap']
+                # seed 세대 — 프론트가 "이 배치는 어느 기본 배치를 기준으로 만들었나"를 각인한다.
+                # 이후 seed 가 개편되면(위젯 분해 등) 콘솔이 저장본의 이 값과 비교해 안내를 띄운다.
+                # 필드가 유실되면 안내가 매번 다시 뜨므로 반드시 보존한다.
+                if isinstance(body.get('seedVersion'), (int, float)) and not isinstance(body.get('seedVersion'), bool):
+                    doc['seedVersion'] = int(body['seedVersion'])
                 file_store.save(ldir, lid, doc)
                 return HandlerResult(status=200, body=file_store.load(ldir, lid))
             if method == 'DELETE':

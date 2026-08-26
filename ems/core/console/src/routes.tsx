@@ -14,15 +14,14 @@ import {
 import type { RouteDef, RouteSection } from './nav-types'
 import { SERVICE_MANIFESTS } from './services/registry'
 
-import { DASHBOARD_LAYOUT } from './widgets/layouts'
-import AlertsPage from './pages/AlertsPage'
-import ActiveAlarmsPage from './pages/ActiveAlarmsPage'
+import {
+  DASHBOARD_LAYOUT, ALERTS_ACTIVE_LAYOUT, ALERTS_HISTORY_LAYOUT,
+  ALERTS_ANALYSIS_LAYOUT, ALERTS_CATALOG_LAYOUT,
+} from './widgets/layouts'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
 import ServersPage from './pages/ServersPage'
 import AutoDeployPage from './pages/AutoDeployPage'
-import AlarmCatalogPage from './pages/AlarmCatalogPage'
-import AlarmAnalysisPage from './pages/AlarmAnalysisPage'
 import VerificationV2Page from './pages/VerificationV2Page'
 import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
@@ -69,12 +68,13 @@ const CORE_SECTIONS: RouteSection[] = [
     defaultPath: '/alerts/active',
     order: 20,
     routes: [
-      { path: '/alerts/active',  title: '활성 알람',        component: ActiveAlarmsPage },
-      { path: '/alerts/history', title: '알람·이벤트 이력', component: AlertsPage },
+      // 심각도 요약(타일 묶음) + 목록 합성 — 각각 옮기거나 다른 화면에 놓을 수 있다.
+      { path: '/alerts/active',  title: '활성 알람',        layout: ALERTS_ACTIVE_LAYOUT, layoutId: 'alerts.active' },
+      { path: '/alerts/history', title: '알람·이벤트 이력', layout: ALERTS_HISTORY_LAYOUT, layoutId: 'alerts.history' },
       // 코드별/유형별 집계·분포·추이 — 이력(개별 라이프사이클 열람)과 역할 분리
-      { path: '/alerts/analysis', title: '유형별 분석',      component: AlarmAnalysisPage },
+      { path: '/alerts/analysis', title: '유형별 분석',      layout: ALERTS_ANALYSIS_LAYOUT, layoutId: 'alerts.analysis' },
       // 코드 사전 (rule + 모듈 자기보고 병합 — alarm_pipeline.md §8.1)
-      { path: '/alerts/catalog', title: '알람 카탈로그',    component: AlarmCatalogPage },
+      { path: '/alerts/catalog', title: '알람 카탈로그',    layout: ALERTS_CATALOG_LAYOUT, layoutId: 'alerts.catalog' },
     ],
   },
   // ── 관리(admin) ──

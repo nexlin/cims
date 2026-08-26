@@ -27,8 +27,12 @@ async function _fetch() {
 }
 
 export function getSource(id: string): DataSource | undefined { return _byId.get(id) }
+// 훅 밖(편집기 [⚙] 패널의 옵션 목록 등)에서 쓰는 동기 접근자 — 아직 미로딩이면 빈 배열.
+export function catalogSources(): DataSource[] { return _catalog ?? [] }
 export function sourcesForShape(shape: ShapeKind, catalog: DataSource[]): DataSource[] {
-  return catalog.filter(s => s.shapes.includes(shape))
+  // stat(지표 1개)은 kpi 계약을 쓴다 — descriptor 는 'kpi' 만 선언하므로 여기서 이어준다.
+  const want: ShapeKind = shape === 'stat' ? 'kpi' : shape
+  return catalog.filter(s => s.shapes.includes(want))
 }
 
 // 카탈로그 구독 훅 — 첫 사용 시 1회 fetch. reload() 로 강제 갱신(편집 후).

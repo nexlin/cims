@@ -2,13 +2,16 @@
 //   활성 알람 뷰는 ActiveAlarmsPage(store 라이브), 코드 사전·평가 규칙은 AlarmCatalogPage,
 //   코드별/유형별 집계·분포는 AlarmAnalysisPage 소관 — 여기는 기간 창 안의 알람
 //   라이프사이클(발생→변경→해소)과 이벤트 스트림 열람 전용.
+//   **알람 이력 / 이벤트 이력은 각각 위젯**이고, 둘 사이 전환은 탭 컨트롤 위젯이 쓰는 페이지
+//   파라미터 `atab` 을 배치의 visibleWhen 이 읽어 처리한다(widgets/core/faultWidgets.tsx).
 //   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
-import { DaysButtons, Pager } from '../components/ListControls'
+import { Pager } from '../components/ListControls'
+import { usePageParam } from '../widgets/pageParams'
 import {
   alarmTypeLabel, eventTypeLabel, EVENT_KIND_LABEL, sevBadgeClass, severityOf,
   fmtTime, durationBetween, downloadCsv,
@@ -107,10 +110,11 @@ function DetailItem({ label, value }: { label: string; value?: string | null }) 
 }
 
 // ── 알람 탭 ──────────────────────────────────────────────────────────────────
-function AlarmsSection() {
+export function AlarmsSection() {
   const { show } = useToast()
   const [events, setEvents] = useState<AlertEvent[]>([])
-  const [days, setDays] = useState(7)
+  // 기간은 이 위젯이 소유하지 않는다 — 같은 페이지의 기간 선택 컨트롤(core.days-filter)이 쓰는 값.
+  const days = Number(usePageParam('days')[0]) || 7
   const [sevFilter, setSevFilter] = useState('')
   const [codeFilter, setCodeFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -181,8 +185,6 @@ function AlarmsSection() {
   return (
     <>
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <DaysButtons days={days} onChange={setDays} />
-        <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
         <select className="form-input" value={sevFilter} onChange={e => setSevFilter(e.target.value)} style={{ width: 110 }}>
           <option value="">심각도 전체</option>
           {['critical', 'major', 'minor', 'warning', 'indeterminate'].map(s => <option key={s} value={s}>{s}</option>)}
@@ -222,7 +224,7 @@ function AlarmsSection() {
           <div className="empty">기록된 알람 없음</div>
         ) : (
           <>
-            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            <div className="scroll-fill">
             <table className="data-table">
               <thead>
                 <tr>
@@ -401,10 +403,11 @@ function groupEvents(events: EventRecord[]): EventGroup[] {
   return groups
 }
 
-function EventsSection() {
+export function EventsSection() {
   const { show } = useToast()
   const [events, setEvents] = useState<EventRecord[]>([])
-  const [days, setDays] = useState(7)
+  // 기간은 이 위젯이 소유하지 않는다 — 같은 페이지의 기간 선택 컨트롤(core.days-filter)이 쓰는 값.
+  const days = Number(usePageParam('days')[0]) || 7
   const [filterType, setFilterType] = useState('')
   const [filterKind, setFilterKind] = useState('')
   const [q, setQ] = useState('')
@@ -453,8 +456,6 @@ function EventsSection() {
   return (
     <>
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <DaysButtons days={days} onChange={setDays} />
-        <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
         <select className="form-input" value={filterKind} onChange={e => setFilterKind(e.target.value)} style={{ width: 120 }}>
           <option value="">분류 전체</option>
           <option value="stateChange">상태 변화</option>
@@ -486,7 +487,7 @@ function EventsSection() {
           <div className="empty">기록된 이벤트 없음</div>
         ) : (
           <>
-            <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+            <div className="scroll-fill">
             <table className="data-table">
               <thead>
                 <tr>
@@ -568,17 +569,3 @@ function EventsSection() {
 // ── 페이지 ───────────────────────────────────────────────────────────────────
 //   화면 내 고정 레이아웃 — 탭/툴바/컬럼 헤더/페이저는 항상 보이고 표 영역만 내부 스크롤.
 //   (100vh − 콘텐츠 헤더·서브탭·본문 패딩 ≈ 135px)
-export default function AlertsPage() {
-  const [tab, setTab] = useState<'alarms' | 'events'>('alarms')
-  return (
-    <div className="page" style={{ height: 'calc(100vh - 135px)', minHeight: 480 }}>
-      <div className="tab-nav" style={{ flex: 'none' }}>
-        <button className={`tab-btn ${tab === 'alarms' ? 'tab-btn--active' : ''}`}
-                onClick={() => setTab('alarms')}>알람</button>
-        <button className={`tab-btn ${tab === 'events' ? 'tab-btn--active' : ''}`}
-                onClick={() => setTab('events')}>이벤트</button>
-      </div>
-      {tab === 'alarms' ? <AlarmsSection /> : <EventsSection />}
-    </div>
-  )
-}

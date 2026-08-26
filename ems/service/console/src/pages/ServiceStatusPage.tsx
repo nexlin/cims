@@ -535,7 +535,7 @@ export function OrgStatsCard() {
         </div>
         {/* 구성원 로스터 — 헤더(고정)·본문(스크롤)·페이지(고정) */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', maxHeight: 520 }}>
-          <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+          <div className="scroll-fill">
             {!roster ? <Loading />
               : roster.subscribers.length === 0 ? <div className="empty">{q ? '검색 결과 없음' : '구성원 없음'}</div>
               : <SubscriberRows subs={roster.subscribers} />}
@@ -636,6 +636,7 @@ export function SubscriberLookup() {
 }
 
 // ── 위젯: 서비스 상세 (탭 통합 — 호·그룹·이벤트·조직·조회) ──
+// 루트에 .widget-stack — 위젯으로 배치됐을 때 칸을 채운다(없으면 내용 높이만 차지).
 export function ServiceDetailTabs() {
   const live = useServiceLive()
   const [tab, setTab] = useState<'events' | 'org' | 'volte' | 'ptt'>('org')
@@ -647,8 +648,8 @@ export function ServiceDetailTabs() {
     </button>
   )
   return (
-    <div>
-      <div className="toolbar" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+    <div className="widget-stack">
+      <div className="toolbar" style={{ flexWrap: 'wrap' }}>
         {tb('events', '라이브 이벤트')}
         {tb('org', '부서별')}
         {tb('volte', 'VoLTE 호', v?.active)}
