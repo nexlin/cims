@@ -45,6 +45,11 @@ export interface WidgetDef {
   // 이 위젯이 호출하는 API 의 id 목록 (백엔드 `*_API_DOCS` 의 id). 개발자 모드에서 위젯에 [API]
   // 배지로 노출된다. **id 만** 선언한다 — 경로/파라미터/응답 등 내용은 백엔드가 소유(api_docs.md).
   apis?: string[]
+  // 배치 설정에 따라 호출 API 가 갈리는 위젯(소스 선택형 shape)은 API id 를 정적으로 못 적는다.
+  // 대신 이 배치가 쓰는 **데이터 소스 id** 를 돌려주면, 배지가 카탈로그에서 그 소스의 endpoint 를
+  // 찾아 API 문서의 path 와 대조해 id 를 얻는다. 둘 다 이미 존재하는 정보라 새 중복 선언이 아니다.
+  // `apis` 와 합집합으로 표시된다.
+  apiSources?: (config: Record<string, unknown> | undefined) => string[]
 }
 
 // 레이아웃에 배치된 위젯 1개. 두 배치 모드가 하위호환으로 공존한다:

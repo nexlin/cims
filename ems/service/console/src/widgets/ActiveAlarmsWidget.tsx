@@ -158,5 +158,6 @@ export const activeAlarmsWidget: WidgetDef = {
   title: '활성 알람',
   category: 'event',
   component: ActiveAlarmsWidget,
+  apis: ['alerts.list'],
   defaultSize: { w: 12 },
 }

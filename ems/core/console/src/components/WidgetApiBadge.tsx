@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom'
 import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
 import { loadApiDocs, type ApiDoc, type ApiDocAuth } from '../api/apiDocs'
+import { useDataSourceCatalogPassive } from '../widgets/shapes/sourceRegistry'
 
 const METHOD_COLOR: Record<string, string> = {
   GET: 'badge--green', POST: 'badge--blue', PUT: 'badge--yellow', DELETE: 'badge--red',
@@ -48,6 +49,23 @@ function toCurl(a: ApiDoc): string {
   const body = (a.params || []).some(p => p.in === 'body')
     ? ` \\\n  -H "Content-Type: application/json" -d '{...}'` : ''
   return `curl -sk ${m}-H "Authorization: Bearer <TOKEN>" \\\n  "https://<OAM>:4419${path}${qs ? '?' + qs : ''}"${body}`
+}
+
+// 호출 경로 → API 문서 찾기. 소스 선택형 위젯(shape)은 배치 설정에 따라 API 가 갈려 id 를 정적으로
+// 못 적으므로, 위젯이 돌려준 경로를 문서의 path 와 대조한다. path 파라미터(`{iface}`)는 한 세그먼트
+// 와일드카드로 취급하고, `/api/v1` 접두사·후행 슬래시·query 는 떼고 비교한다.
+function docForPath(docs: ApiDoc[], endpoint: string): ApiDoc | undefined {
+  const want = endpoint.split('?')[0].replace(/\/+$/, '')
+  return docs.find(d => {
+    const p = (d.path || '').replace(/^\/api\/v1/, '').replace(/\/+$/, '')
+    if (p === want) return true
+    if (!p.includes('{')) return false
+    const re = new RegExp('^' + p.split('/')
+      .map(seg => (seg.startsWith('{') && seg.endsWith('}'))
+        ? '[^/]+' : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('/') + '$')
+    return re.test(want)
+  })
 }
 
 function authText(auth: ApiDoc['auth']): string {
@@ -209,25 +227,39 @@ function ApiRow({ a }: { a: ApiDoc }) {
   )
 }
 
-/** ids 로 문서를 조회해 [API n] 배지를 렌더. 개발자 모드 OFF / 문서 0건이면 null. */
-export default function WidgetApiBadge({ ids, title, overlay }: {
+/** ids·sourceIds 로 문서를 조회해 [API n] 배지를 렌더. 개발자 모드 OFF / 문서 0건이면 null. */
+export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
   ids?: string[]
   title?: string          // 모달 제목에 쓸 위젯 이름
   overlay?: boolean       // true=보기 모드(위젯 우상단 절대배치), false=편집 카드 헤더 인라인
+  sourceIds?: string[]    // 배치가 쓰는 데이터 소스 id (WidgetDef.apiSources) — endpoint 로 환산해 합침
 }) {
   const devMode = useDevMode()
   const [docs, setDocs] = useState<ApiDoc[] | null>(null)
   const [open, setOpen] = useState(false)
-  const key = (ids || []).join(',')
+  // 소스 id → 호출 경로. 카탈로그는 비동기라 처음엔 비어 있다 — 구독하고 있으므로 도착하면
+  // 리렌더되고 그때 경로가 채워진다(한 번 계산하고 마는 구조면 배지가 영영 안 뜬다).
+  const catalog = useDataSourceCatalogPassive()
+  const paths = (sourceIds || [])
+    .map(sid => catalog.find(s => s.id === sid)?.endpoint)
+    .filter((e): e is string => !!e)
+  const key = [...(ids || []), ...paths].join(',')
 
   useEffect(() => {
     if (!devMode || !key) return
     let alive = true
     loadApiDocs().then(map => {
-      if (alive) setDocs((ids || []).map(i => map.get(i)).filter((a): a is ApiDoc => !!a))
+      if (!alive) return
+      const all = [...map.values()]
+      const found = [
+        ...(ids || []).map(i => map.get(i)),
+        ...paths.map(pp => docForPath(all, pp)),
+      ].filter((a): a is ApiDoc => !!a)
+      // 같은 API 를 id·경로 양쪽으로 지목했을 수 있다 — id 로 중복 제거.
+      setDocs([...new Map(found.map(a => [a.id, a])).values()])
     })
     return () => { alive = false }
-    // key 로 ids 변화를 추적 (배열 아이덴티티 대신)
+    // key 로 ids·경로 변화를 추적 (배열 아이덴티티 대신)
   }, [devMode, key])   // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!devMode || !key || !docs || docs.length === 0) return null

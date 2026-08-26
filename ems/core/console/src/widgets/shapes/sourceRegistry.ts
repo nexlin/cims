@@ -35,6 +35,19 @@ export function sourcesForShape(shape: ShapeKind, catalog: DataSource[]): DataSo
   return catalog.filter(s => s.shapes.includes(want))
 }
 
+// 카탈로그 **구독만** 하는 훅 — 로드를 시작하지 않는다. 이미 누가(shape 위젯) 로드했을 때만 값이 온다.
+// [API] 배지가 소스 id → endpoint 환산에 쓴다: 배지 때문에 카탈로그를 새로 받아오지는 않으면서
+// (개발자 모드 OFF 평시 트래픽 0 원칙), 카탈로그가 나중에 도착하면 리렌더돼 배지가 살아난다.
+export function useDataSourceCatalogPassive(): DataSource[] {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const sub = () => setTick(t => t + 1)
+    _subs.add(sub)
+    return () => { _subs.delete(sub) }
+  }, [])
+  return _catalog ?? []
+}
+
 // 카탈로그 구독 훅 — 첫 사용 시 1회 fetch. reload() 로 강제 갱신(편집 후).
 export function useDataSourceCatalog(): { sources: DataSource[]; loading: boolean; error: string; reload: () => void } {
   const [, setTick] = useState(0)

@@ -31,16 +31,23 @@ const svcStatsLayout = (id: string, title: string, source: string, stats: number
   }
 }
 
-// 메시지 통계 = 인터페이스(SIP/CMP/CSC/HTTPS)를 한 화면에서 갈아 보는 구성이라 **소스 선택을 노출**한다.
-const MSG_SOURCE = 'cims.msg.sip'
+// 메시지 통계 = 인터페이스(SIP/CMP/CSC/HTTPS)를 한 화면에서 갈아 보는 구성. 대상 선택은 위젯이 아니라
+// **화면 공통 조건**(core.source-picker → `src`)으로 두어 차트·표가 함께 움직인다.
+// 후보는 **인터페이스**만 — 전 인터페이스 합계(cims.msg-summary)는 표 계약이 없어 같은 축에 못 둔다.
+const MSG_IFACES = ['cims.msg.sip', 'cims.msg.cmp', 'cims.msg.csc', 'cims.msg.https']
+const MSG_SOURCE = MSG_IFACES[0]
 export const STATS_MESSAGES_LAYOUT: PageLayout = {
-  id: 'stats.messages', title: '메시지 통계', seedVersion: 1,
+  id: 'stats.messages', title: '메시지 통계', seedVersion: 2,
   widgets: [
-    { widgetId: 'core.page-filter', x: 0,  y: 0, w: 48, h: 4 },
-    { widgetId: 'shape.time-bar',   x: 0,  y: 4, w: 29, h: 22,
-      config: { source: MSG_SOURCE, pickSource: true, title: '시간대별 메시지' } },
-    { widgetId: 'shape.table',      x: 29, y: 4, w: 19, h: 22,
-      config: { source: MSG_SOURCE, pickSource: true, title: '메서드별 건수' } },
+    { widgetId: 'core.page-filter',   x: 0,  y: 0, w: 48, h: 4 },
+    // 인터페이스 선택은 화면 공통 조건(`src`) — 차트와 표가 같은 대상을 함께 본다.
+    // 후보를 열거해 이 화면과 무관한 소스(VoLTE/PTT 서비스 KPI)가 섞이지 않게 한다.
+    { widgetId: 'core.source-picker', x: 0,  y: 4, w: 48, h: 3,
+      config: { sources: MSG_IFACES.join(',') } },
+    { widgetId: 'shape.time-bar',     x: 0,  y: 7, w: 29, h: 22,
+      config: { source: MSG_SOURCE, title: '시간대별 메시지' } },
+    { widgetId: 'shape.table',        x: 29, y: 7, w: 19, h: 22,
+      config: { source: MSG_SOURCE, title: '메서드별 건수' } },
   ],
 }
 

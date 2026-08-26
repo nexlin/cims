@@ -267,3 +267,160 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 CIMS_ALERTS_HANDLER_LIST = [
     (_BASE, handle_alerts, {}),
 ]
+
+
+# ── API 문서 (개발자 모드 [API] 배지) — 정본: docs/design/features/api_docs.md ──────────
+# 조회·카탈로그만 선언한다. 평가 규칙(`/alerts/rules` — 임계·주기)은 내부 설정이라 제외,
+# 승인/코멘트(POST)·SSE 스트림도 제외(변이·내부 전송 수단).
+# `module=None` = **base 상주** — oam_app 이 base_rules 에 등록하므로 role=base 에서도 살아있다.
+# (oam-svc 로 적으면 base 배포에서 가용 판정에 걸려 배지가 통째로 사라진다.)
+_AUTH_MONITOR = {'scheme': 'bearer', 'role': 'monitor', 'token_from': 'POST /api/v1/auth/login'}
+
+_ERR_COMMON = [
+    {'status': 401, 'when': 'Authorization 헤더 없음 / 토큰 만료', 'body': {'error': 'unauthorized'}},
+    {'status': 403, 'when': '권한 등급 미달', 'body': {'error': 'forbidden'}},
+]
+
+# 알람 레코드 1건의 공통 필드 — 목록 응답의 events[] 에 그대로 실린다 (X.733/32.111 정합).
+_ALARM_FIELDS = [
+    {'name': 'events[].ts', 'type': 'string', 'desc': '레코드 기록 시각 (ISO8601, 초 단위)'},
+    {'name': 'events[].action', 'type': 'string', 'enum': ['open', 'close', 'change', 'ack', 'comment'],
+     'desc': '발생/해소/심각도 변경/승인/코멘트 — 한 알람의 생애가 여러 레코드로 남는다'},
+    {'name': 'events[].alarm_id', 'type': 'string',
+     'desc': '알람 인스턴스 식별자 `code@mo_instance@epoch`. 앞 두 마디가 활성 알람 키'},
+    {'name': 'events[].code', 'type': 'string', 'desc': '알람 코드 (A-XXX-NNN) — 카탈로그의 키'},
+    {'name': 'events[].type', 'type': 'string', 'desc': '조건 클래스 (process_down/connection_lost/threshold_crossed 등)'},
+    {'name': 'events[].perceived_severity', 'type': 'string',
+     'enum': ['critical', 'major', 'minor', 'warning', 'indeterminate', 'cleared'],
+     'desc': '인지 심각도 (X.733). 구 레코드는 severity 로도 실린다'},
+    {'name': 'events[].event_type', 'type': 'string', 'desc': 'X.733 event type (communicationsAlarm 등)'},
+    {'name': 'events[].probable_cause', 'type': 'string', 'desc': 'X.733 추정 원인'},
+    {'name': 'events[].message', 'type': 'string', 'desc': '사람이 읽는 한 줄 설명'},
+    {'name': 'events[].source.mo_class', 'type': 'string', 'desc': '대상 자원의 클래스 (service/node/module 등)'},
+    {'name': 'events[].source.mo_instance', 'type': 'string',
+     'desc': '대상 자원의 **불변 id** 경로 — 식별은 항상 이 값으로 한다'},
+    {'name': 'events[].source.mo_label', 'type': 'string',
+     'desc': '표시용 이름 — 조회 시점에 현재 이름으로 해석해 붙인다(과거 레코드도 현재 이름으로 보인다)'},
+    {'name': 'events[].source.detected_by', 'type': 'string', 'desc': '감지 주체 (OAM 규칙 / 자기보고 모듈)'},
+    {'name': 'events[].raised_time', 'type': 'string', 'desc': '발생 시각 (32.111 alarmRaisedTime)'},
+    {'name': 'events[].clear_time', 'type': 'string', 'desc': '해소 시각 (alarmClearedTime)'},
+    {'name': 'events[].change_time', 'type': 'string', 'desc': '심각도 변경 시각 (alarmChangedTime)'},
+    {'name': 'events[].trend_indication', 'type': 'string', 'enum': ['moreSevere', 'lessSevere'],
+     'desc': 'change 레코드에 동반되는 추세'},
+    {'name': 'events[].threshold_info', 'type': 'object',
+     'desc': '임계 계열 알람의 관측치 {observed, threshold, unit}'},
+    {'name': 'events[].effect', 'type': 'string', 'desc': '영향'},
+    {'name': 'events[].recommended_action', 'type': 'string', 'desc': '권고 조치'},
+    {'name': 'events[].ack_state', 'type': 'string', 'enum': ['acknowledged', 'unacknowledged'],
+     'desc': '승인 상태 (P1 라이프사이클)'},
+]
+
+_EX_ALARM = {
+    'ts': '2026-01-02T09:15:00', 'action': 'open',
+    'alarm_id': 'A-PRC-001@service/cims/module/csp@1767312900',
+    'code': 'A-PRC-001', 'type': 'process_down', 'perceived_severity': 'critical',
+    'event_type': 'processingErrorAlarm', 'probable_cause': 'softwareError',
+    'message': 'csp 프로세스 응답 없음',
+    'source': {'mo_class': 'module', 'mo_instance': 'service/cims/module/csp',
+               'mo_label': 'CIMS / CSP', 'detected_by': 'oam.rule'},
+    'raised_time': '2026-01-02T09:15:00',
+}
+
+CIMS_ALERTS_API_DOCS = [
+    {'id': 'alerts.list', 'module': None, 'method': 'GET', 'path': '/api/v1/alerts',
+     'summary': '알람 이력 — 발생/해소/심각도 변경/승인 레코드를 최신순으로 (활성 알람도 여기서 파생)',
+     'params': [
+         {'name': 'days', 'in': 'query', 'type': 'integer', 'required': False,
+          'desc': '조회 일수. 기본 7, 허용 1~90 (범위 밖은 잘림)'},
+         {'name': 'type', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': '조건 클래스로 필터 (`alerts.types` 로 값 목록 조회)'},
+         {'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False,
+          'desc': '최대 건수. 기본 500, 허용 1~5000'},
+     ],
+     'response': '{days, count, events[]}',
+     'response_fields': [
+         {'name': 'days', 'type': 'integer', 'unit': '일', 'desc': '실제 적용된 조회 일수'},
+         {'name': 'count', 'type': 'integer', 'unit': '건', 'desc': 'events 배열 길이'},
+     ] + _ALARM_FIELDS,
+     'example': {'days': 7, 'count': 1, 'events': [dict(_EX_ALARM)]},
+     'errors': list(_ERR_COMMON),
+     'notes': ['**활성 알람은 별도 엔드포인트가 아니다** — open 후 close 가 없는 alarm_id 가 활성이다.',
+               '한 알람의 생애가 여러 레코드로 나뉜다(open→change→ack→close). 인스턴스 병합 키는 '
+               'alarm_id 의 앞 두 마디(`code@mo_instance`).',
+               '일자별 파일을 스캔하므로 days 를 키우면 응답이 느려진다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'alerts.summary', 'module': None, 'method': 'GET', 'path': '/api/v1/alerts/summary',
+     'summary': '알람 집계 — 인스턴스별 발생/해소 횟수·평균 지속시간 + 일별 발생량',
+     'params': [
+         {'name': 'days', 'in': 'query', 'type': 'integer', 'required': False,
+          'desc': '집계 일수. 기본 7, 허용 1~90'},
+     ],
+     'response': '{days, by_type[], daily[]}',
+     'response_fields': [
+         {'name': 'days', 'type': 'integer', 'unit': '일', 'desc': '실제 적용된 집계 일수'},
+         {'name': 'by_type[].key', 'type': 'string', 'desc': '집계 단위 키 `code@mo_instance` (활성 인스턴스 단위)'},
+         {'name': 'by_type[].type', 'type': 'string', 'desc': '조건 클래스'},
+         {'name': 'by_type[].code', 'type': 'string', 'desc': '알람 코드'},
+         {'name': 'by_type[].mo_instance', 'type': 'string', 'desc': '대상 자원의 불변 id 경로'},
+         {'name': 'by_type[].perceived_severity', 'type': 'string', 'desc': '최신 심각도'},
+         {'name': 'by_type[].opens', 'type': 'integer', 'unit': '건', 'desc': '기간 내 발생 횟수'},
+         {'name': 'by_type[].resolved', 'type': 'integer', 'unit': '건', 'desc': '기간 내 해소 횟수'},
+         {'name': 'by_type[].currently_open', 'type': 'boolean', 'desc': '지금 활성인가'},
+         {'name': 'by_type[].avg_duration_sec', 'type': 'number', 'unit': '초',
+          'desc': '발생→해소 평균 지속시간. 해소된 짝이 없으면 null'},
+         {'name': 'by_type[].last_ts', 'type': 'string', 'desc': '마지막 레코드 시각'},
+         {'name': 'daily[].date', 'type': 'string', 'desc': 'YYYY-MM-DD (오래된 → 최근)'},
+         {'name': 'daily[].opens', 'type': 'integer', 'unit': '건', 'desc': '그 날 발생 건수'},
+     ],
+     'example': {'days': 7,
+                 'by_type': [{'key': 'A-PRC-001@service/cims/module/csp', 'type': 'process_down',
+                              'code': 'A-PRC-001', 'mo_instance': 'service/cims/module/csp',
+                              'perceived_severity': 'critical', 'opens': 2, 'resolved': 2,
+                              'currently_open': False, 'avg_duration_sec': 184.0,
+                              'last_ts': '2026-01-02T09:18:04'}],
+                 'daily': [{'date': '2026-01-01', 'opens': 0}, {'date': '2026-01-02', 'opens': 2}]},
+     'errors': list(_ERR_COMMON),
+     'notes': ['승인/코멘트 레코드는 집계 대상이 아니다 (발생/해소만 센다).',
+               'daily 는 요청 일수만큼 **빈 날도 0 으로** 채워 돌려준다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'alerts.catalog', 'module': None, 'method': 'GET', 'path': '/api/v1/alerts/catalog',
+     'summary': '알람 코드 사전 — code 별 정의(심각도·원인·영향·권고 조치)',
+     'params': [],
+     'response': '{catalog[]}',
+     'response_fields': [
+         {'name': 'catalog[].code', 'type': 'string', 'desc': '알람 코드 (A-XXX-NNN) — 알람 레코드의 code 와 짝'},
+         {'name': 'catalog[].type', 'type': 'string', 'desc': '조건 클래스'},
+         {'name': 'catalog[].perceived_severity', 'type': 'string', 'desc': '기본 인지 심각도'},
+         {'name': 'catalog[].event_type', 'type': 'string', 'desc': 'X.733 event type'},
+         {'name': 'catalog[].probable_cause', 'type': 'string', 'desc': 'X.733 추정 원인'},
+         {'name': 'catalog[].mo_class', 'type': 'string', 'desc': '대상 자원 클래스'},
+         {'name': 'catalog[].metric', 'type': 'string', 'desc': '임계 계열이면 관측 지표명'},
+         {'name': 'catalog[].effect', 'type': 'string', 'desc': '영향'},
+         {'name': 'catalog[].recommended_action', 'type': 'string', 'desc': '권고 조치'},
+         {'name': 'catalog[].origin', 'type': 'string',
+          'desc': "정의 출처 — 'rule'(OAM 평가 규칙) 또는 'module:<모듈>'(모듈 자기보고 등록분)"},
+     ],
+     'example': {'catalog': [
+         {'code': 'A-PRC-001', 'type': 'process_down', 'perceived_severity': 'critical',
+          'event_type': 'processingErrorAlarm', 'probable_cause': 'softwareError',
+          'mo_class': 'module', 'effect': '해당 모듈 기능 중단',
+          'recommended_action': '프로세스 상태·로그 확인 후 재기동', 'origin': 'rule'}]},
+     'errors': list(_ERR_COMMON),
+     'notes': ['모듈 자기보고 정의는 file_store 보존본이라 **그 모듈이 내려가 있어도** 목록에 남는다.',
+               '같은 code 가 양쪽에 있으면 OAM 규칙 정의가 이긴다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'alerts.types', 'module': None, 'method': 'GET', 'path': '/api/v1/alerts/types',
+     'summary': '최근 30일 내 등장한 알람 조건 클래스 목록 (필터 선택지)',
+     'params': [],
+     'response': '{types[]}',
+     'response_fields': [
+         {'name': 'types[]', 'type': 'string', 'desc': '조건 클래스 — `alerts.list` 의 type 파라미터에 그대로 쓴다'},
+     ],
+     'example': {'types': ['process_down', 'connection_lost', 'threshold_crossed']},
+     'errors': list(_ERR_COMMON),
+     'notes': ['기간은 30일 고정이다(파라미터 없음).'],
+     'auth': dict(_AUTH_MONITOR)},
+]

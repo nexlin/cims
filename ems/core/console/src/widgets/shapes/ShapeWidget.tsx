@@ -1,7 +1,8 @@
-// 범용 shape 위젯 — 자기 shape 를 지원하는 데이터 소스를 dropdown 으로 선택 → fetch → 렌더.
-// 기본 소스는 배치 설정(config.source, 편집기 [⚙])에 영속. 뷰에서의 전환은 일시적(탐색용).
-// 기간·단위는 같은 페이지에 `core.page-filter` 가 있으면 그쪽을 따르고(자기 컨트롤 접음),
-// 없으면 자기 컨트롤을 쓴다 — 한 페이지에 날짜 선택기가 여러 개 생기지 않게 하는 규칙(pageParams).
+// 범용 shape 위젯 — 배치가 지정한 데이터 소스를 fetch → 렌더.
+// 소스는 배치 설정(config.source, 편집기 [⚙])이 정본이다. 단 같은 페이지에 `core.source-picker`
+// 가 있으면 그 페이지 값(`src`)을 따른다 — 한 화면의 차트·표가 같은 대상을 함께 보게(메시지 통계).
+// 기간·단위도 같은 규칙: `core.page-filter` 가 있으면 그쪽을 따르고(자기 컨트롤 접음), 없으면
+// 자기 컨트롤을 쓴다 — 한 페이지에 날짜 선택기가 여러 개 생기지 않게 하는 규칙(pageParams).
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import type { WidgetDef, WidgetProps } from '../types'
 import type { ShapeData, KpiData, SourceParams } from './types'
@@ -26,7 +27,11 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
   // 소스 카탈로그 = Service Descriptor data_sources (백엔드 데이터 구동). 비동기 로드.
   const { sources: catalog, loading: catLoading, error: catError } = useDataSourceCatalog()
   const sources = useMemo(() => sourcesForShape(shape, catalog), [shape, catalog])
-  const wanted = typeof config?.source === 'string' ? config.source as string : ''
+  // 소스: 페이지에 대상 선택 컨트롤이 있으면 그 값이 우선(없으면 배치 설정).
+  const srcControlled = useHasPageControl('source')
+  const [busSrc] = usePageParam('src')
+  const placed = typeof config?.source === 'string' ? config.source as string : ''
+  const wanted = srcControlled && busSrc ? busSrc : placed
   const [sourceId, setSourceId] = useState(wanted)
   // 기간·단위: 페이지 컨트롤이 있으면 버스 값, 없으면 자기 값. 훅은 항상 둘 다 호출(조건부 호출 금지).
   const controlled = useHasPageControl('period')
@@ -40,12 +45,13 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
-  // 카탈로그 도착 후 소스 기본값 확정 (config.source 가 유효하면 그것, 아니면 첫 소스).
+  // 카탈로그 도착 / 대상 컨트롤 전환에 따라 소스 확정 (wanted 가 유효하면 그것, 아니면 첫 소스).
+  // wanted 가 바뀌면(페이지 컨트롤 클릭) 지금 소스가 유효해도 따라가야 한다.
   useEffect(() => {
     if (sources.length === 0) return
-    if (!sources.some(s => s.id === sourceId)) {
-      setSourceId(sources.some(s => s.id === wanted) ? wanted : sources[0].id)
-    }
+    const valid = sources.some(s => s.id === wanted)
+    if (valid) { if (sourceId !== wanted) setSourceId(wanted); return }
+    if (!sources.some(s => s.id === sourceId)) setSourceId(sources[0].id)
   }, [sources, sourceId, wanted])
 
   const src = sources.find(s => s.id === sourceId)
@@ -89,16 +95,6 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
         <span style={{ fontWeight: 600, fontSize: 13 }}>
           {typeof config?.title === 'string' && config.title ? config.title : SHAPE_LABELS[shape]}
         </span>
-        {/* 소스 선택은 **여러 소스를 한 화면에서 갈아 보는 배치**(config.pickSource)에서만 노출한다.
-            대상별로 메뉴가 나뉜 화면(VoLTE 통계/PTT 통계)에서는 고른다는 개념 자체가 불필요하다.
-            폭 상한 — .form-input 이 width:100% 라 flex 행에서 남은 폭을 다 먹는다. */}
-        {config?.pickSource === true && (
-          <select className="form-input" value={sourceId} onChange={e => setSourceId(e.target.value)}
-                  style={{ fontSize: 12, minWidth: 130, maxWidth: 220, flex: '0 1 auto' }}>
-            {sources.length === 0 && <option value="">{catLoading ? '소스 로딩…' : '(소스 없음)'}</option>}
-            {sources.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-          </select>
-        )}
         {src?.needsControls !== false && (controlled ? (
           // 페이지 컨트롤이 조건을 소유 — 값만 표기(중복 컨트롤 제거).
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -137,9 +133,6 @@ function makeShapeWidget(shape: WidgetShape, id: string, title: string): WidgetD
       return (src?.kpiItems ?? []).map((label, i) => ({ value: String(i), label }))
     },
   }
-  const pickField = {
-    key: 'pickSource', label: '소스 선택 노출', type: 'bool' as const,
-  }
   const titleField = {
     key: 'title', label: '제목', type: 'text' as const, placeholder: SHAPE_LABELS[shape],
   }
@@ -148,7 +141,13 @@ function makeShapeWidget(shape: WidgetShape, id: string, title: string): WidgetD
     category: shape === 'stat' ? 'metric' : 'view',
     defaultSize: shape === 'stat' ? { w: 3, h: 7 } : { w: 6 },
     usesPageParams: true,
-    configFields: shape === 'stat' ? [sourceField, itemField] : [sourceField, titleField, pickField],
+    // 호출 API 는 고른 소스에 따라 갈린다 — API id 를 정적으로 못 적으므로 소스 id 를 넘기고
+    // 경로 환산·문서 대조는 배지가 한다. (같은 계열 소스는 path 파라미터만 다른 한 API 로 모인다)
+    apiSources: cfg => {
+      const id = typeof cfg?.source === 'string' ? cfg.source : ''
+      return id ? [id] : []
+    },
+    configFields: shape === 'stat' ? [sourceField, itemField] : [sourceField, titleField],
     component: (p: WidgetProps) => <ShapeWidgetBody shape={shape} config={p.config} />,
   }
 }

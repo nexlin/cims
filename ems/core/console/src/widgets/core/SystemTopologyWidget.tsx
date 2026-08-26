@@ -306,5 +306,6 @@ export const systemTopologyWidget: WidgetDef = {
   title: '시스템 형상',
   category: 'infra',
   component: SystemTopologyWidget,
+  apis: ['nodes.list'],
   defaultSize: { w: 12 },
 }

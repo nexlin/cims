@@ -113,5 +113,49 @@ class TestConsoleLayouts(unittest.TestCase):
         self.assertIn("dashboard", ids)
 
 
+class TestInstalledServices(unittest.TestCase):
+    """가용 서비스 판정 — API 문서(`/api-docs`)와 위젯 노출이 이 값으로 갈린다.
+
+    게이트웨이 등록 유무로 role 을 추정하던 구현은 **role=all 하이브리드**(csc 만 프록시,
+    oam-svc 는 in-process)를 base 로 오판해 in-process 서비스를 통째로 미가용으로 만들었다
+    — 성능 메뉴의 [API] 배지가 전부 사라졌다. 그 회귀를 고정한다.
+    """
+
+    class _FakeGateway:
+        def __init__(self, routes, admin=object()):
+            self._routes = routes
+            self._ADMIN_SERVER = admin
+
+        def enabled_routes(self, _config):
+            return self._routes
+
+    def setUp(self):
+        from handlers import console_layouts as cl
+        self.cl = cl
+        self._saved = (cl._gateway, cl._INPROC, cl._INPROC_SET)
+
+    def tearDown(self):
+        self.cl._gateway, self.cl._INPROC, self.cl._INPROC_SET = self._saved
+
+    def test_role_all_hybrid_keeps_inprocess_service(self):
+        # csc 만 프록시로 mount 된 상태(= register_gateway 가 호출돼 _ADMIN_SERVER 가 set 됨).
+        self.cl._gateway = self._FakeGateway([{"module": "CSC", "upstream": "https://csc:4430"}])
+        self.cl.set_inprocess_services({"oam-svc"})
+        avail = self.cl.installed_services({})
+        self.assertIn("oam-svc", avail)      # in-process — 게이트웨이와 무관하게 가용
+        self.assertIn("csc", avail)          # 라우트로 도달 (대문자 → 소문자 정규화)
+
+    def test_role_base_without_routes_is_empty(self):
+        # base: 서비스는 전부 게이트웨이 너머 — 라우트가 없으면 가용 서비스도 없다.
+        self.cl._gateway = self._FakeGateway([])
+        self.cl.set_inprocess_services(set())
+        self.assertEqual(self.cl.installed_services({}), set())
+
+    def test_role_all_bundled_csc(self):
+        self.cl._gateway = self._FakeGateway([])
+        self.cl.set_inprocess_services({"oam-svc", "csc"})
+        self.assertEqual(self.cl.installed_services({}), {"oam-svc", "csc"})
+
+
 if __name__ == "__main__":
     unittest.main()

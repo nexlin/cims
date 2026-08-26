@@ -123,5 +123,6 @@ export const recentEventsWidget: WidgetDef = {
   title: '최근 이벤트',
   category: 'event',
   component: RecentEventsWidget,
+  apis: ['events.list'],
   defaultSize: { w: 12 },
 }

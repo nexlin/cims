@@ -43,13 +43,19 @@
 |---|---|---|---|
 | `ems/core/oam/src/handlers/agents.py` | `CIMS_AGENT_API_DOCS` | `None`(base) | `/agents`(노드 사양) · `/agents/{id}/metrics`(자원 사용률) — **조회만** |
 | `ems/core/oam/src/handlers/stats.py` | `CIMS_STATS_API_DOCS` | `oam-svc` | `/stats/*` (health·subscribers·messages·leak-reclaims + service KPI) |
+| `ems/core/oam/src/handlers/alerts.py` | `CIMS_ALERTS_API_DOCS` | `None`(base) | `/alerts` · `/alerts/summary` · `/alerts/catalog` · `/alerts/types` — **조회만** |
+| `ems/core/oam/src/handlers/events.py` | `CIMS_EVENTS_API_DOCS` | `None`(base) | `/events` · `/events/types` — **조회만** |
 | `ems/core/oam/src/handlers/recording.py` | `CIMS_RECORDING_API_DOCS` | `oam-svc` | `/recordings*` (목록·상세·세그먼트·스트리밍) |
 | `ems/core/oam/src/services/flow_logger.py` | `FLOW_API_DOCS` | `oam-svc` | `/call/logs` · `/flow/*` · `/ptt/history*` · `/security/abnormal-sessions` |
 | `csc/src/handlers/admin.py` | `CIMS_ADMIN_API_DOCS` | `csc` | `/users*` · `/ptt/groups*` (CRUD) |
 | `csc/src/handlers/org.py` | `CIMS_ORG_API_DOCS` | `csc` | `/organizations*` (CRUD) |
 
-현재 선언 수: base 2건(노드 사양·사용률), oam-svc 32건(stats 13 · recording 6 · flow 13),
-csc 25건(admin 18 · org 7) = **59건**. 응답 필드는 전 항목에 채워져 있다.
+현재 선언 수: base 8건(노드 사양·사용률 2 · 알람 4 · 이벤트 2), oam-svc 32건(stats 13 · recording 6 ·
+flow 13), csc 25건(admin 18 · org 7) = **65건**. 응답 필드는 전 항목에 채워져 있다.
+
+> `module` 은 **가용 판정 키**다 — 라우팅 등록 위치와 맞춰야 한다. `/alerts`·`/events` 는 oam_app 의
+> `base_rules` 에 등록되는 base 상주라 `None` 이다. `oam-svc` 로 잘못 적으면 `role=base` 배포에서
+> 그 문서가 통째로 걸러져 배지가 사라진다.
 
 ### 무엇을 선언하고 무엇을 안 하나 (범위 정책)
 
@@ -58,6 +64,7 @@ csc 25건(admin 18 · org 7) = **59건**. 응답 필드는 전 항목에 채워�
 | 넣는다 | 안 넣는다 |
 |---|---|
 | 사용량·이력·통계 (`/stats/*`, `/call/logs`, `/flow/*`, `/ptt/history*`, `/security/abnormal-sessions`) | 배포·패키지·sync/drift (`/deployments`, `/packages`, `/csp/sync`, `/csp/drift`, `/services`) |
+| **알람·이벤트 조회**(`/alerts`, `/alerts/summary`, `/alerts/catalog`, `/alerts/types`, `/events*`) | 알람 **평가 규칙**(`/alerts/rules` — 임계·주기 내부 설정) · 승인/코멘트(POST) · SSE 스트림(`/alerts/stream`) |
 | 녹취 (`/recordings*`) | agent 등록·승인·삭제·제어 (`/agents` 의 변이 메서드, `/api/agent/*`) |
 | 가입자·조직·PTT그룹 (`/users*`, `/organizations*`, `/ptt/groups*`) | HA (`/ha-groups`), 게이트웨이(`/gateway`), 외부시스템, 콘솔 계정·레이아웃, 서비스 정의 |
 | **노드 사양·자원 사용률** (`/agents`, `/agents/{id}/metrics` — GET, `monitor`) | 빌드·검증·자동배포 (`/build`, `/verification`, `/provision`) |
@@ -95,9 +102,14 @@ GET /api/v1/api-docs   가용 모듈의 API 문서 전체 → { modules[], count
    - csc 측: `csc/src/handlers/api_docs.py` (`CSC_API_DOCS_HANDLER_LIST`) — `csc_app.py` 가 admin 서버에
      등록. `monitor` 권한 필요.
 
-- 가용 판정은 `handlers/console_layouts.installed_services()` 를 쓴다 (`role=base` 는 게이트웨이 라우트
-  테이블이 권위, `role=all` 은 알려진 서비스 전체). `module` 이 가용 집합에 없으면 제외, `module=None`
-  (base 상주) 은 항상 포함.
+- 가용 판정은 `handlers/console_layouts.installed_services()` 를 쓴다 — **내가 직접(in-process)
+  서빙하는 서비스 ∪ 게이트웨이 라우트로 닿는 서비스**. `module` 이 가용 집합에 없으면 제외,
+  `module=None`(base 상주) 은 항상 포함.
+  - in-process 집합은 `oam_app` 이 기동 시 `set_inprocess_services()` 로 알린다 — `role=all` 이면
+    `{'oam-svc'}`(csc 동봉 시 `csc` 추가), `role=base` 면 빈 집합.
+  - **게이트웨이 등록 유무로 role 을 추정하지 않는다.** `register_gateway` 는 `role=all` 하이브리드
+    (csc 만 프록시, oam-svc 는 in-process)에서도 호출되므로, 그걸 base 로 읽으면 in-process 인
+    oam-svc 가 통째로 미가용이 되어 `/stats/*` 문서가 사라진다(성능 메뉴 배지가 전부 안 뜬다).
   - **모듈명은 소문자로 정규화해 비교한다.** 라우트 테이블은 배포 모듈명을 대문자(`OAM-SVC`/`CSC`)로
     저장하는데 비교 대상(`_KNOWN_SERVICES`, 위젯 `requires_service`, API 문서 `module`)은 소문자라,
     정규화 없이는 `role=base` 에서 전부 미가용으로 오판한다 (위젯 가용성 판정도 같은 경로).
@@ -105,14 +117,29 @@ GET /api/v1/api-docs   가용 모듈의 API 문서 전체 → { modules[], count
   건드리지 않는다.
 - `GET` 외 405, 하위 경로 404.
 
-## 3. 소비 선언 — 위젯의 `apis`
+## 3. 소비 선언 — 위젯의 `apis` / `apiPaths`
 
-위젯이 자기가 부르는 **API id 만** 선언한다. 두 자리:
+위젯이 자기가 부르는 **API id 만** 선언한다. 세 자리:
 
 - **`WidgetDef.apis`** (`widgets/types.ts`) — 실제 위젯. 예: `cims.service-stats` →
   `['stats.service.volte', 'stats.service.ptt', 'stats.messages']`.
 - **`RouteDef.apis`** (`nav-types.ts`) — 고정 페이지(`component:` 라우트). 페이지 전체가 위젯 1개
   (`page:<path>`)로 감싸지므로, `App.tsx` 가 `route.apis` 를 그 page 위젯 def 로 전달한다.
+- **`WidgetDef.apiSources(config)`** — **배치 설정에 따라 API 가 갈리는 위젯**(소스 선택형 `shape.*`).
+  고를 수 있는 소스가 descriptor 데이터라 API id 를 정적으로 못 적는다. 대신 그 배치가 쓰는
+  **데이터 소스 id** 를 돌려주면, 배지가 카탈로그에서 그 소스의 `endpoint` 를 찾아 API 문서의
+  `path` 와 대조해 id 를 얻는다. 둘 다 이미 있는 정보라 새 중복 선언이 아니다. `apis` 와 합집합.
+
+  대조 규칙(`WidgetApiBadge.docForPath`): `/api/v1` 접두사·후행 슬래시·query 를 떼고 비교하며,
+  path 파라미터(`{iface}`)는 **한 세그먼트 와일드카드**로 취급한다. 그래서
+  `/stats/messages/sip` → `stats.messages.iface`, `/stats/messages` → `stats.messages` 로 갈린다.
+
+  소스 카탈로그는 **비동기**다. 배지는 `useDataSourceCatalogPassive()` 로 카탈로그를 **구독만**
+  한다 — 배지 때문에 카탈로그를 새로 받지는 않되(개발자 모드 OFF 평시 트래픽 0), 나중에 도착하면
+  리렌더돼 배지가 살아난다. 렌더 시점에 한 번 계산하고 마는 구조로 두면 배지가 영영 뜨지 않는다.
+
+  **화면을 위젯으로 분해할 때 주의**: 통짜 페이지 위젯이 갖고 있던 `apis` 는 분해된 부품 위젯으로
+  옮겨야 배지가 유지된다. 소스 선택형으로 바뀌었다면 `apiPaths` 로 잇는다.
 
 ## 4. 콘솔 — `[API]` 배지
 

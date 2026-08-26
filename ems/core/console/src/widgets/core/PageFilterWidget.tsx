@@ -38,9 +38,6 @@ function PageFilterWidget({ config }: WidgetProps) {
             ))}
           </>
         )}
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
-          이 페이지의 조회 위젯에 함께 적용
-        </span>
       </div>
     </div>
   )

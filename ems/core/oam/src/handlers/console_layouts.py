@@ -132,26 +132,49 @@ def _dir(config):
     return file_store.domain_dir(config, _DOMAIN)
 
 
+# 이 프로세스가 **직접(in-process) 서빙하는** 서비스 모듈 — oam_app 이 기동 시 알려준다.
+# role=all 이면 {'oam-svc'}(+ csc 동봉 시 'csc'), role=base 면 빈 집합.
+_INPROC: set = set()
+_INPROC_SET = False          # oam_app 이 알려줬는가 (구 경로 호환 판별용)
+
+
+def set_inprocess_services(services) -> None:
+    """기동 시 1회 — 이 프로세스가 직접 서빙하는 서비스 모듈 집합을 등록."""
+    global _INPROC, _INPROC_SET
+    _INPROC = {str(s).lower() for s in (services or set())}
+    _INPROC_SET = True
+
+
 def installed_services(config: dict) -> set:
-    """가용 서비스 모듈 집합.
-      분리 배포(--role base): 게이트웨이 라우트 테이블의 module 들. **라우트 0개 = 서비스 0개**
-        (부트스트랩 직후 base 단독이면 빈 집합 — 전체 폴백 금지. 과거 폴백 버그로 base 에서
-         미배포 서비스가 가용으로 오보돼 base 대시보드에 svc 위젯이 노출됐음).
-      단일 프로세스(--role all): 게이트웨이 미사용(in-process) → 알려진 서비스 전부 가용.
-    role 판별: register_gateway 가 _ADMIN_SERVER 를 set (role=base 에서만; role=all 은 None).
+    """가용 서비스 모듈 집합 = **내가 직접 서빙하는 것 ∪ 게이트웨이로 도달 가능한 것**.
+
+      · in-process(`_INPROC`): role=all 이 자기 프로세스에 등록한 서비스 핸들러(stats/녹취/flow/검증
+        = oam-svc, csc 동봉 시 csc).
+      · 라우트 테이블: 다른 서버에 배포돼 게이트웨이 프록시로 닿는 서비스.
+
+    **라우트 0개 = 서비스 0개** 는 role=base 에서만 성립한다(그때 `_INPROC` 이 비어 있다).
+    전체 폴백은 하지 않는다 — 과거 폴백 버그로 base 에서 미배포 서비스가 가용으로 오보돼
+    base 대시보드에 svc 위젯이 노출됐다.
+
+    게이트웨이 등록 여부로 role 을 추정하지 않는다: `register_gateway` 는 **role=all 하이브리드**
+    (csc 만 프록시, oam-svc 는 in-process)에서도 호출되므로 그걸 base 로 읽으면 in-process 서비스가
+    통째로 미가용이 된다 — API 문서(`/api-docs`)에서 stats 계열이 사라지고 위젯 가용성도 오판한다.
+
     반환값은 **소문자로 정규화**한다 — 라우트 테이블은 배포 모듈명을 대문자('OAM-SVC'/'CSC')로 저장하는데
     비교 대상(_KNOWN_SERVICES, 위젯 requires_service, API 문서 module)은 소문자라 그대로 두면 전부 미가용으로
     오판한다.
     """
+    routed = set()
+    try:
+        if _gateway is not None:
+            routed = {str(r['module']).lower() for r in _gateway.enabled_routes(config) if r.get('module')}
+    except Exception:
+        routed = set()
+    if _INPROC_SET:
+        return set(_INPROC) | routed
+    # oam_app 이 알려주지 않은 경로(구 호출자·단위 테스트) — 게이트웨이 미장착이면 전부 가용.
     gw_active = _gateway is not None and getattr(_gateway, '_ADMIN_SERVER', None) is not None
-    if gw_active:
-        # base: 라우트 테이블이 권위 (비어있으면 서비스 0개)
-        try:
-            return {str(r['module']).lower() for r in _gateway.enabled_routes(config) if r.get('module')}
-        except Exception:
-            return set()
-    # role=all (in-process) — 서비스 전부 가용
-    return set(_KNOWN_SERVICES)
+    return routed if gw_active else set(_KNOWN_SERVICES)
 
 
 def _filter_catalog(role: str, config: dict) -> list:

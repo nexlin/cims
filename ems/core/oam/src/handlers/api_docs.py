@@ -68,6 +68,16 @@ def _stats_docs():
     return CIMS_STATS_API_DOCS
 
 
+def _alerts_docs():
+    from handlers.alerts import CIMS_ALERTS_API_DOCS
+    return CIMS_ALERTS_API_DOCS
+
+
+def _events_docs():
+    from handlers.events import CIMS_EVENTS_API_DOCS
+    return CIMS_EVENTS_API_DOCS
+
+
 def _recording_docs():
     from handlers.recording import CIMS_RECORDING_API_DOCS
     return CIMS_RECORDING_API_DOCS
@@ -89,7 +99,8 @@ def _csc_org_docs():
     return CIMS_ORG_API_DOCS
 
 
-_LOADERS = (_agent_docs, _stats_docs, _recording_docs, _flow_docs, _csc_admin_docs, _csc_org_docs)
+_LOADERS = (_agent_docs, _stats_docs, _alerts_docs, _events_docs, _recording_docs, _flow_docs,
+            _csc_admin_docs, _csc_org_docs)
 
 
 def _declared() -> list:

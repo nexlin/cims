@@ -21,12 +21,15 @@ import { useSearchParams } from 'react-router-dom'
 //   days      = 조회 일수 (분석 화면의 [7일][30일][90일] 컨트롤이 소유)
 //   atab      = 분석 대상 전환 (알람/이벤트) — placement.visibleWhen 이 읽어 탭처럼 동작
 //   svc       = 선택된 서비스 정의 id (서비스 선택 컨트롤이 쓰고 모듈/규칙/소스 위젯이 읽는다)
-export const PAGE_PARAM_KEYS = ['date', 'gran', 'sev', 'days', 'atab', 'svc'] as const
+//   src       = 선택된 데이터 소스 id (소스 선택 컨트롤이 쓰고 shape 위젯들이 읽는다 —
+//               한 화면의 차트·표가 같은 대상을 함께 본다)
+export const PAGE_PARAM_KEYS = ['date', 'gran', 'sev', 'days', 'atab', 'svc', 'src'] as const
 export type PageParamKey = (typeof PAGE_PARAM_KEYS)[number]
 
 // 컨트롤 종류 — 어떤 파라미터 묶음을 누가 소유하는가.
 //   'period' = date+gran (core.page-filter) / 'days' = 조회 일수 (core.days-filter)
-export type PageControlKind = 'period' | 'days' | 'atab' | 'svc'
+//   'source' = 데이터 소스 (core.source-picker) — 있으면 shape 위젯이 자기 배치 소스 대신 이 값을 쓴다
+export type PageControlKind = 'period' | 'days' | 'atab' | 'svc' | 'source'
 
 export const todayIso = () => new Date().toISOString().slice(0, 10)
 
@@ -34,7 +37,7 @@ export const todayIso = () => new Date().toISOString().slice(0, 10)
 export const GRAN_LABELS: Record<string, string> = { '1h': '시간', '1d': '일', '1M': '월' }
 
 const DEFAULTS: Record<PageParamKey, string> =
-  { date: '', gran: '1h', sev: '', days: '7', atab: 'alarms', svc: '' }
+  { date: '', gran: '1h', sev: '', days: '7', atab: 'alarms', svc: '', src: '' }
 
 interface Ctx {
   params: Record<PageParamKey, string>
@@ -56,6 +59,7 @@ export function PageParamsProvider({ children }: { children: ReactNode }) {
     days: search.get('days') || DEFAULTS.days,
     atab: search.get('atab') || DEFAULTS.atab,
     svc: search.get('svc') || DEFAULTS.svc,
+    src: search.get('src') || DEFAULTS.src,
   }), [search])
   const [controls, setControls] = useState<Record<string, number>>({})
 

@@ -1,8 +1,10 @@
-"""S1-UNIT-CONSOLE-LAYOUT — 콘솔 레이아웃 영속 계약 unit test.
+"""S1-UNIT-CONSOLE-LAYOUT — 콘솔 레이아웃 영속 계약 + 가용 서비스 판정 unit test.
 
-위젯 분해 이후 배치 확장 필드(x/y/config/title)와 seed 세대(seedVersion)가 PUT 왕복에서
-유실되지 않는지를 지킨다 — 유실되면 저장본이 옛 배치를 영구 고정하거나 개편 안내가
-매번 다시 뜬다(console_platform.md §3.3~3.4).
+① 위젯 분해 이후 배치 확장 필드(x/y/config/title)와 seed 세대(seedVersion)가 PUT 왕복에서
+   유실되지 않는지 — 유실되면 저장본이 옛 배치를 영구 고정하거나 개편 안내가 매번 다시
+   뜬다(console_platform.md §3.3~3.4).
+② `installed_services()` 의 가용 판정 — role=all 하이브리드(csc 만 프록시)를 base 로 오판하면
+   in-process 인 oam-svc 가 통째로 미가용이 되어 API 문서·위젯이 사라진다(api_docs.md §2).
 """
 from __future__ import annotations
 

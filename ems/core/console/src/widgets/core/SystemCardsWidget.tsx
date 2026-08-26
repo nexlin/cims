@@ -99,5 +99,7 @@ export const systemCardsWidget: WidgetDef = {
   title: '시스템 카드',
   category: 'infra',
   component: SystemCardsWidget,
+  // HA·배포는 선언 대상이 아니다(api_docs.md 범위 정책) — 노드 사양만.
+  apis: ['nodes.list'],
   defaultSize: { w: 12 },
 }

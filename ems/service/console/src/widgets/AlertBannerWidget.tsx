@@ -35,5 +35,6 @@ export const alertBannerWidget: WidgetDef = {
   title: '알람 배너',
   category: 'event',
   component: AlertBannerWidget,
+  apis: ['alerts.list'],
   defaultSize: { w: 12 },
 }

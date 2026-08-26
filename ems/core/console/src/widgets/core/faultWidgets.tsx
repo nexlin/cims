@@ -21,6 +21,7 @@ export const alarmSeverityWidget: WidgetDef = {
   title: '심각도 요약 (활성 알람)',
   category: 'event',
   component: AlarmSeverityTiles,
+  apis: ['alerts.list'],
   defaultSize: { w: 12, h: 5 },
 }
 
@@ -29,6 +30,7 @@ export const alarmListWidget: WidgetDef = {
   title: '활성 알람 목록',
   category: 'event',
   component: ActiveAlarmList,
+  apis: ['alerts.list'],
   defaultSize: { w: 12, h: 24 },
 }
 
@@ -54,9 +56,6 @@ function PeriodDaysControl() {
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
       <DaysButtons days={Number(days) || 7} onChange={d => setDays(String(d))} />
-      <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 'auto' }}>
-        이 페이지의 조회 위젯에 함께 적용
-      </span>
     </div>
   )
 }
@@ -73,12 +72,12 @@ export const alarmEventTabsWidget: WidgetDef = {
 
 export const alarmHistoryWidget: WidgetDef = {
   id: 'core.alarm-history', title: '알람 이력', category: 'event',
-  component: AlarmsSection, defaultSize: { w: 12, h: 34 },
+  component: AlarmsSection, apis: ['alerts.list'], defaultSize: { w: 12, h: 34 },
 }
 
 export const eventHistoryWidget: WidgetDef = {
   id: 'core.event-history', title: '이벤트 이력', category: 'event',
-  component: EventsSection, defaultSize: { w: 12, h: 34 },
+  component: EventsSection, apis: ['events.list'], defaultSize: { w: 12, h: 34 },
 }
 
 export const alarmCatalogWidget: WidgetDef = {
@@ -86,6 +85,7 @@ export const alarmCatalogWidget: WidgetDef = {
   title: '알람 코드 사전',
   category: 'event',
   component: AlarmCatalogTable,
+  apis: ['alerts.catalog'],
   defaultSize: { w: 12, h: 26 },
 }
 
@@ -94,13 +94,16 @@ export const alarmRulesWidget: WidgetDef = {
   title: '알람 평가 규칙 (임계·주기)',
   category: 'event',
   component: AlarmRulesTable,
+  // 평가 규칙(`/alerts/rules`)은 내부 설정이라 API 문서 선언 대상이 아니다 → 배지 없음이 정상.
   defaultSize: { w: 12, h: 20 },
 }
 
 // ── 유형별 분석 블록 — 조회 일수는 core.days-filter 가 소유하고 각 블록이 읽는다 ──
+// 알람 블록은 집계 API(alerts.summary), 이벤트 블록은 목록 API(events.list)를 공유 로더로 부른다.
 const analysis = (id: string, title: string, component: WidgetDef['component'],
                   w: number, h: number): WidgetDef =>
-  ({ id, title, category: 'stats', component, defaultSize: { w, h } })
+  ({ id, title, category: 'stats', component, defaultSize: { w, h },
+     apis: [id.startsWith('core.alarm-') ? 'alerts.summary' : 'events.list'] })
 
 export const ANALYSIS_WIDGETS: WidgetDef[] = [
   analysis('core.alarm-analysis.totals', '알람 분석 — 요약 타일', AlarmTotalsBlock, 12, 6),

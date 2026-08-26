@@ -241,7 +241,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, onChange 
                 {Math.round(view.w / GRID_COLS * 100)}%×{Math.round(view.h * ROW_H_VH)}%
               </span>
               {/* 사용 API — 개발자 모드에서만. 배치하면서 이 위젯이 뭘 부르는지 바로 확인. */}
-              <WidgetApiBadge ids={def?.apis} title={def?.title ?? p.widgetId} />
+              <WidgetApiBadge ids={def?.apis} sourceIds={def?.apiSources?.(p.config)} title={def?.title ?? p.widgetId} />
               <button className="btn btn--sm" title="이 배치의 이름·설정"
                       style={{ marginLeft: 'auto', position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}

@@ -69,7 +69,7 @@ function GridCanvas({ layout }: { layout: PageLayout }) {
         ;(style as Record<string, string | number>)['--h-rows'] = b.h
         return (
           <div key={`${p.widgetId}-${i}`} className="widget-fixed widget-api-host" style={style}>
-            <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
+            <WidgetApiBadge ids={def?.apis} sourceIds={def?.apiSources?.(p.config)} title={def?.title} overlay />
             {p.title && <div className="widget-caption">{p.title}</div>}
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>
@@ -95,7 +95,7 @@ function FlowGrid({ layout }: { layout: PageLayout }) {
           <div key={`${p.widgetId}-${i}`}
                className={`${fixed ? 'widget-fixed ' : ''}widget-api-host`}
                style={{ gridColumn: `span ${span}`, minWidth: 0, ...hStyle }}>
-            <WidgetApiBadge ids={def?.apis} title={def?.title} overlay />
+            <WidgetApiBadge ids={def?.apis} sourceIds={def?.apiSources?.(p.config)} title={def?.title} overlay />
             {p.title && <div className="widget-caption">{p.title}</div>}
             {Comp ? <Comp config={p.config} /> : <UnknownWidget id={p.widgetId} />}
           </div>

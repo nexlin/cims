@@ -61,7 +61,7 @@ function asArray(raw: unknown, path: string): Record<string, unknown>[] {
 export function buildDataSource(spec: DataSourceSpec): DataSource {
   const ds: DataSource = {
     id: spec.id, label: spec.label, serviceId: spec.serviceId,
-    shapes: spec.shapes, needsControls: spec.needsControls,
+    shapes: spec.shapes, needsControls: spec.needsControls, endpoint: spec.endpoint,
     load: (p: SourceParams) => {
       const pv = p as unknown as Record<string, string>
       const qs = (spec.query ?? [])

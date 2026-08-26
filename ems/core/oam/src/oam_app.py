@@ -812,6 +812,18 @@ if __name__ == '__main__':
                            _me_fn, cims_kwargs))
         admin_server.add_dynamic_rules(base_rules)
 
+        # 가용 판정(위젯 노출·API 문서)에 쓸 **내가 직접 서빙하는 서비스** 를 알린다.
+        # 게이트웨이 등록 유무로 추정하면 role=all 하이브리드(csc 만 프록시)를 base 로 오판해
+        # in-process 인 oam-svc 가 통째로 미가용이 된다(성능 메뉴 API 문서가 사라짐).
+        try:
+            from handlers.console_layouts import set_inprocess_services
+            if role == 'all':
+                set_inprocess_services({'oam-svc'} | ({'csc'} if _csc_inproc else set()))
+            else:
+                set_inprocess_services(set())      # base — 서비스는 전부 게이트웨이 너머
+        except Exception as _e:
+            logger.log_error(f"[role] in-process 서비스 등록 실패: {_e}")
+
         # ── SERVICE (in-process; role=all 에서만; P2+ 게이트웨이 프록시로 이관) ──
         if role == 'all':
             if _csc_inproc:

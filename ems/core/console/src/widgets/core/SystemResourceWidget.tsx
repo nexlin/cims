@@ -170,5 +170,6 @@ export const systemResourceWidget: WidgetDef = {
   title: '시스템 리소스',
   category: 'infra',
   component: SystemResourceWidget,
+  apis: ['nodes.list', 'nodes.metrics'],
   defaultSize: { w: 6 },
 }

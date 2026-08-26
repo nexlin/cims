@@ -8,6 +8,7 @@ import { systemCardsWidget } from './core/SystemCardsWidget'
 import { systemTopologyWidget } from './core/SystemTopologyWidget'
 import { systemResourceWidget } from './core/SystemResourceWidget'
 import { pageFilterWidget } from './core/PageFilterWidget'
+import { sourcePickerWidget } from './core/SourcePickerWidget'
 import { FAULT_WIDGETS } from './core/faultWidgets'
 import { SERVICE_DEF_WIDGETS } from './core/serviceDefWidgets'
 import { SHAPE_WIDGETS } from './shapes/ShapeWidget'
@@ -18,6 +19,7 @@ const CORE_WIDGETS: WidgetDef[] = [
   systemTopologyWidget,
   systemResourceWidget,
   pageFilterWidget,
+  sourcePickerWidget,
   ...FAULT_WIDGETS,
   ...SERVICE_DEF_WIDGETS,
   ...SHAPE_WIDGETS,

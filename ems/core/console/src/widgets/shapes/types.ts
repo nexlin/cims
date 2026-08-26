@@ -29,6 +29,7 @@ export interface DataSource<Raw = unknown> {
   label: string                    // 'SIP 메시지'
   serviceId?: string               // 'cims'
   shapes: ShapeKind[]              // 이 소스가 채울 수 있는 shape 들
+  endpoint: string                 // '/stats/messages/sip' — [API] 배지가 이 경로로 API 문서를 찾는다
   kpiItems?: string[]              // kpi 계약의 지표 라벨(선언 순서) — stat 위젯의 지표 선택지
   needsControls?: boolean          // date/granularity 툴바 필요 여부 (기본 true)
   load: (p: SourceParams) => Promise<Raw>
