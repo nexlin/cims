@@ -545,7 +545,12 @@ POST /internal/aka/av            Authorization: Bearer <InternalApi.Token>
 - `/provisioning/me`: `account.authScheme` (`digest`|`aka`), `aka` 면 `account.aka={k,opc,amf}` 와 `sipHa1:null`.
   소프트-K 프로비저닝 — 단말이 USIM 역할이므로 K 원문이 토큰 인증 + TLS 채널로 내려간다(이 채널의 신뢰가 전제).
 - **Android UE**(`android/core`): `account.aka` 를 pjsip AKA cred 로 연결(`AuthCredInfo`
-  `PJSIP_CRED_DATA_EXT_AKA` + akaK/akaOp/akaAmf — pjsua2 가 AKA 콜백을 상시 결선). pjproject 패치
+  `PJSIP_CRED_DATA_EXT_AKA` + akaK/akaOp/akaAmf — pjsua2 가 AKA 콜백을 상시 결선). **자격 표현 = hex
+  문자열**(K/OPc 32자·AMF 4자): pjsua2/Java 경로는 바이너리를 실을 수 없어, pjsip 패치([2-15])가
+  길이 검사(hex 폭 허용)와 소비 시점 디코드(`aka_cred_val` — slen 이 2×바이너리 길이·전부 hex 면
+  디코드, 바이너리 입력 하위호환)로 흡수한다 — AuC 와 동일한 16B K/OPc 로 Milenage 를 계산해
+  RES 가 일치한다(미적용 pjsip 은 계정 add 에서 `op.slen > PJSIP_AKA_OPLEN` assert 로 SIGABRT).
+  pjproject 패치
   (`config_site.h` `PJSIP_HAS_DIGEST_AKA_AUTH` + `PJSIP_AKA_OP_IS_OPC`): AuC 는 OP 가 아니라 **OPc** 를
   배포하므로 milenage 에 `f1_opc`/`f2345_opc`(ComputeOPc 생략) 를 신설해 `sip_auth_aka.c` 가 그것을 쓴다.
   libmilenage 는 third_party 빌드·링크에 편입. **AUTS 재동기는 미구현** — pjsip 은 단말측 SQN 을 추적하지

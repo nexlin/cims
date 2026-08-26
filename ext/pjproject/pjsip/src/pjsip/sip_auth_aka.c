@@ -30,6 +30,41 @@
 
 #include "../../third_party/milenage/milenage.h"
 
+/* CIMS: hex 문자 → 0..15, 아니면 -1 (자족 — 추가 include 의존 없음). */
+static int hex_val(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* CIMS: AKA 자격값 복사 — slen 이 bin_len*2 이고 전부 hex 문자면 디코드,
+ * 아니면 원본 그대로(바이너리, 상한은 호출자 버퍼 크기). */
+static void aka_cred_val(const pj_str_t *src, pj_uint8_t *dst,
+                         unsigned bin_len)
+{
+    unsigned i;
+
+    if (src->slen == (pj_ssize_t)bin_len * 2) {
+        for (i = 0; i < (unsigned)src->slen; ++i) {
+            int hv = hex_val(src->ptr[i]);
+            if (hv < 0)
+                break;
+        }
+        if (i == (unsigned)src->slen) {
+            for (i = 0; i < bin_len; ++i) {
+                dst[i] = (pj_uint8_t)
+                         ((hex_val(src->ptr[i*2]) << 4) |
+                          hex_val(src->ptr[i*2+1]));
+            }
+            return;
+        }
+    }
+    if (src->slen)
+        pj_memcpy(dst, src->ptr, src->slen);
+}
+
 /*
  * Create MD5-AKA1 digest response.
  */
@@ -105,17 +140,19 @@ PJ_DEF(pj_status_t) pjsip_auth_create_aka_response(
     chal_mac = (pj_uint8_t*) (nonce_bin.ptr + PJSIP_AKA_RANDLEN + 
                               PJSIP_AKA_SQNLEN + PJSIP_AKA_AMFLEN);
 
-    /* Copy k. op, and amf */
+    /* Copy k. op, and amf.
+     * CIMS: 각 값은 바이너리 또는 hex 문자열(정확히 2배 길이·전부 hex 문자) —
+     * pjsua2/Java 경로는 문자열만 실을 수 있어 hex 로 온다. hex 면 디코드해
+     * AuC(CSC)와 동일한 16B K/OPc·2B AMF 로 Milenage 를 돌린다
+     * (sip_access_security.md §8.2). 바이너리 입력은 종전대로.
+     */
     pj_bzero(k, sizeof(k));
     pj_bzero(op, sizeof(op));
     pj_bzero(amf, sizeof(amf));
 
-    if (cred->ext.aka.k.slen)
-        pj_memcpy(k, cred->ext.aka.k.ptr, cred->ext.aka.k.slen);
-    if (cred->ext.aka.op.slen)
-        pj_memcpy(op, cred->ext.aka.op.ptr, cred->ext.aka.op.slen);
-    if (cred->ext.aka.amf.slen)
-        pj_memcpy(amf, cred->ext.aka.amf.ptr, cred->ext.aka.amf.slen);
+    aka_cred_val(&cred->ext.aka.k,   k,   PJSIP_AKA_KLEN/2);
+    aka_cred_val(&cred->ext.aka.op,  op,  PJSIP_AKA_OPLEN);
+    aka_cred_val(&cred->ext.aka.amf, amf, PJSIP_AKA_AMFLEN);
 
     /* Given key K and random challenge RAND, compute response RES,
      * confidentiality key CK, integrity key IK and anonymity key AK.

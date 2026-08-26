@@ -1052,12 +1052,16 @@ PJ_DEF(pj_status_t) pjsip_auth_clt_set_credentials( pjsip_auth_clt_sess *sess,
                 PJ_ASSERT_RETURN(c[i].ext.aka.k.slen <= PJSIP_AKA_KLEN,
                                  PJSIP_EAUTHINAKACRED);
 
-                /* Verify OP len */
-                PJ_ASSERT_RETURN(c[i].ext.aka.op.slen <= PJSIP_AKA_OPLEN,
+                /* Verify OP len.
+                 * CIMS: hex 문자열 표현(2배 길이)도 허용 — pjsua2/Java 경로는
+                 * 바이너리를 실을 수 없어 K/OPc/AMF 가 hex 로 온다. 소비 시점
+                 * (sip_auth_aka.c)에서 디코드한다 (sip_access_security.md §8.2).
+                 */
+                PJ_ASSERT_RETURN(c[i].ext.aka.op.slen <= PJSIP_AKA_OPLEN*2,
                                  PJSIP_EAUTHINAKACRED);
 
-                /* Verify AMF len */
-                PJ_ASSERT_RETURN(c[i].ext.aka.amf.slen <= PJSIP_AKA_AMFLEN,
+                /* Verify AMF len (hex 표현 허용 — 위와 동일) */
+                PJ_ASSERT_RETURN(c[i].ext.aka.amf.slen <= PJSIP_AKA_AMFLEN*2,
                                  PJSIP_EAUTHINAKACRED);
 
                 sess->cred_info[i].ext.aka.cb = c[i].ext.aka.cb;
