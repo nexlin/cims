@@ -1464,10 +1464,18 @@ POST 는 tarball 의 `meta.json` 에서 name/version 자동 추출. 동일 (name
 | PUT | `/deployments/{id}` | 필드 업데이트 (`note`, `process_name`, ...) |
 | DELETE | `/deployments/{id}` | 제거 |
 | POST | `/deployments/{id}/job` | job 큐잉 (`{job_type, extra?}`) |
-| GET | `/deployments/{id}/config` | scalar 설정 + 템플릿. `type=password` 필드는 **마스킹**되어 반환 |
+| GET | `/deployments/{id}/config` | scalar 설정 + 템플릿. `config` = overlay(운영자 입력분), **`effective` = 노드에 실제로 들어가는 값** `{key:{v,src}}` — `src` 는 `overlay`(입력값이 그대로 적용) / `injected`(배포 시 OAM 이 채움, 또는 주입이 overlay 를 덮음) / `default`(템플릿 기본값). `type=password` 필드는 양쪽 다 **마스킹**되어 반환 |
 | PUT | `/deployments/{id}/config` | scalar 설정 저장 (`{config, queue_update?}`) — **변경분 병합**. overlay 는 `config_template` 선언 키만 담는다(스키마가 계약) — 저장되지 않은 키는 응답 `pruned_keys[]` 로 반환 |
 | GET | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 읽기 (Agent 프록시) |
 | PUT | `/deployments/{id}/collection/{name}` | jsonl 컬렉션 저장 (`{records, signal?}`) |
+
+> **화면은 `config` 가 아니라 `effective` 를 그린다.** overlay 만 그리면 (a) 주입으로 채워지는
+> 값(`CimsAuth.JwtSecret`·store 경로 등)이 빈칸으로 보여 "설정 안 됨"으로 오해되고,
+> (b) 주입이 overlay 를 덮는 키(`CimsAuth.JwtSecret`·`Mgmt.Cidr`)는 화면과 노드가 다른 상태가
+> 드러나지 않는다. `effective` 는 **템플릿 선언 키만** 담으므로 미선언 주입값은 노출되지 않고,
+> 저장은 변경된 키만 보내므로 채워 보여줘도 주입값이 overlay 에 굳지 않는다.
+> 이것은 **OAM 이 계산한 실효값**이지 노드 파일을 읽은 값이 아니다 — agent 는 파일 내용이 아니라
+> canonical hash 만 보고하므로(`metric.cfg_hashes`), 어긋나면 `config_out_of_sync` 알람이 드러낸다.
 
 관리평면 노드 합류 (2번째 OAM 노드 — [oam_ha.md](../design/features/oam_ha.md) §9):
 
@@ -1505,15 +1513,16 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > 화면에 띄우고 코드로 분기한다(가드 409 는 사유를 보여준 뒤 `force` 재시도를 묻는다).
 
 > **`POST /api/v1/ha-groups/{id}/shared-store/migrate`** (admin) — 관리 store 를 공유
-> 마운트로 이관. body `{mount_point}`. 그룹 `shared_store` 저장 + 멤버 oam/oam-svc 배포설정
-> (`CimsRuntimeDir`/`CimsRuntimeMount`) 갱신 + store 보유 노드에 `migrate_oam_store` job
+> 마운트로 이관. body `{mount_point}`. 멤버 **oam** 배포설정(`CimsRuntimeDir`/`CimsRuntimeMount`
+> + 파생 `Packages.Dir`·`ServiceLogging.Dir`) 갱신 + store 보유 노드에 `migrate_oam_store` job
 > (정지→복사→config→기동) 까지 한 번에 수행하고 **202** 를 반환한다. 진행 중 OAM 이
 > 재기동되므로 콘솔이 잠깐 끊긴다. 복사는 멱등이고, 실패 시 구 설정으로 되돌려 기동한다.
 > 시크릿·인증서는 이관 대상이 아니다(노드 로컬 유지). 대상 경로에 이전 데이터가 있으면
 > **확인 없이 덮는다** — 이관의 source 는 지금 도는 OAM 의 store 이므로 정의상 정본이다.
 > 기존 대상은 삭제하지 않고 `<target>.stale-<시각>` 으로 보관한다. `source == target` 이면
 > 거부한다(이관이 무의미).
-> 400: `invalid_mount_point` / `not_active_standby` / `no_oam_deployment`.
+> 400: `invalid_mount_point` / `not_active_standby` / `no_oam_deployment` /
+> `no_base_oam_deployment`(그룹에 base `oam` 이 없음 — store 위치의 정본이 oam 배포설정이라 적을 곳이 없다).
 > 상세: [oam_ha.md](../design/features/oam_ha.md) §9.4
 
 > **400 `not_a_mount_point`** — `shared_store.mount_point` 가 그룹 멤버의 **실제 마운트**가
@@ -1522,11 +1531,13 @@ Agent OAM 주소 재지정 (이중화 전환: 노드 IP → VIP):
 > mount guard 는 `/proc/mounts` 와 **정확히 일치**하는 경로만 통과시키므로 하위 디렉터리는
 > 마운트 지점이 될 수 없다. 마운트 보고가 아직 없는 노드는 판정하지 않는다.
 
-> **409 `store_path_not_shared`** — `PUT /api/v1/ha-groups/{id}` 로 `shared_store` **경로만**
-> 저장하려 할 때, 그룹 멤버의 oam/oam-svc 배포설정 `CimsRuntimeDir` 이 아직 그 마운트 하위가
-> 아니면 거부된다. 그 상태로 두면 HA 편입은 되는데 데이터는 노드별 로컬에 남아 **절체 시 빈
-> 콘솔**이 된다. 응답 `conflicts[]` 에 어긋난 배포가 실린다. 해결은 위 이관 엔드포인트
-> (콘솔 `이 경로로 이관`). 신규 설치처럼 이미 경로가 맞으면 그대로 저장된다.
+> **400 `shared_store_not_group_scoped`** — `PUT /api/v1/ha-groups/{id}` 에 `shared_store` 를
+> 실으면 거부된다. 공유 store 는 그룹이 저장하는 값이 아니라 **base `oam` 배포설정**
+> (`CimsRuntimeMount`)이고, GET 응답의 `shared_store` 는 그것을 읽은 읽기 전용 유도값이다.
+> 최초 지정은 부트스트랩 설치(`--runtime-mount` / 대화식 `[6/7]`), 이후 변경은 위 이관
+> 엔드포인트(콘솔 `이 경로로 이관`) — 경로 변경은 데이터 이동을 수반하기 때문이다.
+> oam-svc 배포설정에는 store 경로 선언 자체가 없어(overlay 쓰기 마스크가 거른다) 두 모듈이
+> 다른 store 를 가리키는 상태는 생기지 않는다.
 
 > **409 `url_unreachable`** — `POST /api/v1/agents/oam-url` 사전 확인. OAM 이 그 주소의
 > `/health` 에 도달하지 못하면 job 을 큐잉하지 않고 거부한다. 각 agent 도 도달 확인 후에만

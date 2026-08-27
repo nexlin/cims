@@ -137,11 +137,16 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 
 | 노드 로컬 유지 (변경 없음) | 공유 store 로 |
 |---|---|
-| `run/ha/{verdict,role,health,promotion,recovery}` | `control/*` (agents·deployments·jobs·metrics·packages·ha_groups·gateway_routes) |
-| `state/ha/{maintenance,planned_release}`, `run/ha/desired.json` | `console/*` (계정·레이아웃·메뉴) |
-| `run/keepalived/ha.json`, `run/managed_ips.json`, `run/supervised.json` | `ha_operations`, `auth_codes`, `refresh_tokens`, `pkg_files`, `verify_runs` |
+| `run/ha/{verdict,role,health,promotion,recovery,operations}` | `control/*` (agents·deployments·jobs·metrics·packages·ha_groups·gateway_routes·csp_sync_txn·**ha_operations**) |
+| `state/ha/{latch,maintenance,planned_release}`, `run/ha/desired.json` | `console/*` (계정·레이아웃·메뉴) |
+| `run/keepalived/ha.json`, `run/managed_ips.json`, `run/supervised.json` | `auth_codes`, `refresh_tokens`, `pkg_files`, `verify_runs` (카테고리 없이 store 루트 직하) |
 | `modules/<mod>/service.json`, 모듈 `config.json` | |
 | **시크릿·TLS·CA** (`runtime/_secrets/`, §5) | |
+
+`ha_operations`(계획 절체 op)가 공유 store 인 이유 — 관리평면 자기 절체에서는 source 가
+자기 자신을 정지시키므로 **신 Active 가 op 를 이어받아야** 한다. 노드 로컬에 두면 절체
+도중 상태가 끊긴다. 반면 `run/ha/*`(verdict·role·health…)는 그 노드의 관측 결과라
+공유하면 안 된다 — 판정은 노드 로컬이어야 한다.
 
 현재 `file_store.runtime_root` 는 파생 경로가 공유 마운트로 유도되면 `RuntimeError` 를 던지고
 (`oam.json` 에도 "관리 데이터 SoT 는 mgmt host 로컬 유지" 주석이 고정돼 있다), 그 근거는
@@ -176,22 +181,34 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 
 #### 공유 store 는 **oam 모듈 설정이다** — 그룹은 읽기만 한다
 
-정본은 oam/oam-svc 배포설정의 `CimsRuntimeMount` 하나다. 그룹 레코드에 별도 선언을 두지
-않는다 — 같은 사실을 두 곳에 적으면 어긋나고, 어긋남을 막는 코드를 또 써야 한다.
+정본은 **base `oam` 배포설정의 `CimsRuntimeMount`** 하나다. 그룹 레코드에도, oam-svc
+배포설정에도 별도 선언을 두지 않는다 — 같은 사실을 두 곳에서 입력받으면 어긋나고,
+어긋남을 막는 코드를 또 써야 한다.
 
 ```text
-정본:  oam/oam-svc 배포설정 CimsRuntimeMount        ← 부트스트랩(설치 시) 또는 이관
-                    │
-        유도(_derived_shared_store)
-                    ↓
+정본:  oam 배포설정 CimsRuntimeMount / CimsRuntimeDir  ← 부트스트랩(설치 시) 또는 이관
+          │                  │
+          │        유도(agents._store_source)
+          │                  ↓
+          │        oam-svc config.json  (파생값 — 입력 창구 없음)
+          │
+   유도(_derived_shared_store)
+          ↓
 판정:  그룹의 "이 모듈이 절체 대상인가" (requires_leader_lease 전제)
         + ha.json services.<svc>.shared_store (agent 승격 preflight)
 ```
 
-- **성립 조건**: 그룹에 배포된 oam/oam-svc 전부가 같은 비어있지 않은 `CimsRuntimeMount`.
+- **성립 조건**: 그룹에 배포된 **oam** 전부가 같은 비어있지 않은 `CimsRuntimeMount`.
   값이 같다는 것만 본다 — 그 경로가 실제 마운트인지는 노드가 스스로 집행한다(mount
   guard §4.3, agent 승격 preflight §4.2). heartbeat 관측까지 판정에 넣으면 보고가 잠깐
   stale 해질 때마다 HA 편입이 흔들린다.
+- **oam-svc 는 유도에 관여하지 않는다.** oam-svc 도 store 를 읽지만(알람 sweeper 가
+  `agents`·`ha_groups`·`services` 도메인 조회) 그 위치는 언제나 oam 과 같은 값이어야
+  하므로 **사용자 입력이 아니라 파생값**이다. 그래서 oam-svc `config_template.json` 에는
+  store 섹션이 없고(→ overlay 쓰기 마스크가 저장을 구조적으로 차단), 실체화가 oam
+  배포설정에서 유도해 `config.json` 에 넣는다(`agents._store_source`). 유도 출처가
+  **배포 overlay**(desired state)이지 돌고 있는 OAM 의 현재 설정(actual state)이 아닌
+  이유는 §9.4 를 본다.
 - **`scope=service`(공통 설정)** 이다 — 멤버 간 반드시 동일해야 하는 값이므로 서버별 개별
   설정으로 두면 안 된다(개별로 두면 한쪽만 바뀌어도 경고가 없고, 절체하면 다른 store 를 본다).
   편집 창구는 **그룹 > 패키지 설정 > oam > 관리 store** 하나이고, R4 자동 교정이 ACTIVE 기준으로
@@ -201,9 +218,9 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
 - **그룹 API 는 `shared_store` 를 저장하지 않는다.** GET 응답의 `shared_store` 는 읽기 전용
   유도값이고, PUT 으로 보내면 400 `shared_store_not_group_scoped` 다. 경로 변경은 데이터
   이동을 수반하므로 이관(§9.4)이 유일한 경로다.
-- **주입** — 두 번째 노드에 oam/oam-svc 를 설치하면 살아있는 OAM 의 값이 배포설정에
-  주입된다(`_materialize_deploy_config`, overlay 에 값이 없을 때만). store 경로 3종을
-  **함께** 준다:
+- **주입** — 두 번째 노드에 oam 을 설치하면 살아있는 OAM 의 값이 배포설정에 주입된다
+  (`_materialize_deploy_config`, overlay 에 값이 없을 때만 — 이관이 넣은 값을 되돌리지
+  않기 위해). store 경로 3종을 **함께** 준다:
 
   | 키 | 빠뜨리면 |
   |---|---|
@@ -211,8 +228,13 @@ HA 판정이 노드 로컬이어야 한다는 원칙(ha_service_model.md §5·§
   | `CimsRuntimeMount` | **그 노드의 mount guard 가 꺼진다** — 키가 없으면 검사를 건너뛰므로, 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를 만든다 |
   | `Packages.Dir` | 패키지 `oam.json` 의 상대경로로 폴백해 **버전 디렉터리**를 본다 → 그 노드가 Active 가 되는 순간 `/agent-bundle.tar.gz` 404 (agent·모듈 설치/업그레이드 전면 불가) |
 
-  `Packages.Dir` 은 **템플릿에 선언된 모듈에만** 준다 — oam-svc 에는 없다(패키지 서빙은
-  base oam 만). 선언 없는 키를 심으면 설정화면에 유령 항목·드리프트가 된다.
+  `Packages.Dir` 은 **oam 에만** 준다 — 패키지 서빙은 base oam 만의 일이다.
+
+  oam-svc 는 이 표의 앞 두 키를 **overlay 우선 없이 무조건** 받는다(위 "유도에 관여하지
+  않는다"). oam 과 규칙이 다른 이유는 방향이 반대이기 때문이다: oam 에서 overlay 는
+  운영자가 정한 값이라 주입이 덮으면 안 되고, oam-svc 에서 overlay 에 남은 값은 선언을
+  걷어내기 전의 잔재라 이기면 두 프로세스가 다른 store 를 본다. 잔재는 OAM 기동 시
+  `sweep_overlay_schema` 가 렌더 동치를 확인하고 무중단으로 치운다.
 
 #### 경로 파생 규칙 — 무엇이 store 를 따라가고 무엇이 마운트에 붙는가
 
@@ -547,10 +569,10 @@ SAN 이 충분하면 아무것도 하지 않으므로 재기동이 인증서를 
 없거나 발급이 실패하면 경고만 남기고 통과한다 (모듈 자체 폴백이 뒤를 받쳐 기동을 막지
 않는다).
 
-모듈 쪽에는 발급 코드가 없다. `oam_app` 의 SAN 재발급(`_ensure_cert_sans`)과 그룹 CA
-생성·서명 헬퍼는 제거했다 — 기동 중에 재발급하면 이미 뜬 모듈과 인증서가 갈린다.
-`_resolve_oam_cert` 의 self-signed 생성만 엔진을 거치지 않은 기동(수동 실행)용 최후
-폴백으로 남는다.
+모듈 쪽에는 발급 코드가 없다. SAN 점검·그룹 CA 생성·재발급은 **lifecycle 엔진**
+(`agent/lib/cert.sh`)이 모듈 **기동 전**에 수행한다 — 기동 중에 재발급하면 이미 뜬 모듈과
+인증서가 갈린다. `oam_app` 에 남은 것은 `_resolve_oam_cert` 의 self-signed 생성뿐이고,
+그것도 엔진을 거치지 않은 기동(수동 실행)용 최후 폴백이다.
 
 **핫리로드** — SAN 이 바뀌는 사건(VIP 부여·접속 주소 변경)은 모듈이 이미 떠 있을 때도
 일어난다. 그래서 `httpsrv.HttpServer` 가 uvicorn 의 `SSLContext` 를 잡아 두고 인증서
@@ -947,8 +969,9 @@ sudo ./install.sh --join \
 
 | # | 동작 |
 |---|---|
-| 1 | 그룹에 `shared_store` 저장 — 이 시점부터 oam/oam-svc 가 HA 편입 대상(§6.3) |
-| 2 | 멤버의 oam/oam-svc 배포 overlay 에 `CimsRuntimeDir`(=`<mount>/runtime`)·`CimsRuntimeMount` **+ store 파생 경로**(`Packages.Dir`=`<store>/pkg_files`, `ServiceLogging.Dir`=`<mount>/service_log` — §4.1) 병합 — **현재 store 에 기록**되므로 3의 복사에 함께 실려 신 store 와 일관해진다. 로그 경로는 운영자가 콘솔에서 지정할 수 있는 키라 **파생값일 때만** 따라 옮긴다(빈 값 또는 `…/service_log`; 이미 마운트 하위거나 운영자가 고른 다른 위치는 그대로) |
+| 1 | 그룹 레코드에는 **쓰지 않는다** — 공유 store 는 2 의 배포설정이 정본이고 그룹은 그것을 읽는다(§4.1). 2 가 끝나면 그 시점부터 oam/oam-svc 가 HA 편입 대상(§6.3) |
+| 2 | 멤버의 **oam** 배포 overlay 에 `CimsRuntimeDir`(=`<mount>/runtime`)·`CimsRuntimeMount` **+ store 파생 경로**(`Packages.Dir`=`<store>/pkg_files`, `ServiceLogging.Dir`=`<mount>/service_log` — §4.1) 병합 — **현재 store 에 기록**되므로 3의 복사에 함께 실려 신 store 와 일관해진다. 로그 경로는 운영자가 콘솔에서 지정할 수 있는 키라 **파생값일 때만** 따라 옮긴다(빈 값 또는 `…/service_log`; 이미 마운트 하위거나 운영자가 고른 다른 위치는 그대로). oam-svc 는 store 경로를 저장하지 않는다 — 옛 배포에 남은 값이 있으면 여기서 걷어낸다 |
+| 2' | **oam 을 먼저 처리한다.** oam-svc 의 store 경로는 실체화가 oam 배포설정에서 유도해 넣는 파생값이므로(§4.1), 순서가 뒤집히면 oam-svc 가 아직 갱신되지 않은 옛 경로로 실체화돼 혼자 옛 store 에 남는다. 같은 이유로 유도 출처는 **배포 overlay**(desired state)다 — 이 시점의 돌고 있는 OAM 설정(actual state)은 아직 옛 경로다 |
 | 3 | store 를 들고 있는 노드(`status=running`)에 `migrate_oam_store` job |
 | 4 | 나머지 멤버는 `update_config` 만 — 그 노드는 같은 공유 store 를 읽게 된다 |
 | — | **store 가 이미 target 에 있으면**(같은 mount_point 로 재호출 = 설정 재적용) 복사 없이 **전 멤버 `update_config`** — 모듈 정지가 없어 무중단이다. 이 분기가 없으면 agent 가 "source 와 target 이 같습니다"로 거부하면서 config.json 재기록(아래 5)까지 건너뛰어, 파생 경로를 정정하려고 재호출했는데 정작 store 를 든 노드만 안 고쳐진다. 파생 규칙(§4.1)을 뒤늦게 도입한 기존 사이트의 **정규 교정 경로**가 이것이다 |
@@ -982,11 +1005,12 @@ OAM 수명과 무관하고 이미 그 모듈의 lifecycle 을 소유하므로 �
 - 3~6 동안 OAM 이 재기동되므로 **콘솔이 30초 내외 끊긴다**(정상). job 결과는
   `_deliver_report` 재시도 + `_flush_pending_reports` 로 신 OAM 에 늦게라도 전달된다.
 
-**경로만 저장하는 실수를 막는다.** 그룹 `shared_store` 를 PUT 으로 저장할 때, 멤버의
-oam/oam-svc 배포설정 `CimsRuntimeDir` 이 그 마운트 하위가 아니면 **409 `store_path_not_shared`**
-로 거부한다(`_store_path_conflicts`). 그대로 두면 HA 편입은 되는데 데이터는 노드별 로컬이라
-절체 시 빈 콘솔이 되는데, 이는 정확히 과거 사고 상태다. 콘솔은 이 응답을 받으면 이관을
-권하고 동의 시 그대로 이어서 실행한다(막다른 골목을 만들지 않는다).
+**경로만 저장하는 실수는 애초에 성립하지 않는다.** 경로를 적을 수 있는 곳이 하나뿐이기
+때문이다: 그룹 `shared_store` 는 PUT 으로 보내면 400 `shared_store_not_group_scoped`(§4.1),
+oam-svc 는 템플릿에 선언이 없어 overlay 쓰기 마스크가 거른다. 남는 것은 oam 배포설정이고,
+거기서 경로만 바꿔 저장하면 데이터가 따라가지 않으므로 콘솔이 그 자리에서 이관을 권한다
+(관리 store 섹션의 안내 + `[이 경로로 이관]` 버튼). 그대로 두면 HA 편입은 되는데 데이터는
+노드별 로컬이라 절체 시 빈 콘솔이 되고, 이는 정확히 과거 사고 상태다.
 
 **store 위치를 정하는 경로는 둘이고, 이관은 그중 하나다.**
 
@@ -1084,7 +1108,7 @@ OAM 의 mount guard(§4.3)와 같은 조건을 **패키지 전개 전에** 보�
 |---|---|
 | **보고** | agent 가 heartbeat 에 자기 `oam_url` 을 싣는다. OAM 은 그것을 agent 레코드에 보관하고 `GET /agents` 로 노출한다 — 이 값 없이는 어긋남을 감지할 수 없다 |
 | **경고** | 알람 **A-PRC-003**(`config_out_of_sync`, warning, mo=`a<id>/agent`) — agent 별 open/close 라 한 대씩 고치면 그 대상만 닫힌다. **VIP 를 실제로 보유한 멤버가 관측된 뒤에만** 판정한다: 개시 전에는 어느 노드도 VIP 를 갖지 않아 전 agent 가 노드 IP 로 보고하는 것이 **정상**이고, 그때 잡으면 설치 직후부터 상시 경고가 되어 신호가 무의미해진다. (옛 구현은 패키지 제어 탭의 붉은 배너였다 — 그 탭은 프로세스 제어이고 판정도 무조건이라 상시 경고였다) |
-| **차단** | `POST /ha-groups/{id}/failover` 가 사전 점검해 **409 `agents_not_one_vip`** 로 거부. 콘솔은 사유와 대상을 보여주고 **전환을 바로 실행**할 수 있게 한다. `force: true` 로 우회 가능 |
+| **차단** | `POST /ha-groups/{id}/failover` 가 사전 점검해 **409 `agents_not_on_vip`** 로 거부. 콘솔은 사유와 대상을 보여주고 **전환을 바로 실행**할 수 있게 한다. `force: true` 로 우회 가능 |
 | **실행** | 콘솔 **시스템/서버 구성 > 서버 > OAM 접속 주소** — `POST /agents/{id}/oam-url`(그 서버만) 또는 `[전체 적용]` → `POST /agents/oam-url`(전 agent). 각 agent 가 새 주소로 `/health` **도달 확인 후에만** 적용하므로, VIP 가 아직 없을 때 눌러도 fleet 이 끊기지 않는다 |
 
 **이 주소는 agent 의 설정이다 — 서버 단위로 노출한다.** heartbeat·job 결과를 **보내는
@@ -1168,10 +1192,11 @@ priority 100 노드는 BACKUP. cold 모듈이라 csp 도 02 에서 떴다.
        · 상한 초과 → 나머지 무장 + **경고**("기준 멤버가 Active 라는 보장이 깨졌다")
 ```
 
-- **고정 지연이 아니다.** 옛 구현은 `_STAGGER_DELAY_SEC = 75` 였는데 그건 보장이 아니라
-  확률이다: 선행이 75초를 넘기면 그 시점에 아무도 VIP 가 없는 채로 나머지가 무장돼 경합이
-  그대로 재현되고, 반대로 선행이 7초에 끝나도 나머지가 68초를 놀아 이중화 공백이 길어진다.
-  지금은 사실(VIP 보유)을 보고 넘어가고, 상한은 **포기 시점**이다(대기 시간이 아니다).
+- **고정 지연이 아니라 확인이다.** 보류 해제 조건은 "선행이 VIP 를 실제로 잡았다" 는
+  사실이고, `_ARM_CONFIRM_TIMEOUT_SEC`(90초)은 대기 시간이 아니라 **포기 시점**이다.
+  고정 지연으로 두면 보장이 아니라 확률이 된다: 선행이 그 시간을 넘기면 아무도 VIP 가 없는
+  채로 나머지가 무장돼 경합이 그대로 재현되고, 반대로 선행이 몇 초 만에 끝나도 나머지가
+  남은 시간을 놀아 이중화 공백이 길어진다.
 - **VIP 보유자가 이미 있으면 보류하지 않는다** — 운영 중 재렌더(`[적용]`·`[재적용]`·멤버
   편입)는 apply 가 멱등이라 순서가 무관하고, 붙어 있는 VIP 를 흔들지 않는다.
 - **미개시 그룹은 대상이 아니다** — `enabled=false` 로 렌더돼 keepalived 를 켜지 않는다.
@@ -1341,7 +1366,8 @@ FAIL 로 드러난다**: ha.json 에 oam 이 관리 모듈로 있는 구성인�
 4. **접근 불가 노드 승격 금지** — 한 노드에서 NAS 를 끊은(또는 read-only 로 만든) 뒤 상대를
    kill → 그 노드는 승격되지 않고 VIP 공백(데이터 없이 서비스하는 것보다 안전)
 5. **epoch fence** — 두 노드에서 동시에 OAM 을 띄워 강제 모의 → write 는 한 노드만 성공,
-   다른 노드는 read-only + `CIMS-HA-LEASE` 알람
+   다른 노드는 **read-only 강등**(`not_lease_owner: epoch_fenced(...)`) + 스위퍼 중단.
+   전용 알람 코드는 아직 없다 — 로그로만 드러난다(카탈로그 A-PRC-008 `store/lease` 후보)
 5b. **잠금 자기검증** — `nolock` 으로 마운트한 경로를 store 로 주면 기동 후 리스가
    `locking_not_enforced` 로 남아 **read-only** 다(조용히 write 하지 않는다)
 6. **mount guard** — 마운트를 지운 채 OAM 기동 시도 → **기동 거부**(마운트 포인트 하부 로컬

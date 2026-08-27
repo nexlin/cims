@@ -101,9 +101,13 @@ AA 노드의 유일한 HA 관련 동작은 Supervisor 의 **로컬 복구**(죽�
 = 최종 verdict
 ```
 
-파생 표시 상태(화면·로그용): `STARTING`, `STANDBY_READY`, `ACTIVE_HEALTHY`,
-`PROMOTING`, `DEGRADED`, `RECOVERING`, `FAILOVER_LATCHED`, `RECOVERY_VALIDATING`,
-`CONTROL_STALE`, `MAINTENANCE`, `INTENTIONALLY_DOWN`.
+파생 표시 상태(`service_state` — 화면·로그용, 전 목록): `STARTING`, `STANDBY_READY`,
+`STANDBY_INELIGIBLE`, `ACTIVE_HEALTHY`, `PROMOTING`, `RECOVERING`, `FAILOVER_REQUIRED`,
+`FAILOVER_LATCHED`, `PLANNED_RELEASE`, `MAINTENANCE`, `INTENTIONALLY_DOWN`.
+판정 순서는 배타적이다 — `MAINTENANCE` > `PLANNED_RELEASE` > `FAILOVER_LATCHED` >
+(role 분기: BACKUP/UNKNOWN/FAULT → `STANDBY_READY`/`STANDBY_INELIGIBLE`,
+MASTER → grace 중 `PROMOTING`, 아니면 `FAILOVER_REQUIRED`/`INTENTIONALLY_DOWN`/
+`RECOVERING`/`ACTIVE_HEALTHY`).
 
 **verdict 입도**: 그룹 1개 = vrrp_instance 1개 = verdict 1개이며, 그 그룹의 데몬
 모듈 N개를 §7 규칙으로 집계한 결과다(모듈별 verdict 아님).
@@ -112,26 +116,32 @@ verdict 스키마 (`run/ha/verdict/<service>.json`):
 
 ```json
 {
-  "service": "csp",
-  "role": "ACTIVE",
-  "desired_runtime": "RUNNING",
-  "ha_intent": "NORMAL",
-  "service_state": "DEGRADED",
-  "recovery_state": "RESTARTING",
-  "latch_state": "NONE",
+  "service": "g1",
+  "role": "MASTER",
+  "service_state": "RECOVERING",
   "vrrp_eligible": true,
   "service_available": false,
   "standby_ready": false,
+  "in_promotion_grace": false,
+  "reason_codes": ["down:csp"],
   "sequence": 18201,
-  "updated_at": 1784185205,
-  "expires_at": 1784185211,
   "boot_id": "7b4c...",
-  "reason_codes": ["MODULE_RESTARTING:csp-main"]
+  "updated_at": 1784185205,
+  "expires_at": 1784185211
 }
 ```
 
+- `service`: 그룹 **id 파생 키**(`g<id>`) — 이름이 아니다(identifier_model.md).
+- `role`: keepalived 가 마지막으로 통지한 VRRP 상태 (`MASTER`/`BACKUP`/`FAULT`/`UNKNOWN`).
 - `vrrp_eligible`: keepalived track_script 가 실제로 사용하는 값.
-- `updated_at`/`expires_at`: stale 판정 (§9).
+- `updated_at`/`expires_at`: stale 판정 (§9). TTL 은 `_VERDICT_TTL`(6초).
+- `in_promotion_grace`: 승격 grace 창 안인지 — grace 중에는 cold runtime readiness 를
+  자격 계산에서 제외한다(§10).
+
+운영자 의도·복구 진행·래치는 verdict 에 필드로 싣지 않는다. 각각
+`run/ha/desired.json`·재기동 카운터·`state/ha/latch/<svc>.json` 이 정본이고, verdict 에는
+그것들을 합성한 결과(`service_state`/`vrrp_eligible`)와 사유(`reason_codes`)만 담는다 —
+같은 사실을 두 곳에 두지 않기 위해서다.
 - `sequence`: 단조 증가 — 갱신 정지 확인. `boot_id`(`/proc/sys/kernel/random/boot_id`):
   재부팅 전 verdict 재사용 방지.
 - `service_available`(실제 서비스 제공 여부)·`standby_ready`(승격 준비)·`reason_codes`:
@@ -407,8 +417,9 @@ readiness 실패 → STANDBY_RECOVERING → vrrp_eligible=false
 `STANDBY_INELIGIBLE`, preflight 연속 성공 → `STANDBY_READY`(단 래치 존재 시 preflight
 성공만으로 해제하지 않음).
 
-**Non-relevant 모듈:** 한도 초과해도 `service_state=DEGRADED` 까지만, `vrrp_eligible`
-불변.
+**Non-relevant 모듈:** 한도를 초과해도 `vrrp_eligible` 은 불변이다 — 자격 계산이
+relevant 모듈만 집계하므로 non-relevant 실패는 절체 사유가 되지 않는다. 화면에는 모듈
+상태와 `reason_codes` 로만 드러난다(전용 `service_state` 를 따로 두지 않는다).
 
 ## 8. 자격(vrrp_eligible) 계산식
 
@@ -441,9 +452,13 @@ verdict_fresh AND !latch AND !operator_excluded
                           | restart_limit 이내 RECOVERING } 중 하나
 ```
 
-`vrrp_eligible=false` 인 상태: `FAILOVER_LATCHED`, `CONTROL_STALE`(grace 초과),
-`EXCLUDE_NODE`/`MAINTENANCE`, ACTIVE relevant 모듈 restart_limit 초과,
-`total_recovery_timeout` 초과.
+`vrrp_eligible=false` 인 상태: `MAINTENANCE`(EXCLUDE_NODE), `PLANNED_RELEASE`,
+`FAILOVER_LATCHED`, `STANDBY_INELIGIBLE`(hot readiness·cold preflight·공유 store 준비
+중 하나라도 실패), `FAILOVER_REQUIRED`(ACTIVE relevant 모듈이 로컬 복구로 안 고쳐짐 —
+동시에 래치가 걸린다).
+
+verdict 자체가 낡는 경우는 상태가 아니라 **신선도**로 처리한다 — `expires_at` 이 지난
+verdict 는 track_script(`cims-health`)가 실패로 읽어 자격을 잃는다(§9).
 
 ## 9. cims-notify(role writer) · track_script(verdict reader)
 
@@ -576,38 +591,63 @@ OAM 에 의존하지 않는다(로컬 agent + keepalived).
 operation 상태를 영속 저장해 재시작 후 이어서 처리한다.
 
 ```text
-PREPARE_TARGET → TARGET_PREPARED → REQUEST_SOURCE_RELEASE → WAIT_SOURCE_RELEASE
-  → WAIT_TARGET_MASTER → START_TARGET_COLD_MODULES → VERIFY_TARGET → COMMIT
+RELEASING → WAIT_VIP_MOVE → VERIFYING → COMMITTED
+                  │              │
+                  └──────────────┴──→ ROLLED_BACK / FAILED
 ```
 
-- **PREPARE**: 대상 B 가 준비 확인(HA Agent 정상, 래치 없음, 설정·실행파일·의존성·
-  인증서, hot health, cold **preflight**) → `PREPARED` + prepare token(만료 있음).
-  cold 모듈은 VIP 취득 전 완전 readiness 확인 불가라 `PREPARED`(preflight)와
-  `SERVING_READY`(실기동·readiness)를 구분한다.
-- **RELEASE**: token 확인 후 A 가 planned_release·`vrrp_eligible=false` → track_script
-  실패 → VIP 반납 (keepalived 는 계속 실행).
-- **관측**: OAM 이 A role≠MASTER·A VIP 제거·B role=MASTER·B VIP 존재를 실제 관측(고정
-  sleep 금지).
-- **VERIFY**: B cold 모듈 기동(§10 grace)·readiness → `SERVING_READY` → `COMMIT`.
+operation 은 `control/ha_operations` 에 영속되고, 전이는 OAM 의 sweep
+(`sweep_ha_operations` → `_advance_ha_operation`)이 구동한다 — 요청 핸들러는 op 를 만들고 즉시
+반환한다. 그래서 OAM 이 중간에 재기동해도 다음 sweep 이 이어서 처리한다.
 
-### 실패·롤백
+**사전 점검**(동기 — 여기서 걸리면 op 자체를 만들지 않는다):
 
-| 실패 지점 | 처리 |
+| 거부 | 뜻 |
 |---|---|
-| PREPARE 실패 | A 유지, 서비스 영향 없음 (`FAILED_PREPARE`) |
-| PREPARED 후 RELEASE 전 실패 | B prepare token 폐기, A 유지 (`ABORTED`) |
-| RELEASE 요청 후 A 가 아직 VIP 보유 중 실패 | A verdict 복원, A role=MASTER 유지 확인 |
-| A 반납했으나 B 가 MASTER 못 됨 | 자동 롤백: A verdict 복원 → A VIP 복귀 → cold 기동 → readiness (`ROLLED_BACK`, 순단 발생) |
-| B MASTER 됐으나 SERVING_READY 실패 | B 로컬 짧은 복구 시도 → 실패 시 조율된 역절체(추가 순단) |
+| 409 `not_active_standby` | AS 그룹이 아니다 |
+| 409 `not_armed` | 미개시 그룹(`service_intent` 에 running 이 없음) |
+| 409 `failover_in_progress` | 이미 진행 중인 op 가 있다 |
+| 409 `agents_not_on_vip` | VIP 가 아닌 주소로 보고하는 agent 가 있다 — 그대로 넘기면 구 Active 주소가 죽어 fleet 이 단절된다. `force: true` 로 우회 |
+| 409 `active_unresolved` | Active 판정 불가(관측 창·전원 stale) |
+| 409 `no_standby_target` / `target_offline` | 넘길 상대가 없다 / 그 agent 가 오프라인 |
 
-A 는 COMMIT 전까지 `ROLLBACK_READY` 유지(설정·실행파일 유지, 래치 영구설정 금지, 재기동
-카운터 초기화 금지). OAM 이 절체 중 죽으면: B 가 VIP 미취득이면 A release 에 TTL 을 둬
-자동 복원, **B 가 이미 VIP 취득했으면 A 는 자동 롤백하지 않고**(`nopreempt` 로 B 유지)
-OAM 복구/운영자 개입 대기.
+**별도의 PREPARE 단계는 없다.** 대상 노드의 준비 상태는 OAM 이 물어보는 것이 아니라
+standby 가 스스로 만들어 heartbeat 로 올리는 verdict(`STANDBY_READY` vs
+`STANDBY_INELIGIBLE` — hot readiness + cold preflight + 공유 store 준비, §8)다. 판정
+주체를 노드 로컬로 두는 원칙(§1)이 여기에도 그대로 적용되므로, OAM 이 prepare 토큰을
+따로 주고받지 않는다.
 
-**계획 절체 타임아웃 관계**: OAM VERIFY 타임아웃 ≥ VRRP 반납·승격 + `promotion_grace` +
-cold `readiness_timeout` + 허용 restart 시간. grace 중 readiness 실패를 즉시 절체 실패로
-보지 않는다.
+**전이**:
+
+- **RELEASING** — source 에 `ha_planned_release` job 을 보내 그 노드의 `vrrp_eligible`
+  을 false 로 만든다(keepalived 를 stop 하지 않는다). 즉시 `WAIT_VIP_MOVE` 로.
+  op 생성 시점에 target 의 절체 홀드(`desired=stopped`·래치·planned_release)를
+  `ha_clear_holds` 로 먼저 걷는다 — 홀드가 남아 있으면 승격돼도 reconcile 이 모듈을
+  못 켠다.
+- **WAIT_VIP_MOVE** — VIP 보유자를 **실제로 관측**한다(고정 sleep 없음). target 이
+  잡으면 `VERIFYING`.
+- **VERIFYING** — target 이 `_OP_VERIFY_SEC`(15초) 동안 VIP 를 안정적으로 유지하면
+  `COMMITTED`.
+
+**실패·롤백**:
+
+| 상황 | 결과 |
+|---|---|
+| `_OP_RELEASE_TIMEOUT`(30초) 안에 VIP 가 안 넘어가고 **다른 노드가 확정 보유** | `ROLLED_BACK` (`target_not_promoted`) |
+| VIP 보유 판정이 `_OP_OBSERVE_GRACE`(180초) 넘게 불가 | `FAILED` (`observation_unavailable`) — 롤백이 아니라 **관측 실패**로 종결한다. 관리평면 자기 절체 직후처럼 신 Active OAM 이 막 뜬 구간에서 관측이 잠깐 비는 것을 롤백으로 오기록하지 않기 위해서다 |
+| VERIFYING 중 target 이 VIP 를 놓침 | `FAILED` (`target_unstable`) |
+
+**source 의 `planned_release` 마커는 모든 종결 전이에서 해제한다**(`_clear_source_once`)
+— 롤백·실패뿐 아니라 **COMMIT 성공 시에도**. COMMIT 후엔 `nopreempt` 로 target 이 계속
+MASTER 를 유지하지만, 마커를 남기면 source 가 영구 부적격이 되어 역방향 절체가 막힌다.
+종결 상태(`COMMITTED`/`ROLLED_BACK`/`FAILED`)는 sweep 이 더 이상 전진시키지 않으므로
+"다음 호출이 지워주겠지"에 의존하지 않고 전이 시점에 인라인으로 해제한다.
+
+**타임아웃 관계**: `_OP_RELEASE_TIMEOUT` 은 VRRP 반납·승격이 끝나기에 충분해야 하고,
+`_OP_VERIFY_SEC` 는 승격 직후의 흔들림을 걸러낼 만큼은 길어야 한다. cold 모듈의 기동
+readiness 는 이 창의 조건이 아니다 — 승격 grace(`failover_options.health.grace_sec`,
+기본 30초) 안에서는 cold runtime readiness 를 자격 계산에서 빼므로(§10), 기동이 늦다고
+절체가 실패로 뒤집히지 않는다.
 
 **planned_release 생명주기 (중요)**: source 의 `planned_release` 마커는 **모든 종결
 전이에서 반드시 해제**한다 — 롤백/실패뿐 아니라 **COMMIT 성공 시에도** 해제해야 한다.
@@ -641,7 +681,7 @@ relevant 모듈이 (a) 재기동 한도 초과(exhausted) 또는 (b) 좀비(프�
 track_script 실패 → keepalived FAULT → VIP 는 peer 로.
 
 해제(재합류): 운영자가 콘솔에서 해당 모듈을 **start/restart** 하면 래치가 풀린다
-(`_clear_failover_latch`) — 원인을 고친 뒤 올리라는 명시적 re-arm. 해제되면 role 기반
+(`_latch_clear`) — 원인을 고친 뒤 올리라는 명시적 re-arm. 해제되면 role 기반
 reconcile 이 hot 을 기동 → readiness 회복 → track_script PASS → keepalived FAULT→BACKUP
 로 standby 재합류한다(`nopreempt` 라 곧바로 MASTER 는 아님). **agent 재기동·노드 재부팅은
 래치를 풀지 않는다**(영속) — 원인을 고친 뒤 운영자가 명시적으로 올려야 재합류한다.
@@ -746,19 +786,20 @@ state/ha/planned_release/<svc>  존재 = PLANNED_FAILOVER 반납(계획 절체 �
 
 ## 18. 단일 모델 · 비상 밸브
 
-**legacy 경로는 존재하지 않는다.** cims-health 는 항상 verdict reader, cims-notify 는 항상
-role writer, agent 는 HA 그룹이 있으면 항상 Supervisor(Health Checker + Evaluator +
-reconcile)를 구동한다. 모드 플래그(verdict_source/ha_mode/notify_mode)·shadow·서비스별
-컷오버·`flags.json`·구 cims-health 포트검사·구 cims-notify 직접 start/stop 은 전부
-제거한다. legacy watchdog(`supervise_tick`)은 **HA 그룹에 속하지 않은 standalone 모듈
-전용**으로만 남긴다(HA 관리 모듈은 Supervisor reconcile 이 소유).
+**판정 경로는 하나다.** cims-health 는 항상 verdict reader, cims-notify 는 항상 role
+writer, agent 는 HA 그룹이 있으면 항상 Supervisor(Health Checker + Evaluator +
+reconcile)를 구동한다. 모드 플래그도, 서비스별 컷오버도, 두 번째 판정 엔진도 없다.
+watchdog(`supervise_tick`)의 담당은 **HA 그룹에 속하지 않은 standalone 모듈 전용**이다
+— HA 관리 모듈의 기동/정지는 Supervisor reconcile 이 소유한다.
 
 **개시 국면 선착(stagger)은 유지한다.** cold 모듈은 개시 시 양 노드의 승격 자격(preflight)이
 대칭이라, 두 노드를 동시에 arm 하면 우선순위 높은 노드(놀던 standby 여도)가 선착해 "운영자가
 start 누른 노드가 Active" 기대가 깨진다. 따라서 개시(아무도 VIP 미보유) 시 기준 멤버
 (prefer_first = 개별/서버별 start 누른 노드 > record running > 지정 마스터)에게 update_ha 를
-먼저 내리고 나머지는 `_STAGGER_DELAY_SEC` 지연시켜, 기준 멤버가 arm→VIP 선점→nopreempt
-유지로 Active 가 되게 한다. VIP 보유자가 이미 있으면 지연 없음(apply 멱등).
+먼저 내리고 나머지는 **보류**한다. 보류 해제는 시간이 아니라 사실 — 선행이 VIP 를 실제로
+잡은 것을 확인한 뒤 풀고(`_sweep_pending_arm`), `_ARM_CONFIRM_TIMEOUT_SEC`(90초)은 대기
+시간이 아니라 **포기 시점**이다. 이렇게 해야 기준 멤버가 arm→VIP 선점→nopreempt 유지로
+Active 가 된다. VIP 보유자가 이미 있으면 보류 없음(apply 멱등). 상세: oam_ha.md §9.4.3.1.
 
 **유일한 escape 는 비상 밸브 `CIMS_HA_DISABLE`**(§9) 하나뿐이다 — legacy 로 되돌아가는
 이중 판정 엔진이 아니라, 판정을 얼려 현상 유지하는 운영용 kill-switch.

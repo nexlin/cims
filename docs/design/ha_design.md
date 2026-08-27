@@ -392,7 +392,7 @@ standby CSC 가 write API 를 허용하면 split-brain 위험이 있어 **cold-s
 | CMP consistent hash 분배 | `csp/ConsistentHashRing.h` + `csp/CmpClient.{h,cpp}` endpoint vector + AddEndpoint + SelectEndpointForSession |
 | A/S cold-spare + 모듈별 hot 선택 | `oam ha_groups.py`(module_specs 정규화 + cold_modules/relevant_modules 렌더), `agent/bin/cims-notify`(role writer — role 파일 기록), `agent/bin/cims-health`(verdict reader — Supervisor verdict 판독 + 비상 밸브), `agent/cims_agent.py`(Recovery Supervisor: Health+Evaluator+reconcile), 콘솔 `ServersPage`(Cold/Hot 토글·유지보수 토글) |
 | cims_agent VIP target + backoff | `agent/cims_agent.py:run_loop` exponential backoff (5s→10s→20s→max 60s, 성공 시 reset). VIP target 은 `--csc-url` 인자로 변경. |
-| verify 시나리오 | `verify/lib/items/stage6/scn_failover_{csc,csp,cmp}.py` 3개 (ha.json + multi-CMP 감지 시 LIVE 활성 분기). |
+| verify 시나리오 | `verify/lib/items/stage6/scn_failover_{csc,csp,cmp,oam}.py` 4개 (ha.json + multi-CMP 감지 시 LIVE 활성 분기). oam 은 관리평면 절체 — oam_ha.md §12. |
 
 ## 11. 운영 가이드 — keepalived 인프라
 

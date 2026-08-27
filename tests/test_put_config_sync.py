@@ -954,12 +954,109 @@ class TestEffectiveScope(unittest.TestCase):
         self.assertEqual(colls, {"routes"})
 
 
+class TestEffectiveConfigView(_FsCase):
+    """설정 화면의 표시 기준 — **노드에 실제로 들어가는 값**(`effective_config_view`).
+
+    화면이 overlay(운영자가 입력한 것)만 그리면 두 방향으로 틀린다:
+      · 배포 시 주입되는 값(JWT 시크릿·store 경로 등)이 **빈칸**으로 보여 "설정 안 됨"
+        으로 오해된다 — 실측: 콘솔로 설치한 2번째 노드의 시크릿.
+      · 주입이 overlay 를 **덮는** 키(`CimsAuth.JwtSecret`·`Mgmt.Cidr`)는 화면에 운영자
+        입력값이 보이는데 노드는 주입값으로 뜬다 — 어긋남이 드러나지 않는다.
+    """
+
+    TPL = {"version": 1, "sections": [
+        {"key": "server", "title": "서버", "fields": [
+            {"key": "Server.Port", "type": "int", "default": 4419},
+            {"key": "Server.Ip",   "type": "string", "default": ""},
+        ]},
+        {"key": "mgmt", "title": "관리망", "fields": [
+            {"key": "Mgmt.Cidr", "type": "string", "default": ""},
+        ]},
+        {"key": "_infra", "title": "인프라", "hidden": True, "fields": [
+            {"key": "CimsAuth.JwtSecret", "type": "password", "default": ""},
+        ]},
+    ]}
+
+    def _pkg(self, meta=None):
+        return {"id": 1, "name": "oam", "version": "0.1.0",
+                "config_template": self.TPL,
+                "meta": meta if meta is not None else {"shared_identity": True}}
+
+    def _view(self, overlay, meta=None):
+        from handlers.agents import effective_config_view
+        return effective_config_view(self.config, self._pkg(meta), overlay)
+
+    def _seed_injection_source(self):
+        """살아있는 OAM 의 값 — 주입원."""
+        self.config["CimsAuth"] = {"JwtSecret": "REAL-SECRET"}
+        self.config["Mgmt"] = {"Cidr": "10.9.0.0/24"}
+
+    def test_injected_value_is_visible_not_blank(self):
+        """콘솔로 설치한 노드 — overlay 는 비어 있어도 주입값이 보여야 한다."""
+        self._seed_injection_source()
+        v = self._view({})
+        self.assertEqual(v["CimsAuth.JwtSecret"]["src"], "injected")
+        self.assertEqual(v["Mgmt.Cidr"], {"v": "10.9.0.0/24", "src": "injected"})
+
+    def test_secret_is_masked(self):
+        """평문 시크릿은 응답에 실리지 않는다 — sentinel 로 나간다."""
+        self._seed_injection_source()
+        v = self._view({})
+        self.assertNotEqual(v["CimsAuth.JwtSecret"]["v"], "REAL-SECRET")
+        self.assertTrue(v["CimsAuth.JwtSecret"]["v"])   # 빈칸이 아니라 '있음' 이 보인다
+
+    def test_overlay_value_is_labeled_overlay(self):
+        v = self._view({"Server.Ip": "0.0.0.0"})
+        self.assertEqual(v["Server.Ip"], {"v": "0.0.0.0", "src": "overlay"})
+
+    def test_injection_overriding_overlay_is_not_labeled_overlay(self):
+        """`Mgmt.Cidr` 은 주입이 overlay 를 **덮는다** — 화면에는 노드에 실제로 들어가는
+        값이 보여야 하고, 라벨도 'overlay' 가 아니어야 한다(내가 정한 값이 아니므로)."""
+        self._seed_injection_source()
+        v = self._view({"Mgmt.Cidr": "192.168.0.0/24"})
+        self.assertEqual(v["Mgmt.Cidr"]["v"], "10.9.0.0/24")   # 노드에 들어가는 값
+        self.assertEqual(v["Mgmt.Cidr"]["src"], "injected")
+
+    def test_empty_overlay_value_is_default_not_overlay(self):
+        """빈 overlay 값은 실체화가 '미설정' 으로 흘린다 — 라벨도 default 여야 한다."""
+        v = self._view({"Server.Port": ""})
+        self.assertEqual(v["Server.Port"], {"v": 4419, "src": "default"})
+
+    def test_no_injection_module_is_unchanged(self):
+        """주입 대상이 아닌 모듈(csp/cmp 등)은 overlay + 기본값 그대로 — 지금 화면과 동일."""
+        v = self._view({"Server.Ip": "1.2.3.4"}, meta={})
+        self.assertEqual(v["Server.Ip"], {"v": "1.2.3.4", "src": "overlay"})
+        self.assertEqual(v["Mgmt.Cidr"]["src"], "default")
+        self.assertEqual(v["CimsAuth.JwtSecret"]["src"], "default")
+
+    def test_only_declared_keys_are_exposed(self):
+        """미선언 주입 키(`CimsAuth.BuiltinAccounts` 등)는 응답에 실리지 않는다 —
+        선언되지 않은 값이 화면·API 로그로 새는 경로를 만들지 않는다."""
+        self._seed_injection_source()
+        self.config["CimsAuth"]["BuiltinAccounts"] = [{"login_id": "admin",
+                                                       "password_sha256": "deadbeef"}]
+        v = self._view({})
+        self.assertNotIn("CimsAuth.BuiltinAccounts", v)
+        self.assertEqual(set(v), {"Server.Port", "Server.Ip", "Mgmt.Cidr",
+                                  "CimsAuth.JwtSecret"})
+
+    def test_no_template_returns_empty(self):
+        """템플릿 없는 패키지는 판단 근거가 없다 — 빈 결과(화면은 종전 규칙 폴백)."""
+        from handlers.agents import effective_config_view
+        self.assertEqual(effective_config_view(self.config, {"name": "x"}, {"a": 1}), {})
+
+
 class TestDerivedSharedStore(_R4Case):
-    """공유 store = oam/oam-svc **배포설정에서 유도** — 그룹은 저장하지 않는다.
+    """공유 store = base **`oam` 배포설정에서 유도** — 그룹도 oam-svc 도 저장하지 않는다.
 
     옛 구조는 그룹 레코드에 같은 사실을 따로 적어서, 어긋남을 막는 가드를 또 써야 했다.
     (부트스트랩이 설치 시점에 store 를 잡으면 그룹은 그 사실을 모른 채 oam 을 HA 에서
     빼버렸다 — 실제 결함.)
+
+    같은 이유로 **oam-svc 도 store 위치를 입력받지 않는다.** oam-svc 는 store 를 읽지만
+    (알람 sweeper 가 agents·ha_groups·services 도메인 조회) 그 위치는 언제나 oam 과 같은
+    값이어야 하므로 사용자 입력이 아니라 파생값이다 — 템플릿에 선언이 없어 저장될 수
+    없고(`_prune_to_template`), 실체화가 oam 배포설정에서 유도해 넣는다(`_store_source`).
     """
 
     TPL_OAM = {"version": 1, "sections": [
@@ -968,11 +1065,11 @@ class TestDerivedSharedStore(_R4Case):
             {"key": "CimsRuntimeMount", "type": "path", "default": ""},
             {"key": "Packages.Dir",     "type": "path", "default": ""},
         ]}]}
-    # oam-svc 에는 `Packages.Dir` 이 없다 — 패키지 서빙은 base oam 만의 일.
+    # oam-svc 템플릿에는 store 섹션이 **없다** — 위치를 정하는 창구는 oam 하나다.
+    # (`Packages.Dir` 도 없다 — 패키지 서빙은 base oam 만의 일.)
     TPL_SVC = {"version": 1, "sections": [
-        {"key": "store", "title": "관리 store", "scope": "system", "fields": [
-            {"key": "CimsRuntimeDir",   "type": "path", "default": ""},
-            {"key": "CimsRuntimeMount", "type": "path", "default": ""},
+        {"key": "server", "title": "bind", "scope": "system", "fields": [
+            {"key": "Server.Port", "type": "int", "default": 4480},
         ]}]}
 
     def _seed_lease_descriptor(self):
@@ -1014,6 +1111,20 @@ class TestDerivedSharedStore(_R4Case):
         self._seed_store_dep(5, 10, "oam", "/mnt/cims")
         self._seed_store_dep(6, 11, "oam", "")
         self.assertEqual(_derived_shared_store(self.config, g), {})
+
+    def test_svc_deployment_does_not_affect_derivation(self):
+        """oam-svc 는 유도에 관여하지 않는다 — 위치를 정하는 쪽이 아니다.
+
+        옛 구조는 oam·oam-svc **전부**가 같은 mount 를 갖는지 비교해 일치를 요구했다.
+        그것이 "같은 사실을 두 곳에서 입력받고 어긋남을 검사하는" 패턴 자체였다."""
+        from handlers.ha_groups import _derived_shared_store
+        g = self._seed_as_group()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/cims")
+        # 옛 배포에 남은 oam-svc 값이 무엇이든 유도를 흔들지 않는다.
+        self._seed_store_dep(7, 10, "oam-svc", "/mnt/stale")
+        self.assertEqual(_derived_shared_store(self.config, g),
+                         {"mount_point": "/mnt/cims"})
 
     def test_not_derived_when_paths_differ(self):
         from handlers.ha_groups import _derived_shared_store
@@ -1095,15 +1206,84 @@ class TestDerivedSharedStore(_R4Case):
         self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
         self.assertEqual(eff.get("Packages.Dir"), "/mnt/cims/runtime/pkg_files")
 
-    def test_injection_is_template_gated(self):
-        """선언 없는 키는 심지 않는다 — oam-svc 에 Packages.Dir 이 생기면 유령 항목."""
+    def test_svc_never_gets_packages_dir(self):
+        """패키지 서빙은 base oam 만의 일 — oam-svc 에 생기면 유령 항목이다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam-svc", "")
+        self.config["Packages"] = {"Dir": "/mnt/cims/runtime/pkg_files"}
+        self.assertNotIn("Packages.Dir", self._materialize(22, {}))
+
+    def test_svc_store_derived_from_oam_deployment(self):
+        """oam-svc 의 store 경로는 **oam 배포설정**(desired state)에서 온다.
+
+        돌고 있는 OAM 의 현재 설정(actual state)이 아니다 — 이관 job 을 디스패치하는
+        시점의 현재 설정은 아직 옛 경로다. 그 값을 주면 oam-svc 만 옛 store 에 남는다.
+        여기서는 둘을 다른 값으로 두어 어느 쪽이 이기는지 못 박는다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")      # 이관이 갱신한 desired state
+        self._seed_store_dep(6, 11, "oam-svc", "")
+        # 현재 설정(actual state)은 아직 옛 값 — CimsRuntimeDir 은 이 테스트의 file_store
+        # 루트(tmpdir)라 건드리지 않고 비교 기준으로 쓴다(바꾸면 그 경로를 실제로 만든다).
+        self.config["CimsRuntimeMount"] = "/mnt/stale"
+        eff = self._materialize(22, {})
+        self.assertEqual(eff.get("CimsRuntimeDir"), "/mnt/cims/runtime")
+        self.assertNotEqual(eff.get("CimsRuntimeDir"), self.config["CimsRuntimeDir"])
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
+
+    def test_svc_injection_overrides_stale_overlay(self):
+        """oam-svc 는 overlay 우선이 **아니다** — 옛 배포에 남은 값이 이기면 두 프로세스가
+        다른 store 를 본다. oam 과 달리 여기서는 주입이 무조건 이긴다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam-svc", "")
+        eff = self._materialize(22, {"CimsRuntimeDir": "/old/local/runtime",
+                                     "CimsRuntimeMount": "/old/local"})
+        self.assertEqual(eff.get("CimsRuntimeDir"), "/mnt/cims/runtime")
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
+
+    def test_svc_stale_overlay_is_render_equivalent(self):
+        """옛 배포 overlay 에 굳은 store 키는 `sweep_overlay_schema` 가 무중단 정리한다.
+
+        정리 조건이 "렌더 동치"이므로, 주입이 무조건 이기는 지금 구조에서는 키가 있든
+        없든 실체화 결과가 같아야 한다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam-svc", "")
+        stale = {"CimsRuntimeDir": "/old/local/runtime", "CimsRuntimeMount": "/old/local"}
+        self.assertEqual(self._materialize(22, stale), self._materialize(22, {}))
+
+    def test_svc_store_keys_cannot_be_saved(self):
+        """선언이 없으면 overlay 쓰기 마스크가 저장을 막는다 — 두 번째 입력점이 생길 수 없다."""
+        from handlers.agents import _prune_to_template, _pkg_load
+        self._seed_store_dep(6, 11, "oam-svc", "")
+        pruned, dropped = _prune_to_template(
+            {"CimsRuntimeDir": "/x/runtime", "CimsRuntimeMount": "/x", "Server.Port": 4480},
+            _pkg_load(self.config, 22), where="test")
+        self.assertEqual(sorted(pruned), ["Server.Port"])
+        self.assertEqual(dropped, ["CimsRuntimeDir", "CimsRuntimeMount"])
+
+    def test_svc_store_falls_back_to_running_config(self):
+        """oam 배포가 아직 없으면(설치 순서·단독 노드) 현재 설정으로 폴백한다 —
+        빈 값을 주면 file_store 가 노드 로컬로 흘러 엉뚱한 store 를 본다."""
         self._seed_lease_descriptor()
         self._seed_store_dep(6, 11, "oam-svc", "")
         self.config["CimsRuntimeMount"] = "/mnt/cims"
-        self.config["Packages"] = {"Dir": "/mnt/cims/runtime/pkg_files"}
         eff = self._materialize(22, {})
+        self.assertEqual(eff.get("CimsRuntimeDir"), self.config["CimsRuntimeDir"])
         self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/cims")
-        self.assertNotIn("Packages.Dir", eff)
+
+    def test_svc_store_bails_when_oam_members_disagree(self):
+        """oam 멤버 간 값이 갈리면(정상 구성에선 불가) 유도를 포기하고 현재 설정을 쓴다 —
+        어느 쪽이 맞는지 코드가 알 수 없고, 살아있는 경로가 확실한 쪽이 안전하다."""
+        self._seed_lease_descriptor()
+        self._seed_store_dep(5, 10, "oam", "/mnt/cims")
+        self._seed_store_dep(6, 11, "oam", "/mnt/other", pid=24)
+        self._seed_store_dep(7, 10, "oam-svc", "")
+        self.config["CimsRuntimeMount"] = "/mnt/live"
+        eff = self._materialize(22, {})
+        self.assertEqual(eff.get("CimsRuntimeDir"), self.config["CimsRuntimeDir"])
+        self.assertEqual(eff.get("CimsRuntimeMount"), "/mnt/live")
 
     def test_overlay_wins_over_injection(self):
         """이관이 overlay 에 넣은 새 경로를 base 값이 되돌리면 안 된다."""

@@ -274,8 +274,12 @@ config/
 - 하위호환: `common.json` 부재 시 자기 `oam-svc.json` 단독. **base `oam.json` 상속(fallback)은
   없다** — oam-svc 는 자기 설정(배포 overlay `config.json` 또는 `oam-svc.json`)만 읽는 완전
   독립 설정 모듈이다(csp/cmp/csc 와 동일 모델). base 와 공유해야 하는 값(`CimsAuth.JwtSecret`/
-  `CimsRuntimeDir`/`Mgmt.Cidr`)은 상속이 아니라 **배포 시 base OAM 이 주입**한다(아래 실체화
-  참조). 설정 파일이 하나도 없으면 기동 로그에 명시적 에러를 남기고 preflight 가 실패한다 —
+  `CimsRuntimeDir`·`CimsRuntimeMount`/`Mgmt.Cidr`)은 상속이 아니라 **배포 시 base OAM 이
+  주입**한다(아래 실체화 참조). 이 값들은 oam-svc `config_template.json` 에 **선언을 두지
+  않는다** — 선언은 곧 편집권이고(콘솔 필드 + overlay 저장 허용), 이 값들은 운영자가 정할
+  것이 아니라 base 에서 유도되는 파생값이기 때문이다. 양쪽에서 입력받으면 서로 다른 값이
+  저장될 수 있고, 그러면 어긋남을 막는 정합 코드가 또 필요해진다. 선언이 없으면 overlay
+  쓰기 마스크(§14.7)가 저장을 구조적으로 막으므로 그런 상태 자체가 생기지 않는다. 설정 파일이 하나도 없으면 기동 로그에 명시적 에러를 남기고 preflight 가 실패한다 —
   빠진 설정을 코드 기본값이 조용히 메워 오동작하는 경로를 두지 않는다.
   `oam-svc.json` 을 직접 쓰는 경우(패키지 동봉/dev)는 공유값(특히 base 와 동일해야 하는
   `CimsAuth.JwtSecret`)까지 그 파일에서 채워야 한다(`oam-svc.json.sample` 참조).
@@ -294,8 +298,12 @@ oam-svc 소유**다. 정규 관리 경로는 콘솔 배포설정 — oam-svc `co
 주체는 콘솔 UI 가 아니라 **백엔드 실체화**(`agents._materialize_deploy_config`)다: OAM 이
 install/upgrade/update_config job 을 디스패치할 때 ① `config_template` 전 필드의 `default`
 를 base 로 깔고 ② deployment 레코드의 overlay(사용자 변경분)를 병합하고 ③ 게이트웨이 서비스
-모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`CimsRuntimeDir`/
-`Mgmt.Cidr`, 비어있으면 `ServiceLogging.Dir`)을 주입해 완전한 config 를 agent 에 전달한다.
+모듈(meta.gateway.routes 보유)에는 base 소유 공유값(`CimsAuth.JwtSecret`/`Mgmt.Cidr`,
+비어있으면 `ServiceLogging.Dir`)을 주입해 완전한 config 를 agent 에 전달한다. store 경로
+(`CimsRuntimeDir`/`CimsRuntimeMount`)는 리스 보유 모듈(oam/oam-svc)에만 주는데, oam-svc 쪽
+출처는 살아있는 OAM 의 현재 설정이 아니라 **`oam` 배포설정**(desired state)이다
+(`agents._store_source`) — 이관 job 을 디스패치하는 시점의 현재 설정은 아직 옛 경로라
+그것을 주면 oam-svc 만 옛 store 에 남는다. 상세: [oam_ha.md](oam_ha.md) §4.1·§9.4.
 deployment **레코드는 sparse overlay(사용자 변경분)로 유지** — template default 가 바뀌면
 다음 job 디스패치에서 자동 추종되고, template 에 필드가 늘어도 기존 배포가 재배포/설정저장
 시 자동으로 완전한 config.json 을 받는다(빈 default `''`/`[]` 는 '미설정' 시맨틱 보존을 위해
@@ -619,6 +627,16 @@ _put_group_pkg_config`, operator):
 둘을 섞지 않는 것이 이 설계의 불변식이다 — 실행 중인 렌더 결과를 overlay 로 되먹이면
 기본값·주입값이 사용자 의도로 굳어 이후 기본값 변경을 따라가지 못한다.
 
+**단, 화면은 파생물을 그린다.** 저장 대상과 표시 대상은 다르다 — 운영자가 알고 싶은 것은
+"내가 뭘 입력했나" 가 아니라 "이 노드에 무엇이 적용되나" 다. overlay 를 그리면 두 방향으로
+틀린다: 주입으로 채워지는 값이 빈칸으로 보여 "설정 안 됨" 으로 오해되고(실측: 콘솔로 설치한
+2번째 노드의 `CimsAuth.JwtSecret`), 주입이 overlay 를 덮는 키(`CimsAuth.JwtSecret`·
+`Mgmt.Cidr`)는 화면과 노드가 다른 상태가 드러나지 않는다. 그래서 조회 응답이 overlay(`config`)
+와 실효값(`effective` = `{key:{v,src}}`, `agents.effective_config_view`)을 **함께** 싣고 화면은
+후자를 그린다. `src` 로 `overlay`/`injected`/`default` 를 구분해 "자동 채움" 을 배지로 드러낸다.
+되먹임 위험은 없다 — 저장은 **변경된 키만** 전송하므로 손대지 않은 주입값은 overlay 에 앉지
+않는다. 그리고 `effective` 는 **선언된 템플릿 키만** 담으므로 미선언 주입값은 노출되지 않는다.
+
 **규칙: overlay 는 그 패키지 `config_template` 이 선언한 키만 담는다.** 템플릿 밖 키가
 앉으면 (a) 그 패키지 화면에 필드가 없어 보이지도 고치지도 못하고, (b) 자동 교정도
 템플릿 service 키만 순회하므로 영원히 방치되며, (c) 다른 패키지 템플릿에 얹히면 남의
@@ -636,5 +654,13 @@ _put_group_pkg_config`, operator):
   때만 적용한다. 다르면 그 키는 살아있는 설정이므로 두고 **경고**를 남긴다 —
   "이 키는 `config_template` 에 선언되어야 한다"는 신호다. 렌더 결과가 같으므로
   update_config job 을 큐잉하지 않는다(무중단).
-- 따라서 **모듈이 읽는 값은 반드시 템플릿에 선언한다.** 주입으로만 채워지는 값도
-  예외가 아니다 — 선언이 없으면 콘솔에서 고칠 수 없고 정합 대상도 되지 못한다.
+- 따라서 **모듈이 읽는 값 중 운영자가 정하는 것은 반드시 템플릿에 선언한다.** 주입으로
+  채워지더라도 운영자가 고칠 수 있어야 하는 값이면 예외가 아니다 — 선언이 없으면 콘솔에서
+  고칠 수 없고 정합 대상도 되지 못한다.
+- **뒤집으면 규칙 하나가 더 나온다: 운영자가 정해서는 안 되는 값은 선언하지 않는다.**
+  선언은 곧 편집권이므로, 다른 모듈에서 유도되는 파생값에 선언을 주면 두 번째 입력점이
+  생기고 그때부터 "두 값이 같은가" 를 검사하는 코드가 따라붙는다. 그런 값은 선언을 두지
+  않아 이 마스크가 저장을 막게 하고, 실체화가 유일한 출처에서 유도해 채운다. 예:
+  oam-svc 의 `CimsRuntimeDir`/`CimsRuntimeMount`(oam 배포설정에서 유도), `Mgmt.Cidr`.
+  이 값들은 `_prune_to_template` 이 걸러 overlay 에 앉지 못하므로 §14.7 의 세 가지 폐해
+  ((a) 안 보이는 필드 (b) 자동교정 방치 (c) 남의 필드 오독)도 발생하지 않는다.

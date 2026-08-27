@@ -251,14 +251,19 @@ def _normalize_shared_store(raw) -> dict:
 
 
 def _derived_shared_store(config: dict, group: dict) -> dict:
-    """공유 store — **oam/oam-svc 배포설정에서 유도**한다. 그룹에 별도 선언을 두지 않는다.
+    """공유 store — **base `oam` 배포설정에서 유도**한다. 그룹에 별도 선언을 두지 않는다.
 
-    공유 store 는 그 모듈의 설정(`CimsRuntimeMount`)이고, 그룹은 그것을 **읽기만** 한다.
+    공유 store 는 oam 의 설정(`CimsRuntimeMount`)이고, 그룹은 그것을 **읽기만** 한다.
     같은 사실을 그룹 레코드에도 적으면 두 곳이 어긋날 수 있고, 어긋남을 막는 코드를 또
     써야 한다(그게 옛 구조였다 — 그룹 PUT 의 409 + "설정을 함께 맞추세요" 안내문).
 
-    성립 조건: 그룹에 배포된 oam/oam-svc **전부**가 같은 비어있지 않은 `CimsRuntimeMount`
-    를 갖는다. 값이 같다는 것만으로 충분하다 — 그 경로가 실제 마운트인지는 노드가 스스로
+    **oam-svc 는 보지 않는다.** oam-svc 도 store 를 읽지만 위치를 정하지는 않는다 —
+    그 값은 실체화가 oam 배포설정에서 유도해 넣는 파생값이고(`agents._store_source`),
+    템플릿에 선언이 없어 애초에 따로 저장될 수 없다. 두 모듈의 값을 비교해 일치를 요구하던
+    구조는 "같은 사실을 두 곳에서 입력받고 어긋남을 검사하는" 그 패턴 자체였다.
+
+    성립 조건: 그룹에 배포된 oam **전부**가 같은 비어있지 않은 `CimsRuntimeMount` 를
+    갖는다. 값이 같다는 것만으로 충분하다 — 그 경로가 실제 마운트인지는 노드가 스스로
     집행한다(OAM mount guard 는 마운트 없이 기동을 거부하고, agent 승격 preflight 는
     마운트·write 가능 여부를 확인한다). 여기서 heartbeat 관측(`mount_targets`)까지 보면
     보고가 잠깐 stale 해질 때마다 HA 편입이 흔들리므로 **선언만 본다.**
@@ -273,7 +278,7 @@ def _derived_shared_store(config: dict, group: dict) -> dict:
     for d in _deploy_load_all(config):
         if d.get('agent_id') not in aids or d.get('status') == 'removed':
             continue
-        if (d.get('process_name') or '').lower().strip() not in ('oam', 'oam-svc'):
+        if (d.get('process_name') or '').lower().strip() != 'oam':
             continue
         try:
             eff = _materialize_deploy_config(config, _pkg_load(config, d.get('package_id')),
@@ -292,7 +297,7 @@ def _derived_shared_store(config: dict, group: dict) -> dict:
     if legacy:
         logger.log_warning(
             f"[ha-group] group#{group.get('id')} 공유 store 를 배포설정에서 유도하지 못해 "
-            f"그룹 저장값({legacy['mount_point']})을 사용합니다 — oam/oam-svc 배포설정의 "
+            f"그룹 저장값({legacy['mount_point']})을 사용합니다 — oam 배포설정의 "
             f"`CimsRuntimeMount` 를 이 경로로 맞추세요(멤버 간 동일해야 함).")
     return legacy
 
@@ -1558,8 +1563,9 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
     무엇보다 OAM 은 **자기 store 를 자기가 옮길 수 없다**. 그래서:
 
       1. (그룹 레코드에는 쓰지 않는다 — 공유 store 는 배포 overlay 가 정본)
-      2. 그룹 멤버의 oam/oam-svc 배포 overlay 에 `CimsRuntimeDir`/`CimsRuntimeMount` 병합
-         → **현재 store 에 기록**되므로 3단계 복사에 함께 실려 간다(신 store 와 일관)
+      2. 그룹 멤버의 **oam** 배포 overlay 에 `CimsRuntimeDir`/`CimsRuntimeMount` 병합
+         → **현재 store 에 기록**되므로 3단계 복사에 함께 실려 간다(신 store 와 일관).
+         oam-svc 는 저장하지 않는다 — 실체화가 oam 에서 유도해 넣는다(정본 하나)
       3. store 를 들고 있는 노드(현재 oam 이 running 인 노드)에 `migrate_oam_store` job
          → agent 가 정지 → 복사 → config.json 기록 → 기동 을 수행
       4. 나머지 멤버는 `update_config` 만 (그 노드는 같은 공유 store 를 읽게 된다)
@@ -1603,6 +1609,16 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         return HandlerResult(status=400, body={
             'error': 'no_oam_deployment',
             'detail': '이 그룹 멤버에 oam/oam-svc 배포가 없습니다. 먼저 설치하세요.'})
+    # base oam 이 **반드시** 있어야 한다 — store 위치의 정본이 oam 배포설정이기 때문이다.
+    # oam-svc 만 있는 그룹에 이관을 걸면 새 경로를 적을 곳이 없어, 복사는 되는데 설정은
+    # 옛 경로로 남는다(조용한 반쪽 이관). 관리평면을 호스팅하는 그룹에는 정의상 oam 이
+    # 있으므로 이 분기는 잘못 지정한 그룹을 걸러내는 용도다.
+    if not any((d.get('process_name') or '').lower().strip() == 'oam' for d in targets):
+        return HandlerResult(status=400, body={
+            'error': 'no_base_oam_deployment',
+            'detail': ('이 그룹에 base `oam` 배포가 없습니다 — store 위치의 정본이 oam '
+                       '배포설정이라 적을 곳이 없습니다(oam-svc 는 그 값을 유도해 받습니다). '
+                       '관리평면을 호스팅하는 그룹을 지정하거나 먼저 oam 을 설치하세요.')})
 
     # 그룹 레코드에는 쓰지 않는다 — 공유 store 는 아래 2)에서 배포 overlay 에 들어가고
     # 그룹은 그것을 읽는다(`_derived_shared_store`). 두 곳에 적으면 어긋난다.
@@ -1647,12 +1663,16 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
                         f"복사 생략, 설정만 재적용(update_config)")
 
     # ── 2)~4) 배포별 overlay 병합 + job 큐잉
+    #
+    # **oam 을 먼저 처리한다.** oam-svc 의 store 경로는 실체화가 oam 배포설정에서 유도해
+    # 넣는 파생값이므로(`agents._store_source`), 순서가 뒤집히면 oam-svc 가 아직 갱신되지
+    # 않은 옛 경로로 실체화돼 혼자 옛 store 에 남는다.
+    targets.sort(key=lambda d: 0 if (d.get('process_name') or '').lower().strip() == 'oam' else 1)
     jobs: list = []
     for dep in targets:
         cur = dep.get('config') if isinstance(dep.get('config'), dict) else {}
         overlay = dict(cur)
-        overlay['CimsRuntimeDir'] = target_dir
-        overlay['CimsRuntimeMount'] = mnt
+        _is_base = (dep.get('process_name') or '').lower().strip() == 'oam'
         # ── store 파생 키도 함께 옮긴다 ────────────────────────────────────────
         # 이관은 "store 를 이 위치로 옮긴다" 는 뜻이므로 store 에서 유도되는 값이 뒤에
         # 남으면 안 된다. 여기서 갱신하지 않아 실제로 깨졌던 것들:
@@ -1667,8 +1687,17 @@ async def _migrate_shared_store(gid: int, body_raw, config: dict) -> HandlerResu
         #      대용량 로그가 딸려가면 안 된다)
         # `Packages.Dir` 은 패키지를 서빙하는 base oam 만의 키다(oam-svc 템플릿엔 없다) —
         # 선언 없는 키를 overlay 에 심으면 콘솔 설정화면에 유령 항목·드리프트로 보인다.
-        if (dep.get('process_name') or '').lower().strip() == 'oam':
+        if _is_base:
+            overlay['CimsRuntimeDir'] = target_dir
+            overlay['CimsRuntimeMount'] = mnt
             overlay['Packages.Dir'] = f'{target_dir}/pkg_files'
+        else:
+            # oam-svc 는 store 위치를 **저장하지 않는다** — 정본은 oam 배포설정 하나이고
+            # 실체화가 거기서 유도해 config.json 에 넣는다. 옛 배포에 남아 있는 값은 여기서
+            # 걷어낸다: 두면 템플릿 밖 유령 키로 굳고(선언을 뺐다), 이관 때마다 "oam 과
+            # 같은지" 를 검사해야 하는 두 번째 입력점이 된다.
+            overlay.pop('CimsRuntimeDir', None)
+            overlay.pop('CimsRuntimeMount', None)
         if _log_dir_follows_mount(str(cur.get('ServiceLogging.Dir') or ''), mnt):
             overlay['ServiceLogging.Dir'] = f'{mnt}/service_log'
         updated = _deploy_update(config, dep['id'], {'config': overlay}) or dep

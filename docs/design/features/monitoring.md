@@ -179,7 +179,7 @@ VoIP/PTT 리소스 풀이 분리되어 있어 CMP STATS 응답도 분리 노출�
 | `per_iface` rx/tx + rate | `/proc/net/dev` delta | 누적 bytes + rate(B/s) |
 | `modules[]` (pid/cpu/mem) | `_metric_module_names()` 각각 `_pgrep_module` | 아래 참조 |
 
-- **모듈 liveness 탐지 = `_metric_module_names()`**: `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키**. supervised 를 합치는 이유 — 기본 집합 밖 모듈(`/opt/cims-agent/modules/isp` 등)은 listdir 로만은 누락될 수 있어 OAM 의 `module_down` 알람이 **false 로 뜰 수 있다**(deployment=running 인데 agent 미보고). supervised.json(워치독 등록 모듈)을 보면 경로 독립적으로 탐지된다.
+- **모듈 liveness 탐지 = `_metric_module_names()`**: `DEFAULT_INSTALL_ROOT` listdir ∪ **`supervised.json` 키** − 비데몬(`agent`·`console`). **고정 기본 집합(csp/cmp/csc 상시 포함)은 두지 않는다** — pgrep 이 호스트 전역이라 미설치 모듈까지 감시하면 동거 프로세스 오귀속·유령 전이(`process_died` 오탐)의 원천이 된다. 즉 보고 대상은 **agent 가 설치한 모듈만**이다. supervised 를 합치는 이유 — `install_path` 가 agent 트리 밖인 모듈(`/opt/cims-agent/isp` 등)은 listdir 로만은 누락돼 OAM 의 `module_down` 알람이 **false 로 뜰 수 있다**(deployment=running 인데 agent 미보고). supervised.json(워치독 등록 모듈)을 보면 경로 독립적으로 탐지된다.
 - 대시보드 "시스템 리소스" 위젯(`SystemResourceWidget`)은 데이터 0건이어도 패널을 항상 렌더(placeholder)하고, 서버 목록은 즉시 표시·메트릭은 4s 타임아웃 가드로 보강 — 느린/빈 메트릭에 위젯이 사라지거나 행 걸리지 않는다. 위젯은 지표(CPU/메모리/디스크/네트워크) 체크박스 선택 + 서버×지표 area 추이 차트(기준선·현재점·임계색) 형태.
 
 > ⚠️ **OAM 화이트리스트 함정**: agent 가 metric 필드를 보내도, CSC(OAM)의 `agent_api.py _metric()` record 화이트리스트에 없으면 저장 시 버려진다 — 신규 metric 필드(예 `mounts`)는 화이트리스트에 명시 추가 필수. 응답 직렬화(`agents.py _agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 도달한다.

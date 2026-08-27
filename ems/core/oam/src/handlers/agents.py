@@ -213,6 +213,57 @@ def _module_holds_lease(config, pkg_file) -> bool:
         return False
 
 
+def _store_source(config) -> dict:
+    """관리 store 위치의 **정본** — base `oam` 배포설정(desired state).
+
+    store 를 읽지만 위치를 스스로 정하지는 않는 모듈(oam-svc)에 줄 값이다. 위치를 정하는
+    창구는 oam 하나여야 한다 — 양쪽에서 입력받으면 서로 다른 값이 저장될 수 있고, 그러면
+    어긋남을 막는 정합 코드가 또 필요해진다(oam_ha.md §4.1 이 그룹 레코드에 대해 이미
+    거부한 패턴이다).
+
+    출처가 **배포 overlay**(desired state)이지 돌고 있는 OAM 의 현재 설정(actual state)이
+    아닌 이유: 이관 job 을 디스패치하는 시점에 현재 설정은 아직 **옛 경로**다(이관이 아직
+    일어나지 않았다). 그 값을 주면 oam-svc 만 옛 store 에 남는다. 그래서 이관은 oam
+    overlay 를 먼저 갱신하고, 여기서 그 값을 읽는다.
+
+    멤버 간 값이 갈리면(정상 구성에서는 있을 수 없다 — `scope=service` 공통 설정) 유도를
+    포기하고 현재 설정으로 폴백한다. 살아있는 경로가 확실한 쪽을 택하는 편이 안전하다.
+    """
+    out: dict = {}
+    try:
+        by_dir: dict = {}
+        for d in _deploy_load_all(config) or []:
+            if (d.get("process_name") or "").lower().strip() != "oam":
+                continue
+            if d.get("status") == "removed":
+                continue
+            ov = d.get("config") if isinstance(d.get("config"), dict) else {}
+            rd = str(ov.get("CimsRuntimeDir") or "").strip()
+            if rd:
+                by_dir.setdefault(rd, str(ov.get("CimsRuntimeMount") or "").strip())
+        if len(by_dir) == 1:
+            rd, mp = next(iter(by_dir.items()))
+            out["CimsRuntimeDir"] = rd
+            if mp:
+                out["CimsRuntimeMount"] = mp
+            return out
+        if len(by_dir) > 1:
+            logger.log_warning(
+                f"[config] oam 배포설정의 store 경로가 멤버 간 다릅니다 {sorted(by_dir)} — "
+                f"유도 포기, 현재 설정으로 폴백. 그룹 > 패키지 설정 > oam > 관리 store 에서 "
+                f"맞추세요(멤버 간 동일해야 함).")
+    except Exception as e:
+        logger.log_warning(f"[config] store 정본 유도 실패({e}) — 현재 설정으로 폴백")
+
+    rd = str(config.get("CimsRuntimeDir") or "").strip()
+    if rd:
+        out["CimsRuntimeDir"] = rd
+        mp = str(config.get("CimsRuntimeMount") or "").strip()
+        if mp:
+            out["CimsRuntimeMount"] = mp
+    return out
+
+
 def _materialize_deploy_config(config, pkg_file, overlay):
     """배포 config 실체화 — agent 가 쓰는 config.json 이 항상 완전한 유효설정이 되도록
     config_template default 를 base 로 깔고 deployment overlay(사용자 변경분)를 병합.
@@ -222,8 +273,11 @@ def _materialize_deploy_config(config, pkg_file, overlay):
     **그룹 공통 신원 주입** — 대상은 (a) 게이트웨이 서비스 모듈(`meta.gateway.routes` 보유:
     csc/oam-svc, base 발급 토큰을 검증해야 함) + (b) `meta.shared_identity` 선언 모듈
     (base `oam` 자신 — 이중화된 두 번째 노드의 OAM 이 같은 신원으로 떠야 한다).
-      - CimsAuth.JwtSecret / CimsRuntimeDir / Mgmt.Cidr — base 가 SoT, overlay 보다 우선
-        (시크릿 회전·runtime 이동 시 base 현재값 추종).
+      - CimsAuth.JwtSecret / Mgmt.Cidr — base 가 SoT, overlay 보다 우선 (시크릿 회전 시
+        base 현재값 추종).
+      - CimsRuntimeDir / CimsRuntimeMount — store 위치. base `oam` 배포설정이 정본이다.
+        oam 은 overlay 우선(이관 보호), oam-svc 는 **선언 없는 파생값**이라 `_store_source`
+        가 무조건 채운다 — 위치를 입력받는 창구는 oam 하나뿐이다.
       - ServiceLogging.Dir — template 소유(콘솔 편집 가능), 비어있을 때만 base 값 주입.
       - CimsAuth.BuiltinAccounts — shared_identity 모듈만. admin 계정이 노드마다 다르면
         절체 후 로그인이 깨진다(관리평면 이중화 전제, oam_ha.md §5)."""
@@ -254,34 +308,48 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             # 서비스 모듈은 노드 로컬 runtime 을 쓴다 — 절체 시 그 모듈의 로컬 상태
             # (csc IdMS 의 auth_codes·refresh_tokens 등)는 유실되고 단말이 재로그인한다.
             #
-            # store 경로는 **overlay 명시값이 우선**이다. base 를 무조건 덮어쓰면 이관
-            # (overlay 에 새 경로를 넣는 작업)이 무력화된다 — 실측 사고: 이관이 overlay 에
-            # `CimsRuntimeDir=/NAS/runtime` + `CimsRuntimeMount=/NAS` 를 넣었는데 여기서
-            # base(로컬 경로)가 Dir 만 되돌려, "store 가 마운트 하위가 아님" guard 에 걸려
-            # OAM 이 기동을 거부했다(자가복구가 되돌려 콘솔은 살아남음).
-            # overlay 에 값이 없을 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
+            # 리스 보유 모듈 안에서도 **위치를 정하는 쪽과 받아 쓰는 쪽**을 가른다.
             if _module_holds_lease(config, pkg_file):
-                # store 경로 3종을 **함께** 준다 — 하나만 주면 그 노드가 반쪽 설정으로 뜬다.
-                #   · CimsRuntimeDir   원본(store 루트)
-                #   · CimsRuntimeMount mount guard 기준. **없으면 guard 가 꺼진다**
-                #     (키 미설정이면 검사 자체를 건너뛴다 — oam_app._assert_runtime_mount).
-                #     그러면 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를
-                #     만드는 것을 막는 장치가 사라진다.
-                #   · Packages.Dir     store 파생값(oam_ha.md §4.1). 없으면 패키지 oam.json 의
-                #     상대경로("packages")로 폴백해 **버전 디렉터리**를 보므로, 그 노드가
-                #     Active 가 되는 순간 패키지를 못 찾는다(`/agent-bundle.tar.gz` 404 =
-                #     agent·모듈 설치/업그레이드 전면 불가).
-                # 템플릿에 선언된 키만 준다 — oam-svc 에는 `Packages.Dir` 이 없다(패키지 서빙은
-                # base oam 만의 일). 선언 없는 키를 심으면 설정화면에 유령 항목·드리프트가 된다.
-                _tkeys = _template_key_set(tmpl)
-                for _k, _v in (("CimsRuntimeDir",   config.get("CimsRuntimeDir")),
-                               ("CimsRuntimeMount", config.get("CimsRuntimeMount")),
-                               ("Packages.Dir",     (config.get("Packages") or {}).get("Dir"))):
-                    if not _v or str(out.get(_k) or "").strip():
-                        continue        # 값 없음 / overlay 명시값 있음(이관을 무력화하지 않는다)
-                    if _k != "CimsRuntimeDir" and _k not in _tkeys:
-                        continue
-                    out[_k] = _v
+                if ((pkg_file or {}).get("name") or "").lower().strip() == "oam":
+                    # base oam — store 위치를 입력받는 **유일한 창구**(정본).
+                    #
+                    # store 경로는 **overlay 명시값이 우선**이다. base 를 무조건 덮어쓰면 이관
+                    # (overlay 에 새 경로를 넣는 작업)이 무력화된다 — 실측 사고: 이관이 overlay 에
+                    # `CimsRuntimeDir=/NAS/runtime` + `CimsRuntimeMount=/NAS` 를 넣었는데 여기서
+                    # base(로컬 경로)가 Dir 만 되돌려, "store 가 마운트 하위가 아님" guard 에 걸려
+                    # OAM 이 기동을 거부했다(자가복구가 되돌려 콘솔은 살아남음).
+                    # overlay 에 값이 없을 때만 base 를 주입한다(= 아직 정하지 않은 노드에 그룹 값 전파).
+                    #
+                    # 3종을 **함께** 준다 — 하나만 주면 그 노드가 반쪽 설정으로 뜬다.
+                    #   · CimsRuntimeDir   원본(store 루트)
+                    #   · CimsRuntimeMount mount guard 기준. **없으면 guard 가 꺼진다**
+                    #     (키 미설정이면 검사 자체를 건너뛴다 — oam_app._assert_runtime_mount).
+                    #     그러면 마운트 없이 떠서 마운트 지점 하부 로컬 디스크에 두 번째 store 를
+                    #     만드는 것을 막는 장치가 사라진다.
+                    #   · Packages.Dir     store 파생값(oam_ha.md §4.1). 없으면 패키지 oam.json 의
+                    #     상대경로("packages")로 폴백해 **버전 디렉터리**를 보므로, 그 노드가
+                    #     Active 가 되는 순간 패키지를 못 찾는다(`/agent-bundle.tar.gz` 404 =
+                    #     agent·모듈 설치/업그레이드 전면 불가).
+                    _tkeys = _template_key_set(tmpl)
+                    for _k, _v in (("CimsRuntimeDir",   config.get("CimsRuntimeDir")),
+                                   ("CimsRuntimeMount", config.get("CimsRuntimeMount")),
+                                   ("Packages.Dir",     (config.get("Packages") or {}).get("Dir"))):
+                        if not _v or str(out.get(_k) or "").strip():
+                            continue        # 값 없음 / overlay 명시값 있음(이관을 무력화하지 않는다)
+                        if _k != "CimsRuntimeDir" and _k not in _tkeys:
+                            continue
+                        out[_k] = _v
+                else:
+                    # oam-svc — store 를 **읽지만 위치를 정하지는 않는다**(알람 sweeper 가
+                    # agents·ha_groups·services 도메인을 읽는다). 위치는 언제나 oam 과 같은
+                    # 값이어야 하므로 사용자 입력이 아니라 **파생값**이다: 템플릿에 선언하지
+                    # 않아 `_prune_to_template` 이 overlay 저장을 구조적으로 막고, 여기서
+                    # oam 배포설정에서 유도해 **무조건** 채운다(overlay 우선 없음 — 옛 배포에
+                    # 남은 값이 이기면 두 프로세스가 다른 store 를 본다).
+                    # `Mgmt.Cidr` 이 이미 같은 방식이다(바로 아래).
+                    # `Packages.Dir` 은 주지 않는다 — 패키지 서빙은 base oam 만의 일이다.
+                    for _k, _v in _store_source(config).items():
+                        out[_k] = _v
             if (config.get("Mgmt") or {}).get("Cidr"):
                 out["Mgmt.Cidr"] = config["Mgmt"]["Cidr"]
             if not out.get("ServiceLogging.Dir"):
@@ -293,6 +361,54 @@ def _materialize_deploy_config(config, pkg_file, overlay):
             accts = (config.get("CimsAuth") or {}).get("BuiltinAccounts")
             if isinstance(accts, list) and accts:
                 out["CimsAuth.BuiltinAccounts"] = accts
+    return out
+
+
+def effective_config_view(config, pkg_file, overlay) -> dict:
+    """표시용 실효값 — `{key: {v, src}}`. src = `overlay` | `injected` | `default`.
+
+    **화면은 overlay 가 아니라 이 값을 그려야 한다.** overlay 는 "운영자가 입력한 것"
+    뿐이고, 노드 `config.json` 에 실제로 들어가는 것은 `템플릿 기본값 + overlay + 주입`
+    이다. 둘을 혼동하면 두 방향으로 틀린다:
+      · 주입으로 채워지는 값(`CimsAuth.JwtSecret`·store 경로 등)이 **빈칸으로 보여**
+        "설정 안 됨" 으로 오해된다 (실측: 콘솔로 설치한 2번째 노드의 시크릿).
+      · 반대로 주입이 overlay 를 **덮는** 키(`CimsAuth.JwtSecret`·`Mgmt.Cidr`)는
+        화면에 운영자 입력값이 보이는데 노드는 주입값으로 뜨는 상태가 드러나지 않는다.
+
+    안전 장치는 순회 범위와 마스킹 두 개다: **템플릿 선언 키만** 돌기 때문에 미선언
+    주입값(`CimsAuth.BuiltinAccounts` 등)은 노출되지 않고, `type=password` 는 sentinel
+    로 가린다. 저장은 변경된 키만 전송하므로(콘솔) 채워 보여줘도 주입값이 overlay 에
+    굳지 않는다.
+
+    한계: 이것은 **OAM 이 계산한 실효값**이고 노드 파일을 읽은 값이 아니다. agent 는
+    파일 내용이 아니라 canonical hash 만 보고하므로(`metric.cfg_hashes`) 파일 자체를
+    비교할 수단이 없고, 어긋나면 `config_out_of_sync` 알람이 드러낸다. job 이 이
+    산출물을 그대로 기록하므로 정상 상태에서는 둘이 같다.
+    """
+    tmpl = pkg_file.get("config_template") if isinstance(pkg_file, dict) else None
+    overlay = overlay if isinstance(overlay, dict) else {}
+    keys = _template_key_set(tmpl)
+    if not keys:
+        return {}
+    mat = _materialize_deploy_config(config, pkg_file, overlay)
+    defaults = _template_defaults(tmpl)
+    ov = _coerce_list_fields(tmpl, overlay) if isinstance(tmpl, dict) else overlay
+    pw = _password_keys(tmpl)
+    out: dict = {}
+    for k in keys:
+        v = mat.get(k)
+        ovv = ov.get(k)
+        # src 는 "overlay 에 키가 있나" 가 아니라 **그 값이 실제로 적용됐나** 로 가른다.
+        # 키 존재만 보면 두 경우를 'overlay' 로 오표기한다: ① 주입이 overlay 를 덮는 키
+        # (`CimsAuth.JwtSecret`·`Mgmt.Cidr` — 무조건 덮는다) ② overlay 값이 빈 값이라
+        # 실체화가 '미설정' 으로 흘린 키. 둘 다 화면값과 라벨이 어긋난다.
+        if k in ov and ovv is not None and ovv != "" and v == ovv:
+            src = "overlay"
+        elif v is not None and v != defaults.get(k):
+            src = "injected"        # 배포 시 주입 (base 신원·store 경로 등) 또는 주입이 overlay 를 덮음
+        else:
+            src = "default"
+        out[k] = {"v": (_SECRET_MASK if (k in pw and v) else v), "src": src}
     return out
 
 
@@ -2473,7 +2589,14 @@ async def _get_deployment_config(did: int, config):
         body={
             # 시크릿(type=password)은 sentinel 로 가려 응답한다 — 콘솔 화면·API 로그에
             # 평문이 흐르지 않게. 저장 시 sentinel 은 '변경 없음' 으로 걸러진다(_strip_masked).
+            #
+            # `config` = overlay(운영자가 입력한 것만), `effective` = 노드에 실제로 들어가는
+            # 값({key:{v,src}} — 템플릿 기본값 + overlay + 주입). **화면은 `effective` 를
+            # 그린다** — overlay 만 그리면 주입값이 빈칸으로 보이고(시크릿 없음 오해),
+            # 주입이 overlay 를 덮는 키는 화면과 노드가 다른 상태가 드러나지 않는다.
+            # `config` 는 하위호환(구 콘솔)·저장 diff 기준으로 남긴다.
             "config":             _mask_secrets(cfg or {}, pkg.get("config_template")),
+            "effective":          effective_config_view(config, pkg, cfg),
             "config_applied_at":  ca,
             "template":           pkg.get("config_template"),
             "meta":               pkg.get("meta"),
@@ -3097,24 +3220,12 @@ def evaluate_group_package(config, group: dict, pkg_name: str) -> dict:
                  "compared_to": None, "drift": [], "deferred": [], "members": []}
 
     def _member_values(dep):
-        """멤버의 표시용 실효값 — 렌더 결과 + 값의 출처. 멤버마다 **자기 버전의
-        템플릿**으로 계산한다(버전 혼재 창에서도 각자 맞는 필드로 보이게)."""
+        """멤버의 표시용 실효값 — `effective_config_view` 와 **같은 계산**이다(공용 헬퍼).
+        비교 표와 편집 화면이 다른 기준으로 값을 그리면 "같은 값인데 다르게 보이는" 상태가
+        생기므로 계산을 한 곳에만 둔다. 멤버마다 **자기 버전의 템플릿**으로 계산한다
+        (버전 혼재 창에서도 각자 맞는 필드로 보이게)."""
         pkg_file = _pkg_load(config, dep.get("package_id")) or {}
-        tmpl = pkg_file.get("config_template") if isinstance(pkg_file, dict) else None
-        show = _masker(pkg_file)
-        overlay = _deploy_overlay(dep)
-        mat = _materialize_deploy_config(config, pkg_file, overlay)
-        defaults = _template_defaults(tmpl)
-        vals = {}
-        for k in _template_key_set(tmpl):
-            v = mat.get(k)
-            if k in overlay:
-                src = "overlay"
-            elif v is not None and v != defaults.get(k):
-                src = "injected"        # 배포 시 주입 (base 신원·경로 등)
-            else:
-                src = "default"
-            vals[k] = {"v": show(k, v), "src": src}
+        vals = effective_config_view(config, pkg_file, _deploy_overlay(dep))
         return {"deployment_id": dep.get("id"), "agent_id": dep.get("agent_id"),
                 "agent_name": dep.get("agent_name"),
                 "package_version": dep.get("package_version"), "values": vals}

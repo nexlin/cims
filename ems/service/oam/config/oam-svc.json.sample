@@ -10,6 +10,8 @@
         "JwtSecret": "igu8ioB+05H9gFngxCtjUAbmDB6lhsVDfiY0JAYfSk8=",
         "_comment": "base oam.json 의 CimsAuth.JwtSecret 과 동일 값이어야 게이트웨이 경유 토큰을 독립 검증할 수 있다(§5)."
     },
+    "CimsRuntimeDir": "",
+    "_CimsRuntimeDir_comment": "관리 store 루트 — 알람 sweeper 가 agents/ha_groups/services 도메인을 읽어 MO 루트(서버명·그룹명)를 푼다. **base oam 과 반드시 같은 경로.** 콘솔 배포 경로에서는 실체화가 oam 배포설정에서 유도해 넣으므로 config_template 에 선언이 없다(oam_base_service_split.md §7·§14.7) — 이 파일을 직접 쓰는 dev/단독 실행에서만 여기서 채운다. 비우면 노드 로컬 runtime 으로 폴백해 MO 가 주소 그대로 남는다.",
     "CimsDatabase": {
         "Host": "127.0.0.1",
         "Port": 3306,

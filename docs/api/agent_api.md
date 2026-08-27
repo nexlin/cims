@@ -179,7 +179,7 @@ CSC 는 결과에 따라 다음을 자동 처리:
 
 > ⚠️ CSC(OAM) 의 `agent_api.py _metric()` 는 record 화이트리스트로 필드를 거른다 — **신규 metric 필드(`mounts` 등)는 화이트리스트에 명시 추가하지 않으면 저장 시 버려진다**. 마찬가지로 응답 직렬화(`_agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 전달된다.
 
-> ⚠️ 모듈 liveness 탐지(`_metric_module_names()`)는 `_DEFAULT_METRIC_MODULES`(csp/cmp/csc/cwrtc) ∪ `DEFAULT_INSTALL_ROOT`(`<prefix>/modules`) listdir ∪ **`supervised.json` 키**. supervised 에 등록되지 않았거나 기본 집합 밖인 모듈(isp/psp 등)도 listdir 또는 supervised 로 합쳐 경로 독립적으로 탐지해 OAM `module_down` 오탐을 막는다.
+> ⚠️ 모듈 liveness 탐지(`_metric_module_names()`)는 `DEFAULT_INSTALL_ROOT`(`<prefix>/modules`) listdir ∪ **`supervised.json` 키** − 비데몬(`agent`·`console`). 고정 기본 집합은 없다 — **agent 가 설치한 모듈만** 보고한다(미설치 모듈까지 pgrep 하면 동거 프로세스 오귀속·유령 전이의 원천). `install_path` 가 agent 트리 밖인 모듈(isp/psp 등)은 supervised 로 합쳐 경로 독립적으로 탐지해 OAM `module_down` 오탐을 막는다.
 
 **Response 200**: `{"ok": true}`
 
