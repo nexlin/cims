@@ -97,7 +97,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
                     <tr key={m.name}>
                       <td><b>{m.name}</b></td>
                       <td>{m.running
-                        ? <span style={{ color: '#27ae60' }}>✓</span>
+                        ? <span style={{ color: 'var(--success)' }}>✓</span>
                         : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                       <td>{m.pid ?? '—'}</td>
                       <td>{m.cpu_pct ?? '—'}</td>

@@ -5,6 +5,7 @@ import {
   deploymentApi, effectiveScope,
   type Deployment, type ConfigTemplate, type ConfigTemplateField,
   type ConfigTemplateSection, type ConfigScope, type DeploymentConfigHa,
+  type ConfigValueSrc,
 } from '../../api/deployment'
 import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfigEditor'
 import StringListInput from './StringListInput'
@@ -49,6 +50,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
   const [template, setTemplate]   = useState<ConfigTemplate | null>(null)
   const [values, setValues]       = useState<Record<string, FieldValue>>({})
   const [initial, setInitial]     = useState<Record<string, FieldValue>>({})
+  // 값의 출처 — 'injected' 는 배포 시 OAM 이 채운 값(운영자 입력 아님). 배지 표시용.
+  const [srcMap, setSrcMap]       = useState<Record<string, ConfigValueSrc>>({})
   const [appliedAt, setAppliedAt] = useState<string | null>(null)
   const [tab, setTab]             = useState<Tab>('scalar')
   // HA 그룹 컨텍스트 (deployment 모드 + 그룹 멤버일 때만) — 있으면 공통/개별 탭 분리.
@@ -93,14 +96,18 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       return {
         template: r.template,
         config:   r.config || {},
+        // 노드에 실제로 들어가는 값 — 화면은 이걸 그린다(§아래 load 주석).
+        effective: r.effective ?? null,
         appliedAt: r.config_applied_at,
         ha:       r.ha ?? null,
       }
     }
+    // 모듈 모드(소스트리 dev)는 overlay 파일이 곧 적용 설정이라 주입이 없다 — effective 불필요.
     const r = await deploymentApi.getModuleConfig(source.name)
     return {
       template:  r.template,
       config:    r.current || {},
+      effective: null,
       appliedAt: null,
       ha:        null,
     }
@@ -141,14 +148,27 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       const r = await fetchConfig()
       setTemplate(r.template)
       setAppliedAt(r.appliedAt)
+      // 표시 기준 = **노드에 실제로 들어가는 값**(`effective`). overlay 만 그리면
+      // 배포 시 주입되는 값(JWT 시크릿·store 경로 등)이 빈칸으로 보여 "설정 안 됨"으로
+      // 오해되고, 주입이 overlay 를 덮는 키는 화면과 노드가 다른 상태가 드러나지 않는다.
+      // `src === 'default'` 는 템플릿 기본값이므로 위젯 타입에 맞는 `defaultValue(f)` 를
+      // 쓴다 — 빈 기본값(''/[]/null)은 실체화에서 제외되므로 그 값을 그대로 넣으면
+      // 배열/불린 위젯이 깨진다. `effective` 없는 응답(구 OAM·모듈 모드)은 종전 규칙.
       const base: Record<string, FieldValue> = {}
       if (r.template) {
         for (const s of r.template.sections) {
           for (const f of s.fields) {
-            const existing = r.config[f.key]
-            base[f.key] = existing !== undefined
-              ? (existing as FieldValue)
-              : defaultValue(f)
+            const eff = r.effective?.[f.key]
+            if (eff && eff.src !== 'default') {
+              base[f.key] = eff.v as FieldValue
+            } else if (!r.effective) {
+              const existing = r.config[f.key]
+              base[f.key] = existing !== undefined
+                ? (existing as FieldValue)
+                : defaultValue(f)
+            } else {
+              base[f.key] = defaultValue(f)
+            }
           }
         }
       }
@@ -157,6 +177,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
       }
       setValues(base)
       setInitial(base)
+      setSrcMap(Object.fromEntries(
+        Object.entries(r.effective || {}).map(([k, c]) => [k, c.src])))
       setHa(r.ha)
     } catch (e) {
       show((e as Error).message, 'err')
@@ -254,8 +276,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
             {/* 탭 (sticky top) — AS 그룹 멤버는 서버 개별(system) 설정·컬렉션만 */}
             <div style={{
               flex: '0 0 auto',
-              display: 'flex', gap: 0, borderBottom: '1px solid #eee',
-              padding: '0 20px', flexWrap: 'wrap', background: '#fafbfc',
+              display: 'flex', gap: 0, borderBottom: '1px solid var(--border)',
+              padding: '0 20px', flexWrap: 'wrap', background: 'var(--bg-soft)',
             }}>
               <TabBtn active={tab === 'scalar'} onClick={() => setTab('scalar')}>
                 {asMember ? '서버 개별 설정' : '설정'} ({visibleSections.reduce((n, s) => n + s.fields.length, 0)})
@@ -277,7 +299,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
                   </div>
                   {asMember && ha && (
-                    <div style={{ padding: 10, background: '#e8f0fe', border: '1px solid #b8d4f5',
+                    <div style={{ padding: 10, background: 'var(--primary-soft)', border: '1px solid var(--border)',
                                   borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
                       이 화면은 <b>이 서버 고유 설정</b>(bind IP·노드 식별자 등)만 다룹니다.
                       그룹 공통 설정 {svcFieldCount}개 필드와 공통 컬렉션은
@@ -294,6 +316,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                   {visibleSections.map(sec => (
                     <SectionBlock key={sec.key} section={sec} values={values}
                       initial={initial} changed={changed}
+                      srcOf={(k) => srcMap[k]}
                       onChange={(k, v) => setValues(p => ({ ...p, [k]: v }))}
                       onReset={(k) => setValues(p => ({ ...p, [k]: initial[k] }))}
                       footer={sec.key === 'store'
@@ -305,15 +328,15 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                   ))}
                   {isPending ? (
                     <div style={{
-                      marginTop: 12, padding: 10, background: '#e8f4fd',
-                      border: '1px solid #5dade2', borderRadius: 4, fontSize: 12,
+                      marginTop: 12, padding: 10, background: 'var(--primary-soft)',
+                      border: '1px solid var(--border)', borderRadius: 4, fontSize: 12,
                     }}>
                       ℹ 아직 <b>설치 전</b>입니다 — 저장한 값은 [패키지 설치] 탭에서 <b>설치</b> 실행 시 반영됩니다.
                     </div>
                   ) : restartRequired && (
                     <div style={{
-                      marginTop: 12, padding: 10, background: '#fff3e0',
-                      border: '1px solid #f39c12', borderRadius: 4, fontSize: 12,
+                      marginTop: 12, padding: 10, background: 'var(--warn-soft)',
+                      border: '1px solid var(--border)', borderRadius: 4, fontSize: 12,
                     }}>
                       ⚠ 변경된 항목 중 <b>재기동이 필요한</b> 항목이 있습니다. 저장 후
                       <b> Restart</b> 버튼으로 프로세스를 재기동해야 반영됩니다.
@@ -343,7 +366,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
               {source.type === 'deployment' && restartRequired && !isPending && (
                 <button className="btn btn--primary" onClick={() => void save({ restartAfter: true })}
                   disabled={saving || changed.size === 0}
-                  style={{ background: '#e67e22', borderColor: '#e67e22' }}
+                  style={{ background: '#b45309', borderColor: '#b45309' }}
                   title="저장 직후 restart job 자동 큐잉">
                   저장 + 재기동
                 </button>
@@ -377,7 +400,7 @@ function TabBtn({ active, children, onClick }: {
     <button onClick={onClick}
       style={{
         padding: '8px 16px', border: 'none',
-        background: active ? '#fff' : 'transparent',
+        background: active ? 'var(--surface)' : 'transparent',
         borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
         fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13,
       }}>
@@ -413,24 +436,24 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
 
   return (
     <div style={{
-      border: '1px solid #b8d4f5', borderRadius: 6, marginBottom: 12,
-      background: '#fafcfe',
+      border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
+      background: 'var(--bg-soft)',
     }}>
       <div onClick={() => setCollapsed(c => !c)}
         style={{
           padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
           display: 'flex', alignItems: 'center', gap: 8,
-          background: '#e8f0fe', borderBottom: collapsed ? 'none' : '1px solid #b8d4f5',
+          background: 'var(--primary-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
           borderRadius: '6px 6px 0 0',
         }}>
-        <span style={{ color: '#1a73e8', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
-        <b style={{ color: '#1a73e8' }}>변경 사항 ({changed.size})</b>
+        <span style={{ color: 'var(--primary)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
+        <b style={{ color: 'var(--primary)' }}>변경 사항 ({changed.size})</b>
         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           🔁 재기동 {restartKeys.length} · ⚡ 즉시 {hotKeys.length}
         </span>
         <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
                 style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
-                         background: '#fff', border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer' }}>
+                         background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
           전체 초기화
         </button>
       </div>
@@ -451,25 +474,25 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                 const f = fieldByKey.get(k)
                 const restart = f?.restart !== false
                 return (
-                  <tr key={k} style={{ borderTop: '1px solid #eee' }}>
+                  <tr key={k} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '4px 6px' }}>
                       <span title={k}>{f?.label ?? k}</span>
-                      <span style={{ marginLeft: 4, fontSize: 10, color: restart ? '#c0392b' : '#1e7d34' }}>
+                      <span style={{ marginLeft: 4, fontSize: 10, color: restart ? 'var(--danger)' : 'var(--success)' }}>
                         {restart ? '🔁' : '⚡'}
                       </span>
                     </td>
                     <td style={{ padding: '4px 6px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
                       {display(initial[k])}
                     </td>
-                    <td style={{ textAlign: 'center', color: '#1a73e8' }}>→</td>
-                    <td style={{ padding: '4px 6px', color: '#1a73e8', fontFamily: 'monospace' }}>
+                    <td style={{ textAlign: 'center', color: 'var(--primary)' }}>→</td>
+                    <td style={{ padding: '4px 6px', color: 'var(--primary)', fontFamily: 'monospace' }}>
                       {display(values[k])}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <button onClick={() => onReset(k)}
                               title="이 필드만 초기화"
-                              style={{ fontSize: 11, padding: '1px 6px', background: '#fff',
-                                       border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer' }}>
+                              style={{ fontSize: 11, padding: '1px 6px', background: 'var(--surface)',
+                                       border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
                         ↺
                       </button>
                     </td>
@@ -484,7 +507,8 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   )
 }
 
-export function SectionBlock({ section, values, initial, changed, onChange, onReset, footer }: {
+export function SectionBlock({ section, values, initial, changed, onChange, onReset, footer,
+                               srcOf }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -498,6 +522,8 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   onReset: (key: string) => void
   /** 섹션 하단 액션 — 저장만으로는 적용되지 않는 값(관리 store 경로 등)의 정규 경로. */
   footer?: React.ReactNode
+  /** 값의 출처 — `injected`(배포 시 자동 채움)를 배지로 드러낸다. 없으면 배지 없음. */
+  srcOf?: (key: string) => ConfigValueSrc | undefined
 }) {
   // 인프라 section 은 기본 접힘 (헤더 클릭으로 펼침) — 모든 필드는 노출.
   const [collapsed, setCollapsed] = useState(!!section.hidden)
@@ -530,23 +556,23 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
 
   return (
     <div style={{
-      border: '1px solid #e5e5e5', borderRadius: 6, marginBottom: 12,
-      background: '#fff',
-      ...(section.hidden ? { borderStyle: 'dashed', background: '#fcfbf7' } : {}),
+      border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
+      background: 'var(--surface)',
+      ...(section.hidden ? { borderStyle: 'dashed', background: 'var(--warn-soft)' } : {}),
     }}>
       <div onClick={() => setCollapsed(c => !c)}
         style={{
           padding: '10px 14px', cursor: 'pointer', userSelect: 'none',
           display: 'flex', alignItems: 'baseline', gap: 8,
-          borderBottom: collapsed ? 'none' : '1px solid #eee',
-          background: section.hidden ? '#f5efe0' : '#fafafa',
+          borderBottom: collapsed ? 'none' : '1px solid var(--border)',
+          background: section.hidden ? 'var(--warn-soft)' : 'var(--bg-soft)',
         }}>
         <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b>{section.title}</b>
         {section.hidden && (
           <span style={{
             fontSize: 10, padding: '1px 6px', borderRadius: 3,
-            background: '#7f8c8d', color: '#fff',
+            background: '#6b7280', color: '#fff',
           }}>인프라</span>
         )}
         {section.description && (
@@ -560,7 +586,7 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
               {b.title && (
                 <div style={{
                   fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
-                  borderBottom: '1px solid #eee', paddingBottom: 4, marginBottom: 8,
+                  borderBottom: '1px solid var(--border)', paddingBottom: 4, marginBottom: 8,
                   display: 'flex', alignItems: 'baseline', gap: 6,
                 }}>
                   <span>{b.title}</span>
@@ -579,6 +605,7 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
                     value={values[f.key]}
                     initialValue={initial[f.key]}
                     isChanged={changed.has(f.key)}
+                    src={srcOf?.(f.key)}
                     onChange={v => onChange(f.key, v)}
                     onReset={() => onReset(f.key)} />
                 ))}
@@ -600,6 +627,11 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
  * 생기거나(마운트 없으면) mount guard 가 기동을 거부한다. 데이터를 옮기는 것은 이관
  * (`migrate_oam_store` job: 정지 → 복사 → 기록 → 기동)뿐이므로 그 버튼을 여기 둔다.
  * 최초 지정은 부트스트랩 설치가 담당하므로(oam_ha.md §9.4) 보통 이 버튼은 쓰지 않는다.
+ *
+ * 이 footer 는 결과적으로 **oam 에만** 붙는다 — store 섹션을 가진 템플릿이 oam 하나이기
+ * 때문이다. oam-svc 도 store 를 읽지만 위치는 oam 에서 유도되는 파생값이라 입력 창구를
+ * 두지 않는다(oam_ha.md §4.1). 창구가 둘이면 서로 다른 값이 저장될 수 있고, 그때부터
+ * "두 값이 같은가" 를 검사하는 코드가 따라붙는다.
  */
 export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   groupId: number | null
@@ -629,7 +661,7 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   return (
     <div style={{
       marginTop: 12, padding: '8px 10px', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
-      background: '#fff8e1', border: '1px solid #ffe08a',
+      background: 'var(--warn-soft)', border: '1px solid var(--border)',
     }}>
       <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
       않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
@@ -643,7 +675,7 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
             {busy ? '이관 요청 중…' : `⇢ ${mp || '(마운트 지점)'} 으로 이관`}
           </button>
           {dirty && (
-            <span style={{ color: '#b26a00' }}>
+            <span style={{ color: 'var(--warning)' }}>
               편집한 값이 있습니다 — 저장 대신 이 버튼을 쓰세요.
             </span>
           )}
@@ -658,11 +690,13 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   )
 }
 
-function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: {
+function FieldRow({ field, value, initialValue, isChanged, src, onChange, onReset }: {
   field: ConfigTemplateField
   value: FieldValue
   initialValue: FieldValue
   isChanged: boolean
+  /** 값의 출처. `injected` = 운영자가 입력한 값이 아니라 배포 시 OAM 이 채운 값. */
+  src?: ConfigValueSrc
   onChange: (v: FieldValue) => void
   onReset: () => void
 }) {
@@ -670,23 +704,34 @@ function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: 
   const badgeStyle: React.CSSProperties = {
     display: 'inline-block', fontSize: 10, padding: '1px 5px',
     borderRadius: 3, marginLeft: 6, fontWeight: 500,
-    background: needsRestart ? '#fbe9e7' : '#e8f5e9',
-    color:      needsRestart ? '#c0392b' : '#1e7d34',
-    border: `1px solid ${needsRestart ? '#f5c6a7' : '#b7e0bd'}`,
+    background: needsRestart ? 'var(--danger-soft)' : 'var(--success-soft)',
+    color:      needsRestart ? 'var(--danger)' : 'var(--success)',
+    border: '1px solid var(--border)',
     whiteSpace: 'nowrap',
   }
   return (
     <>
       <label style={{
         paddingTop: 6, fontSize: 13,
-        color: isChanged ? '#2980b9' : undefined,
+        color: isChanged ? 'var(--primary)' : undefined,
       }}>
         <span>{field.label}</span>
         <span style={badgeStyle} title={needsRestart ? '재기동 후 반영' : '저장 즉시 반영'}>
           {needsRestart ? '🔁 재기동' : '⚡ 즉시'}
         </span>
         {field.required && <span style={{ color: '#e74c3c', marginLeft: 4 }}>*</span>}
-        {isChanged && <span style={{ marginLeft: 6, color: '#2980b9', fontSize: 11 }}>●</span>}
+        {src === 'injected' && !isChanged && (
+          <span style={{
+            display: 'inline-block', fontSize: 10, padding: '1px 5px', borderRadius: 3,
+            marginLeft: 6, fontWeight: 500, background: 'var(--primary-soft)', color: 'var(--primary)',
+            border: '1px solid var(--border)', whiteSpace: 'nowrap',
+          }} title={'배포 시 OAM 이 채운 값입니다 — 이 서버 설정에 저장된 값이 아닙니다. '
+                  + '노드에는 이 값이 들어갑니다. 일부 키(시크릿·관리망 대역)는 저장하더라도 '
+                  + '배포 시 OAM 값으로 다시 채워집니다.'}>
+            자동 채움
+          </span>
+        )}
+        {isChanged && <span style={{ marginLeft: 6, color: 'var(--primary)', fontSize: 11 }}>●</span>}
       </label>
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -696,8 +741,8 @@ function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: 
           {isChanged && (
             <button onClick={onReset}
                     title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}
-                    style={{ fontSize: 12, padding: '2px 8px', background: '#fff',
-                             border: '1px solid #ccc', borderRadius: 3, cursor: 'pointer',
+                    style={{ fontSize: 12, padding: '2px 8px', background: 'var(--surface)',
+                             border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
                              flexShrink: 0 }}>
               ↺
             </button>
@@ -707,7 +752,7 @@ function FieldRow({ field, value, initialValue, isChanged, onChange, onReset }: 
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{field.help}</div>
         )}
         {!needsRestart && field.reload_hint && (
-          <div style={{ fontSize: 11, color: '#27ae60', marginTop: 3 }}>⚡ {field.reload_hint}</div>
+          <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 3 }}>⚡ {field.reload_hint}</div>
         )}
       </div>
     </>

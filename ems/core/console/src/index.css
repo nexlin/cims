@@ -234,6 +234,8 @@ body {
   font-size: 13px;
   outline: none;
   background: var(--surface);
+  /* 글자색도 명시 — 비워 두면 브라우저 기본에 맡겨져 테마 전환 시 배경과 어긋난다(.btn 과 같은 함정). */
+  color: var(--text);
 }
 .search-input:focus { border-color: var(--primary); }
 

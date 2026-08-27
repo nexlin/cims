@@ -7,20 +7,20 @@ export const SERVICE_KINDS = [
 
 export function agentStatusColor(s: Agent['status']) {
   const m: Record<Agent['status'], { bar: string; border: string }> = {
-    pending:  { bar: '#f39c12', border: '#fce8cc' },
+    pending:  { bar: '#b45309', border: 'var(--border)' },
     approved: { bar: '#3498db', border: '#d6e9f7' },
-    online:   { bar: '#2ecc71', border: '#cfeee0' },
-    offline:  { bar: '#95a5a6', border: '#dde2e3' },
+    online:   { bar: '#15803d', border: '#cfeee0' },
+    offline:  { bar: '#6b7280', border: 'var(--border)' },
     error:    { bar: '#e74c3c', border: '#f6d2cf' },
-    revoked:  { bar: '#7f8c8d', border: '#d3d7d8' },
+    revoked:  { bar: '#6b7280', border: 'var(--border)' },
   }
   return m[s] || m.offline
 }
 
 export function depStatusColor(s: Deployment['status']) {
   return {
-    pending: '#f39c12', deploying: '#3498db', running: '#2ecc71',
-    stopped: '#95a5a6', failed: '#e74c3c', removed: '#7f8c8d',
+    pending: '#b45309', deploying: '#2563eb', running: '#15803d',
+    stopped: '#6b7280', failed: '#c0392b', removed: '#6b7280',
   }[s] || '#bbb'
 }
 

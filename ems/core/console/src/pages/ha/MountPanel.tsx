@@ -79,8 +79,8 @@ export function MountPanel({ title, mounts, applying, onApply }: {
               <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>{m.options || '-'}</td>
               <td style={{ padding: '4px 8px', fontSize: 11 }}>
                 {m.mounted
-                  ? <span style={{ color: '#27ae60', fontWeight: 'bold' }}>● mounted</span>
-                  : <span style={{ color: '#c0392b' }}>○ unmounted</span>}
+                  ? <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>● mounted</span>
+                  : <span style={{ color: 'var(--danger)' }}>○ unmounted</span>}
               </td>
               <td style={{ padding: '4px 8px' }}>
                 <button onClick={() => deleteMount(m)} style={btnDanger()} disabled={applying}>삭제</button>

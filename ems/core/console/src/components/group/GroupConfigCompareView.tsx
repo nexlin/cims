@@ -223,6 +223,16 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     return { v: v as FieldValue, fromDefault: false }
   }, [configView])
 
+  // 표시값도 서버가 계산한 **실효값**(overlay + 기본값 + 배포 시 주입)을 쓴다.
+  // overlay 만 보고 그리면 판정(overlay 기준)과 표시 기준이 달라, 화면에는 같은 값이
+  // 보이는데 드리프트로 표시되는 일이 생긴다 — src 배지로 그 차이를 드러낸다.
+  // 서버 값이 아직 없으면(판정 보류·구 OAM) overlay 기준으로 폴백한다(표시 전용).
+  const memberValues = useMemo(() => {
+    const m = new Map<number, GroupPkgSyncMember['values']>()
+    for (const mem of syncView?.members || []) m.set(mem.agent_id, mem.values)
+    return m
+  }, [syncView])
+
   // effect 에서 최신 dirty 여부를 deps 순환 없이 참조하기 위한 미러 ref
   const dirtyRef = useRef(false)
 
@@ -234,13 +244,23 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   useEffect(() => {
     if (!template || !configView || baseAgentId == null) return
     if (dirtyRef.current) return
+    // 편집 폼도 비교 표와 **같은 기준**(서버가 계산한 실효값)으로 채운다. overlay 만
+    // 보고 채우면 주입값(JWT 시크릿·store 경로 등)이 빈칸으로 보여 같은 화면 안에서
+    // 표(실효값)와 폼(overlay)이 다른 값을 가리킨다. `default` 는 위젯 타입에 맞는
+    // 템플릿 기본값을 쓴다(빈 기본값은 실효값에서 제외되므로 그대로 넣으면 위젯이 깨진다).
+    // 서버 판정이 아직 없으면(구 OAM·판정 보류) overlay 기준 폴백.
     const base: Record<string, FieldValue> = {}
     for (const sec of svcSections) {
-      for (const f of sec.fields) base[f.key] = effective(baseAgentId, f).v
+      for (const f of sec.fields) {
+        const cell = memberValues.get(baseAgentId)?.[f.key]
+        base[f.key] = cell
+          ? (cell.src === 'default' ? defaultValue(f) : (cell.v as FieldValue))
+          : effective(baseAgentId, f).v
+      }
     }
     setFormValues(base)
     setFormInitial(base)
-  }, [template, configView, baseAgentId, svcSections, effective])
+  }, [template, configView, baseAgentId, svcSections, effective, memberValues])
 
   const changed = useMemo(() => {
     const s = new Set<string>()
@@ -332,16 +352,6 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     return driftKeys.has(f.key) ? 'drift' : 'ok'
   }
 
-  // 표시값도 서버가 계산한 **실효값**(overlay + 기본값 + 배포 시 주입)을 쓴다.
-  // overlay 만 보고 그리면 판정(overlay 기준)과 표시 기준이 달라, 화면에는 같은 값이
-  // 보이는데 드리프트로 표시되는 일이 생긴다 — src 배지로 그 차이를 드러낸다.
-  // 서버 값이 아직 없으면(판정 보류·구 OAM) overlay 기준으로 폴백한다(표시 전용).
-  const memberValues = useMemo(() => {
-    const m = new Map<number, GroupPkgSyncMember['values']>()
-    for (const mem of syncView?.members || []) m.set(mem.agent_id, mem.values)
-    return m
-  }, [syncView])
-
   function memberValue(agentId: number, f: ConfigTemplateField):
       { v: FieldValue; src: 'overlay' | 'injected' | 'default' } {
     const cell = memberValues.get(agentId)?.[f.key]
@@ -373,8 +383,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   }, [template, syncKeys, driftKeys])
 
   const stateStyle: Record<CellState, React.CSSProperties> = {
-    ok:         { background: '#f0f9f1' },
-    drift:      { background: '#fff3e0' },
+    ok:         { background: 'var(--success-soft)' },
+    drift:      { background: 'var(--warn-soft)' },
     individual: {},
   }
 
@@ -402,7 +412,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                     style={{
                       padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
                       background: active ? 'var(--surface)' : 'transparent',
-                      color: active ? '#1976d2' : 'var(--text-muted)',
+                      color: active ? 'var(--primary)' : 'var(--text-muted)',
                       border: '1px solid var(--border)', borderBottom: 'none',
                       borderRadius: '6px 6px 0 0', cursor: 'pointer',
                     }}>
@@ -412,7 +422,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
               </span>
               {on !== null && (
                 <span style={{ marginLeft: 5, fontSize: 10,
-                               color: on ? '#1e7d34' : '#e67e22' }}>
+                               color: on ? 'var(--success)' : '#e67e22' }}>
                   {on ? '⬤동기화' : '○수동'}
                 </span>
               )}
@@ -430,11 +440,11 @@ export function GroupConfigCompareView({ group, members: liveMembers,
         <div style={{ flex: '0 0 auto', padding: '10px 16px', fontSize: 12,
                       display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
                       borderBottom: '1px solid var(--border)',
-                      background: autoSyncOn ? '#f4fbf5' : '#fdf6ec' }}>
+                      background: autoSyncOn ? 'var(--success-soft)' : 'var(--warn-soft)' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6,
                           cursor: toggling ? 'wait' : 'pointer', userSelect: 'none',
                           fontWeight: 700,
-                          color: autoSyncOn ? '#1e7d34' : '#e67e22' }}
+                          color: autoSyncOn ? 'var(--success)' : '#e67e22' }}
                  title={autoSyncOn
                    ? 'ON — ACTIVE 기준으로 STANDBY 공통 설정을 자동 교정 (이벤트+주기). 업데이트 작업 전 OFF 로 전환하세요.'
                    : 'OFF — 자동 교정 정지. 멤버별로 독립 편집 (업그레이드 창). 작업 완료 후 ON 으로.'}>
@@ -471,7 +481,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
 
       {/* 내부 뷰 탭 */}
       <div style={{ flex: '0 0 auto', display: 'flex', gap: 0, padding: '0 16px',
-                    borderBottom: '1px solid #eee', background: '#fafbfc' }}>
+                    borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
         {isAS && (
           <ViewBtn active={view === 'edit'} onClick={() => setView('edit')}>
             공통 설정 ({svcSections.reduce((n, s) => n + s.fields.length, 0)})
@@ -497,19 +507,19 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           !configView ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
             <>
               {autoSyncOn ? (
-                <div style={{ padding: 10, background: '#e8f0fe', border: '1px solid #b8d4f5',
+                <div style={{ padding: 10, background: 'var(--primary-soft)', border: '1px solid var(--border)',
                               borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
                   🔗 저장하면 그룹 멤버 <b>전체({deployedMembers.map(m => m.name).join(', ')})</b>에
                   적용됩니다. 표시값 기준: <b>{baseMemberName}</b>
                   {activeMember && baseAgentId === activeAid ? ' (ACTIVE)' : ''}
                   {mixedVersions && (
-                    <div style={{ marginTop: 6, color: '#c0392b' }}>
+                    <div style={{ marginTop: 6, color: 'var(--danger)' }}>
                       ⚠ 버전 혼재 중에는 그룹 일괄 저장이 차단됩니다 — 스위치 OFF 후 멤버별로 편집하세요.
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ padding: 10, background: '#fdf6ec', border: '1px solid #f0c987',
+                <div style={{ padding: 10, background: 'var(--warn-soft)', border: '1px solid var(--border)',
                               borderRadius: 4, fontSize: 12, marginBottom: 12,
                               display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <span>○ 동기화 OFF — <b>편집할 멤버:</b></span>
@@ -530,6 +540,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
               {svcSections.map(sec => (
                 <SectionBlock key={`${baseAgentId}:${sec.key}`} section={sec}
                   values={formValues} initial={formInitial} changed={changed}
+                  srcOf={(k) => (baseAgentId == null ? undefined : memberValues.get(baseAgentId)?.[k]?.src)}
                   onChange={(k, v) => setFormValues(p => ({ ...p, [k]: v }))}
                   onReset={(k) => setFormValues(p => ({ ...p, [k]: formInitial[k] }))}
                   footer={sec.key === 'store'
@@ -576,7 +587,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             <>
               <div style={{ fontSize: 12, marginBottom: 12, display: 'flex', gap: 12,
                             alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ color: '#1e7d34' }}>🔗 공통 일치 {summary.ok}</span>
+                <span style={{ color: 'var(--success)' }}>🔗 공통 일치 {summary.ok}</span>
                 <span style={{ color: summary.drift ? '#e67e22' : 'var(--text-muted)',
                                fontWeight: summary.drift ? 700 : 400 }}>
                   ⚠ 드리프트 {summary.drift}
@@ -594,10 +605,10 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                 </div>
               )}
               {template.sections.map(sec => (
-                <div key={sec.key} style={{ border: '1px solid #e5e5e5', borderRadius: 6,
-                                            marginBottom: 12, background: '#fff', overflow: 'hidden' }}>
-                  <div style={{ padding: '10px 14px', background: '#fafafa',
-                                borderBottom: '1px solid #eee',
+                <div key={sec.key} style={{ border: '1px solid var(--border)', borderRadius: 6,
+                                            marginBottom: 12, background: 'var(--surface)', overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', background: 'var(--bg-soft)',
+                                borderBottom: '1px solid var(--border)',
                                 display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <b>{sec.title}</b>
                     {sec.description && (
@@ -611,7 +622,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                         <th style={{ width: 70, textAlign: 'center' }}>구분</th>
                         {deployedMembers.map(m => (
                           <th key={m.id} style={{ textAlign: 'left', padding: '6px 10px',
-                                                  cursor: 'pointer', color: '#1976d2' }}
+                                                  cursor: 'pointer', color: 'var(--primary)' }}
                               title={`${m.name} 의 설정 편집으로 이동`}
                               onClick={() => onSelectMember(m.id, effectivePkgName)}>
                             {m.name}{activeAid === m.id ? ' ●' : ''}
@@ -626,7 +637,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                       {sec.fields.map(f => {
                         const st = cellState(f)
                         return (
-                          <tr key={f.key} style={{ borderTop: '1px solid #eee', ...stateStyle[st] }}>
+                          <tr key={f.key} style={{ borderTop: '1px solid var(--border)', ...stateStyle[st] }}>
                             <td style={{ padding: '6px 14px' }} title={f.key}>
                               {f.label || f.key}
                             </td>
@@ -634,7 +645,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                               {syncKeys.has(f.key)
                                 ? (st === 'drift'
                                     ? <span title="공통이어야 하는데 멤버 간 값 상이" style={{ color: '#e67e22' }}>⚠</span>
-                                    : <span title="그룹 공통 — 멤버 간 값 동일" style={{ color: '#1e7d34' }}>🔗</span>)
+                                    : <span title="그룹 공통 — 멤버 간 값 동일" style={{ color: 'var(--success)' }}>🔗</span>)
                                 : <span title="서버별 고유값 — 동기화 대상 아님" style={{ fontSize: 10, color: 'var(--text-muted)' }}>개별</span>}
                             </td>
                             {deployedMembers.map(m => {
@@ -679,7 +690,7 @@ function ViewBtn({ active, children, onClick }: {
     <button onClick={onClick}
       style={{
         padding: '8px 16px', border: 'none',
-        background: active ? '#fff' : 'transparent',
+        background: active ? 'var(--surface)' : 'transparent',
         borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
         fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13,
       }}>

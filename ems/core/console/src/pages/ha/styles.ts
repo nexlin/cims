@@ -14,7 +14,7 @@ export function btnSecondary(): CSSProperties {
 }
 export function btnDanger(): CSSProperties {
   return { fontSize: 11, padding: '2px 8px', cursor: 'pointer',
-           background: 'var(--surface)', border: '1px solid #c0392b', color: '#c0392b', borderRadius: 3 }
+           background: 'var(--surface)', border: '1px solid #c0392b', color: 'var(--danger)', borderRadius: 3 }
 }
 export function btnAdd(small = false): CSSProperties {
   return { fontSize: small ? 11 : 13, padding: small ? '3px 10px' : '6px 16px',

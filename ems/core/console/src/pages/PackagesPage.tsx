@@ -173,7 +173,7 @@ function ModuleRow({ mod, active, onClick }: {
     <button onClick={onClick}
       style={{
         display: 'block', width: '100%', textAlign: 'left',
-        padding: '10px 12px', border: 'none', background: active ? '#eef5ff' : 'transparent',
+        padding: '10px 12px', border: 'none', background: active ? 'var(--primary-soft)' : 'transparent',
         borderLeft: `3px solid ${active ? '#3498db' : 'transparent'}`,
         cursor: 'pointer', borderBottom: '1px solid var(--border)',
       }}>
@@ -266,7 +266,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8,
-      background: isLatest ? '#f7fcff' : '#fff',
+      background: isLatest ? 'var(--bg-soft)' : 'var(--surface)',
     }}>
       <div onClick={onToggle}
         style={{
@@ -287,7 +287,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
         {depCount > 0 && (
           <span style={{
-            marginLeft: 'auto', fontSize: 11, color: '#2980b9',
+            marginLeft: 'auto', fontSize: 11, color: 'var(--primary)',
             background: 'var(--primary-soft)', padding: '2px 8px', borderRadius: 10,
           }}>배포 {depCount}곳</span>
         )}

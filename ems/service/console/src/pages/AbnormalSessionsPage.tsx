@@ -20,9 +20,9 @@ interface AbnResp {
 }
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
-  external_ip:  { label: '외부 IP',     color: '#d97706' },
-  scanner_ua:   { label: '스캐너 도구',  color: '#dc2626' },
-  fraud_number: { label: '사기 번호',    color: '#dc2626' },
+  external_ip:  { label: '외부 IP',     color: 'var(--warning)' },
+  scanner_ua:   { label: '스캐너 도구',  color: 'var(--danger)' },
+  fraud_number: { label: '사기 번호',    color: 'var(--danger)' },
   auth_failed:  { label: '인증 실패',    color: '#9333ea' },
 }
 const SEV: Record<string, { label: string; bg: string }> = {

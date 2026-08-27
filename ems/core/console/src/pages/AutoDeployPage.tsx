@@ -314,7 +314,7 @@ export default function AutoDeployPage() {
                   <td>{r.server}</td><td>{r.host}</td><td>{r.auth_mode}</td>
                   <td>{r.os || '-'}</td><td>{r.login_user || '-'}</td>
                   <td>{r.sudo_ok ? '✓' : '✗'}</td>
-                  <td style={{ color: r.ok ? '#27ae60' : '#e74c3c' }}>
+                  <td style={{ color: r.ok ? 'var(--success)' : '#e74c3c' }}>
                     {r.ok ? 'OK' : `${r.error_code || ''} ${r.error || ''}`}
                   </td>
                 </tr>
@@ -337,7 +337,7 @@ export default function AutoDeployPage() {
               {runs.map(r => (
                 <tr key={r.id}>
                   <td>{r.id}</td><td>{r.blueprint}</td>
-                  <td style={{ color: r.status === 'succeeded' ? '#27ae60'
+                  <td style={{ color: r.status === 'succeeded' ? 'var(--success)'
                              : r.status === 'failed' ? '#e74c3c' : 'var(--text-muted)' }}>
                     {r.status}</td>
                   <td>{r.progress.done}/{r.progress.total}
@@ -598,7 +598,7 @@ function RunView({ run, onAction, busy, canEdit }: {
           run #{run.id} — {run.blueprint}
           <span style={{
             marginLeft: 10, fontWeight: 400,
-            color: run.status === 'succeeded' ? '#27ae60'
+            color: run.status === 'succeeded' ? 'var(--success)'
                  : run.status === 'failed' ? '#e74c3c' : '#1976d2',
           }}>{run.status}{running && ' ⋯'}</span>
         </h3>

@@ -42,7 +42,7 @@ export function ObjectListEditor({ field, value, onChange, renderCell, ensureOne
   const cell = renderCell || defaultCell
 
   return (
-    <div style={{ border: '1px dashed #bbb', borderRadius: 4, padding: 6 }}>
+    <div style={{ border: '1px dashed var(--border)', borderRadius: 4, padding: 6 }}>
       {display.length === 0 ? (
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>항목 없음</div>
       ) : (

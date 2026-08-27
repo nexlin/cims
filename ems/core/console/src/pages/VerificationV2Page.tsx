@@ -277,7 +277,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                   fontWeight: 700, lineHeight: 1.2,
                 }}>
                   <div style={{
-                    fontSize: 26, color: isBlocked ? '#6b7280' : color, letterSpacing: 0.5,
+                    fontSize: 26, color: isBlocked ? 'var(--text)' : color, letterSpacing: 0.5,
                     textDecoration: isBlocked ? 'line-through' : 'none',
                   }}>{st.id}</div>
                   <div style={{
@@ -586,7 +586,7 @@ function StageRow({
                   <Fragment key={it.id}>
                     <tr style={{
                       borderTop: '1px solid var(--border, #f3f4f6)',
-                      background: itBlocked ? '#fef3c7' : undefined,
+                      background: itBlocked ? 'var(--warn-soft)' : undefined,
                       opacity: itBlocked ? 0.7 : 1,
                     }}
                     title={itBlocked ? '선행 stage FAIL 로 차단됨 — 함수 호출 없이 BLOCKED' : undefined}>
@@ -659,7 +659,7 @@ function StageRow({
                       const cBlocked = c.status === 'BLOCKED'
                       return (
                         <tr key={c.id} style={{
-                          background: cBlocked ? '#fef3c7' : 'var(--bg-soft)',
+                          background: cBlocked ? 'var(--warn-soft)' : 'var(--bg-soft)',
                           opacity: cBlocked ? 0.7 : 1,
                         }}
                         title={cBlocked ? '선행 stage FAIL 로 차단됨' : undefined}>
@@ -1020,7 +1020,7 @@ export default function VerificationV2Page() {
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>로딩 중…</span>
         )}
         {error && (
-          <span style={{ fontSize: 12, color: '#dc2626', maxWidth: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--danger)', maxWidth: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             ⚠ {error}
           </span>
         )}

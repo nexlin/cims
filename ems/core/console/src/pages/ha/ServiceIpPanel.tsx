@@ -190,7 +190,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                       <td style={{ padding: '4px 8px', fontSize: 11 }}>
                         {isMgmtIp ? <span style={{ color: 'var(--text-muted)' }}>mgmt</span>
                           : isVip ? <span style={{ color: '#8e44ad', fontWeight: 'bold' }}>🔗 VIP</span>
-                          : managed ? <span style={{ color: '#27ae60' }}>● cims</span>
+                          : managed ? <span style={{ color: 'var(--success)' }}>● cims</span>
                           : <span style={{ color: 'var(--text-muted)' }}>○ 외부</span>}
                       </td>
                       <td style={{ padding: '4px 8px' }}>
@@ -295,7 +295,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
             const rowKey = `route-${r.dst}-${r.via}-${r.dev}`
             const ownerChip = kernelAuto  ? <span style={{ color: 'var(--text-muted)' }}>🔒 kernel</span>
                             : isDefault   ? <span style={{ color: '#3498db' }}>★ default</span>
-                            : managed     ? <span style={{ color: '#27ae60' }}>● cims</span>
+                            : managed     ? <span style={{ color: 'var(--success)' }}>● cims</span>
                             :               <span style={{ color: 'var(--text-muted)' }}>○ 외부</span>
             const canEdit = !kernelAuto
             const isEditing = routeEditKey === r.dst

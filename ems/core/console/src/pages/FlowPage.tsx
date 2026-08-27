@@ -425,7 +425,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                 onClick={() => onSelect(i)}
                 style={{
                   cursor: 'pointer',
-                  background: isSelected ? '#dbeafe' : 'transparent',
+                  background: isSelected ? 'var(--primary-soft)' : 'transparent',
                 }}
               >
                 <td style={tdStyle}>{i + 1}</td>

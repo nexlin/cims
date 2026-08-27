@@ -426,7 +426,7 @@ export default function ServersPage() {
                     style={{
                       padding: '9px 20px', fontSize: 13.5, fontWeight: active ? 700 : 400,
                       background: active ? 'var(--surface)' : 'transparent',
-                      color: active ? '#1976d2' : 'var(--text-muted)',
+                      color: active ? 'var(--primary)' : 'var(--text-muted)',
                       border: 'none',
                       borderBottom: active ? '2px solid #1976d2' : '2px solid transparent',
                       marginBottom: -2, cursor: 'pointer',
@@ -439,7 +439,7 @@ export default function ServersPage() {
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
           {!hasRole(user, 'admin') && (
             canEdit && elevationActive() ? (
-              <span style={{ fontSize: 12, color: '#27ae60' }}>
+              <span style={{ fontSize: 12, color: 'var(--success)' }}>
                 🔓 admin 승격 중
                 <button className="btn btn--sm btn--outline" style={{ marginLeft: 6 }}
                         onClick={() => clearElevatedToken()}>해제</button>
@@ -1131,19 +1131,19 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                           const o = vipObs[a.id]
                           if (o === 'active') return (
                             <span title="VIP 실제 보유 — Active (실측)"
-                                  style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
+                                  style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>● Active</span>)
                           if (o === 'standby') return (
                             <span title="VIP 미보유 — Standby (실측)"
                                   style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
                           if (o === 'fail') return (
                             <span title="점검 실패 — offline 또는 health-check 오류"
-                                  style={{ fontSize: 11, color: '#c0392b' }}>✕</span>)
+                                  style={{ fontSize: 11, color: 'var(--danger)' }}>✕</span>)
                           if (vipChecking) return (
                             <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>…</span>)
                           const hb = group.members.find(gm => gm.agent_id === a.id)?.vip_observed
                           if (hb === true) return (
                             <span title="VIP 실제 보유 — Active (heartbeat 관측, ≤30s 지연)"
-                                  style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● Active</span>)
+                                  style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>● Active</span>)
                           if (hb === false) return (
                             <span title="VIP 미보유 — Standby (heartbeat 관측, ≤30s 지연)"
                                   style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
@@ -1362,14 +1362,14 @@ function VipHolderCell({ holders, editing }: { holders: string[]; editing?: bool
   if (editing) return <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
   if (holders.length === 1) {
     return <span title="이 VIP 를 실제로 보유 (heartbeat 관측)"
-                 style={{ fontSize: 11, color: '#27ae60', fontWeight: 600 }}>● {holders[0]}</span>
+                 style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>● {holders[0]}</span>
   }
   if (holders.length === 0) {
     return <span title="어느 멤버도 이 VIP 를 갖고 있지 않음 — 미적용이거나 이동 중"
                  style={{ fontSize: 11, color: '#e67e22' }}>○ 미할당</span>
   }
   return <span title={`동시 보유: ${holders.join(', ')} — split-brain 의심`}
-               style={{ fontSize: 11, color: '#c0392b', fontWeight: 600 }}>⚠ {holders.length}곳 보유</span>
+               style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 600 }}>⚠ {holders.length}곳 보유</span>
 }
 
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
@@ -1886,7 +1886,7 @@ function AgentConfigTab({ agent, deployments, onDone }: {
                     style={{
                       padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
                       background: active ? 'var(--surface)' : 'transparent',
-                      color: active ? '#1976d2' : 'var(--text-muted)',
+                      color: active ? 'var(--primary)' : 'var(--text-muted)',
                       border: '1px solid var(--border)', borderBottom: 'none',
                       borderRadius: '6px 6px 0 0', cursor: 'pointer',
                     }}>
@@ -2392,8 +2392,8 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           올린다. 값 확인·변경은 [시스템/서버 구성] > 서버 > OAM 접속 주소. */}
       {group.failover_op && (
         <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
-                      border: '1px solid ' + (group.failover_op.error ? '#e57373' : '#90caf9'),
-                      background: group.failover_op.error ? '#ffebee' : '#e3f2fd' }}>
+                      border: '1px solid ' + (group.failover_op.error ? 'var(--border)' : '#90caf9'),
+                      background: group.failover_op.error ? 'var(--danger-soft)' : 'var(--primary-soft)' }}>
           <b>계획 절체 진행</b> — 상태 <code>{group.failover_op.state}</code>
           {` (${agentDisplayName(agents.find(a => a.id === group.failover_op!.source_agent_id)?.name || '?')}`}
           {` → ${agentDisplayName(agents.find(a => a.id === group.failover_op!.target_agent_id)?.name || '?')})`}
@@ -2655,7 +2655,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
               onClick={copy} disabled={expired}>{copied ? '✓' : '📋'} 복사</button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-            <div style={{ fontSize: 12, color: expired ? '#e74c3c' : '#666' }}>
+            <div style={{ fontSize: 12, color: expired ? '#e74c3c' : 'var(--text)' }}>
               {expiresAt
                 ? expired
                   ? <>⚠ token 만료됨 ({expiresAt}) — 재발급 필요</>
@@ -2768,7 +2768,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
               ))}
             </select>
             <label style={{ gridColumn: '1 / -1', fontSize: 11,
-                            color: mntValid ? 'var(--text-muted)' : '#c0392b' }}>
+                            color: mntValid ? 'var(--text-muted)' : 'var(--danger)' }}>
               {mntValid
                 ? <>{fromGroup && <>기본값은 <b>이 그룹의 마운트 선언</b>입니다. </>}
                    등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
@@ -2778,7 +2778,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
             </label>
           </>
         ) : (
-          <label style={{ gridColumn: '1 / -1', fontSize: 11, color: '#b26a00' }}>
+          <label style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--warning)' }}>
             이 서버는 <b>마운트 없이</b> 등록됩니다 — 공유 store·서비스 로그를 쓰는 모듈이라면
             나중에 [마운트 관리]에서 직접 추가해야 합니다.
           </label>
@@ -2829,7 +2829,7 @@ function PendingMemberModal({ info, onClose }: {
             .reduce((a, b) => <>{a}, {b}</>)}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: '#b26a00', marginBottom: 10, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: 'var(--warning)', marginBottom: 10, lineHeight: 1.6 }}>
           이 서버는 <b>마운트 없이</b> 등록됩니다 — 필요하면 [마운트 관리]에서 추가하세요.
         </div>
       )}
@@ -3030,7 +3030,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
                   <option key={f} value={f}>{f}</option>
                 ))}
               </select>
-              <label style={{ gridColumn: '1 / -1', fontSize: 11, color: mntValid ? 'var(--text-muted)' : '#c0392b' }}>
+              <label style={{ gridColumn: '1 / -1', fontSize: 11, color: mntValid ? 'var(--text-muted)' : 'var(--danger)' }}>
                 {mntValid
                   ? <>등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
                      defaults+_netdev,nofail) 로 마운트하고 콘솔 [마운트 관리]에 표시됩니다.

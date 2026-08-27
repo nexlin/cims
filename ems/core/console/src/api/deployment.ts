@@ -445,8 +445,19 @@ export interface DeploymentConfigHa {
              package_version: string | null }[]
 }
 
+/** 값의 출처 — 화면이 "내가 입력한 값"과 "자동 채움"을 구분해 보여주는 근거. */
+export type ConfigValueSrc = 'overlay' | 'injected' | 'default'
+
 export interface DeploymentConfigView {
+  /** overlay — 운영자가 이 서버에 지정한 값만. 저장 diff 기준. */
   config: Record<string, unknown>
+  /**
+   * 노드에 **실제로 들어가는 값**(템플릿 기본값 + overlay + 배포 시 주입).
+   * 화면은 이 값을 그린다 — overlay 만 그리면 주입값(JWT 시크릿·store 경로 등)이
+   * 빈칸으로 보여 "설정 안 됨"으로 오해되고, 주입이 overlay 를 덮는 키는 화면과
+   * 노드가 다른 상태가 드러나지 않는다. 구 OAM 은 이 필드가 없으므로 optional.
+   */
+  effective?: Record<string, { v: unknown; src: ConfigValueSrc }> | null
   config_applied_at: string | null
   template: ConfigTemplate | null
   meta: PackageMeta | null

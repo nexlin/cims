@@ -221,7 +221,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
           {collection.description}
           {collection.reload_hint && (
-            <span style={{ marginLeft: 8, color: '#27ae60' }}>⚡ {collection.reload_hint}</span>
+            <span style={{ marginLeft: 8, color: 'var(--success)' }}>⚡ {collection.reload_hint}</span>
           )}
         </div>
       )}
@@ -229,9 +229,9 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {/* T2 drift 배너 — ha_group 멤버 정합 불일치 */}
       {drift.detected && (
         <div style={{
-          background: 'var(--warn-soft)', border: '1px solid #f5c046',
+          background: 'var(--warn-soft)', border: '1px solid var(--border)',
           borderRadius: 4, padding: '8px 12px', marginBottom: 10,
-          fontSize: 12, color: '#7a5a00',
+          fontSize: 12, color: 'var(--warning)',
         }}>
           ⚠️ HA 그룹 멤버 간 정합 불일치 — 양 멤버의 jsonl 이 다릅니다.
           {drift.peers.length > 0 && (
@@ -244,7 +244,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       )}
       {!drift.detected && drift.peers.length > 1 && (
         <div style={{
-          fontSize: 11, color: '#27ae60', marginBottom: 8,
+          fontSize: 11, color: 'var(--success)', marginBottom: 8,
         }}>
           ✓ HA 그룹 멤버 정합 (mode={drift.mode || '?'}, {drift.peers.length} 멤버)
         </div>
@@ -347,7 +347,7 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
   onRemove: () => void
 }) {
   return (
-    <tr style={{ background: active ? '#eef5ff' : undefined }}>
+    <tr style={{ background: active ? 'var(--primary-soft)' : undefined }}>
       {summaryFields.map(f => (
         <td key={f.key} style={{ fontSize: 12 }}>
           {formatValue(row[f.key], f)}

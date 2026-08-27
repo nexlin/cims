@@ -64,7 +64,7 @@ export default function DocsPage() {
               padding: '4px 12px', borderRadius: 4, border: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: active === d.id ? 600 : 400,
               background: active === d.id ? '#2563eb' : 'transparent',
-              color: active === d.id ? '#fff' : '#6b7280',
+              color: active === d.id ? '#fff' : 'var(--text)',
             }}>
             {d.title}
           </button>

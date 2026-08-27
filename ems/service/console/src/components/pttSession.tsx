@@ -93,14 +93,14 @@ export function getEventDisplay(type: string) {
 // floor.jsonl op → 표시 스타일 (TS 24.380). CMP 가 기록하는 8종 전부를 다룬다 —
 // GRANT/RELEASE/IDLE/REVOKE/REVOKE_END/QUEUE/QUEUE_CANCEL/DENY.
 export const FLOOR_OPS: Record<string, { label: string; color: string }> = {
-  GRANT:        { label: '발언권 부여', color: '#16a34a' },
+  GRANT:        { label: '발언권 부여', color: 'var(--success)' },
   RELEASE:      { label: '발언 종료',  color: 'var(--text-muted)' },
   IDLE:         { label: '유휴',      color: 'var(--text-muted)' },
-  REVOKE:       { label: '회수 통지',  color: '#d97706' },
-  REVOKE_END:   { label: '회수 확정',  color: '#dc2626' },
+  REVOKE:       { label: '회수 통지',  color: 'var(--warning)' },
+  REVOKE_END:   { label: '회수 확정',  color: 'var(--danger)' },
   QUEUE:        { label: '대기열 등록', color: '#0891b2' },
   QUEUE_CANCEL: { label: '대기 취소',  color: 'var(--text-muted)' },
-  DENY:         { label: '거절',      color: '#dc2626' },
+  DENY:         { label: '거절',      color: 'var(--danger)' },
 }
 
 // DENY reason(CMP) → 한국어. 규격상 거절 사유가 이력에서 읽혀야 한다.
@@ -794,7 +794,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
   const counts = { floor: floor.length, event: events.length }
   const shown = timeline.filter(it => layers[it.kind])
   const chips: Array<{ key: 'floor' | 'event'; label: string; color: string }> = [
-    { key: 'floor', label: '발언권', color: '#16a34a' },
+    { key: 'floor', label: '발언권', color: 'var(--success)' },
     { key: 'event', label: '멤버', color: '#9333ea' },
   ]
 
@@ -960,7 +960,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
         : <span style={{ color: uColor }}>-</span>}
       {role && <span className="badge badge--gray" style={{ fontSize: 9 }}>{role}</span>}
       {f.prio != null && f.prio >= 0 && <span className="ts">prio {f.prio}</span>}
-      {f.preempt && <span className="ts" style={{ color: '#d97706' }}>← 선점 {who(f.preempted_from)}</span>}
+      {f.preempt && <span className="ts" style={{ color: 'var(--warning)' }}>← 선점 {who(f.preempted_from)}</span>}
       {f.tier && f.tier !== 'normal' && <span className="badge badge--red" style={{ fontSize: 9 }}>{f.tier}</span>}
       {extras.length > 0 && <span className="ts" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
       {turn?.hasVideo && <span className="badge badge--blue" style={{ fontSize: 9 }}>영상</span>}

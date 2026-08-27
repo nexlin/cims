@@ -267,7 +267,7 @@ function DetailModal({ run, onClose, onDelete }: {
                     </td>
                     <td style={td}>S{p.stage}</td>
                     <td style={td}>{p.name}</td>
-                    <td style={{ ...td, color: STATUS_COLOR[p.status] || '#6b7280', fontWeight: 600 }}>
+                    <td style={{ ...td, color: STATUS_COLOR[p.status] || 'var(--text)', fontWeight: 600 }}>
                       {p.status}
                     </td>
                     <td style={td}>{fmtDuration(p.elapsed_ms)}</td>
@@ -280,7 +280,7 @@ function DetailModal({ run, onClose, onDelete }: {
                       </td>
                       <td style={td}>S{c.stage}</td>
                       <td style={td}>{c.name}</td>
-                      <td style={{ ...td, color: STATUS_COLOR[c.status] || '#6b7280' }}>
+                      <td style={{ ...td, color: STATUS_COLOR[c.status] || 'var(--text)' }}>
                         {c.status}
                       </td>
                       <td style={td}>{fmtDuration(c.elapsed_ms)}</td>
@@ -345,7 +345,7 @@ function StatsPanel({
             <option key={d} value={d}>{d}일</option>
           ))}
         </select>
-        {err && <span style={{ color: '#dc2626', fontSize: 11 }}>⚠ {err}</span>}
+        {err && <span style={{ color: 'var(--danger)', fontSize: 11 }}>⚠ {err}</span>}
       </div>
       {stats === null ? (
         <div style={{ ...card, color: 'var(--text-muted)' }}>로딩 중…</div>
@@ -359,10 +359,10 @@ function StatsPanel({
             <KpiGrid items={[
               { label: '전체 회차', value: `${stats.overall.runs}회` },
               { label: '성공률', value: `${stats.overall.success_rate}%`,
-                color: stats.overall.success_rate >= 80 ? '#16a34a'
+                color: stats.overall.success_rate >= 80 ? 'var(--success)'
                        : stats.overall.success_rate >= 50 ? 'var(--warning)' : '#dc2626' },
-              { label: 'PASS', value: `${stats.overall.pass}회`, color: '#16a34a' },
-              { label: 'FAIL', value: `${stats.overall.fail}회`, color: '#dc2626' },
+              { label: 'PASS', value: `${stats.overall.pass}회`, color: 'var(--success)' },
+              { label: 'FAIL', value: `${stats.overall.fail}회`, color: 'var(--danger)' },
               { label: '평균 소요', value: fmtMsShort(stats.overall.avg_elapsed_ms) },
               { label: 'p95 소요', value: fmtMsShort(stats.overall.p95_elapsed_ms) },
             ]} />
@@ -415,7 +415,7 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.runs}</td>
             <td style={{
               padding: '3px 6px', textAlign: 'right', fontWeight: 600,
-              color: r.success_rate >= 80 ? '#16a34a'
+              color: r.success_rate >= 80 ? 'var(--success)'
                      : r.success_rate >= 50 ? 'var(--warning)' : '#dc2626',
             }}>{r.success_rate}%</td>
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{fmtMsShort(r.avg_elapsed_ms)}</td>
@@ -615,7 +615,7 @@ export default function VerificationHistoryPage() {
           </select>
         </label>
         {error && (
-          <span style={{ color: '#dc2626', fontSize: 12, marginLeft: 12 }}>{error}</span>
+          <span style={{ color: 'var(--danger)', fontSize: 12, marginLeft: 12 }}>{error}</span>
         )}
       </div>
 

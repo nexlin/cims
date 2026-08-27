@@ -38,9 +38,9 @@ function memberState(m: MountMember, target: string): MemberState {
 
 function StateDot({ state, name, online }: { state: MemberState; name: string; online: boolean }) {
   const view = {
-    mounted:  { mark: '●', color: '#27ae60', title: `${name}: 마운트됨` },
+    mounted:  { mark: '●', color: 'var(--success)', title: `${name}: 마운트됨` },
     declared: { mark: '◐', color: '#e67e22', title: `${name}: fstab 에는 있으나 지금 마운트 안 됨` },
-    missing:  { mark: '✕', color: '#c0392b',
+    missing:  { mark: '✕', color: 'var(--danger)',
                 // 오프라인 멤버는 fan-out 대상에서 빠진다 — 사유를 여기서 알려야 재적용을
                 // 무한 반복하지 않는다.
                 title: online ? `${name}: 미적용 — [↻ 재적용] 필요`
@@ -141,7 +141,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           {laggingCount > 0 && (
-            <span style={{ fontSize: 11, color: '#c0392b' }}>미적용 {laggingCount}건</span>
+            <span style={{ fontSize: 11, color: 'var(--danger)' }}>미적용 {laggingCount}건</span>
           )}
           <button onClick={reapplyAll} style={btnSmall()}
                   disabled={applying || declared.length === 0}
