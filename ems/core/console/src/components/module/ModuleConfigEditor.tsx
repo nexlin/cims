@@ -229,7 +229,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {/* T2 drift 배너 — ha_group 멤버 정합 불일치 */}
       {drift.detected && (
         <div style={{
-          background: '#fff8e1', border: '1px solid #f5c046',
+          background: 'var(--warn-soft)', border: '1px solid #f5c046',
           borderRadius: 4, padding: '8px 12px', marginBottom: 10,
           fontSize: 12, color: '#7a5a00',
         }}>
@@ -296,8 +296,8 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {/* 편집 영역 */}
       {editingIdx !== null && records[editingIdx] && (
         <div style={{
-          marginTop: 10, padding: 12, border: '1px solid #ddd', borderRadius: 6,
-          background: '#fafbfc',
+          marginTop: 10, padding: 12, border: '1px solid var(--border)', borderRadius: 6,
+          background: 'var(--bg-soft)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             <b style={{ fontSize: 13 }}>행 #{editingIdx + 1} 편집</b>
@@ -447,7 +447,7 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
     const selected = new Set(Array.isArray(value) ? (value as unknown[]).map(String) : [])
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 120, overflowY: 'auto',
-                    border: '1px solid #ddd', borderRadius: 4, padding: 4 }}>
+                    border: '1px solid var(--border)', borderRadius: 4, padding: 4 }}>
         {options.length === 0 ? (
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>(참조할 항목 없음)</div>
         ) : options.map(o => (

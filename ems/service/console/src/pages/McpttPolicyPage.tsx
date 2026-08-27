@@ -79,7 +79,7 @@ export default function McpttPolicyPage() {
           시스템 전역 서비스 설정(TS 24.484 <code>service-config</code>)입니다. 단말이 XCAP 으로 받아
           기능 게이트로 쓰며, <b>사용자별 인가</b>(가입자 &gt; PTT &gt; 프로파일)와 <b>AND</b> 로 판정합니다 —
           여기서 끈 기능은 프로파일이 허용해도 열리지 않습니다.
-          {cfg && !cfg.exists && <span style={{ color: 'var(--warning, #d08a00)' }}> · DB 행이 없어 기본값을 표시합니다(저장하면 생성됩니다).</span>}
+          {cfg && !cfg.exists && <span style={{ color: 'var(--warning)' }}> · DB 행이 없어 기본값을 표시합니다(저장하면 생성됩니다).</span>}
           {cfg?.update_time && <span> · 최근 변경 {new Date(cfg.update_time).toLocaleString()}</span>}
         </div>
       </div>

@@ -123,23 +123,23 @@ function RunListRow({ run, onClick }: { run: RunHistoryItem; onClick: () => void
       </td>
       <td style={td}>{fmtDate(run.started_at)}</td>
       <td style={td}>{scopeLabel(run.scope)}</td>
-      <td style={{ ...td, color: VERDICT_COLOR[run.verdict] || '#374151', fontWeight: 600 }}>
+      <td style={{ ...td, color: VERDICT_COLOR[run.verdict] || 'var(--text)', fontWeight: 600 }}>
         {run.verdict}
       </td>
-      <td style={{ ...td, fontSize: 12, color: '#4b5563' }}>
+      <td style={{ ...td, fontSize: 12, color: 'var(--text-muted)' }}>
         {(t.pass ?? 0)} / {(t.fail ?? 0)} / {(t.skip ?? 0)}
         {t.blocked ? ` / ${t.blocked}` : ''}
-        <span style={{ color: '#9ca3af', marginLeft: 6 }}>(P/F/S)</span>
+        <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>(P/F/S)</span>
       </td>
       <td style={td}>{fmtDuration(run.elapsed_ms)}</td>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: '#6b7280' }}>
+      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
         {run.git_branch && <span>{run.git_branch}@</span>}
         <span>{run.git_sha || '-'}</span>
       </td>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: '#9ca3af' }}>
+      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
         {run.pkg_manifest_hash ? run.pkg_manifest_hash.slice(0, 10) + '…' : '-'}
       </td>
-      <td style={{ ...td, fontSize: 11, color: '#6b7280' }}>{run.trigger}</td>
+      <td style={{ ...td, fontSize: 11, color: 'var(--text-muted)' }}>{run.trigger}</td>
     </tr>
   )
 }
@@ -174,7 +174,7 @@ function DetailModal({ run, onClose, onDelete }: {
             <div style={{ fontSize: 18, fontWeight: 700 }} title={`run_id=${run.id}`}>
               회차 {fmtRunIdShort(run.id)}
             </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
               {fmtDate(run.started_at)} ~ {fmtDate(run.finished_at)} ({fmtDuration(run.elapsed_ms)})
             </div>
           </div>
@@ -273,9 +273,9 @@ function DetailModal({ run, onClose, onDelete }: {
                     <td style={td}>{fmtDuration(p.elapsed_ms)}</td>
                   </tr>
                   {(grouped.childrenByParent[p.id] || []).map(c => (
-                    <tr key={c.id} style={{ background: '#fafafa' }}>
+                    <tr key={c.id} style={{ background: 'var(--bg-soft)' }}>
                       <td style={td}>{c.idx}</td>
-                      <td style={{ ...td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 11, color: '#6b7280' }}>
+                      <td style={{ ...td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
                         └ {c.id}
                       </td>
                       <td style={td}>S{c.stage}</td>
@@ -299,16 +299,16 @@ function DetailModal({ run, onClose, onDelete }: {
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{label}</div>
       <div style={{ fontSize: 13, color: '#111827', marginTop: 2 }}>{value}</div>
     </div>
   )
 }
 
-function Total({ label, value, color = '#374151' }: { label: string; value: number | string; color?: string }) {
+function Total({ label, value, color = 'var(--text)' }: { label: string; value: number | string; color?: string }) {
   return (
     <div style={totalCell}>
-      <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   )
@@ -329,7 +329,7 @@ function StatsPanel({
   err: string | null
 }) {
   const card = useMemo<React.CSSProperties>(() => ({
-    background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6,
+    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
     padding: 12, fontSize: 12,
   }), [])
   return (
@@ -348,9 +348,9 @@ function StatsPanel({
         {err && <span style={{ color: '#dc2626', fontSize: 11 }}>⚠ {err}</span>}
       </div>
       {stats === null ? (
-        <div style={{ ...card, color: '#6b7280' }}>로딩 중…</div>
+        <div style={{ ...card, color: 'var(--text-muted)' }}>로딩 중…</div>
       ) : stats.overall.runs === 0 ? (
-        <div style={{ ...card, color: '#6b7280' }}>해당 기간 회차 없음</div>
+        <div style={{ ...card, color: 'var(--text-muted)' }}>해당 기간 회차 없음</div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           {/* overall */}
@@ -360,7 +360,7 @@ function StatsPanel({
               { label: '전체 회차', value: `${stats.overall.runs}회` },
               { label: '성공률', value: `${stats.overall.success_rate}%`,
                 color: stats.overall.success_rate >= 80 ? '#16a34a'
-                       : stats.overall.success_rate >= 50 ? '#ca8a04' : '#dc2626' },
+                       : stats.overall.success_rate >= 50 ? 'var(--warning)' : '#dc2626' },
               { label: 'PASS', value: `${stats.overall.pass}회`, color: '#16a34a' },
               { label: 'FAIL', value: `${stats.overall.fail}회`, color: '#dc2626' },
               { label: '평균 소요', value: fmtMsShort(stats.overall.avg_elapsed_ms) },
@@ -388,8 +388,8 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
       {items.map(it => (
         <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-          <span style={{ color: '#6b7280' }}>{it.label}</span>
-          <span style={{ fontWeight: 600, color: it.color || '#111' }}>{it.value}</span>
+          <span style={{ color: 'var(--text-muted)' }}>{it.label}</span>
+          <span style={{ fontWeight: 600, color: it.color || 'var(--text)' }}>{it.value}</span>
         </div>
       ))}
     </div>
@@ -397,11 +397,11 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
 }
 
 function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
-  if (rows.length === 0) return <div style={{ color: '#6b7280' }}>없음</div>
+  if (rows.length === 0) return <div style={{ color: 'var(--text-muted)' }}>없음</div>
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
       <thead>
-        <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
+        <tr style={{ borderBottom: '1px solid var(--border)' }}>
           <th style={{ textAlign: 'left',  padding: '4px 6px' }}>scope</th>
           <th style={{ textAlign: 'right', padding: '4px 6px' }}>회차</th>
           <th style={{ textAlign: 'right', padding: '4px 6px' }}>성공률</th>
@@ -410,13 +410,13 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
       </thead>
       <tbody>
         {rows.map(r => (
-          <tr key={r.scope} style={{ borderBottom: '1px dashed #f3f4f6' }}>
+          <tr key={r.scope} style={{ borderBottom: '1px dashed var(--border)' }}>
             <td style={{ padding: '3px 6px' }}>{r.scope}</td>
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.runs}</td>
             <td style={{
               padding: '3px 6px', textAlign: 'right', fontWeight: 600,
               color: r.success_rate >= 80 ? '#16a34a'
-                     : r.success_rate >= 50 ? '#ca8a04' : '#dc2626',
+                     : r.success_rate >= 50 ? 'var(--warning)' : '#dc2626',
             }}>{r.success_rate}%</td>
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{fmtMsShort(r.avg_elapsed_ms)}</td>
           </tr>
@@ -428,7 +428,7 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
 
 /** 회차별 verdict + elapsed 시계열 — inline SVG sparkline (라이브러리 의존 X). */
 function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
-  if (timeline.length === 0) return <div style={{ color: '#6b7280' }}>데이터 없음</div>
+  if (timeline.length === 0) return <div style={{ color: 'var(--text-muted)' }}>데이터 없음</div>
   const W = 380
   const H = 70
   const PAD_X = 4
@@ -547,7 +547,9 @@ export default function VerificationHistoryPage() {
       <style>{`
         @media print {
           @page { margin: 3mm 15mm 2mm 15mm; size: A4; }
-          html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+          /* color 고정 — 다크로 인쇄하면 --text(밝은 회색)가 상속돼 흰 종이에 흐려진다. */
+          html, body { background: #fff !important; color: #111 !important;
+                       margin: 0 !important; padding: 0 !important; }
           .app-layout, .app-layout--collapsed,
           .app-content, .app-content-body,
           .verify-history-page {
@@ -583,7 +585,7 @@ export default function VerificationHistoryPage() {
       `}</style>
       <header style={{ marginBottom: 16, display: 'flex', alignItems: 'baseline', gap: 16 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>검증 이력</h1>
-        <span style={{ fontSize: 12, color: '#6b7280' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
           총 {total} 회차
         </span>
         <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}>↻ 새로고침</button>
@@ -618,7 +620,7 @@ export default function VerificationHistoryPage() {
       </div>
 
       {/* list 표 */}
-      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, overflow: 'auto' }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, overflow: 'auto' }}>
         <table style={tableStyle}>
           <thead>
             <tr>
@@ -635,9 +637,9 @@ export default function VerificationHistoryPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: '#6b7280' }}>로딩 중…</td></tr>
+              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>로딩 중…</td></tr>
             ) : runs.length === 0 ? (
-              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: '#9ca3af' }}>회차 없음</td></tr>
+              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>회차 없음</td></tr>
             ) : (
               runs.map(r => (
                 <RunListRow key={r.id} run={r} onClick={() => openDetail(r.id)} />
@@ -652,7 +654,7 @@ export default function VerificationHistoryPage() {
         <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
           <button style={btnSecondary} disabled={offset === 0}
                   onClick={() => setOffset(Math.max(0, offset - limit))}>← 이전</button>
-          <span style={{ fontSize: 13, color: '#374151' }}>
+          <span style={{ fontSize: 13, color: 'var(--text)' }}>
             {curPage} / {totalPages}
           </span>
           <button style={btnSecondary} disabled={offset + limit >= total}
@@ -674,29 +676,29 @@ const tableStyle: React.CSSProperties = {
   width: '100%', borderCollapse: 'collapse', fontSize: 13,
 }
 const th: React.CSSProperties = {
-  padding: '8px 12px', borderBottom: '1px solid #e5e7eb',
-  textAlign: 'left', background: '#f9fafb',
-  fontSize: 11, color: '#6b7280', textTransform: 'uppercase',
+  padding: '8px 12px', borderBottom: '1px solid var(--border)',
+  textAlign: 'left', background: 'var(--bg-soft)',
+  fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase',
   position: 'sticky', top: 0, zIndex: 1,
 }
 const td: React.CSSProperties = {
-  padding: '8px 12px', borderBottom: '1px solid #f3f4f6',
+  padding: '8px 12px', borderBottom: '1px solid var(--border)',
 }
 const filterLabel: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
-  fontSize: 13, color: '#374151',
+  fontSize: 13, color: 'var(--text)',
 }
 const selectStyle: React.CSSProperties = {
-  padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4,
-  background: '#fff', fontSize: 13,
+  padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4,
+  background: 'var(--surface)', fontSize: 13,
 }
 const btnPrimary: React.CSSProperties = {
   padding: '6px 14px', border: 'none', borderRadius: 4,
   background: '#2563eb', color: '#fff', fontSize: 13, cursor: 'pointer',
 }
 const btnSecondary: React.CSSProperties = {
-  padding: '6px 14px', border: '1px solid #d1d5db', borderRadius: 4,
-  background: '#fff', color: '#374151', fontSize: 13, cursor: 'pointer',
+  padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 4,
+  background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer',
 }
 const btnDanger: React.CSSProperties = {
   padding: '6px 14px', border: 'none', borderRadius: 4,
@@ -708,17 +710,17 @@ const modalBackdrop: React.CSSProperties = {
   zIndex: 1000,
 }
 const modal: React.CSSProperties = {
-  background: '#fff', borderRadius: 8, width: '90vw', maxWidth: 1100,
+  background: 'var(--surface)', borderRadius: 8, width: '90vw', maxWidth: 1100,
   maxHeight: '90vh', overflow: 'auto',
   display: 'flex', flexDirection: 'column',
 }
 const modalHeader: React.CSSProperties = {
-  padding: '16px 20px', borderBottom: '1px solid #e5e7eb',
+  padding: '16px 20px', borderBottom: '1px solid var(--border)',
   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
 }
 const totalsBox: React.CSSProperties = {
   display: 'flex', gap: 16, padding: 12,
-  background: '#f9fafb', borderRadius: 6, border: '1px solid #e5e7eb',
+  background: 'var(--bg-soft)', borderRadius: 6, border: '1px solid var(--border)',
 }
 const totalCell: React.CSSProperties = {
   textAlign: 'center', minWidth: 80,

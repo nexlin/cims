@@ -220,7 +220,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
   return (
     <div ref={containerRef} style={{ flex: '1 1 50%', overflow: 'auto', minWidth: 0, borderRight: '1px solid var(--border)' }}>
       {/* 노드 헤더 (sticky) */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: '#ffffff', borderBottom: '1px solid #e0e2ea' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--surface)', borderBottom: '1px solid #e0e2ea' }}>
         <svg width={svgWidth} height={HEAD_H} style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
           {actors.map(a => {
             const x = actorX(a, actors, colW)
@@ -402,11 +402,11 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
       height: '100%',
       border: '1px solid #e0e2ea',
       borderRadius: 6,
-      background: '#f8f9fa',
+      background: 'var(--surface)',
     }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'monospace' }}>
         <thead>
-          <tr style={{ position: 'sticky', top: 0, background: '#f0f1f3', zIndex: 1 }}>
+          <tr style={{ position: 'sticky', top: 0, background: 'var(--bg-soft)', zIndex: 1 }}>
             <th style={thStyle}>#</th>
             <th style={thStyle}>시간</th>
             <th style={thStyle}>From→To</th>
@@ -475,7 +475,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '6px 8px',
-  color: '#6b7280',
+  color: 'var(--text-muted)',
   fontWeight: 600,
   borderBottom: '1px solid #e0e2ea',
   whiteSpace: 'nowrap',
@@ -639,7 +639,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
       )}
 
       {loading && <div className="empty">로딩 중…</div>}
-      {error   && <div className="empty" style={{ color: '#e96' }}>오류: {error}</div>}
+      {error   && <div className="empty" style={{ color: 'var(--danger)' }}>오류: {error}</div>}
 
       {!loading && !error && messages.length === 0 && (
         <div className="empty">메시지 기록이 없습니다.</div>
@@ -663,7 +663,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
               <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '1px solid #e0e2ea', minHeight: 0 }}>
                 {selected ? (
                   <>
-                    <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: '#f0f1f3' }}>
+                    <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
                       <span className="badge" style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</span>
                       <span style={{ fontWeight: 600, fontSize: 12 }}>{selected.label}</span>
                       <span className="ts">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
@@ -671,7 +671,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                     </div>
                     <pre style={{
                       flex: 1, margin: 0, padding: 12, overflow: 'auto',
-                      background: '#f8f9fa', fontSize: 12, lineHeight: 1.5,
+                      background: 'var(--surface)', fontSize: 12, lineHeight: 1.5,
                       color: '#1a1d2e', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                       minHeight: 0,
                     }}>

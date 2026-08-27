@@ -17,8 +17,11 @@
   --danger:      #dc2626;
   --danger-h:    #b91c1c;
   --success:     #16a34a;
+  --warning:     #d97706;
+  --dev-accent:  #7c3aed;
   --warn-soft:   #fff8e1;
   --danger-soft: #fff1f2;
+  --success-soft:#ecfdf5;
   --radius:      8px;
   --radius-lg:   14px;
   --shadow:      0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.07);
@@ -60,8 +63,11 @@
   --danger:      #f04848;
   --danger-h:    #f87171;
   --success:     #22c55e;
+  --warning:     #fbbf24;
+  --dev-accent:  #a78bfa;
   --warn-soft:   rgba(234,179,8,.13);
   --danger-soft: rgba(240,68,68,.14);
+  --success-soft:rgba(34,197,94,.14);
   --shadow:      0 1px 2px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.4);
   --shadow-lg:   0 10px 30px rgba(0,0,0,.55);
 
@@ -109,6 +115,12 @@ body {
 /* dark 모드 잔여 보정 (하드코딩 light 패치) */
 :root[data-theme="dark"] .form-input:disabled { background: var(--surface-2); }
 :root[data-theme="dark"] .badge--gray { background: var(--surface-2); color: var(--text-muted); }
+/* 나머지 badge 변형도 다크 토큰으로 — 라이트용 파스텔 배경(var(--primary-soft) 등)이 그대로 남으면
+   어두운 화면에 흰 알약이 떠 보인다. soft 배경은 반투명이라 어느 표면 위에서도 겉돌지 않는다. */
+:root[data-theme="dark"] .badge--blue   { background: var(--primary-soft); color: #a5b4fc; }
+:root[data-theme="dark"] .badge--green  { background: var(--success-soft); color: #6ee7a8; }
+:root[data-theme="dark"] .badge--yellow { background: var(--warn-soft);    color: #fcd34d; }
+:root[data-theme="dark"] .badge--red    { background: var(--danger-soft);  color: #fca5a5; }
 :root[data-theme="dark"] .docs-content code,
 :root[data-theme="dark"] .docs-content tr:first-child td { background: var(--surface-2); }
 
@@ -235,6 +247,11 @@ body {
   font-weight: 500;
   white-space: nowrap;
   transition: background .15s, opacity .15s;
+  /* 배경·글자를 반드시 명시한다 — 비워 두면 **브라우저 기본 버튼 색**이 나오고, 다크에서는
+     color-scheme:dark 탓에 회색 버튼이 되어 얹은 글자(--danger 등)와 대비가 무너진다.
+     변형(--primary/--danger/--outline/--ghost)은 아래에서 각자 덮어쓴다. */
+  background: var(--surface-2);
+  color: var(--text);
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn--primary  { background: var(--primary);  color: #fff; }
@@ -296,11 +313,11 @@ body {
   font-size: 11px;
   font-weight: 600;
 }
-.badge--red  { background: #fee2e2; color: #b91c1c; }
-.badge--gray { background: #f3f4f6; color: #6b7280; }
-.badge--blue  { background: #dbeafe; color: #1d4ed8; }
-.badge--green { background: #dcfce7; color: #15803d; }
-.badge--yellow { background: #fef3c7; color: #b45309; }
+.badge--red  { background: var(--danger-soft); color: var(--danger-h); }
+.badge--gray { background: var(--surface-2); color: var(--text-muted); }
+.badge--blue  { background: var(--primary-soft); color: var(--primary); }
+.badge--green { background: var(--success-soft); color: var(--success); }
+.badge--yellow { background: var(--warn-soft); color: var(--warning); }
 
 /* ── Detail tab bar ────────────────────────────────────────── */
 .tab-bar {
@@ -362,14 +379,14 @@ body {
 }
 .form-input:focus { border-color: var(--primary); }
 .form-input--sm { width: 90px; flex-shrink: 0; }
-.form-input:disabled { background: #f3f4f6; color: var(--text-muted); }
+.form-input:disabled { background: var(--surface-2); color: var(--text-muted); }
 
 /* toggle */
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .toggle input { display: none; }
 .toggle-track {
   width: 40px; height: 22px;
-  background: #d1d5db;
+  background: var(--border);
   border-radius: 999px;
   position: relative;
   transition: background .2s;
@@ -488,14 +505,14 @@ body {
 }
 
 .sub-chip--call {
-  background: #dbeafe;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: var(--primary-soft);
+  border-color: var(--border);
+  color: var(--primary);
 }
 .sub-chip--ptt {
-  background: #dcfce7;
-  border-color: #bbf7d0;
-  color: #15803d;
+  background: var(--success-soft);
+  border-color: var(--border);
+  color: var(--success);
 }
 
 .sub-chip-label {
@@ -660,7 +677,7 @@ body {
 }
 .auth-form .btn { width: 100%; padding: 10px; font-size: 14px; }
 .auth-error { color: var(--danger); font-size: 12px; text-align: center; }
-.auth-ok    { color: #15803d;        font-size: 12px; text-align: center; }
+.auth-ok    { color: var(--success);        font-size: 12px; text-align: center; }
 .auth-switch {
   color: var(--primary); font-size: 12px; text-align: center;
   background: none; border: none; cursor: pointer; text-decoration: underline;
@@ -707,8 +724,8 @@ body {
   border-radius: 999px;
   flex-shrink: 0;
 }
-.sp-badge--call { background: #dbeafe; color: #1d4ed8; }
-.sp-badge--ptt  { background: #dcfce7; color: #15803d; }
+.sp-badge--call { background: var(--primary-soft); color: var(--primary); }
+.sp-badge--ptt  { background: var(--success-soft); color: var(--success); }
 
 .sp-number {
   flex: 1;
@@ -742,8 +759,8 @@ body {
   color: var(--danger);
   font-size: 12px;
   padding: 8px 14px;
-  background: #fef2f2;
-  border-bottom: 1px solid #fecaca;
+  background: var(--danger-soft);
+  border-bottom: 1px solid var(--border);
 }
 
 /* Section title */
@@ -779,7 +796,7 @@ body {
   background: none; border: none; cursor: pointer;
   font-size: 15px; padding: 2px 4px; border-radius: 4px;
 }
-.sp-contact-btn:hover { background: #dbeafe; }
+.sp-contact-btn:hover { background: var(--primary-soft); }
 
 .sp-empty-hint {
   padding: 16px 14px;
@@ -825,7 +842,7 @@ body {
 .sp-incoming {
   padding: 16px;
   border-left: 4px solid var(--danger);
-  background: #fef2f2;
+  background: var(--danger-soft);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -861,8 +878,8 @@ body {
   transition: background .1s;
 }
 .sp-group:hover { background: var(--bg-soft); }
-.sp-group--active { background: #f0fdf4; }
-.sp-group--active:hover { background: #dcfce7; }
+.sp-group--active { background: var(--success-soft); }
+.sp-group--active:hover { background: color-mix(in srgb, var(--success) 22%, transparent); }
 .sp-group-dot {
   width: 10px; height: 10px;
   border-radius: 50%;
@@ -878,7 +895,7 @@ body {
 }
 .sp-group-name    { font-size: 13px; font-weight: 500; }
 .sp-group-id      { font-size: 11px; color: var(--text-muted); }
-.sp-group-speaker { font-size: 11px; color: #15803d; font-weight: 600; }
+.sp-group-speaker { font-size: 11px; color: var(--success); font-weight: 600; }
 .sp-group-state   { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
 
 /* Group join/leave button inside row */
@@ -901,7 +918,7 @@ body {
   letter-spacing: .3px;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
-  background: #f3f4f6;
+  background: var(--surface-2);
 }
 .sp-mh-pri    { text-align: center; }
 .sp-mh-status { text-align: right; }
@@ -911,11 +928,11 @@ body {
   grid-template-columns: 36px 1fr 60px;
   align-items: center;
   padding: 7px 14px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--border);
   transition: background .1s;
 }
 .sp-member:last-child { border-bottom: none; }
-.sp-member--speaker { background: #f0fdf4; }
+.sp-member--speaker { background: var(--success-soft); }
 .sp-member--me      { }
 
 .sp-m-pri {
@@ -941,8 +958,8 @@ body {
 .sp-me-tag {
   font-size: 9px;
   font-weight: 700;
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--primary-soft);
+  color: var(--primary);
   padding: 1px 4px;
   border-radius: 999px;
 }
@@ -954,7 +971,7 @@ body {
 .sp-speaker-badge {
   font-size: 10px;
   font-weight: 700;
-  color: #15803d;
+  color: var(--success);
 }
 .sp-conn-dot {
   width: 8px; height: 8px;
@@ -976,7 +993,7 @@ body {
   padding: 14px;
   border-radius: var(--radius);
   border: 2px solid var(--border);
-  background: #f3f4f6;
+  background: var(--surface-2);
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
@@ -985,7 +1002,7 @@ body {
 }
 .sp-push-btn:hover { border-color: var(--primary); background: var(--primary-soft); }
 .sp-push-btn--on {
-  background: #fee2e2;
+  background: var(--danger-soft);
   border-color: var(--danger);
   color: var(--danger);
   transform: scale(0.98);
@@ -1001,7 +1018,7 @@ body {
   width: 130px; height: 130px;
   border-radius: 50%;
   border: 4px solid var(--border);
-  background: #f3f4f6;
+  background: var(--surface-2);
   font-size: 13px; font-weight: 700;
   cursor: pointer; user-select: none;
   transition: background .1s, border-color .1s, transform .1s;
@@ -1010,7 +1027,7 @@ body {
 }
 .phone-ptt-btn:hover { border-color: var(--primary); }
 .phone-ptt-btn--active {
-  background: #fee2e2; border-color: var(--danger);
+  background: var(--danger-soft); border-color: var(--danger);
   transform: scale(0.95);
   box-shadow: 0 0 0 8px rgba(220,38,38,.15);
 }
@@ -1023,7 +1040,7 @@ body {
   transition: background .1s;
 }
 .phone-key:hover  { background: var(--bg); }
-.phone-key:active { background: #dbeafe; }
+.phone-key:active { background: var(--primary-soft); }
 
 /* ── Docs viewer ─────────────────────────────────────────── */
 .docs-content { font-size: 14px; line-height: 1.7; color: var(--text); max-width: 900px; }
@@ -1037,12 +1054,12 @@ body {
 .docs-content h1 { font-size: 22px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
 .docs-content h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--primary); }
 .docs-content h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
-.docs-content code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
+.docs-content code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
 .docs-content pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
 .docs-content pre code { background: none; color: inherit; padding: 0; font-size: 12px; }
 .docs-content li { margin-left: 20px; list-style: disc; }
 .docs-content td { padding: 4px 10px; border: 1px solid var(--border); font-size: 13px; }
-.docs-content tr:first-child td { font-weight: 600; background: #f3f4f6; }
+.docs-content tr:first-child td { font-weight: 600; background: var(--surface-2); }
 .docs-content strong { font-weight: 600; }
 .docs-content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
 
@@ -1270,10 +1287,10 @@ body {
    보기 모드는 위젯 우상단 오버레이(평소 흐리게, hover 시 또렷하게 — 내용 가림 최소화). */
 .widget-api-badge {
   font-size: 10px; line-height: 1.6; white-space: nowrap; cursor: pointer;
-  color: #7c3aed; background: var(--surface);
+  color: var(--dev-accent); background: var(--surface);
   border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
 }
-.widget-api-badge:hover { border-color: #7c3aed; }
+.widget-api-badge:hover { border-color: var(--dev-accent); }
 .widget-api-host { position: relative; }
 .widget-api-badge--overlay {
   position: absolute; top: 4px; right: 4px; z-index: 4;

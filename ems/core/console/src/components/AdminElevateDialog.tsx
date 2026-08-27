@@ -45,7 +45,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1200,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 6, width: 380, padding: 24 }}
+      <div style={{ background: 'var(--surface)', borderRadius: 6, width: 380, padding: 24 }}
            onClick={e => e.stopPropagation()}>
         <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🔐 관리자 인증 (승격)</h3>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>

@@ -362,7 +362,7 @@ export default function ServicesPage() {
             placeholder="v1.2.3"
             title="빌드 & 패키징할 버전 (cims.sh build -v + pkg --no-bump). 비워두면 현재 pkg.json 버전 유지."
             style={{ width: 110, fontSize: 13, padding: '4px 8px',
-                     border: '1px solid #d1d5db', borderRadius: 4 }}
+                     border: '1px solid var(--border)', borderRadius: 4 }}
           />
           <datalist id="all-versions">
             {allVersions.map(v => <option key={v} value={v} />)}
@@ -406,8 +406,8 @@ export default function ServicesPage() {
             const disabled = busy[card.key]
             return (
               <div key={card.key} className="card" style={{
-                border: '1px solid #e5e7eb', borderRadius: 6,
-                background: '#fff', padding: 12,
+                border: '1px solid var(--border)', borderRadius: 6,
+                background: 'var(--surface)', padding: 12,
                 display: 'flex', flexDirection: 'column', gap: 10,
               }}>
                 {/* 헤더 — 모듈명 + critical */}
@@ -415,7 +415,7 @@ export default function ServicesPage() {
                   <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 14 }}>
                     {card.key}
                   </span>
-                  {card.critical && <span className="tag" style={{ background: '#f39c12', color: '#fff' }}>critical</span>}
+                  {card.critical && <span className="tag" style={{ background: '#b45309', color: '#fff' }}>critical</span>}
                   {!card.hasProcess && <span className="tag" style={{ background: '#3498db', color: '#fff' }}>원격</span>}
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
                     {card.label}
@@ -425,7 +425,7 @@ export default function ServicesPage() {
                 {/* 본문 — 2 col x 2 row 그리드: ¹³ / ²⁴.
                     한 행에 두 영역이 좌우로 놓여 컴팩트한 가로 와이드 카드. */}
                 <div style={{
-                  borderTop: '1px solid #f0f2f4', paddingTop: 8,
+                  borderTop: '1px solid var(--border)', paddingTop: 8,
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
                   columnGap: 16, rowGap: 8,
@@ -458,7 +458,7 @@ export default function ServicesPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
                       <span style={{ color: 'var(--text-muted)', fontWeight: 500, minWidth: 50 }}>² 실행</span>
                       <span className="tag" style={{
-                        background: running ? '#2ecc71' : '#95a5a6', color: '#fff',
+                        background: running ? '#15803d' : '#6b7280', color: '#fff',   // 흰 글자를 받으므로 고정 진한 색
                         minWidth: 40, textAlign: 'center',
                       }}>
                         {running ? 'on' : 'off'}

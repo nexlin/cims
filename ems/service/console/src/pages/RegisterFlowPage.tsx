@@ -87,7 +87,7 @@ export default function RegisterFlowPage() {
         )}
 
         {error && (
-          <span style={{ fontSize: 12, color: '#e96', marginLeft: 4 }}>{error}</span>
+          <span style={{ fontSize: 12, color: 'var(--danger)', marginLeft: 4 }}>{error}</span>
         )}
       </div>
 

@@ -115,9 +115,9 @@ export default function PackagesPage() {
       {/* ── 좌측: 모듈 목록 ── */}
       <div style={{
         width: 280, flex: '0 0 auto', display: 'flex', flexDirection: 'column',
-        border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff', overflow: 'hidden',
+        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', overflow: 'hidden',
       }}>
-        <div style={{ padding: 10, borderBottom: '1px solid #eee', display: 'flex', gap: 6 }}>
+        <div style={{ padding: 10, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
           <input className="form-input" placeholder="모듈 검색..."
             value={filter} onChange={e => setFilter(e.target.value)}
             style={{ flex: 1 }} />
@@ -135,7 +135,7 @@ export default function PackagesPage() {
             ))
           )}
         </div>
-        <div style={{ padding: 10, borderTop: '1px solid #eee' }}>
+        <div style={{ padding: 10, borderTop: '1px solid var(--border)' }}>
           <button className="btn btn--primary" style={{ width: '100%' }}
             onClick={() => setUploadOpen(true)}>＋ 패키지 업로드</button>
         </div>
@@ -144,7 +144,7 @@ export default function PackagesPage() {
       {/* ── 우측: 선택 모듈 상세 ── */}
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        border: '1px solid #e5e5e5', borderRadius: 6, background: '#fff',
+        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
       }}>
         {!selectedModule ? (
           <div className="empty" style={{ padding: 40 }}>
@@ -175,13 +175,13 @@ function ModuleRow({ mod, active, onClick }: {
         display: 'block', width: '100%', textAlign: 'left',
         padding: '10px 12px', border: 'none', background: active ? '#eef5ff' : 'transparent',
         borderLeft: `3px solid ${active ? '#3498db' : 'transparent'}`,
-        cursor: 'pointer', borderBottom: '1px solid #f5f5f5',
+        cursor: 'pointer', borderBottom: '1px solid var(--border)',
       }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <b style={{ fontSize: 14 }}>{mod.name}</b>
         <span style={{
           marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)',
-          background: '#f0f0f0', padding: '1px 6px', borderRadius: 10,
+          background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 10,
         }}>{mod.versions.length}</span>
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
@@ -216,7 +216,7 @@ function ModuleDetail({ mod, depCountByPkgId, deployments, onDelete }: {
   return (
     <>
       {/* 헤더 */}
-      <div style={{ padding: 16, borderBottom: '1px solid #eee' }}>
+      <div style={{ padding: 16, borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <h3 style={{ margin: 0 }}>{mod.name}</h3>
           <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>({mod.versions.length}개 버전)</span>
@@ -265,7 +265,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
 }) {
   return (
     <div style={{
-      border: '1px solid #e5e5e5', borderRadius: 6, marginBottom: 8,
+      border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8,
       background: isLatest ? '#f7fcff' : '#fff',
     }}>
       <div onClick={onToggle}
@@ -277,7 +277,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         <b style={{ fontSize: 14 }}>v{p.version}</b>
         {isLatest && (
           <span className="tag" style={{
-            background: '#2ecc71', color: '#fff', fontSize: 10,
+            background: '#15803d', color: '#fff', fontSize: 10,   // 흰 글자 대비 4.5 — 테마 토큰은 다크에서 밝아져 못 쓴다
             padding: '1px 6px', borderRadius: 3,
           }}>최신</span>
         )}
@@ -288,13 +288,13 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         {depCount > 0 && (
           <span style={{
             marginLeft: 'auto', fontSize: 11, color: '#2980b9',
-            background: '#eaf4fc', padding: '2px 8px', borderRadius: 10,
+            background: 'var(--primary-soft)', padding: '2px 8px', borderRadius: 10,
           }}>배포 {depCount}곳</span>
         )}
       </div>
 
       {expanded && (
-        <div style={{ borderTop: '1px solid #eee', padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 4, columnGap: 10 }}>
             <span style={{ color: 'var(--text-muted)' }}>파일</span>
             <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{p.file_path}</code>

@@ -22,7 +22,7 @@ function elapsedSec(iso: string | null, now: number, fallback = 0): number {
 }
 function poolColor(pct: number): string {
   if (pct >= 80) return 'var(--danger)'
-  if (pct >= 60) return 'var(--warning, #d98e00)'
+  if (pct >= 60) return 'var(--warning)'
   return 'var(--success)'
 }
 
@@ -378,7 +378,7 @@ export function PttGroupsCard() {
                 </tr>
                 {isOpen && (
                   <tr>
-                    <td colSpan={8} style={{ background: 'var(--bg-subtle, rgba(0,0,0,.02))' }}>
+                    <td colSpan={8} style={{ background: 'var(--hover)' }}>
                       <MemberDrill group={g.group_id} />
                       {g.floor_held_sec !== undefined && <span style={{ margin: '0 8px', color: 'var(--danger)', fontSize: 12 }}>⚠ floor {fmtDur(g.floor_held_sec)} 점유</span>}
                     </td>
@@ -500,7 +500,7 @@ export function OrgStatsCard() {
     <div className="panel" style={{ padding: 10 }}>
       {dbDegraded && (
         <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 4, fontSize: 12,
-          background: 'rgba(233,150,102,.12)', color: '#c96', border: '1px solid rgba(233,150,102,.4)' }}>
+          background: 'var(--warn-soft)', color: 'var(--warning)', border: '1px solid var(--border)' }}>
           DB 조회 실패 — 구성원/등록 수는 표시되지 않습니다 (활성 세션·발언자는 정상). 상세는 OAM 로그 참조.
         </div>
       )}

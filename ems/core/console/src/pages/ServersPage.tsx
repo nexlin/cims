@@ -664,7 +664,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                 <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
                         title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
                         style={{
-                          border: '1px solid #b8d4f5', background: 'var(--surface)', color: '#3498db',
+                          border: '1px solid var(--border)', background: 'var(--surface)', color: '#3498db',
                           fontSize: 11, padding: '0 6px', borderRadius: 3, cursor: 'pointer',
                           fontWeight: 600,
                         }}>+</button>
@@ -696,7 +696,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                }}>
             <span style={{ width: 14 }} />  {/* expand 자리 비움 — group 정렬 맞춤 */}
             <span style={{
-              background: '#95a5a6', color: '#fff', fontSize: 10,
+              background: '#6b7280', color: '#fff', fontSize: 10,
               padding: '1px 5px', borderRadius: 3,
             }}>SA</span>
             <b style={{ flex: 1 }}>{agentDisplayName(a.name)}</b>
@@ -1003,7 +1003,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
 
   return (
     <>
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           {/* 유형 변경 불가 — 변경 원하면 [🗑 시스템 삭제] 후 [+ 시스템 추가] 재생성. */}
           <span title={`mode=${group.mode} (생성 후 변경 불가)`}
@@ -1391,7 +1391,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
   const setRestart = (k: 'max_fails' | 'window_sec', v: number) =>
     set('restart_limit', { ...rl, [k]: v })
   return (
-    <div style={{ marginTop: 0, border: '1px solid #e0e0e0', borderRadius: 4 }}>
+    <div style={{ marginTop: 0, border: '1px solid var(--border)', borderRadius: 4 }}>
       <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
@@ -1608,7 +1608,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
 
   if (modules.length === 0) return null
   return (
-    <div style={{ marginBottom: 16, border: '1px solid #e0e0e0', borderRadius: 4 }}>
+    <div style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 4 }}>
       <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="모듈별 운영 설정 (앱 설정과 별개) — 각 노드 modules/<mod>/service.json 으로 반영">
@@ -1746,7 +1746,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
   return (
     <>
       {/* 헤더 */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #eee' }}>
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <span style={{
             width: 10, height: 10, borderRadius: '50%', background: sc.bar, display: 'inline-block',
@@ -1966,13 +1966,13 @@ function InspectorSection({ title, expanded, onToggle, children }: {
   children: React.ReactNode
 }) {
   return (
-    <div style={{ borderBottom: '1px solid #eee' }}>
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
       <div onClick={onToggle}
            style={{
              display: 'flex', alignItems: 'center', gap: 8,
              padding: '10px 16px', cursor: 'pointer',
              background: 'var(--bg-soft)', userSelect: 'none',
-             borderBottom: expanded ? '1px solid #eee' : 'none',
+             borderBottom: expanded ? '1px solid var(--border)' : 'none',
            }}>
         <span style={{ width: 14, color: 'var(--text-muted)', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
@@ -2332,7 +2332,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
       {/* 그룹 일괄 제어 바 — 서비스 의도 전환(무장/비무장) + 수동 절체 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
                     padding: '10px 12px', marginBottom: 12, background: 'var(--bg-soft)',
-                    border: '1px solid #e0e0e0', borderRadius: 4 }}>
+                    border: '1px solid var(--border)', borderRadius: 4 }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>그룹 일괄 제어</span>
         <button className="btn btn--sm btn--primary" disabled={!!busy}
                 onClick={() => batch('start')}
@@ -2741,7 +2741,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
         <label>서버 이름 *</label>
         <input className="form-input" value={name} disabled={busy}
                onChange={e => setName(e.target.value)} />
-        <label style={{ gridColumn: '1 / -1', borderTop: '1px solid #eee',
+        <label style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)',
                         paddingTop: 10, marginTop: 4 }}>
           <input type="checkbox" checked={mountOn} disabled={busy}
                  onChange={e => setMountOn(e.target.checked)} />
@@ -3004,7 +3004,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
               그 노드는 공유 store 를 못 써 승격 부적격이 된다(실측: 계획 절체가 원본을
               내려놓은 뒤에야 드러나 관리평면이 끊겼다). 기본값은 이 설치가 이미 쓰는 마운트. */}
           {showMount && (
-          <label style={{ gridColumn: '1 / -1', borderTop: '1px solid #eee', paddingTop: 10, marginTop: 4 }}>
+          <label style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
             <input type="checkbox" checked={mountOn} disabled={creating}
                    onChange={e => setMountOn(e.target.checked)} />
             {' '}공유 스토리지 마운트를 함께 적용

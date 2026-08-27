@@ -141,7 +141,7 @@ function statusColor(s: ItemStatus): string {
   if (s === 'RUNNING') return '#3b82f6'
   if (s === 'BLOCKED') return '#a16207'
   if (s === 'SKIP')    return '#6b7280'
-  return '#9ca3af'
+  return '#6b7280'   // 대기 — 흰 글자를 얹으므로 연한 회색(#9ca3af)은 못 쓴다
 }
 
 function fmtMs(ms: number): string {
@@ -194,7 +194,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 0,
-      background: 'var(--bg-elevated, #fff)',
+      background: 'var(--surface)',
       border: '1px solid var(--border, #e5e7eb)',
       borderRadius: 8, padding: '24px 16px 16px', marginBottom: 12,
     }}>
@@ -249,7 +249,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
               {/* 외곽 ring (진행률 / 상태 색) — BLOCKED 면 점선 경계 + 회색 톤 */}
               <div style={{
                 width: 120, height: 120, borderRadius: 60,
-                background: isBlocked ? '#9ca3af' : ringBg,
+                background: isBlocked ? '#6b7280' : ringBg,
                 padding: 6,
                 boxShadow: isResume ? `0 0 0 4px #3b82f633` : 'none',
                 transition: 'all 0.2s',
@@ -271,7 +271,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                 {/* 내부 흰 원 — BLOCKED 면 회색 배경 */}
                 <div style={{
                   width: '100%', height: '100%', borderRadius: '50%',
-                  background: isBlocked ? '#f3f4f6' : '#fff',
+                  background: isBlocked ? 'var(--surface-2)' : 'var(--surface)',
                   display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center',
                   fontWeight: 700, lineHeight: 1.2,
@@ -281,7 +281,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                     textDecoration: isBlocked ? 'line-through' : 'none',
                   }}>{st.id}</div>
                   <div style={{
-                    fontSize: 12, color: 'var(--muted, #374151)',
+                    fontSize: 12, color: 'var(--text)',
                     marginTop: 4, padding: '0 6px',
                     whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                     maxWidth: '100%', fontWeight: 600,
@@ -289,7 +289,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                     {st.title}
                   </div>
                   <div style={{
-                    fontSize: 11, color: 'var(--muted, #9ca3af)',
+                    fontSize: 11, color: 'var(--text-muted)',
                     marginTop: 3, fontWeight: 500,
                   }}>
                     {isBlocked ? '차단됨' : `${done}/${total}`}
@@ -342,7 +342,7 @@ function GlobalHeader({
   return (
     <div style={{
       display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
-      background: 'var(--bg-elevated, #fff)',
+      background: 'var(--surface)',
       border: '1px solid var(--border, #e5e7eb)',
       borderRadius: 8, padding: 12, marginBottom: 12,
     }}>
@@ -372,7 +372,7 @@ function GlobalHeader({
         style={{
           minWidth: 140, height: 36,
           padding: '0 14px',
-          background: prepResetRunning ? '#dc2626' : '#f59e0b',
+          background: prepResetRunning ? 'var(--danger)' : '#b45309',   // 흰 글자 대비 4.6
           color: '#fff', border: 'none', borderRadius: 6,
           fontSize: 12, fontWeight: 600,
           cursor: anyOtherRunning ? 'not-allowed' : 'pointer',
@@ -386,7 +386,7 @@ function GlobalHeader({
       {/* 재개 지점 dropdown — Run 옆 */}
       <label style={{
         display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 12, color: 'var(--muted, #6b7280)',
+        fontSize: 12, color: 'var(--text-muted)',
       }}>
         🚩 재개 지점:
         <select
@@ -396,7 +396,7 @@ function GlobalHeader({
           style={{
             padding: '6px 8px', borderRadius: 4,
             border: '1px solid #93c5fd',
-            background: '#eff6ff', color: '#1d4ed8',
+            background: 'var(--primary-soft)', color: 'var(--primary)',
             fontSize: 12, fontWeight: 600,
             cursor: running ? 'not-allowed' : 'pointer',
           }}
@@ -410,10 +410,10 @@ function GlobalHeader({
       <div style={{
         marginLeft: 'auto',
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '6px 12px', background: 'var(--bg-muted, #f9fafb)',
+        padding: '6px 12px', background: 'var(--bg-soft)',
         borderRadius: 6, fontSize: 12,
       }}>
-        <span style={{ color: 'var(--muted, #6b7280)' }}>📦 마지막 패키지:</span>
+        <span style={{ color: 'var(--text-muted)' }}>📦 마지막 패키지:</span>
         <code style={{ fontSize: 11, fontWeight: 600 }}>cims-2026.04.29-a3f2b1c</code>
         <span style={{ color: statusColor('PASS') }}>(S4 ✅)</span>
       </div>
@@ -423,7 +423,7 @@ function GlobalHeader({
         title="검증 보고서 PDF 출력 (모든 stage 펼침 → 인쇄)"
         style={{
           padding: '6px 12px', height: 36,
-          background: '#fff',
+          background: 'var(--surface)',
           border: '1px solid var(--border, #d1d5db)',
           borderRadius: 6, fontSize: 12, fontWeight: 600,
           cursor: 'pointer',
@@ -480,7 +480,7 @@ function StageRow({
           : '1px solid var(--border, #e5e7eb)',
       borderRadius: 8, marginBottom: 8,
       // BLOCKED 면 옅은 amber tint 배경 (차단된 stage 가 한눈에)
-      background: isBlocked ? '#fffbeb' : 'var(--bg-elevated, #fff)',
+      background: isBlocked ? 'var(--warn-soft)' : 'var(--surface)',
       boxShadow: isResume ? '0 0 0 3px #3b82f622' : 'none',
       transition: 'all 0.2s',
     }}>
@@ -493,7 +493,7 @@ function StageRow({
         }}
         onClick={onToggle}
       >
-        <span className="v2-no-print" style={{ fontSize: 14, color: 'var(--muted, #6b7280)' }}>
+        <span className="v2-no-print" style={{ fontSize: 14, color: 'var(--text-muted)' }}>
           {expanded ? '▼' : '▶'}
         </span>
         <div style={{
@@ -520,9 +520,9 @@ function StageRow({
               </span>
             )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--muted, #6b7280)' }}>{stage.desc}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{stage.desc}</div>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--muted, #6b7280)' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {done}/{total} 완료 · {fmtMs(elapsed)}
         </div>
         <button
@@ -533,7 +533,7 @@ function StageRow({
           style={{
             minWidth: 110, height: 28,
             padding: '0 12px', fontSize: 12, fontWeight: 600,
-            background: isThisRunning ? '#dc2626' : '#fff',
+            background: isThisRunning ? 'var(--danger)' : 'var(--surface)',
             color: isThisRunning ? '#fff' : 'var(--text, #111827)',
             border: `1px solid ${isThisRunning ? '#dc2626' : 'var(--border, #d1d5db)'}`,
             borderRadius: 4,
@@ -559,7 +559,7 @@ function StageRow({
               <col style={{ width: 90 }} />
             </colgroup>
             <thead>
-              <tr style={{ background: 'var(--bg-muted, #f9fafb)', textAlign: 'left' }}>
+              <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
                 <th style={{ padding: '6px 8px' }}></th>
                 <th style={{ padding: '6px 8px' }}>#</th>
                 <th style={{ padding: '6px 8px' }}>항목</th>
@@ -607,32 +607,32 @@ function StageRow({
                           />
                         )}
                       </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--muted, #9ca3af)' }}>{idx + 1}</td>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
                       <td style={{ padding: '6px 8px' }}>
                         {isGroup && (
                           <span
                             onClick={() => toggleGroup(it.id)}
-                            style={{ cursor: 'pointer', marginRight: 4, color: 'var(--muted, #6b7280)' }}
+                            style={{ cursor: 'pointer', marginRight: 4, color: 'var(--text-muted)' }}
                           >
                             {groupOpen ? '▼' : '▶'}
                           </span>
                         )}
                         <code style={{ fontSize: 11, fontWeight: 600 }}>{it.id}</code>
-                        <div style={{ fontSize: 11, color: 'var(--muted, #6b7280)', marginLeft: isGroup ? 16 : 0 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: isGroup ? 16 : 0 }}>
                           {it.name}
                           {isGroup && groupInfo && (
-                            <span style={{ marginLeft: 6, color: 'var(--muted, #9ca3af)' }}>
+                            <span style={{ marginLeft: 6, color: 'var(--text-muted)' }}>
                               ({groupInfo.doneCount}/{groupInfo.totalCount} 자식)
                             </span>
                           )}
                         </div>
                       </td>
-                      <td style={{ padding: '6px 8px', color: 'var(--muted, #6b7280)', fontSize: 11 }}>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-muted)', fontSize: 11 }}>
                         {it.desc || '—'}
                       </td>
                       <td style={{ padding: '6px 8px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{ flex: 1, height: 6, background: 'var(--bg-muted, #f3f4f6)', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ flex: 1, height: 6, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden' }}>
                             <div style={{
                               width: `${itPct}%`, height: '100%',
                               background: itDone ? statusColor(itStatus) : '#3b82f6',
@@ -642,7 +642,7 @@ function StageRow({
                           <span style={{ minWidth: 30, textAlign: 'right', fontSize: 10 }}>{itPct}%</span>
                         </div>
                       </td>
-                      <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 10, color: 'var(--muted, #6b7280)' }}>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', fontSize: 10, color: 'var(--text-muted)' }}>
                         {itDone || isGroup ? fmtMs(it.elapsedMs || stage.items.filter(c => c.parent === it.id).reduce((s, c) => s + c.elapsedMs, 0)) : '–'}
                       </td>
                       <td style={{ padding: '6px 8px' }}>
@@ -659,7 +659,7 @@ function StageRow({
                       const cBlocked = c.status === 'BLOCKED'
                       return (
                         <tr key={c.id} style={{
-                          background: cBlocked ? '#fef3c7' : 'var(--bg-muted, #fafafa)',
+                          background: cBlocked ? '#fef3c7' : 'var(--bg-soft)',
                           opacity: cBlocked ? 0.7 : 1,
                         }}
                         title={cBlocked ? '선행 stage FAIL 로 차단됨' : undefined}>
@@ -671,21 +671,21 @@ function StageRow({
                               disabled={anyRunning}
                             />
                           </td>
-                          <td style={{ padding: '4px 8px', color: 'var(--muted, #9ca3af)', fontSize: 10 }}>
+                          <td style={{ padding: '4px 8px', color: 'var(--text-muted)', fontSize: 10 }}>
                             {idx + 1}.{ci + 1}
                           </td>
                           <td style={{ padding: '4px 8px', paddingLeft: 32 }}>
-                            <code style={{ fontSize: 10, color: 'var(--muted, #6b7280)' }}>
+                            <code style={{ fontSize: 10, color: 'var(--text-muted)' }}>
                               └ {c.id.split('.').pop()}
                             </code>
-                            <div style={{ fontSize: 10, color: 'var(--muted, #9ca3af)' }}>{c.name}</div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{c.name}</div>
                           </td>
-                          <td style={{ padding: '4px 8px', color: 'var(--muted, #9ca3af)', fontSize: 10 }}>
+                          <td style={{ padding: '4px 8px', color: 'var(--text-muted)', fontSize: 10 }}>
                             {c.desc || '—'}
                           </td>
                           <td style={{ padding: '4px 8px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                              <div style={{ flex: 1, height: 4, background: '#f3f4f6', borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ flex: 1, height: 4, background: 'var(--surface-2)', borderRadius: 2, overflow: 'hidden' }}>
                                 <div style={{
                                   width: `${cPct}%`, height: '100%',
                                   background: cDone ? statusColor(c.status) : '#3b82f6',
@@ -694,7 +694,7 @@ function StageRow({
                               <span style={{ minWidth: 26, textAlign: 'right', fontSize: 9 }}>{cPct}%</span>
                             </div>
                           </td>
-                          <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 9, color: 'var(--muted, #9ca3af)' }}>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', fontSize: 9, color: 'var(--text-muted)' }}>
                             {cDone ? fmtMs(c.elapsedMs) : '–'}
                           </td>
                           <td style={{ padding: '4px 8px' }}>
@@ -961,6 +961,8 @@ export default function VerificationV2Page() {
           @page { margin: 3mm 15mm 2mm 15mm; size: A4; }
           html, body {
             background: #fff !important;
+            /* 테마와 무관하게 검정 글자 — 다크로 인쇄하면 --text(밝은 회색)가 상속돼 흐려진다. */
+            color: #111 !important;
             margin: 0 !important; padding: 0 !important;
           }
 
@@ -1009,13 +1011,13 @@ export default function VerificationV2Page() {
         <h2 style={{ margin: 0, fontSize: 18 }}>검증 — 6단계 파이프라인</h2>
         <span style={{
           fontSize: 10, padding: '2px 8px',
-          background: '#dcfce7', color: '#15803d',
+          background: 'var(--success-soft)', color: 'var(--success)',
           borderRadius: 4, fontWeight: 600,
         }}>
           LIVE
         </span>
         {loading && (
-          <span style={{ fontSize: 12, color: '#6b7280' }}>로딩 중…</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>로딩 중…</span>
         )}
         {error && (
           <span style={{ fontSize: 12, color: '#dc2626', maxWidth: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1023,11 +1025,11 @@ export default function VerificationV2Page() {
           </span>
         )}
         {lastRunId !== null && (
-          <span style={{ fontSize: 12, color: '#6b7280' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             마지막 회차: <a href="/release/verify-history">#{lastRunId}</a>
           </span>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted, #6b7280)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
           이력: <a href="/release/verify-history">/release/verify-history</a>
         </span>
       </div>
@@ -1038,7 +1040,7 @@ export default function VerificationV2Page() {
           style={{
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '8px 12px', marginBottom: 10,
-            background: '#fef3c7', border: '1px solid #f59e0b',
+            background: 'var(--warn-soft)', border: '1px solid var(--warn-soft)',
             borderRadius: 6, fontSize: 12, color: '#92400e',
           }}
         >
@@ -1108,10 +1110,10 @@ export default function VerificationV2Page() {
 
       <div className="v2-no-print" style={{
         marginTop: 16, padding: 12,
-        background: 'var(--bg-muted, #f9fafb)',
+        background: 'var(--bg-soft)',
         border: '1px dashed var(--border, #d1d5db)',
         borderRadius: 6,
-        fontSize: 11, color: 'var(--muted, #6b7280)',
+        fontSize: 11, color: 'var(--text-muted)',
       }}>
         <b>ℹ 안내</b>
         <ul style={{ margin: '6px 0', paddingLeft: 20 }}>

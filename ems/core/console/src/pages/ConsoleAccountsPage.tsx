@@ -76,7 +76,7 @@ export default function ConsoleAccountsPage() {
     <div style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>콘솔 계정</h2>
-        <span className="ts" style={{ color: '#888' }}>
+        <span className="ts" style={{ color: 'var(--text-muted)' }}>
           OAM 로그인 계정 (가입자와 분리). 내장 admin 계정은 oam.json 으로 관리되어 표시되지 않습니다.
         </span>
         {!adding && !editId && (
@@ -159,7 +159,7 @@ export default function ConsoleAccountsPage() {
 function Field({ label, w, children }: { label: string; w?: number; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: w }}>
-      <span className="ts" style={{ fontSize: 11, color: '#888' }}>{label}</span>
+      <span className="ts" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
       {children}
     </label>
   )

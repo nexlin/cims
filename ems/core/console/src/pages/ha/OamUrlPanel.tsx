@@ -38,7 +38,7 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
   const loopback = /^https?:\/\/(127\.|localhost)/i.test(cur)
 
   return (
-    <div style={{ border: '1px solid #e0e0e0', borderRadius: 4, padding: 12 }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 4, padding: 12 }}>
       <div style={{ fontWeight: 600, marginBottom: 8 }}>{title}</div>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 10 }}>
         이 서버의 agent 가 heartbeat·job 결과를 보내는 주소입니다. 관리평면이 이중화면

@@ -116,10 +116,10 @@ export default function MyLayoutPage() {
     <div style={{ display: 'grid', gap: 16, maxWidth: 980 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>내 대시보드 구성</h2>
-        <span className="badge" style={{ background: source === 'override' ? 'var(--primary)' : 'var(--bg-muted)' }}>
+        <span className="badge" style={{ background: source === 'override' ? 'var(--primary)' : 'var(--surface-2)' }}>
           {source === 'override' ? '개인 구성' : '프로파일 기본'}
         </span>
-        {dirty && <span style={{ color: 'var(--warning, #e0a800)', fontSize: 12 }}>● 저장되지 않은 변경</span>}
+        {dirty && <span style={{ color: 'var(--warning)', fontSize: 12 }}>● 저장되지 않은 변경</span>}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           <button className="btn btn--sm btn--primary" onClick={save} disabled={saving || !dirty}>저장</button>
           <button className="btn btn--sm" onClick={() => load()} disabled={saving}>되돌리기</button>
@@ -180,7 +180,7 @@ export default function MyLayoutPage() {
                   <span style={{ fontWeight: 500 }}>{w?.title ?? id}</span>
                   {w && <span className="badge" style={{ fontSize: 11 }}>{AREA_LABEL[w.area]}</span>}
                   {w?.requires_service && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{w.requires_service}</span>}
-                  {note && <span style={{ fontSize: 11, color: 'var(--warning, #e0a800)' }}>⚠ {note}</span>}
+                  {note && <span style={{ fontSize: 11, color: 'var(--warning)' }}>⚠ {note}</span>}
                   <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({id})</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                     <button className="btn btn--sm" onClick={() => move(i, -1)} disabled={i === 0} title="위로">↑</button>

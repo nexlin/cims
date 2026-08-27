@@ -208,7 +208,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       <td>
         {(row.state === 'uploading' || row.state === 'done') && (
           <>
-            <div style={{ width: 240, height: 8, background: '#eee', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ width: 240, height: 8, background: 'var(--bg-soft)', borderRadius: 4, overflow: 'hidden' }}>
               <div style={bar(row.state === 'done' ? '#2ecc71' : '#3498db')} />
             </div>
             <span className="text-muted" style={{ fontSize: 11 }}>
