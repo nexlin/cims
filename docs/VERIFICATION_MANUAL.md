@@ -396,7 +396,7 @@ cspsim 은 **미디어 파일(`-media_file`/`-media_dir`)을 지정하지 않으
 
 - `-db build/dist/csp/config/csp.json`: DB 가입자(imsi 기반 IMPI) 자동 로드. 수동 계정 지정
   (`-user/-password/-domain`) 시엔 가입자의 imsi/service_ref 와 일치해야 REGISTER 가 통과한다.
-- `-creds <file>`: 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개
+- `-creds <file>`: 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`/`k`/`opc`/`sqn` + IdMS 로그인 `login`/`loginPw`(XCAP 토큰용, SIP 자격과 별개)) — `-count` 전개. `-users_from_creds` 를 함께 주면 전개 로스터 = 파일의 `user` 순서(번호 비연속 창 가능, `-user` 무시)
   단말 각각에 자기 H(A1)/비번을 준다(공유 `-password` 불요, [sip_access_security.md §4.7](design/features/sip_access_security.md)).
   전개 user 가 파일에 없으면 기동 전 즉시 중단. verify 항목은 `cred_args()` 가 이 파일을 자동 생성한다.
 - 시험 성공 판정: stdout `Registered N/N`·`Call OK`, SIP 원문 로그(`*_sip.msg.*.jsonl`)의

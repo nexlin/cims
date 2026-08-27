@@ -59,6 +59,13 @@ TS 33.203 이 정의하는 접속 보안 조합만 지원한다. 자유 조합(�
 | **AKA** CSP 메모리 | `CNonceInfo` (nonce=base64(RAND‖AUTN) 에 XRES·발급 신원 결부, nonce 수명) | XRES — 검증 직후 폐기 |
 | **AKA** 단말 전달 | `/provisioning/me` `account.aka{k,opc,amf}` (`authScheme:"aka"`) — 소프트-K | 평문 K/OPc(토큰 인증 + TLS 채널 전제) |
 
+> **CSP 의 AV 조회 HTTPS 클라이언트는 SIP TLS 리스너와 독립**이어야 한다 — psip `SSLConnect` 가 클라이언트
+> `SSL_CTX` 를 첫 사용 시 지연 생성한다(`SSLEnsureClientCtx`, CSipMutex 보호). 종전엔 부팅 시 primary TLS
+> 접속점(stack-global TLS 기동)이 있어야만 ctx 가 만들어져, per-listener 인증서만 쓰거나 TLS 접속점을
+> hot-add 한 노드에서 `[auc] AV request failed … (connect/timeout)` → AKA 챌린지 504 가 났다(dev S3 실측,
+> TcpConnect 성공 후 `SSL_new(NULL)` 무로그 실패). 라이브가 동작한 것은 tls-lab 이 primary 였기 때문이다.
+> 클라이언트 ctx 는 서버 인증서를 검증하지 않는다(내부 API 인증 = Bearer 토큰).
+
 Digest 경로의 부수 규칙: nonce 는 OpenSSL `RAND_bytes` 16 바이트 hex(`csp/NonceMap.cpp`), 단말이
 보낸 realm 은 서비스 realm 과 대조해 불일치면 401 재챌린지, 인증 실패 로그는 정답 해시를 남기지
 않는다, CSC 는 `passwd` 미전송 시 ha1 을 유지한다(부분 업데이트).
@@ -254,8 +261,8 @@ Digest 클라이언트는 원문 비밀번호 없이 **H(A1) 만으로 response 
 |---|---|
 | `/provisioning/me` | `account.sipHa1` (H(A1)). `account.sipPassword` 는 항상 `null`(평문 미배포 — 키는 단말 호환으로 유지). 단말은 `sipHa1` 우선, 없으면 로그인 비번으로 ha1 계산 |
 | Android UE | `sipHa1` 수신 시 pjsip cred 를 `PJSIP_CRED_DATA_DIGEST`(ha1) 로 설정한다(`android/core` SipController — cred realm 은 `*` 유지, pjsip 이 DIGEST cred 의 algorithm 미지정을 MD5 로 기본화). `sipHa1` 이 없으면 평문 cred(`sipPassword` → 로그인 비번) 폴백 — H(A1) 은 realm 에 결박된 값이라 challenge realm 추종이 필요한 상황은 평문 경로만 흡수한다. 수동 설정에서 도메인/IMSI/IMPI/비번을 편집하면 결박이 깨진 저장 ha1 을 함께 소거한다 |
-| cspsim | `-db` 모드는 DB `ha1`(평문 컬럼은 없다 — 비면 등록 불가), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`) — `-count` 전개 단말 각각에 자기 자격을 주며, 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받고, 등록 스레드는 비밀번호가 비어도 ha1 이 있으면 자격으로 인정한다(passwd 소거 후 ha1 단독 등록). `-password` 는 유지(직접 계산) |
-| verify 하네스 | `subscribers.py` 가 "번호 연속 + 전원 `ha1` 보유" 창(window)을 골라 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다(`-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 이 빈 가입자는 시드 대상이 아니고 `-password` 폴백은 없다 |
+| cspsim | `-db` 모드는 DB `ha1`(평문 컬럼은 없다 — 비면 등록 불가), CLI `-ha1 <hex32>` 로 직접 지정. **`-creds <file>`** = 단말별 자격 파일(JSONL: `user`/`ha1`/`authId`/`password`/`k`/`opc`/`sqn` + IdMS 로그인 `login`/`loginPw` — XCAP 토큰은 SIP 자격이 아니라 이 로그인 자격으로 받는다) — `-count` 전개 단말 각각에 자기 자격을 주며(`-users_from_creds` 면 파일의 user 순서가 로스터), 전개 user 가 파일에 없으면 기동 전 즉시 중단(fail fast). psip 클라(`CSipServerInfo::m_strHa1`, `MakeA1`)가 H(A1) 입력을 받고, 등록 스레드는 비밀번호가 비어도 ha1 이 있으면 자격으로 인정한다(passwd 소거 후 ha1 단독 등록). `-password` 는 유지(직접 계산) |
+| verify 하네스 | `subscribers.py` 가 "전원 `ha1` 보유 + UDP Digest(채널 정책·AKA 가입자 제외)" 창(window)을 골라(번호 연속 불요 — cspsim `-users_from_creds`) 단말별 자격(`{KIND}_CREDS`)을 시드하고, 시험 항목은 `cred_args()` 가 쓴 JSONL 자격 파일로 `-no-db -creds` 전개한다(`-no-db` 인 이유 = DB 모드는 `-user` 를 무시하고 DB 첫 N 행을 쓴다). `ha1` 이 빈 가입자는 시드 대상이 아니고 `-password` 폴백은 없다 |
 
 **배포 순서가 계약이다**:
 ① 스키마 — `migrate_subscription_transport.sql` + `migrate_subscription_ha1.sql` (컬럼 추가만,

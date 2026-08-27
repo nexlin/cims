@@ -1126,17 +1126,24 @@ bool SimSession::AcquireXcapToken(const std::string& strHost, int iPort, bool bT
     SHA256((const unsigned char*)strVerifier.data(), strVerifier.size(), hash);
     std::string strChallenge = XcapBase64Url(hash, SHA256_DIGEST_LENGTH);
 
-    // user_name = IdMS USERS 키 형식 (tel:+<msisdn>)
-    std::string strUserUri = m_strUser;
-    if (strUserUri.rfind("tel:", 0) != 0)
-        strUserUri = std::string("tel:") + (!strUserUri.empty() && strUserUri[0] == '+' ? strUserUri : "+" + strUserUri);
+    // IdMS 로그인 자격 — 정본은 users.login_id/passwd(-creds 의 login/loginPw, CSC LOGIN_ACCOUNTS 우선).
+    //   없으면 구식 tel:+<msisdn> / SIP 비밀번호 폴백(CSC legacy USERS 경로 — SIP passwd 소거 후엔
+    //   "login_id not found" 로 실패하는 게 정상, sip_access_security.md §4.7 ⑤).
+    std::string strUserUri = m_strIdmsLogin;
+    std::string strLoginPw = m_strIdmsLoginPw;
+    if (strUserUri.empty()) {
+        strUserUri = m_strUser;
+        if (strUserUri.rfind("tel:", 0) != 0)
+            strUserUri = std::string("tel:") + (!strUserUri.empty() && strUserUri[0] == '+' ? strUserUri : "+" + strUserUri);
+        strLoginPw = m_strPwd;
+    }
 
     const std::string strRedirect = "http://localhost/cb";
 
     // 1) GET /idms/authreq → auth code
     std::string strQuery =
         "/idms/authreq?user_name=" + XcapUrlEncode(strUserUri) +
-        "&user_password=" + XcapUrlEncode(m_strPwd) +
+        "&user_password=" + XcapUrlEncode(strLoginPw) +
         "&client_id=MCPTT_UE&redirect_uri=" + XcapUrlEncode(strRedirect) +
         "&scope=&code_challenge=" + strChallenge + "&code_challenge_method=S256";
 

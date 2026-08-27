@@ -158,6 +158,13 @@ public:
     std::string  m_strDomain;
     std::string  m_strPwd;
     std::string  m_strHa1;   // H(A1) — 비어 있지 않으면 m_strPwd 대신 Digest 응답 계산에 사용
+    // IdMS 로그인 자격(XCAP 토큰용, users.login_id/passwd) — SIP 자격과 별개(sip_access_security.md §4.7).
+    //   비어 있으면 구식 tel:+msisdn / m_strPwd 로 authreq 를 시도한다(-creds 없는 옛 전개 호환).
+    std::string  m_strIdmsLogin;
+    std::string  m_strIdmsLoginPw;
+    void SetIdmsLogin(const std::string& strLogin, const std::string& strPw) {
+        m_strIdmsLogin = strLogin; m_strIdmsLoginPw = strPw;
+    }
     std::string  m_strServerIp;
     int          m_iServerPort;
     // IPsec 등록(-ipsec) 뒤 요청 목적지 = 서버 보호 포트 port_ps (EventRegister 200 에서 UA 의 SA 셋에서 얻음).

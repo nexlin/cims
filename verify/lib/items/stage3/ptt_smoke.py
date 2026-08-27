@@ -1,5 +1,6 @@
 """S3-SCN-PTT-SMOKE — PTT 그룹 통화 스모크 (5인, dev CSP)."""
 from __future__ import annotations
+import os
 
 from ...registry import verify_item, ItemResult
 from ...context import VerifyContext
@@ -34,6 +35,9 @@ def ptt_smoke(ctx: VerifyContext) -> ItemResult:
         # 창 미확보 시 -password 폴백(DB 모드 — -user 는 무시되고 DB 첫 N 행 사용).
         *cred_args(s, "PTT", 5),
         "-group", s.get("PTT_GROUP", ""),
+        # 미디어 — AMR-WB 오디오가 offer 에 없으면 PTT-AS 가 488(`offer has no service codec`)로
+        # 거절한다(08-26 풀 S3 실측). tests/media 의 *_audio.amrwb 를 세션별 라운드로빈 할당.
+        "-media_dir", os.path.join(ctx.repo_root, "tests", "media"),
     ]
     return run_scenario(ctx, "S3-SCN-PTT-SMOKE",
                         "PTT 그룹 통화 (5인)", args, ["PTT_USER", "PTT_GROUP"])

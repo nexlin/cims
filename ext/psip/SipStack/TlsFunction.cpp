@@ -298,12 +298,46 @@ void SSLFinal()
 }
 
 // SSL 세션을 연결한다.
+/** 클라이언트 SSL_CTX 지연 초기화 — HTTPS 클라이언트(CSP→CSC AV 조회 등)는 SIP TLS 리스너와
+ *  무관하게 동작해야 한다. 종전엔 gpsttClientCtx 가 SSLServerStart(stack-global TLS 리스너 기동)나
+ *  SSLClientStart(TLS 클라이언트 전용 모드)에서만 만들어져, per-listener 인증서로만 TLS 접속점을
+ *  올린 노드(또는 TLS 접속점을 기동 후 hot-add 한 노드)에서는 ctx=NULL 로 SSLConnect 가 조용히
+ *  실패했다(CIMS 실측: dev CSP 의 AKA AV 조회 504 — 08-27). 첫 사용 시점에 없으면 만든다.
+ */
+static CSipMutex gclsClientCtxMutex;
+
+static bool SSLEnsureClientCtx( )
+{
+	if( gpsttClientCtx ) return true;
+	gclsClientCtxMutex.acquire();
+	bool bOk = ( gpsttClientCtx != NULL );
+	if( bOk == false )
+	{
+		bOk = SSLClientStart();
+		if( bOk )
+		{
+			CLog::Print( LOG_SYSTEM, "[SSL] client ctx lazily initialized (no TLS listener at start)" );
+		}
+		else
+		{
+			CLog::Print( LOG_ERROR, "[SSL] client ctx lazy init failed" );
+		}
+	}
+	gclsClientCtxMutex.release();
+	return bOk;
+}
+
 bool SSLConnect( Socket iFd, SSL ** ppsttSsl )
 {
 	SSL * psttSsl;
 
+	if( SSLEnsureClientCtx() == false )
+	{
+		return false;
+	}
 	if( (psttSsl = SSL_new( gpsttClientCtx )) == NULL )
 	{
+		CLog::Print( LOG_ERROR, "[SSL] SSL_new(client ctx) error" );
 		return false;
 	}
 	

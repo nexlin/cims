@@ -9,7 +9,23 @@ from ...common import db as _db
 from ...common.subscribers import (
     select_subscribers, VOLTE_DOMAIN, MCPTT_DOMAIN,
 )
-from ...common.access_services import seed_access_services, signal_csp_reload
+from ...common.access_services import seed_access_services, seed_tls_local_node, signal_csp_reload
+
+
+def _warm_csc_https(host: str, port: int, tries: int = 6) -> str:
+    """dev CSC 관리 서버(HTTPS)를 깨운다 — 200/401/404 등 어떤 HTTP 응답이든 오면 warm."""
+    import ssl, time as _t, urllib.request, urllib.error
+    ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+    for i in range(tries):
+        t0 = _t.monotonic()
+        try:
+            urllib.request.urlopen(f"https://{host}:{port}/internal/aka/av", timeout=5, context=ctx)
+            return f"OK {int((_t.monotonic()-t0)*1000)}ms"
+        except urllib.error.HTTPError as e:
+            return f"OK(http {e.code}) {int((_t.monotonic()-t0)*1000)}ms"
+        except Exception:
+            _t.sleep(1.0)
+    return "FAIL(unreachable)"
 
 
 @verify_item(
@@ -37,7 +53,13 @@ def seed(ctx: VerifyContext) -> ItemResult:
         tag="verify-stage3-seed",
         note="auto-seeded by cims_verify S3-SEED",
     )
+    # TLS 접속점 — dev 기본 local_nodes 는 udp-primary 만이라 TLS 전제 시나리오(sec-agree·AKA over
+    # TLS)가 5061 refused 로 죽는다(08-26 풀 S3 실측). 라이브 토폴로지대로 TLS 노드를 함께 시드.
+    tls_seed = seed_tls_local_node(ctx.dist_dir, ctx.sim_ip, 5061)
     reloaded = signal_csp_reload(pid_file)
+    # dev CSC HTTPS(4421) 워밍업 — 기동 직후 첫 TLS 요청이 CSP AV 클라이언트 타임아웃(2s)을 넘겨
+    # AKA 제안이 504 로 떨어진 실측(V19a). 시나리오 전에 한 번 두드려 콜드스타트를 흡수한다.
+    csc_warm = _warm_csc_https(ctx.sim_ip, 4421)
 
     voip_auth = f"{sub['voip_imsi']}@{VOLTE_DOMAIN}" if sub["voip_imsi"] else ""
     ptt_auth  = f"{sub['ptt_imsi']}@{MCPTT_DOMAIN}"  if sub["ptt_imsi"]  else ""
@@ -64,6 +86,7 @@ def seed(ctx: VerifyContext) -> ItemResult:
         f"- PTT:  user={sub['ptt_user']!r}  domain={MCPTT_DOMAIN} group={sub['ptt_group']!r}",
         f"- jsonlDir: {cfg_dir}",
         f"- seeded: {seeded_n}건  / csp reload(SIGUSR1): {'OK' if reloaded else 'FAIL'}",
+        f"- TLS 접속점(5061): {tls_seed}  / dev CSC 4421 warm-up: {csc_warm}",
     ]
     ctx.w("## S3-SEED — 시나리오 준비")
     for line in lines:

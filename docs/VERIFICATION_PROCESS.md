@@ -161,17 +161,29 @@ S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 
 S2 FAIL → S3~S6 BLOCKED.
 
-### S3 — 스모크 (7 항목, depends_on chain)
+### S3 — 스모크 (환경 4 + 시나리오 12 + 검증 1, depends_on chain)
 
-`S3-RESET → S3-CONFIGURE → S3-START → S3-SEED → S3-HEALTH → {S3-SCN-VOIP-SMOKE, S3-SCN-PTT-SMOKE}` (마지막 둘 병렬).
+`S3-CONFIGURE → S3-START → S3-SEED → {S3-SCN-*} → S3-HEALTH` (S3-RESET 은 `prep-reset` 프리셋으로 분리 — 사용자가 명시 실행).
 
-- **S3-RESET**: `cims.sh reset` (가입자 보존)
+- **S3-RESET**: `cims.sh reset --all` (가입자 보존, 로그/DB/녹취/배포본 wipe)
 - **S3-CONFIGURE**: `configure --local-ip <ens160>`
-- **S3-START**: cmp/cmdp/csp/oam/csc/console 순서 기동 (cwrtc/phone 은 재설계 예정 — 제외)
-- **S3-SEED**: csp jsonlDir 에 `access_services.jsonl` 시드 + DB 가입자 선택
-- **S3-HEALTH**: csp/cmp `[E]/[F]` + csc `ERROR:/CRITICAL:` 로그 스캔 (파일별 최근 2000행) 0건
+- **S3-START**: cmp/cmdp/csp/oam/csc/console 순서 기동 (cwrtc/phone 은 재설계 예정 — 제외). **dev 스택은
+  build/dist 기본 포트(csp 5060/5061, cmp 9000/9001, oam 4419, csc 4421/4430)를 잡으므로 배포본(라이브)과
+  동거하는 박스에서는 라이브를 내린 창에서만 돈다.**
+- **S3-SEED**: dev 환경을 라이브 토폴로지와 정합시킨다 — ① `access_services.jsonl` 시드 ② **TLS 접속점
+  (5061, dist csc 자가서명) 시드** — TLS 전제 시나리오(sec-agree·AKA over TLS·TLS 재바인드)가 임시 리스너
+  없이 돈다 ③ DB 가입자 선택 = **UDP Digest 창**(채널 정책 `sip_transport` TLS/TCP 강제·`auth_scheme=aka`
+  가입자 제외 — 그 정책은 전용 시나리오가 본다) + 단말별 자격(`ha1` + IdMS 로그인 `login/loginPw`) ④ csp
+  SIGUSR1 리로드 ⑤ dev CSC HTTPS(4421) 워밍업(기동 직후 첫 TLS 요청이 CSP AV 클라이언트 2s 타임아웃을 넘겨
+  AKA 제안이 504 로 떨어지는 콜드스타트 흡수)
 - **S3-SCN-VOIP-SMOKE**: cspsim VoIP 1콜 (B2BUA, RTP relay, seg_*.rtp +1)
-- **S3-SCN-PTT-SMOKE**: cspsim PTT 그룹콜 1회 (multipart INVITE, floor)
+- **S3-SCN-PTT-SMOKE**: cspsim PTT 그룹콜 1회 (5인, multipart INVITE, floor) — `-media_dir tests/media`
+  로 AMR-WB 를 offer 한다(없으면 PTT-AS 488), `-no-db -creds -users_from_creds` 로 시드 창을 그대로 전개
+- **S3-SCN-CHANNEL-POLICY / REALM-MISMATCH / SEC-AGREE / AKA / IPSEC(-LIVE) / TLS-REBIND / MIXED-TRANSPORT /
+  AKA-MIGRATE-IDEMPOTENT / PROVISIONING-HA1**: SIP 접속 보안 회귀(V1~V26) — 항목 정의는
+  [sip_access_security.md](design/features/sip_access_security.md) 검증표. IPSEC-LIVE 는 dev 에 IPSEC
+  Local Node 가 없으면 SKIP.
+- **S3-HEALTH**: csp/cmp `[E]/[F]` + csc `ERROR:/CRITICAL:` 로그 스캔 (파일별 최근 2000행) 0건
 
 ### S4 — 패키지화 (2 항목)
 

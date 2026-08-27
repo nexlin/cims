@@ -202,11 +202,14 @@ static std::string DerivePttAuthId(const std::string& strUser, const std::string
 //  단말별 자격 파일 (-creds, sip_access_security.md §4.7)
 // ─────────────────────────────────────────────
 // JSONL — 한 줄 = 한 단말:
-// {"user":"+82...","ha1":"<hex32>","authId":"...","password":"...","k":"<hex32>","opc":"<hex32>","sqn":"0"}
+// {"user":"+82...","ha1":"<hex32>","authId":"...","password":"...","k":"<hex32>","opc":"<hex32>","sqn":"0",
+//  "login":"test001","loginPw":"1234"}
 //   · user (필수)         : 전개된 사용자 ID 와 정확 일치하는 매칭 키
 //   · ha1 / password / k  : 셋 중 하나 필수 — ha1 우선(원문 없이 response 계산)
 //                           k+opc 는 IMS AKA(sip_access_security.md §8.2)
 //   · authId (선택)       : '@' 없으면 -domain 을 붙여 조립(DB 모드와 같다)
+//   · login/loginPw (선택): IdMS 로그인 자격(users.login_id/passwd) — XCAP 토큰(authreq) 용.
+//                           SIP 자격과 별개(§4.7). 없으면 구식 tel:+msisdn/-password 로그인 폴백.
 // "같은 비밀번호 구간" 없이 -count 전개 단말 각각에 자기 자격을 준다.
 struct UserCred {
     std::string authId;
@@ -216,9 +219,12 @@ struct UserCred {
         k; // IMS AKA K (hex32) — 있으면 AKAv1-MD5 챌린지에 Milenage 로 답한다
     std::string opc; // IMS AKA OPc (hex32)
     std::string sqn; // 단말 초기 SQN_MS (10진, 선택)
+    std::string login;   // IdMS 로그인 ID (XCAP 토큰) — 선택
+    std::string loginPw; // IdMS 로그인 비밀번호 — 선택
 };
 
-static bool LoadCredsFile(const std::string& strPath, std::map<std::string, UserCred>& mapOut) {
+static bool LoadCredsFile(const std::string& strPath, std::map<std::string, UserCred>& mapOut,
+                          std::vector<std::string>& vecOrder) {
     std::ifstream ifs(strPath);
     if (!ifs.is_open()) {
         printf("[CREDS] 자격 파일 열기 실패: %s\n", strPath.c_str());
@@ -239,12 +245,15 @@ static bool LoadCredsFile(const std::string& strPath, std::map<std::string, User
         cred.k = node.GetString("k");
         cred.opc = node.GetString("opc");
         cred.sqn = node.GetString("sqn");
+        cred.login = node.GetString("login");
+        cred.loginPw = node.GetString("loginPw");
         if (strUser.empty() ||
             (cred.ha1.empty() && cred.password.empty() && cred.k.empty())) {
           printf("[CREDS] %s:%d — user 또는 자격(ha1/password/k) 누락\n",
                  strPath.c_str(), iLine);
           return false;
         }
+        if (mapOut.find(strUser) == mapOut.end()) vecOrder.push_back(strUser);
         mapOut[strUser] = cred;
     }
     if (mapOut.empty()) {
@@ -366,7 +375,9 @@ static void PrintUsage(const char* pszBin) {
     printf("  -ha1         <hex32>     SIP Digest H(A1) — 지정 시 -password 대신 이 값으로 response 계산\n");
     printf("                             (-db 모드는 DB 의 ha1 을 사용 — 비어 있으면 등록 불가)\n");
     printf("  -creds       <file>      단말별 자격 파일(JSONL: "
-           "user/ha1/authId/password/k/opc/sqn)\n");
+           "user/ha1/authId/password/k/opc/sqn/login/loginPw)\n");
+    printf("  -users_from_creds        전개 로스터 = -creds 파일의 user 순서 (-no-db 전용, -user 무시,"
+           " 번호 비연속 창 가능)\n");
     printf("  -aka_k       <hex32>     IMS AKA K — 지정 시 AKAv1-MD5 챌린지에 "
            "Milenage 로 답한다 (TLS 필수)\n");
     printf("  -aka_opc     <hex32>     IMS AKA OPc\n");
@@ -818,6 +829,8 @@ int main(int argc, char* argv[])
     std::string strMediaDir   = GetArg(argc, argv, "-media_dir",   "");
     std::string strVideoFile  = GetArg(argc, argv, "-video_file",  "");
     bool bNoVideo              = HasFlag(argc, argv, "-no_video");
+    // -creds 의 user 순서를 전개 로스터로(번호 비연속 창 허용, -user 무시) — verify 하네스 전개 방식.
+    bool bUsersFromCreds       = HasFlag(argc, argv, "-users_from_creds");
     int iIntervalMs            = atoi(GetArg(argc, argv, "-interval",    "100").c_str());
     std::string strDbConfig   = GetArg(argc, argv, "-db",            "");
     int iDbOffset             = atoi(GetArg(argc, argv, "-db_offset",    "0").c_str());
@@ -870,10 +883,20 @@ int main(int argc, char* argv[])
     // 단말별 자격 파일 (-creds) — 전개될 user 전원이 파일에 있는지 세션 기동 전 일괄 선검증.
     //   조용한 fallback 은 "같은 비밀번호 구간" 함정을 침묵 속에 되살리므로 누락은 즉시 중단.
     std::map<std::string, UserCred> mapCreds;
+    std::vector<std::string> vecCredsOrder;   // 파일 순서(-users_from_creds 로스터)
+    if (bUsersFromCreds && (strCredsFile.empty() || bDbMode)) {
+        printf("[CREDS] -users_from_creds 는 -no-db -creds <file> 와 함께 써야 함 — 중단\n");
+        return 1;
+    }
     if (!strCredsFile.empty()) {
-        if (!LoadCredsFile(strCredsFile, mapCreds)) return 1;
+        if (!LoadCredsFile(strCredsFile, mapCreds, vecCredsOrder)) return 1;
+        if (bUsersFromCreds && iCount > (int)vecCredsOrder.size()) {
+            printf("[CREDS] -count %d > 자격 파일 %d명 — 파일 인원으로 축소\n", iCount, (int)vecCredsOrder.size());
+            iCount = (int)vecCredsOrder.size();
+        }
         for (int i = 0; i < iCount; i++) {
-            std::string u = (bDbMode && i < (int)vecDbSubs.size())
+            std::string u = bUsersFromCreds ? vecCredsOrder[i]
+                          : (bDbMode && i < (int)vecDbSubs.size())
                           ? vecDbSubs[i].id : MakeUserId(strStartUser, i);
             if (mapCreds.find(u) == mapCreds.end()) {
                 printf("[CREDS] 자격 파일에 user=%s 항목이 없음 — 중단\n", u.c_str());
@@ -948,7 +971,7 @@ int main(int argc, char* argv[])
             strPwd    = vecDbSubs[i].password;
             strSesHa1 = vecDbSubs[i].ha1;
         } else {
-            strUser = MakeUserId(strStartUser, i);
+            strUser = bUsersFromCreds ? vecCredsOrder[i] : MakeUserId(strStartUser, i);
             strPwd  = strPassword;
             strSesHa1 = strHa1;
             if (!strExplicitAuthId.empty() && i > 0) {
@@ -1010,6 +1033,10 @@ int main(int argc, char* argv[])
             bPttMode,
             strGroupId
         );
+        if (!mapCreds.empty()) {
+            const UserCred& cred = mapCreds[strUser];
+            if (!cred.login.empty()) s->SetIdmsLogin(cred.login, cred.loginPw);
+        }
         if (strTransport == "tls" || strTransport == "TLS") {
             s->SetTransport(E_SIP_TLS);
         } else if (strTransport == "tcp" || strTransport == "TCP") {
