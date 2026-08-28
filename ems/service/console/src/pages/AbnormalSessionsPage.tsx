@@ -77,7 +77,7 @@ export default function AbnormalSessionsPage() {
         {data && <span className="ts" style={{ marginLeft: 'auto' }}>총 {data.total}건 탐지</span>}
       </div>
 
-      <div className="card" style={{ padding: 12, marginBottom: 12, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <div className="panel" style={{ padding: 12, marginBottom: 12, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
         공개 SIP 포트(VIP)로 유입되는 <b>인터넷발 스캐닝·사기 호 시도</b>입니다. CSP 는 인증(<b>401</b>)으로 정상 거부하므로
         실제 통화로 이어지지 않지만, 로그를 오염시키고 자원을 소모합니다. 신호: <b>외부(공인) 발신 IP</b> · 알려진
         <b> 스캐너 UA</b>(pplsip 등) · <b>사기성 번호</b> · <b>인증 반복실패</b>. 다발 IP 는 방화벽 차단을 권장합니다.
@@ -86,15 +86,17 @@ export default function AbnormalSessionsPage() {
 
       {loading ? <div className="empty">로딩 중...</div> : data && (
         <>
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-            <KpiCard label="탐지 세션" value={data.total} tone={data.total > 0 ? 'warn' : 'ok'} />
-            <KpiCard label="치명(외부 인증성공)" value={critical} tone={critical > 0 ? 'warn' : 'ok'} />
-            <KpiCard label="스캐너 도구" value={scanners} />
-            <KpiCard label="발신 IP 수" value={srcIps} isText={false} />
+          {/* 지표 4장 — 균등 폭 그리드(값 길이에 따라 카드 폭이 달라지지 않게). */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                        gap: 12, marginBottom: 16 }}>
+            <KpiCard label="탐지 세션" value={data.total} unit="건" tone={data.total > 0 ? 'warn' : 'ok'} />
+            <KpiCard label="치명(외부 인증성공)" value={critical} unit="건" tone={critical > 0 ? 'warn' : 'ok'} />
+            <KpiCard label="스캐너 도구" value={scanners} unit="종" />
+            <KpiCard label="발신 IP 수" value={srcIps} unit="개" />
           </div>
 
           {topIps.length > 0 && (
-            <div className="card" style={{ padding: 12, marginBottom: 16 }}>
+            <div className="panel" style={{ padding: 12, marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>발신 IP 상위 (차단 후보)</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {topIps.map(([ip, n]) => (
@@ -171,12 +173,22 @@ export default function AbnormalSessionsPage() {
   )
 }
 
-function KpiCard({ label, value, tone, isText }: { label: string; value: number | string; tone?: 'ok' | 'warn'; isText?: boolean }) {
-  const color = tone === 'warn' ? 'var(--danger, #c0392b)' : tone === 'ok' ? 'var(--success, #27ae60)' : 'var(--text)'
+// 지표 카드 — 다른 화면(누수 회수·성능 통계)과 같은 규격을 쓴다: `.panel` 바탕, 내용 세로 중앙,
+// 라벨 12px / 값 24px, 값 뒤에 단위. 화면마다 카드 모양이 달라 보이지 않게 하는 것이 목적.
+function KpiCard({ label, value, unit, tone }: {
+  label: string; value: number | string; unit?: string; tone?: 'ok' | 'warn'
+}) {
+  const color = tone === 'warn' ? 'var(--danger)' : tone === 'ok' ? 'var(--success)' : 'var(--text)'
   return (
-    <div className="card" style={{ padding: '10px 16px', minWidth: 120 }}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
-      <div style={{ fontSize: isText ? 13 : 22, fontWeight: 700, color, marginTop: 2 }}>{value}</div>
+    <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
+                    justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+        <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>
+          {value}
+          {unit && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{unit}</span>}
+        </div>
+      </div>
     </div>
   )
 }
