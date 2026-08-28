@@ -149,6 +149,7 @@ function SystemTopologyWidget() {
   const navigate = useNavigate()
   const [systems, setSystems] = useState<Sys[]>([])
   const [ext, setExt] = useState<ExternalSystem[]>([])
+  const [loaded, setLoaded] = useState(false)   // 미로딩 vs 진짜 비어있음 구분
   const [extStatus, setExtStatus] = useState<Map<number, ProbeResult>>(new Map())
   // 알람은 전역 store 구독 (alarm_pipeline.md §8.2 — 개별 fetch 제거)
   const { active } = useAlarms()
@@ -215,11 +216,11 @@ function SystemTopologyWidget() {
         sys.push({ key: `a${a.id}`, name: a.name, mode: 'SA', nodes: [node(a.id, undefined, a.status === 'online')] })
       }
       setSystems(sys)
-    } catch { setSystems([]) }
+      setLoaded(true)
+    } catch { setSystems([]); setLoaded(true) }
   }, [])
 
   useEffect(() => { load(); const iv = setInterval(load, 15000); return () => clearInterval(iv) }, [load])
-  if (systems.length === 0 && ext.length === 0) return null
 
   const sysRank = (s: Sys): number => {
     // 그룹 소유 알람(<그룹명>/<객체> — VIP·fan-out drift 등)은 시스템 카드에 귀속 (표준화 §3.4(b)).
@@ -243,6 +244,11 @@ function SystemTopologyWidget() {
         <a onClick={() => navigate('/deploy/servers')}
            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--primary)', cursor: 'pointer' }}>시스템/인프라 →</a>
       </div>
+      {/* 데이터가 없어도 카드(패널)는 유지한다 — null 을 돌려주면 로딩 동안 위젯이 통째로
+          사라졌다가 팝인하고, 시스템이 0대면 카드 자체가 영영 안 보인다. */}
+      {systems.length === 0 && ext.length === 0 && (
+        <div className="empty">{loaded ? '등록된 시스템이 없습니다.' : '불러오는 중…'}</div>
+      )}
       {/* 시스템 카드들 — 다중일 때 좌우로 흐르도록 auto-fit 그리드 (상하좌우 균등). */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: 14, alignItems: 'start' }}>
         {systems.map(s => {

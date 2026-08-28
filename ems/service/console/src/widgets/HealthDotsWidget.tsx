@@ -5,7 +5,16 @@ import { StatusDot } from './shared'
 
 function HealthDotsWidget() {
   const { data } = useSharedHealth()
-  if (!data) return null
+  // 로딩 중에도 자리를 지킨다(팝인 방지) — 점만 흐리게.
+  if (!data) {
+    return (
+      <div style={{ display: 'flex', gap: 12, opacity: 0.5 }}>
+        {['CSP', 'CMP', 'DB'].map(n => (
+          <span key={n} style={{ fontSize: 12, color: 'var(--text-muted)' }}>{n} …</span>
+        ))}
+      </div>
+    )
+  }
   const h = data.health
   return (
     <div style={{ display: 'flex', gap: 12 }}>

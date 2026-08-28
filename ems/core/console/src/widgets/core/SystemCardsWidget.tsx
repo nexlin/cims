@@ -25,6 +25,7 @@ const MODE_TIP: Record<SystemCard['mode'], string> = {
 function SystemCardsWidget() {
   const navigate = useNavigate()
   const [systems, setSystems] = useState<SystemCard[]>([])
+  const [loaded, setLoaded] = useState(false)   // 미로딩 vs 진짜 비어있음 구분
 
   const load = useCallback(async () => {
     try {
@@ -48,7 +49,8 @@ function SystemCardsWidget() {
                      online: a.status === 'online' ? 1 : 0, total: 1 })
       }
       setSystems(cards)
-    } catch { setSystems([]) }
+      setLoaded(true)
+    } catch { setSystems([]); setLoaded(true) }
   }, [])
 
   useEffect(() => {
@@ -56,8 +58,6 @@ function SystemCardsWidget() {
     const iv = setInterval(load, 15000)
     return () => clearInterval(iv)
   }, [load])
-
-  if (systems.length === 0) return null
 
   const onOpen = () => navigate('/deploy/servers')
   return (
@@ -68,6 +68,10 @@ function SystemCardsWidget() {
           시스템/인프라 →
         </a>
       </div>
+      {/* 데이터가 없어도 카드는 유지 — null 을 돌려주면 로딩 동안 위젯이 사라졌다 팝인한다. */}
+      {systems.length === 0 && (
+        <div className="empty">{loaded ? '등록된 시스템이 없습니다.' : '불러오는 중…'}</div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         {systems.map(s => {
           const healthy = s.total > 0 && s.online === s.total

@@ -4,7 +4,15 @@ import type { WidgetDef } from '@core/widgets/types'
 
 function CspRolesWidget() {
   const { data } = useSharedHealth()
-  if (!data) return null
+  // 로딩 중에도 카드는 유지 — null 을 돌려주면 위젯이 통째로 사라졌다 팝인한다.
+  if (!data) {
+    return (
+      <div className="panel" style={{ padding: 16 }}>
+        <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>CSP 모듈 역할</div>
+        <div className="empty">불러오는 중…</div>
+      </div>
+    )
+  }
   return (
     <div className="panel" style={{ padding: 16 }}>
       <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>CSP 모듈 역할</div>
