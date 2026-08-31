@@ -370,12 +370,10 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( st.Has( "MinFinals" ) ) m_iSipStatsMinFinals = (int)st.GetInt( "MinFinals" );
                 if ( st.Has( "CallRateMinor" ) ) m_iSipStatsCallRateMinor = (int)st.GetInt( "CallRateMinor" );
                 if ( st.Has( "CallRateMajor" ) ) m_iSipStatsCallRateMajor = (int)st.GetInt( "CallRateMajor" );
-                if ( st.Has( "CallRateCritical" ) )
-                    m_iSipStatsCallRateCritical = (int)st.GetInt( "CallRateCritical" );
+                if ( st.Has( "CallRateCritical" ) ) m_iSipStatsCallRateCritical = (int)st.GetInt( "CallRateCritical" );
                 if ( st.Has( "RegRateMinor" ) ) m_iSipStatsRegRateMinor = (int)st.GetInt( "RegRateMinor" );
                 if ( st.Has( "RegRateMajor" ) ) m_iSipStatsRegRateMajor = (int)st.GetInt( "RegRateMajor" );
-                if ( st.Has( "RegRateCritical" ) )
-                    m_iSipStatsRegRateCritical = (int)st.GetInt( "RegRateCritical" );
+                if ( st.Has( "RegRateCritical" ) ) m_iSipStatsRegRateCritical = (int)st.GetInt( "RegRateCritical" );
                 if ( st.Has( "CpsMinor" ) ) m_iSipStatsCpsMinor = (int)st.GetInt( "CpsMinor" );
                 if ( st.Has( "CpsMajor" ) ) m_iSipStatsCpsMajor = (int)st.GetInt( "CpsMajor" );
                 if ( st.Has( "CpsCritical" ) ) m_iSipStatsCpsCritical = (int)st.GetInt( "CpsCritical" );

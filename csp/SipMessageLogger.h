@@ -117,24 +117,24 @@ private:
      *  logger 멤버가 아니라 shared_ptr 로 수명을 분리한다 — flusher 는 이 구조체와
      *  전역 로거(CLog)만 만지고 CSipMessageLogger 본체는 절대 참조하지 않는다. */
     struct StoreCtx {
-        std::mutex mtx;                                 // nasQueue/inflight 보호
+        std::mutex mtx;  // nasQueue/inflight 보호
         std::condition_variable cv;
-        std::deque<std::deque<LogItem>> nasQueue;       // 직행 대기 배치 (dispatch → flusher)
-        std::deque<LogItem> inflight;                   // flusher 가 기록 중인 배치 (정지 시 스풀 회수용)
+        std::deque<std::deque<LogItem>> nasQueue;  // 직행 대기 배치 (dispatch → flusher)
+        std::deque<LogItem> inflight;              // flusher 가 기록 중인 배치 (정지 시 스풀 회수용)
         std::atomic<bool> bRun{ true };
-        std::atomic<bool> bExited{ false };             // flusher 스레드 종료 표식 (join/detach 판단)
-        std::atomic<bool> bNasHealthy{ true };          // 저장 경로 판정 (dispatch 라우팅 기준)
-        std::atomic<bool> bSpoolPending{ false };       // 스풀 잔량 존재 — 드레인 전 직행 금지 (순서 보존)
-        std::atomic<long long> llOpStartMs{ 0 };        // 저장 경로 op 시작 시각 (0=idle) — 정체 감지
-        std::atomic<long long> llSpoolBytes{ 0 };       // 스풀 사용량 (근사)
-        std::atomic<bool> bLastOpOk{ true };            // 마지막 저장 경로 op 성공 여부 (idle 회복 판정)
-        std::atomic<unsigned long> ulSpooledLines{ 0 }; // 폴백으로 스풀에 적재된 누적 줄 수
-        std::atomic<unsigned long> ulReplayedLines{ 0 };// 스풀→NAS 재생 완료 누적 줄 수
-        std::atomic<unsigned long> ulDroppedLines{ 0 }; // 스풀 기록 실패/용량 폐기 줄 수
-        std::string strLastError;                       // 마지막 실패 사유 (mtx 보호)
+        std::atomic<bool> bExited{ false };               // flusher 스레드 종료 표식 (join/detach 판단)
+        std::atomic<bool> bNasHealthy{ true };            // 저장 경로 판정 (dispatch 라우팅 기준)
+        std::atomic<bool> bSpoolPending{ false };         // 스풀 잔량 존재 — 드레인 전 직행 금지 (순서 보존)
+        std::atomic<long long> llOpStartMs{ 0 };          // 저장 경로 op 시작 시각 (0=idle) — 정체 감지
+        std::atomic<long long> llSpoolBytes{ 0 };         // 스풀 사용량 (근사)
+        std::atomic<bool> bLastOpOk{ true };              // 마지막 저장 경로 op 성공 여부 (idle 회복 판정)
+        std::atomic<unsigned long> ulSpooledLines{ 0 };   // 폴백으로 스풀에 적재된 누적 줄 수
+        std::atomic<unsigned long> ulReplayedLines{ 0 };  // 스풀→NAS 재생 완료 누적 줄 수
+        std::atomic<unsigned long> ulDroppedLines{ 0 };   // 스풀 기록 실패/용량 폐기 줄 수
+        std::string strLastError;                         // 마지막 실패 사유 (mtx 보호)
         // 시딩: flusher 가 기동 직후 시작 버킷 파일의 기존 줄 수를 계수 → dispatch 가 합류
         std::string strSeedBucketKey;
-        std::string strSeedPath[3];                     // sip/cmp/csc msg 경로 (기동 시점 버킷)
+        std::string strSeedPath[3];  // sip/cmp/csc msg 경로 (기동 시점 버킷)
         long long llSeedCount[3] = { 0, 0, 0 };
         std::atomic<bool> bSeedDone{ false };
         // 불변 설정 (Init 에서 확정)
@@ -280,7 +280,7 @@ private:
     std::deque<LogItem> m_logQueue;  // 기록 대기 (파일경로 + 한 줄)
     std::mutex m_qMtx;               // m_logQueue 보호 (m_mtx 와 독립; 항상 m_mtx→m_qMtx 순서)
     std::condition_variable m_qCv;
-    std::thread m_writerThread;      // dispatch 스레드 (항상 join 가능 — NFS 무접촉)
+    std::thread m_writerThread;  // dispatch 스레드 (항상 join 가능 — NFS 무접촉)
     std::atomic<bool> m_bWriterRunning;
     std::atomic<unsigned long> m_ulDroppedLogs;  // 큐 상한 초과로 버려진 줄 수
 

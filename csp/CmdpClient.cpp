@@ -192,11 +192,10 @@ bool CCmdpClient::SendRequestAndWait( const SimpleJson::JsonNode &payload, std::
         std::string strTxId = std::to_string( transId );
         std::string strSesId = payload.GetString( "sesid" );
         if ( strSesId.empty() ) strSesId = payload.GetString( "session_id" );
-        gclsSipLogger.LogMessage( "csp", "cmdp", "JSON", strCmdName.c_str(),
-                                  ( m_strCmdpIp + ":" + std::to_string( m_iCmdpPort ) ).c_str(), strPacket.c_str(),
-                                  "mcdata", strTxId.c_str(), strSesId.c_str(),
-                                  payload.GetString( "session_id" ).c_str(), payload.GetString( "caller" ).c_str(),
-                                  payload.GetString( "callee" ).c_str() );
+        gclsSipLogger.LogMessage(
+            "csp", "cmdp", "JSON", strCmdName.c_str(), ( m_strCmdpIp + ":" + std::to_string( m_iCmdpPort ) ).c_str(),
+            strPacket.c_str(), "mcdata", strTxId.c_str(), strSesId.c_str(), payload.GetString( "session_id" ).c_str(),
+            payload.GetString( "caller" ).c_str(), payload.GetString( "callee" ).c_str() );
     }
 
     struct sockaddr_in servaddr;
@@ -237,8 +236,8 @@ bool CCmdpClient::SendRequestAndWait( const SimpleJson::JsonNode &payload, std::
 }
 
 bool CCmdpClient::AddRecvSession( const std::string &strSessionId, const std::string &strCaller,
-                                  const std::string &strGroupId, const std::string &strRemotePath,
-                                  long long llMaxSize, std::string &strMsrpPath, const std::string &strSesId ) {
+                                  const std::string &strGroupId, const std::string &strRemotePath, long long llMaxSize,
+                                  std::string &strMsrpPath, const std::string &strSesId ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "MSRP_ADD" );
     req.Set( "mode", "recv" );

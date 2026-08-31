@@ -93,7 +93,8 @@ static bool _splitMultipart( const std::string &strBody, const std::string &strB
         size_t ctPos = hdrs.find( "content-type:" );
         if ( ctPos != std::string::npos ) {
             size_t ctEnd = hdrs.find_first_of( "\r\n", ctPos );
-            std::string ct = hdrs.substr( ctPos + 13, ( ctEnd == std::string::npos ? hdrs.size() : ctEnd ) - ctPos - 13 );
+            std::string ct =
+                hdrs.substr( ctPos + 13, ( ctEnd == std::string::npos ? hdrs.size() : ctEnd ) - ctPos - 13 );
             size_t semi = ct.find( ';' );
             if ( semi != std::string::npos ) ct = ct.substr( 0, semi );
             clsPart.strContentType = _trim( ct );

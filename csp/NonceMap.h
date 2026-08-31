@@ -12,7 +12,6 @@
 #include <sys/time.h>
 #endif
 
-
 class CNonceInfo {
 public:
     /** nonce 저장 시간 */

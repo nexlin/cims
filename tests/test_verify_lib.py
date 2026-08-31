@@ -943,7 +943,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             )
             scn_subscribe._count_notify_lines = lambda dist, since: 2
             ctx = self._ctx()
-            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_PWD": "p"})
+            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_HA1": "h"})
             r = scn_subscribe.scn_subscribe(ctx)
         finally:
             scn_subscribe.run_cspsim = orig
@@ -1005,7 +1005,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             )
             scn_subscribe._count_notify_lines = lambda dist, since: 0
             ctx = self._ctx()
-            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_PWD": "p"})
+            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_HA1": "h"})
             r = scn_subscribe.scn_subscribe(ctx)
         finally:
             scn_subscribe.run_cspsim = orig
@@ -1024,7 +1024,7 @@ class TestStage6NewScenarios(unittest.TestCase):
             )
             scn_subscribe._count_notify_lines = lambda dist, since: 0
             ctx = self._ctx()
-            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_PWD": "p"})
+            ctx.state.update({"PTT_USER": "u", "PTT_DOM": "d", "PTT_HA1": "h"})
             r = scn_subscribe.scn_subscribe(ctx)
         finally:
             scn_subscribe.run_cspsim = orig
@@ -3382,42 +3382,44 @@ class TestStage5ModulesSteps(unittest.TestCase):
         self.assertEqual(len(kill_calls), 5)
 
 
-class TestPickStartSubscriber(unittest.TestCase):
-    """cspsim 은 시작 가입자 비밀번호 하나로 -count 명을 만든다 —
-    시작 가입자는 '번호 연속 + 비밀번호 동일' 구간에서 골라야 한다."""
+class TestPickStartWindow(unittest.TestCase):
+    """하네스는 -creds 전개(단말별 자격)라 기본은 번호 연속을 요구하지 않는다 —
+    전원 ha1 을 가진 count 명 창을 고르고, contiguous=True(구식 -user 전개)만 연속을 본다."""
 
     def setUp(self) -> None:
-        from verify.lib.common.subscribers import pick_start_subscriber
-        self.pick = pick_start_subscriber
+        from verify.lib.common.subscribers import pick_start_window
+        self.pick = pick_start_window
 
-    def test_skips_accounts_with_odd_password(self) -> None:
-        # 앞 2개만 계정별 비밀번호(실서버에서 발견된 데이터 흔들림) → 균일 구간부터 시작
-        rows = [("+821300000001", "45033821300000001"),
-                ("+821300000002", "45033821300000002"),
-                ("+821300000003", "123456"),
-                ("+821300000004", "123456")]
-        self.assertEqual(self.pick(rows, 2)[0], "+821300000003")
+    def test_skips_rows_without_ha1(self) -> None:
+        # 앞 2개는 ha1 없음(정책/미시드 계정) → 건너뛰고 ha1 보유 행으로 창 구성
+        rows = [("+821300000001", ""), ("+821300000002", ""),
+                ("+821300000003", "H3"), ("+821300000004", "H4")]
+        win = self.pick(rows, 2, ha1_idx=1)
+        self.assertEqual([r[0] for r in win], ["+821300000003", "+821300000004"])
 
     def test_count_one_takes_first(self) -> None:
-        rows = [("+821300000001", "A"), ("+821300000002", "B")]
-        self.assertEqual(self.pick(rows, 1)[0], "+821300000001")
+        rows = [("+821300000001", "H1"), ("+821300000002", "H2")]
+        self.assertEqual(self.pick(rows, 1, ha1_idx=1)[0][0], "+821300000001")
 
-    def test_requires_consecutive_numbers(self) -> None:
-        # 비밀번호는 같지만 번호가 끊기면 구간이 아니다 (cspsim 은 +1 씩 올린다)
-        rows = [("+821300000001", "123456"), ("+821300000003", "123456")]
-        self.assertEqual(self.pick(rows, 2)[0], "+821300000001")   # 폴백 = 첫 행
+    def test_noncontiguous_numbers_ok_by_default(self) -> None:
+        # 번호가 끊겨도 기본(-creds 전개)은 창으로 인정
+        rows = [("+821300000001", "H1"), ("+821300000003", "H3")]
+        win = self.pick(rows, 2, ha1_idx=1)
+        self.assertEqual([r[0] for r in win], ["+821300000001", "+821300000003"])
 
-    def test_no_run_falls_back_to_first(self) -> None:
-        rows = [("+821300000001", "A"), ("+821300000002", "B")]
-        self.assertEqual(self.pick(rows, 2)[0], "+821300000001")
+    def test_contiguous_requires_consecutive_numbers(self) -> None:
+        # contiguous=True (구식 -user 시작번호+i 전개)는 번호 연속 필수 → 폴백 = 첫 행 1개
+        rows = [("+821300000001", "H1"), ("+821300000003", "H3")]
+        self.assertEqual(len(self.pick(rows, 2, ha1_idx=1, contiguous=True)), 1)
+
+    def test_short_window_falls_back_to_first(self) -> None:
+        # ha1 보유 행이 count 미달 → 첫 행 1개짜리 창 (미달은 cred_args 가 빈 인자로 드러냄)
+        rows = [("+821300000001", "H1"), ("+821300000002", "")]
+        win = self.pick(rows, 2, ha1_idx=1)
+        self.assertEqual([r[0] for r in win], ["+821300000001"])
 
     def test_empty_rows(self) -> None:
-        self.assertEqual(self.pick([], 3), ())
-
-    def test_ignores_blank_password_run(self) -> None:
-        rows = [("+821300000001", ""), ("+821300000002", ""),
-                ("+821300000003", "123456"), ("+821300000004", "123456")]
-        self.assertEqual(self.pick(rows, 2)[0], "+821300000003")
+        self.assertEqual(self.pick([], 3, ha1_idx=1), [])
 
 
 class TestServiceLogRoots(unittest.TestCase):

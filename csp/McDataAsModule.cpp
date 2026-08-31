@@ -39,16 +39,16 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     // MCData multipart 면 signalling TLV 파싱 (conv/msg id·disposition·payload 크기),
     // 평문(text/plain 등)이면 본문 전체를 payload 로 간주.
     CMcDataSdsInfo clsInfo;
-    bool bMcData = McDataIsMultipartMixed( szContentType ) &&
-                   McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
+    bool bMcData =
+        McDataIsMultipartMixed( szContentType ) && McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
     bool bFd = bMcData && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING;
     int iPayloadSize = bMcData ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
 
     // 게이트 0 — max-payload-size-sds-cplane-bytes (TS 24.484 서비스 설정, 0/미설정=무제한).
     //   초과 SDS 는 media plane(MSRP) 을 써야 한다 — participating 검사 (TS 24.282 §9.2.2 step 8).
     if ( !bFd && gclsSetup.m_iMaxSdsCplaneBytes > 0 && iPayloadSize > gclsSetup.m_iMaxSdsCplaneBytes ) {
-        CLog::Print( LOG_INFO, "McDataAs: payload %d > cplane max %d — reject 403 Warning 203 from(%s)",
-                     iPayloadSize, gclsSetup.m_iMaxSdsCplaneBytes, pszFrom );
+        CLog::Print( LOG_INFO, "McDataAs: payload %d > cplane max %d — reject 403 Warning 203 from(%s)", iPayloadSize,
+                     gclsSetup.m_iMaxSdsCplaneBytes, pszFrom );
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
         if ( pclsResponse ) {
             pclsResponse->AddHeader( "Warning",

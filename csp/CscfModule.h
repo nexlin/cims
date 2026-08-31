@@ -21,7 +21,8 @@ enum ECheckAuthResult {
 #define SIP_SCAN_SUPPRESS_TTL_SEC 300
 
 /** 서버 지원 메서드 목록 — REGISTER 401/200·OPTIONS 200 등의 Allow 헤더 값 (실망 패킷 형태) */
-#define SIP_ALLOW_METHODS "REGISTER,INVITE,ACK,BYE,CANCEL,REFER,OPTIONS,NOTIFY,SUBSCRIBE,MESSAGE,INFO,PRACK,UPDATE,PUBLISH"
+#define SIP_ALLOW_METHODS \
+    "REGISTER,INVITE,ACK,BYE,CANCEL,REFER,OPTIONS,NOTIFY,SUBSCRIBE,MESSAGE,INFO,PRACK,UPDATE,PUBLISH"
 
 /**
  * @brief CSCF Module — REGISTER, SUBSCRIBE 처리, 인증
@@ -39,7 +40,8 @@ public:
 
     // 인증 헬퍼 (다른 모듈에서도 사용 가능)
     //   strRealmOverride: 서비스 엔티티에서 계산된 realm 전달. 비면 전역 AuthRealm 사용.
-    static bool AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride = "", bool bStale = false );
+    static bool AddChallenge( CSipMessage *psttResponse, const std::string &strRealmOverride = "",
+                              bool bStale = false );
     //   pszSecurityServer: RFC 3329 협상 중이면 401 에 실을 Security-Server 목록 (NULL = 미동봉).
     static bool SendUnAuthorizedResponse( CSipMessage *pclsMessage, const std::string &strRealmOverride = "",
                                           bool bStale = false, const char *pszSecurityServer = NULL );

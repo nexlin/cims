@@ -23,11 +23,11 @@ CSipMessageLogger gclsSipLogger;
 static const size_t MAX_CALLID_CACHE = 10000;
 
 // 비동기 writer 튜닝값
-static const size_t kNotifyThreshold = 128;  // 큐가 이만큼 쌓이면 즉시 flush 깨움
-static const size_t kMaxQueue = 200000;      // 큐 상한 (스풀까지 막힌 극단 상황의 메모리 폭주 방지)
-static const int kFlushIntervalMs = 100;     // 주기 flush (버퍼 잔여분 보장)
-static const size_t kNasQueueMax = 8;        // dispatch→flusher 대기 배치 상한 (포화 = 저장 경로 지연 신호)
-static const int kReplayRetryMs = 2000;      // 스풀 재생 실패 후 재시도 간격
+static const size_t kNotifyThreshold = 128;    // 큐가 이만큼 쌓이면 즉시 flush 깨움
+static const size_t kMaxQueue = 200000;        // 큐 상한 (스풀까지 막힌 극단 상황의 메모리 폭주 방지)
+static const int kFlushIntervalMs = 100;       // 주기 flush (버퍼 잔여분 보장)
+static const size_t kNasQueueMax = 8;          // dispatch→flusher 대기 배치 상한 (포화 = 저장 경로 지연 신호)
+static const int kReplayRetryMs = 2000;        // 스풀 재생 실패 후 재시도 간격
 static const int kSpoolTrimIntervalMs = 5000;  // 스풀 용량 정리 최소 간격
 static const int kStopFlusherWaitMs = 2000;    // 정지 시 flusher 종료 대기 상한 (초과 시 detach)
 
@@ -886,8 +886,8 @@ void CSipMessageLogger::TrimSpoolIfNeeded() {
         if ( unlink( f.second.first.c_str() ) == 0 ) {
             ctx.llSpoolBytes.fetch_sub( f.second.second );
             ctx.ulDroppedLines.fetch_add( (unsigned long)iLines );
-            CLog::Print( LOG_ERROR, "service_log spool over capacity — dropped %s (%d lines)",
-                         f.second.first.c_str(), iLines );
+            CLog::Print( LOG_ERROR, "service_log spool over capacity — dropped %s (%d lines)", f.second.first.c_str(),
+                         iLines );
         }
     }
 }

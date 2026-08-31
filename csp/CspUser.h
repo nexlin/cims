@@ -35,13 +35,14 @@
  *        행 부재 시 기본값 = 모드 DedicatedGroup + 긴급그룹 미지정(긴급 미인가) + 인가 전부 허용.
  */
 struct CspUserProfile {
-    bool m_bAllowEmergencyCall = true;      ///< allow-emergency-group-call (긴급 그룹콜 개시 인가)
-    bool m_bAllowEmergencyAlert = true;     ///< allow-activate-emergency-alert (경보 개시 인가)
-    bool m_bAllowAdhocCall = true;          ///< ad hoc 개시 인가 (Setup.PttAdhocEnabled 와 AND)
+    bool m_bAllowEmergencyCall = true;                       ///< allow-emergency-group-call (긴급 그룹콜 개시 인가)
+    bool m_bAllowEmergencyAlert = true;                      ///< allow-activate-emergency-alert (경보 개시 인가)
+    bool m_bAllowAdhocCall = true;                           ///< ad hoc 개시 인가 (Setup.PttAdhocEnabled 와 AND)
     std::string m_strEmergencyGroupMode = "DedicatedGroup";  ///< entry-info: DedicatedGroup|UseCurrentlySelectedGroup
-    std::string m_strEmergencyGroupId;      ///< 전용 긴급그룹 (mcptt_group_id, 빈 값=미지정)
-    bool m_bAllowEmergencyPrivateCall = true;  ///< allow-emergency-private-call (긴급 사설콜 개시 인가)
-    std::string m_strPrivateEmergencyMode = "LocallyDetermined";  ///< MCPTTPrivateRecipient entry-info: LocallyDetermined|UsePreConfigured
+    std::string m_strEmergencyGroupId;                       ///< 전용 긴급그룹 (mcptt_group_id, 빈 값=미지정)
+    bool m_bAllowEmergencyPrivateCall = true;                ///< allow-emergency-private-call (긴급 사설콜 개시 인가)
+    std::string m_strPrivateEmergencyMode =
+        "LocallyDetermined";  ///< MCPTTPrivateRecipient entry-info: LocallyDetermined|UsePreConfigured
     std::string m_strEmergencyPrivateRecipient;  ///< 사전 지정 긴급 수신자 (UsePreConfigured 모드, 빈 값=미지정)
 };
 

@@ -67,8 +67,7 @@ public:
      *  그룹 capability(emergency_call) + 사용자 allow-emergency-group-call +
      *  DedicatedGroup 모드의 대상 일치. DB 불가 시 프로파일 축은 fail-open(그룹 축만 판정).
      *  거부 시 strReason 에 사유. */
-    bool IsConditionInitAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId,
-                                    std::string &strReason );
+    bool IsConditionInitAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId, std::string &strReason );
 
     /** in-call condition 상향 게이트 — 상향 시도에 IsConditionInitAuthorized 를 적용.
      *  취소/비상향은 항상 true (하향 권한은 Apply 가 판정).
@@ -118,9 +117,8 @@ public:
      *  user_src_pt/user_src_te_pt = 서버가 그 leg 쪽에 낸 SDP 의 PT(= UE 송신 PT).
      *  pstrCodec != NULL 이면 협상 오디오 코덱 문자열("AMR-WB/16000")도 반환 — 녹취 메타용.
      *  VoLTE relay leg(remote_* 계열)도 동일 규칙으로 사용한다. */
-    static void GetLegPt( const std::string &strCallId, bool bServerOffered,
-                          int &iUserPt, int &iUserSrcPt, int &iUserTePt, int &iUserSrcTePt,
-                          std::string *pstrCodec = NULL );
+    static void GetLegPt( const std::string &strCallId, bool bServerOffered, int &iUserPt, int &iUserSrcPt,
+                          int &iUserTePt, int &iUserSrcTePt, std::string *pstrCodec = NULL );
 
     /** 멤버 SDP(m=application)의 a=fmtp:MCPTT 협상 결과 파싱 (TS 24.380 §12.1.2.3) —
      *  mc_queueing/mc_priority=N/mc_granted → PTT_JOIN 의 queueing/max_priority/granted.

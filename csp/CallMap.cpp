@@ -351,8 +351,7 @@ void CCallMap::DeleteTimeout( int iTimeoutSec ) {
 void CCallMap::CollectRelaySessionIds( std::set<std::string> &setOut ) {
     m_clsMutex.acquire();
     for ( auto itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        if ( !itMap->second.m_strRelaySessionId.empty() )
-            setOut.insert( itMap->second.m_strRelaySessionId );
+        if ( !itMap->second.m_strRelaySessionId.empty() ) setOut.insert( itMap->second.m_strRelaySessionId );
     }
     m_clsMutex.release();
 }
@@ -373,8 +372,8 @@ int CCallMap::ReclaimZombieBySessionId( const std::set<std::string> &setLiveOnCm
     int iDone = 0;
     for ( const auto &z : clsZombie ) {
         if ( iDone >= iMaxCount ) break;
-        CLog::Print( LOG_INFO, "Audit zombie teardown: CallId(%s) relay=%s (CMP 미보유 — 미디어 소실)",
-                     z.first.c_str(), z.second.c_str() );
+        CLog::Print( LOG_INFO, "Audit zombie teardown: CallId(%s) relay=%s (CMP 미보유 — 미디어 소실)", z.first.c_str(),
+                     z.second.c_str() );
         gclsUserAgent.StopCall( z.first.c_str() );
         Delete( z.first.c_str() );  // bStopPort=true → RemoveSession (이미 CMP 소실이라 no-op 멱등)
         ++iDone;
@@ -397,8 +396,8 @@ bool CCallMap::TeardownByRelaySessionId( const std::string &strSessionId ) {
     m_clsMutex.release();
 
     if ( strCallId.empty() ) return false;  // 이미 종료됨 — 멱등
-    CLog::Print( LOG_INFO, "RELAY_ABORTED teardown: CallId(%s) relay=%s (CMP 회수 — 미디어 소실)",
-                 strCallId.c_str(), strSessionId.c_str() );
+    CLog::Print( LOG_INFO, "RELAY_ABORTED teardown: CallId(%s) relay=%s (CMP 회수 — 미디어 소실)", strCallId.c_str(),
+                 strSessionId.c_str() );
     gclsUserAgent.StopCall( strCallId.c_str() );
     Delete( strCallId.c_str() );  // bStopPort=true → RemoveSession (이미 CMP 회수라 no-op 멱등)
     return true;

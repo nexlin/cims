@@ -571,7 +571,7 @@ bool CDbManager::InsertAffiliation( const std::string &strGroupId, const std::st
         if ( row && row[0] ) strGroupPk = row[0];
         mysql_free_result( pRes );
     }
-    if ( strGroupPk.empty() ) return false;   // 그룹 미발견 = 기록 불가
+    if ( strGroupPk.empty() ) return false;  // 그룹 미발견 = 기록 불가
 
     std::string strExpires =
         ( iExpiresSec > 0 ) ? ( "DATE_ADD(NOW(), INTERVAL " + std::to_string( iExpiresSec ) + " SECOND)" ) : "NULL";
@@ -579,8 +579,9 @@ bool CDbManager::InsertAffiliation( const std::string &strGroupId, const std::st
     // UPSERT (status 재활성). group_id 는 자기 테이블 BIGINT 조회값이므로 숫자다.
     std::string strSql = "INSERT INTO ptt_affiliations (group_id, user_id, client_id, expires_at, status) VALUES (" +
                          strGroupPk + ", '" + Escape( strUserId ) + "', '" + Escape( strClientId ) + "', " +
-                         strExpires + ", 'affiliated') ON DUPLICATE KEY UPDATE affiliated_at=NOW(), expires_at=" +
-                         strExpires + ", status='affiliated'";
+                         strExpires +
+                         ", 'affiliated') ON DUPLICATE KEY UPDATE affiliated_at=NOW(), expires_at=" + strExpires +
+                         ", status='affiliated'";
     return ExecuteQuery( strSql );
 }
 

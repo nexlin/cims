@@ -27,7 +27,7 @@ void McDataDeliveryTargets( const CspPttGroup &clsGroup, const char *pszFrom, co
  *        C-plane/media plane 공용 — media plane 은 pszVia="msrp" 로 구분 필드를 남긴다.
  */
 void McDataArchiveMessage( const char *pszGroup, const char *pszFrom, const char *pszMsgType,
-                           const CMcDataSdsInfo &clsInfo, int iPayloadSize, int iFanout,
-                           const char *pszVia = "", const char *pszFileUrl = "", bool bMcData = true );
+                           const CMcDataSdsInfo &clsInfo, int iPayloadSize, int iFanout, const char *pszVia = "",
+                           const char *pszFileUrl = "", bool bMcData = true );
 
 #endif

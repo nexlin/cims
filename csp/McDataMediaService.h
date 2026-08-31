@@ -38,8 +38,8 @@ public:
     bool IsMsrpInvite( CSipCallRtp *pclsRtp );
 
     /** 발신 단말의 MSRP INVITE 처리 — 게이트→cmdp 세션→AcceptCall. 거부/실패 시 내부에서 StopCall */
-    void OnIncomingMsrpInvite( const char *pszCallId, const char *pszFrom, const char *pszTo,
-                               CSipCallRtp *pclsRtp, CSipMessage *pclsMessage );
+    void OnIncomingMsrpInvite( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,
+                               CSipMessage *pclsMessage );
 
     /** EventCallStart 훅 — 추적 중인 콜이면 true (배포 레그면 answer a=path 를 cmdp 에 전달) */
     bool OnCallStarted( const char *pszCallId, CSipCallRtp *pclsRtp );
@@ -60,13 +60,13 @@ private:
         std::string strSessionId;  // cmdp 세션
         std::string strFrom;       // 발신자 (RECV) / 그룹 (SEND)
         std::string strGroup;
-        std::string strCallee;     // SEND: 수신자
+        std::string strCallee;  // SEND: 수신자
         EDir eDir;
     };
 
     std::mutex m_mutex;
-    std::map<std::string, McDataMediaCall> m_mapCalls;       // callId → 콜 상태
-    std::map<std::string, std::string> m_mapSessionToCall;   // cmdp 세션 → callId
+    std::map<std::string, McDataMediaCall> m_mapCalls;      // callId → 콜 상태
+    std::map<std::string, std::string> m_mapSessionToCall;  // cmdp 세션 → callId
 
     void HandleMsgReceived( const SimpleJson::JsonNode &clsPayload );
     void HandleSessionClosed( const std::string &strSessionId, bool bOk, const char *pszReason );
@@ -76,13 +76,11 @@ private:
                         const SimpleJson::JsonNode &clsPayload );
 
     /** 배포 레그(서버발 INVITE) 1건 생성 */
-    bool InviteMsrpReceiver( const std::string &strGroup, const std::string &strFrom,
-                             const std::string &strMember, const std::string &strFileId,
-                             const std::string &strContentType );
+    bool InviteMsrpReceiver( const std::string &strGroup, const std::string &strFrom, const std::string &strMember,
+                             const std::string &strFileId, const std::string &strContentType );
 
     /** 오퍼/응답 미디어 리스트에서 m=message 의 a=path / 오디오 미디어 추출 */
-    static bool ExtractMsrpOffer( CSipCallRtp *pclsRtp, std::string &strRemotePath,
-                                  const CSdpMedia **ppclsAudio );
+    static bool ExtractMsrpOffer( CSipCallRtp *pclsRtp, std::string &strRemotePath, const CSdpMedia **ppclsAudio );
 
     /** msrp://ip:port/... 에서 ip/port 추출 */
     static bool ParseMsrpPathHost( const std::string &strPath, std::string &strIp, int &iPort );

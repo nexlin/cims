@@ -12,12 +12,14 @@
 //  emergency/imminent 는 prearranged/chat/broadcast(session-type)와 직교하는 런타임 조건.
 
 struct CMcpttInfo {
-    std::string strSessionType;          // prearranged|chat|broadcast|private (선택)
-    bool bEmergency = false;             // <emergency-ind>true</emergency-ind>
-    bool bImminent  = false;             // <imminentperil-ind>true</imminentperil-ind>
-    bool bAlert     = false;             // <alert-ind>true</alert-ind>
+    std::string strSessionType;  // prearranged|chat|broadcast|private (선택)
+    bool bEmergency = false;     // <emergency-ind>true</emergency-ind>
+    bool bImminent = false;      // <imminentperil-ind>true</imminentperil-ind>
+    bool bAlert = false;         // <alert-ind>true</alert-ind>
     // FloorTier 정합 condition: 2=emergency, 1=imminent, 0=normal
-    int Condition() const { return bEmergency ? 2 : ( bImminent ? 1 : 0 ); }
+    int Condition() const {
+        return bEmergency ? 2 : ( bImminent ? 1 : 0 );
+    }
 };
 
 // <...tag...>VALUE</...> 에서 VALUE 가 true/1 인지. tag 미존재 시 false.
@@ -40,8 +42,8 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
     CMcpttInfo info;
     if ( body.empty() ) return info;
     info.bEmergency = _McpttIndTrue( body, "emergency-ind" );
-    info.bImminent  = _McpttIndTrue( body, "imminentperil-ind" );
-    info.bAlert     = _McpttIndTrue( body, "alert-ind" );
+    info.bImminent = _McpttIndTrue( body, "imminentperil-ind" );
+    info.bAlert = _McpttIndTrue( body, "alert-ind" );
     size_t p = body.find( "session-type" );
     if ( p != std::string::npos ) {
         size_t gt = body.find( '>', p );
@@ -60,9 +62,9 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
 //  단순 텍스트 substring 이 아니라 **요소 기반** 판정(group 속성값에 "de-affiliate" 가 들어 있어도
 //  '<' 앵커라 오판 없음). 단말 McpttXml.affiliationCommand 와 정합. namespace prefix 무관.
 struct CMcpttAffiliation {
-    bool bValid       = false;   // 액션 요소를 하나라도 찾음
-    bool bDeaffiliate = false;   // de-affiliate 액션
-    std::string strGroup;        // group 속성값(있으면)
+    bool bValid = false;        // 액션 요소를 하나라도 찾음
+    bool bDeaffiliate = false;  // de-affiliate 액션
+    std::string strGroup;       // group 속성값(있으면)
 };
 
 // 시작태그(예: "affiliate") 의 group="..." 속성 추출.

@@ -223,9 +223,8 @@ bool CCspListenerManager::Sync() {
         return nullptr;
     };
     auto sameBind = []( const ManagedInfo &a, const ManagedInfo &b ) {
-        return a.port == b.port && a.bindIp == b.bindIp && a.protocol == b.protocol &&
-               a.threadCount == b.threadCount && a.tlsCertPath == b.tlsCertPath &&
-               a.tlsKeyPath == b.tlsKeyPath && a.tlsCaPath == b.tlsCaPath;
+        return a.port == b.port && a.bindIp == b.bindIp && a.protocol == b.protocol && a.threadCount == b.threadCount &&
+               a.tlsCertPath == b.tlsCertPath && a.tlsKeyPath == b.tlsKeyPath && a.tlsCaPath == b.tlsCaPath;
     };
 
     // 1) 기존 managed 중: desired 에 없거나(삭제) bind 파라미터가 바뀐(rebind) 것을 stack 에서 제거.

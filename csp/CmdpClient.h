@@ -44,14 +44,13 @@ public:
     static std::string IssueSessionId();
 
     /** 수신(발신 단말→서버) 세션 할당. 성공 시 cmdp 의 a=path 용 msrp_path 반환 */
-    bool AddRecvSession( const std::string &strSessionId, const std::string &strCaller,
-                         const std::string &strGroupId, const std::string &strRemotePath,
-                         long long llMaxSize, std::string &strMsrpPath, const std::string &strSesId = "" );
+    bool AddRecvSession( const std::string &strSessionId, const std::string &strCaller, const std::string &strGroupId,
+                         const std::string &strRemotePath, long long llMaxSize, std::string &strMsrpPath,
+                         const std::string &strSesId = "" );
 
     /** 송신(서버→수신 단말) 세션 할당 — 저장본(file_id) 재전달 */
-    bool AddSendSession( const std::string &strSessionId, const std::string &strFileId,
-                         const std::string &strCaller, const std::string &strCallee,
-                         const std::string &strContentType, std::string &strMsrpPath,
+    bool AddSendSession( const std::string &strSessionId, const std::string &strFileId, const std::string &strCaller,
+                         const std::string &strCallee, const std::string &strContentType, std::string &strMsrpPath,
                          const std::string &strSesId = "" );
 
     /** 수신자 200 OK answer 의 a=path 전달 (전송 개시 트리거) */

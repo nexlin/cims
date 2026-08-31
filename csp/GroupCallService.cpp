@@ -230,8 +230,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     if ( iCond >= 1 ) {
         std::string strReason;
         if ( !IsConditionInitAuthorized( clsGroup, pszCallerInfo, strReason ) ) {
-            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) condition(%d) denied (%s) → 403",
-                         pszGroupId, pszCallerInfo, iCond, strReason.c_str() );
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) condition(%d) denied (%s) → 403", pszGroupId,
+                         pszCallerInfo, iCond, strReason.c_str() );
             gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
             return true;  // 403 응답 완료 — 호출측(dispatcher)이 중복 응답하지 않게 한다
         }
@@ -561,7 +561,10 @@ bool CGroupCallService::IsConditionInitAuthorized( const CspPttGroup &clsGroup, 
             }
             std::string strPeer;
             for ( const auto &p : clsGroup._pusers )
-                if ( p && p->_id != strUserId ) { strPeer = p->_id; break; }
+                if ( p && p->_id != strUserId ) {
+                    strPeer = p->_id;
+                    break;
+                }
             if ( clsProf.m_strEmergencyPrivateRecipient != strPeer ) {
                 strReason = "preconfigured-recipient mismatch";
                 return false;
@@ -581,8 +584,8 @@ bool CGroupCallService::IsConditionInitAuthorized( const CspPttGroup &clsGroup, 
         return false;
     }
     if ( clsProf.m_strEmergencyGroupMode == "DedicatedGroup" && clsProf.m_strEmergencyGroupId != clsGroup._id ) {
-        strReason = clsProf.m_strEmergencyGroupId.empty() ? "dedicated group not provisioned"
-                                                          : "dedicated-group mismatch";
+        strReason =
+            clsProf.m_strEmergencyGroupId.empty() ? "dedicated group not provisioned" : "dedicated-group mismatch";
         return false;
     }
     return true;

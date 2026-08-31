@@ -268,8 +268,7 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                         pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-info+xml" );
                         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
                     }
-                    CLog::Print( LOG_INFO,
-                                 "RecvRequest: in-call upgrade denied group(%s) member(%s) cond(%d) → 403",
+                    CLog::Print( LOG_INFO, "RecvRequest: in-call upgrade denied group(%s) member(%s) cond(%d) → 403",
                                  strGid.c_str(), strMid.c_str(), iCond );
                     return true;
                 }
@@ -293,10 +292,9 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                 CspUser clsToProv;
                 // adhoc-* 는 PTT-AS 의 로컬 서비스 주소공간(EventIncomingCall 에서 ephemeral 합성,
                 // CSC 도 접두사 예약) — GroupMap 에는 합성 후에야 실리므로 접두사로 로컬 판정한다.
-                bool bLocalTarget = gclsGroupMap.Contains( strTo.c_str() ) ||
-                                    strncmp( strTo.c_str(), "adhoc-", 6 ) == 0 ||
-                                    gclsCspUserMap.isAlive( strTo.c_str(), clsToProv ) ||
-                                    gclsDbManager.SelectUser( strTo, clsToProv );
+                bool bLocalTarget =
+                    gclsGroupMap.Contains( strTo.c_str() ) || strncmp( strTo.c_str(), "adhoc-", 6 ) == 0 ||
+                    gclsCspUserMap.isAlive( strTo.c_str(), clsToProv ) || gclsDbManager.SelectUser( strTo, clsToProv );
                 if ( !bLocalTarget ) {
                     CLog::SuppressNetworkSource( pclsMessage->m_strClientIp.c_str(), SIP_SCAN_SUPPRESS_TTL_SEC );
                     SendResponse( pclsMessage, SIP_DECLINE );  // 603
@@ -630,8 +628,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( m_clsPttAs.IsEnabled() && strMcpttSessionType == "private" && !gclsGroupMap.Contains( pszTo ) ) {
         CspUser clsCallee;
         if ( !gclsCspUserMap.isAlive( pszTo, clsCallee ) ) {
-            CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 480 [PTT-AS]",
-                         pszTo );
+            CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 480 [PTT-AS]", pszTo );
             return StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
         }
         std::string strPrivId = std::string( "priv-" ) + pszFrom + "-" + pszTo;
@@ -644,8 +641,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         //   CMP 그룹도 REMOVE 로 확실히 재생성한다 (ADD 멱등 경로는 floor_control 을 갱신하지 않음).
         {
             CspPttGroup clsPrivOld;
-            if ( gclsGroupMap.Select( strPrivId.c_str(), clsPrivOld ) &&
-                 clsPrivOld._floorControl != pszWantFloorCtl ) {
+            if ( gclsGroupMap.Select( strPrivId.c_str(), clsPrivOld ) && clsPrivOld._floorControl != pszWantFloorCtl ) {
                 CLog::Print( LOG_INFO,
                              "EventIncomingCall: private(%s) 잔존 그룹 모드 불일치(%s→%s) — 제거 후 재생성 [PTT-AS]",
                              strPrivId.c_str(), clsPrivOld._floorControl.empty() ? "on" : "off",
@@ -662,7 +658,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsPriv._groupType = "private";
             clsPriv._requireAffiliation = false;  // 계약 §A.1 — 상대 MCPTT ID 직접 지정, 사전 편성 없음
             clsPriv._isAdhoc = true;              // 통화 종료 시 GroupMap 에서 제거(ephemeral)
-            clsPriv._emergencyCall = true;  // 그룹문서 없음 — capability 축 공허, 긴급은 사용자 축 게이트(IsConditionInitAuthorized private 분기)
+            clsPriv._emergencyCall = true;        // 그룹문서 없음 — capability 축 공허, 긴급은 사용자 축
+                                                  // 게이트(IsConditionInitAuthorized private 분기)
             if ( clsPrivFmtpChk.iNoFloorCtrl ) clsPriv._floorControl = "off";
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszTo, 5, "participant", "" ) );
@@ -700,7 +697,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsAdhoc._name = std::string( "adhoc:" ) + pszTo;
             clsAdhoc._groupType = "prearranged";  // on-demand 수명(마지막 이탈 시 teardown)
             clsAdhoc._requireAffiliation = false;
-            clsAdhoc._isAdhoc = true;  // 통화 종료 시 GroupMap 에서 제거(ephemeral)
+            clsAdhoc._isAdhoc = true;        // 통화 종료 시 GroupMap 에서 제거(ephemeral)
             clsAdhoc._emergencyCall = true;  // 그룹문서 없음 — capability 축 공허, 긴급 조건은 ad-hoc 위에 얹힘(§6)
             bool bHasInit = false;
             for ( const auto &m : vecAdhoc ) {
@@ -914,8 +911,8 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         if ( !gclsCmpClient.AddSession( strRelaySessionId, strAllocatedIp, iLocalPort, iLocalVideoPort, iLocalPortB,
                                         iLocalVideoPortB, strRecordDir, pszFrom ? pszFrom : "", pszTo ? pszTo : "",
                                         pclsRtp->m_strIp, iAudioPort, iVideoPort, strRelaySesId, iCallerNat,
-                                        strCallerGuardIp,
-                                        iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt, strCallerCodec ) ) {
+                                        strCallerGuardIp, iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt,
+                                        strCallerCodec ) ) {
             return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
         }
         // leg 별 전용 포트: A(발신) leg SDP = iLocalPort(peer0), B(착신) leg SDP = iLocalPortB(peer1)
@@ -1070,13 +1067,13 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
                     //   (bServerOffered=true). 녹취 세그먼트 메타(audio_pt_b/audio_codec_b) 근거.
                     int iCalleePt = 0, iCalleeSrcPt = 0, iCalleeTePt = 0, iCalleeSrcTePt = 0;
                     std::string strCalleeCodec;
-                    CGroupCallService::GetLegPt( pszCallId, true, iCalleePt, iCalleeSrcPt, iCalleeTePt,
-                                                 iCalleeSrcTePt, &strCalleeCodec );
+                    CGroupCallService::GetLegPt( pszCallId, true, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt,
+                                                 &strCalleeCodec );
                     gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
                                                  iVideoPort > 0 ? iVideoPort : 0, 1, clsCallInfo.m_strRelayCaller,
                                                  clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iCalleeNat,
-                                                 strCalleeGuardIp,
-                                                 iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt, strCalleeCodec );
+                                                 strCalleeGuardIp, iCalleePt, iCalleeSrcPt, iCalleeTePt, iCalleeSrcTePt,
+                                                 strCalleeCodec );
                 }
             }
 
@@ -1233,26 +1230,24 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
                     if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRemoteRtp->m_strIp, strSigIp, strLegGuardIp ) ) {
                         iLegNat = 1;
                         CLog::Print( LOG_INFO, "EventReInvite: peer%d leg NAT (svc=%s sdp=%s sig=%s guard=%s)",
-                                     iPeerIdx, clsNatSvc.name.c_str(), pclsRemoteRtp->m_strIp.c_str(),
-                                     strSigIp.c_str(), strLegGuardIp.c_str() );
+                                     iPeerIdx, clsNatSvc.name.c_str(), pclsRemoteRtp->m_strIp.c_str(), strSigIp.c_str(),
+                                     strLegGuardIp.c_str() );
                     }
                 }
                 // 재협상 leg PT/코덱 — UE 가 offer, 서버 answer 는 echo(bServerOffered=false).
                 int iLegPt = 0, iLegSrcPt = 0, iLegTePt = 0, iLegSrcTePt = 0;
                 std::string strLegCodec;
-                CGroupCallService::GetLegPt( pszCallId, false, iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt,
-                                             &strLegCodec );
+                CGroupCallService::GetLegPt( pszCallId, false, iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt, &strLegCodec );
                 gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRemoteRtp->m_strIp, iAudioPort,
                                              iVideoPort, iPeerIdx, clsCallInfo.m_strRelayCaller,
                                              clsCallInfo.m_strRelayCallee, clsCallInfo.m_strRelaySesId, iLegNat,
-                                             strLegGuardIp,
-                                             iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt, strLegCodec );
+                                             strLegGuardIp, iLegPt, iLegSrcPt, iLegTePt, iLegSrcTePt, strLegCodec );
             }
         }
         if ( pclsRemoteRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
             // 재협상 SDP 에도 CMP relay IP 를 광고 (멀티 미디어노드에서 CSP 로컬 주소 오광고 방지)
             std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
-                                                                          : clsCallInfo.m_strRelayLocalIp;
+                                                                           : clsCallInfo.m_strRelayLocalIp;
             pclsRemoteRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendReInvite( clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp );
@@ -1276,7 +1271,7 @@ void CModuleDispatcher::EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
             std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
-                                                                          : clsCallInfo.m_strRelayLocalIp;
+                                                                           : clsCallInfo.m_strRelayLocalIp;
             pclsRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendPrack( clsCallInfo.m_strPeerCallId.c_str(), pclsRtp );

@@ -449,8 +449,8 @@ bool CCscfModule::CheckAuthrization( CSipMessage *pclsMessage ) {
 
     // 3GPP pre-auth: nonce/response 없는 빈 Authorization은 'Authorization 없음'과 동일 취급.
     //   (RecvRequestRegister 와 동일 가드 — 첫 챌린지에 stale=true 가 붙는 버그 방지)
-    const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
-                                 itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
+    const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() && itCL->m_strNonce.empty() &&
+                                 itCL->m_strResponse.empty() );
 
     // IMS AKA 가입자 (sip_access_security.md §8.2): 비-REGISTER 요청은 등록이 결부한 TLS flow 위에서만 유효하다
     //   (TS 33.203 Annex O/X — 보호 채널 밖의 요청은 받지 않는다). 여기는 그 flow 와 어긋난(또는 미등록) 요청만
@@ -670,8 +670,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     //   access_services 의 auth_realm 이 SOT — Request-URI host 로 서비스 조회 후 EffectiveRealm.
     //   (auth_realm 미지정 시 domain 상속 = 기존 동작.) 서비스 미정의 도메인은 host fallback.
     ServiceInfo svcReg = gclsServiceMap.GetByDomain( pclsMessage->m_clsReqUri.m_strHost );
-    const std::string strRegRealm = ( svcReg.id > 0 ) ? CCspServiceMap::EffectiveRealm( svcReg )
-                                                      : pclsMessage->m_clsReqUri.m_strHost;
+    const std::string strRegRealm =
+        ( svcReg.id > 0 ) ? CCspServiceMap::EffectiveRealm( svcReg ) : pclsMessage->m_clsReqUri.m_strHost;
 
     // ── RFC 3329 sec-agree (TS 24.229 §5.1.1.5.1 프로파일, sip_access_security.md §8.1) ──
     //   초기 REGISTER: Security-Client → 401 에 Security-Server 동봉(발급 보관).
@@ -704,8 +704,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     // 3GPP pre-auth: 첫 REGISTER 의 빈 Authorization(nonce/response 없음)은 IMPI 광고일 뿐
     //   답안 제출이 아니다. 'Authorization 없음'과 동일하게 취급 — nonce 조회로 넘기면
     //   E_AUTH_NONCE_NOT_FOUND(F-07 stale=true) 경로로 빠져 첫 챌린지에 stale 이 붙는 버그가 됨.
-    const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() &&
-                                 itCL->m_strNonce.empty() && itCL->m_strResponse.empty() );
+    const bool bEmptyPreAuth = ( itCL != pclsMessage->m_clsAuthorizationList.end() && itCL->m_strNonce.empty() &&
+                                 itCL->m_strResponse.empty() );
     if ( itCL == pclsMessage->m_clsAuthorizationList.end() || bEmptyPreAuth ) {
         // 체계는 가입자 프로비저닝(auth_scheme)이 정한다 — aka 면 CSC AV 로 AKA 챌린지 (§8.2)
         return SendRegisterChallenge( pclsMessage, strRegRealm, false, pszSecServer, pclsIpsec );
@@ -894,8 +894,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             if ( gclsUserMap.Select( pclsMessage->m_clsFrom.m_clsUri.m_strUser.c_str(), clsRegInfo ) &&
                  clsRegInfo.m_strContactUri.empty() == false ) {
                 CSipFrom clsContact;
-                clsContact.m_clsUri.Parse( clsRegInfo.m_strContactUri.c_str(),
-                                           (int)clsRegInfo.m_strContactUri.size() );
+                clsContact.m_clsUri.Parse( clsRegInfo.m_strContactUri.c_str(), (int)clsRegInfo.m_strContactUri.size() );
                 clsContact.InsertParam( "expires", szExpires );
                 pclsResponse->m_clsContactList.push_back( clsContact );
             }
@@ -1011,10 +1010,11 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
     // C2: affiliation-info 구독 판별 (TS 24.379 §9.3) — Event:presence 또는
     //   Accept: application/vnd.3gpp.mcptt-affiliation-info+xml → 제휴상태 NOTIFY 대상.
-    CSipHeader *pclsSubEvent  = pclsMessage->GetHeader( "Event" );
+    CSipHeader *pclsSubEvent = pclsMessage->GetHeader( "Event" );
     CSipHeader *pclsSubAccept = pclsMessage->GetHeader( "Accept" );
-    bool bAffInfo = ( pclsSubEvent && pclsSubEvent->m_strValue == "presence" ) ||
-                    ( pclsSubAccept && pclsSubAccept->m_strValue.find( "mcptt-affiliation-info" ) != std::string::npos );
+    bool bAffInfo =
+        ( pclsSubEvent && pclsSubEvent->m_strValue == "presence" ) ||
+        ( pclsSubAccept && pclsSubAccept->m_strValue.find( "mcptt-affiliation-info" ) != std::string::npos );
 
     std::string strEventType;
     if ( strEventHdr == "reg" ) {
@@ -1057,10 +1057,14 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         //   기준이라 기본값(gms)으로 흘렀다. gms/cms 는 Event 헤더가 공통(xcap-diff)이라 자원
         //   이름만이 근거다. cms 가 gms 로 저장되면 사용자별 cms 조회(USER_CHANGED)와 이벤트별
         //   전원 조회(SERVICE_CONFIG_CHANGED)가 모두 이 구독을 놓친다.
-        if ( bAffiliation ) strEventType = "conference";
-        else if ( strReqUriUser.find( "cms" ) != std::string::npos ) strEventType = "cms";
-        else if ( strReqUriUser.find( "gms" ) != std::string::npos ) strEventType = "gms";
-        CLog::Print( LOG_INFO, "SUBSCRIBE refresh without state — resource restored from To URI (%s, user=%s, event=%s)",
+        if ( bAffiliation )
+            strEventType = "conference";
+        else if ( strReqUriUser.find( "cms" ) != std::string::npos )
+            strEventType = "cms";
+        else if ( strReqUriUser.find( "gms" ) != std::string::npos )
+            strEventType = "gms";
+        CLog::Print( LOG_INFO,
+                     "SUBSCRIBE refresh without state — resource restored from To URI (%s, user=%s, event=%s)",
                      strReqUriUser.c_str(), strFromId.c_str(), strEventType.c_str() );
     }
 
@@ -1224,8 +1228,7 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     //   (body 없는 순수 Expires:0 refresh 는 관대 처리.)
     const std::string &strBody = pclsMessage->m_strBody;
     const std::string &strCtSub = pclsMessage->m_clsContentType.m_strSubType;
-    if ( !strBody.empty() && !strCtSub.empty() &&
-         strCtSub.find( "mcptt-affiliation" ) == std::string::npos ) {
+    if ( !strBody.empty() && !strCtSub.empty() && strCtSub.find( "mcptt-affiliation" ) == std::string::npos ) {
         CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH] 415: Content-Type %s/%s (mcptt-affiliation-command 기대)",
                      pclsMessage->m_clsContentType.m_strType.c_str(), strCtSub.c_str() );
         SendResponse( pclsMessage, 415 );  // Unsupported Media Type
@@ -1237,13 +1240,12 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     //   액션이 de-affiliate 이거나 Expires:0 이면 해제, else 등록. group 속성은 Req-URI 와 교차검증.
     CMcpttAffiliation clsCmd = ParseAffiliationCommand( strBody );
     bool bDeaffiliate = ( iExpires == 0 ) || ( clsCmd.bValid && clsCmd.bDeaffiliate );
-    if ( clsCmd.bValid && !clsCmd.strGroup.empty() &&
-         clsCmd.strGroup.find( strReqUriUser ) == std::string::npos ) {
+    if ( clsCmd.bValid && !clsCmd.strGroup.empty() && clsCmd.strGroup.find( strReqUriUser ) == std::string::npos ) {
         CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] command group=%s ≠ Req-URI group=%s (Req-URI 우선)",
                      clsCmd.strGroup.c_str(), strReqUriUser.c_str() );
     }
-    CLog::Print( LOG_DEBUG, "[Affiliation/PUBLISH] cmd valid=%d deaffiliate=%d group=%s expires=%d",
-                 clsCmd.bValid, bDeaffiliate, clsCmd.strGroup.c_str(), iExpires );
+    CLog::Print( LOG_DEBUG, "[Affiliation/PUBLISH] cmd valid=%d deaffiliate=%d group=%s expires=%d", clsCmd.bValid,
+                 bDeaffiliate, clsCmd.strGroup.c_str(), iExpires );
 
     // ── 규격 정합 (item 1): 멤버십 게이트 — 자신이 멤버인 그룹에만 affiliate 가능 ──
     //   TS 24.481/24.379. (de-affiliate 는 멤버 여부와 무관하게 항상 허용.)
@@ -1276,8 +1278,7 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         auto it = s_mapEtag.find( strEtagKey );
         if ( it == s_mapEtag.end() || it->second != pclsIfMatch->m_strValue ) {
             CLog::Print( LOG_ERROR, "PUBLISH 412: ETag mismatch user=%s group=%s If-Match=%s stored=%s",
-                         strFromId.c_str(), strReqUriUser.c_str(),
-                         pclsIfMatch->m_strValue.c_str(),
+                         strFromId.c_str(), strReqUriUser.c_str(), pclsIfMatch->m_strValue.c_str(),
                          ( it != s_mapEtag.end() ) ? it->second.c_str() : "(none)" );
             SendResponse( pclsMessage, 412 );
             return true;
@@ -1295,8 +1296,8 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
             //   DB 에 아무것도 안 쓰였는데도 로그만 "affiliate" 로 보이는 침묵 실패가 가능했다
             //   (그룹 미발견 시 INSERT..SELECT 는 에러 없이 0행).
             if ( gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iAffExpires ) ) {
-                CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d",
-                             strFromId.c_str(), strReqUriUser.c_str(), iAffExpires );
+                CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
+                             strReqUriUser.c_str(), iAffExpires );
             } else {
                 CLog::Print( LOG_ERROR,
                              "[Affiliation/PUBLISH] affiliate 미기록 user=%s group=%s expires=%d "
@@ -1322,8 +1323,7 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     unsigned uRnd = (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage );
     char szEtag[64];
     snprintf( szEtag, sizeof( szEtag ), "aff-%llx%08x",
-              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL,
-              uRnd );
+              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL, uRnd );
 
     // ETag 저장 (initial 또는 refresh 모두 갱신)
     {

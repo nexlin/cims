@@ -17,10 +17,10 @@
  */
 #include "CspServer.h"
 
+#include <unistd.h>
+
 #include <csignal>
 #include <set>
-
-#include <unistd.h>
 
 #include "CallDir.h"
 #include "CspAddressing.h"
@@ -262,9 +262,8 @@ int ServiceMain() {
         CLog::Print( LOG_ERROR, "CmpClient Init failed" );
     }
     // audit 수준2 — CSP↔CMP 세션 재조정 설정 주입 (ha_design.md 수준2 / cmp_media_api.md)
-    gclsCmpClient.SetAuditConfig( gclsSetup.m_bAuditEnable, gclsSetup.m_iAuditGraceSec,
-                                  gclsSetup.m_iAuditMaxPerCycle, gclsSetup.m_bAuditZombieTeardown,
-                                  gclsSetup.m_strHaRole, gclsSetup.m_strHaVip );
+    gclsCmpClient.SetAuditConfig( gclsSetup.m_bAuditEnable, gclsSetup.m_iAuditGraceSec, gclsSetup.m_iAuditMaxPerCycle,
+                                  gclsSetup.m_bAuditZombieTeardown, gclsSetup.m_strHaRole, gclsSetup.m_strHaVip );
 
     // FM 자기보고 (alarm_self_reporting.md) — OAM FM ingest 로 알람/이벤트 push.
     //   fm_catalog.json 은 설정 파일 옆(dist: config/) — 배치별 후보 순서 탐색.
@@ -298,16 +297,15 @@ int ServiceMain() {
     // [FIX] Wire Connection Callback and Start Monitor
     //   미디어평면 전체 두절/복구 전이는 자기보고 알람으로도 노출 (A-COM-007 — IBCF/TAS/
     //   PTT-AS 의 CMP 두절 요구를 대표 정의 하나로 수렴, 알람 카탈로그 §5 중복 발화 금지).
-    gclsCmpClient.SetConnectionCallback(
-        [mo = sysId + "/csp/cmp"]( bool bConnected ) {
-            gclsGroupCallService.OnCmpStatusChanged( bConnected );
-            if ( gclsFmReporter.IsEnabled() ) {
-                if ( bConnected )
-                    gclsFmReporter.AlarmClose( "A-COM-007", mo );
-                else
-                    gclsFmReporter.AlarmOpen( "A-COM-007", mo );
-            }
-        } );
+    gclsCmpClient.SetConnectionCallback( [mo = sysId + "/csp/cmp"]( bool bConnected ) {
+        gclsGroupCallService.OnCmpStatusChanged( bConnected );
+        if ( gclsFmReporter.IsEnabled() ) {
+            if ( bConnected )
+                gclsFmReporter.AlarmClose( "A-COM-007", mo );
+            else
+                gclsFmReporter.AlarmOpen( "A-COM-007", mo );
+        }
+    } );
 
     // 부분 장애(일부 CMP endpoint DEAD) — 그 노드로 pin 된 호를 능동 종료(BYE). key 접두사로 분기:
     //   "cmp_sess_" = VoLTE relay session_id → CallMap 양 leg BYE, 그 외 = PTT group_id → 그룹 멤버 BYE.
@@ -439,7 +437,7 @@ int ServiceMain() {
     //   R6 (2026-06-08): 부트스트랩 UDP 바인딩을 제거했으므로 이 Sync 가 primary 포함 모든
     //   SIP 리스너를 올린다. 이후 SIGUSR1 reload 시 Sync 가 포트 변경분을 remove+add 로 재바인딩.
     gclsListenerManager.Sync();
-    gclsListenerManager.CheckCertExpiry();   // 기동 시점 판정 (A-PRC-009)
+    gclsListenerManager.CheckCertExpiry();  // 기동 시점 판정 (A-PRC-009)
     // IMS AKA+IPsec (P4) — 잔류 SA 회수 + 자기점검. IPSEC 접속점이 없거나 특권이 없으면 ipsec-3gpp 미제시.
     gclsIpsecSaSetMap.Init();
     // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
@@ -490,7 +488,7 @@ int ServiceMain() {
             gclsAclPolicyEngine.Sync();
             gclsAccessServiceMap_Sync_compat();
             gclsListenerManager.Sync();
-            gclsListenerManager.CheckCertExpiry();   // 경로 변경 반영 (A-PRC-009)
+            gclsListenerManager.CheckCertExpiry();  // 경로 변경 반영 (A-PRC-009)
             // R6 (2026-06-08): 무중단 포트 변경 — primary 포트가 바뀌었으면 identity fallback 도 추종.
             {
                 LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();
@@ -579,7 +577,7 @@ int ServiceMain() {
     gclsUserAgent.Stop();
     gclsUserAgent.Final();
     gclsIpsecSaSetMap.Shutdown();  // 커널 SA 잔류 방지 (재기동 시 Init 이 reqid 범위로 재회수하기도 한다)
-    gclsFmReporter.Stop();  // 호 소진 대기 동안 pending 재전송 유지 후 종료
+    gclsFmReporter.Stop();         // 호 소진 대기 동안 pending 재전송 유지 후 종료
     CLog::Print( LOG_SYSTEM, "CspServer is terminated" );
     CLog::Release();
     return 0;
@@ -671,10 +669,11 @@ static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInf
     }
 
     std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
-    strBody += "<reginfo xmlns=\"urn:ietf:params:xml:ns:reginfo\" "
-               "xmlns:cp=\"urn:ietf:params:xml:ns:common-policy\" "
-               "xmlns:eri=\"urn:3gpp:ns:extRegInfo:1.0\" version=\"" +
-               std::to_string( iVersion ) + "\" state=\"" + ( bPartial ? "partial" : "full" ) + "\">\r\n";
+    strBody +=
+        "<reginfo xmlns=\"urn:ietf:params:xml:ns:reginfo\" "
+        "xmlns:cp=\"urn:ietf:params:xml:ns:common-policy\" "
+        "xmlns:eri=\"urn:3gpp:ns:extRegInfo:1.0\" version=\"" +
+        std::to_string( iVersion ) + "\" state=\"" + ( bPartial ? "partial" : "full" ) + "\">\r\n";
     strBody += "<registration aor=\"" + sub.strSubscriberUri + "\" id=\"" + sub.strUserId + "\" state=\"" +
                ( bRegistered ? "active" : "terminated" ) + "\">\r\n";
 
@@ -685,13 +684,13 @@ static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInf
         //   feature 파라미터는 <unknown-param> 으로 나열 (실망 형태)
         std::string strContactUri = clsUserInfo.m_strContactUri;
         if ( strContactUri.empty() ) {
-            strContactUri = "sip:" + sub.strUserId + "@" + clsUserInfo.m_strIp + ":" +
-                            std::to_string( clsUserInfo.m_iPort );
+            strContactUri =
+                "sip:" + sub.strUserId + "@" + clsUserInfo.m_strIp + ":" + std::to_string( clsUserInfo.m_iPort );
         }
-        strBody += "<contact id=\"1\" state=\"" + std::string( bRegistered ? "active" : "terminated" ) +
-                   "\" event=\"" + pszContactEvent + "\" duration-registered=\"" +
-                   std::to_string( (int)tDuration ) + "\" expires=\"" + std::to_string( (int)tRemaining ) +
-                   "\" cseq=\"" + std::to_string( clsUserInfo.m_iRegisterCSeq ) + "\">\r\n";
+        strBody += "<contact id=\"1\" state=\"" + std::string( bRegistered ? "active" : "terminated" ) + "\" event=\"" +
+                   pszContactEvent + "\" duration-registered=\"" + std::to_string( (int)tDuration ) + "\" expires=\"" +
+                   std::to_string( (int)tRemaining ) + "\" cseq=\"" + std::to_string( clsUserInfo.m_iRegisterCSeq ) +
+                   "\">\r\n";
         strBody += "<uri>" + strContactUri + "</uri>\r\n";
         for ( SIP_PARAMETER_LIST::const_iterator itParam = clsUserInfo.m_clsContactParamList.begin();
               itParam != clsUserInfo.m_clsContactParamList.end(); ++itParam ) {
@@ -780,9 +779,9 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         // conference: notifier = conference focus = 그룹 AoR (RFC 4575)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
-                                 : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
-                                                                         : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
+                                   : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
+                                                                           : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -899,9 +898,9 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         // conference: notifier = conference focus = 그룹 AoR (RFC 4575)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )         ? "gms_psi"
-                                 : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
-                                                                         : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
+                                   : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
+                                                                           : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -938,10 +937,10 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
-    pMsg->AddHeader( "Event", sub.strEventType == "reg"         ? "reg"
-                           : sub.strEventType == "affiliation" ? "presence"
-                           : sub.strEventType == "conference"  ? "conference"
-                           :                                     "xcap-diff" );
+    pMsg->AddHeader( "Event", sub.strEventType == "reg"           ? "reg"
+                              : sub.strEventType == "affiliation" ? "presence"
+                              : sub.strEventType == "conference"  ? "conference"
+                                                                  : "xcap-diff" );
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
 

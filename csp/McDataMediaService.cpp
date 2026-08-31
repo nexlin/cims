@@ -120,8 +120,7 @@ static std::string _TelUriOf( const std::string &strId ) {
  * 수신 단말이 그룹 스레드 귀속(request-uri)과 발신자 표시·disposition 회신 대상
  * (calling-user-id)을 알 수 있게 한다 (GroupCallService::WrapMultipartBody 패턴).
  */
-static void _WrapMcDataInfoBody( CSipMessage *pclsInvite, const std::string &strGroup,
-                                 const std::string &strCaller ) {
+static void _WrapMcDataInfoBody( CSipMessage *pclsInvite, const std::string &strGroup, const std::string &strCaller ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
     struct timespec _ts;
@@ -136,9 +135,11 @@ static void _WrapMcDataInfoBody( CSipMessage *pclsInvite, const std::string &str
         "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\r\n"
         "  <mcdata-Params>\r\n"
         "    <request-type>group-sds</request-type>\r\n"
-        "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + _TelUriOf( strGroup ) +
+        "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" +
+        _TelUriOf( strGroup ) +
         "</mcdataURI></mcdata-request-uri>\r\n"
-        "    <mcdata-calling-user-id type=\"Normal\"><mcdataURI>" + _TelUriOf( strCaller ) +
+        "    <mcdata-calling-user-id type=\"Normal\"><mcdataURI>" +
+        _TelUriOf( strCaller ) +
         "</mcdataURI></mcdata-calling-user-id>\r\n"
         "  </mcdata-Params>\r\n"
         "</mcdatainfo>";
@@ -251,8 +252,8 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
         m_mapCalls[pszCallId] = clsCall;
         m_mapSessionToCall[strSessionId] = pszCallId;
     }
-    CLog::Print( LOG_INFO, "McDataMedia: recv leg up call(%s) from(%s) group(%s) session(%s) path(%s)",
-                 pszCallId, pszFrom, pszTo, strSessionId.c_str(), strMsrpPath.c_str() );
+    CLog::Print( LOG_INFO, "McDataMedia: recv leg up call(%s) from(%s) group(%s) session(%s) path(%s)", pszCallId,
+                 pszFrom, pszTo, strSessionId.c_str(), strMsrpPath.c_str() );
 }
 
 bool CMcDataMediaService::OnCallStarted( const char *pszCallId, CSipCallRtp *pclsRtp ) {
@@ -290,8 +291,7 @@ bool CMcDataMediaService::OnCallTerminated( const char *pszCallId ) {
         m_mapCalls.erase( it );
     }
     gclsCmdpClient.RemoveSession( strSessionId );  // 멱등
-    CLog::Print( LOG_INFO, "McDataMedia: call(%s) terminated — session(%s) removed", pszCallId,
-                 strSessionId.c_str() );
+    CLog::Print( LOG_INFO, "McDataMedia: call(%s) terminated — session(%s) removed", pszCallId, strSessionId.c_str() );
     return true;
 }
 
@@ -338,15 +338,14 @@ void CMcDataMediaService::HandleMsgReceived( const SimpleJson::JsonNode &clsPayl
     clsInfo.m_strFileName = clsPayload.GetString( "file_name" );
     clsInfo.m_strFileType = clsPayload.GetString( "file_type" );
     clsInfo.m_llFileSize = clsPayload.GetInt( "size", 0 );
-    std::string strUrl = gclsSetup.m_strFdUrlBase.empty()
-                             ? ( "https://" +
-                                 ( gclsSetup.m_strXcapHost.empty() ? gclsSetup.m_strLocalIp
-                                                                   : gclsSetup.m_strXcapHost ) +
-                                 ":4430" )
-                             : gclsSetup.m_strFdUrlBase;
+    std::string strUrl =
+        gclsSetup.m_strFdUrlBase.empty()
+            ? ( "https://" + ( gclsSetup.m_strXcapHost.empty() ? gclsSetup.m_strLocalIp : gclsSetup.m_strXcapHost ) +
+                ":4430" )
+            : gclsSetup.m_strFdUrlBase;
     strUrl += "/mcdata/fd/" + clsPayload.GetString( "file_id" );
-    McDataArchiveMessage( strGroup.c_str(), strFrom.c_str(), "sds", clsInfo,
-                          (int)clsPayload.GetInt( "size", 0 ), iFanout, "msrp", strUrl.c_str() );
+    McDataArchiveMessage( strGroup.c_str(), strFrom.c_str(), "sds", clsInfo, (int)clsPayload.GetInt( "size", 0 ),
+                          iFanout, "msrp", strUrl.c_str() );
 
     // 발신 레그 종료 (전송 완료 — TS 24.282 standalone 은 전달 후 세션 해제)
     std::string strCallId;
@@ -362,9 +361,8 @@ void CMcDataMediaService::HandleMsgReceived( const SimpleJson::JsonNode &clsPayl
     if ( !strCallId.empty() ) gclsUserAgent.StopCall( strCallId.c_str() );
     gclsCmdpClient.RemoveSession( strSessionId );
 
-    CLog::Print( LOG_INFO, "McDataMedia: SDS via MSRP from(%s) group(%s) size=%lld fanout=%d msg(%s)",
-                 strFrom.c_str(), strGroup.c_str(), (long long)clsPayload.GetInt( "size", 0 ), iFanout,
-                 clsInfo.m_strMsgId.c_str() );
+    CLog::Print( LOG_INFO, "McDataMedia: SDS via MSRP from(%s) group(%s) size=%lld fanout=%d msg(%s)", strFrom.c_str(),
+                 strGroup.c_str(), (long long)clsPayload.GetInt( "size", 0 ), iFanout, clsInfo.m_strMsgId.c_str() );
 }
 
 int CMcDataMediaService::FanOutMediaSds( const std::string &strGroup, const std::string &strFrom,
@@ -397,18 +395,15 @@ int CMcDataMediaService::FanOutMediaSds( const std::string &strGroup, const std:
         // 폴백 — FD FILEURL MESSAGE (기존 C-plane FD 수신 경로 재사용)
         if ( strFallbackBody.empty() ) {
             std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
-            std::string strGroupUri =
-                "sip:" + strGroup + ( strDomain.empty() ? "" : "@" + strDomain );
+            std::string strGroupUri = "sip:" + strGroup + ( strDomain.empty() ? "" : "@" + strDomain );
             std::string strUrlBase = gclsSetup.m_strFdUrlBase;
             if ( strUrlBase.empty() )
                 strUrlBase = "https://" +
-                             ( gclsSetup.m_strXcapHost.empty() ? gclsSetup.m_strLocalIp
-                                                               : gclsSetup.m_strXcapHost ) +
+                             ( gclsSetup.m_strXcapHost.empty() ? gclsSetup.m_strLocalIp : gclsSetup.m_strXcapHost ) +
                              ":4430";
             strFallbackBody = McDataBuildFdSignallingBody(
-                strFallbackCt, strGroupUri, strUrlBase + "/mcdata/fd/" + strFileId,
-                clsPayload.GetString( "file_name" ), clsPayload.GetInt( "size", 0 ),
-                clsPayload.GetString( "file_type" ), clsPayload.GetString( "conv_id" ),
+                strFallbackCt, strGroupUri, strUrlBase + "/mcdata/fd/" + strFileId, clsPayload.GetString( "file_name" ),
+                clsPayload.GetInt( "size", 0 ), clsPayload.GetString( "file_type" ), clsPayload.GetString( "conv_id" ),
                 clsPayload.GetString( "msg_id" ) );
         }
         CSipCallRoute clsRoute;
@@ -425,8 +420,7 @@ bool CMcDataMediaService::InviteMsrpReceiver( const std::string &strGroup, const
                                               const std::string &strContentType ) {
     std::string strSessionId = CCmdpClient::IssueSessionId();
     std::string strMsrpPath;
-    if ( !gclsCmdpClient.AddSendSession( strSessionId, strFileId, strGroup, strMember, strContentType,
-                                         strMsrpPath ) ) {
+    if ( !gclsCmdpClient.AddSendSession( strSessionId, strFileId, strGroup, strMember, strContentType, strMsrpPath ) ) {
         CLog::Print( LOG_ERROR, "McDataMedia: AddSendSession failed member(%s) file(%s)", strMember.c_str(),
                      strFileId.c_str() );
         return false;
@@ -458,15 +452,16 @@ bool CMcDataMediaService::InviteMsrpReceiver( const std::string &strGroup, const
     std::string strCallId;
     CSipMessage *pclsInvite = NULL;
     std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
-    if ( !gclsUserAgent.CreateCall( strGroup.c_str(), strMember.c_str(), &clsOffer, &clsRoute, strCallId,
-                                    &pclsInvite, strDomain.empty() ? NULL : strDomain.c_str() ) ) {
+    if ( !gclsUserAgent.CreateCall( strGroup.c_str(), strMember.c_str(), &clsOffer, &clsRoute, strCallId, &pclsInvite,
+                                    strDomain.empty() ? NULL : strDomain.c_str() ) ) {
         gclsCmdpClient.RemoveSession( strSessionId );
         return false;
     }
     if ( pclsInvite != NULL ) {
         // MCData SDS ICSI (TS 24.282 §6.3) — MSRP 대응 단말만 이 INVITE 를 받는다
         pclsInvite->AddHeader(
-            "Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit" );
+            "Accept-Contact",
+            "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit" );
         pclsInvite->AddHeader( "P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds" );
         pclsInvite->AddHeader( "Answer-Mode", "Auto" );
         // mcdata-info multipart — 수신 단말의 그룹 스레드 귀속·발신자 표시·disposition 회신 대상
@@ -493,13 +488,12 @@ bool CMcDataMediaService::InviteMsrpReceiver( const std::string &strGroup, const
         gclsCmdpClient.RemoveSession( strSessionId );
         return false;
     }
-    CLog::Print( LOG_INFO, "McDataMedia: send leg call(%s) member(%s) session(%s) file(%s)",
-                 strCallId.c_str(), strMember.c_str(), strSessionId.c_str(), strFileId.c_str() );
+    CLog::Print( LOG_INFO, "McDataMedia: send leg call(%s) member(%s) session(%s) file(%s)", strCallId.c_str(),
+                 strMember.c_str(), strSessionId.c_str(), strFileId.c_str() );
     return true;
 }
 
-void CMcDataMediaService::HandleSessionClosed( const std::string &strSessionId, bool bOk,
-                                               const char *pszReason ) {
+void CMcDataMediaService::HandleSessionClosed( const std::string &strSessionId, bool bOk, const char *pszReason ) {
     std::string strCallId;
     {
         std::lock_guard<std::mutex> lock( m_mutex );

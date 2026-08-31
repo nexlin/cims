@@ -252,15 +252,15 @@ public:
     // 전용 미디어(CMP) 풀 — MediaServer.Endpoints. SIP remote_nodes 와 분리된 미디어 평면.
     //   primary(m_strCmpIp:m_iCmpPort) 와 함께 CmpClient consistent-hash ring 에 등록되어
     //   Session-ID 기준으로 다중 CMP(AA) 에 relay 세션을 분배한다. 비어있으면 단일 운영.
-    std::vector< std::pair< std::string, int > > m_vecCmpEndpoints;
+    std::vector<std::pair<std::string, int> > m_vecCmpEndpoints;
 
     // CSP↔CMP 세션 재조정(audit 수준2) — Setup.MediaServer.Audit.*
     //   비정상(메시지 유실·재기동·절체)으로 생긴 CMP 고아 relay 를 HEARTBEAT digest 불일치로
     //   감지해 SESSION_LIST diff 후 RemoveSession 회수(sweeper 타임아웃보다 빠른 능동 수렴).
     //   ha_design.md 수준2. 상세: docs/api/cmp_media_api.md.
-    bool m_bAuditEnable = true;        // digest 대조+orphan 회수 (기본 on)
-    int  m_iAuditGraceSec = 30;        // SESSION_LIST min_age — 신규 setup 세션 오회수 방지
-    int  m_iAuditMaxPerCycle = 20;     // 한 cycle 회수 상한(회수 폭풍 방지, 초과분 다음 cycle)
+    bool m_bAuditEnable = true;           // digest 대조+orphan 회수 (기본 on)
+    int m_iAuditGraceSec = 30;            // SESSION_LIST min_age — 신규 setup 세션 오회수 방지
+    int m_iAuditMaxPerCycle = 20;         // 한 cycle 회수 상한(회수 폭풍 방지, 초과분 다음 cycle)
     bool m_bAuditZombieTeardown = false;  // CSP有-CMP無(zombie) 호 강제 종료 opt-in(기본 detect+log)
     // HA 역할 — active 만 회수 실행(standby 는 탐지·로그만; hot-standby 오회수 방지).
     //   "active"|"standby"|"auto"(기본, HA 미배치=active 취급). 절체 시 승격 노드가 active.
@@ -272,10 +272,10 @@ public:
 
     // ================================================================
     // CMDP(MCData Media Plane, MSRP) 연동 설정 — Setup.McDataMedia.*
-    bool m_bUseMcDataMedia;     // Enable (기본 false — cmdp 미배치 환경 무영향)
-    std::string m_strCmdpIp;    // cmdp 제어 주소
-    int m_iCmdpPort;            // cmdp 제어 포트 (기본 9100)
-    int m_iLocalCmdpPort;       // CSP 측 수신 포트 (기본 9101) — cmdp 이벤트 도착지
+    bool m_bUseMcDataMedia;   // Enable (기본 false — cmdp 미배치 환경 무영향)
+    std::string m_strCmdpIp;  // cmdp 제어 주소
+    int m_iCmdpPort;          // cmdp 제어 포트 (기본 9100)
+    int m_iLocalCmdpPort;     // CSP 측 수신 포트 (기본 9101) — cmdp 이벤트 도착지
 
     // ================================================================
     // FM 자기보고(알람/이벤트 push) — Setup.Fm.* (docs/design/alarm_self_reporting.md)
@@ -288,20 +288,20 @@ public:
     // SIP 신호 통계/품질 알람 — Setup.SipStats.* (임계는 모듈 설정 소유 —
     //   alarm_self_reporting.md §4; A-QOS-006/007/009/011·A-SEC-003, 평가는 SipStatsMonitor).
     //   율 하한/CPS 상한의 단계값 0 = 해당 단계 미사용. 전 필드 SIGUSR1 리로드 반영.
-    int m_iSipStatsEvalSec;           // EvalSec 평가 윈도우 초 (기본 60, 0=평가 off — 카운터는 항상 동작)
-    int m_iSipStatsMinFinals;         // MinFinals 율 평가 최소 표본 (윈도우 내 최종응답 수, 기본 20)
-    int m_iSipStatsCallRateMinor;     // 호 성공률 하한 % — minor (기본 90)
-    int m_iSipStatsCallRateMajor;     // 호 성공률 하한 % — major (기본 70)
-    int m_iSipStatsCallRateCritical;  // 호 성공률 하한 % — critical (기본 50)
-    int m_iSipStatsRegRateMinor;      // 등록 성공률 하한 % — minor (기본 90)
-    int m_iSipStatsRegRateMajor;      // 등록 성공률 하한 % — major (기본 70)
-    int m_iSipStatsRegRateCritical;   // 등록 성공률 하한 % — critical (기본 50)
-    int m_iSipStatsCpsMinor;          // 신규 INVITE 유입 CPS 상한 — minor (기본 0=off, 수용량 종속)
-    int m_iSipStatsCpsMajor;          // CPS 상한 — major (기본 0=off)
-    int m_iSipStatsCpsCritical;       // CPS 상한 — critical (기본 0=off)
-    int m_iSipStatsRxErrorMinor;      // SIP 파싱 실패 급증 임계 (윈도우당 건수, 기본 10, 0=off)
-    int m_iSipStatsChannelPolicyMajor;  // 채널 정책(TLS 강제) 위반 반복 임계 (윈도우당 게이트 403 건수, 기본 10, 0=off
-                                        // — A-SEC-003)
+    int m_iSipStatsEvalSec;              // EvalSec 평가 윈도우 초 (기본 60, 0=평가 off — 카운터는 항상 동작)
+    int m_iSipStatsMinFinals;            // MinFinals 율 평가 최소 표본 (윈도우 내 최종응답 수, 기본 20)
+    int m_iSipStatsCallRateMinor;        // 호 성공률 하한 % — minor (기본 90)
+    int m_iSipStatsCallRateMajor;        // 호 성공률 하한 % — major (기본 70)
+    int m_iSipStatsCallRateCritical;     // 호 성공률 하한 % — critical (기본 50)
+    int m_iSipStatsRegRateMinor;         // 등록 성공률 하한 % — minor (기본 90)
+    int m_iSipStatsRegRateMajor;         // 등록 성공률 하한 % — major (기본 70)
+    int m_iSipStatsRegRateCritical;      // 등록 성공률 하한 % — critical (기본 50)
+    int m_iSipStatsCpsMinor;             // 신규 INVITE 유입 CPS 상한 — minor (기본 0=off, 수용량 종속)
+    int m_iSipStatsCpsMajor;             // CPS 상한 — major (기본 0=off)
+    int m_iSipStatsCpsCritical;          // CPS 상한 — critical (기본 0=off)
+    int m_iSipStatsRxErrorMinor;         // SIP 파싱 실패 급증 임계 (윈도우당 건수, 기본 10, 0=off)
+    int m_iSipStatsChannelPolicyMajor;   // 채널 정책(TLS 강제) 위반 반복 임계 (윈도우당 게이트 403 건수, 기본 10, 0=off
+                                         // — A-SEC-003)
     int m_iSipStatsSecAgreeRejectMajor;  // sec-agree 협상 거절(494/421) 반복 임계 (윈도우당 건수, 기본 10, 0=off
                                          // — A-SEC-004)
 

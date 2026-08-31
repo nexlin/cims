@@ -64,8 +64,7 @@ std::string McDataBuildFdSignallingBody( std::string &strContentTypeOut, const s
     // ── FD SIGNALLING PAYLOAD TLV (TS 24.282 §15.1.3, 앱 buildGroupFd 동형) ──
     std::string strName = strFileName;
     for ( size_t p; ( p = strName.find( '"' ) ) != std::string::npos; ) strName.erase( p, 1 );
-    std::string strMeta = "name:\"" + strName + "\" size:" + std::to_string( llFileSize ) +
-                          " type:" + strFileType;
+    std::string strMeta = "name:\"" + strName + "\" size:" + std::to_string( llFileSize ) + " type:" + strFileType;
 
     std::string tlv;
     tlv.reserve( 38 + 4 + strFileUrl.size() + 3 + strMeta.size() );
@@ -81,9 +80,9 @@ std::string McDataBuildFdSignallingBody( std::string &strContentTypeOut, const s
     tlv += (char)0x78;                         // Payload IEI (TLV-E)
     tlv += (char)( ( iUrlLen >> 8 ) & 0xff );
     tlv += (char)( iUrlLen & 0xff );
-    tlv += (char)0x04;                         // FILEURL
+    tlv += (char)0x04;  // FILEURL
     tlv += strFileUrl;
-    tlv += (char)0x79;                         // Metadata IEI (TLV-E)
+    tlv += (char)0x79;  // Metadata IEI (TLV-E)
     tlv += (char)( ( strMeta.size() >> 8 ) & 0xff );
     tlv += (char)( strMeta.size() & 0xff );
     tlv += strMeta;
@@ -97,14 +96,15 @@ std::string McDataBuildFdSignallingBody( std::string &strContentTypeOut, const s
         "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
         "  <mcdata-Params>\n"
         "    <request-type>group-sds</request-type>\n"
-        "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + strGroupUri + "</mcdataURI></mcdata-request-uri>\n"
+        "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" +
+        strGroupUri +
+        "</mcdataURI></mcdata-request-uri>\n"
         "  </mcdata-Params>\n"
         "</mcdatainfo>";
 
     std::string strBoundary = "mcdata-fd-" + strMsgId.substr( 0, 14 );
     std::string strBody;
-    strBody += "--" + strBoundary + "\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n" +
-               strInfo + "\r\n";
+    strBody += "--" + strBoundary + "\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n" + strInfo + "\r\n";
     strBody += "--" + strBoundary +
                "\r\nContent-Type: application/vnd.3gpp.mcdata-signalling\r\n"
                "Content-Transfer-Encoding: base64\r\n\r\n" +
