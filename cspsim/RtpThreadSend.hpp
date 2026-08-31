@@ -118,8 +118,14 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
           ++sSeq;
           iTimeStamp += 320;  // 20ms @ 16kHz
 
-          UdpSend(pRtpThread->m_hSocket, szPacket, (int)sizeof(RtpHeader) + payloadLen,
-                  pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+          {
+              // 미디어 SRTP — 협상된 세션이면 protect 후 송신 (media_security.md §8.2)
+              int iSendLen = (int)sizeof(RtpHeader) + payloadLen;
+              if (!pRtpThread->SrtpEnabled() ||
+                  pRtpThread->SrtpProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
+                  UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen,
+                          pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+          }
 
           ++iFrameIdx;
           if (iFrameIdx >= iTotalFrames) iFrameIdx = 0;  // 루프 재생
@@ -143,8 +149,13 @@ THREAD_API RtpThreadSend(LPVOID lpParameter) {
 
           PcmToUlaw(szRead, 320, szPacket + sizeof(RtpHeader), 160);
 
-          UdpSend(pRtpThread->m_hSocket, szPacket, 160 + (int)sizeof(RtpHeader),
-                  pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+          {
+              int iSendLen = 160 + (int)sizeof(RtpHeader);
+              if (!pRtpThread->SrtpEnabled() ||
+                  pRtpThread->SrtpProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
+                  UdpSend(pRtpThread->m_hSocket, szPacket, iSendLen,
+                          pRtpThread->m_strDestIp.c_str(), pRtpThread->m_iDestPort);
+          }
       }
   }
 

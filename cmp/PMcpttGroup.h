@@ -13,6 +13,7 @@
 #include <memory>
 #include "pbase.h"
 #include "PFloorCrypto.h"
+#include "PMediaCrypto.h"
 
 class PRtpMulticast;
 class PPttMemberPort;
@@ -266,6 +267,16 @@ public:
     // SRTCP 인증 실패/재전송으로 폐기한 floor 패킷 누적 (STATS floor_crypto_drop)
     long getFloorCryptoDrop() const { return _floorCryptoDrop.load(); }
 
+    // 멤버 미디어 SRTP 컨텍스트 (PTT_JOIN media_crypto[_video] — media_security.md §6.2~6.3).
+    //   rx*=UE 상향(UE 의 a=crypto 선언), tx*=CMP 하향(CSP 생성). key/salt 는 디코드된
+    //   바이트열(16B/14B). 동일 구성 재선언은 세션 유지, 변경은 세션 재생성(ROC 리셋).
+    //   실패 시 err — 호출자가 명령을 거부한다(평문 조용 폴백 금지).
+    bool setMemberMediaCrypto(const std::string& sessionId, bool video, const std::string& alg,
+                              const std::string& rxKey, const std::string& rxSalt,
+                              const std::string& txKey, const std::string& txSalt, std::string& err);
+    // 미디어 SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) 폐기 누적 (STATS srtp_drop)
+    long getSrtpDrop() const { return _srtpDrop; }
+
     // Called by PRtpMulticast when a floor control packet is received (m=application)
     void onFloorPacket(const std::string& ip, int port, char* buf, int len);
 
@@ -486,13 +497,23 @@ private:
         // 이 멤버 전용 floor SRTCP 컨텍스트 (CSK 기반). null 이면 그룹 키를 쓴다.
         //   Peer 는 map 에 복사 대입되므로 shared_ptr 로 들고 있는다(PFloorCrypto 는 mutex 보유).
         std::shared_ptr<PFloorCrypto> crypto;
+        // 미디어 SRTP 컨텍스트 (media_crypto[_video]). null=평문 leg — optional 혼용 그룹의
+        //   자연스러운 표현. 접근은 그룹 _mutex 아래 — PMediaCrypto.h 스레드 규약 참조.
+        std::shared_ptr<PMediaCrypto> mediaCrypto;        // audio RTP
+        std::shared_ptr<PMediaCrypto> mediaCryptoVideo;   // video RTP
         bool natLatched = false;       // audio 소스 추종 학습 완료 (관측용)
         bool natLatchedVideo = false;
         int64_t followLogUsec = 0;     // dest follow 로그 rate-limit (소스 경합 시 폭주 방지)
     };
 
-    // nat 멤버의 RTP 수신 판정+latch (호출자가 _mutex 보유). 수락 시 true.
-    bool _acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip, int port, const char* buf, int len);
+    // nat 멤버 수신 형식 검사 (RTP v2 + 최소 길이 + guard IP + 기대 ingress PT — 상태 불변).
+    bool _natFormatOk(const Peer& peer, bool isVideo, const std::string& ip, int port,
+                      const char* buf, int len) const;
+    // nat 멤버 목적지 latch 적용 (호출자가 _mutex 보유). SRTP 멤버는 unprotect 성공 후에만
+    //   호출된다 — 제3자 주입으로 latch 가 오염되지 않는다 (media_security.md §6.2).
+    void _natLatch(Peer& peer, bool isVideo, const std::string& ip, int port);
+    // 미디어 SRTP unprotect 실패 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
+    void _dropSrtp(const char* what, const std::string& memberId);
     std::map<std::string, Peer> _members; // SessionID -> Peer
     std::map<std::string, int> _priorities; // SessionID (UserId) -> Priority
     std::map<std::string, std::string> _roles; // SessionID (UserId) -> role (chair/participant)
@@ -588,6 +609,8 @@ private:
     std::atomic<long> _floorCryptoDrop{0};
     long _srcDrop = 0;           // 미협상 소스/미등록 멤버 드롭 누적
     time_t _lastDropWarn = 0;    // 드롭 WARN rate-limit
+    long _srtpDrop = 0;          // 미디어 SRTP unprotect 실패 폐기 누적
+    time_t _lastSrtpWarn = 0;    // SRTP 드롭 WARN rate-limit
     time_t _createdTime = time(nullptr);  // 그룹 생성 시각 (audit grace) — 구성 시점 고정
 
     // 녹취 (Floor 단위 세그먼트 — 화자 교대 시 파일 분할)

@@ -26,6 +26,11 @@ struct ServiceInfo {
     // 단말 NAT 미디어 정책 (docs/design/features/ue_nat_traversal.md §4)
     std::string media_nat_mode;  // off(기본) | auto | force
     std::string latch_ip_guard;  // strict(기본) | off
+    /** 미디어 SRTP 정책 (SDES e2ae — media_security.md §4).
+     *  off(기본)=평문·a=crypto 무시(SAVP offer 는 488), optional=능력 기반 혼용(발신 offer 는
+     *  mediasec 선언 바인딩에 SAVP), required=SAVP 단일·crypto 없는 offer 488.
+     *  required 는 채널 정책 TLS 강제와 결합해야 유효 — SDES 키가 SDP 에 실린다. */
+    std::string media_srtp;  // off(기본) | optional | required
     /** sec_mechanisms[] 에 ipsec-3gpp — IMS AKA+IPsec(P4, sip_access_security.md §8.3) 제시 허용.
      *  media_nat_mode≠off 와는 상호배제 (로드 시 무시 + ERROR). tls 는 항상 제시된다. */
     bool sec_ipsec = false;

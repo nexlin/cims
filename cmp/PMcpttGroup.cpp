@@ -602,13 +602,21 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
         Peer& sender = itM->second;
         // 선언(SDP) 주소 일치는 latch 상태와 무관하게 항상 수락 — 미디어별 NAT 경로가
         //   갈리는 멤버에서 다른 미디어의 latch 가 ip 를 덮어써도 협상된 신원은 유지.
-        if ((sender.ip != ip || sender.port != port) &&
-            !(sender.declIp == ip && sender.declPort == port)) {
-            if (!sender.natEnabled || !_acceptNatRtp(sender, false, ip, port, buf, len)) {
-                _dropSrc("rtp", memberId, ip, port);
-                return;
-            }
+        bool srcOk = (sender.ip == ip && sender.port == port) ||
+                     (sender.declIp == ip && sender.declPort == port);
+        if (!srcOk && (!sender.natEnabled || !_natFormatOk(sender, false, ip, port, buf, len))) {
+            _dropSrc("rtp", memberId, ip, port);
+            return;
         }
+        // ingress unprotect — 이후 경로(DTMF 판독·분배·녹취)는 전부 평문 (media_security.md
+        //   §6.2). nat 멤버의 latch 는 unprotect 성공 후에만 적용 — 제3자 주입으로 목적지
+        //   오염 불가 (latch 첫 유효 RTP 판정에 인증 포함).
+        if (sender.mediaCrypto && sender.mediaCrypto->enabled() &&
+            !sender.mediaCrypto->unprotectRtp(buf, len)) {
+            _dropSrtp("rtp", memberId);
+            return;
+        }
+        if (!srcOk) _natLatch(sender, false, ip, port);
         const std::string& senderId = memberId;
         unsigned int senderSsrc = sender.ssrc;
 
@@ -699,13 +707,18 @@ void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std:
         return;
     }
     Peer& sender = itM->second;
-    if ((sender.ip != ip || sender.videoPort != port) &&
-        !(sender.declIp == ip && sender.declVideoPort == port)) {
-        if (!sender.natEnabled || !_acceptNatRtp(sender, true, ip, port, buf, len)) {
-            _dropSrc("video rtp", memberId, ip, port);
-            return;
-        }
+    bool srcOk = (sender.ip == ip && sender.videoPort == port) ||
+                 (sender.declIp == ip && sender.declVideoPort == port);
+    if (!srcOk && (!sender.natEnabled || !_natFormatOk(sender, true, ip, port, buf, len))) {
+        _dropSrc("video rtp", memberId, ip, port);
+        return;
     }
+    if (sender.mediaCryptoVideo && sender.mediaCryptoVideo->enabled() &&
+        !sender.mediaCryptoVideo->unprotectRtp(buf, len)) {
+        _dropSrtp("video rtp", memberId);
+        return;
+    }
+    if (!srcOk) _natLatch(sender, true, ip, port);
 
     if (_pttSession) _pttSession->touchActivity();
 
@@ -729,8 +742,11 @@ void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std:
 //   RTP v2 + 최소 길이 + (guard) 소스 IP == sigIp + (선언 시) 기대 ingress PT 일치.
 //   SSRC 핀·스테일 창은 두지 않는다 — 핀이 잘못된 소스에 걸리면 정당한 단말이 영구
 //   차단되는 고착이 더 해악이고, 추종 모델은 선점 소스 소멸 즉시 자가 복구된다.
-//   호출자가 _mutex 보유.
-bool PMcpttGroup::_acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip, int port, const char* buf, int len) {
+//   호출자가 _mutex 보유. SRTP 멤버는 형식 검사와 latch 적용 사이에 unprotect(인증)가
+//   끼므로 둘을 분리한다 (media_security.md §6.2).
+bool PMcpttGroup::_natFormatOk(const Peer& peer, bool isVideo, const std::string& ip, int port,
+                               const char* buf, int len) const {
+    (void)port;
     if (len < 12 || (((unsigned char)buf[0]) >> 6) != 2) return false;
     if (!peer.sigIp.empty() && peer.sigIp != ip) return false;
     // 기대 ingress PT 검사 (JOIN user_src_pt 선언 시) — KA(empty RTP)도 협상 PT 를 실어
@@ -740,7 +756,10 @@ bool PMcpttGroup::_acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip,
         unsigned char te = (unsigned char)((peer.srcTePt > 0 ? peer.srcTePt : 101) & 0x7F);
         if (pt != (unsigned char)(peer.srcPt & 0x7F) && pt != te) return false;
     }
+    return true;
+}
 
+void PMcpttGroup::_natLatch(Peer& peer, bool isVideo, const std::string& ip, int port) {
     bool& latched = isVideo ? peer.natLatchedVideo : peer.natLatched;
     bool changed = (peer.ip != ip) ||
                    (isVideo ? peer.videoPort != port : peer.port != port) || !latched;
@@ -757,7 +776,6 @@ bool PMcpttGroup::_acceptNatRtp(Peer& peer, bool isVideo, const std::string& ip,
                      _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port);
         }
     }
-    return true;
 }
 
 void PMcpttGroup::collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out) {
@@ -775,6 +793,17 @@ void PMcpttGroup::_dropSrc(const char* what, const std::string& memberId, const 
         _lastDropWarn = now;
         LOG_WARN("PMcpttGroup", "[%s] drop %s member=%s src=%s:%d (total=%ld)",
                  _groupId.c_str(), what, memberId.c_str(), ip.c_str(), port, _srcDrop);
+    }
+}
+
+// 미디어 SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) — 위조/재전송 관측 (§6.2)
+void PMcpttGroup::_dropSrtp(const char* what, const std::string& memberId) {
+    ++_srtpDrop;
+    time_t now; time(&now);
+    if (now - _lastSrtpWarn >= 5) {
+        _lastSrtpWarn = now;
+        LOG_WARN("PMcpttGroup", "[%s] drop %s — SRTP unprotect failed member=%s (total=%ld)",
+                 _groupId.c_str(), what, memberId.c_str(), _srtpDrop);
     }
 }
 
@@ -1123,6 +1152,27 @@ bool PMcpttGroup::setMemberCrypto(const std::string& sessionId, const std::strin
     it->second.crypto = ctx;
     LOG_INFO("PMcpttGroup", "[%s] member floor crypto enabled: session=%s alg=%s",
              _groupId.c_str(), sessionId.c_str(), ctx->alg().c_str());
+    return true;
+}
+
+bool PMcpttGroup::setMemberMediaCrypto(const std::string& sessionId, bool video, const std::string& alg,
+                                       const std::string& rxKey, const std::string& rxSalt,
+                                       const std::string& txKey, const std::string& txSalt,
+                                       std::string& err) {
+    PAutoLock lock(_mutex);
+    auto it = _members.find(sessionId);
+    if (it == _members.end()) { err = "member not joined"; return false; }
+    std::shared_ptr<PMediaCrypto>& sec = video ? it->second.mediaCryptoVideo : it->second.mediaCrypto;
+    if (!sec) sec = std::make_shared<PMediaCrypto>();
+    if (!sec->init(alg, rxKey, rxSalt, txKey, txSalt, err)) {
+        // 키 오류 leg 를 평문으로 조용히 폴백하지 않는다 — 컨텍스트 제거 후 명령 거부
+        sec.reset();
+        LOG_WARN("PMcpttGroup", "[%s] member media crypto rejected (%s): %s",
+                 _groupId.c_str(), sessionId.c_str(), err.c_str());
+        return false;
+    }
+    LOG_INFO("PMcpttGroup", "[%s] member media SRTP %s enabled: session=%s alg=%s",
+             _groupId.c_str(), video ? "video" : "audio", sessionId.c_str(), sec->alg().c_str());
     return true;
 }
 
@@ -1849,7 +1899,15 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
         int stampPt = isTe ? peer.tePtOut : peer.ptOut;
         if (stampPt > 0)
             pkt[1] = (char)((pkt[1] & 0x80) | (stampPt & 0x7F));
-        peer.unit->sendAudioTo(peer.ip, peer.port, pkt, len);
+        // 수신자 leg protect — SSRC/seq 재작성 **후** 이므로 슬롯 스트림마다 seq 가 연속이고
+        //   libsrtp any_outbound 템플릿이 SSRC 별 ROC 를 내부 관리한다 (media_security.md §6.2).
+        int sendLen = len;
+        if (peer.mediaCrypto && peer.mediaCrypto->enabled() &&
+            !peer.mediaCrypto->protectRtp(pkt, sendLen, sizeof(pkt))) {
+            LOG_ERROR("PMcpttGroup", "[%s] SRTP protect failed member=%s", _groupId.c_str(), sid.c_str());
+            continue;
+        }
+        peer.unit->sendAudioTo(peer.ip, peer.port, pkt, sendLen);
     }
 }
 
@@ -1914,7 +1972,13 @@ void PMcpttGroup::sendVideoToAll(const char* data, int len, const std::string& e
         memcpy(pkt + 2, &netSeq, 2);
         uint32_t netSsrc = htonl(_egressSsrc(peer.ssrc, slot, true));
         memcpy(pkt + 8, &netSsrc, 4);
-        peer.unit->sendVideoTo(peer.ip, peer.videoPort, pkt, len);
+        int sendLen = len;
+        if (peer.mediaCryptoVideo && peer.mediaCryptoVideo->enabled() &&
+            !peer.mediaCryptoVideo->protectRtp(pkt, sendLen, sizeof(pkt))) {
+            LOG_ERROR("PMcpttGroup", "[%s] video SRTP protect failed member=%s", _groupId.c_str(), sid.c_str());
+            continue;
+        }
+        peer.unit->sendVideoTo(peer.ip, peer.videoPort, pkt, sendLen);
     }
 }
 

@@ -36,6 +36,21 @@ bool CCspServiceMap::Sync() {
             s.inbound_policy = row.GetString( "inbound_policy", "any" );
             s.media_nat_mode = row.GetString( "media_nat_mode", "off" );
             s.latch_ip_guard = row.GetString( "latch_ip_guard", "strict" );
+            // 미디어 SRTP 정책 (media_security.md §4) — 미상 값은 조용히 승격/강등하지 않고 off
+            s.media_srtp = row.GetString( "media_srtp", "off" );
+            if ( s.media_srtp != "off" && s.media_srtp != "optional" && s.media_srtp != "required" ) {
+                CLog::Print( LOG_ERROR, "AccessServiceMap: service '%s' has invalid media_srtp '%s' → off",
+                             s.name.c_str(), s.media_srtp.c_str() );
+                s.media_srtp = "off";
+            }
+            // TLS 결합 (§4) — SDES 키가 SDP 본문에 실리므로 required 는 채널 정책 TLS(또는
+            //   ipsec-3gpp) 강제가 전제다. 집행은 채널 게이트(sip_transport) 몫 — 여기서는
+            //   가입자별 정책을 검사할 수 없어 결합 전제를 드러내기만 한다(정책은 유지).
+            if ( s.media_srtp == "required" )
+                CLog::Print( LOG_ERROR,
+                             "AccessServiceMap: service '%s' media_srtp=required — SDES keys ride in SDP; ensure "
+                             "subscribers of this service enforce sip_transport=TLS (channel gate)",
+                             s.name.c_str() );
             s.priority = (int)row.GetInt( "priority", 100 );
             std::string en = row.GetString( "enabled" );
             s.enabled = ( en != "false" && en != "0" );

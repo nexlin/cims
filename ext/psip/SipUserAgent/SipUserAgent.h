@@ -107,6 +107,7 @@ public:
 
 	// SipUserAgentUtil.hpp
 	bool GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp );
+	bool GetLocalCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool GetRemotePayloadTypes( const char * pszCallId, const char * pszEncoding,
 	                            int & iPt, int & iTePt );
 	bool GetToId( const char * pszCallId, std::string & strToId );

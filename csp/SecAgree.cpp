@@ -80,6 +80,26 @@ static std::string _lower( std::string s ) {
     return s;
 }
 
+bool SecAgreeHasMediaSecSdes( const std::string &strClient ) {
+    size_t pos = 0;
+    while ( pos <= strClient.size() ) {
+        size_t comma = strClient.find( ',', pos );
+        std::string item =
+            _trim( strClient.substr( pos, comma == std::string::npos ? std::string::npos : comma - pos ) );
+        if ( comma == std::string::npos )
+            pos = strClient.size() + 1;
+        else
+            pos = comma + 1;
+        if ( item.empty() ) continue;
+        std::string name;
+        std::map<std::string, std::string> p;
+        _parseMechanism( item, name, p );
+        // mediasec 파라미터 필수 (TS 24.229) — 채널 메커니즘과 같은 헤더를 쓰는 구분자
+        if ( strcasecmp( name.c_str(), "sdes-srtp" ) == 0 && p.count( "mediasec" ) ) return true;
+    }
+    return false;
+}
+
 SecAgreeIpsecOffer SelectIpsecOffer( const std::string &strClient, const std::string &strEalgPref, bool &bAnyIpsec ) {
     SecAgreeIpsecOffer best;
     bAnyIpsec = false;

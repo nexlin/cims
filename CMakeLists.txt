@@ -121,6 +121,31 @@ ExternalProject_Add(
 
 
 #----------------------------------------------------
+#libsrtp Project — 미디어 SRTP 엔진 (docs/design/features/media_security.md §6.1)
+#  upstream 2.5.x 를 ext/libsrtp 로 독립 vendoring (air-gapped 자족, OpenSSL EVP 백엔드).
+#  ⚠️ ext/pjproject/third_party/srtp(동봉분)는 pre-commit 훅이 pjproject fork 에서
+#  동기화하는 트리 — 서버 빌드가 참조하면 단말 빌드 동기화가 서버 빌드를 흔든다. 링크 금지.
+#--------------------------------------------------------
+set(SRTP_EXT libsrtp)
+set(SRTP_DIR ${EXT_DIR}/${SRTP_EXT})
+set(SRTP_PKG_DIR ${PKG_BASE}/${SRTP_EXT})
+set(SRTP_INC ${SRTP_PKG_DIR}/include)
+set(SRTP_LIB_PATH ${SRTP_PKG_DIR}/lib)
+set(SRTP_LIB srtp2)
+ExternalProject_Add(
+   ${SRTP_EXT}
+   SOURCE_DIR ${SRTP_DIR}
+   PREFIX ${CMAKE_CURRENT_SOURCE_DIR}/build/libsrtp
+   CONFIGURE_COMMAND ./configure --prefix=${SRTP_PKG_DIR} --enable-openssl
+   BUILD_IN_SOURCE 1
+   DOWNLOAD_COMMAND ""
+   UPDATE_COMMAND ""
+   # 기본 all 은 test 까지 빌드 — 정적 라이브러리만 필요하다 (install 은 빌드를 안 함)
+   BUILD_COMMAND make libsrtp2.a
+   INSTALL_COMMAND make install
+)
+
+#----------------------------------------------------
 # googletest Project
 #--------------------------------------------------------
 set(GTEST_EXT googletest)

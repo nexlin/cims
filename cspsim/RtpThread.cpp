@@ -18,11 +18,15 @@
  */
 
 #include "RtpThread.h"
+#include "Base64.h"
 #include "G711.h"
 #include "RtpHeader.h"
 #include "ServerUtility.h"
 #include "SipClientSetup.h"
 #include "TimeUtility.h"
+
+#include <mutex>
+#include <srtp2/srtp.h>
 
 #ifndef WIN32
 #define ALSA_PCM_NEW_HW_PARAMS_API
@@ -59,7 +63,88 @@ CRtpThread::CRtpThread()
       m_hVideoSocket(INVALID_SOCKET), m_iVideoPort(0),
       m_bVideoSendThreadRun(false) {}
 
-CRtpThread::~CRtpThread() { Destroy(); }
+CRtpThread::~CRtpThread() { Destroy(); ClearSrtp(); }
+
+// ─────────────────────────────────────────────
+//  미디어 SRTP (SDES — media_security.md §8.2)
+//   서버(CMP)와 동일 엔진(ext/libsrtp). 오디오 RTP 한정 — 검증 시나리오 범위.
+// ─────────────────────────────────────────────
+
+static bool SrtpLibReady() {
+  static std::once_flag once;
+  static bool ok = false;
+  std::call_once(once, [] { ok = (srtp_init() == srtp_err_status_ok); });
+  return ok;
+}
+
+/** base64(key16||salt14) 디코드 — 정확히 30B 면 true */
+static bool SrtpDecodeInline(const std::string &strB64, unsigned char *pArr, int iArrLen) {
+  if (strB64.empty() || strB64.size() > 128) return false;
+  char szBuf[128];
+  int iLen = Base64Decode(strB64.c_str(), (int)strB64.size(), szBuf, sizeof(szBuf));
+  if (iLen != iArrLen) return false;
+  memcpy(pArr, szBuf, iLen);
+  return true;
+}
+
+static bool SrtpAlloc(const std::string &strSuite, bool bInbound, unsigned char *pMaster, srtp_ctx_t_ **ppOut) {
+  srtp_policy_t policy;
+  memset(&policy, 0, sizeof(policy));
+  if (strSuite == "AES_CM_128_HMAC_SHA1_32") {
+    srtp_crypto_policy_set_aes_cm_128_hmac_sha1_32(&policy.rtp);
+    srtp_crypto_policy_set_rtcp_default(&policy.rtcp);
+  } else {
+    srtp_crypto_policy_set_rtp_default(&policy.rtp);
+    srtp_crypto_policy_set_rtcp_default(&policy.rtcp);
+  }
+  policy.ssrc.type = bInbound ? ssrc_any_inbound : ssrc_any_outbound;
+  policy.key = pMaster;
+  policy.window_size = 128;
+  policy.next = NULL;
+  srtp_t session = NULL;
+  if (srtp_create(&session, &policy) != srtp_err_status_ok) return false;
+  *ppOut = session;
+  return true;
+}
+
+bool CRtpThread::SetSrtpKeys(const std::string &strSuite, const std::string &strLocalInlineB64,
+                             const std::string &strRemoteInlineB64) {
+  ClearSrtp();
+  if (!SrtpLibReady()) return false;
+  if (strSuite != "AES_CM_128_HMAC_SHA1_80" && strSuite != "AES_CM_128_HMAC_SHA1_32") return false;
+  unsigned char arrTx[SRTP_AES_ICM_128_KEY_LEN_WSALT], arrRx[SRTP_AES_ICM_128_KEY_LEN_WSALT];
+  if (!SrtpDecodeInline(strLocalInlineB64, arrTx, sizeof(arrTx)) ||
+      !SrtpDecodeInline(strRemoteInlineB64, arrRx, sizeof(arrRx)))
+    return false;
+  if (!SrtpAlloc(strSuite, false, arrTx, &m_pSrtpTx)) return false;
+  if (!SrtpAlloc(strSuite, true, arrRx, &m_pSrtpRx)) {
+    ClearSrtp();
+    return false;
+  }
+  printf("[RTP] SRTP enabled (%s)\n", strSuite.c_str());
+  return true;
+}
+
+void CRtpThread::ClearSrtp() {
+  if (m_pSrtpTx) { srtp_dealloc((srtp_t)m_pSrtpTx); m_pSrtpTx = NULL; }
+  if (m_pSrtpRx) { srtp_dealloc((srtp_t)m_pSrtpRx); m_pSrtpRx = NULL; }
+}
+
+bool CRtpThread::SrtpProtect(char *pszBuf, int &iLen, int iCap) {
+  if (m_pSrtpTx == NULL || iLen < 12 || iLen + 16 > iCap) return false;
+  int n = iLen;
+  if (srtp_protect((srtp_t)m_pSrtpTx, pszBuf, &n) != srtp_err_status_ok) return false;
+  iLen = n;
+  return true;
+}
+
+bool CRtpThread::SrtpUnprotect(char *pszBuf, int &iLen) {
+  if (m_pSrtpRx == NULL || iLen < 12) return false;
+  int n = iLen;
+  if (srtp_unprotect((srtp_t)m_pSrtpRx, pszBuf, &n) != srtp_err_status_ok) return false;
+  iLen = n;
+  return true;
+}
 
 bool CRtpThread::Create() {
   if (m_hSocket != INVALID_SOCKET) {

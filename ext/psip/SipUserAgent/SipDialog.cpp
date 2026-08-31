@@ -253,11 +253,30 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 		int iTePt = FindRemotePayloadType( clsTe.GetMatchPrefix().c_str() );
 		if( iTePt < 0 ) iTePt = clsTe.m_iPt;
 
+		// 미디어 SRTP (SDES — media_security.md §5.1): local crypto 설정 시 RTP/SAVP + a=crypto.
+		//   AVP + a=crypto 병기(best-effort)는 방출하지 않는다 — 수용만 한다(§4).
+		const bool bSrtp = ( m_strLocalCryptoSuite.empty() == false && m_strLocalCryptoKey.empty() == false );
+		const char * pszRtpProto = bSrtp ? "RTP/SAVP" : "RTP/AVP";
+#ifdef USE_MEDIA_LIST
+		// answer 의 protocol 은 offer echo (RFC 3264 §6) — best-effort(AVP+a=crypto) offer 를
+		//   SRTP 로 수락한 경우에도 answer 는 RTP/AVP + a=crypto 로 낸다 (수용 관대화, §4).
+		if( bSrtp && pclsMessage->IsRequest() == false )
+		{
+			SDP_MEDIA_LIST::iterator itRm;
+			for( itRm = m_clsRemoteMediaList.begin(); itRm != m_clsRemoteMediaList.end(); ++itRm )
+			{
+				if( strcasecmp( itRm->m_strMedia.c_str(), "audio" ) ) continue;
+				if( strncasecmp( itRm->m_strProtocol.c_str(), "RTP/SAVP", 8 ) ) pszRtpProto = "RTP/AVP";
+				break;
+			}
+		}
+#endif
+
 		if( pclsMessage->IsRequest() && m_clsCodecList.empty() == false )
 		{
 			CODEC_LIST::iterator	itList;
 
-			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP", m_iLocalRtpPort );
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d %s", m_iLocalRtpPort, pszRtpProto );
 
 			for( itList = m_clsCodecList.begin(); itList != m_clsCodecList.end(); ++itList )
 			{
@@ -294,7 +313,7 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 			int iPt = FindRemotePayloadType( pclsCodec->GetMatchPrefix().c_str() );
 			if( iPt < 0 ) iPt = pclsCodec->m_iPt;
 
-			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d RTP/AVP %d %d\r\n", m_iLocalRtpPort, iPt, iTePt );
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d %s %d %d\r\n", m_iLocalRtpPort, pszRtpProto, iPt, iTePt );
 			iLen += AddCodecAttribute( szSdp + iLen, (int)sizeof(szSdp) - iLen, *pclsCodec, iPt );
 		}
 
@@ -304,6 +323,15 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d %s\r\n", iTePt, clsTe.m_strFmtp.c_str() );
 		}
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
+
+		// a=crypto (RFC 4568) — 자기 송신 키 선언. answer 는 offer 의 tag/suite 를 echo
+		//   (응용이 m_strLocalCryptoTag/Suite 를 remote 값으로 설정한다). MKI/lifetime 미사용.
+		if( bSrtp )
+		{
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=crypto:%s %s inline:%s\r\n",
+				m_strLocalCryptoTag.empty() ? "1" : m_strLocalCryptoTag.c_str(),
+				m_strLocalCryptoSuite.c_str(), m_strLocalCryptoKey.c_str() );
+		}
 	}
 
 	// MCPTT floor control 미디어 (3GPP TS 24.379/24.380) — local application(floor) 포트가
@@ -346,6 +374,10 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	m_clsCodecList = pclsRtp->m_clsCodecList;
 	m_eLocalDirection = pclsRtp->m_eDirection;
 	m_iLocalApplicationPort = pclsRtp->GetApplicationPort();  // MCPTT floor 포트 (없으면 -1)
+	// 미디어 SRTP — local a=crypto (AddSdp 가 방출). 빈 값 설정 = SRTP 미사용으로 해제.
+	m_strLocalCryptoTag = pclsRtp->m_strLocalCryptoTag;
+	m_strLocalCryptoSuite = pclsRtp->m_strLocalCryptoSuite;
+	m_strLocalCryptoKey = pclsRtp->m_strLocalCryptoKey;
 
 	switch( m_eLocalDirection )
 	{
@@ -383,6 +415,10 @@ bool CSipDialog::SetRemoteRtp( CSipCallRtp * pclsRtp )
 	m_iRemoteRtpPort = pclsRtp->m_iPort;
 	m_iCodec = pclsRtp->m_iCodec;
 	m_eRemoteDirection = pclsRtp->m_eDirection;
+	// 미디어 SRTP — 상대 a=crypto (GetSipCallRtp 파싱 결과)
+	m_strRemoteCryptoTag = pclsRtp->m_strRemoteCryptoTag;
+	m_strRemoteCryptoSuite = pclsRtp->m_strRemoteCryptoSuite;
+	m_strRemoteCryptoKey = pclsRtp->m_strRemoteCryptoKey;
 
 	switch( m_eRemoteDirection )
 	{
@@ -415,6 +451,9 @@ bool CSipDialog::SelectLocalRtp( CSipCallRtp * pclsRtp )
 	pclsRtp->m_iPort = m_iLocalRtpPort;
 	pclsRtp->m_iCodec = m_iCodec;
 	pclsRtp->m_eDirection = m_eLocalDirection;
+	pclsRtp->m_strLocalCryptoTag = m_strLocalCryptoTag;
+	pclsRtp->m_strLocalCryptoSuite = m_strLocalCryptoSuite;
+	pclsRtp->m_strLocalCryptoKey = m_strLocalCryptoKey;
 
 #ifdef USE_MEDIA_LIST
 	pclsRtp->m_clsMediaList = m_clsLocalMediaList;
@@ -432,6 +471,9 @@ bool CSipDialog::SelectRemoteRtp( CSipCallRtp * pclsRtp )
 	pclsRtp->m_iPort = m_iRemoteRtpPort;
 	pclsRtp->m_iCodec = m_iCodec;
 	pclsRtp->m_eDirection = m_eRemoteDirection;
+	pclsRtp->m_strRemoteCryptoTag = m_strRemoteCryptoTag;
+	pclsRtp->m_strRemoteCryptoSuite = m_strRemoteCryptoSuite;
+	pclsRtp->m_strRemoteCryptoKey = m_strRemoteCryptoKey;
 
 #ifdef USE_MEDIA_LIST
 	pclsRtp->m_clsMediaList = m_clsRemoteMediaList;

@@ -86,6 +86,11 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
       continue;
     }
 
+    // 미디어 SRTP — 협상된 세션이면 unprotect (인증 실패/재전송 = 드롭, §8.2)
+    if (pRtpThread->SrtpEnabled() && !pRtpThread->SrtpUnprotect(szPacket, iPacketLen)) {
+      continue;
+    }
+
     if (iPacketLen == 160 + sizeof(RtpHeader)) {
       UlawToPcm(szPacket + sizeof(RtpHeader), 160, szPCM, sizeof(szPCM));
 

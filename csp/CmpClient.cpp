@@ -810,7 +810,7 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
                             const std::string &strSesId, const std::string &strRole, int *piLocalPort,
                             int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp, int iUserPt,
                             int iUserSrcPt, int iUserTePt, int iUserSrcTePt, const std::string &strUserCodec,
-                            const McpttFmtp &clsFmtp ) {
+                            const McpttFmtp &clsFmtp, const CmpMediaCrypto *pclsCrypto ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -842,6 +842,18 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
         if ( clsFmtp.iQueueing >= 0 ) req.Set( "queueing", clsFmtp.iQueueing );
         if ( clsFmtp.iMaxPriority > 0 ) req.Set( "max_priority", clsFmtp.iMaxPriority );
         if ( clsFmtp.iGranted > 0 ) req.Set( "granted", 1 );
+        // 멤버 미디어 SRTP 키 (media_security.md §6.3) — 생략 = 평문 leg(신규) / 기존 키 유지(재-JOIN)
+        if ( pclsCrypto && pclsCrypto->bEnabled ) {
+            SimpleJson::JsonNode mc, rx, tx;
+            mc.Set( "alg", pclsCrypto->strAlg );
+            rx.Set( "key", pclsCrypto->strRxKey );
+            rx.Set( "salt", pclsCrypto->strRxSalt );
+            tx.Set( "key", pclsCrypto->strTxKey );
+            tx.Set( "salt", pclsCrypto->strTxSalt );
+            mc.Set( "rx", rx );
+            mc.Set( "tx", tx );
+            req.Set( "media_crypto", mc );
+        }
     }
 
     std::string resp;

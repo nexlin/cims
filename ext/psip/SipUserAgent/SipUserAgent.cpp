@@ -21,6 +21,7 @@
 #include "SipUtility.h"
 #include "SipCodecTable.h"
 #include "SdpMessage.h"
+#include "SdpAttributeCrypto.h"
 #include "StringUtility.h"
 #include "TimeString.h"
 #include "TimeUtility.h"
@@ -572,6 +573,30 @@ bool CSipUserAgent::GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsR
 		}
 
 		clsRtp.m_eDirection = E_RTP_SEND_RECV;
+
+		// 미디어 SRTP (SDES — media_security.md §5.1): m=audio protocol + a=crypto 파싱.
+		//   지원 suite(AES_CM_128_HMAC_SHA1_80|_32) 중 첫 항목을 채택한다 (RFC 4568 §5.1.1).
+		//   RTP/AVP 에 a=crypto 병기(best-effort)도 파싱한다 — 수락 여부는 응용 정책(§4).
+		clsRtp.m_bRemoteSavp = ( strncasecmp( itMedia->m_strProtocol.c_str(), "RTP/SAVP", 8 ) == 0 );
+		{
+			SDP_ATTRIBUTE_LIST::iterator	itCryptoAttr;
+
+			for( itCryptoAttr = itMedia->m_clsAttributeList.begin(); itCryptoAttr != itMedia->m_clsAttributeList.end(); ++itCryptoAttr )
+			{
+				if( strcasecmp( itCryptoAttr->m_strName.c_str(), "crypto" ) ) continue;
+
+				CSdpAttributeCrypto clsCrypto;
+				if( clsCrypto.Parse( itCryptoAttr->m_strValue.c_str(), (int)itCryptoAttr->m_strValue.length() ) == -1 ) continue;
+				if( clsCrypto.Empty() ) continue;
+				if( strcmp( clsCrypto.m_strCryptoSuite.c_str(), "AES_CM_128_HMAC_SHA1_80" ) &&
+						strcmp( clsCrypto.m_strCryptoSuite.c_str(), "AES_CM_128_HMAC_SHA1_32" ) ) continue;
+
+				clsRtp.m_strRemoteCryptoTag = clsCrypto.m_strTag;
+				clsRtp.m_strRemoteCryptoSuite = clsCrypto.m_strCryptoSuite;
+				clsRtp.m_strRemoteCryptoKey = clsCrypto.m_strKey;
+				break;
+			}
+		}
 
 		SDP_ATTRIBUTE_LIST::iterator	itAttr;
 

@@ -702,6 +702,13 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
         for (auto const& [gid, group] : _groups) if (group) fcDrop += group->getFloorCryptoDrop();
         detail.Set("floor_crypto_drop", fcDrop);
     }
+    // 미디어 SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) 폐기 누적 (media_security.md §6.2)
+    {
+        long long sDrop = _srtpDropTotal;   // 해제분 이월 + 활성 자원 합산 = 단조 증가
+        for (auto const& [sid, rtp] : _sessions) if (rtp) sDrop += rtp->getSrtpDrop();
+        for (auto const& [gid, group] : _groups) if (group) sDrop += group->getSrtpDrop();
+        detail.Set("srtp_drop", sDrop);
+    }
     detail.Set("nat", natArr);
     detail.Set("nat_total", natTotal);
     detail.Set("groups", groupsArr);
@@ -788,6 +795,47 @@ void PCmpServer::processSessionList(const SimpleJson::JsonNode& payload, const s
             txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
 }
 
+// media_crypto[_video] 파싱+검증 (media_security.md §6.3) — key/salt=base64 를 디코드해
+//   길이(16B/14B)까지 확인한다. 필드 부재 = 평문 leg(have=false, true 반환). 형식 위반은
+//   err 를 채우고 false — 호출자는 명령을 거부한다(fail-fast, 평문 조용 폴백 금지).
+struct MediaCryptoParam {
+    bool have = false;
+    std::string alg, rxKey, rxSalt, txKey, txSalt;
+};
+static bool _parseMediaCrypto(const SimpleJson::JsonNode& payload, const char* field,
+                              MediaCryptoParam& out, std::string& err) {
+    SimpleJson::JsonNode mc = payload.Get(field);
+    if (mc.type != SimpleJson::JSON_OBJECT) return true;
+    out.have = true;
+    out.alg = mc.GetString("alg");
+    if (!PMediaCrypto::IsSupportedAlg(out.alg)) {
+        err = std::string(field) + ".alg must be AES_CM_128_HMAC_SHA1_80|_32";
+        return false;
+    }
+    SimpleJson::JsonNode rx = mc.Get("rx");
+    SimpleJson::JsonNode tx = mc.Get("tx");
+    if (rx.type != SimpleJson::JSON_OBJECT || tx.type != SimpleJson::JSON_OBJECT) {
+        err = std::string(field) + " requires rx/tx objects";
+        return false;
+    }
+    if (!PFloorCrypto::DecodeBase64(rx.GetString("key"), out.rxKey) ||
+        !PFloorCrypto::DecodeBase64(rx.GetString("salt"), out.rxSalt) ||
+        !PFloorCrypto::DecodeBase64(tx.GetString("key"), out.txKey) ||
+        !PFloorCrypto::DecodeBase64(tx.GetString("salt"), out.txSalt)) {
+        err = std::string(field) + " key/salt must be base64";
+        return false;
+    }
+    if (out.rxKey.size() != 16 || out.txKey.size() != 16) {
+        err = std::string(field) + " key must decode to 16 bytes (AES-128)";
+        return false;
+    }
+    if (out.rxSalt.size() != 14 || out.txSalt.size() != 14) {
+        err = std::string(field) + " salt must decode to 14 bytes";
+        return false;
+    }
+    return true;
+}
+
 void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     std::string cmdName = payload.GetString("cmd");
     if (cmdName.empty()) cmdName = "RELAY_ADD";
@@ -822,6 +870,26 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
         if (!caller.empty() && !callee.empty()) detail = caller + "\xe2\x86\x92" + callee;
         else if (!caller.empty()) detail = caller;
         else detail = sessionId;
+    }
+
+    // 미디어 SRTP 키 (media_crypto[_video] — media_security.md §6.3). leg 귀속이 필요하므로
+    //   peer_index 명시가 전제다. 형식 위반 = 상태 변경 전 명령 거부(fail-fast).
+    MediaCryptoParam mcAudio, mcVideo;
+    {
+        std::string mcErr;
+        if (!_parseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
+            !_parseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr) ||
+            ((mcAudio.have || mcVideo.have) && peerIdx < 0)) {
+            if (mcErr.empty()) mcErr = "media_crypto requires peer_index";
+            std::string txIdStr = std::to_string(transId);
+            logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(),
+                    svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp", caller.c_str(), callee.c_str());
+            int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, "BAD_REQUEST", mcErr.c_str());
+            logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", mcErr.c_str(), txIdStr.c_str(),
+                    svc.c_str(), sesid.c_str(), "", txSeq, "csp", caller.c_str(), callee.c_str());
+            LOG_WARN("PCmpServer", "%s session=%s rejected: %s", cmdName.c_str(), sessionId.c_str(), mcErr.c_str());
+            return;
+        }
     }
 
     std::string rtpIp = _serverIp; // Resource IP
@@ -882,6 +950,27 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
                            (int)payload.GetInt("remote_te_pt", 0),
                            (int)payload.GetInt("remote_src_te_pt", 0),
                            payload.GetString("remote_codec"));
+        }
+
+        // leg 미디어 SRTP 컨텍스트 (media_crypto[_video]) — 키 오류는 명령 거부 (fail-fast).
+        //   재협상(MODIFY) 재키잉도 같은 경로 — 동일 구성은 세션 유지, 변경은 재생성.
+        if (mcAudio.have || mcVideo.have) {
+            std::string secErr;
+            bool secOk =
+                (!mcAudio.have || rtp->setLegCrypto(peerIdx, false, mcAudio.alg, mcAudio.rxKey,
+                                                    mcAudio.rxSalt, mcAudio.txKey, mcAudio.txSalt, secErr)) &&
+                (!mcVideo.have || rtp->setLegCrypto(peerIdx, true, mcVideo.alg, mcVideo.rxKey,
+                                                    mcVideo.rxSalt, mcVideo.txKey, mcVideo.txSalt, secErr));
+            if (!secOk) {
+                std::string txIdStr = std::to_string(transId);
+                logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(),
+                        svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp", caller.c_str(), callee.c_str());
+                int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, "BAD_REQUEST", secErr.c_str());
+                logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", secErr.c_str(), txIdStr.c_str(),
+                        svc.c_str(), sesid.c_str(), "", txSeq, "csp", caller.c_str(), callee.c_str());
+                LOG_WARN("PCmpServer", "%s session=%s rejected: %s", cmdName.c_str(), sessionId.c_str(), secErr.c_str());
+                return;
+            }
         }
 
         // Worker thread는 initResourcePool()에서 영구 등록됨 — 여기서 추가 불필요
@@ -1335,6 +1424,22 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_JOIN", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
+    // 멤버 미디어 SRTP 키 (media_crypto[_video] — media_security.md §6.3).
+    //   형식 위반 = 멤버 등록 전 명령 거부(fail-fast, 평문 조용 폴백 금지).
+    MediaCryptoParam mcAudio, mcVideo;
+    {
+        std::string mcErr;
+        if (!_parseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
+            !_parseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr)) {
+            int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", mcErr.c_str());
+            logFlow(groupId, "cmp", "csp", "JSON", "ERROR", mcErr.c_str(), txIdStr.c_str(),
+                    svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+            LOG_WARN("PCmpServer", "PTT_JOIN group=%s session=%s rejected: %s",
+                     groupId.c_str(), sessionId.c_str(), mcErr.c_str());
+            return;
+        }
+    }
+
     if (_groups.find(groupId) != _groups.end()) {
         PMcpttGroup* group = _groups[groupId];
         group->setSessionMeta(sesid, svc);   // 이벤트 hdr 용 세션 메타 갱신
@@ -1384,6 +1489,22 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
                 if (!merr.empty()) {
                     int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", merr.c_str());
                     logFlow(groupId, "cmp", "csp", "JSON", "ERROR", merr.c_str(), txIdStr.c_str(),
+                            svc.c_str(), sesid.c_str(), "", txSeq, "csp");
+                    return;
+                }
+            }
+            // 멤버 미디어 SRTP (media_crypto[_video]) — 키 오류는 명령 거부 (fail-fast).
+            //   재-JOIN(재협상) 재키잉도 같은 경로 — 동일 구성은 세션 유지, 변경은 재생성.
+            if (mcAudio.have || mcVideo.have) {
+                std::string secErr;
+                bool secOk =
+                    (!mcAudio.have || group->setMemberMediaCrypto(sessionId, false, mcAudio.alg,
+                                          mcAudio.rxKey, mcAudio.rxSalt, mcAudio.txKey, mcAudio.txSalt, secErr)) &&
+                    (!mcVideo.have || group->setMemberMediaCrypto(sessionId, true, mcVideo.alg,
+                                          mcVideo.rxKey, mcVideo.rxSalt, mcVideo.txKey, mcVideo.txSalt, secErr));
+                if (!secOk) {
+                    int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", secErr.c_str());
+                    logFlow(groupId, "cmp", "csp", "JSON", "ERROR", secErr.c_str(), txIdStr.c_str(),
                             svc.c_str(), sesid.c_str(), "", txSeq, "csp");
                     return;
                 }
@@ -1478,6 +1599,7 @@ void PCmpServer::processRemoveGroup(const SimpleJson::JsonNode& payload, const s
         // PTT 리소스 반환 (그룹 floor + 멤버 유닛 전체)
         _srcDropTotal += group->getSrcDrop();  // 드롭 카운터 이월 (rtp_src_drop 단조 증가)
         _floorCryptoDropTotal += group->getFloorCryptoDrop();
+        _srtpDropTotal += group->getSrtpDrop();
         PRtpMulticast* ptt = group->getPttSession();
         if (ptt) { ptt->reset(); freePttResource(ptt); }
         freeGroupMemberUnits(groupId);
@@ -1891,6 +2013,7 @@ void PCmpServer::freeResource(PRtpRelay* rtp) {
         // 드롭 카운터 이월 — 활성 합산에서 빠지는 몫을 전역 누적으로 보존 (rtp_src_drop 단조 증가).
         //   _srcDrop 은 reset() 이 아닌 재할당(resetActivity)에서 초기화되므로 여기서 읽어도 유효.
         _srcDropTotal += rtp->getSrcDrop();
+        _srtpDropTotal += rtp->getSrtpDrop();
         LOG_INFO("PCmpServer", "freeResource: port=%d", rtp->getLocalPort(0));
         _freeResources.push_back(rtp);
     }
@@ -2070,6 +2193,7 @@ void PCmpServer::timeoutLoop() {
                 // PTT 리소스 free pool 반환 (removeGroup 와 동일 패턴) — 누락 시 누적 leak
                 _srcDropTotal += it->second->getSrcDrop();  // 드롭 카운터 이월
                 _floorCryptoDropTotal += it->second->getFloorCryptoDrop();
+                _srtpDropTotal += it->second->getSrtpDrop();
                 PRtpMulticast* ptt = it->second->getPttSession();
                 if (ptt) { ptt->reset(); freePttResource(ptt); }
                 freeGroupMemberUnits(gid);

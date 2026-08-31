@@ -192,6 +192,28 @@ void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp
     }
 }
 
+// 미디어 SRTP answer 협상 (SDES — media_security.md §4·§5.2). 정책 × 수신 offer crypto.
+//   수용 관대화(§4): AVP + a=crypto 병기(best-effort) offer 도 SRTP 로 수락한다.
+//   반환 1=SRTP 수락(strSuite/strUeInline 채움), 0=평문 진행, -1=협상 실패(호출자가 488).
+static int _evalAnswerSdes( const ServiceInfo &svc, CSipCallRtp *pclsRtp, std::string &strSuite,
+                            std::string &strUeInline ) {
+    const bool bValid = !pclsRtp->m_strRemoteCryptoSuite.empty() &&
+                        MediaSdes::IsSupportedSuite( pclsRtp->m_strRemoteCryptoSuite ) &&
+                        MediaSdes::ValidInlineKeyB64( pclsRtp->m_strRemoteCryptoKey );
+    if ( svc.media_srtp == "required" ) {
+        if ( !bValid ) return -1;  // crypto 없는/불량 offer — 488 (§4 표)
+    } else if ( svc.media_srtp == "optional" ) {
+        // SAVP 인데 유효 crypto 가 없으면 협상 불가 (RFC 4568 — SAVP answer 는 crypto 필수)
+        if ( !bValid ) return pclsRtp->m_bRemoteSavp ? -1 : 0;
+    } else {
+        // off — a=crypto 무시(평문). SAVP offer 는 평문 answer 가 성립하지 않으므로 488.
+        return pclsRtp->m_bRemoteSavp ? -1 : 0;
+    }
+    strSuite = pclsRtp->m_strRemoteCryptoSuite;
+    strUeInline = pclsRtp->m_strRemoteCryptoKey;
+    return 1;
+}
+
 /**
  * @brief Process Incoming Group Call (A calling Group)
  */
@@ -220,6 +242,25 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                          pszGroupId, pszCallerInfo, clsSvcCodec.m_strName.c_str() );
             gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
             return true;  // 488 응답 완료 — 호출측(dispatcher) 이 실패로 보고 403 을 덧보내지 않게 한다
+        }
+    }
+
+    // 미디어 SRTP 협상 (SDES — media_security.md §4·§5): 접속서비스 정책 × 개시자 offer crypto.
+    //   실패는 488 — required 인데 crypto 부재, off/optional 인데 성립 불가한 SAVP offer.
+    std::string strCallerSuite, strCallerUeKey, strCallerSrvKey;
+    if ( pclsRtp ) {
+        ServiceInfo clsSrtpSvc = gclsServiceMap.GetForUser( pszCallerInfo, "ptt" );
+        int iSdes = _evalAnswerSdes( clsSrtpSvc, pclsRtp, strCallerSuite, strCallerUeKey );
+        if ( iSdes > 0 ) {
+            strCallerSrvKey = MediaSdes::GenerateInlineKeyB64();
+            if ( strCallerSrvKey.empty() ) iSdes = -1;  // 키 생성 실패 — 평문 조용 폴백 금지
+        }
+        if ( iSdes < 0 ) {
+            CLog::Print( LOG_INFO,
+                         "ProcessGroupCall: Group(%s) Caller(%s) SRTP negotiation failed (policy=%s savp=%d) → 488",
+                         pszGroupId, pszCallerInfo, clsSrtpSvc.media_srtp.c_str(), pclsRtp->m_bRemoteSavp ? 1 : 0 );
+            gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+            return true;
         }
     }
 
@@ -367,6 +408,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         // MCPTT floor (TS 24.379/24.380): 200 OK 에 m=application(SharedFloorPort) 광고 →
         //   개시자가 floor dest 를 학습해 floor REQUEST 를 올바른 포트로 송신(명시적 GRANT).
         clsCallerRtp.m_iApplicationPort = iSharedFloorPort;
+        // 미디어 SRTP answer — offer 의 tag/suite echo + 서버측 키 선언 (media_security.md §5.1)
+        if ( !strCallerSrvKey.empty() && pclsRtp ) {
+            clsCallerRtp.m_strLocalCryptoTag = pclsRtp->m_strRemoteCryptoTag;
+            clsCallerRtp.m_strLocalCryptoSuite = strCallerSuite;
+            clsCallerRtp.m_strLocalCryptoKey = strCallerSrvKey;
+        }
         // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
         //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
         //   (TS 24.379, §9-5 멤버 전파). normal 세션은 기존 단일 SDP 200 OK 그대로.
@@ -465,10 +512,17 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 // 개시자 offer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority/granted)
                 McpttFmtp clsCallerFmtp;
                 ParseMcpttFmtp( pclsRtp, clsCallerFmtp );
+                // 미디어 SRTP 키 (media_security.md §6.3) — rx=개시자 a=crypto, tx=서버 생성
+                CmpMediaCrypto clsCallerCrypto;
+                if ( !strCallerSrvKey.empty() &&
+                     !MediaSdes::BuildCmpKeys( strCallerSuite, strCallerUeKey, strCallerSrvKey, clsCallerCrypto ) )
+                    CLog::Print( LOG_ERROR, "ProcessGroupCall: Caller(%s) SRTP key build failed — leg will not decrypt",
+                                 pszCallerInfo );
                 gclsCmpClient.JoinGroup( pszGroupId, pszCallerInfo, pclsRtp->m_strIp, iCallerAudio, iCallerFloor,
                                          iCallerVideo, GetOrIssueGroupSesId( pszGroupId ), strCallerRole, NULL, NULL,
                                          iCallerNat, strCallerGuardIp, iCallerPt, iCallerSrcPt, iCallerTePt,
-                                         iCallerSrcTePt, strCallerCodec, clsCallerFmtp );
+                                         iCallerSrcTePt, strCallerCodec, clsCallerFmtp,
+                                         clsCallerCrypto.bEnabled ? &clsCallerCrypto : NULL );
                 CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) joined CMP group audio=%d floor=%d role=%s",
                              pszCallerInfo, iCallerAudio, iCallerFloor, strCallerRole.c_str() );
                 // 긴급/임박 개시: 개시자에 floor tier 부여 → 하위 tier 발언자 선점 (TS 24.380, Phase 1 엔진).
@@ -981,6 +1035,24 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
     const CSipCodecEntry &clsSvcCodec = CSipCodecTable::GetTop();
     clsRtp.m_clsCodecList.push_back( clsSvcCodec.m_iPt );
     clsRtp.m_iCodec = clsSvcCodec.m_iPt;
+
+    // 미디어 SRTP offer (media_security.md §4 표·§4.1) — required=SAVP 단일(능력 미선언 포함),
+    //   optional=이 바인딩이 등록 시 mediasec(sdes-srtp) 능력을 선언한 경우만 SAVP.
+    //   per-call 폴백(488 후 재-offer)은 두지 않는다 — 능력을 등록에서 이미 안다.
+    {
+        ServiceInfo clsSrtpSvc = gclsServiceMap.GetForUser( pszUserId, "ptt" );
+        if ( clsSrtpSvc.media_srtp == "required" ||
+             ( clsSrtpSvc.media_srtp == "optional" && clsUserInfo.m_bMediaSecSdes ) ) {
+            std::string strSrvKey = MediaSdes::GenerateInlineKeyB64();
+            if ( strSrvKey.empty() ) {
+                CLog::Print( LOG_ERROR, "InviteMember(%s) SRTP key generation failed — abort invite", pszUserId );
+                return false;
+            }
+            clsRtp.m_strLocalCryptoTag = "1";
+            clsRtp.m_strLocalCryptoSuite = "AES_CM_128_HMAC_SHA1_80";
+            clsRtp.m_strLocalCryptoKey = strSrvKey;
+        }
+    }
 
     // 4. Create Call
     std::string strCallId;
@@ -1529,11 +1601,34 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     // 멤버 answer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority/granted)
     McpttFmtp clsMemberFmtp;
     ParseMcpttFmtp( pclsRtp, clsMemberFmtp );
+    // 미디어 SRTP (media_security.md §5.2) — 서버 offer 에 crypto 를 실었는지는 다이얼로그
+    //   local RTP 가 기억한다 (재협상 re-INVITE 합류 경로 포함 — 키 불변이면 CMP 가 세션 유지).
+    CmpMediaCrypto clsMemberCrypto;
+    {
+        CSipCallRtp clsLocalRtp;
+        if ( gclsUserAgent.GetLocalCallRtp( strCallId.c_str(), &clsLocalRtp ) &&
+             !clsLocalRtp.m_strLocalCryptoKey.empty() ) {
+            // SAVP offer 의 answer 는 유효한 crypto(동일 suite) 필수 (RFC 4568 §5.1.2) —
+            //   부재/불량 = 협상 실패. 평문으로 조용히 폴백하지 않고 leg 를 종료한다.
+            const bool bOk = pclsRtp && !pclsRtp->m_strRemoteCryptoKey.empty() &&
+                             pclsRtp->m_strRemoteCryptoSuite == clsLocalRtp.m_strLocalCryptoSuite &&
+                             MediaSdes::BuildCmpKeys( clsLocalRtp.m_strLocalCryptoSuite, pclsRtp->m_strRemoteCryptoKey,
+                                                      clsLocalRtp.m_strLocalCryptoKey, clsMemberCrypto );
+            if ( !bOk ) {
+                CLog::Print( LOG_ERROR,
+                             "OnCallStarted: member(%s) SRTP answer missing/invalid (group=%s suite=%s) — drop leg",
+                             strMemberId.c_str(), strGroupId.c_str(), clsLocalRtp.m_strLocalCryptoSuite.c_str() );
+                gclsUserAgent.StopCall( strCallId.c_str() );
+                return;
+            }
+        }
+    }
+    const CmpMediaCrypto *pclsMemberCrypto = clsMemberCrypto.bEnabled ? &clsMemberCrypto : NULL;
     int iJoinLocalAudio = 0, iJoinLocalVideo = 0;
-    bool bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort,
-                                            GetOrIssueGroupSesId( strGroupId ), strRole, &iJoinLocalAudio,
-                                            &iJoinLocalVideo, iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt,
-                                            iMemberTePt, iMemberSrcTePt, strMemberCodec, clsMemberFmtp );
+    bool bJoined = gclsCmpClient.JoinGroup(
+        strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort, GetOrIssueGroupSesId( strGroupId ),
+        strRole, &iJoinLocalAudio, &iJoinLocalVideo, iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
+        iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto );
     // 방어: JOIN 응답의 멤버 포트가 offer 에 쓴 캐시와 다르면(유닛 재배정) 캐시를 교정한다.
     //   이 호 자체는 이미 옛 포트로 SDP 를 받아 상향이 성립하지 않으므로 발생 = 버그 신호(ERROR).
     //   정상 경로에서는 LeaveGroup 시 InvalidateMemberPort 로 캐시가 비워져 여기 오지 않는다.
@@ -1580,7 +1675,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
             bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
                                                iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
                                                iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
-                                               iMemberSrcTePt, strMemberCodec, clsMemberFmtp );
+                                               iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto );
         }
     }
     if ( bJoined ) {
@@ -2220,6 +2315,18 @@ int CGroupCallService::PropagateConditionToMembers( const std::string &strGroupI
         // floor 없는 세션(floor_control=off)은 application 포트 미설정 — AddSdp 가 상대 오퍼
         // 미러(port 0)로 m= 수를 보존한다.
         if ( clsGroup._floorControl != "off" && iFloorPort > 0 ) clsRtp.m_iApplicationPort = iFloorPort;
+
+        // 미디어 SRTP leg — 기존 키를 그대로 재광고한다 (재협상 아님, 조건 재광고 re-INVITE.
+        //   키가 바뀌면 단말·CMP 양쪽 세션이 재생성되므로 동일 선언 유지 — media_security.md §5.2)
+        {
+            CSipCallRtp clsLocalRtp;
+            if ( gclsUserAgent.GetLocalCallRtp( leg.first.c_str(), &clsLocalRtp ) &&
+                 !clsLocalRtp.m_strLocalCryptoKey.empty() ) {
+                clsRtp.m_strLocalCryptoTag = clsLocalRtp.m_strLocalCryptoTag;
+                clsRtp.m_strLocalCryptoSuite = clsLocalRtp.m_strLocalCryptoSuite;
+                clsRtp.m_strLocalCryptoKey = clsLocalRtp.m_strLocalCryptoKey;
+            }
+        }
 
         CSipMessage *pclsReq = NULL;
         if ( !gclsUserAgent.CreateReInvite( leg.first.c_str(), &clsRtp, &pclsReq ) ) continue;

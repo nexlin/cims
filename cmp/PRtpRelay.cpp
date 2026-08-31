@@ -65,6 +65,9 @@ void PRtpRelay::reset() {
         leg.nat = false;
         leg.sigIp.clear();
         leg.latched = leg.latchedVideo = leg.latchedRtcp = leg.latchedVideoRtcp = false;
+        // SRTP 컨텍스트 폐기 — 풀 재사용 relay 에 이전 세션 키가 잔존하면 안 된다
+        leg.crypto.reset();
+        leg.cryptoVideo.reset();
     }
 }
 
@@ -144,8 +147,10 @@ static int64_t _getTimeUsec();
 //   (guard) 소스 IP==sigIp + (선언 시) 기대 ingress PT)를 통과한 소스로 송신 목적지를
 //   계속 갱신한다. SSRC 핀·스테일 창은 두지 않는다 — 핀이 잘못된 소스에 걸리면 정당한
 //   단말이 영구 차단되는 고착이 더 해악이고, 추종 모델은 선점 소스 소멸 즉시 자가 복구된다.
-bool PRtpRelay::_acceptNatRtp(int legIdx, bool isVideo, const std::string& ip, int port, const char* pkt, int len) {
-    Leg& leg = _legs[legIdx];
+//   SRTP leg 는 형식 검사와 latch 적용 사이에 unprotect(인증)가 끼므로 둘을 분리한다.
+bool PRtpRelay::_natFormatOk(const Leg& leg, bool isVideo, const std::string& ip, int port,
+                             const char* pkt, int len) const {
+    (void)port;
     if (len < 12 || (((unsigned char)pkt[0]) >> 6) != 2) return false;
     if (!leg.sigIp.empty() && leg.sigIp != ip) return false;
     // 기대 ingress PT 검사 (RELAY remote_src_pt 선언 시) — KA(empty RTP)도 협상 PT 를
@@ -155,7 +160,11 @@ bool PRtpRelay::_acceptNatRtp(int legIdx, bool isVideo, const std::string& ip, i
         unsigned char te = (unsigned char)((leg.srcTePt > 0 ? leg.srcTePt : 101) & 0x7F);
         if (pt != (unsigned char)(leg.srcPt & 0x7F) && pt != te) return false;
     }
+    return true;
+}
 
+void PRtpRelay::_natLatch(int legIdx, bool isVideo, const std::string& ip, int port) {
+    Leg& leg = _legs[legIdx];
     bool& latched = isVideo ? leg.latchedVideo : leg.latched;
     bool changed = (leg.ip != ip) ||
                    (isVideo ? (int)leg.videoPort != port : (int)leg.port != port) || !latched;
@@ -179,6 +188,22 @@ bool PRtpRelay::_acceptNatRtp(int legIdx, bool isVideo, const std::string& ip, i
                      isVideo ? "video RTP" : "RTP", legIdx, ip.c_str(), port, _sessionId.c_str());
         }
     }
+}
+
+bool PRtpRelay::setLegCrypto(int peerIdx, bool video, const std::string& alg,
+                             const std::string& rxKey, const std::string& rxSalt,
+                             const std::string& txKey, const std::string& txSalt, std::string& err) {
+    PAutoLock lock(_mutex);
+    Leg& leg = _legs[peerIdx & 1];
+    std::unique_ptr<PMediaCrypto>& sec = video ? leg.cryptoVideo : leg.crypto;
+    if (!sec) sec.reset(new PMediaCrypto());
+    if (!sec->init(alg, rxKey, rxSalt, txKey, txSalt, err)) {
+        // 키 오류 leg 를 평문으로 조용히 폴백하지 않는다 — 컨텍스트 제거 후 명령 거부
+        sec.reset();
+        return false;
+    }
+    LOG_INFO("PRtpRelay", "SRTP %s peer[%d] alg=%s session=%s", video ? "video" : "audio",
+             peerIdx & 1, sec->alg().c_str(), _sessionId.c_str());
     return true;
 }
 
@@ -200,6 +225,17 @@ void PRtpRelay::_dropSrc(int legIdx, const char* what, const std::string& ip, in
         LOG_WARN("PRtpRelay", "drop %s from unnegotiated src %s:%d peer[%d] expected=%s:%d session=%s (total=%ld)",
                  what, ip.c_str(), port, legIdx, _legs[legIdx].ip.c_str(), expectedPort,
                  _sessionId.c_str(), _srcDrop);
+    }
+}
+
+// SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) — 위조/재전송 관측 (media_security.md §6.2)
+void PRtpRelay::_dropSrtp(int legIdx, const char* what) {
+    ++_srtpDrop;
+    time_t now; time(&now);
+    if (now - _lastSrtpWarn >= 5) {
+        _lastSrtpWarn = now;
+        LOG_WARN("PRtpRelay", "drop %s — SRTP unprotect failed peer[%d] session=%s (total=%ld)",
+                 what, legIdx, _sessionId.c_str(), _srtpDrop);
     }
 }
 
@@ -237,8 +273,22 @@ bool PRtpRelay::proc() {
                     continue;
                 }
             }
-            if (_legs[dst].active)
-                _legs[dst].rtcp.sendTo(pkt, len, &_legs[dst].addrRtcp);
+            // SRTCP 종단 — relay 경로는 RTCP 를 중계하므로 미디어 키로 함께 보호한다 (§6.2)
+            if (src.crypto && src.crypto->enabled() && !src.crypto->unprotectRtcp(pkt, len)) {
+                _dropSrtp(i, "rtcp");
+                continue;
+            }
+            if (_legs[dst].active) {
+                Leg& d = _legs[dst];
+                if (d.crypto && d.crypto->enabled()) {
+                    if (d.crypto->protectRtcp(pkt, len, sizeof(pkt)))
+                        d.rtcp.sendTo(pkt, len, &d.addrRtcp);
+                    else
+                        LOG_ERROR("PRtpRelay", "SRTCP protect failed peer[%d] session=%s", dst, _sessionId.c_str());
+                } else {
+                    d.rtcp.sendTo(pkt, len, &d.addrRtcp);
+                }
+            }
         }
 
         // ── Video RTCP relay ──
@@ -265,8 +315,21 @@ bool PRtpRelay::proc() {
                     continue;
                 }
             }
-            if (_legs[dst].active && _legs[dst].videoPort > 0)
-                _legs[dst].videoRtcp.sendTo(pkt, len, &_legs[dst].addrVideoRtcp);
+            if (src.cryptoVideo && src.cryptoVideo->enabled() && !src.cryptoVideo->unprotectRtcp(pkt, len)) {
+                _dropSrtp(i, "video rtcp");
+                continue;
+            }
+            if (_legs[dst].active && _legs[dst].videoPort > 0) {
+                Leg& d = _legs[dst];
+                if (d.cryptoVideo && d.cryptoVideo->enabled()) {
+                    if (d.cryptoVideo->protectRtcp(pkt, len, sizeof(pkt)))
+                        d.videoRtcp.sendTo(pkt, len, &d.addrVideoRtcp);
+                    else
+                        LOG_ERROR("PRtpRelay", "video SRTCP protect failed peer[%d] session=%s", dst, _sessionId.c_str());
+                } else {
+                    d.videoRtcp.sendTo(pkt, len, &d.addrVideoRtcp);
+                }
+            }
         }
 
         // ── Audio RTP relay + 녹취 ──
@@ -278,13 +341,20 @@ bool PRtpRelay::proc() {
             if (!src.active) continue;
             // 선언(SDP) 주소 일치는 latch 상태와 무관하게 항상 수락 — 미디어별 NAT 경로가
             //   갈리는 leg 에서 다른 미디어의 latch 가 ip 를 덮어써도 협상된 신원은 유지.
-            if ((src.ip != ip || (int)src.port != port) &&
-                !(src.declIp == ip && (int)src.declPort == port)) {
-                if (!src.nat || !_acceptNatRtp(i, false, ip, port, pkt, len)) {
-                    _dropSrc(i, "rtp", ip, port, (int)src.port);
-                    continue;
-                }
+            bool srcOk = (src.ip == ip && (int)src.port == port) ||
+                         (src.declIp == ip && (int)src.declPort == port);
+            if (!srcOk && (!src.nat || !_natFormatOk(src, false, ip, port, pkt, len))) {
+                _dropSrc(i, "rtp", ip, port, (int)src.port);
+                continue;
             }
+            // ingress unprotect — 이후 경로(녹취·relay·PT 분류)는 전부 평문 (§6.2).
+            //   nat leg 의 latch 는 unprotect 성공 후에만 적용 — 제3자 주입으로 목적지
+            //   오염 불가 (latch 첫 유효 RTP 판정에 인증 포함).
+            if (src.crypto && src.crypto->enabled() && !src.crypto->unprotectRtp(pkt, len)) {
+                _dropSrtp(i, "rtp");
+                continue;
+            }
+            if (!srcOk) _natLatch(i, false, ip, port);
             touchActivity();
 
             if (_legs[dst].active) {
@@ -298,13 +368,21 @@ bool PRtpRelay::proc() {
                                                   : (inPt == 101);
                     stampPt = isTe ? _legs[dst].tePtOut : _legs[dst].ptOut;
                 }
-                if (stampPt > 0) {
+                Leg& d = _legs[dst];
+                bool dstSec = d.crypto && d.crypto->enabled();
+                if (stampPt > 0 || dstSec) {
+                    // egress 사본 — 녹취용 평문(pkt)을 보존한 채 스탬프/protect
                     char out[2048];
+                    int outLen = len;
                     memcpy(out, pkt, len);
-                    out[1] = (char)((out[1] & 0x80) | (stampPt & 0x7F));
-                    _legs[dst].rtp.sendTo(out, len, &_legs[dst].addrRtp);
+                    if (stampPt > 0)
+                        out[1] = (char)((out[1] & 0x80) | (stampPt & 0x7F));
+                    if (dstSec && !d.crypto->protectRtp(out, outLen, sizeof(out)))
+                        LOG_ERROR("PRtpRelay", "SRTP protect failed peer[%d] session=%s", dst, _sessionId.c_str());
+                    else
+                        d.rtp.sendTo(out, outLen, &d.addrRtp);
                 } else {
-                    _legs[dst].rtp.sendTo(pkt, len, &_legs[dst].addrRtp);
+                    d.rtp.sendTo(pkt, len, &d.addrRtp);
                 }
             }
 
@@ -331,17 +409,34 @@ bool PRtpRelay::proc() {
             if (len <= 0) break;
             Leg& src = _legs[i];
             if (!src.active || src.videoPort == 0) continue;
-            if ((src.ip != ip || (int)src.videoPort != port) &&
-                !(src.declIp == ip && (int)src.declVideoPort == port)) {
-                if (!src.nat || !_acceptNatRtp(i, true, ip, port, pkt, len)) {
-                    _dropSrc(i, "video rtp", ip, port, (int)src.videoPort);
-                    continue;
-                }
+            bool srcOk = (src.ip == ip && (int)src.videoPort == port) ||
+                         (src.declIp == ip && (int)src.declVideoPort == port);
+            if (!srcOk && (!src.nat || !_natFormatOk(src, true, ip, port, pkt, len))) {
+                _dropSrc(i, "video rtp", ip, port, (int)src.videoPort);
+                continue;
             }
+            if (src.cryptoVideo && src.cryptoVideo->enabled() && !src.cryptoVideo->unprotectRtp(pkt, len)) {
+                _dropSrtp(i, "video rtp");
+                continue;
+            }
+            if (!srcOk) _natLatch(i, true, ip, port);
             touchActivity();
 
-            if (_legs[dst].active && _legs[dst].videoPort > 0)
-                _legs[dst].videoRtp.sendTo(pkt, len, &_legs[dst].addrVideoRtp);
+            if (_legs[dst].active && _legs[dst].videoPort > 0) {
+                Leg& d = _legs[dst];
+                if (d.cryptoVideo && d.cryptoVideo->enabled()) {
+                    // egress 사본 — 녹취용 평문(pkt) 보존
+                    char out[2048];
+                    int outLen = len;
+                    memcpy(out, pkt, len);
+                    if (d.cryptoVideo->protectRtp(out, outLen, sizeof(out)))
+                        d.videoRtp.sendTo(out, outLen, &d.addrVideoRtp);
+                    else
+                        LOG_ERROR("PRtpRelay", "video SRTP protect failed peer[%d] session=%s", dst, _sessionId.c_str());
+                } else {
+                    d.videoRtp.sendTo(pkt, len, &d.addrVideoRtp);
+                }
+            }
 
             if (_recorder)
                 _recorder->writePacket(i == 0 ? "va" : "vb", pkt, len);

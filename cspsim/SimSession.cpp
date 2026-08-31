@@ -1,9 +1,11 @@
 #include "SimSession.h"
+#include "Base64.h"
 #include "SipUtility.h"
 #include "SipMd5.h"
 #include "SdpMedia.h"
 #include "SipCodecTable.h"
 #include "Log.h"
+#include <openssl/rand.h>
 #include <sstream>
 #include <chrono>
 #include <cstring>
@@ -47,8 +49,12 @@ int FindOfferedPt(CSipCallRtp* pclsOffer, const CSipCodecEntry& clsEntry) {
 }
 
 /** 협상 audio 미디어 라인 구성 — 코덱 identity(테이블 PT) 로 엔트리를 찾아 rtpmap/fmtp 생성.
- *  answer(pclsOffer 지정) 는 오퍼 PT echo, 오퍼는 테이블 PT 광고. 반환 = wire PT (RTP 스탬핑용). */
-int BuildAudioMedia(CSipCallRtp& clsRtp, int iPort, int iCodecPt, CSipCallRtp* pclsOffer) {
+ *  answer(pclsOffer 지정) 는 오퍼 PT echo, 오퍼는 테이블 PT 광고. 반환 = wire PT (RTP 스탬핑용).
+ *  미디어 SRTP (media_security.md §8.1): strCryptoKey 지정 시 a=crypto 를 병기하고
+ *  bSavp 면 protocol 을 RTP/SAVP 로 낸다 (answer 는 오퍼 protocol echo — 호출자 책임). */
+int BuildAudioMedia(CSipCallRtp& clsRtp, int iPort, int iCodecPt, CSipCallRtp* pclsOffer,
+                    bool bSavp = false, const std::string& strCryptoSuite = "",
+                    const std::string& strCryptoKey = "", const std::string& strCryptoTag = "1") {
     const CSipCodecEntry* pclsEntry = CSipCodecTable::FindByPt(iCodecPt);
     if (pclsEntry == NULL) pclsEntry = CSipCodecTable::FindByPt(0);  // 미인식 오퍼 → PCMU 관용 (레거시 동작)
     if (pclsEntry == NULL) pclsEntry = &CSipCodecTable::GetTop();
@@ -56,17 +62,31 @@ int BuildAudioMedia(CSipCallRtp& clsRtp, int iPort, int iCodecPt, CSipCallRtp* p
     int iWirePt = FindOfferedPt(pclsOffer, *pclsEntry);
     if (iWirePt < 0) iWirePt = pclsEntry->m_iPt;
 
-    CSdpMedia clsAudio("audio", iPort, "RTP/AVP");
+    CSdpMedia clsAudio("audio", iPort, bSavp ? "RTP/SAVP" : "RTP/AVP");
     clsAudio.AddFmt(iWirePt);
-    char szVal[160];
+    char szVal[192];
     snprintf(szVal, sizeof(szVal), "%d %s", iWirePt, pclsEntry->GetRtpmap().c_str());
     clsAudio.AddAttribute("rtpmap", szVal);
     if (!pclsEntry->m_strFmtp.empty()) {
         snprintf(szVal, sizeof(szVal), "%d %s", iWirePt, pclsEntry->m_strFmtp.c_str());
         clsAudio.AddAttribute("fmtp", szVal);
     }
+    if (!strCryptoKey.empty() && !strCryptoSuite.empty()) {
+        snprintf(szVal, sizeof(szVal), "%s %s inline:%s", strCryptoTag.c_str(), strCryptoSuite.c_str(),
+                 strCryptoKey.c_str());
+        clsAudio.AddAttribute("crypto", szVal);
+    }
     clsRtp.m_clsMediaList.push_back(clsAudio);
     return iWirePt;
+}
+
+/** 미디어 SRTP 자기 송신 키 생성 — base64(key16||salt14). 실패 시 빈 문자열. */
+std::string SrtpGenInlineKeyB64() {
+    unsigned char arr[30];
+    if (RAND_bytes(arr, sizeof(arr)) != 1) return "";
+    std::string strOut;
+    if (!Base64Encode((const char*)arr, (int)sizeof(arr), strOut)) return "";
+    return strOut;
 }
 
 }  // namespace
@@ -762,8 +782,21 @@ void SimSession::StartCall(const std::string& strTarget) {
         clsRtp.m_iApplicationPort = m_clsRtpThread.m_iFloorRecvPort;
 
 #ifdef USE_MEDIA_LIST
+    // 미디어 SRTP 오퍼 (media_security.md §8.1) — required=RTP/SAVP, optional=AVP+a=crypto(best-effort)
+    bool bSrtpOffer = (m_iSrtpMode > 0);
+    if (bSrtpOffer) {
+        m_strSrtpLocalKey = SrtpGenInlineKeyB64();
+        if (m_strSrtpLocalKey.empty()) {
+            printf("[%d] [SRTP] key generation failed — abort call\n", m_iId);
+            return;
+        }
+    } else {
+        m_strSrtpLocalKey.clear();
+    }
     // Audio media line — 오퍼러이므로 테이블 PT 로 광고, RTP 송신 PT 도 동일 값으로
-    m_clsRtpThread.m_iAudioPt = BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL);
+    m_clsRtpThread.m_iAudioPt =
+        BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL, m_iSrtpMode >= 2,
+                        bSrtpOffer ? "AES_CM_128_HMAC_SHA1_80" : "", m_strSrtpLocalKey);
     // Video media line (if video file set)
     if (m_clsRtpThread.m_iVideoPort > 0) {
         CSdpMedia clsVideo("video", m_clsRtpThread.m_iVideoPort, "RTP/AVP");
@@ -1271,6 +1304,35 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 
     if (m_pInviteId) *m_pInviteId = pszCallId;
 
+    // 미디어 SRTP answer 협상 (media_security.md §8.1) — 오퍼 crypto 존재 && 모드>0 이면
+    //   수락(suite/tag echo + 자기 키 선언). SAVP 오퍼인데 수락 불가면 평문 answer 가
+    //   성립하지 않으므로 488. answer protocol 은 오퍼 echo (SAVP/AVP+crypto).
+    bool bSrtpAnswer = false;
+    std::string strSrtpSuite, strSrtpTag = "1";
+    m_pOwner->m_strSrtpLocalKey.clear();
+    if (pclsRtp && m_pOwner->m_iSrtpMode > 0 && !pclsRtp->m_strRemoteCryptoSuite.empty() &&
+        !pclsRtp->m_strRemoteCryptoKey.empty()) {
+        m_pOwner->m_strSrtpLocalKey = SrtpGenInlineKeyB64();
+        if (!m_pOwner->m_strSrtpLocalKey.empty()) {
+            bSrtpAnswer = true;
+            strSrtpSuite = pclsRtp->m_strRemoteCryptoSuite;
+            if (!pclsRtp->m_strRemoteCryptoTag.empty()) strSrtpTag = pclsRtp->m_strRemoteCryptoTag;
+        }
+    }
+    if (pclsRtp && pclsRtp->m_bRemoteSavp && !bSrtpAnswer) {
+        printf("[%d] [SRTP] SAVP offer but srtp mode=off/unusable — 488\n", m_pOwner->m_iId);
+        m_pUserAgent->StopCall(pszCallId, 488);
+        return;
+    }
+    if (bSrtpAnswer &&
+        !m_pOwner->m_clsRtpThread.SetSrtpKeys(strSrtpSuite, m_pOwner->m_strSrtpLocalKey,
+                                              pclsRtp->m_strRemoteCryptoKey)) {
+        printf("[%d] [SRTP] session setup failed — 488\n", m_pOwner->m_iId);
+        m_pUserAgent->StopCall(pszCallId, 488);
+        return;
+    }
+    if (!bSrtpAnswer) m_pOwner->m_clsRtpThread.ClearSrtp();
+
     // PTT 모드: 180 Ringing → 200 OK 자동응답 (실 단말 동작과 동일)
     if (m_pOwner->m_bPttMode) {
         printf("[%d] [PTT] Group INVITE - sending 180 Ringing\n", m_pOwner->m_iId);
@@ -1285,7 +1347,9 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 #ifdef USE_MEDIA_LIST
         // PTT 200 OK SDP: audio(오퍼 PT echo) + video (비디오 파일이 있는 경우)
         m_pOwner->m_clsRtpThread.m_iAudioPt =
-            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp);
+            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
+                            bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
+                            m_pOwner->m_strSrtpLocalKey, strSrtpTag);
         if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
             CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
             clsVideo.AddFmt(96);
@@ -1344,7 +1408,9 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 #ifdef USE_MEDIA_LIST
         // 200 OK SDP에 audio(오퍼 PT echo) + video 미디어 포함
         m_pOwner->m_clsRtpThread.m_iAudioPt =
-            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp);
+            BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
+                            bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
+                            m_pOwner->m_strSrtpLocalKey, strSrtpTag);
         if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
             CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
             clsVideo.AddFmt(96);
@@ -1362,6 +1428,26 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
 }
 
 void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRtp) {
+    // 미디어 SRTP (media_security.md §8.1) — 오퍼에 키를 실었으면 answer 의 a=crypto 로 세션을
+    //   확정한다. RTP 송신은 부모(EventCallStart→RtpThread.Start)에서 시작되므로 그 전에 처리.
+    if (!m_pOwner->m_strSrtpLocalKey.empty()) {
+        bool bOk = pclsRtp && !pclsRtp->m_strRemoteCryptoKey.empty() &&
+                   m_pOwner->m_clsRtpThread.SetSrtpKeys(pclsRtp->m_strRemoteCryptoSuite,
+                                                        m_pOwner->m_strSrtpLocalKey,
+                                                        pclsRtp->m_strRemoteCryptoKey);
+        if (!bOk) {
+            if (m_pOwner->m_iSrtpMode >= 2) {
+                // required — 평문 폴백 금지: answer 가 crypto 를 안 실었으면 협상 실패로 종료
+                printf("[%d] [SRTP] answer without usable crypto (required) — drop call\n", m_pOwner->m_iId);
+                m_pUserAgent->StopCall(pszCallId);
+                return;
+            }
+            printf("[%d] [SRTP] answer without crypto — plaintext call (optional)\n", m_pOwner->m_iId);
+            m_pOwner->m_clsRtpThread.ClearSrtp();
+        }
+    } else if (m_pOwner->m_iSrtpMode == 0) {
+        m_pOwner->m_clsRtpThread.ClearSrtp();
+    }
     CSipClient::EventCallStart(pszCallId, pclsRtp);
     // 발신자(UAC, PTT): 200 OK 의 m=application(SharedFloorPort) 을 floor dest 로 학습.
     //   (member 는 INVITE 에서 학습; caller 는 여기 200 OK 에서.) 미지정 시 audio+1 fallback.

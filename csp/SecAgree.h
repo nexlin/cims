@@ -20,6 +20,15 @@
  *  BuildIpsecServerList 로 만들어 Issue(user, list) 한다 (§8.3, P4). */
 #define SEC_AGREE_SERVER_LIST "tls;q=0.1"
 
+/** 미디어 보안 서버 항목 (TS 24.229 mediasec 파라미터 — media_security.md §4.1). 단말이
+ *  Security-Client 에 sdes-srtp;mediasec 를 선언했을 때만 서버 목록에 병기한다 — 채널
+ *  메커니즘(tls/ipsec-3gpp) 협상과 같은 헤더를 공유하되 mediasec 파라미터로 구분된다. */
+#define SEC_AGREE_MEDIASEC_ENTRY "sdes-srtp;mediasec;q=0.05"
+
+/** Security-Client 목록에 sdes-srtp(mediasec 파라미터) 선언이 있는가 — 미디어 SRTP 능력 학습.
+ *  학습 결과는 등록 바인딩(CUserInfo.m_bMediaSecSdes)에 결부된다 (media_security.md §4.1). */
+bool SecAgreeHasMediaSecSdes( const std::string &strClient );
+
 /** 요청의 sec-agree 헤더 요약 */
 struct SecAgreeRequest {
     bool bRequire;    // Require 또는 Proxy-Require 에 sec-agree

@@ -16,6 +16,7 @@
 
 #include "ConsistentHashRing.h"
 #include "CspPttGroup.h"
+#include "MediaSdes.h"
 #include "SimpleJson.h"
 #include "SipStackDefine.h"
 
@@ -101,12 +102,14 @@ public:
     //   iUserSrcPt/iUserSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류·녹취 메타). 0=재작성 없음.
     //   strUserCodec: 협상 오디오 코덱("AMR-WB/16000") — 녹취 세그먼트 메타용.
     //   clsFmtp: 멤버 SDP 의 a=fmtp:MCPTT 협상 결과 (queueing/max_priority/granted).
+    //   pclsCrypto: 멤버 미디어 SRTP 키 (media_security.md §6.3 media_crypto). NULL/미활성 =
+    //     필드 생략 — 신규 멤버는 평문 leg, 기존 SRTP 멤버의 재-JOIN 은 기존 키 유지.
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
                     int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
                     const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
                     int iUserNat = 0, const std::string &strUserSigIp = "", int iUserPt = 0, int iUserSrcPt = 0,
                     int iUserTePt = 0, int iUserSrcTePt = 0, const std::string &strUserCodec = "",
-                    const McpttFmtp &clsFmtp = McpttFmtp() );
+                    const McpttFmtp &clsFmtp = McpttFmtp(), const CmpMediaCrypto *pclsCrypto = NULL );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

@@ -697,8 +697,13 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
     SecAgreeIpsecOffer clsIpsecOffer;
     if ( clsSA.bHasClient ) clsIpsecOffer = EvaluateIpsecOffer( pclsMessage, strFromUser, clsSA.strClient );
     const SecAgreeIpsecOffer *pclsIpsec = clsIpsecOffer.bValid ? &clsIpsecOffer : NULL;
+    // 미디어 SRTP 능력 (media_security.md §4.1) — Security-Client 의 sdes-srtp;mediasec 선언.
+    //   선언한 단말에게만 서버 목록에 mediasec 항목을 병기한다 (미선언 단말의 Verify 원문 불변).
+    const bool bMediaSecSdes = clsSA.bHasClient && SecAgreeHasMediaSecSdes( clsSA.strClient );
     std::string strSecServer;
-    if ( clsSA.bHasClient && pclsIpsec == NULL ) strSecServer = gclsSecAgreeMap.Issue( strFromUser );
+    if ( clsSA.bHasClient && pclsIpsec == NULL )
+        strSecServer = gclsSecAgreeMap.Issue(
+            strFromUser, bMediaSecSdes ? SEC_AGREE_SERVER_LIST ", " SEC_AGREE_MEDIASEC_ENTRY : SEC_AGREE_SERVER_LIST );
     const char *pszSecServer = strSecServer.empty() ? NULL : strSecServer.c_str();
 
     // 3GPP pre-auth: 첫 REGISTER 의 빈 Authorization(nonce/response 없음)은 IMPI 광고일 뿐
@@ -865,7 +870,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             CspIpsecListenerIntId( CspUuidToIntId( clsIpsecNode.id ), IPSEC_LISTENER_CLIENT_UDP );
         pclsIpsecBind = &clsIpsecBind;
     }
-    if ( gclsUserMap.Insert( pclsMessage, &clsUser, bIntegrityProtected, pclsIpsecBind ) ) {
+    if ( gclsUserMap.Insert( pclsMessage, &clsUser, bIntegrityProtected, pclsIpsecBind, bMediaSecSdes ) ) {
         if ( bIntegrityProtected )
             CLog::Print( LOG_INFO, "sec-agree: user=%s registered integrity-protected (%s) src=%s:%d",
                          strFromUser.c_str(), bIpsecRegister ? "ipsec-3gpp" : "tls", pclsMessage->m_strClientIp.c_str(),

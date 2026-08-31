@@ -38,6 +38,7 @@ CUserInfo::CUserInfo()
       m_iSendOptionsTime( 0 ),
       m_iLastSeenTime( 0 ),
       m_bMcDataMsrp( false ),
+      m_bMediaSecSdes( false ),
       m_iRegisterCSeq( 0 ),
       m_bIntegrityProtected( false ),
       m_iSaReqId( 0 ),
@@ -109,7 +110,7 @@ CUserMap::~CUserMap() {
  * @returns 성공하면 true 를 리턴하고 실패하면 false 를 리턴한다.
  */
 bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bIntegrityProtected,
-                       const CUserInfo *pclsIpsec ) {
+                       const CUserInfo *pclsIpsec, bool bMediaSecSdes ) {
     CUserInfo clsInfo;
     std::string strUserId;
     USER_MAP::iterator itMap;
@@ -126,6 +127,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
 
     clsInfo.m_eTransport = pclsMessage->m_eTransport;
     clsInfo.m_bIntegrityProtected = bIntegrityProtected;
+    clsInfo.m_bMediaSecSdes = bMediaSecSdes;
     if ( pclsIpsec ) {
         clsInfo.m_iSaReqId = pclsIpsec->m_iSaReqId;
         clsInfo.m_iSendPort = pclsIpsec->m_iSendPort;
@@ -231,6 +233,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
             clsBind.m_iLoginTime = clsInfo.m_iLoginTime;
             clsBind.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
             clsBind.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
+            clsBind.m_bMediaSecSdes = clsInfo.m_bMediaSecSdes;
             if ( pclsIpsec ) {
                 // 같은 flow 의 재등록 — 재인증이면 새 SA 셋으로 결부가 바뀐다 (구 셋은 IpsecSaSet 이 retiring)
                 clsBind.m_iSaReqId = clsInfo.m_iSaReqId;

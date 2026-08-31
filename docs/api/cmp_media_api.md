@@ -197,6 +197,7 @@ HEARTBEAT 와 동일한 `resource` 구조에 `detail` 섹션을 더한다.
 |---|---|
 | `rtp_src_drop` | 미협상 소스 드롭 누적 카운터 (no-NAT leg 의 선언 주소 불일치 패킷). 해제된 자원의 몫을 이월한 **단조 증가** 값 |
 | `floor_crypto_drop` | floor SRTCP 인증 실패·재전송 폐기 누적([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)). 해제된 그룹의 몫을 이월한 **단조 증가** 값 |
+| `srtp_drop` | 미디어 SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) 폐기 누적([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). 해제된 자원의 몫을 이월한 **단조 증가** 값 |
 | `nat` | NAT latch 완료 leg 목록 — `key`(session_id 또는 `group_id:member`), `leg`(`a`/`b`/멤버 sid), 학습된 실주소. 최대 20개 (전체 수는 `nat_total`) |
 | `groups` | 활성 그룹별 상세 (`group_id`/`members`/`floor_policy`/`floor_holders`). `floor_policy` 는 적용 중인 정책(`off`/`single`/`dual`/`multi`/`private`), `floor_holders` 는 현재 발언자 **배열**(동시 발언 시 복수, 발언자 없으면 생략). 최대 20개 (전체 수는 `groups_total`) |
 
@@ -268,6 +269,7 @@ diff 한다. push(이벤트)로는 절체 후 새 active 가 옛 세션을 기�
 | `remote_pt` / `remote_te_pt` | - | 이 peer 가 **수신** 선언한 audio/telephone-event wire PT — CMP 가 이 peer 로 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(PT-blind 통과). marker bit 보존, 녹취는 talker 원본 PT 유지 |
 | `remote_src_pt` / `remote_src_te_pt` | - | 이 peer 가 **송신**에 쓰는 audio/TE PT(= 반대편에 낸 SDP 의 PT, RFC 3264) — ingress audio/TE 분류 기준 + 녹취 세그먼트 메타(`audio_pt_a/b`). `remote_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류 |
 | `remote_codec` | - | 이 peer 의 협상 오디오 코덱 문자열(예 `"AMR-WB/16000"`) — 녹취 세그먼트 메타(`audio_codec_a/b`)용. CSP 는 코덱 테이블 top 의 rtpmap prefix 를 싣는다 |
+| `media_crypto` / `media_crypto_video` | - | 이 peer leg 의 미디어 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` — audio(RTP+RTCP)/video 각각 ([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). `peer_index` 필수 |
 | `caller` / `callee` | - | 발/착신자 (flow 로깅·녹취 메타용) |
 | `record_dir` | - | 녹취 디렉토리 (있으면 녹취 시작) |
 
@@ -337,6 +339,37 @@ latch 를 유지한다.
 | `caller` / `callee` | - | flow 로깅용 |
 
 녹취 중지 → 자원 반납. 이미 없는 세션이면 `OK` (자연 멱등).
+
+### 6.4 media_crypto — 미디어 SRTP 종단 (RELAY·PTT 공통)
+
+UE↔CMP 구간 미디어 SRTP(RFC 3711 + SDES RFC 4568, TS 33.328 e2ae —
+[media_security.md](../design/features/media_security.md))의 leg 별 키. CMP 는 leg 마다
+SRTP 를 **종단**한다: ingress unprotect → 평문(믹스·디먹스·녹취·DTMF) → egress protect.
+운반 명령: `RELAY_ADD`/`RELAY_MODIFY`(leg 별 — `peer_index` 필수), `PTT_JOIN`(멤버별,
+주소 동반 ② 호출). `media_crypto`=audio(RTP + relay 경로 RTCP), `media_crypto_video`=video.
+
+| `media_crypto` 필드 | 필수 | 설명 |
+|---|---|---|
+| `alg` | - | crypto suite — `AES_CM_128_HMAC_SHA1_80`(생략 시 기본) / `AES_CM_128_HMAC_SHA1_32` |
+| `rx.key` / `rx.salt` | O | UE→CMP **상향** 마스터 키(base64 16B)/salt(base64 14B) — UE 가 SDP `a=crypto` 로 선언한 값 |
+| `tx.key` / `tx.salt` | O | CMP→UE **하향** 키/salt — CSP 가 leg 마다 생성해 서버 SDP 로 광고한 값 |
+
+```json
+"media_crypto": { "alg": "AES_CM_128_HMAC_SHA1_80",
+                  "rx": { "key": "b64(16B)", "salt": "b64(14B)" },
+                  "tx": { "key": "b64(16B)", "salt": "b64(14B)" } }
+```
+
+- **생략 = 평문 leg**(현행). 기존 SRTP leg 의 재요청에서 생략하면 **기존 키 유지** —
+  optional 정책의 혼용 그룹(SRTP 멤버 + 평문 멤버 공존)이 자연스럽게 표현된다.
+- **동일 구성 재선언(refresh/재전송) = 세션 유지**(ROC·재전송 창 보존), **키 변경 =
+  세션 재생성**(재협상 — ROC 0 리셋, 단말의 재협상 세션 재생성과 정합. `srtp_update` 금지).
+- 키 오류(base64·길이·suite)는 `BAD_REQUEST` **명령 거부** — 평문 조용 폴백 금지.
+- unprotect 실패(인증 태그 불일치·재전송 창 밖)는 드롭 + STATS `detail.srtp_drop` 누적.
+  nat leg 의 목적지 latch 는 unprotect 성공 패킷만 근거로 삼는다(제3자 주입 오염 불가).
+- 하향 슬롯 SSRC 다중화(`0x10000000+`/`0x40000000+`…)는 세션 키가 SSRC 무관(RFC 3711)이라
+  leg 키 하나로 보호된다 — SSRC 별 스트림·ROC 는 엔진(libsrtp)이 내부 관리.
+- 녹취는 unprotect 이후 **평문 RTP 를 저장**한다 — 재생·믹스 파이프라인 무변경.
 
 ## 7. PTT — 그룹통화 + floor control
 
@@ -429,6 +462,7 @@ RELAY_REMOVE 와 동일 규칙).
 | `max_priority` | - | SDP `mc_priority=N` 로 협상한 **요청 가능 최대 우선순위**. 이 값이 있을 때만 Floor Request 의 Floor Priority 로 우선순위를 낮출 수 있다(둘 중 낮은 쪽). 없으면(미협상) 요청의 우선순위 필드를 무시하고 `members` 의 기본값을 쓴다(TS 24.380 §6.3.5.4.4-1a) |
 | `granted` | - | `1` = SDP fmtp `mc_granted` 협상 — 참가 시점에 발언자가 없으면 이 멤버에게 **초기 발언권**을 준다(TS 24.380 §6.3.4.2.2) |
 | `floor_crypto` | - | 이 멤버의 floor SRTCP 키 `{alg,key,salt[,mki]}` — **유니캐스트 floor 는 클라이언트별 CSK 로 보호**(TS 33.180 §9.4)한다. 생략 시 그룹 키([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
+| `media_crypto` / `media_crypto_video` | - | 이 멤버 leg 의 미디어 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` ([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). 생략 = 평문 leg(신규) / 기존 키 유지(재-JOIN) — optional 혼용 그룹 표현 |
 
 응답 payload: `ip`, `port`, `video_port` — **멤버 전용 RTP 포트** (client 는 이 포트를
 그 멤버의 SDP 에 광고). 같은 `(group, session_id)` 재요청은 재할당 없이 동일 포트 반환.

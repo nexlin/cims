@@ -1,7 +1,10 @@
 # 미디어 보안 (SRTP) — 구간 암호화 설계
 
-> **설계 정본, 구현 착수 전.** UE↔CMP 미디어(RTP/RTCP) 구간 암호화를 SDES(RFC 4568) 키 교환
-> 기반 SRTP(RFC 3711)로 도입한다. E2E(KMS/MIKEY-SAKKE, TS 33.180) 는 §10 로드맵.
+> UE↔CMP 미디어(RTP/RTCP) 구간 암호화 — SDES(RFC 4568) 키 교환 기반 SRTP(RFC 3711).
+> 서버(CSP·CMP)·cspsim 은 본 설계대로 구현되어 있다. **잔여**: 단말 축(§7 — pjsip
+> `PJMEDIA_HAS_SRTP` 재빌드·mediasec 선언 패치·앱 정책 연결), 콘솔의 접속서비스
+> `media_srtp` 편집 UI, S3 실측(§9 — 정지 창)·실기기 검증. E2E(KMS/MIKEY-SAKKE,
+> TS 33.180) 는 §10 로드맵.
 
 ## 1. 목표와 범위
 
@@ -171,7 +174,9 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
 
 ### 6.3 제어 API 확장 (UDP JSON)
 
-`RELAY_ADD`(leg 별)·`PTT_GROUP_ADD` 로스터·`PTT_JOIN` payload 에 선택 필드:
+`RELAY_ADD`/`RELAY_MODIFY`(leg 별 — `peer_index` 필수)·`PTT_JOIN`(멤버별, 주소 동반 ②
+호출) payload 의 선택 필드 (정본 = [cmp_media_api.md §6.4](../../api/cmp_media_api.md)).
+`PTT_GROUP_ADD` 로스터는 주소처럼 키도 싣지 않는다 — 키는 SDP 교환 후 JOIN ② 로 온다.
 
 ```json
 "media_crypto": {
@@ -181,11 +186,14 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
 }
 ```
 
-- 생략 시 그 leg 는 평문(현행) — optional 혼용 그룹의 표현이 자연스럽다.
-- `RELAY_MODIFY` / `PTT_MODIFY`(신설 또는 JOIN 재사용)로 재협상 키 교체. 교체 시 ROC·재전송
-  창 리셋.
-- 키 오류(길이·base64)는 `floor_crypto` 와 동일하게 **명령 거부**(fail-fast — 조용한 평문
-  폴백 금지).
+- audio 는 `media_crypto`(RTP + relay 경로 RTCP), video 는 `media_crypto_video` — SDES 는
+  m= 라인마다 키가 다르다.
+- 생략 시 그 leg 는 평문(신규), 기존 SRTP leg 의 재요청 생략은 **기존 키 유지** —
+  optional 혼용 그룹의 표현이 자연스럽다.
+- 재협상 키 교체 = 같은 명령의 재전송(`RELAY_MODIFY` / JOIN ② 재호출). 동일 구성 재선언은
+  세션 유지, 키 변경은 세션 재생성(ROC·재전송 창 리셋 — §6.1).
+- 키 오류(길이·base64·suite)는 `floor_crypto` 와 동일하게 **명령 거부**(fail-fast — 조용한
+  평문 폴백 금지).
 
 ### 6.4 녹취 탭 이동
 
@@ -245,25 +253,25 @@ protect/unprotect 를 삽입. 키는 세션당 생성(발신)·SDP 파싱(수신
 
 ## 9. 검증 계획
 
-- **S1 단위**: `PMediaCrypto` 래퍼 protect/unprotect 왕복 + seq 랩어라운드(ROC) 관통 +
-  인증 실패/재전송 드롭 + 재협상 세션 재생성(update 아님) + `media_crypto` JSON 파싱
-  fail-fast. RFC 3711 §B.3 벡터 시험은 floor(`PFloorCrypto`) 기존 유지.
-- **S3 신규 `S3-SCN-SRTP`** (cspsim, 시나리오):
-  1. required 서비스 그룹콜 — SDP 협상 확인(`RTP/SAVP`+`a=crypto` 왕복)
-  2. 와이어 실측 — 캡처 페이로드에 G.711 평문 패턴 부재(암호화 실증)
-  3. 녹취 파일 평문 재생 가능(탭 이동 검증)
-  4. required 에서 평문 offer → 488
-  5. optional 혼용 — SRTP 멤버 + 평문 멤버 동일 그룹 상호 수신
-  6. 능력 기반 offer — mediasec 선언/미선언 바인딩에 SAVP/AVP 가 각각 나가는지(§4.1)
-- **대조군**: `media_srtp=off` 전 시나리오 회귀(기존 S3 그린 유지).
-- **실기기**: W999/MF52 SRTP 그룹콜 + 귀검증, 협력업체 단말은 SDK 재빌드 후.
+- **S1 단위** — `tests/cmp_media_crypto_test.cpp` (`PMediaCrypto` + ext/libsrtp 단독 링크):
+  protect/unprotect 왕복(RTP/RTCP·양방향) + seq 랩어라운드(ROC) 관통 + 인증 실패/재전송
+  드롭 + 하향 슬롯 SSRC 다중화 + 재협상 세션 재생성(update 아님) + 동일 구성 재선언 세션
+  유지(재전송 창 보존으로 입증) + 키/salt/suite fail-fast. RFC 3711 §B.3 벡터 시험은
+  floor(`PFloorCrypto`) 기존 유지. `media_crypto` JSON fail-fast 는 S3 게이트로 본다.
+- **S3 `S3-SCN-SRTP`** (verify/lib/items/stage3/scn_srtp.py — 정책 플립+SIGUSR1, 자기복원):
+  - R1 required 그룹콜 — cspsim SRTP 성립(`RTP/SAVP`+`a=crypto` 왕복) + CMP `media_crypto`
+    수신 로그 + 신규 녹취(unprotect 후 평문 저장 — 탭 이동 검증)
+  - R2 required 에서 평문 offer → 488 (CSP 협상 게이트 로그)
+  - R3 optional — `RTP/AVP`+`a=crypto`(best-effort) 수용 관대화 경로
+  - R4 off 대조군 — 정책·단말 off 원복 후 평문 그룹콜 그린(기존 동작 유지)
+- **정지 창/실기기 잔여**: 와이어 캡처 실측(암호화 페이로드 실증), optional 혼용 그룹
+  (SRTP 멤버+평문 멤버 상호 수신), 능력 기반 offer(mediasec 선언/미선언 바인딩에
+  SAVP/AVP — §4.1), W999/MF52 SRTP 그룹콜 + 귀검증, 협력업체 단말은 SDK 재빌드 후.
 
 ## 10. 롤아웃과 로드맵
 
 **배포 = 3축 동반**: csp·cmp(+cspsim)·APK. 정책 기본값 `off` 이므로 배포 자체는 무영향 —
 서비스 단위로 `optional`(혼용 검증) → `required`(완전 전환) 단계 상향한다.
-
-규모 추정: CMP 2~3d · CSP 1~2d · 단말 1d · cspsim 1~2d · 검증 1d.
 
 **로드맵 (범위 밖, 요구 발생 시)**
 - **E2E 미디어 암호화** — TS 33.180 KMS(ECCSI/SAKKE)·MIKEY-SAKKE, GMK/PCK. CMP 녹취·믹스·U10

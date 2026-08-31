@@ -5,6 +5,7 @@ include_directories(
    ./
    ${PMP_INC}
    ${PMPROC_INC}
+   ${SRTP_INC}
    ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
 
@@ -17,11 +18,13 @@ message(" ***> ${PMPROC_LIB_PATH}")
 
 #add_executable(pmpagent pmpagent.cpp)
 #add_executable(prtpsim prtpsim.cpp)
-add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PFloorCrypto.cpp PRtpRelay.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp)
+add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PFloorCrypto.cpp PMediaCrypto.cpp PRtpRelay.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp)
 
-# floor control(RTCP) SRTCP 보호 — TS 33.180. 미디어 RTP 는 투명 relay 라 암호 의존이 없다.
+# 미디어 SRTP 종단 (RFC 3711/4568, e2ae) — ext/libsrtp vendoring (media_security.md §6.1).
+# floor control(RTCP) SRTCP 는 자체 구현(PFloorCrypto, TS 33.180) — OpenSSL 직접 사용.
+add_dependencies(cmp ${SRTP_EXT})
 find_package(OpenSSL REQUIRED)
-target_link_libraries(cmp OpenSSL::Crypto)
+target_link_libraries(cmp ${SRTP_LIB_PATH}/libsrtp2.a OpenSSL::Crypto)
 
 set(TEST_SRCS
    #pmpagent 

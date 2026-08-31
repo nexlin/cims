@@ -398,6 +398,10 @@ static void PrintUsage(const char* pszBin) {
     printf("  -sec_verify  <값>        [시험] Security-Verify 를 echo 대신 이 "
            "값으로 전송 (강등 변조 → 서버 494)\n");
     printf("                             -count 전개 단말 각각의 자격 — 파일에 없는 user 는 즉시 중단\n");
+    printf(
+        "  -srtp off|optional|required  미디어 SRTP (SDES, media_security.md §8) — optional=AVP+a=crypto\n"
+        "                           best-effort 오퍼, required=RTP/SAVP 오퍼. -sec_agree 동반 시\n"
+        "                           REGISTER 에 sdes-srtp;mediasec 능력 선언(§4.1)\n");
     printf("  -ipsec                   IMS AKA + IPsec (TS 33.203 §7) — Security-Client 에 "
            "ipsec-3gpp 제안, 401 뒤 커널 SA 설치 (CAP_NET_ADMIN, -aka_k 필수)\n");
     printf("  -ipsec_alg   <alg>       hmac-sha-1-96(기본)|hmac-md5-96\n");
@@ -811,6 +815,14 @@ int main(int argc, char* argv[])
     bool bIpsec = HasFlag(argc, argv, "-ipsec");
     std::string strIpsecAlg = GetArg(argc, argv, "-ipsec_alg", "hmac-sha-1-96");
     std::string strIpsecEalg = GetArg(argc, argv, "-ipsec_ealg", "aes-cbc");
+    // 미디어 SRTP (SDES — media_security.md §8.3): off(기본)|optional|required.
+    //   optional=AVP+a=crypto best-effort 오퍼, required=RTP/SAVP 오퍼(상대 무crypto 시 실패).
+    //   -sec_agree 동반 시 REGISTER Security-Client 에 sdes-srtp;mediasec 능력을 선언한다(§4.1).
+    std::string strSrtp = GetArg(argc, argv, "-srtp", "off");
+    int iSrtpMode = (strSrtp == "required") ? 2 : (strSrtp == "optional" ? 1 : 0);
+    if (strSrtp != "off" && strSrtp != "optional" && strSrtp != "required") {
+        printf("invalid -srtp '%s' (off|optional|required) — using off\n", strSrtp.c_str());
+    }
     std::string strGroupId    = GetArg(argc, argv, "-group",      "1000");
     std::string strScenario   = GetArg(argc, argv, "-scenario",   "");
     int iCallDuration          = atoi(GetArg(argc, argv, "-call_duration", "10").c_str());
@@ -1072,6 +1084,7 @@ int main(int argc, char* argv[])
           s->SetSecAgree(true, strSecVerify);
         if (bIpsec)
           s->SetIpsec(true, strIpsecAlg, strIpsecEalg);
+        s->SetSrtpMode(iSrtpMode);  // SetSecAgree 이후 — mediasec 능력 선언 결합(§4.1)
         if (!strSesAkaK.empty())
           s->SetAka(strSesAkaK, strSesAkaOpc, (uint64_t)ullSesAkaSqn);
         s->SetNoRegister(bNoRegister);

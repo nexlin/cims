@@ -20,8 +20,12 @@
 #define _RTP_THREAD_H_
 
 #include "SipUdp.h"
+#include <string>
 #include <vector>
 #include <atomic>
+
+// libsrtp 불투명 핸들 전방선언 (srtp2/srtp.h 는 RtpThread.cpp 에서만 포함)
+struct srtp_ctx_t_;
 
 class CRtpThread
 {
@@ -46,6 +50,17 @@ public:
 	 *  -1 = 미협상(레거시 99 폴백). 합성 PCMU 는 정적 PT 0 고정. */
 	int		m_iAudioPt = -1;
 
+	// ── 미디어 SRTP (SDES — media_security.md §8.2). 오디오 RTP 한정 (S3 시나리오 범위) ──
+	/** 협상 키 주입 — inline 키는 base64(key16||salt14). local=자기 선언(tx), remote=상대 선언(rx).
+	 *  기존 컨텍스트는 폐기 후 재생성. 실패 시 false — 호출자가 호를 정리한다(평문 조용 폴백 금지). */
+	bool SetSrtpKeys( const std::string & strSuite, const std::string & strLocalInlineB64,
+	                  const std::string & strRemoteInlineB64 );
+	void ClearSrtp();
+	bool SrtpEnabled() const { return m_pSrtpTx != NULL; }
+	/** in-place 변환 — 성공 시 iLen 갱신. protect 는 iCap ≥ iLen+16 필요. */
+	bool SrtpProtect( char * pszBuf, int & iLen, int iCap );
+	bool SrtpUnprotect( char * pszBuf, int & iLen );
+
 	Socket	m_hSocket;
 	Socket	m_hRtcpSocket;       // RTCP 소켓 (RTP 포트 + 1)
 	Socket  m_hFloorRecvSocket;  // floor 수신 소켓 (m=application)
@@ -69,6 +84,11 @@ public:
     int     m_iVideoPort;
     bool    m_bVideoSendThreadRun;
     std::string m_strVideoFile;
+
+private:
+    // 미디어 SRTP 컨텍스트 (libsrtp) — tx=ssrc_any_outbound / rx=ssrc_any_inbound
+    srtp_ctx_t_ * m_pSrtpTx = NULL;
+    srtp_ctx_t_ * m_pSrtpRx = NULL;
 };
 
 #endif

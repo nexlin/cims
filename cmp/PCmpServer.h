@@ -110,6 +110,7 @@ private:
     // 미협상 소스 드롭 전역 누적 — 자원 해제 시 이월 (STATS rtp_src_drop 단조 증가 보장)
     long long _srcDropTotal = 0;
     long long _floorCryptoDropTotal = 0;   // 해제된 그룹의 floor SRTCP 폐기 이월(단조 증가)
+    long long _srtpDropTotal = 0;          // 해제된 자원의 미디어 SRTP 폐기 이월(단조 증가)
     PMutex _mutex;
 
     // ── 이벤트 push 상태 (별도 _eventMtx — sweeper 가 _mutex 보유 중 접근하지 않도록 분리) ──

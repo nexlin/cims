@@ -251,6 +251,7 @@ processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이
 | max_priority | - | SDP `mc_priority=N` 협상값 — 있을 때만 요청의 Floor Priority 로 우선순위를 낮출 수 있다(미협상이면 요청값 무시) |
 | granted | - | 1 = fmtp `mc_granted` — 참가 시점에 발언자가 없으면 초기 발언권 부여 |
 | floor_crypto | - | 이 멤버 전용 floor SRTCP 키 `{alg,key,salt[,mki]}` (TS 33.180 CSK) |
+| media_crypto / media_crypto_video | - | 이 멤버 leg 의 미디어 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` — leg 별 종단(ingress unprotect → 평문 분배·녹취 → egress protect). 정본 [cmp_media_api.md §6.4](../../api/cmp_media_api.md), 설계 [media_security.md](../features/media_security.md) |
 
 **응답:** `ip`, `port`, `video_port` — 멤버 전용 RTP 포트 (같은 멤버 재요청 시 동일 포트).
 
@@ -348,6 +349,13 @@ basePort+3 : Video RTCP            basePort+7 : Video RTCP
 각 peer 는 자기 전용 포트로만 송신한다 — **수신 소켓이 곧 peer 신원**이며, 소스 주소는
 검증용이다(선언 주소 불일치 = 드롭 + `rtp_src_drop` 카운터, nat leg 는 목적지 latch).
 하향 송신도 그 peer 의 소켓에서 나가 소스 포트 = 광고 포트(symmetric RTP 정합).
+
+미디어 SRTP leg(`media_crypto[_video]` — [media_security.md](../features/media_security.md))는
+leg 별 `PMediaCrypto`(libsrtp2 래퍼, `ext/libsrtp`)가 종단한다: ingress 소스 검증 →
+unprotect(실패 = 드롭 + `srtp_drop`, nat latch 는 unprotect 성공 후에만) → 평문
+relay·녹취 → 반대 leg 키로 egress protect. relay 경로는 RTCP 도 같은 키로 SRTCP 보호한다.
+그룹 경로(PMcpttGroup)는 상향 unprotect → 평문 분배 → 수신자별 SSRC/seq 재작성 후
+그 수신자 leg 키로 protect (그룹 미디어 RTCP 는 미사용 — floor 는 별도 축).
 
 **듀얼 leg 구조:**
 

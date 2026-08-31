@@ -75,6 +75,11 @@ public:
      *  MSRP(media plane) 배포 가능 단말 표시. fan-out 하이브리드 분기에 사용. */
     bool m_bMcDataMsrp;
 
+    /** REGISTER Security-Client 에 sdes-srtp(mediasec 파라미터) 선언 — 미디어 SRTP 능력
+     *  (TS 33.328 e2ae / TS 24.229, media_security.md §4.1). media_srtp=optional 서비스의
+     *  발신 offer 형태(SAVP/AVP)를 이 바인딩 플래그로 결정한다 — per-call 폴백 없음. */
+    bool m_bMediaSecSdes;
+
     /** 단말이 REGISTER Contact 에 실은 URI 원문 (as-registered, RFC 3261 §10.3).
      *  200 OK Contact 에코·reginfo <uri> 용 — NAT 뒤 단말은 사설 주소일 수 있으므로
      *  실제 도달 주소는 m_strIp:m_iPort(received/rport latch)를 사용한다. */
@@ -122,9 +127,10 @@ public:
     ~CUserMap();
 
     /** bIntegrityProtected: 이 REGISTER 가 sec-agree 협상·대조를 통과했다 (바인딩에 플래그 결부).
-     *  pclsIpsec: IPsec 등록이면 SA 셋 결부 정보 (m_iSaReqId/m_iSendPort/m_iSendListenerId 만 읽는다). */
+     *  pclsIpsec: IPsec 등록이면 SA 셋 결부 정보 (m_iSaReqId/m_iSendPort/m_iSendListenerId 만 읽는다).
+     *  bMediaSecSdes: Security-Client 에 sdes-srtp(mediasec) 선언 — 미디어 SRTP 능력 (§4.1). */
     bool Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bIntegrityProtected = false,
-                 const CUserInfo *pclsIpsec = NULL );
+                 const CUserInfo *pclsIpsec = NULL, bool bMediaSecSdes = false );
     /** 살아있는 바인딩 중 sec-agree 로 결부된 것이 하나라도 있는가 — 채널 정책 게이트의 판정 축. */
     bool IsIntegrityProtected( const char *pszUserId );
     bool Select( const char *pszUserId, CUserInfo &clsInfo );

@@ -95,6 +95,15 @@ public:
 	// local MCPTT floor control (m=application) 포트. -1 이면 SDP 에 floor media 미사용.
 	int					m_iLocalApplicationPort;
 
+	// ── 미디어 SRTP (SDES — media_security.md §5.1). local suite 설정 시 AddSdp 가
+	//    m=audio 를 RTP/SAVP + a=crypto 로 방출한다. key = base64(key||salt) 원문. ──
+	std::string	m_strLocalCryptoTag;
+	std::string	m_strLocalCryptoSuite;
+	std::string	m_strLocalCryptoKey;
+	std::string	m_strRemoteCryptoTag;
+	std::string	m_strRemoteCryptoSuite;
+	std::string	m_strRemoteCryptoKey;
+
 	/** local RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
 	ERtpDirection	m_eLocalDirection;
 

@@ -33,6 +33,24 @@ bool CSipUserAgent::GetRemoteCallRtp( const char * pszCallId, CSipCallRtp * pcls
 	return bRes;
 }
 
+// SIP Call-ID 로 통화를 검색한 후, local RTP 정보(SDP 로 방출한 값 — SRTP local crypto 포함)를
+// 저장한다. 응용이 offer 에 실은 a=crypto 키를 answer 수신 시점에 되찾는 용도 (media_security.md §5).
+bool CSipUserAgent::GetLocalCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	bool	bRes = false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		bRes = itMap->second.SelectLocalRtp( pclsRtp );
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
 /**
  * @ingroup SipUserAgent
  * @brief SIP Call-ID 로 통화를 검색한 후, 원격 SDP(개시자=offer, 수신자=answer)의 rtpmap 에서

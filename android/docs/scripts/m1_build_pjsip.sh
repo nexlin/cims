@@ -44,8 +44,9 @@ cat > pjlib/include/pj/config_site.h <<'EOF'
 
 /* 5) 시그널링 TLS 활성 (docs/design/features/sip_tls_signaling.md §7).
       OpenSSL 정적 링크 — configure-android 의 --with-ssl 가 경로를 준다.
-      미디어 SRTP 는 별개 과제라 계속 off. */
-#define PJMEDIA_HAS_SRTP          0
+      미디어 SRTP (docs/design/features/media_security.md §7) — SDES e2ae. 빌드만 활성:
+      런타임은 앱 계정 정책(use_srtp — 프로비저닝 mediaSecurity)이 켤 때까지 off. */
+#define PJMEDIA_HAS_SRTP          1
 #define PJSIP_HAS_TLS_TRANSPORT   1
 
 /* 6) NAT: RTP keepalive(empty RTP) — 청취 전용(무송신) 구간에도 주기 송신해

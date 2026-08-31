@@ -61,6 +61,20 @@ public:
 	// 전체 코덱 리스트
 	CODEC_LIST	m_clsCodecList;
 
+	// ── 미디어 SRTP (SDES, RFC 4568 — media_security.md §5.1) ──
+	// local: 이 측이 SDP 로 방출할 a=crypto(자기 송신 키 선언). suite 가 설정되면
+	//   AddSdp 의 m=audio 는 RTP/SAVP 가 된다. key = base64(master key16||salt14) 원문.
+	// remote: 수신 SDP 의 a=crypto — 지원 suite 중 첫 항목 (GetSipCallRtp 가 채움).
+	//   m_bRemoteSavp 인데 remote suite 가 비면 유효한 crypto 없는 SAVP offer —
+	//   응용이 협상 실패(488)로 처리한다. MKI 미사용.
+	std::string	m_strLocalCryptoTag;      // a=crypto tag (기본 "1", answer 는 offer tag echo)
+	std::string	m_strLocalCryptoSuite;    // 예: AES_CM_128_HMAC_SHA1_80 (비면 SRTP 미사용)
+	std::string	m_strLocalCryptoKey;      // base64(key||salt)
+	std::string	m_strRemoteCryptoTag;
+	std::string	m_strRemoteCryptoSuite;
+	std::string	m_strRemoteCryptoKey;
+	bool				m_bRemoteSavp = false;    // 수신 m=audio protocol 이 RTP/SAVP(F) 였는지
+
 #ifdef USE_MEDIA_LIST
 	// 전체 미디어 리스트
 	SDP_MEDIA_LIST	m_clsMediaList;

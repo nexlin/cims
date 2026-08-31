@@ -125,6 +125,19 @@ public:
       if (b) m_clsServerInfo.m_bSecAgree = true;
     }
 
+    /** 미디어 SRTP 모드 (SDES — media_security.md §8): 0=off, 1=optional(AVP+a=crypto
+     *  best-effort 오퍼), 2=required(RTP/SAVP 오퍼 — 상대 crypto 부재 시 협상 실패).
+     *  수신 오퍼는 모드>0 이면 내용대로 수락. sec-agree 활성 시 REGISTER Security-Client 에
+     *  sdes-srtp;mediasec 능력을 선언한다(§4.1) — SetSecAgree 이후에 호출할 것. */
+    void SetSrtpMode(int i) {
+      m_iSrtpMode = i;
+      if (i > 0 && m_clsServerInfo.m_bSecAgree && m_clsServerInfo.m_strSecurityClient.empty())
+        m_clsServerInfo.m_strSecurityClient = "tls, sdes-srtp;mediasec";
+    }
+    int  m_iSrtpMode = 0;
+    /** 이 세션이 마지막 SDP 에 선언한 자기 송신 키 (inline base64) — answer 수신 시 세션 확정용 */
+    std::string m_strSrtpLocalKey;
+
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }
     void SetCscHost(const std::string& h, int p, bool tls) { m_strCscHost = h; m_iCscPort = p; m_bCscTls = tls; }
