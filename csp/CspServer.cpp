@@ -94,7 +94,7 @@ int ServiceMain() {
     }
     CLog::SetPrefix( "csp" );
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
-    gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
+    gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp", gclsSetup.m_iServiceLogStallSec );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
     gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId, true,
                         gclsSetup.m_strServiceLogSpoolDir, gclsSetup.m_iServiceLogStallSec,

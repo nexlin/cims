@@ -1,11 +1,21 @@
 #ifndef __PSYNC_RTP_RECORDER_H__
 #define __PSYNC_RTP_RECORDER_H__
 
+#include <atomic>
 #include <string>
 #include <map>
+#include <memory>
 #include <vector>
 #include <cstdint>
 #include <cstdio>
+
+#include "StoreOpWriter.h"
+
+// 녹취 저장 경로 연산 전담 worker (프로세스 공용) — RTP 리액터/제어 스레드는 녹취 경로
+//   (RecordDir — NAS 가능)를 절대 만지지 않는다. 패킷/열기/닫기/메타 연산을 op 로 적재하면
+//   worker 스레드 하나가 순서대로 실행한다. 저장 경로 실패/정체 시 패킷 op 드롭(장애 구간
+//   녹취 유실 수용) + A-PRC-017 자기보고 — PCmpServer 가 startServer 에서 콜백을 구성한다.
+extern CStoreOpWriter gclsRecStoreWriter;
 
 /**
  * 다중 트랙 동기 RTP 녹취기
@@ -16,6 +26,12 @@
  *
  * 파일명: seg_{seq:04d}_{trackPrefix}.rtp
  * 녹취 중: seg_{seq:04d}_{trackPrefix}.rtp.recording
+ *
+ * 저장 경로 무의존 계약 — 호출 스레드(RTP 리액터·제어)는 트랙 상태/메타를 메모리에서만
+ * 관리하고, 파일 I/O(디렉터리 생성·open/write/close·rename·메타/인덱스 기록·기존 seq
+ * 계수)는 전부 gclsRecStoreWriter worker 가 수행한다. FILE* 는 worker 전용 테이블에
+ * 산다. 세그먼트 rename 은 기존 파일을 덮지 않는다(.dup 우회) — 재기동 seq 시딩이
+ * 비동기(늦으면 0부터)라도 기존 세그먼트가 파괴되지 않는 근거.
  */
 class PSyncRtpRecorder {
 public:
@@ -30,8 +46,9 @@ public:
     ~PSyncRtpRecorder();
 
     /** PTT 세션 디렉터리 이름 (CSP 가 PTT_GROUP_ADD 의 session_dir 로 지정) — 시간버킷
-     *  아래 한 겹 더. 기록 단위가 세션이므로 같은 시간대의 다음 통화와 섞이지 않는다. */
-    void setSessionSubdir(const std::string& name) { _sesSubdir = name; }
+     *  아래 한 겹 더. 기록 단위가 세션이므로 같은 시간대의 다음 통화와 섞이지 않는다.
+     *  PTT 는 이 시점(제어 스레드)에 seq 시딩을 worker 로 예약한다. */
+    void setSessionSubdir(const std::string& name);
 
     /** 트랙 추가 (prefix: "a", "b", "va", "vb", "audio", "video" 등) */
     void addTrack(const std::string& prefix);
@@ -88,7 +105,7 @@ private:
 
     struct Track {
         std::string prefix;
-        FILE* fp = nullptr;
+        bool opened = false;      // open op 적재됨 (FILE* 는 worker 전용 테이블에 있다)
         std::string fileName;     // 상대 파일명 (seg_0001_a.rtp)
         std::string tmpPath;      // 절대 경로 (.recording)
         std::string finalPath;    // 절대 경로
@@ -102,11 +119,15 @@ private:
     /** 트랙 prefix → 미디어 종류/슬롯(PTT)/leg(VoIP). tracks[] 메타 구성용.
      *  PTT: audio/audio1..N, video/video1..N (슬롯 번호). VoIP: a/b, va/vb (leg). */
     void _trackKind(const std::string& prefix, std::string& kind, int& slot, std::string& side) const;
-    /** _baseDir 하위 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH} 경로 (mkdir 포함) */
+    /** _baseDir 하위 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH} 경로 (순수 계산) */
     std::string _hourDirNow();
-    /** 시간버킷 segments.jsonl 의 최대 seq (없으면 0) — 세션 재시작 시 이어받기용 */
+    /** 시간버킷 segments.jsonl 의 최대 seq (없으면 0) — 세션 재시작 시 이어받기용.
+     *  저장 경로 읽기 — worker op 안에서만 호출한다 (시딩 예약: _enqueueSeed). */
     static int _lastIndexedSeq(const std::string& hourDir);
-    /** mkdir -p (경로 내 모든 상위 디렉터리 생성) */
+    /** 현재 시간버킷의 seq 시딩을 worker 로 예약 — 결과는 _seedSeq 에 담긴다.
+     *  첫 startPttSegment 전에 도착하면 이어받고, 늦으면 0부터 (rename .dup 가드가 보호). */
+    void _enqueueSeed();
+    /** mkdir -p (경로 내 모든 상위 디렉터리 생성) — worker op 전용 */
     static void _mkdirP(const std::string& path);
     static int64_t _nowUsec();
     static void _isoUsec(int64_t usec, char* buf, int bufLen);
@@ -142,6 +163,9 @@ private:
     std::string _sesSubdir;        // PTT 세션 디렉터리 이름 S{ts}_{n} (빈값=레거시 버킷 직행)
     std::string _curHourDir;       // 현재 기록 디렉터리 {base}/{YYYY}/{MM}/{DD}/{HH}[/{sesdir}]
     int _hourSeq = 0;              // 세션 내 세그먼트 시퀀스 (시간버킷을 넘어도 이어진다)
+    // seq 시딩 결과 (-1=미도착) — worker 가 채우고 startPttSegment 가 합류. detach 대비 shared_ptr.
+    std::shared_ptr<std::atomic<long long>> _seedSeq;
+    bool _seedRequested = false;
 
     void _openTracks();            // _curSegDir 에 등록 트랙 파일 열기 (공통)
     void _openTrack(Track& t);     // 트랙 1개 열기 (세그먼트 중 추가된 트랙 포함)

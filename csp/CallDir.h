@@ -13,18 +13,64 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 
+#include "FmReporter.h"
+#include "Log.h"
+#include "StoreOpWriter.h"
+
+/**
+ * 호 이력(CDR)/실시간 상태 파일 기록 — 저장 경로 무의존(non-blocking) 계약.
+ *
+ * ServiceLogDir(NAS 가능) 아래 call.json/session.json/events.jsonl/state 파일을 기록한다.
+ * 원자 rewrite·rename·디렉터리 스캔이 섞여 있어 append 스풀(ServiceLogWriter) 재생이
+ * 불가능하므로, StoreOpWriter 로 격리한다:
+ *   - 생산자(SIP 스레드)는 m_mtx 아래 맵 북키핑 + 경로/내용 문자열 조립만 하고 op 를
+ *     적재한다 — 파일시스템 무접촉. 디렉터리 생성도 worker 가 기록 직전에 수행한다.
+ *   - worker 스레드 하나가 op 를 FIFO 실행 — 같은 파일의 RMW(예: call.json
+ *     ringing→active→ended) 순서가 보존된다.
+ *   - 저장 경로 실패/정체(StallSec)/큐 포화 시 op 드롭(장애 구간 이력 유실 수용) +
+ *     A-PRC-013 storage_failure 자기보고, 회복 시 자연 해소. 상세: flow_logging.md §2.
+ */
 class CCallDir {
 public:
-    void Init( const std::string &strBaseDir, const std::string &strComponent ) {
+    void Init( const std::string &strBaseDir, const std::string &strComponent, int iStallSec = 5 ) {
         if ( strBaseDir.empty() ) return;
         m_strCallsDir = strBaseDir;
         m_strComponent = strComponent;
-        MkdirP( m_strCallsDir );
-        MkdirP( m_strCallsDir + "/state/volte" );
-        MkdirP( m_strCallsDir + "/state/ptt" );
-        CleanupStaleStates();
+
+        std::string strPath = m_strCallsDir;
+        m_worker.Init(
+            iStallSec, 20000, 64LL * 1024 * 1024,
+            []( EnumSowLogLevel eLevel, const std::string &strMsg ) {
+                CLog::Print( eLevel == SOW_LOG_ERROR ? LOG_ERROR : LOG_SYSTEM, "call_dir %s", strMsg.c_str() );
+            },
+            [strPath]( const SowDegradeInfo &clsInfo ) {
+                // A-PRC-013 storage_failure — 폴백 진입 시 open, 회복 시 close
+                if ( !gclsFmReporter.IsEnabled() ) return;
+                const std::string strMo = gclsFmReporter.Node() + "/csp/call_dir";
+                if ( clsInfo.bDegraded ) {
+                    SimpleJson::JsonNode nodeParams;
+                    nodeParams.Set( "path", strPath.c_str() );
+                    nodeParams.Set( "reason", clsInfo.strReason.c_str() );
+                    nodeParams.Set( "dropped", (int)clsInfo.ulDroppedOps );
+                    gclsFmReporter.AlarmOpen( "A-PRC-013", strMo, nodeParams );
+                } else {
+                    gclsFmReporter.AlarmClose( "A-PRC-013", strMo );
+                }
+            } );
+
+        // 기동 작업: base/state 디렉터리 보장 + stale 상태 파일 정리 (worker — 저장 경로 최초 접촉)
+        std::string base = m_strCallsDir;
+        m_worker.Enqueue( [base]() {
+            bool bOk = MkdirP( base );
+            bOk = MkdirP( base + "/state/volte" ) && bOk;
+            bOk = MkdirP( base + "/state/ptt" ) && bOk;
+            _purgeStateDirS( base + "/state/volte" );
+            _purgeStateDirS( base + "/state/ptt" );
+            return bOk;
+        } );
     }
 
     bool IsEnabled() const {
@@ -35,8 +81,11 @@ public:
      *  CSP 재시작 후에는 SIP 다이얼로그가 모두 소실되므로 이전 state 는 무조건 stale. */
     void CleanupStaleStates() {
         if ( m_strCallsDir.empty() ) return;
-        _purgeStateDir( m_strCallsDir + "/state/volte" );
-        _purgeStateDir( m_strCallsDir + "/state/ptt" );
+        std::string base = m_strCallsDir;
+        m_worker.Enqueue( [base]() {
+            bool bOk = _purgeStateDirS( base + "/state/volte" );
+            return _purgeStateDirS( base + "/state/ptt" ) && bOk;
+        } );
     }
 
     // ── Session-ID 관리 ────────────────────────────────
@@ -75,30 +124,28 @@ public:
     /** Write session mapping (session.json) to the .d directory */
     void WriteSessionMapping( const std::string &strSessionId, const std::string &strCallIdA,
                               const std::string &strCallIdB, const std::string &strSesId = "" ) {
-        std::lock_guard<std::mutex> lock( m_mtx );
-        std::string dir = _dir( strSessionId );
-        if ( dir.empty() ) {
-            // Try via call-id
-            dir = _dir( strCallIdA );
+        std::string dir;
+        {
+            std::lock_guard<std::mutex> lock( m_mtx );
+            dir = _dir( strSessionId );
+            if ( dir.empty() ) dir = _dir( strCallIdA );  // Try via call-id
         }
         if ( dir.empty() ) return;
-        std::string path = dir + "/session.json";
-        FILE *f = fopen( path.c_str(), "w" );
-        if ( !f ) return;
+        std::string content;
         if ( strSesId.empty() ) {
-            fprintf( f, "{\"session_id\":\"%s\",\"call_ids\":[\"%s\",\"%s\"]}\n", Esc( strSessionId ).c_str(),
-                     Esc( strCallIdA ).c_str(), Esc( strCallIdB ).c_str() );
+            content = "{\"session_id\":\"" + Esc( strSessionId ) + "\",\"call_ids\":[\"" + Esc( strCallIdA ) + "\",\"" +
+                      Esc( strCallIdB ) + "\"]}\n";
         } else {
-            fprintf( f, "{\"session_id\":\"%s\",\"sesid\":\"%s\",\"call_ids\":[\"%s\",\"%s\"]}\n",
-                     Esc( strSessionId ).c_str(), Esc( strSesId ).c_str(), Esc( strCallIdA ).c_str(),
-                     Esc( strCallIdB ).c_str() );
+            content = "{\"session_id\":\"" + Esc( strSessionId ) + "\",\"sesid\":\"" + Esc( strSesId ) +
+                      "\",\"call_ids\":[\"" + Esc( strCallIdA ) + "\",\"" + Esc( strCallIdB ) + "\"]}\n";
         }
-        fclose( f );
+        std::string path = dir + "/session.json";
+        m_worker.Enqueue( [path, content]() { return _writeFileS( path, content ); }, content.size() );
     }
 
     // ── VoIP ─────────────────────────────────────────────
 
-    /** VoIP 세션 디렉터리 생성. Session-ID 기반. */
+    /** VoIP 세션 디렉터리 경로 결정 (Session-ID 기반 — 순수 계산, 생성은 worker 가 기록 직전에). */
     std::string GetVoipDir( const std::string &strCallId, const std::string &strCaller,
                             const std::string &strCallee = "" ) {
         std::lock_guard<std::mutex> lock( m_mtx );
@@ -126,7 +173,7 @@ public:
         auto it = m_mapDir.find( strCallId );
         if ( it != m_mapDir.end() ) return it->second;
 
-        // 새 디렉터리 생성 (Session-ID가 있으면 사용, 없으면 Call-ID)
+        // 새 디렉터리 경로 (Session-ID가 있으면 사용, 없으면 Call-ID)
         std::string key = strCallId;
         if ( itSess != m_mapCallSession.end() ) key = itSess->second;
 
@@ -135,7 +182,6 @@ public:
         std::string sc = San( strCaller, 20 );
         std::string dir = m_strCallsDir + "/volte/" + yyyy + "/" + mm + "/" + dd + "/" + hh + "/" + Prefix( sc ) + "/" +
                           sc + "/" + San( key, 80 ) + ".d";
-        MkdirP( dir );
         m_mapDir[key] = dir;
         // Call-ID로도 같은 디렉터리를 찾을 수 있게
         if ( key != strCallId ) m_mapDir[strCallId] = dir;
@@ -147,22 +193,18 @@ public:
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );
         if ( dir.empty() ) return;
-        std::string path = dir + "/call.json";
-        struct stat st;
-        if ( stat( path.c_str(), &st ) == 0 ) return;
+        // 세션당 1회만 기록 (re-INVITE 멱등) — 메모리 셋으로 판정 (구 stat() 프로브 대체)
+        if ( m_setCallJson.size() > 50000 ) m_setCallJson.clear();
+        if ( !m_setCallJson.insert( dir ).second ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
         const char *pszCallType = bVideo ? "volte_video" : "volte";
-        FILE *f = fopen( path.c_str(), "w" );
-        if ( !f ) return;
-        fprintf( f,
-                 "{\"call_id\":\"%s\",\"call_type\":\"%s\","
-                 "\"initiator\":\"%s\",\"callee\":\"%s\","
-                 "\"state\":\"ringing\",\"invite_time\":\"%s\","
-                 "\"answer_time\":null,\"end_time\":null,"
-                 "\"duration\":0,\"end_reason\":null}\n",
-                 Esc( strCallId ).c_str(), pszCallType, Esc( strCaller ).c_str(), Esc( strCallee ).c_str(), ts );
-        fclose( f );
+        std::string content = "{\"call_id\":\"" + Esc( strCallId ) + "\",\"call_type\":\"" + pszCallType +
+                              "\",\"initiator\":\"" + Esc( strCaller ) + "\",\"callee\":\"" + Esc( strCallee ) +
+                              "\",\"state\":\"ringing\",\"invite_time\":\"" + ts +
+                              "\",\"answer_time\":null,\"end_time\":null,\"duration\":0,\"end_reason\":null}\n";
+        std::string path = dir + "/call.json";
+        m_worker.Enqueue( [path, content]() { return _writeFileS( path, content ); }, content.size() );
 
         // 가입자별 실시간 상태 파일 — 발/착신 각각
         std::string sessId = _sessionIdByCallId( strCallId );
@@ -174,18 +216,11 @@ public:
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );
         if ( dir.empty() ) return;
-        std::string path = dir + "/call.json";
-        std::string c = _readFile( path );
-        if ( c.empty() ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
-        _replace( c, "\"state\":\"ringing\"", "\"state\":\"active\"" );
-        _replace( c, "\"answer_time\":null", std::string( "\"answer_time\":\"" ) + ts + "\"" );
-        FILE *f = fopen( path.c_str(), "w" );
-        if ( f ) {
-            fputs( c.c_str(), f );
-            fclose( f );
-        }
+        std::string path = dir + "/call.json";
+        std::string tsStr = ts;
+        m_worker.Enqueue( [path, tsStr]() { return _updateAnswerS( path, tsStr ); } );
 
         // state/volte/ 하위 해당 call_id 매칭 파일 active 로 승격
         _promoteVoipStates( strCallId, ts );
@@ -195,8 +230,16 @@ public:
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );
         if ( dir.empty() ) return;
-        _updateCallJson( dir, strReason, iDur );
-        _appendIndex( dir, strCallId, "volte" );
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        std::string tsStr = ts;
+        std::string reason = strReason;
+        std::string callId = strCallId;
+        m_worker.Enqueue( [dir, reason, iDur, tsStr, callId]() {
+            bool bOk = _updateCallJsonS( dir, reason, iDur, tsStr );
+            return _appendIndexS( dir, callId, "volte", tsStr ) && bOk;
+        } );
+        m_setCallJson.erase( dir );
         m_mapDir.erase( strCallId );
 
         // state/volte/ 하위 해당 call_id 매칭 파일 제거
@@ -209,12 +252,10 @@ public:
         if ( dir.empty() ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
-        FILE *f = fopen( ( dir + "/participants.jsonl" ).c_str(), "a" );
-        if ( f ) {
-            fprintf( f, "{\"msisdn\":\"%s\",\"role\":\"%s\",\"join_time\":\"%s\",\"leave_time\":null}\n",
-                     Esc( strMsisdn ).c_str(), strRole.c_str(), ts );
-            fclose( f );
-        }
+        std::string line = "{\"msisdn\":\"" + Esc( strMsisdn ) + "\",\"role\":\"" + strRole + "\",\"join_time\":\"" +
+                           ts + "\",\"leave_time\":null}\n";
+        std::string path = dir + "/participants.jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
     }
 
     // ── PTT ──────────────────────────────────────────────
@@ -242,8 +283,6 @@ public:
         std::string key = ( !strStorageId.empty() && strStorageId != "0" ) ? strStorageId : strGroupId;
         std::string sg = San( key, 32 );
         std::string base = m_strCallsDir + "/ptt/" + sg;
-        struct stat st;
-        if ( stat( base.c_str(), &st ) != 0 ) MkdirP( base );
 
         // 런타임 맵은 mcptt_group_id 로 키잉(다른 PTT 메서드가 group._id 로 조회).
         m_mapPttSession[strGroupId] = base;
@@ -266,26 +305,20 @@ public:
         return it == m_mapPttSesName.end() ? std::string() : it->second;
     }
 
-    /** 그룹 base 하위 현재 시각 시간버킷 ptt/{gid}/{YYYY}/{MM}/{DD}/{HH} (생성 후 반환) */
+    /** 그룹 base 하위 현재 시각 시간버킷 ptt/{gid}/{YYYY}/{MM}/{DD}/{HH} — 순수 계산 */
     std::string _pttHourDir( const std::string &base ) {
         std::string yyyy, mm, dd, hh;
         DateHour( yyyy, mm, dd, hh );
-        std::string dir = base + "/" + yyyy + "/" + mm + "/" + dd + "/" + hh;
-        struct stat st;
-        if ( stat( dir.c_str(), &st ) != 0 ) MkdirP( dir );
-        return dir;
+        return base + "/" + yyyy + "/" + mm + "/" + dd + "/" + hh;
     }
 
-    /** 현재 시각 버킷의 세션 디렉터리 (생성 후 반환). m_mtx 획득 상태에서 호출한다.
-     *  세션이 시간을 넘기면 다음 버킷에 같은 이름으로 자연히 생성된다. */
+    /** 현재 시각 버킷의 세션 디렉터리 경로 (순수 계산 — 생성은 worker 가 기록 직전에).
+     *  m_mtx 획득 상태에서 호출한다. 세션이 시간을 넘기면 다음 버킷에 같은 이름으로 이어진다. */
     std::string _pttSessionDirLocked( const std::string &strGroupId, const std::string &base ) {
         std::string hourDir = _pttHourDir( base );
         auto it = m_mapPttSesName.find( strGroupId );
         if ( it == m_mapPttSesName.end() || it->second.empty() ) return hourDir;  // 이름 미상 — 버킷 직행
-        std::string dir = hourDir + "/" + it->second;
-        struct stat st;
-        if ( stat( dir.c_str(), &st ) != 0 ) MkdirP( dir );
-        return dir;
+        return hourDir + "/" + it->second;
     }
 
     /** strGroupJson = CGroupCallService::BuildGroupDescriptor 가 만든 자기완결 디스크립터
@@ -295,14 +328,13 @@ public:
     void PttSessionStart( const std::string &strGroupId, const std::string &strCallId, const std::string &strInitiator,
                           const std::string &strGroupJson = "{}" ) {
         // GetPttSessionDir가 이미 호출된 상태여야 함
-        std::string dir, sessId;
         {
             std::lock_guard<std::mutex> lock( m_mtx );
             auto it = m_mapPttSession.find( strGroupId );
             if ( it == m_mapPttSession.end() ) return;
-            dir = it->second;  // 그룹 base
+            std::string dir = it->second;  // 그룹 base
 
-            sessId = m_mapPttSessionId[strGroupId];
+            std::string sessId = m_mapPttSessionId[strGroupId];
             char ts[32];
             IsoNow( ts, sizeof( ts ) );
 
@@ -316,7 +348,10 @@ public:
             // group.json (자기완결 그룹 디스크립터) — base 루트에 1개 = 최신 편성 스냅샷.
             //   매 세션 시작마다 재작성한다 — 최초 1회만 기록하면 이후 추가된 필드
             //   (floor_control/floor_policy/max_talkers)·편성 변경이 영영 반영되지 않는다.
-            _writeDescriptor( dir + "/group.json", desc + body + "}" );
+            std::string groupPath = dir + "/group.json";
+            std::string groupContent = desc + body + "}\n";
+            m_worker.Enqueue( [groupPath, groupContent]() { return _writeFileS( groupPath, groupContent ); },
+                              groupContent.size() );
 
             // session.json — 세션 디렉터리(시작 버킷)에 당시 디스크립터 + 세션 사실을 남긴다.
             //   반이중/전이중·동시 발언 정원 표시는 이것이 정본 — 루트 group.json 은 최신
@@ -332,7 +367,9 @@ public:
                                        Esc( strInitiator ) + "\"" + ",\"call_id\":\"" + Esc( strCallId ) + "\"" +
                                        ",\"start_time\":\"" + std::string( ts ) + "\"";
                 std::string sessPath = sesDir + "/session.json";
-                _writeDescriptor( sessPath, desc + sessBody + "}" );
+                std::string sessContent = desc + sessBody + "}\n";
+                m_worker.Enqueue( [sessPath, sessContent]() { return _writeFileS( sessPath, sessContent ); },
+                                  sessContent.size() );
                 m_mapPttSessionDesc[strGroupId] = sessPath;
             }
 
@@ -400,15 +437,11 @@ public:
                 line += "," + inner;
             }
         }
-        line += "}";
+        line += "}\n";
 
         // 세션 디렉터리 events.jsonl 에 append (dir=그룹 base → {YYYY}/{MM}/{DD}/{HH}/{sesdir}/)
-        std::string sesDir = _pttSessionDirLocked( strGroupId, dir );
-        FILE *f = fopen( ( sesDir + "/events.jsonl" ).c_str(), "a" );
-        if ( f ) {
-            fprintf( f, "%s\n", line.c_str() );
-            fclose( f );
-        }
+        std::string path = _pttSessionDirLocked( strGroupId, dir ) + "/events.jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
     }
 
     // ── MCData 그룹 메시지 보관 ────────────────────────
@@ -424,20 +457,15 @@ public:
             std::string inner = strJsonData.substr( 1, strJsonData.size() - 2 );
             if ( !inner.empty() ) line += "," + inner;
         }
-        line += "}";
+        line += "}\n";
 
         time_t now = time( NULL );
         struct tm t;
         localtime_r( &now, &t );
         char sub[64];
         snprintf( sub, sizeof( sub ), "/%04d/%02d/%02d/%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour );
-        std::string dir = m_strCallsDir + "/message/" + San( strGroupId, 64 ) + sub;
-        MkdirP( dir );
-        FILE *f = fopen( ( dir + "/messages.jsonl" ).c_str(), "a" );
-        if ( f ) {
-            fprintf( f, "%s\n", line.c_str() );
-            fclose( f );
-        }
+        std::string path = m_strCallsDir + "/message/" + San( strGroupId, 64 ) + sub + "/messages.jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
     }
 
     // ── Flow 메시지 기록 ────────────────────────────
@@ -474,12 +502,14 @@ private:
     std::string m_strCallsDir;
     std::string m_strComponent;
     std::mutex m_mtx;
+    CStoreOpWriter m_worker;                                 // 저장 경로 연산 전담 (SIP 스레드 무접촉)
     std::map<std::string, std::string> m_mapDir;             // key(sessionId or callId) → dir path
     std::map<std::string, std::string> m_mapCallSession;     // callId → sessionId
     std::map<std::string, std::string> m_mapPttSession;      // groupId → 그룹 base 디렉터리
     std::map<std::string, std::string> m_mapPttSessionId;    // groupId → 현재 세션 sesid
     std::map<std::string, std::string> m_mapPttSesName;      // groupId → 세션 디렉터리 이름 S{ts}_{n}
     std::map<std::string, std::string> m_mapPttSessionDesc;  // groupId → 세션 시작 버킷 session.json 경로
+    std::set<std::string> m_setCallJson;                     // call.json 기록 완료 dir (멱등 가드)
 
     std::string _dir( const std::string &key ) {
         // 1) 직접 조회
@@ -541,28 +571,79 @@ private:
         if ( it == m_mapPttSession.end() ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
-        _finalizeDescriptor( it->second + "/group.json", ts );
+        std::string tsStr = ts;
+        std::string groupPath = it->second + "/group.json";
+        m_worker.Enqueue( [groupPath, tsStr]() { return _finalizeDescriptorS( groupPath, tsStr ); } );
         auto itDesc = m_mapPttSessionDesc.find( strGroupId );
         if ( itDesc != m_mapPttSessionDesc.end() ) {
-            _finalizeDescriptor( itDesc->second, ts );
+            std::string sessPath = itDesc->second;
+            m_worker.Enqueue( [sessPath, tsStr]() { return _finalizeDescriptorS( sessPath, tsStr ); } );
             m_mapPttSessionDesc.erase( itDesc );
         }
     }
 
-    /** 디스크립터 파일 기록 (전체 재작성) */
-    void _writeDescriptor( const std::string &path, const std::string &desc ) {
+    // ── 저장 경로 연산 (worker 스레드 전용 — 정적, 캡처된 값만 사용) ──────────
+
+    /** 파일 전체 재작성 (w) — 상위 디렉터리 보장 포함 */
+    static bool _writeFileS( const std::string &path, const std::string &content ) {
+        MkdirP( path.substr( 0, path.rfind( '/' ) ) );
         FILE *f = fopen( path.c_str(), "w" );
-        if ( f ) {
-            fprintf( f, "%s\n", desc.c_str() );
-            fclose( f );
+        if ( !f ) return false;
+        bool bOk = fwrite( content.data(), 1, content.size(), f ) == content.size();
+        fclose( f );
+        return bOk;
+    }
+
+    /** 한 줄 append — 상위 디렉터리 보장 포함 */
+    static bool _appendLineS( const std::string &path, const std::string &line ) {
+        MkdirP( path.substr( 0, path.rfind( '/' ) ) );
+        FILE *f = fopen( path.c_str(), "a" );
+        if ( !f ) return false;
+        bool bOk = fwrite( line.data(), 1, line.size(), f ) == line.size();
+        fclose( f );
+        return bOk;
+    }
+
+    /** call.json ringing→active + answer_time (RMW — worker FIFO 가 순서 보장) */
+    static bool _updateAnswerS( const std::string &path, const std::string &ts ) {
+        std::string c = _readFile( path );
+        if ( c.empty() ) return false;
+        _replace( c, "\"state\":\"ringing\"", "\"state\":\"active\"" );
+        _replace( c, "\"answer_time\":null", std::string( "\"answer_time\":\"" ) + ts + "\"" );
+        return _writeFileS( path, c );
+    }
+
+    static bool _updateCallJsonS( const std::string &dir, const std::string &reason, int dur, const std::string &ts ) {
+        std::string path = dir + "/call.json";
+        std::string c = _readFile( path );
+        if ( c.empty() ) return false;
+        _replace( c, "\"state\":\"ringing\"", "\"state\":\"ended\"" );
+        _replace( c, "\"state\":\"active\"", "\"state\":\"ended\"" );
+        _replace( c, "\"end_time\":null", std::string( "\"end_time\":\"" ) + ts + "\"" );
+        _replace( c, "\"duration\":0", "\"duration\":" + std::to_string( dur ) );
+        _replace( c, "\"end_reason\":null", std::string( "\"end_reason\":\"" ) + reason + "\"" );
+        return _writeFileS( path, c );
+    }
+
+    static bool _appendIndexS( const std::string &dir, const std::string &id, const std::string &type,
+                               const std::string &ts ) {
+        std::string hhDir = dir;
+        int levels = ( type == "volte" ) ? 3 : 2;
+        for ( int i = 0; i < levels; ++i ) {
+            size_t pos = hhDir.rfind( '/' );
+            if ( pos != std::string::npos ) hhDir = hhDir.substr( 0, pos );
         }
+        std::string dn = dir.substr( dir.rfind( '/' ) + 1 );
+        std::string line = "{\"dir\":\"" + Esc( dn ) + "\",\"type\":\"" + type + "\",\"id\":\"" + Esc( id ) +
+                           "\",\"time\":\"" + ts + "\"}\n";
+        return _appendLineS( hhDir + "/index.json", line );
     }
 
     /** 디스크립터 종료 마킹 — state=ended + end_time. end_time 은 이미 있으면 값만
      *  교체한다 (종전엔 종료마다 말미에 삽입해 중복 키가 무한 누적됐다). */
-    void _finalizeDescriptor( const std::string &path, const char *ts ) {
+    static bool _finalizeDescriptorS( const std::string &path, const std::string &ts ) {
         std::string c = _readFile( path );
-        if ( c.empty() ) return;
+        if ( c.empty() ) return false;
         _replace( c, "\"state\":\"active\"", "\"state\":\"ended\"" );
         static const char kKey[] = "\"end_time\":\"";
         size_t k = c.find( kKey );
@@ -574,11 +655,64 @@ private:
             size_t lb = c.rfind( '}' );
             if ( lb != std::string::npos ) c.insert( lb, std::string( ",\"end_time\":\"" ) + ts + "\"" );
         }
-        FILE *f = fopen( path.c_str(), "w" );
-        if ( f ) {
-            fputs( c.c_str(), f );
-            fclose( f );
+        return _writeFileS( path, c );
+    }
+
+    /** 원자 쓰기: .tmp 로 쓰고 rename (POSIX atomic) — 상위 디렉터리 보장 포함 */
+    static bool _atomicWriteS( const std::string &path, const std::string &content ) {
+        std::string tmp = path + ".tmp";
+        if ( !_writeFileS( tmp, content ) ) return false;
+        return rename( tmp.c_str(), path.c_str() ) == 0;
+    }
+
+    /** state 디렉터리에서 needle 매칭 파일 제거 */
+    static bool _removeStatesMatchingS( const std::string &dir, const std::string &needle ) {
+        DIR *d = opendir( dir.c_str() );
+        if ( !d ) return false;
+        struct dirent *ent;
+        while ( ( ent = readdir( d ) ) != nullptr ) {
+            if ( ent->d_name[0] == '.' ) continue;
+            std::string path = dir + "/" + ent->d_name;
+            std::string c = _readFile( path );
+            if ( c.find( needle ) != std::string::npos ) {
+                ::unlink( path.c_str() );
+            }
         }
+        closedir( d );
+        return true;
+    }
+
+    /** VoIP Answer 시 state 파일 state=ringing → active + answered_at 업데이트 */
+    static bool _promoteVoipStatesS( const std::string &dir, const std::string &needle, const std::string &ts ) {
+        DIR *d = opendir( dir.c_str() );
+        if ( !d ) return false;
+        bool bOk = true;
+        struct dirent *ent;
+        while ( ( ent = readdir( d ) ) != nullptr ) {
+            if ( ent->d_name[0] == '.' ) continue;
+            std::string path = dir + "/" + ent->d_name;
+            std::string c = _readFile( path );
+            if ( c.find( needle ) == std::string::npos ) continue;
+            _replace( c, "\"state\":\"ringing\"", "\"state\":\"active\"" );
+            _replace( c, "\"answered_at\":null", std::string( "\"answered_at\":\"" ) + ts + "\"" );
+            if ( !_atomicWriteS( path, c ) ) bOk = false;
+        }
+        closedir( d );
+        return bOk;
+    }
+
+    /** state 디렉토리 내 모든 *.json 제거 (기동 시 호출) */
+    static bool _purgeStateDirS( const std::string &dir ) {
+        DIR *d = opendir( dir.c_str() );
+        if ( !d ) return false;
+        struct dirent *ent;
+        while ( ( ent = readdir( d ) ) != nullptr ) {
+            if ( ent->d_name[0] == '.' ) continue;
+            std::string path = dir + "/" + ent->d_name;
+            ::unlink( path.c_str() );
+        }
+        closedir( d );
+        return true;
     }
 
     void _writeJsonl( const std::string &dir, const char *from, const char *to, const char *proto, const char *label,
@@ -600,48 +734,9 @@ private:
                            Esc( label ? label : "" ) +
                            "\","
                            "\"body\":\"" +
-                           Esc( body ? body : "" ) + "\"}";
-        FILE *f = fopen( ( dir + "/" + m_strComponent + ".jsonl" ).c_str(), "a" );
-        if ( f ) {
-            fprintf( f, "%s\n", line.c_str() );
-            fclose( f );
-        }
-    }
-
-    void _updateCallJson( const std::string &dir, const std::string &reason, int dur ) {
-        std::string path = dir + "/call.json";
-        std::string c = _readFile( path );
-        if ( c.empty() ) return;
-        char ts[32];
-        IsoNow( ts, sizeof( ts ) );
-        _replace( c, "\"state\":\"ringing\"", "\"state\":\"ended\"" );
-        _replace( c, "\"state\":\"active\"", "\"state\":\"ended\"" );
-        _replace( c, "\"end_time\":null", std::string( "\"end_time\":\"" ) + ts + "\"" );
-        _replace( c, "\"duration\":0", "\"duration\":" + std::to_string( dur ) );
-        _replace( c, "\"end_reason\":null", std::string( "\"end_reason\":\"" ) + reason + "\"" );
-        FILE *f = fopen( path.c_str(), "w" );
-        if ( f ) {
-            fputs( c.c_str(), f );
-            fclose( f );
-        }
-    }
-
-    void _appendIndex( const std::string &dir, const std::string &id, const std::string &type ) {
-        std::string hhDir = dir;
-        int levels = ( type == "volte" ) ? 3 : 2;
-        for ( int i = 0; i < levels; ++i ) {
-            size_t pos = hhDir.rfind( '/' );
-            if ( pos != std::string::npos ) hhDir = hhDir.substr( 0, pos );
-        }
-        char ts[32];
-        IsoNow( ts, sizeof( ts ) );
-        FILE *f = fopen( ( hhDir + "/index.json" ).c_str(), "a" );
-        if ( f ) {
-            std::string dn = dir.substr( dir.rfind( '/' ) + 1 );
-            fprintf( f, "{\"dir\":\"%s\",\"type\":\"%s\",\"id\":\"%s\",\"time\":\"%s\"}\n", Esc( dn ).c_str(),
-                     type.c_str(), Esc( id ).c_str(), ts );
-            fclose( f );
-        }
+                           Esc( body ? body : "" ) + "\"}\n";
+        std::string path = dir + "/" + m_strComponent + ".jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
     }
 
     static std::string _readFile( const std::string &p ) {
@@ -736,7 +831,7 @@ private:
 
     // ── 가입자 실시간 상태 파일 ──────────────────────────
     //   경로: {CallsDir}/state/{volte|ptt}/{sanitized_subscriber_id}.json
-    //   원자 쓰기: .tmp 로 쓰고 rename (POSIX atomic)
+    //   원자 쓰기: .tmp 로 쓰고 rename (POSIX atomic) — worker 가 수행
 
     std::string _sessionIdByCallId( const std::string &strCallId ) {
         auto it = m_mapCallSession.find( strCallId );
@@ -745,15 +840,6 @@ private:
 
     std::string _stateFilePath( const std::string &kind, const std::string &subId ) {
         return m_strCallsDir + "/state/" + kind + "/" + San( subId, 64 ) + ".json";
-    }
-
-    void _atomicWrite( const std::string &path, const std::string &content ) {
-        std::string tmp = path + ".tmp";
-        FILE *f = fopen( tmp.c_str(), "w" );
-        if ( !f ) return;
-        fwrite( content.data(), 1, content.size(), f );
-        fclose( f );
-        rename( tmp.c_str(), path.c_str() );
     }
 
     void _writeVoipState( const std::string &subId, const std::string &callId, const std::string &sessionId,
@@ -766,7 +852,8 @@ private:
                            ",\"state\":\"" + Esc( state ) + "\"" + ",\"video\":" + ( bVideo ? "true" : "false" ) +
                            ",\"media_node\":\"" + Esc( mediaNode ) + "\"" + ",\"started_at\":\"" + ts + "\"" +
                            ",\"answered_at\":null" + ",\"record_dir\":\"" + Esc( recordDir ) + "\"}\n";
-        _atomicWrite( _stateFilePath( "volte", subId ), body );
+        std::string path = _stateFilePath( "volte", subId );
+        m_worker.Enqueue( [path, body]() { return _atomicWriteS( path, body ); }, body.size() );
     }
 
     void _writePttState( const std::string &subId, const std::string &groupId, const std::string &sessionId,
@@ -778,12 +865,17 @@ private:
                            ",\"group_id\":\"" + Esc( groupId ) + "\"" + ",\"role\":\"" + Esc( role ) + "\"" +
                            ",\"state\":\"active\"" + ",\"started_at\":\"" + ts + "\"" + ",\"record_dir\":\"" +
                            Esc( recordDir ) + "\"}\n";
-        _atomicWrite( _stateFilePath( "ptt", subId ), body );
+        std::string path = _stateFilePath( "ptt", subId );
+        m_worker.Enqueue( [path, body]() { return _atomicWriteS( path, body ); }, body.size() );
     }
 
     void _removePttState( const std::string &subId ) {
         if ( m_strCallsDir.empty() || subId.empty() ) return;
-        ::unlink( _stateFilePath( "ptt", subId ).c_str() );
+        std::string path = _stateFilePath( "ptt", subId );
+        m_worker.Enqueue( [path]() {
+            ::unlink( path.c_str() );
+            return true;
+        } );
     }
 
     /** 특정 call_id 에 매칭되는 volte state 파일 삭제 (caller + callee 동시 정리).
@@ -795,18 +887,7 @@ private:
         std::string needle =
             sessId.empty() ? "\"call_id\":\"" + Esc( strCallId ) + "\"" : "\"session_id\":\"" + Esc( sessId ) + "\"";
         std::string dir = m_strCallsDir + "/state/volte";
-        DIR *d = opendir( dir.c_str() );
-        if ( !d ) return;
-        struct dirent *ent;
-        while ( ( ent = readdir( d ) ) != nullptr ) {
-            if ( ent->d_name[0] == '.' ) continue;
-            std::string path = dir + "/" + ent->d_name;
-            std::string c = _readFile( path );
-            if ( c.find( needle ) != std::string::npos ) {
-                ::unlink( path.c_str() );
-            }
-        }
-        closedir( d );
+        m_worker.Enqueue( [dir, needle]() { return _removeStatesMatchingS( dir, needle ); } );
     }
 
     /** VoIP Answer 시 state 파일 state=ringing → active + answered_at 업데이트.
@@ -817,51 +898,16 @@ private:
         std::string needle =
             sessId.empty() ? "\"call_id\":\"" + Esc( strCallId ) + "\"" : "\"session_id\":\"" + Esc( sessId ) + "\"";
         std::string dir = m_strCallsDir + "/state/volte";
-        DIR *d = opendir( dir.c_str() );
-        if ( !d ) return;
-        struct dirent *ent;
-        while ( ( ent = readdir( d ) ) != nullptr ) {
-            if ( ent->d_name[0] == '.' ) continue;
-            std::string path = dir + "/" + ent->d_name;
-            std::string c = _readFile( path );
-            if ( c.find( needle ) == std::string::npos ) continue;
-            _replace( c, "\"state\":\"ringing\"", "\"state\":\"active\"" );
-            _replace( c, "\"answered_at\":null", std::string( "\"answered_at\":\"" ) + ts + "\"" );
-            _atomicWrite( path, c );
-        }
-        closedir( d );
+        std::string tsStr = ts;
+        m_worker.Enqueue( [dir, needle, tsStr]() { return _promoteVoipStatesS( dir, needle, tsStr ); } );
     }
 
     /** 그룹 세션 종료 시 해당 그룹의 잔여 state 파일 일괄 제거 */
     void _removePttStatesByGroupId( const std::string &strGroupId ) {
         if ( m_strCallsDir.empty() || strGroupId.empty() ) return;
-        std::string dir = m_strCallsDir + "/state/ptt";
-        DIR *d = opendir( dir.c_str() );
-        if ( !d ) return;
         std::string needle = "\"group_id\":\"" + Esc( strGroupId ) + "\"";
-        struct dirent *ent;
-        while ( ( ent = readdir( d ) ) != nullptr ) {
-            if ( ent->d_name[0] == '.' ) continue;
-            std::string path = dir + "/" + ent->d_name;
-            std::string c = _readFile( path );
-            if ( c.find( needle ) != std::string::npos ) {
-                ::unlink( path.c_str() );
-            }
-        }
-        closedir( d );
-    }
-
-    /** state 디렉토리 내 모든 *.json 제거 (기동 시 호출) */
-    void _purgeStateDir( const std::string &dir ) {
-        DIR *d = opendir( dir.c_str() );
-        if ( !d ) return;
-        struct dirent *ent;
-        while ( ( ent = readdir( d ) ) != nullptr ) {
-            if ( ent->d_name[0] == '.' ) continue;
-            std::string path = dir + "/" + ent->d_name;
-            ::unlink( path.c_str() );
-        }
-        closedir( d );
+        std::string dir = m_strCallsDir + "/state/ptt";
+        m_worker.Enqueue( [dir, needle]() { return _removeStatesMatchingS( dir, needle ); } );
     }
 };
 

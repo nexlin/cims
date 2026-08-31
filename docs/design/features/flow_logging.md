@@ -92,10 +92,15 @@ cmp/cmdp 공용 `CServiceLogWriter`(include/ServiceLogWriter.h), csc `logger.py`
 - **설정**: 모듈별 `ServiceLogging.{SpoolDir,StallSec,SpoolMaxMb}` (기본 `spool`/5/1024 —
   SpoolDir 는 반드시 로컬 디스크 경로). CSP 는 `Setup.ServiceLogging.*`.
 
-> 남은 별도 축: **CallDir**(call.json/session.json — SIP 스레드 동기 쓰기, 원자 rewrite 라
-> append 스풀 불가 — 별도 설계 필요)과 **CMP 녹취**(`PSyncRtpRecorder` — RTP 리액터 스레드가
-> `RecordDir`(NAS 가능)에 직접 fwrite. NFS 행 시 미디어 평면 리액터가 갇힐 수 있어 최우선
-> 후속 설계 대상).
+**재생 불가 연산 축(CallDir·녹취)** — 원자 rewrite·rename·디렉터리 스캔이 섞인 기록은 스풀
+재생이 불가능하므로 **`include/StoreOpWriter.h`(CStoreOpWriter — op worker)** 로 격리한다:
+서비스 스레드는 순수 계산+op 적재만, worker 하나가 FIFO 실행. 실패/정체(StallSec)/큐 포화
+시 op 드롭(장애 구간 유실 수용) + 자기보고, 회복 시 자연 재개.
+
+- **CSP CallDir**(`csp/CallDir.h` — call.json/session.json/events/state 파일): SIP 스레드
+  파일시스템 무접촉. 폴백 시 **A-PRC-013**(mo `<node>/csp/call_dir`).
+- **CMP 녹취**(`PSyncRtpRecorder` + floor.jsonl): RTP 리액터 저장 경로 무접촉. 폴백 시
+  **A-PRC-017**(mo `<시스템ID>/cmp/record`). 상세: [recording.md](recording.md) §3.1.
 
 ## 3. Realm 설정
 

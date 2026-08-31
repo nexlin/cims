@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cctype>
 #include "PMcpttGroup.h"
+#include "PSyncRtpRecorder.h"
 #include <fstream>
 #include <tuple>
 #include <unordered_map>
@@ -109,6 +110,7 @@ bool PCmpServer::startServer() {
 
     _running = true;
     startServiceLogWriter();  // 서비스 로그 writer 기동 (control 스레드 NFS HOL 블로킹 제거 + 스풀 폴백)
+    startRecStoreWriter();    // 녹취 저장 경로 op worker 기동 (RTP 리액터 저장 경로 무접촉 + A-PRC-017)
     std::thread([this]() {
         this->runControlLoop();
     }).detach();
@@ -205,6 +207,7 @@ void PCmpServer::stopServer() {
     if (_fmMonitorThread.joinable()) _fmMonitorThread.join();
     gclsFmReporter.Stop();  // process_stopping pending 재전송 여지 후 종료
     _logWriter.Stop();  // timeout 스레드 정지 후 잔여 로그 flush (저장 경로 무응답 시 스풀 회수)
+    gclsRecStoreWriter.Stop();  // 녹취 잔여 op 드레인 (저장소 무응답이면 드롭 계수 후 detach)
     if (_udpFd >= 0) {
         ::close(_udpFd);
         _udpFd = -1;
@@ -1739,10 +1742,7 @@ void PCmpServer::loadConfig() {
         }
     }
 
-    if (_recordEnable) {
-        std::string mkdirCmd = "mkdir -p " + _recordDir;
-        system(mkdirCmd.c_str());
-    }
+    // 녹취 디렉터리 생성은 녹취 op worker 가 기록 직전에 수행 (저장 경로 무접촉)
 
     LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d floor timers T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d",
            _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttVideoStartPort, _pttMemberPoolSize,
@@ -2338,6 +2338,33 @@ void PCmpServer::startServiceLogWriter() {
                 gclsFmReporter.AlarmOpen("A-PRC-006", mo, params);
             } else {
                 gclsFmReporter.AlarmClose("A-PRC-006", mo);
+            }
+        });
+}
+
+// 녹취 저장 경로 op worker 기동 — RTP 리액터/제어 스레드는 녹취 경로(NAS 가능)를 만지지
+//   않고 op 만 적재한다 (PSyncRtpRecorder/_logFloorLocal). 실패/정체/포화 시 패킷 op 드롭
+//   (장애 구간 녹취 유실 수용) + A-PRC-017 record storage_failure 자기보고.
+void PCmpServer::startRecStoreWriter() {
+    std::string recPath = _recordDir.empty() ? _serviceLogDir : _recordDir;
+    gclsRecStoreWriter.Init(
+        _logStallSec, 20000, 64LL * 1024 * 1024,
+        [](EnumSowLogLevel level, const std::string& msg) {
+            if (level == SOW_LOG_ERROR) { LOG_ERROR("RecStore", "%s", msg.c_str()); }
+            else if (level == SOW_LOG_DEBUG) { LOG_DEBUG("RecStore", "%s", msg.c_str()); }
+            else { LOG_INFO("RecStore", "%s", msg.c_str()); }
+        },
+        [this, recPath](const SowDegradeInfo& d) {
+            if (!gclsFmReporter.IsEnabled()) return;
+            std::string mo = _systemId + "/" + _nodeName + "/record";
+            if (d.bDegraded) {
+                SimpleJson::JsonNode params;
+                params.Set("path", recPath.c_str());
+                params.Set("reason", d.strReason.c_str());
+                params.Set("dropped", (int)d.ulDroppedOps);
+                gclsFmReporter.AlarmOpen("A-PRC-017", mo, params);
+            } else {
+                gclsFmReporter.AlarmClose("A-PRC-017", mo);
             }
         });
 }

@@ -15,6 +15,19 @@
     },
     {
       "type": "storage_failure",
+      "code": "A-PRC-017",
+      "perceived_severity": "critical",
+      "event_type": "processingError",
+      "probable_cause": "underlyingResourceUnavailable",
+      "mo_class": "service",
+      "metric": "녹취(record) 저장 경로 기록",
+      "msg_open": "Recording writes failing on {path} ({reason}) — {dropped} ops dropped",
+      "msg_close": "Recording store recovered ({mo})",
+      "effect": "녹취 세그먼트/메타/floor 이벤트 기록이 유실되는 중 — 법적 보존 공백 (미디어 중계 자체는 정상). 장애 구간은 소급 복구되지 않는다",
+      "recommended_action": "녹취 볼륨(NAS/NFS) 마운트·권한·용량 확인·유실 구간 산정 (params.dropped)"
+    },
+    {
+      "type": "storage_failure",
       "code": "A-PRC-006",
       "perceived_severity": "major",
       "event_type": "processingError",

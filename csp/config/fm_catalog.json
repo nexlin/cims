@@ -106,6 +106,19 @@
     },
     {
       "type": "storage_failure",
+      "code": "A-PRC-013",
+      "perceived_severity": "critical",
+      "event_type": "processingError",
+      "probable_cause": "underlyingResourceUnavailable",
+      "mo_class": "service",
+      "metric": "호 이력(CDR)/실시간 상태 파일 기록 (call_dir)",
+      "msg_open": "Call history (CDR) writes failing on {path} ({reason}) — {dropped} ops dropped",
+      "msg_close": "Call history store recovered ({mo})",
+      "effect": "호 이력(call.json/session.json/events)·실시간 상태 파일 기록이 유실되는 중 — 과금/이력/콘솔 실시간 현황 공백 (호 처리 자체는 정상). 재생 불가 연산이라 장애 구간은 소급 복구되지 않는다",
+      "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 이후 기록은 재개되나 장애 구간 유실분은 params.dropped 로 산정"
+    },
+    {
+      "type": "storage_failure",
       "code": "A-PRC-006",
       "perceived_severity": "major",
       "event_type": "processingError",

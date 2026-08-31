@@ -181,6 +181,7 @@ private:
     int _logSpoolMaxMb = 1024;           // ServiceLogging.SpoolMaxMb — 스풀 용량 상한
     std::string _seedBucketKey;          // 기동 시점 버킷 — 시딩(재기동 seq 연속성) 합류 판정
     void startServiceLogWriter();        // startServer 에서 기동
+    void startRecStoreWriter();          // 녹취 op worker(gclsRecStoreWriter) 기동 — A-PRC-017 콜백 구성
 
     // msg_log body
     std::string _msgLogDir;

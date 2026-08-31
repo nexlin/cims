@@ -68,18 +68,32 @@ VoIP 1:1 통화 및 PTT 그룹콜의 음성·영상을 녹취하고, Console UI�
 
 ## 3. 녹취 흐름
 
-### 3.1 CMP: raw RTP 저장 (비동기)
+### 3.1 CMP: raw RTP 저장 (비동기 — 저장 경로 무의존)
 
 ```
-RTP 패킷 수신
+RTP 패킷 수신 (리액터 스레드)
   ↓
 포워딩 (기존 로직)
   ↓
-비동기 write: [4-byte len][RTP packet] → .rtp 파일
-  (별도 I/O 스레드 또는 non-blocking write)
+직렬화([4B len][8B recv_usec][RTP]) + op 적재  ← 리액터는 저장 경로 무접촉
+  ↓
+녹취 op worker(gclsRecStoreWriter — include/StoreOpWriter.h) 가 FIFO 실행:
+  디렉터리 생성·트랙 open/write/close·rename·세그먼트 메타/인덱스·floor.jsonl
 ```
 
 CMP는 트랜스코딩을 **절대 하지 않음**. raw 파일만 저장하고 서비스 루프에 영향 없음.
+
+**저장 경로(NAS) 무의존 계약** — RecordDir 가 NFS hard mount 여도 미디어 평면은 막히지
+않는다 (flow_logging.md §2 와 같은 원리, 단 재생 불가 연산이라 스풀이 없다):
+
+- RTP 리액터/제어 스레드는 트랙 상태·메타를 메모리에서만 관리하고 저장 연산을 op 로
+  적재한다. `FILE*` 는 worker 전용 테이블에 산다.
+- 쓰기 실패(연속)·in-flight 정체(`ServiceLogging.StallSec`)·큐 포화(64MB/2만 op) 시
+  패킷 op 를 드롭하고 **A-PRC-017** record storage_failure 로 자기보고한다 — 장애 구간
+  녹취는 유실을 수용한다(미디어 볼륨이라 스풀 부적합). 회복 시 이후 세그먼트부터 재개.
+- **seq 시딩 비동기**: CMP 재기동 후 같은 세션 복귀 시 segments.jsonl 마지막 seq 는
+  worker 가 비동기 계수한다(그룹 ADD 시 예약). 시딩 미도착으로 seq 가 겹쳐도 close op
+  의 rename 이 기존 세그먼트를 덮지 않고 `.dup` 로 보존한다 (무손실 가드).
 
 ### 3.2 VoIP 1:1 통화
 

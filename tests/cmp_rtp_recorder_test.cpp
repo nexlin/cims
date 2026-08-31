@@ -1,7 +1,7 @@
 // cmp_rtp_recorder_test.cpp — 녹취 세그먼트 메타(PSyncRtpRecorder)의 tracks[] 계약 검증.
 //
-// 빌드: g++ -std=c++17 -I../cmp tests/cmp_rtp_recorder_test.cpp ../cmp/PSyncRtpRecorder.cpp -o /tmp/rectest
-// (PSyncRtpRecorder.cpp 는 PLog.h 외 외부 의존이 없어 단독 링크 가능)
+// 빌드: g++ -std=c++17 -pthread -Icmp -Iinclude tests/cmp_rtp_recorder_test.cpp cmp/PSyncRtpRecorder.cpp -o /tmp/rectest
+// (PSyncRtpRecorder.cpp 는 PLog.h/StoreOpWriter.h 외 외부 의존이 없어 단독 링크 가능)
 //
 // 검증 항목:
 //   pttSingleTalker      단일 화자 — 슬롯 0 트랙 1개, 화자 구간 1개, flat 키 호환 유지
@@ -131,6 +131,7 @@ static void pttSingleTalker() {
         r.setTrackSpeaker("video", "01011112222");
         writeMedia(r, "audio");
         r.finishSegment();
+        gclsRecStoreWriter.Flush(3000);  // 비동기 op worker 드레인 후 파일 검증
     }
     std::string j = lastSegmentLine(dir);
     CHECK(!j.empty(), "segments.jsonl 이 기록되어야 한다");
@@ -169,6 +170,7 @@ static void pttMultiTalker() {
         r.setTrackPtCodec("audio2", 96, "AMR-WB/16000");
         writeMedia(r, "audio2");
         r.finishSegment();
+        gclsRecStoreWriter.Flush(3000);  // 비동기 op worker 드레인 후 파일 검증
     }
     std::string j = lastSegmentLine(dir);
     std::string t0 = trackObj(j, "audio"), t1 = trackObj(j, "audio1"), t2 = trackObj(j, "audio2");
@@ -199,6 +201,7 @@ static void slotReuseSplitsSpans() {
         r.setTrackPtCodec("audio", 99, "AMR-WB/16000");
         writeMedia(r, "audio");
         r.finishSegment();
+        gclsRecStoreWriter.Flush(3000);  // 비동기 op worker 드레인 후 파일 검증
     }
     std::string j = lastSegmentLine(dir);
     std::string t0 = trackObj(j, "audio");
@@ -226,6 +229,7 @@ static void emptyTrackDropped() {
         writeMedia(r, "audio");
         writeKeepalive(r, "video");     // 영상 포트 keepalive 만 — 영상 없음으로 취급
         r.finishSegment();
+        gclsRecStoreWriter.Flush(3000);  // 비동기 op worker 드레인 후 파일 검증
     }
     std::string j = lastSegmentLine(dir);
     CHECK(has(j, "\"has_video\":false"), "keepalive-only 트랙은 영상 없음");
@@ -245,6 +249,7 @@ static void voipTrackSides() {
         writeMedia(r, "a");
         writeMedia(r, "b");
         r.finishSegment();
+        gclsRecStoreWriter.Flush(3000);  // 비동기 op worker 드레인 후 파일 검증
     }
     std::string j = lastSegmentLine(dir);
     CHECK(has(j, "\"caller\":\"01011112222\""), "VoIP caller 유지");
@@ -259,6 +264,8 @@ static void voipTrackSides() {
 
 int main() {
     printf("=== CMP RTP recorder 메타 계약 테스트 ===\n");
+    // 파일 I/O 는 비동기 op worker 가 수행 — 테스트는 기동 후 각 시나리오에서 Flush 로 드레인
+    gclsRecStoreWriter.Init(5, 20000, 64LL * 1024 * 1024);
     pttSingleTalker();
     pttMultiTalker();
     slotReuseSplitsSpans();

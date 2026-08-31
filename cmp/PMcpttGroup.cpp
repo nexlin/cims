@@ -12,7 +12,8 @@
 
 unsigned int PMcpttGroup::_nextSsrc = 1000;
 
-// 세션 로컬 floor 이벤트 기록 (_recordDir/floor.jsonl). 크래시-세이프 append.
+// 세션 로컬 floor 이벤트 기록 (_recordDir/floor.jsonl). 여기(floor 처리 스레드)서는 한 줄
+//   조립만 하고, 디렉터리 생성+append 는 녹취 op worker 몫 — 저장 경로 무접촉.
 void PMcpttGroup::_logFloorLocal(const char* op, const std::string& user, unsigned int ssrc, int prio,
                                  const char* extraJson)
 {
@@ -26,27 +27,32 @@ void PMcpttGroup::_logFloorLocal(const char* op, const std::string& user, unsign
     int n = (int)strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tmv);
     snprintf(ts + n, sizeof(ts) - n, ".%06ld", (long)tv.tv_usec);
 
-    // 세션 디렉터리 {base}/{YYYY}/{MM}/{DD}/{HH}/{sesdir}/floor.jsonl (mkdir -p).
+    // 세션 디렉터리 {base}/{YYYY}/{MM}/{DD}/{HH}/{sesdir}/floor.jsonl.
     //   sesdir 미지정(레거시)이면 버킷 직행 — 기존 녹취와 같은 자리.
     char hb[32];
     snprintf(hb, sizeof(hb), "/%04d/%02d/%02d/%02d",
              tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour);
     std::string hourDir = _recordDir + hb;
     if (!_recordSesDir.empty()) hourDir += "/" + _recordSesDir;
-    {
-        std::string p = hourDir;
+    std::string path = hourDir + "/floor.jsonl";
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "{\"ts\":\"%s\",\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d%s%s}\n",
+             ts, op, user.c_str(), ssrc, prio,
+             (extraJson && extraJson[0]) ? "," : "",
+             (extraJson && extraJson[0]) ? extraJson : "");
+    std::string line(buf);
+    gclsRecStoreWriter.Enqueue([path, line]() {
+        std::string dir = path.substr(0, path.rfind('/'));
+        std::string p = dir;
         for (size_t i = 1; i < p.size(); ++i)
             if (p[i] == '/') { p[i] = '\0'; mkdir(p.c_str(), 0755); p[i] = '/'; }
         mkdir(p.c_str(), 0755);
-    }
-    std::string path = hourDir + "/floor.jsonl";
-    FILE* f = fopen(path.c_str(), "a");
-    if (!f) return;
-    fprintf(f, "{\"ts\":\"%s\",\"op\":\"%s\",\"user\":\"%s\",\"ssrc\":%u,\"prio\":%d%s%s}\n",
-            ts, op, user.c_str(), ssrc, prio,
-            (extraJson && extraJson[0]) ? "," : "",
-            (extraJson && extraJson[0]) ? extraJson : "");
-    fclose(f);
+        FILE* f = fopen(path.c_str(), "a");
+        if (!f) return false;
+        bool ok = fwrite(line.data(), 1, line.size(), f) == line.size();
+        fclose(f);
+        return ok;
+    }, line.size());
 }
 
 // Floor 패킷 빌드/파싱 헬퍼(TS 24.380 §8.2 RTCP APP "MCPT" + TLV)는 PFloorCodec.cpp
@@ -1948,9 +1954,7 @@ void PMcpttGroup::setRecording(bool enable, const std::string& dir, const std::s
     _recordDir = dir;
     _recordSesDir = sesDir;
     if (enable && !dir.empty()) {
-        std::string mkdirCmd = "mkdir -p " + dir;
-        system(mkdirCmd.c_str());
-        startRecording();
+        startRecording();  // 디렉터리 생성은 녹취 op worker 가 기록 직전에 수행
     }
 }
 
