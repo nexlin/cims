@@ -1083,7 +1083,10 @@ def _grant_ipsec_capability(module_root: str, install_path: str) -> str:
     name = os.path.basename((module_root or "").rstrip("/"))
     if name not in ("csp", "cspsim"):
         return ""
-    binp = os.path.join(install_path, "bin", name)
+    # 버전 디렉토리 레이아웃은 <install>/<모듈>/bin/<모듈> — 평탄 <install>/bin/ 은 legacy.
+    binp = os.path.join(install_path, name, "bin", name)
+    if not os.path.isfile(binp):
+        binp = os.path.join(install_path, "bin", name)
     if not os.path.isfile(binp):
         return ""
     rc, out, err = _run_cims_priv("setcap-net-admin", binp, timeout=20)

@@ -119,6 +119,16 @@ def srtp(ctx: VerifyContext) -> ItemResult:
             return False
         return signal_csp_reload(pid_file)
 
+    # 마커는 tail 이 아니라 on_line 전 스트림에서 찾는다 — 5인 그룹콜 출력이
+    # tail 창(100줄)을 넘겨 초반 "[RTP] SRTP enabled" 가 잘린다.
+    def srtp_watch() -> tuple:
+        seen = {"srtp": False}
+
+        def on_line(line: str):
+            if "[RTP] SRTP enabled" in line:
+                seen["srtp"] = True
+        return seen, on_line
+
     def group_call(srtp_arg: str) -> tuple:
         """cspsim 그룹콜 1회 — (rc, tail, 신규 녹취+이벤트, cspsim SRTP enabled 여부)"""
         t0 = time.time()
@@ -132,9 +142,10 @@ def srtp(ctx: VerifyContext) -> ItemResult:
             "-media_dir", media_dir,
             "-srtp", srtp_arg,
         ]
-        rc, tail = run_cspsim(ctx.repo_root, args, timeout=120)
+        seen, on_line = srtp_watch()
+        rc, tail = run_cspsim(ctx.repo_root, args, timeout=120, on_line=on_line)
         delta = count_recordings(ctx.dist_dir, since=t0) + count_ptt_events(ctx.dist_dir, since=t0)
-        return rc, tail, delta, ("[RTP] SRTP enabled" in tail), t0
+        return rc, tail, delta, seen["srtp"], t0
 
     checks = []  # (이름, ok, 상세)
     try:
@@ -181,8 +192,9 @@ def srtp(ctx: VerifyContext) -> ItemResult:
                 *cred_args(s, "VOIP", 2),
                 "-srtp", "required",
             ]
-            rc5, tail5 = run_cspsim(ctx.repo_root, args5, timeout=120)
-            sim5 = "[RTP] SRTP enabled" in tail5
+            seen5, on_line5 = srtp_watch()
+            rc5, tail5 = run_cspsim(ctx.repo_root, args5, timeout=120, on_line=on_line5)
+            sim5 = seen5["srtp"]
             # PRtpRelay setLegCrypto — 양 leg 각 1건 이상 (audio)
             relay5 = _grep_logs("SRTP audio peer[", log_dirs[:1], t5 - 5)
             ok5 = sim5 and relay5 >= 2
