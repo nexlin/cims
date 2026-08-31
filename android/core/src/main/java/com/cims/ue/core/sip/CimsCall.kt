@@ -91,6 +91,13 @@ class CimsCall : Call {
             //   (착신 경로의 고전적 회귀 지점, [SipController.incomingFloorSdp] KDoc 참조).
             Log.i(TAG, "onCallSdpCreated(call=$id) floorInject=${pendingAppSdp != null} " +
                 "localM=[${prm.sdp.wholeSdp.lineSequence().filter { it.startsWith("m=") }.joinToString("|") { it.trim() }}]")
+            // 빈 wholeSdp = pjsua2 인쇄 버퍼(PJSUA2_MAX_SDP_BUF_LEN) 오버플로. 이 상태로
+            // 주입하면 v=/o= 없는 조각 SDP 가 로컬 오퍼가 되어 pjmedia_sdp_validate assert
+            // 로 네이티브 abort — 주입을 포기하고 pjsua 원본 오퍼(floor 없음)로 강등한다.
+            if (prm.sdp.wholeSdp.isBlank()) {
+                Log.e(TAG, "onCallSdpCreated(call=$id): empty wholeSdp (SDP print buffer overflow) — skip inject")
+                return
+            }
             pendingAppSdp?.let { extra ->
                 val sdp = prm.sdp
                 val whole = sdp.wholeSdp

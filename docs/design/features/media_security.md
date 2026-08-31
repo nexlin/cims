@@ -219,6 +219,12 @@ android-arm64 정적 링크 — 추가 의존 없음). pjmedia 의 SDES 협상(`
 RTP/SAVP)은 내장 — 앱은 use-srtp 수준만 지정한다. 빌드만으로는 무영향 — 런타임은 앱
 계정 정책(§7.2)이 켤 때까지 off.
 
+`PJSUA2_MAX_SDP_BUF_LEN 4000` 도 필수 — pjsua2 `SdpSession.wholeSdp` 인쇄 버퍼(기본
+1024B)는 SRTP 오퍼(전 crypto suite `a=crypto`, RTP m= 라인마다)가 넘친다. 넘치면
+`wholeSdp=""` 로 내려와 앱 floor 주입([CimsCall.onCallSdpCreated])이 조각 SDP 를 만들고
+`pjmedia_sdp_validate` assert 로 네이티브 abort 한다. 앱도 방어한다 — `wholeSdp` 가 비면
+주입을 포기하고 pjsua 원본 오퍼(floor 없음)로 강등(크래시 대신 기능 축소).
+
 ### 7.2 앱 정책 연결
 
 계정 미디어 설정 `srtpUse` 는 프로비저닝 프로파일이 정한다 — CSC `/provisioning/me` 의

@@ -52,6 +52,12 @@ cat > pjlib/include/pj/config_site.h <<'EOF'
 /* 6) NAT: RTP keepalive(empty RTP) — 청취 전용(무송신) 구간에도 주기 송신해
       하향 NAT 매핑·CMP latch 유지 (ue_nat_traversal.md §7.1). 주기=PJMEDIA_STREAM_KA_INTERVAL(기본 5s) */
 #define PJMEDIA_STREAM_ENABLE_KA  1
+
+/* 7) pjsua2 SdpSession.wholeSdp 인쇄 버퍼 — 기본 1024B 는 SRTP(SDES) 오퍼가 넘친다
+      (crypto_count=0 → NULL 제외 전 수트 a=crypto, RTP m= 라인마다). 넘치면 wholeSdp=""
+      → 앱 SDP 주입(onCallSdpCreated)이 조각 SDP 를 만들어 pjmedia_sdp_validate assert
+      크래시(media_security.md §7). SIP 패킷 상한(PJSIP_MAX_PKT_LEN 4000)과 정렬. */
+#define PJSUA2_MAX_SDP_BUF_LEN    4000
 EOF
 sha256sum pjlib/include/pj/config_site.h
 
