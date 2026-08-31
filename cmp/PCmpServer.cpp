@@ -25,11 +25,6 @@
 static const int kEventMaxAttempts = 5;
 static const int kEventRetryIntervalSec = 1;
 
-// 비동기 배치 writer 튜닝값 (CSP SipMessageLogger 와 동일)
-static const size_t kCmpLogNotifyThreshold = 128;     // 큐가 이만큼 쌓이면 즉시 flush 깨움
-static const size_t kCmpLogMaxQueue = 200000;         // 큐 상한 (NFS 장애 backlog 시 메모리 폭주 방지)
-static const int kCmpLogFlushIntervalMs = 100;        // 주기 flush (버퍼 잔여분 보장)
-
 PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120),
       _floorIdleSec(4), _floorStopTalkSec(30), _floorRevokeGraceSec(3), _floorRevokeRetxSec(1),
@@ -113,7 +108,7 @@ bool PCmpServer::startServer() {
     }
 
     _running = true;
-    startLogWriter();  // 비동기 배치 로그 writer 기동 (control 스레드 NFS HOL 블로킹 제거)
+    startServiceLogWriter();  // 서비스 로그 writer 기동 (control 스레드 NFS HOL 블로킹 제거 + 스풀 폴백)
     std::thread([this]() {
         this->runControlLoop();
     }).detach();
@@ -209,7 +204,7 @@ void PCmpServer::stopServer() {
     if (_timeoutThread.joinable()) _timeoutThread.join();
     if (_fmMonitorThread.joinable()) _fmMonitorThread.join();
     gclsFmReporter.Stop();  // process_stopping pending 재전송 여지 후 종료
-    stopLogWriter();  // timeout 스레드 정지 후 잔여 로그 전량 flush
+    _logWriter.Stop();  // timeout 스레드 정지 후 잔여 로그 flush (저장 경로 무응답 시 스풀 회수)
     if (_udpFd >= 0) {
         ::close(_udpFd);
         _udpFd = -1;
@@ -1711,6 +1706,9 @@ void PCmpServer::loadConfig() {
             if (root2.Has("ServiceLogging")) {
                 SimpleJson::JsonNode sl = root2.Get("ServiceLogging");
                 if (sl.Has("Dir")) _serviceLogDir = sl.GetString("Dir");
+                if (sl.Has("SpoolDir")) _logSpoolDir = sl.GetString("SpoolDir");
+                if (sl.Has("StallSec")) _logStallSec = (int)sl.GetInt("StallSec", 5);
+                if (sl.Has("SpoolMaxMb")) _logSpoolMaxMb = (int)sl.GetInt("SpoolMaxMb", 1024);
                 // Flow 로깅 세부 flag: { "Flow": { "Floor": true, "Dtmf": true, "Rtcp": false } }
                 if (sl.Has("Flow")) {
                     SimpleJson::JsonNode fl = sl.Get("Flow");
@@ -2117,14 +2115,6 @@ std::string PCmpServer::getFlowHourDir() {
     return buf;
 }
 
-bool PCmpServer::mkdirP(const std::string& p) {
-    struct stat st;
-    if (stat(p.c_str(), &st) == 0) return true;
-    size_t pos = p.rfind('/');
-    if (pos != std::string::npos && pos > 0) mkdirP(p.substr(0, pos));
-    return mkdir(p.c_str(), 0755) == 0 || errno == EEXIST;
-}
-
 std::string PCmpServer::bucketSuffix() {
     time_t now = time(nullptr);
     struct tm t;
@@ -2144,28 +2134,17 @@ std::string PCmpServer::msgFilePath() {
     return _currentMsgHourDir + "/" + _systemId + "_csp.msg." + bucketSuffix() + ".jsonl";
 }
 
-int PCmpServer::countFileLines(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "r");
-    if (!f) return 0;
-    int n = 0;
-    char buf[4096];
-    while (fgets(buf, sizeof(buf), f)) n++;
-    fclose(f);
-    return n;
-}
-
-// 5분 버킷 회전 — 파일 핸들을 유지하지 않고(open-per-write) 디렉터리만 보장하고,
-//   버킷이 바뀌면 _msgSeq 를 '미계수(-1)' 로 리셋(다음 write 가 기존 줄 수를 lazy 계수해 이어붙임).
-//   (구버전: 시간당 파일을 내내 열어둠 → 운영 중 로그삭제 시 .nfs 고아·데이터유실 + 대용량검색. CSP SipMessageLogger 와 동일 전환.)
+// 5분 버킷 회전 — 순수 북키핑 (파일시스템 무접촉: 디렉터리 생성은 flusher 가 기록 직전에,
+//   기존 줄 계수(시딩)는 flusher 가 기동 시 1회 수행). 버킷이 바뀌면 _msgSeq 를 -1 로 리셋
+//   — 다음 write 가 기동 첫 버킷이면 시딩 결과에 합류하고, 이후 버킷은 새 파일명이라 0 부터.
 void PCmpServer::ensureBucket() {
     std::string hourDir = getFlowHourDir();
     std::string bucketKey = hourDir + "/" + bucketSuffix();
     if (bucketKey == _currentBucketKey) return;
     _currentBucketKey = bucketKey;
-    mkdirP(hourDir);
     _currentFlowHourDir = hourDir;
     _currentMsgHourDir  = hourDir;   // flow/msg 통합 디렉터리
-    _msgSeq = -1;                    // 새 버킷 → 다음 write 가 lazy 계수
+    _msgSeq = -1;
 }
 
 static std::string _jsonEsc(const char* s) {
@@ -2185,12 +2164,18 @@ static std::string _jsonEsc(const char* s) {
 
 int PCmpServer::writeMsgLine(const char* ts, const char* dir, const char* peer, const char* proto, const char* msg,
                               const char* caller, const char* callee) {
-    if (!msg || !msg[0]) return 0;
+    if (!msg || !msg[0] || _serviceLogDir.empty()) return 0;
     std::lock_guard<std::mutex> lk(_logMtx);  // ensureBucket+seq+format+enqueue 직렬화
     ensureBucket();
     std::string path = msgFilePath();
     if (path.empty()) return 0;
-    if (_msgSeq < 0) _msgSeq = countFileLines(path);  // 버킷 첫 write: 기존 줄 수 계수(재기동 연속성)
+    if (_msgSeq < 0) {
+        // 버킷 첫 write — 기동 첫 버킷이면 flusher 시딩(기존 줄 수 비동기 계수)에 합류해
+        //   재기동 seq 연속성을 잇는다. 시딩 미도착/이후 버킷은 0 부터 (어긋남은 리더의
+        //   sesid/내용 폴백이 흡수). 생산자는 저장 경로를 읽지 않는다.
+        _msgSeq = (_logWriter.SeedDone() && _currentBucketKey == _seedBucketKey)
+                      ? (int)_logWriter.SeedCount(0) : 0;
+    }
     _msgSeq++;
     int seq = _msgSeq;
     // 순서: ts, dir, peer, caller, callee, proto, msg (빈값 key 생략)
@@ -2208,7 +2193,7 @@ int PCmpServer::writeMsgLine(const char* ts, const char* dir, const char* peer, 
     line += "\",\"msg\":\"";
     line += _jsonEsc(msg);
     line += "\"}\n";
-    enqueueLine(path, std::move(line));  // NFS I/O 없이 즉시 반환
+    _logWriter.Enqueue(path, std::move(line));  // 파일 I/O 없이 즉시 반환
     return seq;
 }
 
@@ -2284,7 +2269,7 @@ void PCmpServer::logFlow(const std::string& key, const char* from, const char* t
     if (seq > 0) emit("seq", "", true, seq);
     emit("iface",   iface ? std::string(iface) : "");
     line += "}\n";
-    enqueueLine(flowPath, std::move(line));  // NFS I/O 없이 즉시 반환
+    _logWriter.Enqueue(flowPath, std::move(line));  // 파일 I/O 없이 즉시 반환
 }
 
 // 누수 회수 세션 상세를 {ServiceLogDir}/leak_reclaim/YYYY/MM/DD/reclaim.jsonl 에 한 줄 기록(open-append-close).
@@ -2298,15 +2283,14 @@ void PCmpServer::writeLeakReclaim(const std::string& sessionId, const std::strin
     char dir[512];
     snprintf(dir, sizeof(dir), "%s/leak_reclaim/%04d/%02d/%02d", _serviceLogDir.c_str(), t.tm_year + 1900,
              t.tm_mon + 1, t.tm_mday);
-    mkdirP(dir);  // 디렉터리만 동기 생성(드물게 발동) — 실제 기록은 비동기 writer
-    std::string path = std::string(dir) + "/reclaim.jsonl";
+    std::string path = std::string(dir) + "/reclaim.jsonl";  // 디렉터리 생성은 flusher 가 기록 직전에
     char buf[1024];
     snprintf(buf, sizeof(buf),
              "{\"ts\":\"%s\",\"node\":\"%s\",\"session_id\":\"%s\",\"sesid\":\"%s\",\"service\":\"%s\","
              "\"reason\":\"%s\",\"held_sec\":%d}\n",
              getTimestamp().c_str(), _nodeName.c_str(), _jsonEsc(sessionId.c_str()).c_str(),
              _jsonEsc(sesid.c_str()).c_str(), _jsonEsc(service.c_str()).c_str(), reason, heldSec);
-    enqueueLine(path, std::string(buf));
+    _logWriter.Enqueue(path, std::string(buf));
 }
 
 std::string PCmpServer::getMsgHourDir() {
@@ -2322,83 +2306,38 @@ std::string PCmpServer::getMsgHourDir() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 비동기 배치 writer (CSP SipMessageLogger 와 동일 패턴)
-//   생산자(writeMsgLine/logFlow/writeLeakReclaim)는 _logMtx 보유 중 포맷한 한 줄을
-//   enqueueLine 으로 적재만 하고 즉시 반환(NFS I/O 없음). 단일 control 스레드가 매 control
-//   패킷마다 NFS open/append/close 로 막히던 HOL 블로킹 제거. 단일 writer 스레드가 주기/임계마다
-//   큐를 비워 파일경로별로 라인을 합쳐 경로당 1회 open→append→close. 단일 writer + FIFO 라
-//   파일 내 줄 순서 = enqueue(=seq) 순서와 일치 → flow.seq ↔ msg 줄번호 cross-reference 정합 유지.
+// 서비스 로그 writer 기동 — 공용 CServiceLogWriter (dispatch + NAS flusher + 스풀 폴백,
+//   include/ServiceLogWriter.h). 생산자는 포맷+enqueue 만 하고 저장 경로(NAS 가능)는
+//   flusher 스레드만 만진다 — control 스레드는 NFS 행에도 막히지 않는다.
+//   시딩 대상: 기동 시점 버킷의 msg 파일 (flusher 가 기존 줄 수를 비동기 계수,
+//   writeMsgLine 첫 write 가 합류해 재기동 seq 연속성 유지).
 // ─────────────────────────────────────────────────────────────────────────────
-void PCmpServer::enqueueLine(const std::string& path, std::string&& line) {
-    if (path.empty() || line.empty()) return;
-    bool bNotify = false;
-    {
-        std::lock_guard<std::mutex> lk(_logQMtx);
-        if (_logQueue.size() >= kCmpLogMaxQueue) {
-            // backlog 상한 초과(예: NFS 무응답) — 가장 오래된 줄을 버려 메모리 폭주 방지.
-            _logQueue.pop_front();
-            _logDropped.fetch_add(1);
-        }
-        _logQueue.push_back(LogItem{path, std::move(line)});
-        if (_logQueue.size() >= kCmpLogNotifyThreshold) bNotify = true;
-    }
-    if (bNotify) _logQCv.notify_one();
-}
-
-void PCmpServer::flushLogBatch(std::deque<LogItem>& batch) {
-    if (batch.empty()) return;
-    // 파일경로별로 라인을 이어붙인다. 같은 경로의 줄은 batch 순서(=enqueue/seq 순서)대로 누적.
-    std::unordered_map<std::string, std::string> groups;
-    for (auto& item : batch) {
-        auto it = groups.find(item.path);
-        if (it == groups.end())
-            groups.emplace(std::move(item.path), std::move(item.line));
-        else
-            it->second += item.line;
-    }
-    batch.clear();
-    // 경로당 1회 open→append→close (서로 다른 파일끼리는 순서 무관).
-    for (auto& kv : groups) {
-        FILE* f = fopen(kv.first.c_str(), "a");
-        if (!f) continue;
-        fwrite(kv.second.data(), 1, kv.second.size(), f);
-        fclose(f);
-    }
-}
-
-void PCmpServer::logWriterLoop() {
-    const auto interval = std::chrono::milliseconds(kCmpLogFlushIntervalMs);
-    while (_logWriterRunning.load()) {
-        std::deque<LogItem> batch;
-        {
-            std::unique_lock<std::mutex> lk(_logQMtx);
-            _logQCv.wait_for(lk, interval, [this] { return !_logQueue.empty() || !_logWriterRunning.load(); });
-            batch.swap(_logQueue);
-        }
-        flushLogBatch(batch);  // 락 밖에서 NFS I/O
-    }
-    // 종료 — 잔여 큐 전량 flush
-    for (;;) {
-        std::deque<LogItem> batch;
-        {
-            std::lock_guard<std::mutex> lk(_logQMtx);
-            batch.swap(_logQueue);
-        }
-        if (batch.empty()) break;
-        flushLogBatch(batch);
-    }
-}
-
-void PCmpServer::startLogWriter() {
-    bool bExpected = false;
-    if (_logWriterRunning.compare_exchange_strong(bExpected, true)) {
-        _logWriterThread = std::thread(&PCmpServer::logWriterLoop, this);
-    }
-}
-
-void PCmpServer::stopLogWriter() {
-    if (_logWriterRunning.exchange(false)) {
-        _logQCv.notify_all();
-        if (_logWriterThread.joinable()) _logWriterThread.join();
-    }
+void PCmpServer::startServiceLogWriter() {
+    if (_serviceLogDir.empty()) return;
+    std::string hourDir = getFlowHourDir();
+    std::string mm5 = bucketSuffix();
+    _seedBucketKey = hourDir + "/" + mm5;
+    std::string seedPath = hourDir + "/" + _systemId + "_csp.msg." + mm5 + ".jsonl";
+    _logWriter.Init(
+        _logSpoolDir, _logStallSec, _logSpoolMaxMb, {_serviceLogDir}, {seedPath},
+        [](EnumSlwLogLevel level, const std::string& msg) {
+            if (level == SLW_LOG_ERROR) { LOG_ERROR("ServiceLog", "%s", msg.c_str()); }
+            else if (level == SLW_LOG_DEBUG) { LOG_DEBUG("ServiceLog", "%s", msg.c_str()); }
+            else { LOG_INFO("ServiceLog", "%s", msg.c_str()); }
+        },
+        [this](const SlwDegradeInfo& d) {
+            // A-PRC-006 storage_failure — 폴백 진입 시 open, 스풀 드레인 회복 시 close
+            if (!gclsFmReporter.IsEnabled()) return;
+            std::string mo = _systemId + "/" + _nodeName + "/service_log";
+            if (d.bDegraded) {
+                SimpleJson::JsonNode params;
+                params.Set("path", _serviceLogDir.c_str());
+                params.Set("reason", d.strReason.empty() ? "spool backlog" : d.strReason.c_str());
+                params.Set("spooled", (int)d.ulSpooledLines);
+                params.Set("dropped", (int)d.ulDroppedLines);
+                gclsFmReporter.AlarmOpen("A-PRC-006", mo, params);
+            } else {
+                gclsFmReporter.AlarmClose("A-PRC-006", mo);
+            }
+        });
 }

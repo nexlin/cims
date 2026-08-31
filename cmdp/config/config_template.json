@@ -160,6 +160,33 @@
           "help": "flow/msg jsonl 루트 (csp/cmp 와 통합 디렉터리)."
         },
         {
+          "key": "ServiceLogging.SpoolDir",
+          "label": "서비스 로그 로컬 스풀 디렉터리",
+          "type": "string",
+          "default": "spool",
+          "hidden": true,
+          "restart": true,
+          "help": "Dir(NAS 가능) 무응답 시 폴백 저장소 — 반드시 로컬 디스크 경로. 회복 시 자동 재생(replay)된다."
+        },
+        {
+          "key": "ServiceLogging.StallSec",
+          "label": "저장 경로 무응답 판정(초)",
+          "type": "int",
+          "default": 5,
+          "hidden": true,
+          "restart": true,
+          "help": "flusher in-flight 가 이 시간을 넘으면 스풀 폴백 전환 (NFS hard mount 행 격리, A-PRC-006)."
+        },
+        {
+          "key": "ServiceLogging.SpoolMaxMb",
+          "label": "스풀 용량 상한(MB)",
+          "type": "int",
+          "default": 1024,
+          "hidden": true,
+          "restart": true,
+          "help": "초과 시 오래된 스풀 파일부터 폐기 (폐기 줄 수는 A-PRC-006 params.dropped 로 노출)."
+        },
+        {
           "key": "SystemId",
           "label": "시스템 ID",
           "type": "string",

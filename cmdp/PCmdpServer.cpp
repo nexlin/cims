@@ -115,7 +115,7 @@ bool PCmdpServer::startServer() {
     }
 
     _running = true;
-    startLogWriter();
+    startServiceLogWriter();
     std::thread([this]() { this->runControlLoop(); }).detach();
 
     _timeoutThread = std::thread([this]() { this->timeoutLoop(); });
@@ -163,7 +163,7 @@ void PCmdpServer::stopServer() {
     }
     if (_timeoutThread.joinable()) _timeoutThread.join();
     gclsFmReporter.Stop();
-    stopLogWriter();
+    _logWriter.Stop();  // 잔여 로그 flush (저장 경로 무응답 시 스풀 회수)
     if (_listenFd >= 0) { ::close(_listenFd); _listenFd = -1; }
     if (_udpFd >= 0) { ::close(_udpFd); _udpFd = -1; }
     LOG_INFO("PCmdpServer", "Server stopped");
@@ -490,7 +490,7 @@ void PCmdpServer::processStats(const SimpleJson::JsonNode& payload, const std::s
     body.Set("aborted", (long long)_statAborted);
     body.Set("orphan_reclaim", (long long)_statOrphanReclaim);
     body.Set("pending_events", (int)_pendingEvents.size());
-    body.Set("log_dropped", (long long)_logDropped.load());
+    body.Set("log_dropped", (long long)_logWriter.DroppedQueueLines());
     sendOk(ip, port, transId, "STATS", "", &body);
 }
 
@@ -1004,6 +1004,9 @@ void PCmdpServer::loadConfig() {
     if (root.Has("ServiceLogging")) {
         SimpleJson::JsonNode sl = root.Get("ServiceLogging");
         if (sl.Has("Dir")) _serviceLogDir = sl.GetString("Dir");
+        if (sl.Has("SpoolDir")) _logSpoolDir = sl.GetString("SpoolDir");
+        if (sl.Has("StallSec")) _logStallSec = (int)sl.GetInt("StallSec", 5);
+        if (sl.Has("SpoolMaxMb")) _logSpoolMaxMb = (int)sl.GetInt("SpoolMaxMb", 1024);
     }
     if (root.Has("SystemId")) _systemId = root.GetString("SystemId");
     _nodeName = _systemId;
@@ -1045,14 +1048,6 @@ std::string PCmdpServer::getTimestamp() {
     return buf;
 }
 
-bool PCmdpServer::mkdirP(const std::string& p) {
-    struct stat st;
-    if (stat(p.c_str(), &st) == 0) return true;
-    size_t pos = p.rfind('/');
-    if (pos != std::string::npos && pos > 0) mkdirP(p.substr(0, pos));
-    return mkdir(p.c_str(), 0755) == 0 || errno == EEXIST;
-}
-
 std::string PCmdpServer::bucketSuffix() {
     time_t now = time(nullptr);
     struct tm t;
@@ -1072,16 +1067,8 @@ std::string PCmdpServer::msgFilePath() {
     return _currentHourDir + "/" + _systemId + "_csp.msg." + bucketSuffix() + ".jsonl";
 }
 
-int PCmdpServer::countFileLines(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "r");
-    if (!f) return 0;
-    int n = 0;
-    char buf[4096];
-    while (fgets(buf, sizeof(buf), f)) n++;
-    fclose(f);
-    return n;
-}
-
+// 5분 버킷 회전 — 순수 북키핑 (파일시스템 무접촉: 디렉터리 생성은 flusher 가 기록 직전에,
+//   기존 줄 계수(시딩)는 flusher 가 기동 시 1회 수행).
 void PCmdpServer::ensureBucket() {
     if (_serviceLogDir.empty()) return;
     time_t now = time(nullptr);
@@ -1093,7 +1080,6 @@ void PCmdpServer::ensureBucket() {
     std::string bucketKey = std::string(hourDir) + "/" + bucketSuffix();
     if (bucketKey == _currentBucketKey) return;
     _currentBucketKey = bucketKey;
-    mkdirP(hourDir);
     _currentHourDir = hourDir;
     _msgSeq = -1;
 }
@@ -1120,7 +1106,13 @@ int PCmdpServer::writeMsgLine(const char* dir, const char* peer, const char* pro
     ensureBucket();
     std::string path = msgFilePath();
     if (path.empty()) return 0;
-    if (_msgSeq < 0) _msgSeq = countFileLines(path);
+    if (_msgSeq < 0) {
+        // 버킷 첫 write — 기동 첫 버킷이면 flusher 시딩(기존 줄 수 비동기 계수)에 합류해
+        //   재기동 seq 연속성을 잇는다. 이후 버킷은 새 파일명이라 0 부터. 생산자는 저장
+        //   경로를 읽지 않는다.
+        _msgSeq = (_logWriter.SeedDone() && _currentBucketKey == _seedBucketKey)
+                      ? (int)_logWriter.SeedCount(0) : 0;
+    }
     _msgSeq++;
     int seq = _msgSeq;
     std::string line = "{\"ts\":\"" + getTimestamp() + "\",\"dir\":\"" + (dir ? dir : "") +
@@ -1129,7 +1121,7 @@ int PCmdpServer::writeMsgLine(const char* dir, const char* peer, const char* pro
     if (callee && callee[0]) line += ",\"callee\":\"" + _jsonEscC(callee) + "\"";
     line += ",\"proto\":\"" + std::string(proto ? proto : "") + "\",\"msg\":\"" + _jsonEscC(msg) +
             "\"}\n";
-    enqueueLine(path, std::move(line));
+    _logWriter.Enqueue(path, std::move(line));
     return seq;
 }
 
@@ -1172,75 +1164,43 @@ void PCmdpServer::logFlow(const std::string& key, const char* from, const char* 
     emit("mid", txId ? _jsonEscC(txId) : "");
     if (seq > 0) emit("seq", "", true, seq);
     line += "}\n";
-    enqueueLine(flowPath, std::move(line));
+    _logWriter.Enqueue(flowPath, std::move(line));
 }
 
-void PCmdpServer::enqueueLine(const std::string& path, std::string&& line) {
-    if (path.empty() || line.empty()) return;
-    bool bNotify = false;
-    {
-        std::lock_guard<std::mutex> lk(_logQMtx);
-        if (_logQueue.size() >= kCmdpLogMaxQueue) {
-            _logQueue.pop_front();
-            _logDropped.fetch_add(1);
-        }
-        _logQueue.push_back(LogItem{path, std::move(line)});
-        if (_logQueue.size() >= kCmdpLogNotifyThreshold) bNotify = true;
-    }
-    if (bNotify) _logQCv.notify_one();
-}
-
-void PCmdpServer::flushLogBatch(std::deque<LogItem>& batch) {
-    if (batch.empty()) return;
-    std::unordered_map<std::string, std::string> groups;
-    for (auto& item : batch) {
-        auto it = groups.find(item.path);
-        if (it == groups.end())
-            groups.emplace(std::move(item.path), std::move(item.line));
-        else
-            it->second += item.line;
-    }
-    batch.clear();
-    for (auto& kv : groups) {
-        FILE* f = fopen(kv.first.c_str(), "a");
-        if (!f) continue;
-        fwrite(kv.second.data(), 1, kv.second.size(), f);
-        fclose(f);
-    }
-}
-
-void PCmdpServer::logWriterLoop() {
-    const auto interval = std::chrono::milliseconds(kCmdpLogFlushIntervalMs);
-    while (_logWriterRunning.load()) {
-        std::deque<LogItem> batch;
-        {
-            std::unique_lock<std::mutex> lk(_logQMtx);
-            _logQCv.wait_for(lk, interval,
-                             [this] { return !_logQueue.empty() || !_logWriterRunning.load(); });
-            batch.swap(_logQueue);
-        }
-        flushLogBatch(batch);
-    }
-    for (;;) {
-        std::deque<LogItem> batch;
-        {
-            std::lock_guard<std::mutex> lk(_logQMtx);
-            batch.swap(_logQueue);
-        }
-        if (batch.empty()) break;
-        flushLogBatch(batch);
-    }
-}
-
-void PCmdpServer::startLogWriter() {
-    bool bExpected = false;
-    if (_logWriterRunning.compare_exchange_strong(bExpected, true))
-        _logWriterThread = std::thread(&PCmdpServer::logWriterLoop, this);
-}
-
-void PCmdpServer::stopLogWriter() {
-    if (_logWriterRunning.exchange(false)) {
-        _logQCv.notify_all();
-        if (_logWriterThread.joinable()) _logWriterThread.join();
-    }
+// 서비스 로그 writer 기동 — 공용 CServiceLogWriter (dispatch + NAS flusher + 스풀 폴백,
+//   include/ServiceLogWriter.h). 시딩 대상: 기동 시점 버킷의 msg 파일 (flusher 가 기존
+//   줄 수를 비동기 계수, writeMsgLine 첫 write 가 합류해 재기동 seq 연속성 유지).
+void PCmdpServer::startServiceLogWriter() {
+    if (_serviceLogDir.empty()) return;
+    time_t now = time(nullptr);
+    struct tm t;
+    localtime_r(&now, &t);
+    char hourDir[512];
+    snprintf(hourDir, sizeof(hourDir), "%s/%04d/%02d/%02d/%02d", _serviceLogDir.c_str(),
+             t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour);
+    std::string mm5 = bucketSuffix();
+    _seedBucketKey = std::string(hourDir) + "/" + mm5;
+    std::string seedPath = std::string(hourDir) + "/" + _systemId + "_csp.msg." + mm5 + ".jsonl";
+    _logWriter.Init(
+        _logSpoolDir, _logStallSec, _logSpoolMaxMb, {_serviceLogDir}, {seedPath},
+        [](EnumSlwLogLevel level, const std::string& msg) {
+            if (level == SLW_LOG_ERROR) { LOG_ERROR("ServiceLog", "%s", msg.c_str()); }
+            else if (level == SLW_LOG_DEBUG) { LOG_DEBUG("ServiceLog", "%s", msg.c_str()); }
+            else { LOG_INFO("ServiceLog", "%s", msg.c_str()); }
+        },
+        [this](const SlwDegradeInfo& d) {
+            // A-PRC-006 storage_failure — 폴백 진입 시 open, 스풀 드레인 회복 시 close
+            if (!gclsFmReporter.IsEnabled()) return;
+            std::string mo = _systemId + "/" + _nodeName + "/service_log";
+            if (d.bDegraded) {
+                SimpleJson::JsonNode params;
+                params.Set("path", _serviceLogDir.c_str());
+                params.Set("reason", d.strReason.empty() ? "spool backlog" : d.strReason.c_str());
+                params.Set("spooled", (int)d.ulSpooledLines);
+                params.Set("dropped", (int)d.ulDroppedLines);
+                gclsFmReporter.AlarmOpen("A-PRC-006", mo, params);
+            } else {
+                gclsFmReporter.AlarmClose("A-PRC-006", mo);
+            }
+        });
 }

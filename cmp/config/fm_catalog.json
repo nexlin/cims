@@ -12,6 +12,19 @@
       "msg_close": "Media resource pool restored ({mo})",
       "effect": "신규 호/그룹/멤버의 미디어 자원 할당 실패 (NO_RESOURCE 거절)",
       "recommended_action": "동시 호 수 확인, 풀 크기(RtpPoolSize 등) 증설, stale 세션 sweep 점검"
+    },
+    {
+      "type": "storage_failure",
+      "code": "A-PRC-006",
+      "perceived_severity": "major",
+      "event_type": "processingError",
+      "probable_cause": "underlyingResourceUnavailable",
+      "mo_class": "service",
+      "metric": "서비스 로그(flow/msg) 저장 경로 기록",
+      "msg_open": "Service log writes failing on {path} ({reason}) — diverted to local spool ({spooled} lines, {dropped} dropped)",
+      "msg_close": "Service log store recovered — local spool drained ({mo})",
+      "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). 미디어/제어 처리에는 영향 없음",
+      "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     }
   ],
   "events": [

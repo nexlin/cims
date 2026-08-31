@@ -64,13 +64,15 @@ writer 가 flush 주기(100ms)·큐 임계마다 큐를 비워 **파일경로별
 (open-per-batch). writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
 목적: NFS 동기 I/O 가 **단일 수신/디스패치 스레드**(csp CmpClient RecvLoop, cmp control loop)를 막던 HOL 블로킹 제거
 (상세: [csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md)). 구현: csp `CSipMessageLogger`,
-cmp `PCmpServer`(enqueueLine/logWriterLoop), csc `logger.py`(deque+writer 스레드).
+cmp/cmdp 공용 `CServiceLogWriter`(include/ServiceLogWriter.h), csc `logger.py`.
 
-**CSP 저장 경로 무의존(스풀 폴백)** — `ServiceLogging.Dir` 가 NAS(NFS hard mount)일 때 NFS 가
-행이면 쓰기는 실패 대신 **무기한 블록**된다. CSP 는 이를 2단 writer 로 격리한다 (`CSipMessageLogger`):
+**저장 경로 무의존(스풀 폴백)** — `ServiceLogging.Dir` 가 NAS(NFS hard mount)일 때 NFS 가
+행이면 쓰기는 실패 대신 **무기한 블록**된다. **CSP/CMP/CMDP/CSC 전 모듈**이 이를 2단 writer 로
+격리한다 (구현: csp `CSipMessageLogger` 내장, cmp/cmdp 공용 `include/ServiceLogWriter.h`
+(`CServiceLogWriter`), csc `logger.py` 파이썬 구현 — 계약 동일):
 
-- **생산자(SIP/제어 스레드)**: 파일시스템 무접촉 — 큐 적재만. 버킷 회전도 북키핑만 하고
-  디렉터리 생성·기존 줄 계수는 하지 않는다.
+- **생산자(SIP/제어/요청 스레드)**: 파일시스템 무접촉 — 큐 적재만. 버킷 회전도 북키핑만 하고
+  디렉터리 생성·기존 줄 계수는 하지 않는다 (디렉터리 생성은 flusher 가 기록 직전에 수행).
 - **dispatch 스레드**: 큐를 소비해 목적지 결정. 저장소 건강 + 스풀 잔량 없음이면 flusher 큐로
   직행, 아니면 **로컬 스풀**(`ServiceLogging.SpoolDir`, 기본 `spool`)의 미러 파일
   (`{spool}/abs{목적경로}`)에 append. dispatch 도 NFS 를 만지지 않아 항상 살아 있다.
@@ -83,13 +85,17 @@ cmp `PCmpServer`(enqueueLine/logWriterLoop), csc `logger.py`(deque+writer 스레
   비동기로 수행해 합류한다. 합류 전에 첫 write 가 오면 0 부터 시작 (리더 폴백 흡수).
 - **정지**: 저장소가 건강하면 flusher 드레인을 기다리고, 죽어 있으면 잔량을 스풀로 회수 후
   flusher 를 detach 한다 (NFS killable 대기라 프로세스 종료가 회수). 다음 기동이 재생한다.
-- **자기보고**: 폴백 진입 시 알람 `A-PRC-006 storage_failure`(mo=`<node>/csp/service_log`)
-  open, 스풀 드레인 완료 시 close. 스풀 용량 상한 `ServiceLogging.SpoolMaxMb`(기본 1024)
-  초과 시 오래된 스풀 파일부터 폐기(폐기 줄 수는 알람 params `dropped` 로 노출).
+- **자기보고**: 폴백 진입 시 알람 `A-PRC-006 storage_failure`(mo=`<시스템ID>/<모듈>/service_log`)
+  open, 스풀 드레인 완료 시 close — 모듈별 감지 행은 [alarm_catalog.csv](../alarm_catalog.csv).
+  스풀 용량 상한 `ServiceLogging.SpoolMaxMb`(기본 1024) 초과 시 오래된 스풀 파일부터
+  폐기(폐기 줄 수는 알람 params `dropped` 로 노출).
+- **설정**: 모듈별 `ServiceLogging.{SpoolDir,StallSec,SpoolMaxMb}` (기본 `spool`/5/1024 —
+  SpoolDir 는 반드시 로컬 디스크 경로). CSP 는 `Setup.ServiceLogging.*`.
 
-> CMP/CMDP/CSC 의 writer 는 아직 스풀 폴백이 없다 (NFS 행 시 writer 블록 + 큐 상한 드롭,
-> A-PRC-006 감지 행 '후보' — [alarm_catalog.csv](../alarm_catalog.csv)). CSP 와 같은 패턴의
-> 이식이 후속 과제. CallDir(call.json/session.json — SIP 스레드 동기 쓰기)와 녹취도 별도 축.
+> 남은 별도 축: **CallDir**(call.json/session.json — SIP 스레드 동기 쓰기, 원자 rewrite 라
+> append 스풀 불가 — 별도 설계 필요)과 **CMP 녹취**(`PSyncRtpRecorder` — RTP 리액터 스레드가
+> `RecordDir`(NAS 가능)에 직접 fwrite. NFS 행 시 미디어 평면 리액터가 갇힐 수 있어 최우선
+> 후속 설계 대상).
 
 ## 3. Realm 설정
 

@@ -30,6 +30,7 @@
 #include "PFdStore.h"
 #include "PMsrpConnection.h"
 #include "PMsrpSession.h"
+#include "ServiceLogWriter.h"
 #include "SimpleJson.h"
 
 class PCmdpServer : public PModule {
@@ -172,26 +173,19 @@ private:
     std::string bucketSuffix();
     std::string flowFilePath();
     std::string msgFilePath();
-    static int countFileLines(const std::string& path);
     static std::string getTimestamp();
-    static bool mkdirP(const std::string& path);
 
-    struct LogItem {
-        std::string path;
-        std::string line;
-    };
+    // 서비스 로그 writer — 공용 2단(dispatch + NAS flusher + 로컬 스풀 폴백,
+    //   include/ServiceLogWriter.h). 생산자는 _logMtx 보유 중 포맷+seq 부여+Enqueue 만 —
+    //   파일시스템 무접촉(디렉터리 생성·줄수 계수는 flusher 몫). 저장 경로(NAS) 실패/무응답 시
+    //   스풀 폴백 + A-PRC-006 자기보고, 회복 시 재생. 계약: flow_logging.md §2.
     std::mutex _logMtx;
-    std::deque<LogItem> _logQueue;
-    std::mutex _logQMtx;
-    std::condition_variable _logQCv;
-    std::thread _logWriterThread;
-    std::atomic<bool> _logWriterRunning{false};
-    std::atomic<unsigned long> _logDropped{0};
-    void enqueueLine(const std::string& path, std::string&& line);
-    void logWriterLoop();
-    void flushLogBatch(std::deque<LogItem>& batch);
-    void startLogWriter();
-    void stopLogWriter();
+    CServiceLogWriter _logWriter;
+    std::string _logSpoolDir = "spool";  // ServiceLogging.SpoolDir — 로컬 디스크 경로여야 한다
+    int _logStallSec = 5;                // ServiceLogging.StallSec — 저장 경로 무응답 판정(초)
+    int _logSpoolMaxMb = 1024;           // ServiceLogging.SpoolMaxMb — 스풀 용량 상한
+    std::string _seedBucketKey;          // 기동 시점 버킷 — 시딩(재기동 seq 연속성) 합류 판정
+    void startServiceLogWriter();        // startServer 에서 기동
 
     // ── 통계 ───────────────────────────────────────────────────────────
     long _statRecvMessages = 0;

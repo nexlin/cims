@@ -167,6 +167,9 @@ if __name__ == '__main__':
         csc_logger.init(
             service_log_dir=_service_log_dir,
             system_id=_system_id,
+            spool_dir=str(sl.get("SpoolDir", "") or "spool"),
+            stall_sec=int(sl.get("StallSec", 5) or 5),
+            spool_max_mb=int(sl.get("SpoolMaxMb", 1024) or 1024),
         )
 
         # ── pi_http 요청 로깅 훅 등록 (admin/mcptt 자동 로깅) ──
