@@ -2195,6 +2195,13 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         ipsec = {"port_ps": int(svc.get('ipsec_port_ps')), "port_pc": int(svc.get('ipsec_port_pc') or 0)}
     elif 'ipsec-3gpp' in security:
         security = [m for m in security if m != 'ipsec-3gpp']   # 포트쌍 미설정 = 도달 경로 없음
+    # 미디어 SRTP(SDES) 정책 (media_security.md §7.2): 단말 srtp_use 의 SoT — 서버 접속서비스
+    #   정책과 같은 값을 내려 단말·서버가 한 SoT 를 본다. 값이 이상하면 off(조용한 상향 금지).
+    #   ⚠ csc.json Provisioning.Services.<kind>.media_srtp 는 CSP access_services.media_srtp 와
+    #     일치해야 한다(csc 는 CSP 를 조회하지 않는다).
+    media_security = str(svc.get('media_srtp') or 'off').lower()
+    if media_security not in ('off', 'optional', 'required'):
+        media_security = 'off'
     profile = {
         "kind": kind,
         "sip": {
@@ -2207,6 +2214,7 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
             "enforced": enforced,   # true = 서버가 이 transport 를 집행(다른 채널 403)
             "domain": svc.get('domain') or IDMS_DOMAIN,
             "security": security,   # RFC 3329 제시 목록 — ["tls"] | ["tls","ipsec-3gpp"]
+            "mediaSecurity": media_security,   # off|optional|required — 단말 srtp_use 정책
             **({"ipsec": ipsec} if ipsec else {}),
         },
         "account": account,

@@ -61,6 +61,9 @@ data class ServiceProfile(
     val akaAmf: String = "8000",
     /** 서버 제시 채널 보호 목록(`sip.security`, RFC 3329) — ["tls"] | ["tls","ipsec-3gpp"]. */
     val secMechanisms: List<String> = emptyList(),
+    /** 미디어 SRTP(SDES) 정책(`sip.mediaSecurity`) — "off"|"optional"|"required".
+     *  서버 접속서비스 media_srtp 와 같은 값(media_security.md §7.2). 구 서버 응답이면 "off". */
+    val mediaSecurity: String = "off",
     val mcpttId: String? = null,      // PTT 전용
     /** MCData C-plane SDS payload 상한(byte) — 초과 시 MSRP 미디어평면 발신(TS 24.282 §9.2.1.1).
      *  0/미수신 = 무제한(항상 C-plane MESSAGE). 서버 `services[].mcdata.maxPayloadSdsCplaneBytes`. */
@@ -96,6 +99,7 @@ data class ServiceProfile(
             akaOpc = akaOpc,
             akaAmf = akaAmf,
             secMechanisms = secMechanisms,
+            mediaSecurity = mediaSecurity,
             countryCode = countryCode,
             maxPayloadSdsCplaneBytes = maxPayloadSdsCplaneBytes,
         )

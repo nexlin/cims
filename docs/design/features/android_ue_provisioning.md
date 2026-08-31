@@ -90,7 +90,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
       "kind": "ptt",
       "sip":     { "host": "<PSP host>", "port": 15061, "transport": "TLS",
                    "transports": [ { "transport": "TLS", "port": 15061 } ],
-                   "default": "TLS", "enforced": true,
+                   "default": "TLS", "enforced": true, "mediaSecurity": "optional",
                    "domain": "ptt.mnc033.mcc450.3gppnetwork.org" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
                    "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
@@ -109,6 +109,11 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - `sip.enforced`: `true` 면 서버가 그 transport 를 **집행**한다(가입자 `sip_transport=TLS` —
   [sip_access_security.md §3](sip_access_security.md)). 목록은 TLS 하나로 좁혀지고, 다른 채널의 요청은
   REGISTER 포함 403 이다. `false` 면 목록 안에서 단말이 고른다.
+- `sip.mediaSecurity`: 미디어 SRTP(SDES) 정책 `off|optional|required` — 서버 접속서비스
+  `media_srtp` 와 같은 값(한 SoT, 설정 `Provisioning.Services.<kind>.media_srtp` — CSP 와 운영자
+  동기). 단말은 TLS 접속일 때만 pjsua `srtpUse` 로 반영하고 REGISTER `Security-Client` 에
+  `sdes-srtp;mediasec` 능력을 병기한다([media_security.md §7.2](media_security.md)). 구 서버
+  응답에 없으면 `off`.
 - `account.imsi`: Digest username = `imsi@sip.domain`(서버 CscfModule 강제). 서비스별로 다를 수 있음.
 - `account.msisdn`: 공개 ID(AOR user part). `authId`: 전체 IMPI 직접지정(보통 빈값 → imsi@domain 합성).
 - `account.sipHa1`: **서비스 가입(subscription) 의 SIP Digest H(A1)**(`*_subscriptions.ha1` =

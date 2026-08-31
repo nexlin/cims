@@ -23,6 +23,7 @@ import org.pjsip.pjsua2.SipMultipartPartVector
 import org.pjsip.pjsua2.SipTxOption
 import org.pjsip.PjCamera2
 import org.pjsip.pjsua2.pjmedia_dir
+import org.pjsip.pjsua2.pjmedia_srtp_use
 import org.pjsip.pjsua2.pjmedia_vid_dev_std_index
 import org.pjsip.pjsua2.pjsip_cred_data_type
 import org.pjsip.pjsua2.pjsip_status_code
@@ -720,18 +721,34 @@ class SipController(private val config: SipAccountConfig) {
         )
         Log.i(TAG, "auth cred: ${if (isAka) "aka(K/OPc)" else if (hasHa1) "ha1(digest)" else "plain-passwd"} user=${c.digestUsername}")
 
+        // 미디어 SRTP(SDES, media_security.md §7.2) — 프로비저닝 mediaSecurity 를 pjsua srtpUse 로.
+        // TLS 접속일 때만 켠다: SDES 키가 SDP 에 실리므로 기밀 채널 전제(TS 33.328)이고, 비-TLS 에서
+        // srtpUse 를 켜면 pjsua 의 secure-signaling 게이트가 호 자체를 거부한다(ESESSIONINSECURE).
+        // 비-TLS 바인딩은 mediasec 능력도 선언하지 않으므로 서버도 그 leg 에 평문을 offer 한다.
+        val mediaSrtp = tp == "tls" && !c.mediaSecurity.equals("off", ignoreCase = true) &&
+            c.mediaSecurity.isNotBlank()
+        ac.mediaConfig.srtpUse = when {
+            !mediaSrtp -> pjmedia_srtp_use.PJMEDIA_SRTP_DISABLED
+            c.mediaSecurity.equals("required", ignoreCase = true) -> pjmedia_srtp_use.PJMEDIA_SRTP_MANDATORY
+            else -> pjmedia_srtp_use.PJMEDIA_SRTP_OPTIONAL   // optional = AVP+crypto best-effort offer
+        }
+
         // sec-agree 제안 (RFC 3329, sip_access_security.md §8.1) — TLS 접속 + 서버가 tls 메커니즘을
         // 제시하는 경우만. 401 의 Security-Server 를 Security-Verify 로 echo 하는 쪽은 pjsip 패치
         // (sip_reg.c)가 처리하므로 여기서는 제안 헤더만 싣는다. 협상 후 서버는 그 신원의 비-TLS
-        // 요청을 403 으로 거절한다(강등 방지 게이트 합류).
+        // 요청을 403 으로 거절한다(강등 방지 게이트 합류). 미디어 SRTP 정책이 켜져 있으면 mediasec
+        // 능력(sdes-srtp, TS 24.229/33.328 e2ae)을 병기한다 — 서버가 이 바인딩에 SAVP 를 offer 하는
+        // 근거(media_security.md §4.1).
         if (tp == "tls" && c.secMechanisms.any { it.equals("tls", ignoreCase = true) }) {
+            val secClient = if (mediaSrtp) "tls, sdes-srtp;mediasec" else "tls"
             val hv = SipHeaderVector()
-            hv.add(SipHeader().apply { hName = "Security-Client"; hValue = "tls" })
+            hv.add(SipHeader().apply { hName = "Security-Client"; hValue = secClient })
             hv.add(SipHeader().apply { hName = "Require"; hValue = "sec-agree" })
             hv.add(SipHeader().apply { hName = "Proxy-Require"; hValue = "sec-agree" })
             ac.regConfig.headers = hv
-            Log.i(TAG, "sec-agree 제안 활성 (Security-Client: tls)")
+            Log.i(TAG, "sec-agree 제안 활성 (Security-Client: $secClient)")
         }
+        if (mediaSrtp) Log.i(TAG, "media SRTP ${c.mediaSecurity.lowercase()} (srtpUse=${ac.mediaConfig.srtpUse})")
 
         // Contact 부가 파라미터(capability feature tag 등) — 서버가 MSRP 배포 대상 판정에 사용
         if (contactParams.isNotBlank()) ac.sipConfig.contactParams = contactParams

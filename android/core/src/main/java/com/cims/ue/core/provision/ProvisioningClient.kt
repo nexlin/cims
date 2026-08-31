@@ -198,6 +198,7 @@ class ProvisioningClient(
                 secMechanisms = (sip.optJSONArray("security") ?: JSONArray()).let { sec ->
                     (0 until sec.length()).map { k -> sec.optString(k) }.filter { it.isNotBlank() }
                 },
+                mediaSecurity = sip.optString("mediaSecurity", "off").ifBlank { "off" },
                 mcpttId = acc.stringOrNull("mcpttId"),
                 maxPayloadSdsCplaneBytes = s.optJSONObject("mcdata")
                     ?.optInt("maxPayloadSdsCplaneBytes", 0) ?: 0,

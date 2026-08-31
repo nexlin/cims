@@ -47,6 +47,10 @@ data class SipAccountConfig(
     /** 서버 제시 채널 보호 목록(프로비저닝 `sip.security`, RFC 3329) — "tls" 포함 + TLS 접속이면
      *  REGISTER 에 sec-agree 를 제안한다(Security-Verify echo 는 pjsip sip_reg.c 패치가 처리). */
     val secMechanisms: List<String> = emptyList(),
+    /** 미디어 SRTP(SDES) 정책(프로비저닝 `sip.mediaSecurity`) — "off"|"optional"|"required".
+     *  서버 접속서비스 media_srtp 와 같은 값(한 SoT, media_security.md §7.2). TLS 접속일 때만
+     *  pjsua srtpUse 로 반영한다 — SDES 키가 SDP 에 실리므로 기밀 시그널링 채널 전제. */
+    val mediaSecurity: String = "off",
     val expiresSec: Int = 3600,         // 희망 등록 주기(서버는 200 OK 에서 3600 하드코딩으로 덮어씀)
     val countryCode: String = "",       // 홈 국가코드(digits, 예 "82") — 프로비저닝 수신, 번호 로컬 표기용(표시 전용)
     /** MCData C-plane SDS payload 상한(byte, 프로비저닝 수신) — 초과 시 MSRP 미디어평면 발신.

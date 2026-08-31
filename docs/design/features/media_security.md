@@ -1,10 +1,10 @@
 # 미디어 보안 (SRTP) — 구간 암호화 설계
 
 > UE↔CMP 미디어(RTP/RTCP) 구간 암호화 — SDES(RFC 4568) 키 교환 기반 SRTP(RFC 3711).
-> 서버(CSP·CMP)·cspsim 은 본 설계대로 구현되어 있다. **잔여**: 단말 축(§7 — pjsip
-> `PJMEDIA_HAS_SRTP` 재빌드·mediasec 선언 패치·앱 정책 연결), 콘솔의 접속서비스
-> `media_srtp` 편집 UI, S3 실측(§9 — 정지 창)·실기기 검증. E2E(KMS/MIKEY-SAKKE,
-> TS 33.180) 는 §10 로드맵.
+> 서버(CSP·CMP)·cspsim·단말(pjsip SRTP 빌드 + 앱 mediaSecurity 정책, §7)·콘솔 스키마
+> (`media_srtp` — 접속서비스 편집)·CSC 프로비저닝(§7.2)은 본 설계대로 구현되어 있다.
+> **잔여**: S3 실측(§9 — 정지 창)·실기기/와이어 캡처 검증, 협력업체 SDK 재빌드(§7.3),
+> VoLTE relay leg crypto 재작성(§5.2 — 2차). E2E(KMS/MIKEY-SAKKE, TS 33.180)는 §10 로드맵.
 
 ## 1. 목표와 범위
 
@@ -206,19 +206,30 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
 
 ### 7.1 pjsip 플래그
 
-`m1_build_pjsip.sh` 의 config_site.h 에서 `PJMEDIA_HAS_SRTP 0 → 1`. OpenSSL 은 TLS 축에서
-이미 android-arm64 정적 링크됨 — 추가 의존 없음. pjmedia 의 SDES 협상(`a=crypto` 생성/파싱,
-RTP/SAVP)은 내장 — 앱은 use-srtp 수준만 지정한다.
+`m1_build_pjsip.sh` 의 config_site.h 는 `PJMEDIA_HAS_SRTP 1` (TLS 축과 같은 OpenSSL
+android-arm64 정적 링크 — 추가 의존 없음). pjmedia 의 SDES 협상(`a=crypto` 생성/파싱,
+RTP/SAVP)은 내장 — 앱은 use-srtp 수준만 지정한다. 빌드만으로는 무영향 — 런타임은 앱
+계정 정책(§7.2)이 켤 때까지 off.
 
 ### 7.2 앱 정책 연결
 
-계정 미디어 설정 `srtp_use` 를 프로비저닝 프로파일로 내린다 —
-[android_ue_provisioning.md](android_ue_provisioning.md) 의 서비스별 프로파일에
-`mediaSecurity: off|optional|required` 필드 추가 (CSC `/provisioning/me`). 서버 접속서비스
-정책(§4)과 같은 값을 내려 단말·서버가 한 SoT 를 본다.
+계정 미디어 설정 `srtpUse` 는 프로비저닝 프로파일이 정한다 — CSC `/provisioning/me` 의
+서비스별 프로파일 `sip.mediaSecurity: off|optional|required`
+([android_ue_provisioning.md §3](android_ue_provisioning.md), CSC 설정
+`Provisioning.Services.<kind>.media_srtp` — 서버 접속서비스 정책(§4)과 같은 값을 내려
+단말·서버가 한 SoT 를 본다. CSP `access_services.media_srtp` 와의 동기는 운영자 몫 —
+CSC 는 CSP 를 조회하지 않는다).
 
-능력 선언(§4.1): SRTP 빌드 단말은 REGISTER `Security-Client` 에 `sdes-srtp`(+`mediasec`
-파라미터)를 싣는다 — 기존 sec-agree pjsip fork 패치의 연장(신규 축 아님).
+앱 매핑(`SipController.buildAccountConfig`): **TLS 접속일 때만** required→`MANDATORY`,
+optional→`OPTIONAL`(AVP+crypto best-effort offer), 그 외/비-TLS→`DISABLED`. 비-TLS 에서
+끄는 이유 — SDES 키가 SDP 에 실리므로 기밀 채널 전제(TS 33.328)이고, pjsua 는
+`srtpUse≠DISABLED` 인데 시그널링이 비보안이면 호 자체를 거부한다(`ESESSIONINSECURE`,
+secure-signaling 게이트). 비-TLS 바인딩은 mediasec 능력도 선언하지 않으므로 서버도 그
+leg 에 평문을 offer 한다 — 양쪽 판단이 일치한다.
+
+능력 선언(§4.1): 정책이 켜진 TLS 계정은 REGISTER `Security-Client` 에
+`tls, sdes-srtp;mediasec` 를 싣는다 — 기존 sec-agree 제안 헤더의 확장(Security-Verify
+echo 는 pjsip sip_reg.c 패치가 처리, 신규 축 아님).
 
 ### 7.3 협력업체 SDK
 

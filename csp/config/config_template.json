@@ -2075,6 +2075,18 @@
             "help": "이 서비스 가입자에게 제시할 채널 보호 메커니즘. tls 는 항상. ipsec-3gpp(IMS AKA+IPsec, sip_access_security.md §8.3)는 AKA 가입자에게만 제시되며 노드에 IPSEC Local Node 가 있어야 한다. ESP transport mode 는 NAT 를 지나지 못하므로 media_nat_mode 가 off 일 때만 유효(아니면 무시 + ERROR)."
           },
           {
+            "key": "media_srtp",
+            "label": "미디어 SRTP",
+            "type": "enum",
+            "options": [
+              "off",
+              "optional",
+              "required"
+            ],
+            "default": "off",
+            "help": "UE↔CMP 미디어 SRTP(SDES) 정책. off=평문(a=crypto 무시) / optional=능력(mediasec) 선언 단말만 SAVP offer(혼용 전환기) / required=SAVP 단일, 평문 offer 488. required 는 채널 정책 TLS(ipsec-3gpp) 강제와 결합해야 유효(SDES 키가 SDP 에 실림). 집행은 현재 PTT(kind=ptt)만 — volte relay 는 2차(설정 시 미집행 ERROR 로그). CSC Provisioning.Services.<kind>.media_srtp 와 운영자 동기. docs/design/features/media_security.md §4"
+          },
+          {
             "key": "allowed_local_node_refs",
             "label": "허용 Local Node",
             "type": "ref_list",

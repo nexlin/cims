@@ -191,6 +191,19 @@
           "help": "Digest username = imsi@도메인. CSP 의 VoLTE access_service 도메인과 일치해야 등록된다."
         },
         {
+          "key": "Provisioning.Services.volte.media_srtp",
+          "label": "VoLTE 미디어 SRTP",
+          "type": "enum",
+          "options": [
+            "off",
+            "optional",
+            "required"
+          ],
+          "default": "off",
+          "restart": true,
+          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. CSP access_services.media_srtp 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다). docs/design/features/media_security.md §7.2"
+        },
+        {
           "key": "Provisioning.Services.ptt.host",
           "label": "PTT SIP 주소 (PSP)",
           "type": "string",
@@ -248,6 +261,19 @@
           "deploy_value": "@PTT_DOMAIN@",
           "restart": true,
           "help": "PTT access_service 도메인. MCPTT ID 와는 별개."
+        },
+        {
+          "key": "Provisioning.Services.ptt.media_srtp",
+          "label": "PTT 미디어 SRTP",
+          "type": "enum",
+          "options": [
+            "off",
+            "optional",
+            "required"
+          ],
+          "default": "off",
+          "restart": true,
+          "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. CSP access_services.media_srtp 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다). docs/design/features/media_security.md §7.2"
         }
       ],
       "scope": "service"
