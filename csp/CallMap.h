@@ -23,6 +23,7 @@
 #include <set>
 #include <string>
 
+#include "MediaSdes.h"
 #include "SipMutex.h"
 
 class CMonitorString;
@@ -53,6 +54,11 @@ public:
     std::string m_strRelayLocalIp;  // CMP relay IP (SDP 광고 / answer MODIFY 에 사용, 구 GetLocalIp 대체)
     std::string m_strRelayCaller;
     std::string m_strRelayCallee;
+
+    /** relay leg 별 미디어 SRTP(SDES) 협상 상태 — [0]=수신(caller/peer0), [1]=발신(callee/peer1).
+     *  answer 재작성(offer echo)·re-INVITE 키 유지/갱신·CMP media_crypto 조립의 원천
+     *  (media_security.md §5.2). 양 leg entry 에 동일하게 기록된다(SetRelaySdesLeg). */
+    RelaySdesLeg m_clsSdesLeg[2];
 
     /** 마지막 SIP activity 시간 (통화 생성/갱신 시 기록) */
     time_t m_iLastActivityTime;
@@ -86,6 +92,9 @@ public:
      *  teardown(Delete)·answer MODIFY 가 이 정보를 읽어 CMP 세션을 session_id 로 직접 지목한다. */
     void SetRelayInfo( const char *pszCallId, const std::string &strSessionId, const std::string &strSesId,
                        const std::string &strLocalIp, const std::string &strCaller, const std::string &strCallee );
+
+    /** relay leg(iLeg: 0=수신/peer0, 1=발신/peer1)의 SDES 상태를 양 leg entry 에 기록. */
+    void SetRelaySdesLeg( const char *pszCallId, int iLeg, const RelaySdesLeg &clsLeg );
     bool Update( const char *pszCallId, const char *pszPeerCallId );
     bool Select( const char *pszCallId, std::string &strCallId );
     bool Select( const char *pszCallId, CCallInfo &clsCallInfo );

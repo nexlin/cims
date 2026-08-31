@@ -62,18 +62,22 @@ public:
     //   iRemotePt/iRemoteTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),
     //   iRemoteSrcPt/iRemoteSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류·녹취 메타). 0=재작성 없음.
     //   strRemoteCodec: 협상 오디오 코덱("AMR-WB/16000") — 녹취 세그먼트 메타용.
+    //   pclsCrypto/pclsCryptoVideo: 그 peer leg 의 미디어 SRTP 키 (media_crypto[_video],
+    //   cmp_media_api.md §6.4). NULL/미활성 = 필드 생략(평문 leg / 기존 키 유지).
     bool AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
                      int &iLocalPortB, int &iLocalVideoPortB, const std::string &strRecordDir = "",
                      const std::string &strCaller = "", const std::string &strCallee = "",
                      const std::string &strRmtIp = "", int iRmtPort = 0, int iRmtVideoPort = 0,
                      const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "",
                      int iRemotePt = 0, int iRemoteSrcPt = 0, int iRemoteTePt = 0, int iRemoteSrcTePt = 0,
-                     const std::string &strRemoteCodec = "" );
+                     const std::string &strRemoteCodec = "", const CmpMediaCrypto *pclsCrypto = NULL,
+                     const CmpMediaCrypto *pclsCryptoVideo = NULL );
     bool ModifySession( const std::string &strSessionId, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                         int iPeerIdx, const std::string &strCaller = "", const std::string &strCallee = "",
                         const std::string &strSesId = "", int iRemoteNat = 0, const std::string &strRemoteSigIp = "",
                         int iRemotePt = 0, int iRemoteSrcPt = 0, int iRemoteTePt = 0, int iRemoteSrcTePt = 0,
-                        const std::string &strRemoteCodec = "" );
+                        const std::string &strRemoteCodec = "", const CmpMediaCrypto *pclsCrypto = NULL,
+                        const CmpMediaCrypto *pclsCryptoVideo = NULL );
     bool RemoveSession( const std::string &strSessionId, const std::string &strCaller = "",
                         const std::string &strCallee = "", const std::string &strSesId = "" );
 

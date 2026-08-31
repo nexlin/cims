@@ -2,8 +2,11 @@
 
 #include <openssl/rand.h>
 
+#include <cstring>
+
 #include "Base64.h"
 #include "Log.h"
+#include "SdpAttributeCrypto.h"
 
 namespace MediaSdes {
 
@@ -60,6 +63,59 @@ namespace MediaSdes {
         clsOut.strAlg = strSuite;
         clsOut.bEnabled = true;
         return true;
+    }
+
+    /** pszMedia 의 첫 active(port>0) m= 라인. 없으면 NULL. */
+    static CSdpMedia *_findActiveMedia( SDP_MEDIA_LIST &clsList, const char *pszMedia ) {
+        for ( SDP_MEDIA_LIST::iterator it = clsList.begin(); it != clsList.end(); ++it ) {
+            if ( strcasecmp( it->m_strMedia.c_str(), pszMedia ) ) continue;
+            if ( it->m_iPort <= 0 ) continue;
+            return &( *it );
+        }
+        return NULL;
+    }
+
+    int ReadOfferCrypto( const SDP_MEDIA_LIST &clsList, const char *pszMedia, std::string &strTag,
+                         std::string &strSuite, std::string &strInline, std::string &strProto ) {
+        strTag.clear();
+        strSuite.clear();
+        strInline.clear();
+        strProto.clear();
+        CSdpMedia *pclsMedia = _findActiveMedia( const_cast<SDP_MEDIA_LIST &>( clsList ), pszMedia );
+        if ( pclsMedia == NULL ) return 0;
+        strProto = pclsMedia->m_strProtocol;
+        const bool bSavp = strncasecmp( strProto.c_str(), "RTP/SAVP", 8 ) == 0;
+        for ( SDP_ATTRIBUTE_LIST::const_iterator it = pclsMedia->m_clsAttributeList.begin();
+              it != pclsMedia->m_clsAttributeList.end(); ++it ) {
+            if ( strcasecmp( it->m_strName.c_str(), "crypto" ) ) continue;
+            CSdpAttributeCrypto clsCrypto;
+            if ( clsCrypto.Parse( it->m_strValue.c_str(), (int)it->m_strValue.size() ) <= 0 ) continue;
+            if ( !IsSupportedSuite( clsCrypto.m_strCryptoSuite ) ) continue;
+            if ( !ValidInlineKeyB64( clsCrypto.m_strKey ) ) continue;
+            strTag = clsCrypto.m_strTag;
+            strSuite = clsCrypto.m_strCryptoSuite;
+            strInline = clsCrypto.m_strKey;
+            return 1;
+        }
+        // 유효 crypto 없음: SAVP 는 crypto 가 필수(RFC 4568)라 성립 불가, AVP 병기는 무시(평문).
+        return bSavp ? -1 : 0;
+    }
+
+    void StripCrypto( SDP_MEDIA_LIST &clsList ) {
+        for ( SDP_MEDIA_LIST::iterator it = clsList.begin(); it != clsList.end(); ++it ) {
+            it->DeleteAttribute( "crypto" );
+        }
+    }
+
+    void ApplyCrypto( SDP_MEDIA_LIST &clsList, const char *pszMedia, const std::string &strProto,
+                      const std::string &strTag, const std::string &strSuite, const std::string &strInline ) {
+        CSdpMedia *pclsMedia = _findActiveMedia( clsList, pszMedia );
+        if ( pclsMedia == NULL ) return;
+        if ( !strProto.empty() ) pclsMedia->m_strProtocol = strProto;
+        if ( !strInline.empty() ) {
+            std::string strValue = ( strTag.empty() ? "1" : strTag ) + " " + strSuite + " inline:" + strInline;
+            pclsMedia->AddAttribute( "crypto", strValue.c_str() );
+        }
     }
 
 }  // namespace MediaSdes

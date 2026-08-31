@@ -531,13 +531,28 @@ bool CCmpClient::_ProbeAlive( const CmpEndpoint &ep, int &iFreePorts ) {
     return true;
 }
 
+/** relay 명령의 media_crypto[_video] 필드 방출 (cmp_media_api.md §6.4 — NULL/미활성 = 생략) */
+static void _setRelayMediaCrypto( SimpleJson::JsonNode &req, const char *pszField, const CmpMediaCrypto *pclsCrypto ) {
+    if ( pclsCrypto == NULL || !pclsCrypto->bEnabled ) return;
+    SimpleJson::JsonNode mc, rx, tx;
+    mc.Set( "alg", pclsCrypto->strAlg );
+    rx.Set( "key", pclsCrypto->strRxKey );
+    rx.Set( "salt", pclsCrypto->strRxSalt );
+    tx.Set( "key", pclsCrypto->strTxKey );
+    tx.Set( "salt", pclsCrypto->strTxSalt );
+    mc.Set( "rx", rx );
+    mc.Set( "tx", tx );
+    req.Set( pszField, mc );
+}
+
 bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLocalIp, int &iLocalPort,
                              int &iLocalVideoPort, int &iLocalPortB, int &iLocalVideoPortB,
                              const std::string &strRecordDir, const std::string &strCaller,
                              const std::string &strCallee, const std::string &strRmtIp, int iRmtPort, int iRmtVideoPort,
                              const std::string &strSesId, int iRemoteNat, const std::string &strRemoteSigIp,
                              int iRemotePt, int iRemoteSrcPt, int iRemoteTePt, int iRemoteSrcTePt,
-                             const std::string &strRemoteCodec ) {
+                             const std::string &strRemoteCodec, const CmpMediaCrypto *pclsCrypto,
+                             const CmpMediaCrypto *pclsCryptoVideo ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_ADD" );
     req.Set( "session_id", strSessionId );
@@ -555,6 +570,9 @@ bool CCmpClient::AddSession( const std::string &strSessionId, std::string &strLo
     if ( iRemoteTePt > 0 ) req.Set( "remote_te_pt", iRemoteTePt );
     if ( iRemoteSrcTePt > 0 ) req.Set( "remote_src_te_pt", iRemoteSrcTePt );
     if ( !strRemoteCodec.empty() ) req.Set( "remote_codec", strRemoteCodec );
+    // peer0(발신 A) leg 미디어 SRTP 키 (media_security.md §5.2 — 생략 = 평문 leg)
+    _setRelayMediaCrypto( req, "media_crypto", pclsCrypto );
+    _setRelayMediaCrypto( req, "media_crypto_video", pclsCryptoVideo );
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
     if ( !strCallee.empty() ) req.Set( "callee", strCallee );
@@ -597,7 +615,8 @@ bool CCmpClient::ModifySession( const std::string &strSessionId, const std::stri
                                 int iRmtVideoPort, int iPeerIdx, const std::string &strCaller,
                                 const std::string &strCallee, const std::string &strSesId, int iRemoteNat,
                                 const std::string &strRemoteSigIp, int iRemotePt, int iRemoteSrcPt, int iRemoteTePt,
-                                int iRemoteSrcTePt, const std::string &strRemoteCodec ) {
+                                int iRemoteSrcTePt, const std::string &strRemoteCodec, const CmpMediaCrypto *pclsCrypto,
+                                const CmpMediaCrypto *pclsCryptoVideo ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "RELAY_MODIFY" );
     req.Set( "session_id", strSessionId );
@@ -615,6 +634,9 @@ bool CCmpClient::ModifySession( const std::string &strSessionId, const std::stri
     if ( iRemoteTePt > 0 ) req.Set( "remote_te_pt", iRemoteTePt );
     if ( iRemoteSrcTePt > 0 ) req.Set( "remote_src_te_pt", iRemoteSrcTePt );
     if ( !strRemoteCodec.empty() ) req.Set( "remote_codec", strRemoteCodec );
+    // 해당 peer leg 미디어 SRTP 키 (media_security.md §5.2 — 생략 = 평문 leg / 기존 키 유지)
+    _setRelayMediaCrypto( req, "media_crypto", pclsCrypto );
+    _setRelayMediaCrypto( req, "media_crypto_video", pclsCryptoVideo );
     if ( !strCaller.empty() ) req.Set( "caller", strCaller );
     if ( !strCallee.empty() ) req.Set( "callee", strCallee );
 

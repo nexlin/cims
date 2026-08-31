@@ -51,15 +51,6 @@ bool CCspServiceMap::Sync() {
                              "AccessServiceMap: service '%s' media_srtp=required — SDES keys ride in SDP; ensure "
                              "subscribers of this service enforce sip_transport=TLS (channel gate)",
                              s.name.c_str() );
-            // 1차 구현 범위 = PTT (media_security.md §5.2). volte relay 는 media-list passthrough 라
-            //   crypto 를 leg 별로 종단하지 못한다 — 정책이 켜져 있어도 미집행이고, 단말끼리 E2E
-            //   SRTP 를 협상하면 녹취가 깨진다. 값은 유지(2차 구현 시 그대로 발효), 소리내어 알린다.
-            if ( s.kind == "volte" && s.media_srtp != "off" )
-                CLog::Print( LOG_ERROR,
-                             "AccessServiceMap: service '%s' (volte) media_srtp=%s is NOT enforced yet — VoLTE relay "
-                             "leg crypto is phase 2 (media_security.md §5.2); endpoints may negotiate e2e SRTP and "
-                             "break recording",
-                             s.name.c_str(), s.media_srtp.c_str() );
             s.priority = (int)row.GetInt( "priority", 100 );
             std::string en = row.GetString( "enabled" );
             s.enabled = ( en != "false" && en != "0" );

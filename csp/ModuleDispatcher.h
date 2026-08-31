@@ -73,6 +73,9 @@ public:
     void EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) override;
     void EventCallEnd( const char *pszCallId, int iSipStatus ) override;
     void EventReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) override;
+    /** 서버가 전달한 re-INVITE 의 최종 응답 — relay SRTP leg 의 재-answer 재키잉을 CMP 에 반영
+     *  (media_security.md §5.2). 주소/PT 갱신은 기존 EventReInvite→MODIFY 경로가 담당. */
+    void EventReInviteResponse( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRemoteRtp ) override;
     /** 서버 발신 in-dialog 요청(세션 갱신·만료 BYE)의 현재 도달 주소 — 등록 바인딩(latch)을
      *  돌려준다. fan-out INVITE·NOTIFY 가 쓰는 것과 같은 (IP, 포트, transport) 한 세트다. */
     bool EventGetLegDest( const char *pszCallId, const char *pszPeerId, std::string &strIp, int &iPort,

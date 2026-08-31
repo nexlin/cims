@@ -182,7 +182,7 @@ S2 FAIL → S3~S6 BLOCKED.
 - **S3-SCN-SRTP**: 미디어 SRTP 회귀 ([media_security.md §9](design/features/media_security.md)) —
   접속서비스 `media_srtp` 를 required/optional/off 로 플립(SIGUSR1)하며 cspsim `-srtp` 군을 돌린다.
   R1 required 협상+CMP 종단+평문 녹취, R2 평문 offer 488 게이트, R3 optional best-effort 수용,
-  R4 off 대조군(자기복원)
+  R4 off 대조군(자기복원), R5 VoLTE relay leg 종단(volte 서비스 플립 + 2자 통화 — leg 별 독립 키)
 - **S3-SCN-CHANNEL-POLICY / REALM-MISMATCH / SEC-AGREE / AKA / IPSEC(-LIVE) / TLS-REBIND / MIXED-TRANSPORT /
   AKA-MIGRATE-IDEMPOTENT / PROVISIONING-HA1**: SIP 접속 보안 회귀(V1~V26) — 항목 정의는
   [sip_access_security.md](design/features/sip_access_security.md) 검증표. IPSEC-LIVE 는 dev 에 IPSEC

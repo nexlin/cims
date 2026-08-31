@@ -1,10 +1,10 @@
 # 미디어 보안 (SRTP) — 구간 암호화 설계
 
 > UE↔CMP 미디어(RTP/RTCP) 구간 암호화 — SDES(RFC 4568) 키 교환 기반 SRTP(RFC 3711).
-> 서버(CSP·CMP)·cspsim·단말(pjsip SRTP 빌드 + 앱 mediaSecurity 정책, §7)·콘솔 스키마
-> (`media_srtp` — 접속서비스 편집)·CSC 프로비저닝(§7.2)은 본 설계대로 구현되어 있다.
-> **잔여**: S3 실측(§9 — 정지 창)·실기기/와이어 캡처 검증, 협력업체 SDK 재빌드(§7.3),
-> VoLTE relay leg crypto 재작성(§5.2 — 2차). E2E(KMS/MIKEY-SAKKE, TS 33.180)는 §10 로드맵.
+> 서버(CSP·CMP — PTT 그룹/사설 + VoLTE relay)·cspsim·단말(pjsip SRTP 빌드 + 앱
+> mediaSecurity 정책, §7)·콘솔 스키마(`media_srtp` — 접속서비스 편집)·CSC 프로비저닝
+> (§7.2)은 본 설계대로 구현되어 있다. **잔여**: S3 실측(§9 — 정지 창)·실기기/와이어
+> 캡처 검증, 협력업체 SDK 재빌드(§7.3). E2E(KMS/MIKEY-SAKKE, TS 33.180)는 §10 로드맵.
 
 ## 1. 목표와 범위
 
@@ -122,8 +122,16 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
   (RELAY_MODIFY / PTT_MODIFY 확장). 직전과 동일 선언(refresh/재전송)이면 키 유지 —
   latch 유지 규칙([ue_nat_traversal.md §5](ue_nat_traversal.md))과 동형.
 - **VoLTE relay(media-list passthrough) leg**: SDP 를 투과하면 양 단말이 E2E SRTP 를 협상해
-  버려 CMP 녹취가 깨진다. SRTP 서비스의 relay leg 는 **crypto 라인을 leg 별로 재작성**한다
-  (구간 종단 유지). 1차 구현 범위는 PTT(그룹/사설)이고 VoLTE relay 는 2차(§9).
+  버려 CMP 녹취가 깨진다. relay 는 **crypto 라인을 leg 별로 재작성**한다(구간 종단 유지) —
+  모든 전달 지점(INVITE fan-out·18x early media·answer·re-INVITE·PRACK)에서 수신 crypto 를
+  벗기고(`MediaSdes::StripCrypto`) 그 leg 의 협상 상태(CallMap `RelaySdesLeg` — leg×미디어별
+  UE 키/서버 키)로 다시 싣는다. 판단 규칙은 PTT 와 동일(§4 표): A(발신) leg 는 offer 내용
+  ×정책, B(착신) leg 는 정책×착신 바인딩 mediasec 능력으로 offer 형태(SAVP/AVP)를 결정하고,
+  SAVP offer 에 crypto 없는/불일치 answer 는 호 종료(평문 폴백 금지). 키는 `RELAY_ADD`
+  (peer0)·`RELAY_MODIFY`(peer1/재협상) 의 `media_crypto[_video]` 로 CMP 에 내린다. 서버가
+  전달한 re-INVITE 의 재-answer 재키잉은 `EventReInviteResponse` 가 감지해 키 변경 시에만
+  MODIFY 를 재발행한다(불변 = 무동작 — CMP 세션 유지). 호 전환(REFER/blind transfer)은
+  SRTP 재수립 미지원 — crypto 만 벗겨 키 누출을 차단한다(legacy best-effort).
 
 ## 6. CMP 설계
 
@@ -275,6 +283,11 @@ protect/unprotect 를 삽입. 키는 세션당 생성(발신)·SDP 파싱(수신
   - R2 required 에서 평문 offer → 488 (CSP 협상 게이트 로그)
   - R3 optional — `RTP/AVP`+`a=crypto`(best-effort) 수용 관대화 경로
   - R4 off 대조군 — 정책·단말 off 원복 후 평문 그룹콜 그린(기존 동작 유지)
+  - R5 VoLTE relay — volte 서비스 required 플립 + cspsim 2자 통화(`-srtp required`):
+    양 단말 SRTP 성립 + CMP relay leg crypto 2건(leg 별 독립 키 — 투과가 아닌 종단, §5.2)
+- **S1 단위(relay SDP 조작)** — `tests/csp_media_sdes_relay_test.cpp`: `ReadOfferCrypto`
+  (SAVP 유효/지원불가 suite/-1·AVP best-effort/평문·비활성 미디어)·`StripCrypto`·
+  `ApplyCrypto`(키 재작성·여타 속성 보존·평문 정규화) 13케이스.
 - **정지 창/실기기 잔여**: 와이어 캡처 실측(암호화 페이로드 실증), optional 혼용 그룹
   (SRTP 멤버+평문 멤버 상호 수신), 능력 기반 offer(mediasec 선언/미선언 바인딩에
   SAVP/AVP — §4.1), W999/MF52 SRTP 그룹콜 + 귀검증, 협력업체 단말은 SDK 재빌드 후.

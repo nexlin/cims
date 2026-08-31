@@ -11,6 +11,9 @@ cspsim `-srtp` 군/대조군을 돌린다 (자기복원 — 종료 시 S3-SEED �
   R2 required 488 게이트 — 평문 offer(`-srtp off`) → CSP "SRTP negotiation failed →488"
   R3 optional 관대 수용 — `-srtp optional`(AVP+a=crypto best-effort) 도 SRTP 로 성립
   R4 off 대조군 — 정책·단말 모두 off 로 원복 후 평문 그룹콜 그린 (기존 동작 유지)
+  R5 VoLTE relay leg 종단 — volte 서비스 required 플립 + `-mode volte -scenario call
+     -srtp required`: 양 단말 SRTP 성립 + CMP relay leg crypto("SRTP audio peer[") 2건
+     (leg 별 독립 키 — crypto 투과가 아니라 CSP 재작성·종단, media_security.md §5.2)
 
 와이어 캡처 실측(§9-2)·혼용 그룹(§9-5)·mediasec 능력 기반 offer(§9-6)는 실기기/
 패킷캡처 전제 — 라이브 정지 창 절차로 별도 수행한다.
@@ -24,7 +27,7 @@ import time
 
 from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
-from ...common.subscribers import MCPTT_DOMAIN, cred_args
+from ...common.subscribers import MCPTT_DOMAIN, VOLTE_DOMAIN, cred_args
 from ...common.access_services import signal_csp_reload
 from ...common.cspsim import run_cspsim
 from ...common.recordings import count_recordings, count_ptt_events
@@ -37,8 +40,8 @@ def _jsonl_path(ctx: VerifyContext) -> str:
     return os.path.join(ctx.dist_dir, "config", "access_services.jsonl")
 
 
-def _set_ptt_media_srtp(path: str, value: str) -> bool:
-    """ptt kind 레코드의 media_srtp 를 value 로 (빈 값 = 필드 제거). 성공 시 True."""
+def _set_media_srtp(path: str, kind: str, value: str) -> bool:
+    """kind 레코드의 media_srtp 를 value 로 (빈 값 = 필드 제거). 성공 시 True."""
     try:
         rows = []
         hit = False
@@ -47,7 +50,7 @@ def _set_ptt_media_srtp(path: str, value: str) -> bool:
                 if not line.strip():
                     continue
                 r = json.loads(line)
-                if r.get("kind") == "ptt":
+                if r.get("kind") == kind:
                     if value:
                         r["media_srtp"] = value
                     else:
@@ -111,8 +114,8 @@ def srtp(ctx: VerifyContext) -> ItemResult:
     log_dirs = [os.path.join(ctx.dist_dir, "cmp", "log"), os.path.join(ctx.dist_dir, "csp", "log")]
     media_dir = os.path.join(ctx.repo_root, "tests", "media")
 
-    def flip(value: str) -> bool:
-        if not _set_ptt_media_srtp(jsonl, value):
+    def flip(value: str, kind: str = "ptt") -> bool:
+        if not _set_media_srtp(jsonl, kind, value):
             return False
         return signal_csp_reload(pid_file)
 
@@ -162,9 +165,31 @@ def srtp(ctx: VerifyContext) -> ItemResult:
             ok3 = sim3 and cmp3 >= 1 and delta3 >= 1
             checks.append(("R3 optional 관대 수용", ok3,
                            f"sim_srtp={sim3} cmp_media_crypto={cmp3} 녹취/이벤트 +{delta3} rc={rc3}"))
+
+        # ── R5: VoLTE relay leg 종단 (B2BUA — leg 별 독립 키, media_security.md §5.2) ──
+        if not s.get("VOIP_USER"):
+            ctx.w("- [INFO] R5 생략 — VOIP_USER 미준비")
+        elif not flip("required", "volte"):
+            checks.append(("R5 volte relay 종단", False, "정책 플립(volte required) 실패"))
+        else:
+            t5 = time.time()
+            args5 = [
+                "-no-db", "-mode", "volte", "-scenario", "call",
+                "-count", "2", "-duration", "6", "-ip", ctx.sim_ip,
+                "-user", s.get("VOIP_USER", ""),
+                "-domain", s.get("VOIP_DOM", VOLTE_DOMAIN),
+                *cred_args(s, "VOIP", 2),
+                "-srtp", "required",
+            ]
+            rc5, tail5 = run_cspsim(ctx.repo_root, args5, timeout=120)
+            sim5 = "[RTP] SRTP enabled" in tail5
+            # PRtpRelay setLegCrypto — 양 leg 각 1건 이상 (audio)
+            relay5 = _grep_logs("SRTP audio peer[", log_dirs[:1], t5 - 5)
+            ok5 = sim5 and relay5 >= 2
+            checks.append(("R5 volte relay 종단", ok5, f"sim_srtp={sim5} relay_leg_crypto={relay5} rc={rc5}"))
     finally:
         # ── 자기복원 + R4: off 대조군 (기존 평문 동작 유지) ──
-        restored = flip("")
+        restored = flip("") and flip("", "volte")
         rc4, tail4, delta4, sim4, _ = group_call("off")
         ok4 = restored and delta4 >= 1 and not sim4
         checks.append(("R4 off 대조군(원복)", ok4, f"restored={restored} 녹취/이벤트 +{delta4} rc={rc4}"))

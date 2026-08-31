@@ -279,6 +279,23 @@ void CCallMap::SetRelayInfo( const char *pszCallId, const std::string &strSessio
     m_clsMutex.release();
 }
 
+void CCallMap::SetRelaySdesLeg( const char *pszCallId, int iLeg, const RelaySdesLeg &clsLeg ) {
+    if ( iLeg < 0 || iLeg > 1 ) return;
+    m_clsMutex.acquire();
+    auto apply = [&]( CALL_MAP::iterator it ) {
+        if ( it == m_clsMap.end() ) return;
+        it->second.m_clsSdesLeg[iLeg] = clsLeg;
+    };
+    auto it = m_clsMap.find( pszCallId );
+    std::string strPeer;
+    if ( it != m_clsMap.end() ) {
+        strPeer = it->second.m_strPeerCallId;
+        apply( it );
+    }
+    if ( !strPeer.empty() ) apply( m_clsMap.find( strPeer ) );  // B2BUA 양 leg 공유 상태
+    m_clsMutex.release();
+}
+
 bool CCallMap::DeleteOne( const char *pszCallId ) {
     CALL_MAP::iterator itMap;
     bool bRes = false;

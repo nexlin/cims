@@ -2084,7 +2084,7 @@
               "required"
             ],
             "default": "off",
-            "help": "UE↔CMP 미디어 SRTP(SDES) 정책. off=평문(a=crypto 무시) / optional=능력(mediasec) 선언 단말만 SAVP offer(혼용 전환기) / required=SAVP 단일, 평문 offer 488. required 는 채널 정책 TLS(ipsec-3gpp) 강제와 결합해야 유효(SDES 키가 SDP 에 실림). 집행은 현재 PTT(kind=ptt)만 — volte relay 는 2차(설정 시 미집행 ERROR 로그). CSC Provisioning.Services.<kind>.media_srtp 와 운영자 동기. docs/design/features/media_security.md §4"
+            "help": "UE↔CMP 미디어 SRTP(SDES) 정책. off=평문(a=crypto 무시) / optional=능력(mediasec) 선언 단말만 SAVP offer(혼용 전환기) / required=SAVP 단일, 평문 offer 488. required 는 채널 정책 TLS(ipsec-3gpp) 강제와 결합해야 유효(SDES 키가 SDP 에 실림). PTT(그룹/사설)·VoLTE relay 양쪽 집행. CSC Provisioning.Services.<kind>.media_srtp 와 운영자 동기. docs/design/features/media_security.md §4"
           },
           {
             "key": "allowed_local_node_refs",

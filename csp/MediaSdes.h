@@ -10,6 +10,8 @@
 
 #include <string>
 
+#include "SdpMedia.h"
+
 /** CMP media_crypto payload 파라미터 — base64 필드 그대로 UDP JSON 에 실린다.
  *  rx = UE→CMP 상향(UE 의 a=crypto 선언 키), tx = CMP→UE 하향(CSP 생성 키). */
 struct CmpMediaCrypto {
@@ -17,6 +19,23 @@ struct CmpMediaCrypto {
     std::string strAlg;               // crypto suite (AES_CM_128_HMAC_SHA1_80|_32)
     std::string strRxKey, strRxSalt;  // base64(16B) / base64(14B)
     std::string strTxKey, strTxSalt;
+};
+
+/** VoLTE relay(B2BUA) leg 한 미디어(m= 라인)의 SDES 협상 상태 — CallMap 에 저장 (§5.2).
+ *  relay 는 crypto 를 leg 별로 종단하므로 leg×미디어마다 UE 키/서버 키 쌍을 기억한다. */
+struct RelaySdesMedia {
+    bool bSrtp = false;
+    std::string strTag;     // 그 leg offer 의 crypto tag (answer echo, 비면 "1")
+    std::string strSuite;   // 채택 suite
+    std::string strProto;   // 그 leg offer 의 m= protocol 원문 (answer protocol echo)
+    std::string strUeKey;   // UE 선언 inline b64 (CMP rx)
+    std::string strSrvKey;  // 서버 생성 inline b64 (CMP tx — SDP 로 광고)
+};
+
+/** relay 한 leg 의 SDES 상태 (오디오 + 비디오 — SDES 는 m= 라인마다 키가 다르다) */
+struct RelaySdesLeg {
+    RelaySdesMedia clsAudio;
+    RelaySdesMedia clsVideo;
 };
 
 namespace MediaSdes {
@@ -35,6 +54,24 @@ namespace MediaSdes {
      *  협상 실패 처리). */
     bool BuildCmpKeys( const std::string &strSuite, const std::string &strUeInlineB64,
                        const std::string &strSrvInlineB64, CmpMediaCrypto &clsOut );
+
+    // ── VoLTE relay(media-list passthrough) 의 SDP 리스트 조작 (§5.2) ──
+
+    /** pszMedia 의 첫 active(port>0) m= 라인에서 crypto offer 를 읽는다.
+     *  반환: 1=유효 crypto(tag/suite/inline 채움) / 0=crypto 없음·미디어 비활성·AVP 에 지원 불가
+     *  crypto 병기(무시) / -1=성립 불가(RTP/SAVP 인데 지원 가능한 유효 crypto 없음 — RFC 4568 상
+     *  평문 폴백 없음). strProto 는 항상 그 m= 라인의 protocol 원문(미디어 비활성이면 빈 값). */
+    int ReadOfferCrypto( const SDP_MEDIA_LIST &clsList, const char *pszMedia, std::string &strTag,
+                         std::string &strSuite, std::string &strInline, std::string &strProto );
+
+    /** 모든 m= 라인의 a=crypto 제거 — 구간 종단(수신 leg 키가 반대 leg 로 투과되면 단말끼리
+     *  E2E SRTP 를 협상해 CMP 종단·녹취가 깨진다). */
+    void StripCrypto( SDP_MEDIA_LIST &clsList );
+
+    /** pszMedia 의 첫 active m= 라인에 protocol 설정 + (strInline 비어있지 않으면) a=crypto 부여.
+     *  미디어 부재/비활성이면 무시. strProto 빈 값 = protocol 유지. */
+    void ApplyCrypto( SDP_MEDIA_LIST &clsList, const char *pszMedia, const std::string &strProto,
+                      const std::string &strTag, const std::string &strSuite, const std::string &strInline );
 
 }  // namespace MediaSdes
 
