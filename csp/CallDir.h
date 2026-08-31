@@ -35,12 +35,15 @@
  */
 class CCallDir {
 public:
+    static const int kProbeIntervalSec = 60;  // 유휴 write probe 간격
+
     void Init( const std::string &strBaseDir, const std::string &strComponent, int iStallSec = 5 ) {
         if ( strBaseDir.empty() ) return;
         m_strCallsDir = strBaseDir;
         m_strComponent = strComponent;
 
         std::string strPath = m_strCallsDir;
+        std::string strProbePath = m_strCallsDir + "/state/.probe";
         m_worker.Init(
             iStallSec, 20000, 64LL * 1024 * 1024,
             []( EnumSowLogLevel eLevel, const std::string &strMsg ) {
@@ -59,6 +62,14 @@ public:
                 } else {
                     gclsFmReporter.AlarmClose( "A-PRC-013", strMo );
                 }
+            },
+            // 유휴 write probe (60s) — 무호 구간의 마운트 소실/권한 상실도 실쓰기로 선제
+            //   감지한다 (경로 문자열만으로는 IsEnabled 가 true 라 소실을 못 본다).
+            kProbeIntervalSec,
+            [strProbePath]() {
+                if ( !_writeFileS( strProbePath, "probe\n" ) ) return false;
+                ::unlink( strProbePath.c_str() );
+                return true;
             } );
 
         // 기동 작업: base/state 디렉터리 보장 + stale 상태 파일 정리 (worker — 저장 경로 최초 접촉)
@@ -230,16 +241,19 @@ public:
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );
         if ( dir.empty() ) return;
-        char ts[32];
-        IsoNow( ts, sizeof( ts ) );
-        std::string tsStr = ts;
-        std::string reason = strReason;
-        std::string callId = strCallId;
-        m_worker.Enqueue( [dir, reason, iDur, tsStr, callId]() {
-            bool bOk = _updateCallJsonS( dir, reason, iDur, tsStr );
-            return _appendIndexS( dir, callId, "volte", tsStr ) && bOk;
-        } );
-        m_setCallJson.erase( dir );
+        // call.json 을 기록한 세션의 첫 종료만 마감+인덱스를 남긴다 — B2BUA 양 leg 의
+        //   VoipCallEnd 가 각각 인덱스를 append 해 같은 호가 2줄로 남던 중복 제거.
+        if ( m_setCallJson.erase( dir ) > 0 ) {
+            char ts[32];
+            IsoNow( ts, sizeof( ts ) );
+            std::string tsStr = ts;
+            std::string reason = strReason;
+            std::string callId = strCallId;
+            m_worker.Enqueue( [dir, reason, iDur, tsStr, callId]() {
+                bool bOk = _updateCallJsonS( dir, reason, iDur, tsStr );
+                return _appendIndexS( dir, callId, "volte", tsStr ) && bOk;
+            } );
+        }
         m_mapDir.erase( strCallId );
 
         // state/volte/ 하위 해당 call_id 매칭 파일 제거

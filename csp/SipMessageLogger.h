@@ -1,18 +1,12 @@
 #ifndef _SIP_MESSAGE_LOGGER_H_
 #define _SIP_MESSAGE_LOGGER_H_
 
-#include <atomic>
-#include <condition_variable>
-#include <cstdio>
-#include <deque>
-#include <functional>
 #include <map>
-#include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 
 #include "Log.h"
+#include "ServiceLogWriter.h"
 
 /**
  * @brief Unified message logger for SIP/CMP/CSC protocols
@@ -37,13 +31,12 @@
  *   - HEARTBEAT/OPTIONS: always "system"
  *
  * 저장 경로 무의존(non-blocking) 계약 — Dir 가 NAS(NFS) 여도 SIP/제어 스레드는 막히지 않는다:
- *   - 생산자(Print/LogMessage/LogSecurity)는 파일시스템 호출 없이 큐 적재만 한다.
- *   - dispatch 스레드가 큐를 소비해 목적지를 정한다. 저장소가 건강하면 NAS flusher 큐로,
- *     아니면 로컬 스풀(SpoolDir)로 기록한다 — dispatch 도 NFS 를 만지지 않는다.
- *   - NAS flusher 스레드만 저장 경로 I/O 를 수행한다. 쓰기 실패(fail-fast)·in-flight 정체
- *     (StallSec 초과, hard mount 행)·flusher 큐 포화 시 폴백이 걸리고, 회복되면 스풀을
- *     경로별 줄 순서대로 재생(replay)한 뒤 직행으로 복귀한다 (seq↔줄번호 정합 보존).
- *   - 폴백 진입/회복은 A-PRC-006 storage_failure 알람으로 자기보고한다.
+ *   생산자(Print/LogMessage/LogSecurity)는 파일시스템 호출 없이 포맷+큐 적재만 하고,
+ *   2단 writer(dispatch + NAS flusher + 로컬 스풀 폴백/재생)는 공용 CServiceLogWriter
+ *   (include/ServiceLogWriter.h — cmp/cmdp 와 동일 구현)가 수행한다. 폴백 진입/회복은
+ *   A-PRC-006 storage_failure 알람으로 자기보고한다. 계약 상세: flow_logging.md §2.
+ *   시딩(재기동 시 기동 버킷의 기존 줄 계수)은 flusher 가 비동기 수행하고
+ *   WriteInterfaceLine 의 첫 write 가 합류한다.
  */
 class CSipMessageLogger : public ILogCallBack {
 public:
@@ -106,45 +99,6 @@ public:
     std::string GetSesIdByCallId( const std::string &strCallId );
 
 private:
-    /** 비동기 writer 큐 항목: 목적 파일 경로 + 포맷 완료된 한 줄(개행 포함) */
-    struct LogItem {
-        std::string path;
-        std::string line;
-    };
-
-    /** NAS flusher 스레드와 dispatch 가 공유하는 상태.
-     *  flusher 는 종료 시 저장 경로 I/O 에 갇혀 join 불가할 수 있어 detach 되므로,
-     *  logger 멤버가 아니라 shared_ptr 로 수명을 분리한다 — flusher 는 이 구조체와
-     *  전역 로거(CLog)만 만지고 CSipMessageLogger 본체는 절대 참조하지 않는다. */
-    struct StoreCtx {
-        std::mutex mtx;  // nasQueue/inflight 보호
-        std::condition_variable cv;
-        std::deque<std::deque<LogItem>> nasQueue;  // 직행 대기 배치 (dispatch → flusher)
-        std::deque<LogItem> inflight;              // flusher 가 기록 중인 배치 (정지 시 스풀 회수용)
-        std::atomic<bool> bRun{ true };
-        std::atomic<bool> bExited{ false };               // flusher 스레드 종료 표식 (join/detach 판단)
-        std::atomic<bool> bNasHealthy{ true };            // 저장 경로 판정 (dispatch 라우팅 기준)
-        std::atomic<bool> bSpoolPending{ false };         // 스풀 잔량 존재 — 드레인 전 직행 금지 (순서 보존)
-        std::atomic<long long> llOpStartMs{ 0 };          // 저장 경로 op 시작 시각 (0=idle) — 정체 감지
-        std::atomic<long long> llSpoolBytes{ 0 };         // 스풀 사용량 (근사)
-        std::atomic<bool> bLastOpOk{ true };              // 마지막 저장 경로 op 성공 여부 (idle 회복 판정)
-        std::atomic<unsigned long> ulSpooledLines{ 0 };   // 폴백으로 스풀에 적재된 누적 줄 수
-        std::atomic<unsigned long> ulReplayedLines{ 0 };  // 스풀→NAS 재생 완료 누적 줄 수
-        std::atomic<unsigned long> ulDroppedLines{ 0 };   // 스풀 기록 실패/용량 폐기 줄 수
-        std::string strLastError;                         // 마지막 실패 사유 (mtx 보호)
-        // 시딩: flusher 가 기동 직후 시작 버킷 파일의 기존 줄 수를 계수 → dispatch 가 합류
-        std::string strSeedBucketKey;
-        std::string strSeedPath[3];  // sip/cmp/csc msg 경로 (기동 시점 버킷)
-        long long llSeedCount[3] = { 0, 0, 0 };
-        std::atomic<bool> bSeedDone{ false };
-        // 불변 설정 (Init 에서 확정)
-        std::string strSpoolDir;
-        std::string strFlowBaseDir;
-        std::string strMsgBaseDir;
-        int iStallMs = 5000;
-        long long llSpoolMaxBytes = 0;
-    };
-
     /** Determine service from SIP message domain */
     std::string ClassifyService( const char *pszMsg, const std::string &strCallId, const std::string &strMethod );
 
@@ -175,12 +129,6 @@ private:
     std::string FlowFilePath();
     /** iface msg 파일 경로: {msgHourDir}/{systemId}_{iface}.msg.{mm5}.jsonl */
     std::string MsgFilePath( const char *pszIface );
-    /** 파일의 현재 줄 수 — 시딩(재기동 대비 seq 연속성) 계수용. 없으면 0. */
-    static int CountFileLines( const std::string &path );
-
-    /** Ensure directory exists (recursive) */
-    static bool MkdirP( const std::string &path );
-
     /** Get current hourly directory path for flow logs */
     std::string GetFlowHourDir();
 
@@ -205,51 +153,12 @@ private:
     /** Extract URI user part from a From/To header value */
     static std::string ExtractUriUser( const std::string &strHeaderValue );
 
-    // ── 비동기 배치 로그 writer (dispatch + NAS flusher 2단) ────────────────
+    // ── 서비스 로그 writer — 공용 CServiceLogWriter 위임 ─────────────────────
     /** 포맷 완료된 한 줄을 파일경로와 함께 큐에 적재 — 파일 I/O 없이 즉시 반환.
      *  생산자(Print/LogMessage)가 m_mtx 를 보유한 채 호출하므로 enqueue 순서=seq 순서. */
-    void EnqueueLine( const std::string &strPath, std::string &&strLine );
-    /** dispatch 스레드 본체: flush 주기(kFlushIntervalMs) 또는 큐 임계 도달 시 큐를 비워
-     *  저장소 건강 여부에 따라 NAS flusher 큐 또는 로컬 스풀로 라우팅. NFS 무접촉. */
-    void WriterLoop();
-    /** 한 배치를 로컬 스풀에 기록 (dispatch/정지 경로 전용 — 로컬 디스크 I/O). */
-    void SpoolBatch( std::deque<LogItem> &batch );
-    /** 배치 라우팅: 직행(nasQueue) | 폴백(회수 후 스풀). 반환 false = 큐 포화 역압
-     *  (배치를 m_logQueue 앞으로 되돌림 — 호출자는 한 tick 쉬고 재시도). */
-    bool RouteBatch( std::deque<LogItem> &batch, bool bForceSpoolOnBackpressure );
-    /** 폴백 진입 시 flusher 큐 잔량(스풀 내용보다 오래된 분)을 FIFO 로 먼저 스풀에 회수. */
-    void ReclaimNasQueueToSpool();
-    /** 스풀 용량 상한 초과 시 오래된 스풀 파일부터 폐기 (dispatch 전용, 주기 제한). */
-    void TrimSpoolIfNeeded();
-    /** flusher 시딩 결과를 iface seq 에 합류 — 같은 버킷이고 생산자 write 전(-1)일 때만. */
-    void ApplySeedIfPending();
-    /** 알람/상태 전이 정리 — A-PRC-006 open/close (dispatch 스레드 단독 소유). */
-    void ReconcileStoreAlarm();
-    void StartWriter();
-    void StopWriter();
-
-    /** NAS flusher 스레드 본체 — ctx 만 참조 (logger 본체 무접촉, detach 안전).
-     *  기동 시: base 디렉터리 보장 + 시작 버킷 시딩 계수. 이후: nasQueue 배치 flush,
-     *  idle 이면 스풀 재생. 실패/정체 시 ctx 상태만 갱신 (알람은 dispatch 가 올린다). */
-    static void NasFlusherLoop( std::shared_ptr<StoreCtx> ctx );
-    /** 배치를 저장 경로에 기록. 실패 그룹부터는 스풀로 우회 적재. */
-    static void FlushBatchToStore( StoreCtx &ctx, std::deque<LogItem> &batch );
-    /** 배치 전체를 스풀로 우회 (flusher 전용 — 스풀 잔량 존재 중 직행 대기분의 순서 보존). */
-    static void SpoolBatchToCtx( StoreCtx &ctx, std::deque<LogItem> &batch );
-    /** 스풀에서 가장 오래된 파일 하나를 저장 경로로 재생. 스풀이 비면 bSpoolPending 해제.
-     *  반환: 재생을 시도했으면 true (실패 포함), 스풀이 비어 할 일이 없었으면 false. */
-    static bool ReplaySpoolOne( StoreCtx &ctx );
-    /** 한 목적 경로 분량을 스풀 미러 파일에 append (로컬). 실패 시 폐기 계수. */
-    static bool SpoolAppend( StoreCtx &ctx, const std::string &strTarget, const std::string &strData, size_t nLines );
-    /** 목적 경로 → 스풀 미러 경로 ({spool}/abs{path} | {spool}/rel/{path}) */
-    static std::string SpoolPathFor( const StoreCtx &ctx, const std::string &strTarget );
-    /** 스풀 미러 경로 → 목적 경로 (SpoolPathFor 역변환. 실패 시 빈 문자열) */
-    static std::string TargetPathFor( const StoreCtx &ctx, const std::string &strSpoolFile );
-    /** 스풀 트리 재귀 스캔 — 파일 (경로, mtime, size) 콜백. */
-    static void ScanSpool( const std::string &strDir,
-                           const std::function<void( const std::string &, time_t, long long )> &fn );
-    /** monotonic ms (steady_clock) — 정체 감지/백오프용 */
-    static long long NowMs();
+    void EnqueueLine( const std::string &strPath, std::string &&strLine ) {
+        m_clsWriter.Enqueue( strPath, std::move( strLine ) );
+    }
 
     std::string m_strFlowBaseDir;  // service_log base
     std::string m_strMsgBaseDir;   // msg_log base
@@ -276,20 +185,10 @@ private:
     int m_iCmpSeq;
     int m_iCscSeq;
 
-    // 비동기 writer 상태 — 생산자는 m_qMtx 만 잡고 enqueue, dispatch 가 소비
-    std::deque<LogItem> m_logQueue;  // 기록 대기 (파일경로 + 한 줄)
-    std::mutex m_qMtx;               // m_logQueue 보호 (m_mtx 와 독립; 항상 m_mtx→m_qMtx 순서)
-    std::condition_variable m_qCv;
-    std::thread m_writerThread;  // dispatch 스레드 (항상 join 가능 — NFS 무접촉)
-    std::atomic<bool> m_bWriterRunning;
-    std::atomic<unsigned long> m_ulDroppedLogs;  // 큐 상한 초과로 버려진 줄 수
-
-    std::shared_ptr<StoreCtx> m_ctx;  // NAS flusher 공유 상태
-    std::thread m_nasThread;          // NAS flusher (정지 시 join 불가하면 detach)
-    bool m_bSeedApplied;              // 시딩 합류 완료 (dispatch 단독 접근)
-    bool m_bStoreAlarmOpen;           // A-PRC-006 FM 보고 상태 (dispatch 단독 접근)
-    bool m_bStoreDegraded;            // 폴백 상태 로컬 로그 전이 추적 (dispatch 단독 접근)
-    long long m_llLastSpoolTrimMs;    // 스풀 용량 정리 주기 제한 (dispatch 단독 접근)
+    // 서비스 로그 writer (2단 dispatch+flusher+스풀 — include/ServiceLogWriter.h 공용 구현)
+    CServiceLogWriter m_clsWriter;
+    // 시딩 대상 버킷 키 ({msgHourDir}/{mm5}) — WriteInterfaceLine 첫 write 의 시딩 합류 판정
+    std::string m_strSeedBucketKey;
 };
 
 extern CSipMessageLogger gclsSipLogger;

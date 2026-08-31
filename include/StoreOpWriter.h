@@ -55,9 +55,12 @@ public:
     /** worker 기동. iStallSec: op in-flight 가 이 시간을 넘으면 저장소 무응답 판정.
      *  nMaxOps/llMaxBytes: 큐 상한 — droppable op 는 초과 시 즉시 드롭, 필수 op 는
      *  4×nMaxOps 까지 수용 후 드롭(메모리 폭주 방지 최후선).
-     *  fnLog/fnDegrade 는 프로세스 수명 객체만 참조해야 한다 (worker detach 대비). */
+     *  iProbeSec/fnProbe: 유휴 프로브 — 큐가 빈 채 이 간격이 지나면 worker 가 fnProbe 를
+     *  op 로 실행한다(성공/실패가 degrade 판정에 합류). 기록이 없는 유휴 구간의 저장소
+     *  소실(NAS mount 이탈 등)을 선제 감지한다. 0/미지정 = 비활성.
+     *  fnLog/fnDegrade/fnProbe 는 프로세스 수명 객체만 참조해야 한다 (worker detach 대비). */
     void Init( int iStallSec, size_t nMaxOps, long long llMaxBytes, SowLogFn fnLog = SowLogFn(),
-               SowDegradeFn fnDegrade = SowDegradeFn() ) {
+               SowDegradeFn fnDegrade = SowDegradeFn(), int iProbeSec = 0, StoreOp fnProbe = StoreOp() ) {
         if ( m_ctx ) return;
         m_ctx = std::make_shared<Ctx>();
         m_ctx->iStallMs = ( iStallSec > 0 ? iStallSec : 5 ) * 1000;
@@ -65,6 +68,8 @@ public:
         m_ctx->llMaxBytes = llMaxBytes > 0 ? llMaxBytes : 64LL * 1024 * 1024;
         m_ctx->fnLog = fnLog;
         m_ctx->fnDegrade = fnDegrade;
+        m_ctx->iProbeMs = iProbeSec > 0 ? iProbeSec * 1000 : 0;
+        m_ctx->fnProbe = fnProbe;
         m_thread = std::thread( &CStoreOpWriter::WorkerLoop, m_ctx );
     }
 
@@ -181,6 +186,9 @@ private:
         long long llMaxBytes = 64LL * 1024 * 1024;
         SowLogFn fnLog;
         SowDegradeFn fnDegrade;
+        int iProbeMs = 0;  // 유휴 프로브 간격 (0=비활성)
+        StoreOp fnProbe;
+        long long llLastProbeMs = 0;  // worker 단독 접근
     };
 
     static long long NowMs() {
@@ -223,12 +231,24 @@ private:
                 ctx.cv.wait_for( lk, std::chrono::milliseconds( 200 ),
                                  [&] { return !ctx.queue.empty() || !ctx.bRun.load(); } );
                 if ( !ctx.bRun.load() ) break;
-                if ( ctx.queue.empty() ) continue;
-                op = std::move( ctx.queue.front().first );
-                nBytes = ctx.queue.front().second;
-                ctx.queue.pop_front();
-                ctx.llQueueBytes -= (long long)nBytes;
-                ctx.bInOp.store( true );
+                if ( ctx.queue.empty() ) {
+                    // 유휴 프로브 — 기록이 없는 구간의 저장소 소실 선제 감지. 실제 op 와
+                    //   같은 계정(op_start/성공·실패)으로 실행해 degrade 판정에 합류한다.
+                    if ( ctx.iProbeMs > 0 && ctx.fnProbe && NowMs() - ctx.llLastProbeMs >= ctx.iProbeMs ) {
+                        ctx.llLastProbeMs = NowMs();
+                        op = ctx.fnProbe;
+                        ctx.bInOp.store( true );
+                        lk.unlock();
+                    } else {
+                        continue;
+                    }
+                } else {
+                    op = std::move( ctx.queue.front().first );
+                    nBytes = ctx.queue.front().second;
+                    ctx.queue.pop_front();
+                    ctx.llQueueBytes -= (long long)nBytes;
+                    ctx.bInOp.store( true );
+                }
             }
             // 저장 경로 I/O — 행이면 여기(worker)만 갇힌다. 생산자 Enqueue 가 정체를 감지한다.
             ctx.llOpStartMs.store( NowMs() );

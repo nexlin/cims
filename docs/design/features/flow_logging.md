@@ -63,13 +63,14 @@ nodeId 비교 — msg 파일 `dir` 과 동일 관점)를 구분하고, 원문 �
 writer 가 flush 주기(100ms)·큐 임계마다 큐를 비워 **파일경로별로 라인을 합쳐 경로당 1회 open→append→close**
 (open-per-batch). writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
 목적: NFS 동기 I/O 가 **단일 수신/디스패치 스레드**(csp CmpClient RecvLoop, cmp control loop)를 막던 HOL 블로킹 제거
-(상세: [csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md)). 구현: csp `CSipMessageLogger`,
-cmp/cmdp 공용 `CServiceLogWriter`(include/ServiceLogWriter.h), csc `logger.py`.
+(상세: [csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md)). 구현: csp/cmp/cmdp 공용
+`CServiceLogWriter`(include/ServiceLogWriter.h — csp 는 `CSipMessageLogger` 가 위임), csc `logger.py`.
 
 **저장 경로 무의존(스풀 폴백)** — `ServiceLogging.Dir` 가 NAS(NFS hard mount)일 때 NFS 가
 행이면 쓰기는 실패 대신 **무기한 블록**된다. **CSP/CMP/CMDP/CSC 전 모듈**이 이를 2단 writer 로
-격리한다 (구현: csp `CSipMessageLogger` 내장, cmp/cmdp 공용 `include/ServiceLogWriter.h`
-(`CServiceLogWriter`), csc `logger.py` 파이썬 구현 — 계약 동일):
+격리한다 (구현: csp/cmp/cmdp 는 공용 `include/ServiceLogWriter.h`(`CServiceLogWriter`) —
+csp 는 `CSipMessageLogger` 가 포맷/seq 를 맡고 writer 를 위임, csc 는 `logger.py`
+파이썬 구현 — 계약 동일):
 
 - **생산자(SIP/제어/요청 스레드)**: 파일시스템 무접촉 — 큐 적재만. 버킷 회전도 북키핑만 하고
   디렉터리 생성·기존 줄 계수는 하지 않는다 (디렉터리 생성은 flusher 가 기록 직전에 수행).
@@ -98,7 +99,9 @@ cmp/cmdp 공용 `CServiceLogWriter`(include/ServiceLogWriter.h), csc `logger.py`
 시 op 드롭(장애 구간 유실 수용) + 자기보고, 회복 시 자연 재개.
 
 - **CSP CallDir**(`csp/CallDir.h` — call.json/session.json/events/state 파일): SIP 스레드
-  파일시스템 무접촉. 폴백 시 **A-PRC-013**(mo `<node>/csp/call_dir`).
+  파일시스템 무접촉. 폴백 시 **A-PRC-013**(mo `<node>/csp/call_dir`). 무호 유휴 구간도
+  60s **write probe**(state/.probe 실쓰기)가 같은 판정에 합류 — 마운트 소실을 트래픽 없이
+  선제 감지하고, 회복도 probe 성공으로 자동 close.
 - **CMP 녹취**(`PSyncRtpRecorder` + floor.jsonl): RTP 리액터 저장 경로 무접촉. 폴백 시
   **A-PRC-017**(mo `<시스템ID>/cmp/record`). 상세: [recording.md](recording.md) §3.1.
 
