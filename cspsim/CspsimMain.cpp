@@ -29,6 +29,8 @@ struct DbSubscriber {
     std::string password;     // 평문 — CLI/-creds 전용 (DB 에는 없다: passwd 컬럼 DROP, sip_access_security.md §4.7 ⑥)
     std::string ha1;          // SIP Digest H(A1) (sip_access_security.md §4) — DB 모드의 유일한 Digest 자격
     std::string serviceType;  // "volte" or "ptt"
+    std::string sipTransport; // 채널 정책 (sip_access_security.md §3) — ''(무정책)|UDP|TCP|TLS
+    std::string authScheme;   // digest|aka — aka 는 TLS 위 AKAv1-MD5 만 성립 (Annex X)
 };
 
 static bool LoadSubscribersFromDb(const std::string& strCspJson,
@@ -80,7 +82,8 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
     // VoIP 가입자
     if (strFilterMode.empty() || strFilterMode == "volte") {
         const char* sql =
-            "SELECT cu.id, COALESCE(cu.imsi,''), COALESCE(cu.ha1,'') "
+            "SELECT cu.id, COALESCE(cu.imsi,''), COALESCE(cu.ha1,''), "
+            "COALESCE(cu.sip_transport,''), COALESCE(cu.auth_scheme,'digest') "
             "FROM volte_subscriptions cu "
             "ORDER BY cu.id";
         if (mysql_query(pMysql, sql) == 0) {
@@ -92,8 +95,10 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     sub.id       = row[0] ? row[0] : "";
                     std::string imsi = row[1] ? row[1] : "";
                     sub.authId = imsi;   // domain 은 상위에서 붙임
-                    sub.ha1         = row[2] ? row[2] : "";
-                    sub.serviceType = "volte";
+                    sub.ha1          = row[2] ? row[2] : "";
+                    sub.sipTransport = row[3] ? row[3] : "";
+                    sub.authScheme   = row[4] ? row[4] : "digest";
+                    sub.serviceType  = "volte";
                     vecOut.push_back(sub);
                 }
                 mysql_free_result(res);
@@ -106,14 +111,16 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
         std::string sql;
         if (!strGroupId.empty()) {
             // group_id(멤버) 는 surrogate ptt_groups.id → mcptt_group_id 식별자로 JOIN
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), COALESCE(pu.ha1,'') "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), COALESCE(pu.ha1,''), "
+                  "COALESCE(pu.sip_transport,''), COALESCE(pu.auth_scheme,'digest') "
                   "FROM ptt_subscriptions pu "
                   "JOIN ptt_group_members gm ON gm.user_id = pu.id "
                   "JOIN ptt_groups g ON g.id = gm.group_id "
                   "WHERE g.mcptt_group_id='" + strGroupId + "' "
                   "ORDER BY gm.priority, pu.id";
         } else {
-            sql = "SELECT pu.id, COALESCE(pu.imsi,''), COALESCE(pu.ha1,'') "
+            sql = "SELECT pu.id, COALESCE(pu.imsi,''), COALESCE(pu.ha1,''), "
+                  "COALESCE(pu.sip_transport,''), COALESCE(pu.auth_scheme,'digest') "
                   "FROM ptt_subscriptions pu "
                   "ORDER BY pu.id";
         }
@@ -126,8 +133,10 @@ static bool LoadSubscribersFromDb(const std::string& strCspJson,
                     sub.id       = row[0] ? row[0] : "";
                     std::string imsi = row[1] ? row[1] : "";
                     sub.authId = imsi;   // domain 은 상위에서 붙임
-                    sub.ha1         = row[2] ? row[2] : "";
-                    sub.serviceType = "ptt";
+                    sub.ha1          = row[2] ? row[2] : "";
+                    sub.sipTransport = row[3] ? row[3] : "";
+                    sub.authScheme   = row[4] ? row[4] : "digest";
+                    sub.serviceType  = "ptt";
                     vecOut.push_back(sub);
                 }
                 mysql_free_result(res);
@@ -867,6 +876,23 @@ int main(int argc, char* argv[])
             }
             if (iCount <= 1 && !HasFlag(argc, argv, "-count")) {
                 iCount = (int)vecDbSubs.size();
+            }
+            // 채널 정책 사전 경고 — CSP 게이트(sip_access_security.md §3)는 정책 위반 REGISTER 를
+            //   인증보다 먼저 403 처리하므로, 해당 가입자는 조용히 미등록 상태로 남아 시나리오의
+            //   등록 대기(30s)만 꽉 채운다. 시험 전에 원인을 드러낸다.
+            {
+                std::string strCliTransport = strTransport;
+                for (auto& c : strCliTransport) c = toupper(c);
+                int iUsed = iCount < (int)vecDbSubs.size() ? iCount : (int)vecDbSubs.size();
+                for (int k = 0; k < iUsed; k++) {
+                    const DbSubscriber& sub = vecDbSubs[k];
+                    if (!sub.sipTransport.empty() && sub.sipTransport != strCliTransport)
+                        printf("[DB] ⚠ %s: sip_transport=%s 정책 vs CLI -transport %s — 채널 정책 게이트가 REGISTER 를 403 처리 (미등록 예상)\n",
+                               sub.id.c_str(), sub.sipTransport.c_str(), strCliTransport.c_str());
+                    if (sub.authScheme == "aka" && strAkaK.empty())
+                        printf("[DB] ⚠ %s: auth_scheme=aka 인데 -aka_k 미지정 — Digest 등록이 거부된다 (미등록 예상)\n",
+                               sub.id.c_str());
+                }
             }
         } else {
             // -db 명시 요청의 조용한 fallback 금지 (-creds 선검증과 동일 원칙) —

@@ -1237,6 +1237,13 @@ void SimSession::FetchXcapDoc(const std::string& strXcapRoot, const std::string&
 // ─────────────────────────────────────────────
 void SessionSipClient::EventRegister(CSipServerInfo* pclsInfo, int iStatus) {
     if (iStatus == 200) {
+        // REGISTER Expires=0 (로그아웃) 의 200 OK — 등록 성공과 별개 이벤트라 통계·경과시간에서 제외
+        //   (경과시간은 tRegStart 기준이라 시나리오 길이만큼 커져 "등록 지연"으로 오독된다)
+        if (pclsInfo->m_iLoginTimeout == 0) {
+            m_pOwner->m_bRegistered = false;
+            printf("[%d] DEREGISTERED User=%s\n", m_pOwner->m_iId, pclsInfo->m_strUserId.c_str());
+            return;
+        }
         m_pOwner->m_bRegistered = true;
         m_pOwner->m_iRoutePort = pclsInfo->m_clsIpsec.ServerPort();  // IPsec 이면 port_ps, 아니면 0
         m_pOwner->m_stats.iRegOk++;
