@@ -72,16 +72,8 @@ namespace CspAddressing {
      *  R5.c 이후 CMP interface 와 CSP interface 가 다를 때 분리 예정. */
     std::string GetLocalRtpAddress();
 
-    /** XCAP / MCPTT 서비스 URL host.
-     *  Phase 3: xcap-diff NOTIFY 의 xcap-root host. Setup.Xcap.Host(CSC XCAP 서버)
-     *  가 지정되면 그 값, 비면 CSP primary LocalIp fallback. */
-    std::string GetLocalXcapAddress();
-
-    /** XCAP / MCPTT 서비스 URL port (Setup.Xcap.Port, 기본 4430 = CSC McpttServer). */
-    int GetXcapPort();
-
-    /** XCAP / MCPTT 서비스 URL scheme (Setup.Xcap.Scheme, 기본 "https" — CSC TLS). */
-    std::string GetXcapScheme();
+    /* XCAP / MCPTT 서비스 URL 접근자는 없다 — 단말용 주소의 정본은 CSC 이고
+     * CSP 는 CscEndpointCache 로 취득한다 (CscEndpointCache.h). */
 
     /** R6: 해당 서비스(kind="volte"|"ptt")에 대한 CSP server identity URI.
      *  access_services.server_identity_uri 가 명시되면 그것 반환.

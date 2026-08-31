@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 
+#include "CscEndpointCache.h"
 #include "HttpClient.h"
 #include "Log.h"
 #include "SimpleJson.h"
@@ -10,13 +11,7 @@
 CCscAvClient gclsCscAvClient;
 
 std::string CCscAvClient::Url() {
-    std::string strHost = gclsSetup.m_strCscHost;
-    if ( strHost.empty() ) strHost = gclsSetup.m_strXcapHost;
-    if ( strHost.empty() ) strHost = gclsSetup.m_strLocalIp;
-    const std::string strScheme = gclsSetup.m_strCscScheme.empty() ? "https" : gclsSetup.m_strCscScheme;
-    char szPort[16];
-    snprintf( szPort, sizeof( szPort ), "%d", gclsSetup.m_iCscPort > 0 ? gclsSetup.m_iCscPort : 4421 );
-    return strScheme + "://" + strHost + ":" + szPort + "/internal/aka/av";
+    return CscEndpoint::AdminBaseUrl() + "/internal/aka/av";
 }
 
 static bool IsHexLen( const std::string &s, size_t iBytes ) {

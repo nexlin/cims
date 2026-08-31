@@ -538,9 +538,10 @@ POST /internal/aka/av            Authorization: Bearer <InternalApi.Token>
 | 채널 | `requiresTls()` 가 `aka` 를 포함하므로 UDP/TCP 의 AKA 신원 요청은 REGISTER 포함 403(§3 게이트, A-SEC-003 계수 동일) |
 | ik/ck | P/S-CSCF 가 한 프로세스라 401 에 싣지 않는다(P-CSCF 가 제거하는 파라미터). TLS 위에서는 소비처가 없다 |
 
-설정 `Setup.Csc.{Host,Port,Scheme,InternalToken,TimeoutMs}`(config_template `csc_internal`, SIGUSR1 재로드).
-`Host` 비면 `Setup.Xcap.Host` → LocalIp. DB 는 `auth_scheme` 컬럼을 프로브(`CDbManager::m_bHasAkaColumns`)해
-미적용이면 전원 digest.
+설정 `Setup.Csc.{Host,Port,Scheme,InternalToken,TimeoutMs}`(config_template `csc_internal` = "CSC 연동 (내부 API)",
+SIGUSR1 재로드). `Host` 비면 LocalIp. 같은 자격으로 단말용 MCPTT 서비스 주소도 취득한다
+(`GET /internal/mcptt/endpoint` → xcap-diff NOTIFY 의 `xcap-root`, `CscEndpointCache`). DB 는 `auth_scheme`
+컬럼을 프로브(`CDbManager::m_bHasAkaColumns`)해 미적용이면 전원 digest.
 
 **단말**
 

@@ -4,6 +4,7 @@
 
 #include "CallDir.h"
 #include "CallMap.h"
+#include "CscEndpointCache.h"
 #include "CspConfigCache.h"
 #include "CspListenerManager.h"
 #include "CspLocalNodeMap.h"
@@ -274,6 +275,9 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         CLog::Print( LOG_INFO, "CscInterface: Stats response sent (reg=%d calls=%d)", regUsers, activeCalls );
     } else if ( strEvent == "CSC_RESTART" ) {
         CLog::Print( LOG_INFO, "CscInterface: CSC_RESTART received — resyncing group/user state from DB" );
+
+        // CSC 재기동 = 설정 재로드 계기 — 단말용 MCPTT 서비스 주소(xcap-root) 재취득.
+        gclsCscEndpointCache.Refresh();
 
         // Resync user map from DB
         gclsCspUserMap.LoadFromDb();

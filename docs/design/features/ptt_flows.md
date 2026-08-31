@@ -13,7 +13,7 @@
 > - **개시자(originator) 도 CMP floor/RTP 멤버**: `ProcessGroupCall` 이 caller 를 `PTT_JOIN`(audio/floor=audio+1) → caller RTP 릴레이 + floor 참여. 200 OK 에 `m=application`(SharedFloorPort) 광고(psip `AddSdp` append, audio-only 호엔 무영향) → 개시자가 floor dest 학습.
 > - **broadcast**: `PTT_GROUP_ADD` 에 `group_type`+`initiator_id` 전달 → CMP `handleFloorRequest` 가 개시자 외 floor REQUEST 를 REJECT(`floor.jsonl reason=broadcast`).
 > - **신규 그룹 즉시 발신**: `EventIncomingCall` 이 그룹 캐시 미스 시 `LoadFromDb()` lazy-reload (notify 도달 무관 안전망). csc `notify_csp` GROUP_CHANGED 를 CSP+PSP 양쪽 broadcast.
-> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` = `https://{CSC}:{4430}/`(`Setup.Xcap.{Host,Port,Scheme}`). UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
+> - **UE↔CSC XCAP HTTP**: 그룹문서/user-profile/service-config 는 **CSC McpttServer(HTTPS :4430)** 가 서빙. xcap-diff NOTIFY 의 `xcap-root` 는 **CSC 정본**(`McpttServer.PublicUrl`, 비면 요청 Host 유도)이고 CSP 가 내부 API `GET /internal/mcptt/endpoint` 로 취득한다 — CSP 에는 이 주소 설정이 없다. ue-init-config 의 `GMS/CMS-XCAP-root-URI` 와 같은 값이 된다. UE 는 NOTIFY 수신 → CSC-1 토큰(OAuth2 PKCE) 취득 → 문서 GET(`If-None-Match` 304). [mcptt_api.md](../../api/mcptt_api.md)
 >
 > **3GPP 정합 세부**
 > - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
@@ -258,7 +258,7 @@ UE                      CSP                          CSC McpttServer(HTTPS :4430
   │ ── SUBSCRIBE ──────► │  Event: xcap-diff (gms_psi/cms_psi)
   │ ◄── 200 OK ──────── │
   │ ◄── NOTIFY ──────── │  xcap-diff:
-  │ ── 200 OK ────────► │   xcap-root="https://{CSC}:4430/"   ← Setup.Xcap.{Host,Port,Scheme}
+  │ ── 200 OK ────────► │   xcap-root="https://{CSC}:4430/"   ← CSC McpttServer.PublicUrl (내부 API 취득)
   │                      │   <document sel="org.openmobilealliance.groups/users/tel:{u}/tel:{group}"/>  (gms, 가입자 그룹별)
   │                      │   <document sel="org.3gpp.mcptt.user-profile/.../user-profile"/>  (cms)
   │                      │   <document sel="org.3gpp.mcptt.service-config/.../service-config"/>
@@ -268,7 +268,7 @@ UE                      CSP                          CSC McpttServer(HTTPS :4430
   │ ── HTTPS GET .. If-None-Match: {etag} ──────────────────────────────────► │
   │ ◄── 304 Not Modified ─────────────────────────────────────────────────────  │
 ```
-> 무토큰 GET → 401. xcap-root = `https://{CSC}:4430`(McpttServer). cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
+> 무토큰 GET → 401. xcap-root = `https://{CSC}:4430`(McpttServer) — 정본은 CSC `McpttServer.PublicUrl`, CSP 는 `GET /internal/mcptt/endpoint` 로 취득해 광고한다. cspsim 은 `RecvResponse`/NOTIFY 에서 floor·문서 경로를 학습해 동일 흐름 수행.
 > **CIMS 실제 시점:** SUBSCRIBE/NOTIFY(SIP)는 Digest 세션으로 동작하며, access_token 은 위 XCAP
 > GET **직전에 B1 의 /idms PKCE 로 lazy 취득**한다(토큰의 유일 소비처가 XCAP).
 

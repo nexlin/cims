@@ -118,6 +118,49 @@ bool CHttpClient::DoGet( const char * pszUrl, const char * pszInputContentType, 
 	return false;
 }
 
+// 요청 헤더를 추가하여 HTTP GET 명령을 실행한다. (본문 없음 — Authorization 등 헤더만 필요한 조회용)
+bool CHttpClient::DoGet( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList, std::string & strOutputContentType, std::string & strOutputBody )
+{
+	strOutputContentType.clear();
+	strOutputBody.clear();
+
+	if( pszUrl == NULL )
+	{
+		CLog::Print( LOG_ERROR, "%s pszUrl is null", __FUNCTION__ );
+		return false;
+	}
+
+	CHttpUri clsUri;
+	int iUrlLen = strlen( pszUrl );
+
+	if( clsUri.Parse( pszUrl, iUrlLen ) == -1 )
+	{
+		CLog::Print( LOG_ERROR, "%s clsUri.Parse(%s) error", __FUNCTION__, pszUrl );
+		return false;
+	}
+
+	CHttpMessage clsRequest;
+	CHttpPacket clsPacket;
+
+	clsRequest.SetRequest( "GET", &clsUri );
+
+	if( pclsHeaderList )
+	{
+		clsRequest.m_clsHeaderList.insert( clsRequest.m_clsHeaderList.end(), pclsHeaderList->begin(), pclsHeaderList->end() );
+	}
+
+	if( Execute( &clsUri, &clsRequest, &clsPacket ) )
+	{
+		CHttpMessage * pclsMessage = clsPacket.GetHttpMessage();
+
+		strOutputContentType = pclsMessage->m_strContentType;
+		strOutputBody = pclsMessage->m_strBody;
+		return true;
+	}
+
+	return false;
+}
+
 // HTTP POST 명령을 실행한다.
 bool CHttpClient::DoPost( const char * pszUrl, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody )
 {

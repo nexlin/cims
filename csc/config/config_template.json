@@ -58,6 +58,15 @@
           "min": 1,
           "max": 65535,
           "restart": true
+        },
+        {
+          "key": "McpttServer.PublicUrl",
+          "label": "MCPTT 서비스 공개 URL",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 요청/조회부터 적용.",
+          "help": "단말이 실제로 도달하는 이 서비스의 base URL (예: https://ptt.example.com:4430). 단말에 주소를 알려주는 모든 자리 — ue-init-config 의 XCAP-root-URI, openid-configuration, /provisioning/me 의 csc, CSP 가 xcap-diff NOTIFY 로 광고하는 xcap-root — 의 정본. 비우면 단말/CSP 가 접속해 온 주소에서 유도(올인원 단일 노드 전용). VIP·NAT·리버스 프록시 뒤라면 반드시 지정."
         }
       ],
       "scope": "service"

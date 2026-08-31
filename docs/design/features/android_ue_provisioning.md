@@ -72,7 +72,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 ```json
 {
   "user":  { "displayName": "테스트001", "loginId": "test001" },
-  "csc":   { "host": "<CSC host>", "port": 4430 },
+  "csc":   { "host": "<CSC host>", "port": 4430 },      // McpttServer.PublicUrl 정본 (비면 요청 Host)
   "countryCode": "82",
   "services": [
     {

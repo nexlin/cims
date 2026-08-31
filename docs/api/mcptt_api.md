@@ -49,7 +49,17 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 |
 | GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
 
-ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트·domain·PLMN·GMS-URI)는 토폴로지에서 유도되고,
+ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설정 `McpttServer.PublicUrl`
+이 정본이다(비면 요청 Host 유도 — 올인원 전용). CSP 가 xcap-diff NOTIFY 로 광고하는 `xcap-root`
+도 같은 값이며, CSP 는 이를 내부 API 로 취득한다:
+
+| Method | Path | 인증 | 응답 |
+|---|---|---|---|
+| GET | `/internal/mcptt/endpoint` (admin 4421) | `Bearer {InternalApi.Token}` | `{"xcap_root","mcptt_port","public_url_configured"}` |
+
+`/api/v1` 밖이라 OAM 게이트웨이가 프록시하지 않는다(CSP 직접 호출 전용, `/internal/aka/av` 와 동일).
+
+나머지 주소류(domain·PLMN·GMS-URI)는 토폴로지에서 유도되고,
 규격 파라미터값(Timers·con-ref·http-proxy·보호 플래그·group-creation-XUI·name)과 확장 요소
 (`MCPTT/MCData-Service-Details`) 는 csc 설정 `UeInitConfig.*` 로 사용자지정한다 — 값이 바뀌면 ETag 도
 바뀐다([mcptt_standard_conformance.md §R4-1](../design/features/mcptt_standard_conformance.md)).

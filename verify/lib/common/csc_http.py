@@ -91,6 +91,23 @@ def get_json(url: str, token: Optional[str] = None, timeout: int = 10) -> Any:
         raise CscHttpError(f"GET {url} non-JSON: {e}", status=status, body=body[:400])
 
 
+def request_status(method: str, url: str, token: Optional[str] = None,
+                   timeout: int = 10) -> tuple:
+    """임의 메서드 호출 → (status, parsed_json_or_text). 4xx/5xx 도 그대로 반환한다
+    (게이트 검사처럼 401/403 자체가 기대값인 경우용). 네트워크 오류만 예외."""
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    status, body = _request(method, url, headers=headers, timeout=timeout)
+    parsed: Any = body
+    if body:
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError:
+            parsed = body
+    return (status, parsed)
+
+
 def post_json(url: str, payload: dict, token: Optional[str] = None,
               timeout: int = 15) -> tuple:
     """POST JSON. (status, parsed_json_or_text) 반환. 4xx/5xx 도 그대로 반환

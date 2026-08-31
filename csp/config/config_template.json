@@ -383,7 +383,7 @@
           "type": "string",
           "default": "",
           "restart": false,
-          "help": "FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430). 비면 Xcap Host:4430."
+          "help": "FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430). 비우면 CSC 가 알려주는 단말용 서비스 URL(= McpttServer.PublicUrl)을 쓴다 — 보통 비워 둔다."
         }
       ],
       "scope": "system"
@@ -591,48 +591,9 @@
       "scope": "service"
     },
     {
-      "key": "xcap",
-      "title": "XCAP / CSC 연동 (UE↔CSC)",
-      "description": "MCPTT 단말이 그룹문서/사용자 프로파일/서비스 설정을 취득하는 CSC XCAP(MCPTT) 서버. CSP 는 xcap-diff NOTIFY 의 xcap-root URL 로 이 주소를 광고한다.",
-      "fields": [
-        {
-          "key": "Setup.Xcap.Host",
-          "label": "XCAP 서버 주소",
-          "type": "string",
-          "default": "",
-          "deploy_value": "@CSC_IP@",
-          "restart": true,
-          "help": "CSC XCAP(MCPTT) 서버의 IP/호스트명. 비우면 CSP 자기 IP 로 fallback (단일 노드). 단말이 라우팅 가능한 CSC 주소(또는 VIP)로 지정."
-        },
-        {
-          "key": "Setup.Xcap.Port",
-          "label": "XCAP 서버 포트",
-          "type": "int",
-          "default": 4430,
-          "min": 1,
-          "max": 65535,
-          "restart": true,
-          "help": "CSC McpttServer 포트 (GMS/CMS/KMS XCAP 라우트 서빙). csc.json McpttServer.Port 와 일치."
-        },
-        {
-          "key": "Setup.Xcap.Scheme",
-          "label": "XCAP 스킴",
-          "type": "enum",
-          "options": [
-            "https",
-            "http"
-          ],
-          "default": "https",
-          "restart": true,
-          "help": "CSC McpttServer 가 TLS(cert 존재) 면 https. 3GPP CSC-2/3 규격 기본은 https."
-        }
-      ],
-      "scope": "service"
-    },
-    {
       "key": "csc_internal",
-      "title": "CSC 내부 API (S-CSCF ↔ HSS/AuC — IMS AKA 인증 벡터)",
-      "description": "가입자 auth_scheme=aka 의 REGISTER 챌린지에 쓸 AV(RAND/AUTN/XRES)를 CSC 에서 받아오는 경로 (sip_access_security.md §8.2, Cx MAR/MAA 상당). Digest 가입자에게는 쓰이지 않는다.",
+      "title": "CSC 연동 (내부 API)",
+      "description": "CSP 가 CSC admin 서버에 직접 접속하는 경로. 두 용도 — ① IMS AKA 인증 벡터(AV) 취득: 가입자 auth_scheme=aka 의 REGISTER 챌린지용 RAND/AUTN/XRES (sip_access_security.md §8.2, Cx MAR/MAA 상당, Digest 가입자에는 미사용) ② 단말용 MCPTT 서비스 주소 취득: xcap-diff NOTIFY 의 xcap-root 와 MCData FD URL base. 단말이 XCAP 문서를 받는 주소의 정본은 CSC 의 McpttServer.PublicUrl 이며, CSP 에는 그 주소를 적는 설정이 없다.",
       "fields": [
         {
           "key": "Setup.Csc.Host",
@@ -642,7 +603,7 @@
           "deploy_value": "@CSC_IP@",
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "CSC admin 서버 IP/호스트명. 비우면 Setup.Xcap.Host, 그것도 비면 CSP 자기 IP."
+          "help": "CSC admin 서버 IP/호스트명. 비우면 CSP 자기 IP (올인원). CSP↔CSC 내부망 주소면 된다 — 단말이 도달하는 주소가 아니다."
         },
         {
           "key": "Setup.Csc.Port",
@@ -653,7 +614,7 @@
           "max": 65535,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "csc.json Server.Port (내부 API /internal/aka/av 가 붙는 admin 서버)."
+          "help": "csc.json Server.Port (내부 API /internal/aka/av · /internal/mcptt/endpoint 가 붙는 admin 서버)."
         },
         {
           "key": "Setup.Csc.Scheme",
@@ -677,7 +638,7 @@
           "secret": true,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "csc.json InternalApi.Token 과 같은 값(configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 가 504 로 거부된다."
+          "help": "csc.json InternalApi.Token 과 같은 값(configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 가 504 로 거부되고, 단말용 xcap-root 도 취득하지 못해 설정 유도값으로 떨어진다."
         },
         {
           "key": "Setup.Csc.TimeoutMs",
@@ -688,7 +649,7 @@
           "max": 30000,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "CSC 응답 대기 상한. 초과 시 그 REGISTER 는 504 Server Time-out."
+          "help": "CSC 응답 대기 상한. 초과 시 그 REGISTER 는 504 Server Time-out (endpoint 조회는 마지막 성공값/유도값 유지)."
         }
       ],
       "scope": "service"

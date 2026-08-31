@@ -33,7 +33,7 @@ public:
     /** AV 1개 요청. strRandHex/strAutsHex 는 재동기(AUTS) 때만 (직전 챌린지 RAND + 단말 AUTS). */
     ECscAvResult Request( const std::string &strMsisdn, const std::string &strService, const std::string &strRandHex,
                           const std::string &strAutsHex, CscAv &clsOut );
-    /** 요청 URL — 설정 fallback(Csc.Host → Xcap.Host → LocalIp) 적용 */
+    /** 요청 URL — CSC admin base URL(Csc.Host → LocalIp fallback) + /internal/aka/av */
     static std::string Url();
 };
 

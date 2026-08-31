@@ -750,7 +750,30 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 | `SERVICE_CONFIG_CHANGED` | cms 구독자 **전원**에게 xcap-diff NOTIFY (service-config 은 시스템 전역 문서 — CSP 는 소비하지 않고 중계만) |
 | `GROUP_CHANGED` | 그룹 설정 reload + CMP 동기화 + GMS NOTIFY 발송 |
 | `STATS_REQUEST` | CSP 통계 응답 (등록자 수, 활성 호 등) |
-| `CSC_RESTART` | DB 전체 재동기화 |
+| `CSC_RESTART` | DB 전체 재동기화 + 단말용 XCAP root 재취득 (`CscEndpointCache::Refresh`) |
+
+---
+
+### 3.11 CCscAvClient / CCscEndpointCache
+
+**파일:** `CscAvClient.h/.cpp`, `CscEndpointCache.h/.cpp`
+
+CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 두 개. 설정은
+`Setup.Csc.{Host,Port,Scheme,InternalToken,TimeoutMs}` 한 세트를 공유하고, 인증은
+`Authorization: Bearer {InternalToken}`(csc.json `InternalApi.Token` 과 같은 값) 이다.
+
+| 클래스 | 호출 | 용도 | 시점 |
+|---|---|---|---|
+| `CCscAvClient` | `POST /internal/aka/av` | IMS AKA 인증 벡터(RAND/AUTN/XRES) — S-CSCF↔HSS/AuC 상당 | AKA 가입자 REGISTER 챌린지마다 (동기) |
+| `CCscEndpointCache` | `GET /internal/mcptt/endpoint` | **단말용 MCPTT 서비스 주소**(`xcap_root`) | 기동 1회 · SIGUSR1 · `CSC_RESTART` (캐시) |
+
+`CCscEndpointCache` 가 취득한 `xcap_root` 는 xcap-diff NOTIFY 의 `xcap-root` 속성과 MCData FD
+다운로드 URL base(`Setup.McData.FdUrlBase` 미설정 시)로 쓰인다. **CSP 에는 이 주소를 적는 설정이
+없다** — 정본은 CSC 의 `McpttServer.PublicUrl` 한 곳이고, 그래야 단말이 ue-init-config 로 듣는
+주소(`GMS/CMS-XCAP-root-URI`)와 NOTIFY 로 듣는 주소가 같아진다.
+
+조회 실패 시: 마지막 성공값을 유지하고, 미취득 상태면 `https://{Setup.Csc.Host}:4430/` 로 유도하며
+ERROR 를 남긴다. 실패 후 30초 안에는 재시도하지 않는다(SIP 스레드 동기 I/O 스탬피드 방지).
 
 ---
 

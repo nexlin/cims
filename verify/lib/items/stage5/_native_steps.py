@@ -124,6 +124,10 @@ _TARGET_PORTS = {
 #                     csp 변종은 Roles + LocalIp + MediaServer 분기, cmp 변종은
 #                     RtpIp + CspIp 분기. cims.sh start_*_variant 가 시작 직전
 #                     install_path/config.json 을 모듈 csp.json/cmp.json 에 머지.
+# CSP↔CSC 내부 API 공유 토큰 (배포본 스택 전용, 하네스가 양쪽 overlay 에 같은 값으로 주입).
+#   용도 = IMS AKA AV 취득 + 단말용 XCAP root(/internal/mcptt/endpoint) 취득.
+VERIFY_INTERNAL_TOKEN = "verify-internal-token"
+
 _INSTANCES = [
     # csc — mgmt 호스트의 서비스 모듈 (oam_csc_split). 배포본 OAM(게이트웨이) 이
     # install 성공 시 JwtSecret 자동 주입 + 가입자/조직 라우트를 self-register
@@ -139,8 +143,10 @@ _INSTANCES = [
      "config_overlay": {
          "Server.Port": csc_http.deployed_csc_port("verify"),
          # dev Test-CSC 의 MCPTT(4430) 와 bind 충돌 회피 — 배포본 스택은 4431.
-         # csp/psp 변종의 Setup.Xcap.Port 와 동기 (아래 _INSTANCES overlay).
          "McpttServer.Port": 4431,
+         # 단말용 XCAP root 의 정본 — csp/psp 는 이 값을 내부 API 로 취득해 NOTIFY 로 광고한다.
+         "McpttServer.PublicUrl": "https://127.0.0.1:4431",
+         "InternalApi.Token": VERIFY_INTERNAL_TOKEN,
          # 그룹/가입자 변경 notify 대상 = 배포본 CSP/PSP (dev 스택 아님).
          "CspNotify.Ip": "127.0.0.1",
          "PspNotify.Ip": "127.0.0.3",
@@ -165,9 +171,11 @@ _INSTANCES = [
          "Setup.MediaServer.Endpoints": [{"ip": "127.0.0.1", "port": 9000}],
          # dev csp (9001) 와 충돌 회피 — 배포본 CSP 는 9011 사용.
          "Setup.MediaServer.LocalPort": 9011,
-         # XCAP(GMS/CMS) 대상 = 배포본 csc (mgmt 호스트 127.0.0.1:4431).
-         "Setup.Xcap.Host": "127.0.0.1",
-         "Setup.Xcap.Port": 4431,
+         # CSC 연동(내부 API) = 배포본 csc admin (mgmt 호스트 127.0.0.1). 단말용 XCAP root 는
+         #   이 경로로 취득한다 (csc overlay 의 McpttServer.PublicUrl = https://127.0.0.1:4431).
+         "Setup.Csc.Host": "127.0.0.1",
+         "Setup.Csc.Port": csc_http.deployed_csc_port("verify"),
+         "Setup.Csc.InternalToken": VERIFY_INTERNAL_TOKEN,
      }},
     {"id": "psp",
      "display_name": "PTT SIP Server",
@@ -186,9 +194,11 @@ _INSTANCES = [
          "Setup.MediaServer.Endpoints": [{"ip": "127.0.0.3", "port": 9000}],
          # 인스턴스별 LocalPort 분리 — dev csp(9001)/CSP(9011) 와 충돌 회피.
          "Setup.MediaServer.LocalPort": 9012,
-         # XCAP(GMS/CMS) 대상 = 배포본 csc (mgmt 호스트 127.0.0.1:4431).
-         "Setup.Xcap.Host": "127.0.0.1",
-         "Setup.Xcap.Port": 4431,
+         # CSC 연동(내부 API) = 배포본 csc admin (mgmt 호스트 127.0.0.1). 단말용 XCAP root 는
+         #   이 경로로 취득한다 (csc overlay 의 McpttServer.PublicUrl = https://127.0.0.1:4431).
+         "Setup.Csc.Host": "127.0.0.1",
+         "Setup.Csc.Port": csc_http.deployed_csc_port("verify"),
+         "Setup.Csc.InternalToken": VERIFY_INTERNAL_TOKEN,
      }},
     {"id": "cmp",
      "display_name": "VoLTE Media Server",

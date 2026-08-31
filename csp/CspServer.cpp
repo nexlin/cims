@@ -36,6 +36,7 @@ static void _cspReloadHandler( int ) {
 
 CCallDir gclsCallDir;
 #include "CmpClient.h"
+#include "CscEndpointCache.h"
 #include "CscInterface.h"
 #include "CspAclPolicyEngine.h"
 #include "CspConfigCache.h"
@@ -438,6 +439,9 @@ int ServiceMain() {
     //   SIP 리스너를 올린다. 이후 SIGUSR1 reload 시 Sync 가 포트 변경분을 remove+add 로 재바인딩.
     gclsListenerManager.Sync();
     gclsListenerManager.CheckCertExpiry();  // 기동 시점 판정 (A-PRC-009)
+    // 단말용 MCPTT 서비스 주소(xcap-root) 를 CSC 에서 취득 — 첫 NOTIFY 전에 확보.
+    //   실패해도 기동은 계속한다(유도값 사용 + ERROR 로그, 이후 SIGUSR1/CSC_RESTART 에 재시도).
+    gclsCscEndpointCache.Refresh();
     // IMS AKA+IPsec (P4) — 잔류 SA 회수 + 자기점검. IPSEC 접속점이 없거나 특권이 없으면 ipsec-3gpp 미제시.
     gclsIpsecSaSetMap.Init();
     // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
@@ -489,6 +493,7 @@ int ServiceMain() {
             gclsAccessServiceMap_Sync_compat();
             gclsListenerManager.Sync();
             gclsListenerManager.CheckCertExpiry();  // 경로 변경 반영 (A-PRC-009)
+            gclsCscEndpointCache.Refresh();         // CSC 주소/PublicUrl 변경 추종
             // R6 (2026-06-08): 무중단 포트 변경 — primary 포트가 바뀌었으면 identity fallback 도 추종.
             {
                 LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();
@@ -596,10 +601,9 @@ extern CSipUserAgent gclsUserAgent;
  */
 static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::string &etag,
                                       const std::string &strChangedId ) {
-    // Phase 3: xcap-root = CSC XCAP(MCPTT) 서버 (Setup.Xcap.Scheme://Host:Port, 기본 https:4430).
-    //   기존 하드코딩 http://{CSP}:4420 은 CSC Admin 서버(라우트 없음)를 가리키던 오류였음.
-    const std::string strXcapRoot = CspAddressing::GetXcapScheme() + "://" + CspAddressing::GetLocalXcapAddress() +
-                                    ":" + std::to_string( CspAddressing::GetXcapPort() ) + "/";
+    // xcap-root = CSC 가 알려주는 단말용 MCPTT 서비스 root (정본 = CSC McpttServer.PublicUrl).
+    //   CSP 설정에 이 주소를 적지 않는다 — ue-init-config 가 단말에 주는 주소와 같아야 하므로.
+    const std::string strXcapRoot = gclsCscEndpointCache.GetXcapRoot();
     std::string strBody;
     strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     strBody += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"";

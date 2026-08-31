@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "CmdpClient.h"
+#include "CscEndpointCache.h"
 #include "CspServiceMap.h"
 #include "GroupMap.h"
 #include "Log.h"
@@ -338,11 +339,9 @@ void CMcDataMediaService::HandleMsgReceived( const SimpleJson::JsonNode &clsPayl
     clsInfo.m_strFileName = clsPayload.GetString( "file_name" );
     clsInfo.m_strFileType = clsPayload.GetString( "file_type" );
     clsInfo.m_llFileSize = clsPayload.GetInt( "size", 0 );
+    // 폴백 = CSC 가 알려주는 단말용 서비스 URL (포트 하드코딩 없음 — 정본은 CSC PublicUrl).
     std::string strUrl =
-        gclsSetup.m_strFdUrlBase.empty()
-            ? ( "https://" + ( gclsSetup.m_strXcapHost.empty() ? gclsSetup.m_strLocalIp : gclsSetup.m_strXcapHost ) +
-                ":4430" )
-            : gclsSetup.m_strFdUrlBase;
+        gclsSetup.m_strFdUrlBase.empty() ? gclsCscEndpointCache.GetServiceUrlBase() : gclsSetup.m_strFdUrlBase;
     strUrl += "/mcdata/fd/" + clsPayload.GetString( "file_id" );
     McDataArchiveMessage( strGroup.c_str(), strFrom.c_str(), "sds", clsInfo, (int)clsPayload.GetInt( "size", 0 ),
                           iFanout, "msrp", strUrl.c_str() );
@@ -397,10 +396,7 @@ int CMcDataMediaService::FanOutMediaSds( const std::string &strGroup, const std:
             std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
             std::string strGroupUri = "sip:" + strGroup + ( strDomain.empty() ? "" : "@" + strDomain );
             std::string strUrlBase = gclsSetup.m_strFdUrlBase;
-            if ( strUrlBase.empty() )
-                strUrlBase = "https://" +
-                             ( gclsSetup.m_strXcapHost.empty() ? gclsSetup.m_strLocalIp : gclsSetup.m_strXcapHost ) +
-                             ":4430";
+            if ( strUrlBase.empty() ) strUrlBase = gclsCscEndpointCache.GetServiceUrlBase();
             strFallbackBody = McDataBuildFdSignallingBody(
                 strFallbackCt, strGroupUri, strUrlBase + "/mcdata/fd/" + strFileId, clsPayload.GetString( "file_name" ),
                 clsPayload.GetInt( "size", 0 ), clsPayload.GetString( "file_type" ), clsPayload.GetString( "conv_id" ),

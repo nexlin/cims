@@ -210,7 +210,7 @@ mgmt 체인은 **standalone OAM**(02_deployment §2.1 — 콘솔 SPA 정적 동�
 | PTT SIP Server | `ptt-sip-server` | `<dist>/ptt-sip-server/` | psp (variant=PSP) |
 | PTT Media Server | `ptt-media-server` | `<dist>/ptt-media-server/` | pmp (variant=PMP) |
 
-각 service-server 는 **base 바이너리 동일 + Roles 토글 + LocalIp/Port overlay** 로 인스턴스화 (deployment overlay = `install_path/<모듈>/config.json` → 모듈 config 시작 직전 머지). 설치 레이아웃은 버전형 (`<agent>/modules/<모듈>/<ver>/` + `current` 심볼릭). csp 변종의 DB 접속·`Setup.Xcap.*`(배포본 csc 4431), csc 의 `CimsDatabase.*`·`McpttServer.Port`(4431)·notify 대상은 step 19 가 overlay 로 주입 — 운영에서 블루프린트/콘솔 설정 단계가 담당하는 값을 verify 체인에서는 하네스가 담당한다. csp 변종의 SIP 리스너 SoT(`local_nodes.jsonl` primary) 는 step 21 이 시작 전 non-clobber 시드. loopback alias (127.0.0.2 / 127.0.0.3 등) 는 `verify/lib/common/loopback.py` 가 관리.
+각 service-server 는 **base 바이너리 동일 + Roles 토글 + LocalIp/Port overlay** 로 인스턴스화 (deployment overlay = `install_path/<모듈>/config.json` → 모듈 config 시작 직전 머지). 설치 레이아웃은 버전형 (`<agent>/modules/<모듈>/<ver>/` + `current` 심볼릭). csp 변종의 DB 접속·`Setup.Csc.*`(배포본 csc admin), csc 의 `CimsDatabase.*`·`McpttServer.{Port,PublicUrl}`(4431)·`InternalApi.Token`·notify 대상은 step 19 가 overlay 로 주입 — 운영에서 블루프린트/콘솔 설정 단계가 담당하는 값을 verify 체인에서는 하네스가 담당한다. csp 변종의 SIP 리스너 SoT(`local_nodes.jsonl` primary) 는 step 21 이 시작 전 non-clobber 시드. loopback alias (127.0.0.2 / 127.0.0.3 등) 는 `verify/lib/common/loopback.py` 가 관리.
 
 verify Test-agent 는 `CIMS_AGENT_NO_SUPERVISE=1` 로 spawn 한다 — `_PREFIX`(build/dist)/run 의 dev pid 파일이 감독 집합에 seed 되어 dev 스택(oam 등)과 재기동 경쟁하는 사고 방지. `cims.sh reset` 이 `<dist>/run/supervised.json` 잔재도 정리한다.
 

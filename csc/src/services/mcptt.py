@@ -100,6 +100,11 @@ PSP_NOTIFY_PORT = 4421
 PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,tcp_port,tls_port,transport,domain}, "ptt":{...}}}
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
+# 단말이 도달하는 MCPTT 서비스(IdMS/GMS/CMS/KMS) 공개 base URL — **단일 정본**.
+#   McpttServer.PublicUrl 설정값(정규화: 스킴 필수·후행 / 제거). 비면 요청 Host 유도(올인원).
+#   단말에 주소를 알려주는 모든 자리(ue-init-config XCAP-root-URI · openid-configuration ·
+#   authreq 폼 action · /provisioning/me csc · CSP 에 주는 xcap-root)가 이 값에서 파생된다.
+_MCPTT_PUBLIC_URL = ''
 
 # ue-init-config 규격 파라미터값 (config UeInitConfig.* — 주소류는 토폴로지 유도라 여기 없음).
 #   빈 dict 면 코드 기본값(_UE_INIT_DEFAULTS) — 설정 섹션이 없는 배포본(업그레이드 직후)도 종전 문서 그대로.
@@ -117,6 +122,50 @@ _UE_INIT_DEFAULTS = {
                        "McData": {"Enable": False, "ServerUri": ""}},
 }
 _UE_INIT_LAST_GOOD = {}      # base_url → (xml, etag): 설정값이 문서를 깨뜨렸을 때 유지할 마지막 정상 문서
+
+
+def _request_host(args, default_port: bool = True) -> str:
+    """요청 Host 헤더 (없으면 IdMS 도메인 유도). PublicUrl 미설정 시의 폴백 재료."""
+    fallback = f"{IDMS_DOMAIN}:{_MCPTT_PORT}" if default_port else IDMS_DOMAIN
+    return (args.headers.get('host') or args.headers.get('Host') or fallback).strip()
+
+
+def public_base_url(args) -> str:
+    """단말이 도달하는 MCPTT 서비스 공개 base URL (후행 '/' 없음) — 단일 정본.
+
+    McpttServer.PublicUrl 이 있으면 그 값, 없으면 요청 Host 유도(올인원 기본).
+    리버스 프록시·VIP·다중 노드 구성에서는 PublicUrl 을 명시해야 단말이 받는 주소가
+    실제 도달 주소와 일치한다."""
+    if _MCPTT_PUBLIC_URL:
+        return _MCPTT_PUBLIC_URL
+    return f"https://{_request_host(args)}"
+
+
+def public_host_port(args):
+    """공개 base URL 의 (host, port) — /provisioning/me 의 csc 블록용."""
+    rest = public_base_url(args).split('://', 1)[-1].split('/', 1)[0]
+    if ':' in rest:
+        host, _, port = rest.rpartition(':')
+        if host and port.isdigit():
+            return host, int(port)
+    return rest, _MCPTT_PORT
+
+
+def public_xcap_root(args) -> str:
+    """xcap-diff NOTIFY 의 xcap-root · MCData FD URL base (후행 '/' 포함).
+
+    CSP 가 내부 API 로 조회하는 값. PublicUrl 이 있으면 그 값, 없으면 CSP 요청의 Host
+    에서 host 만 취해 McpttServer.Port 를 붙인다 — CSP 는 admin 포트(4421)로 오므로
+    포트를 그대로 쓰면 안 된다(단일 노드에서만 정확, 다중 노드는 PublicUrl 필수)."""
+    if _MCPTT_PUBLIC_URL:
+        base = _MCPTT_PUBLIC_URL
+    else:
+        host = _request_host(args, default_port=False)
+        if ':' in host:
+            host = host.rpartition(':')[0]          # admin 포트 제거
+        base = f"https://{host}:{_MCPTT_PORT}"
+    return base + '/'
+
 
 # IdMS 규격 로그인 폼(TS 24.482 §6.3.1) 입력칸 이름 — 외부 단말/SDK 가 헤드리스로 채울 때 찾는 name.
 IDMS_FORM_LOGIN_FIELD = "username"
@@ -214,10 +263,17 @@ def apply_config(config):
                     f"PSP={PSP_NOTIFY_IP or '(unset)'}:{PSP_NOTIFY_PORT}")
 
     # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
-    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL
     _DB_CONFIG = db_config
     PROVISIONING = config.get('Provisioning', {}) or {}
-    _MCPTT_PORT = int((config.get('McpttServer', {}) or {}).get('Port', 4430))
+    _mcptt_conf = config.get('McpttServer', {}) or {}
+    _MCPTT_PORT = int(_mcptt_conf.get('Port', 4430))
+    # 공개 base URL — 스킴 없으면 https 보정, 후행 '/' 제거. 비면 요청 Host 유도(올인원).
+    _pub = str(_mcptt_conf.get('PublicUrl') or '').strip().rstrip('/')
+    if _pub and '://' not in _pub:
+        _pub = 'https://' + _pub
+    _MCPTT_PUBLIC_URL = _pub
+    logger.log_info(f"MCPTT public base URL: {_MCPTT_PUBLIC_URL or '(요청 Host 유도)'}")
 
     global GROUP_DIR
     if group_path:
@@ -1543,10 +1599,9 @@ button{{margin-top:1.2em;padding:.6em 1.4em}} .error{{color:#b00020}}
 
 
 def _authreq_action_url(args: HandlerArgs) -> str:
-    """폼 action = 이 authreq 의 절대 URL (요청 Host 유도 — openid-configuration·ue-init-config 와 같은 규칙).
+    """폼 action = 이 authreq 의 절대 URL (공개 base URL 정본 — openid-configuration·ue-init-config 와 같은 규칙).
     헤드리스 SDK 가 상대 경로를 못 풀 수 있어 절대 URL 로 준다."""
-    host = (args.headers.get('host') or args.headers.get('Host') or f"{IDMS_DOMAIN}:{_MCPTT_PORT}").strip()
-    return f"https://{host}/idms/authreq"
+    return f"{public_base_url(args)}/idms/authreq"
 
 
 async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -1892,13 +1947,13 @@ async def handle_ue_init_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
     if args.method != 'GET':
         return HandlerResult(status=405)
 
-    host = (args.headers.get('host') or args.headers.get('Host') or f"{IDMS_DOMAIN}:{_MCPTT_PORT}").strip()
-    xml, etag = get_ue_init_config_xml(f"https://{host}")
+    base = public_base_url(args)
+    xml, etag = get_ue_init_config_xml(base)
 
     if_none_match = args.headers.get('if-none-match', '')
     if if_none_match and if_none_match == etag:
         return HandlerResult(status=304)
-    logger.log_info(f"[CMS] UE init config served (host={host})")
+    logger.log_info(f"[CMS] UE init config served (base={base})")
     return HandlerResult(status=200, body=xml,
                          media_type='application/vnd.3gpp.mcptt-ue-init-config+xml',
                          headers={'Etag': etag})
@@ -2030,10 +2085,9 @@ async def handle_token_introspect(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
 
 # S1: OIDC Discovery — GET /.well-known/openid-configuration (TS 33.180 / OIDC Discovery 1.0)
-#   단말이 엔드포인트를 하드코딩하지 않고 동적 발견. base URL 은 요청 Host 헤더에서 유도.
+#   단말이 엔드포인트를 하드코딩하지 않고 동적 발견. base URL 은 공개 base URL 정본(public_base_url).
 async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    host = (args.headers.get('host') or args.headers.get('Host') or f"{IDMS_DOMAIN}").strip()
-    base = f"https://{host}"
+    base = public_base_url(args)
     doc = {
         "issuer": IDMS_ISSUER,
         "authorization_endpoint": f"{base}/idms/authreq",
@@ -2180,7 +2234,9 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                              body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
                              media_type="application/json")
     msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    # 시그널링(CSP/PSP) host 폴백 = 요청 Host (올인원 전제). CSC 자기 주소는 공개 URL 정본에서.
     host_ip = (args.headers.get('host') or args.headers.get('Host') or '').split(':')[0]
+    csc_host, csc_port = public_host_port(args)
     if not _DB_CONFIG:
         return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
 
@@ -2256,7 +2312,7 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
         country = _country_code_of(msisdn)
     body = {
         "user": {"displayName": display_name, "loginId": token.get('sub') or msisdn},
-        "csc": {"host": host_ip, "port": _MCPTT_PORT},
+        "csc": {"host": csc_host, "port": csc_port},
         "countryCode": country,     # 판정 불가 시 "" (null 금지 — Android org.json 이 "null" 문자열화)
         "services": services,
     }

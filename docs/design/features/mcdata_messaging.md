@@ -178,6 +178,7 @@ CSP fan-out (하이브리드):
 - **설정**:
   - csp.json `Setup.McDataMedia.{Enable(기본 false),Host,ControlPort(9100),LocalPort(9101)}`,
     `Setup.McData.{MaxPayloadSizeSdsCplaneBytes(기본 0=무제한),FdUrlBase}` — 콘솔
+    (`FdUrlBase` 비면 CSC 가 알려주는 단말용 서비스 URL = `McpttServer.PublicUrl`) —
     `mcdata_media` 섹션. Enable=false 면 기존 C-plane 만 동작(현행 무영향).
   - cmdp.json `ServerIp/ServerPort(9100)/MsrpIp/MsrpPort(2855)/MaxMessageBytes(10MB)/
     SessionTimeout/OrphanReclaimSec/McDataFd.Dir(CSC 와 공유)/ServiceLogging.Dir/SystemId`.

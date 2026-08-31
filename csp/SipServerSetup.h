@@ -324,7 +324,7 @@ public:
     //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).
     int m_iMaxSdsCplaneBytes;
     //   FdUrlBase: FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430).
-    //   비면 Xcap Host:4430 로 유도.
+    //   비면 CSC 가 알려주는 단말용 서비스 URL(CscEndpointCache) 로 유도.
     std::string m_strFdUrlBase;
 
     // ================================================================
@@ -336,19 +336,13 @@ public:
     std::vector<CspMediaCodec> m_vecMediaCodecs;
 
     // ================================================================
-    // XCAP / CSC 연동 (UE↔CSC, 3GPP TS 24.484 — Phase 3)
-    //   xcap-diff NOTIFY 의 xcap-root URL 로 advertise 할 CSC XCAP(MCPTT) 서버 주소.
-    //   비어있으면 m_strLocalIp 로 fallback (CSP 자기 IP — 단일 노드 호환).
-    //   port 기본값 4430 = CSC McpttServer (GMS/CMS/KMS 라우트가 실제 서빙되는 포트).
-    //   scheme 기본값 https (CSC McpttServer 는 cert 존재 시 TLS — 3GPP CSC-2/3 규격).
-    std::string m_strXcapHost;
-    int m_iXcapPort;
-    std::string m_strXcapScheme;
-
-    // ================================================================
-    // CSC 내부 API (S-CSCF ↔ HSS/AuC — IMS AKA AV, sip_access_security.md §8.2) — Setup.Csc.*
-    //   Host 비면 Xcap.Host → LocalIp 순 fallback. InternalToken 은 csc.json InternalApi.Token 과 같은 값
-    //   (configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 는 504.
+    // CSC 연동 (내부 API) — Setup.Csc.*
+    //   두 용도: ① IMS AKA 인증 벡터 취득(S-CSCF ↔ HSS/AuC, sip_access_security.md §8.2)
+    //            ② 단말용 MCPTT 서비스 주소(xcap-root) 취득 (CscEndpointCache)
+    //   Host 비면 LocalIp fallback. InternalToken 은 csc.json InternalApi.Token 과 같은 값
+    //   (configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 는 504, xcap-root 는 유도값.
+    //   ※ 단말이 XCAP 문서를 받는 주소의 정본은 CSC(McpttServer.PublicUrl) 다 — CSP 에는
+    //     그 주소를 적는 설정이 없다(구 Setup.Xcap.* 폐기).
     std::string m_strCscHost;
     int m_iCscPort;
     std::string m_strCscScheme;

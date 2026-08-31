@@ -136,9 +136,6 @@ CSipServerSetup::CSipServerSetup()
       m_iIpsecTempSaTimeoutSec( 32 ),
       m_strIpsecEalgPreference( "aes-cbc" ),
       m_iMaxSdsCplaneBytes( 0 ),
-      m_strXcapHost( "" ),
-      m_iXcapPort( 4430 ),
-      m_strXcapScheme( "https" ),
       m_strCscHost( "" ),
       m_iCscPort( 4421 ),
       m_strCscScheme( "https" ),
@@ -414,16 +411,19 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( mc.Has( "FdUrlBase" ) ) m_strFdUrlBase = mc.GetString( "FdUrlBase" );
             }
 
-            // XCAP / CSC 연동 (Phase 3): xcap-diff NOTIFY 의 xcap-root 로 advertise 할
-            //   CSC XCAP(MCPTT) 서버 주소. Host 미지정 시 m_strLocalIp fallback.
+            // 구 Setup.Xcap.* — 폐기됨. 단말용 XCAP root 의 정본은 CSC(McpttServer.PublicUrl)
+            //   이고 CSP 는 내부 API 로 취득한다(CscEndpointCache). overlay 에 잔존해도 무시.
             if ( setup.Has( "Xcap" ) ) {
-                SimpleJson::JsonNode xcap = setup.Get( "Xcap" );
-                if ( xcap.Has( "Host" ) ) m_strXcapHost = xcap.GetString( "Host" );
-                if ( xcap.Has( "Port" ) ) m_iXcapPort = (int)xcap.GetInt( "Port" );
-                if ( xcap.Has( "Scheme" ) ) m_strXcapScheme = xcap.GetString( "Scheme" );
+                static bool bWarned = false;
+                if ( !bWarned ) {
+                    bWarned = true;
+                    CLog::Print( LOG_ERROR,
+                                 "Setup.Xcap.* 는 폐기된 설정입니다 — 무시합니다. 단말용 XCAP 주소는 "
+                                 "CSC 의 McpttServer.PublicUrl 로 이관됐습니다(CSP 가 내부 API 로 취득)." );
+                }
             }
 
-            // CSC 내부 API (IMS AKA AV — sip_access_security.md §8.2)
+            // CSC 내부 API (IMS AKA AV + 단말용 MCPTT 서비스 주소)
             if ( setup.Has( "Csc" ) ) {
                 SimpleJson::JsonNode csc = setup.Get( "Csc" );
                 if ( csc.Has( "Host" ) ) m_strCscHost = csc.GetString( "Host" );

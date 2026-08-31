@@ -26,8 +26,16 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 
 | 서버 | 포트 | 용도 |
 |------|------|------|
-| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 AV API(`/internal/aka/av`, `/api/v1` 밖 — 게이트웨이 미프록시) |
+| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 API(`/internal/aka/av` AV 발급, `/internal/mcptt/endpoint` 단말용 XCAP root — `/api/v1` 밖, 게이트웨이 미프록시) |
 | MCPTT Service Server | 4430 (HTTPS) | 단말용 IdMS/GMS/CMS/KMS |
+
+**단말이 도달하는 공개 주소의 정본** = `McpttServer.PublicUrl`. 단말에 주소를 알려주는 모든
+자리가 이 한 값에서 파생된다 — ue-init-config 의 `GMS/CMS-XCAP-root-URI`,
+`.well-known/openid-configuration`, IdMS 로그인 폼 action, `/provisioning/me` 의 `csc`, 그리고
+CSP 가 xcap-diff NOTIFY 로 광고하는 `xcap-root`(내부 API 로 취득). 비우면 요청 Host 헤더에서
+유도한다(올인원 단일 노드 전용) — VIP·NAT·리버스 프록시 뒤라면 반드시 지정한다. CSP 에는 이
+주소를 적는 설정이 없다(구 `csp.json Setup.Xcap.*` 폐기 — 같은 정보가 두 곳에 있어 단말이 듣는
+두 주소가 어긋날 수 있었다).
 
 ### 1.3 프로세스 구성
 
@@ -705,7 +713,8 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
   },
   "McpttServer": {
     "Ip": "0.0.0.0",
-    "Port": 4430
+    "Port": 4430,
+    "PublicUrl": ""
   },
   "CimsDatabase": {
     "host": "127.0.0.1",
@@ -771,7 +780,8 @@ agent 가 쓴 `csc/config.json` 단독으로 정상 동작해야 하며, base �
 agent 의 `job_update_config` 는 overlay 를 재기록한 뒤 모듈에 **SIGUSR1** 을 보낸다.
 CSC 는 `csc_app.py` 에서 핸들러를 등록해 `load_config()` → `admin_auth.init()` →
 `mcptt.apply_config()` 를 다시 수행한다. `config_template` 의 `restart:false` 필드
-(`CspNotify`/`PspNotify`, IdMs TTL, `Provisioning` 등)가 재기동 없이 반영되는 경로다.
+(`CspNotify`/`PspNotify`, IdMs TTL, `Provisioning`, `McpttServer.PublicUrl` 등)가 재기동 없이
+반영되는 경로다.
 
 - `mcptt.apply_config(config)` = 스칼라 설정만 재적용 (가입자/그룹 데이터 로드는 미포함).
   기동 시엔 `load_shared_data()` 가 먼저 호출한다.

@@ -111,6 +111,8 @@ if __name__ == '__main__':
     # AuC — IMS AKA 인증 벡터 발급자 (sip_access_security.md §8.2). 내부 AV API 는 admin 서버(4421)에
     #   붙지만 /api/v1 밖이라 OAM 게이트웨이가 프록시하지 않는다(CSP 직접 호출 전용).
     from handlers.auc_api        import CSC_AUC_HANDLER_LIST
+    # 내부 토폴로지 API — CSP 가 단말용 XCAP root 를 조회한다(정본=McpttServer.PublicUrl).
+    from handlers.internal_api   import CSC_INTERNAL_HANDLER_LIST
     from services.auc            import auc as _auc
 
     admin_server = None
@@ -323,7 +325,8 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in (CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
-                                     + CSC_API_DOCS_HANDLER_LIST + CSC_AUC_HANDLER_LIST)
+                                     + CSC_API_DOCS_HANDLER_LIST + CSC_AUC_HANDLER_LIST
+                                     + CSC_INTERNAL_HANDLER_LIST)
         ])
         admin_server.start()
         logger.log_info(f"CSC Admin server started on port {admin_conf.get('Port', 4421)}")
