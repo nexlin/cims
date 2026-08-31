@@ -53,18 +53,43 @@ nodeId 비교 — msg 파일 `dir` 과 동일 관점)를 구분하고, 원문 �
 > 경로에 기록하면 flow/msg 파일이 인터리브되어 seq 정합이 깨지고(위 폴백으로 원문 조회는 복원되지만),
 > security 로그·통계·버킷 seq 재계수도 오염된다. 노드 추가 시 `csp_02` 처럼 id 를 분리한다.
 
-**CSP 5분 버킷·open-per-write** (`SipMessageLogger`): 매 줄 `fopen(append)`→write→`fclose`, 파일명에 5분 접미사.
+**CSP 5분 버킷·open-per-batch** (`SipMessageLogger`): 파일명에 5분 접미사, 파일 핸들 비유지.
 이로써 `.nfs` 고아·운영중 로그삭제 데이터유실·대용량 검색 부담을 피한다.
 `seq` 는 5분 버킷별로 리셋되므로 **원문 역조회 시 flow 엔트리 `ts`(HH:MM:SS)로 버킷(mm5)을 도출**해 해당 파일을 연다.
 리더(`flow_logger.py`)는 `.msg.jsonl` + `.msg.{mm5}.jsonl` glob 을 모두 매칭한다.
 
 **CMP/CSC 도 동일하게 5분 버킷**(`cmp_0N`/`csc_01`/`oam_01` SystemId 분리). **CSP·CMP·CSC 모두
 비동기 배치 writer** 사용: 생산자(로깅 호출부)는 한 줄을 포맷·seq 부여 후 큐에 적재만 하고 즉시 반환(파일 I/O 없음),
-단일 writer 스레드가 flush 주기(100ms)·큐 임계마다 큐를 비워 **파일경로별로 라인을 합쳐 경로당 1회 open→append→close**
-(open-per-batch). 단일 writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
+writer 가 flush 주기(100ms)·큐 임계마다 큐를 비워 **파일경로별로 라인을 합쳐 경로당 1회 open→append→close**
+(open-per-batch). writer FIFO 라 파일 줄순서=enqueue(=seq) 순서가 유지되어 `seq↔원문 줄번호` 정합 보존.
 목적: NFS 동기 I/O 가 **단일 수신/디스패치 스레드**(csp CmpClient RecvLoop, cmp control loop)를 막던 HOL 블로킹 제거
 (상세: [csp_control_plane_load_hardening.md](../csp_control_plane_load_hardening.md)). 구현: csp `CSipMessageLogger`,
 cmp `PCmpServer`(enqueueLine/logWriterLoop), csc `logger.py`(deque+writer 스레드).
+
+**CSP 저장 경로 무의존(스풀 폴백)** — `ServiceLogging.Dir` 가 NAS(NFS hard mount)일 때 NFS 가
+행이면 쓰기는 실패 대신 **무기한 블록**된다. CSP 는 이를 2단 writer 로 격리한다 (`CSipMessageLogger`):
+
+- **생산자(SIP/제어 스레드)**: 파일시스템 무접촉 — 큐 적재만. 버킷 회전도 북키핑만 하고
+  디렉터리 생성·기존 줄 계수는 하지 않는다.
+- **dispatch 스레드**: 큐를 소비해 목적지 결정. 저장소 건강 + 스풀 잔량 없음이면 flusher 큐로
+  직행, 아니면 **로컬 스풀**(`ServiceLogging.SpoolDir`, 기본 `spool`)의 미러 파일
+  (`{spool}/abs{목적경로}`)에 append. dispatch 도 NFS 를 만지지 않아 항상 살아 있다.
+- **NAS flusher 스레드**: 저장 경로 I/O 전담 — 갇혀도 이 스레드 하나뿐. 무응답 판정은
+  ① 쓰기 실패(fail-fast) ② in-flight 정체 `ServiceLogging.StallSec`(기본 5s) 초과
+  ③ flusher 큐 포화. 회복되면 스풀을 **오래된 파일부터 순서대로 재생(replay)** 한 뒤 직행
+  복귀 — 경로별 줄 순서(=seq 정합)가 보존된다. 재생 중 crash 는 재생분 중복(at-least-once)
+  가능 — 리더의 sesid/내용 매칭 폴백이 흡수.
+- **seq 시딩**: 재기동 시 기동 버킷의 기존 줄 계수(저장 파일 + 스풀 잔량)는 flusher 가
+  비동기로 수행해 합류한다. 합류 전에 첫 write 가 오면 0 부터 시작 (리더 폴백 흡수).
+- **정지**: 저장소가 건강하면 flusher 드레인을 기다리고, 죽어 있으면 잔량을 스풀로 회수 후
+  flusher 를 detach 한다 (NFS killable 대기라 프로세스 종료가 회수). 다음 기동이 재생한다.
+- **자기보고**: 폴백 진입 시 알람 `A-PRC-006 storage_failure`(mo=`<node>/csp/service_log`)
+  open, 스풀 드레인 완료 시 close. 스풀 용량 상한 `ServiceLogging.SpoolMaxMb`(기본 1024)
+  초과 시 오래된 스풀 파일부터 폐기(폐기 줄 수는 알람 params `dropped` 로 노출).
+
+> CMP/CMDP/CSC 의 writer 는 아직 스풀 폴백이 없다 (NFS 행 시 writer 블록 + 큐 상한 드롭,
+> A-PRC-006 감지 행 '후보' — [alarm_catalog.csv](../alarm_catalog.csv)). CSP 와 같은 패턴의
+> 이식이 후속 과제. CallDir(call.json/session.json — SIP 스레드 동기 쓰기)와 녹취도 별도 축.
 
 ## 3. Realm 설정
 

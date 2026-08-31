@@ -215,6 +215,17 @@ public:
     /** 서비스 로그 디렉터리 — 통화 이력/Flow/녹취용 (빈 값이면 비활성화) */
     std::string m_strServiceLogDir;
 
+    /** 서비스 로그 로컬 스풀 디렉터리 — Dir(NAS 가능) 무응답 시 폴백 저장소.
+     *  반드시 로컬 디스크 경로. 기본값: "spool" (실행 디렉터리 기준) */
+    std::string m_strServiceLogSpoolDir;
+
+    /** 서비스 로그 저장 경로 무응답 판정 시간(초) — flusher in-flight 가 이 시간을 넘으면
+     *  스풀 폴백 전환 (기본 5) */
+    int m_iServiceLogStallSec;
+
+    /** 스풀 용량 상한(MB) — 초과 시 오래된 스풀 파일부터 폐기 (기본 1024) */
+    int m_iServiceLogSpoolMaxMb;
+
     /** 시스템 식별자 (로그 디렉터리 하위 구분) — 기본값: "csp_01" */
     std::string m_strSystemId;
 

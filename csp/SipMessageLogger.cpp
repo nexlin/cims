@@ -1,15 +1,21 @@
 #include "SipMessageLogger.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdarg>
 #include <cstring>
 #include <ctime>
 #include <unordered_map>
 #include <utility>
+#include <vector>
+
+#include "FmReporter.h"
 
 CSipMessageLogger gclsSipLogger;
 
@@ -18,51 +24,34 @@ static const size_t MAX_CALLID_CACHE = 10000;
 
 // 비동기 writer 튜닝값
 static const size_t kNotifyThreshold = 128;  // 큐가 이만큼 쌓이면 즉시 flush 깨움
-static const size_t kMaxQueue = 200000;      // 큐 상한 (NFS 장애 등 backlog 시 메모리 폭주 방지)
+static const size_t kMaxQueue = 200000;      // 큐 상한 (스풀까지 막힌 극단 상황의 메모리 폭주 방지)
 static const int kFlushIntervalMs = 100;     // 주기 flush (버퍼 잔여분 보장)
+static const size_t kNasQueueMax = 8;        // dispatch→flusher 대기 배치 상한 (포화 = 저장 경로 지연 신호)
+static const int kReplayRetryMs = 2000;      // 스풀 재생 실패 후 재시도 간격
+static const int kSpoolTrimIntervalMs = 5000;  // 스풀 용량 정리 최소 간격
+static const int kStopFlusherWaitMs = 2000;    // 정지 시 flusher 종료 대기 상한 (초과 시 detach)
 
 CSipMessageLogger::CSipMessageLogger()
     : m_bEnabled( false ),
       m_bRawLogEnabled( true ),
-      m_pFlowFile( NULL ),
-      m_pSipFile( NULL ),
-      m_pCmpFile( NULL ),
-      m_pCscFile( NULL ),
-      m_iSipSeq( 0 ),
-      m_iCmpSeq( 0 ),
-      m_iCscSeq( 0 ),
+      m_iSipSeq( -1 ),
+      m_iCmpSeq( -1 ),
+      m_iCscSeq( -1 ),
       m_bWriterRunning( false ),
-      m_ulDroppedLogs( 0 ) {
+      m_ulDroppedLogs( 0 ),
+      m_bSeedApplied( false ),
+      m_bStoreAlarmOpen( false ),
+      m_bStoreDegraded( false ),
+      m_llLastSpoolTrimMs( 0 ) {
 }
 
 CSipMessageLogger::~CSipMessageLogger() {
-    StopWriter();  // 잔여 큐 전량 flush 후 writer 조인
-    std::lock_guard<std::mutex> lock( m_mtx );
-    CloseAllFiles();
-}
-
-void CSipMessageLogger::CloseAllFiles() {
-    // Called under m_mtx lock
-    if ( m_pFlowFile ) {
-        fclose( m_pFlowFile );
-        m_pFlowFile = NULL;
-    }
-    if ( m_pSipFile ) {
-        fclose( m_pSipFile );
-        m_pSipFile = NULL;
-    }
-    if ( m_pCmpFile ) {
-        fclose( m_pCmpFile );
-        m_pCmpFile = NULL;
-    }
-    if ( m_pCscFile ) {
-        fclose( m_pCscFile );
-        m_pCscFile = NULL;
-    }
+    StopWriter();  // 잔여 큐 스풀 회수 후 dispatch 조인 (flusher 는 갇혀 있으면 detach)
 }
 
 void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::string &strMsgBaseDir,
-                              const std::string &strSystemId, bool bRawLogEnabled ) {
+                              const std::string &strSystemId, bool bRawLogEnabled, const std::string &strSpoolDir,
+                              int iStallSec, int iSpoolMaxMb ) {
     if ( strFlowBaseDir.empty() && strMsgBaseDir.empty() ) return;
     m_strFlowBaseDir = strFlowBaseDir;
     m_strMsgBaseDir = strMsgBaseDir;
@@ -72,10 +61,33 @@ void CSipMessageLogger::Init( const std::string &strFlowBaseDir, const std::stri
     auto upos = m_strNodeName.find( '_' );
     if ( upos != std::string::npos ) m_strNodeName = m_strNodeName.substr( 0, upos );
     m_bRawLogEnabled = bRawLogEnabled;
-    if ( !m_strFlowBaseDir.empty() ) MkdirP( m_strFlowBaseDir );
-    if ( !m_strMsgBaseDir.empty() ) MkdirP( m_strMsgBaseDir );
+
+    // 저장 경로(NAS 가능) I/O 는 전부 flusher 스레드로 — 여기서는 로컬 스풀만 만진다.
+    m_ctx = std::make_shared<StoreCtx>();
+    m_ctx->strSpoolDir = strSpoolDir.empty() ? "spool" : strSpoolDir;
+    m_ctx->strFlowBaseDir = m_strFlowBaseDir;
+    m_ctx->strMsgBaseDir = m_strMsgBaseDir;
+    m_ctx->iStallMs = ( iStallSec > 0 ? iStallSec : 5 ) * 1000;
+    m_ctx->llSpoolMaxBytes = (long long)( iSpoolMaxMb > 0 ? iSpoolMaxMb : 1024 ) * 1024 * 1024;
+    MkdirP( m_ctx->strSpoolDir );
+
+    // 시딩 대상: 기동 시점 버킷의 iface msg 파일 (재기동 seq 연속성 — flusher 가 비동기 계수)
+    m_ctx->strSeedBucketKey = GetMsgHourDir() + "/" + BucketSuffix();
+    static const char *arrIfaces[3] = { "sip", "cmp", "csc" };
+    for ( int i = 0; i < 3; i++ ) m_ctx->strSeedPath[i] = MsgFilePath( arrIfaces[i] );
+
+    // 이전 run 스풀 잔량 스캔 (로컬) — 잔량이 있으면 드레인 전 직행 금지 (경로별 줄 순서 보존)
+    long long llBytes = 0;
+    bool bPending = false;
+    ScanSpool( m_ctx->strSpoolDir, [&]( const std::string &, time_t, long long llSize ) {
+        llBytes += llSize;
+        bPending = true;
+    } );
+    m_ctx->llSpoolBytes.store( llBytes );
+    m_ctx->bSpoolPending.store( bPending );
+
     m_bEnabled = true;
-    StartWriter();  // 비동기 배치 writer 기동 (활성화 시 1회)
+    StartWriter();  // dispatch + NAS flusher 기동 (활성화 시 1회)
 }
 
 void CSipMessageLogger::LogSecurity( const char *pszPeer, const char *pszMethod, const char *pszCaller,
@@ -83,10 +95,9 @@ void CSipMessageLogger::LogSecurity( const char *pszPeer, const char *pszMethod,
                                      const char *pszReasons, bool bRegisteredCaller ) {
     if ( !m_bEnabled ) return;
     std::string strTs = GetTimestamp();
-    std::string strFlowHourDir = GetFlowHourDir();
     std::string strMsgHourDir = GetMsgHourDir();
     std::lock_guard<std::mutex> lock( m_mtx );
-    EnsureHourlyFiles( strFlowHourDir, strMsgHourDir );
+    RotateBucket( strMsgHourDir );
     std::string strPath = strMsgHourDir + "/" + m_strSystemId + ".security." + BucketSuffix() + ".jsonl";
     std::string strLine = "{\"ts\":\"" + strTs + "\"";
     strLine += ",\"peer\":\"" + JsonEsc( pszPeer ) + "\"";
@@ -390,11 +401,10 @@ void CSipMessageLogger::Print( EnumLogLevel eLevel, const char *fmt, ... ) {
     std::string strCSeq = ExtractHeader( pszSipMsg, "CSeq:", NULL );
 
     std::string strTs = GetTimestamp();
-    std::string strFlowHourDir = GetFlowHourDir();
     std::string strMsgHourDir = GetMsgHourDir();
 
     std::lock_guard<std::mutex> lock( m_mtx );
-    EnsureHourlyFiles( strFlowHourDir, strMsgHourDir );
+    RotateBucket( strMsgHourDir );
 
     // Classify service from SIP message domain
     std::string strService = ClassifyService( pszSipMsg, strCallId, strMethod );
@@ -475,7 +485,6 @@ void CSipMessageLogger::LogMessage( const char *pszFrom, const char *pszTo, cons
     const char *proto = ( pszProto && *pszProto ) ? pszProto : "JSON";
     const char *pszDir = ( pszFrom && strcmp( pszFrom, "csp" ) == 0 ) ? "TX" : "RX";
     const char *service = ( pszService && *pszService ) ? pszService : "";
-    std::string strFlowHourDir = GetFlowHourDir();
     std::string strMsgHourDir = GetMsgHourDir();
 
     // Determine interface from proto
@@ -487,7 +496,7 @@ void CSipMessageLogger::LogMessage( const char *pszFrom, const char *pszTo, cons
     }
 
     std::lock_guard<std::mutex> lock( m_mtx );
-    EnsureHourlyFiles( strFlowHourDir, strMsgHourDir );
+    RotateBucket( strMsgHourDir );
 
     // 1. {system_id}_{iface}.jsonl (per-interface) — G7 sesid embed
     int iSeq = 0;
@@ -502,27 +511,20 @@ void CSipMessageLogger::LogMessage( const char *pszFrom, const char *pszTo, cons
                    pszSesId ? pszSesId : "", "", iSeq, iface, pszCaller, pszCallee );
 }
 
-void CSipMessageLogger::EnsureHourlyFiles( const std::string &strFlowHourDir, const std::string &strMsgHourDir ) {
-    // Called under m_mtx lock. 5분 버킷 회전 — 파일 핸들을 유지하지 않고(open-per-write) 디렉터리만 보장하고,
-    //   버킷이 바뀌면 iface seq 를 '미계수(-1)' 로 리셋한다(다음 write 가 기존 줄 수를 계수해 이어붙임).
-    //   (구버전은 시간당 파일을 1시간 내내 열어두었다 → 운영 중 로그 삭제 시 .nfs 고아·데이터 유실 +
-    //    대용량 파일 검색 부담. 매 줄 open/append/close + 5분 파일로 전환.)
+void CSipMessageLogger::RotateBucket( const std::string &strMsgHourDir ) {
+    // Called under m_mtx lock. 5분 버킷 회전 — 순수 북키핑. 파일시스템 무접촉:
+    //   디렉터리 생성은 flusher 가 기록 직전에, 기존 줄 계수(시딩)는 flusher 가 기동 시 1회 수행.
+    //   run 도중 새로 열리는 버킷은 새 파일명이라 기존 줄이 있을 수 없으므로 seq=0 에서 시작한다.
+    //   기동 첫 버킷만 -1(시딩 대기)로 두어 flusher 계수 결과가 합류하게 한다 — 합류 전에
+    //   생산자 write 가 먼저 오면 0 부터 시작한다 (seq 어긋남은 리더의 sesid/내용 폴백이 흡수).
     std::string strBucketKey = strMsgHourDir + "/" + BucketSuffix();
     if ( strBucketKey == m_strCurrentBucketKey ) return;
+    bool bFirstRotation = m_strCurrentBucketKey.empty();
     m_strCurrentBucketKey = strBucketKey;
-
-    if ( !strFlowHourDir.empty() ) {
-        MkdirP( strFlowHourDir );
-        m_strCurrentFlowHourDir = strFlowHourDir;
-    }
-    if ( !strMsgHourDir.empty() ) {
-        MkdirP( strMsgHourDir );
-        m_strCurrentMsgHourDir = strMsgHourDir;
-    }
-    // 새 버킷 → 다음 write 가 해당 파일의 기존 줄 수를 lazy 계수(재기동 시 seq 연속성).
-    m_iSipSeq = -1;
-    m_iCmpSeq = -1;
-    m_iCscSeq = -1;
+    if ( bFirstRotation && m_ctx && strBucketKey == m_ctx->strSeedBucketKey ) return;  // 시딩 대기(-1) 유지
+    m_iSipSeq = 0;
+    m_iCmpSeq = 0;
+    m_iCscSeq = 0;
 }
 
 std::string CSipMessageLogger::BucketSuffix() {
@@ -549,28 +551,17 @@ std::string CSipMessageLogger::MsgFilePath( const char *pszIface ) {
 int CSipMessageLogger::CountFileLines( const std::string &path ) {
     FILE *f = fopen( path.c_str(), "r" );
     if ( !f ) return 0;
+    // 개행 계수 — SIP 원문 줄은 수 KB 를 넘으므로 fgets 반복 계수는 과계수한다.
     int n = 0;
-    char buf[4096];
-    while ( fgets( buf, sizeof( buf ), f ) ) n++;
+    char buf[65536];
+    size_t r;
+    while ( ( r = fread( buf, 1, sizeof( buf ), f ) ) > 0 ) {
+        for ( size_t i = 0; i < r; i++ ) {
+            if ( buf[i] == '\n' ) n++;
+        }
+    }
     fclose( f );
     return n;
-}
-
-FILE *CSipMessageLogger::GetFlowFile() {
-    if ( m_strCurrentFlowHourDir.empty() ) return NULL;
-    if ( !m_pFlowFile ) {
-        std::string path = m_strCurrentFlowHourDir + "/" + m_strSystemId + ".flow.jsonl";
-        m_pFlowFile = fopen( path.c_str(), "a" );
-    }
-    return m_pFlowFile;
-}
-
-FILE *CSipMessageLogger::GetInterfaceFile( const char *pszIface ) {
-    // Called under m_mtx lock
-    if ( strcmp( pszIface, "sip" ) == 0 ) return m_pSipFile;
-    if ( strcmp( pszIface, "cmp" ) == 0 ) return m_pCmpFile;
-    if ( strcmp( pszIface, "csc" ) == 0 ) return m_pCscFile;
-    return m_pSipFile;  // fallback
 }
 
 int &CSipMessageLogger::GetIfaceSeq( const char *pszIface ) {
@@ -637,9 +628,9 @@ int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *psz
     if ( strPath.empty() ) return 0;
 
     int &iSeq = GetIfaceSeq( pszIface );
-    if ( iSeq < 0 ) iSeq = CountFileLines( strPath );  // 버킷 첫 write: 기존 줄 수 계수(재기동 연속성)
-    //   주의: 버킷 첫 줄에서만 호출되며 그 시점엔 해당 버킷 파일로 적재된 줄이 아직 없으므로,
-    //   디스크 줄 수(=writer 가 이미 flush 한 분)로 seq 를 seed 해도 정합. 이후는 in-memory 증가.
+    // -1 = 기동 첫 버킷의 시딩(flusher 비동기 계수) 미도착 — 여기서 저장 경로를 읽지 않는다
+    //   (생산자 무접촉 계약). 0 부터 시작하고 어긋남은 리더의 sesid/내용 폴백이 흡수한다.
+    if ( iSeq < 0 ) iSeq = 0;
 
     std::string strEscMsg = JsonEsc( pszMsg );
     iSeq++;
@@ -681,19 +672,31 @@ int CSipMessageLogger::WriteInterfaceLine( const char *pszIface, const char *psz
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 비동기 배치 writer
+// 비동기 배치 writer — dispatch + NAS flusher 2단
 //   생산자(Print/LogMessage)는 m_mtx 보유 중 포맷한 한 줄을 EnqueueLine 으로 적재만 하고
-//   즉시 반환한다(NFS I/O 없음). 단일 writer 스레드가 주기/임계마다 큐를 비워 파일경로별로
-//   라인을 합쳐 경로당 1회 open→append→close 한다. 단일 writer + FIFO 라 파일 내 줄 순서가
-//   enqueue(=seq) 순서와 일치하여 flow.seq → msg 줄번호 cross-reference 정합이 유지된다.
+//   즉시 반환한다(파일 I/O 없음). dispatch 스레드가 주기/임계마다 큐를 비워:
+//     - 저장소 건강 + 스풀 잔량 없음 → flusher 큐(nasQueue)로 직행
+//     - 아니면 → 로컬 스풀 미러 파일에 append (dispatch 는 NFS 무접촉 — 항상 join 가능)
+//   NAS flusher 스레드만 저장 경로(NAS 가능) I/O 를 수행한다. hard NFS mount 는 쓰기가
+//   실패하는 대신 무기한 행이므로, 정체(in-flight > StallSec)를 dispatch 가 감지해 폴백을
+//   건다 — 갇히는 스레드는 flusher 하나뿐이고 SIP/제어 평면은 계속 돈다.
+//   회복 시 flusher 가 스풀을 오래된 파일부터 저장 경로로 재생(replay)한 뒤 직행 복귀 —
+//   경로별 줄 순서 = enqueue(=seq) 순서가 유지되어 flow.seq → msg 줄번호 정합 보존.
+//   (스풀 재생 중 crash 는 재생분 중복(at-least-once) 가능 — 리더의 sesid/내용 매칭이 흡수.)
 // ─────────────────────────────────────────────────────────────────────────────
+long long CSipMessageLogger::NowMs() {
+    return (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch() )
+        .count();
+}
+
 void CSipMessageLogger::EnqueueLine( const std::string &strPath, std::string &&strLine ) {
     if ( strPath.empty() || strLine.empty() ) return;
     bool bNotify = false;
     {
         std::lock_guard<std::mutex> lk( m_qMtx );
         if ( m_logQueue.size() >= kMaxQueue ) {
-            // backlog 상한 초과(예: NFS 무응답) — 가장 오래된 줄을 버려 메모리 폭주 방지.
+            // backlog 상한 초과(로컬 스풀까지 막힌 극단 상황) — 가장 오래된 줄을 버려 메모리 폭주 방지.
             m_logQueue.pop_front();
             m_ulDroppedLogs.fetch_add( 1 );
         }
@@ -703,29 +706,9 @@ void CSipMessageLogger::EnqueueLine( const std::string &strPath, std::string &&s
     if ( bNotify ) m_qCv.notify_one();
 }
 
-void CSipMessageLogger::FlushBatch( std::deque<LogItem> &batch ) {
-    if ( batch.empty() ) return;
-    // 파일경로별로 라인을 이어붙인다. 같은 경로의 줄은 batch 순서(=enqueue/seq 순서)대로 누적.
-    std::unordered_map<std::string, std::string> groups;
-    for ( auto &item : batch ) {
-        auto it = groups.find( item.path );
-        if ( it == groups.end() )
-            groups.emplace( std::move( item.path ), std::move( item.line ) );
-        else
-            it->second += item.line;
-    }
-    batch.clear();
-    // 경로당 1회 open→append→close (서로 다른 파일끼리는 순서 무관).
-    for ( auto &kv : groups ) {
-        FILE *pFile = fopen( kv.first.c_str(), "a" );
-        if ( !pFile ) continue;
-        fwrite( kv.second.data(), 1, kv.second.size(), pFile );
-        fclose( pFile );
-    }
-}
-
 void CSipMessageLogger::WriterLoop() {
     const auto interval = std::chrono::milliseconds( kFlushIntervalMs );
+    StoreCtx &ctx = *m_ctx;
     while ( m_bWriterRunning.load() ) {
         std::deque<LogItem> batch;
         {
@@ -733,9 +716,27 @@ void CSipMessageLogger::WriterLoop() {
             m_qCv.wait_for( lk, interval, [this] { return !m_logQueue.empty() || !m_bWriterRunning.load(); } );
             batch.swap( m_logQueue );
         }
-        FlushBatch( batch );  // 락 밖에서 NFS I/O
+        ApplySeedIfPending();
+
+        // 정체 감지: flusher 가 저장 경로 op 에 StallSec 이상 갇혀 있으면 무응답 판정.
+        long long llOpStart = ctx.llOpStartMs.load();
+        if ( llOpStart != 0 && NowMs() - llOpStart > ctx.iStallMs && ctx.bNasHealthy.load() ) {
+            ctx.bNasHealthy.store( false );
+            ctx.bLastOpOk.store( false );
+            std::lock_guard<std::mutex> lk( ctx.mtx );
+            ctx.strLastError = "stall: store op in-flight > " + std::to_string( ctx.iStallMs ) + "ms";
+        }
+
+        if ( !batch.empty() ) {
+            if ( !RouteBatch( batch, false ) ) {
+                // flusher 큐 포화 역압 — 배치는 m_logQueue 앞으로 되돌아갔다. 한 tick 쉰다
+                //   (스풀로 우회하면 큐 잔량보다 새 줄이 먼저 스풀에 앉아 경로별 순서가 깨진다).
+                std::this_thread::sleep_for( interval );
+            }
+        }
+        ReconcileStoreAlarm();
     }
-    // 종료 — 잔여 큐 전량 flush
+    // 종료 — 잔여 큐 회수. 역압이면 스풀로 강제 회수해 어떤 경우에도 막히지 않는다.
     for ( ;; ) {
         std::deque<LogItem> batch;
         {
@@ -743,7 +744,151 @@ void CSipMessageLogger::WriterLoop() {
             batch.swap( m_logQueue );
         }
         if ( batch.empty() ) break;
-        FlushBatch( batch );
+        RouteBatch( batch, true );
+    }
+}
+
+bool CSipMessageLogger::RouteBatch( std::deque<LogItem> &batch, bool bForceSpoolOnBackpressure ) {
+    if ( batch.empty() ) return true;
+    StoreCtx &ctx = *m_ctx;
+    bool bFallback = !ctx.bNasHealthy.load() || ctx.bSpoolPending.load();
+    if ( !bFallback ) {
+        bool bQueued = false;
+        {
+            std::lock_guard<std::mutex> lk( ctx.mtx );
+            if ( ctx.nasQueue.size() < kNasQueueMax ) {
+                ctx.nasQueue.push_back( std::move( batch ) );
+                bQueued = true;
+            }
+        }
+        if ( bQueued ) {
+            ctx.cv.notify_one();
+            return true;
+        }
+        if ( !bForceSpoolOnBackpressure ) {
+            // 큐 포화 — 순서 보존을 위해 m_logQueue 앞으로 되돌린다 (다음 tick 재시도).
+            std::lock_guard<std::mutex> lk( m_qMtx );
+            for ( auto it = batch.rbegin(); it != batch.rend(); ++it ) {
+                m_logQueue.push_front( std::move( *it ) );
+            }
+            batch.clear();
+            return false;
+        }
+    }
+    // 폴백 — flusher 큐 잔량(현재 배치보다 오래된 줄)부터 회수해 경로별 순서를 지킨다.
+    ReclaimNasQueueToSpool();
+    SpoolBatch( batch );
+    return true;
+}
+
+void CSipMessageLogger::ReclaimNasQueueToSpool() {
+    StoreCtx &ctx = *m_ctx;
+    std::deque<std::deque<LogItem>> pending;
+    {
+        std::lock_guard<std::mutex> lk( ctx.mtx );
+        pending.swap( ctx.nasQueue );
+    }
+    for ( auto &b : pending ) SpoolBatch( b );
+}
+
+void CSipMessageLogger::ApplySeedIfPending() {
+    // flusher 의 기동 시딩(기존 줄 계수) 합류 — 생산자 write 가 아직 없을 때(-1)만 유효.
+    if ( m_bSeedApplied || !m_ctx || !m_ctx->bSeedDone.load() ) return;
+    std::lock_guard<std::mutex> lock( m_mtx );
+    m_bSeedApplied = true;
+    if ( !m_strCurrentBucketKey.empty() && m_strCurrentBucketKey != m_ctx->strSeedBucketKey ) return;  // 버킷 지남
+    if ( m_iSipSeq < 0 ) m_iSipSeq = (int)m_ctx->llSeedCount[0];
+    if ( m_iCmpSeq < 0 ) m_iCmpSeq = (int)m_ctx->llSeedCount[1];
+    if ( m_iCscSeq < 0 ) m_iCscSeq = (int)m_ctx->llSeedCount[2];
+}
+
+void CSipMessageLogger::ReconcileStoreAlarm() {
+    // 폴백 상태 전이의 단일 소유자 — FM 알람(A-PRC-006)과 로컬 로그 모두 dispatch 만 만진다
+    //   (flusher 는 detach 될 수 있어 전역 싱글턴 호출을 맡기지 않는다).
+    StoreCtx &ctx = *m_ctx;
+    bool bDegraded = !ctx.bNasHealthy.load() || ctx.bSpoolPending.load();
+
+    if ( bDegraded != m_bStoreDegraded ) {
+        m_bStoreDegraded = bDegraded;
+        std::string strReason;
+        {
+            std::lock_guard<std::mutex> lk( ctx.mtx );
+            strReason = ctx.strLastError;
+        }
+        if ( bDegraded ) {
+            CLog::Print( LOG_ERROR, "service_log store fallback engaged (dir=%s, reason=%s, spool=%s)",
+                         m_strMsgBaseDir.c_str(), strReason.empty() ? "spool backlog" : strReason.c_str(),
+                         ctx.strSpoolDir.c_str() );
+        } else {
+            CLog::Print( LOG_SYSTEM,
+                         "service_log store recovered — spool drained (spooled=%lu, replayed=%lu, dropped=%lu)",
+                         ctx.ulSpooledLines.load(), ctx.ulReplayedLines.load(), ctx.ulDroppedLines.load() );
+        }
+    }
+
+    if ( gclsFmReporter.IsEnabled() ) {
+        const std::string strMo = gclsFmReporter.Node() + "/csp/service_log";
+        if ( bDegraded && !m_bStoreAlarmOpen ) {
+            std::string strReason;
+            {
+                std::lock_guard<std::mutex> lk( ctx.mtx );
+                strReason = ctx.strLastError;
+            }
+            SimpleJson::JsonNode nodeParams;
+            nodeParams.Set( "path", m_strMsgBaseDir.c_str() );
+            nodeParams.Set( "reason", strReason.empty() ? "spool backlog" : strReason.c_str() );
+            nodeParams.Set( "spooled", (int)ctx.ulSpooledLines.load() );
+            nodeParams.Set( "dropped", (int)ctx.ulDroppedLines.load() );
+            gclsFmReporter.AlarmOpen( "A-PRC-006", strMo, nodeParams );
+            m_bStoreAlarmOpen = true;
+        } else if ( !bDegraded && m_bStoreAlarmOpen ) {
+            gclsFmReporter.AlarmClose( "A-PRC-006", strMo );
+            m_bStoreAlarmOpen = false;
+        }
+    }
+}
+
+void CSipMessageLogger::SpoolBatch( std::deque<LogItem> &batch ) {
+    if ( batch.empty() ) return;
+    StoreCtx &ctx = *m_ctx;
+    // 파일경로별 병합 후 스풀 미러에 append (로컬 디스크 — 실패는 즉시 반환, 행 없음).
+    std::unordered_map<std::string, std::pair<std::string, size_t>> groups;  // path → (data, lines)
+    for ( auto &item : batch ) {
+        auto &slot = groups[item.path];
+        slot.first += item.line;
+        slot.second++;
+    }
+    batch.clear();
+    for ( auto &kv : groups ) {
+        SpoolAppend( ctx, kv.first, kv.second.first, kv.second.second );
+    }
+    TrimSpoolIfNeeded();
+}
+
+void CSipMessageLogger::TrimSpoolIfNeeded() {
+    StoreCtx &ctx = *m_ctx;
+    if ( ctx.llSpoolBytes.load() <= ctx.llSpoolMaxBytes ) return;
+    long long llNow = NowMs();
+    if ( llNow - m_llLastSpoolTrimMs < kSpoolTrimIntervalMs ) return;
+    m_llLastSpoolTrimMs = llNow;
+
+    // 오래된 스풀 파일부터 폐기 — 재생 중(.replay) 파일은 건드리지 않는다.
+    std::vector<std::pair<time_t, std::pair<std::string, long long>>> files;  // (mtime, (path, size))
+    ScanSpool( ctx.strSpoolDir, [&]( const std::string &strPath, time_t tMtime, long long llSize ) {
+        if ( strPath.size() > 7 && strPath.compare( strPath.size() - 7, 7, ".replay" ) == 0 ) return;
+        files.push_back( { tMtime, { strPath, llSize } } );
+    } );
+    std::sort( files.begin(), files.end() );
+    long long llTarget = ctx.llSpoolMaxBytes * 9 / 10;  // 90% 까지 정리
+    for ( auto &f : files ) {
+        if ( ctx.llSpoolBytes.load() <= llTarget ) break;
+        int iLines = CountFileLines( f.second.first );
+        if ( unlink( f.second.first.c_str() ) == 0 ) {
+            ctx.llSpoolBytes.fetch_sub( f.second.second );
+            ctx.ulDroppedLines.fetch_add( (unsigned long)iLines );
+            CLog::Print( LOG_ERROR, "service_log spool over capacity — dropped %s (%d lines)",
+                         f.second.first.c_str(), iLines );
+        }
     }
 }
 
@@ -751,14 +896,323 @@ void CSipMessageLogger::StartWriter() {
     bool bExpected = false;
     if ( m_bWriterRunning.compare_exchange_strong( bExpected, true ) ) {
         m_writerThread = std::thread( &CSipMessageLogger::WriterLoop, this );
+        m_nasThread = std::thread( &CSipMessageLogger::NasFlusherLoop, m_ctx );
     }
 }
 
 void CSipMessageLogger::StopWriter() {
-    if ( m_bWriterRunning.exchange( false ) ) {
-        m_qCv.notify_all();
-        if ( m_writerThread.joinable() ) m_writerThread.join();
+    if ( !m_bWriterRunning.exchange( false ) ) return;
+    m_qCv.notify_all();
+    if ( m_writerThread.joinable() ) m_writerThread.join();  // dispatch 는 NFS 무접촉 — 항상 join 가능
+
+    // 저장소가 건강하면 flusher 큐 잔량이 저장 경로로 나가도록 잠시 기다린다 (정상 종료 시
+    //   마지막 줄까지 직행 — 스풀 잔존을 남기지 않는다). 죽은 저장소는 기다리지 않는다.
+    StoreCtx &ctx = *m_ctx;
+    long long llDrainDeadline = NowMs() + kStopFlusherWaitMs;
+    while ( NowMs() < llDrainDeadline && ctx.bNasHealthy.load() && !ctx.bSpoolPending.load() ) {
+        bool bIdle;
+        {
+            std::lock_guard<std::mutex> lk( ctx.mtx );
+            bIdle = ctx.nasQueue.empty() && ctx.inflight.empty();
+        }
+        if ( bIdle ) break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
     }
+
+    // flusher 정지 — 저장 경로 op 에 갇혀 있으면 detach 한다 (NFS killable 대기라 프로세스
+    //   종료(exit_group)가 회수한다). detach 후 flusher 는 StoreCtx(shared_ptr)만 참조.
+    ctx.bRun.store( false );
+    ctx.cv.notify_all();
+    for ( int i = 0; i < kStopFlusherWaitMs / 100 && !ctx.bExited.load(); i++ ) {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+    }
+    if ( m_nasThread.joinable() ) {
+        if ( ctx.bExited.load() ) {
+            m_nasThread.join();
+        } else {
+            m_nasThread.detach();
+        }
+    }
+
+    // 미기록 잔량(nasQueue + inflight) 스풀 회수 — 다음 기동의 replay 가 저장 경로로 밀어넣는다.
+    //   (inflight 는 갇힌 op 가 나중에 완료되면 중복 기록될 수 있다 — at-least-once 수용.)
+    std::deque<std::deque<LogItem>> remains;
+    {
+        std::lock_guard<std::mutex> lk( ctx.mtx );
+        remains.swap( ctx.nasQueue );
+        if ( !ctx.inflight.empty() && !ctx.bExited.load() ) remains.push_front( std::move( ctx.inflight ) );
+        ctx.inflight.clear();
+    }
+    for ( auto &batch : remains ) SpoolBatch( batch );
+}
+
+// ── NAS flusher (저장 경로 I/O 전담 — StoreCtx 외 무접촉) ─────────────────────
+void CSipMessageLogger::NasFlusherLoop( std::shared_ptr<StoreCtx> pCtx ) {
+    StoreCtx &ctx = *pCtx;
+
+    // 기동 작업 ①: base 디렉터리 보장 (저장 경로 최초 접촉 — 여기서 행이면 여기만 갇힌다)
+    ctx.llOpStartMs.store( NowMs() );
+    if ( !ctx.strFlowBaseDir.empty() ) MkdirP( ctx.strFlowBaseDir );
+    if ( !ctx.strMsgBaseDir.empty() && ctx.strMsgBaseDir != ctx.strFlowBaseDir ) MkdirP( ctx.strMsgBaseDir );
+    // 기동 작업 ②: 시작 버킷 시딩 — 저장 경로의 기존 줄 + 이전 run 스풀 잔량(재생 대기분) 계수
+    for ( int i = 0; i < 3; i++ ) {
+        if ( ctx.strSeedPath[i].empty() || !ctx.bRun.load() ) continue;
+        long long n = CountFileLines( ctx.strSeedPath[i] );
+        std::string strSpool = SpoolPathFor( ctx, ctx.strSeedPath[i] );
+        n += CountFileLines( strSpool );
+        n += CountFileLines( strSpool + ".replay" );
+        ctx.llSeedCount[i] = n;
+    }
+    ctx.llOpStartMs.store( 0 );
+    ctx.bSeedDone.store( true );
+
+    long long llNextReplayMs = 0;
+    while ( ctx.bRun.load() ) {
+        std::deque<LogItem> batch;
+        {
+            std::unique_lock<std::mutex> lk( ctx.mtx );
+            ctx.cv.wait_for( lk, std::chrono::milliseconds( 200 ),
+                             [&] { return !ctx.nasQueue.empty() || !ctx.bRun.load(); } );
+            if ( !ctx.bRun.load() ) break;
+            if ( !ctx.nasQueue.empty() ) {
+                batch.swap( ctx.nasQueue.front() );
+                ctx.nasQueue.pop_front();
+                ctx.inflight = batch;  // 정지 시 회수용 사본
+            }
+        }
+        if ( !batch.empty() ) {
+            if ( ctx.bSpoolPending.load() ) {
+                // dispatch 의 회수(reclaim)와 pop 이 겹친 드문 경쟁 — 이 배치는 스풀 내용보다
+                //   오래됐을 수 있으므로 저장 경로 직행 대신 스풀로 우회해 재생 경로로 일원화.
+                SpoolBatchToCtx( ctx, batch );
+            } else {
+                FlushBatchToStore( ctx, batch );
+            }
+            std::lock_guard<std::mutex> lk( ctx.mtx );
+            ctx.inflight.clear();
+            continue;
+        }
+        // idle — 스풀 재생 (실패 시 백오프)
+        if ( ctx.bSpoolPending.load() && NowMs() >= llNextReplayMs ) {
+            ReplaySpoolOne( ctx );
+            if ( !ctx.bLastOpOk.load() ) llNextReplayMs = NowMs() + kReplayRetryMs;
+        }
+        // 정체로 unhealthy 가 됐지만 스풀 유입이 없었던 경우 — 직전 op 성공이 확인되면 복귀
+        if ( !ctx.bNasHealthy.load() && !ctx.bSpoolPending.load() && ctx.bLastOpOk.load() ) {
+            ctx.bNasHealthy.store( true );
+        }
+    }
+    ctx.bExited.store( true );
+}
+
+void CSipMessageLogger::FlushBatchToStore( StoreCtx &ctx, std::deque<LogItem> &batch ) {
+    if ( batch.empty() ) return;
+    // 파일경로별 병합 — 같은 경로의 줄은 batch 순서(=enqueue/seq 순서)대로 누적.
+    std::unordered_map<std::string, std::pair<std::string, size_t>> groups;
+    for ( auto &item : batch ) {
+        auto &slot = groups[item.path];
+        slot.first += item.line;
+        slot.second++;
+    }
+    batch.clear();
+
+    bool bFailed = false;
+    for ( auto &kv : groups ) {
+        if ( bFailed ) {
+            // 앞 그룹 실패 후에는 저장 경로를 더 만지지 않고 스풀로 우회 (지연 누적 방지)
+            SpoolAppend( ctx, kv.first, kv.second.first, kv.second.second );
+            continue;
+        }
+        // 디렉터리 보장 후 경로당 1회 open→append→close (서로 다른 파일끼리는 순서 무관)
+        std::string strDir = kv.first.substr( 0, kv.first.rfind( '/' ) );
+        ctx.llOpStartMs.store( NowMs() );
+        MkdirP( strDir );
+        int iErr = 0;
+        FILE *pFile = fopen( kv.first.c_str(), "a" );
+        bool bOk = false;
+        if ( pFile ) {
+            bOk = fwrite( kv.second.first.data(), 1, kv.second.first.size(), pFile ) == kv.second.first.size();
+            if ( !bOk ) iErr = errno;
+            fclose( pFile );
+        } else {
+            iErr = errno;
+        }
+        ctx.llOpStartMs.store( 0 );
+        if ( bOk ) {
+            ctx.bLastOpOk.store( true );
+        } else {
+            bFailed = true;
+            ctx.bLastOpOk.store( false );
+            ctx.bNasHealthy.store( false );
+            {
+                std::lock_guard<std::mutex> lk( ctx.mtx );
+                ctx.strLastError = std::string( "write failed: " ) + strerror( iErr );
+            }
+            SpoolAppend( ctx, kv.first, kv.second.first, kv.second.second );
+        }
+    }
+}
+
+void CSipMessageLogger::SpoolBatchToCtx( StoreCtx &ctx, std::deque<LogItem> &batch ) {
+    if ( batch.empty() ) return;
+    std::unordered_map<std::string, std::pair<std::string, size_t>> groups;
+    for ( auto &item : batch ) {
+        auto &slot = groups[item.path];
+        slot.first += item.line;
+        slot.second++;
+    }
+    batch.clear();
+    for ( auto &kv : groups ) {
+        SpoolAppend( ctx, kv.first, kv.second.first, kv.second.second );
+    }
+}
+
+bool CSipMessageLogger::SpoolAppend( StoreCtx &ctx, const std::string &strTarget, const std::string &strData,
+                                     size_t nLines ) {
+    std::string strSpoolPath = SpoolPathFor( ctx, strTarget );
+    std::string strDir = strSpoolPath.substr( 0, strSpoolPath.rfind( '/' ) );
+    MkdirP( strDir );
+    FILE *pFile = fopen( strSpoolPath.c_str(), "a" );
+    bool bOk = false;
+    if ( pFile ) {
+        bOk = fwrite( strData.data(), 1, strData.size(), pFile ) == strData.size();
+        fclose( pFile );
+    }
+    if ( bOk ) {
+        ctx.llSpoolBytes.fetch_add( (long long)strData.size() );
+        ctx.ulSpooledLines.fetch_add( (unsigned long)nLines );
+        ctx.bSpoolPending.store( true );
+    } else {
+        // 로컬 스풀마저 실패 (디스크 풀 등) — 폐기 계수만 남긴다
+        ctx.ulDroppedLines.fetch_add( (unsigned long)nLines );
+    }
+    return bOk;
+}
+
+bool CSipMessageLogger::ReplaySpoolOne( StoreCtx &ctx ) {
+    // 재생 대상 선택: 중단분(.replay) 우선, 없으면 가장 오래된 파일을 .replay 로 rename.
+    std::string strPick;
+    time_t tPickMtime = 0;
+    bool bPickIsReplay = false;
+    ScanSpool( ctx.strSpoolDir, [&]( const std::string &strPath, time_t tMtime, long long ) {
+        bool bReplay = strPath.size() > 7 && strPath.compare( strPath.size() - 7, 7, ".replay" ) == 0;
+        if ( bReplay != bPickIsReplay ) {
+            if ( !bReplay ) return;  // .replay 가 이미 후보면 일반 파일은 무시
+            strPick.clear();         // 일반 후보를 .replay 로 교체
+            bPickIsReplay = true;
+        }
+        if ( strPick.empty() || tMtime < tPickMtime ) {
+            strPick = strPath;
+            tPickMtime = tMtime;
+        }
+    } );
+
+    if ( strPick.empty() ) {
+        // 스풀 드레인 완료 — 직행 복귀 (알람 close 는 dispatch 가 수행)
+        ctx.bSpoolPending.store( false );
+        ctx.llSpoolBytes.store( 0 );
+        if ( ctx.bLastOpOk.load() ) ctx.bNasHealthy.store( true );
+        return false;
+    }
+
+    if ( !bPickIsReplay ) {
+        std::string strRenamed = strPick + ".replay";
+        if ( rename( strPick.c_str(), strRenamed.c_str() ) != 0 ) return true;
+        strPick = strRenamed;
+    }
+
+    // 내용 적재 (로컬 읽기)
+    std::string strData;
+    long long llSize = 0;
+    {
+        FILE *pFile = fopen( strPick.c_str(), "r" );
+        if ( !pFile ) return true;  // 경쟁 삭제 등 — 다음 tick 재평가
+        char buf[65536];
+        size_t r;
+        while ( ( r = fread( buf, 1, sizeof( buf ), pFile ) ) > 0 ) strData.append( buf, r );
+        fclose( pFile );
+        llSize = (long long)strData.size();
+    }
+    size_t nLines = 0;
+    for ( char c : strData ) {
+        if ( c == '\n' ) nLines++;
+    }
+
+    std::string strBase = strPick.substr( 0, strPick.size() - 7 );  // ".replay" 제거
+    std::string strTarget = TargetPathFor( ctx, strBase );
+    if ( strTarget.empty() ) {
+        // 매핑 불능(손상 경로) — 폐기
+        unlink( strPick.c_str() );
+        ctx.llSpoolBytes.fetch_sub( llSize );
+        ctx.ulDroppedLines.fetch_add( (unsigned long)nLines );
+        return true;
+    }
+
+    // 저장 경로 append (여기서 행이면 flusher 만 갇힌다 — dispatch 가 정체를 감지)
+    std::string strDir = strTarget.substr( 0, strTarget.rfind( '/' ) );
+    ctx.llOpStartMs.store( NowMs() );
+    MkdirP( strDir );
+    int iErr = 0;
+    FILE *pFile = fopen( strTarget.c_str(), "a" );
+    bool bOk = false;
+    if ( pFile ) {
+        bOk = fwrite( strData.data(), 1, strData.size(), pFile ) == strData.size();
+        if ( !bOk ) iErr = errno;
+        fclose( pFile );
+    } else {
+        iErr = errno;
+    }
+    ctx.llOpStartMs.store( 0 );
+
+    if ( bOk ) {
+        unlink( strPick.c_str() );
+        ctx.llSpoolBytes.fetch_sub( llSize );
+        ctx.ulReplayedLines.fetch_add( (unsigned long)nLines );
+        ctx.bLastOpOk.store( true );
+    } else {
+        ctx.bLastOpOk.store( false );
+        ctx.bNasHealthy.store( false );
+        std::lock_guard<std::mutex> lk( ctx.mtx );
+        ctx.strLastError = std::string( "replay failed: " ) + strerror( iErr );
+    }
+    return true;
+}
+
+std::string CSipMessageLogger::SpoolPathFor( const StoreCtx &ctx, const std::string &strTarget ) {
+    // 절대/상대 목적 경로를 무손실 왕복 가능한 미러 경로로: {spool}/abs{…} | {spool}/rel/{…}
+    if ( !strTarget.empty() && strTarget[0] == '/' ) return ctx.strSpoolDir + "/abs" + strTarget;
+    return ctx.strSpoolDir + "/rel/" + strTarget;
+}
+
+std::string CSipMessageLogger::TargetPathFor( const StoreCtx &ctx, const std::string &strSpoolFile ) {
+    std::string strAbsPrefix = ctx.strSpoolDir + "/abs/";
+    std::string strRelPrefix = ctx.strSpoolDir + "/rel/";
+    if ( strSpoolFile.compare( 0, strAbsPrefix.size(), strAbsPrefix ) == 0 ) {
+        return strSpoolFile.substr( strAbsPrefix.size() - 1 );  // 선행 '/' 유지
+    }
+    if ( strSpoolFile.compare( 0, strRelPrefix.size(), strRelPrefix ) == 0 ) {
+        return strSpoolFile.substr( strRelPrefix.size() );
+    }
+    return "";
+}
+
+void CSipMessageLogger::ScanSpool( const std::string &strDir,
+                                   const std::function<void( const std::string &, time_t, long long )> &fn ) {
+    DIR *pDir = opendir( strDir.c_str() );
+    if ( !pDir ) return;
+    struct dirent *pEnt;
+    while ( ( pEnt = readdir( pDir ) ) != NULL ) {
+        if ( strcmp( pEnt->d_name, "." ) == 0 || strcmp( pEnt->d_name, ".." ) == 0 ) continue;
+        std::string strPath = strDir + "/" + pEnt->d_name;
+        struct stat st;
+        if ( stat( strPath.c_str(), &st ) != 0 ) continue;
+        if ( S_ISDIR( st.st_mode ) ) {
+            ScanSpool( strPath, fn );
+        } else if ( S_ISREG( st.st_mode ) ) {
+            fn( strPath, st.st_mtime, (long long)st.st_size );
+        }
+    }
+    closedir( pDir );
 }
 
 std::string CSipMessageLogger::GetFlowHourDir() {

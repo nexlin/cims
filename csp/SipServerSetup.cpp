@@ -98,6 +98,9 @@ CSipServerSetup::CSipServerSetup()
       m_strServiceMode( "both" ),
       m_bTestEnvOpenTermination( false ),  // ⚠️ 상용 기본 false — 테스트망에서만 true
       m_bPttAdhocEnabled( true ),          // ad hoc 그룹콜 허용 (기존 동작 보존 — 끄면 합성 거부)
+      m_strServiceLogSpoolDir( "spool" ),
+      m_iServiceLogStallSec( 5 ),
+      m_iServiceLogSpoolMaxMb( 1024 ),
       m_iLogLevel( 0 ),
       m_iLogMaxSize( 20000000 ),
       m_iMonitorPort( 6000 ),
@@ -550,6 +553,10 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                     // record_dir = ServiceLogDir (통합)
                     if ( m_bRecordEnable && m_strRecordDir.empty() ) m_strRecordDir = m_strServiceLogDir;
                 }
+                // 스풀 폴백 (Dir 가 NAS 일 때 무응답 격리 — SipMessageLogger 참조)
+                if ( sl.Has( "SpoolDir" ) ) m_strServiceLogSpoolDir = sl.GetString( "SpoolDir" );
+                if ( sl.Has( "StallSec" ) ) m_iServiceLogStallSec = (int)sl.GetInt( "StallSec" );
+                if ( sl.Has( "SpoolMaxMb" ) ) m_iServiceLogSpoolMaxMb = (int)sl.GetInt( "SpoolMaxMb" );
             }
             // 레거시 호환
             if ( m_strServiceLogDir.empty() && setup.Has( "ServiceLog" ) ) {

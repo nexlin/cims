@@ -96,7 +96,9 @@ int ServiceMain() {
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
     gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp" );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
-    gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId );
+    gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId, true,
+                        gclsSetup.m_strServiceLogSpoolDir, gclsSetup.m_iServiceLogStallSec,
+                        gclsSetup.m_iServiceLogSpoolMaxMb );
     // v3 (2026-04-22): domain→kind 매핑은 AccessServiceMap 이 SOT.
     //   Sync 는 아래 clsSetup 설정 블록에서 수행.
     //   초기 SipLogger 는 빈 맵으로 시작 — AccessServiceMap.Sync() 후 재설정됨.

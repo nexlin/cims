@@ -105,6 +105,19 @@
       "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 단말의 Security-Client/Verify 구현과 Setup.SecAgree.Require 정책 확인"
     },
     {
+      "type": "storage_failure",
+      "code": "A-PRC-006",
+      "perceived_severity": "major",
+      "event_type": "processingError",
+      "probable_cause": "underlyingResourceUnavailable",
+      "mo_class": "service",
+      "metric": "서비스 로그(flow/msg) 저장 경로 기록",
+      "msg_open": "Service log writes failing on {path} ({reason}) — diverted to local spool ({spooled} lines, {dropped} dropped)",
+      "msg_close": "Service log store recovered — local spool drained ({mo})",
+      "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). SIP 처리에는 영향 없음",
+      "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
+    },
+    {
       "type": "cert_expiring",
       "code": "A-PRC-009",
       "perceived_severity": "warning",
