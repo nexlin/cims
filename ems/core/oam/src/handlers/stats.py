@@ -13,6 +13,7 @@ Routes:
 import os
 import glob
 import json
+import re
 import socket
 import time
 import asyncio
@@ -419,8 +420,9 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
         if parts[0] == 'messages':
             iface = parts[1] if len(parts) > 1 else None  # sip, cmp, csc, https
-            date = qp('date')
-            return await _messages_stats_v2(config, iface, date)
+            # 구간 조회 — from/to + granularity. date 는 "그 날 하루" 축약(하위 호환).
+            return await _messages_stats_v2(config, iface, qp('date'),
+                                            qp('from'), qp('to'), qp('granularity', '1h'))
 
         if parts[0] == 'leak-reclaims':
             return await _leak_reclaims(config, qp('date'))
@@ -670,11 +672,14 @@ def _parse_msg_method(msg: str) -> str:
     if not first:
         return 'unknown'
     # CMP/CSC JSON-over-UDP — cmd/type/event 순으로 분류, 응답({result:..})은 RESPONSE.
+    # envelope v2(cmp_media_api.md)는 명령을 `hdr` 에 둔다 — 여기를 안 보면 CMP 전량이
+    # 'json' 한 덩어리가 되어 메서드 분포가 무의미해진다.
     if first.startswith('{'):
         try:
             j = json.loads(msg)
             payload = j.get('payload') if isinstance(j.get('payload'), dict) else {}
-            for src in (payload, j):
+            hdr = j.get('hdr') if isinstance(j.get('hdr'), dict) else {}
+            for src in (hdr, payload, j):
                 for k in ('cmd', 'type', 'event'):
                     v = src.get(k)
                     if v:
@@ -731,35 +736,181 @@ def _leak_reclaims(config, date=None) -> HandlerResult:
                                            'items': items[:500]})
 
 
+# 서비스 판정(도메인) — CSP `CCspServiceMap::BuildDomainToKindMap` 과 **같은 규칙**이다:
+# enabled 인 access service 를 priority 오름차순으로 보고, 도메인마다 첫 항목의 kind 를 남긴다.
+#
+# 왜 로그의 필드가 아니라 여기서 다시 가르는가: 메시지 로그(`*.msg.jsonl`)는 `service` 를 적지
+# 않는다(그 필드는 flow 줄에만 있다). 이미 쌓인 로그를 그대로 쓰려면 소비자가 판정해야 한다.
+#
+# 왜 도메인인가: 3GPP ICSI(`+g.3gpp.icsi-ref`)가 규격상 정본이지만 **현장 데이터가 신뢰할 수
+# 없다** — 단말이 MCPTT 호에 `icsi.mcdata.sds` 를 붙이는 사례가 확인됐다(본문은
+# `application/vnd.3gpp.mcptt-info+xml` + `m=application ... UDP MCPTT`). 붙지 않는 호도 많다.
+# 도메인은 접속 서비스 정의가 소유하는 값이라 전 구간에서 일관된다.
+def _domain_service_map(config: dict) -> dict:
+    """{도메인 → kind} — access_services.jsonl 기반. 없으면 빈 dict."""
+    rows = []
+    for path in _access_services_paths(config):
+        try:
+            if not os.path.isfile(path):
+                continue
+            with open(path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        r = json.loads(line)
+                    except Exception:
+                        continue
+                    if r.get('enabled') is False or not r.get('domain') or not r.get('kind'):
+                        continue
+                    rows.append(r)
+            if rows:
+                break
+        except Exception:
+            continue
+    out = {}
+    for r in sorted(rows, key=lambda x: (x.get('priority') if isinstance(x.get('priority'), int) else 1 << 30)):
+        out.setdefault(str(r['domain']).lower(), str(r['kind']).lower())
+    return out
+
+
+def _access_services_paths(config: dict) -> list:
+    """access_services.jsonl 탐색 경로 (handlers/users.py 와 같은 순서)."""
+    out = []
+    if config.get('AccessServicesFile'):
+        out.append(config['AccessServicesFile'])
+    cfg_path = config.get('__config_path__')
+    if cfg_path:
+        base = os.path.dirname(os.path.abspath(cfg_path))
+        out.append(os.path.normpath(os.path.join(base, '..', '..', 'config', 'access_services.jsonl')))
+    here = os.path.dirname(os.path.abspath(__file__))
+    out.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'config', 'access_services.jsonl')))
+    out.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'build', 'dist', 'config', 'access_services.jsonl')))
+    return out
+
+
+_DOMAIN_IN_URI = re.compile(r'@([A-Za-z0-9._-]+)')
+
+
+def _classify_service(msg: str, dmap: dict) -> str:
+    """SIP 원문에서 서비스 판정. Request-URI → To → From 순으로 첫 매치(CSP 와 같은 순서).
+
+    응답(SIP/2.0 …)은 Request-URI 가 없어 To/From 만 본다.
+    """
+    if not msg or not dmap:
+        return ''
+    head = msg.split('\r\n\r\n', 1)[0]
+    lines = head.split('\r\n')
+    cands = []
+    first = lines[0] if lines else ''
+    if not first.startswith('SIP/2.0'):
+        parts = first.split(' ')
+        if len(parts) > 1:
+            cands.append(parts[1])
+    for tag in ('to:', 't:', 'from:', 'f:'):
+        for ln in lines[1:]:
+            low = ln.lower()
+            if low.startswith(tag):
+                cands.append(ln)
+                break
+    for c in cands:
+        for dom in _DOMAIN_IN_URI.findall(c):
+            kind = dmap.get(dom.lower().split(':')[0])
+            if kind:
+                return kind
+    return ''
+
+
+_DATE_FROM_PATH = re.compile(r'/(\d{4})/(\d{2})/(\d{2})/\d{2}/[^/]+$')
+
+
+def _ts_full(fpath: str, ts: str) -> str:
+    """로그 줄의 ts + 파일 경로의 날짜 → 'YYYY-MM-DD HH:MM:SS'.
+
+    로그의 `ts` 는 **시각만** 담는다(`'21:00:00.102885'`) — 날짜는 `{루트}/YYYY/MM/DD/HH/` 경로가
+    갖는다. 구간 조회는 날짜까지 있어야 비교되므로 여기서 합친다.
+    (날짜가 붙은 ts 를 쓰는 줄도 그대로 통과시킨다 — 형식이 바뀌어도 깨지지 않게.)
+    """
+    ts = (ts or '').strip()
+    if len(ts) >= 10 and ts[4] == '-':
+        return ts[:19]
+    m = _DATE_FROM_PATH.search(fpath.replace('\\', '/'))
+    if not m:
+        return ts[:19]
+    return f'{m.group(1)}-{m.group(2)}-{m.group(3)} {ts[:8]}'
+
+
+def _svc_bucket(label: str, count: int, svc_counts: dict) -> dict:
+    """한 버킷의 서비스축 분해 — 셋이 **서로 겹치지 않고** 합이 count 다:
+        volte + ptt + unknown == count
+    화면의 계열 차트가 이 값들을 그대로 쌓으므로, 겹치는 값을 내면 막대가 이중 계산된다.
+    `unknown` = 서비스를 못 가린 줄(옛 CSP 가 남긴 service 없는 로그, 도메인 미등록 등).
+    """
+    sv = svc_counts.get(label, {})
+    volte, ptt = sv.get('volte', 0), sv.get('ptt', 0)
+    return {'label': label, 'count': count, 'volte': volte, 'ptt': ptt,
+            'unknown': max(count - volte - ptt, 0)}
+
+
 @_offload
-def _messages_stats_v2(config, iface, date) -> HandlerResult:
+def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h') -> HandlerResult:
     """service_log JSONL 기반 인터페이스별 메시지 통계.
 
     실제 레이아웃: {ServiceLogDir}/YYYY/MM/DD/HH/csp_01_{sip|cmp|csc}.msg.jsonl
     각 라인 = {ts,dir,peer,caller,callee,sesid,proto,msg}. method 는 msg 본문에서 파싱.
     (옛 MsgLogDir/{comp}/.../{iface}.jsonl 레이아웃 + entry['method'] 가정은 폐기됨.)
+
+    조회 구간은 [from,to] — `date` 는 "그 날 하루" 축약형(하위 호환). 버킷은 `gran`
+    단위로 끊고, 단위별 최대 범위(_GRAN_MAX_DAYS)를 넘으면 끝에서부터 잘라낸다.
     """
     import glob as _glob
 
-    if not date:
-        date = datetime.now().strftime('%Y-%m-%d')
-    d = date.replace('-', '')
-    yyyy, mm, dd = d[:4], d[4:6], d[6:8]
+    # 범위 확정 — from 이 없으면 date(없으면 오늘) 하루로.
+    if not from_dt:
+        date = date or datetime.now().strftime('%Y-%m-%d')
+        from_dt, to_dt = date + ' 00:00:00', date + ' 23:59:59'
+    elif not to_dt:
+        to_dt = from_dt[:10] + ' 23:59:59'
+    from_dt, to_dt = _norm_dt(from_dt), _norm_dt(to_dt, end=True)
+    from_dt, to_dt, truncated = _clamp_range(from_dt, to_dt, gran)
 
     base = _service_log_dir(config)
+    empty = {'from': from_dt, 'to': to_dt, 'granularity': gran, 'truncated': truncated,
+             'date': (date or from_dt[:10]), 'interface': iface,
+             'total': 0, 'buckets': [], 'method_counts': {}, 'method_service': {},
+             'service_totals': {'volte': 0, 'ptt': 0}, 'voip_invite': 0, 'ptt_invite': 0}
     if not base:
-        return HandlerResult(status=200, body={'date': date, 'interface': iface,
-                                               'total': 0, 'buckets': [], 'method_counts': {}})
+        return HandlerResult(status=200, body=empty)
 
-    hourly = {}         # hour → count
+    # 스캔 대상 일자 목록 (로그가 YYYY/MM/DD/HH 트리라 날짜 단위로 훑는다)
+    try:
+        d0 = datetime.strptime(from_dt[:10], '%Y-%m-%d')
+        d1 = datetime.strptime(to_dt[:10], '%Y-%m-%d')
+    except Exception:
+        return HandlerResult(status=200, body=empty)
+    days = []
+    while d0 <= d1:
+        days.append((d0.strftime('%Y'), d0.strftime('%m'), d0.strftime('%d')))
+        d0 += timedelta(days=1)
+
+    lo, hi = from_dt[:19], to_dt[:19]
+    dmap = _domain_service_map(config)   # 도메인 → kind. 스캔 전 1회.
+    counts = {}         # 버킷 라벨 → count
     method_counts = {}  # method/status → count
+    # 서비스축 분해 — 로그 줄의 `service` 필드(volte|ptt)를 그대로 쓴다.
+    svc_counts = {}     # 버킷 라벨 → {svc → count}
+    svc_invite = {}     # svc → INVITE 수 (호 시도 규모 비교용)
+    method_svc = {}     # method → {svc → count} — '메서드 비중'을 서비스 계열로 쪼갤 때 쓴다
 
     if iface == 'https':
         # HTTPS(콘솔/XCAP) — *_ue.msg 에는 본문이 없어 method 불가 → flow 로그의
         # proto=HTTPS 엔트리(method='GET /path', detail='status=NNN')로 집계.
         # (구버전은 unknown iface 가 sip+cmp+csc 전체 합산으로 fallback — 잘못된 수치)
-        patterns = [os.path.join(base, yyyy, mm, dd, '*', '*.flow.jsonl'),
-                    os.path.join(base, yyyy, mm, dd, '*', '*.flow.[0-9][0-9].jsonl')]
+        patterns = [os.path.join(base, y, m, d, '*', '*.flow.jsonl')
+                    for (y, m, d) in days]
+        patterns += [os.path.join(base, y, m, d, '*', '*.flow.[0-9][0-9].jsonl')
+                     for (y, m, d) in days]
         for pattern in patterns:
             for fpath in _glob.glob(pattern):
                 try:
@@ -772,9 +923,11 @@ def _messages_stats_v2(config, iface, date) -> HandlerResult:
                                 entry = json.loads(line)
                                 if entry.get('proto') != 'HTTPS':
                                     continue
-                                ts = entry.get('ts', '')
-                                hour = int(ts.split(':')[0]) if ':' in ts else 0
-                                hourly[hour] = hourly.get(hour, 0) + 1
+                                ts = _ts_full(fpath, entry.get('ts'))
+                                if ts < lo or ts > hi:
+                                    continue
+                                k = _bucket_start(ts, gran)
+                                counts[k] = counts.get(k, 0) + 1
                                 verb = str(entry.get('method', '')).split(' ', 1)[0].upper() or 'unknown'
                                 method_counts[verb] = method_counts.get(verb, 0) + 1
                                 m = str(entry.get('detail', ''))
@@ -788,8 +941,10 @@ def _messages_stats_v2(config, iface, date) -> HandlerResult:
     elif iface in ('sip', 'cmp', 'csc'):
         # 시간당 단일 파일(*.msg.jsonl) + 5분 버킷 파일(*.msg.{mm5}.jsonl) 모두 포함.
         # systemId 는 와일드카드 — csp_01 하드코딩 시 csp_02(standby)/멀티노드 누락.
-        patterns = [os.path.join(base, yyyy, mm, dd, '*', f'*_{iface}.msg.jsonl'),
-                    os.path.join(base, yyyy, mm, dd, '*', f'*_{iface}.msg.[0-9][0-9].jsonl')]
+        patterns = [os.path.join(base, y, m, d, '*', f'*_{iface}.msg.jsonl')
+                    for (y, m, d) in days]
+        patterns += [os.path.join(base, y, m, d, '*', f'*_{iface}.msg.[0-9][0-9].jsonl')
+                     for (y, m, d) in days]
         for pattern in patterns:
             for fpath in _glob.glob(pattern):
                 try:
@@ -800,26 +955,74 @@ def _messages_stats_v2(config, iface, date) -> HandlerResult:
                                 continue
                             try:
                                 entry = json.loads(line)
-                                ts = entry.get('ts', '')
-                                hour = int(ts.split(':')[0]) if ':' in ts else 0
+                                ts = _ts_full(fpath, entry.get('ts'))
+                                if ts < lo or ts > hi:
+                                    continue
                                 method = _parse_msg_method(entry.get('msg', ''))
-                                hourly[hour] = hourly.get(hour, 0) + 1
+                                k = _bucket_start(ts, gran)
+                                counts[k] = counts.get(k, 0) + 1
                                 method_counts[method] = method_counts.get(method, 0) + 1
+                                svc = _classify_service(entry.get('msg', ''), dmap) or 'unknown'
+                                method_svc.setdefault(method, {})
+                                method_svc[method][svc] = method_svc[method].get(svc, 0) + 1
+                                if svc != 'unknown':
+                                    svc_counts.setdefault(k, {})
+                                    svc_counts[k][svc] = svc_counts[k].get(svc, 0) + 1
+                                    if method == 'INVITE':
+                                        svc_invite[svc] = svc_invite.get(svc, 0) + 1
                             except Exception:
                                 pass
                 except Exception:
                     pass
     # unknown iface → 빈 결과 (구: 전체 합산 fallback)
 
-    buckets = [{'hour': h, 'count': hourly.get(h, 0)} for h in range(24)]
+    # 빈 구간도 0 으로 채워 연속 축을 만든다(구멍 뚫린 막대그래프 방지).
+    buckets = []
+    step = {'5m': timedelta(minutes=5), '10m': timedelta(minutes=10),
+            '1h': timedelta(hours=1), '1d': timedelta(days=1)}.get(gran)
+    if step:
+        cur = datetime.strptime(_bucket_start(lo, gran).ljust(19, '0')[:19]
+                                if gran in ('5m', '10m') else lo[:19], '%Y-%m-%d %H:%M:%S') \
+            if gran not in ('5m', '10m') else datetime.strptime(_bucket_start(lo, gran) + ':00', '%Y-%m-%d %H:%M:%S')
+        end = datetime.strptime(hi[:19], '%Y-%m-%d %H:%M:%S')
+        if gran == '1h':
+            cur = cur.replace(minute=0, second=0)
+        elif gran == '1d':
+            cur = cur.replace(hour=0, minute=0, second=0)
+        guard = 0
+        while cur <= end and guard < 5000:
+            k = _bucket_start(cur.strftime('%Y-%m-%d %H:%M:%S'), gran)
+            buckets.append(_svc_bucket(k, counts.get(k, 0), svc_counts))
+            cur += step
+            guard += 1
+    else:
+        # 1M/1y — 라벨이 가변 길이라 등장한 키만 정렬해 낸다.
+        for k in sorted(counts):
+            buckets.append(_svc_bucket(k, counts[k], svc_counts))
+
+    # 시간(1h) 조회는 옛 소비자(hour 정수 키)를 위해 hour 를 함께 싣는다.
+    if gran == '1h':
+        for b in buckets:
+            try:
+                b['hour'] = int(b['label'][11:13])
+            except Exception:
+                pass
+
     sorted_methods = dict(sorted(method_counts.items(), key=lambda x: -x[1]))
 
     return HandlerResult(status=200, body={
-        'date': date,
+        'from': from_dt, 'to': to_dt, 'granularity': gran, 'truncated': truncated,
+        'date': (date or from_dt[:10]),
         'interface': iface,
-        'total': sum(hourly.values()),
+        'total': sum(counts.values()),
         'buckets': buckets,
         'method_counts': sorted_methods,
+        # 메서드 × 서비스 — 분포 막대를 서비스 계열 색으로 쪼갠다(각 메서드의 합 = method_counts).
+        'method_service': {m: method_svc.get(m, {}) for m in sorted_methods},
+        # 서비스축 요약 — 옛 화면이 읽던 voip_invite/ptt_invite 키를 그대로 채운다.
+        'service_totals': {k: sum(v.get(k, 0) for v in svc_counts.values()) for k in ('volte', 'ptt')},
+        'voip_invite': svc_invite.get('volte', 0),
+        'ptt_invite': svc_invite.get('ptt', 0),
     })
 
 
@@ -890,6 +1093,76 @@ def _ts_of(record: dict, call_type: str) -> str:
     else:
         ts = record.get('invite_time', '')
     return ts.replace('T', ' ', 1) if ts else ts
+
+
+# 집계 단위별 **최대 조회 범위** — 버킷 수가 폭발하면 차트도 못 읽고 스캔 비용만 는다.
+# 기준은 버킷 800개 근처지만, 상한은 거기서 **사람이 말하는 창**으로 반올림했다(3일·일주일·한 달·2년).
+# 그래서 실제 버킷 수는 기준을 조금 넘기도 한다: 5m=864 / 10m=1008 / 1h=720 / 1d=730.
+# 콘솔 page-filter(`GRAN_MAX_DAYS`)와 **같은 표**를 쓴다 — 한쪽만 바꾸면 화면과 서버가 어긋난다.
+_GRAN_MAX_DAYS = {'5m': 3, '10m': 7, '1h': 30, '1d': 730}   # 1M/1y 는 사실상 무제한
+
+def _norm_dt(v: str, end: bool = False) -> str:
+    """'YYYY-MM-DD' / 'YYYY-MM-DD HH:MM' → 'YYYY-MM-DD HH:MM:SS'.
+
+    화면(datetime-local)은 초를 보내지 않는다. 구간 계산·버킷 채우기가 모두 초까지 가정하므로
+    **입구에서 한 번만** 맞춘다 (파싱하는 자리마다 방어하면 새 자리가 생길 때 또 빠진다).
+    """
+    if not v:
+        return v
+    v = str(v).strip().replace('T', ' ')
+    if len(v) == 10:
+        return v + (' 23:59:59' if end else ' 00:00:00')
+    if len(v) == 16:
+        return v + (':59' if end else ':00')
+    return v[:19]
+
+
+def _clamp_range(from_dt: str, to_dt: str, gran: str):
+    """[from,to] 를 단위 상한으로 자른다. 잘렸으면 (from,to,True) — 응답에 truncated 로 알린다."""
+    lim = _GRAN_MAX_DAYS.get(gran)
+    if not lim:
+        return from_dt, to_dt, False
+    try:
+        f = datetime.strptime(from_dt[:19], '%Y-%m-%d %H:%M:%S')
+        t = datetime.strptime(to_dt[:19], '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return from_dt, to_dt, False
+    if (t - f).days <= lim:
+        return from_dt, to_dt, False
+    # 끝을 기준으로 뒤에서 자른다 — 최근 구간이 관심사다.
+    # 자른 시작점은 단위 경계로 내려 맞춘다 — 그냥 빼면 '08-25 23:59:59' 같은 지점에서 시작해
+    # 첫 버킷이 반토막 나고 표시 구간과 축 첫 칸이 어긋난다.
+    f = t - timedelta(days=lim)
+    if gran in ('5m', '10m'):
+        f = f.replace(minute=f.minute - f.minute % (5 if gran == '5m' else 10), second=0)
+    elif gran == '1h':
+        f = f.replace(minute=0, second=0)
+    elif gran == '1d':
+        f = f.replace(hour=0, minute=0, second=0)
+    return f.strftime('%Y-%m-%d %H:%M:%S'), to_dt, True
+
+
+def _bucket_start(ts: str, gran: str) -> str:
+    """레코드 ts → 그 레코드가 속한 버킷의 시작 라벨.
+       5m/10m = 'YYYY-MM-DD HH:MM', 1h = 'YYYY-MM-DD HH', 1d = 'YYYY-MM-DD',
+       1M = 'YYYY-MM', 1y = 'YYYY'."""
+    t = (ts or '')[:19]
+    if gran == '1y':
+        return t[:4]
+    if gran == '1M':
+        return t[:7]
+    if gran == '1d':
+        return t[:10]
+    if gran == '1h':
+        return t[:13]
+    if gran in ('5m', '10m'):
+        step = 5 if gran == '5m' else 10
+        try:
+            mi = int(t[14:16])
+        except Exception:
+            mi = 0
+        return f"{t[:14]}{(mi // step) * step:02d}"
+    return t[:13]
 
 
 def _bucket_key(ts: str, gran: str) -> str:

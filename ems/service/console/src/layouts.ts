@@ -9,61 +9,9 @@
 import type { PageLayout } from '@core/widgets/types'
 
 const one = (id: string, title: string, widgetId: string,
-             config?: Record<string, unknown>): PageLayout => ({
-  id, title, widgets: [{ widgetId, config }],
+             config?: Record<string, unknown>, seedVersion?: number): PageLayout => ({
+  id, title, widgets: [{ widgetId, config }], ...(seedVersion ? { seedVersion } : {}),
 })
-
-// 서비스 통계(VoLTE/PTT) = 지표 카드 N개 + 추이 + 분포. **지표는 1개 = 카드 1개**,
-// 소스는 메뉴가 이미 대상별로 나뉘어 있으므로 고정(선택 UI 없음. item = kpi 계약의 0-based 인덱스).
-const svcStatsLayout = (id: string, title: string, source: string, stats: number,
-                        trend: string, dist: string): PageLayout => {
-  const w = Math.floor(48 / stats)
-  return {
-    id, title, seedVersion: 5,
-    widgets: [
-      { widgetId: 'core.page-filter', x: 0, y: 0, w: 48, h: 4 },
-      ...Array.from({ length: stats }, (_, i) => ({
-        widgetId: 'shape.stat', x: i * w, y: 4, w, h: 7, config: { source, item: i },
-      })),
-      { widgetId: 'shape.time-bar',     x: 0,  y: 11, w: 26, h: 20, config: { source, title: trend } },
-      { widgetId: 'shape.distribution', x: 26, y: 11, w: 22, h: 20, config: { source, title: dist } },
-    ],
-  }
-}
-
-// 메시지 통계 = 인터페이스(SIP/CMP/CSC/HTTPS)를 한 화면에서 갈아 보는 구성. 대상 선택은 위젯이 아니라
-// **화면 공통 조건**(core.source-picker → `src`)으로 두어 차트·표가 함께 움직인다.
-// 후보는 **인터페이스**만 — 전 인터페이스 합계(cims.msg-summary)는 표 계약이 없어 같은 축에 못 둔다.
-const MSG_IFACES = ['cims.msg.sip', 'cims.msg.cmp', 'cims.msg.csc', 'cims.msg.https']
-const MSG_SOURCE = MSG_IFACES[0]
-export const STATS_MESSAGES_LAYOUT: PageLayout = {
-  id: 'stats.messages', title: '메시지 통계', seedVersion: 2,
-  widgets: [
-    { widgetId: 'core.page-filter',   x: 0,  y: 0, w: 48, h: 4 },
-    // 인터페이스 선택은 화면 공통 조건(`src`) — 차트와 표가 같은 대상을 함께 본다.
-    // 후보를 열거해 이 화면과 무관한 소스(VoLTE/PTT 서비스 KPI)가 섞이지 않게 한다.
-    { widgetId: 'core.source-picker', x: 0,  y: 4, w: 48, h: 3,
-      config: { sources: MSG_IFACES.join(',') } },
-    { widgetId: 'shape.time-bar',     x: 0,  y: 7, w: 29, h: 22,
-      config: { source: MSG_SOURCE, title: '시간대별 메시지' } },
-    { widgetId: 'shape.table',        x: 29, y: 7, w: 19, h: 22,
-      config: { source: MSG_SOURCE, title: '메서드별 건수' } },
-  ],
-}
-
-// 누수 회수(sweeper) — 다른 통계 화면과 같은 구성: 조회 조건 + 지표 카드 낱개 + 목록.
-// 집계 단위(시간/일/월)는 쓰지 않는 일자 조회라 단위 버튼은 감춘다.
-export const STATS_LEAK_LAYOUT: PageLayout = {
-  id: 'stats.leak-reclaims', title: '누수 회수(sweeper)', seedVersion: 2,
-  widgets: [
-    { widgetId: 'core.page-filter', x: 0,  y: 0,  w: 48, h: 4, config: { showGran: false } },
-    { widgetId: 'cims.leak.total',   x: 0,  y: 4,  w: 12, h: 7 },
-    { widgetId: 'cims.leak.orphan',  x: 12, y: 4,  w: 12, h: 7 },
-    { widgetId: 'cims.leak.hold',    x: 24, y: 4,  w: 12, h: 7 },
-    { widgetId: 'cims.leak.by-node', x: 36, y: 4,  w: 12, h: 7 },
-    { widgetId: 'cims.leak.list',    x: 0,  y: 11, w: 48, h: 32 },
-  ],
-}
 
 // 서비스 섹션 — 서비스 현황은 섹션별 개별 위젯을 합성(운영자가 ✎ 편집으로 재배치 가능).
 // 탭 통합 위젯(cims.svc-detail)은 등록만 남기고 seed 에서 빼 개별 위젯으로 되돌렸다 — 한 화면에서
@@ -84,10 +32,51 @@ export const SERVICE_STATUS_LAYOUT: PageLayout = {
 export const SERVICE_HISTORY_VOLTE_LAYOUT = one('service.history-volte', 'VoLTE 이력', 'cims.volte-history')
 export const SERVICE_HISTORY_PTT_LAYOUT   = one('service.history-ptt', 'PTT 이력', 'cims.ptt-history')
 
-// 통계 섹션 — 소스는 descriptor 등록 id (service_descriptors_seed/cims.json 의 data_sources[]).
-// 지표 수 = 소스가 선언한 kpi 항목 수 (descriptor cims.json 의 map.kpi.items)
-//   volte: 호 시도·호 성공률·평균 통화시간·성공 (4) / ptt: 그룹콜 수·평균 세션 시간 (2)
+// 서비스 통계(VoLTE/PTT) — `core.page-filter` + 지표 카드 낱개 + 추이 + 분포.
+// 메시지는 여기에 두지 않는다: 메시지를 서비스별로 가른 화면은 어느 메뉴에 있든 내용이 같아
+// (VoLTE 메뉴의 메시지가 아니라 "전체 메시지를 서비스별로 가른 것") 같은 페이지를 두 군데
+// 걸어두는 셈이었다. 서비스축 메시지는 `메시지 통계` 메뉴 하나로 뺐다.
+const svcStats = (id: string, title: string, source: string, stats: number,
+                  trend: string, dist: string): PageLayout => {
+  const w = Math.floor(48 / stats)
+  return {
+    id, title, seedVersion: 8,
+    widgets: [
+      { widgetId: 'core.page-filter', x: 0, y: 0, w: 48, h: 4 },
+      ...Array.from({ length: stats }, (_, i) => ({
+        widgetId: 'shape.stat', x: i * w, y: 4, w, h: 7, config: { source, item: i },
+      })),
+      { widgetId: 'shape.time-bar',     x: 0,  y: 11, w: 26, h: 20, config: { source, title: trend } },
+      { widgetId: 'shape.distribution', x: 26, y: 11, w: 22, h: 20, config: { source, title: dist } },
+    ],
+  }
+}
 export const STATS_VOLTE_LAYOUT =
-  svcStatsLayout('stats.volte', 'VoLTE 통계', 'cims.svc.volte', 4, '호 시도 추이', '종료 사유 분포')
+  svcStats('stats.volte', 'VoLTE 통계', 'cims.svc.volte', 4, '호 시도 추이', '종료 사유 분포')
 export const STATS_PTT_LAYOUT =
-  svcStatsLayout('stats.ptt', 'PTT 통계', 'cims.svc.ptt', 2, '그룹콜 수 추이', '그룹별 사용 빈도')
+  svcStats('stats.ptt', 'PTT 통계', 'cims.svc.ptt', 2, '그룹콜 수 추이', '그룹별 사용 빈도')
+
+// 인터페이스 통계 — 옛 SIP/CMP/CSC/HTTPS 4개 메뉴를 한 화면으로 합친다. 넷은 보는 값이 같고
+// 대상만 달랐다(메뉴가 아니라 **조회 조건**). 대상 전환은 core.source-picker(`src`)가 소유하고
+// 같은 페이지의 shape 위젯들이 함께 따라간다 — 차트는 SIP, 표는 CMP 인 상태가 생기지 않는다.
+//
+// 서비스축(VoLTE/PTT)은 **메뉴가 아니라 계열**이다. `core.series-select` 가 파라미터 `series` 를
+// 소유하고, 시계열과 메서드 비중이 **함께** 그 선택을 따른다 — 한 화면의 두 그림이 다른 대상을
+// 보지 않게. '전체 메시지' 타일은 계열이 아니라 전부 선택 버튼이다(계열이 겹치지 않으므로
+// 전부 켠 막대가 곧 전체다).
+export const STATS_IFACE_LAYOUT: PageLayout = {
+  id: 'stats.interfaces', title: '인터페이스 통계', seedVersion: 9,
+  widgets: [
+    { widgetId: 'core.page-filter', x: 0, y: 0, w: 48, h: 4 },
+    { widgetId: 'core.source-picker', x: 0, y: 4, w: 48, h: 3,
+      config: { shape: 'time-bar', sources: 'cims.msg.sip, cims.msg.cmp, cims.msg.csc, cims.msg.https' } },
+    { widgetId: 'core.series-select', x: 0, y: 7, w: 48, h: 8,
+      config: { source: 'cims.msg.sip', allLabel: '전체 메시지' } },
+    { widgetId: 'shape.series-bar', x: 0, y: 15, w: 30, h: 24,
+      config: { source: 'cims.msg.sip', title: '시간대별 메시지 수' } },
+    { widgetId: 'shape.distribution', x: 30, y: 15, w: 18, h: 24,
+      config: { source: 'cims.msg.sip', title: '메서드 비중' } },
+    { widgetId: 'shape.table', x: 0, y: 39, w: 48, h: 20,
+      config: { source: 'cims.msg.sip', title: '메서드별 카운트' } },
+  ],
+}

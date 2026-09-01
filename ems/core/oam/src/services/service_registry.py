@@ -249,13 +249,17 @@ def seed_if_empty(config: dict = None) -> int:
     return n
 
 
-def merge_seed_modules(config: dict = None) -> int:
+def merge_seed_updates(config: dict = None) -> int:
     """seed descriptor 에만 있는 **모듈**을 store 의 같은 id descriptor 에 추가 (기동 마이그레이션).
 
     `seed_if_empty` 는 store 가 비었을 때만 주입하므로, 이미 운용 중인 노드에는 새 모듈
     (예: 관리평면 `oam`/`oam-svc`)이 영구히 반영되지 않는다. 모듈이 descriptor 에 없으면
     `_agent_daemon_modules` 가 그 모듈을 daemon 으로 보지 않아 HA 의 cold/relevant/헬스
     대상에서 빠진다 → 이중화 대상이 될 수 없다.
+
+    같은 이유로 **데이터 소스(`data_sources`)** 도 병합한다 — 서비스 pack 이 새 소스나 새 shape
+    을 추가해도 이미 seed 된 노드에는 영원히 닿지 않아, 그 소스를 쓰는 화면이 빈 화면이 된다.
+    shape/map 은 운영자 정책이 아니라 **렌더러와의 계약**이라 코드가 정본이다.
 
     운영자 편집을 보존한다: **이름이 없는 모듈만 추가**하고, 기존 모듈 엔트리·alert_rules·
     label 은 건드리지 않는다. 예외로 기존 모듈의 `health` 블록에는 **없는 키만 채운다**
@@ -289,12 +293,38 @@ def merge_seed_modules(config: dict = None) -> int:
                 if k not in tgt['health']:
                     tgt['health'][k] = v
                     filled += 1
-        if not new_mods and not filled:
+        # 데이터 소스 — seed 가 가진 소스는 **seed 를 그대로 정본으로 삼는다**(shapes·map·endpoint).
+        # 이 값들은 운영자 정책이 아니라 렌더러와의 계약이다(어느 필드를 어떤 축으로 읽는가).
+        # "없는 것만 채우기"로 두면 두 방향 모두 막힌다 — 매핑을 고쳐도 옛 노드에 안 닿고,
+        # shape 를 빼도 store 에 남아 빈 화면을 만든다. 실제로 kpi 를 뺐는데 목록에만 남는 일이 있었다.
+        # 운영자가 **직접 추가한 소스**(seed 에 없는 id)는 건드리지 않는다.
+        by_id = {x.get('id'): x for x in (cur.get('data_sources') or []) if isinstance(x, dict)}
+        new_srcs, filled_shapes = [], 0
+        for sd in (doc.get('data_sources') or []):
+            if not isinstance(sd, dict) or not sd.get('id'):
+                continue
+            tgt = by_id.get(sd['id'])
+            if not tgt:
+                new_srcs.append(sd)
+                continue
+            for k in ('shapes', 'map', 'endpoint', 'query', 'label', 'needsControls'):
+                want = sd.get(k)
+                if want is None:
+                    if k in tgt:
+                        del tgt[k]
+                        filled_shapes += 1
+                elif tgt.get(k) != want:
+                    tgt[k] = want
+                    filled_shapes += 1
+
+        if not new_mods and not filled and not new_srcs and not filled_shapes:
             continue
         if new_mods:
             cur.setdefault('modules', []).extend(new_mods)
+        if new_srcs:
+            cur.setdefault('data_sources', []).extend(new_srcs)
         file_store.save(d, cur['id'], cur)
-        added += len(new_mods) + filled
+        added += len(new_mods) + filled + len(new_srcs) + filled_shapes
     return added
 
 

@@ -176,6 +176,11 @@ function Shell() {
               <Route path="/dashboard/alerts" element={<Navigate to="/alerts/history" replace />} />
               {/* 옛 경로 호환 — 자동 배포는 시스템 → 릴리스 그룹으로 이전 */}
               <Route path="/deploy/auto-deploy" element={<Navigate to="/release/auto-deploy" replace />} />
+              {/* 옛 경로 호환 — SIP/CMP/CSC/HTTPS 별 메뉴와 서비스축 메시지 통계는
+                  '인터페이스 통계' 한 화면으로 합쳐졌다(대상·서비스는 조회 조건). */}
+              {['/stats/sip', '/stats/cmp', '/stats/csc', '/stats/https', '/stats/messages'].map(p => (
+                <Route key={p} path={p} element={<Navigate to="/stats/interfaces" replace />} />
+              ))}
               {/* 옛 경로 호환 — HA 상세 편집은 시스템/인프라 그룹 인스펙터로 흡수됨 */}
               <Route path="/deploy/services" element={<HaServicesRedirect />} />
               {FLAT_ROUTES.map(r => (

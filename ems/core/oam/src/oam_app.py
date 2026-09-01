@@ -742,15 +742,16 @@ if __name__ == '__main__':
         if _seeded:
             logger.log_info(f'[service-registry] seeded {_seeded} service descriptor(s) from seed dir (store was empty)')
         else:
-            # 이미 운용 중인 store — seed 에 새로 생긴 **모듈만** 병합(운영자 편집 보존).
+            # 이미 운용 중인 store — seed 에 새로 생긴 **모듈·데이터 소스**만 병합(운영자 편집 보존).
             # 이게 없으면 신규 모듈(관리평면 oam/oam-svc 등)이 기존 노드에서 영구히
-            # descriptor 밖에 남아 HA 의 daemon/cold/relevant/헬스 대상이 되지 못한다.
+            # descriptor 밖에 남아 HA 의 daemon/cold/relevant/헬스 대상이 되지 못하고,
+            # 새 데이터 소스·shape 는 그것을 쓰는 화면이 빈 채로 남는다.
             try:
-                _merged = service_registry.merge_seed_modules(config)
+                _merged = service_registry.merge_seed_updates(config)
                 if _merged:
-                    logger.log_info(f'[service-registry] merged {_merged} new module(s) from seed dir')
+                    logger.log_info(f'[service-registry] merged {_merged} seed update(s) — module/data source')
             except Exception as _e:
-                logger.log_warning(f'[service-registry] seed module merge skip: {_e}')
+                logger.log_warning(f'[service-registry] seed merge skip: {_e}')
 
         admin_server = HttpServer(
             admin_conf.get('Ip', '0.0.0.0'),

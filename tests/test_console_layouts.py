@@ -95,7 +95,7 @@ class TestConsoleLayouts(unittest.TestCase):
         self.assertNotIn("seedVersion", res.body)
 
     def test_put_requires_widgets(self):
-        res = self._put("stats.sip", {"title": "SIP"})
+        res = self._put("stats.interfaces", {"title": "인터페이스"})
         self.assertEqual(res.status, 400)
 
     def test_delete_resets_to_seed(self):

@@ -79,7 +79,14 @@ page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**. `App.tsx` 의
 분해하면 같은 조회 조건(기간·단위)을 여러 위젯이 함께 봐야 한다. 조건은 **레이아웃 단위**로 한 곳에 둔다.
 
 - 컨트롤 위젯 `core.page-filter`(카테고리 `control`)가 조건을 소유(`usePageControl('period')`),
-  데이터 위젯은 `usePageParam('date'|'gran')` 으로 읽는다.
+  데이터 위젯은 `usePageParam('from'|'to'|'gran')` 으로 읽는다.
+- **조회 기간은 구간(`from`~`to`)으로 정한다.** 기준일 하나(`date`)+단위 조합은 "8/28 에 '월' 단위"
+  처럼 무엇을 보는지가 모호했다. 먼저 구간을 정하고 그 안을 `gran` 단위로 쪼갠다.
+  단위는 `5분/10분/1시간/일/월/년` 6종이며, 단위마다 **최대 조회 범위**가 있다
+  (`GRAN_MAX_DAYS` — 5분 3일 / 10분 7일 / 1시간 30일 / 일 730일). 버킷이 800개 근처를 넘으면
+  차트가 읽히지 않고 스캔 비용만 늘기 때문이며, 상한은 그 근방을 사람이 읽기 좋은 값으로 반올림했다.
+  범위를 넘는 단위 버튼은 비활성으로 보이고, 구간을 넓히면 `bestGran` 이 맞는 단위로 올려준다.
+  서버도 같은 표(`stats.py::_GRAN_MAX_DAYS`)로 **끝에서부터** 잘라내고 `truncated` 로 알린다.
 - 그 페이지에 컨트롤 위젯이 **없으면** 데이터 위젯은 자기 컨트롤을 쓴다 — 배치만으로 두 형태가 성립하며
   위젯 설정을 늘리지 않는다. (`shape.*` 는 컨트롤이 있으면 자기 날짜/단위 컨트롤을 접고 값만 표기)
 - **조회 대상도 같은 규칙으로 다룬다.** 한 화면에서 대상을 갈아 보는 구성(메시지 통계의 인터페이스)은
@@ -90,6 +97,16 @@ page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**. `App.tsx` 의
   카탈로그 전체가 후보라 화면 목적과 무관한 소스(VoLTE/PTT 서비스 KPI)까지 섞인다.
 - **URL 쿼리가 유일한 정본**(`?date=`·`?gran=`) — 딥링크/뒤로가기가 조건까지 재현한다. 버스가 소유한
   키만 건드리므로 페이지가 쓰는 `?group=`·`?agent=`·`?t=`·`?q=` 와 충돌하지 않는다.
+- **표시 선택도 파라미터로 둔다.** 계열 차트에서 무엇을 그릴지는 `series`(계열 키 쉼표 목록)를
+  `core.series-select` 가 소유하고 `shape.series-bar` 가 읽는다. 비어 있으면 전 계열이라,
+  링크에 아무것도 안 붙은 상태가 곧 기본 화면이다. 계열은 이미 받은 응답 안에 다 들어 있으므로
+  **켜고 끌 때 다시 조회하지 않는다** — 표시 문제와 조회 문제를 섞지 않는다.
+- 구간 기본값(URL 에 `from`/`to` 가 없을 때)은 **마운트 때 한 번** 정하고 그대로 쓴다. 매번
+  `지금`을 다시 계산하면 계열 토글처럼 표시만 바꾸는 조작이 조회 창까지 움직여, 같은 화면의
+  지표 타일과 차트가 서로 다른 끝시각으로 조회하는 일이 생긴다. 창을 지금으로 당기는 건
+  `[오늘]`·`[↺]` 가 명시적으로 한다(URL 에 값을 쓴다).
+- 화면이 보내는 시각은 `YYYY-MM-DD HH:MM`(초 없음)이다. 서버는 입구에서 `_norm_dt` 로 한 번만
+  초까지 채운다 — 파싱하는 자리마다 방어하면 자리가 늘 때 또 빠진다.
 - 새 파라미터는 `PAGE_PARAM_KEYS` 표에만 추가한다.
 
 ### 3.3 배치 단위 설정 · 표시 이름
@@ -110,6 +127,8 @@ page 는 고정 화면이 아니라 **위젯 배치(PageLayout)**. `App.tsx` 의
 함께 실린다. 대신 **컨트롤 위젯은 편집 중에도 조작 가능**(`.grid-widget-body--live`)이라 탭을 바꿔가며
 각 탭의 배치를 편집할 수 있고, 위젯 추가도 현재 탭에서 보이는 배치 기준으로 자리를 잡는다.
 카드 헤더에는 `atab=events` 배지가 붙어 어느 탭 소속인지 보인다.
+
+쓰는 곳: 장애 화면의 알람/이벤트(`atab`, `core.alarm-event-tabs`).
 탭 버튼은 그 파라미터를 쓰는 컨트롤 위젯이 그린다(카드 껍데기 없이 기존 탭 모양 그대로).
 
 ### 3.4 seed 개편 전파 (`PageLayout.seedVersion`)
@@ -184,18 +203,38 @@ seed 는 grid 좌표(x/y/w/h)로 직접 쓴다 — 폭을 48칸 단위로 지정
 - 탭은 위젯을 합치지 않고 **배치의 `visibleWhen`** 으로 구현한다(§3.5) — 블록은 각각 떼어낼 수 있는
   위젯으로 두고, 어느 쪽을 보일지만 파라미터가 정한다.
 
-성능 메뉴(`/stats/*`)는 **VoLTE 통계 · PTT 통계 · 메시지 통계 · 누수 회수** 4개다.
-- VoLTE/PTT 통계 = `core.page-filter` + **지표 카드(`shape.stat`) 낱개** + 추이 + 분포. 메뉴가 이미
-  대상별로 갈려 있으므로 **소스 선택 UI 를 노출하지 않는다**(`config.source` 고정). 지표는 `config.item`
-  (소스 kpi 계약의 0-based 인덱스)로 하나씩 고른다.
-- 메시지 통계 = 인터페이스(SIP/CMP/CSC/HTTPS)를 **한 화면에서 갈아 보는** 구성이라 메뉴를 4개로
-  두지 않고 `config.pickSource: true` 로 소스 선택을 노출한다.
+성능 메뉴(`/stats/*`)는 **VoLTE 통계 · PTT 통계 · 인터페이스 통계 · 누수 회수** 4개다.
+세 질문이 각각 한 자리를 갖고, 그 밖의 메뉴는 두지 않는다.
+
+| 질문 | 보는 곳 |
+|---|---|
+| 호가 얼마나·잘 되나 | VoLTE 통계 / PTT 통계 — 호 단위(call.json) 집계라 성공률·통화시간·종료사유까지 |
+| 어떤 메시지가 얼마나 오가나 | 인터페이스 통계 — 메시지 로그 집계, 메서드별·서비스별 |
+
+메시지 로그의 INVITE 를 세어 "호 시도"를 따로 만들지 않는다 — 재전송·re-INVITE 가 섞여 호 단위
+집계와 숫자가 어긋난다. 호는 호 통계가, 메시지는 메시지 통계가 센다.
+
+- VoLTE/PTT 통계 = `core.page-filter` + **지표 카드(`shape.stat`) 낱개** + 추이 + 분포.
+  메뉴가 이미 대상별로 갈려 있으므로 **소스 선택 UI 를 노출하지 않는다**(`config.source` 고정).
+  지표는 `config.item`(소스 kpi 계약의 0-based 인덱스)로 하나씩 고른다.
+  메시지는 여기 두지 않는다 — 메서드 종류(INVITE·REGISTER·…)는 인터페이스 통계가 이미 그린다.
+- 인터페이스 통계 = 인터페이스를 **한 화면에서 갈아 보는** 구성이라 메뉴를 4개로 두지 않고
+  `core.source-picker`(파라미터 `src`)로 대상을 고른다 — 차트·분포·표가 함께 따라간다.
+  **서비스축(VoLTE/PTT)은 메뉴가 아니라 계열이며, SIP 에만 있다** — CMP/CSC 는 제어 메시지(JSON),
+  HTTPS 는 관리 트래픽이라 서비스 구분이 없다. 그 셋은 계열을 하나(`전체`)만 선언해 같은 위젯으로
+  그리되 없는 구분을 지어내지 않는다(계열이 하나면 선택 타일도 합계 하나만 낸다). `core.series-select` 가 계열 카드(색 + 이름 +
+  구간 합계)를 그리고 파라미터 `series` 를 소유하며, 시계열(`shape.series-bar`)과 메서드 비중
+  (`shape.distribution`)이 **함께** 그 선택을 따른다 — 한 화면의 두 그림이 다른 대상을 보지 않게.
+  계열은 `VoLTE / PTT / 미분류` 로 서로 겹치지 않아 전부 켠 막대가 곧 전체다. 그래서 '전체 메시지'
+  타일은 계열이 아니라 **전부 선택 버튼**이다(`config.allLabel` 로 이름 지정).
+  구간 내내 0 인 계열은 카드에서 숨긴다 — '미분류'처럼 정상일 때 비어 있는 계열이 자리만 먹지 않게.
 - 차트/표 제목은 `config.title` 로 배치에서 정한다(소스가 고정된 화면에서는 소스명보다 "무엇을
   그리는가"가 읽기 쉽다 — 호 시도 추이, 종료 사유 분포).
-구 통짜 위젯 `cims.service-stats`/`cims.message-stats` 는 저장본 하위호환으로만 등록해 둔다.
-- 누수 회수(`/stats/leak-reclaims`)도 같은 구성 — 조회 조건(단위 버튼 없이 날짜만: `config.showGran:false`)
-  + 지표 카드 4(총 회수·무RTP·RTP후 미해제·노드별) + 회수 세션 목록.
-  화면의 뜻(0건이 정상)은 자리를 차지하지 않게 목록 헤더의 `ⓘ`(hover=툴팁, 클릭=펼침)로 접어 둔다.
+구 통짜 위젯 `cims.service-stats`/`cims.message-stats` 는 저장본 하위호환으로만 등록해 둔다
+(seed 는 쓰지 않는다 — 분해된 배치가 정본).
+- 누수 회수(`/stats/leak-reclaims`) — 조회 조건(날짜) + 지표 카드 4(총 회수·무RTP·RTP후 미해제·노드)
+  + 회수 세션 목록. 화면의 뜻(0건이 정상)은 자리를 차지하지 않게 툴바의 `ⓘ`(`components/InfoDot`
+  — hover=요약 title, 클릭=말풍선, 바깥클릭/Esc=닫기)로 접어 둔다.
 서비스 메뉴(`/service/*`)와 구성 메뉴의 워크벤치(조직·사용자·PTT 그룹·MCPTT 정책)는 **분해하지 않는다**
 — 현황→이력→상세, 목록→편집으로 이어지는 흐름 화면이다.
 
@@ -223,12 +262,20 @@ seed 는 grid 좌표(x/y/w/h)로 직접 쓴다 — 폭을 48칸 단위로 지정
 | 선 | `--border` · 마우스오버 `--hover` |
 | 글자 | `--text` / 보조 `--text-muted` |
 | 상태 | `--primary` `--success` `--warning` `--danger` + soft 배경 `--primary-soft` `--success-soft` `--warn-soft` `--danger-soft` |
+| 차트 계열 | `--chart-1` ~ `--chart-5` — 색상(hue)이 서로 뚜렷이 다른 5색, 선언 순서대로 배정. `--chart-muted` 는 '미분류'처럼 값이 아니라 빈자리를 뜻하는 계열용(소스가 `color` 로 직접 지정) |
+
+계열 색에는 상태색(`--success`/`--warning`/`--danger`)을 쓰지 않는다 — 계열은 "무엇인가"이지
+"좋다/나쁘다"가 아니라서, 섞으면 초록 막대가 정상을 뜻하는 것처럼 읽힌다.
 
 세 가지 함정이 실제로 다크 화면을 깨뜨렸다:
 
 - **없는 토큰 + 라이트 폴백**(`var(--muted, #6b7280)`, `var(--bg-elevated, #fff)`) — 토큰이 없으니
   폴백이 **항상** 적용돼 다크에서 흰 배경·회색 글자가 그대로 남는다. 폴백은 안전장치가 아니라
   테마를 무력화하는 장치다. 토큰 이름을 정확히 쓰고 폴백은 적지 않는다.
+  토큰이 **정의돼 있어도** 마찬가지다 — 그 폴백은 지금 죽은 코드이고, 토큰 이름이 바뀌는 날
+  라이트 색을 조용히 되살린다. `var(--surface, #fff)` 같은 표기는 남기지 않는다.
+- **CSS 에 없는 클래스에 기대기**(`className="card"` — `.card` 규칙이 존재하지 않음) — 배경/테두리가
+  아예 안 붙어 다크에서 카드가 사라진다. 카드는 `.panel` 을 쓴다.
 - **badge/tag 변형의 파스텔 배경**(`.badge--blue { background:#dbeafe }`) — 라이트용 색이 다크에서
   흰 알약으로 뜬다. soft 토큰으로 적고, 전경 대비가 모자라면 `:root[data-theme="dark"]` 오버라이드를
   짝지어 둔다.
@@ -254,10 +301,24 @@ seed 는 grid 좌표(x/y/w/h)로 직접 쓴다 — 폭을 48칸 단위로 지정
 **데이터 성격(shape)이 같고 소스만 다른 출력**(차트/표/KPI/분포)을 위젯마다 만들지 않는다.
 코어가 **shape**(presentation)를, 서비스가 **데이터 소스**(데이터)를 제공 → shape 위젯이 소스를 선택.
 
-- shape: `time-bar` · `stat` · `distribution` · `table` — 코어 위젯 `shape.*`. `kpi` 는 **데이터 계약**
-  (descriptor 가 선언하는 지표 목록)으로만 존재하고, 화면에 놓는 것은 그중 하나를 그리는 `stat`
-  (지표 카드, category `metric`)이다. 소스가 선언한 지표 라벨은 `DataSource.kpiItems` 로 노출돼
-  편집기 `[⚙]` 의 지표 선택지가 된다.
+- shape: `time-bar` · `series-bar` · `stat` · `distribution` · `table` — 코어 위젯 `shape.*`.
+  `kpi` 는 **데이터 계약**(descriptor 가 선언하는 지표 목록)으로만 존재하고, 화면에 놓는 것은
+  그중 하나를 그리는 `stat`(지표 카드, category `metric`)이다. 소스가 선언한 지표 라벨은
+  `DataSource.kpiItems` 로 노출돼 편집기 `[⚙]` 의 지표 선택지가 된다.
+- `series-bar` 는 한 버킷이 값 하나가 아니라 **계열별 값**을 갖는 시계열이다. 버킷마다 막대는
+  하나이고 고른 계열이 색으로 **쌓인다** — 막대 높이 = 고른 계열의 합. 계열은 map 에 선언 순서대로
+  적고, 그 순서가 곧 색(`--chart-1`~`5`)이자 쌓는 순서(아래→위)이며 범례·카드 순서다.
+  **순서를 바꾸면 보던 색이 바뀐다** — 계열을 추가할 때는 뒤에 붙인다.
+- **계열은 겹치지 않게 쪼갠다.** 쌓기는 "부분의 합"이라 막대 높이가 곧 고른 계열의 합이고, 그래서
+  *전부 켠 상태 = 전체*가 성립해야 한다. 포함관계인 값을 계열로 두면(전체 ⊃ VoLTE) 더한 값이
+  실제보다 커진다. 그래서 소스가 분해값을 내고(`_svc_bucket`: `volte + ptt + unknown == count`),
+  '전체' 계열은 두지 않는다 — 전부 켜면 그게 전체다.
+- 분포(`distribution`)도 같은 계열로 쪼갤 수 있다: `partsObject` 가 항목별 계열 값을 가리키면
+  (`method_service[메서드] = {volte,ptt,unknown}`) 막대 하나를 계열 색으로 나눠 칠하고, 계열 선택이
+  걸리면 값·합계를 고른 계열 기준으로 다시 센다.
+- 그래도 겹치는 계열을 선언할 여지는 남긴다: 계열에 `includes`(품고 있는 계열 키)를 적으면 렌더러가
+  그 조합을 골랐을 때만 범례 아래에 한 줄로 알린다(선택을 막지는 않는다).
+- 마우스를 올리면 그 버킷의 전 계열 값과 합계가 말풍선으로 뜨고, 가리킨 계열이 굵게 강조된다.
 - 렌더러: `widgets/shapes/renderers.tsx` — shape 데이터만 받아 그린다(소스/fetch 무관).
 - **데이터 소스 등록 = Service Descriptor 의 `data_sources[]` (백엔드 데이터)**. 모듈/alert_rules 와 동일하게 descriptor 로 등록 — 새 소스는 **descriptor 편집만**(프론트 코드 0).
 - 스펙 → DataSource 빌더 `widgets/shapes/dataSourceSpec.ts` — 선언적 매핑을 해석하는 **정규화 계층**:
@@ -284,8 +345,18 @@ seed 는 grid 좌표(x/y/w/h)로 직접 쓴다 — 폭을 48칸 단위로 지정
 
 OAM 코어의 CIMS 하드코딩(모듈맵/빌드 화이트리스트/제어 허용목록/alert/데이터 소스)을 descriptor 데이터로 분리.
 
-- 저장: file_store `services` 도메인. 시드: `csc/src/services/service_descriptors_seed/*.json`(CIMS=`cims.json`). store 비면 1회 주입.
-- 집계: `csc/src/services/service_registry.py` — `all_modules` / `valid_module_names` / `controllable_modules` / `alert_rules`(코어 host 규칙 disk_high/module_down 병합) / `data_sources`.
+- 저장: file_store `services` 도메인. 시드: `ems/core/oam/src/services/service_descriptors_seed/*.json`(CIMS=`cims.json`).
+- 집계: `ems/core/oam/src/services/service_registry.py` — `all_modules` / `valid_module_names` / `controllable_modules` / `alert_rules`(코어 host 규칙 disk_high/module_down 병합) / `data_sources`.
+- **시드 반영은 두 단계다.** `seed_if_empty` 는 store 가 **비었을 때만** 전체 주입하므로, 이미
+  운용 중인 노드에는 뒤에 추가된 것이 영원히 닿지 않는다. 그래서 기동 시 `merge_seed_updates` 가
+  차이를 덧댄다. 무엇을 덮고 무엇을 보존하는지는 **그 값의 정본이 누구인가**로 갈린다:
+  - 운영자 정본(덮지 않음) — 모듈 엔트리, `alert_rules`, `label`, 이미 값이 있는 `health` 키.
+    없는 것만 추가/보강한다.
+  - 코드 정본(seed 를 그대로 반영) — seed 가 가진 데이터 소스의 `shapes`·`map`·`endpoint`·`query`
+    ·`label`. 이 값들은 "어느 필드를 어떤 축으로 읽는가"라는 렌더러와의 계약이다. 없는 것만 채우는
+    정책은 양방향으로 막힌다 — 매핑을 고쳐도 옛 노드에 안 닿고, shape 를 빼도 store 에 남아 빈
+    화면을 만든다. 그래서 **제거까지 전파**한다. 운영자가 직접 추가한 소스(seed 에 없는 id)는
+    건드리지 않는다.
 - API: `ems/core/oam/src/handlers/service_descriptors.py` — `GET /api/v1/service-descriptors[/{id}]` · `/modules` · `/data-sources` · `PUT`(modules+alert_rules+data_sources 보존) · `DELETE`.
 - 콘솔: `/deploy/service-defs`(ServiceDescriptorsPage) — **폼 편집**(`pages/descriptors/forms.tsx`의 `ServiceForm`: id/label·모듈·alert_rules 행 추가/삭제, `DataSourceForm`: shapes 체크 + shape별 매핑 폼) + 전체 JSON "고급" fallback. 데이터 소스는 카드의 데이터 소스 섹션에서 추가/편집/삭제.
 > API 문서(개발자 모드 `[API]` 버튼)는 descriptor 가 아니라 **각 API 를 구현한 모듈의 코드**가 소유한다.

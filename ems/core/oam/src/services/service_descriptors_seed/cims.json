@@ -184,16 +184,21 @@
       "label": "SIP 메시지",
       "shapes": [
         "time-bar",
+        "series-bar",
+        "distribution",
         "table"
       ],
       "endpoint": "/stats/messages/sip",
       "query": [
-        "date"
+        "from",
+        "to",
+        "granularity"
       ],
       "map": {
         "time-bar": {
           "from": "buckets",
           "label": [
+            "label",
             "hour"
           ],
           "value": "count"
@@ -203,6 +208,55 @@
           "columns": [
             "메서드",
             "건수"
+          ]
+        },
+        "distribution": {
+          "fromObject": "method_counts",
+          "totalPath": "total",
+          "partsObject": "method_service",
+          "series": [
+            {
+              "key": "volte",
+              "label": "VoLTE",
+              "value": "volte"
+            },
+            {
+              "key": "ptt",
+              "label": "PTT",
+              "value": "ptt"
+            },
+            {
+              "key": "unknown",
+              "label": "미분류",
+              "value": "unknown",
+              "color": "chart-muted"
+            }
+          ]
+        },
+        "series-bar": {
+          "from": "buckets",
+          "label": [
+            "label",
+            "hour"
+          ],
+          "unit": "건",
+          "series": [
+            {
+              "key": "volte",
+              "label": "VoLTE",
+              "value": "volte"
+            },
+            {
+              "key": "ptt",
+              "label": "PTT",
+              "value": "ptt"
+            },
+            {
+              "key": "unknown",
+              "label": "미분류",
+              "value": "unknown",
+              "color": "chart-muted"
+            }
           ]
         }
       }
@@ -212,16 +266,21 @@
       "label": "CMP 메시지",
       "shapes": [
         "time-bar",
+        "series-bar",
+        "distribution",
         "table"
       ],
       "endpoint": "/stats/messages/cmp",
       "query": [
-        "date"
+        "from",
+        "to",
+        "granularity"
       ],
       "map": {
         "time-bar": {
           "from": "buckets",
           "label": [
+            "label",
             "hour"
           ],
           "value": "count"
@@ -231,6 +290,25 @@
           "columns": [
             "메서드",
             "건수"
+          ]
+        },
+        "distribution": {
+          "fromObject": "method_counts",
+          "totalPath": "total"
+        },
+        "series-bar": {
+          "from": "buckets",
+          "label": [
+            "label",
+            "hour"
+          ],
+          "unit": "건",
+          "series": [
+            {
+              "key": "total",
+              "label": "전체",
+              "value": "count"
+            }
           ]
         }
       }
@@ -240,16 +318,21 @@
       "label": "CSC 메시지",
       "shapes": [
         "time-bar",
+        "series-bar",
+        "distribution",
         "table"
       ],
       "endpoint": "/stats/messages/csc",
       "query": [
-        "date"
+        "from",
+        "to",
+        "granularity"
       ],
       "map": {
         "time-bar": {
           "from": "buckets",
           "label": [
+            "label",
             "hour"
           ],
           "value": "count"
@@ -260,6 +343,25 @@
             "메서드",
             "건수"
           ]
+        },
+        "distribution": {
+          "fromObject": "method_counts",
+          "totalPath": "total"
+        },
+        "series-bar": {
+          "from": "buckets",
+          "label": [
+            "label",
+            "hour"
+          ],
+          "unit": "건",
+          "series": [
+            {
+              "key": "total",
+              "label": "전체",
+              "value": "count"
+            }
+          ]
         }
       }
     },
@@ -268,16 +370,21 @@
       "label": "HTTPS 메시지",
       "shapes": [
         "time-bar",
+        "series-bar",
+        "distribution",
         "table"
       ],
       "endpoint": "/stats/messages/https",
       "query": [
-        "date"
+        "from",
+        "to",
+        "granularity"
       ],
       "map": {
         "time-bar": {
           "from": "buckets",
           "label": [
+            "label",
             "hour"
           ],
           "value": "count"
@@ -287,6 +394,25 @@
           "columns": [
             "메서드",
             "건수"
+          ]
+        },
+        "distribution": {
+          "fromObject": "method_counts",
+          "totalPath": "total"
+        },
+        "series-bar": {
+          "from": "buckets",
+          "label": [
+            "label",
+            "hour"
+          ],
+          "unit": "건",
+          "series": [
+            {
+              "key": "total",
+              "label": "전체",
+              "value": "count"
+            }
           ]
         }
       }
@@ -301,8 +427,9 @@
       ],
       "endpoint": "/stats/service/volte",
       "query": [
-        "date",
-        "granularity"
+        "granularity",
+        "from",
+        "to"
       ],
       "map": {
         "kpi": {
@@ -332,6 +459,7 @@
         "time-bar": {
           "from": "volte.buckets",
           "label": [
+            "label",
             "hour",
             "date"
           ],
@@ -353,8 +481,9 @@
       ],
       "endpoint": "/stats/service/ptt",
       "query": [
-        "date",
-        "granularity"
+        "granularity",
+        "from",
+        "to"
       ],
       "map": {
         "kpi": {
@@ -374,6 +503,7 @@
         "time-bar": {
           "from": "ptt.buckets",
           "label": [
+            "label",
             "hour",
             "date"
           ],
@@ -393,12 +523,15 @@
       ],
       "endpoint": "/stats/messages",
       "query": [
-        "date"
+        "from",
+        "to",
+        "granularity"
       ],
       "map": {
         "time-bar": {
           "from": "buckets",
           "label": [
+            "label",
             "hour"
           ],
           "value": "count"

@@ -24,11 +24,12 @@ import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
 import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
+import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
 import {
   SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
-  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_MESSAGES_LAYOUT, STATS_LEAK_LAYOUT,
+  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_IFACE_LAYOUT,
 } from './layouts'
 
 // 출력 섹션 route = 합성 가능한 레이아웃 (고정 페이지 대체). 각 route 는 layout(seed) + layoutId 영속.
@@ -78,10 +79,10 @@ export const cimsManifest: ServiceManifest = {
       routes: [
         { path: '/stats/volte', title: 'VoLTE 통계', layout: STATS_VOLTE_LAYOUT, layoutId: 'stats.volte', requiredRole: 'monitor' },
         { path: '/stats/ptt',   title: 'PTT 통계',   layout: STATS_PTT_LAYOUT,   layoutId: 'stats.ptt',   requiredRole: 'monitor' },
-        // 인터페이스별(SIP/CMP/CSC/HTTPS) 메시지 통계는 메뉴 4개가 아니라 한 화면에서 소스를 갈아 본다.
-        { path: '/stats/messages', title: '메시지 통계', layout: STATS_MESSAGES_LAYOUT, layoutId: 'stats.messages', requiredRole: 'monitor' },
-        { path: '/stats/leak-reclaims', title: '누수 회수(sweeper)', layout: STATS_LEAK_LAYOUT,
-          layoutId: 'stats.leak-reclaims', requiredRole: 'monitor' },
+        { path: '/stats/interfaces', title: '인터페이스 통계', layout: STATS_IFACE_LAYOUT,
+          layoutId: 'stats.interfaces', requiredRole: 'monitor' },
+        { path: '/stats/leak-reclaims', title: '누수 회수(sweeper)', component: LeakReclaimsPage, requiredRole: 'monitor',
+          apis: ['stats.leak-reclaims'] },
       ],
     },
     // ── 구성 (admin) — 가입자 프로비저닝 + 서비스 정의. FCAPS Configuration. ──

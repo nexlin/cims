@@ -2698,7 +2698,7 @@ def _startup_grace_for(mod: str, s: dict) -> float:
         # 명시값이 없으면 **HTTP readiness 를 쓰는 모듈**은 앱 레벨 기동을 기다린다(기본 60초).
         # 포트 bind 만 보는 모듈(1초 내)과 달리, HTTP 200 은 초기화 완료를 뜻하므로 느리다.
         # descriptor 가 아직 이 필드를 갖지 않은 기존 설치본에서도 좀비 오판이 나지 않게
-        # 하는 이중 방어다(merge_seed_modules 는 없는 **모듈**만 추가하고 필드는 안 채운다).
+        # 하는 이중 방어다(merge_seed_updates 는 없는 **모듈**만 추가하고 필드는 안 채운다).
         if mh.get("http_path"):
             # 상한 기본값 — 공유 스토리지 store 에서 관리평면 콜드스타트가 75초를 넘긴
             # 실측이 있어 넉넉히 둔다. 판정의 1차 기준은 시간이 아니라 readiness 관측이다.

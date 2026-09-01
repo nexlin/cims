@@ -454,10 +454,44 @@ GET /api/v1/stats/...?granularity=5m&from=...&to=...
 
 ### 3.1 메시지 통계
 
-각 프로토콜별 메시지 수를 선택한 시간 단위로 집계.
+각 프로토콜별 메시지 수를 선택한 구간·시간 단위로 집계. 콘솔에서는 **성능 > 인터페이스 통계**
+한 화면이며, 인터페이스(SIP/CMP/CSC/HTTPS)는 대상 선택으로, 서비스(VoLTE/PTT)는 계열로 가른다.
 
 #### 데이터 소스
-NAS `msg_log/csp/sip/{YYYY}/{MM}/{DD}/{HH}/sip.jsonl` 파일에서 `method`, `dir`, `ts` 필드를 집계.
+`{ServiceLogging.Dir}/{YYYY}/{MM}/{DD}/{HH}/{node}_{sip|cmp|csc}.msg.jsonl` 각 줄을 집계한다.
+읽는 필드는 `ts` 와 `msg` 둘뿐이다.
+
+- **시각** — 로그의 `ts` 는 **시각만** 담는다(`"21:00:00.102885"`). 날짜는 경로(`YYYY/MM/DD`)가
+  갖는다. 구간 조회는 날짜까지 필요하므로 `_ts_full` 이 경로의 날짜와 합친다.
+- **method** — `msg` 본문 첫 줄에서 파싱(`_parse_msg_method`). 요청은 메서드, 응답은 상태코드,
+  JSON(CMP/CSC)은 `hdr`→`payload`→최상위 순으로 `cmd`/`type`/`event`. envelope v2 는 명령을
+  `hdr` 에 두므로 그걸 빼면 CMP 전량이 `json` 한 덩어리가 된다.
+
+HTTPS 는 `*_ue.msg` 에 본문이 없어 flow 로그의 `proto=HTTPS` 엔트리로 집계한다(`method` 필드의
+첫 토큰 + `detail=status=NNN`).
+
+**서비스축(VoLTE/PTT)은 SIP 에만 있다.** CMP/CSC 는 제어 메시지(JSON)라 서비스 구분이 없고,
+HTTPS 는 관리 트래픽이다. 없는 구분을 네 인터페이스에 똑같이 그리지 않는다.
+
+버킷마다 `volte + ptt + unknown == count` 로 **겹치지 않게** 낸다. 콘솔의 계열 차트가 이 값을
+그대로 쌓으므로 전부 켠 막대가 곧 전체 메시지다. 메서드별 분포도 같은 축으로 쪼갤 수 있도록
+`method_service`(메서드 → 서비스별 수, 각 메서드의 합 = `method_counts`)를 함께 싣는다.
+
+#### 서비스 판정 — 도메인 (`_domain_service_map` / `_classify_service`)
+
+접속 서비스 정의(`access_services.jsonl`)의 `domain → kind` 로 가른다. enabled 항목을 priority
+오름차순으로 보고 도메인마다 첫 kind 를 남기는 규칙은 CSP `CCspServiceMap::BuildDomainToKindMap`
+과 같다. 판정 순서도 CSP 와 같이 Request-URI → To → From 이며, 응답은 To/From 만 본다.
+
+**3GPP ICSI(`+g.3gpp.icsi-ref`)를 쓰지 않는다.** 규격상으로는 ICSI 가 서비스 정본이지만 현장
+데이터가 신뢰할 수 없다 — 실측(2026-06~09, 68일)에서 단말이 MCPTT 그룹콜에 `icsi.mcdata.sds` 를
+붙이는 것이 확인됐다(같은 메시지 본문은 `application/vnd.3gpp.mcptt-info+xml` +
+`m=application ... UDP MCPTT`). 아예 붙지 않는 호도 많아 커버리지가 도메인의 1% 수준이다.
+> 단말의 ICSI 오태깅 자체는 규격 정합·interop 문제로 별도 수정 대상이다.
+
+조회는 구간(`from`~`to`) + 단위(`granularity`)다. 단위별 최대 범위는
+`stats.py::_GRAN_MAX_DAYS`(5분 3일 / 10분 7일 / 1시간 30일 / 일 730일)이며, 넘으면 **끝에서부터**
+잘라내고 응답 `truncated: true` 로 알린다 — 최근 구간이 관심사이기 때문.
 
 #### 통계 항목
 
@@ -477,9 +511,12 @@ NAS `msg_log/csp/sip/{YYYY}/{MM}/{DD}/{HH}/sip.jsonl` 파일에서 `method`, `di
 ┌──────────────────────────────────────────────────────────────┐
 │  메시지 통계                                                  │
 │                                                               │
-│  [5분] [10분] [1시간] [1일] [1월] [1년]   [SIP▾] [전체▾]     │
-│  ─────                                                        │
-│  2026-04-03 09:00 ~ 10:00                                     │
+│  조회 구간 [2026-04-03 09:00] ~ [2026-04-03 10:00]  [오늘][7일][30일][↺] │
+│  [5분] [10분] [1시간] [일] [월] [년]                          │
+│  (인터페이스) [SIP][CMP][CSC][HTTPS]                          │
+│  (서비스 계열) [전체 메시지][VoLTE][PTT][미분류]              │
+│      ←클릭=계열 토글(전체=전부 선택), 시계열·메서드 비중이 함께 따른다 │
+│  ──────────                                                   │
 │                                                               │
 │  ┌───────────────────────────────────────────────────────┐   │
 │  │ 35│  ██                                                │   │
