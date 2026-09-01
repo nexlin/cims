@@ -141,6 +141,7 @@ CSipServerSetup::CSipServerSetup()
       m_strCscScheme( "https" ),
       m_strCscInternalToken( "" ),
       m_iCscTimeoutMs( 2000 ),
+      m_bDeprecatedXcapSeen( false ),
       m_bRoleCscf( true ),
       m_bRoleTas( true ),
       m_bRolePttAs( true ),
@@ -207,6 +208,16 @@ static std::string _findDeploymentConfig( const std::string &cspJsonPath ) {
         return cand;
     }
     return "";
+}
+
+void CSipServerSetup::WarnDeprecatedKeys() {
+    // Read() 시점에는 로그가 아직 열려 있지 않다 — 로그 초기화 이후 이 함수가 보고한다.
+    if ( m_bDeprecatedXcapSeen ) {
+        CLog::Print( LOG_ERROR,
+                     "Setup.Xcap.* 는 폐기된 설정입니다 — 무시합니다. 단말용 XCAP 주소의 정본은 "
+                     "CSC 의 McpttServer.PublicUrl 이며 CSP 는 내부 API 로 취득합니다"
+                     "(/internal/mcptt/endpoint). csp.json 에서 Setup.Xcap 블록을 제거하십시오." );
+    }
 }
 
 bool CSipServerSetup::Read( const char *pszFileName ) {
@@ -413,15 +424,9 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
 
             // 구 Setup.Xcap.* — 폐기됨. 단말용 XCAP root 의 정본은 CSC(McpttServer.PublicUrl)
             //   이고 CSP 는 내부 API 로 취득한다(CscEndpointCache). overlay 에 잔존해도 무시.
-            if ( setup.Has( "Xcap" ) ) {
-                static bool bWarned = false;
-                if ( !bWarned ) {
-                    bWarned = true;
-                    CLog::Print( LOG_ERROR,
-                                 "Setup.Xcap.* 는 폐기된 설정입니다 — 무시합니다. 단말용 XCAP 주소는 "
-                                 "CSC 의 McpttServer.PublicUrl 로 이관됐습니다(CSP 가 내부 API 로 취득)." );
-                }
-            }
+            //   여기서 CLog::Print 를 해도 로그가 아직 열리지 않아 유실된다 — 플래그만 세우고
+            //   WarnDeprecatedKeys() 가 로그 초기화 후 출력한다.
+            m_bDeprecatedXcapSeen = setup.Has( "Xcap" );
 
             // CSC 내부 API (IMS AKA AV + 단말용 MCPTT 서비스 주소)
             if ( setup.Has( "Csc" ) ) {

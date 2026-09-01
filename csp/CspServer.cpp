@@ -95,6 +95,8 @@ int ServiceMain() {
     }
     CLog::SetPrefix( "csp" );
     CLog::SetDirectory( gclsSetup.m_strLogFolder.c_str() );
+    // Read() 는 위에서 로그 초기화 전에 돌았다 — 그때 관찰한 폐기 키를 이제 보고한다.
+    gclsSetup.WarnDeprecatedKeys();
     gclsCallDir.Init( gclsSetup.m_strServiceLogDir, "csp", gclsSetup.m_iServiceLogStallSec );
     std::string sysId = gclsSetup.m_strSystemId.empty() ? "csp_01" : gclsSetup.m_strSystemId;
     gclsSipLogger.Init( gclsSetup.m_strServiceLogDir, gclsSetup.m_strMsgLogDir, sysId, true,
@@ -480,6 +482,7 @@ int ServiceMain() {
             // scalar csp.json 재파싱 → gclsSetup 의 단순 값(CallPickupId/Timeout 류) 즉시 반영.
             //   bootstrap 성 필드(UdpThreadCount, DB 연결 등)는 재기동이 필요 — 여기서 반영해도 기존 객체엔 미적용.
             gclsSetup.Read();
+            gclsSetup.WarnDeprecatedKeys();
             gclsCspConfigCache.ReloadFromJsonl();
             gclsLocalNodeMap.Sync();
             gclsRemoteNodeMap.Sync();

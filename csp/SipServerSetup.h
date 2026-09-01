@@ -343,11 +343,19 @@ public:
     //   (configure 가 함께 렌더). 비면 AKA 가입자 REGISTER 는 504, xcap-root 는 유도값.
     //   ※ 단말이 XCAP 문서를 받는 주소의 정본은 CSC(McpttServer.PublicUrl) 다 — CSP 에는
     //     그 주소를 적는 설정이 없다(구 Setup.Xcap.* 폐기).
+    //   m_bDeprecatedXcapSeen: 설정에 폐기된 Setup.Xcap 블록이 남아 있었는지.
+    //     ⚠️ Read() 는 CLog::SetDirectory() **이전에** 호출되므로 Read() 안의 CLog::Print 는
+    //     로그 파일에 남지 않는다. 그래서 여기서는 플래그만 세우고, 로그 초기화 후
+    //     WarnDeprecatedKeys() 가 출력한다.
     std::string m_strCscHost;
     int m_iCscPort;
     std::string m_strCscScheme;
     std::string m_strCscInternalToken;
     int m_iCscTimeoutMs;
+    bool m_bDeprecatedXcapSeen;
+
+    /** 폐기된 설정 키 경고 출력 — 로그 초기화 이후(기동/SIGUSR1 reload)에 호출. */
+    void WarnDeprecatedKeys();
 
     // ================================================================
     // 런타임 설정 jsonl 디렉토리 (agent 관리)

@@ -774,6 +774,12 @@ CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 두 �
 
 조회 실패 시: 마지막 성공값을 유지하고, 미취득 상태면 `https://{Setup.Csc.Host}:4430/` 로 유도하며
 ERROR 를 남긴다. 실패 후 30초 안에는 재시도하지 않는다(SIP 스레드 동기 I/O 스탬피드 방지).
+CSP 가 CSC 보다 먼저 기동하면 첫 조회는 실패하고, 이후 `CSC_RESTART` 수신 시 재취득한다.
+
+폐기된 `Setup.Xcap` 블록이 설정에 남아 있으면 무시하고 `WarnDeprecatedKeys()` 가 ERROR 로
+제거를 안내한다. **이 경고는 로그 초기화 이후에 출력된다** — `CSipServerSetup::Read()` 는
+`CLog::SetDirectory()` 보다 먼저 호출되므로 `Read()` 안에서 찍는 로그는 파일에 남지 않는다
+(설정 파싱 중 관찰한 사실은 플래그로 넘겨 초기화 후 보고해야 한다).
 
 ---
 
