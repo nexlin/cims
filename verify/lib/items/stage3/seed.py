@@ -52,6 +52,7 @@ def seed(ctx: VerifyContext) -> ItemResult:
         cfg_dir, sub["voip_ref"], sub["ptt_ref"],
         tag="verify-stage3-seed",
         note="auto-seeded by cims_verify S3-SEED",
+        with_noxfer=True,   # S3-SCN-XFER 의 REFER 403 게이트용 transfer_allowed=false 변종
     )
     # TLS 접속점 — dev 기본 local_nodes 는 udp-primary 만이라 TLS 전제 시나리오(sec-agree·AKA over
     # TLS)가 5061 refused 로 죽는다(08-26 풀 S3 실측). 라이브 토폴로지대로 TLS 노드를 함께 시드.

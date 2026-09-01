@@ -183,6 +183,11 @@ S2 FAIL → S3~S6 BLOCKED.
   접속서비스 `media_srtp` 를 required/optional/off 로 플립(SIGUSR1)하며 cspsim `-srtp` 군을 돌린다.
   R1 required 협상+CMP 종단+평문 녹취, R2 평문 offer 488 게이트, R3 optional best-effort 수용,
   R4 off 대조군(자기복원), R5 VoLTE relay leg 종단(volte 서비스 플립 + 2자 통화 — leg 별 독립 키)
+- **S3-SCN-XFER / PICKUP / DIALOG**: 관제 소프트폰 보조 서비스 회귀
+  ([volte_supplementary_services.md §8 검증](design/features/volte_supplementary_services.md)) — 같은 org VOIP
+  4명(A,B,C,D)에 `pickup_group` 을 명시 부여(자기복원)해 실컬럼 축으로 호 전달(blind/attended + `transfer_allowed`
+  403)·당겨받기(그룹/지정 + 타 그룹 403·그룹 밖 404)·BLF(dialog NOTIFY + INVITE-Replaces + 그룹 밖 감시 403 +
+  미지 Event 489)를 cspsim 3 단말 시나리오의 RTP delta·최종 응답 마커로 판정. 컬럼 부재 DB 는 경계 검사 SKIP
 - **S3-SCN-CHANNEL-POLICY / REALM-MISMATCH / SEC-AGREE / AKA / IPSEC(-LIVE) / TLS-REBIND / MIXED-TRANSPORT /
   AKA-MIGRATE-IDEMPOTENT / PROVISIONING-HA1**: SIP 접속 보안 회귀(V1~V26) — 항목 정의는
   [sip_access_security.md](design/features/sip_access_security.md) 검증표. IPSEC-LIVE 는 dev 에 IPSEC

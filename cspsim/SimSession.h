@@ -28,6 +28,8 @@ public:
                                     const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage = NULL );
     virtual void EventCallStart( const char * pszCallId, CSipCallRtp * pclsRtp );
     virtual void EventCallEnd( const char * pszCallId, int iSipStatus );
+    /** REFER 최종 응답 (psip RecvReferResponse) — 전달 게이트(transfer_allowed=false → 403) 판정용. */
+    virtual void EventTransferResponse( const char * pszCallId, int iSipStatus );
 
     SimSession* m_pOwner;
 };
@@ -74,6 +76,7 @@ enum ESimScenario {
     E_SCENARIO_TRANSFER_ATTENDED, // A→B + A→C(상담) 후 A 가 attended REFER — 전달 후 B–C (§6.2)
     E_SCENARIO_PICKUP,            // A→B 링잉 중 C 가 당겨받기 코드 다이얼 — A–C (§5)
     E_SCENARIO_DIALOG_PICKUP,     // C 가 B 를 dialog 구독(BLF) → A→B 링잉 NOTIFY → C 가 INVITE-Replaces — A–C (§6.2)
+    E_SCENARIO_SUBSCRIBE_EVENT,   // 등록 후 -event 토큰으로 SUBSCRIBE 1건 — 최종 응답 프로브 (RFC 6665 §8.2.1 489 등)
 };
 
 // ─────────────────────────────────────────────
@@ -160,6 +163,7 @@ public:
     /** attended REFER 발신 — 첫 통화(m_strInviteId)와 상담 통화(m_strConsultId)를 Replaces 로
      *  묶어 두 상대를 연결하고 자신은 빠진다. StartConsultCall 이 확립된 뒤 호출. */
     void AttendedTransfer();
+    std::atomic<int>  m_iReferStatus{0};          // 마지막 REFER 최종 응답 (202 정상 / 403 transfer_allowed=false)
     /** 당겨받기 대상(ringing-hold) 모드 — INVITE 수신 시 180 만 보내고 200 을 보내지 않는다.
      *  다른 단말이 당겨받기 코드로 이 링잉 호를 가져갈 수 있게 한다. Start() 전/후 무관. */
     void SetRingHold(bool b) { m_bRingHold = b; }
@@ -172,6 +176,11 @@ public:
     void StartCallWithReplaces(const std::string& strTarget, const std::string& strReplacesCallId,
                                const std::string& strToTag, const std::string& strFromTag);
     std::atomic<int>  m_iDialogNotifyCount{0};   // 수신 dialog NOTIFY 수
+    std::atomic<int>  m_iDlgSubStatus{0};        // dialog SUBSCRIBE 최종 응답 (200 / 403 그룹 밖 감시 / 489)
+    /** 임의 이벤트 패키지 SUBSCRIBE 프로브 — strEvent 를 Event 헤더에 그대로 싣고 최종 응답을
+     *  m_iEventSubStatus 에 기록한다 (RFC 6665 §8.2.1: 미지원 패키지 → 489 Bad Event 판정용). */
+    void SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor);
+    std::atomic<int>  m_iEventSubStatus{0};
     std::string       m_strWatchedDlgCallId;     // 마지막 dialog NOTIFY 의 활성 dialog Call-ID (Replaces 대상)
     std::string       m_strWatchedDlgState;      // early|confirmed|terminated
     std::string       m_strWatchedDlgLocalTag;   // dialog-info local-tag
@@ -243,6 +252,7 @@ public:
     bool         m_bRingHold{false};    // 당겨받기 대상 — 180 만 보내고 200 보류
     bool         m_bRegistered;
     bool         m_bInCall;
+    std::atomic<int> m_iLastCallEndStatus{0};   // 마지막 EventCallEnd 의 SIP 상태 — 발신 실패(403/404/488) 판정용
     bool         m_bNoRegister{false};  // true 면 REGISTER 자동 송신 skip (외부 SIP peer 모드)
     bool         m_bNoXcap{false};      // true 면 NOTIFY 수신 시 XCAP HTTP GET skip (Phase 3D)
     std::string  m_strCscHost;          // CSC IP — REGISTER 전 IdMS auth 대상 (빈 문자열이면 skip)
@@ -273,6 +283,11 @@ public:
     std::string  m_strDlgSubFromTag;
     std::string  m_strDlgWatchedAor;   // 감시 대상 AoR
 
+    // 이벤트 패키지 프로브 다이얼로그 (SubscribeEvent)
+    std::string  m_strEventSubCallId;
+    int          m_iEventSubSeq{0};
+    std::string  m_strEventSubFromTag;
+
     // conference 구독 다이얼로그 (RFC 4575 — 그룹 참가자 정보. 그룹 AoR 로
     // SUBSCRIBE)
     std::string m_strConfSubGroup;
@@ -286,6 +301,11 @@ public:
     static long long NowMs();
 
 private:
+    // 자원(AoR) 대상 out-of-dialog SUBSCRIBE — Req-URI/To = 자원, Event/Accept 지정, 본문 없음.
+    //   dialog(RFC 4235)·이벤트 프로브 공용. strAccept 가 비면 Accept 를 싣지 않는다.
+    void SendEventSubscribe(const std::string& strEvent, const std::string& strAccept,
+                            const std::string& strResourceAor,
+                            std::string& strCallIdOut, int& iSeqOut, std::string& strFromTagOut);
     // SUBSCRIBE 메시지 생성 후 전송
     void SendSubscribe(const std::string& strPsi,
                        std::string& strCallIdOut,

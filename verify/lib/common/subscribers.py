@@ -226,3 +226,77 @@ def set_transport_policy(db_cfg: dict, table: str, user: str, value) -> bool:
     finally:
         try: conn.close()
         except Exception: pass
+
+
+# ─────────────────────────────────────────────────────────────
+# 관제 보조 서비스 프로브용 — pickup_group / service_ref 읽기/쓰기
+#   (volte_supplementary_services.md §5.1·§6.3 — S3-SCN-PICKUP/DIALOG/XFER 가 플립 후 복원)
+# ─────────────────────────────────────────────────────────────
+def has_column(db_cfg: dict, table: str, column: str) -> bool:
+    """information_schema 로 컬럼 존재 확인 (예: volte_subscriptions.pickup_group 마이그레이션 적용 여부)."""
+    if not db_cfg:
+        return False
+    conn = _db.connect(db_cfg)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s AND COLUMN_NAME=%s", (table, column))
+        row = cur.fetchone()
+        return bool(row and row[0])
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def _get_col(db_cfg: dict, table: str, column: str, user: str):
+    """user 행의 column 값. 행 없음 None, NULL 은 '' (복원 시 NULL 로 되돌리기 위한 구분)."""
+    if not db_cfg or not user:
+        return None
+    conn = _db.connect(db_cfg)
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT {column} FROM {table} WHERE id=%s", (user,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return row[0] if row[0] is not None else ""
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def _set_col(db_cfg: dict, table: str, column: str, user: str, value) -> bool:
+    """user 행의 column 을 value 로. None/'' 이면 NULL."""
+    if not db_cfg or not user:
+        return False
+    conn = _db.connect(db_cfg)
+    try:
+        cur = conn.cursor()
+        if value is None or value == "":
+            cur.execute(f"UPDATE {table} SET {column}=NULL WHERE id=%s", (user,))
+        else:
+            cur.execute(f"UPDATE {table} SET {column}=%s WHERE id=%s", (value, user))
+        return cur.rowcount >= 0
+    finally:
+        try: conn.close()
+        except Exception: pass
+
+
+def get_pickup_group(db_cfg: dict, table: str, user: str):
+    return _get_col(db_cfg, table, "pickup_group", user)
+
+
+def set_pickup_group(db_cfg: dict, table: str, user: str, value) -> bool:
+    return _set_col(db_cfg, table, "pickup_group", user, value)
+
+
+def get_service_ref(db_cfg: dict, table: str, user: str):
+    return _get_col(db_cfg, table, "service_ref", user)
+
+
+def set_service_ref(db_cfg: dict, table: str, user: str, value) -> bool:
+    """service_ref 는 NOT NULL 축 — 빈 값 복원은 호출자가 원값을 그대로 넘긴다."""
+    if not db_cfg or not user or not value:
+        return False
+    return _set_col(db_cfg, table, "service_ref", user, value)

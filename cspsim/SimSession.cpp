@@ -632,20 +632,39 @@ void SimSession::SubscribeReg()
 void SimSession::SubscribeDialog(const std::string& strWatchedAor)
 {
     m_strDlgWatchedAor = strWatchedAor;
+    m_iDlgSubStatus = 0;
+    printf("[%d] SUBSCRIBE dialog watched=%s\n", m_iId, strWatchedAor.c_str());
+    SendEventSubscribe("dialog", "application/dialog-info+xml", strWatchedAor,
+                       m_strDlgSubCallId, m_iDlgSubSeq, m_strDlgSubFromTag);
+}
+
+// 이벤트 패키지 프로브 — Event 토큰 임의 지정. 자원은 보통 자기 AoR (인가 축 무관하게 분류만 본다).
+void SimSession::SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor)
+{
+    m_iEventSubStatus = 0;
+    printf("[%d] SUBSCRIBE Event=%s resource=%s\n", m_iId, strEvent.c_str(), strResourceAor.c_str());
+    SendEventSubscribe(strEvent, "", strResourceAor, m_strEventSubCallId, m_iEventSubSeq, m_strEventSubFromTag);
+}
+
+void SimSession::SendEventSubscribe(const std::string& strEvent, const std::string& strAccept,
+                                    const std::string& strResourceAor,
+                                    std::string& strCallIdOut, int& iSeqOut, std::string& strFromTagOut)
+{
     const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
 
     char szCallId[128];
-    snprintf(szCallId, sizeof(szCallId), "dlgsub_%s_%d_%d", m_strUser.c_str(), m_iId, (int)time(NULL));
-    m_strDlgSubCallId = szCallId;
-    m_iDlgSubSeq = 1;
+    snprintf(szCallId, sizeof(szCallId), "evsub_%s_%s_%d_%d", strEvent.c_str(), m_strUser.c_str(), m_iId,
+             (int)time(NULL));
+    strCallIdOut = szCallId;
+    iSeqOut = 1;
 
     char szTag[64];
     SipMakeTag(szTag, sizeof(szTag));
-    m_strDlgSubFromTag = szTag;
+    strFromTagOut = szTag;
 
     CSipMessage* pMsg = new CSipMessage();
     pMsg->m_strSipMethod = "SUBSCRIBE";
-    pMsg->m_clsReqUri.Set("sip", strWatchedAor.c_str(), m_strDomain.c_str(), m_iServerPort);
+    pMsg->m_clsReqUri.Set("sip", strResourceAor.c_str(), m_strDomain.c_str(), m_iServerPort);
 
     char szBranch[SIP_BRANCH_MAX_SIZE];
     SipMakeBranch(szBranch, sizeof(szBranch));
@@ -653,14 +672,14 @@ void SimSession::SubscribeDialog(const std::string& strWatchedAor)
 
     pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
     pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
-    pMsg->m_clsTo.m_clsUri.Set("sip", strWatchedAor.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsTo.m_clsUri.Set("sip", strResourceAor.c_str(), m_strDomain.c_str(), 0);
 
     pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
-    pMsg->m_clsCSeq.Set(m_iDlgSubSeq, "SUBSCRIBE");
+    pMsg->m_clsCSeq.Set(iSeqOut, "SUBSCRIBE");
     pMsg->m_iMaxForwards = 70;
     pMsg->AddHeader("Expires", "3600");
-    pMsg->AddHeader("Event", "dialog");
-    pMsg->AddHeader("Accept", "application/dialog-info+xml");
+    pMsg->AddHeader("Event", strEvent.c_str());
+    if (!strAccept.empty()) pMsg->AddHeader("Accept", strAccept.c_str());
 
     char szContact[128];
     snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>", m_strUser.c_str(), strLocalIp.c_str(), m_iLocalPort);
@@ -668,7 +687,6 @@ void SimSession::SubscribeDialog(const std::string& strWatchedAor)
 
     pMsg->AddRoute(m_strServerIp.c_str(), RoutePort(), m_eTransport);
 
-    printf("[%d] SUBSCRIBE dialog watched=%s Call-ID=%s\n", m_iId, strWatchedAor.c_str(), szCallId);
     m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
 }
 
@@ -1208,8 +1226,17 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
             printf("[%d] CMS SUBSCRIBED OK\n", m_iId);
         } else if (strCallId == m_strRegSubCallId) {
             printf("[%d] REG-EVENT SUBSCRIBED OK\n", m_iId);
+        } else if (strCallId == m_strDlgSubCallId) {
+            m_iDlgSubStatus = 200;
+            printf("[%d] [BLF] dialog SUBSCRIBED OK watched=%s\n", m_iId, m_strDlgWatchedAor.c_str());
+        } else if (strCallId == m_strEventSubCallId) {
+            m_iEventSubStatus = 200;
+            printf("[%d] EVENT-PROBE SUBSCRIBED OK\n", m_iId);
         }
     } else if (iStatus >= 400) {
+        // dialog 구독·이벤트 프로브의 최종 응답은 검증 판정값 (403 그룹 밖 감시 / 489 Bad Event)
+        if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = iStatus;
+        else if (strCallId == m_strEventSubCallId) m_iEventSubStatus = iStatus;
         printf("[%d] SUBSCRIBE %d error (CallId=%s)\n",
                m_iId, iStatus, strCallId.c_str());
     }
@@ -1641,5 +1668,11 @@ void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     m_pOwner->m_bInCall = false;
     m_pOwner->m_strInviteId.clear();
     m_pOwner->m_stats.iCallEnd++;
+    m_pOwner->m_iLastCallEndStatus = iSipStatus;
     printf("[%d] CALL ENDED CallId=%s status=%d\n", m_pOwner->m_iId, pszCallId, iSipStatus);
+}
+
+void SessionSipClient::EventTransferResponse(const char* pszCallId, int iSipStatus) {
+    m_pOwner->m_iReferStatus = iSipStatus;
+    printf("[%d] [XFER] REFER response status=%d CallId=%s\n", m_pOwner->m_iId, iSipStatus, pszCallId);
 }

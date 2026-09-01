@@ -12,25 +12,43 @@ import uuid
 from .subscribers import VOLTE_DOMAIN, MCPTT_DOMAIN
 
 
+# 호 전달 금지 정책 서비스 — S3-SCN-XFER 가 전달자 service_ref 를 잠시 이 서비스로 돌려
+#   REFER 403 게이트(volte_supplementary_services.md §6.3)를 본다. voip 서비스와 같은 도메인·realm 이라
+#   등록/인증은 동일하고, priority 가 낮아(=값이 커) GetByKind/도메인 매핑의 1순위를 빼앗지 않는다.
+NOXFER_SERVICE_REF = "volte-noxfer"
+
+
 def seed_access_services(cfg_dir: str, voip_ref: str, ptt_ref: str,
                           tag: str = "verify-seed",
-                          note: str = "auto-seeded by verify.lib") -> int:
-    """{cfg_dir}/access_services.jsonl 작성. 작성 건수 반환."""
+                          note: str = "auto-seeded by verify.lib",
+                          with_noxfer: bool = False) -> int:
+    """{cfg_dir}/access_services.jsonl 작성. 작성 건수 반환.
+
+    volte 레코드는 관제 보조 서비스 필드(`pickup_feature_code`="**", `transfer_allowed`=true)를 명시해
+    서비스별 피처코드 경로(전역 CallPickupId 폴백 아님)를 태운다. with_noxfer 면 `transfer_allowed=false`
+    변종(NOXFER_SERVICE_REF)을 하나 더 쓴다.
+    """
     seeded = []
 
-    def add(name: str, kind: str, domain: str) -> None:
+    def add(name: str, kind: str, domain: str, priority: int = 100, **extra) -> None:
         if not name:
             return
-        seeded.append({
+        rec = {
             "id": uuid.uuid4().hex, "name": name, "enabled": True,
             "kind": kind, "domain": domain, "auth_realm": domain,
             "inbound_policy": "any", "allowed_local_node_refs": [],
-            "priority": 100, "tags": [tag], "note": note,
+            "priority": priority, "tags": [tag], "note": note,
             "server_identity_uri": f"sip:cspserver@{domain}",
-        })
+        }
+        if kind == "volte":
+            rec.update({"pickup_feature_code": "**", "transfer_allowed": True})
+        rec.update(extra)
+        seeded.append(rec)
 
     add(voip_ref, "volte", VOLTE_DOMAIN)
     add(ptt_ref,  "ptt",   MCPTT_DOMAIN)
+    if with_noxfer and voip_ref:
+        add(NOXFER_SERVICE_REF, "volte", VOLTE_DOMAIN, priority=200, transfer_allowed=False)
     if not seeded:
         return 0
     os.makedirs(cfg_dir, exist_ok=True)

@@ -143,7 +143,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 **design/features/** (기능별 상세)
 - [ptt_flows.md](docs/design/features/ptt_flows.md) — PTT(MCPTT) 케이스·메시지 flow
 - [volte_flows.md](docs/design/features/volte_flows.md) — VoLTE 호 flow
-- [volte_supplementary_services.md](docs/design/features/volte_supplementary_services.md) — 관제 소프트폰 보조 서비스 (USIM 없는 Digest+TLS 가입자 규약(내선=가입 id=imsi), 당겨받기 `pickup_group` 축·서비스별 피처코드·지정/그룹 픽업, 호 전달 REFER(blind/attended) — 미디어 재고정은 전부 CMP `RELAY_MODIFY`·SRTP 유지, 표준형=수신 INVITE-Replaces(RFC 3891)·dialog 이벤트 패키지(RFC 4235 BLF)·489. 설정=접속서비스 `pickup_feature_code`/`transfer_allowed` + 가입자 `pickup_group`. 검증=S3-SCN-XFER/PICKUP/DIALOG. P0~P3 구현 반영 — 보조 서비스 로직은 CTasModule 소유(IModule 훅), relay SDES leg 헬퍼는 MediaSdes 공용)
+- [volte_supplementary_services.md](docs/design/features/volte_supplementary_services.md) — 관제 소프트폰 보조 서비스 (USIM 없는 Digest+TLS 가입자 규약(내선=가입 id=imsi), 당겨받기 `pickup_group` 축·서비스별 피처코드·지정/그룹 픽업, 호 전달 REFER(blind/attended) — 미디어 재고정은 전부 CMP `RELAY_MODIFY`·SRTP 유지, 표준형=수신 INVITE-Replaces(RFC 3891)·dialog 이벤트 패키지(RFC 4235 BLF)·489. 설정=접속서비스 `pickup_feature_code`/`transfer_allowed` + 가입자 `pickup_group`. 검증=S3-SCN-XFER/PICKUP/DIALOG(`pickup_group` 실컬럼 축 + 403/404/489 게이트 자동 판정). P0~P3 구현 반영 — 보조 서비스 로직은 CTasModule 소유(IModule 훅), relay SDES leg 헬퍼는 MediaSdes 공용)
 - [mcptt_authorization.md](docs/design/features/mcptt_authorization.md) — MCPTT 권한/RBAC
 - [mcptt_emergency_modes.md](docs/design/features/mcptt_emergency_modes.md) — 긴급/임박/알림/ad-hoc 모드
 - [mcptt_standard_conformance.md](docs/design/features/mcptt_standard_conformance.md) — MCPTT 서버(CSC/CSP/CMP) 3GPP TS 규격 정합 보완 사항(단말 interop 전제) + §0-R 미반영 로드맵

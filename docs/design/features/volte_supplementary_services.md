@@ -4,8 +4,9 @@
 > 당겨받기(call pickup)·호 전달(call transfer)을 쓰는 시나리오의 CSP 보완 설계와 설정 규약.
 > **P0(미디어 정합 — RELAY_MODIFY·SRTP)·P1(관제 축 — 픽업 그룹·서비스별 피처코드·전달 권한)·
 > P2(표준형 — 수신 INVITE-Replaces·RFC 4235 dialog 이벤트 패키지·489)·P3(구조 — `CTasModule`
-> 소유 이관)은 구현 반영, cspsim 시나리오 4종·S3 검증(`S3-SCN-XFER`/`PICKUP`/`DIALOG`)으로
-> 실측 PASS.**
+> 소유 이관)은 구현 반영, cspsim 시나리오 5종·S3 검증(`S3-SCN-XFER`/`PICKUP`/`DIALOG` — happy-path
+> 미디어 재고정 + 그룹 경계 403/404·`transfer_allowed` 403·미지 Event 489 게이트)으로 `pickup_group`
+> 실컬럼 축에서 실측 PASS.**
 >
 > 관련: [sip_access_security.md](sip_access_security.md)(인증), [sip_service_model.md](sip_service_model.md)
 > (접속서비스), [media_security.md](media_security.md)(SRTP), [volte_flows.md](volte_flows.md)(기본 호 flow),
@@ -46,10 +47,11 @@ RFC 4235(dialog event) + INVITE-with-Replaces 다. 본 설계는 1차로 **피�
   Event 를 489 Bad Event 로 교정했다(구 `else→gms` 오분류 제거) (§6.2, P2).
 - **G6(O(n) 스캔)** — `UserMap` 에 픽업 그룹 인덱스를 두어 `SelectGroup` 전수 스캔을 제거했다
   (`SelectToRing` 은 그룹원 한정 조회라 유지, P1).
-- **G7(실검증 공백)** — cspsim 에 `transfer`/`transfer_attended`/`pickup`/`dialog_pickup` 시나리오
-  (3 단말 A,B,C)와 `S3-SCN-XFER`/`S3-SCN-PICKUP`/`S3-SCN-DIALOG` 검증 항목을 추가했다. 판정
-  정본 = 재고정 후 각 단말의 누적 수신 RTP delta(재고정된 relay 로 미디어가 흐르고 빠진 단말은
-  무흐름) — §8 검증 행.
+- **G7(실검증 공백)** — cspsim 에 `transfer`/`transfer_attended`/`pickup`/`dialog_pickup`/
+  `subscribe_event` 시나리오와 `S3-SCN-XFER`/`S3-SCN-PICKUP`/`S3-SCN-DIALOG` 검증 항목을 추가했다.
+  판정 정본 = 재고정 후 각 단말의 누적 수신 RTP delta(재고정된 relay 로 미디어가 흐르고 빠진
+  단말은 무흐름) + 요청별 최종 응답 마커(`pickup_status`/`dialog_sub_status`/`refer_status`) —
+  §8 검증 행.
 
 INVITE 경로에 DB 질의를 넣지 않는다 — 모든 신규 판정(내선 해석·픽업 그룹·전달 권한)은
 인메모리 맵(`gclsCspUserMap`/`CspServiceMap`)에서 답한다 (`ModuleDispatcher.cpp` 의
@@ -239,21 +241,38 @@ dialog-info NOTIFY 빌더·발신(`SendDialogEventNotify`), `CTasModule` 의 `On
 INVITE-Replaces 를 조립한다. (c) 미지 Event → 489 Bad Event(구 `else→gms` 오분류 제거). BLF
 클릭 픽업 = dialog 구독으로 링잉 leg 를 알고(G5) 그 leg 를 Replaces 로 가져온다(G4).
 
-검증(구현 반영, G7): cspsim VoLTE 시나리오 4종 — `transfer`(A→B 후 A blind REFER→C),
+검증(구현 반영, G7): cspsim VoLTE 시나리오 — `transfer`(A→B 후 A blind REFER→C),
 `transfer_attended`(A→B + A→C 상담 후 attended REFER), `pickup`(A→B 링잉 중 C 가 `-pickup_code`
-다이얼), `dialog_pickup`(C 가 B 를 dialog 구독 → 링잉 NOTIFY → C INVITE-Replaces) — 는 3 단말
-(A,B,C)을 세우고 시나리오 말미에 각 단말의 누적 수신 RTP delta 를 출력한다
-(`SimSession::RecvPackets` — RtpThread 수신 카운터). 착신/재-INVITE leg 는 UAS 경로라 `m_bInCall`
-플래그가 신뢰되지 않으므로 **RTP delta 가 판정 정본**이다: 전달 후 살아남는 두 단말(B·C)로
-미디어가 흐르고 빠진 단말(전달자 A / 픽업 대상 B)은 무흐름이면 재고정 성공. S3 항목
-`S3-SCN-XFER`(blind+attended)·`S3-SCN-PICKUP`(그룹 픽업)·`S3-SCN-DIALOG`(dialog NOTIFY +
-INVITE-Replaces BLF)가 이를 자동 판정한다 — 같은 org VOIP 3명을 DB 에서 골라(픽업 그룹 = org
-폴백) 실행한다.
+[+`-pickup_target <내선>`=지정 픽업] 다이얼), `dialog_pickup`(C 가 B 를 dialog 구독 → 링잉 NOTIFY →
+C INVITE-Replaces), `subscribe_event`(등록 후 `-event <token>` 으로 자기 AoR SUBSCRIBE 1건) — 는
+3 단말(A,B,C)을 세우고 시나리오 말미에 각 단말의 누적 수신 RTP delta 와 요청별 최종 응답 마커
+(`pickup_status=`·`dialog_sub_status=`·`refer_status=`·`SUBSCRIBE-EVENT result: … status=`)를
+출력한다(`SimSession::RecvPackets` — RtpThread 수신 카운터, `EventCallEnd`/`EventTransferResponse`/
+SUBSCRIBE 응답 캡처). 착신/재-INVITE leg 는 UAS 경로라 `m_bInCall` 플래그가 신뢰되지 않으므로
+**RTP delta 가 미디어 판정 정본**이다: 전달 후 살아남는 두 단말(B·C)로 미디어가 흐르고 빠진
+단말(전달자 A / 픽업 대상 B)은 무흐름이면 재고정 성공.
+
+S3 항목은 같은 org VOIP 가입자 4명(A,B,C,D)을 DB 에서 고르고, `pickup_group` 컬럼이 있으면
+A,B,C 에 같은 그룹·D 에 다른 그룹을 명시 부여(DB UPDATE + CSP `USER_CHANGED` → `ReloadFromDb`)해
+**실컬럼 축**으로 판정한 뒤 원값을 복원한다(자기복원). 컬럼이 없으면(마이그레이션 미적용) 전원
+org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로 보고한다.
+
+| 항목 | 검사 | 판정 |
+|---|---|---|
+| `S3-SCN-XFER` | X1 blind 전달 / X2 attended 전달 | B·C 미디어, A 드롭 (X1 은 `refer_status` 2xx) |
+| | X3 `transfer_allowed=false` | A 의 `service_ref` 를 S3-SEED 시드 `volte-noxfer`(같은 도메인, `transfer_allowed=false`)로 플립 → REFER 403, 원 통화 A·B 미디어 유지·C 무흐름 |
+| `S3-SCN-PICKUP` | P1 그룹 픽업 `**` / P2 지정 픽업 `**<B>` | A·C 미디어, B 무흐름, `pickup_status=200` |
+| | P3 타 그룹 지정 픽업 / P4 그룹 밖 그룹 픽업 | D(다른 `pickup_group`, 같은 org) → 403 / 404, 재고정 없음 (컬럼 축 한정) |
+| `S3-SCN-DIALOG` | D1 dialog NOTIFY / D2 Replaces 재고정 | C 구독 200 + NOTIFY ≥1, A·C 미디어·B 무흐름 |
+| | D3 그룹 밖 감시 / D4 미지 Event | D 의 B dialog 구독 → 403·NOTIFY 0 (컬럼 축 한정) / `Event: cims-verify-bogus` → 489, 대조 `Event: dialog` 자기감시 → 200 |
+
+피처코드는 S3-SEED 가 volte 접속서비스에 `pickup_feature_code="**"` 를 시드해 **서비스 필드
+경로**(전역 `CallPickupId` 폴백 아님)를 태운다.
 
 ```bash
-./cims-verify run --stage 3 --item S3-SCN-XFER     # blind/attended 전달 — B·C 미디어·A 드롭
-./cims-verify run --stage 3 --item S3-SCN-PICKUP   # 그룹 픽업 — A·C 미디어·B(응답보류) 드롭
-./cims-verify run --stage 3 --item S3-SCN-DIALOG   # BLF: dialog NOTIFY 수신 + Replaces 재고정
+./cims-verify run --items S3-SEED,S3-SCN-XFER      # X1/X2 전달 + X3 transfer_allowed 403
+./cims-verify run --items S3-SEED,S3-SCN-PICKUP    # P1/P2 그룹·지정 픽업 + P3/P4 그룹 경계 403/404
+./cims-verify run --items S3-SEED,S3-SCN-DIALOG    # D1/D2 BLF + D3 그룹 밖 감시 403 + D4 미지 Event 489
 ```
 
 ---
@@ -354,15 +373,16 @@ CSP 캐시에 반영된다(신규 통지 경로 없음). 표시 이름은 `users
 ### 10.6 검증 진입점
 
 ```bash
-./cims-verify run --stage 3 --item S3-SCN-XFER    # blind/attended 전달 — B·C 미디어·A 드롭
-./cims-verify run --stage 3 --item S3-SCN-PICKUP  # 그룹 픽업 — A·C 미디어·B 드롭
-./cims-verify run --stage 3 --item S3-SCN-DIALOG  # BLF: dialog NOTIFY + INVITE-Replaces 재고정
+./cims-verify run --items S3-SEED,S3-SCN-XFER      # X1/X2 blind·attended 전달 + X3 transfer_allowed=false → REFER 403
+./cims-verify run --items S3-SEED,S3-SCN-PICKUP    # P1/P2 그룹·지정 픽업 + P3/P4 타 그룹 403 / 그룹 밖 404
+./cims-verify run --items S3-SEED,S3-SCN-DIALOG    # D1/D2 dialog NOTIFY·Replaces + D3 그룹 밖 감시 403 + D4 미지 Event 489
 ```
 
-세 항목은 같은 org VOIP 가입자 3명을 DB 에서 골라 cspsim 3 단말 시나리오를 돌리고, 각 단말의
-누적 수신 RTP delta 로 미디어 재고정을 판정한다(§8 검증). 지정 픽업 그룹 경계(403)·`transfer_allowed`
-게이트(403)·미지 Event 489 의 자동 검증은 후속(정책 서비스·bad-event 프로브 시드 전제) — 현재는
-같은 그룹 happy-path 와 dialog-event/Replaces 핵심 경로가 자동 판정된다.
+세 항목은 같은 org VOIP 가입자 4명을 DB 에서 골라 cspsim 3 단말 시나리오를 돌리고, 각 단말의
+누적 수신 RTP delta 와 요청별 최종 응답 마커로 판정한다(§8 검증 표). 그룹 경계 검사(P3/P4/D3)는
+`pickup_group` 컬럼에 값을 명시 부여해 실컬럼 축으로 보며(자기복원), 컬럼이 없는 DB 에서는 SKIP
+으로 보고한다. `S3-SEED` 가 선행되어야 한다 — volte 서비스의 `pickup_feature_code` 와 X3 용
+`volte-noxfer` 서비스를 시드한다.
 
 ---
 
