@@ -195,7 +195,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 0,
       background: 'var(--surface)',
-      border: '1px solid var(--border, #e5e7eb)',
+      border: '1px solid var(--border)',
       borderRadius: 8, padding: '24px 16px 16px', marginBottom: 12,
     }}>
       {stages.map((st, i) => {
@@ -302,7 +302,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                 flex: '0 0 24px', height: 3,
                 background: stageStatus(stages[i].items) === 'PASS'
                   ? statusColor('PASS')
-                  : 'var(--border, #e5e7eb)',
+                  : 'var(--border)',
                 margin: '0 -1px',
                 borderRadius: 2,
               }} />
@@ -343,7 +343,7 @@ function GlobalHeader({
     <div style={{
       display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
       background: 'var(--surface)',
-      border: '1px solid var(--border, #e5e7eb)',
+      border: '1px solid var(--border)',
       borderRadius: 8, padding: 12, marginBottom: 12,
     }}>
       {/* 시작/중단 toggle 버튼 — 크기 고정 */}
@@ -424,7 +424,7 @@ function GlobalHeader({
         style={{
           padding: '6px 12px', height: 36,
           background: 'var(--surface)',
-          border: '1px solid var(--border, #d1d5db)',
+          border: '1px solid var(--border)',
           borderRadius: 6, fontSize: 12, fontWeight: 600,
           cursor: 'pointer',
         }}
@@ -477,7 +477,7 @@ function StageRow({
         ? '2px solid #3b82f6'
         : isBlocked
           ? '1px dashed #a16207'
-          : '1px solid var(--border, #e5e7eb)',
+          : '1px solid var(--border)',
       borderRadius: 8, marginBottom: 8,
       // BLOCKED 면 옅은 amber tint 배경 (차단된 stage 가 한눈에)
       background: isBlocked ? 'var(--warn-soft)' : 'var(--surface)',
@@ -489,7 +489,7 @@ function StageRow({
         style={{
           display: 'flex', alignItems: 'center', gap: 12,
           padding: '12px 16px', cursor: 'pointer',
-          borderBottom: expanded ? '1px solid var(--border, #e5e7eb)' : 'none',
+          borderBottom: expanded ? '1px solid var(--border)' : 'none',
         }}
         onClick={onToggle}
       >
@@ -534,8 +534,8 @@ function StageRow({
             minWidth: 110, height: 28,
             padding: '0 12px', fontSize: 12, fontWeight: 600,
             background: isThisRunning ? 'var(--danger)' : 'var(--surface)',
-            color: isThisRunning ? '#fff' : 'var(--text, #111827)',
-            border: `1px solid ${isThisRunning ? '#dc2626' : 'var(--border, #d1d5db)'}`,
+            color: isThisRunning ? '#fff' : 'var(--text)',
+            border: `1px solid ${isThisRunning ? '#dc2626' : 'var(--border)'}`,
             borderRadius: 4,
             cursor: (anyRunning && !isThisRunning) ? 'not-allowed' : 'pointer',
             opacity: (anyRunning && !isThisRunning) ? 0.5 : 1,
@@ -585,7 +585,7 @@ function StageRow({
                 return (
                   <Fragment key={it.id}>
                     <tr style={{
-                      borderTop: '1px solid var(--border, #f3f4f6)',
+                      borderTop: '1px solid var(--border)',
                       background: itBlocked ? 'var(--warn-soft)' : undefined,
                       opacity: itBlocked ? 0.7 : 1,
                     }}
@@ -1111,7 +1111,7 @@ export default function VerificationV2Page() {
       <div className="v2-no-print" style={{
         marginTop: 16, padding: 12,
         background: 'var(--bg-soft)',
-        border: '1px dashed var(--border, #d1d5db)',
+        border: '1px dashed var(--border)',
         borderRadius: 6,
         fontSize: 11, color: 'var(--text-muted)',
       }}>

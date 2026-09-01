@@ -158,7 +158,7 @@ export default function HealthCheckModal({ agents, onClose }: { agents: Agent[];
     <Modal title={title} onClose={onClose} width={agents.length > 1 ? 760 : 720}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         {agents.map((a, i) => (
-          <div key={a.id} style={i > 0 ? { borderTop: '1px solid var(--border, #e0e0e0)', paddingTop: 16 } : undefined}>
+          <div key={a.id} style={i > 0 ? { borderTop: '1px solid var(--border)', paddingTop: 16 } : undefined}>
             <HealthCheckPanel agent={a} />
           </div>
         ))}

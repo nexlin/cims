@@ -854,7 +854,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
               <div key={`e${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', fontSize: 12, borderTop: border, borderLeft: '4px solid transparent' }}>
                 <span className="ts" style={{ minWidth: 70, color: 'var(--text-muted)' }}>{fmtShortTime(ev.ts)}</span>
                 <span style={{ minWidth: 30, textAlign: 'center', color: disp.color, fontSize: 14 }}>{disp.icon}</span>
-                <span style={{ color: 'var(--text, #1a1d2e)' }}>
+                <span style={{ color: 'var(--text)' }}>
                   {ev.member && <><Person id={ev.member} names={names} style={{ fontWeight: 500 }} />{' '}</>}
                   {disp.label}
                   {ev.type === 'member_join' && ev.role === 'initiator' &&

@@ -405,7 +405,7 @@ export default function ServicesPage() {
             const running = s?.running ?? false
             const disabled = busy[card.key]
             return (
-              <div key={card.key} className="card" style={{
+              <div key={card.key} style={{
                 border: '1px solid var(--border)', borderRadius: 6,
                 background: 'var(--surface)', padding: 12,
                 display: 'flex', flexDirection: 'column', gap: 10,

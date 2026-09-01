@@ -194,7 +194,7 @@ export function ActiveAlarmList() {
                     <td>{elapsedSince(a.ts)}</td>
                     <td>
                       {a.acked
-                        ? <span style={{ fontSize: 11, color: 'var(--success, #16a34a)' }}>✓ {a.ackUser || '승인'}</span>
+                        ? <span style={{ fontSize: 11, color: 'var(--success)' }}>✓ {a.ackUser || '승인'}</span>
                         : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>미승인</span>}
                     </td>
                   </tr>,

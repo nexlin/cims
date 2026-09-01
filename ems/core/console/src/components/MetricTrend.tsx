@@ -33,7 +33,7 @@ export default function MetricTrend({ label, values, unit = '%', color, warn, wi
     )
   }
   return (
-    <div style={{ flex: 1, background: 'var(--surface, #fff)', border: '1px solid var(--border, #e5e5e5)',
+    <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
                   borderRadius: 4, padding: '8px 10px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>

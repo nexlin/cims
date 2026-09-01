@@ -81,7 +81,7 @@ export default function AbnormalSessionsPage() {
         공개 SIP 포트(VIP)로 유입되는 <b>인터넷발 스캐닝·사기 호 시도</b>입니다. CSP 는 인증(<b>401</b>)으로 정상 거부하므로
         실제 통화로 이어지지 않지만, 로그를 오염시키고 자원을 소모합니다. 신호: <b>외부(공인) 발신 IP</b> · 알려진
         <b> 스캐너 UA</b>(pplsip 등) · <b>사기성 번호</b> · <b>인증 반복실패</b>. 다발 IP 는 방화벽 차단을 권장합니다.
-        {critical > 0 && <span style={{ color: 'var(--danger, #dc2626)', fontWeight: 700 }}> ⚠ 외부에서 인증 성공(2xx)한 세션이 있습니다 — 즉시 점검 필요.</span>}
+        {critical > 0 && <span style={{ color: 'var(--danger)', fontWeight: 700 }}> ⚠ 외부에서 인증 성공(2xx)한 세션이 있습니다 — 즉시 점검 필요.</span>}
       </div>
 
       {loading ? <div className="empty">로딩 중...</div> : data && (
@@ -101,7 +101,7 @@ export default function AbnormalSessionsPage() {
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {topIps.map(([ip, n]) => (
                   <span key={ip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 14, background: 'rgba(220,38,38,0.08)', fontSize: 12, fontFamily: 'monospace' }}>
-                    {ip}<b style={{ color: 'var(--danger, #dc2626)' }}>{n}</b>
+                    {ip}<b style={{ color: 'var(--danger)' }}>{n}</b>
                   </span>
                 ))}
               </div>

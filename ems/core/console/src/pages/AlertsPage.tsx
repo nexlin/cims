@@ -279,7 +279,7 @@ export function AlarmsSection() {
                           <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>💬{r.comments!.length}</span>
                         )}
                         {r.ack_state === 'acknowledged' && (
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--success, #16a34a)' }}>✓</span>
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--success)' }}>✓</span>
                         )}
                       </td>
                       <td className="ts">

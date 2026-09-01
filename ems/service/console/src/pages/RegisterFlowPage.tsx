@@ -41,7 +41,7 @@ export default function RegisterFlowPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* ── 툴바 ── */}
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text, #1a1d2e)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' }}>
           메세지 이력
         </span>
 

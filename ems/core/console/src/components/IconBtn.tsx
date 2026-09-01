@@ -16,7 +16,7 @@ export default function IconBtn({ title, onClick, tone, disabled, children }: {
     <button title={title} aria-label={title} onClick={onClick} disabled={disabled}
       className={`btn btn--sm ${cls}${tone === 'danger' ? ' icon-btn--danger' : ''}`}
       style={{ padding: '3px 6px', display: 'inline-flex', alignItems: 'center', lineHeight: 0,
-               ...(tone === 'danger' ? { color: 'var(--danger, #c0392b)' } : {}) }}>
+               ...(tone === 'danger' ? { color: 'var(--danger)' } : {}) }}>
       {children}
     </button>
   )

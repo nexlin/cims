@@ -332,7 +332,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             marginTop: 8, padding: '8px 12px', borderRadius: 6,
-            background: 'rgba(220,38,38,0.08)', color: 'var(--danger, #dc2626)', fontSize: 13,
+            background: 'rgba(220,38,38,0.08)', color: 'var(--danger)', fontSize: 13,
           }}>
             <span>⚠️ 재생 준비 실패: {prepError}</span>
             <button className="btn btn--sm" onClick={() => { if (current) loadSegment(current, true) }}>다시 시도</button>
@@ -398,7 +398,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   style={{
                     cursor: 'pointer',
                     background: isActive ? 'var(--primary-soft)' : undefined,
-                    boxShadow: isActive ? 'inset 3px 0 0 var(--primary, #4f6ef7)' : undefined,
+                    boxShadow: isActive ? 'inset 3px 0 0 var(--primary)' : undefined,
                     fontWeight: isActive ? 600 : undefined,
                     opacity: isChecked ? 1 : 0.45,
                   }}

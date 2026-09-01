@@ -1,7 +1,7 @@
 // CIMS 대시보드 위젯 공용 조각 — Sparkline / StatusDot / 시각 포맷.
 
 export function StatusDot({ status }: { status: string }) {
-  const color = status === 'up' ? 'var(--success, #22c55e)' : 'var(--danger)'
+  const color = status === 'up' ? 'var(--success)' : 'var(--danger)'
   return <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: color, marginRight: 6 }} />
 }
 

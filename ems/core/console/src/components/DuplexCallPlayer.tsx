@@ -114,7 +114,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 8, padding: '13px 14px',
-      background: 'var(--bg-soft, #f8fafc)', display: 'flex', flexDirection: 'column', gap: 11,
+      background: 'var(--bg-soft)', display: 'flex', flexDirection: 'column', gap: 11,
     }}>
       {/* ── transport ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -144,7 +144,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
           <div style={{
             position: 'absolute', left: `${ratio * 100}%`, top: '50%', width: 12, height: 12,
             margin: '-6px 0 0 -6px', borderRadius: '50%', background: 'var(--primary)',
-            boxShadow: '0 0 0 3px var(--surface, #fff)',
+            boxShadow: '0 0 0 3px var(--surface)',
           }} />
         </div>
         <span className="ts" style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 38 }}>

@@ -194,7 +194,7 @@ export default function VolteHistoryPage() {
   const totalPages = Math.max(1, Math.ceil(total / ps))
   const dayTotal = useMemo(() => Object.values(hours).reduce((a, b) => a + b, 0), [hours])
   const selNode = orgs.find(o => o.code === selOrg)
-  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface, #fff)', zIndex: 1 }
+  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }
 
   return (
     <div className="panel" style={{ padding: 10 }}>
@@ -335,7 +335,7 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
 }) {
   return (
     <>
-      <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--hover, #eef5ff)' : 'transparent' }}>
+      <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--hover)' : 'transparent' }}>
         <td style={{ ...tdS, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
         <td style={tdS}><span className={`badge ${l.call_type === 'volte_video' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</span></td>
         <td style={tdS}>
@@ -414,7 +414,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
         {/* 좌 */}
         <div style={{ flex: '1 1 460px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {/* 시퀀스 다이어그램 */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontWeight: 600, fontSize: 12 }}>시퀀스 다이어그램</span>
               {/* 노드별 표시 토글(뱃지) — CSP/CMP(/CSC). 끄면 해당 노드 메시지 숨김. */}
@@ -442,7 +442,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
             </div>
           </div>
           {/* 메시지 이력 */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
             <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
               메시지 이력 {msgs.length > 0 && <span className="ts" style={{ color: 'var(--text-muted)' }}>{msgs.length}건</span>}
             </div>
@@ -468,7 +468,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                           const sel = selIdx === i
                           return (
                             <tr key={i} onClick={() => select(i)}
-                              style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--hover, #eef5ff)' : undefined }}>
+                              style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--hover)' : undefined }}>
                               <td style={{ ...dS, textAlign: 'right', color: 'var(--text-muted)' }}>{i + 1}</td>
                               <td style={dS} className="ts">{fmtClock(m.ts)}</td>
                               <td style={dS}>{actorLbl(m.from)}<span style={{ color: 'var(--text-muted)' }}>→</span>{actorLbl(m.to)}</td>
@@ -491,7 +491,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
         </div>
 
         {/* 우: 메시지 상세 */}
-        <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface, #fff)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
             메시지 상세 {selIdx != null && msgs[selIdx] && <span className="ts" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
           </div>

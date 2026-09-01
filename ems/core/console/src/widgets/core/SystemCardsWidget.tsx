@@ -75,7 +75,7 @@ function SystemCardsWidget() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         {systems.map(s => {
           const healthy = s.total > 0 && s.online === s.total
-          const dot = healthy ? 'var(--success, #22c55e)' : s.online > 0 ? '#f59e0b' : 'var(--danger)'
+          const dot = healthy ? 'var(--success)' : s.online > 0 ? '#f59e0b' : 'var(--danger)'
           return (
             <div key={s.key} onClick={onOpen}
                  style={{ background: 'var(--surface)', border: '1px solid var(--border)',
@@ -88,7 +88,7 @@ function SystemCardsWidget() {
                                background: MODE_COLOR[s.mode], padding: '1px 6px', borderRadius: 3 }}>{s.mode}</span>
               </div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                온라인 <b style={{ color: healthy ? 'var(--success, #22c55e)' : 'inherit' }}>{s.online}</b>/{s.total}
+                온라인 <b style={{ color: healthy ? 'var(--success)' : 'inherit' }}>{s.online}</b>/{s.total}
               </div>
             </div>
           )

@@ -645,7 +645,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                  style={{
                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
                    borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                   background: isSelected ? 'var(--primary-soft, #eef5ff)' : 'var(--bg-soft)',
+                   background: isSelected ? 'var(--primary-soft)' : 'var(--bg-soft)',
                  }}>
               <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
                     style={{ width: 14, color: 'var(--text-muted)' }}>{isOpen ? '▼' : '▶'}</span>
@@ -692,7 +692,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                style={{
                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
                  borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                 background: isSelected ? 'var(--primary-soft, #eef5ff)' : 'var(--bg-soft)',
+                 background: isSelected ? 'var(--primary-soft)' : 'var(--bg-soft)',
                }}>
             <span style={{ width: 14 }} />  {/* expand 자리 비움 — group 정렬 맞춤 */}
             <span style={{
@@ -729,7 +729,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
            display: 'flex', alignItems: 'center', gap: 6,
            padding: '6px 10px', paddingLeft: indent ? 32 : 10,
            borderBottom: '1px solid var(--border)', cursor: 'pointer',
-           background: active ? 'var(--primary-soft, #eef5ff)' : undefined,
+           background: active ? 'var(--primary-soft)' : undefined,
          }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
       <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>
