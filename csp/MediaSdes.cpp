@@ -1,6 +1,7 @@
 #include "MediaSdes.h"
 
 #include <openssl/rand.h>
+#include <strings.h>
 
 #include <cstring>
 
@@ -115,6 +116,91 @@ namespace MediaSdes {
         if ( !strInline.empty() ) {
             std::string strValue = ( strTag.empty() ? "1" : strTag ) + " " + strSuite + " inline:" + strInline;
             pclsMedia->AddAttribute( "crypto", strValue.c_str() );
+        }
+    }
+
+    // ── VoLTE relay leg 종단 — leg 별 SDES 평가·재작성 (media_security.md §5.2) ──
+
+    int EvalRelayOfferSdes( const std::string &strSrtpPolicy, const SDP_MEDIA_LIST &clsList, const char *pszMedia,
+                            RelaySdesMedia &clsOut ) {
+        std::string strTag, strSuite, strInline, strProto;
+        int iRet = ReadOfferCrypto( clsList, pszMedia, strTag, strSuite, strInline, strProto );
+        clsOut.strProto = strProto;        // answer protocol echo 근거 (평문 포함)
+        if ( strProto.empty() ) return 0;  // 미디어 부재/비활성
+        if ( iRet < 0 ) return -1;         // SAVP 인데 유효 crypto 없음 — 폴백 불가
+        if ( strSrtpPolicy == "off" ) {
+            // off = a=crypto 무시(평문). 단 SAVP 단독 offer 는 평문 answer 가 불가(RFC 4568) → 488.
+            return iRet == 1 && strncasecmp( strProto.c_str(), "RTP/SAVP", 8 ) == 0 ? -1 : 0;
+        }
+        if ( iRet == 0 ) {
+            // crypto 없는 offer: required 는 488(SAVP 단일 정책), optional 은 평문 leg 허용.
+            return strSrtpPolicy == "required" ? -1 : 0;
+        }
+        clsOut.bSrtp = true;
+        clsOut.strTag = strTag;
+        clsOut.strSuite = strSuite;
+        clsOut.strUeKey = strInline;
+        clsOut.strSrvKey = GenerateInlineKeyB64();
+        return clsOut.strSrvKey.empty() ? -1 : 1;
+    }
+
+    bool ApplyRelayLegOffer( SDP_MEDIA_LIST &clsList, const char *pszMedia, bool bSrtp, RelaySdesMedia &clsOut ) {
+        std::string strTag, strSuite, strInline, strProto;
+        ReadOfferCrypto( clsList, pszMedia, strTag, strSuite, strInline, strProto );  // strip 후 — active 판정용
+        if ( strProto.empty() ) return true;
+        if ( !bSrtp ) {
+            ApplyCrypto( clsList, pszMedia, "RTP/AVP", "", "", "" );
+            return true;
+        }
+        clsOut.bSrtp = true;
+        clsOut.strTag = "1";
+        clsOut.strSuite = "AES_CM_128_HMAC_SHA1_80";  // 기본 제안 (§2)
+        clsOut.strProto = "RTP/SAVP";
+        clsOut.strSrvKey = GenerateInlineKeyB64();
+        if ( clsOut.strSrvKey.empty() ) return false;
+        ApplyCrypto( clsList, pszMedia, "RTP/SAVP", clsOut.strTag, clsOut.strSuite, clsOut.strSrvKey );
+        return true;
+    }
+
+    bool EvalRelayAnswerSdes( const SDP_MEDIA_LIST &clsList, const char *pszMedia, RelaySdesMedia &clsLeg,
+                              CmpMediaCrypto &clsOut ) {
+        if ( !clsLeg.bSrtp ) return true;
+        std::string strTag, strSuite, strInline, strProto;
+        int iRet = ReadOfferCrypto( clsList, pszMedia, strTag, strSuite, strInline, strProto );
+        if ( strProto.empty() ) {  // 미디어 거절 — 평문(비활성)화
+            clsLeg = RelaySdesMedia();
+            return true;
+        }
+        if ( iRet != 1 || strSuite != clsLeg.strSuite ) return false;
+        clsLeg.strUeKey = strInline;
+        return BuildCmpKeys( clsLeg.strSuite, clsLeg.strUeKey, clsLeg.strSrvKey, clsOut );
+    }
+
+    void ReadReinviteSdes( const SDP_MEDIA_LIST &clsList, const char *pszMedia, int iPeerIdx, RelaySdesMedia &clsLeg,
+                           CmpMediaCrypto &clsOut ) {
+        if ( !clsLeg.bSrtp ) return;
+        std::string strTag, strSuite, strInline, strProto;
+        int iRet = ReadOfferCrypto( clsList, pszMedia, strTag, strSuite, strInline, strProto );
+        if ( iRet != 1 || strSuite != clsLeg.strSuite ) {
+            CLog::Print( LOG_ERROR, "MediaSdes: peer%d %s SRTP leg re-offer without matching crypto — 기존 키 유지",
+                         iPeerIdx, pszMedia );
+            return;
+        }
+        if ( strInline != clsLeg.strUeKey ) {
+            clsLeg.strUeKey = strInline;
+            CLog::Print( LOG_INFO, "MediaSdes: peer%d %s SRTP UE rekey", iPeerIdx, pszMedia );
+        }
+        BuildCmpKeys( clsLeg.strSuite, clsLeg.strUeKey, clsLeg.strSrvKey, clsOut );
+    }
+
+    void RewriteRelaySdpForLeg( SDP_MEDIA_LIST &clsList, const RelaySdesLeg &clsLeg, bool bOffer ) {
+        StripCrypto( clsList );
+        const RelaySdesMedia *arr[2] = { &clsLeg.clsAudio, &clsLeg.clsVideo };
+        const char *arrName[2] = { "audio", "video" };
+        for ( int i = 0; i < 2; ++i ) {
+            const RelaySdesMedia &m = *arr[i];
+            std::string strProto = bOffer ? std::string( m.bSrtp ? "RTP/SAVP" : "RTP/AVP" ) : m.strProto;
+            ApplyCrypto( clsList, arrName[i], strProto, m.strTag, m.strSuite, m.bSrtp ? m.strSrvKey : std::string() );
         }
     }
 

@@ -40,7 +40,7 @@ SIP Stack (psip)
 CModuleDispatcher ◄── ISipUserAgentCallBack ── CSipUserAgent (B2BUA)
   │
   ├── CCscfModule    ── REGISTER, SUBSCRIBE, Digest 인증
-  ├── CTasModule     ── VoIP B2BUA: DND, 착신전환, 착신거부, 콜픽업
+  ├── CTasModule     ── VoIP 보조 서비스: DND·착신전환·착신거부, 당겨받기, 호 전달, dialog 이벤트
   ├── CPttAsModule   ── PTT 그룹콜 (CGroupCallService 래핑)
   └── CIbcfModule    ── IP-PBX 트렁크 라우팅
 ```
@@ -169,18 +169,24 @@ SUBSCRIBE (Event: gms 또는 cms)
 
 **파일:** `TasModule.h/.cpp`
 
-VoIP 1:1 통화의 B2BUA 처리 및 부가서비스.
+VoIP 보조 서비스 소유 모듈 ([volte_supplementary_services.md](../features/volte_supplementary_services.md)).
+B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고, 보조 서비스 판정·leg 재고정은
+이 모듈이 수행한다. relay SDES leg 평가/재작성 헬퍼는 `MediaSdes` 네임스페이스 공용이다.
 
 **부가서비스:**
 
 | 서비스 | 트리거 | 동작 |
 |--------|--------|------|
-| DND (착신거부) | `CspUser::m_bDnd == true` | 603 Decline |
+| DND (착신거부) | `CspUser::m_bDnd == true` | 603 Decline (`ScreenInvite`/`ApplyTerminationServices`) |
 | 개별 착신거부 | `CspUser::m_vecReject`에 발신자 포함 | 603 Decline |
-| 착신전환 | `CspUser::m_strForward` 설정됨 | 302 Moved Temporarily |
-| 콜픽업 | 특수 pickup URI 호출 | 그룹 내 활성 호 연결 |
+| 착신전환 | `CspUser::m_strForward` 설정됨 | 302 Moved Temporarily (수신 listener 주소 Contact) |
+| 당겨받기 | 피처코드 다이얼(`TryPickupDial`) / INVITE-Replaces(`OnIncomingCall`) | 링잉 leg 재키잉 + `RELAY_MODIFY` |
+| 호 전달 | REFER blind/attended (`OnBlindTransfer`/`OnTransfer`, 게이트=`OnSipRequest`) | 원 relay 유지·교체 leg `RELAY_MODIFY` |
+| dialog 이벤트 (RFC 4235) | 호 상태 변화 (`OnCallRing/OnCallStart/OnCallEnd`) | BLF dialog-info NOTIFY |
 
-**B2BUA 호 생성:**
+TAS 역할 off(`roles.TAS=false`) 시 위 보조 서비스 전체가 비활성이다(모듈 게이트).
+
+**B2BUA 호 생성 (ModuleDispatcher — 라우팅 골격):**
 
 ```
 EventIncomingCall(incomingCallId, from, to, rtp)

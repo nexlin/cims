@@ -1,40 +1,782 @@
+/**
+ * CTasModule — VoLTE 보조 서비스 (volte_supplementary_services.md)
+ *
+ * DND/착신거부/착신전환·당겨받기(피처코드/INVITE-Replaces)·호 전달(REFER blind/attended)·
+ * dialog 이벤트 패키지(RFC 4235). B2BUA 골격(라우팅·relay 수명)은 ModuleDispatcher 가 유지하고,
+ * 이 모듈은 보조 서비스 판정과 leg 재고정(RELAY_MODIFY — cmp_media_api.md §6.2)을 수행한다.
+ * INVITE 경로에 DB 질의를 넣지 않는다 — 모든 판정은 인메모리 맵에서 답한다.
+ */
+
 #include "TasModule.h"
 
+#include "CallMap.h"
+#include "CmpClient.h"
+#include "CspAddressing.h"
+#include "CspServiceMap.h"
+#include "CspUser.h"
+#include "GroupCallService.h"
+#include "Log.h"
+#include "MediaSdes.h"
+#include "ModuleDispatcher.h"
+#include "RtpMap.h"  // SOCKET_COUNT_PER_MEDIA
 #include "SipServerSetup.h"
+#include "SipStackThread.h"  // GetCurrentInboundListenerId()
+#include "UserMap.h"
+
+extern void SendDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
+                                   const std::string &strState, const std::string &strDir,
+                                   const std::string &strLocalAor, const std::string &strRemoteAor,
+                                   const std::string &strLocalTag, const std::string &strRemoteTag );
 
 bool CTasModule::IsEnabled() const {
     return gclsSetup.m_bRoleTas;
 }
 
-// Phase 5 에서 SipServerUserAgent.hpp 의 VoIP 호 처리 로직 이동 예정
-// 현재는 ModuleDispatcher가 기존 로직을 직접 호출
+// ──────────────────────────────────────────────────────────────
+//  RecvRequest 시점 게이트
+// ──────────────────────────────────────────────────────────────
+
+bool CTasModule::OnSipRequest( int iThreadId, CSipMessage *pclsMessage ) {
+    (void)iThreadId;
+
+    // REFER(호 전달) 게이트 — 접속서비스 transfer_allowed=false 가입자의 전달 요청은 403
+    //   (volte_supplementary_services.md §6.3). 통과 시 기존 흐름대로 psip 이 REFER 를 종단한다
+    //   (B2BUA — OnTransfer/OnBlindTransfer).
+    if ( pclsMessage->IsMethod( SIP_METHOD_REFER ) ) {
+        const std::string strReferFrom = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
+        ServiceInfo clsXferSvc = gclsServiceMap.GetForUser( strReferFrom, "volte" );
+        if ( clsXferSvc.id > 0 && clsXferSvc.transfer_allowed == false ) {
+            CLog::Print( LOG_INFO, "TAS: REFER from(%s) denied — service '%s' transfer_allowed=false → 403",
+                         strReferFrom.c_str(), clsXferSvc.name.c_str() );
+            gclsDispatcher.SendResponse( pclsMessage, SIP_FORBIDDEN );
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CTasModule::ScreenInvite( CSipMessage *pclsMessage, const char *pszFrom, const char *pszTo ) {
+    CspUser clsToUser;
+    if ( gclsCspUserMap.isAlive( pszTo, clsToUser ) ) {
+        if ( clsToUser.isDnd() || clsToUser.isReject( pszFrom ) ) {
+            CLog::Print( LOG_INFO, "TAS: Rejected (DND/Reject) From=%s To=%s", pszFrom, pszTo );
+            gclsDispatcher.SendResponse( pclsMessage, SIP_DECLINE );
+            return true;
+        }
+
+        // 서비스 모드 체크
+        if ( gclsSetup.m_strServiceMode == "ptt" ) {
+            gclsDispatcher.SendResponse( pclsMessage, SIP_FORBIDDEN );
+            return true;
+        }
+    }
+    return false;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  착신 서비스 — Replaces / DND·착신거부·착신전환 / 픽업 다이얼
+// ──────────────────────────────────────────────────────────────
 
 EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                                CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
+    (void)pszTo;
+    // 수신 INVITE 의 Replaces(RFC 3891) — 관제 BLF 당겨받기·표준 attended 완결. 헤더가 있으면
+    //   대상 다이얼로그를 pszCallId 로 교체하고 여기서 종결한다(정상 라우팅 미진입).
+    if ( HandleIncomingReplaces( pszCallId, pszFrom, pclsRtp, pclsMessage ) ) return E_ROUTE_HANDLED;
     return E_ROUTE_PASS;
 }
 
+bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const CspUser &clsUser ) {
+    if ( clsUser.isDnd() || clsUser.isReject( pszFrom ) ) {
+        gclsDispatcher.StopCall( pszCallId, SIP_DECLINE );
+        return true;
+    }
+
+    if ( clsUser.isCallForward() ) {
+        CSipMessage *pclsInvite = gclsUserAgent.DeleteIncomingCall( pszCallId );
+        if ( pclsInvite ) {
+            CSipMessage *pclsResponse = pclsInvite->CreateResponseWithToTag( SIP_MOVED_TEMPORARILY );
+            if ( pclsResponse ) {
+                CSipFrom clsContact;
+                clsContact.m_clsUri.m_strProtocol = SIP_PROTOCOL;
+                clsContact.m_clsUri.m_strUser = clsUser.m_strForward;
+                // T4: 302 Moved Temporarily 는 수신 listener 의 bind_ip:bind_port 로 Contact 생성.
+                const int iListenerId = GetCurrentInboundListenerId();
+                clsContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
+                clsContact.m_clsUri.m_iPort = CspAddressing::GetLocalSipPort( iListenerId, gclsSetup.m_iUdpPort );
+                pclsResponse->m_clsContactList.push_back( clsContact );
+                gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+                return true;
+            }
+        }
+        gclsDispatcher.StopCall( pszCallId, SIP_MOVED_TEMPORARILY );
+        return true;
+    }
+    return false;
+}
+
+bool CTasModule::TryPickupDial( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp ) {
+    std::string strPickupTarget;
+    if ( IsPickupDial( pszFrom, pszTo, strPickupTarget ) == false ) return false;
+    gclsDispatcher.SetCallOwner( pszCallId, this );
+    PickUp( pszCallId, pszFrom, strPickupTarget.empty() ? NULL : strPickupTarget.c_str(), pclsRtp );
+    return true;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  dialog 이벤트 패키지 (RFC 4235) + blind transfer 진행/완결
+// ──────────────────────────────────────────────────────────────
+
+// dialog-event 상태 통지 — B2BUA 양 leg 는 From=caller/To=callee 로 동일하므로, 당사자별 leg 는
+//   m_bRecv(caller-facing) 로 가른다. picker 가 Replaces 로 가져갈 leg Call-ID 를 실어 보낸다.
+void CTasModule::NotifyDialogState( const char *pszCallId, const char *pszState ) {
+    CCallInfo clsCi;
+    if ( !gclsCallMap.Select( pszCallId, clsCi ) ) return;
+    std::string strCaller, strCallee;
+    gclsUserAgent.GetFromId( pszCallId, strCaller );  // A (발신)
+    gclsUserAgent.GetToId( pszCallId, strCallee );    // B (착신)
+    // caller-facing leg = m_bRecv=true 인 leg, callee-facing leg = m_bRecv=false 인 leg
+    std::string strAleg, strBleg;
+    if ( clsCi.m_bRecv ) {
+        strAleg = pszCallId;
+        strBleg = clsCi.m_strPeerCallId;
+    } else {
+        strBleg = pszCallId;
+        strAleg = clsCi.m_strPeerCallId;
+    }
+    // 착신 B 감시자 → B-facing leg Call-ID (picker 가 Replaces 로 이 leg 를 가져간다)
+    if ( !strCallee.empty() && !strBleg.empty() ) {
+        std::string lt, rt;
+        gclsUserAgent.GetDialogTags( strBleg.c_str(), lt, rt );
+        SendDialogEventNotify( strCallee, strBleg, pszState, "recipient", strCallee, strCaller, lt, rt );
+    }
+    // 발신 A 감시자 → A-facing leg Call-ID
+    if ( !strCaller.empty() && !strAleg.empty() ) {
+        std::string lt, rt;
+        gclsUserAgent.GetDialogTags( strAleg.c_str(), lt, rt );
+        SendDialogEventNotify( strCaller, strAleg, pszState, "initiator", strCaller, strCallee, lt, rt );
+    }
+}
+
 bool CTasModule::OnCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRtp ) {
+    (void)pclsRtp;
+    CCallInfo clsCallInfo;
+    if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // dialog-event: 착신 링잉(early) 통지 — 감시자(BLF)가 당겨받기 대상을 알 수 있게 (§6.2)
+        if ( iSipStatus >= 180 && iSipStatus < 200 ) NotifyDialogState( pszCallId, "early" );
+        return false;
+    }
+    if ( gclsTransCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // blind transfer 진행 보고 — 전환 leg 의 18x 를 REFER 지시자에게 NOTIFY (RFC 3515)
+        gclsUserAgent.SendNotify( clsCallInfo.m_strPeerCallId.c_str(), iSipStatus );
+        return true;
+    }
     return false;
 }
-bool CTasModule::OnCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
-    return false;
-}
+
 bool CTasModule::OnCallEnd( const char *pszCallId, int iSipStatus ) {
+    CCallInfo clsCallInfo;
+    if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // dialog-event: 종료(terminated) 통지 — CallMap 삭제 전에 leg 식별이 살아 있을 때 낸다 (§6.2).
+        NotifyDialogState( pszCallId, "terminated" );
+        return false;
+    }
+    std::string strCallId;
+    if ( gclsTransCallMap.Select( pszCallId, strCallId ) ) {
+        // blind transfer 전환 leg 실패/종료 — REFER 지시자에게 최종 NOTIFY 후 trans entry 정리
+        gclsUserAgent.SendNotify( strCallId.c_str(), iSipStatus );
+        gclsTransCallMap.Delete( pszCallId );
+        return true;
+    }
     return false;
 }
-bool CTasModule::OnReInvite( const char *pszCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp ) {
-    return false;
+
+bool CTasModule::OnCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
+    CCallInfo clsCallInfo;
+    if ( gclsCallMap.Select( pszCallId ) ) {
+        // dialog-event: 호 확립(confirmed) 통지 (§6.2). answer 처리는 디스패처 정상 경로가 계속한다.
+        NotifyDialogState( pszCallId, "confirmed" );
+        return false;
+    }
+    if ( gclsTransCallMap.Select( pszCallId, clsCallInfo ) == false ) return false;
+
+    // blind transfer 완결 — 전환 대상 leg 의 answer. 원 통화의 relay 세션을 유지한 채 전환
+    //   leg 를 RELAY_MODIFY 로 재고정하고 남는 leg 와 재결합한다 (포트 산술 금지 —
+    //   cmp_media_api.md §6.2, media_security.md §5.2).
+    const std::string strTransferorCallId = clsCallInfo.m_strPeerCallId;  // REFER 를 보낸(떠나는) leg
+    CCallInfo clsOldInfo, clsStayInfo;
+    if ( gclsCallMap.Select( strTransferorCallId.c_str(), clsOldInfo ) == false ||
+         gclsCallMap.Select( clsOldInfo.m_strPeerCallId.c_str(), clsStayInfo ) == false ) {
+        gclsUserAgent.SendNotify( strTransferorCallId.c_str(), SIP_OK );
+        gclsTransCallMap.Delete( pszCallId, false );
+        gclsUserAgent.StopCall( pszCallId );
+        return true;
+    }
+    const std::string strStayCallId = clsOldInfo.m_strPeerCallId;  // 남는(전환받는) leg
+    const bool bRelay = !clsOldInfo.m_strRelaySessionId.empty();
+    const int iStayIdx = clsStayInfo.m_bRecv ? 0 : 1;  // 남는 leg 의 relay peer index
+    const int iNewIdx = 1 - iStayIdx;                  // 전환 leg 가 승계하는 index
+
+    // 전환 leg answer SDES 검증 — offer 상태는 OnBlindTransfer 가 trans entry 에 저장.
+    //   SAVP offer 에 crypto 없는 answer 는 전환만 중단(평문 폴백 금지) — 원 통화는 유지.
+    RelaySdesLeg clsNewLeg = clsCallInfo.m_clsSdesLeg[iNewIdx];
+    CmpMediaCrypto clsNewAudioCrypto, clsNewVideoCrypto;
+    if ( bRelay && pclsRtp &&
+         ( !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "audio", clsNewLeg.clsAudio, clsNewAudioCrypto ) ||
+           !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "video", clsNewLeg.clsVideo,
+                                            clsNewVideoCrypto ) ) ) {
+        CLog::Print( LOG_ERROR,
+                     "OnCallStart: transfer leg SDES answer missing/mismatched crypto — 전환 중단, 원 통화 유지 "
+                     "(CallId=%s)",
+                     pszCallId );
+        gclsUserAgent.SendNotify( strTransferorCallId.c_str(), SIP_NOT_ACCEPTABLE_HERE );
+        gclsTransCallMap.Delete( pszCallId, false );
+        gclsUserAgent.StopCall( pszCallId );
+        return true;
+    }
+    gclsUserAgent.SendNotify( strTransferorCallId.c_str(), SIP_OK );
+
+    std::string strNewUserId;
+    gclsUserAgent.GetToId( pszCallId, strNewUserId );
+    const std::string strNewCaller = iNewIdx == 0 ? strNewUserId : clsOldInfo.m_strRelayCaller;
+    const std::string strNewCallee = iNewIdx == 1 ? strNewUserId : clsOldInfo.m_strRelayCallee;
+
+    if ( bRelay && pclsRtp ) {
+        // 전환 leg 를 기존 relay 의 승계 index 로 재고정 — 주소·NAT·PT·crypto (정상 answer 경로와 동형)
+        int iAudioPort = pclsRtp->GetAudioPort();
+        if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
+        if ( iAudioPort > 0 ) {
+            int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
+            int iNewNat = 0;
+            std::string strNewGuardIp;
+            {
+                ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strNewUserId, "volte" );
+                std::string strSigIp;
+                CUserInfo clsNewUserInfo;
+                if ( !strNewUserId.empty() && gclsUserMap.Select( strNewUserId.c_str(), clsNewUserInfo ) )
+                    strSigIp = clsNewUserInfo.m_strIp;
+                if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strNewGuardIp ) ) iNewNat = 1;
+            }
+            int iNewPt = 0, iNewSrcPt = 0, iNewTePt = 0, iNewSrcTePt = 0;
+            std::string strNewCodec;
+            CGroupCallService::GetLegPt( pszCallId, true, iNewPt, iNewSrcPt, iNewTePt, iNewSrcTePt, &strNewCodec );
+            gclsCmpClient.ModifySession(
+                clsOldInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort, iVideoPort > 0 ? iVideoPort : 0, iNewIdx,
+                strNewCaller, strNewCallee, clsOldInfo.m_strRelaySesId, iNewNat, strNewGuardIp, iNewPt, iNewSrcPt,
+                iNewTePt, iNewSrcTePt, strNewCodec, clsNewAudioCrypto.bEnabled ? &clsNewAudioCrypto : NULL,
+                clsNewVideoCrypto.bEnabled ? &clsNewVideoCrypto : NULL );
+        }
+    }
+
+    // 떠나는 leg 종료 + 원 pair 해체 — relay 는 계속 쓰므로 회수 금지(bStopPort=false)
+    gclsUserAgent.StopCall( strTransferorCallId.c_str() );
+    gclsCallMap.Delete( strTransferorCallId.c_str(), false );
+
+    // 새 pair — entry 포트 = 그 leg 의 peer 에게 광고하는 relay 포트(각 leg 포트 불변),
+    //   m_bRecv 는 peer0 표식(EventReInvite/EventCallStart 의 index 판정 근거).
+    if ( iStayIdx == 0 )
+        gclsCallMap.Insert( strStayCallId.c_str(), pszCallId, clsStayInfo.m_iPeerRtpPort, clsOldInfo.m_iPeerRtpPort );
+    else
+        gclsCallMap.Insert( pszCallId, strStayCallId.c_str(), clsOldInfo.m_iPeerRtpPort, clsStayInfo.m_iPeerRtpPort );
+    if ( bRelay ) {
+        gclsCallMap.SetRelayInfo( pszCallId, clsOldInfo.m_strRelaySessionId, clsOldInfo.m_strRelaySesId,
+                                  clsOldInfo.m_strRelayLocalIp, strNewCaller, strNewCallee );
+        gclsCallMap.SetRelaySdesLeg( pszCallId, iStayIdx, clsOldInfo.m_clsSdesLeg[iStayIdx] );
+        gclsCallMap.SetRelaySdesLeg( pszCallId, iNewIdx, clsNewLeg );
+    }
+    gclsCallMap.SetEstablished( pszCallId );
+
+    // 남는 leg 로 re-INVITE — 전환 leg answer 를 남는 leg 상태로 재작성 + relay 주소·기존 포트 재광고
+    if ( bRelay && pclsRtp && clsOldInfo.m_iPeerRtpPort > 0 ) {
+        MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsOldInfo.m_clsSdesLeg[iStayIdx], true );
+        std::string strRelayIp =
+            clsOldInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsOldInfo.m_strRelayLocalIp;
+        pclsRtp->SetIpPort( strRelayIp.c_str(), clsOldInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+    }
+    gclsUserAgent.SendReInvite( strStayCallId.c_str(), pclsRtp );
+    gclsTransCallMap.Delete( pszCallId, false );
+    return true;
 }
-bool CTasModule::OnPrack( const char *pszCallId, CSipCallRtp *pclsRtp ) {
-    return false;
-}
+
+// ──────────────────────────────────────────────────────────────
+//  호 전달 (Call Transfer — volte_supplementary_services.md §6)
+// ──────────────────────────────────────────────────────────────
+
 bool CTasModule::OnTransfer( const char *pszCallId, const char *pszReferToCallId, bool bScreened ) {
-    return false;
+    CCallInfo clsCallInfo, clsReferToCallInfo;
+    CSipCallRtp clsRtp;
+
+    if ( gclsCallMap.Select( pszCallId, clsCallInfo ) == false ) return false;
+    if ( gclsCallMap.Select( pszReferToCallId, clsReferToCallInfo ) == false ) return false;
+
+    // pszCallId/pszReferToCallId = 전환 지시자(REFER 발신 단말)의 두 다이얼로그 leg. 남는 당사자는
+    //   각 pair 의 peer leg — 유지(stay) = 원 통화의 peer, 합류(join) = 상담 통화의 peer.
+    //   원 통화의 relay 세션을 유지해 stay leg 의 미디어 앵커(광고된 relay 포트)를 불변으로 두고,
+    //   전환 지시자가 쓰던 peer index 로 join 단말을 RELAY_MODIFY 재고정한다 (cmp_media_api.md §6.2).
+    //   상담 통화의 relay 는 pair 해체 시 회수한다. (구 ±4 leg 블록 포트 산술 제거.)
+    const std::string strStayCallId = clsCallInfo.m_strPeerCallId;
+    const std::string strJoinCallId = clsReferToCallInfo.m_strPeerCallId;
+    CCallInfo clsStayInfo, clsJoinInfo;
+    if ( gclsCallMap.Select( strStayCallId.c_str(), clsStayInfo ) == false ) return false;
+    if ( gclsCallMap.Select( strJoinCallId.c_str(), clsJoinInfo ) == false ) return false;
+
+    if ( gclsUserAgent.GetRemoteCallRtp( strStayCallId.c_str(), &clsRtp ) == false ) return false;
+    clsRtp.SetDirection( E_RTP_SEND_RECV );  // join 단말로 보낼 재-offer 본문 (stay 원격 SDP 기반)
+
+    const bool bRelay = !clsCallInfo.m_strRelaySessionId.empty();
+    const int iStayIdx = clsStayInfo.m_bRecv ? 0 : 1;  // stay leg 의 relay peer index
+    const int iNewIdx = 1 - iStayIdx;                  // join 단말이 승계하는 index
+    const int iStayPort = clsCallInfo.m_iPeerRtpPort;  // stay 에게 광고된 relay 포트 (불변)
+    const int iJoinPort = clsStayInfo.m_iPeerRtpPort;  // 전환 지시자 leg 포트 → join 이 승계
+    const std::string strRelayIp =
+        clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsCallInfo.m_strRelayLocalIp;
+    std::string strStayUserId, strJoinUserId;
+    gclsUserAgent.GetToId( strStayCallId.c_str(), strStayUserId );
+    gclsUserAgent.GetToId( strJoinCallId.c_str(), strJoinUserId );
+    const std::string strNewCaller = iStayIdx == 0 ? strStayUserId : strJoinUserId;
+    const std::string strNewCallee = iStayIdx == 0 ? strJoinUserId : strStayUserId;
+
+    if ( bScreened ) {
+        CSipCallRtp clsReferToRtp;
+        if ( gclsUserAgent.GetRemoteCallRtp( strJoinCallId.c_str(), &clsReferToRtp ) == false ) return false;
+        clsReferToRtp.SetDirection( E_RTP_SEND_RECV );  // stay 로 보낼 재-offer 본문 (join 원격 SDP 기반)
+
+        // join 단말이 상담 통화에서 확립한 SDES leg 상태를 그대로 이관 — 같은 서버 키를 재광고하고
+        //   기존 UE 선언 키를 유지 relay 의 승계 index 로 내린다 (재키잉 없음, media_security.md §5.2).
+        const int iJoinOldIdx = clsJoinInfo.m_bRecv ? 0 : 1;
+        RelaySdesLeg clsJoinLeg = clsJoinInfo.m_clsSdesLeg[iJoinOldIdx];
+        CmpMediaCrypto clsJoinAudioCrypto, clsJoinVideoCrypto;
+        if ( bRelay && ( ( clsJoinLeg.clsAudio.bSrtp &&
+                           !MediaSdes::BuildCmpKeys( clsJoinLeg.clsAudio.strSuite, clsJoinLeg.clsAudio.strUeKey,
+                                                     clsJoinLeg.clsAudio.strSrvKey, clsJoinAudioCrypto ) ) ||
+                         ( clsJoinLeg.clsVideo.bSrtp &&
+                           !MediaSdes::BuildCmpKeys( clsJoinLeg.clsVideo.strSuite, clsJoinLeg.clsVideo.strUeKey,
+                                                     clsJoinLeg.clsVideo.strSrvKey, clsJoinVideoCrypto ) ) ) ) {
+            CLog::Print( LOG_ERROR, "OnTransfer: SRTP key carry-over failed — 전환 거부 (CallId=%s)", pszCallId );
+            return false;
+        }
+
+        // pair 해체 — 유지 relay(원 통화)는 회수 금지(bStopPort=false), 상담 통화 relay 는 여기서 회수
+        gclsCallMap.Delete( pszCallId, false );
+        gclsCallMap.Delete( pszReferToCallId, true );
+
+        if ( bRelay ) {
+            // join 단말의 미디어를 유지 relay 의 승계 index 로 재고정 — 주소는 join 의 UE 선언 주소
+            int iAudioPort = clsReferToRtp.GetAudioPort();
+            if ( iAudioPort <= 0 && clsReferToRtp.m_iPort > 0 ) iAudioPort = clsReferToRtp.m_iPort;
+            if ( iAudioPort > 0 ) {
+                int iVideoPort = ( clsReferToRtp.GetMediaCount() >= 2 ) ? clsReferToRtp.GetVideoPort() : 0;
+                int iJoinNat = 0;
+                std::string strJoinGuardIp;
+                {
+                    ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strJoinUserId, "volte" );
+                    std::string strSigIp;
+                    CUserInfo clsJoinUserInfo;
+                    if ( !strJoinUserId.empty() && gclsUserMap.Select( strJoinUserId.c_str(), clsJoinUserInfo ) )
+                        strSigIp = clsJoinUserInfo.m_strIp;
+                    if ( CCspServiceMap::EvalMediaNat( clsNatSvc, clsReferToRtp.m_strIp, strSigIp, strJoinGuardIp ) )
+                        iJoinNat = 1;
+                }
+                int iJoinPt = 0, iJoinSrcPt = 0, iJoinTePt = 0, iJoinSrcTePt = 0;
+                std::string strJoinCodec;
+                CGroupCallService::GetLegPt( strJoinCallId, clsJoinInfo.m_bRecv ? false : true, iJoinPt, iJoinSrcPt,
+                                             iJoinTePt, iJoinSrcTePt, &strJoinCodec );
+                gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, clsReferToRtp.m_strIp, iAudioPort,
+                                             iVideoPort > 0 ? iVideoPort : 0, iNewIdx, strNewCaller, strNewCallee,
+                                             clsCallInfo.m_strRelaySesId, iJoinNat, strJoinGuardIp, iJoinPt, iJoinSrcPt,
+                                             iJoinTePt, iJoinSrcTePt, strJoinCodec,
+                                             clsJoinAudioCrypto.bEnabled ? &clsJoinAudioCrypto : NULL,
+                                             clsJoinVideoCrypto.bEnabled ? &clsJoinVideoCrypto : NULL );
+            }
+        }
+
+        // 새 pair + relay descriptor — entry 포트 = 그 leg 의 peer 에게 광고하는 relay 포트
+        if ( iStayIdx == 0 )
+            gclsCallMap.Insert( strStayCallId.c_str(), strJoinCallId.c_str(), iJoinPort, iStayPort );
+        else
+            gclsCallMap.Insert( strJoinCallId.c_str(), strStayCallId.c_str(), iStayPort, iJoinPort );
+        if ( bRelay ) {
+            gclsCallMap.SetRelayInfo( strStayCallId.c_str(), clsCallInfo.m_strRelaySessionId,
+                                      clsCallInfo.m_strRelaySesId, clsCallInfo.m_strRelayLocalIp, strNewCaller,
+                                      strNewCallee );
+            gclsCallMap.SetRelaySdesLeg( strStayCallId.c_str(), iStayIdx, clsCallInfo.m_clsSdesLeg[iStayIdx] );
+            gclsCallMap.SetRelaySdesLeg( strStayCallId.c_str(), iNewIdx, clsJoinLeg );
+        }
+        gclsCallMap.SetEstablished( strStayCallId.c_str() );
+
+        // 양 leg 재-offer — 각 수신 leg 의 SDES 상태로 재작성 + relay 주소·기존 leg 포트 재광고
+        if ( bRelay ) {
+            MediaSdes::RewriteRelaySdpForLeg( clsReferToRtp.m_clsMediaList, clsCallInfo.m_clsSdesLeg[iStayIdx], true );
+            clsReferToRtp.SetIpPort( strRelayIp.c_str(), iStayPort, SOCKET_COUNT_PER_MEDIA );
+            MediaSdes::RewriteRelaySdpForLeg( clsRtp.m_clsMediaList, clsJoinLeg, true );
+            clsRtp.SetIpPort( strRelayIp.c_str(), iJoinPort, SOCKET_COUNT_PER_MEDIA );
+        } else {
+            // 직결(비 relay) — crypto 투과만 차단 (기존 동작 보존)
+            MediaSdes::StripCrypto( clsRtp.m_clsMediaList );
+            MediaSdes::StripCrypto( clsReferToRtp.m_clsMediaList );
+        }
+        gclsUserAgent.SendReInvite( strStayCallId.c_str(), &clsReferToRtp );
+        gclsUserAgent.SendReInvite( strJoinCallId.c_str(), &clsRtp );
+
+        gclsUserAgent.StopCall( pszCallId );
+        gclsUserAgent.StopCall( pszReferToCallId, SIP_REQUEST_TERMINATED );
+        return true;
+    }
+
+    // unscreened — 상담 통화 미확립: 상담 pair 전체 해체(relay 회수) 후, 유지 relay 의 승계 index
+    //   포트로 join 대상에게 신규 INVITE. answer 재고정은 EventCallStart 정상 경로가 수행한다.
+    gclsCallMap.Delete( pszCallId, false );
+    gclsCallMap.Delete( pszReferToCallId, true );
+    gclsUserAgent.StopCall( pszCallId );
+    gclsUserAgent.StopCall( pszReferToCallId, SIP_REQUEST_TERMINATED );
+
+    std::string strNewCallId;
+    CUserInfo clsUserInfo;
+    CSipCallRoute clsRoute;
+    if ( gclsUserMap.Select( strJoinUserId.c_str(), clsUserInfo ) == false ) {
+        gclsUserAgent.StopCall( strStayCallId.c_str() );
+        gclsUserAgent.StopCall( strJoinCallId.c_str() );
+        return true;
+    }
+    gclsUserAgent.StopCall( strJoinCallId.c_str() );  // 미확립 상담 leg 정리(CANCEL)
+
+    RelaySdesLeg clsNewLeg;
+    MediaSdes::StripCrypto( clsRtp.m_clsMediaList );  // stay leg 키 누출 차단
+    if ( bRelay ) {
+        // 신규 leg offer — 정책 × join 단말의 mediasec 능력으로 형태 결정, 서버 키는 새로 생성
+        //   (떠나는 전환 지시자에게 알려진 키를 재사용하지 않는다).
+        bool bNewSdes = false;
+        ServiceInfo clsJoinSvc = gclsServiceMap.GetForUser( strJoinUserId, "volte" );
+        if ( clsJoinSvc.media_srtp == "required" )
+            bNewSdes = true;
+        else if ( clsJoinSvc.media_srtp == "optional" )
+            bNewSdes = clsUserInfo.m_bMediaSecSdes;
+        if ( !MediaSdes::ApplyRelayLegOffer( clsRtp.m_clsMediaList, "audio", bNewSdes, clsNewLeg.clsAudio ) ||
+             !MediaSdes::ApplyRelayLegOffer( clsRtp.m_clsMediaList, "video", bNewSdes, clsNewLeg.clsVideo ) ) {
+            CLog::Print( LOG_ERROR, "OnTransfer: transfer leg SRTP key build failed (CallId=%s)", pszCallId );
+            gclsUserAgent.StopCall( strStayCallId.c_str() );
+            return false;
+        }
+        clsRtp.SetIpPort( strRelayIp.c_str(), iJoinPort, SOCKET_COUNT_PER_MEDIA );
+    }
+
+    clsUserInfo.GetCallRoute( clsRoute );
+    if ( gclsUserAgent.StartCall( strStayUserId.c_str(), strJoinUserId.c_str(), &clsRtp, &clsRoute, strNewCallId ) ==
+         false ) {
+        gclsUserAgent.StopCall( strStayCallId.c_str() );
+        return false;
+    }
+    if ( iStayIdx == 0 )
+        gclsCallMap.Insert( strStayCallId.c_str(), strNewCallId.c_str(), iJoinPort, iStayPort );
+    else
+        gclsCallMap.Insert( strNewCallId.c_str(), strStayCallId.c_str(), iStayPort, iJoinPort );
+    if ( bRelay ) {
+        gclsCallMap.SetRelayInfo( strStayCallId.c_str(), clsCallInfo.m_strRelaySessionId, clsCallInfo.m_strRelaySesId,
+                                  clsCallInfo.m_strRelayLocalIp, strNewCaller, strNewCallee );
+        gclsCallMap.SetRelaySdesLeg( strStayCallId.c_str(), iStayIdx, clsCallInfo.m_clsSdesLeg[iStayIdx] );
+        gclsCallMap.SetRelaySdesLeg( strStayCallId.c_str(), iNewIdx, clsNewLeg );
+    }
+    return true;
 }
+
 bool CTasModule::OnBlindTransfer( const char *pszCallId, const char *pszReferToId ) {
-    return false;
+    std::string strCallId, strInviteCallId, strToId;
+    CSipCallRtp clsRtp;
+    CUserInfo clsUserInfo;
+    CSipCallRoute clsRoute;
+    int iStartPort = -1;
+
+    if ( gclsCallMap.Select( pszCallId, strCallId ) == false ) return false;
+    if ( gclsUserAgent.GetToId( strCallId.c_str(), strToId ) == false ) return false;
+    if ( gclsUserMap.Select( pszReferToId, clsUserInfo ) == false ) return false;
+    if ( gclsUserAgent.GetRemoteCallRtp( strCallId.c_str(), &clsRtp ) == false ) return false;
+    clsRtp.SetDirection( E_RTP_SEND_RECV );
+
+    // 원 통화의 relay 세션을 유지 — 전환 대상은 REFER 지시자 leg 의 peer index·포트를 승계한다
+    //   (신규 AddSession 없음: 실패·거절 시 원 통화가 그대로 남고, relay 누수 경로도 사라진다).
+    //   완결(answer 재고정·pair 재결합)은 OnCallStart 의 trans 분기가 RELAY_MODIFY 로 수행.
+    CCallInfo clsOldInfo, clsStayInfo;
+    const bool bRelay = gclsCallMap.Select( pszCallId, clsOldInfo ) && !clsOldInfo.m_strRelaySessionId.empty() &&
+                        gclsCallMap.Select( strCallId.c_str(), clsStayInfo );
+    RelaySdesLeg clsNewLeg;
+    int iNewIdx = 1;
+    MediaSdes::StripCrypto( clsRtp.m_clsMediaList );  // 남는 leg 키 누출 차단
+    if ( bRelay ) {
+        iNewIdx = clsOldInfo.m_bRecv ? 0 : 1;     // 지시자 leg 의 index = 전환 대상이 승계
+        iStartPort = clsStayInfo.m_iPeerRtpPort;  // 지시자 leg 의 relay 포트 → 전환 대상에게 광고
+        // 신규 leg offer — 정책 × 전환 대상의 mediasec 능력, 서버 키는 새로 생성 (떠나는 단말에
+        //   알려진 키 재사용 금지 — media_security.md §5.2)
+        bool bNewSdes = false;
+        ServiceInfo clsNewSvc = gclsServiceMap.GetForUser( pszReferToId ? pszReferToId : "", "volte" );
+        if ( clsNewSvc.media_srtp == "required" )
+            bNewSdes = true;
+        else if ( clsNewSvc.media_srtp == "optional" )
+            bNewSdes = clsUserInfo.m_bMediaSecSdes;
+        if ( !MediaSdes::ApplyRelayLegOffer( clsRtp.m_clsMediaList, "audio", bNewSdes, clsNewLeg.clsAudio ) ||
+             !MediaSdes::ApplyRelayLegOffer( clsRtp.m_clsMediaList, "video", bNewSdes, clsNewLeg.clsVideo ) ) {
+            CLog::Print( LOG_ERROR, "OnBlindTransfer: transfer leg SRTP key build failed (CallId=%s)", pszCallId );
+            return false;
+        }
+        std::string strRelayIp =
+            clsOldInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsOldInfo.m_strRelayLocalIp;
+        clsRtp.SetIpPort( strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA );
+    }
+
+    clsUserInfo.GetCallRoute( clsRoute );
+    if ( gclsUserAgent.StartCall( strToId.c_str(), pszReferToId, &clsRtp, &clsRoute, strInviteCallId ) == false )
+        return false;
+    gclsTransCallMap.Insert( pszCallId, strInviteCallId.c_str(), iStartPort );
+    // 전환 leg 의 SDES offer 상태만 trans entry 에 보관 — relay descriptor 는 보관하지 않는다
+    //   (trans Delete 가 계속 쓰는 원 통화의 relay 를 회수하지 않도록).
+    if ( bRelay ) gclsTransCallMap.SetRelaySdesLeg( pszCallId, iNewIdx, clsNewLeg );
+    return true;
 }
-bool CTasModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage ) {
-    return false;
+
+// ──────────────────────────────────────────────────────────────
+//  당겨받기 (Call Pickup — volte_supplementary_services.md §5)
+// ──────────────────────────────────────────────────────────────
+
+bool CTasModule::IsPickupDial( const char *pszFrom, const char *pszTo, std::string &strTarget ) {
+    strTarget.clear();
+    if ( pszTo == NULL || pszTo[0] == '\0' ) return false;
+
+    // 코드 결정 — 발신 가입자의 접속서비스 pickup_feature_code. 필드 미지정(레거시 레코드)이면
+    //   전역 Setup.Sip.CallPickupId 폴백(전환기 호환), 빈 값이면 그 서비스에서 픽업 비활성 (§5.2).
+    ServiceInfo clsSvc = gclsServiceMap.GetForUser( pszFrom ? pszFrom : "", "volte" );
+    std::string strCode;
+    if ( clsSvc.id > 0 && clsSvc.pickup_code_set )
+        strCode = clsSvc.pickup_feature_code;
+    else
+        strCode = gclsSetup.m_strCallPickupId;
+    if ( strCode.empty() ) return false;
+
+    const size_t iLen = strCode.size();
+    if ( strncmp( pszTo, strCode.c_str(), iLen ) != 0 ) return false;
+    if ( pszTo[iLen] == '\0' ) return true;  // 그룹 픽업
+    strTarget = pszTo + iLen;                // 지정 픽업 — "<code><내선>"
+    return true;
+}
+
+void CTasModule::PickUp( const char *pszCallId, const char *pszFrom, const char *pszTarget, CSipCallRtp *pclsRtp ) {
+    CspUser xmlFrom;
+    USER_ID_LIST clsUserIdList;
+    bool bCallPickup = false;
+    bool bCommitted = false;  // 재키잉(원 착신 leg 해체) 이후에는 다음 후보로 넘어갈 수 없다
+
+    // 후보 결정 — 축은 픽업 그룹(pickup_group, 미지정 시 org 폴백 — §5.1).
+    //   그룹 픽업: 그룹 인덱스의 등록 그룹원 전체. 지정 픽업: 대상 내선 하나 — 같은 그룹일 때만(403).
+    if ( gclsCspUserMap.Select( pszFrom, xmlFrom ) ) {
+        if ( pszTarget != NULL && pszTarget[0] != '\0' ) {
+            CUserInfo clsTargetInfo;
+            if ( gclsUserMap.Select( pszTarget, clsTargetInfo ) == false )
+                return gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
+            if ( clsTargetInfo.m_strGroupId != xmlFrom.EffectivePickupGroup() ) {
+                CLog::Print( LOG_INFO, "PickUp: directed target(%s) not in picker(%s) group(%s) → 403", pszTarget,
+                             pszFrom, xmlFrom.EffectivePickupGroup().c_str() );
+                return gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
+            }
+            clsUserIdList.push_back( pszTarget );
+        } else {
+            gclsUserMap.SelectGroup( xmlFrom.EffectivePickupGroup().c_str(), clsUserIdList );
+        }
+    }
+
+    for ( USER_ID_LIST::iterator itUIL = clsUserIdList.begin();
+          itUIL != clsUserIdList.end() && bCallPickup == false && bCommitted == false; ++itUIL ) {
+        std::string strOldCallId;
+        if ( gclsCallMap.SelectToRing( itUIL->c_str(), strOldCallId ) == false ) continue;
+        // SDES 협상 불가(488)는 원 호를 건드리지 않고 즉시 종료; 재키잉 이후 실패는 후보 순회 중단.
+        int iRc = PickUpLeg( pszCallId, pszFrom, pclsRtp, strOldCallId );
+        if ( iRc == 0 ) {
+            bCallPickup = true;
+        } else if ( iRc == SIP_NOT_ACCEPTABLE_HERE ) {
+            return gclsDispatcher.StopCall( pszCallId, iRc );
+        } else {
+            bCommitted = true;  // 재키잉 후 실패 — 다른 후보로 넘어가지 않는다
+        }
+    }
+
+    if ( bCallPickup == false ) gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
+}
+
+// 당겨받기 재고정 코어 — 링잉/대상 leg(strOldCallId)를 pszCallId(신규 단말)로 승계·재고정.
+//   PickUp(피처코드)·HandleIncomingReplaces(RFC 3891) 공용. 반환 0=성공, >0=실패 SIP 코드.
+int CTasModule::PickUpLeg( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
+                           const std::string &strOldCallId ) {
+    // 링잉 호의 양 leg — 발신자에게 광고할 relay 포트(peer0)는 링잉(착신) leg entry 에,
+    //   신규(픽업) 단말에게 광고할 relay 포트(peer1)는 발신 leg entry 에 있다.
+    CCallInfo clsOldCallInfo, clsPeerCallInfo;
+    if ( gclsCallMap.Select( strOldCallId.c_str(), clsOldCallInfo ) == false ) return SIP_NOT_FOUND;
+    if ( gclsCallMap.Select( clsOldCallInfo.m_strPeerCallId.c_str(), clsPeerCallInfo ) == false ) return SIP_NOT_FOUND;
+
+    const bool bRelay = !clsOldCallInfo.m_strRelaySessionId.empty();
+    RelaySdesLeg clsNewLeg;
+    CmpMediaCrypto clsNewAudioCrypto, clsNewVideoCrypto;
+    if ( bRelay && pclsRtp ) {
+        // 신규 단말 offer 의 SDES 평가(정책 = 신규 단말의 접속서비스). 협상 불가는 원 호를
+        //   건드리지 않고 488 (평문 폴백 금지) — 아직 재키잉 전이라 원 호가 그대로 유지된다.
+        ServiceInfo clsPickSvc = gclsServiceMap.GetForUser( pszFrom ? pszFrom : "", "volte" );
+        if ( MediaSdes::EvalRelayOfferSdes( clsPickSvc.media_srtp, pclsRtp->m_clsMediaList, "audio",
+                                            clsNewLeg.clsAudio ) < 0 ||
+             MediaSdes::EvalRelayOfferSdes( clsPickSvc.media_srtp, pclsRtp->m_clsMediaList, "video",
+                                            clsNewLeg.clsVideo ) < 0 ||
+             ( clsNewLeg.clsAudio.bSrtp &&
+               !MediaSdes::BuildCmpKeys( clsNewLeg.clsAudio.strSuite, clsNewLeg.clsAudio.strUeKey,
+                                         clsNewLeg.clsAudio.strSrvKey, clsNewAudioCrypto ) ) ||
+             ( clsNewLeg.clsVideo.bSrtp &&
+               !MediaSdes::BuildCmpKeys( clsNewLeg.clsVideo.strSuite, clsNewLeg.clsVideo.strUeKey,
+                                         clsNewLeg.clsVideo.strSrvKey, clsNewVideoCrypto ) ) ) {
+            CLog::Print( LOG_INFO, "PickUpLeg: picker(%s) SDES offer not acceptable → 488", pszFrom );
+            return SIP_NOT_ACCEPTABLE_HERE;
+        }
+    }
+
+    // 재키잉 — 신규 단말 leg 가 링잉 착신 leg 의 자리를(relay peer index·포트 포함) 승계한다.
+    if ( gclsCallMap.Insert( pszCallId, clsOldCallInfo ) == false ) return SIP_INTERNAL_SERVER_ERROR;
+    gclsCallMap.Update( clsOldCallInfo.m_strPeerCallId.c_str(), pszCallId );
+    gclsCallMap.DeleteOne( strOldCallId.c_str() );
+    gclsUserAgent.StopCall( strOldCallId.c_str() );
+
+    if ( bRelay && pclsRtp ) {
+        // 신규 단말을 relay 착신(peer1) index 로 재고정 — 주소·NAT·PT·crypto (RELAY_MODIFY,
+        //   cmp_media_api.md §6.2). 대상은 항상 발신(peer0)이 건 링잉 호이므로 승계 index 는 1.
+        int iAudioPort = pclsRtp->GetAudioPort();
+        if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
+        if ( iAudioPort > 0 ) {
+            int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
+            int iPickNat = 0;
+            std::string strPickGuardIp;
+            {
+                ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( pszFrom ? pszFrom : "", "volte" );
+                std::string strSigIp;
+                CUserInfo clsPickUserInfo;
+                if ( gclsUserMap.Select( pszFrom, clsPickUserInfo ) ) strSigIp = clsPickUserInfo.m_strIp;
+                if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strPickGuardIp ) )
+                    iPickNat = 1;
+            }
+            int iPickPt = 0, iPickSrcPt = 0, iPickTePt = 0, iPickSrcTePt = 0;
+            std::string strPickCodec;
+            CGroupCallService::GetLegPt( pszCallId, false, iPickPt, iPickSrcPt, iPickTePt, iPickSrcTePt,
+                                         &strPickCodec );
+            gclsCmpClient.ModifySession( clsOldCallInfo.m_strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
+                                         iVideoPort > 0 ? iVideoPort : 0, 1, clsOldCallInfo.m_strRelayCaller,
+                                         pszFrom ? pszFrom : "", clsOldCallInfo.m_strRelaySesId, iPickNat,
+                                         strPickGuardIp, iPickPt, iPickSrcPt, iPickTePt, iPickSrcTePt, strPickCodec,
+                                         clsNewAudioCrypto.bEnabled ? &clsNewAudioCrypto : NULL,
+                                         clsNewVideoCrypto.bEnabled ? &clsNewVideoCrypto : NULL );
+        }
+        gclsCallMap.SetRelayInfo( pszCallId, clsOldCallInfo.m_strRelaySessionId, clsOldCallInfo.m_strRelaySesId,
+                                  clsOldCallInfo.m_strRelayLocalIp, clsOldCallInfo.m_strRelayCaller,
+                                  pszFrom ? pszFrom : "" );
+        gclsCallMap.SetRelaySdesLeg( pszCallId, 1, clsNewLeg );
+
+        const std::string strRelayIp = clsOldCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
+                                                                                : clsOldCallInfo.m_strRelayLocalIp;
+        // 발신자에게 200 answer — 신규 offer 를 발신 leg 상태(offer echo)로 재작성 + peer0 포트
+        CSipCallRtp clsAnswerRtp = *pclsRtp;
+        MediaSdes::RewriteRelaySdpForLeg( clsAnswerRtp.m_clsMediaList, clsOldCallInfo.m_clsSdesLeg[0], false );
+        clsAnswerRtp.SetIpPort( strRelayIp.c_str(), clsOldCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+        if ( gclsUserAgent.AcceptCall( clsOldCallInfo.m_strPeerCallId.c_str(), &clsAnswerRtp ) == false ) {
+            gclsUserAgent.StopCall( clsOldCallInfo.m_strPeerCallId.c_str() );
+            return SIP_INTERNAL_SERVER_ERROR;
+        }
+        // 신규 단말에게 200 answer — 자기 offer echo(신규 leg 상태) + peer1 포트
+        MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsNewLeg, false );
+        pclsRtp->SetIpPort( strRelayIp.c_str(), clsPeerCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+        gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
+        gclsCallMap.SetEstablished( pszCallId );
+        return 0;
+    }
+
+    // 직결(비 relay) — 기존 포트 재사용 동작 보존
+    CSipCallRtp clsRemoteRtp;
+    if ( gclsUserAgent.GetRemoteCallRtp( clsOldCallInfo.m_strPeerCallId.c_str(), &clsRemoteRtp ) ) {
+        if ( pclsRtp ) {
+            if ( clsOldCallInfo.m_iPeerRtpPort > 0 ) {
+                pclsRtp->m_iPort = clsOldCallInfo.m_iPeerRtpPort;
+                pclsRtp->m_strIp = CspAddressing::GetLocalRtpAddress();
+            }
+            pclsRtp->m_iCodec = clsRemoteRtp.m_iCodec;
+        }
+        if ( gclsUserAgent.AcceptCall( clsOldCallInfo.m_strPeerCallId.c_str(), pclsRtp ) ) {
+            if ( pclsRtp ) {
+                if ( clsOldCallInfo.m_iPeerRtpPort > 0 )
+                    pclsRtp->m_iPort = clsPeerCallInfo.m_iPeerRtpPort;
+                else
+                    pclsRtp = &clsRemoteRtp;
+            }
+            gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
+            gclsCallMap.SetEstablished( pszCallId );
+            return 0;
+        }
+        gclsUserAgent.StopCall( clsOldCallInfo.m_strPeerCallId.c_str() );
+    }
+    return SIP_INTERNAL_SERVER_ERROR;
+}
+
+// 수신 INVITE 의 Replaces(RFC 3891) 처리 — 관제 BLF 당겨받기·표준 attended 완결.
+bool CTasModule::HandleIncomingReplaces( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
+                                         CSipMessage *pclsMessage ) {
+    if ( pclsMessage == NULL ) return false;
+    CSipHeader *pclsRep = pclsMessage->GetHeader( "Replaces" );
+    if ( pclsRep == NULL || pclsRep->m_strValue.empty() ) return false;
+
+    // Replaces: <call-id>;to-tag=<t>;from-tag=<f>  (RFC 3891, 미이스케이프 표준형)
+    std::string strVal = pclsRep->m_strValue, strTargetCallId, strToTag, strFromTag;
+    {
+        size_t p = strVal.find( ';' );
+        strTargetCallId = ( p == std::string::npos ) ? strVal : strVal.substr( 0, p );
+        // 앞뒤 공백 제거
+        while ( !strTargetCallId.empty() && ( strTargetCallId.back() == ' ' ) ) strTargetCallId.pop_back();
+        auto param = [&]( const char *pszKey ) -> std::string {
+            std::string strKey = pszKey;
+            size_t q = strVal.find( strKey );
+            if ( q == std::string::npos ) return "";
+            q += strKey.size();
+            size_t e = strVal.find( ';', q );
+            std::string v = strVal.substr( q, e == std::string::npos ? std::string::npos : e - q );
+            while ( !v.empty() && ( v.back() == ' ' ) ) v.pop_back();
+            return v;
+        };
+        strToTag = param( "to-tag=" );
+        strFromTag = param( "from-tag=" );
+    }
+    if ( strTargetCallId.empty() ) return false;
+
+    // 대상 다이얼로그 확인 — CallMap 에 존재하고 psip 다이얼로그 태그가 일치해야 한다.
+    CCallInfo clsTarget;
+    if ( gclsCallMap.Select( strTargetCallId.c_str(), clsTarget ) == false ) {
+        CLog::Print( LOG_INFO, "Replaces target %s not found → 481 (from %s)", strTargetCallId.c_str(), pszFrom );
+        gclsDispatcher.StopCall( pszCallId, SIP_CALL_TRANSACTION_DOES_NOT_EXIST );
+        return true;
+    }
+    if ( gclsUserAgent.MatchReplacesDialog( strTargetCallId.c_str(), strToTag.c_str(), strFromTag.c_str() ) == false ) {
+        CLog::Print( LOG_INFO, "Replaces tag mismatch for %s → 481 (from %s)", strTargetCallId.c_str(), pszFrom );
+        gclsDispatcher.StopCall( pszCallId, SIP_CALL_TRANSACTION_DOES_NOT_EXIST );
+        return true;
+    }
+
+    // 인가 — Replaces 발신자와 대상 호 당사자는 같은 픽업 그룹이어야 한다(§6.2, 무단 가로채기 방지).
+    //   대상 호의 당사자 = 대상 leg 의 상대(원 발신자) + 대상 leg 자신(원 착신자) 중 하나.
+    {
+        std::string strCallee, strCaller;
+        gclsUserAgent.GetToId( strTargetCallId.c_str(), strCallee );
+        gclsUserAgent.GetFromId( strTargetCallId.c_str(), strCaller );
+        CspUser clsPicker, clsCallee;
+        std::string strGP, strGC;
+        if ( gclsCspUserMap.Select( pszFrom, clsPicker ) ) strGP = clsPicker.EffectivePickupGroup();
+        if ( gclsCspUserMap.Select( strCallee.c_str(), clsCallee ) ) strGC = clsCallee.EffectivePickupGroup();
+        const bool bSelf = ( pszFrom && ( strCallee == pszFrom || strCaller == pszFrom ) );
+        if ( !bSelf && ( strGP.empty() || strGP != strGC ) ) {
+            CLog::Print( LOG_INFO, "Replaces denied — %s not same pickup group as %s (%s vs %s) → 403", pszFrom,
+                         strCallee.c_str(), strGP.c_str(), strGC.c_str() );
+            gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
+            return true;
+        }
+    }
+
+    CLog::Print( LOG_INFO, "Replaces: %s replaces dialog %s (picker %s)", pszCallId, strTargetCallId.c_str(), pszFrom );
+    int iRc = PickUpLeg( pszCallId, pszFrom, pclsRtp, strTargetCallId );
+    if ( iRc != 0 ) gclsDispatcher.StopCall( pszCallId, iRc );
+    return true;
 }

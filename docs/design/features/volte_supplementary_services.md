@@ -3,8 +3,9 @@
 > **설계 정본.** USIM 없는 관제센터용 소프트폰이 내선번호로 서로를 부르고,
 > 당겨받기(call pickup)·호 전달(call transfer)을 쓰는 시나리오의 CSP 보완 설계와 설정 규약.
 > **P0(미디어 정합 — RELAY_MODIFY·SRTP)·P1(관제 축 — 픽업 그룹·서비스별 피처코드·전달 권한)·
-> P2(표준형 — 수신 INVITE-Replaces·RFC 4235 dialog 이벤트 패키지·489)는 구현 반영, cspsim
-> 시나리오 4종·S3 검증(`S3-SCN-XFER`/`PICKUP`/`DIALOG`)으로 실측 PASS.** P3(§8)은 구현 전.
+> P2(표준형 — 수신 INVITE-Replaces·RFC 4235 dialog 이벤트 패키지·489)·P3(구조 — `CTasModule`
+> 소유 이관)은 구현 반영, cspsim 시나리오 4종·S3 검증(`S3-SCN-XFER`/`PICKUP`/`DIALOG`)으로
+> 실측 PASS.**
 >
 > 관련: [sip_access_security.md](sip_access_security.md)(인증), [sip_service_model.md](sip_service_model.md)
 > (접속서비스), [media_security.md](media_security.md)(SRTP), [volte_flows.md](volte_flows.md)(기본 호 flow),
@@ -207,20 +208,34 @@ CMP 명령 없음.
 
 ---
 
-## 8. 구현 단계
+## 8. 구현 구조
 
 P0(미디어 정합 — `RELAY_MODIFY`·SRTP)·P1(관제 축 — 픽업 그룹·서비스 플래그·그룹 인덱스)·
-P2(표준형 — 수신 INVITE-Replaces·dialog 이벤트 패키지·489)는 모두 구현 반영이다
-(§5·§6·§7·§10). 잔여 단계:
+P2(표준형 — 수신 INVITE-Replaces·dialog 이벤트 패키지·489)·P3(구조 — 모듈 이관)은 모두
+구현 반영이다 (§5·§6·§7·§10).
 
-| 단계 | 내용 | 갭 |
-|---|---|---|
-| **P3** | 구조 정리 — 보조 서비스(DND/전환/픽업/전달)를 `IModule` 훅 경유 `CTasModule` 로 이관 (현재 스텁·미호출). 기능 동결 상태에서 별도 수행 | — |
+**모듈 구조 (P3)**: 보조 서비스 로직은 **`CTasModule` 소유**다 — `ModuleDispatcher` 는 B2BUA
+골격(라우팅·relay 수명)만 유지하고, 각 이벤트 시점에 `IModule` 훅으로 위임한다
+(TAS 역할 off 시 보조 서비스 전체 비활성 — 모듈 게이트).
+
+| CTasModule 진입점 | 담당 |
+|---|---|
+| `OnSipRequest` | REFER 게이트 — `transfer_allowed=false` 403 (§6.3) |
+| `OnIncomingCall` | 수신 INVITE-Replaces(RFC 3891) → `PickUpLeg` 교체 (§6.2) |
+| `OnCallRing` / `OnCallStart` / `OnCallEnd` | dialog-event early/confirmed/terminated 통지 (§6.2) + blind transfer 진행 NOTIFY·완결(재고정·재결합)·실패 정리 (§6.1) |
+| `OnTransfer` / `OnBlindTransfer` | attended / blind transfer (§6) |
+| `ScreenInvite` | RecvRequest INVITE 조기 스크린 — DND/착신거부 603 (다이얼로그 생성 전) |
+| `TryPickupDial` | 미등록 착신의 픽업 피처코드 판정·수행 (§5.2) |
+| `ApplyTerminationServices` | 착신 가입자 DND/착신거부 603·착신전환 302 |
+
+relay leg SDES 평가/재작성 헬퍼(`EvalRelayOfferSdes`/`ApplyRelayLegOffer`/`EvalRelayAnswerSdes`/
+`ReadReinviteSdes`/`RewriteRelaySdpForLeg`)는 `MediaSdes` 네임스페이스에 있고 디스패처(B2BUA
+정상 경로)와 TAS(픽업·전달 재고정)가 공용한다 ([media_security.md](media_security.md) §5.2).
 
 **P2 상세**: (a) 수신 INVITE-with-Replaces — `HandleIncomingReplaces`(§6.2). (b) dialog 이벤트
 패키지 — `CscfModule` SUBSCRIBE 에 `dialog` 분기 + 같은 픽업 그룹 인가(403), `CspServer` 에
-dialog-info NOTIFY 빌더·발신(`SendDialogEventNotify`), `ModuleDispatcher` 의 `EventCallRing/Start/
-End` 에서 호 상태(early/confirmed/terminated) 트리거. picker 는 NOTIFY 의 `call-id`(+태그)로
+dialog-info NOTIFY 빌더·발신(`SendDialogEventNotify`), `CTasModule` 의 `OnCallRing/Start/End`
+에서 호 상태(early/confirmed/terminated) 트리거. picker 는 NOTIFY 의 `call-id`(+태그)로
 INVITE-Replaces 를 조립한다. (c) 미지 Event → 489 Bad Event(구 `else→gms` 오분류 제거). BLF
 클릭 픽업 = dialog 구독으로 링잉 leg 를 알고(G5) 그 leg 를 Replaces 로 가져온다(G4).
 

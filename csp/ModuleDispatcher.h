@@ -95,25 +95,6 @@ public:
     bool ProxyInvite( CSipMessage *pclsMessage, const char *pszDestIp, int iDestPort, ESipTransport eTransport );
 
 private:
-    /** 당겨받기 (volte_supplementary_services.md §5). pszTarget: 지정 픽업 대상 내선
-     *  (NULL/빈 값 = 그룹 픽업 — 발신자의 픽업 그룹에서 링 중인 아무 호). */
-    void PickUp( const char *pszCallId, const char *pszFrom, const char *pszTarget, CSipCallRtp *pclsRtp );
-
-    /** 픽업 다이얼 판정 (§5.2) — 발신 가입자 접속서비스의 pickup_feature_code (필드 미지정 시
-     *  전역 Setup.Sip.CallPickupId 폴백, 빈 값=비활성). "<code>"=그룹 픽업(strTarget 빈 값),
-     *  "<code><내선>"=지정 픽업(strTarget=내선). */
-    bool IsPickupDial( const char *pszFrom, const char *pszTo, std::string &strTarget );
-
-    /** 당겨받기 재고정 코어 — 링잉/대상 leg(strOldCallId)를 pszCallId(신규 단말)로 재키잉하고
-     *  relay 를 RELAY_MODIFY 로 재고정한다. PickUp(피처코드)과 INVITE-Replaces(RFC 3891) 공용.
-     *  반환 0=성공(양측 200 발신 완료), >0=실패 SIP 코드(호출자가 pszCallId 에 응답). */
-    int PickUpLeg( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp, const std::string &strOldCallId );
-
-    /** 수신 INVITE 의 Replaces(RFC 3891) 처리 — 헤더가 있으면 대상 다이얼로그를 찾아 pszCallId 로
-     *  교체(당겨받기/attended 완결)하고 true. 헤더가 없으면 false(정상 호 처리 계속). */
-    bool HandleIncomingReplaces( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
-                                 CSipMessage *pclsMessage );
-
     CCscfModule m_clsCscf;
     CTasModule m_clsTas;
     CPttAsModule m_clsPttAs;

@@ -73,6 +73,37 @@ namespace MediaSdes {
     void ApplyCrypto( SDP_MEDIA_LIST &clsList, const char *pszMedia, const std::string &strProto,
                       const std::string &strTag, const std::string &strSuite, const std::string &strInline );
 
+    // ── VoLTE relay leg 종단 — leg 별 SDES 평가·재작성 (media_security.md §5.2) ──
+    //    relay 는 media-list passthrough 라 수신 crypto 를 그대로 흘리면 단말끼리 E2E SRTP 를
+    //    협상해 CMP 종단(녹취·NAT latch 판정)이 깨진다. 모든 전달 지점에서 crypto 라인을 벗기고
+    //    그 leg 의 협상 상태(CallMap RelaySdesLeg)로 다시 싣는다. B2BUA(ModuleDispatcher)와
+    //    보조 서비스(TasModule — 픽업·전달)가 공용한다.
+
+    /** 발신(offer) leg 의 한 미디어 평가 — 정책(media_srtp: off/optional/required)×offer 내용 → leg 상태.
+     *  반환 1=SRTP(서버 키 생성) / 0=평문 / -1=협상 실패(488). */
+    int EvalRelayOfferSdes( const std::string &strSrtpPolicy, const SDP_MEDIA_LIST &clsList, const char *pszMedia,
+                            RelaySdesMedia &clsOut );
+
+    /** 상대(offer 전달) leg 의 한 미디어 재작성 — SRTP 면 서버 키 생성+SAVP+a=crypto, 평문이면 RTP/AVP
+     *  정규화(반대 leg 가 SAVP 로 왔어도 이 leg 는 평문). 반환 false = 키 생성 실패. 미디어 비활성 = true. */
+    bool ApplyRelayLegOffer( SDP_MEDIA_LIST &clsList, const char *pszMedia, bool bSrtp, RelaySdesMedia &clsOut );
+
+    /** answer leg 의 한 미디어 검증·UE 키 확정 — SAVP offer 미디어는 같은 suite 의 유효 crypto 가
+     *  있어야 한다(평문 폴백 금지). 미디어 거절(port 0)은 그 미디어만 비활성.
+     *  반환 false = 협상 실패(호출자가 호 종료). */
+    bool EvalRelayAnswerSdes( const SDP_MEDIA_LIST &clsList, const char *pszMedia, RelaySdesMedia &clsLeg,
+                              CmpMediaCrypto &clsOut );
+
+    /** 재협상 offer/answer 의 한 미디어 — SRTP leg 는 UE 재키잉만 반영(서버 키 유지: 이 leg 의 200 OK 는
+     *  psip 이 기존 local SDP 로 답한다). crypto 소거 offer 는 키 유지 + ERROR(강등 수용 금지 —
+     *  이후 unprotect 실패는 srtp_drop 으로 드러남). 동일 선언 재전송 = CMP 세션 유지. */
+    void ReadReinviteSdes( const SDP_MEDIA_LIST &clsList, const char *pszMedia, int iPeerIdx, RelaySdesMedia &clsLeg,
+                           CmpMediaCrypto &clsOut );
+
+    /** 상대 leg 로 나가는 SDP 를 그 leg 의 SDES 상태로 재작성. bOffer=true 면 protocol 을 상태로
+     *  결정(SAVP/AVP), false(answer)면 그 leg offer 의 protocol echo. */
+    void RewriteRelaySdpForLeg( SDP_MEDIA_LIST &clsList, const RelaySdesLeg &clsLeg, bool bOffer );
+
 }  // namespace MediaSdes
 
 #endif
