@@ -368,6 +368,44 @@ _priv_dpkg_install() {
     return 2
 }
 
+do_module_deps_install() {   # <module-vendor-dir> — 모듈 패키지가 들고 온 deb 를 설치
+    local dir="$1"
+    [[ "$dir" == /* && "$dir" != *..* ]] || { err "module-deps: absolute path without '..' required"; exit 2; }
+    # 모듈 설치 트리 밑만 허용 — 임의 경로의 deb 설치를 특권으로 열어주지 않는다.
+    [[ "$dir" == */modules/*/vendor || "$dir" == */modules/*/*/vendor ]] \
+        || { err "module-deps: <install>/modules/<mod>/[<ver>/]vendor 경로만 허용: $dir"; exit 2; }
+    [[ -d "$dir" ]] || { err "module-deps: not a directory: $dir"; exit 2; }
+
+    local debs=() d
+    for d in "$dir"/*.deb; do [[ -e "$d" ]] && debs+=("$d"); done
+    [[ ${#debs[@]} -eq 0 ]] && { ok "module deps 없음 ($dir)"; return 0; }
+
+    # 이미 모두 정상 설치면 dpkg 를 부르지 않는다 — 모듈 재설치마다 dpkg 락을 잡을 이유가 없다.
+    local missing="" name
+    for d in "${debs[@]}"; do
+        name=$(dpkg-deb -f "$d" Package 2>/dev/null) || continue
+        _pkg_healthy "$name" || missing+=" $name"
+    done
+    if [[ -z "$missing" ]]; then
+        ok "module deps 완비 (${#debs[@]} deb — 설치 불필요)"
+        return 0
+    fi
+
+    info "module deps 미완비:$missing → offline 설치 (${#debs[@]} deb)"
+    local rc=0
+    _priv_dpkg_install "${debs[@]}" || rc=$?
+    if [[ $rc -eq 2 ]]; then
+        err "module deps 설치 보류 — dpkg 락 경합 (다음 설치/기동 시 재시도)"; exit 3
+    elif [[ $rc -ne 0 ]]; then
+        _cims_dpkg apt-get -o DPkg::Lock::Timeout=100 -y --fix-broken install >/dev/null 2>&1 || true
+        if ! _priv_dpkg_install "${debs[@]}"; then
+            err "module deps 설치 실패: $(tail -3 /tmp/cims-priv.err 2>/dev/null)"; exit 3
+        fi
+    fi
+    ok "module deps 설치 완료 (${#debs[@]} deb)"
+    rm -f /tmp/cims-priv.err
+}
+
 do_base_deps_status() {   # 0=완비, 1=미완비. vendor deb 의 Package 들이 설치돼 있는지만 본다.
     local missing="" d name
     for d in "$VENDOR_DIR"/*/*.deb; do
@@ -547,6 +585,10 @@ case "${1:-}" in
     policy-rc-clear)
         [[ $# -eq 1 ]] || { err "usage: cims-priv policy-rc-clear"; exit 1; }
         do_policy_rc_clear
+        ;;
+    module-deps-install)
+        [[ $# -eq 2 ]] || { err "usage: cims-priv module-deps-install <module-vendor-dir>"; exit 1; }
+        do_module_deps_install "$2"
         ;;
     setcap-net-admin)
         [[ $# -eq 2 ]] || { err "usage: cims-priv setcap-net-admin <bin>"; exit 1; }

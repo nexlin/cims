@@ -35,7 +35,7 @@ set(PKG_BASE ${CMAKE_CURRENT_SOURCE_DIR}/pkg)
 set(PASF     pasf)
 set(PASF_DIR ${EXT_DIR}/${PASF})
 set(PASF_INC ${PASF_DIR}/include)
-set(PASF_LIB_PATH ${PASF_DIR}/lib})
+set(PASF_LIB_PATH ${PASF_DIR}/lib)
 set(PASF_BIN_PATH ${TMPA_BIN_PATH})
 set(PASF_LIB ${PASF})
 set(BUILD_BASE ${CMAKE_CURRENT_SOURCE_DIR}/build)
@@ -309,8 +309,8 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/cmdp/log
 
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/bin
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/lib
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/config
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/vendor
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/cert
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/user
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/group
@@ -372,11 +372,15 @@ add_custom_target(dist
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/Group       ${CMAKE_BINARY_DIR}/dist/csp/group
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/dist/csp/route
 
-    # ── 4b. CSP 동적 의존 라이브러리 vendoring (RPATH=$ORIGIN/../lib) ───
-    #    libmariadb3 시스템 미설치 호스트에서도 csp 단독 구동 가능.
-    #    MARIADB_LIB_ACTUAL = find_library 결과의 REALPATH (csp/CMakeLists 에서 cache).
-    #    SONAME (libmariadb.so.3) 으로 명시적 rename — csp binary 가 그 이름으로 dlopen.
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${MARIADB_LIB_ACTUAL} ${CMAKE_BINARY_DIR}/dist/csp/lib/libmariadb.so.3
+    # ── 4b. CSP OS 의존 deb 동봉 (air-gapped 정식 설치) ────────
+    #    csp 는 C++ 바이너리라 libmariadb.so.3 가 실행 전제다(가입자·그룹 DB). apt repo 가
+    #    없는 노드를 위해 deb 를 패키지에 싣고, agent 가 **모듈 설치 시점에** dpkg 로 설치한다
+    #    (cims_agent `_install_module_deps` → cims-priv `module-deps-install`).
+    #    옛 방식(.so 를 csp/lib/ 에 복사 + RPATH `$ORIGIN/../lib`)은 대상에서 설치가 일어나지
+    #    않아 dpkg/ldconfig 가 존재를 모르고, 실행 파일의 상대 경로 규칙 하나에만 의존했다.
+    #    그 규칙은 파일 capability 가 붙는 순간 무효가 된다(AT_SECURE — 커널이 $ORIGIN 무시).
+    #    IPsec 용 setcap 이 걸리자 csp 가 "cannot open shared object file" 로 즉시 죽었다.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/csp/vendor ${CMAKE_BINARY_DIR}/dist/csp/vendor
 
     # ── 5. 인증서 복사 ─────────────────────────────────────────
     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/csp/csp.pem  ${CMAKE_BINARY_DIR}/dist/csp/cert/

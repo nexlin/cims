@@ -23,12 +23,6 @@ if(NOT MARIADB_INCLUDE_DIR)
 endif()
 message(STATUS "MariaDB lib: ${MARIADB_LIB}, include: ${MARIADB_INCLUDE_DIR}")
 
-# REALPATH 계산 — find_library 가 symlink (libmariadb.so) 를 잡았을 경우
-# main CMakeLists 의 dist target 이 실제 .so.3 파일을 복사할 수 있게 cache 에 노출.
-get_filename_component(MARIADB_LIB_ACTUAL ${MARIADB_LIB} REALPATH)
-set(MARIADB_LIB_ACTUAL "${MARIADB_LIB_ACTUAL}" CACHE INTERNAL "Resolved libmariadb path for vendoring")
-message(STATUS "MariaDB lib (resolved): ${MARIADB_LIB_ACTUAL}")
-
 # hiredis (Phase 1.D-2 — HA register state replication, optional).
 # 미설치 시 RedisStore 가 cold-mode (Init 가 false 반환) — fail-over 시 단말 재 REGISTER 로 복원.
 # 활성: sudo apt-get install -y libhiredis-dev
@@ -54,13 +48,19 @@ file(GLOB SRCS "*.cpp")
 # Define the executable
 add_executable(csp ${SRCS})
 
-# RPATH 박기 — 배포 시 csp/lib/ 의 vendored libmariadb 우선 사용.
-# `$ORIGIN/../lib` = bin/csp 기준 ../lib/ → csp/lib/libmariadb.so.3.
-# 시스템에 libmariadb3 가 없어도 패키지 단독 구동 가능.
+# 빌드 트리 경로가 RUNPATH 로 새는 것을 막는다 — LINK_DIRECTORIES(ext/pasf/lib) 를 CMake 가
+# 자동으로 RUNPATH 에 넣는데, 그 경로는 대상 노드에 존재하지 않는다(빌드 장비 절대경로).
+# 지금은 pasf 를 정적 링크해 무해하지만, 배포 바이너리에 빌드 환경을 새기지 않는다.
 set_target_properties(csp PROPERTIES
+    SKIP_BUILD_RPATH TRUE
     BUILD_WITH_INSTALL_RPATH TRUE
-    INSTALL_RPATH "$ORIGIN/../lib"
+    INSTALL_RPATH ""
 )
+
+# RPATH 를 박지 않는다 — libmariadb3 는 대상 노드에 **정식 설치**된다
+# (agent/vendor/mariadb/*.deb + cims-priv ensure-base-deps → /usr/lib/x86_64-linux-gnu/).
+# `$ORIGIN/../lib` 방식은 파일 capability(IPsec 용 setcap CAP_NET_ADMIN)가 붙는 순간
+# 커널이 AT_SECURE 로 취급해 무시하므로, 특권이 필요한 바이너리에서는 성립하지 않는다.
 
 # Include directories (Propagated from targets but adding explicit just in case)
 target_include_directories(csp PUBLIC

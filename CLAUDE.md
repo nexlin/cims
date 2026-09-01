@@ -43,6 +43,8 @@ sudo apt-get install -y cmake build-essential libssl-dev libmariadb-dev clang-fo
 `libmariadb-dev` 는 MariaDB **클라이언트 라이브러리·헤더** (DB 서버 아님) — CSP 빌드 필수
 (`csp/CMakeLists.txt` 가 없으면 configure 중단). MariaDB 서버는 별도 장비에 둘 수 있다
 ([docs/DEV_SERVER_SETUP.md](docs/DEV_SERVER_SETUP.md) §1.2, §6).
+배포 대상 노드에는 이 패키지를 따로 깔지 않는다 — CSP 패키지가 `csp/vendor/*.deb` 로 런타임
+라이브러리를 동봉하고, agent 가 모듈 설치 시점에 설치한다 (`csp/vendor/README.md`).
 `clang-format` 은 검증 stage 1 (`S1-CPP-FORMAT`) 의 정적 검사용. 미설치 시 SKIP.
 
 **Build** (out-of-source, 레포 루트에서):

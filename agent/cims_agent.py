@@ -1135,6 +1135,39 @@ def _runtime_install_path(params: dict) -> str:
     return legacy
 
 
+def _install_module_deps(module_root: str, install_path: str) -> str:
+    """모듈 패키지가 동봉한 OS 의존 deb 를 설치한다 (`<install>/<모듈>/vendor/*.deb`).
+
+    air-gapped 노드엔 apt repo 가 없으므로 필요한 라이브러리를 패키지가 직접 들고 온다.
+    **모듈 설치 시점에** 설치하는 이유: 그 의존은 그 모듈의 것이다. agent 의
+    `vendor/`(keepalived·nfs·base)처럼 전 노드 균일 설치로 두면, 그 모듈이 없는 노드에도
+    라이브러리가 깔린다.
+
+    CSP 는 C++ 바이너리라 `libmariadb.so.3` 가 실행 전제다(가입자·그룹 DB). 옛 방식은 빌드
+    장비의 .so 를 패키지에 복사하고 RPATH `$ORIGIN/../lib` 로 참조했는데, 파일 capability 가
+    붙으면 커널이 AT_SECURE 로 취급해 $ORIGIN 을 무시한다 — IPsec 용 setcap 이 걸리자 CSP 가
+    "cannot open shared object file" 로 즉시 죽었다. 표준 경로 설치라야 capability 와 무관하다.
+
+    설치 실패는 로그만 남긴다 — 기동 실패는 모듈 자신이 보고한다. 반환: 로그용 짧은 문자열.
+    """
+    name = os.path.basename((module_root or "").rstrip("/"))
+    if not name:
+        return ""
+    # 버전 디렉토리 레이아웃은 <install>/<모듈>/vendor — 평탄 <install>/vendor 는 legacy.
+    vdir = os.path.join(install_path, name, "vendor")
+    if not os.path.isdir(vdir):
+        vdir = os.path.join(install_path, "vendor")
+    if not os.path.isdir(vdir):
+        return ""
+    if not any(f.endswith(".deb") for f in os.listdir(vdir)):
+        return ""
+    rc, out, err = _run_cims_priv("module-deps-install", vdir, timeout=300)
+    if rc == 0:
+        return " deps"
+    print(f"[agent] {name}: 동봉 의존 설치 실패 rc={rc} ({(err or out).strip()[:160]})", flush=True)
+    return ""
+
+
 def _grant_ipsec_capability(module_root: str, install_path: str) -> str:
     """csp/cspsim 실행 파일에 CAP_NET_ADMIN 파일 capability 를 건다 (cims-priv setcap-net-admin,
     sip_access_security.md §8.3 — IMS AKA+IPsec 의 커널 XFRM SA 프로그래밍). 파일이 교체되는
@@ -1478,6 +1511,8 @@ def job_install(params: dict, oam_url: str, session_token: str) -> tuple:
     if module_root:
         if _flip_current(module_root, install_path):
             flipped = " current->" + os.path.basename(install_path)
+        # 의존 설치가 먼저다 — 라이브러리가 없으면 capability 를 걸어도 실행되지 않는다.
+        flipped += _install_module_deps(module_root, install_path)
         flipped += _grant_ipsec_capability(module_root, install_path)
 
     pruned = ""
@@ -4583,6 +4618,9 @@ def job_process_control(params: dict, job_type: str) -> tuple:
         if os.path.islink(cur_path) or os.path.exists(cur_path):
             prev_vdir = os.path.realpath(cur_path)
         _flip_current(module_root, install_path)
+        # 롤백으로 옛 버전이 활성화되는 경로 — 그 버전이 요구하는 의존이 다를 수 있다.
+        # 이미 완비면 cims-priv 가 dpkg 를 부르지 않고 즉시 반환한다(기동 지연 없음).
+        _install_module_deps(module_root, install_path)
         _grant_ipsec_capability(module_root, install_path)
 
     # stale-stop: 타겟 버전 밖에서 도는 인스턴스(구버전)를 먼저 stop → 포트 바인드 충돌

@@ -241,9 +241,28 @@ per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가
 
 | 계층 | 주체 | 책임 | 패키지 제거 |
 |---|---|---|---|
-| L1 노드 base | `cims-priv do_ensure_base_deps` (agent 기동마다) | vendor deb 균일 설치 + 무결성 복구 | **안 함** |
+| L1 노드 base | `cims-priv do_ensure_base_deps` (agent 기동마다) | agent `vendor/` deb 균일 설치 + 무결성 복구 | **안 함** |
+| L1' 모듈 의존 | `cims-priv module-deps-install` (모듈 install·start·restart) | 그 **모듈 패키지가 동봉한** deb 설치 | **안 함** |
 | L2 HA 무장/해제 | `cims-ha apply` / `cims-ha disarm` (`job_update_ha`) | conf·unit·스크립트 스테이징, keepalived 기동/정지 | **안 함** |
 | L3 노드 철거 | `uninstall.sh` → `cims-ha purge` | CIMS 소유 구성 제거 후 패키지 제거 | **여기서만** |
+
+**L1 과 L1' 의 경계 — 누구의 의존인가.** agent `vendor/`(keepalived·nfs·base)는 노드가 그
+기능을 쓰든 안 쓰든 필요한 **OS base** 라 균일 설치한다. 반면 모듈 고유 의존은 그 모듈이
+설치되는 노드에만 들어간다 — CSP 가 없는 노드(CMP 전용 등)에 MariaDB 클라이언트를 깔 이유가
+없다. 그래서 모듈 패키지가 자기 deb 를 `<모듈>/vendor/*.deb` 로 들고 다니고, agent 의
+`_install_module_deps` 가 설치·기동 시점에 `cims-priv module-deps-install` 로 설치한다
+(이미 완비면 dpkg 를 부르지 않는다 — 기동 지연 없음).
+
+현재 대상: **CSP** — `libmariadb3`(+`mariadb-common`·`mysql-common`). CSP 는 C++ 바이너리라
+네이티브 `libmariadb.so.3` 가 실행 전제다. `csp/vendor/README.md` 가 폐쇄집합·배경의 정본.
+> CSC/OAM 은 순수 파이썬 드라이버(`pymysql`)를 `<모듈>/vendor/` 로 실어 보내므로 OS 패키지가
+> 필요 없다 — 같은 DB 를 보지만 네이티브 라이브러리 의존이 없다.
+
+> **`.so` 를 패키지에 복사하는 방식은 쓰지 않는다.** 대상에서 설치가 일어나지 않아
+> `dpkg`·`ldconfig` 가 존재를 모르고, 실행 파일 RPATH(`$ORIGIN/../lib`) 하나에만 의존한다.
+> 그 규칙은 파일 capability 가 붙는 순간 무효다 — 커널이 특권 바이너리를 `AT_SECURE` 로
+> 취급해 `$ORIGIN`·`LD_LIBRARY_PATH` 를 무시한다. IPsec 용 `setcap-net-admin` 이 csp 에
+> `CAP_NET_ADMIN` 을 걸자 `libmariadb.so.3: cannot open shared object file` 로 즉사했다.
 
 **소유 경계** — `cims-ha` 가 `/etc/keepalived` 에서 만들고 지우는 것은 아래뿐이다
 (`_ha_staged_pairs`/`_ha_owned_paths` 가 단일 정의, apply 와 disarm 이 같은 목록을 쓴다):
