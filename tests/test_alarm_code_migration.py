@@ -252,9 +252,14 @@ class TestSipStatsSelfReport(unittest.TestCase):
         with open(p, encoding='utf-8') as f:
             d = json.load(f)
         codes = {a['code']: a for a in d['alarms']}
-        for c in ('A-QOS-006', 'A-QOS-007', 'A-QOS-009', 'A-QOS-011'):
+        # 클래스는 code 별로 갈린다 — 분류 축은 매체가 아니라 잃은 능력(표준화 §3.5).
+        #   성공률 저하는 품질, 수용 상한 접근은 용량, 그 외 단순 임계는 threshold_crossed.
+        for c, t in (('A-QOS-006', 'quality_degraded'),
+                     ('A-QOS-007', 'quality_degraded'),
+                     ('A-QOS-009', 'capacity_threshold'),
+                     ('A-QOS-011', 'threshold_crossed')):
             self.assertIn(c, codes, f"csp fm_catalog 에 {c} 미선언")
-            self.assertEqual(codes[c]['type'], 'threshold_crossed', c)
+            self.assertEqual(codes[c]['type'], t, c)
         for c in ('A-SEC-003', 'A-SEC-004'):
             self.assertIn(c, codes, f'csp fm_catalog 에 {c} 미선언')
             self.assertEqual(codes[c]['type'], 'security_violation', c)

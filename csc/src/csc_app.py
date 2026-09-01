@@ -362,6 +362,7 @@ if __name__ == '__main__':
             catalog_file=os.path.join(_COMPONENT_ROOT, 'config', 'fm_catalog.json'),
             log=logger)
         _fm_db_probe = None
+        _fm_cert_probe = None
         if _fm:
             # mo 는 서버명 루트 <node>/<module>[/<component>] (표준화 §3.4(b)).
             _fm.send_event('process_started', mo=f'{_system_id}/csc')
@@ -375,6 +376,21 @@ if __name__ == '__main__':
                             else _fm.alarm_open('A-COM-001', _db_mo, params=_db_params)),
                 log=logger)
             _fm_db_probe.start()
+
+            # 자기 HTTPS 인증서 만료 임박 (A-PRC-009) — 자기 파일이라 자기가 본다.
+            #   OAM 은 형제 모듈의 runtime/cert 경로를 알지 못한다. 같은 정의 코드를
+            #   CSP(SIP TLS)·OAM(자기 HTTPS·agent mTLS CA)이 각자의 mo 로 나눠 감지한다.
+            if ssl_certfile:
+                _cert_mo = f'{_system_id}/csc/cert/https'
+                _fm_cert_probe = fm_reporter.CertExpiryProbe(
+                    ssl_certfile, _cert_mo,
+                    lambda params, sev: _fm.alarm_open('A-PRC-009', _cert_mo,
+                                                       params=params, severity=sev),
+                    lambda: _fm.alarm_close('A-PRC-009', _cert_mo),
+                    log=logger)
+                _fm_cert_probe.start()
+            else:
+                logger.log_info('[fm] cert probe 비활성 — HTTPS 미사용(server.crt 없음)')
 
         # ── SIGTERM = graceful stop — process_stopping 이벤트 후 서버 정리 ──
         # (종전: 핸들러 부재 → 파이썬 기본 동작으로 즉사, 종료 통지 불가)
@@ -404,6 +420,8 @@ if __name__ == '__main__':
             time.sleep(1)          # ack/재전송 1회 여유 (best-effort)
             if _fm_db_probe:
                 _fm_db_probe.stop()
+            if _fm_cert_probe:
+                _fm_cert_probe.stop()
             _fm.stop()
         if admin_server:  admin_server.stop(5)
         if mcptt_server:  mcptt_server.stop(5)

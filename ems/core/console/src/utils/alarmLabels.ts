@@ -1,14 +1,17 @@
 // 알람/이벤트 표시 어휘 — 단일 정의 (AlertsPage / ActiveAlarmsPage / AlarmCatalogPage 공유).
-//   클래스(type) 한글 라벨은 alarm_catalog.md §4 의 21클래스 + 구 슬러그 하위호환.
+//   클래스(type) 한글 라벨은 alarm_catalog.md §4 의 25클래스 + 구 슬러그 하위호환.
 //   심각도 배지/서열은 X.733 perceived severity 6단계.
 
-// ── 알람 조건 클래스 (21종, alarm_catalog.md §4) ─────────────────────────────
+// ── 알람 조건 클래스 (25종, alarm_catalog.md §4) ─────────────────────────────
 export const ALARM_TYPE_LABEL: Record<string, string> = {
   // COM
   connection_lost: '연결 끊김',
   delivery_failed: '전달 실패',
   // QOS
+  capacity_threshold: '용량 임계',
+  quality_degraded: '품질 저하',
   threshold_crossed: '임계 초과',
+  safety_critical_failure: '안전 기능 실패',
   resource_exhausted: '자원 고갈',
   capacity_degraded: '용량 미달',
   resource_leak: '자원 누수',
@@ -20,6 +23,7 @@ export const ALARM_TYPE_LABEL: Record<string, string> = {
   crash_loop: '재기동 반복 실패',
   listener_unavailable: '접속점 불능',
   storage_failure: '저장소 장애',
+  retention_failure: '보존 기록 실패',
   config_invalid: '설정 결함',
   config_out_of_sync: '설정 불일치',
   state_out_of_sync: '상태 부정합',

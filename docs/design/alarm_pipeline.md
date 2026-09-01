@@ -45,9 +45,9 @@ OAM 자체판정 (drift 등) ── (OAM 내부) ──────────�
 
 | 주체 (detected_by) | 관측 | 판정 위치 | 발생물 | 발화 절차 |
 |---|---|---|---|---|
-| **L1 `agent`** | 노드 로컬 — 프로세스 생존, 호스트 자원, 설정 해시, HA 전이 | **OAM**(agent 는 원시 관측만 보고) | process_down·threshold_crossed(host)·config_out_of_sync·ha_flap + `process_died` 이벤트 | agent 가 metric 에 관측 필드 동봉 → OAM `_eval_agent_rule` 이 rule 평가·전이 |
+| **L1 `agent`** | 노드 로컬 — 프로세스 생존, 호스트 자원, 설정 해시, HA 전이 | **OAM**(agent 는 원시 관측만 보고) | process_down·capacity_threshold(host)·config_out_of_sync·ha_flap + `process_died` 이벤트 | agent 가 metric 에 관측 필드 동봉 → OAM `_eval_agent_rule` 이 rule 평가·전이 |
 | **L2 `self`** | 모듈 내부 — DB 연결, 자원 풀, 스토어, 내부 상태 | **모듈**(전이 판정까지 모듈 소관) | fm_catalog 등재 알람 + 이벤트 | 모듈이 open/close 전이 시점에 FM_ALARM/FM_EVENT 발신 (조건·임계는 모듈 설정 소유) |
-| **L3 `oam-svc`/`oam`** | 원격 응답성 — STATS probe, DB SELECT, RTP 사용률 | **OAM**(sweeper rule) | process_unresponsive·connection_lost(db)·threshold_crossed(rtp) | 주기 스윕(30s)이 probe 후 전이 |
+| **L3 `oam-svc`/`oam`** | 원격 응답성 — STATS probe, DB SELECT, RTP 사용률 | **OAM**(sweeper rule) | process_unresponsive·connection_lost(db)·capacity_threshold(rtp) | 주기 스윕(30s)이 probe 후 전이 |
 | **OAM 자체 (`oam`)** | 관리평면 정합 — HA fan-out drift 등 | **OAM** | config_out_of_sync(HA) | drift sweeper 가 판정·전이 |
 
 - **판정은 감지 주체 소관, 기록은 OAM 소관.** L2 만 전이 판정이 모듈에 있고(활성 알람 SoT =

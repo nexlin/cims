@@ -68,16 +68,31 @@ def partition_of(detected_by: str, akey: str) -> str:
 def restore_open_state(service_log_dir: str, scope: str = 'all', days: int = 30,
                        log=None) -> dict:
     """기동 시 활성 알람 복원. scope: 'service'=OAM 관측 계열(oam-svc/oam),
-    'agent'=agent 계열, 'self'=모듈 자기보고, 'all'=자기보고 제외 전부(role=all 대행).
+    'agent'=agent 계열, 'self'=모듈 자기보고, 'all'=자기보고 제외 전부(role=all 대행),
+    **'base'=agent 계열 + base 자신이 발화한 것**(detected_by='oam').
     분리 배포에서 base/oam-svc/FM ingest 가 각자 소유 계열만 추적하도록 나눈다 —
-    파티션 판정은 partition_of (detected_by 일원화)."""
+    파티션 판정은 partition_of (detected_by 일원화).
+
+    `'base'` 가 따로 있는 이유: `partition_of` 는 `oam`·`oam-svc` 를 같은 `service`
+    파티션으로 묶는데, 분리 배포(role=base)의 base 는 `scope='agent'` 만 복원해서
+    **자기가 `detected_by='oam'` 으로 발화한 알람을 재기동 후 못 찾았다** — 닫아야 할
+    때 in-memory 에 키가 없어 close 가 발행되지 않고 영구 미해소로 남는다(실측:
+    detected_by=oam 이 open 10 / close 7). 파티션 분류는 그대로 두고 복원 조건만
+    detected_by 로 정밀화한다 (drift_sweeper.drift_open_keys 와 같은 규약).
+    드리프트 계열(A-PRC-003 @ `<그룹명>/config/<coll>`)은 `_drift_open` 이 따로
+    복원하므로 여기에도 함께 들어오지만, base 의 `_alert_open` 쪽에서는 평가 주체가
+    없어 무해하다(다음 기동 시 close 반영으로 자연 정리)."""
     from services import alert_log
     state: dict = {}
     if not service_log_dir:
         return state
     try:
         meta = alert_log.compute_open_state(service_log_dir, days=days, with_meta=True)
-        if scope in ('self', 'service', 'agent'):
+        if scope == 'base':
+            meta = {k: m for k, m in meta.items()
+                    if partition_of(m.get('detected_by'), k) == 'agent'
+                    or (m.get('detected_by') or '') == 'oam'}
+        elif scope in ('self', 'service', 'agent'):
             meta = {k: m for k, m in meta.items()
                     if partition_of(m.get('detected_by'), k) == scope}
         else:   # 'all' — 자기보고(self)는 FM ingest 가 자체 복원
@@ -298,6 +313,44 @@ def build_mo_label_resolver(config):
         nm = names.get(root)
         return f"{nm}{sep}{rest}" if nm else mo
     return label
+
+
+def cert_earliest_days_left(path):
+    """인증서 파일의 **가장 이른 만료**까지 남은 일수 — A-PRC-009 cert_expiring 판정 공용.
+
+    반환 `(days_left, not_after_iso)`, 읽기/파싱 실패 시 `(None, None)`.
+    체인 PEM(leaf+CA)이면 CA 만료도 함께 걸린다 — leaf 만 보면 CA 가 먼저 죽는 구성을
+    놓친다(csp/CspListenerManager.cpp `_certEarliestDaysLeft` 와 같은 규약).
+    `openssl` CLI 는 OAM 이 CA·서버 인증서 생성에 이미 쓰는 도구라 새 의존이 아니다."""
+    import subprocess as _sp, datetime as _dt, re as _re
+    try:
+        with open(path, 'r') as f:
+            pem = f.read()
+    except OSError:
+        return None, None
+    blocks = _re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', pem, _re.S)
+    if not blocks:
+        return None, None
+    earliest = None
+    for b in blocks:
+        try:
+            r = _sp.run(['openssl', 'x509', '-noout', '-enddate'], input=b,
+                        capture_output=True, text=True, timeout=10)
+            if r.returncode != 0:
+                continue
+            raw = (r.stdout or '').strip()
+            if not raw.startswith('notAfter='):
+                continue
+            exp = _dt.datetime.strptime(raw[len('notAfter='):].strip(), '%b %d %H:%M:%S %Y %Z')
+            exp = exp.replace(tzinfo=_dt.timezone.utc)
+            if earliest is None or exp < earliest:
+                earliest = exp
+        except Exception:
+            continue
+    if earliest is None:
+        return None, None
+    return ((earliest - _dt.datetime.now(_dt.timezone.utc)).days,
+            earliest.isoformat(timespec='seconds'))
 
 
 def mgmt_mo_root(config) -> str:

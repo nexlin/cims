@@ -989,7 +989,7 @@ if __name__ == '__main__':
         _service_log = _paths2.service_log_dir(config)
         # _alert_open: { akey(code@mo_instance) : alarm_id } — 자기 소유 계열만 추적.
         _alert_open: dict = alarm_sweeper.restore_open_state(
-            _service_log, scope=('all' if role == 'all' else 'agent'), log=logger)
+            _service_log, scope=('all' if role == 'all' else 'base'), log=logger)
 
         # ── FM ingest (모듈 자기보고 — alarm_self_reporting.md) ─────────
         # 소유는 oam-svc — role=all 단일 프로세스에서만 base 가 대행 (sweeper 소유
@@ -1044,6 +1044,9 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[alarm-sweep] cold 모듈 HA 집합 계산 실패: {e}")
             return skip, must_run
+
+        # cert_expiring 판정 근거가 없는 agent — 경고 1회만 (스윕 30s 마다 반복 금지).
+        _cert_src_missing_logged: set = set()
 
         def _eval_agent_rule(rule: dict, agent: dict, metric: dict,
                              deps: list,
@@ -1137,6 +1140,42 @@ if __name__ == '__main__':
                           expected=(mis or {}).get('vip', '-'))
                 res.append((mo, mis is not None, _fmt(rule.get('msg_open'), **kw),
                             _fmt(rule.get('msg_close'), **kw), None, None))
+            elif chk == 'cert_expiring':
+                # agent 가 **서빙 중인** HTTPS 인증서의 만료 임박 — mTLS 배치면 mTLS cert,
+                #   아니면 self-signed. 만료되면 OAM→agent 명령 채널이 끊겨 배포·재시작·HA
+                #   제어가 함께 막힌다. 원본은 노드에 있어 OAM 이 파일을 읽지 못하므로
+                #   **agent 자기보고(metric.cert)가 판정 근거**다.
+                #   폴백: 보고 필드 이전의 구 agent 는 레코드 cert_expires_at(발급 시 기록,
+                #   mTLS 배치 한정)을 쓴다 — 업그레이드 과도기에 감시가 끊기지 않게.
+                #   회전/재발급이 성공하면 만료가 밀려 임계 밖으로 나가고 미평가 close 로 해제.
+                exp = (metric.get('cert') or {}).get('not_after') or agent.get('cert_expires_at')
+                if not exp:
+                    # 판정 근거 없음 = **무감시**. 조용히 빠지면 감시되는 줄 알게 되므로
+                    #   agent 당 1회 남긴다 (매 스윕 반복 금지).
+                    if agent.get('id') not in _cert_src_missing_logged:
+                        _cert_src_missing_logged.add(agent.get('id'))
+                        logger.log_warning(
+                            f"[cert-expiry] agent {host_name}: 인증서 만료 판정 근거 없음 "
+                            f"(metric.cert 미보고 · 레코드 cert_expires_at 없음) — 무감시")
+                    return res
+                try:
+                    from datetime import datetime as _dt
+                    exp_dt = _dt.fromisoformat(str(exp))
+                    days_left = (exp_dt - _dt.now(exp_dt.tzinfo)).days
+                except Exception:
+                    return res
+                _cert_src_missing_logged.discard(agent.get('id'))  # 근거 복구 — 재무장
+                # 잔여일은 "작을수록 나쁨" — staged_severity(큰 값이 나쁨)를 쓰지 않고 직접 판정.
+                thr_w = int((rule.get('thresholds') or {}).get('warning', 30))
+                thr_c = int((rule.get('thresholds') or {}).get('critical', 7))
+                is_open = days_left <= thr_w
+                sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
+                mo = f"{host}/agent/cert"
+                kw = dict(mo=mo, host=host_name, days_left=days_left,
+                          not_after=str(exp), threshold=thr_w)
+                tinfo = {'observed': days_left, 'threshold': thr_w, 'unit': rule.get('unit') or '일'}
+                res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw),
+                            _fmt(rule.get('msg_close'), **kw), tinfo, sev))
             elif chk == 'ha_flap':
                 # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
                 # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.
@@ -1289,6 +1328,57 @@ if __name__ == '__main__':
                 if r:
                     _transition(r, mo_part, 'agent', False, '',
                                 _fmt(r.get('msg_close'), mo=mo_part))
+
+        def _sweep_cert_expiry():
+            """관리평면 **파일** 인증서 만료 임박 (A-PRC-009) — 자기 HTTPS cert + agent mTLS CA.
+
+            per-agent mTLS 는 agent 계열 dispatch(check=cert_expiring)가 레코드
+            `cert_expires_at` 으로 보고, CSP SIP TLS 는 모듈 자기보고(L2)가 본다 —
+            같은 정의 코드에 mo 로 분리(표준화 §3.4(b)). 여기서 보는 것은 OAM 이 직접
+            읽을 수 있는 관리평면 파일뿐이다.
+            읽기/파싱 실패는 만료로 단정하지 않는다 — 개설 실패 축은 A-PRC-030 이 본다."""
+            try:
+                rule = next((r for r in service_registry.alert_rules(config)
+                             if r.get('check') == 'cert_expiring'), None)
+                if not rule or not _service_log:
+                    return
+                root = alarm_sweeper.mgmt_mo_root(config)
+                targets = []
+                if ssl_certfile:
+                    targets.append((f"{root}/oam/cert/https", ssl_certfile))
+                # 관리평면 CA 두 축 — **용도가 다른 별개의 CA** 라 각각 제 이름으로 본다.
+                #   ca/          그룹 CA(cert.sh `_ensure_group_ca`) — oam·oam-svc·csc 의
+                #                HTTPS 서버 인증서를 서명. 항상 존재한다.
+                #   agent_mtls/  agent mTLS CA(agent_api.py `_agent_mtls_dir`) — agent 상호인증.
+                #                Agent.MtlsEnabled 배치에만 존재하고, 없으면 조용히 건너뛴다.
+                # 하나만 보고 멈추면 나중에 mTLS 를 켰을 때 그 CA 가 영영 감시 밖에 남는다.
+                try:
+                    from services import paths as _p
+                    _sec = _p.secrets_dir(config)
+                    for _sub, _leaf in (('ca/ca.crt', 'group'), ('agent_mtls/ca.crt', 'agent_mtls')):
+                        _cand = os.path.join(_sec, _sub)
+                        if os.path.isfile(_cand):
+                            targets.append((f"{root}/oam/cert/ca/{_leaf}", _cand))
+                except Exception:
+                    pass
+                thr_w = int((rule.get('thresholds') or {}).get('warning', 30))
+                thr_c = int((rule.get('thresholds') or {}).get('critical', 7))
+                for mo, path in targets:
+                    days_left, not_after = alarm_sweeper.cert_earliest_days_left(path)
+                    if days_left is None:
+                        logger.log_warning(f"[cert-expiry] 인증서를 읽을 수 없음 ({path}) — 만료 판정 생략")
+                        continue
+                    is_open = days_left <= thr_w
+                    sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
+                    kw = dict(mo=mo, days_left=days_left, not_after=not_after, threshold=thr_w)
+                    alarm_sweeper.transition(
+                        _alert_open, _service_log, dict(rule, perceived_severity=(sev or rule.get('perceived_severity'))),
+                        mo, 'oam', is_open,
+                        _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw),
+                        threshold_info={'observed': days_left, 'threshold': thr_w,
+                                        'unit': rule.get('unit') or '일'}, log=logger)
+            except Exception as e:
+                logger.log_error(f"[cert-expiry] error: {e}")
 
         def _sweep_alerts():
             try:
@@ -1569,6 +1659,7 @@ if __name__ == '__main__':
                 _last_sweep = _now
             if _now - _last_cert_sweep >= CERT_SWEEP_INTERVAL:
                 _sweep_cert_rotate()
+                _sweep_cert_expiry()
                 _last_cert_sweep = _now
             if _now - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
                 _sweep_alerts()

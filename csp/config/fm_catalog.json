@@ -27,7 +27,7 @@
       "recommended_action": "CMP 프로세스/제어 채널(UDP 9001 계열)·네트워크 확인"
     },
     {
-      "type": "threshold_crossed",
+      "type": "quality_degraded",
       "code": "A-QOS-006",
       "perceived_severity": "minor",
       "event_type": "qualityOfService",
@@ -40,7 +40,7 @@
       "recommended_action": "실패 응답 코드 분포(params top_code)·flow 로그로 원인 축 식별, 원천(DB/CSC/CMP)·대국 상태 확인"
     },
     {
-      "type": "threshold_crossed",
+      "type": "quality_degraded",
       "code": "A-QOS-007",
       "perceived_severity": "minor",
       "event_type": "qualityOfService",
@@ -53,7 +53,7 @@
       "recommended_action": "인증 실패/원천(DB·CSC) 장애/네트워크 축 구분, 실패 코드 분포 확인"
     },
     {
-      "type": "threshold_crossed",
+      "type": "capacity_threshold",
       "code": "A-QOS-009",
       "perceived_severity": "minor",
       "event_type": "qualityOfService",

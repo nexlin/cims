@@ -73,6 +73,15 @@ cmd_sync() {
             cp -f "$SCRIPT_DIR/csc/config/config_template.json" \
                   "$DIST_DIR/csc/config/config_template.json"
         fi
+        # fm_catalog.json 동기화 (기동 시 FM_REGISTER 로 등록하는 자기보고 카탈로그 —
+        #   alarm_self_reporting.md §4). C++ 모듈(csp/cmp/cmdp)은 make dist 가 config
+        #   디렉터리를 통째로 복사해 들어가지만 csc 는 여기서만 온다 — 빠지면 새 알람
+        #   클래스를 선언해도 패키지에 실리지 않고 UNKNOWN_CODE 로 거절된다.
+        if [[ -f "$SCRIPT_DIR/csc/config/fm_catalog.json" ]]; then
+            mkdir -p "$DIST_DIR/csc/config"
+            cp -f "$SCRIPT_DIR/csc/config/fm_catalog.json" \
+                  "$DIST_DIR/csc/config/fm_catalog.json"
+        fi
         # OAM 분리 Phase 2 — pkg.json 동기화 (별도 tarball 등록에 필요)
         if [[ -f "$SCRIPT_DIR/ems/core/oam/pkg.json" ]]; then
             cp -f "$SCRIPT_DIR/ems/core/oam/pkg.json" "$DIST_DIR/oam/pkg.json"

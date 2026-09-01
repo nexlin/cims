@@ -25,6 +25,18 @@
       "msg_close": "Service log store recovered — local spool drained ({mo})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). 가입자/MCPTT API 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
+    },
+    {
+      "type": "cert_expiring",
+      "code": "A-PRC-009",
+      "perceived_severity": "warning",
+      "event_type": "processingError",
+      "probable_cause": "keyExpired",
+      "mo_class": "software",
+      "msg_open": "{mo} 인증서 만료 임박 — {days_left}일 남음 (만료 {not_after})",
+      "msg_close": "{mo} 인증서 잔여 수명 정상",
+      "effect": "만료 시 가입자/MCPTT API(IdMS·GMS·CMS·XCAP) HTTPS 접속 전면 실패 예고",
+      "recommended_action": "server.crt 재발급(배포 lifecycle cert.sh)·모듈 재시작"
     }
   ],
   "events": [

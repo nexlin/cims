@@ -51,7 +51,7 @@ import time
 import traceback
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 
 DEFAULT_STATE_DIR = os.environ.get(
     "CIMS_AGENT_STATE",
@@ -751,6 +751,58 @@ def _cfg_hash_for_module(name: str):
     return None
 
 
+_SERVING_CERT: tuple = ()    # (path, kind) — HTTPS 리스너가 실제로 집어든 인증서
+_CERT_INFO_CACHE: dict = {}  # cert path → (mtime, {"not_after":…}) — 2초 주기 재파싱 방지
+
+
+def _serving_cert_info() -> dict:
+    """agent 가 **지금 서빙 중인** HTTPS 인증서의 만료 정보 — OAM cert_expiring 알람 입력.
+
+    대상은 `_start_sync_server` 가 `load_cert_chain` 에 넘긴 그 파일이다(mTLS 배치면
+    agent_mtls.crt, 아니면 self-signed agent.crt). 선택 로직을 여기에 복제하지 않는 이유는
+    두 벌이 어긋나면 **엉뚱한 파일을 감시하면서 감시 중이라고 보고**하기 때문이다.
+    파일 안 인증서가 여럿이면 **가장 이른 만료**를 쓴다 (CSP CheckCertExpiry 와 같은 규약).
+    읽기/파싱 실패는 만료로 단정하지 않는다 — {} 를 돌려 보고에서 빠지고, OAM 이
+    "판정 근거 없음"으로 로그를 남긴다."""
+    if not _SERVING_CERT:
+        return {}
+    path, kind = _SERVING_CERT
+    try:
+        st = os.stat(path)
+    except OSError:
+        return {}
+    cached = _CERT_INFO_CACHE.get(path)
+    if cached and cached[0] == st.st_mtime:
+        return cached[1]
+    try:
+        out = subprocess.run(["openssl", "crl2pkcs7", "-nocrl", "-certfile", path],
+                             capture_output=True, check=True).stdout
+        txt = subprocess.run(["openssl", "pkcs7", "-print_certs", "-noout", "-text"],
+                             input=out, capture_output=True, check=True).stdout.decode("utf-8", "replace")
+    except Exception:
+        return {}
+    earliest = None
+    for line in txt.splitlines():
+        line = line.strip()
+        if not line.startswith("Not After :"):
+            continue
+        try:
+            dt = datetime.strptime(line.split(":", 1)[1].strip().replace(" GMT", ""),
+                                   "%b %d %H:%M:%S %Y")
+        except Exception:
+            continue
+        if earliest is None or dt < earliest:
+            earliest = dt
+    if earliest is None:
+        return {}
+    # openssl 의 notAfter 는 GMT — tz 를 명시해 보낸다. OAM 은 `now(exp.tzinfo)` 로
+    #   비교하므로 naive 로 보내면 로컬시와 UTC 가 섞인다(임계 30일에선 무해하나 부정확).
+    info = {"not_after": earliest.replace(tzinfo=timezone.utc).isoformat(timespec="seconds"),
+            "kind": kind}
+    _CERT_INFO_CACHE[path] = (st.st_mtime, info)
+    return info
+
+
 _PREV_RUNNING_MODULES: set = set()   # 직전 metric 의 실행 모듈 집합 — 소멸 전이(process_died) 감지
 
 
@@ -828,6 +880,14 @@ def collect_metrics() -> dict:
                 hashes[name] = h
         if hashes:
             m["cfg_hashes"] = hashes
+    except Exception:
+        pass
+    # 자기 HTTPS 인증서 만료 — OAM cert_expiring 알람 입력. OAM 은 노드 파일을 읽지
+    #   못하므로 이 보고가 유일한 근거다(mo=<서버명>/agent/cert).
+    try:
+        cert = _serving_cert_info()
+        if cert:
+            m["cert"] = cert
     except Exception:
         pass
     # keepalived 전이 카운트 (최근 10분) — OAM ha_flap 알람 입력.
@@ -4934,6 +4994,9 @@ def start_sync_server(state: AgentState, state_dir: str, port: int) -> int:
         crt, key = mtls_crt, mtls_key
     else:
         crt, key = _ensure_self_signed_cert(state_dir)
+    # 만료 감시(OAM cert_expiring)의 대상 — 여기서 정한 그 파일이 정본이다.
+    global _SERVING_CERT
+    _SERVING_CERT = (crt, "mtls" if use_mtls else "self-signed")
 
     class H(_Handler):
         pass

@@ -910,6 +910,7 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
     mounts = body.get("mounts") or []
     cfg_hashes = body.get("cfg_hashes") or {}          # {module: 배포 config.json canonical hash}
     ha_transitions = body.get("ha_transitions") or {}  # {svc: 최근 10분 keepalived 전이 수}
+    cert = body.get("cert") or {}                      # {not_after, kind} — agent 서빙 인증서 만료
     record = {
         'cpu_pct': body.get("cpu_pct"),
         'mem_pct': body.get("mem_pct"),
@@ -921,6 +922,7 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
         'mounts':    mounts if isinstance(mounts, list) else [],
         'cfg_hashes': cfg_hashes if isinstance(cfg_hashes, dict) else {},
         'ha_transitions': ha_transitions if isinstance(ha_transitions, dict) else {},
+        'cert': cert if isinstance(cert, dict) else {},
     }
     await asyncio.to_thread(_metric_append, config, agent['id'], record)
     # 프로세스 전이 이벤트(process_died) — 감지 L1 (alarm_standardization §3.4(b)).

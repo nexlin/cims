@@ -31,7 +31,7 @@ _CORE_CONTROLLABLE = {'console'}
 # 알람 표준화(X.733/32.111, docs/design/alarm_standardization.md): type=조건클래스, 객체는 source.
 # scope='agent' → sweeper 가 online agent 별로 평가, mo_instance 는 런타임 합성(<host>/disk, <host>/<module>).
 _CORE_ALERT_RULES = [
-    {'type': 'threshold_crossed', 'code': 'A-QOS-001', 'perceived_severity': 'warning',
+    {'type': 'capacity_threshold', 'code': 'A-QOS-001', 'perceived_severity': 'warning',
      'event_type': 'qualityOfService', 'probable_cause': 'storageCapacityProblem', 'mo_class': 'host',
      'check': 'disk_high', 'scope': 'agent', 'unit': '%', 'metric': '디스크 사용률',
      # 단계 임계 (X.733 severity 승격 — 도달 단계가 severity, 승격/완화는 action=change)
@@ -78,6 +78,18 @@ _CORE_ALERT_RULES = [
      'msg_close': '{mo} HA 전이 빈도 정상',
      'effect': 'VIP 반복 이동 — 해당 서비스 간헐 단절',
      'recommended_action': '헬스체크 포트/모듈 상태 확인, notify_<svc>.log·keepalived journal 점검'},
+    # 인증서·키 자재 만료 임박 — agent 서빙 인증서(자기보고 metric.cert) + 관리평면 파일
+    #   인증서(그룹 CA·agent mTLS CA·oam/oam-svc HTTPS). CSP SIP TLS·CSC HTTPS 는 모듈
+    #   자기보고(L2)가 본다 — 같은 code, mo 로 분리.
+    #   임계는 CSP 구현·agent 회전 임계와 정렬(warn 30d / crit 7d).
+    {'type': 'cert_expiring', 'code': 'A-PRC-009', 'perceived_severity': 'warning',
+     'event_type': 'processingError', 'probable_cause': 'keyExpired', 'mo_class': 'software',
+     'check': 'cert_expiring', 'scope': 'agent', 'unit': '일', 'metric': '인증서 잔여 수명',
+     'thresholds': {'warning': 30, 'critical': 7},
+     'msg_open': '{mo} 인증서 만료 임박 — {days_left}일 남음 (만료 {not_after})',
+     'msg_close': '{mo} 인증서 잔여 수명 정상 ({days_left}일)',
+     'effect': '만료 시 접속·상호인증 전면 실패 — agent 관측/콘솔 접속 단절',
+     'recommended_action': '인증서 재발급·회전 경로 점검 (agent 는 cert_rotate, 파일 인증서는 재생성 후 모듈 재시작)'},
 ]
 
 # 알람 클래스 기본값 — check → 표준 분류 필드. 규칙에 명시값 있으면 우선(setdefault).
@@ -94,14 +106,16 @@ _ALERT_CLASS_DEFAULTS = {
                      'probable_cause': 'softwareError', 'mo_class': 'software', 'perceived_severity': 'critical'},
     'db_down':      {'type': 'connection_lost', 'code': 'A-COM-001', 'event_type': 'communications',
                      'probable_cause': 'communicationsSubsystemFailure', 'mo_class': 'service', 'perceived_severity': 'critical'},
-    'rtp_pct_gte':  {'type': 'threshold_crossed', 'code': 'A-QOS-024', 'event_type': 'qualityOfService',
+    'rtp_pct_gte':  {'type': 'capacity_threshold', 'code': 'A-QOS-024', 'event_type': 'qualityOfService',
                      'probable_cause': 'resourceAtOrNearingCapacity', 'mo_class': 'service', 'perceived_severity': 'warning'},
-    'disk_high':    {'type': 'threshold_crossed', 'code': 'A-QOS-001', 'event_type': 'qualityOfService',
+    'disk_high':    {'type': 'capacity_threshold', 'code': 'A-QOS-001', 'event_type': 'qualityOfService',
                      'probable_cause': 'storageCapacityProblem', 'mo_class': 'host', 'perceived_severity': 'warning'},
     'config_drift': {'type': 'config_out_of_sync', 'code': 'A-PRC-003', 'event_type': 'processingError',
                      'probable_cause': 'configurationOrCustomizationError', 'mo_class': 'software', 'perceived_severity': 'warning'},
     'ha_flap':      {'type': 'threshold_crossed', 'code': 'A-QOS-023', 'event_type': 'qualityOfService',
                      'probable_cause': 'thresholdCrossed', 'mo_class': 'service', 'perceived_severity': 'warning'},
+    'cert_expiring': {'type': 'cert_expiring', 'code': 'A-PRC-009', 'event_type': 'processingError',
+                     'probable_cause': 'keyExpired', 'mo_class': 'software', 'perceived_severity': 'warning'},
 }
 
 # 옛 per-process/리소스·개명 전 type → (조건클래스, code). 구 이벤트/규칙 read 시 alias.
@@ -110,7 +124,7 @@ _ALERT_CLASS_DEFAULTS = {
 _OLD_TYPE_ALIAS = {
     'csp_down': ('process_down', 'A-PRC-001'), 'cmp_down': ('process_down', 'A-PRC-001'),
     'module_down': ('process_down', 'A-PRC-001'), 'db_down': ('connection_lost', 'A-COM-001'),
-    'rtp_high': ('threshold_crossed', 'A-QOS-024'), 'disk_high': ('threshold_crossed', 'A-QOS-001'),
+    'rtp_high': ('capacity_threshold', 'A-QOS-024'), 'disk_high': ('capacity_threshold', 'A-QOS-001'),
     'service_unresponsive': ('process_unresponsive', 'A-PRC-004'),
 }
 

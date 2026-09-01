@@ -150,9 +150,10 @@ ssh-free 운영을 위한 두 축 — **raw metric 시계열**(통계/알람)과
 ### 10.1 Heartbeat / Metric (raw 시계열)
 
 - agent 는 기본 **2초** 주기로 heartbeat + metric 전송 (`DEFAULT_HEARTBEAT_SEC` / `DEFAULT_METRIC_SEC`).
-- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[] / cfg_hashes{} / ha_transitions{}`.
+- metric payload: `cpu_pct(/proc/stat) / mem_pct / disk_pct(root) / mounts[] (마운트별 사용률, /proc/mounts+statvfs) / load_avg / per_iface[] (rx/tx + rate + errors) / modules[] / cfg_hashes{} / ha_transitions{} / cert{}`.
   - `cfg_hashes` = {모듈: 배포 config.json canonical hash 12hex} — 설치 모듈 전체(중지 포함, `modules/<mod>/current/<mod>/config.json`, mtime 캐시). OAM `config_drift` 평가(`CIMS-PRC-003`) 입력.
   - `ha_transitions` = {svc: 최근 10분 keepalived 전이 수} — `/var/log/cims-ha/notify_<svc>.log` tail 집계. OAM `ha_flap` 평가(`CIMS-QOS-001`) 입력. 미가독/부재 시 생략.
+  - `cert` = {not_after, kind} — HTTPS 리스너가 실제로 집어든 인증서(`_SERVING_CERT`)의 가장 이른 만료. mTLS 배치면 `agent_mtls.crt`, 아니면 self-signed `agent.crt`. mtime 캐시. OAM `cert_expiring` 평가(`A-PRC-009`, mo=`<서버명>/agent/cert`) 입력 — 만료 시 OAM→agent 명령 채널(배포·재시작·HA 제어)이 함께 막힌다. 읽기 실패는 필드 생략(만료로 단정하지 않음).
   - ⚠ OAM `agent_api.py _metric()` 가 record 를 필드 화이트리스트로 저장 — **신규 metric 필드는 화이트리스트 추가 필수**(미추가 시 버려짐). 조회는 `jsonl_tail_recent`(tail-read, 2초 시계열 풀파싱 금지).
 - OAM 가 `POST /metric` 수신 → `{CimsRuntimeDir}/metrics/<agent_id>/YYYY/MM/DD.jsonl` append.
 - retention: `_sweep_metric_purge` 가 `MetricRetentionDays`(기본 3일) 초과 일별 파일 삭제.
@@ -192,7 +193,7 @@ OAM `_sweep_alerts` 가 평가. 규칙은 service descriptor(`service_registry.a
 | core | `ha_flap` | metric.ha_transitions[svc] ≥ threshold(기본 6회/10분) | online agent 별. flap 정지 시 윈도 만료로 자동 close |
 | service(CIMS) | `process_unresponsive` | CSP/CMP STATS 무응답 — 프로세스 생존과 별개 조건(hang·과부하), 생존은 L1 process_down | 중앙 poll (oam-svc) |
 | service(CIMS) | `connection_lost` | DB 연결 실패 | 중앙 |
-| service(CIMS) | `threshold_crossed` | RTP 포트 사용률 ≥ threshold | 중앙 |
+| service(CIMS) | `capacity_threshold` | RTP 포트 사용률 ≥ threshold | 중앙 |
 
 per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가(오프라인/metric 없음/배포 제거) 시 열린 alert 를 자동 close.
 - **프로세스 전이 이벤트**: agent 는 감시 tick 의 실행 집합 전이(소멸)를 metric 보고에 동반하고,

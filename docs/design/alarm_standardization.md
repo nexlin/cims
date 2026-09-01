@@ -122,7 +122,8 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - **코멘트 = `action: "comment"`** (32.111 setComment/notifyComments): `POST /alerts/comment
   {alarm_id, text}` → `{comment, comment_user, comment_time}` 레코드. ack 과 같이 통계
   미집계, 판독측은 해당 활성 행에 누적 표시 (AlertsPage 💬).
-- **임계 계열 구조화** (X.733 thresholdInfo): threshold_crossed 계열 레코드는
+- **임계 계열 구조화** (X.733 thresholdInfo): 임계 계열(`capacity_threshold`·
+  `quality_degraded`·`threshold_crossed`) 레코드는
   `threshold_info: {observed, threshold, unit}` 를 동반 — 관측값/임계값이 message 문자열에만
   있지 않고 기계 판독 가능 (rtp 사용률·disk·ha_flap).
 
@@ -131,17 +132,18 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 기존 6개(csp_down/cmp_down/module_down/db_down/rtp_high/disk_high) → **조건 클래스**로 정규화.
 어느 프로세스/리소스/호스트인지는 `source.mo_instance`, 심각도/임계/원인은 **rule 속성**(클래스 정체성 아님).
 `code` 는 정의 코드(§3.4(a)). 한 클래스의 여러 rule 이 서로 다른 정의인 경우는 각자의
-코드를 갖는다 — threshold_crossed 의 disk=`A-QOS-001`·ha_flap=`A-QOS-023`(공통)·
-RTP 사용률=`A-QOS-024`(MRF, 노드별 발화).
+코드를 갖는다 — capacity_threshold 의 disk=`A-QOS-001`·RTP 사용률=`A-QOS-024`(MRF, 노드별
+발화), threshold_crossed 의 ha_flap=`A-QOS-023`(공통).
 
 | code | type(클래스) | eventType | probableCause (rule별) | mo_class | mo_instance 예시 | severity(rule별) | detected_by |
 |---|---|---|---|---|---|---|---|
 | `A-PRC-001` | `process_down` | processingError | softwareError | software | `<host>/<module>` (전 모듈 — csp/cmp 포함) | critical | agent |
 | `A-PRC-004` | `process_unresponsive` | processingError | responseTimeExcessive | service | `SIG_SVR_01/csp`(노드 주소 관측) · `<그룹명>/csp`(VIP 관측) — CMP 는 endpoint 소유 서버별 `MED_SVR_01/cmp` | major | oam-svc / oam |
 | `A-COM-001` | `connection_lost` | communications | communicationsSubsystemFailure / underlyingResourceUnavailable | service | `<관리그룹>/db`(OAM 관측 — 그룹 공통 신원) · 모듈 관점은 `<서버명>/<모듈>/db`(자기보고 §4) | critical | oam-svc / oam / self |
-| `A-QOS-001` | `threshold_crossed` | qualityOfService | storageCapacityProblem | host | `<서버명>/disk` (호스트 자원 — cpu/mem/load 확장 시 rule 만 추가) | 단계 임계(minor 80 / major 90 / critical 95, 승격=action change) | agent |
+| `A-QOS-001` | `capacity_threshold` | qualityOfService | storageCapacityProblem | host | `<서버명>/disk` (호스트 자원 — cpu/mem/load 확장 시 rule 만 추가) | 단계 임계(minor 80 / major 90 / critical 95, 승격=action change) | agent |
 | `A-QOS-023` | `threshold_crossed` | qualityOfService | thresholdCrossed | service | `<서버명>/ha/<svc>` (check=ha_flap — keepalived 전이 빈도 임계) | warning | agent |
-| `A-QOS-024` | `threshold_crossed` | qualityOfService | resourceAtOrNearingCapacity | service | `MED_SVR_01/cmp/rtp_ports` (노드별 발화 — check=rtp_pct_gte) | 단계 임계(minor 80 / major 90 / critical 95) | oam-svc / oam |
+| `A-QOS-024` | `capacity_threshold` | qualityOfService | resourceAtOrNearingCapacity | service | `MED_SVR_01/cmp/rtp_ports` (노드별 발화 — check=rtp_pct_gte) | 단계 임계(minor 80 / major 90 / critical 95) | oam-svc / oam |
+| `A-PRC-009` | `cert_expiring` | processingError | keyExpired | software | `<관리그룹>/oam/cert/https` · `<관리그룹>/oam/cert/ca/{group,agent_mtls}`(그룹 CA 는 모듈 HTTPS 서명자, agent mTLS CA 는 `Agent.MtlsEnabled` 배치에만 존재) · `<관리그룹>/oam-svc/cert/https`(관리평면 파일) · `<서버명>/agent/cert`(agent 자기보고 metric.cert — 서빙 중 인증서) · `<서버명>/csc/cert/https`·`<서버명>/csp/cert/<proto:port>`(자기보고) | 단계 임계(warning 30일 / critical 7일 — 잔여일이 작을수록 나쁨) | oam / oam-svc / self |
 | `A-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<서버명>/<모듈>/config` · `<그룹명>/config/<collection>`(HA fan-out) | warning | agent / oam |
 
 `A-PRC-003` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
@@ -150,7 +152,17 @@ agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 
 (최근 10분 keepalived 전이 수, 기본 임계 6회)로 VIP flap 을 노출한다 — 전이 개별 건은
 §3.6 대로 이벤트(로그)일 뿐이며, 알람은 빈도 임계 초과라는 *조건*이다.
 
-> **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`threshold_crossed` / `db_down`→`connection_lost`. 구 `csp_down`/`cmp_down` 은 "프로세스 생존"과 "관리 응답성" 두 *조건*의 혼합이었다 — 생존은 `process_down`(agent 관측), 응답성은 `process_unresponsive`(OAM probe)로 분리한다(§3.4(b) 감지 3계층). 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
+> **통합 원리**(§3.5): 같은 *조건*은 한 클래스. `module_down`→`process_down` / `rtp_high`+`disk_high`(+cpu/mem/network)→`capacity_threshold` / `db_down`→`connection_lost`. 구 `csp_down`/`cmp_down` 은 "프로세스 생존"과 "관리 응답성" 두 *조건*의 혼합이었다 — 생존은 `process_down`(agent 관측), 응답성은 `process_unresponsive`(OAM probe)로 분리한다(§3.4(b) 감지 3계층). 어느 리소스인지는 **source**, 임계값·단위·probableCause·severity 는 **rule** 이 보유 → 새 리소스(cpu/mem/network) 추가 시 **type/code 신설 없이 rule 만 추가**.
+> **클래스 분할 이행**: `threshold_crossed` 는 자원 사용률(`capacity_threshold`)·서비스 품질
+> (`quality_degraded`)·안전 필수 기능 실패(`safety_critical_failure`)로, `storage_failure` 는
+> 보존 대상(`retention_failure`)·관측 기록(`observability_lost`)으로 분리했다(카탈로그 §4).
+> **과거 레코드는 발행 당시의 type 을 보존한다** — 개명(`resource_failure`→`storage_failure`)은
+> 1:1 이라 read alias 로 치환했지만 분할은 1:N 이라 type 만으로는 결정되지 않고, 알람 레코드는
+> 사건 기록이라 사후에 고쳐 쓰면 이력이 왜곡된다. **안정 식별자는 `code`** 이고 분할에도 불변이라
+> 코드 기준 조회·상관·집계는 영향이 없다. 표시단은 구 슬러그 라벨을 유지하고(콘솔
+> `ALARM_TYPE_LABEL`), 클래스 필터에 구·신 이름이 함께 보이는 기간은 보존 기간
+> (`AlertRetainDays`, 기본 180일) 안에서 점차 줄어든다.
+>
 > 같은 클래스라도 rule 별로 probableCause/severity 가 다를 수 있음(disk→storageCapacityProblem/warning, rtp→resourceAtOrNearingCapacity/warning, 단계별 minor→major).
 > `process_down` 은 전 모듈을 agent 관측으로 판정한다 — agent module 점검에서 csp/cmp 를 제외하던 규칙(proc_down_targets)은 두지 않는다. 같은 모듈에 `process_down`(L1)과 `process_unresponsive`(L3)가 함께 열리는 것은 중복이 아니라 별개 조건이며, correlatedNotifications(P2)로 상관을 명시한다.
 
@@ -186,11 +198,11 @@ vIBCF 의 장애코드(A00XX — flat, 정의당 1개) vs 타입 인덱스(분�
   | `CIMS-PRC-003` | `A-PRC-003` | config_out_of_sync — 배포 정본 드리프트 |
   | `CIMS-PRC-004` | `A-PRC-004` | process_unresponsive |
   | `CIMS-COM-001` | `A-COM-001` | connection_lost — 서비스 DB 두절 (CSP·CSC 구현 발화) |
-  | `CIMS-QOS-001` | `A-QOS-001` | threshold_crossed — 호스트 자원 단계 임계 (disk 구현 발화) |
+  | `CIMS-QOS-001` | `A-QOS-001` | capacity_threshold — 호스트 자원 단계 임계 (disk 구현 발화) |
   | `CIMS-QOS-002` | `A-QOS-002` | resource_exhausted — 미디어 자원 풀 완전 고갈 (CMP 구현 발화) |
 
   승계 기준은 **구 코드로 실제 발화 중인 정의**다 — 이행 시 열린 알람의 코드 연속성이 목적.
-  구 클래스 코드 하나가 여러 정의로 갈라지는 경우(threshold_crossed 의 rtp/ha_flap rule,
+  구 클래스 코드 하나가 여러 정의로 갈라지는 경우(구 threshold_crossed 의 rtp/ha_flap rule,
   storage_failure 로 넓힐 CDR·녹취 등)의 잔여 발화는 이행 시 rule/mo 별로 각자의 정의
   코드에 매핑한다.
 - **wire/저장/rule/fm_catalog 는 flat 정의 코드를 사용한다.** 구 포맷 `CIMS-<DOMAIN>-<SEQ>`(서비스 접두 + 클래스 단위 코드)는 `_CODE_REVISIONS` alias 로 read/수신 시 흡수되고, 구 코드로 열려 있던 알람은 스윕이 이행 종결 후 현행 코드로 재발행한다(아래 "코드는 불변" 절차). 구 `CIMS-QOS-001` 이 갈라진 정의는 rule 의 check 가 배정한다 — disk=`A-QOS-001`·ha_flap=`A-QOS-023`·rtp 사용률=`A-QOS-024`.
@@ -402,7 +414,7 @@ attributeValueChange 등 성격 클래스로 식별하고 구체 내용은 속�
 | `A-PRC-001` process_down | 해당 인스턴스 호처리/기능 중단 | 프로세스 재기동, 로그/코어 확인, HA 절체 점검 |
 | `A-PRC-004` process_unresponsive | 관리/제어 응답 불가 — hang·과부하 의심, 호처리 영향 가능 | 프로세스 상태·부하 확인(L1 process_down 동반 여부), 필요 시 재기동 |
 | `A-COM-001` connection_lost | 의존 자원(DB/트렁크) 사용 기능 저하 | 연결성/방화벽/원격 노드 상태 확인 |
-| `A-QOS-001` threshold_crossed | 용량 임계 근접 — 추가 부하 시 실패 위험 | 사용량 원인 파악, 자원 증설/정리 |
+| `A-QOS-001` capacity_threshold | 용량 임계 근접 — 추가 부하 시 실패 위험 | 사용량 원인 파악, 자원 증설/정리 |
 
 ### 7.2 보강 — 사내 벤치마크: vIBCF/TrGW POD 대조
 

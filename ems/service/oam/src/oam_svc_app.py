@@ -336,9 +336,50 @@ if __name__ == '__main__':
         else:
             logger.log_info("[alert-sweep] disabled — no ServiceLogging.Dir")
 
+        # ── 자기 HTTPS 인증서 만료 임박 (A-PRC-009 cert_expiring) ────────
+        # 자기 파일이라 자기가 본다 — base OAM 은 형제 모듈의 runtime/cert 경로를 알지
+        #   못한다(버전무관 자리이지만 모듈별로 갈린다). base 는 자기 cert + agent mTLS
+        #   CA 를, CSP 는 SIP TLS 를 각각 본다 — 같은 정의 코드에 mo 로 분리(표준화 §3.4(b)).
+        # 임계는 CSP 구현·agent 회전 임계와 정렬(warn 30d / crit 7d, 규칙이 보유).
+        CERT_EXPIRY_SWEEP_INTERVAL = int(config.get('CertExpirySweepSec', 3600))
+
+        def _sweep_own_cert_expiry():
+            try:
+                if not (_service_log_dir and ssl_certfile):
+                    return
+                from services import service_registry as _sr
+                rule = next((r for r in _sr.alert_rules(config)
+                             if r.get('check') == 'cert_expiring'), None)
+                if not rule:
+                    return
+                days_left, not_after = alarm_sweeper.cert_earliest_days_left(ssl_certfile)
+                if days_left is None:
+                    logger.log_warning(f"[cert-expiry] 인증서를 읽을 수 없음 ({ssl_certfile}) — 판정 생략")
+                    return
+                thr_w = int((rule.get('thresholds') or {}).get('warning', 30))
+                thr_c = int((rule.get('thresholds') or {}).get('critical', 7))
+                is_open = days_left <= thr_w
+                sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
+                mo = f"{alarm_sweeper.mgmt_mo_root(config)}/oam-svc/cert/https"
+                kw = dict(mo=mo, days_left=days_left, not_after=not_after, threshold=thr_w)
+                alarm_sweeper.transition(
+                    _alert_open, _service_log_dir,
+                    dict(rule, perceived_severity=(sev or rule.get('perceived_severity'))),
+                    mo, 'oam-svc', is_open,
+                    alarm_sweeper.fmt(rule.get('msg_open'), **kw),
+                    alarm_sweeper.fmt(rule.get('msg_close'), **kw),
+                    threshold_info={'observed': days_left, 'threshold': thr_w,
+                                    'unit': rule.get('unit') or '일'}, log=logger)
+            except Exception as e:
+                logger.log_error(f"[cert-expiry] error: {e}")
+
         _last_alert_sweep = 0.0
+        _last_cert_expiry_sweep = 0.0
         while True:
             time.sleep(1)
+            if _service_log_dir and time.time() - _last_cert_expiry_sweep >= CERT_EXPIRY_SWEEP_INTERVAL:
+                _sweep_own_cert_expiry()
+                _last_cert_expiry_sweep = time.time()
             if _service_log_dir and time.time() - _last_alert_sweep >= ALERT_SWEEP_INTERVAL:
                 try:
                     alarm_sweeper.sweep_service_rules(

@@ -160,7 +160,8 @@ CSC 는 결과에 따라 다음을 자동 처리:
     {"module":"cmp","event":"process_died"}
   ],
   "cfg_hashes": {"csp": "c40e66e87ce3"},
-  "ha_transitions": 0
+  "ha_transitions": 0,
+  "cert": {"not_after": "2036-08-23T05:51:14+00:00", "kind": "self-signed"}
 }
 ```
 
@@ -176,6 +177,13 @@ CSC 는 결과에 따라 다음을 자동 처리:
   OAM 이 배포기록 실체화본 hash 와 비교해 config drift(`A-PRC-003`) 판정. 파일 없음/파싱
   실패 모듈은 생략(OAM 평가 제외).
 - `ha_transitions` — 최근 10분 keepalived 전이 수 (ha_flap 임계 판정 입력). 0/무전이 시 생략.
+- `cert` — agent 가 **서빙 중인** HTTPS 인증서의 만료(`not_after`, tz 명시 ISO8601)와 종류
+  (`kind` = `mtls`|`self-signed`). OAM 의 `cert_expiring`(`A-PRC-009`,
+  mo=`<서버명>/agent/cert`) 판정 근거 — 원본 인증서는 노드에 있어 OAM 이 파일을 읽지
+  못한다. 대상은 HTTPS 리스너가 실제로 `load_cert_chain` 에 넘긴 그 파일이고, 파일 안
+  인증서가 여럿이면 **가장 이른 만료**를 싣는다(CSP `CheckCertExpiry` 와 같은 규약).
+  읽기/파싱 실패는 만료로 단정하지 않고 필드를 생략한다 — OAM 이 "판정 근거 없음(무감시)"
+  으로 1회 경고한다.
 
 > ⚠️ CSC(OAM) 의 `agent_api.py _metric()` 는 record 화이트리스트로 필드를 거른다 — **신규 metric 필드(`mounts` 등)는 화이트리스트에 명시 추가하지 않으면 저장 시 버려진다**. 마찬가지로 응답 직렬화(`_agent_metrics._row`)에서도 `per_iface`/`mounts` 를 노출해야 대시보드에 전달된다.
 

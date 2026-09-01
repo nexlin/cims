@@ -145,7 +145,7 @@
 > agent supervised(HA 자동복구)와 이중 제어가 될 수 있어 배포 환경에선 상태조회 용도로만 쓴다.
 
 **알람 sweeper 분리** (`services/alarm_sweeper.py` 공용 코어):
-- **서비스 계열**(`process_unresponsive`(csp/cmp probe)/`connection_lost`(db)/`threshold_crossed`(rtp),
+- **서비스 계열**(`process_unresponsive`(csp/cmp probe)/`connection_lost`(db)/`capacity_threshold`(rtp),
   scope≠`agent`) 평가·발화 = **oam-svc** (`detected_by='oam-svc'`) — probe 대상·DB 가 oam-svc
   설정이므로. `--role all` 에서는 base 가 대행 평가(`detected_by='oam'`).
 - **agent 계열**(disk/`process_down`(module_down — 전 모듈, csp/cmp 포함), scope=`agent`,

@@ -98,7 +98,7 @@ CSV 는 두 축을 한 파일에 담는다 (`행` 컬럼 — §2):
 ### 3.2 component 컬럼 (★)
 
 활성 알람 식별키는 `(정의 코드, mo_instance)` 다. 같은 클래스를 여러 내부 조건에 재사용하면
-(`storage_failure` "쓰기 실패" 가 로그·CDR·녹취·스토어에 두루 쓰이듯) **component 세그먼트가
+(`storage_failure` "저장 실패" 가 FD·IdMS·파일 스토어와 DB 쿼리에 두루 쓰이듯) **component 세그먼트가
 없을 때 mo 가 겹친다** — 행의 구분과 활성키 분리를 CSV 차원에서 강제하기 위해
 `component` 컬럼을 둔다.
 
@@ -118,7 +118,7 @@ CSV 는 두 축을 한 파일에 담는다 (`행` 컬럼 — §2):
 
 ## 4. type 체계 — 조건 클래스 카탈로그 (★)
 
-알람 `type` 은 아래 **21개 조건 클래스**만 쓴다. 분류 기준은 **조건의 성격**(무엇이
+알람 `type` 은 아래 **25개 조건 클래스**만 쓴다. 분류 기준은 **조건의 성격**(무엇이
 일어나고 있는가)이지 객체·원인·영향이 아니다 — 객체는 `대상`/`component`(mo), 원인은
 probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 먼저 이 표에서 흡수처를
 찾고, 어느 성격에도 맞지 않을 때만 클래스를 신설한다.
@@ -136,11 +136,14 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 
 | type | 정의 | 대표 조건 |
 |---|---|---|
-| `threshold_crossed` | 수치 지표의 **단계 임계 초과** (승격/완화 = change) | disk/cpu/mem/load/NIC/RTP 사용률, 모듈별 CPU·RSS, FD 파티션 |
+| `capacity_threshold` | **자원 사용률의 단계 임계** — 갖춘 용량을 얼마나 쓰고 있는가. 대응은 정리·증설(용량 관리) | 호스트 CPU/MEM/DISK/load, 모듈 프로세스 CPU/RSS, 동시 세션 사용률, 신호 유입 rate(CPS), 미디어 포트 풀 사용률 |
+| `quality_degraded` | **서비스 품질 지표의 하락** — 성공률·응답률·지연·손실. 자원은 남아 있는데 서비스가 나빠지는 것이며, 대응은 원인 추적(장애 징후) | 호·등록 성공률 하한, 대국별 성공률·실패응답·RTT, 부가서비스 실행 실패율, 그룹콜 수립 성공률, 미디어 무흐름 비율·품질(손실/지터) |
+| `threshold_crossed` | **그 외 지표의 임계 초과** — 오류율·전이 빈도 등 이상 징후. 용량도 서비스 품질도 아닌 수치 지표 | NTP offset/delay 정밀도, SIP 수신 이상(파싱 실패) 급증, keepalived VIP flap 빈도, NIC 오류 카운터 증가율 |
 | `resource_exhausted` | 자원 **고갈·포화로 신규 수용 불가** | 풀 완전 고갈, 연결 상한, fd 고갈, 로그 큐 포화, endpoint 포화, 발언 슬롯 초과 |
 | `capacity_degraded` | **설정 대비 실효 용량 미달** (시스템이 갖춰야 할 용량을 못 갖춤) | 풀 부분/전량 bind 실패, epoll 미등록 소켓 잔류 |
 | `resource_leak` | **회수 실패로 자원이 점진 누적·증식** | orphan/idle 회수 지속, PTT 그룹 미회수, 연결 누수, IdMS 스토어 무한 증식 |
 | `overload` | **과부하 방어(차단/강등) 발동** | 제어평면 신규 요청 차단 |
+| `safety_critical_failure` | **안전 필수 기능의 처리 실패** — 인명 직결 기능이라 단계 임계가 아니라 **단건 발생만으로 즉시** 발화한다. 비율 지표로 흡수하면 소수 건이 묻히므로 `quality_degraded` 에 넣지 않는다 | 긴급/임박위험 호 처리 실패 |
 
 **PRC (processingError) — 실행·저장·정합·이중화·관측**
 
@@ -151,13 +154,14 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 | `worker_unavailable` | 프로세스 내부 **실행 단위·서브시스템 정지** (스레드/리액터/타이머/스위퍼/엔진) | RTP 리액터·제어 루프·MSRP 리액터 사망, 스위퍼 연속 실패, probe 스레드 사망, provision 엔진 불능 |
 | `crash_loop` | **재기동/기동 반복 실패** (불안정 지속) | restart 소진, 한 번도 못 뜨는 start 반복 실패 |
 | `listener_unavailable` | **자기 수신 접속점 불능** (listen 포트·소켓·수신 채널 개설 실패/상실) | SIP/HTTP 리스너, 제어 소켓, CSC 연동 포트, Monitor 포트, FM ingest |
-| `storage_failure` | **영속 저장소 읽기/쓰기/접근 실패** (파일·DB·스토어 — 유실/기능 정지) | 로그/CDR/녹취/상태파일 쓰기 실패, FD·IdMS·파일 스토어, DB 쿼리/적재 실패, 공유 store(NAS) 접근 불가, 알람 스트림 자기 기록 |
+| `storage_failure` | **서비스 데이터의 영속 저장 실패** — 읽기/쓰기/접근 불가로 **기능이 실제로 깨진다**. 관측 기록(→`observability_lost`)·보존 대상(→`retention_failure`)은 제외 | FD 스토어 저장·접근 실패, DB 쿼리 지속 실패, 그룹 정본 파일 적재 실패, IdMS 토큰 스토어 기록 실패, 가입자/그룹 파일 스토어 기록 실패 |
+| `retention_failure` | **법적·정산 보존 대상의 기록 실패** — 서비스는 정상인데 **사후 증명 수단을 잃는다**. 유실 구간이 곧 손해라 관측 기록보다 등급이 높다(critical) | CDR(호 이력) 기록 실패, 녹취 저장 실패 |
 | `config_invalid` | **설정 자체의 결함·미설정·무결성 위반**으로 기능 비활성/오동작 | 참조 무결성, 컬렉션 소실, 타이머 0, 시크릿 미설정, Data 게이트, 스키마 드리프트, TLS 비활성 |
 | `config_out_of_sync` | **기대(배포 기록·정본·버전) vs 실제의 불일치** | config drift, HA fan-out drift, sync_txn 전파 실패, 버전 deferred, managed IP/route 소실, fleet misdirect |
-| `state_out_of_sync` | 컴포넌트 간 **런타임 상태 정합 실패** | CSP↔CMP 세션집합 불일치, 그룹 컨텍스트 재수립 실패, 알람 open-state 복원 불일치 |
+| `state_out_of_sync` | 컴포넌트 간 **런타임 상태 정합 실패** — 정본을 못 따라가 **옛 값으로 계속 서비스**하는 것을 포함한다(기능은 살아 있고 내용이 틀린다) | CSP↔CMP 세션집합 불일치, 그룹 컨텍스트 재수립 실패, 알람 open-state 복원 불일치, 가입자/프로파일 재적재 실패(stale 캐시로 서비스) |
 | `redundancy_degraded` | **이중화 실질 소실·승격 불가·절체 메커니즘 이상** | 절체 래치, 승격 부적격, keepalived 미설치/비활성/얼림, VIP 무보유/이중보유, ha_excluded, store 소유권 리스 상실 |
-| `dependency_unavailable` | **필수 실행 의존물 부재** (도구/패키지/권한/플랫폼 기능) | cims-svc/priv 미발견, sudo 미등록, base deps, NAS flock 미제공 |
-| `observability_lost` | **관측·자기보고 파이프라인의 공백·오염·무력화** (통신 두절 제외) | metric blackout, ip -j 빈 배열 위장, 카탈로그 무력화(UNKNOWN_CODE), 관측 대상 공백, 스위퍼 비활성 |
+| `dependency_unavailable` | **필수 실행 의존물 부재** (도구/패키지/권한/플랫폼 기능) — 저장 **매체 자체**의 부재(마운트 소실)도 여기다. 매체 위의 읽기/쓰기 실패는 `storage_failure` | cims-svc/priv 미발견, sudo 미등록, base deps, 공유 스토리지(NAS) 마운트 소실·flock 미제공 |
+| `observability_lost` | **관측 능력 상실** — 자기보고 파이프라인의 공백·오염·무력화 + **관측 기록의 쓰기 실패**. 서비스는 정상이고 우리가 보지 못하게 되는 것이 공통 성격이다 (통신 두절 제외) | metric blackout, ip -j 빈 배열 위장, 카탈로그 무력화(UNKNOWN_CODE), 관측 대상 공백, 스위퍼 비활성, 서비스 로그(flow/msg) 기록 실패, 실시간 상태 파일 기록 실패, 알람/이벤트 스트림 자기 기록 실패 |
 | `cert_expiring` | **인증서 수명 위험** (만료 임박·회전 실패) | agent mTLS 만료 임박, 회전 실패 |
 
 **SEC (X.736 Security Alarm) — 보안**
@@ -171,7 +175,10 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
   (`CIMS-<DOMAIN>-<SEQ>` 7종)는 `_CODE_REVISIONS` read alias + 스윕 이행 종결로
   흡수됐다(표준화 §3.4(a) — 각 클래스의 대표 정의가 구 번호를 승계, 구 QOS-001 의 분할은
   ha_flap=A-QOS-023·rtp 사용률=A-QOS-024). `storage_failure` 는 구 type
-  `resource_failure` 의 개명(정의를 "영속 저장소 실패"로 좁힌 것). 미구현 클래스는
+  `resource_failure` 의 개명이고, 이후 보존 대상(`retention_failure`)·관측 기록
+  (`observability_lost`)을 떼어내 "서비스 데이터의 저장 실패"로 다시 좁혔다.
+  `threshold_crossed` 도 `capacity_threshold`·`quality_degraded`·`safety_critical_failure`
+  로 분할했다 — 구 type 값은 read alias 로 흡수한다. 미구현 클래스는
   구현 채택 시 표준화 §3.3 매핑 표에 편입한다.
 - **경계 규칙** (혼동 잦은 쌍):
   - `connection_lost` vs `delivery_failed`: 연결/생존 신호 자체가 끊기면 전자, 채널은
@@ -183,6 +190,24 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
     설정이 아니라 **런타임 상태**의 정합이 깨졌으면 state_out_of_sync.
   - `capacity_degraded` vs `resource_exhausted`: 갖춰야 할 용량을 **못 갖춘 것**(결함)이
     전자, 갖춘 용량이 **다 쓰인 것**(수요)이 후자.
+  - `capacity_threshold` vs `quality_degraded`: **자원을 얼마나 쓰고 있나**(사용률·유입률)가
+    전자, **서비스가 얼마나 잘 되고 있나**(성공률·응답률·손실)가 후자. 대응 활동이 갈린다 —
+    전자는 정리·증설(용량 관리), 후자는 원인 추적(장애 대응).
+  - `capacity_threshold` vs `resource_exhausted`: 임계를 **넘은 것**(아직 수용 가능)이 전자,
+    **다 써서 신규 수용이 안 되는 것**이 후자. 같은 자원의 전·후 단계다(예: 포트 풀 사용률
+    A-QOS-024 → 완전 고갈 A-QOS-002).
+  - `quality_degraded` vs `safety_critical_failure`: 비율이 임계 아래로 내려간 것이 전자,
+    **안전 필수 기능이 단 한 건이라도 실패한 것**이 후자. 후자를 비율로 흡수하면 소수 건이
+    묻힌다 — 클래스를 나누는 이유가 그것이다.
+  - `storage_failure` vs `retention_failure` vs `observability_lost`: 셋 다 "기록이 안 된다"
+    이지만 **잃는 능력**이 다르다. 서비스 기능이 깨지면 storage_failure, 법적·정산 **증명
+    수단**을 잃으면 retention_failure, 서비스는 정상인데 **우리가 못 보게** 되면
+    observability_lost. 매체(파일·DB·NAS)로 가르지 않는다 — 같은 파일 쓰기 실패도 로그면
+    관측, CDR 이면 보존, 그룹 정본이면 서비스다(§3.5 — 객체는 type 이 아니다).
+  - `storage_failure` vs `dependency_unavailable`: 저장 **매체 위**의 읽기/쓰기 실패가 전자,
+    **매체 자체**의 부재(마운트 소실·잠금 미제공)가 후자.
+  - `storage_failure` vs `state_out_of_sync`: 저장·조회가 실패해 **기능이 멈추면** 전자,
+    저장은 되는데 정본을 못 따라가 **옛 값으로 계속 서비스하면** 후자.
   - `observability_lost` vs `connection_lost`: 관측 주체와의 통신 자체가 끊기면
     connection_lost(agent 두절·FM_SYNC 두절), 통신은 되는데 관측 데이터/판정이
     공백·오염되면 observability_lost.
@@ -349,19 +374,20 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 감지 모듈�
   배열도 같은 상한을 받는다. 배포 스큐 주의: 4KB 초과 카탈로그는 수신측(OAM)을 먼저
   올려야 등록된다.
 - **클래스 배정은 §4 type 체계가 정본** — 같은 조건 = 한 클래스(표준화 §3.5), 감지
-  주체가 달라도 클래스는 같다(공유 store 접근 불가 = AGENT/OAM 모두 `storage_failure`,
+  주체가 달라도 클래스는 같다(공유 store 접근 불가 = AGENT/OAM 모두
+  `dependency_unavailable`,
   승격 부적격 = AGENT 노드 자격/OAM 그룹 제외 모두 `redundancy_degraded`). 자기 listen
   포트 개설 실패는 connection 이 아니라 `listener_unavailable`, 단계 용량 임계는 감지
-  주체가 self 여도 `threshold_crossed` 다.
-- **로그 계열 공통 3축**: 쓰기 실패(storage_failure `service_log`) / 큐 포화·drop
+  주체가 self 여도 `capacity_threshold` 다.
+- **로그 계열 공통 3축**: 쓰기 실패(observability_lost `service_log`) / 큐 포화·drop
   (resource_exhausted `log_queue` — fopen 성공인데 소비가 못 따라가는 축, 쓰기 실패 알람이
   안 열리는 사각) / 설정 미설정(config_invalid) — 4개 모듈(csp/cmp/cmdp/csc)이 동형 구조라
   CSV 도 같은 3분할을 쓴다.
 
 ### 10.1 CSP
 
-**현행**: 알람 6종(connection_lost — DB·CMP 두절 / threshold_crossed — 호·등록 성공률,
-신규 INVITE CPS, SIP 수신 이상) + 이벤트 2종(process_started/stopping). fm_catalog.json
+**현행**: 알람 6종(connection_lost — DB·CMP 두절 / quality_degraded — 호·등록 성공률 /
+capacity_threshold — 신규 INVITE CPS / threshold_crossed — SIP 수신 이상) + 이벤트 2종(process_started/stopping). fm_catalog.json
 선언과 구현이 일치한다. SIP 통계 축은 psip 스택 카운터(`CSipStackCounter` — 수신 요청·
 최종응답 수신/송신·파싱 실패, **와이어에 없는 로컬 합성 408/660 포함**: `RecvResponse`
 팬아웃 계측)를 `SipStatsMonitor` 가 `Setup.SipStats.*` 윈도우/단계 임계로 평가해
@@ -439,7 +465,7 @@ CSV 에 담기지 않는 판정 근거·경계·동반 결함을 감지 모듈�
 
 **자기보고 대상이 아닌 것**: 코덱/믹서 이상(CMP 는 투명 relay — 코덱·믹싱 코드 자체가 없음,
 PT 는 헤더 1바이트 스탬프), HA 역할 전이(All-Active — keepalived/standby 코드 없음, 절체
-관측은 CSP CmpClient 소관), 사용률 단계 임계(OAM sweeper threshold_crossed 역할 분담), floor 타이머
+관측은 CSP CmpClient 소관), 사용률 단계 임계(OAM sweeper capacity_threshold 역할 분담), floor 타이머
 만료·대기열 Deny(정상 규격 동작), 디스크 여유(agent 소관).
 `config_reloaded` 이벤트도 N/A — **런타임 설정 재적재 경로 자체가 없다**(SIGHUP/SIGUSR1
 핸들러 없음, 전 필드 restart 요구).
@@ -508,7 +534,7 @@ MsrpWorkerCount 사실상 무효(`:589,593,789` — 리액터 사망 판정은 �
 `csp_control_peer_changed` 이벤트가 같은 훅에서 무료) ②리액터 사망(worker/msrp — 결함
 ④의 무로그 skip 분기 포함) ③서비스 로그 쓰기 실패 + log_queue(storage_failure·resource_exhausted)
 ④CSP ack 소진(delivery_failed `csp/events` — 트래픽 구동 축) ⑤스토어 무트래픽 probe + ENOSPC
-결함 수정 ⑥스토어 용량 임계(threshold_crossed — NAS 라 host metric 미커버) ⑦연결 누수(idle 회수
+결함 수정 ⑥스토어 용량 임계(capacity_threshold — NAS 라 host metric 미커버) ⑦연결 누수(idle 회수
 신설 — 연결 포화 행의 선행) ⑧MSRP 연결 포화·fd 고갈(resource_exhausted ×2).
 
 ### 10.4 CSC
@@ -603,7 +629,7 @@ oam-svc 는 별도 감지 로직이 없다 — base 코어(`alarm_sweeper`)를 �
    close — `observability_lost`(metric blackout, N주기 stale 전이) 신설이 남은 과제.
 2. **리스 상실/획득 실패**: read-only 강등 + **base sweeper 10종 전부 정지**가 로그로만
    남는다(`oam_app.py:625-636`, 게이트 `:1559-1578`). 단 정지 범위는 base 한정 — oam-svc
-   서비스 알람(process_unresponsive/connection_lost/threshold_crossed)은 리스 게이트가 없어 계속 발화한다. →
+   서비스 알람(process_unresponsive/connection_lost/capacity_threshold)은 리스 게이트가 없어 계속 발화한다. →
    `redundancy_degraded`(store/lease) 신설(+ NAS flock no-op 는
    `dependency_unavailable`(store/lock) 별행 — 펜싱 부재 = 손상 위험 상시라는 다른
    의미의 sticky 조건).

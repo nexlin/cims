@@ -78,18 +78,33 @@ class FmReporter:
 
     # ── 공개 API — 알람은 (code, mo) 전이 시에만 통지 (멱등) ─────────────
 
-    def alarm_open(self, code: str, mo: str, params: dict = None):
+    def alarm_open(self, code: str, mo: str, params: dict = None, severity: str = None):
+        """알람 open — (code, mo) 가 활성키. 이미 같은 상태면 no-op (전이 시에만 통지).
+
+        `severity` 동반 open 은 단계 임계(staged) 알람용 — 이미 open 이라도 severity 가
+        다르면 재통지한다(OAM transition 이 action=change/moreSevere|lessSevere 로 기록,
+        표준화 §3.4(d)). None 이면 카탈로그 기본값을 쓴다. csp `FmReporter::AlarmOpen`
+        (include/FmReporter.h) 과 같은 규약.
+        """
         akey = f"{code}@{mo}"
         with self._lock:
-            if akey in self._active:
-                return
-            self._active[akey] = {'code': code, 'mo_instance': mo,
-                                  'open_ts': _now_iso(), 'params': params or {}}
+            ent = self._active.get(akey)
+            if ent is not None:
+                if ent.get('perceived_severity') == severity:
+                    return              # 이미 같은 상태 — 전이 아님
+                ent['perceived_severity'] = severity   # 승격/완화 — open_ts 는 유지
+                ent['params'] = params or {}
+            else:
+                self._active[akey] = {'code': code, 'mo_instance': mo,
+                                      'open_ts': _now_iso(), 'params': params or {},
+                                      'perceived_severity': severity}
         payload = {'action': 'open', 'code': code, 'mo_instance': mo, 'ts': _now_iso()}
+        if severity:
+            payload['perceived_severity'] = severity
         if params:
             payload['params'] = params
         self._send('FM_ALARM', payload)
-        self._log_info(f"[fm] ALARM OPEN {akey}")
+        self._log_info(f"[fm] ALARM OPEN {akey}" + (f" sev={severity}" if severity else ""))
 
     def alarm_close(self, code: str, mo: str):
         akey = f"{code}@{mo}"
@@ -123,7 +138,15 @@ class FmReporter:
     # ── 송신 코어 ────────────────────────────────────────────────────────
 
     def _active_list(self) -> list:
-        return [dict(v) for v in self._active.values()]
+        # FM_SYNC/FM_REGISTER 의 active 항목 — 단계 임계 알람의 현재 severity 를 실어
+        #   유실·재기동 후 reconcile 시 단계가 보존된다(자기보고 설계 §4).
+        out = []
+        for v in self._active.values():
+            d = dict(v)
+            if d.get('perceived_severity') is None:
+                d.pop('perceived_severity', None)
+            out.append(d)
+        return out
 
     def _send_register(self):
         with self._lock:
@@ -252,6 +275,89 @@ class FmReporter:
     def _log_error(self, m):
         if self.log:
             self.log.log_error(m)
+
+
+def cert_earliest_days_left(path):
+    """인증서 파일의 **가장 이른 만료**까지 남은 일수 — `(days_left, not_after_iso)`.
+    읽기/파싱 실패 시 `(None, None)`. 체인 PEM(leaf+CA)이면 CA 만료도 함께 걸린다 —
+    leaf 만 보면 CA 가 먼저 죽는 구성을 놓친다(csp `_certEarliestDaysLeft` 와 같은 규약).
+    `openssl` CLI 는 배포 lifecycle 이 인증서 생성에 이미 쓰는 도구다."""
+    import subprocess as _sp, datetime as _dt, re as _re
+    try:
+        with open(path, 'r') as f:
+            pem = f.read()
+    except OSError:
+        return None, None
+    blocks = _re.findall(r'-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----', pem, _re.S)
+    if not blocks:
+        return None, None
+    earliest = None
+    for b in blocks:
+        try:
+            r = _sp.run(['openssl', 'x509', '-noout', '-enddate'], input=b,
+                        capture_output=True, text=True, timeout=10)
+            if r.returncode != 0:
+                continue
+            raw = (r.stdout or '').strip()
+            if not raw.startswith('notAfter='):
+                continue
+            exp = _dt.datetime.strptime(raw[len('notAfter='):].strip(), '%b %d %H:%M:%S %Y %Z')
+            exp = exp.replace(tzinfo=_dt.timezone.utc)
+            if earliest is None or exp < earliest:
+                earliest = exp
+        except Exception:
+            continue
+    if earliest is None:
+        return None, None
+    return ((earliest - _dt.datetime.now(_dt.timezone.utc)).days,
+            earliest.isoformat(timespec='seconds'))
+
+
+class CertExpiryProbe(threading.Thread):
+    """자기 HTTPS 인증서 만료 임박 probe — A-PRC-009 cert_expiring (L2 자기보고).
+
+    자기 파일이라 자기가 본다 — OAM 은 형제 모듈의 runtime/cert 경로를 알지 못한다.
+    같은 정의 코드를 CSP(SIP TLS)·OAM(자기 HTTPS·agent mTLS CA)이 각자의 mo 로 나눠
+    감지한다(표준화 §3.4(b) 소유 주체 루트).
+    임계는 CSP 구현·agent 회전 임계와 정렬 — warn 30일 / crit 7일.
+    읽기/파싱 실패는 만료로 단정하지 않는다(로그만) — 개설 실패 축은 A-PRC-025 가 본다.
+    """
+
+    PERIOD_SEC = 3600
+    WARN_DAYS = 30
+    CRIT_DAYS = 7
+
+    def __init__(self, cert_path, mo, on_open, on_close, log=None):
+        super().__init__(name='fm-cert-probe', daemon=True)
+        self._path = cert_path
+        self._mo = mo
+        self._on_open = on_open      # callable(params: dict, severity: str)
+        self._on_close = on_close    # callable()
+        self.log = log
+        self._stop = threading.Event()
+
+    def stop(self):
+        self._stop.set()
+
+    def run(self):
+        first = True
+        while first or not self._stop.wait(self.PERIOD_SEC):
+            first = False
+            days_left, not_after = cert_earliest_days_left(self._path)
+            if days_left is None:
+                if self.log:
+                    self.log.log_warning(f"[fm] cert probe: 인증서를 읽을 수 없음 "
+                                         f"({self._path}) — 만료 판정 생략")
+                continue
+            if days_left > self.WARN_DAYS:
+                self._on_close()        # 교체하면 자연 회수
+                continue
+            sev = 'critical' if days_left <= self.CRIT_DAYS else 'warning'
+            self._on_open({'path': self._path, 'not_after': not_after,
+                           'days_left': days_left, 'threshold': self.WARN_DAYS}, sev)
+            if self.log:
+                self.log.log_info(f"[fm] cert_expiring: {self._path} — "
+                                  f"{days_left}일 남음, severity={sev}")
 
 
 class DbHealthProbe(threading.Thread):

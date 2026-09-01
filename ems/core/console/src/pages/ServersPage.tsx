@@ -2041,11 +2041,25 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
   dep: Deployment; agent: Agent
   packages: SipPackage[]
   desc: string | null
-  onJob: (d: Deployment, jt: JobType) => void
+  onJob: (d: Deployment, jt: JobType) => void | Promise<void>
   onUpgrade: (d: Deployment) => void
-  onRollback: (d: Deployment) => void
-  onRemove: (d: Deployment) => void
+  onRollback: (d: Deployment) => void | Promise<void>
+  onRemove: (d: Deployment) => void | Promise<void>
 }) {
+  // 진행 중 표시·연타 차단 — [패키지 제어] 탭(ControlTab)과 같은 규약.
+  //   install 은 queueJob 이 awaitJob 으로 job 완료까지 기다리는데(로컬 패치 06) 그동안
+  //   버튼이 아무 변화가 없어 **눌렸는지 알 수 없었다**. 눌린 버튼은 '⏳ 진행 중' 으로
+  //   바뀌고 같은 행의 나머지 작업은 잠근다(같은 모듈에 설치·롤백 동시 진행 방지).
+  //   업그레이드는 모달만 여는 동기 동작이라 대상에서 뺀다 — 잠금이 깜빡이고 말 뿐이다.
+  type RowAction = 'install' | 'rollback' | 'remove'
+  const [rowBusy, setRowBusy] = useState<RowAction | null>(null)
+  async function runRow(kind: RowAction, fn: () => void | Promise<void>) {
+    if (rowBusy) return
+    setRowBusy(kind)
+    try { await fn() } finally { setRowBusy(null) }
+  }
+  const rowLbl = (k: RowAction, text: string) => (rowBusy === k ? '⏳ 진행 중' : text)
+  const rowTip = (t: string) => (rowBusy ? `${rowBusy} 진행 중 — 완료까지 기다리세요` : t)
   // 상태 배지·색은 실측 우선(depEffectiveStatus) — [패키지 제어] 탭과 동일 기준.
   // 죽어 있으면 마지막 job 결과가 running 이어도 stopped 로 보인다(두 탭 일치).
   const shown = depEffectiveStatus(d)
@@ -2084,24 +2098,28 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
       </td>
       <td>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <button className="btn btn--sm" disabled={!online} title="install (파일 배치 + 설정 적용)"
-            onClick={() => onJob(d, 'install')}>
-            {notInstalled ? '설치' : '재설치'}
+          <button className="btn btn--sm" disabled={!online || !!rowBusy}
+            title={rowTip('install (파일 배치 + 설정 적용)')}
+            onClick={() => runRow('install', () => onJob(d, 'install'))}>
+            {rowLbl('install', notInstalled ? '설치' : '재설치')}
           </button>
-          <button className="btn btn--sm" disabled={!canUpgrade}
-            title={!online ? 'agent 오프라인'
+          <button className="btn btn--sm" disabled={!canUpgrade || !!rowBusy}
+            title={rowBusy ? rowTip('') : !online ? 'agent 오프라인'
               : notInstalled ? '아직 설치 전 — [설치] 를 먼저 하세요'
               : isRunning ? '실행 중에는 업그레이드할 수 없습니다 — [패키지 제어] 에서 정지 후 진행하세요'
               : upCands.length === 0 ? `${d.package_name} 의 다른 버전 패키지가 없음 (릴리스에 업로드 필요)`
               : `버전을 골라 업그레이드 (등록됨: ${upCands.map(p => 'v' + p.version).join(', ')})`}
             onClick={() => onUpgrade(d)}>↑ 업그레이드</button>
-          <button className="btn btn--sm" disabled={!canRollback}
-            title={canRollback
+          <button className="btn btn--sm" disabled={!canRollback || !!rowBusy}
+            title={rowBusy ? rowTip('') : canRollback
               ? `이전 버전으로 롤백 (v${d.prev_package_version || '?'} · ${d.prev_install_path})`
               : '롤백 대상 없음 (이전 버전 설치 이력 없음)'}
-            onClick={() => onRollback(d)}>⤺ 롤백</button>
-          <button className="btn btn--sm btn--danger" title="delete"
-            onClick={() => onRemove(d)}>✕</button>
+            onClick={() => runRow('rollback', () => onRollback(d))}>
+            {rowLbl('rollback', '⤺ 롤백')}</button>
+          <button className="btn btn--sm btn--danger" disabled={!!rowBusy}
+            title={rowTip('delete')}
+            onClick={() => runRow('remove', () => onRemove(d))}>
+            {rowLbl('remove', '✕')}</button>
         </div>
       </td>
     </tr>

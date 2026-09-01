@@ -161,8 +161,11 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 |---|---|---|---|
 | `A-COM-001` (재사용) | connection_lost | communications | CSP·CSC 의 DB 연결 두절 (`<서버명>/<mod>/db`) |
 | `A-QOS-002` | resource_exhausted | qualityOfService | CMP 자원 풀 완전 고갈 — rtp/ptt_floor/ptt_member (`<서버명>/cmp/<pool>`). 사용률 임계는 OAM sweeper(A-QOS-024, 노드별) 담당 — 역할 분담 |
-| `A-PRC-002` | storage_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 후보: 녹취 쓰기 실패 |
-| `A-QOS-006/007/009/011` | threshold_crossed | qualityOfService | CSP SIP 신호 통계 — 호/등록 성공률·신규 INVITE CPS·SIP 수신 이상 (`<서버명>/csp/{calls/success_rate, reg/success_rate, cps, sip/rx_error}`). 윈도우/단계 임계는 `Setup.SipStats.*`(모듈 설정 소유), 통지가 `perceived_severity` 를 동반 — 단계 승격/완화는 open 재통지(action=change) |
+| `A-PRC-002` | storage_failure | processingError | CMDP FD 스토어 저장 실패 (`<서버명>/cmdp/fd_store`). 녹취 쓰기 실패는 `retention_failure`(A-PRC-017 — 보존 대상) 로 분리됐다 |
+| `A-QOS-006/007` | quality_degraded | qualityOfService | CSP 호·등록 성공률 하한 (`<서버명>/csp/{calls/success_rate, reg/success_rate}`). 윈도우/단계 임계는 `Setup.SipStats.*`(모듈 설정 소유), 통지가 `perceived_severity` 를 동반 — 단계 승격/완화는 open 재통지(action=change) |
+| `A-QOS-009` | capacity_threshold | qualityOfService | CSP 신규 INVITE 유입 rate (`<서버명>/csp/cps`). 윈도우/단계 임계는 `Setup.SipStats.*`(모듈 설정 소유), 통지가 `perceived_severity` 를 동반 — 단계 승격/완화는 open 재통지(action=change) |
+| `A-QOS-011` | threshold_crossed | qualityOfService | CSP SIP 수신 이상(파싱 실패·규격 위반) 급증 (`<서버명>/csp/sip/rx_error`). 윈도우/단계 임계는 `Setup.SipStats.*`(모듈 설정 소유), 통지가 `perceived_severity` 를 동반 — 단계 승격/완화는 open 재통지(action=change) |
+| `A-PRC-009` (재사용) | cert_expiring | processingError | CSC 자기 HTTPS 인증서 만료 임박 (`<서버명>/csc/cert/https`) — `CertExpiryProbe` 1시간 주기. 임계 warn 30일 / crit 7일은 **probe 소유**(CSP 구현·agent 회전 임계와 정렬), 단계 severity 동반 open. 자기 파일이라 자기가 본다 — OAM 은 형제 모듈의 runtime/cert 경로를 모른다 |
 | `A-SEC-003` | security_violation | securityServiceOrMechanismViolation (X.736) | CSP 채널 정책(TLS 강제) 위반 반복 — 게이트 403 건수의 윈도우 급증 (`<서버명>/csp/channel_policy`, 소스 IP 동반). 임계는 `Setup.SipStats.ChannelPolicyMajor`(기본 10, 0=off), 단일 단계 major — 평가는 SipStatsMonitor 동일 윈도우 |
 | `A-SEC-004` | security_violation | securityServiceOrMechanismViolation (X.736) | CSP sec-agree(RFC 3329) 협상 거절 반복 — 494(변조·제안 없음·Verify 생략)/421(정책상 협상 필수) 건수의 윈도우 급증 (`<서버명>/csp/sec_agree`, 소스 IP 동반). 임계는 `Setup.SipStats.SecAgreeRejectMajor`(기본 10, 0=off), 단일 단계 major — A-SEC-003 과 같은 소스 계수기·윈도우 |
 
