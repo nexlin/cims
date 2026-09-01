@@ -133,12 +133,12 @@
       "fields": [
         {
           "key": "Setup.Sip.CallPickupId",
-          "label": "Call Pickup ID (당겨받기)",
+          "label": "Call Pickup ID (당겨받기 — 폐기 예정)",
           "type": "string",
           "default": "**",
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 INVITE 부터 적용.",
-          "help": "VoLTE 당겨받기 기능 트리거 전화번호."
+          "help": "당겨받기 코드의 정본은 접속서비스별 pickup_feature_code (volte_supplementary_services.md §5.2). 이 전역 키는 그 필드가 없는 레거시 서비스 레코드의 폴백으로만 쓰이며 폐기 예정."
         },
         {
           "key": "Setup.Sip.StaleCallTimeout",
@@ -2085,6 +2085,20 @@
             ],
             "default": "off",
             "help": "UE↔CMP 미디어 SRTP(SDES) 정책. off=평문(a=crypto 무시) / optional=능력(mediasec) 선언 단말만 SAVP offer(혼용 전환기) / required=SAVP 단일, 평문 offer 488. required 는 채널 정책 TLS(ipsec-3gpp) 강제와 결합해야 유효(SDES 키가 SDP 에 실림). PTT(그룹/사설)·VoLTE relay 양쪽 집행. CSC Provisioning.Services.<kind>.media_srtp 와 운영자 동기. docs/design/features/media_security.md §4"
+          },
+          {
+            "key": "pickup_feature_code",
+            "label": "당겨받기 코드",
+            "type": "string",
+            "default": "",
+            "help": "이 서비스 가입자의 당겨받기 피처코드. 빈 값=비활성. '<코드>'(예: **)=그룹 픽업(같은 pickup_group 에서 링 중인 호), '<코드><내선>'(예: **1003)=지정 픽업(같은 그룹일 때만, 아니면 403). 전역 Setup.Sip.CallPickupId 는 이 필드가 없는 레거시 레코드의 폴백 — 폐기 예정. docs/design/features/volte_supplementary_services.md §5.2"
+          },
+          {
+            "key": "transfer_allowed",
+            "label": "호 전달 허용",
+            "type": "bool",
+            "default": true,
+            "help": "이 서비스 가입자의 호 전달(REFER — blind/attended) 허용. false 면 REFER 403. volte_supplementary_services.md §6.3"
           },
           {
             "key": "allowed_local_node_refs",

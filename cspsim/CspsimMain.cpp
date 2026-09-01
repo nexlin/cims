@@ -416,6 +416,10 @@ static void PrintUsage(const char* pszBin) {
     printf("                             call         - 등록 + 짝끼리 통화\n");
     printf("                             group-call   - 등록 + 구독 + 그룹통화 (PTT)\n");
     printf("                             full         - 전체 반복\n");
+    printf("                             transfer     - [volte] A→B 후 A blind REFER(→C): 전달 후 B–C (-count 3)\n");
+    printf("                             transfer_attended - [volte] A→B + A→C 상담 후 attended REFER: B–C (-count 3)\n");
+    printf("                             pickup       - [volte] A→B 링잉 중 C 가 당겨받기 코드(-pickup_code) 다이얼: A–C (-count 3)\n");
+    printf("                             dialog_pickup- [volte] C 가 B 를 dialog 구독(BLF) → A→B 링잉 NOTIFY → C INVITE-Replaces: A–C (-count 3)\n");
     printf("  -call_duration <secs>    통화 유지 시간 (default: 10, 버스트 모델 일괄 보유시간)\n");
     printf("  -floor_hold  <secs>      [ptt] 화자 순환 시 참여자별 발언(floor 보유) 시간 (default: 5)\n");
     printf("  -floor_loop              [ptt] 화자 순환을 종료(quit)까지 무한 반복 (장기 안정성 시험)\n");
@@ -460,6 +464,7 @@ static bool g_bPreempt = false;   // -preempt: floor 선점(preemption) 검증 �
 static int  g_iPreemptBy = 0;     // -preempt_by N: 선점자 세션 인덱스 (default 0; chair 검증 시 chair 인덱스)
 static bool g_bNoConfSub = false;  // -no_conf_sub: conference 구독 skip (구 APK 재현)
 static std::string g_strXcapRoot; // -xcap_root: SUBSCRIBE 후 XCAP 문서 능동 GET (Phase 3D 검증)
+static std::string g_strPickupCode = "**";  // -pickup_code: 당겨받기 코드 (pickup 시나리오, 서버 pickup_feature_code/CallPickupId 와 일치)
 
 // -hold <secs>: register 시나리오가 등록을 유지하는 시간 — 등록 유지 중 외부 프로브(비보호 요청 403 등)를
 //   받기 위한 창. 0 이면 종전대로 등록 직후 해제. (RunScenario 시그니처를 늘리지 않으려 파일 정적)
@@ -630,6 +635,105 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         }
         for (int i = 0; i < iCallDuration * 10; i++) usleep(100000);
         printf("[Scenario] Ending calls...\n");
+        for (auto* s : sessions) s->StopCall();
+        return;
+    }
+
+    // 3b. 호 전달·당겨받기 (volte_supplementary_services.md §5·§6) — 3 단말(A,B,C) 필요.
+    //   서버(B2BUA)가 REFER/픽업을 종단하며, 재고정된 leg 로 미디어가 이어지는지(원 relay 유지)를
+    //   각 단말의 누적 수신 RTP 로 검증한다. (검증 아이템 S3-SCN-XFER/PICKUP 이 결과를 판정.)
+    if (eScenario == E_SCENARIO_TRANSFER || eScenario == E_SCENARIO_TRANSFER_ATTENDED ||
+        eScenario == E_SCENARIO_PICKUP || eScenario == E_SCENARIO_DIALOG_PICKUP) {
+        if (sessions.size() < 3) {
+            printf("[Scenario] transfer/pickup 는 -count 3 (A,B,C) 필요 — 현재 %d\n", (int)sessions.size());
+            g_bScenarioDone = true;
+            return;
+        }
+        SimSession* A = sessions[0];
+        SimSession* B = sessions[1];
+        SimSession* C = sessions[2];
+        auto waitInCall = [&](SimSession* s, int tenths) {
+            for (int t = 0; t < tenths && !g_bQuit; ++t) {
+                if (s->m_bInCall) return true;
+                usleep(100000);
+            }
+            return s->m_bInCall;
+        };
+
+        if (eScenario == E_SCENARIO_DIALOG_PICKUP) {
+            // 관제 BLF: C 가 B 를 dialog 구독 → A→B 링잉 시 dialog NOTIFY 로 leg Call-ID 학습 →
+            //   C 가 INVITE-Replaces 로 그 링잉 호를 가져간다(§6.2). 서버가 A–C 연결.
+            B->SetRingHold(true);
+            printf("[Scenario] BLF: C(%s) SUBSCRIBE dialog watched=B(%s)\n", C->m_strUser.c_str(),
+                   B->m_strUser.c_str());
+            C->SubscribeDialog(B->m_strUser);
+            for (int t = 0; t < 15 && !g_bQuit; ++t) usleep(100000);  // 구독 확립 대기
+            printf("[Scenario] BLF: A(%s) -> B(%s) [ring-hold]\n", A->m_strUser.c_str(), B->m_strUser.c_str());
+            A->StartCall(B->m_strUser);
+            // C 가 dialog NOTIFY(early)로 링잉 leg Call-ID 를 받을 때까지 대기 (최대 6s)
+            for (int t = 0; t < 60 && !g_bQuit; ++t) {
+                if (!C->m_strWatchedDlgCallId.empty() && C->m_strWatchedDlgState == "early") break;
+                usleep(100000);
+            }
+            if (C->m_strWatchedDlgCallId.empty()) {
+                printf("[Scenario] BLF: dialog NOTIFY 미수신 — INVITE-Replaces 생략(실패)\n");
+            } else {
+                printf("[Scenario] BLF: C INVITE-Replaces(call-id=%s) 당겨받기\n",
+                       C->m_strWatchedDlgCallId.c_str());
+                // RFC 3891 태그 방향: picker to-tag=원격(remote)·from-tag=로컬(local) — 서버가 양방향 대조.
+                C->StartCallWithReplaces(B->m_strUser, C->m_strWatchedDlgCallId, C->m_strWatchedDlgRemoteTag,
+                                         C->m_strWatchedDlgLocalTag);
+            }
+            bool aOk = waitInCall(A, 40), cOk = waitInCall(C, 40);
+            printf("[Scenario] BLF result: dialog_notify=%d A_inCall=%d C_inCall=%d B_inCall=%d\n",
+                   C->m_iDialogNotifyCount.load(), aOk, cOk, B->m_bInCall);
+        } else if (eScenario == E_SCENARIO_PICKUP) {
+            // A→B 링잉(B ring-hold: 180만) 중 C 가 당겨받기 코드 다이얼 → 서버 PickUp 이 A–C 연결.
+            B->SetRingHold(true);
+            printf("[Scenario] PICKUP: A(%s) -> B(%s) [ring-hold]\n", A->m_strUser.c_str(), B->m_strUser.c_str());
+            A->StartCall(B->m_strUser);
+            for (int t = 0; t < 20 && !g_bQuit; ++t) usleep(100000);  // 2s — B 링잉 확립 대기
+            printf("[Scenario] PICKUP: C(%s) dials pickup code '%s'\n", C->m_strUser.c_str(), g_strPickupCode.c_str());
+            C->StartCall(g_strPickupCode);
+            bool aOk = waitInCall(A, 40), cOk = waitInCall(C, 40);
+            printf("[Scenario] PICKUP result: A_inCall=%d C_inCall=%d B_inCall=%d\n", aOk, cOk, B->m_bInCall);
+        } else if (eScenario == E_SCENARIO_TRANSFER) {
+            // A→B 확립 후 A 가 blind REFER(→C): 전달 후 B–C.
+            printf("[Scenario] BLIND XFER: A(%s) -> B(%s)\n", A->m_strUser.c_str(), B->m_strUser.c_str());
+            A->StartCall(B->m_strUser);
+            waitInCall(A, 60);
+            waitInCall(B, 60);
+            for (int t = 0; t < 20 && !g_bQuit; ++t) usleep(100000);  // 2s 통화 유지(기준 미디어)
+            printf("[Scenario] BLIND XFER: A REFER(blind) -> C(%s)\n", C->m_strUser.c_str());
+            A->BlindTransfer(C->m_strUser);
+            bool cOk = waitInCall(C, 60);
+            printf("[Scenario] BLIND XFER result: C_inCall=%d B_inCall=%d A_inCall=%d\n", cOk, B->m_bInCall,
+                   A->m_bInCall);
+        } else {
+            // attended: A→B + A→C(상담) 후 attended REFER → B–C.
+            printf("[Scenario] ATT XFER: A(%s) -> B(%s)\n", A->m_strUser.c_str(), B->m_strUser.c_str());
+            A->StartCall(B->m_strUser);
+            waitInCall(A, 60);
+            waitInCall(B, 60);
+            for (int t = 0; t < 15 && !g_bQuit; ++t) usleep(100000);
+            printf("[Scenario] ATT XFER: A -> C(%s) [consult]\n", C->m_strUser.c_str());
+            A->StartConsultCall(C->m_strUser);
+            waitInCall(C, 60);
+            for (int t = 0; t < 15 && !g_bQuit; ++t) usleep(100000);
+            printf("[Scenario] ATT XFER: A REFER(attended, Replaces consult)\n");
+            A->AttendedTransfer();
+            for (int t = 0; t < 30 && !g_bQuit; ++t) usleep(100000);  // 전달 완결·재-INVITE 대기
+            printf("[Scenario] ATT XFER result: B_inCall=%d C_inCall=%d A_inCall=%d\n", B->m_bInCall, C->m_bInCall,
+                   A->m_bInCall);
+        }
+
+        // 재고정 후 미디어 흐름 관찰 창 — 이후 검증 아이템이 각 단말 누적 수신 RTP 로 판정한다.
+        unsigned long long a0 = A->RecvPackets(), b0 = B->RecvPackets(), c0 = C->RecvPackets();
+        int obs = iCallDuration > 0 ? iCallDuration : 4;
+        for (int t = 0; t < obs * 10 && !g_bQuit; ++t) usleep(100000);
+        printf("[Scenario] RTP recv delta over %ds: A=+%llu B=+%llu C=+%llu\n", obs, A->RecvPackets() - a0,
+               B->RecvPackets() - b0, C->RecvPackets() - c0);
+        printf("[Scenario] transfer/pickup done, stopping calls\n");
         for (auto* s : sessions) s->StopCall();
         return;
     }
@@ -864,6 +968,7 @@ int main(int argc, char* argv[])
     // XCAP HTTP GET 비활성화 (Phase 3D). 기본은 xcap-diff NOTIFY 수신 시 자동 GET.
     bool bNoXcap               = HasFlag(argc, argv, "-no_xcap");
     g_bNoConfSub               = HasFlag(argc, argv, "-no_conf_sub");
+    g_strPickupCode            = GetArg(argc, argv, "-pickup_code", "**");
     // CSC 연동: REGISTER 전 IdMS auth 수행 (올바른 순서)
     std::string strCscIp       = GetArg(argc, argv, "-csc_ip",   "");
     int iCscPort               = atoi(GetArg(argc, argv, "-csc_port", "4530").c_str());
@@ -952,6 +1057,10 @@ int main(int argc, char* argv[])
     else if (strScenario == "call")       eScenario = E_SCENARIO_CALL;
     else if (strScenario == "group-call" || strScenario == "group_call") eScenario = E_SCENARIO_GROUP_CALL;
     else if (strScenario == "full")       eScenario = E_SCENARIO_FULL;
+    else if (strScenario == "transfer" || strScenario == "transfer_blind") eScenario = E_SCENARIO_TRANSFER;
+    else if (strScenario == "transfer_attended" || strScenario == "attended") eScenario = E_SCENARIO_TRANSFER_ATTENDED;
+    else if (strScenario == "pickup")     eScenario = E_SCENARIO_PICKUP;
+    else if (strScenario == "dialog_pickup" || strScenario == "blf") eScenario = E_SCENARIO_DIALOG_PICKUP;
 
     // 로깅 설정
     CLog::SetPrefix("cspsim");

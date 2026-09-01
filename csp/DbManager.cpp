@@ -101,6 +101,14 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] subscriptions.auth_scheme column absent — migrate_subscription_aka.sql 미적용. IMS AKA "
                      "가입자 없음(전원 digest)" );
+    // 픽업 그룹 (pickup_group — volte_supplementary_services.md §5.1). 미적용이면 전원 org_id 폴백 (INFO — 선택 기능).
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM volte_subscriptions LIKE 'pickup_group'" );
+    m_bHasPickupColumn = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasPickupColumn )
+        CLog::Print( LOG_INFO,
+                     "[DB] subscriptions.pickup_group column absent — migrate_subscription_pickup_group.sql 미적용. "
+                     "당겨받기 그룹은 전원 org_id 폴백" );
 }
 
 std::string CDbManager::Ha1Col( const char *pszAlias ) const {
@@ -111,6 +119,11 @@ std::string CDbManager::Ha1Col( const char *pszAlias ) const {
 std::string CDbManager::AuthSchemeCol( const char *pszAlias ) const {
     if ( !m_bHasAkaColumns ) return "'digest'";
     return std::string( "COALESCE(" ) + pszAlias + ".auth_scheme,'digest')";
+}
+
+std::string CDbManager::PickupGroupCol( const char *pszAlias ) const {
+    if ( !m_bHasPickupColumn ) return "''";
+    return std::string( "COALESCE(" ) + pszAlias + ".pickup_group,'')";
 }
 
 void CDbManager::Disconnect() {
@@ -263,7 +276,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     std::string strSql =
         "SELECT cu.id, u.name, u.org_id, cu.dnd, cu.forward_id, u.id AS person_id, "
         "       COALESCE(cu.service_ref,''), COALESCE(cu.imsi,''), " +
-        Ha1Col( "cu" ) + ", COALESCE(cu.sip_transport,''), " + AuthSchemeCol( "cu" ) +
+        Ha1Col( "cu" ) + ", COALESCE(cu.sip_transport,''), " + AuthSchemeCol( "cu" ) + ", " + PickupGroupCol( "cu" ) +
         " FROM volte_subscriptions cu JOIN users u ON cu.user_id = u.id "
         "WHERE cu.id='" +
         Escape( strUserId ) + "'";
@@ -280,7 +293,8 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
         strSql =
             "SELECT pu.id, u.name, u.org_id, pu.dnd, pu.forward_id, u.id AS person_id, "
             "       COALESCE(pu.service_ref,''), COALESCE(pu.imsi,''), " +
-            Ha1Col( "pu" ) + ", COALESCE(pu.sip_transport,''), " + AuthSchemeCol( "pu" ) +
+            Ha1Col( "pu" ) + ", COALESCE(pu.sip_transport,''), " + AuthSchemeCol( "pu" ) + ", " +
+            PickupGroupCol( "pu" ) +
             " FROM ptt_subscriptions pu JOIN users u ON pu.user_id = u.id "
             "WHERE pu.id='" +
             Escape( strUserId ) + "'";
@@ -309,6 +323,7 @@ bool CDbManager::SelectUser( const std::string &strUserId, CspUser &clsUser ) {
     clsUser.m_strHa1 = row[8] ? row[8] : "";
     clsUser.m_strSipTransport = row[9] ? row[9] : "";
     clsUser.m_strAuthScheme = row[10] ? row[10] : "digest";
+    clsUser.m_strPickupGroup = row[11] ? row[11] : "";
     clsUser._loadTime = time( nullptr );
 
     mysql_free_result( pRes );

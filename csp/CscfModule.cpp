@@ -1030,10 +1030,23 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     } else if ( strEventHdr == "conference" || bAffiliation ) {
         // conference(RFC 4575) — Event 헤더가 1차 근거, 그룹 URI 매칭은 헤더 없는 구현 호환용.
         strEventType = "conference";
+    } else if ( strEventHdr == "dialog" ) {
+        // RFC 4235 dialog-event — 관제 BLF/당겨받기(volte_supplementary_services.md §6.2).
+        //   자원(watched AoR) = R-URI user (없으면 refresh 복원 또는 To URI).
+        strEventType = "dialog";
     } else if ( strReqUri.find( "gms" ) != std::string::npos ) {
         strEventType = "gms";
     } else if ( strReqUri.find( "cms" ) != std::string::npos ) {
         strEventType = "cms";
+    } else if ( !strEventHdr.empty() && strEventHdr != "xcap-diff" ) {
+        // RFC 6665 §8.2.1 — 지원하지 않는 이벤트 패키지는 489 Bad Event. 구 구현은 미지 Event 를
+        //   조용히 gms 로 오분류해 엉뚱한 xcap-diff NOTIFY 를 냈다. gms/cms 는 Event: xcap-diff +
+        //   자원(R-URI)로 식별하므로 그 경우만 아래 기본(gms/cms)으로 흐른다. in-dialog refresh 는
+        //   원 Event(reg/dialog/conference/xcap-diff)를 그대로 실어 이 분기에 걸리지 않는다.
+        CLog::Print( LOG_INFO, "SUBSCRIBE unsupported Event '%s' from %s → 489 Bad Event", strEventHdr.c_str(),
+                     strFromId.c_str() );
+        SendResponse( pclsMessage, 489 );
+        return true;
     } else {
         strEventType = "gms";
     }
@@ -1137,6 +1150,31 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         snprintf( szToTag, sizeof( szToTag ), "%s", strReqToTag.c_str() );
     } else {
         SipMakeTag( szToTag, sizeof( szToTag ) );
+    }
+
+    // dialog-event 인가 (관제 BLF, volte_supplementary_services.md §6.2) — 초기 구독 시 구독자와
+    //   감시 대상(watched AoR)이 같은 픽업 그룹인지 확인한다. 그룹 밖 감시는 403(타 가입자 호 상태
+    //   노출 방지). 자기 자신 감시는 허용. refresh 는 기존 구독이 이미 인가받았으므로 재검사 생략.
+    if ( strEventType == "dialog" && !bRefresh ) {
+        if ( strReqUriUser.empty() ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE dialog without watched AoR (R-URI user) from %s → 489",
+                         strFromId.c_str() );
+            SendResponse( pclsMessage, 489 );
+            return true;
+        }
+        if ( strReqUriUser != strFromId ) {
+            CspUser clsSub, clsWatched;
+            std::string strGSub, strGWatch;
+            if ( gclsCspUserMap.Select( strFromId.c_str(), clsSub ) ) strGSub = clsSub.EffectivePickupGroup();
+            if ( gclsCspUserMap.Select( strReqUriUser.c_str(), clsWatched ) )
+                strGWatch = clsWatched.EffectivePickupGroup();
+            if ( strGSub.empty() || strGSub != strGWatch ) {
+                CLog::Print( LOG_INFO, "SUBSCRIBE dialog denied — %s watch %s not same pickup group (%s vs %s) → 403",
+                             strFromId.c_str(), strReqUriUser.c_str(), strGSub.c_str(), strGWatch.c_str() );
+                SendResponse( pclsMessage, 403 );
+                return true;
+            }
+        }
     }
 
     SubscriptionInfo info;

@@ -130,8 +130,12 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
   SAVP offer 에 crypto 없는/불일치 answer 는 호 종료(평문 폴백 금지). 키는 `RELAY_ADD`
   (peer0)·`RELAY_MODIFY`(peer1/재협상) 의 `media_crypto[_video]` 로 CMP 에 내린다. 서버가
   전달한 re-INVITE 의 재-answer 재키잉은 `EventReInviteResponse` 가 감지해 키 변경 시에만
-  MODIFY 를 재발행한다(불변 = 무동작 — CMP 세션 유지). 호 전환(REFER/blind transfer)은
-  SRTP 재수립 미지원 — crypto 만 벗겨 키 누출을 차단한다(legacy best-effort).
+  MODIFY 를 재발행한다(불변 = 무동작 — CMP 세션 유지). 호 전환(REFER — attended/blind)·
+  당겨받기도 SRTP 를 유지한다 — 원 통화의 relay 세션을 유지한 채 교체되는 leg 만
+  `RELAY_MODIFY` 로 재고정하며, attended 는 합류 단말의 기존 leg 키를 이관(재키잉 없음),
+  blind/pickup 신규 leg 는 정책×능력으로 새 서버 키를 생성한다(떠나는 단말에 알려진 키
+  재사용 금지). SAVP offer 에 crypto 없는 answer 는 전환만 중단하고 원 통화를 유지한다 —
+  [volte_supplementary_services.md §6](volte_supplementary_services.md).
 
 ## 6. CMP 설계
 

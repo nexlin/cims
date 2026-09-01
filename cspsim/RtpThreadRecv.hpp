@@ -108,6 +108,7 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
     // [RTP STATS LOGIC]
     ullPacketCount++;
     ullByteCount += iPacketLen;
+    pRtpThread->m_ullRecvTotal.fetch_add(1, std::memory_order_relaxed);  // 누적(전달/픽업 미디어 검증)
     tCurrentTime = time(NULL);
     if( tCurrentTime - tLastTime >= 10 )
     {

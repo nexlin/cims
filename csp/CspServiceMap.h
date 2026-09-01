@@ -34,6 +34,14 @@ struct ServiceInfo {
     /** sec_mechanisms[] 에 ipsec-3gpp — IMS AKA+IPsec(P4, sip_access_security.md §8.3) 제시 허용.
      *  media_nat_mode≠off 와는 상호배제 (로드 시 무시 + ERROR). tls 는 항상 제시된다. */
     bool sec_ipsec = false;
+    /** 당겨받기 피처코드 (volte_supplementary_services.md §5.2) — "<code>"=그룹 픽업,
+     *  "<code><내선>"=지정 픽업. 빈 값=이 서비스에서 픽업 비활성. pickup_code_set=false(필드
+     *  미지정)이면 전역 Setup.Sip.CallPickupId 폴백(전환기 호환). */
+    std::string pickup_feature_code;
+    bool pickup_code_set = false;
+    /** 호 전달(REFER) 허용 (volte_supplementary_services.md §6.3) — false 면 이 서비스
+     *  가입자의 REFER 는 403. 기본 true(기존 동작 보존). */
+    bool transfer_allowed = true;
     int priority = 100;
     bool enabled = true;
     std::vector<std::string> allowed_local_node_refs;  // v3: LocalNode name 참조 (SOT)

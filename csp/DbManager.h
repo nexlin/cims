@@ -166,11 +166,15 @@ private:
     bool m_bHasHa1Column = false;
     /** AKA 컬럼(auth_scheme — migrate_subscription_aka.sql, sip_access_security.md §8.2) 존재 여부 */
     bool m_bHasAkaColumns = false;
+    /** 픽업 그룹 컬럼(pickup_group — migrate_subscription_pickup_group.sql) 존재 여부 */
+    bool m_bHasPickupColumn = false;
     void ProbeSchema();
     /** 컬럼이 있으면 COALESCE(식,'') 아니면 '' — SELECT 열 위치를 고정한 채 값만 비운다 */
     std::string Ha1Col( const char *pszAlias ) const;
     /** 컬럼이 있으면 COALESCE(alias.auth_scheme,'digest') 아니면 'digest' */
     std::string AuthSchemeCol( const char *pszAlias ) const;
+    /** 컬럼이 있으면 COALESCE(alias.pickup_group,'') 아니면 '' */
+    std::string PickupGroupCol( const char *pszAlias ) const;
     MYSQL_RES *ExecuteSelect( const std::string &strSql );
 
     void HealthProbeLoop();

@@ -112,6 +112,13 @@ public:
 	                            int & iPt, int & iTePt );
 	bool GetToId( const char * pszCallId, std::string & strToId );
 	bool GetFromId( const char * pszCallId, std::string & strFromId );
+	// Call-ID 로 다이얼로그의 로컬(from)/원격(to) 태그를 얻는다. dialog-event(RFC 4235)
+	//   NOTIFY 본문·수신 Replaces(RFC 3891) 대조용. 미발견 시 false.
+	bool GetDialogTags( const char * pszCallId, std::string & strLocalTag, std::string & strRemoteTag );
+	// 수신 Replaces(callid;to-tag;from-tag)에 해당하는 로컬 다이얼로그를 찾는다. Call-ID 가
+	//   맵 키이므로 Call-ID 로 찾고 태그 쌍을 양방향으로 대조한다(발신자 관점에 따라 뒤집힐 수 있다).
+	//   일치하면 true (그 Call-ID 는 곧 pszCallId 자신). 태그를 못 실은 요청은 Call-ID 만으로 허용.
+	bool MatchReplacesDialog( const char * pszCallId, const char * pszToTag, const char * pszFromTag );
 	bool GetContact( const char * pszCallId, CSipCallRoute * pclsRoute );
 	bool GetCdr( const char * pszCallId, CSipCdr * pclsCdr );
 	bool GetInviteHeaderValue( const char * pszCallId, const char * pszHeaderName, std::string & strValue );

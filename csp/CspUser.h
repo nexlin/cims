@@ -117,6 +117,15 @@ public:
     // 소속 아이디
     std::string m_strOrganizationId;
 
+    // 당겨받기 그룹 키 (volte_supplementary_services.md §5.1) — 같은 값끼리 픽업 가능.
+    //   빈 값 = 미지정: 등록 바인딩의 픽업 그룹은 m_strOrganizationId 로 폴백한다(전환기 호환).
+    std::string m_strPickupGroup;
+
+    /** 등록 바인딩·픽업 판정에 쓰는 유효 픽업 그룹 — pickup_group 우선, 비면 org 폴백. */
+    const std::string &EffectivePickupGroup() const {
+        return m_strPickupGroup.empty() ? m_strOrganizationId : m_strPickupGroup;
+    }
+
     // 가입자가 생성된 시간
     time_t m_iCreateTime;
     // 가입자 정보가 마지막으로 수정된 시간

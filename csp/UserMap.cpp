@@ -135,7 +135,9 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
     }
     time( &clsInfo.m_iLoginTime );
 
-    clsInfo.m_strGroupId = pclsXmlUser->m_strOrganizationId;
+    // 픽업 그룹 — pickup_group 우선, 미지정이면 org 폴백 (volte_supplementary_services.md §5.1).
+    //   등록 시점 스냅샷: 프로비저닝 변경은 다음 등록 갱신부터 반영된다.
+    clsInfo.m_strGroupId = pclsXmlUser->EffectivePickupGroup();
 
     // MCData media plane capability — Contact 의 +g.3gpp.icsi-ref 에 icsi.mcdata 포함 여부
     //   (RFC 3840 feature tag; 등록 단위로 판정 — 바인딩 만료와 함께 소멸)
@@ -167,6 +169,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
         USER_BINDING_LIST clsList;
         clsList.push_back( clsInfo );
         m_clsMap.insert( USER_MAP::value_type( strUserId, clsList ) );
+        _indexGroupAdd( clsInfo.m_strGroupId, strUserId );
         CLog::Print( LOG_DEBUG, "user(%s) is inserted (%s:%d:%d) group(%s)", strUserId.c_str(), clsInfo.m_strIp.c_str(),
                      clsInfo.m_iPort, clsInfo.m_eTransport, clsInfo.m_strGroupId.c_str() );
     } else {
@@ -224,7 +227,11 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
         }
 
         CUserInfo &clsBind = clsList[iIdx];
-        // 그룹(조직)은 가입자 단위 속성이므로 전 바인딩에 반영한다.
+        // 픽업 그룹은 가입자 단위 속성이므로 전 바인딩에 반영한다 (+ 그룹 인덱스 이동).
+        if ( !clsList.empty() && clsList[0].m_strGroupId != clsInfo.m_strGroupId ) {
+            _indexGroupRemove( clsList[0].m_strGroupId, strUserId );
+            _indexGroupAdd( clsInfo.m_strGroupId, strUserId );
+        }
         for ( size_t k = 0; k < clsList.size(); ++k ) clsList[k].m_strGroupId = clsInfo.m_strGroupId;
 
         // 재등록 갱신 — REGISTER 에서만 capability·Contact 재평가 (비REGISTER 갱신은 Contact 미포함)
@@ -323,16 +330,15 @@ bool CUserMap::IsIntegrityProtected( const char *pszUserId ) {
  * @returns 그룹 아이디에 포함된 사용자 리스트가 존재하면 true 를 리턴하고 그렇지 않으면 false 를 리턴한다.
  */
 bool CUserMap::SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList ) {
-    USER_MAP::iterator itMap;
-
     clsList.clear();
+    if ( pszGroupId == NULL || pszGroupId[0] == '\0' ) return false;
 
     m_clsMutex.acquire();
-    for ( itMap = m_clsMap.begin(); itMap != m_clsMap.end(); ++itMap ) {
-        if ( itMap->second.empty() ) continue;
-        // 그룹은 가입자 단위 속성 — 어느 바인딩을 봐도 같다.
-        if ( !strcmp( pszGroupId, itMap->second[0].m_strGroupId.c_str() ) ) {
-            clsList.push_back( itMap->first );
+    // 그룹 인덱스 조회 — 등록 가입자 전수 스캔 없이 그룹원만 답한다 (그룹은 가입자 단위 속성).
+    std::map<std::string, std::set<std::string> >::iterator itIdx = m_clsGroupIndex.find( pszGroupId );
+    if ( itIdx != m_clsGroupIndex.end() ) {
+        for ( std::set<std::string>::iterator it = itIdx->second.begin(); it != itIdx->second.end(); ++it ) {
+            clsList.push_back( *it );
         }
     }
     m_clsMutex.release();
@@ -340,6 +346,19 @@ bool CUserMap::SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList ) {
     if ( clsList.empty() == false ) return true;
 
     return false;
+}
+
+void CUserMap::_indexGroupAdd( const std::string &strGroupId, const std::string &strUserId ) {
+    if ( strGroupId.empty() ) return;
+    m_clsGroupIndex[strGroupId].insert( strUserId );
+}
+
+void CUserMap::_indexGroupRemove( const std::string &strGroupId, const std::string &strUserId ) {
+    if ( strGroupId.empty() ) return;
+    std::map<std::string, std::set<std::string> >::iterator it = m_clsGroupIndex.find( strGroupId );
+    if ( it == m_clsGroupIndex.end() ) return;
+    it->second.erase( strUserId );
+    if ( it->second.empty() ) m_clsGroupIndex.erase( it );
 }
 
 /**
@@ -356,6 +375,7 @@ bool CUserMap::Delete( const char *pszUserId ) {
     itMap = m_clsMap.find( pszUserId );
     if ( itMap != m_clsMap.end() ) {
         for ( size_t i = 0; i < itMap->second.size(); ++i ) _releaseBindingSa( itMap->second[i], "unregistered" );
+        if ( !itMap->second.empty() ) _indexGroupRemove( itMap->second[0].m_strGroupId, itMap->first );
         m_clsMap.erase( itMap );
         CLog::Print( LOG_DEBUG, "user(%s) is deleted", pszUserId );
         bRes = true;
@@ -481,6 +501,7 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
         // 마지막 바인딩이 사라지면 등록 해제다 — 그때만 가입자를 제거하고 통지 대상으로 넘긴다.
         if ( clsList.empty() ) {
             CLog::Print( LOG_DEBUG, "user(%s) is deleted - timeout", itMap->first.c_str() );
+            _indexGroupRemove( clsLastRemoved.m_strGroupId, itMap->first );
             clsDeletedInfoList.push_back( std::make_pair( itMap->first, clsLastRemoved ) );
             itMap = m_clsMap.erase( itMap );
         } else {

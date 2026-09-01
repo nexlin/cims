@@ -70,6 +70,10 @@ enum ESimScenario {
     E_SCENARIO_CALL,          // REGISTER + peer간 통화
     E_SCENARIO_GROUP_CALL,    // REGISTER + SUBSCRIBE + 그룹통화
     E_SCENARIO_FULL,          // 위 전부 반복
+    E_SCENARIO_TRANSFER,          // A→B 통화 후 A 가 blind REFER(→C) — 전달 후 B–C (volte_supplementary_services.md §6.1)
+    E_SCENARIO_TRANSFER_ATTENDED, // A→B + A→C(상담) 후 A 가 attended REFER — 전달 후 B–C (§6.2)
+    E_SCENARIO_PICKUP,            // A→B 링잉 중 C 가 당겨받기 코드 다이얼 — A–C (§5)
+    E_SCENARIO_DIALOG_PICKUP,     // C 가 B 를 dialog 구독(BLF) → A→B 링잉 NOTIFY → C 가 INVITE-Replaces — A–C (§6.2)
 };
 
 // ─────────────────────────────────────────────
@@ -145,6 +149,36 @@ public:
     // 액션
     void StartCall(const std::string& strTarget = "");
     void StopCall();
+
+    // ── 호 전달·당겨받기 (volte_supplementary_services.md §5·§6) ──
+    /** blind REFER 발신 — 현재 통화(m_strInviteId)의 상대를 strTarget 으로 전달한다.
+     *  서버(B2BUA)가 REFER 를 종단하고 상대 leg 를 strTarget 에 연결한다. */
+    void BlindTransfer(const std::string& strTarget);
+    /** 상담(consultation) 통화 발신 — 두 번째 다이얼로그(m_strConsultId)로 strTarget 을 부른다.
+     *  첫 통화(m_strInviteId)는 유지. attended transfer 전제. */
+    void StartConsultCall(const std::string& strTarget);
+    /** attended REFER 발신 — 첫 통화(m_strInviteId)와 상담 통화(m_strConsultId)를 Replaces 로
+     *  묶어 두 상대를 연결하고 자신은 빠진다. StartConsultCall 이 확립된 뒤 호출. */
+    void AttendedTransfer();
+    /** 당겨받기 대상(ringing-hold) 모드 — INVITE 수신 시 180 만 보내고 200 을 보내지 않는다.
+     *  다른 단말이 당겨받기 코드로 이 링잉 호를 가져갈 수 있게 한다. Start() 전/후 무관. */
+    void SetRingHold(bool b) { m_bRingHold = b; }
+
+    /** dialog-event(RFC 4235) 구독 — 감시 대상 AoR 의 호 상태 변화를 dialog-info NOTIFY 로 받는다
+     *  (관제 BLF). NOTIFY 수신 시 링잉 leg Call-ID/태그를 학습해 INVITE-Replaces 당겨받기에 쓴다. */
+    void SubscribeDialog(const std::string& strWatchedAor);
+    /** INVITE-with-Replaces(RFC 3891) 발신 — replacesCallId(+태그) 대상 다이얼로그를 교체한다
+     *  (BLF 클릭 당겨받기·표준 attended 완결). target 은 Request-URI user(임의 — 서버는 Replaces 로 라우팅). */
+    void StartCallWithReplaces(const std::string& strTarget, const std::string& strReplacesCallId,
+                               const std::string& strToTag, const std::string& strFromTag);
+    std::atomic<int>  m_iDialogNotifyCount{0};   // 수신 dialog NOTIFY 수
+    std::string       m_strWatchedDlgCallId;     // 마지막 dialog NOTIFY 의 활성 dialog Call-ID (Replaces 대상)
+    std::string       m_strWatchedDlgState;      // early|confirmed|terminated
+    std::string       m_strWatchedDlgLocalTag;   // dialog-info local-tag
+    std::string       m_strWatchedDlgRemoteTag;  // dialog-info remote-tag
+    /** 누적 수신 RTP 패킷 수 — 전달·픽업 후 미디어 흐름 검증용. */
+    unsigned long long RecvPackets() const { return m_clsRtpThread.m_ullRecvTotal.load(); }
+
     void StartGroupCall(const std::string& strGroupId = "");
     void SetEmergency(int iCond) { m_iEmergencyCond = iCond; }  // 0/1/2 (normal/imminent/emergency)
     void SetAdhocMembers(const std::vector<std::string>& v) { m_vecAdhoc = v; }  // ad hoc 멤버 MSISDN
@@ -205,6 +239,8 @@ public:
 
     // 상태
     std::string  m_strInviteId;
+    std::string  m_strConsultId;        // attended transfer 상담 통화 call-id (두 번째 다이얼로그)
+    bool         m_bRingHold{false};    // 당겨받기 대상 — 180 만 보내고 200 보류
     bool         m_bRegistered;
     bool         m_bInCall;
     bool         m_bNoRegister{false};  // true 면 REGISTER 자동 송신 skip (외부 SIP peer 모드)
@@ -230,6 +266,12 @@ public:
     std::string  m_strRegSubCallId;
     int          m_iRegSubSeq{0};
     std::string  m_strRegSubFromTag;
+
+    // dialog-event 구독 다이얼로그 (RFC 4235 — 관제 BLF)
+    std::string  m_strDlgSubCallId;
+    int          m_iDlgSubSeq{0};
+    std::string  m_strDlgSubFromTag;
+    std::string  m_strDlgWatchedAor;   // 감시 대상 AoR
 
     // conference 구독 다이얼로그 (RFC 4575 — 그룹 참가자 정보. 그룹 AoR 로
     // SUBSCRIBE)

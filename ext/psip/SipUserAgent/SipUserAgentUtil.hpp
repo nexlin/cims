@@ -125,6 +125,54 @@ bool CSipUserAgent::GetFromId( const char * pszCallId, std::string & strFromId )
 	return bRes;
 }
 
+// Call-ID 로 다이얼로그의 로컬(from)/원격(to) 태그를 얻는다 (dialog-event 본문·Replaces 대조).
+bool CSipUserAgent::GetDialogTags( const char * pszCallId, std::string & strLocalTag, std::string & strRemoteTag )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	bool	bRes = false;
+
+	strLocalTag.clear();
+	strRemoteTag.clear();
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		strLocalTag = itMap->second.m_strFromTag;   // 로컬(서버) 태그
+		strRemoteTag = itMap->second.m_strToTag;    // 원격(상대) 태그
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+// 수신 Replaces(RFC 3891) 대상 다이얼로그 대조 — Call-ID 로 찾고 태그 쌍을 양방향 비교.
+bool CSipUserAgent::MatchReplacesDialog( const char * pszCallId, const char * pszToTag, const char * pszFromTag )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	bool	bRes = false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		const std::string & local = itMap->second.m_strFromTag;
+		const std::string & remote = itMap->second.m_strToTag;
+		std::string to = pszToTag ? pszToTag : "";
+		std::string from = pszFromTag ? pszFromTag : "";
+		// 태그 미전달이면 Call-ID 매칭만으로 허용(기존 Refer-To Replaces 경로와 동일 관용).
+		//   전달됐다면 {to,from} 이 {local,remote} 와 어느 방향으로든 일치해야 한다.
+		if( to.empty() && from.empty() )
+			bRes = true;
+		else if( ( to == local && from == remote ) || ( to == remote && from == local ) )
+			bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
 // SIP Call-ID 로 통화를 검색한 후, 검색된 결과로 전화 상대방의 Contact 정보를 CSipCallRoute 객체에 저장한다.
 bool CSipUserAgent::GetContact( const char * pszCallId, CSipCallRoute * pclsRoute )
 {

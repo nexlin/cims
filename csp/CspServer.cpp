@@ -754,9 +754,47 @@ static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
  * @param pclsRegInfo  reg-event 전용: 등록 삭제 후 통지(unregistered/expired)처럼 UserMap 에서
  *                     더 이상 조회할 수 없는 경우 삭제 직전 바인딩을 넘긴다 (body·전송 목적지에 사용)
  */
+/**
+ * @brief dialog-event(RFC 4235) NOTIFY 본문 상태 — 변경된(또는 스냅샷) 다이얼로그 1건.
+ *   strCallId 가 비면 감시 대상에게 활성 호가 없음(빈 full 스냅샷). 관제 BLF/당겨받기용:
+ *   picker 는 strCallId 를 Replaces 대상으로 INVITE 한다 (volte_supplementary_services.md §6.2).
+ */
+struct DialogNotifyState {
+    bool bFull = false;  // full(초기 스냅샷) / partial(상태 변경)
+    std::string strCallId;
+    std::string strState;  // trying|early|confirmed|terminated
+    std::string strDir;    // initiator|recipient
+    std::string strLocalTag, strRemoteTag;
+    std::string strLocalAor, strRemoteAor;
+};
+
+static std::string BuildDialogInfoBody( const std::string &strWatchedAor, const DialogNotifyState &dlg, int iVersion ) {
+    const std::string strDom = gclsServiceMap.GetDomainByKind( "volte" );
+    const std::string strDomSuffix = strDom.empty() ? "" : ( "@" + strDom );
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    s += "<dialog-info xmlns=\"urn:ietf:params:xml:ns:dialog-info\" version=\"" + std::to_string( iVersion ) +
+         "\" state=\"" + ( dlg.bFull ? "full" : "partial" ) + "\" entity=\"sip:" + strWatchedAor + strDomSuffix +
+         "\">\r\n";
+    if ( !dlg.strCallId.empty() ) {
+        s += "  <dialog id=\"" + dlg.strCallId + "\" call-id=\"" + dlg.strCallId + "\"";
+        if ( !dlg.strLocalTag.empty() ) s += " local-tag=\"" + dlg.strLocalTag + "\"";
+        if ( !dlg.strRemoteTag.empty() ) s += " remote-tag=\"" + dlg.strRemoteTag + "\"";
+        s += " direction=\"" + ( dlg.strDir.empty() ? std::string( "recipient" ) : dlg.strDir ) + "\">\r\n";
+        s += "    <state>" + ( dlg.strState.empty() ? std::string( "confirmed" ) : dlg.strState ) + "</state>\r\n";
+        if ( !dlg.strLocalAor.empty() )
+            s += "    <local><identity>sip:" + dlg.strLocalAor + strDomSuffix + "</identity></local>\r\n";
+        if ( !dlg.strRemoteAor.empty() )
+            s += "    <remote><identity>sip:" + dlg.strRemoteAor + strDomSuffix + "</identity></remote>\r\n";
+        s += "  </dialog>\r\n";
+    }
+    s += "</dialog-info>\r\n";
+    return s;
+}
+
 static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::string &etag,
                                     const std::string &strChangedId, const char *pszRegEvent = NULL,
-                                    const CUserInfo *pclsRegInfo = NULL, const std::string *pstrPrebuiltBody = NULL ) {
+                                    const CUserInfo *pclsRegInfo = NULL, const std::string *pstrPrebuiltBody = NULL,
+                                    const DialogNotifyState *pDlg = NULL ) {
     // SUBSCRIBE 수신 listener 의 bind_ip:bind_port 를 Via/From 자기 주소로 사용.
     // listener id 가 0 (옛 dialog) 이거나 매칭 실패 시 stack primary 로 fallback.
     const int iListenerId = sub.iInboundListenerId;
@@ -784,6 +822,9 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
     } else if ( sub.strEventType == "conference" ) {
         // conference: notifier = conference focus = 그룹 AoR (RFC 4575)
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
+    } else if ( sub.strEventType == "dialog" ) {
+        // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
         std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
@@ -861,6 +902,14 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         pMsg->AddHeader( "Event", "conference" );
         if ( pstrPrebuiltBody != NULL ) strBody = *pstrPrebuiltBody;
         pMsg->m_clsContentType.Set( "application", "conference-info+xml" );
+    } else if ( sub.strEventType == "dialog" ) {
+        // dialog-event (RFC 4235) — 감시 대상의 호 상태 1건 (당겨받기 BLF). version 은 구독 내
+        //   0 부터 (reg 와 동일: 첫 NOTIFY iSeq=2 → -2). pDlg 없으면 빈 full 스냅샷(활성 호 없음).
+        pMsg->AddHeader( "Event", "dialog" );
+        DialogNotifyState clsEmpty;
+        clsEmpty.bFull = true;
+        strBody = BuildDialogInfoBody( sub.strResourceId, pDlg ? *pDlg : clsEmpty, iSeq - 2 );
+        pMsg->m_clsContentType.Set( "application", "dialog-info+xml" );
     } else {
         pMsg->AddHeader( "Event", "xcap-diff" );
         strBody = BuildXcapDiffBody( sub, etag, strChangedId );
@@ -903,6 +952,9 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
         pMsg->m_clsFrom.m_clsUri.Parse( sub.strSubscriberUri.c_str(), (int)sub.strSubscriberUri.size() );
     } else if ( sub.strEventType == "conference" ) {
         // conference: notifier = conference focus = 그룹 AoR (RFC 4575)
+        pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
+    } else if ( sub.strEventType == "dialog" ) {
+        // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
         std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
@@ -947,6 +999,7 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
     pMsg->AddHeader( "Event", sub.strEventType == "reg"           ? "reg"
                               : sub.strEventType == "affiliation" ? "presence"
                               : sub.strEventType == "conference"  ? "conference"
+                              : sub.strEventType == "dialog"      ? "dialog"
                                                                   : "xcap-diff" );
     pMsg->AddHeader( "Subscription-State", "terminated;reason=timeout" );
     pMsg->m_iContentLength = 0;
@@ -977,6 +1030,15 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
         //   활성 세션이 없으면 빈 로스터(users 없음)로 나가 UE 가 "참여자 0" 을 즉시 알 수 있다.
         std::string strBody = gclsGroupCallService.BuildConferenceInfoBody( sub.strResourceId );
         SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
+        return;
+    }
+    if ( sub.strEventType == "dialog" ) {
+        // RFC 4235: 구독 수락 직후 감시 대상의 현재 호 상태 full 스냅샷 1건. 현 구현은 진행 중
+        //   호를 CallMap 에서 역인덱싱하지 않으므로 빈 full(활성 호 없음)로 시작하고, 이후 호 상태
+        //   변경마다 SendDialogEventNotify 가 partial 로 갱신한다.
+        DialogNotifyState clsEmpty;
+        clsEmpty.bFull = true;
+        SendNotifyToSubscriber( sub, "", "", NULL, NULL, NULL, &clsEmpty );
         return;
     }
     if ( sub.strEventType == "gms" ) {
@@ -1016,6 +1078,36 @@ void SendRegEventNotify( const std::string &strUserId, const char *pszEvent, con
     for ( std::list<SubscriptionInfo>::iterator itSub = clsSubList.begin(); itSub != clsSubList.end(); ++itSub ) {
         SendNotifyToSubscriber( *itSub, "", "", pszEvent, pclsInfo );
     }
+}
+
+/**
+ * @brief dialog-event(RFC 4235) 상태 변경을 감시자에게 통지 (관제 BLF/당겨받기, §6.2).
+ *   호가 링잉(early)/응답(confirmed)/종료(terminated)될 때 ModuleDispatcher 가 호출한다.
+ *   strWatchedAor = 상태가 바뀐 당사자, strDlgCallId = 그 당사자의 CSP 측 leg Call-ID
+ *   (picker 가 Replaces 로 쓸 값). 그 당사자의 dialog 구독자 전원에게 partial NOTIFY.
+ */
+void SendDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
+                            const std::string &strState, const std::string &strDir, const std::string &strLocalAor,
+                            const std::string &strRemoteAor, const std::string &strLocalTag,
+                            const std::string &strRemoteTag ) {
+    std::list<SubscriptionInfo> clsSubList;
+    gclsSubscriptionManager.GetSubscriptionsByResource( strWatchedAor, "dialog", clsSubList );
+    if ( clsSubList.empty() ) return;
+
+    DialogNotifyState dlg;
+    dlg.bFull = false;
+    dlg.strCallId = strDlgCallId;
+    dlg.strState = strState;
+    dlg.strDir = strDir;
+    dlg.strLocalAor = strLocalAor;
+    dlg.strRemoteAor = strRemoteAor;
+    dlg.strLocalTag = strLocalTag;
+    dlg.strRemoteTag = strRemoteTag;
+    for ( std::list<SubscriptionInfo>::iterator itSub = clsSubList.begin(); itSub != clsSubList.end(); ++itSub ) {
+        SendNotifyToSubscriber( *itSub, "", "", NULL, NULL, NULL, &dlg );
+    }
+    CLog::Print( LOG_INFO, "SendDialogEventNotify: watched=%s state=%s callid=%s subs=%d", strWatchedAor.c_str(),
+                 strState.c_str(), strDlgCallId.c_str(), (int)clsSubList.size() );
 }
 
 /**

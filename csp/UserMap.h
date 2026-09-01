@@ -20,6 +20,7 @@
 #define _USER_MAP_H_
 
 #include <map>
+#include <set>
 #include <vector>
 
 #include "CspUser.h"
@@ -170,6 +171,13 @@ private:
 
     /** 가입자당 바인딩 상한 — 죽은 flow 가 만료 전에 누적되는 것을 막는다(초과 시 최고령 제거). */
     static const size_t MAX_BINDING_PER_USER = 8;
+
+    /** 픽업 그룹 → 등록 가입자 집합 인덱스 — SelectGroup(픽업 후보 탐색)을 전수 스캔 없이
+     *  답한다. m_clsMap 의 가입자 추가/제거·그룹 변경 지점에서만 갱신하며 m_clsMutex 로 보호.
+     *  호출 전 m_clsMutex 를 잡고 있어야 한다. */
+    std::map<std::string, std::set<std::string> > m_clsGroupIndex;
+    void _indexGroupAdd( const std::string &strGroupId, const std::string &strUserId );
+    void _indexGroupRemove( const std::string &strGroupId, const std::string &strUserId );
 
     USER_MAP m_clsMap;
     CSipMutex m_clsMutex;

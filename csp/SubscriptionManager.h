@@ -18,7 +18,7 @@ struct SubscriptionInfo {
     std::string strToTag;          // Server-generated tag -> NOTIFY From-tag
     std::string strContact;        // Contact URI from SUBSCRIBE -> NOTIFY Request-URI
     std::string strCallId;         // SIP Dialog Call-ID
-    std::string strEventType;      // "reg"|"affiliation"|"conference"|"gms"|"cms"
+    std::string strEventType;      // "reg"|"affiliation"|"conference"|"gms"|"cms"|"dialog"
     std::string strResourceId;     // 구독 대상 자원 (Req-URI user) — conference 는 그룹 ID
     int iExpires;                  // Expires in seconds
     time_t tStartTime;             // Subscription Start Time

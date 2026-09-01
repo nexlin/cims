@@ -55,6 +55,16 @@ bool CCspServiceMap::Sync() {
             std::string en = row.GetString( "enabled" );
             s.enabled = ( en != "false" && en != "0" );
 
+            // 당겨받기 피처코드 — 필드 미지정(부재)과 빈 값을 구분한다: 부재=전역 폴백, 빈 값=비활성
+            //   (volte_supplementary_services.md §5.2)
+            if ( row.Has( "pickup_feature_code" ) ) {
+                s.pickup_code_set = true;
+                s.pickup_feature_code = row.GetString( "pickup_feature_code" );
+            }
+            // 호 전달(REFER) 허용 — 기본 true (§6.3)
+            std::string tr = row.GetString( "transfer_allowed" );
+            s.transfer_allowed = ( tr != "false" && tr != "0" );
+
             // sec_mechanisms[] — ipsec-3gpp 는 ESP transport mode 라 NAT 와 상호배제 (§8.3 정적 겹)
             SimpleJson::JsonNode mechs = row.Get( "sec_mechanisms" );
             if ( mechs.type == SimpleJson::JSON_ARRAY ) {

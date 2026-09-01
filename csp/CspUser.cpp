@@ -50,6 +50,7 @@ void CspUser::clear() {
     m_strAuthScheme.clear();
     m_bDnd = false;
     m_strOrganizationId.clear();
+    m_strPickupGroup.clear();
     m_vecReject.clear();
     m_strForward.clear();
     m_iCreateTime = 0;
@@ -98,6 +99,7 @@ bool CspUserMap::_loadUserFromFile( std::string strUserId, CspUser &clsUser ) {
     if ( jsonUser.Has( "auth_scheme" ) ) clsUser.m_strAuthScheme = jsonUser.GetString( "auth_scheme" );
     if ( jsonUser.Has( "org_id" ) ) clsUser.m_strOrganizationId = jsonUser.GetString( "org_id" );
     if ( jsonUser.Has( "service_type" ) ) clsUser.m_strServiceType = jsonUser.GetString( "service_type" );
+    if ( jsonUser.Has( "pickup_group" ) ) clsUser.m_strPickupGroup = jsonUser.GetString( "pickup_group" );
 
     // v3 (2026-04-22): service_ref / imsi — DB 의 volte_subscriptions / ptt_subscriptions 에 적재되는
     // 가입자 매핑. file fallback 모드 (DB 미연결) 에서도 user JSON 에서 직접 읽어 service_binding 채움.

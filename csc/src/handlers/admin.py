@@ -195,9 +195,10 @@ async def _list_users(config):
 
             # 1 query for all volte_subscriptions
             aka_cols = _aka_select_extra(cur)
+            pickup_cols = _pickup_select_extra(cur)
             cur.execute(
                 "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols} FROM volte_subscriptions ORDER BY user_id, id"
+                f"{aka_cols}{pickup_cols} FROM volte_subscriptions ORDER BY user_id, id"
             )
             call_subs_by_user: dict = {}
             for s in cur.fetchall():
@@ -210,7 +211,7 @@ async def _list_users(config):
             # 1 query for all ptt_subscriptions
             cur.execute(
                 "SELECT id, user_id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols} FROM ptt_subscriptions ORDER BY user_id, id"
+                f"{aka_cols}{pickup_cols} FROM ptt_subscriptions ORDER BY user_id, id"
             )
             ptt_subs_by_user: dict = {}
             for s in cur.fetchall():
@@ -265,9 +266,10 @@ async def _get_user(person_id: str, config):
 
             # call subscriptions
             aka_cols = _aka_select_extra(cur)
+            pickup_cols = _pickup_select_extra(cur)
             cur.execute(
                 "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols} FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
+                f"{aka_cols}{pickup_cols} FROM volte_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             call_subs = cur.fetchall()
@@ -280,7 +282,7 @@ async def _get_user(person_id: str, config):
             # ptt subscriptions
             cur.execute(
                 "SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, register_time, logout_time "
-                f"{aka_cols} FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
+                f"{aka_cols}{pickup_cols} FROM ptt_subscriptions WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
             ptt_subs = cur.fetchall()
@@ -471,7 +473,7 @@ async def _list_subscriptions(person_id: str, svc: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
             cur.execute(
                 f"SELECT id, service_ref, imsi, sip_transport, dnd, forward_id, "
-                f"       register_time, logout_time {_aka_select_extra(cur)} "
+                f"       register_time, logout_time {_aka_select_extra(cur)}{_pickup_select_extra(cur)} "
                 f"FROM {table} WHERE user_id=%s ORDER BY id",
                 (person_id,)
             )
@@ -542,6 +544,39 @@ def _aka_select_extra(cur) -> str:
     if not _auc.has_aka_columns(cur):
         return ""
     return ", auth_scheme, (k_enc<>'') AS aka_provisioned"
+
+
+# ── 당겨받기 그룹 (volte_supplementary_services.md §5.1) ─────────────────────────
+#   pickup_group: 같은 값끼리 당겨받기 가능. NULL/빈 값 = 미지정(CSP 는 org_id 폴백).
+#   CSP 반영은 다음 REGISTER 갱신부터(등록 바인딩 스냅샷).
+
+_HAS_PICKUP_COL = None  # 컬럼 프로브 캐시 (프로세스 수명). None=미확인
+
+_PICKUP_SCHEMA_ERROR = {'error': 'schema_not_migrated',
+                        'detail': 'subscriptions.pickup_group column absent — sql/migrate_subscription_pickup_group.sql not applied'}
+
+
+def _has_pickup_column(cur) -> bool:
+    """subscriptions.pickup_group 존재 여부 — migrate_subscription_pickup_group.sql. 한 번 확인 후 캐시."""
+    global _HAS_PICKUP_COL
+    if _HAS_PICKUP_COL is None:
+        cur.execute("SHOW COLUMNS FROM volte_subscriptions LIKE 'pickup_group'")
+        _HAS_PICKUP_COL = cur.fetchone() is not None
+    return _HAS_PICKUP_COL
+
+
+def _pickup_select_extra(cur) -> str:
+    """목록/단건 SELECT 에 덧붙일 pickup_group 열 — 마이그레이션 미적용 DB 면 빈 문자열."""
+    return ", COALESCE(pickup_group,'') AS pickup_group" if _has_pickup_column(cur) else ""
+
+
+def _parse_pickup_group(body):
+    """body.pickup_group → str|None. 빈 값/공백 = None(그룹 해제 — CSP 는 org 폴백)."""
+    v = body.get('pickup_group')
+    if v is None:
+        return None
+    v = str(v).strip()
+    return v or None
 
 
 def _parse_auth_scheme(body):
@@ -644,12 +679,18 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 return aka
             aka_cols = ''.join(', ' + f.split('=')[0] for f in aka[0])
             aka_ph = ',%s' * len(aka[1])
+            pickup_col, pickup_vals = '', []
+            if 'pickup_group' in body:
+                if not _has_pickup_column(cur):
+                    return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
+                pickup_col, pickup_vals = ', pickup_group', [_parse_pickup_group(body)]
             if not _has_ha1_column(cur):
                 return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
             cur.execute(
-                f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id{aka_cols}) "
-                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{aka_ph})",
-                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *aka[1])
+                f"INSERT INTO {table} (id, user_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id"
+                f"{pickup_col}{aka_cols}) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s{',%s' * len(pickup_vals)}{aka_ph})",
+                (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *pickup_vals, *aka[1])
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
     return HandlerResult(status=201, body={'id': msisdn})
@@ -697,6 +738,10 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
                 fields.append("imsi=%s"); values.append(new_imsi)
             if 'sip_transport' in body:
                 fields.append("sip_transport=%s"); values.append(sip_transport)
+            if 'pickup_group' in body:
+                if not _has_pickup_column(cur):
+                    return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
+                fields.append("pickup_group=%s"); values.append(_parse_pickup_group(body))
 
             # H(A1) 결박 — imsi/service_ref 가 바뀌면 기존 ha1 은 무효다. 서버는 원문을 모르므로
             #   passwd 동시 입력을 요구한다 (§4.3).
@@ -1478,6 +1523,8 @@ _USER_FIELDS = [
     {'name': '*_subscriptions[].service_ref', 'type': 'string', 'desc': '소속 서비스명 (도메인 결정)'},
     {'name': '*_subscriptions[].dnd', 'type': 'boolean', 'desc': '방해금지'},
     {'name': '*_subscriptions[].forward_id', 'type': 'string', 'desc': '착신전환 대상'},
+    {'name': '*_subscriptions[].pickup_group', 'type': 'string',
+     'desc': '당겨받기 그룹 키 — 같은 값끼리 픽업 가능. 빈 값=미지정(CSP 는 org_id 폴백). 마이그레이션 전 DB 는 생략'},
     {'name': '*_subscriptions[].register_time', 'type': 'string', 'desc': 'ISO8601 최근 등록 시각'},
     {'name': '*_subscriptions[].logout_time', 'type': 'string', 'desc': 'ISO8601 최근 로그아웃 시각'},
     {'name': 'create_time', 'type': 'string', 'desc': 'ISO8601 생성'},
@@ -1675,7 +1722,8 @@ CIMS_ADMIN_API_DOCS = [
           'enum': ['call', 'ptt'], 'desc': '가입 종류'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
           'desc': '{id(MSISDN, 필수), imsi(필수), service_ref?, passwd?, sip_transport?(UDP|TCP|TLS), '
-                  'auth_scheme?(digest|aka), k?(hex32), opc?(hex32)|op?(hex32), amf?(hex4), dnd?, forward_id?}'},
+                  'auth_scheme?(digest|aka), k?(hex32), opc?(hex32)|op?(hex32), amf?(hex4), dnd?, forward_id?, '
+                  'pickup_group?}'},
      ],
      'response': '{id}',
      'response_fields': [{'name': 'id', 'type': 'string', 'desc': '추가된 번호(MSISDN)'}],
@@ -1700,7 +1748,9 @@ CIMS_ADMIN_API_DOCS = [
                'sip_transport=TLS 는 **서버가 집행**한다 — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 전부 403. '
                'UDP/TCP 는 단말 프로비저닝 힌트일 뿐이고 null 이면 단말이 transport 를 고른다.',
                'auth_scheme=aka(IMS AKA over TLS) 는 k + opc(또는 op → OPc 유도) 를 함께 보낸다. K/OPc 는 AuC.Kek 로 '
-               '암호화 보관되고 어떤 API 응답에도 나가지 않는다. AKA 가입자는 sip_transport 와 무관하게 TLS 채널만 허용된다.'],
+               '암호화 보관되고 어떤 API 응답에도 나가지 않는다. AKA 가입자는 sip_transport 와 무관하게 TLS 채널만 허용된다.',
+               'pickup_group 은 당겨받기 그룹 키 — 같은 값끼리 픽업 가능(volte_supplementary_services.md §5.1). '
+               '빈 값/미전송=미지정(CSP 는 org_id 폴백). CSP 반영은 다음 REGISTER 갱신부터.'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.subs.update', 'module': 'csc', 'method': 'PUT',
@@ -1729,7 +1779,8 @@ CIMS_ADMIN_API_DOCS = [
                'H(A1) 은 (imsi, 서비스 domain/realm) 에 결박된다. imsi 나 service_ref 를 바꾸는 요청은 passwd 를 함께 보내야 한다.',
                'sip_transport 는 키가 있을 때만 반영 — null/빈값이면 정책 해제(단말 선택).',
                'auth_scheme/k/opc(op)/amf 는 키가 있을 때만 반영. k 나 opc 를 바꾸면 SQN 이 0 으로 리셋된다. '
-               'aka 로 바꾸는데 보관된 키가 없으면 k/opc 를 같이 보내야 한다(400).'],
+               'aka 로 바꾸는데 보관된 키가 없으면 k/opc 를 같이 보내야 한다(400).',
+               'pickup_group 은 키가 있을 때만 반영 — 빈 값이면 그룹 해제(org_id 폴백). 반영은 다음 REGISTER 갱신부터.'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.subs.delete', 'module': 'csc', 'method': 'DELETE',

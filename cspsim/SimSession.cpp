@@ -626,6 +626,86 @@ void SimSession::SubscribeReg()
 }
 
 // ─────────────────────────────────────────────
+//  dialog-event SUBSCRIBE (RFC 4235 — 관제 BLF, volte_supplementary_services.md §6.2)
+//   Req-URI/To = 감시 대상 AoR, Event: dialog. 서버가 대상의 호 상태를 dialog-info NOTIFY 로 통지.
+// ─────────────────────────────────────────────
+void SimSession::SubscribeDialog(const std::string& strWatchedAor)
+{
+    m_strDlgWatchedAor = strWatchedAor;
+    const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
+
+    char szCallId[128];
+    snprintf(szCallId, sizeof(szCallId), "dlgsub_%s_%d_%d", m_strUser.c_str(), m_iId, (int)time(NULL));
+    m_strDlgSubCallId = szCallId;
+    m_iDlgSubSeq = 1;
+
+    char szTag[64];
+    SipMakeTag(szTag, sizeof(szTag));
+    m_strDlgSubFromTag = szTag;
+
+    CSipMessage* pMsg = new CSipMessage();
+    pMsg->m_strSipMethod = "SUBSCRIBE";
+    pMsg->m_clsReqUri.Set("sip", strWatchedAor.c_str(), m_strDomain.c_str(), m_iServerPort);
+
+    char szBranch[SIP_BRANCH_MAX_SIZE];
+    SipMakeBranch(szBranch, sizeof(szBranch));
+    pMsg->AddVia(strLocalIp.c_str(), m_iLocalPort, szBranch);
+
+    pMsg->m_clsFrom.m_clsUri.Set("sip", m_strUser.c_str(), m_strDomain.c_str(), 0);
+    pMsg->m_clsFrom.InsertParam(SIP_TAG, szTag);
+    pMsg->m_clsTo.m_clsUri.Set("sip", strWatchedAor.c_str(), m_strDomain.c_str(), 0);
+
+    pMsg->m_clsCallId.Parse(szCallId, (int)strlen(szCallId));
+    pMsg->m_clsCSeq.Set(m_iDlgSubSeq, "SUBSCRIBE");
+    pMsg->m_iMaxForwards = 70;
+    pMsg->AddHeader("Expires", "3600");
+    pMsg->AddHeader("Event", "dialog");
+    pMsg->AddHeader("Accept", "application/dialog-info+xml");
+
+    char szContact[128];
+    snprintf(szContact, sizeof(szContact), "<sip:%s@%s:%d>", m_strUser.c_str(), strLocalIp.c_str(), m_iLocalPort);
+    pMsg->AddHeader("Contact", szContact);
+
+    pMsg->AddRoute(m_strServerIp.c_str(), RoutePort(), m_eTransport);
+
+    printf("[%d] SUBSCRIBE dialog watched=%s Call-ID=%s\n", m_iId, strWatchedAor.c_str(), szCallId);
+    m_clsUserAgent.m_clsSipStack.SendSipMessage(pMsg);
+}
+
+// INVITE-with-Replaces(RFC 3891) — 대상 다이얼로그(strReplacesCallId+태그)를 교체한다.
+void SimSession::StartCallWithReplaces(const std::string& strTarget, const std::string& strReplacesCallId,
+                                       const std::string& strToTag, const std::string& strFromTag)
+{
+    if (!m_strInviteId.empty() || strReplacesCallId.empty()) return;
+
+    CSipCallRtp clsRtp;
+    CSipCallRoute clsRoute;
+    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
+    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
+#ifdef USE_MEDIA_LIST
+    m_clsRtpThread.m_iAudioPt = BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL, false, "", "");
+#endif
+    clsRoute.m_strDestIp  = m_strServerIp;
+    clsRoute.m_iDestPort  = RoutePort();
+    clsRoute.m_eTransport = m_eTransport;
+
+    CSipMessage* pInvite = NULL;
+    if (m_clsUserAgent.CreateCall(m_strUser.c_str(), strTarget.c_str(), &clsRtp, &clsRoute, m_strInviteId, &pInvite,
+                                  NULL) && pInvite) {
+        // Replaces: <call-id>;to-tag=..;from-tag=.. (RFC 3891). 태그 없으면 Call-ID 만.
+        std::string strReplaces = strReplacesCallId;
+        if (!strToTag.empty()) strReplaces += ";to-tag=" + strToTag;
+        if (!strFromTag.empty()) strReplaces += ";from-tag=" + strFromTag;
+        pInvite->AddHeader("Replaces", strReplaces.c_str());
+        printf("[%d] INVITE (Replaces=%s) -> %s\n", m_iId, strReplaces.c_str(), strTarget.c_str());
+        m_clsUserAgent.StartCall(m_strInviteId.c_str(), pInvite);
+        return;
+    }
+    printf("[%d] StartCallWithReplaces: CreateCall 실패\n", m_iId);
+}
+
+// ─────────────────────────────────────────────
 //  SUBSCRIBE Expires=0 (구독 해제, RFC 3265 §3.1.4)
 //  기존 다이얼로그(Call-ID / From-tag)를 재사용해야 서버가 같은 구독으로 인식한다.
 // ─────────────────────────────────────────────
@@ -885,6 +965,51 @@ void SimSession::StopCall() {
 }
 
 // ─────────────────────────────────────────────
+//  호 전달·당겨받기 (volte_supplementary_services.md §5·§6)
+// ─────────────────────────────────────────────
+void SimSession::BlindTransfer(const std::string& strTarget) {
+    if (m_strInviteId.empty()) {
+        printf("[%d] [XFER] BlindTransfer NOOP — no active call\n", m_iId);
+        return;
+    }
+    printf("[%d] [XFER] REFER (blind) callid=%s -> %s\n", m_iId, m_strInviteId.c_str(), strTarget.c_str());
+    m_clsUserAgent.TransferCallBlind(m_strInviteId.c_str(), strTarget.c_str());
+}
+
+void SimSession::StartConsultCall(const std::string& strTarget) {
+    if (!m_strConsultId.empty()) {
+        printf("[%d] [XFER] StartConsultCall NOOP — consult already active\n", m_iId);
+        return;
+    }
+    // 상담 통화는 두 번째 다이얼로그 — 첫 통화(m_strInviteId)와 RtpThread 를 공유한다(발신자는
+    //   전달 후 빠지므로 상담 구간의 미디어 방향은 검증 대상이 아니다). VoIP 전용(PTT/긴급 없음).
+    CSipCallRtp clsRtp;
+    CSipCallRoute clsRoute;
+    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
+    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
+#ifdef USE_MEDIA_LIST
+    m_clsRtpThread.m_iAudioPt = BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL, false, "", "");
+#endif
+    clsRoute.m_strDestIp  = m_strServerIp;
+    clsRoute.m_iDestPort  = RoutePort();
+    clsRoute.m_eTransport = m_eTransport;
+    printf("[%d] INVITE (consult) -> %s\n", m_iId, strTarget.c_str());
+    m_clsUserAgent.StartCall(m_strUser.c_str(), strTarget.c_str(), &clsRtp, &clsRoute, m_strConsultId);
+}
+
+void SimSession::AttendedTransfer() {
+    if (m_strInviteId.empty() || m_strConsultId.empty()) {
+        printf("[%d] [XFER] AttendedTransfer NOOP — need both call(%s) + consult(%s)\n", m_iId,
+               m_strInviteId.c_str(), m_strConsultId.c_str());
+        return;
+    }
+    printf("[%d] [XFER] REFER (attended) call=%s replaces consult=%s\n", m_iId, m_strInviteId.c_str(),
+           m_strConsultId.c_str());
+    m_clsUserAgent.TransferCall(m_strInviteId.c_str(), m_strConsultId.c_str());
+}
+
+// ─────────────────────────────────────────────
 //  PTT 그룹통화 시작: 그룹 ID로 INVITE 발신
 // ─────────────────────────────────────────────
 void SimSession::StartGroupCall(const std::string& strGroupId) {
@@ -962,6 +1087,40 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
     // Conference Event NOTIFY (RFC 4575, in-dialog) 처리
     CSipHeader* pEvtHdr = pclsMessage->GetHeader("Event");
     std::string strEvt = pEvtHdr ? pEvtHdr->m_strValue : "";
+
+    // dialog-event NOTIFY (RFC 4235, 관제 BLF) — dialog-info+xml 에서 활성 dialog Call-ID/태그 학습.
+    if (strEvt.find("dialog") != std::string::npos) {
+        m_iDialogNotifyCount++;
+        const std::string& body = pclsMessage->m_strBody;
+        auto attr = [&](const char* key) -> std::string {
+            size_t p = body.find(key);
+            if (p == std::string::npos) return "";
+            p += strlen(key);
+            size_t e = body.find('"', p);
+            return (e != std::string::npos) ? body.substr(p, e - p) : "";
+        };
+        std::string cid = attr("call-id=\"");
+        std::string st;
+        {
+            size_t sp = body.find("<state>");
+            if (sp != std::string::npos) {
+                size_t se = body.find("</state>", sp);
+                if (se != std::string::npos) st = body.substr(sp + 7, se - sp - 7);
+            }
+        }
+        if (!cid.empty()) {
+            m_strWatchedDlgCallId = cid;
+            m_strWatchedDlgState = st;
+            m_strWatchedDlgLocalTag = attr("local-tag=\"");
+            m_strWatchedDlgRemoteTag = attr("remote-tag=\"");
+        }
+        printf("[%d] [BLF] dialog NOTIFY watched=%s state=%s call-id=%s\n", m_iId,
+               pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), st.c_str(), cid.c_str());
+        CSipMessage* pRes = pclsMessage->CreateResponseWithToTag(200);
+        if (pRes) m_clsUserAgent.m_clsSipStack.SendSipMessage(pRes);
+        return true;
+    }
+
     if (strEvt.find("conference") != std::string::npos) {
         m_stats.iConfNotify++;
         printf("[%d] [CONF] Conference NOTIFY received (v%d)\n", m_iId, m_stats.iConfNotify.load());
@@ -1303,6 +1462,14 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
     }
 
     if (m_pInviteId) *m_pInviteId = pszCallId;
+
+    // 당겨받기 대상(ring-hold): 180 만 보내고 200 은 보류한다 — 다른 단말이 당겨받기 코드로 이
+    //   링잉 호를 가져간다(서버 PickUp 이 이 leg 를 StopCall→회수, volte_supplementary_services.md §5).
+    if (m_pOwner->m_bRingHold) {
+        printf("[%d] [PICKUP] ring-hold — 180 Ringing, 200 보류\n", m_pOwner->m_iId);
+        m_pUserAgent->RingCall(pszCallId, 180, NULL);
+        return;
+    }
 
     // 미디어 SRTP answer 협상 (media_security.md §8.1) — 오퍼 crypto 존재 && 모드>0 이면
     //   수락(suite/tag echo + 자기 키 선언). SAVP 오퍼인데 수락 불가면 평문 answer 가

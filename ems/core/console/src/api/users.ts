@@ -19,6 +19,9 @@ export interface Subscription {
   //   보내면 SQN 이 0 으로 리셋된다. AKA 컬럼 미적용 DB 에서는 두 키가 응답에 없다.
   auth_scheme?: AuthScheme
   aka_provisioned?: boolean
+  // 당겨받기 그룹 키 — 같은 값끼리 픽업 가능 (volte_supplementary_services.md §5.1).
+  //   빈 값/미지정=org_id 폴백. 반영은 다음 REGISTER 갱신부터. 마이그레이션 전 DB 는 응답에 없다.
+  pickup_group?: string | null
   k?: string        // hex32, 입력 전용
   opc?: string      // hex32, 입력 전용
   register_time?: string | null
