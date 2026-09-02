@@ -7,6 +7,7 @@
 import { AlarmSeverityTiles, ActiveAlarmList } from '../../pages/ActiveAlarmsPage'
 import { AlarmCatalogTable, AlarmRulesTable } from '../../pages/AlarmCatalogPage'
 import { AlarmsSection, EventsSection } from '../../pages/AlertsPage'
+import { AuditEventsSection } from '../../pages/AuditEventsPage'
 import { usePageParam } from '../pageParams'
 import { DaysButtons } from '../../components/ListControls'
 import {
@@ -80,6 +81,12 @@ export const eventHistoryWidget: WidgetDef = {
   component: EventsSection, apis: ['events.list'], defaultSize: { w: 12, h: 34 },
 }
 
+// 감사 이력 — kind=audit(E-AUD-*) 전용. 합법감청 params 를 열로 펼친다. 라우트가 manager 이상으로 게이트.
+export const auditHistoryWidget: WidgetDef = {
+  id: 'core.audit-history', title: '감사 이력 (합법감청 등)', category: 'event',
+  component: AuditEventsSection, apis: ['events.list'], defaultSize: { w: 12, h: 38 },
+}
+
 export const alarmCatalogWidget: WidgetDef = {
   id: 'core.alarm-catalog',
   title: '알람 코드 사전',
@@ -119,6 +126,6 @@ export const ANALYSIS_WIDGETS: WidgetDef[] = [
 
 export const FAULT_WIDGETS: WidgetDef[] = [
   alarmSeverityWidget, alarmListWidget, alarmEventTabsWidget, periodDaysWidget,
-  alarmHistoryWidget, eventHistoryWidget, alarmCatalogWidget, alarmRulesWidget,
+  alarmHistoryWidget, eventHistoryWidget, auditHistoryWidget, alarmCatalogWidget, alarmRulesWidget,
   ...ANALYSIS_WIDGETS,
 ]

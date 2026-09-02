@@ -600,8 +600,26 @@ void CTasModule::PickUp( const char *pszCallId, const char *pszFrom, const char 
 
     // 후보 결정 — 축은 픽업 그룹(pickup_group, 미지정 시 org 폴백 — §5.1).
     //   그룹 픽업: 그룹 인덱스의 등록 그룹원 전체. 지정 픽업: 대상 내선 하나 — 같은 그룹일 때만(403).
+    // 픽업자의 유효 그룹 축 값 — 멤버 인덱스 → pickup_group → org 폴백 (dispatch_center.md §3.3)
+    const std::string strPickerGroup = gclsDispatchGroupMap.EffectiveGroupOf( pszFrom );
     if ( gclsCspUserMap.Select( pszFrom, xmlFrom ) ) {
         if ( pszTarget != NULL && pszTarget[0] != '\0' ) {
+            // 대표번호 지정 픽업 (§4.4 F5) — "<code><대표번호>": 포크 중인 대표번호 호를 가져간다. 인가 = 그 그룹의
+            // 멤버.
+            CspDispatchGroup clsPilotGroup;
+            if ( gclsDispatchGroupMap.SelectByPilot( pszTarget, clsPilotGroup ) ) {
+                if ( clsPilotGroup.m_strId != strPickerGroup ) {
+                    CLog::Print( LOG_INFO, "PickUp: pilot(%s) group(%s) ≠ picker(%s) group(%s) → 403", pszTarget,
+                                 clsPilotGroup.m_strId.c_str(), pszFrom, strPickerGroup.c_str() );
+                    return gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
+                }
+                std::lock_guard<std::recursive_mutex> lock( m_mutexFork );
+                const std::string strACallId = FindForkForPickup( strPickerGroup, pszTarget );
+                if ( strACallId.empty() ) return gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
+                int iRc = PickUpFork( pszCallId, pszFrom, pclsRtp, strACallId );
+                if ( iRc != 0 ) gclsDispatcher.StopCall( pszCallId, iRc );
+                return;
+            }
             CUserInfo clsTargetInfo;
             if ( gclsUserMap.Select( pszTarget, clsTargetInfo ) == false )
                 return gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
@@ -631,7 +649,134 @@ void CTasModule::PickUp( const char *pszCallId, const char *pszFrom, const char 
         }
     }
 
+    // CallMap 에 링잉 호가 없으면 포크 중인 대표번호 호(대기 leg 는 CallMap 밖) — 그룹 픽업은 픽업자 그룹의 포크 집합,
+    //   지정 픽업은 대상 내선이 대기 leg 로 링 중인 집합 (§4.4 "대기 leg 를 대표번호의 링잉 호로 본다").
+    if ( bCallPickup == false && bCommitted == false && !strPickerGroup.empty() ) {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexFork );
+        const std::string strACallId = FindForkForPickup( strPickerGroup, pszTarget );
+        if ( !strACallId.empty() ) {
+            int iRc = PickUpFork( pszCallId, pszFrom, pclsRtp, strACallId );
+            if ( iRc == 0 ) return;
+            return gclsDispatcher.StopCall( pszCallId, iRc );
+        }
+    }
+
     if ( bCallPickup == false ) gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
+}
+
+std::string CTasModule::FindForkForPickup( const std::string &strPickerGroup, const char *pszTarget ) {
+    const std::string strTarget = pszTarget ? pszTarget : "";
+    for ( const auto &kv : m_mapFork ) {
+        const CTasForkSet &clsSet = kv.second;
+        if ( clsSet.strGroupId != strPickerGroup || clsSet.setPending.empty() ) continue;
+        if ( strTarget.empty() || strTarget == clsSet.strPilot ) return kv.first;
+        for ( const auto &strLeg : clsSet.setPending ) {
+            auto it = clsSet.mapLegUser.find( strLeg );
+            if ( it != clsSet.mapLegUser.end() && it->second == strTarget ) return kv.first;
+        }
+    }
+    return "";
+}
+
+// 포크 집합 당겨받기 — 승자 확정(OnForkStart)과 같은 재키잉이되, 픽업 leg 는 수신 INVITE 라 answer 를 여기서 직접 낸다
+//   (PickUpLeg 와 동형: 픽업 offer 로 A·픽업 양측 200, relay peer1 = 픽업 단말).
+int CTasModule::PickUpFork( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
+                            const std::string &strACallId ) {
+    auto itSet = m_mapFork.find( strACallId );
+    if ( itSet == m_mapFork.end() ) return SIP_NOT_FOUND;
+    if ( !itSet->second.bRelay || pclsRtp == NULL ) return SIP_SERVICE_UNAVAILABLE;  // 포크는 relay 위에서만 성립
+    const std::string strPicker = pszFrom ? pszFrom : "";
+
+    // 픽업 단말 offer 의 SDES 평가(정책 = 픽업 단말의 접속서비스) — 협상 불가는 포크를 건드리지 않고 488.
+    RelaySdesLeg clsNewLeg;
+    CmpMediaCrypto clsNewAudioCrypto, clsNewVideoCrypto;
+    {
+        ServiceInfo clsPickSvc = gclsServiceMap.GetForUser( strPicker, "volte" );
+        if ( MediaSdes::EvalRelayOfferSdes( clsPickSvc.media_srtp, pclsRtp->m_clsMediaList, "audio",
+                                            clsNewLeg.clsAudio ) < 0 ||
+             MediaSdes::EvalRelayOfferSdes( clsPickSvc.media_srtp, pclsRtp->m_clsMediaList, "video",
+                                            clsNewLeg.clsVideo ) < 0 ||
+             ( clsNewLeg.clsAudio.bSrtp &&
+               !MediaSdes::BuildCmpKeys( clsNewLeg.clsAudio.strSuite, clsNewLeg.clsAudio.strUeKey,
+                                         clsNewLeg.clsAudio.strSrvKey, clsNewAudioCrypto ) ) ||
+             ( clsNewLeg.clsVideo.bSrtp &&
+               !MediaSdes::BuildCmpKeys( clsNewLeg.clsVideo.strSuite, clsNewLeg.clsVideo.strUeKey,
+                                         clsNewLeg.clsVideo.strSrvKey, clsNewVideoCrypto ) ) ) {
+            CLog::Print( LOG_INFO, "PickUpFork: picker(%s) SDES offer not acceptable → 488", pszFrom );
+            return SIP_NOT_ACCEPTABLE_HERE;
+        }
+    }
+
+    // 커밋 — 집합 제거, 대기 leg 전원 CANCEL (최종 응답 487 은 m_mapForkLeg 로 OnForkEnd 가 흡수)
+    CTasForkSet clsSet = itSet->second;
+    m_mapFork.erase( itSet );
+    for ( const auto &strLeg : clsSet.setPending ) {
+        gclsUserAgent.StopCall( strLeg.c_str() );
+        NotifyPilotDialog( clsSet, strLeg, "terminated", "" );
+    }
+
+    // (A, 픽업) 쌍 — OnForkStart 와 동일 (entry 포트 = 그 leg 의 peer 에게 광고하는 relay 포트)
+    gclsCallMap.Insert( strACallId.c_str(), pszCallId, clsSet.iPortB, clsSet.iPortA );
+    gclsCallMap.SetRelayInfo( strACallId.c_str(), clsSet.strRelaySessionId, clsSet.strRelaySesId,
+                              clsSet.strRelayLocalIp, clsSet.strCaller, strPicker );
+    gclsCallMap.SetRelaySdesLeg( strACallId.c_str(), 0, clsSet.clsSdesA );
+    gclsCallMap.SetRelaySdesLeg( strACallId.c_str(), 1, clsNewLeg );
+    const std::string strSesIdA = gclsSipLogger.GetSesIdByCallId( strACallId );
+    if ( !strSesIdA.empty() ) gclsSipLogger.SetCallSesId( pszCallId, strSesIdA );
+    if ( gclsCallDir.IsEnabled() && !clsSet.strSessionId.empty() )
+        gclsCallDir.MapCallToSession( pszCallId, clsSet.strSessionId );
+
+    // relay peer1 = 픽업 단말 (RELAY_MODIFY — 주소·NAT·PT·crypto, PickUpLeg 와 동형)
+    int iAudioPort = pclsRtp->GetAudioPort();
+    if ( iAudioPort <= 0 && pclsRtp->m_iPort > 0 ) iAudioPort = pclsRtp->m_iPort;
+    if ( iAudioPort > 0 ) {
+        int iVideoPort = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
+        int iPickNat = 0;
+        std::string strPickGuardIp;
+        {
+            ServiceInfo clsNatSvc = gclsServiceMap.GetForUser( strPicker, "volte" );
+            std::string strSigIp;
+            CUserInfo clsPickUserInfo;
+            if ( gclsUserMap.Select( strPicker.c_str(), clsPickUserInfo ) ) strSigIp = clsPickUserInfo.m_strIp;
+            if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRtp->m_strIp, strSigIp, strPickGuardIp ) ) iPickNat = 1;
+        }
+        int iPickPt = 0, iPickSrcPt = 0, iPickTePt = 0, iPickSrcTePt = 0;
+        std::string strPickCodec;
+        CGroupCallService::GetLegPt( pszCallId, false, iPickPt, iPickSrcPt, iPickTePt, iPickSrcTePt, &strPickCodec );
+        gclsCmpClient.ModifySession( clsSet.strRelaySessionId, pclsRtp->m_strIp, iAudioPort,
+                                     iVideoPort > 0 ? iVideoPort : 0, 1, clsSet.strCaller, strPicker,
+                                     clsSet.strRelaySesId, iPickNat, strPickGuardIp, iPickPt, iPickSrcPt, iPickTePt,
+                                     iPickSrcTePt, strPickCodec, clsNewAudioCrypto.bEnabled ? &clsNewAudioCrypto : NULL,
+                                     clsNewVideoCrypto.bEnabled ? &clsNewVideoCrypto : NULL );
+    }
+
+    const std::string strRelayIp =
+        clsSet.strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsSet.strRelayLocalIp;
+    // A(발신자)에게 200 answer — 픽업 offer 를 A leg 상태로 재작성 + peer0 포트
+    CSipCallRtp clsAnswerRtp = *pclsRtp;
+    MediaSdes::RewriteRelaySdpForLeg( clsAnswerRtp.m_clsMediaList, clsSet.clsSdesA, false );
+    clsAnswerRtp.SetIpPort( strRelayIp.c_str(), clsSet.iPortA, SOCKET_COUNT_PER_MEDIA );
+    if ( gclsUserAgent.AcceptCall( strACallId.c_str(), &clsAnswerRtp ) == false ) {
+        gclsUserAgent.StopCall( strACallId.c_str() );
+        return SIP_INTERNAL_SERVER_ERROR;
+    }
+    // 픽업 단말에게 200 answer — 자기 offer echo(신규 leg 상태) + peer1 포트
+    MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsNewLeg, false );
+    pclsRtp->SetIpPort( strRelayIp.c_str(), clsSet.iPortB, SOCKET_COUNT_PER_MEDIA );
+    gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
+    gclsCallMap.SetEstablished( pszCallId );
+
+    m_mapPilotOfCall[strACallId] = clsSet.strPilot;
+    m_mapPilotOfCall[pszCallId] = clsSet.strPilot;
+    if ( gclsCallDir.IsEnabled() && !clsSet.strSessionId.empty() ) {
+        gclsCallDir.WriteSessionMapping( clsSet.strSessionId, strACallId, pszCallId, clsSet.strRelaySesId );
+        gclsCallDir.VoipAddParticipant( strACallId, strPicker, "callee" );
+        gclsCallDir.VoipCallAnswer( strACallId );
+    }
+    NotifyPilotDialog( clsSet, pszCallId, "confirmed", "" );
+    CLog::Print( LOG_INFO, "PickUpFork: pilot(%s) picked up by %s (leg %s) — %d pending cancelled [TAS]",
+                 clsSet.strPilot.c_str(), strPicker.c_str(), pszCallId, (int)clsSet.setPending.size() );
+    return 0;
 }
 
 // 당겨받기 재고정 코어 — 링잉/대상 leg(strOldCallId)를 pszCallId(신규 단말)로 승계·재고정.
@@ -912,6 +1057,29 @@ int CTasModule::ForkAlert( CTasForkSet &clsSet, const std::vector<std::string> &
     return iCount;
 }
 
+int CTasModule::StartAlert( CTasForkSet &clsSet, const std::vector<std::string> &vecTargets ) {
+    clsSet.vecQueue.clear();
+    if ( !clsSet.bSequential ) return ForkAlert( clsSet, vecTargets );
+    // sequential alerting (TS 24.239) — alert_order 순으로 한 명씩, 단계 시한 = iNoAnswerSec
+    clsSet.vecQueue = vecTargets;
+    return AdvanceSequential( clsSet ) ? 1 : 0;
+}
+
+bool CTasModule::AdvanceSequential( CTasForkSet &clsSet ) {
+    while ( !clsSet.vecQueue.empty() ) {
+        const std::string strNext = clsSet.vecQueue.front();
+        clsSet.vecQueue.erase( clsSet.vecQueue.begin() );
+        std::vector<std::string> vecOne( 1, strNext );
+        clsSet.tStart = time( NULL );
+        if ( ForkAlert( clsSet, vecOne ) > 0 ) {
+            CLog::Print( LOG_INFO, "AdvanceSequential: pilot(%s) → member(%s) step=%ds remaining=%d [TAS]",
+                         clsSet.strPilot.c_str(), strNext.c_str(), clsSet.iNoAnswerSec, (int)clsSet.vecQueue.size() );
+            return true;
+        }
+    }
+    return false;
+}
+
 bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,
                                    CSipMessage *pclsMessage ) {
     CspDispatchGroup clsGroup;
@@ -941,6 +1109,7 @@ bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, c
     clsSet.strGroupId = clsGroup.m_strId;
     clsSet.strPilot = pszTo;
     clsSet.strOverflow = clsGroup.m_strOverflowTarget;
+    clsSet.bSequential = ( clsGroup.m_strAlertMode == "sequential" );
     clsSet.iNoAnswerSec = clsGroup.m_iNoAnswerSec > 0 ? clsGroup.m_iNoAnswerSec : 30;
     if ( clsSet.iNoAnswerSec > gclsSetup.m_iDispatchForkRingTimeoutSec )
         clsSet.iNoAnswerSec = gclsSetup.m_iDispatchForkRingTimeoutSec;
@@ -1030,7 +1199,7 @@ bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, c
     int iLegs = 0;
     {
         std::lock_guard<std::recursive_mutex> lock( m_mutexFork );
-        iLegs = ForkAlert( clsSet, vecTargets );
+        iLegs = StartAlert( clsSet, vecTargets );
         if ( iLegs == 0 && !clsSet.strOverflow.empty() ) {
             // 등록 그룹원이 없는 대표번호 — 즉시 overflow 로 (무응답 대기 없음)
             m_mapFork[pszCallId] = clsSet;
@@ -1051,9 +1220,10 @@ bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, c
         gclsCallDir.VoipAddParticipant( pszCallId, strCaller, "caller" );
     }
     CLog::Print( LOG_INFO,
-                 "TryDispatchPilot: pilot(%s) group(%s) caller(%s) forked to %d member(s) relay=%s "
+                 "TryDispatchPilot: pilot(%s) group(%s) caller(%s) %s to %d member(s) (targets=%d) relay=%s "
                  "no_answer=%ds overflow=%s [TAS]",
-                 pszTo, clsGroup.m_strId.c_str(), pszFrom, iLegs, clsSet.strRelaySessionId.c_str(), clsSet.iNoAnswerSec,
+                 pszTo, clsGroup.m_strId.c_str(), pszFrom, clsSet.bSequential ? "sequential" : "forked", iLegs,
+                 (int)vecTargets.size(), clsSet.strRelaySessionId.c_str(), clsSet.iNoAnswerSec,
                  clsSet.strOverflow.empty() ? "-" : clsSet.strOverflow.c_str() );
     return true;
 }
@@ -1143,6 +1313,8 @@ bool CTasModule::OnForkEnd( const char *pszCallId, int iSipStatus ) {
     clsSet.setPending.erase( pszCallId );
     if ( iSipStatus == SIP_BUSY_HERE ) clsSet.bBusySeen = true;
     if ( !clsSet.setPending.empty() ) return true;  // 다른 대기 leg 진행 중 — A 에게 전달하지 않는다
+    // sequential — 이 순번 실패(거절·통화중·무응답 CANCEL) → 다음 순번
+    if ( clsSet.bSequential && AdvanceSequential( clsSet ) ) return true;
     // 전원 최종 실패
     if ( !clsSet.strOverflow.empty() && clsSet.iDepth == 0 )
         OverflowFork( strACallId );
@@ -1188,15 +1360,17 @@ void CTasModule::OverflowFork( const std::string &strACallId ) {
     if ( gclsDispatchGroupMap.SelectByPilot( strTarget.c_str(), clsNext ) ) {
         // 다른 대표번호 — 그 그룹원에게 재포크 (순환 금지: depth 1 에서 더 넘기지 않는다)
         ResolveForkTargets( clsNext, clsSet.strCaller, vecTargets );
+        clsSet.bSequential = ( clsNext.m_strAlertMode == "sequential" );
         clsSet.iNoAnswerSec = clsNext.m_iNoAnswerSec > 0 ? clsNext.m_iNoAnswerSec : clsSet.iNoAnswerSec;
         if ( clsSet.iNoAnswerSec > gclsSetup.m_iDispatchForkRingTimeoutSec )
             clsSet.iNoAnswerSec = gclsSetup.m_iDispatchForkRingTimeoutSec;
     } else if ( strTarget != clsSet.strCaller && gclsUserMap.Select( strTarget.c_str() ) ) {
+        clsSet.bSequential = false;
         vecTargets.push_back( strTarget );  // 내선 — 단일 leg 포크
     }
     clsSet.tStart = time( NULL );
     clsSet.bRang = false;
-    int iLegs = vecTargets.empty() ? 0 : ForkAlert( clsSet, vecTargets );
+    int iLegs = vecTargets.empty() ? 0 : StartAlert( clsSet, vecTargets );
     CLog::Print( LOG_INFO, "OverflowFork: pilot(%s) → overflow(%s) %d leg(s) [TAS]", clsSet.strPilot.c_str(),
                  strTarget.c_str(), iLegs );
     if ( iLegs == 0 ) FailFork( strACallId, SIP_TEMPORARILY_UNAVAILABLE );
@@ -1213,6 +1387,16 @@ void CTasModule::Tick() {
     for ( const auto &strACallId : vecExpired ) {
         auto itSet = m_mapFork.find( strACallId );
         if ( itSet == m_mapFork.end() ) continue;
+        if ( itSet->second.bSequential && !itSet->second.vecQueue.empty() ) {
+            // sequential 단계 시한 만료 — 현 순번 CANCEL 후 다음 순번 (487 은 OnForkEnd 가 흡수)
+            CTasForkSet &clsSeq = itSet->second;
+            for ( const auto &strLeg : clsSeq.setPending ) {
+                gclsUserAgent.StopCall( strLeg.c_str() );
+                NotifyPilotDialog( clsSeq, strLeg, "terminated", "" );
+            }
+            clsSeq.setPending.clear();
+            if ( AdvanceSequential( clsSeq ) ) continue;
+        }
         CLog::Print( LOG_INFO, "Tick: pilot(%s) no answer in %ds (%d pending) → %s [TAS]",
                      itSet->second.strPilot.c_str(), itSet->second.iNoAnswerSec, (int)itSet->second.setPending.size(),
                      ( !itSet->second.strOverflow.empty() && itSet->second.iDepth == 0 ) ? "overflow" : "480" );

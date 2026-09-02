@@ -52,6 +52,7 @@ export const EVENT_TYPE_LABEL: Record<string, string> = {
   catalog_registered: '카탈로그 등록',
   session_reclaimed: '세션 회수',
   control_peer_changed: '제어 피어 변경',
+  call_monitored: '통화 감청(청취)',
 }
 
 export function eventTypeLabel(t?: string): string {

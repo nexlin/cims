@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <set>
 
 // Forward declaration
 class SimSession;
@@ -79,6 +80,7 @@ enum ESimScenario {
     E_SCENARIO_SUBSCRIBE_EVENT,   // 등록 후 -event 토큰으로 SUBSCRIBE 1건 — 최종 응답 프로브 (RFC 6665 §8.2.1 489 등)
     E_SCENARIO_HUNT,              // [volte] A→대표번호(-pilot): B·C 병렬 링, C 응답 → A–C (dispatch_center.md §4, -count 3~4)
     E_SCENARIO_MONITOR,          // [volte] A↔B 통화 중 M(감청자)이 dialog 구독→INVITE-Join → 청취(SSRC 2개), A/B 무영향 (§5)
+    E_SCENARIO_PTT_LISTEN,       // [ptt] 멤버 그룹콜 중 M(관제사)이 그룹 AoR 로 recvonly INVITE → 청취 멤버(floor 거절·은닉) (§5.6)
 };
 
 // ─────────────────────────────────────────────
@@ -171,6 +173,14 @@ public:
     /** 당겨받기 대상(ringing-hold) 모드 — INVITE 수신 시 180 만 보내고 200 을 보내지 않는다.
      *  다른 단말이 당겨받기 코드로 이 링잉 호를 가져갈 수 있게 한다. Start() 전/후 무관. */
     void SetRingHold(bool b) { m_bRingHold = b; }
+    /** 청취 전용 발신 — StartCall 의 SDP 를 a=recvonly 로 낸다 (PTT 그룹콜 청취 합류, dispatch_center.md §5.6). */
+    void SetListenOnly(bool b) { m_bListenOnly = b; }
+    /** conference NOTIFY(RFC 4575) 로스터에 이 사용자가 실린 적이 있는가 — 청취 멤버 은닉/공개 판정. */
+    bool ConfRosterHas(const std::string& strUser) {
+        std::lock_guard<std::mutex> lk(m_mtxConf);
+        return m_setConfUsers.count(strUser) > 0;
+    }
+    std::atomic<long long> m_tInCallMs{0};   // 발신 호 확립(200 OK) 시각 ms — 응답 지연(sequential alerting) 측정
 
     /** dialog-event(RFC 4235) 구독 — 감시 대상 AoR 의 호 상태 변화를 dialog-info NOTIFY 로 받는다
      *  (관제 BLF). NOTIFY 수신 시 링잉 leg Call-ID/태그를 학습해 INVITE-Replaces 당겨받기에 쓴다. */
@@ -262,6 +272,9 @@ public:
     std::string  m_strInviteId;
     std::string  m_strConsultId;        // attended transfer 상담 통화 call-id (두 번째 다이얼로그)
     bool         m_bRingHold{false};    // 당겨받기 대상 — 180 만 보내고 200 보류
+    bool         m_bListenOnly{false};  // 청취 전용 발신 — SDP a=recvonly
+    std::set<std::string> m_setConfUsers;  // conference NOTIFY 에서 본 로스터 사용자(누적)
+    std::mutex   m_mtxConf;
     bool         m_bRegistered;
     bool         m_bInCall;
     std::atomic<int> m_iLastCallEndStatus{0};   // 마지막 EventCallEnd 의 SIP 상태 — 발신 실패(403/404/488) 판정용

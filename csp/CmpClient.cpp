@@ -834,7 +834,8 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
                             const std::string &strSesId, const std::string &strRole, int *piLocalPort,
                             int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp, int iUserPt,
                             int iUserSrcPt, int iUserTePt, int iUserSrcTePt, const std::string &strUserCodec,
-                            const McpttFmtp &clsFmtp, const CmpMediaCrypto *pclsCrypto ) {
+                            const McpttFmtp &clsFmtp, const CmpMediaCrypto *pclsCrypto, int iRecvOnly,
+                            int iFloorSuppress ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -866,6 +867,10 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
         if ( clsFmtp.iQueueing >= 0 ) req.Set( "queueing", clsFmtp.iQueueing );
         if ( clsFmtp.iMaxPriority > 0 ) req.Set( "max_priority", clsFmtp.iMaxPriority );
         if ( clsFmtp.iGranted > 0 ) req.Set( "granted", 1 );
+        // 청취 leg (dispatch_center.md §5.6 — TS 24.379 ambient listening): 상향 미중계·floor 요청 거절,
+        //   floor_suppress 는 청취자에게 floor 메시지를 끊을 때만(기본은 Floor Taken Permission=0 변형을 받는다).
+        if ( iRecvOnly ) req.Set( "recv_only", 1 );
+        if ( iFloorSuppress ) req.Set( "floor_suppress", 1 );
         // 멤버 미디어 SRTP 키 (media_security.md §6.3) — 생략 = 평문 leg(신규) / 기존 키 유지(재-JOIN)
         if ( pclsCrypto && pclsCrypto->bEnabled ) {
             SimpleJson::JsonNode mc, rx, tx;

@@ -103,7 +103,7 @@ def monitor(ctx: VerifyContext) -> ItemResult:
             "-ip", ctx.sim_ip, "-domain", VOLTE_DOMAIN,
             *trio_cred_args(trio, tag), "-media_dir", media_dir, "-duration", "5", "-no_video",
         ]
-        rc, tail = run_cspsim(ctx.repo_root, args, timeout=180)
+        rc, tail = run_cspsim(ctx.repo_root, args, timeout=180, tail_lines=400)
         return rc, _parse_mon(tail), parse_marker_int(tail, "join_status")
 
     checks = []

@@ -179,6 +179,8 @@ THREAD_API RtpThreadFloorRecv(LPVOID lpParameter) {
     unsigned char opcode = (unsigned char)buf[0] & 0x1F;
     pRtpThread->m_iLastFloorOp.store(opcode);
     if (opcode == 1) pRtpThread->m_bGrantReceived.store(true);  // GRANTED(subtype=1, TS 24.380) — TAKEN이 즉시 덮어써도 보존
+    if (opcode == 2) pRtpThread->m_iFloorTakenCount++;
+    if (opcode == 3) pRtpThread->m_iFloorDenyCount++;
 
     const char* opName = "UNKNOWN";
     switch (opcode) {

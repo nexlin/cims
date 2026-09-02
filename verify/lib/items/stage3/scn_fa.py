@@ -13,7 +13,11 @@ DISPATCH_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파�
   F1 병렬 호출·응답 — A→pilot, B(ring-hold)·C 링, C 응답 → A·C 미디어, B 무흐름, B_invites=C_invites=1,
                      P-Called-Party-ID 에 대표번호
   F3 무응답 → overflow — B·C 전원 ring-hold → no_answer_sec 뒤 D 로 재시도, D 응답 → A·D 미디어, B·C 무흐름
-  F4 통화 중 제외(busy_members=skip)·F5 대표번호 지정 픽업은 후속(SKIP 보고).
+  F5 대표번호 지정 픽업 — 그룹원 B·C·D 전원 ring-hold, D 가 `**<pilot>` 다이얼 → D 가 받음(포크 집합 재키잉·
+                     RELAY_MODIFY), A·D 미디어, B·C 무흐름, pickup_status=200
+  F6 sequential alerting(TS 24.239) — alert_mode=sequential, no_answer_sec=4: B 먼저 링(ring-hold) → 단계 시한 뒤
+                     CANCEL → C 링·응답. hunt_status=200, C 승자, B_invites=C_invites=1, 응답 지연 ≥ 단계 시한
+  F4 통화 중 제외(busy_members=skip)은 후속(SKIP 보고).
 """
 from __future__ import annotations
 
@@ -67,7 +71,8 @@ class DispatchGroupFixture:
     """관제 그룹 1개 시드(+멤버 pickup_group 파생) + 자기복원. 테이블 부재면 active=False."""
 
     def __init__(self, dist_dir: str, csp_ip: str, group_id: str, pilot: str, members: list, overflow: str,
-                 no_answer_sec: int = 8):
+                 no_answer_sec: int = 8, alert_mode: str = "parallel", ptt_listen: str = "none",
+                 listen_visibility: str = "hidden"):
         self.db_cfg = _db.csp_db_config(dist_dir)
         self.csp_ip = csp_ip
         self.group_id = group_id
@@ -75,6 +80,9 @@ class DispatchGroupFixture:
         self.members = list(members)
         self.overflow = overflow
         self.no_answer_sec = no_answer_sec
+        self.alert_mode = alert_mode
+        self.ptt_listen = ptt_listen
+        self.listen_visibility = listen_visibility
         self.active = False
         self.reason = ""
         self._orig_pickup: dict = {}
@@ -95,9 +103,10 @@ class DispatchGroupFixture:
                 cur.execute(
                     "INSERT INTO dispatch_groups (id, name, pilot_id, service_ref, alert_mode, no_answer_sec, "
                     "busy_members, overflow_target, monitor_scope, ptt_listen, listen_visibility) "
-                    "VALUES (%s,%s,%s,%s,'parallel',%s,'skip',%s,'none','none','hidden')",
+                    "VALUES (%s,%s,%s,%s,%s,%s,'skip',%s,'none',%s,%s)",
                     (self.group_id, f"verify {self.group_id}", self.pilot or None,
-                     "volte" if self.pilot else None, self.no_answer_sec, self.overflow or None))
+                     "volte" if self.pilot else None, self.alert_mode, self.no_answer_sec, self.overflow or None,
+                     self.ptt_listen, self.listen_visibility))
                 for i, user in enumerate(self.members):
                     cur.execute("SELECT group_id FROM dispatch_group_members WHERE user_id=%s", (user,))
                     r = cur.fetchone()
@@ -168,7 +177,7 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
     pilot = f"7{str(org)[-3:].zfill(3)}0"  # 가입 id(E.164 +…)와 겹치지 않는 짧은 내선형 대표번호
     ctx.w(f"- 단말 org={org} A={A['user']} B={B['user']} C={C['user']} D={D['user']} pilot={pilot} group={group_id}")
 
-    def run(tag: str, noanswer: bool) -> tuple:
+    def run(tag: str, noanswer: bool, pickup: bool = False) -> tuple:
         args = [
             "-mode", "volte", "-scenario", "hunt", "-count", "4",
             "-ip", ctx.sim_ip, "-domain", VOLTE_DOMAIN,
@@ -177,7 +186,9 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
         ]
         if noanswer:
             args += ["-hunt_noanswer"]
-        rc, tail = run_cspsim(ctx.repo_root, args, timeout=240)
+        if pickup:
+            args += ["-hunt_pickup"]
+        rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=400)
         return rc, _parse_delta4(tail), parse_marker_int(tail, "hunt_status"), tail
 
     def dstr(d) -> str:
@@ -207,7 +218,33 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
                        f"hunt_status={st} {dstr(d)} D_invites={d_inv} (no_answer_sec={fx.no_answer_sec}) rc={rc}"))
 
         checks.append(("F4 통화 중 그룹원 제외(busy_members=skip)", None, "후속 — cspsim 사전 통화 구성 필요"))
-        checks.append(("F5 대표번호 링잉 호 지정 픽업", None, "후속 — 포크 대기 leg 픽업 미구현 (dispatch_center.md §4.4)"))
+
+    # ── F5: 대표번호 링잉 호 지정 픽업 — B·C·D 그룹원 전원 ring-hold, D 가 **<pilot> ──
+    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [B["user"], C["user"], D["user"]], "") as fx5:
+        if fx5.active:
+            rc, d, st, tail = run("fa_f5", noanswer=False, pickup=True)
+            pk = parse_marker_int(tail, "pickup_status")
+            by = _parse_marker_str(tail, "answered_by") or "-"
+            ok = (d is not None and st == 200 and pk == 200 and by == D["user"] and d[0] >= FLOW_MIN
+                  and d[3] >= FLOW_MIN and d[1] <= DROP_MAX and d[2] <= DROP_MAX)
+            checks.append(("F5 대표번호 링잉 호 지정 픽업 (D **pilot → D 승계, B·C CANCEL)", ok,
+                           f"hunt_status={st} pickup_status={pk} answered_by={by} {dstr(d)} rc={rc}"))
+
+    # ── F6: sequential alerting — B(순번 0, ring-hold) 단계 시한 뒤 C(순번 1) 링·응답 ──
+    seq_step = 4
+    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [B["user"], C["user"]], "",
+                              no_answer_sec=seq_step, alert_mode="sequential") as fx6:
+        if fx6.active:
+            rc, d, st, tail = run("fa_f6", noanswer=False)
+            b_inv, c_inv = parse_marker_int(tail, "B_invites"), parse_marker_int(tail, "C_invites")
+            t_ans = parse_marker_int(tail, "t_answer_ms")
+            by = _parse_marker_str(tail, "answered_by") or "-"
+            ok = (d is not None and st == 200 and by == C["user"] and b_inv == 1 and c_inv == 1
+                  and t_ans is not None and t_ans >= seq_step * 1000
+                  and d[0] >= FLOW_MIN and d[2] >= FLOW_MIN and d[1] <= DROP_MAX)
+            checks.append(("F6 sequential alerting (B 단계 시한 → C 응답, TS 24.239)", ok,
+                           f"hunt_status={st} answered_by={by} B_invites={b_inv} C_invites={c_inv} "
+                           f"t_answer_ms={t_ans} (≥{seq_step * 1000}) {dstr(d)} rc={rc}"))
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

@@ -40,6 +40,15 @@ export const ALERTS_HISTORY_LAYOUT: PageLayout = {
   ],
 }
 
+// 감사 이력 — 기간 선택 + 감사(kind=audit) 표. 합법감청(E-AUD-016) 열람 화면 (manager 이상, 라우트 requiredRole).
+export const ALERTS_AUDIT_LAYOUT: PageLayout = {
+  id: 'alerts.audit', title: '감사 이력', seedVersion: 1,
+  widgets: [
+    { widgetId: 'core.days-filter',   x: 0, y: 0, w: 48, h: 4 },
+    { widgetId: 'core.audit-history', x: 0, y: 4, w: 48, h: 41 },
+  ],
+}
+
 // 유형별 분석 — 이력 화면과 같은 구성: 전환 탭 / 기간 선택 / 블록들.
 // 블록은 각각 위젯이고, 어느 쪽을 보일지는 배치의 visibleWhen 이 판정한다(탭처럼 갈아끼움).
 // 숨겨진 블록은 렌더에서 빠지고 남은 것이 위로 당겨진다 — 편집 모드에선 전부 보인다.

@@ -956,7 +956,9 @@ void SimSession::AffiliateGroup(bool bDeaffiliate) {
 //  일반 VoIP 통화
 // ─────────────────────────────────────────────
 void SimSession::StartCall(const std::string& strTarget) {
-    if (!m_strInviteId.empty()) return;
+    // 링잉 보류(ring-hold) 중인 착신 다이얼로그가 m_strInviteId 를 점유해도 발신은 허용한다 — 대표번호 링잉 호를
+    //   자기도 링 중인 그룹원이 당겨받는(F5) 경우. 그 착신 leg 는 서버가 CANCEL 하고 EventCallEnd 가 흡수한다.
+    if (!m_strInviteId.empty() && (m_bInCall || !m_bRingHold)) return;
 
     CSipCallRtp clsRtp;
     CSipCallRoute clsRoute;
@@ -1000,12 +1002,16 @@ void SimSession::StartCall(const std::string& strTarget) {
     }
 #endif
 
+    // 청취 전용 합류 (dispatch_center.md §5.6) — 서버는 recvonly offer 를 청취 leg 로 판정한다 (answer sendonly)
+    if (m_bListenOnly) clsRtp.SetDirection(E_RTP_RECV);
+
     clsRoute.m_strDestIp  = m_strServerIp;
     clsRoute.m_iDestPort  = RoutePort();  // IPsec 등록 뒤에는 port_ps
     clsRoute.m_eTransport = m_eTransport;  // 등록과 같은 transport 로 발신 (TCP/TLS 호 회귀)
 
     std::string strDst = strTarget.empty() ? m_strServerIp : strTarget;
     m_stats.tCallStart = NowMs();
+    m_tInCallMs = 0;
 
     // MCPTT 긴급/임박 개시 (TS 24.379): mcptt-info 에 emergency-ind/imminentperil-ind 를 실어야 하므로
     //   UA 일괄 StartCall(바디 주입 불가) 대신 CreateCall→multipart 래핑→StartCall(callId,msg) 경로 사용.
@@ -1239,6 +1245,23 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
         printf("[%d] [CONF] Conference NOTIFY received (v%d)\n", m_iId, m_stats.iConfNotify.load());
         // conference-info+xml 에서 user entity/status 추출
         const std::string& body = pclsMessage->m_strBody;
+        // 로스터 사용자 누적 — <user entity="sip:+8250…@domain"> (RFC 4575 F-10, tel: 구형도 수용).
+        //   청취 멤버 은닉(hidden)/공개(visible) 판정에 쓴다 (ptt_listen 시나리오).
+        {
+            std::lock_guard<std::mutex> lk(m_mtxConf);
+            size_t p = 0;
+            while ((p = body.find("<user entity=\"", p)) != std::string::npos) {
+                p += 14;
+                size_t e = body.find("\"", p);
+                if (e == std::string::npos) break;
+                std::string ent = body.substr(p, e - p);
+                if (ent.compare(0, 4, "sip:") == 0 || ent.compare(0, 4, "tel:") == 0) ent = ent.substr(4);
+                size_t at = ent.find('@');
+                if (at != std::string::npos) ent = ent.substr(0, at);
+                m_setConfUsers.insert(ent);
+                p = e;
+            }
+        }
         // <user entity="tel:+82571900005" state="full">
         size_t upos = body.find("entity=\"tel:");
         if (upos != std::string::npos) {
@@ -1806,6 +1829,7 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
         m_pOwner->m_bInCall = true;
         m_pOwner->m_stats.iCallOk++;
     }
+    m_pOwner->m_tInCallMs = SimSession::NowMs();
     long long ms = SimSession::NowMs() - m_pOwner->m_stats.tCallStart;
     m_pOwner->m_stats.llTotalCallMs += ms;
     printf("[%d] CALL STARTED CallId=%s (%lldms)\n", m_pOwner->m_iId, pszCallId, ms);
@@ -1813,9 +1837,15 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
 
 void SessionSipClient::EventCallEnd(const char* pszCallId, int iSipStatus) {
     CSipClient::EventCallEnd(pszCallId, iSipStatus);
+    m_pOwner->m_stats.iCallEnd++;
+    // 다른 다이얼로그(예: 당겨받기 뒤 서버가 CANCEL 한 자기 링잉 착신 leg, 487)의 종료는 현재 호 상태를 건드리지 않는다.
+    if (!m_pOwner->m_strInviteId.empty() && pszCallId && m_pOwner->m_strInviteId != pszCallId) {
+        printf("[%d] CALL ENDED (other dialog) CallId=%s status=%d — current=%s kept\n", m_pOwner->m_iId, pszCallId,
+               iSipStatus, m_pOwner->m_strInviteId.c_str());
+        return;
+    }
     m_pOwner->m_bInCall = false;
     m_pOwner->m_strInviteId.clear();
-    m_pOwner->m_stats.iCallEnd++;
     m_pOwner->m_iLastCallEndStatus = iSipStatus;
     printf("[%d] CALL ENDED CallId=%s status=%d\n", m_pOwner->m_iId, pszCallId, iSipStatus);
 }

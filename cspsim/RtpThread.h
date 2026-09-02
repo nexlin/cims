@@ -87,6 +87,8 @@ public:
     std::string m_strMediaFile;
     std::atomic<int>  m_iLastFloorOp;   // 마지막 수신 floor subtype (TS 24.380: 1=GRANTED,2=TAKEN,5=IDLE,...)
     std::atomic<bool> m_bGrantReceived; // GRANTED(subtype=1) 수신 여부 — TAKEN이 덮어써도 보존
+    std::atomic<int>  m_iFloorDenyCount{0};   // DENY(subtype=3) 수신 누계 — 청취 leg 의 floor 요청 거절 판정(ptt_listen)
+    std::atomic<int>  m_iFloorTakenCount{0};  // TAKEN(subtype=2) 수신 누계 — 청취자가 발언자 통지를 받는지 판정
     // 누적 수신 RTP 패킷 수 (리셋 없음) — 전달·당겨받기 후 재고정된 leg 로 미디어가 실제로
     //   흐르는지 검증하는 표식 (S3-SCN-XFER/PICKUP). recv 스레드가 unprotect 통과분만 센다.
     std::atomic<unsigned long long> m_ullRecvTotal{0};

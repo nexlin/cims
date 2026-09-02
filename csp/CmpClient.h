@@ -129,12 +129,15 @@ public:
     //   clsFmtp: 멤버 SDP 의 a=fmtp:MCPTT 협상 결과 (queueing/max_priority/granted).
     //   pclsCrypto: 멤버 미디어 SRTP 키 (media_security.md §6.3 media_crypto). NULL/미활성 =
     //     필드 생략 — 신규 멤버는 평문 leg, 기존 SRTP 멤버의 재-JOIN 은 기존 키 유지.
+    //   iRecvOnly: 1 = 청취 leg(ambient listening — 상향 미중계·floor 요청 거절, cmp_media_api.md §7.4 recv_only).
+    //   iFloorSuppress: 1 = 이 멤버에게 floor 메시지를 보내지 않음 (floor_suppress).
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
                     int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
                     const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
                     int iUserNat = 0, const std::string &strUserSigIp = "", int iUserPt = 0, int iUserSrcPt = 0,
                     int iUserTePt = 0, int iUserSrcTePt = 0, const std::string &strUserCodec = "",
-                    const McpttFmtp &clsFmtp = McpttFmtp(), const CmpMediaCrypto *pclsCrypto = NULL );
+                    const McpttFmtp &clsFmtp = McpttFmtp(), const CmpMediaCrypto *pclsCrypto = NULL, int iRecvOnly = 0,
+                    int iFloorSuppress = 0 );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

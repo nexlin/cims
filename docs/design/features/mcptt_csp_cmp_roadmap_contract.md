@@ -216,7 +216,7 @@ STATS `detail.groups[].floor_holders`(배열)와 이벤트 `FLOOR_TALKERS`(발�
 | `PTT_GROUP_ADD` | `distribution`, `multicast_*` | B(예약) | MBMS/멀티캐스트 | 미구현 |
 | `PTT_GROUP_ADD`/`RELAY_ADD` | `pre_established` | A | Pre-established session | 미구현 |
 | `PTT_GROUP_ADD` | `regroup`, `constituent_groups` | A | Regroup | 미구현 |
-| `PTT_JOIN` | `recv_only`, `floor_suppress` | B | Ambient listening | 완료 (CSP 발행 미구현) |
+| `PTT_JOIN` | `recv_only`, `floor_suppress` | B | Ambient listening | 완료 — CSP 는 PTT 그룹콜 청취 leg(관제사 recvonly 합류)에 `recv_only=1` 발행, `floor_suppress` 는 미사용(청취자가 Floor Taken Permission=0 변형으로 발언자를 안다 — [dispatch_center.md](dispatch_center.md) §5.6) |
 | STATS `detail.groups[]` | `floor_holders[]` | B | 다중 발언자 관측 | 완료 (OAM 콘솔 반영) |
 | (event) `FLOOR_TALKERS` | 신규 이벤트 | B | 발언자 집합 통지 | CMP push 완료 / CSP 소비 미구현 |
 | (녹취 메타) `tracks[].speakers[]` | 슬롯 트랙·화자 구간 | B | 동시 발언·전이중 녹취 귀속/재생 | 완료 — 이력 조회·믹스/슬롯 재생까지 ([recording.md](recording.md) §3.3.1·§3.6.3) |

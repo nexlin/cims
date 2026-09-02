@@ -240,9 +240,22 @@ private:
          *  세션 활성/마지막 이탈 판정은 확립 leg 만 센다 — 미응답 pending INVITE 가 세션을 붙들어
          *  전원 이탈 후에도 PTT_GROUP_REMOVE 가 밀리는 좀비 세션 방지. */
         bool bEstablished = false;
+        /** PTT 그룹콜 청취 leg (dispatch_center.md §5.6 — 관제사의 recvonly 합류). 세션 활성·마지막 이탈 판정에서
+         *  제외(청취자는 세션을 붙들지 못한다), 참가자 DB/이력에 남기지 않고 감사(E-AUD-016)로 남긴다. */
+        bool bListenOnly = false;
+        bool bListenHidden = true;   ///< 관제 그룹 listen_visibility=hidden — 로스터(RFC 4575)·통지에서 은닉
+        std::string strListenGroup;  ///< 청취자의 관제 그룹 id (감사 상관 키)
+        time_t tListenStart = 0;
     };
     // CallId -> Info
     std::map<std::string, CallSessionInfo> m_mapCallSession;
+
+    /** 그룹의 활성(확립·비청취) leg 존재 — 세션 활성 판정 단일 기준. m_mutex 보유 상태에서 호출. */
+    bool HasActiveLeg( const std::string &strGroupId ) const;
+    /** PTT 청취 감사 이벤트 (E-AUD-016 call_monitored, tap_mode=ptt_listen) — started/ended/denied. */
+    static void EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor,
+                                    const std::string &strDispatchGroup, const std::string &strPttGroup,
+                                    const std::string &strSesId, int iDurMs );
 
     // Track Active Calls ((UserId, GroupId) -> CallId)
     //   멀티그룹 동시 참여: 사용자는 그룹별 독립 다이얼로그를 가진다 (그룹당 1콜).

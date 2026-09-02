@@ -151,11 +151,12 @@ export const alertsApi = {
 }
 
 export const eventsApi = {
-  list: (params: { days?: number; type?: string; kind?: string; limit?: number } = {}) => {
+  list: (params: { days?: number; type?: string; kind?: string; code?: string; limit?: number } = {}) => {
     const p = new URLSearchParams()
     if (params.days) p.set('days', String(params.days))
     if (params.type) p.set('type', params.type)
     if (params.kind) p.set('kind', params.kind)
+    if (params.code) p.set('code', params.code)
     if (params.limit) p.set('limit', String(params.limit))
     const s = p.toString()
     return api.get<EventsResponse>(`/events${s ? '?' + s : ''}`)

@@ -2,8 +2,12 @@
 CIMS 이벤트(정상 동작 통지) 이력 REST API — 알람과 스트림 분리 (alarm_self_reporting.md §6)
 
 Routes:
-  GET /api/v1/events?days=7&type=&kind=&limit=500   최근 이벤트 목록
-  GET /api/v1/events/types                          최근 30일 이벤트 type 목록
+  GET /api/v1/events?days=7&type=&kind=&code=&limit=500   최근 이벤트 목록
+  GET /api/v1/events/types                                최근 30일 이벤트 type 목록
+
+감사 이벤트(kind=audit — E-AUD-*, 예: 합법감청 call_monitored)는 **manager 이상만** 열람한다
+(alarm_catalog 감지 행 규약 — 감청 수행 권한과 열람 권한 분리). manager 미만에게는 목록에서 제외되고,
+kind=audit 명시 조회는 403.
 """
 
 from urllib.parse import urlparse, unquote
@@ -36,9 +40,12 @@ async def handle_events(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
     # 전 엔드포인트 인증 (파이프라인 §7)
     from handlers.auth import require_auth
-    _token, autherr = require_auth(handler_args)
+    from services import admin_auth
+    token, autherr = require_auth(handler_args)
     if autherr:
         return autherr
+    # 감사(audit) 분류 열람 게이트 — manager 이상. 미만이면 감사 이벤트를 결과에서 제외한다.
+    can_audit = admin_auth.role_rank(token.get('role')) >= admin_auth.role_rank('manager')
     base = _service_log_dir(config)
     parts = _path_parts(handler_args.full_path)
     qs = handler_args.query_params or {}
@@ -53,8 +60,11 @@ async def handle_events(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 
         days = max(1, min(int(qp('days', '7')), 90))
         limit = max(1, min(int(qp('limit', '500')), 5000))
+        if qp('kind') == 'audit' and not can_audit:
+            return HandlerResult(status=403, body={'error': '감사 이벤트 열람은 manager 이상'})
         events = event_log.read_recent(base, days=days, type_filter=qp('type'),
-                                       kind_filter=qp('kind'), limit=limit)
+                                       kind_filter=qp('kind'), limit=limit, code_filter=qp('code'),
+                                       exclude_kinds=None if can_audit else {'audit'})
         return HandlerResult(status=200, body={
             'days': days,
             'count': len(events),
@@ -86,7 +96,9 @@ CIMS_EVENTS_API_DOCS = [
          {'name': 'type', 'in': 'query', 'type': 'string', 'required': False,
           'desc': '이벤트 종류로 필터 (`events.types` 로 값 목록 조회)'},
          {'name': 'kind', 'in': 'query', 'type': 'string', 'required': False,
-          'desc': '분류로 필터 — 상태변경 통지(STC) / 감사기록(AUD)'},
+          'desc': '분류로 필터 — stateChange(상태변경 통지) / audit(감사기록 — manager 이상만, 미만은 403)'},
+         {'name': 'code', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': '이벤트 코드로 필터 (예: E-AUD-016 합법감청 call_monitored)'},
          {'name': 'limit', 'in': 'query', 'type': 'integer', 'required': False,
           'desc': '최대 건수. 기본 500, 허용 1~5000'},
      ],
@@ -95,8 +107,8 @@ CIMS_EVENTS_API_DOCS = [
          {'name': 'days', 'type': 'integer', 'unit': '일', 'desc': '실제 적용된 조회 일수'},
          {'name': 'count', 'type': 'integer', 'unit': '건', 'desc': 'events 배열 길이'},
          {'name': 'events[].ts', 'type': 'string', 'desc': '기록 시각 (ISO8601, 초 단위)'},
-         {'name': 'events[].kind', 'type': 'string', 'enum': ['STC', 'AUD'],
-          'desc': 'STC=상태변경 통지, AUD=감사기록(누가 무엇을 했나)'},
+         {'name': 'events[].kind', 'type': 'string', 'enum': ['stateChange', 'audit'],
+          'desc': 'stateChange=상태변경 통지, audit=감사기록(누가 무엇을 했나 — manager 이상만 수신)'},
          {'name': 'events[].type', 'type': 'string', 'desc': '이벤트 종류'},
          {'name': 'events[].code', 'type': 'string', 'desc': '이벤트 코드 (E-XXX-NNN)'},
          {'name': 'events[].message', 'type': 'string', 'desc': '사람이 읽는 한 줄 설명'},
@@ -106,13 +118,14 @@ CIMS_EVENTS_API_DOCS = [
          {'name': 'events[].user', 'type': 'string', 'desc': '감사기록(AUD)의 행위자 계정'},
      ],
      'example': {'days': 7, 'count': 1, 'events': [
-         {'ts': '2026-01-02T09:20:11', 'kind': 'STC', 'type': 'module_started',
+         {'ts': '2026-01-02T09:20:11', 'kind': 'stateChange', 'type': 'module_started',
           'code': 'E-PRC-001', 'message': 'csp 기동 완료',
           'source': {'mo_class': 'module', 'mo_instance': 'service/cims/module/csp',
                      'detected_by': 'agent'}}]},
      'errors': list(_ERR_COMMON),
      'notes': ['알람과 **스트림이 분리**돼 있다 — 장애는 `/api/v1/alerts`, 정상 통지는 여기.',
-               '일자별 파일을 스캔하므로 days 를 키우면 응답이 느려진다.'],
+               '일자별 파일을 스캔하므로 days 를 키우면 응답이 느려진다.',
+               '감사(audit) 이벤트는 manager 미만 계정의 응답에서 제외된다(열람 권한 분리).'],
      'auth': dict(_AUTH_MONITOR)},
 
     {'id': 'events.types', 'module': None, 'method': 'GET', 'path': '/api/v1/events/types',

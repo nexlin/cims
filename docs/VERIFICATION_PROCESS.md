@@ -161,7 +161,7 @@ S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 
 S2 FAIL → S3~S6 BLOCKED.
 
-### S3 — 스모크 (환경 4 + 시나리오 12 + 검증 1, depends_on chain)
+### S3 — 스모크 (환경 4 + 시나리오 20 + 검증 1, depends_on chain)
 
 `S3-CONFIGURE → S3-START → S3-SEED → {S3-SCN-*} → S3-HEALTH` (S3-RESET 은 `prep-reset` 프리셋으로 분리 — 사용자가 명시 실행).
 
@@ -190,6 +190,13 @@ S2 FAIL → S3~S6 BLOCKED.
   4명(A,B,C,D)에 `pickup_group` 을 명시 부여(자기복원)해 실컬럼 축으로 호 전달(blind/attended + `transfer_allowed`
   403)·당겨받기(그룹/지정 + 타 그룹 403·그룹 밖 404)·BLF(dialog NOTIFY + INVITE-Replaces + 그룹 밖 감시 403 +
   미지 Event 489)를 cspsim 3 단말 시나리오의 RTP delta·최종 응답 마커로 판정. 컬럼 부재 DB 는 경계 검사 SKIP
+- **S3-SCN-FA / MONITOR / PTT-LISTEN**: 관제 센터 회귀 ([dispatch_center.md §9](design/features/dispatch_center.md)) —
+  관제 그룹을 DB 에 직접 시드(자기복원, `dispatch_groups` 테이블 미적용 DB 는 SKIP)하고 cspsim `hunt`/`monitor`/
+  `ptt_listen` 시나리오의 RTP delta·최종 응답 마커로 판정. FA = 대표번호 병렬 호출(F1 승자·CANCEL, F3 무응답 overflow,
+  F5 링잉 대표번호 호 지정 픽업, F6 sequential alerting 단계 시한), MONITOR = 업무망 합법감청(M2 Join 200·SSRC 2개·A/B
+  무영향, M5 범위 밖 403), PTT-LISTEN = PTT 그룹콜 청취(L1 recvonly 합류·floor DENY·로스터 은닉, L2 자격 없음 403,
+  L3 범위 밖 403, L4 비멤버 sendrecv 403, L5 공개 청취 로스터 노출 — `ptt_user_profile.allow_ambient_listening` 컬럼
+  미적용 DB 는 SKIP)
 - **S3-SCN-CHANNEL-POLICY / REALM-MISMATCH / SEC-AGREE / AKA / IPSEC(-LIVE) / TLS-REBIND / MIXED-TRANSPORT /
   AKA-MIGRATE-IDEMPOTENT / PROVISIONING-HA1**: SIP 접속 보안 회귀(V1~V26) — 항목 정의는
   [sip_access_security.md](design/features/sip_access_security.md) 검증표. IPSEC-LIVE 는 dev 에 IPSEC

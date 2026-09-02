@@ -424,8 +424,11 @@ static void PrintUsage(const char* pszBin) {
     printf("                             hunt         - [volte] A→대표번호(-pilot): 그룹원 B·C 병렬 링, C 응답(B ring-hold) → A–C (-count 3~4)\n");
     printf("                                            -hunt_noanswer: 전원 ring-hold — 무응답 → A 480 또는 overflow(D 응답)\n");
     printf("                             monitor      - [volte] A↔B 통화 중 M(감청자)이 B dialog 구독→INVITE-Join 청취(SSRC 2개), A/B 무영향 (-count 3, §5)\n");
+    printf("                             ptt_listen   - [ptt] 멤버(앞 N-1) 그룹콜 중 마지막 단말 M 이 그룹 AoR 로 recvonly INVITE → 청취 멤버(floor DENY·은닉) (-count 3+, §5.6)\n");
     printf("  -pilot       <번호>      [hunt] 관제 그룹 대표번호 (A 의 INVITE 대상)\n");
     printf("  -hunt_noanswer           [hunt] B·C 전원 응답 보류 (no_answer_sec·overflow 검증)\n");
+    printf("  -hunt_pickup             [hunt] B·C·D 전원 응답 보류, D 가 <pickup_code><pilot> 로 링잉 대표번호 호를 지정 픽업 (F5, -count 4)\n");
+    printf("  -listen_sendrecv         [ptt_listen] M 이 recvonly 아닌 일반 INVITE — 비멤버 403 판정\n");
     printf("  -pickup_code <code>      [pickup] 당겨받기 코드 (default: **) — 서버 pickup_feature_code 와 일치\n");
     printf("  -pickup_target <내선>    [pickup] 지정 픽업 — C 가 <code><내선> 을 다이얼 (미지정 시 그룹 픽업)\n");
     printf("  -event       <token>     [subscribe_event] Event 헤더 토큰 (default: dialog)\n");
@@ -478,6 +481,8 @@ static std::string g_strPickupTarget;       // -pickup_target: 지정 픽업 대
 static std::string g_strSubscribeEvent = "dialog";  // -event: subscribe_event 시나리오의 Event 토큰 (미지원 토큰 → 489 프로브)
 static std::string g_strPilot;                      // -pilot: hunt 시나리오 대표번호 (dispatch_center.md §4)
 static bool g_bHuntNoAnswer = false;                // -hunt_noanswer: 그룹원 전원 ring-hold (무응답·overflow 검증)
+static bool g_bHuntPickup = false;                  // -hunt_pickup: 전원 ring-hold 중 D 가 <pickup_code><pilot> 로 지정 픽업 (F5)
+static bool g_bListenSendRecv = false;              // -listen_sendrecv: [ptt_listen] M 이 recvonly 아닌 일반 INVITE (비멤버 403 판정)
 
 // -hold <secs>: register 시나리오가 등록을 유지하는 시간 — 등록 유지 중 외부 프로브(비보호 요청 403 등)를
 //   받기 위한 창. 0 이면 종전대로 등록 직후 해제. (RunScenario 시그니처를 늘리지 않으려 파일 정적)
@@ -552,13 +557,17 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         return;
     }
 
+    // ptt_listen: 마지막 단말 = 청취자 M (관제사) — 그룹 멤버가 아니므로 affiliation·conference 구독 단계에서 제외.
+    SimSession* pListener = (eScenario == E_SCENARIO_PTT_LISTEN && sessions.size() >= 2) ? sessions.back() : NULL;
+
     // 2. PTT: GMS/CMS SUBSCRIBE
     if (eScenario == E_SCENARIO_SUBSCRIBE ||
         eScenario == E_SCENARIO_GROUP_CALL ||
+        eScenario == E_SCENARIO_PTT_LISTEN ||
         eScenario == E_SCENARIO_FULL) {
         printf("[Scenario] Sending GMS/CMS SUBSCRIBE...\n");
         for (auto* s : sessions) {
-            if (!s->m_bPttMode) continue;
+            if (!s->m_bPttMode || s == pListener) continue;
             s->SubscribeGms();
             usleep(50000);
             s->SubscribeCms();
@@ -577,7 +586,7 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         // 구독 완료 대기 (최대 10초)
         for (int retry = 0; retry < 100; ++retry) {
             int subCount = 0;
-            for (auto* s : sessions) if (s->m_bGmsSubscribed) subCount++;
+            for (auto* s : sessions) if (s->m_bGmsSubscribed || s == pListener) subCount++;
             if (subCount == (int)sessions.size()) break;
             usleep(100000);
         }
@@ -696,19 +705,36 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             return s->m_bInCall;
         };
         B->SetRingHold(true);
-        if (g_bHuntNoAnswer) C->SetRingHold(true);
-        printf("[Scenario] HUNT: A(%s) -> pilot(%s) [B ring-hold%s]\n", A->m_strUser.c_str(), g_strPilot.c_str(),
-               g_bHuntNoAnswer ? ", C ring-hold" : "");
+        if (g_bHuntNoAnswer || g_bHuntPickup) C->SetRingHold(true);
+        if (g_bHuntPickup && D) D->SetRingHold(true);  // D 도 그룹원(링) — 자기 링 중에 지정 픽업으로 가져간다
+        printf("[Scenario] HUNT: A(%s) -> pilot(%s) [B ring-hold%s%s]\n", A->m_strUser.c_str(), g_strPilot.c_str(),
+               (g_bHuntNoAnswer || g_bHuntPickup) ? ", C ring-hold" : "", g_bHuntPickup ? ", D pickup" : "");
         A->m_iLastCallEndStatus = 0;
         A->StartCall(g_strPilot);
-        // 응답 대기 — 무응답 모드는 no_answer_sec(≤60)+overflow 링 시간을 감안해 넉넉히
-        const int iWaitTenths = g_bHuntNoAnswer ? 900 : 100;
+        // 응답 대기 — 무응답 모드는 no_answer_sec(≤60)+overflow 링 시간을 감안해 넉넉히.
+        //   sequential alerting 은 단계 시한 뒤 다음 순번이 받으므로 병렬보다 오래 걸릴 수 있다.
+        const int iWaitTenths = g_bHuntNoAnswer ? 900 : 600;
         bool aOk = false;
+        int iPickupStatus = 0;
         for (int t = 0; t < iWaitTenths && !g_bQuit; ++t) {
             if (A->m_bInCall) { aOk = true; break; }
             if (A->m_iLastCallEndStatus.load() >= 300) break;  // 최종 실패 응답
+            // F5 지정 픽업 — 링 시작(첫 INVITE 도달) 1.5초 뒤 D 가 <pickup_code><pilot> 다이얼
+            if (g_bHuntPickup && D && iPickupStatus == 0 && t >= 15 &&
+                (B->m_iIncomingInvites.load() > 0 || C->m_iIncomingInvites.load() > 0)) {
+                const std::string strDial = g_strPickupCode + g_strPilot;
+                printf("[Scenario] HUNT: D(%s) dials %s (directed pickup of ringing pilot)\n", D->m_strUser.c_str(),
+                       strDial.c_str());
+                D->m_iLastCallEndStatus = 0;
+                D->StartCall(strDial);
+                iPickupStatus = -1;  // 진행 중
+            }
+            if (iPickupStatus == -1 && !D->m_bInCall && D->m_iLastCallEndStatus.load() >= 300 && A->m_iLastCallEndStatus.load() >= 300)
+                iPickupStatus = D->m_iLastCallEndStatus.load();
             usleep(100000);
         }
+        if (iPickupStatus == -1 || (iPickupStatus != 0 && D->m_bInCall)) iPickupStatus = D->m_bInCall ? 200 : D->m_iLastCallEndStatus.load();
+        const long long tAnswerMs = (aOk && A->m_tInCallMs.load() > 0) ? (A->m_tInCallMs.load() - A->m_stats.tCallStart) : -1;
         // 패자 CANCEL 도착 여유
         for (int t = 0; t < 10 && !g_bQuit; ++t) usleep(100000);
         // 미디어 흐름 관찰 창 — 승자 leg 만 흐르고 패자(B)는 무흐름이어야 한다. 착신 leg 는 UAS 라
@@ -726,9 +752,9 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         // hunt_status: A 의 결과 — 200 확립 / 480·486 전원 실패·무응답 / 404 대표번호 아님. verify 가 읽는다.
         const int iHuntStatus = aOk ? 200 : A->m_iLastCallEndStatus.load();
         printf("[Scenario] HUNT result: hunt_status=%d answered_by=%s A_inCall=%d "
-               "B_invites=%d C_invites=%d D_invites=%d pcpid=%s\n",
+               "B_invites=%d C_invites=%d D_invites=%d pickup_status=%d t_answer_ms=%lld pcpid=%s\n",
                iHuntStatus, strAnsweredBy.c_str(), A->m_bInCall, B->m_iIncomingInvites.load(),
-               C->m_iIncomingInvites.load(), D ? D->m_iIncomingInvites.load() : 0,
+               C->m_iIncomingInvites.load(), D ? D->m_iIncomingInvites.load() : 0, iPickupStatus, tAnswerMs,
                C->m_strLastPCalledParty.empty() ? (B->m_strLastPCalledParty.empty() ? "-" : B->m_strLastPCalledParty.c_str())
                                                 : C->m_strLastPCalledParty.c_str());
         printf("[Scenario] RTP recv delta over %ds: A=+%llu B=+%llu C=+%llu D=+%llu\n", obs, A->RecvPackets() - a0, dB,
@@ -793,6 +819,78 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         printf("[Scenario] MONITOR result: join_status=%d ab_ok=%d M_recv=+%llu M_ssrc=%zu A_recv=+%llu B_recv=+%llu\n",
                iJoinStatus, abOk, dM, M->RecvSsrcCount(), dA, dB);
         printf("[Scenario] monitor done, stopping calls\n");
+        for (auto* s : sessions) s->StopCall();
+        return;
+    }
+
+    // 3a-4. PTT 그룹콜 청취 (dispatch_center.md §5.6) — 멤버(sessions[0..N-2])가 그룹콜 중, 마지막 단말 M(관제사)이
+    //   그룹 AoR 로 a=recvonly INVITE → 서버가 자격(allow_ambient_listening)·범위(ptt_listen) 인가 후 청취 멤버로
+    //   합류(PTT_JOIN recv_only). 판정: join_status, M 수신 RTP delta, M floor 요청 → DENY(GRANT 0),
+    //   hidden = 멤버의 conference 로스터에 M 미노출. -listen_sendrecv 면 M 이 일반 INVITE(비멤버 403 판정).
+    if (eScenario == E_SCENARIO_PTT_LISTEN) {
+        if (sessions.size() < 3 || pListener == NULL) {
+            printf("[Scenario] ptt_listen 은 -count 3 이상(멤버 2+, M) 필요 — 현재 %d\n", (int)sessions.size());
+            g_bScenarioDone = true;
+            return;
+        }
+        SimSession* M = pListener;
+        SimSession* A = sessions[0];
+        const int iMembers = (int)sessions.size() - 1;
+        // 1) 멤버 그룹콜 개시 — sessions[0] 이 INVITE, 나머지 멤버는 서버 fan-out 으로 합류
+        printf("[Scenario] PTT_LISTEN: member A(%s) originating group INVITE -> %s\n", A->m_strUser.c_str(),
+               strGroupId.c_str());
+        A->StartGroupCall(strGroupId);
+        int iJoined = 0;
+        for (int t = 0; t < 300 && !g_bQuit; ++t) {
+            iJoined = 0;
+            for (int i = 0; i < iMembers; ++i) if (sessions[i]->m_bInCall) iJoined++;
+            if (iJoined == iMembers) break;
+            usleep(100000);
+        }
+        printf("[Scenario] PTT_LISTEN: %d/%d members in call\n", iJoined, iMembers);
+        // 2) A 가 floor 를 잡고 발언 — 청취자가 들을 미디어
+        A->m_clsRtpThread.m_bGrantReceived = false;
+        A->SendPttRequest();
+        for (int t = 0; t < 30 && !g_bQuit; ++t) { if (A->m_clsRtpThread.m_bGrantReceived) break; usleep(100000); }
+        printf("[Scenario] PTT_LISTEN: A floor %s\n", A->m_clsRtpThread.m_bGrantReceived ? "GRANTED" : "not granted");
+        // 3) M 청취 합류 (recvonly INVITE)
+        M->SetListenOnly(!g_bListenSendRecv);
+        M->m_iLastCallEndStatus = 0;
+        printf("[Scenario] PTT_LISTEN: M(%s) INVITE %s -> %s\n", M->m_strUser.c_str(),
+               g_bListenSendRecv ? "(sendrecv — non-member)" : "(recvonly — listen)", strGroupId.c_str());
+        M->StartGroupCall(strGroupId);
+        int iJoinStatus = 0;
+        for (int t = 0; t < 100 && !g_bQuit; ++t) {
+            if (M->m_bInCall) { iJoinStatus = 200; break; }
+            if (M->m_iLastCallEndStatus.load() >= 300) { iJoinStatus = M->m_iLastCallEndStatus.load(); break; }
+            usleep(100000);
+        }
+        // 4) 관찰 창 — M 수신 RTP, A 는 계속 발언
+        unsigned long long m0 = M->RecvPackets(), a0 = A->RecvPackets();
+        int obs = iCallDuration > 0 ? iCallDuration : 4;
+        for (int t = 0; t < obs * 10 && !g_bQuit; ++t) usleep(100000);
+        const unsigned long long dM = M->RecvPackets() - m0, dA = A->RecvPackets() - a0;
+        // 5) M 이 floor 요청 — 청취 leg 는 DENY(recv_only) 여야 한다
+        int iDeny = 0, iGrant = 0;
+        if (iJoinStatus == 200) {
+            A->SendPttRelease();
+            for (int t = 0; t < 15 && !g_bQuit; ++t) usleep(100000);
+            const int d0 = M->m_clsRtpThread.m_iFloorDenyCount.load();
+            M->m_clsRtpThread.m_bGrantReceived = false;
+            M->SendPttRequest();
+            for (int t = 0; t < 30 && !g_bQuit; ++t) {
+                if (M->m_clsRtpThread.m_bGrantReceived || M->m_clsRtpThread.m_iFloorDenyCount.load() > d0) break;
+                usleep(100000);
+            }
+            iDeny = M->m_clsRtpThread.m_iFloorDenyCount.load() - d0;
+            iGrant = M->m_clsRtpThread.m_bGrantReceived ? 1 : 0;
+        }
+        // 6) 은닉 — 멤버(A)의 conference 로스터에 M 이 실렸는가
+        const int iHidden = A->ConfRosterHas(M->m_strUser) ? 0 : 1;
+        printf("[Scenario] PTT_LISTEN result: join_status=%d members_in=%d M_recv=+%llu A_recv=+%llu M_grant=%d M_deny=%d "
+               "M_taken=%d hidden=%d\n",
+               iJoinStatus, iJoined, dM, dA, iGrant, iDeny, M->m_clsRtpThread.m_iFloorTakenCount.load(), iHidden);
+        printf("[Scenario] ptt_listen done, stopping calls\n");
         for (auto* s : sessions) s->StopCall();
         return;
     }
@@ -1146,6 +1244,8 @@ int main(int argc, char* argv[])
     g_strSubscribeEvent        = GetArg(argc, argv, "-event", "dialog");
     g_strPilot                 = GetArg(argc, argv, "-pilot", "");
     g_bHuntNoAnswer            = HasFlag(argc, argv, "-hunt_noanswer");
+    g_bHuntPickup              = HasFlag(argc, argv, "-hunt_pickup");
+    g_bListenSendRecv          = HasFlag(argc, argv, "-listen_sendrecv");
     // CSC 연동: REGISTER 전 IdMS auth 수행 (올바른 순서)
     std::string strCscIp       = GetArg(argc, argv, "-csc_ip",   "");
     int iCscPort               = atoi(GetArg(argc, argv, "-csc_port", "4530").c_str());
@@ -1241,6 +1341,7 @@ int main(int argc, char* argv[])
     else if (strScenario == "subscribe_event") eScenario = E_SCENARIO_SUBSCRIBE_EVENT;
     else if (strScenario == "hunt")       eScenario = E_SCENARIO_HUNT;
     else if (strScenario == "monitor")    eScenario = E_SCENARIO_MONITOR;
+    else if (strScenario == "ptt_listen") eScenario = E_SCENARIO_PTT_LISTEN;
 
     // 로깅 설정
     CLog::SetPrefix("cspsim");

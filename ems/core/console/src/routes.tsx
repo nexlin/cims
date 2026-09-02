@@ -16,7 +16,7 @@ import { SERVICE_MANIFESTS } from './services/registry'
 
 import {
   DASHBOARD_LAYOUT, ALERTS_ACTIVE_LAYOUT, ALERTS_HISTORY_LAYOUT,
-  ALERTS_ANALYSIS_LAYOUT, ALERTS_CATALOG_LAYOUT,
+  ALERTS_ANALYSIS_LAYOUT, ALERTS_CATALOG_LAYOUT, ALERTS_AUDIT_LAYOUT,
 } from './widgets/layouts'
 import ServicesPage from './pages/ServicesPage'
 import PackagesPage from './pages/PackagesPage'
@@ -75,6 +75,10 @@ const CORE_SECTIONS: RouteSection[] = [
       { path: '/alerts/analysis', title: '유형별 분석',      layout: ALERTS_ANALYSIS_LAYOUT, layoutId: 'alerts.analysis' },
       // 코드 사전 (rule + 모듈 자기보고 병합 — alarm_pipeline.md §8.1)
       { path: '/alerts/catalog', title: '알람 카탈로그',    layout: ALERTS_CATALOG_LAYOUT, layoutId: 'alerts.catalog' },
+      // 감사 이력 — 합법감청(E-AUD-016 call_monitored) 등 kind=audit. 열람은 manager 이상(감청 수행 권한과 분리,
+      //   dispatch_center.md §5.7). 서버(OAM /events)도 같은 등급으로 감사 이벤트를 감춘다.
+      { path: '/alerts/audit',   title: '감사 이력',        layout: ALERTS_AUDIT_LAYOUT, layoutId: 'alerts.audit',
+        requiredRole: 'manager', apis: ['events.list'] },
     ],
   },
   // ── 관리(admin) ──

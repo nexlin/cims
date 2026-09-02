@@ -27,11 +27,19 @@ def record_event(service_log_dir: str, event: dict) -> None:
 def read_recent(service_log_dir: str, days: int = 7,
                 type_filter: Optional[str] = None,
                 kind_filter: Optional[str] = None,
-                limit: int = 500) -> list:
+                limit: int = 500,
+                code_filter: Optional[str] = None,
+                exclude_kinds: Optional[set] = None) -> list:
+    """최근 이벤트 — type/kind/code 필터. exclude_kinds 는 열람 권한이 없는 분류(감사 kind 를 manager 미만에게
+    감춘다 — alarm_catalog E-AUD 행 '열람은 manager 이상')."""
     def _match(ev: dict) -> bool:
         if type_filter and ev.get('type') != type_filter:
             return False
         if kind_filter and ev.get('kind') != kind_filter:
+            return False
+        if code_filter and ev.get('code') != code_filter:
+            return False
+        if exclude_kinds and ev.get('kind') in exclude_kinds:
             return False
         return True
     return daily_jsonl.read_recent(service_log_dir, _SUBDIR, days=days,

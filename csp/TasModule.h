@@ -44,6 +44,8 @@ struct CTasForkSet {
     int iDepth = 0;            ///< overflow 재귀 깊이(1단계까지)
     std::string strOverflow;   ///< 남은 overflow_target (소진 시 빈 값)
     std::string strSessionId;  ///< CallDir 세션 id
+    bool bSequential = false;  ///< alert_mode=sequential — 한 번에 한 명씩(alert_order 순), iNoAnswerSec 는 단계 시한
+    std::vector<std::string> vecQueue;  ///< sequential 의 남은 호출 대상 (선두가 다음 순번)
 };
 
 /**
@@ -118,6 +120,14 @@ private:
      *  반환 0=성공(양측 200 발신 완료), >0=실패 SIP 코드(호출자가 pszCallId 에 응답). */
     int PickUpLeg( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp, const std::string &strOldCallId );
 
+    /** 대표번호 링잉 호(포크 중 집합)의 당겨받기 후보 — 픽업자 그룹의 포크 집합 중 pszTarget(빈 값=그룹 픽업,
+     *  대표번호, 또는 대기 leg 그룹원 내선)에 맞는 A-leg Call-ID. 없으면 빈 값. m_mutexFork 보유 상태에서 호출. */
+    std::string FindForkForPickup( const std::string &strPickerGroup, const char *pszTarget );
+    /** 포크 집합 당겨받기 (dispatch_center.md §4.4 F5) — 픽업 단말 pszCallId 를 승자 자리에 앉힌다: 대기 leg 전원
+     *  CANCEL, (A, 픽업) 쌍 CallMap 삽입, relay peer1 RELAY_MODIFY, A·픽업 양측 200. 반환 규약은 PickUpLeg 와 같다.
+     *  m_mutexFork 보유 상태에서 호출. */
+    int PickUpFork( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp, const std::string &strACallId );
+
     /** 수신 INVITE 의 Replaces(RFC 3891) 처리 — 헤더가 있으면 대상 다이얼로그를 찾아 pszCallId 로
      *  교체(당겨받기/attended 완결)하고 true. 헤더가 없으면 false(정상 호 처리 계속). */
     bool HandleIncomingReplaces( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
@@ -164,6 +174,12 @@ private:
     /** 대기 leg 생성 — 대상 각각에 leg 전용 SDES offer 로 INVITE(P-Called-Party-ID=대표번호). 생성 수 반환.
      *  m_mutexFork 를 잡은 상태에서 호출한다. */
     int ForkAlert( CTasForkSet &clsSet, const std::vector<std::string> &vecTargets );
+    /** alert_mode 분기 — parallel 은 전원 ForkAlert, sequential 은 vecQueue 에 적재 후 첫 순번 1명만(TS 24.239).
+     *  생성 leg 수 반환. m_mutexFork 보유 상태에서 호출. */
+    int StartAlert( CTasForkSet &clsSet, const std::vector<std::string> &vecTargets );
+    /** sequential 다음 순번 호출 — 큐 선두부터 leg 생성이 성공하는 멤버까지 진행하고 단계 시한(tStart)을 재설정.
+     *  큐 소진(호출 없음)이면 false. m_mutexFork 보유 상태에서 호출. */
+    bool AdvanceSequential( CTasForkSet &clsSet );
     /** 전원 실패/무응답/취소 — 대기 leg CANCEL, A 에게 iSipCode(0=응답 없음: A 가 취소한 경우), relay 회수, 집합 제거.
      */
     void FailFork( const std::string &strACallId, int iSipCode );
