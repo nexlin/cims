@@ -423,6 +423,7 @@ static void PrintUsage(const char* pszBin) {
     printf("                             subscribe_event - 등록 후 -event 토큰으로 자기 AoR SUBSCRIBE 1건, 최종 응답 출력 (489 프로브)\n");
     printf("                             hunt         - [volte] A→대표번호(-pilot): 그룹원 B·C 병렬 링, C 응답(B ring-hold) → A–C (-count 3~4)\n");
     printf("                                            -hunt_noanswer: 전원 ring-hold — 무응답 → A 480 또는 overflow(D 응답)\n");
+    printf("                             monitor      - [volte] A↔B 통화 중 M(감청자)이 B dialog 구독→INVITE-Join 청취(SSRC 2개), A/B 무영향 (-count 3, §5)\n");
     printf("  -pilot       <번호>      [hunt] 관제 그룹 대표번호 (A 의 INVITE 대상)\n");
     printf("  -hunt_noanswer           [hunt] B·C 전원 응답 보류 (no_answer_sec·overflow 검증)\n");
     printf("  -pickup_code <code>      [pickup] 당겨받기 코드 (default: **) — 서버 pickup_feature_code 와 일치\n");
@@ -733,6 +734,65 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         printf("[Scenario] RTP recv delta over %ds: A=+%llu B=+%llu C=+%llu D=+%llu\n", obs, A->RecvPackets() - a0, dB,
                dC, dD);
         printf("[Scenario] hunt done, stopping calls\n");
+        for (auto* s : sessions) s->StopCall();
+        return;
+    }
+
+    // 3a-3. 업무망 합법감청 (dispatch_center.md §5) — A↔B 통화 중 M(감청자)이 B 를 dialog 구독해 활성
+    //   호의 call-id/태그를 학습한 뒤 INVITE-Join(recvonly)으로 청취 leg 에 합류한다. 서버가 CMP tap 을
+    //   붙여 양 화자(caller/callee) 미디어를 SSRC 2개로 분리 인도하고, A/B 에게는 아무 변화가 없다(은닉).
+    //   판정: M 수신 RTP delta>0 + SSRC 2개, A/B 수신 delta 는 통화 그대로(감청 무영향).
+    if (eScenario == E_SCENARIO_MONITOR) {
+        if (sessions.size() < 3) {
+            printf("[Scenario] monitor 는 -count 3 (A,B,M) 필요 — 현재 %d\n", (int)sessions.size());
+            g_bScenarioDone = true;
+            return;
+        }
+        SimSession* A = sessions[0];
+        SimSession* B = sessions[1];
+        SimSession* M = sessions[2];
+        auto waitInCall = [&](SimSession* s, int tenths) {
+            for (int t = 0; t < tenths && !g_bQuit; ++t) { if (s->m_bInCall) return true; usleep(100000); }
+            return s->m_bInCall;
+        };
+        // 1) M 이 B 를 dialog 구독 (BLF) — 통화 확립 전에 걸어 early→confirmed NOTIFY 로 leg call-id/태그 학습.
+        //   (실 운용은 콘솔 활성세션 목록에서 call-id 를 얻어 클릭하지만, cspsim 은 dialog 이벤트로 학습한다.)
+        printf("[Scenario] MONITOR: M(%s) SUBSCRIBE dialog watched=B(%s)\n", M->m_strUser.c_str(), B->m_strUser.c_str());
+        M->SubscribeDialog(B->m_strUser);
+        for (int t = 0; t < 15 && !g_bQuit; ++t) { if (M->m_iDlgSubStatus != 0) break; usleep(100000); }
+        // 2) A↔B 통화 확립 (감청 대상) — M 은 confirmed NOTIFY 로 활성 호 call-id/태그 학습
+        printf("[Scenario] MONITOR: A(%s) -> B(%s)\n", A->m_strUser.c_str(), B->m_strUser.c_str());
+        A->StartCall(B->m_strUser);
+        bool abOk = waitInCall(A, 60) && waitInCall(B, 60);
+        for (int t = 0; t < 60 && !g_bQuit && M->m_iDlgSubStatus < 300; ++t) {
+            if (!M->m_strWatchedDlgCallId.empty() && M->m_strWatchedDlgState == "confirmed") break;
+            usleep(100000);
+        }
+        for (int t = 0; t < 15 && !g_bQuit; ++t) usleep(100000);  // 미디어 흐름 안정
+        // 3) M 이 INVITE-Join 으로 청취 합류
+        int iJoinStatus = 0;
+        unsigned long long a0 = A->RecvPackets(), b0 = B->RecvPackets();
+        if (M->m_iDlgSubStatus >= 300) {
+            iJoinStatus = M->m_iDlgSubStatus.load();
+            printf("[Scenario] MONITOR: dialog SUBSCRIBE %d 거절 — Join 생략\n", iJoinStatus);
+        } else if (M->m_strWatchedDlgCallId.empty()) {
+            printf("[Scenario] MONITOR: dialog NOTIFY(confirmed) 미수신 — Join 생략(실패)\n");
+        } else {
+            printf("[Scenario] MONITOR: M INVITE-Join(call-id=%s) 청취\n", M->m_strWatchedDlgCallId.c_str());
+            M->m_iLastCallEndStatus = 0;
+            M->StartCallWithJoin(B->m_strUser, M->m_strWatchedDlgCallId, M->m_strWatchedDlgRemoteTag,
+                                 M->m_strWatchedDlgLocalTag);
+            bool mOk = waitInCall(M, 40);
+            iJoinStatus = mOk ? 200 : M->m_iLastCallEndStatus.load();
+        }
+        // 4) 관찰 창 — M 은 SSRC 2개 수신, A/B 는 통화 그대로(감청 무영향)
+        unsigned long long m0 = M->RecvPackets();
+        int obs = iCallDuration > 0 ? iCallDuration : 4;
+        for (int t = 0; t < obs * 10 && !g_bQuit; ++t) usleep(100000);
+        unsigned long long dA = A->RecvPackets() - a0, dB = B->RecvPackets() - b0, dM = M->RecvPackets() - m0;
+        printf("[Scenario] MONITOR result: join_status=%d ab_ok=%d M_recv=+%llu M_ssrc=%zu A_recv=+%llu B_recv=+%llu\n",
+               iJoinStatus, abOk, dM, M->RecvSsrcCount(), dA, dB);
+        printf("[Scenario] monitor done, stopping calls\n");
         for (auto* s : sessions) s->StopCall();
         return;
     }
@@ -1180,6 +1240,7 @@ int main(int argc, char* argv[])
     else if (strScenario == "dialog_pickup" || strScenario == "blf") eScenario = E_SCENARIO_DIALOG_PICKUP;
     else if (strScenario == "subscribe_event") eScenario = E_SCENARIO_SUBSCRIBE_EVENT;
     else if (strScenario == "hunt")       eScenario = E_SCENARIO_HUNT;
+    else if (strScenario == "monitor")    eScenario = E_SCENARIO_MONITOR;
 
     // 로깅 설정
     CLog::SetPrefix("cspsim");

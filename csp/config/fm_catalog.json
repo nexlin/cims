@@ -169,6 +169,12 @@
       "code": "E-STC-002",
       "kind": "stateChange",
       "msg": "Process stopping (graceful): {mo}"
+    },
+    {
+      "type": "call_monitored",
+      "code": "E-AUD-016",
+      "kind": "audit",
+      "msg": "Call monitored: {monitor} → session {session} ({phase})"
     }
   ]
 }

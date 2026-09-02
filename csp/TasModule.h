@@ -123,6 +123,36 @@ private:
     bool HandleIncomingReplaces( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
                                  CSipMessage *pclsMessage );
 
+    /** 수신 INVITE 의 Join(RFC 3911) 처리 — 업무망 합법감청 합류 (dispatch_center.md §5.3). 헤더가 있으면
+     *  대상 세션에 CMP 청취 leg(tap)를 붙이고 감청자에게 200(sendonly, a=ssrc 라벨) 응답 후 true.
+     *  헤더가 없으면 false(정상 호 처리 계속). A/B 에게는 아무 메시지도 가지 않는다(은닉). */
+    bool HandleIncomingJoin( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
+                             CSipMessage *pclsMessage );
+
+    /** 감청 leg 정리 — 감청자 BYE 또는 원 통화 종료 시 tap 회수. true=이 Call-ID 가 감청 leg 였다. */
+    bool HandleMonitorLegEnd( const char *pszCallId );
+    /** 원 통화(relay 세션) 종료 시 그 세션에 붙은 감청 leg 를 전부 BYE + tap 회수 (§5.3). */
+    void ReleaseSessionMonitors( const std::string &strRelaySessionId );
+
+public:
+    /** 감청 leg 기록 — Call-ID → (relay session, tap_id, monitor id, 대상, 시작시각). 감사 발신용 공개. */
+    struct MonitorLeg {
+        std::string strSessionId;
+        std::string strSesId;
+        std::string strService;
+        std::string strTapId;
+        std::string strMonitor;
+        std::string strGroupId;
+        std::string strTargetA, strTargetB;
+        std::string strTapMode;
+        time_t tStart = 0;
+    };
+
+private:
+    std::map<std::string, MonitorLeg> m_mapMonitorLeg;                  ///< 감청 leg Call-ID → 정보
+    std::map<std::string, std::set<std::string>> m_mapSessionMonitors;  ///< relay session → 감청 leg Call-ID 집합
+    std::recursive_mutex m_mutexMonitor;
+
     /** dialog-event(RFC 4235) 상태 통지 — 한 호의 두 당사자(caller/callee) 각각을 감시하는 구독자에게
      *  그 당사자의 CSP 측 leg Call-ID 로 partial NOTIFY 를 낸다(당겨받기 BLF, §6.2). */
     void NotifyDialogState( const char *pszCallId, const char *pszState );

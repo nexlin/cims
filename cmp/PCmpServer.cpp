@@ -47,6 +47,7 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     }
 
     initResourcePool();
+    initTapPool();
     initPttResourcePool();
     initPttMemberPool();
 
@@ -315,6 +316,8 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     if (cmdUpper == "RELAY_ADD") processAdd(payload, ip, port, transId);
     else if (cmdUpper == "RELAY_MODIFY") processModify(payload, ip, port, transId);
     else if (cmdUpper == "RELAY_REMOVE") processRemove(payload, ip, port, transId);
+    else if (cmdUpper == "RELAY_TAP_ADD" || cmdUpper == "RELAY_TAP_MODIFY") processTapAdd(payload, ip, port, transId);
+    else if (cmdUpper == "RELAY_TAP_REMOVE") processTapRemove(payload, ip, port, transId);
     else if (cmdUpper == "HEARTBEAT") processAlive(payload, ip, port, transId);
     else if (cmdUpper == "PTT_GROUP_ADD") processAddGroup(payload, ip, port, transId);
     else if (cmdUpper == "PTT_GROUP_MODIFY") processModifyGroup(payload, ip, port, transId);
@@ -489,6 +492,14 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
     SimpleJson::JsonNode resource;
     resource.Set("relay", relay);
     resource.Set("ptt", ptt);
+    // 청취 leg(tap) — 키 존재가 기능 광고(dispatch_center.md §6.3). 풀 0 이면 광고하지 않는다.
+    if (!_tapPool.empty()) {
+        SimpleJson::JsonNode tap;
+        tap.Set("total", (int)_tapPool.size());
+        tap.Set("used", (int)(_tapPool.size() - _freeTaps.size()));
+        tap.Set("max_per_session", _maxTapsPerSession);
+        resource.Set("tap", tap);
+    }
     return resource;
 }
 
@@ -711,6 +722,29 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     }
     detail.Set("nat", natArr);
     detail.Set("nat_total", natTotal);
+    // 활성 청취 leg (dispatch_center.md §6.3) — 세션별 tap 수·송출 패킷
+    {
+        SimpleJson::JsonNode tapsArr;
+        tapsArr.type = SimpleJson::JSON_ARRAY;
+        int tapsTotal = 0;
+        for (auto const& [sid, rtp] : _sessions) {
+            if (!rtp || rtp->tapCount() == 0) continue;
+            std::vector<PRtpTap*> taps;
+            rtp->collectTaps(taps);
+            for (PRtpTap* t : taps) {
+                ++tapsTotal;
+                if ((int)tapsArr.array.size() >= kMaxStatsEntries) continue;
+                SimpleJson::JsonNode n;
+                n.Set("session_id", sid);
+                n.Set("tap_id", t->getTapId());
+                n.Set("monitor", t->getMonitor());
+                n.Set("sent", (long long)t->getSent());
+                tapsArr.Add(n);
+            }
+        }
+        detail.Set("taps", tapsArr);
+        detail.Set("taps_total", tapsTotal);
+    }
     detail.Set("groups", groupsArr);
     detail.Set("groups_total", groupsTotal);
     body.Set("detail", detail);
@@ -1086,6 +1120,173 @@ void PCmpServer::processRemove(const SimpleJson::JsonNode& payload, const std::s
 void PCmpServer::processModify(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
     LOG_DEBUG("PCmpServer", "MODIFY -> delegating to processAdd");
     processAdd(payload, ip, port, transId);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  청취 leg(tap) — dispatch_center.md §6, cmp_media_api.md §6.5
+// ═══════════════════════════════════════════════════════════════
+
+void PCmpServer::initTapPool() {
+    if (_tapPoolSize <= 0) {
+        LOG_INFO("PCmpServer", "Tap pool disabled (TapPoolSize=0) — resource.tap not advertised");
+        return;
+    }
+    int currentPort = _tapStartPort;
+    for (int i = 0; i < _tapPoolSize; ++i) {
+        PRtpTap* tap = new PRtpTap(formatStr("Tap_%d", i));
+        if (tap->init(_rtpIp, currentPort)) {
+            int widx = i % _rtpWorkerCount;
+            tap->setWorkerName(formatStr("RtpWorker_%d", widx));
+            std::vector<int> fds; tap->collectFds(fds);
+            epollAddHandler(widx, tap, fds);
+            _tapPool.push_back(tap);
+            _freeTaps.push_back(tap);
+        } else {
+            LOG_ERROR("PCmpServer", "Failed to init tap resource on port %d", currentPort);
+            delete tap;
+        }
+        currentPort += 4;
+    }
+    LOG_INFO("PCmpServer", "Tap pool: %lu resources (port %d-%d, 4/tap, max %d/session)", _tapPool.size(),
+             _tapStartPort, currentPort - 1, _maxTapsPerSession);
+}
+
+PRtpTap* PCmpServer::allocTap() {
+    if (_freeTaps.empty()) return NULL;
+    PRtpTap* t = _freeTaps.back();
+    _freeTaps.pop_back();
+    return t;
+}
+
+void PCmpServer::freeTap(PRtpTap* tap) {
+    if (!tap) return;
+    tap->reset();
+    _freeTaps.push_back(tap);
+}
+
+void PCmpServer::freeTapsOf(PRtpRelay* rtp) {
+    if (!rtp || rtp->tapCount() == 0) return;
+    std::vector<PRtpTap*> taps;
+    rtp->collectTaps(taps);
+    rtp->clearTaps();
+    for (PRtpTap* t : taps) {
+        LOG_INFO("PCmpServer", "tap released with session=%s tap=%s sent=%ld", rtp->getSessionId().c_str(),
+                 t->getTapId().c_str(), t->getSent());
+        freeTap(t);
+    }
+}
+
+void PCmpServer::processTapAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    std::string cmdName = payload.GetString("cmd");
+    if (cmdName.empty()) cmdName = "RELAY_TAP_ADD";
+    const bool bModify = (cmdName == "RELAY_TAP_MODIFY");
+    std::string sessionId = payload.GetString("session_id");
+    std::string tapId = payload.GetString("tap_id");
+    std::string rmtIp = payload.GetString("remote_ip");
+    int rmtPort = (int)payload.GetInt("remote_port");
+    int rmtVideoPort = (int)payload.GetInt("remote_video_port");
+    std::string monitor = payload.GetString("monitor");
+    std::string modeStr = payload.GetString("tap_mode", "both");
+    std::string sesid = payload.GetString("sesid");
+    std::string svc = payload.GetString("service");
+    std::string txIdStr = std::to_string(transId);
+
+    PAutoLock lock(_mutex);
+    if (sesid.empty()) { auto it = _sesidMap.find(sessionId); sesid = it != _sesidMap.end() ? it->second : issueSesid(monitor); }
+    if (svc.empty()) { auto it = _serviceMap.find(sessionId); svc = it != _serviceMap.end() ? it->second : "volte"; }
+    std::string detail = monitor.empty() ? tapId : monitor + "\xe2\x86\x92" + tapId;
+    logFlow(sessionId, "csp", "cmp", "JSON", cmdName.c_str(), detail.c_str(), txIdStr.c_str(), svc.c_str(),
+            sesid.c_str(), "", _lastRxSeq, "csp", monitor.c_str(), "");
+
+    auto reject = [&](const char* code, const std::string& reason) {
+        int txSeq = sendErr(ip, port, transId, cmdName, sesid, svc, code, reason.c_str());
+        logFlow(sessionId, "cmp", "csp", "JSON", "ERROR", reason.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(),
+                "", txSeq, "csp", monitor.c_str(), "");
+        LOG_WARN("PCmpServer", "%s session=%s tap=%s rejected: %s", cmdName.c_str(), sessionId.c_str(), tapId.c_str(),
+                 reason.c_str());
+    };
+    if (sessionId.empty() || tapId.empty()) return reject("BAD_REQUEST", "session_id and tap_id required");
+    if (_tapPool.empty()) return reject("BAD_REQUEST", "tap not supported (TapPoolSize=0)");
+    auto itS = _sessions.find(sessionId);
+    if (itS == _sessions.end()) return reject("NOT_FOUND", "session not found");  // 부활 금지
+    PRtpRelay* rtp = itS->second;
+
+    MediaCryptoParam mcAudio, mcVideo;
+    {
+        std::string mcErr;
+        if (!_parseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
+            !_parseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr))
+            return reject("BAD_REQUEST", mcErr);
+    }
+
+    PRtpTap* tap = rtp->findTap(tapId);
+    if (!tap) {
+        if (bModify) return reject("NOT_FOUND", "tap not found");
+        if (rtp->tapCount() >= _maxTapsPerSession) return reject("LIMIT", "max taps per session");
+        tap = allocTap();
+        if (!tap) return reject("NO_RESOURCE", "tap pool exhausted");
+        tap->bind(sessionId, tapId, monitor);
+        rtp->attachTap(tap);
+    }
+    // 같은 키 재요청(멱등) 또는 MODIFY — 주소·PT·키만 갱신, 포트/SSRC 불변
+    tap->setMode(PRtpTap::ParseMode(modeStr));
+    if (payload.Has("remote_pt") || payload.Has("remote_te_pt"))
+        tap->setPt((int)payload.GetInt("remote_pt", 0), (int)payload.GetInt("remote_te_pt", 0));
+    if (rmtPort > 0) tap->setRemote(rmtIp, rmtPort, rmtVideoPort);
+    if (mcAudio.have || mcVideo.have) {
+        std::string secErr;
+        bool secOk = (!mcAudio.have || tap->setCrypto(false, mcAudio.alg, mcAudio.txKey, mcAudio.txSalt, secErr)) &&
+                     (!mcVideo.have || tap->setCrypto(true, mcVideo.alg, mcVideo.txKey, mcVideo.txSalt, secErr));
+        if (!secOk) {
+            if (!bModify) { rtp->detachTap(tap); freeTap(tap); }
+            return reject("BAD_REQUEST", secErr);
+        }
+    }
+
+    SimpleJson::JsonNode respBody;
+    respBody.Set("local_ip", _rtpIp);
+    respBody.Set("local_port", (int)tap->getLocalPort());
+    respBody.Set("local_video_port", (int)tap->getLocalVideoPort());
+    respBody.Set("ssrc_a", (long long)tap->getSsrc(0));
+    respBody.Set("ssrc_b", (long long)tap->getSsrc(1));
+    int txSeq = sendOk(ip, port, transId, cmdName, sesid, svc, &respBody, monitor.c_str(), "");
+    logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp",
+            monitor.c_str(), "");
+    LOG_INFO("PCmpServer", "%s session=%s tap=%s monitor=%s mode=%s remote=%s:%d -> local=%s:%u ssrc=%u/%u",
+             cmdName.c_str(), sessionId.c_str(), tapId.c_str(), monitor.c_str(), modeStr.c_str(), rmtIp.c_str(), rmtPort,
+             _rtpIp.c_str(), tap->getLocalPort(), tap->getSsrc(0), tap->getSsrc(1));
+}
+
+void PCmpServer::processTapRemove(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
+    std::string sessionId = payload.GetString("session_id");
+    std::string tapId = payload.GetString("tap_id");
+    std::string monitor = payload.GetString("monitor");
+    std::string txIdStr = std::to_string(transId);
+    PAutoLock lock(_mutex);
+    std::string sesid = payload.GetString("sesid");
+    if (sesid.empty()) { auto it = _sesidMap.find(sessionId); sesid = it != _sesidMap.end() ? it->second : issueSesid(monitor); }
+    std::string svc = payload.GetString("service");
+    if (svc.empty()) { auto it = _serviceMap.find(sessionId); svc = it != _serviceMap.end() ? it->second : "volte"; }
+    logFlow(sessionId, "csp", "cmp", "JSON", "RELAY_TAP_REMOVE", tapId.c_str(), txIdStr.c_str(), svc.c_str(),
+            sesid.c_str(), "", _lastRxSeq, "csp", monitor.c_str(), "");
+    auto itS = _sessions.find(sessionId);
+    if (itS != _sessions.end()) {
+        PRtpTap* tap = itS->second->findTap(tapId);
+        if (tap) {
+            LOG_INFO("PCmpServer", "RELAY_TAP_REMOVE session=%s tap=%s sent=%ld", sessionId.c_str(), tapId.c_str(),
+                     tap->getSent());
+            itS->second->detachTap(tap);
+            freeTap(tap);
+        } else {
+            LOG_WARN("PCmpServer", "RELAY_TAP_REMOVE session=%s tap=%s not found", sessionId.c_str(), tapId.c_str());
+        }
+    } else {
+        LOG_WARN("PCmpServer", "RELAY_TAP_REMOVE session=%s not found", sessionId.c_str());
+    }
+    // 없으면 OK (자연 멱등 — 재전송 안전)
+    int txSeq = sendOk(ip, port, transId, "RELAY_TAP_REMOVE", sesid, svc, NULL, monitor.c_str(), "");
+    logFlow(sessionId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp",
+            monitor.c_str(), "");
 }
 
 void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId) {
@@ -1741,6 +1942,10 @@ void PCmpServer::loadConfig() {
         if (root.Has("RtpStartPort")) _rtpStartPort = (int)root.GetInt("RtpStartPort");
         if (root.Has("RtpPoolSize")) _rtpPoolSize = (int)root.GetInt("RtpPoolSize");
         if (root.Has("RtpIp")) _rtpIp = root.GetString("RtpIp");
+        // 청취 leg(tap) 풀 — dispatch_center.md §6 (TapPoolSize=0 이면 비활성: resource.tap 미광고 → CSP 가 Join 488)
+        if (root.Has("TapStartPort")) _tapStartPort = (int)root.GetInt("TapStartPort");
+        if (root.Has("TapPoolSize")) _tapPoolSize = (int)root.GetInt("TapPoolSize");
+        if (root.Has("MaxTapsPerSession")) _maxTapsPerSession = (int)root.GetInt("MaxTapsPerSession");
         if (root.Has("ServerIp")) _serverIp = root.GetString("ServerIp");
         if (root.Has("ServerPort")) _serverPort = (int)root.GetInt("ServerPort");
         
@@ -2010,6 +2215,8 @@ PRtpRelay* PCmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& vide
 
 void PCmpServer::freeResource(PRtpRelay* rtp) {
     if (rtp) {
+        // 세션 종료 = tap 일괄 회수 (tap 수명은 relay 세션에 종속 — dispatch_center.md §6.2)
+        freeTapsOf(rtp);
         // 드롭 카운터 이월 — 활성 합산에서 빠지는 몫을 전역 누적으로 보존 (rtp_src_drop 단조 증가).
         //   _srcDrop 은 reset() 이 아닌 재할당(resetActivity)에서 초기화되므로 여기서 읽어도 유효.
         _srcDropTotal += rtp->getSrcDrop();

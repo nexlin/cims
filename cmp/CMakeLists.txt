@@ -18,7 +18,7 @@ message(" ***> ${PMPROC_LIB_PATH}")
 
 #add_executable(pmpagent pmpagent.cpp)
 #add_executable(prtpsim prtpsim.cpp)
-add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PFloorCrypto.cpp PMediaCrypto.cpp PRtpRelay.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp)
+add_executable(cmp PMain.cpp PCmpServer.cpp PMcpttGroup.cpp PFloorCodec.cpp PFloorCrypto.cpp PMediaCrypto.cpp PRtpRelay.cpp PRtpTap.cpp PRtpMulticast.cpp PPttMemberPort.cpp PSyncRtpRecorder.cpp)
 
 # 미디어 SRTP 종단 (RFC 3711/4568, e2ae) — ext/libsrtp vendoring (media_security.md §6.1).
 # floor control(RTCP) SRTCP 는 자체 구현(PFloorCrypto, TS 33.180) — OpenSSL 직접 사용.

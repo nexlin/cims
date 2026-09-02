@@ -15,6 +15,7 @@
 //#include "pbase.h"
 #include "pmodule.h"
 #include "PRtpRelay.h"
+#include "PRtpTap.h"
 #include "PRtpMulticast.h"
 #include "PPttMemberPort.h"
 #include "PMcpttGroup.h"
@@ -36,6 +37,9 @@ protected:
     void processAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processRemove(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processModify(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    // 청취 leg — RELAY_TAP_ADD(멱등)/MODIFY(주소·키 갱신)/REMOVE (cmp_media_api.md §6.5, dispatch_center.md §6)
+    void processTapAdd(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processTapRemove(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
     void processAlive(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
 
     // Group Management
@@ -91,6 +95,11 @@ protected:
     void initPttMemberPool();
     PRtpRelay* allocResource(std::string& rtpIp, int& rtpPort, int& videoPort);
     void freeResource(PRtpRelay* rtp);
+    // 청취 leg 풀 — TapStartPort 부터 4포트 블록 × TapPoolSize. freeResource 가 relay 의 tap 을 함께 회수한다.
+    void initTapPool();
+    PRtpTap* allocTap();
+    void freeTap(PRtpTap* tap);
+    void freeTapsOf(PRtpRelay* rtp);  // 호출자가 _mutex 보유
     PRtpMulticast* allocPttResource(std::string& rtpIp, int& floorPort);
     void freePttResource(PRtpMulticast* ptt);
     // 멤버 전용 포트 유닛 — (groupId, sessionId) 키로 할당/재사용 (멱등). 호출자가 _mutex 보유.
@@ -191,6 +200,13 @@ private:
     int _rtpStartPort;
     int _rtpPoolSize;
     std::string _rtpIp;
+
+    // 청취 leg(tap) 풀 (dispatch_center.md §6) — TapStartPort 부터 4포트 블록. 0 = 기능 비활성(resource.tap 미광고)
+    int _tapStartPort = 58000;
+    int _tapPoolSize = 16;
+    int _maxTapsPerSession = 4;   // relay.max_taps — 세션당 상한(초과 LIMIT)
+    std::vector<PRtpTap*> _tapPool;
+    std::vector<PRtpTap*> _freeTaps;
 
     // PTT Resource Pool
     int _pttRtpStartPort;     // 멤버 유닛 audio RTP 대역 시작 (stride 2)

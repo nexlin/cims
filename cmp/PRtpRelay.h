@@ -9,6 +9,7 @@
 #include "PMPBase.h"
 #include "PRtpSocket.h"
 #include "PMediaCrypto.h"
+#include "PRtpTap.h"
 
 class PSyncRtpRecorder;
 
@@ -79,6 +80,15 @@ public:
     long getSrcDrop() const { return _srcDrop; }
     // SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) 폐기 누적 (STATS srtp_drop)
     long getSrtpDrop() const { return _srtpDrop; }
+
+    // 청취 leg(tap) — 세션에 붙는 3자 leg (dispatch_center.md §6.3). peer i 수신 시 (peer 1-i 송신) +
+    //   (tap 전원 송신). 소유·수명은 PCmpServer 풀(RELAY_REMOVE/회수 시 collectTaps→free) — relay 는 참조만.
+    void attachTap(PRtpTap* tap);
+    void detachTap(PRtpTap* tap);
+    int tapCount() const { return (int)_taps.size(); }
+    void collectTaps(std::vector<PRtpTap*>& out) const { out.insert(out.end(), _taps.begin(), _taps.end()); }
+    void clearTaps() { PAutoLock lock(_mutex); _taps.clear(); }
+    PRtpTap* findTap(const std::string& tapId) const;
 
     void startRecording(const std::string& rawDir, const std::string& sessionId,
                         const std::string& caller = "", const std::string& callee = "",
@@ -161,6 +171,7 @@ private:
     long        _srtpDrop = 0;
     time_t      _lastSrtpWarn = 0;
     Leg         _legs[2];
+    std::vector<PRtpTap*> _taps;   // 청취 leg 참조 (송신 fan-out 대상, _mutex 보호)
 
     // 녹취
     PSyncRtpRecorder* _recorder = nullptr;

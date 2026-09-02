@@ -69,6 +69,26 @@ void PRtpRelay::reset() {
         leg.crypto.reset();
         leg.cryptoVideo.reset();
     }
+    _taps.clear();  // 객체 회수는 PCmpServer(freeResource → collectTaps) 몫 — 여기서는 참조만 끊는다
+}
+
+void PRtpRelay::attachTap(PRtpTap* tap) {
+    if (!tap) return;
+    PAutoLock lock(_mutex);
+    for (PRtpTap* t : _taps) if (t == tap) return;
+    _taps.push_back(tap);
+}
+
+void PRtpRelay::detachTap(PRtpTap* tap) {
+    PAutoLock lock(_mutex);
+    for (auto it = _taps.begin(); it != _taps.end(); ++it) {
+        if (*it == tap) { _taps.erase(it); return; }
+    }
+}
+
+PRtpTap* PRtpRelay::findTap(const std::string& tapId) const {
+    for (PRtpTap* t : _taps) if (t && t->getTapId() == tapId) return t;
+    return nullptr;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -278,6 +298,8 @@ bool PRtpRelay::proc() {
                 _dropSrtp(i, "rtcp");
                 continue;
             }
+            // 청취 leg — 이 peer 의 SR/RR 을 tap SSRC 로 재매핑해 송출 (립싱크·수신 통계, §5.4)
+            for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtcp(i, false, pkt, len);
             if (_legs[dst].active) {
                 Leg& d = _legs[dst];
                 if (d.crypto && d.crypto->enabled()) {
@@ -319,6 +341,7 @@ bool PRtpRelay::proc() {
                 _dropSrtp(i, "video rtcp");
                 continue;
             }
+            for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtcp(i, true, pkt, len);
             if (_legs[dst].active && _legs[dst].videoPort > 0) {
                 Leg& d = _legs[dst];
                 if (d.cryptoVideo && d.cryptoVideo->enabled()) {
@@ -356,6 +379,17 @@ bool PRtpRelay::proc() {
             }
             if (!srcOk) _natLatch(i, false, ip, port);
             touchActivity();
+
+            // 청취 leg(tap) — 복호된 평문 ingress 복사(녹취 탭 지점과 동일), 원본 SSRC→tap SSRC 재매핑.
+            //   상대 leg 로의 relay·녹취와 독립이라 A/B 에게는 아무 변화가 없다(은닉, dispatch_center.md §5.4).
+            if (!_taps.empty()) {
+                bool isTe = false;
+                if (len >= 12) {
+                    unsigned char inPt = (unsigned char)(pkt[1] & 0x7F);
+                    isTe = (src.srcTePt > 0) ? (inPt == (unsigned char)(src.srcTePt & 0x7F)) : (inPt == 101);
+                }
+                for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, false, pkt, len, isTe);
+            }
 
             if (_legs[dst].active) {
                 // leg 별 PT 재작성 (cmp_media_api.md — remote_pt/remote_te_pt, 0=재작성 없음).
@@ -421,6 +455,8 @@ bool PRtpRelay::proc() {
             }
             if (!srcOk) _natLatch(i, true, ip, port);
             touchActivity();
+
+            for (PRtpTap* t : _taps) if (t->wants(i)) t->sendRtp(i, true, pkt, len, false);
 
             if (_legs[dst].active && _legs[dst].videoPort > 0) {
                 Leg& d = _legs[dst];

@@ -23,6 +23,8 @@
 #include <string>
 #include <vector>
 #include <atomic>
+#include <set>
+#include <mutex>
 
 // libsrtp 불투명 핸들 전방선언 (srtp2/srtp.h 는 RtpThread.cpp 에서만 포함)
 struct srtp_ctx_t_;
@@ -88,6 +90,11 @@ public:
     // 누적 수신 RTP 패킷 수 (리셋 없음) — 전달·당겨받기 후 재고정된 leg 로 미디어가 실제로
     //   흐르는지 검증하는 표식 (S3-SCN-XFER/PICKUP). recv 스레드가 unprotect 통과분만 센다.
     std::atomic<unsigned long long> m_ullRecvTotal{0};
+    // 수신 audio RTP 의 서로 다른 SSRC 집합 — 청취(감청) leg 가 한 m-line 에서 SSRC 2개(caller/callee)
+    //   를 받는지 검증(S3-SCN-MONITOR). recv 스레드가 헤더 SSRC 를 넣는다.
+    std::set<unsigned int> m_setRecvSsrc;
+    std::mutex m_mtxSsrc;
+    size_t RecvSsrcCount() { std::lock_guard<std::mutex> lk(m_mtxSsrc); return m_setRecvSsrc.size(); }
 
     // Video RTP
     Socket  m_hVideoSocket;

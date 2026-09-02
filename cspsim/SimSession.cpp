@@ -779,6 +779,40 @@ void SimSession::StartCallWithReplaces(const std::string& strTarget, const std::
     printf("[%d] StartCallWithReplaces: CreateCall 실패\n", m_iId);
 }
 
+// INVITE-with-Join(RFC 3911) — 업무망 합법감청 합류 (dispatch_center.md §5.3). recvonly SDP.
+void SimSession::StartCallWithJoin(const std::string& strTarget, const std::string& strJoinCallId,
+                                   const std::string& strToTag, const std::string& strFromTag)
+{
+    if (!m_strInviteId.empty() || strJoinCallId.empty()) return;
+
+    CSipCallRtp clsRtp;
+    CSipCallRoute clsRoute;
+    clsRtp.m_strIp  = m_clsSetup.m_strLocalIp;
+    clsRtp.m_iPort  = m_clsRtpThread.m_iPort;
+    clsRtp.m_iCodec = m_clsRtpThread.m_strMediaFile.empty() ? 0 : CSipCodecTable::GetTop().m_iPt;
+#ifdef USE_MEDIA_LIST
+    m_clsRtpThread.m_iAudioPt = BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL, false, "", "");
+#endif
+    clsRtp.SetDirection(E_RTP_RECV);   // 청취 leg — recvonly (서버가 tap egress 로 미디어를 내려준다)
+    clsRoute.m_strDestIp  = m_strServerIp;
+    clsRoute.m_iDestPort  = RoutePort();
+    clsRoute.m_eTransport = m_eTransport;
+
+    CSipMessage* pInvite = NULL;
+    if (m_clsUserAgent.CreateCall(m_strUser.c_str(), strTarget.c_str(), &clsRtp, &clsRoute, m_strInviteId, &pInvite,
+                                  NULL) && pInvite) {
+        std::string strJoin = strJoinCallId;
+        if (!strToTag.empty()) strJoin += ";to-tag=" + strToTag;
+        if (!strFromTag.empty()) strJoin += ";from-tag=" + strFromTag;
+        pInvite->AddHeader("Join", strJoin.c_str());
+        pInvite->AddHeader("Supported", "join");
+        printf("[%d] INVITE (Join=%s) recvonly -> %s\n", m_iId, strJoin.c_str(), strTarget.c_str());
+        m_clsUserAgent.StartCall(m_strInviteId.c_str(), pInvite);
+        return;
+    }
+    printf("[%d] StartCallWithJoin: CreateCall 실패\n", m_iId);
+}
+
 // ─────────────────────────────────────────────
 //  SUBSCRIBE Expires=0 (구독 해제, RFC 3265 §3.1.4)
 //  기존 다이얼로그(Call-ID / From-tag)를 재사용해야 서버가 같은 구독으로 인식한다.

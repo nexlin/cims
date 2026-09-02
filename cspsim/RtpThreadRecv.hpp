@@ -109,6 +109,12 @@ THREAD_API RtpThreadRecv(LPVOID lpParameter) {
     ullPacketCount++;
     ullByteCount += iPacketLen;
     pRtpThread->m_ullRecvTotal.fetch_add(1, std::memory_order_relaxed);  // 누적(전달/픽업 미디어 검증)
+    // 수신 SSRC 집합 — 감청 leg 는 한 m-line 에서 caller/callee SSRC 2개를 받는다(S3-SCN-MONITOR).
+    if (iPacketLen >= (int)sizeof(RtpHeader)) {
+        unsigned int uSsrc = ntohl(((const RtpHeader*)szPacket)->ssrc);
+        std::lock_guard<std::mutex> lk(pRtpThread->m_mtxSsrc);
+        if (pRtpThread->m_setRecvSsrc.size() < 16) pRtpThread->m_setRecvSsrc.insert(uSsrc);
+    }
     tCurrentTime = time(NULL);
     if( tCurrentTime - tLastTime >= 10 )
     {

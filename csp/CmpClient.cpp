@@ -527,6 +527,8 @@ bool CCmpClient::_ProbeAlive( const CmpEndpoint &ep, int &iFreePorts ) {
             bAny = true;
         }
         if ( bAny ) iFreePorts = iTotal;  // 지표 없으면 -1 유지 → 포화 판정 보류
+        // 청취 leg 지원 광고 — resource.tap 키 존재가 기능 광고(dispatch_center.md §6.3). 없으면 Join 488.
+        m_bTapSupported.store( res.Get( "tap" ).type == SimpleJson::JSON_OBJECT );
     }
     return true;
 }
@@ -1426,4 +1428,97 @@ void CCmpClient::KeepAliveLoop() {
 
         std::this_thread::sleep_for( std::chrono::seconds( 3 ) );
     }
+}
+
+// ── 청취 leg(tap) 명령 (dispatch_center.md §6, cmp_media_api.md §6.5) ──
+bool CCmpClient::AddTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strRmtIp,
+                         int iRmtPort, int iRmtVideoPort, const std::string &strTapMode, const std::string &strMonitor,
+                         int iRemotePt, int iRemoteTePt, const std::string &strSesId, const std::string &strService,
+                         const CmpMediaCrypto *pclsCrypto, const CmpMediaCrypto *pclsCryptoVideo, uint32_t &uSsrcA,
+                         uint32_t &uSsrcB, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
+                         std::string &strErrCode ) {
+    strErrCode.clear();
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "RELAY_TAP_ADD" );
+    req.Set( "session_id", strSessionId );
+    req.Set( "tap_id", strTapId );
+    if ( iRmtPort > 0 ) {
+        req.Set( "remote_ip", strRmtIp );
+        req.Set( "remote_port", iRmtPort );
+        if ( iRmtVideoPort > 0 ) req.Set( "remote_video_port", iRmtVideoPort );
+    }
+    if ( !strTapMode.empty() ) req.Set( "tap_mode", strTapMode );
+    if ( !strMonitor.empty() ) req.Set( "monitor", strMonitor );
+    if ( iRemotePt > 0 ) req.Set( "remote_pt", iRemotePt );
+    if ( iRemoteTePt > 0 ) req.Set( "remote_te_pt", iRemoteTePt );
+    _setRelayMediaCrypto( req, "media_crypto", pclsCrypto );
+    _setRelayMediaCrypto( req, "media_crypto_video", pclsCryptoVideo );
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey( strSessionId ) : strSesId;
+    if ( strFinalSesId.empty() ) strFinalSesId = CSipMessageLogger::IssueSesId( strMonitor, "csp" );
+    req.Set( "sesid", strFinalSesId );
+    if ( !strService.empty() ) req.Set( "service", strService );
+
+    std::string strResp;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) {
+        strErrCode = "TIMEOUT";
+        return false;
+    }
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    if ( respNode.type != SimpleJson::JSON_OBJECT ) {
+        strErrCode = "PARSE";
+        return false;
+    }
+    if ( !respNode.Has( "status" ) || respNode.Get( "status" ).AsString() != "OK" ) {
+        strErrCode = respNode.Has( "code" ) ? respNode.Get( "code" ).AsString() : "ERROR";
+        CLog::Print( LOG_ERROR, "CmpClient::AddTap: session=%s tap=%s ERROR: %s", strSessionId.c_str(),
+                     strTapId.c_str(), strResp.c_str() );
+        return false;
+    }
+    strLocalIp = respNode.Get( "local_ip" ).AsString();
+    iLocalPort = respNode.Get( "local_port" ).AsInt();
+    iLocalVideoPort = respNode.Get( "local_video_port" ).AsInt();
+    uSsrcA = (uint32_t)strtoull( respNode.Get( "ssrc_a" ).AsString().c_str(), NULL, 10 );
+    uSsrcB = (uint32_t)strtoull( respNode.Get( "ssrc_b" ).AsString().c_str(), NULL, 10 );
+    return true;
+}
+
+bool CCmpClient::ModifyTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strRmtIp,
+                            int iRmtPort, int iRmtVideoPort, const std::string &strSesId, const std::string &strService,
+                            const CmpMediaCrypto *pclsCrypto, const CmpMediaCrypto *pclsCryptoVideo ) {
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "RELAY_TAP_MODIFY" );
+    req.Set( "session_id", strSessionId );
+    req.Set( "tap_id", strTapId );
+    if ( iRmtPort > 0 ) {
+        req.Set( "remote_ip", strRmtIp );
+        req.Set( "remote_port", iRmtPort );
+        if ( iRmtVideoPort > 0 ) req.Set( "remote_video_port", iRmtVideoPort );
+    }
+    _setRelayMediaCrypto( req, "media_crypto", pclsCrypto );
+    _setRelayMediaCrypto( req, "media_crypto_video", pclsCryptoVideo );
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey( strSessionId ) : strSesId;
+    req.Set( "sesid", strFinalSesId );
+    if ( !strService.empty() ) req.Set( "service", strService );
+    std::string strResp;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    return respNode.type == SimpleJson::JSON_OBJECT && respNode.Has( "status" ) &&
+           respNode.Get( "status" ).AsString() == "OK";
+}
+
+bool CCmpClient::RemoveTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strMonitor,
+                            const std::string &strSesId, const std::string &strService ) {
+    SimpleJson::JsonNode req;
+    req.Set( "cmd", "RELAY_TAP_REMOVE" );
+    req.Set( "session_id", strSessionId );
+    req.Set( "tap_id", strTapId );
+    if ( !strMonitor.empty() ) req.Set( "monitor", strMonitor );
+    std::string strFinalSesId = strSesId.empty() ? GetSesIdByKey( strSessionId ) : strSesId;
+    req.Set( "sesid", strFinalSesId );
+    if ( !strService.empty() ) req.Set( "service", strService );
+    std::string strResp;
+    if ( !SendRequestAndWait( strSessionId, req, strResp ) ) return false;
+    SimpleJson::JsonNode respNode = SimpleJson::JsonNode::Parse( strResp );
+    return respNode.type == SimpleJson::JSON_OBJECT && respNode.Has( "status" ) &&
+           respNode.Get( "status" ).AsString() == "OK";
 }

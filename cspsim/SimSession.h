@@ -78,6 +78,7 @@ enum ESimScenario {
     E_SCENARIO_DIALOG_PICKUP,     // C 가 B 를 dialog 구독(BLF) → A→B 링잉 NOTIFY → C 가 INVITE-Replaces — A–C (§6.2)
     E_SCENARIO_SUBSCRIBE_EVENT,   // 등록 후 -event 토큰으로 SUBSCRIBE 1건 — 최종 응답 프로브 (RFC 6665 §8.2.1 489 등)
     E_SCENARIO_HUNT,              // [volte] A→대표번호(-pilot): B·C 병렬 링, C 응답 → A–C (dispatch_center.md §4, -count 3~4)
+    E_SCENARIO_MONITOR,          // [volte] A↔B 통화 중 M(감청자)이 dialog 구독→INVITE-Join → 청취(SSRC 2개), A/B 무영향 (§5)
 };
 
 // ─────────────────────────────────────────────
@@ -178,6 +179,11 @@ public:
      *  (BLF 클릭 당겨받기·표준 attended 완결). target 은 Request-URI user(임의 — 서버는 Replaces 로 라우팅). */
     void StartCallWithReplaces(const std::string& strTarget, const std::string& strReplacesCallId,
                                const std::string& strToTag, const std::string& strFromTag);
+    /** INVITE-with-Join(RFC 3911, 업무망 합법감청 합류 — dispatch_center.md §5.3) 발신 —
+     *  joinCallId(+태그) 대상 세션에 청취 leg 로 합류한다. SDP 는 recvonly. 서버가 CMP tap 을 붙이고
+     *  200(sendonly, a=ssrc 라벨) 응답하면 미디어(SSRC 2개)를 수신한다. bWithMedia=false 면 미디어 소켓만 대기. */
+    void StartCallWithJoin(const std::string& strTarget, const std::string& strJoinCallId,
+                           const std::string& strToTag, const std::string& strFromTag);
     std::atomic<int>  m_iDialogNotifyCount{0};   // 수신 dialog NOTIFY 수
     std::atomic<int>  m_iDlgSubStatus{0};        // dialog SUBSCRIBE 최종 응답 (200 / 403 그룹 밖 감시 / 489)
     /** 임의 이벤트 패키지 SUBSCRIBE 프로브 — strEvent 를 Event 헤더에 그대로 싣고 최종 응답을
@@ -190,6 +196,9 @@ public:
     std::string       m_strWatchedDlgRemoteTag;  // dialog-info remote-tag
     /** 누적 수신 RTP 패킷 수 — 전달·픽업 후 미디어 흐름 검증용. */
     unsigned long long RecvPackets() const { return m_clsRtpThread.m_ullRecvTotal.load(); }
+    /** 수신 audio RTP 의 서로 다른 SSRC 수 — 감청 leg 는 caller/callee 2개를 받는다(S3-SCN-MONITOR). */
+    size_t RecvSsrcCount() { return m_clsRtpThread.RecvSsrcCount(); }
+    std::atomic<int>  m_iJoinStatus{0};   // Join INVITE 최종 응답 (200 성공 / 403·481·488·486 거절)
 
     void StartGroupCall(const std::string& strGroupId = "");
     void SetEmergency(int iCond) { m_iEmergencyCond = iCond; }  // 0/1/2 (normal/imminent/emergency)

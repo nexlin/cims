@@ -16,6 +16,7 @@
 #include "CspDispatchGroup.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
+#include "FmReporter.h"
 #include "GroupCallService.h"
 #include "Log.h"
 #include "MediaSdes.h"
@@ -86,6 +87,8 @@ EModuleRouteResult CTasModule::OnIncomingCall( const char *pszCallId, const char
     // 수신 INVITE 의 Replaces(RFC 3891) — 관제 BLF 당겨받기·표준 attended 완결. 헤더가 있으면
     //   대상 다이얼로그를 pszCallId 로 교체하고 여기서 종결한다(정상 라우팅 미진입).
     if ( HandleIncomingReplaces( pszCallId, pszFrom, pclsRtp, pclsMessage ) ) return E_ROUTE_HANDLED;
+    // 수신 INVITE 의 Join(RFC 3911) — 업무망 합법감청 합류 (dispatch_center.md §5.3)
+    if ( HandleIncomingJoin( pszCallId, pszFrom, pclsRtp, pclsMessage ) ) return E_ROUTE_HANDLED;
     return E_ROUTE_PASS;
 }
 
@@ -180,8 +183,16 @@ bool CTasModule::OnCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp 
 }
 
 bool CTasModule::OnCallEnd( const char *pszCallId, int iSipStatus ) {
+    // 감청 leg(M) BYE — CMP tap 회수 (dispatch_center.md §5.3)
+    if ( HandleMonitorLegEnd( pszCallId ) ) return true;
     // 대표번호 포크 — 대기 leg 최종 응답 / A 취소 (dispatch_center.md §4.4)
     if ( OnForkEnd( pszCallId, iSipStatus ) ) return true;
+    // 원 통화 종료 — 그 세션의 감청 leg 를 회수한다 (CallMap leg 삭제 전에 relay session id 를 읽는다)
+    {
+        CCallInfo clsCiForMon;
+        if ( gclsCallMap.Select( pszCallId, clsCiForMon ) && !clsCiForMon.m_strRelaySessionId.empty() )
+            ReleaseSessionMonitors( clsCiForMon.m_strRelaySessionId );
+    }
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         // dialog-event: 종료(terminated) 통지 — CallMap 삭제 전에 leg 식별이 살아 있을 때 낸다 (§6.2).
@@ -1209,5 +1220,262 @@ void CTasModule::Tick() {
             OverflowFork( strACallId );
         else
             FailFork( strACallId, SIP_TEMPORARILY_UNAVAILABLE );
+    }
+}
+
+// ──────────────────────────────────────────────────────────────
+//  업무망 합법감청 — 합류(INVITE-Join) + tap 관리 (dispatch_center.md §5)
+// ──────────────────────────────────────────────────────────────
+
+// dispatch_center.md §5.7 — 감청 감사 이벤트(E-AUD-016 call_monitored). 시작/종료 각 1건.
+static void _emitCallMonitored( const CTasModule::MonitorLeg &m, const char *pszPhase, int iDurMs ) {
+    // FmReporter 는 헤더온리 싱글턴(gclsFmReporter) — 여기서 직접 접근한다.
+    if ( !gclsFmReporter.IsEnabled() ) return;
+    SimpleJson::JsonNode p;
+    p.Set( "phase", pszPhase );
+    p.Set( "monitor", m.strMonitor );
+    p.Set( "group", m.strGroupId );
+    p.Set( "session", m.strSessionId );
+    if ( !m.strSesId.empty() ) p.Set( "sesid", m.strSesId );
+    p.Set( "target_a", m.strTargetA );
+    p.Set( "target_b", m.strTargetB );
+    p.Set( "tap_mode", m.strTapMode );
+    if ( iDurMs >= 0 ) p.Set( "dur_ms", iDurMs );
+    gclsFmReporter.SendEvent( "call_monitored", "audit", gclsFmReporter.Node() + "/csp", p );
+}
+
+bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom, CSipCallRtp *pclsRtp,
+                                     CSipMessage *pclsMessage ) {
+    if ( pclsMessage == NULL ) return false;
+    CSipHeader *pclsJoin = pclsMessage->GetHeader( "Join" );
+    if ( pclsJoin == NULL || pclsJoin->m_strValue.empty() ) return false;
+
+    // Join: <call-id>;to-tag=<t>;from-tag=<f> (RFC 3911, 미이스케이프 표준형 — Replaces 파싱과 동일)
+    std::string strVal = pclsJoin->m_strValue, strTargetCallId, strToTag, strFromTag;
+    {
+        size_t p = strVal.find( ';' );
+        strTargetCallId = ( p == std::string::npos ) ? strVal : strVal.substr( 0, p );
+        while ( !strTargetCallId.empty() && strTargetCallId.back() == ' ' ) strTargetCallId.pop_back();
+        auto param = [&]( const char *pszKey ) -> std::string {
+            size_t q = strVal.find( pszKey );
+            if ( q == std::string::npos ) return "";
+            q += strlen( pszKey );
+            size_t e = strVal.find( ';', q );
+            std::string v = strVal.substr( q, e == std::string::npos ? std::string::npos : e - q );
+            while ( !v.empty() && v.back() == ' ' ) v.pop_back();
+            return v;
+        };
+        strToTag = param( "to-tag=" );
+        strFromTag = param( "from-tag=" );
+    }
+    if ( strTargetCallId.empty() ) return false;
+
+    const std::string strMonitor = pszFrom ? pszFrom : "";
+
+    // 대상 다이얼로그 확인 — CallMap 존재 + psip 태그 대조(MatchReplacesDialog 를 Join 대상에도 재사용).
+    CCallInfo clsTarget;
+    if ( gclsCallMap.Select( strTargetCallId.c_str(), clsTarget ) == false ) {
+        CLog::Print( LOG_INFO, "Join target %s not found → 481 (from %s)", strTargetCallId.c_str(),
+                     strMonitor.c_str() );
+        gclsDispatcher.StopCall( pszCallId, SIP_CALL_TRANSACTION_DOES_NOT_EXIST );
+        return true;
+    }
+    if ( gclsUserAgent.MatchReplacesDialog( strTargetCallId.c_str(), strToTag.c_str(), strFromTag.c_str() ) == false ) {
+        CLog::Print( LOG_INFO, "Join tag mismatch for %s → 481 (from %s)", strTargetCallId.c_str(),
+                     strMonitor.c_str() );
+        gclsDispatcher.StopCall( pszCallId, SIP_CALL_TRANSACTION_DOES_NOT_EXIST );
+        return true;
+    }
+    if ( clsTarget.m_strRelaySessionId.empty() ) {
+        CLog::Print( LOG_INFO, "Join target %s has no relay session → 488 (from %s)", strTargetCallId.c_str(),
+                     strMonitor.c_str() );
+        gclsDispatcher.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+        return true;
+    }
+
+    // 인가 — 감청자의 관제 그룹 monitor_scope 가 대상 호의 어느 당사자 그룹이라도 포함하면 허용 (§5.2).
+    std::string strCaller, strCallee;
+    gclsUserAgent.GetFromId( strTargetCallId.c_str(), strCaller );
+    gclsUserAgent.GetToId( strTargetCallId.c_str(), strCallee );
+    {
+        const std::string strGW = gclsDispatchGroupMap.EffectiveGroupOf( strMonitor.c_str() );
+        const std::string strGA = gclsDispatchGroupMap.EffectiveGroupOf( strCaller.c_str() );
+        const std::string strGB = gclsDispatchGroupMap.EffectiveGroupOf( strCallee.c_str() );
+        const bool bSelf = ( strMonitor == strCaller || strMonitor == strCallee );
+        if ( !bSelf && !gclsDispatchGroupMap.CanWatch( strGW, strGA ) &&
+             !gclsDispatchGroupMap.CanWatch( strGW, strGB ) ) {
+            CLog::Print( LOG_INFO, "Join denied — %s cannot monitor %s/%s (scope) → 403", strMonitor.c_str(),
+                         strCaller.c_str(), strCallee.c_str() );
+            gclsDispatcher.StopCall( pszCallId, SIP_FORBIDDEN );
+            _emitCallMonitored( { clsTarget.m_strRelaySessionId, clsTarget.m_strRelaySesId, "", "", strMonitor, "",
+                                  strCaller, strCallee, "", time( NULL ) },
+                                "denied", -1 );
+            return true;
+        }
+    }
+
+    // 세션당 tap 상한 (§5.5) — CSP 인메모리 카운트 + CMP 기능 광고(resource.tap).
+    if ( gclsCmpClient.SupportsTap() == false ) {
+        CLog::Print( LOG_INFO, "Join — CMP does not advertise resource.tap → 488 (from %s)", strMonitor.c_str() );
+        gclsDispatcher.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+        return true;
+    }
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        auto it = m_mapSessionMonitors.find( clsTarget.m_strRelaySessionId );
+        int iCur = it == m_mapSessionMonitors.end() ? 0 : (int)it->second.size();
+        if ( iCur >= gclsSetup.m_iDispatchMaxTapsPerSession ) {
+            CLog::Print( LOG_INFO, "Join — session %s tap limit %d reached → 486",
+                         clsTarget.m_strRelaySessionId.c_str(), gclsSetup.m_iDispatchMaxTapsPerSession );
+            gclsDispatcher.StopCall( pszCallId, SIP_BUSY_HERE );
+            return true;
+        }
+    }
+
+    // 미디어 — 감청자 offer 는 recvonly 여야 한다(hold 는 488). 통화의 협상 코덱을 그대로 tap 으로 인도한다.
+    if ( pclsRtp->m_eDirection != E_RTP_RECV && pclsRtp->m_eDirection != E_RTP_SEND_RECV ) {
+        CLog::Print( LOG_INFO, "Join — monitor offer not recvonly (dir=%d) → 488", (int)pclsRtp->m_eDirection );
+        gclsDispatcher.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+        return true;
+    }
+
+    // tap egress SRTP — 정책 × 감청자 offer 로 서버 키 생성(감청자가 answer 로 받는 키 = CMP→M tx).
+    ServiceInfo clsMonSvc = gclsServiceMap.GetForUser( strMonitor, "volte" );
+    RelaySdesLeg clsTapLeg;
+    CmpMediaCrypto clsTapAudioCrypto, clsTapVideoCrypto;
+    {
+        int iA =
+            MediaSdes::EvalRelayOfferSdes( clsMonSvc.media_srtp, pclsRtp->m_clsMediaList, "audio", clsTapLeg.clsAudio );
+        int iV =
+            MediaSdes::EvalRelayOfferSdes( clsMonSvc.media_srtp, pclsRtp->m_clsMediaList, "video", clsTapLeg.clsVideo );
+        if ( iA < 0 || iV < 0 ) {
+            CLog::Print( LOG_INFO, "Join — monitor(%s) SDES offer not acceptable → 488", strMonitor.c_str() );
+            gclsDispatcher.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+            return true;
+        }
+        if ( ( clsTapLeg.clsAudio.bSrtp &&
+               !MediaSdes::BuildCmpKeys( clsTapLeg.clsAudio.strSuite, clsTapLeg.clsAudio.strUeKey,
+                                         clsTapLeg.clsAudio.strSrvKey, clsTapAudioCrypto ) ) ||
+             ( clsTapLeg.clsVideo.bSrtp &&
+               !MediaSdes::BuildCmpKeys( clsTapLeg.clsVideo.strSuite, clsTapLeg.clsVideo.strUeKey,
+                                         clsTapLeg.clsVideo.strSrvKey, clsTapVideoCrypto ) ) ) {
+            CLog::Print( LOG_ERROR, "Join — monitor(%s) SRTP key build failed → 488", strMonitor.c_str() );
+            gclsDispatcher.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+            return true;
+        }
+    }
+
+    // 감청자 RTP 주소 + tap_mode
+    int iMonAudio = pclsRtp->GetAudioPort();
+    if ( iMonAudio <= 0 && pclsRtp->m_iPort > 0 ) iMonAudio = pclsRtp->m_iPort;
+    int iMonVideo = ( pclsRtp->GetMediaCount() >= 2 ) ? pclsRtp->GetVideoPort() : 0;
+    int iMonPt = 0, iMonSrcPt = 0, iMonTePt = 0, iMonSrcTePt = 0;
+    std::string strMonCodec;
+    CGroupCallService::GetLegPt( pszCallId, false, iMonPt, iMonSrcPt, iMonTePt, iMonSrcTePt, &strMonCodec );
+
+    std::string strTapId = std::string( "tap-" ) + pszCallId;
+    std::string strTapMode = "both";
+    {
+        CSipHeader *pMode = pclsMessage->GetHeader( "X-Tap-Mode" );  // 운용 선택(민원인만 등) — 확장 헤더
+        if ( pMode && ( pMode->m_strValue == "a" || pMode->m_strValue == "b" ) ) strTapMode = pMode->m_strValue;
+    }
+
+    uint32_t uSsrcA = 0, uSsrcB = 0;
+    std::string strTapLocalIp, strErrCode;
+    int iTapLocalPort = 0, iTapLocalVideoPort = 0;
+    if ( !gclsCmpClient.AddTap( clsTarget.m_strRelaySessionId, strTapId, pclsRtp->m_strIp, iMonAudio, iMonVideo,
+                                strTapMode, strMonitor, iMonPt, iMonTePt, clsTarget.m_strRelaySesId, "volte",
+                                clsTapAudioCrypto.bEnabled ? &clsTapAudioCrypto : NULL,
+                                clsTapVideoCrypto.bEnabled ? &clsTapVideoCrypto : NULL, uSsrcA, uSsrcB, strTapLocalIp,
+                                iTapLocalPort, iTapLocalVideoPort, strErrCode ) ) {
+        int iRc = ( strErrCode == "LIMIT" ) ? SIP_BUSY_HERE : SIP_NOT_ACCEPTABLE_HERE;
+        CLog::Print( LOG_ERROR, "Join — AddTap failed (%s) → %d", strErrCode.c_str(), iRc );
+        gclsDispatcher.StopCall( pszCallId, iRc );
+        return true;
+    }
+
+    // 200 OK — sendonly + tap 포트 + 서버 키(a=crypto) + a=ssrc 라벨(RFC 5576, 귀속). A/B 무영향(은닉).
+    const std::string strRelayIp = strTapLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : strTapLocalIp;
+    MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsTapLeg, false );
+    pclsRtp->SetIpPort( strRelayIp.c_str(), iTapLocalPort, SOCKET_COUNT_PER_MEDIA );
+    pclsRtp->SetDirection( E_RTP_SEND );  // 서버→감청자 단방향
+    // a=ssrc 라벨 — 첫 audio m-line 에 caller/callee SSRC 표기.
+    for ( auto &clsMedia : pclsRtp->m_clsMediaList ) {
+        if ( clsMedia.m_strMedia != "audio" ) continue;
+        char szA[96], szB[96];
+        snprintf( szA, sizeof( szA ), "%u cname:tap-%s", uSsrcA, strTapId.c_str() );
+        snprintf( szB, sizeof( szB ), "%u cname:tap-%s", uSsrcB, strTapId.c_str() );
+        clsMedia.AddAttribute( "ssrc", szA );
+        clsMedia.AddAttribute( "ssrc", ( std::string( szA ) + " label:caller" ).c_str() );
+        clsMedia.AddAttribute( "ssrc", szB );
+        clsMedia.AddAttribute( "ssrc", ( std::string( szB ) + " label:callee" ).c_str() );
+        break;
+    }
+    if ( gclsUserAgent.AcceptCall( pszCallId, pclsRtp ) == false ) {
+        gclsCmpClient.RemoveTap( clsTarget.m_strRelaySessionId, strTapId, strMonitor, clsTarget.m_strRelaySesId,
+                                 "volte" );
+        gclsUserAgent.StopCall( pszCallId );
+        return true;
+    }
+
+    MonitorLeg leg;
+    leg.strSessionId = clsTarget.m_strRelaySessionId;
+    leg.strSesId = clsTarget.m_strRelaySesId;
+    leg.strService = "volte";
+    leg.strTapId = strTapId;
+    leg.strMonitor = strMonitor;
+    leg.strGroupId = gclsDispatchGroupMap.EffectiveGroupOf( strMonitor.c_str() );
+    leg.strTargetA = strCaller;
+    leg.strTargetB = strCallee;
+    leg.strTapMode = strTapMode;
+    leg.tStart = time( NULL );
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        m_mapMonitorLeg[pszCallId] = leg;
+        m_mapSessionMonitors[leg.strSessionId].insert( pszCallId );
+    }
+    gclsDispatcher.SetCallOwner( pszCallId, this );
+    _emitCallMonitored( leg, "started", -1 );
+    CLog::Print( LOG_INFO, "Join — %s monitoring session=%s (targets %s/%s) tap=%s mode=%s ssrc=%u/%u [TAS]",
+                 strMonitor.c_str(), leg.strSessionId.c_str(), strCaller.c_str(), strCallee.c_str(), strTapId.c_str(),
+                 strTapMode.c_str(), uSsrcA, uSsrcB );
+    return true;
+}
+
+bool CTasModule::HandleMonitorLegEnd( const char *pszCallId ) {
+    MonitorLeg leg;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        auto it = m_mapMonitorLeg.find( pszCallId );
+        if ( it == m_mapMonitorLeg.end() ) return false;
+        leg = it->second;
+        m_mapMonitorLeg.erase( it );
+        auto itS = m_mapSessionMonitors.find( leg.strSessionId );
+        if ( itS != m_mapSessionMonitors.end() ) {
+            itS->second.erase( pszCallId );
+            if ( itS->second.empty() ) m_mapSessionMonitors.erase( itS );
+        }
+    }
+    gclsCmpClient.RemoveTap( leg.strSessionId, leg.strTapId, leg.strMonitor, leg.strSesId, leg.strService );
+    gclsDispatcher.RemoveCallOwner( pszCallId );
+    int iDurMs = leg.tStart > 0 ? (int)( ( time( NULL ) - leg.tStart ) * 1000 ) : -1;
+    _emitCallMonitored( leg, "ended", iDurMs );
+    CLog::Print( LOG_INFO, "Join — monitor leg(%s) ended, tap=%s released [TAS]", pszCallId, leg.strTapId.c_str() );
+    return true;
+}
+
+void CTasModule::ReleaseSessionMonitors( const std::string &strRelaySessionId ) {
+    std::vector<std::string> vecLegs;
+    {
+        std::lock_guard<std::recursive_mutex> lock( m_mutexMonitor );
+        auto it = m_mapSessionMonitors.find( strRelaySessionId );
+        if ( it == m_mapSessionMonitors.end() ) return;
+        vecLegs.assign( it->second.begin(), it->second.end() );
+    }
+    // 원 통화 종료 — 감청자에게 BYE. tap 은 RELAY_REMOVE 로 CMP 가 일괄 회수하므로 RemoveTap 은 생략 가능하나,
+    //   HandleMonitorLegEnd 가 지도 정리·감사 종료를 수행하도록 StopCall→EventCallEnd 경로를 태운다.
+    for ( const auto &strLeg : vecLegs ) {
+        gclsUserAgent.StopCall( strLeg.c_str() );
+        HandleMonitorLegEnd( strLeg.c_str() );
     }
 }

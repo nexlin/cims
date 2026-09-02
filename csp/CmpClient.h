@@ -81,6 +81,27 @@ public:
     bool RemoveSession( const std::string &strSessionId, const std::string &strCaller = "",
                         const std::string &strCallee = "", const std::string &strSesId = "" );
 
+    // ── 청취 leg(tap) — 세션에 붙는 3자 leg (dispatch_center.md §6, cmp_media_api.md §6.5) ──
+    //   tapId 는 client 명명(세션 내 유일). 응답 ssrc_a/ssrc_b = tap egress SSRC(caller/callee 라벨링).
+    //   pclsCrypto/pclsCryptoVideo: tap egress SRTP 키(CMP→단말 tx 만 유효). strTapMode: both/a/b.
+    bool AddTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strRmtIp,
+                 int iRmtPort, int iRmtVideoPort, const std::string &strTapMode, const std::string &strMonitor,
+                 int iRemotePt, int iRemoteTePt, const std::string &strSesId, const std::string &strService,
+                 const CmpMediaCrypto *pclsCrypto, const CmpMediaCrypto *pclsCryptoVideo, uint32_t &uSsrcA,
+                 uint32_t &uSsrcB, std::string &strLocalIp, int &iLocalPort, int &iLocalVideoPort,
+                 std::string &strErrCode );
+    bool ModifyTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strRmtIp,
+                    int iRmtPort, int iRmtVideoPort, const std::string &strSesId, const std::string &strService,
+                    const CmpMediaCrypto *pclsCrypto, const CmpMediaCrypto *pclsCryptoVideo );
+    bool RemoveTap( const std::string &strSessionId, const std::string &strTapId, const std::string &strMonitor,
+                    const std::string &strSesId, const std::string &strService );
+
+    /** 담당 CMP endpoint 가 청취 leg(HEARTBEAT resource.tap)를 광고했는가 — Join 을 488 로 거절할 근거.
+     *  단일 CMP 전제라 endpoint 무관 집계값을 준다(다중 CMP 격리는 후속). */
+    bool SupportsTap() const {
+        return m_bTapSupported.load();
+    }
+
     // VoIP relay 세션 식별자(csp_{yyyymmddHHMMSSmmm}_{n}) 발행 — 재시작 경계 포함 전역 유일.
     // teardown/MODIFY 가 포트가 아닌 이 유일 키로 CMP 세션을 지목한다.
     static std::string IssueSessionId();
@@ -309,6 +330,8 @@ private:
     };
     std::mutex m_mutexDigest;
     std::map<std::string, CmpDigest> m_mapEndpointDigest;  // endpoint key("ip:port") → relay digest
+    // HEARTBEAT resource.tap 광고 학습 — 청취 leg 지원 CMP 격리(dispatch_center.md §6.3)
+    std::atomic<bool> m_bTapSupported{ false };
 
 public:
     void SetConnectionCallback( std::function<void( bool )> fnCallback ) {

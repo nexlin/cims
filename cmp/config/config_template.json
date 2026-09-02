@@ -75,6 +75,36 @@
           "max": 10000,
           "restart": true,
           "help": "동시 처리 가능한 VoIP 호 수 (호당 8 포트 블록)."
+        },
+        {
+          "key": "TapStartPort",
+          "label": "청취 leg(tap) 시작 포트",
+          "type": "int",
+          "default": 58000,
+          "min": 1024,
+          "max": 65000,
+          "restart": true,
+          "help": "업무망 합법감청 청취 leg 포트 블록(tap 당 4 포트: Audio RTP/RTCP + Video RTP/RTCP) 시작 (dispatch_center.md §6)."
+        },
+        {
+          "key": "TapPoolSize",
+          "label": "청취 leg(tap) 풀 크기",
+          "type": "int",
+          "default": 16,
+          "min": 0,
+          "max": 1000,
+          "restart": true,
+          "help": "동시 청취 leg 수. 0 = 기능 비활성(HEARTBEAT resource.tap 미광고 → CSP 가 Join INVITE 를 488 로 거절)."
+        },
+        {
+          "key": "MaxTapsPerSession",
+          "label": "세션당 청취 leg 상한",
+          "type": "int",
+          "default": 4,
+          "min": 1,
+          "max": 16,
+          "restart": true,
+          "help": "relay 세션 하나에 붙는 tap 상한 — 초과 RELAY_TAP_ADD 는 LIMIT 오류 (CSP 측 상한 Setup.Sip.Dispatch.MaxTapsPerSession 과 별개)."
         }
       ],
       "scope": "service"

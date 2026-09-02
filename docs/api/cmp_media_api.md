@@ -134,7 +134,8 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
     "resource": {
       "relay": { "total": 500, "used": 8, "sessions": 4 },
       "ptt":   { "total": 100, "used": 2, "groups": 2, "joined": 5,
-                 "member_total": 200, "member_used": 5 }
+                 "member_total": 200, "member_used": 5 },
+      "tap":   { "total": 16, "used": 1, "max_per_session": 4 }
     },
     "session_digest": {
       "relay": { "count": 4, "hash": "61799bd4b6b64b3f" },
@@ -151,6 +152,7 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
 | `ptt.total` / `ptt.used` | PTT 그룹(floor) 풀 크기 / 사용 중 |
 | `ptt.groups` / `ptt.joined` | 활성 그룹 수 / 참가 멤버 총수 |
 | `ptt.member_total` / `ptt.member_used` | PTT 멤버 포트 유닛 풀 크기 / 사용 중 |
+| `tap.total` / `tap.used` / `tap.max_per_session` | 청취 leg(tap) 풀 크기 / 사용 중 / 세션당 상한 ([§6.5](#65-relay_tap_add--relay_tap_modify--relay_tap_remove--청취-legtap)). **키 존재 = 기능 광고** — 없으면 CSP 가 Join 을 488 로 거절 |
 
 client 는 이 요약으로 부하 기반 CMP 선택, 조기 호 거절(admission control)을 할 수 있다.
 
@@ -370,6 +372,54 @@ SRTP 를 **종단**한다: ingress unprotect → 평문(믹스·디먹스·녹�
 - 하향 슬롯 SSRC 다중화(`0x10000000+`/`0x40000000+`…)는 세션 키가 SSRC 무관(RFC 3711)이라
   leg 키 하나로 보호된다 — SSRC 별 스트림·ROC 는 엔진(libsrtp)이 내부 관리.
 - 녹취는 unprotect 이후 **평문 RTP 를 저장**한다 — 재생·믹스 파이프라인 무변경.
+
+### 6.5 RELAY_TAP_ADD / RELAY_TAP_MODIFY / RELAY_TAP_REMOVE — 청취 leg(tap)
+
+RELAY 세션에 붙는 **청취 leg(tap)** — 업무망 합법감청의 미디어 인도 단위
+([dispatch_center.md](../design/features/dispatch_center.md) §5·§6). 자원 키 `(node, session_id, tap_id)`,
+**수명은 세션에 종속**(RELAY_REMOVE/sweeper 회수 시 그 세션의 tap 전부 일괄 회수). 양 peer 의 ingress
+(SRTP 복호 후 평문 — 녹취 탭 지점과 동일)를 **복사**해 청취 단말로 송신하고, peer0/peer1 을 tap 전용
+SSRC 2개로 **분리 인도**한다(트랜스코딩·믹싱 없음 — 믹싱은 단말 몫). 상향(청취 단말 → CMP)은 폐기한다.
+
+**기능 광고**: CMP 는 HEARTBEAT/STATS 의 `resource.tap`(§5.1) 으로 지원을 광고한다 — 키가 없으면(풀
+`TapPoolSize=0`) 미지원이며 client(CSP)는 Join INVITE 를 488 로 거절한다.
+
+RELAY_TAP_ADD (멱등) payload:
+
+| payload 필드 | 필수 | 설명 |
+|---|---|---|
+| `session_id` | O | 대상 relay 세션. 없으면 `NOT_FOUND`(부활 금지) |
+| `tap_id` | O | client 명명(세션 내 유일). 같은 키 재요청은 동일 포트·SSRC 반환(멱등) |
+| `remote_ip` / `remote_port` | O | 청취 단말 RTP 주소 |
+| `remote_video_port` | - | 청취 단말 Video RTP 포트(영상 tap 시) |
+| `remote_pt` / `remote_te_pt` | - | 청취 단말이 수신 선언한 audio/TE PT — tap egress 스탬프 |
+| `tap_mode` | - | `both`(기본, SSRC 2개) / `a`(peer0=caller 만) / `b`(peer1=callee 만) |
+| `monitor` | - | 청취자 id(flow 로깅·감사 메타) |
+| `media_crypto` / `media_crypto_video` | - | tap egress SRTP 키(CMP→단말 tx 만 유효, rx 무시). audio/video 각각([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)) |
+
+응답: `local_ip`, `local_port`, `local_video_port`(tap 전용 포트, RTCP +1), `ssrc_a`/`ssrc_b`(tap egress
+SSRC — caller/callee 라벨링 대상, client 가 SDP `a=ssrc … label:caller|callee`(RFC 5576)로 광고). RTCP 도
+같은 SSRC 로 재매핑해 SR/RR 을 tap 으로 송출한다(립싱크·수신 통계).
+
+```json
+{ "hdr": { "ver": 2, "cmd": "RELAY_TAP_ADD", "type": "request",
+           "sesid": "…", "service": "volte" },
+  "payload": { "session_id": "csp_…_1", "tap_id": "tap-<callid>", "monitor": "+8210…",
+               "remote_ip": "203.0.113.9", "remote_port": 34308, "remote_pt": 96, "remote_te_pt": 101,
+               "tap_mode": "both" } }
+```
+```json
+{ "hdr": { "cmd": "RELAY_TAP_ADD", "type": "response", "status": "OK" },
+  "payload": { "local_ip": "192.168.10.11", "local_port": 58056, "local_video_port": 58058,
+               "ssrc_a": 1229873231, "ssrc_b": 2793878867 } }
+```
+
+RELAY_TAP_MODIFY 는 같은 payload 로 주소·crypto 만 갱신(포트·SSRC 불변). RELAY_TAP_REMOVE 는
+`session_id`+`tap_id`(없으면 `OK` — 자연 멱등). **RELAY_REMOVE / RELAY_ABORTED 는 세션의 tap 을 모두
+회수**하므로 tap 별 REMOVE 는 불요다(client 는 청취 종료 시에만 보낸다).
+
+오류: `NOT_FOUND`(세션 없음), `LIMIT`(세션당 상한 `MaxTapsPerSession` 초과), `NO_RESOURCE`(tap 풀 고갈),
+`BAD_REQUEST`(tap 미지원/키 형식 오류).
 
 ## 7. PTT — 그룹통화 + floor control
 
@@ -662,6 +712,7 @@ Call Control 파트의 후속 과제다([mcptt_csp_cmp_roadmap_contract.md](../d
 | `UNKNOWN_CMD` | 인식할 수 없는 cmd |
 | `BAD_REQUEST` | `hdr` 부재 등 envelope 형식 오류, 필수 필드 누락 |
 | `NO_RESOURCE` | 자원 풀 고갈 (relay/ptt 포트) |
-| `NOT_FOUND` | 대상 자원 없음 (group/session) |
+| `NOT_FOUND` | 대상 자원 없음 (group/session/tap) |
+| `LIMIT` | 세션당 청취 leg(tap) 상한 초과 (§6.5) |
 | `UNSUPPORTED_VER` | 지원하지 않는 `hdr.ver` |
 | `INTERNAL` | CMP 내부 오류 |
