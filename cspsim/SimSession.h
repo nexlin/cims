@@ -77,6 +77,7 @@ enum ESimScenario {
     E_SCENARIO_PICKUP,            // A→B 링잉 중 C 가 당겨받기 코드 다이얼 — A–C (§5)
     E_SCENARIO_DIALOG_PICKUP,     // C 가 B 를 dialog 구독(BLF) → A→B 링잉 NOTIFY → C 가 INVITE-Replaces — A–C (§6.2)
     E_SCENARIO_SUBSCRIBE_EVENT,   // 등록 후 -event 토큰으로 SUBSCRIBE 1건 — 최종 응답 프로브 (RFC 6665 §8.2.1 489 등)
+    E_SCENARIO_HUNT,              // [volte] A→대표번호(-pilot): B·C 병렬 링, C 응답 → A–C (dispatch_center.md §4, -count 3~4)
 };
 
 // ─────────────────────────────────────────────
@@ -255,6 +256,8 @@ public:
     bool         m_bRegistered;
     bool         m_bInCall;
     std::atomic<int> m_iLastCallEndStatus{0};   // 마지막 EventCallEnd 의 SIP 상태 — 발신 실패(403/404/488) 판정용
+    std::atomic<int> m_iIncomingInvites{0};     // 수신 INVITE 누계 — 대표번호 포크 도달 판정 (hunt 시나리오)
+    std::string  m_strLastPCalledParty;         // 마지막 수신 INVITE 의 P-Called-Party-ID (대표번호 착신 표시)
     bool         m_bNoRegister{false};  // true 면 REGISTER 자동 송신 skip (외부 SIP peer 모드)
     bool         m_bNoXcap{false};      // true 면 NOTIFY 수신 시 XCAP HTTP GET skip (Phase 3D)
     std::string  m_strCscHost;          // CSC IP — REGISTER 전 IdMS auth 대상 (빈 문자열이면 skip)

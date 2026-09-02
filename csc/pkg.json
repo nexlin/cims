@@ -9,7 +9,8 @@
       "/api/v1/users",
       "/api/v1/ptt/groups",
       "/api/v1/organizations",
-      "/api/v1/mcptt/service-config"
+      "/api/v1/mcptt/service-config",
+      "/api/v1/dispatch-groups"
     ]
   },
   "service": {

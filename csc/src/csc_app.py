@@ -106,6 +106,7 @@ if __name__ == '__main__':
     from services       import admin_auth
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
+    from handlers.dispatch       import CIMS_DISPATCH_HANDLER_LIST   # 관제 그룹 (dispatch_center.md §8.2)
     # 자기 API 문서 — 분리 배포에서 OAM 이 import 로 읽을 수 없으므로 직접 서비스한다.
     from handlers.api_docs       import CSC_API_DOCS_HANDLER_LIST
     # AuC — IMS AKA 인증 벡터 발급자 (sip_access_security.md §8.2). 내부 AV API 는 admin 서버(4421)에
@@ -325,6 +326,7 @@ if __name__ == '__main__':
         admin_server.add_dynamic_rules([
             (path, handler, cims_kwargs)
             for path, handler, _ in (CIMS_ADMIN_HANDLER_LIST + CIMS_ORG_HANDLER_LIST
+                                     + CIMS_DISPATCH_HANDLER_LIST
                                      + CSC_API_DOCS_HANDLER_LIST + CSC_AUC_HANDLER_LIST
                                      + CSC_INTERNAL_HANDLER_LIST)
         ])

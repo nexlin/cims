@@ -64,6 +64,11 @@
                 "segment": "/api/v1/organizations",
                 "upstream": "https://127.0.0.1:4421",
                 "module": "csc"
+            },
+            {
+                "segment": "/api/v1/dispatch-groups",
+                "upstream": "https://127.0.0.1:4421",
+                "module": "csc"
             }
         ]
     }

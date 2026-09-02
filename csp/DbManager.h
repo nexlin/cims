@@ -20,6 +20,8 @@ struct CspUserProfile;
 class CspUserMap;
 class CspPttGroup;
 class CGroupMap;
+class CspDispatchGroup;
+class CCspDispatchGroupMap;
 
 /**
  * @ingroup CspServer
@@ -101,6 +103,19 @@ public:
     bool LoadAllUsers( CspUserMap &clsMap );
 
     // ─────────────────────────────────────────────
+    //  Dispatch group operations (dispatch_center.md §3) — 테이블 부재 시 관제 기능 비활성
+    // ─────────────────────────────────────────────
+
+    /** dispatch_groups 테이블 존재(migrate_dispatch_groups.sql 적용) 여부 — Connect 시 프로브 */
+    bool HasDispatchTables() const {
+        return m_bHasDispatchTables;
+    }
+    /** 단일 관제 그룹(+멤버·감청 대상·PTT 청취 대상) 조회 */
+    bool SelectDispatchGroup( const std::string &strGroupId, CspDispatchGroup &clsGroup );
+    /** 전체 관제 그룹을 읽어 맵을 재구축한다 */
+    bool LoadAllDispatchGroups( CCspDispatchGroupMap &clsMap );
+
+    // ─────────────────────────────────────────────
     //  Call log operations
     // ─────────────────────────────────────────────
 
@@ -168,6 +183,10 @@ private:
     bool m_bHasAkaColumns = false;
     /** 픽업 그룹 컬럼(pickup_group — migrate_subscription_pickup_group.sql) 존재 여부 */
     bool m_bHasPickupColumn = false;
+    /** 관제 그룹 테이블(dispatch_groups — migrate_dispatch_groups.sql) 존재 여부 */
+    bool m_bHasDispatchTables = false;
+    /** 원격 청취 자격 컬럼(ptt_user_profile.allow_ambient_listening — migrate_ptt_ambient_listening.sql) 존재 여부 */
+    bool m_bHasAmbientColumn = false;
     void ProbeSchema();
     /** 컬럼이 있으면 COALESCE(식,'') 아니면 '' — SELECT 열 위치를 고정한 채 값만 비운다 */
     std::string Ha1Col( const char *pszAlias ) const;

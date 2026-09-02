@@ -926,6 +926,40 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 }
 ```
 
+### 6.7 관제 그룹 (`/api/v1/dispatch-groups`)
+
+관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위 ([dispatch_center.md](../design/features/dispatch_center.md) §3·§8.2).
+불변 id(`dg-xxxxxxxx`) 가 곧 가입자 `pickup_group` 값이다 — **멤버십이 SoT** 라 멤버 추가/제거가 가입자의
+`pickup_group` 을 파생 갱신하고(`USER_CHANGED`), 가입자 API 에서 그 값을 직접 바꾸면 409 `derived_from_dispatch_group`.
+CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가입자당 그룹 하나(다른 그룹 소속 가입자를
+추가하면 이동, 응답 `moved_from`).
+
+| 메서드·경로 | 권한 | 설명 |
+|---|---|---|
+| `GET /api/v1/dispatch-groups[?org_id=]` | monitor+ | 목록(멤버·대상 포함). 테이블 미적용 DB 는 `{groups:[], schema:"not_migrated"}` |
+| `POST /api/v1/dispatch-groups` | operator+ (`monitor_scope`/`ptt_listen`≠none 은 manager) | 생성 — `{id?, name, pilot_id?, service_ref?(pilot 시 필수), alert_mode?, no_answer_sec?, busy_members?, overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, org_id?, members?[{user_id, alert_order}]}` → 201 `{id}` |
+| `GET|PUT|DELETE /api/v1/dispatch-groups/{id}` | monitor+ / operator+ / operator+ | 단건·부분 갱신·삭제(멤버 `pickup_group` NULL 복원) |
+| `GET|POST /api/v1/dispatch-groups/{id}/members` | monitor+ / operator+ (감청·청취 그룹은 manager) | 멤버 목록 / 추가·이동 `{user_id, alert_order?}` → 201 |
+| `DELETE /api/v1/dispatch-groups/{id}/members/{user_id}` | operator+ | 멤버 제거(`pickup_group` NULL) |
+| `PUT /api/v1/dispatch-groups/{id}/monitor-targets` | manager+ | `{target_group_ids:[dg-…]}` — `monitor_scope=listed` 대상 |
+| `PUT /api/v1/dispatch-groups/{id}/ptt-targets` | manager+ | `{ptt_group_ids:[mcptt_group_id…]}` — `ptt_listen=listed` 대상 |
+
+**오류:** 409 `pilot_conflict`(대표번호가 가입 id·다른 대표번호와 충돌) · 409 `group_exists` · 403 `manager_required`
+(감청/청취 범위 변경·그 그룹 편입을 operator 가 시도) · 403 `member_role_insufficient`(감청/청취 그룹에 `users.role`
+operator 미만 가입자 편입) · 400 `schema_not_migrated`(`sql/migrate_dispatch_groups.sql` 미적용) · 404.
+
+**그룹 객체:**
+```json
+{ "id": "dg-7f3a91c2", "name": "관제 1반", "pilot_id": "7000", "service_ref": "volte",
+  "alert_mode": "parallel", "no_answer_sec": 30, "busy_members": "skip", "overflow_target": null,
+  "monitor_scope": "own", "ptt_listen": "none", "listen_visibility": "hidden", "org_id": 1,
+  "members": [{ "user_id": "+821300000004", "alert_order": 0 }], "monitor_targets": [], "ptt_targets": [] }
+```
+
+> PTT 프로파일(`PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`)의 `allow_ambient_listening`(TS 24.484
+> allow-ambient-listening, 기본 false) 은 PTT 그룹콜 청취 **자격**이고, 범위는 관제 그룹 `ptt_listen` 이다
+> (dispatch_center.md §5.6). 컬럼 미적용 DB(`sql/migrate_ptt_ambient_listening.sql`) 에서는 응답이 false 고 입력 시 400.
+
 ---
 
 ## 7. DB 스키마
@@ -998,6 +1032,13 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 | group_id | VARCHAR(32) | N | - | PK (복합), FK → ptt_groups.id ON DELETE CASCADE | 그룹 ID |
 | user_id | VARCHAR(32) | N | - | PK (복합), FK → ptt_subscriptions.id ON DELETE CASCADE | PTT 구독 MSISDN |
 | priority | INT | N | 0 | CHECK (priority >= 0) | 우선순위 (0=최고) |
+
+### dispatch_groups / dispatch_group_members / dispatch_group_monitor_targets / dispatch_group_ptt_targets (관제 그룹)
+
+`sql/migrate_dispatch_groups.sql` — 컬럼 정의는 [db_schema.md](../design/db_schema.md) §2 와
+[dispatch_center.md](../design/features/dispatch_center.md) §8.1. `dispatch_groups.id`(VARCHAR(64), `dg-…`) 가
+`volte_subscriptions.pickup_group` 값이며, `dispatch_group_members.user_id` 가 PK(가입자당 그룹 하나).
+`dispatch_group_ptt_targets.ptt_group_id` 는 `ptt_groups.id`(surrogate) 참조 — API 는 `mcptt_group_id` 로 노출한다.
 
 **ER 다이어그램:**
 ```

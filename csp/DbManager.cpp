@@ -11,6 +11,7 @@
 #include <cstring>
 #include <ctime>
 
+#include "CspDispatchGroup.h"
 #include "CspPttGroup.h"
 #include "CspUser.h"
 #include "GroupMap.h"
@@ -109,6 +110,23 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] subscriptions.pickup_group column absent — migrate_subscription_pickup_group.sql 미적용. "
                      "당겨받기 그룹은 전원 org_id 폴백" );
+    // 관제 그룹 (dispatch_groups — dispatch_center.md §8.1). 미적용이면 대표번호·감청 범위 판정 전체 비활성 (INFO —
+    // 선택 기능).
+    pRes = ExecuteSelect( "SHOW TABLES LIKE 'dispatch_groups'" );
+    m_bHasDispatchTables = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasDispatchTables )
+        CLog::Print( LOG_INFO,
+                     "[DB] dispatch_groups table absent — migrate_dispatch_groups.sql 미적용. 관제 그룹(대표번호 병렬 "
+                     "호출·감청 범위) 비활성 — 당겨받기는 pickup_group 축으로 계속 동작" );
+    // 원격 청취 자격 (ptt_user_profile.allow_ambient_listening — dispatch_center.md §5.6). 미적용이면 전원 자격 없음.
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'" );
+    m_bHasAmbientColumn = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasAmbientColumn )
+        CLog::Print( LOG_INFO,
+                     "[DB] ptt_user_profile.allow_ambient_listening column absent — migrate_ptt_ambient_listening.sql "
+                     "미적용. PTT 그룹콜 청취 자격은 전원 없음" );
 }
 
 std::string CDbManager::Ha1Col( const char *pszAlias ) const {
@@ -351,9 +369,9 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
         "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
         "       emergency_group_mode, COALESCE(emergency_group_id,''), "
         "       allow_emergency_private_call, private_emergency_mode, "
-        "       COALESCE(emergency_private_recipient,'') "
-        "FROM ptt_user_profile WHERE ptt_id='" +
-        Escape( strUserId ) + "'";
+        "       COALESCE(emergency_private_recipient,''), " +
+        std::string( m_bHasAmbientColumn ? "COALESCE(allow_ambient_listening,0)" : "0" ) +
+        " FROM ptt_user_profile WHERE ptt_id='" + Escape( strUserId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return -1;  // 마이그레이션 전 테이블/컬럼 부재 포함 — 호출측 fail-open (v3 선행 적용)
@@ -371,6 +389,7 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
     clsProfile.m_bAllowEmergencyPrivateCall = row[5] ? ( atoi( row[5] ) != 0 ) : true;
     if ( row[6] && row[6][0] ) clsProfile.m_strPrivateEmergencyMode = row[6];
     clsProfile.m_strEmergencyPrivateRecipient = row[7] ? row[7] : "";
+    clsProfile.m_bAllowAmbientListening = row[8] ? ( atoi( row[8] ) != 0 ) : false;
     mysql_free_result( pRes );
     return 1;
 }
@@ -506,8 +525,8 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
                                  "SELECT s.id, u.name, u.org_id, s.dnd, s.forward_id, u.id, "
                                  "       COALESCE(s.service_ref, ''), COALESCE(s.imsi, ''), "
                                  "       " ) +
-                             Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + " FROM " +
-                             aTables[i] + " s JOIN users u ON s.user_id = u.id";
+                             Ha1Col( "s" ) + ", COALESCE(s.sip_transport, ''), " + AuthSchemeCol( "s" ) + ", " +
+                             PickupGroupCol( "s" ) + " FROM " + aTables[i] + " s JOIN users u ON s.user_id = u.id";
 
         MYSQL_RES *pRes = ExecuteSelect( strSql );
         if ( !pRes ) continue;
@@ -526,6 +545,9 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
             clsUser.m_strHa1 = row[8] ? row[8] : "";
             clsUser.m_strSipTransport = row[9] ? row[9] : "";
             clsUser.m_strAuthScheme = row[10] ? row[10] : "digest";
+            // pickup_group — 단건 SelectUser 와 같은 열. 전량 적재가 이 열을 빠뜨리면 부팅/CSC_RESTART 뒤
+            //   전원이 org 폴백으로 등록돼 관제 그룹 축(dispatch_center.md §3.2)이 어긋난다.
+            clsUser.m_strPickupGroup = row[11] ? row[11] : "";
             clsUser._loadTime = time( nullptr );
             if ( !clsUser.m_strId.empty() ) {
                 clsMap.Insert( clsUser );
@@ -537,6 +559,101 @@ bool CDbManager::LoadAllUsers( CspUserMap &clsMap ) {
 
     CLog::Print( LOG_INFO, "[DB] LoadAllUsers: %d users loaded", count );
     return count > 0;
+}
+
+// ─────────────────────────────────────────────
+//  Dispatch group operations (dispatch_center.md §3·§8.1)
+// ─────────────────────────────────────────────
+
+bool CDbManager::SelectDispatchGroup( const std::string &strGroupId, CspDispatchGroup &clsGroup ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_bHasDispatchTables ) return false;
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    std::string strSql =
+        "SELECT id, name, COALESCE(pilot_id,''), COALESCE(service_ref,''), alert_mode, no_answer_sec, busy_members, "
+        "       COALESCE(overflow_target,''), monitor_scope, ptt_listen, listen_visibility, COALESCE(org_id,'') "
+        "FROM dispatch_groups WHERE id='" +
+        Escape( strGroupId ) + "'";
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
+    if ( !pRes ) return false;
+    MYSQL_ROW row = mysql_fetch_row( pRes );
+    if ( !row ) {
+        mysql_free_result( pRes );
+        return false;
+    }
+    clsGroup.Clear();
+    clsGroup.m_strId = row[0] ? row[0] : "";
+    clsGroup.m_strName = row[1] ? row[1] : "";
+    clsGroup.m_strPilotId = row[2] ? row[2] : "";
+    clsGroup.m_strServiceRef = row[3] ? row[3] : "";
+    if ( row[4] && row[4][0] ) clsGroup.m_strAlertMode = row[4];
+    clsGroup.m_iNoAnswerSec = row[5] ? atoi( row[5] ) : 30;
+    if ( row[6] && row[6][0] ) clsGroup.m_strBusyMembers = row[6];
+    clsGroup.m_strOverflowTarget = row[7] ? row[7] : "";
+    if ( row[8] && row[8][0] ) clsGroup.m_strMonitorScope = row[8];
+    if ( row[9] && row[9][0] ) clsGroup.m_strPttListen = row[9];
+    if ( row[10] && row[10][0] ) clsGroup.m_strListenVisibility = row[10];
+    clsGroup.m_strOrgId = row[11] ? row[11] : "";
+    mysql_free_result( pRes );
+
+    const std::string strEsc = Escape( strGroupId );
+    pRes = ExecuteSelect( "SELECT user_id, alert_order FROM dispatch_group_members WHERE group_id='" + strEsc +
+                          "' ORDER BY alert_order, user_id" );
+    if ( pRes ) {
+        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+            if ( !row[0] ) continue;
+            CspDispatchMember m;
+            m.strUserId = row[0];
+            m.iAlertOrder = row[1] ? atoi( row[1] ) : 0;
+            clsGroup.m_vecMembers.push_back( m );
+        }
+        mysql_free_result( pRes );
+    }
+    pRes =
+        ExecuteSelect( "SELECT target_group_id FROM dispatch_group_monitor_targets WHERE group_id='" + strEsc + "'" );
+    if ( pRes ) {
+        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr )
+            if ( row[0] ) clsGroup.m_setMonitorTargets.insert( row[0] );
+        mysql_free_result( pRes );
+    }
+    // ptt_targets 는 ptt_groups.id(surrogate) 참조 — CSP 그룹 맵 키(mcptt_group_id)로 해석해 보관
+    pRes = ExecuteSelect(
+        "SELECT g.mcptt_group_id FROM dispatch_group_ptt_targets t JOIN ptt_groups g ON g.id = t.ptt_group_id "
+        "WHERE t.group_id='" +
+        strEsc + "'" );
+    if ( pRes ) {
+        while ( ( row = mysql_fetch_row( pRes ) ) != nullptr )
+            if ( row[0] ) clsGroup.m_setPttTargets.insert( row[0] );
+        mysql_free_result( pRes );
+    }
+    return true;
+}
+
+bool CDbManager::LoadAllDispatchGroups( CCspDispatchGroupMap &clsMap ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_bHasDispatchTables ) return false;
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT id FROM dispatch_groups" );
+    if ( !pRes ) return false;
+    std::vector<std::string> vecIds;
+    MYSQL_ROW row;
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr )
+        if ( row[0] ) vecIds.push_back( row[0] );
+    mysql_free_result( pRes );
+
+    clsMap.Clear();
+    int iLoaded = 0;
+    for ( const auto &strId : vecIds ) {
+        CspDispatchGroup clsGroup;
+        if ( SelectDispatchGroup( strId, clsGroup ) ) {
+            clsMap.Insert( clsGroup );
+            ++iLoaded;
+        }
+    }
+    CLog::Print( LOG_INFO, "[DB] LoadAllDispatchGroups: %d groups loaded", iLoaded );
+    return true;
 }
 
 bool CDbManager::SelectGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds ) {

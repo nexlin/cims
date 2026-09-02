@@ -89,6 +89,9 @@ CSipServerSetup::CSipServerSetup()
       m_bUseRegisterSession( false ),
       m_iUserTimeout( 3600 ),
       m_iStaleCallTimeout( 300 ),
+      m_iDispatchMaxTapsPerSession( 2 ),
+      m_iDispatchMaxForkTargets( 32 ),
+      m_iDispatchForkRingTimeoutSec( 60 ),
       m_bSessionTimer( true ),  // 비정상 종료 leg 감지 (RFC 4028) — 기본 활성
       m_iSessionExpires( 180 ),
       m_iSessionMinSE( 90 ),
@@ -276,6 +279,19 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                     if ( st.Has( "SessionExpires" ) ) m_iSessionExpires = (int)st.GetInt( "SessionExpires" );
                     if ( st.Has( "MinSE" ) ) m_iSessionMinSE = (int)st.GetInt( "MinSE" );
                     if ( st.Has( "Refresher" ) ) m_strSessionRefresher = st.GetString( "Refresher" );
+                }
+
+                // 관제 센터 — 대표번호 병렬 호출·감청 leg 상한 (dispatch_center.md §8.3)
+                if ( sip.Has( "Dispatch" ) ) {
+                    SimpleJson::JsonNode dp = sip.Get( "Dispatch" );
+                    if ( dp.Has( "MaxTapsPerSession" ) )
+                        m_iDispatchMaxTapsPerSession = (int)dp.GetInt( "MaxTapsPerSession" );
+                    if ( dp.Has( "MaxForkTargets" ) ) m_iDispatchMaxForkTargets = (int)dp.GetInt( "MaxForkTargets" );
+                    if ( dp.Has( "ForkRingTimeoutSec" ) )
+                        m_iDispatchForkRingTimeoutSec = (int)dp.GetInt( "ForkRingTimeoutSec" );
+                    if ( m_iDispatchMaxTapsPerSession < 0 ) m_iDispatchMaxTapsPerSession = 0;
+                    if ( m_iDispatchMaxForkTargets < 1 ) m_iDispatchMaxForkTargets = 1;
+                    if ( m_iDispatchForkRingTimeoutSec < 5 ) m_iDispatchForkRingTimeoutSec = 5;
                 }
             }
 
@@ -489,6 +505,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 SimpleJson::JsonNode dataDir = setup.Get( "DataFolder" );
                 if ( dataDir.Has( "User" ) ) m_strUserDataFolder = dataDir.GetString( "User" );
                 if ( dataDir.Has( "Group" ) ) m_strGroupDataFolder = dataDir.GetString( "Group" );
+                if ( dataDir.Has( "DispatchGroup" ) )
+                    m_strDispatchGroupDataFolder = dataDir.GetString( "DispatchGroup" );
                 // G10 (2026-04-23): DataFolder.SipServer 제거 — SipServerMap legacy 제거와 동반.
             }
 

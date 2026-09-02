@@ -1541,6 +1541,11 @@ void SessionSipClient::EventRegister(CSipServerInfo* pclsInfo, int iStatus) {
 void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszFrom,
                                           const char* pszTo, CSipCallRtp* pclsRtp, CSipMessage* pclsMessage) {
     printf("[%d] INVITE from=%s to=%s\n", m_pOwner->m_iId, pszFrom, pszTo);
+    m_pOwner->m_iIncomingInvites++;
+    if (pclsMessage) {
+        CSipHeader* pclsPcp = pclsMessage->GetHeader("P-Called-Party-ID");
+        m_pOwner->m_strLastPCalledParty = pclsPcp ? pclsPcp->m_strValue : "";
+    }
 
     // TS 24.379: 이미 통화 중이면 486 Busy Here (실 단말과 동일)
     if (m_pOwner->m_bInCall) {

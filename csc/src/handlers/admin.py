@@ -28,6 +28,7 @@ from services.mcptt import (notify_csp, refresh_group_members, DEFAULT_USER_PROF
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml)
+from handlers import dispatch as _dispatch  # 관제 그룹 파생(pickup_group 409 게이트)
 from services import admin_auth
 from services.auc import auc as _auc
 from services.mcptt import logger as _logger
@@ -299,7 +300,8 @@ async def _get_user(person_id: str, config):
                     cur.execute(
                         "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
                         "emergency_group_mode, emergency_group_id, allow_emergency_private_call, "
-                        f"private_emergency_mode, emergency_private_recipient FROM ptt_user_profile WHERE ptt_id IN ({ph})",
+                        f"private_emergency_mode, emergency_private_recipient, {_ambient_select(cur)} "
+                        f"FROM ptt_user_profile WHERE ptt_id IN ({ph})",
                         [s['id'] for s in ptt_subs])
                     for p in cur.fetchall():
                         profiles[p['ptt_id']] = {
@@ -311,6 +313,7 @@ async def _get_user(person_id: str, config):
                             'allow_emergency_private_call': bool(p['allow_emergency_private_call']),
                             'private_emergency_mode': p['private_emergency_mode'],
                             'emergency_private_recipient': p['emergency_private_recipient'],
+                            'allow_ambient_listening': bool(p['allow_ambient_listening']),
                         }
                 except pymysql.Error:
                     pass
@@ -742,6 +745,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             if 'pickup_group' in body:
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
+                # 관제 그룹 소속 가입자의 pickup_group 은 멤버십에서 파생된다 — 직접 편집 409 (dispatch_center.md §3.2)
+                dg = _dispatch.dispatch_group_of_user(cur, msisdn)
+                if dg is not None and _parse_pickup_group(body) != dg:
+                    return HandlerResult(status=409, body={'error': 'derived_from_dispatch_group', 'group_id': dg,
+                                                           'detail': 'pickup_group 은 관제 그룹 멤버십(/api/v1/dispatch-groups)에서 파생된다'})
                 fields.append("pickup_group=%s"); values.append(_parse_pickup_group(body))
 
             # H(A1) 결박 — imsi/service_ref 가 바뀌면 기존 ha1 은 무효다. 서버는 원문을 모르므로
@@ -796,7 +804,22 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
 # ──────────────────────────────────────────────────────────────
 
 _PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call',
-                        'allow_emergency_private_call')
+                        'allow_emergency_private_call', 'allow_ambient_listening')
+
+_HAS_AMBIENT_COL = None  # ptt_user_profile.allow_ambient_listening 프로브 캐시 (migrate_ptt_ambient_listening.sql)
+
+
+def _has_ambient_column(cur) -> bool:
+    global _HAS_AMBIENT_COL
+    if _HAS_AMBIENT_COL is None:
+        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'")
+        _HAS_AMBIENT_COL = cur.fetchone() is not None
+    return _HAS_AMBIENT_COL
+
+
+def _ambient_select(cur) -> str:
+    """SELECT 열 — 컬럼 부재 시 상수 0 (자격 없음, dispatch_center.md §5.6)."""
+    return "allow_ambient_listening" if _has_ambient_column(cur) else "0 AS allow_ambient_listening"
 
 
 async def _get_ptt_profile(person_id: str, msisdn: str, config):
@@ -808,7 +831,8 @@ async def _get_ptt_profile(person_id: str, msisdn: str, config):
             cur.execute(
                 "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
                 "emergency_group_mode, emergency_group_id, "
-                "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient "
+                "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient, "
+                f"{_ambient_select(cur)} "
                 "FROM ptt_user_profile WHERE ptt_id=%s", (msisdn,))
             row = cur.fetchone()
     if row:
@@ -840,12 +864,18 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
     allow_alert = 1 if body.get('allow_emergency_alert', True) else 0
     allow_adhoc = 1 if body.get('allow_adhoc_call', True) else 0
     allow_priv  = 1 if body.get('allow_emergency_private_call', True) else 0
+    # 원격 청취 자격 (TS 24.484 allow-ambient-listening, dispatch_center.md §5.6) — 기본 0, 부여는 manager 승인
+    allow_amb   = 1 if body.get('allow_ambient_listening', False) else 0
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s", (msisdn, person_id))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            has_amb = _has_ambient_column(cur)
+            if 'allow_ambient_listening' in body and not has_amb:
+                return HandlerResult(status=400, body={'error': 'schema_not_migrated',
+                                                       'detail': 'ptt_user_profile.allow_ambient_listening absent — sql/migrate_ptt_ambient_listening.sql not applied'})
             if egid:
                 cur.execute("SELECT 1 FROM ptt_groups WHERE mcptt_group_id=%s", (egid,))
                 if cur.fetchone() is None:
@@ -855,12 +885,16 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
                 if cur.fetchone() is None:
                     return HandlerResult(status=400,
                                          body={'error': f'unknown emergency_private_recipient: {precip}'})
+            amb_col = ", allow_ambient_listening" if has_amb else ""
+            amb_ph = ",%s" if has_amb else ""
+            amb_upd = ", allow_ambient_listening=VALUES(allow_ambient_listening)" if has_amb else ""
+            amb_vals = (allow_amb,) if has_amb else ()
             cur.execute(
                 "INSERT INTO ptt_user_profile (ptt_id, allow_emergency_call, allow_emergency_alert, "
                 "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
-                "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient, "
-                "update_time) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW()) "
+                "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient"
+                f"{amb_col}, update_time) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s{amb_ph},NOW()) "
                 "ON DUPLICATE KEY UPDATE allow_emergency_call=VALUES(allow_emergency_call), "
                 "allow_emergency_alert=VALUES(allow_emergency_alert), "
                 "allow_adhoc_call=VALUES(allow_adhoc_call), "
@@ -868,8 +902,8 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
                 "emergency_group_id=VALUES(emergency_group_id), "
                 "allow_emergency_private_call=VALUES(allow_emergency_private_call), "
                 "private_emergency_mode=VALUES(private_emergency_mode), "
-                "emergency_private_recipient=VALUES(emergency_private_recipient), update_time=NOW()",
-                (msisdn, allow_call, allow_alert, allow_adhoc, mode, egid, allow_priv, pmode, precip))
+                f"emergency_private_recipient=VALUES(emergency_private_recipient){amb_upd}, update_time=NOW()",
+                (msisdn, allow_call, allow_alert, allow_adhoc, mode, egid, allow_priv, pmode, precip, *amb_vals))
 
     prof = {
         "allow_emergency_call": bool(allow_call),
@@ -880,6 +914,7 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
         "allow_emergency_private_call": bool(allow_priv),
         "private_emergency_mode": pmode,
         "emergency_private_recipient": precip,
+        "allow_ambient_listening": bool(allow_amb) if has_amb else False,
     }
     update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")

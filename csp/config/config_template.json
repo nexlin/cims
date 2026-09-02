@@ -151,6 +151,36 @@
           "help": "0 = 비활성. 마지막 SIP activity 이후 무응답 통화 자동 종료."
         },
         {
+          "key": "Setup.Sip.Dispatch.MaxForkTargets",
+          "label": "대표번호 동시 포크 상한",
+          "type": "int",
+          "default": 32,
+          "min": 1,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 대표번호 착신부터 적용.",
+          "help": "관제 그룹 대표번호 1건이 동시에 호출하는 그룹원 상한 — 초과분은 alert_order 순으로 절삭한다 (제어평면 부하 방어, dispatch_center.md §8.3)."
+        },
+        {
+          "key": "Setup.Sip.Dispatch.ForkRingTimeoutSec",
+          "label": "대표번호 무응답 상한 (s)",
+          "type": "int",
+          "default": 60,
+          "min": 5,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 대표번호 착신부터 적용.",
+          "help": "관제 그룹 no_answer_sec 의 상한 — 그룹 값이 이를 넘으면 clamp. 만료 시 overflow_target 재시도 또는 480 (dispatch_center.md §4.4)."
+        },
+        {
+          "key": "Setup.Sip.Dispatch.MaxTapsPerSession",
+          "label": "세션당 감청 leg 상한",
+          "type": "int",
+          "default": 2,
+          "min": 0,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드. 다음 Join INVITE 부터 적용.",
+          "help": "한 통화 세션에 동시에 붙는 합법감청(tap) leg 상한 — 초과 Join 은 486 (dispatch_center.md §5.5). 0 = 감청 비활성."
+        },
+        {
           "key": "Setup.Sip.SessionTimer.Enable",
           "label": "세션 타이머 (RFC 4028)",
           "type": "bool",
@@ -897,6 +927,16 @@
           "hidden": true,
           "restart": true,
           "help": "DB 가 SOT. 이 폴더는 DB 미연결 시 fallback."
+        },
+        {
+          "key": "Setup.DataFolder.DispatchGroup",
+          "label": "관제 그룹 데이터 폴더",
+          "group": "data_folder",
+          "type": "path",
+          "default": "dispatch_group",
+          "hidden": true,
+          "restart": true,
+          "help": "DB 가 SOT(dispatch_groups). dispatch_groups 테이블 미적용·DB 미연결 시 <id>.json fallback (dispatch_center.md §3.3)."
         },
         {
           "key": "Setup.ServiceLogging.Enable",

@@ -1,11 +1,50 @@
 #ifndef _TAS_MODULE_H_
 #define _TAS_MODULE_H_
 
+#include <map>
+#include <mutex>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "IModule.h"
+#include "MediaSdes.h"
+#include "SipUserAgentCallBack.h"  // CSipCallRtp (포크 집합의 B-leg 공통 offer 보관)
 
 class CspUser;
+class CspDispatchGroup;
+
+/**
+ * @brief 대표번호 병렬 호출 포크 집합 (dispatch_center.md §4.4) — A-leg 하나에 대기 B-leg N 개.
+ *
+ * 대기 leg 는 승자 확정 전까지 CCallMap 밖(TAS 소유)에 있다 — CCallMap 은 leg 쌍(1:1) 모델이라 포크 중에는
+ * peer 가 정해지지 않는다. 승자 확정 시 (A, 승자) 쌍을 CCallMap 에 넣고 이후는 기존 1:1 경로가 이어받는다.
+ * 패자 leg 는 CANCEL 후 최종 응답(487)이 올 때까지 m_mapForkLeg 에 남아 이벤트를 흡수한다.
+ */
+struct CTasForkSet {
+    std::string strACallId;                          ///< 발신(A) leg Call-ID
+    std::string strCaller;                           ///< 발신자 id
+    std::string strGroupId;                          ///< 관제 그룹 id
+    std::string strPilot;                            ///< 대표번호
+    std::string strDomain;                           ///< 대표번호 도메인 (P-Called-Party-ID)
+    std::set<std::string> setPending;                ///< 대기 B-leg Call-ID
+    std::map<std::string, std::string> mapLegUser;   ///< B-leg → 그룹원 id
+    std::map<std::string, RelaySdesLeg> mapLegSdes;  ///< B-leg 별 서버 offer SDES 상태 (leg 전용 키)
+    std::vector<std::string> vecAlerted;             ///< 호출한 그룹원(call.json alerted[])
+    bool bRelay = false;
+    std::string strRelaySessionId, strRelaySesId, strRelayLocalIp, strMediaNode;
+    int iPortA = -1;           ///< A 에게 광고하는 relay 포트(peer0)
+    int iPortB = -1;           ///< 대기 leg 전원에게 광고하는 relay 포트(peer1 — 승자만 MODIFY 로 고정)
+    RelaySdesLeg clsSdesA;     ///< A leg SDES 협상 상태
+    CSipCallRtp clsBaseOffer;  ///< B-leg 공통 offer(crypto strip·relay 주소) — overflow 재시도 원본
+    bool bRang = false;        ///< A 에게 180 을 전달했는가(첫 180 만)
+    bool bBusySeen = false;    ///< 대기 leg 중 486 이 있었는가(전원 실패 시 486 우세)
+    time_t tStart = 0;
+    int iNoAnswerSec = 30;
+    int iDepth = 0;            ///< overflow 재귀 깊이(1단계까지)
+    std::string strOverflow;   ///< 남은 overflow_target (소진 시 빈 값)
+    std::string strSessionId;  ///< CallDir 세션 id
+};
 
 /**
  * @brief TAS — VoLTE 보조 서비스 모듈 (volte_supplementary_services.md)
@@ -52,6 +91,14 @@ public:
      *  true=픽업 다이얼로 소비(응답 완료), false=픽업 다이얼 아님(호출자가 404). */
     bool TryPickupDial( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp );
 
+    /** 대표번호(pilot) 해석·병렬 호출 (dispatch_center.md §4) — 미등록 착신에서 TryPickupDial 앞에 호출된다.
+     *  pszTo 가 관제 그룹 대표번호면 등록 그룹원 전원에게 포크하고 true(소비). 아니면 false. */
+    bool TryDispatchPilot( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,
+                           CSipMessage *pclsMessage );
+
+    /** 1초 주기 — 포크 집합 무응답(no_answer_sec) 판정 → overflow 또는 480 (§4.4). */
+    void Tick();
+
     /** 착신 가입자 종단 서비스 — DND/착신거부 603, 착신전환 302 (수신 listener 주소로 Contact).
      *  true=응답 발신·소비, false=일반 B2BUA 진행. */
     bool ApplyTerminationServices( const char *pszCallId, const char *pszFrom, const CspUser &clsUser );
@@ -79,6 +126,32 @@ private:
     /** dialog-event(RFC 4235) 상태 통지 — 한 호의 두 당사자(caller/callee) 각각을 감시하는 구독자에게
      *  그 당사자의 CSP 측 leg Call-ID 로 partial NOTIFY 를 낸다(당겨받기 BLF, §6.2). */
     void NotifyDialogState( const char *pszCallId, const char *pszState );
+
+    // ── 대표번호 병렬 호출 (dispatch_center.md §4) ──
+    /** 그룹원 → 포크 대상 결정: 등록·(busy_members=skip) 비통화·발신자 제외, alert_order 순, MaxForkTargets 절삭. */
+    void ResolveForkTargets( const CspDispatchGroup &clsGroup, const std::string &strCaller,
+                             std::vector<std::string> &vecTargets );
+    /** 대기 leg 생성 — 대상 각각에 leg 전용 SDES offer 로 INVITE(P-Called-Party-ID=대표번호). 생성 수 반환.
+     *  m_mutexFork 를 잡은 상태에서 호출한다. */
+    int ForkAlert( CTasForkSet &clsSet, const std::vector<std::string> &vecTargets );
+    /** 전원 실패/무응답/취소 — 대기 leg CANCEL, A 에게 iSipCode(0=응답 없음: A 가 취소한 경우), relay 회수, 집합 제거.
+     */
+    void FailFork( const std::string &strACallId, int iSipCode );
+    /** 무응답 → overflow_target 으로 재시도(1단계). 대상이 없으면 FailFork(480). */
+    void OverflowFork( const std::string &strACallId );
+    /** 대표번호 AoR 감시자에게 dialog 이벤트(§4.5) — 대기/승자 leg Call-ID 로 통지. */
+    void NotifyPilotDialog( const CTasForkSet &clsSet, const std::string &strLegCallId, const char *pszState,
+                            const std::string &strRemote );
+    /** 가입자가 확립/진행 중 다이얼로그를 갖는가 (busy_members=skip 판정). */
+    static bool IsUserBusy( const std::string &strUserId );
+    bool OnForkRing( const char *pszCallId, int iSipStatus );
+    bool OnForkStart( const char *pszCallId, CSipCallRtp *pclsRtp );
+    bool OnForkEnd( const char *pszCallId, int iSipStatus );
+
+    std::map<std::string, CTasForkSet> m_mapFork;         ///< A-leg Call-ID → 포크 집합
+    std::map<std::string, std::string> m_mapForkLeg;      ///< B-leg Call-ID → A-leg Call-ID
+    std::map<std::string, std::string> m_mapPilotOfCall;  ///< 확립 후 A/B leg → 대표번호 (종료 통지용)
+    std::recursive_mutex m_mutexFork;
 };
 
 #endif

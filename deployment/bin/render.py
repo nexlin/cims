@@ -685,7 +685,7 @@ def _build_csp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
             ("Password", db.get("password", "cims1234")),
             ("DbName",   db.get("dbname", "cims")),
         ])),
-        ("DataFolder", OrderedDict([("User", "user"), ("Group", "group")])),
+        ("DataFolder", OrderedDict([("User", "user"), ("Group", "group"), ("DispatchGroup", "dispatch_group")])),
     ])
 
     # ServiceLogging — env.service_logging 또는 setup.service_logging override

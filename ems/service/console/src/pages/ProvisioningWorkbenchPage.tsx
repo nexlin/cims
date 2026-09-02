@@ -734,7 +734,10 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 </> : <AuthBadge sub={r.sub} />}</td>
                 <td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</td>
                 <td>{!isCall ? <span className="ts">—</span> : ed ? <input className="form-input" placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</td>
-                <td>{ed ? <input className="form-input" placeholder="예: control-room-1" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} /> : <span className="ts">{r.sub.pickup_group || '—'}</span>}</td>
+                <td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
+                    ? <span className="badge badge--blue" style={{ fontSize: 10 }} title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</span>
+                    : <input className="form-input" placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 관제 그룹(대표번호·감청)은 관리 › 관제 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
+                  : <span className="ts" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</td>
                 <td className="actions">
                   {!canWrite ? <span className="ts">—</span> : ed ? <>
                     <IconBtn title="저장" tone="primary" onClick={() => saveEdit(r)}><Check size={ICON} /></IconBtn>

@@ -809,6 +809,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         // G10 (2026-04-23): 레거시 IBCF XML trunk (SipServerMap) 경로 제거.
         //   외부 peer 라우팅은 routing_policies + PendingRouteMap (G1) 으로 결정.
         //   여기까지 도달한 "내부에 없는 callee" 는 CallPickup(TAS) 외에는 NOT_FOUND.
+        // 관제 그룹 대표번호(pilot) — 등록 그룹원 전원에게 병렬 포크 (dispatch_center.md §4.2, TryPickupDial 앞)
+        if ( m_clsTas.IsEnabled() && m_clsTas.TryDispatchPilot( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage ) )
+            return;
         if ( m_clsTas.IsEnabled() && m_clsTas.TryPickupDial( pszCallId, pszFrom, pszTo, pclsRtp ) ) return;
         return StopCall( pszCallId, SIP_NOT_FOUND );
     }
@@ -1030,6 +1033,10 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallRing(%s,%d)", pszCallId, iSipStatus );
 
+    // TAS — 대표번호 포크 대기 leg 18x(소비: 첫 180 만 A 에 전달) / dialog-event 링잉(early) 통지(BLF §6.2,
+    //   CallMap leg — 통과) / blind transfer 진행 NOTIFY (trans leg — 소비)
+    if ( m_clsTas.IsEnabled() && m_clsTas.OnCallRing( pszCallId, iSipStatus, pclsRtp ) ) return;
+
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         if ( pclsRtp && clsCallInfo.m_iPeerRtpPort > 0 ) {
             pclsRtp->m_iPort = clsCallInfo.m_iPeerRtpPort;
@@ -1046,8 +1053,6 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
         if ( iRSeq != -1 ) gclsUserAgent.SetRSeq( clsCallInfo.m_strPeerCallId.c_str(), iRSeq );
         gclsUserAgent.RingCall( clsCallInfo.m_strPeerCallId.c_str(), iSipStatus, pclsRtp );
     }
-    // TAS — dialog-event 링잉(early) 통지(BLF §6.2) / blind transfer 진행 NOTIFY (trans leg)
-    if ( m_clsTas.IsEnabled() ) m_clsTas.OnCallRing( pszCallId, iSipStatus, pclsRtp );
 }
 
 void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
@@ -1188,9 +1193,12 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
                  bSelHit ? 1 : 0, bSelHit ? clsCallInfo.m_strPeerCallId.c_str() : "-",
                  bSelHit ? clsCallInfo.m_iPeerRtpPort : -1 );
 
-    // TAS — dialog-event 종료(terminated) 통지(CallMap 삭제 전, §6.2) / blind transfer 전환 leg
-    //   실패 NOTIFY + trans entry 정리 (CallMap 밖 trans leg)
-    if ( m_clsTas.IsEnabled() ) m_clsTas.OnCallEnd( pszCallId, iSipStatus );
+    // TAS — dialog-event 종료(terminated) 통지(CallMap 삭제 전, §6.2 — 통과) / blind transfer 전환 leg
+    //   실패 NOTIFY + trans entry 정리 (CallMap 밖 trans leg — 소비) / 대표번호 포크 leg·A 취소 (소비)
+    if ( m_clsTas.IsEnabled() && m_clsTas.OnCallEnd( pszCallId, iSipStatus ) ) {
+        RemoveCallOwner( pszCallId );
+        return;
+    }
 
     if ( bSelHit ) {
         // Service log: VoipCallEnd

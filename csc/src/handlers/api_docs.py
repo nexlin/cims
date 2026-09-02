@@ -12,6 +12,7 @@ from services import admin_auth
 
 from .admin import CIMS_ADMIN_API_DOCS
 from .org import CIMS_ORG_API_DOCS
+from .dispatch import CIMS_DISPATCH_API_DOCS
 
 
 _BASE = '/api/v1/api-docs'
@@ -23,7 +24,7 @@ async def handle_api_docs(handler_args: HandlerArgs, kwargs: dict) -> HandlerRes
     _payload, err = admin_auth.require_role(handler_args, 'monitor')
     if err:
         return err
-    apis = list(CIMS_ADMIN_API_DOCS) + list(CIMS_ORG_API_DOCS)
+    apis = list(CIMS_ADMIN_API_DOCS) + list(CIMS_ORG_API_DOCS) + list(CIMS_DISPATCH_API_DOCS)
     return HandlerResult(status=200, body={'module': 'csc', 'count': len(apis), 'apis': apis})
 
 

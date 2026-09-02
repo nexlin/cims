@@ -6,6 +6,7 @@
 #include "CallMap.h"
 #include "CscEndpointCache.h"
 #include "CspConfigCache.h"
+#include "CspDispatchGroup.h"
 #include "CspListenerManager.h"
 #include "CspLocalNodeMap.h"
 #include "CspRouteMap.h"
@@ -281,6 +282,8 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
 
         // Resync user map from DB
         gclsCspUserMap.LoadFromDb();
+        // 관제 그룹도 재동기 (대표번호·감청 범위 — dispatch_center.md §3.3)
+        if ( gclsDbManager.HasDispatchTables() ) gclsDispatchGroupMap.LoadFromDb();
 
         // Trigger full group resync (SyncGroupsState)
         gclsGroupCallService.OnGroupConfigChanged();
@@ -297,6 +300,28 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         //   CSP 는 이 문서를 소비하지 않으므로(서빙은 CSC XCAP) 캐시 갱신 없이 중계만 한다.
         extern void SendServiceConfigNotify( const std::string &etag );
         SendServiceConfigNotify( strEtag );
+    } else if ( strEvent == "DISPATCH_GROUP_CHANGED" ) {
+        // 관제 그룹 변경 (dispatch_center.md §3.3) — uri = 그룹 id(dg-…). DELETE 는 맵에서 제거,
+        //   그 외(POST/PUT/멤버·대상 변경)는 DB 단건 재적재. uri 가 비면 전량 재적재.
+        //   가입자 pickup_group 파생 갱신은 CSC 가 USER_CHANGED 를 따로 보낸다(기존 경로).
+        std::string strGroupId = strUri;
+        if ( strGroupId.substr( 0, 4 ) == "tel:" ) strGroupId = strGroupId.substr( 4 );
+        if ( !gclsDbManager.HasDispatchTables() ) {
+            CLog::Print( LOG_INFO, "CscInterface: DISPATCH_GROUP_CHANGED ignored — dispatch_groups table absent" );
+        } else if ( strGroupId.empty() ) {
+            gclsDispatchGroupMap.LoadFromDb();
+            CLog::Print( LOG_INFO, "CscInterface: DispatchGroupMap reloaded (%d groups)",
+                         gclsDispatchGroupMap.GetCount() );
+        } else if ( strAction == "DELETE" ) {
+            gclsDispatchGroupMap.Remove( strGroupId.c_str() );
+            CLog::Print( LOG_INFO, "CscInterface: Dispatch group removed [%s]", strGroupId.c_str() );
+        } else if ( gclsDispatchGroupMap.LoadOneFromDb( strGroupId.c_str() ) ) {
+            CLog::Print( LOG_INFO, "CscInterface: Dispatch group updated [%s]", strGroupId.c_str() );
+        } else {
+            // DB 에 없으면 삭제로 간주(통지 순서 역전 방어)
+            gclsDispatchGroupMap.Remove( strGroupId.c_str() );
+            CLog::Print( LOG_INFO, "CscInterface: Dispatch group not in DB — removed [%s]", strGroupId.c_str() );
+        }
     } else if ( strEvent == "USER_CHANGED" ) {
         extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
         SendSipNotify( strUri, strEtag, strAction );

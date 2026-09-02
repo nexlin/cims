@@ -90,6 +90,14 @@ public:
     /** Call Pickup 을 위한 아이디 ( 전화번호 ) */
     std::string m_strCallPickupId;
 
+    // 관제 센터 (Setup.Sip.Dispatch — docs/design/features/dispatch_center.md §8.3)
+    /** 세션당 감청(tap) leg 상한 — 초과 Join 은 486 (§5.5) */
+    int m_iDispatchMaxTapsPerSession;
+    /** 대표번호 1건이 동시 포크하는 멤버 상한 — 초과분은 alert_order 순 절삭 (제어평면 부하 방어) */
+    int m_iDispatchMaxForkTargets;
+    /** 그룹 no_answer_sec 상한 — 그룹 값이 이를 넘으면 clamp */
+    int m_iDispatchForkRingTimeoutSec;
+
     /** SIP stack 실행 주기 (ms 단위) */
     int m_iStackExecutePeriod;
 
@@ -120,6 +128,9 @@ public:
 
     /** 그룹 정보 저장 폴더 - 비어 있으면 DB 를 사용한다. */
     std::string m_strGroupDataFolder;
+
+    /** 관제 그룹 JSON fallback 폴더 (DataFolder.DispatchGroup) - 비어 있으면 DB 를 사용한다. */
+    std::string m_strDispatchGroupDataFolder;
 
     /** SIP REGISTER 를 전송한 후, 수신한 401 응답의 Authenticate 를 저장하여서 다음 주기의 SIP REGISTER 메시지를 생성할
      * 때에 사용하는 경우 true 로 설정한다. */

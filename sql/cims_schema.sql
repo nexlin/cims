@@ -188,6 +188,8 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
         COMMENT '긴급 사설콜 대상 결정 (MCPTTPrivateRecipient entry-info, TS 24.484)',
     emergency_private_recipient VARCHAR(64) DEFAULT NULL
         COMMENT '사전 지정 긴급 수신자 (ptt_subscriptions.id) — UsePreConfigured 모드 대상. NULL=미지정(그 모드에선 미인가)',
+    allow_ambient_listening TINYINT(1) NOT NULL DEFAULT 0
+        COMMENT 'allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사, dispatch_center.md §5.6)',
     update_time           DATETIME     DEFAULT NULL,
     PRIMARY KEY (ptt_id),
     CONSTRAINT fk_pup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE,
@@ -195,6 +197,56 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
     CONSTRAINT fk_pup_emg_priv FOREIGN KEY (emergency_private_recipient) REFERENCES ptt_subscriptions (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='사용자 MCPTT 프로파일 (SOS 대상 결정 모드·전용 긴급그룹·긴급 사설콜·개시 인가)';
+
+-- ─────────────────────────────────────────────
+--  관제 그룹 (dispatch group) — 픽업 그룹+대표번호+감청 범위 (docs/design/features/dispatch_center.md)
+--  volte_subscriptions.pickup_group 값 = dispatch_groups.id (CSC 가 멤버십에서 파생 갱신)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS dispatch_groups (
+    id              VARCHAR(64)  NOT NULL COMMENT '불변 키 (CSC 발급 dg-xxxxxxxx) — pickup_group 값·상관 키',
+    name            VARCHAR(128) NOT NULL DEFAULT '' COMMENT '표시 이름',
+    pilot_id        VARCHAR(64)           DEFAULT NULL COMMENT '대표번호(AoR user part). NULL=대표번호 없음',
+    service_ref     VARCHAR(64)           DEFAULT NULL COMMENT '대표번호 접속서비스 name',
+    alert_mode      ENUM('parallel','sequential') NOT NULL DEFAULT 'parallel' COMMENT 'TS 24.239 alerting mode',
+    no_answer_sec   INT          NOT NULL DEFAULT 30 COMMENT '전원 무응답 판정 초',
+    busy_members    ENUM('skip','alert') NOT NULL DEFAULT 'skip' COMMENT '통화 중 그룹원 호출 여부',
+    overflow_target VARCHAR(64)           DEFAULT NULL COMMENT '무응답 넘김 대상(대표번호/내선). NULL=480',
+    monitor_scope   ENUM('none','own','listed','all') NOT NULL DEFAULT 'none' COMMENT '합법감청(dialog 감시·Join) 범위',
+    ptt_listen      ENUM('none','listed','all')       NOT NULL DEFAULT 'none' COMMENT 'PTT 그룹콜 청취 범위',
+    listen_visibility ENUM('hidden','visible')        NOT NULL DEFAULT 'hidden' COMMENT 'PTT 청취 멤버 로스터 노출',
+    org_id          INT                   DEFAULT NULL COMMENT '소속 조직 (콘솔 필터·RBAC 스코프)',
+    created_at      DATETIME              DEFAULT CURRENT_TIMESTAMP,
+    updated_at      DATETIME              DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_dg_pilot (pilot_id),
+    KEY idx_dg_org (org_id),
+    CONSTRAINT fk_dg_org FOREIGN KEY (org_id) REFERENCES organizations (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='관제 그룹 (픽업 그룹+대표번호+감청 범위)';
+
+CREATE TABLE IF NOT EXISTS dispatch_group_members (
+    user_id     VARCHAR(64) NOT NULL COMMENT '가입자 id (volte_subscriptions.id) — 가입자당 그룹 하나',
+    group_id    VARCHAR(64) NOT NULL COMMENT 'dispatch_groups.id',
+    alert_order INT         NOT NULL DEFAULT 0 COMMENT 'sequential 호출 순서 (MaxForkTargets 절삭 순서)',
+    PRIMARY KEY (user_id),
+    KEY idx_dgm_group (group_id),
+    CONSTRAINT fk_dgm_group FOREIGN KEY (group_id) REFERENCES dispatch_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='관제 그룹 멤버';
+
+CREATE TABLE IF NOT EXISTS dispatch_group_monitor_targets (
+    group_id        VARCHAR(64) NOT NULL COMMENT '감청 주체 그룹',
+    target_group_id VARCHAR(64) NOT NULL COMMENT '감청 대상 그룹',
+    PRIMARY KEY (group_id, target_group_id),
+    CONSTRAINT fk_dgt_group  FOREIGN KEY (group_id)        REFERENCES dispatch_groups (id) ON DELETE CASCADE,
+    CONSTRAINT fk_dgt_target FOREIGN KEY (target_group_id) REFERENCES dispatch_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='monitor_scope=listed 대상';
+
+CREATE TABLE IF NOT EXISTS dispatch_group_ptt_targets (
+    group_id     VARCHAR(64) NOT NULL COMMENT '청취 주체 관제 그룹',
+    ptt_group_id BIGINT      NOT NULL COMMENT 'ptt_groups.id (surrogate)',
+    PRIMARY KEY (group_id, ptt_group_id),
+    CONSTRAINT fk_dgp_group FOREIGN KEY (group_id)     REFERENCES dispatch_groups (id) ON DELETE CASCADE,
+    CONSTRAINT fk_dgp_ptt   FOREIGN KEY (ptt_group_id) REFERENCES ptt_groups (id)      ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='ptt_listen=listed 대상';
 
 -- ─────────────────────────────────────────────
 --  MCPTT 시스템 서비스 설정 (TS 24.484 service-config — 시스템 전역 1건)

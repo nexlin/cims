@@ -29,7 +29,12 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | | `volte_subscriptions` | cims_schema.sql + migrate_voip_to_volte.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | VoLTE MSISDN, SIP 인증(`ha1` SoT, `auth_scheme`/AKA 자료(`k_enc`/`opc_enc`/`sqn`/`amf`), `sip_transport` 채널 정책), dnd/forward |
 | | `user_rejects` | cims_schema.sql | VoLTE 착신거부 목록 |
 | | `ptt_subscriptions` | cims_schema.sql + migrate_auth.sql + migrate_auth_id_dropped.sql + migrate_subscription_transport.sql + migrate_subscription_ha1.sql + migrate_subscription_aka.sql | MCPTT ID, IMPI 인증(`ha1` SoT, `auth_scheme`/AKA 자료, `sip_transport` 채널 정책) |
-| | `ptt_user_profile` | cims_schema.sql + migrate_ptt_user_profile_v2.sql | 사용자 MCPTT 프로파일(TS 24.484) — SOS 대상 결정 모드/전용 긴급그룹·개시 인가 3종 ([mcptt_emergency_modes.md](features/mcptt_emergency_modes.md) §2) |
+| | `ptt_user_profile` | cims_schema.sql + migrate_ptt_user_profile_v2.sql + migrate_ptt_user_profile_v3.sql + migrate_ptt_ambient_listening.sql | 사용자 MCPTT 프로파일(TS 24.484) — SOS 대상 결정 모드/전용 긴급그룹·개시 인가 3종 ([mcptt_emergency_modes.md](features/mcptt_emergency_modes.md) §2), 긴급 사설콜, `allow_ambient_listening`(원격 청취 자격 — [dispatch_center.md](features/dispatch_center.md) §5.6, 기본 0) |
+| | `volte_subscriptions.pickup_group` / `ptt_subscriptions.pickup_group` | migrate_subscription_pickup_group.sql | 당겨받기 그룹 축(NULL=org 폴백). 관제 그룹 소속 가입자는 값이 `dispatch_groups.id`(`dg-…`)로 **파생**된다(CSC 단일 쓰기 주체, 직접 편집 409) |
+| **관제 그룹** | `dispatch_groups` | cims_schema.sql + migrate_dispatch_groups.sql | 관제 그룹(픽업 그룹+대표번호+감청 범위, [dispatch_center.md](features/dispatch_center.md) §3·§8.1) — `id`(VARCHAR(64) 불변 키 `dg-xxxxxxxx`), name, `pilot_id`(UNIQUE, 대표번호), `service_ref`, `alert_mode`(parallel/sequential), `no_answer_sec`, `busy_members`(skip/alert), `overflow_target`, `monitor_scope`(none/own/listed/all), `ptt_listen`(none/listed/all), `listen_visibility`(hidden/visible), `org_id`(FK organizations SET NULL) |
+| | `dispatch_group_members` | migrate_dispatch_groups.sql | `user_id` **PK**(가입자당 그룹 하나), `group_id`(FK CASCADE), `alert_order`(sequential 호출·포크 상한 절삭 순) |
+| | `dispatch_group_monitor_targets` | migrate_dispatch_groups.sql | (`group_id`, `target_group_id`) — `monitor_scope=listed` 의 감청 대상 그룹 |
+| | `dispatch_group_ptt_targets` | migrate_dispatch_groups.sql | (`group_id`, `ptt_group_id`=**ptt_groups.id surrogate** FK CASCADE) — `ptt_listen=listed` 대상. CSP 는 적재 시 `mcptt_group_id` 로 해석 |
 | | `mcptt_service_config` | cims_schema.sql + migrate_mcptt_service_config.sql | MCPTT **시스템 전역** 서비스 설정(TS 24.484 service-config) — **단일 행 id=1**. 1:1/긴급/경보/발언요청/그룹생성 허용 + N2 상한. 편집=`PUT /api/v1/mcptt/service-config`(콘솔 구성>MCPTT 정책), 단말이 user-profile 인가와 AND 로 게이트 |
 | | `users.login_id/password/role` | migrate_auth.sql | 콘솔 인증(가입자와 동일 신원). `role` RBAC ([mcptt_authorization.md](features/mcptt_authorization.md)) |
 | **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_ptt_groups_v2.sql + migrate_ptt_groups_v3_3gpp.sql | **id=surrogate BIGINT AI(PK, 디렉터리/FK 키)**, `mcptt_group_id`(UNIQUE 식별자), name/priority/encryption/emergency/video_enabled/org_code, **group_type(prearranged/chat/broadcast)/on_network/max_members/require_affiliation/alias/icon_url** (3GPP) |
@@ -63,6 +68,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 - `voip_subscriptions(id)` ← `user_rejects.subscription_id` (CASCADE)
 - `ptt_groups(id)` ← `ptt_group_members.group_id` (CASCADE) — **id=surrogate BIGINT**; `mcptt_group_id` 는 UNIQUE 식별자(키 아님)
 - `ptt_groups(id)` ← `ptt_affiliations.group_id` (CASCADE)
+- `dispatch_groups(id)` ← `dispatch_group_members.group_id`, `dispatch_group_monitor_targets.{group_id,target_group_id}`, `dispatch_group_ptt_targets.group_id` (CASCADE); `ptt_groups(id)` ← `dispatch_group_ptt_targets.ptt_group_id` (CASCADE); `organizations(id)` ← `dispatch_groups.org_id` (SET NULL). `volte_subscriptions.pickup_group` 은 FK 없이 값으로 `dispatch_groups.id` 를 담는다(파생 — 삭제 시 CSC 가 NULL 로 되돌린다)
 - `sip_service(id)` ← `voip_subscriptions.service_id`, `ptt_subscriptions.service_id` (NULLABLE)
 - `ha_groups(id)` ← `ha_group_members.group_id` (CASCADE)
 

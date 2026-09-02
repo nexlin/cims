@@ -50,6 +50,7 @@ DEFAULT_USER_PROFILE = {
     "allow_emergency_private_call": True,
     "private_emergency_mode": "LocallyDetermined",
     "emergency_private_recipient": None,
+    "allow_ambient_listening": False,   # TS 24.484 allow-ambient-listening — 원격 청취 자격 (관제사, 기본 없음)
 }
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
@@ -327,11 +328,14 @@ def load_shared_data(config):
 
                     # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — 마이그레이션 전이면 스킵
                     try:
+                        # allow_ambient_listening 은 migrate_ptt_ambient_listening.sql 이후에만 — 컬럼 부재 시 상수 0
+                        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'")
+                        amb_col = "allow_ambient_listening" if cur.fetchone() else "0 AS allow_ambient_listening"
                         cur.execute(
                             "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, "
                             "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
                             "allow_emergency_private_call, private_emergency_mode, "
-                            "emergency_private_recipient "
+                            f"emergency_private_recipient, {amb_col} "
                             "FROM ptt_user_profile")
                         PTT_PROFILES.clear()
                         for r in cur.fetchall():
@@ -344,6 +348,7 @@ def load_shared_data(config):
                                 "allow_emergency_private_call": bool(r['allow_emergency_private_call']),
                                 "private_emergency_mode": r['private_emergency_mode'],
                                 "emergency_private_recipient": r['emergency_private_recipient'],
+                                "allow_ambient_listening": bool(r['allow_ambient_listening']),
                             }
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
@@ -709,7 +714,7 @@ def notify_csp(event_type, uri, action, etag="", sesid="", caller="", service=""
             if event_type in ("CSC_RESTART", "HEARTBEAT", "STATS_REQUEST", "STATS_RESPONSE"):
                 service = "system"
             elif event_type in (
-                "USER_CHANGED", "GROUP_CHANGED",
+                "USER_CHANGED", "GROUP_CHANGED", "DISPATCH_GROUP_CHANGED",
                 # CSP 런타임 설정 변경 알림 (admin 트리거)
                 "LISTENER_CHANGED", "TRUNK_CHANGED",
                 "ROUTE_RULE_CHANGED", "ACCESS_LIST_CHANGED",
@@ -1201,6 +1206,7 @@ def get_user_profile_xml(user_uri):
         <allow-activate-emergency-alert>{_b('allow_emergency_alert')}</allow-activate-emergency-alert>
         <allow-cancel-emergency-alert>{_b('allow_emergency_alert')}</allow-cancel-emergency-alert>
         <allow-emergency-private-call>{_b('allow_emergency_private_call')}</allow-emergency-private-call>
+        <allow-ambient-listening>{"true" if prof.get('allow_ambient_listening') else "false"}</allow-ambient-listening>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
       </actions>
     </rule>
@@ -2252,6 +2258,7 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
 
     services: list = []
     display_name = None
+    dispatch = None
     try:
         import pymysql
         conn = pymysql.connect(host=_DB_CONFIG.get('Host', '127.0.0.1'),
@@ -2307,6 +2314,20 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None
+                # 관제 데스크 (dispatch_center.md §8.4) — 소속 관제 그룹·대표번호·감청/청취 범위.
+                #   테이블 미적용 DB 에서는 블록을 생략한다(null 금지 — Android org.json 문자열화).
+                try:
+                    cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,''), g.monitor_scope, g.ptt_listen, "
+                                "g.listen_visibility FROM dispatch_group_members m "
+                                "JOIN dispatch_groups g ON g.id=m.group_id "
+                                "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
+                    dg = cur.fetchone()
+                    if dg:
+                        dispatch = {"groupId": dg[0], "groupName": dg[1] or "", "pilotId": dg[2] or "",
+                                    "monitorScope": dg[3] or "none", "pttListen": dg[4] or "none",
+                                    "listenVisibility": dg[5] or "hidden"}
+                except Exception:
+                    dispatch = None
         finally:
             conn.close()
     except Exception as e:
@@ -2326,6 +2347,8 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
         "countryCode": country,     # 판정 불가 시 "" (null 금지 — Android org.json 이 "null" 문자열화)
         "services": services,
     }
+    if dispatch:
+        body["dispatch"] = dispatch
     logger.log_info(f"[provisioning/me] msisdn={msisdn} user_id services={[s['kind'] for s in services]} cc={country}")
     return HandlerResult(status=200, body=body, media_type="application/json")
 

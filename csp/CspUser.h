@@ -44,6 +44,9 @@ struct CspUserProfile {
     std::string m_strPrivateEmergencyMode =
         "LocallyDetermined";  ///< MCPTTPrivateRecipient entry-info: LocallyDetermined|UsePreConfigured
     std::string m_strEmergencyPrivateRecipient;  ///< 사전 지정 긴급 수신자 (UsePreConfigured 모드, 빈 값=미지정)
+    /** allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사, dispatch_center.md §5.6).
+     *  기본 false — 행 부재·컬럼 미적용 DB 에서는 전원 자격 없음(청취 INVITE 403). */
+    bool m_bAllowAmbientListening = false;
 };
 
 /**

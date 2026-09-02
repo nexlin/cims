@@ -40,6 +40,7 @@ CCallDir gclsCallDir;
 #include "CscInterface.h"
 #include "CspAclPolicyEngine.h"
 #include "CspConfigCache.h"
+#include "CspDispatchGroup.h"
 #include "CspListenerManager.h"
 #include "CspLocalNodeMap.h"
 #include "CspPendingRouteMap.h"
@@ -373,6 +374,17 @@ int ServiceMain() {
         gclsCspUserMap.Load( gclsSetup.m_strUserDataFolder.c_str() );
     }
 
+    // Load dispatch groups (관제 그룹 — dispatch_center.md §3.3): DB primary(테이블 존재 시), file fallback.
+    //   테이블 미적용 DB 에서도 폴더가 지정돼 있으면 파일로 적재한다(개발·시험 환경).
+    if ( gclsDbManager.IsConnected() && gclsDbManager.HasDispatchTables() ) {
+        CLog::Print( LOG_SYSTEM, "Loading DispatchGroupMap from DB (primary)..." );
+        gclsDispatchGroupMap.LoadFromDb();
+    } else if ( gclsSetup.m_strDispatchGroupDataFolder.length() > 0 ) {
+        CLog::Print( LOG_SYSTEM, "Loading DispatchGroupMap from files: %s",
+                     gclsSetup.m_strDispatchGroupDataFolder.c_str() );
+        gclsDispatchGroupMap.Load( gclsSetup.m_strDispatchGroupDataFolder.c_str() );
+    }
+
     {
         USER_ID_LIST clsRegList;
         gclsUserMap.GetRegisteredUsers( clsRegList );
@@ -513,6 +525,8 @@ int ServiceMain() {
         // 세션 타이머 (RFC 4028) — 갱신 발사 / 만료 leg 회수.
         //   비정상 종료(BYE 유실) leg 을 시한으로 정리한다 (leg_liveness.md).
         gclsUserAgent.CheckSessionTimer();
+        // 관제 — 대표번호 포크 집합 무응답 판정 (dispatch_center.md §4.4)
+        gclsDispatcher.GetTas()->Tick();
 
         // IPsec SA 셋 — 임시 유예·retiring·해제 유예·수명 만료 회수 (sip_access_security.md §8.3)
         gclsIpsecSaSetMap.Sweep( time( NULL ) );

@@ -1,8 +1,13 @@
 # 관제 센터 — 관제 그룹·대표번호 병렬 호출·업무망 합법감청
 
-> **설계 초안 — 구현 착수 전.** 관제 센터(소프트폰·관제용 앱) 요구 세 가지를 수용하는 CSP/CMP/CSC
-> 설계와 설정 규약. 요구 = ① 업무망 통화를 선택해 합법감청(운영자 인가 기반 감독 청취), ② 관제센터로 걸려오는 전화를 N 명의 관제사가
-> 선택적으로 수신(그룹핑), ③ 관제센터 그룹을 N 개 생성.
+> 관제 센터(소프트폰·관제용 앱) 요구 세 가지를 수용하는 CSP/CMP/CSC 설계와 설정 규약. 요구 = ① 업무망
+> 통화를 선택해 합법감청(운영자 인가 기반 감독 청취), ② 관제센터로 걸려오는 전화를 N 명의 관제사가 선택적으로
+> 수신(그룹핑), ③ 관제센터 그룹을 N 개 생성.
+>
+> **구현 상태**: ③ 관제 그룹 모델(CSC API·DB·콘솔·CSP 인메모리 맵)과 ② 대표번호 병렬 호출(포크 집합·승자
+> 확정·CANCEL·무응답·overflow)·dialog 이벤트 인가 범위 확장(§5.2)은 구현·실측 완료. ① 합류(RFC 3911 Join +
+> CMP tap, §5.3~§5.7·§6)와 PTT 그룹콜 청취 JOIN(§5.6)은 **미구현(다음 단계)** — 해당 절은 설계 정본으로 유지한다.
+> 대표번호 링잉 호의 지정 픽업(§4.4 마지막 항)·sequential alerting 상태기도 후속이다.
 >
 > 관련: [volte_supplementary_services.md](volte_supplementary_services.md)(내선·당겨받기·호 전달 —
 > 본 설계가 그 위에 얹힌다), [registration_binding_set.md](registration_binding_set.md)(도달 경로 선택),
@@ -82,11 +87,14 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
 
 ### 3.3 CSP 인메모리 맵
 
-`CspDispatchGroupMap` — 그룹 id 인덱스 + pilot 인덱스 + 감청 범위. 부팅 시 `DbManager` 가 적재하고
-`DISPATCH_GROUP_CHANGED` UDP 통지(기존 `GROUP_CHANGED`/`SERVICE_CHANGED`/`USER_CHANGED` 계열)로
-재적재한다. JSON fallback 은 `csp/DispatchGroup/<id>.json`(User/Group 관례). 그룹원 **집합**은 기존
-`UserMap` 의 픽업 그룹 인덱스(`SelectGroup`)를 그대로 쓴다 — `pickup_group` 값이 그룹 id 이므로
-새 인덱스가 필요 없다.
+`CCspDispatchGroupMap`(`csp/CspDispatchGroup.h/.cpp`) — 그룹 id 인덱스 + pilot 인덱스 + 멤버 인덱스(가입자 →
+그룹) + 감청/청취 범위 판정(`CanWatch`/`CanListenPtt`). 부팅 시 `DbManager` 가 적재하고(`dispatch_groups`
+테이블 부재는 프로브로 감지 — INFO 로그 후 관제 기능 비활성) `DISPATCH_GROUP_CHANGED` UDP 통지(uri=그룹 id,
+DELETE=제거·그 외 단건 재적재, 빈 uri=전량)와 `CSC_RESTART` 로 재적재한다. JSON fallback 은
+`DataFolder.DispatchGroup`(기본 `dispatch_group/`)의 `<id>.json`(User/Group 관례 — 멤버·대상 배열 포함, 개발·시험
+환경에서 DB 마이그레이션 없이 쓴다). 포크 대상은 **멤버 테이블(`alert_order` 순)** 이 SoT 이고 등록·생존 여부만
+`UserMap` 으로 판정한다 — 등록 바인딩의 그룹 스냅샷 지연에 좌우되지 않는다. 당겨받기·BLF·감청 인가의 그룹 축
+값은 `EffectiveGroupOf`(멤버 인덱스 → `CspUser.EffectivePickupGroup()` = `pickup_group` → org 폴백) 하나로 답한다.
 
 ---
 
@@ -101,7 +109,7 @@ UE-A ──INVITE sip:7000@dispatch.cims──► CSP(TAS)
                                           │ ── RELAY_ADD (peer0=A 주소, peer1=0.0.0.0:0 미확정) ──► CMP
                                           │ ── INVITE ──► UE-B   SDP: local_port_b, 서버 키 offer(B 전용)
                                           │ ── INVITE ──► UE-C   SDP: local_port_b, 서버 키 offer(C 전용)
-                                          │              From: A, To: 7000, P-Called-Party-ID: <sip:7000@dispatch.cims>
+                                          │              From: A, To: B|C(그룹원 AoR), P-Called-Party-ID: <sip:7000@dispatch.cims>
  UE-A ◄── 180 Ringing ─────────────────── │ ◄── 180 ── B, C   (첫 180 만 A 에 전달)
                                           │ ◄── 200 OK ── C     ← 최초 응답 = 승자
                                           │ ── RELAY_MODIFY (peer_index=1, C 주소·C answer crypto, callee=C) ──► CMP
@@ -128,7 +136,8 @@ TAS 인에이블 CSP 로 보내야 한다. 트렁크 leg 는 SRTP·코덱 협상
 
 ### 4.3 헤더·신원
 
-- B-leg `From` = 원 발신자(관제사가 발신자를 봐야 한다). `To` = 대표번호. **`P-Called-Party-ID`
+- B-leg `From` = 원 발신자(관제사가 발신자를 봐야 한다). `To` = 그룹원 AoR(B2BUA 관례 — 착신 leg 의 신원
+  조회(NAT·서비스·PT)가 `GetToId` 에 걸려 있고 그룹콜 fan-out 도 같은 관례다). **`P-Called-Party-ID`
   (RFC 3455 / TS 24.229) = 대표번호** — 단말 앱이 "대표번호로 온 호" 임을 알고 데스크 UI 를 띄운다
   (그룹콜 fan-out 이 이미 이 헤더를 쓴다, `GroupCallService.cpp`).
 - **재타게팅 이력의 표준 표현 = History-Info(RFC 7044)** 이지만 코드에 미구현이다. 현재는
@@ -381,21 +390,32 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 
 보조 서비스 로직은 기존대로 **`CTasModule` 소유**, `ModuleDispatcher` 는 B2BUA 골격만 유지한다.
 
-| 컴포넌트 | 변경 |
-|---|---|
-| **CSC** | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members`(§8.2), `pickup_group` 파생 갱신 + 409 게이트, `DISPATCH_GROUP_CHANGED` 통지, pilot↔가입 id 충돌 검증, RBAC(operator 이상만 감청 그룹 편입), `ptt_user_profile.allow_ambient_listening` 편집(§8.1), `/provisioning/me` 에 `dispatch{ group_id, pilot_id, monitor_scope, ptt_listen }` |
-| **CSP `CspDispatchGroupMap`** | 그룹/pilot 인덱스·범위 판정, DB 적재·통지 재적재·JSON fallback(§3.3) |
-| **CSP `CCallMap`** | 포크 집합(§4.4), `MatchDialog`(Replaces 대조 일반화), tap leg 표식(`m_bMonitorLeg` — 이벤트·픽업 후보 제외) |
-| **CSP `CTasModule`** | `TryDispatchPilot`(§4.2) · 포크 응답 상태기(승자/CANCEL/무응답/overflow) · `HandleIncomingJoin`(§5.3) · `CanWatchDialog`(§5.2) · PTT 청취 JOIN + `allow_ambient_listening` 자격 게이트(§5.6) · `E-AUD-016` 발신 |
-| **CSP `CmpClient`** | `AddTap/ModifyTap/RemoveTap`, HEARTBEAT `resource.tap` 학습 |
-| **CMP** | `PRtpRelay::_taps`, `RELAY_TAP_*` 핸들러, 자원 광고·STATS(§6) |
-| **콘솔** | 관리>가입자 옆 **관제 그룹** 페이지(그룹 CRUD·멤버·범위·대표번호), 가입자 편집의 `pickup_group` 을 관제 그룹 선택으로 표시, 감사 화면에 `call_monitored` |
-| **단말(관제용 앱/소프트폰)** | 대표번호 착신 표시(`P-Called-Party-ID`), dialog 목록·클릭→Join INVITE(`a=recvonly`), SSRC 2개 디먹스·믹스(U10 공용), PTT 청취 채널 UI(U6) |
-| **cspsim** | `hunt`·`hunt_noanswer`·`monitor` 시나리오(§9) |
+| 컴포넌트 | 변경 | 상태 |
+|---|---|---|
+| **CSC** `handlers/dispatch.py` | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members` + `/monitor-targets` + `/ptt-targets`(§8.2), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_dispatch_group`, `DISPATCH_GROUP_CHANGED` 통지(uri=그룹 id), pilot↔가입 id·타 대표번호 충돌 409, RBAC(감청/청취 범위 변경·그 그룹 편입은 manager, 편입 가입자 `users.role` operator 이상), `ptt_user_profile.allow_ambient_listening` 편집·XCAP user-profile `<allow-ambient-listening>`, `/provisioning/me` `dispatch{groupId,groupName,pilotId,monitorScope,pttListen,listenVisibility}`. 테이블 미적용 DB 는 목록 `schema=not_migrated`·변경 400 | 구현 |
+| **CSP `CCspDispatchGroupMap`** (`CspDispatchGroup.h/.cpp`) | 그룹 id·pilot·멤버 인덱스, `CanWatch`(§5.2)·`CanListenPtt`(§5.6) 범위 판정, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group` → org 폴백), DbManager 적재(`SelectDispatchGroup`/`LoadAllDispatchGroups`, 부팅 프로브 `HasDispatchTables`)·`DISPATCH_GROUP_CHANGED`/`CSC_RESTART` 재적재·JSON fallback `DataFolder.DispatchGroup`(§3.3) | 구현 |
+| **CSP `CTasModule` 포크 집합** | `CTasForkSet`(TAS 소유 — 대기 leg 는 승자 확정 전까지 `CCallMap` 밖) · `TryDispatchPilot`(§4.2, 미등록 착신 분기의 `TryPickupDial` 앞) · `ResolveForkTargets`(등록·`busy_members=skip` 비통화·발신자 제외·`alert_order` 순·`MaxForkTargets` 절삭) · `ForkAlert`(leg 전용 SDES 서버 키·`P-Called-Party-ID`=대표번호) · `OnForkRing`(첫 180 만 A 에, SDP 없이) · `OnForkStart`(승자 → (A,승자) 쌍 CallMap 삽입 후 디스패처 정상 answer 경로가 RELAY_MODIFY·A 200, 패자 CANCEL, 늦은 200 은 BYE) · `OnForkEnd`(패자 최종 응답 흡수, 전원 실패 486/480, A 취소 → 전원 CANCEL+relay 회수) · `Tick`(1초 — `no_answer_sec` 만료 → `OverflowFork`(대표번호면 그 그룹원 재포크·내선이면 단일 leg, 1단계) 또는 480) · 대표번호 AoR dialog 이벤트(§4.5 — early/confirmed/terminated) | 구현 |
+| **CSP `CscfModule`** | dialog SUBSCRIBE 인가 → `CanWatch(EffectiveGroupOf(구독자), 대상 그룹)`; 대상이 대표번호면 그 그룹(§4.5) | 구현 |
+| **CSP `ModuleDispatcher`** | `OnCallRing`/`OnCallEnd` 훅을 소비형으로(포크 leg 흡수) — CallMap leg 의 dialog 통지는 종전대로 통과 | 구현 |
+| **CSP 설정** | `Setup.Sip.Dispatch.{MaxForkTargets,ForkRingTimeoutSec,MaxTapsPerSession}`, `Setup.DataFolder.DispatchGroup`(config_template·render 기본 `dispatch_group`) | 구현 |
+| **CSP `CCallMap`** | `MatchDialog`(Replaces 대조 일반화), tap leg 표식(`m_bMonitorLeg` — 이벤트·픽업 후보 제외) | 미구현(③) |
+| **CSP `CTasModule` 감청** | `HandleIncomingJoin`(§5.3) · PTT 청취 JOIN + `allow_ambient_listening` 자격 게이트(§5.6) · `E-AUD-016` 발신 | 미구현(③④) |
+| **CSP `CmpClient`** | `AddTap/ModifyTap/RemoveTap`, HEARTBEAT `resource.tap` 학습 | 미구현(③) |
+| **CMP** | `PRtpRelay::_taps`, `RELAY_TAP_*` 핸들러, 자원 광고·STATS(§6) | 미구현(③) |
+| **콘솔** | 관리>가입자 옆 **관제 그룹** 페이지(`DispatchGroupsPage` — 그룹 CRUD·멤버 transfer(VoLTE 가입자)·`alert_order`·감청/청취 범위(manager)·listed 대상 선택), 가입자 편집의 `pickup_group` 은 `dg-` 파생값이면 잠금 표시, `McpttProfile.allow_ambient_listening` 타입 | 구현(감사 화면 `call_monitored` 는 ③) |
+| **OAM 게이트웨이** | csc `pkg.json` `gateway.routes` + `oam.json Gateway.Routes` 시드에 `/api/v1/dispatch-groups` | 구현 |
+| **단말(관제용 앱/소프트폰)** | 대표번호 착신 표시(`P-Called-Party-ID`), dialog 목록·클릭→Join INVITE(`a=recvonly`), SSRC 2개 디먹스·믹스(U10 공용), PTT 청취 채널 UI(U6) | 단말 파트 |
+| **cspsim** | `hunt`(`-pilot`, `-hunt_noanswer`) 시나리오 — 마커 `hunt_status`/`answered_by`/`*_invites`/`pcpid` + 4단말 RTP delta(§9) · `monitor` 시나리오 | `hunt` 구현 / `monitor` ③ |
 
 구현 순서: ① CSC/DB/콘솔 모델 → ② CSP 포크 집합 + pilot 착신 → ③ CMP tap + CSP Join → ④ PTT 청취
 JOIN → ⑤ cspsim·S3 게이트 → 문서(§11). ②의 포크 집합이 유일한 구조 변경이고 나머지는 기존 훅·계약의
-연장이다.
+연장이다. ①②(+②의 cspsim `hunt`·`S3-SCN-FA`) 완료, ③④ 진행 예정.
+
+**포크 집합의 위치(구현 결정)**: 대기 B-leg 는 `CCallMap`(leg 쌍 1:1 모델) 밖의 TAS 소유 맵에 두고, 승자 확정
+시점에 (A, 승자) 쌍을 `CCallMap` 에 넣어 이후를 기존 1:1 경로(answer RELAY_MODIFY·re-INVITE·BYE·sweeper)에
+넘긴다. 패자 leg 는 CANCEL 후 최종 응답(487)이 올 때까지 TAS 맵에 남아 이벤트를 흡수한다. B-leg INVITE 의
+`To` 는 B2BUA 관례대로 그룹원 AoR 이고 `P-Called-Party-ID` 가 대표번호다(§4.3 — GroupCallService fan-out 과
+동형). 포크는 공유 relay(peer1 포트 공용) 위에서만 성립하므로 RTP relay 비활성 노드에서는 503 이다.
 
 ---
 
