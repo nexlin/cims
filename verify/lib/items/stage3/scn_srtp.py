@@ -191,6 +191,9 @@ def srtp(ctx: VerifyContext) -> ItemResult:
                 "-domain", s.get("VOIP_DOM", VOLTE_DOMAIN),
                 *cred_args(s, "VOIP", 2),
                 "-srtp", "required",
+                # cspsim SRTP 는 오디오 RTP 한정(RtpThread.h §8.2) — 영상 m-line 은 평문 RTP/AVP 로 나가므로
+                #   required 정책의 CSP 가 규격대로 488 한다(모든 활성 미디어 SAVP). 음성 전용으로 offer.
+                "-no_video",
             ]
             seen5, on_line5 = srtp_watch()
             rc5, tail5 = run_cspsim(ctx.repo_root, args5, timeout=120, on_line=on_line5)

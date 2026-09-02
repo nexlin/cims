@@ -13,7 +13,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-import subprocess
 import uuid
 
 from ...registry import verify_item, ItemResult, ItemStatus
@@ -73,10 +72,8 @@ def aka_migrate_idempotent(ctx: VerifyContext) -> ItemResult:
     before = _seed_ha1(db_cfg, user)
 
     def run_once() -> int:
-        cmd = ["mysql", f"-h{db_cfg['Host']}", f"-P{db_cfg.get('Port', 3306)}",
-               f"-u{db_cfg['User']}", f"-p{db_cfg['Password']}", db_cfg["DbName"]]
-        with open(sql_path, "rb") as f:
-            return subprocess.run(cmd, stdin=f, capture_output=True, timeout=30).returncode
+        # mysql CLI 가 없는 환경(dev media01)도 같은 경로로 — pymysql MULTI_STATEMENTS 실행
+        return _db.run_sql_script(db_cfg, sql_path)
 
     rc1 = run_once()
     rc2 = run_once()

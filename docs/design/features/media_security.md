@@ -293,7 +293,8 @@ protect/unprotect 를 삽입. 키는 세션당 생성(발신)·SDP 파싱(수신
   - R2 required 에서 평문 offer → 488 (CSP 협상 게이트 로그)
   - R3 optional — `RTP/AVP`+`a=crypto`(best-effort) 수용 관대화 경로
   - R4 off 대조군 — 정책·단말 off 원복 후 평문 그룹콜 그린(기존 동작 유지)
-  - R5 VoLTE relay — volte 서비스 required 플립 + cspsim 2자 통화(`-srtp required`):
+  - R5 VoLTE relay — volte 서비스 required 플립 + cspsim 2자 통화(`-srtp required -no_video` —
+    cspsim SRTP 는 오디오 RTP 한정이라 영상 m-line 이 섞이면 required 정책의 CSP 가 규격대로 488):
     양 단말 SRTP 성립 + CMP relay leg crypto 2건(leg 별 독립 키 — 투과가 아닌 종단, §5.2)
 - **S1 단위(relay SDP 조작)** — `tests/csp_media_sdes_relay_test.cpp`: `ReadOfferCrypto`
   (SAVP 유효/지원불가 suite/-1·AVP best-effort/평문·비활성 미디어)·`StripCrypto`·
