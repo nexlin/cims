@@ -175,8 +175,11 @@ SAN 에 들어간다. 외부망 IP 로 브라우저 접속해도 SAN 불일치�
 - **`oam` 은 다시 설치하지 않는다.** 부트스트랩이 `status=running` deployment 로 자기등록해
   둔다.
 - 게이트웨이 라우트는 서비스 모듈이 설치 시 **self-register** 한다 — 수동 시드 불필요.
-- csc/oam-svc 의 `CimsRuntimeDir` 과 `CimsAuth.JwtSecret` 은 **입력하지 않는다.** 설정
-  실체화가 oam 배포설정에서 유도(`_store_source`)·주입한다.
+- `CimsAuth.JwtSecret` 은 **입력하지 않는다** — 설정 실체화가 게이트웨이 서비스 모듈
+  (csc·oam-svc)에 그룹 공통 신원으로 주입한다.
+- `CimsRuntimeDir` 은 다르다. oam-svc 는 oam 배포설정에서 유도(`_store_source`)받지만
+  **csc 는 받지 못한다** — 비워 두면 컬렉션·IdMS 토큰 경로가 엉뚱하게 잡힌다.
+  §4.2 ① 에서 반드시 설정한다.
 - 설정 항목은 대부분 재기동이 필요하다. 값을 다 넣고 패널 하단 **`저장 + 재기동`** 을 쓴다
   (`저장` 만 누르면 파일에만 반영되고 프로세스는 옛 값으로 계속 돈다).
 - 템플릿에 선언되지 않은 키는 저장 시 버려지고 `미저장(템플릿에 없는 키)` 로 보고된다.
@@ -294,6 +297,83 @@ Digest realm 의 근거다.
 `Auth realm` 을 비우면 도메인을 상속한다. `Inbound 정책` `any` 면 `허용 Local Node` 는
 비워 둔다(`restricted` 일 때만 필수).
 
+#### ⚠ 알려진 결함 — `sip_service` 컬렉션 수동 seed 가 필요하다
+
+**이 단계까지만 하면 가입자 프로비저닝이 전면 실패한다.** PTT/VoLTE 번호를 추가할 때
+`400 service_ref required to derive ha1 (unknown service)` 가 나온다.
+
+CSP·콘솔은 `access_services` 를 쓰지만, **CSC 는 구 컬렉션 `sip_service` 만 읽는다**
+(`csc/src/services/config_cache.py` — `_DOMAIN_BY_ENTITY["service"] = "sip_service"`).
+가입자의 SIP 자격 H(A1) 은 `imsi@<domain>:<realm>:<passwd>` 로 만들어지는데, 그 domain/realm
+을 이 컬렉션에서 찾기 때문에 비어 있으면 유도가 불가능하다. **`sip_service` 를 쓰는 주체는
+어디에도 없다** — 콘솔에도 그 컬렉션 편집 화면이 없다.
+
+해소에는 **두 단계가 다 필요하다.** 하나만 하면 증상이 그대로다.
+
+##### ① csc `CimsRuntimeDir` 설정 — 이것부터
+
+비워 두면 CSC 가 컬렉션을 **엉뚱한 경로에서** 찾는다. `file_store.runtime_root()` 의 폴백이
+`ServiceLogging.Dir` 의 형제 `../runtime` 인데, 부트스트랩 레이아웃은 `service_log` 가
+`runtime` **안에** 있어서 경로가 겹쳐 나온다.
+
+```
+CimsRuntimeDir 미설정
+  ServiceLogging.Dir = <prefix>/modules/oam/runtime/service_log
+        ../runtime   = <prefix>/modules/oam/runtime/runtime      ← 존재하지 않는 경로
+  → 컬렉션 = .../oam/runtime/runtime/collections/csp/sip_service
+```
+
+값을 명시하면 `ha_lookup._collections_base()` 의 판정(`basename=runtime` ∧ `parent=oam` ∧
+`grandparent=modules`)이 성립해 **소유 모듈 네임스페이스**로 유도된다.
+
+```
+CimsRuntimeDir = <prefix>/modules/oam/runtime
+  → 컬렉션 = <prefix>/modules/csp/runtime/collections/sip_service
+```
+
+**콘솔 위치** — `[패키지 설정]` → `csc` 모듈 탭 → **`서비스 로그`** 섹션 →
+필드 **`IdMS 토큰 store`**. `restart` 필드이므로 하단 **`저장 + 재기동`** 을 쓴다.
+
+> 라벨이 `IdMS 토큰 store` 라 찾기 어렵다 — 이 키는 IdMS refresh 토큰/auth code 저장소와
+> **컬렉션 읽기 경로를 함께** 정한다. 같은 섹션의 `서비스 로그 루트`와 혼동하지 말 것:
+> 넣을 값은 그 한 단계 위(`/service_log` 없이)다.
+>
+> 이 값은 결함 우회와 **무관하게 반드시 설정해야 한다.** 비우면 IdMS 토큰도 없는 경로에
+> 쌓으려 하고, 버전 디렉터리로 유도되면 업그레이드마다 전 단말 재로그인이 된다.
+
+##### ② `sip_service` 컬렉션 seed
+
+`access_services` 를 미러링해 손으로 넣는다. `name`·`domain` 이 §4.2 에서 만든 접속 서비스와
+**정확히 같아야** 한다.
+
+```bash
+sudo install -o <서비스계정> -g <서비스계정> -d <prefix>/modules/csp/runtime/collections/sip_service
+```
+
+서비스마다 `<n>.json` 을 하나씩 둔다 (`file_store` 가 디렉터리의 `*.json` 을 전부 읽는다).
+
+```json
+{ "id": 1, "name": "mcptt", "kind": "ptt",
+  "domain": "ptt.mnc033.mcc450.3gppnetwork.org", "auth_realm": "",
+  "inbound_policy": "any", "priority": 100, "enabled": true, "note": "",
+  "listeners": ["access-udp"] }
+```
+
+소유자는 서비스 계정, 모드 `660`. **넣은 뒤 `csc` 를 재기동한다** — 설정 캐시는 기동 시
+`file_store` 에서 1회 로드되고, `refresh_entity()` 는 CSC 자기 write 경로에서만 호출되므로
+(`csc/src/services/mcptt.py`) 외부가 넣은 파일은 재기동으로만 반영된다.
+
+##### 확인
+
+번호 추가가 `201` 로 통하고 `ha1` 이 채워지면 된다.
+
+```bash
+mysql -u<앱계정> -p<비번> <db> -e "SELECT id, imsi, service_ref, LEFT(ha1,10) FROM ptt_subscriptions;"
+```
+
+접속 서비스를 나중에 바꾸면 **두 곳을 함께 고쳐야 한다** — 이 미러가 어긋나면 이미 발급된
+H(A1) 과 CSP 가 계산하는 realm 이 달라져 등록이 401 로 실패한다.
+
 ### 4.3 그 밖의 CSP 설정
 
 `설정` 탭에서 채운다.
@@ -363,8 +443,65 @@ ss -lntup | grep -E ':4419|:4421|:4430|:4480|:5060|:9000|:9001|:9010'
 ## 6. 가입자 프로비저닝
 
 DB 를 새로 만들었으면 비어 있다. `관리 > 구성` 에서 **조직 → 사용자 → PTT 그룹** 순으로
-넣는다. 이후 cspsim 으로 등록·호 시험을 진행한다 —
-[VERIFICATION_MANUAL.md](../VERIFICATION_MANUAL.md).
+넣는다.
+
+- 번호(구독)의 `service_ref` 는 §4.2 에서 만든 **접속 서비스 이름**과 같아야 한다. 이 값으로
+  domain/realm 을 찾아 H(A1) 을 만든다.
+- `imsi` 는 번호 추가 시 필수다 — 인증 username 의 user 파트(`imsi@<domain>`)가 된다.
+- PTT 그룹 ID(`mcptt_group_id`)는 자유 문자열이고 `adhoc-`/`priv-` 접두사만 예약이다.
+  cspsim 의 `-group` 기본값이 `1000` 이므로, 시험 편의상 숫자 ID 로 두면 인자를 생략할 수 있다.
+
+### 6.1 호 시험 (cspsim)
+
+절차·시나리오는 [VERIFICATION_MANUAL.md](../VERIFICATION_MANUAL.md) 가 정본이다. 초도 설치
+직후 최소 확인은 PTT 그룹호 한 번이다.
+
+```bash
+build/bin/cspsim -server_ip <primary_bind_ip> -local_ip <primary_bind_ip> -count 4 -mode ptt -scenario group_call -group <mcptt_group_id> -call_duration 10 -media_dir tests/media -db <db설정.json> -domain <ptt 도메인>
+```
+
+**`-local_ip` 를 명시한다 (멀티홈 호스트 필수).** 생략하면 auto-detect 가 첫 global IP 를
+고르는데, 그것이 서비스망 인터페이스가 아니면 **SDP 광고 주소와 실제 패킷 출발지가 달라진다.**
+등록·호 설정은 정상인데 floor 만 실패하고, CMP 로그에 이렇게 남는다.
+
+```
+addMember … ip=<SDP 주소> floor=33827      ← 이 주소로 멤버 등록
+Floor from unknown <실제 출발지>:33827      ← 포트는 같고 IP 만 다름 → 매칭 실패
+```
+
+증상은 cspsim 쪽 `GRANT timeout — skipping (DENY/QUEUE?)` 다. `media_nat_mode=auto` 로도
+흡수되지만 그건 진짜 NAT 를 위한 것이라, 시험 도구의 주소 선택 오류를 그걸로 덮지 않는다.
+
+**`-group` 은 `mcptt_group_id` 다** (surrogate `ptt_groups.id` 가 아니다). PTT 모드는 **그룹
+멤버만** 로드하므로 값이 틀리면 `[DB] 0명 가입자 로드 → 중단` 이다.
+
+**`-domain` 은 접속 서비스의 `domain` 과 같아야 한다** — `-db` 는 DB 에서 `id/imsi/ha1` 만
+읽고 `authId` 를 `imsi@<domain>` 으로 조립한다.
+
+`-db` 는 `Setup.Database.{Host,Port,User,Password,DbName}` 만 본다. 운영 `csp.json` 은 서비스
+계정 소유(`0600`/`0660`)라 읽히지 않을 수 있으므로, 그 다섯 키만 담은 파일을 따로 두면 된다.
+
+```json
+{ "Setup": { "Database": { "Host": "127.0.0.1", "Port": 3306,
+    "User": "<앱계정>", "Password": "<비번>", "DbName": "<db>" } } }
+```
+
+### 통과 판정
+
+stdout 의 `Registered N/N`·`Call OK` 만으로는 부족하다 — **floor 가 돌았는지**를 봐야 한다.
+
+| 확인 | 통과 기준 |
+|---|---|
+| cspsim stdout | `Registered N/N (fail=0)` · `Call OK/End N/0` · 멤버별 `GRANT received, speaking` |
+| 코덱 | `=> RTP(...) codec(96)` = AMR-WB. **`codec(0)`(PCMU) 이면 미디어 미주입** |
+| PTT 세션 (`/api/v1/ptt/sessions`) | `turn_count`·`speaker_count` > 0, `speakers` 에 참여자 |
+| 녹취 (`/api/v1/recordings`) | 세션당 1건, `segment_count` = 발언 턴 수 |
+| 알람 | 시험 후 `open` 0건 |
+
+`turn_count: 0` 인데 `Call OK` 인 세션은 **floor 실패**다 — 위 `-local_ip` 항목을 먼저 본다.
+
+> **XCAP Token 0 (fail=N, 401) 은 알려진 미해결 항목이다** — IdMS 는 `login_id` 로 키를 잡는데
+> cspsim 은 `tel:<msisdn>` 을 보낸다. 등록·호·floor 와 무관하므로 초도 설치 판정에서 제외한다.
 
 ## 7. 철거 / 재설치
 
@@ -414,7 +551,11 @@ curl -sk https://<관리IP>:4419/api/v1/deployments -H "Authorization: Bearer <�
 | agent 설치 단계 실패 | `<prefix>/modules/oam/current/log/agent_install.log`. ⑥은 자기 OAM 에 HTTPS 로 붙는 단계라 OAM 기동 여부·포트를 먼저 본다 |
 | `db_bootstrap.py` 관리자 접속 실패 | TCP 전용이다. `unix_socket` 환경이면 §1 의 (a) 또는 (b) |
 | CSP `status=failed`, 로그에 `no primary local_node` | §4.1 — `local_nodes` 에 `is_primary=true` 행이 없음 |
+| 번호 추가 시 `400 service_ref required to derive ha1 (unknown service)` | §4.2 — ① csc `CimsRuntimeDir`(콘솔 `서비스 로그 > IdMS 토큰 store`)이 비어 있으면 컬렉션을 `<store>/runtime/runtime/…` 에서 찾는다 ② `sip_service` 컬렉션 미러가 없다. **둘 다** 해야 한다 |
+| csc 가 컬렉션·IdMS 토큰을 엉뚱한 경로에서 찾음 | `CimsRuntimeDir` 미설정 시 폴백이 `ServiceLogging.Dir` 의 형제 `../runtime` 인데, 부트스트랩 레이아웃은 `service_log` 가 `runtime` 안에 있어 `runtime/runtime` 이 된다. §4.2 ① |
+| floor 만 실패 (`GRANT timeout`), 등록·호는 정상 | §6.1 — cspsim `-local_ip` 미지정으로 SDP 주소 ≠ 실제 출발지. CMP 로그에 `Floor from unknown` |
 | CSP 는 떴고 리스너도 열렸는데 UE 가 등록되지 않음 | §4.4 — csc `SIP 포트` 가 기본값 **15060** 으로 남아 CSP 리스너(5060)와 어긋난 경우가 가장 흔하다. 다음으로 `access_services` 도메인 ↔ UE 프로비저닝 도메인 불일치, `local_nodes` bind IP 가 단말이 보는 주소인지 |
+| 등록이 401 로 실패 | `sip_service` 미러의 `domain`/`auth_realm` 이 `access_services` 와 어긋나면 H(A1) 과 CSP 의 realm 계산이 달라진다. 두 곳을 맞춘 뒤 번호를 다시 저장(H(A1) 재발급) |
 | TCP/TLS 로 붙는 UE 만 실패 | csc `SIP TCP/TLS 포트` 가 0 이면 단말에 그 transport 를 광고하지 않거나(TLS) UDP 포트로 시도한다(TCP). §4.4 |
 | TLS 리스너가 안 열림 (`A-PRC-012`) | §4.1 — TLS 행의 `tls_cert_path` 미지정. 로그: `AddTlsListener: no certificate` |
 | 설정을 저장했는데 반영되지 않음 | 모듈 설정 파일은 기동 시점에 써진다. `저장 + 재기동` 을 쓴다 |
