@@ -45,6 +45,7 @@ docs/
     ├── ue_interface.md              단말 연동 개요
     ├── volte_ue.md                  VoLTE 단말 연동 가이드
     ├── ptt_ue.md                    PTT(MCPTT) 단말 연동 가이드
+    ├── initial_install.md           초도 설치 절차 (부트스트랩 → 서비스 기동)
     └── deployment_workflow.md       Console 배포 작업 순서
 ```
 
@@ -54,6 +55,7 @@ docs/
 |---|---|
 | 시스템 전체 이해 | `design/01_overview.md` → `design/02_deployment.md` |
 | 관리자 API 사용 | `api/admin_api.md` |
+| 새 장비에 처음 설치 | `user-manual/initial_install.md` |
 | 서버 배포 진행 | `user-manual/deployment_workflow.md` |
 | 모듈 소스 수정 | `design/modules/<module>.md` |
 | 콘솔 UI 수정 | `design/console_design_system.md` (시각) + `design/console_platform.md` (기능·위젯) |
