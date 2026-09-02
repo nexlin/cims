@@ -82,8 +82,9 @@ Digest 경로의 부수 규칙: nonce 는 OpenSSL `RAND_bytes` 16 바이트 hex(
   (`ext/psip/SipStack/SipTcpThread.cpp`, `SipTlsThread.cpp`, `SipQueueThread.cpp`). `inbound_policy=restricted`
   검사가 TLS 요청에도 유효하다.
 - 가입자별 `sip_transport ENUM('UDP','TCP','TLS')` 는 프로비저닝 힌트이면서 `TLS` 값은 서버 집행
-  정책이다(§3.1). `/provisioning/me` 는 `TLS` 정책 가입자에게 transport 목록을 TLS 하나로 좁히고
-  `sip.enforced=true` 를 표시한다.
+  정책이다(§3.1). `/provisioning/me` 는 서버 게이트와 같은 술어로 transport 목록을 좁힌다 —
+  `TLS` 정책 가입자와 AKA 가입자(§8.2, 서비스가 `ipsec-3gpp` 를 제시하지 않을 때)에게 목록을
+  TLS 하나로 좁히고 `sip.enforced=true` 를 표시한다.
 
 ## 3. P0 — 채널 정책 게이트
 
@@ -552,6 +553,10 @@ SIGUSR1 재로드). `Host` 비면 LocalIp. 같은 자격으로 단말용 MCPTT �
   `-transport tls` 필수.
 - `/provisioning/me`: `account.authScheme` (`digest`|`aka`), `aka` 면 `account.aka={k,opc,amf}` 와 `sipHa1:null`.
   소프트-K 프로비저닝 — 단말이 USIM 역할이므로 K 원문이 토큰 인증 + TLS 채널로 내려간다(이 채널의 신뢰가 전제).
+  AKA 가입자에겐 transport 목록도 TLS 하나로 좁혀지고 `sip.enforced=true` 다(§2.2 — 게이트와 같은 술어.
+  서비스가 `ipsec-3gpp` 를 제시하면 IPsec 부트스트랩 때문에 좁히지 않는다). 콘솔도 AKA 가입자의 채널
+  필드를 "TLS (AKA 강제)" 고정 표시로 바꾼다. `aka`→`digest` 전환은 저장 `ha1` 이 없으면 `passwd`
+  동시 입력을 요구한다(400 — Digest 자격 없는 가입자를 만들지 않는다. 콘솔은 항상 요구).
 - **Android UE**(`android/core`): `account.aka` 를 pjsip AKA cred 로 연결(`AuthCredInfo`
   `PJSIP_CRED_DATA_EXT_AKA` + akaK/akaOp/akaAmf — pjsua2 가 AKA 콜백을 상시 결선). **자격 표현 = hex
   문자열**(K/OPc 32자·AMF 4자): pjsua2/Java 경로는 바이너리를 실을 수 없어, pjsip 패치([2-15])가

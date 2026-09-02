@@ -106,9 +106,11 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   TLS 포트 미설정(`tls_port=0`)이면 TLS 항목이 실리지 않는다. 선택·유지·반영 규칙은
   [sip_tls_signaling.md §7.1](sip_tls_signaling.md) 이 정본.
 - `sip.port`/`sip.transport`: **기본값의 유효 쌍** — 목록을 모르는 구 APK 가 이 두 필드만 읽으므로 유지된다.
-- `sip.enforced`: `true` 면 서버가 그 transport 를 **집행**한다(가입자 `sip_transport=TLS` —
-  [sip_access_security.md §3](sip_access_security.md)). 목록은 TLS 하나로 좁혀지고, 다른 채널의 요청은
-  REGISTER 포함 403 이다. `false` 면 목록 안에서 단말이 고른다.
+- `sip.enforced`: `true` 면 서버가 그 transport 를 **집행**한다 — 가입자 `sip_transport=TLS`
+  또는 `auth_scheme=aka`(서버 게이트와 같은 술어, [sip_access_security.md §3·§8.2](sip_access_security.md)).
+  목록은 TLS 하나로 좁혀지고, 다른 채널의 요청은 REGISTER 포함 403 이다. `false` 면 목록 안에서
+  단말이 고른다. 예외: 서비스가 `ipsec-3gpp` 를 제시하면 AKA 가입자도 좁히지 않는다(IPsec
+  부트스트랩 = 평문 초기 REGISTER — Android 범위 밖).
 - `sip.mediaSecurity`: 미디어 SRTP(SDES) 정책 `off|optional|required` — 서버 접속서비스
   `media_srtp` 와 같은 값(한 SoT, 설정 `Provisioning.Services.<kind>.media_srtp` — CSP 와 운영자
   동기). 단말은 TLS 접속일 때만 pjsua `srtpUse` 로 반영하고 REGISTER `Security-Client` 에

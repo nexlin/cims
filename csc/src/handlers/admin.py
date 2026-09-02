@@ -715,7 +715,8 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
-            cur.execute(f"SELECT imsi, service_ref {_aka_select_extra(cur)} FROM {table} WHERE id=%s AND user_id=%s",
+            ha1_col = ", ha1" if _has_ha1_column(cur) else ""
+            cur.execute(f"SELECT imsi, service_ref{ha1_col} {_aka_select_extra(cur)} FROM {table} WHERE id=%s AND user_id=%s",
                         (msisdn, person_id))
             cur_row = cur.fetchone()
             if cur_row is None:
@@ -748,6 +749,11 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             binding_changed = (new_imsi != cur_row['imsi']) or (new_ref != cur_row['service_ref'])
             if binding_changed and not passwd:
                 return HandlerResult(status=400, body={'error': 'passwd required when imsi or service_ref changes (ha1 rebinding)'})
+            # 체계 전환 검증 — aka→digest 는 Digest 자격(H(A1))이 있어야 한다 (§8.2). AKA 가입자는
+            #   ha1 이 비어 있을 수 있어(자격 = K/OPc 뿐), passwd 없이 전환하면 등록 불가가 된다.
+            if auth_scheme == 'digest' and (cur_row.get('auth_scheme') or 'digest') == 'aka' \
+                    and not passwd and not (cur_row.get('ha1') or ''):
+                return HandlerResult(status=400, body={'error': 'passwd required when switching auth_scheme to digest (no stored ha1)'})
             if passwd:
                 if not new_imsi:
                     return HandlerResult(status=400, body={'error': 'imsi required to derive ha1'})

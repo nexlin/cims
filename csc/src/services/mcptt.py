@@ -2175,16 +2175,6 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
     #   강제가 아니라 권장값이며 단말이 목록에서 바꿀 수 있다. 목록에 없으면(예: TLS 포트 미설정)
     #   첫 항목으로 강등한다 — 도달 불가한 기본값을 내리지 않는다.
     default = (sip_transport or svc.get('transport', 'UDP') or 'UDP').upper()
-    # 채널 정책 집행 (sip_access_security.md §3.1): sip_transport=TLS 는 힌트가 아니라 서버가
-    #   집행하는 정책이다 — 비-TLS 채널의 이 신원 요청은 403. 단말이 고를 수 없으므로 목록을
-    #   TLS 하나로 좁히고 enforced 를 표시한다. TLS 포트 미설정이면 도달 경로가 없어 좁히지 못한다
-    #   (운영 오설정 — 단말은 403 을 받는다).
-    enforced = (sip_transport or '').upper() == 'TLS' and bool(tls_port)
-    if enforced:
-        transports = [t for t in transports if t['transport'] == 'TLS']
-    if not any(t['transport'] == default for t in transports):
-        default = transports[0]['transport']
-    default_port = next(t['port'] for t in transports if t['transport'] == default)
     # 채널 보호 메커니즘 (RFC 3329 sec-agree, sip_access_security.md §8.3): 서비스가 제시하는 목록.
     #   ipsec-3gpp(IMS AKA+IPsec)면 보호 포트쌍(port_ps/port_pc — CSP IPSEC local_node)도 싣는다.
     #   ⚠ csc.json Provisioning.Services.<kind>.sec_mechanisms / ipsec_port_ps / ipsec_port_pc 는
@@ -2195,6 +2185,18 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         ipsec = {"port_ps": int(svc.get('ipsec_port_ps')), "port_pc": int(svc.get('ipsec_port_pc') or 0)}
     elif 'ipsec-3gpp' in security:
         security = [m for m in security if m != 'ipsec-3gpp']   # 포트쌍 미설정 = 도달 경로 없음
+    # 채널 정책 집행 — 서버 게이트와 같은 술어 (sip_access_security.md §3.1·§8.2,
+    #   CspUser::requiresTls = sip_transport=TLS ∨ auth_scheme=aka): TLS 정책 가입자와 AKA 가입자는
+    #   비-TLS 채널의 요청이 403 이므로 단말이 고를 수 없다 — 목록을 TLS 하나로 좁히고 enforced 를
+    #   표시한다. 예외: 서비스가 ipsec-3gpp 를 제시하면 AKA 의 유효 채널이 TLS 또는 IPsec SA 두
+    #   갈래라 좁히지 않는다(IPsec 부트스트랩 = 평문 초기 REGISTER, §8.3). TLS 포트 미설정이면
+    #   도달 경로가 없어 좁히지 못한다(운영 오설정 — 단말은 403 을 받는다).
+    enforced = ((sip_transport or '').upper() == 'TLS' or (bool(aka) and ipsec is None)) and bool(tls_port)
+    if enforced:
+        transports = [t for t in transports if t['transport'] == 'TLS']
+    if not any(t['transport'] == default for t in transports):
+        default = transports[0]['transport']
+    default_port = next(t['port'] for t in transports if t['transport'] == default)
     # 미디어 SRTP(SDES) 정책 (media_security.md §7.2): 단말 srtp_use 의 SoT — 서버 접속서비스
     #   정책과 같은 값을 내려 단말·서버가 한 SoT 를 본다. 값이 이상하면 off(조용한 상향 금지).
     #   ⚠ csc.json Provisioning.Services.<kind>.media_srtp 는 CSP access_services.media_srtp 와

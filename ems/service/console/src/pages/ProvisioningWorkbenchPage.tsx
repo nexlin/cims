@@ -623,9 +623,16 @@ function TransportSelect({ value, onChange }: { value: SipTransport | '' | null 
     {TRANSPORT_OPTS.map(o => <option key={o.v} value={o.v}>{o.label}</option>)}
   </select>
 }
-function TransportBadge({ v }: { v?: SipTransport | null }) {
+function TransportBadge({ v, aka }: { v?: SipTransport | null; aka?: boolean }) {
+  if (aka) return <TransportFixedAka />
   if (!v) return <span className="ts">자유</span>
   return <span className={`badge ${v === 'TLS' ? 'badge--red' : 'badge--blue'}`} style={{ fontSize: 9 }} title={v === 'TLS' ? '서버 집행 — 비-TLS 채널 요청 403' : '프로비저닝 힌트'}>{v}</span>
+}
+// AKA 가입자는 채널 정책(sip_transport) 값과 무관하게 보호 채널이 강제된다(requiresTls = TLS ∨ aka,
+//   sip_access_security.md §8.2) — 선택이 무의미하므로 고정 표시한다. 프로비저닝도 목록을 TLS 로 좁힌다.
+function TransportFixedAka() {
+  return <span className="badge badge--red" style={{ fontSize: 9 }}
+    title="AKA — 보호 채널(TLS) 강제. sip_transport 값과 무관하게 비-TLS 요청은 403이며, 단말 프로비저닝 목록도 TLS 하나로 좁혀진다. 접속서비스에 TLS 접속점(tls_port)이 없으면 등록 불가">TLS (AKA 강제)</span>
 }
 
 // ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+PTT 통합) ──
@@ -657,6 +664,8 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
     // AKA: 체계 변경/키 갱신만 전송 (키는 입력했을 때만 — 비우면 보관 키 유지)
     const aka = akaBody(d.auth_scheme || 'digest', d.k || '', d.opc || '', !!r.sub.aka_provisioned)
     if (aka.err) { show(aka.err, 'err'); return }
+    // aka→digest 전환은 Digest 자격(H(A1)) 생성이 필요하다 — 서버는 저장 ha1 이 없을 때 400 (§8.2)
+    if ((r.sub.auth_scheme || 'digest') === 'aka' && (aka.fields.auth_scheme || 'digest') === 'digest' && !d.passwd) { show('AKA→Digest 전환 시 비밀번호를 함께 입력해야 합니다 (H(A1) 생성)', 'err'); return }
     delete d.k; delete d.opc; delete d.auth_scheme
     if ((aka.fields.auth_scheme || 'digest') !== (r.sub.auth_scheme || 'digest') || aka.fields.k) Object.assign(d, aka.fields)
     try { await usersApi.updateSub(user.id, r.svc, r.sub.id, d); show('수정', 'ok'); setEditKey(null); onReload() }
@@ -718,7 +727,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 <td><strong>{r.sub.id}</strong></td>
                 <td>{ed ? <input className="form-input" type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</td>
                 <td>{ed ? <input className="form-input" placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</td>
-                <td>{ed ? <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} /> : <TransportBadge v={r.sub.sip_transport} />}</td>
+                <td>{ed ? (editForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} />) : <TransportBadge v={r.sub.sip_transport} aka={r.sub.auth_scheme === 'aka'} />}</td>
                 <td>{ed ? <>
                   <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
                   {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
@@ -746,7 +755,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
               <td><input className="form-input" placeholder={addIsCall ? '+8213…' : '+825…'} autoFocus value={addForm.id} onChange={e => setAddForm({ ...addForm, id: e.target.value })} /></td>
               <td><input className="form-input" type="password" placeholder={addForm.auth_scheme === 'aka' ? '암호(선택)' : '암호 *'} value={addForm.passwd} onChange={e => setAddForm({ ...addForm, passwd: e.target.value })} /></td>
               <td><input className="form-input" placeholder="SIM IMSI *" value={addForm.imsi} onChange={e => setAddForm({ ...addForm, imsi: e.target.value })} /></td>
-              <td><TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} /></td>
+              <td>{addForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={addForm.sip_transport} onChange={v => setAddForm({ ...addForm, sip_transport: v })} />}</td>
               <td>
                 <AuthSelect value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
                 {addForm.auth_scheme === 'aka' && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
@@ -836,7 +845,7 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
         <Field label="MSISDN *" w={150}><input className="form-input" placeholder={isCall ? '+8213…' : '+825…'} value={msisdn} onChange={e => setMsisdn(e.target.value)} /></Field>
         <Field label="IMSI *" w={170}><input className="form-input" placeholder="SIM IMSI" value={imsi} onChange={e => setImsi(e.target.value)} /></Field>
         <Field label={authScheme === 'aka' ? '암호' : '암호 *'} w={120}><input className="form-input" type="password" value={passwd} onChange={e => setPasswd(e.target.value)} /></Field>
-        <Field label="채널" w={110}><TransportSelect value={sipTransport} onChange={setSipTransport} /></Field>
+        <Field label="채널" w={110}>{authScheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={sipTransport} onChange={setSipTransport} />}</Field>
         <Field label="인증" w={100}><AuthSelect value={authScheme} onChange={setAuthScheme} /></Field>
         {authScheme === 'aka' && <Field label="K / OPc *" w={300}><AkaKeyInputs k={akaK} opc={akaOpc} onChange={(k, opc) => { setAkaK(k); setAkaOpc(opc) }} /></Field>}
         {isCall && <Field label="DND" w={56}><input type="checkbox" checked={dnd} onChange={e => setDnd(e.target.checked)} style={{ marginTop: 6 }} /></Field>}
