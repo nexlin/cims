@@ -95,8 +95,9 @@ class DispatchGroupFixture:
                 cur.execute(
                     "INSERT INTO dispatch_groups (id, name, pilot_id, service_ref, alert_mode, no_answer_sec, "
                     "busy_members, overflow_target, monitor_scope, ptt_listen, listen_visibility) "
-                    "VALUES (%s,%s,%s,'volte','parallel',%s,'skip',%s,'none','none','hidden')",
-                    (self.group_id, f"verify {self.group_id}", self.pilot, self.no_answer_sec, self.overflow))
+                    "VALUES (%s,%s,%s,%s,'parallel',%s,'skip',%s,'none','none','hidden')",
+                    (self.group_id, f"verify {self.group_id}", self.pilot or None,
+                     "volte" if self.pilot else None, self.no_answer_sec, self.overflow or None))
                 for i, user in enumerate(self.members):
                     cur.execute("SELECT group_id FROM dispatch_group_members WHERE user_id=%s", (user,))
                     r = cur.fetchone()
