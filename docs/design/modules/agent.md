@@ -242,7 +242,7 @@ per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가
 | 계층 | 주체 | 책임 | 패키지 제거 |
 |---|---|---|---|
 | L1 노드 base | `cims-priv do_ensure_base_deps` (agent 기동마다) | agent `vendor/` deb 균일 설치 + 무결성 복구 | **안 함** |
-| L1' 모듈 의존 | `cims-priv module-deps-install` (모듈 install·start·restart) | 그 **모듈 패키지가 동봉한** deb 설치 | **안 함** |
+| L1' 모듈 의존 | `cims-priv module-deps-install` (모듈 **install 시 1회**) | 그 **모듈 패키지가 동봉한** deb 설치 | **안 함** |
 | L2 HA 무장/해제 | `cims-ha apply` / `cims-ha disarm` (`job_update_ha`) | conf·unit·스크립트 스테이징, keepalived 기동/정지 | **안 함** |
 | L3 노드 철거 | `uninstall.sh` → `cims-ha purge` | CIMS 소유 구성 제거 후 패키지 제거 | **여기서만** |
 
@@ -250,8 +250,10 @@ per-agent(scope=agent) 규칙은 agent 별로 펼쳐 평가하며, 관측 불가
 기능을 쓰든 안 쓰든 필요한 **OS base** 라 균일 설치한다. 반면 모듈 고유 의존은 그 모듈이
 설치되는 노드에만 들어간다 — CSP 가 없는 노드(CMP 전용 등)에 MariaDB 클라이언트를 깔 이유가
 없다. 그래서 모듈 패키지가 자기 deb 를 `<모듈>/vendor/*.deb` 로 들고 다니고, agent 의
-`_install_module_deps` 가 설치·기동 시점에 `cims-priv module-deps-install` 로 설치한다
-(이미 완비면 dpkg 를 부르지 않는다 — 기동 지연 없음).
+`_install_module_deps` 가 **install 시점에만** `cims-priv module-deps-install` 로 설치한다.
+기동(start/restart) 경로에는 얹지 않는다 — 이 의존은 OS 에 종속적이지 모듈 버전에 종속적이지
+않아서, 버전마다 다른 라이브러리를 요구하는 상황은 개발 단계에서 맞출 문제이지 기동할 때마다
+재설치로 덮을 문제가 아니다.
 
 현재 대상: **CSP** — `libmariadb3`(+`mariadb-common`·`mysql-common`). CSP 는 C++ 바이너리라
 네이티브 `libmariadb.so.3` 가 실행 전제다. `csp/vendor/README.md` 가 폐쇄집합·배경의 정본.

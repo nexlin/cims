@@ -1148,6 +1148,11 @@ def _install_module_deps(module_root: str, install_path: str) -> str:
     붙으면 커널이 AT_SECURE 로 취급해 $ORIGIN 을 무시한다 — IPsec 용 setcap 이 걸리자 CSP 가
     "cannot open shared object file" 로 즉시 죽었다. 표준 경로 설치라야 capability 와 무관하다.
 
+    **install 에서만 부른다.** 이 의존은 OS 에 종속적이지 모듈 버전에 종속적이지 않다 —
+    버전마다 다른 라이브러리를 요구하는 상황은 애초에 개발 단계에서 맞출 문제이지, 기동할 때마다
+    재설치로 덮을 문제가 아니다. start/restart 에 얹으면 재시작마다 sudo·dpkg 조회가 붙고,
+    판정이 한 번 어긋나면 기동할 때마다 재설치가 돈다.
+
     설치 실패는 로그만 남긴다 — 기동 실패는 모듈 자신이 보고한다. 반환: 로그용 짧은 문자열.
     """
     name = os.path.basename((module_root or "").rstrip("/"))
@@ -4618,9 +4623,6 @@ def job_process_control(params: dict, job_type: str) -> tuple:
         if os.path.islink(cur_path) or os.path.exists(cur_path):
             prev_vdir = os.path.realpath(cur_path)
         _flip_current(module_root, install_path)
-        # 롤백으로 옛 버전이 활성화되는 경로 — 그 버전이 요구하는 의존이 다를 수 있다.
-        # 이미 완비면 cims-priv 가 dpkg 를 부르지 않고 즉시 반환한다(기동 지연 없음).
-        _install_module_deps(module_root, install_path)
         _grant_ipsec_capability(module_root, install_path)
 
     # stale-stop: 타겟 버전 밖에서 도는 인스턴스(구버전)를 먼저 stop → 포트 바인드 충돌
