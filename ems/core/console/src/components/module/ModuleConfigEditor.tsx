@@ -365,6 +365,33 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
   )
 }
 
+// 체크박스 다중 선택 — 문자열 배열 값 공통 (ref_list 참조 목록 / options 선언 string_list)
+function CheckboxList({ options, value, onChange, emptyText }: {
+  options: string[]
+  value: unknown
+  onChange: (v: unknown) => void
+  emptyText?: string
+}) {
+  const selected = new Set(Array.isArray(value) ? (value as unknown[]).map(String) : [])
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 120, overflowY: 'auto',
+                  border: '1px solid var(--border)', borderRadius: 4, padding: 4 }}>
+      {options.length === 0 ? (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{emptyText || '(항목 없음)'}</div>
+      ) : options.map(o => (
+        <label key={o} style={{ fontSize: 12 }}>
+          <input type="checkbox" checked={selected.has(o)}
+            onChange={e => {
+              const next = new Set(selected)
+              if (e.target.checked) next.add(o); else next.delete(o)
+              onChange(Array.from(next))
+            }} /> {o}
+        </label>
+      ))}
+    </div>
+  )
+}
+
 function formatValue(v: unknown, f: ConfigTemplateField): string {
   if (v === undefined || v === null || v === '') return '—'
   if (f.type === 'bool') return v ? '✓' : ''
@@ -439,29 +466,17 @@ function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unkno
     )
   }
   if (f.type === 'string_list') {
+    // options 선언 = 닫힌 값 공간 → 체크박스 다중 선택 (자유 입력 오타의 조용한 실패 방지 —
+    //   예: access_services.sec_mechanisms). 미선언이면 종전 콤마 분리 입력.
+    if (f.options?.length) {
+      return <CheckboxList options={f.options} value={value} onChange={onChange} />
+    }
     // 콤마 분리 입력 ↔ 문자열 배열
     return <StringListInput value={value} onChange={onChange} />
   }
   if (f.type === 'ref_list') {
     const options = (f.ref_collection && refOpts[f.ref_collection]) || []
-    const selected = new Set(Array.isArray(value) ? (value as unknown[]).map(String) : [])
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 120, overflowY: 'auto',
-                    border: '1px solid var(--border)', borderRadius: 4, padding: 4 }}>
-        {options.length === 0 ? (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>(참조할 항목 없음)</div>
-        ) : options.map(o => (
-          <label key={o} style={{ fontSize: 12 }}>
-            <input type="checkbox" checked={selected.has(o)}
-              onChange={e => {
-                const next = new Set(selected)
-                if (e.target.checked) next.add(o); else next.delete(o)
-                onChange(Array.from(next))
-              }} /> {o}
-          </label>
-        ))}
-      </div>
-    )
+    return <CheckboxList options={options} value={value} onChange={onChange} emptyText="(참조할 항목 없음)" />
   }
   if (f.type === 'object_list') {
     // 공용 편집기 — item 필드의 ref/ref_list 를 위해 이 renderInput 을 renderCell 로 주입.

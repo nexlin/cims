@@ -273,7 +273,7 @@ export interface ConfigTemplateField {
   required?: boolean
   restart?: boolean
   advanced?: boolean
-  options?: string[]        // enum
+  options?: string[]        // enum · string_list(선언 시 닫힌 값 공간 — 체크박스 다중 선택)
   min?: number              // int
   max?: number              // int
   reload_hint?: string

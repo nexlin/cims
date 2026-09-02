@@ -4493,6 +4493,15 @@ def _validate_record(schema: dict, record: dict) -> list:
             opts = fdef.get("options") or []
             if opts and val not in opts:
                 errors.append(f"{key}: must be one of {opts}")
+        elif t == "string_list":
+            # options 선언 = 닫힌 값 공간 (예: access_services.sec_mechanisms) — 콘솔 밖
+            #   API 직접 PUT 의 오타도 여기서 걸러 조용한 실패(협상 제시 누락)를 막는다.
+            opts = fdef.get("options") or []
+            if opts:
+                vals = val if isinstance(val, list) else [val]
+                bad = [v for v in vals if v not in opts]
+                if bad:
+                    errors.append(f"{key}: must be from {opts} (invalid: {bad})")
     return errors
 
 

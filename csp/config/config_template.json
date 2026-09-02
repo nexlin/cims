@@ -2069,6 +2069,10 @@
             "key": "sec_mechanisms",
             "label": "보안 메커니즘 (RFC 3329)",
             "type": "string_list",
+            "options": [
+              "tls",
+              "ipsec-3gpp"
+            ],
             "default": [
               "tls"
             ],

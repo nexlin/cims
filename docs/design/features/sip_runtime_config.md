@@ -62,9 +62,12 @@ Console 에서 CSP 의 수신 엔드포인트/피어 연결/라우팅 정책/ACL
 
 OAM 은 이 스키마로:
 - UI 폼을 동적 렌더 (`type`, `enum options`, `required`, `advanced`)
-- PUT 시 validation — **`required` / `int` / `bool` / `enum` 만** 검사한다 (`_validate_record`)
+- PUT 시 validation — **`required` / `int` / `bool` / `enum` / `string_list`(`options` 선언 시 원소
+  검사)** 를 검사한다 (`_validate_record`)
 - `id_type: "uuid"` 인 경우 자동 ID 부여 (`uuid4().hex[:16]`)
-- `tags` 필드 (`type: string_list`) 는 자유 입력
+- `string_list` 는 기본 자유 입력(콤마 분리 — 예: `tags`). 필드에 `options` 를 선언하면 닫힌 값
+  공간으로 간주해 콘솔이 체크박스 다중 선택으로 렌더한다 (예: `access_services.sec_mechanisms`
+  `["tls","ipsec-3gpp"]` — 자유 입력 오타가 협상 제시 누락으로 조용히 실패하는 것을 방지)
 
 **콘솔 편집(PUT) 경로는 참조 무결성을 검사하지 않는다.** 존재하지 않는 `local_node_ref` /
 `route_ref` / `rule_ref` / `match_rule_set_ref` 도 그대로 저장되며, CSP 가 로드할 때 ERROR 로그로만
