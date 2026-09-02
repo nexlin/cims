@@ -12,8 +12,9 @@ cspsim `-srtp` 군/대조군을 돌린다 (자기복원 — 종료 시 S3-SEED �
   R3 optional 관대 수용 — `-srtp optional`(AVP+a=crypto best-effort) 도 SRTP 로 성립
   R4 off 대조군 — 정책·단말 모두 off 로 원복 후 평문 그룹콜 그린 (기존 동작 유지)
   R5 VoLTE relay leg 종단 — volte 서비스 required 플립 + `-mode volte -scenario call
-     -srtp required`: 양 단말 SRTP 성립 + CMP relay leg crypto("SRTP audio peer[") 2건
-     (leg 별 독립 키 — crypto 투과가 아니라 CSP 재작성·종단, media_security.md §5.2)
+     -srtp required`(영상 동반 — cims.sh sim 기본 미디어): 양 단말 오디오·비디오 SRTP 성립 +
+     CMP relay leg crypto audio("SRTP audio peer[")·video("SRTP video peer[") 각 2건
+     (leg·m-line 별 독립 키 — crypto 투과가 아니라 CSP 재작성·종단, media_security.md §5.2)
 
 와이어 캡처 실측(§9-2)·혼용 그룹(§9-5)·mediasec 능력 기반 offer(§9-6)는 실기기/
 패킷캡처 전제 — 라이브 정지 창 절차로 별도 수행한다.
@@ -122,11 +123,13 @@ def srtp(ctx: VerifyContext) -> ItemResult:
     # 마커는 tail 이 아니라 on_line 전 스트림에서 찾는다 — 5인 그룹콜 출력이
     # tail 창(100줄)을 넘겨 초반 "[RTP] SRTP enabled" 가 잘린다.
     def srtp_watch() -> tuple:
-        seen = {"srtp": False}
+        seen = {"srtp": False, "video": 0}
 
         def on_line(line: str):
             if "[RTP] SRTP enabled" in line:
                 seen["srtp"] = True
+            elif "[RTP] SRTP video enabled" in line:
+                seen["video"] += 1
         return seen, on_line
 
     def group_call(srtp_arg: str) -> tuple:
@@ -191,17 +194,19 @@ def srtp(ctx: VerifyContext) -> ItemResult:
                 "-domain", s.get("VOIP_DOM", VOLTE_DOMAIN),
                 *cred_args(s, "VOIP", 2),
                 "-srtp", "required",
-                # cspsim SRTP 는 오디오 RTP 한정(RtpThread.h §8.2) — 영상 m-line 은 평문 RTP/AVP 로 나가므로
-                #   required 정책의 CSP 가 규격대로 488 한다(모든 활성 미디어 SAVP). 음성 전용으로 offer.
-                "-no_video",
+                # 영상 동반(cims.sh sim 기본 미디어) — 오디오·비디오 m-line 각각 SAVP+a=crypto 로 offer 하고
+                #   CSP 가 leg 별로 재작성, CMP 가 m-line 별 독립 키로 종단하는 경로까지 실측한다.
             ]
             seen5, on_line5 = srtp_watch()
             rc5, tail5 = run_cspsim(ctx.repo_root, args5, timeout=120, on_line=on_line5)
             sim5 = seen5["srtp"]
-            # PRtpRelay setLegCrypto — 양 leg 각 1건 이상 (audio)
+            sim5v = seen5["video"]
+            # PRtpRelay setLegCrypto — 양 leg 각 1건 이상, audio/video 각각
             relay5 = _grep_logs("SRTP audio peer[", log_dirs[:1], t5 - 5)
-            ok5 = sim5 and relay5 >= 2
-            checks.append(("R5 volte relay 종단", ok5, f"sim_srtp={sim5} relay_leg_crypto={relay5} rc={rc5}"))
+            relay5v = _grep_logs("SRTP video peer[", log_dirs[:1], t5 - 5)
+            ok5 = sim5 and sim5v >= 2 and relay5 >= 2 and relay5v >= 2
+            checks.append(("R5 volte relay 종단(audio+video)", ok5,
+                           f"sim_srtp={sim5} sim_video_srtp={sim5v} relay_leg_crypto audio={relay5} video={relay5v} rc={rc5}"))
     finally:
         # ── 자기복원 + R4: off 대조군 (기존 평문 동작 유지) ──
         restored = flip("") and flip("", "volte")

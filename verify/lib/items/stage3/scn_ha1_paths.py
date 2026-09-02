@@ -2,8 +2,9 @@
 
 sip_access_security.md §6 의 V6/V8 을 자동화한다.
 - V6: `sql/migrate_subscription_aka.sql` 2회 실행 — 둘 다 성공(컬럼 존재 시 no-op)·
-  시드 가입자 ha1 보존·재등록(인증) 유지. (가입자 PUT 경유 ha1 보존은 CSC 관리
-  API 경로라 여기 미포함 — §8.4 잔여.)
+  시드 가입자 ha1 보존·재등록(인증) 유지. 스크립트가 탄 경로(no-op/ALTER)를 보고하고,
+  ALTER 경로에서 계정 권한 부족이면 결함이 아니라 판정 불가(SKIP)로 구분한다. (가입자
+  PUT 경유 ha1 보존은 CSC 관리 API 경로라 여기 미포함 — §8.4 잔여.)
 - V8: IdMS PKCE 로그인(scope=cims:provisioning) → `GET /provisioning/me` 의 `sipHa1`
   존재 + 평문 비밀번호 필드 부재 확인 → 그 ha1 로 REGISTER 200 (단말 부트스트랩 등가).
   시드 가입자의 로그인 계정(users.login_id)이 없으면 SKIP.
@@ -69,25 +70,43 @@ def aka_migrate_idempotent(ctx: VerifyContext) -> ItemResult:
     if not os.path.isfile(sql_path):
         return skip(f"이행 스크립트 없음: {sql_path}")
 
+    # 이행 스크립트의 실제 경로 — 컬럼이 있으면 no-op(SELECT 1), 없으면 ALTER 를 탄다.
+    #   ALTER 경로는 계정에 ALTER 권한이 필요하다(운영 이행은 DBA 계정 절차 — sip_access_security.md §8.4).
+    #   권한 부족은 스크립트 결함이 아니라 '이 계정으로는 판정 불가' → SKIP 으로 구분한다.
+    tables = ("volte_subscriptions", "ptt_subscriptions")
+    had_cols = {t: _db.column_exists(db_cfg, t, "auth_scheme") for t in tables}
+    path_desc = ("no-op(컬럼 존재)" if all(had_cols.values()) else
+                 "ALTER 실행(컬럼 부재: " + ",".join(t for t, ok in had_cols.items() if not ok) + ")")
     before = _seed_ha1(db_cfg, user)
 
-    def run_once() -> int:
-        # mysql CLI 가 없는 환경(dev media01)도 같은 경로로 — pymysql MULTI_STATEMENTS 실행
-        return _db.run_sql_script(db_cfg, sql_path)
+    def run_once():
+        """(ok, 사유) — mysql CLI 가 없는 환경(dev media01)도 같은 경로로: pymysql MULTI_STATEMENTS."""
+        try:
+            _db.run_sql_script(db_cfg, sql_path)
+            return True, "ok"
+        except _db.SqlScriptError as e:
+            if e.permission_denied:
+                raise
+            return False, str(e)
 
-    rc1 = run_once()
-    rc2 = run_once()
+    try:
+        ok1, why1 = run_once()
+        ok2, why2 = run_once()
+    except _db.SqlScriptError as e:
+        return skip(f"이행 스크립트가 {path_desc} 경로에서 권한 거부 — {e} "
+                    f"(계정 {db_cfg.get('User')} 에 ALTER 없음. 운영 DBA 계정 절차로 이행 후 재검증)")
     after = _seed_ha1(db_cfg, user)
+    cols_after = all(_db.column_exists(db_cfg, t, "auth_scheme") for t in tables)
     reg = sip_probe.probe_register_auth(ctx.sim_ip, _CSP_SIP_PORT, user, domain,
                                         auth_user, ha1, ctx.sim_ip,
                                         deregister=True) if ha1 else {}
 
-    ok_run = (rc1 == 0 and rc2 == 0)
+    ok_run = ok1 and ok2 and cols_after
     ok_ha1 = (before is not None and before == after)
     ok_reg = (reg.get("second") == 200)
     lines = [
-        f"- 이행 스크립트 1차/2차 → rc={rc1}/{rc2} "
-        f"({'PASS' if ok_run else 'FAIL'} — 둘 다 0, 컬럼 존재 시 no-op)",
+        f"- 이행 스크립트 경로: {path_desc} → 1차 {why1} / 2차 {why2} / 컬럼 {'존재' if cols_after else '부재'} "
+        f"({'PASS' if ok_run else 'FAIL'} — 둘 다 성공, 2차는 no-op)",
         f"- 시드 가입자 {user} ha1 보존 → {'불변' if ok_ha1 else f'변경됨({before!r}→{after!r})'} "
         f"({'PASS' if ok_ha1 else 'FAIL'})",
         f"- 재등록(저장 ha1) → {reg.get('first')}/{reg.get('second')} "

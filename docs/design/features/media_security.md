@@ -266,14 +266,22 @@ floor SRTCP(F6, [mcptt_standard_conformance.md](mcptt_standard_conformance.md) �
 
 ### 8.1 SDP
 
-`SimSession.cpp` 의 `CSdpMedia("audio", port, "RTP/AVP")` 생성부에 SRTP 모드 분기
-(`RTP/SAVP` + `a=crypto` — `CSdpAttributeCrypto` 재사용). 수신 answer 의 crypto 파싱 동일.
+`SimSession.cpp` 의 `BuildAudioMedia`/`BuildVideoMedia` 가 SRTP 모드에 따라 m-line 을
+`RTP/SAVP` + `a=crypto` 로 낸다. `a=crypto` 는 m-line 단위(RFC 4568 §5)이므로 오디오·비디오가
+**각자 키를 선언**하고(`m_strSrtpLocalKey`/`m_strSrtpVideoLocalKey`), answer 도 m-line 별로 확정한다.
+상대 crypto 는 오디오는 psip `CSipCallRtp` 필드, 비디오는 `m_clsMediaList` 에서 직접 읽는다
+(`ReadMediaCrypto` — psip 가 audio 만 필드로 올리므로). 판정 규칙은 오디오와 동일:
+SAVP 오퍼인데 수락 불가 → 488, required 오퍼에 crypto 없는 활성 video answer → 호 종료,
+optional → 평문 비디오, answer 가 video 를 거절/생략 → 비디오 미송신.
+비디오 송신 목적지는 상대 SDP 의 활성 `m=video` 포트(RFC 3264)로 학습하고, PTT 의
+`X-Video-Port` 헤더는 SDP 에 video 가 없을 때의 폴백이다.
 
 ### 8.2 RTP 경로
 
-`RtpThread.cpp` 송신(`sendto`)·수신 지점에 libsrtp(`ext/libsrtp` 동일 타깃, §6.1)의
-protect/unprotect 를 삽입. 키는 세션당 생성(발신)·SDP 파싱(수신). REGISTER 능력 선언
-(§4.1)은 psip sec-agree 확장을 공유한다.
+`RtpThread.cpp` 가 m-line 별 libsrtp 세션(`SrtpSession` audio/video, `ext/libsrtp` 동일 타깃,
+§6.1)을 들고 오디오 송신·수신, 비디오 송신(단일 NAL·FU-A 두 경로) 지점에서 protect/unprotect
+한다. 키는 세션당 생성(발신)·SDP 파싱(수신). REGISTER 능력 선언(§4.1)은 psip sec-agree 확장을
+공유한다.
 
 ### 8.3 인자
 
@@ -293,9 +301,10 @@ protect/unprotect 를 삽입. 키는 세션당 생성(발신)·SDP 파싱(수신
   - R2 required 에서 평문 offer → 488 (CSP 협상 게이트 로그)
   - R3 optional — `RTP/AVP`+`a=crypto`(best-effort) 수용 관대화 경로
   - R4 off 대조군 — 정책·단말 off 원복 후 평문 그룹콜 그린(기존 동작 유지)
-  - R5 VoLTE relay — volte 서비스 required 플립 + cspsim 2자 통화(`-srtp required -no_video` —
-    cspsim SRTP 는 오디오 RTP 한정이라 영상 m-line 이 섞이면 required 정책의 CSP 가 규격대로 488):
-    양 단말 SRTP 성립 + CMP relay leg crypto 2건(leg 별 독립 키 — 투과가 아닌 종단, §5.2)
+  - R5 VoLTE relay — volte 서비스 required 플립 + cspsim 2자 통화(`-srtp required`, 영상 동반):
+    양 단말 오디오·비디오 SRTP 성립 + CMP relay leg crypto audio/video 각 2건(leg·m-line 별 독립
+    키 — 투과가 아닌 종단, §5.2). 녹취에 비디오 트랙(`seg_*_va/vb.rtp`)이 생기면 보호된 영상
+    RTP 가 양 leg 를 관통해 CMP 가 복호했다는 증거
 - **S1 단위(relay SDP 조작)** — `tests/csp_media_sdes_relay_test.cpp`: `ReadOfferCrypto`
   (SAVP 유효/지원불가 suite/-1·AVP best-effort/평문·비활성 미디어)·`StripCrypto`·
   `ApplyCrypto`(키 재작성·여타 속성 보존·평문 정규화) 13케이스.

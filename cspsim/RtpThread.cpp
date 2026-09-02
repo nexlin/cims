@@ -67,7 +67,7 @@ CRtpThread::~CRtpThread() { Destroy(); ClearSrtp(); }
 
 // ─────────────────────────────────────────────
 //  미디어 SRTP (SDES — media_security.md §8.2)
-//   서버(CMP)와 동일 엔진(ext/libsrtp). 오디오 RTP 한정 — 검증 시나리오 범위.
+//   서버(CMP)와 동일 엔진(ext/libsrtp). 오디오·비디오 m-line 별 독립 세션(RFC 4568 §5).
 // ─────────────────────────────────────────────
 
 static bool SrtpLibReady() {
@@ -107,44 +107,70 @@ static bool SrtpAlloc(const std::string &strSuite, bool bInbound, unsigned char 
   return true;
 }
 
-bool CRtpThread::SetSrtpKeys(const std::string &strSuite, const std::string &strLocalInlineB64,
-                             const std::string &strRemoteInlineB64) {
-  ClearSrtp();
+bool CRtpThread::SetSessionKeys(SrtpSession &clsSes, const char *pszMedia, const std::string &strSuite,
+                                const std::string &strLocalInlineB64, const std::string &strRemoteInlineB64) {
+  ClearSession(clsSes);
   if (!SrtpLibReady()) return false;
   if (strSuite != "AES_CM_128_HMAC_SHA1_80" && strSuite != "AES_CM_128_HMAC_SHA1_32") return false;
   unsigned char arrTx[SRTP_AES_ICM_128_KEY_LEN_WSALT], arrRx[SRTP_AES_ICM_128_KEY_LEN_WSALT];
   if (!SrtpDecodeInline(strLocalInlineB64, arrTx, sizeof(arrTx)) ||
       !SrtpDecodeInline(strRemoteInlineB64, arrRx, sizeof(arrRx)))
     return false;
-  if (!SrtpAlloc(strSuite, false, arrTx, &m_pSrtpTx)) return false;
-  if (!SrtpAlloc(strSuite, true, arrRx, &m_pSrtpRx)) {
-    ClearSrtp();
+  if (!SrtpAlloc(strSuite, false, arrTx, &clsSes.pTx)) return false;
+  if (!SrtpAlloc(strSuite, true, arrRx, &clsSes.pRx)) {
+    ClearSession(clsSes);
     return false;
   }
-  printf("[RTP] SRTP enabled (%s)\n", strSuite.c_str());
+  // "[RTP] SRTP enabled" 는 검증 하네스(S3-SCN-SRTP)의 오디오 성립 마커 — 문구 유지
+  if (pszMedia[0] == 'a')
+    printf("[RTP] SRTP enabled (%s)\n", strSuite.c_str());
+  else
+    printf("[RTP] SRTP %s enabled (%s)\n", pszMedia, strSuite.c_str());
   return true;
+}
+
+void CRtpThread::ClearSession(SrtpSession &clsSes) {
+  if (clsSes.pTx) { srtp_dealloc((srtp_t)clsSes.pTx); clsSes.pTx = NULL; }
+  if (clsSes.pRx) { srtp_dealloc((srtp_t)clsSes.pRx); clsSes.pRx = NULL; }
+}
+
+bool CRtpThread::Protect(SrtpSession &clsSes, char *pszBuf, int &iLen, int iCap) {
+  if (clsSes.pTx == NULL || iLen < 12 || iLen + 16 > iCap) return false;
+  int n = iLen;
+  if (srtp_protect((srtp_t)clsSes.pTx, pszBuf, &n) != srtp_err_status_ok) return false;
+  iLen = n;
+  return true;
+}
+
+bool CRtpThread::Unprotect(SrtpSession &clsSes, char *pszBuf, int &iLen) {
+  if (clsSes.pRx == NULL || iLen < 12) return false;
+  int n = iLen;
+  if (srtp_unprotect((srtp_t)clsSes.pRx, pszBuf, &n) != srtp_err_status_ok) return false;
+  iLen = n;
+  return true;
+}
+
+bool CRtpThread::SetSrtpKeys(const std::string &strSuite, const std::string &strLocalInlineB64,
+                             const std::string &strRemoteInlineB64) {
+  return SetSessionKeys(m_clsSrtpAudio, "audio", strSuite, strLocalInlineB64, strRemoteInlineB64);
+}
+
+bool CRtpThread::SetVideoSrtpKeys(const std::string &strSuite, const std::string &strLocalInlineB64,
+                                  const std::string &strRemoteInlineB64) {
+  return SetSessionKeys(m_clsSrtpVideo, "video", strSuite, strLocalInlineB64, strRemoteInlineB64);
 }
 
 void CRtpThread::ClearSrtp() {
-  if (m_pSrtpTx) { srtp_dealloc((srtp_t)m_pSrtpTx); m_pSrtpTx = NULL; }
-  if (m_pSrtpRx) { srtp_dealloc((srtp_t)m_pSrtpRx); m_pSrtpRx = NULL; }
+  ClearSession(m_clsSrtpAudio);
+  ClearSession(m_clsSrtpVideo);
 }
 
-bool CRtpThread::SrtpProtect(char *pszBuf, int &iLen, int iCap) {
-  if (m_pSrtpTx == NULL || iLen < 12 || iLen + 16 > iCap) return false;
-  int n = iLen;
-  if (srtp_protect((srtp_t)m_pSrtpTx, pszBuf, &n) != srtp_err_status_ok) return false;
-  iLen = n;
-  return true;
-}
+void CRtpThread::ClearVideoSrtp() { ClearSession(m_clsSrtpVideo); }
 
-bool CRtpThread::SrtpUnprotect(char *pszBuf, int &iLen) {
-  if (m_pSrtpRx == NULL || iLen < 12) return false;
-  int n = iLen;
-  if (srtp_unprotect((srtp_t)m_pSrtpRx, pszBuf, &n) != srtp_err_status_ok) return false;
-  iLen = n;
-  return true;
-}
+bool CRtpThread::SrtpProtect(char *pszBuf, int &iLen, int iCap) { return Protect(m_clsSrtpAudio, pszBuf, iLen, iCap); }
+bool CRtpThread::SrtpUnprotect(char *pszBuf, int &iLen) { return Unprotect(m_clsSrtpAudio, pszBuf, iLen); }
+bool CRtpThread::SrtpVideoProtect(char *pszBuf, int &iLen, int iCap) { return Protect(m_clsSrtpVideo, pszBuf, iLen, iCap); }
+bool CRtpThread::SrtpVideoUnprotect(char *pszBuf, int &iLen) { return Unprotect(m_clsSrtpVideo, pszBuf, iLen); }
 
 bool CRtpThread::Create() {
   if (m_hSocket != INVALID_SOCKET) {

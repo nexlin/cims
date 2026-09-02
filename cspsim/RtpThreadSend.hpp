@@ -259,9 +259,12 @@ THREAD_API RtpThreadVideoSend(LPVOID lpParameter) {
 
             memcpy(szPacket + sizeof(RtpHeader), nal.data(), iNalSize);
 
-            UdpSend(pRtpThread->m_hVideoSocket, szPacket,
-                    (int)sizeof(RtpHeader) + iNalSize,
-                    pRtpThread->m_strDestIp.c_str(), iVideoDestPort);
+            // 미디어 SRTP — 비디오 m-line 협상 세션이면 protect 후 송신 (media_security.md §8.2)
+            int iSendLen = (int)sizeof(RtpHeader) + iNalSize;
+            if (!pRtpThread->VideoSrtpEnabled() ||
+                pRtpThread->SrtpVideoProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
+                UdpSend(pRtpThread->m_hVideoSocket, szPacket, iSendLen,
+                        pRtpThread->m_strDestIp.c_str(), iVideoDestPort);
         } else {
             // FU-A fragmentation (RFC 6184)
             uint8_t nalHeader = nal[0];
@@ -302,9 +305,11 @@ THREAD_API RtpThreadVideoSend(LPVOID lpParameter) {
 
                 memcpy(payload + 2, nal.data() + iOffset, iChunk);
 
-                UdpSend(pRtpThread->m_hVideoSocket, szPacket,
-                        (int)sizeof(RtpHeader) + 2 + iChunk,
-                        pRtpThread->m_strDestIp.c_str(), iVideoDestPort);
+                int iSendLen = (int)sizeof(RtpHeader) + 2 + iChunk;
+                if (!pRtpThread->VideoSrtpEnabled() ||
+                    pRtpThread->SrtpVideoProtect(szPacket, iSendLen, (int)sizeof(szPacket)))
+                    UdpSend(pRtpThread->m_hVideoSocket, szPacket, iSendLen,
+                            pRtpThread->m_strDestIp.c_str(), iVideoDestPort);
 
                 iOffset += iChunk;
                 iRemaining -= iChunk;

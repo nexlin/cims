@@ -167,7 +167,9 @@ S2 FAIL → S3~S6 BLOCKED.
 
 - **S3-RESET**: `cims.sh reset --all` (가입자 보존, 로그/DB/녹취/배포본 wipe)
 - **S3-CONFIGURE**: `configure --local-ip <ens160>`
-- **S3-START**: cmp/cmdp/csp/oam/csc/console 순서 기동 (cwrtc/phone 은 재설계 예정 — 제외). **dev 스택은
+- **S3-START**: cmp/cmdp/csp/oam/csc/console 순서 **재시작**(`cims-svc restart` — cwrtc/phone 은 재설계 예정 — 제외).
+  `start` 가 아닌 이유: S3-CONFIGURE 가 JWT 시크릿·CSP↔CSC 내부 API 토큰을 매번 새로 렌더하므로, 이미 떠 있는
+  프로세스를 건너뛰면 구 시크릿을 든 스택을 검증한다(내부 API 401 → AKA/XCAP-ROOT 오탐). **dev 스택은
   build/dist 기본 포트(csp 5060/5061, cmp 9000/9001, oam 4419, csc 4421/4430)를 잡으므로 배포본(라이브)과
   동거하는 박스에서는 라이브를 내린 창에서만 돈다.**
 - **S3-SEED**: dev 환경을 라이브 토폴로지와 정합시킨다 — ① `access_services.jsonl` 시드 ② **TLS 접속점
@@ -182,7 +184,7 @@ S2 FAIL → S3~S6 BLOCKED.
 - **S3-SCN-SRTP**: 미디어 SRTP 회귀 ([media_security.md §9](design/features/media_security.md)) —
   접속서비스 `media_srtp` 를 required/optional/off 로 플립(SIGUSR1)하며 cspsim `-srtp` 군을 돌린다.
   R1 required 협상+CMP 종단+평문 녹취, R2 평문 offer 488 게이트, R3 optional best-effort 수용,
-  R4 off 대조군(자기복원), R5 VoLTE relay leg 종단(volte 서비스 플립 + 2자 통화 — leg 별 독립 키)
+  R4 off 대조군(자기복원), R5 VoLTE relay leg 종단(volte 서비스 플립 + 영상 동반 2자 통화 — leg·m-line 별 독립 키, audio/video 각각)
 - **S3-SCN-XFER / PICKUP / DIALOG**: 관제 소프트폰 보조 서비스 회귀
   ([volte_supplementary_services.md §8 검증](design/features/volte_supplementary_services.md)) — 같은 org VOIP
   4명(A,B,C,D)에 `pickup_group` 을 명시 부여(자기복원)해 실컬럼 축으로 호 전달(blind/attended + `transfer_allowed`

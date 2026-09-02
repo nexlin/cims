@@ -142,8 +142,10 @@ public:
         m_clsServerInfo.m_strSecurityClient = "tls, sdes-srtp;mediasec";
     }
     int  m_iSrtpMode = 0;
-    /** 이 세션이 마지막 SDP 에 선언한 자기 송신 키 (inline base64) — answer 수신 시 세션 확정용 */
+    /** 이 세션이 마지막 SDP 에 선언한 자기 송신 키 (inline base64) — answer 수신 시 세션 확정용.
+     *  a=crypto 는 m-line 단위(RFC 4568 §5)라 audio/video 키를 따로 든다. */
     std::string m_strSrtpLocalKey;
+    std::string m_strSrtpVideoLocalKey;
 
     void SetNoRegister(bool b) { m_bNoRegister = b; }
     void SetNoXcap(bool b) { m_bNoXcap = b; }

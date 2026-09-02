@@ -3,6 +3,7 @@
 #include "SipUtility.h"
 #include "SipMd5.h"
 #include "SdpMedia.h"
+#include "SdpAttributeCrypto.h"
 #include "SipCodecTable.h"
 #include "Log.h"
 #include <openssl/rand.h>
@@ -87,6 +88,61 @@ std::string SrtpGenInlineKeyB64() {
     std::string strOut;
     if (!Base64Encode((const char*)arr, (int)sizeof(arr), strOut)) return "";
     return strOut;
+}
+
+/** video 미디어 라인 구성 (H.264 PT 96 고정). 미디어 SRTP 는 audio 와 동일 규약 — a=crypto 는
+ *  m-line 단위(RFC 4568 §5)라 비디오는 자기 키를 따로 선언한다. */
+void BuildVideoMedia(CSipCallRtp& clsRtp, int iPort, bool bSavp = false, const std::string& strCryptoSuite = "",
+                     const std::string& strCryptoKey = "", const std::string& strCryptoTag = "1") {
+    CSdpMedia clsVideo("video", iPort, bSavp ? "RTP/SAVP" : "RTP/AVP");
+    clsVideo.AddFmt(96);
+    clsVideo.AddAttribute("rtpmap", "96 H264/90000");
+    clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
+    if (!strCryptoKey.empty() && !strCryptoSuite.empty()) {
+        char szVal[192];
+        snprintf(szVal, sizeof(szVal), "%s %s inline:%s", strCryptoTag.c_str(), strCryptoSuite.c_str(),
+                 strCryptoKey.c_str());
+        clsVideo.AddAttribute("crypto", szVal);
+    }
+    clsRtp.m_clsMediaList.push_back(clsVideo);
+}
+
+/** 상대 SDP 의 pszMedia 첫 active(port>0) m-line 포트. 없으면 0 (미디어 부재/거절). */
+int FindActiveMediaPort(const SDP_MEDIA_LIST& clsList, const char* pszMedia) {
+    for (SDP_MEDIA_LIST::const_iterator it = clsList.begin(); it != clsList.end(); ++it) {
+        if (strcasecmp(it->m_strMedia.c_str(), pszMedia)) continue;
+        if (it->m_iPort <= 0) continue;
+        return it->m_iPort;
+    }
+    return 0;
+}
+
+/** 상대 SDP 의 pszMedia active m-line 에서 SDES crypto 를 읽는다 (psip GetSipCallRtp 는 audio 만
+ *  CSipCallRtp 필드로 올리므로 video 는 media list 에서 직접). 지원 suite 의 첫 항목 채택.
+ *  반환: 0=미디어 부재/비활성, 1=유효 crypto, 2=평문(crypto 없음), -1=SAVP 인데 유효 crypto 없음. */
+int ReadMediaCrypto(const SDP_MEDIA_LIST& clsList, const char* pszMedia, std::string& strTag,
+                    std::string& strSuite, std::string& strKey, bool& bSavp) {
+    strTag.clear(); strSuite.clear(); strKey.clear(); bSavp = false;
+    for (SDP_MEDIA_LIST::const_iterator it = clsList.begin(); it != clsList.end(); ++it) {
+        if (strcasecmp(it->m_strMedia.c_str(), pszMedia)) continue;
+        if (it->m_iPort <= 0) continue;
+        bSavp = (strncasecmp(it->m_strProtocol.c_str(), "RTP/SAVP", 8) == 0);
+        for (SDP_ATTRIBUTE_LIST::const_iterator itA = it->m_clsAttributeList.begin();
+             itA != it->m_clsAttributeList.end(); ++itA) {
+            if (strcasecmp(itA->m_strName.c_str(), "crypto")) continue;
+            CSdpAttributeCrypto clsCrypto;
+            if (clsCrypto.Parse(itA->m_strValue.c_str(), (int)itA->m_strValue.size()) <= 0) continue;
+            if (clsCrypto.Empty()) continue;
+            if (clsCrypto.m_strCryptoSuite != "AES_CM_128_HMAC_SHA1_80" &&
+                clsCrypto.m_strCryptoSuite != "AES_CM_128_HMAC_SHA1_32") continue;
+            strTag = clsCrypto.m_strTag;
+            strSuite = clsCrypto.m_strCryptoSuite;
+            strKey = clsCrypto.m_strKey;
+            return 1;
+        }
+        return bSavp ? -1 : 2;
+    }
+    return 0;
 }
 
 }  // namespace
@@ -895,13 +951,18 @@ void SimSession::StartCall(const std::string& strTarget) {
     m_clsRtpThread.m_iAudioPt =
         BuildAudioMedia(clsRtp, m_clsRtpThread.m_iPort, clsRtp.m_iCodec, NULL, m_iSrtpMode >= 2,
                         bSrtpOffer ? "AES_CM_128_HMAC_SHA1_80" : "", m_strSrtpLocalKey);
-    // Video media line (if video file set)
+    // Video media line (if video file set) — SRTP 오퍼 시 비디오도 자기 키로 a=crypto (m-line 단위)
+    m_strSrtpVideoLocalKey.clear();
     if (m_clsRtpThread.m_iVideoPort > 0) {
-        CSdpMedia clsVideo("video", m_clsRtpThread.m_iVideoPort, "RTP/AVP");
-        clsVideo.AddFmt(96);
-        clsVideo.AddAttribute("rtpmap", "96 H264/90000");
-        clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
-        clsRtp.m_clsMediaList.push_back(clsVideo);
+        if (bSrtpOffer) {
+            m_strSrtpVideoLocalKey = SrtpGenInlineKeyB64();
+            if (m_strSrtpVideoLocalKey.empty()) {
+                printf("[%d] [SRTP] video key generation failed — abort call\n", m_iId);
+                return;
+            }
+        }
+        BuildVideoMedia(clsRtp, m_clsRtpThread.m_iVideoPort, m_iSrtpMode >= 2,
+                        bSrtpOffer ? "AES_CM_128_HMAC_SHA1_80" : "", m_strSrtpVideoLocalKey);
     }
 #endif
 
@@ -1527,6 +1588,38 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
     }
     if (!bSrtpAnswer) m_pOwner->m_clsRtpThread.ClearSrtp();
 
+    // 비디오 m-line SDES (RFC 4568 §5 — 미디어 단위 키). 오퍼 video 에 crypto 가 있고 모드>0 이면
+    //   수락(suite/tag echo + 자기 키), SAVP 인데 수락 불가면 488. 오퍼에 video 가 없거나 평문이면
+    //   기존대로 평문 m=video (CSP PTT 는 video 를 X-Video-Port 로만 다룬다).
+    bool bVideoSrtpAnswer = false;
+    std::string strVideoSuite, strVideoTag = "1", strVideoRemoteKey;
+    bool bVideoSavp = false;
+    m_pOwner->m_strSrtpVideoLocalKey.clear();
+    m_pOwner->m_clsRtpThread.ClearVideoSrtp();
+    if (pclsRtp) {
+        int iVc = ReadMediaCrypto(pclsRtp->m_clsMediaList, "video", strVideoTag, strVideoSuite,
+                                  strVideoRemoteKey, bVideoSavp);
+        if (iVc == 1 && m_pOwner->m_iSrtpMode > 0) {
+            m_pOwner->m_strSrtpVideoLocalKey = SrtpGenInlineKeyB64();
+            bVideoSrtpAnswer = !m_pOwner->m_strSrtpVideoLocalKey.empty();
+            if (strVideoTag.empty()) strVideoTag = "1";
+        }
+        if (bVideoSavp && !bVideoSrtpAnswer) {
+            printf("[%d] [SRTP] video SAVP offer but srtp mode=off/unusable — 488\n", m_pOwner->m_iId);
+            m_pUserAgent->StopCall(pszCallId, 488);
+            return;
+        }
+        if (bVideoSrtpAnswer && m_pOwner->m_clsRtpThread.m_iVideoPort > 0 &&
+            !m_pOwner->m_clsRtpThread.SetVideoSrtpKeys(strVideoSuite, m_pOwner->m_strSrtpVideoLocalKey,
+                                                       strVideoRemoteKey)) {
+            printf("[%d] [SRTP] video session setup failed — 488\n", m_pOwner->m_iId);
+            m_pUserAgent->StopCall(pszCallId, 488);
+            return;
+        }
+        // 비디오 송신 목적지 = 오퍼 m=video 포트 (RFC 3264) — 없으면 PTT X-Video-Port 헤더 폴백(아래)
+        m_pOwner->m_clsRtpThread.m_iDestVideoPort = FindActiveMediaPort(pclsRtp->m_clsMediaList, "video");
+    }
+
     // PTT 모드: 180 Ringing → 200 OK 자동응답 (실 단말 동작과 동일)
     if (m_pOwner->m_bPttMode) {
         printf("[%d] [PTT] Group INVITE - sending 180 Ringing\n", m_pOwner->m_iId);
@@ -1544,13 +1637,9 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
             BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
                             bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
                             m_pOwner->m_strSrtpLocalKey, strSrtpTag);
-        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
-            CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
-            clsVideo.AddFmt(96);
-            clsVideo.AddAttribute("rtpmap", "96 H264/90000");
-            clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
-            clsLocalRtp.m_clsMediaList.push_back(clsVideo);
-        }
+        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
+            BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
+                            bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
 
         // PTT 200 OK: m=application(floor 수신 포트) 광고
@@ -1572,8 +1661,8 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
                     }
                 }
             }
-            // X-Video-Port 헤더에서 비디오 포트 추출
-            if (pclsMessage) {
+            // X-Video-Port 헤더에서 비디오 포트 추출 (SDP m=video 가 없을 때의 PTT 폴백)
+            if (pclsMessage && m_pOwner->m_clsRtpThread.m_iDestVideoPort <= 0) {
                 CSipHeader* pVideoHdr = pclsMessage->GetHeader("X-Video-Port");
                 if (pVideoHdr && !pVideoHdr->m_strValue.empty()) {
                     int vp = atoi(pVideoHdr->m_strValue.c_str());
@@ -1605,13 +1694,9 @@ void SessionSipClient::EventIncomingCall(const char* pszCallId, const char* pszF
             BuildAudioMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iPort, clsLocalRtp.m_iCodec, pclsRtp,
                             bSrtpAnswer && pclsRtp->m_bRemoteSavp, bSrtpAnswer ? strSrtpSuite : "",
                             m_pOwner->m_strSrtpLocalKey, strSrtpTag);
-        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0) {
-            CSdpMedia clsVideo("video", m_pOwner->m_clsRtpThread.m_iVideoPort, "RTP/AVP");
-            clsVideo.AddFmt(96);
-            clsVideo.AddAttribute("rtpmap", "96 H264/90000");
-            clsVideo.AddAttribute("fmtp", "96 profile-level-id=42C016; packetization-mode=1");
-            clsLocalRtp.m_clsMediaList.push_back(clsVideo);
-        }
+        if (m_pOwner->m_clsRtpThread.m_iVideoPort > 0)
+            BuildVideoMedia(clsLocalRtp, m_pOwner->m_clsRtpThread.m_iVideoPort, bVideoSrtpAnswer && bVideoSavp,
+                            bVideoSrtpAnswer ? strVideoSuite : "", m_pOwner->m_strSrtpVideoLocalKey, strVideoTag);
 #endif
 
         m_pUserAgent->AcceptCall(pszCallId, &clsLocalRtp);
@@ -1641,6 +1726,30 @@ void SessionSipClient::EventCallStart(const char* pszCallId, CSipCallRtp* pclsRt
         }
     } else if (m_pOwner->m_iSrtpMode == 0) {
         m_pOwner->m_clsRtpThread.ClearSrtp();
+    }
+    // 비디오 m-line answer — 오퍼에 비디오 키를 실었으면 answer video 의 a=crypto 로 확정.
+    //   answer 가 video 를 거절/생략(port 0·m-line 없음)하면 비디오 미송신(SRTP 무관). 활성 video 가
+    //   crypto 없이 오면 required 는 협상 실패(호 종료), optional 은 평문 비디오.
+    if (pclsRtp) {
+        int iVideoDest = FindActiveMediaPort(pclsRtp->m_clsMediaList, "video");
+        m_pOwner->m_clsRtpThread.m_iDestVideoPort = iVideoDest;
+        if (!m_pOwner->m_strSrtpVideoLocalKey.empty() && iVideoDest > 0) {
+            std::string strTag, strSuite, strKey;
+            bool bSavp = false;
+            bool bOk = ReadMediaCrypto(pclsRtp->m_clsMediaList, "video", strTag, strSuite, strKey, bSavp) == 1 &&
+                       m_pOwner->m_clsRtpThread.SetVideoSrtpKeys(strSuite, m_pOwner->m_strSrtpVideoLocalKey, strKey);
+            if (!bOk) {
+                if (m_pOwner->m_iSrtpMode >= 2) {
+                    printf("[%d] [SRTP] video answer without usable crypto (required) — drop call\n", m_pOwner->m_iId);
+                    m_pUserAgent->StopCall(pszCallId);
+                    return;
+                }
+                printf("[%d] [SRTP] video answer without crypto — plaintext video (optional)\n", m_pOwner->m_iId);
+                m_pOwner->m_clsRtpThread.ClearVideoSrtp();
+            }
+        } else {
+            m_pOwner->m_clsRtpThread.ClearVideoSrtp();
+        }
     }
     CSipClient::EventCallStart(pszCallId, pclsRtp);
     // 발신자(UAC, PTT): 200 OK 의 m=application(SharedFloorPort) 을 floor dest 로 학습.
