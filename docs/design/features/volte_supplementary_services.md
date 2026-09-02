@@ -280,7 +280,8 @@ org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로
 ## 9. 범위 외 / 향후 과제
 
 - 내선↔MSISDN 별칭 계층 (§4) — `transform_rule_set_refs` 실체화 후보.
-- 호 보류(hold)/파킹(park), 그룹 착신(hunt group) — 별도 설계.
+- 호 보류(hold)/파킹(park) — 별도 설계. 그룹 착신(대표번호 병렬 호출)·통화 감청·관제 그룹 엔티티는
+  [dispatch_center.md](dispatch_center.md) 가 설계 정본이다(`pickup_group` 값이 관제 그룹 id 로 파생된다).
 - Android UE 의 REFER 발신·픽업 UI — 서버 완성 후 단말 파트.
 - `listener_id` 전파의 TCP/TLS 확장 — 관제 전용 listener 를 `inbound_policy=restricted` 로
   울타리 치려면 필요 ([sip_service_model.md](sip_service_model.md) §9 갭). 그 전까지 관제
