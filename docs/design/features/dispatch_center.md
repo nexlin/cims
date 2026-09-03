@@ -446,7 +446,7 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 | **OAM** | `GET /api/v1/events` — `kind=audit` 열람 manager 게이트(미만은 결과 제외·명시 조회 403)·`code=` 필터 | 구현 |
 | **OAM 게이트웨이** | csc `pkg.json` `gateway.routes` + `oam.json Gateway.Routes` 시드에 `/api/v1/dispatch-groups` | 구현 |
 | **단말 SDK `libcimsue`** ([ue_sdk.md](ue_sdk.md)) | `calledParty`(P-Called-Party-ID), `dialogWatch`(RFC 4235)·`join`(RFC 3911 recvonly, 200 OK a=ssrc 라벨 → `sources`), `pickup`, `transfer`, `joinGroupCall(listenOnly)` — `cimsue-cli` 로 dev 실측(Join 200·감청 RTP·caller/callee 라벨·픽업·REFER) | 구현 |
-| **단말 앱(관제용 UI)** | dialog 목록·클릭→Join, SSRC 별 활성/레벨 표시(U10 관측 API 후속), PTT 청취 채널 UI(U6) | 앱 파트 |
+| **단말 앱(관제용 UI)** | dialog 목록·클릭→Join, SSRC 별 활성/레벨 표시(U10 관측 API 후속), PTT 청취 채널 UI(U6) — 화면 설계 정본 [dispatch_desktop_ui.md](dispatch_desktop_ui.md)(Windows WPF, 다섯 구획·배너·핫키·응답 코드 문구) | 앱 파트 (UI 설계 완료, 구현 전) |
 | **cspsim** | `hunt`(`-pilot`, `-hunt_noanswer`, `-hunt_pickup` — D 의 `<code><pilot>` 지정 픽업, 마커 `pickup_status`/`t_answer_ms`) · `monitor`(dialog 구독→INVITE-Join 청취, 마커 `join_status`/`M_ssrc`/A·B·M RTP delta — SSRC 2개·은닉 판정) · `ptt_listen`(멤버 그룹콜 중 M 의 recvonly INVITE, `-listen_sendrecv` 비멤버 대조 — 마커 `join_status`/`M_recv`/`M_grant`/`M_deny`/`hidden`) · 수신 SSRC 집합·floor DENY/TAKEN 카운터·conference 로스터 누적 | 구현 |
 
 ②의 포크 집합이 유일한 구조 변경이고 나머지는 기존 훅·계약의 연장이다.
