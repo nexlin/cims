@@ -99,8 +99,25 @@ set(PJ_INC      ${PKG_WIN}/include)
 # 설치한다(ext/pjproject/CMakeLists.txt·third_party/CMakeLists.txt 의 install 절). deps 래퍼(AMR-WB)는 lib/.
 set(PJ_LIB_PATH ${PKG_WIN}/lib ${PKG_WIN}/bin ${PKG_WIN}/bin/pjproject/third_party)
 set(PJ_TARGET   "msvc-x64")
-add_subdirectory(${REPO_ROOT}/sdk/core ${CMAKE_BINARY_DIR}/core)
-add_dependencies(cimsue pjproject)
+
+# ── 3b. 단위시험(S1-UE-UNIT) — googletest. 루트 CMake 와 같은 변수 계약(GTEST_DIR/GTEST_INC/GTEST_LIB_PATH)으로 sdk/core 가
+# cimsue_test 를 만든다. CRT 는 위와 같이 /MD 로 맞춘다(gtest_force_shared_crt). Debug 접미(gtestd) 는 두지 않는다 — 링크 이름 고정.
+option(CIMSUE_BUILD_TESTS "cimsue_test(googletest) 빌드" ON)
+if(CIMSUE_BUILD_TESTS)
+    set(GTEST_DIR ${PKG_WIN}/googletest)
+    ExternalProject_Add(googletest
+        GIT_REPOSITORY https://github.com/google/googletest.git
+        GIT_TAG        v1.14.0
+        GIT_SHALLOW    ON
+        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${GTEST_DIR} -DBUILD_GMOCK=OFF -Dgtest_force_shared_crt=ON
+                   -DCMAKE_DEBUG_POSTFIX= -DCMAKE_MSVC_RUNTIME_LIBRARY=${CMAKE_MSVC_RUNTIME_LIBRARY}
+        BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config $<CONFIG>
+        INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config $<CONFIG>)
+    set(GTEST_INC      ${GTEST_DIR}/include)
+    set(GTEST_LIB_PATH ${GTEST_DIR}/lib)
+endif()
+
+add_subdirectory(${REPO_ROOT}/sdk/core ${CMAKE_BINARY_DIR}/core)   # TARGET pjproject 를 보고 스스로 의존을 건다
 
 # ── 4. SDK 디렉터리 (zip 원본) ──
 add_custom_target(sdk-layout ALL

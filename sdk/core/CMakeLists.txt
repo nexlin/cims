@@ -67,7 +67,9 @@ if(CIMSUE_SHARED)
 else()
     set(_cimsue_lib_type STATIC)
 endif()
-add_library(cimsue ${_cimsue_lib_type}
+# 코어 소스는 OBJECT 라이브러리로 한 번만 컴파일한다 — 라이브러리 cimsue(Linux 정적 / Windows DLL)와 단위시험이 같은 오브젝트를
+# 나눠 쓴다. Windows DLL 은 공개 표면(CIMSUE_API)만 export 하므로 내부 심볼을 시험하는 cimsue_test 는 DLL 대신 오브젝트를 링크한다.
+add_library(cimsue_objs OBJECT
     src/engine.cpp
     src/account_map.cpp
     src/types.cpp
@@ -77,36 +79,47 @@ add_library(cimsue ${_cimsue_lib_type}
     src/mcdata/sds_codec.cpp
     src/http/https_client.cpp
     src/csc/csc_client.cpp
+    src/c_api.cpp
     ${FLOOR_DEFS_H}
 )
-target_include_directories(cimsue
-    PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE ${PJ_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# 사용 요구(include·매크로·옵션·pj 링크)는 INTERFACE 타깃 하나에 모아 오브젝트·라이브러리·시험이 같은 것을 본다.
+add_library(cimsue_iface INTERFACE)
 # pjproject 헤더는 공개 헤더에 새지 않지만(pImpl), 내부 소스·단위시험은 pjsua2 를 include 한다.
-target_include_directories(cimsue INTERFACE ${PJ_INC})
+target_include_directories(cimsue_iface INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include ${PJ_INC})
 # pjlib 플랫폼 선택 매크로 — autoconf 빌드(Linux/Android)는 PJ_AUTOCONF, MSVC 는 PJ_WIN32 (pjproject CMake 와 동일값)
 if(WIN32)
     # WIN32_LEAN_AND_MEAN·PJ_WIN32_WINNT 는 pj/compat/os_win32.h 가 무조건 정의한다 — 여기서 겹치면 C4005.
-    target_compile_definitions(cimsue PUBLIC PJ_WIN32=1 NOMINMAX PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
+    target_compile_definitions(cimsue_iface INTERFACE PJ_WIN32=1 NOMINMAX PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
     if(MSVC)
-        target_compile_options(cimsue PUBLIC /utf-8)   # 소스·주석이 UTF-8 (코드 페이지 949 에서 C4819)
+        target_compile_options(cimsue_iface INTERFACE /utf-8)   # 소스·주석이 UTF-8 (코드 페이지 949 에서 C4819)
     endif()
 else()
-    target_compile_definitions(cimsue PUBLIC PJ_AUTOCONF=1 PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
+    target_compile_definitions(cimsue_iface INTERFACE PJ_AUTOCONF=1 PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
 endif()
-target_compile_features(cimsue PUBLIC cxx_std_17)
+target_compile_features(cimsue_iface INTERFACE cxx_std_17)
 if(CIMSUE_SHARED)
-    target_compile_definitions(cimsue PUBLIC CIMSUE_SHARED PRIVATE CIMSUE_BUILDING)
+    target_compile_definitions(cimsue_iface INTERFACE CIMSUE_SHARED)
+endif()
+target_link_directories(cimsue_iface INTERFACE ${PJ_LIB_PATH})
+if(DEFINED AMR_PKG_DIR)
+    target_link_directories(cimsue_iface INTERFACE ${AMR_PKG_DIR}/lib ${AMRWB_PKG_DIR}/lib)
+endif()
+target_link_libraries(cimsue_iface INTERFACE ${PJ_LIBS} ${PJ_SYS_LIBS})
+
+target_link_libraries(cimsue_objs PRIVATE cimsue_iface)
+target_include_directories(cimsue_objs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+if(CIMSUE_SHARED)
+    target_compile_definitions(cimsue_objs PRIVATE CIMSUE_BUILDING)   # export.h → dllexport
+endif()
+if(TARGET pjproject)
+    add_dependencies(cimsue_objs pjproject)                          # pj 헤더가 설치된 뒤 컴파일
+endif()
+
+add_library(cimsue ${_cimsue_lib_type} $<TARGET_OBJECTS:cimsue_objs>)
+target_link_libraries(cimsue PUBLIC cimsue_iface)
+if(CIMSUE_SHARED)
     set_target_properties(cimsue PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
                                             ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-endif()
-target_link_directories(cimsue PUBLIC ${PJ_LIB_PATH})
-if(DEFINED AMR_PKG_DIR)
-    target_link_directories(cimsue PUBLIC ${AMR_PKG_DIR}/lib ${AMRWB_PKG_DIR}/lib)
-endif()
-target_link_libraries(cimsue PUBLIC ${PJ_LIBS} ${PJ_SYS_LIBS})
-if(TARGET pjproject)
-    add_dependencies(cimsue pjproject)
 endif()
 
 # 헤드리스 UE — 검증 도구 (build/bin/cimsue-cli)
@@ -117,7 +130,7 @@ if(NOT MSVC)
 endif()
 set_target_properties(cimsue-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# 단위시험 (S1-UE-UNIT / S1-UE-FLOOR-CODEC) — 루트의 googletest ExternalProject 산출물
+# 단위시험 (S1-UE-UNIT / S1-UE-FLOOR-CODEC) — googletest 는 루트(Linux)·sdk/windows 슈퍼빌드(Windows) 의 ExternalProject 산출물
 if(DEFINED GTEST_DIR)
     add_executable(cimsue_test
         test/account_map_test.cpp
@@ -125,15 +138,22 @@ if(DEFINED GTEST_DIR)
         test/sds_codec_test.cpp
         test/csc_test.cpp
         test/engine_route_test.cpp
-        # CMP 서버 코덱과 교차 검증 — cmp/PFloorCodec.cpp 는 PMcpttGroup.h(+pasf pbase.h) 만 필요
-        test/floor_xcheck_test.cpp
-        ${CIMS_ROOT}/cmp/PFloorCodec.cpp)
-    target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src
-                               ${CIMS_ROOT}/cmp ${EXT_DIR}/pasf/include)
+        test/c_api_test.cpp)
+    target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
-    target_link_libraries(cimsue_test PRIVATE cimsue gtest gtest_main)
-    if(NOT WIN32)
-        target_link_libraries(cimsue_test PRIVATE pthread)
+    if(WIN32)
+        # DLL 은 공개 표면만 export 한다 — 내부 심볼(detail::·floor::Message·mcptt::)을 시험하므로 오브젝트를 직접 링크한다.
+        # 시험 TU 는 CIMSUE_API 를 비워 dllimport 선언을 내지 않는다(__imp_ 미해결 방지 — export.h 의 override). 오브젝트 쪽 dllexport 는
+        # 그대로라 exe 에도 export 테이블이 생기지만 무해하다.
+        target_sources(cimsue_test PRIVATE $<TARGET_OBJECTS:cimsue_objs>)
+        target_compile_definitions(cimsue_test PRIVATE CIMSUE_API=)
+        target_link_libraries(cimsue_test PRIVATE cimsue_iface gtest gtest_main)
+    else()
+        # CMP 서버 코덱과 교차 검증 — cmp/PFloorCodec.cpp 는 PMcpttGroup.h(+pasf pbase.h) 만 필요.
+        # pasf 가 pthread/semaphore/sys/time 을 끌어 Linux 전용 — Windows 는 코어 코덱 시험(floor_codec_test)만.
+        target_sources(cimsue_test PRIVATE test/floor_xcheck_test.cpp ${CIMS_ROOT}/cmp/PFloorCodec.cpp)
+        target_include_directories(cimsue_test PRIVATE ${CIMS_ROOT}/cmp ${EXT_DIR}/pasf/include)
+        target_link_libraries(cimsue_test PRIVATE cimsue gtest gtest_main pthread)
     endif()
     set_target_properties(cimsue_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
     if(TARGET googletest)

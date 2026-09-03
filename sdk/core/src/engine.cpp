@@ -174,14 +174,14 @@ struct Engine::Impl {
     std::map<int, std::unique_ptr<pj::ExtraAudioDevice>> routes;
     int nextRouteId = 1;
     int nextAccountId = 0;
-    std::atomic<long> nextToken{1};
+    std::atomic<int64_t> nextToken{1};
 
     // 스냅샷 — 콜백(pjsip 스레드)이 쓰고 조회(임의 스레드)가 읽는다
     std::mutex snapM;
     std::map<int, RegInfo> regInfos;
     std::map<int, CallInfo> callInfos;                     // 종료된 호도 잠시 보존(조회·최종 통계) — pruneFinished
     std::map<int, StreamStats> finalStats;                 // onStreamDestroyed 시점의 최종 RTP 통계
-    std::map<long, std::pair<int, std::string>> publishPending;   // token → (accountId, groupId)
+    std::map<int64_t, std::pair<int, std::string>> publishPending;   // token → (accountId, groupId)
     std::map<std::string, std::string> publishEtag;               // "accountId:group" → SIP-ETag
     static constexpr size_t kKeepFinished = 64;
     void pruneFinished() {                                 // snapM 잡은 상태에서 호출
@@ -225,9 +225,9 @@ struct Engine::Impl {
     static bool rxOnlyLeg(PjCall* call);
     pj::AudioMedia* activeAudio(PjCall* call, unsigned* idxOut = nullptr);
     void wireMedia(PjCall* call, int callId);
-    long doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
+    int64_t doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                        const std::string& contentType, const std::string& body,
-                       const std::map<std::string, std::string>& headers, long token);
+                       const std::map<std::string, std::string>& headers, int64_t token);
 };
 
 namespace {
@@ -531,7 +531,7 @@ public:
             if (ts.tsx.statusCode < 200) return;
             RequestResult r;
             r.accountId = accountId_;
-            r.token = (long)(intptr_t)prm.userData;
+            r.token = (int64_t)(intptr_t)prm.userData;
             r.method = ts.tsx.method;
             r.code = ts.tsx.statusCode;
             r.reason = ts.tsx.statusText;
@@ -682,9 +682,9 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     if (micOn) mic.startTransmit(*aud); else mic.stopTransmit(*aud);
 }
 
-long Engine::Impl::doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
+int64_t Engine::Impl::doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                                  const std::string& contentType, const std::string& body,
-                                 const std::map<std::string, std::string>& headers, long token) {
+                                 const std::map<std::string, std::string>& headers, int64_t token) {
     auto it = accounts.find(accountId);
     if (it == accounts.end()) return -1;
     try {
@@ -1087,18 +1087,18 @@ FloorInfo Engine::floorInfo(int callId) const {
     });
 }
 
-long Engine::sendRequest(int accountId, const std::string& method, const std::string& targetUri,
-                         const std::string& contentType, const std::string& body,
-                         const std::map<std::string, std::string>& headers) {
+int64_t Engine::sendRequest(int accountId, const std::string& method, const std::string& targetUri,
+                            const std::string& contentType, const std::string& body,
+                            const std::map<std::string, std::string>& headers) {
     if (!impl_->running) return -1;
-    long token = impl_->nextToken++;
+    int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=] { return impl_->doSendRequest(accountId, method, targetUri, contentType, body, headers, token); });
 }
 
-long Engine::affiliate(int accountId, const std::string& groupId, bool on) {
+int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on) {
     if (!impl_->running) return -1;
-    long token = impl_->nextToken++;
-    return impl_->ctl.runSync([=]() -> long {
+    int64_t token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> int64_t {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return -1;
@@ -1118,23 +1118,23 @@ long Engine::affiliate(int accountId, const std::string& groupId, bool on) {
 
 Result Engine::subscribeConference(int accountId, const std::string& groupId, bool on) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    long token = impl_->nextToken++;
+    int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
         std::map<std::string, std::string> h{{"Event", "conference"}, {"Expires", on ? "3600" : "0"}};
-        long r = o->doSendRequest(accountId, "SUBSCRIBE", "sip:" + groupId + "@" + ic->second.domain, "", "", h, token);
+        int64_t r = o->doSendRequest(accountId, "SUBSCRIBE", "sip:" + groupId + "@" + ic->second.domain, "", "", h, token);
         return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
 
 Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, bool on) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    long token = impl_->nextToken++;
+    int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         std::map<std::string, std::string> h{{"Event", "xcap-diff"}, {"Expires", on ? "3600" : "0"}};
-        long r = impl_->doSendRequest(accountId, "SUBSCRIBE", psiUri, "", "", h, token);
+        int64_t r = impl_->doSendRequest(accountId, "SUBSCRIBE", psiUri, "", "", h, token);
         return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
@@ -1143,13 +1143,13 @@ Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, bool 
 
 Result Engine::dialogWatch(int accountId, const std::string& targetAor, bool on) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    long token = impl_->nextToken++;
+    int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
         std::map<std::string, std::string> h{{"Event", "dialog"}, {"Expires", on ? "3600" : "0"}};
-        long r = o->doSendRequest(accountId, "SUBSCRIBE", detail::normalizeTarget(targetAor, ic->second.domain), "", "", h, token);
+        int64_t r = o->doSendRequest(accountId, "SUBSCRIBE", detail::normalizeTarget(targetAor, ic->second.domain), "", "", h, token);
         return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
@@ -1216,13 +1216,13 @@ Result Engine::transferAttended(int callId, int consultCallId) {
 std::string Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery) {
     if (!impl_->running || text.empty()) return std::string();
     std::string msgId = mcdata::newMessageId();
-    long token = impl_->nextToken++;
+    int64_t token = impl_->nextToken++;
     bool ok = impl_->ctl.runSync([=]() -> bool {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return false;
         mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId,
-                                               requestDelivery, (long)std::time(nullptr));
+                                               requestDelivery, (int64_t)std::time(nullptr));
         return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
     });
     return ok ? msgId : std::string();
@@ -1231,13 +1231,13 @@ std::string Engine::sendGroupSds(int accountId, const std::string& groupId, cons
 Result Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
                                    const std::string& msgId, int notifType) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    long token = impl_->nextToken++;
+    int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
-        mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, (long)std::time(nullptr));
-        long r = o->doSendRequest(accountId, "MESSAGE", "sip:" + mcptt::bareId(peer) + "@" + ic->second.domain, b.contentType, b.body, {}, token);
+        mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, (int64_t)std::time(nullptr));
+        int64_t r = o->doSendRequest(accountId, "MESSAGE", "sip:" + mcptt::bareId(peer) + "@" + ic->second.domain, b.contentType, b.body, {}, token);
         return r < 0 ? Result::fail(-3, "send failed") : Result::success();
     });
 }

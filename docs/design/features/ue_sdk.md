@@ -318,7 +318,8 @@ sdk/windows/
 
 - `src/http/https_client.cpp` — BSD 소켓/winsock 차이를 소켓 층(`sock_t`·`closeSock`·`setTimeout`·`WSAStartup`)에서만 흡수. HTTP·TLS 는 공통.
 - `cli/main.cpp` — SIGSEGV 백트레이스(glibc `execinfo`)는 `#ifndef _WIN32`.
-- 64비트 정수 — `SdsMessage.timeSec/fileSize`·SDS 5옥텟 시각은 `int64_t`(Windows `long` 은 32비트). floor 소켓 핸들은 `intptr_t`(Win64 `SOCKET`).
+- 64비트 정수 — `SdsMessage.timeSec/fileSize`·SDS 5옥텟 시각·요청 token(`affiliate`/`sendRequest` 반환, `RequestResult.token`)은
+  `int64_t`(Windows `long` 은 32비트 — `long` 은 공개 헤더에 두지 않는다). floor 소켓 핸들은 `intptr_t`(Win64 `SOCKET`).
 - `sdk/core/CMakeLists.txt` — `WIN32` 면 `PJ_WIN32` 정의·`ws2_32 winmm ole32 iphlpapi crypt32` 시스템 라이브러리·`-rdynamic`/`pthread` 생략, `PJ_LIBS` 를 슈퍼빌드가 `-D` 로 준다(config.guess 접미는 autoconf 전용).
 
 ### 6.3 관제석 오디오 배치
@@ -341,7 +342,7 @@ C API 는 그 헤더를 **손으로 1:1 평탄화**한 것이며(SWIG 는 C# 대
 
 | 층 | 위치 | 규칙 |
 |---|---|---|
-| C API `cimsue_c.h` | `sdk/core/include/cimsue/cimsue_c.h`, 구현 `sdk/core/src/c_api.cpp` — `cimsue.dll` 이 export (`CIMSUE_API` + `extern "C"`) | 불투명 핸들(`cimsue_engine_t*`·`cimsue_csc_t*`), 호/그룹은 정수 id(코어와 동일 값). 명령은 동기 반환 코드(`cimsue_status_t`), 상태·이벤트는 **콜백 구조체 한 벌**(`cimsue_listener_t` — `Listener` 가상함수 1:1, `void* user`) 로 코어 스레드(`ue-ctl`)에서 호출. 문자열은 UTF-8 `const char*`, 코어 소유 문자열은 콜백 동안만 유효. 구조체(`CallState`·`GroupCallState`·`MediaSources` 등)는 POD 로 평탄화하고 배열은 `(ptr, count)`. 열거형 값은 C++ 과 같은 정수. 모든 함수가 `Engine`/`Listener` 헤더와 같은 이름·순서를 따른다 |
+| C API `cimsue_c.h` | `sdk/core/include/cimsue/cimsue_c.h`, 구현 `sdk/core/src/c_api.cpp` — `cimsue.dll` 이 export (`CIMSUE_API` + `extern "C"`, x64 `__cdecl`). 프로토콜 로직이 없는 평탄화 층 — 타입 변환과 수명 규약만 둔다 | 불투명 핸들(`cimsue_engine_t*`·`cimsue_csc_t*`), 계정·호·라우트는 코어와 같은 정수 id. 명령은 동기 `cimsue_status_t`(0=성공, 그 외 = C++ `Result::code` 그대로 — 음수 코어·양수 pjsua/HTTP), 사유는 스레드별 `cimsue_last_error()`; id 반환 함수는 -1 이 실패. 상태·이벤트는 **콜백 구조체 한 벌**(`cimsue_listener_t` — `Listener` 가상함수 1:1, `void* user`, NULL 은 무시; `start()` 가 복사하고 기동 중에는 교체하지 않는다) 로 코어 **이벤트 스레드**에서 호출. 문자열은 UTF-8 `const char*` — 코어 소유 문자열·배열은 콜백 인자면 그 콜백 동안, 조회(getter) 산출이면 같은 스레드의 다음 조회까지(스레드별 스냅샷; CSC 산출은 그 핸들의 다음 호출까지) 유효. 구조체(`CallInfo`·`FloorEvent`·`Profile` 등)는 POD 로 평탄화, 배열은 `(ptr, count)`, 참/거짓은 `int32_t`, 열거형 값은 C++ 과 같은 정수. 입력 설정은 `cimsue_*_default()` 로 채운 뒤 덮어쓴다(문자열 NULL = C++ 기본값 유지, 빈 문자열 = 지움). 모든 함수가 `Engine`/`Listener`/`CscClient` 헤더와 같은 이름·순서. 단위시험 `test/c_api_test.cpp`(S1-UE-UNIT — Windows 는 DLL 이 export 하지 않는 내부 심볼까지 시험하므로 `cimsue_test` 가 DLL 대신 코어 오브젝트(`cimsue_objs`)를 직접 링크) |
 | .NET 파사드 `CimsUe.dll` | `sdk/windows/dotnet/CimsUe/` (C# 클래스 라이브러리, `net10.0-windows`, `AllowUnsafeBlocks`) | `NativeMethods`(`[DllImport("cimsue")]`·`LibraryImport` 소스 생성)는 internal. 공개면은 Kotlin 파사드와 같은 모델 — `Engine`·`Account`·`Call`·`Group`·`Subscriptions`·`CscClient` 클래스 + `IObservable`/이벤트, 콜백은 `SynchronizationContext.Post` 로 앱 스레드에 마샬링(WPF `Dispatcher` 를 참조하지 않는다). 네이티브 핸들은 `SafeHandle` 로 수명 관리, 콜백 델리게이트는 `GCHandle` 로 고정 |
 | Windows 접점 (파사드 안) | `CimsUe/Platform/` | `AudioEndpoints`(`IMMDeviceEnumerator`·`IMMNotificationClient` COM interop) · `HotKeys`(`RegisterHotKey` + 메시지 전용 HWND) · `CredentialStore`(`ProtectedData` DPAPI) · `SingleInstance`(명명 Mutex + 창 활성화) · `AutoStart`(`HKCU\...\Run`). 프로토콜·SIP·RTP 는 이 층에 없다(§1 경계 규칙 3) |
 | 앱 | `windows/dispatch-desktop/` (WPF, MVVM) | `CimsUe.dll` 만 참조. 배포는 self-contained 게시 + MSIX, `cimsue.dll` 은 `CimsUe` 패키지의 `runtimes/win-x64/native/` 로 동봉 |
@@ -412,7 +413,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | D. csc + domain + 관제 API | PKCE/XCAP/프로비저닝(dispatch 블록)·`Capabilities`·dialogWatch·join·pickup·transfer·listenGroupCall·`MediaSources` 라벨 | `S3-UE-CLI` Join/픽업/PTT 청취 PASS |
 | E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획 | 실기기 실측(§9) |
 | F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드 — **빌드 확정**(§6.1 엔진 빌드 확정·CRT 행). 남은 것: WMME 장치 열거 실측 | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 (S3 실측 전) |
-| F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) + `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스) + `windows/dispatch-desktop`(WPF, §6.1) §7 다섯 구획 | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 |
+| F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 79 함수 export, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스) → `windows/dispatch-desktop`(WPF, §6.1) §7 다섯 구획 | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 |
 | F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 콜백 렌더 장치 패치 → `onVideoFrame` | 감청 영상 격자 실측 |
 
 ---

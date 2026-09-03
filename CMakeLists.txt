@@ -281,7 +281,7 @@ ExternalProject_Add(
 # pjproject — 단말 SDK(libcimsue) 엔진 (docs/design/features/ue_sdk.md §3·§8)
 #  ext/pjproject 가 Linux/Android/Windows 공통 소스 정본. 여기서는 Linux(개발 서버·CI) 빌드 —
 #  libcimsue 단위시험·헤드리스 UE `cimsue-cli` 가 링크한다. Android(NDK)는 sdk/android/build-native.sh,
-#  Windows(MSVC)는 pjproject-vs14.sln 이 같은 트리를 빌드한다.
+#  Windows(MSVC)는 sdk/windows 슈퍼빌드가 같은 트리를 pjproject 자체 CMake 로 빌드한다(ue_sdk.md §6.1).
 #  config_site.h(pjproject 가 gitignore) 는 sdk/engine/config_site/linux.h 를 #include 하는 한 줄로 생성.
 #  aconfigure 산출물(build.mak·os-auto.mak·*_auto.h·.depend·output/·lib/)은 전부 pjproject .gitignore
 #  대상 — in-source 빌드가 트리를 더럽히지 않는다.

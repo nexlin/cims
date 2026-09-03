@@ -32,16 +32,25 @@ OpenSSL 은 vcpkg 대신 설치본을 `-DCMAKE_PREFIX_PATH=<openssl 설치 경�
 ```
 cmake -S sdk/windows -B build-win -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
 cmake --build build-win --config Release
+build-win\bin\Release\cimsue_test.exe                      (단위시험 S1-UE-UNIT — 코어 + C API)
 build-win\sdk\bin\cimsue-cli.exe --server <CSP> --port 5060 --domain <D> --msisdn <M> --imsi <I> --ha1 <HEX> register
 dotnet build sdk/windows/dotnet/CimsUe -c Release          (F2 — 파사드)
 ```
 
 산출물 `build-win/sdk/{bin,lib,include}` 가 배포 zip 의 원본이다(`.dll`/`.lib` 은 커밋하지 않는다). 파사드 NuGet 패키지는
-`cimsue.dll` 을 `runtimes/win-x64/native/` 로 동봉한다.
+`cimsue.dll` 을 `runtimes/win-x64/native/` 로 동봉한다. 단위시험은 슈퍼빌드가 googletest 를 함께 받아 빌드한다
+(`-DCIMSUE_BUILD_TESTS=OFF` 로 끌 수 있다). `cimsue_test` 는 DLL 이 export 하지 않는 내부 심볼도 시험하므로 DLL 이 아니라
+코어 오브젝트를 직접 링크한다(`sdk/core/CMakeLists.txt`).
+
+> Smart App Control 이 켜진 PC 는 새로 링크한 미서명 exe 를 파일별 평판으로 간헐 차단한다("Application Control policy has blocked
+> this file"). 재빌드·재시도로 풀리기도 하며, 정책 변경은 개발자 본인의 결정이다.
 
 ## 상태
 
 F1 빌드 확정 — VS 2022 17.14(MSVC 14.44)·CMake 4.4·vcpkg openssl 3.6 에서 슈퍼빌드가 `cimsue.dll`·`cimsue-cli.exe` 까지
 통과하고 `cimsue-cli --help` 가 DLL 을 로드해 실행된다. 확정된 사실은 슈퍼빌드 파일 서두와 ue_sdk.md §6.1 에 있다
 (pjproject CMake 통과 → `pjproject-vs14.sln` 폴백 불필요). 남은 F1 항목은 S3 시나리오(등록·1:1 TLS+SRTP·그룹콜 floor·Join)의
-Windows 실측과 WMME 장치 열거 실측. `dotnet/`(C API·.NET 파사드) 은 F2.
+Windows 실측과 WMME 장치 열거 실측.
+
+F2 — C API `cimsue_c.h` 구현·export 확인(79 함수), `cimsue_test` 27 케이스가 Windows 에서 통과(코어 시험 + `c_api_test`).
+다음은 `dotnet/CimsUe`(.NET 파사드 + Windows 접점) → `windows/dispatch-desktop`(WPF).

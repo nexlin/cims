@@ -75,15 +75,15 @@ public:
     FloorInfo floorInfo(int callId) const;
 
     /** affiliation PUBLISH(TS 24.379 §9, Event: mcptt). on=false 면 Expires:0. 반환 token(onRequestResult 상관). */
-    long affiliate(int accountId, const std::string& groupId, bool on);
+    int64_t affiliate(int accountId, const std::string& groupId, bool on);
     /** 그룹 로스터 구독(RFC 4575 conference, 엔진 패치 evsub) — 확인 신호는 onRoster NOTIFY. */
     Result subscribeConference(int accountId, const std::string& groupId, bool on);
     /** 문서 변경 구독(RFC 5875 xcap-diff) — psiUri 예 sip:gms_psi@domain. 본문은 onMessage 로. */
     Result subscribeXcapDiff(int accountId, const std::string& psiUri, bool on);
     /** 임의 SIP 요청(MESSAGE/PUBLISH/SUBSCRIBE …). 반환 token. */
-    long sendRequest(int accountId, const std::string& method, const std::string& targetUri,
-                     const std::string& contentType, const std::string& body,
-                     const std::map<std::string, std::string>& headers = {});
+    int64_t sendRequest(int accountId, const std::string& method, const std::string& targetUri,
+                        const std::string& contentType, const std::string& body,
+                        const std::map<std::string, std::string>& headers = {});
 
     // ── 관제 (dispatch_center.md §5, volte_supplementary_services.md §5·§6) ──
     /** 대상 AoR 의 dialog 이벤트 구독(RFC 4235, 인가 = 관제 그룹 monitor_scope). NOTIFY → onDialogInfo. */

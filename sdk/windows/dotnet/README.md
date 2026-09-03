@@ -22,5 +22,6 @@ dotnet/
 | `SingleInstance` | 명명 Mutex + 두 번째 실행 시 창 활성화 | — |
 | `AutoStart` | `HKCU\...\Run` 등록 | — |
 
-콜백은 코어 스레드(`ue-ctl`)에서 오며 파사드가 `SynchronizationContext.Post` 로 앱 스레드에 넘긴다. WPF `Dispatcher` 는
-앱(`windows/dispatch-desktop`)만 안다.
+콜백은 코어 **이벤트 스레드**에서 온다(`cimsue_listener_t` — ue_sdk.md §6.4, 콜백 인자 문자열은 콜백 동안만 유효하므로 파사드가
+관리 문자열로 복사한다). 파사드가 `SynchronizationContext.Post` 로 앱 스레드에 넘기며, WPF `Dispatcher` 는 앱(`windows/dispatch-desktop`)만
+안다. 네이티브 표면은 `sdk/core/include/cimsue/cimsue_c.h`(구현 완료 — `cimsue.dll` export, `cimsue_test` 로 검증) 하나다.

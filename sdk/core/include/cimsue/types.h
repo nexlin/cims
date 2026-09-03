@@ -205,7 +205,7 @@ struct FloorInfo {
 /** 임의 SIP 요청(PUBLISH 등)의 최종 응답. */
 struct RequestResult {
     int accountId = -1;
-    long token = 0;
+    int64_t token = 0;
     std::string method;
     int code = 0;
     std::string reason;

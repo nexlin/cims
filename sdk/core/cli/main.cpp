@@ -218,7 +218,7 @@ public:
         set([&] { sds.push_back(m); });
     }
     void onRequestResult(const RequestResult& r) override {
-        std::fprintf(stderr, "[cimsue-cli] %s token=%ld → %d %s etag=%s\n", r.method.c_str(), r.token, r.code, r.reason.c_str(), r.etag.c_str());
+        std::fprintf(stderr, "[cimsue-cli] %s token=%lld → %d %s etag=%s\n", r.method.c_str(), (long long)r.token, r.code, r.reason.c_str(), r.etag.c_str());
         set([&] { results[r.token] = r; });
     }
     void onMessage(int, const std::string& from, const std::string& ct, const std::string& body) override {
@@ -238,7 +238,7 @@ public:
     std::vector<DialogInfo> dialogs;
     int granted = 0, taken = 0, denied = 0, rosters = 0;
     std::vector<SdsMessage> sds;
-    std::map<long, RequestResult> results;
+    std::map<int64_t, RequestResult> results;
 
 private:
     template <typename F> void set(F f) { { std::lock_guard<std::mutex> lk(m_); f(); } cv_.notify_all(); }
@@ -387,7 +387,7 @@ int main(int argc, char** argv) {
     s.code = ls.reg.code; s.reason = ls.reg.reason;
 
     for (auto& g : o.affiliate) {
-        long tok = eng.affiliate(acc, g, true);
+        int64_t tok = eng.affiliate(acc, g, true);
         bool got = ls.waitFor([&] { return ls.results.count(tok) > 0; }, 10);
         if (!got || ls.results[tok].code / 100 != 2)
             std::fprintf(stderr, "[cimsue-cli] affiliate %s failed (code=%d)\n", g.c_str(), got ? ls.results[tok].code : 0);
