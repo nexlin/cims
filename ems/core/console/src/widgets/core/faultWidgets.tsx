@@ -80,12 +80,12 @@ export const eventHistoryWidget = block(
   'core.event-history', '이벤트 이력 (표)', EventsSection, ['events.list'], 12, 40)
 // 조회 조건 — 기간 선택 옆줄에 놓는다. 표는 아래 공간을 전부 쓴다.
 export const alarmHistoryFilterWidget: WidgetDef = {
-  id: 'core.alarm-history.filter', title: '알람 이력 — 조회 조건', category: 'control',
-  component: AlarmHistoryFilter, apis: ['alerts.list'], defaultSize: { w: 8, h: 4 },
+  id: 'core.alarm-history.filter', title: '알람 이력 — 조회 조건 (기간·필터)', category: 'control',
+  component: AlarmHistoryFilter, apis: ['alerts.list'], defaultSize: { w: 12, h: 4 },
 }
 export const eventHistoryFilterWidget: WidgetDef = {
-  id: 'core.event-history.filter', title: '이벤트 이력 — 조회 조건', category: 'control',
-  component: EventHistoryFilter, apis: ['events.list'], defaultSize: { w: 8, h: 4 },
+  id: 'core.event-history.filter', title: '이벤트 이력 — 조회 조건 (기간·필터)', category: 'control',
+  component: EventHistoryFilter, apis: ['events.list'], defaultSize: { w: 12, h: 4 },
 }
 
 // 유형별 분석 블록 — 알람은 집계 API(alerts.summary), 이벤트는 목록 API(events.list)를 공유 로더로.
@@ -111,15 +111,14 @@ export const ANALYSIS_BLOCK_WIDGETS: WidgetDef[] = [
 const alarmTab = { param: 'atab', equals: 'alarms' }
 const eventTab = { param: 'atab', equals: 'events' }
 
-// 알람/이벤트 전환 탭은 **예전처럼 맨 위 한 줄**. 그 아래 줄에 기간 선택과 그 탭의 필터를
-// 나란히 두고, 표가 나머지를 전부 차지한다.
+// 알람/이벤트 전환 탭은 **예전처럼 맨 위 한 줄**. 그 아래는 기간+필터가 **한 블록 한 줄**이고
+// (따로 두면 조회 조건이 두 덩어리로 갈려 보인다), 표가 나머지를 전부 차지한다.
 const HISTORY_CARD_LAYOUT: WidgetPlacement[] = [
-  { widgetId: 'core.alarm-event-tabs',     x: 0,  y: 0, w: 48, h: 4 },
-  { widgetId: 'core.days-filter',          x: 0,  y: 4, w: 14, h: 4 },
-  { widgetId: 'core.alarm-history.filter', x: 14, y: 4, w: 34, h: 4, visibleWhen: alarmTab },
-  { widgetId: 'core.event-history.filter', x: 14, y: 4, w: 34, h: 4, visibleWhen: eventTab },
-  { widgetId: 'core.alarm-history',        x: 0,  y: 8, w: 48, h: 40, visibleWhen: alarmTab },
-  { widgetId: 'core.event-history',        x: 0,  y: 8, w: 48, h: 40, visibleWhen: eventTab },
+  { widgetId: 'core.alarm-event-tabs',     x: 0, y: 0, w: 48, h: 4 },
+  { widgetId: 'core.alarm-history.filter', x: 0, y: 4, w: 48, h: 4, visibleWhen: alarmTab },
+  { widgetId: 'core.event-history.filter', x: 0, y: 4, w: 48, h: 4, visibleWhen: eventTab },
+  { widgetId: 'core.alarm-history',        x: 0, y: 8, w: 48, h: 40, visibleWhen: alarmTab },
+  { widgetId: 'core.event-history',        x: 0, y: 8, w: 48, h: 40, visibleWhen: eventTab },
 ]
 
 const ANALYSIS_CARD_LAYOUT: WidgetPlacement[] = [

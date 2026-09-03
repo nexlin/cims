@@ -13,7 +13,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
-import { Pager } from '../components/ListControls'
+import { DaysButtons, Pager } from '../components/ListControls'
 import { makeSharedByKey } from '../widgets/sharedFetch'
 import { usePageParam } from '../widgets/pageParams'
 import { alertsFilter, useAlarmFilter, useEventFilter } from './alertsHistoryStore'
@@ -146,6 +146,7 @@ function useAlarmHistory() {
 // 기간 선택 옆줄에 놓는 컨트롤 — 표는 아래 공간을 전부 쓴다.
 export function AlarmHistoryFilter() {
   const { days, allRows, rows, f, reload } = useAlarmHistory()
+  const setDays = usePageParam('days')[1]
   const codes = useMemo(() => [...new Set(allRows.map(r => r.code).filter(Boolean) as string[])].sort(), [allRows])
   const types = useMemo(() => [...new Set(allRows.map(r => r.type).filter(Boolean))].sort(), [allRows])
   const exportCsv = () => {
@@ -159,6 +160,9 @@ export function AlarmHistoryFilter() {
   }
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      {/* 기간과 필터는 **한 줄 한 블록** — 조회 조건이 두 덩어리로 갈려 보이지 않게. */}
+      <DaysButtons days={days} onChange={d => setDays(String(d))} />
+      <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
       <select className="form-input" value={f.sev} style={{ width: 108 }}
               onChange={e => alertsFilter.setAlarm({ sev: e.target.value })}>
         <option value="">심각도 전체</option>
@@ -426,6 +430,7 @@ function useEventHistory() {
 // ── 이벤트 조회 조건 ─────────────────────────────────────────────────────────
 export function EventHistoryFilter() {
   const { days, events, filtered, f, reload } = useEventHistory()
+  const setDays = usePageParam('days')[1]
   const types = useMemo(() => [...new Set(events.map(e => e.type).filter(Boolean))].sort(), [events])
   const exportCsv = () => {
     downloadCsv(`events_${days}d.csv`,
@@ -434,6 +439,8 @@ export function EventHistoryFilter() {
   }
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <DaysButtons days={days} onChange={d => setDays(String(d))} />
+      <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
       <select className="form-input" value={f.kind} style={{ width: 116 }}
               onChange={e => alertsFilter.setEvent({ kind: e.target.value })}>
         <option value="">분류 전체</option>
