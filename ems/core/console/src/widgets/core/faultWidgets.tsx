@@ -111,14 +111,15 @@ export const ANALYSIS_BLOCK_WIDGETS: WidgetDef[] = [
 const alarmTab = { param: 'atab', equals: 'alarms' }
 const eventTab = { param: 'atab', equals: 'events' }
 
-// 조회 조건은 **한 줄**로 — 탭 / 기간 / 그 탭의 필터. 표가 아래를 전부 차지한다.
+// 알람/이벤트 전환 탭은 **예전처럼 맨 위 한 줄**. 그 아래 줄에 기간 선택과 그 탭의 필터를
+// 나란히 두고, 표가 나머지를 전부 차지한다.
 const HISTORY_CARD_LAYOUT: WidgetPlacement[] = [
-  { widgetId: 'core.alarm-event-tabs',    x: 0,  y: 0, w: 8,  h: 4 },
-  { widgetId: 'core.days-filter',         x: 8,  y: 0, w: 14, h: 4 },
-  { widgetId: 'core.alarm-history.filter', x: 22, y: 0, w: 26, h: 4, visibleWhen: alarmTab },
-  { widgetId: 'core.event-history.filter', x: 22, y: 0, w: 26, h: 4, visibleWhen: eventTab },
-  { widgetId: 'core.alarm-history',       x: 0,  y: 4, w: 48, h: 44, visibleWhen: alarmTab },
-  { widgetId: 'core.event-history',       x: 0,  y: 4, w: 48, h: 44, visibleWhen: eventTab },
+  { widgetId: 'core.alarm-event-tabs',     x: 0,  y: 0, w: 48, h: 4 },
+  { widgetId: 'core.days-filter',          x: 0,  y: 4, w: 14, h: 4 },
+  { widgetId: 'core.alarm-history.filter', x: 14, y: 4, w: 34, h: 4, visibleWhen: alarmTab },
+  { widgetId: 'core.event-history.filter', x: 14, y: 4, w: 34, h: 4, visibleWhen: eventTab },
+  { widgetId: 'core.alarm-history',        x: 0,  y: 8, w: 48, h: 40, visibleWhen: alarmTab },
+  { widgetId: 'core.event-history',        x: 0,  y: 8, w: 48, h: 40, visibleWhen: eventTab },
 ]
 
 const ANALYSIS_CARD_LAYOUT: WidgetPlacement[] = [

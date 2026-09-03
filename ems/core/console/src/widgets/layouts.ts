@@ -38,7 +38,7 @@ export const ALERTS_CATALOG_LAYOUT: PageLayout = {
 // 떼어 놓으면 말이 되지 않는다(고른 탭과 기간이 곧 표의 의미). 조건은 그대로 페이지 파라미터
 // (`atab`/`days`)여서, 컨트롤 위젯을 따로 얹는 배치도 여전히 성립한다.
 export const ALERTS_HISTORY_LAYOUT: PageLayout = {
-  id: 'alerts.history', title: '알람·이벤트 이력', seedVersion: 6,
+  id: 'alerts.history', title: '알람·이벤트 이력', seedVersion: 7,
   widgets: [
     { widgetId: 'core.alarm-event-history', x: 0, y: 0, w: 48, h: 48 },
   ],
