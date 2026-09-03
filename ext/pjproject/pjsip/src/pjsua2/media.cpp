@@ -1293,10 +1293,17 @@ void ExtraAudioDevice::open()
     pjmedia_snd_port_param param;
     pjmedia_snd_port_param_default(&param);
     
-    status = pjmedia_aud_dev_default_param(recDev, &param.base);
+    /* CIMS: recDev == PJMEDIA_AUD_INVALID_DEV -> playback-only extra device.
+     * A second playback endpoint (dispatcher desk: headset + loudspeaker) must not
+     * open the capture device a second time -- the primary sound device owns the
+     * microphone. See docs/design/features/ue_sdk.md section 6 (Windows SDK). */
+    pj_bool_t cims_play_only = (recDev == PJMEDIA_AUD_INVALID_DEV);
+    status = pjmedia_aud_dev_default_param(cims_play_only ? playDev : recDev,
+                                           &param.base);
     PJSUA2_CHECK_RAISE_ERROR(status);
 
-    param.base.dir = PJMEDIA_DIR_CAPTURE_PLAYBACK;
+    param.base.dir = cims_play_only ? PJMEDIA_DIR_PLAYBACK
+                                    : PJMEDIA_DIR_CAPTURE_PLAYBACK;
     param.base.play_id = playDev;
     param.base.rec_id = recDev;
     param.base.clock_rate = master_info.clock_rate;

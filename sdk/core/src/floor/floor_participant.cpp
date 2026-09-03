@@ -19,7 +19,7 @@ bool Participant::open(int localPort) {
     if (pj_sock_bind(s, &addr, sizeof(addr)) != PJ_SUCCESS) { pj_sock_close(s); return false; }
     int len = sizeof(addr);
     if (pj_sock_getsockname(s, &addr, &len) == PJ_SUCCESS) localPort_ = pj_ntohs(addr.sin_port);
-    sock_ = (long)s;
+    sock_ = (std::intptr_t)s;
     running_ = true;
     rx_ = std::thread([this] { rxLoop(); });
     if (cb_.log) cb_.log(3, "floor socket bound :" + std::to_string(localPort_) + " (call " + std::to_string(callId_) + ")");

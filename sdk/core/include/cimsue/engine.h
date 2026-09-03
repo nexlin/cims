@@ -9,12 +9,13 @@
 #include <string>
 #include <vector>
 
+#include "cimsue/export.h"
 #include "cimsue/listener.h"
 #include "cimsue/types.h"
 
 namespace cimsue {
 
-class Engine {
+class CIMSUE_API Engine {
 public:
     Engine();
     ~Engine();
@@ -107,8 +108,17 @@ public:
 
     // ── 장치 ──
     std::vector<AudioDeviceInfo> audioDevices() const;
+    /** 장치 목록 재열거(핫플러그 뒤). 플랫폼 SDK 가 장치 변경 통지(WM_DEVICECHANGE 등)에서 부른다. */
+    Result refreshAudioDevices();
     /** 캡처/재생 장치 선택(pjmedia 장치 id). -1=기본 캡처, -2=기본 재생. */
     Result setAudioDevices(int captureDev, int playbackDev);
+    /** 추가 재생 라우트 — 두 번째 재생 장치를 재생 전용으로 브리지에 연다(관제석 헤드셋+스피커 분리 출력,
+     *  ue_sdk.md §6). 마이크는 기본 캡처 장치 하나만 쓴다. 반환 routeId ≥ 1, 실패 -1. 기본 재생 장치 = 라우트 0. */
+    int addPlaybackRoute(int playbackDev);
+    /** 라우트 닫기. 이 라우트에 붙은 호는 라우트 0 으로 되돌아간다. */
+    Result removePlaybackRoute(int routeId);
+    /** 호의 수신 음성을 재생할 라우트 선택(0=기본). 활성 호면 즉시 재결선. */
+    Result setCallRoute(int callId, int routeId);
 
     static std::string version();
 

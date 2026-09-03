@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "cimsue/export.h"
 #include "cimsue/types.h"
 
 namespace cimsue {
@@ -66,7 +67,7 @@ struct Profile {
 struct GroupSummary { std::string uri, displayName, etag; int memberCount = -1; };
 struct XcapDoc { std::string body, etag; bool notModified = false; };
 
-class CscClient {
+class CIMSUE_API CscClient {
 public:
     explicit CscClient(const CscEndpoint& ep, std::shared_ptr<http::ITransport> transport = nullptr);
     ~CscClient();

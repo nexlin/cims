@@ -82,16 +82,16 @@ std::string newMessageId() {
     return hexEncode(std::string((const char*)b, 16));
 }
 
-static void putDateTime(std::string& s, long sec) {           // 5옥텟 big-endian (Kotlin putDateTime 과 동일)
+static void putDateTime(std::string& s, int64_t sec) {           // 5옥텟 big-endian (Kotlin putDateTime 과 동일)
     for (int i = 4; i >= 0; --i) s += (char)((sec >> (8 * i)) & 0xFF);
 }
-static long readDateTime(const std::string& b, size_t off) {
-    long v = 0;
+static int64_t readDateTime(const std::string& b, size_t off) {   // 40비트 — long 은 Windows 에서 32비트
+    int64_t v = 0;
     for (size_t i = 0; i < 5; ++i) v = (v << 8) | (unsigned char)b[off + i];
     return v;
 }
 
-std::string sdsSignallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, long timeSec) {
+std::string sdsSignallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec) {
     std::string s;
     s += (char)kMsgSdsSignalling;
     putDateTime(s, timeSec);
@@ -134,7 +134,7 @@ static void appendPart(std::string& b, const std::string& boundary, const std::s
 }
 
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
-                   const std::string& msgId, bool requestDelivery, long timeSec) {
+                   const std::string& msgId, bool requestDelivery, int64_t timeSec) {
     std::string boundary = "mcdata-" + msgId.substr(0, 16);
     std::string body;
     appendPart(body, boundary, kCtInfo, nullptr, infoXml(groupUri));
@@ -144,7 +144,7 @@ Body buildGroupSds(const std::string& groupUri, const std::string& text, const s
     return Body{"multipart/mixed;boundary=" + boundary, body};
 }
 
-Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, long timeSec) {
+Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec) {
     std::string tlv;
     tlv += (char)kMsgSdsNotification;
     tlv += (char)notifType;

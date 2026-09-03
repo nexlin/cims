@@ -6,11 +6,16 @@
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
 
-#include <netdb.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#else
+#  include <netdb.h>
+#  include <netinet/in.h>
+#  include <sys/socket.h>
+#  include <sys/time.h>
+#  include <unistd.h>
+#endif
 
 #include <cctype>
 #include <cstring>
@@ -55,29 +60,53 @@ bool parseUrl(const std::string& url, Url& u) {
     return !u.host.empty() && u.port > 0;
 }
 
-int connectTcp(const std::string& host, int port, int timeoutSec) {
+// 소켓 층 — BSD 소켓(POSIX) / winsock(Windows) 차이는 여기서만 흡수한다. 그 위 HTTP·TLS 는 공통.
+#ifdef _WIN32
+using sock_t = SOCKET;
+constexpr sock_t kBadSock = INVALID_SOCKET;
+void closeSock(sock_t s) { closesocket(s); }
+void setTimeout(sock_t s, int sec) {
+    DWORD ms = (DWORD)sec * 1000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&ms, sizeof ms);
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&ms, sizeof ms);
+}
+void ensureWinsock() {
+    static struct Init { Init() { WSADATA d; WSAStartup(MAKEWORD(2, 2), &d); } } init;
+}
+#else
+using sock_t = int;
+constexpr sock_t kBadSock = -1;
+void closeSock(sock_t s) { close(s); }
+void setTimeout(sock_t s, int sec) {
+    struct timeval tv{sec, 0};
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+}
+void ensureWinsock() {}
+#endif
+
+sock_t connectTcp(const std::string& host, int port, int timeoutSec) {
+    ensureWinsock();
     struct addrinfo hints; std::memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_STREAM;
     struct addrinfo* res = nullptr;
-    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0) return -1;
-    int fd = -1;
+    if (getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res) != 0) return kBadSock;
+    sock_t fd = kBadSock;
     for (auto* ai = res; ai; ai = ai->ai_next) {
-        fd = (int)socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (fd < 0) continue;
-        struct timeval tv{timeoutSec, 0};
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0) break;
-        close(fd); fd = -1;
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd == kBadSock) continue;
+        setTimeout(fd, timeoutSec);
+        if (connect(fd, ai->ai_addr, (int)ai->ai_addrlen) == 0) break;
+        closeSock(fd); fd = kBadSock;
     }
     freeaddrinfo(res);
     return fd;
 }
 
 struct Conn {
-    int fd = -1; SSL_CTX* ctx = nullptr; SSL* ssl = nullptr;
-    ~Conn() { if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); } if (ctx) SSL_CTX_free(ctx); if (fd >= 0) close(fd); }
-    int write(const std::string& d) { return ssl ? SSL_write(ssl, d.data(), (int)d.size()) : (int)::send(fd, d.data(), d.size(), 0); }
+    sock_t fd = kBadSock; SSL_CTX* ctx = nullptr; SSL* ssl = nullptr;
+    ~Conn() { if (ssl) { SSL_shutdown(ssl); SSL_free(ssl); } if (ctx) SSL_CTX_free(ctx); if (fd != kBadSock) closeSock(fd); }
+    int write(const std::string& d) { return ssl ? SSL_write(ssl, d.data(), (int)d.size()) : (int)::send(fd, d.data(), (int)d.size(), 0); }
     int read(char* b, int n) { return ssl ? SSL_read(ssl, b, n) : (int)::recv(fd, b, n, 0); }
 };
 
@@ -106,7 +135,7 @@ Response OpenSslTransport::request(const std::string& method, const std::string&
     if (!parseUrl(url, u)) { r.error = "bad url"; return r; }
     Conn c;
     c.fd = connectTcp(u.host, u.port, timeoutSec_);
-    if (c.fd < 0) { r.error = "connect failed"; return r; }
+    if (c.fd == kBadSock) { r.error = "connect failed"; return r; }
     if (u.tls) {
         c.ctx = SSL_CTX_new(TLS_client_method());
         if (!c.ctx) { r.error = "ssl ctx"; return r; }
@@ -115,7 +144,7 @@ Response OpenSslTransport::request(const std::string& method, const std::string&
             SSL_CTX_set_verify(c.ctx, SSL_VERIFY_PEER, nullptr);
         }
         c.ssl = SSL_new(c.ctx);
-        SSL_set_fd(c.ssl, c.fd);
+        SSL_set_fd(c.ssl, (int)c.fd);
         SSL_set_tlsext_host_name(c.ssl, u.host.c_str());
         if (verify_) SSL_set1_host(c.ssl, u.host.c_str());
         if (SSL_connect(c.ssl) != 1) {

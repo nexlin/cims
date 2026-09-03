@@ -36,9 +36,11 @@
 #include <thread>
 #include <vector>
 
+#ifndef _WIN32
 #include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
+#endif
 
 #include "cimsue/cimsue.h"
 
@@ -304,6 +306,8 @@ int cscLogin(const Opts& o, Profile& prof, TokenSet& tok) {
 }  // namespace
 
 // 진단 — SIGSEGV/SIGABRT 시 백트레이스(-rdynamic 심볼)를 stderr 로. 실기기 없는 개발 서버에 gdb 가 없어 필요하다.
+// glibc 전용(execinfo) — Windows 빌드는 디버거/WER 에 맡긴다.
+#ifndef _WIN32
 static void crashHandler(int sig) {
     void* frames[64];
     int n = backtrace(frames, 64);
@@ -311,10 +315,13 @@ static void crashHandler(int sig) {
     backtrace_symbols_fd(frames, n, 2);
     _exit(128 + sig);
 }
+#endif
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
     signal(SIGSEGV, crashHandler);
     signal(SIGABRT, crashHandler);
+#endif
     Opts o;
     if (!parse(argc, argv, o)) { usage(); return 2; }
 

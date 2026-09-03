@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "cimsue/export.h"
+
 namespace cimsue {
 
 enum class Transport { UDP, TCP, TLS };
@@ -143,6 +145,8 @@ struct CallInfo {
     bool mediaActive = false;
     bool muted = false;
     bool listen = true;
+    /** 수신 음성 재생 라우트 — 0=기본 재생 장치, 그 외 Engine::addPlaybackRoute 가 준 id(관제석 스피커 등). */
+    int playbackRoute = 0;
     int lastCode = 0;
     std::string lastReason;
     std::vector<MediaSource> sources;
@@ -238,14 +242,14 @@ struct SdsMessage {
     std::string fromUri;
     std::string groupUri;             // mcdata-info request-uri (그룹 SDS)
     std::string convId, msgId;        // UUID hex32
-    long timeSec = 0;
+    int64_t timeSec = 0;
     int dispositionReq = 0;           // 0 없음 / 1 delivery / 2 read / 3 both
     std::string text;
     bool notification = false;        // SDS NOTIFICATION
     int notifType = 0;                // 1 undelivered / 2 delivered / 3 read / 4 delivered+read
     bool fd = false;                  // FD SIGNALLING (파일 URL)
     std::string fileUrl, fileName, fileType;
-    long fileSize = 0;
+    int64_t fileSize = 0;
 };
 
 struct StreamStats {
@@ -262,10 +266,10 @@ struct AudioDeviceInfo {
     unsigned outputCount = 0;
 };
 
-const char* toString(RegState s);
-const char* toString(CallState s);
-const char* toString(Transport t);
-const char* toString(FloorState s);
-const char* toString(FloorEvent::Kind k);
+CIMSUE_API const char* toString(RegState s);
+CIMSUE_API const char* toString(CallState s);
+CIMSUE_API const char* toString(Transport t);
+CIMSUE_API const char* toString(FloorState s);
+CIMSUE_API const char* toString(FloorEvent::Kind k);
 
 }  // namespace cimsue

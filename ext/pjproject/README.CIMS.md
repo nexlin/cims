@@ -20,6 +20,7 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
   | 무전/통화 분리 라우팅 (`set_track_preferred_device`, OUTPUT_ROUTE) | `pjmedia/src/pjmedia-audiodev/android_jni_dev.c` | Android 전용 — PTT 채널과 통화의 출력 장치 분리 |
   | PTT 유휴 무음 50pps 상향 스트림 제거 (`stream->vad_enabled` 분기) | `pjmedia/src/pjmedia/stream.c` | 브리지 미연결 유휴 시 무음 RTP 송신 생략 — KA 가 NAT 유지 담당 |
   | 이벤트 구독 (`pjsua_cims_conf_subscribe`, `cims_conf_find`) | `pjsip/src/pjsua-lib/pjsua_acc.c`, `pjsua_pres.c` | conference(RFC 4575)·xcap-diff(RFC 5875)·dialog(RFC 4235, 관제 BLF·Join 대상 학습) 구독의 in-dialog 갱신(RFC 6665) — NOTIFY 본문은 on_pager2 로 앱에 전달 |
+  | `ExtraAudioDevice` 재생 전용 모드 (`recDev == PJMEDIA_AUD_INVALID_DEV` → `PJMEDIA_DIR_PLAYBACK`, `cims_play_only`) | `pjsip/src/pjsua2/media.cpp` | 코어 재생 라우트(`Engine::addPlaybackRoute`) — 관제석 헤드셋+스피커 분리 출력에서 두 번째 장치의 마이크를 열지 않음 (ue_sdk.md §6) |
   | U10 동시 발언 SSRC 디먹스 (`cims_mt_rx`) | `pjmedia/src/pjmedia/stream.c`, `stream_imp_common.c` | 한 스트림의 SSRC 별 서브스트림(지터버퍼+디코더) → PCM 합산 — mcptt_ue_multitalker_media.md §5. secondary SSRC 도 빈 payload·비협상 PT 는 소비만(AMR 파서 보호 — 감청 tap 의 CMP 자체 SSRC 패킷) |
 
 - `config_site.h` 는 upstream 이 무시하는 파일이라 트리에 없다. 플랫폼별 정본은 `sdk/engine/config_site/{common,android,linux,windows}.h`
@@ -31,7 +32,7 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
 |---|---|
 | Linux | 루트 CMake `ExternalProject_Add(pjproject)` — `aconfigure` + `make` (ue_sdk.md §8) |
 | Android | `sdk/android/build-native.sh` — 이 트리를 `configure-android`(NDK) 로 빌드 + SWIG 후 산출물 배치. 패치 적용 단계는 없다(트리가 정본). `android/docs/scripts/m1_build_pjsip.sh` 는 위임 스텁 |
-| Windows | `pjproject-vs14.sln` (MSVC) |
+| Windows | `sdk/windows` 슈퍼빌드가 이 트리의 자체 CMake(`CMakeLists.txt`, WMME 백엔드)를 ExternalProject 로 빌드. `pjproject-vs14.sln` 은 폴백 (ue_sdk.md §6) |
 
 ## 경계
 

@@ -4,11 +4,12 @@
 // 명령을 다시 불러도 교착하지 않는다. 플랫폼 SDK 는 필요 시 UI 스레드로 마샬링한다.
 #pragma once
 
+#include "cimsue/export.h"
 #include "cimsue/types.h"
 
 namespace cimsue {
 
-class Listener {
+class CIMSUE_API Listener {
 public:
     virtual ~Listener() = default;
     /** pjsip/코어 로그 한 줄. level 은 pjsip 레벨(1=error … 6=trace). */

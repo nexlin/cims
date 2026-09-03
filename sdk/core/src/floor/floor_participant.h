@@ -8,6 +8,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <chrono>
 #include <functional>
 #include <mutex>
@@ -63,7 +64,7 @@ private:
     const uint32_t ssrc_;
     const std::string userId_;
     Callbacks cb_;
-    long sock_ = -1;                              // pj_sock_t
+    std::intptr_t sock_ = -1;                     // pj_sock_t (Win64 SOCKET 은 64비트 — long 불가)
     int localPort_ = 0;
     std::string remoteIp_;
     int remotePort_ = 0;

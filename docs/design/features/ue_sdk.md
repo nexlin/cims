@@ -289,19 +289,45 @@ android_ue_client §13 그대로.
 
 ```
 sdk/windows/
-  include/cimsue/          코어 공개 헤더 (sdk/core/include 와 동일 — 설치 복사)
-  cimsue.dll / cimsue.lib  코어 + 엔진 정적 링크 (x64)
-  cimsue_c.h (선택)        C API — UI 를 C#(WPF/WinUI 3) 으로 만들 때만 P/Invoke 용으로 생성
-  platform/                Windows 접점: WASAPI 엔드포인트 열거·선택 · ExtraAudioDevice 로 헤드셋+스피커 분리 출력 ·
-                           전역 핫키(PTT·응답) · 단일 인스턴스 · 자격 저장(DPAPI) · 자동 시작
+  CMakeLists.txt           슈퍼빌드 — AMR-WB(deps) → pjproject(자체 CMake) → sdk/core(CIMSUE_SHARED) → sdk/{bin,lib,include}
+  deps/{opencore-amrwb,vo-amrwbenc}/   ext/ 소스의 MSVC CMake 래퍼 (upstream 은 autotools 만)
+  platform/                Windows 접점: 엔드포인트 열거·핫플러그 통지 · 전역 핫키(PTT·응답) · 단일 인스턴스 · 자격 저장(DPAPI) · 자동 시작
+산출물: cimsue.dll + cimsue.lib + include/cimsue/*.h (= sdk/core/include 복사) + cimsue-cli.exe
 ```
 
-- UI 는 **C++**(Qt 또는 WinUI 3 C++/WinRT) 를 전제로 하며 이 경우 헤더가 곧 SDK 이고 추가 바인딩이 없다.
-  C# UI 를 택하면 C API 한 겹만 추가된다.
-- 영상은 §4.5 프레임 콜백을 UI 가 그린다(SDL 창 off). 감청 영상 격자 합성은 UI.
-- 오디오는 pjmedia WASAPI 백엔드. 관제석의 헤드셋(통화)·스피커(PTT 채널 청취) 동시 출력은 `ExtraAudioDevice`
-  로 두 번째 재생 장치를 열어 채널별로 연결한다 — 실기 검증 항목(§11).
-- 배포는 MSI(DLL·헤더는 zip/NuGet). 코드 서명·설치 정책은 운영 몫.
+### 6.1 결정
+
+| 항목 | 결정 | 근거 |
+|---|---|---|
+| 엔진 빌드 | `ext/pjproject` 의 **자체 CMake**(`pjlib` WIN32 분기·WMME/WASAPI/DSHOW 옵션 보유)를 슈퍼빌드가 ExternalProject 로 돈다. `pjproject-vs14.sln` 은 폴백 | 한 빌드 시스템으로 의존성·엔진·코어를 잇고, Linux ExternalProject 와 같은 config_site 생성 방식을 쓴다. vs14.sln 은 AMR·OpenSSL 경로를 손으로 꿰어야 한다 |
+| config_site | `sdk/engine/config_site/windows.h` 한 줄 include (Linux 와 동일 규약) | §3 |
+| 오디오 백엔드 | **WMME**. 2.16 의 `wasapi_dev.cpp` 는 UWP/Windows Phone 전용(`phoneaudioclient.h`·`Windows::Phone::Media::Devices`, vcxproj 도 `WinDesktop` 제외)이라 데스크톱에서 컴파일되지 않는다 | 실측 지연·핫플러그 문제가 있을 때 데스크톱 WASAPI 백엔드는 §11 과제 |
+| 이중 출력(헤드셋+스피커) | 코어 **재생 라우트** API — `addPlaybackRoute(dev)` 가 두 번째 재생 장치를 **재생 전용** `ExtraAudioDevice` 로 브리지에 열고, `setCallRoute(callId, route)` 로 호별 sink 를 고른다. 마이크는 기본 캡처 장치 하나 | pjsua2 `ExtraAudioDevice` 는 원래 캡처+재생을 함께 여는데 두 번째 장치의 마이크는 필요 없고 열면 장치 점유·에코 위험 → 엔진 패치(`recDev == PJMEDIA_AUD_INVALID_DEV` → `PJMEDIA_DIR_PLAYBACK`). 플랫폼 공통 API 라 Android 에서도 무전/통화 분리 출력에 쓸 수 있다 |
+| 코어 배포 형태 | **DLL**(`CIMSUE_SHARED`, `cimsue/export.h` 의 `CIMSUE_API` — Engine·Listener·CscClient·toString). pj 라이브러리는 DLL 안에 정적 링크 | C++ 클래스 export 는 앱과 같은 MSVC·CRT 전제(관제 앱은 같은 솔루션). C# UI 면 C API 한 겹(§11) |
+| 영상 | F1·F2 는 음성만(`PJMEDIA_HAS_VIDEO 0`). F3 에서 OpenH264 + DSHOW 캡처 + **CIMS 콜백 렌더 장치**(pjmedia-videodev 패치: 디코드 프레임 → `onVideoFrame`) | 관제 요구(감청·PTT 청취·BLF·픽업·전달)는 전부 음성. pjproject 에 "창 없는 프레임 콜백" 렌더러가 없어 패치가 필요 — 감청 영상 격자(§4.5)는 UI 합성 |
+| 인증 | Digest+TLS 만 — `PJSIP_HAS_DIGEST_AKA_AUTH 0` | 관제 소프트폰 가입자 규약(volte_supplementary_services §2)이 USIM 없는 Digest. pjproject CMake third_party 에 milenage 가 없어 켜면 링크 실패 |
+| OpenSSL | 외부(vcpkg `openssl` 또는 `CMAKE_PREFIX_PATH`) — SIP TLS·SRTP·코어 HTTPS 가 한 OpenSSL | 레포 vendoring 대상이 아님(서버도 시스템 libssl) |
+| UI 스택 | **권고 = Qt 6 (C++)** — 헤더가 곧 SDK, 추가 바인딩 없음. WinUI 3 C++/WinRT 는 대안, C# 은 C API 전제 | 코어와 같은 언어·같은 툴체인, 다중 모니터·고밀도 보드 UI 관용구 성숙. 라이선스: 앱은 pjproject 로 이미 GPL 트랙(android_ue_client §13)이라 Qt LGPL 동적 링크에 추가 부담 없음. **확정은 앱 착수 시**(F2 종료 시점) — SDK 는 UI 스택을 모른다 |
+
+### 6.2 코어 이식성 (Linux 에서 선행 반영)
+
+코어는 pjlib 추상(`pj_sock_*`·`pj_thread_register`) 위에 있어 대부분 그대로 컴파일된다. 플랫폼 분기는 다음 네 곳이 전부다.
+
+- `src/http/https_client.cpp` — BSD 소켓/winsock 차이를 소켓 층(`sock_t`·`closeSock`·`setTimeout`·`WSAStartup`)에서만 흡수. HTTP·TLS 는 공통.
+- `cli/main.cpp` — SIGSEGV 백트레이스(glibc `execinfo`)는 `#ifndef _WIN32`.
+- 64비트 정수 — `SdsMessage.timeSec/fileSize`·SDS 5옥텟 시각은 `int64_t`(Windows `long` 은 32비트). floor 소켓 핸들은 `intptr_t`(Win64 `SOCKET`).
+- `sdk/core/CMakeLists.txt` — `WIN32` 면 `PJ_WIN32` 정의·`ws2_32 winmm ole32 iphlpapi crypt32` 시스템 라이브러리·`-rdynamic`/`pthread` 생략, `PJ_LIBS` 를 슈퍼빌드가 `-D` 로 준다(config.guess 접미는 autoconf 전용).
+
+### 6.3 관제석 오디오 배치
+
+```
+기본 재생 장치(라우트 0) = 헤드셋      ← 통화·감청 Join·1:1
+추가 재생 라우트(≥1)   = 데스크 스피커 ← PTT 그룹콜 청취 채널  (Engine::setCallRoute(callId, route))
+기본 캡처 장치         = 헤드셋 마이크  (하나만 — floor Granted 에서만 결선)
+```
+
+앱은 `audioDevices()` 로 고른 장치 id 를 `setAudioDevices`/`addPlaybackRoute` 에 넘기고, 장치 핫플러그는 `platform/AudioEndpoints`
+(`IMMNotificationClient`) 가 감지해 `refreshAudioDevices()` 를 부른다. 두 장치 동시 출력의 지연·에코는 실기 검증 항목(§9·§11).
 
 ---
 
@@ -337,7 +363,7 @@ sdk/windows/
 |---|---|---|
 | Linux (개발 서버) | 루트 `cmake .. && make` — `pjproject`(ExternalProject, `make pjproject` 단독 가능) → `cimsue` → `cimsue-cli` → `cimsue_test`. `make dist` 에 `cimsue-cli` 를 verify 도구로 포함 | `pkg/pjproject`, `build/bin/cimsue-cli`, `build/lib/libcimsue.a` |
 | Android | `sdk/android/build-native.sh` — `config_site.h` 한 줄 생성(→ `android.h`) → `configure-android`(NDK) → `make` → SWIG(pjsua2+cimsue) → `.so`·Java 를 `jniLibs`/소스셋에 배치. 그 뒤 Gradle | `cimsue-android.aar` |
-| Windows | `sdk/engine/config_site/windows.h` 복사 → `pjproject-vs14.sln` → `sdk/windows` CMake/MSVC | `cimsue.dll`·헤더 |
+| Windows | `cmake -S sdk/windows -B build-win -A x64` 슈퍼빌드 — AMR-WB 래퍼 → `config_site.h` 한 줄 생성(→ `windows.h`) → pjproject 자체 CMake → `sdk/core`(DLL) → `sdk/{bin,lib,include}`. OpenSSL 은 vcpkg | `cimsue.dll`·`cimsue.lib`·헤더·`cimsue-cli.exe` |
 
 NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, 이 서버는 Linux 빌드·단위시험·`cimsue-cli`
 검증을 담당한다. 산출물(`.so`/`.dll`)은 커밋하지 않는다.
@@ -349,10 +375,10 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | stage | 항목 | 내용 |
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
-| S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱. 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
+| S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱·재생 라우트 수명(null 장치 엔진 기동 → 라우트 추가/제거 → 종료 순서). 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | 실기기 | Android | 태블릿·UNIWA 에서 감청 SSRC 2개 귀속 표시·PTT 청취 버튼 비활성·대표번호 착신 — 와이어 실측 |
-| 실기기 | Windows | WASAPI 이중 출력·핫키·감청 영상 격자 |
+| 실기기 | Windows | 재생 라우트 이중 출력(헤드셋+스피커, WMME)·핫플러그 재열거·핫키·감청 영상 격자(F3) |
 
 ---
 
@@ -368,16 +394,21 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | C. floor + mcdata + 구독 | 정의 테이블(§4.6)·floor participant·SDS/MSRP·conference/xcap-diff 구독·그룹콜/affiliation/긴급 | `S1-UE-FLOOR-CODEC`·`S3-UE-CLI` 그룹콜/floor/SDS PASS. ptt-client 가 파사드로 전환, PttController 분해 |
 | D. csc + domain + 관제 API | PKCE/XCAP/프로비저닝(dispatch 블록)·`Capabilities`·dialogWatch·join·pickup·transfer·listenGroupCall·`MediaSources` 라벨 | `S3-UE-CLI` Join/픽업/PTT 청취 PASS |
 | E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획 | 실기기 실측(§9) |
-| F. Windows SDK·앱 | `sdk/windows` + `windows/dispatch-desktop` — 코어 변경 없이 플랫폼 접점·UI 만 | WASAPI 이중 출력·감청 격자 실측 |
+| F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드. 확정 항목: pjproject CMake 설치 라이브러리 이름(`PJ_LIBS`)·링크 순서·WMME 장치 열거. 폴백 vs14.sln | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 |
+| F2. Windows 접점·관제 앱 | `sdk/windows/platform`(엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스) + `windows/dispatch-desktop`(UI 스택 확정 — 권고 Qt, §6.1) §7 다섯 구획 | 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 |
+| F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 콜백 렌더 장치 패치 → `onVideoFrame` | 감청 영상 격자 실측 |
 
 ---
 
 ## 11. 미해결 / 향후 과제
 
-- **Windows 오디오 이중 출력** — `ExtraAudioDevice` 로 헤드셋+스피커 동시 출력의 지연·에코 실측.
+- **Windows 오디오 이중 출력** — 재생 라우트(재생 전용 `ExtraAudioDevice`)의 WMME 지연·에코·장치 점유 실측. WMME 가 부족하면
+  데스크톱 WASAPI 백엔드(`IMMDeviceEnumerator`+`IAudioClient` 공유 모드 — 2.16 의 UWP 전용 구현과 별개 파일)를 엔진 패치로 추가.
+- **Windows 영상 렌더 경로** — pjproject 에 "창 없는 프레임 콜백" 렌더 장치가 없다. F3 에서 pjmedia-videodev 콜백 장치를
+  CIMS 패치로 추가해 `onVideoFrame` 을 채운다(Android 프레임 콜백 선택지와 같은 장치를 공유).
 - **Android 영상 경로 선택** — Surface 직결(현행) vs 프레임 콜백(§4.5). 감청 격자 합성이 필요한 관제 태블릿은
   프레임 콜백이 맞고, 1:1 영상 앱은 Surface 직결이 싸다. 파사드가 둘을 다 제공할지 결정.
-- **C API 필요 여부** — Windows UI 스택 확정 후(C++ 이면 불필요).
+- **C API 필요 여부** — Windows UI 스택 확정 후(권고 Qt/C++ 이면 불필요. C# 이면 `cimsue_c.h` 한 겹 + P/Invoke).
 - **개발 서버 TLS 인증서** — `build/dist/csp/cert/csp.pem` 이 자가서명·SAN 없음이라 코어의 서버 검증(`tlsVerifyServer`)을
   켠 채로는 등록이 503 `PJSIP_TLS_ECERTVERIF` 로 막힌다(정상 동작). TLS/SRTP 회귀를 검증 켠 채 돌리려면
   sip_tls_signaling.md §8 요건(SAN=도메인/IP)의 인증서를 개발 서버에 발급해야 한다.

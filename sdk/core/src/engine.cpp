@@ -170,6 +170,9 @@ struct Engine::Impl {
     std::map<int, std::unique_ptr<pj::Account>> accounts;
     std::map<int, AccountConfig> accountCfgs;
     std::map<int, std::unique_ptr<pj::Call>> calls;        // pjsua call id → Call
+    /** 추가 재생 라우트(routeId ≥ 1) — 재생 전용 ExtraAudioDevice. 라우트 0 은 기본 재생 장치. */
+    std::map<int, std::unique_ptr<pj::ExtraAudioDevice>> routes;
+    int nextRouteId = 1;
     int nextAccountId = 0;
     std::atomic<long> nextToken{1};
 
@@ -665,7 +668,14 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     pj::AudDevManager& adm = ep->audDevManager();
     pj::AudioMedia& spk = adm.getPlaybackDevMedia();
     pj::AudioMedia& mic = adm.getCaptureDevMedia();
-    if (snap.listen) aud->startTransmit(spk); else aud->stopTransmit(spk);
+    // 재생 sink — 라우트 0 = 기본 재생 장치, 그 외 = 추가 재생 라우트. 선택되지 않은 sink 와의 결선은 끊는다
+    // (미결선 쌍의 disconnect 는 no-op). 라우트가 사라졌으면 기본 장치로 폴백.
+    pj::AudioMedia* sink = &spk;
+    auto rt = routes.find(snap.playbackRoute);
+    if (snap.playbackRoute != 0 && rt != routes.end()) sink = rt->second.get();
+    if (sink != &spk) aud->stopTransmit(spk);
+    for (auto& kv : routes) if (kv.second.get() != sink) aud->stopTransmit(*kv.second);
+    if (snap.listen) aud->startTransmit(*sink); else aud->stopTransmit(*sink);
     bool micOn;
     if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
     else micOn = !snap.muted && !call->recvOnly;
@@ -762,6 +772,7 @@ void Engine::stop() {
     impl_->ctl.runSync([this] {
         Impl* o = impl_.get();
         o->calls.clear();                        // ~Call → hangup, floor participant close
+        o->routes.clear();                       // ~ExtraAudioDevice → close (libDestroy 전)
         o->accounts.clear();                     // ~Account → shutdown
         try { o->ep->libDestroy(); } catch (...) {}               // LogWriter 도 여기서 pjsua2 가 delete
         o->logWriter = nullptr;
@@ -1246,6 +1257,14 @@ std::vector<AudioDeviceInfo> Engine::audioDevices() const {
     });
 }
 
+Result Engine::refreshAudioDevices() {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this]() -> Result {
+        try { impl_->ep->audDevManager().refreshDevs(); return Result::success(); }
+        catch (pj::Error& e) { return fromError(e); }
+    });
+}
+
 Result Engine::setAudioDevices(int captureDev, int playbackDev) {
     if (!impl_->running) return Result::fail(-1, "not running");
     return impl_->ctl.runSync([this, captureDev, playbackDev]() -> Result {
@@ -1254,6 +1273,59 @@ Result Engine::setAudioDevices(int captureDev, int playbackDev) {
             impl_->ep->audDevManager().setPlaybackDev(playbackDev);
             return Result::success();
         } catch (pj::Error& e) { return fromError(e); }
+    });
+}
+
+int Engine::addPlaybackRoute(int playbackDev) {
+    if (!impl_->running) return -1;
+    return impl_->ctl.runSync([this, playbackDev]() -> int {
+        Impl* o = impl_.get();
+        try {
+            // recDev = PJMEDIA_AUD_INVALID_DEV → 재생 전용(엔진 패치, ExtraAudioDevice::open). 브리지 포맷(16k mono) 으로 연다.
+            std::unique_ptr<pj::ExtraAudioDevice> dev(new pj::ExtraAudioDevice(playbackDev, PJMEDIA_AUD_INVALID_DEV));
+            dev->open();
+            int id = o->nextRouteId++;
+            o->routes[id] = std::move(dev);
+            o->log(3, "playback route " + std::to_string(id) + " ← dev " + std::to_string(playbackDev));
+            return id;
+        } catch (pj::Error& e) {
+            o->log(1, "addPlaybackRoute dev " + std::to_string(playbackDev) + ": " + e.info(false));
+            return -1;
+        }
+    });
+}
+
+Result Engine::removePlaybackRoute(int routeId) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, routeId]() -> Result {
+        Impl* o = impl_.get();
+        auto it = o->routes.find(routeId);
+        if (it == o->routes.end()) return Result::fail(-1, "no such route");
+        // 이 라우트에 붙은 호는 기본 장치로 되돌리고 재결선 — 결선을 먼저 끊은 뒤 장치를 닫는다
+        for (auto& kv : o->calls) {
+            int callId = kv.first;
+            if (o->snapshotCall(callId).playbackRoute != routeId) continue;
+            o->updateCall(callId, [](CallInfo& c) { c.playbackRoute = 0; });
+            try { o->wireMedia(static_cast<PjCall*>(kv.second.get()), callId); } catch (pj::Error&) {}
+        }
+        o->routes.erase(it);                     // ~ExtraAudioDevice → close
+        return Result::success();
+    });
+}
+
+Result Engine::setCallRoute(int callId, int routeId) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, callId, routeId]() -> Result {
+        Impl* o = impl_.get();
+        if (routeId != 0 && o->routes.find(routeId) == o->routes.end()) return Result::fail(-1, "no such route");
+        PjCall* c = o->findCall(callId);
+        if (!c) return Result::fail(-1, "no such call");
+        CallInfo snap;
+        o->updateCall(callId, [routeId](CallInfo& ci) { ci.playbackRoute = routeId; }, &snap);
+        if (snap.mediaActive) {
+            try { o->wireMedia(c, callId); } catch (pj::Error& e) { return fromError(e); }
+        }
+        return Result::success();
     });
 }
 

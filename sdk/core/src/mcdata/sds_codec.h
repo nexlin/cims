@@ -32,9 +32,9 @@ std::string newMessageId();
 struct Body { std::string contentType; std::string body; };
 /** 그룹 SDS 발신 본문. groupUri 예 "tel:g001". */
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
-                   const std::string& msgId, bool requestDelivery, long timeSec);
+                   const std::string& msgId, bool requestDelivery, int64_t timeSec);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문 — 원 발신자 1:1 대상. */
-Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, long timeSec);
+Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec);
 
 /** multipart/mixed MCData 본문 파싱 — mcdata-signalling 파트가 없으면 false. */
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out);
@@ -44,7 +44,7 @@ std::string base64Encode(const std::string& raw);
 std::string base64Decode(const std::string& b64);
 std::string hexEncode(const std::string& raw);
 std::string hexDecode(const std::string& hex);
-std::string sdsSignallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, long timeSec);
+std::string sdsSignallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec);
 std::string sdsPayloadTlv(const std::string& text);
 
 }  // namespace mcdata

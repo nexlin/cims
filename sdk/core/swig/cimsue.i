@@ -26,6 +26,8 @@ using namespace cimsue;
 // pImpl — 바인딩에 내부 타입을 내지 않는다
 %ignore cimsue::Engine::Impl;
 
+// export.h 의 DLL 가시성 매크로 — SWIG 는 헤더의 #if 를 평가하지 않으므로 빈 매크로로 선언
+#define CIMSUE_API
 %include "cimsue/types.h"
 %include "cimsue/listener.h"
 %include "cimsue/engine.h"
