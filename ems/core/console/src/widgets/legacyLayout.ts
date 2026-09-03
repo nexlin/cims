@@ -13,6 +13,7 @@ import type { WidgetPlacement } from './types'
 import { compact, gridBox, isGridLayout, isGridPlacement } from './gridLayout'
 import { catalogSources } from './shapes/sourceRegistry'
 import { SEVERITY_ORDER } from '../utils/alarmLabels'
+import { ALARM_TOTAL_TILES, EVENT_TOTAL_TILES } from '../pages/AlarmAnalysisPage'
 
 export interface SplitPart { widgetId: string; config?: Record<string, unknown> }
 // 부모 배치의 config 를 받아 부품 목록을 만든다 (소스 같은 인스턴스 설정을 부품에 물려주기 위함).
@@ -39,6 +40,11 @@ export const CORE_SPLITS: Record<string, SplitFn> = {
   ],
   // 구 `core.alarm-severity`(심각도 타일 5장이 한 카드) → 타일 1장짜리 위젯 5개.
   'core.alarm-severity': () => SEVERITY_ORDER.map(sev => ({ widgetId: `core.alarm-severity.${sev}` })),
+  // 구 유형별 분석 요약 타일(4장이 한 카드) → 타일 1장짜리 위젯 4개. 알람·이벤트 각각.
+  'core.alarm-analysis.totals': () =>
+    ALARM_TOTAL_TILES.map(t => ({ widgetId: `core.alarm-analysis.totals.${t.key}` })),
+  'core.event-analysis.totals': () =>
+    EVENT_TOTAL_TILES.map(t => ({ widgetId: `core.event-analysis.totals.${t.key}` })),
 }
 
 // 폐지 위젯 id → 대체 위젯 id (부품 N개 → 위젯 1개).

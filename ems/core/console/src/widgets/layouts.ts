@@ -56,7 +56,7 @@ export const ALERTS_AUDIT_LAYOUT: PageLayout = {
 // 유형별 분석 — 이력 화면과 같은 구성: 전환 탭 · 기간 선택 · 블록들이 한 위젯이다. 블록들은 같은
 // 기간 창을 여러 각도(요약/분포/추이/코드별/유형별)에서 보는 한 벌이라 함께 둔다.
 export const ALERTS_ANALYSIS_LAYOUT: PageLayout = {
-  id: 'alerts.analysis', title: '유형별 분석', seedVersion: 8,
+  id: 'alerts.analysis', title: '유형별 분석', seedVersion: 9,
   widgets: [
     { widgetId: 'core.alarm-event-analysis', x: 0, y: 0, w: 48, h: 48 },
   ],

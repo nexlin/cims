@@ -6,7 +6,8 @@
 // **화면 전체가 카드 하나**(`core.alarm-event-analysis`)다 — 전환 탭·기간 선택·블록들은 같은 기간
 // 창을 여러 각도(요약 / 분포 / 추이 / 코드별 / 유형별)에서 보는 한 벌이라 함께 묶는다.
 // 다만 카드 **안**은 바깥과 같은 48×48 셀 배치라(console_platform §3.0.1) 블록은 각각 위젯으로
-// 등록돼 있고, 운영자가 카드 안에서 재배치·추가·제거할 수 있다.
+// 등록돼 있고, 운영자가 카드 안에서 재배치·추가·제거할 수 있다. 요약 타일은 **1장 = 위젯 1개**다
+// (세는 축이 건수·종류 수·시간으로 서로 달라 한 장만 놓아도 말이 된다 — §3.1).
 // 알람/이벤트 전환은 배치의 `visibleWhen`(파라미터 `atab`)이 판정한다 — 카드 안에서도 같은 규칙.
 // 조회 일수는 페이지 파라미터 `days` 로 두므로 딥링크가 화면을 재현하고,
 // 같은 days 를 보는 블록이 여러 개여도 조회는 **1회**만 나간다(아래 공유 로더).
@@ -23,12 +24,16 @@ import {
 const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신순 절단(표기)
 
 // ── 공통 표시 조각 ───────────────────────────────────────────────────────────
+// 요약 타일 — 값 하나짜리 위젯의 몸통. 칸을 채우고 값은 세로 중앙(지표 카드 공통 규칙).
 function Tile({ label, value, accent }: { label: string; value: ReactNode; accent?: boolean }) {
   return (
-    <div style={{ flex: 1, minWidth: 110, background: 'var(--surface)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)', padding: '10px 14px' }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: accent ? 'var(--danger)' : 'var(--text)' }}>{value}</div>
+    <div style={{ flex: 1, minWidth: 110, minHeight: 0, background: 'var(--surface)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10,
+                  display: 'flex', flexDirection: 'column',
+                  justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1,
+                    color: accent ? 'var(--danger)' : 'var(--text)' }}>{value}</div>
     </div>
   )
 }
@@ -188,20 +193,29 @@ function useAlarmTotals(stats: AlertSummaryByType[]) {
   }, [stats])
 }
 
-// 요약 타일 — 같은 기간의 한 묶음이라 타일끼리는 쪼개지 않는다.
-export function AlarmTotalsBlock() {
-  const { stats, loading, error } = useAlarmSummary()
-  const totals = useAlarmTotals(stats)
-  return (
-    <Block loading={loading} error={error}>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <Tile label="기간 내 발생" value={totals.opens} />
-        <Tile label="해소" value={totals.resolved} />
-        <Tile label="미해소 (코드·소스)" value={totals.open} accent={totals.open > 0} />
-        <Tile label="평균 지속 (해소분)" value={totals.avgDur != null ? formatSec(Math.round(totals.avgDur)) : '—'} />
-      </div>
-    </Block>
-  )
+// 요약 타일 — **타일 1장 = 위젯 1개.** 발생 건수 / 해소 건수 / 미해소 조합 수 / 평균 지속(시간)은
+// 세는 축이 서로 달라 하나만 놓아도 말이 된다(§3.1). 타일별 컴포넌트를 두지 않고 선언 표 + 팩토리.
+export interface AnalysisTile {
+  key: string
+  label: string           // 타일에 보이는 이름
+  title: string           // 편집 목록에서 고를 때의 이름
+}
+
+export const ALARM_TOTAL_TILES: AnalysisTile[] = [
+  { key: 'opens',    label: '기간 내 발생',      title: '알람 분석 — 기간 내 발생' },
+  { key: 'resolved', label: '해소',              title: '알람 분석 — 해소' },
+  { key: 'open',     label: '미해소 (코드·소스)', title: '알람 분석 — 미해소' },
+  { key: 'avgDur',   label: '평균 지속 (해소분)', title: '알람 분석 — 평균 지속' },
+]
+
+// 타일 한 장이 곧 위젯 몸통 — 바깥 panel 을 한 겹 더 두르지 않는다(비정상 세션 지표와 같은 형태).
+export function AlarmTotalTile({ tile }: { tile: AnalysisTile }) {
+  const { stats } = useAlarmSummary()
+  const t = useAlarmTotals(stats)
+  const value = tile.key === 'avgDur'
+    ? (t.avgDur != null ? formatSec(Math.round(t.avgDur)) : '—')
+    : (t[tile.key as 'opens' | 'resolved' | 'open'] ?? 0)
+  return <Tile label={tile.label} value={value} accent={tile.key === 'open' && t.open > 0} />
 }
 
 export function AlarmSeverityDistBlock() {
@@ -385,22 +399,30 @@ function useEventAggs() {
   return { days, events, byKind, byType, bySource, daily, loading, error }
 }
 
-export function EventTotalsBlock() {
-  const { events, byKind, byType, loading, error } = useEventAggs()
+// 이벤트 요약 타일도 낱개 — 총 통지 건수 / 상태변화 건수 / 감사 건수 / 유형 종류 수.
+export const EVENT_TOTAL_TILES: AnalysisTile[] = [
+  { key: 'total',       label: '총 통지',   title: '이벤트 분석 — 총 통지' },
+  { key: 'stateChange', label: '상태 변화', title: '이벤트 분석 — 상태 변화' },
+  { key: 'audit',       label: '감사',      title: '이벤트 분석 — 감사' },
+  { key: 'types',       label: '유형 수',   title: '이벤트 분석 — 유형 수' },
+]
+
+export function EventTotalTile({ tile }: { tile: AnalysisTile }) {
+  const { events, byKind, byType } = useEventAggs()
+  const n = tile.key === 'total' ? events.length
+    : tile.key === 'types' ? byType.length
+    : (byKind[tile.key] || 0)
+  // 상한 도달 표기는 '총 통지' 타일에만 — 절단된 수치가 그것이다.
+  const truncated = tile.key === 'total' && events.length >= FETCH_LIMIT
   return (
-    <Block loading={loading} error={error}>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <Tile label="총 통지" value={events.length} />
-        <Tile label="상태 변화" value={byKind['stateChange'] || 0} />
-        <Tile label="감사" value={byKind['audit'] || 0} />
-        <Tile label="유형 수" value={byType.length} />
-      </div>
-      {events.length >= FETCH_LIMIT && (
-        <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 6 }}>
+    <Tile label={tile.label} value={truncated ? (
+      <>
+        {n}
+        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
           최신 {FETCH_LIMIT}건만 집계 (기간을 좁히세요)
         </div>
-      )}
-    </Block>
+      </>
+    ) : n} />
   )
 }
 

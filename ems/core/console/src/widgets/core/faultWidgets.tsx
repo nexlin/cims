@@ -4,6 +4,7 @@
 //   · 심각도 타일은 **1장 = 위젯 1개**. 선언 표(SEVERITY_ORDER) + 팩토리로 만들고, 목록과는
 //     페이지 파라미터 `sev` 로 이어진다(타일 클릭 = 목록 필터).
 //   · 코드 사전(조회)과 평가 규칙(감지 설정)은 성격도 API 도 달라 각각 위젯.
+//   · 유형별 분석의 요약 타일도 심각도 타일과 같다 — 세는 축(건수 / 종류 수 / 시간)이 달라 1장 = 위젯 1개.
 //   · 이력·유형별 분석은 **화면 전체가 위젯 하나**. 전환 탭·기간·표(블록)는 함께 조작하는 한 벌이라
 //     떼어 놓으면 말이 되지 않는다. 조건은 그대로 페이지 파라미터라 컨트롤 위젯을 따로 놓는 배치도
 //     성립한다(그 경우 위젯이 자기 안의 컨트롤을 접는다 — §3.2).
@@ -14,8 +15,9 @@ import {
 } from '../../pages/AlertsPage'
 import { AuditEventsSection } from '../../pages/AuditEventsPage'
 import {
-  AlarmTotalsBlock, AlarmSeverityDistBlock, AlarmDailyBlock, AlarmByCodeBlock, AlarmByTypeBlock,
-  EventTotalsBlock, EventDailyBlock, EventByTypeBlock, EventBySourceBlock,
+  ALARM_TOTAL_TILES, AlarmTotalTile, EVENT_TOTAL_TILES, EventTotalTile,
+  AlarmSeverityDistBlock, AlarmDailyBlock, AlarmByCodeBlock, AlarmByTypeBlock,
+  EventDailyBlock, EventByTypeBlock, EventBySourceBlock,
 } from '../../pages/AlarmAnalysisPage'
 import { makeCardWidget } from '../CardLayout'
 import { GRID_ROWS } from '../gridLayout'
@@ -94,13 +96,22 @@ const analysis = (id: string, title: string, component: WidgetDef['component'],
   ({ id, title, category: 'stats', component, defaultSize: { w, h },
      apis: [id.startsWith('core.alarm-') ? 'alerts.summary' : 'events.list'] })
 
+// 요약 타일은 **1장 = 위젯 1개** — 세는 축(건수/종류 수/시간)이 서로 다르다. 심각도 타일과 같은
+// 방식으로 선언 표(ALARM_TOTAL_TILES·EVENT_TOTAL_TILES) + 팩토리로 만든다.
+const totalTile = (prefix: string, t: { key: string; title: string },
+                   component: WidgetDef['component']): WidgetDef =>
+  ({ ...analysis(`${prefix}.${t.key}`, t.title, component, 3, 7), category: 'metric',
+     minSize: { h: 4 } })
+
 export const ANALYSIS_BLOCK_WIDGETS: WidgetDef[] = [
-  analysis('core.alarm-analysis.totals', '알람 분석 — 요약 타일', AlarmTotalsBlock, 12, 6),
+  ...ALARM_TOTAL_TILES.map(t => totalTile('core.alarm-analysis.totals', t,
+    () => <AlarmTotalTile tile={t} />)),
   analysis('core.alarm-analysis.severity', '알람 분석 — 심각도 분포', AlarmSeverityDistBlock, 6, 9),
   analysis('core.alarm-analysis.daily', '알람 분석 — 일별 발생량', AlarmDailyBlock, 6, 9),
   analysis('core.alarm-analysis.by-code', '알람 분석 — 코드별 표', AlarmByCodeBlock, 7, 24),
   analysis('core.alarm-analysis.by-type', '알람 분석 — 유형(클래스)별 표', AlarmByTypeBlock, 5, 24),
-  analysis('core.event-analysis.totals', '이벤트 분석 — 요약 타일', EventTotalsBlock, 12, 6),
+  ...EVENT_TOTAL_TILES.map(t => totalTile('core.event-analysis.totals', t,
+    () => <EventTotalTile tile={t} />)),
   analysis('core.event-analysis.daily', '이벤트 분석 — 일별 통지량', EventDailyBlock, 12, 8),
   analysis('core.event-analysis.by-type', '이벤트 분석 — 유형별 표', EventByTypeBlock, 7, 22),
   analysis('core.event-analysis.by-source', '이벤트 분석 — 소스별 표', EventBySourceBlock, 5, 22),
@@ -124,12 +135,19 @@ const HISTORY_CARD_LAYOUT: WidgetPlacement[] = [
 const ANALYSIS_CARD_LAYOUT: WidgetPlacement[] = [
   { widgetId: 'core.alarm-event-tabs', x: 0, y: 0, w: 48, h: 4 },
   { widgetId: 'core.days-filter',      x: 0, y: 4, w: 48, h: 4 },
-  { widgetId: 'core.alarm-analysis.totals',    x: 0,  y: 8,  w: 48, h: 7,  visibleWhen: alarmTab },
+  // 요약 타일 4장 = 48칸을 12·12·12·12 로 나눈 한 줄.
+  ...ALARM_TOTAL_TILES.map((t, i) => ({
+    widgetId: `core.alarm-analysis.totals.${t.key}`, x: i * 12, y: 8, w: 12, h: 7,
+    visibleWhen: alarmTab,
+  })),
   { widgetId: 'core.alarm-analysis.severity',  x: 0,  y: 15, w: 24, h: 9,  visibleWhen: alarmTab },
   { widgetId: 'core.alarm-analysis.daily',     x: 24, y: 15, w: 24, h: 9,  visibleWhen: alarmTab },
   { widgetId: 'core.alarm-analysis.by-code',   x: 0,  y: 24, w: 28, h: 24, visibleWhen: alarmTab },
   { widgetId: 'core.alarm-analysis.by-type',   x: 28, y: 24, w: 20, h: 24, visibleWhen: alarmTab },
-  { widgetId: 'core.event-analysis.totals',    x: 0,  y: 8,  w: 48, h: 7,  visibleWhen: eventTab },
+  ...EVENT_TOTAL_TILES.map((t, i) => ({
+    widgetId: `core.event-analysis.totals.${t.key}`, x: i * 12, y: 8, w: 12, h: 7,
+    visibleWhen: eventTab,
+  })),
   { widgetId: 'core.event-analysis.daily',     x: 0,  y: 15, w: 48, h: 9,  visibleWhen: eventTab },
   { widgetId: 'core.event-analysis.by-type',   x: 0,  y: 24, w: 28, h: 24, visibleWhen: eventTab },
   { widgetId: 'core.event-analysis.by-source', x: 28, y: 24, w: 20, h: 24, visibleWhen: eventTab },
