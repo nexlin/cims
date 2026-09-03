@@ -238,13 +238,18 @@ body {
   flex: 1; min-height: 0; min-width: 0;
   display: grid; gap: 0; align-items: stretch;
 }
-.card-block { display: flex; min-width: 0; min-height: 0; box-sizing: border-box; }
+/* 블록 칸은 **세로 스택**이다(.widget-fixed 와 같은 규칙) — 루트가 여러 조각인 위젯(툴바+표 등)을
+   row 로 두면 조각들이 가로로 반씩 나눠 갖는다. */
+.card-block { display: flex; flex-direction: column; min-width: 0; min-height: 0; box-sizing: border-box; }
 .card-canvas > .card-block,
 .card-canvas > .grid-widget { margin: calc(var(--card-gap, 12px) / 2); box-sizing: border-box; }
-.card-block > * { flex: 1; min-width: 0; min-height: 0; }
-.card-block > .panel { overflow-y: auto; overflow-x: hidden; }
+.card-block > * { width: 100%; min-width: 0; }
+.card-block > .panel { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.card-block > .widget-stack { flex: 1; min-height: 0; }
+.card-block > .card-canvas { flex: 1; min-height: 0; }
+/* 컨트롤(툴바·탭)이 블록 루트일 때는 칸을 채우고 내용은 세로 중앙 */
 .card-block > .toolbar,
-.card-block > .tab-nav { align-items: center; }
+.card-block > .tab-nav { flex: 1; min-height: 0; align-items: center; }
 
 /* 고정 페이지(component 라우트)를 위젯으로 감싼 본문 — 위젯과 같은 규율(console_platform §3.0):
    배치한 칸을 채우고, 넘치면 브라우저가 아니라 **이 안에서** 스크롤한다.

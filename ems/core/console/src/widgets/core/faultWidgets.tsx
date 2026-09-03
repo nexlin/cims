@@ -9,7 +9,9 @@
 //     성립한다(그 경우 위젯이 자기 안의 컨트롤을 접는다 — §3.2).
 import { AlarmSeverityTile, ActiveAlarmList } from '../../pages/ActiveAlarmsPage'
 import { AlarmCatalogTable, AlarmRulesTable } from '../../pages/AlarmCatalogPage'
-import { AlarmsSection, EventsSection } from '../../pages/AlertsPage'
+import {
+  AlarmHistoryFilter, AlarmsSection, EventHistoryFilter, EventsSection,
+} from '../../pages/AlertsPage'
 import { AuditEventsSection } from '../../pages/AuditEventsPage'
 import {
   AlarmTotalsBlock, AlarmSeverityDistBlock, AlarmDailyBlock, AlarmByCodeBlock, AlarmByTypeBlock,
@@ -73,9 +75,18 @@ const block = (id: string, title: string, component: WidgetDef['component'],
   ({ id, title, category: 'event', component, apis, defaultSize: { w, h } })
 
 export const alarmHistoryWidget = block(
-  'core.alarm-history', '알람 이력 (표)', AlarmsSection, ['alerts.list'], 12, 34)
+  'core.alarm-history', '알람 이력 (표)', AlarmsSection, ['alerts.list'], 12, 40)
 export const eventHistoryWidget = block(
-  'core.event-history', '이벤트 이력 (표)', EventsSection, ['events.list'], 12, 34)
+  'core.event-history', '이벤트 이력 (표)', EventsSection, ['events.list'], 12, 40)
+// 조회 조건 — 기간 선택 옆줄에 놓는다. 표는 아래 공간을 전부 쓴다.
+export const alarmHistoryFilterWidget: WidgetDef = {
+  id: 'core.alarm-history.filter', title: '알람 이력 — 조회 조건', category: 'control',
+  component: AlarmHistoryFilter, apis: ['alerts.list'], defaultSize: { w: 8, h: 4 },
+}
+export const eventHistoryFilterWidget: WidgetDef = {
+  id: 'core.event-history.filter', title: '이벤트 이력 — 조회 조건', category: 'control',
+  component: EventHistoryFilter, apis: ['events.list'], defaultSize: { w: 8, h: 4 },
+}
 
 // 유형별 분석 블록 — 알람은 집계 API(alerts.summary), 이벤트는 목록 API(events.list)를 공유 로더로.
 const analysis = (id: string, title: string, component: WidgetDef['component'],
@@ -100,11 +111,14 @@ export const ANALYSIS_BLOCK_WIDGETS: WidgetDef[] = [
 const alarmTab = { param: 'atab', equals: 'alarms' }
 const eventTab = { param: 'atab', equals: 'events' }
 
+// 조회 조건은 **한 줄**로 — 탭 / 기간 / 그 탭의 필터. 표가 아래를 전부 차지한다.
 const HISTORY_CARD_LAYOUT: WidgetPlacement[] = [
-  { widgetId: 'core.alarm-event-tabs', x: 0, y: 0, w: 48, h: 4 },
-  { widgetId: 'core.days-filter',      x: 0, y: 4, w: 48, h: 4 },
-  { widgetId: 'core.alarm-history',    x: 0, y: 8, w: 48, h: 40, visibleWhen: alarmTab },
-  { widgetId: 'core.event-history',    x: 0, y: 8, w: 48, h: 40, visibleWhen: eventTab },
+  { widgetId: 'core.alarm-event-tabs',    x: 0,  y: 0, w: 8,  h: 4 },
+  { widgetId: 'core.days-filter',         x: 8,  y: 0, w: 14, h: 4 },
+  { widgetId: 'core.alarm-history.filter', x: 22, y: 0, w: 26, h: 4, visibleWhen: alarmTab },
+  { widgetId: 'core.event-history.filter', x: 22, y: 0, w: 26, h: 4, visibleWhen: eventTab },
+  { widgetId: 'core.alarm-history',       x: 0,  y: 4, w: 48, h: 44, visibleWhen: alarmTab },
+  { widgetId: 'core.event-history',       x: 0,  y: 4, w: 48, h: 44, visibleWhen: eventTab },
 ]
 
 const ANALYSIS_CARD_LAYOUT: WidgetPlacement[] = [
@@ -159,6 +173,7 @@ export const FAULT_WIDGETS: WidgetDef[] = [
   ...SEVERITY_TILE_WIDGETS, alarmListWidget,
   alarmEventTabsWidget, periodDaysWidget,
   alarmEventHistoryWidget, alarmEventAnalysisWidget,
+  alarmHistoryFilterWidget, eventHistoryFilterWidget,
   alarmHistoryWidget, eventHistoryWidget, ...ANALYSIS_BLOCK_WIDGETS,
   auditHistoryWidget, alarmCatalogWidget, alarmRulesWidget,
 ]

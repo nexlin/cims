@@ -10,11 +10,13 @@
 //   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
 import { Pager } from '../components/ListControls'
+import { makeSharedByKey } from '../widgets/sharedFetch'
 import { usePageParam } from '../widgets/pageParams'
+import { alertsFilter, useAlarmFilter, useEventFilter } from './alertsHistoryStore'
 import {
   alarmTypeLabel, eventTypeLabel, EVENT_KIND_LABEL, sevBadgeClass, severityOf,
   fmtTime, durationBetween, downloadCsv,
@@ -113,68 +115,39 @@ function DetailItem({ label, value }: { label: string; value?: string | null }) 
 }
 
 // ── 알람 탭 ──────────────────────────────────────────────────────────────────
-export function AlarmsSection() {
-  const { show } = useToast()
-  const [events, setEvents] = useState<AlertEvent[]>([])
-  // 기간은 이 표가 소유하지 않는다 — 화면의 기간 선택 컨트롤이 쓰는 페이지 파라미터를 읽는다.
+// ── 공유 조회 ────────────────────────────────────────────────────────────────
+// 필터 블록과 표 블록이 **같은 응답**을 봐야 하므로 days 를 키로 공유한다(요청 1회).
+const useAlertsRaw = makeSharedByKey(k => alertsApi.list({ days: Number(k), limit: FETCH_LIMIT }))
+const useEventsRaw = makeSharedByKey(k => eventsApi.list({ days: Number(k), limit: FETCH_LIMIT }))
+
+function useAlarmHistory() {
+  // 기간은 이 화면이 소유하지 않는다 — 기간 선택 컨트롤이 쓰는 페이지 파라미터를 읽는다.
   const days = Number(usePageParam('days')[0]) || 7
-  const [sevFilter, setSevFilter] = useState('')
-  const [codeFilter, setCodeFilter] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [q, setQ] = useState('')
-  const [showResolved, setShowResolved] = useState(true)
-  const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [page, setPage] = useState(0)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const list = await alertsApi.list({ days, limit: FETCH_LIMIT })
-      setEvents(list.events)
-    } catch (e: unknown) {
-      show(String(e), 'err')
-    } finally {
-      setLoading(false)
-    }
-  }, [days, show])
-
-  useEffect(() => { load() }, [load])
-  useEffect(() => { setPage(0) }, [days, sevFilter, codeFilter, typeFilter, q, showResolved])
-
+  const { data, loading, error, reload } = useAlertsRaw(String(days))
+  const events = useMemo(() => data?.events ?? [], [data])
   const allRows = useMemo(() => pairEvents(events), [events])
-  const codes = useMemo(() => [...new Set(allRows.map(r => r.code).filter(Boolean) as string[])].sort(), [allRows])
-  const types = useMemo(() => [...new Set(allRows.map(r => r.type).filter(Boolean))].sort(), [allRows])
-
+  const f = useAlarmFilter()
   const rows = useMemo(() => {
-    const needle = q.trim().toLowerCase()
+    const needle = f.q.trim().toLowerCase()
     return allRows.filter(r => {
-      if (!showResolved && r.resolved_at) return false
-      if (sevFilter && severityOf(r) !== sevFilter) return false
-      if (codeFilter && r.code !== codeFilter) return false
-      if (typeFilter && r.type !== typeFilter) return false
+      if (!f.showResolved && r.resolved_at) return false
+      if (f.sev && severityOf(r) !== f.sev) return false
+      if (f.code && r.code !== f.code) return false
+      if (f.type && r.type !== f.type) return false
       if (needle && ![r.code, r.type, r.message, r.source?.mo_instance, r.source?.mo_label, r.source?.detected_by]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
-  }, [allRows, sevFilter, codeFilter, typeFilter, q, showResolved])
+  }, [allRows, f])
+  return { days, events, allRows, rows, f, loading, error, reload }
+}
 
-  const openCount = rows.filter(r => r.action === 'open' && !r.resolved_at).length
-  const pageStart = Math.min(page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1)) * PAGE_SIZE
-  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE)
-
-  const ackAlarm = useCallback(async (alarmId?: string) => {
-    if (!alarmId) return
-    try { await alertsApi.ack(alarmId); show('알람 승인됨', 'ok'); load() }
-    catch (e) { show((e as Error).message, 'err') }
-  }, [load, show])
-
-  const commentAlarm = useCallback(async (alarmId: string | undefined, text: string) => {
-    if (!alarmId) return
-    try { await alertsApi.comment(alarmId, text); show('코멘트 기록됨', 'ok'); load() }
-    catch (e) { show((e as Error).message, 'err') }
-  }, [load, show])
-
+// ── 알람 조회 조건 ───────────────────────────────────────────────────────────
+// 기간 선택 옆줄에 놓는 컨트롤 — 표는 아래 공간을 전부 쓴다.
+export function AlarmHistoryFilter() {
+  const { days, allRows, rows, f, reload } = useAlarmHistory()
+  const codes = useMemo(() => [...new Set(allRows.map(r => r.code).filter(Boolean) as string[])].sort(), [allRows])
+  const types = useMemo(() => [...new Set(allRows.map(r => r.type).filter(Boolean))].sort(), [allRows])
   const exportCsv = () => {
     downloadCsv(`alarms_${days}d.csv`,
       ['발생', '해제', '지속(초)', '심각도', '코드', '클래스', '소스', '감지', '메시지', '재통지', '승인자'],
@@ -184,34 +157,59 @@ export function AlarmsSection() {
         r.message, r.occurrences ?? 1, r.ack_user || '',
       ]))
   }
+  return (
+    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <select className="form-input" value={f.sev} style={{ width: 108 }}
+              onChange={e => alertsFilter.setAlarm({ sev: e.target.value })}>
+        <option value="">심각도 전체</option>
+        {['critical', 'major', 'minor', 'warning', 'indeterminate'].map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+      <select className="form-input" value={f.code} style={{ width: 124 }}
+              onChange={e => alertsFilter.setAlarm({ code: e.target.value })}>
+        <option value="">코드 전체</option>
+        {codes.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <select className="form-input" value={f.type} style={{ width: 132 }}
+              onChange={e => alertsFilter.setAlarm({ type: e.target.value })}>
+        <option value="">클래스 전체</option>
+        {types.map(t => <option key={t} value={t}>{alarmTypeLabel(t)}</option>)}
+      </select>
+      <input className="search-input" style={{ width: 170 }} placeholder="소스/메시지 검색"
+             value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })} />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}>
+        <input type="checkbox" checked={f.showResolved}
+               onChange={e => alertsFilter.setAlarm({ showResolved: e.target.checked })} />
+        해소 포함
+      </label>
+      <button className="btn btn--ghost btn--sm" onClick={exportCsv} disabled={rows.length === 0}>CSV</button>
+      <button className="btn btn--ghost btn--sm" onClick={reload}>↻</button>
+    </div>
+  )
+}
+
+// ── 알람 이력 표 ─────────────────────────────────────────────────────────────
+export function AlarmsSection() {
+  const { show } = useToast()
+  const { events, rows, f, loading, reload } = useAlarmHistory()
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  const openCount = rows.filter(r => r.action === 'open' && !r.resolved_at).length
+  const pageStart = Math.min(f.page, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1)) * PAGE_SIZE
+  const pageRows = rows.slice(pageStart, pageStart + PAGE_SIZE)
+
+  const ackAlarm = useCallback(async (alarmId?: string) => {
+    if (!alarmId) return
+    try { await alertsApi.ack(alarmId); show('알람 승인됨', 'ok'); reload() }
+    catch (e) { show((e as Error).message, 'err') }
+  }, [reload, show])
+
+  const commentAlarm = useCallback(async (alarmId: string | undefined, text: string) => {
+    if (!alarmId) return
+    try { await alertsApi.comment(alarmId, text); show('코멘트 기록됨', 'ok'); reload() }
+    catch (e) { show((e as Error).message, 'err') }
+  }, [reload, show])
 
   return (
-    <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <select className="form-input" value={sevFilter} onChange={e => setSevFilter(e.target.value)} style={{ width: 110 }}>
-          <option value="">심각도 전체</option>
-          {['critical', 'major', 'minor', 'warning', 'indeterminate'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select className="form-input" value={codeFilter} onChange={e => setCodeFilter(e.target.value)} style={{ width: 130 }}>
-          <option value="">코드 전체</option>
-          {codes.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
-        <select className="form-input" value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ width: 140 }}>
-          <option value="">클래스 전체</option>
-          {types.map(t => <option key={t} value={t}>{alarmTypeLabel(t)}</option>)}
-        </select>
-        <input className="search-input" style={{ width: 200 }} placeholder="소스/메시지 검색"
-               value={q} onChange={e => setQ(e.target.value)} />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13 }}>
-          <input type="checkbox" checked={showResolved}
-            onChange={e => setShowResolved(e.target.checked)} />
-          해소 포함
-        </label>
-        <button className="btn btn--ghost btn--sm" onClick={exportCsv} style={{ marginLeft: 'auto' }}
-                disabled={rows.length === 0}>CSV</button>
-        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
-      </div>
-
       <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
           알람 이력 ({rows.length}건{openCount > 0 && <span style={{ color: 'var(--danger)' }}> · 미해소 {openCount}</span>})
@@ -305,11 +303,11 @@ export function AlarmsSection() {
               </tbody>
             </table>
             </div>
-            <Pager page={page} count={rows.length} pageSize={PAGE_SIZE} onPage={setPage} />
+            <Pager page={f.page} count={rows.length} pageSize={PAGE_SIZE}
+                   onPage={pg => alertsFilter.setAlarm({ page: pg })} />
           </>
         )}
       </div>
-    </>
   )
 }
 
@@ -406,75 +404,63 @@ function groupEvents(events: EventRecord[]): EventGroup[] {
   return groups
 }
 
-export function EventsSection() {
-  const { show } = useToast()
-  const [events, setEvents] = useState<EventRecord[]>([])
-  // 기간은 이 표가 소유하지 않는다 — 화면의 기간 선택 컨트롤이 쓰는 페이지 파라미터를 읽는다.
+function useEventHistory() {
   const days = Number(usePageParam('days')[0]) || 7
-  const [filterType, setFilterType] = useState('')
-  const [filterKind, setFilterKind] = useState('')
-  const [q, setQ] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [page, setPage] = useState(0)
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    try {
-      const list = await eventsApi.list({ days, limit: FETCH_LIMIT })
-      setEvents(list.events)
-    } catch (e: unknown) {
-      show(String(e), 'err')
-    } finally {
-      setLoading(false)
-    }
-  }, [days, show])
-
-  useEffect(() => { load() }, [load])
-  useEffect(() => { setPage(0) }, [days, filterType, filterKind, q])
-
-  const types = useMemo(() => [...new Set(events.map(e => e.type).filter(Boolean))].sort(), [events])
-
+  const { data, loading, error, reload } = useEventsRaw(String(days))
+  const events = useMemo(() => data?.events ?? [], [data])
+  const f = useEventFilter()
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase()
+    const needle = f.q.trim().toLowerCase()
     return events.filter(e => {
-      if (filterType && e.type !== filterType) return false
-      if (filterKind && e.kind !== filterKind) return false
+      if (f.type && e.type !== f.type) return false
+      if (f.kind && e.kind !== f.kind) return false
       if (needle && ![e.code, e.type, e.message, e.source?.mo_instance]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
-  }, [events, filterType, filterKind, q])
-
+  }, [events, f])
   const groups = useMemo(() => groupEvents(filtered), [filtered])
-  const pageStart = Math.min(page, Math.max(0, Math.ceil(groups.length / PAGE_SIZE) - 1)) * PAGE_SIZE
-  const pageGroups = groups.slice(pageStart, pageStart + PAGE_SIZE)
+  return { days, events, filtered, groups, f, loading, error, reload }
+}
 
+// ── 이벤트 조회 조건 ─────────────────────────────────────────────────────────
+export function EventHistoryFilter() {
+  const { days, events, filtered, f, reload } = useEventHistory()
+  const types = useMemo(() => [...new Set(events.map(e => e.type).filter(Boolean))].sort(), [events])
   const exportCsv = () => {
     downloadCsv(`events_${days}d.csv`,
       ['시각', '분류', '코드', '유형', '소스', '메시지'],
       filtered.map(e => [e.ts, e.kind || '', e.code || '', e.type, e.source?.mo_instance || '', e.message]))
   }
+  return (
+    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <select className="form-input" value={f.kind} style={{ width: 116 }}
+              onChange={e => alertsFilter.setEvent({ kind: e.target.value })}>
+        <option value="">분류 전체</option>
+        <option value="stateChange">상태 변화</option>
+        <option value="audit">감사</option>
+      </select>
+      <select className="form-input" value={f.type} style={{ width: 152 }}
+              onChange={e => alertsFilter.setEvent({ type: e.target.value })}>
+        <option value="">유형 전체</option>
+        {types.map(t => <option key={t} value={t}>{eventTypeLabel(t)}</option>)}
+      </select>
+      <input className="search-input" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
+             value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })} />
+      <button className="btn btn--ghost btn--sm" onClick={exportCsv} disabled={filtered.length === 0}>CSV</button>
+      <button className="btn btn--ghost btn--sm" onClick={reload}>↻</button>
+    </div>
+  )
+}
+
+// ── 이벤트 이력 표 ───────────────────────────────────────────────────────────
+export function EventsSection() {
+  const { events, filtered, groups, f, loading } = useEventHistory()
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const pageStart = Math.min(f.page, Math.max(0, Math.ceil(groups.length / PAGE_SIZE) - 1)) * PAGE_SIZE
+  const pageGroups = groups.slice(pageStart, pageStart + PAGE_SIZE)
 
   return (
-    <>
-      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8, flex: 'none' }}>
-        <select className="form-input" value={filterKind} onChange={e => setFilterKind(e.target.value)} style={{ width: 120 }}>
-          <option value="">분류 전체</option>
-          <option value="stateChange">상태 변화</option>
-          <option value="audit">감사</option>
-        </select>
-        <select className="form-input" value={filterType} onChange={e => setFilterType(e.target.value)} style={{ width: 160 }}>
-          <option value="">유형 전체</option>
-          {types.map(t => <option key={t} value={t}>{eventTypeLabel(t)}</option>)}
-        </select>
-        <input className="search-input" style={{ width: 200 }} placeholder="코드/소스/메시지 검색"
-               value={q} onChange={e => setQ(e.target.value)} />
-        <button className="btn btn--ghost btn--sm" onClick={exportCsv} style={{ marginLeft: 'auto' }}
-                disabled={filtered.length === 0}>CSV</button>
-        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
-      </div>
-
       <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
           이벤트 이력 ({filtered.length}건 · {groups.length}묶음)
@@ -561,10 +547,10 @@ export function EventsSection() {
               </tbody>
             </table>
             </div>
-            <Pager page={page} count={groups.length} pageSize={PAGE_SIZE} onPage={setPage} unit="묶음" />
+            <Pager page={f.page} count={groups.length} pageSize={PAGE_SIZE} unit="묶음"
+                   onPage={pg => alertsFilter.setEvent({ page: pg })} />
           </>
         )}
       </div>
-    </>
   )
 }
