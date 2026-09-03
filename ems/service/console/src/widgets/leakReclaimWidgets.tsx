@@ -5,13 +5,18 @@
 //   reason: orphan_no_rtp(setup 실패/무RTP, OrphanReclaimSec 회수) | hold_timeout(RTP 받았으나
 //           REMOVE 미수신 = CSP crash/BYE 누락, SessionTimeout 회수).
 //
-// 다른 통계 화면과 같은 구성으로 나눈다 — 조회 조건(core.page-filter) + 지표 카드 낱개 + 목록.
-// 조회는 날짜를 키로 공유하므로 위젯이 몇 개든 요청은 1회다(makeSharedByKey).
-import { useState, type CSSProperties } from 'react'
+// **화면 = 카드 하나**(`cims.leak-reclaims`)이고 안의 여섯 블록(조회 조건 · 지표 4 낱개 · 목록)은
+// 각각 위젯이라 카드 안 편집으로 재배치할 수 있다(console_platform §3.0.1).
+// 지표 4개는 서로 다른 축(총 회수 / 무RTP / RTP후 미해제 / 노드별)이라 낱개다(§3.1).
+// 조회는 날짜(페이지 파라미터 `date`)를 키로 공유하므로 블록이 몇 개든 요청은 1회다(makeSharedByKey).
+import { type CSSProperties } from 'react'
 import { api } from '@core/api/client'
+import { InfoDot } from '@core/components/InfoDot'
+import { makeCardWidget } from '@core/widgets/CardLayout'
+import { GRID_ROWS } from '@core/widgets/gridLayout'
 import { makeSharedByKey } from '@core/widgets/sharedFetch'
 import { usePageParam, todayIso } from '@core/widgets/pageParams'
-import type { WidgetDef } from '@core/widgets/types'
+import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
 
 interface ReclaimItem {
   ts: string; node: string; session_id: string; sesid: string
@@ -104,33 +109,40 @@ function ByNodeBlock() {
   )
 }
 
-// 화면의 뜻 — 0건이 정상이라는 걸 모르면 오해하기 쉽다. 자리를 차지하지 않게 헤더의 ⓘ 로 접어 둔다
-// (hover 는 툴팁, 클릭하면 아래에 펼침).
-const NOTE = 'CMP sweeper 가 회수한 고아 relay 목록입니다. 정상 운영에서는 0건이 기대값이며, '
-  + '항목이 나타나면 CSP 비정상 종료(crash) 또는 teardown 누락으로 누수된 relay 를 안전망이 회수한 것입니다.'
+// 조회 조건 — 날짜(페이지 파라미터 `date`)를 소유한다. 화면의 뜻은 ⓘ 로 접는다
+// (0건이 정상이라는 걸 모르면 오해하기 쉬운 화면이라 설명 자체는 남겨 둔다).
+function FilterBlock() {
+  const [date, setDate] = usePageParam('date')
+  const { data, loading, error, reload } = useReclaims()
+  const n = data?.counts.total ?? 0
+  return (
+    <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
+      <input type="date" className="form-input" value={date || todayIso()} style={{ width: 150 }}
+             onChange={e => setDate(e.target.value)} />
+      <button className="btn btn--sm btn--ghost" title="다시 조회" onClick={reload}>↻</button>
+      <InfoDot label="누수 회수란?">
+        CMP sweeper 가 회수한 <b>고아 relay</b> 목록입니다. 정상 운영에서는 <b>0건</b>이 기대값이며,
+        항목이 나타나면 CSP 비정상 종료(crash) 또는 teardown 누락으로 누수된 relay 를
+        안전망이 회수한 것입니다.
+      </InfoDot>
+      {loading && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>갱신 중…</span>}
+      {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>조회 실패</span>}
+      <span className="ts" style={{ marginLeft: 'auto' }}>총 {n}건 회수</span>
+    </div>
+  )
+}
 
 function ListBlock() {
   const { data, loading, error } = useReclaims()
-  const [noteOpen, setNoteOpen] = useState(false)
   const items = data?.items ?? []
   return (
     <div className="panel" style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, flex: 'none',
                     borderBottom: '1px solid var(--border)' }}>
         회수 세션 ({items.length}건)
-        <button className="btn btn--ghost btn--sm" title={NOTE} aria-label="이 화면 설명"
-                onClick={() => setNoteOpen(o => !o)}
-                style={{ marginLeft: 6, padding: '0 6px', fontSize: 12, color: 'var(--text-muted)' }}>ⓘ</button>
         {loading && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}> · 갱신 중…</span>}
         {error && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}> · 조회 실패</span>}
       </div>
-      {noteOpen && (
-        <div style={{ padding: '8px 16px', flex: 'none', fontSize: 12, lineHeight: 1.6,
-                      color: 'var(--text-muted)', borderBottom: '1px solid var(--border)',
-                      background: 'var(--bg-soft)' }}>
-          {NOTE}
-        </div>
-      )}
       <div className="scroll-fill">
         <table className="data-table">
           <thead>
@@ -175,7 +187,25 @@ const w = (id: string, title: string, component: WidgetDef['component'],
   ({ id, title, category: 'stats', apis: ['stats.leak-reclaims'], component,
      defaultSize: { w: width, h }, adminOnly: true })
 
+// 카드 안 기본 배치 — 지표 4장은 48칸을 12·12·12·12 로 나눠 한 줄에. 세로 합 = GRID_ROWS.
+export const LEAK_CARD_LAYOUT: WidgetPlacement[] = [
+  { widgetId: 'cims.leak.filter',  x: 0,  y: 0,  w: 48, h: 4 },
+  { widgetId: 'cims.leak.total',   x: 0,  y: 4,  w: 12, h: 7 },
+  { widgetId: 'cims.leak.orphan',  x: 12, y: 4,  w: 12, h: 7 },
+  { widgetId: 'cims.leak.hold',    x: 24, y: 4,  w: 12, h: 7 },
+  { widgetId: 'cims.leak.by-node', x: 36, y: 4,  w: 12, h: 7 },
+  { widgetId: 'cims.leak.list',    x: 0,  y: 11, w: 48, h: 37 },
+]
+
+export const leakCardWidget: WidgetDef = makeCardWidget({
+  id: 'cims.leak-reclaims', title: '누수 회수 화면', category: 'stats',
+  defaultSize: { w: 12, h: GRID_ROWS }, layout: LEAK_CARD_LAYOUT,
+})
+
 export const LEAK_RECLAIM_WIDGETS: WidgetDef[] = [
+  leakCardWidget,
+  { id: 'cims.leak.filter', title: '누수 회수 — 조회 조건', category: 'control',
+    apis: ['stats.leak-reclaims'], component: FilterBlock, defaultSize: { w: 12, h: 4 } },
   w('cims.leak.total', '누수 회수 — 총 회수', TotalBlock, 3, 7),
   w('cims.leak.orphan', '누수 회수 — 무RTP', OrphanBlock, 3, 7),
   w('cims.leak.hold', '누수 회수 — RTP후 미해제', HoldBlock, 3, 7),

@@ -29,6 +29,10 @@ export const SERVICE_STATUS_LAYOUT: PageLayout = {
     { widgetId: 'cims.svc-detail',    x: 0,  y: 25, w: 48, h: 23 },
   ],
 }
+// 누수 회수(sweeper) — 화면 전체가 카드 하나(조회 조건 · 지표 4 · 회수 세션 목록).
+export const LEAK_RECLAIMS_LAYOUT =
+  oneCard('stats.leak-reclaims', '누수 회수(sweeper)', 'cims.leak-reclaims', 1)
+
 // 비정상 세션 이력 — 화면 전체가 카드 하나(조회 조건 · 지표 · 발신 IP · 세션 표).
 export const ABNORMAL_SESSIONS_LAYOUT =
   oneCard('service.abnormal-sessions', '비정상 세션 이력', 'cims.abnormal-sessions', 1)
