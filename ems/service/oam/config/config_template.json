@@ -214,7 +214,7 @@
     {
       "key": "logging",
       "title": "서비스 로그",
-      "description": "CSP/CMP/CSC 와 공유하는 서비스 로그 루트 — stats(messages/leak)·flow·녹취 조회 + 알람(alert_log) 기록 위치.",
+      "description": "CSP/CMP/CSC 와 공유하는 서비스 로그 루트 — stats(messages/leak)·flow·녹취 조회 + 알람(alert_log) 기록 위치. SIP 통계 1분 기저 집계도 이 아래 stats/1m/ 에 쌓인다.",
       "fields": [
         {
           "key": "ServiceLogging.Dir",
@@ -224,6 +224,50 @@
           "deploy_value": "@SERVICE_LOG_DIR@",
           "restart": true,
           "help": "비우면 base oam.json 상속값 사용."
+        },
+        {
+          "key": "StatsRollup.Enabled",
+          "label": "1분 집계 수행",
+          "type": "bool",
+          "default": true,
+          "restart": true,
+          "help": "SIP 호·메시지를 1분 버킷으로 미리 집계한다. 분보다 큰 단위는 전부 이 계층의 합산으로 나온다. 끄면 조회가 원본 스캔으로 폴백한다."
+        },
+        {
+          "key": "StatsRollup.Interval",
+          "label": "집계 주기(초)",
+          "type": "int",
+          "default": 60,
+          "min": 10,
+          "restart": true,
+          "help": "완결된 분만 집계하므로 주기를 줄여도 결과는 같고 지연만 짧아진다."
+        },
+        {
+          "key": "ServiceLogging.StatsRetainDays.1m",
+          "label": "1분 집계 보존(일)",
+          "type": "int",
+          "default": 14,
+          "min": 0,
+          "restart": true,
+          "help": "0 은 무제한. 보존기간이 지난 날의 버킷은 되짚기 대상에서 빠지고 late_dropped 로 계상된다 — 그 값이 계속 오르면 보존기간이 짧다는 신호다."
+        },
+        {
+          "key": "ServiceLogging.StatsRetainDays.1h",
+          "label": "시간 집계 보존(일)",
+          "type": "int",
+          "default": 400,
+          "min": 0,
+          "restart": true,
+          "help": "0 은 무제한. 365일 미만은 365로 올린다 — 전년 동월 비교가 깨지지 않게(알람 스트림 90일 클램프와 같은 방식)."
+        },
+        {
+          "key": "ServiceLogging.StatsRetainDays.1d",
+          "label": "일 집계 보존(일)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "restart": true,
+          "help": "0 은 무제한. 하루 1레코드라 용량이 거의 들지 않아 장기 추세는 이 계층이 담당한다."
         }
       ],
       "scope": "service"

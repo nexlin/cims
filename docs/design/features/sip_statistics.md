@@ -73,6 +73,9 @@
 | 실제 통화 | `duration > 0` | **`turn_count > 0`** |
 | 정상 종료 | `end_reason == "normal"` | 정상 종료 (§8 선행) |
 
+PTT 의 분모(전체 시도)는 아직 원천에 없다 — 실패한 그룹통화 시도가 기록되지 않는다(§8 Y6).
+그때까지 PTT 는 소통률·참여율만 낸다.
+
 **PTT 의 소통률 판정이 `turn_count > 0` 인 것이 핵심이다.** 세션은 수립됐는데 아무도 발언을
 못 한 상태 — floor control 장애 — 가 여기서만 드러난다. 성공률로는 정상으로 보인다.
 VoLTE 의 `answer_time` 있음 + `duration == 0`(붙었으나 미디어 없음)이 같은 성질이다.
@@ -108,11 +111,36 @@ VoLTE 의 `answer_time` 있음 + `duration == 0`(붙었으나 미디어 없음)�
 
 ### 2.4 메시지 통계
 
-SIP 원문 1건 = 1 카운트. 방향(`dir`)·메서드/응답코드·서비스로 분류한다.
+SIP 원문 1건 = 1 카운트. 방향(`dir`)·메시지 종류·서비스로 분류한다.
 
 - 요청: `_SIP_REQUEST_METHODS` 14종 (INVITE·ACK·BYE·CANCEL·OPTIONS·REGISTER·PRACK·
-  SUBSCRIBE·NOTIFY·PUBLISH·INFO·REFER·MESSAGE·UPDATE)
-- 응답: 상태코드 (`200`·`401`·`180` …). 계열(2xx/4xx…) 집계는 조회 시 합산.
+  SUBSCRIBE·NOTIFY·PUBLISH·INFO·REFER·MESSAGE·UPDATE) — 키 = 메서드
+- 응답: 키 = **`<트랜잭션 메서드>/<상태코드>`** (`INVITE/180`·`INVITE/200`·`BYE/200`·
+  `REGISTER/401` …). 계열(2xx/4xx…) 집계는 조회 시 합산.
+
+**응답을 상태코드만으로 세지 않는다.** 그러면 INVITE 의 200(호 성립)·BYE 의 200(호 해제)·
+REGISTER 의 200(등록)이 한 칸에 합쳐져 세어도 쓸 수 없다. 트랜잭션 메서드는 응답 원문의
+`CSeq` 에서 얻는다 — 응답의 CSeq 는 요청의 것을 그대로 복사하므로(RFC 3261 §8.1.1.5) 로그
+한 줄만으로 결정된다. `CSeq` 가 없는 줄(구 로그·비정상 메시지)은 상태코드로 폴백한다.
+
+메서드를 앞에 두는 이유는 정렬하면 트랜잭션끼리 붙어 표에서 눈이 따라가기 쉽기 때문이다 —
+`BYE · BYE/200 · CANCEL · INVITE · INVITE/180 · INVITE/200`.
+
+### 2.5 메시지 통계의 표시 — 시간 × 종류 교차표
+
+합계 한 줄로는 **어느 시간대에 무엇이 늘었는지** 알 수 없고, 그것이 통계를 보는 이유다.
+행=시간 버킷, 열=메시지 종류, 칸=건수의 교차표로 낸다.
+
+```
+시각                INVITE  INVITE/180  INVITE/200  BYE  BYE/200  CANCEL   합계
+2026-09-03 15:00         8           8           8    8        8       0     48
+2026-09-03 16:00         5           5           4    4        4       1     29
+```
+
+열은 **전 구간 합계 내림차순**이라 조회 구간이 바뀌어도 읽는 순서가 안정적이고, 열 수 상한을
+넘는 꼬리는 `기타` 로 접는다. 칸 배경 농도는 **그 열 안에서의 상대 크기**다 — 메시지별
+자릿수가 크게 달라(200 은 수백, CANCEL 은 한 자리) 표 전체를 기준으로 정규화하면 작은 열이
+전부 빈칸처럼 보인다.
 
 ## 3. 원천
 
@@ -136,7 +164,12 @@ SIP 원문 1건 = 1 카운트. 방향(`dir`)·메서드/응답코드·서비스�
 `access_services` 의 `domain → kind` 로 SIP URI 를 분류한다. 순서는 CSP 와 동일하게
 Request-URI → To → From, 첫 매치. 응답은 Request-URI 가 없으므로 To/From 만 본다.
 
-이 판정이 서비스축(요구 ⑤) 전체의 근거다. **현재 깨져 있다 — §8 X1 참조.**
+이 판정이 서비스축(요구 ⑤) 전체의 근거다. 접속 서비스 정의를 읽는 경로는 관리평면 소비자
+공통으로 `services/access_services` 하나다 — 원본은 대상 노드의
+`<install_path>/config/access_services.jsonl` 이고(CSP 가 직접 읽는 SoT), OAM 은 agent proxy
+로 그것을 읽은 뒤 `modules/csp/runtime/collections/access_services/` 에 **읽기 전용 복제**를
+남긴다. 복제는 agent 불통 구간의 폴백이자 CSC 의 유일한 경로다(CSC 에는 agent 클라이언트가
+없다). 쓰기 주체는 콘솔 → OAM → agent 하나뿐이다.
 
 ## 4. 시간 축
 
@@ -195,7 +228,10 @@ SIP 원문 / 호 이력          ← 원본. 조회에 직접 쓰지 않는다
     "reasons": {"normal": 9, "no_answer": 2, "canceled": 1},
     "duration_sum_sec": 842,            // 평균은 조회 시 계산 (합산 가능성 유지)
     "pdd_sum_ms": 21400, "pdd_n": 11,   // answer_time - invite_time
-    "legs_invited": 44, "legs_joined": 39   // 참여율
+    "legs_invited": 44, "legs_joined": 39,  // 참여율
+    "by_group": {                       // 그룹 축 — PTT 만
+      "testgrp01": {"sessions": 9, "talked": 8}
+    }
   },
   "msg": {                              // 메시지 통계
     "in":  {"INVITE": 8, "200": 130, "NOTIFY": 76},
@@ -210,11 +246,34 @@ SIP 원문 / 호 이력          ← 원본. 조회에 직접 쓰지 않는다
 평균이 아니다) 롤업이 성립하지 않는다. 평균값(`avg_duration`)도 같은 이유로 합(`sum`)과
 건수(`n`)로 나눠 둔다.
 
+**그룹 축(`by_group`)의 키 수는 전체 그룹 수와 무관하다** — 1분 레코드는 그 분에 활성이던
+그룹만 담는다. 그래서 그룹이 수천 개여도 레코드는 동시 활성 그룹 수로 묶인다. 값이 카운터라
+상위 단위로 그대로 합산된다. 표시용 식별자는 `mcptt_group_id` 이고, 없으면 `group_key`
+(`ptt_groups.id`)로 폴백한다 — surrogate 키는 운영자가 보는 이름이 아니다
+([identifier_model.md](../identifier_model.md)).
+
 ### 5.2 저장 위치
 
 ```
 {ServiceLogging.Dir}/stats/{1m,1h,1d}/YYYY/MM/DD.jsonl
+{ServiceLogging.Dir}/stats/.rollup_state.json      # watermark + 미결 호 목록 (§6.1)
 ```
+
+**1m 만 원본에서 만들고, 1h·1d 는 그 합산이다.** 1m 이 바뀐 날(신규·되짚기)의 파생 계층은
+그 날 1m 파일을 **통째로 다시 접어** 만든다 — 증분 누적이 아니라, 되짚기로 1m 이 바뀐 날도
+자동으로 정합해진다. 하루가 최대 1440 × 서비스 수라 통째 접기가 싸다.
+
+**계층을 나누는 이유는 보존기간이다.** 계층이 하나였을 때는 1분의 보존기간이 전체 조회
+지평을 결정했다 — 두 달 조회가 조용히 2주로 잘렸다(실측). 같은 90일이 1m 은 12만 버킷,
+1d 는 90 레코드다. 월 단위 조회에 1분 정밀도는 쓰이지 않는다.
+
+5m·10m·1w·1M·1y 는 저장하지 않는다 — 조회 시 접으면 되고, 저장 계층을 늘리면 롤업 경로와
+보존 정책이 함께 늘어난다.
+
+일별 파일은 append 가 아니라 **원자적 교체**(tmp+rename)로 쓴다. 되짚기가 이미 적은 버킷을
+다시 계산하므로 append 로는 같은 버킷이 여러 줄로 남고, 읽는 쪽이 "마지막 줄이 정답" 규칙을
+알아야 한다. 하루치가 최대 1440 × 서비스 수라 통째 교체가 싸다. 호도 메시지도 없는 분은
+아예 적지 않는다 — 대부분의 분이 비어 있고, 빈 줄로 채우면 파일만 커진다.
 
 `alerts/`·`events/` 와 같은 자리다. **관리 store(`CimsRuntimeDir`)에 두지 않는다** — 관리
 store 는 이중화에서 단일 writer 리스 하에 있는 공유 자원이고, 통계는 append-only 관측
@@ -284,9 +343,23 @@ oam-svc 에 주기 작업으로 둔다(통계는 oam-svc 귀속 — `oam_base_se
 | 키 | 뜻 | 기본값 |
 |---|---|---|
 | `StatsRollup.Enabled` | 롤업 수행 | `true` |
-| `StatsRollup.Interval` | 주기(초) | 60 |
+| `StatsRollup.Interval` | 주기(초) | 60 (최소 10) |
 
 `Enabled=false` 면 조회가 원본 스캔으로 폴백한다(되돌리기 경로 — `PttIndex` 와 같은 규약).
+세 키 모두 `config_template.json` 에 선언되어 콘솔에서 편집된다.
+
+구현은 `services/stats_rollup.py` — oam-svc 가 기동 시 `init()` 하고 주기 루프에서
+`run_once()` 를 부른다. 보존 스위퍼는 하루 1회.
+
+**완결된 분만 집계한다** — 진행 중인 분을 집계하면 그 분이 끝나기 전에 값이 확정되어 뒤에
+도착한 메시지가 누락된다. 그래서 대상 구간은 항상 `[watermark+1분, 지금-1분]` 이다.
+
+원본은 **시간(HH) 디렉터리 단위로 한 번 읽고 분으로 쪼갠다.** 분마다 열면 같은 시간
+디렉터리를 60번 열게 되고, 되짚기까지 겹치면 더 는다. 로그 트리가 이미 HH 로 나뉘어 있어
+이 경계가 자연스럽다.
+
+첫 기동(watermark 없음)은 **1일치만 소급**한다. 원본이 남아 있어도 무한정 거슬러 오르면 첫
+롤업이 몇 분씩 걸린다 — 그보다 과거는 `rebuild_range()` 로 필요할 때 만든다.
 
 ## 7. API
 
@@ -309,10 +382,39 @@ GET /api/v1/stats/calls?from=&to=&granularity=&svc=
 GET /api/v1/stats/messages/{iface}?from=&to=&granularity=&svc=
 ```
 
-- `granularity`: `1m|5m|10m|1h|1d|1w|1M`
-- `svc`: `volte|ptt|all` (기본 `all` — 서비스별 분리 + 합계 동시 반환)
+- `granularity`: `1m|5m|10m|1h|1d|1w|1M|1y`
+- `svc`: `volte|ptt|unknown|all` (기본 `all`)
 - 응답에 분자·분모를 함께 실어 화면이 비율을 재계산할 수 있게 한다. 비율만 주면 구간 합산이
   불가능하다.
+- **`all` 은 `svc` 필터와 무관하게 전체 서비스 합계다.** 필터한 부분합을 `all` 로 내면 읽는
+  쪽이 그것을 시스템 전체로 오해한다 — 필터는 어떤 서비스 칸을 낼지만 정한다.
+- 그룹 축은 `by_group`(그룹별 `{sessions, talked}`)과, 분포 위젯이 바로 쓰도록 세션수만 뽑은
+  `by_group_sessions`(`{그룹: 수}`)를 함께 낸다 — 두 겹 map 을 화면이 다시 펴지 않게.
+- `source` 로 어느 경로였는지 알린다: `rollup`(집계) / `scan`(원본 즉석) / `mixed`(섞임) /
+  `none`. 폴백은 **집계와 같은 함수**(`build_minutes` → `aggregate`)를 쓴다 — 폴백에 별도
+  계산식을 두면 두 경로가 서서히 어긋난다.
+- **조회 계층은 날마다 고른다.** 요청 단위를 만들 수 있는 **가장 거친** 계층
+  (`1m|5m|10m`→1m · `1h`→1h · `1d|1w|1M|1y`→1d)을 먼저 보고, 그 날에 없으면 더 잔 계층으로
+  내려간다(잔 것은 항상 접을 수 있다). 응답 `coverage.by_unit` 이 어느 계층에서 몇 날을
+  읽었는지 알린다.
+- **구간이 하루를 온전히 덮지 않는 날은 1분 계층으로 내려간다.** 거친 버킷은 쪼갤 수 없어
+  그대로 쓰면 구간 양 끝에서 총계가 부풀어진다.
+- **폴백은 날 단위로 부분 동작한다.** 어느 계층에도 없는 날만 원본에서 즉석 집계한다. 구간 전체에 집계가 하나도 없을 때만 폴백하면, 최근 며칠만 집계가 남은 구간
+  (보존기간 경과)에서 앞쪽에 구멍이 생기고 **조용히 작은 값**이 나온다 — 운영자는 그 감소를
+  실제 트래픽 변화로 읽는다.
+- 즉석 집계에는 **날 수 상한**이 있다(`_SCAN_DAY_BUDGET` 14일 — 하루 스캔이 시간 디렉터리
+  24개 남짓이고 게이트웨이 프록시 타임아웃이 5초다). 넘는 구간은 채우지 않고 응답
+  `coverage.missing_days` 와 `warning` 으로 알린다. 예산을 넘으면 **최근 날부터** 채운다 —
+  오래된 쪽이 빠지는 것이 덜 놀랍다.
+- 즉석 집계 결과는 **적지 않는다** — 보존기간이 지나 지운 날을 되살리면 purge 가 무의미해진다.
+
+```jsonc
+"source": "mixed",
+"coverage": { "days": 63, "rollup": 15, "scanned": 14, "missing": 34,
+              "missing_days": ["2026-07-03", "…"] }
+```
+- 작은 단위에는 조회 구간 상한이 있다(`1m` 2일 · `5m` 7일 · `10m` 14일). 막는 것은 스캔
+  비용이 아니라 **화면에 그릴 버킷 수**다. 큰 단위는 합산이 싸서 상한이 없다.
 
 응답 예:
 
@@ -327,33 +429,48 @@ GET /api/v1/stats/messages/{iface}?from=&to=&granularity=&svc=
 
 ## 8. 선행 조건
 
-이 통계를 세우기 전에 해소해야 하는 항목. 앞의 셋은 통계가 **동작하지 못하게** 막는다.
+이 통계를 세우기 전에 해소해야 하는 항목. X 계열은 통계가 **동작하지 못하게** 막는다.
+
+| | 내용 | 대상 | 상태 |
+|---|---|---|---|
+| **X1** | 접속 서비스 정의 읽기 경로 — 소비자마다 경로를 추측해 서로 다른 곳을 봤다. 결과: **서비스 판정이 전부 `unknown` → 서비스축(요구 ⑤) 전체 무효** | OAM·CSC | 해소 — `services/access_services` 로 단일화 (§3.1) |
+| **X2** | `_calc_voip_stats` 가 `answer_time` 을 읽지 않아 성공률·완료율 계산 불가 | OAM | 해소 — 3지표 + PDD 산출, 콘솔 KPI 반영 |
+| Y1 | `session.json` 의 `call_ids` 가 2개 고정(B2BUA 전제) → **N개**로 확장. 그룹 fan-out·감청·전환 leg 을 담지 못함 | CSP | |
+| Y2 | leg 별 `role` 기록 (§1.2) — 감청·PBX 구분 근거 | CSP | |
+| Y3 | 시도(attempt) 식별자 — 여러 leg 을 한 시도로 묶는 키. `sesid` 로 충분한지 확인 필요 | CSP | |
+| Y4 | `PttSessionEnd()` 에 종료 사유 인자 추가 — PTT 완료율의 유일한 결손 | CSP | |
+| Y5 | `canceled` 사유 분리 (현재 `no_answer`/`incomplete` 에 섞임) | CSP | |
+
+X 계열은 해소됐다 — VoLTE 3지표와 서비스축이 동작한다. Y1~Y3 은 감청·PBX 기능 구현과 함께
+간다 — 그 전까지 leg 은 전부 `terminating` 으로 취급되어 기존 동작이 유지된다.
+
+**PTT 는 Y6 이 남아 지표를 낼 수 없다.** 실패한 시도가 원천에 없기 때문이다 — CSP 는
+`PttSessionStart()` 로 세션 디렉터리를 만들 때 비로소 기록을 남기는데, 코덱 불일치(488)·
+SRTP 키 실패·권한 거부(403)·세션 시간창 이탈은 그 호출 **전에** 반환한다
+(`csp/GroupCallService.cpp`). 그래서 세션 기록만 세면 성공률이 항상 100% 다. 소통률
+(`turn_count > 0`)과 참여율(`people` / `member_count`)은 세션 인덱스만으로 산출 가능하므로
+Y6 과 무관하게 먼저 낼 수 있다.
 
 | | 내용 | 대상 |
 |---|---|---|
-| **X1** | OAM 이 `access_services.jsonl` 을 못 찾음 — `_access_services_paths()` 가 OAM 자기 트리만 훑는데 파일은 `modules/csp/<ver>/config/` 에 있다. 결과: **서비스 판정이 전부 `unknown` → 서비스축(요구 ⑤) 전체 무효** | OAM |
-| **X2** | `AccessServicesFile` 이 `config_template.json` 미선언 — 콘솔로 우회 주입이 불가(`_prune_to_template` 이 버림) | OAM |
-| **X3** | `_calc_voip_stats` 가 `answer_time` 을 읽지 않음 (필드는 `call.json` 에 이미 있다). 호 이력 API 응답 필드 목록에도 없음. **성공률·완료율이 계산 불가** | OAM |
-| Y1 | `session.json` 의 `call_ids` 가 2개 고정(B2BUA 전제) → **N개**로 확장. 그룹 fan-out·감청·전환 leg 을 담지 못함 | CSP |
-| Y2 | leg 별 `role` 기록 (§1.2) — 감청·PBX 구분 근거 | CSP |
-| Y3 | 시도(attempt) 식별자 — 여러 leg 을 한 시도로 묶는 키. `sesid` 로 충분한지 확인 필요 | CSP |
-| Y4 | `PttSessionEnd()` 에 종료 사유 인자 추가 — PTT 완료율의 유일한 결손 | CSP |
-| Y5 | `canceled` 사유 분리 (현재 `no_answer`/`incomplete` 에 섞임) | CSP |
-
-**X1·X3 은 코드 한 곳씩이다.** Y1~Y3 은 감청·PBX 기능 구현과 함께 간다 — 그 전까지 leg 은
-전부 `terminating` 으로 취급되어 기존 동작이 유지된다.
+| **Y6** | 실패한 PTT 그룹통화 시도를 기록 — 현재 `PttSessionStart()` 이전 실패 경로가 아무것도 남기지 않아 **성공률의 분모가 없다** | CSP |
 
 ## 9. 이행
 
 기존 엔드포인트는 이 모델의 특수형이다.
 
-| 기존 | 이행 |
-|---|---|
-| `/stats/messages/{iface}` (`date`·`granularity`, 버킷 `label`) | `svc` 파라미터 + 1m/1w/1M 추가, 버킷 키 통일. 기존 파라미터는 유지 |
-| `/stats/service/voip` (`attempts`/`success`/`success_rate`) | `/stats/calls?svc=volte` 로 흡수. `success_rate` 는 `sessions/attempts` 와 같은 값 |
-| `/stats/service/ptt` (`calls`) | `/stats/calls?svc=ptt`. `calls` = `attempts` |
+| 기존 | 이행 | 상태 |
+|---|---|---|
+| `/stats/messages/{iface}` (`date`·`granularity`, 버킷 `label`) | `svc` + 1m/1w/1M/1y, 버킷 키 통일. 옛 필드(`label`·`count`·`volte`·`ptt`·`unknown`·`hour`)는 그대로 유지 | 완료 (`iface=sip` 한정 — 다른 인터페이스는 집계 대상이 아니라 옛 스캔 경로) |
+| `/stats/service/voip` (`attempts`/`success`/`success_rate`) | `/stats/calls?svc=volte` 로 흡수 | 신규 엔드포인트 제공. 옛 엔드포인트는 존치 |
+| `/stats/service/ptt` (`calls`) | `/stats/calls?svc=ptt` | 완료 — 그룹 축까지 집계에 포함. 콘솔 데이터소스 `cims.svc.ptt` 가 새 엔드포인트를 읽는다 |
 
-`_GRAN_MAX_DAYS` 조회 범위 제한은 롤업 도입과 함께 제거한다(보존기간이 그 역할을 대체).
+콘솔 `성능 > VoLTE/PTT 통계` 는 데이터소스(`cims.svc.volte`/`cims.svc.ptt`)가 이 엔드포인트를
+가리킨다 — 지표 카드·추이·분포가 한 응답에서 나오므로 화면 안에서 숫자가 갈라지지 않는다.
+PTT 지표는 성공률·완료율 자리를 비우고 세션·소통률·참여율·평균 세션 시간을 낸다(§8 Y6).
+
+`_GRAN_MAX_DAYS` 는 옛 스캔 경로에만 남는다. 집계 경로의 상한(`_CALLS_MAX_DAYS`)은 버킷 수
+기준이라 성격이 다르다(§7.2).
 
 ## 10. 미결
 

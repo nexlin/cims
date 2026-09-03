@@ -163,7 +163,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [recording.md](docs/design/features/recording.md) — 녹취 구조 (슬롯 트랙·믹스/단독 재생·PTT 세션 이력 UI)
 - [flow_logging.md](docs/design/features/flow_logging.md) — SIP/Flow 로깅 (sesid 규칙·5분 버킷)
 - [monitoring.md](docs/design/features/monitoring.md) — 모니터링
-- [sip_statistics.md](docs/design/features/sip_statistics.md) — SIP 호·메시지 통계 (세는 단위 3계층 attempt/session/leg — 그룹통화·감청·PBX 로 leg 이 늘어도 비율이 흔들리지 않게. 성공률·소통률·완료율·참여율, 1분 기저 롤업 피라미드(분~월 정수배 유도), 미결 호 추적, 보존 계층. 선행 조건 X1~X3·Y1~Y5)
+- [sip_statistics.md](docs/design/features/sip_statistics.md) — SIP 호·메시지 통계 (세는 단위 3계층 attempt/session/leg — 그룹통화·감청·PBX 로 leg 이 늘어도 비율이 흔들리지 않게. 성공률·소통률·완료율·참여율, 1분 기저 롤업 피라미드(분~월 정수배 유도), 미결 호 추적, 보존 계층. 구현: 서비스 판정 단일화(`services/access_services`)·VoLTE 3지표·1분 기저 집계(`services/stats_rollup`, oam-svc 주기 실행). 잔여: 조회 API 통일(§7)·PTT 시도 기록 Y6)
 - [sip_service_model.md](docs/design/features/sip_service_model.md) / [sip_runtime_config.md](docs/design/features/sip_runtime_config.md) — SIP 서비스 모델·런타임 설정
 - [ha_service_model.md](docs/design/features/ha_service_model.md) — HA 서비스 운영 모델 (책임 분리·선언적 verdict·절체 판정 — 설계 정본, 단계적 이행)
 - [oam_base_service_split.md](docs/design/features/oam_base_service_split.md) / [oam_self_upgrade.md](docs/design/features/oam_self_upgrade.md) — OAM base/service 분리·self-upgrade

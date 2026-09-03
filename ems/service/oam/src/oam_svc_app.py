@@ -155,7 +155,7 @@ if __name__ == '__main__':
         return merged
 
     # 귀속 핸들러 import (공유 모듈) — preflight 가 여기 import 성공을 검증.
-    from services import flow_logger, ptt_index, logger as csc_logger
+    from services import flow_logger, ptt_index, stats_rollup, logger as csc_logger
     from services.flow_logger    import FLOW_HANDLER_LIST
     from handlers                import recording, auth
     from handlers.recording      import CIMS_RECORDING_HANDLER_LIST
@@ -238,6 +238,12 @@ if __name__ == '__main__':
         # oam-svc 도 base(oam_app)와 동일하게 초기화해야 한다. 미초기화면 빈 목록이 나온다.
         _ptt_idx_cfg = config.get('PttIndex') or {}
         ptt_index.init(_service_log_dir, enabled=bool(_ptt_idx_cfg.get('Enabled', True)))
+
+        # SIP 호·메시지 1분 기저 집계 — ptt_index 를 소비하므로 그 뒤에 초기화한다.
+        # 끄면 조회가 원본 스캔으로 폴백한다(PttIndex 와 같은 되돌리기 규약).
+        _rollup_cfg = config.get('StatsRollup') or {}
+        stats_rollup.init(_service_log_dir, config,
+                          enabled=bool(_rollup_cfg.get('Enabled', True)))
 
         # verification (S1~S6) — tests 디렉토리 탐색
         tests_dir = _first_dir([os.path.join(_repo_root, 'tests')]) \
@@ -342,6 +348,12 @@ if __name__ == '__main__':
         #   CA 를, CSP 는 SIP TLS 를 각각 본다 — 같은 정의 코드에 mo 로 분리(표준화 §3.4(b)).
         # 임계는 CSP 구현·agent 회전 임계와 정렬(warn 30d / crit 7d, 규칙이 보유).
         CERT_EXPIRY_SWEEP_INTERVAL = int(config.get('CertExpirySweepSec', 3600))
+        STATS_ROLLUP_INTERVAL = max(10, int(_rollup_cfg.get('Interval', 60)))
+        # 계층별 보존 — 계층을 나눈 이유가 보존기간이다(1분은 짧게, 일은 길게).
+        _sr = (config.get('ServiceLogging') or {}).get('StatsRetainDays') or {}
+        STATS_RETAIN = {'1m': int(_sr.get('1m', 14) or 0),
+                        '1h': int(_sr.get('1h', 400) or 0),
+                        '1d': int(_sr.get('1d', 0) or 0)}
 
         def _sweep_own_cert_expiry():
             try:
@@ -373,10 +385,33 @@ if __name__ == '__main__':
             except Exception as e:
                 logger.log_error(f"[cert-expiry] error: {e}")
 
+        if stats_rollup.enabled():
+            logger.log_info(f"[stats-rollup] interval={STATS_ROLLUP_INTERVAL}s, "
+                            f"retain={STATS_RETAIN}, root={stats_rollup.stats_root()}")
+
         _last_alert_sweep = 0.0
         _last_cert_expiry_sweep = 0.0
+        _last_stats_rollup = 0.0
+        _last_stats_purge = 0.0
         while True:
             time.sleep(1)
+            if stats_rollup.enabled() and time.time() - _last_stats_rollup >= STATS_ROLLUP_INTERVAL:
+                try:
+                    r = stats_rollup.run_once()
+                    if r.get('buckets') or r.get('revisited'):
+                        logger.log_info(f"[stats-rollup] {r}")
+                except Exception as e:
+                    logger.log_error(f"[stats-rollup] error: {e}")
+                _last_stats_rollup = time.time()
+            # 보존 스위퍼는 하루 1회로 충분하다 — 지우는 단위가 일별 파일이다.
+            if stats_rollup.enabled() and time.time() - _last_stats_purge >= 86400:
+                try:
+                    n = stats_rollup.purge_old(STATS_RETAIN)
+                    if n:
+                        logger.log_info(f"[stats-rollup] 보존 초과 삭제 {n}")
+                except Exception as e:
+                    logger.log_error(f"[stats-rollup] purge error: {e}")
+                _last_stats_purge = time.time()
             if _service_log_dir and time.time() - _last_cert_expiry_sweep >= CERT_EXPIRY_SWEEP_INTERVAL:
                 _sweep_own_cert_expiry()
                 _last_cert_expiry_sweep = time.time()

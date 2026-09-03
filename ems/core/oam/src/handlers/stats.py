@@ -30,6 +30,9 @@ import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 
+from services import access_services, stats_rollup
+from services.stats_rollup import _pdd_ms, _rate
+
 logger = logging.getLogger(__name__)
 
 # 클라이언트 응답용 공통 에러 바디 — 원인 상세(호스트/계정 힌트가 실리는 DB 예외 문자열 등)는
@@ -389,7 +392,8 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     parts = _path_parts(handler_args.full_path, _STATS_BASE)
     method = handler_args.method.upper()
 
-    if method != 'GET':
+    # /stats/calls/rebuild 만 POST — 나머지는 조회 전용.
+    if method != 'GET' and not (len(parts) > 1 and parts[0] == 'calls' and parts[1] == 'rebuild'):
         return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
     def qp(name, default=None):
@@ -400,6 +404,7 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
         if len(parts) == 0:
             return HandlerResult(status=200, body={'endpoints': [
                 '/api/v1/stats/health', '/api/v1/stats/messages',
+                '/api/v1/stats/calls', '/api/v1/stats/calls/rebuild',
                 '/api/v1/stats/leak-reclaims',
                 '/api/v1/stats/service/voip', '/api/v1/stats/service/ptt',
                 '/api/v1/stats/service/summary'
@@ -420,9 +425,63 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
         if parts[0] == 'messages':
             iface = parts[1] if len(parts) > 1 else None  # sip, cmp, csc, https
+            gran = qp('granularity', '1h')
+            svc = (qp('svc', 'all') or 'all').lower()
+            # SIP 축만 1분 집계가 있다(다른 인터페이스는 집계 대상이 아니다). 집계가 있으면
+            # 그쪽으로, 없으면 옛 원본 스캔으로 — 도입 전 구간·롤업 비활성이 여기로 온다.
+            if iface == 'sip' and gran in stats_rollup.GRANULARITIES:
+                d = qp('date')
+                f = _norm_dt(qp('from') or (d or datetime.now().strftime('%Y-%m-%d')))
+                t = _norm_dt(qp('to') or (qp('from') or d or
+                                          datetime.now().strftime('%Y-%m-%d')), end=True)
+                f, t, tr = _clamp_calls_range(f, t, gran)
+                r = await _messages_stats_rollup(config, f, t, gran, svc, d, tr)
+                if r.status == 200:
+                    return r
+                # 204 = 그 구간에 집계 없음 → 폴백
             # 구간 조회 — from/to + granularity. date 는 "그 날 하루" 축약(하위 호환).
+            if gran not in _GRAN_MAX_DAYS:
+                gran = '1h'      # 옛 스캔 경로는 5m/10m/1h/1d 만 안다
             return await _messages_stats_v2(config, iface, qp('date'),
-                                            qp('from'), qp('to'), qp('granularity', '1h'))
+                                            qp('from'), qp('to'), gran)
+
+        if parts[0] == 'calls' and len(parts) > 1 and parts[1] == 'rebuild':
+            # 재집계는 변이 — 조회와 달리 admin 을 요구한다.
+            from services.admin_auth import require_role
+            _p, deny = require_role(handler_args, 'admin')
+            if deny:
+                return deny
+            if method != 'POST':
+                return HandlerResult(status=405, body={'error': 'POST only'})
+            d = qp('date')
+            f = (qp('from') or d or '')[:10]
+            t = (qp('to') or d or f)[:10]
+            if len(f) != 10 or len(t) != 10:
+                return HandlerResult(status=400,
+                                     body={'error': 'from/to (YYYY-MM-DD) 또는 date 필요'})
+            return await _calls_rebuild(config, f, t)
+
+        if parts[0] == 'calls':
+            gran = qp('granularity', '1h')
+            if gran not in stats_rollup.GRANULARITIES:
+                return HandlerResult(status=400, body={
+                    'error': 'invalid granularity',
+                    'allowed': list(stats_rollup.GRANULARITIES)})
+            svc = (qp('svc', 'all') or 'all').lower()
+            if svc not in ('all', 'volte', 'ptt', 'unknown'):
+                return HandlerResult(status=400, body={
+                    'error': 'invalid svc', 'allowed': ['all', 'volte', 'ptt', 'unknown']})
+            # date=YYYY-MM-DD 는 "그 날 하루" 축약 — messages 축과 같은 규약.
+            d = qp('date')
+            f = _norm_dt(qp('from') or (d or ''))
+            t = _norm_dt(qp('to') or (d or ''), end=True)
+            if not f or not t:
+                return HandlerResult(status=400, body={'error': 'from/to 또는 date 필요'})
+            f, t, truncated = _clamp_calls_range(f, t, gran)
+            r = await _calls_stats(config, f, t, gran, svc)
+            if truncated and isinstance(r.body, dict):
+                r.body['truncated'] = True
+            return r
 
         if parts[0] == 'leak-reclaims':
             return await _leak_reclaims(config, qp('date'))
@@ -437,6 +496,100 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
     except Exception as e:
         logger.exception('stats handler error: %s', e)
         return HandlerResult(status=500, body=_ERR_INTERNAL)
+
+
+# ──────────────────────────────────────────────────────────────
+#  호 통계 조회 — 1분 기저 집계 위에서 (sip_statistics.md §7)
+# ──────────────────────────────────────────────────────────────
+
+# 작은 단위 조회 상한 — 막는 것은 스캔 비용이 아니라 **버킷 수**다. 1분 30일이면 43200 칸이라
+# 화면이 읽지 못한다. 콘솔 page-filter(`GRAN_MAX_DAYS`)와 **같은 값**을 쓴다 — 한쪽만 느슨하면
+# 화면이 못 고르는 조합을 API 만 받아 두 경로의 동작이 갈린다.
+# 1h·1d 는 서버에서 막지 않는다: 계층(1h·1d)이 있어 합산이 싸고, 화면 가독성 상한은
+# 콘솔이 갖는다(63일 1d 조회가 여기 걸리면 안 된다).
+_CALLS_MAX_DAYS = {'1m': 2, '5m': 3, '10m': 7}
+
+
+@_offload
+def _calls_rebuild(config: dict, from_day: str, to_day: str) -> HandlerResult:
+    """1분 집계를 원본에서 다시 만든다 (운영/검증용).
+
+    왜 필요한가: 롤업은 미결·신규 버킷만 다시 계산하므로, **집계 스키마에 축이 추가되면
+    이미 적힌 버킷은 그 축이 빈 채로 남는다**(그룹 축 추가 때 실측). 첫 기동 소급이 1일치인
+    것도 같은 이유로 과거를 채울 수단이 필요하다.
+
+    watermark 는 건드리지 않는다 — 과거 재생성이 이후의 정상 집계를 되돌리면 안 된다.
+    """
+    if not stats_rollup.enabled():
+        return HandlerResult(status=409, body={
+            'error': 'rollup_disabled',
+            'hint': 'StatsRollup.Enabled 가 꺼져 있으면 집계 파일을 만들지 않습니다'})
+    n = stats_rollup.rebuild_range(from_day, to_day)
+    return HandlerResult(status=200, body={
+        'ok': True, 'from': from_day, 'to': to_day, 'buckets': n})
+
+
+def _source_of(cov: dict) -> str:
+    """조회가 어디서 왔는지 — rollup(집계) / scan(원본 즉석) / mixed(섞임) / none."""
+    r, sc = cov.get('rollup', 0), cov.get('scanned', 0)
+    if r and sc:
+        return 'mixed'
+    if r:
+        return 'rollup'
+    if sc:
+        return 'scan'
+    return 'none'
+
+
+def _clamp_calls_range(from_dt: str, to_dt: str, gran: str):
+    """작은 단위의 조회 구간을 자른다. 잘렸으면 (from, to, True).
+
+    제한하는 것은 스캔 비용이 아니라 **화면에 그릴 버킷 수**다 — 큰 단위는 1분 합산이라
+    비용이 거의 없어 상한을 두지 않는다. 끝을 기준으로 뒤에서 자른다(최근 구간이 관심사).
+    """
+    lim = _CALLS_MAX_DAYS.get(gran)
+    if not lim:
+        return from_dt, to_dt, False
+    try:
+        f = datetime.strptime(from_dt[:19], '%Y-%m-%d %H:%M:%S')
+        t = datetime.strptime(to_dt[:19], '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return from_dt, to_dt, False
+    if (t - f).days <= lim:
+        return from_dt, to_dt, False
+    return (t - timedelta(days=lim)).strftime('%Y-%m-%d %H:%M:%S'), to_dt, True
+
+
+@_offload
+def _calls_stats(config: dict, from_dt: str, to_dt: str, gran: str, svc: str) -> HandlerResult:
+    """서비스별 호 KPI — 1분 집계를 요청 단위로 접어 낸다.
+
+    집계가 없는 구간(롤업 도입 전, `StatsRollup.Enabled=false`)은 **원본을 그 자리에서
+    같은 함수로 접어** 답한다. 폴백에 별도 계산식을 두면 두 경로가 서서히 어긋나므로
+    집계와 조회가 같은 `build_minutes`/`aggregate` 를 쓴다. 응답의 `source` 로 어느
+    경로였는지 알린다.
+    """
+    root = _service_log_dir(config)
+    if not root:
+        return HandlerResult(status=200, body={
+            'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc,
+            'source': 'none', 'totals': {}, 'buckets': [],
+            'hint': 'ServiceLogging.Dir 미설정'})
+
+    rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran)
+    buckets, totals = stats_rollup.aggregate(rows, gran, svc)
+    body = {
+        'from': from_dt, 'to': to_dt, 'granularity': gran, 'svc': svc or 'all',
+        'source': _source_of(cov), 'coverage': cov,
+        'totals': totals, 'buckets': buckets,
+    }
+    if cov.get('missing'):
+        # 보존기간 밖이라 빠진 구간을 **응답에 적는다** — 조용히 작은 값을 내면 운영자가
+        # 그 감소를 실제 트래픽 변화로 읽는다.
+        body['warning'] = (f"{cov['missing']}일이 집계 보존기간을 넘어 제외됐습니다 "
+                           f"(ServiceLogging.StatsRetainDays.1m). 필요하면 보존기간을 늘리고 "
+                           f"POST /api/v1/stats/calls/rebuild 로 다시 만드세요.")
+    return HandlerResult(status=200, body=body)
 
 
 _STATS_SERVICE_BASE = '/api/v1/stats/service'
@@ -691,9 +844,26 @@ def _parse_msg_method(msg: str) -> str:
             return 'json'
     tok = first.split()
     if first.startswith('SIP/2.0'):
-        return tok[1] if len(tok) > 1 else 'response'   # status code
+        code = tok[1] if len(tok) > 1 else 'response'
+        # 응답은 **어느 트랜잭션의 응답인지**까지 세야 쓸 수 있다. 상태코드만 세면 INVITE 의
+        # 200(호 성립)·BYE 의 200(호 해제)·REGISTER 의 200(등록)이 한 칸에 합쳐진다.
+        # 근거는 CSeq 헤더(RFC 3261 §8.1.1.5 — 응답의 CSeq 는 요청의 것을 그대로 복사).
+        # 메서드를 앞에 두는 이유: 정렬하면 트랜잭션끼리 붙어 표에서 눈이 따라가기 쉽다
+        #   (BYE, BYE/200, CANCEL, INVITE, INVITE/180, INVITE/200).
+        cseq = _cseq_method(msg)
+        return f'{cseq}/{code}' if cseq else code
     method = tok[0].upper()
     return method if method in _SIP_REQUEST_METHODS else method
+
+
+_CSEQ_RE = re.compile(r'^CSeq\s*:\s*\d+\s+([A-Za-z]+)\s*$', re.IGNORECASE | re.MULTILINE)
+
+
+def _cseq_method(msg: str) -> str:
+    """응답 원문의 `CSeq: <n> <METHOD>` 에서 메서드. 없으면 '' (구 로그·비정상 메시지)."""
+    head = msg.split('\r\n\r\n', 1)[0].replace('\r\n', '\n')
+    m = _CSEQ_RE.search(head)
+    return m.group(1).upper() if m else''
 
 
 @_offload
@@ -747,47 +917,8 @@ def _leak_reclaims(config, date=None) -> HandlerResult:
 # `application/vnd.3gpp.mcptt-info+xml` + `m=application ... UDP MCPTT`). 붙지 않는 호도 많다.
 # 도메인은 접속 서비스 정의가 소유하는 값이라 전 구간에서 일관된다.
 def _domain_service_map(config: dict) -> dict:
-    """{도메인 → kind} — access_services.jsonl 기반. 없으면 빈 dict."""
-    rows = []
-    for path in _access_services_paths(config):
-        try:
-            if not os.path.isfile(path):
-                continue
-            with open(path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        r = json.loads(line)
-                    except Exception:
-                        continue
-                    if r.get('enabled') is False or not r.get('domain') or not r.get('kind'):
-                        continue
-                    rows.append(r)
-            if rows:
-                break
-        except Exception:
-            continue
-    out = {}
-    for r in sorted(rows, key=lambda x: (x.get('priority') if isinstance(x.get('priority'), int) else 1 << 30)):
-        out.setdefault(str(r['domain']).lower(), str(r['kind']).lower())
-    return out
-
-
-def _access_services_paths(config: dict) -> list:
-    """access_services.jsonl 탐색 경로 (handlers/users.py 와 같은 순서)."""
-    out = []
-    if config.get('AccessServicesFile'):
-        out.append(config['AccessServicesFile'])
-    cfg_path = config.get('__config_path__')
-    if cfg_path:
-        base = os.path.dirname(os.path.abspath(cfg_path))
-        out.append(os.path.normpath(os.path.join(base, '..', '..', 'config', 'access_services.jsonl')))
-    here = os.path.dirname(os.path.abspath(__file__))
-    out.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'config', 'access_services.jsonl')))
-    out.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'build', 'dist', 'config', 'access_services.jsonl')))
-    return out
+    """{도메인 → kind} — 접속 서비스 정의 기반. 못 읽으면 빈 dict."""
+    return access_services.domain_kind_map(config)
 
 
 _DOMAIN_IN_URI = re.compile(r'@([A-Za-z0-9._-]+)')
@@ -841,16 +972,95 @@ def _ts_full(fpath: str, ts: str) -> str:
     return f'{m.group(1)}-{m.group(2)}-{m.group(3)} {ts[:8]}'
 
 
-def _svc_bucket(label: str, count: int, svc_counts: dict) -> dict:
+def _svc_bucket(label: str, count: int, svc_counts: dict, io_counts: dict = None) -> dict:
     """한 버킷의 서비스축 분해 — 셋이 **서로 겹치지 않고** 합이 count 다:
         volte + ptt + unknown == count
     화면의 계열 차트가 이 값들을 그대로 쌓으므로, 겹치는 값을 내면 막대가 이중 계산된다.
     `unknown` = 서비스를 못 가린 줄(옛 CSP 가 남긴 service 없는 로그, 도메인 미등록 등).
+
+    `in`/`out` = 그 버킷의 메서드별 건수(수신/송신). 교차표(시간 × 메서드)가 이걸 읽는다 —
+    없으면 인터페이스를 바꿀 때 표만 빈칸이 되어 한 화면의 그림과 표가 다른 것을 본다.
     """
     sv = svc_counts.get(label, {})
     volte, ptt = sv.get('volte', 0), sv.get('ptt', 0)
+    io = (io_counts or {}).get(label) or {}
     return {'label': label, 'count': count, 'volte': volte, 'ptt': ptt,
-            'unknown': max(count - volte - ptt, 0)}
+            'unknown': max(count - volte - ptt, 0),
+            'in': io.get('in') or {}, 'out': io.get('out') or {}}
+
+
+@_offload
+def _messages_stats_rollup(config, from_dt: str, to_dt: str, gran: str,
+                           svc: str, date: str, truncated: bool) -> HandlerResult:
+    """SIP 메시지 통계 — 1분 집계 위에서 (sip_statistics.md §9 이행).
+
+    옛 응답 필드(`total`·`method_counts`·`service_totals`·`buckets[].{label,count,volte,
+    ptt,unknown}`)를 그대로 내고 통일 키(`bucket`·`bucket_start`)를 **덧붙인다** — 기존
+    화면을 깨지 않으면서 1m·1w·1M 과 `svc` 를 열기 위해서다.
+
+    집계가 없는 구간은 호출측이 옛 원본 스캔으로 폴백한다(도입 전 구간·롤업 비활성).
+    """
+    root = _service_log_dir(config)
+    if not root:
+        return HandlerResult(status=204, body=None)      # 폴백 신호 (호출측에서만 소비)
+    rows, cov = stats_rollup.read_range_filled(root, from_dt, to_dt, config, gran=gran)
+    if not rows:
+        return HandlerResult(status=204, body=None)
+
+    buckets, totals = stats_rollup.aggregate(rows, gran, svc, include_msg=True)
+
+    def _flat(cell):
+        m = cell.get('msg') or {}
+        out = {}
+        for io in ('in', 'out'):
+            for k, v in (m.get(io) or {}).items():
+                out[k] = out.get(k, 0) + int(v or 0)
+        return out
+
+    method_counts = _flat(totals.get('all') or {})
+    total = sum(method_counts.values())
+    # 옛 method_service: {메서드: {서비스: 건수}} — 서비스축 분해가 이 축의 핵심이다.
+    method_service: dict = {}
+    for key, cell in totals.items():
+        if key == 'all':
+            continue
+        for meth, n in _flat(cell).items():
+            method_service.setdefault(meth, {})[key] = n
+
+    out_buckets = []
+    for b in buckets:
+        per = {k: sum(_flat(v).values()) for k, v in b.items()
+               if k not in ('bucket', 'bucket_start')}
+        row = {
+            'bucket': b['bucket'], 'bucket_start': b['bucket_start'],
+            'label': b['bucket'],                       # 옛 키
+            'count': per.get('all', 0),
+            'volte': per.get('volte', 0), 'ptt': per.get('ptt', 0),
+            'unknown': per.get('unknown', 0),
+            'in': (b.get('all') or {}).get('msg', {}).get('in', {}),
+            'out': (b.get('all') or {}).get('msg', {}).get('out', {}),
+        }
+        if gran == '1h':
+            try:
+                row['hour'] = int(b['bucket'][11:13])
+            except (ValueError, IndexError):
+                pass
+        out_buckets.append(row)
+
+    svc_totals = {k: sum(_flat(totals.get(k) or {}).values()) for k in ('volte', 'ptt')}
+    return HandlerResult(status=200, body={
+        'from': from_dt, 'to': to_dt, 'granularity': gran, 'truncated': truncated,
+        'date': (date or from_dt[:10]), 'interface': 'sip', 'svc': svc or 'all',
+        'source': _source_of(cov), 'coverage': cov,
+        'total': total, 'buckets': out_buckets,
+        'method_counts': dict(sorted(method_counts.items(), key=lambda x: -x[1])),
+        'method_service': method_service,
+        'service_totals': svc_totals,
+        'voip_invite': (method_service.get('INVITE') or {}).get('volte', 0),
+        'ptt_invite': (method_service.get('INVITE') or {}).get('ptt', 0),
+        **({'warning': f"{cov['missing']}일이 집계 보존기간을 넘어 제외됐습니다"}
+           if cov.get('missing') else {}),
+    })
 
 
 @_offload
@@ -900,6 +1110,7 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
     method_counts = {}  # method/status → count
     # 서비스축 분해 — 로그 줄의 `service` 필드(volte|ptt)를 그대로 쓴다.
     svc_counts = {}     # 버킷 라벨 → {svc → count}
+    io_counts = {}      # 버킷 라벨 → {'in'|'out' → {method → count}} — 교차표용
     svc_invite = {}     # svc → INVITE 수 (호 시도 규모 비교용)
     method_svc = {}     # method → {svc → count} — '메서드 비중'을 서비스 계열로 쪼갤 때 쓴다
 
@@ -930,10 +1141,14 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
                                 counts[k] = counts.get(k, 0) + 1
                                 verb = str(entry.get('method', '')).split(' ', 1)[0].upper() or 'unknown'
                                 method_counts[verb] = method_counts.get(verb, 0) + 1
+                                _io = io_counts.setdefault(k, {}).setdefault('in', {})
+                                _io[verb] = _io.get(verb, 0) + 1
                                 m = str(entry.get('detail', ''))
                                 if m.startswith('status='):
                                     code = m[7:].split()[0]
                                     method_counts[code] = method_counts.get(code, 0) + 1
+                                    _o = io_counts.setdefault(k, {}).setdefault('out', {})
+                                    _o[code] = _o.get(code, 0) + 1
                             except Exception:
                                 pass
                 except Exception:
@@ -962,6 +1177,10 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
                                 k = _bucket_start(ts, gran)
                                 counts[k] = counts.get(k, 0) + 1
                                 method_counts[method] = method_counts.get(method, 0) + 1
+                                # dir 은 CSP·CSC 공통으로 RX(수신)/TX(송신).
+                                _d = 'out' if str(entry.get('dir', '')).upper() == 'TX' else 'in'
+                                _io = io_counts.setdefault(k, {}).setdefault(_d, {})
+                                _io[method] = _io.get(method, 0) + 1
                                 svc = _classify_service(entry.get('msg', ''), dmap) or 'unknown'
                                 method_svc.setdefault(method, {})
                                 method_svc[method][svc] = method_svc[method].get(svc, 0) + 1
@@ -992,13 +1211,13 @@ def _messages_stats_v2(config, iface, date, from_dt=None, to_dt=None, gran='1h')
         guard = 0
         while cur <= end and guard < 5000:
             k = _bucket_start(cur.strftime('%Y-%m-%d %H:%M:%S'), gran)
-            buckets.append(_svc_bucket(k, counts.get(k, 0), svc_counts))
+            buckets.append(_svc_bucket(k, counts.get(k, 0), svc_counts, io_counts))
             cur += step
             guard += 1
     else:
         # 1M/1y — 라벨이 가변 길이라 등장한 키만 정렬해 낸다.
         for k in sorted(counts):
-            buckets.append(_svc_bucket(k, counts[k], svc_counts))
+            buckets.append(_svc_bucket(k, counts[k], svc_counts, io_counts))
 
     # 시간(1h) 조회는 옛 소비자(hour 정수 키)를 위해 hour 를 함께 싣는다.
     if gran == '1h':
@@ -1208,59 +1427,111 @@ def _service_stats(config, svc, gran, from_dt, to_dt, date) -> HandlerResult:
 
 
 def _calc_voip_stats(config, from_dt, to_dt, gran):
-    total = 0
-    success = 0
+    """VoLTE 호 KPI — 시도(attempt) 기준 3지표 (sip_statistics.md §2.1).
+
+        성공률 = 세션이 성립한 시도 / 전체 시도      answer_time != null
+        소통률 = 실제 통화가 있었던 시도 / 전체 시도  duration > 0
+        완료율 = 정상 종료한 시도 / 세션이 성립한 시도  end_reason == "normal"
+
+    셋을 나눠 세는 이유: 붙었는데 미디어가 없는 호(성공·미소통)와 붙어서 통화했지만
+    비정상 종료한 호(성공·소통·미완료)는 서로 다른 장애다. 한 칸에 섞으면 어느 쪽인지
+    알 수 없다.
+
+    **비율이 아니라 분자·분모를 함께 낸다.** 비율은 합산이 안 되므로(구간 비율의 평균은
+    전체 비율이 아니다) 롤업·재집계의 근거는 항상 건수여야 한다(§5.1).
+
+    완료율의 분모는 `attempts` 가 아니라 `sessions` 다 — 붙지도 않은 호를 "완료하지
+    못했다" 고 세면 성공률과 같은 것을 두 번 재게 된다.
+    """
+    attempts = sessions = talked = completed = 0
     durations = []
+    pdd_sum_ms = 0
+    pdd_n = 0
     end_reasons: dict = {}
-    by_bucket_total: dict = {}  # bucket_key -> count
-    by_bucket_ok: dict = {}     # bucket_key -> count
+    # 버킷별 분자·분모 (bucket_key -> count)
+    bk_attempts: dict = {}
+    bk_sessions: dict = {}
+    bk_talked: dict = {}
+    bk_completed: dict = {}
 
     for rec in _iter_call_jsons(config, 'volte', from_dt, to_dt):
         ts = _ts_of(rec, 'volte')
         if not ts or ts < from_dt or ts > to_dt:
             continue
-        total += 1
+        attempts += 1
         state = rec.get('state', '')
         reason = rec.get('end_reason') or 'unknown'
         dur = int(rec.get('duration', 0) or 0)
-        is_success = (state == 'ended' and reason == 'normal')
-        if is_success:
-            success += 1
+
+        # 세션 성립 = 200 OK 를 받아 answer_time 이 채워진 것 (CallDir.h VoipCallAnswer).
+        # state 로 판정하면 진행중(active)과 종료(ended)를 따로 처리해야 하고, 비정상
+        # 종료한 호가 "성립하지 않은 것" 으로 빠진다.
+        answered = bool(rec.get('answer_time'))
+        if answered:
+            sessions += 1
+            pdd = _pdd_ms(ts, rec.get('answer_time'))
+            if pdd is not None:
+                pdd_sum_ms += pdd
+                pdd_n += 1
         if dur > 0:
+            talked += 1
             durations.append(dur)
+        if answered and state == 'ended' and reason == 'normal':
+            completed += 1
         if state == 'ended':
             end_reasons[reason] = end_reasons.get(reason, 0) + 1
+
         bk = _bucket_key(ts, gran)
         if bk:
-            by_bucket_total[bk] = by_bucket_total.get(bk, 0) + 1
-            if is_success:
-                by_bucket_ok[bk] = by_bucket_ok.get(bk, 0) + 1
+            bk_attempts[bk] = bk_attempts.get(bk, 0) + 1
+            if answered:
+                bk_sessions[bk] = bk_sessions.get(bk, 0) + 1
+            if dur > 0:
+                bk_talked[bk] = bk_talked.get(bk, 0) + 1
+            if answered and state == 'ended' and reason == 'normal':
+                bk_completed[bk] = bk_completed.get(bk, 0) + 1
 
-    if gran in ('5m', '10m', '1h'):
-        keys = sorted(by_bucket_total.keys(), key=lambda k: int(k))
-        buckets = []
-        for k in keys:
-            cnt = by_bucket_total[k]
-            ok = by_bucket_ok.get(k, 0)
-            buckets.append({'hour': int(k), 'attempts': cnt, 'success': ok,
-                            'success_rate': round(ok / cnt * 100, 1) if cnt > 0 else 0})
-    else:
-        keys = sorted(by_bucket_total.keys())
-        buckets = []
-        for k in keys:
-            cnt = by_bucket_total[k]
-            ok = by_bucket_ok.get(k, 0)
-            buckets.append({'date': k, 'attempts': cnt, 'success': ok,
-                            'success_rate': round(ok / cnt * 100, 1) if cnt > 0 else 0})
+    keys = sorted(bk_attempts.keys(), key=lambda k: int(k)) \
+        if gran in ('5m', '10m', '1h') else sorted(bk_attempts.keys())
+    label = 'hour' if gran in ('5m', '10m', '1h') else 'date'
+    buckets = []
+    for k in keys:
+        a = bk_attempts[k]
+        se = bk_sessions.get(k, 0)
+        tk = bk_talked.get(k, 0)
+        cp = bk_completed.get(k, 0)
+        buckets.append({
+            label:            int(k) if label == 'hour' else k,
+            'attempts':       a,
+            'sessions':       se,
+            'talked':         tk,
+            'completed':      cp,
+            'success':        se,                      # 옛 소비자 호환 (= sessions)
+            'success_rate':   _rate(se, a),
+            'talk_rate':      _rate(tk, a),
+            'completion_rate': _rate(cp, se),
+        })
 
     avg_dur = round(sum(durations) / len(durations), 1) if durations else 0
     return {
-        'total_attempts': total,
-        'total_success': success,
-        'success_rate': round(success / total * 100, 1) if total > 0 else 0,
+        # 옛 필드 — 콘솔 KPI 카드가 쓰는 이름. total_success 의 판정 근거가
+        # "정상 종료" 에서 "세션 성립" 으로 바뀌었다(§9 이행 표).
+        'total_attempts':   attempts,
+        'total_success':    sessions,
+        'success_rate':     _rate(sessions, attempts),
         'avg_duration_sec': avg_dur,
-        'end_reasons': end_reasons,
-        'buckets': buckets,
+        'end_reasons':      end_reasons,
+        'buckets':          buckets,
+        # 3지표 — 분자·분모 동봉
+        'total_sessions':   sessions,
+        'total_talked':     talked,
+        'total_completed':  completed,
+        'talk_rate':        _rate(talked, attempts),
+        'completion_rate':  _rate(completed, sessions),
+        'duration_sum_sec': sum(durations),
+        'pdd_sum_ms':       pdd_sum_ms,
+        'pdd_n':            pdd_n,
+        'avg_pdd_ms':       round(pdd_sum_ms / pdd_n) if pdd_n else 0,
     }
 
 
@@ -2550,6 +2821,74 @@ CIMS_STATS_API_DOCS = [
                'calls[]/groups[] 는 현재 참여 중인 것만 담긴다.'],
      'auth': dict(_AUTH_MONITOR)},
 
+    {'id': 'stats.calls', 'module': 'oam-svc', 'method': 'GET',
+     'path': '/api/v1/stats/calls',
+     'summary': '서비스별 호 KPI — 성공률·소통률·완료율·참여율 (1분 기저 집계)',
+     'params': [
+         {'name': 'from', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': 'YYYY-MM-DD[ HH:MM[:SS]] — to 와 짝'},
+         {'name': 'to', 'in': 'query', 'type': 'string', 'required': False, 'desc': '구간 끝'},
+         {'name': 'date', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': 'YYYY-MM-DD — "그 날 하루" 축약 (from/to 대신)'},
+         {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': list(stats_rollup.GRANULARITIES), 'desc': '버킷 단위 (기본 1h)'},
+         {'name': 'svc', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['all', 'volte', 'ptt', 'unknown'], 'desc': '서비스축 (기본 all)'},
+     ],
+     'response': '{from, to, granularity, svc, source, totals{}, buckets[]}',
+     'response_fields': [
+         {'name': 'source', 'type': 'string',
+          'desc': 'rollup = 1분 집계, scan = 집계 없는 구간을 원본에서 즉석 계산, none = 로그 경로 미설정'},
+         {'name': 'totals.<svc>.attempts', 'type': 'integer', 'unit': '건', 'desc': '호 시도 (성공률·소통률 분모)'},
+         {'name': 'totals.<svc>.sessions', 'type': 'integer', 'unit': '건', 'desc': '세션 성립 (성공률 분자·완료율 분모)'},
+         {'name': 'totals.<svc>.talked', 'type': 'integer', 'unit': '건', 'desc': '실제 통화 (소통률 분자)'},
+         {'name': 'totals.<svc>.completed', 'type': 'integer', 'unit': '건', 'desc': '정상 종료 (완료율 분자)'},
+         {'name': 'totals.<svc>.legs_invited', 'type': 'integer', 'unit': '개', 'desc': '초대한 leg (참여율 분모)'},
+         {'name': 'totals.<svc>.legs_joined', 'type': 'integer', 'unit': '개', 'desc': 'join 한 leg (참여율 분자)'},
+         {'name': 'totals.<svc>.reasons{}', 'type': 'object', 'desc': '종료 사유별 건수'},
+         {'name': 'totals.<svc>.open', 'type': 'integer', 'unit': '건', 'desc': '아직 끝나지 않아 값이 확정되지 않은 호'},
+         {'name': 'totals.<svc>.late_dropped', 'type': 'integer', 'unit': '건',
+          'desc': '보존기간 초과로 되짚지 못한 호 — 계속 오르면 1분 계층 보존기간이 짧다'},
+         {'name': 'buckets[].bucket', 'type': 'string', 'desc': '버킷 시작 라벨 (단위 무관 동일 키)'},
+         {'name': 'buckets[].bucket_start', 'type': 'string', 'desc': '버킷 시작 ISO8601 (오프셋 포함)'},
+     ],
+     'example': {'from': '2026-09-03 00:00:00', 'to': '2026-09-03 23:59:59',
+                 'granularity': '1h', 'svc': 'all', 'source': 'rollup',
+                 'totals': {'volte': {'attempts': 120, 'sessions': 118, 'talked': 110,
+                                      'completed': 105, 'success_rate': 98.3,
+                                      'talk_rate': 91.7, 'completion_rate': 89.0}},
+                 'buckets': [{'bucket': '2026-09-03 15:00',
+                              'bucket_start': '2026-09-03T15:00:00+09:00',
+                              'all': {'attempts': 12, 'sessions': 11}}]},
+     'errors': list(_ERR_COMMON),
+     'notes': ['비율은 저장하지 않는다 — 분자·분모를 함께 내므로 화면이 구간을 다시 합칠 수 있다.',
+               'PTT 는 attempts 가 0 이다: 실패한 그룹통화 시도가 원천에 없다(sip_statistics.md §8 Y6). '
+               '세션 기록이 곧 성립이라 세면 성공률이 항상 100% 가 된다.',
+               '`all` 은 svc 필터와 무관하게 전체 서비스 합계다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'stats.calls.rebuild', 'module': 'oam-svc', 'method': 'POST',
+     'path': '/api/v1/stats/calls/rebuild',
+     'summary': '1분 집계 재생성 (원본에서 다시 계산) — 운영/검증용',
+     'params': [
+         {'name': 'from', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD'},
+         {'name': 'to', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD'},
+         {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': '하루만 재생성'},
+     ],
+     'response': '{ok, from, to, buckets}',
+     'response_fields': [
+         {'name': 'buckets', 'type': 'integer', 'unit': '개', 'desc': '다시 적은 버킷 수'},
+     ],
+     'example': {'ok': True, 'from': '2026-09-03', 'to': '2026-09-03', 'buckets': 12},
+     'errors': list(_ERR_COMMON) + [
+         {'status': 409, 'when': 'StatsRollup.Enabled 가 꺼져 있음',
+          'body': {'error': 'rollup_disabled'}}],
+     'notes': ['롤업은 미결·신규 버킷만 다시 계산한다 — 집계 스키마에 축이 추가되면 이미 적힌 '
+               '버킷은 그 축이 빈 채 남으므로 이 API 로 채운다.',
+               'watermark 를 건드리지 않는다 — 과거 재생성이 이후의 정상 집계를 되돌리지 않는다.',
+               '변이라서 admin 권한을 요구한다(조회는 monitor).'],
+     'auth': {'scheme': 'bearer', 'role': 'admin', 'token_from': 'POST /api/v1/auth/login'}},
+
     {'id': 'stats.messages', 'module': 'oam-svc', 'method': 'GET', 'path': '/api/v1/stats/messages',
      'summary': '전 인터페이스 메시지 카운터 (시간대 버킷 + 메서드/상태코드별 집계)',
      'params': [{'name': 'date', 'in': 'query', 'type': 'string', 'required': False,
@@ -2579,10 +2918,16 @@ CIMS_STATS_API_DOCS = [
          {'name': 'iface', 'in': 'path', 'type': 'string', 'required': True,
           'enum': ['sip', 'cmp', 'csc', 'https'], 'desc': '대상 인터페이스'},
          {'name': 'date', 'in': 'query', 'type': 'string', 'required': False, 'desc': 'YYYY-MM-DD (기본 오늘)'},
+         {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': 'iface=sip 은 1m/5m/10m/1h/1d/1w/1M/1y (1분 집계). 그 외 인터페이스는 5m/10m/1h/1d'},
+         {'name': 'svc', 'in': 'query', 'type': 'string', 'required': False,
+          'enum': ['all', 'volte', 'ptt', 'unknown'], 'desc': 'iface=sip 전용 서비스축 (기본 all)'},
      ],
      'response': '{date, interface, total, buckets[], method_counts{}}',
      'response_fields': [
          {'name': 'interface', 'type': 'string', 'desc': '요청한 iface 그대로'},
+         {'name': 'buckets[].bucket', 'type': 'string', 'desc': '버킷 시작 라벨 (집계 경로에서만)'},
+         {'name': 'buckets[].bucket_start', 'type': 'string', 'desc': '버킷 시작 ISO8601 (집계 경로에서만)'},
          {'name': 'total', 'type': 'integer', 'unit': '건', 'desc': '총 메시지 수'},
          {'name': 'buckets[].hour', 'type': 'string', 'desc': '시간대 (00~23)'},
          {'name': 'buckets[].count', 'type': 'integer', 'unit': '건', 'desc': '건수'},
