@@ -1537,11 +1537,77 @@ typedef struct send_request_data
 {
     pjsua_acc_id acc_id;
     void *token;
+    unsigned auth_retry;    /* CIMS: 401/407 재발행 횟수 (루프 상한) */
 } send_request_data;
+
+static void on_send_request(void *request_data, pjsip_event *event);
+
+/* CIMS: Account::sendRequest 로 나간 out-of-dialog 요청(MESSAGE·PUBLISH 등)의
+ * 401/407 챌린지 재발행. regc/inv/evsub/pjsua_im 은 각자 재인증 경로를 갖지만 이
+ * 범용 경로에는 없어, 등록 flow 밖에서 챌린지되면(UDP 등록 단말의 1300B 초과 요청이
+ * RFC 3261 §18.1.1 로 TCP 승격되는 경우 등) 그대로 최종 실패했다.
+ * pjsua_im.c im_callback 과 같은 규칙: 계정 자격으로 임시 auth 세션 → reinit →
+ * CSeq+1 → 같은 콜백으로 재전송. 재발행에 성공하면 앱 콜백은 재발행 트랜잭션의
+ * 최종 응답에서 한 번만 온다(mod-stateful-util 은 tsx 당 1회). 상한
+ * PJSIP_MAX_STALE_COUNT; 자격 불일치(같은 nonce 재거절)는 reinit 가
+ * PJSIP_EFAILEDCREDENTIAL 로 끊어 401 이 앱 콜백으로 간다. */
+static pj_bool_t cims_send_request_reauth(send_request_data *data,
+                                          pjsip_event *event)
+{
+    pjsip_transaction *tsx;
+    pjsip_rx_data *rdata;
+    pjsua_acc *acc;
+    pjsip_auth_clt_sess auth;
+    pjsip_tx_data *tdata = NULL;
+    send_request_data *data2;
+    pj_status_t status;
+
+    if (event->type != PJSIP_EVENT_TSX_STATE ||
+        event->body.tsx_state.type != PJSIP_EVENT_RX_MSG)
+        return PJ_FALSE;
+    tsx = event->body.tsx_state.tsx;
+    if (tsx->status_code != PJSIP_SC_UNAUTHORIZED &&
+        tsx->status_code != PJSIP_SC_PROXY_AUTHENTICATION_REQUIRED)
+        return PJ_FALSE;
+    if (data->auth_retry >= PJSIP_MAX_STALE_COUNT ||
+        !pjsua_acc_is_valid(data->acc_id))
+        return PJ_FALSE;
+
+    rdata = event->body.tsx_state.src.rdata;
+    acc = &pjsua_var.acc[data->acc_id];
+
+    pjsip_auth_clt_init(&auth, pjsua_var.endpt, rdata->tp_info.pool, 0);
+    pjsip_auth_clt_set_credentials(&auth, acc->cred_cnt, acc->cred);
+    pjsip_auth_clt_set_prefs(&auth, &acc->cfg.auth_pref);
+
+    status = pjsip_auth_clt_reinit_req(&auth, rdata, tsx->last_tx, &tdata);
+    if (status == PJ_SUCCESS) {
+        data2 = PJ_POOL_ZALLOC_T(tdata->pool, send_request_data);
+        data2->acc_id = data->acc_id;
+        data2->token = data->token;
+        data2->auth_retry = data->auth_retry + 1;
+        PJSIP_MSG_CSEQ_HDR(tdata->msg)->cseq++;
+        status = pjsip_endpt_send_request(pjsua_var.endpt, tdata, -1,
+                                          data2, &on_send_request);
+    }
+    pjsip_auth_clt_deinit(&auth);
+
+    if (status != PJ_SUCCESS) {
+        pjsua_perror(THIS_FILE, "CIMS: re-auth of account request failed",
+                     status);
+        return PJ_FALSE;
+    }
+    PJ_LOG(4,(THIS_FILE, "Account %d %.*s resent with authentication (%d)",
+              data->acc_id, (int)tsx->method.name.slen, tsx->method.name.ptr,
+              tsx->status_code));
+    return PJ_TRUE;
+}
 
 static void on_send_request(void *request_data, pjsip_event *event)
 {
     send_request_data *data = (send_request_data*) request_data;
+    if (data && cims_send_request_reauth(data, event))
+        return;     /* 재발행됨 — 앱 콜백은 재발행 트랜잭션의 최종 응답에서 */
     if (data && pjsua_var.ua_cfg.cb.on_acc_send_request)
         (pjsua_var.ua_cfg.cb.on_acc_send_request)(data->acc_id, data->token, event);
 }

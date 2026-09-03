@@ -7,7 +7,8 @@ import java.util.UUID
  * MCData SDS 메시지 코덱 — TS 24.282 §15 (메시지 정의·IE 코딩) + Annex D(mcdata-info) + Annex E(MIME).
  *
  * SIP MESSAGE 본문 = multipart/mixed:
- *  - application/vnd.3gpp.mcdata-info+xml   : 대상 그룹 URI (수신측 그룹 스레드 귀속)
+ *  - application/vnd.3gpp.mcdata-info+xml   : request-type(group-sds/one-to-one-sds…) + 대상 URI
+ *                                             (그룹 URI 또는 1:1 상대 URI — 수신측 스레드 귀속 근거)
  *  - application/vnd.3gpp.mcdata-signalling : SDS SIGNALLING PAYLOAD / SDS NOTIFICATION (TLV)
  *  - application/vnd.3gpp.mcdata-payload    : DATA PAYLOAD (TLV)
  *
@@ -43,6 +44,12 @@ object McDataCodec {
     const val CT_SIGNALLING = "application/vnd.3gpp.mcdata-signalling"
     const val CT_PAYLOAD = "application/vnd.3gpp.mcdata-payload"
 
+    // Annex D mcdata-info <request-type> — 그룹/1:1 × SDS/FD
+    const val REQ_GROUP_SDS = "group-sds"
+    const val REQ_ONE_TO_ONE_SDS = "one-to-one-sds"
+    const val REQ_GROUP_FD = "group-fd"
+    const val REQ_ONE_TO_ONE_FD = "one-to-one-fd"
+
     /** 파싱 결과 — SDS 본문 메시지 또는 disposition 통지. */
     sealed interface Parsed
     data class SdsMessage(
@@ -51,7 +58,8 @@ object McDataCodec {
         val time: Long,              // epoch seconds
         val dispositionReq: Int,     // 0=없음, DISP_REQ_*
         val text: String,
-        val groupUri: String?,       // mcdata-info <mcdata-request-uri>
+        val requestUri: String?,     // mcdata-info <mcdata-request-uri> — 그룹 URI 또는 1:1 상대(수신자) URI
+        val oneToOne: Boolean = false, // <request-type> 이 one-to-one-* — 스레드 키는 발신자
     ) : Parsed
     data class SdsNotification(val convId: String, val msgId: String, val type: Int) : Parsed
     data class FdMessage(
@@ -62,13 +70,20 @@ object McDataCodec {
         val fileName: String,
         val fileSize: Long,
         val fileType: String,
-        val groupUri: String?,
+        val requestUri: String?,
+        val oneToOne: Boolean = false,
     ) : Parsed
 
     /** 그룹 스레드 conversation ID — 그룹당 결정적 UUID (기기 간 동일, TS 24.282 의
      *  "기존 대화 지속 시 기존 Conversation ID 재사용" 을 그룹=상시 대화 1개로 프로파일링). */
     fun conversationIdOf(groupId: String): String =
         hex(UUID.nameUUIDFromBytes("cims-mcdata:$groupId".toByteArray(Charsets.UTF_8)))
+
+    /** 1:1 대화 conversation ID — 사용자 쌍당 결정적 UUID(쌍을 정렬하므로 양쪽 단말이 같은 값). */
+    fun conversationIdOf(userA: String, userB: String): String {
+        val pair = listOf(userA, userB).sorted().joinToString(":")
+        return hex(UUID.nameUUIDFromBytes("cims-mcdata:1to1:$pair".toByteArray(Charsets.UTF_8)))
+    }
 
     fun newMessageId(): String = hex(UUID.randomUUID())
 
@@ -112,18 +127,20 @@ object McDataCodec {
         return uriOf("mcdata-request-uri") to uriOf("mcdata-calling-user-id")
     }
 
-    /** 그룹 SDS 발신 본문 생성. @return (Content-Type, body) */
-    fun buildGroupSds(
-        groupUri: String,
+    /** SDS 발신 본문 생성 — [targetUri]=그룹 URI(group-sds) 또는 상대 URI(one-to-one-sds).
+     *  @return (Content-Type, body) */
+    fun buildSds(
+        targetUri: String,
         text: String,
         convId: String,
         msgId: String,
+        oneToOne: Boolean = false,
         requestDelivery: Boolean = true,
         timeSec: Long = System.currentTimeMillis() / 1000,
     ): Pair<String, String> {
         val signalling = buildSdsSignallingTlv(convId, msgId, requestDelivery, timeSec)
         val payload = buildSdsPayloadTlv(text)
-        val info = mcDataInfoXml(groupUri)
+        val info = mcDataInfoXml(if (oneToOne) REQ_ONE_TO_ONE_SDS else REQ_GROUP_SDS, targetUri)
         val boundary = "mcdata-${msgId.take(16)}"
         val body = buildString {
             appendPart(boundary, CT_INFO, null, info)
@@ -134,16 +151,18 @@ object McDataCodec {
         return "multipart/mixed;boundary=$boundary" to body
     }
 
-    /** 그룹 FD(파일전송) 발신 본문 생성 — FD SIGNALLING PAYLOAD(TS 24.282 §15.1.3):
-     *  Payload IE=FILEURL, Metadata IE=RFC 5547 file-selector(name/size/type). @return (Content-Type, body) */
-    fun buildGroupFd(
-        groupUri: String,
+    /** FD(파일전송) 발신 본문 생성 — FD SIGNALLING PAYLOAD(TS 24.282 §15.1.3):
+     *  Payload IE=FILEURL, Metadata IE=RFC 5547 file-selector(name/size/type).
+     *  [targetUri]=그룹 URI(group-fd) 또는 상대 URI(one-to-one-fd). @return (Content-Type, body) */
+    fun buildFd(
+        targetUri: String,
         fileUrl: String,
         fileName: String,
         fileSize: Long,
         mime: String,
         convId: String,
         msgId: String,
+        oneToOne: Boolean = false,
         timeSec: Long = System.currentTimeMillis() / 1000,
     ): Pair<String, String> {
         val urlBytes = fileUrl.toByteArray(Charsets.UTF_8)
@@ -162,7 +181,7 @@ object McDataCodec {
             putShort(metaBytes.size.toShort())
             put(metaBytes)
         }.array()
-        val info = mcDataInfoXml(groupUri)
+        val info = mcDataInfoXml(if (oneToOne) REQ_ONE_TO_ONE_FD else REQ_GROUP_FD, targetUri)
         val boundary = "mcdata-fd-${msgId.take(14)}"
         val body = buildString {
             appendPart(boundary, CT_INFO, null, info)
@@ -200,7 +219,7 @@ object McDataCodec {
             ?: return null
         var convId = ""; var msgId = ""; var time = 0L
         var dispositionReq = 0; var notifType = -1; var msgType = 0
-        var text = ""; var groupUri: String? = null
+        var text = ""; var requestUri: String? = null; var oneToOne = false
         var fileUrl = ""; var fileName = ""; var fileSize = 0L; var fileType = ""
 
         for (part in splitParts(body, boundary)) {
@@ -284,16 +303,19 @@ object McDataCodec {
                     }
                 }
                 CT_INFO -> {
-                    groupUri = Regex(
+                    requestUri = Regex(
                         "<mcdata-request-uri[^>]*>\\s*<mcdataURI>([^<]+)</mcdataURI>",
                         RegexOption.DOT_MATCHES_ALL,
                     ).find(part.content)?.groupValues?.get(1)?.trim()
+                    oneToOne = Regex("<request-type>\\s*([^<]+)</request-type>")
+                        .find(part.content)?.groupValues?.get(1)?.trim()
+                        ?.startsWith("one-to-one") == true
                 }
             }
         }
         return when (msgType) {
-            MSG_SDS_SIGNALLING -> SdsMessage(convId, msgId, time, dispositionReq, text, groupUri)
-            MSG_FD_SIGNALLING -> FdMessage(convId, msgId, time, fileUrl, fileName, fileSize, fileType, groupUri)
+            MSG_SDS_SIGNALLING -> SdsMessage(convId, msgId, time, dispositionReq, text, requestUri, oneToOne)
+            MSG_FD_SIGNALLING -> FdMessage(convId, msgId, time, fileUrl, fileName, fileSize, fileType, requestUri, oneToOne)
             MSG_SDS_NOTIFICATION -> SdsNotification(convId, msgId, notifType)
             else -> null
         }
@@ -301,12 +323,12 @@ object McDataCodec {
 
     // ── 내부 ──
 
-    private fun mcDataInfoXml(groupUri: String) = """
+    private fun mcDataInfoXml(requestType: String, targetUri: String) = """
         <?xml version="1.0" encoding="UTF-8"?>
         <mcdatainfo xmlns="urn:3gpp:ns:mcdataInfo:1.0">
           <mcdata-Params>
-            <request-type>group-sds</request-type>
-            <mcdata-request-uri type="Normal"><mcdataURI>$groupUri</mcdataURI></mcdata-request-uri>
+            <request-type>$requestType</request-type>
+            <mcdata-request-uri type="Normal"><mcdataURI>$targetUri</mcdataURI></mcdata-request-uri>
           </mcdata-Params>
         </mcdatainfo>
     """.trimIndent()

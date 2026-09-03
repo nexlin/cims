@@ -393,7 +393,7 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            AttachButton(42) { uri -> svc?.sendGroupAttachment(peer, uri) }
+            AttachButton(42) { uri -> svc?.sendAttachment(peer, uri) }
             Box(
                 Modifier.weight(1f).height(42.dp)
                     .clip(RoundedCornerShape(21.dp)).background(Ct.SurfaceHi)
@@ -413,7 +413,7 @@ fun MessageThreadScreen(st: PttUiState, svc: PttService?, peer: String, onBack: 
                 Modifier.size(42.dp).clip(CircleShape)
                     .background(if (canSend) Ct.Mint else Ct.SurfaceHi)
                     .clickable(enabled = canSend) {
-                        svc?.sendGroupMessage(peer, input.trim())
+                        svc?.sendMessage(peer, input.trim())
                         input = ""
                     },
                 contentAlignment = Alignment.Center,

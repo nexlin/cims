@@ -61,6 +61,57 @@ public class PjCamera2
     /* For debugging purpose only */
     private final SurfaceView surfaceView;
 
+    /* 로컬 셀프뷰(내 화면) 프리뷰 surface. 앱이 SetPreviewSurface() 로 등록한다.
+     * 카메라를 다시 열지 않고, 이미 열린 CameraDevice 에 CaptureSession 만
+     * 재구성해 인코딩용 ImageReader 와 함께 출력 target 으로 추가한다
+     * (Camera2 는 한 세션에서 다중 출력 surface 지원 → 카메라 2중 오픈/SYSERR 회피). */
+    private Surface previewSurface = null;
+    private static PjCamera2 active = null;
+    private static Surface pendingPreview = null;
+
+    /** 앱(SipController)에서 셀프뷰 surface 등록/해제. null 이면 프리뷰 제거.
+     * surfaceCreated/surfaceChanged 가 같은 Surface 로 여러 번 콜백하므로 참조 동일 시 무시한다
+     * (반복 세션 재구성이 카메라 teardown race 를 유발하기 때문). */
+    public static void SetPreviewSurface(Surface s)
+    {
+        if (s == pendingPreview)
+            return;
+        pendingPreview = s;
+        PjCamera2 a = active;
+        if (a != null)
+            a.applyPreviewSurface(s);
+    }
+
+    /** 실행 중 카메라의 CaptureSession 을 프리뷰 surface 포함/제외로 재구성. */
+    private void applyPreviewSurface(final Surface s)
+    {
+        final Handler h = handler;
+        if (h == null || camera == null) {
+            previewSurface = s;
+            return;
+        }
+        h.post(new Runnable() {
+            @Override
+            public void run() {
+                // 이미 반영됐거나(중복) 더 최신 요청이 왔으면(stale) 재구성 생략 — teardown race 방지.
+                if (s == previewSurface || s != pendingPreview)
+                    return;
+                previewSurface = s;
+                if (!isRunning || camera == null)
+                    return;
+                try {
+                    if (previewSession != null) {
+                        previewSession.close();
+                        previewSession = null;
+                    }
+                    StartPreview();
+                } catch (Exception e) {
+                    Log.d(TAG, "applyPreviewSurface: " + e.getMessage());
+                }
+            }
+        });
+    }
+
     native void PushFrame2(long userData_,
                            ByteBuffer plane0, int rowStride0, int pixStride0,
                            ByteBuffer plane1, int rowStride1, int pixStride1,
@@ -196,6 +247,9 @@ public class PjCamera2
             surfaceList.add(imageReader.getSurface());
             if (surfaceView != null)
                 surfaceList.add(surfaceView.getHolder().getSurface());
+            final Surface pv = previewSurface;
+            if (pv != null && pv.isValid())
+                surfaceList.add(pv);
 
             camera.createCaptureSession(surfaceList,
                 new CameraCaptureSession.StateCallback() {
@@ -203,11 +257,19 @@ public class PjCamera2
                     public void onConfigured(CameraCaptureSession session) {
                         Log.d(TAG, "CameraCaptureSession.StateCallback.onConfigured");
 
+                        // 재구성 race 로 이미 닫혔거나(camera==null) 정지 중이면 이 세션은 버린다.
+                        // (여기서 Stop() 을 부르면 카메라 전체가 teardown 되어 셀프뷰가 사라짐)
+                        if (camera == null || !isRunning) {
+                            try { session.close(); } catch (Exception ignore) {}
+                            return;
+                        }
                         try {
                             CaptureRequest.Builder previewBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD);
                             previewBuilder.addTarget(imageReader.getSurface());
                             if (surfaceView != null)
                                 previewBuilder.addTarget(surfaceView.getHolder().getSurface());
+                            if (pv != null && pv.isValid())
+                                previewBuilder.addTarget(pv);
                             previewBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO);
                             if (start_with_fps) {
                                 Range<Integer> fpsRange = new Range<>(fps, fps);
@@ -216,8 +278,8 @@ public class PjCamera2
                             session.setRepeatingRequest(previewBuilder.build(), null, handler);
                             previewSession = session;
                         } catch (Exception e) {
-                            Log.d(TAG, e.getMessage());
-                            Stop();
+                            Log.d(TAG, "onConfigured: " + e.getMessage());
+                            try { session.close(); } catch (Exception ignore) {}
                         }
                         if (surfaceView!=null)
                             surfaceView.getHolder().addCallback(surfaceHolderCallback);
@@ -254,6 +316,8 @@ public class PjCamera2
         imageReader = ImageReader.newInstance(w, h, fmt, 3);
         imageReader.setOnImageAvailableListener(imageAvailListener, handler);
         isRunning = true;
+        active = this;
+        previewSurface = pendingPreview;    /* 통화 시작 전 등록된 셀프뷰 surface 승계 */
 
         try {
             cm.openCamera(ci.id, camStateCallback, handler);
@@ -272,6 +336,8 @@ public class PjCamera2
             return;
 
         isRunning = false;
+        if (active == this)
+            active = null;
         Log.d(TAG, "Stopping..");
 
         if (previewSession != null) {

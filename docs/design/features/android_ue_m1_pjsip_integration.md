@@ -189,6 +189,18 @@ git describe --tags     # 2.16 기대
 > 단말 없이 검증할 때는 같은 두 파일만 패치한 **호스트 pjsip 빌드 + 하니스**로 같은 native
 > 경로를 태울 수 있다(`pjsua_acc_send_request` 직접 호출 → `on_pager2` 수신).
 
+> **`Account::sendRequest` 401/407 재인증 패치 (`ext/pjproject` 적용 — `pjsip/src/pjsua-lib/pjsua_acc.c`).**
+> `pjsua_acc_send_request` 로 나가는 out-of-dialog 요청(MESSAGE·PUBLISH)은 regc/inv/evsub/
+> `pjsua_im_send` 와 달리 챌린지 재발행 경로가 없어, 등록 flow 밖에서 401 을 받으면 그대로 최종
+> 실패했다 — UDP 등록 단말의 MCData SDS MESSAGE(≈1.6KB)가 RFC 3261 §18.1.1 로 TCP 승격되면
+> CSP 가 등록 바인딩 밖 요청으로 401 을 내고 문자가 유실되던 원인
+> ([mcdata_messaging.md](mcdata_messaging.md) §4). `on_send_request` 콜백이 401/407(RX_MSG)이면
+> `pjsua_im.c` `im_callback` 과 같은 규칙으로 계정 자격의 임시 auth 세션 →
+> `pjsip_auth_clt_reinit_req` → CSeq+1 → 같은 콜백으로 재전송한다(`cims_send_request_reauth`).
+> 상한 `PJSIP_MAX_STALE_COUNT`; 같은 nonce 재거절은 reinit 가 `PJSIP_EFAILEDCREDENTIAL` 로 끊어
+> 401 이 앱 콜백으로 간다. 앱 콜백(`Account::onSendRequest`)은 재발행 트랜잭션의 최종 응답에서
+> 한 번만 온다(`mod-stateful-util` 은 tsx 당 1회). SWIG 인터페이스 불변.
+
 ### 2.6 configure / build / SWIG
 
 ```bash

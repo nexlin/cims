@@ -11,8 +11,8 @@ class McDataCodecTest {
     @Test fun groupSdsRoundTrip() {
         val convId = McDataCodec.conversationIdOf("g001")
         val msgId = McDataCodec.newMessageId()
-        val (ct, body) = McDataCodec.buildGroupSds(
-            groupUri = "tel:g001", text = "안녕하세요 테스트 메시지", convId = convId, msgId = msgId,
+        val (ct, body) = McDataCodec.buildSds(
+            targetUri = "tel:g001", text = "안녕하세요 테스트 메시지", convId = convId, msgId = msgId,
             timeSec = 1_700_000_000L,
         )
         assertTrue(ct.startsWith("multipart/mixed;boundary="))
@@ -28,7 +28,60 @@ class McDataCodecTest {
         assertEquals(1_700_000_000L, p.time)
         assertEquals(McDataCodec.DISP_REQ_DELIVERY, p.dispositionReq)
         assertEquals("안녕하세요 테스트 메시지", p.text)
-        assertEquals("tel:g001", p.groupUri)
+        assertEquals("tel:g001", p.requestUri)
+    }
+
+    @Test fun groupSdsIsNotOneToOne() {
+        val (ct, body) = McDataCodec.buildSds(
+            targetUri = "tel:g001", text = "g", convId = McDataCodec.conversationIdOf("g001"),
+            msgId = McDataCodec.newMessageId(),
+        )
+        assertTrue(body.contains("<request-type>group-sds</request-type>"))
+        val p = McDataCodec.parse(ct, body) as McDataCodec.SdsMessage
+        assertEquals(false, p.oneToOne)
+    }
+
+    @Test fun oneToOneSdsRoundTrip() {
+        // 1:1 SDS — request-type one-to-one-sds, request-uri=상대(수신자) URI. 수신측은
+        // oneToOne 으로 스레드 키를 발신자로 잡는다(request-uri 는 자기 자신).
+        val convId = McDataCodec.conversationIdOf("+82500000001", "+82500000002")
+        val msgId = McDataCodec.newMessageId()
+        val (ct, body) = McDataCodec.buildSds(
+            targetUri = "tel:+82500000002", text = "1:1 문자", convId = convId, msgId = msgId,
+            oneToOne = true, timeSec = 1_700_000_000L,
+        )
+        assertTrue(body.contains("<request-type>one-to-one-sds</request-type>"))
+        val p = McDataCodec.parse(ct, body)
+        assertTrue(p is McDataCodec.SdsMessage)
+        p as McDataCodec.SdsMessage
+        assertEquals(true, p.oneToOne)
+        assertEquals("tel:+82500000002", p.requestUri)
+        assertEquals(convId, p.convId)
+        assertEquals("1:1 문자", p.text)
+    }
+
+    @Test fun oneToOneFdRequestType() {
+        val (ct, body) = McDataCodec.buildFd(
+            targetUri = "tel:+82500000002", fileUrl = "https://h/mcdata/fd/x", fileName = "a.bin",
+            fileSize = 1L, mime = "application/octet-stream",
+            convId = McDataCodec.conversationIdOf("+82500000001", "+82500000002"),
+            msgId = McDataCodec.newMessageId(), oneToOne = true,
+        )
+        assertTrue(body.contains("<request-type>one-to-one-fd</request-type>"))
+        val p = McDataCodec.parse(ct, body) as McDataCodec.FdMessage
+        assertEquals(true, p.oneToOne)
+    }
+
+    @Test fun oneToOneConversationIdIsSymmetric() {
+        // 양쪽 단말이 같은 conversation ID 를 유도해야 한다(쌍 정렬)
+        assertEquals(
+            McDataCodec.conversationIdOf("+82500000001", "+82500000002"),
+            McDataCodec.conversationIdOf("+82500000002", "+82500000001"),
+        )
+        assertTrue(McDataCodec.conversationIdOf("+82500000001", "+82500000002") !=
+            McDataCodec.conversationIdOf("+82500000001", "+82500000003"))
+        assertTrue(McDataCodec.conversationIdOf("+82500000001", "+82500000002") !=
+            McDataCodec.conversationIdOf("+82500000001"))
     }
 
     @Test fun conversationIdIsStablePerGroup() {
@@ -51,8 +104,8 @@ class McDataCodecTest {
     }
 
     @Test fun noDispositionWhenNotRequested() {
-        val (ct, body) = McDataCodec.buildGroupSds(
-            groupUri = "tel:g001", text = "x", convId = McDataCodec.conversationIdOf("g001"),
+        val (ct, body) = McDataCodec.buildSds(
+            targetUri = "tel:g001", text = "x", convId = McDataCodec.conversationIdOf("g001"),
             msgId = McDataCodec.newMessageId(), requestDelivery = false,
         )
         val p = McDataCodec.parse(ct, body) as McDataCodec.SdsMessage
@@ -61,8 +114,8 @@ class McDataCodecTest {
 
     @Test fun boundaryFallbackFromBody() {
         // Content-Type 에 boundary 파라미터가 유실돼도 본문 첫 줄에서 유도
-        val (_, body) = McDataCodec.buildGroupSds(
-            groupUri = "tel:g001", text = "폴백", convId = McDataCodec.conversationIdOf("g001"),
+        val (_, body) = McDataCodec.buildSds(
+            targetUri = "tel:g001", text = "폴백", convId = McDataCodec.conversationIdOf("g001"),
             msgId = McDataCodec.newMessageId(),
         )
         val p = McDataCodec.parse("multipart/mixed", body)
@@ -73,8 +126,8 @@ class McDataCodecTest {
     @Test fun groupFdRoundTrip() {
         val convId = McDataCodec.conversationIdOf("g001")
         val msgId = McDataCodec.newMessageId()
-        val (ct, body) = McDataCodec.buildGroupFd(
-            groupUri = "tel:g001", fileUrl = "https://10.0.1.45:4430/mcdata/fd/abc123",
+        val (ct, body) = McDataCodec.buildFd(
+            targetUri = "tel:g001", fileUrl = "https://10.0.1.45:4430/mcdata/fd/abc123",
             fileName = "현장 사진.jpg", fileSize = 123456L, mime = "image/jpeg",
             convId = convId, msgId = msgId, timeSec = 1_700_000_000L,
         )
@@ -87,17 +140,17 @@ class McDataCodecTest {
         assertEquals("현장 사진.jpg", p.fileName)
         assertEquals(123456L, p.fileSize)
         assertEquals("image/jpeg", p.fileType)
-        assertEquals("tel:g001", p.groupUri)
+        assertEquals("tel:g001", p.requestUri)
     }
 
     @Test fun rawTlvBuildersMatchGroupSdsParts() {
-        // buildGroupSds 가 raw 빌더 산출물의 base64 인 것 확인 — MSRP(raw)와 C-plane(base64) 동일 TLV
+        // buildSds 가 raw 빌더 산출물의 base64 인 것 확인 — MSRP(raw)와 C-plane(base64) 동일 TLV
         val convId = McDataCodec.conversationIdOf("g001")
         val msgId = McDataCodec.newMessageId()
         val sig = McDataCodec.buildSdsSignallingTlv(convId, msgId, timeSec = 1_700_000_000L)
         val pay = McDataCodec.buildSdsPayloadTlv("가나다 abc")
-        val (_, body) = McDataCodec.buildGroupSds(
-            groupUri = "tel:g001", text = "가나다 abc", convId = convId, msgId = msgId,
+        val (_, body) = McDataCodec.buildSds(
+            targetUri = "tel:g001", text = "가나다 abc", convId = convId, msgId = msgId,
             timeSec = 1_700_000_000L,
         )
         val b64 = java.util.Base64.getEncoder()

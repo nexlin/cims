@@ -21,6 +21,8 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
   | PTT 유휴 무음 50pps 상향 스트림 제거 (`stream->vad_enabled` 분기) | `pjmedia/src/pjmedia/stream.c` | 브리지 미연결 유휴 시 무음 RTP 송신 생략 — KA 가 NAT 유지 담당 |
   | 이벤트 구독 (`pjsua_cims_conf_subscribe`, `cims_conf_find`) | `pjsip/src/pjsua-lib/pjsua_acc.c`, `pjsua_pres.c` | conference(RFC 4575)·xcap-diff(RFC 5875)·dialog(RFC 4235, 관제 BLF·Join 대상 학습) 구독의 in-dialog 갱신(RFC 6665) — NOTIFY 본문은 on_pager2 로 앱에 전달 |
   | `ExtraAudioDevice` 재생 전용 모드 (`recDev == PJMEDIA_AUD_INVALID_DEV` → `PJMEDIA_DIR_PLAYBACK`, `cims_play_only`) | `pjsip/src/pjsua2/media.cpp` | 코어 재생 라우트(`Engine::addPlaybackRoute`) — 관제석 헤드셋+스피커 분리 출력에서 두 번째 장치의 마이크를 열지 않음 (ue_sdk.md §6) |
+  | Camera2 로컬 셀프뷰 프리뷰 (`PjCamera2.SetPreviewSurface`) | `pjmedia/src/pjmedia-videodev/android/PjCamera2.java` | 앱이 등록한 프리뷰 Surface 를 열린 CameraDevice 의 CaptureSession 에 인코딩 ImageReader 와 함께 출력 target 으로 추가 — 카메라 2중 오픈 없이 영상통화 셀프뷰(PiP). `sdk/android/build-native.sh` 가 `android/core/src/pjsua2/java/org/pjsip/` 로 복사한다 |
+  | `Account::sendRequest` 401/407 재인증 재발행 (`cims_send_request_reauth`, `send_request_data.auth_retry`) | `pjsip/src/pjsua-lib/pjsua_acc.c` | out-of-dialog 요청(MESSAGE·PUBLISH)의 챌린지에 계정 자격으로 CSeq+1 재발행 — regc/inv/evsub/pjsua_im 과 달리 이 경로엔 없었다. UDP 등록 단말의 MCData SDS(≈1.6KB)가 RFC 3261 §18.1.1 TCP 승격으로 등록 flow 밖에서 401 받아 유실되던 원인(mcdata_messaging.md §4). 상한 PJSIP_MAX_STALE_COUNT |
   | U10 동시 발언 SSRC 디먹스 (`cims_mt_rx`) | `pjmedia/src/pjmedia/stream.c`, `stream_imp_common.c` | 한 스트림의 SSRC 별 서브스트림(지터버퍼+디코더) → PCM 합산 — mcptt_ue_multitalker_media.md §5. secondary SSRC 도 빈 payload·비협상 PT 는 소비만(AMR 파서 보호 — 감청 tap 의 CMP 자체 SSRC 패킷) |
 
 - `config_site.h` 는 upstream 이 무시하는 파일이라 트리에 없다. 플랫폼별 정본은 `sdk/engine/config_site/{common,android,linux,windows}.h`

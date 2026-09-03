@@ -173,12 +173,14 @@ class PttController(
     private val _sendProgress = MutableSharedFlow<SendProgress>(extraBufferCapacity = 64)
     val sendProgress: SharedFlow<SendProgress> = _sendProgress.asSharedFlow()
 
-    /** MSRP 발신 결과 — (msgId, 성공 여부). 서비스가 MessageStore 상태(SENT/FAILED) 반영. */
+    /** 문자 발신 결과 — (msgId, 성공 여부). C-plane 은 MESSAGE 트랜잭션 최종 응답(2xx), MSRP 는
+     *  전송 완료. 서비스가 MessageStore 상태(SENT/FAILED) 반영. */
     private val _sendResult = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 16)
     val sendResult: SharedFlow<Pair<String, Boolean>> = _sendResult.asSharedFlow()
 
-    /** [text] 가 C-plane 임계를 초과해 MSRP 미디어평면으로 발신되는가 — 초기 말풍선 상태 판단용. */
-    fun willUseMsrp(text: String): Boolean =
+    /** [text] 가 C-plane 임계를 초과해 MSRP 미디어평면으로 발신되는가 — 그룹 SDS 한정
+     *  (서버 미디어평면은 그룹 대상만 종단, 1:1 은 항상 C-plane). */
+    private fun willUseMsrp(text: String): Boolean =
         sipConfig.maxPayloadSdsCplaneBytes > 0 &&
             McDataCodec.sdsPayloadSize(text) > sipConfig.maxPayloadSdsCplaneBytes
 
@@ -331,7 +333,10 @@ class PttController(
     private val affBackoffUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()  // 백오프 대기 종료 시각
     /** 서버가 준 `SIP-ETag`(RFC 3903) — 갱신 PUBLISH 의 `SIP-If-Match` 로 되돌려 refresh 로 처리되게 한다. */
     private val affEtag = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private val affSeq = java.util.concurrent.atomic.AtomicLong(1)
+    /** [SipController.sendRequest] token 발급 — affiliation PUBLISH·C-plane SDS MESSAGE 공용. */
+    private val reqSeq = java.util.concurrent.atomic.AtomicLong(1)
+    /** C-plane SDS MESSAGE token → msgId — 최종 응답을 [sendResult] 로 대응. */
+    private val sdsPending = java.util.concurrent.ConcurrentHashMap<Long, String>()
     /** 403(등록 소실) 대응 재-REGISTER 스로틀 — 연속 실패마다 재등록하지 않도록. */
     @Volatile private var affReRegisterAt = 0L
 
@@ -508,10 +513,19 @@ class PttController(
                 }
             }
         }
-        // affiliation PUBLISH 최종 응답 — 2xx 확정, 실패는 지수 백오프 재시도. token 당 1회 처리
-        // (같은 트랜잭션의 COMPLETED/TERMINATED 중복 통지는 affPending remove 로 자연 dedupe).
+        // sendRequest 최종 응답 상관(token 당 1회 처리 — 같은 트랜잭션의 중복 통지는 remove 로 dedupe).
+        //  ① C-plane SDS MESSAGE: 2xx=SENT, 그 외(403/404/408/503…)=FAILED → [sendResult].
+        //     401/407 은 native(ext/pjproject pjsua_acc.c cims_send_request_reauth)가 재발행하므로 여기 오면
+        //     재인증까지 실패한 최종 결과다.
+        //  ② affiliation PUBLISH: 2xx 확정, 실패는 지수 백오프 재시도.
         scope.launch {
             sip.sendReqResults.collect { r ->
+                sdsPending.remove(r.token)?.let { msgId ->
+                    val ok = r.code in 200..299
+                    if (!ok) Log.w(TAG, "SDS MESSAGE $msgId 실패: ${r.code} ${r.reason}")
+                    _sendResult.tryEmit(msgId to ok)
+                    return@collect
+                }
                 val (g, on) = affPending.remove(r.token) ?: return@collect
                 if (r.code in 200..299) {
                     affAttempts.remove(g)
@@ -1425,7 +1439,7 @@ class PttController(
      *  보유 ETag 가 있으면 `SIP-If-Match` 를 실어 **갱신(refresh)** 으로 처리되게 한다(RFC 3903 §4) —
      *  없으면 매 발행이 초기 publication 이라 서버가 event state 를 새로 만든다. */
     fun affiliate(groupId: String, on: Boolean = true) {
-        val token = affSeq.getAndIncrement()
+        val token = reqSeq.getAndIncrement()
         affPending[token] = groupId to on
         val groupSip = "sip:$groupId@${sipConfig.domain}"
         val hdrs = mutableMapOf(
@@ -1453,34 +1467,53 @@ class PttController(
     }
 
     /**
-     * 그룹 문자 발신 — MCData 그룹 SDS (TS 24.282 §9.2.2). multipart/mixed 본문
-     * (mcdata-info + SDS SIGNALLING PAYLOAD + DATA PAYLOAD)으로 CSP(MCDATA-AS)가
-     * 게이트(allow-SDS·멤버십·크기) 후 affiliate 멤버에게 fan-out. 로컬 저장은 서비스 몫.
+     * 문자 발신 — MCData SDS (TS 24.282 §9.2.2). [peer] 가 그룹 ID 면 그룹 SDS(request-type
+     * group-sds — CSP MCDATA-AS 가 allow-SDS·멤버십·크기 게이트 후 affiliate 멤버에게 fan-out),
+     * 아니면 1:1 SDS(one-to-one-sds — CSP 가 상대의 등록 바인딩으로 전달). multipart/mixed 본문
+     * (mcdata-info + SDS SIGNALLING PAYLOAD + DATA PAYLOAD). 로컬 저장은 서비스 몫.
      *
-     * payload 가 프로비저닝 임계([SipAccountConfig.maxPayloadSdsCplaneBytes], 0=무제한)를
+     * 그룹 SDS 의 payload 가 프로비저닝 임계([SipAccountConfig.maxPayloadSdsCplaneBytes], 0=무제한)를
      * 초과하면 C-plane 대신 **MSRP 미디어평면**(§9.2.3)으로 발신한다 — 초과 MESSAGE 는
-     * 서버가 403+Warning 203 으로 거절하는 표준 동작.
+     * 서버가 403+Warning 203 으로 거절하는 표준 동작. 미디어평면은 서버가 그룹 대상만
+     * 종단하므로 1:1 은 항상 C-plane.
+     *
+     * 결과는 두 경로 모두 [sendResult] — C-plane 은 MESSAGE 트랜잭션 최종 응답(2xx=성공, 그 외·
+     * 타임아웃=실패). 등록 flow 밖(UDP 등록 단말의 1300B 초과 요청 TCP 승격 등)에서 받는 401
+     * 재인증은 native(ext/pjproject `pjsua_acc.c` `cims_send_request_reauth`)가 자격을 붙여 재발행하므로
+     * 여기엔 최종 응답만 온다.
+     * @param msgId 재전송이면 실패한 문자의 msgId(수신측 중복 대사 기준), 아니면 신규 발급
      * @return message ID (UUID hex 32자, delivered 통지 대사용) — 빈 문자열이면 미발신
      */
-    fun sendGroupMessage(groupId: String, text: String): String {
-        if (text.isBlank()) return ""
-        val convId = McDataCodec.conversationIdOf(groupId)
-        val msgId = McDataCodec.newMessageId()
-        if (willUseMsrp(text)) {
-            scope.launch { sendGroupMessageMsrp(groupId, text, convId, msgId) }
+    fun sendSds(peer: String, text: String, msgId: String = McDataCodec.newMessageId()): String {
+        if (text.isBlank() || msgId.isBlank()) return ""
+        val group = isGroupId(peer)
+        val convId = conversationIdFor(peer)
+        if (group && willUseMsrp(text)) {
+            scope.launch { sendSdsMsrp(peer, text, convId, msgId) }
             return msgId
         }
-        val (ct, body) = McDataCodec.buildGroupSds(
-            groupUri = "tel:$groupId", text = text, convId = convId, msgId = msgId,
+        val (ct, body) = McDataCodec.buildSds(
+            targetUri = "tel:$peer", text = text, convId = convId, msgId = msgId, oneToOne = !group,
         )
+        val token = reqSeq.getAndIncrement()
+        sdsPending[token] = msgId
         sip.sendRequest(
             method = "MESSAGE",
-            targetUri = "sip:$groupId@${sipConfig.domain}",
+            targetUri = "sip:$peer@${sipConfig.domain}",
             contentType = ct,
             body = body,
+            token = token,
         )
         return msgId
     }
+
+    /** [id] 가 프로비저닝된 그룹 ID 인가 — 문자·첨부 대상의 그룹/1:1 판별(UI 와 같은 술어). */
+    fun isGroupId(id: String): Boolean = _groups.value.any { bareId(it.uri) == id }
+
+    /** 대상별 conversation ID — 그룹=그룹당 결정적, 1:1=사용자 쌍당 결정적(양쪽 단말 동일). */
+    private fun conversationIdFor(peer: String): String =
+        if (isGroupId(peer)) McDataCodec.conversationIdOf(peer)
+        else McDataCodec.conversationIdOf(bareId(mcpttId), peer)
 
     // ── MCData MSRP 미디어평면 송신 (TS 24.282 §9.2.3) ──
 
@@ -1491,7 +1524,7 @@ class PttController(
      * 서버 a=path 로 TCP 접속 → SIGNALLING/PAYLOAD TLV SEND → 서버 BYE(완료 신호).
      * 서버(cmdp)가 종단 저장 후 하이브리드 fan-out(MSRP 수신 단말=INVITE, 그 외=FILEURL 폴백).
      */
-    private suspend fun sendGroupMessageMsrp(
+    private suspend fun sendSdsMsrp(
         groupId: String,
         text: String,
         convId: String,
@@ -1702,44 +1735,32 @@ class PttController(
         }
     }
 
-    /** 실패 문자 재전송 — 같은 msgId 재사용(수신측 중복 대사는 msgId 기준). 결과는 [sendResult]. */
-    fun resendGroupMessage(groupId: String, text: String, msgId: String) {
-        if (text.isBlank() || msgId.isBlank()) return
-        val convId = McDataCodec.conversationIdOf(groupId)
-        if (willUseMsrp(text)) {
-            scope.launch { sendGroupMessageMsrp(groupId, text, convId, msgId) }
-        } else {
-            val (ct, body) = McDataCodec.buildGroupSds(
-                groupUri = "tel:$groupId", text = text, convId = convId, msgId = msgId,
-            )
-            sip.sendRequest("MESSAGE", "sip:$groupId@${sipConfig.domain}", ct, body)
-            _sendResult.tryEmit(msgId to true)      // C-plane 은 종전대로 fire-and-forget
-        }
-    }
-
     /** FD 전송 결과 — 로컬 이력 저장용. */
     data class FdSent(val msgId: String, val url: String, val size: Long)
 
     /**
-     * 그룹 파일전송 — FD via HTTP (TS 23.282): CSC 콘텐츠 서버 업로드 → FD SIGNALLING
+     * 파일전송 — FD via HTTP (TS 23.282): CSC 콘텐츠 서버 업로드 → FD SIGNALLING
      * PAYLOAD(SIP MESSAGE) 전파. 블로킹(업로드 HTTP) — Dispatchers.IO 에서 호출할 것.
+     * 1:1 대상은 request-type one-to-one-fd 로 인코딩하지만 CSC 업로드 게이트(allow_fd·멤버십)가
+     * 그룹 단위라 현재 서버는 그룹 첨부만 받는다(mcdata_messaging.md §8).
      * @return null 이면 실패 (토큰 없음/업로드 거부 — allow_fd·크기 게이트는 서버가 판정)
      */
-    fun sendGroupAttachment(groupId: String, data: ByteArray, fileName: String, mime: String): FdSent? {
+    fun sendAttachment(peer: String, data: ByteArray, fileName: String, mime: String): FdSent? {
         val c = csc ?: return null
         val t = token?.accessToken ?: run { _status.value = "첨부: 토큰 없음"; return null }
-        val up = runCatching { c.uploadFd(t, data, fileName, mime, groupId) }
+        val up = runCatching { c.uploadFd(t, data, fileName, mime, peer) }
             .onFailure { Log.w(TAG, "FD 업로드 실패: ${it.message}"); _status.value = "첨부 업로드 실패" }
             .getOrNull() ?: return null
-        val convId = McDataCodec.conversationIdOf(groupId)
+        val group = isGroupId(peer)
+        val convId = conversationIdFor(peer)
         val msgId = McDataCodec.newMessageId()
-        val (ct, body) = McDataCodec.buildGroupFd(
-            groupUri = "tel:$groupId", fileUrl = up.url, fileName = up.name,
-            fileSize = up.size, mime = mime, convId = convId, msgId = msgId,
+        val (ct, body) = McDataCodec.buildFd(
+            targetUri = "tel:$peer", fileUrl = up.url, fileName = up.name,
+            fileSize = up.size, mime = mime, convId = convId, msgId = msgId, oneToOne = !group,
         )
         sip.sendRequest(
             method = "MESSAGE",
-            targetUri = "sip:$groupId@${sipConfig.domain}",
+            targetUri = "sip:$peer@${sipConfig.domain}",
             contentType = ct,
             body = body,
         )

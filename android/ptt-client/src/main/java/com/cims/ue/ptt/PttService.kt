@@ -71,23 +71,25 @@ class PttService : Service() {
 
     fun bumpConfigTick() { _configTick.value++ }
 
-    /** 그룹 문자(MCData SDS) 발신 + 로컬 스레드 저장 — msgId 보존(delivered 통지 대사용).
-     *  MSRP(미디어평면) 경로는 수 초 걸리고 실패 가능 → PENDING 으로 시작(결과는 sendResult 반영). */
-    fun sendGroupMessage(groupId: String, text: String) {
-        val viaMsrp = controller?.willUseMsrp(text) == true
-        val msgId = controller?.sendGroupMessage(groupId, text) ?: return
-        if (msgId.isEmpty()) return
-        messages.add(groupId, text, com.cims.ue.core.message.MsgDirection.OUT, msgId = msgId,
-            sendState = if (viaMsrp) com.cims.ue.core.message.SendState.PENDING
-            else com.cims.ue.core.message.SendState.SENT)
+    /** 문자(MCData SDS) 발신 + 로컬 스레드 저장 — [peer]=그룹 ID 또는 상대 번호. msgId 는 저장
+     *  후 발신에 넘긴다(delivered 통지·결과 대사용 — 응답이 저장보다 먼저 와도 유실 없음).
+     *  C-plane·MSRP 모두 PENDING 으로 시작하고 [PttController.sendResult](최종 응답/전송 결과)로
+     *  SENT/FAILED 를 확정한다 — 재인증 실패·타임아웃이 ✓ 로 숨지 않게. */
+    fun sendMessage(peer: String, text: String) {
+        val c = controller ?: return
+        if (text.isBlank()) return
+        val msgId = McDataCodec.newMessageId()
+        messages.add(peer, text, com.cims.ue.core.message.MsgDirection.OUT, msgId = msgId,
+            sendState = com.cims.ue.core.message.SendState.PENDING)
         _messageTick.value++
+        c.sendSds(peer, text, msgId)
     }
 
     /** 실패 문자 재전송(말풍선 탭) — PENDING 복귀 후 같은 msgId 로 재시도. */
     fun resendMessage(e: com.cims.ue.core.message.MessageEntry) {
         if (e.msgId.isBlank() || e.text.isBlank()) return
         if (messages.setSendState(e.msgId, com.cims.ue.core.message.SendState.PENDING)) _messageTick.value++
-        controller?.resendGroupMessage(e.peer, e.text, e.msgId)
+        controller?.sendSds(e.peer, e.text, e.msgId)
     }
 
     /** MSRP 발신 진행률(msgId → 0f~1f) — 말풍선 진행 바용(런타임 전용, 미영속). */
@@ -118,19 +120,20 @@ class PttService : Service() {
 
     // ── MCData FD (파일전송) ──
 
-    /** 첨부 전송 — content Uri 읽기 → CSC 업로드 → FD SIGNALLING (mcdata_messaging.md). */
-    fun sendGroupAttachment(groupId: String, uri: android.net.Uri) {
+    /** 첨부 전송 — content Uri 읽기 → CSC 업로드 → FD SIGNALLING (mcdata_messaging.md).
+     *  [peer]=그룹 ID 또는 상대 번호(1:1 첨부는 서버 업로드 게이트가 그룹 단위라 현재 거부됨). */
+    fun sendAttachment(peer: String, uri: android.net.Uri) {
         val c = controller ?: return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val picked = readContent(uri) ?: run {
                 mainHandler.post { toast("첨부 파일을 읽을 수 없습니다") }; return@launch
             }
             val (data, name, mime) = picked
-            val sent = c.sendGroupAttachment(groupId, data, name, mime)
+            val sent = c.sendAttachment(peer, data, name, mime)
             if (sent == null) { mainHandler.post { toast("첨부 전송 실패 (그룹 파일전송 허용 여부 확인)") }; return@launch }
             // 발신본은 로컬 파일로 바로 보관 (재다운로드 불필요)
             val path = writeAttachment(sent.msgId, name, data)
-            messages.add(groupId, "", com.cims.ue.core.message.MsgDirection.OUT, msgId = sent.msgId,
+            messages.add(peer, "", com.cims.ue.core.message.MsgDirection.OUT, msgId = sent.msgId,
                 attName = name, attUrl = sent.url, attSize = sent.size, attPath = path ?: "")
             _messageTick.value++
         }
@@ -491,7 +494,8 @@ class PttService : Service() {
                 mainHandler.post { overlay.update(color, "PTT ${if (reg is com.cims.ue.core.sip.RegState.Registered) "가능" else "연결 안 됨"}") }
             }.launchIn(this)
             // 수신 문자(SIP MESSAGE) → 인박스 영속.
-            //  - MCData SDS(multipart/mixed): mcdata-info 의 그룹 URI 로 그룹 스레드 귀속 +
+            //  - MCData SDS/FD(multipart/mixed): 스레드 키 = 그룹(group-*)이면 mcdata-info 의
+            //    request-uri(그룹 ID), 1:1(one-to-one-*)이면 발신자 — [threadKeyOf].
             //    disposition 요청 시 DELIVERED 통지 회신, DELIVERED 통지 수신 시 발신 문자에 반영.
             //  - text/plain(구버전 앱 호환): 발신자 스레드로 저장.
             c.incomingMessage.onEach { im ->
@@ -501,8 +505,7 @@ class PttService : Service() {
                         is McDataCodec.SdsMessage -> onSdsParsed(p, sender)
                         is McDataCodec.FdMessage -> {
                             if (p.fileUrl.isNotBlank()) {
-                                val gid = p.groupUri?.let(PttController::bareId)
-                                    ?.takeUnless { it.isBlank() } ?: sender
+                                val gid = threadKeyOf(p.oneToOne, p.requestUri, sender)
                                 messages.add(gid, "", com.cims.ue.core.message.MsgDirection.IN,
                                     sender = sender, msgId = p.msgId,
                                     attName = p.fileName.ifBlank { "file.bin" },
@@ -528,7 +531,7 @@ class PttService : Service() {
                     _messageTick.value++
                 }
             }.launchIn(this)
-            // MSRP 발신 결과 → 말풍선 상태(SENT/FAILED) 반영 + 진행률 정리
+            // 발신 결과(C-plane 최종 응답·MSRP 전송) → 말풍선 상태(SENT/FAILED) 반영 + 진행률 정리
             c.sendResult.onEach { (msgId, ok) ->
                 _sendProgress.value = _sendProgress.value - msgId
                 val st = if (ok) com.cims.ue.core.message.SendState.SENT
@@ -550,6 +553,13 @@ class PttService : Service() {
         }
     }
 
+    /** 수신 SDS/FD 의 스레드 키 — 그룹은 mcdata-request-uri(그룹 ID), 1:1 은 발신자.
+     *  1:1 의 request-uri 는 수신자 자신이라 키로 쓰면 자기 번호 스레드에 귀속되고 답장이
+     *  자기에게 간다. request-uri 가 없으면(비표준 본문) 발신자 폴백. */
+    private fun threadKeyOf(oneToOne: Boolean, requestUri: String?, sender: String): String =
+        if (oneToOne) sender
+        else requestUri?.let(PttController::bareId)?.takeUnless { it.isBlank() } ?: sender
+
     /** 수신 SDS 공통 처리 — C-plane MESSAGE 와 MSRP 미디어평면 공용(저장·tick·DELIVERED 통지). */
     private fun onSdsParsed(
         p: McDataCodec.SdsMessage,
@@ -557,9 +567,7 @@ class PttService : Service() {
         gidOverride: String? = null,
         notifiable: Boolean = true,
     ) {
-        val gid = gidOverride
-            ?: p.groupUri?.let(PttController::bareId)?.takeUnless { it.isBlank() }
-            ?: sender
+        val gid = gidOverride ?: threadKeyOf(p.oneToOne, p.requestUri, sender)
         if (p.text.isNotEmpty()) {
             messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
                 sender = sender, msgId = p.msgId)

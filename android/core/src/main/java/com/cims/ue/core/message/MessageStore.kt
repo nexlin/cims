@@ -7,8 +7,8 @@ import org.json.JSONObject
 /** 문자 방향 — 수신/발신. */
 enum class MsgDirection { IN, OUT }
 
-/** 발신 문자 전송 상태 — [SENT]=완료(기본, C-plane 즉시), [PENDING]=미디어평면(MSRP) 전송 중,
- *  [FAILED]=실패(말풍선 탭으로 재전송). 수신 문자는 항상 SENT. */
+/** 발신 문자 전송 상태 — [PENDING]=발신 후 결과 대기(C-plane MESSAGE 최종 응답·MSRP 전송 공통),
+ *  [SENT]=완료(2xx/전송 성공), [FAILED]=실패(말풍선 탭으로 재전송). 수신 문자·첨부 발신은 SENT. */
 enum class SendState { SENT, PENDING, FAILED }
 
 /** 문자 한 건. [peer] 는 상대 번호 또는 그룹 ID(표시용, sip:/@도메인 제거됨), [time] 은 epoch millis.

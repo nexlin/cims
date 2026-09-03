@@ -570,7 +570,7 @@ private fun InlineChat(st: PttUiState, svc: PttService?, groupId: String,
         // 입력바 — 첨부 + 입력 + 전송(SIP MESSAGE 그룹 fan-out)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AttachButton(38) { uri -> svc?.sendGroupAttachment(groupId, uri) }
+            AttachButton(38) { uri -> svc?.sendAttachment(groupId, uri) }
             Box(
                 Modifier.weight(1f).height(38.dp)
                     .clip(RoundedCornerShape(19.dp)).background(Ct.SurfaceHi)
@@ -590,7 +590,7 @@ private fun InlineChat(st: PttUiState, svc: PttService?, groupId: String,
                 Modifier.size(38.dp).clip(CircleShape)
                     .background(if (canSend) Ct.Mint else Ct.SurfaceHi)
                     .clickable(enabled = canSend) {
-                        svc?.sendGroupMessage(groupId, input.trim())
+                        svc?.sendMessage(groupId, input.trim())
                         input = ""
                     },
                 contentAlignment = Alignment.Center,

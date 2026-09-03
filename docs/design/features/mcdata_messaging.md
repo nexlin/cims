@@ -23,6 +23,9 @@
   단순화 — §7 편차 참조).
 - CMP 는 관여하지 않는다. **대용량 SDS 의 미디어평면(MSRP)은 별도 프로세스 `cmdp` 가 종단한다
   (§4.7)** — C-plane 게이트(`allow_sds`·멤버십)와 보관은 두 평면이 공용이다.
+- **1:1 SDS** 는 같은 본문 구조에 `request-type=one-to-one-sds`·`mcdata-request-uri=상대 URI` 로
+  상대 AoR 에 직행하고, CSP 는 상대의 등록 바인딩으로 본문 그대로 전달한다(§4 ③ — 게이트·보관
+  없음, §8). DELIVERED 통지도 같은 1:1 경로다.
 
 ## 2. 그룹별 게이트 — TS 24.481 그룹문서
 
@@ -52,12 +55,13 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 
 | 파트 Content-Type | 내용 |
 |---|---|
-| `application/vnd.3gpp.mcdata-info+xml` | `<mcdatainfo><mcdata-Params><request-type>group-sds</request-type><mcdata-request-uri type="Normal"><mcdataURI>tel:<gid></mcdataURI>…` — 수신측 그룹 스레드 귀속 키 |
+| `application/vnd.3gpp.mcdata-info+xml` | `<mcdatainfo><mcdata-Params><request-type>group-sds｜one-to-one-sds</request-type><mcdata-request-uri type="Normal"><mcdataURI>tel:<gid 또는 상대></mcdataURI>…` — 수신측 스레드 귀속 근거: 그룹은 request-uri(그룹 ID), 1:1 은 발신자(request-uri 는 수신자 자신) |
 | `application/vnd.3gpp.mcdata-signalling` | **SDS SIGNALLING PAYLOAD** (type 0x01) TLV: Date-time(5B, UTC초) + Conversation ID(16B UUID) + Message ID(16B UUID) + [disposition request TV `0x8N`] |
 | `application/vnd.3gpp.mcdata-payload` | **DATA PAYLOAD** (type 0x03) TLV: payload 수(1B) + Payload IE(IEI 0x78, TLV-E, content-type TEXT=0x01) |
 
 - **Conversation ID** = 그룹당 결정적 UUID(`UUID.nameUUIDFromBytes("cims-mcdata:<gid>")`) —
   "기존 대화 지속 시 Conversation ID 재사용" 규정을 그룹=상시 대화 1개로 프로파일링(기기 간 동일).
+  1:1 은 사용자 쌍당 결정적 UUID(`"cims-mcdata:1to1:<a>:<b>"`, 쌍 정렬 — 양쪽 단말 동일).
 - **Message ID** = 발신 시 신규 UUID. delivered 통지 대사·로컬 저장 키.
 - **Disposition**: 발신 시 `DELIVERY`(0x81) 요청 → 수신 앱이 **SDS NOTIFICATION**(type 0x05,
   DELIVERED=0x02)을 원 발신자에게 1:1 MESSAGE 로 회신 → 발신 앱 말풍선에 ✓ 표시.
@@ -67,7 +71,8 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 ## 4. CSP 처리 흐름
 
 `CModuleDispatcher::EventMessage` 순서: ① 긴급경보(alert-ind, 기존 경로) → ② **MCDATA-AS
-`OnMessage`** (그룹 대상일 때) → ③ 1:1 전달 (Content-Type 보존).
+`OnMessage`** (그룹 대상일 때) → ③ 1:1 전달 (Content-Type 보존). 1:1 SDS/FD·SDS NOTIFICATION 은
+③ — 상대의 등록 바인딩으로 본문 그대로 전달하며 게이트·보관은 없다(§8).
 
 MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 1. `allow_sds`=false → **403 Forbidden**
@@ -83,6 +88,14 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
   — 녹취/이력과 동일한 서비스 로그 경로. SIP 원문은 기존 SipMessageLogger jsonl 에 남는다.
 - 미참여(비affiliated) 멤버는 규격상 배포 대상이 아니다. 부재중 수신(late entry/message store)은
   본 증분 범위 밖(§8).
+- **등록 flow 밖에서 온 MESSAGE 의 재인증** — SDS MESSAGE 는 mcdata-info·base64 TLV·Accept 헤더로
+  본문이 짧아도 약 1.6KB 라, UDP 등록 단말(pjsip)은 RFC 3261 §18.1.1 에 따라 TCP 로 승격해 보낸다.
+  CSP 는 등록 바인딩과 다른 flow 의 요청을 Digest 로 재인증하고 바인딩은 만들지 않는다
+  ([registration_binding_set.md](registration_binding_set.md) §3). 단말은 401 에 자격을 붙여 CSeq+1 로
+  재발행해야 통과한다 — pjsua 의 `Account::sendRequest` 경로에는 이 재발행이 없어 엔진 소스 정본
+  `ext/pjproject` 의 `pjsua_acc.c`(`cims_send_request_reauth`)로 보강했다(인벤토리
+  `ext/pjproject/README.CIMS.md`, [android_ue_m1_pjsip_integration.md](android_ue_m1_pjsip_integration.md) §2.5).
+  TLS/TCP 등록 단말은 승격이 없어 해당 없음. 서버 변경 없음.
 
 ### 4.1 메시지 보관·콘솔 모니터링
 
@@ -191,18 +204,22 @@ CSP fan-out (하이브리드):
 
 ## 5. 앱 동작
 
-- 발신: `PttController.sendGroupMessage` — MCData multipart 생성, msgId 반환 →
-  `MessageStore`(OUT, msgId) 저장. payload(UTF-8 텍스트 바이트, 서버 게이트와 동일 기준)가
+- 발신: `PttService.sendMessage(peer)` 가 msgId 를 발급해 `MessageStore`(OUT, PENDING) 에 먼저
+  저장하고 `PttController.sendSds(peer, text, msgId)` 로 발신 — peer 가 프로비저닝 그룹이면
+  group-sds, 아니면 one-to-one-sds(항상 C-plane). 그룹 SDS 의 payload(UTF-8 텍스트 바이트, 서버
+  게이트와 동일 기준)가
   프로비저닝 임계 `mcdata.maxPayloadSdsCplaneBytes`(0=무제한)를 초과하면 C-plane MESSAGE
   대신 **MSRP 미디어평면 발신**(§4.7) — `SipController.makeMsrpInvite`(더미 m=audio +
   `m=message TCP/MSRP` SDP 주입, Accept-Contact mcdata ICSI) → 200 OK `a=path` 로 TCP
   out-connect(`mcdata/msrp/MsrpSession`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음)
   16KB 청크 SEND → 서버 BYE 로 완료. MSRP 호 상태는 `MsrpEvent` 플로우로 일반 통화
   상태와 격리(그룹 URI 동일로 인한 PTT 세션 callId 오염 방지).
-  - **전송 상태 말풍선**: MSRP 발신은 PENDING(🕓+진행률%·진행 바) → 성공 SENT(✓)/실패
-    FAILED(⚠, 탭=같은 msgId 재전송) — `MessageStore.sendState`+`PttController.sendResult/
-    sendProgress`. DELIVERED 통지 수신 시 ✓✓. C-plane 발신은 종전대로 즉시 SENT.
-    서비스 재기동 시 잔존 PENDING 은 FAILED 로 마감(재전송 유도).
+  - **전송 상태 말풍선**: C-plane·MSRP 모두 PENDING(🕓, MSRP 는 +진행률%·진행 바) → 성공
+    SENT(✓)/실패 FAILED(⚠, 탭=같은 msgId 재전송) — `MessageStore.sendState`+`PttController.
+    sendResult/sendProgress`. C-plane 의 결과는 MESSAGE 트랜잭션 최종 응답(`sendRequest` token
+    상관 — 2xx=SENT, 403/404/408/503 등=FAILED). 401/407 은 native(`cims_send_request_reauth`)가 재발행하므로 앱에는
+    최종 결과만 온다. DELIVERED 통지 수신 시 ✓✓. 서비스 재기동 시 잔존 PENDING 은 FAILED 로
+    마감(재전송 유도). 첨부(FD) 발신은 업로드 성공 시 SENT.
   - 진행률 육안 시험(릴리스 무영향): `adb shell setprop debug.cims.msrp.slow <청크간 ms>`
     + `setprop debug.cims.msrp.chunk <청크 bytes>` — 0=끔.
 - 수신(MSRP 미디어평면): REGISTER Contact 에 `;+g.3gpp.icsi-ref="…icsi.mcdata.sds"` 광고
@@ -216,8 +233,9 @@ CSP fan-out (하이브리드):
   그룹/발신자는 INVITE mcdata-info(request-uri/calling-user-id), 구서버 폴백=From(그룹,
   이때 DELIVERED 회신은 억제).
 - 수신(`PttService`): `multipart/mixed` → 코덱 파싱 —
-  - SDS 메시지: `mcdata-info` 그룹 URI 로 **그룹 스레드 귀속**(스레드 키=그룹 ID, 발신자는
-    `sender` 필드), disposition 요청 시 DELIVERED 통지 자동 회신.
+  - SDS 메시지: 스레드 키 = `request-type` 이 group-* 면 `mcdata-info` request-uri(그룹 ID, 발신자는
+    `sender` 필드), one-to-one-* 면 **발신자**(request-uri 는 수신자 자신이라 키로 쓰지 않는다 —
+    `PttService.threadKeyOf`). disposition 요청 시 DELIVERED 통지 자동 회신.
   - SDS NOTIFICATION(DELIVERED): 해당 msgId 발신 문자 `delivered` 마킹 → ✓ 표시.
   - `text/plain`(구버전 앱): 종전대로 발신자 스레드 저장 (전환기 호환).
 - UI(`MessagesScreen`): 그룹 스레드 수신 말풍선 위 발신자 라벨, 발신 말풍선 delivered ✓.
@@ -244,6 +262,8 @@ CSP fan-out (하이브리드):
 | TLV 전송 인코딩 | 파트에 raw binary | **Content-Transfer-Encoding: base64** | PJSIP Java 바인딩이 본문을 String 으로만 취급 — raw binary 가 UTF-8 재인코딩에 손상. MIME 적합 인코딩이므로 표준 단말 interop 시 네이티브 바이트 경로로 교체 필요 |
 | 수신 본문 취득(앱) | pjsua2 `OnInstantMessageParam.msgBody` | **`multipart/mixed` 는 msgBody 가 빈 문자열·contentType 에 boundary 누락** → 착신 INVITE 와 동일하게 `rdata.wholeMsg` 원문에서 Content-Type(boundary 포함) 헤더·본문 직접 추출 (`core/…/sip/CimsAccount.kt`) | pjsua2 Java 바인딩이 multipart body 를 String 으로 재구성하지 않음 — 이 우회 없이는 그룹 SDS/FD 수신·delivered 통지가 앱에 반영 안 됨. text/plain 등 단일 파트는 msgBody 사용 |
 | 라우팅 | participating PSI 로 송신, 그룹은 mcdata-info 로 | Request-URI=그룹 URI 직행 (mcdata-info 도 포함) | 통합 배치 단순화. 서버는 양쪽 모두 수용 |
+| 1:1 SDS | participating → 상대 participating 경유, 서버 보관 | Request-URI=상대 AoR 직행 + `one-to-one-sds` mcdata-info. CSP 는 등록 바인딩으로 본문 그대로 전달(게이트·보관 없음) | 통합 배치 단순화. 보관·이력은 §8 |
+| media plane SDS 대상 | 그룹·1:1 모두 | **그룹만** (`McDataMediaService` 가 그룹 조회 필수) — 1:1 은 크기와 무관하게 C-plane, C-plane 임계 게이트(§4.7)도 그룹 대상만 | 1:1 standalone 은 §8 |
 | FD 콘텐츠 서버 | media storage function (absolute URI discovery 등) | CSC 4430 `/mcdata/fd` 고정 경로 + IdMS Bearer | 단일 도메인. URL 은 FD SIGNALLING 으로 전달되므로 discovery 불필요 |
 | FD 통지 | FD NOTIFICATION(다운로드 완료 등) | 미사용 | 최소 프로파일 — 필요 시 후속 |
 | ICSI feature tag | Accept-Contact/P-Asserted-Service 로 요청 구분 | Content-Type 로 구분 | 단일 서비스 도메인이라 불필요 |
