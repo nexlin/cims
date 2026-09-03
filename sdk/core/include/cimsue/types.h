@@ -151,7 +151,8 @@ struct CallInfo {
     std::string groupId;              // 그룹 id(bare) 또는 사설콜 상대(bare)
     McpttInfo mcptt;
     bool halfDuplex = false;          // floor 로 마이크를 게이트한다(Granted 에서만 송신)
-    bool listenOnly = false;
+    bool listenOnly = false;          // a=recvonly 청취 leg (PTT 청취·감청 Join)
+    std::string joinedDialog;         // INVITE-Join 으로 합류한 대상 dialog 의 Call-ID
 };
 
 // ── floor (TS 24.380 participant) ──
@@ -205,6 +206,24 @@ struct RequestResult {
     int code = 0;
     std::string reason;
     std::string etag;                 // SIP-ETag (PUBLISH)
+};
+
+/** 감시 대상의 dialog 상태 (RFC 4235 dialog-info) — 관제 BLF·INVITE-Join 대상 식별 (dispatch_center.md §5.2·§5.3). */
+struct DialogInfo {
+    int accountId = -1;
+    std::string watched;              // dialog-info entity(감시 대상 AoR)
+    std::string id, callId, localTag, remoteTag;
+    std::string direction;            // initiator|recipient
+    std::string state;                // trying|proceeding|early|confirmed|terminated
+    std::string remoteIdentity;
+    bool full = false;
+    /** Join 헤더 값 — cspsim/CSP 규약: <call-id>;to-tag=<remote-tag>;from-tag=<local-tag> (MatchDialog 는 양방향 대조). */
+    std::string joinHeader() const {
+        std::string j = callId;
+        if (!remoteTag.empty()) j += ";to-tag=" + remoteTag;
+        if (!localTag.empty()) j += ";from-tag=" + localTag;
+        return j;
+    }
 };
 
 /** 회의 로스터 항목 (RFC 4575 conference-info). */

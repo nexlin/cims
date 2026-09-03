@@ -1,6 +1,7 @@
 #include "mcptt_xml.h"
 
 #include <cctype>
+#include <cstdlib>
 
 namespace cimsue {
 namespace mcptt {
@@ -115,6 +116,64 @@ bool parseConferenceInfo(const std::string& xml, std::vector<RosterEntry>& users
         pos = end + 7;
     }
     return true;
+}
+
+static std::string attrOf(const std::string& tag, const char* name) {
+    std::string key = std::string(name) + "=\"";
+    size_t p = tag.find(key);
+    if (p == std::string::npos) return std::string();
+    size_t e = tag.find('"', p + key.size());
+    return e == std::string::npos ? std::string() : tag.substr(p + key.size(), e - p - key.size());
+}
+
+bool parseDialogInfo(const std::string& xml, std::vector<DialogInfo>& out) {
+    out.clear();
+    size_t di = xml.find("<dialog-info");
+    if (di == std::string::npos) return false;
+    size_t gt = xml.find('>', di);
+    std::string head = xml.substr(di, gt == std::string::npos ? std::string::npos : gt - di + 1);
+    std::string entity = attrOf(head, "entity");
+    bool full = attrOf(head, "state") == "full";
+    size_t pos = gt == std::string::npos ? di : gt;
+    while ((pos = xml.find("<dialog", pos)) != std::string::npos) {
+        char nc = pos + 7 < xml.size() ? xml[pos + 7] : '\0';
+        if (nc != ' ' && nc != '>' && nc != '\t' && nc != '\n') { pos += 7; continue; }
+        size_t tgt = xml.find('>', pos);
+        if (tgt == std::string::npos) break;
+        std::string tag = xml.substr(pos, tgt - pos + 1);
+        size_t end = xml.find("</dialog>", tgt);
+        std::string body = xml.substr(tgt + 1, end == std::string::npos ? std::string::npos : end - tgt - 1);
+        DialogInfo d;
+        d.watched = entity; d.full = full;
+        d.id = attrOf(tag, "id"); d.callId = attrOf(tag, "call-id");
+        d.localTag = attrOf(tag, "local-tag"); d.remoteTag = attrOf(tag, "remote-tag");
+        d.direction = attrOf(tag, "direction");
+        d.state = elemText(body, "state");
+        size_t r = body.find("<remote");
+        if (r != std::string::npos) d.remoteIdentity = elemText(body.substr(r), "identity");
+        out.push_back(d);
+        pos = end == std::string::npos ? xml.size() : end + 9;
+    }
+    return true;
+}
+
+std::vector<MediaSource> sdpSsrcLabels(const std::string& sdp) {
+    std::vector<MediaSource> out;
+    size_t pos = 0;
+    while ((pos = sdp.find("a=ssrc:", pos)) != std::string::npos) {
+        size_t eol = sdp.find_first_of("\r\n", pos);
+        std::string line = sdp.substr(pos + 7, eol == std::string::npos ? std::string::npos : eol - pos - 7);
+        MediaSource m;
+        m.ssrc = (uint32_t)std::strtoul(line.c_str(), nullptr, 10);
+        size_t l = line.find("label:");
+        if (l != std::string::npos) { size_t e = line.find_first_of(" \t", l); m.label = line.substr(l + 6, e == std::string::npos ? std::string::npos : e - l - 6); }
+        m.active = true;
+        bool dup = false;
+        for (auto& x : out) if (x.ssrc == m.ssrc) { dup = true; if (x.label.empty()) x.label = m.label; }
+        if (!dup && m.ssrc) out.push_back(m);
+        pos = eol == std::string::npos ? sdp.size() : eol;
+    }
+    return out;
 }
 
 std::string bareId(const std::string& uri) {

@@ -24,6 +24,8 @@ public:
     /** 그룹 로스터(RFC 4575 conference-info) — 구독 NOTIFY 또는 in-dialog NOTIFY. full=전체 스냅샷. */
     virtual void onRoster(int accountId, const std::string& groupId, const std::vector<RosterEntry>& users,
                           bool full) { (void)accountId; (void)groupId; (void)users; (void)full; }
+    /** 감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회. Join 대상 선택의 입력. */
+    virtual void onDialogInfo(const DialogInfo& d) { (void)d; }
     /** MCData SDS 수신(메시지·disposition 통지·FD). */
     virtual void onSds(const SdsMessage& msg) { (void)msg; }
     /** 임의 요청(PUBLISH/SUBSCRIBE 등)의 최종 응답 — affiliation 확인·ETag. */

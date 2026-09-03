@@ -84,6 +84,19 @@ public:
                      const std::string& contentType, const std::string& body,
                      const std::map<std::string, std::string>& headers = {});
 
+    // ── 관제 (dispatch_center.md §5, volte_supplementary_services.md §5·§6) ──
+    /** 대상 AoR 의 dialog 이벤트 구독(RFC 4235, 인가 = 관제 그룹 monitor_scope). NOTIFY → onDialogInfo. */
+    Result dialogWatch(int accountId, const std::string& targetAor, bool on);
+    /** 통화 청취 합류 — INVITE-with-Join(RFC 3911) + a=recvonly. dlg 는 onDialogInfo 로 학습한 대상 dialog.
+     *  200 OK 의 a=ssrc label(caller/callee) 이 CallInfo.sources 로 온다(U10 디먹스 라벨). 반환 callId. */
+    int join(int accountId, const std::string& targetUri, const DialogInfo& dlg);
+    /** 당겨받기 — 피처코드 다이얼(그룹 픽업 = code, 지정 픽업 = code+number). 결과는 호 상태(200/403/404/489). */
+    int pickup(int accountId, const std::string& featureCode, const std::string& number = std::string());
+    /** 호 전달 blind — REFER(RFC 3515). target 은 번호 또는 URI. 진행은 onCallState(REFER 수락 후 서버가 BYE). */
+    Result transfer(int callId, const std::string& target);
+    /** 호 전달 attended — Refer-To 에 Replaces(consultCallId 의 dialog). */
+    Result transferAttended(int callId, int consultCallId);
+
     // ── MCData SDS (TS 24.282 §9.2.2 C-plane) ──
     /** 그룹 SDS 발신(MESSAGE multipart). 반환 msgId(UUID hex32), 실패 빈 문자열. */
     std::string sendGroupSds(int accountId, const std::string& groupId, const std::string& text,

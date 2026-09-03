@@ -1572,6 +1572,7 @@ static pj_bool_t cims_intercept_subscribe(pjsua_acc_id acc_id,
 {
     static const pj_str_t EV_CONF = { "conference", 10 };
     static const pj_str_t EV_XCAP = { "xcap-diff", 9 };
+    static const pj_str_t EV_DLG  = { "dialog", 6 };      /* CIMS: RFC 4235 dialog (관제 BLF) */
     const pjsip_hdr *h;
     const pj_str_t *ev = NULL;
     pj_uint32_t expires = PJSIP_EXPIRES_NOT_SPECIFIED;
@@ -1596,6 +1597,11 @@ static pj_bool_t cims_intercept_subscribe(pjsua_acc_id acc_id,
                        pj_strnicmp2(&gh->hvalue, "xcap-diff", 9) == 0)
             {
                 ev = &EV_XCAP;
+            }
+            else if (gh->hvalue.slen >= EV_DLG.slen &&
+                     pj_strnicmp2(&gh->hvalue, "dialog", 6) == 0)
+            {
+                ev = &EV_DLG;
             }
         } else if (pj_stricmp2(&h->name, "Expires") == 0) {
             expires = (pj_uint32_t) pj_strtoul(&gh->hvalue);

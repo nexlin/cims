@@ -2688,6 +2688,9 @@ static const pj_str_t STR_CONF_EVENT = { "conference", 10 };
 static const pj_str_t STR_CONF_INFO  = { "application/conference-info+xml", 31 };
 static const pj_str_t STR_XCAP_EVENT = { "xcap-diff", 9 };
 static const pj_str_t STR_XCAP_DIFF  = { "application/xcap-diff+xml", 25 };
+/* CIMS: dialog 이벤트(RFC 4235) — 관제 BLF·INVITE-Join 대상(call-id/태그) 학습 (dispatch_center.md §5.2) */
+static const pj_str_t STR_DLG_EVENT  = { "dialog", 6 };
+static const pj_str_t STR_DLG_INFO   = { "application/dialog-info+xml", 27 };
 
 
 /* 구독 식별 = (자원, 이벤트 패키지). 같은 자원을 서로 다른 패키지로 구독할 수 있으므로
@@ -3083,6 +3086,15 @@ static pj_status_t cims_conf_init(void)
                                       3600, PJ_ARRAY_SIZE(accept), accept);
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_FILE, "Unable to register xcap-diff event package",
+                     status);
+    }
+
+    /* CIMS: dialog (RFC 4235) */
+    accept[0] = STR_DLG_INFO;
+    status = pjsip_evsub_register_pkg(&mod_cims_conf, &STR_DLG_EVENT,
+                                      3600, PJ_ARRAY_SIZE(accept), accept);
+    if (status != PJ_SUCCESS) {
+        pjsua_perror(THIS_FILE, "Unable to register dialog event package",
                      status);
     }
 

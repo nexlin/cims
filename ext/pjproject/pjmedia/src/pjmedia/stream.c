@@ -381,6 +381,12 @@ static pj_bool_t cims_mt_rx(pjmedia_stream *stream, const pjmedia_rtp_hdr *hdr,
     if (ssrc == stream->mt_prim_ssrc)
         return PJ_FALSE;                        /* primary 화자 */
 
+    /* secondary 화자라도 협상 코덱 PT 가 아니거나(keep-alive·타 PT) payload 가 코덱 프레임이
+     * 될 수 없으면 소비만 한다 — 기존 단일 화자 경로의 "Bad RTP pt"/빈 payload 무시와 대칭.
+     * (감청 tap leg 는 CMP 자체 SSRC 의 비코덱 패킷도 실어 보낸다 — AMR 파서에 넣으면 버퍼 밖을 읽는다.) */
+    if (payloadlen < 2 || hdr->pt != stream->si.rx_pt)
+        return PJ_TRUE;
+
     /* secondary 화자 — 정원 초과면 소비(=드롭), primary 세션엔 넣지 않는다. */
     pj_mutex_lock(stream->base.jb_mutex);
     sub = cims_mt_find_or_bind(stream, ssrc);

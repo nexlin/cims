@@ -219,16 +219,8 @@ struct Engine::Impl {
     }
     void applyCodecPolicy();
     PjCall* findCall(int callId);
-    pj::AudioMedia* activeAudio(pj::Call* call, unsigned* idxOut = nullptr) {
-        pj::CallInfo ci = call->getInfo();
-        for (auto& m : ci.media) {
-            if (m.type == PJMEDIA_TYPE_AUDIO && m.status == PJSUA_CALL_MEDIA_ACTIVE) {
-                if (idxOut) *idxOut = m.index;
-                return pj::AudioMedia::typecastFromMedia(call->getMedia(m.index));
-            }
-        }
-        return nullptr;
-    }
+    static bool rxOnlyLeg(PjCall* call);
+    pj::AudioMedia* activeAudio(PjCall* call, unsigned* idxOut = nullptr);
     void wireMedia(PjCall* call, int callId);
     long doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                        const std::string& contentType, const std::string& body,
@@ -267,7 +259,18 @@ public:
         : pj::Call(acc, callId), o_(o), accountId_(accountId) {}
 
     std::unique_ptr<McpttSession> mcptt;
+    bool recvOnly = false;               // 감청 Join 등 청취 전용 평문 leg (a=recvonly, 마이크 없음)
     int accountId() const { return accountId_; }
+
+    /** 청취 전용 leg — 로컬 SDP 의 audio 방향을 recvonly 로 (서버가 PTT_JOIN recv_only / tap 으로 해석). */
+    static std::string forceRecvOnly(const std::string& w) {
+        size_t a = w.find("a=sendrecv");
+        if (a != std::string::npos) return w.substr(0, a) + "a=recvonly" + w.substr(a + 10);
+        size_t ma = w.find("m=audio ");
+        if (ma == std::string::npos) return w;
+        size_t eol = w.find("\r\n", ma);
+        return eol == std::string::npos ? w : w.substr(0, eol + 2) + "a=recvonly\r\n" + w.substr(eol + 2);
+    }
 
     /** floor participant 생성·바인드 + 콜백 배선. 이벤트 콜백 안의 callId 는 나중에(makeCall 뒤) 정해질 수
      *  있어 참조로 들고 있다가 sealCallId 로 확정한다. 마이크 게이트는 ue-ctl 로 넘겨 pjsua 를 만진다. */
@@ -306,8 +309,10 @@ public:
     }
 
     void onCallSdpCreated(pj::OnCallSdpCreatedParam& prm) override {
-        if (!mcptt) return;
+        if (!mcptt && !recvOnly) return;
         try {
+            if (recvOnly && !prm.sdp.wholeSdp.empty()) prm.sdp.wholeSdp = forceRecvOnly(prm.sdp.wholeSdp);
+            if (!mcptt) return;
             if (!mcptt->pendingAppSdp.empty()) {
                 std::string whole = prm.sdp.wholeSdp;
                 if (whole.empty()) {
@@ -321,15 +326,7 @@ public:
                 }
             }
             // 청취 전용 합류(a=recvonly) — 관제 PTT 청취(dispatch_center.md §5.6): 서버가 PTT_JOIN recv_only 로 변환.
-            if (mcptt->listenOnly) {
-                std::string w = prm.sdp.wholeSdp;
-                size_t a = w.find("a=sendrecv");
-                if (a != std::string::npos) prm.sdp.wholeSdp = w.substr(0, a) + "a=recvonly" + w.substr(a + 10);
-                else {
-                    size_t ma = w.find("m=audio ");
-                    if (ma != std::string::npos) { size_t eol = w.find("\r\n", ma); if (eol != std::string::npos) prm.sdp.wholeSdp = w.substr(0, eol + 2) + "a=recvonly\r\n" + w.substr(eol + 2); }
-                }
-            }
+            if (mcptt->listenOnly && !prm.sdp.wholeSdp.empty()) prm.sdp.wholeSdp = forceRecvOnly(prm.sdp.wholeSdp);
             if (!prm.remSdp.wholeSdp.empty()) learnFloorRemote(prm.remSdp.wholeSdp);          // UAS: 상대 offer
         } catch (...) {}
     }
@@ -342,6 +339,15 @@ public:
             if (msg.empty()) return;
             if (mcptt && msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("m=application") != std::string::npos)
                 learnFloorRemote(sipBody(msg));                                               // UAC: 200 OK answer
+            if (msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("a=ssrc:") != std::string::npos) {
+                // 감청 leg 200 OK — a=ssrc label:caller/callee (RFC 5576) → 소스 귀속(U10 디먹스 라벨)
+                std::vector<MediaSource> src = mcptt::sdpSsrcLabels(sipBody(msg));
+                if (!src.empty()) {
+                    CallInfo snap;
+                    o_->updateCall(getId(), [&](CallInfo& c) { c.sources = src; }, &snap);
+                    o_->emit([o = o_, snap] { o->listener->onCallMedia(snap); });
+                }
+            }
             if (msg.rfind("NOTIFY ", 0) == 0 && msg.find("conference-info") != std::string::npos) {
                 std::vector<RosterEntry> users; bool full = false;
                 if (mcptt::parseConferenceInfo(sipBody(msg), users, full)) {
@@ -404,10 +410,12 @@ public:
         const int id = getId();
         pj::CallInfo ci = getInfo();
         bool held = false, active = false;
+        const bool rxOnly = recvOnly || (mcptt && mcptt->listenOnly);
         for (auto& m : ci.media) {
             if (m.type != PJMEDIA_TYPE_AUDIO) continue;
             if (m.status == PJSUA_CALL_MEDIA_ACTIVE) active = true;
-            if (m.status == PJSUA_CALL_MEDIA_LOCAL_HOLD || m.status == PJSUA_CALL_MEDIA_REMOTE_HOLD) held = true;
+            else if (m.status == PJSUA_CALL_MEDIA_REMOTE_HOLD && rxOnly) active = true;     // 서버 sendonly ↔ 우리 recvonly
+            else if (m.status == PJSUA_CALL_MEDIA_LOCAL_HOLD || m.status == PJSUA_CALL_MEDIA_REMOTE_HOLD) held = true;
         }
         try { if (active) o_->wireMedia(this, id); } catch (pj::Error& e) { o_->log(2, std::string("wireMedia: ") + e.info(false)); }
         CallInfo snap;
@@ -561,6 +569,17 @@ public:
                 return;
             }
         }
+        if (ct.find("dialog-info") != std::string::npos) {
+            std::vector<DialogInfo> dl;
+            if (mcptt::parseDialogInfo(body, dl)) {
+                if (dl.empty()) {                                   // 초기 full 스냅샷에 dialog 없음 — 구독 성립 신호(callId 빈 값)
+                    DialogInfo none; none.accountId = acc; none.watched = mcptt::bareId(from); none.full = true;
+                    o_->emit([o = o_, none] { o->listener->onDialogInfo(none); });
+                }
+                for (auto& d : dl) { d.accountId = acc; o_->emit([o = o_, d] { o->listener->onDialogInfo(d); }); }
+                return;
+            }
+        }
         if (ct.find("conference-info") != std::string::npos) {
             std::vector<RosterEntry> users; bool full = false;
             if (mcptt::parseConferenceInfo(body, users, full)) {
@@ -580,6 +599,23 @@ private:
 }  // namespace
 
 // ── Impl 헬퍼 ──
+
+bool Engine::Impl::rxOnlyLeg(PjCall* call) { return call->recvOnly || (call->mcptt && call->mcptt->listenOnly); }
+
+pj::AudioMedia* Engine::Impl::activeAudio(PjCall* call, unsigned* idxOut) {
+    pj::CallInfo ci = call->getInfo();
+    for (auto& m : ci.media) {
+        // 청취 전용 leg(a=recvonly)는 서버가 sendonly 로 답하므로 pjsua 가 REMOTE_HOLD 로 분류한다 — 미디어는 흐른다.
+        bool ok = m.status == PJSUA_CALL_MEDIA_ACTIVE || (m.status == PJSUA_CALL_MEDIA_REMOTE_HOLD && rxOnlyLeg(call));
+        if (m.type == PJMEDIA_TYPE_AUDIO && ok) {
+            pj::Media* med = call->getMedia(m.index);          // 비활성(hold 등)이면 NULL 일 수 있다
+            if (!med) continue;
+            if (idxOut) *idxOut = m.index;
+            return pj::AudioMedia::typecastFromMedia(med);
+        }
+    }
+    return nullptr;
+}
 
 PjCall* Engine::Impl::findCall(int callId) {
     auto it = calls.find(callId);
@@ -632,7 +668,7 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     if (snap.listen) aud->startTransmit(spk); else aud->stopTransmit(spk);
     bool micOn;
     if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
-    else micOn = !snap.muted;
+    else micOn = !snap.muted && !call->recvOnly;
     if (micOn) mic.startTransmit(*aud); else mic.stopTransmit(*aud);
 }
 
@@ -1089,6 +1125,80 @@ Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, bool 
         std::map<std::string, std::string> h{{"Event", "xcap-diff"}, {"Expires", on ? "3600" : "0"}};
         long r = impl_->doSendRequest(accountId, "SUBSCRIBE", psiUri, "", "", h, token);
         return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+    });
+}
+
+// ── 관제 ──
+
+Result Engine::dialogWatch(int accountId, const std::string& targetAor, bool on) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    long token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> Result {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
+        std::map<std::string, std::string> h{{"Event", "dialog"}, {"Expires", on ? "3600" : "0"}};
+        long r = o->doSendRequest(accountId, "SUBSCRIBE", detail::normalizeTarget(targetAor, ic->second.domain), "", "", h, token);
+        return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+    });
+}
+
+int Engine::join(int accountId, const std::string& targetUri, const DialogInfo& dlg) {
+    if (!impl_->running || dlg.callId.empty()) return -1;
+    return impl_->ctl.runSync([this, accountId, targetUri, dlg]() -> int {
+        Impl* o = impl_.get();
+        auto it = o->accounts.find(accountId);
+        if (it == o->accounts.end()) return -1;
+        const std::string dst = detail::normalizeTarget(targetUri, o->accountCfgs[accountId].domain);
+        auto call = std::make_unique<PjCall>(o, *it->second, accountId);
+        call->recvOnly = true;
+        try {
+            pj::CallOpParam prm(true);
+            prm.opt.audioCount = 1;
+            prm.opt.videoCount = 0;
+            pj::SipHeader hj; hj.hName = "Join"; hj.hValue = dlg.joinHeader();
+            pj::SipHeader hs; hs.hName = "Supported"; hs.hValue = "join";
+            prm.txOption.headers.push_back(hj);
+            prm.txOption.headers.push_back(hs);
+            call->makeCall(dst, prm);
+        } catch (pj::Error& e) {
+            o->log(1, std::string("join ") + dst + ": " + e.info(false));
+            return -1;
+        }
+        const int id = call->getId();
+        call->sealCallId(id);
+        o->updateCall(id, [&](CallInfo& c) {
+            c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
+            c.remoteUri = dst; c.listenOnly = true; c.joinedDialog = dlg.callId;
+        });
+        o->calls[id] = std::move(call);
+        o->log(3, "join " + dst + " (Join: " + dlg.joinHeader() + ") → call " + std::to_string(id));
+        return id;
+    });
+}
+
+int Engine::pickup(int accountId, const std::string& featureCode, const std::string& number) {
+    if (featureCode.empty()) return -1;
+    return dial(accountId, featureCode + number);
+}
+
+Result Engine::transfer(int callId, const std::string& target) {
+    Impl* o = impl_.get();
+    return withCall(o, callId, [o, callId, target](PjCall& c) {
+        int acc = o->snapshotCall(callId).accountId;
+        std::string dst = detail::normalizeTarget(target, o->accountCfgs[acc].domain);
+        pj::CallOpParam prm;
+        c.xfer(dst, prm);
+    });
+}
+
+Result Engine::transferAttended(int callId, int consultCallId) {
+    Impl* o = impl_.get();
+    return withCall(o, callId, [o, consultCallId](PjCall& c) {
+        PjCall* d = o->findCall(consultCallId);
+        if (!d) throw pj::Error(PJ_ENOTFOUND, "transferAttended", "no consult call", __FILE__, __LINE__);
+        pj::CallOpParam prm;
+        c.xferReplaces(*d, prm);
     });
 }
 

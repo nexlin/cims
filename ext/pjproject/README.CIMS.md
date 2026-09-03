@@ -19,8 +19,8 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
   | `stream_info.c` si->param zero-init · `pjsua_txt` 비-RTP m=text 슬롯 스트림 생성 스킵 | `pjmedia/src/pjmedia/stream_info.c`, `pjsip/src/pjsua-lib/pjsua_txt.c` | MSRP(m=message/TCP) 슬롯을 RTP 스트림으로 열지 않음 |
   | 무전/통화 분리 라우팅 (`set_track_preferred_device`, OUTPUT_ROUTE) | `pjmedia/src/pjmedia-audiodev/android_jni_dev.c` | Android 전용 — PTT 채널과 통화의 출력 장치 분리 |
   | PTT 유휴 무음 50pps 상향 스트림 제거 (`stream->vad_enabled` 분기) | `pjmedia/src/pjmedia/stream.c` | 브리지 미연결 유휴 시 무음 RTP 송신 생략 — KA 가 NAT 유지 담당 |
-  | 이벤트 구독 (`pjsua_cims_conf_subscribe`, `cims_conf_find`) | `pjsip/src/pjsua-lib/pjsua_acc.c`, `pjsua_pres.c` | conference(RFC 4575)·xcap-diff(RFC 5875) 구독의 in-dialog 갱신(RFC 6665) |
-  | U10 동시 발언 SSRC 디먹스 (`cims_mt_rx`) | `pjmedia/src/pjmedia/stream.c`, `stream_imp_common.c` | 한 스트림의 SSRC 별 서브스트림(지터버퍼+디코더) → PCM 합산 — mcptt_ue_multitalker_media.md §5 |
+  | 이벤트 구독 (`pjsua_cims_conf_subscribe`, `cims_conf_find`) | `pjsip/src/pjsua-lib/pjsua_acc.c`, `pjsua_pres.c` | conference(RFC 4575)·xcap-diff(RFC 5875)·dialog(RFC 4235, 관제 BLF·Join 대상 학습) 구독의 in-dialog 갱신(RFC 6665) — NOTIFY 본문은 on_pager2 로 앱에 전달 |
+  | U10 동시 발언 SSRC 디먹스 (`cims_mt_rx`) | `pjmedia/src/pjmedia/stream.c`, `stream_imp_common.c` | 한 스트림의 SSRC 별 서브스트림(지터버퍼+디코더) → PCM 합산 — mcptt_ue_multitalker_media.md §5. secondary SSRC 도 빈 payload·비협상 PT 는 소비만(AMR 파서 보호 — 감청 tap 의 CMP 자체 SSRC 패킷) |
 
 - `config_site.h` 는 upstream 이 무시하는 파일이라 트리에 없다. 플랫폼별 정본은 `sdk/engine/config_site/{common,android,linux,windows}.h`
   (ue_sdk.md §3) 이며 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다.

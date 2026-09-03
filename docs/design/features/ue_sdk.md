@@ -97,8 +97,9 @@ sdk/core/
   src/
     engine.cpp          Endpoint 부팅·계정(REGISTER Digest/AKA·sec-agree)·호(INVITE/BYE/보류)·MCPTT 세션(그룹콜/사설콜
                         multipart INVITE·SDP m=application 주입/학습·a=recvonly 청취·착신 자동 수락)·affiliation PUBLISH·
-                        conference/xcap-diff SUBSCRIBE·MESSAGE 송수신 라우팅(SDS/roster/기타) · account_map.cpp 매핑 규칙
-                        (확장: Join·Replaces·REFER·dialog RFC 4235 — D 단계)
+                        conference/xcap-diff/dialog SUBSCRIBE·MESSAGE/NOTIFY 라우팅(SDS/roster/dialog-info/기타)·관제
+                        (dialogWatch RFC 4235 → join RFC 3911 recvonly + a=ssrc 라벨 → sources, pickup 피처코드, transfer REFER
+                        blind/attended) · account_map.cpp 매핑 규칙
     media/              장치 추상(코어는 pjmedia 장치 id 만 다룸) · 호별 rx 레벨/뮤트/listen · SSRC 소스 테이블
                         (U10 산출: 호 안의 소스별 활성·레벨·RFC 5576 label) · 영상 프레임 콜백(창 없음)
     floor/              floor_defs.h(생성) · floor_codec(TS 24.380 §8 RTCP-APP TLV, CMP 코덱과 바이트 호환) ·
@@ -107,6 +108,10 @@ sdk/core/
     mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command 빌더, mcptt-info/conference-info 파서
     mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION TLV + multipart(base64) 빌드·파싱,
                         Java 호환 conversation id (확장: MSRP 미디어평면·FD 업/다운로드)
+    csc/                csc_client — IdMS OAuth2 PKCE(S256) 로그인·refresh, `/provisioning/me`(services→AccountConfig,
+                        dispatch 블록), GMS 그룹 목록, XCAP GET(ETag/304). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출,
+                        자체 JSON 파서(pjlib 비의존)
+    http/               https_client — ITransport(주입 가능) + OpenSSL 기본 구현(HTTP/1.1, chunked, 신뢰 앵커 PEM)
     csc/                OAuth2 PKCE(IdMS) · XCAP(GMS 그룹·CMS user-profile/service-config, ETag) ·
                         `/provisioning/me` · `/provisioning/directory` · FD 스토어 — HTTP 전송은 인터페이스(§4.4)
     domain/             UE 세션 모델(등록·호 목록·그룹/채널·affiliation·긴급/경보·데스크) → 상태 스냅샷 + 이벤트
@@ -218,6 +223,15 @@ cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로
 
 결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`granted`·`taken`·`denied`·`code`), 종료코드 0/2/3/4/5/6/7
 (성공/인자/등록/호/미디어 없음/floor 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(Event: mcptt), 종료 시 de-affiliate.
+```
+cimsue-cli [계정] dialog-watch <aor> [--duration S]   # RFC 4235 구독 → dialog-info 를 JSON 줄로
+cimsue-cli [계정] join <aor> [--duration S]           # 감시 → confirmed dialog 에 INVITE-Join(recvonly) → 수신 RTP·SSRC 라벨
+cimsue-cli [계정] pickup [번호] --code <피처코드>      # 그룹/지정 픽업
+cimsue-cli [계정] transfer <peer> --to <target>       # peer 와 통화 후 REFER blind (answer --transfer-to 는 착신측 전달)
+cimsue-cli --csc-host H --user U --pw P [--no-tls-verify] login          # PKCE 로그인 + /provisioning/me 요약
+cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --port N] <command>   # 프로파일로 계정 채움
+```
+
 오디오 장치는 null(헤드리스) — 브리지는 돌고 RTP 는 흐른다. 통계는 스트림 소멸 시점(`onStreamDestroyed`)에
 보존해 상대가 먼저 끊어도 남는다. 사용 예는 [VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록.
 
@@ -336,7 +350,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱. 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
-| S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·Join·픽업·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
+| S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | 실기기 | Android | 태블릿·UNIWA 에서 감청 SSRC 2개 귀속 표시·PTT 청취 버튼 비활성·대표번호 착신 — 와이어 실측 |
 | 실기기 | Windows | WASAPI 이중 출력·핫키·감청 영상 격자 |
 
@@ -367,6 +381,13 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 - **개발 서버 TLS 인증서** — `build/dist/csp/cert/csp.pem` 이 자가서명·SAN 없음이라 코어의 서버 검증(`tlsVerifyServer`)을
   켠 채로는 등록이 503 `PJSIP_TLS_ECERTVERIF` 로 막힌다(정상 동작). TLS/SRTP 회귀를 검증 켠 채 돌리려면
   sip_tls_signaling.md §8 요건(SAN=도메인/IP)의 인증서를 개발 서버에 발급해야 한다.
+- **개발 서버 CSC 프로비저닝 설정** — `Provisioning.Services.*.host` 가 비어 있고 port=15060 이라 `/provisioning/me` 가
+  `127.0.0.1:15060` 을 내려준다(실 접속점은 121.161.164.48:5060). 단말 SDK 는 프로파일을 그대로 따르므로 개발 서버
+  csc.json 의 서비스 host/port 를 실 값으로 맞춰야 `--from-profile` 만으로 등록된다(cli 는 `--server/--port` 명시로 덮을 수 있다).
+- **청취 전용 leg 의 미디어 상태** — 서버가 `a=sendonly` 로 답하므로 pjsua 는 REMOTE_HOLD 로 분류한다. 코어는 recvonly
+  leg(Join·PTT 청취)에서 이를 활성으로 다루지만, 감청 leg 의 SSRC 별 활성/레벨은 아직 SDP 라벨만 있고 실시간 값이 없다
+  — pjproject 에 U10 서브스트림 관측 API(SSRC 별 수신 활성·레벨)를 추가해야 `MediaSources.active/level` 이 채워진다.
+- **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
 - **cspsim 과 `cimsue-cli` 의 역할 분담 장기안** — 시뮬레이터 축(부하·다중 단말)과 실스택 축(정합)의 S3 항목 배분.
 

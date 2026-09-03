@@ -456,8 +456,8 @@ static void on_rx_rtp( pjmedia_tp_cb_param *param)
      * 자기 서브스트림(지터버퍼+디코더)으로 갈라 넣고 get_frame 에서 믹싱한다. primary
      * RTP 세션에는 넣지 않으므로 SSRC 변경(ESESSRESTART) 지터버퍼 리셋이 나지 않는다.
      * 첫 SSRC(primary)는 여기서 통과시켜 기존 단일 화자 경로를 그대로 탄다. */
-    if (cims_mt_rx(stream, hdr, payload, payloadlen))
-        return;
+    if (payloadlen > 0 && cims_mt_rx(stream, hdr, payload, payloadlen))
+        return;                                 /* 빈 payload(keep-alive)는 아래 기존 경로가 버린다 */
 #endif
 
     /* See if source address of RTP packet is different than the

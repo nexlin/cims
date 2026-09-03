@@ -517,6 +517,23 @@ sleep 2
 ./build/bin/cimsue-cli $P --msisdn +82500000001 ... sds g001 "안녕 SDS"
 ```
 
+```bash
+# 관제 — 관제 그룹 시드가 필요하다(dispatch_center.md §8.1). 감시자 M 은 monitor_scope=all 그룹, 대상 A·B 는 다른 그룹.
+#   (verify 픽스처 DispatchGroupFixture 와 같은 INSERT + CSP 4421 DISPATCH_GROUP_CHANGED/USER_CHANGED 통지)
+# 감청: M 이 먼저 구독(초기 NOTIFY 는 빈 스냅샷, confirmed 는 통화 성립 시점에만 온다) → A→B 통화 → M Join
+./build/bin/cimsue-cli $A --msisdn +821300000003 ... --json join +821300000002 --timeout 25 --duration 8 &
+./build/bin/cimsue-cli $A --msisdn +821300000002 ... --json answer --duration 20 &
+./build/bin/cimsue-cli $A --msisdn +821300000001 ... --json call +821300000002 --duration 16
+#  → M {"outcome":"ok","rx_pkts":401,"sources":[{"ssrc":..,"label":"caller"},{"ssrc":..,"label":"callee"},...]}
+# 픽업: B 는 register --hold 로 링만, 같은 pickup_group 의 M 이 ** 로 당겨받기
+./build/bin/cimsue-cli $A --msisdn +821300000003 ... --json pickup --code '**' --duration 6
+# 전달: B 가 착신 후 3초 뒤 C 로 REFER → B transferred:true, C 수신 RTP > 0
+./build/bin/cimsue-cli $A --msisdn +821300000002 ... --json answer --transfer-to +821300000003 --transfer-after 3
+# CSC: PKCE 로그인 + 프로파일, 프로파일로 계정 채워 등록
+./build/bin/cimsue-cli --csc-host 127.0.0.1 --user test001 --pw 1234 --no-tls-verify --json login
+./build/bin/cimsue-cli --csc-host 127.0.0.1 --user test001 --pw 1234 --no-tls-verify --from-profile volte --server 121.161.164.48 --port 5060 register
+```
+
 | 종료코드 | 의미 |
 |---|---|
 | 0 | 성공 (call/answer/group-call 은 수신 RTP > 0 까지) |
@@ -526,6 +543,7 @@ sleep 2
 | 5 | 미디어 없음 (호는 성립했으나 수신 RTP 0) |
 | 6 | floor 미획득 (`--ptt-at` 요청에 Granted 없음) |
 | 7 | SDS 실패 (거절·시한·미수신) |
+| 8 | 관제 실패 (dialog 구독 NOTIFY 없음·confirmed dialog 없음·Join 거절·픽업 거절·전달 미완) |
 
 판정은 cspsim 축과 같다 — JSON 의 `rx_pkts`(누적 수신 RTP)가 통화 시간에 비례해야 하고, `code` 는 200.
 `--log-level 4` 이상이면 pjsip 로그(SDP·SRTP 협상 포함)가 stderr 로 나온다.

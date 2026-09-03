@@ -51,6 +51,8 @@ add_library(cimsue STATIC
     src/floor/floor_participant.cpp
     src/mcptt/mcptt_xml.cpp
     src/mcdata/sds_codec.cpp
+    src/http/https_client.cpp
+    src/csc/csc_client.cpp
     ${FLOOR_DEFS_H}
 )
 target_include_directories(cimsue
@@ -69,6 +71,7 @@ endif()
 # 헤드리스 UE — 검증 도구 (build/bin/cimsue-cli)
 add_executable(cimsue-cli cli/main.cpp)
 target_link_libraries(cimsue-cli PRIVATE cimsue)
+target_link_options(cimsue-cli PRIVATE -rdynamic)      # 크래시 백트레이스 심볼
 set_target_properties(cimsue-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # 단위시험 (S1-UE-UNIT / S1-UE-FLOOR-CODEC) — 루트의 googletest ExternalProject 산출물
@@ -77,6 +80,7 @@ if(DEFINED GTEST_DIR)
         test/account_map_test.cpp
         test/floor_codec_test.cpp
         test/sds_codec_test.cpp
+        test/csc_test.cpp
         # CMP 서버 코덱과 교차 검증 — cmp/PFloorCodec.cpp 는 PMcpttGroup.h(+pasf pbase.h) 만 필요
         test/floor_xcheck_test.cpp
         ${CMAKE_SOURCE_DIR}/cmp/PFloorCodec.cpp)

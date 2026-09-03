@@ -33,6 +33,11 @@ McpttInfo parseMcpttInfo(const std::string& wholeMsg);
 /** RFC 4575 conference-info 파싱 — users(entity, status), full(state="full"). */
 bool parseConferenceInfo(const std::string& xml, std::vector<RosterEntry>& users, bool& full);
 
+/** RFC 4235 dialog-info 파싱 — dialog 마다 DialogInfo(accountId 는 호출자가 채움). 없으면 false. */
+bool parseDialogInfo(const std::string& xml, std::vector<DialogInfo>& out);
+/** SDP 의 a=ssrc:<ssrc> label:<name> (RFC 5576) → MediaSource 목록(active=true). */
+std::vector<MediaSource> sdpSsrcLabels(const std::string& sdp);
+
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);
 std::string xmlEscape(const std::string& s);
