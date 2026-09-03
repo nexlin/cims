@@ -34,7 +34,7 @@ from pathlib import PurePath
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
-from services import file_store
+from services import access_services, file_store
 
 logger = Logger()
 
@@ -4735,6 +4735,13 @@ async def _put_deployment_collection(handler_args, did: int, name: str, config):
         {"records": records, "signal": do_signal}, 15, config,
     )
     ok = (status == 200)
+
+    # 로컬 읽기 복제(미러) 갱신 — SoT 는 방금 쓴 대상 노드 파일이고, 미러는 관리평면
+    # 소비자(통계·가입자 도메인 해석·CSC realm)가 읽는 사본이다. 실패해도 PUT 은 성공이다
+    # (services/access_services 가 원본을 직접 읽는 경로를 먼저 시도한다).
+    if ok and name == access_services.COLLECTION:
+        await asyncio.to_thread(access_services.refresh_mirror, config, records)
+
     peers_resp = [{
         "deployment_id": dep["id"],
         "agent_id":      dep.get("agent_id"),
@@ -4858,11 +4865,10 @@ async def handle_drift(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
 
 async def handle_sip_services(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """SipService 목록 조회 (L5).
+    """SipService 목록 조회 (L5) — csp 의 access_services 를 옛 응답 형태로 노출.
 
-    옛 csp_runtime/sip_service file_store → 진짜 SoT 인 첫 csp deployment 의
-    access_services 컬렉션 으로 마이그레이션. UI (VolteMsisdnPage/PttMsisdnPage)
-    의 cspRuntimeApi.listServices() 호환을 위해 같은 경로/응답 형태 유지.
+    UI (VolteMsisdnPage/PttMsisdnPage) 의 cspRuntimeApi.listServices() 호환을 위해
+    경로/응답 형태를 유지한다. 실체는 services/access_services 가 읽는다.
 
     Routes:
       GET /api/v1/csp/services             — 통합 목록 (volte/ptt 둘 다)
@@ -4881,51 +4887,32 @@ async def handle_sip_services(handler_args: HandlerArgs, kwargs: dict) -> Handle
                   "hint": "Use PUT /api/v1/deployments/<did>/collection/access_services"},
             media_type="application/json")
 
-    # ── csp deployment 1건 결정 (HA 그룹이면 첫 멤버 — drift 는 GET /drift 로 별도 확인)
-    deps = await asyncio.to_thread(_agent_load_all_deployments, config)
-    csp_dep = None
-    for d in deps:
-        if d.get('package_name') == 'csp':
-            csp_dep = d; break
-        pkg = _pkg_load(config, pid=d.get('package_id')) or {}
-        if pkg.get('name') == 'csp':
-            d = dict(d); d['package_name'] = 'csp'
-            csp_dep = d; break
-    if not csp_dep:
-        return HandlerResult(status=200, body={"items": []}, media_type="application/json")
-
-    agent = _agent_load(config, aid=csp_dep.get('agent_id')) or {}
-    status, body = await asyncio.to_thread(_agent_proxy_call,
-        "GET", agent, "/collection",
-        {"install_path": csp_dep.get('install_path'), "name": "access_services"},
-        None, 10, config)
+    # 접속 서비스 읽기는 services/access_services 하나로 모은다 — 원본(대상 노드) 우선,
+    # 불통이면 로컬 미러. 소비자마다 경로를 추측하던 것이 서비스 판정 결손의 원인이었다.
+    records = await asyncio.to_thread(access_services.load, config)
 
     items: list = []
-    if status == 200 and isinstance(body, dict):
-        for r in body.get('records') or []:
-            items.append({
-                "id":             r.get("id"),
-                "name":           r.get("name"),
-                "kind":           r.get("kind"),
-                "domain":         r.get("domain"),
-                "auth_realm":     r.get("auth_realm"),
-                "inbound_policy": r.get("inbound_policy"),
-                "priority":       r.get("priority"),
-                "enabled":        bool(r.get("enabled")),
-                "listeners":      r.get("allowed_local_node_refs") or [],
-                "note":           r.get("note"),
-                "etag":           "",
-                "create_time":    None,
-                "update_time":    None,
-            })
+    for r in records:
+        items.append({
+            "id":             r.get("id"),
+            "name":           r.get("name"),
+            "kind":           r.get("kind"),
+            "domain":         r.get("domain"),
+            "auth_realm":     r.get("auth_realm"),
+            "inbound_policy": r.get("inbound_policy"),
+            "priority":       r.get("priority"),
+            "enabled":        bool(r.get("enabled")),
+            "listeners":      r.get("allowed_local_node_refs") or [],
+            "note":           r.get("note"),
+            "etag":           "",
+            "create_time":    None,
+            "update_time":    None,
+        })
 
     if single := (tail[0] if tail else None):
-        try: sid = int(single)
-        except (TypeError, ValueError):
-            return HandlerResult(status=400, body={"error": "invalid_id"},
-                                 media_type="application/json")
+        # access_services 의 id 는 uuid 문자열이다 (id_type=uuid) — 문자열로 비교한다.
         for it in items:
-            if it["id"] == sid:
+            if str(it["id"]) == single:
                 return HandlerResult(status=200, body=it, media_type="application/json")
         return HandlerResult(status=404, body={"error": "not_found"},
                              media_type="application/json")

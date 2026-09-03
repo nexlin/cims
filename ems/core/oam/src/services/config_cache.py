@@ -9,6 +9,7 @@ Entities:
   trunk     — sip_trunk
   route     — routing_rule (+ routing_rule_match, routing_rule_transform)
   access    — routing_access_list
+  service   — access_services (접속 서비스 정의 — 도메인/realm)
 
 Files (atomic write: .tmp → fsync → rename):
   {cache_dir}/listeners.json
@@ -79,7 +80,9 @@ _DOMAIN_BY_ENTITY = {
     "trunk":    "sip_trunk",
     "route":    "routing_rule",
     "access":   "routing_access_list",
-    "service":  "sip_service",
+    # 접속 서비스 SoT 는 csp 의 access_services 컬렉션이다. 옛 sip_service 는 폐기됐고
+    # 쓰는 주체가 없다 — 그걸 계속 읽으면 서비스 정의가 영구히 비어 있게 된다.
+    "service":  "access_services",
 }
 
 
@@ -314,8 +317,10 @@ class CscConfigCache:
             rows.sort(key=lambda r: (r.get("priority") or 0, r.get("id") or 0))
             return [_row_access(r) for r in rows]
         if entity == "service":
-            rows.sort(key=lambda r: (r.get("priority") or 0, r.get("id") or 0))
-            return [_row_service(r, r.get("listeners") or []) for r in rows]
+            # id 는 uuid 문자열 — int 폴백과 섞이면 정렬이 TypeError 로 죽는다.
+            rows.sort(key=lambda r: (r.get("priority") or 0, str(r.get("id") or "")))
+            # access_services 는 노드 결합을 allowed_local_node_refs 로 적는다.
+            return [_row_service(r, r.get("allowed_local_node_refs") or []) for r in rows]
         return []
 
     # ── internal file I/O ─────────────────────────────────────

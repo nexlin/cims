@@ -49,11 +49,15 @@
     <agent_id>/
       YYYY/MM/DD.jsonl               # 메트릭 시계열 (원본)
       latest.json                    # 최신 1건 quick-read
-  sip_service/<id>.json + .seq
   sip_trunk/<id>.json + .seq
   routing_rule/<id>.json + .seq      # match/transform 은 rule json 에 임베드
   ...
 ```
+
+> 컬렉션은 이 평면 배치가 아니라 모듈 네임스페이스
+> `modules/<owner>/runtime/collections/<name>/` 에 놓인다 —
+> [runtime_store_v2_module_namespacing.md](runtime_store_v2_module_namespacing.md) §3.
+> 접속 서비스는 `sip_service` 를 폐기하고 `access_services` 로 통합됐다(같은 문서 §2 B).
 
 ## 3. 단일 엔티티 파일 포맷
 
@@ -138,7 +142,7 @@ def _atomic_write(path, content):
 - **agents**: agents.py CRUD / agent_api.py 핫패스(enroll/heartbeat/cert/metric) / ha_groups.py 멤버 enrich / csc_app.py sweeper(stale offline + cert rotate). agent_deployment JOIN 은 `_enrich_deploy` 로 pkg + agent 통합.
 - **deployments/jobs/metrics**: agent_deployment CRUD + agent_job CRUD + JSONL 시계열 metric. `_job_pick_pending`(heartbeat 큐 pick), `_metric_append`/`_metric_load_recent`(시계열), `_job_create`(INSERT). report 핸들러는 agent_job 갱신 + agent_deployment 상태 hook(install_path 추출 포함).
 - **ha_groups**: members 배열을 그룹 JSON 안에 임베드. CRUD + vrid 자동 할당(file_store 순회 기반) + agent_name enrich. agents.py 의 `_ha_group_map_for_agents`/`_check_ha_capability` 도 file_store.
-- **csp runtime config**: csp_runtime.py 5 entities(listener/trunk/route/access/service) + audit JSONL. config_cache.py 도 file_store 로드. routing_rule 의 match/transform, sip_service 의 listeners 는 그룹 JSON 안에 임베드. CSP C++ 는 jsonl 파일이 SoT(access_services.jsonl 등) — 본 도메인은 Console 측 정리.
+- **csp runtime config**: csp_runtime.py 5 entities(listener/trunk/route/access/service) + audit JSONL. config_cache.py 도 file_store 로드. routing_rule 의 match/transform 은 그룹 JSON 안에 임베드. `service` entity 는 `access_services` 컬렉션을 읽는다(옛 `sip_service` 폐기). CSP C++ 는 jsonl 파일이 SoT(access_services.jsonl 등) — 본 도메인은 Console 측 정리.
 - **recordings**: CSC handlers 가 파일 기반(call.json + recordings/). CSP `InsertRecording` no-op.
 - **auth tokens**: `csc/src/services/idms_storage.py` 의 auth_codes/refresh_tokens 도메인.
 - **organizations**: DB 유지 — `users.org_id` FK 대상이라 가입자 도메인과 함께 외부 이중화 DB 인계(`csc/src/handlers/org.py` 가 DB CRUD).

@@ -13,11 +13,11 @@ Routes:
 """
 
 from pathlib import PurePath
-import json
-import os
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 import pymysql
+
+from services import access_services
 
 from . import auth as _auth
 
@@ -26,50 +26,8 @@ _USERS_BASE = '/api/v1/users'
 
 
 def _access_service_domain_map(config):
-    """access_services.jsonl 을 읽어 service_ref(name) → domain 매핑 반환.
-
-    탐색 경로:
-      1) config['AccessServicesFile'] (절대경로 지정 시)
-      2) <csc config dir>/../../config/access_services.jsonl (install_path/config)
-      3) build/dist/config/access_services.jsonl (개발 환경)
-    """
-    candidates = []
-    if config.get('AccessServicesFile'):
-        candidates.append(config['AccessServicesFile'])
-    # config 파일이 있는 디렉토리 → ../../config/access_services.jsonl
-    cfg_path = config.get('__config_path__')
-    if cfg_path:
-        base = os.path.dirname(os.path.abspath(cfg_path))
-        candidates.append(os.path.normpath(os.path.join(base, '..', '..', 'config', 'access_services.jsonl')))
-    # 실행 경로 기반 fallback — handlers/ 에서 3 단계 up = dist_root
-    here = os.path.dirname(os.path.abspath(__file__))
-    candidates.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'config', 'access_services.jsonl')))
-    # 소스 트리 개발환경 — build/dist/config 시도
-    candidates.append(os.path.normpath(os.path.join(here, '..', '..', '..', 'build', 'dist', 'config', 'access_services.jsonl')))
-
-    for path in candidates:
-        try:
-            if not os.path.isfile(path):
-                continue
-            out = {}
-            with open(path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        rec = json.loads(line)
-                    except Exception:
-                        continue
-                    name = rec.get('name')
-                    domain = rec.get('domain')
-                    if name and domain:
-                        out[name] = domain
-            if out:
-                return out
-        except Exception:
-            continue
-    return {}
+    """{service_ref(name) → domain} — 접속 서비스 정의 기반. 읽기 경로는 services/access_services."""
+    return access_services.name_domain_map(config)
 
 
 def _dt(val):

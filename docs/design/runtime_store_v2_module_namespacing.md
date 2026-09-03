@@ -32,13 +32,20 @@ CIMS 설정은 두 종류이며 적용 경로가 다르다.
 3. `update_config` job 1건
 4. agent `job_update_config`: `install_path/<pkg>/config.json` 재기록(버전 디렉터리) → 모듈 SIGUSR1 reload → ack
 
-### B. 컬렉션 (local_nodes/routes/sip_service…) — `sync_config`
+### B. 컬렉션 (local_nodes/routes/access_services…) — `sync_config`
 1. 콘솔 `PUT /deployments/{id}/collection/{name} {records:[...]}`
-2. OAM: config_template schema 검증 → SoT 저장 `modules/oam/runtime/<collection>/` **(버전 무관)**
+2. OAM: config_template schema 검증 + id 부여
 3. agent `PUT /collection`(push) 또는 `job_sync_config`(pull `/api/agent/csp-config/<col>`):
    `install_path/config/<col>.jsonl` atomic write(버전 디렉터리) → SIGUSR1 → ack —
    **이 deployment 에만** (그룹 전파 없음)
 4. GET 시 멤버 간 records hash 비교로 **drift 감지**
+
+**SoT 는 대상 노드의 `<install_path>/config/<col>.jsonl` 이다.** 모듈이 그 파일을 직접 읽고,
+쓰기는 위 경로 하나뿐이다. `modules/<owner>/runtime/collections/<col>/` 은 그 SoT 의
+**읽기 전용 복제**가 놓이는 자리다 — 관리평면 소비자(통계·가입자 도메인 해석·CSC realm)가
+대상 노드에 같이 있으리라는 보장이 없어서 필요하다. 복제는 3 의 PUT 이 성공한 뒤 갱신되고,
+복제를 고쳐도 모듈에는 반영되지 않는다. `access_services` 가 이 방식으로 동작한다
+(`services/access_services` — sip_statistics.md §3.1).
 
 ### overlay 스키마 계약
 deployment overlay 는 그 패키지 `config_template` 이 선언한 키만 담는다 — 저장 시 마스크,
@@ -83,7 +90,7 @@ drift_sweeper 의 "동일해야 정상인 컬렉션" 판정에만 쓰인다.
     │   └── runtime/                      # ── CSP 모듈 데이터 (버전 무관 영속, csp 소유) ──
     │       └── collections/
     │           └── <collection>/         #    local_nodes/ remote_nodes/ routes/ rules/ ...
-    │               ├── _schema_version   #    이 SoT 가 준수하는 모듈/스키마 버전
+    │               ├── .schema_version  #    이 복제/SoT 가 준수하는 모듈/스키마 버전
     │               └── <id>.json
     │
     ├── cmp/ ...  csc/ ...  console/ ...   # 동일 패턴 (컬렉션 있는 모듈만 runtime/collections)
