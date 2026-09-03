@@ -1,0 +1,30 @@
+<!-- 어두운 팔레트 — Light.xaml 과 같은 키. 설정 테마 dark 에서 교체된다(App.ApplyTheme). -->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="Brush.Bg" Color="#0B0F17" />
+    <SolidColorBrush x:Key="Brush.BgSoft" Color="#111827" />
+    <SolidColorBrush x:Key="Brush.Surface" Color="#151C2B" />
+    <SolidColorBrush x:Key="Brush.Surface2" Color="#1D2636" />
+    <SolidColorBrush x:Key="Brush.Hover" Color="#1B2435" />
+    <SolidColorBrush x:Key="Brush.Border" Color="#2A3346" />
+    <SolidColorBrush x:Key="Brush.BorderStrong" Color="#3B4660" />
+    <SolidColorBrush x:Key="Brush.Text" Color="#E6E9F1" />
+    <SolidColorBrush x:Key="Brush.Muted" Color="#93A1B8" />
+    <SolidColorBrush x:Key="Brush.Primary" Color="#6366F1" />
+    <SolidColorBrush x:Key="Brush.PrimarySoft" Color="#29293F" />
+    <SolidColorBrush x:Key="Brush.Ring" Color="#FBBF24" />
+    <SolidColorBrush x:Key="Brush.RingSoft" Color="#2E2A1C" />
+    <SolidColorBrush x:Key="Brush.Talk" Color="#22C55E" />
+    <SolidColorBrush x:Key="Brush.TalkSoft" Color="#14301F" />
+    <SolidColorBrush x:Key="Brush.Held" Color="#60A5FA" />
+    <SolidColorBrush x:Key="Brush.HeldSoft" Color="#1A2A44" />
+    <SolidColorBrush x:Key="Brush.Mon" Color="#A78BFA" />
+    <SolidColorBrush x:Key="Brush.MonSoft" Color="#2B2547" />
+    <SolidColorBrush x:Key="Brush.Listen" Color="#2DD4BF" />
+    <SolidColorBrush x:Key="Brush.ListenSoft" Color="#15302F" />
+    <SolidColorBrush x:Key="Brush.Emg" Color="#F04848" />
+    <SolidColorBrush x:Key="Brush.EmgSoft" Color="#3A1B22" />
+    <SolidColorBrush x:Key="Brush.MeterTrack" Color="#2A3346" />
+    <SolidColorBrush x:Key="Brush.Wire" Color="#5B6785" />
+    <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
+</ResourceDictionary>

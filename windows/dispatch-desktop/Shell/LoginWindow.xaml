@@ -1,0 +1,38 @@
+<Window x:Class="DispatchDesktop.Shell.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:LoginViewModel}"
+        Style="{StaticResource Window.Base}" Title="CIMS 관제조작반 — 로그인" Width="420" SizeToContent="Height" WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
+    <!-- 로그인 창 (§6) -->
+    <StackPanel Margin="24">
+        <TextBlock Text="CIMS 관제조작반" FontSize="20" FontWeight="Bold" Margin="0,0,0,2" />
+        <TextBlock Style="{StaticResource Muted}" Text="관제사 계정으로 로그인합니다 (CSC PKCE)" Margin="0,0,0,16" />
+        <TextBlock Text="아이디" Style="{StaticResource Hint}" />
+        <TextBox Style="{StaticResource Field}" Text="{Binding LoginId, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,10" />
+        <TextBlock Text="비밀번호" Style="{StaticResource Hint}" />
+        <PasswordBox x:Name="Pw" Style="{StaticResource FieldPw}" Margin="0,2,0,10" PasswordChanged="Pw_Changed" KeyDown="Pw_KeyDown" />
+        <CheckBox Content="자동 로그인 (refresh token 만 이 PC 에 보관)" IsChecked="{Binding AutoLogin}" Margin="0,0,0,10" />
+        <Button Content="고급 ▾" Command="{Binding ToggleAdvancedCommand}" HorizontalAlignment="Left" Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" Foreground="{DynamicResource Brush.Muted}" />
+        <StackPanel Visibility="{Binding Advanced, Converter={StaticResource BoolToVis}}" Margin="0,6,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="8" /><ColumnDefinition Width="90" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="CSC 주소" Style="{StaticResource Hint}" />
+                    <TextBox Style="{StaticResource Field}" Text="{Binding Host, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="포트" Style="{StaticResource Hint}" />
+                    <TextBox Style="{StaticResource Field}" Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                </StackPanel>
+            </Grid>
+            <CheckBox Content="서버 인증서 검증" IsChecked="{Binding VerifyServer}" Margin="0,8,0,6" />
+            <TextBlock Text="사설 CA PEM (SIP TLS·HTTPS 공용, 비면 시스템 기본)" Style="{StaticResource Hint}" />
+            <TextBox Style="{StaticResource Field}" Text="{Binding CaPemPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+        </StackPanel>
+        <TextBlock Text="{Binding Error}" Foreground="{DynamicResource Brush.Emg}" TextWrapping="Wrap" Margin="0,10,0,0" Visibility="{Binding Error, Converter={StaticResource StrToVis}}" />
+        <TextBlock Text="{Binding Status}" Style="{StaticResource Muted}" Margin="0,6,0,0" Visibility="{Binding Status, Converter={StaticResource StrToVis}}" />
+        <Button Style="{StaticResource Btn.Pri}" Content="로그인" Height="36" Command="{Binding LoginCommand}" IsEnabled="{Binding CanLogin}" IsDefault="True" Margin="0,14,0,0" />
+    </StackPanel>
+</Window>

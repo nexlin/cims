@@ -1,0 +1,16 @@
+<Project>
+  <!-- sdk/windows/dotnet 공통 — 파사드(CimsUe)·단위시험. 앱(windows/dispatch-desktop)은 자기 설정을 가진다. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <Deterministic>true</Deterministic>
+    <Authors>CIMS</Authors>
+    <Product>CIMS UE SDK</Product>
+    <Version>0.1.0</Version>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- 네이티브 cimsue.dll 위치 — 슈퍼빌드 산출물(build-win/sdk/bin). 다른 곳이면 -p:CimsUeNativeDir=<dir> -->
+    <CimsUeNativeDir Condition="'$(CimsUeNativeDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\build-win\sdk\bin\</CimsUeNativeDir>
+  </PropertyGroup>
+</Project>

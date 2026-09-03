@@ -915,4 +915,39 @@ void CIMSUE_CALL cimsue_service_profile_to_account(const cimsue_service_profile_
     *out = c;
 }
 
+// ── ABI 자기검사 ──
+
+int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
+    switch (id) {
+    case CIMSUE_STRUCT_ENGINE_CONFIG:     return (int32_t)sizeof(cimsue_engine_config_t);
+    case CIMSUE_STRUCT_ACCOUNT_CONFIG:    return (int32_t)sizeof(cimsue_account_config_t);
+    case CIMSUE_STRUCT_CALL_OPTIONS:      return (int32_t)sizeof(cimsue_call_options_t);
+    case CIMSUE_STRUCT_GROUP_CALL_OPTIONS: return (int32_t)sizeof(cimsue_group_call_options_t);
+    case CIMSUE_STRUCT_HEADER:            return (int32_t)sizeof(cimsue_header_t);
+    case CIMSUE_STRUCT_REG_INFO:          return (int32_t)sizeof(cimsue_reg_info_t);
+    case CIMSUE_STRUCT_MCPTT_INFO:        return (int32_t)sizeof(cimsue_mcptt_info_t);
+    case CIMSUE_STRUCT_MEDIA_SOURCE:      return (int32_t)sizeof(cimsue_media_source_t);
+    case CIMSUE_STRUCT_CALL_INFO:         return (int32_t)sizeof(cimsue_call_info_t);
+    case CIMSUE_STRUCT_TALKER:            return (int32_t)sizeof(cimsue_talker_t);
+    case CIMSUE_STRUCT_FLOOR_EVENT:       return (int32_t)sizeof(cimsue_floor_event_t);
+    case CIMSUE_STRUCT_FLOOR_INFO:        return (int32_t)sizeof(cimsue_floor_info_t);
+    case CIMSUE_STRUCT_REQUEST_RESULT:    return (int32_t)sizeof(cimsue_request_result_t);
+    case CIMSUE_STRUCT_DIALOG_INFO:       return (int32_t)sizeof(cimsue_dialog_info_t);
+    case CIMSUE_STRUCT_ROSTER_ENTRY:      return (int32_t)sizeof(cimsue_roster_entry_t);
+    case CIMSUE_STRUCT_SDS_MESSAGE:       return (int32_t)sizeof(cimsue_sds_message_t);
+    case CIMSUE_STRUCT_STREAM_STATS:      return (int32_t)sizeof(cimsue_stream_stats_t);
+    case CIMSUE_STRUCT_AUDIO_DEVICE_INFO: return (int32_t)sizeof(cimsue_audio_device_info_t);
+    case CIMSUE_STRUCT_LISTENER:          return (int32_t)sizeof(cimsue_listener_t);
+    case CIMSUE_STRUCT_CSC_ENDPOINT:      return (int32_t)sizeof(cimsue_csc_endpoint_t);
+    case CIMSUE_STRUCT_TOKEN_SET:         return (int32_t)sizeof(cimsue_token_set_t);
+    case CIMSUE_STRUCT_SERVICE_ENDPOINT:  return (int32_t)sizeof(cimsue_service_endpoint_t);
+    case CIMSUE_STRUCT_SERVICE_PROFILE:   return (int32_t)sizeof(cimsue_service_profile_t);
+    case CIMSUE_STRUCT_DISPATCH_PROFILE:  return (int32_t)sizeof(cimsue_dispatch_profile_t);
+    case CIMSUE_STRUCT_PROFILE:           return (int32_t)sizeof(cimsue_profile_t);
+    case CIMSUE_STRUCT_GROUP_SUMMARY:     return (int32_t)sizeof(cimsue_group_summary_t);
+    case CIMSUE_STRUCT_XCAP_DOC:          return (int32_t)sizeof(cimsue_xcap_doc_t);
+    default:                              return -1;
+    }
+}
+
 }  // extern "C"

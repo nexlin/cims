@@ -45,6 +45,18 @@ TEST(CApi, EnumValuesMatchCxx) {
     EXPECT_STREQ(cimsue_version(), Engine::version().c_str());
 }
 
+// ── ABI 자기검사 — 바인딩이 대조할 sizeof 가 실제 구조체와 같고, 등록된 id 는 전부 답하며, 모르는 id 는 -1 ──
+TEST(CApi, StructSizesForBindings) {
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_ENGINE_CONFIG), (int32_t)sizeof(cimsue_engine_config_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_ACCOUNT_CONFIG), (int32_t)sizeof(cimsue_account_config_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_CALL_INFO), (int32_t)sizeof(cimsue_call_info_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_FLOOR_EVENT), (int32_t)sizeof(cimsue_floor_event_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_LISTENER), (int32_t)sizeof(cimsue_listener_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_PROFILE), (int32_t)sizeof(cimsue_profile_t));
+    for (int i = 0; i < (int)CIMSUE_STRUCT_COUNT_; ++i) EXPECT_GT(cimsue_struct_size((cimsue_struct_id_t)i), 0) << "id " << i;
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_COUNT_), -1);
+}
+
 // ── 설정 기본값 규약 — default() 의 숫자 필드 = C++ 기본값, 문자열 NULL = C++ 기본값 유지 ──
 TEST(CApi, ConfigDefaultsFollowCxx) {
     const AccountConfig d;

@@ -324,29 +324,37 @@ sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오
 ## 11. 구현 구조 (WPF, MVVM)
 
 ```
-windows/dispatch-desktop/
-  App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처
-  Shell/MainWindow.xaml         도킹 호스트(4 패널 + 스플리터), 상단 바, 배너 레이어, 토스트 레이어
-  Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 DataTemplate, 위치·모니터 기억
-  Shell/Docking/                패널 이동·별창·접기·프리셋(layout.json) — 도킹 라이브러리 어댑터
+windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-windows, CommunityToolkit.Mvvm · Dirkster.AvalonDock · Microsoft.Data.Sqlite
+  App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·네트워크 복귀 재등록. `--ui-preview` = 로그인 없이 메인(개발)
+  Shell/MainWindow.xaml         상단 바 · 배너 레이어 · AvalonDock 도킹 호스트(①②③④ LayoutAnchorable, ContentId ptt/pttlog/call/calllog) · 토스트 레이어
+                                코드비하인드: 배치 잠금(CanMove/CanFloat)·프리셋(XmlLayoutSerializer → layout.json)·감청 창 관리·앱 포커스 핫키·트레이 최소화·종료 확인
+  Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 본문, 위치 기억, 닫기 = 종료(확인), 세션 종료 → 3초 후 자동 닫힘
+  Shell/LoginWindow · SettingsWindow · PromptWindow
   ViewModels/
+    MainViewModel               패널 VM 조립 · 패널 간 연동(발신 필드 채움·스레드 따라가기·[채널] 포커스) · 전역 핫키 → 동작 · 감청 창 열기/닫기 요청
     DeskViewModel               Profile·dispatch·등록 상태·오디오 요약·감청 중 N 칩·배치 잠금/프리셋 (상단 바)
-    PttChannelsViewModel        ① 왼쪽 — ChannelCard(멤버/사설콜/애드혹) · FloorState · 선택 채널 · 카드/타일 모드
+    PttChannelsViewModel        ① 왼쪽 — ChannelCard(멤버/사설콜/애드혹) · FloorState · 선택 채널(애드혹 우선 자동 선택) · 카드/타일 모드
     PttOriginateViewModel       ① 오른쪽 위 — 사설콜/애드혹 모드 · PTT 주소록(사용자/그룹) · 애드혹 선택 칩
-    McDataMessagesViewModel     ① 오른쪽 아래 — 스레드·말풍선·첨부
+    McDataMessagesViewModel     ① 오른쪽 아래 — 스레드·말풍선·disposition 자동 회신·발신 순서 큐로 MESSAGE 최종 응답 상관 (MessagesViewModelBase)
     PttActivityViewModel        ② — 진행 중 행(conference 로스터·floor) + 최근 이벤트 링 버퍼
-    CallDeskViewModel           ③ 왼쓰 — 그룹원 띠(DialogInfo) · QueueItem(대표번호 dialog) · CallCard
+    CallDeskViewModel           ③ 왼쪽 — MemberChip(DialogInfo) · QueueItem(대표번호 dialog) · CallCard(전달 blind/attended 포함)
     CallOriginateViewModel      ③ 오른쪽 위 — 표시 모드 [다이얼패드|주소록|최근] 하나 · 다이얼패드(DTMF 겸용) · 주소록 · 최근
-    SmsMessagesViewModel        ③ 오른쪽 아래 — text/plain MESSAGE 스레드 · 게이트웨이 상태
+    SmsMessagesViewModel        ③ 오른쪽 아래 — text/plain MESSAGE 스레드 · token 상관 · 외부망 비활성
     CallActivityViewModel       ④ — 세션 행(dialog 쌍 결합) + 최근 기록
     MonitorWindowViewModel      감청 창 하나(join 호 또는 listenOnly 그룹콜) · MediaSource 미터
-    Banners(Incoming/Emergency) · Toasts
+    LoginViewModel · SettingsViewModel
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
-           listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③)
-  Services/ SettingsStore(json) · LayoutStore(프리셋) · MessageStore(SQLite: mcdata/sms) · ActivityLog(링 버퍼·CSV) · HotKeyMap ·
-            AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) · Directory(그룹원·PTT 사용자·연락처 CSV)
-  Views/    패널별 UserControl, 카드·행 DataTemplate, 상태 색 리소스(§3.2)
+           listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem·GroupInfo·DialogRow·Message/MessageThread·ActivityRow·Contact
+  Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용) ·
+            Notifications(토스트·배너) · SettingsStore(json) · LayoutStore(프리셋) · MessageStore(SQLite: mcdata/sms) · ActivityLog(링 버퍼·CSV) ·
+            HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) · DirectoryService(그룹원·PTT 사용자·연락처 CSV) ·
+            ResponseText(§9 사전) · AppLog(%APPDATA% logs, 7일)
+  Views/    PttChannelsPanel · PttOriginateView · MessagesView(MCData/SMS 공용) · PttActivityPanel · CallDeskPanel · CallOriginateView · CallActivityPanel
+  Themes/   Light/Dark(같은 키) · Styles(패널·카드·버튼·배지·칩·미터)  Converters/  표시 규약 변환기
 ```
+
+- 도킹 라이브러리 = **AvalonDock(Dirkster, MS-PL)**. 잠금은 각 패널의 `CanMove`/`CanFloat` 를 끄고 안쪽 `GridSplitter` 를 비활성, 접기는 AvalonDock
+  auto-hide, 별창은 float, 프리셋은 `XmlLayoutSerializer` XML 을 `layout.json` 에 이름별로 보관("기본 배치" 는 XAML 기본).
 
 - 파사드 이벤트(`CimsUe.Engine` 의 `CallStateChanged`·`FloorChanged`·`DialogInfo`…)는 UI 스레드로 마샬링돼 온다(ue_sdk.md §6.4) — ViewModel 은
   `ObservableCollection` 직접 갱신.
@@ -375,3 +383,51 @@ windows/dispatch-desktop/
 - **대표번호 발신 표시**(`P-Preferred-Identity`=pilot — 서버 과제) 확정 시 ③ 발신에 "대표번호로 발신" 토글.
 - **큐/ACD**, **영상 F3**, **ambient listening**, **끼어들기**(CMP 믹서) — 서버 과제.
 - **도킹 라이브러리 선정** — AvalonDock(MS-PL) vs 자체 `Grid` 이동 구현; 별창·프리셋 요구가 있어 라이브러리 채택이 유력, 라이선스 검토 후 확정.
+
+## 14. 실기 시험 환경 — 개발 서버(.45) 등록 계획
+
+앱 실기 시험(§2 표의 작업 전부)을 위해 `.45` 개발 서버(`121.161.164.45` — CSC·CSP·CMP 동거)에 아래를 등록한다. 서버 쪽 등록이 끝나면
+앱은 로그인 창에 CSC 주소·관제석 계정만 넣어 붙는다. 스키마 전제 = `sql/migrate_dispatch_groups.sql` ·
+`sql/migrate_ptt_ambient_listening.sql` 적용([dispatch_center.md](dispatch_center.md) §8.1), CSC 관리 API 는 [admin_api.md](../../api/admin_api.md) §6.7.
+
+### 14.1 등록 대상
+
+| 대상 | 값 | 비고 |
+|---|---|---|
+| **관제석 가입자 ①** | 로그인 `disp01` · 표시명 `관제1석` · VoLTE 내선(msisdn=가입 id=imsi) `1002` · PTT 번호 `+82500000101` · `users.role=operator` | Digest+TLS 관제 소프트폰 규약([volte_supplementary_services.md](volte_supplementary_services.md)) — 서비스 `volte`·`ptt` 둘 다 프로비저닝, `sipHa1` 발급 |
+| **관제석 가입자 ②** | 로그인 `disp02` · 표시명 `관제2석` · VoLTE 내선 `1003` · PTT 번호 `+82500000102` · `role=operator` | 같은 관제 그룹의 두 번째 자리 — 그룹원 띠·지정 픽업·대표번호 병렬 호출·상호 감청의 상대 |
+| **관제 그룹** | `id=dg-dispatch01` · `name=관제1` · **`pilot_id=7000`**(대표번호) · `service_ref=<VoLTE 접속서비스 name>` · `alert_mode=parallel` · `no_answer_sec=30` · `busy_members=skip` · `overflow_target=NULL` · `monitor_scope=all` · `ptt_listen=all` · `listen_visibility=hidden` · members `[{1002, alert_order 0}, {1003, 1}]` | `POST /api/v1/dispatch-groups` (manager 토큰 — `monitor_scope≠none`). 멤버 편입으로 두 가입자의 `pickup_group=dg-dispatch01` 이 설정된다 |
+| **PTT 청취 자격** | 두 가입자의 `ptt_user_profile.allow_ambient_listening=1` | `PUT /api/v1/users/{pid}/ptt/{msisdn}/profile` — 없으면 PTT 청취 403 |
+| **PTT 그룹(멤버)** | 기존 `g001` 에 두 PTT 번호를 멤버로 추가 | ① 채널 카드·MCData 그룹 스레드·affiliation·conference 구독 대상 |
+| **PTT 그룹(청취 범위)** | `g002` — 두 관제석이 **멤버가 아닌** 그룹, 다른 PTT 단말 2대(`+82500000001/2` 등 기존 시험 계정) 멤버 | ② 진행 중 행 [청취] → PTT 청취 창(`ptt_listen=all`). 로스터 표시는 서버의 청취 범위 구독 인가(§13) 전까지 "미상" |
+| **감청·픽업 대상 통화 가입자** | 기존 VoLTE 시험 가입자 `+821300000001/2`(또는 내선 `1004`·`1005`) — 관제 그룹 **밖** | ④ 진행 중 행 [청취](Join, `monitor_scope=all`)·전달 대상. 대표번호 착신은 이들 중 하나가 `7000` 으로 발신 |
+| **접속서비스** | VoLTE `sip_transport=TLS`+`media_srtp=optional` 서비스 하나(대표번호 `service_ref` 가 이것), PTT 서비스 하나. 인증서는 개발 자가서명 → 앱 로그인 창 "서버 인증서 검증" 끔 또는 CA PEM 지정 | `pickup_feature_code`(기본 `**`)·`transfer_allowed=1` 확인 — 앱 설정의 피처코드와 일치해야 한다 |
+
+### 14.2 앱이 서버에서 기대하는 것
+
+- `POST /oauth/token`(PKCE) 로그인 → `GET /provisioning/me` 응답에 `services[volte, ptt]`(각 `sipHost/sipPort/transport/domain/msisdn/imsi/authId/sipHa1`,
+  PTT 는 `mcpttId`) + **`dispatch` 블록** `{present:true, groupId:"dg-dispatch01", groupName:"관제1", pilotId:"7000", monitorScope:"all", pttListen:"all",
+  listenVisibility:"hidden"}`. `present=false` 면 앱은 소프트폰 모드(§6).
+- GMS `listGroups(<PTT 번호 tel: URI>)` 가 `g001` 을 돌려준다(카드 소스). 대표번호 `7000` 과 그룹원 내선은 앱이 `dialogWatch` 로 구독하므로
+  CSP 의 dialog 이벤트 인가(`monitor_scope`)가 두 관제석 모두에 적용돼야 한다.
+- 그룹원 목록은 서버 API 가 없어(§13) 앱 로컬 `%APPDATA%\CIMS\dispatch-desktop\directory.csv` 에 둔다 — 시험용 내용:
+  ```
+  kind,number,name,tags
+  ext,1002,관제1석,member
+  ext,1003,관제2석,member
+  ext,1004,시험단말A,
+  ext,1005,시험단말B,
+  external,02-120,교통상황실,
+  ptt,+82500000001,PTT단말1,
+  ptt,+82500000002,PTT단말2,
+  ```
+
+### 14.3 시험 순서(일괄)
+
+1. 두 관제석 로그인·등록(PTT·VoLTE 점등 녹색) → ① 카드 `g001` 참여·PTT 발언·로스터 → MCData 그룹 SDS 왕복(✓✓).
+2. 시험단말 → `7000` 발신 → 두 관제석 착신 배너(주황)·③ 대기열 → 한쪽 응답, 다른 쪽 [당겨받기]/무응답 부재 행.
+3. 시험단말A ↔ B 통화 → ④ 진행 중 행 [청취] → 감청 창(caller/callee 두 줄) → 종료 시 자동 닫힘. 그룹원 띠에서 상대 관제석 통화 [청취].
+4. 관제석 ① 착신 링 중 ②가 [픽업](지정)·`**`(그룹) → 픽업 행. 통화 중 [전달▾] blind / [상담 전달] attended.
+5. `g002` 세션(PTT 단말 2대) → ② 행 [청취] → PTT 청취 창(발언자·참가자). 사설콜(반이중·전이중)·애드혹(주소록 ☐) 카드.
+6. SMS·LMS(`1002`↔`1003`, 70자 초과) · 오디오 라우트 🎧/🔊 · 핫키(Ctrl+Space PTT, F9 응답, F8 픽업, F10 종료) · 배치 프리셋 저장/복원.
+

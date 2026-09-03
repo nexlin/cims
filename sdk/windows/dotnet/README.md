@@ -25,3 +25,10 @@ dotnet/
 콜백은 코어 **이벤트 스레드**에서 온다(`cimsue_listener_t` — ue_sdk.md §6.4, 콜백 인자 문자열은 콜백 동안만 유효하므로 파사드가
 관리 문자열로 복사한다). 파사드가 `SynchronizationContext.Post` 로 앱 스레드에 넘기며, WPF `Dispatcher` 는 앱(`windows/dispatch-desktop`)만
 안다. 네이티브 표면은 `sdk/core/include/cimsue/cimsue_c.h`(구현 완료 — `cimsue.dll` export, `cimsue_test` 로 검증) 하나다.
+
+**네이티브 DLL 배치**: 관리 어셈블리 `CimsUe.dll` 과 네이티브 `cimsue.dll` 은 Windows 에서 같은 이름이라 한 디렉터리에 둘 수 없다(P/Invoke 가 관리
+DLL 을 열어 `EntryPointNotFound`). 빌드 출력·NuGet 패키지 모두 `runtimes/win-x64/native/`(cimsue.dll + OpenSSL 런타임 둘)에 두고, `NativeLoader` 가
+`CIMSUE_NATIVE_DIR` → `runtimes/win-x64/native` → 앱 디렉터리 순으로 찾는다. 원본은 `Directory.Build.props` 의 `CimsUeNativeDir`(기본 `build-win/sdk/bin`).
+
+**시험**: `dotnet test CimsUe.Tests` — 50건(ABI 레이아웃 27 구조체 대조 `cimsue_struct_size`·헤드리스 엔진 수명·SynchronizationContext 마샬링·프로파일 파싱·
+접점). xunit 은 `SynchronizationContext.Current` 를 두므로 "이벤트 스레드 직접 수신" 시험은 컨텍스트를 명시적으로 비운다.

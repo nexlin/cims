@@ -1,0 +1,75 @@
+<UserControl x:Class="DispatchDesktop.Views.PttActivityPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:m="clr-namespace:DispatchDesktop.Models"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:PttActivityViewModel}">
+    <!-- ② PTT 내역 — 실시간 (§4.2): 진행 중 고정 + 최근 시각순 -->
+    <Border Style="{StaticResource Pnl}">
+        <DockPanel>
+            <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
+                <DockPanel VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource H2}" Text="② PTT 내역" Margin="6,0,10,0" />
+                    <TextBlock Style="{StaticResource Muted}" Text="실시간" VerticalAlignment="Center" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="CSV" Command="{Binding ExportCommand}" Margin="6,0,0,0" />
+                    <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="140" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="검색" />
+                    <Border Style="{StaticResource SegGroup}" HorizontalAlignment="Right" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Style="{StaticResource Seg}" Content="전체" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=all}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
+                            <RadioButton Style="{StaticResource Seg}" Content="내 채널" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=mine}" Command="{Binding SetFilterCommand}" CommandParameter="mine" />
+                            <RadioButton Style="{StaticResource Seg}" Content="긴급" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=emergency}" Command="{Binding SetFilterCommand}" CommandParameter="emergency" />
+                        </StackPanel>
+                    </Border>
+                </DockPanel>
+            </Border>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <Border Style="{StaticResource LogHeader}"><TextBlock Style="{StaticResource Hint}" Text="진행 중" /></Border>
+                    <ItemsControl ItemsSource="{Binding Ongoing}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:PttOngoingRow}">
+                                <Border Style="{StaticResource LogRow}">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <Button Style="{StaticResource Btn.Xs}" Content="채널" Command="{Binding ChannelCommand}" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}" />
+                                            <Button Style="{StaticResource Btn.Xs.Mon}" Content="청취" Command="{Binding ListenCommand}" IsEnabled="{Binding CanListen}" Visibility="{Binding IsScope, Converter={StaticResource BoolToVis}}" ToolTip="청취 전용 합류(감청 창)" />
+                                            <Button Style="{StaticResource Btn.Xs.Mon}" Content="청취 중 · 창" Command="{Binding ShowWindowCommand}" Visibility="{Binding IsListening, Converter={StaticResource BoolToVis}}" Margin="4,0,0,0" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Elapsed, Converter={StaticResource Elapsed}}" Width="54" />
+                                            <TextBlock Text="{Binding Title}" FontWeight="Medium" Margin="0,0,8,0" />
+                                            <Border Style="{StaticResource Badge}"><TextBlock Text="{Binding Badge}" /></Border>
+                                            <Border Style="{StaticResource Badge.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                                            <TextBlock Style="{StaticResource Muted}" Text="{Binding ParticipantsText}" Margin="0,0,8,0" />
+                                            <TextBlock Style="{StaticResource Muted}" Visibility="{Binding Speaker, Converter={StaticResource StrToVis}}"><Run Text="발언 " /><Run Text="{Binding Speaker, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
+                                            <Ellipse Style="{StaticResource Dot}" Margin="8,0,4,0" Fill="{DynamicResource Brush.Talk}" Visibility="{Binding HasSession, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Style="{StaticResource Muted}" Text="{Binding StateText}" FontSize="12" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Style="{StaticResource Hint}" Text="진행 중인 PTT 세션 없음" Margin="10,6" Visibility="{Binding Ongoing.Count, Converter={StaticResource ZeroToVis}}" />
+                    <Border Style="{StaticResource LogHeader}"><TextBlock Style="{StaticResource Hint}" Text="최근" /></Border>
+                    <ItemsControl ItemsSource="{Binding Recent}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type m:ActivityRow}">
+                                <Border Style="{StaticResource LogRow}">
+                                    <DockPanel>
+                                        <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Time, StringFormat=HH:mm}" Width="54" />
+                                        <Border Style="{StaticResource Badge}" Width="52"><TextBlock Text="{Binding KindText}" HorizontalAlignment="Center" /></Border>
+                                        <TextBlock Text="⚠" Foreground="{DynamicResource Brush.Emg}" Margin="0,0,6,0" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}" />
+                                        <TextBlock Text="{Binding Title}" Margin="0,0,8,0" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Style="{StaticResource Muted}" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Border>
+</UserControl>

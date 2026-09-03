@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- 관제조작반 앱 (WPF, MVVM) — dispatch_desktop_ui.md §11. SDK 는 CimsUe.dll(.NET 파사드)만 참조한다. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <RootNamespace>DispatchDesktop</RootNamespace>
+    <AssemblyName>CimsDispatch</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <Product>CIMS 관제조작반</Product>
+    <Authors>CIMS</Authors>
+    <SatelliteResourceLanguages>en;ko</SatelliteResourceLanguages>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Dirkster.AvalonDock" Version="4.74.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\sdk\windows\dotnet\CimsUe\CimsUe.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="directory.sample.csv" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

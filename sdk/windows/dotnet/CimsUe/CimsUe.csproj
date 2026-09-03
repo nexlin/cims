@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- .NET 파사드 CimsUe.dll — P/Invoke → cimsue_c.h (ue_sdk.md §6.4). UI 프레임워크 참조 없음(WPF 는 앱만 안다). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>CimsUe</RootNamespace>
+    <AssemblyName>CimsUe</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Description>CIMS 단말 SDK .NET 파사드 — libcimsue(cimsue.dll) C API 위의 Engine·Account·Call·CscClient + Windows 접점</Description>
+    <PackageId>CimsUe</PackageId>
+    <IsPackable>true</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.11" />
+    <InternalsVisibleTo Include="CimsUe.Tests" />
+  </ItemGroup>
+
+  <!-- 네이티브 런타임 — 개발 출력·패키지 모두 runtimes/win-x64/native (NuGet 규약). 관리 어셈블리 CimsUe.dll 과 네이티브 cimsue.dll 은
+       Windows 에서 같은 이름이라 한 디렉터리에 둘 수 없다(P/Invoke 가 관리 DLL 을 열어 EntryPointNotFound).
+       cimsue.dll 은 vcpkg OpenSSL 런타임(libcrypto-3-x64·libssl-3-x64)에 의존하므로 셋을 함께 둔다. 참조하는 프로젝트에도 전이 복사된다. -->
+  <ItemGroup Condition="Exists('$(CimsUeNativeDir)cimsue.dll')">
+    <None Include="$(CimsUeNativeDir)cimsue.dll;$(CimsUeNativeDir)libcrypto-3-x64.dll;$(CimsUeNativeDir)libssl-3-x64.dll"
+          Link="runtimes/win-x64/native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false"
+          Pack="true" PackagePath="runtimes/win-x64/native/" />
+  </ItemGroup>
+  <Target Name="CimsUeNativeMissing" BeforeTargets="Build" Condition="!Exists('$(CimsUeNativeDir)cimsue.dll')">
+    <Warning Text="cimsue.dll 이 '$(CimsUeNativeDir)' 에 없다 — sdk/windows 슈퍼빌드를 먼저 돌리거나 -p:CimsUeNativeDir=&lt;dir&gt; 로 지정 (런타임에 CIMSUE_NATIVE_DIR 환경변수로도 찾는다)" />
+  </Target>
+</Project>

@@ -1,0 +1,186 @@
+<Window x:Class="DispatchDesktop.Shell.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ad="https://github.com/Dirkster99/AvalonDock"
+        xmlns:v="clr-namespace:DispatchDesktop.Views"
+        xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+        xmlns:svc="clr-namespace:DispatchDesktop.Services"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:MainViewModel}"
+        Style="{StaticResource Window.Base}" Title="CIMS 관제조작반" Width="1920" Height="1080" MinWidth="1200" MinHeight="700" WindowStartupLocation="CenterScreen">
+    <!-- 주 창 (§3.1): 상단 바 · 배너 레이어 · 도킹 호스트(①②③④) · 토스트 레이어 -->
+    <Grid>
+        <DockPanel>
+            <!-- 상단 바 -->
+            <Border DockPanel.Dock="Top" Height="56" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="14,0">
+                <DockPanel VerticalAlignment="Center" DataContext="{Binding Desk}">
+                    <!-- 오른쪽: 배치·오디오·핫키·시각·설정 -->
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Border Style="{StaticResource Pill}" Background="{DynamicResource Brush.MonSoft}" BorderBrush="{DynamicResource Brush.Mon}" Visibility="{Binding HasMonitors, Converter={StaticResource BoolToVis}}" ToolTip="열린 감청·청취 창 — 클릭하면 복원">
+                            <Menu Background="Transparent">
+                                <MenuItem ItemsSource="{Binding Monitors}" Foreground="{DynamicResource Brush.Mon}" FontWeight="SemiBold">
+                                    <MenuItem.Header>
+                                        <TextBlock><Run Text="감청 중 " /><Run Text="{Binding MonitorCount, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock>
+                                    </MenuItem.Header>
+                                    <MenuItem.ItemContainerStyle>
+                                        <Style TargetType="MenuItem">
+                                            <Setter Property="Header" Value="{Binding Title}" />
+                                            <Setter Property="Command" Value="{Binding DataContext.ActivateMonitorCommand, RelativeSource={RelativeSource AncestorType=Menu}}" />
+                                            <Setter Property="CommandParameter" Value="{Binding}" />
+                                        </Style>
+                                    </MenuItem.ItemContainerStyle>
+                                </MenuItem>
+                            </Menu>
+                        </Border>
+                        <Button Style="{StaticResource Btn.Sm}" Command="{Binding ToggleLockCommand}" Margin="0,0,4,0" ToolTip="배치 잠금 — 잠긴 동안 패널 이동·스플리터 비활성">
+                            <Button.Content>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="🔓 배치" />
+                                            <Style.Triggers><DataTrigger Binding="{Binding LayoutLocked}" Value="True"><Setter Property="Text" Value="🔒 배치" /></DataTrigger></Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                        </Button>
+                        <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,10,0">
+                            <MenuItem Padding="8,4" FontSize="12.5">
+                                <MenuItem.Header><TextBlock><Run Text="{Binding CurrentPreset, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock></MenuItem.Header>
+                                <MenuItem Header="프리셋 전환" ItemsSource="{Binding Presets}">
+                                    <MenuItem.ItemContainerStyle>
+                                        <Style TargetType="MenuItem">
+                                            <Setter Property="Header" Value="{Binding}" />
+                                            <Setter Property="Command" Value="{Binding DataContext.ApplyPresetCommand, RelativeSource={RelativeSource AncestorType=Menu}}" />
+                                            <Setter Property="CommandParameter" Value="{Binding}" />
+                                        </Style>
+                                    </MenuItem.ItemContainerStyle>
+                                </MenuItem>
+                                <MenuItem Header="현재 배치 저장…" Click="SavePreset_Click" />
+                                <MenuItem Header="현재 프리셋 삭제" Click="DeletePreset_Click" />
+                                <Separator />
+                                <MenuItem Header="기본 배치로 복원" Command="{Binding ApplyPresetCommand}" CommandParameter="기본 배치" />
+                            </MenuItem>
+                        </Menu>
+                        <Button Style="{StaticResource Btn.Sm}" Content="{Binding AudioSummary}" ToolTip="{Binding AudioTip}" Command="{Binding OpenSettingsCommand}" Margin="0,0,6,0" />
+                        <Border Style="{StaticResource Pill}"><TextBlock Text="{Binding PttHotKey}" FontSize="12" /></Border>
+                        <TextBlock Style="{StaticResource Mono}" Text="{Binding Clock}" FontSize="16" VerticalAlignment="Center" Margin="4,0,10,0" />
+                        <Menu Background="Transparent" VerticalAlignment="Center">
+                            <MenuItem Header="⚙" FontSize="16" Padding="6,2">
+                                <MenuItem Header="설정…" Command="{Binding OpenSettingsCommand}" />
+                                <Separator />
+                                <MenuItem Header="로그아웃" Command="{Binding LogoutCommand}" />
+                                <MenuItem Header="종료" Command="{Binding ExitCommand}" />
+                            </MenuItem>
+                        </Menu>
+                    </StackPanel>
+                    <!-- 왼쪽: 신원·등록 점등 -->
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="CIMS 관제" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,14,0" />
+                        <TextBlock VerticalAlignment="Center" Margin="0,0,14,0">
+                            <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
+                            <Run Text="{Binding Extension, Mode=OneWay}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
+                            <Run Text="{Binding PttNumber, Mode=OneWay}" ToolTip="{Binding PttNumberFull}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
+                            <Run Text="{Binding GroupName, Mode=OneWay}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
+                            <Run Text="{Binding Pilot, Mode=OneWay}" />
+                        </TextBlock>
+                        <Border Style="{StaticResource Pill}" ToolTip="{Binding PttTip}" Visibility="{Binding HasPtt, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource Dot}" Fill="{Binding PttState, Converter={StaticResource RegBrush}}" />
+                                <TextBlock Text="PTT" FontSize="12" />
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Pill}" ToolTip="{Binding VolteTip}" Visibility="{Binding HasVolte, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Style="{StaticResource Dot}" Fill="{Binding VolteState, Converter={StaticResource RegBrush}}" />
+                                <TextBlock Text="VoLTE" FontSize="12" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <!-- 배너 레이어 (착신·긴급 스택, 최신 위) -->
+            <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Notify.Banners}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type svc:Banner}">
+                        <Border x:Name="Bar" Padding="14,6" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource Brush.Border}" Background="{DynamicResource Brush.HeldSoft}">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <Button Style="{StaticResource Btn.Sm.Pri}" Content="응답 F9" Command="{Binding DataContext.AnswerBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Margin="0,0,6,0" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
+                                    <Button Style="{StaticResource Btn.Sm}" Content="거절" Command="{Binding DataContext.RejectBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
+                                    <Button Style="{StaticResource Btn.Sm}" Content="채널로 이동" Command="{Binding DataContext.GoToChannelCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}" />
+                                </StackPanel>
+                                <TextBlock VerticalAlignment="Center" FontSize="14">
+                                    <Run Text="{Binding Title, Mode=OneWay}" FontWeight="Bold" /><Run Text=" · " /><Run Text="{Binding Subtitle, Mode=OneWay}" /><Run Text="  " />
+                                    <Run Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" FontFamily="{StaticResource Font.Mono}" />
+                                </TextBlock>
+                            </DockPanel>
+                        </Border>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsPilot}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.RingSoft}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsPtt}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.ListenSoft}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsEmg}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Bar" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsPeril}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Bar" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsAlert}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.Mon}" /><Setter TargetName="Bar" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <!-- 도킹 호스트 -->
+            <ad:DockingManager x:Name="Dock" AllowMixedOrientation="True" Margin="6">
+                <ad:LayoutRoot>
+                    <ad:LayoutPanel Orientation="Horizontal">
+                        <ad:LayoutPanel Orientation="Vertical" DockWidth="*">
+                            <ad:LayoutAnchorablePane DockHeight="600*">
+                                <ad:LayoutAnchorable ContentId="ptt" Title="⋮⋮ ① PTT 채널" CanClose="False" CanHide="False" CanAutoHide="True">
+                                    <v:PttChannelsPanel />
+                                </ad:LayoutAnchorable>
+                            </ad:LayoutAnchorablePane>
+                            <ad:LayoutAnchorablePane DockHeight="406*">
+                                <ad:LayoutAnchorable ContentId="pttlog" Title="⋮⋮ ② PTT 내역" CanClose="False" CanHide="False" CanAutoHide="True">
+                                    <v:PttActivityPanel DataContext="{Binding PttActivity}" />
+                                </ad:LayoutAnchorable>
+                            </ad:LayoutAnchorablePane>
+                        </ad:LayoutPanel>
+                        <ad:LayoutPanel Orientation="Vertical" DockWidth="*">
+                            <ad:LayoutAnchorablePane DockHeight="600*">
+                                <ad:LayoutAnchorable ContentId="call" Title="⋮⋮ ③ 일반통화" CanClose="False" CanHide="False" CanAutoHide="True">
+                                    <v:CallDeskPanel />
+                                </ad:LayoutAnchorable>
+                            </ad:LayoutAnchorablePane>
+                            <ad:LayoutAnchorablePane DockHeight="406*">
+                                <ad:LayoutAnchorable ContentId="calllog" Title="⋮⋮ ④ 일반통화 내역" CanClose="False" CanHide="False" CanAutoHide="True">
+                                    <v:CallActivityPanel DataContext="{Binding CallActivity}" />
+                                </ad:LayoutAnchorable>
+                            </ad:LayoutAnchorablePane>
+                        </ad:LayoutPanel>
+                    </ad:LayoutPanel>
+                </ad:LayoutRoot>
+            </ad:DockingManager>
+        </DockPanel>
+        <!-- 토스트 레이어 (우하단) -->
+        <ItemsControl ItemsSource="{Binding Notify.Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,18,18" Width="380">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate DataType="{x:Type svc:Toast}">
+                    <Border x:Name="T" Style="{StaticResource Card}" BorderBrush="{DynamicResource Brush.BorderStrong}" Margin="0,6,0,0">
+                        <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.18" /></Border.Effect>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="×" Background="Transparent" BorderThickness="0" Cursor="Hand" VerticalAlignment="Top"
+                                    Command="{Binding DataContext.DismissToastCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                            <StackPanel>
+                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontWeight="Medium" />
+                                <Button Content="▸ 상세" Background="Transparent" BorderThickness="0" Padding="0" HorizontalAlignment="Left" Cursor="Hand" FontSize="11.5" Foreground="{DynamicResource Brush.Muted}"
+                                        Command="{Binding DataContext.ToggleToastDetailCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}" />
+                                <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Detail}" FontSize="11.5" TextWrapping="Wrap" Visibility="{Binding ShowDetail, Converter={StaticResource BoolToVis}}" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding IsError}" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                        <DataTrigger Binding="{Binding IsWarn}" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
+                    </DataTemplate.Triggers>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </Grid>
+</Window>

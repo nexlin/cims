@@ -115,3 +115,9 @@ pw.md
 
 # Windows SDK 슈퍼빌드 (sdk/windows)
 build-win/
+
+# .NET 빌드 산출물 (sdk/windows/dotnet, windows/dispatch-desktop)
+sdk/windows/dotnet/**/bin/
+sdk/windows/dotnet/**/obj/
+windows/**/bin/
+windows/**/obj/

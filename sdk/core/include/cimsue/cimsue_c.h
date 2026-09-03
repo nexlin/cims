@@ -551,6 +551,22 @@ CIMSUE_API const cimsue_service_profile_t* CIMSUE_CALL cimsue_profile_service(co
 CIMSUE_API void CIMSUE_CALL cimsue_service_profile_to_account(const cimsue_service_profile_t* sp, const char* login_pw,
                                                               cimsue_account_config_t* out);
 
+/* ── ABI 자기검사 ──
+ * 바인딩(P/Invoke 등 손 평탄화 층)이 자기 구조체 정의를 이 DLL 이 실제로 컴파일한 레이아웃과 대조한다 —
+ * 헤더와 바인딩의 드리프트를 바인딩 쪽 단위시험이 잡는다(ue_sdk.md §6.4). 구조체를 추가하면 여기에도 등록한다. */
+typedef enum {
+    CIMSUE_STRUCT_ENGINE_CONFIG = 0, CIMSUE_STRUCT_ACCOUNT_CONFIG, CIMSUE_STRUCT_CALL_OPTIONS,
+    CIMSUE_STRUCT_GROUP_CALL_OPTIONS, CIMSUE_STRUCT_HEADER, CIMSUE_STRUCT_REG_INFO, CIMSUE_STRUCT_MCPTT_INFO,
+    CIMSUE_STRUCT_MEDIA_SOURCE, CIMSUE_STRUCT_CALL_INFO, CIMSUE_STRUCT_TALKER, CIMSUE_STRUCT_FLOOR_EVENT,
+    CIMSUE_STRUCT_FLOOR_INFO, CIMSUE_STRUCT_REQUEST_RESULT, CIMSUE_STRUCT_DIALOG_INFO, CIMSUE_STRUCT_ROSTER_ENTRY,
+    CIMSUE_STRUCT_SDS_MESSAGE, CIMSUE_STRUCT_STREAM_STATS, CIMSUE_STRUCT_AUDIO_DEVICE_INFO, CIMSUE_STRUCT_LISTENER,
+    CIMSUE_STRUCT_CSC_ENDPOINT, CIMSUE_STRUCT_TOKEN_SET, CIMSUE_STRUCT_SERVICE_ENDPOINT, CIMSUE_STRUCT_SERVICE_PROFILE,
+    CIMSUE_STRUCT_DISPATCH_PROFILE, CIMSUE_STRUCT_PROFILE, CIMSUE_STRUCT_GROUP_SUMMARY, CIMSUE_STRUCT_XCAP_DOC,
+    CIMSUE_STRUCT_COUNT_
+} cimsue_struct_id_t;
+/** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */
+CIMSUE_API int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id);
+
 #ifdef __cplusplus
 }  /* extern "C" */
 #endif
