@@ -2,8 +2,11 @@
 //   활성 알람 뷰는 ActiveAlarmsPage(store 라이브), 코드 사전·평가 규칙은 AlarmCatalogPage,
 //   코드별/유형별 집계·분포는 AlarmAnalysisPage 소관 — 여기는 기간 창 안의 알람
 //   라이프사이클(발생→변경→해소)과 이벤트 스트림 열람 전용.
-//   **알람 이력 / 이벤트 이력은 각각 위젯**이고, 둘 사이 전환은 탭 컨트롤 위젯이 쓰는 페이지
-//   파라미터 `atab` 을 배치의 visibleWhen 이 읽어 처리한다(widgets/core/faultWidgets.tsx).
+//   **화면 전체가 카드 하나**(`core.alarm-event-history`)다 — 전환 탭·기간 선택·이력 표는 따로
+//   떼면 말이 되지 않는 한 조작 단위(탭을 고르고 기간을 좁혀 표를 읽는다)라 함께 묶는다.
+//   카드 **안**은 바깥과 같은 48×48 셀 배치라 블록이 각각 위젯이고 재배치할 수 있다(§3.0.1).
+//   알람/이벤트 전환은 배치의 `visibleWhen`(파라미터 `atab`)이 판정한다.
+//   조건은 그대로 페이지 파라미터(`atab`/`days`)여서 딥링크가 화면을 재현한다.
 //   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
@@ -113,7 +116,7 @@ function DetailItem({ label, value }: { label: string; value?: string | null }) 
 export function AlarmsSection() {
   const { show } = useToast()
   const [events, setEvents] = useState<AlertEvent[]>([])
-  // 기간은 이 위젯이 소유하지 않는다 — 같은 페이지의 기간 선택 컨트롤(core.days-filter)이 쓰는 값.
+  // 기간은 이 표가 소유하지 않는다 — 화면의 기간 선택 컨트롤이 쓰는 페이지 파라미터를 읽는다.
   const days = Number(usePageParam('days')[0]) || 7
   const [sevFilter, setSevFilter] = useState('')
   const [codeFilter, setCodeFilter] = useState('')
@@ -406,7 +409,7 @@ function groupEvents(events: EventRecord[]): EventGroup[] {
 export function EventsSection() {
   const { show } = useToast()
   const [events, setEvents] = useState<EventRecord[]>([])
-  // 기간은 이 위젯이 소유하지 않는다 — 같은 페이지의 기간 선택 컨트롤(core.days-filter)이 쓰는 값.
+  // 기간은 이 표가 소유하지 않는다 — 화면의 기간 선택 컨트롤이 쓰는 페이지 파라미터를 읽는다.
   const days = Number(usePageParam('days')[0]) || 7
   const [filterType, setFilterType] = useState('')
   const [filterKind, setFilterKind] = useState('')
@@ -565,7 +568,3 @@ export function EventsSection() {
     </>
   )
 }
-
-// ── 페이지 ───────────────────────────────────────────────────────────────────
-//   화면 내 고정 레이아웃 — 탭/툴바/컬럼 헤더/페이저는 항상 보이고 표 영역만 내부 스크롤.
-//   (100vh − 콘텐츠 헤더·서브탭·본문 패딩 ≈ 135px)

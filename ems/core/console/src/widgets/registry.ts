@@ -2,7 +2,7 @@
 // 새 위젯: 코어면 CORE_WIDGETS 에, 서비스면 해당 manifest.widgets 에 추가.
 
 import type { WidgetDef } from './types'
-import { CORE_SPLITS, type SplitFn } from './legacySplit'
+import { CORE_MERGES, CORE_SPLITS, type SplitFn } from './legacyLayout'
 import { SERVICE_MANIFESTS } from '../services/registry'
 import { systemCardsWidget } from './core/SystemCardsWidget'
 import { systemTopologyWidget } from './core/SystemTopologyWidget'
@@ -11,19 +11,25 @@ import { pageFilterWidget } from './core/PageFilterWidget'
 import { sourcePickerWidget } from './core/SourcePickerWidget'
 import { FAULT_WIDGETS } from './core/faultWidgets'
 import { SERVICE_DEF_WIDGETS } from './core/serviceDefWidgets'
+import { MY_LAYOUT_WIDGETS } from './core/myLayoutWidgets'
 import { SHAPE_WIDGETS } from './shapes/ShapeWidget'
 
 // 코어(서비스 무지) 위젯 — 인프라/시스템 + 범용 shape 위젯(소스 선택형).
-const CORE_WIDGETS: WidgetDef[] = [
-  systemCardsWidget,
-  systemTopologyWidget,
-  systemResourceWidget,
-  pageFilterWidget,
-  sourcePickerWidget,
-  ...FAULT_WIDGETS,
-  ...SERVICE_DEF_WIDGETS,
-  ...SHAPE_WIDGETS,
-]
+// **집계는 lazy** — 카드 안에 블록을 끼우는 위젯(widgets/CardLayout.tsx)이 이 모듈을 되짚어 참조하므로
+// (registry → 위젯 모듈 → CardLayout → registry) 모듈 평가 시점에 배열을 만들면 초기화 순서에 걸린다.
+function coreWidgets(): WidgetDef[] {
+  return [
+    systemCardsWidget,
+    systemTopologyWidget,
+    systemResourceWidget,
+    pageFilterWidget,
+    sourcePickerWidget,
+    ...FAULT_WIDGETS,
+    ...SERVICE_DEF_WIDGETS,
+    ...MY_LAYOUT_WIDGETS,
+    ...SHAPE_WIDGETS,
+  ]
+}
 
 // 런타임 등록 위젯 — App 이 라우트 컴포넌트를 'page:<path>' 위젯으로 주입(모든 메뉴 페이지를
 // 위젯 합성 surface 로 편집 가능하게). registry 내 정적 import 로 잡기엔 순환이라 외부 주입.
@@ -45,7 +51,7 @@ function ensure() {
   const service = SERVICE_MANIFESTS.flatMap(
     m => (m.widgets ?? []).map(w => ({ ...w, serviceId: w.serviceId ?? m.id }))
   )
-  _all = [...CORE_WIDGETS, ...service, ..._extra]
+  _all = [...coreWidgets(), ...service, ..._extra]
   _byId = new Map(_all.map(w => [w.id, w]))
 }
 
@@ -59,7 +65,7 @@ export function allWidgets(): WidgetDef[] {
   return _all!
 }
 
-// 폐지된 묶음 위젯 → 부품 전개 규칙 (코어 + 서비스 pack 기여분). legacySplit.expandSplits 가 쓴다.
+// 폐지 위젯 전이 규칙 (코어 + 서비스 pack 기여분) — legacyLayout 의 expandSplits/collapseMerges 가 쓴다.
 let _splits: Record<string, SplitFn> | null = null
 export function splitFor(widgetId: string): SplitFn | undefined {
   if (!_splits) {
@@ -67,6 +73,15 @@ export function splitFor(widgetId: string): SplitFn | undefined {
     for (const m of SERVICE_MANIFESTS) Object.assign(_splits, m.splits ?? {})
   }
   return _splits[widgetId]
+}
+
+let _merges: Record<string, string> | null = null
+export function mergeFor(widgetId: string): string | undefined {
+  if (!_merges) {
+    _merges = { ...CORE_MERGES }
+    for (const m of SERVICE_MANIFESTS) Object.assign(_merges, m.merges ?? {})
+  }
+  return _merges[widgetId]
 }
 
 // 위젯 카테고리 — 편집 UI 그룹핑용. 표시 순서 + 한글 라벨.

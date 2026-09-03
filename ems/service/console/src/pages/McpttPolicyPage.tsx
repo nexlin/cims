@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { mcpttApi, type McpttServiceConfig } from '@core/api/mcptt'
 import { useToast } from '@core/components/Toast'
+import { InfoDot } from '@core/components/InfoDot'
 import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 
@@ -74,13 +75,18 @@ export default function McpttPolicyPage() {
   return (
     <div style={{ padding: 16, maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
-        <h2 style={{ margin: '0 0 4px' }}>MCPTT 정책</h2>
+        <h2 style={{ margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          MCPTT 정책
+          {/* 화면의 뜻은 한 번 읽으면 되는 설명이라 ⓘ 로 접는다 — 상태(아래)는 매번 봐야 하므로 남긴다. */}
+          <InfoDot label="MCPTT 정책이란?">
+            시스템 전역 서비스 설정(TS 24.484 <code>service-config</code>)입니다. 단말이 XCAP 으로 받아
+            기능 게이트로 쓰며, <b>사용자별 인가</b>(가입자 &gt; PTT &gt; 프로파일)와 <b>AND</b> 로 판정합니다 —
+            여기서 끈 기능은 프로파일이 허용해도 열리지 않습니다.
+          </InfoDot>
+        </h2>
         <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6 }}>
-          시스템 전역 서비스 설정(TS 24.484 <code>service-config</code>)입니다. 단말이 XCAP 으로 받아
-          기능 게이트로 쓰며, <b>사용자별 인가</b>(가입자 &gt; PTT &gt; 프로파일)와 <b>AND</b> 로 판정합니다 —
-          여기서 끈 기능은 프로파일이 허용해도 열리지 않습니다.
-          {cfg && !cfg.exists && <span style={{ color: 'var(--warning)' }}> · DB 행이 없어 기본값을 표시합니다(저장하면 생성됩니다).</span>}
-          {cfg?.update_time && <span> · 최근 변경 {new Date(cfg.update_time).toLocaleString()}</span>}
+          {cfg && !cfg.exists && <span style={{ color: 'var(--warning)' }}>DB 행이 없어 기본값을 표시합니다(저장하면 생성됩니다). </span>}
+          {cfg?.update_time && <span>최근 변경 {new Date(cfg.update_time).toLocaleString()}</span>}
         </div>
       </div>
 

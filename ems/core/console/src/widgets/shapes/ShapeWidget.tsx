@@ -122,8 +122,8 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
   }
 
   return (
-    <div className="panel" style={{ padding: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+    <div className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         {/* 제목 — 배치에서 지정(config.title)한 이름이 우선. 소스가 고정된 화면에서는 소스명보다
             "무엇을 그리는가"(호 시도 추이, 종료 사유 분포)가 읽기 쉽다. */}
         <span style={{ fontWeight: 600, fontSize: 13 }}>
@@ -153,7 +153,8 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
         ))}
         <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto' }} onClick={() => void load()}>↻</button>
       </div>
-      {body}
+      {/* 본문은 남은 높이를 전부 받는다 — 차트는 그 높이를 채우고(비율 렌더), 표는 넘치면 스크롤. */}
+      <div className="scroll-fill">{body}</div>
     </div>
   )
 }

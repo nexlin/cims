@@ -3,9 +3,13 @@
 //   알람은 /alerts/summary 집계만 사용(레코드 미수신 — 서버가 open/close 페어링),
 //   이벤트는 레코드를 받아 클라이언트에서 유형/소스별로 접는다.
 //
-// **블록 = 위젯 1개**로 나눠 배치한다(요약 타일 / 심각도 분포 / 일자별 추이 / 코드별 표 / 유형별 표).
-// 조회 일수는 `core.days-filter` 컨트롤 위젯이 페이지 파라미터 `days` 로 소유하고, 블록들은 그것을
-// 읽는다 — 같은 days 면 조회는 **1회**만 나간다(아래 공유 로더).
+// **화면 전체가 카드 하나**(`core.alarm-event-analysis`)다 — 전환 탭·기간 선택·블록들은 같은 기간
+// 창을 여러 각도(요약 / 분포 / 추이 / 코드별 / 유형별)에서 보는 한 벌이라 함께 묶는다.
+// 다만 카드 **안**은 바깥과 같은 48×48 셀 배치라(console_platform §3.0.1) 블록은 각각 위젯으로
+// 등록돼 있고, 운영자가 카드 안에서 재배치·추가·제거할 수 있다.
+// 알람/이벤트 전환은 배치의 `visibleWhen`(파라미터 `atab`)이 판정한다 — 카드 안에서도 같은 규칙.
+// 조회 일수는 페이지 파라미터 `days` 로 두므로 딥링크가 화면을 재현하고,
+// 같은 days 를 보는 블록이 여러 개여도 조회는 **1회**만 나간다(아래 공유 로더).
 import { useMemo, type ReactNode } from 'react'
 import { alertsApi, eventsApi, type AlertSummaryByType, type EventRecord } from '../api/alerts'
 import { usePageParam } from '../widgets/pageParams'
@@ -131,7 +135,7 @@ interface SourceAgg { source: string; count: number; last: string }
 const useAlarmSummaryRaw = makeSharedByKey(k => alertsApi.summary(Number(k)))
 const useEventListRaw = makeSharedByKey(k => eventsApi.list({ days: Number(k), limit: FETCH_LIMIT }))
 
-// 조회 일수 — 컨트롤 위젯이 없으면 기본 7일.
+// 조회 일수 — 아직 아무도 고르지 않았으면 기본 7일.
 function useDays(): string { return usePageParam('days')[0] || '7' }
 
 function useAlarmSummary() {
@@ -148,7 +152,7 @@ function useEventList() {
   return { days, events, loading, error, reload }
 }
 
-// 블록 공통 껍데기 — 제목 + 오류/로딩 표기.
+// 블록 공통 껍데기 — 제목 + 오류/로딩 표기. 루트가 `.panel`(flex:1)이라 담긴 칸을 채운다.
 function Block({ title, loading, error, children, pad = true }: {
   title?: ReactNode; loading?: boolean; error?: string; children: ReactNode; pad?: boolean
 }) {

@@ -137,7 +137,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 
 ## 1. Stage 별 상세
 
-### S1 — 정적 검사 (8 항목)
+### S1 — 정적 검사 (9 항목)
 
 | ID | 검사 | 도구 |
 |---|---|---|
@@ -149,6 +149,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UNIT-VERIFY-LIB | verify.lib 단위 | `python3 -m unittest tests.test_verify_lib` |
 | S1-UNIT-HA-INTENT | HA 무장/해제 의도·소유 경계 | `python3 -m unittest tests.test_ha_intent` |
 | S1-UNIT-CONSOLE-LAYOUT | 콘솔 레이아웃 영속 계약 | `python3 -m unittest tests.test_console_layouts` |
+| S1-UNIT-GRID-BUDGET | 콘솔 그리드 세로 예산·잠금 | `node tests/frontend/grid_budget.test.mjs` (gridLayout.ts esbuild 번들) |
 
 S1 FAIL → S2~S6 자동 BLOCKED (stage gate).
 

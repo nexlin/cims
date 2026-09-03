@@ -8,7 +8,7 @@
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { WidgetDef, PageLayout } from './widgets/types'
-import type { SplitFn } from './widgets/legacySplit'
+import type { SplitFn } from './widgets/legacyLayout'
 import type { Role } from './api/auth'
 
 export type RouteDef = {
@@ -64,8 +64,10 @@ export interface ServiceManifest {
   sections: RouteSection[]
   widgets?: WidgetDef[]      // registry 가 수집해 layout(PageLayout)에서 배치
   // 폐지한 묶음 위젯 id → 부품 전개 규칙. 저장본이 옛 id 를 참조하면 로드 시 부품으로 펼친다
-  // (widgets/legacySplit.ts). 묶음 위젯을 없앨 때 여기 한 줄을 남긴다.
+  // (widgets/legacyLayout.ts). 묶음 위젯을 없앨 때 여기 한 줄을 남긴다.
   splits?: Record<string, SplitFn>
+  // 반대 방향 — 폐지한 부품 위젯 id → 대체 위젯 id. 낱개로 흩어져 있던 것을 하나로 합칠 때 남긴다.
+  merges?: Record<string, string>
   // 데이터 소스는 manifest 가 아니라 Service Descriptor(data_sources, 백엔드 데이터)로 등록 —
   // shape 위젯이 /service-descriptors/data-sources 카탈로그를 소비 (완전 데이터 구동).
 }

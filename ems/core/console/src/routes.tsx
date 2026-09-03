@@ -15,7 +15,7 @@ import type { RouteDef, RouteSection } from './nav-types'
 import { SERVICE_MANIFESTS } from './services/registry'
 
 import {
-  DASHBOARD_LAYOUT, ALERTS_ACTIVE_LAYOUT, ALERTS_HISTORY_LAYOUT,
+  DASHBOARD_LAYOUT, MY_LAYOUT_LAYOUT, ALERTS_ACTIVE_LAYOUT, ALERTS_HISTORY_LAYOUT,
   ALERTS_ANALYSIS_LAYOUT, ALERTS_CATALOG_LAYOUT, ALERTS_AUDIT_LAYOUT,
 } from './widgets/layouts'
 import ServicesPage from './pages/ServicesPage'
@@ -27,7 +27,6 @@ import VerificationHistoryPage from './pages/VerificationHistoryPage'
 import DocsPage from './pages/DocsPage'
 import ExternalSystemsPage from './pages/ExternalSystemsPage'
 import ConsoleAccountsPage from './pages/ConsoleAccountsPage'
-import MyLayoutPage from './pages/MyLayoutPage'
 
 export type { RouteDef, RouteSection } from './nav-types'
 
@@ -56,7 +55,8 @@ const CORE_SECTIONS: RouteSection[] = [
     routes: [
       { path: '/dashboard', title: '종합 현황', layout: DASHBOARD_LAYOUT, layoutId: 'dashboard' },
       // 콘솔 D1 — 계정별 개인 대시보드 구성(프로파일+위젯). 서버 저장(/console/layouts/me).
-      { path: '/dashboard/my-layout', title: '내 대시보드 구성', component: MyLayoutPage },
+      { path: '/dashboard/my-layout', title: '내 대시보드 구성',
+        layout: MY_LAYOUT_LAYOUT, layoutId: 'dashboard.my-layout' },
     ],
   },
   {

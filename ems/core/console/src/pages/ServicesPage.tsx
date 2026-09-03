@@ -386,7 +386,7 @@ export default function ServicesPage() {
 
       <div style={{
         display: 'flex', gap: 16, alignItems: 'stretch',
-        height: 'calc(100vh - 180px)', minHeight: 320,
+        flex: 1, minHeight: 320,
       }}>
         <div style={{ flex: '3 1 0', minWidth: 0, overflow: 'auto' }}>
       {loading ? (
@@ -595,7 +595,7 @@ export default function ServicesPage() {
                   <textarea
                     className="form-input"
                     style={{
-                      width: '100%', height: 'calc(100vh - 260px)', minHeight: 400,
+                      width: '100%', height: '100%', minHeight: 400,
                       fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5,
                       background: '#0d1117', color: '#c9d1d9',
                     }}

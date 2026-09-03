@@ -121,7 +121,7 @@ export default function PttGroupsWorkbenchPage() {
   const openGroup = openId ? groups.find(g => g.id === openId) : undefined
 
   return (
-    <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', height: 'calc(100vh - 92px)' }}>
+    <div style={{ display: 'flex', gap: 16, alignItems: 'stretch', flex: 1, minHeight: 0 }}>
       {/* 좌: 조직 트리 (공유 스코프) */}
       <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
         style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />

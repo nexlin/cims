@@ -67,6 +67,11 @@ export const EVENT_KIND_LABEL: Record<string, string> = {
 // ── 심각도 (X.733 6단계) ─────────────────────────────────────────────────────
 export const SEVERITY_ORDER = ['critical', 'major', 'minor', 'warning', 'indeterminate'] as const
 
+// 심각도 표시명 — 활성 알람 타일(위젯 1장 = 심각도 1종)의 라벨·위젯 제목이 같은 표를 쓴다.
+export const SEVERITY_LABEL: Record<string, string> = {
+  critical: 'Critical', major: 'Major', minor: 'Minor', warning: 'Warning', indeterminate: 'Indeterminate',
+}
+
 export function sevBadgeClass(sev?: string): string {
   switch (sev) {
     case 'critical': return 'badge--red'

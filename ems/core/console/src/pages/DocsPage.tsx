@@ -55,7 +55,7 @@ export default function DocsPage() {
   }, [active])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 70px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
       <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
         {DOCS.map(d => (
           <button key={d.id}

@@ -2,14 +2,14 @@
 //  · 2D grid (placement 에 x/y): 12칸×N행 셀 그리드에 grid-column/grid-row 로 절대 배치.
 //  · legacy flow (x/y 없음): 12-col flow(합>12 wrap) — 기존 저장본/미편집 seed 가 그대로 렌더.
 // 위젯은 자체 chrome(패널/헤더)을 렌더 — 렌더러는 배치(span·좌표)만 담당. 예외는 배치 단위 표시
-// 이름(placement.title, 편집기 [⚙] 에서 지정)뿐 — 이건 위젯이 모르는 값이라 렌더러가 캡션으로 얹는다.
+// 이름(placement.title — 옛 저장본에만 남는 값)뿐. 위젯이 모르는 값이라 렌더러가 캡션으로 얹는다.
 // registry 에 없는 위젯 id → fallback 카드(graceful, 레이아웃 안 깨짐).
 
 import type { CSSProperties } from 'react'
 import WidgetApiBadge from '../components/WidgetApiBadge'
 import { getWidget } from './registry'
 import type { PageLayout } from './types'
-import { compact, isGridLayout, gridBox, GRID_COLS, ROW_H_VH, GRID_GAP } from './gridLayout'
+import { compact, isGridLayout, gridBox, GRID_COLS, GRID_ROWS, GRID_GAP } from './gridLayout'
 import { isPlacementVisible, usePageParams } from './pageParams'
 import type { WidgetPlacement } from './types'
 
@@ -45,8 +45,11 @@ export function GridRenderer({ layout }: { layout: PageLayout }) {
 }
 
 // ── 2D grid 렌더 ─────────────────────────────────────────────────────────
-// DOM 은 (y,x) 정렬로 렌더 — 명시 배치라 데스크톱은 순서 무관, 단일열 폴백(index.css @media)이
-// 올바른 시각 순서로 쌓이도록. --h-rows 는 단일열 폴백에서 min-height 계산에 쓰인다.
+// 캔버스는 **고정 예산**(48열 × GRID_ROWS행)을 콘텐츠 영역에 꽉 채운다 — 행 높이가 vh 절대값이
+// 아니라 `1fr` 이라 어떤 창 크기에서도 배치가 정확히 한 화면이고, 비율도 그대로다.
+// 창이 설계 해상도(1920×1080)보다 작으면 캔버스 min-size(index.css) 때문에 스크롤이 생긴다 —
+// 재배열하지 않고 그대로 보여주는 게 관제 화면의 규율이다(console_platform §3.0).
+// DOM 은 (y,x) 정렬로 렌더 — 명시 배치라 순서 무관이지만 탭 이동 순서가 시각 순서와 맞도록.
 function GridCanvas({ layout }: { layout: PageLayout }) {
   const gap = layout.gap ?? GRID_GAP
   const items = layout.widgets
@@ -56,7 +59,7 @@ function GridCanvas({ layout }: { layout: PageLayout }) {
   return (
     <div className="grid-canvas"
          style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID_COLS}, 1fr)`,
-                  gridAutoRows: `${ROW_H_VH}vh`, gap: 0, alignItems: 'stretch',
+                  gridTemplateRows: `repeat(${GRID_ROWS}, 1fr)`, gap: 0, alignItems: 'stretch',
                   ['--card-gap']: `${gap}px` } as CSSProperties}>
       {items.map(({ p, i, b }) => {
         const def = getWidget(p.widgetId)
@@ -66,7 +69,6 @@ function GridCanvas({ layout }: { layout: PageLayout }) {
           gridRow: `${b.y + 1} / span ${b.h}`,
           minWidth: 0,
         }
-        ;(style as Record<string, string | number>)['--h-rows'] = b.h
         return (
           <div key={`${p.widgetId}-${i}`} className="widget-fixed widget-api-host" style={style}>
             <WidgetApiBadge ids={def?.apis} sourceIds={def?.apiSources?.(p.config)} title={def?.title} overlay />

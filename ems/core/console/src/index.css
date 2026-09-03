@@ -182,7 +182,7 @@ body {
 .tab-btn:hover { background: var(--bg); color: var(--text); }
 .tab-btn--active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
 
-.app-main { flex: 1; padding: 24px; }
+.app-main { flex: 1; padding: var(--main-pad, 24px); }
 
 /* ── Page / panel layout ───────────────────────────────────── */
 .page { display: flex; flex-direction: column; gap: 16px; }
@@ -229,6 +229,31 @@ body {
 /* 위젯 본문의 스크롤 영역 — 내용이 넘치면 스크롤하고, 비었을 때 안내가 중앙에 오도록 flex 컬럼.
    (block 이면 .empty 가 위쪽에 붙어 카드 아래가 휑하게 남는다) */
 .scroll-fill { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+
+/* 카드 하나 안의 블록 배치(widgets/CardLayout.tsx) — **바깥 캔버스와 같은 48×48 셀 그리드**를
+   카드 박스에 그대로 깐다(min-size 없음: 카드가 주는 크기가 곧 캔버스). 그래서 좌표·편집기·잠금
+   규칙을 한 벌로 쓴다. 블록은 낱개로 배치했을 때(.widget-fixed)와 같은 규칙 — 할당된 칸을 채우고
+   넘치면 그 안에서 스크롤한다. */
+.card-canvas {
+  flex: 1; min-height: 0; min-width: 0;
+  display: grid; gap: 0; align-items: stretch;
+}
+.card-block { display: flex; min-width: 0; min-height: 0; box-sizing: border-box; }
+.card-canvas > .card-block,
+.card-canvas > .grid-widget { margin: calc(var(--card-gap, 12px) / 2); box-sizing: border-box; }
+.card-block > * { flex: 1; min-width: 0; min-height: 0; }
+.card-block > .panel { overflow-y: auto; overflow-x: hidden; }
+.card-block > .toolbar,
+.card-block > .tab-nav { align-items: center; }
+
+/* 고정 페이지(component 라우트)를 위젯으로 감싼 본문 — 위젯과 같은 규율(console_platform §3.0):
+   배치한 칸을 채우고, 넘치면 브라우저가 아니라 **이 안에서** 스크롤한다.
+   페이지 루트가 자기 높이를 잡는 경우(`flex:1`)와 내용만큼 자라는 경우 둘 다 받아 준다. */
+.page-scroll {
+  flex: 1; min-height: 0; min-width: 0;
+  display: flex; flex-direction: column;
+  overflow: auto;
+}
 
 .panel-header {
   padding: 12px 16px;
@@ -1091,6 +1116,18 @@ body {
 .app-layout {
   --header-h: 64px;   /* 위젯 편집 컨트롤 수용 위해 확대 (구 52px) */
   --sidebar-w: 224px;
+  /* ── 설계 캔버스 (관제 화면 기준 해상도) ────────────────────────────────
+     화면은 1920×1080 에서 스크롤 없이 한눈에 들어와야 한다(console_platform §3.0).
+     위젯 그리드가 차지하는 실제 박스 = 그 해상도에서 셸 크롬을 뺀 크기이고, 그리드는 이 박스를
+     48열 × 48행으로 나눈다(gridLayout.GRID_COLS/GRID_ROWS → 셀 ≈ 34.3 × 20.2px).
+     `--sidebar-w-full` 을 쓰는 이유: 사이드바를 접으면 자리가 넓어지는 것이지 설계 폭이 바뀌는
+     게 아니다. 창이 이보다 작으면 재배열하지 않고 그대로 두고 스크롤이 생긴다. */
+  --design-w: 1920px;
+  --design-h: 1080px;
+  --sidebar-w-full: 224px;
+  --main-pad: 24px;
+  --canvas-w: calc(var(--design-w) - var(--sidebar-w-full) - var(--main-pad) * 2);
+  --canvas-h: calc(var(--design-h) - var(--header-h) - var(--main-pad) * 2);
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
   grid-template-rows: var(--header-h) 1fr;
@@ -1201,7 +1238,8 @@ body {
 /* ── Content + SubTabs ──────────────────────────── */
 .app-content {
   grid-area: content;
-  overflow-y: auto; padding: 0; position: relative;
+  /* 설계 캔버스보다 창이 작을 때만 스크롤이 생긴다 — 가로도 함께(재배열 안 함). */
+  overflow: auto; padding: 0; position: relative;
   display: flex; flex-direction: column;
 }
 .app-content-header {
@@ -1221,20 +1259,33 @@ body {
 .subtabs-item--active {
   color: var(--primary); border-bottom-color: var(--primary); font-weight: 600;
 }
-.app-content-body { padding: 24px; flex: 1; }
+/* 라우트 본문 래퍼 — 위젯 캔버스가 "남은 높이 전부"를 definite 하게 받도록 flex 사슬을 이어준다.
+   그리드 행이 `1fr` 이라 캔버스에 확정 높이가 없으면 트랙이 내용 높이로 쪼그라든다. */
+.app-content-body {
+  padding: var(--main-pad, 24px); flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+}
+.app-content-body > .layout-host { flex: 1; min-height: 0; }
 
 /* ── 위젯 편집 컨트롤 (글로벌 헤더 슬롯으로 portal — 2026-06-10) ─────────
    구 우상단 플로팅 overlay 가 첫 행 위젯의 컨트롤(↑↓/폭/높이/✕)을 덮던 문제로
    헤더(.app-header-editslot) 내 상주로 이전. */
-.layout-host { position: relative; }
+.layout-host { position: relative; display: flex; flex-direction: column; }
+/* 캔버스는 남은 높이를 받되 **설계 캔버스보다 작아지지는 않는다**(.grid-canvas 의 min-height).
+   여기서 min-height:0 을 주면 그 하한이 무력화돼 트랙(1fr)이 내용 높이로 쪼그라든다. */
+.layout-host > .grid-canvas { flex: 1; }
+.layout-edit-budget { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .icon-btn--danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .layout-edit-fab { opacity: 0.85; }
 .layout-edit-fab:hover { opacity: 1; }
 .layout-edit-hint { font-size: 12px; color: var(--primary); font-weight: 600; white-space: nowrap; }
 
 /* ── 자유 2D 그리드 (GridRenderer 뷰 + GridEditor 편집) ────────────────────
-   위젯 배치를 12칸×N행 셀 그리드에 grid-column/grid-row 로 절대 배치.
-   행 높이 = 화면 세로의 2%(vh) = gridLayout.ROW_H_VH → 모든 해상도에서 같은 세로 비율. */
+   위젯 배치를 48열 × 48행 셀 그리드에 grid-column/grid-row 로 절대 배치.
+   **캔버스는 화면 한 장**이다 — 열도 행도 `1fr` 이라 콘텐츠 영역을 정확히 채우고, 창 크기가
+   달라져도 배치 비율은 그대로다. min-size 로 설계 캔버스(1920×1080 기준)를 하한으로 두므로
+   창이 그보다 작으면 재배열 없이 스크롤만 생긴다(관제 화면 규율). */
+.grid-canvas { min-width: var(--canvas-w); min-height: var(--canvas-h); }
 .grid-canvas .widget-fixed { display: flex; flex-direction: column; min-height: 0; }
 /* 카드 간 간격 = 각 카드 margin(트랙 gap 아님) → 칸수(48)와 간격이 서로 간섭하지 않음. box-sizing 으로 span 크기 유지. */
 .grid-canvas > * { margin: calc(var(--card-gap, 12px) / 2); box-sizing: border-box; }
@@ -1343,6 +1394,33 @@ body {
 }
 .grid-canvas--dragging { user-select: none; cursor: grabbing; }
 
+/* 잠긴 카드 — 위치·크기 고정. 실선 테두리로 "여긴 안 움직인다"를 드러내고 드래그 커서를 없앤다. */
+.grid-widget--locked { border-style: solid; border-color: var(--primary); }
+.grid-widget--locked > .grid-drag-handle { cursor: default; }
+
+/* ── 카드 안 편집 (console_platform §3.0.1) ─────────────────────────────────
+   편집 중인 카드는 **자기 자리에 그대로** 있고 본문만 중첩 편집기가 된다. 편집 가능한 영역이
+   곧 그 카드의 박스라는 걸 보여주려고, 그 카드만 또렷하게 두고 나머지는 흐리고 잠근다. */
+.grid-canvas--inside .grid-widget { transition: opacity .12s; }
+.grid-widget--dimmed { opacity: .32; pointer-events: none; }
+.grid-widget--dimmed .grid-rz { display: none; }
+.grid-widget--inside {
+  border-style: solid; border-width: 2px; border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+  z-index: 15;
+}
+/* 편집 중인 카드의 제목줄만 **겹치지 않고 자기 줄을 차지**한다 — 안쪽 블록의 제목줄과 겹치면
+   [↺ 기본][저장][완료] 를 누를 수 없다. 편집 중에만 생기는 도구 띠라서 뷰에는 영향이 없다. */
+.grid-widget--inside > .grid-drag-handle {
+  position: static; opacity: 1; cursor: default;
+  background: var(--primary-soft); color: var(--text);
+}
+/* 중첩 편집기는 조작해야 하므로 본문의 미리보기 잠금을 푼다 */
+.grid-widget--inside > .grid-widget-body { pointer-events: auto; opacity: 1; }
+/* 카드 안 편집 캔버스 — 그 카드 박스가 곧 캔버스(min-size 없음). 점선으로 편집 중임을 드러낸다. */
+.card-canvas--edit { background: color-mix(in srgb, var(--primary) 5%, transparent); }
+.card-canvas--edit > .grid-widget { border-style: dashed; }
+
 /* 미리보기 — 편집 중 저장 후 모습 확인. 제목줄·리사이즈 핸들·점선을 감추고 본문을 그대로 보여준다.
    조작 요소가 사라지므로 드래그/리사이즈도 자연히 멈춘다. */
 .grid-canvas--preview .grid-drag-handle,
@@ -1351,15 +1429,10 @@ body {
 .grid-canvas--preview .grid-widget { border-color: transparent; }
 .grid-canvas--preview .grid-widget-body { pointer-events: auto; opacity: 1; }
 
-/* 좁은 화면 — grid 를 단일열로 collapse (콘솔 최초 media query, .grid-canvas 로 스코프).
-   x/w 무시하고 DOM(=시각) 순서로 쌓고, 행 span → --h-rows 로 최소 높이 확보(행 = 화면 2%, ROW_H_VH 동기). 편집은 데스크톱 전용. */
-@media (max-width: 900px) {
-  .grid-canvas { display: flex !important; flex-direction: column; }
-  .grid-canvas > * {
-    grid-column: auto !important; grid-row: auto !important;
-    min-height: calc(var(--h-rows, 15) * 2vh);
-  }
-}
+/* 좁은 화면에서도 **재배열하지 않는다** — 관제 화면은 운영자가 위치를 기억하고 쓰므로 배치가
+   창 크기에 따라 바뀌면 안 된다. 설계 캔버스보다 작으면 그대로 두고 스크롤이 생긴다
+   (.grid-canvas 의 min-width/min-height + .app-content 의 overflow). 예전의 단일열 collapse
+   media query 는 그래서 제거했다. */
 
 /* ── ⓘ 말풍선 (components/InfoDot) ── */
 .info-dot-wrap { position: relative; display: inline-flex; }

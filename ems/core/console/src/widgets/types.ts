@@ -35,6 +35,10 @@ export interface WidgetDef {
   serviceId?: string              // undefined=코어, 'cims'=CIMS 서비스 pack
   component: ComponentType<WidgetProps>
   defaultSize?: { w: number; h?: number }  // 기본 폭(12-칸 기준 1~12, 미지정=12; grid 은 ×COL_SCALE 환산) + grid 기본 행 span(h).
+  // 이 위젯이 쓸모를 유지하는 최소 크기(그리드 셀). 캔버스가 고정 예산이라 위젯을 키우면 다른
+  // 위젯이 줄어드는데, 그 하한이 여기다(미지정 = gridLayout.MIN_ROWS). 표·차트처럼 몇 행부터
+  // 읽을 수 있는지가 분명한 위젯만 선언한다.
+  minSize?: { w?: number; h?: number }
   adminOnly?: boolean
   // 이 위젯 인스턴스가 갖는 설정 항목 — 편집기 [⚙] 패널이 그린다. 배치(placement.config)에 저장돼
   // 같은 위젯을 다른 설정으로 여러 벌 놓을 수 있다(예: 소스가 다른 시계열 차트 2개).
@@ -45,6 +49,10 @@ export interface WidgetDef {
   // 이 위젯이 호출하는 API 의 id 목록 (백엔드 `*_API_DOCS` 의 id). 개발자 모드에서 위젯에 [API]
   // 배지로 노출된다. **id 만** 선언한다 — 경로/파라미터/응답 등 내용은 백엔드가 소유(api_docs.md).
   apis?: string[]
+  // 카드 안 기본 배치 — 이 위젯이 "여러 블록을 담은 카드"면 그 안의 배치를 여기 선언한다
+  // (widgets/CardLayout.tsx). 좌표계는 바깥과 같은 48×48 셀이라 편집기가 그대로 재사용된다.
+  // 운영자가 카드 안을 편집하면 `placement.config.layout` 에 저장돼 그것이 우선한다.
+  cardLayout?: WidgetPlacement[]
   // 배치 설정에 따라 호출 API 가 갈리는 위젯(소스 선택형 shape)은 API id 를 정적으로 못 적는다.
   // 대신 이 배치가 쓰는 **데이터 소스 id** 를 돌려주면, 배지가 카탈로그에서 그 소스의 endpoint 를
   // 찾아 API 문서의 path 와 대조해 id 를 얻는다. 둘 다 이미 존재하는 정보라 새 중복 선언이 아니다.
@@ -55,6 +63,7 @@ export interface WidgetDef {
 // 레이아웃에 배치된 위젯 1개. 두 배치 모드가 하위호환으로 공존한다:
 //  · legacy flow: x/y 없음 → GridRenderer 가 순서+w 로 flow(합>12 wrap). h 는 vh(1~100)|px(>100).
 //  · 2D grid:     x/y 있음 → 절대 셀 좌표 배치. w=열 span, h=행 span(모두 그리드 셀 단위로 통일).
+//                 세로는 **고정 예산**(gridLayout.GRID_ROWS)이라 y+h 가 그 값을 넘을 수 없다.
 // 편집 진입 시 legacy 를 grid 로 1회 migrate(gridLayout.flowToGrid). 판별은 gridLayout.isGridPlacement.
 export interface WidgetPlacement {
   widgetId: string
@@ -67,8 +76,12 @@ export interface WidgetPlacement {
   // (예: 유형별 분석의 [알람]/[이벤트]). 숨겨진 배치는 렌더에서 빠지고 남은 것이 위로 당겨진다.
   // **편집 모드에서는 조건과 무관하게 모두 보인다** — 숨은 위젯도 배치해야 하므로.
   visibleWhen?: { param: string; equals: string }
-  // 이 인스턴스의 표시 이름(운영자 지정). 미지정 시 WidgetDef.title. 같은 위젯을 여러 벌 놓고
-  // 각각 다르게 부르는 일이 분해 후엔 흔하므로 배치 단위 속성이다. 뷰에서 캡션으로 표시.
+  // 잠금 — 이 배치의 위치·크기를 고정한다. 다른 위젯을 키울 때 밀리지도 줄어들지도 않는다.
+  // 캔버스가 고정 예산이라 "어디를 지킬지"를 운영자가 지정하는 장치다(console_platform §3.0).
+  locked?: boolean
+  // 이 배치의 표시 이름 — **옛 저장본 호환 전용**. 편집 UI 에서는 더 이상 붙일 수 없다:
+  // 관제 화면에서 위젯 이름을 바꾸면 그게 원래 무엇인지 가려져 위험하다(identifier_model —
+  // 동작은 불변 id 로, 표시는 정의된 이름으로). 남아 있는 값은 뷰에서 캡션으로 계속 그린다.
   title?: string
 }
 

@@ -9,7 +9,14 @@
 // 편집 경로는 **항목 단위 인라인 CRUD 로 통일**한다 — 각 위젯이 자기 컬렉션의 [＋ 추가]/[편집]/[✕] 를
 // 온전히 담당한다. 예전에는 데이터 소스만 인라인이고 모듈·알람 규칙은 서비스 편집 모달 안에 있어
 // 같은 성격인데 조작 방법이 갈렸다.
+//
+// **배치 단위는 화면 전체가 카드 하나**(`core.service-defs`)다 — 고른 서비스가 곧 아래 세 컬렉션의
+// 의미라, 선택을 떼거나 컬렉션 하나만 떼어 놓으면 무엇에 대한 목록인지 알 수 없다. 카드 안 구성은
+// SERVICE_DEF_CARD_ROWS 선언이 정본이고, 블록은 아래 위젯들을 id 로 그대로 쓴다(CardLayout).
 import { useState } from 'react'
+import { makeCardWidget } from '../CardLayout'
+import { GRID_ROWS } from '../gridLayout'
+import type { WidgetPlacement } from '../types'
 import { serviceDescriptorsApi, type ServiceDescriptor } from '../../api/serviceDescriptors'
 import { ServiceForm, ModuleForm, AlertRuleForm, DataSourceForm } from '../../pages/descriptors/forms'
 import Modal from '../../components/Modal'
@@ -335,7 +342,24 @@ export const servicePickerWidget: WidgetDef = {
 const def = (id: string, title: string, component: WidgetDef['component'], h: number): WidgetDef =>
   ({ id, title, category: 'service', component, defaultSize: { w: 12, h }, adminOnly: true })
 
+// 카드 안 기본 배치 — 서비스 선택 / 이름·JSON·삭제 / 모듈 · 알람 규칙 / 데이터 소스.
+// 좌표계는 바깥 캔버스와 같은 48×48 셀이라 운영자가 같은 편집기로 카드 안을 재배치할 수 있다.
+export const SERVICE_DEF_CARD_LAYOUT: WidgetPlacement[] = [
+  { widgetId: 'core.service-picker',      x: 0,  y: 0,  w: 48, h: 4 },
+  { widgetId: 'core.service-def.header',  x: 0,  y: 4,  w: 48, h: 4 },
+  { widgetId: 'core.service-def.modules', x: 0,  y: 8,  w: 24, h: 19 },
+  { widgetId: 'core.service-def.rules',   x: 24, y: 8,  w: 24, h: 19 },
+  { widgetId: 'core.service-def.sources', x: 0,  y: 27, w: 48, h: 21 },
+]
+
+export const serviceDefsWidget: WidgetDef = makeCardWidget({
+  id: 'core.service-defs', title: '서비스 정의 화면', category: 'service', adminOnly: true,
+  defaultSize: { w: 12, h: GRID_ROWS },
+  layout: SERVICE_DEF_CARD_LAYOUT,
+})
+
 export const SERVICE_DEF_WIDGETS: WidgetDef[] = [
+  serviceDefsWidget,
   servicePickerWidget,
   def('core.service-def.header', '서비스 정의 — 이름/JSON/삭제', ServiceHeaderBlock, 5),
   def('core.service-def.modules', '서비스 정의 — 모듈', ModulesBlock, 16),

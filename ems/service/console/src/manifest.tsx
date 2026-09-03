@@ -17,6 +17,8 @@ import { recentEventsWidget } from './widgets/RecentEventsWidget'
 import { activeVoipWidget } from './widgets/ActiveVoipWidget'
 import { activePttWidget } from './widgets/ActivePttWidget'
 import { CIMS_OUTPUT_WIDGETS } from './widgets/outputWidgets'
+import { STATS_SCREEN_WIDGETS } from './widgets/statsScreens'
+import { ABNORMAL_WIDGETS } from './widgets/abnormalWidgets'
 
 import ProvisioningWorkbenchPage from './pages/ProvisioningWorkbenchPage'
 import OrganizationsPage from './pages/OrganizationsPage'
@@ -24,13 +26,12 @@ import PttGroupsWorkbenchPage from './pages/PttGroupsWorkbenchPage'
 import DispatchGroupsPage from './pages/DispatchGroupsPage'
 import McpttPolicyPage from './pages/McpttPolicyPage'
 import RegisterFlowPage from './pages/RegisterFlowPage'
-import AbnormalSessionsPage from './pages/AbnormalSessionsPage'
 import LeakReclaimsPage from './pages/LeakReclaimsPage'
 import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아웃 — '구성' 그룹에 배치
 
 import {
   SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
-  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_IFACE_LAYOUT,
+  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_IFACE_LAYOUT, ABNORMAL_SESSIONS_LAYOUT,
 } from './layouts'
 
 // 출력 섹션 route = 합성 가능한 레이아웃 (고정 페이지 대체). 각 route 는 layout(seed) + layoutId 영속.
@@ -45,6 +46,8 @@ export const cimsManifest: ServiceManifest = {
     healthDotsWidget, cspRolesWidget,
     alertBannerWidget, activeAlarmsWidget, recentEventsWidget, activeVoipWidget, activePttWidget,
     ...CIMS_OUTPUT_WIDGETS,
+    ...STATS_SCREEN_WIDGETS,       // 성능 통계 — 화면 하나 = 카드 하나(카드 안 블록은 코어 위젯 그대로)
+    ...ABNORMAL_WIDGETS,           // 비정상 세션 이력 — 카드 + 블록 4
   ],
   // 폐지한 묶음 위젯 → 부품 전개 (저장본이 옛 id 를 참조할 때만 쓰인다)
   splits: { ...STAT_CARD_SPLITS },
@@ -62,8 +65,8 @@ export const cimsManifest: ServiceManifest = {
         { path: '/service/status',         title: '서비스 현황',    layout: SERVICE_STATUS_LAYOUT,        layoutId: 'service.status',        requiredRole: 'monitor' },
         { path: '/service/history/volte',  title: 'VoLTE 호 이력',  layout: SERVICE_HISTORY_VOLTE_LAYOUT, layoutId: 'service.history-volte', requiredRole: 'monitor' },
         { path: '/service/history/ptt',    title: 'PTT 세션 이력',  layout: SERVICE_HISTORY_PTT_LAYOUT,   layoutId: 'service.history-ptt',   requiredRole: 'monitor' },
-        { path: '/service/abnormal-sessions', title: '비정상 세션 이력', component: AbnormalSessionsPage, requiredRole: 'monitor',
-          apis: ['flow.abnormal-sessions'] },
+        { path: '/service/abnormal-sessions', title: '비정상 세션 이력', requiredRole: 'monitor',
+          layout: ABNORMAL_SESSIONS_LAYOUT, layoutId: 'service.abnormal-sessions' },
         { path: '/service/register-flow',     title: '메세지 이력', component: RegisterFlowPage,     requiredRole: 'monitor',
           apis: ['flow.user', 'flow.register', 'flow.register.list', 'flow.body'] },
       ],

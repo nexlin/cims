@@ -111,7 +111,7 @@ export default function PackagesPage() {
   if (loading) return <div className="empty">로딩 중...</div>
 
   return (
-    <div style={{ display: 'flex', gap: 16, height: 'calc(100vh - 120px)' }}>
+    <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
       {/* ── 좌측: 모듈 목록 ── */}
       <div style={{
         width: 280, flex: '0 0 auto', display: 'flex', flexDirection: 'column',

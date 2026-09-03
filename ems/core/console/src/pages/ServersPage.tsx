@@ -17,6 +17,7 @@ import type { GroupMount } from '../api/ha_groups'
 import { splitPrefixHost } from './ha/helpers'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
+import { InfoDot } from '../components/InfoDot'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
@@ -415,7 +416,7 @@ export default function ServersPage() {
   if (loading) return <div className="empty">로딩 중...</div>
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: 'calc(100vh - 120px)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
       {/* 페이지 탭 — 좌측 선택(서버/그룹) 공유, 우측 내용 전환 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 2, borderBottom: '2px solid var(--border)' }}>
         {PAGE_TABS.map(t => {
@@ -1614,6 +1615,11 @@ function ModuleSpecSection({ group, deployments, onReload }: {
            title="모듈별 운영 설정 (앱 설정과 별개) — 각 노드 modules/<mod>/service.json 으로 반영">
         <span onClick={() => setOpen(v => !v)} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
         <span onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer' }}>모듈 운영 명세 (감시 · 절체 모드)</span>
+        <InfoDot label="모듈 운영 명세란?">
+          이 설정은 앱 설정(config.json)과 별개 파일(service.json)로 각 노드에 저장되며 agent 가
+          감시·절체 판정에 사용합니다. 안전 등급 shared_writer/unknown 은 절체 후 자동 복귀(래치 해제)를
+          하지 않고 운영자 확인을 요구합니다.
+        </InfoDot>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, cursor: 'pointer' }}
               onClick={() => setOpen(v => !v)}>
           {modules.join(', ')}
@@ -1674,10 +1680,6 @@ function ModuleSpecSection({ group, deployments, onReload }: {
               })}
             </tbody>
           </table>
-          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-            이 설정은 앱 설정(config.json)과 별개 파일(service.json)로 각 노드에 저장되며 agent 가 감시·절체 판정에 사용합니다.
-            안전 등급 shared_writer/unknown 은 절체 후 자동 복귀(래치 해제)를 하지 않고 운영자 확인을 요구합니다.
-          </div>
         </div>
       )}
     </div>
@@ -1914,10 +1916,12 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
 }) {
   return (
     <div style={{ padding: 20, overflow: 'auto' }}>
-      <h4 style={{ marginTop: 0 }}>멤버별 패키지 배포 현황 — {group.name}</h4>
-      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-        설치/업그레이드/롤백 등 작업은 좌측 트리(또는 아래 멤버 클릭)에서 서버를 선택해 수행합니다.
-      </p>
+      <h4 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+        멤버별 패키지 배포 현황 — {group.name}
+        <InfoDot label="여기서 무엇을 하나?">
+          설치/업그레이드/롤백 등 작업은 좌측 트리(또는 아래 멤버 클릭)에서 서버를 선택해 수행합니다.
+        </InfoDot>
+      </h4>
       <table className="data-table">
         <thead>
           <tr><th>서버</th><th>상태</th><th>배포 모듈</th></tr>

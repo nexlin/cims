@@ -221,7 +221,7 @@ export default function VolteHistoryPage() {
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         {/* 좌: 부서 트리 */}
-        <div style={{ flex: '0 0 220px', height: 'calc(100vh - 230px)', minHeight: 420, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
+        <div style={{ flex: '0 0 220px', minHeight: 0, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
           <div onClick={() => setSelOrg('')}
             style={{ cursor: 'pointer', padding: '4px 6px', borderRadius: 4, fontSize: 13, fontWeight: 700,
               background: selOrg === '' ? 'rgba(80,120,255,.12)' : undefined }}>
@@ -238,7 +238,7 @@ export default function VolteHistoryPage() {
         </div>
 
         {/* 우: 히트맵 + 호 목록 */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 230px)', minHeight: 420 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {/* 시간대 히트맵 */}
           <div style={{ flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>

@@ -11,7 +11,7 @@ import type { CSSProperties } from 'react'
 import { useSharedHealth, type HistorySample } from '@core/widgets/useSharedHealth'
 import type { HealthResponse } from '@core/api/stats'
 import type { WidgetDef } from '@core/widgets/types'
-import type { SplitFn } from '@core/widgets/legacySplit'
+import type { SplitFn } from '@core/widgets/legacyLayout'
 import { Sparkline } from './shared'
 
 // 카드 상자 — flex 컬럼(내용 세로 중앙). 위젯 1장으로 배치되면 grid 칸을 채우고(flex:1),
@@ -107,7 +107,7 @@ function makeMetricWidget(m: MetricDef): WidgetDef {
 export const STAT_CARD_WIDGETS: WidgetDef[] = HEALTH_METRICS.map(makeMetricWidget)
 
 // 구 묶음 위젯 `cims.kpi`("KPI (가입자/번호/호/그룹/RTP)" — 7개 지표가 한 카드) → 지표별 위젯 전개.
-// 묶음 위젯 자체는 없앴다. 이미 저장된 레이아웃만 로드 시 펼쳐 준다(legacySplit.ts).
+// 묶음 위젯 자체는 없앴다. 이미 저장된 레이아웃만 로드 시 펼쳐 준다(legacyLayout.ts).
 export const STAT_CARD_SPLITS: Record<string, SplitFn> = {
   'cims.kpi': () => HEALTH_METRICS.map(m => ({ widgetId: `cims.stat.${m.key}` })),
 }

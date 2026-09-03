@@ -1,4 +1,8 @@
 // shape별 순수 렌더러 — shape 데이터만 받아 그린다 (소스/fetch 무관). 테마 토큰 사용.
+//
+// **차트 높이는 담긴 칸을 따라간다** — px 를 박아 두면 카드를 키워도 여백만 생기고 줄이면 잘린다.
+// 캔버스가 고정 예산(화면 한 장)이라 카드 크기가 배치마다 다르므로, 막대 높이는 플롯 영역 대비
+// **비율(%)** 로 그린다(플롯 영역은 flex:1 로 남은 높이를 전부 차지).
 import { useRef, useState } from 'react'
 import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData } from './types'
 
@@ -6,21 +10,25 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
   const { buckets, unit } = data
   const vals = buckets.map(b => b.value)
   const max = Math.max(...vals, 1)
-  const maxH = 180
   if (buckets.length === 0) return <div className="empty">데이터 없음</div>
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: maxH, padding: '0 4px' }}>
-        {buckets.map((b, i) => (
-          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{b.value > 0 ? b.value : ''}</div>
-            <div title={`${b.label}: ${b.value}${unit || ''}`}
-                 style={{ width: '100%', maxWidth: 32, height: Math.max(b.value / max * (maxH - 20), 2),
-                          background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{String(b.label)}</div>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: 2, padding: '0 4px' }}>
+      {buckets.map((b, i) => (
+        <div key={i} style={{ flex: 1, minWidth: 0, height: '100%',
+                              display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
+            {b.value > 0 ? b.value : ''}
           </div>
-        ))}
-      </div>
+          {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
+          <div style={{ flex: 1, minHeight: 0, width: '100%',
+                        display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+            <div title={`${b.label}: ${b.value}${unit || ''}`}
+                 style={{ width: '100%', maxWidth: 32, height: `${(b.value / max) * 100}%`, minHeight: 2,
+                          background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
+          </div>
+          <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{String(b.label)}</div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -40,7 +48,6 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
 
   const sum = (b: typeof buckets[number]) => series.reduce((a, sp) => a + (b.values[sp.key] || 0), 0)
   const max = Math.max(1, ...buckets.map(sum))
-  const maxH = 190
   // 라벨이 촘촘하면(버킷이 많으면) 몇 칸 걸러 하나만 적는다 — 겹쳐 뭉개지는 것보다 낫다.
   const every = Math.ceil(buckets.length / 24)
   // 고른 계열 중 포함관계로 겹치는 쌍이 있으면 합계가 중복된다.
@@ -55,8 +62,10 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
   const hoveredBucket = hover ? buckets.find(b => String(b.label) === hover.bucket) : undefined
 
   return (
-    <div ref={wrap} style={{ position: 'relative' }} onMouseLeave={() => setHover(null)}>
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
+    <div ref={wrap} style={{ position: 'relative', flex: 1, minHeight: 0,
+                             display: 'flex', flexDirection: 'column' }}
+         onMouseLeave={() => setHover(null)}>
+      <div style={{ flex: 'none', display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 8 }}>
         {series.map(sp => (
           <span key={sp.key} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: sp.color }} />
@@ -65,11 +74,11 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
         ))}
       </div>
       {overlap.length > 0 && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+        <div style={{ flex: 'none', fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
           ※ {overlap.map(sp => sp.label).join(' · ')} 은(는) 다른 계열을 포함합니다 — 함께 쌓으면 합계가 중복됩니다.
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: maxH, padding: '0 4px' }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: 2, padding: '0 4px' }}>
         {buckets.map((b, i) => {
           const total = sum(b)
           const on = hover?.bucket === String(b.label)
@@ -86,7 +95,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
                   return (
                     <div key={sp.key}
                          onMouseMove={e => move(e, String(b.label), sp.key, total)}
-                         style={{ width: '100%', maxWidth: 26, height: Math.max(v / max * (maxH - 26), 2),
+                         style={{ width: '100%', maxWidth: 26, height: `${(v / max) * 100}%`, minHeight: 2,
                                   background: sp.color,
                                   opacity: !hover || hover.key === sp.key ? 1 : 0.45,
                                   cursor: 'default' }} />
@@ -97,7 +106,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
                        style={{ width: '100%', maxWidth: 26, height: 2, background: 'var(--border)' }} />
                 )}
               </div>
-              <div style={{ fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden',
+              <div style={{ flex: 'none', fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden',
                             color: on ? 'var(--text)' : 'var(--text-muted)',
                             fontWeight: on ? 600 : 400 }}>
                 {i % every === 0 || on ? String(b.label) : ''}

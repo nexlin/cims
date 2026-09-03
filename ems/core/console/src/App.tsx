@@ -18,6 +18,7 @@ import { authApi } from './api/auth'
 import { EditableLayout } from './widgets/EditableLayout'
 import { registerWidgets } from './widgets/registry'
 import type { WidgetProps, PageLayout } from './widgets/types'
+import { GRID_COLS, GRID_ROWS } from './widgets/gridLayout'
 import type { ComponentType } from 'react'
 import './index.css'
 
@@ -30,15 +31,22 @@ const PAGE_WIDGET_PREFIX = 'page:'
 
 // 고정 페이지 → page 위젯 정의. 모듈 로드 시 일괄 등록하고(아래), 렌더 시에도 보장 등록(idempotent)
 // 한다 — 모듈 평가 순서/HMR 에 흔들리지 않도록.
+//
+// 본문은 `.page-scroll` 로 감싼다 — **페이지도 위젯과 같은 규율**을 따라야 하기 때문이다
+// (console_platform §3.0): 배치한 칸을 채우고, 넘치면 브라우저가 아니라 **그 안에서** 스크롤한다.
+// 관제 화면이라 페이지 스크롤은 곧 "화면 밖으로 밀려남"이라 허용하지 않는다.
 function pageWidgetDefs() {
-  return FLAT_ROUTES.filter(r => r.component && !r.layout).map(r => ({
-    id: PAGE_WIDGET_PREFIX + r.path,
-    title: r.title,
-    category: 'page' as const,
-    component: r.component as unknown as ComponentType<WidgetProps>,
-    adminOnly: r.adminOnly,
-    apis: r.apis,          // 고정 페이지의 사용 API — 개발자 모드 [API] 배지용
-  }))
+  return FLAT_ROUTES.filter(r => r.component && !r.layout).map(r => {
+    const Page = r.component as unknown as ComponentType<WidgetProps>
+    return {
+      id: PAGE_WIDGET_PREFIX + r.path,
+      title: r.title,
+      category: 'page' as const,
+      component: (props: WidgetProps) => <div className="page-scroll"><Page {...props} /></div>,
+      adminOnly: r.adminOnly,
+      apis: r.apis,          // 고정 페이지의 사용 API — 개발자 모드 [API] 배지용
+    }
+  })
 }
 registerWidgets(pageWidgetDefs())
 
@@ -49,9 +57,16 @@ function routeLayoutId(r: RouteDef): string {
   if (r.layout) return r.layout.id || r.path.replace(/^\/+/, '').replace(/\//g, '.')
   return PAGE_WIDGET_PREFIX + r.path.replace(/^\/+/, '').replace(/\//g, '.')
 }
+// 고정 페이지의 기본 배치 = **캔버스 한 장을 통째로 차지하는 위젯 하나**.
+// 예전엔 legacy flow(`w: 12`, 높이 미지정)라 페이지가 내용만큼 자라 브라우저가 스크롤됐다.
+// 이제 grid 좌표로 48×48 을 채우므로 어떤 페이지든 한 화면 안이고, 넘치는 내용은 `.page-scroll`
+// 안에서 스크롤한다(§3.0). seedVersion 은 저장본이 옛 flow 배치를 붙들고 있을 때 안내를 띄우기 위함.
 function routeSeed(r: RouteDef): PageLayout {
   if (r.layout) return r.layout
-  return { id: routeLayoutId(r), widgets: [{ widgetId: PAGE_WIDGET_PREFIX + r.path, w: 12 }] }
+  return {
+    id: routeLayoutId(r), seedVersion: 1,
+    widgets: [{ widgetId: PAGE_WIDGET_PREFIX + r.path, x: 0, y: 0, w: GRID_COLS, h: GRID_ROWS }],
+  }
 }
 
 // 모든 라우트를 EditableLayout 으로 렌더 — 합성 라우트는 자기 seed, 고정 페이지는 단일 page 위젯.

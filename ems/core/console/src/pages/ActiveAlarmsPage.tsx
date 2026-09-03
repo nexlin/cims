@@ -1,21 +1,15 @@
 // 활성 알람 — 전역 알람 store(useAlarms, SSE 라이브) 구독 뷰 (alarm_pipeline.md §8.2).
 //   이력 페이지(AlertsPage)와 분리: 여기는 "지금 열린 알람" 만 — 승인/코멘트 조작 포함.
-//   위젯 2개로 나눠 배치한다: **심각도 요약(타일 묶음)** 과 **목록**. 타일은 낱개로 쪼개지 않는다 —
-//   같은 축의 분포라 하나만 보면 "전체 중 얼마"인지 알 수 없기 때문(console_platform §3.1).
-//   둘을 잇는 건 배치가 아니라 페이지 파라미터 `sev` (타일이 쓰고 목록이 읽는다).
+//   배치 단위는 **심각도 타일 1장 = 위젯 1개**(Critical/Major/…) 와 **목록**이다. 타일과 목록을
+//   잇는 건 배치가 아니라 페이지 파라미터 `sev` (타일이 쓰고 목록이 읽는다) — 타일을 몇 장 놓든,
+//   순서를 어떻게 바꾸든 목록 필터는 그대로 걸린다.
 //   데이터는 store 하나(대시보드 위젯·헤더 배지와 동일 fold)라 표시 일관.
 import { useMemo, useState } from 'react'
 import { alertsApi } from '../api/alerts'
 import { useToast } from '../components/Toast'
 import { useAlarms, refreshAlarms, severityOf, type ActiveAlarm } from '../widgets/useAlarms'
-import {
-  alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_ORDER,
-} from '../utils/alarmLabels'
+import { alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_LABEL } from '../utils/alarmLabels'
 import { usePageParam } from '../widgets/pageParams'
-
-const SEV_TILE_LABEL: Record<string, string> = {
-  critical: 'Critical', major: 'Major', minor: 'Minor', warning: 'Warning', indeterminate: 'Indeterminate',
-}
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -69,41 +63,31 @@ function AlarmDetail({ a, onAck, onComment }: {
   )
 }
 
-// 심각도 요약 — 타일 묶음 하나가 최소 단위. 클릭 = 페이지 파라미터 `sev` 토글(같은 화면의 목록이 걸림).
-export function AlarmSeverityTiles() {
+// 심각도 타일 1장 — 배치 1칸을 채우고, 클릭하면 페이지 파라미터 `sev` 를 토글한다(같은 화면의
+// 활성 알람 목록이 그 값으로 걸린다. 이미 켜진 타일을 다시 누르면 필터 해제).
+export function AlarmSeverityTile({ sev }: { sev: string }) {
   const { active } = useAlarms()
   const [sevFilter, setSevFilter] = usePageParam('sev')
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {}
-    for (const a of active) c[severityOf(a)] = (c[severityOf(a)] || 0) + 1
-    return c
-  }, [active])
+  const n = useMemo(() => active.filter(a => severityOf(a) === sev).length, [active, sev])
+  const on = sevFilter === sev
   return (
-    <div style={{ display: 'flex', gap: 12, height: '100%', alignItems: 'stretch' }}>
-      {SEVERITY_ORDER.map(sev => {
-        const n = counts[sev] || 0
-        const on = sevFilter === sev
-        return (
-          <button key={sev} onClick={() => setSevFilter(on ? '' : sev)}
-            title={`${SEV_TILE_LABEL[sev]} ${n}건${on ? ' — 필터 해제' : n ? ' — 이 심각도만 보기' : ''}`}
-            style={{
-              flex: 1, textAlign: 'left', cursor: 'pointer', minWidth: 0,
-              background: 'var(--surface)', borderRadius: 'var(--radius)', padding: '12px 16px',
-              border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
-            }}>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{SEV_TILE_LABEL[sev]}</div>
-            <div style={{ fontSize: 24, fontWeight: 700,
-                          color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--danger)' : 'var(--text)' }}>
-              {n}
-            </div>
-          </button>
-        )
-      })}
-    </div>
+    <button onClick={() => setSevFilter(on ? '' : sev)}
+      title={`${SEVERITY_LABEL[sev] || sev} ${n}건${on ? ' — 필터 해제' : n ? ' — 이 심각도만 보기' : ''}`}
+      style={{
+        flex: '1 1 auto', minHeight: 0, minWidth: 0, textAlign: 'left', cursor: 'pointer',
+        background: 'var(--surface)', borderRadius: 'var(--radius)', padding: '12px 16px',
+        border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
+      }}>
+      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{SEVERITY_LABEL[sev] || sev}</div>
+      <div style={{ fontSize: 24, fontWeight: 700,
+                    color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--danger)' : 'var(--text)' }}>
+        {n}
+      </div>
+    </button>
   )
 }
 
-// 활성 알람 목록 — 검색 + 표 + 상세. 심각도 필터는 타일 위젯이 쓰는 페이지 파라미터를 읽는다.
+// 활성 알람 목록 — 검색 + 표 + 상세. 심각도 필터는 타일 위젯들이 쓰는 페이지 파라미터를 읽는다.
 export function ActiveAlarmList() {
   const { show } = useToast()
   const { active, loaded, error, lastUpdated } = useAlarms()

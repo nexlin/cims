@@ -17,9 +17,10 @@ import { useSearchParams } from 'react-router-dom'
 
 // 버스가 소유하는 URL 쿼리 키. 새 파라미터를 늘릴 때 이 표에만 추가한다.
 //   date/gran = 조회 기간·집계 단위 (core.page-filter 가 소유)
-//   sev       = 심각도 필터 (심각도 요약 타일이 쓰고 알람 목록이 읽는다. 빈 값 = 전체)
-//   days      = 조회 일수 (분석 화면의 [7일][30일][90일] 컨트롤이 소유)
-//   atab      = 분석 대상 전환 (알람/이벤트) — placement.visibleWhen 이 읽어 탭처럼 동작
+//   sev       = 심각도 필터 (심각도 타일이 쓰고 알람 목록이 읽는다. 빈 값 = 전체)
+//   days      = 조회 일수 ([오늘][7일][30일][90일] — 이력·분석 위젯 안의 컨트롤, 또는 core.days-filter)
+//   atab      = 알람/이벤트 전환 — 이력·분석 위젯이 읽어 본문을 갈아끼운다
+//               (배치의 visibleWhen 으로 탭을 구성하는 레이아웃도 같은 값을 본다)
 //   svc       = 선택된 서비스 정의 id (서비스 선택 컨트롤이 쓰고 모듈/규칙/소스 위젯이 읽는다)
 //   src       = 선택된 데이터 소스 id (소스 선택 컨트롤이 쓰고 shape 위젯들이 읽는다 —
 //               한 화면의 차트·표가 같은 대상을 함께 본다)
@@ -33,6 +34,7 @@ export type PageParamKey = (typeof PAGE_PARAM_KEYS)[number]
 
 // 컨트롤 종류 — 어떤 파라미터 묶음을 누가 소유하는가.
 //   'period' = date+gran (core.page-filter) / 'days' = 조회 일수 (core.days-filter)
+//   'atab'   = 알람/이벤트 전환 (core.alarm-event-tabs)
 //   'source' = 데이터 소스 (core.source-picker) — 있으면 shape 위젯이 자기 배치 소스 대신 이 값을 쓴다
 //   'series' = 표시 계열 (core.series-select) — 있으면 계열 차트가 고른 것만 그린다
 export type PageControlKind = 'period' | 'days' | 'atab' | 'svc' | 'source' | 'series'
