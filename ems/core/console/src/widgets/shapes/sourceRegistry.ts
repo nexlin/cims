@@ -63,12 +63,14 @@ export function useDataSourceCatalog(): { sources: DataSource[]; loading: boolea
   }
 }
 
-// co-placed 위젯이 같은 소스를 쓰면 load 중복 방지 — (sourceId|date|gran) 단기 캐시.
+// co-placed 위젯이 같은 소스를 쓰면 load 중복 방지 — (sourceId|구간|gran) 단기 캐시.
+// 키에 from/to 가 있어야 한다 — date(=from 의 날짜)만 쓰면 같은 날 안에서 구간을 좁히거나
+// 넓힌 조회가 캐시창(4초) 동안 옛 응답을 받는다.
 const _cache = new Map<string, { ts: number; p: Promise<unknown> }>()
 const TTL_MS = 4000
 
 export function loadSource(src: DataSource, params: SourceParams): Promise<unknown> {
-  const key = `${src.id}|${params.date}|${params.granularity}`
+  const key = `${src.id}|${params.from}|${params.to}|${params.date}|${params.granularity}`
   const hit = _cache.get(key)
   const now = Date.now()
   if (hit && now - hit.ts < TTL_MS) return hit.p

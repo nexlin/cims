@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
-import { statsApi, type MessagesResponse, type ServiceStatsResponse } from '@core/api/stats'
+import { statsApi, type MessagesResponse, type ServiceStatsResponse,
+         type CallsResponse, type CallCell } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
 
 type SubTab = 'messages' | 'service'
-type Granularity = '5m' | '10m' | '1h' | '1d' | '1M' | '1y'
+type Granularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
 type SvcType = 'volte' | 'ptt'
 
+// 서버 services/stats_rollup.GRANULARITIES 와 같은 목록이어야 한다 — 한쪽만 늘리면
+// 화면이 서버가 모르는 단위를 보내고 조용히 옛 경로로 폴백한다.
 const GRAN_LABELS: Record<Granularity, string> = {
-  '5m': '5분', '10m': '10분', '1h': '1시간', '1d': '1일', '1M': '1월', '1y': '1년'
+  '1m': '1분', '5m': '5분', '10m': '10분', '1h': '1시간',
+  '1d': '1일', '1w': '1주', '1M': '1월', '1y': '1년'
 }
 
  
@@ -50,11 +54,68 @@ function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
   )
 }
 
-function KpiCard({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
+// sub — 비율 카드의 분자/분모. 비율만 보여주면 "3건 중 2건" 인지 "3만건 중 2만건" 인지
+// 구분되지 않아 같은 66.7% 를 같은 무게로 읽게 된다.
+function KpiCard({ label, value, unit, sub }: {
+  label: string; value: string | number; unit?: string; sub?: string
+}) {
   return (
-    <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
+    <div style={{ flex: '1 1 140px', minWidth: 140, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700 }}>{value}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{unit}</span></div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>}
+    </div>
+  )
+}
+
+/**
+ * 호 지표 카드 묶음. 비율마다 분자/분모를 함께 적는다 — 같은 66.7% 라도 "3건 중 2건"과
+ * "3만건 중 2만건"은 다른 정보다.
+ *
+ * VoLTE 와 PTT 가 내는 지표가 다르다. PTT 는 **실패한 그룹통화 시도가 원천에 없어서**
+ * 성공률을 낼 수 없다(sip_statistics.md §8 Y6) — 세션 기록이 곧 성립이라 세면 항상 100%
+ * 가 된다. 그래서 PTT 에는 성공률·완료율 자리를 비우고 소통률과 참여율만 낸다.
+ */
+function CallKpis({ cell, source, kind }: {
+  cell?: CallCell
+  source?: string
+  kind: 'volte' | 'ptt'
+}) {
+  if (!cell) return null
+  const scan = source === 'scan'
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {kind === 'volte' ? (
+          <>
+            <KpiCard label="호 시도" value={cell.attempts} unit="건" />
+            <KpiCard label="성공률" value={cell.success_rate} unit="%"
+                     sub={`성립 ${cell.sessions} / 시도 ${cell.attempts}`} />
+            <KpiCard label="소통률" value={cell.talk_rate} unit="%"
+                     sub={`통화 ${cell.talked} / 시도 ${cell.attempts}`} />
+            <KpiCard label="완료율" value={cell.completion_rate} unit="%"
+                     sub={`정상종료 ${cell.completed} / 성립 ${cell.sessions}`} />
+          </>
+        ) : (
+          <>
+            <KpiCard label="세션" value={cell.sessions} unit="건" />
+            <KpiCard label="소통률" value={cell.talk_rate_sessions} unit="%"
+                     sub={`발언있음 ${cell.talked} / 세션 ${cell.sessions}`} />
+            <KpiCard label="참여율" value={cell.join_rate} unit="%"
+                     sub={`참여 ${cell.legs_joined} / 초대 ${cell.legs_invited}`} />
+          </>
+        )}
+        <KpiCard label={kind === 'ptt' ? '평균 세션 시간' : '평균 통화시간'}
+                 value={fmtDuration(cell.avg_duration_sec)} />
+        {kind === 'volte' && <KpiCard label="평균 접속지연" value={cell.avg_pdd_ms} unit="ms" />}
+      </div>
+      {(scan || cell.open > 0 || cell.late_dropped > 0) && (
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+          {scan && <span>집계 없는 구간 — 원본에서 즉석 계산했습니다. </span>}
+          {cell.open > 0 && <span>진행 중 {cell.open}건(종료 후 값이 갱신됩니다). </span>}
+          {cell.late_dropped > 0 && <span>보존기간 초과로 되짚지 못한 호 {cell.late_dropped}건. </span>}
+        </div>
+      )}
     </div>
   )
 }
@@ -76,6 +137,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
   const [msgData, setMsgData] = useState<MessagesResponse | null>(null)
   // 서비스 통계
   const [svcData, setSvcData] = useState<ServiceStatsResponse | null>(null)
+  const [callsData, setCallsData] = useState<CallsResponse | null>(null)
   const [loading, setLoading] = useState(false)
 
   const loadMessages = useCallback(async () => {
@@ -90,8 +152,14 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
   const loadService = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await statsApi.service(svcType, { date, granularity: gran })
+      // 호 지표(성공률·소통률·완료율·참여율)는 1분 집계 위의 /stats/calls 가 낸다.
+      // /stats/service/* 는 그룹별 빈도처럼 집계에 없는 축만 담당한다.
+      const [res, calls] = await Promise.all([
+        statsApi.service(svcType, { date, granularity: gran }),
+        statsApi.calls({ date, granularity: gran, svc: svcType }),
+      ])
       setSvcData(res)
+      setCallsData(calls)
     } catch (e: unknown) { show(String(e), 'err') }
     finally { setLoading(false) }
   }, [date, gran, svcType, show])
@@ -157,12 +225,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       {/* 서비스 통계 — VoIP */}
       {subTab === 'service' && svcData?.volte && (
         <>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <KpiCard label="호 시도" value={svcData.volte.total_attempts} unit="건" />
-            <KpiCard label="호 성공률" value={svcData.volte.success_rate} unit="%" />
-            <KpiCard label="평균 통화시간" value={fmtDuration(svcData.volte.avg_duration_sec)} />
-            <KpiCard label="성공" value={svcData.volte.total_success} unit="건" />
-          </div>
+          <CallKpis cell={callsData?.totals?.volte} source={callsData?.source} kind="volte" />
 
           <div className="panel" style={{ padding: 16 }}>
             <div style={{ fontWeight: 600, marginBottom: 12 }}>호 시도 수 추이</div>
@@ -196,10 +259,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       {/* 서비스 통계 — PTT */}
       {subTab === 'service' && svcData?.ptt && (
         <>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <KpiCard label="그룹콜 수" value={svcData.ptt.total_calls} unit="건" />
-            <KpiCard label="평균 세션 시간" value={fmtDuration(svcData.ptt.avg_duration_sec)} />
-          </div>
+          <CallKpis cell={callsData?.totals?.ptt} source={callsData?.source} kind="ptt" />
 
           <div className="panel" style={{ padding: 16 }}>
             <div style={{ fontWeight: 600, marginBottom: 12 }}>그룹콜 수 추이</div>

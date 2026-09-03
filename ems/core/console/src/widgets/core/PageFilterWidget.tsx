@@ -9,7 +9,7 @@
 import type { WidgetDef, WidgetProps } from '../types'
 import {
   GRAN_LABELS, GRAN_MAX_DAYS, bestGran, defaultRange, fmtDt, granFits,
-  usePageControl, usePageParam,
+  usePageControl, usePageParam, useSetPageParams,
 } from '../pageParams'
 
 // 'YYYY-MM-DD HH:MM' ↔ datetime-local('YYYY-MM-DDTHH:MM')
@@ -28,13 +28,20 @@ function PageFilterWidget({ config }: WidgetProps) {
   const [from, setFrom] = usePageParam('from')
   const [to, setTo] = usePageParam('to')
   const [gran, setGran] = usePageParam('gran')
+  const setMany = useSetPageParams()
   // 집계 단위가 없는 조회(일자 단위 목록 등)에서는 단위 버튼을 감춘다.
   const showGran = config?.showGran !== false
 
   // 구간을 바꾸면 지금 단위가 감당 못 할 수 있다 — 그때만 자동 승격.
+  // from·to(+gran)는 **한 번에** 쓴다. 나눠 쓰면 앞의 갱신이 사라진다(pageParams setParams 주석).
   const applyRange = (f: string, t: string) => {
-    setFrom(f); setTo(t)
-    if (showGran && !granFits(f, t, gran)) setGran(bestGran(f, t))
+    const nextGran = showGran && !granFits(f, t, gran) ? bestGran(f, t) : ''
+    if (setMany) {
+      setMany({ from: f, to: t, ...(nextGran ? { gran: nextGran } : {}) })
+    } else {
+      setFrom(f); setTo(t)
+      if (nextGran) setGran(nextGran)
+    }
   }
   const applyPreset = (days: number) => {
     const now = new Date()

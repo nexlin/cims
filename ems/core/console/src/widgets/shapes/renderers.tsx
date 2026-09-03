@@ -4,20 +4,48 @@
 // 캔버스가 고정 예산(화면 한 장)이라 카드 크기가 배치마다 다르므로, 막대 높이는 플롯 영역 대비
 // **비율(%)** 로 그린다(플롯 영역은 flex:1 로 남은 높이를 전부 차지).
 import { useRef, useState } from 'react'
-import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData } from './types'
+import type { CSSProperties } from 'react'
+import type { TimeBarData, SeriesBarData, KpiData, DistributionData, TableData, MatrixData } from './types'
+
+// ── 시간축 공용 ────────────────────────────────────────────────────────────
+
+/**
+ * 라벨 압축 — 촘촘한 축에서 반복되는 연·월을 지운다. 전체 값은 tooltip 이 갖는다.
+ *   'YYYY-MM-DD HH:MM' → 'HH:MM' (날이 바뀌는 칸만 'MM-DD HH:MM')
+ *   'YYYY-MM-DD'       → 'MM-DD'
+ *   'YYYY-MM' · 'YYYY' → 그대로 (버킷 수가 적어 압축할 이유가 없다)
+ */
+function compactLabels(labels: (string | number)[]): string[] {
+  const out: string[] = []
+  let prevDay = ''
+  for (const raw of labels) {
+    const v = String(raw)
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?$/.exec(v)
+    if (!m) { out.push(v); prevDay = ''; continue }
+    const [, , mo, dd, hm] = m
+    if (!hm) { out.push(`${mo}-${dd}`); prevDay = `${mo}-${dd}`; continue }
+    const day = `${mo}-${dd}`
+    out.push(day === prevDay ? hm : `${day} ${hm}`)
+    prevDay = day
+  }
+  return out
+}
 
 export function TimeBarChart({ data }: { data: TimeBarData }) {
   const { buckets, unit } = data
   const vals = buckets.map(b => b.value)
   const max = Math.max(...vals, 1)
   if (buckets.length === 0) return <div className="empty">데이터 없음</div>
+  const labels = compactLabels(buckets.map(b => b.label))
+  // 라벨·값은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다).
+  const every = Math.ceil(buckets.length / 24)
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: 2, padding: '0 4px' }}>
       {buckets.map((b, i) => (
         <div key={i} style={{ flex: 1, minWidth: 0, height: '100%',
                               display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
-            {b.value > 0 ? b.value : ''}
+            {b.value > 0 && i % every === 0 ? b.value : ''}
           </div>
           {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
           <div style={{ flex: 1, minHeight: 0, width: '100%',
@@ -26,7 +54,10 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
                  style={{ width: '100%', maxWidth: 32, height: `${(b.value / max) * 100}%`, minHeight: 2,
                           background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
           </div>
-          <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{String(b.label)}</div>
+          {/* 라벨은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다). */}
+          <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+            {i % every === 0 ? labels[i] : ''}
+          </div>
         </div>
       ))}
     </div>
@@ -50,6 +81,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
   const max = Math.max(1, ...buckets.map(sum))
   // 라벨이 촘촘하면(버킷이 많으면) 몇 칸 걸러 하나만 적는다 — 겹쳐 뭉개지는 것보다 낫다.
   const every = Math.ceil(buckets.length / 24)
+  const labels = compactLabels(buckets.map(b => b.label))
   // 고른 계열 중 포함관계로 겹치는 쌍이 있으면 합계가 중복된다.
   const shownKeys = new Set(series.map(sp => sp.key))
   const overlap = series.filter(sp => (sp.includes ?? []).some(k => shownKeys.has(k)))
@@ -109,7 +141,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
               <div style={{ flex: 'none', fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden',
                             color: on ? 'var(--text)' : 'var(--text-muted)',
                             fontWeight: on ? 600 : 400 }}>
-                {i % every === 0 || on ? String(b.label) : ''}
+                {i % every === 0 || on ? labels[i] : ''}
               </div>
             </div>
           )
@@ -242,5 +274,82 @@ export function KvTable({ data }: { data: TableData }) {
           ))}
       </tbody>
     </table>
+  )
+}
+
+/**
+ * 교차표 — 행=시간 버킷, 열=항목(SIP 메서드 등).
+ *
+ * 가시성 장치 세 가지:
+ *  1) **0 은 흐리게.** 통계표는 대부분 칸이 0 이라, 0 이 진하면 값이 있는 칸이 묻힌다.
+ *  2) **칸 배경 농도 = 그 열 안에서의 상대 크기.** 같은 메시지의 시간대별 증감을 색으로 먼저
+ *     읽고 숫자로 확인하게 한다. 열마다 정규화하는 이유는 메시지별 자릿수가 크게 달라
+ *     (200 은 수백, CANCEL 은 한 자리) 표 전체 기준으로는 작은 열이 전부 흰칸이 되기 때문이다.
+ *  3) **합계 행·열 고정.** 가로 스크롤이 생겨도 시각(첫 열)과 합계는 늘 보이게 sticky.
+ */
+export function MatrixTable({ data }: { data: MatrixData }) {
+  const colMax = new Map(data.columns.map(c => [
+    c.key, Math.max(1, ...data.rows.map(r => r.cells[c.key] ?? 0)),
+  ]))
+  const cellBg = (key: string, v: number) => {
+    if (!v) return undefined
+    const a = Math.min(0.42, 0.06 + 0.36 * (v / (colMax.get(key) || 1)))
+    return `color-mix(in srgb, var(--primary) ${Math.round(a * 100)}%, transparent)`
+  }
+  const numTd = (v: number, bg?: string): CSSProperties => ({
+    textAlign: 'right', fontVariantNumeric: 'tabular-nums',
+    color: v ? 'var(--text)' : 'var(--text-muted)', opacity: v ? 1 : 0.45,
+    fontWeight: v ? 600 : 400, background: bg, whiteSpace: 'nowrap',
+  })
+  const stickyL: CSSProperties = {
+    position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 1, whiteSpace: 'nowrap',
+  }
+  const stickyR: CSSProperties = {
+    position: 'sticky', right: 0, background: 'var(--surface)', zIndex: 1,
+  }
+
+  if (data.rows.length === 0 || data.columns.length === 0) {
+    return <div className="empty">데이터 없음</div>
+  }
+  return (
+    <div style={{ overflow: 'auto', maxHeight: '100%' }}>
+      <table className="data-table" style={{ fontSize: 12, borderCollapse: 'separate', borderSpacing: 0 }}>
+        <thead>
+          <tr>
+            <th style={{ ...stickyL, zIndex: 2 }}>시각</th>
+            {data.columns.map(c => (
+              <th key={c.key} style={{ textAlign: 'right', whiteSpace: 'nowrap' }}
+                  title={`전 구간 ${c.total}${c.unit ?? data.unit ?? '건'}`}>
+                {c.label}{c.unit === '%' ? ' (%)' : ''}
+              </th>
+            ))}
+            {data.rowTotal && <th style={{ ...stickyR, zIndex: 2, textAlign: 'right' }}>합계</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {data.rows.map(r => (
+            <tr key={r.label}>
+              <td style={stickyL}>{r.label}</td>
+              {data.columns.map(c => {
+                const v = r.cells[c.key] ?? 0
+                return <td key={c.key} style={numTd(v, cellBg(c.key, v))}>{v}</td>
+              })}
+              {data.rowTotal &&
+                <td style={{ ...stickyR, ...numTd(r.total), fontWeight: 700 }}>{r.total}</td>}
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td style={{ ...stickyL, fontWeight: 700 }}>{data.rowTotal ? '합계' : '전 구간'}</td>
+            {data.columns.map(c => (
+              <td key={c.key} style={{ ...numTd(c.total), fontWeight: 700 }}>{c.total}</td>
+            ))}
+            {data.rowTotal &&
+              <td style={{ ...stickyR, ...numTd(data.grandTotal), fontWeight: 700 }}>{data.grandTotal}</td>}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   )
 }

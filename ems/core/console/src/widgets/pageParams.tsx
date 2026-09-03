@@ -42,16 +42,19 @@ export type PageControlKind = 'period' | 'days' | 'atab' | 'svc' | 'source' | 's
 export const todayIso = () => new Date().toISOString().slice(0, 10)
 
 // 집계 단위 라벨 — 컨트롤 위젯과 shape 위젯이 같은 표를 쓴다.
+// 서버 services/stats_rollup.GRANULARITIES 와 **같은 목록**이어야 한다 — 한쪽만 늘리면
+// 화면이 서버가 모르는 단위를 보내거나(조용히 폴백), 서버가 내는 단위를 못 고른다.
 export const GRAN_LABELS: Record<string, string> =
-  { '5m': '5분', '10m': '10분', '1h': '1시간', '1d': '일', '1M': '월', '1y': '년' }
+  { '1m': '1분', '5m': '5분', '10m': '10분', '1h': '1시간',
+    '1d': '일', '1w': '주', '1M': '월', '1y': '년' }
 
 // 단위별 **최대 조회 범위(일)** — 버킷이 수천 개가 되면 차트도 못 읽고 스캔 비용만 는다.
-// 기준은 버킷 800개 근처지만, 상한은 거기서 **사람이 말하는 창**으로 반올림했다(3일·일주일·한 달·2년).
-// 그래서 실제 버킷 수는 기준을 조금 넘기도 한다: 5m=864 / 10m=1008 / 1h=720 / 1d=730.
-// 서버도 **같은 표**를 적용한다 (handlers/stats.py `_GRAN_MAX_DAYS`) — 한쪽만 바꾸면 어긋난다.
-// 1M/1y 는 사실상 무제한.
+// 기준은 버킷 800개 근처지만, 상한은 거기서 **사람이 말하는 창**으로 반올림했다.
+// 실제 버킷 수: 1m=2880 / 5m=864 / 10m=1008 / 1h=720 / 1d=730.
+// 서버도 같은 성격의 표를 갖는다 (handlers/stats.py `_CALLS_MAX_DAYS`) — 한쪽만 바꾸면 어긋난다.
+// 1분은 2일 — 하루 1440칸이라 그 이상은 화면이 읽지 못한다. 1w/1M/1y 는 사실상 무제한.
 export const GRAN_MAX_DAYS: Record<string, number> =
-  { '5m': 3, '10m': 7, '1h': 30, '1d': 730 }
+  { '1m': 2, '5m': 3, '10m': 7, '1h': 30, '1d': 730 }
 
 // 구간이 이 단위로 감당 가능한가 — 컨트롤이 버튼 활성/비활성을 이걸로 정한다.
 export function granFits(from: string, to: string, gran: string): boolean {
@@ -64,7 +67,7 @@ export function granFits(from: string, to: string, gran: string): boolean {
 
 // 구간에 맞는 가장 세밀한 단위 — 프리셋 버튼이 범위를 바꿀 때 단위를 자동 승격한다.
 export function bestGran(from: string, to: string): string {
-  for (const g of ['5m', '10m', '1h', '1d', '1M', '1y']) {
+  for (const g of ['1m', '5m', '10m', '1h', '1d', '1w', '1M', '1y']) {
     if (granFits(from, to, g)) return g
   }
   return '1y'
@@ -88,6 +91,7 @@ const DEFAULTS: Record<PageParamKey, string> =
 interface Ctx {
   params: Record<PageParamKey, string>
   setParam: (k: PageParamKey, v: string) => void
+  setParams: (patch: Partial<Record<PageParamKey, string>>) => void
   controls: Record<string, number>            // kind → 마운트된 컨트롤 위젯 수
   acquire: (kind: PageControlKind) => void
   release: (kind: PageControlKind) => void
@@ -118,15 +122,25 @@ export function PageParamsProvider({ children }: { children: ReactNode }) {
   }), [search, fallbackRange])
   const [controls, setControls] = useState<Record<string, number>>({})
 
-  const setParam = useCallback((k: PageParamKey, v: string) => {
-    // 버스 소유 키만 갱신 — 나머지 쿼리는 보존. replace 로 히스토리 오염 방지.
+  // 여러 키를 **한 번에** 갱신한다. 한 핸들러에서 setParam 을 연달아 부르면 앞의 갱신이
+  // 사라진다 — react-router 의 함수형 업데이터가 받는 값은 렌더 시점 searchParams 라
+  // (useSearchParams: `nextInit(new URLSearchParams(searchParams))`), 같은 배치의 두 번째
+  // 호출도 갱신 전 값을 보고 navigate 한다. 구간(from+to)처럼 짝으로 움직이는 값은
+  // 반드시 이 함수를 쓴다.
+  const setParams = useCallback((patch: Partial<Record<PageParamKey, string>>) => {
     setSearch(prev => {
       const next = new URLSearchParams(prev)
-      if (v) next.set(k, v)
-      else next.delete(k)
+      for (const [k, v] of Object.entries(patch)) {
+        if (v) next.set(k, v)
+        else next.delete(k)
+      }
       return next
     }, { replace: true })
   }, [setSearch])
+
+  const setParam = useCallback((k: PageParamKey, v: string) => {
+    setParams({ [k]: v } as Partial<Record<PageParamKey, string>>)
+  }, [setParams])
 
   const acquire = useCallback((kind: PageControlKind) => {
     setControls(c => ({ ...c, [kind]: (c[kind] ?? 0) + 1 }))
@@ -135,8 +149,8 @@ export function PageParamsProvider({ children }: { children: ReactNode }) {
     setControls(c => ({ ...c, [kind]: Math.max(0, (c[kind] ?? 0) - 1) }))
   }, [])
 
-  const value = useMemo<Ctx>(() => ({ params, setParam, controls, acquire, release }),
-    [params, setParam, controls, acquire, release])
+  const value = useMemo<Ctx>(() => ({ params, setParam, setParams, controls, acquire, release }),
+    [params, setParam, setParams, controls, acquire, release])
   return <PageParamsCtx.Provider value={value}>{children}</PageParamsCtx.Provider>
 }
 
@@ -150,6 +164,15 @@ export function usePageParam(key: PageParamKey): [string, (v: string) => void] {
       : DEFAULTS[key])
   if (!ctx) return [fallback, setFallback]
   return [ctx.params[key] ?? DEFAULTS[key], v => ctx.setParam(key, v)]
+}
+
+// 여러 파라미터 동시 갱신 — 구간(from+to)·단위 승격처럼 함께 움직이는 값용.
+// Provider 밖에서는 키별 로컬 폴백이 서로 독립이라 순차 호출로도 안전하다.
+// Provider 밖(단독 렌더)에서는 null — 호출측이 키별 setter 로 폴백한다(로컬 폴백 상태는
+// 키마다 독립이라 순차 호출로도 덮어쓰기가 없다).
+export function useSetPageParams(): ((patch: Partial<Record<PageParamKey, string>>) => void) | null {
+  const ctx = useContext(PageParamsCtx)
+  return ctx ? ctx.setParams : null
 }
 
 // 배치가 지금 보여야 하는가 — placement.visibleWhen 판정. 렌더러와 편집기가 같은 규칙을 쓴다.

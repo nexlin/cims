@@ -56,17 +56,39 @@ export interface VoipBucket {
   hour?: number
   date?: string
   attempts: number
+  sessions: number
+  talked: number
+  completed: number
+  /** = sessions (옛 소비자 호환) */
   success: number
   success_rate: number
+  talk_rate: number
+  completion_rate: number
 }
 
+/**
+ * VoLTE 호 KPI — 시도(attempt) 기준 3지표.
+ *   성공률 sessions/attempts · 소통률 talked/attempts · 완료율 completed/sessions
+ * 비율은 표시용 파생값이고 근거는 항상 건수다 (sip_statistics.md §2.1, §5.1).
+ */
 export interface VoipStats {
   total_attempts: number
+  /** = total_sessions. 판정 근거는 answer_time 이다. */
   total_success: number
   success_rate: number
   avg_duration_sec: number
   end_reasons: Record<string, number>
   buckets: VoipBucket[]
+  total_sessions: number
+  total_talked: number
+  total_completed: number
+  talk_rate: number
+  completion_rate: number
+  duration_sum_sec: number
+  pdd_sum_ms: number
+  pdd_n: number
+  /** 평균 PDD(호 접속 지연) — answer_time - invite_time */
+  avg_pdd_ms: number
 }
 
 export interface PttBucket {
@@ -193,8 +215,82 @@ export interface ServiceTrend {
   points: TrendPoint[]; peaks: Record<TrendMetric, number>
 }
 
+/** 조회 단위 — 서버(services/stats_rollup.GRANULARITIES)와 같은 목록이어야 한다. */
+export type StatGranularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
+export type StatService = 'all' | 'volte' | 'ptt' | 'unknown'
+
+/**
+ * 서비스 1칸의 호 지표 — 분자·분모와 비율이 함께 온다.
+ * 비율만 쓰면 구간을 다시 합칠 수 없고 "3건 중 2건"과 "3만건 중 2만건"이 같아 보인다.
+ */
+export interface CallCell {
+  attempts: number
+  sessions: number
+  talked: number
+  completed: number
+  duration_sum_sec: number
+  pdd_sum_ms: number
+  pdd_n: number
+  legs_invited: number
+  legs_joined: number
+  open: number
+  late_dropped: number
+  reasons: Record<string, number>
+  success_rate: number
+  talk_rate: number
+  /** 세션을 분모로 한 소통률 — PTT 용(attempts 가 0 이라 talk_rate 를 쓸 수 없다) */
+  talk_rate_sessions: number
+  completion_rate: number
+  join_rate: number
+  avg_pdd_ms: number
+  avg_duration_sec: number
+}
+
+export interface CallBucket {
+  /** 표시 라벨 = 버킷 시작 시각 */
+  bucket: string
+  /** 오프셋 포함 ISO — 라벨 파싱 없이 시각을 알 수 있게 */
+  bucket_start: string
+  all?: CallCell
+  volte?: CallCell
+  ptt?: CallCell
+  unknown?: CallCell
+}
+
+export interface CallsResponse {
+  from: string
+  to: string
+  granularity: StatGranularity
+  svc: StatService
+  /** rollup = 1분 집계, scan = 원본 즉석 집계(집계 없는 구간) */
+  source: 'rollup' | 'scan' | 'none'
+  truncated?: boolean
+  totals: Partial<Record<StatService, CallCell>>
+  buckets: CallBucket[]
+}
+
+export interface CallsQuery {
+  from?: string
+  to?: string
+  date?: string
+  granularity?: StatGranularity
+  svc?: StatService
+}
+
 export const statsApi = {
   health: () => api.get<HealthResponse>('/stats/health'),
+
+  /** 호 통계 — 1분 기저 집계 위. 서비스축(volte/ptt)과 분~년 단위를 모두 받는다. */
+  calls: (params: CallsQuery = {}) => {
+    const sp = new URLSearchParams()
+    if (params.from) sp.set('from', params.from)
+    if (params.to) sp.set('to', params.to)
+    if (params.date) sp.set('date', params.date)
+    if (params.granularity) sp.set('granularity', params.granularity)
+    if (params.svc) sp.set('svc', params.svc)
+    const qs = sp.toString()
+    return api.get<CallsResponse>('/stats/calls' + (qs ? `?${qs}` : ''))
+  },
 
   subscribers: (params: SubscribersQuery = {}) => {
     const sp = new URLSearchParams()

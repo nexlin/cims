@@ -5,10 +5,11 @@
 import { api } from '../../api/client'
 import type {
   DataSource, ShapeKind, SourceParams,
-  TimeBarData, SeriesBarData, KpiData, DistributionData, TableData,
+  TimeBarData, SeriesBarData, KpiData, DistributionData, TableData, MatrixData,
 } from './types'
 
 // shape별 매핑 선언 (descriptor 데이터의 map[shape]).
+// value 는 버킷 행 기준 **중첩 경로**를 받는다('ptt.sessions'). 한 겹 이름도 그대로 동작.
 interface TimeBarMap { from: string; label: string[]; value: string; unit?: string }
 // 계열 시계열 — 한 버킷 행에서 계열마다 다른 필드를 읽는다. 색은 선언 순서대로 --chart-1..5.
 interface SeriesBarMap {
@@ -23,6 +24,26 @@ interface DistMap {
   series?: { key: string; label: string; value: string; color?: string }[]
 }
 interface TableMap { fromObject?: string; from?: string; key?: string; value?: string; columns: [string, string] }
+/**
+ * 교차표 — 행은 버킷 배열, 칸은 버킷 안의 {항목: 수} map.
+ *   from        버킷 배열 경로
+ *   label       행 라벨 후보 필드
+ *   cells       버킷 행 기준, {항목: 수} map 의 경로. 여러 개면 **합산**한다
+ *               (예: ['in','out'] → 수신+송신 합).
+ *   limit       열 상한(합계 내림차순). 초과분은 '기타' 로 접는다.
+ */
+interface MatrixMap {
+  from: string; label: string[]; limit?: number; unit?: string
+  /** 동적 열 — 버킷 안의 {항목: 수} map 경로들. 여러 개면 합산(예: ['in','out']). */
+  cells?: string[]
+  /**
+   * 고정 열 — 열이 미리 정해진 표(호 통계의 시도·성립·소통·완료).
+   *   path      버킷 행 기준 경로
+   *   totalPath 합계 행 값의 **절대 경로**. 비율처럼 합산이 무의미한 열에 쓴다
+   *             (없으면 행들의 합).
+   */
+  columns?: { key: string; label: string; path: string; totalPath?: string; unit?: string }[]
+}
 
 export interface DataSourceSpec {
   id: string
@@ -32,7 +53,7 @@ export interface DataSourceSpec {
   endpoint: string                 // '/stats/messages/sip'
   query?: string[]                 // {date,granularity} 중 query 로 붙일 것
   needsControls?: boolean
-  map: Partial<Record<ShapeKind, TimeBarMap | SeriesBarMap | KpiMap | DistMap | TableMap>>
+  map: Partial<Record<ShapeKind, TimeBarMap | SeriesBarMap | KpiMap | DistMap | TableMap | MatrixMap>>
 }
 
 // 중첩 경로 접근 — 'voip.buckets' → obj.voip.buckets. 정규화 매핑의 핵심.
@@ -91,7 +112,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
     const c = m['time-bar'] as TimeBarMap
     ds.toTimeBar = (raw): TimeBarData => ({
       unit: c.unit,
-      buckets: asArray(raw, c.from).map(it => ({ label: firstField(it, c.label) as string | number, value: Number(it[c.value]) || 0 })),
+      buckets: asArray(raw, c.from).map(it => ({ label: firstField(it, c.label) as string | number, value: Number(getPath(it, c.value)) || 0 })),
     })
   }
   if (m['series-bar']) {
@@ -104,7 +125,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
       })),
       buckets: asArray(raw, c.from).map(it => ({
         label: firstField(it, c.label) as string | number,
-        values: Object.fromEntries(c.series.map(sp => [sp.key, Number(it[sp.value]) || 0])),
+        values: Object.fromEntries(c.series.map(sp => [sp.key, Number(getPath(it, sp.value)) || 0])),
       })),
     })
   }
@@ -115,6 +136,71 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
     ds.toKpi = (raw): KpiData => ({
       items: c.items.map(it => ({ label: it.label, value: applyFormat(getPath(raw, it.path), it.format), unit: it.unit })),
     })
+  }
+  if (m.matrix) {
+    const c = m.matrix as MatrixMap
+    // 고정 열 — 열이 같은 축이 아니므로 행 합계를 내지 않는다.
+    if (c.columns?.length) {
+      ds.toMatrix = (raw): MatrixData => {
+        const specs = c.columns as NonNullable<MatrixMap['columns']>
+        const rows = asArray(raw, c.from).map(it => {
+          const cells: Record<string, number> = {}
+          for (const sp of specs) cells[sp.key] = Number(getPath(it, sp.path)) || 0
+          return { label: String(firstField(it, c.label) ?? ''), cells, total: 0 }
+        })
+        const columns = specs.map(sp => ({
+          key: sp.key, label: sp.label, unit: sp.unit,
+          total: sp.totalPath !== undefined
+            ? (Number(getPath(raw, sp.totalPath)) || 0)
+            : rows.reduce((a, r) => a + (r.cells[sp.key] ?? 0), 0),
+        }))
+        return { unit: c.unit, columns, rows, rowTotal: false, grandTotal: 0 }
+      }
+    } else {
+    ds.toMatrix = (raw): MatrixData => {
+      // 버킷마다 {항목: 수} 를 모아 열 목록을 먼저 정한다 — 열은 **전 구간 합계 내림차순**
+      // 이라 자주 나오는 메시지가 왼쪽에 온다(조회 구간이 바뀌어도 읽는 순서가 안정적).
+      const rowsRaw = asArray(raw, c.from).map(it => {
+        const cells: Record<string, number> = {}
+        for (const path of (c.cells ?? [])) {
+          const m0 = getPath(it, path)
+          if (!m0 || typeof m0 !== 'object') continue
+          for (const [k, v] of Object.entries(m0 as Record<string, unknown>)) {
+            cells[k] = (cells[k] ?? 0) + (Number(v) || 0)
+          }
+        }
+        return { label: String(firstField(it, c.label) ?? ''), cells }
+      })
+      const totals: Record<string, number> = {}
+      for (const r of rowsRaw) {
+        for (const [k, v] of Object.entries(r.cells)) totals[k] = (totals[k] ?? 0) + v
+      }
+      let keys = Object.keys(totals).sort((a, b) => totals[b] - totals[a] || a.localeCompare(b))
+      let folded: string[] = []
+      const lim = c.limit ?? 0
+      if (lim > 0 && keys.length > lim) {
+        folded = keys.slice(lim)
+        keys = keys.slice(0, lim)
+      }
+      const ETC = '기타'
+      const columns: MatrixData['columns'] = keys.map(k => ({ key: k, label: k, total: totals[k] }))
+      if (folded.length) {
+        columns.push({ key: ETC, label: `${ETC}(${folded.length})`,
+                       total: folded.reduce((a, k) => a + totals[k], 0) })
+      }
+      const rows = rowsRaw.map(r => {
+        const cells: Record<string, number> = {}
+        for (const k of keys) cells[k] = r.cells[k] ?? 0
+        if (folded.length) cells[ETC] = folded.reduce((a, k) => a + (r.cells[k] ?? 0), 0)
+        const total = Object.values(cells).reduce((a, v) => a + v, 0)
+        return { label: r.label, cells, total }
+      })
+      return {
+        unit: c.unit, columns, rows, rowTotal: true,
+        grandTotal: rows.reduce((a, r) => a + r.total, 0),
+      }
+    }
+    }
   }
   if (m.distribution) {
     const c = m.distribution as DistMap

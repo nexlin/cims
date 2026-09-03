@@ -9,11 +9,11 @@ import type { ShapeData, KpiData, SeriesBarData, DistributionData, SourceParams 
 import { SHAPE_LABELS, SHAPE_ADAPTER } from './types'
 import { catalogSources, sourcesForShape, useDataSourceCatalog, loadSource } from './sourceRegistry'
 import { GRAN_LABELS, defaultRange, granFits, useHasPageControl, usePageParam, usePageControl } from '../pageParams'
-import { TimeBarChart, SeriesBarChart, StatValue, DistributionBars, KvTable } from './renderers'
+import { TimeBarChart, SeriesBarChart, StatValue, DistributionBars, KvTable, MatrixTable } from './renderers'
 
 const RENDERERS = {
   'time-bar': TimeBarChart, 'series-bar': SeriesBarChart,
-  stat: StatValue, distribution: DistributionBars, table: KvTable,
+  stat: StatValue, distribution: DistributionBars, table: KvTable, matrix: MatrixTable,
 } as const
 type WidgetShape = keyof typeof RENDERERS
 
@@ -322,8 +322,9 @@ export const seriesBarWidget    = makeShapeWidget('series-bar', 'shape.series-ba
 export const statWidget         = makeShapeWidget('stat', 'shape.stat', '지표 (소스·항목 선택)')
 export const distributionWidget = makeShapeWidget('distribution', 'shape.distribution', '분포')
 export const tableShapeWidget   = makeShapeWidget('table', 'shape.table', '표')
+export const matrixWidget       = makeShapeWidget('matrix', 'shape.matrix', '교차표 (시간 × 항목)')
 
 export const SHAPE_WIDGETS: WidgetDef[] = [
   statWidget, timeBarWidget, seriesBarWidget, distributionWidget, tableShapeWidget,
-  seriesSelectWidget,
+  matrixWidget, seriesSelectWidget,
 ]
