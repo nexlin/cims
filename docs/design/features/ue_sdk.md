@@ -122,8 +122,13 @@ sdk/core/
 
 ### 4.2 공개 API 모델
 
-API 는 **명령(동기 반환 없음, 결과는 이벤트)** · **상태 스냅샷(조회)** · **이벤트(리스너 1개)** 세 갈래다.
+API 는 **명령(즉시 `Result`/id 반환, 프로토콜 결과는 이벤트)** · **상태 스냅샷(조회)** · **이벤트(리스너 1개)** 세 갈래다.
 플랫폼 SDK 는 이 셋을 각자의 관용구(Kotlin `StateFlow`/`SharedFlow`, C++ 콜백)로 옮기기만 한다.
+
+C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 **id 로** 다룬다(`addAccount → accountId`,
+`dial → callId`, `answer(callId)` …). 바인딩이 단순하고 수명 문제(콜백 중 객체 삭제)가 없기 때문이다. 아래 표의
+`Account`/`Call`/`Group` 같은 객체 구분은 API 의 **의미 묶음**이고, 객체형 파사드(Kotlin `CimsUe.Call` 등)는
+플랫폼 SDK 가 id 를 감싸 제공한다. 공개 헤더(`types.h`·`listener.h`·`engine.h`)는 pjsua2 를 include 하지 않는다.
 
 | 객체 | 명령 | 상태 | 이벤트 |
 |---|---|---|---|
@@ -187,9 +192,21 @@ Python 상수(`scripts/mcptt_floor_policy_probe.py`)를 생성한다. 알고리�
 
 ### 4.7 `cimsue-cli`
 
-코어 위의 헤드리스 UE. Linux 에서 빌드되며 등록·그룹콜·floor·SDS·Join·픽업을 명령행/스크립트로 구동한다.
-cspsim 은 서버 검증용 시뮬레이터로 그대로 두고, `cimsue-cli` 는 **실제 단말 스택**으로 같은 S3 시나리오를
-한 번 더 확인하는 축이다(§9).
+코어 위의 헤드리스 UE(`sdk/core/cli`, `build/bin/cimsue-cli`). Linux 에서 빌드되며 등록·1:1 호(→ 그룹콜·floor·
+SDS·Join·픽업으로 확장)를 명령행으로 구동한다. cspsim 은 서버 검증용 시뮬레이터로 그대로 두고, `cimsue-cli` 는
+**실제 단말 스택**으로 같은 S3 시나리오를 한 번 더 확인하는 축이다(§9).
+
+```
+cimsue-cli [계정] register [--hold S]            # 200 OK → (hold) → de-REGISTER
+cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
+cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration
+계정: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I|--auth-id IMPI)
+      (--ha1 HEX32|--password P) [--srtp off|optional|required] [--sec tls] [--tls-ca PEM] [--json]
+```
+
+결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`code`), 종료코드 0/2/3/4/5(성공/인자/등록/호/미디어 없음).
+오디오 장치는 null(헤드리스) — 브리지는 돌고 RTP 는 흐른다. 통계는 스트림 소멸 시점(`onStreamDestroyed`)에
+보존해 상대가 먼저 끊어도 남는다. 사용 예는 [VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록.
 
 ---
 
@@ -305,8 +322,8 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | stage | 항목 | 내용 |
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | §4.6 교차 검증(CMP↔코어 코덱), 정의 테이블 생성물 일치 |
-| S1 | `S1-UE-UNIT` | SDP 협상(AMR-WB fmtp·SRTP crypto·m=application)·floor 상태머신·SDS TLV·MSRP 프레이밍·PKCE |
-| S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1·그룹콜·floor·SDS·Join·픽업·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489) |
+| S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱. 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
+| S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜·floor·SDS·Join·픽업·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | 실기기 | Android | 태블릿·UNIWA 에서 감청 SSRC 2개 귀속 표시·PTT 청취 버튼 비활성·대표번호 착신 — 와이어 실측 |
 | 실기기 | Windows | WASAPI 이중 출력·핫키·감청 영상 격자 |
 
@@ -334,6 +351,9 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 - **Android 영상 경로 선택** — Surface 직결(현행) vs 프레임 콜백(§4.5). 감청 격자 합성이 필요한 관제 태블릿은
   프레임 콜백이 맞고, 1:1 영상 앱은 Surface 직결이 싸다. 파사드가 둘을 다 제공할지 결정.
 - **C API 필요 여부** — Windows UI 스택 확정 후(C++ 이면 불필요).
+- **개발 서버 TLS 인증서** — `build/dist/csp/cert/csp.pem` 이 자가서명·SAN 없음이라 코어의 서버 검증(`tlsVerifyServer`)을
+  켠 채로는 등록이 503 `PJSIP_TLS_ECERTVERIF` 로 막힌다(정상 동작). TLS/SRTP 회귀를 검증 켠 채 돌리려면
+  sip_tls_signaling.md §8 요건(SAN=도메인/IP)의 인증서를 개발 서버에 발급해야 한다.
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
 - **cspsim 과 `cimsue-cli` 의 역할 분담 장기안** — 시뮬레이터 축(부하·다중 단말)과 실스택 축(정합)의 S3 항목 배분.
 

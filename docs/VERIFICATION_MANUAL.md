@@ -475,6 +475,47 @@ private(개시자 초기 발언권, 큐 없는 DENY) · `floor_control=off`
 
 ---
 
+## 부록. 헤드리스 UE (cimsue-cli) 수동 호시험
+
+`cimsue-cli` 는 단말 SDK 코어 `libcimsue`(pjsua2) 위의 헤드리스 UE 다 — [design/features/ue_sdk.md](design/features/ue_sdk.md) §4.7.
+cspsim(시뮬레이터)과 달리 **실제 단말 스택**(pjsua2 코덱·지터버퍼·SRTP·TLS)으로 등록·1:1 호를 돌리므로, 단말 정합
+회귀의 두 번째 축이다. 빌드 산출물은 `build/bin/cimsue-cli` (루트 `make` — `CIMS_UE_SDK=ON` 기본).
+
+가입자 자격은 DB 의 `volte_subscriptions.id/imsi/ha1` 이다(단말은 DB 를 보지 않으므로 인자로 넘긴다).
+
+```bash
+# 인자 공통: 접속점·도메인·가입자 (도메인은 access_services.jsonl 의 kind=volte domain)
+A="--server 121.161.164.48 --domain ims.mnc033.mcc450.3gppnetwork.org"
+
+# 등록만 (200 OK 후 de-REGISTER) — 종료코드 0
+./build/bin/cimsue-cli $A --msisdn +821300000001 --imsi 45033821300000001 --ha1 <HA1> register
+
+# 1:1 호 — 착신 단말을 먼저 띄우고(answer), 발신(call). 둘 다 JSON 한 줄 + 종료코드
+./build/bin/cimsue-cli $A --msisdn +821300000002 --imsi <IMSI2> --ha1 <HA1_2> --json answer --duration 10 &
+sleep 3
+./build/bin/cimsue-cli $A --msisdn +821300000001 --imsi <IMSI1> --ha1 <HA1_1> --json call +821300000002 --duration 6
+#  → {"cmd":"call","outcome":"ok",...,"rx_pkts":301,"tx_pkts":300,...}  (AMR-WB 20ms → 6초 ≈ 300 패킷)
+
+# TLS + SRTP(SDES) — 접속점 5061, 신뢰 앵커 PEM(서버 인증서를 발급한 CA)
+./build/bin/cimsue-cli $A --port 5061 --transport tls --tls-ca <CA.pem> --srtp optional ... call ...
+#  개발 서버의 build/dist/csp/cert/csp.pem 은 자가서명·SAN 없음(CN=csp) → 신원 검증이 반드시 실패(503
+#  PJSIP_TLS_ECERTVERIF, 올바른 동작). 경로만 볼 때는 --no-tls-verify 로 우회한다 — 상용 게이트는
+#  sip_tls_signaling.md §8 의 인증서 요건(SAN=도메인/IP) 충족 후 검증 켠 채로 통과해야 한다.
+```
+
+| 종료코드 | 의미 |
+|---|---|
+| 0 | 성공 (call/answer 는 수신 RTP > 0 까지) |
+| 2 | 인자 오류 |
+| 3 | 등록 실패·시한 |
+| 4 | 호 실패·시한 / 착신 없음 |
+| 5 | 미디어 없음 (호는 성립했으나 수신 RTP 0) |
+
+판정은 cspsim 축과 같다 — JSON 의 `rx_pkts`(누적 수신 RTP)가 통화 시간에 비례해야 하고, `code` 는 200.
+`--log-level 4` 이상이면 pjsip 로그(SDP·SRTP 협상 포함)가 stderr 로 나온다.
+
+---
+
 ## 부록. 자동화 / CI
 
 ### 비동기 job (backend 폴링)
@@ -507,6 +548,8 @@ echo $?    # 0=PASS, 1=FAIL
 ```
 
 ### unit test
+
+단말 SDK 코어 단위시험(S1-UE-UNIT): `./build/bin/cimsue_test` — config→pjsua2 매핑(IMPI·realm·SRTP/TLS 게이트·sec-agree)·헬퍼.
 
 ```bash
 python3 -m unittest tests.test_verify_lib    # 161 OK

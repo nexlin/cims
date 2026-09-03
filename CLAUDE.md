@@ -99,6 +99,8 @@ ems/        OAM + 콘솔
   core/     { oam/ (base 게이트웨이=`oam` 패키지), console/ (공통 셸·base 메뉴) }
   service/  { oam/ (서비스 모듈=`oam-svc` 패키지), console/ (서비스 팩) }
 agent/      노드 에이전트
+sdk/        단말 SDK — engine/(pjproject config_site 정본) core/(libcimsue C++ 코어·cimsue-cli·단위시험·SWIG .i) android/(NDK 빌드 스크립트)
+android/    Android UE 앱(volte/ptt/cims SSO) + core(pjsua2 SWIG·Kotlin — sdk/core 로 이식 중)
 deployment/ 부트스트랩·DB 부트스트랩 모듈
 verify/     S1~S6 검증 인프라 (verify/lib/)
 tests/      테스트

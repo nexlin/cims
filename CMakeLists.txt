@@ -319,6 +319,8 @@ ExternalProject_Add(
          COMMAND make lib
    INSTALL_COMMAND make install
 )
+# 코어 libcimsue + cimsue-cli + cimsue_test — pasf 전역 LINK_LIBRARIES 가 걸리기 전에 포함한다
+add_subdirectory(sdk/core)
 endif()
 
 add_subdirectory(${PASF_DIR})
