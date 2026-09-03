@@ -241,7 +241,7 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
    AlertBannerWidget 은 `/alerts` 활성 critical/major 를 소비(자체 임계 판정 제거,
    `ActiveAlarmsWidget.computeActive` 공유).
 6. **drift_sweeper**: HA fan-out drift 를 표준 알람(A-PRC-003,
-   `<그룹명>/config/<collection>`, transition 코어)으로 발화. 구 포맷
+   `g<그룹id>/config/<collection>`, transition 코어)으로 발화. 구 포맷
    (`config_drift::…`·구 code·구 mo `cims/ha/…`) open 은 스윕에서 이행 종결 후
    현행 알람으로 재발행.
 

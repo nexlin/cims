@@ -291,8 +291,8 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
 - 노드 분리를 빠뜨리면 HA 다중 인스턴스에서 활성키가 충돌한다 (cmp 변종 pmp/imp 의
   SystemId overlay 필수 사유와 동일).
 - **AGENT/OAM 행의 mo 는 위 규칙이 아니라 sweeper 합성 규칙을 따른다** — agent 계열
-  `<서버명>/<module|disk|…>`, 서비스 probe 는 관측 신원 기준 `<서버명>|<그룹명>/<모듈>`,
-  HA fan-out `<그룹명>/config/<collection>` (표준화 §3.4(b)). CSV 의 `instance` 컬럼은
+  `a<서버id>/<module|disk|…>`, 서비스 probe 는 관측 신원 기준 `a<서버id>|g<그룹id>/<모듈>`,
+  HA fan-out `g<그룹id>/config/<collection>` (표준화 §3.4(b) — 루트는 **불변 id**). CSV 의 `instance` 컬럼은
   어느 쪽이든 **발신(감지) 모듈**이다.
 - `detected_by` 는 CSV 에 컬럼을 두지 않는다 — `instance`(감지 모듈)가 주체 클래스를
   결정한다 (CSP/CMP/CMDP/CSC→`self`, AGENT→`agent`, OAM-SVC→`oam-svc`, OAM→`oam`).

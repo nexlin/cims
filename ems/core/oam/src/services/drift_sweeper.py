@@ -226,9 +226,14 @@ _OLD_PREFIX = 'config_drift::'    # 구 포맷 akey(type) — 이행 종결 대�
 
 
 def _mo_instance(r: dict) -> str:
-    """<그룹명>/config/<collection> — 그룹 소유 객체 루트 (표준화 §3.4(b)).
-    그룹명 부재(구 레코드/무명 그룹)는 g<gid> 폴백."""
-    root = r.get('ha_group_name') or f"g{r.get('ha_group_id')}"
+    """`g<id>/config/<collection>` — 그룹 소유 객체 루트 (표준화 §3.4(b)).
+
+    루트는 **불변 id** 다. mo_instance 는 활성 알람 식별키의 절반이라 그룹 이름을 넣으면
+    이름을 바꾼 순간 열린 알람을 같은 키로 찾지 못한다(alarm_sweeper.server_mo_root 와 같은
+    이유). 사람이 읽는 이름은 표시 계층이 id 로 해석해 붙인다(`mo_label`).
+    id 부재(구 레코드)만 이름 폴백 — 그 키는 orphan reap 이 정리한다."""
+    gid = r.get('ha_group_id')
+    root = f"g{gid}" if gid is not None else (r.get('ha_group_name') or '')
     return f"{root}/config/{r['collection']}"
 
 

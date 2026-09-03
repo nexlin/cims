@@ -84,6 +84,12 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 - **type 은 조건 클래스, code 는 정의** (process_unresponsive / A-PRC-004). 어느 프로세스인지는 `source.mo_instance`(§3.4/§3.5). `csp_down`/`cmp_down` 처럼 프로세스명을 type 에 박지 않음.
 - `perceived_severity` 가 기존 `severity` 를 대체. **하위호환**: `severity` 만 있으면 perceived_severity 로 승격(critical/warning 표준 값 유효). 신규 major/minor/indeterminate 가능.
 - managedObject **instance** 는 `mo_instance` 명시 또는 런타임 합성(§3.4(b) — 루트는 소유 주체의 **불변 식별자**): agent 규칙 = `a<서버id>/<module|disk|…>`, service 규칙 = 관측 신원 기준 — 노드 주소 관측 = `a<서버id>/<모듈>`(CMP 다중 미디어 노드(AA)는 endpoint 소유 서버로 해석해 개별 발화), VIP 관측 = `g<그룹id>/<모듈>`. 주소→소유 주체 해석은 인벤토리가 정본(`alarm_sweeper.build_mo_root_resolver`).
+  - **해석 실패 시에도 주소를 루트로 쓰지 않는다** (`alarm_sweeper.owner_mo_root`) — ① 관측
+    주소 해석 → ② 그 패키지를 호스팅하는 그룹(`g<그룹id>`) → ③ 관리평면 루트 순. 주소는
+    잘 바뀐다: VIP 부여 전후, `CspNotify` 미설정 시 기본값 `127.0.0.1`, 그룹 등록 전후로 같은
+    관측이 다른 키를 만든다. 실측에서 하나의 CSP probe 조건이 `127.0.0.1/csp`·`<VIP>/csp`·
+    `g2/csp` 세 키로 갈려 앞의 둘이 영구 미해소로 남았다. 주소 루트로 열린 구 활성키는
+    스윕이 이행 종결한다.
   - **왜 이름이 아니라 id 인가** — `mo_instance` 는 활성 알람 식별키의 절반(§3.4(a) "활성 알람 식별키 = (정의 코드, mo_instance)")이다. 여기에 운영자가 바꿀 수 있는 이름이 들어가면 서버/그룹을 개명한 순간 열린 알람을 같은 키로 찾지 못해 **영영 닫히지 않고 새 이름으로 중복이 열린다**. X.733/3GPP 도 식별자(DN)와 표시 이름(userLabel)을 나눈다 — 이 규약은 그 분리를 따른다. 식별자 모델 일반 규칙은 [identifier_model.md](identifier_model.md).
   - **표시** — 사람이 읽는 자리에는 이름을 쓴다. `msg_open`/`msg_close` 의 `{host}` 는 그 시점의 이름으로 렌더되고, 조회 API 가 `source.mo_label`(루트를 **현재** 이름으로 해석)을 함께 실어 콘솔이 그것을 표기한다(`mo_instance` 는 tooltip·검색어로 유지). 조회 시점 해석이라 개명하면 과거 레코드의 표시도 현재 이름을 따른다.
   - 모듈 자기보고(§FM)의 루트는 **모듈이 선언한 자기 node 신원**(`SystemId`)이고 OAM 의 서버 이름과 무관하다 — 개명의 영향을 받지 않으므로 이 규약의 대상 밖이다.
@@ -144,7 +150,7 @@ CIMS 알람을 임의 스키마(`critical`/`warning` 2단계)에서 **IMS 망관
 | `A-QOS-023` | `threshold_crossed` | qualityOfService | thresholdCrossed | service | `<서버명>/ha/<svc>` (check=ha_flap — keepalived 전이 빈도 임계) | warning | agent |
 | `A-QOS-024` | `capacity_threshold` | qualityOfService | resourceAtOrNearingCapacity | service | `MED_SVR_01/cmp/rtp_ports` (노드별 발화 — check=rtp_pct_gte) | 단계 임계(minor 80 / major 90 / critical 95) | oam-svc / oam |
 | `A-PRC-009` | `cert_expiring` | processingError | keyExpired | software | `<관리그룹>/oam/cert/https` · `<관리그룹>/oam/cert/ca/{group,agent_mtls}`(그룹 CA 는 모듈 HTTPS 서명자, agent mTLS CA 는 `Agent.MtlsEnabled` 배치에만 존재) · `<관리그룹>/oam-svc/cert/https`(관리평면 파일) · `<서버명>/agent/cert`(agent 자기보고 metric.cert — 서빙 중 인증서) · `<서버명>/csc/cert/https`·`<서버명>/csp/cert/<proto:port>`(자기보고) | 단계 임계(warning 30일 / critical 7일 — 잔여일이 작을수록 나쁨) | oam / oam-svc / self |
-| `A-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `<서버명>/<모듈>/config` · `<그룹명>/config/<collection>`(HA fan-out) | warning | agent / oam |
+| `A-PRC-003` | `config_out_of_sync` | processingError | configurationOrCustomizationError | software | `a<서버id>/<모듈>/config` · `g<그룹id>/config/<collection>`(HA fan-out) | warning | agent / oam |
 
 `A-PRC-003` 은 배포기록 실체화본(config_template default + overlay)의 canonical hash 와
 agent 가 보고하는 노드 실파일(`metric.cfg_hashes`) hash 의 불일치 = 설정 드리프트를 노출한다.

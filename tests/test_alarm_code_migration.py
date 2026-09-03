@@ -158,6 +158,46 @@ class TestRestoreAndMigration(unittest.TestCase):
         self.assertNotIn('CIMS-PRC-004@cims/csp', state)
 
 
+class TestMoRootImmutableId(unittest.TestCase):
+    """mo 루트는 항상 불변 id — 주소·이름이 루트로 새면 활성키가 갈려 영구 미해소가 된다.
+
+    실측 사고: 같은 CSP probe 조건이 `127.0.0.1/csp`(CspNotify 미설정 기본값)·
+    `121.161.164.141/csp`(VIP, 그룹 등록 전)·`g2/csp`(그룹 등록 후) 세 키로 갈려,
+    앞의 둘이 닫히지 않고 콘솔에 계속 떠 있었다.
+    """
+
+    def test_resolver_returns_empty_when_unresolved(self):
+        # 스토어가 비면 해석 불가 — 주소를 루트로 돌려주지 않는다.
+        resolve = alarm_sweeper.build_mo_root_resolver({})
+        self.assertEqual(resolve('121.161.164.141'), '')
+        self.assertEqual(resolve('127.0.0.1'), '')
+
+    def test_owner_root_falls_back_to_mgmt_not_address(self):
+        cfg = {'SystemId': 'oam1'}
+        resolve = alarm_sweeper.build_mo_root_resolver(cfg)
+        root = alarm_sweeper.owner_mo_root(cfg, resolve, '121.161.164.141', 'csp')
+        self.assertEqual(root, 'oam1')          # 관리평면 루트 — 주소가 아니다
+        self.assertFalse(alarm_sweeper._is_addr_root(root))
+
+    def test_addr_root_detection(self):
+        for r in ('127.0.0.1', '121.161.164.141', '10.0.0.1:9000'):
+            self.assertTrue(alarm_sweeper._is_addr_root(r), r)
+        for r in ('g2', 'a1', 'oam', 'cims'):
+            self.assertFalse(alarm_sweeper._is_addr_root(r), r)
+
+    def test_mo_root_of(self):
+        self.assertEqual(alarm_sweeper.mo_root_of('A-PRC-004@g2/csp'), 'g2')
+        self.assertEqual(alarm_sweeper.mo_root_of('A-PRC-004@127.0.0.1/csp'), '127.0.0.1')
+
+    def test_drift_mo_root_prefers_id_over_name(self):
+        from services import drift_sweeper
+        r = {'ha_group_id': 2, 'ha_group_name': '제어그룹', 'collection': 'local_nodes'}
+        self.assertEqual(drift_sweeper._mo_instance(r), 'g2/config/local_nodes')
+        # 이름이 바뀌어도 키는 그대로 — 열린 알람을 계속 찾을 수 있다.
+        r2 = {**r, 'ha_group_name': '이름변경'}
+        self.assertEqual(drift_sweeper._mo_instance(r2), drift_sweeper._mo_instance(r))
+
+
 class TestRetentionPurge(unittest.TestCase):
     def test_purge_old_by_file_date(self):
         from services import daily_jsonl

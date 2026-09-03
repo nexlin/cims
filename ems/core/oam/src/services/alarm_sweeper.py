@@ -262,9 +262,15 @@ def group_mo_root(group) -> str:
 def build_mo_root_resolver(config):
     """관측 주소 → 소유 주체 루트(**id 파생**) 해석기 (표준화 §3.4(b)).
     VIP 관측 = 그룹 루트(`g<id>`), 노드 주소 관측 = 서버 루트(`a<id>`). 어휘의 정본은
-    인벤토리 — 여기서는 그 실체화본(ha_groups VIP·agent 등록 IP/인터페이스)으로
-    해석하고, 해석 불가 주소는 주소 그대로 루트로 쓴다(비표준 배포 폴백).
-    스토어 적재 비용이 있으므로 스윕당 1회 생성한다."""
+    인벤토리 — 여기서는 그 실체화본(ha_groups VIP·agent 등록 IP/인터페이스)으로 해석한다.
+    스토어 적재 비용이 있으므로 스윕당 1회 생성한다.
+
+    **해석 불가면 빈 문자열**이다 — 주소를 루트로 쓰지 않는다. mo_instance 는 활성 알람
+    식별키의 절반이라 가변값을 넣으면 그 값이 바뀌는 순간 열린 알람을 같은 키로 찾지 못해
+    영영 닫히지 않는다(server_mo_root 주석과 같은 이유). 주소는 특히 잘 바뀐다 — VIP 부여
+    전후, CspNotify 미설정 시 기본값 127.0.0.1, 그룹 구성 전후로 같은 관측이 다른 키를
+    만든다(실측: A-PRC-004 가 `127.0.0.1/csp`·`121.161.164.141/csp`·`g2/csp` 세 키로 갈려
+    앞의 둘이 영구 미해소). 폴백 선택은 호출자가 `owner_mo_root` 로 한다."""
     vip_to_group: dict = {}
     addr_to_server: dict = {}
     try:
@@ -285,8 +291,45 @@ def build_mo_root_resolver(config):
 
     def resolve(addr) -> str:
         addr = str(addr or '')
-        return vip_to_group.get(addr) or addr_to_server.get(addr) or addr
+        return vip_to_group.get(addr) or addr_to_server.get(addr) or ''
     return resolve
+
+
+def owner_mo_root(config, resolve, addr, package: str = '') -> str:
+    """관측 대상의 소유 주체 루트 — **항상 불변 id 파생**을 돌려준다.
+
+    ① 관측 주소로 해석 (VIP→`g<id>` / 노드 IP→`a<id>`) — 가장 구체적이다.
+    ② 실패하면 그 패키지를 호스팅하는 그룹 — 주소가 뭐든 "이 모듈의 주인"은 같다.
+    ③ 그것도 없으면 관리평면 루트 (`mgmt_mo_root` — 그룹 id 또는 SystemId).
+
+    ③ 까지 가는 경우는 HA 그룹도 배포기록도 없는 단독 배포다. SystemId 는 설정값이라
+    바뀔 수 있지만 재식별을 의도한 변경이고, db_down 계열이 이미 같은 루트를 쓴다.
+    """
+    root = resolve(addr) if resolve else ''
+    if root:
+        return root
+    if package:
+        try:
+            from services import ha_lookup
+            g = ha_lookup.ha_group_for_package(config, package)
+            if g and g.get('id') is not None:
+                return group_mo_root(g)
+        except Exception:
+            pass
+    return mgmt_mo_root(config)
+
+
+# mo 루트가 주소(IPv4[:port])인가 — 구 폴백이 만든 활성키 판별용.
+def _is_addr_root(root: str) -> bool:
+    host = (root or '').split(':', 1)[0]
+    parts = host.split('.')
+    return len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+def mo_root_of(akey: str) -> str:
+    """akey(code@mo) 의 mo 첫 세그먼트 — 소유 주체 루트."""
+    mo = akey.split('@', 1)[1] if '@' in akey else ''
+    return mo.split('/', 1)[0]
 
 
 def build_mo_label_resolver(config):
@@ -410,9 +453,10 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
         raw = [(ip, port, _probe_cmp(ip, port)) for ip, port in _media_endpoints(config)]
         root_count: dict = {}
         for ip, _port, _stats in raw:
-            root_count[resolve(ip)] = root_count.get(resolve(ip), 0) + 1
+            r0 = owner_mo_root(config, resolve, ip, 'cmp')
+            root_count[r0] = root_count.get(r0, 0) + 1
         for ip, port, stats in raw:
-            root = resolve(ip)
+            root = owner_mo_root(config, resolve, ip, 'cmp')
             # 같은 서버의 다중 endpoint — 루트에 포트 접미로 활성키 충돌 방지 (예외 배치)
             if root_count[root] > 1:
                 root = f"{root}:{port}"
@@ -439,6 +483,12 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
         state, service_log_dir, detected_by,
         lambda k: '@cims/' in k and not k.split('@', 1)[1].startswith('cims/ha/'),
         "알람 코드/mo 루트 이행 종결 — 지속 조건은 현행 정의 코드로 재발행", log=log)
+    # 주소 루트(구 폴백) 활성키 이행 종결 — mo 루트는 이제 항상 불변 id 다.
+    # 같은 조건이 `127.0.0.1/csp`·`<VIP>/csp`·`g<id>/csp` 로 갈려 앞의 둘이 영구
+    # 미해소로 남던 것을 정리한다. 지속 조건은 아래 평가가 현행 키로 재발화.
+    close_migrated_keys(
+        state, service_log_dir, detected_by, lambda k: _is_addr_root(mo_root_of(k)),
+        "mo 루트 불변 id 이행 종결 — 지속 조건은 소유 주체 루트로 재발행", log=log)
     for r in rules:
         chk = r.get('check')
         thr = r.get('threshold', rtp_threshold)
@@ -498,7 +548,8 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
             continue
         # 단일 인스턴스 규칙 — 관측 신원으로 mo 합성
         if chk == 'process_unresponsive':
-            mo = r.get('mo_instance') or f"{resolve(csp_addr)}/{r.get('target', 'csp')}"
+            tgt = r.get('target', 'csp')
+            mo = r.get('mo_instance') or f"{owner_mo_root(config, resolve, csp_addr, tgt)}/{tgt}"
         elif chk == 'db_down':
             mo = r.get('mo_instance') or f"{mgmt_mo_root(config)}/db"
         else:
@@ -508,3 +559,13 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
         msg_close = fmt(r.get('msg_close'), mo=mo, threshold=thr)
         transition(state, service_log_dir, r, mo, detected_by, is_open, msg_open, msg_close,
                    log=log)
+        # 신원 재해석으로 이탈한 같은 계열 활성키 정리 — CMP·rtp_pct 분기에는 있고
+        # 단일 인스턴스 분기에만 없어서, 루트가 바뀌면 옛 키가 영영 안 닫혔다.
+        # 모듈 세그먼트가 같은 것만 대상(같은 code 의 다른 모듈 계열과 구분).
+        seg = _mo_module_segment(f"{code}@{mo}")
+        for akey in [k for k in list(state)
+                     if k.startswith(f"{code}@") and k.split('@', 1)[1] != mo
+                     and _mo_module_segment(k) == seg]:
+            stale = akey.split('@', 1)[1]
+            transition(state, service_log_dir, r, stale, detected_by, False, '',
+                       f"{stale} 관측 신원 재해석 — 정리", log=log)
