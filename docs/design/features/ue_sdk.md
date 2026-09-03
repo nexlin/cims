@@ -95,13 +95,18 @@ SWIG 을 돌린 뒤 산출물을 배치하는 절차만** 담는다(`android/doc
 sdk/core/
   include/cimsue/       공개 헤더 = 플랫폼 SDK·바인딩 생성의 정본 (§4.2)
   src/
-    sip/                Endpoint 부팅 · Account(REGISTER Digest/AKA·sec-agree·Service-Route) · Call(INVITE/BYE/
-                        re-INVITE·Join·Replaces·REFER) · 구독(dialog RFC 4235 · conference RFC 4575 ·
-                        xcap-diff RFC 5875 · presence) · MESSAGE · SDP 협상(코덱·SRTP SDES·m=application·m=text)
+    engine.cpp          Endpoint 부팅·계정(REGISTER Digest/AKA·sec-agree)·호(INVITE/BYE/보류)·MCPTT 세션(그룹콜/사설콜
+                        multipart INVITE·SDP m=application 주입/학습·a=recvonly 청취·착신 자동 수락)·affiliation PUBLISH·
+                        conference/xcap-diff SUBSCRIBE·MESSAGE 송수신 라우팅(SDS/roster/기타) · account_map.cpp 매핑 규칙
+                        (확장: Join·Replaces·REFER·dialog RFC 4235 — D 단계)
     media/              장치 추상(코어는 pjmedia 장치 id 만 다룸) · 호별 rx 레벨/뮤트/listen · SSRC 소스 테이블
                         (U10 산출: 호 안의 소스별 활성·레벨·RFC 5576 label) · 영상 프레임 콜백(창 없음)
-    floor/              TS 24.380 participant 상태머신(§6.2.4) + MCPT RTCP-APP 코덱 · 청취 전용 모드(Permission=0)
-    mcdata/             TS 24.282 SDS(시그널링 TLV·C-plane MESSAGE·대용량 MSRP) · FD 업/다운로드 · disposition
+    floor/              floor_defs.h(생성) · floor_codec(TS 24.380 §8 RTCP-APP TLV, CMP 코덱과 바이트 호환) ·
+                        floor_participant(§6.2.4 상태머신 + UDP 소켓 + Ack keepalive·Revoke Release 재전송·MSN 폐기·
+                        요청 시한·Granted Duration 자체 종료·청취 전용) — 원천 android FloorClient.kt
+    mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command 빌더, mcptt-info/conference-info 파서
+    mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION TLV + multipart(base64) 빌드·파싱,
+                        Java 호환 conversation id (확장: MSRP 미디어평면·FD 업/다운로드)
     csc/                OAuth2 PKCE(IdMS) · XCAP(GMS 그룹·CMS user-profile/service-config, ETag) ·
                         `/provisioning/me` · `/provisioning/directory` · FD 스토어 — HTTP 전송은 인터페이스(§4.4)
     domain/             UE 세션 모델(등록·호 목록·그룹/채널·affiliation·긴급/경보·데스크) → 상태 스냅샷 + 이벤트
@@ -185,10 +190,13 @@ OkHttp 가 필요하면 파사드가 구현체를 주입한다. TLS 트러스트
 
 ### 4.6 floor 코덱 단일 정의
 
-[mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md) §6 의 결론을 실행한다. opcode·field id·
-cause·indicator 비트는 `docs/design/features/mcptt_floor_defs.yaml` 한 곳에 두고 C++ 헤더(코어·`cmp/PMcpttGroup.h`)·
-Python 상수(`scripts/mcptt_floor_policy_probe.py`)를 생성한다. 알고리즘 드리프트는 교차 검증으로 잡는다 — CMP
-인코더 출력을 코어 디코더로, 코어 빌더 출력을 `ParseFloorMessage` 로 파싱하는 시험이 S1 에 들어간다.
+[mcptt_ue_multitalker_media.md](mcptt_ue_multitalker_media.md) §6 의 결론. 정본 테이블은
+`docs/design/features/mcptt_floor_defs.yaml`(opcode·field id·indicator 비트·source/permission/queued purpose·cause 문구)
+이고 `scripts/gen_floor_defs.py` 가 코어 헤더 `sdk/core/src/floor/floor_defs.h` 를 생성한다(CMake 가 테이블 변경 시 재생성).
+`gen_floor_defs.py --check` 는 생성물 최신성과 `cmp/PMcpttGroup.h`·android `FloorControl.kt`·
+`scripts/mcptt_floor_policy_probe.py` 의 상수를 테이블과 대조한다(CMP·Kotlin 은 생성물이 아니라 대조 대상 — 값이
+어긋나면 S1 이 막는다). 알고리즘 드리프트는 `cimsue_test` 의 교차 검증이 잡는다 — 코어 빌더 출력을 CMP
+`ParseFloorMessage` 로, CMP `BuildFloorMessage` 출력(Granted ack-요구·Taken 리스트·Deny·Queue)을 코어 `decode` 로.
 
 ### 4.7 `cimsue-cli`
 
@@ -199,12 +207,17 @@ SDS·Join·픽업으로 확장)를 명령행으로 구동한다. cspsim 은 서�
 ```
 cimsue-cli [계정] register [--hold S]            # 200 OK → (hold) → de-REGISTER
 cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
-cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration
+cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락)
+cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency]
+cimsue-cli [계정] sds <groupId> <text>           # MESSAGE 최종 응답까지
+cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로
 계정: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I|--auth-id IMPI)
-      (--ha1 HEX32|--password P) [--srtp off|optional|required] [--sec tls] [--tls-ca PEM] [--json]
+      (--ha1 HEX32|--password P) [--mcptt-id tel:..] [--affiliate G,..] [--srtp off|optional|required] [--sec tls]
+      [--tls-ca PEM] [--json]
 ```
 
-결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`code`), 종료코드 0/2/3/4/5(성공/인자/등록/호/미디어 없음).
+결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`granted`·`taken`·`denied`·`code`), 종료코드 0/2/3/4/5/6/7
+(성공/인자/등록/호/미디어 없음/floor 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(Event: mcptt), 종료 시 de-affiliate.
 오디오 장치는 null(헤드리스) — 브리지는 돌고 RTP 는 흐른다. 통계는 스트림 소멸 시점(`onStreamDestroyed`)에
 보존해 상대가 먼저 끊어도 남는다. 사용 예는 [VERIFICATION_MANUAL.md](../../VERIFICATION_MANUAL.md) 부록.
 
@@ -321,9 +334,9 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 
 | stage | 항목 | 내용 |
 |---|---|---|
-| S1 | `S1-UE-FLOOR-CODEC` | §4.6 교차 검증(CMP↔코어 코덱), 정의 테이블 생성물 일치 |
+| S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱. 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
-| S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜·floor·SDS·Join·픽업·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
+| S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·Join·픽업·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | 실기기 | Android | 태블릿·UNIWA 에서 감청 SSRC 2개 귀속 표시·PTT 청취 버튼 비활성·대표번호 착신 — 와이어 실측 |
 | 실기기 | Windows | WASAPI 이중 출력·핫키·감청 영상 격자 |
 

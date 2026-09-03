@@ -168,12 +168,13 @@ NDK+JNI 를 새로 들여야 한다 — `android/` 에는 현재 네이티브 �
 - `cmp/PMcpttGroup.h` · `android/.../floor/FloorControl.kt`
 - `scripts/mcptt_floor_policy_probe.py` · `tests/cmp_floor_codec_test.cpp`
 
-따라서 권고는 **단일 정의 테이블 + 실행 가능한 계약 시험**이다:
+따라서 **단일 정의 테이블 + 실행 가능한 계약 시험**으로 간다 ([ue_sdk.md](ue_sdk.md) §4.6):
 
-1. 하나의 테이블(YAML/JSON)에서 C++ 헤더 · Kotlin object · Python 상수를 생성 — JNI 없이 상수
-   드리프트를 없앤다.
-2. 알고리즘 드리프트는 **교차 검증**으로 잡는다 — CMP 인코더가 만든 패킷을 단말 디코더 규칙으로
-   파싱하고, 역방향은 단말 빌더 출력을 `ParseFloorMessage` 로 파싱한다. 안드로이드 빌드가 없는
-   환경에서도 돌아가므로 CI 에 고정할 수 있다.
+1. 정본 테이블 `mcptt_floor_defs.yaml` → `scripts/gen_floor_defs.py` 가 코어 헤더(`sdk/core/src/floor/floor_defs.h`)를
+   생성하고, `--check` 가 `cmp/PMcpttGroup.h`·`FloorControl.kt`·`mcptt_floor_policy_probe.py` 의 상수를 테이블과 대조한다
+   — 네 곳의 상수 드리프트를 JNI 없이 없앤다.
+2. 알고리즘 드리프트는 **교차 검증**으로 잡는다 — `cimsue_test` 의 `FloorXCheck` 가 CMP `BuildFloorMessage` 출력을
+   코어 디코더로, 코어 빌더 출력을 `ParseFloorMessage` 로 파싱한다. 안드로이드 빌드가 없는 환경에서도 돌아간다.
 
-JNI 공유 라이브러리로 가더라도 1·2 는 그대로 필요하다 — 먼저 하는 편이 낫다.
+단말 SDK 코어(`libcimsue`)의 floor 코덱·participant 는 Kotlin `FloorCodec`/`FloorClient` 를 C++ 로 이식한 것이고, Android
+앱은 SDK 전환 후 이 코어를 쓴다(ue_sdk.md §5.3).

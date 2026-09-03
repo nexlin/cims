@@ -503,13 +503,29 @@ sleep 3
 #  sip_tls_signaling.md §8 의 인증서 요건(SAN=도메인/IP) 충족 후 검증 켠 채로 통과해야 한다.
 ```
 
+```bash
+# MCPTT 그룹콜 — B 가 먼저 참여(청취), A 가 3초 뒤 3초간 PTT. 자격은 ptt_subscriptions, 도메인은 kind=ptt.
+P="--server 121.161.164.48 --domain ptt.mnc033.mcc450.3gppnetwork.org --affiliate g001 --json"
+./build/bin/cimsue-cli $P --msisdn +82500000002 --imsi <IMSI> --ha1 <HA1> group-call g001 --duration 14 &
+sleep 2
+./build/bin/cimsue-cli $P --msisdn +82500000001 --imsi <IMSI> --ha1 <HA1> group-call g001 --duration 10 --ptt-at 3 --ptt-len 3
+#  A → {"outcome":"ok",...,"tx_pkts":151,"granted":1,...,"floor_remote":"121.161.164.48:54018","rosters":1}
+#  B → {"outcome":"ok",...,"rx_pkts":151,"taken":1,...}     (A 의 3초 발언 = AMR-WB 50pps ≈ 150 패킷 수신)
+
+# MCData 그룹 SDS — B 수신 대기, A 발신
+./build/bin/cimsue-cli $P --msisdn +82500000002 ... sds-recv --duration 12 &
+./build/bin/cimsue-cli $P --msisdn +82500000001 ... sds g001 "안녕 SDS"
+```
+
 | 종료코드 | 의미 |
 |---|---|
-| 0 | 성공 (call/answer 는 수신 RTP > 0 까지) |
+| 0 | 성공 (call/answer/group-call 은 수신 RTP > 0 까지) |
 | 2 | 인자 오류 |
 | 3 | 등록 실패·시한 |
 | 4 | 호 실패·시한 / 착신 없음 |
 | 5 | 미디어 없음 (호는 성립했으나 수신 RTP 0) |
+| 6 | floor 미획득 (`--ptt-at` 요청에 Granted 없음) |
+| 7 | SDS 실패 (거절·시한·미수신) |
 
 판정은 cspsim 축과 같다 — JSON 의 `rx_pkts`(누적 수신 RTP)가 통화 시간에 비례해야 하고, `code` 는 200.
 `--log-level 4` 이상이면 pjsip 로그(SDP·SRTP 협상 포함)가 stderr 로 나온다.
@@ -549,7 +565,8 @@ echo $?    # 0=PASS, 1=FAIL
 
 ### unit test
 
-단말 SDK 코어 단위시험(S1-UE-UNIT): `./build/bin/cimsue_test` — config→pjsua2 매핑(IMPI·realm·SRTP/TLS 게이트·sec-agree)·헬퍼.
+단말 SDK 코어 단위시험(S1-UE-UNIT / S1-UE-FLOOR-CODEC): `./build/bin/cimsue_test` — config→pjsua2 매핑·floor 코덱·
+CMP 코덱 교차 검증(`FloorXCheck`)·SDS 코덱·MCPTT XML. floor 정의 드리프트: `python3 scripts/gen_floor_defs.py --check`.
 
 ```bash
 python3 -m unittest tests.test_verify_lib    # 161 OK

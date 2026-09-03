@@ -6,12 +6,15 @@
 //    이벤트 스레드 `ue-evt` 가 부른다 — 리스너 안에서 명령을 다시 불러도(ue-ctl 로 감) 교착 없음.
 //  - pj::Account/pj::Call 은 엔진이 강참조 테이블로 보관하고 DISCONNECTED 뒤 ue-ctl 에서 해제한다.
 //    콜백 안에서 자기 객체를 지우지 않는다.
+//  - MCPTT 세션(그룹콜·사설콜)은 호마다 floor participant(별도 UDP 소켓)를 갖고, SDP 의 m=application 을
+//    송신 SDP 에 주입·수신 SDP 에서 학습한다(android SipController/CimsCall 의 규칙 승계).
 #include "cimsue/engine.h"
 
 #include <pjsua2.hpp>
 
 #include <atomic>
 #include <condition_variable>
+#include <ctime>
 #include <deque>
 #include <functional>
 #include <future>
@@ -21,8 +24,11 @@
 #include <thread>
 
 #include "account_map.h"
+#include "floor/floor_participant.h"
+#include "mcdata/sds_codec.h"
+#include "mcptt/mcptt_xml.h"
 
-#define CIMSUE_VERSION "0.1.0"
+#define CIMSUE_VERSION "0.2.0"
 
 namespace cimsue {
 
@@ -31,10 +37,9 @@ namespace {
 /** 단일 워커 스레드 + 작업 큐. */
 class Worker {
 public:
-    void start(const std::string& name, std::function<void()> onStart = nullptr) {
+    void start() {
         stop_ = false;
-        th_ = std::thread([this, name, onStart] {
-            if (onStart) onStart();
+        th_ = std::thread([this] {
             for (;;) {
                 std::function<void()> job;
                 {
@@ -66,7 +71,6 @@ public:
         cv_.notify_all();
         if (th_.joinable()) th_.join();
     }
-    bool isCurrent() const { return std::this_thread::get_id() == th_.get_id(); }
 
 private:
     std::thread th_;
@@ -78,17 +82,78 @@ private:
 
 Result fromError(const pj::Error& e) { return Result::fail((int)e.status, e.info(false)); }
 
-}  // namespace
+/** SDP m=application 섹션 텍스트 (floor 평면, ptt_ue.md). */
+std::string floorSdp(int localPort, bool fullDuplex) {
+    return "m=application " + std::to_string(localPort) + " UDP MCPTT\r\n"
+           "a=floorid:0 mstrm:audio\r\n" +
+           std::string(fullDuplex ? "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl" : "a=fmtp:MCPTT mc_queueing");
+}
 
-// ─────────────────────────────────────────────────────────────────────────────
+/** SDP 에서 m=application 의 (ip, port). 섹션 c= 우선, 없으면 세션 c=. */
+bool parseApplication(const std::string& sdp, std::string& ip, int& port) {
+    size_t m = sdp.find("m=application ");
+    if (m == std::string::npos) return false;
+    port = std::atoi(sdp.c_str() + m + 14);
+    if (port <= 0) return false;
+    size_t next = sdp.find("\nm=", m + 1);
+    std::string section = sdp.substr(m, next == std::string::npos ? std::string::npos : next - m);
+    auto conn = [](const std::string& s) -> std::string {
+        size_t c = s.find("c=IN IP4 ");
+        if (c == std::string::npos) return std::string();
+        size_t e = s.find_first_of("\r\n", c);
+        return s.substr(c + 9, e == std::string::npos ? std::string::npos : e - c - 9);
+    };
+    ip = conn(section);
+    if (ip.empty()) ip = conn(sdp);
+    return !ip.empty();
+}
 
-struct Engine::Impl;
+/** 주입 섹션에 c= 라인 보장 — pjmedia_sdp_validate EMISSINGCONN 방지. */
+std::string withConnLine(const std::string& whole, const std::string& extra) {
+    std::string section = extra;
+    while (!section.empty() && (section.back() == '\r' || section.back() == '\n')) section.pop_back();
+    if (section.find("c=IN ") != std::string::npos) return section;
+    size_t c = whole.find("c=IN IP4 ");
+    if (c == std::string::npos) return section;
+    size_t e = whole.find_first_of("\r\n", c);
+    std::string cline = whole.substr(c, e == std::string::npos ? std::string::npos : e - c);
+    size_t nl = section.find("\r\n");
+    if (nl == std::string::npos) return section + "\r\n" + cline;
+    return section.substr(0, nl + 2) + cline + section.substr(nl);
+}
 
-namespace {
+/** [whole] 의 [prefix] 미디어 섹션(다음 m= 전까지)을 [extra] 로 교체 — media_count 불변(med_prov_cnt 정합).
+ *  prefix 가 없으면 끝에 덧붙인다. */
+std::string replaceMediaSection(const std::string& whole, const std::string& prefix, const std::string& extra) {
+    size_t s = whole.find(prefix);
+    std::string body = withConnLine(whole, extra) + "\r\n";
+    if (s == std::string::npos) {
+        std::string w = whole;
+        while (!w.empty() && (w.back() == '\r' || w.back() == '\n')) w.pop_back();
+        return w + "\r\n" + body;
+    }
+    size_t e = whole.find("\nm=", s + 1);
+    if (e == std::string::npos) return whole.substr(0, s) + body;
+    return whole.substr(0, s) + body + whole.substr(e + 1);
+}
+
+uint32_t ssrcOf(const std::string& id) {
+    uint32_t v = (uint32_t)(std::hash<std::string>{}(id) & 0xffffffffu);
+    return v ? v : 1;
+}
+
+std::string sipBody(const std::string& whole) {
+    size_t p = whole.find("\r\n\r\n");
+    return p == std::string::npos ? std::string() : whole.substr(p + 4);
+}
+
 class PjAccount;
 class PjCall;
 class PjLog;
+
 }  // namespace
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 struct Engine::Impl {
     EngineConfig cfg;
@@ -100,19 +165,21 @@ struct Engine::Impl {
     std::unique_ptr<pj::Endpoint> ep;
     /** pjsua2 소유 — libInit 에 넘긴 뒤에는 Endpoint::libDestroy 가 delete 한다(여기서 지우면 이중 해제). */
     pj::LogWriter* logWriter = nullptr;
-    std::string domainDefault;
 
     // ue-ctl 에서만 접근
     std::map<int, std::unique_ptr<pj::Account>> accounts;
     std::map<int, AccountConfig> accountCfgs;
     std::map<int, std::unique_ptr<pj::Call>> calls;        // pjsua call id → Call
     int nextAccountId = 0;
+    std::atomic<long> nextToken{1};
 
     // 스냅샷 — 콜백(pjsip 스레드)이 쓰고 조회(임의 스레드)가 읽는다
     std::mutex snapM;
     std::map<int, RegInfo> regInfos;
     std::map<int, CallInfo> callInfos;                     // 종료된 호도 잠시 보존(조회·최종 통계) — pruneFinished
     std::map<int, StreamStats> finalStats;                 // onStreamDestroyed 시점의 최종 RTP 통계
+    std::map<long, std::pair<int, std::string>> publishPending;   // token → (accountId, groupId)
+    std::map<std::string, std::string> publishEtag;               // "accountId:group" → SIP-ETag
     static constexpr size_t kKeepFinished = 64;
     void pruneFinished() {                                 // snapM 잡은 상태에서 호출
         while (callInfos.size() > kKeepFinished) {
@@ -151,10 +218,7 @@ struct Engine::Impl {
         if (out) *out = ci;
     }
     void applyCodecPolicy();
-    pj::Call* findCall(int callId) {
-        auto it = calls.find(callId);
-        return it == calls.end() ? nullptr : it->second.get();
-    }
+    PjCall* findCall(int callId);
     pj::AudioMedia* activeAudio(pj::Call* call, unsigned* idxOut = nullptr) {
         pj::CallInfo ci = call->getInfo();
         for (auto& m : ci.media) {
@@ -165,10 +229,25 @@ struct Engine::Impl {
         }
         return nullptr;
     }
-    void wireMedia(pj::Call* call, int callId);
+    void wireMedia(PjCall* call, int callId);
+    long doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
+                       const std::string& contentType, const std::string& body,
+                       const std::map<std::string, std::string>& headers, long token);
 };
 
 namespace {
+
+/** MCPTT 세션(그룹콜/사설콜) 부속 상태 — PjCall 소유. */
+struct McpttSession {
+    std::string groupId;                 // bare id (그룹) 또는 상대 번호(사설콜)
+    bool isPrivate = false;
+    bool fullDuplex = false;             // mc_no_floor_ctrl — floor 없이 마이크 상시
+    bool listenOnly = false;
+    bool micOpen = false;                // floor Granted 로 열림
+    std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
+    std::unique_ptr<floor::Participant> floor;
+    bool remoteLearned = false;
+};
 
 class PjLog : public pj::LogWriter {
 public:
@@ -187,6 +266,93 @@ public:
     PjCall(Engine::Impl* o, pj::Account& acc, int accountId, int callId = PJSUA_INVALID_ID)
         : pj::Call(acc, callId), o_(o), accountId_(accountId) {}
 
+    std::unique_ptr<McpttSession> mcptt;
+    int accountId() const { return accountId_; }
+
+    /** floor participant 생성·바인드 + 콜백 배선. 이벤트 콜백 안의 callId 는 나중에(makeCall 뒤) 정해질 수
+     *  있어 참조로 들고 있다가 sealCallId 로 확정한다. 마이크 게이트는 ue-ctl 로 넘겨 pjsua 를 만진다. */
+    bool openFloor(const std::string& userId) {
+        floor::Participant::Callbacks cb;
+        Engine::Impl* o = o_;
+        auto idRef = floorCallId_;
+        cb.onEvent = [o, idRef](FloorEvent ev) {
+            ev.callId = *idRef;
+            o->emit([o, ev] { o->listener->onFloor(ev); });
+        };
+        cb.onMic = [o, idRef](bool on) {
+            int id = *idRef;
+            o->ctl.post([o, id, on] {
+                PjCall* c = o->findCall(id);
+                if (!c || !c->mcptt) return;
+                c->mcptt->micOpen = on;
+                try { o->wireMedia(c, id); } catch (pj::Error& e) { o->log(2, std::string("floor mic: ") + e.info(false)); }
+            });
+        };
+        cb.log = [o](int level, const std::string& m) { o->log(level, m); };
+        mcptt->floor.reset(new floor::Participant(-1, ssrcOf(userId), userId, cb));
+        if (!mcptt->floor->open(0)) { mcptt->floor.reset(); return false; }
+        if (mcptt->listenOnly) mcptt->floor->setListenOnly(true);
+        return true;
+    }
+    void sealCallId(int id) { *floorCallId_ = id; }
+
+    void learnFloorRemote(const std::string& sdp) {
+        if (!mcptt || !mcptt->floor || mcptt->remoteLearned) return;
+        std::string ip; int port = 0;
+        if (parseApplication(sdp, ip, port)) {
+            mcptt->remoteLearned = true;
+            mcptt->floor->setRemote(ip, port);
+        }
+    }
+
+    void onCallSdpCreated(pj::OnCallSdpCreatedParam& prm) override {
+        if (!mcptt) return;
+        try {
+            if (!mcptt->pendingAppSdp.empty()) {
+                std::string whole = prm.sdp.wholeSdp;
+                if (whole.empty()) {
+                    o_->log(1, "onCallSdpCreated: empty wholeSdp (SDP print buffer overflow) — skip floor inject");
+                } else if (whole.find("m=application") != std::string::npos) {
+                    prm.sdp.wholeSdp = replaceMediaSection(whole, "m=application", mcptt->pendingAppSdp);
+                } else if (whole.find("m=text") != std::string::npos) {
+                    prm.sdp.wholeSdp = replaceMediaSection(whole, "m=text", mcptt->pendingAppSdp);
+                } else {
+                    prm.sdp.wholeSdp = replaceMediaSection(whole, "\x01", mcptt->pendingAppSdp);   // append
+                }
+            }
+            // 청취 전용 합류(a=recvonly) — 관제 PTT 청취(dispatch_center.md §5.6): 서버가 PTT_JOIN recv_only 로 변환.
+            if (mcptt->listenOnly) {
+                std::string w = prm.sdp.wholeSdp;
+                size_t a = w.find("a=sendrecv");
+                if (a != std::string::npos) prm.sdp.wholeSdp = w.substr(0, a) + "a=recvonly" + w.substr(a + 10);
+                else {
+                    size_t ma = w.find("m=audio ");
+                    if (ma != std::string::npos) { size_t eol = w.find("\r\n", ma); if (eol != std::string::npos) prm.sdp.wholeSdp = w.substr(0, eol + 2) + "a=recvonly\r\n" + w.substr(eol + 2); }
+                }
+            }
+            if (!prm.remSdp.wholeSdp.empty()) learnFloorRemote(prm.remSdp.wholeSdp);          // UAS: 상대 offer
+        } catch (...) {}
+    }
+
+    void onCallTsxState(pj::OnCallTsxStateParam& prm) override {
+        try {
+            if (prm.e.type != PJSIP_EVENT_TSX_STATE) return;
+            if (prm.e.body.tsxState.type != PJSIP_EVENT_RX_MSG) return;
+            const std::string& msg = prm.e.body.tsxState.src.rdata.wholeMsg;
+            if (msg.empty()) return;
+            if (mcptt && msg.rfind("SIP/2.0 2", 0) == 0 && msg.find("m=application") != std::string::npos)
+                learnFloorRemote(sipBody(msg));                                               // UAC: 200 OK answer
+            if (msg.rfind("NOTIFY ", 0) == 0 && msg.find("conference-info") != std::string::npos) {
+                std::vector<RosterEntry> users; bool full = false;
+                if (mcptt::parseConferenceInfo(sipBody(msg), users, full)) {
+                    std::string gid = mcptt ? mcptt->groupId : std::string();
+                    int acc = accountId_;
+                    o_->emit([o = o_, acc, gid, users, full] { o->listener->onRoster(acc, gid, users, full); });
+                }
+            }
+        } catch (...) {}
+    }
+
     void onCallState(pj::OnCallStateParam&) override {
         pj::CallInfo ci = getInfo();
         const int id = getId();
@@ -201,7 +367,6 @@ public:
             switch (ci.state) {
                 case PJSIP_INV_STATE_CALLING:
                 case PJSIP_INV_STATE_EARLY:
-                    // 착신(UAS)의 EARLY(자동 180)는 Incoming 을 덮어쓰지 않는다 — 발신(UAC)만 Outgoing.
                     if (ci.role == PJSIP_ROLE_UAC) ns = CallState::Outgoing;
                     break;
                 case PJSIP_INV_STATE_CONNECTING:
@@ -219,16 +384,14 @@ public:
         }, &snap);
         if (changed) o_->emit([o = o_, snap] { o->listener->onCallState(snap); });
         if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
-            // 콜백 안에서 자기 객체를 지우지 않는다 — ue-ctl 에서 해제.
-            o_->ctl.post([o = o_, id] {
-                o->calls.erase(id);
+            o_->ctl.post([o = o_, id] {                    // 콜백 안에서 자기 객체를 지우지 않는다
+                o->calls.erase(id);                        // ~PjCall → floor participant close
                 std::lock_guard<std::mutex> lk(o->snapM);
                 o->pruneFinished();
             });
         }
     }
 
-    /** 스트림 소멸 직전 — 이 시점이 RTP 통계를 읽을 수 있는 마지막 기회다(DISCONNECTED 콜백에서는 이미 없다). */
     void onStreamDestroyed(pj::OnStreamDestroyedParam& prm) override {
         try {
             StreamStats s = Engine::Impl::fromPj(getStreamStat(prm.streamIdx));
@@ -266,6 +429,7 @@ public:
 private:
     Engine::Impl* o_;
     int accountId_;
+    std::shared_ptr<int> floorCallId_ = std::make_shared<int>(-1);
 };
 
 class PjAccount : public pj::Account {
@@ -282,20 +446,37 @@ public:
         ri.reason = prm.reason;
         ri.expiresSec = expires;
         if (active && prm.code / 100 == 2) ri.state = RegState::Registered;
-        else if (!active && prm.code / 100 == 2) ri.state = RegState::Unregistered;   // de-REGISTER 200
+        else if (!active && prm.code / 100 == 2) ri.state = RegState::Unregistered;
         else ri.state = RegState::Failed;
         { std::lock_guard<std::mutex> lk(o_->snapM); o_->regInfos[accountId_] = ri; }
         o_->emit([o = o_, ri] { o->listener->onRegState(ri); });
     }
 
     void onIncomingCall(pj::OnIncomingCallParam& prm) override {
-        // Call 객체 생성은 pjsua 콜백 안에서 해야 한다(call id 가 이 시점에만 유효). 테이블 삽입은
-        // ue-ctl 소유 자료구조라 ue-ctl 로 넘긴다 — 그 사이 pjsua 는 이 call 을 우리 것으로 안다.
         auto* call = new PjCall(o_, *this, accountId_, prm.callId);
+        call->sealCallId(prm.callId);
         std::string whole;
         try { whole = prm.rdata.wholeMsg; } catch (...) {}
         std::string remote;
         try { remote = call->getInfo().remoteUri; } catch (...) {}
+        const AccountConfig& cfg = o_->accountCfgs[accountId_];
+        McpttInfo mi = mcptt::parseMcpttInfo(whole);
+        bool autoAnswer = false;
+        if (mi.present) {
+            // MCPTT 착신 — floor 소켓은 **180 전에** 바인드해야 한다(pjsua 는 여기서 응답 SDP 를 한 번 만들고
+            // 200 에 재사용하므로, 늦으면 m=application 0 이 나가 CSP 가 착신 leg 의 floor 포트를 모른다).
+            call->mcptt.reset(new McpttSession);
+            call->mcptt->isPrivate = mi.privateCall;
+            call->mcptt->fullDuplex = mi.noFloorCtrl;
+            call->mcptt->groupId = mi.privateCall ? mcptt::bareId(mi.callingUserId) : mcptt::bareId(remote);
+            if (!mi.noFloorCtrl) {
+                if (call->openFloor(cfg.effectiveMcpttId()))
+                    call->mcptt->pendingAppSdp = floorSdp(call->mcptt->floor->localPort(), false);
+            } else {
+                call->mcptt->micOpen = true;                                                 // 전이중 — 마이크 상시
+            }
+            autoAnswer = cfg.autoAnswerMcptt;
+        }
         CallInfo snap;
         o_->updateCall(prm.callId, [&](CallInfo& c) {
             c.accountId = accountId_;
@@ -304,15 +485,91 @@ public:
             c.remoteUri = remote;
             c.video = whole.find("m=video") != std::string::npos;
             c.calledParty = detail::uriUser(detail::headerValue(whole, "P-Called-Party-ID"));
+            if (mi.present) {
+                c.isMcptt = true; c.mcptt = mi; c.groupId = call->mcptt->groupId;
+                c.halfDuplex = !mi.noFloorCtrl;
+            }
         }, &snap);
         o_->ctl.post([o = o_, call, id = prm.callId] { o->calls[id].reset(call); });
-        // 180 Ringing 은 코어가 즉시 — 200 OK 는 앱의 answer().
         try {
             pj::CallOpParam p;
             p.statusCode = PJSIP_SC_RINGING;
             call->answer(p);
         } catch (pj::Error& e) { o_->log(2, std::string("180 failed: ") + e.info(false)); }
         o_->emit([o = o_, snap] { o->listener->onIncomingCall(snap); });
+        if (autoAnswer) {
+            o_->ctl.post([o = o_, id = prm.callId] {
+                PjCall* c = o->findCall(id);
+                if (!c) return;
+                try {
+                    pj::CallOpParam p(true);
+                    p.statusCode = PJSIP_SC_OK;
+                    p.opt.audioCount = 1;
+                    p.opt.videoCount = 0;
+                    c->answer(p);
+                } catch (pj::Error& e) { o->log(1, std::string("mcptt auto-answer: ") + e.info(false)); }
+            });
+        }
+    }
+
+    /** sendRequest 트랜잭션 최종 응답(≥200) — 같은 tsx 가 COMPLETED/TERMINATED 로 두 번 올 수 있다. */
+    void onSendRequest(pj::OnSendRequestParam& prm) override {
+        try {
+            if (prm.e.type != PJSIP_EVENT_TSX_STATE) return;
+            auto& ts = prm.e.body.tsxState;
+            if (ts.tsx.statusCode < 200) return;
+            RequestResult r;
+            r.accountId = accountId_;
+            r.token = (long)(intptr_t)prm.userData;
+            r.method = ts.tsx.method;
+            r.code = ts.tsx.statusCode;
+            r.reason = ts.tsx.statusText;
+            if (ts.type == PJSIP_EVENT_RX_MSG) r.etag = detail::headerValue(ts.src.rdata.wholeMsg, "SIP-ETag");
+            {
+                std::lock_guard<std::mutex> lk(o_->snapM);
+                auto it = o_->publishPending.find(r.token);
+                if (it != o_->publishPending.end()) {
+                    if (!r.etag.empty() && r.code / 100 == 2)
+                        o_->publishEtag[std::to_string(it->second.first) + ":" + it->second.second] = r.etag;
+                    o_->publishPending.erase(it);
+                }
+            }
+            o_->emit([o = o_, r] { o->listener->onRequestResult(r); });
+        } catch (...) {}
+    }
+
+    /** MESSAGE/NOTIFY 본문 — MCData SDS → onSds, conference-info → onRoster, 그 외 onMessage.
+     *  multipart 는 pjsua2 msgBody 가 비거나 boundary 가 빠지므로 원문에서 Content-Type·본문을 직접 뽑는다. */
+    void onInstantMessage(pj::OnInstantMessageParam& prm) override {
+        std::string ct = prm.contentType, body = prm.msgBody, from = prm.fromUri;
+        bool multipart = ct.rfind("multipart/", 0) == 0;
+        if (body.empty() || (multipart && ct.find("boundary") == std::string::npos)) {
+            std::string whole;
+            try { whole = prm.rdata.wholeMsg; } catch (...) {}
+            if (!whole.empty()) {
+                std::string h = detail::headerValue(whole, "Content-Type");
+                if (!h.empty()) ct = h;
+                body = sipBody(whole);
+            }
+        }
+        int acc = accountId_;
+        if (body.find("mcdata-signalling") != std::string::npos) {
+            SdsMessage m;
+            if (mcdata::parse(ct, body, m)) {
+                m.accountId = acc; m.fromUri = from;
+                o_->emit([o = o_, m] { o->listener->onSds(m); });
+                return;
+            }
+        }
+        if (ct.find("conference-info") != std::string::npos) {
+            std::vector<RosterEntry> users; bool full = false;
+            if (mcptt::parseConferenceInfo(body, users, full)) {
+                std::string gid = mcptt::bareId(from);
+                o_->emit([o = o_, acc, gid, users, full] { o->listener->onRoster(acc, gid, users, full); });
+                return;
+            }
+        }
+        o_->emit([o = o_, acc, from, ct, body] { o->listener->onMessage(acc, from, ct, body); });
     }
 
 private:
@@ -323,6 +580,11 @@ private:
 }  // namespace
 
 // ── Impl 헬퍼 ──
+
+PjCall* Engine::Impl::findCall(int callId) {
+    auto it = calls.find(callId);
+    return it == calls.end() ? nullptr : static_cast<PjCall*>(it->second.get());
+}
 
 void Engine::Impl::applyCodecPolicy() {
     // 음성: AMR-WB 최우선 + fmtp octet-align=1; mode-set=0,1,2 (enc/dec). G.711 은 안전망으로 낮은 우선순위,
@@ -358,9 +620,9 @@ void Engine::Impl::applyCodecPolicy() {
     log(3, "codecs: " + all + (amrwb.empty() ? "" : "(AMR-WB first)"));
 }
 
-void Engine::Impl::wireMedia(pj::Call* call, int callId) {
-    // conference bridge 결선 — 호 → 스피커(listen), 마이크 → 호(!muted). 장치 미디어는 Endpoint 소유라
-    // 보관하지 않고 매번 재취득한다.
+void Engine::Impl::wireMedia(PjCall* call, int callId) {
+    // conference bridge 결선 — 호 → 스피커(listen), 마이크 → 호. MCPTT 반이중은 floor Granted(micOpen)에서만
+    // 마이크를 결선한다. 장치 미디어는 Endpoint 소유라 보관하지 않고 매번 재취득.
     pj::AudioMedia* aud = activeAudio(call);
     if (!aud) return;
     CallInfo snap = snapshotCall(callId);
@@ -368,7 +630,33 @@ void Engine::Impl::wireMedia(pj::Call* call, int callId) {
     pj::AudioMedia& spk = adm.getPlaybackDevMedia();
     pj::AudioMedia& mic = adm.getCaptureDevMedia();
     if (snap.listen) aud->startTransmit(spk); else aud->stopTransmit(spk);
-    if (!snap.muted) mic.startTransmit(*aud); else mic.stopTransmit(*aud);
+    bool micOn;
+    if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
+    else micOn = !snap.muted;
+    if (micOn) mic.startTransmit(*aud); else mic.stopTransmit(*aud);
+}
+
+long Engine::Impl::doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
+                                 const std::string& contentType, const std::string& body,
+                                 const std::map<std::string, std::string>& headers, long token) {
+    auto it = accounts.find(accountId);
+    if (it == accounts.end()) return -1;
+    try {
+        pj::SipTxOption tx;
+        tx.targetUri = targetUri;
+        if (!contentType.empty()) tx.contentType = contentType;
+        if (!body.empty()) tx.msgBody = body;
+        for (auto& kv : headers) { pj::SipHeader h; h.hName = kv.first; h.hValue = kv.second; tx.headers.push_back(h); }
+        pj::SendRequestParam prm;
+        prm.method = method;
+        prm.txOption = tx;
+        prm.userData = (pj::Token)(intptr_t)token;
+        it->second->sendRequest(prm);
+        return token;
+    } catch (pj::Error& e) {
+        log(1, method + " " + targetUri + ": " + e.info(false));
+        return -1;
+    }
 }
 
 // ── Engine 공개 API ──
@@ -384,8 +672,8 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
     if (impl_->running) return Result::fail(-1, "already running");
     impl_->cfg = cfg;
     impl_->listener = listener;
-    impl_->evt.start("ue-evt");
-    impl_->ctl.start("ue-ctl");
+    impl_->evt.start();
+    impl_->ctl.start();
     Result r = impl_->ctl.runSync([this]() -> Result {
         Impl* o = impl_.get();
         try {
@@ -395,13 +683,13 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             pj::EpConfig epc;
             epc.uaConfig.userAgent = o->cfg.userAgent;
             epc.logConfig.level = o->cfg.logLevel;
-            epc.logConfig.consoleLevel = o->cfg.logLevel;         // pjsua 는 앱 writer 호출도 console_level 로 게이트한다
+            epc.logConfig.consoleLevel = o->cfg.logLevel;    // pjsua 는 앱 writer 호출도 console_level 로 게이트한다
             std::unique_ptr<pj::LogWriter> writer(new PjLog(o));
             epc.logConfig.writer = writer.get();
             epc.medConfig.noVad = o->cfg.noVad;
             epc.medConfig.clockRate = o->cfg.clockRate;
             o->ep->libInit(epc);
-            o->logWriter = writer.release();                       // 이제 pjsua2 소유
+            o->logWriter = writer.release();                 // 이제 pjsua2 소유
             {
                 pj::TransportConfig tc; tc.port = o->cfg.udpPort;
                 o->ep->transportCreate(PJSIP_TRANSPORT_UDP, tc);
@@ -437,8 +725,8 @@ void Engine::stop() {
     if (!impl_->running) return;
     impl_->ctl.runSync([this] {
         Impl* o = impl_.get();
-        o->calls.clear();                        // ~Call → hangup
-        o->accounts.clear();                     // ~Account → shutdown(de-REGISTER 시도)
+        o->calls.clear();                        // ~Call → hangup, floor participant close
+        o->accounts.clear();                     // ~Account → shutdown
         try { o->ep->libDestroy(); } catch (...) {}               // LogWriter 도 여기서 pjsua2 가 delete
         o->logWriter = nullptr;
         o->ep.reset();
@@ -452,6 +740,8 @@ void Engine::stop() {
     impl_->regInfos.clear();
     impl_->callInfos.clear();
     impl_->finalStats.clear();
+    impl_->publishPending.clear();
+    impl_->publishEtag.clear();
 }
 
 int Engine::addAccount(const AccountConfig& cfg) {
@@ -464,15 +754,16 @@ int Engine::addAccount(const AccountConfig& cfg) {
             std::string note;
             pj::AccountConfig ac = detail::buildPjAccountConfig(cfg, &note);
             auto acc = std::make_unique<PjAccount>(o, id);
+            o->accountCfgs[id] = cfg;                        // onIncomingCall 이 읽으므로 create 전에
             acc->create(ac, o->accounts.empty());
             o->accounts[id] = std::move(acc);
-            o->accountCfgs[id] = cfg;
-            if (o->domainDefault.empty()) o->domainDefault = cfg.domain;
             { std::lock_guard<std::mutex> lk(o->snapM); o->regInfos[id] = RegInfo{id, RegState::Unregistered, 0, "", 0}; }
             o->log(3, "account " + std::to_string(id) + " " + cfg.aor() + " via " + cfg.serverHost + ":" +
-                          std::to_string(cfg.serverPort) + "/" + toString(cfg.transport) + " user=" + cfg.digestUsername() + " " + note);
+                          std::to_string(cfg.serverPort) + "/" + toString(cfg.transport) + " user=" + cfg.digestUsername() +
+                          " mcptt=" + cfg.effectiveMcpttId() + " " + note);
             return id;
         } catch (pj::Error& e) {
+            o->accountCfgs.erase(id);
             o->log(1, std::string("addAccount: ") + e.info(false));
             return -1;
         }
@@ -545,6 +836,7 @@ int Engine::dial(int accountId, const std::string& target, const CallOptions& op
             return -1;
         }
         const int id = call->getId();
+        call->sealCallId(id);
         o->updateCall(id, [&](CallInfo& c) {
             c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
             c.remoteUri = dst; c.video = opts.video;
@@ -555,10 +847,10 @@ int Engine::dial(int accountId, const std::string& target, const CallOptions& op
     });
 }
 
-static Result withCall(Engine::Impl* o, int callId, const std::function<void(pj::Call&)>& f) {
+static Result withCall(Engine::Impl* o, int callId, const std::function<void(PjCall&)>& f) {
     if (!o->running) return Result::fail(-1, "not running");
     return o->ctl.runSync([o, callId, f]() -> Result {
-        pj::Call* c = o->findCall(callId);
+        PjCall* c = o->findCall(callId);
         if (!c) return Result::fail(-2, "no such call");
         try { f(*c); return Result::success(); } catch (pj::Error& e) { return fromError(e); }
     });
@@ -595,21 +887,21 @@ Result Engine::resume(int callId) {
 }
 Result Engine::setMuted(int callId, bool muted) {
     Impl* o = impl_.get();
-    return withCall(o, callId, [o, callId, muted](pj::Call& c) {
+    return withCall(o, callId, [o, callId, muted](PjCall& c) {
         o->updateCall(callId, [&](CallInfo& ci) { ci.muted = muted; });
         o->wireMedia(&c, callId);
     });
 }
 Result Engine::setListen(int callId, bool listen) {
     Impl* o = impl_.get();
-    return withCall(o, callId, [o, callId, listen](pj::Call& c) {
+    return withCall(o, callId, [o, callId, listen](PjCall& c) {
         o->updateCall(callId, [&](CallInfo& ci) { ci.listen = listen; });
         o->wireMedia(&c, callId);
     });
 }
 Result Engine::setRxLevel(int callId, float level) {
     Impl* o = impl_.get();
-    return withCall(o, callId, [o, level](pj::Call& c) {
+    return withCall(o, callId, [o, level](PjCall& c) {
         pj::AudioMedia* aud = o->activeAudio(&c);
         if (!aud) throw pj::Error(PJ_EINVALIDOP, "setRxLevel", "no active audio", __FILE__, __LINE__);
         aud->adjustRxLevel(level);
@@ -638,13 +930,194 @@ StreamStats Engine::streamStats(int callId) const {
     };
     return impl_->ctl.runSync([this, callId, s, finalOf]() mutable -> StreamStats {
         Impl* o = impl_.get();
-        pj::Call* c = o->findCall(callId);
-        if (!c) return finalOf();                                  // 종료된 호 — 소멸 시점의 최종 통계
+        PjCall* c = o->findCall(callId);
+        if (!c) return finalOf();
         try {
             unsigned idx = 0;
             if (!o->activeAudio(c, &idx)) return finalOf();
             return Impl::fromPj(c->getStreamStat(idx));
         } catch (...) { return finalOf(); }
+    });
+}
+
+// ── MCPTT ──
+
+static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, bool isPrivate, const GroupCallOptions& opts) {
+    auto it = o->accounts.find(accountId);
+    if (it == o->accounts.end()) { o->log(1, "mcptt: no such account"); return -1; }
+    const AccountConfig& cfg = o->accountCfgs[accountId];
+    for (auto& kv : o->calls) {                                          // 같은 세션 중복 방지
+        PjCall* c = static_cast<PjCall*>(kv.second.get());
+        if (c->mcptt && c->mcptt->groupId == id && c->mcptt->isPrivate == isPrivate) return kv.first;
+    }
+    auto call = std::make_unique<PjCall>(o, *it->second, accountId);
+    call->mcptt.reset(new McpttSession);
+    call->mcptt->groupId = id;
+    call->mcptt->isPrivate = isPrivate;
+    call->mcptt->fullDuplex = isPrivate && opts.fullDuplex;
+    call->mcptt->listenOnly = opts.listenOnly;
+    const std::string mcpttId = cfg.effectiveMcpttId();
+    // floor 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 로컬 offer 에 포트를 광고한다.
+    if (!call->mcptt->fullDuplex) {
+        if (!call->openFloor(mcpttId)) { o->log(1, "floor socket bind failed"); return -1; }
+        call->mcptt->pendingAppSdp = floorSdp(call->mcptt->floor->localPort(), false);
+    } else {
+        call->mcptt->micOpen = true;
+    }
+    try {
+        pj::CallOpParam prm(true);
+        prm.opt.audioCount = 1;
+        prm.opt.videoCount = 0;
+        prm.txOption.multipartContentType.type = "multipart";
+        prm.txOption.multipartContentType.subType = "mixed";
+        pj::SipMultipartPart p1;
+        p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
+        p1.body = mcptt::mcpttInfo(isPrivate ? "private" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
+                                   opts.emergency ? 1 : 0, opts.imminentPeril ? 1 : 0);
+        prm.txOption.multipartParts.push_back(p1);
+        if (!opts.members.empty()) {
+            pj::SipMultipartPart p2;
+            p2.contentType.type = "application"; p2.contentType.subType = "resource-lists+xml";
+            p2.body = mcptt::resourceLists(opts.members);
+            prm.txOption.multipartParts.push_back(p2);
+        }
+        call->makeCall("sip:" + id + "@" + cfg.domain, prm);
+    } catch (pj::Error& e) {
+        o->log(1, std::string("mcptt invite ") + id + ": " + e.info(false));
+        return -1;
+    }
+    const int callId = call->getId();
+    call->sealCallId(callId);
+    o->updateCall(callId, [&](CallInfo& c) {
+        c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
+        c.remoteUri = "sip:" + id + "@" + cfg.domain; c.isMcptt = true; c.groupId = id;
+        c.mcptt.present = true; c.mcptt.sessionType = isPrivate ? "private" : "prearranged";
+        c.mcptt.emergency = opts.emergency; c.mcptt.imminentPeril = opts.imminentPeril;
+        c.mcptt.privateCall = isPrivate; c.mcptt.noFloorCtrl = call->mcptt->fullDuplex;
+        c.halfDuplex = !call->mcptt->fullDuplex; c.listenOnly = opts.listenOnly;
+    });
+    o->calls[callId] = std::move(call);
+    o->log(3, std::string(isPrivate ? "private call " : "group call ") + id + " → call " + std::to_string(callId));
+    return callId;
+}
+
+int Engine::joinGroupCall(int accountId, const std::string& groupId, const GroupCallOptions& opts) {
+    if (!impl_->running) return -1;
+    return impl_->ctl.runSync([this, accountId, groupId, opts] { return startMcptt(impl_.get(), accountId, groupId, false, opts); });
+}
+int Engine::startPrivateCall(int accountId, const std::string& peer, const GroupCallOptions& opts) {
+    if (!impl_->running) return -1;
+    return impl_->ctl.runSync([this, accountId, peer, opts] { return startMcptt(impl_.get(), accountId, mcptt::bareId(peer), true, opts); });
+}
+
+Result Engine::floorRequest(int callId, int priority) {
+    Impl* o = impl_.get();
+    return withCall(o, callId, [o, callId, priority](PjCall& c) {
+        if (!c.mcptt) throw pj::Error(PJ_EINVALIDOP, "floorRequest", "not an MCPTT session", __FILE__, __LINE__);
+        if (c.mcptt->fullDuplex) return;                                     // 전이중 — 마이크 상시, floor 없음
+        if (!c.mcptt->floor) throw pj::Error(PJ_EINVALIDOP, "floorRequest", "no floor participant", __FILE__, __LINE__);
+        bool emergency = o->snapshotCall(callId).mcptt.emergency;
+        c.mcptt->floor->request(priority, emergency);
+    });
+}
+Result Engine::floorRelease(int callId) {
+    return withCall(impl_.get(), callId, [](PjCall& c) {
+        if (c.mcptt && c.mcptt->floor) c.mcptt->floor->release();
+    });
+}
+Result Engine::floorQueueCancel(int callId) {
+    return withCall(impl_.get(), callId, [](PjCall& c) {
+        if (c.mcptt && c.mcptt->floor) c.mcptt->floor->cancelQueued();
+    });
+}
+FloorInfo Engine::floorInfo(int callId) const {
+    FloorInfo fi;
+    if (!impl_->running) return fi;
+    return impl_->ctl.runSync([this, callId, fi]() mutable {
+        PjCall* c = impl_->findCall(callId);
+        if (c && c->mcptt && c->mcptt->floor) fi = c->mcptt->floor->info();
+        return fi;
+    });
+}
+
+long Engine::sendRequest(int accountId, const std::string& method, const std::string& targetUri,
+                         const std::string& contentType, const std::string& body,
+                         const std::map<std::string, std::string>& headers) {
+    if (!impl_->running) return -1;
+    long token = impl_->nextToken++;
+    return impl_->ctl.runSync([=] { return impl_->doSendRequest(accountId, method, targetUri, contentType, body, headers, token); });
+}
+
+long Engine::affiliate(int accountId, const std::string& groupId, bool on) {
+    if (!impl_->running) return -1;
+    long token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> long {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return -1;
+        std::map<std::string, std::string> h;
+        h["Event"] = "mcptt";                                              // TS 24.379 §9 — 없으면 CSP 489
+        h["Expires"] = on ? "3600" : "0";
+        {
+            std::lock_guard<std::mutex> lk(o->snapM);
+            auto et = o->publishEtag.find(std::to_string(accountId) + ":" + groupId);
+            if (et != o->publishEtag.end()) h["SIP-If-Match"] = et->second;
+            o->publishPending[token] = {accountId, groupId};
+        }
+        return o->doSendRequest(accountId, "PUBLISH", "sip:" + groupId + "@" + ic->second.domain, mcptt::kCtAffiliation,
+                                mcptt::affiliationCommand("tel:" + groupId, on), h, token);
+    });
+}
+
+Result Engine::subscribeConference(int accountId, const std::string& groupId, bool on) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    long token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> Result {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
+        std::map<std::string, std::string> h{{"Event", "conference"}, {"Expires", on ? "3600" : "0"}};
+        long r = o->doSendRequest(accountId, "SUBSCRIBE", "sip:" + groupId + "@" + ic->second.domain, "", "", h, token);
+        return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+    });
+}
+
+Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, bool on) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    long token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> Result {
+        std::map<std::string, std::string> h{{"Event", "xcap-diff"}, {"Expires", on ? "3600" : "0"}};
+        long r = impl_->doSendRequest(accountId, "SUBSCRIBE", psiUri, "", "", h, token);
+        return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+    });
+}
+
+std::string Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery) {
+    if (!impl_->running || text.empty()) return std::string();
+    std::string msgId = mcdata::newMessageId();
+    long token = impl_->nextToken++;
+    bool ok = impl_->ctl.runSync([=]() -> bool {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return false;
+        mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId,
+                                               requestDelivery, (long)std::time(nullptr));
+        return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+    });
+    return ok ? msgId : std::string();
+}
+
+Result Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
+                                   const std::string& msgId, int notifType) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    long token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> Result {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
+        mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, (long)std::time(nullptr));
+        long r = o->doSendRequest(accountId, "MESSAGE", "sip:" + mcptt::bareId(peer) + "@" + ic->second.domain, b.contentType, b.body, {}, token);
+        return r < 0 ? Result::fail(-3, "send failed") : Result::success();
     });
 }
 

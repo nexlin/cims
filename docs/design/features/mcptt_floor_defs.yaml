@@ -1,0 +1,111 @@
+# MCPTT floor control 정의 테이블 — 단일 정본 (docs/design/features/mcptt_ue_multitalker_media.md §6,
+# ue_sdk.md §4.6). 3GPP TS 24.380 §8 의 opcode·field id·indicator 비트·cause 를 한 곳에 두고
+# scripts/gen_floor_defs.py 가 C++ 헤더(sdk/core/src/floor/floor_defs.h)를 생성하며, --check 로
+# cmp/PMcpttGroup.h · android FloorControl.kt · scripts/mcptt_floor_policy_probe.py 의 상수와 대조한다.
+# 값을 바꿀 때는 이 파일만 고치고 생성기를 돌린다(S1 게이트 `S1-UE-FLOOR-CODEC` 이 --check 를 실행).
+
+rtcp:
+  pt_app: 204
+  name: MCPT
+  ack_required_bit: 0x10        # subtype 첫 비트 = Acknowledgment is required (Table 8.2.2.1-1)
+
+# Table 8.2.2-1 — RTCP APP subtype = 메시지 타입. dir: ue→srv / srv→ue / both
+opcodes:
+  REQUEST:        {value: 0,    dir: ue2srv, name: "Floor Request"}
+  GRANTED:        {value: 1,    dir: srv2ue, name: "Floor Granted"}
+  TAKEN:          {value: 2,    dir: srv2ue, name: "Floor Taken"}
+  DENY:           {value: 3,    dir: srv2ue, name: "Floor Deny"}
+  RELEASE:        {value: 4,    dir: ue2srv, name: "Floor Release"}
+  IDLE:           {value: 5,    dir: srv2ue, name: "Floor Idle"}
+  REVOKE:         {value: 6,    dir: srv2ue, name: "Floor Revoke"}
+  QUEUE_POS_REQ:  {value: 8,    dir: ue2srv, name: "Floor Queue Position Request"}
+  QUEUE_POS_INFO: {value: 9,    dir: srv2ue, name: "Floor Queue Position Info"}
+  ACK:            {value: 10,   dir: both,   name: "Floor Ack"}
+  MEDIA_FLOW:     {value: 0x0B, dir: ue2srv, name: "Unicast Media Flow Control"}
+  QUEUED_CANCEL:  {value: 0x0E, dir: both,   name: "Queued Floor Requests"}
+  RELEASE_MULTI:  {value: 0x0F, dir: srv2ue, name: "Floor Release Multi Talker"}
+
+# §8.2.3 — floor control specific field ID. string: 가변 길이(4옥텟 정렬 대상)
+fields:
+  PRIORITY:        {value: 0}
+  DURATION:        {value: 1}
+  REJECT_CAUSE:    {value: 2}
+  QUEUE_INFO:      {value: 3}
+  GRANTED_PARTY:   {value: 4,  string: true}
+  PERMISSION:      {value: 5}
+  USER_ID:         {value: 6,  string: true}
+  QUEUE_SIZE:      {value: 7}
+  MSG_SEQ:         {value: 8}
+  QUEUED_USER_ID:  {value: 9,  string: true}
+  SOURCE:          {value: 10}
+  TRACK_INFO:      {value: 11, string: true}
+  MSG_TYPE:        {value: 12}
+  FLOOR_INDICATOR: {value: 13}
+  SSRC:            {value: 14}
+  GRANTED_USERS:   {value: 15}
+  SSRC_LIST:       {value: 16}
+  QUEUED_PURPOSE:  {value: 21}
+  QUEUED_USERS:    {value: 22}
+  QUEUED_RESULT:   {value: 23}
+  MEDIA_FLOW:      {value: 24}
+
+# §8.2.3.13 Floor Indicator 비트마스크
+indicator:
+  NORMAL:          0x8000
+  BROADCAST_GROUP: 0x4000
+  SYSTEM:          0x2000
+  EMERGENCY:       0x1000
+  IMMINENT_PERIL:  0x0800
+  QUEUEING:        0x0400
+  DUAL_FLOOR:      0x0200
+  TEMPORARY_GROUP: 0x0100
+  MULTI_TALKER:    0x0080
+
+# §8.2.3.12 Source
+source:
+  PARTICIPANT: 0
+  PARTICIPATING: 1
+  CONTROLLING: 2
+  NON_CONTROLLING: 3
+
+# §8.2.3.7 Permission to Request the Floor
+permission:
+  DENIED: 0
+  ALLOWED: 1
+
+# §8.2.3.23 Queued Floor Requests Purpose
+queued_purpose:
+  CANCEL_REQUEST: 0
+  CANCEL_RESULT: 1
+  CANCEL_NOTIFY: 2
+
+# §8.2.3.25 Queued Floor Requests Result
+queued_result:
+  0: "Cancelled"
+  2: "Queue empty"
+  3: "No queued request"
+  5: "Partially cancelled"
+
+# §8.2.3.4 Reject Cause (Floor Deny)
+reject_cause:
+  1: "Another MCPTT client has permission"
+  2: "Internal floor control server error"
+  3: "Only one participant"
+  4: "Retry-after timer has not expired"
+  5: "Receive only"
+  6: "No resources available"
+  7: "Queue full"
+  255: "Other reason"
+
+# §8.2.3.4 Revoke Cause (Floor Revoke)
+revoke_cause:
+  1: "Only one MCPTT client"
+  2: "Media burst too long"
+  3: "No permission to send a Media Burst"
+  4: "Media Burst pre-empted"
+  6: "No resources available"
+  255: "Other reason"
+
+# §8.2.3.24 Media Flow Control Indicator
+media_flow:
+  RESUME_BIT: 0x80

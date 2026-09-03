@@ -4,6 +4,7 @@
 // 즉시 결과(Result/id)를 돌려준다. 프로토콜 진행은 Listener 이벤트로 온다.
 #pragma once
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,7 +38,7 @@ public:
     RegInfo regInfo(int accountId) const;
     std::vector<int> accounts() const;
 
-    // ── 호 ──
+    // ── 호 (VoLTE 1:1) ──
     /** 발신. target 은 번호(도메인 자동 결합) 또는 sip: URI. 반환 callId ≥ 0, 실패 -1. */
     int dial(int accountId, const std::string& target, const CallOptions& opts = CallOptions());
     Result answer(int callId, const CallOptions& opts = CallOptions());
@@ -45,7 +46,7 @@ public:
     Result hangup(int callId);
     Result hold(int callId);
     Result resume(int callId);
-    /** 마이크 → 호 송신 차단/복구. */
+    /** 마이크 → 호 송신 차단/복구. MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시된다. */
     Result setMuted(int callId, bool muted);
     /** 호 → 스피커 청취 on/off (멀티 채널 듣기 정책). */
     Result setListen(int callId, bool listen);
@@ -54,8 +55,42 @@ public:
     Result sendDtmf(int callId, const std::string& digits);
     CallInfo callInfo(int callId) const;
     std::vector<int> calls() const;
-    /** 오디오 스트림 RTP/RTCP 통계(동기 조회). 미디어 비활성이면 valid=false. */
+    /** 오디오 스트림 RTP/RTCP 통계(동기 조회). 종료된 호는 소멸 시점의 최종 통계. */
     StreamStats streamStats(int callId) const;
+
+    // ── MCPTT 그룹콜·사설콜 (TS 24.379) ──
+    /** 그룹콜 참여(발신 INVITE, multipart mcptt-info[+resource-lists], SDP m=application floor).
+     *  groupId 는 bare id(예 "g001"). 반환 callId. 이미 같은 그룹 세션이 있으면 그 callId. */
+    int joinGroupCall(int accountId, const std::string& groupId, const GroupCallOptions& opts = GroupCallOptions());
+    /** 1:1 사설콜(session-type=private). peer 는 bare 번호. fullDuplex 면 mc_no_floor_ctrl. */
+    int startPrivateCall(int accountId, const std::string& peer, const GroupCallOptions& opts = GroupCallOptions());
+    /** 세션 이탈(BYE). */
+    Result leaveGroupCall(int callId) { return hangup(callId); }
+    /** PTT down — Floor Request. 응답은 onFloor(Granted/Denied/QueuePosition). priority<0 = 미기재. */
+    Result floorRequest(int callId, int priority = -1);
+    /** PTT up — Floor Release(대기 중이면 Queued Cancel 선행). */
+    Result floorRelease(int callId);
+    Result floorQueueCancel(int callId);
+    FloorInfo floorInfo(int callId) const;
+
+    /** affiliation PUBLISH(TS 24.379 §9, Event: mcptt). on=false 면 Expires:0. 반환 token(onRequestResult 상관). */
+    long affiliate(int accountId, const std::string& groupId, bool on);
+    /** 그룹 로스터 구독(RFC 4575 conference, 엔진 패치 evsub) — 확인 신호는 onRoster NOTIFY. */
+    Result subscribeConference(int accountId, const std::string& groupId, bool on);
+    /** 문서 변경 구독(RFC 5875 xcap-diff) — psiUri 예 sip:gms_psi@domain. 본문은 onMessage 로. */
+    Result subscribeXcapDiff(int accountId, const std::string& psiUri, bool on);
+    /** 임의 SIP 요청(MESSAGE/PUBLISH/SUBSCRIBE …). 반환 token. */
+    long sendRequest(int accountId, const std::string& method, const std::string& targetUri,
+                     const std::string& contentType, const std::string& body,
+                     const std::map<std::string, std::string>& headers = {});
+
+    // ── MCData SDS (TS 24.282 §9.2.2 C-plane) ──
+    /** 그룹 SDS 발신(MESSAGE multipart). 반환 msgId(UUID hex32), 실패 빈 문자열. */
+    std::string sendGroupSds(int accountId, const std::string& groupId, const std::string& text,
+                             bool requestDelivery = true);
+    /** SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. */
+    Result sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
+                               const std::string& msgId, int notifType);
 
     // ── 장치 ──
     std::vector<AudioDeviceInfo> audioDevices() const;

@@ -34,14 +34,28 @@ if(NOT DEFINED PJ_SYS_LIBS)
     set(PJ_SYS_LIBS ssl crypto opencore-amrnb opencore-amrwb vo-amrwbenc m rt pthread)
 endif()
 
+# floor 정의 헤더는 생성물이다 — 정본 테이블이 바뀌면 재생성 (scripts/gen_floor_defs.py)
+set(FLOOR_DEFS_YAML ${CMAKE_SOURCE_DIR}/docs/design/features/mcptt_floor_defs.yaml)
+set(FLOOR_DEFS_H ${CMAKE_CURRENT_SOURCE_DIR}/src/floor/floor_defs.h)
+add_custom_command(
+    OUTPUT ${FLOOR_DEFS_H}
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/gen_floor_defs.py
+    DEPENDS ${FLOOR_DEFS_YAML} ${CMAKE_SOURCE_DIR}/scripts/gen_floor_defs.py
+    COMMENT "floor_defs.h ← mcptt_floor_defs.yaml")
+
 add_library(cimsue STATIC
     src/engine.cpp
     src/account_map.cpp
     src/types.cpp
+    src/floor/floor_codec.cpp
+    src/floor/floor_participant.cpp
+    src/mcptt/mcptt_xml.cpp
+    src/mcdata/sds_codec.cpp
+    ${FLOOR_DEFS_H}
 )
 target_include_directories(cimsue
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE ${PJ_INC})
+    PRIVATE ${PJ_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # pjproject 헤더는 공개 헤더에 새지 않지만(pImpl), 내부 소스·단위시험은 pjsua2 를 include 한다.
 target_include_directories(cimsue INTERFACE ${PJ_INC})
 target_compile_definitions(cimsue PUBLIC PJ_AUTOCONF=1 PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
@@ -57,10 +71,17 @@ add_executable(cimsue-cli cli/main.cpp)
 target_link_libraries(cimsue-cli PRIVATE cimsue)
 set_target_properties(cimsue-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-# 단위시험 (S1-UE-UNIT) — 루트의 googletest ExternalProject 산출물
+# 단위시험 (S1-UE-UNIT / S1-UE-FLOOR-CODEC) — 루트의 googletest ExternalProject 산출물
 if(DEFINED GTEST_DIR)
-    add_executable(cimsue_test test/account_map_test.cpp)
-    target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    add_executable(cimsue_test
+        test/account_map_test.cpp
+        test/floor_codec_test.cpp
+        test/sds_codec_test.cpp
+        # CMP 서버 코덱과 교차 검증 — cmp/PFloorCodec.cpp 는 PMcpttGroup.h(+pasf pbase.h) 만 필요
+        test/floor_xcheck_test.cpp
+        ${CMAKE_SOURCE_DIR}/cmp/PFloorCodec.cpp)
+    target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src
+                               ${CMAKE_SOURCE_DIR}/cmp ${EXT_DIR}/pasf/include)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     target_link_libraries(cimsue_test PRIVATE cimsue gtest gtest_main pthread)
     set_target_properties(cimsue_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
