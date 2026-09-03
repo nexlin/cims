@@ -611,6 +611,10 @@ S3-SEED 가 관제 그룹 2개(대표번호 있는 `dg-verify-a`: A 제외 B·C�
   흡수한다.
 - **RFC 4662 RLS** 목록 구독(§5.2 표준형), **큐/ACD**(대기열·순번 안내), 대표번호 **발신 표시**(관제사가
   대표번호로 걸 때 `P-Preferred-Identity`=pilot).
+- **청취 범위 그룹의 conference 이벤트 구독 인가** — 관제 앱의 PTT 세션 목록([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.3)은
+  RFC 4575 conference 구독(`onRoster`)으로 "진행 중·참가자 수" 를 알아야 하는데, 현재 conference SUBSCRIBE 인가는 그룹 멤버 기준이다.
+  청취 leg 와 같은 축(`allow_ambient_listening` 자격 + `CanListenPtt` 범위)으로 비멤버 관제사의 구독을 허용한다 — `listen_visibility=hidden`
+  그룹이라도 관제사 자신이 받는 로스터에는 영향이 없다(청취 멤버 제외 규칙은 그대로).
 - Android UE 의 Join 발신·SSRC 디먹스 UI — 서버 완성 후 단말 파트.
 
 ---

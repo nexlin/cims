@@ -369,9 +369,10 @@ C API 는 그 헤더를 **손으로 1:1 평탄화**한 것이며(SWIG 는 C# 대
 | 비멤버 sendrecv 거절 | 403 | `onGroupCall(failed 403)` 표시 | — |
 | SRTP·TLS | 접속서비스 `media_srtp`·`sip_transport` | 프로파일 값으로 코어가 자동 협상. 앱 개입 없음 | RFC 4568, TS 33.203 |
 
-앱 화면 구성은 [dispatch_center.md](dispatch_center.md) §5·§7 의 관제사 동작에 대응하는 **dialog 보드·대표번호
-데스크·감청 패널(A/B 귀속·레벨)·PTT 청취 채널·SDS·디렉터리** 다섯 구획이며, 태블릿(가로)과 데스크톱이 같은
-구획을 다른 밀도로 배치한다. 화면 상세(캔버스·구획·조작·배너·핫키·응답 코드 문구 사전·MVVM 구조)는
+앱 화면 구성은 [dispatch_center.md](dispatch_center.md) §5·§7 의 관제사 동작에 대응하는 **통화 보드(BLF)·통화
+데스크(대표번호 대기열·내 통화·발신 3모드)·활성 세션(VoLTE 통화·PTT 세션 목록)·PTT 채널·SDS·디렉터리** 다섯 구획
++ **감청 창**(듣기만 하는 세션은 팝업 — A/B 귀속·레벨)이며, 태블릿(가로)과 데스크톱이 같은 구획을 다른 밀도로
+배치한다. 화면 상세(캔버스·구획·조작·배너·핫키·응답 코드 문구 사전·MVVM 구조)는
 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) 가 정본이다.
 
 ---
