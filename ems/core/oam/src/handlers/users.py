@@ -104,43 +104,28 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
 
 
 async def _get_me(handler_args, config):
-    """본인 프로파일 — role, org_id 등. subscription 없음."""
+    """본인 프로파일 — role 등. subscription 없음.
+
+    콘솔 계정(내장 admin / console_accounts file_store)만 대상 — DB 조회 없이 토큰 클레임만으로
+    합성한다. DB users 는 가입자(person) 전용이라 콘솔 계정이 아니고 role 컬럼도 없다
+    (sql/migrate_users_person_only.sql, csc_standalone_module.md 도메인 경계) — 콘솔 토큰이 아니면 404."""
     payload, err = _auth.require_auth(handler_args)
     if err:
         return err
 
-    # 콘솔 계정(내장 admin / console_accounts file_store) — DB 조회 없이 토큰
-    # 클레임만으로 프로파일 합성. (DB users 는 가입자 person 전용이라 콘솔 계정 아님.)
-    if payload.get('builtin') or payload.get('file_acct'):
-        return HandlerResult(status=200, body={
-            'id': payload.get('sub'),
-            'name': payload.get('name') or payload.get('login_id'),
-            'login_id': payload.get('login_id'),
-            'role': payload.get('role'),
-            'org_id': None,
-            'builtin': bool(payload.get('builtin')),
-            'create_time': None,
-            'update_time': None,
-        })
+    if not (payload.get('builtin') or payload.get('file_acct')):
+        return HandlerResult(status=404, body={'error': '콘솔 계정이 아닙니다'})
 
-    try:
-        with _auth._get_db(config) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT id, name, login_id, role, org_id, create_time, update_time "
-                    "FROM users WHERE id=%s",
-                    (int(payload['sub']),)
-                )
-                user = cur.fetchone()
-    except pymysql.Error as e:
-        return HandlerResult(status=500, body={'error': str(e)})
-
-    if user is None:
-        return HandlerResult(status=404, body={'error': '사용자를 찾을 수 없습니다'})
-
-    user['create_time'] = _dt(user.get('create_time'))
-    user['update_time'] = _dt(user.get('update_time'))
-    return HandlerResult(status=200, body=user)
+    return HandlerResult(status=200, body={
+        'id': payload.get('sub'),
+        'name': payload.get('name') or payload.get('login_id'),
+        'login_id': payload.get('login_id'),
+        'role': payload.get('role'),
+        'org_id': None,
+        'builtin': bool(payload.get('builtin')),
+        'create_time': None,
+        'update_time': None,
+    })
 
 
 async def _get_me_subscriptions(handler_args, config):

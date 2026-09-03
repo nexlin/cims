@@ -21,9 +21,10 @@ from httpsrv.handler import HandlerResult
 _SECRET = 'cims_jwt_secret_change_me'  # config 로 갱신
 
 # ─────────────────────────────────────────────────────────────
-#  RBAC 역할 모델 (계층적 5종) — docs/design/features/mcptt_authorization.md §3
+#  RBAC 역할 모델 (계층적) — docs/design/features/mcptt_authorization.md §3
 #    admin > manager > operator > monitor > user
-#    user 는 telephony 전용으로 OAM 콘솔 로그인 불가.
+#    역할은 콘솔 계정(OAM console_accounts·내장 admin)의 속성 — 토큰 클레임으로만 온다.
+#    user 는 "콘솔 계정 없음"(가입자 = telephony 전용, 로그인 불가) 의 자리값. DB users 에는 role 이 없다.
 # ─────────────────────────────────────────────────────────────
 _ROLE_RANK = {'user': 0, 'monitor': 1, 'operator': 2, 'manager': 3, 'admin': 4}
 ROLES = tuple(_ROLE_RANK.keys())

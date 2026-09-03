@@ -514,20 +514,36 @@ _HA1_SCHEMA_ERROR = {'error': 'schema_not_migrated',
                      'detail': 'subscriptions.ha1 column absent — sql/migrate_subscription_ha1.sql not applied'}
 
 
-def _service_realm(service_ref):
-    """access_services.name → (domain, realm). realm = auth_realm ?? domain (CSP EffectiveRealm 과 동일).
-    서비스 정의는 OAM 스토어(config cache 'service') 에 있다. 미해석이면 None."""
+def _service_realm(config: dict, service_ref, kind: str):
+    """서비스의 (domain, realm) — H(A1) 결박 재료. realm = auth_realm ?? domain (CSP EffectiveRealm 과 동일,
+    sip_access_security.md §4.3). service_ref 가 없으면 None(400) — 가입자 행의 service_ref 가 CSP 의 서비스
+    해석 키이기 때문이다.
+
+    ① 정본 = csp 소유 `access_services` 컬렉션(runtime store — sip_service_model.md): 같은 runtime store 를
+       보는 배포에서 name=service_ref 로 조회.
+    ② 미도달이면 csc.json `Provisioning.Services.<kind>`(volte|ptt) — `/provisioning/me` 가 단말에 내려주는
+       `domain` 과 같은 원천이라 단말 Digest username(imsi@domain)과 결박이 맞는다(csc 는 CSP 를 조회하지
+       않는다 — 두 값은 운영 규약으로 일치시킨다, mcptt.py Provisioning 주석)."""
     if not service_ref:
         return None
-    from services import config_cache as _cfg
-    cache = _cfg.CONFIG_CACHE
-    if cache is None:
-        return None
-    for r in cache.get_all('service') or []:
-        if r.get('name') == service_ref:
-            domain = r.get('domain') or ''
-            return domain, (r.get('auth_realm') or domain)
+    try:
+        from services import ha_lookup as _ha, file_store as _fs
+        for r in _fs.load_all(_ha.collection_dir(config, 'access_services')) or []:
+            domain = (r.get('domain') or '').strip()
+            if r.get('name') == service_ref and domain:
+                return domain, ((r.get('auth_realm') or '').strip() or domain)
+    except Exception as e:  # runtime store 미도달·손상은 ② 로 — 이유는 로그로만
+        _logger.log_warning(f"_service_realm: access_services lookup failed ({e}) — Provisioning.Services fallback")
+    svc = (((config or {}).get('Provisioning') or {}).get('Services') or {}).get(kind) or {}
+    domain = (svc.get('domain') or '').strip()
+    if domain:
+        return domain, ((svc.get('auth_realm') or '').strip() or domain)
     return None
+
+
+def _service_kind(svc: str) -> str:
+    """가입 종류(call|ptt) → Provisioning.Services 키(volte|ptt)."""
+    return 'volte' if svc == 'call' else 'ptt'
 
 
 def _digest_ha1(imsi: str, domain: str, realm: str, passwd: str) -> str:
@@ -667,7 +683,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
 
     ha1 = ''
     if passwd:
-        realm = _service_realm(service_ref)
+        realm = _service_realm(config, service_ref, _service_kind(svc))
         if realm is None:
             return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
         ha1 = _digest_ha1(imsi, realm[0], realm[1], passwd)
@@ -765,7 +781,7 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             if passwd:
                 if not new_imsi:
                     return HandlerResult(status=400, body={'error': 'imsi required to derive ha1'})
-                realm = _service_realm(new_ref)
+                realm = _service_realm(config, new_ref, _service_kind(svc))
                 if realm is None:
                     return HandlerResult(status=400, body={'error': 'service_ref required to derive ha1 (unknown service)'})
                 if not _has_ha1_column(cur):

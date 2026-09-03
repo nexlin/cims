@@ -173,6 +173,11 @@ H(A1) = MD5( <impi> ":" <realm> ":" <password> )
 ```
 
 - 평문 `password` 는 **CSC API 요청 본문에만 존재**하고, 저장 전에 H(A1) 로 변환된다.
+- CSC 의 `(domain, realm)` 해석(`handlers/admin.py _service_realm`) — ① 정본 `access_services` 컬렉션(csp
+  소유, runtime store)을 name=`service_ref` 로 조회, ② 미도달이면 csc.json `Provisioning.Services.<kind>`
+  (volte|ptt)의 `domain`/`auth_realm` — `/provisioning/me` 가 단말에 내려주는 `domain` 과 같은 원천이라
+  단말 username(`imsi@domain`)과 결박이 맞는다. 두 원천은 운영 규약으로 일치시킨다(csc 는 CSP 를 조회하지
+  않는다). `service_ref` 가 없거나 어느 쪽에도 없으면 400.
 - H(A1) 은 그 realm 에 한한 비밀번호 등가물이다 — 유출 시 CIMS 인증은 가능하지만,
   사용자가 다른 서비스에 재사용한 원문 비밀번호는 노출되지 않는다. 전달·보관 전 구간이
   이 등가물로 좁혀진다.

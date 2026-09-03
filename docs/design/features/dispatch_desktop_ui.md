@@ -389,34 +389,41 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 앱 실기 시험(§2 표의 작업 전부)을 위해 `.45` 개발 서버(`121.161.164.45` — CSC·CSP·CMP 동거)에 아래를 등록한다. 서버 쪽 등록이 끝나면
 앱은 로그인 창에 CSC 주소·관제석 계정만 넣어 붙는다. 스키마 전제 = `sql/migrate_dispatch_groups.sql` ·
 `sql/migrate_ptt_ambient_listening.sql` 적용([dispatch_center.md](dispatch_center.md) §8.1), CSC 관리 API 는 [admin_api.md](../../api/admin_api.md) §6.7.
+콘솔에서는 `구성 > 사용자`(가입자·번호)·`구성 > 관제 그룹`(대표번호·호출 방식·감청/청취 범위·멤버) 화면이 같은 API 를 쓴다.
+
+**번호 체계** — 망 신원은 가입자당 글로벌 E.164 하나다(관제석 `+8231000100x`, 대표번호 `+82310001000` — 대표번호는 TS 24.239
+Flexible Alerting pilot 로 가상·미등록·포크). **내선 4자리는 망 주소가 아니라 관제 앱 주소록의 표시 라벨**이다(아래 directory.csv —
+서버·콘솔에 내선 엔티티는 없다). 일반번호와 내선을 둘 다 망 주소로 두는 것(TS 23.228 implicit registration set / 별칭)은
+[volte_supplementary_services.md](volte_supplementary_services.md) §9 향후 과제라, 시험은 이 규약으로 간다.
 
 ### 14.1 등록 대상
 
 | 대상 | 값 | 비고 |
 |---|---|---|
-| **관제석 가입자 ①** | 로그인 `disp01` · 표시명 `관제1석` · VoLTE 내선(msisdn=가입 id=imsi) `1002` · PTT 번호 `+82500000101` · `users.role=operator` | Digest+TLS 관제 소프트폰 규약([volte_supplementary_services.md](volte_supplementary_services.md)) — 서비스 `volte`·`ptt` 둘 다 프로비저닝, `sipHa1` 발급 |
-| **관제석 가입자 ②** | 로그인 `disp02` · 표시명 `관제2석` · VoLTE 내선 `1003` · PTT 번호 `+82500000102` · `role=operator` | 같은 관제 그룹의 두 번째 자리 — 그룹원 띠·지정 픽업·대표번호 병렬 호출·상호 감청의 상대 |
-| **관제 그룹** | `id=dg-dispatch01` · `name=관제1` · **`pilot_id=7000`**(대표번호) · `service_ref=<VoLTE 접속서비스 name>` · `alert_mode=parallel` · `no_answer_sec=30` · `busy_members=skip` · `overflow_target=NULL` · `monitor_scope=all` · `ptt_listen=all` · `listen_visibility=hidden` · members `[{1002, alert_order 0}, {1003, 1}]` | `POST /api/v1/dispatch-groups` (manager 토큰 — `monitor_scope≠none`). 멤버 편입으로 두 가입자의 `pickup_group=dg-dispatch01` 이 설정된다 |
-| **PTT 청취 자격** | 두 가입자의 `ptt_user_profile.allow_ambient_listening=1` | `PUT /api/v1/users/{pid}/ptt/{msisdn}/profile` — 없으면 PTT 청취 403 |
-| **PTT 그룹(멤버)** | 기존 `g001` 에 두 PTT 번호를 멤버로 추가 | ① 채널 카드·MCData 그룹 스레드·affiliation·conference 구독 대상 |
-| **PTT 그룹(청취 범위)** | `g002` — 두 관제석이 **멤버가 아닌** 그룹, 다른 PTT 단말 2대(`+82500000001/2` 등 기존 시험 계정) 멤버 | ② 진행 중 행 [청취] → PTT 청취 창(`ptt_listen=all`). 로스터 표시는 서버의 청취 범위 구독 인가(§13) 전까지 "미상" |
-| **감청·픽업 대상 통화 가입자** | 기존 VoLTE 시험 가입자 `+821300000001/2`(또는 내선 `1004`·`1005`) — 관제 그룹 **밖** | ④ 진행 중 행 [청취](Join, `monitor_scope=all`)·전달 대상. 대표번호 착신은 이들 중 하나가 `7000` 으로 발신 |
+| **관제석 가입자 ①** | person `disp01`(표시명 `관제1석`, 조직 TEAM01) · VoLTE 번호(msisdn=가입 id=imsi) `+82310001001` · `sip_transport=TLS` · 내선 라벨 `1001`(앱 주소록) · PTT 번호 **미등록**(PTT 채널 시험 전 `ptt` 가입 추가) | Digest+TLS 관제 소프트폰 규약([volte_supplementary_services.md](volte_supplementary_services.md)) — `sipHa1` 발급. 등록 완료(TLS 200 OK 실측). 콘솔 역할은 가입자에 없다(역할 = 콘솔 계정, [mcptt_authorization.md](mcptt_authorization.md) §2) |
+| **관제석 가입자 ②** | person `disp02`(`관제2석`) · VoLTE 번호 `+82310001002` · TLS · 내선 라벨 `1002` · PTT 번호 **미등록** | 같은 관제 그룹의 두 번째 자리 — 그룹원 띠·지정 픽업·대표번호 병렬 호출·상호 감청의 상대 |
+| **관제 그룹** | `id=dg-dispatch01` · `name=관제1` · **`pilot_id=+82310001000`**(대표번호) · `service_ref=volte` · `alert_mode=parallel` · `no_answer_sec=30` · `busy_members=skip` · `overflow_target=NULL` · `listen_visibility=hidden` · members `[{+82310001001, alert_order 0}, {+82310001002, 1}]` · **`monitor_scope=none` · `ptt_listen=none`(등록 시점)** — 감청·청취 시험 단계에서 콘솔 `구성 > 관제 그룹` 에서 manager 계정으로 `all` 로 올린다 | 등록 완료 — 대표번호 병렬 포크 실측(두 관제석 동시 링·한쪽 응답·다른 쪽 CANCEL). 멤버 편입으로 두 가입자의 `pickup_group=dg-dispatch01` 이 설정돼 있다 |
+| **PTT 청취 자격** | 두 가입자의 `ptt_user_profile.allow_ambient_listening=1` | `PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`(콘솔 `구성 > 사용자` PTT 프로파일) — 없으면 PTT 청취 403. PTT 가입 추가 후 |
+| **PTT 그룹(멤버)** | 사내 시험 그룹 `g002` 에 두 PTT 번호를 멤버로 추가(`g001` 은 협력업체 단말이 포함돼 시험에 쓰지 않는다) | ① 채널 카드·MCData 그룹 스레드·affiliation·conference 구독 대상 |
+| **PTT 그룹(청취 범위)** | 두 관제석이 **멤버가 아닌** 그룹(예: `g003`) — 다른 PTT 단말 2대(`+82500000001/2` 등 기존 시험 계정) 멤버 | ② 진행 중 행 [청취] → PTT 청취 창(`ptt_listen=all`). 로스터 표시는 서버의 청취 범위 구독 인가(§13) 전까지 "미상" |
+| **감청·픽업 대상 통화 가입자** | 기존 VoLTE 시험 가입자 `+821300000001/2`(사내 단말) — 관제 그룹 **밖** | ④ 진행 중 행 [청취](Join, `monitor_scope=all`)·전달 대상. 대표번호 착신은 이들 중 하나가 `+82310001000` 으로 발신 |
 | **접속서비스** | VoLTE `sip_transport=TLS`+`media_srtp=optional` 서비스 하나(대표번호 `service_ref` 가 이것), PTT 서비스 하나. 인증서는 개발 자가서명 → 앱 로그인 창 "서버 인증서 검증" 끔 또는 CA PEM 지정 | `pickup_feature_code`(기본 `**`)·`transfer_allowed=1` 확인 — 앱 설정의 피처코드와 일치해야 한다 |
 
 ### 14.2 앱이 서버에서 기대하는 것
 
 - `POST /oauth/token`(PKCE) 로그인 → `GET /provisioning/me` 응답에 `services[volte, ptt]`(각 `sipHost/sipPort/transport/domain/msisdn/imsi/authId/sipHa1`,
-  PTT 는 `mcpttId`) + **`dispatch` 블록** `{present:true, groupId:"dg-dispatch01", groupName:"관제1", pilotId:"7000", monitorScope:"all", pttListen:"all",
-  listenVisibility:"hidden"}`. `present=false` 면 앱은 소프트폰 모드(§6).
-- GMS `listGroups(<PTT 번호 tel: URI>)` 가 `g001` 을 돌려준다(카드 소스). 대표번호 `7000` 과 그룹원 내선은 앱이 `dialogWatch` 로 구독하므로
+  PTT 는 `mcpttId`) + **`dispatch` 블록** `{present:true, groupId:"dg-dispatch01", groupName:"관제1", pilotId:"+82310001000", monitorScope:"none"|"all",
+  pttListen:"none"|"all", listenVisibility:"hidden"}`. `present=false` 면 앱은 소프트폰 모드(§6).
+- GMS `listGroups(<PTT 번호 tel: URI>)` 가 `g002` 를 돌려준다(카드 소스). 대표번호 `+82310001000` 과 그룹원 번호는 앱이 `dialogWatch` 로 구독하므로
   CSP 의 dialog 이벤트 인가(`monitor_scope`)가 두 관제석 모두에 적용돼야 한다.
-- 그룹원 목록은 서버 API 가 없어(§13) 앱 로컬 `%APPDATA%\CIMS\dispatch-desktop\directory.csv` 에 둔다 — 시험용 내용:
+- 그룹원 목록은 서버 API 가 없어(§13) 앱 로컬 `%APPDATA%\CIMS\dispatch-desktop\directory.csv` 에 둔다. `number` 는 실제로 다이얼되는
+  망 주소(E.164)이고 내선 4자리는 `name` 에 병기하는 표시 라벨이다(단축 다이얼 열은 §13 후속) — 시험용 내용:
   ```
   kind,number,name,tags
-  ext,1002,관제1석,member
-  ext,1003,관제2석,member
-  ext,1004,시험단말A,
-  ext,1005,시험단말B,
+  ext,+82310001001,관제1석 1001,member
+  ext,+82310001002,관제2석 1002,member
+  ext,+821300000001,시험단말A,
+  ext,+821300000002,시험단말B,
   external,02-120,교통상황실,
   ptt,+82500000001,PTT단말1,
   ptt,+82500000002,PTT단말2,
@@ -424,10 +431,10 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 ### 14.3 시험 순서(일괄)
 
-1. 두 관제석 로그인·등록(PTT·VoLTE 점등 녹색) → ① 카드 `g001` 참여·PTT 발언·로스터 → MCData 그룹 SDS 왕복(✓✓).
-2. 시험단말 → `7000` 발신 → 두 관제석 착신 배너(주황)·③ 대기열 → 한쪽 응답, 다른 쪽 [당겨받기]/무응답 부재 행.
+1. 두 관제석 로그인·등록(PTT·VoLTE 점등 녹색) → ① 카드 `g002` 참여·PTT 발언·로스터 → MCData 그룹 SDS 왕복(✓✓).
+2. 시험단말 → `+82310001000` 발신 → 두 관제석 착신 배너(주황)·③ 대기열 → 한쪽 응답, 다른 쪽 [당겨받기]/무응답 부재 행.
 3. 시험단말A ↔ B 통화 → ④ 진행 중 행 [청취] → 감청 창(caller/callee 두 줄) → 종료 시 자동 닫힘. 그룹원 띠에서 상대 관제석 통화 [청취].
 4. 관제석 ① 착신 링 중 ②가 [픽업](지정)·`**`(그룹) → 픽업 행. 통화 중 [전달▾] blind / [상담 전달] attended.
-5. `g002` 세션(PTT 단말 2대) → ② 행 [청취] → PTT 청취 창(발언자·참가자). 사설콜(반이중·전이중)·애드혹(주소록 ☐) 카드.
-6. SMS·LMS(`1002`↔`1003`, 70자 초과) · 오디오 라우트 🎧/🔊 · 핫키(Ctrl+Space PTT, F9 응답, F8 픽업, F10 종료) · 배치 프리셋 저장/복원.
+5. 청취 범위 그룹(예: `g003`) 세션(PTT 단말 2대) → ② 행 [청취] → PTT 청취 창(발언자·참가자). 사설콜(반이중·전이중)·애드혹(주소록 ☐) 카드.
+6. SMS·LMS(`+82310001001`↔`+82310001002`, 70자 초과) · 오디오 라우트 🎧/🔊 · 핫키(Ctrl+Space PTT, F9 응답, F8 픽업, F10 종료) · 배치 프리셋 저장/복원.
 

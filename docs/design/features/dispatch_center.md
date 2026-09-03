@@ -267,8 +267,12 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
 - **응답 코드**: dialog 없음/조기 dialog → 481, 인가 실패 → 403, `recvonly` 아님·코덱 불일치·
   서비스 `media_srtp=required` 인데 crypto 없음 → 488, 세션당 tap 상한 초과 → 486.
 - **인가 두 겹**: SIP 경로는 인메모리 판정(그룹 멤버십 + `monitor_scope`)만 한다. "누가 감청 가능
-  그룹의 멤버가 될 수 있나" 는 CSC/콘솔의 RBAC(`users.role` operator 이상만 `monitor_scope≠none`
-  그룹에 편입 가능, [mcptt_authorization.md](mcptt_authorization.md))가 프로비저닝 시점에 막는다.
+  그룹의 멤버가 될 수 있나" 는 CSC/콘솔의 RBAC 가 프로비저닝 시점에 막는다 — `monitor_scope≠none`/
+  `ptt_listen≠none` 그룹의 생성·범위 변경·멤버 편입은 **콘솔 계정 `manager` 이상**만
+  ([mcptt_authorization.md](mcptt_authorization.md)). 편입되는 가입자 쪽에는 역할 게이트가 없다 —
+  가입자(DB `users` = person 전용, role 컬럼 없음)와 콘솔 계정(OAM `console_accounts`)은 다른
+  저장소·다른 모듈이라 가입자에게 역할이 없기 때문이다([csc_standalone_module.md](csc_standalone_module.md)
+  도메인 경계).
 - **재-INVITE**: M 의 주소 변경(NAT 재바인딩 등)은 `RELAY_TAP_MODIFY`. hold 는 의미 없음(488).
 - **종료**: M 의 BYE → `RELAY_TAP_REMOVE`. 원 통화 종료 → CSP 가 세션의 tap 전부에 BYE 를 보내고
   `RELAY_REMOVE`(tap 은 세션과 함께 회수, 별도 명령 불요).
@@ -328,7 +332,8 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   하나를 읽어 판정한다(`SelectUserProfile` — 인덱스 단건, 다른 프로파일 게이트와 같은 경로. 값 0·행 부재·DB
   불가는 모두 403 — 당사자 모르게 미디어를 인도하는 동작이라 fail-closed). 규격이 정한 인가 자리를 그대로 쓴다.
 - **범위 = 관제 그룹 `ptt_listen`**(`none`/`listed`/`all`): 자격자가 어느 PTT 그룹을 들을 수 있는가.
-- **편입 게이트 = `users.role`**(manager 승인): 자격 부여 자체를 콘솔에서 승인·감사한다(§5.7).
+- **편입 게이트 = 콘솔 `manager` 승인**: 청취 범위가 있는 관제 그룹으로의 편입과 `allow_ambient_listening`
+  부여를 콘솔에서 승인·감사한다(§5.7). 편입되는 가입자 쪽 역할 게이트는 없다(§5.3).
 
 **로스터 노출 — `listen_visibility`(은닉·투명 둘 다 정식 지원)**: 규격이 청취 멤버 표시를 정의하지
 않으므로 CIMS 정책축이며, **관제사의 관제 그룹 속성**으로 두 모드를 모두 지원한다.
@@ -366,7 +371,7 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 
 ### 5.8 법적 근거·인가
 
-- **감청은 운영자 인가에 근거한다.** 편입(누가 감청 가능 그룹의 멤버가 되나)은 `users.role` `manager`
+- **감청은 운영자 인가에 근거한다.** 편입(누가 감청 가능 그룹의 멤버가 되나)은 콘솔 계정 `manager`
   이상이 콘솔에서 명시 승인하고 그 자체가 감사된다(§5.7). SIP 경로는 인메모리 인가만 집행한다(§5.3).
 - **동의·고지는 배포 정책**이다. 관할지 법제(업무 통화 감청 고지 의무·동의 요건)에 따라 가입자 온보딩
   시 고지하는 것을 전제하며, 시스템은 그 근거를 강제하지 않고 감사로 뒷받침한다.
@@ -431,7 +436,7 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 
 | 컴포넌트 | 변경 | 상태 |
 |---|---|---|
-| **CSC** `handlers/dispatch.py` | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members` + `/monitor-targets` + `/ptt-targets`(§8.2), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_dispatch_group`, `DISPATCH_GROUP_CHANGED` 통지(uri=그룹 id), pilot↔가입 id·타 대표번호 충돌 409, RBAC(감청/청취 범위 변경·그 그룹 편입은 manager, 편입 가입자 `users.role` operator 이상), `ptt_user_profile.allow_ambient_listening` 편집·XCAP user-profile `<allow-ambient-listening>`, `/provisioning/me` `dispatch{groupId,groupName,pilotId,monitorScope,pttListen,listenVisibility}`. 테이블 미적용 DB 는 목록 `schema=not_migrated`·변경 400 | 구현 |
+| **CSC** `handlers/dispatch.py` | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members` + `/monitor-targets` + `/ptt-targets`(§8.2), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_dispatch_group`, `DISPATCH_GROUP_CHANGED` 통지(uri=그룹 id), pilot↔가입 id·타 대표번호 충돌 409, RBAC(감청/청취 범위 변경·그 그룹 편입은 콘솔 manager — 편입 가입자 쪽 역할 게이트 없음), `ptt_user_profile.allow_ambient_listening` 편집·XCAP user-profile `<allow-ambient-listening>`, `/provisioning/me` `dispatch{groupId,groupName,pilotId,monitorScope,pttListen,listenVisibility}`. 테이블 미적용 DB 는 목록 `schema=not_migrated`·변경 400 | 구현 |
 | **CSP `CCspDispatchGroupMap`** (`CspDispatchGroup.h/.cpp`) | 그룹 id·pilot·멤버 인덱스, `CanWatch`(§5.2)·`CanListenPtt`(§5.6) 범위 판정, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group` → org 폴백), DbManager 적재(`SelectDispatchGroup`/`LoadAllDispatchGroups`, 부팅 프로브 `HasDispatchTables`)·`DISPATCH_GROUP_CHANGED`/`CSC_RESTART` 재적재·JSON fallback `DataFolder.DispatchGroup`(§3.3) | 구현 |
 | **CSP `CTasModule` 포크 집합** | `CTasForkSet`(TAS 소유 — 대기 leg 는 승자 확정 전까지 `CCallMap` 밖) · `TryDispatchPilot`(§4.2, 미등록 착신 분기의 `TryPickupDial` 앞) · `ResolveForkTargets`(등록·`busy_members=skip` 비통화·발신자 제외·`alert_order` 순·`MaxForkTargets` 절삭) · `StartAlert`(`alert_mode` 분기 — parallel 전원 / sequential 큐+첫 순번) · `AdvanceSequential`(§4.4a 다음 순번·단계 시한 재설정) · `ForkAlert`(leg 전용 SDES 서버 키·`P-Called-Party-ID`=대표번호) · `OnForkRing`(첫 180 만 A 에, SDP 없이) · `OnForkStart`(승자 → (A,승자) 쌍 CallMap 삽입 후 디스패처 정상 answer 경로가 RELAY_MODIFY·A 200, 패자 CANCEL, 늦은 200 은 BYE) · `OnForkEnd`(패자 최종 응답 흡수, sequential 다음 순번, 전원 실패 486/480, A 취소 → 전원 CANCEL+relay 회수) · `Tick`(1초 — `no_answer_sec` 만료 → sequential 다음 순번 / `OverflowFork`(대표번호면 그 그룹원 재포크·내선이면 단일 leg, 1단계) 또는 480) · `FindForkForPickup`/`PickUpFork`(§4.4 링잉 대표번호 호 당겨받기 — `PickUp` 의 CallMap 후보 폴백) · 대표번호 AoR dialog 이벤트(§4.5 — early/confirmed/terminated) | 구현 |
 | **CSP `CscfModule`** | dialog SUBSCRIBE 인가 → `CanWatch(EffectiveGroupOf(구독자), 대상 그룹)`; 대상이 대표번호면 그 그룹(§4.5) | 구현 |
@@ -530,7 +535,8 @@ ALTER TABLE ptt_user_profile
 `POST /{id}/members` / `DELETE /{id}/members/{user_id}` / `PUT /{id}/monitor-targets` /
 `PUT /{id}/ptt-targets`. PTT 그룹 API([../../api/admin_api.md](../../api/admin_api.md) §6)와 동형.
 검증: `pilot_id` 가 `volte_subscriptions.id`/`ptt_subscriptions.id`/다른 pilot 과 충돌 → 409;
-`monitor_scope≠none` 그룹에 `users.role` 이 operator 미만인 가입자 편입 → 403.
+`monitor_scope≠none`/`ptt_listen≠none` 그룹의 생성·범위 변경·멤버 편입을 manager 미만 콘솔 계정이 시도
+→ 403 `manager_required`(편입되는 가입자 쪽 역할 게이트는 없다 — §5.3).
 
 ### 8.3 접속서비스·csp.json
 

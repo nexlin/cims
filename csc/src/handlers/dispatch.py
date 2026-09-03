@@ -98,7 +98,11 @@ async def handle_dispatch_groups(handler_args: HandlerArgs, kwargs: dict) -> Han
     """/api/v1/dispatch-groups/* — 조회 monitor+, 생성/변경 operator+, 감청 범위·PTT 청취 편입은 manager+.
 
     감청(monitor_scope≠none / ptt_listen≠none)은 당사자가 모르는 동작이므로 그 그룹의 범위 변경과 멤버
-    편입은 manager 승인으로 제한한다 (dispatch_center.md §5.8)."""
+    편입은 manager 승인으로 제한한다 (dispatch_center.md §5.8). 역할(role)은 **콘솔 계정**(OAM
+    console_accounts·내장 admin — 토큰 클레임)에만 있다. 편입되는 가입자(person) 쪽에는 역할 게이트가
+    없다 — DB users 는 person 전용이라 role 컬럼이 없고(sql/migrate_users_person_only.sql), 콘솔 계정과
+    가입자는 다른 저장소·다른 모듈이다(csc_standalone_module.md 도메인 경계). PTT 청취 자격은 TS 24.484
+    ptt_user_profile.allow_ambient_listening 이며 CSP 가 청취 개시 시점에 판정한다(§5.6)."""
     config = kwargs.get('config', {})
     parts = _path_parts(handler_args.full_path, _DISPATCH_BASE)
     group_id = parts[0] if len(parts) > 0 else None
@@ -218,18 +222,6 @@ def _pilot_conflict(cur, pilot: str, self_id: str = None):
 
 def _monitoring(g: dict) -> bool:
     return (g.get('monitor_scope') or 'none') != 'none' or (g.get('ptt_listen') or 'none') != 'none'
-
-
-def _member_role_ok(cur, user_id: str) -> bool:
-    """감청 가능 그룹 편입 게이트 — 가입자의 users.role 이 operator 이상이어야 한다 (§5.3·§8.2)."""
-    cur.execute("SELECT u.role FROM volte_subscriptions s JOIN users u ON u.id=s.user_id WHERE s.id=%s", (user_id,))
-    row = cur.fetchone()
-    if row is None:
-        cur.execute("SELECT u.role FROM ptt_subscriptions s JOIN users u ON u.id=s.user_id WHERE s.id=%s", (user_id,))
-        row = cur.fetchone()
-    if row is None:
-        return False
-    return admin_auth.role_rank(row.get('role')) >= admin_auth.role_rank('operator')
 
 
 def _sync_pickup_group(cur, user_id: str, group_id):
@@ -463,14 +455,10 @@ def _add_member(cur, group_id: str, body, is_manager: bool):
         return HandlerResult(status=404, body={'error': 'Group not found'})
     if not _subscriber_exists(cur, user_id):
         return HandlerResult(status=404, body={'error': 'Subscriber not found', 'detail': user_id})
-    if _monitoring(g):
-        # 감청 가능 그룹 편입 — manager 승인 + 가입자 users.role operator 이상 (§5.3·§5.8)
-        if not is_manager:
-            return HandlerResult(status=403, body={'error': 'manager_required',
-                                                   'detail': '감청/청취 그룹 편입은 manager 이상'})
-        if not _member_role_ok(cur, user_id):
-            return HandlerResult(status=403, body={'error': 'member_role_insufficient',
-                                                   'detail': 'monitor_scope/ptt_listen≠none 그룹의 멤버는 users.role operator 이상'})
+    if _monitoring(g) and not is_manager:
+        # 감청 가능 그룹 편입 — 콘솔 manager 승인 (§5.8). 가입자 쪽 역할 게이트는 없다(handle_dispatch_groups 주석).
+        return HandlerResult(status=403, body={'error': 'manager_required',
+                                               'detail': '감청/청취 그룹 편입은 manager 이상'})
     # 가입자당 그룹 하나 — 다른 그룹 소속이면 이동(이전 그룹도 재적재 통지)
     prev = dispatch_group_of_user(cur, user_id)
     order = int(body.get('alert_order', 0))
@@ -652,7 +640,6 @@ CIMS_DISPATCH_API_DOCS = [
      'errors': _ERR_COMMON + [
          _ERR_SCHEMA,
          {'status': 403, 'when': '감청/청취 그룹 편입을 operator 가 시도', 'body': {'error': 'manager_required'}},
-         {'status': 403, 'when': '감청/청취 그룹에 users.role operator 미만 가입자 편입', 'body': {'error': 'member_role_insufficient'}},
          {'status': 404, 'when': '없는 그룹/가입자'},
      ],
      'notes': ['성공 시 **201**.', '가입자 pickup_group 이 그룹 id 로 갱신된다 — 반영은 다음 REGISTER 갱신부터(등록 바인딩 스냅샷).'],

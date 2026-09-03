@@ -462,7 +462,7 @@ Content-Type: application/json
 |------|------|------|--------|------|
 | `id` | string | Y | - | MSISDN (E.164 형식, `+` 국가코드 포함) |
 | `auth_id` | string | N | id와 동일 | SIP Digest 인증 ID |
-| `passwd` | string | Y | - | SIP Digest 비밀번호 — **저장되지 않는다.** `ha1=MD5(imsi@domain:realm:passwd)` 로 변환해 저장(realm = 서비스 `auth_realm ?? domain`). 따라서 `service_ref` 가 해석되어야 한다(400) |
+| `passwd` | string | Y | - | SIP Digest 비밀번호 — **저장되지 않는다.** `ha1=MD5(imsi@domain:realm:passwd)` 로 변환해 저장(realm = 서비스 `auth_realm ?? domain` — `access_services` 컬렉션, 미도달 시 csc.json `Provisioning.Services.<kind>`). 따라서 `service_ref` 가 해석되어야 한다(400) |
 | `sip_transport` | string | N | null | 채널 정책 `UDP`/`TCP`/`TLS`. **`TLS` 는 서버가 집행** — 이 번호의 비-TLS 채널 요청은 REGISTER 포함 403. `UDP`/`TCP` 는 단말 프로비저닝 힌트, null 은 단말 선택 |
 | `auth_scheme` | string | N | `digest` | 인증 체계 `digest`(SIP Digest, `ha1`) / `aka`(IMS AKA over TLS — `sip_transport` 와 무관하게 TLS 채널만 허용). 마이그레이션(`migrate_subscription_aka.sql`) 전 DB 에서는 400 |
 | `k` / `opc` / `op` / `amf` | string | aka 면 Y | - / `8000` | IMS AKA 자료(hex32 / hex32 / hex32 → OPc 유도 / hex4). **저장 형식은 CSC `AuC.Kek` 암호화**이며 어떤 응답에도 원문이 나가지 않는다(조회는 `auth_scheme`·`aka_provisioned`). 키를 넣으면 SQN 이 0 으로 리셋. `AuC.Kek` 미설정이면 503 |
@@ -945,8 +945,8 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 | `PUT /api/v1/dispatch-groups/{id}/ptt-targets` | manager+ | `{ptt_group_ids:[mcptt_group_id…]}` — `ptt_listen=listed` 대상 |
 
 **오류:** 409 `pilot_conflict`(대표번호가 가입 id·다른 대표번호와 충돌) · 409 `group_exists` · 403 `manager_required`
-(감청/청취 범위 변경·그 그룹 편입을 operator 가 시도) · 403 `member_role_insufficient`(감청/청취 그룹에 `users.role`
-operator 미만 가입자 편입) · 400 `schema_not_migrated`(`sql/migrate_dispatch_groups.sql` 미적용) · 404.
+(감청/청취 범위 변경·그 그룹 편입을 operator 가 시도 — 편입되는 가입자 쪽 역할 게이트는 없다, 역할은 콘솔 계정에만) ·
+400 `schema_not_migrated`(`sql/migrate_dispatch_groups.sql` 미적용) · 404.
 
 **그룹 객체:**
 ```json
