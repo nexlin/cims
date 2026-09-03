@@ -496,6 +496,10 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 
 ### 9.1 코드 위치 (확정: 모노레포 `android/`, 공유 `core` + 클라이언트 2개)
 
+> **모듈 구조의 정본은 [ue_sdk.md](ue_sdk.md) 로 이동했다.** 최종 상태는 C++ 코어 `libcimsue`(`sdk/core`) +
+> Android SDK(`sdk/android`, AAR) 위에 앱이 얹히는 구조이며, 아래는 그 이행 전 `android/core` 기준 배치다
+> (ue_sdk.md §5.3 대응표).
+
 ```
 cims/
   android/

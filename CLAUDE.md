@@ -28,6 +28,7 @@ cspsim  ←─ SIP (UDP 5060 / TCP 25061 / TLS 5061) ──→  CSP
 | **CSC** (`csc/`) | 가입자 관리 + MCPTT(IdMS/GMS/CMS/XCAP) 서버 | [docs/design/modules/csc.md](docs/design/modules/csc.md) |
 | **OAM/Console** (`ems/`) | 운영·관리 평면 게이트웨이 + 웹 콘솔 (core/service 분리) + 자동 배포 엔진 내장 | [docs/design/console_platform.md](docs/design/console_platform.md), [docs/design/oam_csc_split.md](docs/design/oam_csc_split.md) |
 | **Agent** (`agent/`) | 노드 에이전트 (배포/HA/업그레이드 supervised) | [docs/design/modules/agent.md](docs/design/modules/agent.md) |
+| **UE SDK** (`sdk/`, `android/`) | 단말 SDK — C++ 코어 `libcimsue`(pjsua2 위) + Android/Windows 플랫폼 SDK. 관제조작반·PTT·VoLTE 앱의 공통 토대 (설계 정본, Android 부터 구현) | [docs/design/features/ue_sdk.md](docs/design/features/ue_sdk.md) |
 
 전체 아키텍처 개요는 [docs/design/01_overview.md](docs/design/01_overview.md), 배포 아키텍처는
 [docs/design/02_deployment.md](docs/design/02_deployment.md) 를 본다.
@@ -170,6 +171,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [android_ue_client.md](docs/design/features/android_ue_client.md) / [android_ue_m1_pjsip_integration.md](docs/design/features/android_ue_m1_pjsip_integration.md) — Android UE 클라이언트
 - [mcptt_ue_multitalker_media.md](docs/design/features/mcptt_ue_multitalker_media.md) — 단말 동시 발언 미디어 평면(U10) 선택지·구현 설계 + floor 코덱 공유/정의 단일화 검토 (pjproject·안드로이드 빌드 환경 필요)
 - [android_ue_provisioning.md](docs/design/features/android_ue_provisioning.md) — UE 로그인·자동 프로비저닝(서비스별 프로파일, CSC `/provisioning/me`)
+- [ue_sdk.md](docs/design/features/ue_sdk.md) — 단말 SDK `libcimsue` — 플랫폼 중립 C++ 코어(sip·media·floor·mcdata·csc·domain, pjsua2 위, 공개 헤더 = 바인딩 정본) + Android SDK(SWIG Java+Kotlin 파사드+Android 접점, AAR) + Windows SDK(C++ DLL+헤더). 엔진 = `ext/pjproject` 단일 소스 정본(config_site 플랫폼별, Linux/NDK/MSVC 같은 트리), `cimsue-cli` 헤드리스 UE 로 S3 검증. 관제조작반 앱(Windows+Android 태블릿) 요구↔API 매핑 §7. **설계 정본 — 이행 순서 A~F, Android 먼저**
 
 **api/**
 - [admin_api.md](docs/api/admin_api.md) · [collection_api.md](docs/api/collection_api.md) · [agent_api.md](docs/api/agent_api.md) · [mcptt_api.md](docs/api/mcptt_api.md) · [cmp_media_api.md](docs/api/cmp_media_api.md) — CMP 미디어 서비스 제어 API (UDP JSON envelope v2)

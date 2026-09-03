@@ -544,6 +544,9 @@ csp.json `sections.tas` 신규 키:
 
 ### 8.4 단말
 
+> 관제용 앱의 구현 토대는 [ue_sdk.md](ue_sdk.md)(C++ 코어 `libcimsue` + Android/Windows SDK) 이며, 아래 요건과
+> 코어 API 의 대응표는 그 문서 §7 이다.
+
 관제용 앱은 `/provisioning/me` 의 `dispatch` 블록으로 자기 데스크(그룹·대표번호·범위)를 안다.
 Join INVITE 는 `Supported: join` 을 싣고, SDP 는 `a=recvonly` + 통화 표준 코덱(AMR-WB) +
 SDES crypto(서비스 `media_srtp` 에 따름). 미디어 수신부는 한 m-line 의 **SSRC 2개를 디먹스해 각각
