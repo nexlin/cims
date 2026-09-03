@@ -44,7 +44,7 @@ struct ServiceProfile {
     std::vector<std::string> secMechanisms;
     int maxPayloadSdsCplaneBytes = 0;
     /** 이 서비스로 등록할 AccountConfig — 프로파일 값 그대로(loginPw 는 sipHa1 부재 시 평문 폴백). */
-    AccountConfig toAccount(const std::string& loginPw = std::string()) const;
+    CIMSUE_API AccountConfig toAccount(const std::string& loginPw = std::string()) const;
 };
 
 /** 관제 데스크(dispatch_center.md §8.4) — 없으면 present=false. */
@@ -61,7 +61,7 @@ struct Profile {
     std::string cscHost; int cscPort = 4430;
     std::vector<ServiceProfile> services;
     DispatchProfile dispatch;
-    const ServiceProfile* service(const std::string& kind) const;
+    CIMSUE_API const ServiceProfile* service(const std::string& kind) const;
 };
 
 struct GroupSummary { std::string uri, displayName, etag; int memberCount = -1; };

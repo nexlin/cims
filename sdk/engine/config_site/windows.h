@@ -27,3 +27,7 @@
 /* 인증: 관제 소프트폰 가입자 규약은 Digest+TLS(volte_supplementary_services.md) — AKA(milenage) 는 Windows 엔진에서 제외.
    pjproject CMake 의 third_party 에 milenage 가 없어 켜면 링크가 깨진다. */
 #define PJSIP_HAS_DIGEST_AKA_AUTH      0
+
+/* AMR-WB 라이브러리는 CMake 가 imported target(OpenCoreAMRWB::/VisualOnAMRWBEnc::) 으로 링크한다. pjmedia-codec 의 MSVC 자동 링크
+   (#pragma comment(lib, "libopencore-amrwb.a") — gcc 산출물 이름 전제) 는 끈다. 켜 두면 pjsua 앱 링크에서 LNK1104. */
+#define PJMEDIA_AUTO_LINK_OPENCORE_AMR_LIBS 0

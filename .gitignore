@@ -112,3 +112,6 @@ ems/service/console/node_modules
 /HA_report*.md
 /HA_design_recommand*.md
 pw.md
+
+# Windows SDK 슈퍼빌드 (sdk/windows)
+build-win/

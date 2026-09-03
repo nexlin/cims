@@ -12,7 +12,7 @@ set(AMR_BASE ${OC_SRC}/opencore/codecs_v2/audio/gsm_amr)
 set(DEC_DIR  ${AMR_BASE}/amr_wb/dec)
 
 file(GLOB DEC_SRC ${DEC_DIR}/src/*.cpp)
-list(FILTER DEC_SRC EXCLUDE REGEX "decoder_amr_wb\\.cpp$")      # Makefile.am 과 동일하게 제외
+list(FILTER DEC_SRC EXCLUDE REGEX "/decoder_amr_wb\\.cpp$")     # Makefile.am 과 동일하게 제외 (앞의 / 로 dtx_decoder_amr_wb.cpp 는 남긴다)
 add_library(opencore-amrwb STATIC ${OC_SRC}/amrwb/wrapper.cpp ${DEC_SRC})
 target_include_directories(opencore-amrwb PRIVATE
     ${OC_SRC}/oscl ${DEC_DIR}/src ${DEC_DIR}/include ${AMR_BASE}/common/dec/include)

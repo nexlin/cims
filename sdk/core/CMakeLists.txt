@@ -14,6 +14,8 @@ cmake_minimum_required(VERSION 3.16)
 if(NOT DEFINED PJ_DIR)
     message(FATAL_ERROR "sdk/core 는 루트 CMake 에서만 빌드한다 (PJ_DIR/PJ_PKG_DIR 필요)")
 endif()
+# 레포 루트 — 루트 CMake 뿐 아니라 sdk/windows 슈퍼빌드(CMAKE_SOURCE_DIR=sdk/windows)에서도 include 되므로 자기 위치에서 구한다.
+get_filename_component(CIMS_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../.. ABSOLUTE)
 
 if(NOT DEFINED PJ_LIBS)
     if(NOT DEFINED PJ_TARGET)
@@ -45,12 +47,17 @@ if(NOT DEFINED PJ_SYS_LIBS)
 endif()
 
 # floor 정의 헤더는 생성물이다 — 정본 테이블이 바뀌면 재생성 (scripts/gen_floor_defs.py)
-set(FLOOR_DEFS_YAML ${CMAKE_SOURCE_DIR}/docs/design/features/mcptt_floor_defs.yaml)
+# 인터프리터는 find_package 로 잡는다 — Windows(python.org 설치본)에는 `python3` 이름이 없다.
+find_package(Python3 COMPONENTS Interpreter)
+if(NOT Python3_EXECUTABLE)
+    set(Python3_EXECUTABLE python3)
+endif()
+set(FLOOR_DEFS_YAML ${CIMS_ROOT}/docs/design/features/mcptt_floor_defs.yaml)
 set(FLOOR_DEFS_H ${CMAKE_CURRENT_SOURCE_DIR}/src/floor/floor_defs.h)
 add_custom_command(
     OUTPUT ${FLOOR_DEFS_H}
-    COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/gen_floor_defs.py
-    DEPENDS ${FLOOR_DEFS_YAML} ${CMAKE_SOURCE_DIR}/scripts/gen_floor_defs.py
+    COMMAND ${Python3_EXECUTABLE} ${CIMS_ROOT}/scripts/gen_floor_defs.py
+    DEPENDS ${FLOOR_DEFS_YAML} ${CIMS_ROOT}/scripts/gen_floor_defs.py
     COMMENT "floor_defs.h ← mcptt_floor_defs.yaml")
 
 # Windows SDK 는 DLL(CIMSUE_SHARED — export.h), 그 외는 정적. pj 라이브러리는 DLL 안으로 정적 링크된다.
@@ -79,8 +86,11 @@ target_include_directories(cimsue
 target_include_directories(cimsue INTERFACE ${PJ_INC})
 # pjlib 플랫폼 선택 매크로 — autoconf 빌드(Linux/Android)는 PJ_AUTOCONF, MSVC 는 PJ_WIN32 (pjproject CMake 와 동일값)
 if(WIN32)
-    target_compile_definitions(cimsue PUBLIC PJ_WIN32=1 PJ_WIN32_WINNT=0x0601 WIN32_LEAN_AND_MEAN NOMINMAX
-                                             PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
+    # WIN32_LEAN_AND_MEAN·PJ_WIN32_WINNT 는 pj/compat/os_win32.h 가 무조건 정의한다 — 여기서 겹치면 C4005.
+    target_compile_definitions(cimsue PUBLIC PJ_WIN32=1 NOMINMAX PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
+    if(MSVC)
+        target_compile_options(cimsue PUBLIC /utf-8)   # 소스·주석이 UTF-8 (코드 페이지 949 에서 C4819)
+    endif()
 else()
     target_compile_definitions(cimsue PUBLIC PJ_AUTOCONF=1 PJ_IS_BIG_ENDIAN=0 PJ_IS_LITTLE_ENDIAN=1)
 endif()
@@ -117,9 +127,9 @@ if(DEFINED GTEST_DIR)
         test/engine_route_test.cpp
         # CMP 서버 코덱과 교차 검증 — cmp/PFloorCodec.cpp 는 PMcpttGroup.h(+pasf pbase.h) 만 필요
         test/floor_xcheck_test.cpp
-        ${CMAKE_SOURCE_DIR}/cmp/PFloorCodec.cpp)
+        ${CIMS_ROOT}/cmp/PFloorCodec.cpp)
     target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src
-                               ${CMAKE_SOURCE_DIR}/cmp ${EXT_DIR}/pasf/include)
+                               ${CIMS_ROOT}/cmp ${EXT_DIR}/pasf/include)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     target_link_libraries(cimsue_test PRIVATE cimsue gtest gtest_main)
     if(NOT WIN32)
