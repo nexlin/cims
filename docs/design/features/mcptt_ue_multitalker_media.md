@@ -4,9 +4,9 @@
 [android_ue_client.md §5.4](android_ue_client.md#54-서버-규격-정합에-따른-단말-구현-요구사항-ts-24380) 의
 **U10** 이 이 문서의 대상이며, 나머지 U 항목(floor 평면)은 모두 반영을 마쳤다.
 
-구현은 `android/docs/scripts/m1_build_pjsip.sh` 의 pjproject 패치 `[2-14]` 로 반영돼 있다(§5).
-빌드·실기기 검증에는 **WSL2 네이티브 빌드 환경**이 필요하다 — pjsip `.so` 는 WSL2 에서 빌드해
-`android/core/src/pjsua2/jniLibs/` 로 투입하는 구조이고, `android/` 에는 네이티브 빌드가 없다.
+구현은 엔진 소스 정본 `ext/pjproject` 의 `pjmedia/src/pjmedia/stream.c`·`stream_imp_common.c` 에 반영돼 있다(§5).
+Android `.so` 는 WSL2 에서 `sdk/android/build-native.sh` 로 빌드해 투입한다([ue_sdk.md](ue_sdk.md) §3·§8) —
+`android/` 자체에는 네이티브 빌드가 없다.
 
 ---
 
@@ -106,8 +106,7 @@ pjsua 는 통화당 오디오 스트림을 여러 개 지원한다 — 각 스�
 
 ## 5. 구현 — `pjmedia_stream` 내부 SSRC 디먹스
 
-**패치**: `android/docs/scripts/m1_build_pjsip.sh` `[2-14]`(멱등 `git apply`) —
-pjproject `pjmedia/src/pjmedia/stream.c` + `stream_imp_common.c`. 앱(Kotlin)·SWIG 는 바뀌지
+**패치**: 엔진 소스 정본 `ext/pjproject` 의 `pjmedia/src/pjmedia/stream.c` + `stream_imp_common.c`. 앱(Kotlin)·SWIG 는 바뀌지
 않는다. 네이티브 상태는 `struct cims_mt_sub`(서브스트림 테이블)과 `cims_mt_*` 함수로 모인다.
 
 - **디먹스 지점** — `on_rx_rtp`(RX/ioqueue 스레드). RTP 헤더 SSRC 를 보고:

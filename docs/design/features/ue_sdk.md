@@ -72,13 +72,14 @@
 
 **`ext/pjproject` 가 유일한 소스 정본이다.** pjproject 를 수정할 때는 이 트리를 직접 고치고 git 이 이력을
 보관한다. psip·opencore-amr 을 `ext/` 에 두고 쓰는 관례와 같다. Android `.so` 빌드 스크립트
-(`android/docs/scripts/m1_build_pjsip.sh`)는 upstream clone·패치 적용 단계를 갖지 않고 **이 트리를 NDK 로
-빌드하고 SWIG 을 돌리는 절차만** 담는다.
+(`sdk/android/build-native.sh`)는 upstream clone·패치 적용 단계를 갖지 않고 **이 트리를 NDK 로 빌드하고
+SWIG 을 돌린 뒤 산출물을 배치하는 절차만** 담는다(`android/docs/scripts/m1_build_pjsip.sh` 는 위임 스텁).
+적용된 패치 인벤토리는 `ext/pjproject/README.CIMS.md`.
 
 | 항목 | 규약 |
 |---|---|
-| **config_site.h** | upstream 이 무시하는 파일이므로 `sdk/engine/config_site/{common,android,windows,linux}.h` 로 커밋한다. `common.h` 에 세 플랫폼이 같아야 하는 결정(U10, `PJMEDIA_HAS_SRTP 1`, `PJSIP_HAS_TLS_TRANSPORT 1`, 코덱 표면 축소 — G.711 안전망 유지·AMR-NB/VP8/VP9/Speex 등 off, 이벤트 구독 패치 스위치)을 두고, 플랫폼 파일은 `common.h` 를 include 한 뒤 장치·코덱 백엔드만 정한다(Android=And-Media MediaCodec 코덱·OpenSL/AAudio, Windows=WASAPI·SDL 창 off, Linux=ALSA 또는 null 장치). 빌드 시 `pjlib/include/pj/config_site.h` 로 복사한다 |
-| **Linux 빌드** | 루트 `CMakeLists.txt` 에 psip/pasf 와 같은 `ExternalProject_Add(pjproject)` — 코어·`cimsue-cli`·단위시험이 링크한다. pjproject 자체 CMake 는 upstream 이 Linux x86_64 만 시험한 실험 단계라 `aconfigure`+`make` 경로를 쓴다 |
+| **config_site.h** | upstream 이 무시하는 파일이므로 `sdk/engine/config_site/{common,android,windows,linux}.h` 로 커밋한다. `common.h` 에 세 플랫폼이 같아야 하는 결정(U10, `PJMEDIA_HAS_SRTP 1`, `PJSIP_HAS_TLS_TRANSPORT 1`, 코덱 표면 축소 — G.711 안전망 유지·AMR-NB/VP8/VP9/Speex 등 off, 이벤트 구독 패치 스위치)을 두고, 플랫폼 파일은 `common.h` 를 include 한 뒤 장치·코덱 백엔드만 정한다(Android=And-Media MediaCodec 코덱·OpenSL/AAudio, Windows=WASAPI·SDL 창 off, Linux=null 장치·영상 off·opencore AMR-WB). 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다 — 플랫폼 파일이 `common.h` 를 상대경로로 include 하므로 복사가 없고 pjproject 트리에는 gitignore 된 한 줄짜리 파일만 생긴다 |
+| **Linux 빌드** | 루트 `CMakeLists.txt` 의 `ExternalProject_Add(pjproject)` (`option(CIMS_UE_SDK ON)`) — `aconfigure`(`--disable-sound --disable-video`, 서버가 만든 `pkg/opencore-amr`·`pkg/vo-amrwbenc` 링크, `-fPIC`) → `make dep` → `make lib` → `pkg/pjproject` 설치. 코어·`cimsue-cli`·단위시험이 링크한다(`pkg/pjproject/lib/pkgconfig/libpjproject.pc` 의 Libs/Libs.private + opencore·vo-amrwbenc 라이브러리 경로). 코덱은 config_site 로만 끈다 — configure `--disable-speex-codec` 은 third_party/speex 를 빼서 AEC(`echo_common.o`) 링크가 깨진다. pjproject 자체 CMake 는 upstream 이 Linux x86_64 만 시험한 실험 단계라 쓰지 않는다 |
 | **Windows 빌드** | 같은 트리의 `pjproject-vs14.sln`(MSVC) 로 빌드한다. pjproject CMake 채택은 upstream 안정화 후 |
 | **libsrtp 경계** | 서버(CMP)는 `ext/libsrtp` 독립 vendoring, 단말 엔진은 pjproject 동봉 `third_party/srtp`. 같은 CMake 트리에 들어오므로 타겟 이름·include 경로를 분리하고 서로 링크하지 않는다(루트 CMake 의 기존 주석이 규약) |
 | **플랫폼 한정 패치** | `android_jni_dev` 무전/통화 분리 라우팅([2-10])처럼 한 플랫폼 파일 안에 있는 패치는 그대로 둔다. Windows 의 헤드셋·스피커 분리 출력은 pjsua2 `ExtraAudioDevice` 로 코어 레벨에서 푼다(§6) |
@@ -290,8 +291,8 @@ sdk/windows/
 
 | 대상 | 방법 | 산출물 |
 |---|---|---|
-| Linux (개발 서버) | 루트 `cmake .. && make` — `pjproject`(ExternalProject) → `cimsue` → `cimsue-cli` → `cimsue_test`. `make dist` 에 `cimsue-cli` 를 verify 도구로 포함 | `build/bin/cimsue-cli`, `build/lib/libcimsue.a` |
-| Android | `sdk/android/build-native.sh` — `sdk/engine/config_site/android.h` 복사 → `configure-android`(NDK) → `make` → SWIG(pjsua2+cimsue) → `.so` 를 `jniLibs` 에 배치. 그 뒤 Gradle | `cimsue-android.aar` |
+| Linux (개발 서버) | 루트 `cmake .. && make` — `pjproject`(ExternalProject, `make pjproject` 단독 가능) → `cimsue` → `cimsue-cli` → `cimsue_test`. `make dist` 에 `cimsue-cli` 를 verify 도구로 포함 | `pkg/pjproject`, `build/bin/cimsue-cli`, `build/lib/libcimsue.a` |
+| Android | `sdk/android/build-native.sh` — `config_site.h` 한 줄 생성(→ `android.h`) → `configure-android`(NDK) → `make` → SWIG(pjsua2+cimsue) → `.so`·Java 를 `jniLibs`/소스셋에 배치. 그 뒤 Gradle | `cimsue-android.aar` |
 | Windows | `sdk/engine/config_site/windows.h` 복사 → `pjproject-vs14.sln` → `sdk/windows` CMake/MSVC | `cimsue.dll`·헤더 |
 
 NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, 이 서버는 Linux 빌드·단위시험·`cimsue-cli`

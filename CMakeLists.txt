@@ -277,6 +277,50 @@ ExternalProject_Add(
 #message("LINK_DIRECTORIES(${FFM_LIB_PATH} ${X264_LIB_PATH} ${GTEST_LIB_PATH} ${AMTRTP_LIB_PATH} ${PDK_LIB_PATH} ${AMR_LIB_PATH} ${AMRWB_LIB_PATH} ${HUDTMF_PATH} ${TBB_LIB_PATH} ${JT_LIB_PATH}  ${PASF_LIB_PATH} )")
 #
 #message("LINK_LIBRARIES( ${X264_LIB} ${AMTRTP_LIB} ${GTEST_LIB} ${PDK_LIB} ${PALOG_LIB} ${AMR_LIB} ${AMRWB_LIB} ${TBB_LIB} ${HUDTMF_LIB} ${JT_LIB} ${PASF_LIB} ${PMPROC_LIB} ${FFM_LIB} pthread rt m)")
+#----------------------------------------------------
+# pjproject — 단말 SDK(libcimsue) 엔진 (docs/design/features/ue_sdk.md §3·§8)
+#  ext/pjproject 가 Linux/Android/Windows 공통 소스 정본. 여기서는 Linux(개발 서버·CI) 빌드 —
+#  libcimsue 단위시험·헤드리스 UE `cimsue-cli` 가 링크한다. Android(NDK)는 sdk/android/build-native.sh,
+#  Windows(MSVC)는 pjproject-vs14.sln 이 같은 트리를 빌드한다.
+#  config_site.h(pjproject 가 gitignore) 는 sdk/engine/config_site/linux.h 를 #include 하는 한 줄로 생성.
+#  aconfigure 산출물(build.mak·os-auto.mak·*_auto.h·.depend·output/·lib/)은 전부 pjproject .gitignore
+#  대상 — in-source 빌드가 트리를 더럽히지 않는다.
+#  ⚠️ 동봉 third_party/srtp 는 단말 엔진 전용 — 서버(CMP)의 ext/libsrtp 와 서로 링크하지 않는다.
+#--------------------------------------------------------
+option(CIMS_UE_SDK "단말 SDK 엔진(ext/pjproject) 빌드 — ue_sdk.md" ON)
+if(CIMS_UE_SDK)
+set(PJ_EXT      pjproject)
+set(PJ_DIR      ${EXT_DIR}/${PJ_EXT})
+set(PJ_PKG_DIR  ${PKG_BASE}/${PJ_EXT})
+set(PJ_INC      ${PJ_PKG_DIR}/include)
+set(PJ_LIB_PATH ${PJ_PKG_DIR}/lib)
+set(PJ_CONFIG_SITE ${CMAKE_CURRENT_SOURCE_DIR}/sdk/engine/config_site/linux.h)
+ExternalProject_Add(
+   ${PJ_EXT}
+   SOURCE_DIR ${PJ_DIR}
+   PREFIX ${BUILD_BASE}/pjproject
+   DEPENDS ${AMR_EXT} ${AMRWB_EXT}
+   DOWNLOAD_COMMAND ""
+   UPDATE_COMMAND ""
+   BUILD_IN_SOURCE 1
+   CONFIGURE_COMMAND sh -c "printf '#include \"%s\"\\n' '${PJ_CONFIG_SITE}' > pjlib/include/pj/config_site.h"
+             COMMAND env CFLAGS=-fPIC CXXFLAGS=-fPIC ./aconfigure --prefix=${PJ_PKG_DIR}
+                     --disable-sound --disable-video --disable-sdl --disable-ffmpeg --disable-v4l2
+                     --disable-libyuv --disable-openh264 --disable-vpx --disable-libwebrtc
+                     --disable-gsm-codec --disable-ilbc-codec --disable-g722-codec --disable-g7221-codec
+                     --disable-l16-codec --disable-opus --disable-bcg729 --disable-silk
+                     # speex 는 configure 로 끄지 않는다 — third_party/speex 가 AEC(PJMEDIA_HAS_SPEEX_AEC) 심볼을
+                     # 제공하므로 --disable-speex-codec 은 echo_common.o 링크 실패를 낳는다. 코덱 등록만
+                     # config_site(common.h PJMEDIA_HAS_SPEEX_CODEC 0)로 끈다.
+                     --with-opencore-amr=${AMR_PKG_DIR} --with-opencore-amrwbenc=${AMRWB_PKG_DIR}
+                     --enable-epoll
+   # `lib` = 라이브러리 디렉터리만(pjsip-apps 제외). dep 는 .depend 생성 — 최초·헤더 변경 시 필요
+   BUILD_COMMAND make dep
+         COMMAND make lib
+   INSTALL_COMMAND make install
+)
+endif()
+
 add_subdirectory(${PASF_DIR})
 
 INCLUDE_DIRECTORIES(${PASF_INC})

@@ -8,20 +8,29 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
 ## 정본(SoT)
 
 - **이 트리가 유일한 소스 정본이다.** pjproject 를 수정할 때는 여기서 직접 고치고 커밋한다. 변경 이력은 git.
-- 적용된 CIMS 패치의 내용과 이유는 각 수정 지점의 `CIMS` 주석이 설명한다(예: `pjmedia/src/pjmedia/stream.c`
-  의 U10 SSRC 디먹스, `pjsip/src/pjsua-lib/pjsua_pres.c` 의 `cims_conf_*` 이벤트 구독). 패치 인벤토리(AMR-WB
-  codec_setting·H.264 IDR/비트레이트·StreamInfo 가드·m=text 슬롯 스킵·무전/통화 분리 라우팅·AMR 인코더 워치독·
-  PTT 유휴 무음 제거·conference/xcap-diff 구독·U10)는 [android/docs/scripts/m1_build_pjsip.sh](../../android/docs/scripts/m1_build_pjsip.sh)
-  의 `[2-N]` 단계 제목이 목록 역할을 한다.
-- `config_site.h` 는 upstream 이 무시하는 파일이라 트리에 없다. 플랫폼별 정본은 `sdk/engine/config_site/`
-  (ue_sdk.md §3) 이며 빌드 시 `pjlib/include/pj/config_site.h` 로 복사한다.
+- 적용된 CIMS 패치의 내용과 이유는 각 수정 지점의 `CIMS` 주석이 설명한다. 인벤토리:
+
+  | 패치 | 파일 | 요지 |
+  |---|---|---|
+  | AMR-WB codec_setting NULL 크래시 | `pjmedia/src/pjmedia-codec/and_aud_mediacodec.cpp` | upstream 2.16 버그 — And-Media AMR-WB 열기 시 NULL 역참조 방지 |
+  | AMR 인코더 스톨 워치독 (`enc_fail_watchdog`) | 같은 파일 | MediaCodec 인코더 무응답 시 재기동 |
+  | H.264 IDR 주기 2초 (`KEYFRAME_INTERVAL 2`) · 발신 비트레이트 상한 500kbps + CBR (`cims_br`) | `pjmedia/src/pjmedia-codec/and_vid_mediacodec.cpp` | 영상 정합·대역 상한 |
+  | pjsua2 `StreamInfo::fromPj` NULL codec-param 가드 · sockaddr AF 가드 (`cims_print_sockaddr_safe`) | `pjsip/src/pjsua2/call.cpp` | 협상 실패/비 RTP 슬롯에서의 SIGABRT 방지 |
+  | `stream_info.c` si->param zero-init · `pjsua_txt` 비-RTP m=text 슬롯 스트림 생성 스킵 | `pjmedia/src/pjmedia/stream_info.c`, `pjsip/src/pjsua-lib/pjsua_txt.c` | MSRP(m=message/TCP) 슬롯을 RTP 스트림으로 열지 않음 |
+  | 무전/통화 분리 라우팅 (`set_track_preferred_device`, OUTPUT_ROUTE) | `pjmedia/src/pjmedia-audiodev/android_jni_dev.c` | Android 전용 — PTT 채널과 통화의 출력 장치 분리 |
+  | PTT 유휴 무음 50pps 상향 스트림 제거 (`stream->vad_enabled` 분기) | `pjmedia/src/pjmedia/stream.c` | 브리지 미연결 유휴 시 무음 RTP 송신 생략 — KA 가 NAT 유지 담당 |
+  | 이벤트 구독 (`pjsua_cims_conf_subscribe`, `cims_conf_find`) | `pjsip/src/pjsua-lib/pjsua_acc.c`, `pjsua_pres.c` | conference(RFC 4575)·xcap-diff(RFC 5875) 구독의 in-dialog 갱신(RFC 6665) |
+  | U10 동시 발언 SSRC 디먹스 (`cims_mt_rx`) | `pjmedia/src/pjmedia/stream.c`, `stream_imp_common.c` | 한 스트림의 SSRC 별 서브스트림(지터버퍼+디코더) → PCM 합산 — mcptt_ue_multitalker_media.md §5 |
+
+- `config_site.h` 는 upstream 이 무시하는 파일이라 트리에 없다. 플랫폼별 정본은 `sdk/engine/config_site/{common,android,linux,windows}.h`
+  (ue_sdk.md §3) 이며 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다.
 
 ## 빌드
 
 | 플랫폼 | 방법 |
 |---|---|
 | Linux | 루트 CMake `ExternalProject_Add(pjproject)` — `aconfigure` + `make` (ue_sdk.md §8) |
-| Android | `m1_build_pjsip.sh` — 이 트리를 `configure-android`(NDK) 로 빌드 + SWIG. 스크립트의 upstream clone·패치 적용 단계는 ue_sdk.md §10 A 단계에서 제거된다(트리가 정본이므로 재적용 대상이 없다) |
+| Android | `sdk/android/build-native.sh` — 이 트리를 `configure-android`(NDK) 로 빌드 + SWIG 후 산출물 배치. 패치 적용 단계는 없다(트리가 정본). `android/docs/scripts/m1_build_pjsip.sh` 는 위임 스텁 |
 | Windows | `pjproject-vs14.sln` (MSVC) |
 
 ## 경계

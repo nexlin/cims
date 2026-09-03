@@ -45,6 +45,10 @@
 
 ## 2. PJSIP 안드로이드 빌드 플레이북 (M1.0, Ubuntu)
 
+> **엔진 소스 정본은 `ext/pjproject`, 빌드 진입점은 `sdk/android/build-native.sh`, config_site 정본은
+> `sdk/engine/config_site/{common,android}.h`** — [ue_sdk.md](ue_sdk.md) §3. 아래 §2.4(소스)·§2.5(config_site) 는
+> 그 트리·파일의 근거 설명이며, 절차상 clone·config_site 작성 단계는 스크립트가 트리와 정본 파일을 그대로 쓰는 것으로 대체된다.
+
 ### 2.1 목표와 산출물
 
 Ubuntu 24.04(WSL2/VM/네이티브 무관)에서 `pjproject`를 `arm64-v8a`용으로 크로스컴파일하여 산출물을 `android/core`에 투입한다. **실행 절차·스크립트·실측 상태의 정본은 [android/docs/M1_pjsip_build_ubuntu.md](../../../android/docs/M1_pjsip_build_ubuntu.md)**.
@@ -95,7 +99,7 @@ git describe --tags     # 2.16 기대
 
 ### 2.5 config_site.h — 코덱 전략
 
-`pjlib/include/pj/config_site.h`를 **신규 생성**한다. 핵심 원칙: **AMR-WB/H264 같은 매크로는 Android 빌드에서 기본 1이라 "켜는" 재선언은 no-op이며, 실제 의미 있는 작업은 "끄는" 쪽**(불필요 코덱 빌드 제외)이다. 또한 우리 오버라이드는 `config_site_sample.h` **include 뒤**에 와야 sample 기본값을 덮어쓴다(순서 의존성).
+정본 파일은 `sdk/engine/config_site/common.h`(세 플랫폼 공통) + `android.h`(Android 프렐류드·And-Media 코덱·영상) 이며, 빌드가 `pjlib/include/pj/config_site.h` 에 `android.h` 를 include 하는 한 줄을 생성한다([ue_sdk.md](ue_sdk.md) §3). 아래 블록은 그 두 파일을 합친 내용이다. 핵심 원칙: **AMR-WB/H264 같은 매크로는 Android 빌드에서 기본 1이라 "켜는" 재선언은 no-op이며, 실제 의미 있는 작업은 "끄는" 쪽**(불필요 코덱 빌드 제외)이다. 또한 우리 오버라이드는 `config_site_sample.h` **include 뒤**에 와야 sample 기본값을 덮어쓴다(순서 의존성).
 
 ```c
 /* pjlib/include/pj/config_site.h  (신규 생성) */
@@ -127,9 +131,10 @@ git describe --tags     # 2.16 기대
 #define PJMEDIA_HAS_ILBC_CODEC   0
 #define PJMEDIA_HAS_G722_CODEC   0
 
-/* 5) M4 전까지 보안전송 최소화: SRTP/TLS off (UDP only) */
-#define PJMEDIA_HAS_SRTP          0
-#define PJSIP_HAS_TLS_TRANSPORT   0
+/* 5) 시그널링 TLS(sip_tls_signaling.md §7) + 미디어 SRTP SDES(media_security.md §7) — 빌드만 활성,
+      런타임은 계정 정책(프로비저닝 sip_transport / media_srtp)이 켠다. OpenSSL 은 configure-android --with-ssl */
+#define PJMEDIA_HAS_SRTP          1
+#define PJSIP_HAS_TLS_TRANSPORT   1
 
 /* 6) NAT: RTP keepalive(empty RTP, 기본 0→1) — 청취 전용(무송신) 구간에도 주기 송신해
       하향 NAT 매핑·CMP latch 유지 (ue_nat_traversal.md §7.1). 주기=PJMEDIA_STREAM_KA_INTERVAL(기본 5s) */
@@ -148,10 +153,10 @@ git describe --tags     # 2.16 기대
 > `parse_amr`(RX)·`pack_amr`(TX)가 `(amr_settings_t*)NULL->dec/enc_setting` 를 역참조해
 > **SIGSEGV(fault addr ~0x1/0x2, thread "media")로 앱이 죽는다** — 통화는 SIP 상 연결(200 OK)되나
 > 응답 즉시 크래시해 통화화면·오디오가 사라진다. 수정: 가드를 `#if PJMEDIA_HAS_AND_MEDIA_AMRNB
-> || PJMEDIA_HAS_AND_MEDIA_AMRWB` 로 확대. `m1_build_pjsip.sh` `[2-3]` 단계가 clone 후 멱등
-> 적용한다(빌드 재현성). 실기기 검증: cspsim↔단말 AMR-WB 음성 + H.264 영상 통화 크래시 없이 성립.
+> || PJMEDIA_HAS_AND_MEDIA_AMRWB` 로 확대. 패치는 엔진 소스 정본 `ext/pjproject` 에 적용돼 있다
+> (인벤토리 `ext/pjproject/README.CIMS.md`). 실기기 검증: cspsim↔단말 AMR-WB 음성 + H.264 영상 통화 크래시 없이 성립.
 
-> **⚠️ PTT 조인 크래시 방어 패치 3종 (`m1_build_pjsip.sh` [2-6]~[2-9], 멱등).** PTT 그룹콜
+> **⚠️ PTT 조인 크래시 방어 패치 3종 (`ext/pjproject` 적용 — `pjsip/src/pjsua2/call.cpp`·`pjmedia/src/pjmedia/stream_info.c`·`pjsip/src/pjsua-lib/pjsua_txt.c`).** PTT 그룹콜
 > SDP(floor `m=application` 슬롯 재사용·dynamic PT 협상)에서 pjsua 가 죽는 지점들의 방어 —
 > ①`[2-6]` pjsua2 `StreamInfo::fromPj` NULL codec-param 가드(aud/vid — upstream 주석이
 > "param can be NULL" 인정하면서 무가드 역참조) ②`[2-7]` `stream_info.c` `si->param`
@@ -162,7 +167,7 @@ git describe --tags     # 2.16 기대
 > [ptt_join_crash_and_silence.md](ptt_join_crash_and_silence.md) 참조. 스크립트는
 > `set -o pipefail` 로 `make | tail` 실패 마스킹도 방지한다.
 
-> **conference 이벤트 구독 패치 (`m1_build_pjsip.sh` [2-13], 멱등).** MCPTT 그룹콜 참가자
+> **conference 이벤트 구독 패치 (`ext/pjproject` 적용 — `pjsip/src/pjsua-lib/pjsua_pres.c`·`pjsua_acc.c`).** MCPTT 그룹콜 참가자
 > 로스터(RFC 4575)를 정식 구독으로 받기 위한 native 확장. pjsua2 는 범용 evsub 을 노출하지
 > 않지만 pjsip 자체는 이벤트 구독 프레임워크를 갖고 있으므로 그 위에 얹는다 —
 > ①`pjsua_pres.c`: `conference` 이벤트 패키지 등록(`pjsip_evsub_register_pkg` →
@@ -588,7 +593,7 @@ ep.setVideoCodecParam("H264/97", vp);
 **영상 인코딩 파라미터(발신) 정본:** 해상도 480x640(세로), 15fps, 400kbps(상한 500kbps), IDR(I-frame) 주기 2초.
 - 해상도·fps 는 위 `VidCodecParam` 로 설정.
 - **비트레이트·IDR 주기·CBR 은 And-Media 인코더 네이티브(`and_vid_mediacodec.cpp`) 설정이며 libpjsua2
-  빌드 시 반영**(`m1_build_pjsip.sh` 멱등 패치 [2-4]/[2-5]):
+  빌드 시 반영**(`ext/pjproject` `pjmedia/src/pjmedia-codec/and_vid_mediacodec.cpp` 적용):
   - IDR 주기 = `#define KEYFRAME_INTERVAL 2`(초). 인코더 `i-frame-interval` 로만 유효(디스크립터
     `keyframe_interval` 필드는 dead field).
   - 비트레이트 = `avg_bps` 를 500kbps 로 캡(PJSIP 이 협상 시 해상도 기반으로 480x640@15 → ~920kbps

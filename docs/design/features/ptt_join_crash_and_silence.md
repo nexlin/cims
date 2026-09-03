@@ -188,8 +188,8 @@ CSP floor port 유도는 항상 >0 이다 (`GroupCallService.cpp:737`
    (`PJMEDIA_TP_PROTO_HAS_FLAG(si->proto, RTP_AVP)`) — 비 RTP application 슬롯은 text 스트림 생성
    자체를 스킵 ⓑ `fromPj` 의 rem_addr/rem_rtcp print 6곳에 address-family 가드.
 
-UE 쪽 pjproject 패치는 전부 `android/docs/scripts/m1_build_pjsip.sh` §2-6~2-9 에 멱등 스크립트로
-정본화돼 있다(재빌드 시 자동 적용).
+UE 쪽 pjproject 패치는 엔진 소스 정본 `ext/pjproject`(`pjsip/src/pjsua2/call.cpp`·`pjmedia/src/pjmedia/stream_info.c`·
+`pjsip/src/pjsua-lib/pjsua_txt.c`)에 적용돼 있다 — 인벤토리 `ext/pjproject/README.CIMS.md`.
 
 ### 규격 확인 (PT 정렬 근거)
 - AMR-WB 를 98/99 로 고정하라는 규격 **없음**. PT 96–127=dynamic(RFC 3551), 코덱↔PT 는 `a=rtpmap`

@@ -218,7 +218,7 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
 
 ### 7.1 pjsip 플래그
 
-`m1_build_pjsip.sh` 의 config_site.h 는 `PJMEDIA_HAS_SRTP 1` (TLS 축과 같은 OpenSSL
+엔진 config_site 정본 `sdk/engine/config_site/common.h`([ue_sdk.md](ue_sdk.md) §3) 는 `PJMEDIA_HAS_SRTP 1` (TLS 축과 같은 OpenSSL
 android-arm64 정적 링크 — 추가 의존 없음). pjmedia 의 SDES 협상(`a=crypto` 생성/파싱,
 RTP/SAVP)은 내장 — 앱은 use-srtp 수준만 지정한다. 빌드만으로는 무영향 — 런타임은 앱
 계정 정책(§7.2)이 켤 때까지 off.

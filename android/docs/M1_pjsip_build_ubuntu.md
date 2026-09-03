@@ -57,39 +57,40 @@ ssh nex-ubuntu 'bash ~/m1_provision.sh'
 
 ---
 
-## 2. 빌드 — `scripts/m1_build_pjsip.sh` (clone → config_site.h → make → SWIG)
+## 2. 빌드 — `sdk/android/build-native.sh` (ext/pjproject → configure-android → make → SWIG → 배치)
 
-**상태: 미실행** (다음 단계). 스크립트가 하는 일:
+엔진 소스 정본은 레포의 `ext/pjproject`(CIMS 패치 적용 트리)이고 config_site 정본은 `sdk/engine/config_site/{common,android}.h`
+다 ([ue_sdk.md](../../docs/design/features/ue_sdk.md) §3). 그래서 빌드 머신에는 **cims 레포 체크아웃**이 있어야 하며
+스크립트 한 파일만 복사해 쓰지 않는다. 스크립트가 하는 일:
 
-1. `git clone --depth 1 --branch 2.16 pjproject` + `and_aud_mediacodec.cpp` 실존 확인(경로 C 전제)
-2. `pjlib/include/pj/config_site.h` 생성 — **설계서 §2.5 경로 C 확정본 그대로**(AND_MEDIA_AMRWB=1 / AMRNB=0 / OPENCORE_AMR{WB,NB}=0 / H264=1 / VP8·9=0 / G711 안전망 / SRTP·TLS=0). 생성 후 sha256 출력(빌드 메타 기록용)
-3. `APP_PLATFORM=28 TARGET_ABI=arm64-v8a ./configure-android --use-ndk-cflags` → `make dep && make -j$(nproc)`
-4. `pjsip-apps/src/swig` 에서 `make`(직렬) → `libpjsua2.so` + `org/pjsip/pjsua2/*.java`
-5. 산출물 검증: arm64 ABI 확인 + **`libc++_shared.so` 동봉**(없으면 NDK sysroot 에서 자동 복사 — 미동봉 시 앱 즉시 `UnsatisfiedLinkError`, 설계서 위험 #2)
+1. `pjlib/include/pj/config_site.h` 에 `#include "<repo>/sdk/engine/config_site/android.h"` 한 줄 생성(패치 적용 단계 없음)
+2. `APP_PLATFORM=28 TARGET_ABI=arm64-v8a ./configure-android --use-ndk-cflags --with-ssl=$OPENSSL_PREFIX` → `make dep && make -j$(nproc)`
+3. `pjsip-apps/src/swig` 에서 `libpjsua2.so` 강제 재링크 후 `make` → `libpjsua2.so` + `org/pjsip/pjsua2/*.java`
+4. 산출물 검증: arm64 ABI 확인 + **`libc++_shared.so` 동봉**(없으면 NDK sysroot 에서 자동 복사 — 미동봉 시 앱 즉시 `UnsatisfiedLinkError`, 설계서 위험 #2)
+5. `android/core/src/pjsua2/{jniLibs/arm64-v8a,java}` 로 배치(`--no-install` 로 생략 가능) + `git status ext/pjproject` 로 트리 청결 확인
 
 실행:
 ```bash
-scp android/docs/scripts/m1_build_pjsip.sh nex-ubuntu:~/
-ssh nex-ubuntu 'bash ~/m1_build_pjsip.sh'   # 8코어 기준 수 분~십수 분
+ssh nex-ubuntu 'cd ~/cims && git pull && sdk/android/build-native.sh'   # 8코어 기준 수 분~십수 분
 ```
+
+`android/docs/scripts/m1_build_pjsip.sh` 는 위 스크립트로 위임하는 스텁이다.
 
 ---
 
 ## 3. 산출물 core 투입 (설계서 §2.7)
 
-SWIG 생성물(수백 파일)은 손코드와 섞지 않게 **별도 소스셋** `core/src/pjsua2/` 에 격리:
+SWIG 생성물(수백 파일)은 손코드와 섞지 않게 **별도 소스셋** `core/src/pjsua2/` 에 격리한다. 배치는 `build-native.sh` 5단계가
+빌드 머신의 체크아웃 안에서 수행하므로 그 체크아웃에서 커밋하거나, 다른 호스트로 옮길 때는 두 디렉터리를 그대로 복사한다:
 
 ```bash
-# Windows 호스트에서 (경로는 빌드 로그의 JNIDIR/JAVADIR 출력 참조)
-scp nex-ubuntu:'~/pjproject/pjsip-apps/src/swig/java/android/pjsua2/src/main/jniLibs/arm64-v8a/*.so' \
-    android/core/src/pjsua2/jniLibs/arm64-v8a/
-scp nex-ubuntu:'~/pjproject/pjsip-apps/src/swig/java/android/pjsua2/src/main/java/org/pjsip/pjsua2/*.java' \
-    android/core/src/pjsua2/java/org/pjsip/pjsua2/
+scp -r nex-ubuntu:'~/cims/android/core/src/pjsua2/jniLibs/arm64-v8a/*.so' android/core/src/pjsua2/jniLibs/arm64-v8a/
+scp -r nex-ubuntu:'~/cims/android/core/src/pjsua2/java/org/pjsip/pjsua2/*.java' android/core/src/pjsua2/java/org/pjsip/pjsua2/
 ```
 
 `core/build.gradle.kts`: `ndk.abiFilters += "arm64-v8a"`, `sourceSets`(java.srcDir/jniLibs.srcDir), `packaging.jniLibs.useLegacyPackaging = false`(16KB page 정렬) — 설계서 §2.7 코드 그대로. AGP 9.2.1 DSL 유효성은 Gradle sync 로 확인(verify-on-machine).
 
-빌드 메타(README 또는 커밋 메시지에 고정 기록): pjproject 태그(2.16) / NDK(`28.2.13676358`) / config_site.h sha256 / SWIG(4.2.0).
+빌드 메타(커밋 메시지에 고정 기록): 빌드한 cims 커밋(= `ext/pjproject`·`sdk/engine/config_site` 상태) / NDK(`28.2.13676358`) / SWIG(4.2.0).
 
 ---
 

@@ -295,7 +295,7 @@ TLS 로 등록·통화한다. 구성 요소는 다음과 같다.
 | 항목 | 내용 |
 |---|---|
 | OpenSSL | android-arm64 정적 빌드(`android/docs/scripts/m1_build_openssl.sh` → `$HOME/opt/openssl-android-arm64`) |
-| pjproject | `config_site.h` 의 `PJSIP_HAS_TLS_TRANSPORT 1` + `configure-android --with-ssl=<prefix>` (`m1_build_pjsip.sh`). SWIG 산출물은 불변 — `.so` 만 교체된다 |
+| pjproject | `config_site.h` 의 `PJSIP_HAS_TLS_TRANSPORT 1` + `configure-android --with-ssl=<prefix>` (`sdk/android/build-native.sh`, config_site 정본 `sdk/engine/config_site/common.h`). SWIG 산출물은 불변 — `.so` 만 교체된다 |
 | transport 생성 | `PjLib.kt` 가 UDP·TCP 에 이어 TLS transport 를 만든다. 실패해도 평문 transport 로 계속한다(구 `.so` 호환) |
 | 서버 인증서 검증 | `TlsConfig.verifyServer = true` + `caBuf = CimsTrustStore.CA_BUNDLE`(APK 동봉 사설 CA). 검사 자체는 플래그와 무관하게 항상 수행돼 `verify_status` 에 기록되고, 이 플래그가 **실패 시 연결을 끊을지**를 결정한다(`sip_transport_tls.c` 의 `verify_status && verify_server`). 실패 시 transport shutdown → 등록 503 `PJSIP_TLS_ECERTVERIF`. ⚠ `caListFile`/`certFile`/`privKeyFile` 이 설정되면 `caBuf` 가 무시된다 |
 | 계정 설정 | 프로비저닝의 가용 목록에서 고른 transport·포트를 registrar·proxy URI 에 반영(`;transport=tls`). 선택 모델은 [§7.1](#71-선택-모델--단말이-고르고-서버는-가용-목록을-준다) |
@@ -533,7 +533,7 @@ transport 별 도달 모델([§2](#2-transport-별-도달-모델--latch-의-의�
 | `ext/psip/SipStack/TlsFunction.cpp` | SSL ctx 생성·accept·connect. 인증서는 체인 파일로 적재(§8.2), 무중단 교체(`SSLServerCtxReload`)와 참조 획득(`SSLServerCtxAcquire`), 클라이언트 인증서 요구는 CA 설정 시에만 |
 | `ext/psip/SipStack/TcpSocketMap.cpp` | 연결 재사용 맵 (TCP·TLS 공용) |
 | `ext/psip/SipStack/SipStackComm.hpp` | 송신 transport 분기, 수신 Via 각인 |
-| `android/docs/scripts/m1_build_pjsip.sh` | UE pjproject 빌드 (OpenSSL 3.0.15 정적 + `PJSIP_HAS_TLS_TRANSPORT`) |
+| `sdk/android/build-native.sh` | UE 엔진(`ext/pjproject`) Android 빌드 (OpenSSL 3.0.15 정적 + `PJSIP_HAS_TLS_TRANSPORT` — `sdk/engine/config_site/common.h`) |
 | `android/core/.../sip/PjLib.kt` | UE transport 생성 + 서버 인증서 검증 설정 |
 | `android/core/.../sip/CimsTrustStore.kt` | UE 신뢰 앵커(APK 동봉 사설 CA PEM). CA 교체 시 여기에 추가 |
 | `csc/src/services/mcptt.py` | 프로비저닝 가용 transport 목록 제공(§7.1) |
