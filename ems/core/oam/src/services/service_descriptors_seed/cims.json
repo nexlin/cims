@@ -528,6 +528,16 @@
               "label": "평균 접속지연",
               "path": "totals.volte.avg_pdd_ms",
               "unit": "ms"
+            },
+            {
+              "label": "성공",
+              "path": "totals.volte.sessions",
+              "unit": "건"
+            },
+            {
+              "label": "NER",
+              "path": "totals.volte.ner",
+              "unit": "%"
             }
           ]
         },
@@ -591,6 +601,13 @@
               "unit": "%"
             },
             {
+              "key": "ner",
+              "label": "NER",
+              "path": "volte.ner",
+              "totalPath": "totals.volte.ner",
+              "unit": "%"
+            },
+            {
               "key": "talk",
               "label": "소통률",
               "path": "volte.talk_rate",
@@ -603,8 +620,110 @@
               "path": "volte.completion_rate",
               "totalPath": "totals.volte.completion_rate",
               "unit": "%"
+            },
+            {
+              "key": "drop",
+              "label": "드롭률",
+              "path": "volte.drop_rate",
+              "totalPath": "totals.volte.drop_rate",
+              "unit": "%"
+            },
+            {
+              "key": "r_busy",
+              "label": "통화중",
+              "path": "volte.reasons.busy",
+              "totalPath": "totals.volte.reasons.busy",
+              "unit": "건"
+            },
+            {
+              "key": "r_error",
+              "label": "오류",
+              "path": "volte.reasons.error",
+              "totalPath": "totals.volte.reasons.error",
+              "unit": "건"
+            },
+            {
+              "key": "r_timeout",
+              "label": "시간초과",
+              "path": "volte.reasons.timeout",
+              "totalPath": "totals.volte.reasons.timeout",
+              "unit": "건"
+            },
+            {
+              "key": "r_incomplete",
+              "label": "비정상종료",
+              "path": "volte.reasons.incomplete",
+              "totalPath": "totals.volte.reasons.incomplete",
+              "unit": "건"
             }
+          ],
+          "notes": [
+            "성공률 = 성립 / 시도 — 세션이 성립한 호(응답 수신)의 비율",
+            "소통률 = 소통 / 시도 — 실제 통화가 오간 호(통화시간 > 0)의 비율",
+            "NER = (성립 + 통화중 + 무응답 + 거절 + 발신포기) / 시도 — 상대 사정을 분자에 넣어 망 책임만 본다 (ITU-T E.425)",
+            "완료율 = 정상종료 / 성립 — 성립한 호 중 정상 종료(BYE)한 비율. 분모가 시도가 아니다",
+            "시도에서 빼는 것은 없다 — 재호출·포기·무응답·거절 전부 시도로 센다",
+            "성공률과 NER 의 차이 = 상대 사정으로 안 붙은 비율. 둘 다 낮으면 망·시스템 문제다",
+            "드롭률 = 100% − 완료율 — 붙은 뒤 BYE 없이 끊긴 호의 비율"
           ]
+        }
+      }
+    },
+    {
+      "id": "cims.svc.volte.errors",
+      "label": "VoLTE 실패 응답코드",
+      "shapes": [
+        "matrix",
+        "distribution"
+      ],
+      "endpoint": "/stats/calls?svc=volte",
+      "query": [
+        "granularity",
+        "from",
+        "to"
+      ],
+      "map": {
+        "matrix": {
+          "from": "buckets",
+          "label": [
+            "bucket",
+            "label",
+            "hour",
+            "date"
+          ],
+          "cells": [
+            "volte.statuses"
+          ],
+          "limit": 12,
+          "unit": "건",
+          "cellLabels": {
+            "400": "400 잘못된 요청",
+            "403": "403 금지",
+            "404": "404 없는 번호",
+            "408": "408 요청 시간초과",
+            "480": "480 일시 불가",
+            "486": "486 통화중",
+            "487": "487 요청 취소",
+            "488": "488 코덱 불일치",
+            "500": "500 서버 내부 오류",
+            "502": "502 게이트웨이 오류",
+            "503": "503 서비스 불가",
+            "504": "504 게이트웨이 시간초과",
+            "600": "600 전부 통화중",
+            "603": "603 거절",
+            "604": "604 없는 사용자",
+            "606": "606 수락 불가"
+          },
+          "notes": [
+            "종료 시점의 SIP 응답코드별 건수 — `end_reason` 의 `error` 한 칸으로 뭉개진 실패를 코드별로 가른다",
+            "정상 종료(200)는 담지 않는다 — 그건 정상종료 열이 이미 센다. 여기 있는 값은 전부 실패다",
+            "열은 전 구간 합계 내림차순이고, 12개를 넘는 꼬리는 `기타` 로 접는다",
+            "CSP 가 응답코드를 기록하기 시작한 시점(csp 0.2.114) 이후의 호만 채워진다 — 그 전 호는 빈칸이다"
+          ]
+        },
+        "distribution": {
+          "fromObject": "totals.volte.statuses",
+          "totalPath": "totals.volte.attempts"
         }
       }
     },
@@ -714,6 +833,11 @@
               "totalPath": "totals.ptt.join_rate",
               "unit": "%"
             }
+          ],
+          "notes": [
+            "소통률 = 발언있음 / 세션 — 발언(floor)이 한 번이라도 있었던 세션의 비율",
+            "참여율 = 참여 / 초대 — 초대한 멤버 중 실제 참여한 비율. 성공률과 다른 정보다",
+            "성공률·완료율은 내지 않는다 — 실패한 그룹통화 시도가 원천에 기록되지 않아 분모가 없다"
           ]
         }
       }

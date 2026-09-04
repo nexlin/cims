@@ -89,6 +89,7 @@ function CallKpis({ cell, source, kind }: {
         {kind === 'volte' ? (
           <>
             <KpiCard label="호 시도" value={cell.attempts} unit="건" />
+            <KpiCard label="성공" value={cell.sessions} unit="건" />
             <KpiCard label="성공률" value={cell.success_rate} unit="%"
                      sub={`성립 ${cell.sessions} / 시도 ${cell.attempts}`} />
             <KpiCard label="소통률" value={cell.talk_rate} unit="%"

@@ -43,6 +43,10 @@ interface MatrixMap {
    *             (없으면 행들의 합).
    */
   columns?: { key: string; label: string; path: string; totalPath?: string; unit?: string }[]
+  /** 표 아래 각주 — 비율 열은 이름만으로 분자·분모를 알 수 없어 소스가 계산식을 함께 준다. */
+  notes?: string[]
+  /** 동적 열의 표시 이름 — 열 키가 코드(488·503)일 때 뜻을 붙인다. 없는 키는 키를 그대로 쓴다. */
+  cellLabels?: Record<string, string>
 }
 
 export interface DataSourceSpec {
@@ -154,7 +158,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
             ? (Number(getPath(raw, sp.totalPath)) || 0)
             : rows.reduce((a, r) => a + (r.cells[sp.key] ?? 0), 0),
         }))
-        return { unit: c.unit, columns, rows, rowTotal: false, grandTotal: 0 }
+        return { unit: c.unit, columns, rows, rowTotal: false, grandTotal: 0, notes: c.notes }
       }
     } else {
     ds.toMatrix = (raw): MatrixData => {
@@ -183,7 +187,9 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
         keys = keys.slice(0, lim)
       }
       const ETC = '기타'
-      const columns: MatrixData['columns'] = keys.map(k => ({ key: k, label: k, total: totals[k] }))
+      const columns: MatrixData['columns'] = keys.map(k => ({
+        key: k, label: c.cellLabels?.[k] ?? k, total: totals[k],
+      }))
       if (folded.length) {
         columns.push({ key: ETC, label: `${ETC}(${folded.length})`,
                        total: folded.reduce((a, k) => a + totals[k], 0) })
@@ -197,7 +203,7 @@ export function buildDataSource(spec: DataSourceSpec): DataSource {
       })
       return {
         unit: c.unit, columns, rows, rowTotal: true,
-        grandTotal: rows.reduce((a, r) => a + r.total, 0),
+        grandTotal: rows.reduce((a, r) => a + r.total, 0), notes: c.notes,
       }
     }
     }

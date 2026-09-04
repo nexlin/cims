@@ -350,6 +350,13 @@ export function MatrixTable({ data }: { data: MatrixData }) {
           </tr>
         </tfoot>
       </table>
+      {/* 각주 — 비율 열은 이름만으로 분자·분모를 알 수 없다. 표를 보는 자리에서 바로 읽히게
+          표 바로 아래 둔다(별도 도움말로 빼면 아무도 찾아가지 않는다). */}
+      {data.notes?.length ? (
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          {data.notes.map(n => <div key={n}>{n}</div>)}
+        </div>
+      ) : null}
     </div>
   )
 }

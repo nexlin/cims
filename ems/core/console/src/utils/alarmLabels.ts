@@ -43,16 +43,51 @@ export function alarmTypeLabel(t?: string): string {
   return (t && ALARM_TYPE_LABEL[t]) || t || '-'
 }
 
-// ── 이벤트 (wire 정의 슬러그 → 라벨) ─────────────────────────────────────────
+// ── 이벤트 (wire 슬러그 → 라벨) ──────────────────────────────────────────────
+//   **키는 `alarm_catalog.csv` 의 감지 행 `type`** 이다 — 모듈이 실제로 실어 보내는 값.
+//   정의 행의 type(lifecycle·config_changed·ha_transition 같은 요구 분류)은 레코드에 실리지
+//   않으므로 키가 아니다. 두 어휘를 섞으면 화면이 오지 않는 값에 라벨을 달고, 오는 값은
+//   놓친다.
+//   라벨이 없으면 `eventTypeLabel` 이 **슬러그를 그대로 반환**한다 — 에러 없이 영어가 뜨므로
+//   구현 전인 감지 슬러그도 미리 채워 둔다(CSV 에 '후보'로 적힌 것 포함).
 export const EVENT_TYPE_LABEL: Record<string, string> = {
+  // 상태 변화 (E-STC-*)
   process_started: '프로세스 기동',
   process_stopping: '프로세스 종료',
   process_died: '프로세스 소멸',
+  module_restarted: '모듈 자동 재기동',
   config_reloaded: '설정 재적재',
-  catalog_registered: '카탈로그 등록',
+  ha_role_changed: 'HA 역할 전이',
+  ha_switchover: 'HA 절체',
+  csp_control_peer_changed: '제어 피어 변경',
+  db_fallback_entered: 'DB 폴백 진입',
+  db_fallback_exited: 'DB 폴백 해제',
+  node_offline: '노드 관측 두절',
+  // node_online 은 CSV 에서 node_offline 행이 함께 적고 있는 짝 슬러그(관측 두절/복귀 전이).
+  node_online: '노드 관측 복귀',
+  // 감사 (E-AUD-*)
+  service_control: '서비스 제어',
+  auth_audit: '인증 감사',
+  node_maintenance: '운영 개입 전이',
+  config_change: '설정 변경',
+  user_config_changed: '가입자 설정 변경',
+  group_config_changed: '그룹 설정 변경',
+  listener_added: '접속점 추가',
+  listener_removed: '접속점 제거',
   session_reclaimed: '세션 회수',
+  cmp_session_reclaimed: 'CMP 세션 회수',
+  cmp_endpoint_added: 'CMP 노드 추가',
+  csc_resync_requested: '가입자 전량 재동기',
+  csp_resync_sent: '재동기 요청 발신',
+  deploy_job: '배포 job 결과',
+  deployment_failed: '배포 실패',
+  // 구 슬러그 하위호환 (알람 쪽과 같은 방식 — 옛 레코드를 읽을 때 필요)
+  //   control_peer_changed → csp_control_peer_changed 로 개정됨.
+  //   catalog_registered 는 CSV 에 감지 행이 없다(발화 주체 없음) — 지우면 옛 레코드가
+  //   영어로 뜨므로 남긴다.
   control_peer_changed: '제어 피어 변경',
   call_monitored: '통화 감청(청취)',
+  catalog_registered: '카탈로그 등록',
 }
 
 export function eventTypeLabel(t?: string): string {

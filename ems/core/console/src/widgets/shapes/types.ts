@@ -31,6 +31,8 @@ export interface MatrixData {
   /** 행 합계 열을 낼지. 열이 **같은 축**일 때만 의미가 있다(메서드별 건수 O, 시도+성립+비율 X). */
   rowTotal: boolean
   grandTotal: number
+  /** 표 아래 각주 — 열 이름만으로는 알 수 없는 계산식(성공률 = …)을 소스가 함께 준다. */
+  notes?: string[]
 }
 // 계열 시계열 — series 는 **선언 순서**가 색 순서(--chart-1..5)이자 쌓는 순서(아래→위)다.
 // includes = 이 계열이 **품고 있는** 다른 계열들(예: '전체'는 volte/ptt 를 포함). 쌓기는 "부분의

@@ -312,6 +312,13 @@ probableCause(rule 속성), 영향은 effect 로 간다. 새 감지 조건은 �
   4. 자기보고 모듈(CSP/CMP/CMDP/CSC)의 `구분=알람` 이고 type 이 같은 감지 행들은
      (instance, 대상, component) 조합이 서로 다르다 — 유일 예외는 CMDP
      `storage_failure @ fd_store` 2행(§3.2). AGENT/OAM 행은 이 불변식 밖(§3.2·§7).
+- **콘솔 표시 라벨의 키는 감지 행의 `type`** 이다 (`console/src/utils/alarmLabels.ts` —
+  알람은 `ALARM_TYPE_LABEL`, 이벤트는 `EVENT_TYPE_LABEL`). 정의 행의 `type`(`lifecycle`·
+  `config_changed`·`ha_transition` 같은 요구 분류)은 **레코드에 실리지 않으므로 키가 아니다.**
+  두 어휘를 섞으면 오지 않는 값에 라벨을 달고 오는 값은 놓친다. 라벨이 없으면 화면은
+  **에러 없이 슬러그(영어)를 그대로 표시**하므로, `후보` 감지 행도 라벨을 미리 채워 둔다 —
+  구현되는 순간 한글로 뜨게. 이름을 개정하면 옛 슬러그를 하위호환 키로 남긴다(옛 레코드
+  조회용).
 - 구현 상태(`현재 구현 여부`)는 코드 정본과 함께 갱신한다 — 후보가 구현되면 `구현` 으로
   바꾸고 `severity` 를 확정값으로 채우며(정의 행 severity 정합 — §3 severity 규약),
   fm_catalog/rule 에 정의 코드를 탑재한다. 카탈로그 선언(`fm_catalog.json`)과 CSV 의
