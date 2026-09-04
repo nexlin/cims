@@ -349,11 +349,12 @@ if __name__ == '__main__':
         # 임계는 CSP 구현·agent 회전 임계와 정렬(warn 30d / crit 7d, 규칙이 보유).
         CERT_EXPIRY_SWEEP_INTERVAL = int(config.get('CertExpirySweepSec', 3600))
         STATS_ROLLUP_INTERVAL = max(10, int(_rollup_cfg.get('Interval', 60)))
-        # 계층별 보존 — 계층을 나눈 이유가 보존기간이다(1분은 짧게, 일은 길게).
+        # 계층별 보존 — 계층을 나눈 이유가 보존기간이다. 계층마다 파일이 따로라 서로 묶이지
+        # 않는다(1분이 지워져도 1시간은 남는다). 월·년은 영구라 스위퍼 대상이 아니다.
         _sr = (config.get('ServiceLogging') or {}).get('StatsRetainDays') or {}
         STATS_RETAIN = {'1m': int(_sr.get('1m', 14) or 0),
-                        '1h': int(_sr.get('1h', 400) or 0),
-                        '1d': int(_sr.get('1d', 0) or 0)}
+                        '1h': int(_sr.get('1h', 90) or 0),
+                        '1d': int(_sr.get('1d', 730) or 0)}
 
         def _sweep_own_cert_expiry():
             try:

@@ -44,14 +44,28 @@ _STATE_NAME = '.rollup_state.json'
 #
 #  계층을 나누는 이유는 보존기간이다. 1분을 길게 보관하면(90일 = 12만 버킷) 월 단위 조회에
 #  쓰지도 않는 정밀도를 위해 용량을 낸다. 같은 90일이 1d 계층에서는 90 레코드다.
-UNITS = ('1m', '1h', '1d')
+UNITS = ('1m', '1h', '1d', '1M')
+
+# 월은 **연도별 파일**이다 (`stats/1M/YYYY.jsonl` = 그 해 12줄 × 서비스 수).
+# 날짜별 파일로 둘 수 없다 — 월 버킷은 여러 날에 걸쳐 있어 어느 날짜 파일에도 속하지 않는다.
+#
+# 월을 **저장**하는 이유는 일 계층의 보존기간이 월·년 조회 지평을 정하지 않게 하기 위함이다.
+# 합산으로만 두면 일 계층을 2년으로 자르는 순간 2년 넘은 월 통계를 만들 재료가 사라진다.
+# 자기 파일을 가지면 1시간 계층이 1분 계층과 무관하게 남는 것과 같은 이유로 남는다.
+#
+# **년은 저장하지 않는다 — 월 12개를 합산한다.** 년을 저장해 봤더니 그 해의 월이 아직 다
+# 만들어지지 않은 상태에서 쓰인 행이 그대로 정답 행세를 했다(실측: 년 2,705 / 실제 5,216).
+# 저장된 거친 행은 완전한지 알 방법이 없어 빈 곳을 신고할 수도 없다. 월 단위로 읽으면 없는
+# 달이 날짜 경로로 내려가 `missing_days` 에 잡힌다 — 조용히 작은 값이 나오지 않는다.
+_PERIOD_UNITS = ('1M',)
 
 # 요청 단위 → 읽을 계층. 그 단위를 만들 수 있는 **가장 거친** 계층을 고른다.
 _GRAN_UNIT = {'1m': '1m', '5m': '1m', '10m': '1m',
               '1h': '1h',
-              '1d': '1d', '1w': '1d', '1M': '1d', '1y': '1d'}
+              '1d': '1d', '1w': '1d',
+              '1M': '1M', '1y': '1M'}
 
-# 선호 계층이 없는 날은 더 잔 계층으로 내려간다(잔 것은 항상 접을 수 있다).
+# 선호 계층이 없으면 더 잔 계층으로 내려간다(잔 것은 항상 접을 수 있다).
 _FALLBACK = {'1d': ('1d', '1h', '1m'), '1h': ('1h', '1m'), '1m': ('1m',)}
 
 
@@ -111,11 +125,132 @@ def _hour_of(bucket: str) -> str:
     return bucket[:13]
 
 
+def _month_of(bucket: str) -> str:
+    return bucket[:7]
+
+
 def _day_path(day: str, unit: str = '1m') -> str:
     """day='YYYY-MM-DD' → {stats}/{unit}/YYYY/MM/DD.jsonl"""
     if not stats_root() or len(day) < 10:
         return ''
     return os.path.join(_service_log_dir, _subdir(unit), day[0:4], day[5:7], day[8:10] + '.jsonl')
+
+
+# ── 월·년 계층 — 연도별 파일 ───────────────────────────────────
+
+def _period_path(unit: str, year: str) -> str:
+    """unit='1M'|'1y', year='YYYY' → {stats}/{unit}/YYYY.jsonl"""
+    if not stats_root() or unit not in _PERIOD_UNITS or len(year) < 4:
+        return ''
+    return os.path.join(_service_log_dir, _subdir(unit), year[0:4] + '.jsonl')
+
+
+def period_path_at(root: str, unit: str, year: str) -> str:
+    """root 를 명시한 연도 파일 경로 — 조회 경로가 모듈 전역에 의존하지 않게(day_path_at 와 대칭)."""
+    if not root or unit not in _PERIOD_UNITS or len(year) < 4:
+        return ''
+    return os.path.join(root, _subdir(unit), year[0:4] + '.jsonl')
+
+
+def read_period_at(root: str, year: str, unit: str) -> list:
+    p = period_path_at(root, unit, year)
+    if not p or not os.path.isfile(p):
+        return []
+    out = []
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    return out
+
+
+def read_period(year: str, unit: str) -> list:
+    """그 해의 월(또는 년) 레코드. 파일이 없으면 빈 목록."""
+    p = _period_path(unit, year)
+    if not p or not os.path.isfile(p):
+        return []
+    out = []
+    try:
+        with open(p, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    return out
+
+
+def _write_period(year: str, rows: list, unit: str) -> bool:
+    """연도 파일 원자적 교체. 빈 결과면 파일을 지운다(근거 없는 계층을 남기지 않는다)."""
+    p = _period_path(unit, year)
+    if not p:
+        return False
+    if not rows:
+        if os.path.isfile(p):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        return True
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix='.tmp.', dir=os.path.dirname(p))
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            for r in sorted(rows, key=lambda x: (x.get('bucket', ''), x.get('svc', ''))):
+                f.write(json.dumps(r, ensure_ascii=False) + '\n')
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, p)
+        return True
+    except OSError as e:
+        logger.log_error(f"[stats-rollup] {year} {unit} 기록 실패: {e}")
+        return False
+
+
+def _days_of_month(month: str) -> list:
+    """month='YYYY-MM' → 그 달의 'YYYY-MM-DD' 목록."""
+    y, m = int(month[0:4]), int(month[5:7])
+    nxt = datetime(y + (m == 12), (m % 12) + 1, 1)
+    cur = datetime(y, m, 1)
+    out = []
+    while cur < nxt:
+        out.append(cur.strftime('%Y-%m-%d'))
+        cur += timedelta(days=1)
+    return out
+
+
+def rebuild_periods(day: str) -> dict:
+    """그 날이 속한 **달**의 버킷을 그 달의 1일 계층에서 다시 접는다. 반환 {'1M': 레코드 수}.
+
+    되짚기로 과거 날이 바뀌어도 그 달만 다시 접으면 된다. 년은 저장하지 않는다 — 조회 시
+    월 12개를 합산한다.
+
+    **그 달의 1일 계층이 하나도 없으면 기존 월 행을 그대로 둔다.** 일 계층은 보존기간이 있어
+    언젠가 지워지는데, 그때 다시 접으면 근거가 없다는 이유로 영구여야 할 월 행이 사라진다.
+    """
+    month, year = day[:7], day[:4]
+    base = []
+    for d in _days_of_month(month):
+        base.extend(read_day(d, '1d'))
+    if not base:
+        return {'1M': 0}
+    months = [r for r in read_period(year, '1M') if _month_of(r.get('bucket', '')) != month]
+    months.extend(fold_records(base, '1M'))
+    _write_period(year, months, '1M')
+    return {'1M': len(months)}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -130,6 +265,10 @@ def _empty(bucket: str, svc: str) -> dict:
         'call': {
             'attempts': 0, 'sessions': 0, 'talked': 0, 'completed': 0,
             'reasons': {},
+            # 실패 응답코드 축 — `end_reason` 의 `error` 한 칸으로 뭉개진 실패를 코드별로
+            # 가른다(488 코덱 불일치 / 503 서비스 불가 …). **정상 종료(200)는 담지 않는다** —
+            # 그건 `completed` 가 이미 세고, 넣으면 실패 분해를 읽을 때 200 이 전부를 가린다.
+            'statuses': {},
             'duration_sum_sec': 0,
             'pdd_sum_ms': 0, 'pdd_n': 0,
             'legs_invited': 0, 'legs_joined': 0,
@@ -259,6 +398,9 @@ def _fold_volte(rec: dict, agg: dict) -> None:
         _bump(c, 'completed')
     if state == 'ended' and reason:
         _bump(c['reasons'], reason)
+    st = int(rec.get('end_status', 0) or 0)
+    if state == 'ended' and st and st != 200:
+        _bump(c['statuses'], str(st))
     # 1:1 통화의 leg 은 발신 1 + 착신 1. 참여율 분모는 착신 leg 이다(§1.2).
     _bump(c, 'legs_invited')
     if answered:
@@ -529,6 +671,8 @@ def fold_records(rows: list, unit: str) -> list:
             c[k] = c.get(k, 0) + int(src.get(k, 0) or 0)
         for k, v in (src.get('reasons') or {}).items():
             c['reasons'][k] = c['reasons'].get(k, 0) + int(v or 0)
+        for k, v in (src.get('statuses') or {}).items():
+            c['statuses'][k] = c['statuses'].get(k, 0) + int(v or 0)
         for gid, gv in (src.get('by_group') or {}).items():
             g = c['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
             for k in ('sessions', 'talked'):
@@ -716,8 +860,11 @@ def run_once() -> dict:
                                  fresh_days={_day_of(m) for m in pending})
         # 1m 이 바뀐 날의 파생 계층을 다시 접는다 — 조회가 계층을 골라 읽으므로
         # 여기서 미루면 상위 단위 조회가 옛 값을 본다.
+        # 월·년은 달 단위로 한 번만 접는다 — 같은 달의 날이 여러 개 바뀌어도 결과가 같다.
         for _d in sorted({_day_of(m) for m in targets}):
             rebuild_derived(_d)
+        for _mo in sorted({_day_of(m)[:7] for m in targets}):
+            rebuild_periods(_mo + '-01')
 
         # 버킷의 `open` 은 그 분에 시작해 아직 안 끝난 호의 수다 — 되짚기의 진행 상황이
         # 화면에 그대로 보이게 하려는 것이라 집계 시점 값을 그대로 둔다.
@@ -758,14 +905,17 @@ def rebuild_range(from_day: str, to_day: str) -> int:
             records = build_minutes(_service_log_dir, minutes, _config)
             merge_days(records, minutes, fresh_days={day})
             rebuild_derived(day)
+            rebuild_periods(day)
             total += len(records)
             logger.log_info(f"[stats-rollup] rebuild {day}: 버킷 {len(records)}건")
             cur += timedelta(days=1)
     return total
 
 
-# 1시간 계층 보존 하한 — 전년 동월 비교가 깨지지 않게(알람 스트림 90일 클램프와 같은 방식).
-_RETAIN_MIN = {'1h': 365}
+# 계층별 보존 하한 — 현재 없다. 1시간 계층에 365일 하한을 두었던 근거(전년 동월 비교)는
+# 월 조회가 1일 계층에서 나오므로 성립하지 않는다. 하한이 남아 있으면 운영자가 90일을 넣어도
+# 조용히 365 로 올라가 설정이 먹지 않는다.
+_RETAIN_MIN: dict = {}
 
 
 def purge_old(retain: dict) -> dict:
@@ -779,6 +929,10 @@ def purge_old(retain: dict) -> dict:
     from services import daily_jsonl
     out = {}
     for unit in UNITS:
+        # 월·년은 영구다 — 지우면 그 구간을 되살릴 재료(일 계층)가 이미 없을 수 있고,
+        # 연도 파일이라 날짜 기준 스위퍼로는 다루지도 못한다.
+        if unit in _PERIOD_UNITS:
+            continue
         days = int((retain or {}).get(unit, 0) or 0)
         lo = _RETAIN_MIN.get(unit)
         if days > 0 and lo and days < lo:
@@ -799,38 +953,14 @@ def purge_old(retain: dict) -> dict:
 _SCAN_DAY_BUDGET = 14
 
 
-def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
-                      budget: int = None, gran: str = '1m') -> tuple:
-    """구간 레코드 + 커버리지 → (rows, coverage).
+def _read_days(root: str, days: list, lo: str, hi: str, chain: tuple,
+               config: dict, budget: int) -> tuple:
+    """날짜별로 계층을 골라 읽는다 → (rows, by_unit, scanned_days, omitted_days).
 
-    **날마다 계층을 고른다.** 요청 단위가 감당되는 가장 거친 계층(`unit_for`)을 먼저 보고,
-    그 날에 없으면 더 잔 계층으로 내려간다(잔 것은 항상 접을 수 있다). 어느 계층에도
-    없으면 원본에서 즉석 집계한다.
-
-    이렇게 나누는 이유는 보존기간이다 — 1분은 짧게(14일), 일 계층은 무제한으로 두면
-    월 단위 조회가 1분 보존에 묶이지 않는다. 계층이 하나였을 때는 1분의 보존기간이
-    전체 조회 지평을 결정해, 두 달 조회가 조용히 2주로 잘렸다(실측).
-
-    즉석 집계 결과는 **적지 않는다** — 보존기간이 지나 지운 날을 되살리면 purge 가
-    무의미해진다(merge_days 도 같은 이유로 그 날을 거부한다).
+    요청 단위가 감당되는 가장 거친 계층부터 보고, 그 날에 없으면 더 잔 계층으로 내려간다
+    (잔 것은 항상 접을 수 있다). 어느 계층에도 없으면 원본에서 즉석 집계한다.
     """
-    empty_cov = {'days': 0, 'unit': unit_for(gran), 'by_unit': {},
-                 'rollup': 0, 'scanned': 0, 'missing': 0, 'missing_days': []}
-    a, b = _parse(from_dt), _parse(to_dt)
-    if a is None or b is None:
-        return [], empty_cov
-    budget = _SCAN_DAY_BUDGET if budget is None else budget
-    lo, hi = _minute(from_dt), _minute(to_dt)
-    chain = _FALLBACK.get(unit_for(gran), ('1m',))
-
-    days, cur = [], a.date()
-    while cur <= b.date() and len(days) < 800:
-        days.append(cur.strftime('%Y-%m-%d'))
-        cur += timedelta(days=1)
-
-    rows = []
-    by_unit: dict = {}
-    missing = []
+    rows, by_unit, missing = [], {}, []
     for d in days:
         # 구간이 이 날을 **온전히** 덮는가. 덮지 않는 날(구간의 양 끝)에 거친 계층을 쓰면
         # 버킷을 쪼갤 수 없어 총계가 부풀어진다 — 그런 날만 1분 계층으로 내려가 정확히 자른다.
@@ -865,9 +995,90 @@ def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
                 minutes.add(mi)
         if minutes:
             rows.extend(build_minutes(root, minutes, config).values())
+    return rows, by_unit, fill, omitted
+
+
+def _month_bounds(month: str) -> tuple:
+    """월 버킷의 시작·끝 분 라벨. month='YYYY-MM'."""
+    days = _days_of_month(month)
+    return f'{days[0]} 00:00', f'{days[-1]} 23:59'
+
+
+def _read_stored_periods(root: str, unit: str, lo: str, hi: str, days: list) -> tuple:
+    """월 저장 계층에서 읽는다 → (rows, by_unit, 남은 날짜들).
+
+    **구간이 온전히 덮는 달만** 저장 버킷을 쓴다 — 월 버킷은 쪼갤 수 없어서, 구간이 달
+    중간에서 시작하면 그 달을 통째로 세어 총계가 부풀어진다. 그런 달과 저장이 없는 달은
+    날짜 경로로 넘겨 일·시·분 계층에서 만들고, 거기서도 없으면 `missing_days` 로 신고한다.
+    """
+    order, by_key = [], {}
+    for d in days:
+        k = d[:7]
+        if k not in by_key:
+            by_key[k] = []
+            order.append(k)
+        by_key[k].append(d)
+
+    rows, by_unit, rest, cache = [], {}, [], {}
+    for k in order:
+        ps, pe = _month_bounds(k)
+        if not (lo <= ps and pe <= hi):
+            rest.extend(by_key[k])          # 반쪽 기간 — 저장 버킷을 쓸 수 없다
+            continue
+        year = k[:4]
+        if year not in cache:
+            cache[year] = read_period_at(root, year, unit)
+        hit = [r for r in cache[year] if r.get('bucket') == k]
+        if not hit:
+            rest.extend(by_key[k])
+            continue
+        rows.extend(hit)
+        by_unit[unit] = by_unit.get(unit, 0) + 1
+    return rows, by_unit, rest
+
+
+def read_range_filled(root: str, from_dt: str, to_dt: str, config: dict = None,
+                      budget: int = None, gran: str = '1m') -> tuple:
+    """구간 레코드 + 커버리지 → (rows, coverage).
+
+    **계층을 골라 읽는다.** 월·년은 저장 버킷을 먼저 보고, 나머지(와 반쪽 기간)는 날마다
+    가장 거친 계층부터 내려가며 읽는다. 어느 계층에도 없으면 원본에서 즉석 집계한다.
+
+    계층을 나누는 이유는 보존기간이다 — **계층마다 파일이 따로라 보존기간이 서로 묶이지
+    않는다.** 1분이 14일 뒤 지워져도 1시간은 90일까지, 월·년은 영구히 남는다. 계층이
+    하나였을 때는 1분의 보존기간이 전체 조회 지평을 결정해, 두 달 조회가 조용히 2주로
+    잘렸다(실측).
+
+    즉석 집계 결과는 **적지 않는다** — 보존기간이 지나 지운 날을 되살리면 purge 가
+    무의미해진다(merge_days 도 같은 이유로 그 날을 거부한다).
+    """
+    unit = unit_for(gran)
+    empty_cov = {'days': 0, 'unit': unit, 'by_unit': {},
+                 'rollup': 0, 'scanned': 0, 'missing': 0, 'missing_days': []}
+    a, b = _parse(from_dt), _parse(to_dt)
+    if a is None or b is None:
+        return [], empty_cov
+    budget = _SCAN_DAY_BUDGET if budget is None else budget
+    lo, hi = _minute(from_dt), _minute(to_dt)
+
+    days, cur = [], a.date()
+    while cur <= b.date() and len(days) < 800:
+        days.append(cur.strftime('%Y-%m-%d'))
+        cur += timedelta(days=1)
+
+    rows, by_unit = [], {}
+    rest = days
+    if unit in _PERIOD_UNITS:
+        rows, by_unit, rest = _read_stored_periods(root, unit, lo, hi, days)
+
+    chain = _FALLBACK.get('1d' if unit in _PERIOD_UNITS else unit, ('1m',))
+    d_rows, d_by_unit, fill, omitted = _read_days(root, rest, lo, hi, chain, config, budget)
+    rows.extend(d_rows)
+    for u, n in d_by_unit.items():
+        by_unit[u] = by_unit.get(u, 0) + n
 
     return rows, {
-        'days': len(days), 'unit': unit_for(gran), 'by_unit': by_unit,
+        'days': len(days), 'unit': unit, 'by_unit': by_unit,
         'rollup': sum(by_unit.values()), 'scanned': len(fill),
         'missing': len(omitted), 'missing_days': omitted[:40],
     }
@@ -922,8 +1133,8 @@ def bucket_of(label: str, gran: str) -> str:
     if gran == '1d':
         return dt.strftime('%Y-%m-%d')
     if gran == '1w':
-        # 주는 일요일 시작 — weekday() 는 월=0 이라 일요일은 6.
-        return (dt.date() - timedelta(days=(dt.weekday() + 1) % 7)).strftime('%Y-%m-%d')
+        # 주는 월요일 시작 — weekday() 가 월=0 이라 그만큼 빼면 그 주 월요일이다.
+        return (dt.date() - timedelta(days=dt.weekday())).strftime('%Y-%m-%d')
     if gran == '1M':
         return dt.strftime('%Y-%m')
     if gran == '1y':
@@ -945,7 +1156,7 @@ def _zero_call() -> dict:
     return {'attempts': 0, 'sessions': 0, 'talked': 0, 'completed': 0,
             'duration_sum_sec': 0, 'pdd_sum_ms': 0, 'pdd_n': 0,
             'legs_invited': 0, 'legs_joined': 0, 'open': 0, 'late_dropped': 0,
-            'reasons': {}, 'by_group': {}}
+            'reasons': {}, 'statuses': {}, 'by_group': {}}
 
 
 def _add_call(dst: dict, src: dict, open_n: int = 0, late_n: int = 0) -> None:
@@ -954,6 +1165,8 @@ def _add_call(dst: dict, src: dict, open_n: int = 0, late_n: int = 0) -> None:
         dst[k] = dst.get(k, 0) + int(src.get(k, 0) or 0)
     for k, v in (src.get('reasons') or {}).items():
         dst['reasons'][k] = dst['reasons'].get(k, 0) + int(v or 0)
+    for k, v in (src.get('statuses') or {}).items():
+        dst['statuses'][k] = dst['statuses'].get(k, 0) + int(v or 0)
     for gid, gv in (src.get('by_group') or {}).items():
         tgt = dst['by_group'].setdefault(gid, {'sessions': 0, 'talked': 0})
         for k in ('sessions', 'talked'):
@@ -974,19 +1187,53 @@ def _rate(num: int, den: int) -> float:
     return round(num / den * 100, 1) if den > 0 else 0
 
 
+# NER 분자에 넣는 종료 사유 — **망이 아니라 상대 쪽 사정**으로 안 붙은 것들.
+# `error`·`timeout`·`incomplete` 는 망·시스템 책임이라 넣지 않는다. `canceled`(발신자 포기)는
+# 망 결함이 아니므로 넣는다 — 다만 CSP 가 아직 이 사유를 분리해 기록하지 않아(§8 Y5) 지금은
+# 대부분 `no_answer`·`incomplete` 에 섞여 들어온다.
+_NER_USER_REASONS = ('busy', 'no_answer', 'rejected', 'canceled')
+
+
 def with_rates(c: dict) -> dict:
     """분자·분모에 비율을 덧붙인다. **분모를 지운 채로 내지 않는다** — 비율만 받은 화면은
     구간을 다시 합칠 수 없고, 3건 중 2건과 3만건 중 2만건을 같은 무게로 보여준다."""
     out = dict(c)
     out['reasons'] = dict(c.get('reasons') or {})
+    # 코드별(내림차순)과 계열별(4xx/5xx/6xx)을 함께 낸다 — 코드는 원인 특정에, 계열은 추세에
+    # 쓰인다. 계열을 화면이 다시 접지 않게 여기서 만든다(그룹 축과 같은 규약).
+    st = {k: int(v or 0) for k, v in (c.get('statuses') or {}).items()}
+    out['statuses'] = dict(sorted(st.items(), key=lambda x: -x[1]))
+    grp: dict = {}
+    for k, v in st.items():
+        cls = f'{k[0]}xx' if k[:1].isdigit() else 'other'
+        grp[cls] = grp.get(cls, 0) + v
+    out['status_classes'] = dict(sorted(grp.items()))
     # 그룹 축은 건수 내림차순. 분포 위젯은 {키: 수} 한 겹을 기대하므로 세션수만 뽑은
     # `by_group_sessions` 를 함께 낸다 — 두 겹 map 을 화면이 다시 펴지 않게.
     bg = {k: dict(v) for k, v in (c.get('by_group') or {}).items()}
     out['by_group'] = dict(sorted(bg.items(), key=lambda x: -x[1].get('sessions', 0)))
     out['by_group_sessions'] = {k: v.get('sessions', 0) for k, v in out['by_group'].items()}
     out['success_rate'] = _rate(c.get('sessions', 0), c.get('attempts', 0))
+    # NER (ITU-T E.425) — **사용자 사정으로 안 붙은 호를 분자에 넣어 망 책임만 남긴다.**
+    # 상대가 통화중이거나 안 받은 것은 망 잘못이 아닌데 성공률(ASR)은 그것도 실패로 센다.
+    # 그래서 성공률이 낮을 때 망 문제인지 상대 사정인지 성공률만으로는 가를 수 없다.
+    # 두 값의 차이가 곧 사용자 사정으로 안 붙은 비율이다.
+    # 응답한 호는 **어떻게 끝났든** 분자다 — 붙은 뒤 끊긴 것은 셋업 실패가 아니라 드롭이고,
+    # 그건 완료율이 본다. 그래서 `sessions` 를 통째로 넣고 거기에 붙지 못한 사유 중
+    # 상대 쪽 것만 더한다. 응답 전 망 실패(error·timeout·incomplete)는 어느 쪽에도 없어
+    # 자연히 빠진다.
+    ner_ok = (c.get('sessions', 0)
+              + sum(int(out['reasons'].get(k, 0) or 0) for k in _NER_USER_REASONS))
+    # 분자가 시도를 넘을 수 없다 — 넘으면 원천이 어긋난 것이고(응답한 호에 붙지 못한 사유가
+    # 달린 경우), 그대로 내면 103% 같은 값이 지표 행세를 한다.
+    out['ner_ok'] = min(ner_ok, c.get('attempts', 0)) if c.get('attempts', 0) else ner_ok
+    out['ner'] = _rate(out['ner_ok'], c.get('attempts', 0))
     out['talk_rate'] = _rate(c.get('talked', 0), c.get('attempts', 0))
     out['completion_rate'] = _rate(c.get('completed', 0), c.get('sessions', 0))
+    # 드롭률 = 완료율의 여집합 (3GPP TS 32.410 Call Drop Rate). 업계는 보통 이 방향으로 보고
+    # 목표치도 이쪽으로 잡는다("< 1%"). 성립한 호가 없으면 0 이다 — 100% 로 내면 아무 일도
+    # 없던 구간이 전부 드롭으로 보인다.
+    out['drop_rate'] = round(100.0 - out['completion_rate'], 1) if c.get('sessions', 0) else 0
     out['join_rate'] = _rate(c.get('legs_joined', 0), c.get('legs_invited', 0))
     # 세션을 분모로 한 소통률 — **PTT 용**이다. PTT 는 실패한 시도가 원천에 없어
     # attempts 가 0 이고(§8 Y6), 그러면 talk_rate 가 분모 0 으로 항상 0% 가 된다.

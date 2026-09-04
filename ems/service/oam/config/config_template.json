@@ -255,19 +255,19 @@
           "key": "ServiceLogging.StatsRetainDays.1h",
           "label": "시간 집계 보존(일)",
           "type": "int",
-          "default": 400,
+          "default": 90,
           "min": 0,
           "restart": true,
-          "help": "0 은 무제한. 365일 미만은 365로 올린다 — 전년 동월 비교가 깨지지 않게(알람 스트림 90일 클램프와 같은 방식)."
+          "help": "0 은 무제한. 1분 계층이 지워져도 이 계층은 남는다 — 계층마다 별도 파일이라 보존기간이 서로 묶이지 않는다."
         },
         {
           "key": "ServiceLogging.StatsRetainDays.1d",
           "label": "일 집계 보존(일)",
           "type": "int",
-          "default": 0,
+          "default": 730,
           "min": 0,
           "restart": true,
-          "help": "0 은 무제한. 하루 1레코드라 용량이 거의 들지 않아 장기 추세는 이 계층이 담당한다."
+          "help": "0 은 무제한. 이 계층이 지워져도 월·년 집계는 자기 파일로 남는다(영구)."
         }
       ],
       "scope": "service"
