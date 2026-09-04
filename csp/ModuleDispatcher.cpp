@@ -179,7 +179,9 @@ void CModuleDispatcher::OnCallEnded( const char *pszCallId, int iSipStatus ) {
     }
     if ( gclsCallDir.IsEnabled() ) {
         int dur = (int)( clsCdr.m_sttEndTime.tv_sec - clsCdr.m_sttStartTime.tv_sec );
-        gclsCallDir.VoipCallEnd( clsCdr.m_strCallId, "normal", dur > 0 ? dur : 0 );
+        // 이 호출은 멱등 가드에 걸려 보통 no-op 이다(EventCallEnd 가 이미 마감했다) — 그래도
+        // 값을 온전히 넘긴다. 가드가 바뀌면 조용히 0 이 들어가는 쪽으로 퇴화하지 않게.
+        gclsCallDir.VoipCallEnd( clsCdr.m_strCallId, "normal", dur > 0 ? dur : 0, iSipStatus );
     }
 }
 
@@ -743,6 +745,15 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             return StopCall( pszCallId, SIP_FORBIDDEN );
     }
 
+    // 여기서부터는 **1:1 VoLTE 경로**다(그룹·private 분기는 위에서 끝났다). 이 구간의 거절은
+    //   시도로 남긴다 — 기록하지 않으면 성공률·NER 의 분모에서 빠진다(F-54).
+    //   그룹·private 거절에는 쓰지 않는다: volte 트리에 쓰면 집계가 svc='volte' 로 못 박아
+    //   세므로(build_minutes) PTT 실패가 VoLTE 통계를 오염시킨다.
+    auto RejectVoice = [&]( int iCode ) {
+        if ( gclsCallDir.IsEnabled() ) gclsCallDir.VoipCallRejected( pszCallId, pszFrom, pszTo, iCode );
+        return StopCall( pszCallId, iCode );
+    };
+
     // G1 (2026-04-23): Routing policy 결정 (RecvRequest 에서 PendingRouteMap 에 넣어둔 것) 을 먼저 소비.
     //   있으면 callee 가 내부 가입자여도 외부 peer 로 B2BUA forward (Routing policy 가 우선).
     //   없으면 아래 내부 가입자 경로 (PTT 그룹 / legacy IBCF / TAS) 로 진행.
@@ -813,17 +824,19 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         if ( m_clsTas.IsEnabled() && m_clsTas.TryDispatchPilot( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage ) )
             return;
         if ( m_clsTas.IsEnabled() && m_clsTas.TryPickupDial( pszCallId, pszFrom, pszTo, pclsRtp ) ) return;
-        return StopCall( pszCallId, SIP_NOT_FOUND );
+        return RejectVoice( SIP_NOT_FOUND );
     }
 
     if ( GetCallOwner( pszCallId ) == NULL ) SetCallOwner( pszCallId, &m_clsTas );
 
     // TAS: DND/착신거부 603, 착신전환 302
+    //   상류가 CTasModule 로 이관했다 — 이 거절은 모듈 안에서 응답하므로 여기서 시도로 남길
+    //   수 없다. F-54 적용 범위에서 빠져 있다(후속: 모듈 안에서 기록하거나 콜백을 넘긴다).
     if ( m_clsTas.IsEnabled() && m_clsTas.ApplyTerminationServices( pszCallId, pszFrom, clsUser ) ) return;
 
     // B2BUA 호 설정
     if ( bRoutePrefix == false ) {
-        if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return StopCall( pszCallId, SIP_NOT_FOUND );
+        if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return RejectVoice( SIP_NOT_FOUND );
     }
 
     int iStartPort = -1;
@@ -892,7 +905,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                 CLog::Print( LOG_INFO,
                              "EventIncomingCall: caller(%s) SDES offer not acceptable (svc=%s media_srtp=%s) → 488",
                              pszFrom, clsVolteSvc.name.c_str(), clsVolteSvc.media_srtp.c_str() );
-                return StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+                return RejectVoice( SIP_NOT_ACCEPTABLE_HERE );
             }
             if ( ( clsSdesA.clsAudio.bSrtp &&
                    !MediaSdes::BuildCmpKeys( clsSdesA.clsAudio.strSuite, clsSdesA.clsAudio.strUeKey,
@@ -901,7 +914,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                    !MediaSdes::BuildCmpKeys( clsSdesA.clsVideo.strSuite, clsSdesA.clsVideo.strUeKey,
                                              clsSdesA.clsVideo.strSrvKey, clsCallerVideoCrypto ) ) ) {
                 CLog::Print( LOG_ERROR, "EventIncomingCall: caller(%s) SRTP key build failed → 488", pszFrom );
-                return StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+                return RejectVoice( SIP_NOT_ACCEPTABLE_HERE );
             }
 
             bool bCalleeSdes = false;
@@ -915,7 +928,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             if ( !MediaSdes::ApplyRelayLegOffer( pclsRtp->m_clsMediaList, "audio", bCalleeSdes, clsSdesB.clsAudio ) ||
                  !MediaSdes::ApplyRelayLegOffer( pclsRtp->m_clsMediaList, "video", bCalleeSdes, clsSdesB.clsVideo ) ) {
                 CLog::Print( LOG_ERROR, "EventIncomingCall: callee(%s) SRTP key build failed → 500", pszTo );
-                return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
+                return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
             }
             if ( clsSdesA.clsAudio.bSrtp || clsSdesB.clsAudio.bSrtp )
                 CLog::Print(
@@ -945,7 +958,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                         strCallerGuardIp, iCallerPt, iCallerSrcPt, iCallerTePt, iCallerSrcTePt,
                                         strCallerCodec, clsCallerAudioCrypto.bEnabled ? &clsCallerAudioCrypto : NULL,
                                         clsCallerVideoCrypto.bEnabled ? &clsCallerVideoCrypto : NULL ) ) {
-            return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
+            return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
         }
         // leg 별 전용 포트: A(발신) leg SDP = iLocalPort(peer0), B(착신) leg SDP = iLocalPortB(peer1)
         iStartPort = iLocalPort;
@@ -977,7 +990,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                          strRelaySessionId.c_str(), pszCallId );
             gclsCmpClient.RemoveSession( strRelaySessionId, pszFrom ? pszFrom : "", pszTo ? pszTo : "", strRelaySesId );
         }
-        return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
+        return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
     }
 
     // P-Asserted-Identity 는 psip(CSipDialog::CreateMessage)가 발신 leg 도메인 기준으로
@@ -1013,7 +1026,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     if ( gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) == false ) {
         gclsCallMap.Delete( pszCallId );
-        return StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR );
+        return RejectVoice( SIP_INTERNAL_SERVER_ERROR );
     }
 
     if ( gclsDbManager.IsConnected() ) {
@@ -1181,6 +1194,24 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
     }
 }
 
+/** 호의 통화시간(초) — CDR 의 응답 시각 ~ 종료 시각. 응답 전에 끝난 호는 0.
+ *
+ *  CallDir 의 마감은 **첫 종료 호출 한 번뿐**이다(같은 호가 인덱스에 두 줄로 남지 않게 걸어둔
+ *  멱등 가드). 그래서 마감하는 그 자리에서 통화시간을 알아야 한다 — 뒤따르는 OnCallEnded 가
+ *  실제 값을 알고 있어도 가드에 걸려 반영되지 못한다(그 탓에 duration 이 늘 0 이었다).
+ *
+ *  종료 시각이 아직 안 찍힌 시점에도 불릴 수 있어 그때는 현재 시각으로 본다.
+ */
+static int _CallDurationSec( const char *pszCallId ) {
+    if ( !pszCallId || !*pszCallId ) return 0;
+    CSipCdr clsCdr;
+    if ( !gclsUserAgent.GetCdr( pszCallId, &clsCdr ) ) return 0;
+    if ( clsCdr.m_sttStartTime.tv_sec == 0 ) return 0;
+    time_t tEnd = clsCdr.m_sttEndTime.tv_sec ? clsCdr.m_sttEndTime.tv_sec : time( nullptr );
+    int iDur = (int)( tEnd - clsCdr.m_sttStartTime.tv_sec );
+    return iDur > 0 ? iDur : 0;
+}
+
 void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallEnd(%s:%d)", pszCallId, iSipStatus );
@@ -1213,7 +1244,13 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
                 strOrigCallId = clsCallInfo.m_strPeerCallId;
             std::string gid = gclsGroupCallService.GetGroupIdByCallId( pszCallId );
             if ( gid.empty() ) {
-                gclsCallDir.VoipCallEnd( strOrigCallId, iSipStatus == 200 ? "normal" : "error", 0 );
+                // B2BUA 는 어느 leg 이 먼저 끝날지 정해져 있지 않다 — 끝난 leg 의 CDR 에
+                // 응답 시각이 없으면 상대 leg 에서 찾는다.
+                int iDur = _CallDurationSec( pszCallId );
+                if ( iDur == 0 && !clsCallInfo.m_strPeerCallId.empty() )
+                    iDur = _CallDurationSec( clsCallInfo.m_strPeerCallId.c_str() );
+                gclsCallDir.VoipCallEnd( strOrigCallId, iSipStatus == 200 ? "normal" : "error", iDur,
+                                         iSipStatus );
             }
         }
         if ( clsCallInfo.m_bRecv )

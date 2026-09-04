@@ -213,7 +213,7 @@ public:
         std::string content = "{\"call_id\":\"" + Esc( strCallId ) + "\",\"call_type\":\"" + pszCallType +
                               "\",\"initiator\":\"" + Esc( strCaller ) + "\",\"callee\":\"" + Esc( strCallee ) +
                               "\",\"state\":\"ringing\",\"invite_time\":\"" + ts +
-                              "\",\"answer_time\":null,\"end_time\":null,\"duration\":0,\"end_reason\":null}\n";
+                              "\",\"answer_time\":null,\"end_time\":null,\"duration\":0,\"end_reason\":null,\"end_status\":0}\n";
         std::string path = dir + "/call.json";
         m_worker.Enqueue( [path, content]() { return _writeFileS( path, content ); }, content.size() );
 
@@ -221,6 +221,54 @@ public:
         std::string sessId = _sessionIdByCallId( strCallId );
         _writeVoipState( strCaller, strCallId, sessId, strCallee, "caller", "ringing", ts, dir, bVideo, strMediaNode );
         _writeVoipState( strCallee, strCallId, sessId, strCaller, "callee", "ringing", ts, dir, bVideo, strMediaNode );
+    }
+
+    /** 응답코드 → 종료 사유 어휘 (sip_statistics.md §2.3). 정확한 코드는 `end_status` 가 갖는다. */
+    static const char *_ReasonOfStatus( int iStatus ) {
+        if ( iStatus == 486 || iStatus == 600 ) return "busy";
+        if ( iStatus == 408 || iStatus == 480 ) return "no_answer";
+        if ( iStatus == 488 || iStatus == 606 ) return "error";   // 코덱·SDP 협상 실패
+        if ( iStatus >= 500 && iStatus < 600 ) return "error";
+        if ( iStatus >= 400 ) return "rejected";                  // 403·404·603 …
+        return "error";
+    }
+
+    /** CSP 가 **응답 전에 자체 거절한 호**를 시도로 남긴다 (F-54).
+     *
+     *  `VoipCallStart` 는 착신 leg 으로 INVITE 를 넘기기로 결정한 뒤에 불린다. 그 전에 거절한
+     *  호는 아무 기록도 남지 않아 성공률·NER 의 분모에서 조용히 빠졌다 — 없는 번호로 거는 호가
+     *  많은 구간에서 성공률이 실제보다 좋게 나온다.
+     *
+     *  응답 전에 끝났으므로 `answer_time` 은 null, `duration` 0 이고 `state` 는 처음부터
+     *  `ended` 다. 이미 기록된 세션(정상 경로가 만든 호)은 건드리지 않는다 — 재INVITE·인증
+     *  재시도로 같은 시도를 두 번 세지 않게.
+     */
+    void VoipCallRejected( const std::string &strCallId, const std::string &strCaller,
+                           const std::string &strCallee, int iStatus ) {
+        // GetVoipDir 이 m_mtx 를 스스로 잡는다 — 아래 lock 안에서 부르면 교착이다.
+        std::string dir = GetVoipDir( strCallId, strCaller, strCallee );
+        if ( dir.empty() ) return;
+        std::lock_guard<std::mutex> lock( m_mtx );
+        if ( m_setCallJson.count( dir ) > 0 ) return;   // 정상 경로가 이미 기록한 세션
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        std::string tsStr = ts;
+        std::string content = "{\"call_id\":\"" + Esc( strCallId ) +
+                              "\",\"call_type\":\"volte\",\"initiator\":\"" + Esc( strCaller ) +
+                              "\",\"callee\":\"" + Esc( strCallee ) +
+                              "\",\"state\":\"ended\",\"invite_time\":\"" + tsStr +
+                              "\",\"answer_time\":null,\"end_time\":\"" + tsStr +
+                              "\",\"duration\":0,\"end_reason\":\"" + _ReasonOfStatus( iStatus ) +
+                              "\",\"end_status\":" + std::to_string( iStatus ) + "}\n";
+        std::string path = dir + "/call.json";
+        std::string callId = strCallId;
+        m_worker.Enqueue(
+            [path, content, dir, callId, tsStr]() {
+                bool bOk = _writeFileS( path, content );
+                return _appendIndexS( dir, callId, "volte", tsStr ) && bOk;
+            },
+            content.size() );
+        m_mapDir.erase( strCallId );
     }
 
     void VoipCallAnswer( const std::string &strCallId ) {
@@ -237,7 +285,8 @@ public:
         _promoteVoipStates( strCallId, ts );
     }
 
-    void VoipCallEnd( const std::string &strCallId, const std::string &strReason = "normal", int iDur = 0 ) {
+    void VoipCallEnd( const std::string &strCallId, const std::string &strReason = "normal", int iDur = 0,
+                      int iStatus = 0 ) {
         std::lock_guard<std::mutex> lock( m_mtx );
         std::string dir = _dir( strCallId );
         if ( dir.empty() ) return;
@@ -249,8 +298,8 @@ public:
             std::string tsStr = ts;
             std::string reason = strReason;
             std::string callId = strCallId;
-            m_worker.Enqueue( [dir, reason, iDur, tsStr, callId]() {
-                bool bOk = _updateCallJsonS( dir, reason, iDur, tsStr );
+            m_worker.Enqueue( [dir, reason, iDur, iStatus, tsStr, callId]() {
+                bool bOk = _updateCallJsonS( dir, reason, iDur, iStatus, tsStr );
                 return _appendIndexS( dir, callId, "volte", tsStr ) && bOk;
             } );
         }
@@ -627,7 +676,10 @@ private:
         return _writeFileS( path, c );
     }
 
-    static bool _updateCallJsonS( const std::string &dir, const std::string &reason, int dur, const std::string &ts ) {
+    /** 종료 마킹 — state/end_time/duration/end_reason/end_status 를 한 번에 채운다.
+     *  치환 방식이라 생성 템플릿에 그 키가 있어야 한다(없으면 조용히 아무것도 안 바뀐다). */
+    static bool _updateCallJsonS( const std::string &dir, const std::string &reason, int dur, int status,
+                                  const std::string &ts ) {
         std::string path = dir + "/call.json";
         std::string c = _readFile( path );
         if ( c.empty() ) return false;
@@ -636,6 +688,9 @@ private:
         _replace( c, "\"end_time\":null", std::string( "\"end_time\":\"" ) + ts + "\"" );
         _replace( c, "\"duration\":0", "\"duration\":" + std::to_string( dur ) );
         _replace( c, "\"end_reason\":null", std::string( "\"end_reason\":\"" ) + reason + "\"" );
+        // 응답코드는 `error` 한 칸으로 뭉개진 실패를 코드별로 가르는 유일한 근거다
+        //   (488 코덱 불일치 / 503 서비스 불가 / 5xx 서버 오류 …). BYE 정상 종료는 200.
+        _replace( c, "\"end_status\":0", "\"end_status\":" + std::to_string( status ) );
         return _writeFileS( path, c );
     }
 
