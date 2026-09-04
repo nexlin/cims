@@ -84,30 +84,26 @@ export const MY_LAYOUT_LAYOUT: PageLayout = {
 export const DASHBOARD_LAYOUT: PageLayout = {
   id: 'dashboard',
   title: '대시보드',
-  // 5세대: **화면 한 장(48행)에 맞춤**. 예전엔 대부분이 전폭(48칸) 스택이라 172vh 로 자라 페이지가
-  //        스크롤됐다 — 관제 대시보드는 스크롤이 곧 "알람이 화면 밖으로 나감"이라 가로를 쓰도록
-  //        2열로 접었다. 위젯 구성은 그대로 유지한다(하나라도 빠지면 한눈에 볼 것이 줄어든다).
-  seedVersion: 5,
+  // 6세대: **세 줄 2열**(줄당 24칸씩) — ① 서비스 요약 ② 시스템 ③ 알람·이벤트. 위에서 아래로
+  //        "서비스가 도는가 → 그것을 떠받치는 시스템은 성한가 → 지금 무엇이 터졌는가" 순이다.
+  // 요약은 서비스 현황 화면과 **같은 카드**를 그대로 얹는다(대상별 한 벌 — VoLTE 끼리, PTT 끼리).
+  // 지표를 낱장으로 흩어 놓으면 한 대상의 상태가 화면 여기저기로 갈리므로 묶은 채로 두고,
+  // 카드 우상단 `서비스 현황 →` 로 상세로 건너간다.
+  seedVersion: 8,
   widgets: [
-    // ① 알람·이벤트 — 최상단(가장 강한 자리). 알람이 좌측 우선.
-    { widgetId: 'cims.active-alarms',      x: 0,  y: 0,  w: 28, h: 15 },
-    { widgetId: 'cims.recent-events',      x: 28, y: 0,  w: 20, h: 15 },
-    // ② 현황 카드 — 지표 1개 = 위젯 1개(cims.stat.*). 7장이 한 줄에 들어가게 48칸을 7·7·7·7·7·7·6 로 나눈다.
-    { widgetId: 'cims.stat.subscribers',   x: 0,  y: 15, w: 7,  h: 6 },
-    { widgetId: 'cims.stat.volte-numbers', x: 7,  y: 15, w: 7,  h: 6 },
-    { widgetId: 'cims.stat.ptt-numbers',   x: 14, y: 15, w: 7,  h: 6 },
-    { widgetId: 'cims.stat.active-calls',  x: 21, y: 15, w: 7,  h: 6 },
-    { widgetId: 'cims.stat.ptt-groups',    x: 28, y: 15, w: 7,  h: 6 },
-    { widgetId: 'cims.stat.rtp-voip',      x: 35, y: 15, w: 7,  h: 6 },
-    { widgetId: 'cims.stat.rtp-ptt',       x: 42, y: 15, w: 6,  h: 6 },
-    // ③ 시스템 — 형상(½) + 리소스(½)
-    { widgetId: 'core.system-topology',    x: 0,  y: 21, w: 24, h: 14 },
-    { widgetId: 'core.system-resource',    x: 24, y: 21, w: 24, h: 14 },
-    // ④ 진행 중 + 추이 — 활성 VoIP · 활성 PTT · 호 시도 추이 3열
-    { widgetId: 'cims.active-voip',        x: 0,  y: 35, w: 16, h: 13 },
-    { widgetId: 'cims.active-ptt',         x: 16, y: 35, w: 16, h: 13 },
-    { widgetId: 'shape.time-bar',          x: 32, y: 35, w: 16, h: 13, config: { source: 'cims.svc.volte' } },
+    // ① 서비스 요약 — VoLTE · PTT
+    // 요약 카드는 머리줄 + 타일 3장이 들어가고 카드 안 편집도 해야 해서 11행.
+    { widgetId: 'cims.volte-summary',   x: 0,  y: 0,  w: 24, h: 11 },
+    { widgetId: 'cims.ptt-summary',     x: 24, y: 0,  w: 24, h: 11 },
+    // ② 시스템 — 형상 · 리소스
+    { widgetId: 'core.system-topology', x: 0,  y: 11, w: 24, h: 18 },
+    { widgetId: 'core.system-resource', x: 24, y: 11, w: 24, h: 18 },
+    // ③ 장애 — 활성 알람 · 최근 이벤트. 목록이 길어지는 자리라 가장 넉넉히.
+    { widgetId: 'cims.active-alarms',   x: 0,  y: 29, w: 24, h: 19 },
+    { widgetId: 'cims.recent-events',   x: 24, y: 29, w: 24, h: 19 },
   ],
-  // 과감히 제거: cims.health-dots(→형상 노드/모듈 상태로 흡수), cims.alert-banner(→active-alarms),
-  //            core.system-cards(→system-topology 로 대체), cims.csp-roles(단순 역할 플래그).
+  // 대시보드에서 내린 것(위젯 자체는 남아 있어 편집기에서 다시 얹을 수 있다):
+  //   cims.stat.*(지표 낱장 7장) → 서비스 요약 카드가 같은 수치를 대상별로 묶어 보여준다,
+  //   cims.active-voip / cims.active-ptt(진행 중 표) → 서비스 현황·이력 화면이 정본,
+  //   shape.time-bar(시계열) → 성능 통계 화면이 정본.
 }

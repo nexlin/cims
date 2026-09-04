@@ -51,7 +51,8 @@ function makeSharedPoll<T>(fetcher: () => Promise<T>, periodMs = 5000) {
     return state
   }
 }
-const useServiceLive = makeSharedPoll<ServiceLive>(() => statsApi.serviceLive())
+// 대시보드 요약 카드(dashboardCards.tsx)도 같은 폴러를 쓴다 — 화면이 몇 장이든 조회는 1회.
+export const useServiceLive = makeSharedPoll<ServiceLive>(() => statsApi.serviceLive())
 
 export function usePins(key: string): { pins: Set<string>; toggle: (id: string) => void } {
   const [pins, setPins] = useState<Set<string>>(() => {
@@ -74,9 +75,11 @@ function Gauge({ label, pool }: { label: string; pool: Pool }) {
   const total = pool.total || 0, used = pool.used || 0
   const pct = total > 0 ? Math.round((used / total) * 100) : 0
   return (
-    <div style={{ minWidth: 200 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>
-        <span>{label}</span><span>{used} / {total} ({pct}%)</span>
+    <div style={{ minWidth: 220, flex: 1 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>
+        {/* 라벨이 길면 줄이고(수치가 밀려 겹치지 않게) 전체 문구는 툴팁으로 */}
+        <span title={label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={{ whiteSpace: 'nowrap' }}>{used} / {total} ({pct}%)</span>
       </div>
       <div style={{ height: 8, borderRadius: 4, background: 'var(--border)', overflow: 'hidden' }}>
         <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: poolColor(pct), transition: 'width .3s' }} />

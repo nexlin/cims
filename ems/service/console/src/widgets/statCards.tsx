@@ -22,11 +22,12 @@ const CARD_BOX: CSSProperties = {
   padding: '10px 12px', textAlign: 'center', boxSizing: 'border-box',
 }
 
-export function StatCard({ label, value, sub, unit, series }: {
-  label: string; value: string | number; sub?: string; unit?: string; series?: number[]
+// hint = 이 수치가 무엇을 세는지(툴팁). 라벨만으로는 헷갈리는 지표에만 단다.
+export function StatCard({ label, value, sub, unit, series, hint }: {
+  label: string; value: string | number; sub?: string; unit?: string; series?: number[]; hint?: string
 }) {
   return (
-    <div style={{ ...CARD_BOX, justifyContent: 'center' }}>
+    <div style={{ ...CARD_BOX, justifyContent: 'center' }} title={hint}>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.15 }}>
         {value}

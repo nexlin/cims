@@ -9,6 +9,7 @@ import type { ServiceManifest } from '@core/nav-types'
 
 import { healthDotsWidget } from './widgets/HealthDotsWidget'
 import { STAT_CARD_WIDGETS, STAT_CARD_SPLITS } from './widgets/statCards'
+import { DASHBOARD_CARD_WIDGETS } from './widgets/dashboardCards'
 import { LEAK_RECLAIM_WIDGETS } from './widgets/leakReclaimWidgets'
 import { cspRolesWidget } from './widgets/CspRolesWidget'
 import { alertBannerWidget } from './widgets/AlertBannerWidget'
@@ -42,6 +43,7 @@ export const cimsManifest: ServiceManifest = {
   label: 'CIMS',
   widgets: [
     ...STAT_CARD_WIDGETS,          // 대시보드 현황 지표 — 서로 다른 축이라 지표 1개 = 위젯 1개
+    ...DASHBOARD_CARD_WIDGETS,     // 대시보드 서비스 요약 — VoLTE/PTT 각 한 장(타일 3개)
     ...LEAK_RECLAIM_WIDGETS,       // 누수 회수(sweeper) 블록
     healthDotsWidget, cspRolesWidget,
     alertBannerWidget, activeAlarmsWidget, recentEventsWidget, activeVoipWidget, activePttWidget,

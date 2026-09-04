@@ -307,24 +307,36 @@ seed 를 개편하면 `seedVersion` 을 올린다 — 저장본의 값이 더 �
 화이트리스트**(`id`/`title`/`widgets`/`gap`/`seedVersion`) — 새 레이아웃 단위 속성을 추가하면 `console.py`
 PUT 에도 함께 넣어야 유실되지 않는다. 저장본 없으면 프론트 seed.
 
-크기는 **가로·세로 모두 그리드 셀 단위**로 통일(`w`=열 span 1~48 ≈가로 2%/칸, `h`=행 span). 행 높이는
-화면 세로 비율(`gridLayout.ROW_H_VH`, 기본 2%vh) — 가로(48칸)·세로(2%vh) 모두 ~2% 세밀도로 동일하다.
-정수 셀(조작감)은 유지하되 한 행의 실제 크기가 vh 라 **모든 해상도에서 같은 세로 비율**로 보인다.
+크기는 **가로·세로 모두 그리드 셀 단위**로 통일(`w`=열 span 1~48 ≈가로 2%/칸, `h`=행 span 1~48).
+행·열 트랙이 모두 `1fr` 이라 한 칸의 실제 크기는 캔버스(1648×968)를 48 로 나눈 값이고, 창이 커져도
+**비율이 그대로**다(§3.0). legacy vh 높이를 행으로 환산할 때만 명목값 `NOMINAL_ROW_VH` 를 쓴다.
 seed 는 grid 좌표(x/y/w/h)로 직접 쓴다 — 폭을 48칸 단위로 지정하므로 한 줄에 7장 같은 배치도 정확하다.
 **세로는 48행이 전부**(§3.0)라 seed 도 그 안에 들어가야 한다 — 모자라면 세로로 쌓지 말고 가로를 쓴다.
-대시보드가 그 예다: 예전엔 거의 전부 전폭(48칸) 스택이라 172vh 로 자라 페이지가 스크롤됐는데,
-위젯 구성은 그대로 두고 2~3열로 접어 48행에 맞췄다(알람·이벤트 / 현황 카드 7 / 형상·리소스 /
-활성 VoIP·PTT·호 추이).
+대시보드가 그 예다: **세 줄 2열**(줄당 24칸) — ① VoLTE 요약·PTT 요약 ② 시스템 형상·시스템 리소스
+③ 활성 알람·최근 이벤트. 위에서 아래로 "서비스가 도는가 → 떠받치는 시스템은 성한가 → 지금 무엇이
+터졌는가" 순이고, 목록이 자라는 ③ 이 가장 넉넉하다(9·19·20행).
 편집 배지는 실제 차지 비율(가로%×세로%)을 표시. legacy seed 폭은 12-칸 기준이라 migrate 시 `COL_SCALE`(×4)
 환산. legacy flow 배치는 `h` 를 vh(1~100)|px(>100)로 하위호환 해석(`widgetHeightCss`). 카드 간 간격은
 레이아웃 단위 `PageLayout.gap`(px, 편집 툴바 슬라이더) — 트랙 gap 이 아니라 **카드 margin**(`--card-gap`)이라
 칸수와 무관하게 안전. OAM PUT 이 top-level `gap` 을 보존. `.widget-fixed` 가 패널 채움/스크롤. 코어 위젯(`widgets/core/`): `SystemTopologyWidget`(EMS 노드 형상 +
 외부 시스템 점선 노드) · `SystemResourceWidget`(서버×지표 추이) · `SystemCardsWidget` · `PageFilterWidget`
-(조회 조건). 대시보드의 현황 카드는 서비스 pack 의 지표별 위젯 `cims.stat.*`(`statCards.tsx` 선언 표에서
-생성, 데이터는 `stats.health` 공유 폴러 1개) — 서로 다른 축이라 낱개로 뗐다. 구 묶음 위젯
-`cims.kpi` 만 삭제하고 전개 규칙(splits)을 남겼다. 대시보드의 `cims.active-alarms`·`cims.recent-events`·
-`cims.svc-volte-kpi`·`cims.svc-ptt-kpi`·`cims.svc-detail`·`shape.kpi` 는 **그대로 유지**한다 — 대시보드는
-한눈에 훑는 요약 화면이라 알람 타일+목록이 한 카드로 붙어 있어야 하고, 낱개로 보는 건 장애 메뉴가 한다. 데이터 정의는 `features/monitoring.md` §1.7~1.8.
+(조회 조건). 대시보드의 서비스 요약은 **대시보드 전용 카드**(`cims.volte-summary` ·
+`cims.ptt-summary`, `widgets/dashboardCards.tsx`)다 — 대상별로 묶되(§3.1 비율 부속 규칙) 훑는 데
+필요한 3개만 타일로 세운다. 두 카드의 타일 순서는 **등록 · 진행 중 · 규모**로 맞춘다(VoLTE =
+등록·통화 중·RTP 풀, PTT = 등록·그룹·참여) — 같은 항목이 같은 자리에 있어야 나란히 놓고 비교된다.
+카드 안은 다른 카드와 같은 48×48 셀이라(§3.0.1) 머리줄·타일이 각각 블록 위젯이고 `[⚙]` 으로
+자리·크기를 바꿀 수 있다. 타일 모양은 지표 카드(`StatCard`)를 그대로 쓰고, 머리줄의 `서비스 현황`
+버튼이 상세로 넘긴다. 세는 축이 헷갈리는 지표에는 `StatCard.hint`(툴팁)로 뜻을 적는다 — PTT 의
+'등록'은 **번호(단말)** 축, 'PTT 그룹'은 **통화** 축이다. 파고들 때 필요한 값을 다 펼치는 서비스
+현황 카드(`cims.svc-volte-kpi` · `cims.svc-ptt-kpi`)와는 **다른 위젯**이고, 데이터는 같은 공유
+폴러(`stats.service.live`)를 쓴다. 지표 낱장 위젯 `cims.stat.*`
+(`statCards.tsx` 선언 표에서 생성, 데이터는 `stats.health` 공유 폴러 1개)는 축이 서로 달라 낱개로
+남아 있지만 **대시보드 seed 에서는 내렸다** — 같은 수치를 요약 카드가 대상별로 묶어 보여주기 때문이며,
+필요하면 편집기에서 다시 얹는다. 같은 이유로 `cims.active-voip`·`cims.active-ptt`(진행 중 표, 정본은
+서비스 현황·이력)와 `shape.time-bar`(시계열, 정본은 성능 통계)도 내렸다. 구 묶음 위젯 `cims.kpi` 만
+삭제하고 전개 규칙(splits)을 남겼다. `cims.active-alarms`·`cims.recent-events` 는 알람 타일+목록이 한
+카드로 붙어 있어야 훑을 수 있어 **그대로 유지**한다 — 낱개로 보는 건 장애 메뉴가 한다.
+데이터 정의는 `features/monitoring.md` §1.7~1.8.
 
 장애(fault) 메뉴 분해 결과 (운영자 확정):
 - `/alerts/active` = 심각도 타일 **5장이 각각 위젯**(`core.alarm-severity.<심각도>`) + `core.alarm-list`
