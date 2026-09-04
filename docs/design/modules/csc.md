@@ -667,7 +667,7 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 
 | 테이블 | 키 | 용도 |
 |--------|----|------|
-| `users` | `id INT AI PK` | 가입자 개인정보(name/email/org_id/details) + 콘솔 인증(login_id/password/role) |
+| `users` | `id INT AI PK` | 가입자(person) 개인정보(name/email/org_id/title/details) + **단말 IdMS 로그인 자격**(`login_id`/`passwd` — 콘솔 계정이 아니다, 콘솔 계정은 OAM `console_accounts`; role 컬럼 없음). IdMS 는 기동 시 `LOGIN_ACCOUNTS` 로 적재하고 admin API 의 가입자·가입 번호 변경 후 `refresh_login_accounts()` 로 재조회한다(재기동 없이 반영) |
 | `volte_subscriptions` | `id VARCHAR PK`(MSISDN) | VoLTE 회선: SIP 인증, dnd/forward. `user_id` → users(CASCADE) |
 | `user_rejects` | `id INT AI PK` | VoLTE 착신거부 목록. `subscription_id` → volte_subscriptions(CASCADE) |
 | `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증. `user_id` → users(CASCADE) |

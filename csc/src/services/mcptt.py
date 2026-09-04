@@ -379,23 +379,7 @@ def load_shared_data(config):
                         logger.log_info(f"mcptt_service_config load skipped (pre-migration?): {se}")
 
                     # IdMS 로그인 계정(login_id) — MCPTT ID 는 ptt(없으면 volte) msisdn 에서 tel:+ 파생.
-                    LOGIN_ACCOUNTS.clear()
-                    cur.execute(
-                        "SELECT u.id uid, u.login_id, u.passwd, u.name, "
-                        "(SELECT id FROM ptt_subscriptions WHERE user_id=u.id LIMIT 1) ptt, "
-                        "(SELECT id FROM volte_subscriptions WHERE user_id=u.id LIMIT 1) volte "
-                        "FROM users u WHERE u.login_id IS NOT NULL AND u.login_id<>''")
-                    for r in cur.fetchall():
-                        msisdn = r.get('ptt') or r.get('volte')
-                        if msisdn:
-                            mcptt_id = msisdn if str(msisdn).startswith('tel:') else (
-                                f"tel:{msisdn}" if str(msisdn).startswith('+') else f"tel:+{msisdn}")
-                        else:
-                            mcptt_id = f"login:{r['login_id']}"
-                        LOGIN_ACCOUNTS[r['login_id']] = {
-                            "password": r.get('passwd') or '', "user_id": r['uid'],
-                            "mcptt_id": mcptt_id, "name": r.get('name'),
-                        }
+                    _load_login_accounts(cur)
             db_users_loaded = True
             logger.log_info(f"Users loaded from DB: {len(USERS)} (login accounts: {len(LOGIN_ACCOUNTS)})")
         except Exception as e:
@@ -538,6 +522,57 @@ def load_shared_data(config):
                     logger.log_info(f"Loaded File Group: {uri}")
             except Exception as e:
                 logger.log_error(f"Error loading group {fpath}: {e}")
+
+def _load_login_accounts(cur) -> None:
+    """users.login_id/passwd → LOGIN_ACCOUNTS 전량 교체. 기동 적재와 admin API 변경 후 갱신이 같은 코드를 쓴다."""
+    cur.execute(
+        "SELECT u.id uid, u.login_id, u.passwd, u.name, "
+        "(SELECT id FROM ptt_subscriptions WHERE user_id=u.id LIMIT 1) ptt, "
+        "(SELECT id FROM volte_subscriptions WHERE user_id=u.id LIMIT 1) volte "
+        "FROM users u WHERE u.login_id IS NOT NULL AND u.login_id<>''")
+    fresh = {}
+    for r in cur.fetchall():
+        msisdn = r.get('ptt') or r.get('volte')
+        if msisdn:
+            mcptt_id = msisdn if str(msisdn).startswith('tel:') else (
+                f"tel:{msisdn}" if str(msisdn).startswith('+') else f"tel:+{msisdn}")
+        else:
+            mcptt_id = f"login:{r['login_id']}"
+        fresh[r['login_id']] = {
+            "password": r.get('passwd') or '', "user_id": r['uid'],
+            "mcptt_id": mcptt_id, "name": r.get('name'),
+        }
+    LOGIN_ACCOUNTS.clear()
+    LOGIN_ACCOUNTS.update(fresh)
+
+
+def refresh_login_accounts() -> bool:
+    """DB 에서 IdMS 로그인 계정을 재조회해 LOGIN_ACCOUNTS 에 반영한다.
+    admin API 의 가입자 login_id/passwd 변경·가입 번호 추가/삭제(MCPTT ID 파생)가 재기동 없이 로그인에
+    보이도록 admin.py 가 호출한다 (LOGIN_ACCOUNTS 는 기동 시 1회 적재 — 이 갱신이 없으면 재기동 전까지 stale)."""
+    if not _DB_CONFIG:
+        return False
+    try:
+        import pymysql, pymysql.cursors
+        conn = pymysql.connect(
+            host=_DB_CONFIG.get('Host', '127.0.0.1'),
+            port=int(_DB_CONFIG.get('Port', 3306)),
+            user=_DB_CONFIG.get('User', 'root'),
+            password=_DB_CONFIG.get('Password', ''),
+            database=_DB_CONFIG.get('Db', 'cims'),
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor,
+            connect_timeout=5,
+        )
+        with conn:
+            with conn.cursor() as cur:
+                _load_login_accounts(cur)
+        logger.log_info(f"refresh_login_accounts: {len(LOGIN_ACCOUNTS)} login accounts")
+        return True
+    except Exception as e:
+        logger.log_error(f"refresh_login_accounts failed: {e}")
+        return False
+
 
 def refresh_group_members(group_id: str) -> bool:
     """DB에서 해당 그룹 멤버를 재조회해 in-memory GROUPS 에 반영한다.

@@ -24,7 +24,7 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services.mcptt import (notify_csp, refresh_group_members, DEFAULT_USER_PROFILE,
+from services.mcptt import (notify_csp, refresh_group_members, refresh_login_accounts, DEFAULT_USER_PROFILE,
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml)
@@ -364,6 +364,7 @@ async def _create_user(body, config, payload=None):
                         "INSERT IGNORE INTO user_rejects (user_id, reject_id) VALUES (%s, %s)",
                         (person_id, rid)
                     )
+    refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=201, body={'id': person_id})
 
 
@@ -412,6 +413,7 @@ async def _update_user(person_id: str, body, config, payload=None):
     else:
         return HandlerResult(status=400, body={'error': 'No updatable fields provided'})
 
+    refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=200, body={'id': person_id})
 
 
@@ -431,6 +433,7 @@ async def _delete_user(person_id: str, config):
                 return HandlerResult(status=404, body={'error': 'User not found'})
     for sid in sub_ids:
         notify_csp("USER_CHANGED", f"tel:{sid}", "DELETE")
+    refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=200, body={'id': person_id})
 
 
@@ -452,6 +455,7 @@ async def _batch_delete_users(body, config):
         except Exception as e:
             errors.append({'id': pid, 'error': str(e)})
 
+    refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=200, body={
         'deleted': deleted, 'errors': errors
     })
@@ -712,6 +716,7 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 (msisdn, person_id, service_ref, imsi, ha1, sip_transport, dnd, forward_id, *pickup_vals, *aka[1])
             )
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "POST")
+    refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=201, body={'id': msisdn})
 
 
@@ -812,6 +817,7 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
     if svc == 'ptt':
         update_user_profile_cache(msisdn, None)  # 프로파일 행은 FK CASCADE 로 함께 삭제됨
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "DELETE")
+    refresh_login_accounts()  # IdMS 로그인 캐시 — login_id/passwd·MCPTT ID 파생 변경 즉시 반영
     return HandlerResult(status=200, body={'id': msisdn})
 
 
