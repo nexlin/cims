@@ -12,6 +12,10 @@ type Record_ = Record<string, unknown>
 // 한 페이지에서 여러 editor 가 열려도 중복 fetch 방지.
 type RefOptions = Record<string, string[]>
 const refOptionsCache: { current: RefOptions } = { current: {} }
+// 참조 컬렉션의 전체 레코드 — 교차 전제조건 표시용 (access_services 편집 시 local_nodes 의
+//   TLS/IPSEC 접속점 유무 판정). 이름 캐시와 같은 fetch 에서 채워지며 같은 신선도를 가진다.
+type RefRecords = Record<string, Record_[]>
+const refRecordsCache: { current: RefRecords } = { current: {} }
 
 export type ModuleConfigEditorSource =
   | { type: 'deployment'; deploymentId: number }
@@ -46,6 +50,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const [tagFilter, setTagFilter] = useState<string>('')
   const [refOpts, setRefOpts]     = useState<RefOptions>(refOptionsCache.current)
+  const [refRecords, setRefRecords] = useState<RefRecords>(refRecordsCache.current)
   const [drift, setDrift]       = useState<DriftInfo>({ detected: false, peers: [] })
   const refOptsLoaded = useRef(new Set<string>())
   // load() 가 편집 중 refetch 로 입력을 덮어쓰지 않도록 하는 가드 미러 —
@@ -78,18 +83,22 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
     Promise.all(todo.map(async c => {
       try {
         const r = await getter(c)
-        const names = (r.records as Record_[])
+        const recs = r.records as Record_[]
+        const names = recs
           .map(rec => String(rec['name'] || rec['id'] || ''))
           .filter(s => !!s)
-        return [c, names] as [string, string[]]
+        return [c, names, recs] as [string, string[], Record_[]]
       } catch {
-        return [c, [] as string[]] as [string, string[]]
+        return [c, [] as string[], [] as Record_[]] as [string, string[], Record_[]]
       }
     })).then(pairs => {
       const merge: RefOptions = { ...refOptionsCache.current }
-      for (const [c, v] of pairs) merge[c] = v
+      const mergeRecs: RefRecords = { ...refRecordsCache.current }
+      for (const [c, v, recs] of pairs) { merge[c] = v; mergeRecs[c] = recs }
       refOptionsCache.current = merge
+      refRecordsCache.current = mergeRecs
       setRefOpts({ ...merge })
+      setRefRecords({ ...mergeRecs })
     })
   }, [fields, source])
 
@@ -173,6 +182,19 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   }
 
   async function save() {
+    // 교차 전제조건 확인 (access_services · media_security.md §4): media_srtp=required 인데
+    //   TLS 도달 경로가 없으면 어떤 단말도 SRTP 를 못 켠다(CSP ERROR). 접속점을 나중에 열 수도
+    //   있으므로 차단이 아닌 확인으로 둔다.
+    if (collection.key === 'access_services') {
+      const localNodes = refRecordsCache.current['local_nodes'] || []
+      const bad = records
+        .filter(r => String(r['media_srtp'] || '').toLowerCase() === 'required'
+          && !accessServiceNodes(r, localNodes).some(n => String(n['protocol'] || '').toUpperCase() === 'TLS'))
+        .map(r => String(r['name'] || '?'))
+      if (bad.length && !confirm(
+        `media_srtp=required 인데 TLS 접속점이 없는 서비스: ${bad.join(', ')}\n` +
+        'TLS 접속점이 없으면 어떤 단말도 SRTP 를 켤 수 없습니다 (CSP ERROR 로그). 그래도 저장할까요?')) return
+    }
     setSaving(true)
     try {
       const r = await saveCollection(records)
@@ -312,6 +334,10 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
                 refOpts={refOpts}
                 onChange={v => updateField(editingIdx, f.key, v)} />
             ))}
+            {collection.key === 'access_services' && (
+              <AccessServiceSecurityHints record={records[editingIdx]}
+                localNodes={refRecords['local_nodes'] || []} />
+            )}
           </div>
         </div>
       )}
@@ -338,6 +364,51 @@ const ModuleConfigEditor = memo(
   (prev, next) => prev.source === next.source && prev.collection === next.collection
 )
 export default ModuleConfigEditor
+
+// ── 접속서비스 보안 전제조건 표시 (sip_access_security.md §3·§8.3 / media_security.md §4) ──
+//   media_srtp·sec_mechanisms 는 local_nodes 의 도달 경로가 전제인데, 조합 오류가 CSP 기동
+//   로그(ERROR)에서야 드러나므로 편집 시점에 상태를 보여준다. 판정 재료는 편집기 로드 시점의
+//   local_nodes 캐시 — 접속점을 방금 고쳤다면 [다시 로드] 후 확인.
+function accessServiceNodes(record: Record_, localNodes: Record_[]): Record_[] {
+  const restricted = record['inbound_policy'] === 'restricted'
+  const refs = Array.isArray(record['allowed_local_node_refs'])
+    ? new Set((record['allowed_local_node_refs'] as unknown[]).map(String)) : new Set<string>()
+  return localNodes.filter(n => n['enabled'] !== false
+    && (!restricted || refs.size === 0 || refs.has(String(n['name'] || ''))))
+}
+
+function AccessServiceSecurityHints({ record, localNodes }: { record: Record_; localNodes: Record_[] }) {
+  const nodes = accessServiceNodes(record, localNodes)
+  const byProto = (p: string) => nodes.filter(n => String(n['protocol'] || '').toUpperCase() === p)
+  const fmt = (ns: Record_[]) => ns.map(n => `${n['name']}(${n['bind_port']})`).join(', ')
+  const srtp = String(record['media_srtp'] || 'off').toLowerCase()
+  const mechs = Array.isArray(record['sec_mechanisms'])
+    ? (record['sec_mechanisms'] as unknown[]).map(String) : []
+  const tls = byProto('TLS')
+  const ipsec = byProto('IPSEC')
+  const lines: Array<{ ok: boolean; text: string }> = []
+  if (srtp !== 'off') {
+    lines.push(tls.length
+      ? { ok: true, text: `media_srtp=${srtp} — TLS 도달 경로: ${fmt(tls)} (TLS 접속 단말만 SRTP 반영)` }
+      : { ok: false, text: `media_srtp=${srtp} — 이 서비스에 TLS 접속점이 없어 어떤 단말도 SRTP 를 켤 수 없습니다${srtp === 'required' ? ' (required 무효 — CSP ERROR)' : ''}` })
+  }
+  if (mechs.includes('ipsec-3gpp')) {
+    lines.push(ipsec.length
+      ? { ok: true, text: `ipsec-3gpp — IPSEC 접속점: ${fmt(ipsec)} (AKA 가입자에게만 제시, NAT 미지원)` }
+      : { ok: false, text: 'ipsec-3gpp — IPSEC 접속점이 없어 제시 목록에서 제외됩니다 (Security-Server 에 tls 만)' })
+  }
+  if (lines.length === 0) return null
+  return (
+    <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4,
+                  borderTop: '1px solid var(--border)', paddingTop: 8 }}>
+      {lines.map((l, i) => (
+        <div key={i} style={{ fontSize: 11.5, color: l.ok ? 'var(--text-muted)' : 'var(--warning)' }}>
+          {l.ok ? '✓' : '⚠'} {l.text}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
   row: Record_

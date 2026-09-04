@@ -74,6 +74,11 @@ CMP 내부:  ingress unprotect → 평문 (믹스·디먹스·녹취·DTMF 감�
   강제일 때만 유효하다 — SDES 키가 SDP 에 실리기 때문(TS 33.328). 로드 시 채널 게이트
   (`sip_transport`, [sip_access_security.md §3](sip_access_security.md)) 미강제 서비스에
   required 가 걸리면 ERROR 로그(정책은 유지 — 집행은 채널 게이트 몫).
+- **콘솔 전제조건 표시**: 접속서비스 편집 폼은 `media_srtp≠off`/`ipsec-3gpp` 선택 시 그
+  서비스의 도달 경로(local_nodes 의 TLS/IPSEC 접속점)를 즉석 표시하고, `required` 인데
+  TLS 접속점이 없으면 저장 전에 확인을 받는다 — 위 ERROR 가 기동 로그에서야 드러나는 것을
+  편집 시점으로 앞당기는 표시일 뿐, 집행 규칙은 바뀌지 않는다 (`ModuleConfigEditor`
+  `AccessServiceSecurityHints`).
 - **수용 관대화(규격 밖, 의도된 예외)**: pjmedia 의 optional 모드처럼 `RTP/AVP` 에
   `a=crypto` 를 병기하는 best-effort offer 도 SRTP 로 수락한다(실무 interop 관례 —
   RFC 4568 은 SAVP 를 요구). CSP 가 내는 offer 는 어느 모드에서도 이 형태를 쓰지 않는다.
