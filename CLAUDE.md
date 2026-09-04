@@ -129,6 +129,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [ha_design.md](docs/design/ha_design.md) — HA 설계
 - [db_schema.md](docs/design/db_schema.md) — DB 스키마 (file_store SoT 포함)
 - [console_platform.md](docs/design/console_platform.md) — 콘솔 플랫폼
+- [console_design_system.md](docs/design/console_design_system.md) — 콘솔 디자인 시스템 — 시각 계약 정본 (Tailwind + shadcn/ui + Radix 전면 이행, Mantine 폐기. 토큰·컴포넌트 배리언트·상태 표현 규칙은 콘솔 **전 37 페이지 + 공통 셸**에 적용, 화면 구조·문구 스펙은 `/deploy/servers` 만 존재. 원본 자료 = `cims-design-handoff/`(읽기 전용), 핸드오프↔현재 코드 충돌 판정 §7·단계 이행 T0~T4 §8·미결 §9)
 - [oam_csc_split.md](docs/design/oam_csc_split.md) — OAM/CSC 분리 경계·인증·토폴로지
 - [csc_config_server.md](docs/design/csc_config_server.md) — CSC config server
 - [csp_control_plane_load_hardening.md](docs/design/csp_control_plane_load_hardening.md) — CSP 제어평면 부하 대책
@@ -199,6 +200,14 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
   레포 소스 직접 실행과 배포본은 구분한다.
 - 기능 작업 전 **관련 design/features 문서를 먼저 읽는다.** 문서와 코드가 어긋나면 코드를 정본으로
   보되, 그 차이를 문서 갱신으로 해소한다.
+
+**콘솔 UI (프론트)**
+- `ems/core/console/**` · `ems/service/console/**` 를 수정하기 전에
+  **[docs/design/console_design_system.md](docs/design/console_design_system.md) 를 먼저 읽는다.**
+  토큰 체계가 이행 중이라 임의로 색·간격을 넣으면 37개 페이지가 어긋난다.
+- 읽지 않아도 걸리는 것 셋: **hex 직접 사용 금지**(토큰만) · **이모지/텍스트 글리프 아이콘 금지**(Lucide 만) ·
+  **화면 스펙 없는 페이지의 구조·문구를 지어내지 않는다**(규칙만 적용, 나머지는 현행 유지).
+- 디자이너 원본 `cims-design-handoff/` 는 **읽기 전용**이다. 우리 결정은 위 정본 문서에만 쓴다.
 
 **기능 보완 = 코드 + 문서 동시 갱신**
 - 동작·인터페이스·설정 키를 바꾸면 해당 docs 문서를 같은 변경에서 갱신한다.

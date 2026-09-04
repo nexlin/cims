@@ -1,0 +1,178 @@
+/* ============================================================
+   CIMS Console — design tokens
+   Figma: 3nHGkPN8XAaHQxPNGn608v (01 Design style sheet)
+   내보낸 값 그대로입니다. 색을 새로 만들지 마세요.
+
+   두 층으로 되어 있습니다.
+   1) shadcn 표준 변수  — shadcn 컴포넌트가 그대로 집어갑니다
+   2) --cims-* 도메인 변수 — shadcn 에 없는 의미색(성공/경고/정보/중립 등)
+   ============================================================ */
+
+@layer base {
+  :root {
+    /* ---------- 1) shadcn 표준 ---------- */
+    --background: #f4f6fb;          /* bg/canvas */
+    --foreground: #161a2b;          /* text/default */
+
+    --card: #ffffff;                /* surface/default */
+    --card-foreground: #161a2b;
+    --popover: #ffffff;
+    --popover-foreground: #161a2b;
+
+    --primary: #4f46e5;             /* brand/solid */
+    --primary-foreground: #ffffff;
+
+    --secondary: #eef1f7;           /* neutral/soft */
+    --secondary-foreground: #475569;/* neutral/on-soft */
+
+    --muted: #f8fafc;               /* bg/subtle */
+    --muted-foreground: #64748b;    /* text/muted */
+
+    --accent: #f2f6fe;              /* surface/hover */
+    --accent-foreground: #161a2b;
+
+    --destructive: #dc2626;         /* danger/solid */
+    --destructive-foreground: #ffffff;
+
+    --border: #e5e8f1;              /* border/default */
+    --input: #e5e8f1;
+    --ring: #4f46e5;                /* brand/solid */
+
+    --radius: 0.5rem;               /* 8px = radius/md */
+
+    /* shadcn sidebar 블록용 */
+    --sidebar: #ffffff;             /* surface/sidebar */
+    --sidebar-foreground: #51607a;  /* text/sidebar */
+    --sidebar-primary: #4f46e5;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #f1f5fb;      /* surface/sidebar-hover */
+    --sidebar-accent-foreground: #161a2b;
+    --sidebar-border: #e9ecf3;      /* border/shell */
+    --sidebar-ring: #4f46e5;
+
+    /* ---------- 2) CIMS 도메인 ---------- */
+    --cims-brand-hover: #4338ca;
+    --cims-brand-soft: #eef2ff;
+    --cims-brand-on-soft: #4338ca;
+
+    --cims-success: #16a34a;
+    --cims-success-soft: #f0fdf4;
+    --cims-success-on-soft: #15803d;
+
+    --cims-warning: #d97706;
+    --cims-warning-soft: #fffbeb;
+    --cims-warning-on-soft: #b45309;
+
+    --cims-danger-hover: #b91c1c;
+    --cims-danger-soft: #fef2f2;
+    --cims-danger-on-soft: #b91c1c;
+
+    --cims-info: #2563eb;
+    --cims-info-soft: #eff6ff;
+    --cims-info-on-soft: #1d4ed8;
+
+    --cims-neutral: #64748b;
+    --cims-neutral-soft: #eef1f7;
+    --cims-neutral-on-soft: #475569;
+
+    --cims-surface-raised: #eef1f7;
+    --cims-surface-header: #ffffff;
+    --cims-border-strong: #cbd5e1;  /* 표 외곽선 */
+    --cims-text-header: #1e293b;
+    --cims-text-disabled: #94a3b8;  /* 비활성 라벨·아이콘 */
+
+    --cims-focus-ring: 0 0 0 3px rgb(79 70 229 / 0.35);
+    --cims-elevation-sm: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.07);
+    --cims-elevation-lg: 0 10px 30px rgb(16 24 40 / 0.13);
+  }
+
+  .dark {
+    --background: #0b0f17;
+    --foreground: #e6e9f1;
+
+    --card: #151c2b;
+    --card-foreground: #e6e9f1;
+    --popover: #151c2b;
+    --popover-foreground: #e6e9f1;
+
+    --primary: #6366f1;
+    --primary-foreground: #ffffff;
+
+    --secondary: #1d2636;
+    --secondary-foreground: #93a1b8;
+
+    --muted: #111827;
+    --muted-foreground: #93a1b8;
+
+    --accent: #1b2435;
+    --accent-foreground: #e6e9f1;
+
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+
+    --border: #2a3346;
+    --input: #2a3346;
+    --ring: #6366f1;
+
+    --sidebar: #0d1422;
+    --sidebar-foreground: #93a1b8;
+    --sidebar-primary: #6366f1;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #1b2435;
+    --sidebar-accent-foreground: #e6e9f1;
+    --sidebar-border: #222b3b;
+    --sidebar-ring: #6366f1;
+
+    --cims-brand-hover: #818cf8;
+    --cims-brand-soft: #22284b;
+    --cims-brand-on-soft: #a5b4fc;
+
+    --cims-success: #22c55e;
+    --cims-success-soft: #173733;
+    --cims-success-on-soft: #4ade80;
+
+    --cims-warning: #f59e0b;
+    --cims-warning-soft: #393126;
+    --cims-warning-on-soft: #fcd34d;
+
+    --cims-danger-hover: #f87171;
+    --cims-danger-soft: #382222;
+    --cims-danger-on-soft: #fca5a5;
+
+    --cims-info: #3b82f6;
+    --cims-info-soft: #1b2c4c;
+    --cims-info-on-soft: #93c5fd;
+
+    --cims-neutral: #93a1b8;
+    --cims-neutral-soft: #1d2636;
+    --cims-neutral-on-soft: #93a1b8;
+
+    --cims-surface-raised: #1d2636;
+    --cims-surface-header: #0d1422;
+    --cims-border-strong: #334155;
+    --cims-text-header: #e6e9f1;
+    --cims-text-disabled: #6b7794;
+
+    --cims-focus-ring: 0 0 0 3px rgb(99 102 241 / 0.35);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+      system-ui, "Malgun Gothic", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    letter-spacing: -0.01em;
+  }
+
+  code, kbd, samp, .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  /* 모든 인터랙티브 요소의 포커스 링 — 현재 웹에는 없습니다. 반드시 넣어주세요. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: var(--cims-focus-ring);
+  }
+}
