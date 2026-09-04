@@ -11,8 +11,11 @@
 - **관제사가 참여한 PTT 채널이 중심이다.** 화면은 두 세계 — **PTT(무전)** 와 **일반통화(VoLTE·외부망)** — 를 같은 폭의 좌우
   두 열로 놓고, 각 세계는 위 **운영 패널** · 아래 **실시간 내역 패널** 의 짝이다. 운영 패널 안은 다시 **왼쪽 운영 / 오른쓰 발신+주소록 /
   그 아래 메시지** 로 나뉜다(§3.1).
-- **네 패널 + 그룹원 띠.** ① PTT 채널 · ② PTT 내역 · ③ 일반통화 · ④ 일반통화 내역. 관제 그룹원(2~4명, 최대 10)의 통화 상태는
-  격자 보드가 아니라 ③ 첫 줄의 **상태 띠**다.
+- **도킹 패널 여덟 개 + 그룹원 띠.** 열마다 네 패널 — PTT 열: PTT 발신(주소록 포함) · PTT 채널 · PTT 메시지 · PTT 내역, 일반통화 열:
+  일반통화 발신(주소록·다이얼패드) · 일반통화(그룹원 띠·대기열·내 통화) · 메시지(SMS·LMS) · 일반통화 내역. 기본 배치는 열마다 위 행
+  [발신 | 채널/운영], 아래 행 [메시지 | 내역] 의 2×2 로, 왼쪽(발신·메시지) : 오른쪽(채널·운영·내역) 기본 폭 = 1 : 2 (§3.1 의 ①~④ 구획 번호는 이 여덟 패널의
+  묶음 이름으로 계속 쓴다: ① = PTT 발신+채널+메시지, ② = PTT 내역, ③ = 일반통화 발신+운영+메시지, ④ = 일반통화 내역). 관제 그룹원(2~4명,
+  최대 10)의 통화 상태는 격자 보드가 아니라 일반통화 패널 첫 줄의 **상태 띠**다.
 - **패널은 도킹 패널이다.** 머리를 끌어 위치를 바꾸고, 경계를 끌어 크기를 바꾸고, 별창으로 떼어 두 번째 모니터에 둔다. 기본 배치가
   이 문서의 캔버스이고, 배치는 프리셋으로 저장·잠금한다(§3.3).
 - **화면 한 장, 스크롤 없음.** 콘솔 관제 캔버스([../console_platform.md](../console_platform.md) §3.0)와 같은 규율 — 목록이 넘치면
@@ -326,7 +329,10 @@ sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오
 ```
 windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-windows, CommunityToolkit.Mvvm · Dirkster.AvalonDock · Microsoft.Data.Sqlite
   App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·네트워크 복귀 재등록. `--ui-preview` = 로그인 없이 메인(개발)
-  Shell/MainWindow.xaml         상단 바 · 배너 레이어 · AvalonDock 도킹 호스트(①②③④ LayoutAnchorable, ContentId ptt/pttlog/call/calllog) · 토스트 레이어
+  Shell/MainWindow.xaml         상단 바(드롭다운은 Popup — 시스템 메뉴는 테마 색을 못 입힌다) · 배너 레이어 · AvalonDock 도킹 호스트(패널 8개 LayoutAnchorable,
+                                ContentId pttcall/ptt/pttmsg/pttlog · callorig/call/sms/calllog, 열마다 [발신 | 채널·운영] / [메시지 | 내역]) · 토스트 레이어
+  Themes/Controls.xaml          기본 컨트롤(ScrollBar·ComboBox·CheckBox·RadioButton·TabControl·ToolTip·TextBox)의 테마 템플릿 — Light/Dark 브러시로만 그린다.
+                                도킹 크롬은 AvalonDock VS2013 Light/Dark 테마를 앱 테마와 함께 전환
                                 코드비하인드: 배치 잠금(CanMove/CanFloat)·프리셋(XmlLayoutSerializer → layout.json)·감청 창 관리·앱 포커스 핫키·트레이 최소화·종료 확인
   Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 본문, 위치 기억, 닫기 = 종료(확인), 세션 종료 → 3초 후 자동 닫힘
   Shell/LoginWindow · SettingsWindow · PromptWindow
@@ -369,9 +375,15 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 ## 13. 미해결 / 향후 과제
 
-- **그룹원·PTT 사용자·연락처 목록 공급** — `/provisioning/me` 의 `dispatch` 블록은 그룹·범위만 준다. 관제 그룹원 내선 목록, 사설콜·애드혹 대상 PTT
-  사용자 목록, 조직 연락처(외부망 번호)가 필요하다. 선택지: (a) `dispatch` 블록에 `members[]`·`monitorTargets[].members[]` 확장 + CSC 연락처 API, (b) RFC 4662
-  RLS 목록 구독(표준형 — 서버 §5.2 후속). 초기형은 GMS 그룹 문서 멤버·프로비저닝·로컬 CSV.
+- **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +
+  가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
+  **아직 서버가 주지 않는 것**: 관제 그룹원 내선 목록(`dispatch` 블록에 `members[]` 확장 또는 RFC 4662 RLS — 그 전까지 로컬 CSV `member` 태그),
+  외부망 연락처(CSV `external`).
+- **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 관제사가 채널(GMS 그룹)을 만들고 멤버를 바꾸는 기능. 서버 API 는 CSC `/api/v1/ptt/groups`
+  ([admin_api.md](../../api/admin_api.md) §6)가 있으나 관리 토큰(role) 기준이라 **관제사(operator) PKCE 토큰으로 호출 가능한지 권한 모델 확정이 먼저**(CSC 과제).
+  확정 후 ① PTT 주소록 [그룹] 탭에 [새 그룹]·행 [편집]·[삭제] 을 붙이고 GMS 목록·affiliation·conference 구독을 재적용한다.
+- **조직 구성 관리는 OAM 콘솔 몫** — 조직 트리(`organizations` 계층)·가입자 소속·관제 그룹 편성은 콘솔 `관리 > 조직/가입자/관제 그룹` 에서 편집하고
+  앱은 `/provisioning/directory`·`dispatch` 블록으로 결과만 받는다(콘솔 화면 과제, [../console_platform.md](../console_platform.md)).
 - **서버 전제 — 청취 범위 그룹의 conference 이벤트 구독 인가**(dispatch_center.md §10): ② 진행 중 행의 "진행/참가자 수" 소스. 그 전까지 청취 그룹 행은
   "미상".
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
@@ -400,6 +412,7 @@ Flexible Alerting pilot 로 가상·미등록·포크). **내선 4자리는 망 
 
 | 대상 | 값 | 비고 |
 |---|---|---|
+<<<<<<< HEAD
 | **관제석 가입자 ①** | person `disp01`(표시명 `관제1석`, 조직 TEAM01) · VoLTE 번호(msisdn=가입 id=imsi) `+82310001001` · `sip_transport=TLS` · 내선 라벨 `1001`(앱 주소록) · PTT 번호 **미등록**(PTT 채널 시험 전 `ptt` 가입 추가) | Digest+TLS 관제 소프트폰 규약([volte_supplementary_services.md](volte_supplementary_services.md)) — `sipHa1` 발급. 등록 완료(TLS 200 OK 실측). 콘솔 역할은 가입자에 없다(역할 = 콘솔 계정, [mcptt_authorization.md](mcptt_authorization.md) §2) |
 | **관제석 가입자 ②** | person `disp02`(`관제2석`) · VoLTE 번호 `+82310001002` · TLS · 내선 라벨 `1002` · PTT 번호 **미등록** | 같은 관제 그룹의 두 번째 자리 — 그룹원 띠·지정 픽업·대표번호 병렬 호출·상호 감청의 상대 |
 | **관제 그룹** | `id=dg-dispatch01` · `name=관제1` · **`pilot_id=+82310001000`**(대표번호) · `service_ref=volte` · `alert_mode=parallel` · `no_answer_sec=30` · `busy_members=skip` · `overflow_target=NULL` · `listen_visibility=hidden` · members `[{+82310001001, alert_order 0}, {+82310001002, 1}]` · **`monitor_scope=none` · `ptt_listen=none`(등록 시점)** — 감청·청취 시험 단계에서 콘솔 `구성 > 관제 그룹` 에서 manager 계정으로 `all` 로 올린다 | 등록 완료 — 대표번호 병렬 포크 실측(두 관제석 동시 링·한쪽 응답·다른 쪽 CANCEL). 멤버 편입으로 두 가입자의 `pickup_group=dg-dispatch01` 이 설정돼 있다 |
@@ -407,6 +420,15 @@ Flexible Alerting pilot 로 가상·미등록·포크). **내선 4자리는 망 
 | **PTT 그룹(멤버)** | 사내 시험 그룹 `g002` 에 두 PTT 번호를 멤버로 추가(`g001` 은 협력업체 단말이 포함돼 시험에 쓰지 않는다) | ① 채널 카드·MCData 그룹 스레드·affiliation·conference 구독 대상 |
 | **PTT 그룹(청취 범위)** | 두 관제석이 **멤버가 아닌** 그룹(예: `g003`) — 다른 PTT 단말 2대(`+82500000001/2` 등 기존 시험 계정) 멤버 | ② 진행 중 행 [청취] → PTT 청취 창(`ptt_listen=all`). 로스터 표시는 서버의 청취 범위 구독 인가(§13) 전까지 "미상" |
 | **감청·픽업 대상 통화 가입자** | 기존 VoLTE 시험 가입자 `+821300000001/2`(사내 단말) — 관제 그룹 **밖** | ④ 진행 중 행 [청취](Join, `monitor_scope=all`)·전달 대상. 대표번호 착신은 이들 중 하나가 `+82310001000` 으로 발신 |
+=======
+| **관제석 가입자 ①** | 로그인 `disp01` · 표시명 `관제1석` · VoLTE `+82310001001` · PTT `+82510001001` · `users.role=operator` (서버 등록 실제값 — 내선 `1002` 대신 E.164) | Digest+TLS 관제 소프트폰 규약([volte_supplementary_services.md](volte_supplementary_services.md)) — 서비스 `volte`·`ptt` 둘 다 프로비저닝, `sipHa1` 발급 |
+| **관제석 가입자 ②** | 로그인 `disp02` · 표시명 `관제2석` · VoLTE `+82310001002` · PTT `+82510001002`(같은 규칙 추정 — 서버 확인) · `role=operator` | 같은 관제 그룹의 두 번째 자리 — 그룹원 띠·지정 픽업·대표번호 병렬 호출·상호 감청의 상대 |
+| **관제 그룹** | `id=dg-dispatch01` · `name=관제1` · **`pilot_id=7000`**(대표번호) · `service_ref=<VoLTE 접속서비스 name>` · `alert_mode=parallel` · `no_answer_sec=30` · `busy_members=skip` · `overflow_target=NULL` · `monitor_scope=all` · `ptt_listen=all` · `listen_visibility=hidden` · members `[{1002, alert_order 0}, {1003, 1}]` | `POST /api/v1/dispatch-groups` (manager 토큰 — `monitor_scope≠none`). 멤버 편입으로 두 가입자의 `pickup_group=dg-dispatch01` 이 설정된다 |
+| **PTT 청취 자격** | 두 가입자의 `ptt_user_profile.allow_ambient_listening=1` | `PUT /api/v1/users/{pid}/ptt/{msisdn}/profile` — 없으면 PTT 청취 403 |
+| **PTT 그룹(멤버)** | 기존 `g001` 에 두 PTT 번호를 멤버로 추가 | ① 채널 카드·MCData 그룹 스레드·affiliation·conference 구독 대상 |
+| **PTT 그룹(청취 범위)** | `g002` — 두 관제석이 **멤버가 아닌** 그룹, 다른 PTT 단말 2대(`+82500000001/2` 등 기존 시험 계정) 멤버 | ② 진행 중 행 [청취] → PTT 청취 창(`ptt_listen=all`). 로스터 표시는 서버의 청취 범위 구독 인가(§13) 전까지 "미상" |
+| **감청·픽업 대상 통화 가입자** | 기존 VoLTE 시험 가입자 `+821300000001/2`(또는 내선 `1004`·`1005`) — 관제 그룹 **밖** | ④ 진행 중 행 [청취](Join, `monitor_scope=all`)·전달 대상. 대표번호 착신은 이들 중 하나가 `7000` 으로 발신 |
+>>>>>>> 28080300 (feat(dispatch): 관제조작반 패널 8개 재편·서버 전화번호부 주소록·다크 모드 컨트롤 테마·다이얼패드/제안 목록)
 | **접속서비스** | VoLTE `sip_transport=TLS`+`media_srtp=optional` 서비스 하나(대표번호 `service_ref` 가 이것), PTT 서비스 하나. 인증서는 개발 자가서명 → 앱 로그인 창 "서버 인증서 검증" 끔 또는 CA PEM 지정 | `pickup_feature_code`(기본 `**`)·`transfer_allowed=1` 확인 — 앱 설정의 피처코드와 일치해야 한다 |
 
 ### 14.2 앱이 서버에서 기대하는 것

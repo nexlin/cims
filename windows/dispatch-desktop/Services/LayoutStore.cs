@@ -27,6 +27,8 @@ public sealed class LayoutPreset
 
 public sealed class LayoutFile
 {
+    /// <summary>패널 구성 버전 — 패널 집합(ContentId)이 바뀌면 올린다. 다르면 저장된 도킹 XML 을 버리고 기본 배치로.</summary>
+    public int Version { get; set; } = LayoutStore.CurrentVersion;
     public string Current { get; set; } = LayoutStore.DefaultName;
     public List<LayoutPreset> Presets { get; set; } = new();
 }
@@ -34,6 +36,8 @@ public sealed class LayoutFile
 public sealed class LayoutStore
 {
     public const string DefaultName = "기본 배치";
+    /// <summary>2 = 패널 8개(발신·채널/운영·메시지·내역 × PTT/일반통화).</summary>
+    public const int CurrentVersion = 2;
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
@@ -58,6 +62,11 @@ public sealed class LayoutStore
                 File = JsonSerializer.Deserialize<LayoutFile>(System.IO.File.ReadAllText(AppPaths.Layout), Json) ?? new LayoutFile();
         }
         catch (Exception) { File = new LayoutFile(); }
+        if (File.Version != CurrentVersion)
+        {
+            foreach (var p in File.Presets) p.DockXml = "";          // 패널 집합이 바뀜 — 저장 배치는 못 쓴다(창 위치·잠금은 유지)
+            File.Version = CurrentVersion;
+        }
         _ = Get(DefaultName);
     }
 

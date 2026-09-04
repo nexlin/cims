@@ -5,7 +5,15 @@
              xmlns:m="clr-namespace:DispatchDesktop.Models"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:CallOriginateViewModel}">
-    <!-- ③ 오른쪽 위 — 일반통화 발신: 번호 필드 [발신][픽업 **] + [다이얼패드|주소록|최근] 중 하나 (§4.3) -->
+    <!-- ③ 오른쪽 위 — 일반통화 발신: 번호 필드 [발신][픽업 **] + [다이얼패드|주소록|최근] 중 하나 (§4.3).
+         주소록 = 서버 회사 전화번호부: 조직 범위 콤보 + 검색 + 조직별 섹션 헤더(Android 연락처 탭과 같은 동선) -->
+    <UserControl.Resources>
+        <CollectionViewSource x:Key="BookView" Source="{Binding Book}">
+            <CollectionViewSource.GroupDescriptions>
+                <PropertyGroupDescription PropertyName="OrgPath" />
+            </CollectionViewSource.GroupDescriptions>
+        </CollectionViewSource>
+    </UserControl.Resources>
     <Border Style="{StaticResource Sub}">
         <DockPanel>
             <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
@@ -22,14 +30,38 @@
             </Border>
             <DockPanel DockPanel.Dock="Top" Margin="10,8,10,6">
                 <Button DockPanel.Dock="Right" Style="{StaticResource Btn}" Content="{Binding PickupCode, StringFormat=픽업 {0}}" Command="{Binding PickupCommand}" Margin="6,0,0,0" ToolTip="그룹 픽업(당겨받기)" />
-                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Pri}" Content="발신" Command="{Binding DialCommand}" Margin="6,0,0,0" />
                 <TextBox Style="{StaticResource Field}" Text="{Binding Number, UpdateSourceTrigger=PropertyChanged}" KeyDown="Number_KeyDown" ToolTip="내선·번호·이름 또는 sip: URI" />
             </DockPanel>
+            <!-- 입력 중 주소록 제안 (이름·번호 부분 일치) -->
+            <Border DockPanel.Dock="Top" Margin="10,0,10,6" Style="{StaticResource Sub}" Background="{DynamicResource Brush.BgSoft}" Height="132">
+                <Grid>
+                <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="이름·번호를 입력하면 주소록에서 찾아 여기 보입니다 (Enter = 발신)" Visibility="{Binding HasSuggestions, Converter={StaticResource NotToVis}}" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Suggestions}" Margin="2">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:BookRow}">
+                            <Button Style="{StaticResource DropItem}" Padding="8,4" HorizontalContentAlignment="Stretch"
+                                    Command="{Binding DataContext.PickCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Pri}" Content="발신" Command="{Binding DataContext.CallSuggestionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                    <TextBlock VerticalAlignment="Center">
+                                        <Run Text="{Binding Name, Mode=OneWay}" FontWeight="Medium" /><Run Text="  " />
+                                        <Run Text="{Binding DisplayNumber, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" Foreground="{DynamicResource Brush.Muted}" /><Run Text="  " />
+                                        <Run Text="{Binding OrgPath, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource Brush.Muted}" />
+                                    </TextBlock>
+                                </DockPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                </ScrollViewer>
+                </Grid>
+            </Border>
             <Grid>
                 <!-- 다이얼패드 -->
                 <DockPanel Visibility="{Binding IsPad, Converter={StaticResource BoolToVis}}" Margin="10,0,10,8">
                     <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="{Binding PadHint}" Margin="0,0,0,6" />
-                    <UniformGrid Columns="3" Rows="4">
+                    <UniformGrid Columns="3" Rows="5">
                         <UniformGrid.Resources>
                             <Style TargetType="Button" BasedOn="{StaticResource Btn}">
                                 <Setter Property="Margin" Value="3" />
@@ -50,25 +82,52 @@
                         <Button Content="*" Command="{Binding PadCommand}" CommandParameter="*" />
                         <Button Content="0" Command="{Binding PadCommand}" CommandParameter="0" />
                         <Button Content="#" Command="{Binding PadCommand}" CommandParameter="#" />
+                        <Button Content="⌫" Command="{Binding BackspaceCommand}" ToolTip="한 글자 지움" />
+                        <Button Content="C" Command="{Binding ClearCommand}" ToolTip="전체 지움" />
+                        <Button Content="📞" Command="{Binding DialCommand}" ToolTip="발신" Foreground="{DynamicResource Brush.Talk}" />
                     </UniformGrid>
                 </DockPanel>
                 <!-- 주소록 -->
                 <DockPanel Visibility="{Binding IsBook, Converter={StaticResource BoolToVis}}">
-                    <TextBox DockPanel.Dock="Top" Style="{StaticResource Field}" Height="26" Margin="10,0,10,4" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="검색" />
-                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Book}">
+                    <DockPanel DockPanel.Dock="Top" Margin="10,0,10,4">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="⟳" Command="{Binding SyncCommand}" ToolTip="{Binding SyncText}" Margin="4,0,0,0" />
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" Text="{Binding BookCount}" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0" />
+                        <ComboBox Style="{StaticResource FieldCombo}" Height="26" Width="170" ItemsSource="{Binding OrgChoices}" SelectedItem="{Binding OrgScope}" DisplayMemberPath="Text" ToolTip="조직 범위(하위 포함)" />
+                        <TextBox Style="{StaticResource Field}" Height="26" Margin="6,0,0,0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="이름·번호 검색(조직 무시)" />
+                    </DockPanel>
+                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Source={StaticResource BookView}}">
+                        <ListBox.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.HeaderTemplate>
+                                    <DataTemplate>
+                                        <Border Style="{StaticResource LogHeader}">
+                                            <TextBlock Style="{StaticResource Hint}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Primary}">
+                                                <Run Text="{Binding Name, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding ItemCount, Mode=OneWay}" /><Run Text="명" />
+                                            </TextBlock>
+                                        </Border>
+                                    </DataTemplate>
+                                </GroupStyle.HeaderTemplate>
+                            </GroupStyle>
+                        </ListBox.GroupStyle>
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:BookRow}">
                                 <Border Style="{StaticResource LogRow}">
                                     <DockPanel>
-                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                             <Button Style="{StaticResource Btn.Xs}" Content="통화" Command="{Binding DataContext.CallCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
                                             <Button Style="{StaticResource Btn.Xs}" Content="문자" Command="{Binding DataContext.SmsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" IsEnabled="{Binding IsExternal, Converter={StaticResource Not}}" ToolTip="{Binding SmsTip}" />
                                         </StackPanel>
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="{Binding Name}" FontWeight="Medium" Margin="0,0,8,0" />
-                                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Number}" Margin="0,0,8,0" />
-                                            <Border Style="{StaticResource Badge}"><TextBlock Text="{Binding KindText}" /></Border>
-                                            <TextBlock Style="{StaticResource Muted}" Text="{Binding Status}" FontSize="12" Foreground="{DynamicResource Brush.Talk}" />
+                                        <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource Brush.PrimarySoft}" Margin="0,0,8,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Initial}" Foreground="{DynamicResource Brush.Primary}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" />
+                                        </Border>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Name}" FontWeight="Medium" Margin="0,0,6,0" />
+                                                <Border Style="{StaticResource Badge.Member}" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}"><TextBlock Text="그룹원" /></Border>
+                                                <Border Style="{StaticResource Badge}" Visibility="{Binding IsExternal, Converter={StaticResource BoolToVis}}"><TextBlock Text="외부" /></Border>
+                                                <TextBlock Style="{StaticResource Muted}" Text="{Binding Status}" FontSize="12" Foreground="{DynamicResource Brush.Talk}" />
+                                            </StackPanel>
+                                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding DisplayNumber}" ToolTip="{Binding Number}" FontSize="12" />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>

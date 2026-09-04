@@ -34,6 +34,7 @@ public partial class MainWindow : Window
         vm.Desk.LogoutRequested += (_, _) => { if (ConfirmLeave("로그아웃")) { _exitConfirmed = true; ((App)Application.Current).Logout(); } };
         vm.Desk.ExitRequested += (_, _) => { if (ConfirmLeave("종료")) { _exitConfirmed = true; ((App)Application.Current).ExitApp(); } };
 
+        ApplyDockTheme(vm.Session.Settings.Current.Theme);
         Loaded += (_, _) => { ApplyPreset(_layout.File.Current, restoreWindow: true); ApplyLock(vm.Desk.LayoutLocked); _vm.RestoreFromSnapshot(); };
         Closing += OnClosing;
         PreviewKeyDown += OnKeyDown;
@@ -101,14 +102,28 @@ public partial class MainWindow : Window
         _vm.Desk.RefreshPresets();
     }
 
+    /// <summary>드롭다운 팝업 항목 클릭 → 팝업 닫기(Command 는 그대로 실행된다).</summary>
+    private void DropItem_Click(object sender, RoutedEventArgs e)
+    {
+        MonDrop.IsChecked = false; PresetDrop.IsChecked = false; GearDrop.IsChecked = false;
+    }
+
+    /// <summary>도킹 크롬(패널 제목줄·탭·스플리터)을 앱 테마에 맞춘다 — AvalonDock VS2013 테마.</summary>
+    public void ApplyDockTheme(string theme)
+    {
+        Dock.Theme = theme == "dark" ? new AvalonDock.Themes.Vs2013DarkTheme() : new AvalonDock.Themes.Vs2013LightTheme();
+    }
+
     private void SavePreset_Click(object sender, RoutedEventArgs e)
     {
+        DropItem_Click(sender, e);
         var dlg = new PromptWindow("배치 프리셋 저장", "프리셋 이름", _layout.File.Current == LayoutStore.DefaultName ? "" : _layout.File.Current) { Owner = this };
         if (dlg.ShowDialog() == true && dlg.Value.Trim().Length > 0) SavePreset(dlg.Value.Trim());
     }
 
     private void DeletePreset_Click(object sender, RoutedEventArgs e)
     {
+        DropItem_Click(sender, e);
         string cur = _layout.File.Current;
         if (cur == LayoutStore.DefaultName) return;
         if (MessageBox.Show(this, $"프리셋 '{cur}' 을 삭제할까요?", "프리셋 삭제", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;

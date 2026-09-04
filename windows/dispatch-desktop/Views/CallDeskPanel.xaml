@@ -1,169 +1,150 @@
 <UserControl x:Class="DispatchDesktop.Views.CallDeskPanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:v="clr-namespace:DispatchDesktop.Views"
              xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:MainViewModel}">
-    <!-- ③ 일반통화 — 운영 (§4.3): 왼쪽 그룹원 띠·대기열·내 통화 | 오른쪽 발신 / SMS·LMS -->
+    <!-- 일반통화 패널 (§4.3 왼쪽) — 관제 그룹원 상태 띠 · 대표번호 대기열 · 내 통화 카드 -->
     <Border Style="{StaticResource Pnl}">
         <DockPanel>
             <Border DockPanel.Dock="Top" Style="{StaticResource PanelHeader}">
                 <DockPanel VerticalAlignment="Center">
-                    <TextBlock Style="{StaticResource H2}" Text="③ 일반통화" Margin="6,0,10,0" />
+                    <TextBlock Style="{StaticResource H2}" Text="일반통화" Margin="6,0,10,0" />
                     <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center">
                         <Run Text="{Binding Desk.Pilot, Mode=OneWay}" /><Run Text=" · VoLTE·외부망" />
                     </TextBlock>
                 </DockPanel>
             </Border>
-            <Grid Margin="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="545*" MinWidth="320" />
-                    <ColumnDefinition Width="6" />
-                    <ColumnDefinition Width="400*" MinWidth="320" />
-                </Grid.ColumnDefinitions>
-                <DockPanel DataContext="{Binding CallDesk}">
-                    <!-- 관제 그룹원 상태 띠 -->
-                    <Border DockPanel.Dock="Top" Style="{StaticResource Sub}" Margin="0,0,0,8">
-                        <DockPanel>
-                            <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
-                                <TextBlock Style="{StaticResource SectionHeader}" Text="관제 그룹원" />
-                            </Border>
-                            <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="관제 데스크 미배정 — 콘솔 관리 › 관제 그룹에서 배정" Visibility="{Binding HasDesk, Converter={StaticResource NotToVis}}" />
-                            <ItemsControl ItemsSource="{Binding Members}" Margin="8,6" Visibility="{Binding HasDesk, Converter={StaticResource BoolToVis}}">
-                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type vm:MemberChip}">
-                                        <Border x:Name="Chip" Style="{StaticResource Pill}" Margin="0,0,6,6" Cursor="Hand" MouseLeftButtonUp="Chip_Click">
-                                            <StackPanel Orientation="Horizontal">
-                                                <Ellipse x:Name="Dot" Style="{StaticResource Dot}" />
-                                                <TextBlock Text="{Binding Label}" FontWeight="Medium" />
-                                                <TextBlock x:Name="St" Style="{StaticResource Muted}" Margin="6,0,0,0" FontSize="12">
-                                                    <Run Text="{Binding StateText, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Peer, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" />
-                                                </TextBlock>
-                                                <Button Style="{StaticResource Btn.Xs}" Content="픽업" Command="{Binding PickupCommand}" Margin="6,0,0,0" Visibility="{Binding CanPickup, Converter={StaticResource BoolToVis}}" />
-                                                <Button Style="{StaticResource Btn.Xs.Mon}" Content="청취" Command="{Binding MonitorCommand}" Margin="6,0,0,0" Visibility="{Binding CanMonitor, Converter={StaticResource BoolToVis}}" />
-                                                <Border Style="{StaticResource Badge.Mon}" Margin="6,0,0,0" Visibility="{Binding IsMonitoring, Converter={StaticResource BoolToVis}}"><TextBlock Text="청취 중" /></Border>
+            <DockPanel DataContext="{Binding CallDesk}" Margin="8">
+                <!-- 관제 그룹원 상태 띠 -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource Sub}" Margin="0,0,0,8">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
+                            <TextBlock Style="{StaticResource SectionHeader}" Text="관제 그룹원" />
+                        </Border>
+                        <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="관제 데스크 미배정 — 콘솔 관리 › 관제 그룹에서 배정" Visibility="{Binding HasDesk, Converter={StaticResource NotToVis}}" />
+                        <ItemsControl ItemsSource="{Binding Members}" Margin="8,6" Visibility="{Binding HasDesk, Converter={StaticResource BoolToVis}}">
+                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:MemberChip}">
+                                    <Border x:Name="Chip" Style="{StaticResource Pill}" Margin="0,0,6,6" Cursor="Hand" MouseLeftButtonUp="Chip_Click">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Ellipse x:Name="Dot" Style="{StaticResource Dot}" />
+                                            <TextBlock Text="{Binding Label}" FontWeight="Medium" />
+                                            <TextBlock x:Name="St" Style="{StaticResource Muted}" Margin="6,0,0,0" FontSize="12">
+                                                <Run Text="{Binding StateText, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Peer, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" />
+                                            </TextBlock>
+                                            <Button Style="{StaticResource Btn.Xs}" Content="픽업" Command="{Binding PickupCommand}" Margin="6,0,0,0" Visibility="{Binding CanPickup, Converter={StaticResource BoolToVis}}" />
+                                            <Button Style="{StaticResource Btn.Xs.Mon}" Content="청취" Command="{Binding MonitorCommand}" Margin="6,0,0,0" Visibility="{Binding CanMonitor, Converter={StaticResource BoolToVis}}" />
+                                            <Border Style="{StaticResource Badge.Mon}" Margin="6,0,0,0" Visibility="{Binding IsMonitoring, Converter={StaticResource BoolToVis}}"><TextBlock Text="청취 중" /></Border>
+                                        </StackPanel>
+                                    </Border>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsIdle}" Value="True"><Setter TargetName="St" Property="Visibility" Value="Collapsed" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding IsRinging}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.RingSoft}" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding IsTalking}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkSoft}" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </DockPanel>
+                </Border>
+                <!-- 대기열 -->
+                <Border DockPanel.Dock="Top" Style="{StaticResource Sub}" Margin="0,0,0,8" Visibility="{Binding HasDesk, Converter={StaticResource BoolToVis}}">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}"><TextBlock Style="{StaticResource SectionHeader}" Text="대기열" /></Border>
+                        <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="{Binding EmptyQueueText}" Visibility="{Binding QueueEmpty, Converter={StaticResource BoolToVis}}" />
+                        <ItemsControl ItemsSource="{Binding Queue}" Margin="8,4">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:QueueItem}">
+                                    <Border Style="{StaticResource Card}" Background="{DynamicResource Brush.RingSoft}" BorderBrush="{DynamicResource Brush.Ring}" Margin="0,0,0,6">
+                                        <DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Button Style="{StaticResource Btn.Sm.Pri}" Content="응답" Command="{Binding AnswerCommand}" Margin="0,0,6,0" Visibility="{Binding RingsMe, Converter={StaticResource BoolToVis}}" />
+                                                <Button Style="{StaticResource Btn.Sm}" Content="당겨받기" Command="{Binding PickupCommand}" Visibility="{Binding IsRinging, Converter={StaticResource BoolToVis}}" />
                                             </StackPanel>
-                                        </Border>
-                                        <DataTemplate.Triggers>
-                                            <DataTrigger Binding="{Binding IsIdle}" Value="True"><Setter TargetName="St" Property="Visibility" Value="Collapsed" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding IsRinging}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ring}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.RingSoft}" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding IsTalking}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkSoft}" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></DataTrigger>
-                                        </DataTemplate.Triggers>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </DockPanel>
-                    </Border>
-                    <!-- 대기열 -->
-                    <Border DockPanel.Dock="Top" Style="{StaticResource Sub}" Margin="0,0,0,8" Visibility="{Binding HasDesk, Converter={StaticResource BoolToVis}}">
-                        <DockPanel>
-                            <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}"><TextBlock Style="{StaticResource SectionHeader}" Text="대기열" /></Border>
-                            <TextBlock Style="{StaticResource Hint}" Margin="10,8" Text="{Binding EmptyQueueText}" Visibility="{Binding QueueEmpty, Converter={StaticResource BoolToVis}}" />
-                            <ItemsControl ItemsSource="{Binding Queue}" Margin="8,4">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type vm:QueueItem}">
-                                        <Border Style="{StaticResource Card}" Background="{DynamicResource Brush.RingSoft}" BorderBrush="{DynamicResource Brush.Ring}" Margin="0,0,0,6">
-                                            <DockPanel>
-                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                                    <Button Style="{StaticResource Btn.Sm.Pri}" Content="응답" Command="{Binding AnswerCommand}" Margin="0,0,6,0" Visibility="{Binding RingsMe, Converter={StaticResource BoolToVis}}" />
-                                                    <Button Style="{StaticResource Btn.Sm}" Content="당겨받기" Command="{Binding PickupCommand}" Visibility="{Binding IsRinging, Converter={StaticResource BoolToVis}}" />
-                                                </StackPanel>
+                                            <StackPanel>
+                                                <TextBlock><Run Text="🔔 " /><Run Text="{Binding Caller, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" → " /><Run Text="{Binding Pilot, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
+                                                <TextBlock Style="{StaticResource Muted}" FontSize="12" Visibility="{Binding IsRinging, Converter={StaticResource BoolToVis}}"><Run Text="울림 " /><Run Text="{Binding Ringing, Mode=OneWay}" /></TextBlock>
+                                                <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="{Binding AnsweredBy}" Visibility="{Binding IsAnswered, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </DockPanel>
+                </Border>
+                <!-- 내 통화 -->
+                <Border Style="{StaticResource Sub}">
+                    <DockPanel>
+                        <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}"><TextBlock Style="{StaticResource SectionHeader}" Text="내 통화" /></Border>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="8,6">
+                                <TextBlock Style="{StaticResource Hint}" Text="통화 없음" Visibility="{Binding Calls.Count, Converter={StaticResource ZeroToVis}}" />
+                                <ItemsControl ItemsSource="{Binding Calls}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:CallCard}">
+                                            <Border x:Name="Card" Style="{StaticResource Card}">
                                                 <StackPanel>
-                                                    <TextBlock><Run Text="🔔 " /><Run Text="{Binding Caller, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" → " /><Run Text="{Binding Pilot, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
-                                                    <TextBlock Style="{StaticResource Muted}" FontSize="12" Visibility="{Binding IsRinging, Converter={StaticResource BoolToVis}}"><Run Text="울림 " /><Run Text="{Binding Ringing, Mode=OneWay}" /></TextBlock>
-                                                    <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="{Binding AnsweredBy}" Visibility="{Binding IsAnswered, Converter={StaticResource BoolToVis}}" />
+                                                    <DockPanel>
+                                                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Mono}" Text="{Binding Session.Elapsed, Converter={StaticResource Elapsed}}" />
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock x:Name="Icon" Text="▶" Margin="0,0,6,0" Foreground="{DynamicResource Brush.Talk}" />
+                                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Margin="0,0,8,0" ToolTip="{Binding Session.Info.RemoteUri}" />
+                                                            <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding PathBadge, Converter={StaticResource StrToVis}}"><TextBlock Text="{Binding PathBadge}" /></Border>
+                                                            <TextBlock Style="{StaticResource Muted}" Text="{Binding Session.StateText}" />
+                                                        </StackPanel>
+                                                    </DockPanel>
+                                                    <TextBlock Style="{StaticResource Hint}" Text="{Binding Session.TransferNote}" Visibility="{Binding HasTransferNote, Converter={StaticResource BoolToVis}}" />
+                                                    <WrapPanel Margin="0,6,0,0">
+                                                        <Button Style="{StaticResource Btn.Xs.Pri}" Content="응답" Command="{Binding AnswerCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs.Danger}" Content="거절" Command="{Binding RejectCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="보류" Command="{Binding HoldCommand}" Margin="0,0,4,4" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="재개" Command="{Binding ResumeCommand}" Margin="0,0,4,4" Visibility="{Binding CanResume, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="음소거" Command="{Binding MuteCommand}" Margin="0,0,4,4" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="DTMF" Command="{Binding DtmfCommand}" Margin="0,0,4,4" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="🎧/🔊" Command="{Binding RouteCommand}" IsEnabled="{Binding CanToggleRoute}" Margin="0,0,4,4" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="전달 ▾" Command="{Binding OpenTransferCommand}" Margin="0,0,4,4" Visibility="{Binding CanTransfer, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs.Pri}" Content="전달 완결" Command="{Binding CompleteCommand}" Margin="0,0,4,4" Visibility="{Binding CanComplete, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs}" Content="취소" Command="{Binding CancelConsultCommand}" Margin="0,0,4,4" Visibility="{Binding IsConsult, Converter={StaticResource BoolToVis}}" />
+                                                        <Button Style="{StaticResource Btn.Xs.Danger}" Content="종료" Command="{Binding HangupCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource NotToVis}}" />
+                                                    </WrapPanel>
+                                                    <!-- 전달 대상 입력 -->
+                                                    <Border Visibility="{Binding TransferOpen, Converter={StaticResource BoolToVis}}" Background="{DynamicResource Brush.BgSoft}" CornerRadius="6" Padding="8,6" Margin="0,4,0,0">
+                                                        <StackPanel>
+                                                            <DockPanel>
+                                                                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="상담 전달" Command="{Binding ConsultCommand}" Margin="4,0,0,0" />
+                                                                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Pri}" Content="전달" Command="{Binding TransferBlindCommand}" Margin="4,0,0,0" />
+                                                                <TextBox Style="{StaticResource Field}" Height="26" Text="{Binding TransferTarget, UpdateSourceTrigger=PropertyChanged}" ToolTip="전달 대상 내선·번호" />
+                                                            </DockPanel>
+                                                            <ItemsControl ItemsSource="{Binding DataContext.MemberExtensions, RelativeSource={RelativeSource AncestorType=DockPanel}}" Margin="0,4,0,0">
+                                                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate>
+                                                                        <Button Style="{StaticResource Btn.Xs}" Content="{Binding}" Margin="0,0,4,4" Command="{Binding DataContext.PickMemberCommand, RelativeSource={RelativeSource AncestorType=Border}}" CommandParameter="{Binding}" />
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Border>
                                                 </StackPanel>
-                                            </DockPanel>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </DockPanel>
-                    </Border>
-                    <!-- 내 통화 -->
-                    <Border Style="{StaticResource Sub}">
-                        <DockPanel>
-                            <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}"><TextBlock Style="{StaticResource SectionHeader}" Text="내 통화" /></Border>
-                            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                <StackPanel Margin="8,6">
-                                    <TextBlock Style="{StaticResource Hint}" Text="통화 없음" Visibility="{Binding Calls.Count, Converter={StaticResource ZeroToVis}}" />
-                                    <ItemsControl ItemsSource="{Binding Calls}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate DataType="{x:Type vm:CallCard}">
-                                                <Border x:Name="Card" Style="{StaticResource Card}">
-                                                    <StackPanel>
-                                                        <DockPanel>
-                                                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Mono}" Text="{Binding Session.Elapsed, Converter={StaticResource Elapsed}}" />
-                                                            <StackPanel Orientation="Horizontal">
-                                                                <TextBlock x:Name="Icon" Text="▶" Margin="0,0,6,0" Foreground="{DynamicResource Brush.Talk}" />
-                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Margin="0,0,8,0" ToolTip="{Binding Session.Info.RemoteUri}" />
-                                                                <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding PathBadge, Converter={StaticResource StrToVis}}"><TextBlock Text="{Binding PathBadge}" /></Border>
-                                                                <TextBlock Style="{StaticResource Muted}" Text="{Binding Session.StateText}" />
-                                                            </StackPanel>
-                                                        </DockPanel>
-                                                        <TextBlock Style="{StaticResource Hint}" Text="{Binding Session.TransferNote}" Visibility="{Binding HasTransferNote, Converter={StaticResource BoolToVis}}" />
-                                                        <WrapPanel Margin="0,6,0,0">
-                                                            <Button Style="{StaticResource Btn.Xs.Pri}" Content="응답" Command="{Binding AnswerCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs.Danger}" Content="거절" Command="{Binding RejectCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="보류" Command="{Binding HoldCommand}" Margin="0,0,4,4" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="재개" Command="{Binding ResumeCommand}" Margin="0,0,4,4" Visibility="{Binding CanResume, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="음소거" Command="{Binding MuteCommand}" Margin="0,0,4,4" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="DTMF" Command="{Binding DtmfCommand}" Margin="0,0,4,4" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="🎧/🔊" Command="{Binding RouteCommand}" IsEnabled="{Binding CanToggleRoute}" Margin="0,0,4,4" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="전달 ▾" Command="{Binding OpenTransferCommand}" Margin="0,0,4,4" Visibility="{Binding CanTransfer, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs.Pri}" Content="전달 완결" Command="{Binding CompleteCommand}" Margin="0,0,4,4" Visibility="{Binding CanComplete, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs}" Content="취소" Command="{Binding CancelConsultCommand}" Margin="0,0,4,4" Visibility="{Binding IsConsult, Converter={StaticResource BoolToVis}}" />
-                                                            <Button Style="{StaticResource Btn.Xs.Danger}" Content="종료" Command="{Binding HangupCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource NotToVis}}" />
-                                                        </WrapPanel>
-                                                        <!-- 전달 대상 입력 -->
-                                                        <Border Visibility="{Binding TransferOpen, Converter={StaticResource BoolToVis}}" Background="{DynamicResource Brush.BgSoft}" CornerRadius="6" Padding="8,6" Margin="0,4,0,0">
-                                                            <StackPanel>
-                                                                <DockPanel>
-                                                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="상담 전달" Command="{Binding ConsultCommand}" Margin="4,0,0,0" />
-                                                                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Pri}" Content="전달" Command="{Binding TransferBlindCommand}" Margin="4,0,0,0" />
-                                                                    <TextBox Style="{StaticResource Field}" Height="26" Text="{Binding TransferTarget, UpdateSourceTrigger=PropertyChanged}" ToolTip="전달 대상 내선·번호" />
-                                                                </DockPanel>
-                                                                <ItemsControl ItemsSource="{Binding DataContext.MemberExtensions, RelativeSource={RelativeSource AncestorType=DockPanel}}" Margin="0,4,0,0">
-                                                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                                                    <ItemsControl.ItemTemplate>
-                                                                        <DataTemplate>
-                                                                            <Button Style="{StaticResource Btn.Xs}" Content="{Binding}" Margin="0,0,4,4" Command="{Binding DataContext.PickMemberCommand, RelativeSource={RelativeSource AncestorType=Border}}" CommandParameter="{Binding}" />
-                                                                        </DataTemplate>
-                                                                    </ItemsControl.ItemTemplate>
-                                                                </ItemsControl>
-                                                            </StackPanel>
-                                                        </Border>
-                                                    </StackPanel>
-                                                </Border>
-                                                <DataTemplate.Triggers>
-                                                    <DataTrigger Binding="{Binding Session.IsHeld}" Value="True"><Setter TargetName="Icon" Property="Text" Value="⏸" /><Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.HeldSoft}" /></DataTrigger>
-                                                    <DataTrigger Binding="{Binding Session.IsIncoming}" Value="True"><Setter TargetName="Icon" Property="Text" Value="🔔" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
-                                                    <DataTrigger Binding="{Binding Session.IsOutgoing}" Value="True"><Setter TargetName="Icon" Property="Text" Value="↗" /><Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource Brush.Muted}" /></DataTrigger>
-                                                    <DataTrigger Binding="{Binding Session.IsActive}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
-                                                </DataTemplate.Triggers>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </StackPanel>
-                            </ScrollViewer>
-                        </DockPanel>
-                    </Border>
-                </DockPanel>
-                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" IsEnabled="{Binding Desk.LayoutLocked, Converter={StaticResource Not}}" />
-                <Grid Grid.Column="2">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" MinHeight="160" />
-                        <RowDefinition Height="6" />
-                        <RowDefinition Height="*" MinHeight="160" />
-                    </Grid.RowDefinitions>
-                    <v:CallOriginateView DataContext="{Binding CallOriginate}" />
-                    <GridSplitter Grid.Row="1" Height="6" HorizontalAlignment="Stretch" Background="Transparent" IsEnabled="{Binding Desk.LayoutLocked, Converter={StaticResource Not}}" />
-                    <v:MessagesView Grid.Row="2" DataContext="{Binding Sms}" Title="SMS · LMS" Subtitle="SIP MESSAGE text/plain · 외부망 게이트웨이 미구성" InputTip="문자… (70자 초과 시 LMS)" />
-                </Grid>
-            </Grid>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Session.IsHeld}" Value="True"><Setter TargetName="Icon" Property="Text" Value="⏸" /><Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.HeldSoft}" /></DataTrigger>
+                                                <DataTrigger Binding="{Binding Session.IsIncoming}" Value="True"><Setter TargetName="Icon" Property="Text" Value="🔔" /><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
+                                                <DataTrigger Binding="{Binding Session.IsOutgoing}" Value="True"><Setter TargetName="Icon" Property="Text" Value="↗" /><Setter TargetName="Icon" Property="Foreground" Value="{DynamicResource Brush.Muted}" /></DataTrigger>
+                                                <DataTrigger Binding="{Binding Session.IsActive}" Value="True"><Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
+            </DockPanel>
         </DockPanel>
     </Border>
 </UserControl>

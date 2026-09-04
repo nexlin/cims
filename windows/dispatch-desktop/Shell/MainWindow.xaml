@@ -8,71 +8,85 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:MainViewModel}"
         Style="{StaticResource Window.Base}" Title="CIMS 관제조작반" Width="1920" Height="1080" MinWidth="1200" MinHeight="700" WindowStartupLocation="CenterScreen">
-    <!-- 주 창 (§3.1): 상단 바 · 배너 레이어 · 도킹 호스트(①②③④) · 토스트 레이어 -->
+    <!-- 주 창 (§3.1): 상단 바 · 배너 레이어 · 도킹 호스트(패널 8개 = 열마다 [발신 | 채널/운영] / [메시지 | 내역]) · 토스트 레이어 -->
     <Grid>
         <DockPanel>
             <!-- 상단 바 -->
             <Border DockPanel.Dock="Top" Height="56" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="14,0">
                 <DockPanel VerticalAlignment="Center" DataContext="{Binding Desk}">
-                    <!-- 오른쪽: 배치·오디오·핫키·시각·설정 -->
+                    <!-- 오른쪽: 감청 칩·배치·프리셋·오디오·핫키·시각·설정 -->
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                        <Border Style="{StaticResource Pill}" Background="{DynamicResource Brush.MonSoft}" BorderBrush="{DynamicResource Brush.Mon}" Visibility="{Binding HasMonitors, Converter={StaticResource BoolToVis}}" ToolTip="열린 감청·청취 창 — 클릭하면 복원">
-                            <Menu Background="Transparent">
-                                <MenuItem ItemsSource="{Binding Monitors}" Foreground="{DynamicResource Brush.Mon}" FontWeight="SemiBold">
-                                    <MenuItem.Header>
-                                        <TextBlock><Run Text="감청 중 " /><Run Text="{Binding MonitorCount, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock>
-                                    </MenuItem.Header>
-                                    <MenuItem.ItemContainerStyle>
-                                        <Style TargetType="MenuItem">
-                                            <Setter Property="Header" Value="{Binding Title}" />
-                                            <Setter Property="Command" Value="{Binding DataContext.ActivateMonitorCommand, RelativeSource={RelativeSource AncestorType=Menu}}" />
-                                            <Setter Property="CommandParameter" Value="{Binding}" />
-                                        </Style>
-                                    </MenuItem.ItemContainerStyle>
-                                </MenuItem>
-                            </Menu>
-                        </Border>
-                        <Button Style="{StaticResource Btn.Sm}" Command="{Binding ToggleLockCommand}" Margin="0,0,4,0" ToolTip="배치 잠금 — 잠긴 동안 패널 이동·스플리터 비활성">
-                            <Button.Content>
-                                <TextBlock>
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="🔓 배치" />
-                                            <Style.Triggers><DataTrigger Binding="{Binding LayoutLocked}" Value="True"><Setter Property="Text" Value="🔒 배치" /></DataTrigger></Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Button.Content>
+                        <!-- 감청 중 N ▾ -->
+                        <Grid Visibility="{Binding HasMonitors, Converter={StaticResource BoolToVis}}" Margin="0,0,8,0">
+                            <ToggleButton x:Name="MonDrop" Style="{StaticResource DropButton}" Foreground="{DynamicResource Brush.Mon}" BorderBrush="{DynamicResource Brush.Mon}" Background="{DynamicResource Brush.MonSoft}" ToolTip="열린 감청·청취 창 — 클릭하면 복원">
+                                <TextBlock FontWeight="SemiBold"><Run Text="감청 중 " /><Run Text="{Binding MonitorCount, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock>
+                            </ToggleButton>
+                            <Popup IsOpen="{Binding IsChecked, ElementName=MonDrop}" PlacementTarget="{Binding ElementName=MonDrop}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                                <Border Style="{StaticResource DropPanel}">
+                                    <ItemsControl ItemsSource="{Binding Monitors}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Style="{StaticResource DropItem}" Content="{Binding Title}" Click="DropItem_Click"
+                                                        Command="{Binding DataContext.ActivateMonitorCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <!-- 배치 잠금 -->
+                        <Button Style="{StaticResource Btn.Sm}" Command="{Binding ToggleLockCommand}" Margin="0,0,4,0" ToolTip="배치 잠금 — 잠긴 동안 패널 이동·별창 비활성">
+                            <TextBlock>
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="🔓 배치" />
+                                        <Style.Triggers><DataTrigger Binding="{Binding LayoutLocked}" Value="True"><Setter Property="Text" Value="🔒 배치" /></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </Button>
-                        <Menu Background="Transparent" VerticalAlignment="Center" Margin="0,0,10,0">
-                            <MenuItem Padding="8,4" FontSize="12.5">
-                                <MenuItem.Header><TextBlock><Run Text="{Binding CurrentPreset, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock></MenuItem.Header>
-                                <MenuItem Header="프리셋 전환" ItemsSource="{Binding Presets}">
-                                    <MenuItem.ItemContainerStyle>
-                                        <Style TargetType="MenuItem">
-                                            <Setter Property="Header" Value="{Binding}" />
-                                            <Setter Property="Command" Value="{Binding DataContext.ApplyPresetCommand, RelativeSource={RelativeSource AncestorType=Menu}}" />
-                                            <Setter Property="CommandParameter" Value="{Binding}" />
-                                        </Style>
-                                    </MenuItem.ItemContainerStyle>
-                                </MenuItem>
-                                <MenuItem Header="현재 배치 저장…" Click="SavePreset_Click" />
-                                <MenuItem Header="현재 프리셋 삭제" Click="DeletePreset_Click" />
-                                <Separator />
-                                <MenuItem Header="기본 배치로 복원" Command="{Binding ApplyPresetCommand}" CommandParameter="기본 배치" />
-                            </MenuItem>
-                        </Menu>
+                        <!-- 프리셋 ▾ -->
+                        <Grid Margin="0,0,10,0">
+                            <ToggleButton x:Name="PresetDrop" Style="{StaticResource DropButton}">
+                                <TextBlock><Run Text="{Binding CurrentPreset, Mode=OneWay}" /><Run Text=" ▾" /></TextBlock>
+                            </ToggleButton>
+                            <Popup IsOpen="{Binding IsChecked, ElementName=PresetDrop}" PlacementTarget="{Binding ElementName=PresetDrop}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+                                <Border Style="{StaticResource DropPanel}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource Hint}" Text="프리셋 전환" Margin="10,4,10,2" />
+                                        <ItemsControl ItemsSource="{Binding Presets}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Style="{StaticResource DropItem}" Content="{Binding}" Click="DropItem_Click"
+                                                            Command="{Binding DataContext.ApplyPresetCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,4" />
+                                        <Button Style="{StaticResource DropItem}" Content="현재 배치 저장…" Click="SavePreset_Click" />
+                                        <Button Style="{StaticResource DropItem}" Content="현재 프리셋 삭제" Click="DeletePreset_Click" />
+                                        <Button Style="{StaticResource DropItem}" Content="기본 배치로 복원" Click="DropItem_Click" Command="{Binding ApplyPresetCommand}" CommandParameter="기본 배치" />
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+                        </Grid>
                         <Button Style="{StaticResource Btn.Sm}" Content="{Binding AudioSummary}" ToolTip="{Binding AudioTip}" Command="{Binding OpenSettingsCommand}" Margin="0,0,6,0" />
                         <Border Style="{StaticResource Pill}"><TextBlock Text="{Binding PttHotKey}" FontSize="12" /></Border>
                         <TextBlock Style="{StaticResource Mono}" Text="{Binding Clock}" FontSize="16" VerticalAlignment="Center" Margin="4,0,10,0" />
-                        <Menu Background="Transparent" VerticalAlignment="Center">
-                            <MenuItem Header="⚙" FontSize="16" Padding="6,2">
-                                <MenuItem Header="설정…" Command="{Binding OpenSettingsCommand}" />
-                                <Separator />
-                                <MenuItem Header="로그아웃" Command="{Binding LogoutCommand}" />
-                                <MenuItem Header="종료" Command="{Binding ExitCommand}" />
-                            </MenuItem>
-                        </Menu>
+                        <!-- ⚙ ▾ -->
+                        <Grid>
+                            <ToggleButton x:Name="GearDrop" Style="{StaticResource DropButton}" Content="⚙" FontSize="15" Padding="7,0" />
+                            <Popup IsOpen="{Binding IsChecked, ElementName=GearDrop}" PlacementTarget="{Binding ElementName=GearDrop}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" HorizontalOffset="-140">
+                                <Border Style="{StaticResource DropPanel}">
+                                    <StackPanel>
+                                        <Button Style="{StaticResource DropItem}" Content="설정…" Click="DropItem_Click" Command="{Binding OpenSettingsCommand}" />
+                                        <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,4" />
+                                        <Button Style="{StaticResource DropItem}" Content="로그아웃" Click="DropItem_Click" Command="{Binding LogoutCommand}" />
+                                        <Button Style="{StaticResource DropItem}" Content="종료" Click="DropItem_Click" Command="{Binding ExitCommand}" />
+                                    </StackPanel>
+                                </Border>
+                            </Popup>
+                        </Grid>
                     </StackPanel>
                     <!-- 왼쪽: 신원·등록 점등 -->
                     <StackPanel Orientation="Horizontal">
@@ -126,33 +140,61 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <!-- 도킹 호스트 -->
+            <!-- 도킹 호스트 — 패널 8개. 열 = PTT / 일반통화, 행 = [발신 | 채널·운영] / [메시지 | 내역] -->
             <ad:DockingManager x:Name="Dock" AllowMixedOrientation="True" Margin="6">
                 <ad:LayoutRoot>
                     <ad:LayoutPanel Orientation="Horizontal">
                         <ad:LayoutPanel Orientation="Vertical" DockWidth="*">
-                            <ad:LayoutAnchorablePane DockHeight="600*">
-                                <ad:LayoutAnchorable ContentId="ptt" Title="⋮⋮ ① PTT 채널" CanClose="False" CanHide="False" CanAutoHide="True">
-                                    <v:PttChannelsPanel />
-                                </ad:LayoutAnchorable>
-                            </ad:LayoutAnchorablePane>
-                            <ad:LayoutAnchorablePane DockHeight="406*">
-                                <ad:LayoutAnchorable ContentId="pttlog" Title="⋮⋮ ② PTT 내역" CanClose="False" CanHide="False" CanAutoHide="True">
-                                    <v:PttActivityPanel DataContext="{Binding PttActivity}" />
-                                </ad:LayoutAnchorable>
-                            </ad:LayoutAnchorablePane>
+                            <ad:LayoutPanel Orientation="Horizontal" DockHeight="580*">
+                                <ad:LayoutAnchorablePane DockWidth="1*">
+                                    <ad:LayoutAnchorable ContentId="pttcall" Title="⋮⋮ PTT 발신 · 주소록" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:PttOriginateView DataContext="{Binding PttOriginate}" />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                                <ad:LayoutAnchorablePane DockWidth="2*">
+                                    <ad:LayoutAnchorable ContentId="ptt" Title="⋮⋮ PTT 채널" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:PttChannelsPanel />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                            </ad:LayoutPanel>
+                            <ad:LayoutPanel Orientation="Horizontal" DockHeight="420*">
+                                <ad:LayoutAnchorablePane DockWidth="1*">
+                                    <ad:LayoutAnchorable ContentId="pttmsg" Title="⋮⋮ PTT 메시지" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:MessagesView DataContext="{Binding McData}" Title="MCData 메시지" Subtitle="SDS" />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                                <ad:LayoutAnchorablePane DockWidth="2*">
+                                    <ad:LayoutAnchorable ContentId="pttlog" Title="⋮⋮ PTT 내역" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:PttActivityPanel DataContext="{Binding PttActivity}" />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                            </ad:LayoutPanel>
                         </ad:LayoutPanel>
                         <ad:LayoutPanel Orientation="Vertical" DockWidth="*">
-                            <ad:LayoutAnchorablePane DockHeight="600*">
-                                <ad:LayoutAnchorable ContentId="call" Title="⋮⋮ ③ 일반통화" CanClose="False" CanHide="False" CanAutoHide="True">
-                                    <v:CallDeskPanel />
-                                </ad:LayoutAnchorable>
-                            </ad:LayoutAnchorablePane>
-                            <ad:LayoutAnchorablePane DockHeight="406*">
-                                <ad:LayoutAnchorable ContentId="calllog" Title="⋮⋮ ④ 일반통화 내역" CanClose="False" CanHide="False" CanAutoHide="True">
-                                    <v:CallActivityPanel DataContext="{Binding CallActivity}" />
-                                </ad:LayoutAnchorable>
-                            </ad:LayoutAnchorablePane>
+                            <ad:LayoutPanel Orientation="Horizontal" DockHeight="580*">
+                                <ad:LayoutAnchorablePane DockWidth="1*">
+                                    <ad:LayoutAnchorable ContentId="callorig" Title="⋮⋮ 일반통화 발신 · 주소록" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:CallOriginateView DataContext="{Binding CallOriginate}" />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                                <ad:LayoutAnchorablePane DockWidth="2*">
+                                    <ad:LayoutAnchorable ContentId="call" Title="⋮⋮ 일반통화" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:CallDeskPanel />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                            </ad:LayoutPanel>
+                            <ad:LayoutPanel Orientation="Horizontal" DockHeight="420*">
+                                <ad:LayoutAnchorablePane DockWidth="1*">
+                                    <ad:LayoutAnchorable ContentId="sms" Title="⋮⋮ 메시지 (SMS·LMS)" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:MessagesView DataContext="{Binding Sms}" Title="SMS · LMS" Subtitle="SIP MESSAGE text/plain · 외부망 게이트웨이 미구성" InputTip="문자… (70자 초과 시 LMS)" />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                                <ad:LayoutAnchorablePane DockWidth="2*">
+                                    <ad:LayoutAnchorable ContentId="calllog" Title="⋮⋮ 일반통화 내역" CanClose="False" CanHide="False" CanAutoHide="True">
+                                        <v:CallActivityPanel DataContext="{Binding CallActivity}" />
+                                    </ad:LayoutAnchorable>
+                                </ad:LayoutAnchorablePane>
+                            </ad:LayoutPanel>
                         </ad:LayoutPanel>
                     </ad:LayoutPanel>
                 </ad:LayoutRoot>
@@ -165,7 +207,7 @@
                     <Border x:Name="T" Style="{StaticResource Card}" BorderBrush="{DynamicResource Brush.BorderStrong}" Margin="0,6,0,0">
                         <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.18" /></Border.Effect>
                         <DockPanel>
-                            <Button DockPanel.Dock="Right" Content="×" Background="Transparent" BorderThickness="0" Cursor="Hand" VerticalAlignment="Top"
+                            <Button DockPanel.Dock="Right" Content="×" Background="Transparent" BorderThickness="0" Cursor="Hand" VerticalAlignment="Top" Foreground="{DynamicResource Brush.Muted}"
                                     Command="{Binding DataContext.DismissToastCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
                             <StackPanel>
                                 <TextBlock Text="{Binding Text}" TextWrapping="Wrap" FontWeight="Medium" />

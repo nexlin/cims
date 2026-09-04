@@ -308,6 +308,7 @@
     </Style>
     <Style TargetType="ComboBox" x:Key="FieldCombo">
         <Setter Property="Height" Value="30" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="FontSize" Value="13" />
     </Style>
     <Style TargetType="PasswordBox" x:Key="FieldPw">
@@ -323,6 +324,7 @@
     <!-- 목록 — 선택 강조 없는 얇은 ListBox -->
     <Style TargetType="ListBox" x:Key="PlainList">
         <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />

@@ -1,4 +1,5 @@
 // ① 오른쪽 위 — PTT 발신 [사설콜|애드혹] + PTT 주소록 [사용자|그룹] (§4.1).
+// 사용자 목록 = 서버 회사 전화번호부(service=ptt, 조직 범위·섹션 — Android PTT 연락처 탭과 같은 동선) + CSV ptt 항목.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -12,10 +13,12 @@ public sealed partial class PttUserRow : ObservableObject
     public Contact Contact { get; }
     [ObservableProperty] private bool _checked;
     [ObservableProperty] private string _status = "";
-    public PttUserRow(Contact c) { Contact = c; }
-    public string Name => Contact.Name.Length > 0 ? Contact.Name : Contact.Number;
-    public string NumberShort => Contact.Number.Length > 4 ? "…" + Contact.Number[^4..] : Contact.Number;
+    public PttUserRow(Contact c, string displayNumber, string orgPath) { Contact = c; DisplayNumber = displayNumber; OrgPath = orgPath; }
+    public string Name => Contact.Name.Length > 0 ? Contact.Name : DisplayNumber;
     public string Number => Contact.Number;
+    public string DisplayNumber { get; }
+    public string OrgPath { get; }
+    public string Initial => Name.Length > 0 ? Name[..1] : "?";
 }
 
 public sealed partial class PttOriginateViewModel : ObservableObject
@@ -31,9 +34,14 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [ObservableProperty] private bool _fullDuplex;
     [ObservableProperty] private bool _emergency;
     [ObservableProperty] private string _search = "";
+    [ObservableProperty] private OrgChoice? _orgScope;
+    public ObservableCollection<OrgChoice> OrgChoices { get; } = new();
     public ObservableCollection<PttUserRow> Users { get; } = new();
     public ObservableCollection<PttUserRow> AdhocSelection { get; } = new();
     public ObservableCollection<GroupInfo> Groups { get; } = new();
+    /// <summary>사설콜 대상 입력과 일치하는 PTT 사용자(이름·번호 부분 일치, 최대 8).</summary>
+    public ObservableCollection<PttUserRow> Suggestions { get; } = new();
+    public bool HasSuggestions => Suggestions.Count > 0;
 
     public event EventHandler<GroupInfo>? MessageGroupRequested;
     public event EventHandler<string>? MessageUserRequested;
@@ -53,18 +61,44 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public bool IsPrivate => Mode == "private";
     public bool IsAdhoc => Mode == "adhoc";
     public bool IsUsers => Book == "users";
+    public bool IsGroups => Book == "groups";
+    public bool IsPadBook => Book == "pad";
     public string StartText => IsPrivate ? "사설콜 발신" : $"애드혹 발신 ({AdhocSelection.Count}명)";
     public bool CanStart => IsPrivate ? Target.Trim().Length > 0 : AdhocSelection.Count > 0;
+    public string UserCount => $"{Users.Count}명";
 
     partial void OnModeChanged(string v) { OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
-    partial void OnBookChanged(string v) => OnPropertyChanged(nameof(IsUsers));
-    partial void OnTargetChanged(string v) => OnPropertyChanged(nameof(CanStart));
+    partial void OnBookChanged(string v) { OnPropertyChanged(nameof(IsUsers)); OnPropertyChanged(nameof(IsGroups)); OnPropertyChanged(nameof(IsPadBook)); }
+    partial void OnTargetChanged(string v) { OnPropertyChanged(nameof(CanStart)); UpdateSuggestions(); }
+
+    private void UpdateSuggestions()
+    {
+        Suggestions.Clear();
+        string q = Target.Trim();
+        if (q.Length > 0 && IsPrivate)
+        {
+            string qn = DirectoryService.Normalize(q);
+            foreach (var u in _allUsers.Where(u => u.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                               || (qn.Length > 0 && (DirectoryService.Normalize(u.Number).Contains(qn) || DirectoryService.Normalize(u.DisplayNumber).Contains(qn))))
+                                     .Take(8))
+                Suggestions.Add(u);
+        }
+        OnPropertyChanged(nameof(HasSuggestions));
+    }
     partial void OnSearchChanged(string v) => Filter();
+    partial void OnOrgScopeChanged(OrgChoice? v) => Filter();
 
     private void Reload()
     {
+        var d = _s.Directory;
         _allUsers.Clear();
-        foreach (var c in _s.Directory.PttUsers) _allUsers.Add(new PttUserRow(c));
+        foreach (var c in d.PttUsers.Where(c => DirectoryService.Normalize(c.Number) != DirectoryService.Normalize(_s.MyPttNumber)))
+            _allUsers.Add(new PttUserRow(c, d.DisplayNumber(c.Number), d.OrgPath(c.OrgCode)));
+        string? keep = OrgScope?.Code;
+        OrgChoices.Clear();
+        OrgChoices.Add(new OrgChoice("", "전체 조직", _allUsers.Count));
+        foreach (var (code, label, count) in d.OrgTree(ContactKind.PttUser)) OrgChoices.Add(new OrgChoice(code, label, count));
+        OrgScope = OrgChoices.FirstOrDefault(o => o.Code == keep) ?? OrgChoices[0];
         Filter();
         ReloadGroups();
         RefreshStatus();
@@ -79,9 +113,14 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     private void Filter()
     {
         string q = Search.Trim();
+        var scope = _s.Directory.OrgScope(OrgScope?.Code ?? "");
+        IEnumerable<PttUserRow> rows = _allUsers;
+        if (q.Length > 0) rows = rows.Where(u => u.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || u.Number.Contains(q, StringComparison.OrdinalIgnoreCase) || u.DisplayNumber.Contains(q, StringComparison.OrdinalIgnoreCase));
+        else if (scope is not null) rows = rows.Where(u => scope.Contains(u.Contact.OrgCode));
+        var order = _s.Directory.OrgTree(ContactKind.PttUser).Select((o, i) => (o.Code, i)).ToDictionary(x => x.Code, x => x.i);
         Users.Clear();
-        foreach (var u in _allUsers.Where(u => q.Length == 0 || u.Name.Contains(q, StringComparison.OrdinalIgnoreCase) || u.Number.Contains(q, StringComparison.OrdinalIgnoreCase)))
-            Users.Add(u);
+        foreach (var u in rows.OrderBy(u => order.TryGetValue(u.Contact.OrgCode, out int i) ? i : int.MaxValue).ThenBy(u => u.Name, StringComparer.CurrentCulture)) Users.Add(u);
+        OnPropertyChanged(nameof(UserCount));
     }
 
     /// <summary>사용자 현재 상태 — 어느 채널에 참여/발언 중인지(로스터·세션에서 파생).</summary>
@@ -92,7 +131,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
             string st = "";
             foreach (var g in _s.Groups)
             {
-                var e = g.Roster.FirstOrDefault(r => Converters.UserPartConverter.UserPart(r.Uri) == u.Number);
+                var e = g.Roster.FirstOrDefault(r => DirectoryService.Normalize(Converters.UserPartConverter.UserPart(r.Uri)) == DirectoryService.Normalize(u.Number));
                 if (e is null) continue;
                 var sess = _s.SessionOfGroup(g.Id);
                 st = sess is not null && sess.Speaker == u.Name ? $"{g.Name} 발언" : $"{g.Name} 참여";
@@ -111,8 +150,9 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         if (IsPrivate)
         {
             string t = Target.Trim();
-            var byName = _allUsers.FirstOrDefault(u => u.Name.Equals(t, StringComparison.OrdinalIgnoreCase));
-            var r = _s.StartPrivateCall(byName?.Number ?? t, FullDuplex, Emergency);
+            var row = _allUsers.FirstOrDefault(u => u.Name.Equals(t, StringComparison.OrdinalIgnoreCase))
+                      ?? _allUsers.FirstOrDefault(u => DirectoryService.Normalize(u.DisplayNumber) == DirectoryService.Normalize(t));
+            var r = _s.StartPrivateCall(row?.Number ?? t, FullDuplex, Emergency);
             if (r.Ok) { Target = ""; Emergency = false; }
         }
         else
@@ -122,7 +162,12 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         }
     }
 
+    [RelayCommand] private void Pad(string key) { Mode = "private"; Target += key; }
+    [RelayCommand] private void Backspace() { if (Target.Length > 0) Target = Target[..^1]; }
+    [RelayCommand] private void Clear() => Target = "";
+    [RelayCommand] private void Pick(PttUserRow u) { Target = u.DisplayNumber; Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
     [RelayCommand] private void PrivateTo(PttUserRow u) { Mode = "private"; Target = u.Name; Start(); }
+    [RelayCommand] private void PrivateFullTo(PttUserRow u) { Mode = "private"; FullDuplex = true; Target = u.Name; Start(); }
     [RelayCommand]
     private void ToggleAdhoc(PttUserRow u)
     {

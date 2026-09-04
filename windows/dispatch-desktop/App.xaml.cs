@@ -89,6 +89,7 @@ public partial class App : Application
         if (current is not null && current.Source!.OriginalString.EndsWith(uri.OriginalString, StringComparison.OrdinalIgnoreCase)) return;
         if (current is not null) dict.Remove(current);
         dict.Insert(0, new ResourceDictionary { Source = uri });
+        _main?.ApplyDockTheme(theme);
     }
 
     /// <summary>로그아웃 — 등록 해제·토큰 폐기 후 로그인 창으로.</summary>

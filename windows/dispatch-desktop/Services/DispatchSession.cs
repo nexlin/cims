@@ -177,8 +177,27 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var p = await _csc.FetchProfileAsync(_tokens.AccessToken, ct);
         if (!p.Ok) return p.WithoutValue();
         Profile = p.Value;
-        Log.Info($"profile {p.Value.LoginId} services={string.Join(",", p.Value.Services.Select(s => s.Kind))} desk={p.Value.Dispatch.Present}");
+        Directory.CountryCode = p.Value.CountryCode;
+        Log.Info($"profile {p.Value.LoginId} services={string.Join(",", p.Value.Services.Select(s => s.Kind))} desk={p.Value.Dispatch.Present} " +
+                 $"group={p.Value.Dispatch.GroupId} pilot={p.Value.Dispatch.PilotId} monitor={p.Value.Dispatch.MonitorScope} pttListen={p.Value.Dispatch.PttListen} cc={p.Value.CountryCode}");
         return Result.Success;
+    }
+
+    /// <summary>회사 전화번호부 동기화 — `/provisioning/directory?service=volte|ptt`, ETag 로 304 면 다운로드 생략(android_ue_provisioning.md §3-1).</summary>
+    public async Task SyncDirectoryAsync(CancellationToken ct = default)
+    {
+        if (_csc is null || _tokens is null) return;
+        var csc = _csc; string token = _tokens.AccessToken;
+        foreach (string service in new[] { "volte", "ptt" })
+        {
+            if (service == "ptt" && Ptt is null && PttService is null) continue;
+            string? etag = Directory.Etag(service);
+            var r = await Task.Run(() => csc.XcapGet(token, $"/provisioning/directory?service={service}", "application/json", etag), ct);
+            if (!r.Ok) { Log.Warn($"directory {service}: {r}"); if (Directory.Etag(service) is null) Notify.Warn($"전화번호부({service}) 동기화 실패", r.ToString()); continue; }
+            if (r.Value.NotModified) { Directory.TouchServer(); Log.Info($"directory {service}: not modified"); continue; }
+            if (Directory.ApplyServer(service, r.Value.Body, r.Value.ETag)) Log.Info($"directory {service}: {Directory.Contacts.Count(c => c.IsServer)} entries etag={r.Value.ETag}");
+            else Log.Warn($"directory {service}: bad json");
+        }
     }
 
     /// <summary>엔진 기동 → 계정 추가·등록 → 관제 범위 적용 → 그룹 목록·affiliation·로스터 구독.</summary>
@@ -210,6 +229,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             if (!reg.Ok) Notify.Error($"{sp.Kind.ToUpperInvariant()} 등록 요청 실패", reg.ToString());
         }
         OnPropertyChanged(nameof(CanSms));
+        await SyncDirectoryAsync();
 
         // 관제 범위: 그룹원·대표번호 dialog 구독 (§4.3)
         if (HasDesk && Volte is not null)
@@ -577,6 +597,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     // ── 로스터 ──
     private void OnRoster(RosterUpdate r)
     {
+        Log.Info($"roster {r.GroupId} full={r.Full} " + string.Join(",", r.Users.Select(u => u.Uri + ":" + u.Status)));
         var g = Groups.FirstOrDefault(x => x.Id == r.GroupId);
         if (g is null) { g = new GroupInfo(r.GroupId, r.GroupId, r.GroupId, 0) { IsMember = false }; Groups.Add(g); }
         var before = g.Roster.Where(e => e.Status == "connected").Select(e => e.Uri).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -608,6 +629,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     // ── dialog (BLF·대기열·④) ──
     private void OnDialog(DialogInfo d)
     {
+        Log.Info($"dialog watched={d.Watched} id={d.Id} state={d.State} dir={d.Direction} remote={d.RemoteIdentity} callid={d.CallId} full={d.Full}");
         string key = d.Watched + "|" + d.Id;
         var row = Dialogs.FirstOrDefault(x => x.Key == key);
         if (d.State == "terminated")
