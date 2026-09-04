@@ -14,12 +14,20 @@ import { GRID_COLS, GRID_ROWS } from '@core/widgets/gridLayout'
 import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
 
 // 서비스 통계(VoLTE/PTT) — 조회 조건 / 지표 카드 낱개 / 추이 · 분포.
-const svcLayout = (source: string, stats: number, trend: string, dist: string): WidgetPlacement[] => {
-  const w = Math.floor(GRID_COLS / stats)
+//
+// 지표는 소스가 선언한 kpi 항목의 **인덱스 배열**로 받는다. 개수를 세는 방식이었을 때 소스가
+// 8개를 선언해도 4를 세면 뒤 항목(평균 통화시간·평균 접속지연)이 조용히 잘렸다 — 선언은 8,
+// 화면은 4, 양쪽 다 자기 기준으로는 정상이라 어긋나도 아무 데서도 경고가 나지 않는다.
+// 인덱스로 적으면 무엇을 어느 자리에 두는지가 선언에 보이고, 화면 순서가 소스의 선언 순서에
+// 매이지도 않는다. 마지막 타일이 나머지 폭을 흡수한다(48 이 항목 수로 안 나눠떨어질 때).
+const svcLayout = (source: string, items: number[], trend: string, dist: string): WidgetPlacement[] => {
+  const w = Math.floor(GRID_COLS / items.length)
   return [
     { widgetId: 'core.page-filter', x: 0, y: 0, w: GRID_COLS, h: 4 },
-    ...Array.from({ length: stats }, (_, i) => ({
-      widgetId: 'shape.stat', x: i * w, y: 4, w, h: 7, config: { source, item: i },
+    ...items.map((item, i) => ({
+      widgetId: 'shape.stat', x: i * w, y: 4,
+      w: i === items.length - 1 ? GRID_COLS - w * i : w, h: 7,
+      config: { source, item },
     })),
     { widgetId: 'shape.time-bar', x: 0, y: 11, w: 26, h: 37, config: { source, title: trend } },
     { widgetId: 'shape.distribution', x: 26, y: 11, w: 22, h: 37, config: { source, title: dist } },
@@ -50,8 +58,12 @@ const ifaceLayout: WidgetPlacement[] = [
 
 // 화면별 카드 안 기본 배치 — 세로 합 = GRID_ROWS = **화면 한 장**.
 export const STATS_SCREEN_LAYOUTS = {
-  volte: svcLayout('cims.svc.volte', 4, '호 시도 추이', '종료 사유 분포'),
-  ptt: svcLayout('cims.svc.ptt', 2, '그룹콜 수 추이', '그룹별 사용 빈도'),
+  // 호 시도 · 성공 · 성공률 · NER · 소통률 · 완료율 · 평균 통화시간 · 평균 접속지연
+  //   비율 앞에 그 분자(성공=성립 건수)를 둔다 — 같은 100% 라도 2건과 2만건은 다른 정보다.
+  //   NER 은 성공률 바로 옆이다: 분모가 같아서(시도) 나란히 놓아야 두 값의 차이가 읽힌다.
+  volte: svcLayout('cims.svc.volte', [0, 6, 1, 7, 2, 3, 4, 5], '호 시도 추이', '종료 사유 분포'),
+  // PTT 는 실패한 시도가 원천에 없어 성공률·완료율을 못 낸다(sip_statistics.md §8 Y6).
+  ptt: svcLayout('cims.svc.ptt', [0, 1, 2, 3], '그룹콜 수 추이', '그룹별 사용 빈도'),
   interfaces: ifaceLayout,
 } as const
 
