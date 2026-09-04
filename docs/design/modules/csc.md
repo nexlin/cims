@@ -813,7 +813,7 @@ csc/
 │   ├── services/                   # 비-HTTP 서비스 (7개)
 │   │   ├── mcptt.py                # MCPTT IdMS/GMS/CMS/KMS + notify_csp/_psp
 │   │   ├── idms_storage.py         # IdMS auth_code/refresh_token 저장
-│   │   ├── config_cache.py         # csc.json 부팅 시 1회 로드
+│   │   ├── config_cache.py         # CSP 런타임 정의 캐시 (읽을 때 원본 지문 확인)
 │   │   ├── file_store.py           # 파일 기반 저장
 │   │   ├── ha_lookup.py            # HA 멤버 조회
 │   │   ├── logger.py               # 비동기 배치 로그 writer

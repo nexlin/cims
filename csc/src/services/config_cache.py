@@ -240,6 +240,7 @@ class CscConfigCache:
         self._lock = threading.RLock()
         self._data: Dict[str, List[dict]] = {e: [] for e in ENTITIES}
         self._meta: Dict[str, dict] = {e: {} for e in ENTITIES}
+        self._sig: Dict[str, tuple] = {e: () for e in ENTITIES}
         self._read_only = False
         os.makedirs(cache_dir, exist_ok=True)
 
@@ -268,10 +269,12 @@ class CscConfigCache:
 
     def get_all(self, entity: str) -> List[dict]:
         with self._lock:
+            self._ensure_fresh(entity)
             return list(self._data.get(entity, []))
 
     def get_one(self, entity: str, entity_id: int) -> Optional[dict]:
         with self._lock:
+            self._ensure_fresh(entity)
             for row in self._data.get(entity, []):
                 if int(row.get("id", -1)) == int(entity_id):
                     return dict(row)
@@ -281,19 +284,78 @@ class CscConfigCache:
         with self._lock:
             return dict(self._meta.get(entity, {}))
 
+    # ── SoT 신선도 ────────────────────────────────────────────
+    #  접속 서비스(entity 'service')처럼 **CSC 가 쓰지 않는** 정의는 OAM 이 SoT 디렉터리에
+    #  직접 반영한다. 그 변경을 CSC 에 알리는 신호는 없다 — 기동 시 1회만 읽으면 재기동
+    #  전까지 옛 값을 물고 있게 되고, 접속 서비스를 새로 만든 직후 그 서비스의 가입자
+    #  자격(H(A1)) 유도가 계속 'unknown service' 로 실패한다(실측).
+    #  그래서 **읽을 때 원본 지문을 보고 바뀌었으면 다시 읽는다.** 읽기 경로가 관리자
+    #  조작뿐이라 stat 비용은 문제되지 않고, 별도 폴링 스레드도 필요 없다.
+
+    def _source_signature(self, entity: str) -> tuple:
+        """SoT 디렉터리의 변경 지문 — (파일명, mtime_ns, size) 정렬 목록.
+
+        디렉터리 mtime 만으로는 부족하다 — 파일 추가·삭제는 잡아도 기존 파일의 제자리
+        교체(atomic rename)는 놓칠 수 있다. 읽지 못하는 경로(미생성·권한)는 빈 지문이라,
+        나중에 생기면 그 자체가 변경으로 잡힌다.
+        """
+        domain = _DOMAIN_BY_ENTITY.get(entity)
+        if not domain:
+            return ()
+        from services import ha_lookup
+        d = ha_lookup.collection_dir(self._runtime_config, domain)
+        rows = []
+        try:
+            with os.scandir(d) as it:
+                for ent in it:
+                    if ent.name.startswith(".") or not ent.name.endswith(".json"):
+                        continue
+                    st = ent.stat()
+                    rows.append((ent.name, st.st_mtime_ns, st.st_size))
+        except OSError:
+            return ()
+        return tuple(sorted(rows))
+
+    def _ensure_fresh(self, entity: str) -> None:
+        """원본이 바뀌었으면 그 entity 만 다시 읽는다 (호출측은 이미 락 안).
+
+        지문을 **적재 전에** 뜬다 — 적재 중에 원본이 또 바뀌면 옛 지문이 남아 다음 읽기가
+        한 번 더 적재한다. 반대 순서면 그 변경을 영구히 놓친다.
+        실패는 삼킨다 — 신선도 확인이 읽기 자체를 깨뜨리면 안 된다(옛 값이라도 답하는 편이
+        낫다). 스냅샷 파일 기록 실패도 메모리 갱신을 되돌리지 않는다.
+        """
+        try:
+            sig = self._source_signature(entity)
+            if sig == self._sig.get(entity):
+                return
+            self._data[entity] = self._load_entity_from_store(entity)
+            self._sig[entity] = sig
+            logger.log_info(f"CscConfigCache: {entity} 원본 변경 감지 → 재적재 "
+                            f"({len(self._data[entity])}건)")
+            try:
+                self._flush_entity_to_file(entity)
+            except Exception as e:
+                logger.log_warning(f"CscConfigCache: {entity} 스냅샷 기록 실패 ({e}) — 메모리는 갱신됨")
+        except Exception as e:
+            logger.log_warning(f"CscConfigCache: {entity} 신선도 확인 실패 ({e}), 캐시 유지")
+
     def refresh_entity(self, entity: str) -> None:
         """특정 entity 만 file_store 에서 재조회 + 파일/메타 갱신. write-through 경로에서 사용."""
         if entity not in ENTITIES:
             raise ValueError(f"unknown entity: {entity}")
         with self._lock:
+            sig = self._source_signature(entity)
             self._data[entity] = self._load_entity_from_store(entity)
+            self._sig[entity] = sig
             self._flush_entity_to_file(entity)
 
     # ── internal file_store load ──────────────────────────────
 
     def _load_all_from_store(self) -> None:
         for e in ENTITIES:
+            sig = self._source_signature(e)
             self._data[e] = self._load_entity_from_store(e)
+            self._sig[e] = sig
 
     def _load_entity_from_store(self, entity: str) -> List[dict]:
         domain = _DOMAIN_BY_ENTITY.get(entity)
