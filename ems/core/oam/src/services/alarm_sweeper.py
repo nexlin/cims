@@ -486,9 +486,16 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
     # 주소 루트(구 폴백) 활성키 이행 종결 — mo 루트는 이제 항상 불변 id 다.
     # 같은 조건이 `127.0.0.1/csp`·`<VIP>/csp`·`g<id>/csp` 로 갈려 앞의 둘이 영구
     # 미해소로 남던 것을 정리한다. 지속 조건은 아래 평가가 현행 키로 재발화.
-    close_migrated_keys(
-        state, service_log_dir, detected_by, lambda k: _is_addr_root(mo_root_of(k)),
-        "mo 루트 불변 id 이행 종결 — 지속 조건은 소유 주체 루트로 재발행", log=log)
+    #
+    # **신원 해석이 실제로 되는 동안만** 종결한다. `resolve()` 는 인벤토리(agent 스토어)를
+    # best-effort 로 읽고 실패하면 주소를 그대로 루트로 쓴다 — 그 순간에는 주소 루트가
+    # 폴백이 아니라 **현행 형태**다. 그때도 이 종결을 돌리면 방금 발행한 키를 닫고 다음
+    # 평가가 같은 키를 다시 열어 open/close 가 번갈아 나온다(플래핑). agent 파일은
+    # heartbeat 주기로 재작성되므로 읽기는 순간적으로 실패할 수 있다.
+    if resolve(csp_addr) != str(csp_addr):
+        close_migrated_keys(
+            state, service_log_dir, detected_by, lambda k: _is_addr_root(mo_root_of(k)),
+            "mo 루트 불변 id 이행 종결 — 지속 조건은 소유 주체 루트로 재발행", log=log)
     for r in rules:
         chk = r.get('check')
         thr = r.get('threshold', rtp_threshold)
@@ -562,10 +569,30 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
         # 신원 재해석으로 이탈한 같은 계열 활성키 정리 — CMP·rtp_pct 분기에는 있고
         # 단일 인스턴스 분기에만 없어서, 루트가 바뀌면 옛 키가 영영 안 닫혔다.
         # 모듈 세그먼트가 같은 것만 대상(같은 code 의 다른 모듈 계열과 구분).
-        seg = _mo_module_segment(f"{code}@{mo}")
-        for akey in [k for k in list(state)
-                     if k.startswith(f"{code}@") and k.split('@', 1)[1] != mo
-                     and _mo_module_segment(k) == seg]:
-            stale = akey.split('@', 1)[1]
-            transition(state, service_log_dir, r, stale, detected_by, False, '',
-                       f"{stale} 관측 신원 재해석 — 정리", log=log)
+        #
+        # 정리하기 전에 둘을 확인한다 — 하나라도 아니면 손대지 않는다. 이 정리는 **close 를
+        # 발행**하므로, 근거 없이 돌면 살아 있는 알람을 지우거나 지웠다 열었다 한다.
+        #   ① **관측이 됐나.** probe 가 실패해 판정 근거가 없는 상태에서 열린 알람을 일괄
+        #      오종결하면 안 된다(표준화 §3.4(d) 후단). CMP 분기가 `if cur_mo:` 로 같은
+        #      가드를 두고 있는데 이 분기에만 없었다.
+        #   ② **신원 해석이 성공했나.** `resolve()` 는 인벤토리(agent 스토어)를 best-effort
+        #      로 읽고 실패하면 주소를 그대로 루트로 쓴다. agent 파일은 heartbeat 주기로
+        #      재작성돼 읽기가 순간 실패할 수 있는데, 그때의 주소형 mo 를 기준으로 정리하면
+        #      정상형(a<id>) 알람을 지웠다 열었다 하는 플래핑이 된다(실측).
+        if chk == 'process_unresponsive':
+            observable = bool(ctx.get(r.get('target', 'csp')))
+            resolved = resolve(csp_addr) != str(csp_addr)
+        elif chk == 'db_down':
+            # mgmt 루트는 설정 파생이라 신원이 항상 확정된다. 다만 DB 가 불통인 동안에는
+            # 정리하지 않는다 — 장애 구간에서 활성키를 건드릴 이유가 없다.
+            observable, resolved = bool(ctx.get('db_ok')), True
+        else:
+            observable, resolved = False, False   # 관측 가능 여부를 모르는 규칙은 정리하지 않는다
+        if observable and resolved:
+            seg = _mo_module_segment(f"{code}@{mo}")
+            for akey in [k for k in list(state)
+                         if k.startswith(f"{code}@") and k.split('@', 1)[1] != mo
+                         and _mo_module_segment(k) == seg]:
+                stale = akey.split('@', 1)[1]
+                transition(state, service_log_dir, r, stale, detected_by, False, '',
+                           f"{stale} 관측 신원 재해석 — 정리", log=log)

@@ -198,6 +198,75 @@ class TestMoRootImmutableId(unittest.TestCase):
         self.assertEqual(drift_sweeper._mo_instance(r2), drift_sweeper._mo_instance(r))
 
 
+class TestStaleCleanupGuards(unittest.TestCase):
+    """신원 재해석 정리는 **close 를 발행**한다 — 근거 없이 돌면 살아 있는 알람을 지우거나,
+    지웠다 열었다 하는 플래핑이 된다. 두 가드가 지켜지는지 본다.
+      ① 관측 실패(probe 무응답) → 손대지 않는다
+      ② 신원 미해석(인벤토리 읽기 실패로 주소가 그대로 루트) → 손대지 않는다
+    한 번 사라졌던 가드다(상류 병합에서 조용히 빠졌다) — 시험으로 못 박아 둔다."""
+
+    RULE = {'type': 'process_unresponsive', 'code': 'A-PRC-004', 'check': 'process_unresponsive',
+            'target': 'csp', 'perceived_severity': 'major', 'mo_class': 'service',
+            'msg_open': '{mo} 무응답', 'msg_close': '{mo} 정상화'}
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix='alarmguard_')
+        self.config = {'CspNotify': {'Ip': '10.0.0.9'}}
+        from handlers import stats as _stats
+        from services import service_registry as _reg
+        self._saved = {'csp': _stats._get_csp_stats, 'db': _stats._get_db,
+                       'ep': _stats._media_endpoints, 'rules': _reg.alert_rules,
+                       'resolver': alarm_sweeper.build_mo_root_resolver}
+        self._stats, self._reg = _stats, _reg
+        _stats._media_endpoints = lambda _c: []
+        _stats._get_db = lambda _c: (_ for _ in ()).throw(RuntimeError('db 없음'))
+        _reg.alert_rules = lambda _c: [dict(self.RULE)]
+
+    def tearDown(self):
+        self._stats._get_csp_stats = self._saved['csp']
+        self._stats._get_db = self._saved['db']
+        self._stats._media_endpoints = self._saved['ep']
+        self._reg.alert_rules = self._saved['rules']
+        alarm_sweeper.build_mo_root_resolver = self._saved['resolver']
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _sweep(self, stale_mo: str, *, observable: bool, resolved: bool) -> dict:
+        """옛 루트로 열린 활성키 하나를 두고 한 바퀴 돌린 뒤의 state."""
+        self._stats._get_csp_stats = lambda _c: ({'uptime': 1} if observable else {})
+        # resolved=True → 인벤토리가 주소를 불변 id 로 해석. False → 주소를 그대로 루트로 쓴다.
+        alarm_sweeper.build_mo_root_resolver = (
+            lambda _c: (lambda a: 'a7' if resolved else str(a)))
+        state = {}
+        alarm_sweeper.transition(state, self.dir, dict(self.RULE), stale_mo,
+                                 'oam-svc', True, 'open', 'close')
+        self.assertIn(f'A-PRC-004@{stale_mo}', state)       # 전제: 옛 루트로 열려 있다
+        alarm_sweeper.sweep_service_rules(self.config, state, self.dir, 'oam-svc')
+        return state
+
+    # ① 관측 실패 — 옛 **불변 id** 루트(단일 인스턴스 분기 소관)
+    def test_keeps_stale_when_unobservable(self):
+        state = self._sweep('a9/csp', observable=False, resolved=True)
+        self.assertIn('A-PRC-004@a9/csp', state,
+                      '관측 실패 구간에서 옛 활성키를 오종결했다')
+
+    def test_closes_stale_when_observable(self):
+        state = self._sweep('a9/csp', observable=True, resolved=True)
+        self.assertNotIn('A-PRC-004@a9/csp', state,
+                         '근거가 갖춰졌는데 옛 활성키가 안 닫혔다')
+
+    # ② 신원 미해석 — **주소** 루트(이행 종결 블록 소관). 이때 주소 루트는 폴백이 아니라
+    #    현행 형태라, 닫으면 다음 평가가 다시 열어 플래핑이 된다.
+    def test_keeps_addr_root_when_identity_unresolved(self):
+        state = self._sweep('10.0.0.1/csp', observable=True, resolved=False)
+        self.assertIn('A-PRC-004@10.0.0.1/csp', state,
+                      '신원 미해석 상태에서 주소 루트를 종결해 플래핑을 만든다')
+
+    def test_closes_addr_root_when_identity_resolves(self):
+        state = self._sweep('10.0.0.1/csp', observable=True, resolved=True)
+        self.assertNotIn('A-PRC-004@10.0.0.1/csp', state,
+                         '신원이 해석되는데 구 주소 루트가 안 닫혔다')
+
+
 class TestRetentionPurge(unittest.TestCase):
     def test_purge_old_by_file_date(self):
         from services import daily_jsonl
