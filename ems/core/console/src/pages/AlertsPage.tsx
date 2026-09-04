@@ -115,6 +115,12 @@ function DetailItem({ label, value }: { label: string; value?: string | null }) 
 }
 
 // ── 알람 탭 ──────────────────────────────────────────────────────────────────
+// 이력 화면의 자동 갱신 주기 — 기본 OFF(토글).
+//   활성 알람 뷰는 상시 폴링이지만 이력은 조회 1회다. 화면을 띄워둔 채로는 새 알람이 보이지
+//   않는다. 다만 이력은 과거를 훑는 화면이라 자동 갱신이 스크롤·페이지를 흔들 수 있어 **켤 때만**
+//   돈다. 조회량이 큰 화면(FETCH_LIMIT)이라 주기는 활성 뷰보다 길게 잡는다.
+const HISTORY_POLL_MS = 30_000
+
 // ── 공유 조회 ────────────────────────────────────────────────────────────────
 // 필터 블록과 표 블록이 **같은 응답**을 봐야 하므로 days 를 키로 공유한다(요청 1회).
 const useAlertsRaw = makeSharedByKey(k => alertsApi.list({ days: Number(k), limit: FETCH_LIMIT }))
@@ -123,10 +129,12 @@ const useEventsRaw = makeSharedByKey(k => eventsApi.list({ days: Number(k), limi
 function useAlarmHistory() {
   // 기간은 이 화면이 소유하지 않는다 — 기간 선택 컨트롤이 쓰는 페이지 파라미터를 읽는다.
   const days = Number(usePageParam('days')[0]) || 7
-  const { data, loading, error, reload } = useAlertsRaw(String(days))
+  const f = useAlarmFilter()
+  // 폴링은 공유 로더가 **키당 하나**로 돌린다 — 필터 블록과 표 블록이 같은 훅을 써도 요청은 한 벌.
+  const { data, loading, error, reload, updatedAt } =
+    useAlertsRaw(String(days), f.live ? HISTORY_POLL_MS : 0)
   const events = useMemo(() => data?.events ?? [], [data])
   const allRows = useMemo(() => pairEvents(events), [events])
-  const f = useAlarmFilter()
   const rows = useMemo(() => {
     const needle = f.q.trim().toLowerCase()
     return allRows.filter(r => {
@@ -139,13 +147,13 @@ function useAlarmHistory() {
       return true
     })
   }, [allRows, f])
-  return { days, events, allRows, rows, f, loading, error, reload }
+  return { days, events, allRows, rows, f, loading, error, reload, updatedAt }
 }
 
 // ── 알람 조회 조건 ───────────────────────────────────────────────────────────
 // 기간 선택 옆줄에 놓는 컨트롤 — 표는 아래 공간을 전부 쓴다.
 export function AlarmHistoryFilter() {
-  const { days, allRows, rows, f, reload } = useAlarmHistory()
+  const { days, allRows, rows, f, reload, updatedAt } = useAlarmHistory()
   const setDays = usePageParam('days')[1]
   const codes = useMemo(() => [...new Set(allRows.map(r => r.code).filter(Boolean) as string[])].sort(), [allRows])
   const types = useMemo(() => [...new Set(allRows.map(r => r.type).filter(Boolean))].sort(), [allRows])
@@ -186,6 +194,19 @@ export function AlarmHistoryFilter() {
         해소 포함
       </label>
       <button className="btn btn--ghost btn--sm" onClick={exportCsv} disabled={rows.length === 0}>CSV</button>
+      {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
+          구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}
+             title={`켜면 ${HISTORY_POLL_MS / 1000}초마다 자동 조회`}>
+        <input type="checkbox" checked={f.live}
+               onChange={e => alertsFilter.setAlarm({ live: e.target.checked })} />
+        실시간 감시
+      </label>
+      {f.live && (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
+        </span>
+      )}
       <button className="btn btn--ghost btn--sm" onClick={reload}>↻</button>
     </div>
   )
@@ -410,9 +431,10 @@ function groupEvents(events: EventRecord[]): EventGroup[] {
 
 function useEventHistory() {
   const days = Number(usePageParam('days')[0]) || 7
-  const { data, loading, error, reload } = useEventsRaw(String(days))
-  const events = useMemo(() => data?.events ?? [], [data])
   const f = useEventFilter()
+  const { data, loading, error, reload, updatedAt } =
+    useEventsRaw(String(days), f.live ? HISTORY_POLL_MS : 0)
+  const events = useMemo(() => data?.events ?? [], [data])
   const filtered = useMemo(() => {
     const needle = f.q.trim().toLowerCase()
     return events.filter(e => {
@@ -424,12 +446,12 @@ function useEventHistory() {
     })
   }, [events, f])
   const groups = useMemo(() => groupEvents(filtered), [filtered])
-  return { days, events, filtered, groups, f, loading, error, reload }
+  return { days, events, filtered, groups, f, loading, error, reload, updatedAt }
 }
 
 // ── 이벤트 조회 조건 ─────────────────────────────────────────────────────────
 export function EventHistoryFilter() {
-  const { days, events, filtered, f, reload } = useEventHistory()
+  const { days, events, filtered, f, reload, updatedAt } = useEventHistory()
   const setDays = usePageParam('days')[1]
   const types = useMemo(() => [...new Set(events.map(e => e.type).filter(Boolean))].sort(), [events])
   const exportCsv = () => {
@@ -455,6 +477,19 @@ export function EventHistoryFilter() {
       <input className="search-input" style={{ width: 180 }} placeholder="코드/소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })} />
       <button className="btn btn--ghost btn--sm" onClick={exportCsv} disabled={filtered.length === 0}>CSV</button>
+      {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
+          구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
+      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, whiteSpace: 'nowrap' }}
+             title={`켜면 ${HISTORY_POLL_MS / 1000}초마다 자동 조회`}>
+        <input type="checkbox" checked={f.live}
+               onChange={e => alertsFilter.setEvent({ live: e.target.checked })} />
+        실시간 감시
+      </label>
+      {f.live && (
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
+        </span>
+      )}
       <button className="btn btn--ghost btn--sm" onClick={reload}>↻</button>
     </div>
   )
