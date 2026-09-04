@@ -24,8 +24,10 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import com.cims.ue.core.config.ConfigStore
+import com.cims.ue.core.message.MessageEntry
 import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
+import com.cims.ue.core.message.SendState
 import com.cims.ue.core.sip.CallState
 import com.cims.ue.core.sip.PjLib
 import com.cims.ue.core.sip.RegState
@@ -232,19 +234,45 @@ class SipService : Service() {
         return com.cims.ue.core.sip.toE164(dst, cc)
     }
 
+    /** [SipController.sendRequest] token 발급 + 문자 token→msgId 대응(최종 응답을 말풍선 상태로). */
+    private val reqSeq = java.util.concurrent.atomic.AtomicLong(1)
+    private val msgPending = java.util.concurrent.ConcurrentHashMap<Long, String>()
+
     /** 문자(SIP MESSAGE, RFC 3428 page-mode) 송신 + 인박스(발신) 기록. 대상=sip:번호@도메인.
-     *  대상 번호는 발신과 동일하게 E.164 정규화 — 저장 peer 도 정규화해 수신(From=E.164) 스레드와 합치. */
+     *  대상 번호는 발신과 동일하게 E.164 정규화 — 저장 peer 도 정규화해 수신(From=E.164) 스레드와 합치.
+     *  발신은 PENDING 으로 저장하고 MESSAGE 트랜잭션 최종 응답(2xx=SENT, 그 외·타임아웃=FAILED)으로 확정한다 —
+     *  등록 flow 밖(UDP 등록 단말의 1300B 초과 요청 TCP 승격)에서 받는 401 은 native 가 재발행하므로 여기엔
+     *  최종 결과만 온다(mcdata_messaging.md §4 와 같은 경로). 실패는 말풍선 탭으로 재전송([resendMessage]). */
     fun sendMessage(dst: String, text: String) {
-        val cfg = ConfigStore(this).load()
+        if (text.isBlank()) return
         val to = normalizeDial(dst)
+        val msgId = java.util.UUID.randomUUID().toString().replace("-", "")
+        MessageStore(this).add(to, text, MsgDirection.OUT, msgId = msgId, sendState = SendState.PENDING)
+        messagesVersion.value++
+        sendMessageRequest(to, text, msgId)
+    }
+
+    /** 실패 문자 재전송(말풍선 탭) — 같은 항목(msgId)을 PENDING 으로 되돌리고 다시 보낸다. */
+    fun resendMessage(e: MessageEntry) {
+        if (e.msgId.isBlank() || e.text.isBlank()) return
+        if (MessageStore(this).setSendState(e.msgId, SendState.PENDING)) messagesVersion.value++
+        sendMessageRequest(e.peer, e.text, e.msgId)
+    }
+
+    private fun sendMessageRequest(to: String, text: String, msgId: String) {
+        val cfg = ConfigStore(this).load()
+        val token = reqSeq.getAndIncrement()
+        msgPending[token] = msgId
         controller?.sendRequest(
             method = "MESSAGE",
             targetUri = "sip:${to}@${cfg.domain}",
             contentType = "text/plain",
             body = text,
-        )
-        MessageStore(this).add(to, text, MsgDirection.OUT)
-        messagesVersion.value++
+            token = token,
+        ) ?: run {
+            msgPending.remove(token)
+            if (MessageStore(this).setSendState(msgId, SendState.FAILED)) messagesVersion.value++
+        }
     }
     fun answer(callId: Int, video: Boolean = false) = controller?.answer(callId, video)
     fun reject(callId: Int) = controller?.reject(callId)
@@ -498,6 +526,8 @@ class SipService : Service() {
 
     private fun observe(c: SipController) {
         stateJob?.cancel()
+        // 이전 프로세스의 미결 PENDING — 결과 이벤트 유실 상태이므로 실패로 마감(재전송 가능)
+        if (MessageStore(this).failStalePending()) messagesVersion.value++
         stateJob = scope.launch {
             // 등록 상태 = 상시 알림(상태바 아이콘) + 화면 최상단 전역 배지(오버레이) — 한눈에 통화 가능 여부.
             c.regState.onEach { reg ->
@@ -545,6 +575,15 @@ class SipService : Service() {
                     CallState.Null -> null
                 }
                 if (line != null) updateNotification("CIMS Phone", line)
+            }.launchIn(this)
+
+            // 문자 MESSAGE 최종 응답(token 상관) → 말풍선 상태 SENT/FAILED. token 당 1회(remove 로 dedupe).
+            c.sendReqResults.onEach { r ->
+                val msgId = msgPending.remove(r.token) ?: return@onEach
+                val ok = r.code in 200..299
+                if (!ok) android.util.Log.w("SipService", "MESSAGE $msgId 실패: ${r.code} ${r.reason}")
+                if (MessageStore(this@SipService).setSendState(msgId, if (ok) SendState.SENT else SendState.FAILED))
+                    messagesVersion.value++
             }.launchIn(this)
 
             // 수신 문자 — 인박스 저장 + 알림(백그라운드에서도 도착 확인 가능).

@@ -132,8 +132,10 @@ import com.cims.ue.core.contacts.CompanyOrg
 import com.cims.ue.core.contacts.Contact
 import com.cims.ue.core.contacts.ContactStore
 import com.cims.ue.core.contacts.FavoriteStore
+import com.cims.ue.core.message.MessageEntry
 import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
+import com.cims.ue.core.message.SendState
 import com.cims.ue.core.sip.CallState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -556,6 +558,7 @@ private fun HomeScreen(
                         version = msgVersion,
                         nameFor = { n -> contacts.nameFor(n) },
                         onSend = { peer, text -> service?.sendMessage(peer, text) },
+                        onResend = { e -> service?.resendMessage(e) },
                         onMarkRead = { peer -> service?.markThreadRead(peer) ?: msgStore.markRead(peer) },
                     )
                     // 설정 = 탭 콘텐츠(하단 내비 유지). 항목 변경 즉시 저장·재등록 반영.
@@ -1626,6 +1629,7 @@ private fun MessagesScreen(
     version: Long,
     nameFor: (String) -> String?,
     onSend: (String, String) -> Unit,
+    onResend: (MessageEntry) -> Unit,
     onMarkRead: (String) -> Unit,
 ) {
     var openPeer by remember { mutableStateOf<String?>(null) }
@@ -1638,6 +1642,7 @@ private fun MessagesScreen(
             store = store,
             version = version,
             onSend = { text -> onSend(peer, text) },
+            onResend = onResend,
             onBack = { openPeer = null },
         )
         // 대화 진입/새 문자 도착 시 읽음 처리
@@ -1699,6 +1704,7 @@ private fun ConversationScreen(
     store: MessageStore,
     version: Long,
     onSend: (String) -> Unit,
+    onResend: (MessageEntry) -> Unit,
     onBack: () -> Unit,
 ) {
     val entries = remember(version) { store.thread(peer) }
@@ -1742,8 +1748,16 @@ private fun ConversationScreen(
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         Text(e.text, style = MaterialTheme.typography.bodyMedium)
-                        Text(formatTime(e.time), style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // 발신 상태 — 🕓 응답 대기 / ⚠ 실패(탭=재전송) / ✓ 전송됨(MESSAGE 2xx). 수신은 시각만.
+                        val (label, color) = when {
+                            incoming -> formatTime(e.time) to MaterialTheme.colorScheme.onSurfaceVariant
+                            e.sendState == SendState.PENDING -> "🕓 ${formatTime(e.time)}" to MaterialTheme.colorScheme.onSurfaceVariant
+                            e.sendState == SendState.FAILED -> "⚠ 실패 · 재전송" to MaterialTheme.colorScheme.error
+                            else -> "✓ ${formatTime(e.time)}" to MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Text(label, style = MaterialTheme.typography.labelSmall, color = color,
+                            modifier = if (!incoming && e.sendState == SendState.FAILED)
+                                Modifier.clickable { onResend(e) } else Modifier)
                     }
                 }
             }

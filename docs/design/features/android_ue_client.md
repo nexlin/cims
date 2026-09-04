@@ -485,7 +485,7 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 | **착신 영상 응답** | 수신 INVITE 원문 SDP 의 `m=video` 로 영상호 감지(`CallState.Incoming.video`) → 통화화면에 "영상" 응답 버튼(CAMERA 권한 확보 후 `answer(withVideo)`=`opt.videoCount=1`) |
 | **로컬 카메라 프리뷰** | 영상 통화 중 우하단 PiP(내 화면): `VideoPreview`(전면 카메라 우선, `VidDevManager.enumDev2` 이름 "front" 매칭) + `SurfaceView.setZOrderMediaOverlay` — 호 종료/shutdown 시 자동 정리 |
 | **발신번호 E.164 정규화** | 가입자 정본(IMPU/조회 키)은 E.164 — 키패드 로컬 표기("013…")를 그대로 보내면 CSP 404. `SipService.makeCall`/`sendMessage` 가 발신 직전 core `toE164`(cc=프로비저닝 countryCode, 폴백=내 msisdn ITU 유도 `countryCodeOf`)로 정규화 — 키패드/통화이력/연락처 공통. "+" 시작·비숫자(단축번호 등)는 그대로 |
-| **문자(SIP MESSAGE)** | RFC 3428 page-mode 송수신: 송신=`SipController.sendRequest("MESSAGE")`(대상·저장 peer 모두 E.164 정규화 — 수신 스레드와 합치), 수신=`Account.onInstantMessage`→`SipController.incomingMessage`(SharedFlow)→`SipService` 가 **인박스 저장 + 알림**. 인박스=core `MessageStore`(상대별 스레드·안읽음 카운트, SharedPreferences+JSON). UI=문자 탭(스레드 목록→말풍선 대화·전송, 안읽음 배지) |
+| **문자(SIP MESSAGE)** | RFC 3428 page-mode 송수신: 송신=`SipController.sendRequest("MESSAGE")`(대상·저장 peer 모두 E.164 정규화 — 수신 스레드와 합치; 발신은 PENDING 으로 저장하고 token 상관 최종 응답 2xx=SENT ✓ / 그 외·타임아웃=FAILED ⚠(탭=같은 항목 재전송) — 본문 약 300B 를 넘으면 pjsip 이 TCP 로 승격해 UDP 등록 계정은 401 재인증을 거치는데 native 가 재발행한다(mcdata_messaging.md §4)), 수신=`Account.onInstantMessage`→`SipController.incomingMessage`(SharedFlow)→`SipService` 가 **인박스 저장 + 알림**. 인박스=core `MessageStore`(상대별 스레드·안읽음 카운트, SharedPreferences+JSON). UI=문자 탭(스레드 목록→말풍선 대화·전송, 안읽음 배지) |
 | 권한 | RECORD_AUDIO, CAMERA(영상), POST_NOTIFICATIONS, USE_FULL_SCREEN_INTENT·VIBRATE(착신), FOREGROUND_SERVICE(_MICROPHONE), 네트워크 |
 | 오디오 포커스 | AudioManager 포커스 + 통화 라우팅(스피커/리시버/BT) |
 | 하드웨어 PTT | 러기드 단말의 물리 PTT 키 매핑(KeyEvent/벤더 인텐트) — 옵션, M2+ |
