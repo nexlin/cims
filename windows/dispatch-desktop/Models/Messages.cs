@@ -19,8 +19,9 @@ public sealed partial class Message : ObservableObject
     public string PeerName { get; set; } = "";
     public string GroupUri { get; init; } = "";
     public string ConvId { get; init; } = "";
-    public string MsgId { get; init; } = "";
-    /// <summary>sendRequest token(SMS) — 최종 응답 상관.</summary>
+    /// <summary>MCData 메시지 id — 재전송하면 새 id 를 받으므로 갱신된다(disposition 통지 상관).</summary>
+    public string MsgId { get; set; } = "";
+    /// <summary>sendRequest token(SMS·SDS 공통) — 최종 응답 RequestCompleted 상관.</summary>
     public long Token { get; set; }
     public string Text { get; init; } = "";
     public DateTime Time { get; init; } = DateTime.Now;

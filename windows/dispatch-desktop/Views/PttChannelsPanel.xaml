@@ -58,15 +58,15 @@
                                     </StackPanel>
                                     <!-- 상태 줄 -->
                                     <StackPanel Orientation="Horizontal" Grid.Row="1" Grid.Column="0" Margin="0,4,0,0">
-                                        <Ellipse Style="{StaticResource Dot}">
-                                            <Ellipse.Resources>
+                                        <Ellipse>
+                                            <Ellipse.Style>
                                                 <Style TargetType="Ellipse" BasedOn="{StaticResource Dot}">
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsJoined}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
                                                         <DataTrigger Binding="{Binding IsEmergency}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
                                                     </Style.Triggers>
                                                 </Style>
-                                            </Ellipse.Resources>
+                                            </Ellipse.Style>
                                         </Ellipse>
                                         <TextBlock Text="{Binding SessionText}" VerticalAlignment="Center" Margin="0,0,10,0" />
                                         <TextBlock Style="{StaticResource Muted}" VerticalAlignment="Center" Visibility="{Binding HasSpeaker, Converter={StaticResource BoolToVis}}">

@@ -77,9 +77,9 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public bool CanStart => IsPrivate ? Target.Trim().Length > 0 : AdhocSelection.Count > 0;
     public string UserCount => $"{Users.Count}명";
 
-    partial void OnModeChanged(string v) { OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
-    partial void OnBookChanged(string v) { OnPropertyChanged(nameof(IsUsers)); OnPropertyChanged(nameof(IsGroups)); OnPropertyChanged(nameof(IsPadBook)); }
-    partial void OnTargetChanged(string v) { OnPropertyChanged(nameof(CanStart)); UpdateSuggestions(); }
+    partial void OnModeChanged(string value) { OnPropertyChanged(nameof(IsPrivate)); OnPropertyChanged(nameof(IsAdhoc)); OnPropertyChanged(nameof(StartText)); OnPropertyChanged(nameof(CanStart)); }
+    partial void OnBookChanged(string value) { OnPropertyChanged(nameof(IsUsers)); OnPropertyChanged(nameof(IsGroups)); OnPropertyChanged(nameof(IsPadBook)); }
+    partial void OnTargetChanged(string value) { OnPropertyChanged(nameof(CanStart)); UpdateSuggestions(); }
 
     private void UpdateSuggestions()
     {
@@ -95,8 +95,8 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         }
         OnPropertyChanged(nameof(HasSuggestions));
     }
-    partial void OnSearchChanged(string v) => Filter();
-    partial void OnOrgScopeChanged(OrgChoice? v) => Filter();
+    partial void OnSearchChanged(string value) => Filter();
+    partial void OnOrgScopeChanged(OrgChoice? value) => Filter();
 
     private void Reload()
     {

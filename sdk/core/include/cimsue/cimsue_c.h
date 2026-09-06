@@ -381,14 +381,17 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_transfer_attended(cimsue_en
                                                                        int32_t consult_call_id);
 
 /* MCData SDS (TS 24.282 §9.2.2 C-plane) */
-/** 그룹 SDS 발신. 성공 시 msg_id_out 에 UUID hex32 를 NUL 종료로 기록한다(33바이트면 충분). */
+/** 그룹 SDS 발신. 성공 시 msg_id_out 에 UUID hex32 를 NUL 종료로 기록한다(33바이트면 충분).
+ *  token_out(NULL 가능) = 요청 token — 최종 응답 on_request_completed(MESSAGE, token) 상관용. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_sds(cimsue_engine_t* e, int32_t account_id,
                                                                     const char* group_id, const char* text,
                                                                     int32_t request_delivery, char* msg_id_out,
-                                                                    int32_t msg_id_cap);
+                                                                    int32_t msg_id_cap, int64_t* token_out);
+/** SDS disposition 통지. token_out(NULL 가능) = 요청 token. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsue_engine_t* e, int32_t account_id,
                                                                            const char* peer, const char* conv_id,
-                                                                           const char* msg_id, int32_t notif_type);
+                                                                           const char* msg_id, int32_t notif_type,
+                                                                           int64_t* token_out);
 
 /* 장치 */
 /** 반환 개수, *out 은 스냅샷 배열(다음 조회까지 유효). */

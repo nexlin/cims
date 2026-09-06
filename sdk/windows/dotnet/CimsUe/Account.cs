@@ -98,18 +98,24 @@ public sealed unsafe class Account
         Engine.CallResult(cimsue_engine_pickup(Engine.Handle, Id, featureCode, string.IsNullOrEmpty(number) ? null : number));
 
     // ── MCData SDS (TS 24.282 §9.2.2 C-plane) ──
-    /// <summary>그룹 SDS 발신(MESSAGE multipart). Value = msgId(UUID hex32) — SdsReceived 의 disposition 통지와 상관.</summary>
-    public Result<string> SendGroupSds(string groupId, string text, bool requestDelivery = true)
+    /// <summary>그룹 SDS 발신(MESSAGE multipart). MsgId(UUID hex32) = SdsReceived 의 disposition 통지와 상관,
+    /// Token = 최종 응답 RequestCompleted(MESSAGE, Token) 과 상관(통지 발신의 완료 이벤트와 구분).</summary>
+    public Result<SdsSend> SendGroupSds(string groupId, string text, bool requestDelivery = true)
     {
         byte* buf = stackalloc byte[64];
-        int st = cimsue_engine_send_group_sds(Engine.Handle, Id, groupId, text, Engine.B(requestDelivery), buf, 64);
-        if (st != 0) return Result<string>.Fail(st, Engine.LastError());
-        return Result<string>.Success(Utf8.Str(buf));
+        long token = -1;
+        int st = cimsue_engine_send_group_sds(Engine.Handle, Id, groupId, text, Engine.B(requestDelivery), buf, 64, &token);
+        if (st != 0) return Result<SdsSend>.Fail(st, Engine.LastError());
+        return Result<SdsSend>.Success(new SdsSend(Utf8.Str(buf), token));
     }
 
-    /// <summary>SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4.</summary>
-    public Result SendSdsNotification(string peer, string convId, string msgId, int notifType) =>
-        Engine.Status(cimsue_engine_send_sds_notification(Engine.Handle, Id, peer, convId, msgId, notifType));
+    /// <summary>SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. Value = 요청 token.</summary>
+    public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType)
+    {
+        long token = -1;
+        int st = cimsue_engine_send_sds_notification(Engine.Handle, Id, peer, convId, msgId, notifType, &token);
+        return st != 0 ? Result<long>.Fail(st, Engine.LastError()) : Result<long>.Success(token);
+    }
 
     // ── 변환 ──
     internal static cimsue_call_options_t ToNative(CallOptions? o)

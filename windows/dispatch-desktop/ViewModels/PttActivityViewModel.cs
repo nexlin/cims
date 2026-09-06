@@ -70,8 +70,8 @@ public sealed partial class PttActivityViewModel : ObservableObject
         Refilter();
     }
 
-    partial void OnFilterChanged(string v) => Refilter();
-    partial void OnSearchChanged(string v) => Refilter();
+    partial void OnFilterChanged(string value) => Refilter();
+    partial void OnSearchChanged(string value) => Refilter();
     [RelayCommand] private void SetFilter(string f) => Filter = f;
 
     public void Rebuild()

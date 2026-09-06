@@ -66,6 +66,9 @@ public sealed class MessageStore : IDisposable
 
     public void UpdateState(long id, SendState state) => Exec("UPDATE messages SET state=@s WHERE id=@id", ("@s", (int)state), ("@id", id));
     public void UpdateToken(long id, long token) => Exec("UPDATE messages SET token=@t WHERE id=@id", ("@t", token), ("@id", id));
+    /// <summary>재전송으로 바뀐 MCData msgId·token 을 함께 갱신.</summary>
+    public void UpdateResend(long id, string msgId, long token, SendState state) =>
+        Exec("UPDATE messages SET msg_id=@m, token=@t, state=@s WHERE id=@id", ("@m", msgId), ("@t", token), ("@s", (int)state), ("@id", id));
     public void MarkRead(string threadKey, MessageKind kind) =>
         Exec("UPDATE messages SET read=1 WHERE thread_key=@k AND kind=@kind", ("@k", threadKey), ("@kind", (int)kind));
 

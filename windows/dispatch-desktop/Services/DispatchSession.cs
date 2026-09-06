@@ -644,9 +644,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case SessionKind.VolteCall when s.Operation == Operation.Transfer && s.ConsultFor is not null:
                 Activity.Add(ActivityPanel.Call, ActivityKind.Transfer, $"전달 {MyExtension} → {s.Title} attended", dur.Trim(' ', '·'), number: s.PeerNumber);
                 break;
+            case SessionKind.VolteCall when ci.Dir == CallDir.Incoming && s.ConnectedAt is null && IsPilot(ci.CalledParty):
+                // 대표번호 포크 leg 가 응답 없이 끝남 — 동료가 받아 CANCEL 된 것일 수 있어 여기서는 부재로 세지 않는다.
+                // 전원 무응답 부재는 대표번호 dialog 가 confirmed 없이 terminated 될 때(OnDialog) 1건만 기록한다.
+                break;
             case SessionKind.VolteCall when ci.Dir == CallDir.Incoming && s.ConnectedAt is null:
-                Activity.Add(ActivityPanel.Call, ActivityKind.Missed, $"부재 {(IsPilot(ci.CalledParty) ? UserPartConverter.UserPart(ci.CalledParty) : MyExtension)} ← {s.Title}",
-                             "", missed: true, number: s.PeerNumber, pilot: IsPilot(ci.CalledParty));
+                Activity.Add(ActivityPanel.Call, ActivityKind.Missed, $"부재 {MyExtension} ← {s.Title}", "", missed: true, number: s.PeerNumber);
                 break;
             case SessionKind.VolteCall when ci.Dir == CallDir.Incoming:
                 Activity.Add(ActivityPanel.Call, ActivityKind.Incoming, $"착신 {(IsPilot(ci.CalledParty) ? UserPartConverter.UserPart(ci.CalledParty) : MyExtension)} ← {s.Title}",
@@ -799,6 +802,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private void OnDialog(DialogInfo d)
     {
         Log.Info($"dialog watched={d.Watched} id={d.Id} state={d.State} dir={d.Direction} remote={d.RemoteIdentity} callid={d.CallId} full={d.Full}");
+        // 초기 full 스냅샷에 dialog 가 없으면 코어가 id·state 빈 자리표시자를 올린다(구독 성립 신호) — 행으로 만들지 않는다
+        if (d.Id.Length == 0 || d.State.Length == 0) return;
         string key = d.Watched + "|" + d.Id;
         var row = Dialogs.FirstOrDefault(x => x.Key == key);
         if (d.State == "terminated")
@@ -951,16 +956,22 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public Result FloorQueueCancel(SessionItem s) => Engine.GetCall(s.CallId).FloorQueueCancel();
 
     // 메시지
-    public Result<string> SendGroupSds(string groupId, string text)
+    /// <summary>그룹 SDS 발신 — Value.MsgId(disposition 상관)·Value.Token(RequestCompleted 상관).</summary>
+    public Result<SdsSend> SendGroupSds(string groupId, string text)
     {
-        if (Ptt is null) return Result<string>.Fail(-1, "PTT 계정 없음");
+        if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
         var r = Ptt.SendGroupSds(groupId, text, requestDelivery: true);
         if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
         return r;
     }
 
-    public Result SendSdsNotification(string peer, string convId, string msgId, int notifType) =>
-        Ptt?.SendSdsNotification(UserPartConverter.UserPart(peer), convId, msgId, notifType) ?? Fail("PTT 계정 없음");
+    public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType)
+    {
+        if (Ptt is null) return Result<long>.Fail(-1, "PTT 계정 없음");
+        var r = Ptt.SendSdsNotification(UserPartConverter.UserPart(peer), convId, msgId, notifType);
+        if (!r.Ok) Log.Warn($"sds notification → {peer}: {r}");
+        return r;
+    }
 
     public Result<long> SendSms(string target, string text)
     {

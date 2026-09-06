@@ -31,10 +31,10 @@ public sealed partial class LoginViewModel : ObservableObject
     }
 
     public bool CanLogin => !Busy && Host.Trim().Length > 0 && LoginId.Trim().Length > 0 && Password.Length > 0;
-    partial void OnBusyChanged(bool v) => OnPropertyChanged(nameof(CanLogin));
-    partial void OnHostChanged(string v) => OnPropertyChanged(nameof(CanLogin));
-    partial void OnLoginIdChanged(string v) => OnPropertyChanged(nameof(CanLogin));
-    partial void OnPasswordChanged(string v) => OnPropertyChanged(nameof(CanLogin));
+    partial void OnBusyChanged(bool value) => OnPropertyChanged(nameof(CanLogin));
+    partial void OnHostChanged(string value) => OnPropertyChanged(nameof(CanLogin));
+    partial void OnLoginIdChanged(string value) => OnPropertyChanged(nameof(CanLogin));
+    partial void OnPasswordChanged(string value) => OnPropertyChanged(nameof(CanLogin));
 
     [RelayCommand] private void ToggleAdvanced() => Advanced = !Advanced;
 

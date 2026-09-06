@@ -41,7 +41,9 @@ public sealed class DirectoryService
         foreach (string p in candidates)
         {
             if (p.Length == 0 || !File.Exists(p)) continue;
-            LoadCsv(p);
+            try { LoadCsv(p); }
+            catch (IOException) { _csv.Clear(); continue; }        // Excel 등이 열어 잠근 파일 — 다음 후보로(기동을 막지 않는다)
+            catch (UnauthorizedAccessException) { _csv.Clear(); continue; }
             LoadedFrom = p;
             break;
         }
@@ -55,7 +57,7 @@ public sealed class DirectoryService
         {
             string line = raw.Trim();
             if (line.Length == 0 || line.StartsWith('#') || line.StartsWith("kind,", StringComparison.OrdinalIgnoreCase)) continue;
-            string[] f = line.Split(',');
+            string[] f = SplitCsv(line);
             if (f.Length < 2) continue;
             var kind = f[0].Trim().ToLowerInvariant() switch
             {
@@ -71,6 +73,28 @@ public sealed class DirectoryService
             _csv.RemoveAll(x => x.Kind == kind && Normalize(x.Number) == Normalize(number));
             _csv.Add(new Contact(kind, number, name, tags));
         }
+    }
+
+    /// <summary>CSV 한 줄 분리 — 큰따옴표 필드 안의 쉼표("김철수, 팀장")와 "" 이스케이프를 지킨다(RFC 4180).</summary>
+    internal static string[] SplitCsv(string line)
+    {
+        var fields = new List<string>();
+        var sb = new System.Text.StringBuilder();
+        bool quoted = false;
+        for (int i = 0; i < line.Length; ++i)
+        {
+            char c = line[i];
+            if (quoted)
+            {
+                if (c == '"') { if (i + 1 < line.Length && line[i + 1] == '"') { sb.Append('"'); ++i; } else quoted = false; }
+                else sb.Append(c);
+            }
+            else if (c == '"') quoted = true;
+            else if (c == ',') { fields.Add(sb.ToString()); sb.Clear(); }
+            else sb.Append(c);
+        }
+        fields.Add(sb.ToString());
+        return fields.ToArray();
     }
 
     // ── 서버 전화번호부 ──

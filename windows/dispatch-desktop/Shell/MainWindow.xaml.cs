@@ -77,9 +77,9 @@ public partial class MainWindow : Window
     {
         var p = _layout.Get(name);
         if (p is null) return;
-        if (name == LayoutStore.DefaultName) { if (_defaultXml is not null) DeserializeDock(_defaultXml); }
+        _defaultXml ??= SerializeDock();                       // 기본 배치 = XAML 초기 상태 — 프리셋을 적용하기 전에 찍어 둔다
+        if (name == LayoutStore.DefaultName) DeserializeDock(_defaultXml);
         else DeserializeDock(p.DockXml);
-        _defaultXml ??= SerializeDock();
         if (restoreWindow && p.Window.Left is double wl && p.Window.Top is double wt)
         {
             Left = wl; Top = wt; Width = p.Window.Width; Height = p.Window.Height;
@@ -222,6 +222,23 @@ public partial class MainWindow : Window
 
     public void ActivateFromSecondInstance()
     {
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Show(); Activate();
+    }
+
+    /// <summary>로그아웃 — 창·ViewModel 은 앱 수명 동안 하나만 두고(세션 이벤트 구독이 로그인마다 쌓이지 않게) 숨긴다. 감청 창은 닫는다.</summary>
+    public void HideForLogout()
+    {
+        PersistWindow();
+        foreach (var w in _monitors.Values.ToList()) w.CloseFromSession();
+        _exitConfirmed = false;
+        Hide();
+    }
+
+    /// <summary>재로그인 — 숨긴 창을 다시 보이고 스냅샷에서 화면을 재구성한다.</summary>
+    public void ShowAfterLogin()
+    {
+        _vm.RestoreFromSnapshot();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
         Show(); Activate();
     }

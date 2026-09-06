@@ -73,10 +73,18 @@ public sealed class SettingsStore
         catch (Exception) { Current = new AppSettings(); }
     }
 
+    /// <summary>저장 실패(읽기 전용·잠김 %APPDATA%)는 삼킨다 — 메모리 설정은 유효하고, 창 닫기·토글마다 오류 창이 뜨면 안 된다.</summary>
+    public bool LastSaveFailed { get; private set; }
+
     public void Save()
     {
-        AppPaths.Ensure();
-        File.WriteAllText(AppPaths.Settings, JsonSerializer.Serialize(Current, Json));
+        try
+        {
+            AppPaths.Ensure();
+            File.WriteAllText(AppPaths.Settings, JsonSerializer.Serialize(Current, Json));
+            LastSaveFailed = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { LastSaveFailed = true; }
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

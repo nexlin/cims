@@ -99,12 +99,13 @@ public:
     Result transferAttended(int callId, int consultCallId);
 
     // ── MCData SDS (TS 24.282 §9.2.2 C-plane) ──
-    /** 그룹 SDS 발신(MESSAGE multipart). 반환 msgId(UUID hex32), 실패 빈 문자열. */
+    /** 그룹 SDS 발신(MESSAGE multipart). 반환 msgId(UUID hex32), 실패 빈 문자열. token 을 주면 요청 token 을 돌려준다 —
+     *  최종 응답은 onRequestCompleted(MESSAGE, token) 으로 오므로 앱은 이 token 으로 상관한다(disposition 통지 발신과 구분). */
     std::string sendGroupSds(int accountId, const std::string& groupId, const std::string& text,
-                             bool requestDelivery = true);
-    /** SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. */
+                             bool requestDelivery = true, int64_t* token = nullptr);
+    /** SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. token = 요청 token(onRequestCompleted 상관). */
     Result sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
-                               const std::string& msgId, int notifType);
+                               const std::string& msgId, int notifType, int64_t* token = nullptr);
 
     // ── 장치 ──
     std::vector<AudioDeviceInfo> audioDevices() const;

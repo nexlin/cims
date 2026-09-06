@@ -167,6 +167,9 @@ public sealed record FloorInfo(FloorState State, IReadOnlyList<Talker> Talkers, 
 /// <summary>임의 SIP 요청(PUBLISH/MESSAGE 등)의 최종 응답 — token 으로 상관.</summary>
 public sealed record RequestResult(int AccountId, long Token, string Method, int Code, string Reason, string ETag);
 
+/// <summary>그룹 SDS 발신 결과 — MsgId 는 disposition 통지 상관, Token 은 RequestCompleted 상관.</summary>
+public sealed record SdsSend(string MsgId, long Token);
+
 /// <summary>감시 대상의 dialog 상태 (RFC 4235) — 관제 BLF·INVITE-Join 대상 식별.</summary>
 public sealed record DialogInfo(int AccountId, string Watched, string Id, string CallId, string LocalTag, string RemoteTag,
                                 string Direction, string State, string RemoteIdentity, bool Full)

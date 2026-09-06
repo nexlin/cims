@@ -70,10 +70,15 @@ public sealed class LayoutStore
         _ = Get(DefaultName);
     }
 
+    /// <summary>저장 실패(읽기 전용·잠김 %APPDATA%)는 삼킨다 — 배치는 메모리에 유효하고, 창 닫기마다 오류 창이 뜨면 안 된다.</summary>
     public void Save()
     {
-        AppPaths.Ensure();
-        System.IO.File.WriteAllText(AppPaths.Layout, JsonSerializer.Serialize(File, Json));
+        try
+        {
+            AppPaths.Ensure();
+            System.IO.File.WriteAllText(AppPaths.Layout, JsonSerializer.Serialize(File, Json));
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { }
     }
 
     /// <summary>현재 배치를 이름으로 저장(같은 이름은 덮어씀) 후 그 프리셋을 현재로.</summary>

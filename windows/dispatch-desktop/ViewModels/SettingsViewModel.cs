@@ -17,7 +17,7 @@ public sealed partial class HotKeyRow : ObservableObject
     [ObservableProperty] private bool _conflict;
     public HotKeyRow(string name, string label, bool global, string text) { Name = name; Label = label; IsGlobal = global; _text = text; }
     public bool IsValid => Text.Trim().Length == 0 || HotKey.TryParse(Text, out _);
-    partial void OnTextChanged(string v) => OnPropertyChanged(nameof(IsValid));
+    partial void OnTextChanged(string value) => OnPropertyChanged(nameof(IsValid));
 }
 
 public sealed partial class ChannelChoice : ObservableObject

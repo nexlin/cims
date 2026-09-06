@@ -161,8 +161,10 @@
 **오른쪽 아래: MCData 메시지** — [mcdata_messaging.md](mcdata_messaging.md) §5 의 앱 동작:
 - 스레드 칩(그룹 = `groupUri`, 1:1 = 발신자 — `threadKeyOf` 규칙, 미읽음 수) → 선택 스레드의 말풍선(발신 상태 🕓→✓→✓✓/⚠ 재전송, 그룹 수신은
   발신자 라벨) → 입력 + [📎](FD) + [전송]. 채널 카드를 선택하면 그 그룹 스레드로 따라간다(설정으로 끌 수 있음).
-- 발신 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` → `onRequestResult`(token, 2xx=SENT) · disposition 요청 수신은 `sendSdsNotification(delivered)`
-  자동 회신 · `onSds(notification)` → ✓✓. 1:1 SDS 는 사설콜 상대·주소록 사용자에게.
+- 발신 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` → `(msgId, token)` · 최종 응답 `onRequestCompleted(MESSAGE, token)` 을 **token 으로**
+  상관해 2xx=SENT(SMS 와 같은 규칙 — 자동 회신하는 disposition 통지의 완료 이벤트는 어느 메시지에도 맞지 않아 무시된다) · disposition 요청 수신은
+  `sendSdsNotification(delivered)` 자동 회신 · `onSds(notification)` 을 msgId 로 상관 → ✓✓(재전송은 새 msgId·token 을 메시지에 덮어쓴다).
+  1:1 SDS 는 사설콜 상대·주소록 사용자에게(스레드 키 = 상대 번호 user part).
 - 보관: 로컬 SQLite(`%APPDATA%\CIMS\dispatch-desktop\messages.db`) 최근 30일(설정). 미읽음은 패널이 접혀 있어도 머리 배지.
 
 ### 4.2 ② PTT 내역 — 실시간 (좌 열 아래)
@@ -189,8 +191,12 @@
 - 10명을 넘으면 띠가 두 줄이 되고 그 이상은 "+n" 로 접는다(운영 권고 10 이내).
 
 **왼쪽 중: 대기열** — 대표번호 AoR dialog(dispatch_center.md §4.5): 발신자 · `→ 대표번호` · 링 경과 · 울리는 그룹원(포크 대기 leg — 각 내선
-dialog 의 early 로 추정, RLS 전) · [당겨받기]=`pickup(code, pilotId)`. 자기 단말도 울리면 [응답]. 응답되면 "응답: 1004 최순경" 3초 후 제거.
-sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오늘 응대·부재 건수.
+dialog 의 early 로 추정, RLS 전) · [당겨받기]=`pickup(code, pilotId)`. 자기 단말도 울리면 [응답](**이 발신자의 내 착신 leg 만** 받는다 — 직접 착신과
+동시에 울려도 다른 호를 받지 않는다). 응답되면 "응답: 1004 최순경" 3초 후 제거하고, 그 호의 leg 가 전부 끝나기 전까지 NOTIFY 재수신으로 되살리지 않는다.
+**항목 = 발신자 기준 한 호** — 서버가 대표번호 dialog 를 포크 leg 마다(id=각 그룹원 leg 의 Call-ID) 내보내므로(서버 요청서 §6-7, 설계 §4.5 는 호 단위)
+같은 발신자의 leg 를 한 항목으로 병합하고 대표 leg 는 confirmed 우선. 초기 full 스냅샷의 빈 자리표시자(id·state 빈 값)는 행으로 만들지 않는다.
+sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오늘 응대·부재 건수 — **대표번호 부재는 dialog 가 confirmed 없이 terminated 될 때 1건**
+(내 leg 가 응답 없이 끝난 것은 동료가 받은 경우일 수 있어 세지 않는다), 직접 착신 부재는 내 세션 기준.
 
 **왼쪽 아래: 내 통화** — `calls()` 중 VoLTE 통화(`!isMcptt && !listenOnly`) 카드(활성 1 + 보류 n, 스크롤):
 - 카드: 상대 · **착신 경로 배지**(`calledParty`=pilot → "대표 7000 착신") · 상태 · 경과 · 🎧/🔊 · [응답]/[거절 486]/[보류]/[재개]/[음소거]/[DTMF]/[전달 ▾]/
@@ -261,6 +267,10 @@ sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오
   (일반 소프트폰 모드). 콘솔 `관리 > 관제 그룹` 배정 안내.
 - 등록 실패(401/403/타임아웃) → 상단 점등 빨강 + 토스트, 자동 재시도(백오프 5→60초). `refreshRegistration` 은 네트워크 복귀 이벤트(Windows
   `NetworkChange`)에서 즉시.
+- **메인 창·ViewModel 은 앱 수명 동안 하나.** 세션·핫키·1초 틱은 싱글턴이라 로그인마다 VM 을 새로 만들면 이벤트 구독이 쌓인다(SDS 이중 저장·PTT 이중
+  요청). 로그아웃 = 창 숨김(+감청 창 닫기·창 위치 저장) → 로그인 창, 재로그인 = 스냅샷 재구성 후 다시 표시.
+- **기동 실패는 종료로 끝난다.** 데이터 폴더(`%APPDATA%\CIMS\dispatch-desktop`)의 `messages.db` 잠김·읽기 전용 등 기동 중 예외는 "기동 실패" 창을 띄우고
+  프로세스를 끝낸다(창 없는 프로세스로 남지 않게). 주소록 CSV 가 잠겨 있으면 그 파일만 건너뛰고, 설정·배치 저장 실패는 조용히 삼킨다(메모리 값 유지).
 - 로그아웃: 등록 해제 → 토큰 폐기 → 로그인 창. 창 닫기는 트레이 최소화(설정), 완전 종료는 메뉴 — 감청 창·진행 세션이 있으면 확인.
 
 ## 7. 오디오 배치 UI (ue_sdk.md §6.3)
@@ -347,9 +357,9 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     DeskViewModel               Profile·dispatch·등록 상태·오디오 요약·감청 중 N 칩·배치 잠금/프리셋 (상단 바)
     PttChannelsViewModel        ① 왼쪽 — ChannelCard(멤버/사설콜/애드혹) · FloorState · 선택 채널(애드혹 우선 자동 선택) · 카드/타일 모드
     PttOriginateViewModel       ① 오른쪽 위 — 사설콜/애드혹 모드 · PTT 주소록(사용자/그룹) · 애드혹 선택 칩
-    McDataMessagesViewModel     ① 오른쪽 아래 — 스레드·말풍선·disposition 자동 회신·발신 순서 큐로 MESSAGE 최종 응답 상관 (MessagesViewModelBase)
+    McDataMessagesViewModel     ① 오른쪽 아래 — 스레드·말풍선·disposition 자동 회신·발신 token 으로 MESSAGE 최종 응답 상관 (MessagesViewModelBase)
     PttActivityViewModel        ② — 진행 중 행(conference 로스터·floor) + 최근 이벤트 링 버퍼
-    CallDeskViewModel           ③ 왼쪽 — MemberChip(DialogInfo) · QueueItem(대표번호 dialog) · CallCard(전달 blind/attended 포함)
+    CallDeskViewModel           ③ 왼쪽 — MemberChip(DialogInfo) · QueueItem(대표번호 호 — 발신자 기준 leg 병합) · CallCard(전달 blind/attended 포함)
     CallOriginateViewModel      ③ 오른쪽 위 — 표시 모드 [다이얼패드|주소록|최근] 하나 · 다이얼패드(DTMF 겸용) · 주소록 · 최근
     SmsMessagesViewModel        ③ 오른쪽 아래 — text/plain MESSAGE 스레드 · token 상관 · 외부망 비활성
     CallActivityViewModel       ④ — 세션 행(dialog 쌍 결합) + 최근 기록

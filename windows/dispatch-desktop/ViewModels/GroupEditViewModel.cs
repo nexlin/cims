@@ -42,7 +42,8 @@ public sealed partial class GroupEditViewModel : ObservableObject
     private string _ifMatch = "";
     private string _orgCode = "";
 
-    public static IReadOnlyList<string> SessionTypes { get; } = new[] { "prearranged", "chat", "broadcast" };
+    /// <summary>인스턴스 프로퍼티 — WPF 바인딩은 static 멤버를 경로로 풀지 못한다.</summary>
+    public IReadOnlyList<string> SessionTypes { get; } = new[] { "prearranged", "chat", "broadcast" };
 
     [ObservableProperty] private string _name = "";
     /// <summary>그룹 id(uri user part) — 신규만 편집 가능.</summary>

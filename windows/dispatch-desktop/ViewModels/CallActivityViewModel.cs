@@ -60,8 +60,8 @@ public sealed partial class CallActivityViewModel : ObservableObject
         Refilter();
     }
 
-    partial void OnFilterChanged(string v) => Refilter();
-    partial void OnSearchChanged(string v) => Refilter();
+    partial void OnFilterChanged(string value) => Refilter();
+    partial void OnSearchChanged(string value) => Refilter();
     [RelayCommand] private void SetFilter(string f) => Filter = f;
 
     /// <summary>결합 규칙: 감시 대상 두 내선의 leg 가 서로를 가리키고 전이 시각이 근접하면 한 행(dispatch_center.md §5.3).</summary>

@@ -71,8 +71,8 @@ public sealed partial class CallOriginateViewModel : ObservableObject
     public string BookCount => $"{Book.Count}명";
     public string SyncText => _s.Directory.ServerSyncedAt is DateTime t ? $"동기화 {t:HH:mm}" : "서버 전화번호부 미동기화";
 
-    partial void OnModeChanged(string v) { OnPropertyChanged(nameof(IsPad)); OnPropertyChanged(nameof(IsBook)); OnPropertyChanged(nameof(IsRecent)); _s.Settings.Update(x => x.OriginateMode = v); }
-    partial void OnNumberChanged(string v) { OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); UpdateSuggestions(); }
+    partial void OnModeChanged(string value) { OnPropertyChanged(nameof(IsPad)); OnPropertyChanged(nameof(IsBook)); OnPropertyChanged(nameof(IsRecent)); _s.Settings.Update(x => x.OriginateMode = value); }
+    partial void OnNumberChanged(string value) { OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); UpdateSuggestions(); }
 
     private void UpdateSuggestions()
     {
@@ -88,8 +88,8 @@ public sealed partial class CallOriginateViewModel : ObservableObject
         }
         OnPropertyChanged(nameof(HasSuggestions));
     }
-    partial void OnSearchChanged(string v) => Filter();
-    partial void OnOrgScopeChanged(OrgChoice? v) => Filter();
+    partial void OnSearchChanged(string value) => Filter();
+    partial void OnOrgScopeChanged(OrgChoice? value) => Filter();
 
     public void RefreshPad() { OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); }
 

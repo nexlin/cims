@@ -33,16 +33,16 @@
                     <Grid.ColumnDefinitions><ColumnDefinition Width="120" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding CallerName}" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <ProgressBar Grid.Column="1" Style="{StaticResource Meter}" Value="{Binding CallerLevel, Mode=OneWay}" VerticalAlignment="Center" Margin="8,0" />
-                    <Ellipse Grid.Column="2" Style="{StaticResource Dot}">
-                        <Ellipse.Resources><Style TargetType="Ellipse" BasedOn="{StaticResource Dot}"><Style.Triggers><DataTrigger Binding="{Binding CallerActive}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger></Style.Triggers></Style></Ellipse.Resources>
+                    <Ellipse Grid.Column="2">
+                        <Ellipse.Style><Style TargetType="Ellipse" BasedOn="{StaticResource Dot}"><Style.Triggers><DataTrigger Binding="{Binding CallerActive}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger></Style.Triggers></Style></Ellipse.Style>
                     </Ellipse>
                 </Grid>
                 <Grid Margin="0,4">
                     <Grid.ColumnDefinitions><ColumnDefinition Width="120" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                     <TextBlock Text="{Binding CalleeName}" FontWeight="Medium" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                     <ProgressBar Grid.Column="1" Style="{StaticResource Meter}" Value="{Binding CalleeLevel, Mode=OneWay}" VerticalAlignment="Center" Margin="8,0" />
-                    <Ellipse Grid.Column="2" Style="{StaticResource Dot}">
-                        <Ellipse.Resources><Style TargetType="Ellipse" BasedOn="{StaticResource Dot}"><Style.Triggers><DataTrigger Binding="{Binding CalleeActive}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger></Style.Triggers></Style></Ellipse.Resources>
+                    <Ellipse Grid.Column="2">
+                        <Ellipse.Style><Style TargetType="Ellipse" BasedOn="{StaticResource Dot}"><Style.Triggers><DataTrigger Binding="{Binding CalleeActive}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger></Style.Triggers></Style></Ellipse.Style>
                     </Ellipse>
                 </Grid>
                 <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0"><Run Text="[양쪽] · " /><Run Text="{Binding VideoNote, Mode=OneWay}" /></TextBlock>

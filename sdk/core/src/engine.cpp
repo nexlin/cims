@@ -1213,10 +1213,12 @@ Result Engine::transferAttended(int callId, int consultCallId) {
     });
 }
 
-std::string Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery) {
+std::string Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery,
+                                 int64_t* tokenOut) {
     if (!impl_->running || text.empty()) return std::string();
     std::string msgId = mcdata::newMessageId();
     int64_t token = impl_->nextToken++;
+    if (tokenOut) *tokenOut = token;
     bool ok = impl_->ctl.runSync([=]() -> bool {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
@@ -1229,9 +1231,10 @@ std::string Engine::sendGroupSds(int accountId, const std::string& groupId, cons
 }
 
 Result Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
-                                   const std::string& msgId, int notifType) {
+                                   const std::string& msgId, int notifType, int64_t* tokenOut) {
     if (!impl_->running) return Result::fail(-1, "not running");
     int64_t token = impl_->nextToken++;
+    if (tokenOut) *tokenOut = token;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);

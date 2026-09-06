@@ -37,15 +37,15 @@
                                 <Grid Margin="0,3">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="200" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                     <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
-                                    <TextBox Grid.Column="1" Style="{StaticResource Field}" Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}">
-                                        <TextBox.Resources>
+                                    <TextBox Grid.Column="1" Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}">
+                                        <TextBox.Style>
                                             <Style TargetType="TextBox" BasedOn="{StaticResource Field}">
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding Conflict}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
                                                     <DataTrigger Binding="{Binding IsValid}" Value="False"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
-                                        </TextBox.Resources>
+                                        </TextBox.Style>
                                     </TextBox>
                                     <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="10,0,0,0">
                                         <TextBlock.Style>

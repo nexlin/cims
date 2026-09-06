@@ -71,8 +71,8 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_transfer_attended(IntPtr e, int call_id, int consult_call_id);
 
     // MCData SDS
-    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_group_sds(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, [MarshalAs(U8)] string text, int request_delivery, byte* msg_id_out, int msg_id_cap);
-    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_sds_notification(IntPtr e, int account_id, [MarshalAs(U8)] string peer, [MarshalAs(U8)] string conv_id, [MarshalAs(U8)] string msg_id, int notif_type);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_group_sds(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, [MarshalAs(U8)] string text, int request_delivery, byte* msg_id_out, int msg_id_cap, long* token_out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_sds_notification(IntPtr e, int account_id, [MarshalAs(U8)] string peer, [MarshalAs(U8)] string conv_id, [MarshalAs(U8)] string msg_id, int notif_type, long* token_out);
 
     // 장치
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_audio_devices(IntPtr e, cimsue_audio_device_info_t** @out);

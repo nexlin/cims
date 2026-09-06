@@ -19,6 +19,9 @@ public partial class App : Application
     private MainWindow? _main;
     private DispatcherTimer? _tick;
 
+    private MainViewModel? _mainVm;
+    private bool _started;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -26,11 +29,29 @@ public partial class App : Application
         if (!_instance.IsFirst) { Shutdown(0); return; }
         _instance.ActivationRequested += (_, _) => _main?.ActivateFromSecondInstance();
 
+        // 기동 중 예외는 창 없는 프로세스로 남지 않게 종료한다(ShutdownMode 가 명시 종료라 스스로 끝나지 않는다).
+        DispatcherUnhandledException += (_, ex) =>
+        {
+            _log?.Error("unhandled", ex.Exception);
+            MessageBox.Show(ex.Exception.Message, _started ? "오류" : "기동 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+            ex.Handled = true;
+            if (!_started) Shutdown(1);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, ex) => _log?.Error("fatal", ex.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, ex) => { _log?.Error("task", ex.Exception); ex.SetObserved(); };
+        try { StartCore(e); }
+        catch (Exception ex)
+        {
+            _log?.Error("startup", ex);
+            MessageBox.Show($"앱을 시작할 수 없습니다.\n{ex.Message}\n\n데이터 폴더: {AppPaths.Root}", "기동 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown(1);
+        }
+    }
+
+    private void StartCore(StartupEventArgs e)
+    {
         AppPaths.Ensure();
         _log = new AppLog();
-        DispatcherUnhandledException += (_, ex) => { _log.Error("unhandled", ex.Exception); MessageBox.Show(ex.Exception.Message, "오류", MessageBoxButton.OK, MessageBoxImage.Error); ex.Handled = true; };
-        AppDomain.CurrentDomain.UnhandledException += (_, ex) => _log.Error("fatal", ex.ExceptionObject as Exception);
-        TaskScheduler.UnobservedTaskException += (_, ex) => { _log.Error("task", ex.Exception); ex.SetObserved(); };
 
         var settings = new SettingsStore();
         settings.Load();
@@ -49,6 +70,7 @@ public partial class App : Application
         NetworkChange.NetworkAvailabilityChanged += (_, a) => { if (a.IsAvailable) Dispatcher.BeginInvoke(() => _session?.RefreshRegistrations()); };
 
         _log.Info($"start {CimsUe.Engine.Version}");
+        _started = true;
         // --ui-preview: 로그인·엔진 없이 메인 화면만(화면 배치·바인딩 점검용 개발 스위치). 프로파일이 없으므로 소프트폰 모드 표시.
         if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase)) { ShowMain(); return; }
         _ = RunLoginAsync();
@@ -56,28 +78,42 @@ public partial class App : Application
 
     private async Task RunLoginAsync()
     {
-        var s = _session!;
-        var login = new LoginViewModel(s);
-        bool ok = false;
-        if (s.HasSavedLogin) ok = await login.ResumeAsync();
-        if (!ok)
+        try
         {
-            var w = new LoginWindow(login);
-            if (w.ShowDialog() != true) { ExitApp(); return; }
+            var s = _session!;
+            var login = new LoginViewModel(s);
+            bool ok = false;
+            if (s.HasSavedLogin) ok = await login.ResumeAsync();
+            if (!ok)
+            {
+                var w = new LoginWindow(login);
+                if (w.ShowDialog() != true) { ExitApp(); return; }
+            }
+            ShowMain();
         }
-        ShowMain();
+        catch (Exception ex)
+        {
+            _log?.Error("login flow", ex);
+            MessageBox.Show(ex.Message, "로그인 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+            ExitApp();
+        }
     }
 
+    /// <summary>메인 창·ViewModel 은 앱 수명 동안 하나 — 세션·핫키·틱은 싱글턴이라 로그인마다 새로 만들면 이벤트 구독이 쌓인다(SDS 이중 저장·PTT 이중 요청).
+    /// 재로그인은 숨겨 둔 창을 다시 보이고 스냅샷에서 재구성한다.</summary>
     private void ShowMain()
     {
         var s = _session!;
         var conflicts = _hotKeys!.Apply(s.Settings.Current.HotKeys);
         if (conflicts.Count > 0) s.Notify.Warn("핫키 충돌: " + string.Join(", ", conflicts), "다른 프로그램이 같은 키를 등록했습니다 — 설정에서 바꾸세요");
-        var vm = new MainViewModel(s, _layout!, _hotKeys);
-        _main = new MainWindow(vm, _layout!);
-        _tick!.Tick += (_, _) => vm.Tick(DateTime.Now);
-        _tick.Start();
-        _main.Show();
+        if (_mainVm is null)
+        {
+            var vm = _mainVm = new MainViewModel(s, _layout!, _hotKeys);
+            _tick!.Tick += (_, _) => vm.Tick(DateTime.Now);
+        }
+        if (_main is null) { _main = new MainWindow(_mainVm, _layout!); _main.Show(); }
+        else _main.ShowAfterLogin();
+        _tick!.Start();
         if (!s.HasDesk) s.Notify.Info("관제 데스크 미배정 — 일반 소프트폰 모드", "콘솔 관리 › 관제 그룹에서 배정하면 그룹원 띠·대기열·청취가 켜집니다");
     }
 
@@ -96,8 +132,7 @@ public partial class App : Application
     public void Logout()
     {
         _tick?.Stop();
-        _main?.Close();
-        _main = null;
+        _main?.HideForLogout();
         _session!.Logout();
         _ = RunLoginAsync();
     }

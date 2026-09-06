@@ -43,12 +43,17 @@ public sealed partial class MemberChip : ObservableObject
     public event EventHandler<string>? FillRequested;
 }
 
-/// <summary>대기열 항목 — 대표번호 AoR 의 dialog 하나(포크 집합).</summary>
+/// <summary>대기열 항목 — 대표번호에 걸려온 호 하나(발신자 기준). 서버가 포크 leg 마다 dialog 를 내므로(서버 요청서 §6-7) 같은 발신자의
+/// leg 들을 한 항목으로 병합하고, Dialog 는 그중 대표 leg(confirmed 우선)다.</summary>
 public sealed partial class QueueItem : ObservableObject
 {
     private readonly DispatchSession _s;
-    public DialogRow Dialog { get; }
-    public QueueItem(DispatchSession s, DialogRow d) { _s = s; Dialog = d; }
+    /// <summary>병합 키 — 발신자 번호(user part).</summary>
+    public string CallerNumber { get; }
+    [ObservableProperty] private DialogRow _dialog;
+    /// <summary>confirmed 뒤 3초 제거가 예약됐는가(재수신 NOTIFY 로 되살아나지 않게).</summary>
+    public bool DismissScheduled { get; set; }
+    public QueueItem(DispatchSession s, DialogRow d) { _s = s; _dialog = d; CallerNumber = d.RemoteNumber; }
     public string Caller => _s.Directory.Label(Dialog.Info.RemoteIdentity);
     public string Pilot => UserPartConverter.UserPart(Dialog.Watched);
     public TimeSpan Elapsed => Dialog.Elapsed;
@@ -62,7 +67,12 @@ public sealed partial class QueueItem : ObservableObject
     public string AnsweredBy => IsAnswered ? "응답: " + (_s.Dialogs.FirstOrDefault(d => d != Dialog && d.IsConfirmed && UserPartConverter.UserPart(d.Info.RemoteIdentity) == UserPartConverter.UserPart(Dialog.Info.RemoteIdentity)) is { } m ? _s.Directory.Label(m.WatchedNumber) : "") : "";
     public void Refresh() { foreach (var p in new[] { nameof(Elapsed), nameof(IsRinging), nameof(IsAnswered), nameof(Ringing), nameof(RingsMe), nameof(AnsweredBy), nameof(Caller) }) OnPropertyChanged(p); }
     [RelayCommand] private void Pickup() => _s.Pickup(Pilot);
-    [RelayCommand] private void Answer() { var s = _s.Sessions.FirstOrDefault(x => x.IsIncoming); if (s is not null) _s.Answer(s); }
+    /// <summary>이 호의 내 착신 leg 만 받는다 — 직접 착신과 동시에 울릴 때 다른 호를 받지 않도록.</summary>
+    [RelayCommand] private void Answer()
+    {
+        var s = _s.Sessions.FirstOrDefault(x => x.IsIncoming && UserPartConverter.UserPart(x.Info.RemoteUri) == CallerNumber);
+        if (s is not null) _s.Answer(s);
+    }
 }
 
 /// <summary>내 통화 카드.</summary>
@@ -110,6 +120,8 @@ public sealed partial class CallDeskViewModel : ObservableObject
     public ObservableCollection<MemberChip> Members { get; } = new();
     public ObservableCollection<QueueItem> Queue { get; } = new();
     public ObservableCollection<CallCard> Calls { get; } = new();
+    /// <summary>응답 뒤 대기열에서 내린 호의 발신자 — 그 호의 leg 가 전부 끝날 때까지 되살리지 않는다.</summary>
+    private readonly HashSet<string> _dismissed = new(StringComparer.Ordinal);
     public IReadOnlyList<string> MemberExtensions => Members.Where(m => !m.IsMe).Select(m => m.Extension).ToList();
 
     public event EventHandler<string>? FillRequested;
@@ -153,10 +165,31 @@ public sealed partial class CallDeskViewModel : ObservableObject
     {
         if (_s.IsPilot(d.Watched))
         {
-            var q = Queue.FirstOrDefault(x => x.Dialog == d);
-            if (d.IsTerminated) { if (q is not null) Queue.Remove(q); }
-            else if (q is null) Queue.Add(new QueueItem(_s, d));
-            else if (d.IsConfirmed) _ = Task.Delay(3000).ContinueWith(_ => { if (Queue.Contains(q)) Queue.Remove(q); }, TaskScheduler.FromCurrentSynchronizationContext());
+            // 발신자 기준 병합: 살아 있는 leg 가 하나라도 있으면 항목 유지, 대표 leg 는 confirmed 우선. 종료된 leg 는 세션이 Dialogs 에서 이미 뺐다.
+            string caller = d.RemoteNumber;
+            var q = Queue.FirstOrDefault(x => x.CallerNumber == caller);
+            var legs = _s.Dialogs.Where(x => _s.IsPilot(x.Watched) && x.RemoteNumber == caller && !x.IsTerminated).ToList();
+            if (legs.Count == 0)
+            {
+                if (q is not null) Queue.Remove(q);
+                _dismissed.Remove(caller);
+            }
+            else
+            {
+                var best = legs.OrderByDescending(x => x.IsConfirmed).ThenBy(x => x.FirstSeen).First();
+                if (q is null)
+                {
+                    if (best.IsConfirmed && _dismissed.Contains(caller)) { Refresh(); return; }   // 응답 뒤 3초 표시가 끝난 호 — NOTIFY 재수신으로 되살리지 않는다
+                    q = new QueueItem(_s, best); Queue.Add(q);
+                }
+                else if (q.Dialog != best) q.Dialog = best;
+                if (best.IsConfirmed && !q.DismissScheduled)
+                {
+                    q.DismissScheduled = true;
+                    var item = q;
+                    _ = Task.Delay(3000).ContinueWith(_ => { if (Queue.Remove(item)) _dismissed.Add(item.CallerNumber); }, TaskScheduler.FromCurrentSynchronizationContext());
+                }
+            }
         }
         else
         {

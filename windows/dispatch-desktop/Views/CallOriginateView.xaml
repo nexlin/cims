@@ -29,7 +29,7 @@
                 </DockPanel>
             </Border>
             <DockPanel DockPanel.Dock="Top" Margin="10,8,10,6">
-                <Button DockPanel.Dock="Right" Style="{StaticResource Btn}" Content="{Binding PickupCode, StringFormat=픽업 {0}}" Command="{Binding PickupCommand}" Margin="6,0,0,0" ToolTip="그룹 픽업(당겨받기)" />
+                <Button DockPanel.Dock="Right" Style="{StaticResource Btn}" Content="{Binding PickupCode}" ContentStringFormat="픽업 {0}" Command="{Binding PickupCommand}" Margin="6,0,0,0" ToolTip="그룹 픽업(당겨받기)" />
                 <TextBox Style="{StaticResource Field}" Text="{Binding Number, UpdateSourceTrigger=PropertyChanged}" KeyDown="Number_KeyDown" ToolTip="내선·번호·이름 또는 sip: URI" />
             </DockPanel>
             <!-- 입력 중 주소록 제안 (이름·번호 부분 일치) -->

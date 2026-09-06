@@ -61,7 +61,7 @@ public sealed partial class MonitorWindowViewModel : ObservableObject
             OnPropertyChanged(p);
     }
 
-    partial void OnVolumeChanged(double v) => _s.Engine.GetCall(Session.CallId).SetRxLevel((float)v);
+    partial void OnVolumeChanged(double value) => _s.Engine.GetCall(Session.CallId).SetRxLevel((float)value);
 
     [RelayCommand] private void ToggleRoute() => _s.ToggleRoute(Session);
     [RelayCommand] private void Stop() { if (IsPtt) _s.LeaveChannel(Session); else _s.Hangup(Session); }

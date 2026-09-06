@@ -41,15 +41,15 @@
                                             <TextBlock FontWeight="Medium" Margin="0,0,8,0"><Run Text="{Binding A, Mode=OneWay}" /><Run Text=" ↔ " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding B, Mode=OneWay}" /></TextBlock>
                                             <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding PathBadge, Converter={StaticResource StrToVis}}"><TextBlock Text="{Binding PathBadge}" /></Border>
                                             <Border Style="{StaticResource Badge}" Visibility="{Binding IsTalking, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding VisibilityBadge}" /></Border>
-                                            <Ellipse Style="{StaticResource Dot}">
-                                                <Ellipse.Resources>
+                                            <Ellipse>
+                                                <Ellipse.Style>
                                                     <Style TargetType="Ellipse" BasedOn="{StaticResource Dot}">
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsRinging}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
                                                             <DataTrigger Binding="{Binding IsTalking}" Value="True"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
-                                                </Ellipse.Resources>
+                                                </Ellipse.Style>
                                             </Ellipse>
                                             <TextBlock Style="{StaticResource Muted}" Text="{Binding StateText}" FontSize="12" />
                                         </StackPanel>
