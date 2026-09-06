@@ -40,6 +40,10 @@
 #include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
+#else
+#include <windows.h>
+#include <shellapi.h>
+#pragma comment(lib, "shell32.lib")
 #endif
 
 #include "cimsue/cimsue.h"
@@ -297,6 +301,19 @@ std::string jsonEsc(const std::string& s) {
     return o;
 }
 
+/** dispatch 블록(dispatch_center.md §8.4) — members[]/pttTargets[] 는 서버 P2 반영 확인용으로 그대로 노출한다. */
+std::string dispatchJson(const DispatchProfile& d) {
+    std::string mem, tgt;
+    for (auto& m : d.members)
+        mem += std::string(mem.empty() ? "" : ",") + "{\"user_id\":\"" + jsonEsc(m.userId) + "\",\"name\":\"" + jsonEsc(m.name) + "\",\"volte_aor\":\"" +
+               jsonEsc(m.volteAor) + "\",\"ptt_id\":\"" + jsonEsc(m.pttId) + "\",\"extension\":\"" + jsonEsc(m.extension) + "\"}";
+    for (auto& t : d.pttTargets)
+        tgt += std::string(tgt.empty() ? "" : ",") + "{\"id\":\"" + jsonEsc(t.id) + "\",\"uri\":\"" + jsonEsc(t.uri) + "\",\"name\":\"" + jsonEsc(t.name) + "\"}";
+    return "{\"group_id\":\"" + jsonEsc(d.groupId) + "\",\"group_name\":\"" + jsonEsc(d.groupName) + "\",\"pilot_id\":\"" + jsonEsc(d.pilotId) +
+           "\",\"monitor_scope\":\"" + d.monitorScope + "\",\"ptt_listen\":\"" + d.pttListen + "\",\"listen_visibility\":\"" + d.listenVisibility +
+           "\",\"members\":[" + mem + "],\"ptt_targets\":[" + tgt + "]}";
+}
+
 /** CSC 로그인 + 프로파일. 반환 0 성공, 그 외 종료코드. */
 int cscLogin(const Opts& o, Profile& prof, TokenSet& tok) {
     CscEndpoint ep;
@@ -328,6 +345,25 @@ int main(int argc, char** argv) {
 #ifndef _WIN32
     signal(SIGSEGV, crashHandler);
     signal(SIGABRT, crashHandler);
+#else
+    // Windows 콘솔은 argv 를 ANSI(CP949)로 넘긴다 — 한글 그룹명·표시명이 서버에 깨져 저장되지 않도록 UTF-8 로 다시 받는다. 출력도 UTF-8.
+    SetConsoleOutputCP(CP_UTF8);
+    static std::vector<std::string> utf8Args;
+    static std::vector<char*> utf8Argv;
+    int wargc = 0;
+    if (LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc)) {
+        for (int i = 0; i < wargc; ++i) {
+            int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+            std::string s(n > 0 ? n - 1 : 0, '\0');
+            if (n > 0) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, s.data(), n, nullptr, nullptr);
+            utf8Args.push_back(std::move(s));
+        }
+        LocalFree(wargv);
+        for (auto& s : utf8Args) utf8Argv.push_back(s.data());
+        utf8Argv.push_back(nullptr);
+        argc = wargc;
+        argv = utf8Argv.data();
+    }
 #endif
     Opts o;
     if (!parse(argc, argv, o)) { usage(); return 2; }
@@ -402,9 +438,7 @@ int main(int argc, char** argv) {
                         std::to_string((int)s.mediaSecurity) + ",\"enforced\":" + (s.enforced ? "true" : "false") + "}";
             std::printf("{\"cmd\":\"login\",\"outcome\":\"ok\",\"login_id\":\"%s\",\"display_name\":\"%s\",\"country\":\"%s\",\"services\":[%s],"
                         "\"dispatch\":%s}\n", jsonEsc(prof.loginId).c_str(), jsonEsc(prof.displayName).c_str(), prof.countryCode.c_str(), svcs.c_str(),
-                        prof.dispatch.present ? ("{\"group_id\":\"" + prof.dispatch.groupId + "\",\"pilot_id\":\"" + prof.dispatch.pilotId +
-                                                 "\",\"monitor_scope\":\"" + prof.dispatch.monitorScope + "\",\"ptt_listen\":\"" + prof.dispatch.pttListen + "\"}").c_str()
-                                              : "null");
+                        prof.dispatch.present ? dispatchJson(prof.dispatch).c_str() : "null");
             return 0;
         }
         const ServiceProfile* sp = prof.service(o.fromProfile);

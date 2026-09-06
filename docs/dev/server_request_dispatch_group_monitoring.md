@@ -76,7 +76,7 @@
 ```json
 "dispatch": {
   ...기존...,
-  "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.…", "extension": "1002" } ],
+  "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+821310001002", "pttId": "sip:+82510001002@ptt.…", "extension": "1002" } ],
   "pttTargets": [ { "id": "g002", "uri": "sip:g002@ptt.…", "name": "음성그룹2" } ],
   "etag": "…"
 }
@@ -115,3 +115,24 @@
 - 앱: `DispatchSession.RefreshGroupsAsync()` 추출, [그룹] 탭 [새 그룹]/[편집]/[삭제] + `GroupEditWindow`, 생성 후 affiliation·conference 재적용, 삭제 시 해제, `SubscribeXcapDiff` 로 서버발 변경 자동 반영.
 - 앱: `dispatch.members[]`/`pttTargets[]` 로 dialog watch·conference 구독 대상 전환(로컬 CSV `member` 태그 폐지), ② PTT 내역에 청취 범위 그룹 행 표시.
 - 문서: `ue_sdk.md` §7 매핑 행, `dispatch_desktop_ui.md` §13 갱신.
+
+---
+
+## 6. 단말 세션 실측 발견 (2026-09-06, 라이브 .45 — cimsue-cli 로 CRUD 사이클 통과 후)
+
+서버가 다음 단계(P2→P3→P3b)를 진행하면서 같이 봐 달라는 것. 우선순위 순.
+
+1. **P3b 응답 계약 확정** — 앱 폴링 클라이언트 `HistoryClient` 뼈대가 들어갔다. 앱이 읽는 형태는
+   [dispatch_desktop_ui.md §13](../design/features/dispatch_desktop_ui.md) "서버 통합 이력 조회" 항목(요청 `kind/since/limit` + `If-None-Match`,
+   응답 `items[]{id,time,kind,event,from,to,group,duration,emergency,text}` + `next` + ETag). 그 형태로 가도 되는지, 다르면 확정안을 같은 절에 적어
+   달라 — 앱은 `Parse` 와 event 이름표만 맞춘다. **구현 전에는 404 를 유지**해 달라(200 빈 목록이면 앱이 폴링을 계속 돈다). 범위 밖은 403.
+2. **관제 그룹 `dg-dispatch01` 범위가 `monitor_scope=none`·`ptt_listen=none`** 이다(프로비저닝 실측). 감청·PTT 청취·이력 시험을 위해 콘솔
+   `구성 > 관제 그룹`(manager)에서 `all` 로 올려 달라(설계 §14.1 의 "시험 단계에서 올린다" 시점).
+3. **시험 그룹 편성이 설계 §14.1 과 다르다** — disp01/disp02 의 GMS 목록에 `tel:g003`(음성그룹3, 멤버 3, owner=false)만 있고 `g002` 는 없다.
+   설계는 "g002 = 멤버 그룹, g003 = 청취 범위 비멤버 그룹"이었다. 편성을 문서대로 되돌리거나, 문서를 현재 편성으로 고쳐 달라(청취 범위 시험엔
+   관제석이 멤버가 아닌 그룹이 하나 필요하다).
+4. **P2 는 아직 안 내려온다**(`dispatch.members[]/ptt_targets[]` 빈 배열 — `cimsue-cli … login` 이 이제 두 배열을 그대로 찍으니 반영 확인에 쓰면 된다).
+   `extension` 은 E.164 끝자리 4(1001/1002)로 부탁.
+5. (문서) 본 요청서 §2 예시 JSON 의 `volteAor` 가 옛 번호 `tel:+82310001002` — 재키잉 값 `tel:+821310001002` 로.
+6. (확인) GMS PUT 에 `role` 없이 멤버를 보내면 생성자(authorized user)까지 `participant` 로 저장된다. 앱은 자기 자신을 `chair` 로 명시해 보내니
+   동작엔 문제없지만, role 생략 시 생성자 기본값을 chair 로 둘지는 서버 규칙으로 확정해 mcptt_api.md §2 에 한 줄 적어 달라.

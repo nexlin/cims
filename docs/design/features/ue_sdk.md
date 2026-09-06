@@ -228,7 +228,7 @@ cimsue-cli [계정] dialog-watch <aor> [--duration S]   # RFC 4235 구독 → di
 cimsue-cli [계정] join <aor> [--duration S]           # 감시 → confirmed dialog 에 INVITE-Join(recvonly) → 수신 RTP·SSRC 라벨
 cimsue-cli [계정] pickup [번호] --code <피처코드>      # 그룹/지정 픽업
 cimsue-cli [계정] transfer <peer> --to <target>       # peer 와 통화 후 REFER blind (answer --transfer-to 는 착신측 전달)
-cimsue-cli --csc-host H --user U --pw P [--no-tls-verify] login          # PKCE 로그인 + /provisioning/me 요약
+cimsue-cli --csc-host H --user U --pw P [--no-tls-verify] login          # PKCE 로그인 + /provisioning/me 요약(dispatch members/ptt_targets 포함 — 서버 P2 반영 확인용)
 cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --port N] <command>   # 프로파일로 계정 채움
 ```
 

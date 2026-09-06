@@ -132,6 +132,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
 
     private CscClient MakeCsc(string host, int port)
     {
+        _history?.Dispose(); _history = null;                    // 이전 CSC 클라이언트 위에서 돌던 폴링 정지
         _csc?.Dispose();
         var s = Settings.Current;
         _csc = new CscClient(new CscEndpoint
@@ -257,8 +258,68 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         }
         IsReady = true;
         ProfileApplied?.Invoke(this, EventArgs.Empty);
+        _ = StartHistoryAsync();                                 // 서버 통합 이력(P3b) — 없으면 탐침에서 조용히 꺼진다
         return Result.Success;
     }
+
+    // ── 서버 통합 이력 폴링 (P3b — `/provisioning/history`, dispatch_desktop_ui.md §13) ──
+    private HistoryClient? _history;
+
+    private async Task StartHistoryAsync()
+    {
+        if (_csc is null || _tokens is null || !HasDesk) return;
+        _history?.Dispose();
+        _history = new HistoryClient(_csc, () => _tokens?.AccessToken, Log);
+        _history.Received += (_, e) => OnHistory(e);
+        if (await _history.ProbeAsync() == true)
+            _history.Start(new[] { HistoryKind.Call, HistoryKind.Ptt, HistoryKind.Message });
+    }
+
+    /// <summary>이력 항목 → ②④ 내역 행. 내가 당사자인 항목은 이미 로컬 행이 있으니 건너뛴다 — 서버 이력의 몫은 관제 범위 안 타인의 통화·세션·메시지.</summary>
+    private void OnHistory(HistoryEntry e)
+    {
+        if (IsMe(e.From) || IsMe(e.To)) return;
+        string from = Directory.NameOf(UserPartConverter.UserPart(e.From)) is { Length: > 0 } fn ? fn : Directory.DisplayNumber(UserPartConverter.UserPart(e.From));
+        string to = Directory.NameOf(UserPartConverter.UserPart(e.To)) is { Length: > 0 } tn ? tn : Directory.DisplayNumber(UserPartConverter.UserPart(e.To));
+        string dur = e.DurationSec > 0 ? $"{e.DurationSec / 60}:{e.DurationSec % 60:00}" : "";
+        switch (e.Kind)
+        {
+            case HistoryKind.Call:
+            {
+                var kind = e.Event switch
+                {
+                    "call.answered" or "call.ended" => ActivityKind.Incoming, "call.missed" or "call.noanswer" => ActivityKind.Missed,
+                    "call.transferred" => ActivityKind.Transfer, "call.pickup" => ActivityKind.Pickup, _ => ActivityKind.Note,
+                };
+                Activity.Add(new ActivityRow(e.Time, ActivityPanel.Call, kind, $"{from} → {to}", dur.Length > 0 ? dur : e.Event,
+                                             e.Emergency, kind == ActivityKind.Missed, UserPartConverter.UserPart(e.From), IsPilot: e.To.Length > 0 && IsPilotUri(e.To)));
+                break;
+            }
+            case HistoryKind.Ptt:
+            {
+                string group = Groups.FirstOrDefault(g => string.Equals(g.Uri, e.Group, StringComparison.OrdinalIgnoreCase))?.Name ?? UserPartConverter.UserPart(e.Group);
+                var kind = e.Event switch
+                {
+                    "ptt.talk" => ActivityKind.Talk, "ptt.session.start" => ActivityKind.SessionStart, "ptt.session.end" => ActivityKind.SessionEnd,
+                    "ptt.emergency" => ActivityKind.Emergency, "ptt.private" => ActivityKind.Private, "ptt.adhoc" => ActivityKind.Adhoc, _ => ActivityKind.Note,
+                };
+                Activity.Add(new ActivityRow(e.Time, ActivityPanel.Ptt, kind, $"{group} · {from}", dur.Length > 0 ? dur : e.Event, e.Emergency, false, UserPartConverter.UserPart(e.From)));
+                break;
+            }
+            case HistoryKind.Message:
+            {
+                bool sms = e.Event.StartsWith("message.sms", StringComparison.Ordinal);
+                string target = e.Group.Length > 0
+                    ? Groups.FirstOrDefault(g => string.Equals(g.Uri, e.Group, StringComparison.OrdinalIgnoreCase))?.Name ?? UserPartConverter.UserPart(e.Group) : to;
+                string text = e.Text.Length > 60 ? e.Text[..60] + "…" : e.Text;
+                Activity.Add(new ActivityRow(e.Time, sms ? ActivityPanel.Call : ActivityPanel.Ptt, sms ? ActivityKind.Sms : ActivityKind.Sds,
+                                             $"{from} → {target}", text, e.Emergency, false, UserPartConverter.UserPart(e.From)));
+                break;
+            }
+        }
+    }
+
+    private bool IsPilotUri(string uri) => PilotId.Length > 0 && string.Equals(UserPartConverter.UserPart(uri), UserPartConverter.UserPart(PilotId), StringComparison.Ordinal);
 
     // ── PTT 그룹 목록·관리 (GMS, TS 24.481 — 서버 요청서 §1) ──
     private int _groupRefreshSeq;
@@ -395,6 +456,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public void Logout()
     {
         foreach (var s in Sessions.ToList()) Engine.GetCall(s.CallId).Hangup();
+        _history?.Dispose(); _history = null;
         Engine.Stop();
         Credentials.Delete(RefreshTokenKey);
         _tokens = null; _loginPw = "";
@@ -923,6 +985,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        _history?.Dispose();
         Endpoints.Dispose();
         Engine.Dispose();
         _csc?.Dispose();

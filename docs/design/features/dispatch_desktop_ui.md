@@ -177,6 +177,8 @@
 - **최근 행**(이벤트 종류): 발언(누가·몇 초 — `onFloor` Granted→Idle) · 긴급/임박 개시·해제 · 세션 시작/종료(참가·길이) · 멤버 합류/이탈(로스터 diff) ·
   SDS(발신자·요약) · 사설콜/애드혹 시작·종료 · 청취 시작/종료(관제사 자신). 필터 [전체|내 채널|긴급], 검색.
 - 앱 로컬 링 버퍼(세션당 200 행, 하루)·CSV 내보내기. 서버 정본(PTT 세션 이력·감사)과 별개 — 앱 내역은 관제사의 작업 메모리다.
+  범위 안 **타인**의 세션·발언·SDS 는 서버 통합 이력 폴링(`HistoryClient`, §13)이 수초 지연으로 최근 행에 합친다(내가 당사자인 항목은 로컬 행이
+  이미 있어 건너뜀).
 
 ### 4.3 ③ 일반통화 — 운영 (우 열 위)
 
@@ -226,7 +228,7 @@ sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오
   근접하면 한 행(어느 leg 로도 Join 가능 — dispatch_center.md §5.3). 한쪽만 감시 대상이면 그 leg 하나.
 - **최근 행**: 착신(응답자·길이) · 발신(길이) · 부재(대표번호 전원 무응답 → 넘김 대상, [재발신][문자]) · 전달(blind/attended, 대상) · 픽업(누가 어느 호를) ·
   문자(SMS 요약) · 청취 시작/종료(관제사 자신). 필터 [전체|대표번호|부재], 검색. 정렬: 링잉 → 진행 시작 역순 → 최근 시각 역순.
-- 로컬 링 버퍼·CSV 내보내기(②와 동일). 서버 정본은 통화 기록·녹취 이력.
+- 로컬 링 버퍼·CSV 내보내기(②와 동일). 서버 정본은 통화 기록·녹취 이력. 범위 안 타인의 끝난 통화·SMS 는 서버 통합 이력 폴링(§13)이 최근 행에 합친다.
 
 ## 5. 감청 창 (팝업)
 
@@ -392,7 +394,18 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 - **조직 구성 관리는 OAM 콘솔 몫** — 조직 트리(`organizations` 계층)·가입자 소속·관제 그룹 편성은 콘솔 `관리 > 조직/가입자/관제 그룹` 에서 편집하고
   앱은 `/provisioning/directory`·`dispatch` 블록으로 결과만 받는다(콘솔 화면 과제, [../console_platform.md](../console_platform.md)).
 - **서버 전제 — 청취 범위 그룹의 conference 이벤트 구독 인가**(dispatch_center.md §10): ② 진행 중 행의 "진행/참가자 수" 소스. 그 전까지 청취 그룹 행은
-  "미상".
+  "미상". 서버가 인가를 켜면 범위 밖 그룹은 403 + `Warning: 138` 이 온다 — 앱은 `Area.PttListen` 403 문구로 흡수하고 재시도하지 않는다(구독은 그룹 목록
+  재조회 때 1회).
+- **서버 통합 이력 조회(메시지 모니터링 포함) — 앱 `Services/HistoryClient`**: 관제 범위 안에서 **끝난** 통화·PTT 세션·메시지를 수초 지연으로 ②④ 최근 행에
+  합친다. 진행 중 상태는 dialog/conference 구독이 정본이라 폴링이 live 를 대체하지 않는다. 메시지 모니터링은 **실시간 사본 없이 이력 조회만**으로 결정
+  (요청서 [../../dev/server_request_dispatch_group_monitoring.md](../../dev/server_request_dispatch_group_monitoring.md) §4).
+  - 요청: `GET /provisioning/history?kind=call|ptt|message&since=<cursor>&limit=200`(CSC 4430, PKCE Bearer, `If-None-Match` → 304). kind 별로 커서·ETag 독립,
+    2.5 초 주기. 로그인 직후 `kind=call&limit=1` 탐침 — 404/501 이면 서버 미구현으로 조용히 꺼지고, 403 이면 범위 밖으로 꺼진다(재시도 없음).
+  - 응답(앱이 읽는 것 — **서버 확정 대기**, 필드 추가는 무시): `{ "items": [ { "id", "time"(ISO 8601), "kind", "event", "from", "to", "group", "duration"(초),
+    "emergency", "text" } ], "next": "<다음 since 커서>", "etag" }`. `id` 가 중복 제거 키, `items` 는 시각순. `event` 는 앱이 아는 값만 종류로 옮기고 나머지는
+    메모 행: call = `call.answered|call.ended|call.missed|call.noanswer|call.transferred|call.pickup`, ptt = `ptt.talk|ptt.session.start|ptt.session.end|
+    ptt.emergency|ptt.private|ptt.adhoc`, message = `message.sds|message.sms`(sms 는 ④, sds 는 ②).
+  - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
   게이트웨이가 필요하다. 앱은 게이트웨이 유무를 접속서비스 능력으로 받아 [문자] 활성/비활성을 결정한다(능력 키 신설 필요).
 - **U10 관측 API** — `MediaSource.level/active` 실시간 갱신 확정 후 감청 창 레벨 미터 활성.
