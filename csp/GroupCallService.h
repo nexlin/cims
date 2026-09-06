@@ -127,6 +127,14 @@ public:
      *  멤버의 비선점 요청은 Deny #1). */
     static void ParseMcpttFmtp( class CSipCallRtp *pclsRtp, struct McpttFmtp &clsFmtp );
 
+    /** conference 이벤트(RFC 4575) 구독 인가 — TS 24.379 §10.1.3.4.1 (dispatch_center.md §5.6).
+     *  0=허용. 아니면 보낼 SIP 상태(403 = 그룹 문서 <on-network-allow-conference-state> 불허·Warning 138 /
+     *  480 = 브로드캐스트 그룹·Warning 105)와 Warning 헤더 값·거절 사유(로그용). 멤버는 그룹 속성으로, 비멤버 관제사는
+     *  청취 leg 와 같은 2단(allow_ambient_listening + ptt_listen 범위)으로 판정한다 — 즉석 세션(adhoc/priv)·미지 자원은
+     * 통과. */
+    static int CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
+                                         std::string &strWarning, std::string &strReason );
+
 private:
     void MonitorLoop();
     void SyncGroupsState();

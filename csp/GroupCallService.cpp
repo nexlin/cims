@@ -1992,6 +1992,51 @@ bool CGroupCallService::HasActiveLeg( const std::string &strGroupId ) const {
     return false;
 }
 
+// TS 24.379 §10.1.3.4.1 — conference 이벤트 패키지 구독 인가 (dispatch_center.md §5.6).
+//   규격: controlling function 이 구독자(<mcptt-calling-user-id> ≒ From)를 그룹 문서(TS 24.481)의
+//   <on-network-allow-conference-state> 로 판정, 불허 시 403 + Warning "138 subscription of conference events not
+//   allowed". 브로드캐스트 그룹 세션은 480 + Warning 105. CIMS 해석: 그룹 멤버 = 그룹 속성값(기본 허용), 비멤버
+//   관제사 = 청취 leg 와 같은 2단 인가(프로파일 allow_ambient_listening + 관제 그룹 ptt_listen 범위) — 합류 전
+//   사전 모니터링 구독(진행 중·참가자 수)을 같은 축으로 허용한다. 프로파일 부재·DB 불가는 불허(fail-closed).
+//   즉석 세션(adhoc-/priv-)은 그룹 문서가 없고 참가자 = fan-out 대상이라 통과, 미지 자원은 기존 처리에 맡긴다.
+int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
+                                                 std::string &strWarning, std::string &strReason ) {
+    CspPttGroup clsGroup;
+    if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) || clsGroup._isAdhoc ) return 0;
+    if ( clsGroup._groupType == "broadcast" ) {
+        strWarning = "105 CIMS \"subscription not allowed in a broadcast group call\"";
+        strReason = "broadcast group";
+        return SIP_TEMPORARILY_UNAVAILABLE;
+    }
+    bool bMember = false;
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) {
+            bMember = true;
+            break;
+        }
+    }
+    if ( bMember && clsGroup._allowConferenceState ) return 0;
+    CspUserProfile clsProf;
+    const int iProf = gclsDbManager.SelectUserProfile( strUserId.c_str(), clsProf );
+    const std::string strDg = gclsDispatchGroupMap.EffectiveGroupOf( strUserId.c_str() );
+    if ( iProf == 1 && clsProf.m_bAllowAmbientListening &&
+         gclsDispatchGroupMap.CanListenPtt( strDg, strGroupId.c_str() ) ) {
+        CLog::Print( LOG_INFO, "SUBSCRIBE conference: %s on group %s allowed by dispatch listen scope (%s)",
+                     strUserId.c_str(), strGroupId.c_str(), strDg.c_str() );
+        return 0;
+    }
+    strWarning = "138 CIMS \"subscription of conference events not allowed\"";
+    if ( bMember )
+        strReason = "on-network-allow-conference-state=false";
+    else if ( iProf != 1 )
+        strReason = ( iProf < 0 ) ? "non-member, profile unavailable" : "non-member, no profile";
+    else if ( !clsProf.m_bAllowAmbientListening )
+        strReason = "non-member, allow_ambient_listening=0";
+    else
+        strReason = "non-member, ptt_listen scope (" + strDg + ")";
+    return SIP_FORBIDDEN;
+}
+
 // dispatch_center.md §5.7 — PTT 그룹콜 청취 감사(E-AUD-016 call_monitored, tap_mode=ptt_listen). 시작/종료/거절 각 1건.
 //   target_a = PTT 그룹 id, target_b 없음(그룹 세션). 통화 감청(TAS Join)과 같은 이벤트 코드·필드 체계.
 void CGroupCallService::EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor,

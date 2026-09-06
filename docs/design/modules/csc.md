@@ -1,7 +1,8 @@
 # 12. CSC (CIMS Service Controller) 모듈 상세 설계
 
 > CSC 는 자족 독립 모듈이다([features/csc_standalone_module.md](../features/csc_standalone_module.md)). OAM(`ems/core/oam/src`)을 마운트하지 않으며, 결합은 계약(게이트웨이 HTTP + 공유 JwtSecret JWT verify + DB)만이다.
-> - 통화 이력/Flow API(`services/flow_logger.py`)는 **oam-svc 소유**다. HA fan-out 인프라(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log)도 oam 이 보유한다.
+> - 통화 이력/Flow API(`services/flow_logger.py`)는 **oam-svc 소유**다(콘솔 토큰·조직 전체·날짜 탐색). HA fan-out 인프라(sync_dispatch·sync_txn·drift_sweeper·service_registry·collection_schema·alert_log)도 oam 이 보유한다.
+> - 관제 데스크 **통합 이력** `GET /provisioning/history`(`services/dispatch_history.py`)는 CSC 소유지만 별개 realm 이다 — 관제사(가입자) PKCE 토큰 + 관제 그룹 범위 게이트 + 커서. flow_logger 를 재구현하지 않고 같은 공유 NAS 파일(`ServiceLogging.Dir`)을 범위로만 걸러 읽는 얇은 구독자 뷰다. 현행 `csc/src/services/` = **mcptt · dispatch_history · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth · fm_reporter · mcdata_fd · auc** 등.
 > - 현행 `csc/src/services/` = **mcptt · idms_storage · config_cache · file_store · ha_lookup · logger · admin_auth** (7개) + `__init__.py`.
 
 ## 1. 개요

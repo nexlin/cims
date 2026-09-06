@@ -110,6 +110,22 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 - **콘솔**: 서비스 > **그룹 메시지 이력** (`/service/messages`,
   `ems/service/console/src/pages/GroupMessagesPage.tsx`) — 날짜·그룹·검색 필터 테이블.
 
+### 4.3 1:1 SDS/SMS 보관 — 관제 데스크 이력
+
+1:1 SDS/SMS(Request-URI=상대 AoR 직행, §4 표)는 기본적으로 CSP 가 등록 바인딩으로 본문만 전달하고 보관하지
+않는다. 관제 데스크 통합 이력([dispatch_center.md §5.7a](dispatch_center.md))이 1:1 메시지 모니터링을 요구하면
+`Setup.McData.StoreOneToOneSds`(기본 off)를 켠다:
+
+- **보관 SoT**: CSP 가 1:1 MESSAGE 릴레이 시점(`CModuleDispatcher::EventMessage` 의 1:1 분기, SendSms 앞)에
+  `{ServiceLogDir}/message_direct/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl` 에 1줄 append(`CCallDir::McData1to1Log`).
+  레코드: `ts·from·to·msg_type(sds|text|fd)·conv_id·msg_id·text·size·disposition_req`. disposition 통지
+  (`SDS NOTIFICATION`)는 이력이 아니라 제외한다.
+- **전량 보관, 조회 시 게이트**: 범위 한정 보관은 관제 그룹 멤버십 변동 시 이력 결손·정책 불투명을 낳으므로
+  전량 보관하고, **열람 권한은 조회 시점에 관제 그룹 `monitor_scope` 로 게이트**한다(감시 멤버가 발신 또는 수신인
+  1:1 메시지만, [dispatch_center.md §5.7a](dispatch_center.md)). 조회 = `GET /provisioning/history?kind=message`
+  (그룹 SDS + 1:1 병합, [android_ue_provisioning.md §3-2](android_ue_provisioning.md)), 감사 `E-AUD-016 tap_mode=history`.
+- 개인정보 영향이 크므로 기본 off — 합법감청 운용(고지·동의 전제, [dispatch_center.md §5.8](dispatch_center.md))에서만 켠다.
+
 ## 4.5 대용량 파일 — FD via HTTP (TS 23.282)
 
 ```
@@ -262,7 +278,7 @@ CSP fan-out (하이브리드):
 | TLV 전송 인코딩 | 파트에 raw binary | **Content-Transfer-Encoding: base64** | PJSIP Java 바인딩이 본문을 String 으로만 취급 — raw binary 가 UTF-8 재인코딩에 손상. MIME 적합 인코딩이므로 표준 단말 interop 시 네이티브 바이트 경로로 교체 필요 |
 | 수신 본문 취득(앱) | pjsua2 `OnInstantMessageParam.msgBody` | **`multipart/mixed` 는 msgBody 가 빈 문자열·contentType 에 boundary 누락** → 착신 INVITE 와 동일하게 `rdata.wholeMsg` 원문에서 Content-Type(boundary 포함) 헤더·본문 직접 추출 (`core/…/sip/CimsAccount.kt`) | pjsua2 Java 바인딩이 multipart body 를 String 으로 재구성하지 않음 — 이 우회 없이는 그룹 SDS/FD 수신·delivered 통지가 앱에 반영 안 됨. text/plain 등 단일 파트는 msgBody 사용 |
 | 라우팅 | participating PSI 로 송신, 그룹은 mcdata-info 로 | Request-URI=그룹 URI 직행 (mcdata-info 도 포함) | 통합 배치 단순화. 서버는 양쪽 모두 수용 |
-| 1:1 SDS | participating → 상대 participating 경유, 서버 보관 | Request-URI=상대 AoR 직행 + `one-to-one-sds` mcdata-info. CSP 는 등록 바인딩으로 본문 그대로 전달(게이트·보관 없음) | 통합 배치 단순화. 보관·이력은 §8 |
+| 1:1 SDS | participating → 상대 participating 경유, 서버 보관 | Request-URI=상대 AoR 직행 + `one-to-one-sds` mcdata-info. CSP 는 등록 바인딩으로 본문 그대로 전달(게이트 없음, 보관은 `Setup.McData.StoreOneToOneSds` 시 §4.3) | 통합 배치 단순화. 관제 이력은 §4.3 |
 | media plane SDS 대상 | 그룹·1:1 모두 | **그룹만** (`McDataMediaService` 가 그룹 조회 필수) — 1:1 은 크기와 무관하게 C-plane, C-plane 임계 게이트(§4.7)도 그룹 대상만 | 1:1 standalone 은 §8 |
 | FD 콘텐츠 서버 | media storage function (absolute URI discovery 등) | CSC 4430 `/mcdata/fd` 고정 경로 + IdMS Bearer | 단일 도메인. URL 은 FD SIGNALLING 으로 전달되므로 discovery 불필요 |
 | FD 통지 | FD NOTIFICATION(다운로드 완료 등) | 미사용 | 최소 프로파일 — 필요 시 후속 |

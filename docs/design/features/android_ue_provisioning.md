@@ -95,9 +95,24 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
                    "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
     }
-  ]
+  ],
+  "dispatch": {                                          // 관제 데스크 소속일 때만 (없으면 키 자체 생략)
+    "groupId": "dg-dispatch01", "groupName": "관제 1조", "pilotId": "+821310001000",
+    "monitorScope": "own", "pttListen": "listed", "listenVisibility": "hidden",
+    "members": [
+      { "userId": 5020, "name": "관제1석", "volteAor": "tel:+821310001001",
+        "pttId": "tel:+82510001001", "extension": "1001", "groupId": "dg-dispatch01" },
+      { "userId": 5021, "name": "관제2석", "volteAor": "tel:+821310001002",
+        "pttId": "", "extension": "1002", "groupId": "dg-dispatch01" }
+    ],
+    "pttTargets": [ { "id": "g002", "uri": "tel:g002", "name": "음성그룹2" } ],
+    "etag": "\"3f1c…\""
+  }
 }
 ```
+
+응답 헤더 `ETag`(응답 전체의 내용 해시) — 단말이 `If-None-Match` 로 같은 값을 보내면 **304**(본문 없음).
+관제 앱의 주기 재조회(발견 목록 갱신 감지)는 이 경로로 전송 없이 끝난다.
 
 필드 규칙:
 - `sip.host/domain`: 단말이 접속할 **서비스별 시그널링 서버**. VoLTE=CSP, PTT=PSP (다를 수 있음).
@@ -132,8 +147,23 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
   빈 문자열(`""`) — 명시적 `null` 은 보내지 않는다(Android `org.json` 이 `"null"` 문자열로 오독).
+- `dispatch`: **관제 데스크**([dispatch_center.md §8.4](dispatch_center.md)) — 사용자가 관제 그룹
+  (`dispatch_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음).
+  - `groupId/groupName/pilotId/monitorScope/pttListen/listenVisibility`: 소속 그룹의 속성 그대로
+    (`monitor_scope` `none|own|listed|all`, `ptt_listen` `none|listed|all`, `listen_visibility` `hidden|visible`).
+  - `members[]`: **dialog 감시(RFC 4235) 대상** = 서버가 `monitorScope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
+    VoLTE 가입자 목록 — 자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹), `listed` 는 대상 그룹원 추가,
+    `all` 은 전 VoLTE 가입자. 항목 = `userId`(`users.id`) · `name` · `volteAor`(`tel:+E.164`) · `pttId`(첫 PTT 가입
+    `tel:`, 미가입 `""`) · `extension`(가입 번호 끝자리 N — 설정 `Provisioning.ExtensionDigits`, 기본 4. 망 주소가
+    아닌 **표시 라벨**) · `groupId`(그 가입자의 관제 그룹, 무소속 `""`). 정렬 = 자기 그룹(`alert_order`) → 그 외.
+    앱의 **그룹원 상태 띠는 `groupId == dispatch.groupId`** 인 항목이다. 앱은 enum 을 해석하지 않는다.
+  - `pttTargets[]`: **conference 구독·청취 대상** = `pttListen` 을 `CanListenPtt` 와 같은 규칙으로 해석한 PTT
+    그룹(`listed` 대상, `all` 전 그룹, `none` `[]`). 항목 = `id`(`mcptt_group_id`) · `uri`(시스템 관례 `tel:` 형) ·
+    `name`. GMS 멤버 그룹과 겹칠 수 있다 — 앱은 `id` 로 병합한다.
+  - `etag`: 블록 내용 파생(따옴표 포함) — 재조회 결과에서 대상 변경 여부만 볼 때 비교한다. 304 판정은 응답
+    헤더 `ETag`(전체) 로만 한다.
 
-오류: 토큰 무효 401. 사용자에 해당 서비스 없으면 `services` 에서 제외(빈 배열 가능).
+오류: 토큰 무효 401. 사용자에 해당 서비스 없으면 `services` 에서 제외(빈 배열 가능). `If-None-Match` 일치 304.
 
 ## 3-1. Contract — `GET /provisioning/directory`
 
@@ -176,6 +206,47 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   (구서버)일 때만 단말이 내 msisdn 에서 유도(ITU 자릿수 규칙)하는 fallback.
   **표시 전용** — 발신·저장·즐겨찾기 매칭 키는 원본(+E.164) 유지.
 
+## 3-2. Contract — `GET /provisioning/history` (관제 데스크 통합 이력)
+
+관제 데스크(가입자=관제사)의 **지난 이력** 조회. 진행 중(live) 상태는 표준 구독(RFC 4235 dialog·
+RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②PTT 내역·④통화 내역 패널과 메시지
+모니터링이 같은 계약 하나로 최근 이력을 커서로 받는다([dispatch_center.md §5.6](dispatch_center.md)).
+
+요청: `GET /provisioning/history?kind=call|ptt|message&since=<ISO8601|epoch>&limit=<n>` +
+`Authorization: Bearer <provisioning access token>`(PKCE, `/provisioning/me` 와 같은 토큰).
+
+- `kind`(필수): `call`(VoLTE) · `ptt`(PTT 그룹 세션) · `message`(SDS — 그룹 + 1:1). 미지 값 400.
+- `since`(선택): 이 시각 **이후**(strict)만. 생략 시 최근 1시간. 이전 응답의 `nextSince` 를 그대로 넣어
+  폴링한다(관제 앱 2~3초 주기). 스캔은 최대 48 시간 버킷으로 유계.
+- `limit`(선택, 기본 200, 최대 1000): 가장 최근 N 개.
+
+응답 `200`:
+```json
+{
+  "kind": "call", "since": "2026-09-06T19:00:00", "nextSince": "2026-09-06T19:05:12",
+  "count": 2,
+  "items": [ { "kind":"call", "ts":"…", "id":"<call_id>", "initiator":"+82…", "callee":"+82…",
+               "state":"ended", "inviteTime":"…", "answerTime":"…", "endTime":"…",
+               "duration":30, "sipStatus":200, "endReason":"normal" } ]
+}
+```
+- `items` 는 `ts` **오름차순**(오래된→최근). 앱은 `nextSince` 로 다음 폴링(그 이후만 수신) — 표시할 때
+  뒤집는다. `ts` = 종료분은 end_time, 진행 중은 시작/발신 시각.
+- kind=`ptt` 항목: `{kind,ts,id:<sesid>,groupId,groupName,initiator,callId,state,startTime,endTime,memberCount}`.
+- kind=`message` 항목: `{kind,ts,id:<msg_id>,scope:"group"|"direct",groupId,from,to,msgType,convId,text,size,
+  dispositionReq,fanout,fileName,fileUrl}`.
+
+**범위(scope) 게이트** — 관제 그룹 속성으로 서버가 거른다(CSP `CanWatch`/`CanListenPtt` 와 같은 규칙):
+- `call` · 1:1 `message` = `monitor_scope` 로 해석한 감시 대상 VoLTE 가입자(자기 그룹원 항상 + `listed`
+  대상 그룹원 / `all` 전 가입자)가 발신 또는 수신인 것.
+- `ptt` · 그룹 `message` = `ptt_listen` 으로 해석한 청취 대상 PTT 그룹.
+- **관제 그룹 미소속 = `403 no_monitor_scope`**. 열람은 감사(`E-AUD-016 call_monitored`, `tap_mode=history`) —
+  당사자 모르게 이력을 여는 동작이라 감사 대상(manager 열람, [dispatch_center.md §5.7](dispatch_center.md)).
+
+> 백엔드는 CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
+> 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다.
+> 1:1 SDS/SMS 는 CSP `Setup.McData.StoreOneToOneSds` 를 켜야 보관된다([mcdata_messaging.md §4.3](mcdata_messaging.md)).
+
 ## 4. 서버측 구현 (CSC)
 
 1. **엔드포인트 `GET /provisioning/me`** (`csc/src/services/mcptt.py` `handle_provisioning_me`, CSC mcptt 서버 4430):
@@ -183,6 +254,10 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
    - 조회: 로그인 msisdn 으로 person(`user_id`) 확인 → 그 person 의 `volte_subscriptions`+`ptt_subscriptions`
      전 서비스를 반환(로그인 1회로 보유 서비스 모두). 계정: id(msisdn)/imsi/auth_id.
    - 사용자: `users.name` → displayName.
+   - 관제 데스크: `dispatch_discovery` — 소속 관제 그룹 1행 + 범위 enum 해석 질의(members = `volte_subscriptions`
+     ⋈ `users` ⟕ `dispatch_group_members`, WHERE 만 범위별 / pttTargets = `dispatch_group_ptt_targets` ⋈ `ptt_groups`
+     또는 전 그룹). 범위 판정 규칙은 CSP `CCspDispatchGroupMap`(게이트)과 여기(목록) 둘뿐이며 같아야 한다.
+   - ETag: 응답 전체 정규화 JSON 의 sha256(앞 32 hex) — `If-None-Match` 일치 시 304.
 2. **시그널링 도메인/주소** ← CSC 설정 `Provisioning.Services.<kind>`
    `{host,port,tcp_port,tls_port,transport,domain}`. 포트 3개가 가용 transport 목록으로 조립된다
    (`tcp_port=0`→평문 포트 공용, `tls_port=0`→TLS 미광고).
@@ -201,6 +276,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 4. **홈 국가코드** ← CSC 설정 `Provisioning.CountryCode`(템플릿 default 82, configure.sh `--country-code`).
    미설정 시 로그인 msisdn 에서 유도(`_country_code_of`, 단말 fallback 과 동일한 ITU 자릿수 규칙).
    응답 `countryCode` 로 내려주며 단말은 이 값을 번호 로컬 표기의 SoT 로 저장(`SipAccountConfig.countryCode`).
+5. **내선 라벨 자릿수** ← CSC 설정 `Provisioning.ExtensionDigits`(템플릿 default 4, 0=전체 digits) —
+   `dispatch.members[].extension` 이 가입 번호 끝자리 몇 자리인가([volte_supplementary_services.md](volte_supplementary_services.md) §4
+   의 "내선 대역은 프로비저닝 규약" 축).
 
 > 참고: 이는 TS 24.484 CMS 설정 플레인의 **확장**으로 볼 수 있다(표준 user-profile/service-config 는 SIP 코어 접속 주소를 담지 않으므로 본 프로젝트 전용 프로비저닝 문서로 정의). 서버 정합 갭은 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) 와 함께 관리.
 

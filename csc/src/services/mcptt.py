@@ -100,6 +100,7 @@ PSP_NOTIFY_PORT = 4421
 #   서비스 kind 별 시그널링 서버/도메인. host 빈값이면 요청 Host(=UE 가 접속한 IP) 사용(올인원 기본).
 #   다중 노드면 host 를 CSP/PSP 대표(VIP) 주소로 지정.
 PROVISIONING = {}            # config Provisioning: {"Services":{"volte":{host,port,tcp_port,tls_port,transport,domain}, "ptt":{...}}}
+_SERVICE_LOG_DIR = ''        # ServiceLogging.Dir (NAS 공유) — 통합 이력 조회(/provisioning/history) 백엔드
 _DB_CONFIG = None            # CimsDatabase (가입자 라이브 조회용)
 _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
 # 단말이 도달하는 MCPTT 서비스(IdMS/GMS/CMS/KMS) 공개 base URL — **단일 정본**.
@@ -265,9 +266,11 @@ def apply_config(config):
                     f"PSP={PSP_NOTIFY_IP or '(unset)'}:{PSP_NOTIFY_PORT}")
 
     # 자동 프로비저닝(/provisioning/me) — DB 핸들 + 서비스별 시그널링/도메인 매핑 보관.
-    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL
+    global _DB_CONFIG, PROVISIONING, _MCPTT_PORT, _MCPTT_PUBLIC_URL, _SERVICE_LOG_DIR
     _DB_CONFIG = db_config
     PROVISIONING = config.get('Provisioning', {}) or {}
+    _sl = config.get('ServiceLogging', {}) or {}
+    _SERVICE_LOG_DIR = str(_sl.get('Dir', '') or config.get('ServiceLogDir', config.get('MsgLogDir', '')) or '').strip()
     _mcptt_conf = config.get('McpttServer', {}) or {}
     _MCPTT_PORT = int(_mcptt_conf.get('Port', 4430))
     # 공개 base URL — 스킴 없으면 https 보정, 후행 '/' 제거. 비면 요청 Host 유도(올인원).
@@ -533,7 +536,7 @@ def refresh_login_accounts() -> bool:
 #   맞춘다 — 어느 경로도 GROUPS 를 직접 조립하지 않는다.
 _GROUP_SELECT = (
     "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
-    "emergency_call, emergency_alert, "
+    "emergency_call, emergency_alert, allow_conference_state, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, "
     "group_type, on_network, max_members, require_affiliation, alias, "
@@ -566,6 +569,7 @@ def _group_row_to_dict(row: dict) -> dict:
         "encryption": bool(row.get('encryption', 0)),
         "emergency_call": bool(row.get('emergency_call', 0)),
         "emergency_alert": bool(row.get('emergency_alert', 1)),
+        "allow_conference_state": bool(row.get('allow_conference_state', 1)),
         "allow_sds": bool(row.get('allow_sds', 1)),
         "allow_fd": bool(row.get('allow_fd', 0)),
         "max_sds_size": row.get('max_sds_size', 10000),
@@ -1115,6 +1119,9 @@ def get_group_xml(group_uri):
     #   규격 요소(TS 24.481)는 유지하되 별도 설정 축을 두지 않는다.
     imminent_val = emergency_val
     alert_val = 'true' if group.get('emergency_alert', True) else 'false'
+    # on-network-allow-conference-state (TS 24.481 §7.2.4.2) — 멤버의 conference 이벤트(RFC 4575) 구독 허용.
+    #   CSP 가 초기 SUBSCRIBE 에서 판정(TS 24.379 §10.1.3.4.1, 불허 403 Warning 138). 관제사 청취 범위는 별도 축.
+    conf_state_val = 'true' if group.get('allow_conference_state', True) else 'false'
     org_code = group.get('org_code', '')
     group_type = group.get('group_type', 'prearranged')
     # max_members 0(무제한) 이면 관례값 10 노출
@@ -1152,6 +1159,7 @@ def get_group_xml(group_uri):
           <mcpttgi:allow-MCPTT-emergency-call>{emergency_val}</mcpttgi:allow-MCPTT-emergency-call>
           <mcpttgi:allow-imminent-peril-call>{imminent_val}</mcpttgi:allow-imminent-peril-call>
           <mcpttgi:allow-MCPTT-emergency-alert>{alert_val}</mcpttgi:allow-MCPTT-emergency-alert>
+          <mcpttgi:on-network-allow-conference-state>{conf_state_val}</mcpttgi:on-network-allow-conference-state>
         </cp:actions>
       </cp:rule>
     </cp:ruleset>"""
@@ -1990,6 +1998,7 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'encryption': _xbool(ls, 'gi:on-network-encryption'),
         'emergency_call': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-call'),
         'emergency_alert': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-alert'),
+        'allow_conference_state': _xbool(ls, './/cp:actions/gi:on-network-allow-conference-state'),
         'org_code': _xtext(ls, 'gi:org-code'),
         'members': None,
     }
@@ -2017,15 +2026,15 @@ def parse_group_document_xml(xml_text: str) -> dict:
 
 _GMS_CREATE_DEFAULTS = {
     'video_enabled': False, 'priority': 5, 'encryption': False, 'emergency_call': False,
-    'emergency_alert': True, 'allow_sds': True, 'allow_fd': False, 'max_sds_size': 10000,
-    'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged', 'max_members': 0,
-    'require_affiliation': True,
+    'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': False,
+    'max_sds_size': 10000, 'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged',
+    'max_members': 0, 'require_affiliation': True,
 }
-_GMS_BOOL_COLS = ('video_enabled', 'encryption', 'emergency_call', 'emergency_alert', 'allow_sds',
-                  'allow_fd', 'require_affiliation')
+_GMS_BOOL_COLS = ('video_enabled', 'encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
+                  'allow_sds', 'allow_fd', 'require_affiliation')
 _GMS_ATTR_COLS = ('video_enabled', 'priority', 'encryption', 'emergency_call', 'emergency_alert',
-                  'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code', 'group_type',
-                  'max_members', 'require_affiliation')
+                  'allow_conference_state', 'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code',
+                  'group_type', 'max_members', 'require_affiliation')
 
 
 def _gms_unknown_members(cur, members: list) -> list:
@@ -2578,6 +2587,92 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         profile["allowCreateGroup"] = bool(get_user_profile(sid).get('allow_create_group'))
     return profile
 
+# ─── 관제 데스크 발견(discovery) — /provisioning/me `dispatch` 블록 (dispatch_center.md §8.4) ───
+
+def _extension_of(msisdn: str) -> str:
+    """내선 라벨 = E.164 끝자리 N 자리(설정 Provisioning.ExtensionDigits, 기본 4, 0=전체).
+    망 주소가 아니라 관제 앱 주소록·그룹원 띠의 표시 라벨이다(dispatch_desktop_ui.md §13)."""
+    digits = ''.join(ch for ch in (msisdn or '') if ch.isdigit())
+    n = 4
+    if isinstance(PROVISIONING, dict) and PROVISIONING.get('ExtensionDigits') not in (None, ''):
+        try:
+            n = int(PROVISIONING.get('ExtensionDigits'))
+        except (TypeError, ValueError):
+            n = 4
+    return digits[-n:] if n > 0 else digits
+
+
+def _tel_uri(msisdn: str) -> str:
+    """가입 id(E.164) → tel: URI. 이미 scheme 이 있으면 그대로(시스템 관례 = tel: 형, `_provision_service` mcpttId 와 동일)."""
+    s = (msisdn or '').strip()
+    if not s:
+        return ''
+    return s if s.startswith(('tel:', 'sip:')) else f"tel:{s}"
+
+
+def _content_etag_json(obj) -> str:
+    """내용 파생 ETag(RFC 7232 강한 검증자) — 정규화 JSON 의 sha256 앞 32 hex, 따옴표 포함. 같은 내용=같은 값."""
+    canon = json.dumps(obj, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    return '"' + hashlib.sha256(canon.encode('utf-8')).hexdigest()[:32] + '"'
+
+
+def dispatch_discovery(cur, user_id) -> Optional[dict]:
+    """관제 데스크 블록 = 소속 관제 그룹 속성 + **서버가 범위 enum 을 해석한 대상 목록**.
+
+    - members[]    dialog 감시(RFC 4235) 대상 = CSP `CanWatch` 가 허용하는 VoLTE 가입자 집합(dispatch_center.md §5.2):
+                   자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹) + `monitor_scope=listed` 의 대상 그룹원,
+                   `all` 은 전 VoLTE 가입자. 항목 `groupId` = 그 가입자의 관제 그룹 — 앱은 ③ 그룹원 띠를
+                   `groupId == dispatch.groupId` 로 고른다. 정렬 = 자기 그룹(alert_order) → 그 외(그룹·번호).
+    - pttTargets[] conference 구독·청취 대상 = `CanListenPtt` 가 허용하는 PTT 그룹(§5.6): `listed` 대상, `all` 은 전 그룹.
+                   uri 는 시스템 관례 tel: 형(`_group_uri`). 멤버 그룹과 겹칠 수 있다(앱이 id 로 병합).
+    - etag         블록 내용 파생 — 앱은 재조회 결과의 대상 변경을 값 비교로 안다.
+    앱은 enum 을 해석하지 않는다. 범위 판정 규칙은 CSP(게이트)와 여기(목록) 두 곳에만 있고 같아야 한다.
+    관제 그룹 미소속이면 None. 테이블 미적용 DB 는 예외 — 호출자가 블록을 생략한다."""
+    cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,''), g.monitor_scope, g.ptt_listen, "
+                "g.listen_visibility FROM dispatch_group_members m "
+                "JOIN dispatch_groups g ON g.id=m.group_id "
+                "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
+    dg = cur.fetchone()
+    if not dg:
+        return None
+    gid = dg[0]
+    scope = dg[3] or "none"
+    ptt_listen = dg[4] or "none"
+    # members — 범위별로 WHERE 만 다르고 투영·정렬은 하나.
+    member_sql = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
+                  "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) "
+                  "FROM volte_subscriptions s JOIN users u ON u.id=s.user_id "
+                  "LEFT JOIN dispatch_group_members m ON m.user_id=s.id")
+    order = " ORDER BY CASE WHEN m.group_id=%s THEN 0 ELSE 1 END, m.group_id, m.alert_order, s.id"
+    if scope == 'all':
+        cur.execute(member_sql + order, (gid,))
+    elif scope == 'listed':
+        cur.execute(member_sql + " WHERE m.group_id=%s OR m.group_id IN "
+                    "(SELECT target_group_id FROM dispatch_group_monitor_targets WHERE group_id=%s)" + order,
+                    (gid, gid, gid))
+    else:   # none / own — 같은 픽업 그룹은 CanWatch 규칙 1 로 항상 허용
+        cur.execute(member_sql + " WHERE m.group_id=%s" + order, (gid, gid))
+    members = [{"userId": uid, "name": name or "", "volteAor": _tel_uri(vid),
+                "pttId": _tel_uri(pid) if pid else "", "extension": _extension_of(vid), "groupId": mg or ""}
+               for uid, name, vid, mg, pid in cur.fetchall()]
+    # pttTargets
+    if ptt_listen == 'all':
+        cur.execute("SELECT mcptt_group_id, name FROM ptt_groups ORDER BY mcptt_group_id")
+        rows = cur.fetchall()
+    elif ptt_listen == 'listed':
+        cur.execute("SELECT g.mcptt_group_id, g.name FROM dispatch_group_ptt_targets t "
+                    "JOIN ptt_groups g ON g.id=t.ptt_group_id WHERE t.group_id=%s ORDER BY g.mcptt_group_id", (gid,))
+        rows = cur.fetchall()
+    else:
+        rows = []
+    targets = [{"id": mid, "uri": _group_uri(mid), "name": name or ""} for mid, name in rows]
+    block = {"groupId": gid, "groupName": dg[1] or "", "pilotId": dg[2] or "",
+             "monitorScope": scope, "pttListen": ptt_listen, "listenVisibility": dg[5] or "hidden",
+             "members": members, "pttTargets": targets}
+    block["etag"] = _content_etag_json(block)
+    return block
+
+
 async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
@@ -2655,19 +2750,13 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                 cur.execute("SELECT name FROM users WHERE id=%s", (user_id,))
                 rr = cur.fetchone()
                 display_name = rr[0] if rr else None
-                # 관제 데스크 (dispatch_center.md §8.4) — 소속 관제 그룹·대표번호·감청/청취 범위.
-                #   테이블 미적용 DB 에서는 블록을 생략한다(null 금지 — Android org.json 문자열화).
+                # 관제 데스크 (dispatch_center.md §8.4) — 소속 관제 그룹·대표번호·범위 + 서버가 해석한 감시 대상
+                #   목록(members[]/pttTargets[]/etag, `dispatch_discovery`). 테이블 미적용 DB 에서는 블록을
+                #   생략한다(null 금지 — Android org.json 문자열화).
                 try:
-                    cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,''), g.monitor_scope, g.ptt_listen, "
-                                "g.listen_visibility FROM dispatch_group_members m "
-                                "JOIN dispatch_groups g ON g.id=m.group_id "
-                                "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
-                    dg = cur.fetchone()
-                    if dg:
-                        dispatch = {"groupId": dg[0], "groupName": dg[1] or "", "pilotId": dg[2] or "",
-                                    "monitorScope": dg[3] or "none", "pttListen": dg[4] or "none",
-                                    "listenVisibility": dg[5] or "hidden"}
-                except Exception:
+                    dispatch = dispatch_discovery(cur, user_id)
+                except Exception as e:
+                    logger.log_info(f"[provisioning/me] dispatch block skipped: {e}")
                     dispatch = None
         finally:
             conn.close()
@@ -2690,7 +2779,123 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
     }
     if dispatch:
         body["dispatch"] = dispatch
-    logger.log_info(f"[provisioning/me] msisdn={msisdn} user_id services={[s['kind'] for s in services]} cc={country}")
+    # 버전(ETag) — 응답 전체의 내용 해시(RFC 7232). 단말 If-None-Match 일치 시 304 — 관제 앱의 주기 재조회
+    #   (발견 목록 갱신 감지)가 전송 없이 끝난다. dispatch.etag 는 블록 단위 값(대상 변경만 볼 때).
+    etag = _content_etag_json(body)
+    inm = args.headers.get('if-none-match') or args.headers.get('If-None-Match')
+    if inm and inm == etag:
+        logger.log_info(f"[provisioning/me] msisdn={msisdn} not-modified etag={etag}")
+        return HandlerResult(status=304, headers={"ETag": etag})
+    disp_log = (f" dispatch={dispatch['groupId']}/{dispatch['monitorScope']}:{len(dispatch['members'])}"
+                f"/{dispatch['pttListen']}:{len(dispatch['pttTargets'])}") if dispatch else ""
+    logger.log_info(f"[provisioning/me] msisdn={msisdn} services={[s['kind'] for s in services]} cc={country}"
+                    f"{disp_log} etag={etag}")
+    return HandlerResult(status=200, body=body, headers={"ETag": etag}, media_type="application/json")
+
+
+# ── 통합 이력 조회 (GET /provisioning/history, dispatch_center.md §5.6·§8.4) ──
+
+_HISTORY_KINDS = ("call", "ptt", "message")
+
+
+def _dispatch_scope_sets(cur, user_id) -> Optional[dict]:
+    """관제 데스크 범위를 이력 대조용 집합으로 — dispatch_discovery(P2, /provisioning/me 와 같은 SoT)를
+    재사용해 members(감시 VoLTE user-part)·ptt_groups(청취 PTT mcptt_group_id)를 뽑는다.
+    관제 그룹 미소속이면 None(→ 403). 범위 규칙(CanWatch/CanListenPtt)은 dispatch_discovery 한 곳."""
+    from services import dispatch_history as _dh
+    d = dispatch_discovery(cur, user_id)
+    if not d:
+        return None
+    return {
+        "groupId": d["groupId"],
+        "monitorScope": d.get("monitorScope", "none"),
+        "pttListen": d.get("pttListen", "none"),
+        "members": {_dh.userpart(m.get("volteAor")) for m in d.get("members", []) if m.get("volteAor")},
+        "ptt_groups": {t.get("id") for t in d.get("pttTargets", []) if t.get("id")},
+    }
+
+
+async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    """관제 데스크 통합 이력 — `?kind=call|ptt|message&since=&limit=` (PKCE provisioning 토큰).
+
+    진행 중(live) 상태는 표준 구독(RFC 4235/4575)이 담당하고 이 API 는 대체하지 않는다 — 관제 그룹
+    **범위 안의 지난 이력**만 커서로 준다. 범위 밖·관제 미소속은 403. 열람은 감사(E-AUD-016 tap_mode=history)."""
+    token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
+    if not token:
+        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+    _sc = token.get('scope') or []
+    if isinstance(_sc, str):
+        _sc = _sc.split()
+    if _sc and SCOPE_PROVISIONING not in _sc:
+        return HandlerResult(status=403, body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
+                             media_type="application/json")
+    qp = getattr(args, 'query_params', None) or {}
+
+    def _q(name, default=None):
+        v = qp.get(name)
+        if isinstance(v, list):
+            return v[0] if v else default
+        return v if v not in (None, '') else default
+
+    kind = str(_q('kind', 'call')).lower()
+    if kind not in _HISTORY_KINDS:
+        return HandlerResult(status=400, body={"error": "invalid_kind", "allowed": list(_HISTORY_KINDS)},
+                             media_type="application/json")
+    from services import dispatch_history as _dh
+    since_dt = _dh.parse_ts(_q('since'))
+    try:
+        limit = int(_q('limit', 200))
+    except (TypeError, ValueError):
+        limit = 200
+
+    msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    if not _DB_CONFIG:
+        return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
+    scope = None
+    try:
+        import pymysql
+        conn = pymysql.connect(host=_DB_CONFIG.get('Host', '127.0.0.1'), port=int(_DB_CONFIG.get('Port', 3306)),
+                               user=_DB_CONFIG.get('User', 'root'), password=_DB_CONFIG.get('Password', ''),
+                               database=_DB_CONFIG.get('Db', 'cims'), connect_timeout=5)
+        try:
+            cur = conn.cursor()
+            user_id = None
+            for t in ('volte_subscriptions', 'ptt_subscriptions'):
+                cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
+                r = cur.fetchone()
+                if r:
+                    user_id = r[0]
+                    break
+            if user_id is not None:
+                scope = _dispatch_scope_sets(cur, user_id)
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.log_error(f"[provisioning/history] DB error: {e}")
+        return HandlerResult(status=503, body={"error": "db_error", "detail": str(e)}, media_type="application/json")
+
+    # 관제 그룹 미소속 = 감시 범위 없음 → 403 (범위 밖 열람 거부, dispatch_center.md §5.6).
+    if not scope:
+        return HandlerResult(status=403, body={"error": "no_monitor_scope"}, media_type="application/json")
+
+    items, next_since = _dh.query(_SERVICE_LOG_DIR, kind, scope, since_dt, limit)
+    # 감사 — 당사자 모르게 이력을 열람하는 동작(E-AUD-016 tap_mode=history). 실패는 조회를 막지 않는다.
+    try:
+        from services import fm_reporter as _fm
+        r = _fm.get()
+        if r is not None:
+            r.send_event('call_monitored', kind='audit', mo=f"{r.node}/csc",
+                         params={"monitor": msisdn, "group": scope["groupId"], "tap_mode": "history",
+                                 "hist_kind": kind, "count": len(items),
+                                 "monitor_scope": scope["monitorScope"], "ptt_listen": scope["pttListen"]},
+                         message=f"{msisdn} read {kind} history ({len(items)}) scope {scope['groupId']}")
+    except Exception as e:
+        logger.log_warning(f"[provisioning/history] audit emit failed: {e}")
+
+    body = {"kind": kind, "since": _dh._iso(since_dt) if since_dt else "", "nextSince": next_since,
+            "count": len(items), "items": items}
+    logger.log_info(f"[provisioning/history] msisdn={msisdn} kind={kind} scope={scope['groupId']} "
+                    f"m={len(scope['members'])} g={len(scope['ptt_groups'])} → {len(items)} items")
     return HandlerResult(status=200, body=body, media_type="application/json")
 
 
@@ -2771,6 +2976,8 @@ CSC_HANDLER_LIST = [
     ("/provisioning/me", handle_provisioning_me, {}),
     # 회사 전화번호부 (조직별 VoLTE 가입자 — 단말 '회사 연락처' 읽기전용 소스)
     ("/provisioning/directory", handle_provisioning_directory, {}),
+    # 관제 데스크 통합 이력 (call|ptt|message — 범위 게이트, 감사 E-AUD-016)
+    ("/provisioning/history", handle_provisioning_history, {}),
     # IdMS (3GPP TS 33.180 / OAuth 2.0 PKCE)
     ("/idms/authreq",     handle_auth_req,          {}),
     ("/idms/tokenreq",    handle_token_req,          {}),

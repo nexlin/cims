@@ -1131,7 +1131,7 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
 # 그룹 조회 컬럼 (id=surrogate, mcptt_group_id=식별자). 응답에서 id 는 mcptt_group_id 로 노출.
 _GROUP_COLS = (
     "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
-    "emergency_alert, "
+    "emergency_alert, allow_conference_state, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
     "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, created_at"
@@ -1171,6 +1171,7 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['encryption'] = bool(g.get('encryption', 0))
     g['emergency_call'] = bool(g.get('emergency_call', 0))
     g['emergency_alert'] = bool(g.get('emergency_alert', 1))
+    g['allow_conference_state'] = bool(g.get('allow_conference_state', 1))
     g['allow_sds'] = bool(g.get('allow_sds', 1))
     g['allow_fd'] = bool(g.get('allow_fd', 0))
     g['max_sds_size'] = int(g.get('max_sds_size', 10000) or 0)
@@ -1331,6 +1332,7 @@ async def _create_group(body, config, payload=None):
     encryption     = 1 if body.get('encryption', False) else 0
     emergency_call = 1 if body.get('emergency_call', False) else 0
     emergency_alert     = 1 if body.get('emergency_alert', True) else 0
+    allow_conference_state = 1 if body.get('allow_conference_state', True) else 0
     allow_sds           = 1 if body.get('allow_sds', True) else 0
     allow_fd            = 1 if body.get('allow_fd', False) else 0
     max_sds_size        = int(body.get('max_sds_size', 10000))
@@ -1378,14 +1380,14 @@ async def _create_group(body, config, payload=None):
                                      body={'error': 'authorized user 는 PTT 가입자여야 합니다'})
             cur.execute(
                 "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
-                "emergency_call, emergency_alert, "
+                "emergency_call, emergency_alert, allow_conference_state, "
                 "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
                 "max_members, require_affiliation, alias, authorized_user_id, "
                 "floor_policy, max_talkers) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
-                 emergency_call, emergency_alert,
+                 emergency_call, emergency_alert, allow_conference_state,
                  allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
                  on_network, max_members, require_affiliation, alias, authorized_user_id,
@@ -1435,7 +1437,7 @@ async def _update_group(group_id: str, body, config, payload=None):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(int(body[fld]))
-            for fld in ('encryption', 'emergency_call', 'emergency_alert',
+            for fld in ('encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
                         'on_network', 'require_affiliation',
                         'allow_sds', 'allow_fd'):
                 if fld in body:
@@ -1630,6 +1632,7 @@ _GROUP_FIELDS = [
     {'name': 'encryption', 'type': 'boolean', 'desc': '암호화 사용'},
     {'name': 'emergency_call', 'type': 'boolean', 'desc': '긴급 통화 허용'},
     {'name': 'emergency_alert', 'type': 'boolean', 'desc': '긴급 알림 허용'},
+    {'name': 'allow_conference_state', 'type': 'boolean', 'desc': 'on-network-allow-conference-state — 멤버의 conference 이벤트(RFC 4575) 구독 허용 (기본 true; 불허 시 CSP 403 Warning 138)'},
     {'name': 'allow_sds', 'type': 'boolean', 'desc': 'MCData 텍스트(SDS) 허용'},
     {'name': 'allow_fd', 'type': 'boolean', 'desc': '파일 전송(FD) 허용'},
     {'name': 'max_sds_size', 'type': 'integer', 'unit': 'byte', 'desc': 'SDS 최대 크기'},
@@ -1650,7 +1653,7 @@ _GROUP_FIELDS = [
 _GROUP_EXAMPLE = {
     'id': 'g-ops-1', 'name': '운영1팀', 'alias': 'OPS1', 'org_code': 'D110',
     'group_type': 'normal', 'priority': 5, 'video_enabled': False, 'encryption': True,
-    'emergency_call': True, 'emergency_alert': True, 'allow_sds': True, 'allow_fd': True,
+    'emergency_call': True, 'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': True,
     'max_sds_size': 4096, 'max_auto_recv': 1048576, 'on_network': True, 'max_members': 50,
     'require_affiliation': False, 'authorized_user_id': '01000000003',
     'floor_policy': 'single', 'max_talkers': 0,

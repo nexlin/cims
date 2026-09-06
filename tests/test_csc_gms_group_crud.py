@@ -91,8 +91,8 @@ class ParseTests(unittest.TestCase):
     def test_roundtrip_with_get_group_xml(self):
         m.GROUPS["tel:g-0000abcd"] = {
             "display_name": "관제채널", "etag": "e", "video_enabled": True, "priority": 3, "encryption": False,
-            "emergency_call": True, "emergency_alert": False, "allow_sds": True, "allow_fd": True,
-            "max_sds_size": 2000, "max_auto_recv": 4096, "org_code": "TEAM01", "group_type": "chat",
+            "emergency_call": True, "emergency_alert": False, "allow_conference_state": False, "allow_sds": True,
+            "allow_fd": True, "max_sds_size": 2000, "max_auto_recv": 4096, "org_code": "TEAM01", "group_type": "chat",
             "max_members": 7, "require_affiliation": False, "authorized_user": "tel:+82510001001",
             "members": [{"uri": "tel:+82510001001", "name": "관제1석", "role": "chair", "priority": 1, "title": "팀장"},
                         {"uri": "tel:+82500000001", "name": "테스트001", "role": "participant", "priority": 5}],
@@ -106,6 +106,9 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(d["group_type"], "chat")
         self.assertEqual((d["video_enabled"], d["priority"], d["encryption"]), (True, 3, False))
         self.assertEqual((d["emergency_call"], d["emergency_alert"]), (True, False))
+        # on-network-allow-conference-state (TS 24.481 §7.2.4.2) — cp:actions 요소 왕복
+        self.assertIs(d["allow_conference_state"], False)
+        self.assertIn("<mcpttgi:on-network-allow-conference-state>false</mcpttgi:on-network-allow-conference-state>", xml)
         self.assertEqual((d["allow_sds"], d["allow_fd"], d["max_sds_size"], d["max_auto_recv"]), (True, True, 2000, 4096))
         self.assertEqual((d["max_members"], d["require_affiliation"], d["org_code"]), (7, False, "TEAM01"))
         self.assertEqual([(x["user_id"], x["role"], x["priority"]) for x in d["members"]],
@@ -304,6 +307,8 @@ class DbWriteTests(unittest.TestCase):
         self.assertEqual(args[0], "g-0a1b2c3d"); self.assertEqual(args[1], "관제채널"); self.assertEqual(args[-1], 5020)
         self.assertEqual(args[2 + m._GMS_ATTR_COLS.index("group_type")], "chat")
         self.assertEqual(args[2 + m._GMS_ATTR_COLS.index("priority")], 5)            # 기본값
+        self.assertEqual(args[2 + m._GMS_ATTR_COLS.index("allow_conference_state")], 1)   # 기본 허용
+        self.assertIn("allow_conference_state", ins)
         mem = [a for q, a in cur.sql if q.startswith("INSERT IGNORE INTO ptt_group_members")]
         self.assertEqual([(a[1], a[2], a[3]) for a in mem], [("+82500000001", 1, "chair"), ("+82500000002", 0, "participant")])
         self.assertTrue(any(q.startswith("DELETE FROM ptt_group_members") for q, _ in cur.sql))

@@ -33,6 +33,7 @@
 #include "GroupCallService.h"
 #include "GroupMap.h"
 #include "Log.h"
+#include "McDataCodec.h"
 #include "McDataMediaService.h"
 #include "McpttInfo.h"
 #include "MemoryDebug.h"
@@ -1249,8 +1250,7 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus ) {
                 int iDur = _CallDurationSec( pszCallId );
                 if ( iDur == 0 && !clsCallInfo.m_strPeerCallId.empty() )
                     iDur = _CallDurationSec( clsCallInfo.m_strPeerCallId.c_str() );
-                gclsCallDir.VoipCallEnd( strOrigCallId, iSipStatus == 200 ? "normal" : "error", iDur,
-                                         iSipStatus );
+                gclsCallDir.VoipCallEnd( strOrigCallId, iSipStatus == 200 ? "normal" : "error", iDur, iSipStatus );
             }
         }
         if ( clsCallInfo.m_bRecv )
@@ -1520,6 +1520,29 @@ bool CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CS
     char szContentType[512];
     szContentType[0] = '\0';
     pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
+
+    // 관제 데스크 통합 이력용 1:1 SDS/SMS 보관 (dispatch_center.md §5.6, mcdata_messaging.md §4.3).
+    //   Setup.McData.StoreOneToOneSds 가 켜졌을 때만. 전량 보관 — 열람 범위는 CSC 조회 시점 게이트.
+    //   disposition 통지(수신확인)는 이력이 아니므로 제외한다(사람 메시지·파일만).
+    if ( gclsSetup.m_bStoreOneToOneSds && gclsCallDir.IsEnabled() ) {
+        CMcDataSdsInfo clsInfo;
+        bool bMc = McDataIsMultipartMixed( szContentType ) &&
+                   McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
+        bool bDisposition = bMc && ( clsInfo.m_iMsgType == MCDATA_MSG_SDS_NOTIFICATION );
+        if ( !bDisposition ) {
+            std::string strText = bMc ? clsInfo.m_strText : pclsMessage->m_strBody;
+            const char *pszType = bMc ? ( clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING ? "fd" : "sds" ) : "text";
+            int iSize = bMc ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
+            std::string strRec = std::string( "{\"from\":\"" ) + CCallDir::JsonEsc( pszFrom ) + "\",\"to\":\"" +
+                                 CCallDir::JsonEsc( pszTo ) + "\",\"msg_type\":\"" + pszType + "\",\"conv_id\":\"" +
+                                 CCallDir::JsonEsc( clsInfo.m_strConvId ) + "\",\"msg_id\":\"" +
+                                 CCallDir::JsonEsc( clsInfo.m_strMsgId ) + "\",\"text\":\"" +
+                                 CCallDir::JsonEsc( strText ) + "\",\"size\":" + std::to_string( iSize ) +
+                                 ",\"disposition_req\":" + std::to_string( clsInfo.m_iDispositionReq ) + "}";
+            gclsCallDir.McData1to1Log( strRec );
+        }
+    }
+
     return gclsUserAgent.SendSms( pszFrom, pszTo, pclsMessage->m_strBody.c_str(), &clsRoute,
                                   szContentType[0] ? szContentType : NULL );
 }

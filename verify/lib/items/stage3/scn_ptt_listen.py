@@ -9,9 +9,10 @@
 (없으면 S3-SEED 창의 마지막 멤버). `dispatch_groups` 테이블·컬럼 미적용 DB 면 SKIP.
 
 검사 (cspsim `ptt_listen` 결과 마커):
-  L1 청취 합류 — allow=1·ptt_listen=all·hidden: join 200, M 수신 RTP delta>0, floor 요청 DENY(GRANT 0), 멤버 로스터에 M 없음
-  L2 자격 없음 — allow_ambient_listening=0 → 403, M 무수신
-  L3 범위 밖 — ptt_listen=none → 403
+  L1 청취 합류 — allow=1·ptt_listen=all·hidden: join 200, M 수신 RTP delta>0, floor 요청 DENY(GRANT 0), 멤버 로스터에 M 없음,
+     합류 전 M 의 conference SUBSCRIBE 200 (TS 24.379 §10.1.3.4.1 — 청취 범위를 <on-network-allow-conference-state> 해석으로 인가)
+  L2 자격 없음 — allow_ambient_listening=0 → 403, M 무수신, conference SUBSCRIBE 403 + Warning 138
+  L3 범위 밖 — ptt_listen=none → 403, conference SUBSCRIBE 403 + Warning 138
   L4 비멤버 일반 INVITE(sendrecv) → 403 (TS 24.379 비멤버 거절)
   L5 공개 청취 — listen_visibility=visible: join 200, 멤버 로스터에 M 노출(roles listener)
 """
@@ -34,7 +35,7 @@ _RID = "S3-SCN-PTT-LISTEN"
 _RNAME = "PTT 그룹콜 청취 (관제사 recvonly 합류 — 자격·범위 인가, floor DENY, 로스터 은닉/공개)"
 
 _RES_RE = re.compile(r"PTT_LISTEN result: join_status=(-?\d+) members_in=(\d+) M_recv=\+(\d+) A_recv=\+(\d+) "
-                     r"M_grant=(\d+) M_deny=(\d+) M_taken=(\d+) hidden=(\d+)")
+                     r"M_grant=(\d+) M_deny=(\d+) M_taken=(\d+) hidden=(\d+)(?: M_conf_sub=(-?\d+) M_conf_warn=(\d+))?")
 
 
 def _parse_res(text: str):
@@ -43,8 +44,13 @@ def _parse_res(text: str):
         m = _RES_RE.search(line)
         if m:
             last = m
-    return None if not last else {k: int(last.group(i + 1)) for i, k in enumerate(
-        ("join", "members", "m_recv", "a_recv", "grant", "deny", "taken", "hidden"))}
+    if not last:
+        return None
+    r = {k: int(last.group(i + 1)) for i, k in enumerate(("join", "members", "m_recv", "a_recv", "grant", "deny", "taken", "hidden"))}
+    # conference 구독 마커 — 구 cspsim 은 미출력(-1 = 판정 불가)
+    r["conf_sub"] = int(last.group(9)) if last.group(9) is not None else -1
+    r["conf_warn"] = int(last.group(10)) if last.group(10) is not None else -1
+    return r
 
 
 def _pick_listener(db_cfg: dict, ptt_group: str, fallback: dict) -> dict:
@@ -171,7 +177,8 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
     def rstr(r) -> str:
         return "결과 마커 미출력" if r is None else (
             f"join_status={r['join']} members_in={r['members']} M_recv=+{r['m_recv']} A_recv=+{r['a_recv']} "
-            f"M_grant={r['grant']} M_deny={r['deny']} M_taken={r['taken']} hidden={r['hidden']}")
+            f"M_grant={r['grant']} M_deny={r['deny']} M_taken={r['taken']} hidden={r['hidden']} "
+            f"M_conf_sub={r['conf_sub']} M_conf_warn={r['conf_warn']}")
 
     checks = []
     # ── L1: 인가된 청취 (allow=1, ptt_listen=all, hidden) ──
@@ -183,6 +190,8 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
         ok = (r is not None and r["join"] == 200 and r["members"] >= 2 and r["m_recv"] >= FLOW_MIN
               and r["grant"] == 0 and r["deny"] >= 1 and r["hidden"] == 1)
         checks.append(("L1 청취 합류 (200, 수신 RTP, floor DENY, 로스터 은닉)", ok, f"{rstr(r)} rc={rc}"))
+        checks.append(("L1b 범위 안 관제사 conference SUBSCRIBE → 200 (TS 24.379 §10.1.3.4.1)",
+                       r is not None and r["conf_sub"] == 200, f"M_conf_sub={r['conf_sub'] if r else '-'}"))
         # ── L4: 비멤버 일반 INVITE → 403 ──
         if M["user"] != members[-1]["user"]:
             rc, r = run("lsn_l4", sendrecv=True)
@@ -196,12 +205,18 @@ def ptt_listen(ctx: VerifyContext) -> ItemResult:
             rc, r = run("lsn_l2")
             checks.append(("L2 자격 없음(allow_ambient_listening=0) → 403",
                            r is not None and r["join"] == 403 and r["m_recv"] <= DROP_MAX, f"{rstr(r)} rc={rc}"))
+            checks.append(("L2b 자격 없음 conference SUBSCRIBE → 403 + Warning 138",
+                           r is not None and r["conf_sub"] == 403 and r["conf_warn"] == 138,
+                           f"M_conf_sub={r['conf_sub'] if r else '-'} warn={r['conf_warn'] if r else '-'}"))
     # ── L3: 범위 밖 → 403 ──
     with ListenerFixture(ctx.dist_dir, ctx.sim_ip, dg, M["user"], 1, "none", "hidden") as fx:
         if fx.active:
             rc, r = run("lsn_l3")
             checks.append(("L3 범위 밖(ptt_listen=none) → 403", r is not None and r["join"] == 403,
                            f"{rstr(r)} rc={rc}"))
+            checks.append(("L3b 범위 밖 conference SUBSCRIBE → 403 + Warning 138",
+                           r is not None and r["conf_sub"] == 403 and r["conf_warn"] == 138,
+                           f"M_conf_sub={r['conf_sub'] if r else '-'} warn={r['conf_warn'] if r else '-'}"))
     # ── L5: 공개 청취 — 로스터 노출 ──
     with ListenerFixture(ctx.dist_dir, ctx.sim_ip, dg, M["user"], 1, "all", "visible") as fx:
         if fx.active:

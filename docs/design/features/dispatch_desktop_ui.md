@@ -381,7 +381,10 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 - 파사드 이벤트(`CimsUe.Engine` 의 `CallStateChanged`·`FloorChanged`·`DialogInfo`…)는 UI 스레드로 마샬링돼 온다(ue_sdk.md §6.4) — ViewModel 은
   `ObservableCollection` 직접 갱신.
 - **UI 는 코어 상태의 투영**: 카드·행·창은 `calls()`/`callInfo` 스냅샷과 구독 이벤트에서 파생하고 앱이 별도 상태 기계를 갖지 않는다(재접속·재기동 후
-  화면 재구성 = 스냅샷 재조회, 열려 있던 감청 창도 `calls()` 의 listenOnly 호에서 복원). 내역(②④)만 앱이 축적한다.
+  화면 재구성 = 스냅샷 재조회, 열려 있던 감청 창도 `calls()` 의 listenOnly 호에서 복원). 내역(②④)과 메시지
+  모니터링은 서버 통합 이력 `GET /provisioning/history?kind=call|ptt|message`(관제 그룹 범위 게이트·커서, csc 0.2.104,
+  계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md))을 2~3초 커서 폴링(`nextSince`)해 채운다 —
+  진행 중(live) 상태는 종전 구독(dialog/conference)이 담당한다(폴링으로 대체하지 않는다).
 - 접근성: 모든 조작은 키보드 도달 가능, 상태는 색+아이콘+텍스트 삼중.
 
 ## 12. Android 태블릿 밀도
@@ -393,9 +396,9 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 - **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +
   가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
-  **아직 서버가 주지 않는 것**: 관제 그룹원 내선 목록·청취 대상 그룹 목록 — `dispatch` 블록 `members[]`/`pttTargets[]` 확장을 서버에 요청
-  ([../../dev/server_request_dispatch_group_monitoring.md](../../dev/server_request_dispatch_group_monitoring.md) §2). 앱은 두 배열이 오면 그것을
-  dialog watch·conference 구독 대상으로 쓰고, 없으면 로컬 CSV `member` 태그로 폴백한다. 외부망 연락처(CSV `external`).
+  **관제 그룹원·청취 대상은 서버가 준다**: `dispatch` 블록 `members[]`(항목 `groupId` 로 자기 그룹원 = ③ 띠 / 그 외 = 감시 전용)·
+  `pttTargets[]`·`etag` + 응답 `ETag`/`If-None-Match` 304([android_ue_provisioning.md §3](android_ue_provisioning.md), csc 0.2.104). 앱은 두 배열을
+  dialog watch·conference 구독 대상으로 쓰고(로컬 CSV `member` 태그 폴백은 구 서버용), 주기 재조회로 편성 변경을 따라간다. 외부망 연락처(CSV `external`).
 - **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 경로는 **GMS XCAP**(TS 24.481, 생성 주체 = 권한 있는 가입자 = 관제사, PKCE 토큰)로 확정.
   관리 API `/api/v1/ptt/groups`([admin_api.md](../../api/admin_api.md) §6)는 콘솔 토큰 전용으로 그대로 둔다. 자격 = `ptt_user_profile.allow_group_creation`
   (프로비저닝 `ptt.allowCreateGroup`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
@@ -403,18 +406,17 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
 - **조직 구성 관리는 OAM 콘솔 몫** — 조직 트리(`organizations` 계층)·가입자 소속·관제 그룹 편성은 콘솔 `관리 > 조직/가입자/관제 그룹` 에서 편집하고
   앱은 `/provisioning/directory`·`dispatch` 블록으로 결과만 받는다(콘솔 화면 과제, [../console_platform.md](../console_platform.md)).
-- **서버 전제 — 청취 범위 그룹의 conference 이벤트 구독 인가**(dispatch_center.md §10): ② 진행 중 행의 "진행/참가자 수" 소스. 그 전까지 청취 그룹 행은
-  "미상". 서버가 인가를 켜면 범위 밖 그룹은 403 + `Warning: 138` 이 온다 — 앱은 `Area.PttListen` 403 문구로 흡수하고 재시도하지 않는다(구독은 그룹 목록
-  재조회 때 1회).
+- **청취 범위 그룹의 conference 이벤트 구독**은 서버가 인가한다([dispatch_center.md §5.6](dispatch_center.md), TS 24.379 §10.1.3.4.1) — `pttTargets[]`
+  그룹 구독은 200(② 진행 중 행의 "진행/참가자 수" 소스), 범위 밖·자격 없음은 **403 + `Warning: 138`**(앱은 `Area.PttListen` 403 문구로 흡수, 재시도
+  루프 금지), 브로드캐스트 그룹은 480 + Warning 105.
 - **서버 통합 이력 조회(메시지 모니터링 포함) — 앱 `Services/HistoryClient`**: 관제 범위 안에서 **끝난** 통화·PTT 세션·메시지를 수초 지연으로 ②④ 최근 행에
   합친다. 진행 중 상태는 dialog/conference 구독이 정본이라 폴링이 live 를 대체하지 않는다. 메시지 모니터링은 **실시간 사본 없이 이력 조회만**으로 결정
-  (요청서 [../../dev/server_request_dispatch_group_monitoring.md](../../dev/server_request_dispatch_group_monitoring.md) §4).
+  ([mcdata_messaging.md §4.3](mcdata_messaging.md)).
   - 요청: `GET /provisioning/history?kind=call|ptt|message&since=<cursor>&limit=200`(CSC 4430, PKCE Bearer, `If-None-Match` → 304). kind 별로 커서·ETag 독립,
     2.5 초 주기. 로그인 직후 `kind=call&limit=1` 탐침 — 404/501 이면 서버 미구현으로 조용히 꺼지고, 403 이면 범위 밖으로 꺼진다(재시도 없음).
-  - 응답(앱이 읽는 것 — **서버 확정 대기**, 필드 추가는 무시): `{ "items": [ { "id", "time"(ISO 8601), "kind", "event", "from", "to", "group", "duration"(초),
-    "emergency", "text" } ], "next": "<다음 since 커서>", "etag" }`. `id` 가 중복 제거 키, `items` 는 시각순. `event` 는 앱이 아는 값만 종류로 옮기고 나머지는
-    메모 행: call = `call.answered|call.ended|call.missed|call.noanswer|call.transferred|call.pickup`, ptt = `ptt.talk|ptt.session.start|ptt.session.end|
-    ptt.emergency|ptt.private|ptt.adhoc`, message = `message.sds|message.sms`(sms 는 ④, sds 는 ②).
+  - 응답(앱이 읽는 것 — 서버 계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md), 필드 추가는 무시): `{ "items": [ { "id", "ts"(ISO 8601),
+    "kind", "scope", "from", "to", "groupId", "duration", "endReason", "text" } ], "nextSince": "<다음 커서>" }` + 응답 헤더 `ETag`. `id` 가 중복 제거 키,
+    `items` 는 `ts` 오름차순. 앱은 kind·필드로 ②(ptt/그룹 sds)·④(call/1:1 sds) 행에 매핑한다.
   - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
   게이트웨이가 필요하다. 앱은 게이트웨이 유무를 접속서비스 능력으로 받아 [문자] 활성/비활성을 결정한다(능력 키 신설 필요).

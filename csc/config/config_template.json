@@ -132,6 +132,16 @@
           "help": "E.164 digits (+ 없음). 단말 번호 로컬 표기의 SoT. 비우면 로그인 msisdn 에서 유도."
         },
         {
+          "key": "Provisioning.ExtensionDigits",
+          "label": "내선 라벨 자릿수",
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 15,
+          "restart": true,
+          "help": "관제 데스크 dispatch.members[].extension = 가입 번호(E.164) 끝자리 N 자리. 망 주소가 아닌 관제 앱 표시 라벨(dispatch_center.md §8.4). 0 = 전체 digits."
+        },
+        {
           "key": "Provisioning.Services.volte.host",
           "label": "VoLTE SIP 주소 (CSP)",
           "type": "string",

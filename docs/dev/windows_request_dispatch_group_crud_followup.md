@@ -1,4 +1,4 @@
-> 작업 요청서(서버 세션 → 단말/Windows 세션). 단말 구현·문서 반영이 끝나면 이 파일은 삭제하고 내용은 각 설계 정본(ue_sdk.md·dispatch_desktop_ui.md)에 최종 상태로만 남긴다. 짝이 되는 서버 요청서 = [server_request_dispatch_group_monitoring.md](server_request_dispatch_group_monitoring.md).
+> 작업 요청서(서버 세션 → 단말/Windows 세션). 단말 구현·문서 반영이 끝나면 이 파일은 삭제하고 내용은 각 설계 정본(ue_sdk.md·dispatch_desktop_ui.md)에 최종 상태로만 남긴다. 서버 파트(PTT 그룹 CRUD·활성 세션 발견·conference 인가·통합 이력·1:1 메시지 보관)는 **전부 구현 완료**로 정본 문서에 반영됐다(요청서는 삭제됨): 계약 [../design/features/android_ue_provisioning.md](../design/features/android_ue_provisioning.md) §3-2·[../design/features/dispatch_center.md](../design/features/dispatch_center.md) §5.6/§5.7a·[../api/mcptt_api.md](../api/mcptt_api.md) §2.
 
 # Windows 후속 요청 — 관제조작반 PTT 그룹 CRUD 실기 연동 · 계약 접점 반영 · 다음 서버 과제 대비
 
@@ -83,9 +83,9 @@
 
 | 서버 과제 | 단말이 지금 해둘 것 |
 |---|---|
-| **P2** `/provisioning/me` `dispatch.members[]`(userId·name·volteAor·pttId·extension) / `pttTargets[]` / `etag`+`If-None-Match` 304 | 두 배열이 오면 dialog watch·conference 구독 대상으로 쓰고, 없으면 로컬 CSV `member` 태그 폴백 — 현재 구조 유지. `extension` 은 E.164 끝자리 |
-| **P3** conference SUBSCRIBE 인가 — 규격형(TS 24.379 §10.1.3.4.1): 그룹 문서 `<on-network-allow-conference-state>` 로 인가, 불허 시 **403 + `Warning: 138 "subscription of conference events not allowed"`** | 지금은 게이트가 없어 구독이 항상 성공한다. 구현 후 청취 범위 밖 그룹은 403 이 오니 `Area.PttListen` 403 문구("청취 자격이 없거나 범위 밖")로 흡수하고 재시도 루프를 돌지 않게. Warning 138 은 로그에 남긴다 |
-| **P3b** 통합 이력 API `GET /provisioning/history?kind=call\|ptt\|message&since=&limit=` (PKCE, 범위 밖 403) — **결정: 메시지 모니터링은 실시간 사본 없이 "수초 내 이력 조회만"**. 진행 중(live) 상태는 종전대로 RFC 4235 dialog·RFC 4575 conference 구독(폴링 대체 안 함) | ②PTT 내역·④통화 내역 패널용 폴링 클라이언트(2~3초, `since` 커서, ETag) 뼈대를 준비. 메시지 모니터링 UI 도 같은 이력 소스(kind=message) 를 쓰는 구조로 설계. 서버 계약 확정 후 붙인다 |
+| **P2 ✅ 구현(csc 0.2.104)** `/provisioning/me` `dispatch.members[]`(userId·name·volteAor·pttId·extension·**groupId**) / `pttTargets[]`(id·**uri=tel: 형**·name) / `etag` + 응답 **`ETag`/`If-None-Match` 304** — 계약 [android_ue_provisioning.md §3](../design/features/android_ue_provisioning.md) | SDK `DispatchMember` 에 `groupId` 필드 추가(C API·.NET 파사드 동반). 앱: dialog watch 대상 = `members[]` 전체, **③ 그룹원 띠 = `groupId == dispatch.groupId`** 인 항목만(`listed`/`all` 은 자기 그룹 밖 가입자를 포함한다). conference 구독 = GMS 멤버 그룹 ∪ `pttTargets[]`(id 병합). 주기 재조회(예 60초)에 `If-None-Match: <ETag>` 를 붙여 304 면 무변경, 200 이면 `dispatch.etag` 비교 후 구독 집합 재적용. `extension` 은 서버 설정 자릿수(기본 4) |
+| **P3 ✅ 구현(csp)** conference SUBSCRIBE 인가 — 규격형(TS 24.379 §10.1.3.4.1): 그룹 문서 `<on-network-allow-conference-state>`(GMS 문서 `<cp:actions>` 요소, 기본 true — `GroupDoc` 파서는 미지 요소로 무시해도 됨) + 비멤버 관제사 청취 범위 해석, 불허 시 **403 + `Warning: 138 CIMS "subscription of conference events not allowed"`**, 브로드캐스트 그룹 **480 + Warning 105** | 청취 범위 밖·자격 없는 `pttTargets[]`/비멤버 그룹 구독은 403 이 온다 — `Area.PttListen` 403 문구("청취 자격이 없거나 범위 밖")로 흡수하고 재시도 루프를 돌지 않게. Warning 138/105 는 로그에 남긴다. 480 은 "브로드캐스트 그룹은 참가자 정보를 제공하지 않음" 문구. 배포 = csp 다음 릴리스 + DB 마이그레이션 |
+| **P3b ✅ 구현(csc 0.2.104)** 통합 이력 API `GET /provisioning/history?kind=call\|ptt\|message&since=&limit=` (PKCE, 관제 그룹 범위 게이트·커서 `since`/`nextSince`, 관제 미소속 403, 감사 E-AUD-016 `tap_mode=history`). 메시지 모니터링 = 실시간 사본 없이 "수초 내 이력 조회만"(kind=message = 그룹 SDS + 1:1). 1:1 SDS 는 CSP `Setup.McData.StoreOneToOneSds`(기본 off) 켜야 보관. 진행 중(live) 상태는 종전 RFC 4235/4575 구독(폴링 대체 안 함). 계약 [../design/features/android_ue_provisioning.md](../design/features/android_ue_provisioning.md) §3-2 | ②PTT 내역·④통화 내역·메시지 모니터링 패널이 `nextSince` 커서로 2~3초 폴링. 항목 형태(call/ptt/message)는 계약 §3-2. `CscClient.history(kind, since, limit)` |
 
 ---
 

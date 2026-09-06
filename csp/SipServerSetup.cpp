@@ -139,6 +139,7 @@ CSipServerSetup::CSipServerSetup()
       m_iIpsecTempSaTimeoutSec( 32 ),
       m_strIpsecEalgPreference( "aes-cbc" ),
       m_iMaxSdsCplaneBytes( 0 ),
+      m_bStoreOneToOneSds( false ),
       m_strCscHost( "" ),
       m_iCscPort( 4421 ),
       m_strCscScheme( "https" ),
@@ -435,6 +436,8 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 SimpleJson::JsonNode mc = setup.Get( "McData" );
                 if ( mc.Has( "MaxPayloadSizeSdsCplaneBytes" ) )
                     m_iMaxSdsCplaneBytes = (int)mc.GetInt( "MaxPayloadSizeSdsCplaneBytes" );
+                if ( mc.Has( "StoreOneToOneSds" ) )
+                    m_bStoreOneToOneSds = ( mc.GetString( "StoreOneToOneSds" ) == "true" );
                 if ( mc.Has( "FdUrlBase" ) ) m_strFdUrlBase = mc.GetString( "FdUrlBase" );
             }
 

@@ -47,6 +47,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   (session-type prearranged, priority 5, SDS 허용, FD 불허, 긴급통화 불허, 긴급경보 허용). `<list>` 가 있으면
   멤버 전체 교체(없으면 유지) — entry uri 는 PTT 가입 번호(`tel:+E.164`, `sip:` 형 가능), 미가입 번호는 400.
   `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
+  `<cp:actions>` 의 `<mcpttgi:on-network-allow-conference-state>`(TS 24.481 §7.2.4.2, 기본 true) = 멤버의 conference 이벤트
+  (RFC 4575) 구독 허용 — CSP 가 초기 SUBSCRIBE 에서 판정(TS 24.379 §10.1.3.4.1, 불허 403 `Warning: 138`).
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -79,6 +81,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <cp:ruleset><cp:rule id="a7c"><cp:actions>
       <mcpttgi:allow-MCPTT-emergency-call>false</mcpttgi:allow-MCPTT-emergency-call>
       <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>
+      <mcpttgi:on-network-allow-conference-state>true</mcpttgi:on-network-allow-conference-state>
     </cp:actions></cp:rule></cp:ruleset>
   </list-service>
 </group>

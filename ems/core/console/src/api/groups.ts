@@ -16,6 +16,7 @@ export interface Group {
   encryption?: boolean
   emergency_call?: boolean         // allow-MCPTT-emergency-call — condition(긴급·임박) 공통 게이트
   emergency_alert?: boolean        // allow-MCPTT-emergency-alert
+  allow_conference_state?: boolean // on-network-allow-conference-state — 멤버의 conference 이벤트(RFC 4575) 구독 허용
   allow_sds?: boolean              // mcdata-allow-short-data-service (그룹 SDS 메시징, TS 24.481)
   allow_fd?: boolean               // mcdata-allow-file-distribution (그룹 파일전송)
   max_sds_size?: number            // mcdata-on-network-max-data-size-for-SDS (octets, 0=무제한)

@@ -440,7 +440,7 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
         "COALESCE(ps.id,''), "
         "g.emergency_alert, "
         "g.allow_sds, g.allow_fd, g.max_sds_size, "
-        "g.floor_policy, g.max_talkers "
+        "g.floor_policy, g.max_talkers, g.allow_conference_state "
         "FROM ptt_groups g "
         "LEFT JOIN ptt_subscriptions ps ON ps.user_id = g.authorized_user_id "
         "WHERE g.mcptt_group_id='" +
@@ -481,6 +481,7 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._maxSdsSize = row[22] ? atoi( row[22] ) : 10000;
     clsGroup._floorPolicy = row[23] ? row[23] : "single";
     clsGroup._maxTalkers = row[24] ? atoi( row[24] ) : 2;
+    clsGroup._allowConferenceState = row[25] ? ( atoi( row[25] ) != 0 ) : true;
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조

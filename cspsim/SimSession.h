@@ -200,6 +200,10 @@ public:
      *  m_iEventSubStatus 에 기록한다 (RFC 6665 §8.2.1: 미지원 패키지 → 489 Bad Event 판정용). */
     void SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor);
     std::atomic<int>  m_iEventSubStatus{0};
+    /** conference 구독(SubscribeConference)의 최종 응답 상태 — 0=대기. TS 24.379 §10.1.3.4.1 인가 판정값
+     *  (범위 안 200 / 밖 403 Warning 138). m_strConfSubWarning = 거절 응답의 Warning 헤더 값. */
+    std::atomic<int>  m_iConfSubStatus{0};
+    std::string       m_strConfSubWarning;
     std::string       m_strWatchedDlgCallId;     // 마지막 dialog NOTIFY 의 활성 dialog Call-ID (Replaces 대상)
     std::string       m_strWatchedDlgState;      // early|confirmed|terminated
     std::string       m_strWatchedDlgLocalTag;   // dialog-info local-tag

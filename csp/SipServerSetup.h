@@ -334,6 +334,9 @@ public:
     //   MaxPayloadSizeSdsCplaneBytes: TS 24.484 <max-payload-size-sds-cplane-bytes>.
     //   0/미설정=무제한(현행 동작). 초과 SDS MESSAGE 는 403 + Warning 203 거부(미디어평면 유도).
     int m_iMaxSdsCplaneBytes;
+    //   StoreOneToOneSds: 1:1 SDS/SMS 를 관제 데스크 이력용으로 보관할지 (기본 false — 켜야 함).
+    //   전량 보관하고 열람은 조회 시점에 관제 그룹 범위로 게이트한다(dispatch_center.md §5.6·mcdata_messaging.md §4.3).
+    bool m_bStoreOneToOneSds;
     //   FdUrlBase: FILEURL 폴백 배포의 다운로드 URL base (예: https://host:4430).
     //   비면 CSC 가 알려주는 단말용 서비스 URL(CscEndpointCache) 로 유도.
     std::string m_strFdUrlBase;

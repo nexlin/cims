@@ -210,10 +210,10 @@ public:
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
         const char *pszCallType = bVideo ? "volte_video" : "volte";
-        std::string content = "{\"call_id\":\"" + Esc( strCallId ) + "\",\"call_type\":\"" + pszCallType +
-                              "\",\"initiator\":\"" + Esc( strCaller ) + "\",\"callee\":\"" + Esc( strCallee ) +
-                              "\",\"state\":\"ringing\",\"invite_time\":\"" + ts +
-                              "\",\"answer_time\":null,\"end_time\":null,\"duration\":0,\"end_reason\":null,\"end_status\":0}\n";
+        std::string content =
+            "{\"call_id\":\"" + Esc( strCallId ) + "\",\"call_type\":\"" + pszCallType + "\",\"initiator\":\"" +
+            Esc( strCaller ) + "\",\"callee\":\"" + Esc( strCallee ) + "\",\"state\":\"ringing\",\"invite_time\":\"" +
+            ts + "\",\"answer_time\":null,\"end_time\":null,\"duration\":0,\"end_reason\":null,\"end_status\":0}\n";
         std::string path = dir + "/call.json";
         m_worker.Enqueue( [path, content]() { return _writeFileS( path, content ); }, content.size() );
 
@@ -227,9 +227,9 @@ public:
     static const char *_ReasonOfStatus( int iStatus ) {
         if ( iStatus == 486 || iStatus == 600 ) return "busy";
         if ( iStatus == 408 || iStatus == 480 ) return "no_answer";
-        if ( iStatus == 488 || iStatus == 606 ) return "error";   // 코덱·SDP 협상 실패
+        if ( iStatus == 488 || iStatus == 606 ) return "error";  // 코덱·SDP 협상 실패
         if ( iStatus >= 500 && iStatus < 600 ) return "error";
-        if ( iStatus >= 400 ) return "rejected";                  // 403·404·603 …
+        if ( iStatus >= 400 ) return "rejected";  // 403·404·603 …
         return "error";
     }
 
@@ -243,23 +243,21 @@ public:
      *  `ended` 다. 이미 기록된 세션(정상 경로가 만든 호)은 건드리지 않는다 — 재INVITE·인증
      *  재시도로 같은 시도를 두 번 세지 않게.
      */
-    void VoipCallRejected( const std::string &strCallId, const std::string &strCaller,
-                           const std::string &strCallee, int iStatus ) {
+    void VoipCallRejected( const std::string &strCallId, const std::string &strCaller, const std::string &strCallee,
+                           int iStatus ) {
         // GetVoipDir 이 m_mtx 를 스스로 잡는다 — 아래 lock 안에서 부르면 교착이다.
         std::string dir = GetVoipDir( strCallId, strCaller, strCallee );
         if ( dir.empty() ) return;
         std::lock_guard<std::mutex> lock( m_mtx );
-        if ( m_setCallJson.count( dir ) > 0 ) return;   // 정상 경로가 이미 기록한 세션
+        if ( m_setCallJson.count( dir ) > 0 ) return;  // 정상 경로가 이미 기록한 세션
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
         std::string tsStr = ts;
-        std::string content = "{\"call_id\":\"" + Esc( strCallId ) +
-                              "\",\"call_type\":\"volte\",\"initiator\":\"" + Esc( strCaller ) +
-                              "\",\"callee\":\"" + Esc( strCallee ) +
-                              "\",\"state\":\"ended\",\"invite_time\":\"" + tsStr +
-                              "\",\"answer_time\":null,\"end_time\":\"" + tsStr +
-                              "\",\"duration\":0,\"end_reason\":\"" + _ReasonOfStatus( iStatus ) +
-                              "\",\"end_status\":" + std::to_string( iStatus ) + "}\n";
+        std::string content =
+            "{\"call_id\":\"" + Esc( strCallId ) + "\",\"call_type\":\"volte\",\"initiator\":\"" + Esc( strCaller ) +
+            "\",\"callee\":\"" + Esc( strCallee ) + "\",\"state\":\"ended\",\"invite_time\":\"" + tsStr +
+            "\",\"answer_time\":null,\"end_time\":\"" + tsStr + "\",\"duration\":0,\"end_reason\":\"" +
+            _ReasonOfStatus( iStatus ) + "\",\"end_status\":" + std::to_string( iStatus ) + "}\n";
         std::string path = dir + "/call.json";
         std::string callId = strCallId;
         m_worker.Enqueue(
@@ -528,6 +526,30 @@ public:
         char sub[64];
         snprintf( sub, sizeof( sub ), "/%04d/%02d/%02d/%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour );
         std::string path = m_strCallsDir + "/message/" + San( strGroupId, 64 ) + sub + "/messages.jsonl";
+        m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
+    }
+
+    // ── MCData 1:1 SDS/SMS 보관 ─────────────────────
+    //   경로: {ServiceLogDir}/message_direct/{YYYY}/{MM}/{DD}/{HH}/messages.jsonl (그룹 무관 평면)
+    //   관제 데스크 통합 이력(dispatch_center.md §5.6)용 — 전량 보관, 열람 범위는 CSC 조회 시점 게이트.
+    //   Setup.McData.StoreOneToOneSds 가 켜졌을 때만 호출된다(ModuleDispatcher).
+    void McData1to1Log( const std::string &strJsonData ) {
+        if ( m_strCallsDir.empty() ) return;
+        char ts[32];
+        IsoNow( ts, sizeof( ts ) );
+        std::string line = "{\"ts\":\"" + std::string( ts ) + "\"";
+        if ( !strJsonData.empty() && strJsonData.front() == '{' && strJsonData.back() == '}' ) {
+            std::string inner = strJsonData.substr( 1, strJsonData.size() - 2 );
+            if ( !inner.empty() ) line += "," + inner;
+        }
+        line += "}\n";
+
+        time_t now = time( NULL );
+        struct tm t;
+        localtime_r( &now, &t );
+        char sub[64];
+        snprintf( sub, sizeof( sub ), "/%04d/%02d/%02d/%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour );
+        std::string path = m_strCallsDir + "/message_direct" + std::string( sub ) + "/messages.jsonl";
         m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); }, line.size() );
     }
 

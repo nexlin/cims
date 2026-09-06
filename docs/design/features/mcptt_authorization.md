@@ -82,6 +82,10 @@ OAM file_store `console_accounts`, 콘솔 `관리 > 계정`)와 분리한다. �
 
 - 계층적이라 게이팅은 "필요 등급 이상" + (PTT그룹은) "소유 스코프" 추가 체크.
 - `monitor` ack 불가, ack는 `operator` 이상 (논의 확정).
+- 가입자(user)의 **그룹 conference 이벤트 구독**(RFC 4575)은 콘솔 역할이 아니라 그룹 문서 축이다 — 멤버는
+  `ptt_groups.allow_conference_state`(`<on-network-allow-conference-state>`), 비멤버 관제사는 청취 범위(자격
+  `allow_ambient_listening` + 관제 그룹 `ptt_listen`). CSP 가 초기 SUBSCRIBE 에서 판정(TS 24.379 §10.1.3.4.1, 403 `Warning: 138`) —
+  [dispatch_center.md §5.6](dispatch_center.md).
 
 ## 4. 그룹 소유 — `authorized_user_id` (단일 필드)
 

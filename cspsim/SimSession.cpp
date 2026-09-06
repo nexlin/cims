@@ -585,6 +585,8 @@ void SimSession::SubscribeConference(const std::string &strGroupId) {
   m_strConfSubGroup = strGroupId;
   m_strConfSubCallId = szCallId;
   m_iConfSubSeq = 1;
+  m_iConfSubStatus = 0;
+  m_strConfSubWarning.clear();
 
   char szTag[64];
   SipMakeTag(szTag, sizeof(szTag));
@@ -1350,13 +1352,22 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         } else if (strCallId == m_strEventSubCallId) {
             m_iEventSubStatus = 200;
             printf("[%d] EVENT-PROBE SUBSCRIBED OK\n", m_iId);
+        } else if (strCallId == m_strConfSubCallId) {
+            m_iConfSubStatus = 200;
+            printf("[%d] CONFERENCE SUBSCRIBED OK group=%s\n", m_iId, m_strConfSubGroup.c_str());
         }
     } else if (iStatus >= 400) {
-        // dialog 구독·이벤트 프로브의 최종 응답은 검증 판정값 (403 그룹 밖 감시 / 489 Bad Event)
+        // dialog 구독·이벤트 프로브·conference 구독의 최종 응답은 검증 판정값
+        //   (403 그룹 밖 감시 / 489 Bad Event / 403 Warning 138 conference 인가 거절)
+        CSipHeader* pWarn = pclsMessage->GetHeader("Warning");
         if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = iStatus;
         else if (strCallId == m_strEventSubCallId) m_iEventSubStatus = iStatus;
-        printf("[%d] SUBSCRIBE %d error (CallId=%s)\n",
-               m_iId, iStatus, strCallId.c_str());
+        else if (strCallId == m_strConfSubCallId) {
+            m_iConfSubStatus = iStatus;
+            m_strConfSubWarning = pWarn ? pWarn->m_strValue : "";
+        }
+        printf("[%d] SUBSCRIBE %d error (CallId=%s)%s%s\n",
+               m_iId, iStatus, strCallId.c_str(), pWarn ? " Warning: " : "", pWarn ? pWarn->m_strValue.c_str() : "");
     }
     return true;
 }

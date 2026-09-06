@@ -530,6 +530,14 @@ bool CCscfModule::SendResponseStatic( CSipMessage *pclsMessage, int iStatusCode 
     return true;
 }
 
+bool CCscfModule::SendResponseWithWarning( CSipMessage *pclsMessage, int iStatusCode, const char *pszWarning ) {
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatusCode );
+    if ( pclsResponse == NULL ) return false;
+    if ( pszWarning && *pszWarning ) pclsResponse->AddHeader( "Warning", pszWarning );
+    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    return true;
+}
+
 // ──────────────────────────────────────────────────────────────
 //  채널 정책 게이트 (sip_access_security.md §3 — TS 33.203 Annex O)
 // ──────────────────────────────────────────────────────────────
@@ -1181,6 +1189,23 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
                 SendResponse( pclsMessage, 403 );
                 return true;
             }
+        }
+    }
+
+    // conference-event 인가 (TS 24.379 §10.1.3.4.1, dispatch_center.md §5.6) — 초기 구독만(refresh 는 기존 구독이
+    //   이미 인가받음). 규격 = 그룹 문서 <on-network-allow-conference-state> 로 구독자를 판정, 불허 403 + Warning 138,
+    //   브로드캐스트 그룹 480 + Warning 105. CIMS 확장 = 비멤버 관제사의 청취 범위(allow_ambient_listening +
+    //   ptt_listen)를 같은 요소의 해석으로 두어 합류 전 사전 모니터링 구독을 허용한다. 판정 본체는
+    //   CGroupCallService::CheckConferenceSubscribe(청취 leg 게이트와 같은 축).
+    if ( strEventType == "conference" && !bRefresh && !strReqUriUser.empty() ) {
+        std::string strWarning, strReason;
+        const int iDeny =
+            CGroupCallService::CheckConferenceSubscribe( strReqUriUser, strFromId, strWarning, strReason );
+        if ( iDeny ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE conference denied — %s on group %s (%s) → %d", strFromId.c_str(),
+                         strReqUriUser.c_str(), strReason.c_str(), iDeny );
+            SendResponseWithWarning( pclsMessage, iDeny, strWarning.c_str() );
+            return true;
         }
     }
 

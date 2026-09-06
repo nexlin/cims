@@ -757,6 +757,7 @@ Content-Type: application/json
 | `id` | string | Y | 그룹 MSISDN (E.164 형식) |
 | `name` | string | Y | 그룹 표시 이름 |
 | `video_enabled` | boolean | N | 영상 지원 여부 (기본: false) |
+| `allow_conference_state` | boolean | N | `on-network-allow-conference-state`(TS 24.481) — 멤버의 conference 이벤트(RFC 4575) 구독 허용 (기본: true). false 면 CSP 가 초기 SUBSCRIBE 를 403 `Warning: 138` 로 거절. 관제사 청취 범위 인가는 별도([dispatch_center.md §5.6](../design/features/dispatch_center.md)) |
 | `floor_policy` | string | N | 동시 발언 정책 `single`(기본)/`dual`/`multi` |
 | `max_talkers` | integer | N | `multi` 의 동시 발언자 수 (2~8, CMP 슬롯 상한). `single`/`dual` 은 미해석 — 2 로 정규화 |
 | `members` | array | N | 초기 멤버 목록 |

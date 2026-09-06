@@ -17,6 +17,7 @@ CspPttGroup::CspPttGroup()
       _encryption( false ),
       _emergencyCall( false ),
       _emergencyAlert( true ),
+      _allowConferenceState( true ),
       _isAdhoc( false ),
       _allowSds( true ),
       _allowFd( false ),
@@ -92,6 +93,8 @@ bool CspPttGroup::load( std::string groupId ) {
     if ( root.Has( "max_talkers" ) ) _maxTalkers = root.GetInt( "max_talkers" );
 
     // MCData 그룹 메시징 게이트 (JSON fallback)
+    if ( root.Has( "allow_conference_state" ) )
+        _allowConferenceState = ( root.GetInt( "allow_conference_state" ) != 0 );
     if ( root.Has( "allow_sds" ) ) _allowSds = ( root.GetInt( "allow_sds" ) != 0 );
     if ( root.Has( "allow_fd" ) ) _allowFd = ( root.GetInt( "allow_fd" ) != 0 );
     if ( root.Has( "max_sds_size" ) ) _maxSdsSize = root.GetInt( "max_sds_size" );
@@ -128,6 +131,7 @@ void CspPttGroup::Clear() {
     _encryption = false;
     _emergencyCall = false;
     _emergencyAlert = true;
+    _allowConferenceState = true;
     _isAdhoc = false;
     _allowSds = true;
     _allowFd = false;

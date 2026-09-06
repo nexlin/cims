@@ -37,7 +37,7 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | | `dispatch_group_ptt_targets` | migrate_dispatch_groups.sql | (`group_id`, `ptt_group_id`=**ptt_groups.id surrogate** FK CASCADE) — `ptt_listen=listed` 대상. CSP 는 적재 시 `mcptt_group_id` 로 해석 |
 | | `mcptt_service_config` | cims_schema.sql + migrate_mcptt_service_config.sql | MCPTT **시스템 전역** 서비스 설정(TS 24.484 service-config) — **단일 행 id=1**. 1:1/긴급/경보/발언요청/그룹생성 허용 + N2 상한. 편집=`PUT /api/v1/mcptt/service-config`(콘솔 구성>MCPTT 정책), 단말이 user-profile 인가와 AND 로 게이트 |
 | | `users.login_id/password/role` | migrate_auth.sql | 콘솔 인증(가입자와 동일 신원). `role` RBAC ([mcptt_authorization.md](features/mcptt_authorization.md)) |
-| **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_ptt_groups_v2.sql + migrate_ptt_groups_v3_3gpp.sql | **id=surrogate BIGINT AI(PK, 디렉터리/FK 키)**, `mcptt_group_id`(UNIQUE 식별자), name/priority/encryption/emergency/video_enabled/org_code, **group_type(prearranged/chat/broadcast)/on_network/max_members/require_affiliation/alias/icon_url** (3GPP) |
+| **PTT 그룹** | `ptt_groups` | cims_schema.sql + migrate_ptt_groups_v2.sql + migrate_ptt_groups_v3_3gpp.sql + migrate_ptt_group_conference_state.sql | **id=surrogate BIGINT AI(PK, 디렉터리/FK 키)**, `mcptt_group_id`(UNIQUE 식별자), name/priority/encryption/emergency/video_enabled/org_code, **group_type(prearranged/chat/broadcast)/on_network/max_members/require_affiliation/alias/icon_url** (3GPP), `allow_conference_state`(on-network-allow-conference-state — 멤버의 conference 구독 허용, 기본 1) |
 | | `ptt_group_members` | cims_schema.sql + migrate_ptt_groups_v3_3gpp.sql | group_id=**surrogate ptt_groups.id(BIGINT FK)**, user_id, priority, **role(chair/participant), mcptt_id** |
 | | `ptt_affiliations` | migrate_ptt_groups_v3_3gpp.sql | MCPTT affiliation(TS 24.379 §9): (group_id, user_id, client_id) + affiliated_at/expires_at/status |
 | | `ptt_session_seq` (시퀀스) | migrate_ptt_session_seq.sql | PTT 세션 ID 발급 시퀀스 |
@@ -97,6 +97,8 @@ for f in sql/migrate_*.sql; do mysql -u root -p cims < "$f"; done
 | PTT 그룹 이력/녹취 | `{ServiceLogDir}/ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/` (id=ptt_groups.id surrogate, 시간버킷) — `group.json`(base) + `events/floor/segments.jsonl` + `seg/{NNN}/seg_NNNN_*`(100세그 shard) | 시간창 스캔. [recording.md](features/recording.md) |
 | 참여자 | `.d/participants.jsonl` | call.json 와 동봉 |
 | Session ↔ Call-ID 매핑 | `.d/session.json` | flow 재구성 |
+| 그룹 SDS 메시지 | `{ServiceLogDir}/message/{gid}/YYYY/MM/DD/HH/messages.jsonl` | 콘솔 oam-svc + 관제 `GET /provisioning/history?kind=message`(범위 게이트) |
+| 1:1 SDS/SMS (관제 이력) | `{ServiceLogDir}/message_direct/YYYY/MM/DD/HH/messages.jsonl` — `Setup.McData.StoreOneToOneSds` 시에만 | 관제 이력 조회 시 `monitor_scope` 게이트([mcdata_messaging.md §4.3](features/mcdata_messaging.md)) |
 | SIP 메시지 | `{MsgLogDir}/csp/sip/YYYY/MM/DD/HH/sip.jsonl` | call_id 별 grep |
 | 검증 회차 | `verify_runs/YYYY/MM/<id>.json` | `verify.lib.run_store` |
 | Alert 이력 | `{ServiceLogDir}/alerts/YYYY/MM/DD.jsonl` | `csc/services/alert_log.py` |

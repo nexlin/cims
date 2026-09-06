@@ -70,6 +70,10 @@ public:
     bool _emergencyCall;
     /** 긴급경보 허용 (allow-MCPTT-emergency-alert) */
     bool _emergencyAlert;
+    /** 멤버의 conference 이벤트(RFC 4575) 구독 허용 (on-network-allow-conference-state, TS 24.481 §7.2.4.2) —
+     *  초기 SUBSCRIBE 인가(TS 24.379 §10.1.3.4.1, 불허 403 Warning 138). 관제사 청취 범위는 별도 축(dispatch_center.md
+     * §5.6) */
+    bool _allowConferenceState;
     /** ad hoc 동적 그룹(Rel-18) — 비영속 in-memory, 통화 종료 시 GroupMap 에서 제거 */
     bool _isAdhoc;
 

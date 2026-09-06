@@ -31,6 +31,7 @@
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
+| C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 브로드캐스트 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 표준 클레임(`sub`/`iss`/`iat`) + nonce | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |

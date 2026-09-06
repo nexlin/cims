@@ -408,6 +408,14 @@
           "help": "TS 24.484 max-payload-size-sds-cplane-bytes. 0=무제한(현행). 초과 SDS MESSAGE 는 403+Warning 203 거부 — 단말은 MSRP 로 전환해야 한다. CSC provisioning 의 mcdata.maxPayloadSdsCplaneBytes 와 동기 유지."
         },
         {
+          "key": "Setup.McData.StoreOneToOneSds",
+          "label": "1:1 SDS/SMS 이력 보관",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "관제 데스크 통합 이력(dispatch_center.md §5.6)용으로 1:1 SDS/SMS 를 {ServiceLogDir}/message_direct/ 에 보관한다. 전량 보관하고 열람 범위는 CSC /provisioning/history 조회 시점에 관제 그룹 monitor_scope 로 게이트한다. 기본 off(개인정보 — 관제 감청 운용 시에만 켠다)."
+        },
+        {
           "key": "Setup.McData.FdUrlBase",
           "label": "FD 다운로드 URL base",
           "type": "string",

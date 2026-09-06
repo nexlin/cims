@@ -848,6 +848,14 @@ static void RunScenario(std::vector<SimSession*>& sessions,
             usleep(100000);
         }
         printf("[Scenario] PTT_LISTEN: %d/%d members in call\n", iJoined, iMembers);
+        // 1b) M 의 conference 이벤트 구독 (RFC 4575) — 합류 전 사전 모니터링(진행 중·참가자 수). 서버가 TS 24.379
+        //   §10.1.3.4.1 로 인가한다: 청취 범위 안 관제사 200 / 자격·범위 밖 403 + Warning 138 (dispatch_center.md §5.6).
+        M->SubscribeConference(strGroupId);
+        for (int t = 0; t < 50 && !g_bQuit; ++t) { if (M->m_iConfSubStatus.load() != 0) break; usleep(100000); }
+        const int iConfSub = M->m_iConfSubStatus.load();
+        const int iConfWarn = M->m_strConfSubWarning.empty() ? 0 : atoi(M->m_strConfSubWarning.c_str());
+        printf("[Scenario] PTT_LISTEN: M conference SUBSCRIBE -> %d%s%s\n", iConfSub,
+               M->m_strConfSubWarning.empty() ? "" : " Warning: ", M->m_strConfSubWarning.c_str());
         // 2) A 가 floor 를 잡고 발언 — 청취자가 들을 미디어
         A->m_clsRtpThread.m_bGrantReceived = false;
         A->SendPttRequest();
@@ -888,8 +896,9 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         // 6) 은닉 — 멤버(A)의 conference 로스터에 M 이 실렸는가
         const int iHidden = A->ConfRosterHas(M->m_strUser) ? 0 : 1;
         printf("[Scenario] PTT_LISTEN result: join_status=%d members_in=%d M_recv=+%llu A_recv=+%llu M_grant=%d M_deny=%d "
-               "M_taken=%d hidden=%d\n",
-               iJoinStatus, iJoined, dM, dA, iGrant, iDeny, M->m_clsRtpThread.m_iFloorTakenCount.load(), iHidden);
+               "M_taken=%d hidden=%d M_conf_sub=%d M_conf_warn=%d\n",
+               iJoinStatus, iJoined, dM, dA, iGrant, iDeny, M->m_clsRtpThread.m_iFloorTakenCount.load(), iHidden,
+               iConfSub, iConfWarn);
         printf("[Scenario] ptt_listen done, stopping calls\n");
         for (auto* s : sessions) s->StopCall();
         return;

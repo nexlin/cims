@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS ptt_groups (
     authorized_user_id  INT                   DEFAULT NULL COMMENT '그룹 소유자 users.id (TS 23.280)',
     created_at          DATETIME              DEFAULT CURRENT_TIMESTAMP COMMENT '그룹 생성 시각',
     emergency_alert     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'allow-MCPTT-emergency-alert',
+    allow_conference_state TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'on-network-allow-conference-state (TS 24.481 §7.2.4.2) — 멤버의 conference 이벤트(RFC 4575) 구독 허용. 관제사 청취 범위는 별도 축(dispatch_center.md §5.6)',
     allow_sds           TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'mcdata-allow-short-data-service (그룹 SDS 메시징 허용, TS 24.481)',
     allow_fd            TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'mcdata-allow-file-distribution (그룹 파일전송 허용, TS 24.481)',
     max_sds_size        INT          NOT NULL DEFAULT 10000 COMMENT 'mcdata-on-network-max-data-size-for-SDS (payload octets, 0=무제한)',

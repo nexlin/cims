@@ -79,6 +79,8 @@ private:
 
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
     static bool SendResponseStatic( CSipMessage *pclsMessage, int iStatusCode );
+    /** 상태 응답 + Warning 헤더(RFC 3261 §20.43 — TS 24.379 §4.4 warn-code 텍스트) */
+    static bool SendResponseWithWarning( CSipMessage *pclsMessage, int iStatusCode, const char *pszWarning );
     /** RFC 3329 협상 거절 — 494(대조 실패/제안 없음) 또는 421(정책상 협상 필수) + 새 Security-Server. */
     bool SendSecAgreeReject( CSipMessage *pclsMessage, int iStatusCode, const std::string &strUser,
                              const char *pszReason );

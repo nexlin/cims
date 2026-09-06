@@ -8,8 +8,9 @@
 > 생성 요소가 없어 CIMS 확장, 규격 동사형 관례) ② 그룹 uri 는 시스템 관례 **`tel:g-<8hex>`**(`sip:g-…@<PTT 도메인>` 도
 > 수용, GROUPS 키·CSP·제휴가 전부 tel: 형) ③ 타인 소유 id 는 409 `uri_taken`, 소유자 없는 콘솔 그룹은 403 `not_group_owner`.
 > §1.4 admin CRUD 캐시 동기화·API 문서 DELETE 도 완료. 부수 발견: HTTP 계층이 XML media type 을 415 로 거부하고 있었음(수정).
-> §2 발견·§3 conference 인가(규격형: `<on-network-allow-conference-state>` + Warning 138)·§4 메시지(**이력 조회만**으로
-> 결정, 통합 `GET /provisioning/history?kind=call|ptt|message`) 는 후속.
+> **§2 발견·§3 conference 인가·§4 메시지(§3b 통합 이력)·1:1 SDS 보관: 전부 구현 완료**(csc 0.2.104·csp 0.2.112, 커밋 `4ccdf9c9`).
+> 계약 정본 = [android_ue_provisioning.md §3-2](../design/features/android_ue_provisioning.md)(history)·[dispatch_center.md §5.6/§5.7a](../design/features/dispatch_center.md).
+> **남은 서버 과제 = §6 의 #7(대표번호 dialog 포크 leg 별 발행)·#8(빈 초기 full NOTIFY) 두 결함**. #1~#6 은 아래 확인란 참조(대부분 P2/P3b 로 해소).
 > **09-06 라이브 배포 완료(csc 0.2.103, 관제석 자격 부여, e2e PASS).** 단말 쪽 후속(재빌드·오류 문구·실기 e2e·번호 재키잉·다음 과제 대비) =
 > [windows_request_dispatch_group_crud_followup.md](windows_request_dispatch_group_crud_followup.md).
 
