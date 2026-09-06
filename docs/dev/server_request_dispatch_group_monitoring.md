@@ -136,3 +136,12 @@
 5. (문서) 본 요청서 §2 예시 JSON 의 `volteAor` 가 옛 번호 `tel:+82310001002` — 재키잉 값 `tel:+821310001002` 로.
 6. (확인) GMS PUT 에 `role` 없이 멤버를 보내면 생성자(authorized user)까지 `participant` 로 저장된다. 앱은 자기 자신을 `chair` 로 명시해 보내니
    동작엔 문제없지만, role 생략 시 생성자 기본값을 chair 로 둘지는 서버 규칙으로 확정해 mcptt_api.md §2 에 한 줄 적어 달라.
+7. **대표번호 dialog 이벤트가 포크 leg 마다 따로 나간다 — 설계 §4.5 와 다르다.** `CTasModule::NotifyPilotDialog`(`csp/TasModule.cpp:993`) 가
+   `entity=<pilot>` NOTIFY 를 **그룹원 B-leg 마다** `id=<그 leg 의 Call-ID>` 로 보내므로, 대표번호 착신 한 건이 앱 대기열에 N 행(그룹원 수)으로
+   뜨고 그중 하나가 관제사 자신의 착신 leg 다("대기열에 내게 온 전화가 뜬다" 현상의 근본 원인). [dispatch_center.md §4.5](../design/features/dispatch_center.md)
+   는 "대표번호에 걸려온 **호**의 early/confirmed/terminated 와 응답자(remote)"라 적었고 RFC 4235 도 dialog 는 pilot 이 참여자인 dialog 단위다 —
+   **포크 집합(`CTasForkSet`)당 dialog 하나**(`id` = A-leg Call-ID 또는 포크 집합 id 고정, early → confirmed 시 `remote` 는 발신자 유지 + 응답자는
+   `<local>` 쪽 또는 CIMS 확장 요소로, terminated 1회)로 정리해 달라. 앱은 그때까지 발신자 기준으로 행을 병합해 방어한다.
+8. **dialog 구독 초기 NOTIFY 가 빈 `state=full`** (`csp/CspServer.cpp:1049` — 진행 중 호를 역인덱싱하지 않음). 앱은 코어가 올리는 빈 자리표시자
+   (`id`·`state` 빈 값)를 무시하도록 고쳤지만, RFC 4235 §3.2 대로 **구독 시점의 진행 중 dialog 를 full 스냅샷에 담아** 주면 관제석 재로그인·
+   재구독 때 이미 울리고 있는 대표번호 호·통화 중인 그룹원이 즉시 보인다(지금은 다음 상태 변화까지 "대기"로 보인다).
