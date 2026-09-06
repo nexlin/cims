@@ -10,6 +10,8 @@
 > §1.4 admin CRUD 캐시 동기화·API 문서 DELETE 도 완료. 부수 발견: HTTP 계층이 XML media type 을 415 로 거부하고 있었음(수정).
 > §2 발견·§3 conference 인가(규격형: `<on-network-allow-conference-state>` + Warning 138)·§4 메시지(**이력 조회만**으로
 > 결정, 통합 `GET /provisioning/history?kind=call|ptt|message`) 는 후속.
+> **09-06 라이브 배포 완료(csc 0.2.103, 관제석 자격 부여, e2e PASS).** 단말 쪽 후속(재빌드·오류 문구·실기 e2e·번호 재키잉·다음 과제 대비) =
+> [windows_request_dispatch_group_crud_followup.md](windows_request_dispatch_group_crud_followup.md).
 
 작성 주체: Windows 관제조작반(`windows/dispatch-desktop`) + 단말 SDK(`sdk/`) 쪽 세션.
 대상: 서버(CSC/CSP/CMP/OAM) 쪽 Claude Code 세션. 아래 계약대로 서버가 구현되면 단말 쪽은 같은 계약으로 SDK·앱을 붙인다.
