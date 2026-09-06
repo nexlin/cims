@@ -377,11 +377,14 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 - **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +
   가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
-  **아직 서버가 주지 않는 것**: 관제 그룹원 내선 목록(`dispatch` 블록에 `members[]` 확장 또는 RFC 4662 RLS — 그 전까지 로컬 CSV `member` 태그),
-  외부망 연락처(CSV `external`).
-- **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 관제사가 채널(GMS 그룹)을 만들고 멤버를 바꾸는 기능. 서버 API 는 CSC `/api/v1/ptt/groups`
-  ([admin_api.md](../../api/admin_api.md) §6)가 있으나 관리 토큰(role) 기준이라 **관제사(operator) PKCE 토큰으로 호출 가능한지 권한 모델 확정이 먼저**(CSC 과제).
-  확정 후 ① PTT 주소록 [그룹] 탭에 [새 그룹]·행 [편집]·[삭제] 을 붙이고 GMS 목록·affiliation·conference 구독을 재적용한다.
+  **아직 서버가 주지 않는 것**: 관제 그룹원 내선 목록·청취 대상 그룹 목록 — `dispatch` 블록 `members[]`/`pttTargets[]` 확장을 서버에 요청
+  ([../../dev/server_request_dispatch_group_monitoring.md](../../dev/server_request_dispatch_group_monitoring.md) §2). 앱은 두 배열이 오면 그것을
+  dialog watch·conference 구독 대상으로 쓰고, 없으면 로컬 CSV `member` 태그로 폴백한다. 외부망 연락처(CSV `external`).
+- **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 경로는 **GMS XCAP**(TS 24.481, 생성 주체 = 권한 있는 가입자 = 관제사, PKCE 토큰)로 확정.
+  관리 API `/api/v1/ptt/groups`([admin_api.md](../../api/admin_api.md) §6)는 콘솔 토큰 전용으로 그대로 둔다. 자격 = `ptt_user_profile.allow_group_creation`
+  (프로비저닝 `ptt.allowGroupCreation`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
+  앱: PTT 주소록 [그룹] 탭 [새 그룹]·행 [편집]·[삭제] → `GroupEditWindow` → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
+  (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
 - **조직 구성 관리는 OAM 콘솔 몫** — 조직 트리(`organizations` 계층)·가입자 소속·관제 그룹 편성은 콘솔 `관리 > 조직/가입자/관제 그룹` 에서 편집하고
   앱은 `/provisioning/directory`·`dispatch` 블록으로 결과만 받는다(콘솔 화면 과제, [../console_platform.md](../console_platform.md)).
 - **서버 전제 — 청취 범위 그룹의 conference 이벤트 구독 인가**(dispatch_center.md §10): ② 진행 중 행의 "진행/참가자 수" 소스. 그 전까지 청취 그룹 행은
