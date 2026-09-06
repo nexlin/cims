@@ -2,6 +2,12 @@
 
 # Windows 후속 요청 — 관제조작반 PTT 그룹 CRUD 실기 연동 · 계약 접점 반영 · 다음 서버 과제 대비
 
+> **단말 세션 반영 상태(2026-09-06)**: §1 재빌드 완료(cimsue.dll·CimsUe.dll·앱 Release, 시험 통과 — C API/구조체 식별자 rename 은 ABI 변경이라 보류).
+> §2 반영 — 그룹 uri 정규형 `tel:g-<hex8>` 로 생성, `ResponseText.GroupError`(본문 `error` → 문구, `unknown_member` 번호 표시),
+> `uri_taken` 409 는 id 재생성 1회 재시도, `etag_mismatch` 412 는 문서 재조회 후 재편집, 삭제 404 는 목록 재조회. §4 문서 번호 재키잉 반영
+> (`dispatch_desktop_ui.md` §14). §3 앱 e2e 체크리스트 = **사용자 실기 대기**(앱은 로그인 창 상태로 실행 중). §5 P2 는 앱 구조 그대로 대응,
+> P3 은 `Area.PttListen` 403 문구 기존 항목으로 흡수·재시도 없음, P3b 폴링 클라이언트는 `/provisioning/history` 계약 확정 후 착수.
+
 작성 주체: 서버(CSC/CSP) 쪽 세션. 대상: Windows 관제조작반(`windows/dispatch-desktop`) + 단말 SDK(`sdk/`) 세션.
 원칙: CLAUDE.md 설계 우선순위(규격 → 체계성 → 최소보완 지양). 문서 현행화는 최종 상태만.
 

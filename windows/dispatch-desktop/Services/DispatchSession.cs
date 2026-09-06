@@ -323,8 +323,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                                          TaskScheduler.FromCurrentSynchronizationContext());
     }
 
-    /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다(sip:g-&lt;8hex&gt;@ptt 도메인).</summary>
-    public string NewGroupUri() => $"sip:g-{Guid.NewGuid():N}"[..14] + "@" + PttDomain;
+    /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다. 정규형 `tel:g-&lt;소문자 hex 8&gt;`(mcptt_api.md §2; `adhoc-`/`priv-` 예약).</summary>
+    public string NewGroupUri() => "tel:g-" + Guid.NewGuid().ToString("N")[..8];
 
     public Task<Result<GroupDoc>> GetGroupAsync(GroupInfo g, CancellationToken ct = default)
     {
@@ -349,7 +349,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (_csc is null || _tokens is null) return Result.Fail(-1, "로그인 전");
         var r = await _csc.DeleteGroupAsync(_tokens.AccessToken, MyPttId, g.Uri, ct);
-        if (!r.Ok) { Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString()); return r; }
+        if (!r.Ok)
+        {
+            Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString());
+            if (r.Code == 404) await RefreshGroupsAsync(ct);                    // 이미 없어진 그룹 — 목록만 맞춘다
+            return r;
+        }
         Activity.Add(ActivityPanel.Ptt, ActivityKind.Note, $"그룹 삭제 {g.Name}");
         Notify.Info("그룹 삭제 완료", g.Name);
         await RefreshGroupsAsync(ct);

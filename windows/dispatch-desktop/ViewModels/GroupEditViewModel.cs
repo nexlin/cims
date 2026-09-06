@@ -83,7 +83,8 @@ public sealed partial class GroupEditViewModel : ObservableObject
 
     public bool IsNew => _existing is null;
     public string Title => IsNew ? "새 PTT 그룹" : $"그룹 편집 — {_existing!.Name}";
-    public string Uri => IsNew ? $"sip:{GroupId.Trim()}@{_s.PttDomain}" : _existing!.Uri;
+    /// <summary>그룹 uri 정규형 = `tel:&lt;id&gt;`(mcptt_api.md §2). 기존 그룹은 목록의 uri 그대로.</summary>
+    public string Uri => IsNew ? $"tel:{GroupId.Trim()}" : _existing!.Uri;
     public bool HasError => Error.Length > 0;
     public string MemberCountText => $"{Members.Count}명";
     public bool CanSave => Loaded && !Busy && Name.Trim().Length > 0 && Members.Count > 0 && (!IsNew || GroupId.Trim().Length > 0);
@@ -161,8 +162,20 @@ public sealed partial class GroupEditViewModel : ObservableObject
             doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.IsChair ? 7 : 5 });
         Busy = true;
         var r = await _s.SaveGroupAsync(doc, IsNew ? null : _ifMatch);
+        if (!r.Ok && r.Code == 409 && IsNew && ResponseText.GroupError(r.Reason).Error == "uri_taken")
+        {
+            // 클라이언트 명명 id 충돌(타인 소유) — id 재생성 후 1회 재시도(mcptt_api.md §2)
+            GroupId = UserPartConverter.UserPart(_s.NewGroupUri());
+            doc.Uri = Uri;
+            r = await _s.SaveGroupAsync(doc, null);
+        }
         Busy = false;
-        if (!r.Ok) { Error = ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason); return; }
+        if (!r.Ok)
+        {
+            Error = ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason);
+            if (r.Code == 412 && !IsNew) _ = LoadAsync();                     // 타인이 먼저 갱신 — 최신 문서로 다시 편집
+            return;
+        }
         Saved?.Invoke(this, EventArgs.Empty);
     }
 }
