@@ -67,7 +67,7 @@ public class CscTests
     public void ParseProfileDispatchDiscoveryAndGroupCreation()
     {
         var r = CscClient.ParseProfile("""
-        { "services": [], "ptt": { "allowGroupCreation": true },
+        { "services": [], "ptt": { "allowCreateGroup": true },
           "dispatch": { "groupId": "dg-1", "monitorScope": "listed", "pttListen": "listed",
             "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" } ],
             "pttTargets": [ { "id": "g002", "uri": "sip:g002@ptt.example.org", "name": "음성그룹2" } ] } }

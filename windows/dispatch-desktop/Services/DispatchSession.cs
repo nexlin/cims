@@ -111,7 +111,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool CanListenPtt => HasDesk && Dispatch.PttListen != "none";
     public bool ListenHidden => Dispatch.ListenVisibility != "visible";
     public bool CanSms => Volte is not null;      // 외부망 게이트웨이 능력 키는 §13 — 지금은 등록 가입자 간만
-    /// <summary>GMS 그룹 생성 자격(`ptt.allowGroupCreation`) — [새 그룹] 노출. 편집·삭제는 그룹별 IsOwner.</summary>
+    /// <summary>GMS 그룹 생성 자격(`ptt.allowCreateGroup`) — [새 그룹] 노출. 편집·삭제는 그룹별 IsOwner.</summary>
     public bool CanCreateGroups => Profile?.AllowGroupCreation == true && Ptt is not null;
     public string PttDomain => PttService?.Domain ?? "";
 

@@ -64,7 +64,7 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         Reload();
     }
 
-    /// <summary>[새 그룹] 노출 — 프로비저닝 `ptt.allowGroupCreation`.</summary>
+    /// <summary>[새 그룹] 노출 — 프로비저닝 `ptt.allowCreateGroup`.</summary>
     public bool CanCreateGroups => _s.CanCreateGroups;
     [ObservableProperty] private bool _refreshingGroups;
 

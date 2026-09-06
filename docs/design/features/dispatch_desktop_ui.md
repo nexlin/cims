@@ -149,7 +149,7 @@
 
 - **PTT 주소록**: 세그먼트 [사용자|그룹]. 사용자 행 = 이름·PTT 번호·현재 상태(어느 채널에서 발언/참여 중 — 로스터에서 파생)·[사설]·[☐ 애드혹].
   그룹 행 = 이름·멤버 수·[채널에 추가]·[메시지] + 내 소유 그룹(`is_owner`)이면 "내 그룹" 배지·[편집]·[삭제]. 탭 머리 = [↻ 새로고침]·[새 그룹](자격
-  `ptt.allowGroupCreation` 일 때만). [새 그룹]/[편집] → `GroupEditWindow`(이름·id·세션 종류·우선순위·최대 참가자·긴급/SDS/FD/영상/affiliation/암호화 +
+  `ptt.allowCreateGroup` 일 때만). [새 그룹]/[편집] → `GroupEditWindow`(이름·id·세션 종류·우선순위·최대 참가자·긴급/SDS/FD/영상/affiliation/암호화 +
   멤버 = PTT 주소록에서 추가·의장 토글) → GMS XCAP PUT(편집은 `If-Match`, 412 = 재편집 안내) → 목록 재조회(`RefreshGroupsAsync` — 새 그룹
   affiliation·conference 구독, 사라진 그룹 해제). [삭제] = 확인 후 XCAP DELETE. 서버발 변경은 `xcap-diff`(`sip:gms_psi@…`) NOTIFY 로 자동 재조회.
   검색 공통. 소스는 §13(GMS 그룹 문서 멤버 + 프로비저닝 → 사용자 목록 API 후속).
@@ -386,7 +386,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   dialog watch·conference 구독 대상으로 쓰고, 없으면 로컬 CSV `member` 태그로 폴백한다. 외부망 연락처(CSV `external`).
 - **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 경로는 **GMS XCAP**(TS 24.481, 생성 주체 = 권한 있는 가입자 = 관제사, PKCE 토큰)로 확정.
   관리 API `/api/v1/ptt/groups`([admin_api.md](../../api/admin_api.md) §6)는 콘솔 토큰 전용으로 그대로 둔다. 자격 = `ptt_user_profile.allow_group_creation`
-  (프로비저닝 `ptt.allowGroupCreation`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
+  (프로비저닝 `ptt.allowCreateGroup`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
   앱: PTT 주소록 [그룹] 탭 [새 그룹]·행 [편집]·[삭제] → `GroupEditWindow` → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
   (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
 - **조직 구성 관리는 OAM 콘솔 몫** — 조직 트리(`organizations` 계층)·가입자 소속·관제 그룹 편성은 콘솔 `관리 > 조직/가입자/관제 그룹` 에서 편집하고

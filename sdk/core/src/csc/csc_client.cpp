@@ -236,10 +236,10 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
         });
     }
     // 그룹 생성 자격 — 최상위 ptt 블록(정본) 또는 ptt 서비스 항목(호환).
-    out.allowGroupCreation = Json::boolean(Json::child(j.root, "ptt"), "allowGroupCreation", false);
+    out.allowGroupCreation = Json::boolean(Json::child(j.root, "ptt"), "allowCreateGroup", false);
     if (!out.allowGroupCreation)
         Json::each(Json::child(j.root, "services"), [&](const JVal* s) {
-            if (Json::str(s, "kind") == "ptt" && Json::boolean(s, "allowGroupCreation", false)) out.allowGroupCreation = true;
+            if (Json::str(s, "kind") == "ptt" && Json::boolean(s, "allowCreateGroup", false)) out.allowGroupCreation = true;
         });
     return true;
 }

@@ -68,7 +68,7 @@ struct Profile {
     std::string cscHost; int cscPort = 4430;
     std::vector<ServiceProfile> services;
     DispatchProfile dispatch;
-    /** GMS 그룹 생성 자격(ptt_user_profile.allow_group_creation — `ptt.allowGroupCreation`). */
+    /** GMS 그룹 생성 자격(ptt_user_profile.allow_create_group — 프로비저닝 `ptt.allowCreateGroup`). */
     bool allowGroupCreation = false;
     CIMSUE_API const ServiceProfile* service(const std::string& kind) const;
 };

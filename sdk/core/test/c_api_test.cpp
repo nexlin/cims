@@ -278,7 +278,7 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
 
     // 프로파일 dispatch 확장 평탄화
     cimsue_profile_t p{};
-    ASSERT_EQ(cimsue_csc_parse_profile(R"({"services":[],"ptt":{"allowGroupCreation":true},"dispatch":{"groupId":"dg-1",
+    ASSERT_EQ(cimsue_csc_parse_profile(R"({"services":[],"ptt":{"allowCreateGroup":true},"dispatch":{"groupId":"dg-1",
         "members":[{"userId":1,"name":"A","volteAor":"tel:+8231","extension":"1001"}],"pttTargets":[{"id":"g1","uri":"sip:g1@d","name":"G1"}]}})", &p), CIMSUE_OK);
     EXPECT_EQ(p.allow_group_creation, 1);
     ASSERT_EQ(p.dispatch.member_count, 1); EXPECT_STREQ(p.dispatch.members[0].extension, "1001");

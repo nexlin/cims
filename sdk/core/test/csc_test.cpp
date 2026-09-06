@@ -71,7 +71,7 @@ TEST(Csc, ParseProfile) {
 TEST(Csc, ParseProfileDispatchDiscovery) {
     static const char* kJson = R"({
       "services": [ { "kind": "ptt", "sip": { "domain": "ptt.example.org" }, "account": { "msisdn": "+82500000001" } } ],
-      "ptt": { "allowGroupCreation": true },
+      "ptt": { "allowCreateGroup": true },
       "dispatch": { "groupId": "dg-1", "monitorScope": "listed", "pttListen": "listed",
         "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" },
                      { "userId": 13, "name": "빈항목" } ],
@@ -88,7 +88,7 @@ TEST(Csc, ParseProfileDispatchDiscovery) {
     EXPECT_EQ(p.dispatch.pttTargets[0].name, "음성그룹2");
     EXPECT_EQ(p.dispatch.pttTargets[1].id, "g003");            // id 생략 → uri user part
     Profile svc;                                               // 서비스 항목 표기(호환)도 인정
-    ASSERT_TRUE(CscClient::parseProfile(R"({"services":[{"kind":"ptt","allowGroupCreation":true}]})", svc));
+    ASSERT_TRUE(CscClient::parseProfile(R"({"services":[{"kind":"ptt","allowCreateGroup":true}]})", svc));
     EXPECT_TRUE(svc.allowGroupCreation);
 }
 
