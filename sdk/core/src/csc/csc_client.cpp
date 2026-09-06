@@ -218,7 +218,29 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
         out.dispatch.groupId = Json::str(d, "groupId"); out.dispatch.groupName = Json::str(d, "groupName");
         out.dispatch.pilotId = Json::str(d, "pilotId"); out.dispatch.monitorScope = Json::str(d, "monitorScope", "none");
         out.dispatch.pttListen = Json::str(d, "pttListen", "none"); out.dispatch.listenVisibility = Json::str(d, "listenVisibility", "hidden");
+        // 발견(discovery) 확장 — 서버가 아직 주지 않으면 빈 배열(앱은 로컬 폴백).
+        Json::each(Json::child(d, "members"), [&](const JVal* m) {
+            DispatchMember dm;
+            dm.userId = Json::str(m, "userId"); dm.name = Json::str(m, "name"); dm.volteAor = Json::str(m, "volteAor");
+            dm.pttId = Json::str(m, "pttId"); dm.extension = Json::str(m, "extension");
+            if (!dm.volteAor.empty() || !dm.extension.empty() || !dm.pttId.empty()) out.dispatch.members.push_back(dm);
+        });
+        Json::each(Json::child(d, "pttTargets"), [&](const JVal* t) {
+            DispatchTarget dt;
+            dt.id = Json::str(t, "id"); dt.uri = Json::str(t, "uri"); dt.name = Json::str(t, "name");
+            if (dt.id.empty() && !dt.uri.empty()) {           // id 생략 시 uri user part
+                size_t c = dt.uri.find(':'), a = dt.uri.find('@');
+                dt.id = dt.uri.substr(c == std::string::npos ? 0 : c + 1, a == std::string::npos ? std::string::npos : a - (c == std::string::npos ? 0 : c + 1));
+            }
+            if (!dt.id.empty()) out.dispatch.pttTargets.push_back(dt);
+        });
     }
+    // 그룹 생성 자격 — 최상위 ptt 블록(정본) 또는 ptt 서비스 항목(호환).
+    out.allowGroupCreation = Json::boolean(Json::child(j.root, "ptt"), "allowGroupCreation", false);
+    if (!out.allowGroupCreation)
+        Json::each(Json::child(j.root, "services"), [&](const JVal* s) {
+            if (Json::str(s, "kind") == "ptt" && Json::boolean(s, "allowGroupCreation", false)) out.allowGroupCreation = true;
+        });
     return true;
 }
 
@@ -241,8 +263,40 @@ Result CscClient::listGroups(const std::string& accessToken, const std::string& 
     Json::each(j.root, [&](const JVal* g) {
         GroupSummary s; s.uri = Json::str(g, "uri"); s.displayName = Json::str(g, "display_name"); s.etag = Json::str(g, "etag");
         s.memberCount = Json::num(g, "member_count", -1);
+        s.isOwner = Json::boolean(g, "is_owner", false);
         out.push_back(s);
     });
+    return Result::success();
+}
+
+Result CscClient::getGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri, GroupDoc& out) {
+    XcapDoc doc;
+    Result r = xcapGet(accessToken, groupPath(userUri, groupUri), kCtGroupDoc, "", doc);
+    if (!r.ok) return r;
+    std::string err;
+    GroupDoc d; d.etag = doc.etag;
+    if (!GroupDoc::parse(doc.body, d, &err)) return Result::fail(-2, "group doc: " + err);
+    out = d;
+    return Result::success();
+}
+
+Result CscClient::putGroup(const std::string& accessToken, const std::string& userUri, const GroupDoc& doc, const std::string& ifMatch, GroupDoc& out) {
+    if (doc.uri.empty()) return Result::fail(-2, "group uri required");
+    std::map<std::string, std::string> h{{"Authorization", "Bearer " + accessToken}, {"Content-Type", kCtGroupDoc}, {"Accept", kCtGroupDoc}};
+    if (!ifMatch.empty()) h["If-Match"] = ifMatch;
+    http::Response r = impl_->tp->request("PUT", impl_->ep.baseUrl() + groupPath(userUri, doc.uri), h, doc.toXml());
+    if (r.status / 100 != 2) return httpFail(r, "putGroup");
+    GroupDoc d; d.etag = http::header(r, "etag");
+    std::string err;
+    if (r.body.empty() || !GroupDoc::parse(r.body, d, &err)) { d = doc; d.etag = http::header(r, "etag"); }   // 본문 없는 2xx — 보낸 문서로
+    out = d;
+    return Result::success();
+}
+
+Result CscClient::deleteGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri) {
+    http::Response r = impl_->tp->request("DELETE", impl_->ep.baseUrl() + groupPath(userUri, groupUri),
+                                          {{"Authorization", "Bearer " + accessToken}}, "");
+    if (r.status / 100 != 2) return httpFail(r, "deleteGroup");
     return Result::success();
 }
 

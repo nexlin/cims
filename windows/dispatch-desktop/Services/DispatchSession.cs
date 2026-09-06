@@ -86,7 +86,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.RosterChanged += (_, r) => OnRoster(r);
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
-        Engine.MessageReceived += (_, m) => SipMessageReceived?.Invoke(this, m);
+        Engine.MessageReceived += (_, m) => { SipMessageReceived?.Invoke(this, m); OnSipMessage(m); };
         Engine.RequestCompleted += (_, r) => RequestCompleted?.Invoke(this, r);
         Engine.HandlerFailed += (_, ex) => Log.Error("이벤트 핸들러 예외", ex);
         Engine.Stopped += (_, _) => Log.Info("engine stopped");
@@ -111,14 +111,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool CanListenPtt => HasDesk && Dispatch.PttListen != "none";
     public bool ListenHidden => Dispatch.ListenVisibility != "visible";
     public bool CanSms => Volte is not null;      // 외부망 게이트웨이 능력 키는 §13 — 지금은 등록 가입자 간만
+    /// <summary>GMS 그룹 생성 자격(`ptt.allowGroupCreation`) — [새 그룹] 노출. 편집·삭제는 그룹별 IsOwner.</summary>
+    public bool CanCreateGroups => Profile?.AllowGroupCreation == true && Ptt is not null;
+    public string PttDomain => PttService?.Domain ?? "";
 
     partial void OnProfileChanged(Profile? value)
     {
         OnPropertyChanged(nameof(Dispatch)); OnPropertyChanged(nameof(HasDesk)); OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(MyExtension)); OnPropertyChanged(nameof(MyPttId)); OnPropertyChanged(nameof(MyPttNumber));
         OnPropertyChanged(nameof(PilotId)); OnPropertyChanged(nameof(GroupName)); OnPropertyChanged(nameof(CanMonitorCalls));
-        OnPropertyChanged(nameof(CanListenPtt)); OnPropertyChanged(nameof(ListenHidden));
+        OnPropertyChanged(nameof(CanListenPtt)); OnPropertyChanged(nameof(ListenHidden)); OnPropertyChanged(nameof(CanCreateGroups));
+        OnPropertyChanged(nameof(PttDomain));
     }
+    partial void OnPttChanged(Account? value) => OnPropertyChanged(nameof(CanCreateGroups));
 
     // ── 로그인·프로비저닝 (§6) ──
     private const string RefreshTokenKey = "csc.refresh";
@@ -178,8 +183,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (!p.Ok) return p.WithoutValue();
         Profile = p.Value;
         Directory.CountryCode = p.Value.CountryCode;
+        Directory.SetMembers(p.Value.Dispatch.Members);              // 서버 그룹원 목록(없으면 CSV member 폴백)
         Log.Info($"profile {p.Value.LoginId} services={string.Join(",", p.Value.Services.Select(s => s.Kind))} desk={p.Value.Dispatch.Present} " +
-                 $"group={p.Value.Dispatch.GroupId} pilot={p.Value.Dispatch.PilotId} monitor={p.Value.Dispatch.MonitorScope} pttListen={p.Value.Dispatch.PttListen} cc={p.Value.CountryCode}");
+                 $"group={p.Value.Dispatch.GroupId} pilot={p.Value.Dispatch.PilotId} monitor={p.Value.Dispatch.MonitorScope} pttListen={p.Value.Dispatch.PttListen} " +
+                 $"members={p.Value.Dispatch.Members.Count} pttTargets={p.Value.Dispatch.PttTargets.Count} groupCreate={p.Value.AllowGroupCreation} cc={p.Value.CountryCode}");
         return Result.Success;
     }
 
@@ -231,35 +238,122 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanSms));
         await SyncDirectoryAsync();
 
-        // 관제 범위: 그룹원·대표번호 dialog 구독 (§4.3)
+        // 관제 범위: 그룹원·대표번호 dialog 구독 (§4.3) — 그룹원 = 프로비저닝 members[](정본) 또는 CSV member 폴백
         if (HasDesk && Volte is not null)
         {
             foreach (var m in Directory.Members) Watch(m.Number);
             if (PilotId.Length > 0) Watch(PilotId);
         }
-        // 멤버 그룹: GMS 목록 → affiliation + conference 구독 (§4.1·§4.2)
-        if (Ptt is not null && _csc is not null && _tokens is not null)
+        // 멤버 그룹(GMS 목록 → affiliation + conference 구독)·청취 범위 그룹(pttTargets → conference 구독) (§4.1·§4.2)
+        if (Ptt is not null)
         {
-            var groups = await _csc.ListGroupsAsync(_tokens.AccessToken, MyPttId);
-            if (groups.Ok)
+            await RefreshGroupsAsync();
+            // 서버발 그룹 변경(GROUP_CHANGED → xcap-diff NOTIFY, RFC 5875) 을 받아 목록을 자동 재조회
+            if (PttDomain.Length > 0)
             {
-                Groups.Clear();
-                foreach (var g in groups.Value)
-                {
-                    string id = UserPartConverter.UserPart(g.Uri);
-                    var gi = new GroupInfo(id, g.Uri, g.DisplayName.Length > 0 ? g.DisplayName : id, g.MemberCount);
-                    Groups.Add(gi);
-                    var af = Ptt.Affiliate(id, true);
-                    gi.Affiliated = af.Ok;
-                    Ptt.SubscribeConference(id, true);
-                }
-                Directory.SetGroups(Groups);
+                var x = Ptt.SubscribeXcapDiff($"sip:gms_psi@{PttDomain}", true);
+                if (!x.Ok) Log.Warn($"xcap-diff subscribe: {x}");
             }
-            else Notify.Warn("그룹 목록을 받지 못했습니다", groups.ToString());
         }
         IsReady = true;
         ProfileApplied?.Invoke(this, EventArgs.Empty);
         return Result.Success;
+    }
+
+    // ── PTT 그룹 목록·관리 (GMS, TS 24.481 — 서버 요청서 §1) ──
+    private int _groupRefreshSeq;
+
+    /// <summary>GMS 목록 재조회 → Groups 를 차분 갱신: 새 멤버 그룹은 affiliation+conference 구독, 사라진 그룹은 해제.
+    /// 청취 범위 그룹(pttTargets, 비멤버)은 conference 구독만. Groups 의 CollectionChanged 로 주소록·채널 카드·설정이 따라온다.</summary>
+    public async Task<Result> RefreshGroupsAsync(CancellationToken ct = default)
+    {
+        if (Ptt is null || _csc is null || _tokens is null) return Result.Fail(-1, "PTT 계정 없음");
+        var csc = _csc; string token = _tokens.AccessToken; var ptt = Ptt;
+        var groups = await csc.ListGroupsAsync(token, MyPttId, ct);
+        if (!groups.Ok) { Notify.Warn("그룹 목록을 받지 못했습니다", groups.ToString()); return groups.WithoutValue(); }
+        if (Ptt != ptt) return Result.Fail(-1, "세션 종료");                 // 조회 중 로그아웃
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in groups.Value)
+        {
+            string id = UserPartConverter.UserPart(g.Uri);
+            if (id.Length == 0 || !seen.Add(id)) continue;
+            string name = g.DisplayName.Length > 0 ? g.DisplayName : id;
+            var gi = Groups.FirstOrDefault(x => x.Id == id);
+            if (gi is not null && !gi.IsMember) { Groups.Remove(gi); gi = null; }   // 청취 범위 → 멤버 승격
+            if (gi is null)
+            {
+                gi = new GroupInfo(id, g.Uri, name, g.MemberCount) { IsOwner = g.IsOwner, Etag = g.ETag };
+                Groups.Add(gi);
+                gi.Affiliated = ptt.Affiliate(id, true).Ok;
+                var sc = ptt.SubscribeConference(id, true);
+                if (!sc.Ok) Log.Warn($"conference subscribe {id}: {sc}");
+            }
+            else { gi.Name = name; gi.MemberCount = g.MemberCount; gi.IsOwner = g.IsOwner; gi.Etag = g.ETag; }
+        }
+        foreach (var gone in Groups.Where(x => x.IsMember && !seen.Contains(x.Id)).ToList())
+        {
+            ptt.Affiliate(gone.Id, false);
+            ptt.SubscribeConference(gone.Id, false);
+            Groups.Remove(gone);
+            Log.Info($"group gone {gone.Id}");
+        }
+        // 청취 범위 그룹 — 프로비저닝 pttTargets(서버가 ptt_listen 범위를 해석한 목록). 로스터 NOTIFY 로 진행/참가자 수를 안다.
+        if (CanListenPtt)
+            foreach (var t in Dispatch.PttTargets)
+            {
+                if (t.Id.Length == 0 || seen.Contains(t.Id) || Groups.Any(x => x.Id == t.Id)) continue;
+                string uri = t.Uri.Length > 0 ? t.Uri : $"sip:{t.Id}@{PttDomain}";
+                Groups.Add(new GroupInfo(t.Id, uri, t.Name.Length > 0 ? t.Name : t.Id, 0) { IsMember = false });
+                var sc = ptt.SubscribeConference(t.Id, true);
+                if (!sc.Ok) Log.Warn($"conference subscribe(listen scope) {t.Id}: {sc}");
+            }
+        Directory.SetGroups(Groups.Where(x => x.IsMember));
+        Log.Info($"groups {Groups.Count(x => x.IsMember)} member ({Groups.Count(x => x.IsOwner)} owned), {Groups.Count(x => !x.IsMember)} listen-scope");
+        return Result.Success;
+    }
+
+    /// <summary>xcap-diff NOTIFY(gms 축) → 그룹 목록 재조회(연속 통지는 0.5초 합침).</summary>
+    private void OnSipMessage(SipMessage m)
+    {
+        if (!m.ContentType.Contains("xcap-diff", StringComparison.OrdinalIgnoreCase)) return;
+        if (!m.Body.Contains("org.openmobilealliance.groups", StringComparison.Ordinal)) return;
+        int seq = ++_groupRefreshSeq;
+        Log.Info("xcap-diff: group document changed — refreshing");
+        _ = Task.Delay(500).ContinueWith(_ => { if (seq == _groupRefreshSeq && Ptt is not null) _ = RefreshGroupsAsync(); },
+                                         TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다(sip:g-&lt;8hex&gt;@ptt 도메인).</summary>
+    public string NewGroupUri() => $"sip:g-{Guid.NewGuid():N}"[..14] + "@" + PttDomain;
+
+    public Task<Result<GroupDoc>> GetGroupAsync(GroupInfo g, CancellationToken ct = default)
+    {
+        if (_csc is null || _tokens is null) return Task.FromResult(Result<GroupDoc>.Fail(-1, "로그인 전"));
+        return _csc.GetGroupAsync(_tokens.AccessToken, MyPttId, g.Uri, ct);
+    }
+
+    /// <summary>그룹 생성/수정(PUT). ifMatch = 편집 시작 시 ETag(충돌 412). 성공 시 목록 재조회.</summary>
+    public async Task<Result<GroupDoc>> SaveGroupAsync(GroupDoc doc, string? ifMatch, CancellationToken ct = default)
+    {
+        if (_csc is null || _tokens is null) return Result<GroupDoc>.Fail(-1, "로그인 전");
+        var r = await _csc.PutGroupAsync(_tokens.AccessToken, MyPttId, doc, ifMatch, ct);
+        if (!r.Ok) { Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString()); return r; }
+        bool isNew = ifMatch is null || ifMatch.Length == 0;
+        Activity.Add(ActivityPanel.Ptt, ActivityKind.Note, $"그룹 {(isNew ? "생성" : "편집")} {r.Value.DisplayName}", $"멤버 {r.Value.Members.Count}");
+        Notify.Info($"그룹 {(isNew ? "생성" : "편집")} 완료", r.Value.DisplayName);
+        await RefreshGroupsAsync(ct);
+        return r;
+    }
+
+    public async Task<Result> DeleteGroupAsync(GroupInfo g, CancellationToken ct = default)
+    {
+        if (_csc is null || _tokens is null) return Result.Fail(-1, "로그인 전");
+        var r = await _csc.DeleteGroupAsync(_tokens.AccessToken, MyPttId, g.Uri, ct);
+        if (!r.Ok) { Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString()); return r; }
+        Activity.Add(ActivityPanel.Ptt, ActivityKind.Note, $"그룹 삭제 {g.Name}");
+        Notify.Info("그룹 삭제 완료", g.Name);
+        await RefreshGroupsAsync(ct);
+        return r;
     }
 
     private void Watch(string numberOrAor)

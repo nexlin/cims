@@ -176,9 +176,26 @@ public sealed class DirectoryService
         Rebuild();
     }
 
+    private readonly List<Contact> _serverMembers = new();
+    /// <summary>프로비저닝 `dispatch.members[]` → 관제 그룹원(정본). 비면 CSV member 태그 폴백.</summary>
+    public void SetMembers(IEnumerable<CimsUe.DispatchMember> members)
+    {
+        _serverMembers.Clear();
+        foreach (var m in members)
+        {
+            string number = m.Extension.Length > 0 ? m.Extension : Converters.UserPartConverter.UserPart(m.VolteAor);
+            if (number.Length == 0) continue;
+            _serverMembers.Add(new Contact(ContactKind.Extension, number, m.Name, new[] { "server", "member" }));
+        }
+        Rebuild();
+    }
+    public bool HasServerMembers => _serverMembers.Count > 0;
+
     // ── 조회 ──
-    /// <summary>관제 그룹원 내선(BLF 대상) — CSV member 태그(서버 공급은 §13).</summary>
-    public IReadOnlyList<Contact> Members => _merged.Where(c => c.Kind == ContactKind.Extension && c.IsMember).ToList();
+    /// <summary>관제 그룹원 내선(BLF 대상) — 프로비저닝 members[] 가 있으면 그것(이름은 전화번호부로 보강), 없으면 CSV member 태그.</summary>
+    public IReadOnlyList<Contact> Members => _serverMembers.Count > 0
+        ? _serverMembers.Select(m => m.Name.Length > 0 ? m : m with { Name = NameOf(m.Number) }).ToList()
+        : _merged.Where(c => c.Kind == ContactKind.Extension && c.IsMember).ToList();
     public IReadOnlyList<Contact> PttUsers => _merged.Where(c => c.Kind == ContactKind.PttUser).ToList();
     public IReadOnlyList<Contact> Groups => _merged.Where(c => c.Kind == ContactKind.PttGroup).ToList();
     public IReadOnlyList<Contact> CallBook => _merged.Where(c => c.Kind is ContactKind.Extension or ContactKind.External).ToList();

@@ -292,11 +292,55 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
 }
 
 /** Profile 한 벌의 소유자 — C++ 객체와 그것을 가리키는 POD 배열을 함께 들고 있는다. */
+/** GroupDoc 의 C 스냅샷 — 핸들(getter 산출)과 스레드 스크래치(parse) 양쪽이 쓴다. */
+struct GroupDocHolder {
+    GroupDoc cxx;
+    std::vector<cimsue_group_member_t> mem;
+    cimsue_group_doc_t out{};
+
+    void build() {
+        mem.clear();
+        for (const auto& m : cxx.members) mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority});
+        out = cimsue_group_doc_t{};
+        out.uri = C(cxx.uri); out.display_name = C(cxx.displayName); out.etag = C(cxx.etag);
+        out.members = mem.empty() ? nullptr : mem.data();
+        out.member_count = (int32_t)mem.size();
+        out.session_type = C(cxx.sessionType);
+        out.video_enabled = B(cxx.videoEnabled); out.encryption = B(cxx.encryption);
+        out.emergency_call = B(cxx.emergencyCall); out.emergency_alert = B(cxx.emergencyAlert);
+        out.allow_sds = B(cxx.allowSds); out.allow_fd = B(cxx.allowFd); out.require_affiliation = B(cxx.requireAffiliation);
+        out.priority = cxx.priority; out.max_participants = cxx.maxParticipants;
+        out.org_code = C(cxx.orgCode); out.authorized_user = C(cxx.authorizedUser);
+    }
+};
+
+GroupDoc toCxx(const cimsue_group_doc_t* d) {
+    GroupDoc g;
+    if (!d) return g;
+    g.uri = S(d->uri); g.displayName = S(d->display_name); g.etag = S(d->etag);
+    for (int32_t i = 0; d->members && i < d->member_count; ++i) {
+        GroupMember m;
+        m.uri = S(d->members[i].uri); m.name = S(d->members[i].display_name);
+        if (d->members[i].role && *d->members[i].role) m.role = d->members[i].role;
+        m.priority = d->members[i].priority;
+        g.members.push_back(m);
+    }
+    if (d->session_type && *d->session_type) g.sessionType = d->session_type;
+    g.videoEnabled = d->video_enabled != 0; g.encryption = d->encryption != 0;
+    g.emergencyCall = d->emergency_call != 0; g.emergencyAlert = d->emergency_alert != 0;
+    g.allowSds = d->allow_sds != 0; g.allowFd = d->allow_fd != 0; g.requireAffiliation = d->require_affiliation != 0;
+    g.priority = d->priority; g.maxParticipants = d->max_participants;
+    g.orgCode = S(d->org_code); g.authorizedUser = S(d->authorized_user);
+    return g;
+}
+
 struct ProfileHolder {
     Profile cxx;
     std::vector<cimsue_service_profile_t>              svc;
     std::vector<std::vector<cimsue_service_endpoint_t>> eps;
     std::vector<std::vector<const char*>>              sec;
+    std::vector<cimsue_dispatch_member_t>              members;
+    std::vector<cimsue_dispatch_target_t>              targets;
     cimsue_profile_t out{};
 
     void build() {
@@ -339,6 +383,14 @@ struct ProfileHolder {
         out.dispatch.monitor_scope = C(d.monitorScope);
         out.dispatch.ptt_listen = C(d.pttListen);
         out.dispatch.listen_visibility = C(d.listenVisibility);
+        members.clear(); targets.clear();
+        for (const auto& m : d.members) members.push_back({C(m.userId), C(m.name), C(m.volteAor), C(m.pttId), C(m.extension)});
+        for (const auto& t : d.pttTargets) targets.push_back({C(t.id), C(t.uri), C(t.name)});
+        out.dispatch.members = members.empty() ? nullptr : members.data();
+        out.dispatch.member_count = (int32_t)members.size();
+        out.dispatch.ptt_targets = targets.empty() ? nullptr : targets.data();
+        out.dispatch.ptt_target_count = (int32_t)targets.size();
+        out.allow_group_creation = B(cxx.allowGroupCreation);
     }
 };
 
@@ -358,6 +410,7 @@ struct Scratch {
     AccountConfig                           acc;
     std::vector<const char*>                accSec;
     ProfileHolder                           profile;
+    GroupDocHolder                          groupDoc;
 };
 thread_local Scratch g_s;
 
@@ -440,6 +493,7 @@ struct cimsue_csc {
     std::vector<cimsue_group_summary_t> groupsC;
     XcapDoc                    doc;
     cimsue_xcap_doc_t          docC{};
+    GroupDocHolder             group;
 };
 
 namespace {
@@ -845,10 +899,51 @@ int32_t CIMSUE_CALL cimsue_csc_list_groups(cimsue_csc_t* c, const char* access_t
     Result r = c->cli->listGroups(S(access_token), S(user_uri), c->groups);
     c->groupsC.clear();
     for (const auto& g : c->groups)
-        c->groupsC.push_back({C(g.uri), C(g.displayName), C(g.etag), g.memberCount});
+        c->groupsC.push_back({C(g.uri), C(g.displayName), C(g.etag), g.memberCount, B(g.isOwner)});
     if (out) *out = c->groupsC.empty() ? nullptr : c->groupsC.data();
     if (!r.ok) { ret(r); return -1; }
     return (int32_t)c->groupsC.size();
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_get_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                 const char* group_uri, cimsue_group_doc_t* out) {
+    if (!c) return -1;
+    c->group.cxx = GroupDoc();
+    cimsue_status_t st = ret(c->cli->getGroup(S(access_token), S(user_uri), S(group_uri), c->group.cxx));
+    c->group.build();
+    if (out) *out = c->group.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_put_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                 const cimsue_group_doc_t* doc, const char* if_match, cimsue_group_doc_t* out) {
+    if (!c || !doc) return -1;
+    GroupDoc in = toCxx(doc);
+    c->group.cxx = GroupDoc();
+    cimsue_status_t st = ret(c->cli->putGroup(S(access_token), S(user_uri), in, S(if_match), c->group.cxx));
+    c->group.build();
+    if (out) *out = c->group.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_delete_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                    const char* group_uri) {
+    if (!c) return -1;
+    return ret(c->cli->deleteGroup(S(access_token), S(user_uri), S(group_uri)));
+}
+
+int32_t CIMSUE_CALL cimsue_group_doc_to_xml(const cimsue_group_doc_t* doc, char* out, int32_t cap) {
+    return copyOut(toCxx(doc).toXml(), out, cap);
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_group_doc_parse(const char* xml, cimsue_group_doc_t* out) {
+    g_s.groupDoc.cxx = GroupDoc();
+    std::string err;
+    bool ok = GroupDoc::parse(S(xml), g_s.groupDoc.cxx, &err);
+    g_s.groupDoc.build();
+    if (out) *out = g_s.groupDoc.out;
+    if (!ok) { g_lastError = err; return -1; }
+    return CIMSUE_OK;
 }
 
 cimsue_status_t CIMSUE_CALL cimsue_csc_xcap_get(cimsue_csc_t* c, const char* access_token, const char* path,
@@ -946,6 +1041,10 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_PROFILE:           return (int32_t)sizeof(cimsue_profile_t);
     case CIMSUE_STRUCT_GROUP_SUMMARY:     return (int32_t)sizeof(cimsue_group_summary_t);
     case CIMSUE_STRUCT_XCAP_DOC:          return (int32_t)sizeof(cimsue_xcap_doc_t);
+    case CIMSUE_STRUCT_DISPATCH_MEMBER:   return (int32_t)sizeof(cimsue_dispatch_member_t);
+    case CIMSUE_STRUCT_DISPATCH_TARGET:   return (int32_t)sizeof(cimsue_dispatch_target_t);
+    case CIMSUE_STRUCT_GROUP_MEMBER:      return (int32_t)sizeof(cimsue_group_member_t);
+    case CIMSUE_STRUCT_GROUP_DOC:         return (int32_t)sizeof(cimsue_group_doc_t);
     default:                              return -1;
     }
 }

@@ -148,7 +148,11 @@
 | 애드혹 | PTT 사용자 N명(주소록 ☐ 체크 → 칩, 최소 1) | ☐긴급 | `joinGroupCall(acc_ptt, "adhoc-<내 PTT 번호>-<epoch초>", {members: tel: URI[]})` → 카드 |
 
 - **PTT 주소록**: 세그먼트 [사용자|그룹]. 사용자 행 = 이름·PTT 번호·현재 상태(어느 채널에서 발언/참여 중 — 로스터에서 파생)·[사설]·[☐ 애드혹].
-  그룹 행 = 이름·멤버 수·[채널에 추가]·[메시지]. 검색 공통. 소스는 §13(GMS 그룹 문서 멤버 + 프로비저닝 → 사용자 목록 API 후속).
+  그룹 행 = 이름·멤버 수·[채널에 추가]·[메시지] + 내 소유 그룹(`is_owner`)이면 "내 그룹" 배지·[편집]·[삭제]. 탭 머리 = [↻ 새로고침]·[새 그룹](자격
+  `ptt.allowGroupCreation` 일 때만). [새 그룹]/[편집] → `GroupEditWindow`(이름·id·세션 종류·우선순위·최대 참가자·긴급/SDS/FD/영상/affiliation/암호화 +
+  멤버 = PTT 주소록에서 추가·의장 토글) → GMS XCAP PUT(편집은 `If-Match`, 412 = 재편집 안내) → 목록 재조회(`RefreshGroupsAsync` — 새 그룹
+  affiliation·conference 구독, 사라진 그룹 해제). [삭제] = 확인 후 XCAP DELETE. 서버발 변경은 `xcap-diff`(`sip:gms_psi@…`) NOTIFY 로 자동 재조회.
+  검색 공통. 소스는 §13(GMS 그룹 문서 멤버 + 프로비저닝 → 사용자 목록 API 후속).
 - 애드혹 임시 그룹 id 는 앱이 만든다(mcptt_emergency_modes.md §6 규약; `adhoc-`·`priv-` 는 편성 그룹 예약어). 채널 영속·affiliation·로스터 구독 대상이
   아니다.
 - 자격 선차단: CMS user-profile(`allow_adhoc_call`·`allow_emergency_private_call`·`PrivateCall/EmergencyCall/MCPTTPrivateRecipient`) 에 없으면 해당

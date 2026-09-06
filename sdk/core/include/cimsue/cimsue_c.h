@@ -478,15 +478,35 @@ typedef struct {
     int32_t                          max_payload_sds_cplane_bytes;
 } cimsue_service_profile_t;
 
-/** 관제 데스크(dispatch_center.md §8.4) — 없으면 present=0. */
+/** 관제 그룹원(dispatch members[]) — dialog 구독·그룹원 띠 대상. */
 typedef struct {
-    int32_t     present;
-    const char* group_id;
-    const char* group_name;
-    const char* pilot_id;
-    const char* monitor_scope;          /* none|own|listed|all */
-    const char* ptt_listen;
-    const char* listen_visibility;
+    const char* user_id;
+    const char* name;
+    const char* volte_aor;
+    const char* ptt_id;
+    const char* extension;
+} cimsue_dispatch_member_t;
+
+/** 청취 대상 PTT 그룹(dispatch pttTargets[]). */
+typedef struct {
+    const char* id;
+    const char* uri;
+    const char* name;
+} cimsue_dispatch_target_t;
+
+/** 관제 데스크(dispatch_center.md §8.4) — 없으면 present=0. members/ptt_targets 는 서버 미제공 시 빈 배열. */
+typedef struct {
+    int32_t                         present;
+    const char*                     group_id;
+    const char*                     group_name;
+    const char*                     pilot_id;
+    const char*                     monitor_scope;          /* none|own|listed|all */
+    const char*                     ptt_listen;
+    const char*                     listen_visibility;
+    const cimsue_dispatch_member_t* members;
+    int32_t                         member_count;
+    const cimsue_dispatch_target_t* ptt_targets;
+    int32_t                         ptt_target_count;
 } cimsue_dispatch_profile_t;
 
 typedef struct {
@@ -498,6 +518,7 @@ typedef struct {
     const cimsue_service_profile_t* services;
     int32_t                         service_count;
     cimsue_dispatch_profile_t       dispatch;
+    int32_t                         allow_group_creation;   /* GMS 그룹 생성 자격 */
 } cimsue_profile_t;
 
 typedef struct {
@@ -505,6 +526,7 @@ typedef struct {
     const char* display_name;
     const char* etag;
     int32_t     member_count;
+    int32_t     is_owner;               /* 토큰 주체가 authorized user(편집·삭제 가능) */
 } cimsue_group_summary_t;
 
 typedef struct {
@@ -512,6 +534,35 @@ typedef struct {
     const char* etag;
     int32_t     not_modified;
 } cimsue_xcap_doc_t;
+
+/** 그룹 문서 멤버 — role = chair | participant. */
+typedef struct {
+    const char* uri;
+    const char* display_name;
+    const char* role;
+    int32_t     priority;
+} cimsue_group_member_t;
+
+/** GMS 그룹 문서(csc.h GroupDoc) — GET 산출·PUT 입력 공용. 입력 시 문자열 NULL 은 빈 값, members NULL 은 멤버 없음. */
+typedef struct {
+    const char*                  uri;
+    const char*                  display_name;
+    const char*                  etag;                  /* 산출 전용(입력은 if_match 인자) */
+    const cimsue_group_member_t* members;
+    int32_t                      member_count;
+    const char*                  session_type;          /* prearranged | chat | broadcast (NULL = prearranged) */
+    int32_t                      video_enabled;
+    int32_t                      encryption;
+    int32_t                      emergency_call;
+    int32_t                      emergency_alert;
+    int32_t                      allow_sds;
+    int32_t                      allow_fd;
+    int32_t                      require_affiliation;
+    int32_t                      priority;
+    int32_t                      max_participants;      /* 0 = 미기재 */
+    const char*                  org_code;
+    const char*                  authorized_user;       /* 산출 전용 */
+} cimsue_group_doc_t;
 
 CIMSUE_API void CIMSUE_CALL cimsue_csc_endpoint_default(cimsue_csc_endpoint_t* ep);
 CIMSUE_API cimsue_csc_t* CIMSUE_CALL cimsue_csc_create(const cimsue_csc_endpoint_t* ep);
@@ -539,6 +590,20 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_service_config(cimsue_csc_
                                                                      const char* user_uri, const char* etag,
                                                                      cimsue_xcap_doc_t* out);
 
+/* ── GMS 그룹 관리(TS 24.481 XCAP PUT/DELETE — authorized user = 토큰 주체) ── */
+/** 그룹 문서 GET → *out (핸들 스냅샷). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                            const char* group_uri, cimsue_group_doc_t* out);
+/** 그룹 생성/수정 — doc 를 PUT. if_match(NULL 가능)로 조건부. 성공 시 *out = 서버 확정 문서(etag 포함). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_put_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                            const cimsue_group_doc_t* doc, const char* if_match,
+                                                            cimsue_group_doc_t* out);
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_delete_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                               const char* group_uri);
+/** 그룹 문서 ↔ XML (시험·캐시용). to_xml 은 문자열 산출 규약, parse 산출은 스레드별 스냅샷. */
+CIMSUE_API int32_t CIMSUE_CALL cimsue_group_doc_to_xml(const cimsue_group_doc_t* doc, char* out, int32_t cap);
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_group_doc_parse(const char* xml, cimsue_group_doc_t* out);
+
 /** /provisioning/me 응답 JSON → 프로파일 (시험용). 산출은 스레드별 스냅샷. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_parse_profile(const char* json, cimsue_profile_t* out);
 CIMSUE_API int32_t CIMSUE_CALL cimsue_csc_enc(const char* s, char* out, int32_t cap);
@@ -562,6 +627,7 @@ typedef enum {
     CIMSUE_STRUCT_SDS_MESSAGE, CIMSUE_STRUCT_STREAM_STATS, CIMSUE_STRUCT_AUDIO_DEVICE_INFO, CIMSUE_STRUCT_LISTENER,
     CIMSUE_STRUCT_CSC_ENDPOINT, CIMSUE_STRUCT_TOKEN_SET, CIMSUE_STRUCT_SERVICE_ENDPOINT, CIMSUE_STRUCT_SERVICE_PROFILE,
     CIMSUE_STRUCT_DISPATCH_PROFILE, CIMSUE_STRUCT_PROFILE, CIMSUE_STRUCT_GROUP_SUMMARY, CIMSUE_STRUCT_XCAP_DOC,
+    CIMSUE_STRUCT_DISPATCH_MEMBER, CIMSUE_STRUCT_DISPATCH_TARGET, CIMSUE_STRUCT_GROUP_MEMBER, CIMSUE_STRUCT_GROUP_DOC,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

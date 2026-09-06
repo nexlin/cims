@@ -242,3 +242,45 @@ TEST(CApi, CscHandle) {
     cimsue_csc_destroy(c);
     cimsue_csc_destroy(nullptr);
 }
+
+// ── 그룹 문서 평탄화 — C 입력(멤버 배열) → XML → C 산출 왕복, 새 구조체 id 등록 ──
+TEST(CApi, GroupDocRoundTripAndAbi) {
+    cimsue_group_member_t mem[2] = {{"tel:+82510001001", "관제1석", "chair", 7}, {"tel:+82510001002", nullptr, nullptr, 5}};
+    cimsue_group_doc_t d{};
+    d.uri = "sip:g002@ptt.example.org"; d.display_name = "음성그룹2"; d.members = mem; d.member_count = 2;
+    d.session_type = nullptr;                                  // NULL = prearranged
+    d.allow_sds = 1; d.emergency_call = 1; d.emergency_alert = 1; d.require_affiliation = 1; d.priority = 5; d.max_participants = 12;
+    int32_t need = cimsue_group_doc_to_xml(&d, nullptr, 0);
+    ASSERT_GT(need, 0);
+    std::string xml(need + 1, '\0');
+    cimsue_group_doc_to_xml(&d, &xml[0], need + 1);
+    xml.resize(need);
+    EXPECT_NE(xml.find("<mcpttgi:session-type>prearranged</mcpttgi:session-type>"), std::string::npos);
+    EXPECT_NE(xml.find("<entry uri=\"tel:+82510001002\">"), std::string::npos);
+
+    cimsue_group_doc_t out{};
+    ASSERT_EQ(cimsue_group_doc_parse(xml.c_str(), &out), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_STREQ(out.uri, "sip:g002@ptt.example.org");
+    EXPECT_STREQ(out.display_name, "음성그룹2");
+    ASSERT_EQ(out.member_count, 2);
+    EXPECT_STREQ(out.members[0].role, "chair"); EXPECT_EQ(out.members[0].priority, 7);
+    EXPECT_STREQ(out.members[1].role, "participant"); EXPECT_STREQ(out.members[1].display_name, "");
+    EXPECT_EQ(out.max_participants, 12); EXPECT_EQ(out.allow_sds, 1); EXPECT_EQ(out.allow_fd, 0);
+    EXPECT_NE(cimsue_group_doc_parse("<other/>", &out), CIMSUE_OK);
+    EXPECT_EQ(out.member_count, 0);
+
+    // 새 구조체는 ABI 표에 등록돼 있어야 한다(바인딩 단위시험이 대조)
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_GROUP_DOC), (int32_t)sizeof(cimsue_group_doc_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_GROUP_MEMBER), (int32_t)sizeof(cimsue_group_member_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_DISPATCH_MEMBER), (int32_t)sizeof(cimsue_dispatch_member_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_DISPATCH_TARGET), (int32_t)sizeof(cimsue_dispatch_target_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_COUNT_), -1);
+
+    // 프로파일 dispatch 확장 평탄화
+    cimsue_profile_t p{};
+    ASSERT_EQ(cimsue_csc_parse_profile(R"({"services":[],"ptt":{"allowGroupCreation":true},"dispatch":{"groupId":"dg-1",
+        "members":[{"userId":1,"name":"A","volteAor":"tel:+8231","extension":"1001"}],"pttTargets":[{"id":"g1","uri":"sip:g1@d","name":"G1"}]}})", &p), CIMSUE_OK);
+    EXPECT_EQ(p.allow_group_creation, 1);
+    ASSERT_EQ(p.dispatch.member_count, 1); EXPECT_STREQ(p.dispatch.members[0].extension, "1001");
+    ASSERT_EQ(p.dispatch.ptt_target_count, 1); EXPECT_STREQ(p.dispatch.ptt_targets[0].name, "G1");
+}

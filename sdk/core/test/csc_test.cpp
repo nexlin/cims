@@ -62,7 +62,114 @@ TEST(Csc, ParseProfile) {
     Profile none;
     ASSERT_TRUE(CscClient::parseProfile(R"({"services":[]})", none));
     EXPECT_FALSE(none.dispatch.present);
+    EXPECT_FALSE(none.allowGroupCreation);
+    EXPECT_TRUE(none.dispatch.members.empty());
     EXPECT_FALSE(CscClient::parseProfile("not json", none));
+}
+
+// dispatch 발견 확장(members[]/pttTargets[])·그룹 생성 자격 — 서버 요청서 §1.2·§2 계약. 없으면 빈 배열/false.
+TEST(Csc, ParseProfileDispatchDiscovery) {
+    static const char* kJson = R"({
+      "services": [ { "kind": "ptt", "sip": { "domain": "ptt.example.org" }, "account": { "msisdn": "+82500000001" } } ],
+      "ptt": { "allowGroupCreation": true },
+      "dispatch": { "groupId": "dg-1", "monitorScope": "listed", "pttListen": "listed",
+        "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" },
+                     { "userId": 13, "name": "빈항목" } ],
+        "pttTargets": [ { "id": "g002", "uri": "sip:g002@ptt.example.org", "name": "음성그룹2" }, { "uri": "sip:g003@ptt.example.org" } ] }
+    })";
+    Profile p;
+    ASSERT_TRUE(CscClient::parseProfile(kJson, p));
+    EXPECT_TRUE(p.allowGroupCreation);
+    ASSERT_EQ(p.dispatch.members.size(), 1u);                  // 주소가 하나도 없는 항목은 버린다
+    EXPECT_EQ(p.dispatch.members[0].userId, "12");
+    EXPECT_EQ(p.dispatch.members[0].volteAor, "tel:+82310001002");
+    EXPECT_EQ(p.dispatch.members[0].extension, "1002");
+    ASSERT_EQ(p.dispatch.pttTargets.size(), 2u);
+    EXPECT_EQ(p.dispatch.pttTargets[0].name, "음성그룹2");
+    EXPECT_EQ(p.dispatch.pttTargets[1].id, "g003");            // id 생략 → uri user part
+    Profile svc;                                               // 서비스 항목 표기(호환)도 인정
+    ASSERT_TRUE(CscClient::parseProfile(R"({"services":[{"kind":"ptt","allowGroupCreation":true}]})", svc));
+    EXPECT_TRUE(svc.allowGroupCreation);
+}
+
+// GMS 그룹 문서 — 서버(get_group_xml) 형식 파싱 + toXml 왕복. 요소는 접두사 무관 로컬 이름, 텍스트는 XML 이스케이프.
+TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
+    static const char* kXml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<group xmlns="urn:oma:xml:poc:list-service" xmlns:rl="urn:ietf:params:xml:ns:resource-lists" xmlns:cp="urn:ietf:params:xml:ns:common-policy"
+  xmlns:oxe="urn:oma:xml:xdm:extensions" xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0" xmlns:cims="urn:cims:groupinfo:1.0">
+  <list-service uri="sip:g002@ptt.example.org">
+    <display-name xml:lang="en-us">음성그룹 &amp; 2</display-name>
+    <list>
+      <entry uri="tel:+82510001001">
+        <rl:display-name>관제1석</rl:display-name>
+        <mcpttgi:on-network-required/>
+        <mcpttgi:participant-type>chair</mcpttgi:participant-type>
+        <mcpttgi:user-priority>7</mcpttgi:user-priority>
+        <cims:user-title>팀장</cims:user-title>
+      </entry>
+      <entry uri="tel:+82510001002">
+        <rl:display-name>관제2석</rl:display-name>
+        <mcpttgi:participant-type>participant</mcpttgi:participant-type>
+        <mcpttgi:user-priority>5</mcpttgi:user-priority>
+      </entry>
+    </list>
+    <mcpttgi:session-type>chat</mcpttgi:session-type>
+    <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
+    <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
+    <mcpttgi:mcptt-video>true</mcpttgi:mcptt-video>
+    <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
+    <mcpttgi:on-network-max-participant-count>20</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:on-network-require-affiliation>false</mcpttgi:on-network-require-affiliation>
+    <mcpttgi:on-network-hang-time>3</mcpttgi:on-network-hang-time>
+    <mcpttgi:on-network-group-priority>3</mcpttgi:on-network-group-priority>
+    <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
+    <cp:ruleset><cp:rule id="a7c"><cp:actions>
+      <mcpttgi:allow-MCPTT-emergency-call>false</mcpttgi:allow-MCPTT-emergency-call>
+      <mcpttgi:allow-imminent-peril-call>false</mcpttgi:allow-imminent-peril-call>
+      <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>
+    </cp:actions></cp:rule></cp:ruleset>
+    <oxe:supported-services><oxe:service enabler="example.mcptt"><oxe:group-media><mcpttgi:mcptt-speech/></oxe:group-media></oxe:service></oxe:supported-services>
+    <mcpttgi:org-code>ORG1</mcpttgi:org-code>
+    <mcpttgi:authorized-user>tel:+82510001001</mcpttgi:authorized-user>
+  </list-service>
+</group>)";
+    GroupDoc d; d.etag = "\"e1\"";
+    std::string err;
+    ASSERT_TRUE(GroupDoc::parse(kXml, d, &err)) << err;
+    EXPECT_EQ(d.uri, "sip:g002@ptt.example.org");
+    EXPECT_EQ(d.displayName, "음성그룹 & 2");
+    EXPECT_EQ(d.etag, "\"e1\"");                               // 호출자가 채운 etag 는 유지
+    ASSERT_EQ(d.members.size(), 2u);
+    EXPECT_EQ(d.members[0].uri, "tel:+82510001001");
+    EXPECT_EQ(d.members[0].name, "관제1석");
+    EXPECT_EQ(d.members[0].role, "chair");
+    EXPECT_EQ(d.members[0].priority, 7);
+    EXPECT_EQ(d.members[1].role, "participant");
+    EXPECT_EQ(d.sessionType, "chat");
+    EXPECT_TRUE(d.allowSds); EXPECT_FALSE(d.allowFd); EXPECT_TRUE(d.videoEnabled);
+    EXPECT_EQ(d.maxParticipants, 20); EXPECT_FALSE(d.requireAffiliation); EXPECT_EQ(d.priority, 3);
+    EXPECT_FALSE(d.encryption); EXPECT_FALSE(d.emergencyCall); EXPECT_TRUE(d.emergencyAlert);
+    EXPECT_EQ(d.orgCode, "ORG1");
+    EXPECT_EQ(d.authorizedUser, "tel:+82510001001");
+
+    // 왕복 — toXml 결과를 다시 파싱하면 같은 모델
+    GroupDoc back;
+    ASSERT_TRUE(GroupDoc::parse(d.toXml(), back, &err)) << err;
+    EXPECT_EQ(back.uri, d.uri); EXPECT_EQ(back.displayName, d.displayName);
+    ASSERT_EQ(back.members.size(), 2u);
+    EXPECT_EQ(back.members[0].role, "chair"); EXPECT_EQ(back.members[0].priority, 7); EXPECT_EQ(back.members[1].name, "관제2석");
+    EXPECT_EQ(back.sessionType, "chat"); EXPECT_TRUE(back.videoEnabled); EXPECT_EQ(back.maxParticipants, 20);
+    EXPECT_FALSE(back.emergencyCall); EXPECT_TRUE(back.emergencyAlert); EXPECT_EQ(back.orgCode, "ORG1");
+    EXPECT_NE(d.toXml().find("<display-name xml:lang=\"en-us\">음성그룹 &amp; 2</display-name>"), std::string::npos);
+
+    GroupDoc fresh;                                            // 최소 문서(멤버 없음·기본값) 도 유효
+    fresh.uri = "sip:g-new@ptt.example.org"; fresh.displayName = "새 그룹";
+    GroupDoc parsed;
+    ASSERT_TRUE(GroupDoc::parse(fresh.toXml(), parsed));
+    EXPECT_TRUE(parsed.members.empty()); EXPECT_EQ(parsed.sessionType, "prearranged"); EXPECT_EQ(parsed.maxParticipants, 0);
+    EXPECT_TRUE(parsed.requireAffiliation); EXPECT_TRUE(parsed.emergencyCall);
+    EXPECT_FALSE(GroupDoc::parse("<other/>", parsed, &err));
+    EXPECT_FALSE(err.empty());
 }
 
 TEST(DialogInfo, ParseAndJoinHeader) {

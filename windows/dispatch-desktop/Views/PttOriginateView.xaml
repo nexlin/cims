@@ -100,6 +100,14 @@
                 <ComboBox Style="{StaticResource FieldCombo}" Height="26" Width="160" ItemsSource="{Binding OrgChoices}" SelectedItem="{Binding OrgScope}" DisplayMemberPath="Text" ToolTip="조직 범위(하위 포함)" />
                 <TextBox Style="{StaticResource Field}" Height="26" Margin="6,0,0,0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="이름·번호 검색(조직 무시)" />
             </DockPanel>
+            <!-- 그룹 관리 줄 — [새 그룹] 은 생성 자격(ptt.allowGroupCreation) 있을 때만, [새로고침] = GMS 목록 재조회 -->
+            <DockPanel DockPanel.Dock="Top" Margin="10,4,10,4" Visibility="{Binding IsGroups, Converter={StaticResource BoolToVis}}">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource Btn.Sm}" Content="↻" ToolTip="그룹 목록 새로고침" Command="{Binding RefreshGroupsCommand}" IsEnabled="{Binding RefreshingGroups, Converter={StaticResource Not}}" Margin="0,0,4,0" />
+                    <Button Style="{StaticResource Btn.Sm.Pri}" Content="새 그룹" ToolTip="PTT 그룹 만들기(GMS)" Command="{Binding NewGroupCommand}" Visibility="{Binding CanCreateGroups, Converter={StaticResource BoolToVis}}" />
+                </StackPanel>
+                <TextBlock Style="{StaticResource Hint}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="멤버 그룹 · 내 그룹은 편집·삭제 가능" ToolTip="GMS 그룹 목록. 내가 만든(소유한) 그룹만 편집·삭제할 수 있습니다." />
+            </DockPanel>
             <Grid>
                 <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Source={StaticResource UsersView}}" Visibility="{Binding IsUsers, Converter={StaticResource BoolToVis}}">
                     <ListBox.GroupStyle>
@@ -177,10 +185,15 @@
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                         <Button Style="{StaticResource Btn.Xs}" Content="채널에 추가" Command="{Binding DataContext.AddChannelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
                                         <Button Style="{StaticResource Btn.Xs}" Content="메시지" Command="{Binding DataContext.MessageGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                                        <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding DataContext.EditGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="4,0,0,0"
+                                                Visibility="{Binding IsOwner, Converter={StaticResource BoolToVis}}" />
+                                        <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DataContext.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="4,0,0,0"
+                                                Visibility="{Binding IsOwner, Converter={StaticResource BoolToVis}}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="{Binding Name}" FontWeight="Medium" Margin="0,0,8,0" />
                                         <TextBlock Style="{StaticResource Muted}" FontSize="12"><Run Text="멤버 " /><Run Text="{Binding MemberCount, Mode=OneWay}" /></TextBlock>
+                                        <Border Style="{StaticResource Badge}" Margin="8,0,0,0" Visibility="{Binding IsOwner, Converter={StaticResource BoolToVis}}"><TextBlock Text="내 그룹" /></Border>
                                     </StackPanel>
                                 </DockPanel>
                             </Border>

@@ -31,6 +31,8 @@ public partial class MainWindow : Window
         vm.Desk.PresetApplyRequested += (_, name) => ApplyPreset(name);
         vm.Desk.PresetSaveRequested += (_, name) => SavePreset(name);
         vm.Desk.SettingsRequested += (_, _) => OpenSettings();
+        vm.GroupEditRequested += (_, g) => { var w = new GroupEditWindow(g) { Owner = this }; w.ShowDialog(); };
+        vm.GroupDeleteRequested += (_, g) => DeleteGroup(g);
         vm.Desk.LogoutRequested += (_, _) => { if (ConfirmLeave("로그아웃")) { _exitConfirmed = true; ((App)Application.Current).Logout(); } };
         vm.Desk.ExitRequested += (_, _) => { if (ConfirmLeave("종료")) { _exitConfirmed = true; ((App)Application.Current).ExitApp(); } };
 
@@ -180,6 +182,16 @@ public partial class MainWindow : Window
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) m |= CimsUe.Platform.HotKeyModifiers.Alt;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Windows)) m |= CimsUe.Platform.HotKeyModifiers.Win;
         return m == hk.Modifiers;
+    }
+
+    // ── PTT 그룹 삭제 확인 (GMS DELETE — 본인 소유만) ──
+    private async void DeleteGroup(GroupInfo g)
+    {
+        var live = _vm.Session.SessionOfGroup(g.Id) ?? _vm.Session.ListenOfGroup(g.Id);
+        string extra = live is not null ? "\n진행 중인 세션이 있습니다 — 삭제하면 서버가 세션을 정리합니다." : "";
+        if (MessageBox.Show(this, $"그룹 '{g.Name}' ({g.Id}) 을 삭제할까요?\n멤버 {g.MemberCount}명의 단말에서도 사라집니다.{extra}", "그룹 삭제",
+                            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        await _vm.Session.DeleteGroupAsync(g);
     }
 
     // ── 설정·종료 ──

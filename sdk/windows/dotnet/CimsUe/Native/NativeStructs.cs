@@ -322,6 +322,24 @@ internal unsafe struct cimsue_service_profile_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_dispatch_member_t
+{
+    public byte* user_id;
+    public byte* name;
+    public byte* volte_aor;
+    public byte* ptt_id;
+    public byte* extension;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_dispatch_target_t
+{
+    public byte* id;
+    public byte* uri;
+    public byte* name;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_dispatch_profile_t
 {
     public int present;
@@ -331,6 +349,10 @@ internal unsafe struct cimsue_dispatch_profile_t
     public byte* monitor_scope;
     public byte* ptt_listen;
     public byte* listen_visibility;
+    public cimsue_dispatch_member_t* members;
+    public int member_count;
+    public cimsue_dispatch_target_t* ptt_targets;
+    public int ptt_target_count;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -344,6 +366,7 @@ internal unsafe struct cimsue_profile_t
     public cimsue_service_profile_t* services;
     public int service_count;
     public cimsue_dispatch_profile_t dispatch;
+    public int allow_group_creation;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -353,6 +376,7 @@ internal unsafe struct cimsue_group_summary_t
     public byte* display_name;
     public byte* etag;
     public int member_count;
+    public int is_owner;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -363,11 +387,43 @@ internal unsafe struct cimsue_xcap_doc_t
     public int not_modified;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_group_member_t
+{
+    public byte* uri;
+    public byte* display_name;
+    public byte* role;
+    public int priority;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_group_doc_t
+{
+    public byte* uri;
+    public byte* display_name;
+    public byte* etag;
+    public cimsue_group_member_t* members;
+    public int member_count;
+    public byte* session_type;
+    public int video_enabled;
+    public int encryption;
+    public int emergency_call;
+    public int emergency_alert;
+    public int allow_sds;
+    public int allow_fd;
+    public int require_affiliation;
+    public int priority;
+    public int max_participants;
+    public byte* org_code;
+    public byte* authorized_user;
+}
+
 /// <summary>cimsue_struct_id_t — ABI 자기검사용 구조체 id (헤더와 같은 순서).</summary>
 internal enum cimsue_struct_id_t
 {
     ENGINE_CONFIG = 0, ACCOUNT_CONFIG, CALL_OPTIONS, GROUP_CALL_OPTIONS, HEADER, REG_INFO, MCPTT_INFO, MEDIA_SOURCE, CALL_INFO,
     TALKER, FLOOR_EVENT, FLOOR_INFO, REQUEST_RESULT, DIALOG_INFO, ROSTER_ENTRY, SDS_MESSAGE, STREAM_STATS, AUDIO_DEVICE_INFO,
     LISTENER, CSC_ENDPOINT, TOKEN_SET, SERVICE_ENDPOINT, SERVICE_PROFILE, DISPATCH_PROFILE, PROFILE, GROUP_SUMMARY, XCAP_DOC,
+    DISPATCH_MEMBER, DISPATCH_TARGET, GROUP_MEMBER, GROUP_DOC,
     COUNT_,
 }

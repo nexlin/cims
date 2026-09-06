@@ -64,6 +64,51 @@ public class CscTests
     }
 
     [Fact]
+    public void ParseProfileDispatchDiscoveryAndGroupCreation()
+    {
+        var r = CscClient.ParseProfile("""
+        { "services": [], "ptt": { "allowGroupCreation": true },
+          "dispatch": { "groupId": "dg-1", "monitorScope": "listed", "pttListen": "listed",
+            "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" } ],
+            "pttTargets": [ { "id": "g002", "uri": "sip:g002@ptt.example.org", "name": "음성그룹2" } ] } }
+        """);
+        Assert.True(r.Ok, r.Reason);
+        Assert.True(r.Value!.AllowGroupCreation);
+        var m = Assert.Single(r.Value.Dispatch.Members);
+        Assert.Equal("1002", m.Extension); Assert.Equal("관제2석", m.Name); Assert.Equal("tel:+82310001002", m.VolteAor);
+        var t = Assert.Single(r.Value.Dispatch.PttTargets);
+        Assert.Equal("g002", t.Id); Assert.Equal("음성그룹2", t.Name);
+        var old = CscClient.ParseProfile(ProfileJson).Value!;          // 확장 없는 응답 = 빈 목록·false
+        Assert.Empty(old.Dispatch.Members); Assert.Empty(old.Dispatch.PttTargets); Assert.False(old.AllowGroupCreation);
+    }
+
+    [Fact]
+    public void GroupDocRoundTripsThroughCore()
+    {
+        var doc = new GroupDoc
+        {
+            Uri = "sip:g-1234abcd@ptt.example.org", DisplayName = "순찰 & 지원", SessionType = "chat", VideoEnabled = true,
+            MaxParticipants = 16, RequireAffiliation = false, EmergencyCall = false, OrgCode = "ORG1",
+            Members = { new GroupMember { Uri = "tel:+82510001001", Name = "관제1석", Role = "chair", Priority = 7 },
+                        new GroupMember { Uri = "tel:+82510001002" } },
+        };
+        string xml = doc.ToXml();
+        Assert.Contains("<list-service uri=\"sip:g-1234abcd@ptt.example.org\">", xml);
+        Assert.Contains("순찰 &amp; 지원", xml);
+        Assert.Contains("<mcpttgi:session-type>chat</mcpttgi:session-type>", xml);
+        var back = GroupDoc.Parse(xml);
+        Assert.True(back.Ok, back.Reason);
+        var b = back.Value!;
+        Assert.Equal(doc.Uri, b.Uri); Assert.Equal("순찰 & 지원", b.DisplayName); Assert.Equal("chat", b.SessionType);
+        Assert.True(b.VideoEnabled); Assert.Equal(16, b.MaxParticipants); Assert.False(b.RequireAffiliation); Assert.False(b.EmergencyCall);
+        Assert.True(b.EmergencyAlert); Assert.Equal("ORG1", b.OrgCode);
+        Assert.Equal(2, b.Members.Count);
+        Assert.Equal("chair", b.Members[0].Role); Assert.Equal(7, b.Members[0].Priority); Assert.Equal("관제1석", b.Members[0].Name);
+        Assert.Equal("participant", b.Members[1].Role); Assert.Equal("", b.Members[1].Name);
+        Assert.False(GroupDoc.Parse("<other/>").Ok);
+    }
+
+    [Fact]
     public void ParseProfileFailureCarriesReason()
     {
         var r = CscClient.ParseProfile("{not json");

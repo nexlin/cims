@@ -73,6 +73,9 @@ struct Opts {
     // CSC
     std::string cscHost; int cscPort = 4430; std::string user, pw, cscCaFile, fromProfile;
     bool portSet = false, transportSet = false;
+    // GMS 그룹 관리(group-put)
+    std::string groupName;
+    std::vector<std::string> groupMembers;
 };
 
 void usage() {
@@ -85,7 +88,8 @@ void usage() {
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency]\n"
         "  sds GROUP TEXT | sds-recv [--duration S] | login\n"
-        "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n");
+        "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
+        "  groups | group-get URI | group-put URI --name N [--members tel:..,tel:..] | group-delete URI   (--csc-host --user --pw)\n");
 }
 
 bool parse(int argc, char** argv, Opts& o) {
@@ -131,6 +135,8 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--pw", [&](const std::string& v) { o.pw = v; })) continue;
             if (opt("--csc-ca", [&](const std::string& v) { o.cscCaFile = v; })) continue;
             if (opt("--from-profile", [&](const std::string& v) { o.fromProfile = v; })) continue;
+            if (opt("--name", [&](const std::string& v) { o.groupName = v; })) continue;
+            if (opt("--members", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.groupMembers.push_back(m); })) continue;
         } catch (std::exception& e) { std::fprintf(stderr, "%s\n", e.what()); return false; }
         if (a == "--no-tls-verify") o.tlsVerify = false;
         else if (a == "--json") o.json = true;
@@ -143,12 +149,13 @@ bool parse(int argc, char** argv, Opts& o) {
     }
     if (pos.empty()) return false;
     o.cmd = pos[0];
-    static const char* needTarget[] = {"call", "group-call", "dialog-watch", "join", "transfer"};
+    static const char* needTarget[] = {"call", "group-call", "dialog-watch", "join", "transfer", "group-get", "group-put", "group-delete"};
     for (auto n : needTarget) if (o.cmd == n) { if (pos.size() < 2) return false; o.target = pos[1]; }
     if (o.cmd == "sds") { if (pos.size() < 3) return false; o.target = pos[1]; for (size_t i = 2; i < pos.size(); ++i) o.text += (i > 2 ? " " : "") + pos[i]; }
     if (o.cmd == "pickup") { if (pos.size() >= 2) o.target = pos[1]; if (o.code.empty()) return false; }
     if (o.cmd == "transfer" && o.transferTo.empty()) return false;
-    static const char* known[] = {"register", "call", "answer", "group-call", "sds", "sds-recv", "login", "dialog-watch", "join", "pickup", "transfer"};
+    static const char* known[] = {"register", "call", "answer", "group-call", "sds", "sds-recv", "login", "dialog-watch", "join", "pickup", "transfer",
+                                  "groups", "group-get", "group-put", "group-delete"};
     bool ok = false;
     for (auto k : known) if (o.cmd == k) ok = true;
     return ok;
@@ -326,11 +333,66 @@ int main(int argc, char** argv) {
     if (!parse(argc, argv, o)) { usage(); return 2; }
 
     // ── CSC 로그인 / 프로파일 (login 명령 또는 --from-profile) ──
-    if (o.cmd == "login" || !o.fromProfile.empty()) {
+    const bool groupCmd = o.cmd == "groups" || o.cmd == "group-get" || o.cmd == "group-put" || o.cmd == "group-delete";
+    if (o.cmd == "login" || groupCmd || !o.fromProfile.empty()) {
         if (o.cscHost.empty() || o.user.empty()) { std::fprintf(stderr, "need --csc-host --user --pw\n"); return 2; }
         Profile prof; TokenSet tok;
         int rc = cscLogin(o, prof, tok);
         if (rc) return rc;
+        if (groupCmd) {
+            // GMS 그룹 관리(TS 24.481 XCAP) — 자기 트리(ptt 서비스 mcptt_id)에서 목록/문서/PUT/DELETE. 출력은 JSON 한 줄.
+            const ServiceProfile* ptt = prof.service("ptt");
+            std::string me = ptt ? (ptt->mcpttId.empty() ? "tel:" + ptt->msisdn : ptt->mcpttId) : "";
+            if (me.empty()) { std::fprintf(stderr, "[cimsue-cli] profile has no ptt service\n"); return 3; }
+            CscEndpoint ep; ep.host = o.cscHost; ep.port = o.cscPort; ep.verifyServer = o.tlsVerify;
+            if (!o.cscCaFile.empty()) ep.caPem = readFile(o.cscCaFile); else if (!o.tlsCaFile.empty()) ep.caPem = readFile(o.tlsCaFile);
+            CscClient csc(ep);
+            auto printDoc = [&](const char* cmd, const GroupDoc& d) {
+                std::string mem;
+                for (auto& m : d.members) mem += std::string(mem.empty() ? "" : ",") + "{\"uri\":\"" + jsonEsc(m.uri) + "\",\"name\":\"" + jsonEsc(m.name) + "\",\"role\":\"" + m.role + "\"}";
+                std::printf("{\"cmd\":\"%s\",\"outcome\":\"ok\",\"uri\":\"%s\",\"name\":\"%s\",\"etag\":\"%s\",\"session_type\":\"%s\",\"authorized_user\":\"%s\",\"members\":[%s]}\n",
+                            cmd, jsonEsc(d.uri).c_str(), jsonEsc(d.displayName).c_str(), jsonEsc(d.etag).c_str(), d.sessionType.c_str(),
+                            jsonEsc(d.authorizedUser).c_str(), mem.c_str());
+            };
+            Result r;
+            if (o.cmd == "groups") {
+                std::vector<GroupSummary> gs;
+                r = csc.listGroups(tok.accessToken, me, gs);
+                if (r.ok) {
+                    std::string items;
+                    for (auto& g : gs) items += std::string(items.empty() ? "" : ",") + "{\"uri\":\"" + jsonEsc(g.uri) + "\",\"name\":\"" + jsonEsc(g.displayName) +
+                                                "\",\"members\":" + std::to_string(g.memberCount) + ",\"owner\":" + (g.isOwner ? "true" : "false") + "}";
+                    std::printf("{\"cmd\":\"groups\",\"outcome\":\"ok\",\"user\":\"%s\",\"allow_group_creation\":%s,\"groups\":[%s]}\n",
+                                jsonEsc(me).c_str(), prof.allowGroupCreation ? "true" : "false", items.c_str());
+                }
+            } else if (o.cmd == "group-get") {
+                GroupDoc d;
+                r = csc.getGroup(tok.accessToken, me, o.target, d);
+                if (r.ok) printDoc("group-get", d);
+            } else if (o.cmd == "group-put") {
+                GroupDoc d, out;
+                r = csc.getGroup(tok.accessToken, me, o.target, d);           // 기존 문서면 수정(etag 조건부), 없으면 신규
+                std::string ifMatch = r.ok ? d.etag : std::string();
+                if (!r.ok) { d = GroupDoc(); d.uri = o.target; }
+                if (!o.groupName.empty()) d.displayName = o.groupName;
+                if (d.displayName.empty()) d.displayName = o.target;
+                if (!o.groupMembers.empty()) {
+                    d.members.clear();
+                    for (auto& m : o.groupMembers) { GroupMember gm; gm.uri = m; d.members.push_back(gm); }
+                }
+                if (d.members.empty()) { GroupMember gm; gm.uri = me; gm.role = "chair"; d.members.push_back(gm); }
+                r = csc.putGroup(tok.accessToken, me, d, ifMatch, out);
+                if (r.ok) printDoc("group-put", out);
+            } else {
+                r = csc.deleteGroup(tok.accessToken, me, o.target);
+                if (r.ok) std::printf("{\"cmd\":\"group-delete\",\"outcome\":\"ok\",\"uri\":\"%s\"}\n", jsonEsc(o.target).c_str());
+            }
+            if (!r.ok) {
+                std::printf("{\"cmd\":\"%s\",\"outcome\":\"failed\",\"code\":%d,\"reason\":\"%s\"}\n", o.cmd.c_str(), r.code, jsonEsc(r.reason).c_str());
+                return r.code == 403 ? 8 : 3;
+            }
+            return 0;
+        }
         if (o.cmd == "login") {
             std::string svcs;
             for (auto& s : prof.services)

@@ -47,13 +47,20 @@ struct ServiceProfile {
     CIMSUE_API AccountConfig toAccount(const std::string& loginPw = std::string()) const;
 };
 
-/** 관제 데스크(dispatch_center.md §8.4) — 없으면 present=false. */
+/** 관제 그룹원(dispatch 블록 members[]) — dialog 구독·그룹원 상태 띠 대상. */
+struct DispatchMember { std::string userId, name, volteAor, pttId, extension; };
+/** 청취 대상 PTT 그룹(dispatch 블록 pttTargets[] — 서버가 ptt_listen 범위를 해석한 결과). */
+struct DispatchTarget { std::string id, uri, name; };
+
+/** 관제 데스크(dispatch_center.md §8.4) — 없으면 present=false. members/pttTargets 는 서버가 주지 않으면 빈 배열. */
 struct DispatchProfile {
     bool present = false;
     std::string groupId, groupName, pilotId;
     std::string monitorScope = "none";    // none|own|listed|all
     std::string pttListen = "none";
     std::string listenVisibility = "hidden";
+    std::vector<DispatchMember> members;
+    std::vector<DispatchTarget> pttTargets;
 };
 
 struct Profile {
@@ -61,11 +68,40 @@ struct Profile {
     std::string cscHost; int cscPort = 4430;
     std::vector<ServiceProfile> services;
     DispatchProfile dispatch;
+    /** GMS 그룹 생성 자격(ptt_user_profile.allow_group_creation — `ptt.allowGroupCreation`). */
+    bool allowGroupCreation = false;
     CIMSUE_API const ServiceProfile* service(const std::string& kind) const;
 };
 
-struct GroupSummary { std::string uri, displayName, etag; int memberCount = -1; };
+/** GMS 목록 항목. isOwner = 토큰 주체가 authorized user(편집·삭제 가능). */
+struct GroupSummary { std::string uri, displayName, etag; int memberCount = -1; bool isOwner = false; };
 struct XcapDoc { std::string body, etag; bool notModified = false; };
+
+/** 그룹 문서 멤버(list/entry). role = chair | participant (mcpttgi:participant-type). */
+struct GroupMember { std::string uri, name; std::string role = "participant"; int priority = 5; };
+
+/** GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi 확장) — GET 응답·PUT 본문의 단일 모델.
+ *  서버가 내는 문서와 같은 요소만 다룬다(mcptt_api.md §2). 모르는 요소는 파싱에서 무시, 직렬화에는 넣지 않는다. */
+struct GroupDoc {
+    std::string uri, displayName, etag;
+    std::vector<GroupMember> members;
+    std::string sessionType = "prearranged";   // prearranged | chat | broadcast (mcpttgi:session-type)
+    bool videoEnabled = false;
+    bool encryption = false;
+    bool emergencyCall = true;                 // allow-MCPTT-emergency-call (imminent-peril 은 서버가 미러)
+    bool emergencyAlert = true;
+    bool allowSds = true;
+    bool allowFd = false;
+    bool requireAffiliation = true;
+    int priority = 5;                          // on-network-group-priority
+    int maxParticipants = 0;                   // on-network-max-participant-count (0 = 미기재)
+    std::string orgCode, authorizedUser;       // authorized-user 는 서버 산출(읽기 전용)
+    /** 문서 → XML(PUT 본문). */
+    CIMSUE_API std::string toXml() const;
+    /** XML → 문서. 실패면 false(err 에 사유). */
+    CIMSUE_API static bool parse(const std::string& xml, GroupDoc& out, std::string* err = nullptr);
+};
+constexpr const char* kCtGroupDoc = "application/vnd.oma.poc.groups+xml";
 
 class CIMSUE_API CscClient {
 public:
@@ -89,6 +125,19 @@ public:
     Result getServiceConfig(const std::string& accessToken, const std::string& userUri, const std::string& etag, XcapDoc& out) {
         return xcapGet(accessToken, "/org.3gpp.mcptt.service-config/users/" + enc(userUri) + "/service-config",
                        "application/vnd.3gpp.mcptt-service-config+xml", etag, out);
+    }
+
+    // ── GMS 그룹 관리(TS 24.481 — 그룹 생성·수정·삭제 주체 = authorized user, XCAP PUT/DELETE, PKCE 토큰) ──
+    /** 그룹 문서 GET → GroupDoc(etag 포함). userUri 는 자기 XCAP 트리(토큰 mcptt_id). */
+    Result getGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri, GroupDoc& out);
+    /** 그룹 생성(신규 uri)/수정(기존 uri) — PUT 본문 = doc.toXml(). ifMatch 가 비지 않으면 조건부(412 = 충돌).
+     *  성공 시 out = 서버가 확정한 문서(etag·authorizedUser 채워짐). 실패 code = HTTP(403 자격/소유, 409 타인 소유, 412). */
+    Result putGroup(const std::string& accessToken, const std::string& userUri, const GroupDoc& doc, const std::string& ifMatch, GroupDoc& out);
+    /** 그룹 삭제 — 본인 소유만(403). */
+    Result deleteGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri);
+    /** XCAP 그룹 문서 경로(/org.openmobilealliance.groups/users/{user}/{group}). */
+    static std::string groupPath(const std::string& userUri, const std::string& groupUri) {
+        return "/org.openmobilealliance.groups/users/" + enc(userUri) + "/" + enc(groupUri);
     }
 
     /** /provisioning/me 응답 JSON → Profile (시험용 공개). */

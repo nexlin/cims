@@ -35,6 +35,10 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.PROFILE, sizeof(cimsue_profile_t) },
         new object[] { cimsue_struct_id_t.GROUP_SUMMARY, sizeof(cimsue_group_summary_t) },
         new object[] { cimsue_struct_id_t.XCAP_DOC, sizeof(cimsue_xcap_doc_t) },
+        new object[] { cimsue_struct_id_t.DISPATCH_MEMBER, sizeof(cimsue_dispatch_member_t) },
+        new object[] { cimsue_struct_id_t.DISPATCH_TARGET, sizeof(cimsue_dispatch_target_t) },
+        new object[] { cimsue_struct_id_t.GROUP_MEMBER, sizeof(cimsue_group_member_t) },
+        new object[] { cimsue_struct_id_t.GROUP_DOC, sizeof(cimsue_group_doc_t) },
     };
 
     [Theory]

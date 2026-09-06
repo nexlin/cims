@@ -34,22 +34,69 @@ public sealed record ServiceProfile(
     public AccountConfig ToAccountConfig(string? loginPw = null) => CscClient.ToAccountConfig(this, loginPw);
 }
 
-/// <summary>관제 데스크(dispatch_center.md §8.4) — 없으면 Present=false. MonitorScope·PttListen = none|own|listed|all, ListenVisibility = hidden|visible.</summary>
+/// <summary>관제 그룹원(dispatch members[]) — dialog 구독·그룹원 띠 대상.</summary>
+public sealed record DispatchMember(string UserId, string Name, string VolteAor, string PttId, string Extension);
+/// <summary>청취 대상 PTT 그룹(dispatch pttTargets[] — 서버가 ptt_listen 범위를 해석한 결과).</summary>
+public sealed record DispatchTarget(string Id, string Uri, string Name);
+
+/// <summary>관제 데스크(dispatch_center.md §8.4) — 없으면 Present=false. MonitorScope·PttListen = none|own|listed|all, ListenVisibility = hidden|visible.
+/// Members/PttTargets 는 서버가 주지 않으면 빈 목록.</summary>
 public sealed record DispatchProfile(bool Present, string GroupId, string GroupName, string PilotId,
-                                     string MonitorScope, string PttListen, string ListenVisibility)
+                                     string MonitorScope, string PttListen, string ListenVisibility,
+                                     IReadOnlyList<DispatchMember> Members, IReadOnlyList<DispatchTarget> PttTargets)
 {
-    public static DispatchProfile None { get; } = new(false, "", "", "", "none", "none", "hidden");
+    public static DispatchProfile None { get; } = new(false, "", "", "", "none", "none", "hidden", Array.Empty<DispatchMember>(), Array.Empty<DispatchTarget>());
 }
 
 public sealed record Profile(string DisplayName, string LoginId, string CountryCode, string CscHost, int CscPort,
-                             IReadOnlyList<ServiceProfile> Services, DispatchProfile Dispatch)
+                             IReadOnlyList<ServiceProfile> Services, DispatchProfile Dispatch, bool AllowGroupCreation)
 {
     /// <summary>kind 로 서비스 찾기 — 없으면 null.</summary>
     public ServiceProfile? Service(string kind) => Services.FirstOrDefault(s => s.Kind == kind);
 }
 
-public sealed record GroupSummary(string Uri, string DisplayName, string ETag, int MemberCount);
+/// <summary>GMS 목록 항목. IsOwner = 토큰 주체가 authorized user(편집·삭제 가능).</summary>
+public sealed record GroupSummary(string Uri, string DisplayName, string ETag, int MemberCount, bool IsOwner);
 public sealed record XcapDoc(string Body, string ETag, bool NotModified);
+
+/// <summary>그룹 문서 멤버 — Role = chair | participant.</summary>
+public sealed class GroupMember
+{
+    public string Uri { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Role { get; set; } = "participant";
+    public int Priority { get; set; } = 5;
+}
+
+/// <summary>GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 산출·PUT 입력 공용 모델(cimsue/csc.h GroupDoc 1:1). 편집 폼이 그대로 쓰도록 가변.</summary>
+public sealed class GroupDoc
+{
+    public string Uri { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    /// <summary>서버 산출(GET/PUT 응답 ETag). 수정 PUT 의 If-Match 로 쓴다.</summary>
+    public string ETag { get; set; } = "";
+    public List<GroupMember> Members { get; set; } = new();
+    /// <summary>prearranged | chat | broadcast</summary>
+    public string SessionType { get; set; } = "prearranged";
+    public bool VideoEnabled { get; set; }
+    public bool Encryption { get; set; }
+    public bool EmergencyCall { get; set; } = true;
+    public bool EmergencyAlert { get; set; } = true;
+    public bool AllowSds { get; set; } = true;
+    public bool AllowFd { get; set; }
+    public bool RequireAffiliation { get; set; } = true;
+    public int Priority { get; set; } = 5;
+    /// <summary>0 = 미기재.</summary>
+    public int MaxParticipants { get; set; }
+    public string OrgCode { get; set; } = "";
+    /// <summary>서버 산출 — 그룹 소유자(authorized user).</summary>
+    public string AuthorizedUser { get; set; } = "";
+
+    /// <summary>문서 → XML(PUT 본문) — 직렬화 규칙은 코어.</summary>
+    public string ToXml() => CscClient.GroupDocToXml(this);
+    /// <summary>XML → 문서(코어 파서). 실패면 Reason.</summary>
+    public static Result<GroupDoc> Parse(string xml) => CscClient.ParseGroupDoc(xml);
+}
 
 public sealed unsafe class CscClient : IDisposable
 {
@@ -125,9 +172,64 @@ public sealed unsafe class CscClient : IDisposable
             if (n < 0) return Result<IReadOnlyList<GroupSummary>>.Fail(-1, Engine.LastError());
             var list = new GroupSummary[n];
             for (int i = 0; i < n; ++i)
-                list[i] = new GroupSummary(Utf8.Str(g[i].uri), Utf8.Str(g[i].display_name), Utf8.Str(g[i].etag), g[i].member_count);
+                list[i] = new GroupSummary(Utf8.Str(g[i].uri), Utf8.Str(g[i].display_name), Utf8.Str(g[i].etag), g[i].member_count, g[i].is_owner != 0);
             return Result<IReadOnlyList<GroupSummary>>.Success(list);
         }
+    }
+
+    // ── GMS 그룹 관리(TS 24.481 XCAP PUT/DELETE — authorized user = 토큰 주체, PKCE 토큰) ──
+    /// <summary>그룹 문서 GET(ETag 포함). userUri = 자기 XCAP 트리(mcptt_id).</summary>
+    public Result<GroupDoc> GetGroup(string accessToken, string userUri, string groupUri)
+    {
+        lock (_gate)
+        {
+            cimsue_group_doc_t d;
+            int st = cimsue_csc_get_group(Handle, accessToken, userUri, groupUri, &d);
+            return st == 0 ? Result<GroupDoc>.Success(ToManaged(&d)) : Result<GroupDoc>.Fail(st, Engine.LastError());
+        }
+    }
+
+    /// <summary>그룹 생성(신규 Uri)/수정(기존 Uri) — ifMatch 로 조건부(412 = 충돌). 성공 시 서버가 확정한 문서(ETag·AuthorizedUser).
+    /// 실패 Code = HTTP(403 자격/소유, 409 타인 소유, 412).</summary>
+    public Result<GroupDoc> PutGroup(string accessToken, string userUri, GroupDoc doc, string? ifMatch = null)
+    {
+        ArgumentNullException.ThrowIfNull(doc);
+        lock (_gate)
+        {
+            using var s = new NativeStrings();
+            cimsue_group_doc_t n = ToNative(doc, s);
+            cimsue_group_doc_t d;
+            int st = cimsue_csc_put_group(Handle, accessToken, userUri, &n, ifMatch, &d);
+            return st == 0 ? Result<GroupDoc>.Success(ToManaged(&d)) : Result<GroupDoc>.Fail(st, Engine.LastError());
+        }
+    }
+
+    /// <summary>그룹 삭제 — 본인 소유만(403).</summary>
+    public Result DeleteGroup(string accessToken, string userUri, string groupUri)
+    {
+        lock (_gate) return Engine.Status(cimsue_csc_delete_group(Handle, accessToken, userUri, groupUri));
+    }
+
+    public Task<Result<GroupDoc>> GetGroupAsync(string accessToken, string userUri, string groupUri, CancellationToken ct = default) =>
+        Task.Run(() => GetGroup(accessToken, userUri, groupUri), ct);
+    public Task<Result<GroupDoc>> PutGroupAsync(string accessToken, string userUri, GroupDoc doc, string? ifMatch = null, CancellationToken ct = default) =>
+        Task.Run(() => PutGroup(accessToken, userUri, doc, ifMatch), ct);
+    public Task<Result> DeleteGroupAsync(string accessToken, string userUri, string groupUri, CancellationToken ct = default) =>
+        Task.Run(() => DeleteGroup(accessToken, userUri, groupUri), ct);
+
+    internal static string GroupDocToXml(GroupDoc doc)
+    {
+        using var s = new NativeStrings();
+        var n = (cimsue_group_doc_t*)s.Alloc(sizeof(cimsue_group_doc_t));   // 람다가 지역 주소를 못 잡으므로 임시 버퍼에 둔다
+        *n = ToNative(doc, s);
+        return Utf8.Call((buf, cap) => cimsue_group_doc_to_xml(n, buf, cap));
+    }
+
+    internal static Result<GroupDoc> ParseGroupDoc(string xml)
+    {
+        cimsue_group_doc_t d;
+        int st = cimsue_group_doc_parse(xml, &d);
+        return st == 0 ? Result<GroupDoc>.Success(ToManaged(&d)) : Result<GroupDoc>.Fail(st, Engine.LastError());
     }
 
     /// <summary>XCAP GET — ifNoneMatch 로 304 캐시(NotModified).</summary>
@@ -218,10 +320,62 @@ public sealed unsafe class CscClient : IDisposable
         var svc = new ServiceProfile[Math.Max(0, p->service_count)];
         for (int i = 0; i < svc.Length; ++i) svc[i] = ToManaged(&p->services[i]);
         ref cimsue_dispatch_profile_t d = ref p->dispatch;
+        var members = new DispatchMember[Math.Max(0, d.member_count)];
+        for (int i = 0; i < members.Length; ++i)
+            members[i] = new DispatchMember(Utf8.Str(d.members[i].user_id), Utf8.Str(d.members[i].name), Utf8.Str(d.members[i].volte_aor),
+                                            Utf8.Str(d.members[i].ptt_id), Utf8.Str(d.members[i].extension));
+        var targets = new DispatchTarget[Math.Max(0, d.ptt_target_count)];
+        for (int i = 0; i < targets.Length; ++i)
+            targets[i] = new DispatchTarget(Utf8.Str(d.ptt_targets[i].id), Utf8.Str(d.ptt_targets[i].uri), Utf8.Str(d.ptt_targets[i].name));
         var dispatch = new DispatchProfile(d.present != 0, Utf8.Str(d.group_id), Utf8.Str(d.group_name), Utf8.Str(d.pilot_id),
-                                           Utf8.Str(d.monitor_scope), Utf8.Str(d.ptt_listen), Utf8.Str(d.listen_visibility));
+                                           Utf8.Str(d.monitor_scope), Utf8.Str(d.ptt_listen), Utf8.Str(d.listen_visibility), members, targets);
         return new Profile(Utf8.Str(p->display_name), Utf8.Str(p->login_id), Utf8.Str(p->country_code), Utf8.Str(p->csc_host),
-                           p->csc_port, svc, dispatch);
+                           p->csc_port, svc, dispatch, p->allow_group_creation != 0);
+    }
+
+    private static GroupDoc ToManaged(cimsue_group_doc_t* d)
+    {
+        var g = new GroupDoc
+        {
+            Uri = Utf8.Str(d->uri), DisplayName = Utf8.Str(d->display_name), ETag = Utf8.Str(d->etag),
+            SessionType = Utf8.Str(d->session_type) is { Length: > 0 } st ? st : "prearranged",
+            VideoEnabled = d->video_enabled != 0, Encryption = d->encryption != 0,
+            EmergencyCall = d->emergency_call != 0, EmergencyAlert = d->emergency_alert != 0,
+            AllowSds = d->allow_sds != 0, AllowFd = d->allow_fd != 0, RequireAffiliation = d->require_affiliation != 0,
+            Priority = d->priority, MaxParticipants = d->max_participants,
+            OrgCode = Utf8.Str(d->org_code), AuthorizedUser = Utf8.Str(d->authorized_user),
+        };
+        for (int i = 0; i < d->member_count; ++i)
+            g.Members.Add(new GroupMember
+            {
+                Uri = Utf8.Str(d->members[i].uri), Name = Utf8.Str(d->members[i].display_name),
+                Role = Utf8.Str(d->members[i].role) is { Length: > 0 } r ? r : "participant", Priority = d->members[i].priority,
+            });
+        return g;
+    }
+
+    private static cimsue_group_doc_t ToNative(GroupDoc g, NativeStrings s)
+    {
+        cimsue_group_doc_t n = default;
+        n.uri = s.Add(g.Uri); n.display_name = s.Add(g.DisplayName); n.etag = s.Add(g.ETag);
+        n.member_count = g.Members.Count;
+        if (n.member_count > 0)
+        {
+            n.members = (cimsue_group_member_t*)s.Alloc(sizeof(cimsue_group_member_t) * n.member_count);
+            for (int i = 0; i < n.member_count; ++i)
+            {
+                var m = g.Members[i];
+                n.members[i].uri = s.Add(m.Uri); n.members[i].display_name = s.Add(m.Name);
+                n.members[i].role = s.Add(m.Role); n.members[i].priority = m.Priority;
+            }
+        }
+        n.session_type = s.Add(g.SessionType);
+        n.video_enabled = Engine.B(g.VideoEnabled); n.encryption = Engine.B(g.Encryption);
+        n.emergency_call = Engine.B(g.EmergencyCall); n.emergency_alert = Engine.B(g.EmergencyAlert);
+        n.allow_sds = Engine.B(g.AllowSds); n.allow_fd = Engine.B(g.AllowFd); n.require_affiliation = Engine.B(g.RequireAffiliation);
+        n.priority = g.Priority; n.max_participants = g.MaxParticipants;
+        n.org_code = s.Add(g.OrgCode); n.authorized_user = s.Add(g.AuthorizedUser);
+        return n;
     }
 
     private static cimsue_service_profile_t ToNative(ServiceProfile sp, NativeStrings s)

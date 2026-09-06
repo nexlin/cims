@@ -79,6 +79,7 @@ add_library(cimsue_objs OBJECT
     src/mcdata/sds_codec.cpp
     src/http/https_client.cpp
     src/csc/csc_client.cpp
+    src/csc/group_doc.cpp
     src/c_api.cpp
     ${FLOOR_DEFS_H}
 )

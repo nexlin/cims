@@ -46,6 +46,10 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     public event EventHandler<GroupInfo>? MessageGroupRequested;
     public event EventHandler<string>? MessageUserRequested;
     public event EventHandler<GroupInfo>? AddChannelRequested;
+    /// <summary>그룹 생성/편집/삭제 — 창·확인은 MainWindow 몫(GMS XCAP, 본인 소유만).</summary>
+    public event EventHandler? NewGroupRequested;
+    public event EventHandler<GroupInfo>? EditGroupRequested;
+    public event EventHandler<GroupInfo>? DeleteGroupRequested;
 
     public PttOriginateViewModel(DispatchSession s)
     {
@@ -55,8 +59,14 @@ public sealed partial class PttOriginateViewModel : ObservableObject
         s.RosterChanged += (_, _) => RefreshStatus();
         s.SessionAdded += (_, _) => RefreshStatus();
         s.SessionEnded += (_, _) => RefreshStatus();
+        s.ProfileApplied += (_, _) => OnPropertyChanged(nameof(CanCreateGroups));
+        s.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DispatchSession.CanCreateGroups)) OnPropertyChanged(nameof(CanCreateGroups)); };
         Reload();
     }
+
+    /// <summary>[새 그룹] 노출 — 프로비저닝 `ptt.allowGroupCreation`.</summary>
+    public bool CanCreateGroups => _s.CanCreateGroups;
+    [ObservableProperty] private bool _refreshingGroups;
 
     public bool IsPrivate => Mode == "private";
     public bool IsAdhoc => Mode == "adhoc";
@@ -180,4 +190,16 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [RelayCommand] private void MessageUser(PttUserRow u) => MessageUserRequested?.Invoke(this, u.Number);
     [RelayCommand] private void MessageGroup(GroupInfo g) => MessageGroupRequested?.Invoke(this, g);
     [RelayCommand] private void AddChannel(GroupInfo g) => AddChannelRequested?.Invoke(this, g);
+
+    // 그룹 관리(§4.1 [그룹] 탭) — 창·삭제 확인은 MainWindow
+    [RelayCommand] private void NewGroup() => NewGroupRequested?.Invoke(this, EventArgs.Empty);
+    [RelayCommand] private void EditGroup(GroupInfo g) => EditGroupRequested?.Invoke(this, g);
+    [RelayCommand] private void DeleteGroup(GroupInfo g) => DeleteGroupRequested?.Invoke(this, g);
+    [RelayCommand]
+    private async Task RefreshGroups()
+    {
+        if (RefreshingGroups) return;
+        RefreshingGroups = true;
+        try { await _s.RefreshGroupsAsync(); } finally { RefreshingGroups = false; }
+    }
 }

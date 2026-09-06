@@ -367,6 +367,8 @@ C API 는 그 헤더를 **손으로 1:1 평탄화**한 것이며(SWIG 는 C# 대
 | PTT 그룹콜 청취 | 그룹 AoR 로 recvonly INVITE → `PTT_JOIN recv_only=1` | `Group.listenGroupCall()` → `GroupCallState.active(listenOnly=true)` | TS 24.379 |
 | 청취 중 PTT 버튼 비활성 | Floor Taken `Permission to Request the Floor=0` | `FloorState.taken.permissionToRequest=false` (앱은 버튼 disable) | TS 24.380 |
 | 비멤버 sendrecv 거절 | 403 | `onGroupCall(failed 403)` 표시 | — |
+| 활성 세션 발견 — 관제 그룹원 내선·청취 대상 그룹 목록 | `/provisioning/me` `dispatch{members[]{userId,name,volteAor,pttId,extension}, pttTargets[]{id,uri,name}}` (서버 요청서 [../../dev/server_request_dispatch_group_monitoring.md](../../dev/server_request_dispatch_group_monitoring.md) §2 — 없으면 빈 배열) | `Profile.dispatch.members/pttTargets` → 앱이 `dialogWatch`·`subscribeConference` 대상으로 | CSC |
+| PTT 그룹 생성·편집·삭제 (관제사 = authorized user) | GMS XCAP `PUT/DELETE /org.openmobilealliance.groups/users/{xui}/{group}` (문서 = GET 과 같은 OMA list-service + mcpttgi), 자격 `ptt.allowGroupCreation`, 목록 `is_owner`, `If-Match`/412 | `CscClient.getGroup/putGroup/deleteGroup` + `GroupDoc`(`toXml`/`parse` — pjlib 비의존 문자열 스캔) · `GroupSummary.isOwner` · `Profile.allowGroupCreation`. 변경 감지 = `subscribeXcapDiff("sip:gms_psi@…")` → `onMessage(xcap-diff)` | TS 24.481, RFC 4825, RFC 5875 |
 | SRTP·TLS | 접속서비스 `media_srtp`·`sip_transport` | 프로파일 값으로 코어가 자동 협상. 앱 개입 없음 | RFC 4568, TS 33.203 |
 
 앱 화면 구성은 **PTT 채널 중심**의 좌 PTT · 우 일반통화 두 열 — 각 열이 위 운영(① PTT 채널 카드 + PTT 발신·주소록 +

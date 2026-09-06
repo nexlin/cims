@@ -5,7 +5,7 @@ namespace DispatchDesktop.Services;
 
 public static class ResponseText
 {
-    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call }
+    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call, Group }
 
     public static Area AreaOf(Operation op) => op switch
     {
@@ -55,6 +55,13 @@ public static class ResponseText
         (Area.Call, 403) => "발신이 허용되지 않습니다",
         (Area.Call, 487) => "취소됨",
         (Area.Call, 603) => "거절됨",
+        // GMS 그룹 관리(XCAP PUT/DELETE) — 서버 요청서 §1.3
+        (Area.Group, 401) => "로그인이 만료됐습니다 — 다시 로그인하세요",
+        (Area.Group, 403) => "그룹을 만들거나 바꿀 권한이 없습니다 (자격 또는 본인 소유 그룹만)",
+        (Area.Group, 404) => "그룹이 없습니다 — 목록을 새로 고칩니다",
+        (Area.Group, 409) => "같은 id 의 그룹을 다른 사용자가 소유하고 있습니다",
+        (Area.Group, 412) => "다른 곳에서 먼저 바뀐 그룹입니다 — 다시 열어 편집하세요",
+        (Area.Group, 400) => "그룹 문서 형식 오류",
         _ => null,
     };
 

@@ -25,6 +25,9 @@ public sealed partial class MainViewModel : ObservableObject
     public event EventHandler<SessionItem>? MonitorWindowRequested;
     public event EventHandler<SessionItem>? MonitorWindowActivateRequested;
     public event EventHandler<SessionItem>? MonitorWindowCloseRequested;
+    /// <summary>PTT 그룹 편집 창(생성 = 인자 null)·삭제 확인 요청 — 창은 MainWindow.</summary>
+    public event EventHandler<GroupEditViewModel>? GroupEditRequested;
+    public event EventHandler<GroupInfo>? GroupDeleteRequested;
 
     public MainViewModel(DispatchSession session, LayoutStore layout, HotKeyMap hotKeys)
     {
@@ -45,6 +48,9 @@ public sealed partial class MainViewModel : ObservableObject
         PttOriginate.MessageGroupRequested += (_, g) => McData.OpenGroup(g);
         PttOriginate.MessageUserRequested += (_, n) => McData.OpenUser(n);
         PttOriginate.AddChannelRequested += (_, g) => { Session.Settings.Update(s => { if (s.SelectedChannels.Count > 0 && !s.SelectedChannels.Contains(g.Id)) s.SelectedChannels.Add(g.Id); }); PttChannels.FocusGroup(g.Id); };
+        PttOriginate.NewGroupRequested += (_, _) => GroupEditRequested?.Invoke(this, new GroupEditViewModel(Session, null));
+        PttOriginate.EditGroupRequested += (_, g) => GroupEditRequested?.Invoke(this, new GroupEditViewModel(Session, g));
+        PttOriginate.DeleteGroupRequested += (_, g) => GroupDeleteRequested?.Invoke(this, g);
         PttActivity.ChannelRequested += (_, id) => PttChannels.FocusGroup(id);
         PttActivity.WindowRequested += (_, s) => MonitorWindowActivateRequested?.Invoke(this, s);
         CallDesk.FillRequested += (_, n) => CallOriginate.Fill(n);

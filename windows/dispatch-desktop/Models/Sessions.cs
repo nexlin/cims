@@ -155,6 +155,10 @@ public sealed partial class GroupInfo : ObservableObject
     [ObservableProperty] private bool _affiliated;
     /// <summary>멤버 그룹(true) / 청취 범위 그룹(false — pttListen 대상).</summary>
     public bool IsMember { get; init; } = true;
+    /// <summary>내가 소유(authorized user)한 그룹 — [편집]·[삭제] 가능(GMS 목록 is_owner).</summary>
+    [ObservableProperty] private bool _isOwner;
+    /// <summary>GMS 목록의 문서 ETag — 편집 PUT 의 If-Match.</summary>
+    [ObservableProperty] private string _etag = "";
     [ObservableProperty] private IReadOnlyList<RosterEntry> _roster = Array.Empty<RosterEntry>();
     [ObservableProperty] private DateTime? _rosterAt;
 
