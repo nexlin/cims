@@ -193,8 +193,9 @@
 **왼쪽 중: 대기열** — 대표번호 AoR dialog(dispatch_center.md §4.5): 발신자 · `→ 대표번호` · 링 경과 · 울리는 그룹원(포크 대기 leg — 각 내선
 dialog 의 early 로 추정, RLS 전) · [당겨받기]=`pickup(code, pilotId)`. 자기 단말도 울리면 [응답](**이 발신자의 내 착신 leg 만** 받는다 — 직접 착신과
 동시에 울려도 다른 호를 받지 않는다). 응답되면 "응답: 1004 최순경" 3초 후 제거하고, 그 호의 leg 가 전부 끝나기 전까지 NOTIFY 재수신으로 되살리지 않는다.
-**항목 = 발신자 기준 한 호** — 서버가 대표번호 dialog 를 포크 leg 마다(id=각 그룹원 leg 의 Call-ID) 내보내므로(서버 요청서 §6-7, 설계 §4.5 는 호 단위)
-같은 발신자의 leg 를 한 항목으로 병합하고 대표 leg 는 confirmed 우선. 초기 full 스냅샷의 빈 자리표시자(id·state 빈 값)는 행으로 만들지 않는다.
+**항목 = 발신자 기준 한 호** — 서버가 대표번호 dialog 를 **포크 집합당 하나**(id=A-leg 발신자 Call-ID)로 내보낸다(설계 §4.5, 착신 한 건=한 행).
+앱의 발신자 기준 병합은 방어적으로 유지(구 서버 호환). 대표 leg 는 confirmed 우선. 초기 full 스냅샷에는 진행 중 대표번호 호가 실려
+재로그인 즉시 보인다(서버가 RFC 4235 §3.2 full 로 채움).
 sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오늘 응대·부재 건수 — **대표번호 부재는 dialog 가 confirmed 없이 terminated 될 때 1건**
 (내 leg 가 응답 없이 끝난 것은 동료가 받은 경우일 수 있어 세지 않는다), 직접 착신 부재는 내 세션 기준.
 
@@ -386,7 +387,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   `ObservableCollection` 직접 갱신.
 - **UI 는 코어 상태의 투영**: 카드·행·창은 `calls()`/`callInfo` 스냅샷과 구독 이벤트에서 파생하고 앱이 별도 상태 기계를 갖지 않는다(재접속·재기동 후
   화면 재구성 = 스냅샷 재조회, 열려 있던 감청 창도 `calls()` 의 listenOnly 호에서 복원). 내역(②④)과 메시지
-  모니터링은 서버 통합 이력 `GET /provisioning/history?kind=call|ptt|message`(관제 그룹 범위 게이트·커서, csc 0.2.104,
+  모니터링은 서버 통합 이력 `GET /provisioning/history?kind=call|ptt|message`(관제 그룹 범위 게이트·커서,
   계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md))을 2~3초 커서 폴링(`nextSince`)해 채운다 —
   진행 중(live) 상태는 종전 구독(dialog/conference)이 담당한다(폴링으로 대체하지 않는다).
 - 접근성: 모든 조작은 키보드 도달 가능, 상태는 색+아이콘+텍스트 삼중.
@@ -402,7 +403,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
   서버·CSV 병합과 이름 조회의 키는 **E.164 정규형**(홈 국가의 `010…` 은 `+8210…` 으로, 6자리 이하 내선은 그대로)이라 표기가 달라도 한 연락처다.
   **관제 그룹원·청취 대상은 서버가 준다**: `dispatch` 블록 `members[]`(항목 `groupId` 로 자기 그룹원 = ③ 띠 / 그 외 = 감시 전용)·
-  `pttTargets[]`·`etag` + 응답 `ETag`/`If-None-Match` 304([android_ue_provisioning.md §3](android_ue_provisioning.md), csc 0.2.104). 앱은 두 배열을
+  `pttTargets[]`·`etag` + 응답 `ETag`/`If-None-Match` 304([android_ue_provisioning.md §3](android_ue_provisioning.md)). 앱은 두 배열을
   dialog watch·conference 구독 대상으로 쓰고(로컬 CSV `member` 태그 폴백은 구 서버용), 주기 재조회로 편성 변경을 따라간다. 외부망 연락처(CSV `external`).
 - **PTT 그룹 생성·편집·삭제를 관제 앱에서** — 경로는 **GMS XCAP**(TS 24.481, 생성 주체 = 권한 있는 가입자 = 관제사, PKCE 토큰)로 확정.
   관리 API `/api/v1/ptt/groups`([admin_api.md](../../api/admin_api.md) §6)는 콘솔 토큰 전용으로 그대로 둔다. 자격 = `ptt_user_profile.allow_group_creation`

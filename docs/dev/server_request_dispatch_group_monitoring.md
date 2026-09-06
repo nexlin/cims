@@ -8,12 +8,12 @@
 > 생성 요소가 없어 CIMS 확장, 규격 동사형 관례) ② 그룹 uri 는 시스템 관례 **`tel:g-<8hex>`**(`sip:g-…@<PTT 도메인>` 도
 > 수용, GROUPS 키·CSP·제휴가 전부 tel: 형) ③ 타인 소유 id 는 409 `uri_taken`, 소유자 없는 콘솔 그룹은 403 `not_group_owner`.
 > §1.4 admin CRUD 캐시 동기화·API 문서 DELETE 도 완료. 부수 발견: HTTP 계층이 XML media type 을 415 로 거부하고 있었음(수정).
-> **§2 발견·§3 conference 인가·§4 메시지(§3b 통합 이력)·1:1 SDS 보관: 전부 구현 완료**(csc 0.2.104·csp 0.2.112, 커밋 `4ccdf9c9`).
+> **§2 발견·§3 conference 인가·§4 메시지(§3b 통합 이력)·1:1 SDS 보관: 전부 구현 완료**(csc 0.2.104·csp 0.2.112, 라이브 배포됨).
 > 계약 정본 = [android_ue_provisioning.md §3-2](../design/features/android_ue_provisioning.md)(history)·[dispatch_center.md §5.6/§5.7a](../design/features/dispatch_center.md).
 > **§6 #1(P3b 응답 계약)·#7(대표번호 dialog 포크 leg 별 발행)·#8(빈 초기 full NOTIFY): 구현 완료**(csp 0.2.112). #1 = 응답을 앱
 > `HistoryClient` 계약(items[]{id,time,kind,event,from,to,group,duration,emergency,text}+next+ETag/304)으로 정렬. #7 = 포크 집합당
 > dialog 하나(id=A-leg Call-ID). #8 = dialog 구독 초기 full 스냅샷에 진행 중 호(멤버 BLF·대표번호 착신) 포함. #4·#5 P2/P3b 로 해소,
-> #6 = mcptt_api.md §2 문서 규칙. **남은 것(서버 코드 아님) = #2 `dg-dispatch01` 범위 all 승격(콘솔)·#3 시험 그룹 편성(콘솔/시드)**.
+> #6 = mcptt_api.md §2 문서 규칙. **전 항목 완료·라이브 배포**(csc 0.2.104·csp 0.2.112, agent dep4/dep2 커토버 PASS). #2 `dg-dispatch01` 범위 all·#3 시험 그룹 편성(g002=멤버·g003=비멤버 청취) 반영. 서버 파트 종결 — 최종 상태는 정본에. 잔여는 단말 실기 확인뿐.
 > **09-06 라이브 배포 완료(csc 0.2.103, 관제석 자격 부여, e2e PASS).** 단말 쪽 후속(재빌드·오류 문구·실기 e2e·번호 재키잉·다음 과제 대비) =
 > [windows_request_dispatch_group_crud_followup.md](windows_request_dispatch_group_crud_followup.md).
 
