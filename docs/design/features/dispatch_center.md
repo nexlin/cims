@@ -80,10 +80,18 @@ ambient 플래그·녹취 탭)의 연장으로 구성한다. **INVITE 경로에 
 ### 3.2 멤버십과 파생
 
 - `dispatch_group_members(user_id PK, group_id, alert_order)` — **가입자당 그룹 하나**. `pickup_group`
-  이 단일 값이므로 이 제약이 축 통합의 전제다(겸임은 §10).
-- CSC 가 멤버 추가/제거 시 `volte_subscriptions.pickup_group` 을 `group_id`/NULL 로 **함께 갱신**하고
-  `USER_CHANGED` 를 보낸다(기존 경로). 관제 그룹 소속 가입자의 `pickup_group` 직접 편집은 409
-  (`derived_from_dispatch_group`) — SoT 는 멤버십이다.
+  이 단일 값이므로 이 제약이 축 통합의 전제다(겸임은 §10). 멤버 행의 `user_id` 는 **대표번호 포크·dialog
+  감시 대상인 회선**(관제사의 VoLTE 회선)이다 — CSP `ResolveForkTargets` 는 서비스 구분 없이 등록된 멤버
+  전원에게 포크하므로 PTT 회선을 멤버로 넣지 않는다(PTT 앱까지 울린다).
+- **관제 그룹은 person 귀속이다.** CSC 가 멤버 추가/제거/그룹 삭제 시 그 회선이 속한 person 의 **volte·ptt 전
+  회선** `pickup_group` 을 유효 그룹(`effective_dispatch_group` = 자기 멤버십 → 없으면 같은 person 의 멤버십, 여럿이면
+  `alert_order`·회선 id 순 첫째)으로 **재계산**하고, 값이 바뀐 회선마다 `USER_CHANGED` 를 보낸다(CSP 는 회선별
+  사용자 캐시로 `pickup_group` 을 든다). 관제사의 PTT 회선은 멤버가 아니어도 이렇게 그룹을 물려받아야 CSP 가 PTT
+  청취·conference 구독 인가(§5.6)에서 SIP 신원(PTT id)으로 범위를 찾는다 — 없으면 `EffectiveGroupOf` 가 org 로
+  폴백해 범위 밖 403 이 된다. 기존 데이터는 `sql/migrate_dispatch_groups.sql` 끝의 백필(같은 규칙, 재실행 안전)로
+  맞춘다.
+- 파생 회선(자기 멤버십 여부와 무관)의 `pickup_group` 직접 편집은 409(`derived_from_dispatch_group`), 관제 그룹
+  귀속 person 에 새 회선을 개설하면 파생값을 물려받는다(지정값이 다르면 409) — SoT 는 멤버십이다.
 - `dispatch_group_monitor_targets(group_id, target_group_id)` — `monitor_scope=listed` 의 대상.
 - `dispatch_group_ptt_targets(group_id, ptt_group_id)` — `ptt_listen=listed` 의 대상.
 
@@ -343,7 +351,11 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   이 사용자가 원격 청취를 수행할 자격. 관제사에게만 부여(기본 0). CSP 가 청취 개시 INVITE 에서 프로파일 행
   하나를 읽어 판정한다(`SelectUserProfile` — 인덱스 단건, 다른 프로파일 게이트와 같은 경로. 값 0·행 부재·DB
   불가는 모두 403 — 당사자 모르게 미디어를 인도하는 동작이라 fail-closed). 규격이 정한 인가 자리를 그대로 쓴다.
-- **범위 = 관제 그룹 `ptt_listen`**(`none`/`listed`/`all`): 자격자가 어느 PTT 그룹을 들을 수 있는가.
+- **범위 = 관제 그룹 `ptt_listen`**(`none`/`listed`/`all`): 자격자가 어느 PTT 그룹을 들을 수 있는가. 청취자의 관제
+  그룹은 청취 INVITE·conference SUBSCRIBE 의 **SIP 신원 = PTT 회선 id** 로 `EffectiveGroupOf` 에 묻는다 — PTT 회선은
+  멤버 행이 아니므로(§3.2) 같은 person 의 VoLTE 멤버십에서 파생된 `ptt_subscriptions.pickup_group` 이 답이다.
+  두 자격·범위는 별개 설정이라 둘 다 있어야 한다: 프로파일 자격만 켜고 파생이 비면 `ptt_listen scope` 403,
+  파생만 있고 자격이 없으면 `allow_ambient_listening=0` 403(CSP 로그 `ProcessGroupCall … denied (사유)`).
 - **편입 게이트 = 콘솔 `manager` 승인**: 청취 범위가 있는 관제 그룹으로의 편입과 `allow_ambient_listening`
   부여를 콘솔에서 승인·감사한다(§5.7). 편입되는 가입자 쪽 역할 게이트는 없다(§5.3).
 
@@ -483,7 +495,7 @@ MODIFY 는 ADD 와 같은 payload 로 주소·crypto 만 갱신(같은 포트). 
 
 | 컴포넌트 | 변경 | 상태 |
 |---|---|---|
-| **CSC** `handlers/dispatch.py` | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members` + `/monitor-targets` + `/ptt-targets`(§8.2), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_dispatch_group`, `DISPATCH_GROUP_CHANGED` 통지(uri=그룹 id), pilot↔가입 id·타 대표번호 충돌 409, RBAC(감청/청취 범위 변경·그 그룹 편입은 콘솔 manager — 편입 가입자 쪽 역할 게이트 없음), `ptt_user_profile.allow_ambient_listening` 편집·XCAP user-profile `<allow-ambient-listening>`, `/provisioning/me` `dispatch{groupId,groupName,pilotId,monitorScope,pttListen,listenVisibility, members[],pttTargets[],etag}`(발견 — `services/mcptt.py` `dispatch_discovery`, §8.4) + 응답 `ETag`/`If-None-Match` 304. **관제사의 PTT 그룹 생성·편집·삭제는 GMS XCAP 경로**(PKCE 토큰, 생성 자격 `ptt_user_profile.allow_create_group` = OAM 부여, 편집·삭제 = 본인 소유 — [mcptt_authorization.md §4.1](mcptt_authorization.md)). 테이블 미적용 DB 는 목록 `schema=not_migrated`·변경 400. **통합 이력** `GET /provisioning/history?kind=call\|ptt\|message`(`services/dispatch_history.py` — 공유 NAS 파일을 관제 그룹 범위로 필터, 커서 `since`/`nextSince`, 관제 미소속 403, 감사 E-AUD-016 `tap_mode=history`) | 구현 |
+| **CSC** `handlers/dispatch.py` | `dispatch_groups`·멤버·대상 테이블(§8.1), `/api/v1/dispatch-groups` CRUD + `/members` + `/monitor-targets` + `/ptt-targets`(§8.2), `pickup_group` 파생 갱신(멤버 추가/제거/그룹 삭제 → 같은 person 의 volte·ptt 전 회선 재계산 `effective_dispatch_group` → 바뀐 회선마다 USER_CHANGED) + 가입자 API 직접 편집 409 `derived_from_dispatch_group`(파생 회선 포함)·새 회선 개설 시 파생값 상속, `DISPATCH_GROUP_CHANGED` 통지(uri=그룹 id), pilot↔가입 id·타 대표번호 충돌 409, RBAC(감청/청취 범위 변경·그 그룹 편입은 콘솔 manager — 편입 가입자 쪽 역할 게이트 없음), `ptt_user_profile.allow_ambient_listening` 편집·XCAP user-profile `<allow-ambient-listening>`, `/provisioning/me` `dispatch{groupId,groupName,pilotId,monitorScope,pttListen,listenVisibility, members[],pttTargets[],etag}`(발견 — `services/mcptt.py` `dispatch_discovery`, §8.4) + 응답 `ETag`/`If-None-Match` 304. **관제사의 PTT 그룹 생성·편집·삭제는 GMS XCAP 경로**(PKCE 토큰, 생성 자격 `ptt_user_profile.allow_create_group` = OAM 부여, 편집·삭제 = 본인 소유 — [mcptt_authorization.md §4.1](mcptt_authorization.md)). 테이블 미적용 DB 는 목록 `schema=not_migrated`·변경 400. **통합 이력** `GET /provisioning/history?kind=call\|ptt\|message`(`services/dispatch_history.py` — 공유 NAS 파일을 관제 그룹 범위로 필터, 커서 `since`/`nextSince`, 관제 미소속 403, 감사 E-AUD-016 `tap_mode=history`) | 구현 |
 | **CSP `CCspDispatchGroupMap`** (`CspDispatchGroup.h/.cpp`) | 그룹 id·pilot·멤버 인덱스, `CanWatch`(§5.2)·`CanListenPtt`(§5.6) 범위 판정, `EffectiveGroupOf`(멤버 인덱스 → `pickup_group` → org 폴백), DbManager 적재(`SelectDispatchGroup`/`LoadAllDispatchGroups`, 부팅 프로브 `HasDispatchTables`)·`DISPATCH_GROUP_CHANGED`/`CSC_RESTART` 재적재·JSON fallback `DataFolder.DispatchGroup`(§3.3) | 구현 |
 | **CSP `CTasModule` 포크 집합** | `CTasForkSet`(TAS 소유 — 대기 leg 는 승자 확정 전까지 `CCallMap` 밖) · `TryDispatchPilot`(§4.2, 미등록 착신 분기의 `TryPickupDial` 앞) · `ResolveForkTargets`(등록·`busy_members=skip` 비통화·발신자 제외·`alert_order` 순·`MaxForkTargets` 절삭) · `StartAlert`(`alert_mode` 분기 — parallel 전원 / sequential 큐+첫 순번) · `AdvanceSequential`(§4.4a 다음 순번·단계 시한 재설정) · `ForkAlert`(leg 전용 SDES 서버 키·`P-Called-Party-ID`=대표번호) · `OnForkRing`(첫 180 만 A 에, SDP 없이) · `OnForkStart`(승자 → (A,승자) 쌍 CallMap 삽입 후 디스패처 정상 answer 경로가 RELAY_MODIFY·A 200, 패자 CANCEL, 늦은 200 은 BYE) · `OnForkEnd`(패자 최종 응답 흡수, sequential 다음 순번, 전원 실패 486/480, A 취소 → 전원 CANCEL+relay 회수) · `Tick`(1초 — `no_answer_sec` 만료 → sequential 다음 순번 / `OverflowFork`(대표번호면 그 그룹원 재포크·내선이면 단일 leg, 1단계) 또는 480) · `FindForkForPickup`/`PickUpFork`(§4.4 링잉 대표번호 호 당겨받기 — `PickUp` 의 CallMap 후보 폴백) · 대표번호 AoR dialog 이벤트(§4.5 — early/confirmed/terminated) | 구현 |
 | **CSP `CscfModule`** | dialog SUBSCRIBE 인가 → `CanWatch(EffectiveGroupOf(구독자), 대상 그룹)`; 대상이 대표번호면 그 그룹(§4.5) · conference SUBSCRIBE 인가(§5.6, TS 24.379 §10.1.3.4.1) → `CGroupCallService::CheckConferenceSubscribe`(멤버 = `allow_conference_state` / 비멤버 = 자격+`CanListenPtt`), 403 `Warning: 138`·480 `Warning: 105`(`SendResponseWithWarning`) | 구현 |

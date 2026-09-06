@@ -66,8 +66,15 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
 | GMS 그룹 CRUD | 생성 201 → disp02 목록 반영(owner=false) → disp02 삭제 403 `not_group_owner` → 미가입 번호 400 `unknown_member` → 삭제 |
 | 청취 범위 그룹 합류(g003 listen-only) | **403** — 원인은 disp01 프로파일 `allow-ambient-listening=false`(서버 계정 설정, 설계 §14.1 "PTT 청취 자격" 미부여). 앱 결함 아님 |
 
-1. **서버(콘솔) 설정 하나** — disp01/disp02 의 `ptt_user_profile.allow_ambient_listening=1` 부여(콘솔 `구성 > 사용자` PTT 프로파일 또는
-   `PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`). 이것 없이는 ② [청취]·청취 범위 conference 구독이 403 이다.
+1. ✅ **서버 쪽 처리 완료(09-06 21:30, 서버 세션)** — 원인은 둘이었다. ① 자격: disp01/disp02 `ptt_user_profile.allow_ambient_listening=1`
+   부여(프로파일 PUT 200, CSP 사용자 캐시 갱신 확인). ② 범위: CSP 는 청취 INVITE 의 SIP 신원(**PTT 회선** `+82510001001`)으로
+   관제 그룹을 찾는데 `dg-dispatch01` 멤버 행은 VoLTE 회선뿐이라 org(`TEAM01`)로 폴백 → 자격을 켜도 `ptt_listen scope` 403 이
+   났을 것. 근본 수정 = 관제 그룹을 person 귀속으로 보고 같은 person 의 PTT 회선 `pickup_group` 도 파생(CSC `effective_dispatch_group`
+   + `migrate_dispatch_groups.sql` 백필, dispatch_center.md §3.2·§5.6). 라이브 DB 백필 적용·CSP 캐시 재적재 완료. **서버 실측**:
+   `cimsue-cli --from-profile ptt group-call g003 --listen-only` → 종전 `denied (allow_ambient_listening=0) → 403` 이
+   `no active session → 480`(자격·범위 통과 뒤 활성 세션 없음 = 정상). g003 에 실단말 세션이 있을 때 다시 합류하면 200 이어야 한다.
+   CSC 코드(파생 자동화)는 **다음 csc 릴리스**에 포함 — 지금 라이브(0.2.104)는 백필 값으로 동작하며, 콘솔에서 관제 그룹 멤버를
+   바꾸면 PTT 회선 파생은 새 csc 배포 전까지 자동 갱신되지 않는다.
 2. **앱 실기 e2e(사용자)** — 후속 요청서 §3 그룹 CRUD 7단계 + 아래 확인 줄:
    - 로그인 직후 로그 `profile … members=42 pttTargets=5`, ③ 띠에 관제1석·관제2석만, `groups 1 member (0 owned), 4 listen-scope`(g002 는 멤버)
    - `history: available` 뒤 통화·SDS 가 생기면 ②④ 최근 행에 타인 항목이 수초 내 붙는지

@@ -55,7 +55,8 @@ def _load_admin():
           get_service_config=lambda *a, **k: {}, update_service_config_cache=lambda *a, **k: None,
           get_service_config_xml=lambda *a, **k: "", logger=_Log())
     _stub("services.auc", auc=types.SimpleNamespace())
-    _stub("handlers.dispatch", dispatch_group_of_user=lambda *a, **k: None)
+    _stub("handlers.dispatch", dispatch_group_of_user=lambda *a, **k: None,
+          effective_dispatch_group=lambda *a, **k: None, dispatch_group_of_person=lambda *a, **k: None)
     spec = importlib.util.spec_from_file_location(
         "handlers_admin_under_test", os.path.join(_CSC_SRC, "handlers", "admin.py"))
     mod = importlib.util.module_from_spec(spec)

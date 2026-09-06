@@ -66,3 +66,31 @@ INSERT IGNORE INTO dispatch_group_members (user_id, group_id)
     SELECT s.id, s.pickup_group
       FROM volte_subscriptions s
      WHERE s.pickup_group IS NOT NULL AND s.pickup_group <> '';
+
+-- 관제 그룹은 person 귀속(가입자당 그룹 하나) — 멤버 행(대표번호 포크·dialog 감시 대상인 VoLTE 회선)의 그룹을
+--  같은 person 의 비멤버 회선(관제사 PTT 회선)이 pickup_group 으로 물려받는다. CSP 는 PTT 청취·conference 구독
+--  인가(dispatch_center.md §5.6)에서 SIP 신원(PTT id)으로 EffectiveGroupOf(멤버 색인 → pickup_group → org 폴백)를
+--  묻으므로 이 파생이 없으면 org 폴백 → 범위 밖 403. CSC 는 멤버 변경 때마다 같은 파생을 한다
+--  (handlers/dispatch.py effective_dispatch_group) — 여기서는 기존 데이터만 맞춘다. 결정 규칙 동일(alert_order·회선 id 순
+--  첫째). PTT 회선을 멤버 행으로 넣지 않는 이유 = 대표번호 포크 대상(CSP ResolveForkTargets)이 돼 PTT 앱까지 울린다.
+UPDATE ptt_subscriptions p
+  JOIN (SELECT s.user_id AS person,
+               SUBSTRING_INDEX(GROUP_CONCAT(m.group_id ORDER BY m.alert_order, m.user_id), ',', 1) AS group_id
+          FROM dispatch_group_members m
+          JOIN (SELECT id, user_id FROM volte_subscriptions UNION ALL SELECT id, user_id FROM ptt_subscriptions) s
+            ON s.id = m.user_id
+         GROUP BY s.user_id) d ON d.person = p.user_id
+  LEFT JOIN dispatch_group_members own ON own.user_id = p.id
+   SET p.pickup_group = d.group_id
+ WHERE own.user_id IS NULL AND NOT (p.pickup_group <=> d.group_id);
+
+UPDATE volte_subscriptions v
+  JOIN (SELECT s.user_id AS person,
+               SUBSTRING_INDEX(GROUP_CONCAT(m.group_id ORDER BY m.alert_order, m.user_id), ',', 1) AS group_id
+          FROM dispatch_group_members m
+          JOIN (SELECT id, user_id FROM volte_subscriptions UNION ALL SELECT id, user_id FROM ptt_subscriptions) s
+            ON s.id = m.user_id
+         GROUP BY s.user_id) d ON d.person = v.user_id
+  LEFT JOIN dispatch_group_members own ON own.user_id = v.id
+   SET v.pickup_group = d.group_id
+ WHERE own.user_id IS NULL AND NOT (v.pickup_group <=> d.group_id);

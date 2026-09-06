@@ -932,6 +932,11 @@ curl -k -X DELETE "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001/mem
 관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위 ([dispatch_center.md](../design/features/dispatch_center.md) §3·§8.2).
 불변 id(`dg-xxxxxxxx`) 가 곧 가입자 `pickup_group` 값이다 — **멤버십이 SoT** 라 멤버 추가/제거가 가입자의
 `pickup_group` 을 파생 갱신하고(`USER_CHANGED`), 가입자 API 에서 그 값을 직접 바꾸면 409 `derived_from_dispatch_group`.
+관제 그룹은 person 귀속이다: 멤버 행은 대표번호 포크·dialog 감시 대상인 **VoLTE 회선** 하나이고, 같은 person 의
+다른 회선(관제사 **PTT 회선**)은 멤버가 아니어도 `pickup_group` 을 물려받는다(재계산 규칙 = 자기 멤버십 → 같은 person
+의 멤버십, dispatch_center.md §3.2). 이 파생이 PTT 청취·conference 구독 범위(§5.6)의 답이므로 PTT 회선을 멤버로
+넣지 않는다(포크 대상이 돼 PTT 앱이 울린다). 파생 회선의 직접 편집도 409, 관제 그룹 귀속 person 의 새 회선(`POST
+/users/{pid}/{call|ptt}`)은 파생값을 물려받는다(다른 값 지정 시 409).
 CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가입자당 그룹 하나(다른 그룹 소속 가입자를
 추가하면 이동, 응답 `moved_from`).
 
@@ -939,9 +944,9 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 |---|---|---|
 | `GET /api/v1/dispatch-groups[?org_id=]` | monitor+ | 목록(멤버·대상 포함). 테이블 미적용 DB 는 `{groups:[], schema:"not_migrated"}` |
 | `POST /api/v1/dispatch-groups` | operator+ (`monitor_scope`/`ptt_listen`≠none 은 manager) | 생성 — `{id?, name, pilot_id?, service_ref?(pilot 시 필수), alert_mode?, no_answer_sec?, busy_members?, overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, org_id?, members?[{user_id, alert_order}]}` → 201 `{id}` |
-| `GET|PUT|DELETE /api/v1/dispatch-groups/{id}` | monitor+ / operator+ / operator+ | 단건·부분 갱신·삭제(멤버 `pickup_group` NULL 복원) |
+| `GET|PUT|DELETE /api/v1/dispatch-groups/{id}` | monitor+ / operator+ / operator+ | 단건·부분 갱신·삭제(멤버와 같은 person 의 파생 회선 `pickup_group` 재계산 — 남는 멤버십 없으면 NULL) |
 | `GET|POST /api/v1/dispatch-groups/{id}/members` | monitor+ / operator+ (감청·청취 그룹은 manager) | 멤버 목록 / 추가·이동 `{user_id, alert_order?}` → 201 |
-| `DELETE /api/v1/dispatch-groups/{id}/members/{user_id}` | operator+ | 멤버 제거(`pickup_group` NULL) |
+| `DELETE /api/v1/dispatch-groups/{id}/members/{user_id}` | operator+ | 멤버 제거(같은 person 의 파생 회선 포함 `pickup_group` 재계산 → NULL) |
 | `PUT /api/v1/dispatch-groups/{id}/monitor-targets` | manager+ | `{target_group_ids:[dg-…]}` — `monitor_scope=listed` 대상 |
 | `PUT /api/v1/dispatch-groups/{id}/ptt-targets` | manager+ | `{ptt_group_ids:[mcptt_group_id…]}` — `ptt_listen=listed` 대상 |
 
@@ -1042,7 +1047,7 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 
 `sql/migrate_dispatch_groups.sql` — 컬럼 정의는 [db_schema.md](../design/db_schema.md) §2 와
 [dispatch_center.md](../design/features/dispatch_center.md) §8.1. `dispatch_groups.id`(VARCHAR(64), `dg-…`) 가
-`volte_subscriptions.pickup_group` 값이며, `dispatch_group_members.user_id` 가 PK(가입자당 그룹 하나).
+`volte_subscriptions.pickup_group` 값이며(같은 person 의 `ptt_subscriptions.pickup_group` 도 파생), `dispatch_group_members.user_id` 가 PK(가입자당 그룹 하나).
 `dispatch_group_ptt_targets.ptt_group_id` 는 `ptt_groups.id`(surrogate) 참조 — API 는 `mcptt_group_id` 로 노출한다.
 
 **ER 다이어그램:**

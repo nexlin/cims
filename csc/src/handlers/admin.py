@@ -709,6 +709,15 @@ async def _add_subscription(person_id: str, svc: str, body, config):
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
                 pickup_col, pickup_vals = ', pickup_group', [_parse_pickup_group(body)]
+            # 관제 그룹 귀속 person 의 새 회선 — pickup_group 은 멤버십에서 파생된다(dispatch_center.md §3.2). 직접
+            #   지정값이 다르면 409, 없으면 파생값을 물려받는다(관제사에게 PTT 회선을 뒤에 개설해도 청취 범위가 열린다).
+            if _has_pickup_column(cur):
+                dg = _dispatch.dispatch_group_of_person(cur, person_id)
+                if dg is not None:
+                    if pickup_vals and pickup_vals[0] != dg:
+                        return HandlerResult(status=409, body={'error': 'derived_from_dispatch_group', 'group_id': dg,
+                                                               'detail': 'pickup_group 은 관제 그룹 멤버십(/api/v1/dispatch-groups)에서 파생된다'})
+                    pickup_col, pickup_vals = ', pickup_group', [dg]
             if not _has_ha1_column(cur):
                 return HandlerResult(status=503, body=_HA1_SCHEMA_ERROR)
             cur.execute(
@@ -768,8 +777,9 @@ async def _update_subscription(person_id: str, svc: str, msisdn: str, body, conf
             if 'pickup_group' in body:
                 if not _has_pickup_column(cur):
                     return HandlerResult(status=400, body=_PICKUP_SCHEMA_ERROR)
-                # 관제 그룹 소속 가입자의 pickup_group 은 멤버십에서 파생된다 — 직접 편집 409 (dispatch_center.md §3.2)
-                dg = _dispatch.dispatch_group_of_user(cur, msisdn)
+                # 관제 그룹 소속 가입자의 pickup_group 은 멤버십에서 파생된다 — 직접 편집 409 (dispatch_center.md §3.2).
+                #   같은 person 의 다른 회선(관제사 PTT 회선)도 파생 대상이라 유효 그룹(effective)으로 판정한다.
+                dg = _dispatch.effective_dispatch_group(cur, msisdn)
                 if dg is not None and _parse_pickup_group(body) != dg:
                     return HandlerResult(status=409, body={'error': 'derived_from_dispatch_group', 'group_id': dg,
                                                            'detail': 'pickup_group 은 관제 그룹 멤버십(/api/v1/dispatch-groups)에서 파생된다'})

@@ -13,6 +13,9 @@ volte_subscriptions.pickup_group 값이라 당겨받기·BLF 인가·대표번�
 
 SoT 는 멤버십(dispatch_group_members)이다 — 멤버 추가/제거 시 가입자 pickup_group 을 group_id/NULL 로
 함께 갱신(USER_CHANGED)하고, CSP 에는 DISPATCH_GROUP_CHANGED 로 그룹 재적재를 알린다.
+관제 그룹은 person 귀속이다(가입자당 그룹 하나) — 멤버 행은 대표번호 포크·dialog 감시 대상인 VoLTE 회선에
+두고, 같은 사람의 다른 회선(관제사 PTT 회선)은 멤버가 아니어도 pickup_group 으로 그룹을 물려받는다
+(effective_dispatch_group — CSP EffectiveGroupOf 와 같은 답, dispatch_center.md §3.2·§5.6).
 """
 
 import secrets
@@ -73,13 +76,50 @@ def has_dispatch_tables(cur) -> bool:
 
 
 def dispatch_group_of_user(cur, user_id: str):
-    """가입자가 속한 관제 그룹 id (없으면 None). 테이블 미적용이면 None.
-    admin.py 가 pickup_group 직접 편집 409 게이트(derived_from_dispatch_group)에 쓴다."""
+    """가입(회선) id 자신의 멤버십 관제 그룹 id (없으면 None). 테이블 미적용이면 None.
+    멤버 이동(이전 그룹 통지)처럼 **멤버 행** 자체를 묻는 곳에 쓴다. 귀속 판정은 effective_dispatch_group."""
     if not has_dispatch_tables(cur):
         return None
     cur.execute("SELECT group_id FROM dispatch_group_members WHERE user_id=%s", (user_id,))
     row = cur.fetchone()
     return row['group_id'] if row else None
+
+
+_SUB_TABLES = ('volte_subscriptions', 'ptt_subscriptions')
+
+
+def _person_of(cur, user_id: str):
+    """가입 id → person(users.id). 어느 가입 테이블에도 없으면 None."""
+    for t in _SUB_TABLES:
+        cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (user_id,))
+        row = cur.fetchone()
+        if row:
+            return row['user_id']
+    return None
+
+
+def dispatch_group_of_person(cur, person_id):
+    """person 의 관제 그룹 id — 그 사람의 어느 회선이든 멤버십이 있으면 그 그룹(가입자당 그룹 하나 §3.2;
+    여럿이면 alert_order·회선 id 순 첫째로 결정적). 없으면 None. 테이블 미적용이면 None."""
+    if person_id is None or not has_dispatch_tables(cur):
+        return None
+    cur.execute("SELECT m.group_id FROM dispatch_group_members m WHERE m.user_id IN ("
+                "SELECT id FROM volte_subscriptions WHERE user_id=%s UNION "
+                "SELECT id FROM ptt_subscriptions WHERE user_id=%s) "
+                "ORDER BY m.alert_order, m.user_id LIMIT 1", (person_id, person_id))
+    row = cur.fetchone()
+    return row['group_id'] if row else None
+
+
+def effective_dispatch_group(cur, user_id: str):
+    """회선의 유효 관제 그룹 = 자기 멤버십 → 없으면 같은 person 의 다른 회선 멤버십(파생). 관제 그룹은 person
+    귀속이라 관제사의 PTT 회선은 멤버(대표번호 포크 대상)가 아니어도 VoLTE 회선의 그룹을 물려받는다. CSP
+    EffectiveGroupOf(멤버 색인 → pickup_group → org 폴백)가 같은 답을 내도록 pickup_group 파생값의 정의이며
+    (dispatch_center.md §3.2·§5.6), admin.py 의 pickup_group 직접 편집 409 게이트(derived_from_dispatch_group)가 쓴다."""
+    own = dispatch_group_of_user(cur, user_id)
+    if own is not None or not has_dispatch_tables(cur):
+        return own
+    return dispatch_group_of_person(cur, _person_of(cur, user_id))
 
 
 def _new_group_id() -> str:
@@ -224,17 +264,45 @@ def _monitoring(g: dict) -> bool:
     return (g.get('monitor_scope') or 'none') != 'none' or (g.get('ptt_listen') or 'none') != 'none'
 
 
-def _sync_pickup_group(cur, user_id: str, group_id):
-    """멤버십 → volte/ptt 가입자 pickup_group 파생 갱신 (컬럼 존재 테이블만)."""
-    for t in ('volte_subscriptions', 'ptt_subscriptions'):
+def _sync_pickup_group(cur, user_id: str) -> list:
+    """멤버십 변경 뒤 파생값 재계산 — user_id 가 속한 person 의 volte/ptt **전 회선** pickup_group 을
+    effective_dispatch_group 으로 맞춘다(컬럼 존재 테이블만). 값이 바뀐 회선 id 목록을 돌려준다(USER_CHANGED 대상 —
+    CSP 는 회선별 사용자 캐시로 pickup_group 을 든다). 멤버 행 뒤에 호출한다(INSERT/DELETE 반영 상태를 읽는다).
+
+    관제사의 PTT 회선을 멤버로 넣지 않고 파생으로 잇는 이유: 멤버 행은 대표번호 포크 대상(CSP ResolveForkTargets —
+    서비스 구분 없이 등록 멤버 전원)이라 PTT 앱까지 울린다. 반면 CSP 의 PTT 청취·conference 구독 인가(§5.6)는
+    SIP 신원(PTT id)으로 EffectiveGroupOf 를 묻고 멤버 색인에 없으면 pickup_group 을 읽으므로, 이 파생이 없으면
+    org 폴백 → CanListenPtt 실패 → 403 이 된다."""
+    person = _person_of(cur, user_id)
+    changed = []
+    for t in _SUB_TABLES:
         cur.execute("SHOW COLUMNS FROM %s LIKE 'pickup_group'" % t)
         if cur.fetchone() is None:
             continue
-        cur.execute(f"UPDATE {t} SET pickup_group=%s WHERE id=%s", (group_id, user_id))
+        if person is None:
+            cur.execute(f"SELECT id, pickup_group FROM {t} WHERE id=%s", (user_id,))
+        else:
+            cur.execute(f"SELECT id, pickup_group FROM {t} WHERE user_id=%s", (person,))
+        for row in cur.fetchall():
+            eff = effective_dispatch_group(cur, row['id'])
+            if (row['pickup_group'] or None) != eff:
+                cur.execute(f"UPDATE {t} SET pickup_group=%s WHERE id=%s", (eff, row['id']))
+                changed.append(row['id'])
+    return changed
+
+
+def _changed_users(*ids_lists) -> list:
+    """USER_CHANGED 통지 대상 — 멤버 행이 바뀐 회선 + 파생값이 바뀐 회선, 순서 유지·중복 제거."""
+    out = []
+    for ids in ids_lists:
+        for uid in ids:
+            if uid and uid not in out:
+                out.append(uid)
+    return out
 
 
 def _subscriber_exists(cur, user_id: str) -> bool:
-    for t in ('volte_subscriptions', 'ptt_subscriptions'):
+    for t in _SUB_TABLES:
         cur.execute(f"SELECT 1 FROM {t} WHERE id=%s", (user_id,))
         if cur.fetchone():
             return True
@@ -351,8 +419,7 @@ def _create_group(cur, body, is_manager: bool):
         cur.execute("INSERT INTO dispatch_group_members (user_id, group_id, alert_order) VALUES (%s,%s,%s) "
                     "ON DUPLICATE KEY UPDATE group_id=VALUES(group_id), alert_order=VALUES(alert_order)",
                     (uid, group_id, order))
-        _sync_pickup_group(cur, uid, group_id)
-        changed_users.append(uid)
+        changed_users = _changed_users(changed_users, [uid], _sync_pickup_group(cur, uid))
     notify_csp("DISPATCH_GROUP_CHANGED", group_id, "POST")
     for uid in changed_users:
         notify_csp("USER_CHANGED", f"tel:{uid}", "PUT")
@@ -421,11 +488,12 @@ def _delete_group(cur, group_id: str):
     cur.execute("DELETE FROM dispatch_groups WHERE id=%s", (group_id,))
     if cur.rowcount == 0:
         return HandlerResult(status=404, body={'error': 'Group not found'})
-    # 멤버 행은 FK CASCADE — 파생 pickup_group 해제(NULL → CSP org 폴백)
+    # 멤버 행은 FK CASCADE — 파생 pickup_group 재계산(같은 person 의 PTT 회선 포함, 남는 멤버십 없으면 NULL → CSP org 폴백)
+    changed = list(users)
     for uid in users:
-        _sync_pickup_group(cur, uid, None)
+        changed = _changed_users(changed, _sync_pickup_group(cur, uid))
     notify_csp("DISPATCH_GROUP_CHANGED", group_id, "DELETE")
-    for uid in users:
+    for uid in changed:
         notify_csp("USER_CHANGED", f"tel:{uid}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
@@ -465,11 +533,12 @@ def _add_member(cur, group_id: str, body, is_manager: bool):
     cur.execute("INSERT INTO dispatch_group_members (user_id, group_id, alert_order) VALUES (%s,%s,%s) "
                 "ON DUPLICATE KEY UPDATE group_id=VALUES(group_id), alert_order=VALUES(alert_order)",
                 (user_id, group_id, order))
-    _sync_pickup_group(cur, user_id, group_id)
+    changed = _changed_users([user_id], _sync_pickup_group(cur, user_id))
     notify_csp("DISPATCH_GROUP_CHANGED", group_id, "PUT")
     if prev and prev != group_id:
         notify_csp("DISPATCH_GROUP_CHANGED", prev, "PUT")
-    notify_csp("USER_CHANGED", f"tel:{user_id}", "PUT")
+    for uid in changed:
+        notify_csp("USER_CHANGED", f"tel:{uid}", "PUT")
     return HandlerResult(status=201, body={'group_id': group_id, 'user_id': user_id, 'moved_from': prev})
 
 
@@ -477,9 +546,10 @@ def _remove_member(cur, group_id: str, user_id: str):
     cur.execute("DELETE FROM dispatch_group_members WHERE group_id=%s AND user_id=%s", (group_id, user_id))
     if cur.rowcount == 0:
         return HandlerResult(status=404, body={'error': 'Member not found'})
-    _sync_pickup_group(cur, user_id, None)
+    changed = _changed_users([user_id], _sync_pickup_group(cur, user_id))
     notify_csp("DISPATCH_GROUP_CHANGED", group_id, "PUT")
-    notify_csp("USER_CHANGED", f"tel:{user_id}", "PUT")
+    for uid in changed:
+        notify_csp("USER_CHANGED", f"tel:{uid}", "PUT")
     return HandlerResult(status=200, body={'group_id': group_id, 'user_id': user_id})
 
 
@@ -598,7 +668,7 @@ CIMS_DISPATCH_API_DOCS = [
          {'status': 409, 'when': 'pilot_id 가 가입 id·다른 대표번호와 충돌', 'body': {'error': 'pilot_conflict'}},
          {'status': 409, 'when': 'id 중복', 'body': {'error': 'group_exists'}},
      ],
-     'notes': ['성공 시 **201**.', '멤버 편입은 가입자 pickup_group 을 그룹 id 로 파생 갱신하고 USER_CHANGED 를 보낸다.',
+     'notes': ['성공 시 **201**.', '멤버 편입은 가입자 pickup_group 을 그룹 id 로 파생 갱신하고 USER_CHANGED 를 보낸다 — 같은 person 의 다른 회선(관제사 PTT 회선)도 물려받는다(멤버 행은 VoLTE 회선 하나).',
                'CSP 에는 DISPATCH_GROUP_CHANGED(uri=그룹 id) 로 재적재를 알린다.'],
      'auth': dict(_AUTH_OPERATOR)},
     {'id': 'csc.dispatch-groups.update', 'module': 'csc', 'method': 'PUT', 'path': '/api/v1/dispatch-groups/{id}',
@@ -620,7 +690,7 @@ CIMS_DISPATCH_API_DOCS = [
      'response': '{id}', 'response_fields': [{'name': 'id', 'type': 'string', 'desc': '그룹 id'}],
      'example': {'id': 'dg-7f3a91c2'},
      'errors': _ERR_COMMON + [_ERR_SCHEMA, {'status': 404, 'when': '없는 그룹', 'body': {'error': 'Group not found'}}],
-     'notes': ['멤버의 pickup_group 은 NULL 로 돌아간다 (CSP 는 org 폴백).'], 'auth': dict(_AUTH_OPERATOR)},
+     'notes': ['멤버(와 같은 person 의 파생 회선)의 pickup_group 은 NULL 로 돌아간다 (CSP 는 org 폴백).'], 'auth': dict(_AUTH_OPERATOR)},
     {'id': 'csc.dispatch-groups.members.list', 'module': 'csc', 'method': 'GET',
      'path': '/api/v1/dispatch-groups/{id}/members', 'summary': '관제 그룹 멤버 목록',
      'params': [{'name': 'id', 'in': 'path', 'type': 'string', 'required': True, 'desc': '그룹 id'}],
@@ -642,7 +712,7 @@ CIMS_DISPATCH_API_DOCS = [
          {'status': 403, 'when': '감청/청취 그룹 편입을 operator 가 시도', 'body': {'error': 'manager_required'}},
          {'status': 404, 'when': '없는 그룹/가입자'},
      ],
-     'notes': ['성공 시 **201**.', '가입자 pickup_group 이 그룹 id 로 갱신된다 — 반영은 다음 REGISTER 갱신부터(등록 바인딩 스냅샷).'],
+     'notes': ['성공 시 **201**.', '가입자 pickup_group 이 그룹 id 로 갱신된다 — 같은 person 의 PTT 회선도 파생으로 물려받아 PTT 청취·conference 구독 범위(§5.6)가 열린다. 픽업 축 반영은 다음 REGISTER 갱신부터(등록 바인딩 스냅샷).'],
      'auth': dict(_AUTH_OPERATOR)},
     {'id': 'csc.dispatch-groups.members.remove', 'module': 'csc', 'method': 'DELETE',
      'path': '/api/v1/dispatch-groups/{id}/members/{user_id}', 'summary': '멤버 제거 (pickup_group 해제)',
