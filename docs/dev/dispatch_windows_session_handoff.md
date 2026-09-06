@@ -73,8 +73,8 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
    + `migrate_dispatch_groups.sql` 백필, dispatch_center.md §3.2·§5.6). 라이브 DB 백필 적용·CSP 캐시 재적재 완료. **서버 실측**:
    `cimsue-cli --from-profile ptt group-call g003 --listen-only` → 종전 `denied (allow_ambient_listening=0) → 403` 이
    `no active session → 480`(자격·범위 통과 뒤 활성 세션 없음 = 정상). g003 에 실단말 세션이 있을 때 다시 합류하면 200 이어야 한다.
-   CSC 코드(파생 자동화)는 **다음 csc 릴리스**에 포함 — 지금 라이브(0.2.104)는 백필 값으로 동작하며, 콘솔에서 관제 그룹 멤버를
-   바꾸면 PTT 회선 파생은 새 csc 배포 전까지 자동 갱신되지 않는다.
+   CSC 코드(파생 자동화)는 **csc 0.2.105 로 라이브 배포 완료**(21:4x, 정지창 11초, 커밋 `3a10fff0`) — 이후 콘솔에서 관제 그룹 멤버를
+   바꾸면 같은 person 의 PTT 회선 `pickup_group` 도 자동 파생된다(파생 회선 직접 편집은 409 실측).
 2. **앱 실기 e2e(사용자)** — 후속 요청서 §3 그룹 CRUD 7단계 + 아래 확인 줄:
    - 로그인 직후 로그 `profile … members=42 pttTargets=5`, ③ 띠에 관제1석·관제2석만, `groups 1 member (0 owned), 4 listen-scope`(g002 는 멤버)
    - `history: available` 뒤 통화·SDS 가 생기면 ②④ 최근 행에 타인 항목이 수초 내 붙는지
