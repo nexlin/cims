@@ -414,9 +414,10 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   ([mcdata_messaging.md §4.3](mcdata_messaging.md)).
   - 요청: `GET /provisioning/history?kind=call|ptt|message&since=<cursor>&limit=200`(CSC 4430, PKCE Bearer, `If-None-Match` → 304). kind 별로 커서·ETag 독립,
     2.5 초 주기. 로그인 직후 `kind=call&limit=1` 탐침 — 404/501 이면 서버 미구현으로 조용히 꺼지고, 403 이면 범위 밖으로 꺼진다(재시도 없음).
-  - 응답(앱이 읽는 것 — 서버 계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md), 필드 추가는 무시): `{ "items": [ { "id", "ts"(ISO 8601),
-    "kind", "scope", "from", "to", "groupId", "duration", "endReason", "text" } ], "nextSince": "<다음 커서>" }` + 응답 헤더 `ETag`. `id` 가 중복 제거 키,
-    `items` 는 `ts` 오름차순. 앱은 kind·필드로 ②(ptt/그룹 sds)·④(call/1:1 sds) 행에 매핑한다.
+  - 응답(앱이 읽는 것 — 서버 계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md), 필드 추가는 무시): `{ "items": [ { "id", "time"(ISO 8601+offset),
+    "kind", "event", "from", "to", "group"(URI), "duration"(초), "emergency", "text" } ], "next": "<다음 커서>" }` + 응답 헤더 `ETag`(If-None-Match→304).
+    `id` 가 중복 제거 키, `items` 는 `time` 오름차순. `event` = call.answered/missed·ptt.session.start/end·message.sds(②)/sms(④) — 앱이 이름표로
+    ②(ptt·그룹 sds)·④(call·1:1 sms) 행에 매핑한다.
   - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
   게이트웨이가 필요하다. 앱은 게이트웨이 유무를 접속서비스 능력으로 받아 [문자] 활성/비활성을 결정한다(능력 키 신설 필요).

@@ -2879,24 +2879,33 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
         return HandlerResult(status=403, body={"error": "no_monitor_scope"}, media_type="application/json")
 
     items, next_since = _dh.query(_SERVICE_LOG_DIR, kind, scope, since_dt, limit)
+    # 앱(HistoryClient) 와이어 계약 — dispatch_desktop_ui.md §13 / android_ue_provisioning.md §3-2.
+    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text} + 최상위 next + 응답 ETag/304.
+    wire = [_dh.format_item(r) for r in items]
+    body = {"items": wire, "next": next_since}
+    etag = _content_etag_json(body)
+    inm = args.headers.get('if-none-match') or args.headers.get('If-None-Match')
+    if inm and inm == etag:
+        logger.log_info(f"[provisioning/history] msisdn={msisdn} kind={kind} not-modified etag={etag}")
+        return HandlerResult(status=304, headers={"ETag": etag})
+
     # 감사 — 당사자 모르게 이력을 열람하는 동작(E-AUD-016 tap_mode=history). 실패는 조회를 막지 않는다.
+    #   변경 없는 폴링(304)은 감사하지 않는다(위에서 반환) — 실제 열람(새 항목/최초)만 남긴다.
     try:
         from services import fm_reporter as _fm
         r = _fm.get()
         if r is not None:
             r.send_event('call_monitored', kind='audit', mo=f"{r.node}/csc",
                          params={"monitor": msisdn, "group": scope["groupId"], "tap_mode": "history",
-                                 "hist_kind": kind, "count": len(items),
+                                 "hist_kind": kind, "count": len(wire),
                                  "monitor_scope": scope["monitorScope"], "ptt_listen": scope["pttListen"]},
-                         message=f"{msisdn} read {kind} history ({len(items)}) scope {scope['groupId']}")
+                         message=f"{msisdn} read {kind} history ({len(wire)}) scope {scope['groupId']}")
     except Exception as e:
         logger.log_warning(f"[provisioning/history] audit emit failed: {e}")
 
-    body = {"kind": kind, "since": _dh._iso(since_dt) if since_dt else "", "nextSince": next_since,
-            "count": len(items), "items": items}
     logger.log_info(f"[provisioning/history] msisdn={msisdn} kind={kind} scope={scope['groupId']} "
-                    f"m={len(scope['members'])} g={len(scope['ptt_groups'])} → {len(items)} items")
-    return HandlerResult(status=200, body=body, media_type="application/json")
+                    f"m={len(scope['members'])} g={len(scope['ptt_groups'])} → {len(wire)} items etag={etag}")
+    return HandlerResult(status=200, body=body, headers={"ETag": etag}, media_type="application/json")
 
 
 async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> HandlerResult:

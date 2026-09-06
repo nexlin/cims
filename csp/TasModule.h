@@ -46,6 +46,16 @@ struct CTasForkSet {
     std::string strSessionId;  ///< CallDir 세션 id
     bool bSequential = false;  ///< alert_mode=sequential — 한 번에 한 명씩(alert_order 순), iNoAnswerSec 는 단계 시한
     std::vector<std::string> vecQueue;  ///< sequential 의 남은 호출 대상 (선두가 다음 순번)
+    bool bDialogOpen =
+        false;  ///< 대표번호 dialog(early/confirmed) NOTIFY 를 낸 적 있는가 — terminated 를 집합당 1회만 내기 위한 가드
+};
+
+/** dialog 초기 full 스냅샷용 대표번호 호 1건 (CspServer 가 DialogNotifyState 로 변환). */
+struct PilotDialogSnapshot {
+    std::string strDialogId;  ///< dialog id = A-leg(발신자) Call-ID
+    std::string strPilot;     ///< 대표번호 AoR
+    std::string strCaller;    ///< 발신자 id
+    bool bConfirmed = false;  ///< true=확립(응답됨) / false=울리는 중(early)
 };
 
 /**
@@ -145,6 +155,10 @@ private:
     void ReleaseSessionMonitors( const std::string &strRelaySessionId );
 
 public:
+    /** dialog SUBSCRIBE 초기 full 스냅샷 — 감시 대상이 대표번호일 때 진행 중(울림/확립) 호를 채운다
+     *  (RFC 4235 §3.2, dispatch_center.md §4.5). 재로그인·재구독 즉시 대표번호 착신이 보이게 한다. */
+    void CollectPilotDialogs( const std::string &strPilotAor, std::vector<PilotDialogSnapshot> &vecOut );
+
     /** 감청 leg 기록 — Call-ID → (relay session, tap_id, monitor id, 대상, 시작시각). 감사 발신용 공개. */
     struct MonitorLeg {
         std::string strSessionId;
@@ -186,8 +200,10 @@ private:
     /** 무응답 → overflow_target 으로 재시도(1단계). 대상이 없으면 FailFork(480). */
     void OverflowFork( const std::string &strACallId );
     /** 대표번호 AoR 감시자에게 dialog 이벤트(§4.5) — 대기/승자 leg Call-ID 로 통지. */
-    void NotifyPilotDialog( const CTasForkSet &clsSet, const std::string &strLegCallId, const char *pszState,
-                            const std::string &strRemote );
+    /** 대표번호 AoR 감시자에게 dialog 이벤트 — 포크 집합당 dialog 하나(id=A-leg Call-ID, dispatch_center.md §4.5).
+     *  early/confirmed/terminated 가 같은 id 를 써 감시 앱 대기열에 착신 한 건이 한 행으로 뜬다(leg 별 아님). */
+    void NotifyPilotDialog( const CTasForkSet &clsSet, const char *pszState, const std::string &strRemote = "" );
+
     /** 가입자가 확립/진행 중 다이얼로그를 갖는가 (busy_members=skip 판정). */
     static bool IsUserBusy( const std::string &strUserId );
     bool OnForkRing( const char *pszCallId, int iSipStatus );

@@ -483,6 +483,12 @@ int CCallMap::GetCount() {
  * @brief 통화 맵 모니터링용 문자열을 생성한다.
  * @param strBuf 통화 맵 모니터링용 문자열 저장 변수
  */
+void CCallMap::Iterate( const std::function<void( const std::string &, const CCallInfo & )> &fn ) {
+    m_clsMutex.acquire();
+    for ( CALL_MAP::const_iterator it = m_clsMap.begin(); it != m_clsMap.end(); ++it ) fn( it->first, it->second );
+    m_clsMutex.release();
+}
+
 void CCallMap::GetString( CMonitorString &strBuf ) {
     CALL_MAP::iterator itMap;
     strBuf.Clear();

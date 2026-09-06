@@ -75,6 +75,7 @@ CCallDir gclsCallDir;
 #include "SipUri.h"
 #include "SipUserAgentVersion.h"
 #include "SubscriptionManager.h"
+#include "TasModule.h"  // CollectPilotDialogs / PilotDialogSnapshot (dialog 초기 full 스냅샷)
 #include "UserMap.h"
 
 // Forward Declaration for Notify Helpers
@@ -782,6 +783,20 @@ struct DialogNotifyState {
     std::string strLocalAor, strRemoteAor;
 };
 
+static void _AppendDialogEntry( std::string &s, const DialogNotifyState &dlg, const std::string &strDomSuffix ) {
+    if ( dlg.strCallId.empty() ) return;
+    s += "  <dialog id=\"" + dlg.strCallId + "\" call-id=\"" + dlg.strCallId + "\"";
+    if ( !dlg.strLocalTag.empty() ) s += " local-tag=\"" + dlg.strLocalTag + "\"";
+    if ( !dlg.strRemoteTag.empty() ) s += " remote-tag=\"" + dlg.strRemoteTag + "\"";
+    s += " direction=\"" + ( dlg.strDir.empty() ? std::string( "recipient" ) : dlg.strDir ) + "\">\r\n";
+    s += "    <state>" + ( dlg.strState.empty() ? std::string( "confirmed" ) : dlg.strState ) + "</state>\r\n";
+    if ( !dlg.strLocalAor.empty() )
+        s += "    <local><identity>sip:" + dlg.strLocalAor + strDomSuffix + "</identity></local>\r\n";
+    if ( !dlg.strRemoteAor.empty() )
+        s += "    <remote><identity>sip:" + dlg.strRemoteAor + strDomSuffix + "</identity></remote>\r\n";
+    s += "  </dialog>\r\n";
+}
+
 static std::string BuildDialogInfoBody( const std::string &strWatchedAor, const DialogNotifyState &dlg, int iVersion ) {
     const std::string strDom = gclsServiceMap.GetDomainByKind( "volte" );
     const std::string strDomSuffix = strDom.empty() ? "" : ( "@" + strDom );
@@ -789,18 +804,20 @@ static std::string BuildDialogInfoBody( const std::string &strWatchedAor, const 
     s += "<dialog-info xmlns=\"urn:ietf:params:xml:ns:dialog-info\" version=\"" + std::to_string( iVersion ) +
          "\" state=\"" + ( dlg.bFull ? "full" : "partial" ) + "\" entity=\"sip:" + strWatchedAor + strDomSuffix +
          "\">\r\n";
-    if ( !dlg.strCallId.empty() ) {
-        s += "  <dialog id=\"" + dlg.strCallId + "\" call-id=\"" + dlg.strCallId + "\"";
-        if ( !dlg.strLocalTag.empty() ) s += " local-tag=\"" + dlg.strLocalTag + "\"";
-        if ( !dlg.strRemoteTag.empty() ) s += " remote-tag=\"" + dlg.strRemoteTag + "\"";
-        s += " direction=\"" + ( dlg.strDir.empty() ? std::string( "recipient" ) : dlg.strDir ) + "\">\r\n";
-        s += "    <state>" + ( dlg.strState.empty() ? std::string( "confirmed" ) : dlg.strState ) + "</state>\r\n";
-        if ( !dlg.strLocalAor.empty() )
-            s += "    <local><identity>sip:" + dlg.strLocalAor + strDomSuffix + "</identity></local>\r\n";
-        if ( !dlg.strRemoteAor.empty() )
-            s += "    <remote><identity>sip:" + dlg.strRemoteAor + strDomSuffix + "</identity></remote>\r\n";
-        s += "  </dialog>\r\n";
-    }
+    _AppendDialogEntry( s, dlg, strDomSuffix );
+    s += "</dialog-info>\r\n";
+    return s;
+}
+
+// 초기 full 스냅샷 — 진행 중 dialog 여러 건(RFC 4235 §3.2). 빈 목록이면 빈 full(활성 호 없음).
+static std::string BuildDialogInfoBodyMulti( const std::string &strWatchedAor,
+                                             const std::vector<DialogNotifyState> &vecDlg, int iVersion ) {
+    const std::string strDom = gclsServiceMap.GetDomainByKind( "volte" );
+    const std::string strDomSuffix = strDom.empty() ? "" : ( "@" + strDom );
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    s += "<dialog-info xmlns=\"urn:ietf:params:xml:ns:dialog-info\" version=\"" + std::to_string( iVersion ) +
+         "\" state=\"full\" entity=\"sip:" + strWatchedAor + strDomSuffix + "\">\r\n";
+    for ( const auto &dlg : vecDlg ) _AppendDialogEntry( s, dlg, strDomSuffix );
     s += "</dialog-info>\r\n";
     return s;
 }
@@ -917,12 +934,17 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         if ( pstrPrebuiltBody != NULL ) strBody = *pstrPrebuiltBody;
         pMsg->m_clsContentType.Set( "application", "conference-info+xml" );
     } else if ( sub.strEventType == "dialog" ) {
-        // dialog-event (RFC 4235) — 감시 대상의 호 상태 1건 (당겨받기 BLF). version 은 구독 내
-        //   0 부터 (reg 와 동일: 첫 NOTIFY iSeq=2 → -2). pDlg 없으면 빈 full 스냅샷(활성 호 없음).
+        // dialog-event (RFC 4235) — 감시 대상의 호 상태. version 은 구독 내 0 부터 (reg 와 동일: 첫 NOTIFY iSeq=2 →
+        // -2).
+        //   초기 full 스냅샷(진행 중 호 여러 건)은 호출자가 만든 prebuilt body 로, 이후 partial 갱신은 pDlg 1건으로.
         pMsg->AddHeader( "Event", "dialog" );
-        DialogNotifyState clsEmpty;
-        clsEmpty.bFull = true;
-        strBody = BuildDialogInfoBody( sub.strResourceId, pDlg ? *pDlg : clsEmpty, iSeq - 2 );
+        if ( pstrPrebuiltBody != NULL ) {
+            strBody = *pstrPrebuiltBody;
+        } else {
+            DialogNotifyState clsEmpty;
+            clsEmpty.bFull = true;
+            strBody = BuildDialogInfoBody( sub.strResourceId, pDlg ? *pDlg : clsEmpty, iSeq - 2 );
+        }
         pMsg->m_clsContentType.Set( "application", "dialog-info+xml" );
     } else {
         pMsg->AddHeader( "Event", "xcap-diff" );
@@ -1028,6 +1050,56 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
  * @brief Send initial NOTIFY immediately after 200 OK to SUBSCRIBE
  *        (Active state, no specific document change)
  */
+// dialog SUBSCRIBE 초기 full 스냅샷 — 감시 대상 AoR 이 당사자인 진행 중 호(멤버 BLF) + 대표번호 착신(TAS).
+//   RFC 4235 §3.2 — 재로그인·재구독 즉시 이미 울리는/통화 중인 상태가 보이게 한다(dispatch_center.md §4.5/§5.2).
+static std::vector<DialogNotifyState> CollectInitialDialogs( const std::string &strAor ) {
+    std::vector<DialogNotifyState> vecOut;
+    std::set<std::string> setSeen;
+    // 1) 멤버 호 — CallMap 에서 감시 AoR 이 발신/착신인 caller-facing(m_bRecv) leg (leg 쌍 중복 제거)
+    gclsCallMap.Iterate( [&]( const std::string &strCallId, const CCallInfo &clsCi ) {
+        if ( !clsCi.m_bRecv ) return;
+        std::string strFrom, strTo;
+        gclsUserAgent.GetFromId( strCallId.c_str(), strFrom );
+        gclsUserAgent.GetToId( strCallId.c_str(), strTo );
+        DialogNotifyState d;
+        d.bFull = true;
+        d.strCallId = strCallId;
+        d.strState = clsCi.m_bEstablished ? "confirmed" : "early";
+        if ( strFrom == strAor ) {
+            d.strDir = "initiator";
+            d.strLocalAor = strAor;
+            d.strRemoteAor = strTo;
+        } else if ( strTo == strAor ) {
+            d.strDir = "recipient";
+            d.strLocalAor = strAor;
+            d.strRemoteAor = strFrom;
+        } else {
+            return;
+        }
+        gclsUserAgent.GetDialogTags( strCallId.c_str(), d.strLocalTag, d.strRemoteTag );
+        if ( setSeen.insert( strCallId ).second ) vecOut.push_back( d );
+    } );
+    // 2) 대표번호 착신 — TAS 포크(울림)/확립 집합 (감시 AoR 이 대표번호일 때)
+    CTasModule *pTas = gclsDispatcher.GetTas();
+    if ( pTas ) {
+        std::vector<PilotDialogSnapshot> vecPilot;
+        pTas->CollectPilotDialogs( strAor, vecPilot );
+        for ( const auto &p : vecPilot ) {
+            if ( !setSeen.insert( p.strDialogId ).second ) continue;
+            DialogNotifyState d;
+            d.bFull = true;
+            d.strCallId = p.strDialogId;
+            d.strState = p.bConfirmed ? "confirmed" : "early";
+            d.strDir = "recipient";
+            d.strLocalAor = p.strPilot;
+            d.strRemoteAor = p.strCaller;
+            gclsUserAgent.GetDialogTags( p.strDialogId.c_str(), d.strLocalTag, d.strRemoteTag );
+            vecOut.push_back( d );
+        }
+    }
+    return vecOut;
+}
+
 void SendInitialNotify( const SubscriptionInfo &sub ) {
     if ( sub.strEventType == "reg" ) {
         // reg-event: 등록 상태 reginfo 문서 1건
@@ -1047,12 +1119,17 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
         return;
     }
     if ( sub.strEventType == "dialog" ) {
-        // RFC 4235: 구독 수락 직후 감시 대상의 현재 호 상태 full 스냅샷 1건. 현 구현은 진행 중
-        //   호를 CallMap 에서 역인덱싱하지 않으므로 빈 full(활성 호 없음)로 시작하고, 이후 호 상태
-        //   변경마다 SendDialogEventNotify 가 partial 로 갱신한다.
-        DialogNotifyState clsEmpty;
-        clsEmpty.bFull = true;
-        SendNotifyToSubscriber( sub, "", "", NULL, NULL, NULL, &clsEmpty );
+        // RFC 4235 §3.2: 구독 수락 직후 감시 대상의 진행 중 호를 full 스냅샷으로 준다(멤버 BLF + 대표번호 착신).
+        //   이후 상태 변경은 SendDialogEventNotify 가 partial 로 갱신. 활성 호가 없으면 빈 full.
+        std::vector<DialogNotifyState> vecDlg = CollectInitialDialogs( sub.strResourceId );
+        if ( vecDlg.empty() ) {
+            DialogNotifyState clsEmpty;
+            clsEmpty.bFull = true;
+            SendNotifyToSubscriber( sub, "", "", NULL, NULL, NULL, &clsEmpty );
+        } else {
+            std::string strBody = BuildDialogInfoBodyMulti( sub.strResourceId, vecDlg, 0 );
+            SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
+        }
         return;
     }
     if ( sub.strEventType == "gms" ) {

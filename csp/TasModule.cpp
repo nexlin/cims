@@ -205,8 +205,11 @@ bool CTasModule::OnCallEnd( const char *pszCallId, int iSipStatus ) {
                 std::string strPilot = it->second, strCaller, strCallee, lt, rt;
                 gclsUserAgent.GetFromId( pszCallId, strCaller );
                 gclsUserAgent.GetToId( pszCallId, strCallee );
-                gclsUserAgent.GetDialogTags( pszCallId, lt, rt );
-                SendDialogEventNotify( strPilot, pszCallId, "terminated", "recipient", strPilot, strCaller, lt, rt );
+                // dialog id = A-leg(발신자) Call-ID — early/confirmed 와 같은 id 로 같은 dialog 를 닫는다.
+                const std::string strCallerLeg =
+                    clsCallInfo.m_bRecv ? std::string( pszCallId ) : clsCallInfo.m_strPeerCallId;
+                gclsUserAgent.GetDialogTags( strCallerLeg.c_str(), lt, rt );
+                SendDialogEventNotify( strPilot, strCallerLeg, "terminated", "recipient", strPilot, strCaller, lt, rt );
                 m_mapPilotOfCall.erase( it );
                 m_mapPilotOfCall.erase( clsCallInfo.m_strPeerCallId );
             }
@@ -711,8 +714,8 @@ int CTasModule::PickUpFork( const char *pszCallId, const char *pszFrom, CSipCall
     CTasForkSet clsSet = itSet->second;
     m_mapFork.erase( itSet );
     for ( const auto &strLeg : clsSet.setPending ) {
-        gclsUserAgent.StopCall( strLeg.c_str() );
-        NotifyPilotDialog( clsSet, strLeg, "terminated", "" );
+        gclsUserAgent.StopCall(
+            strLeg.c_str() );  // 패자 CANCEL — dialog 는 아래 confirmed 로 이어진다(terminated 아님)
     }
 
     // (A, 픽업) 쌍 — OnForkStart 와 동일 (entry 포트 = 그 leg 의 peer 에게 광고하는 relay 포트)
@@ -773,7 +776,7 @@ int CTasModule::PickUpFork( const char *pszCallId, const char *pszFrom, CSipCall
         gclsCallDir.VoipAddParticipant( strACallId, strPicker, "callee" );
         gclsCallDir.VoipCallAnswer( strACallId );
     }
-    NotifyPilotDialog( clsSet, pszCallId, "confirmed", "" );
+    NotifyPilotDialog( clsSet, "confirmed" );
     CLog::Print( LOG_INFO, "PickUpFork: pilot(%s) picked up by %s (leg %s) — %d pending cancelled [TAS]",
                  clsSet.strPilot.c_str(), strPicker.c_str(), pszCallId, (int)clsSet.setPending.size() );
     return 0;
@@ -990,13 +993,33 @@ void CTasModule::ResolveForkTargets( const CspDispatchGroup &clsGroup, const std
     }
 }
 
-void CTasModule::NotifyPilotDialog( const CTasForkSet &clsSet, const std::string &strLegCallId, const char *pszState,
-                                    const std::string &strRemote ) {
+void CTasModule::NotifyPilotDialog( const CTasForkSet &clsSet, const char *pszState, const std::string &strRemote ) {
+    // 포크 집합당 dialog 하나 — id·태그를 A-leg(발신자→대표번호 INVITE) Call-ID 로 고정해 early→confirmed→terminated 가
+    //   같은 dialog 를 갱신한다. 종전엔 B-leg(그룹원)별 Call-ID 를 id 로 써 착신 한 건이 감시 앱에 N 행으로
+    //   떴다(§4.5·RFC 4235).
     std::string lt, rt;
-    gclsUserAgent.GetDialogTags( strLegCallId.c_str(), lt, rt );
-    // 대표번호 AoR 감시자(그룹원 데스크) — recipient 방향, local=대표번호, remote=발신자(응답자 표시는 앱 몫)
-    SendDialogEventNotify( clsSet.strPilot, strLegCallId, pszState, "recipient", clsSet.strPilot,
+    gclsUserAgent.GetDialogTags( clsSet.strACallId.c_str(), lt, rt );
+    // recipient 방향, local=대표번호, remote=발신자(응답한 그룹원 표시는 앱 몫)
+    SendDialogEventNotify( clsSet.strPilot, clsSet.strACallId, pszState, "recipient", clsSet.strPilot,
                            strRemote.empty() ? clsSet.strCaller : strRemote, lt, rt );
+}
+
+void CTasModule::CollectPilotDialogs( const std::string &strPilotAor, std::vector<PilotDialogSnapshot> &vecOut ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutexFork );
+    // 울리는 중 — 포크 집합(early 를 이미 낸 것만: 실제 링잉 상태)
+    for ( const auto &kv : m_mapFork )
+        if ( kv.second.strPilot == strPilotAor && kv.second.bDialogOpen )
+            vecOut.push_back( { kv.second.strACallId, strPilotAor, kv.second.strCaller, false } );
+    // 확립 — m_mapPilotOfCall 은 양 leg 이 pilot 에 매핑되므로 caller-facing(m_bRecv) leg 만 골라 1건으로.
+    for ( const auto &kv : m_mapPilotOfCall ) {
+        if ( kv.second != strPilotAor ) continue;
+        CCallInfo clsCi;
+        if ( gclsCallMap.Select( kv.first.c_str(), clsCi ) && clsCi.m_bRecv ) {
+            std::string strCaller;
+            gclsUserAgent.GetFromId( kv.first.c_str(), strCaller );
+            vecOut.push_back( { kv.first, strPilotAor, strCaller, true } );
+        }
+    }
 }
 
 int CTasModule::ForkAlert( CTasForkSet &clsSet, const std::vector<std::string> &vecTargets ) {
@@ -1237,11 +1260,13 @@ bool CTasModule::OnForkRing( const char *pszCallId, int iSipStatus ) {
     CTasForkSet &clsSet = itSet->second;
     if ( iSipStatus >= 180 && iSipStatus < 200 ) {
         if ( !clsSet.bRang ) {
-            // 첫 180 만 A 에게, SDP 없이 — 대기 leg 의 미디어는 CMP 가 폐기하므로 183 조기 미디어를 주면 무음 구간
+            // 첫 180 만 A 에게, SDP 없이 — 대기 leg 의 미디어는 CMP 가 폐기하므로 183 조기 미디어를 주면 무음 구간.
+            //   대표번호 dialog early 도 여기서 1회만 낸다(leg 마다가 아니라 착신 한 건에 대해 한 번).
             clsSet.bRang = true;
             gclsUserAgent.RingCall( clsSet.strACallId.c_str(), SIP_RINGING, NULL );
+            clsSet.bDialogOpen = true;
+            NotifyPilotDialog( clsSet, "early" );
         }
-        NotifyPilotDialog( clsSet, pszCallId, "early", "" );
     }
     return true;
 }
@@ -1286,7 +1311,7 @@ bool CTasModule::OnForkStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
         gclsCallDir.WriteSessionMapping( clsSet.strSessionId, strACallId, pszCallId, clsSet.strRelaySesId );
         gclsCallDir.VoipAddParticipant( strACallId, strWinner, "callee" );
     }
-    NotifyPilotDialog( clsSet, pszCallId, "confirmed", "" );
+    NotifyPilotDialog( clsSet, "confirmed" );
     CLog::Print( LOG_INFO, "OnForkStart: pilot(%s) answered by %s (leg %s) — %d loser(s) cancelled [TAS]",
                  clsSet.strPilot.c_str(), strWinner.c_str(), pszCallId, (int)clsSet.setPending.size() - 1 );
     return false;  // 디스패처 정상 answer 경로가 RELAY_MODIFY(peer1)·A 200 OK 를 수행
@@ -1329,10 +1354,10 @@ void CTasModule::FailFork( const std::string &strACallId, int iSipCode ) {
     if ( itSet == m_mapFork.end() ) return;
     CTasForkSet clsSet = itSet->second;
     m_mapFork.erase( itSet );
-    for ( const auto &strLeg : clsSet.setPending ) {
+    for ( const auto &strLeg : clsSet.setPending )
         gclsUserAgent.StopCall( strLeg.c_str() );  // CANCEL — 최종 응답은 OnForkEnd 가 흡수
-        NotifyPilotDialog( clsSet, strLeg, "terminated", "" );
-    }
+    // 착신 한 건이 완전 실패 — 대표번호 dialog terminated 를 집합당 1회만(early/confirmed 를 낸 적 있을 때).
+    if ( clsSet.bDialogOpen ) NotifyPilotDialog( clsSet, "terminated" );
     if ( clsSet.bRelay )
         gclsCmpClient.RemoveSession( clsSet.strRelaySessionId, clsSet.strCaller, clsSet.strPilot,
                                      clsSet.strRelaySesId );
@@ -1390,10 +1415,8 @@ void CTasModule::Tick() {
         if ( itSet->second.bSequential && !itSet->second.vecQueue.empty() ) {
             // sequential 단계 시한 만료 — 현 순번 CANCEL 후 다음 순번 (487 은 OnForkEnd 가 흡수)
             CTasForkSet &clsSeq = itSet->second;
-            for ( const auto &strLeg : clsSeq.setPending ) {
-                gclsUserAgent.StopCall( strLeg.c_str() );
-                NotifyPilotDialog( clsSeq, strLeg, "terminated", "" );
-            }
+            for ( const auto &strLeg : clsSeq.setPending )
+                gclsUserAgent.StopCall( strLeg.c_str() );  // 현 순번 CANCEL — dialog 는 early 유지(다음 순번 계속)
             clsSeq.setPending.clear();
             if ( AdvanceSequential( clsSeq ) ) continue;
         }

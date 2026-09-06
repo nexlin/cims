@@ -173,6 +173,46 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(dh.userpart("SIP:G002@X"), "g002")
 
 
+class WireFormatTests(unittest.TestCase):
+    """format_item — 내부 row → 앱 HistoryEntry 계약. 시각 offset ISO·event 이름표·group tel: uri."""
+
+    def test_call_item(self):
+        row = {"kind": "call", "ts": "2026-09-06T19:05:00", "id": "c1", "initiator": "+8210001",
+               "callee": "+8210002", "answerTime": "2026-09-06T19:04:59", "duration": 42, "state": "ended"}
+        w = dh.format_item(row)
+        self.assertEqual((w["id"], w["kind"], w["event"], w["from"], w["to"], w["group"], w["duration"]),
+                         ("c1", "call", "call.answered", "+8210001", "+8210002", "", 42))
+        self.assertRegex(w["time"], r'^2026-09-06T19:05:00[+-]\d{2}:\d{2}$')
+        self.assertFalse(w["emergency"]); self.assertEqual(w["text"], "")
+
+    def test_call_missed_when_unanswered(self):
+        w = dh.format_item({"kind": "call", "ts": "t", "id": "c2", "initiator": "a", "callee": "b",
+                            "answerTime": None, "duration": 0})
+        self.assertEqual(w["event"], "call.missed")
+
+    def test_ptt_item_group_uri_and_duration(self):
+        w = dh.format_item({"kind": "ptt", "ts": "2026-09-06T19:00:30", "id": "s1", "groupId": "g002",
+                            "initiator": "+8250001", "state": "ended", "startTime": "2026-09-06T19:00:00",
+                            "endTime": "2026-09-06T19:00:30"})
+        self.assertEqual((w["kind"], w["event"], w["group"], w["from"], w["to"], w["duration"]),
+                         ("ptt", "ptt.session.end", "tel:g002", "+8250001", "", 30))
+
+    def test_ptt_active_is_session_start(self):
+        w = dh.format_item({"kind": "ptt", "ts": "t", "id": "s2", "groupId": "g002", "state": "active"})
+        self.assertEqual(w["event"], "ptt.session.start")
+
+    def test_message_group_vs_direct_event(self):
+        g = dh.format_item({"kind": "message", "ts": "t", "id": "m1", "scope": "group", "groupId": "g002",
+                            "from": "+8250001", "text": "hi"})
+        d = dh.format_item({"kind": "message", "ts": "t", "id": "m2", "scope": "direct", "from": "+8210001",
+                            "to": "+8210002", "text": "dm"})
+        self.assertEqual((g["event"], g["group"], g["text"]), ("message.sds", "tel:g002", "hi"))
+        self.assertEqual((d["event"], d["group"], d["to"]), ("message.sms", "", "+8210002"))
+
+    def test_bad_time_is_empty(self):
+        self.assertEqual(dh.format_item({"kind": "call", "ts": None, "id": "c", "initiator": "a", "callee": "b"})["time"], "")
+
+
 class HandlerTests(unittest.TestCase):
     """handle_provisioning_history — 토큰·kind·범위 게이트(403)·감사·응답 형태."""
 
@@ -240,26 +280,50 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(r.status, 403)
         self.assertEqual(r.body["error"], "no_monitor_scope")
 
-    def test_call_history_and_audit(self):
+    def test_call_history_wire_contract_and_audit(self):
         self.t.call("call-A", "+821310002001", "+821310009999")
         r = self._get(kind="call")
         self.assertEqual(r.status, 200)
-        self.assertEqual(r.body["kind"], "call")
-        self.assertEqual([x["id"] for x in r.body["items"]], ["call-A"])
-        self.assertTrue(r.body["nextSince"])
+        # 앱 HistoryClient 계약 — 최상위 items/next, 응답 ETag
+        self.assertIn("items", r.body); self.assertIn("next", r.body)
+        self.assertNotIn("nextSince", r.body); self.assertNotIn("kind", r.body)
+        self.assertRegex(r.headers.get("ETag", ""), r'^"[0-9a-f]{32}"$')
+        it = r.body["items"][0]
+        self.assertEqual(it["id"], "call-A")
+        self.assertEqual(it["kind"], "call")
+        self.assertEqual(it["event"], "call.answered")           # answer_time 있음
+        self.assertEqual((it["from"], it["to"]), ("+821310002001", "+821310009999"))
+        self.assertRegex(it["time"], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$')
+        self.assertEqual(it["group"], ""); self.assertIsInstance(it["duration"], int)
+        self.assertIn("emergency", it); self.assertIn("text", it)
         # 감사 E-AUD-016 (call_monitored, tap_mode=history) 1건
         self.assertEqual(len(self.audits), 1)
         _args, kw = self.audits[0]
-        self.assertEqual(_args[0], "call_monitored")
-        self.assertEqual(kw["kind"], "audit")
-        self.assertEqual(kw["params"]["tap_mode"], "history")
-        self.assertEqual(kw["params"]["hist_kind"], "call")
+        self.assertEqual((_args[0], kw["kind"], kw["params"]["tap_mode"], kw["params"]["hist_kind"]),
+                         ("call_monitored", "audit", "history", "call"))
 
-    def test_message_history_group_scope(self):
+    def test_if_none_match_304_no_audit(self):
+        self.t.call("call-A", "+821310002001", "+821310009999")
+        first = self._get(kind="call")
+        self.audits.clear()
+        # 같은 ETag 로 재요청 → 304, 감사 없음
+        a = HandlerArgs("GET", "/provisioning/history", "127.0.0.1", 0,
+                        headers={"authorization": "Bearer x", "if-none-match": first.headers["ETag"]},
+                        query_params={"kind": "call"})
+        r304 = asyncio.run(m.handle_provisioning_history(a, {}))
+        self.assertEqual(r304.status, 304)
+        self.assertEqual(r304.headers["ETag"], first.headers["ETag"])
+        self.assertEqual(len(self.audits), 0)
+
+    def test_message_history_wire_group_and_direct(self):
         self.t.group_msg("g002", "+82510002001", "team msg")
-        self.t.group_msg("g009", "+82510009999", "outside")
+        self.t.direct_msg("+821310002001", "+821310009999", "dm")
         r = self._get(kind="message")
-        self.assertEqual([x["text"] for x in r.body["items"]], ["team msg"])
+        by_text = {x["text"]: x for x in r.body["items"]}
+        self.assertEqual(by_text["team msg"]["event"], "message.sds")
+        self.assertEqual(by_text["team msg"]["group"], "tel:g002")
+        self.assertEqual(by_text["dm"]["event"], "message.sms")
+        self.assertEqual(by_text["dm"]["group"], "")
 
     def test_mcptt_route_registered(self):
         paths = [p for (p, _h, _k) in m.CSC_HANDLER_LIST]

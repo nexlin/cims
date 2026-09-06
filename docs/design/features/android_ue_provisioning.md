@@ -220,21 +220,25 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
   폴링한다(관제 앱 2~3초 주기). 스캔은 최대 48 시간 버킷으로 유계.
 - `limit`(선택, 기본 200, 최대 1000): 가장 최근 N 개.
 
-응답 `200`:
+응답 `200`(단말 `HistoryClient` 계약 — 필드 추가는 무시, 필수 `id`·`time` 없으면 스킵):
 ```json
 {
-  "kind": "call", "since": "2026-09-06T19:00:00", "nextSince": "2026-09-06T19:05:12",
-  "count": 2,
-  "items": [ { "kind":"call", "ts":"…", "id":"<call_id>", "initiator":"+82…", "callee":"+82…",
-               "state":"ended", "inviteTime":"…", "answerTime":"…", "endTime":"…",
-               "duration":30, "sipStatus":200, "endReason":"normal" } ]
+  "items": [
+    { "id": "<call_id>", "time": "2026-09-06T19:05:12+09:00", "kind": "call",
+      "event": "call.answered", "from": "+82…", "to": "+82…", "group": "",
+      "duration": 30, "emergency": false, "text": "" }
+  ],
+  "next": "2026-09-06T19:05:12"
 }
 ```
-- `items` 는 `ts` **오름차순**(오래된→최근). 앱은 `nextSince` 로 다음 폴링(그 이후만 수신) — 표시할 때
-  뒤집는다. `ts` = 종료분은 end_time, 진행 중은 시작/발신 시각.
-- kind=`ptt` 항목: `{kind,ts,id:<sesid>,groupId,groupName,initiator,callId,state,startTime,endTime,memberCount}`.
-- kind=`message` 항목: `{kind,ts,id:<msg_id>,scope:"group"|"direct",groupId,from,to,msgType,convId,text,size,
-  dispositionReq,fanout,fileName,fileUrl}`.
+- 항목 공통 필드: `id`(중복 제거 키) · `time`(ISO8601 + 로컬 offset — 앱 `DateTime` 파싱) · `kind`(call/ptt/message) ·
+  `event`(아래 이름표) · `from` · `to` · `group`(그룹 URI `tel:<gid>`, 비그룹은 "") · `duration`(초) · `emergency`(bool) · `text`.
+- `items` 는 `time` **오름차순**(오래된→최근). 앱은 `next` 를 다음 폴링의 `since` 로 그대로 넣어 그 이후만 받는다(표시는 뒤집는다).
+- `event` 이름표(앱 switch 와 1:1): call = `call.answered`(응답됨)/`call.missed`(무응답) · ptt = `ptt.session.start`(진행 중)/
+  `ptt.session.end`(종료) · message = `message.sds`(그룹 SDS → ② 패널)/`message.sms`(1:1 → ④ 패널). `group`·`duration`·`text`
+  는 종류에 따라 채워진다(call `group=""`·`duration`=통화초, ptt `group=tel:<gid>`·`duration`=세션초, message `text`=본문).
+- 응답 헤더 `ETag`. 단말이 `If-None-Match` 로 같은 값을 보내면 **304**(본문 없음, 폴링 대역 절약). 변경 없는 304 는
+  감사하지 않는다 — 실제 열람(새 항목/최초)만 `E-AUD-016` 로 남긴다.
 
 **범위(scope) 게이트** — 관제 그룹 속성으로 서버가 거른다(CSP `CanWatch`/`CanListenPtt` 와 같은 규칙):
 - `call` · 1:1 `message` = `monitor_scope` 로 해석한 감시 대상 VoLTE 가입자(자기 그룹원 항상 + `listed`

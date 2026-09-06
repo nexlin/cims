@@ -19,6 +19,7 @@
 #ifndef _CALL_MAP_H_
 #define _CALL_MAP_H_
 
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -126,6 +127,9 @@ public:
     bool TeardownByRelaySessionId( const std::string &strSessionId );
 
     void GetString( CMonitorString &strBuf );
+
+    /** 활성 호 read-only 순회 (dialog 초기 full 스냅샷 — RFC 4235 §3.2). 콜백에서 map 을 수정하지 말 것. */
+    void Iterate( const std::function<void( const std::string &, const CCallInfo & )> &fn );
 
 private:
     CALL_MAP m_clsMap;

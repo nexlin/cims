@@ -191,6 +191,13 @@ TAS 인에이블 CSP 로 보내야 한다. 트렁크 leg 는 SRTP·코덱 협상
 걸려온 호의 early/confirmed/terminated 와 응답자(`remote` 신원)가 NOTIFY 된다 — 데스크 큐 표시·
 "누가 받았나" 표시의 표준 경로다.
 
+**포크 집합당 dialog 하나(RFC 4235 정합).** 착신 한 건은 그룹원 N명에게 포크되지만 감시자에게는
+**dialog 하나**로 보여야 한다(데스크 큐에 한 행). `CTasModule::NotifyPilotDialog` 이 dialog `id` 를
+**A-leg(발신자→대표번호 INVITE) Call-ID 로 고정**해 early(첫 180 에서 1회)→confirmed(승자 응답)→
+terminated(집합 완전 실패 또는 확립 호 종료 시 1회)가 같은 dialog 를 갱신한다. 포크 leg(그룹원)별
+Call-ID 를 id 로 쓰지 않는다(그러면 착신 한 건이 N행으로 뜬다). 패자 CANCEL·sequential 단계 전환은
+terminated 를 내지 않는다(dialog 는 early 유지). 초기 full 스냅샷(§5.2)에도 진행 중 대표번호 호가 실린다.
+
 ### 4.6 녹취·이력
 
 relay 는 대표번호 호 1건이다. `RELAY_ADD` 의 `callee` 는 대표번호, 승자 확정 시 `RELAY_MODIFY` 의
@@ -244,6 +251,10 @@ RFC 3911 `Join` 은 **대상 dialog 지목·인가의 시그널링 수단으로�
 - **초기형**: 대상 내선별 dialog 구독. 대상 목록은 `/provisioning/me` `dispatch.members[]`(§8.4) — CSC 가
   `monitor_scope` 를 위 `CanWatchDialog` 와 **같은 규칙**으로 해석해 내려준 VoLTE 가입자 집합이라 앱은 enum 을
   해석하지 않고 그대로 구독한다. 클릭 시 소프트폰이 §5.3 의 Join INVITE 를 낸다.
+  - **구독 수락 직후 full 스냅샷**(RFC 4235 §3.2): CSP 가 감시 대상이 당사자인 **진행 중 호**(멤버 BLF = CallMap
+    caller-facing leg)와 **대표번호 착신**(TAS 포크 집합=울림 / 확립 집합)을 모아 `state=full` NOTIFY 로 준다
+    (`CspServer.cpp CollectInitialDialogs`·`BuildDialogInfoBodyMulti`, `CallMap::Iterate`·`CTasModule::CollectPilotDialogs`).
+    재로그인·재구독 즉시 이미 울리는 대표번호 호·통화 중 그룹원이 보인다(활성 호 없으면 빈 full, 이후 partial 갱신).
 - **표준형(후속)**: RFC 4662 RLS — `Supported: eventlist` 로 그룹의 감시 목록 URI 하나를 구독하고
   RLMI+multipart NOTIFY 로 전 대상의 dialog-info 를 받는다. 구독 N 개를 1개로 줄인다.
 

@@ -47,6 +47,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   (session-type prearranged, priority 5, SDS 허용, FD 불허, 긴급통화 불허, 긴급경보 허용). `<list>` 가 있으면
   멤버 전체 교체(없으면 유지) — entry uri 는 PTT 가입 번호(`tel:+E.164`, `sip:` 형 가능), 미가입 번호는 400.
   `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
+  entry 의 `<mcpttgi:participant-type>` 를 생략하면 **`participant` 로 저장**된다 — 그룹 소유(chair 권한)는 member role 이
+  아니라 `authorized_user_id`(= 생성자)로 판정하므로, 생성자를 chair 로 표기하려면 자기 entry 에 `chair` 를 명시한다(앱 기본 동작).
   `<cp:actions>` 의 `<mcpttgi:on-network-allow-conference-state>`(TS 24.481 §7.2.4.2, 기본 true) = 멤버의 conference 이벤트
   (RFC 4575) 구독 허용 — CSP 가 초기 SUBSCRIBE 에서 판정(TS 24.379 §10.1.3.4.1, 불허 403 `Warning: 138`).
 

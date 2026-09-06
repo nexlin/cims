@@ -78,6 +78,17 @@ def _hour_buckets(since_dt: datetime, until_dt: datetime) -> List[Tuple[str, str
 
 # ── 신원 정규화(범위 대조용) ────────────────────────────────────────────────
 
+def _group_uri(gid: str) -> str:
+    """mcptt_group_id → GMS 그룹 URI(tel: 형). mcptt.py `_group_uri` 와 같은 규칙(순환 import 회피)."""
+    if not gid:
+        return "tel:"
+    if gid.startswith(('tel:', 'sip:')):
+        return gid
+    if gid.startswith('+'):
+        return f"tel:{gid}"
+    return f"tel:+{gid}" if gid.isdigit() else f"tel:{gid}"
+
+
 def userpart(uri) -> str:
     """tel:/sip: scheme 과 @도메인 제거 + 소문자 → user-part. 단일 PTT/VoLTE 도메인 전제
     (mcptt.py `_norm_mcptt_uri` 와 같은 절충 — 사용자부가 시스템에서 유일)."""
@@ -240,6 +251,60 @@ def scan_messages(sl_dir: str, group_ids: set, members: set,
                 if userpart(rec.get('from')) in members or userpart(rec.get('to')) in members:
                     rows.append(_msg_row(rec, "direct"))
     return rows
+
+
+# ── 앱(HistoryEntry) 와이어 매핑 ──────────────────────────────────────────────
+#   Windows 관제 앱 `Services/HistoryClient.Parse` 계약(dispatch_desktop_ui.md §13):
+#   item = {id, time(ISO8601+offset), kind, event, from, to, group, duration(sec), emergency, text} + 최상위 next.
+#   event 이름표는 앱 switch 와 1:1 — call.answered/missed·ptt.session.start/end·message.sds/sms.
+
+def _local_iso(ts) -> str:
+    """파일의 naive-local 시각 → 로컬 offset ISO8601(앱 DateTime.TryParse RoundtripKind 용). 실패 시 ""."""
+    dt = parse_ts(ts)
+    return dt.astimezone().isoformat(timespec="seconds") if dt else ""
+
+
+def _dur_sec(a, b) -> int:
+    da, db = parse_ts(a), parse_ts(b)
+    if da and db:
+        return max(0, int((db - da).total_seconds()))
+    return 0
+
+
+def _event_of(row: dict) -> str:
+    k = row.get("kind")
+    if k == "call":
+        return "call.answered" if row.get("answerTime") else "call.missed"
+    if k == "ptt":
+        return "ptt.session.end" if (row.get("state") == "ended" or row.get("endTime")) else "ptt.session.start"
+    if k == "message":
+        # 그룹 SDS → ②(sds), 1:1 → ④(sms 취급, 사람 대 사람). 앱이 event prefix 로 패널을 가른다.
+        return "message.sds" if row.get("scope") == "group" else "message.sms"
+    return ""
+
+
+def format_item(row: dict) -> dict:
+    """내부 row → 앱 와이어 item. 없는 값은 빈 문자열/0/false (앱은 모르는 필드 무시·필수 id·time 없으면 스킵)."""
+    k = row.get("kind")
+    gid = row.get("groupId")
+    group_uri = _group_uri(gid) if gid else ""
+    if k == "call":
+        duration = int(row.get("duration") or 0)
+        frm, to = row.get("initiator", ""), row.get("callee", "")
+        group_uri = ""
+    elif k == "ptt":
+        duration = _dur_sec(row.get("startTime"), row.get("endTime"))
+        frm, to = row.get("initiator", ""), ""
+    else:  # message
+        duration = 0
+        frm, to = row.get("from", "") or "", row.get("to", "") or ""
+        if row.get("scope") != "group":
+            group_uri = ""
+    return {
+        "id": row.get("id", ""), "time": _local_iso(row.get("ts")), "kind": k, "event": _event_of(row),
+        "from": frm or "", "to": to or "", "group": group_uri,
+        "duration": duration, "emergency": bool(row.get("emergency", False)), "text": row.get("text", "") or "",
+    }
 
 
 # ── 통합 조회 ────────────────────────────────────────────────────────────────
