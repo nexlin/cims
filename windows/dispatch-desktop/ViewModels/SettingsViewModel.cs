@@ -68,9 +68,17 @@ public sealed partial class SettingsViewModel : ObservableObject
         _autoStart = CimsUe.Platform.AutoStart.IsEnabled(AppPaths.InstanceName);
         LoadDevices();
         foreach (var (name, label, global) in new[] { ("ptt", "PTT (누르는 동안)", true), ("answer", "응답", true), ("hangup", "종료", true), ("pickup", "그룹 픽업", true), ("hold", "보류/재개", false), ("mute", "음소거", false) })
-            HotKeys.Add(new HotKeyRow(name, label, global, c.HotKeys.TryGetValue(name, out var t) ? t : "") { Conflict = hotKeys.Conflicts.Contains(name) });
+        {
+            var row = new HotKeyRow(name, label, global, c.HotKeys.TryGetValue(name, out var t) ? t : "") { Conflict = hotKeys.Conflicts.Contains(name) };
+            row.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(HotKeyRow.IsValid)) { OnPropertyChanged(nameof(CanSave)); OnPropertyChanged(nameof(HotKeyError)); } };
+            HotKeys.Add(row);
+        }
         foreach (var g in s.Groups.Where(g => g.IsMember)) Channels.Add(new ChannelChoice(g, c.SelectedChannels.Count == 0 || c.SelectedChannels.Contains(g.Id)));
     }
+
+    /// <summary>해석되지 않는 핫키 문자열이 있으면 저장하지 않는다 — 조용히 등록만 빠지던 것을 막는다.</summary>
+    public bool CanSave => HotKeys.All(h => h.IsValid);
+    public string HotKeyError => CanSave ? "" : "핫키 형식 오류: " + string.Join(", ", HotKeys.Where(h => !h.IsValid).Select(h => h.Label)) + " — 예: Ctrl+Space, F9, Alt+Shift+P";
 
     [RelayCommand]
     private void LoadDevices()
@@ -95,6 +103,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void Save()
     {
+        if (!CanSave) return;
         _s.Settings.Update(c =>
         {
             c.CaptureDevice = CaptureDevice; c.HeadsetDevice = HeadsetDevice; c.SpeakerDevice = SpeakerDevice; c.SpeakerRouteEnabled = SpeakerRouteEnabled;

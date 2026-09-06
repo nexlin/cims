@@ -19,13 +19,30 @@ public sealed partial class ChannelCard : ObservableObject
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _showRoster;
     [ObservableProperty] private bool _deniedFlash;
-    public int Index { get; set; }
+    /// <summary>Ctrl+N 번호 — 카드가 빠지면 다시 매겨지므로 표시도 따라가야 한다.</summary>
+    [ObservableProperty] private int _index;
 
-    public ChannelCard(DispatchSession s, GroupInfo group) { _s = s; Kind = CardKind.Member; Group = group; group.PropertyChanged += (_, _) => Refresh(); }
+    // 그룹·세션은 카드보다 오래 산다 — 카드를 버릴 때 Detach 로 구독을 풀지 않으면 Rebuild 마다 옛 카드가 남아 계속 갱신된다
+    private readonly System.ComponentModel.PropertyChangedEventHandler _onSource;
+
+    public ChannelCard(DispatchSession s, GroupInfo group)
+    {
+        _s = s; Kind = CardKind.Member; Group = group;
+        _onSource = (_, _) => Refresh();
+        group.PropertyChanged += _onSource;
+    }
     public ChannelCard(DispatchSession s, SessionItem session)
     {
         _s = s; Kind = session.Kind == SessionKind.PttPrivate ? CardKind.Private : CardKind.Adhoc; _session = session;
-        session.PropertyChanged += (_, _) => Refresh();
+        _onSource = (_, _) => Refresh();
+        session.PropertyChanged += _onSource;
+    }
+
+    /// <summary>카드 폐기 — 그룹·세션 PropertyChanged 구독 해제.</summary>
+    public void Detach()
+    {
+        if (Group is not null) Group.PropertyChanged -= _onSource;
+        if (Session is not null) Session.PropertyChanged -= _onSource;
     }
 
     public string Id => Group?.Id ?? Session?.Info.GroupId ?? Session?.CallId.ToString() ?? "";
@@ -74,7 +91,8 @@ public sealed partial class ChannelCard : ObservableObject
             OnPropertyChanged(p);
     }
 
-    partial void OnSessionChanged(SessionItem? value) { if (value is not null) value.PropertyChanged += (_, _) => Refresh(); Refresh(); }
+    partial void OnSessionChanging(SessionItem? value) { if (Session is not null && Session != value) Session.PropertyChanged -= _onSource; }
+    partial void OnSessionChanged(SessionItem? value) { if (value is not null) value.PropertyChanged += _onSource; Refresh(); }
     partial void OnDeniedFlashChanged(bool value) => OnPropertyChanged(nameof(PttText));
 
     [RelayCommand] private void Join() { if (Group is not null) _s.JoinChannel(Group); }
@@ -118,14 +136,25 @@ public sealed partial class PttChannelsViewModel : ObservableObject
         s.SessionEnded += (_, item) => OnSession(item, added: false);
         s.SessionChanged += (_, _) => OnPropertyChanged(nameof(JoinedCount));
         s.Floor += (_, e) => OnFloor(e.Session, e.Event);
-        s.Settings.Changed += (_, _) => { ViewMode = s.Settings.Current.ChannelViewMode; Rebuild(); };
+        _channelKey = ChannelKey();
+        // 설정은 발신 모드 토글처럼 카드와 무관한 변경도 저장한다 — 채널 선택이 바뀐 때만 재구성(로스터 펼침·이전 선택을 잃지 않게)
+        s.Settings.Changed += (_, _) =>
+        {
+            ViewMode = s.Settings.Current.ChannelViewMode;
+            string key = ChannelKey();
+            if (key != _channelKey) { _channelKey = key; Rebuild(); }
+        };
     }
+
+    private string _channelKey = "";
+    private string ChannelKey() => string.Join(",", _s.Settings.Current.SelectedChannels);
 
     partial void OnViewModeChanged(string value) => OnPropertyChanged(nameof(IsTile));
 
     public void Rebuild()
     {
         string? selId = Selected?.Id;
+        foreach (var c in Cards) c.Detach();
         Cards.Clear();
         var chosen = _s.Settings.Current.SelectedChannels;
         foreach (var g in _s.Groups.Where(g => g.IsMember && (chosen.Count == 0 || chosen.Contains(g.Id))))
@@ -160,6 +189,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                     var c = Cards.FirstOrDefault(x => x.Session == item);
                     if (c is not null)
                     {
+                        c.Detach();
                         Cards.Remove(c);
                         Renumber();
                         if (Selected == c) Select(_previousSelection is not null && Cards.Contains(_previousSelection) ? _previousSelection : Cards.FirstOrDefault());

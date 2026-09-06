@@ -186,11 +186,21 @@ public sealed class DirectoryService
         merged.AddRange(csvByKey.Values);
         _merged = merged;
         _names.Clear();
-        foreach (var c in merged) if (c.Name.Length > 0) { _names[Normalize(c.Number)] = c.Name; _names[Normalize(DisplayNumber(c.Number))] = c.Name; }
+        foreach (var c in merged) if (c.Name.Length > 0) _names[Canonical(c.Number)] = c.Name;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    private static string Key(ContactKind k, string number) => (k == ContactKind.PttUser ? "p:" : "v:") + Normalize(number);
+    private string Key(ContactKind k, string number) => (k == ContactKind.PttUser ? "p:" : "v:") + Canonical(number);
+
+    /// <summary>비교·병합 정규형 — 숫자·+ 만 남기고, 홈 국가의 로컬 표기(010…)는 E.164(+8210…)로 올린다. 내선처럼 짧은 번호(≤6자리)는 그대로.
+    /// CSV `01012345678` 과 서버 `+821012345678` 이 한 연락처가 되고, IsExternal 이 서버 가입자를 외부망으로 오판하지 않게.</summary>
+    public string Canonical(string number)
+    {
+        string n = Normalize(number);
+        if (CountryCode.Length > 0 && n.Length > 6 && n.StartsWith('0') && !n.StartsWith("00", StringComparison.Ordinal))
+            return "+" + CountryCode + n[1..];
+        return n;
+    }
 
     /// <summary>GMS 그룹 목록 → 그룹 항목 갱신(멤버 수 포함).</summary>
     public void SetGroups(IEnumerable<GroupInfo> groups)
@@ -286,7 +296,7 @@ public sealed class DirectoryService
     public string NameOf(string? numberOrUri)
     {
         if (string.IsNullOrEmpty(numberOrUri)) return "";
-        return _names.TryGetValue(Normalize(Converters.UserPartConverter.UserPart(numberOrUri)), out string? n) ? n : "";
+        return _names.TryGetValue(Canonical(Converters.UserPartConverter.UserPart(numberOrUri)), out string? n) ? n : "";
     }
 
     /// <summary>"1003 이순경" 형태 병기(§3.2 신원 표시). 이름 없으면 번호만.</summary>
@@ -310,9 +320,10 @@ public sealed class DirectoryService
 
     public bool IsExternal(string number)
     {
-        var c = _merged.FirstOrDefault(x => Normalize(x.Number) == Normalize(number));
+        string key = Canonical(number);
+        var c = _merged.FirstOrDefault(x => Canonical(x.Number) == key);
         if (c is not null) return c.Kind == ContactKind.External;
-        string digits = Normalize(number);
+        string digits = key;
         return digits.Length > 6 && !digits.StartsWith('+');       // 내선 규약(짧은 번호)·E.164 가입자 밖이면 외부망으로 본다
     }
 

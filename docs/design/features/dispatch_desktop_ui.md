@@ -302,7 +302,8 @@ sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오
 | 음소거 | `F12` | 활성 통화·전이중 사설콜 `setMuted` 토글 | 앱 포커스 시 |
 | 채널 선택 | `Ctrl+1..9` | ① 카드 n 선택 | 앱 포커스 시 |
 
-- 설정에서 재배치, 충돌(`RegisterHotKey` 실패)은 빨강 표시. 게임패드/풋스위치는 HID 키 매핑으로 같은 경로.
+- 설정에서 재배치, 충돌(`RegisterHotKey` 실패)은 빨강 표시. 해석되지 않는 문자열(`HotKey.TryParse` 실패)은 행에 "형식 오류"를 띄우고 [저장·적용]을 막는다
+  (조용히 등록만 빠지는 일이 없게). 게임패드/풋스위치는 HID 키 매핑으로 같은 경로.
 - PTT 키 hold 중 포커스가 바뀌어도 release 를 놓치지 않도록 key-up 폴링 20ms + 안전장치(Granted 후 `TalkLimit` 는 코어가 자동 Release).
 
 ## 9. 응답 코드 → 화면 문구 (사전)
@@ -396,6 +397,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 - **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +
   가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
+  서버·CSV 병합과 이름 조회의 키는 **E.164 정규형**(홈 국가의 `010…` 은 `+8210…` 으로, 6자리 이하 내선은 그대로)이라 표기가 달라도 한 연락처다.
   **관제 그룹원·청취 대상은 서버가 준다**: `dispatch` 블록 `members[]`(항목 `groupId` 로 자기 그룹원 = ③ 띠 / 그 외 = 감시 전용)·
   `pttTargets[]`·`etag` + 응답 `ETag`/`If-None-Match` 304([android_ue_provisioning.md §3](android_ue_provisioning.md), csc 0.2.104). 앱은 두 배열을
   dialog watch·conference 구독 대상으로 쓰고(로컬 CSV `member` 태그 폴백은 구 서버용), 주기 재조회로 편성 변경을 따라간다. 외부망 연락처(CSV `external`).

@@ -7,10 +7,14 @@
         Style="{StaticResource Window.Base}" Title="설정" Width="640" Height="640" WindowStartupLocation="CenterOwner">
     <!-- 설정 — 오디오(§7)·핫키(§8)·관제·표시·채널 -->
     <DockPanel Margin="16">
-        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button Style="{StaticResource Btn}" Content="닫기" IsCancel="True" Margin="0,0,6,0" />
-            <Button Style="{StaticResource Btn.Pri}" Content="저장·적용" Command="{Binding SaveCommand}" />
-        </StackPanel>
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Style="{StaticResource Btn}" Content="닫기" IsCancel="True" Margin="0,0,6,0" />
+                <Button Style="{StaticResource Btn.Pri}" Content="저장·적용" Command="{Binding SaveCommand}" IsEnabled="{Binding CanSave}" />
+            </StackPanel>
+            <TextBlock Text="{Binding HotKeyError}" Foreground="{DynamicResource Brush.Emg}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,12,0"
+                       Visibility="{Binding HotKeyError, Converter={StaticResource StrToVis}}" />
+        </DockPanel>
         <TabControl>
             <TabItem Header="오디오">
                 <StackPanel Margin="12">
@@ -54,6 +58,7 @@
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsGlobal}" Value="False"><Setter Property="Text" Value="앱 포커스 시" /></DataTrigger>
                                                     <DataTrigger Binding="{Binding Conflict}" Value="True"><Setter Property="Text" Value="충돌 — 다른 프로그램이 이미 사용" /><Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsValid}" Value="False"><Setter Property="Text" Value="형식 오류 — 예: Ctrl+Space, F9" /><Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </TextBlock.Style>
