@@ -124,7 +124,7 @@ public sealed class DirectoryService
             var orgs = new List<OrgNode>();
             if (root.TryGetProperty("orgs", out var oa) && oa.ValueKind == JsonValueKind.Array)
                 foreach (var o in oa.EnumerateArray())
-                    orgs.Add(new OrgNode(Str(o, "code"), Str(o, "name"), Str(o, "parent"), o.TryGetProperty("sort", out var s) && s.TryGetInt32(out int n) ? n : 0));
+                    orgs.Add(new OrgNode(Str(o, "code"), Str(o, "name"), Str(o, "parent"), o.TryGetProperty("sort", out var s) && s.ValueKind == JsonValueKind.Number && s.TryGetInt32(out int n) ? n : 0));
             var list = new List<Contact>();
             var kind = service == "ptt" ? ContactKind.PttUser : ContactKind.Extension;
             if (root.TryGetProperty("entries", out var ea) && ea.ValueKind == JsonValueKind.Array)

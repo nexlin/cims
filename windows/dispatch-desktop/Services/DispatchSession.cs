@@ -461,7 +461,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Credentials.Delete(RefreshTokenKey);
         _tokens = null; _loginPw = "";
         Volte = null; Ptt = null; Profile = null;
-        _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
+        _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
         VolteReg = RegInfo.Empty; PttReg = RegInfo.Empty;
         IsReady = false;
@@ -513,6 +513,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     // ── 등록 ──
     private void OnRegistration(RegInfo r)
     {
+        // 로그아웃 뒤 늦게 오는 un-REGISTER 실패 등 — 계정 표가 비어 있으면 이 세션의 것이 아니다(로그인 창에 토스트가 뜨지 않게)
+        if (!_accountKinds.ContainsKey(r.AccountId)) { Log.Info($"reg late acc={r.AccountId} {r.State} {r.Code} — ignored"); return; }
         var kind = KindOf(r.AccountId);
         if (kind == AccountKind.Ptt) PttReg = r; else VolteReg = r;
         string name = kind == AccountKind.Ptt ? "PTT" : "VoLTE";
@@ -784,10 +786,11 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 if (u.Status != "disconnected") next.Add(u);
             }
         }
+        bool firstSnapshot = g.RosterAt is null;                 // 구독 직후 full 스냅샷 — 이미 있던 참가자를 "합류"로 적지 않는다
         g.Roster = next;
         g.RosterAt = DateTime.Now;
         var after = next.Where(e => e.Status == "connected").Select(e => e.Uri).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (g.IsMember && g.RosterAt is not null && before.Count + after.Count > 0)
+        if (g.IsMember && !firstSnapshot && before.Count + after.Count > 0)
         {
             foreach (var u in after.Except(before)) if (!IsMe(u)) Activity.Add(ActivityPanel.Ptt, ActivityKind.Member, $"{g.Name} {NameOfPtt(u)} 합류");
             foreach (var u in before.Except(after)) if (!IsMe(u)) Activity.Add(ActivityPanel.Ptt, ActivityKind.Member, $"{g.Name} {NameOfPtt(u)} 이탈");
@@ -991,8 +994,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Notify.Tick(now);
         foreach (var (acc, at) in _regRetryAt.ToList())
             if (now >= at) { _regRetryAt.Remove(acc); Engine.GetAccount(acc).Register(); }
-        if (now.Second == 0 && now.Minute == 0) Activity.Prune(now);
+        if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게
     }
+    private DateTime _lastPrune = DateTime.Today;
 
     public void Dispose()
     {

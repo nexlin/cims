@@ -176,8 +176,9 @@ public sealed partial class PttOriginateViewModel : ObservableObject
     [RelayCommand] private void Backspace() { if (Target.Length > 0) Target = Target[..^1]; }
     [RelayCommand] private void Clear() => Target = "";
     [RelayCommand] private void Pick(PttUserRow u) { Target = u.DisplayNumber; Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
-    [RelayCommand] private void PrivateTo(PttUserRow u) { Mode = "private"; Target = u.Name; Start(); }
-    [RelayCommand] private void PrivateFullTo(PttUserRow u) { Mode = "private"; FullDuplex = true; Target = u.Name; Start(); }
+    // 대상은 번호로 — 같은 표시명이 둘이면 이름 해석이 다른 사람을 고를 수 있다
+    [RelayCommand] private void PrivateTo(PttUserRow u) { Mode = "private"; Target = u.DisplayNumber; Start(); }
+    [RelayCommand] private void PrivateFullTo(PttUserRow u) { Mode = "private"; FullDuplex = true; Target = u.DisplayNumber; Start(); }
     [RelayCommand]
     private void ToggleAdhoc(PttUserRow u)
     {

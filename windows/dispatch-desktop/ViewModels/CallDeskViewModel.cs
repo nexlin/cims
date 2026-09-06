@@ -137,6 +137,19 @@ public sealed partial class CallDeskViewModel : ObservableObject
         s.SessionAdded += (_, item) => { if (item.IsVolteCall) { var c = new CallCard(s, item); c.DtmfRequested += (_, x) => DtmfRequested?.Invoke(this, x); Calls.Add(c); } Refresh(); };
         s.SessionEnded += (_, item) => { var c = Calls.FirstOrDefault(x => x.Session == item); if (c is not null) Calls.Remove(c); Refresh(); };
         s.SessionChanged += (_, _) => Refresh();
+        // 로그아웃은 Sessions/Dialogs 를 Clear 한다(개별 Ended 이벤트 없음) — VM 이 앱 수명 동안 살아 있으니 투영도 함께 비운다
+        s.Dialogs.CollectionChanged += (_, e) =>
+        {
+            if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Reset) return;
+            Queue.Clear(); _dismissed.Clear();
+            foreach (var m in Members) m.Dialog = null;
+            Refresh();
+        };
+        s.Sessions.CollectionChanged += (_, e) =>
+        {
+            if (e.Action != System.Collections.Specialized.NotifyCollectionChangedAction.Reset) return;
+            Calls.Clear(); Refresh();
+        };
     }
 
     public bool HasDesk => _s.HasDesk;
