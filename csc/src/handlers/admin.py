@@ -24,7 +24,8 @@ import pymysql
 import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
-from services.mcptt import (notify_csp, refresh_group_members, refresh_login_accounts, DEFAULT_USER_PROFILE,
+from services.mcptt import (notify_csp, refresh_group_members, refresh_login_accounts, sync_group_from_db,
+                            DEFAULT_USER_PROFILE,
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml)
@@ -300,7 +301,7 @@ async def _get_user(person_id: str, config):
                     cur.execute(
                         "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
                         "emergency_group_mode, emergency_group_id, allow_emergency_private_call, "
-                        f"private_emergency_mode, emergency_private_recipient, {_ambient_select(cur)} "
+                        f"private_emergency_mode, emergency_private_recipient, {_opt_profile_select(cur)} "
                         f"FROM ptt_user_profile WHERE ptt_id IN ({ph})",
                         [s['id'] for s in ptt_subs])
                     for p in cur.fetchall():
@@ -314,6 +315,7 @@ async def _get_user(person_id: str, config):
                             'private_emergency_mode': p['private_emergency_mode'],
                             'emergency_private_recipient': p['emergency_private_recipient'],
                             'allow_ambient_listening': bool(p['allow_ambient_listening']),
+                            'allow_create_group': bool(p['allow_create_group']),
                         }
                 except pymysql.Error:
                     pass
@@ -826,22 +828,28 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config):
 # ──────────────────────────────────────────────────────────────
 
 _PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call',
-                        'allow_emergency_private_call', 'allow_ambient_listening')
+                        'allow_emergency_private_call', 'allow_ambient_listening', 'allow_create_group')
 
-_HAS_AMBIENT_COL = None  # ptt_user_profile.allow_ambient_listening 프로브 캐시 (migrate_ptt_ambient_listening.sql)
+# 마이그레이션으로 뒤에 붙은 프로파일 인가 컬럼 — 부재 시 SELECT 는 상수 0(자격 없음), 쓰기 요청은 400.
+#   allow_ambient_listening: migrate_ptt_ambient_listening.sql (dispatch_center.md §5.6)
+#   allow_create_group     : migrate_ptt_allow_create_group.sql (mcptt_authorization.md §3)
+_OPT_PROFILE_COLS = {
+    'allow_ambient_listening': 'sql/migrate_ptt_ambient_listening.sql',
+    'allow_create_group': 'sql/migrate_ptt_allow_create_group.sql',
+}
+_OPT_COL_PRESENT = {}   # 컬럼명 → bool 프로브 캐시
 
 
-def _has_ambient_column(cur) -> bool:
-    global _HAS_AMBIENT_COL
-    if _HAS_AMBIENT_COL is None:
-        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'")
-        _HAS_AMBIENT_COL = cur.fetchone() is not None
-    return _HAS_AMBIENT_COL
+def _opt_col_present(cur, col: str) -> bool:
+    if col not in _OPT_COL_PRESENT:
+        cur.execute(f"SHOW COLUMNS FROM ptt_user_profile LIKE '{col}'")
+        _OPT_COL_PRESENT[col] = cur.fetchone() is not None
+    return _OPT_COL_PRESENT[col]
 
 
-def _ambient_select(cur) -> str:
-    """SELECT 열 — 컬럼 부재 시 상수 0 (자격 없음, dispatch_center.md §5.6)."""
-    return "allow_ambient_listening" if _has_ambient_column(cur) else "0 AS allow_ambient_listening"
+def _opt_profile_select(cur) -> str:
+    """선택 컬럼 SELECT 조각 — 부재 컬럼은 상수 0 별칭으로 채워 호출자 키 집합을 고정한다."""
+    return ", ".join(c if _opt_col_present(cur, c) else f"0 AS {c}" for c in _OPT_PROFILE_COLS)
 
 
 async def _get_ptt_profile(person_id: str, msisdn: str, config):
@@ -854,7 +862,7 @@ async def _get_ptt_profile(person_id: str, msisdn: str, config):
                 "SELECT allow_emergency_call, allow_emergency_alert, allow_adhoc_call, "
                 "emergency_group_mode, emergency_group_id, "
                 "allow_emergency_private_call, private_emergency_mode, emergency_private_recipient, "
-                f"{_ambient_select(cur)} "
+                f"{_opt_profile_select(cur)} "
                 "FROM ptt_user_profile WHERE ptt_id=%s", (msisdn,))
             row = cur.fetchone()
     if row:
@@ -886,18 +894,20 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
     allow_alert = 1 if body.get('allow_emergency_alert', True) else 0
     allow_adhoc = 1 if body.get('allow_adhoc_call', True) else 0
     allow_priv  = 1 if body.get('allow_emergency_private_call', True) else 0
-    # 원격 청취 자격 (TS 24.484 allow-ambient-listening, dispatch_center.md §5.6) — 기본 0, 부여는 manager 승인
-    allow_amb   = 1 if body.get('allow_ambient_listening', False) else 0
+    # 관제사 자격 두 축 — 기본 0, 부여는 OAM(콘솔·admin API): 원격 청취(TS 24.484 allow-ambient-listening,
+    #   dispatch_center.md §5.6) · GMS 그룹 생성(CIMS 확장 allow-create-group, mcptt_authorization.md §3)
+    opt_vals = {c: (1 if body.get(c, False) else 0) for c in _OPT_PROFILE_COLS}
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s", (msisdn, person_id))
             if cur.fetchone() is None:
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
-            has_amb = _has_ambient_column(cur)
-            if 'allow_ambient_listening' in body and not has_amb:
-                return HandlerResult(status=400, body={'error': 'schema_not_migrated',
-                                                       'detail': 'ptt_user_profile.allow_ambient_listening absent — sql/migrate_ptt_ambient_listening.sql not applied'})
+            present = [c for c in _OPT_PROFILE_COLS if _opt_col_present(cur, c)]
+            for c, mig in _OPT_PROFILE_COLS.items():
+                if c in body and c not in present:
+                    return HandlerResult(status=400, body={'error': 'schema_not_migrated',
+                                                           'detail': f'ptt_user_profile.{c} absent — {mig} not applied'})
             if egid:
                 cur.execute("SELECT 1 FROM ptt_groups WHERE mcptt_group_id=%s", (egid,))
                 if cur.fetchone() is None:
@@ -907,10 +917,10 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
                 if cur.fetchone() is None:
                     return HandlerResult(status=400,
                                          body={'error': f'unknown emergency_private_recipient: {precip}'})
-            amb_col = ", allow_ambient_listening" if has_amb else ""
-            amb_ph = ",%s" if has_amb else ""
-            amb_upd = ", allow_ambient_listening=VALUES(allow_ambient_listening)" if has_amb else ""
-            amb_vals = (allow_amb,) if has_amb else ()
+            amb_col = "".join(f", {c}" for c in present)
+            amb_ph = ",%s" * len(present)
+            amb_upd = "".join(f", {c}=VALUES({c})" for c in present)
+            amb_vals = tuple(opt_vals[c] for c in present)
             cur.execute(
                 "INSERT INTO ptt_user_profile (ptt_id, allow_emergency_call, allow_emergency_alert, "
                 "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
@@ -936,7 +946,8 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
         "allow_emergency_private_call": bool(allow_priv),
         "private_emergency_mode": pmode,
         "emergency_private_recipient": precip,
-        "allow_ambient_listening": bool(allow_amb) if has_amb else False,
+        "allow_ambient_listening": bool(opt_vals['allow_ambient_listening']) if 'allow_ambient_listening' in present else False,
+        "allow_create_group": bool(opt_vals['allow_create_group']) if 'allow_create_group' in present else False,
     }
     update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
@@ -1383,6 +1394,7 @@ async def _create_group(body, config, payload=None):
             gpk = cur.lastrowid
             for m in members:
                 _insert_member(cur, gpk, m)
+    sync_group_from_db(group_id)   # in-memory GROUPS — GMS 목록·문서에 즉시 반영(재기동 불필요)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "POST")
     return HandlerResult(status=201, body={'id': group_id})
 
@@ -1461,7 +1473,7 @@ async def _update_group(group_id: str, body, config, payload=None):
                 cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                 for m in body['members']:
                     _insert_member(cur, gpk, m)
-    refresh_group_members(group_id)
+    sync_group_from_db(group_id)   # 속성+멤버 — 종전 refresh_group_members 는 멤버만 갱신했다
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
 
@@ -1473,6 +1485,7 @@ async def _delete_group(group_id: str, config):
             cur.execute("DELETE FROM ptt_groups WHERE mcptt_group_id=%s", (group_id,))
             if cur.rowcount == 0:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
+    sync_group_from_db(group_id)   # 캐시에서 제거 — 종전엔 재기동 전까지 GMS 목록에 남았다
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "DELETE")
     return HandlerResult(status=200, body={'id': group_id})
 

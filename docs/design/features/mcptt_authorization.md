@@ -68,7 +68,7 @@ OAM file_store `console_accounts`, 콘솔 `관리 > 계정`)와 분리한다. �
 | 도메인 | admin | manager | operator | monitor | user |
 |---|---|---|---|---|---|
 | 가입자/조직 | CRUD | CRUD | R | R | – |
-| PTT 그룹 | CRUD(all) | CRUD(all) | **생성 + 본인소유 CRUD / 타인 R** | R | – |
+| PTT 그룹 | CRUD(all) | CRUD(all) | **생성 + 본인소유 CRUD / 타인 R** | R | **GMS XCAP: 생성(`allow_create_group`) + 본인소유 CRUD** (§4.1) |
 | 모니터링/성능 | ● | ● | ● | R | – |
 | 알람 ack | ● | ● | ● | – | – |
 | MCPTT 관제(floor/긴급) | ● | ● | ● | – | – |
@@ -93,6 +93,26 @@ OAM file_store `console_accounts`, 콘솔 `관리 > 계정`)와 분리한다. �
   - 표시명 = `users.name/login_id`
 - **편집 인가 규칙**: `admin`·`manager` → 모든 그룹 / `operator` → `authorized_user_id == 본인` 만 / 생성 시 `authorized_user_id=본인` 자동.
 - 제약: authorized user 는 **PTT 가입자여야** 함(규격). admin/manager 대리 생성 시 owner를 PTT 가입자 중 지정.
+
+### 4.1 가입자(관제사) 주체의 그룹 CRUD — GMS XCAP 경로
+
+규격(TS 23.280 §10.2.5, TS 24.481)의 그룹 생성·수정·삭제 주체는 **authorized user(MC 가입자)** 이고 경로는
+GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PTT 가입자(`users.id` 있음)이므로 이 경로에서는
+§9 의 "콘솔 operator 소유 판정" 문제가 없다. 관리 API(4421, 콘솔 토큰)는 콘솔 전용으로 두고 **PKCE 토큰을
+관리 API 에 끼워 넣지 않는다**(토큰 realm 혼합 금지).
+
+| 동작 | 인가 | 근거 |
+|---|---|---|
+| 생성 (PUT 신규 uri) | 프로파일 `ptt_user_profile.allow_create_group=1` | CIMS 확장 요소 `<cims:allow-create-group>` — TS 24.484 에는 일반 그룹 생성 요소가 없다(`allow-regroup` 은 임시 regroup, `allow-create-{group,user}-broadcast-group` 은 브로드캐스트 한정). 규격상 이 인가는 GMS 측 정책이라 프로파일 확장 자리(`anyExt` 계열, 기존 `cims:allow-adhoc-group-call` 과 같은 관례)에 둔다 |
+| 수정·삭제 (PUT 기존 / DELETE) | `ptt_groups.authorized_user_id == 토큰 가입자 users.id` | §4 소유 규칙 그대로. 콘솔 admin/manager 가 만든 소유자 없는 그룹은 관제사가 편집 불가(의도) |
+
+- 부여는 **OAM** 이 한다(TS 23.280 authorized user = 조직 프로비저닝): 콘솔 가입자 편집의 PTT 프로파일 토글,
+  admin API `PUT /api/v1/users/{id}/ptt/{msisdn}/profile` 의 `allow_create_group`, 관제 그룹 멤버 화면의 일괄 부여 —
+  셋 다 같은 플래그(인가 축은 하나). `allow_ambient_listening` 과 같은 결.
+- 단말에는 프로비저닝 `/provisioning/me` 의 ptt 서비스 `allowCreateGroup` 으로 노출([새 그룹] 표시 여부),
+  수정·삭제 가능 여부는 GMS 목록의 `is_owner`. 계약 상세 = [mcptt_api.md §2](../../api/mcptt_api.md).
+- 정본은 DB(`ptt_groups`·`ptt_group_members`)이고 관리 API·GMS 두 쓰기 경로가 같은 캐시 동기화
+  (`sync_group_from_db`)와 CSP `GROUP_CHANGED` 통지를 공유한다.
 
 ## 5. `group.json` (자기완결형 디스크립터, CSP 기록)
 
@@ -152,7 +172,8 @@ OAM file_store `console_accounts`, 콘솔 `관리 > 계정`)와 분리한다. �
 - `ptt_group_members.role` (chair/participant) = **통화 중 floor 권한** (TS 24.380) — 별개. 한 가입자가 `operator`(관리) + 어떤 그룹의 `chair`(발언통제)일 수 있음.
 
 ## 9. 미결/후속
-- 콘솔 계정에는 `users.id` 가 없어(§2) `operator` 의 본인 소유 그룹 판정(`sub`=login_id ≠ `authorized_user_id`)이 항상 403 이다 —
-  `authorized_user_id` 를 콘솔 계정 login_id 로 재키잉하거나 소유 스코프를 org 로 옮기는 것은 후속 과제.
-- A축 telephony feature 플래그(can_create_group/can_emergency/can_video/max_priority)는 별도 트랙(이번 범위 외).
+- **콘솔 operator** 계정에는 `users.id` 가 없어(§2) 본인 소유 그룹 판정(`sub`=login_id ≠ `authorized_user_id`)이 항상 403 이다 —
+  `authorized_user_id` 를 콘솔 계정 login_id 로 재키잉하거나 소유 스코프를 org 로 옮기는 것은 후속 과제. **가입자(관제사)** 경로는
+  §4.1 GMS 로 해소됨(토큰 sub→users.id 해석).
+- A축 telephony feature 플래그 중 그룹 생성은 §4.1 `allow_create_group` 으로 구현. 나머지(can_emergency/can_video/max_priority)는 별도 트랙.
 - 다중 역할·세밀 scope(org 단위)가 필요해지면 `user_permissions(user_id,capability,scope)` 테이블로 확장(현재는 단일 role + 그룹 소유 스코프로 충분).

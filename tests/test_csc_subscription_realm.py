@@ -49,7 +49,7 @@ def _load_admin():
         def log_info(self, *a, **k): pass
         def log_error(self, *a, **k): pass
 
-    _stub("services.mcptt", notify_csp=lambda *a, **k: None, refresh_group_members=lambda *a, **k: None,
+    _stub("services.mcptt", notify_csp=lambda *a, **k: None, refresh_group_members=lambda *a, **k: None, sync_group_from_db=lambda *a, **k: True,
           refresh_login_accounts=lambda *a, **k: True,
           DEFAULT_USER_PROFILE={}, update_user_profile_cache=lambda *a, **k: None, SERVICE_CONFIG_DEFAULTS={},
           get_service_config=lambda *a, **k: {}, update_service_config_cache=lambda *a, **k: None,

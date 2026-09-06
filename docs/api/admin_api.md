@@ -959,6 +959,10 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 > PTT 프로파일(`PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`)의 `allow_ambient_listening`(TS 24.484
 > allow-ambient-listening, 기본 false) 은 PTT 그룹콜 청취 **자격**이고, 범위는 관제 그룹 `ptt_listen` 이다
 > (dispatch_center.md §5.6). 컬럼 미적용 DB(`sql/migrate_ptt_ambient_listening.sql`) 에서는 응답이 false 고 입력 시 400.
+>
+> 같은 프로파일의 `allow_create_group`(CIMS 확장 allow-create-group, 기본 false) 은 관제사가 **GMS XCAP 으로 PTT 그룹을
+> 생성**할 자격이다(수정·삭제는 그룹 소유로 판정 — mcptt_authorization.md §4.1). 부여 주체는 OAM(이 API·콘솔 가입자
+> 편집). 컬럼 미적용 DB(`sql/migrate_ptt_allow_create_group.sql`) 에서는 응답이 false 고 입력 시 400.
 
 ---
 

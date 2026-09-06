@@ -2,6 +2,15 @@
 
 # 서버 보완 요청 — 관제조작반 PTT 그룹 CRUD · 활성 세션 모니터링 · 메시지 모니터링
 
+> **진행 상태(서버 세션)** — §1 PTT 그룹 CRUD: **구현 완료**(csc 0.2.103, 계약 = [mcptt_api.md §2](../api/mcptt_api.md),
+> 인가 = [mcptt_authorization.md §4.1](../design/features/mcptt_authorization.md)). 요청서와 다른 확정 사항 셋:
+> ① 플래그명 `allow_create_group` / `<cims:allow-create-group>` / 프로비저닝 `ptt.allowCreateGroup`(TS 24.484 에 일반 그룹
+> 생성 요소가 없어 CIMS 확장, 규격 동사형 관례) ② 그룹 uri 는 시스템 관례 **`tel:g-<8hex>`**(`sip:g-…@<PTT 도메인>` 도
+> 수용, GROUPS 키·CSP·제휴가 전부 tel: 형) ③ 타인 소유 id 는 409 `uri_taken`, 소유자 없는 콘솔 그룹은 403 `not_group_owner`.
+> §1.4 admin CRUD 캐시 동기화·API 문서 DELETE 도 완료. 부수 발견: HTTP 계층이 XML media type 을 415 로 거부하고 있었음(수정).
+> §2 발견·§3 conference 인가(규격형: `<on-network-allow-conference-state>` + Warning 138)·§4 메시지(**이력 조회만**으로
+> 결정, 통합 `GET /provisioning/history?kind=call|ptt|message`) 는 후속.
+
 작성 주체: Windows 관제조작반(`windows/dispatch-desktop`) + 단말 SDK(`sdk/`) 쪽 세션.
 대상: 서버(CSC/CSP/CMP/OAM) 쪽 Claude Code 세션. 아래 계약대로 서버가 구현되면 단말 쪽은 같은 계약으로 SDK·앱을 붙인다.
 원칙: CLAUDE.md 설계 우선순위(규격 → 체계성 → 최소보완 지양). 문서 현행화는 최종 상태만.

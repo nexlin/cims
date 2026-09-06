@@ -99,6 +99,10 @@ async def _get_body_from_request(req: Request) -> Optional[BodyData]:
                 # suffix = ".csv.gz" if "gzip" in content_encoding else ".csv"
                 # path = await HttpUtil.spool_body_to_temp(req.stream(), suffix=suffix)
                 # body_data = HttpUtil.iter_csv_rows_from_path(path, encoding=charset)
+            elif media_type.endswith("+xml") or media_type in ("application/xml", "text/xml"):
+                # XCAP Ut 문서 (TS 24.481 그룹 application/vnd.oma.poc.groups+xml 등) — 원시 바이트로
+                #   넘기고 파싱은 핸들러가 한다(스키마·크기·DTD 거부는 핸들러 몫).
+                body_data = await req.body()
             else:
                 raise HttpException(f"Unsupported media type: {media_type}", 415)
             return body_data

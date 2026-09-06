@@ -190,6 +190,8 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
         COMMENT '사전 지정 긴급 수신자 (ptt_subscriptions.id) — UsePreConfigured 모드 대상. NULL=미지정(그 모드에선 미인가)',
     allow_ambient_listening TINYINT(1) NOT NULL DEFAULT 0
         COMMENT 'allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사, dispatch_center.md §5.6)',
+    allow_create_group    TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'allow-create-group (CIMS 확장, TS 24.484 ruleset 자리) — GMS XCAP 그룹 생성 자격 (관제사, mcptt_authorization.md §3). 수정·삭제는 소유(authorized_user_id)로 판정',
     update_time           DATETIME     DEFAULT NULL,
     PRIMARY KEY (ptt_id),
     CONSTRAINT fk_pup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE,

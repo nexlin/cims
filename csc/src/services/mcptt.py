@@ -51,6 +51,7 @@ DEFAULT_USER_PROFILE = {
     "private_emergency_mode": "LocallyDetermined",
     "emergency_private_recipient": None,
     "allow_ambient_listening": False,   # TS 24.484 allow-ambient-listening — 원격 청취 자격 (관제사, 기본 없음)
+    "allow_create_group": False,        # CIMS 확장 allow-create-group — GMS XCAP 그룹 생성 자격 (관제사, 기본 없음)
 }
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
@@ -328,14 +329,17 @@ def load_shared_data(config):
 
                     # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — 마이그레이션 전이면 스킵
                     try:
-                        # allow_ambient_listening 은 migrate_ptt_ambient_listening.sql 이후에만 — 컬럼 부재 시 상수 0
+                        # allow_ambient_listening / allow_create_group 은 각 migrate_ptt_*.sql 이후에만 —
+                        #   컬럼 부재 시 상수 0 (선행 배포 무해).
                         cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'")
                         amb_col = "allow_ambient_listening" if cur.fetchone() else "0 AS allow_ambient_listening"
+                        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_create_group'")
+                        acg_col = "allow_create_group" if cur.fetchone() else "0 AS allow_create_group"
                         cur.execute(
                             "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, "
                             "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
                             "allow_emergency_private_call, private_emergency_mode, "
-                            f"emergency_private_recipient, {amb_col} "
+                            f"emergency_private_recipient, {amb_col}, {acg_col} "
                             "FROM ptt_user_profile")
                         PTT_PROFILES.clear()
                         for r in cur.fetchall():
@@ -349,6 +353,7 @@ def load_shared_data(config):
                                 "private_emergency_mode": r['private_emergency_mode'],
                                 "emergency_private_recipient": r['emergency_private_recipient'],
                                 "allow_ambient_listening": bool(r['allow_ambient_listening']),
+                                "allow_create_group": bool(r['allow_create_group']),
                             }
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
@@ -421,69 +426,17 @@ def load_shared_data(config):
             )
             with conn:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
-                        "emergency_call, emergency_alert, "
-                        "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
-                        "org_code, session_start, session_end, "
-                        "group_type, on_network, max_members, require_affiliation, alias, "
-                        "authorized_user_id, "
-                        "(SELECT id FROM ptt_subscriptions WHERE user_id=ptt_groups.authorized_user_id "
-                        " ORDER BY id LIMIT 1) AS authorized_user_msisdn "
-                        "FROM ptt_groups"
-                    )
+                    # 행→dict 변환은 단일 그룹 동기화(sync_group_from_db)와 같은 함수를 쓴다 —
+                    #   기동 적재와 CRUD 후 갱신이 같은 모양을 보장.
+                    cur.execute(_GROUP_SELECT)
                     for row in cur.fetchall():
-                        gid = row['mcptt_group_id']
-                        uri = _group_uri(gid)
-                        GROUPS[uri] = {
-                            "display_name": row['name'],
-                            "video_enabled": bool(row.get('video_enabled', 0)),
-                            "priority": row.get('priority', 5),
-                            "encryption": bool(row.get('encryption', 0)),
-                            "emergency_call": bool(row.get('emergency_call', 0)),
-                            "emergency_alert": bool(row.get('emergency_alert', 1)),
-                            "allow_sds": bool(row.get('allow_sds', 1)),
-                            "allow_fd": bool(row.get('allow_fd', 0)),
-                            "max_sds_size": row.get('max_sds_size', 10000),
-                            "max_auto_recv": row.get('max_auto_recv', 1048576),
-                            "org_code": row.get('org_code', ''),
-                            "group_type": row.get('group_type', 'prearranged'),
-                            "on_network": bool(row.get('on_network', 1)),
-                            "max_members": row.get('max_members', 0),
-                            "require_affiliation": bool(row.get('require_affiliation', 1)),
-                            "alias": row.get('alias', ''),
-                            "session_start": row['session_start'].isoformat() if row.get('session_start') else None,
-                            "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
-                            "etag": f"etag_{gid}",
-                            "created_by": "", "created_at": "",
-                            # 그룹 소유 (3GPP authorized user) — 파생 MCPTT ID
-                            "authorized_user": (f"tel:{row['authorized_user_msisdn']}"
-                                                if row.get('authorized_user_msisdn') else ""),
-                            "members": []
-                        }
+                        GROUPS[_group_uri(row['mcptt_group_id'])] = _group_row_to_dict(row)
                     # 멤버 목록 + users 테이블에서 이름·직함 조회 (group_id=surrogate → mcptt_group_id JOIN)
-                    title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
-                    cur.execute(
-                        "SELECT g.mcptt_group_id AS mcptt_group_id, gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
-                        f"       u.name AS user_name{title_col} "
-                        "FROM ptt_group_members gm "
-                        "JOIN ptt_groups g ON g.id = gm.group_id "
-                        "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
-                        "LEFT JOIN users u ON u.id = ps.user_id "
-                        "ORDER BY g.mcptt_group_id, gm.priority"
-                    )
+                    cur.execute(_member_select_sql(cur) + " ORDER BY g.mcptt_group_id, gm.priority")
                     for row in cur.fetchall():
                         g_uri = _group_uri(row['mcptt_group_id'])
-                        uid = row['user_id']
-                        m_uri = row.get('mcptt_id') or (f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}")
-                        m_name = row.get('user_name') or m_uri
                         if g_uri in GROUPS:
-                            GROUPS[g_uri]['members'].append({
-                                "uri": m_uri, "name": m_name,
-                                "role": row.get('role') or "participant",
-                                "priority": row['priority'], "joined_at": "",
-                                "title": row.get('user_title') or ""
-                            })
+                            GROUPS[g_uri]['members'].append(_member_row_to_dict(row))
                     for uri in GROUPS:
                         logger.log_info(f"Loaded DB Group: {uri} ({len(GROUPS[uri]['members'])} members)")
             db_groups_loaded = True
@@ -574,57 +527,128 @@ def refresh_login_accounts() -> bool:
         return False
 
 
-def refresh_group_members(group_id: str) -> bool:
-    """DB에서 해당 그룹 멤버를 재조회해 in-memory GROUPS 에 반영한다.
-    admin API 멤버 변경이 GMS 그룹 목록/문서에 즉시 보이도록 admin.py 가 호출
-    (GROUPS 는 기동 시 1회 적재 — 이 갱신이 없으면 재기동 전까지 stale)."""
+# ── ptt_groups ↔ in-memory GROUPS — 행→dict 단일 변환 ──────────────────────────
+#   기동 적재(load_shared_data)와 CRUD 후 단일 그룹 동기화(sync_group_from_db)가 같은 함수를 쓴다.
+#   admin API(콘솔) 와 GMS XCAP(가입자) 두 쓰기 경로 모두 DB 를 정본으로 쓰고 이 동기화로 캐시를
+#   맞춘다 — 어느 경로도 GROUPS 를 직접 조립하지 않는다.
+_GROUP_SELECT = (
+    "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
+    "emergency_call, emergency_alert, "
+    "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
+    "org_code, session_start, session_end, "
+    "group_type, on_network, max_members, require_affiliation, alias, "
+    "authorized_user_id, "
+    "(SELECT id FROM ptt_subscriptions WHERE user_id=ptt_groups.authorized_user_id "
+    " ORDER BY id LIMIT 1) AS authorized_user_msisdn "
+    "FROM ptt_groups"
+)
+
+
+def _member_select_sql(cur) -> str:
+    """멤버 행 SELECT (WHERE/ORDER BY 는 호출자가 붙인다). users.title 은 컬럼 존재 시만."""
+    title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
+    return (
+        "SELECT g.mcptt_group_id AS mcptt_group_id, gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
+        f"       u.name AS user_name{title_col} "
+        "FROM ptt_group_members gm "
+        "JOIN ptt_groups g ON g.id = gm.group_id "
+        "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
+        "LEFT JOIN users u ON u.id = ps.user_id"
+    )
+
+
+def _group_row_to_dict(row: dict) -> dict:
+    gid = row['mcptt_group_id']
+    return {
+        "display_name": row['name'],
+        "video_enabled": bool(row.get('video_enabled', 0)),
+        "priority": row.get('priority', 5),
+        "encryption": bool(row.get('encryption', 0)),
+        "emergency_call": bool(row.get('emergency_call', 0)),
+        "emergency_alert": bool(row.get('emergency_alert', 1)),
+        "allow_sds": bool(row.get('allow_sds', 1)),
+        "allow_fd": bool(row.get('allow_fd', 0)),
+        "max_sds_size": row.get('max_sds_size', 10000),
+        "max_auto_recv": row.get('max_auto_recv', 1048576),
+        "org_code": row.get('org_code', ''),
+        "group_type": row.get('group_type', 'prearranged'),
+        "on_network": bool(row.get('on_network', 1)),
+        "max_members": row.get('max_members', 0),
+        "require_affiliation": bool(row.get('require_affiliation', 1)),
+        "alias": row.get('alias', ''),
+        "session_start": row['session_start'].isoformat() if row.get('session_start') else None,
+        "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
+        "etag": f"etag_{gid}",
+        "created_by": "", "created_at": "",
+        # 그룹 소유 (3GPP TS 23.280 authorized user) — 파생 MCPTT ID(표시·열람 인가) + users.id(GMS 쓰기 인가)
+        "authorized_user": (f"tel:{row['authorized_user_msisdn']}"
+                            if row.get('authorized_user_msisdn') else ""),
+        "authorized_user_id": row.get('authorized_user_id'),
+        "members": []
+    }
+
+
+def _member_row_to_dict(row: dict) -> dict:
+    uid = row['user_id']
+    m_uri = row.get('mcptt_id') or (f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}")
+    return {
+        "uri": m_uri, "name": row.get('user_name') or m_uri,
+        "role": row.get('role') or "participant",
+        "priority": row['priority'], "joined_at": "",
+        "title": row.get('user_title') or ""
+    }
+
+
+def _db_connect():
+    """CimsDatabase 설정으로 pymysql 연결 (DictCursor, 5초). _DB_CONFIG 없으면 None."""
     if not _DB_CONFIG:
-        return False
+        return None
+    import pymysql, pymysql.cursors
+    return pymysql.connect(
+        host=_DB_CONFIG.get('Host', '127.0.0.1'),
+        port=int(_DB_CONFIG.get('Port', 3306)),
+        user=_DB_CONFIG.get('User', 'root'),
+        password=_DB_CONFIG.get('Password', ''),
+        database=_DB_CONFIG.get('Db', 'cims'),
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=5,
+    )
+
+
+def sync_group_from_db(group_id: str) -> bool:
+    """DB 의 그룹 한 건(속성+멤버)을 재조회해 in-memory GROUPS 에 반영한다. 행이 없으면 캐시에서 제거.
+    admin API 그룹 CRUD 와 GMS XCAP PUT/DELETE 가 쓰기 후 공통으로 호출한다 — GROUPS 는 기동 시
+    1회 적재라 이 동기화가 없으면 재기동 전까지 stale(신규 그룹은 GMS 목록에 없고 삭제 그룹이 남는다).
+    반환값 = 캐시에 그룹이 존재하는가."""
     uri = _group_uri(group_id)
-    grp = GROUPS.get(uri)
-    if not grp:
-        return False
     try:
-        import pymysql, pymysql.cursors
-        conn = pymysql.connect(
-            host=_DB_CONFIG.get('Host', '127.0.0.1'),
-            port=int(_DB_CONFIG.get('Port', 3306)),
-            user=_DB_CONFIG.get('User', 'root'),
-            password=_DB_CONFIG.get('Password', ''),
-            database=_DB_CONFIG.get('Db', 'cims'),
-            charset='utf8mb4',
-            cursorclass=pymysql.cursors.DictCursor,
-            connect_timeout=5,
-        )
+        conn = _db_connect()
+        if conn is None:
+            return uri in GROUPS
         with conn:
             with conn.cursor() as cur:
-                title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
-                cur.execute(
-                    "SELECT gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
-                    f"       u.name AS user_name{title_col} "
-                    "FROM ptt_group_members gm "
-                    "JOIN ptt_groups g ON g.id = gm.group_id "
-                    "LEFT JOIN ptt_subscriptions ps ON ps.id = gm.user_id "
-                    "LEFT JOIN users u ON u.id = ps.user_id "
-                    "WHERE g.mcptt_group_id=%s ORDER BY gm.priority",
-                    (group_id,)
-                )
-                members = []
-                for row in cur.fetchall():
-                    uid = row['user_id']
-                    m_uri = row.get('mcptt_id') or (f"tel:{uid}" if uid.startswith('+') else f"tel:+{uid}")
-                    members.append({
-                        "uri": m_uri, "name": row.get('user_name') or m_uri,
-                        "role": row.get('role') or "participant",
-                        "priority": row['priority'], "joined_at": "",
-                        "title": row.get('user_title') or ""
-                    })
-        grp['members'] = members
-        logger.log_info(f"refresh_group_members({group_id}): {len(members)} members")
+                cur.execute(_GROUP_SELECT + " WHERE mcptt_group_id=%s", (group_id,))
+                row = cur.fetchone()
+                if not row:
+                    GROUPS.pop(uri, None)
+                    logger.log_info(f"sync_group_from_db({group_id}): removed from cache")
+                    return False
+                grp = _group_row_to_dict(row)
+                cur.execute(_member_select_sql(cur) + " WHERE g.mcptt_group_id=%s ORDER BY gm.priority",
+                            (group_id,))
+                grp['members'] = [_member_row_to_dict(r) for r in cur.fetchall()]
+        GROUPS[uri] = grp
+        logger.log_info(f"sync_group_from_db({group_id}): {len(grp['members'])} members")
         return True
     except Exception as e:
-        logger.log_error(f"refresh_group_members({group_id}) failed: {e}")
-        return False
+        logger.log_error(f"sync_group_from_db({group_id}) failed: {e}")
+        return uri in GROUPS
+
+
+def refresh_group_members(group_id: str) -> bool:
+    """호환 이름 — sync_group_from_db 로 위임(속성까지 함께 갱신). 기존 호출자(admin.py·시험) 유지."""
+    return sync_group_from_db(group_id)
 
 
 # [FIX] Notify CSP logic
@@ -1243,6 +1267,7 @@ def get_user_profile_xml(user_uri):
         <allow-emergency-private-call>{_b('allow_emergency_private_call')}</allow-emergency-private-call>
         <allow-ambient-listening>{"true" if prof.get('allow_ambient_listening') else "false"}</allow-ambient-listening>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
+        <cims:allow-create-group>{"true" if prof.get('allow_create_group') else "false"}</cims:allow-create-group>
       </actions>
     </rule>
   </ruleset>
@@ -1851,6 +1876,239 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     
     return HandlerResult(status=400, body={"error": "unsupported_grant_type"}, media_type="application/json")
 
+
+# ── GMS XCAP 그룹 CRUD — 가입자(관제사) 주체 (mcptt_authorization.md §3, TS 24.481 Ut PUT/DELETE) ──
+#   인가 축 둘: 생성 = 프로파일 allow_create_group(OAM 부여), 수정·삭제 = 소유(ptt_groups.authorized_user_id
+#   == 토큰 가입자 users.id). 관리 API(4421, 콘솔 토큰)와 정본(DB)·캐시 동기화(sync_group_from_db)를 공유하고
+#   토큰 realm 은 섞지 않는다(PKCE 토큰은 여기 GMS 에서만).
+import re as _re
+import xml.etree.ElementTree as _ET
+
+GMS_GROUP_ID_RE = _re.compile(r'^g-[0-9a-f]{8}$')   # 단말이 새 그룹에 붙이는 식별자 (XCAP 클라이언트 명명)
+_GMS_MAX_BODY = 256 * 1024
+_NS = {
+    'poc': 'urn:oma:xml:poc:list-service',
+    'rl': 'urn:ietf:params:xml:ns:resource-lists',
+    'cp': 'urn:ietf:params:xml:ns:common-policy',
+    'gi': 'urn:3gpp:ns:mcpttGroupInfo:1.0',
+    'cims': 'urn:cims:groupinfo:1.0',
+}
+
+
+def _token_user_id(payload: dict) -> Optional[int]:
+    """토큰 sub(=login_id) → users.id. LOGIN_ACCOUNTS 는 admin API 변경 후 refresh_login_accounts 로 최신."""
+    acct = LOGIN_ACCOUNTS.get((payload or {}).get('sub') or '')
+    try:
+        return int(acct['user_id']) if acct and acct.get('user_id') is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _requester_ptt_id(payload: dict) -> str:
+    """토큰 mcptt_id(tel:+E.164) → ptt_subscriptions.id / PTT_PROFILES 키(+E.164)."""
+    u = _norm_mcptt_uri((payload or {}).get('mcptt_id') or '')
+    return u if (not u or u.startswith('+')) else f"+{u}" if u.isdigit() else u
+
+
+def _gms_gid_from_uri(group_uri: str) -> Tuple[str, str]:
+    """XCAP 경로의 그룹 URI → (mcptt_group_id, 도메인). tel:g-… / sip:g-…@dom 모두 수용."""
+    s = (group_uri or '').strip()
+    dom = ''
+    if '@' in s:
+        dom = s.split('@', 1)[1].lower()
+    return _norm_mcptt_uri(s), dom
+
+
+def _ptt_domains() -> set:
+    ds = {IDMS_DOMAIN.lower()}
+    try:
+        d = ((PROVISIONING.get('Services') or {}).get('ptt') or {}).get('domain')
+        if d:
+            ds.add(str(d).lower())
+    except Exception:
+        pass
+    return ds
+
+
+def validate_new_gms_group_id(gid: str, dom: str = '') -> Optional[str]:
+    """새 그룹 식별자 검증 — 오류 문자열 또는 None. 형식 g-<8hex>, 예약 접두사 거부, sip: 형이면 PTT 도메인."""
+    if not gid:
+        return 'group id required'
+    if gid.startswith(('adhoc-', 'priv-')):
+        return "group id prefix 'adhoc-'/'priv-' is reserved for on-the-fly sessions"
+    if not GMS_GROUP_ID_RE.match(gid):
+        return "group id must be 'g-' + 8 lowercase hex (client-named, XCAP)"
+    if dom and dom not in _ptt_domains():
+        return f"group uri domain '{dom}' is not the PTT domain"
+    return None
+
+
+def _xtext(el, path: str) -> Optional[str]:
+    n = el.find(path, _NS)
+    return n.text.strip() if (n is not None and n.text is not None) else None
+
+
+def _xbool(el, path: str) -> Optional[bool]:
+    t = _xtext(el, path)
+    return None if t is None else t.lower() == 'true'
+
+
+def _xint(el, path: str) -> Optional[int]:
+    t = _xtext(el, path)
+    try:
+        return None if t is None else int(t)
+    except ValueError:
+        return None
+
+
+def parse_group_document_xml(xml_text: str) -> dict:
+    """application/vnd.oma.poc.groups+xml (get_group_xml 이 내는 문서와 같은 포맷) → 속성 dict.
+    없는 요소는 None(갱신 시 기존값 유지, 생성 시 기본값). members 는 요소가 있을 때만 리스트.
+    ValueError = 스키마 위반(400)."""
+    if not xml_text or len(xml_text) > _GMS_MAX_BODY:
+        raise ValueError('empty or oversized body')
+    if '<!DOCTYPE' in xml_text or '<!ENTITY' in xml_text:
+        raise ValueError('DTD not allowed')
+    try:
+        root = _ET.fromstring(xml_text)
+    except _ET.ParseError as e:
+        raise ValueError(f'malformed XML: {e}')
+    ls = root if root.tag == f"{{{_NS['poc']}}}list-service" else root.find('poc:list-service', _NS)
+    if ls is None:
+        raise ValueError('list-service element missing')
+    out = {
+        'display_name': _xtext(ls, 'poc:display-name'),
+        'group_type': _xtext(ls, 'gi:session-type'),
+        'allow_sds': _xbool(ls, 'gi:mcdata-allow-short-data-service'),
+        'allow_fd': _xbool(ls, 'gi:mcdata-allow-file-distribution'),
+        'max_sds_size': _xint(ls, 'gi:mcdata-on-network-max-data-size-for-SDS'),
+        'max_auto_recv': _xint(ls, 'gi:mcdata-on-network-max-data-size-auto-recv'),
+        'video_enabled': _xbool(ls, 'gi:mcptt-video'),
+        'max_members': _xint(ls, 'gi:on-network-max-participant-count'),
+        'require_affiliation': _xbool(ls, 'gi:on-network-require-affiliation'),
+        'priority': _xint(ls, 'gi:on-network-group-priority'),
+        'encryption': _xbool(ls, 'gi:on-network-encryption'),
+        'emergency_call': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-call'),
+        'emergency_alert': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-alert'),
+        'org_code': _xtext(ls, 'gi:org-code'),
+        'members': None,
+    }
+    if out['group_type'] is not None and out['group_type'] not in ('prearranged', 'chat', 'broadcast'):
+        raise ValueError(f"session-type '{out['group_type']}' not one of prearranged/chat/broadcast")
+    lst = ls.find('poc:list', _NS)
+    if lst is not None:
+        members = []
+        for e in lst.findall('poc:entry', _NS):
+            uri = (e.get('uri') or '').strip()
+            uid = _norm_mcptt_uri(uri)
+            if uid and uid[0] != '+' and uid.isdigit():
+                uid = '+' + uid
+            if not uid:
+                raise ValueError('entry without uri')
+            role = (_xtext(e, 'gi:participant-type') or 'participant').lower()
+            if role not in ('chair', 'participant'):
+                raise ValueError(f"participant-type '{role}' not one of chair/participant")
+            prio = _xint(e, 'gi:user-priority')
+            members.append({'user_id': uid, 'mcptt_id': uri if uri.lower().startswith(('tel:', 'sip:')) else None,
+                            'role': role, 'priority': prio if prio is not None else 0})
+        out['members'] = members
+    return out
+
+
+_GMS_CREATE_DEFAULTS = {
+    'video_enabled': False, 'priority': 5, 'encryption': False, 'emergency_call': False,
+    'emergency_alert': True, 'allow_sds': True, 'allow_fd': False, 'max_sds_size': 10000,
+    'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged', 'max_members': 0,
+    'require_affiliation': True,
+}
+_GMS_BOOL_COLS = ('video_enabled', 'encryption', 'emergency_call', 'emergency_alert', 'allow_sds',
+                  'allow_fd', 'require_affiliation')
+_GMS_ATTR_COLS = ('video_enabled', 'priority', 'encryption', 'emergency_call', 'emergency_alert',
+                  'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code', 'group_type',
+                  'max_members', 'require_affiliation')
+
+
+def _gms_unknown_members(cur, members: list) -> list:
+    ids = [m['user_id'] for m in members]
+    if not ids:
+        return []
+    cur.execute("SELECT id FROM ptt_subscriptions WHERE id IN (%s)" % ",".join(["%s"] * len(ids)), ids)
+    known = {r['id'] for r in cur.fetchall()}
+    return [i for i in ids if i not in known]
+
+
+def gms_write_group(gid: str, doc: dict, owner_user_id: Optional[int], create: bool) -> Tuple[int, dict]:
+    """DB 에 그룹 생성(INSERT)/갱신(UPDATE, 준 필드만) + 멤버 교체 → (status, err). 성공 시 (0, {}).
+    호출자가 인가를 마친 뒤 부른다. 커밋 후 sync_group_from_db 로 캐시를 맞추는 것은 호출자 몫이 아니라 여기서 한다."""
+    conn = _db_connect()
+    if conn is None:
+        return 503, {'error': 'db_unavailable'}
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                if doc.get('members') is not None:
+                    unknown = _gms_unknown_members(cur, doc['members'])
+                    if unknown:
+                        return 400, {'error': 'unknown_member', 'detail': unknown}
+                if create:
+                    vals = {k: (doc[k] if doc.get(k) is not None else _GMS_CREATE_DEFAULTS[k])
+                            for k in _GMS_ATTR_COLS}
+                    for k in _GMS_BOOL_COLS:
+                        vals[k] = 1 if vals[k] else 0
+                    cur.execute(
+                        "INSERT INTO ptt_groups (mcptt_group_id, name, " + ", ".join(_GMS_ATTR_COLS) +
+                        ", authorized_user_id) VALUES (" + ", ".join(["%s"] * (len(_GMS_ATTR_COLS) + 3)) + ")",
+                        [gid, doc.get('display_name') or gid] + [vals[k] for k in _GMS_ATTR_COLS] + [owner_user_id])
+                    gpk = cur.lastrowid
+                else:
+                    cur.execute("SELECT id FROM ptt_groups WHERE mcptt_group_id=%s", (gid,))
+                    row = cur.fetchone()
+                    if not row:
+                        return 404, {'error': 'not_found'}
+                    gpk = row['id']
+                    sets, args = [], []
+                    if doc.get('display_name') is not None:
+                        sets.append("name=%s"); args.append(doc['display_name'])
+                    for k in _GMS_ATTR_COLS:
+                        if doc.get(k) is not None:
+                            sets.append(f"{k}=%s"); args.append((1 if doc[k] else 0) if k in _GMS_BOOL_COLS else doc[k])
+                    if sets:
+                        cur.execute("UPDATE ptt_groups SET " + ", ".join(sets) + " WHERE id=%s", args + [gpk])
+                if doc.get('members') is not None:
+                    cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
+                    for m in doc['members']:
+                        cur.execute("INSERT IGNORE INTO ptt_group_members (group_id, user_id, priority, role, mcptt_id) "
+                                    "VALUES (%s, %s, %s, %s, %s)",
+                                    (gpk, m['user_id'], int(m.get('priority') or 0), m.get('role') or 'participant',
+                                     m.get('mcptt_id')))
+            conn.commit()
+    except Exception as e:
+        logger.log_error(f"gms_write_group({gid}, create={create}) failed: {e}")
+        return 500, {'error': 'db_error', 'detail': str(e)}
+    sync_group_from_db(gid)
+    return 0, {}
+
+
+def gms_delete_group(gid: str) -> Tuple[int, dict]:
+    conn = _db_connect()
+    if conn is None:
+        return 503, {'error': 'db_unavailable'}
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM ptt_groups WHERE mcptt_group_id=%s", (gid,))   # FK CASCADE 가 멤버 정리
+                n = cur.rowcount
+            conn.commit()
+    except Exception as e:
+        logger.log_error(f"gms_delete_group({gid}) failed: {e}")
+        return 500, {'error': 'db_error', 'detail': str(e)}
+    sync_group_from_db(gid)
+    return (0, {}) if n else (404, {'error': 'not_found'})
+
+
+def _json_result(status: int, body: dict, headers=None) -> HandlerResult:
+    return HandlerResult(status=status, body=json.dumps(body), media_type='application/json', headers=headers or {})
+
 # GMS: List groups for a user
 # GET /org.openmobilealliance.groups/users/{user_uri}
 async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
@@ -1866,20 +2124,23 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 
     logger.log_info(f"[GMS] List groups for user: {user_uri}")
 
+    # 소유자(authorized_user_id == 토큰 가입자 users.id)면 멤버가 아니어도 목록에 넣는다 — 편집·삭제 대상 열거용.
+    #   is_owner 는 앱이 [편집]/[삭제] 노출 여부를 정할 근거(GMS PUT/DELETE 인가와 같은 판정).
+    my_uid = _token_user_id(token_payload)
     result = []
     for group_uri, group in GROUPS.items():
-        for member in group.get('members', []):
-            if member['uri'] == user_uri:
-                result.append({
-                    "uri": group_uri,
-                    "display_name": group['display_name'],
-                    "etag": group['etag'],
-                    "member_count": len(group['members']),
-                })
-                break
+        is_owner = my_uid is not None and group.get('authorized_user_id') == my_uid
+        is_member = any(_uri_eq(m.get('uri'), user_uri) for m in group.get('members', []))
+        if is_member or is_owner:
+            result.append({
+                "uri": group_uri,
+                "display_name": group['display_name'],
+                "etag": group['etag'],
+                "member_count": len(group['members']),
+                "is_owner": is_owner,
+            })
 
-    import json as _json
-    return HandlerResult(status=200, body=_json.dumps(result), media_type='application/json')
+    return HandlerResult(status=200, body=json.dumps(result), media_type='application/json')
 
 
 # GMS: unified handler — dispatches on path depth
@@ -1939,38 +2200,80 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 return HandlerResult(status=404)
 
         elif args.method == 'PUT':
-            display_name = f"Group {group_uri}"
-            now_str = datetime.datetime.now().isoformat()
-
-            GROUPS[group_uri] = {
-                "display_name": display_name,
-                "etag": f"etag_{int(time.time())}",
-                "created_by": user_uri,
-                "created_at": now_str,
-                "members": [
-                    {"uri": user_uri, "name": "Owner", "role": "owner", "priority": 5, "joined_at": now_str}
-                ]
-            }
-            save_group_to_file(group_uri, GROUPS[group_uri])
-            notify_csp("GROUP_CHANGED", group_uri, "PUT", GROUPS[group_uri].get('etag', ''))
-
-            xml, etag = get_group_xml(group_uri)
-            return HandlerResult(status=200, body=xml, media_type='application/vnd.oma.poc.groups+xml', headers={'Etag': etag})
+            # GMS XCAP PUT (TS 24.481 Ut) — 본문 = GET 이 내는 그룹 문서와 같은 포맷. 신규 = 생성 자격, 기존 = 소유.
+            gid, dom = _gms_gid_from_uri(group_uri)
+            uri_key = _group_uri(gid)
+            existing = GROUPS.get(uri_key)
+            if gid.startswith(('adhoc-', 'priv-')):
+                return _json_result(400, {'error': 'reserved_prefix'})
+            my_uid = _token_user_id(token_payload)
+            if existing is None:
+                err = validate_new_gms_group_id(gid, dom)
+                if err:
+                    return _json_result(400, {'error': 'invalid_group_id', 'detail': err})
+                if not get_user_profile(_requester_ptt_id(token_payload)).get('allow_create_group'):
+                    logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' lacks allow_create_group")
+                    return _json_result(403, {'error': 'group_creation_not_allowed'})
+                if my_uid is None:
+                    return _json_result(403, {'error': 'group_creation_not_allowed', 'detail': 'token subject has no users.id'})
+            else:
+                owner = existing.get('authorized_user_id')
+                if my_uid is None or owner != my_uid:
+                    logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' is not the owner (owner={owner})")
+                    # 타인 소유 = 409(클라이언트 명명 id 충돌 — 다른 id 로 다시), 소유자 없음(콘솔 생성) = 403.
+                    if owner is not None and my_uid is not None:
+                        return _json_result(409, {'error': 'uri_taken', 'detail': 'group is owned by another user'})
+                    return _json_result(403, {'error': 'not_group_owner'})
+                if_match = args.headers.get('if-match', '')
+                if if_match:
+                    _x, cur_etag = get_group_xml(uri_key)
+                    if if_match.strip('"') != (cur_etag or '').strip('"'):
+                        return _json_result(412, {'error': 'etag_mismatch', 'etag': cur_etag})
+            try:
+                doc = parse_group_document_xml(args.body.decode('utf-8', 'replace') if isinstance(args.body, (bytes, bytearray)) else (args.body or ''))
+            except ValueError as ve:
+                return _json_result(400, {'error': 'invalid_group_document', 'detail': str(ve)})
+            if not _DB_CONFIG:
+                # DB 없는 개발 환경 폴백 — 파일 그룹만 갱신(종전 동작). 운영은 항상 DB.
+                grp = existing or {"created_by": user_uri, "created_at": datetime.datetime.now().isoformat(),
+                                   "members": [], "authorized_user": requester or "",
+                                   "authorized_user_id": my_uid}
+                grp["display_name"] = doc.get('display_name') or grp.get('display_name') or gid
+                grp["etag"] = f"etag_{int(time.time())}"
+                if doc.get('members') is not None:
+                    grp["members"] = [{"uri": m.get('mcptt_id') or f"tel:{m['user_id']}", "name": m['user_id'],
+                                       "role": m['role'], "priority": m['priority'], "joined_at": ""} for m in doc['members']]
+                GROUPS[uri_key] = grp
+                save_group_to_file(uri_key, grp)
+            else:
+                st, err = gms_write_group(gid, doc, my_uid, create=existing is None)
+                if st:
+                    return _json_result(st, err)
+            notify_csp("GROUP_CHANGED", uri_key, "PUT", GROUPS.get(uri_key, {}).get('etag', ''))
+            xml, etag = get_group_xml(uri_key)
+            return HandlerResult(status=201 if existing is None else 200, body=xml,
+                                 media_type='application/vnd.oma.poc.groups+xml', headers={'Etag': etag})
 
         elif args.method == 'DELETE':
-            if group_uri in GROUPS:
-                del GROUPS[group_uri]
-                # Persist deletion
-                delete_group_file(group_uri)
-                
-                # [FIX] Notify CSP
-                notify_csp("GROUP_CHANGED", group_uri, "DELETE", "")
-
-                return HandlerResult(status=200)
+            gid, _dom = _gms_gid_from_uri(group_uri)
+            uri_key = _group_uri(gid)
+            existing = GROUPS.get(uri_key)
+            if existing is None:
+                return _json_result(404, {'error': 'not_found'})
+            my_uid = _token_user_id(token_payload)
+            if my_uid is None or existing.get('authorized_user_id') != my_uid:
+                logger.log_error(f"[GMS] DELETE {gid} denied: '{requester}' is not the owner")
+                return _json_result(403, {'error': 'not_group_owner'})
+            if not _DB_CONFIG:
+                GROUPS.pop(uri_key, None)
+                delete_group_file(uri_key)
             else:
-                return HandlerResult(status=404)
+                st, err = gms_delete_group(gid)
+                if st:
+                    return _json_result(st, err)
+            notify_csp("GROUP_CHANGED", uri_key, "DELETE", "")
+            return HandlerResult(status=200)
 
-        return HandlerResult(status=405)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -2270,6 +2573,9 @@ def _provision_service(kind: str, sid: str, imsi: str, auth_id: str, host_ip: st
         profile["mcdata"] = {
             "maxPayloadSdsCplaneBytes": int(mcdata_cfg.get('MaxPayloadSdsCplaneBytes', 0) or 0),
         }
+        # GMS XCAP 그룹 생성 자격 (mcptt_authorization.md §3) — 앱이 [새 그룹] 노출 여부를 결정.
+        #   수정·삭제 자격은 그룹 소유라 그룹 목록의 is_owner 로 준다(여기 아님).
+        profile["allowCreateGroup"] = bool(get_user_profile(sid).get('allow_create_group'))
     return profile
 
 async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:

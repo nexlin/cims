@@ -483,9 +483,18 @@ XCAP 기반 그룹 관리.
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/org.openmobilealliance.groups/users/{mcptt_id}/...` | 그룹 목록/상세 |
-| PUT | `/org.openmobilealliance.groups/users/{mcptt_id}/...` | 그룹 수정 |
-| DELETE | `/org.openmobilealliance.groups/users/{mcptt_id}/...` | 그룹 삭제 |
+| GET | `/org.openmobilealliance.groups/users/{mcptt_id}` | 그룹 목록(JSON) — 멤버인 그룹 + 소유 그룹, 항목에 `is_owner` |
+| GET | `/org.openmobilealliance.groups/users/{mcptt_id}/{group_uri}` | 그룹 문서(XML) — 멤버·소유자만 |
+| PUT | `/org.openmobilealliance.groups/users/{mcptt_id}/{group_uri}` | 생성(신규 uri — 프로파일 `allow_create_group`) / 수정(소유자). 본문 = GET 문서 포맷, DB 기록 |
+| DELETE | `/org.openmobilealliance.groups/users/{mcptt_id}/{group_uri}` | 삭제(소유자) |
+
+**쓰기 인가** — 가입자(관제사) 주체, TS 24.481 Ut. 토큰 = IdMS PKCE(콘솔 토큰 realm 과 분리). 신규 = 토큰 본인
+트리 + `ptt_user_profile.allow_create_group`(OAM 부여, CIMS 확장 `<cims:allow-create-group>`), 기존/삭제 =
+`ptt_groups.authorized_user_id == 토큰 sub(login_id)→users.id`. 신규 식별자는 클라이언트 명명 `g-<8hex>`(`adhoc-`/`priv-`
+예약 거부, `sip:` 형이면 PTT 도메인 검증), 타인 소유 id 는 409. 정본 = DB(`ptt_groups`·`ptt_group_members`), 쓰기 후
+`sync_group_from_db` 로 in-memory `GROUPS` 동기화(관리 API 그룹 CRUD 와 공통) + CSP `GROUP_CHANGED` → xcap-diff NOTIFY.
+계약·오류 코드·XML 샘플 = [mcptt_api.md §2](../../api/mcptt_api.md), 인가 모델 = [mcptt_authorization.md §4.1](../features/mcptt_authorization.md).
+HTTP 계층은 `*+xml`/`application/xml` 본문을 원시 바이트로 핸들러에 넘긴다(그 외 미지 media type 은 415).
 
 **그룹 목록 응답 (JSON):**
 
