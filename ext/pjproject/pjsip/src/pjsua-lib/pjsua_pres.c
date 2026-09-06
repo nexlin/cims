@@ -18,6 +18,7 @@
  */
 #include <pjsua-lib/pjsua.h>
 #include <pjsua-lib/pjsua_internal.h>
+#include <pjsip-simple/errno.h>
 
 
 #define THIS_FILE   "pjsua_pres.c"
@@ -2650,8 +2651,14 @@ static pj_status_t enable_unsolicited_mwi(void)
  * (contentType=application/conference-info+xml, fromUri=그룹 AoR=conference focus).
  */
 
-/* 동시 구독 상한 = 편성/참여 채널 수(conference) + 서버 PSI 구독(xcap-diff) 여유 */
-#define CIMS_CONF_MAX_SUB       24
+/* 동시 구독 상한 — 이 표를 conference(편성/청취 범위 채널) · xcap-diff(서버 PSI) · dialog(관제
+ * 감시 대상 회선 + 대표번호, RFC 4235) 가 함께 쓴다. 관제조작반은 monitor_scope=all 이면 조직
+ * 전원을 dialog 로 감시하므로(dispatch_center.md §5.2) 조직 규모로 잡는다 — 슬롯 하나가 수십 바이트라
+ * 정적 표로 충분하다. config_site 에서 재정의 가능. */
+#ifndef PJSUA_CIMS_MAX_SUB
+#   define PJSUA_CIMS_MAX_SUB   256
+#endif
+#define CIMS_CONF_MAX_SUB       PJSUA_CIMS_MAX_SUB
 
 typedef struct cims_conf_sub
 {
@@ -3089,11 +3096,16 @@ static pj_status_t cims_conf_init(void)
                      status);
     }
 
-    /* CIMS: dialog (RFC 4235) */
+    /* CIMS: dialog (RFC 4235). pjsua_core 가 상위 mod-dlg-event(buddy 용)로 같은 패키지를 먼저
+     * 등록해 두므로 EPKGEXISTS 는 정상 — 구독은 dialog 단위로 매칭되고 콜백은 구독마다 붙으니
+     * (cims_conf_cb) 어느 모듈이 패키지 소유자든 동작은 같다. */
     accept[0] = STR_DLG_INFO;
     status = pjsip_evsub_register_pkg(&mod_cims_conf, &STR_DLG_EVENT,
                                       3600, PJ_ARRAY_SIZE(accept), accept);
-    if (status != PJ_SUCCESS) {
+    if (status == PJSIP_SIMPLE_EPKGEXISTS) {
+        PJ_LOG(4,(THIS_FILE, "dialog event package already registered "
+                             "(mod-dlg-event) — CIMS subscriptions reuse it"));
+    } else if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_FILE, "Unable to register dialog event package",
                      status);
     }

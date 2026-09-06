@@ -154,8 +154,9 @@ public sealed partial class CallDeskViewModel : ObservableObject
     }
 
     public bool HasDesk => _s.HasDesk;
-    public int TodayAnswered => _s.Activity.Call.Count(r => r.Kind == ActivityKind.Incoming && r.Time.Date == DateTime.Today);
-    public int TodayMissed => _s.Activity.Call.Count(r => r.IsMissed && r.Time.Date == DateTime.Today);
+    // 이 데스크의 집계 — 대표번호 착신(내 응답·동료 응답)과 내 직접 착신. 서버 이력의 타인 간 통화(IsOthers)는 제외.
+    public int TodayAnswered => _s.Activity.Call.Count(r => r.Kind == ActivityKind.Incoming && !r.IsOthers && r.Time.Date == DateTime.Today);
+    public int TodayMissed => _s.Activity.Call.Count(r => r.IsMissed && !r.IsOthers && r.Time.Date == DateTime.Today);
     public string EmptyQueueText => $"대기 호 없음 · 오늘 응대 {TodayAnswered} · 부재 {TodayMissed}";
     public bool QueueEmpty => Queue.Count == 0;
 

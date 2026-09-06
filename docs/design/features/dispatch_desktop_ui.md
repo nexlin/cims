@@ -188,6 +188,10 @@
 - 칩 = 내선 · 이름 · 상태(dialog `state`: 대기/링잉/통화/보류 + 상대·경과). 자기 내선은 "나". 링잉 → [픽업](`pickup(code, ext)`), 통화 중이고
   `monitorScope` 안 → [청취](감청 창), 대기 → 클릭 → 발신 필드에 채움.
 - 소스: 그룹원마다 `dialogWatch(acc, ext, true)`(RFC 4235) → `onDialogInfo`. 대표번호 AoR 도 구독(대기열). 그룹원 목록 공급은 §13.
+  구독 순서는 **대표번호 → 감시 대상 전원**(엔진 슬롯이 모자라면 앞쪽이 산다 — ue_sdk.md §3 `PJSUA_CIMS_MAX_SUB`), 실패는 줄마다 로그하고
+  관제사에게 토스트 한 번("회선 감시 구독 실패 n건"), 실패한 회선은 다음 편성 재적용 때 다시 시도한다.
+- **dialog 종료 규칙**: dialog id(Call-ID+태그)는 양 당사자에게 같은 하나의 dialog 다 — `terminated` 는 entity 가 무엇이든 그 id 의 행 전부에
+  적용한다(CSP 가 대표번호 포크 호의 종료 NOTIFY entity/direction 을 어긋나게 보내는 경우가 있어 — [server_request_dispatch_dialog_notify.md](../../dev/server_request_dispatch_dialog_notify.md) — entity|id 키만 보면 띠·④ 진행 중에 "통화 중" 이 남는다).
 - 10명을 넘으면 띠가 두 줄이 되고 그 이상은 "+n" 로 접는다(운영 권고 10 이내).
 
 **왼쪽 중: 대기열** — 대표번호 AoR dialog(dispatch_center.md §4.5): 발신자 · `→ 대표번호` · 링 경과 · 울리는 그룹원(포크 대기 leg — 각 내선
@@ -196,8 +200,10 @@ dialog 의 early 로 추정, RLS 전) · [당겨받기]=`pickup(code, pilotId)`.
 **항목 = 발신자 기준 한 호** — 서버가 대표번호 dialog 를 **포크 집합당 하나**(id=A-leg 발신자 Call-ID)로 내보낸다(설계 §4.5, 착신 한 건=한 행).
 앱의 발신자 기준 병합은 방어적으로 유지(구 서버 호환). 대표 leg 는 confirmed 우선. 초기 full 스냅샷에는 진행 중 대표번호 호가 실려
 재로그인 즉시 보인다(서버가 RFC 4235 §3.2 full 로 채움).
-sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오늘 응대·부재 건수 — **대표번호 부재는 dialog 가 confirmed 없이 terminated 될 때 1건**
-(내 leg 가 응답 없이 끝난 것은 동료가 받은 경우일 수 있어 세지 않는다), 직접 착신 부재는 내 세션 기준.
+sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오늘 응대·부재 건수 — **대표번호 호의 결과 행은 대표번호 dialog 가 정본**: confirmed 없이
+terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받은 경우일 수 있어 세지 않는다), confirmed 뒤 terminated = 착신(응답자 = 같은 발신자와 confirmed 된
+그룹원 회선, 내가 받은 호는 내 세션 행이 대신), 직접 착신 부재는 내 세션 기준. 서버 통합 이력(§13)의 대표번호 `call.*` 항목은 응답자 필드가 없어 이
+행과 겹치므로 건너뛴다. 응대·부재 집계는 이 데스크 것만(이력의 타인 간 통화 `IsOthers` 제외).
 
 **왼쪽 아래: 내 통화** — `calls()` 중 VoLTE 통화(`!isMcptt && !listenOnly`) 카드(활성 1 + 보류 n, 스크롤):
 - 카드: 상대 · **착신 경로 배지**(`calledParty`=pilot → "대표 7000 착신") · 상태 · 경과 · 🎧/🔊 · [응답]/[거절 486]/[보류]/[재개]/[음소거]/[DTMF]/[전달 ▾]/
@@ -423,7 +429,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   - 응답(앱이 읽는 것 — 서버 계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md), 필드 추가는 무시): `{ "items": [ { "id", "time"(ISO 8601+offset),
     "kind", "event", "from", "to", "group"(URI), "duration"(초), "emergency", "text" } ], "next": "<다음 커서>" }` + 응답 헤더 `ETag`(If-None-Match→304).
     `id` 가 중복 제거 키, `items` 는 `time` 오름차순. `event` = call.answered/missed·ptt.session.start/end·message.sds(②)/sms(④) — 앱이 이름표로
-    ②(ptt·그룹 sds)·④(call·1:1 sms) 행에 매핑한다.
+    ②(ptt·그룹 sds)·④(call·1:1 sms) 행에 매핑한다(상세 문구 = 길이 또는 이름표 한글). 내가 당사자인 항목과 **대표번호 호**(로컬 dialog 가 정본, §4.3)는
+    건너뛰고, 넣는 행은 `IsOthers` 로 표시해 데스크 응대·부재 집계에서 뺀다.
   - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
   게이트웨이가 필요하다. 앱은 게이트웨이 유무를 접속서비스 능력으로 받아 [문자] 활성/비활성을 결정한다(능력 키 신설 필요).

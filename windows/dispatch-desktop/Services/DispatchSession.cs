@@ -239,12 +239,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanSms));
         await SyncDirectoryAsync();
 
-        // 관제 범위: 감시 대상 전원·대표번호 dialog 구독 (§4.3) — 대상 = 프로비저닝 members[](서버가 monitorScope 해석, 정본) 또는 CSV member 폴백
-        if (HasDesk && Volte is not null)
-        {
-            foreach (var m in Directory.WatchTargets) Watch(m.Number);
-            if (PilotId.Length > 0) Watch(PilotId);
-        }
+        // 관제 범위: 대표번호·감시 대상 전원 dialog 구독 (§4.3) — 대상 = 프로비저닝 members[](서버가 monitorScope 해석, 정본) 또는 CSV member 폴백
+        if (HasDesk && Volte is not null) WatchAll();
         _nextDispatchPoll = DateTime.Now.AddSeconds(DispatchPollSec);
         // 멤버 그룹(GMS 목록 → affiliation + conference 구독)·청취 범위 그룹(pttTargets → conference 구독) (§4.1·§4.2)
         if (Ptt is not null)
@@ -276,12 +272,15 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             _history.Start(new[] { HistoryKind.Call, HistoryKind.Ptt, HistoryKind.Message });
     }
 
-    /// <summary>이력 항목 → ②④ 내역 행. 내가 당사자인 항목은 이미 로컬 행이 있으니 건너뛴다 — 서버 이력의 몫은 관제 범위 안 타인의 통화·세션·메시지.</summary>
+    /// <summary>이력 항목 → ②④ 내역 행. 내가 당사자인 항목은 이미 로컬 행이 있으니 건너뛴다 — 서버 이력의 몫은 관제 범위 안 타인의 통화·세션·메시지.
+    /// 대표번호 호(부재·동료 응답·내 응답)도 로컬(대표번호 dialog, RecordPilotOutcome)이 즉시 기록하고 이력엔 응답자 필드가 없어 구분이 안 되므로 건너뛴다.</summary>
     private void OnHistory(HistoryEntry e)
     {
         if (IsMe(e.From) || IsMe(e.To)) return;
-        string from = Directory.NameOf(UserPartConverter.UserPart(e.From)) is { Length: > 0 } fn ? fn : Directory.DisplayNumber(UserPartConverter.UserPart(e.From));
-        string to = Directory.NameOf(UserPartConverter.UserPart(e.To)) is { Length: > 0 } tn ? tn : Directory.DisplayNumber(UserPartConverter.UserPart(e.To));
+        bool pilot = (e.To.Length > 0 && IsPilotUri(e.To)) || (e.From.Length > 0 && IsPilotUri(e.From));
+        if (pilot && e.Kind == HistoryKind.Call) return;                       // 대표번호 호 결과는 dialog 가 정본(RecordPilotOutcome)
+        string from = Label(e.From);
+        string to = pilot && IsPilotUri(e.To) ? $"대표 {Directory.DisplayNumber(UserPartConverter.UserPart(e.To))}" : Label(e.To);
         string dur = e.DurationSec > 0 ? $"{e.DurationSec / 60}:{e.DurationSec % 60:00}" : "";
         switch (e.Kind)
         {
@@ -292,8 +291,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                     "call.answered" or "call.ended" => ActivityKind.Incoming, "call.missed" or "call.noanswer" => ActivityKind.Missed,
                     "call.transferred" => ActivityKind.Transfer, "call.pickup" => ActivityKind.Pickup, _ => ActivityKind.Note,
                 };
-                Activity.Add(new ActivityRow(e.Time, ActivityPanel.Call, kind, $"{from} → {to}", dur.Length > 0 ? dur : e.Event,
-                                             e.Emergency, kind == ActivityKind.Missed, UserPartConverter.UserPart(e.From), IsPilot: e.To.Length > 0 && IsPilotUri(e.To)));
+                Activity.Add(new ActivityRow(e.Time, ActivityPanel.Call, kind, $"{from} → {to}", dur.Length > 0 ? dur : HistoryEventText(e.Event),
+                                             e.Emergency, kind == ActivityKind.Missed, UserPartConverter.UserPart(e.From), IsPilot: pilot, IsOthers: true));
                 break;
             }
             case HistoryKind.Ptt:
@@ -304,7 +303,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                     "ptt.talk" => ActivityKind.Talk, "ptt.session.start" => ActivityKind.SessionStart, "ptt.session.end" => ActivityKind.SessionEnd,
                     "ptt.emergency" => ActivityKind.Emergency, "ptt.private" => ActivityKind.Private, "ptt.adhoc" => ActivityKind.Adhoc, _ => ActivityKind.Note,
                 };
-                Activity.Add(new ActivityRow(e.Time, ActivityPanel.Ptt, kind, $"{group} · {from}", dur.Length > 0 ? dur : e.Event, e.Emergency, false, UserPartConverter.UserPart(e.From)));
+                Activity.Add(new ActivityRow(e.Time, ActivityPanel.Ptt, kind, $"{group} · {from}", dur.Length > 0 ? dur : HistoryEventText(e.Event), e.Emergency, false, UserPartConverter.UserPart(e.From), IsOthers: true));
                 break;
             }
             case HistoryKind.Message:
@@ -314,11 +313,21 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                     ? Groups.FirstOrDefault(g => string.Equals(g.Uri, e.Group, StringComparison.OrdinalIgnoreCase))?.Name ?? UserPartConverter.UserPart(e.Group) : to;
                 string text = e.Text.Length > 60 ? e.Text[..60] + "…" : e.Text;
                 Activity.Add(new ActivityRow(e.Time, sms ? ActivityPanel.Call : ActivityPanel.Ptt, sms ? ActivityKind.Sms : ActivityKind.Sds,
-                                             $"{from} → {target}", text, e.Emergency, false, UserPartConverter.UserPart(e.From)));
+                                             $"{from} → {target}", text, e.Emergency, false, UserPartConverter.UserPart(e.From), IsOthers: true));
                 break;
             }
         }
     }
+
+    private string Label(string uri) => Directory.NameOf(UserPartConverter.UserPart(uri)) is { Length: > 0 } n ? n : Directory.DisplayNumber(UserPartConverter.UserPart(uri));
+
+    /// <summary>이력 event 이름표(android_ue_provisioning.md §3-2) → 상세 문구. 모르는 이름은 그대로.</summary>
+    private static string HistoryEventText(string ev) => ev switch
+    {
+        "call.answered" => "응답", "call.ended" => "종료", "call.missed" => "부재", "call.noanswer" => "무응답", "call.transferred" => "전달", "call.pickup" => "당겨받기",
+        "ptt.talk" => "발언", "ptt.session.start" => "세션 시작", "ptt.session.end" => "세션 종료", "ptt.emergency" => "긴급", "ptt.private" => "사설콜", "ptt.adhoc" => "애드혹",
+        _ => ev,
+    };
 
     private bool IsPilotUri(string uri) => PilotId.Length > 0 && string.Equals(UserPartConverter.UserPart(uri), UserPartConverter.UserPart(PilotId), StringComparison.Ordinal);
 
@@ -352,12 +361,17 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             }
             else { gi.Name = name; gi.MemberCount = g.MemberCount; gi.IsOwner = g.IsOwner; gi.Etag = g.ETag; }
         }
+        var goneIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var gone in Groups.Where(x => x.IsMember && !seen.Contains(x.Id)).ToList())
         {
             ptt.Affiliate(gone.Id, false);
             ptt.SubscribeConference(gone.Id, false);
             Groups.Remove(gone);
+            goneIds.Add(gone.Id);
             Log.Info($"group gone {gone.Id}");
+            // 서버 pttTargets(ptt_listen=all 은 전 그룹)가 아직 이 그룹을 들고 있을 수 있다 — 다음 틱에 /provisioning/me 재조회를 당겨
+            // 삭제된 그룹을 청취 범위로 다시 구독하는 창을 없앤다(정상 주기는 60초).
+            if (HasDesk) _nextDispatchPoll = DateTime.Now;
         }
         // 청취 범위 그룹 — 프로비저닝 pttTargets(서버가 ptt_listen 범위를 해석한 목록). 로스터 NOTIFY 로 진행/참가자 수를 안다.
         // 범위 밖·자격 없음은 서버가 403 + Warning 138(브로드캐스트 480 + 105)로 거절한다 — 구독은 여기서 1회, 재시도 루프 없음.
@@ -365,7 +379,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                                      : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var t in Dispatch.PttTargets)
         {
-            if (!listenIds.Contains(t.Id) || seen.Contains(t.Id) || Groups.Any(x => x.Id == t.Id)) continue;
+            if (!listenIds.Contains(t.Id) || seen.Contains(t.Id) || goneIds.Contains(t.Id) || Groups.Any(x => x.Id == t.Id)) continue;
             string uri = t.Uri.Length > 0 ? t.Uri : $"tel:{t.Id}";
             Groups.Add(new GroupInfo(t.Id, uri, t.Name.Length > 0 ? t.Name : t.Id, 0) { IsMember = false });
             var sc = ptt.SubscribeConference(t.Id, true);
@@ -415,8 +429,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 Volte.DialogWatch(aor, false); _watched.Remove(aor);
                 foreach (var row in Dialogs.Where(d => string.Equals(d.Watched, aor, StringComparison.OrdinalIgnoreCase)).ToList()) { Dialogs.Remove(row); DialogEnded?.Invoke(this, row); }
             }
-            foreach (var m in Directory.WatchTargets) Watch(m.Number);
-            if (PilotId.Length > 0) Watch(PilotId);
+            WatchAll();
         }
         if (Ptt is not null) await RefreshGroupsAsync();
         Notify.Info("관제 편성이 바뀌었습니다", $"그룹원 {Directory.Members.Count} · 감시 {Directory.WatchTargets.Count} · 청취 그룹 {Groups.Count(g => !g.IsMember)}");
@@ -479,13 +492,27 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return r;
     }
 
-    private void Watch(string numberOrAor)
+    /// <summary>대표번호를 먼저(대기열은 이 구독 하나에 달렸다), 그다음 감시 대상 전원. 구독 슬롯이 모자라면 앞쪽이 산다 —
+    /// 실패는 줄마다 로그하되 관제사에게는 한 번만 알린다(감시 누락은 조용히 넘기면 안 되는 상태).</summary>
+    private void WatchAll()
     {
         if (Volte is null) return;
+        int failed = 0; string first = "";
+        if (PilotId.Length > 0 && !Watch(PilotId)) { failed++; first = PilotId; }
+        foreach (var m in Directory.WatchTargets)
+            if (!Watch(m.Number)) { if (failed++ == 0) first = m.Number; }
+        if (failed > 0) Notify.Warn($"회선 감시 구독 실패 {failed}건", $"{first} 등 — 그룹원 상태·대기열이 빠질 수 있습니다 (로그 dialogWatch 참조)");
+    }
+
+    /// <summary>이미 구독 중이면 true(중복 요청 없음), 새 구독은 결과대로.</summary>
+    private bool Watch(string numberOrAor)
+    {
+        if (Volte is null) return false;
         string aor = ToSipUri(numberOrAor);
-        if (!_watched.Add(aor)) return;
+        if (!_watched.Add(aor)) return true;
         var r = Volte.DialogWatch(aor, true);
-        if (!r.Ok) Log.Warn($"dialogWatch {aor}: {r}");
+        if (!r.Ok) { Log.Warn($"dialogWatch {aor}: {r}"); _watched.Remove(aor); return false; }
+        return true;
     }
 
     public string ToSipUri(string numberOrUri)
@@ -861,19 +888,53 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var row = Dialogs.FirstOrDefault(x => x.Key == key);
         if (d.State == "terminated")
         {
-            if (row is null) return;
-            row.Apply(d);
-            Dialogs.Remove(row);
-            if (IsPilot(d.Watched) && !row.WasConfirmed)
-                Activity.Add(ActivityPanel.Call, ActivityKind.Missed, $"부재 {UserPartConverter.UserPart(PilotId)} ← {Directory.Label(d.RemoteIdentity)}", "전원 무응답",
-                             missed: true, number: row.RemoteNumber, pilot: true);
-            DialogEnded?.Invoke(this, row);
+            // dialog id(Call-ID+태그)는 양 당사자에게 같은 하나의 dialog 다 — 종료는 entity 가 무엇이든 그 id 의 행 전부에 적용한다.
+            // (CSP 가 대표번호 포크 호 종료 NOTIFY 의 entity/direction 을 다른 회선으로 붙여 보내는 경우가 있어 — 서버 결함 보고 —
+            //  entity|id 키만 보면 ③ 띠·④ 진행 중에 "통화 중" 행이 남는다.)
+            var ended = Dialogs.Where(x => x.Id == d.Id).ToList();
+            if (ended.Count == 0) return;
+            foreach (var r in ended)
+            {
+                var since = r.StateSince; var last = r.Info;                    // confirmed 시각(통화 길이)·상대 — 종료 본문이 덮기 전에
+                if (r == row) r.Apply(d);
+                else r.Apply(r.Info with { State = "terminated" });
+                Dialogs.Remove(r);
+                if (IsPilot(r.Watched)) RecordPilotOutcome(r, last, since);
+                DialogEnded?.Invoke(this, r);
+            }
             return;
         }
         if (row is null) { row = new DialogRow(d); Dialogs.Add(row); }
         else row.Apply(d);
-        if (row.IsConfirmed) row.WasConfirmed = true;
+        if (row.IsConfirmed)
+        {
+            row.WasConfirmed = true;
+            // 그룹원 회선이 같은 발신자와 confirmed 되면 그 회선이 대표번호 호의 응답자(포크 승자) — 대표번호 행에 기록(§4.4).
+            // 대표번호·회선 confirmed NOTIFY 순서는 서버가 정하지 않으므로 어느 쪽이 먼저 와도 맞물리게 양방향으로 본다.
+            if (!IsPilot(row.Watched))
+                foreach (var pr in Dialogs.Where(x => IsPilot(x.Watched) && x.AnsweredBy.Length == 0 && x.RemoteNumber == row.RemoteNumber)) pr.AnsweredBy = row.WatchedNumber;
+            else if (row.AnsweredBy.Length == 0)
+                row.AnsweredBy = Dialogs.FirstOrDefault(x => !IsPilot(x.Watched) && x.IsConfirmed && x.RemoteNumber == row.RemoteNumber)?.WatchedNumber ?? "";
+        }
         DialogChanged?.Invoke(this, row);
+    }
+
+    /// <summary>대표번호 호의 결과 행 — 대표번호 dialog 가 정본(§4.4·§13): 전원 무응답 = 부재, 동료 응답 = 착신(응답자 표기).
+    /// 내가 받은 호는 내 세션 종료(OnSessionEnded)가 이미 "착신 … 응답 나" 를 남기므로 여기서는 만들지 않는다.
+    /// 서버 이력(call.*)의 대표번호 항목은 응답자 필드가 없어 이 행과 겹치므로 OnHistory 가 건너뛴다.</summary>
+    private void RecordPilotOutcome(DialogRow r, DialogInfo last, DateTime confirmedAt)
+    {
+        string pilot = UserPartConverter.UserPart(PilotId);
+        string caller = UserPartConverter.UserPart(last.RemoteIdentity);
+        if (!r.WasConfirmed)
+        {
+            Activity.Add(ActivityPanel.Call, ActivityKind.Missed, $"부재 {pilot} ← {Directory.Label(caller)}", "전원 무응답", missed: true, number: caller, pilot: true);
+            return;
+        }
+        if (r.AnsweredBy == MyExtension) return;
+        string who = r.AnsweredBy.Length > 0 ? Directory.Label(r.AnsweredBy) : "그룹원(미상)";
+        Activity.Add(ActivityPanel.Call, ActivityKind.Incoming, $"착신 {pilot} ← {Directory.Label(caller)}", $"응답 {who} · {Fmt(DateTime.Now - confirmedAt)}",
+                     number: caller, pilot: true);
     }
 
     // ── 관제 동작 (§2 표) ──

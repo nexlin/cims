@@ -9,8 +9,9 @@ public enum ActivityKind
     Incoming, Outgoing, Missed, Transfer, Pickup, Sms, Note,
 }
 
+/// <param name="IsOthers">서버 이력에서 온 타인 간 항목(관제 범위 모니터링, §13) — 이 데스크의 응대·부재 집계에 넣지 않는다.</param>
 public sealed record ActivityRow(DateTime Time, ActivityPanel Panel, ActivityKind Kind, string Title, string Detail,
-                                 bool IsEmergency = false, bool IsMissed = false, string Number = "", bool IsPilot = false)
+                                 bool IsEmergency = false, bool IsMissed = false, string Number = "", bool IsPilot = false, bool IsOthers = false)
 {
     public string KindText => Kind switch
     {

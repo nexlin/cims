@@ -19,6 +19,8 @@ public sealed partial class DialogRow : ObservableObject
     [ObservableProperty] private TimeSpan _elapsed;
     /// <summary>한 번이라도 confirmed 였는가 — 대표번호 부재(전원 무응답) 판정.</summary>
     public bool WasConfirmed { get; set; }
+    /// <summary>대표번호 행에서만: 같은 발신자와 confirmed 된 그룹원 회선(포크 승자) 번호. 비면 미상.</summary>
+    public string AnsweredBy { get; set; } = "";
 
     public DialogRow(DialogInfo info)
     {

@@ -24,10 +24,10 @@ claude
 | SDK 코어 `sdk/core` — `GroupDoc`(XML 직렬화/파서), `CscClient.getGroup/putGroup/deleteGroup`, `Profile.allowGroupCreation`, `dispatch.members[]/pttTargets[]` 파싱 | 완료, 단위시험 통과 | `sdk/core/include/cimsue/csc.h`, `src/csc/group_doc.cpp`, `test/csc_test.cpp` |
 | C API / .NET 파사드 — 구조체 4개(`dispatch_member/target`, `group_member/doc`)·`cimsue_csc_get/put/delete_group`, `CscClient.GetGroup/PutGroup/DeleteGroup` | 완료, ABI 시험 통과(56건) | `cimsue_c.h`, `c_api.cpp`, `sdk/windows/dotnet/CimsUe/CscClient.cs` |
 | 앱 `windows/dispatch-desktop` — [그룹] 탭 [새 그룹]/[↻]/[편집]/[삭제], `GroupEditWindow`, `RefreshGroupsAsync`(차분 갱신·청취 범위 그룹 구독), xcap-diff 자동 재조회, 오류 문구·409 재시도·412 재조회, 서버 그룹원 우선(`Directory.SetMembers`) | 완료, Release 빌드 통과 | `Services/DispatchSession.cs`, `ViewModels/GroupEditViewModel.cs`, `Shell/GroupEditWindow.xaml`, `Services/ResponseText.cs` |
-| 앱 실기 e2e(그룹 생성→disp02 자동 갱신→편집/삭제/오류 문구) | **미실시 — 사용자 실기** | 후속 요청서 §3 체크리스트 |
-| 활성 세션 발견(서버 P2 — `/provisioning/me` `dispatch.members[]{…,groupId}/pttTargets[]/etag`, 응답 `ETag`/304) | **서버 구현(csc 0.2.104)**. 앱 반영: `DispatchMember.GroupId`(SDK·C API·파사드), `Directory.WatchTargets`(감시 = 전원) / `Members`(③ 띠 = `groupId == dispatch.groupId`), 60초 재조회 `RefreshDispatchAsync`(If-None-Match 304, 변경 시 dialog watch·conference 구독 집합 재적용) — **실기 미확인** | [android_ue_provisioning.md §3](../design/features/android_ue_provisioning.md), `DispatchSession.RefreshDispatchAsync` |
+| 앱 실기 e2e(그룹 생성→disp02 자동 갱신→삭제, 대표번호 착신/응답/부재/동료 응답, PTT 청취, SDS 양방향) | **UI 자동화로 실기 완료(09-06 22시)** — §3-2. 남은 실기 = 오디오 실청취·핫키·콘솔 편성 변경(사용자) | §3-2 |
+| 활성 세션 발견(서버 P2 — `/provisioning/me` `dispatch.members[]{…,groupId}/pttTargets[]/etag`, 응답 `ETag`/304) | **서버 구현(csc 0.2.104)**. 앱 반영: `DispatchMember.GroupId`(SDK·C API·파사드), `Directory.WatchTargets`(감시 = 전원) / `Members`(③ 띠 = `groupId == dispatch.groupId`), 60초 재조회 `RefreshDispatchAsync`(If-None-Match 304, 변경 시 dialog watch·conference 구독 집합 재적용) — 실기 통과(304 조용·그룹 수 변동 감지) | [android_ue_provisioning.md §3](../design/features/android_ue_provisioning.md), `DispatchSession.RefreshDispatchAsync` |
 | 청취 범위 conference 구독 인가(서버 P3 — 403 + Warning 138, 브로드캐스트 480 + 105) | **서버 구현(csp, 다음 릴리스 + DB 마이그레이션)**. 앱: 구독 1회·재시도 없음, 범위에서 빠진 청취 그룹은 구독 해제 — 403/480 문구 = `Area.PttListen` | [dispatch_center.md §5.6](../design/features/dispatch_center.md) |
-| 통합 이력·메시지 모니터링(서버 P3b — `GET /provisioning/history?kind=call\|ptt\|message&since&limit`, ETag/304, 403 `no_monitor_scope`) | **서버 구현(csc 0.2.104)**. 앱 `Services/HistoryClient`(탐침→404/501/403 이면 꺼짐, kind 별 `next` 커서·ETag, 2.5초) + `DispatchSession.OnHistory`(②④ 내역 행) — 계약 §3-2 와 대조 완료(items/next/event 이름표 일치), **실기 미확인**. 1:1 SDS 는 CSP `Setup.McData.StoreOneToOneSds` 필요 | [android_ue_provisioning.md §3-2](../design/features/android_ue_provisioning.md) |
+| 통합 이력·메시지 모니터링(서버 P3b — `GET /provisioning/history?kind=call\|ptt\|message&since&limit`, ETag/304, 403 `no_monitor_scope`) | **서버 구현(csc 0.2.104)**. 앱 `Services/HistoryClient`(탐침→404/501/403 이면 꺼짐, kind 별 `next` 커서·ETag, 2.5초) + `DispatchSession.OnHistory`(②④ 내역 행) — 계약 §3-2 와 대조 완료(items/next/event 이름표 일치), 실기 통과(타인 세션·통화 행 유입, 대표번호 항목은 dialog 정본이라 건너뜀). 1:1 SDS 는 CSP `Setup.McData.StoreOneToOneSds` 필요 | [android_ue_provisioning.md §3-2](../design/features/android_ue_provisioning.md) |
 | 감청 창 화자 레벨 미터(U10 관측 API) | SDK/엔진 과제, 미착수 | ue_sdk.md §11 |
 
 관제사 계정: disp01/disp02 (pw 1234, 개발 서버 121.161.164.45, CSC 4430 — 앱은 인증서 검증 끔). VoLTE `+821310001001/2`(내선 1001/1002), 대표번호 `+821310001000`,
@@ -53,7 +53,7 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
 - 서버 쪽 확인용 CLI(로그인 필요): `cimsue-cli --csc-host 121.161.164.45 --csc-port 4430 --no-tls-verify --user disp01 --pw <pw> groups | group-get URI | group-put URI --name N --members tel:..,tel:.. | group-delete URI`.
 - Smart App Control 이 새 exe 를 간헐 차단할 수 있다(재빌드·재시도로 풀림, 보안 설정은 사용자 결정).
 
-## 3. 남은 일 (우선순위 순) — 2026-09-06 21시 실측 반영
+## 3. 남은 일 (우선순위 순) — 2026-09-06 22시 실측 반영
 
 서버(csc 0.2.104 / csp 0.2.112)가 배포된 뒤 헤드리스 UE(`cimsue-cli`)와 PKCE 스크립트로 앱이 쓰는 경로를 실측했다. **앱 코드 변경 없이 전부 통과**:
 
@@ -75,13 +75,26 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
    `no active session → 480`(자격·범위 통과 뒤 활성 세션 없음 = 정상). g003 에 실단말 세션이 있을 때 다시 합류하면 200 이어야 한다.
    CSC 코드(파생 자동화)는 **csc 0.2.105 로 라이브 배포 완료**(21:4x, 정지창 11초, 커밋 `3a10fff0`) — 이후 콘솔에서 관제 그룹 멤버를
    바꾸면 같은 person 의 PTT 회선 `pickup_group` 도 자동 파생된다(파생 회선 직접 편집은 409 실측).
-2. **앱 실기 e2e(사용자)** — 후속 요청서 §3 그룹 CRUD 7단계 + 아래 확인 줄:
-   - 로그인 직후 로그 `profile … members=42 pttTargets=5`, ③ 띠에 관제1석·관제2석만, `groups 1 member (0 owned), 4 listen-scope`(g002 는 멤버)
-   - `history: available` 뒤 통화·SDS 가 생기면 ②④ 최근 행에 타인 항목이 수초 내 붙는지
-   - 시험단말 → `+821310001000` 발신 시 대기열이 **한 행**·[응답] 이 그 호를 받는지, 동료 응답 시 내 쪽에 "부재"가 안 남는지
-   - 60초 뒤 로그에 `provisioning/me` 재조회가 조용한지(304), 콘솔에서 관제 그룹 편성을 바꾸면 토스트 "관제 편성이 바뀌었습니다"
-3. (정리) 후속/요청서 `docs/dev/*_request_*.md` 는 양쪽 반영이 끝났으니 삭제하고 설계 정본만 남긴다. 이 파일도 같다.
-4. (정리) C API `allow_group_creation` → `allow_create_group` rename 은 ABI 변경 — 파사드·`AbiLayoutTests`·문서 동시 변경일 때만.
+2. ✅ **앱 GUI e2e(2026-09-06 22시, CLI 세션 — UI 자동화로 실기)** — 화면 잠금 상태라 스크린샷 대신 UIA 트리·앱 로그로 판정. 상대 단말 = `cimsue-cli`(disp02).
+   - 로그인·프로파일 `members=42 pttTargets=5`, VoLTE/PTT 등록 200, ③ 띠 = 관제1석·관제2석, `groups 1 member (0 owned), 4 listen-scope`, 로스터 5개, `history: available` — 통과
+   - **결함 1(엔진, 수정)**: 구독 슬롯 24개(`pjsua_pres.c CIMS_CONF_MAX_SUB`)에 dialog 42 + 대표번호 + conference 5 + xcap-diff 가 넘쳐 **대표번호·conference 구독 전부 실패**
+     (`Too many CIMS subscriptions`). → `PJSUA_CIMS_MAX_SUB` 256(config_site 재정의 가능) + 앱은 대표번호를 먼저 구독하고 실패 건수를 토스트. 함께 있던 기동 오류
+     "Unable to register dialog event package: already exist" 는 upstream mod-dlg-event 가 먼저 등록한 정상 상황 → 레벨 4 로.
+   - 대표번호 착신(disp02 → +821310001000): 대기열 1행, [응답] → 양방향 RTP, 정상 종료 — 통과. 전원 무응답 → 부재 1건 — 통과(아래 결함 2 수정 뒤).
+   - **결함 2(앱, 수정)**: 대표번호 부재가 dialog(로컬)와 서버 이력 `call.missed` 양쪽에서 행이 생겨 **부재 2**. 내가 받은 호도 이력 `call.answered/ended`(from=발신자, to=대표번호)
+     와 겹쳐 응대가 부풀었다. → 대표번호 호는 dialog 가 정본(`RecordPilotOutcome`: 부재·동료 응답 행), 이력의 대표번호 `call.*` 는 건너뜀, 이력 행 `IsOthers` 는 응대·부재 집계 제외.
+   - **결함 3(서버 CSP, 앱 완화)**: 발신자(A-leg)가 BYE 하면 종료 dialog NOTIFY 의 entity/direction/remote 가 confirmed 때와 어긋나고 1001 에는 종료가 안 와 **③ 띠·④ 진행 중에
+     "통화 중" 잔류**. version 도 단조 증가 아님. → 요청서 [server_request_dispatch_dialog_notify.md](server_request_dispatch_dialog_notify.md). 앱은 같은 dialog id 의 행 전부를 종료해 잔류를 없앰.
+   - 동료 응답(앱이 대표번호 발신 → disp02 `answer`): ④ "착신 대표 ← 관제1석 · 응답 관제2석 · 00:12" 1행, 내 쪽 부재 없음 — 통과.
+   - PTT 청취(g003, 활성 세션 2명): [청취] → 200, 감청 창 "청취 전용·참가자 2", [청취 종료] 200 — 통과(서버 §3-1 수정 확인).
+   - SDS: 앱 → g002 → disp02 수신(✓✓ disposition), disp02 → g002 → 앱 수신 표시 — 통과.
+   - 그룹 CRUD(GUI): [새 그룹] → 이름·멤버 2명 → 생성 201 → disp02 목록에 `owner=false` → [삭제] → xcap-diff 재조회로 목록에서 제거 — 통과. 삭제 직후 서버 `pttTargets`(ptt_listen=all)에
+     그 그룹이 60초 남아 청취 범위로 재구독되던 창은 그룹 소멸 시 발견 재조회를 당겨서 없앰.
+   - 60초 `/provisioning/me` 재조회: 변경 없으면 조용(304), 그룹 수 변동 시 `dispatch discovery changed … pttTargets 6→5` + 토스트 — 통과.
+   - 미실시: 콘솔에서 관제 편성 변경(콘솔 접근 없음), 오디오 실청취(잠금 세션), 핫키.
+3. **서버(CSP)**: [server_request_dispatch_dialog_notify.md](server_request_dispatch_dialog_notify.md) — A-leg BYE 시 종료 dialog NOTIFY entity/direction 오귀속·version 비단조. 앱은 완화 반영, 서버 수정 뒤 S3-SCN-FA 로 확인.
+4. (정리) 후속/요청서 `docs/dev/*_request_*.md` 중 양쪽 반영이 끝난 것(group_crud_followup·group_monitoring)은 삭제하고 설계 정본만 남긴다. 이 파일도 3 이 끝나면 같다.
+5. (정리) C API `allow_group_creation` → `allow_create_group` rename 은 ABI 변경 — 파사드·`AbiLayoutTests`·문서 동시 변경일 때만.
 
 ## 4. 이번에 확정한 계약·규칙 (앱이 지키는 것)
 
@@ -97,4 +110,5 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
 
 - `bdf72d6c` 서버 요청서 + UI §13 결정 · `05bb385b` 단말 파트(SDK·파사드·앱 그룹 CRUD) · 서버 `9bf59d26`·`718b42a0`·`d2cb2ab4` · `93b1aef8` 계약 접점 반영·번호 재키잉
   · `16b4c8a6` 409 재시도 세션 이동·샘플 CSV 재키잉 · `2d50ebc8` HistoryClient 뼈대 · `30feccda`·`e90ff616`·`34264ac8` 앱 결함 검토 보완
-  · 서버 `d725ae73`(P2·P3·P3b)·`e3d08d8c`(요청서 §6 결함 3건) · (다음) 앱 P2 반영 — `DispatchMember.GroupId`·`WatchTargets`·`RefreshDispatchAsync`.
+  · 서버 `d725ae73`(P2·P3·P3b)·`e3d08d8c`(요청서 §6 결함 3건) · `0c17951e` 앱 P2 반영 · 서버 `3a10fff0`(person 단위 pickup_group 파생, csc 0.2.105)
+  · (이번) 엔진 구독 슬롯 256·dialog 패키지 EPKGEXISTS·앱 대표번호 결과 행 정본화·dialog id 종료·이력 IsOthers·그룹 소멸 시 발견 재조회.
