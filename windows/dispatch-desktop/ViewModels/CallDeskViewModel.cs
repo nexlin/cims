@@ -18,7 +18,8 @@ public sealed partial class MemberChip : ObservableObject
     [ObservableProperty] private DialogRow? _dialog;
     public MemberChip(DispatchSession s, string ext, string name, bool me) { _s = s; Extension = ext; Name = name; IsMe = me; }
 
-    public string Label => IsMe ? $"{Extension} 나" : Name.Length > 0 ? $"{Extension} {Name}" : Extension;
+    /// <summary>번호는 망 주소(E.164)라 로컬 표기로, 내선 라벨은 이름에 병기돼 온다("관제2석 1002").</summary>
+    public string Label => IsMe ? $"{_s.Directory.DisplayNumber(Extension)} 나" : Name.Length > 0 ? $"{_s.Directory.DisplayNumber(Extension)} {Name}" : _s.Directory.DisplayNumber(Extension);
     public string State => Dialog is null ? "idle" : Dialog.IsEarly ? "ringing" : Dialog.IsConfirmed ? "talking" : "idle";
     public string StateText => Dialog is null ? "대기" : Dialog.IsEarly ? "링잉" : Dialog.IsConfirmed ? "통화" : "대기";
     public string Peer => Dialog is null ? "" : _s.Directory.Label(Dialog.Info.RemoteIdentity);

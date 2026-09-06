@@ -306,7 +306,8 @@ std::string dispatchJson(const DispatchProfile& d) {
     std::string mem, tgt;
     for (auto& m : d.members)
         mem += std::string(mem.empty() ? "" : ",") + "{\"user_id\":\"" + jsonEsc(m.userId) + "\",\"name\":\"" + jsonEsc(m.name) + "\",\"volte_aor\":\"" +
-               jsonEsc(m.volteAor) + "\",\"ptt_id\":\"" + jsonEsc(m.pttId) + "\",\"extension\":\"" + jsonEsc(m.extension) + "\"}";
+               jsonEsc(m.volteAor) + "\",\"ptt_id\":\"" + jsonEsc(m.pttId) + "\",\"extension\":\"" + jsonEsc(m.extension) +
+               "\",\"group_id\":\"" + jsonEsc(m.groupId) + "\"}";
     for (auto& t : d.pttTargets)
         tgt += std::string(tgt.empty() ? "" : ",") + "{\"id\":\"" + jsonEsc(t.id) + "\",\"uri\":\"" + jsonEsc(t.uri) + "\",\"name\":\"" + jsonEsc(t.name) + "\"}";
     return "{\"group_id\":\"" + jsonEsc(d.groupId) + "\",\"group_name\":\"" + jsonEsc(d.groupName) + "\",\"pilot_id\":\"" + jsonEsc(d.pilotId) +
