@@ -73,7 +73,7 @@ TEST(Csc, ParseProfileDispatchDiscovery) {
       "services": [ { "kind": "ptt", "sip": { "domain": "ptt.example.org" }, "account": { "msisdn": "+82500000001" } } ],
       "ptt": { "allowCreateGroup": true },
       "dispatch": { "groupId": "dg-1", "monitorScope": "listed", "pttListen": "listed",
-        "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" },
+        "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002", "groupId": "dg-1" },
                      { "userId": 13, "name": "빈항목" } ],
         "pttTargets": [ { "id": "g002", "uri": "sip:g002@ptt.example.org", "name": "음성그룹2" }, { "uri": "sip:g003@ptt.example.org" } ] }
     })";
@@ -84,6 +84,7 @@ TEST(Csc, ParseProfileDispatchDiscovery) {
     EXPECT_EQ(p.dispatch.members[0].userId, "12");
     EXPECT_EQ(p.dispatch.members[0].volteAor, "tel:+82310001002");
     EXPECT_EQ(p.dispatch.members[0].extension, "1002");
+    EXPECT_EQ(p.dispatch.members[0].groupId, "dg-1");
     ASSERT_EQ(p.dispatch.pttTargets.size(), 2u);
     EXPECT_EQ(p.dispatch.pttTargets[0].name, "음성그룹2");
     EXPECT_EQ(p.dispatch.pttTargets[1].id, "g003");            // id 생략 → uri user part

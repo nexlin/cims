@@ -184,7 +184,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (!p.Ok) return p.WithoutValue();
         Profile = p.Value;
         Directory.CountryCode = p.Value.CountryCode;
-        Directory.SetMembers(p.Value.Dispatch.Members);              // 서버 그룹원 목록(없으면 CSV member 폴백)
+        Directory.SetMembers(p.Value.Dispatch.Members, p.Value.Dispatch.GroupId);   // 서버 감시 대상·그룹원 목록(없으면 CSV member 폴백)
         Log.Info($"profile {p.Value.LoginId} services={string.Join(",", p.Value.Services.Select(s => s.Kind))} desk={p.Value.Dispatch.Present} " +
                  $"group={p.Value.Dispatch.GroupId} pilot={p.Value.Dispatch.PilotId} monitor={p.Value.Dispatch.MonitorScope} pttListen={p.Value.Dispatch.PttListen} " +
                  $"members={p.Value.Dispatch.Members.Count} pttTargets={p.Value.Dispatch.PttTargets.Count} groupCreate={p.Value.AllowGroupCreation} cc={p.Value.CountryCode}");
@@ -239,12 +239,13 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanSms));
         await SyncDirectoryAsync();
 
-        // 관제 범위: 그룹원·대표번호 dialog 구독 (§4.3) — 그룹원 = 프로비저닝 members[](정본) 또는 CSV member 폴백
+        // 관제 범위: 감시 대상 전원·대표번호 dialog 구독 (§4.3) — 대상 = 프로비저닝 members[](서버가 monitorScope 해석, 정본) 또는 CSV member 폴백
         if (HasDesk && Volte is not null)
         {
-            foreach (var m in Directory.Members) Watch(m.Number);
+            foreach (var m in Directory.WatchTargets) Watch(m.Number);
             if (PilotId.Length > 0) Watch(PilotId);
         }
+        _nextDispatchPoll = DateTime.Now.AddSeconds(DispatchPollSec);
         // 멤버 그룹(GMS 목록 → affiliation + conference 구독)·청취 범위 그룹(pttTargets → conference 구독) (§4.1·§4.2)
         if (Ptt is not null)
         {
@@ -359,18 +360,66 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             Log.Info($"group gone {gone.Id}");
         }
         // 청취 범위 그룹 — 프로비저닝 pttTargets(서버가 ptt_listen 범위를 해석한 목록). 로스터 NOTIFY 로 진행/참가자 수를 안다.
-        if (CanListenPtt)
-            foreach (var t in Dispatch.PttTargets)
-            {
-                if (t.Id.Length == 0 || seen.Contains(t.Id) || Groups.Any(x => x.Id == t.Id)) continue;
-                string uri = t.Uri.Length > 0 ? t.Uri : $"sip:{t.Id}@{PttDomain}";
-                Groups.Add(new GroupInfo(t.Id, uri, t.Name.Length > 0 ? t.Name : t.Id, 0) { IsMember = false });
-                var sc = ptt.SubscribeConference(t.Id, true);
-                if (!sc.Ok) Log.Warn($"conference subscribe(listen scope) {t.Id}: {sc}");
-            }
+        // 범위 밖·자격 없음은 서버가 403 + Warning 138(브로드캐스트 480 + 105)로 거절한다 — 구독은 여기서 1회, 재시도 루프 없음.
+        var listenIds = CanListenPtt ? Dispatch.PttTargets.Select(t => t.Id).Where(id => id.Length > 0).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                                     : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in Dispatch.PttTargets)
+        {
+            if (!listenIds.Contains(t.Id) || seen.Contains(t.Id) || Groups.Any(x => x.Id == t.Id)) continue;
+            string uri = t.Uri.Length > 0 ? t.Uri : $"tel:{t.Id}";
+            Groups.Add(new GroupInfo(t.Id, uri, t.Name.Length > 0 ? t.Name : t.Id, 0) { IsMember = false });
+            var sc = ptt.SubscribeConference(t.Id, true);
+            if (!sc.Ok) Log.Warn($"conference subscribe(listen scope) {t.Id}: {sc}");
+        }
+        foreach (var gone in Groups.Where(x => !x.IsMember && !listenIds.Contains(x.Id)).ToList())   // 범위 재조회로 빠진 청취 그룹
+        {
+            ptt.SubscribeConference(gone.Id, false);
+            Groups.Remove(gone);
+            Log.Info($"listen-scope group gone {gone.Id}");
+        }
         Directory.SetGroups(Groups.Where(x => x.IsMember));
         Log.Info($"groups {Groups.Count(x => x.IsMember)} member ({Groups.Count(x => x.IsOwner)} owned), {Groups.Count(x => !x.IsMember)} listen-scope");
         return Result.Success;
+    }
+
+    // ── 발견 목록 주기 재조회 (android_ue_provisioning.md §3 — `/provisioning/me` If-None-Match → 304 면 무변경) ──
+    public const int DispatchPollSec = 60;
+    private string _profileEtag = "";
+    private DateTime _nextDispatchPoll = DateTime.MaxValue;
+
+    /// <summary>관제 편성 변경(그룹원·청취 대상) 추적 — 304 면 끝, 200 이면 두 목록을 비교해 바뀐 것만 dialog watch·conference 구독에 재적용.</summary>
+    private async Task RefreshDispatchAsync()
+    {
+        if (_csc is null || _tokens is null || Profile is null) return;
+        var csc = _csc; string token = _tokens.AccessToken;
+        var r = await Task.Run(() => csc.XcapGet(token, "/provisioning/me", "application/json", _profileEtag.Length > 0 ? _profileEtag : null));
+        if (!r.Ok) { Log.Warn($"provisioning/me poll: {r}"); return; }
+        if (r.Value.NotModified || Profile is null) return;
+        _profileEtag = r.Value.ETag;
+        var p = CscClient.ParseProfile(r.Value.Body);
+        if (!p.Ok) { Log.Warn($"provisioning/me poll: bad profile — {p.Reason}"); return; }
+        var oldD = Profile.Dispatch; var newD = p.Value.Dispatch;
+        bool sameMembers = oldD.Members.Select(m => $"{m.VolteAor}|{m.GroupId}|{m.Name}").ToHashSet().SetEquals(newD.Members.Select(m => $"{m.VolteAor}|{m.GroupId}|{m.Name}"));
+        bool sameTargets = oldD.PttTargets.Select(t => t.Id).ToHashSet().SetEquals(newD.PttTargets.Select(t => t.Id));
+        bool sameScope = oldD.MonitorScope == newD.MonitorScope && oldD.PttListen == newD.PttListen && oldD.GroupId == newD.GroupId && oldD.PilotId == newD.PilotId;
+        if (sameMembers && sameTargets && sameScope) return;
+        Log.Info($"dispatch discovery changed: members {oldD.Members.Count}→{newD.Members.Count} pttTargets {oldD.PttTargets.Count}→{newD.PttTargets.Count} scope {newD.MonitorScope}/{newD.PttListen}");
+        Profile = p.Value;
+        Directory.SetMembers(newD.Members, newD.GroupId);
+        if (Volte is not null && HasDesk)
+        {
+            var want = Directory.WatchTargets.Select(m => ToSipUri(m.Number)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (PilotId.Length > 0) want.Add(ToSipUri(PilotId));
+            foreach (var aor in _watched.Where(a => !want.Contains(a)).ToList())
+            {
+                Volte.DialogWatch(aor, false); _watched.Remove(aor);
+                foreach (var row in Dialogs.Where(d => string.Equals(d.Watched, aor, StringComparison.OrdinalIgnoreCase)).ToList()) { Dialogs.Remove(row); DialogEnded?.Invoke(this, row); }
+            }
+            foreach (var m in Directory.WatchTargets) Watch(m.Number);
+            if (PilotId.Length > 0) Watch(PilotId);
+        }
+        if (Ptt is not null) await RefreshGroupsAsync();
+        Notify.Info("관제 편성이 바뀌었습니다", $"그룹원 {Directory.Members.Count} · 감시 {Directory.WatchTargets.Count} · 청취 그룹 {Groups.Count(g => !g.IsMember)}");
     }
 
     /// <summary>xcap-diff NOTIFY(gms 축) → 그룹 목록 재조회(연속 통지는 0.5초 합침).</summary>
@@ -464,6 +513,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
         VolteReg = RegInfo.Empty; PttReg = RegInfo.Empty;
+        _nextDispatchPoll = DateTime.MaxValue; _profileEtag = "";
         IsReady = false;
     }
 
@@ -995,6 +1045,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         foreach (var (acc, at) in _regRetryAt.ToList())
             if (now >= at) { _regRetryAt.Remove(acc); Engine.GetAccount(acc).Register(); }
         if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게
+        if (IsReady && HasDesk && now >= _nextDispatchPoll) { _nextDispatchPoll = now.AddSeconds(DispatchPollSec); _ = RefreshDispatchAsync(); }
     }
     private DateTime _lastPrune = DateTime.Today;
 

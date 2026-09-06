@@ -329,6 +329,7 @@ internal unsafe struct cimsue_dispatch_member_t
     public byte* volte_aor;
     public byte* ptt_id;
     public byte* extension;
+    public byte* group_id;
 }
 
 [StructLayout(LayoutKind.Sequential)]

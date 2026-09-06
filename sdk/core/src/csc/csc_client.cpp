@@ -222,7 +222,7 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
         Json::each(Json::child(d, "members"), [&](const JVal* m) {
             DispatchMember dm;
             dm.userId = Json::str(m, "userId"); dm.name = Json::str(m, "name"); dm.volteAor = Json::str(m, "volteAor");
-            dm.pttId = Json::str(m, "pttId"); dm.extension = Json::str(m, "extension");
+            dm.pttId = Json::str(m, "pttId"); dm.extension = Json::str(m, "extension"); dm.groupId = Json::str(m, "groupId");
             if (!dm.volteAor.empty() || !dm.extension.empty() || !dm.pttId.empty()) out.dispatch.members.push_back(dm);
         });
         Json::each(Json::child(d, "pttTargets"), [&](const JVal* t) {

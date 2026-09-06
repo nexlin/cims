@@ -210,25 +210,39 @@ public sealed class DirectoryService
         Rebuild();
     }
 
-    private readonly List<Contact> _serverMembers = new();
-    /// <summary>프로비저닝 `dispatch.members[]` → 관제 그룹원(정본). 비면 CSV member 태그 폴백.</summary>
-    public void SetMembers(IEnumerable<CimsUe.DispatchMember> members)
+    private readonly List<Contact> _serverMembers = new();        // 감시(dialog watch) 대상 전원 — 서버가 monitorScope 를 해석한 목록
+    private readonly List<Contact> _serverDeskMembers = new();    // 그중 자기 관제 그룹원(groupId == dispatch.groupId) — ③ 띠
+    /// <summary>프로비저닝 `dispatch.members[]`(정본, android_ue_provisioning.md §3) → 감시 대상 전원 + 자기 그룹원. 비면 CSV member 태그 폴백.
+    /// 번호는 망 주소(volteAor)로 두고 내선 라벨(extension)은 이름에 병기한다 — dialog watch·발신이 곧바로 다이얼되게.</summary>
+    public void SetMembers(IEnumerable<CimsUe.DispatchMember> members, string deskGroupId)
     {
-        _serverMembers.Clear();
-        foreach (var m in members)
+        _serverMembers.Clear(); _serverDeskMembers.Clear();
+        var all = members.ToList();
+        bool hasGroupIds = all.Any(m => m.GroupId.Length > 0);          // 구 서버(groupId 없음)면 전원을 그룹원으로 본다
+        foreach (var m in all)
         {
-            string number = m.Extension.Length > 0 ? m.Extension : Converters.UserPartConverter.UserPart(m.VolteAor);
+            string aor = Converters.UserPartConverter.UserPart(m.VolteAor);
+            string number = aor.Length > 0 ? aor : m.Extension;
             if (number.Length == 0) continue;
-            _serverMembers.Add(new Contact(ContactKind.Extension, number, m.Name, new[] { "server", "member" }));
+            string name = m.Name.Length > 0 && m.Extension.Length > 0 && aor.Length > 0 ? $"{m.Name} {m.Extension}" : m.Name;
+            bool desk = !hasGroupIds || (deskGroupId.Length > 0 && string.Equals(m.GroupId, deskGroupId, StringComparison.Ordinal));
+            var c = new Contact(ContactKind.Extension, number, name, desk ? new[] { "server", "member" } : new[] { "server", "watch" });
+            _serverMembers.Add(c);
+            if (desk) _serverDeskMembers.Add(c);
         }
         Rebuild();
     }
+
+    /// <summary>dialog 감시 대상 — 서버 목록이 있으면 전원(범위 밖 그룹원 포함), 없으면 CSV 그룹원.</summary>
+    public IReadOnlyList<Contact> WatchTargets => _serverMembers.Count > 0
+        ? _serverMembers.Select(m => m.Name.Length > 0 ? m : m with { Name = NameOf(m.Number) }).ToList()
+        : Members;
     public bool HasServerMembers => _serverMembers.Count > 0;
 
     // ── 조회 ──
-    /// <summary>관제 그룹원 내선(BLF 대상) — 프로비저닝 members[] 가 있으면 그것(이름은 전화번호부로 보강), 없으면 CSV member 태그.</summary>
+    /// <summary>관제 그룹원(③ 띠) — 프로비저닝 members[] 중 자기 관제 그룹(groupId == dispatch.groupId), 이름은 전화번호부로 보강. 없으면 CSV member 태그.</summary>
     public IReadOnlyList<Contact> Members => _serverMembers.Count > 0
-        ? _serverMembers.Select(m => m.Name.Length > 0 ? m : m with { Name = NameOf(m.Number) }).ToList()
+        ? _serverDeskMembers.Select(m => m.Name.Length > 0 ? m : m with { Name = NameOf(m.Number) }).ToList()
         : _merged.Where(c => c.Kind == ContactKind.Extension && c.IsMember).ToList();
     public IReadOnlyList<Contact> PttUsers => _merged.Where(c => c.Kind == ContactKind.PttUser).ToList();
     public IReadOnlyList<Contact> Groups => _merged.Where(c => c.Kind == ContactKind.PttGroup).ToList();

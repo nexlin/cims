@@ -384,7 +384,7 @@ struct ProfileHolder {
         out.dispatch.ptt_listen = C(d.pttListen);
         out.dispatch.listen_visibility = C(d.listenVisibility);
         members.clear(); targets.clear();
-        for (const auto& m : d.members) members.push_back({C(m.userId), C(m.name), C(m.volteAor), C(m.pttId), C(m.extension)});
+        for (const auto& m : d.members) members.push_back({C(m.userId), C(m.name), C(m.volteAor), C(m.pttId), C(m.extension), C(m.groupId)});
         for (const auto& t : d.pttTargets) targets.push_back({C(t.id), C(t.uri), C(t.name)});
         out.dispatch.members = members.empty() ? nullptr : members.data();
         out.dispatch.member_count = (int32_t)members.size();

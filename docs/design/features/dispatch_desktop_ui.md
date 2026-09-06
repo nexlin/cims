@@ -267,6 +267,9 @@ sequential 모드는 한 명만 울린다. 빈 상태: "대기 호 없음" + 오
   (일반 소프트폰 모드). 콘솔 `관리 > 관제 그룹` 배정 안내.
 - 등록 실패(401/403/타임아웃) → 상단 점등 빨강 + 토스트, 자동 재시도(백오프 5→60초). `refreshRegistration` 은 네트워크 복귀 이벤트(Windows
   `NetworkChange`)에서 즉시.
+- **관제 편성 추적**: 로그인 후 60초마다 `GET /provisioning/me` 를 `If-None-Match` 로 재조회한다 — 304 면 끝, 200 이면 `dispatch.members[]`
+  (`groupId == dispatch.groupId` 가 ③ 그룹원 띠, 나머지는 감시 전용)·`pttTargets[]`·범위를 비교해 바뀐 것만 dialog watch 해제/추가·conference 구독
+  재적용 후 토스트 한 줄. 그룹원 번호는 망 주소(`volteAor`)이고 내선 라벨은 이름에 병기된다.
 - **메인 창·ViewModel 은 앱 수명 동안 하나.** 세션·핫키·1초 틱은 싱글턴이라 로그인마다 VM 을 새로 만들면 이벤트 구독이 쌓인다(SDS 이중 저장·PTT 이중
   요청). 로그아웃 = 창 숨김(+감청 창 닫기·창 위치 저장) → 로그인 창, 재로그인 = 스냅샷 재구성 후 다시 표시.
 - **기동 실패는 종료로 끝난다.** 데이터 폴더(`%APPDATA%\CIMS\dispatch-desktop`)의 `messages.db` 잠김·읽기 전용 등 기동 중 예외는 "기동 실패" 창을 띄우고
@@ -463,7 +466,7 @@ Flexible Alerting pilot 로 가상·미등록·포크). **내선 4자리는 망 
   pttListen:"none"|"all", listenVisibility:"hidden"}`. `present=false` 면 앱은 소프트폰 모드(§6).
 - GMS `listGroups(<PTT 번호 tel: URI>)` 가 `g002` 를 돌려준다(카드 소스). 대표번호 `+821310001000` 과 그룹원 번호는 앱이 `dialogWatch` 로 구독하므로
   CSP 의 dialog 이벤트 인가(`monitor_scope`)가 두 관제석 모두에 적용돼야 한다.
-- 그룹원 목록은 서버 API 가 없어(§13) 앱 로컬 `%APPDATA%\CIMS\dispatch-desktop\directory.csv` 에 둔다. `number` 는 실제로 다이얼되는
+- 그룹원 목록은 프로비저닝 `dispatch.members[]`(§13, csc 0.2.104)가 정본이고 앱 로컬 `%APPDATA%\CIMS\dispatch-desktop\directory.csv` 는 구 서버 폴백·외부망 연락처용이다. `number` 는 실제로 다이얼되는
   망 주소(E.164)이고 내선 4자리는 `name` 에 병기하는 표시 라벨이다(단축 다이얼 열은 §13 후속) — 시험용 내용:
   ```
   kind,number,name,tags

@@ -488,6 +488,7 @@ typedef struct {
     const char* volte_aor;
     const char* ptt_id;
     const char* extension;
+    const char* group_id;               /* 그 가입자의 관제 그룹(무소속 "") — 그룹원 띠 = group_id == dispatch.group_id */
 } cimsue_dispatch_member_t;
 
 /** 청취 대상 PTT 그룹(dispatch pttTargets[]). */

@@ -48,7 +48,8 @@ struct ServiceProfile {
 };
 
 /** 관제 그룹원(dispatch 블록 members[]) — dialog 구독·그룹원 상태 띠 대상. */
-struct DispatchMember { std::string userId, name, volteAor, pttId, extension; };
+/** 관제 그룹원(dispatch members[]) — groupId = 그 가입자의 관제 그룹(무소속 ""). 앱의 그룹원 띠 = groupId == dispatch.groupId, 감시 대상 = 전원. */
+struct DispatchMember { std::string userId, name, volteAor, pttId, extension, groupId; };
 /** 청취 대상 PTT 그룹(dispatch 블록 pttTargets[] — 서버가 ptt_listen 범위를 해석한 결과). */
 struct DispatchTarget { std::string id, uri, name; };
 

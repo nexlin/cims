@@ -35,7 +35,8 @@ public sealed record ServiceProfile(
 }
 
 /// <summary>관제 그룹원(dispatch members[]) — dialog 구독·그룹원 띠 대상.</summary>
-public sealed record DispatchMember(string UserId, string Name, string VolteAor, string PttId, string Extension);
+/// <summary>관제 그룹원(dispatch members[]) — GroupId = 그 가입자의 관제 그룹(무소속 ""). 그룹원 띠 = GroupId == Dispatch.GroupId, dialog 감시 = 전원.</summary>
+public sealed record DispatchMember(string UserId, string Name, string VolteAor, string PttId, string Extension, string GroupId);
 /// <summary>청취 대상 PTT 그룹(dispatch pttTargets[] — 서버가 ptt_listen 범위를 해석한 결과).</summary>
 public sealed record DispatchTarget(string Id, string Uri, string Name);
 
@@ -323,7 +324,7 @@ public sealed unsafe class CscClient : IDisposable
         var members = new DispatchMember[Math.Max(0, d.member_count)];
         for (int i = 0; i < members.Length; ++i)
             members[i] = new DispatchMember(Utf8.Str(d.members[i].user_id), Utf8.Str(d.members[i].name), Utf8.Str(d.members[i].volte_aor),
-                                            Utf8.Str(d.members[i].ptt_id), Utf8.Str(d.members[i].extension));
+                                            Utf8.Str(d.members[i].ptt_id), Utf8.Str(d.members[i].extension), Utf8.Str(d.members[i].group_id));
         var targets = new DispatchTarget[Math.Max(0, d.ptt_target_count)];
         for (int i = 0; i < targets.Length; ++i)
             targets[i] = new DispatchTarget(Utf8.Str(d.ptt_targets[i].id), Utf8.Str(d.ptt_targets[i].uri), Utf8.Str(d.ptt_targets[i].name));
