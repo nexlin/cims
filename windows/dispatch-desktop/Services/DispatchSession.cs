@@ -332,13 +332,21 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return _csc.GetGroupAsync(_tokens.AccessToken, MyPttId, g.Uri, ct);
     }
 
-    /// <summary>그룹 생성/수정(PUT). ifMatch = 편집 시작 시 ETag(충돌 412). 성공 시 목록 재조회.</summary>
+    /// <summary>그룹 생성/수정(PUT). ifMatch = 편집 시작 시 ETag(충돌 412). 신규 id 충돌(409 `uri_taken`)은 id 를 다시 만들어 한 번만
+    /// 조용히 재시도한다 — 성공 문서의 uri 가 정본이니 호출자는 r.Value.Uri 를 쓴다. 성공 시 목록 재조회.</summary>
     public async Task<Result<GroupDoc>> SaveGroupAsync(GroupDoc doc, string? ifMatch, CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return Result<GroupDoc>.Fail(-1, "로그인 전");
-        var r = await _csc.PutGroupAsync(_tokens.AccessToken, MyPttId, doc, ifMatch, ct);
-        if (!r.Ok) { Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString()); return r; }
         bool isNew = ifMatch is null || ifMatch.Length == 0;
+        var r = await _csc.PutGroupAsync(_tokens.AccessToken, MyPttId, doc, ifMatch, ct);
+        if (!r.Ok && isNew && r.Code == 409 && ResponseText.GroupError(r.Reason).Error == "uri_taken")
+        {
+            // 클라이언트 명명 id 가 타인 소유와 충돌(mcptt_api.md §2) — 첫 409 는 사용자에게 보이지 않는다
+            Log.Info($"putGroup {doc.Uri}: uri_taken — id 재생성 후 재시도");
+            doc.Uri = NewGroupUri();
+            r = await _csc.PutGroupAsync(_tokens.AccessToken, MyPttId, doc, null, ct);
+        }
+        if (!r.Ok) { Notify.Error(ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason), r.ToString()); return r; }
         Activity.Add(ActivityPanel.Ptt, ActivityKind.Note, $"그룹 {(isNew ? "생성" : "편집")} {r.Value.DisplayName}", $"멤버 {r.Value.Members.Count}");
         Notify.Info($"그룹 {(isNew ? "생성" : "편집")} 완료", r.Value.DisplayName);
         await RefreshGroupsAsync(ct);

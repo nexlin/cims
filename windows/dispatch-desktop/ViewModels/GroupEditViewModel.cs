@@ -161,14 +161,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
         foreach (var m in Members)
             doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.IsChair ? 7 : 5 });
         Busy = true;
-        var r = await _s.SaveGroupAsync(doc, IsNew ? null : _ifMatch);
-        if (!r.Ok && r.Code == 409 && IsNew && ResponseText.GroupError(r.Reason).Error == "uri_taken")
-        {
-            // 클라이언트 명명 id 충돌(타인 소유) — id 재생성 후 1회 재시도(mcptt_api.md §2)
-            GroupId = UserPartConverter.UserPart(_s.NewGroupUri());
-            doc.Uri = Uri;
-            r = await _s.SaveGroupAsync(doc, null);
-        }
+        var r = await _s.SaveGroupAsync(doc, IsNew ? null : _ifMatch);       // 409 uri_taken 재시도는 세션이 처리
         Busy = false;
         if (!r.Ok)
         {
@@ -176,6 +169,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
             if (r.Code == 412 && !IsNew) _ = LoadAsync();                     // 타인이 먼저 갱신 — 최신 문서로 다시 편집
             return;
         }
+        if (IsNew && r.Value.Uri.Length > 0) GroupId = UserPartConverter.UserPart(r.Value.Uri);   // 응답 문서 uri 가 정본(재시도로 바뀔 수 있다)
         Saved?.Invoke(this, EventArgs.Empty);
     }
 }

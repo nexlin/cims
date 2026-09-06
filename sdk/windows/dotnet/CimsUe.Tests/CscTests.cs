@@ -69,13 +69,13 @@ public class CscTests
         var r = CscClient.ParseProfile("""
         { "services": [], "ptt": { "allowCreateGroup": true },
           "dispatch": { "groupId": "dg-1", "monitorScope": "listed", "pttListen": "listed",
-            "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+82310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" } ],
+            "members": [ { "userId": 12, "name": "관제2석", "volteAor": "tel:+821310001002", "pttId": "sip:+82510001002@ptt.example.org", "extension": "1002" } ],
             "pttTargets": [ { "id": "g002", "uri": "sip:g002@ptt.example.org", "name": "음성그룹2" } ] } }
         """);
         Assert.True(r.Ok, r.Reason);
         Assert.True(r.Value!.AllowGroupCreation);
         var m = Assert.Single(r.Value.Dispatch.Members);
-        Assert.Equal("1002", m.Extension); Assert.Equal("관제2석", m.Name); Assert.Equal("tel:+82310001002", m.VolteAor);
+        Assert.Equal("1002", m.Extension); Assert.Equal("관제2석", m.Name); Assert.Equal("tel:+821310001002", m.VolteAor);
         var t = Assert.Single(r.Value.Dispatch.PttTargets);
         Assert.Equal("g002", t.Id); Assert.Equal("음성그룹2", t.Name);
         var old = CscClient.ParseProfile(ProfileJson).Value!;          // 확장 없는 응답 = 빈 목록·false

@@ -1,12 +1,11 @@
+# 앱 로컬 주소록 샘플 — 실제 파일은 %APPDATA%\CIMS\dispatch-desktop\directory.csv (dispatch_desktop_ui.md §14.2).
+# number = 실제로 다이얼되는 망 주소(E.164). 내선 4자리는 망 주소가 아니라 name 에 병기하는 표시 라벨.
+# tags: member = 관제 그룹원(dialog watch·③ 그룹원 띠) — 서버 프로비저닝 dispatch.members[] 가 오면 그쪽이 우선.
 kind,number,name,tags
-ext,1001,박순경,member
-ext,1003,이순경,member
-ext,1004,최순경,member
-ext,1005,김순경,member
-ext,1006,정경장,
+ext,+821310001001,관제1석 1001,member
+ext,+821310001002,관제2석 1002,member
+ext,+821300000001,시험단말A,
+ext,+821300000002,시험단말B,
 external,02-120,교통상황실,
-external,02-119-0000,소방 상황실,
-ptt,+82500000004,최순경,
-ptt,+82500000008,윤순경,
-ptt,+82500000010,임순경,
-ptt,+82500002003,박경장,
+ptt,+82500000001,PTT단말1,
+ptt,+82500000002,PTT단말2,
