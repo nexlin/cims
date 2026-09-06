@@ -53,19 +53,28 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
 - 서버 쪽 확인용 CLI(로그인 필요): `cimsue-cli --csc-host 121.161.164.45 --csc-port 4430 --no-tls-verify --user disp01 --pw <pw> groups | group-get URI | group-put URI --name N --members tel:..,tel:.. | group-delete URI`.
 - Smart App Control 이 새 exe 를 간헐 차단할 수 있다(재빌드·재시도로 풀림, 보안 설정은 사용자 결정).
 
-## 3. 남은 일 (우선순위 순)
+## 3. 남은 일 (우선순위 순) — 2026-09-06 21시 실측 반영
 
-1. **앱 실기 e2e(그룹 CRUD)** — 후속 요청서 §3 의 7단계. 앱 층만 본다(서버는 CLI 로 같은 사이클 통과). 실패 시 로그 줄로 층 판정 → 수정 → 재빌드.
-   비밀번호 입력이 필요해 Claude 가 대신 못 한다 — 사용자가 로그인한 뒤 로그 판정은 Claude 에게 맡겨도 된다.
-2. **P2 실기 확인** — 로그인 로그 `members=N pttTargets=M` 이 0 이 아닌지(관제 그룹 `dg-dispatch01` 의 `monitor_scope`/`ptt_listen` 이 `none` 이면 빈 배열 —
-   콘솔 `구성 > 관제 그룹` 에서 manager 로 `all`/`listed` 로 올려야 한다), ③ 띠 = 자기 그룹원만·감시(dialog)는 전원, ② PTT 내역에 "청취 범위" 행이 로스터 NOTIFY 로 뜨는지,
-   콘솔에서 편성을 바꾸면 60초 안에 `dispatch discovery changed` 로그 + 토스트가 뜨는지. `directory.sample.csv` 의 `member` 태그 행은 서버 목록이 확인되면 정리.
-3. **P3 실기 확인** — csp 다음 릴리스 배포 후: 범위 밖 그룹 conference 구독이 403(Warning 138)/480(105) 이면 문구만 뜨고 재시도 루프가 없는지.
-4. **P3b 실기 확인** — 로그 `history: …` 탐침 결과. 403 `no_monitor_scope` 면 관제 그룹 범위부터(2번). 항목이 ②④ 내역에 붙는지, 메시지(kind=message)는 CSP
-   `Setup.McData.StoreOneToOneSds` 설정 여부에 따라 1:1 유무가 갈린다. 메시지 모니터링 전용 UI(별도 패널)는 아직 없다 — 내역 행으로만 표시(설계 §13 후속).
-5. (정리) C API `allow_group_creation` → `allow_create_group` rename 은 ABI 변경 — 파사드·`AbiLayoutTests`·문서 동시 변경일 때만.
-6. (정리) 후속/요청서 `docs/dev/*_request_*.md` 는 양쪽 반영이 끝나면 삭제하고 설계 정본에만 최종 상태를 남긴다. 이 파일도 같다.
-7. 미해결(이전부터): ③ 대기열에 "내게 온 전화"가 뜨는 현상 — 서버가 대표번호 dialog 를 포크 leg 마다 내던 것(요청서 §6, 서버 `e3d08d8c` 보완) + 앱 leg 병합(`30feccda`) 이후 재현 여부 확인.
+서버(csc 0.2.104 / csp 0.2.112)가 배포된 뒤 헤드리스 UE(`cimsue-cli`)와 PKCE 스크립트로 앱이 쓰는 경로를 실측했다. **앱 코드 변경 없이 전부 통과**:
+
+| 경로 | 실측 |
+|---|---|
+| `/provisioning/me` | `dispatch` members 42(범위 all)·ptt_targets g001~g005·관제석 두 명 `group_id=dg-dispatch01`, 응답 `etag`(소문자 헤더) + `If-None-Match` → **304** |
+| `/provisioning/history?kind=call\|ptt\|message` | 200 `{items:[],next:"…"}` + etag, `If-None-Match` → 304, 미지 kind 400 `invalid_kind` — 앱 `HistoryClient` 계약과 일치(이력은 아직 0건) |
+| VoLTE·PTT 등록(TLS 15061) | 둘 다 200 |
+| 대표번호 dialog 감시 | 초기 빈 full 스냅샷 1건(앱은 무시) → disp02 발신 시 **호당 dialog 하나**(early → terminated, 같은 id) — §6-7·8 반영 확인 |
+| GMS 그룹 CRUD | 생성 201 → disp02 목록 반영(owner=false) → disp02 삭제 403 `not_group_owner` → 미가입 번호 400 `unknown_member` → 삭제 |
+| 청취 범위 그룹 합류(g003 listen-only) | **403** — 원인은 disp01 프로파일 `allow-ambient-listening=false`(서버 계정 설정, 설계 §14.1 "PTT 청취 자격" 미부여). 앱 결함 아님 |
+
+1. **서버(콘솔) 설정 하나** — disp01/disp02 의 `ptt_user_profile.allow_ambient_listening=1` 부여(콘솔 `구성 > 사용자` PTT 프로파일 또는
+   `PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`). 이것 없이는 ② [청취]·청취 범위 conference 구독이 403 이다.
+2. **앱 실기 e2e(사용자)** — 후속 요청서 §3 그룹 CRUD 7단계 + 아래 확인 줄:
+   - 로그인 직후 로그 `profile … members=42 pttTargets=5`, ③ 띠에 관제1석·관제2석만, `groups 1 member (0 owned), 4 listen-scope`(g002 는 멤버)
+   - `history: available` 뒤 통화·SDS 가 생기면 ②④ 최근 행에 타인 항목이 수초 내 붙는지
+   - 시험단말 → `+821310001000` 발신 시 대기열이 **한 행**·[응답] 이 그 호를 받는지, 동료 응답 시 내 쪽에 "부재"가 안 남는지
+   - 60초 뒤 로그에 `provisioning/me` 재조회가 조용한지(304), 콘솔에서 관제 그룹 편성을 바꾸면 토스트 "관제 편성이 바뀌었습니다"
+3. (정리) 후속/요청서 `docs/dev/*_request_*.md` 는 양쪽 반영이 끝났으니 삭제하고 설계 정본만 남긴다. 이 파일도 같다.
+4. (정리) C API `allow_group_creation` → `allow_create_group` rename 은 ABI 변경 — 파사드·`AbiLayoutTests`·문서 동시 변경일 때만.
 
 ## 4. 이번에 확정한 계약·규칙 (앱이 지키는 것)
 
