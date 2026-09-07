@@ -1,6 +1,7 @@
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, Pencil, Play, RefreshCw, RotateCw, Search, Square, Stethoscope, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowUp, Check, ChevronDown, ChevronRight, Hourglass, Lock, Pencil, Play, RefreshCw, RotateCw, Search, Square, Stethoscope, Trash2, Undo2, X } from 'lucide-react'
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { Alert } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -883,41 +884,62 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
     ...m, agent: agents.find(a => a.id === m.agent_id)
   }))
 
-  // dirty 검출 — 영역별로 분리. 각 영역의 [▶ 적용] 이 자체 dirty 만 보고 활성.
-  const metaDirty = editName !== group.name
-    || editAuthPass !== group.auth_pass
-    || editNote !== (group.note || '')
+  // dirty 검출 — **필드 단위**. 하단 통합 저장(StickySaveBar)이 바뀐 필드만 payload 에 담는다.
+  // backend `_update_group` 은 `if k in body` 부분 갱신이라 **안 담긴 필드는 손대지 않는다** —
+  // 그래서 통합 저장이어도 사정거리가 넓어지지 않는다(정본 문서 §7-10).
+  const nameDirty     = editName !== group.name
+  const authDirty     = editAuthPass !== group.auth_pass
+  const noteDirty     = editNote !== (group.note || '')
   const failoverDirty = JSON.stringify(editFailover) !== JSON.stringify(group.failover_options || FAILOVER_DEFAULTS)
-  const vipDirty = JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
+  const vipDirty      = JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
   const masterChanged = editMasterAid !== initialMaster
+
+  // 화면이 보여 주는 값의 기준 노드 — 멤버마다 실제 값이 다를 수 있는데 화면은 하나다.
+  // 지정 MASTER(priority 최대)를 기준으로 삼는다.
+  const activeMemberLabel = (() => {
+    const top = [...memberAgents].sort((x, y) => (y.priority ?? 0) - (x.priority ?? 0))[0]
+    const nm = top?.agent ? agentDisplayName(top.agent.name) : null
+    return nm ? `MASTER 노드 ${nm}` : '지정 MASTER 노드'
+  })()
+
+  // 저장 전에 **무엇이 바뀌는지** 보여준다 — 배지 숫자와 tooltip 이 같은 목록을 쓴다.
+  const changes = [
+    nameDirty     && '그룹 이름',
+    authDirty     && 'auth_pass',
+    noteDirty     && 'note',
+    failoverDirty && '절체 조건',
+    masterChanged && 'MASTER 지정',
+    vipDirty      && 'VIP Bindings',
+  ].filter(Boolean) as string[]
 
   // 영역별 적용 — 그 영역의 변경만 backend 로 push. backend 의 _update_group 은 부분 업데이트
   // 지원 + _enqueue_update_ha_for_members 자동 호출 → 멤버 agent 의 keepalived 즉시 반영.
-  async function applyMeta() {
-    if (!metaDirty) return
+  /** 통합 저장 — **바뀐 필드만** 한 번에. keepalived 재렌더도 1회로 준다(구: 영역마다 1회). */
+  async function saveAll() {
+    if (changes.length === 0) return
+    const body: Record<string, unknown> = {}
+    if (nameDirty)     body.name = editName
+    if (authDirty)     body.auth_pass = group.mode === 'active_standby' ? editAuthPass : ''
+    if (noteDirty)     body.note = editNote
+    if (failoverDirty) body.failover_options = editFailover
+    if (vipDirty)      body.vip_bindings = editBindings
     try {
-      await haGroupsApi.update(group.id, {
-        name: editName,
-        auth_pass: group.mode === 'active_standby' ? editAuthPass : '',
-        note: editNote,
-      })
-      show('메타 적용됨', 'ok'); await onReload()
+      if (Object.keys(body).length) await haGroupsApi.update(group.id, body)
+      // MASTER 는 멤버 priority 라 별도 API — 그룹 update 와 한 트랜잭션이 아니다.
+      if (masterChanged && editMasterAid !== null) await applyMembers({ silent: true })
+      show(`저장됨 — ${changes.join(' · ')} (전 멤버 적용)`, 'ok')
+      await onReload()
     } catch (e) { show((e as Error).message, 'err') }
   }
-  async function applyFailover() {
-    if (!failoverDirty) return
-    try {
-      await haGroupsApi.update(group.id, { failover_options: editFailover })
-      show('절체 조건 적용됨', 'ok'); await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
+  function revertAll() {
+    setEditName(group.name)
+    setEditAuthPass(group.auth_pass || '')
+    setEditNote(group.note || '')
+    setEditFailover(group.failover_options || FAILOVER_DEFAULTS)
+    setEditBindings(group.vip_bindings || [])
+    setEditMasterAid(initialMaster)
   }
-  async function applyVipBindings() {
-    if (!vipDirty) return
-    try {
-      await haGroupsApi.update(group.id, { vip_bindings: editBindings })
-      show('VIP 적용됨', 'ok'); await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
-  }
+
   // 값 변경 없는 재렌더 — 재설치·복구된 노드가 그룹의 VIP 설정을 따라잡게 한다.
   async function reapplyVip() {
     try {
@@ -934,18 +956,16 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
       .filter(m => (m.agent?.interfaces || []).some(x => x.ip === ip))
       .map(m => (m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`))
   }
-  async function applyMembers() {
+  async function applyMembers({ silent = false }: { silent?: boolean } = {}) {
     // Master 선택 변경 → 해당 멤버 priority=100, 나머지=90. AS 에만 의미.
     if (!masterChanged || editMasterAid === null) return
-    try {
-      for (const m of group.members) {
-        const newPrio = m.agent_id === editMasterAid ? 100 : 90
-        if (newPrio !== m.priority) {
-          await haGroupsApi.addMember(group.id, { agent_id: m.agent_id, priority: newPrio })
-        }
+    for (const m of group.members) {
+      const newPrio = m.agent_id === editMasterAid ? 100 : 90
+      if (newPrio !== m.priority) {
+        await haGroupsApi.addMember(group.id, { agent_id: m.agent_id, priority: newPrio })
       }
-      show('멤버 적용됨', 'ok'); await onReload()
-    } catch (e) { show((e as Error).message, 'err') }
+    }
+    if (!silent) { show('멤버 적용됨', 'ok'); await onReload() }
   }
   // ── 그룹 공통 마운트 — 선언 갱신 + 전 멤버 fan-out (오프라인 멤버는 결과에 사유) ──
   async function applyGroupMounts(ops: MountOp[], label: string) {
@@ -1092,13 +1112,20 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
           <label style={{ color: 'var(--muted-foreground)' }}>note:</label>
           <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
                  style={{ flex: 1 }} />
-          <button className="btn btn--sm btn--primary" onClick={applyMeta} disabled={!metaDirty}
-                  title="이름/auth_pass/note 변경을 backend 에 적용 (즉시 keepalived 반영)">
-            <Play size={13} /> 적용
-          </button>
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {/* 이 화면의 변경 범위를 먼저 알린다 (Figma G1 42:428 상단 SectionMessage).
+            표시값 기준 노드도 함께 — 멤버마다 값이 다를 수 있는데 화면은 하나다. */}
+        <Alert variant="info" className="mb-4">
+          <div className="font-semibold">
+            이 화면의 변경은 그룹 멤버 전체({memberAgents.map(m =>
+              m.agent ? agentDisplayName(m.agent.name) : `#${m.agent_id}`).join(', ')})에 적용됩니다
+          </div>
+          <div className="mt-0.5 text-xs opacity-90">
+            표시값 기준은 {activeMemberLabel} 입니다. 개별 서버만 바꾸려면 좌측 트리에서 해당 서버를 선택하세요.
+          </div>
+        </Alert>
         {/* 절체 조건 — 그룹 단위 설정. 자체 [적용] 으로 그 영역만 backend push. AS 만. */}
         {group.mode === 'active_standby' && (
           <div style={{ marginBottom: 20 }}>
@@ -1108,7 +1135,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
               open={failoverOpen}
               onToggle={() => setFailoverOpen(v => !v)}
               dirty={failoverDirty}
-              onApply={applyFailover}
             />
           </div>
         )}
@@ -1125,12 +1151,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
               <button className="btn btn--sm" onClick={checkVipHolders} disabled={vipChecking}
                       title="멤버별 health-check 로 실제 VIP 보유(Active) 상태를 관측 (sync REST — 수 초 소요)">
                 {vipChecking ? '점검 중…' : '🔄 실측'}
-              </button>
-            )}
-            {group.mode === 'active_standby' && (
-              <button className="btn btn--sm btn--primary" onClick={applyMembers} disabled={!masterChanged}
-                      title="Master 변경을 backend 에 적용 (priority swap + keepalived 즉시 반영)">
-                <Play size={13} /> 적용
               </button>
             )}
           </div>
@@ -1247,13 +1267,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                       ? '먼저 [적용] 으로 변경을 저장하세요'
                       : '저장된 VIP 설정을 전 멤버 keepalived 에 다시 내려보냄 (값 변경 없음)'}>
               <RotateCw size={13} /> 재적용
-            </button>
-            <button className="btn btn--sm btn--primary" onClick={applyVipBindings}
-                    disabled={!vipDirty || bindingEditMode !== null}
-                    title={bindingEditMode !== null
-                      ? '편집 중인 행을 먼저 [저장] 또는 [×] 로 닫으세요'
-                      : 'VIP 변경을 backend 에 적용 (즉시 keepalived 반영)'}>
-              <Play size={13} /> 적용
             </button>
           </div>
         </div>
@@ -1405,6 +1418,29 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
         {/* 공유 store 는 이 탭에 없다 — oam/oam-svc 의 [패키지 설정] > 관리 store 로 귀속.
             HA 편입 여부는 그 값에서 유도되고, 미충족 사유는 [패키지 제어] 탭 배너가 알린다. */}
       </div>
+      {/* StickySaveBar — 하단 통합 저장 (Figma G1 42:428).
+          구 화면은 그룹 설정·절체 조건·멤버·VIP 마다 [적용] 이 따로 있어 keepalived 가
+          영역 수만큼 재렌더됐다. 이제 **바뀐 필드만** 한 번에 보낸다(정본 문서 §7-10). */}
+      <div className="flex shrink-0 items-center gap-3 border-t border-border bg-card px-4 py-2.5">
+        {changes.length > 0
+          ? <Badge variant="warningSoft" title={changes.join(' · ')}>변경 {changes.length}건 · 전 멤버 적용</Badge>
+          : <span className="text-xs text-muted-foreground">변경 없음</span>}
+        <span className="truncate text-xs text-muted-foreground">
+          {changes.length > 0
+            ? changes.join(' · ')
+            : '그룹 설정 · 절체 조건 · 멤버 · VIP 를 한 번에 저장 — keepalived 재생성'}
+        </span>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button className="btn btn--sm" onClick={revertAll} disabled={changes.length === 0}
+                  title="저장하지 않은 변경을 되돌린다">
+            <ArrowLeft size={13} /> 되돌리기
+          </button>
+          <button className="btn btn--sm btn--primary" onClick={saveAll} disabled={changes.length === 0}
+                  title="바뀐 필드만 보낸다 — 안 만진 값은 backend 가 손대지 않는다">
+            <Check size={13} /> 저장 — 전 멤버 적용
+          </button>
+        </div>
+      </div>
     </>
   )
 }
@@ -1428,13 +1464,13 @@ function VipHolderCell({ holders, editing }: { holders: string[]; editing?: bool
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
 // preempt / track_interface / restart_limit. 모듈별 값(프로세스 감시·절체 모드)은
 // 패키지 설정의 모듈 운영 명세(ModuleSpecSection)로 이관됨.
-function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
+function FailoverSection({ value, onChange, open, onToggle, dirty }: {
   value: FailoverOptions
   onChange: (v: FailoverOptions) => void
   open: boolean
   onToggle: () => void
+  /** 저장은 하단 StickySaveBar 가 한다 — 여기서는 변경 표시만 */
   dirty: boolean
-  onApply: () => void
 }) {
   const set = <K extends keyof FailoverOptions>(k: K, v: FailoverOptions[K]) =>
     onChange({ ...value, [k]: v })
@@ -1453,13 +1489,10 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
           감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · {value.preempt === 'preempt' ? '자동복귀' : '복귀없음'}
         </span>
-        <button className="btn btn--sm btn--primary"
-                style={{ marginLeft: 'auto' }}
-                onClick={(e) => { e.stopPropagation(); onApply() }}
-                disabled={!dirty}
-                title="절체 조건 변경을 backend 에 적용 (즉시 keepalived 반영)">
-          <Play size={13} /> 적용
-        </button>
+        {/* 저장은 하단 StickySaveBar 가 한다 — 여기서는 변경 여부만 알린다 */}
+        {dirty && (
+          <Badge variant="warningSoft" className="ml-auto">변경됨</Badge>
+        )}
       </div>
       {open && (
         <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
