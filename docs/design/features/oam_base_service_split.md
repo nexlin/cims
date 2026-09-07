@@ -131,6 +131,10 @@
 > 프록시로 mount 하고(`register_gateway(modules={'csc'})`), `/users/me` 는 base slim
 > 핸들러가 커버(mount 경로 `/api/v1/users/me`). stats/녹취/flow/검증은 in-process 유지
 > — 모듈 필터가 oam-svc 계열 라우트의 중복 mount(세그먼트 충돌)를 막는다.
+> 라우트의 `module` 키는 **패키지 id**(소문자 `csc`·`oam-svc` — `pkg.json name`)다.
+> 배포 레코드의 표시용 `process_name`("CSC")은 키로 쓰지 않는다(identifier_model) —
+> self-register·deregister 는 패키지 id 로 쓰고, 테이블 쓰기(upsert)와 모든 비교(mount
+> 필터·deregister)가 소문자 정규화를 거치므로 과거 대문자 레코드도 그대로 정합된다.
 > dev(build/dist)는 배포 단계가 없어 csc 라우트를 base `oam.json` 의 `Gateway.Routes`
 > 로 시드하며(라우트 테이블 비었을 때 1회), 콘솔(4419) 토큰의 csc 측 독립 검증을 위해
 > `configure.sh` 가 `oam.json CimsAuth.JwtSecret` 을 csc.json 렌더값과 동일하게 정렬한다.

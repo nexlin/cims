@@ -598,6 +598,64 @@ PY
 }
 seed_local_nodes
 
+# ── 단말 프로비저닝 SIP 포트 ← local_nodes 정합 ─────────────────
+# csc.json Provisioning.Services.<kind>.{port,tcp_port,tls_port} 는 단말이 REGISTER 할
+# CSP 리스너 포트인데, 템플릿 default(운영 표준 배치)와 dev 시드(UDP 5060/TCP 25061/
+# TLS 5061)가 다르면 단말이 존재하지 않는 포트로 접속한다. SIP 리스너의 SoT 는
+# local_nodes.jsonl 이므로 dev configure 는 그 access 리스너에서 포트를 유도해 기록한다
+# (host 가 비어 있거나 CSP_IP 인 서비스만 — 다른 서버를 가리키면 운영자 값 보존).
+# 분산 배포는 콘솔 [패키지 설정] > csc 값이 정본(configure 미경유).
+align_csc_provisioning_ports() {
+    local nodes="$DIST_DIR/config/local_nodes.jsonl"
+    [[ -f $nodes ]] || return 0
+    local cfg
+    for cfg in "$DIST_DIR/csc/config/csc.json" "$DIST_DIR/csc/config/csc-tb.json"; do
+        [[ -f $cfg ]] || continue
+        NODES="$nodes" CFG="$cfg" CSP_IP="$CSP_IP" python3 - <<'PY'
+import json, os
+ports = {"UDP": 0, "TCP": 0, "TLS": 0}
+primary_udp = 0
+with open(os.environ["NODES"], encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        r = json.loads(line)
+        if not r.get("enabled", True) or r.get("edge", "access") != "access":
+            continue
+        proto = str(r.get("protocol", "")).upper()
+        port = int(r.get("bind_port") or 0)
+        if proto in ports and port and not ports[proto]:
+            ports[proto] = port
+        if proto == "UDP" and r.get("is_primary"):
+            primary_udp = port
+if primary_udp:
+    ports["UDP"] = primary_udp
+cfg_path = os.environ["CFG"]
+with open(cfg_path, encoding="utf-8") as f:
+    c = json.load(f)
+svcs = ((c.get("Provisioning") or {}).get("Services") or {})
+changed = []
+for kind, svc in svcs.items():
+    if not isinstance(svc, dict):
+        continue
+    host = (svc.get("host") or "").strip()
+    if host and host != os.environ["CSP_IP"]:
+        continue
+    want = {"port": ports["UDP"] or int(svc.get("port") or 0),
+            "tcp_port": ports["TCP"], "tls_port": ports["TLS"]}
+    if want["port"] and any(svc.get(k) != v for k, v in want.items()):
+        svc.update(want)
+        changed.append(f"{kind}={want['port']}/tcp{want['tcp_port']}/tls{want['tls_port']}")
+if changed:
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(c, f, indent=4, ensure_ascii=False)
+    print("  " + os.path.basename(cfg_path) + " Provisioning 포트 ← local_nodes: " + ", ".join(changed))
+PY
+    done
+}
+align_csc_provisioning_ports
+
 # ── 시험 환경 설정 파일 생성 (소스 트리 tests/ 에만) ────────────
 # 테스트가 실제 배포 IP/도메인/DB 를 자동으로 사용하도록 한다.
 # 하드코딩 드리프트 방지.

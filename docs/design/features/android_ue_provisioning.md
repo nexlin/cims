@@ -328,7 +328,10 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
    - 콘솔 `관리 > 시스템 > 시스템/인프라` → 서버 선택 → **[패키지 설정] > csc > [설정]** 탭의
      `자동 프로비저닝 (단말 접속 정보)` 에서 편집. 전 필드 `restart: true` → 저장 후 csc 재기동.
    - configure.sh 경로(올인원 시험환경)는 `deploy_value` 로 `@VOLTE_DOMAIN@`/`@PTT_DOMAIN@`/
-     `@COUNTRY_CODE@` 를 치환해 csc.json 에 기록한다. 포트/host 는 템플릿 default(5060 / 빈값).
+     `@COUNTRY_CODE@` 를 치환해 csc.json 에 기록하고, **SIP 포트(`port`/`tcp_port`/`tls_port`)는
+     `local_nodes.jsonl` 의 access 리스너(UDP primary/TCP/TLS)에서 유도해 기록한다**(리스너 SoT 와
+     단일화 — 템플릿 default 15060 은 운영 표준 배치용이라 dev 시드 5060/25061/5061 과 다르다).
+     host 가 비어 있거나 CSP_IP 인 서비스만 정합하고, 다른 서버를 가리키면 운영자 값을 보존한다.
 3. SIP 자격: 응답 `account.sipHa1`(H(A1)) 로 인증한다 — 평문 SIP 비밀번호는 망에 실리지 않고 단말도 갖지
    않는다. `sipHa1` 이 없는 가입(H(A1) 미생성)은 단말이 등록을 시도하지 않는다.
 4. **홈 국가코드** ← CSC 설정 `Provisioning.CountryCode`(템플릿 default 82, configure.sh `--country-code`).
