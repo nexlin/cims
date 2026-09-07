@@ -378,10 +378,10 @@ muted 글자는 `text-muted-foreground` 가 맞다) · `table`(5곳 — 전부 `
 |---|---|---|
 | **T0a 토큰 개명** | `index.css` 의 라이트/다크 토큰 블록을 Figma `01`(`8:2`/`13:2`) 기준으로 다시 쓰고 §5.1 매핑대로 `var(--...)` 를 일괄 치환(실측 **1,158곳 · 76파일**). C 갈래는 이름·값 그대로. 테마 스위치(`data-theme`)는 안 건드린다 | **라이트** — 5개 색만 변화(+`rgba()`→`rgb()` 표기 2건), 나머지 값 동일. **다크** — 10개 변화, soft 계열 4종이 투명→불투명이라 **눈에 띄는 의도된 변화**(§5.1-B). 실측 라이트 31/38·다크 26/36 동일 |
 | **T0b Tailwind 도입** | Tailwind **v3** + Radix + shadcn 설치, `tailwind.config.ts` 이식 — content 에 `../../service/console/src` 포함, `darkMode` 를 `.dark` 가 아니라 우리 스위치 `[data-theme="dark"]` 에 결선, **preflight off**. `@tailwind` 지시문은 `index.css` **맨 앞** — 기존 CSS 가 뒤에 와서 이긴다(이행 중 충돌 시 현행 유지). shadcn 20종을 `src/components/ui/` 에 생성 | 기존 화면 회귀 0 — **JS 번들 불변**(컴포넌트 미임포트라 트리셰이킹) · 유틸리티↔레거시 클래스 충돌 0 |
-| **T0c 폰트·아이콘** | **Pretendard Variable · JetBrains Mono 로드** — 지금은 `font-family` 에 이름만 있고 실제 로드가 없어 시스템 폰트로 떨어진다. 온프레미스 콘솔이라 CDN 이 아니라 자체 호스팅. + 텍스트 글리프 `↻ ▶ ■ ▼ ⏹ ❚❚ ✎ ●` 를 Lucide 로. 소스 87곳 중 **주석 7곳은 대상 아님**, JSX 직접 41곳은 단순 치환, **문자열 상수 4곳은 구조 변경**(`icon: '■'` → 컴포넌트 참조 — `pttSession.tsx` `EVENT_ICONS` 등), 나머지는 케이스별 | **화면은 변하고 기능은 안 변한다** — 눈으로 확인. 글리프 잔존 0건(주석 제외) |
+| **T0c 폰트·아이콘** | ① **Pretendard Variable · JetBrains Mono 자체 호스팅** — `font-family` 에 이름만 있고 로드가 없어 시스템 폰트로 떨어져 있었다. 온프레미스라 CDN 대신 npm(`pretendard` 동적 서브셋 92조각 · `@fontsource-variable/jetbrains-mono`). ② **`DESIGN-RULES` §0 지목 글리프 93줄/28파일**(`🩺 ↻ ⤺ ✎ 🔒 ★ 🔁 ⚡ ▶ ■ ⏹ ❚❚ ▼ ▲ ◀ ⚙`)을 Lucide 로 1:1 치환 — 뜻을 재해석하지 않는다. 아이콘만 남는 버튼엔 `title` 을 넣는다 | **화면은 변하고 기능은 안 변한다.** 지목 글리프 잔존 0 · 빌드 통과 |
 | **T1 공통 셸** | AppBar · Sidebar · TreePanel · Tabs + **breadcrumb 줄 신설** (`screens/shell.md`). 메뉴 항목의 그룹 소속은 그대로 둔다 | 전 라우트 셸 회귀 확인 · 위젯 편집 `✎` 슬롯 유지(§7-2) |
 | **T2 시스템/인프라** | `/deploy/servers` — `screens/` 스펙이 있는 유일한 본문 화면. S1~S4 · G1~G4 · A1~A4 · SA · 모달 · 빈 상태. 구조 변경(§1 목록)까지 반영 | 스펙 대조 |
-| **T3 나머지 30 라우트** | 화면 구조·문구 유지, 인라인 `style` → `className` 교체 + **네이티브 `confirm()` 51곳을 시안 Dialog 로 교체**(§7-7 — 대상·문구는 그대로, 껍데기만) | `index.css` 참조 소거 · `window.confirm` 0건 |
+| **T3 나머지 30 라우트** | 화면 구조·문구 유지, 인라인 `style` → `className` 교체 + **네이티브 `confirm()` 51곳을 시안 Dialog 로**(§7-7 — 대상·문구는 그대로, 껍데기만) + **글리프 2차분**(§8.1) + **상태 점 → StatusDot** | `index.css` 참조 소거 · `window.confirm` 0건 · 글리프 2차분 0건 |
 | **T4 정리** | `index.css` reset 제거 → **preflight 켜기**. 잔여 폐기 (그리드/카드 편집 CSS 제외 — §7-3) | Tailwind 단일 출처 |
 
 `ServersPage.tsx` 는 175KB 단일 파일이지만 **위젯으로 분해하지 않는다.**
@@ -392,6 +392,35 @@ muted 글자는 `text-muted-foreground` 가 맞다) · `table`(5곳 — 전부 `
 
 T2 는 시안대로 재작성하면서 **파일만** 읽기 좋은 단위로 나눈다 — 라우팅 등록(`component: ServersPage`)과
 위젯 플랫폼 관계는 그대로다.
+
+### 8.1 글리프 2차분 — T3 로 넘긴 것
+
+`DESIGN-RULES` §0 은 글리프를 **예시로만** 나열했다. 소스 전체를 유니코드 기호로 훑으면 T0c 가
+처리한 93줄 외에 **약 200곳**이 더 있다. 페이지 맥락을 봐야 분류가 되므로 그 페이지를 옮기는
+T3 에서 함께 정리한다.
+
+| 갈래 | 건수 | 처리 |
+|---|---|---|
+| `⚠` | 27 | `AlertTriangle` |
+| `＋`(전각) | 23 | `Plus` |
+| `✕ ✗ ❌` | 28 | `X` |
+| `✓ ✅` | 26 | `Check` |
+| `▾ ▸`(작은 캐럿) | 23 | `Chevron*` |
+| 이모지 40여 종 | ~70 | `🔄 🗑 📋 🔑 💬 🔐 🚩 📄 📦 📡 📁 🔗 🔍 🔧 🎤 📞 👁 📌 ⏸ ⏭ ⏳ …` |
+| **상태 원** `● ○ ◐ 🟢 🟡 🔴` | ~25 | **Lucide 가 아니라 StatusDot 컴포넌트** — 톤 매핑(Success/Warning/Danger/Neutral/Info)이 화면별 판단이라 이식과 함께 |
+
+**대상이 아닌 것 — 건드리지 않는다** (약 140곳)
+
+| 갈래 | 건수 | 왜 |
+|---|---|---|
+| `─ └` 박스 드로잉 | 126 | `FlowPage` 의 시퀀스 다이어그램·트리 그림 문자다. 아이콘이 아니다 |
+| `≈ ≠ ≤ −` 수학 기호 | 15 | 문구 안의 값 비교 표현 |
+| `↑ ↓ ⇄ ⇢ ⤓ ⤒` 화살표 | ~12 | 산문인지 아이콘인지 **줄마다 판단** |
+
+**절대 손대지 않는 두 곳**
+- `ems/core/console/src/api/services.ts` 의 `/●\s+(\w+)/` — `cims-svc status` **출력을 파싱**하는
+  정규식이다. 바꾸면 모듈 상태 표시가 통째로 깨진다
+- `GroupConfigCompareView.tsx` 의 `'●●●'` — 비밀번호 마스크 문자열
 
 ## 9. 남은 항목
 
