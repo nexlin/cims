@@ -238,7 +238,15 @@ relay leg SDES 평가/재작성 헬퍼(`EvalRelayOfferSdes`/`ApplyRelayLegOffer`
 패키지 — `CscfModule` SUBSCRIBE 에 `dialog` 분기 + 같은 픽업 그룹 인가(403), `CspServer` 에
 dialog-info NOTIFY 빌더·발신(`SendDialogEventNotify`), `CTasModule` 의 `OnCallRing/Start/End`
 에서 호 상태(early/confirmed/terminated) 트리거. picker 는 NOTIFY 의 `call-id`(+태그)로
-INVITE-Replaces 를 조립한다. (c) 미지 Event → 489 Bad Event(구 `else→gms` 오분류 제거). BLF
+INVITE-Replaces 를 조립한다. 본문 규칙(RFC 4235 §4.1) — 호의 두 당사자 각각에게 **그 당사자가 가진
+dialog** 를 낸다: `id`/`call-id` = 그 당사자 쪽 CSP leg Call-ID(발신자 = A-leg, 착신자 = B-leg —
+picker 는 착신자의 것을 Replaces 로 쓴다), `local` = entity 자신, `remote` = 상대 leg 의 원단 사용자,
+`direction` = 그 당사자가 INVITE 를 보냈으면(CSP 수신 leg) `initiator`, 아니면 `recipient`. 초기 full
+스냅샷(`CollectInitialDialogs`)도 같은 규칙이다. 당사자·개시 방향은 `CallLegParty`
+(`CCallMap::ResolveLegParties` — 당사자 = `GetToId`(leg 원단, 송·수신 무관), 개시자 = psip `IsSendCall`
+거짓)에서만 해석한다 — psip dialog 의 From/To 는 "CSP 가 요청을 보내는 입장" 으로 저장돼 수신 leg 에서는
+From=다이얼된 번호·To=발신자로 뒤집혀 있어, 이를 caller/callee 로 읽으면 발신자 BYE(A-leg) 때 두 당사자가
+바뀐다. (c) 미지 Event → 489 Bad Event(구 `else→gms` 오분류 제거). BLF
 클릭 픽업 = dialog 구독으로 링잉 leg 를 알고(G5) 그 leg 를 Replaces 로 가져온다(G4).
 
 검증(구현 반영, G7): cspsim VoLTE 시나리오 — `transfer`(A→B 후 A blind REFER→C),

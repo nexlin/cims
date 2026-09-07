@@ -147,6 +147,26 @@ bool CSipUserAgent::GetDialogTags( const char * pszCallId, std::string & strLoca
 	return bRes;
 }
 
+// 다이얼로그 개시 방향 — 이 UA 가 INVITE 를 보냈으면(송신) true, 받았으면(수신) false.
+bool CSipUserAgent::IsSendCall( const char * pszCallId, bool & bSendCall )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	bool	bRes = false;
+
+	bSendCall = false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		bSendCall = itMap->second.m_bSendCall;
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
 // 수신 Replaces(RFC 3891) 대상 다이얼로그 대조 — Call-ID 로 찾고 태그 쌍을 양방향 비교.
 bool CSipUserAgent::MatchReplacesDialog( const char * pszCallId, const char * pszToTag, const char * pszFromTag )
 {

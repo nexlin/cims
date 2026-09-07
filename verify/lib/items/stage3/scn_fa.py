@@ -17,6 +17,9 @@ DISPATCH_GROUP_CHANGED 를 보낸다(멤버 pickup_group 도 그룹 id 로 파�
                      RELAY_MODIFY), A·D 미디어, B·C 무흐름, pickup_status=200
   F6 sequential alerting(TS 24.239) — alert_mode=sequential, no_answer_sec=4: B 먼저 링(ring-hold) → 단계 시한 뒤
                      CANCEL → C 링·응답. hunt_status=200, C 승자, B_invites=C_invites=1, 응답 지연 ≥ 단계 시한
+  F7 dialog 이벤트 정합(RFC 4235) — 그룹원 B 가 대표번호·A·C 를 dialog 구독, C 응답 뒤 **A(발신자)가 먼저 BYE**:
+     세 entity 각각 자기 dialog(id 불변)로 confirmed→terminated 1회, local=entity·remote=상대·direction 불변
+     (대표번호 recipient/remote A · A initiator/remote C · C recipient/remote A), entity 별 version 단조 증가.
   F4 통화 중 제외(busy_members=skip)은 후속(SKIP 보고).
 """
 from __future__ import annotations
@@ -48,6 +51,39 @@ def _parse_delta4(text: str):
         if m:
             last = m
     return None if not last else tuple(int(last.group(i)) for i in range(1, 5))
+
+
+_DLG_RE = re.compile(r"\[BLF\] dlg watcher=(\S+) entity=(\S+) ver=(-?\d+) id=(\S+) dir=(\S+) state=(\S+) local=(\S+) remote=(\S+)")
+
+
+def _parse_dlg_records(text: str, watcher: str) -> list:
+    """cspsim '[BLF] dlg …' 줄 → dict 목록(도착 순). watcher 세션 것만."""
+    out = []
+    for m in _DLG_RE.finditer(text):
+        if m.group(1) != watcher:
+            continue
+        out.append({"entity": m.group(2), "ver": int(m.group(3)), "id": m.group(4), "dir": m.group(5),
+                    "state": m.group(6), "local": m.group(7), "remote": m.group(8)})
+    return out
+
+
+def _judge_dialog_entity(recs: list, entity: str, exp_dir: str, exp_remote: str, exp_states: list) -> tuple:
+    """entity 한 개의 dialog NOTIFY 열을 판정 — (ok, 설명). exp_states = partial 로 기대하는 상태 열(도착 순, 중복 없음)."""
+    mine = [r for r in recs if r["entity"] == entity]
+    vers = [r["ver"] for r in mine]
+    # version 단조 — 한 NOTIFY 에 dialog 여러 개면 같은 version 이 연속으로 찍히므로 연속 중복만 허용
+    mono = all(b > a for a, b in zip(vers, vers[1:]) if b != a) and all(
+        not (b == a and mine[i]["id"] == mine[i + 1]["id"]) for i, (a, b) in enumerate(zip(vers, vers[1:])))
+    dlg = [r for r in mine if r["id"] != "-"]
+    ids = sorted({r["id"] for r in dlg})
+    states = [r["state"] for r in dlg]
+    dirs = sorted({r["dir"] for r in dlg})
+    locals_ = sorted({r["local"] for r in dlg})
+    remotes = sorted({r["remote"] for r in dlg})
+    ok = (mono and len(ids) == 1 and states == exp_states and dirs == [exp_dir] and locals_ == [entity]
+          and remotes == [exp_remote])
+    return ok, (f"{entity}: ver={vers} ids={len(ids)} states={states} dir={dirs} local={locals_} remote={remotes} "
+                f"(기대 states={exp_states} dir={exp_dir} local={entity} remote={exp_remote}, version 단조)")
 
 
 def _parse_marker_str(text: str, key: str):
@@ -177,7 +213,7 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
     pilot = f"7{str(org)[-3:].zfill(3)}0"  # 가입 id(E.164 +…)와 겹치지 않는 짧은 내선형 대표번호
     ctx.w(f"- 단말 org={org} A={A['user']} B={B['user']} C={C['user']} D={D['user']} pilot={pilot} group={group_id}")
 
-    def run(tag: str, noanswer: bool, pickup: bool = False) -> tuple:
+    def run(tag: str, noanswer: bool, pickup: bool = False, watch: bool = False) -> tuple:
         args = [
             "-mode", "volte", "-scenario", "hunt", "-count", "4",
             "-ip", ctx.sim_ip, "-domain", VOLTE_DOMAIN,
@@ -188,7 +224,9 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
             args += ["-hunt_noanswer"]
         if pickup:
             args += ["-hunt_pickup"]
-        rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=400)
+        if watch:
+            args += ["-hunt_watch"]
+        rc, tail = run_cspsim(ctx.repo_root, args, timeout=240, tail_lines=900 if watch else 400)
         return rc, _parse_delta4(tail), parse_marker_int(tail, "hunt_status"), tail
 
     def dstr(d) -> str:
@@ -245,6 +283,21 @@ def flexible_alerting(ctx: VerifyContext) -> ItemResult:
             checks.append(("F6 sequential alerting (B 단계 시한 → C 응답, TS 24.239)", ok,
                            f"hunt_status={st} answered_by={by} B_invites={b_inv} C_invites={c_inv} "
                            f"t_answer_ms={t_ans} (≥{seq_step * 1000}) {dstr(d)} rc={rc}"))
+
+    # ── F7: dialog 이벤트 정합 — 그룹원 B 가 pilot·A·C 감시, C 응답 뒤 A(발신자) 선종료(A-leg BYE) ──
+    #   A 도 멤버로 넣어 B 가 A 를 감시할 수 있게 한다(발신자는 포크 대상에서 제외되므로 B·C 만 울린다).
+    with DispatchGroupFixture(ctx.dist_dir, ctx.sim_ip, group_id, pilot, [A["user"], B["user"], C["user"]], "") as fx7:
+        if fx7.active:
+            rc, d, st, tail = run("fa_f7", noanswer=False, watch=True)
+            sub_ok = parse_marker_int(tail, "dlg_sub_ok")
+            recs = _parse_dlg_records(tail, B["user"])
+            ok_p, s_p = _judge_dialog_entity(recs, pilot, "recipient", A["user"], ["early", "confirmed", "terminated"])
+            ok_a, s_a = _judge_dialog_entity(recs, A["user"], "initiator", C["user"], ["confirmed", "terminated"])
+            ok_c, s_c = _judge_dialog_entity(recs, C["user"], "recipient", A["user"], ["confirmed", "terminated"])
+            ok = st == 200 and sub_ok == 3 and ok_p and ok_a and ok_c
+            checks.append(("F7 dialog 이벤트 정합 (A-leg BYE — entity/direction/remote 불변·terminated 1회·version 단조)", ok,
+                           f"hunt_status={st} dlg_sub_ok={sub_ok}/3 notify={len(recs)} rc={rc}\n"
+                           f"      · {s_p}\n      · {s_a}\n      · {s_c}"))
 
     all_ok = emit_checks(ctx, checks)
     return done(ItemStatus.PASS if all_ok else ItemStatus.FAIL, fmt_checks(checks))

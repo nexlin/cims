@@ -689,11 +689,22 @@ void SimSession::SubscribeReg()
 // ─────────────────────────────────────────────
 void SimSession::SubscribeDialog(const std::string& strWatchedAor)
 {
-    m_strDlgWatchedAor = strWatchedAor;
-    m_iDlgSubStatus = 0;
+    // 첫 구독만 단일 필드(m_iDlgSubStatus 판정값)에, 추가 구독은 별도 다이얼로그로 — 전부 m_mapDlgSubs 에 등록.
+    std::string strCallId, strFromTag;
+    int iSeq = 0;
+    const bool bFirst = m_strDlgSubCallId.empty();
+    if (bFirst) {
+        m_strDlgWatchedAor = strWatchedAor;
+        m_iDlgSubStatus = 0;
+    }
     printf("[%d] SUBSCRIBE dialog watched=%s\n", m_iId, strWatchedAor.c_str());
-    SendEventSubscribe("dialog", "application/dialog-info+xml", strWatchedAor,
-                       m_strDlgSubCallId, m_iDlgSubSeq, m_strDlgSubFromTag);
+    SendEventSubscribe("dialog", "application/dialog-info+xml", strWatchedAor, strCallId, iSeq, strFromTag);
+    if (bFirst) {
+        m_strDlgSubCallId = strCallId;
+        m_iDlgSubSeq = iSeq;
+        m_strDlgSubFromTag = strFromTag;
+    }
+    m_mapDlgSubs[strCallId] = strWatchedAor;
 }
 
 // 이벤트 패키지 프로브 — Event 토큰 임의 지정. 자원은 보통 자기 AoR (인가 축 무관하게 분류만 본다).
@@ -710,9 +721,10 @@ void SimSession::SendEventSubscribe(const std::string& strEvent, const std::stri
 {
     const std::string& strLocalIp = m_clsSetup.m_strLocalIp;
 
-    char szCallId[128];
-    snprintf(szCallId, sizeof(szCallId), "evsub_%s_%s_%d_%d", strEvent.c_str(), m_strUser.c_str(), m_iId,
-             (int)time(NULL));
+    static std::atomic<int> s_iEvSubSerial{0};   // 같은 초에 여러 대상을 구독해도 Call-ID 가 겹치지 않게
+    char szCallId[160];
+    snprintf(szCallId, sizeof(szCallId), "evsub_%s_%s_%d_%d_%d", strEvent.c_str(), m_strUser.c_str(), m_iId,
+             (int)time(NULL), ++s_iEvSubSerial);
     strCallIdOut = szCallId;
     iSeqOut = 1;
 
@@ -1237,6 +1249,67 @@ bool SimSession::RecvRequest(int /*iThreadId*/, CSipMessage* pclsMessage) {
         }
         printf("[%d] [BLF] dialog NOTIFY watched=%s state=%s call-id=%s\n", m_iId,
                pclsMessage->m_clsTo.m_clsUri.m_strUser.c_str(), st.c_str(), cid.c_str());
+        // 판정용 기록 — entity/version(문서 헤더) + dialog 요소마다 id/direction/state/local/remote.
+        //   dialog 요소가 없는 문서(빈 full)도 version 연속성 판정을 위해 id="-" 로 1건 남긴다.
+        {
+            auto user = [](std::string v) {   // "sip:+82…@dom" → "+82…"
+                if (v.compare(0, 4, "sip:") == 0 || v.compare(0, 4, "tel:") == 0) v = v.substr(4);
+                size_t at = v.find('@');
+                return at == std::string::npos ? v : v.substr(0, at);
+            };
+            auto attrIn = [&](const std::string& seg, const char* key) -> std::string {
+                size_t p = seg.find(key);
+                if (p == std::string::npos) return "";
+                p += strlen(key);
+                size_t e = seg.find('"', p);
+                return (e != std::string::npos) ? seg.substr(p, e - p) : "";
+            };
+            auto tagIn = [&](const std::string& seg, const char* open, const char* close) -> std::string {
+                size_t p = seg.find(open);
+                if (p == std::string::npos) return "";
+                p += strlen(open);
+                size_t e = seg.find(close, p);
+                return (e != std::string::npos) ? seg.substr(p, e - p) : "";
+            };
+            DlgNotifyRec base;
+            base.strEntity = user(attr("entity=\""));
+            {
+                const std::string v = attr("version=\"");
+                // 문서 선언 <?xml version="1.0"?> 을 건너뛴 dialog-info 의 version
+                size_t di = body.find("<dialog-info");
+                std::string vv = di != std::string::npos ? attrIn(body.substr(di), "version=\"") : v;
+                base.iVersion = vv.empty() ? -1 : atoi(vv.c_str());
+            }
+            std::vector<DlgNotifyRec> recs;
+            size_t p = 0;
+            while ((p = body.find("<dialog ", p)) != std::string::npos) {
+                size_t e = body.find("</dialog>", p);
+                const std::string seg = body.substr(p, e == std::string::npos ? std::string::npos : e - p);
+                DlgNotifyRec r = base;
+                r.strId = attrIn(seg, "id=\"");
+                r.strDir = attrIn(seg, "direction=\"");
+                r.strState = tagIn(seg, "<state>", "</state>");
+                const std::string loc = tagIn(seg, "<local>", "</local>"), rem = tagIn(seg, "<remote>", "</remote>");
+                r.strLocal = user(tagIn(loc, "<identity>", "</identity>"));
+                r.strRemote = user(tagIn(rem, "<identity>", "</identity>"));
+                recs.push_back(r);
+                if (e == std::string::npos) break;
+                p = e + 9;
+            }
+            if (recs.empty()) {
+                DlgNotifyRec r = base;
+                r.strId = "-";
+                recs.push_back(r);
+            }
+            std::lock_guard<std::mutex> lk(m_mtxConf);
+            for (const auto& r : recs) {
+                m_vecDlgRecs.push_back(r);
+                printf("[%d] [BLF] dlg watcher=%s entity=%s ver=%d id=%s dir=%s state=%s local=%s remote=%s\n", m_iId,
+                       m_strUser.c_str(), r.strEntity.c_str(), r.iVersion, r.strId.c_str(),
+                       r.strDir.empty() ? "-" : r.strDir.c_str(), r.strState.empty() ? "-" : r.strState.c_str(),
+                       r.strLocal.empty() ? "-" : r.strLocal.c_str(), r.strRemote.empty() ? "-" : r.strRemote.c_str());
+            }
+        }
         CSipMessage* pRes = pclsMessage->CreateResponseWithToTag(200);
         if (pRes) m_clsUserAgent.m_clsSipStack.SendSipMessage(pRes);
         return true;
@@ -1346,9 +1419,10 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
             printf("[%d] CMS SUBSCRIBED OK\n", m_iId);
         } else if (strCallId == m_strRegSubCallId) {
             printf("[%d] REG-EVENT SUBSCRIBED OK\n", m_iId);
-        } else if (strCallId == m_strDlgSubCallId) {
-            m_iDlgSubStatus = 200;
-            printf("[%d] [BLF] dialog SUBSCRIBED OK watched=%s\n", m_iId, m_strDlgWatchedAor.c_str());
+        } else if (m_mapDlgSubs.count(strCallId)) {
+            if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = 200;
+            m_iDlgSubOkCount++;
+            printf("[%d] [BLF] dialog SUBSCRIBED OK watched=%s\n", m_iId, m_mapDlgSubs[strCallId].c_str());
         } else if (strCallId == m_strEventSubCallId) {
             m_iEventSubStatus = 200;
             printf("[%d] EVENT-PROBE SUBSCRIBED OK\n", m_iId);
@@ -1361,6 +1435,7 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         //   (403 그룹 밖 감시 / 489 Bad Event / 403 Warning 138 conference 인가 거절)
         CSipHeader* pWarn = pclsMessage->GetHeader("Warning");
         if (strCallId == m_strDlgSubCallId) m_iDlgSubStatus = iStatus;
+        else if (m_mapDlgSubs.count(strCallId)) { /* 추가 감시 대상 거절 — OK 수에 미포함 */ }
         else if (strCallId == m_strEventSubCallId) m_iEventSubStatus = iStatus;
         else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = iStatus;

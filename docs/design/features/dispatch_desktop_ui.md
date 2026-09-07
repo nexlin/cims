@@ -191,7 +191,8 @@
   구독 순서는 **대표번호 → 감시 대상 전원**(엔진 슬롯이 모자라면 앞쪽이 산다 — ue_sdk.md §3 `PJSUA_CIMS_MAX_SUB`), 실패는 줄마다 로그하고
   관제사에게 토스트 한 번("회선 감시 구독 실패 n건"), 실패한 회선은 다음 편성 재적용 때 다시 시도한다.
 - **dialog 종료 규칙**: dialog id(Call-ID+태그)는 양 당사자에게 같은 하나의 dialog 다 — `terminated` 는 entity 가 무엇이든 그 id 의 행 전부에
-  적용한다(CSP 가 대표번호 포크 호의 종료 NOTIFY entity/direction 을 어긋나게 보내는 경우가 있어 — [server_request_dispatch_dialog_notify.md](../../dev/server_request_dispatch_dialog_notify.md) — entity|id 키만 보면 띠·④ 진행 중에 "통화 중" 이 남는다).
+  적용한다(서버는 entity 별로 자기 dialog 를 낸다 — [dispatch_center.md §4.5](dispatch_center.md) — 이 규칙은 그와 무관한 방어적 정리로, NOTIFY 하나가 유실돼도 잔류 행이 남지 않게 한다).
+  `version`(RFC 4235 §4.1)은 **구독(Call-ID) 단위**로 비교한다 — 앱 재기동 뒤 이전 세션의 스테일 구독이 서버에 잠시 남아 그쪽 NOTIFY(다른 version 열)가 같은 entity 로 도착할 수 있다(엔진이 481 로 거절, 서버는 즉시 회수).
 - 10명을 넘으면 띠가 두 줄이 되고 그 이상은 "+n" 로 접는다(운영 권고 10 이내).
 
 **왼쪽 중: 대기열** — 대표번호 AoR dialog(dispatch_center.md §4.5): 발신자 · `→ 대표번호` · 링 경과 · 울리는 그룹원(포크 대기 leg — 각 내선

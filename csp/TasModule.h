@@ -210,9 +210,16 @@ private:
     bool OnForkStart( const char *pszCallId, CSipCallRtp *pclsRtp );
     bool OnForkEnd( const char *pszCallId, int iSipStatus );
 
-    std::map<std::string, CTasForkSet> m_mapFork;         ///< A-leg Call-ID → 포크 집합
-    std::map<std::string, std::string> m_mapForkLeg;      ///< B-leg Call-ID → A-leg Call-ID
-    std::map<std::string, std::string> m_mapPilotOfCall;  ///< 확립 후 A/B leg → 대표번호 (종료 통지용)
+    std::map<std::string, CTasForkSet> m_mapFork;     ///< A-leg Call-ID → 포크 집합
+    std::map<std::string, std::string> m_mapForkLeg;  ///< B-leg Call-ID → A-leg Call-ID
+    /** 확립된 대표번호 호 — 양 leg(A·승자) Call-ID 가 같은 항목을 가리킨다. 대표번호 dialog 의 id 는 포크 집합의
+     *  A-leg Call-ID 로 고정(§4.5)이라 종료 통지·스냅샷이 어느 leg 에서 시작되든 같은 id·발신자를 쓴다. */
+    struct PilotCall {
+        std::string strPilot;    ///< 대표번호 AoR
+        std::string strACallId;  ///< dialog id = A-leg(발신자→대표번호 INVITE) Call-ID
+        std::string strCaller;   ///< 발신자
+    };
+    std::map<std::string, PilotCall> m_mapPilotOfCall;  ///< 확립 후 A/B leg Call-ID → 대표번호 호
     std::recursive_mutex m_mutexFork;
 };
 

@@ -428,6 +428,8 @@ static void PrintUsage(const char* pszBin) {
     printf("  -pilot       <번호>      [hunt] 관제 그룹 대표번호 (A 의 INVITE 대상)\n");
     printf("  -hunt_noanswer           [hunt] B·C 전원 응답 보류 (no_answer_sec·overflow 검증)\n");
     printf("  -hunt_pickup             [hunt] B·C·D 전원 응답 보류, D 가 <pickup_code><pilot> 로 링잉 대표번호 호를 지정 픽업 (F5, -count 4)\n");
+    printf("  -hunt_watch              [hunt] B 가 대표번호·A·C 의 dialog 를 구독하고, 확립 뒤 A(발신자)가 먼저 BYE — 종료 NOTIFY 의\n");
+    printf("                             entity/direction/remote 정합·version 단조 판정용 (F7). 각 NOTIFY 를 '[BLF] dlg …' 줄로 출력\n");
     printf("  -listen_sendrecv         [ptt_listen] M 이 recvonly 아닌 일반 INVITE — 비멤버 403 판정\n");
     printf("  -pickup_code <code>      [pickup] 당겨받기 코드 (default: **) — 서버 pickup_feature_code 와 일치\n");
     printf("  -pickup_target <내선>    [pickup] 지정 픽업 — C 가 <code><내선> 을 다이얼 (미지정 시 그룹 픽업)\n");
@@ -482,6 +484,7 @@ static std::string g_strSubscribeEvent = "dialog";  // -event: subscribe_event �
 static std::string g_strPilot;                      // -pilot: hunt 시나리오 대표번호 (dispatch_center.md §4)
 static bool g_bHuntNoAnswer = false;                // -hunt_noanswer: 그룹원 전원 ring-hold (무응답·overflow 검증)
 static bool g_bHuntPickup = false;                  // -hunt_pickup: 전원 ring-hold 중 D 가 <pickup_code><pilot> 로 지정 픽업 (F5)
+static bool g_bHuntWatch = false;                   // -hunt_watch: B 가 pilot·A·C dialog 감시, A-leg 선종료 (F7 dialog 정합)
 static bool g_bListenSendRecv = false;              // -listen_sendrecv: [ptt_listen] M 이 recvonly 아닌 일반 INVITE (비멤버 403 판정)
 
 // -hold <secs>: register 시나리오가 등록을 유지하는 시간 — 등록 유지 중 외부 프로브(비보호 요청 403 등)를
@@ -707,8 +710,18 @@ static void RunScenario(std::vector<SimSession*>& sessions,
         B->SetRingHold(true);
         if (g_bHuntNoAnswer || g_bHuntPickup) C->SetRingHold(true);
         if (g_bHuntPickup && D) D->SetRingHold(true);  // D 도 그룹원(링) — 자기 링 중에 지정 픽업으로 가져간다
-        printf("[Scenario] HUNT: A(%s) -> pilot(%s) [B ring-hold%s%s]\n", A->m_strUser.c_str(), g_strPilot.c_str(),
-               (g_bHuntNoAnswer || g_bHuntPickup) ? ", C ring-hold" : "", g_bHuntPickup ? ", D pickup" : "");
+        printf("[Scenario] HUNT: A(%s) -> pilot(%s) [B ring-hold%s%s%s]\n", A->m_strUser.c_str(), g_strPilot.c_str(),
+               (g_bHuntNoAnswer || g_bHuntPickup) ? ", C ring-hold" : "", g_bHuntPickup ? ", D pickup" : "",
+               g_bHuntWatch ? ", B watches pilot/A/C, A hangs up first" : "");
+        if (g_bHuntWatch) {
+            // F7 — 감시자 B(그룹원, 같은 pickup_group)가 대표번호·발신자 A·승자 C 의 dialog 를 구독한다 (RFC 4235).
+            //   세 구독의 200 을 기다린 뒤 발신해야 초기 full 스냅샷(version 0)과 이후 partial 이 순서대로 쌓인다.
+            B->SubscribeDialog(g_strPilot);
+            B->SubscribeDialog(A->m_strUser);
+            B->SubscribeDialog(C->m_strUser);
+            for (int t = 0; t < 30 && !g_bQuit && B->m_iDlgSubOkCount.load() < 3; ++t) usleep(100000);
+            printf("[Scenario] HUNT watch: dialog subscriptions ok=%d/3\n", B->m_iDlgSubOkCount.load());
+        }
         A->m_iLastCallEndStatus = 0;
         A->StartCall(g_strPilot);
         // 응답 대기 — 무응답 모드는 no_answer_sec(≤60)+overflow 링 시간을 감안해 넉넉히.
@@ -759,6 +772,17 @@ static void RunScenario(std::vector<SimSession*>& sessions,
                                                 : C->m_strLastPCalledParty.c_str());
         printf("[Scenario] RTP recv delta over %ds: A=+%llu B=+%llu C=+%llu D=+%llu\n", obs, A->RecvPackets() - a0, dB,
                dC, dD);
+        if (g_bHuntWatch) {
+            // A-leg(발신자) 선종료 — 결함 경로. 종료 NOTIFY 3건(pilot·A·C)이 도착할 여유를 준 뒤 기록을 요약한다.
+            printf("[Scenario] HUNT watch: A(%s) hangs up first (A-leg BYE)\n", A->m_strUser.c_str());
+            A->StopCall();
+            for (int t = 0; t < 30 && !g_bQuit; ++t) usleep(100000);
+            const auto recs = B->DialogNotifyRecords();
+            int nTerm = 0;
+            for (const auto& r : recs) if (r.strState == "terminated") nTerm++;
+            printf("[Scenario] HUNT watch result: dlg_sub_ok=%d dlg_notify=%d dlg_terminated=%d\n",
+                   B->m_iDlgSubOkCount.load(), (int)recs.size(), nTerm);
+        }
         printf("[Scenario] hunt done, stopping calls\n");
         for (auto* s : sessions) s->StopCall();
         return;
@@ -1254,6 +1278,7 @@ int main(int argc, char* argv[])
     g_strPilot                 = GetArg(argc, argv, "-pilot", "");
     g_bHuntNoAnswer            = HasFlag(argc, argv, "-hunt_noanswer");
     g_bHuntPickup              = HasFlag(argc, argv, "-hunt_pickup");
+    g_bHuntWatch               = HasFlag(argc, argv, "-hunt_watch");
     g_bListenSendRecv          = HasFlag(argc, argv, "-listen_sendrecv");
     // CSC 연동: REGISTER 전 IdMS auth 수행 (올바른 순서)
     std::string strCscIp       = GetArg(argc, argv, "-csc_ip",   "");

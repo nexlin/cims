@@ -206,6 +206,17 @@ terminated(집합 완전 실패 또는 확립 호 종료 시 1회)가 같은 dia
 Call-ID 를 id 로 쓰지 않는다(그러면 착신 한 건이 N행으로 뜬다). 패자 CANCEL·sequential 단계 전환은
 terminated 를 내지 않는다(dialog 는 early 유지). 초기 full 스냅샷(§5.2)에도 진행 중 대표번호 호가 실린다.
 
+**세 entity 의 본문은 당사자 기준으로 고정(RFC 4235 §4.1).** 확립된 대표번호 호는 `CTasModule::m_mapPilotOfCall`
+항목(`PilotCall` = 대표번호·A-leg Call-ID·발신자)에 고정돼, **어느 leg 의 BYE 든**(발신자 A-leg 든 승자 leg 든) 대표번호
+entity 에는 같은 id·`direction=recipient`·`remote=발신자` 로 terminated 가 **1회** 나간다. 발신자·승자 entity 는 일반
+호와 같은 규칙(`CTasModule::NotifyDialogState`)으로 각자 자기 dialog(발신자 = A-leg Call-ID·`initiator`·remote 승자,
+승자 = 자기 leg Call-ID·`recipient`·remote 발신자)를 confirmed→terminated 로 받는다. 당사자·개시 방향은
+`CallLegParty`(`CCallMap::ResolveLegParties` — 당사자 = leg 의 원단 사용자, 개시자 = CSP 수신 leg)로만 해석한다.
+psip dialog 의 From/To 는 "CSP 가 요청을 보내는 입장" 이라 수신 leg 에서 뒤집혀 있어 이를 caller/callee 로 읽으면
+A-leg BYE 때 두 당사자가 바뀐다. 검증 F7. `version` 은 구독별 NOTIFY CSeq 파생으로 단조 증가 — 단말 재기동으로
+같은 entity 구독이 하나 더 열리면 이전 구독은 첫 NOTIFY 실패(481) 때 회수되며 그 NOTIFY 의 version 은 별개 열이다
+(감시 앱은 dialog 구독(Call-ID) 단위로 version 을 비교해야 한다).
+
 ### 4.6 녹취·이력
 
 relay 는 대표번호 호 1건이다. `RELAY_ADD` 의 `callee` 는 대표번호, 승자 확정 시 `RELAY_MODIFY` 의
@@ -645,6 +656,7 @@ cspsim 시나리오(3~4 단말)와 S3 항목. 판정 정본은 기존 방식 그
 | | F4 통화 중 제외 | B 통화 중(`busy_members=skip`) → C 만 링 |
 | | F5 지정 픽업 | B·C·D 전원 ring-hold, D 가 `**<pilot>` → D 가 받음(포크 집합 재키잉·RELAY_MODIFY), `pickup_status=200`, A·D 미디어, B·C 무흐름 |
 | | F6 sequential | `alert_mode=sequential`, `no_answer_sec=4` → B 먼저 링, 단계 시한 뒤 CANCEL → C 링·응답, `t_answer_ms ≥ 4000` |
+| | F7 dialog 정합 | 그룹원 B 가 대표번호·A·C dialog 구독(`-hunt_watch`), C 응답 뒤 **A(발신자) 선종료** → entity 별 자기 dialog(id 불변) confirmed→terminated 1회, local=entity·remote=상대·direction 불변(대표번호 recipient/A · A initiator/C · C recipient/A), entity 별 version 단조 |
 | `S3-SCN-MONITOR` | M1 목록 | M 의 A dialog 구독(범위 안) → 200 + NOTIFY ≥1 |
 | | M2 청취 | M Join INVITE → 200, M 수신 RTP delta>0 (SSRC 2개), A·B delta 변화 없음 |
 | | M3 은닉 | A·B 에 re-INVITE/NOTIFY 0건, 같은 그룹 D 의 dialog NOTIFY 에 M leg 없음 |
@@ -660,7 +672,7 @@ cspsim 시나리오(3~4 단말)와 S3 항목. 판정 정본은 기존 방식 그
 | `S1` | CMP tap 단위(복사·PT 스탬프·상향 폐기·세션 종료 회수), CSP `Join` 파서·`MatchDialog` 단위 | gtest |
 
 ```bash
-./cims-verify run --items S3-SEED,S3-SCN-FA          # F1·F3·F5·F6 대표번호 호출 (parallel/sequential·overflow·픽업)
+./cims-verify run --items S3-SEED,S3-SCN-FA          # F1·F3·F5·F6·F7 대표번호 호출 (parallel/sequential·overflow·픽업·dialog 정합)
 ./cims-verify run --items S3-SEED,S3-SCN-MONITOR     # M2·M5 감청
 ./cims-verify run --items S3-SEED,S3-SCN-PTT-LISTEN  # L1~L5 PTT 그룹콜 청취
 ```

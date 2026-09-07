@@ -1055,27 +1055,20 @@ void SendTerminatedNotify( const SubscriptionInfo &sub ) {
 static std::vector<DialogNotifyState> CollectInitialDialogs( const std::string &strAor ) {
     std::vector<DialogNotifyState> vecOut;
     std::set<std::string> setSeen;
-    // 1) 멤버 호 — CallMap 에서 감시 AoR 이 발신/착신인 caller-facing(m_bRecv) leg (leg 쌍 중복 제거)
+    // 1) 멤버 호 — CallMap 의 각 leg 에 대해 그 leg 의 당사자(원단 사용자)가 감시 AoR 이면 그 dialog 1건.
+    //    id·direction·remote 는 partial 갱신(CTasModule::NotifyDialogState)과 같은 규칙(CallLegParty) — 한 호에서
+    //    감시 AoR 이 당사자인 leg 는 하나뿐이라 leg 쌍 중복이 생기지 않는다.
     gclsCallMap.Iterate( [&]( const std::string &strCallId, const CCallInfo &clsCi ) {
-        if ( !clsCi.m_bRecv ) return;
-        std::string strFrom, strTo;
-        gclsUserAgent.GetFromId( strCallId.c_str(), strFrom );
-        gclsUserAgent.GetToId( strCallId.c_str(), strTo );
+        CallLegParty clsMe, clsOther;
+        CCallMap::ResolveLegParties( strCallId, clsCi, clsMe, clsOther );
+        if ( clsMe.strUser != strAor ) return;
         DialogNotifyState d;
         d.bFull = true;
         d.strCallId = strCallId;
         d.strState = clsCi.m_bEstablished ? "confirmed" : "early";
-        if ( strFrom == strAor ) {
-            d.strDir = "initiator";
-            d.strLocalAor = strAor;
-            d.strRemoteAor = strTo;
-        } else if ( strTo == strAor ) {
-            d.strDir = "recipient";
-            d.strLocalAor = strAor;
-            d.strRemoteAor = strFrom;
-        } else {
-            return;
-        }
+        d.strDir = clsMe.bInitiator ? "initiator" : "recipient";
+        d.strLocalAor = strAor;
+        d.strRemoteAor = clsOther.strUser;
         gclsUserAgent.GetDialogTags( strCallId.c_str(), d.strLocalTag, d.strRemoteTag );
         if ( setSeen.insert( strCallId ).second ) vecOut.push_back( d );
     } );

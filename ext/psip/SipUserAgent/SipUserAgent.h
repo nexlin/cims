@@ -110,8 +110,15 @@ public:
 	bool GetLocalCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool GetRemotePayloadTypes( const char * pszCallId, const char * pszEncoding,
 	                            int & iPt, int & iTePt );
+	// CSipDialog 의 From/To 는 "이 UA 가 요청을 보내는 입장" 으로 저장된다 — 수신 INVITE 다이얼로그는
+	//   m_strFromId = INVITE To(로컬), m_strToId = INVITE From(원격). 따라서 GetToId() 는 송·수신 무관하게
+	//   그 다이얼로그의 원격(상대) 사용자이고, GetFromId() 는 로컬 신원(송신 = 발신자 표시, 수신 = 다이얼된 번호)이다.
+	//   발신자/착신자를 헤더 의미로 얻으려면 GetCdr() 를, 개시 방향은 IsSendCall() 을 쓴다.
 	bool GetToId( const char * pszCallId, std::string & strToId );
 	bool GetFromId( const char * pszCallId, std::string & strFromId );
+	// 다이얼로그 개시 방향 — bSendCall=true 면 이 UA 가 INVITE 를 보낸(송신) 다이얼로그, false 면 상대가
+	//   보낸(수신) 다이얼로그. dialog-event(RFC 4235) direction 판정용. 미발견 시 false.
+	bool IsSendCall( const char * pszCallId, bool & bSendCall );
 	// Call-ID 로 다이얼로그의 로컬(from)/원격(to) 태그를 얻는다. dialog-event(RFC 4235)
 	//   NOTIFY 본문·수신 Replaces(RFC 3891) 대조용. 미발견 시 false.
 	bool GetDialogTags( const char * pszCallId, std::string & strLocalTag, std::string & strRemoteTag );

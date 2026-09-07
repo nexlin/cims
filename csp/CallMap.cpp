@@ -489,6 +489,28 @@ void CCallMap::Iterate( const std::function<void( const std::string &, const CCa
     m_clsMutex.release();
 }
 
+bool CCallMap::ResolveLegParties( const char *pszCallId, CallLegParty &clsThis, CallLegParty &clsPeer ) {
+    CCallInfo clsCallInfo;
+    if ( Select( pszCallId, clsCallInfo ) == false ) return false;
+    ResolveLegParties( pszCallId, clsCallInfo, clsThis, clsPeer );
+    return true;
+}
+
+void CCallMap::ResolveLegParties( const std::string &strCallId, const CCallInfo &clsCallInfo, CallLegParty &clsThis,
+                                  CallLegParty &clsPeer ) {
+    // 당사자 = leg 의 원단 사용자(GetToId — 송·수신 무관), 개시자 = CSP 가 받은(수신) dialog 의 상대.
+    auto fill = []( const std::string &strLeg, CallLegParty &clsOut ) {
+        clsOut = CallLegParty();
+        if ( strLeg.empty() ) return;
+        clsOut.strCallId = strLeg;
+        gclsUserAgent.GetToId( strLeg.c_str(), clsOut.strUser );
+        bool bSend = true;
+        if ( gclsUserAgent.IsSendCall( strLeg.c_str(), bSend ) ) clsOut.bInitiator = !bSend;
+    };
+    fill( strCallId, clsThis );
+    fill( clsCallInfo.m_strPeerCallId, clsPeer );
+}
+
 void CCallMap::GetString( CMonitorString &strBuf ) {
     CALL_MAP::iterator itMap;
     strBuf.Clear();

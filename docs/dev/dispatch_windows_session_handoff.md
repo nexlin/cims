@@ -84,7 +84,7 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
    - **결함 2(앱, 수정)**: 대표번호 부재가 dialog(로컬)와 서버 이력 `call.missed` 양쪽에서 행이 생겨 **부재 2**. 내가 받은 호도 이력 `call.answered/ended`(from=발신자, to=대표번호)
      와 겹쳐 응대가 부풀었다. → 대표번호 호는 dialog 가 정본(`RecordPilotOutcome`: 부재·동료 응답 행), 이력의 대표번호 `call.*` 는 건너뜀, 이력 행 `IsOthers` 는 응대·부재 집계 제외.
    - **결함 3(서버 CSP, 앱 완화)**: 발신자(A-leg)가 BYE 하면 종료 dialog NOTIFY 의 entity/direction/remote 가 confirmed 때와 어긋나고 1001 에는 종료가 안 와 **③ 띠·④ 진행 중에
-     "통화 중" 잔류**. version 도 단조 증가 아님. → 요청서 [server_request_dispatch_dialog_notify.md](server_request_dispatch_dialog_notify.md). 앱은 같은 dialog id 의 행 전부를 종료해 잔류를 없앰.
+     "통화 중" 잔류**. version 도 단조 증가 아님(→ 스테일 구독의 NOTIFY 가 섞인 것, §3-3). 서버 수정 csp 0.2.113(§3-3). 앱은 같은 dialog id 의 행 전부를 종료해 잔류를 없앰.
    - 동료 응답(앱이 대표번호 발신 → disp02 `answer`): ④ "착신 대표 ← 관제1석 · 응답 관제2석 · 00:12" 1행, 내 쪽 부재 없음 — 통과.
    - PTT 청취(g003, 활성 세션 2명): [청취] → 200, 감청 창 "청취 전용·참가자 2", [청취 종료] 200 — 통과(서버 §3-1 수정 확인).
    - SDS: 앱 → g002 → disp02 수신(✓✓ disposition), disp02 → g002 → 앱 수신 표시 — 통과.
@@ -92,7 +92,12 @@ C:\work\cims\windows\dispatch-desktop\bin\Release\net10.0-windows\CimsDispatch.e
      그 그룹이 60초 남아 청취 범위로 재구독되던 창은 그룹 소멸 시 발견 재조회를 당겨서 없앰.
    - 60초 `/provisioning/me` 재조회: 변경 없으면 조용(304), 그룹 수 변동 시 `dispatch discovery changed … pttTargets 6→5` + 토스트 — 통과.
    - 미실시: 콘솔에서 관제 편성 변경(콘솔 접근 없음), 오디오 실청취(잠금 세션), 핫키.
-3. **서버(CSP)**: [server_request_dispatch_dialog_notify.md](server_request_dispatch_dialog_notify.md) — A-leg BYE 시 종료 dialog NOTIFY entity/direction 오귀속·version 비단조. 앱은 완화 반영, 서버 수정 뒤 S3-SCN-FA 로 확인.
+3. ✅ **서버(CSP) — 완료(csp 0.2.113 라이브, S3-SCN-FA F7 PASS)**: A-leg BYE 종료 dialog NOTIFY 의 entity/direction/remote 오귀속은 TAS 가 psip dialog From/To(요청 송신
+   입장 저장 — 수신 leg 에서 뒤집힘)를 caller/callee 로 읽은 것이 원인. 당사자 해석을 `CallLegParty`(`CCallMap::ResolveLegParties`)로 단일화(NotifyDialogState·대표번호 종료
+   `PilotCall` 고정·초기 full 스냅샷·Replaces/Join 인가) — 규칙은 [dispatch_center.md §4.5](../design/features/dispatch_center.md). **version 비단조는 서버 결함이 아니었다**: 라이브 CSP
+   로그(22:15:28 `subs=2` → `Subscription Reaped … notify-failure`)상 세 entity 모두 이전 앱 세션의 스테일 구독(포트 33841)이 하나씩 남아 있었고, 그쪽 NOTIFY(v5/v2/v3)가 현행 등록
+   바인딩(34226)으로 배달돼 앱 로그에 섞인 것 — 앱이 481 로 거절해 즉시 회수됐다. 현행 구독의 version 은 1·2·3·4 로 단조. **앱은 version 을 구독(Call-ID) 단위로 비교해야 한다.**
+   요청서 `server_request_dispatch_dialog_notify.md` 는 반영 완료로 삭제. 검증 = `S3-SCN-FA` F7(cspsim `-hunt_watch`).
 4. (정리) 후속/요청서 `docs/dev/*_request_*.md` 중 양쪽 반영이 끝난 것(group_crud_followup·group_monitoring)은 삭제하고 설계 정본만 남긴다. 이 파일도 3 이 끝나면 같다.
 5. (정리) C API `allow_group_creation` → `allow_create_group` rename 은 ABI 변경 — 파사드·`AbiLayoutTests`·문서 동시 변경일 때만.
 

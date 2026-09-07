@@ -31,6 +31,21 @@ class CMonitorString;
 
 /**
  * @ingroup CspServer
+ * @brief B2BUA 한 leg 이 대표하는 dialog 의 당사자 — dialog 이벤트(RFC 4235)·Replaces/Join 인가 판정의 공통 해석 단위.
+ *
+ *   psip CSipDialog 의 From/To 는 "CSP 가 요청을 보내는 입장" 이라 수신 leg 에서는 From=다이얼된 번호·To=발신자로
+ *   뒤집힌다. 그래서 caller/callee 를 GetFromId/GetToId 로 읽으면 수신 leg(A) 에서 당사자가 바뀐다. 이 구조체는
+ *   방향과 무관하게 옳은 두 사실만 담는다: 당사자 = 그 leg 의 원단 사용자(GetToId), 개시자 여부 = CSP 수신 leg
+ *   (그 당사자가 INVITE 를 보냈다 = RFC 4235 direction "initiator").
+ */
+struct CallLegParty {
+    std::string strCallId;    ///< 당사자가 가진 dialog = CSP 측 leg Call-ID (dialog-info id, Replaces/Join 대상)
+    std::string strUser;      ///< 당사자(leg 원단 사용자)
+    bool bInitiator = false;  ///< 당사자가 dialog 를 개시(INVITE 송신)했는가
+};
+
+/**
+ * @ingroup CspServer
  * @brief 통화 정보 저장 클래스
  */
 class CCallInfo {
@@ -130,6 +145,13 @@ public:
 
     /** 활성 호 read-only 순회 (dialog 초기 full 스냅샷 — RFC 4235 §3.2). 콜백에서 map 을 수정하지 말 것. */
     void Iterate( const std::function<void( const std::string &, const CCallInfo & )> &fn );
+
+    /** 호 양 당사자 해석 — clsThis = pszCallId leg 의 당사자, clsPeer = 상대 leg 의 당사자 (CallLegParty 참조).
+     *  leg 가 CallMap 에 없으면 false. peer leg 가 아직 없으면 clsPeer 는 빈 값. */
+    bool ResolveLegParties( const char *pszCallId, CallLegParty &clsThis, CallLegParty &clsPeer );
+    /** Iterate 콜백처럼 CCallInfo 를 이미 쥔 자리용(맵 락 재진입 없음). */
+    static void ResolveLegParties( const std::string &strCallId, const CCallInfo &clsCallInfo, CallLegParty &clsThis,
+                                   CallLegParty &clsPeer );
 
 private:
     CALL_MAP m_clsMap;

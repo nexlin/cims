@@ -133,34 +133,22 @@ bool CTasModule::TryPickupDial( const char *pszCallId, const char *pszFrom, cons
 //  dialog 이벤트 패키지 (RFC 4235) + blind transfer 진행/완결
 // ──────────────────────────────────────────────────────────────
 
-// dialog-event 상태 통지 — B2BUA 양 leg 는 From=caller/To=callee 로 동일하므로, 당사자별 leg 는
-//   m_bRecv(caller-facing) 로 가른다. picker 가 Replaces 로 가져갈 leg Call-ID 를 실어 보낸다.
+// dialog-event 상태 통지 — 호의 두 당사자 각각에게 "그 당사자가 가진 dialog"(자기 leg Call-ID) 를 자기 감시자에게
+//   낸다. 당사자·개시 방향은 CallLegParty(leg 원단 사용자·CSP 수신 leg 여부)로 읽는다 — psip From/To 를
+//   caller/callee 로 읽으면 수신 leg(A) 에서 BYE 가 왔을 때 두 당사자가 뒤바뀐다(대표번호 A-leg BYE 결함).
+//   local = entity 자신, remote = 상대 leg 의 원단, direction = 개시자면 initiator (RFC 4235 §4.1).
+//   picker 는 착신자 entity 의 dialog id(B-leg Call-ID)를 Replaces 대상으로 쓴다.
 void CTasModule::NotifyDialogState( const char *pszCallId, const char *pszState ) {
-    CCallInfo clsCi;
-    if ( !gclsCallMap.Select( pszCallId, clsCi ) ) return;
-    std::string strCaller, strCallee;
-    gclsUserAgent.GetFromId( pszCallId, strCaller );  // A (발신)
-    gclsUserAgent.GetToId( pszCallId, strCallee );    // B (착신)
-    // caller-facing leg = m_bRecv=true 인 leg, callee-facing leg = m_bRecv=false 인 leg
-    std::string strAleg, strBleg;
-    if ( clsCi.m_bRecv ) {
-        strAleg = pszCallId;
-        strBleg = clsCi.m_strPeerCallId;
-    } else {
-        strBleg = pszCallId;
-        strAleg = clsCi.m_strPeerCallId;
-    }
-    // 착신 B 감시자 → B-facing leg Call-ID (picker 가 Replaces 로 이 leg 를 가져간다)
-    if ( !strCallee.empty() && !strBleg.empty() ) {
+    CallLegParty clsThis, clsPeer;
+    if ( !gclsCallMap.ResolveLegParties( pszCallId, clsThis, clsPeer ) ) return;
+    const CallLegParty *arr[2] = { &clsThis, &clsPeer };
+    for ( int i = 0; i < 2; ++i ) {
+        const CallLegParty &clsMe = *arr[i], &clsOther = *arr[1 - i];
+        if ( clsMe.strUser.empty() || clsMe.strCallId.empty() ) continue;
         std::string lt, rt;
-        gclsUserAgent.GetDialogTags( strBleg.c_str(), lt, rt );
-        SendDialogEventNotify( strCallee, strBleg, pszState, "recipient", strCallee, strCaller, lt, rt );
-    }
-    // 발신 A 감시자 → A-facing leg Call-ID
-    if ( !strCaller.empty() && !strAleg.empty() ) {
-        std::string lt, rt;
-        gclsUserAgent.GetDialogTags( strAleg.c_str(), lt, rt );
-        SendDialogEventNotify( strCaller, strAleg, pszState, "initiator", strCaller, strCallee, lt, rt );
+        gclsUserAgent.GetDialogTags( clsMe.strCallId.c_str(), lt, rt );
+        SendDialogEventNotify( clsMe.strUser, clsMe.strCallId, pszState, clsMe.bInitiator ? "initiator" : "recipient",
+                               clsMe.strUser, clsOther.strUser, lt, rt );
     }
 }
 
@@ -197,19 +185,17 @@ bool CTasModule::OnCallEnd( const char *pszCallId, int iSipStatus ) {
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         // dialog-event: 종료(terminated) 통지 — CallMap 삭제 전에 leg 식별이 살아 있을 때 낸다 (§6.2).
         NotifyDialogState( pszCallId, "terminated" );
-        // 대표번호로 확립된 호 — 대표번호 AoR 감시자에게도 terminated (§4.5)
+        // 대표번호로 확립된 호 — 대표번호 AoR 감시자에게도 terminated 1회 (§4.5). id·remote 는 포크 집합에서
+        //   고정한 값(A-leg Call-ID·발신자)을 그대로 써 어느 leg 의 BYE 든 early/confirmed 와 같은 dialog 를 닫는다.
         {
             std::lock_guard<std::recursive_mutex> lock( m_mutexFork );
             auto it = m_mapPilotOfCall.find( pszCallId );
             if ( it != m_mapPilotOfCall.end() ) {
-                std::string strPilot = it->second, strCaller, strCallee, lt, rt;
-                gclsUserAgent.GetFromId( pszCallId, strCaller );
-                gclsUserAgent.GetToId( pszCallId, strCallee );
-                // dialog id = A-leg(발신자) Call-ID — early/confirmed 와 같은 id 로 같은 dialog 를 닫는다.
-                const std::string strCallerLeg =
-                    clsCallInfo.m_bRecv ? std::string( pszCallId ) : clsCallInfo.m_strPeerCallId;
-                gclsUserAgent.GetDialogTags( strCallerLeg.c_str(), lt, rt );
-                SendDialogEventNotify( strPilot, strCallerLeg, "terminated", "recipient", strPilot, strCaller, lt, rt );
+                const PilotCall clsPilotCall = it->second;
+                std::string lt, rt;
+                gclsUserAgent.GetDialogTags( clsPilotCall.strACallId.c_str(), lt, rt );
+                SendDialogEventNotify( clsPilotCall.strPilot, clsPilotCall.strACallId, "terminated", "recipient",
+                                       clsPilotCall.strPilot, clsPilotCall.strCaller, lt, rt );
                 m_mapPilotOfCall.erase( it );
                 m_mapPilotOfCall.erase( clsCallInfo.m_strPeerCallId );
             }
@@ -769,8 +755,8 @@ int CTasModule::PickUpFork( const char *pszCallId, const char *pszFrom, CSipCall
     gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
     gclsCallMap.SetEstablished( pszCallId );
 
-    m_mapPilotOfCall[strACallId] = clsSet.strPilot;
-    m_mapPilotOfCall[pszCallId] = clsSet.strPilot;
+    m_mapPilotOfCall[strACallId] = { clsSet.strPilot, strACallId, clsSet.strCaller };
+    m_mapPilotOfCall[pszCallId] = { clsSet.strPilot, strACallId, clsSet.strCaller };
     if ( gclsCallDir.IsEnabled() && !clsSet.strSessionId.empty() ) {
         gclsCallDir.WriteSessionMapping( clsSet.strSessionId, strACallId, pszCallId, clsSet.strRelaySesId );
         gclsCallDir.VoipAddParticipant( strACallId, strPicker, "callee" );
@@ -940,11 +926,11 @@ bool CTasModule::HandleIncomingReplaces( const char *pszCallId, const char *pszF
     }
 
     // 인가 — Replaces 발신자와 대상 호 당사자는 같은 픽업 그룹이어야 한다(§6.2, 무단 가로채기 방지).
-    //   대상 호의 당사자 = 대상 leg 의 상대(원 발신자) + 대상 leg 자신(원 착신자) 중 하나.
+    //   대상 leg 의 당사자(원 착신자) 그룹으로 판정, 발신자 자신·착신자 자신의 Replaces 는 허용.
     {
-        std::string strCallee, strCaller;
-        gclsUserAgent.GetToId( strTargetCallId.c_str(), strCallee );
-        gclsUserAgent.GetFromId( strTargetCallId.c_str(), strCaller );
+        CallLegParty clsTgtParty, clsOtherParty;
+        gclsCallMap.ResolveLegParties( strTargetCallId.c_str(), clsTgtParty, clsOtherParty );
+        const std::string &strCallee = clsTgtParty.strUser, &strCaller = clsOtherParty.strUser;
         CspUser clsPicker, clsCallee;
         std::string strGP, strGC;
         if ( gclsCspUserMap.Select( pszFrom, clsPicker ) ) strGP = clsPicker.EffectivePickupGroup();
@@ -1010,15 +996,12 @@ void CTasModule::CollectPilotDialogs( const std::string &strPilotAor, std::vecto
     for ( const auto &kv : m_mapFork )
         if ( kv.second.strPilot == strPilotAor && kv.second.bDialogOpen )
             vecOut.push_back( { kv.second.strACallId, strPilotAor, kv.second.strCaller, false } );
-    // 확립 — m_mapPilotOfCall 은 양 leg 이 pilot 에 매핑되므로 caller-facing(m_bRecv) leg 만 골라 1건으로.
+    // 확립 — 양 leg 이 같은 PilotCall 을 가리키므로 dialog id(A-leg Call-ID)로 1건씩.
+    std::set<std::string> setSeen;
     for ( const auto &kv : m_mapPilotOfCall ) {
-        if ( kv.second != strPilotAor ) continue;
-        CCallInfo clsCi;
-        if ( gclsCallMap.Select( kv.first.c_str(), clsCi ) && clsCi.m_bRecv ) {
-            std::string strCaller;
-            gclsUserAgent.GetFromId( kv.first.c_str(), strCaller );
-            vecOut.push_back( { kv.first, strPilotAor, strCaller, true } );
-        }
+        if ( kv.second.strPilot != strPilotAor ) continue;
+        if ( !setSeen.insert( kv.second.strACallId ).second ) continue;
+        vecOut.push_back( { kv.second.strACallId, strPilotAor, kv.second.strCaller, true } );
     }
 }
 
@@ -1305,8 +1288,8 @@ bool CTasModule::OnForkStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
         gclsCallMap.SetRelaySdesLeg( strACallId.c_str(), 1, clsSet.mapLegSdes[pszCallId] );
     }
     gclsCallMap.SetEstablished( pszCallId );
-    m_mapPilotOfCall[strACallId] = clsSet.strPilot;
-    m_mapPilotOfCall[pszCallId] = clsSet.strPilot;
+    m_mapPilotOfCall[strACallId] = { clsSet.strPilot, strACallId, clsSet.strCaller };
+    m_mapPilotOfCall[pszCallId] = { clsSet.strPilot, strACallId, clsSet.strCaller };
     if ( gclsCallDir.IsEnabled() && !clsSet.strSessionId.empty() ) {
         gclsCallDir.WriteSessionMapping( clsSet.strSessionId, strACallId, pszCallId, clsSet.strRelaySesId );
         gclsCallDir.VoipAddParticipant( strACallId, strWinner, "callee" );
@@ -1501,9 +1484,14 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
     }
 
     // 인가 — 감청자의 관제 그룹 monitor_scope 가 대상 호의 어느 당사자 그룹이라도 포함하면 허용 (§5.2).
+    //   당사자는 leg 원단 기준(CallLegParty) — 대표번호 호의 A-leg 를 지목해도 다이얼된 번호가 아니라 승자가 잡힌다.
     std::string strCaller, strCallee;
-    gclsUserAgent.GetFromId( strTargetCallId.c_str(), strCaller );
-    gclsUserAgent.GetToId( strTargetCallId.c_str(), strCallee );
+    {
+        CallLegParty clsTgtParty, clsOtherParty;
+        gclsCallMap.ResolveLegParties( strTargetCallId.c_str(), clsTgtParty, clsOtherParty );
+        strCaller = clsTgtParty.bInitiator ? clsTgtParty.strUser : clsOtherParty.strUser;
+        strCallee = clsTgtParty.bInitiator ? clsOtherParty.strUser : clsTgtParty.strUser;
+    }
     {
         const std::string strGW = gclsDispatchGroupMap.EffectiveGroupOf( strMonitor.c_str() );
         const std::string strGA = gclsDispatchGroupMap.EffectiveGroupOf( strCaller.c_str() );

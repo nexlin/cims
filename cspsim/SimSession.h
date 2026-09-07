@@ -195,7 +195,18 @@ public:
     void StartCallWithJoin(const std::string& strTarget, const std::string& strJoinCallId,
                            const std::string& strToTag, const std::string& strFromTag);
     std::atomic<int>  m_iDialogNotifyCount{0};   // 수신 dialog NOTIFY 수
-    std::atomic<int>  m_iDlgSubStatus{0};        // dialog SUBSCRIBE 최종 응답 (200 / 403 그룹 밖 감시 / 489)
+    std::atomic<int>  m_iDlgSubStatus{0};        // dialog SUBSCRIBE 최종 응답 (200 / 403 그룹 밖 감시 / 489) — 첫 구독 기준
+    std::atomic<int>  m_iDlgSubOkCount{0};       // 200 받은 dialog 구독 수 (다중 감시 — hunt -hunt_watch)
+    /** dialog NOTIFY 1건의 dialog 요소 1개 — entity 별 version 단조·id/direction/remote 정합 판정용(S3-SCN-FA F7).
+     *  수신 즉시 "[BLF] dlg watcher= entity= ver= id= dir= state= local= remote=" 한 줄로도 찍는다. */
+    struct DlgNotifyRec {
+        std::string strEntity, strId, strDir, strState, strLocal, strRemote;
+        int iVersion = -1;
+    };
+    std::vector<DlgNotifyRec> DialogNotifyRecords() {
+        std::lock_guard<std::mutex> lk(m_mtxConf);
+        return m_vecDlgRecs;
+    }
     /** 임의 이벤트 패키지 SUBSCRIBE 프로브 — strEvent 를 Event 헤더에 그대로 싣고 최종 응답을
      *  m_iEventSubStatus 에 기록한다 (RFC 6665 §8.2.1: 미지원 패키지 → 489 Bad Event 판정용). */
     void SubscribeEvent(const std::string& strEvent, const std::string& strResourceAor);
@@ -308,11 +319,14 @@ public:
     int          m_iRegSubSeq{0};
     std::string  m_strRegSubFromTag;
 
-    // dialog-event 구독 다이얼로그 (RFC 4235 — 관제 BLF)
+    // dialog-event 구독 다이얼로그 (RFC 4235 — 관제 BLF). 첫 구독은 아래 단일 필드에, 전 구독은 m_mapDlgSubs 에
+    //   (Call-ID → 감시 AoR) — 한 세션이 대표번호·발신자·착신자 여러 대상을 동시에 감시할 수 있다.
     std::string  m_strDlgSubCallId;
     int          m_iDlgSubSeq{0};
     std::string  m_strDlgSubFromTag;
-    std::string  m_strDlgWatchedAor;   // 감시 대상 AoR
+    std::string  m_strDlgWatchedAor;   // 감시 대상 AoR (첫 구독)
+    std::map<std::string, std::string> m_mapDlgSubs;
+    std::vector<DlgNotifyRec> m_vecDlgRecs;   // m_mtxConf 보호
 
     // 이벤트 패키지 프로브 다이얼로그 (SubscribeEvent)
     std::string  m_strEventSubCallId;
