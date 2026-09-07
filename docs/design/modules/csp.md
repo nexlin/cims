@@ -685,6 +685,19 @@ UTC 경과 초 ×8)로 시작한다. (3) 이 §12.2.2 의 수용 조건이다 �
 기억하므로 1부터 세면 후속 NOTIFY 가 전부 500(하위 CSeq)으로 거절되고, 단말은 갱신이 200 이라 새로 구독하지도
 않아 로스터·xcap-diff 통지가 영구 stale 된다. 로그 `SUBSCRIBE stateless refresh accepted — NOTIFY CSeq seeded N`.
 
+**SUBSCRIBE/PUBLISH 의 인가 축은 등록 상태가 아니라 신원이다.** 요청자가 등록표(`CUserMap`, 메모리)에 있으면 그 등록이
+신원을 대신한다(종전과 같음). 없으면 — 재기동으로 등록이 소실됐거나 아직 REGISTER 전 — `CCscfModule::CheckAuthrization`
+으로 **Digest 인증**을 거친다(RFC 6665 §4.2.1: notifier 가 구독자를 인증하며 REGISTER 는 전제가 아니다 · RFC 3903 §6.3
+ESC 도 같다). 자격 없음 → 요청자 서비스 realm(`ChallengeRealmForRequester`)으로 401, 유효 → 수락, 불량/미가입 → 403,
+AKA 가입자는 보호 흐름 밖이라 403(TS 33.203 — 재REGISTER 로 복귀). psip 는 `EventIncomingRequestAuth` 를
+INVITE/BYE/CANCEL/PRACK/REFER/MESSAGE 에만 호출하므로 SUBSCRIBE/PUBLISH 는 이 핸들러 안에서 직접 인증한다.
+종전의 "미등록 = realm 없는 401(SUBSCRIBE)/403(PUBLISH)" 은 자격을 검증하지 않는 챌린지여서 단말이 옳게 답해도
+영원히 성공하지 못했고, 빈 realm 의 `volte` 폴백이 PTT 요청과 어긋나 재기동마다 재REGISTER(최대 Expires) 까지
+PTT 구독·제휴가 전멸했다. 등록 바인딩 없이 수락된 구독의 NOTIFY 는 **구독 요청의 수신 주소**(`SubscriptionInfo`
+`strSrcIp/iSrcPort/eSrcTransport` — received/rport·transport)로 보낸다(RFC 6665 dialog remote target; 등록 latch 와
+같은 NAT 원리). REGISTER 만 바인딩을 만든다는 원칙(RFC 3261 §10)은 그대로다 — 구독은 자기 dialog 목적지를 가진다.
+검증 `S3-SCN-DIALOG` D5(cspsim `-no_register` + SUBSCRIBE 401 Digest 재전송, 챌린지 realm 마커).
+
 **SubscriptionInfo:**
 
 ```cpp
@@ -702,6 +715,11 @@ struct SubscriptionInfo {
     int iNotifySeq;                // NOTIFY CSeq 카운터
 };
 ```
+
+**부여 Expires** = min(요청 Expires, `SUBSCRIBE_MAX_EXPIRES_SEC`=3600) — RFC 6665 §4.2.1.1 대로 notifier 가 짧게 부여하고 2xx 의
+`Expires` 가 부여값이다(요청 없음 = 3600). 제휴 PUBLISH 도 같은 상한. Expires 헤더는 RFC 3261 §20.19 의 32bit 무부호
+delta-seconds 로 파싱한다(psip `ParseDeltaSeconds` — `4294967295` 같은 "무한" 요청이 int 오버플로로 -1→0 이 되어 **해지로
+오판**되던 결함 방지. 이 경우 200 OK `Expires: 0` 만 나가고 구독·초기 NOTIFY 가 생기지 않았다 — 외부 MCX SDK 실측).
 
 **구독 종료 사유:**
 

@@ -27,6 +27,10 @@
 #include "IpsecSaSet.h"
 #include "Log.h"
 #include "McpttInfo.h"  // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
+
+// 구독(SUBSCRIBE)·제휴 PUBLISH 에 부여하는 Expires 상한 (RFC 6665 §4.2.1.1 — notifier 는 요청보다 짧게 부여할 수 있고
+//   2xx 의 Expires 가 부여값이다). 단말이 2^32-1 같은 "무한" 을 요청해도 여기서 자른다. REGISTER 의 3600 과 같은 값.
+static const int SUBSCRIBE_MAX_EXPIRES_SEC = 3600;
 #include "NonceMap.h"
 #include "SecAgree.h"
 #include "SipMd5.h"
@@ -981,9 +985,15 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
 
     std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
-        CLog::Print( LOG_ERROR, "SUBSCRIBE Rejected: User %s not registered", strFromId.c_str() );
-        SendUnAuthorizedResponse( pclsMessage );
-        return true;
+        // 등록표(메모리)에 없는 요청자 — 재기동으로 등록이 소실됐거나 아직 REGISTER 전. 등록 여부가 아니라 **신원**을
+        //   검증한다(RFC 6665 §4.2.1: notifier 가 구독자를 인증하며 REGISTER 는 전제가 아니다). SUBSCRIBE 는 psip 의
+        //   EventIncomingRequestAuth(INVITE/BYE/…) 대상이 아니라 여기서 직접 Digest 를 거친다 — 자격 없음 → 요청자
+        //   서비스 realm 으로 401, 유효 → 수락, 불량/미가입 → 403, AKA 는 보호 흐름 밖이라 403(TS 33.203).
+        //   종전의 "미등록 = realm 없는 401" 은 자격을 검증하지 않는 챌린지여서 단말이 옳게 답해도 영원히 성공하지
+        //   못했고, 폴백 realm(volte)이 PTT 요청과 어긋나 재기동마다 재REGISTER 까지 SUBSCRIBE 가 전멸했다(09-07 실측).
+        if ( CheckAuthrization( pclsMessage ) == false ) return true;
+        CLog::Print( LOG_INFO, "SUBSCRIBE from unregistered %s accepted by Digest identity (%s:%d)", strFromId.c_str(),
+                     pclsMessage->m_strClientIp.c_str(), pclsMessage->m_iClientPort );
     }
 
     std::string strSubCallId;
@@ -1096,6 +1106,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     }
 
     int iExpires = pclsMessage->GetExpires();
+    if ( iExpires > SUBSCRIBE_MAX_EXPIRES_SEC ) iExpires = SUBSCRIBE_MAX_EXPIRES_SEC;   // 부여값 = min(요청, 상한)
 
     if ( iExpires == 0 ) {
         // RFC 3265 §3.1.4: 200 OK 먼저, 그 다음 final NOTIFY (Subscription-State: terminated)
@@ -1230,6 +1241,10 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
                      info.iNotifySeq, strFromId.c_str(), strEventType.c_str() );
     // NOTIFY 송신 시 SUBSCRIBE 수신 listener 의 IP/Port 를 Via/Contact 자기 주소로 사용
     info.iInboundListenerId = GetCurrentInboundListenerId();
+    // 수신 주소 — 등록 바인딩이 없을 때의 NOTIFY 목적지 폴백 (SubscriptionInfo 주석)
+    info.strSrcIp = pclsMessage->m_strClientIp;
+    info.iSrcPort = pclsMessage->m_iClientPort;
+    info.eSrcTransport = pclsMessage->m_eTransport;
 
     gclsSubscriptionManager.AddSubscription( strReqUri, info );
 
@@ -1274,9 +1289,10 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     pclsMessage->m_clsFrom.m_clsUri.ToString( szFromBuf, sizeof( szFromBuf ) );
     std::string strFromId = pclsMessage->m_clsFrom.m_clsUri.m_strUser;
     if ( !gclsUserMap.Select( strFromId.c_str() ) ) {
-        CLog::Print( LOG_ERROR, "PUBLISH Rejected: User %s not registered", strFromId.c_str() );
-        SendResponse( pclsMessage, 403 );
-        return true;
+        // 미등록 요청자 — SUBSCRIBE 와 같은 규칙으로 신원(Digest)을 검증한다(RFC 3903 §6.3: ESC 가 PUBLISH 를 인증).
+        //   종전의 무조건 403 은 재기동 뒤 재REGISTER 까지 제휴 PUBLISH 를 전부 버렸다.
+        if ( CheckAuthrization( pclsMessage ) == false ) return true;
+        CLog::Print( LOG_INFO, "PUBLISH from unregistered %s accepted by Digest identity", strFromId.c_str() );
     }
 
     // F-05: Event 헤더 검증 — TS 24.379 §9는 "mcptt" 요구, 불일치 시 489 Bad Event
@@ -1318,6 +1334,7 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     }
 
     int iExpires = pclsMessage->GetExpires();
+    if ( iExpires > SUBSCRIBE_MAX_EXPIRES_SEC ) iExpires = SUBSCRIBE_MAX_EXPIRES_SEC;
     // affiliate vs de-affiliate 판정 — affiliation-command 액션 요소 기반 파싱(요소 앵커, substring 아님).
     //   액션이 de-affiliate 이거나 Expires:0 이면 해제, else 등록. group 속성은 Req-URI 와 교차검증.
     CMcpttAffiliation clsCmd = ParseAffiliationCommand( strBody );

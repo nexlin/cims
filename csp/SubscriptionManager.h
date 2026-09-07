@@ -7,6 +7,8 @@
 #include <mutex>
 #include <string>
 
+#include "SipTransport.h"
+
 /**
  * @ingroup CspServer
  * @brief Subscription Info Structure
@@ -24,6 +26,12 @@ struct SubscriptionInfo {
     time_t tStartTime;             // Subscription Start Time
     int iNotifySeq;                // CSeq counter for NOTIFY messages
     int iInboundListenerId = 0;    // SUBSCRIBE 수신 listener (NOTIFY Via/Contact 자기 주소 결정)
+    // 구독 요청의 수신 주소(received/rport·transport) — 등록 바인딩이 없는 구독자(재기동 뒤 재REGISTER 전, Digest 로
+    //   수락)에게 NOTIFY 를 보낼 폴백 목적지. RFC 6665 의 dialog remote target 을 NAT 뒤에서 등록 latch 와 같은
+    //   원리로 고정한다 — Contact 가 사설주소여도 도달한다.
+    std::string strSrcIp;
+    int iSrcPort = 0;
+    ESipTransport eSrcTransport = E_SIP_UDP;
 };
 
 /**

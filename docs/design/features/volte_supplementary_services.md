@@ -273,6 +273,7 @@ org 폴백이라 happy-path 만 판정하고 그룹 경계 검사는 SKIP 으로
 | | P3 타 그룹 지정 픽업 / P4 그룹 밖 그룹 픽업 | D(다른 `pickup_group`, 같은 org) → 403 / 404, 재고정 없음 (컬럼 축 한정) |
 | `S3-SCN-DIALOG` | D1 dialog NOTIFY / D2 Replaces 재고정 | C 구독 200 + NOTIFY ≥1, A·C 미디어·B 무흐름 |
 | | D3 그룹 밖 감시 / D4 미지 Event | D 의 B dialog 구독 → 403·NOTIFY 0 (컬럼 축 한정) / `Event: cims-verify-bogus` → 489, 대조 `Event: dialog` 자기감시 → 200 |
+| | D5 미등록 SUBSCRIBE Digest 수락 | PTT 가입자가 REGISTER 없이(`-no_register`) 자기 AoR dialog 구독 → 401 의 realm = 요청자 서비스 realm(ptt, volte 폴백 아님) → Digest 재전송 → 200 ([csp.md](../modules/csp.md) 구독 절 — 등록 아닌 신원 인가) |
 
 피처코드는 S3-SEED 가 volte 접속서비스에 `pickup_feature_code="**"` 를 시드해 **서비스 필드
 경로**(전역 `CallPickupId` 폴백 아님)를 태운다.
