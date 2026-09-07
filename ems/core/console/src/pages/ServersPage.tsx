@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, Pencil, Play, RefreshCw, RotateCw, Square, Stethoscope, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, Pencil, Play, RefreshCw, RotateCw, Search, Square, Stethoscope, Trash2, Undo2, X } from 'lucide-react'
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Badge } from '../components/ui/badge'
@@ -513,6 +513,14 @@ export default function ServersPage() {
             ContextBar 를 탭 **위**에 두어야 어느 탭에 있든 대상이 계속 보인다
             (decisions.md §3 — 웹은 1탭에서만 보였다). */}
         <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+          {selectedGroup && !selectedAgent && (
+            <div className="shrink-0 overflow-hidden rounded-md border border-border bg-card">
+              <GroupContextBar group={selectedGroup}
+                memberCount={(groupedAgents.get(selectedGroup.id) || []).length}
+                onOpenConfig={() => setPageTab('config')}
+                onDeleteSystem={deleteSystem} />
+            </div>
+          )}
           {selectedAgent && (
             <div className="shrink-0 overflow-hidden rounded-md border border-border bg-card">
               <ServerContextBar a={selectedAgent}
@@ -620,8 +628,7 @@ export default function ServersPage() {
                 <GroupInspector group={selectedGroup} agents={agents}
                   onSelectMember={(aid) => setSelection({ kind: 'agent', id: aid })}
                   onReload={load}
-                  onOpenConfig={() => setPageTab('config')}
-                  onDeleteSystem={deleteSystem} />
+                  />
               </fieldset>
             )
           ) : (
@@ -822,13 +829,11 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
 //  Group Inspector (HA 그룹 선택 시)
 // ──────────────────────────────────────────────────────────────
 
-function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig, onDeleteSystem }: {
+function GroupInspector({ group, agents, onSelectMember, onReload }: {
   group: HaGroup
   agents: Agent[]
   onSelectMember: (aid: number) => void
   onReload: () => Promise<void>
-  onOpenConfig: () => void
-  onDeleteSystem: (g: HaGroup) => void
 }) {
   const { show } = useToast()
   const [editName, setEditName]         = useState(group.name)
@@ -1067,29 +1072,13 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
 
   return (
     <>
+      {/* 정체성(AS 배지·이름·#id·vrid)과 액션은 탭 위 GroupContextBar 로 올라갔다.
+          여기는 저장 흐름(metaDirty → [적용])에 묶인 편집 필드만 남긴다. */}
       <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          {/* 유형 변경 불가 — 변경 원하면 [🗑 시스템 삭제] 후 [+ 시스템 추가] 재생성. */}
-          <span title={`mode=${group.mode} (생성 후 변경 불가)`}
-                style={{
-                  background: group.mode === 'active_standby' ? '#3498db' : '#27ae60',
-                  color: '#fff', fontSize: 11, padding: '4px 10px', borderRadius: 3, fontWeight: 600,
-                }}>{group.mode === 'active_standby' ? 'AS' : 'AA'}</span>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12 }}>
+          <label style={{ color: 'var(--muted-foreground)' }}>이름:</label>
           <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
-                 style={{ flex: 1, minWidth: 180 }} />
-          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>#{group.id} · vrid {group.vrid}</span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            <button className="btn btn--sm" onClick={onOpenConfig}
-                    title="멤버별 설정값 나란히 비교 (읽기 전용) — 편집은 각 멤버 서버의 패키지 설정 탭">
-              🔍 설정 비교
-            </button>
-            <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
-                    title="HA 그룹 + 모든 멤버 일괄 삭제">
-              🗑 시스템 삭제
-            </button>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
+                 style={{ width: 200 }} />
           {group.mode === 'active_standby' && (
             <>
               <label style={{ color: 'var(--muted-foreground)' }}>auth_pass:</label>
@@ -1857,6 +1846,43 @@ function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrad
                     ? 'AS 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제로만 가능'
                     : '서버 삭제 (관련 deployment 도 같이 제거)'}>삭제</button>
         )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * GroupContextBar — 탭 위 지속 컨텍스트 (Scope=Group). 정본 = Figma Sec/ContextBar 21:44.
+ *
+ *   [AS] Control (그룹·노드 2) #1 · vrid 51 ···· [설정 비교] [🗑 시스템 삭제]
+ *
+ * 구 헤더는 AS/AA 칩 색이 `#3498db`/`#27ae60` 하드코딩이었다(hex 금지 위반이자 토큰과 다른 색).
+ * 삭제는 **그룹/전체 단위라 destructive solid** 가 맞다 — 행 단위 outline 과 구분된다
+ * (DESIGN-RULES §2). 이름 편집은 저장 흐름에 묶여 있어 인스펙터 본문에 남는다.
+ */
+function GroupContextBar({ group, memberCount, onOpenConfig, onDeleteSystem }: {
+  group: HaGroup
+  memberCount: number
+  onOpenConfig: () => void
+  onDeleteSystem: (g: HaGroup) => void
+}) {
+  const as = group.mode === 'active_standby'
+  return (
+    <div className="flex h-[60px] items-center gap-2 px-3.5">
+      <Badge variant={as ? 'brandSoft' : 'successSoft'}
+             title={`mode=${group.mode} (생성 후 변경 불가)`}>{as ? 'AS' : 'AA'}</Badge>
+      <b className="text-lg">{group.name}</b>
+      <Badge variant="neutralSoft">그룹 · 노드 {memberCount}</Badge>
+      <span className="font-mono text-xs text-muted-foreground">#{group.id} · vrid {group.vrid}</span>
+      <div className="ml-auto flex items-center gap-1.5">
+        <button className="btn btn--sm" onClick={onOpenConfig}
+                title="멤버별 설정값 나란히 비교 (읽기 전용) — 편집은 각 멤버 서버의 패키지 설정 탭">
+          <Search size={13} /> 설정 비교
+        </button>
+        <button className="btn btn--sm btn--danger" onClick={() => onDeleteSystem(group)}
+                title="HA 그룹 + 모든 멤버 일괄 삭제">
+          <Trash2 size={13} /> 시스템 삭제
+        </button>
       </div>
     </div>
   )
