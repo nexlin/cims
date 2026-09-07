@@ -128,3 +128,8 @@ windows/**/obj/
 # 대용량 데이터 반출본 (레포에 올리지 않는다)
 2026.tar.gz
 2026/
+
+# 검증용 헤드리스 브라우저 (레포 루트 설치) — 제품 코드가 아니다.
+# 콘솔 화면 캡처·계산된 스타일 확인에 쓴다 (console_design_system.md §8.3)
+/package.json
+/package-lock.json
