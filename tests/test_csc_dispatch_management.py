@@ -418,6 +418,15 @@ class RecordingsTests(unittest.TestCase):
             else:
                 _svc_pkg.fm_reporter = fm_attr
 
+    def test_verify_tls_string_config(self):
+        dr._client = None
+        self.assertFalse(dr._http({"Recording": {"VerifyTls": "false"}}).verify)
+        dr._client = None
+        self.assertTrue(dr._http({"Recording": {"VerifyTls": "true"}}).verify)
+        dr._client = None
+        self.assertFalse(dr._http({}).verify)
+        dr._client = None
+
     def test_oam_base_config(self):
         self.assertEqual(dr._oam_base({"Recording": {"OamUrl": "https://vip:4419/"}}), "https://vip:4419")
         self.assertEqual(dr._oam_base({"Fm": {"OamIp": "10.1.1.1"}}), "https://10.1.1.1:4419")
@@ -473,3 +482,73 @@ class ServiceCatalogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MemberWriteTests(unittest.TestCase):
+    """_member_write — 번호 변경 시 종전 접속서비스·transport 승계, PTT 프로파일 PUT 의 감사 페이로드(선택 컬럼 부재)."""
+
+    class _Cur:
+        def __init__(self):
+            self._rows = []
+
+        def execute(self, q, args=None):
+            self._rows = []
+            if q.startswith("SELECT id, org_id, name FROM users WHERE id="):
+                self._rows = [{"id": 6000, "org_id": "TEAM01", "name": "시험"}]
+            elif "FROM volte_subscriptions WHERE user_id=" in q:
+                self._rows = [{"id": "+821310009901", "service_ref": "volte", "sip_transport": "TLS"}]
+            elif "FROM ptt_subscriptions WHERE user_id=" in q:
+                self._rows = [{"id": "+82510009901", "service_ref": "mcptt", "sip_transport": "TLS"}]
+            elif "WHERE id=%s" in q and "FROM volte_subscriptions" in q:
+                self._rows = []                                   # 새 번호는 아무도 안 씀
+            else:
+                raise AssertionError(q)
+
+        def fetchone(self):
+            return self._rows[0] if self._rows else None
+
+        def fetchall(self):
+            return list(self._rows)
+
+    def setUp(self):
+        self.calls = []
+        self._saved = (dd._admin._add_subscription, dd._admin._delete_subscription, dd._admin._put_ptt_profile, dd._audit, m.get_user_profile)
+
+        async def add(uid, svc, body, cfg): self.calls.append(("add", uid, svc, dict(body))); return dd.HandlerResult(status=201, body={"id": body["id"]})
+        async def dele(uid, svc, ms, cfg): self.calls.append(("del", uid, svc, ms)); return dd.HandlerResult(status=200, body={"id": ms})
+        async def prof(uid, ms, body, cfg): self.calls.append(("prof", uid, ms, dict(body))); return dd.HandlerResult(status=200, body=dict(body))
+        dd._admin._add_subscription, dd._admin._delete_subscription, dd._admin._put_ptt_profile = add, dele, prof
+        dd._audit = lambda *a, **k: self.calls.append(("audit", a[3], a[5], k.get("after")))
+        m.get_user_profile = lambda ms: {"allow_emergency_call": True, "allow_emergency_alert": True, "allow_adhoc_call": True,
+                                        "allow_emergency_private_call": True, "allow_ambient_listening": False, "allow_create_group": False}
+        self.scope = {"groupId": "dg-1", "directoryAdmin": "own", "orgCode": "TEAM01", "orgCodes": {"TEAM01"}}
+
+    def tearDown(self):
+        dd._admin._add_subscription, dd._admin._delete_subscription, dd._admin._put_ptt_profile, dd._audit, m.get_user_profile = self._saved
+
+    def _run(self, method, parts, body):
+        return asyncio.run(dd._member_write(self._Cur(), {}, self.scope, method, parts, body, "+8213", "1.2.3.4", 5020))
+
+    def test_number_change_inherits_service_and_transport(self):
+        r = self._run("PUT", ("6000", "volte"), {"msisdn": "+821310009902", "password": "1234"})
+        self.assertEqual(r.status, 201)
+        kinds = [c[0] for c in self.calls if c[0] in ("del", "add")]
+        self.assertEqual(kinds, ["del", "add"])
+        added = next(c for c in self.calls if c[0] == "add")[3]
+        self.assertEqual((added["service_ref"], added["sip_transport"], added["passwd"]), ("volte", "TLS", "1234"))
+
+    def test_number_change_requires_password(self):
+        r = self._run("PUT", ("6000", "volte"), {"msisdn": "+821310009902"})
+        self.assertEqual(r.status, 400)
+        self.assertFalse(any(c[0] in ("del", "add") for c in self.calls))
+
+    def test_profile_put_partial_keys_audit(self):
+        r = self._run("PUT", ("6000", "ptt", "profile"), {"allowCreateGroup": True})
+        self.assertEqual(r.status, 200, getattr(r, "body", None))
+        prof = next(c for c in self.calls if c[0] == "prof")[3]
+        self.assertEqual(prof.get("allow_create_group"), True)
+        self.assertNotIn("allow_ambient_listening", prof)        # 현재 False 인 선택 컬럼은 싣지 않는다(미적용 DB 400 회피)
+        self.assertTrue(prof.get("allow_emergency_call"))
+        audit = next(c for c in self.calls if c[0] == "audit" and c[1] == "ptt_profile")
+        self.assertEqual(audit[3]["allowAmbientListening"], False)
+        self.assertEqual(audit[3]["allowCreateGroup"], True)

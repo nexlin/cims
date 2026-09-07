@@ -75,6 +75,8 @@ public sealed partial class GroupEditViewModel : ObservableObject
         if (existing is null)
         {
             GroupId = UserPartConverter.UserPart(s.NewGroupUri());
+            // 관리 범위가 있으면 새 그룹을 데스크 소속 조직(dispatch.orgCode)에 귀속 — 같은 범위의 다른 관제사 관리 창에도 보인다(§4.5).
+            if (s.CanManageDirectory) _orgCode = s.Dispatch.OrgCode;
             AddMember(s.ToTelUri(s.MyPttNumber), s.DisplayName, chair: true);
             Loaded = true;
         }

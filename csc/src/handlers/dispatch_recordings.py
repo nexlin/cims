@@ -51,8 +51,9 @@ def _http(config: dict) -> requests.Session:
     global _client
     if _client is None:
         rec = (config or {}).get('Recording') or {}
+        v = rec.get('VerifyTls', False)                     # 설정 bool 은 문자열("true"/"false")로도 온다 — fm_reporter 와 같은 해석
         _client = requests.Session()
-        _client.verify = bool(rec.get('VerifyTls', False))
+        _client.verify = v is True or str(v).lower() == 'true'
         if not _client.verify:
             try:
                 import urllib3

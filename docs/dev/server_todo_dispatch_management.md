@@ -30,6 +30,16 @@ S1-UNIT-CSC(`verify/lib/items/stage1/unit_csc.py`)에 `tests/test_csc_dispatch_m
 6. **접속서비스 이름**: 앱의 번호 개설 폼은 `GET /provisioning/directory/admin` 의 `services.<kind>[].name` 을 `service_ref` 후보로 받는다. CSC 는 CSP 의 `access_services` 컬렉션을 읽지 못하므로(관리 store 가 다르다 — android_ue_provisioning.md §3-2) 이 이름은 csc.json `Provisioning.Services.<kind>.name` 이 정본이다. 개발 서버는 PTT 접속서비스가 `mcptt` 라 configure `--ptt-service mcptt`(.cims `configure.ptt_service`)로 맞춘다 — 안 맞으면 앱이 개설한 회선의 service_ref 가 CSP 에 없어 REGISTER 403.
 7. **실기 시험 항목**(앱 관리 창): ① 조직 생성/이동/삭제(범위 밖 403·not_empty 409) ② 구성원 생성(VoLTE+PTT 회선 동시)·회선 번호 변경(비밀번호 없이 400)·회선 삭제·자격 토글 → 단말 재등록 확인 ③ PTT 그룹 탭에서 비소유 그룹 편집/삭제 ④ 이력 창 조회(전날 포함)·녹취 행 재생(첫 재생 202 → 변환 대기 → 재생, `failed` 는 [다시 변환]) ⑤ 감사 이벤트(E-AUD-006 config_change · E-AUD-016 tap_mode=recording) 콘솔 `장애 > 감사 이력` 확인.
 
+### 2-8. .48 실측(2026-09-07 18시, csc 0.2.108 라이브)과 재배포 필요분
+
+- **실측 OK**: `/provisioning/me` `directoryAdmin=own/orgCode=TEAM01` · `/provisioning/directory/admin`(22명, services volte/`mcptt`) · 조직 생성/이름 변경/삭제·범위 밖 403·루트 이동 403·중복 409·not_empty 409 ·
+  구성원 생성(VoLTE+PTT)·수정·삭제, 번호 변경(비밀번호 없이 400 / 있으면 201), 타인 번호 409, PTT 회선 삭제 · GMS 그룹 생성 → `/provisioning/directory/groups` isOwner 노출 → 삭제 ·
+  `/provisioning/history` 창 조회(9/1~9/3 통화·PTT 항목에 `recordingId`/`hasRecording`) · 앱 관리 창 조직/구성원 탭 렌더.
+- **재배포 필요(코드 수정됨, 커밋 참조)**: ① `Recording.VerifyTls` 를 문자열 `"false"` 로 렌더한 csc.json 을 `bool("false")=True` 로 읽어 OAM 프록시가 인증서 검증 실패(`502 oam_unreachable`) —
+  fm_reporter 와 같은 문자열 bool 해석으로 정정. 재배포 전까지 녹취 메타/오디오는 502. ② `PUT …/ptt/profile` 이 저장 뒤 감사 페이로드에서 KeyError(500 — 값은 이미 반영됨). ③ 번호 변경 시 요청에 없는
+  접속서비스·transport 를 종전 회선에서 승계(종전엔 UDP 기본값으로 개설됨).
+- **SIP 등록**: 앱이 프로파일대로 `.48:15060/udp` 로 REGISTER 하면 408(응답 없음) — 관제석 계정의 `sip_transport`·CSP 리스너 확인(관리 기능과 무관, 통화·PTT 시험 전제).
+
 ## 3. 남은 서버 과제 (이번 변경 밖)
 
 | # | 과제 | 배경 | 제안 |

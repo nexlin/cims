@@ -433,8 +433,9 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
         return _json(404, {'error': 'Not Found'})
     svc = _KINDS[kind]
     table = 'volte_subscriptions' if kind == 'volte' else 'ptt_subscriptions'
-    cur.execute(f"SELECT id FROM {table} WHERE user_id=%s ORDER BY id", (user_id,))
-    existing = [r['id'] for r in cur.fetchall()]
+    cur.execute(f"SELECT id, service_ref, sip_transport FROM {table} WHERE user_id=%s ORDER BY id", (user_id,))
+    existing_rows = cur.fetchall()
+    existing = [r['id'] for r in existing_rows]
 
     if len(parts) == 3 and parts[2] == 'profile' and kind == 'ptt':
         if method != 'PUT':
@@ -461,7 +462,7 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
                 pb[k] = cur_prof[k]
         r = await _admin._put_ptt_profile(user_id, msisdn, pb, config)
         if r.status == 200:
-            _audit(config, actor, ip, 'ptt_profile', msisdn, 'update', after={k: pb[c] for k, c in _PROFILE_KEYS.items()})
+            _audit(config, actor, ip, 'ptt_profile', msisdn, 'update', after={k: pb.get(c, False) for k, c in _PROFILE_KEYS.items()})
             return _json(200, {"msisdn": msisdn, "profile": {k: bool(r.body.get(c, False)) for k, c in _PROFILE_KEYS.items()}})
         return r
 
@@ -486,6 +487,12 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
             return _json(409, {'error': 'number_exists', 'msisdn': msisdn})
         if existing and not sb.get('passwd'):
             return _json(400, {'error': 'password required when changing the number (ha1 rebinding)'})
+        # 번호 변경 — 요청에 없는 접속서비스·transport 는 종전 회선 값을 물려받는다(앱이 번호만 바꿔도 등록 조건이 유지되게).
+        if existing_rows:
+            if 'service_ref' not in sb and existing_rows[0].get('service_ref'):
+                sb['service_ref'] = existing_rows[0]['service_ref']
+            if 'sip_transport' not in sb and existing_rows[0].get('sip_transport'):
+                sb['sip_transport'] = existing_rows[0]['sip_transport']
         for old in existing:
             rd = await _admin._delete_subscription(user_id, svc, old, config)
             if rd.status != 200:

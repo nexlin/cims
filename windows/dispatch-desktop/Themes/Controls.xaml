@@ -188,7 +188,8 @@
                             <TabPanel IsItemsHost="True" />
                         </Border>
                         <Border Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" CornerRadius="8">
-                            <ContentPresenter ContentSource="SelectedContent" />
+                            <!-- PART_SelectedContentHost — 이름이 있어야 UI Automation 트리(스크린리더·자동화)에 선택 탭 내용이 노출된다 -->
+                            <ContentPresenter x:Name="PART_SelectedContentHost" ContentSource="SelectedContent" />
                         </Border>
                     </DockPanel>
                 </ControlTemplate>
