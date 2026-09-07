@@ -22,7 +22,9 @@ import { StatusDot } from './custom/status-dot'
  *      다크 모드 · 개발자 모드 → [설정] 드롭다운의 토글 스위치
  *      비밀번호 변경 · 로그아웃 → [계정] 메뉴
  *      위젯 편집 ✎ → **여기 남는다.** 시안 누락으로 확인됐다(정본 문서 §7-2)
- *  - 접속 호스트 + 갱신 시각 신설 — 여러 인스턴스를 운영하는데 어디에 접속했는지 표시가 없었다
+ *  - 접속 환경 칩 + 호스트 + 갱신 시각 신설 — 여러 인스턴스를 운영하는데 어디에 접속했는지
+ *    표시가 없었다. 환경 축은 **개발자 모드 스위치**다(켜짐=개발 / 꺼짐=운영) — 우측에 따로
+ *    있던 「개발자 모드」 배지를 이 칩이 대신한다
  *  - 알람은 벨 + 카운트 배지
  *
  * 라벨을 「테마」가 아니라 「다크 모드」로 둔 이유: 스위치의 꺼짐/켜짐이 라이트/다크에
@@ -60,7 +62,12 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
         <span className="app-header-logo-text">CIMS</span>
       </div>
 
-      {/* 접속 환경 — 어느 인스턴스에 붙어 있는지 + 데이터가 살아 있는지 */}
+      {/* 접속 환경 클러스터 (시안 envCluster) — 칩 · 호스트 · 갱신 시각.
+          환경은 개발자 모드 스위치가 곧 축이다: 켜져 있으면 개발, 꺼져 있으면 운영.
+          브라우저 로컬(localStorage) 화면 모드라 서버 속성이 아니라 "지금 내가 보는 모드" 다. */}
+      {devMode
+        ? <Badge className="bg-[var(--dev-accent)] text-white">개발</Badge>
+        : <Badge variant="brandSoft">운영</Badge>}
       <span className="font-mono text-xs text-muted-foreground">{window.location.host}</span>
       <span className="text-xs text-muted-foreground">·</span>
       <Freshness />
@@ -68,8 +75,6 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
       {/* 페이지 위젯 편집 컨트롤 슬롯 — EditableLayout 이 portal 로 렌더.
           남은 공간을 먹어 우측 유틸리티를 밀어낸다(시안의 spacer 역할 겸함). */}
       <div id="layout-edit-slot" className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden" />
-
-      {isAdminRank && devMode && <Badge variant="brandSoft">개발자 모드</Badge>}
 
       {/* 알람 — 벨 + 카운트. 드로어·전이 토스트는 AlarmIndicator 가 계속 담당한다 */}
       <AlarmIndicator />
