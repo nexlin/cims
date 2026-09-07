@@ -4,17 +4,22 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@core/lib/utils"
 
 const alertVariants = cva(
-  "relative w-full rounded-lg border px-4 py-3 text-sm [&>svg+div]:translate-y-[-3px] [&>svg]:absolute [&>svg]:left-4 [&>svg]:top-4 [&>svg]:text-foreground [&>svg~*]:pl-7",
+  // 정본 = Figma `02 Components` Sec/SectionMessage (20:23) — Info·Warning·Danger·Success 4톤.
+  // shadcn 기본 2종(default/destructive)으로는 부족해
+  // `cims-design-handoff/components/custom/alert-variants.ts` 로 교체한 것이다.
+  // **화면당 1개 원칙** (DESIGN-RULES §2).
+  "relative w-full rounded-md border px-3 py-2.5 text-md [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-background text-foreground",
-        destructive:
-          "border-destructive/50 text-destructive dark:border-destructive [&>svg]:text-destructive",
+        info: "border-info bg-info-soft text-info-on",
+        success: "border-success bg-success-soft text-success-on",
+        warning: "border-warning bg-warning-soft text-warning-on",
+        danger: "border-destructive bg-dangersoft text-dangersoft-on",
       },
     },
     defaultVariants: {
-      variant: "default",
+      variant: "info",
     },
   }
 )

@@ -2695,10 +2695,24 @@ function NetworkTab({ agent: a, vipIps, mgmtVip }: {
         대상을 말하고 있어 매 섹션마다 반복할 이유가 없다.
         (IP/Routing 과 라우팅은 ServiceIpPanel 이 한 컴포넌트로 렌더한다 — 시안처럼 둘로
          쪼개려면 그 컴포넌트를 갈라야 해서 별도 단계로 둔다) */}
-    <SubSection title="IP / Routing" count={(a.service_ip_rows || []).length || (a.interfaces || []).length}
+    <SubSection title="IP / Routing" count={(a.interfaces || []).length}
                 hint="cims-managed 만 변경 가능 — 외부 IP / mgmt NIC 은 보호">
     <ServiceIpPanel
-      title=""
+      title="" section="ip"
+      interfaces={a.interfaces || []}
+      storedRows={(a.service_ip_rows || []).map(r => ({ ...r }))}
+      storedRoutes={a.routes || []}
+      slots={[]}
+      applying={applying}
+      onApply={onApply}
+      onUpdateSlot={onUpdateSlot}
+      vipIps={vipIps}
+    />
+    </SubSection>
+    <SubSection title="라우팅" count={(a.routes || []).length}
+                hint="subnet 자동(kernel) 외 모두 변경 가능 — default gateway 포함">
+    <ServiceIpPanel
+      title="" section="routes"
       interfaces={a.interfaces || []}
       storedRows={(a.service_ip_rows || []).map(r => ({ ...r }))}
       storedRoutes={a.routes || []}

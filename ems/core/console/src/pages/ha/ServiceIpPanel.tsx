@@ -1,3 +1,4 @@
+import { Alert } from '@core/components/ui/alert'
 import { Lock, Star } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentRoute } from '../../api/deployment'
@@ -9,9 +10,12 @@ import { btnSmall, btnDanger } from './styles'
 // 모델: 각 IP 가 row (iface, ip 단위). agent 가 보고한 interfaces.managed=true 인 IP 만
 // [삭제] 허용 (외부 IP 는 readonly). [+IP 추가] / [+라우팅 추가] 로 명시적 op 발사.
 // route 는 kernel 외 default GW + specific subnet 모두 변경 가능.
-export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, slots, applying,
+export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows, storedRoutes, slots, applying,
                                  onApply, onUpdateSlot, vipIps }: {
   title: string
+  /** 시안은 `IP / Routing` 과 `라우팅` 을 **별도 Level 2 섹션**으로 둔다(Figma S1 49:1369).
+      호출자가 두 번 렌더해 각각 제 섹션에 넣는다. 다른 화면에서는 'both' 로 통째로 쓴다. */
+  section?: 'ip' | 'routes' | 'both'
   interfaces: NetIface[]
   storedRows: ServiceIpRow[]                                                    // slot 라벨 매칭용 (iface, ip) keyed
   storedRoutes: AgentRoute[]
@@ -140,6 +144,13 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         </div>
       )}
 
+      {section !== 'routes' && (<>
+      {/* 시안은 이 안내를 표 **위** SectionMessage 로 둔다 (Figma S1 49:1519) */}
+      <Alert variant="info" className="mb-2">
+        {slots.length > 0
+          ? <>참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)</>
+          : <>인프라 단계 — NIC 이름이 곧 용도 라벨로 사용됩니다.</>}
+      </Alert>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
@@ -270,11 +281,15 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
           )}
         </tbody>
       </table>
+      </>)}
 
-      <div style={{ marginTop: 16, fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)' }}>
-        라우팅 (subnet 자동(kernel) 외 모두 변경 가능 — default gateway 포함)
-      </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 4 }}>
+      {section !== 'ip' && (<>
+      {section === 'both' && (
+        <div style={{ marginTop: 16, fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)' }}>
+          라우팅 (subnet 자동(kernel) 외 모두 변경 가능 — default gateway 포함)
+        </div>
+      )}
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
           <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 200 }}>dest CIDR</th>
@@ -402,11 +417,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
         </tbody>
       </table>
 
-      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>
-        {slots.length > 0
-          ? <>ℹ 참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)</>
-          : <>ℹ 인프라 단계 — NIC 이름이 곧 용도 라벨로 사용됩니다.</>}
-      </div>
+      </>)}
     </div>
   )
 }
