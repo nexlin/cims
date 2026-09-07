@@ -1222,50 +1222,32 @@ body {
 .app-layout--collapsed { --sidebar-w: 60px; }
 
 /* ── Header ─────────────────────────────────────── */
+/* AppBar 는 Tailwind 로 옮겼다(components/Header.tsx) — 여기 남는 것은 **그리드 배치**뿐이다.
+   클래스 이름 `app-header` 는 지우지 않는다: 이 그리드와 인쇄 시 숨김 규칙
+   (VerificationV2Page·VerificationHistoryPage 의 @media print)이 이 이름을 쓴다. */
 .app-header {
   grid-area: header;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 16px;
-  background: var(--cims-surface-header); color: var(--cims-text-header);
-  border-bottom: 1px solid var(--sidebar-border);
-  /* 이전 .app-header 정의(height:54px / position:sticky)를 명시적으로 덮음. */
+  /* 위쪽 .app-header 정의(height:54px / position:sticky / box-shadow)를 명시적으로 덮는다. */
   height: auto;
   position: static;
   box-shadow: none;
-  gap: 0;
 }
-.app-header-left { display: flex; align-items: center; gap: 10px; }
 .app-header-toggle {
   background: none; border: none; color: var(--cims-neutral); cursor: pointer;
   padding: 7px; display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius); transition: background .15s, color .15s;
 }
 .app-header-toggle:hover { color: var(--cims-text-header); background: var(--sidebar-accent); }
-.app-header-logo {
-  display: flex; align-items: center; gap: 9px;
-  font-size: 16px; font-weight: 700; letter-spacing: -0.02em;
-}
-.app-header-logo svg { color: var(--primary); }
 .app-header-logo-text {
   background: linear-gradient(90deg, var(--primary), var(--cims-brand-hover));
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
-}
-.app-header-right { display: flex; align-items: center; gap: 8px; }
-/* 페이지 위젯 편집 컨트롤 슬롯 — 로고와 사용자 영역 사이, 우측 정렬 */
-.app-header-editslot {
-  flex: 1; min-width: 0;
-  display: flex; align-items: center; justify-content: flex-end;
-  margin: 0 20px; overflow: hidden;
 }
 .layout-edit-headerbar {
   display: flex; align-items: center; gap: 6px;
   flex-wrap: nowrap; min-width: 0; white-space: nowrap;
 }
 .layout-edit-headerbar .form-input { min-width: 0; }
-.app-header-user-name { font-size: 13px; font-weight: 600; color: var(--cims-text-header); }
-.app-header .btn--ghost { color: var(--cims-neutral); }
-.app-header .btn--ghost:hover { color: var(--cims-text-header); background: var(--sidebar-accent); }
 
 /* ── Sidebar ────────────────────────────────────── */
 .sidebar {

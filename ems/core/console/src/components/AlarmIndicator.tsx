@@ -5,11 +5,13 @@
 //   - 드로어: 활성 알람 목록(승인/이동) + 최근 이벤트 탭. 어느 라우트에서든 상주.
 //   - 토스트: critical/major open·moreSevere 승격만 수동 닫기 토스트 — minor 이하/close 는
 //     배지 갱신만, 이벤트는 토스트 없음 (§8.2 소음 통제).
+import { Bell } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { alertsApi } from '../api/alerts'
-import { SEV_COLOR, onAlarmTransition, refreshAlarms, severityOf, useAlarms } from '../widgets/useAlarms'
+import { onAlarmTransition, refreshAlarms, severityOf, useAlarms } from '../widgets/useAlarms'
 import { useToast } from './Toast'
+import { Badge } from './ui/badge'
 
 const SEV_BADGE: Record<string, string> = {
   critical: 'badge--red', major: 'badge--red', minor: 'badge--yellow',
@@ -39,7 +41,12 @@ export default function AlarmIndicator() {
   useAlarmToasts()
 
   const top = active[0] ? severityOf(active[0]) : ''
-  const dotColor = error ? 'var(--destructive)' : (SEV_COLOR[top] || 'var(--muted-foreground)')
+  // 카운트 배지 톤 — 0건은 Neutral(경고색 금지, DESIGN-RULES §1-7), 조회 실패는 Danger.
+  const badgeTone = error ? 'dangerSolid'
+    : active.length === 0 ? 'neutralSoft'
+    : (top === 'critical' || top === 'major') ? 'dangerSolid'
+    : (top === 'minor' || top === 'warning') ? 'warningSolid'
+    : 'infoSolid'
 
   const ack = async (alarmId?: string) => {
     if (!alarmId) return
@@ -54,11 +61,17 @@ export default function AlarmIndicator() {
 
   return (
     <>
-      <button className="alarm-indicator" onClick={() => setOpen(o => !o)}
+      {/* 트리거 — 시안 AppBar 의 `util/알람`(벨 + 카운트 배지, Figma 457:5431).
+          0건도 배지를 지우지 않는다: "표시 없음 = 정상"과 "표시 없음 = 표시 고장"을
+          구분해야 한다(alarm_pipeline.md §8.2). 대신 DESIGN-RULES §1-7 대로 0건은
+          경고색이 아니라 Neutral 로 낸다. */}
+      <button className="relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-neutral hover:bg-sidebar-accent"
+              onClick={() => setOpen(o => !o)}
+              aria-label={loaded ? `활성 알람 ${active.length}건` : '알람 로드 중'}
               title={error ? '알람 조회 실패 — 표시가 최신이 아닐 수 있음'
                            : loaded ? `활성 알람 ${active.length}건` : '알람 로드 중'}>
-        <span className="dot" style={{ background: dotColor }} />
-        알람 {loaded ? active.length : '…'}{error ? ' !' : ''}
+        <Bell size={16} />
+        <Badge variant={badgeTone}>{loaded ? active.length : '…'}{error ? ' !' : ''}</Badge>
       </button>
       {open && (
         <div className="alarm-drawer">

@@ -4,21 +4,30 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@core/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  // 정본 = Figma `02 Components` Sec/Badge (16:33) — Tone 6 × Style 2 = 12종.
+  // shadcn 기본 4종으로는 부족해 `cims-design-handoff/components/custom/badge-variants.ts`
+  // 로 교체한 것이다 (docs/design/console_design_system.md §4).
+  // Soft = 값·분류 표시(기본) / Solid = 개수·심각도처럼 눈에 띄어야 하는 것에만.
+  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm font-semibold leading-4 whitespace-nowrap transition-colors focus-visible:shadow-focus",
   {
     variants: {
       variant: {
-        default:
-          "border-transparent bg-primary text-primary-foreground shadow hover:bg-primary/80",
-        secondary:
-          "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        destructive:
-          "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
-        outline: "text-foreground",
+        brandSoft: "border-transparent bg-brandsoft text-brandsoft-on",
+        successSoft: "border-transparent bg-success-soft text-success-on",
+        warningSoft: "border-transparent bg-warning-soft text-warning-on",
+        dangerSoft: "border-transparent bg-dangersoft text-dangersoft-on",
+        infoSoft: "border-transparent bg-info-soft text-info-on",
+        neutralSoft: "border-transparent bg-neutral-soft text-neutral-on",
+        brandSolid: "border-transparent bg-primary text-primary-foreground",
+        successSolid: "border-transparent bg-success text-white",
+        warningSolid: "border-transparent bg-warning text-white",
+        dangerSolid: "border-transparent bg-destructive text-white",
+        infoSolid: "border-transparent bg-info text-white",
+        neutralSolid: "border-transparent bg-neutral text-white",
       },
     },
     defaultVariants: {
-      variant: "default",
+      variant: "neutralSoft",
     },
   }
 )
