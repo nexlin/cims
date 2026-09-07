@@ -22,7 +22,26 @@
 #include "SipParserDefine.h"
 #include "SipStatusCode.h"
 #include "SipUtility.h"
+#include <ctype.h>
+#include <limits.h>
 #include <stdlib.h>
+
+/**
+ * @brief Expires / Contact expires 의 delta-seconds 파싱 (RFC 3261 §20.19 — 32bit 무부호 정수).
+ *        atoi 는 2^31 이상(예: 4294967295)에서 음수로 넘쳐 -1 이 되고, -1 은 "미지정" 표지와 겹쳐
+ *        GetExpires() 가 0(해지) 을 돌려준다 — 구독/등록이 조용히 해지로 처리되는 결함. int 초과분은
+ *        INT_MAX 로 클램프하고(서버가 상한을 다시 자른다), 숫자가 아니면 0 으로 본다.
+ */
+static int ParseDeltaSeconds(const char *pszValue) {
+  if (pszValue == NULL)
+    return 0;
+  while (*pszValue == ' ' || *pszValue == '\t')
+    ++pszValue;
+  if (!isdigit((unsigned char)*pszValue))
+    return 0;
+  unsigned long long ullValue = strtoull(pszValue, NULL, 10);
+  return ullValue > (unsigned long long)INT_MAX ? INT_MAX : (int)ullValue;
+}
 
 
 CSipMessage::CSipMessage()
@@ -151,7 +170,7 @@ int CSipMessage::Parse(const char *pszText, int iTextLen) {
         if (ParseSipFrom(m_clsContactList, pszValue, iValueLen) == -1)
           return -1;
       } else if (!strcasecmp(pszName, "Expires")) {
-        m_iExpires = atoi(pszValue);
+        m_iExpires = ParseDeltaSeconds(pszValue);
       } else {
         bNotFound = true;
       }
@@ -299,7 +318,7 @@ int CSipMessage::Parse(const char *pszText, int iTextLen) {
     }
 #endif
     else if (!strcasecmp(pszName, "Expires")) {
-      m_iExpires = atoi(pszValue);
+      m_iExpires = ParseDeltaSeconds(pszValue);
     } else if (!strcasecmp(pszName, "User-Agent")) {
       m_strUserAgent = clsHeader.m_strValue;
     } else {
@@ -1158,7 +1177,7 @@ int CSipMessage::GetExpires() {
   std::string strExpires;
 
   if (itContact->SelectParam("EXPIRES", strExpires)) {
-    return atoi(strExpires.c_str());
+    return ParseDeltaSeconds(strExpires.c_str());
   }
 
   return 0;

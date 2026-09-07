@@ -52,7 +52,7 @@ data class ServiceProfile(
     /** SIP Digest H(A1)=MD5(IMPI:realm:pw) hex32 — 평문 비번 없이 response 계산(sip_access_security.md §4.7).
      *  있으면 [sipPassword] 보다 우선. 구 서버 응답이면 null. */
     val sipHa1: String? = null,
-    val sipPassword: String? = null,  // 과도기 평문(passwd 소거 후 항상 null). null 이면 로그인 비번 재사용
+    val sipPassword: String? = null,  // 과도기 평문(passwd 소거 후 항상 null) — 구 서버 호환 키
     /** 인증 체계(`account.authScheme`) — "digest" | "aka". aka 면 [akaK]/[akaOpc] 소프트-USIM 자격
      *  (sip_access_security.md §8.2 — 토큰 인증 + TLS 채널로만 내려온다). */
     val authScheme: String = "digest",
@@ -70,14 +70,15 @@ data class ServiceProfile(
     val maxPayloadSdsCplaneBytes: Int = 0,
 ) {
     /**
-     * 이 서비스 프로파일을 [SipAccountConfig] 로 매핑. SIP Digest 자료는 [sipHa1](H(A1)) 최우선,
-     * 평문은 [sipPassword] 우선·없으면 [loginPassword](로그인 비번) 재사용.
+     * 이 서비스 프로파일을 [SipAccountConfig] 로 매핑. SIP Digest 자료는 [sipHa1](H(A1)) 우선, 없으면
+     * 구 서버 호환 평문 [sipPassword]. 둘 다 없으면 자격 없는 설정이 되어 [SipAccountConfig.isComplete] 가
+     * 미완성으로 판정하고 등록을 시도하지 않는다 — 로그인 비밀번호는 IdMS 자격이라 SIP 에 쓰지 않는다
+     * (sip_access_security.md §4.7, android_ue_provisioning.md §3).
      * [countryCode] = 프로비저닝 응답 홈 국가코드.
      */
     fun toSipAccountConfig(
         loginId: String,
         displayName: String,
-        loginPassword: String,
         countryCode: String = "",
     ): SipAccountConfig =
         SipAccountConfig(
@@ -93,7 +94,7 @@ data class ServiceProfile(
             loginId = loginId,
             authId = authId,
             sipHa1 = sipHa1?.takeIf { it.isNotBlank() }.orEmpty(),
-            password = sipPassword?.takeIf { it.isNotBlank() } ?: loginPassword,
+            password = sipPassword?.takeIf { it.isNotBlank() }.orEmpty(),
             authScheme = authScheme,
             akaK = akaK,
             akaOpc = akaOpc,

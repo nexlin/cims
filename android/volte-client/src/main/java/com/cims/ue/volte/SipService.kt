@@ -178,7 +178,6 @@ class SipService : Service() {
         val cfg = svc.toSipAccountConfig(
             loginId = prof.loginId ?: svc.msisdn,
             displayName = prof.displayName ?: svc.msisdn,
-            loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),  // sipPassword=null → 공유 로그인 비번 재사용
             countryCode = prof.countryCode.orEmpty(),
         )
         // 사용자가 고른 transport 는 유지하며 저장한다 — 서버 transport 는 기본값(권장)이고

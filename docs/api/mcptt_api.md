@@ -105,7 +105,7 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | Method | Path | 인증 |
 |---|---|---|
 | GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
-| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 |
+| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가. ETag 내용 파생 |
 | GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
 
 ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설정 `McpttServer.PublicUrl`

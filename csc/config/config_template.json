@@ -700,6 +700,53 @@
       "scope": "service"
     },
     {
+      "key": "user_profile",
+      "title": "MCPTT 사용자 프로파일 문서 (user-profile) 규격 파라미터값",
+      "description": "TS 24.484 §8.3.2 사용자 프로파일 문서의 상수 요소. 그룹 목록·연락처·긴급 대상·인가는 DB(그룹 멤버십·ptt_user_profile·mcptt_service_config)에서 유도되므로 여기 없다. 값이 바뀌면 문서 ETag 도 바뀌어 단말이 새 문서를 받는다.",
+      "fields": [
+        {
+          "key": "UserProfile.MaxSimultaneousCallsN6",
+          "label": "동시 그룹콜 상한 (MaxSimultaneousCallsN6)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "UserProfile.MaxSimultaneousTransmissionsN7",
+          "label": "동시 송신 상한 (MaxSimultaneousTransmissionsN7)",
+          "type": "int",
+          "default": 1,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UserProfile.Priority",
+          "label": "사용자 우선순위 (Priority)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "UserProfile.MissionCriticalOrganization",
+          "label": "MC 조직명 (MissionCriticalOrganization)",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "비우면 UeInitConfig.Name 을 쓴다."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "service_log",
       "title": "서비스 로그",
       "description": "녹취·msg·flow 로그의 공통 저장 루트. CSP·CMP·CSC 가 같은 경로를 쓰고 OAM 이 조회하므로 그룹 공통(service)으로 관리한다.",

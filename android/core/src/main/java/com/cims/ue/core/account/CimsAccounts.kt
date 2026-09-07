@@ -35,17 +35,13 @@ object CimsAccounts {
     const val KEY_CSC_HOST = "csc_host"
     const val KEY_CSC_PORT = "csc_port"
     const val KEY_PROFILE_JSON = "profile_json"   // /provisioning/me 캐시(선택)
-    // 로그인 비번 — VoLTE/PTT 의 SIP Digest 비번 재사용용(서버가 sipPassword=null 로 내릴 때).
-    //   IMS Digest 는 토큰 인증이 없으므로 비번이 필요. AccountManager(동일서명 프로세스 보호)에 보관.
-    //   ⚠️ 현재 평문(개발) — ConfigStore 와 동일 posture. 운영 시 Keystore/EncryptedSharedPreferences.
-    const val KEY_LOGIN_PW = "login_pw"
+    // 로그인 비밀번호는 보관하지 않는다 — IdMS 자격이라 SIP Digest 에 쓰지 않고(SIP 자료는 프로비저닝 sipHa1),
+    //   토큰 갱신은 refresh_token(password 슬롯)으로 한다.
 
-    fun loginPassword(am: AccountManager, account: Account): String =
-        am.getUserData(account, KEY_LOGIN_PW).orEmpty()
-
-    /** authTokenType → IdMS scope (서버 SCOPE_PROVISIONING / SCOPE_MC_SERVICES 와 정합). */
+    /** authTokenType → IdMS scope (서버 SCOPE_PROVISIONING / SCOPE_MC_SERVICES 와 정합).
+     *  구 빌드의 ptt-client 가 옛 타입 문자열("3gpp:mcptt:ptt_server")로 요청해도 MC 서비스 scope 를 준다(앱 혼재 호환). */
     fun scopeFor(tokenType: String): String = when (tokenType) {
-        TOKEN_MCPTT -> SCOPE_MC_SERVICES
+        TOKEN_MCPTT, "3gpp:mcptt:ptt_server" -> SCOPE_MC_SERVICES
         else -> SCOPE_PROVISIONING
     }
 

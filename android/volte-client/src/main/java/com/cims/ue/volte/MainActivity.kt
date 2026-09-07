@@ -268,7 +268,6 @@ private fun SsoGateScreen(
                     svc.toSipAccountConfig(
                         loginId = prof.loginId ?: "",
                         displayName = prof.displayName ?: "",
-                        loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(context),
                         countryCode = prof.countryCode.orEmpty(),
                     )
                 }
@@ -2188,7 +2187,6 @@ private fun SettingsScreen(
                                     svc.toSipAccountConfig(
                                         loginId = prof.loginId ?: "",
                                         displayName = prof.displayName ?: "",
-                                        loginPassword = SsoProvisioner.loginPassword(context),
                                         countryCode = prof.countryCode.orEmpty(),
                                     )
                                 }

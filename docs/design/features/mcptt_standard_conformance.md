@@ -411,6 +411,14 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 
 ### CMS (TS 24.484)
 - user-profile XML(ns = 규격 §8.3.2.4 정본 `urn:3gpp:mcptt:user-profile:1.0`), self-access 권한(신원 표기 tel:/sip:/sip:@도메인 관용), ETag.
+  **내용은 §8.3.2 XSD 대로**(`get_user_profile_xml`): 루트 `XUI-URI`·`user-profile-index`, `<Common>` = UserAlias·
+  MCPTTUserID(uri-entry)·PrivateCall(PrivateCallList = 내 그룹 동료 멤버, EmergencyCall = 사전 지정 긴급 사설콜 수신자)·
+  MCPTT-group-call(MaxSimultaneousCallsN6·EmergencyCall/ImminentPerilCall/EmergencyAlert·Priority)·MissionCriticalOrganization,
+  `<cp:ruleset>`(RFC 4745) 사용자 인가, `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
+  anyExt `cims:authorized-user`)**·MaxAffiliationsN2(`mcptt_service_config.max_affiliations_n2`)·ImplicitAffiliations(소속 전체)·
+  MaxSimultaneousTransmissionsN7·PrivateEmergencyAlert. 상수는 `UserProfile.*` 설정. 긴급그룹 미지정(DedicatedGroup)은 긴급 요소를
+  싣지 않는다(빈 entry 스키마 위반 방지, 단말은 "미지정"으로 판정). 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
+  전환기 공존 — 클라이언트가 MCPTTGroupInfo 로 옮기면 JSON 목록 제거([mcx_identity_scope.md](mcx_identity_scope.md) 와 같은 방식).
 - **S4 service-config**: 값의 SoT 는 DB `mcptt_service_config` **단일 행**(id=1)이다. 기동 시
   `load_shared_data` 가 `SERVICE_CONFIG` 캐시로 읽고, `get_service_config_xml` 이 그 캐시를 XML 로
   산출한다(내용 파생 ETag — 값이 바뀌면 자동 갱신). 편집은 관리 API

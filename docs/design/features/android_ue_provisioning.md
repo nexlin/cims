@@ -141,8 +141,10 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   값을 pjsip AKA 자격(`PJSIP_CRED_DATA_EXT_AKA`)에 넣어 `AKAv1-MD5` 챌린지에 답하고, 그 가입은 TLS 로만 등록한다
   (Android 연결은 후속). 서버가 키를 못 풀면(`AuC.Kek` 불일치) `k`/`opc` 가 빈 문자열로 온다.
 - `account.sipPassword`: 항상 `null`(서버가 평문을 배포하지 않는다 — 키는 단말 호환으로 유지).
-  단말은 `sipHa1`(DIGEST cred) → 평문 cred(`sipPassword` → 로그인 비번) 순으로 쓴다 — 평문 cred 는
-  pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.
+  단말은 `sipHa1`(DIGEST cred) → 평문 cred(`sipPassword`, 구 서버 호환) 순으로 쓰고, 둘 다 없으면 SIP 계정을
+  구성하지 않는다(`SipAccountConfig.isComplete()` 미완성 → 등록 시도 없음, 앱 상태 "로그인 필요"). **로그인
+  비밀번호는 IdMS 자격이라 SIP Digest 에 쓰지 않는다** — 두 비밀번호는 별개다(sip_access_security.md §4.7).
+  평문 cred 는 pjsip 이 challenge realm 로 그때 ha1 을 계산하므로 realm 결박이 없다.
 - `account.mcpttId`: PTT 프로파일에만. GMS/CMS/affiliation/floor 에서 사용.
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   CSC 설정 `Provisioning.CountryCode` 우선, 미설정이면 로그인 msisdn 에서 서버가 유도. 판정 불가면
@@ -275,8 +277,8 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
      `자동 프로비저닝 (단말 접속 정보)` 에서 편집. 전 필드 `restart: true` → 저장 후 csc 재기동.
    - configure.sh 경로(올인원 시험환경)는 `deploy_value` 로 `@VOLTE_DOMAIN@`/`@PTT_DOMAIN@`/
      `@COUNTRY_CODE@` 를 치환해 csc.json 에 기록한다. 포트/host 는 템플릿 default(5060 / 빈값).
-3. 비번: 응답 `sipPassword=null` → 단말이 로그인 비번을 SIP Digest 비번으로 재사용(망에 SIP 비번 미전송).
-   서비스별 SIP 비번이 다르면 응답에 명시.
+3. SIP 자격: 응답 `account.sipHa1`(H(A1)) 로 인증한다 — 평문 SIP 비밀번호는 망에 실리지 않고 단말도 갖지
+   않는다. `sipHa1` 이 없는 가입(H(A1) 미생성)은 단말이 등록을 시도하지 않는다.
 4. **홈 국가코드** ← CSC 설정 `Provisioning.CountryCode`(템플릿 default 82, configure.sh `--country-code`).
    미설정 시 로그인 msisdn 에서 유도(`_country_code_of`, 단말 fallback 과 동일한 ITU 자릿수 규칙).
    응답 `countryCode` 로 내려주며 단말은 이 값을 번호 로컬 표기의 SoT 로 저장(`SipAccountConfig.countryCode`).
@@ -288,9 +290,9 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 
 ## 5. 클라이언트 구현 (core + 각 앱)
 
-- **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginPassword)`.
+- **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginId, displayName, countryCode)`.
 - **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 설정은 §5-1 수동 설정 모드.
-- 토큰: access_token 보관, 만료 시 재로그인(또는 refresh). SIP 비번 미수신 시 로그인 비번 재사용.
+- 토큰: access_token 보관, 만료 시 재로그인(또는 refresh). SIP 자격(`sipHa1`) 미수신 시 등록하지 않는다.
 - 서버 엔드포인트 준비 전: 로그인/프로비저닝 실패 시 **수동설정으로 graceful fallback**.
 
 ### 5-1. 설정 화면·수동 설정 모드 (volte-client)

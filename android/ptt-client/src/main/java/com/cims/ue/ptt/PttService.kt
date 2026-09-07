@@ -331,7 +331,6 @@ class PttService : Service() {
             val cfg = svc.toSipAccountConfig(
                 loginId = prof.loginId ?: svc.msisdn,
                 displayName = prof.displayName ?: svc.msisdn,
-                loginPassword = com.cims.ue.core.account.SsoProvisioner.loginPassword(this),
                 countryCode = prof.countryCode.orEmpty(),
             )
             // 사용자가 고른 transport 는 유지하며 저장한다 — 서버 transport 는 기본값(권장)이고

@@ -327,13 +327,47 @@ def main():
     # ── Step 4: user-profile — XUI 를 외부 단말식 sip:완전형(@도메인)으로 ──
     print("Step 4  user-profile (XUI=sip:완전형 — 신원 표기 관용)")
     bare = mcptt_id.split(':', 1)[-1]
+    xui = urllib.parse.quote(mcptt_id, safe='')
     xui_full = urllib.parse.quote(f"sip:{bare}@{domain}", safe='')
     st, body, hdr = http_get(f"{cms_root}/org.3gpp.mcptt.user-profile/users/{xui_full}/user-profile", bearer)
     check(st == 200, f"sip:{bare}@{domain} 형 XUI 로 200 (got {st})")
+    # ── Step 4b: 문서 내용 — TS 24.484 §8.3.2 (규격 단말이 여기서 그룹 목록·연락처를 읽는다) ──
+    print("Step 4b user-profile 내용 (TS 24.484 §8.3.2 — OnNetwork MCPTTGroupInfo → GMS 그룹 문서 사슬)")
+    UP = '{urn:3gpp:mcptt:user-profile:1.0}'
+    try:
+        import xml.etree.ElementTree as _ET
+        root = _ET.fromstring(body.encode())
+    except Exception as e:
+        root = None
+        check(False, f"user-profile XML 파싱 ({e})")
+    if root is not None:
+        check(root.tag == UP + 'mcptt-user-profile' and root.get('XUI-URI') and root.get('user-profile-index'),
+              "루트 = mcptt-user-profile + XUI-URI·user-profile-index 속성")
+        uid = root.find(f'{UP}Common/{UP}MCPTTUserID/{UP}uri-entry')
+        check(uid is not None and uid.text == mcptt_id, f"Common/MCPTTUserID/uri-entry = 토큰 mcptt_id ({uid.text if uid is not None else None})")
+        on = root.find(f'{UP}OnNetwork')
+        check(on is not None and on.find(f'{UP}MCPTTUserID') is None, "OnNetwork 에 규격 밖 MCPTTUserID 없음")
+        entries = on.findall(f'{UP}MCPTTGroupInfo/{UP}entry') if on is not None else []
+        check(len(entries) >= 1, f"OnNetwork/MCPTTGroupInfo entry ≥ 1 (got {len(entries)})")
+        check(on is not None and on.find(f'{UP}MaxAffiliationsN2') is not None and on.find(f'{UP}MaxSimultaneousTransmissionsN7') is not None,
+              "OnNetwork MaxAffiliationsN2·MaxSimultaneousTransmissionsN7")
+        bad = [e for e in root.iter(UP + 'entry') if e.find(f'{UP}uri-entry') is None]
+        check(not bad, f"모든 entry 에 uri-entry (빈 entry {len(bad)}건)")
+        rs = root.find('{urn:ietf:params:xml:ns:common-policy}ruleset')
+        check(rs is not None and rs.find('.//' + UP + 'allow-emergency-group-call') is not None,
+              "common-policy ruleset + allow-* 인가 요소")
+        # 사슬: 목록의 각 그룹 URI 로 GMS 그룹 문서를 받을 수 있어야 한다(같은 URI 형)
+        ok_docs = 0
+        for e in entries[:5]:
+            guri = e.find(f'{UP}uri-entry').text
+            st_g, _, _ = http_get(f"{gms_root}/org.openmobilealliance.groups/users/{xui}/{urllib.parse.quote(guri, safe='')}", bearer)
+            ok_docs += (st_g == 200)
+        check(entries and ok_docs == len(entries[:5]), f"MCPTTGroupInfo 의 그룹 URI 로 GMS 그룹 문서 200 ({ok_docs}/{len(entries[:5])})")
+        pcl = root.findall(f'{UP}Common/{UP}PrivateCall/{UP}PrivateCallList/{UP}PrivateCallURI')
+        print(f"  info  PrivateCallList(연락처) {len(pcl)}건, 그룹 {len(entries)}건")
 
     # ── Step 5: service-config + ETag 캐시 ──
     print("Step 5  service-config + ETag")
-    xui = urllib.parse.quote(mcptt_id, safe='')
     st, body, hdr = http_get(f"{cms_root}/org.3gpp.mcptt.service-config/users/{xui}/service-config", bearer)
     check(st == 200, f"200 (got {st})")
     etag = hdr.get('etag', '')

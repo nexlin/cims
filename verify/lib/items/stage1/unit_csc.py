@@ -11,7 +11,9 @@
                                           커서(since)·감사 E-AUD-016(dispatch_center.md §5.6)
   · tests/test_csc_idms_scope.py          IdMS scope·claim·issuer 규격 정합 — 요청∩카탈로그·구 scope 별칭 확장·
                                           access token scope 문자열/client_id/mcdata_id·리소스 서버 검사 3모드·
-                                          issuer 유도(mcx_identity_scope.md)"""
+                                          issuer 유도(mcx_identity_scope.md)
+  · tests/test_csc_user_profile.py        MCPTT user-profile 문서(TS 24.484 §8.3.2) — OnNetwork MCPTTGroupInfo(소속 그룹·소유 표시)·
+                                          ImplicitAffiliations·PrivateCallList(동료)·긴급 요소 부재/폴백·common-policy ruleset·ETag"""
 from __future__ import annotations
 
 import os
@@ -21,12 +23,12 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CSC"
-_NAME = ("CSC unit test — 관제 그룹 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·IdMS scope "
+_NAME = ("CSC unit test — 관제 그룹 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·IdMS scope·user-profile "
          "(python3 -m unittest tests.test_csc_dispatch_rbac tests.test_csc_subscription_realm "
          "tests.test_csc_gms_group_crud tests.test_csc_provisioning_dispatch)")
 _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
-            "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope"]
+            "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile"]
 
 
 @verify_item(

@@ -55,11 +55,4 @@ object SsoProvisioner {
 
     /** 로그인(공유 계정) 존재 여부. */
     fun hasAccount(context: Context): Boolean = CimsAccounts.get(context) != null
-
-    /** 공유 계정의 로그인 비번(SIP Digest 재사용용). 없으면 빈 문자열. */
-    fun loginPassword(context: Context): String {
-        val am = AccountManager.get(context)
-        val account = CimsAccounts.get(am) ?: return ""
-        return CimsAccounts.loginPassword(am, account)
-    }
 }
