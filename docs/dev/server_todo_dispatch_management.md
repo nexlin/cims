@@ -38,7 +38,9 @@ S1-UNIT-CSC(`verify/lib/items/stage1/unit_csc.py`)에 `tests/test_csc_dispatch_m
 - **재배포 필요(코드 수정됨, 커밋 참조)**: ① `Recording.VerifyTls` 를 문자열 `"false"` 로 렌더한 csc.json 을 `bool("false")=True` 로 읽어 OAM 프록시가 인증서 검증 실패(`502 oam_unreachable`) —
   fm_reporter 와 같은 문자열 bool 해석으로 정정. 재배포 전까지 녹취 메타/오디오는 502. ② `PUT …/ptt/profile` 이 저장 뒤 감사 페이로드에서 KeyError(500 — 값은 이미 반영됨). ③ 번호 변경 시 요청에 없는
   접속서비스·transport 를 종전 회선에서 승계(종전엔 UDP 기본값으로 개설됨).
-- **SIP 등록**: 앱이 프로파일대로 `.48:15060/udp` 로 REGISTER 하면 408(응답 없음) — 관제석 계정의 `sip_transport`·CSP 리스너 확인(관리 기능과 무관, 통화·PTT 시험 전제).
+- **SIP 등록 408 — 원인 확정(.48 csc.json 프로비저닝 ↔ CSP 리스너 불일치)**: `/provisioning/me` 가 두 서비스 모두 `15060/UDP, enforced=false`(템플릿 기본값)를 내리는데 .48 CSP 는
+  15060/15061 을 열지 않고 **5060/UDP · 5061/TLS · 25061/TCP** 를 연다. 헤드리스 UE 실측: TLS 5061 → VoLTE·PTT 둘 다 200 등록, UDP 5060 → 403(`sip_transport=TLS` 집행), UDP 15060 → 무응답.
+  조치 = csc.json `Provisioning.Services.{volte,ptt}.tls_port=5061`, `.port=5060`, `.tcp_port=25061`, `.transport=TLS` 로 맞추고 CSC 리로드 → 앱 재로그인. 앱 수정 없음.
 
 ## 3. 남은 서버 과제 (이번 변경 밖)
 
