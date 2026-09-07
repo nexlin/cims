@@ -8,14 +8,18 @@ const alertVariants = cva(
   // shadcn 기본 2종(default/destructive)으로는 부족해
   // `cims-design-handoff/components/custom/alert-variants.ts` 로 교체한 것이다.
   // **화면당 1개 원칙** (DESIGN-RULES §2).
-  "relative w-full rounded-md border px-3 py-2.5 text-md [&>svg]:size-4 [&>svg]:shrink-0",
+  //
+  // 모양은 Atlassian SectionMessage 패턴 — **좌측 3px 바 + soft 배경**이고 사방 테두리는
+  // 없다(시안 실측: 바 `--*`, 배경 `--*-soft`, 라운드 8, 여백 12/10). 핸드오프 참조 구현과
+  // shadcn 기본은 사방 1px 테두리라 그림과 어긋났다.
+  "relative w-full rounded-md border-l-[3px] px-3 py-2.5 text-md [&>svg]:size-4 [&>svg]:shrink-0",
   {
     variants: {
       variant: {
-        info: "border-info bg-info-soft text-info-on",
-        success: "border-success bg-success-soft text-success-on",
-        warning: "border-warning bg-warning-soft text-warning-on",
-        danger: "border-destructive bg-dangersoft text-dangersoft-on",
+        info: "border-l-info bg-info-soft text-info-on",
+        success: "border-l-success bg-success-soft text-success-on",
+        warning: "border-l-warning bg-warning-soft text-warning-on",
+        danger: "border-l-destructive bg-dangersoft text-dangersoft-on",
       },
     },
     defaultVariants: {

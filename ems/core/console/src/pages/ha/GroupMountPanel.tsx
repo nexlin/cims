@@ -11,13 +11,17 @@
 //  없으면 그 자리가 ✕ 로 드러난다(오프라인이라 빠진 멤버·나중에 편입된 멤버).
 //  버튼은 **작업**이다: 전 멤버에 추가 / 없는 멤버에만 적용 / 전 멤버에서 제거.
 // ──────────────────────────────────────────────────────────────
-import { RotateCw } from 'lucide-react'
+import { X } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentMount } from '../../api/deployment'
 import type { GroupMount, MountOp } from '../../api/ha_groups'
 import { ImeSafeInput } from './ImeSafeInput'
 import { MOUNT_DEFAULTS } from './helpers'
-import { btnSmall, btnDanger } from './styles'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { SubSection } from '../../components/custom/collapsible-section'
+import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
+import { StatusDot } from '../../components/custom/status-dot'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
 
@@ -37,21 +41,25 @@ function memberState(m: MountMember, target: string): MemberState {
   return hit.mounted ? 'mounted' : 'declared'
 }
 
+/**
+ * 멤버별 상태 셀 — 시안은 StatusDot + 서버명이다 (Figma G1 187:2936).
+ * 미적용은 ES-5 대로 `✕ <서버명>` 인데 글리프 대신 Lucide `X` 를 쓴다.
+ */
 function StateDot({ state, name, online }: { state: MemberState; name: string; online: boolean }) {
-  const view = {
-    mounted:  { mark: '●', color: 'var(--cims-success)', title: `${name}: 마운트됨` },
-    declared: { mark: '◐', color: '#e67e22', title: `${name}: fstab 에는 있으나 지금 마운트 안 됨` },
-    missing:  { mark: '✕', color: 'var(--destructive)',
-                // 오프라인 멤버는 fan-out 대상에서 빠진다 — 사유를 여기서 알려야 재적용을
-                // 무한 반복하지 않는다.
-                title: online ? `${name}: 미적용 — [재적용] 필요`
-                              : `${name}: 오프라인이라 적용되지 않음 — 노드 복구 후 [재적용]` },
-  }[state]
-  return (
-    <span title={view.title} style={{ color: view.color, fontSize: 12, marginRight: 8 }}>
-      {view.mark} {name}
-    </span>
-  )
+  // 오프라인 멤버는 fan-out 대상에서 빠진다 — 사유를 여기서 알려야 재적용을 무한 반복하지 않는다.
+  if (state === 'missing') {
+    return (
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-sm text-destructive"
+            title={online ? `${name}: 미적용 — [재적용] 필요`
+                          : `${name}: 오프라인이라 적용되지 않음 — 노드 복구 후 [재적용]`}>
+        <X size={12} /> {name}
+      </span>
+    )
+  }
+  return state === 'mounted'
+    ? <StatusDot tone="success" label={name} title={`${name}: 마운트됨`} />
+    : <StatusDot tone="warning" label={name}
+                 title={`${name}: fstab 에는 있으나 지금 마운트 안 됨`} />
 }
 
 export function GroupMountPanel({ declared, members, applying, onApply }: {
@@ -130,118 +138,122 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
   }
 
   return (
-    <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
-                  background: 'var(--muted)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)' }}>
-          마운트 (그룹 공통)
-        </div>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
-          멤버 {members.length}대에 같은 경로로 한 번에 적용 — /etc/fstab 영속.
-          노드별 예외는 좌측 트리에서 서버 선택 &gt; [네트워크] 탭.
-        </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {laggingCount > 0 && (
-            <span style={{ fontSize: 11, color: 'var(--destructive)' }}>미적용 {laggingCount}건</span>
-          )}
-          <button onClick={reapplyAll} style={btnSmall()}
-                  disabled={applying || declared.length === 0}
-                  title="선언된 마운트를 전 멤버에 다시 적용 — 오프라인이었거나 나중에 편입된 멤버 복구">
-            <RotateCw size={13} /> 재적용
-          </button>
-        </div>
-      </div>
-
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+    // 시안(Figma G1 187:2892~187:2969)은 이 블록을 다른 섹션과 같은 **접힘 섹션** 하나로 둔다 —
+    // 구 화면은 회색 패널 안에 별도 제목·우측 [재적용] 을 갖는 딴 살림이었다.
+    // 계약상 접힌 섹션에 액션 버튼을 노출하지 않으므로 [재적용] 은 표 아래 액션 줄로 내렸고,
+    // 접힌 상태에서도 봐야 하는 `미적용 n건` 만 헤더 우측에 남긴다 (ES-5).
+    <SubSection
+      title="마운트 (그룹 공통)"
+      hint={`멤버 ${members.length}대에 같은 경로로 한 번에 적용 — /etc/fstab 영속`
+            + ` · 노드별 예외는 서버 선택 › 네트워크`}
+      right={laggingCount > 0
+        ? <Badge variant="warningSoft">미적용 {laggingCount}건</Badge>
+        : undefined}>
+      <DataTable>
         <thead>
-          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>마운트 위치(target)</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>소스(source)</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>유형</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 130 }}>옵션</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 200 }}>멤버별 상태</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 60 }}>액션</th>
+          <tr>
+            <Th width={150}>마운트 위치(target)</Th>
+            <Th width={275}>소스(source)</Th>
+            <Th width={60}>유형</Th>
+            <Th width={90}>옵션</Th>
+            <Th width={175}>멤버별 상태</Th>
+            <Th width={72}>액션</Th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 && !addOpen && (
-            <tr><td colSpan={6} style={{ padding: 8, color: 'var(--muted-foreground)' }}>
-              (그룹 공통 마운트 없음 — 아래 [＋ 마운트 추가])
-            </td></tr>
+            <tr><Td colSpan={6} className="text-muted-foreground">
+              그룹 공통 마운트 없음 — 아래 [+ 마운트 추가]
+            </Td></tr>
           )}
+          {/* 미적용 행을 노란 배경으로 칠하지 않는다 — 배지와 ✕ 로 충분하다 (ES-5). */}
           {rows.map(m => (
-            <tr key={m.target}
-                style={lagging(m.target).length ? { background: 'var(--cims-warning-soft)' } : undefined}>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{m.target}</td>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{m.source}</td>
-              <td style={{ padding: '4px 8px' }}>{m.fstype}</td>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11,
-                           color: 'var(--muted-foreground)' }}>{m.options || '-'}</td>
-              <td style={{ padding: '4px 8px' }}>
+            <tr key={m.target}>
+              <Td mono>{m.target}</Td>
+              <Td mono className="break-all">{orDash(m.source)}</Td>
+              <Td>{orDash(m.fstype)}</Td>
+              <Td mono className="text-muted-foreground">{orDash(m.options)}</Td>
+              <Td>
                 {members.length === 0
-                  ? <span style={{ color: 'var(--muted-foreground)' }}>(멤버 없음)</span>
-                  : members.map(mem => (
-                      <StateDot key={mem.id} name={mem.name} online={mem.online}
-                                state={memberState(mem, m.target)} />
-                    ))}
-              </td>
-              <td style={{ padding: '4px 8px', whiteSpace: 'nowrap' }}>
-                {lagging(m.target).length > 0 && (
-                  <button onClick={() => applyToLagging(m)} style={btnSmall()} disabled={applying}
-                          title={`이 마운트가 없는 멤버에만 적용: ${lagging(m.target).map(x => x.name).join(', ')}`}>
-                    없는 멤버에 적용
-                  </button>
-                )}
-                <button onClick={() => removeMount(m)} style={btnDanger()} disabled={applying}>삭제</button>
-              </td>
+                  ? <span className="text-muted-foreground">(멤버 없음)</span>
+                  : (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                      {members.map(mem => (
+                        <StateDot key={mem.id} name={mem.name} online={mem.online}
+                                  state={memberState(mem, m.target)} />
+                      ))}
+                    </div>
+                  )}
+              </Td>
+              <Td>
+                <div className="flex items-center gap-1.5">
+                  {lagging(m.target).length > 0 && (
+                    <Button variant="outline" onClick={() => applyToLagging(m)} disabled={applying}
+                            title={`이 마운트가 없는 멤버에만 적용: ${lagging(m.target).map(x => x.name).join(', ')}`}>
+                      없는 멤버에 적용
+                    </Button>
+                  )}
+                  {/* 시안은 여기를 Ghost 로 그렸다 (187:2943) — VIP 행의 Danger 삭제와 다르다. */}
+                  <Button variant="ghost" onClick={() => removeMount(m)} disabled={applying}>삭제</Button>
+                </div>
+              </Td>
             </tr>
           ))}
-          {addOpen ? (
-            <tr style={{ background: 'var(--cims-warning-soft)' }}>
-              <td style={{ padding: '4px 8px' }}>
+          {addOpen && (
+            <tr className="bg-warning-soft">
+              <Td>
                 <ImeSafeInput value={target} onCommit={setTarget} placeholder={MOUNT_DEFAULTS.target}
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <ImeSafeInput value={source} onCommit={setSource}
-                              placeholder={MOUNT_DEFAULTS.source}
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <select value={fstype} onChange={e => setFstype(e.target.value)}
-                        style={{ width: '95%', padding: '2px 4px', fontSize: 12,
-                                 border: '1px solid #e67e22', borderRadius: 3 }}>
+                              className="form-input font-mono" />
+              </Td>
+              <Td>
+                <ImeSafeInput value={source} onCommit={setSource} placeholder={MOUNT_DEFAULTS.source}
+                              className="form-input font-mono" />
+              </Td>
+              <Td>
+                <select value={fstype} onChange={e => setFstype(e.target.value)} className="form-input">
                   {FSTYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-              </td>
-              <td style={{ padding: '4px 8px' }}>
+              </Td>
+              <Td>
                 <ImeSafeInput value={options} onCommit={setOptions} placeholder={MOUNT_DEFAULTS.options}
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid var(--border)', borderRadius: 3 }} />
-              </td>
-              <td colSpan={2} style={{ padding: '4px 8px' }}>
+                              className="form-input font-mono" />
+              </Td>
+              <Td colSpan={2}>
                 {/* 빈칸이어도 활성 — 그대로 누르면 위 placeholder 값이 그대로 적용된다. */}
-                <button onClick={commitAdd} style={btnSmall()} disabled={applying}
-                        title={(!source.trim() || !target.trim())
-                          ? `빈칸은 기본값으로 적용 — ${MOUNT_DEFAULTS.source} → ${MOUNT_DEFAULTS.target}`
-                          : '전 멤버에 이 마운트를 추가'}>전 멤버에 추가</button>
-                <button onClick={() => setAddOpen(false)} style={btnSmall()}>취소</button>
-              </td>
-            </tr>
-          ) : (
-            <tr>
-              <td colSpan={6} style={{ padding: '4px 8px' }}>
-                <button onClick={beginAdd} style={btnSmall()} disabled={applying || members.length === 0}
-                        title={members.length === 0 ? '멤버가 없습니다 — 좌측 트리에서 서버를 편입하세요' : ''}>
-                  ＋ 마운트 추가
-                </button>
-              </td>
+                <div className="flex items-center gap-1.5">
+                  <Button variant="default" onClick={commitAdd} disabled={applying}
+                          title={(!source.trim() || !target.trim())
+                            ? `빈칸은 기본값으로 적용 — ${MOUNT_DEFAULTS.source} → ${MOUNT_DEFAULTS.target}`
+                            : '전 멤버에 이 마운트를 추가'}>전 멤버에 추가</Button>
+                  <Button variant="ghost" onClick={() => setAddOpen(false)}>취소</Button>
+                </div>
+              </Td>
             </tr>
           )}
         </tbody>
-      </table>
-    </div>
+      </DataTable>
+
+      {/* 액션 줄 — 시안 187:2954: Secondary `+ 마운트 추가` · Ghost `재적용` */}
+      <div className="mt-2 flex items-center gap-2">
+        <Button variant="outline" onClick={beginAdd}
+                disabled={applying || members.length === 0 || addOpen}>
+          + 마운트 추가
+        </Button>
+        <Button variant="ghost" onClick={reapplyAll} disabled={applying || declared.length === 0}
+                title="선언된 마운트를 전 멤버에 다시 적용 — 오프라인이었거나 나중에 편입된 멤버 복구">
+          재적용
+        </Button>
+      </div>
+      {/* 비활성 사유는 눈에 보이게 (contracts.md §Button) */}
+      {members.length === 0 ? (
+        <div className="mt-1 text-xs text-muted-foreground">
+          [+ 마운트 추가] 는 멤버가 있어야 열립니다 — 좌측 트리에서 서버를 편입하세요.
+        </div>
+      ) : declared.length === 0 ? (
+        <div className="mt-1 text-xs text-muted-foreground">
+          [재적용] 은 그룹으로 적용한 마운트가 있을 때 열립니다.
+        </div>
+      ) : null}
+    </SubSection>
   )
 }
