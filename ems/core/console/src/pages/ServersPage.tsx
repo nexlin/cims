@@ -1112,18 +1112,18 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
         <SubSection title="그룹 설정" hint="VRRP 인증·메모 · 저장 시 전 멤버 반영">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <FormField label="그룹 이름" required help="트리와 대시보드에 표시되는 이름">
-              <input className="form-input w-full" value={editName}
+              <input className="form-input" value={editName}
                      onChange={e => setEditName(e.target.value)} />
             </FormField>
             {group.mode === 'active_standby' && (
               <FormField label="auth_pass" required
                          help="VRRP 인증 비밀번호 — 멤버 간 동일해야 합니다 (최대 8글자)">
-                <input type="password" className="form-input w-full" maxLength={8}
+                <input type="password" className="form-input" maxLength={8}
                        value={editAuthPass} onChange={e => setEditAuthPass(e.target.value)} />
               </FormField>
             )}
             <FormField label="note" help="운영 메모 (선택)">
-              <input className="form-input w-full" value={editNote}
+              <input className="form-input" value={editNote}
                      onChange={e => setEditNote(e.target.value)} />
             </FormField>
           </div>
@@ -1504,49 +1504,49 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
         <div className="p-3">
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-3">
             <FormField label="감시 주기 (초)" help="기본 1초 · 범위 0.5~5초">
-              <input type="number" min={0.5} max={5} step={0.5} className="form-input w-full"
+              <input type="number" min={0.5} max={5} step={0.5} className="form-input"
                      value={value.advert_int}
                      onChange={e => set('advert_int', Number(e.target.value) || 1)} />
             </FormField>
             <FormField label="점검 주기 (초)" help="health check 실행 간격">
-              <input type="number" min={1} max={60} className="form-input w-full"
+              <input type="number" min={1} max={60} className="form-input"
                      value={value.health.interval}
                      onChange={e => setHealth('interval', Number(e.target.value) || 2)} />
             </FormField>
             <FormField label="제한 시간 (초)" help="health check 응답 대기 한도">
-              <input type="number" min={1} max={60} className="form-input w-full"
+              <input type="number" min={1} max={60} className="form-input"
                      value={value.health.timeout}
                      onChange={e => setHealth('timeout', Number(e.target.value) || 3)} />
             </FormField>
 
             <FormField label="장애 판정 (회)" help="연속 실패 N회 → 절체. 절체까지 ≈ 점검주기 × 이 값">
-              <input type="number" min={1} max={60} className="form-input w-full"
+              <input type="number" min={1} max={60} className="form-input"
                      value={value.health.fall}
                      onChange={e => setHealth('fall', Number(e.target.value) || 2)} />
             </FormField>
             <FormField label="복귀 판정 (회)" help="연속 성공 N회 → 정상">
-              <input type="number" min={1} max={60} className="form-input w-full"
+              <input type="number" min={1} max={60} className="form-input"
                      value={value.health.rise}
                      onChange={e => setHealth('rise', Number(e.target.value) || 2)} />
             </FormField>
             <FormField label="승격 유예 (초)" help="기본 30초 (0 = 유예 없음) — 승격 직후 cold 모듈 기동 시간 흡수">
-              <input type="number" min={0} max={600} className="form-input w-full"
+              <input type="number" min={0} max={600} className="form-input"
                      value={value.health.grace_sec ?? 30}
                      onChange={e => setHealth('grace_sec', Number(e.target.value) || 0)} />
             </FormField>
 
             <FormField label="재기동 임계 (회)" help="윈도우 내 연속 실패 횟수 — 넘으면 로컬 재기동을 포기하고 절체">
-              <input type="number" min={1} max={20} className="form-input w-full"
+              <input type="number" min={1} max={20} className="form-input"
                      value={rl.max_fails}
                      onChange={e => setRestart('max_fails', Number(e.target.value) || 3)} />
             </FormField>
             <FormField label="판정 윈도우 (초)" help="기본 300초">
-              <input type="number" min={10} max={3600} className="form-input w-full"
+              <input type="number" min={10} max={3600} className="form-input"
                      value={rl.window_sec}
                      onChange={e => setRestart('window_sec', Number(e.target.value) || 300)} />
             </FormField>
             <FormField label="권한 복귀 정책" help="자동 복귀 선택 시 복구 노드가 MASTER 를 회수한다">
-              <select className="form-input w-full" value={value.preempt}
+              <select className="form-input" value={value.preempt}
                       onChange={e => set('preempt', e.target.value as 'preempt' | 'nopreempt')}>
                 <option value="nopreempt">복귀 없음 (운영 안정)</option>
                 <option value="preempt">자동 복귀 (priority 우선)</option>
@@ -1554,7 +1554,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
             </FormField>
             {value.preempt === 'preempt' && (
               <FormField label="복귀 지연 (초)" help="옛 MASTER 가 돌아온 뒤 권한 회수 전 안정화 대기">
-                <input type="number" min={0} max={300} className="form-input w-full"
+                <input type="number" min={0} max={300} className="form-input"
                        value={value.preempt_delay}
                        onChange={e => set('preempt_delay', Number(e.target.value) || 0)} />
               </FormField>
