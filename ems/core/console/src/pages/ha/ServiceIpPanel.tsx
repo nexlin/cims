@@ -1,3 +1,4 @@
+import { Lock, Star } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentRoute } from '../../api/deployment'
 import type { NetIface, ServiceIpRow, IpSlot } from './types'
@@ -118,7 +119,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
     ops.push({ op: 'add', dst: orig.dst, via: routeEditVia, dev: routeEditDev })
     onApply(
       { routes: ops },
-      `route ✎ ${orig.dst} → via ${routeEditVia} dev ${routeEditDev}`,
+      `route 수정 ${orig.dst} → via ${routeEditVia} dev ${routeEditDev}`,
     )
     setRouteEditKey(null)
   }
@@ -165,7 +166,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
                         {ipIdx === 0 && <b>{iface}</b>}
                         {ipIdx === 0 && isMgmt && (
                           <span title="agent ↔ CSC 통신 NIC — 변경 시 단절 위험으로 잠금"
-                                style={{ marginLeft: 6, fontSize: 10, color: 'var(--muted-foreground)' }}>🔒 mgmt</span>
+                                style={{ marginLeft: 6, fontSize: 10, color: 'var(--muted-foreground)', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Lock size={10} /> mgmt</span>
                         )}
                       </td>
                       <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
@@ -267,7 +268,7 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
       </table>
 
       <div style={{ marginTop: 16, fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)' }}>
-        라우팅 (subnet 자동(🔒 kernel) 외 모두 변경 가능 — default gateway 포함)
+        라우팅 (subnet 자동(kernel) 외 모두 변경 가능 — default gateway 포함)
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 4 }}>
         <thead>
@@ -293,8 +294,8 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
             const isDefault = !!r.is_default
             const kernelAuto = !!r.kernel_auto
             const rowKey = `route-${r.dst}-${r.via}-${r.dev}`
-            const ownerChip = kernelAuto  ? <span style={{ color: 'var(--muted-foreground)' }}>🔒 kernel</span>
-                            : isDefault   ? <span style={{ color: '#3498db' }}>★ default</span>
+            const ownerChip = kernelAuto  ? <span style={{ color: 'var(--muted-foreground)', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Lock size={11} /> kernel</span>
+                            : isDefault   ? <span style={{ color: '#3498db', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Star size={11} /> default</span>
                             : managed     ? <span style={{ color: 'var(--cims-success)' }}>● cims</span>
                             :               <span style={{ color: 'var(--muted-foreground)' }}>○ 외부</span>
             const canEdit = !kernelAuto

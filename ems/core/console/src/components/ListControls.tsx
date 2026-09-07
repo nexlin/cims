@@ -6,6 +6,7 @@
 //   하므로 소유 선언(usePageControl)은 여기서 하지 않는다.
 
 import { usePageParam } from '../widgets/pageParams'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 export function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
   return (
@@ -22,7 +23,7 @@ export function DaysButtons({ days, onChange }: { days: number; onChange: (d: nu
   )
 }
 
-// 페이지 내비게이션 — «/» 는 처음/끝, ◀/▶ 는 한 페이지 이동. count=0 이면 렌더 생략.
+// 페이지 내비게이션 — «/» 는 처음/끝, Chevron 은 한 페이지 이동. count=0 이면 렌더 생략.
 export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
   page: number
   count: number
@@ -41,9 +42,9 @@ export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
       <span>{from}–{to} / {count}{unit}</span>
       <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
         <button className="btn btn--ghost btn--sm" disabled={cur === 0} onClick={() => onPage(0)}>«</button>
-        <button className="btn btn--ghost btn--sm" disabled={cur === 0} onClick={() => onPage(cur - 1)}>◀</button>
+        <button className="btn btn--ghost btn--sm" disabled={cur === 0} onClick={() => onPage(cur - 1)} title="이전 페이지"><ChevronLeft size={14} /></button>
         <span style={{ minWidth: 56, textAlign: 'center' }}>{cur + 1} / {totalPages}</span>
-        <button className="btn btn--ghost btn--sm" disabled={cur >= totalPages - 1} onClick={() => onPage(cur + 1)}>▶</button>
+        <button className="btn btn--ghost btn--sm" disabled={cur >= totalPages - 1} onClick={() => onPage(cur + 1)} title="다음 페이지"><ChevronRight size={14} /></button>
         <button className="btn btn--ghost btn--sm" disabled={cur >= totalPages - 1} onClick={() => onPage(totalPages - 1)}>»</button>
       </span>
     </div>

@@ -1,3 +1,4 @@
+import { RotateCw, Zap } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -243,7 +244,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
           {collection.description}
           {collection.reload_hint && (
-            <span style={{ marginLeft: 8, color: 'var(--cims-success)' }}>⚡ {collection.reload_hint}</span>
+            <span style={{ marginLeft: 8, color: 'var(--cims-success)', display: 'inline-flex', alignItems: 'center', gap: 3 }}><Zap size={12} /> {collection.reload_hint}</span>
           )}
         </div>
       )}
@@ -344,7 +345,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
 
       <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
         <button className="btn btn--sm btn--outline" onClick={addRow}>＋ 추가</button>
-        <button className="btn btn--sm btn--outline" onClick={reload} disabled={saving}>↻ 다시 로드</button>
+        <button className="btn btn--sm btn--outline" onClick={reload} disabled={saving}><RotateCw size={13} /> 다시 로드</button>
         <span style={{ marginLeft: 'auto' }}>
           <button className="btn btn--sm btn--primary" onClick={save}
             disabled={!dirty || saving}>

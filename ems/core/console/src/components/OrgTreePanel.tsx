@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { orgApi, type Organization } from '../api/organizations'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
 interface TreeNode extends Organization {
   children: TreeNode[]
@@ -88,7 +89,7 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: Or
             >
               <span style={{ width: 14, textAlign: 'center', cursor: hasChildren ? 'pointer' : 'default', userSelect: 'none', fontSize: 10 }}
                 onClick={e => { e.stopPropagation(); if (hasChildren) toggleExpand(n.id) }}>
-                {hasChildren ? (isExpanded ? '▼' : '▶') : '●'}
+                {hasChildren ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : '●'}
               </span>
               <span style={{ fontWeight: isSelected ? 600 : 400 }}>{n.name}</span>
             </div>

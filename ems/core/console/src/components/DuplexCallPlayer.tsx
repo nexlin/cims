@@ -5,6 +5,7 @@
 //   · 기본 재생 = 믹스(양측 합성) — 실제 통화에서 들린 소리
 //   · 드롭다운으로 화자 단독 전환 (화자 식별·증거용)
 //   · 화자별 파형 레인 — floor 이벤트 없이 "누가 언제 말했나"를 보여주는 유일한 수단
+import { Pause, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { recordingsApi, type RecordingSegment, type SegmentTrack } from '../api/recordings'
 import { waitSegmentReady } from './useInlineAudio'
@@ -128,7 +129,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13,
           }}
         >
-          {prep ? '…' : playing ? '❚❚' : '▶'}
+          {prep ? '…' : playing ? <Pause size={13} /> : <Play size={13} />}
         </button>
         <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(pos)}

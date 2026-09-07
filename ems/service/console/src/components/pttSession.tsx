@@ -5,6 +5,7 @@
  * (평면 목록에서 오든, 그룹 활동에서 오든) 표현도 한 벌이어야 한다.
  */
 
+import { ArrowRight, Circle, Dot, Pause, Play, Plus, Settings, Square, X, type LucideIcon } from 'lucide-react'
 import {
   useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback,
   type CSSProperties,
@@ -75,19 +76,21 @@ export function dayWeekday(d: string): string {
   return WEEKDAY[dt.getDay()] || ''
 }
 
-export const EVENT_ICONS: Record<string, { icon: string; label: string; color: string }> = {
-  session_start:  { icon: '●', label: '세션 시작',  color: '#4caf50' },
-  session_end:    { icon: '■', label: '세션 종료',  color: '#f44336' },
-  member_join:    { icon: '✚', label: '입장',      color: '#2196f3' },
-  member_leave:   { icon: '✖', label: '퇴장',      color: '#ff9800' },
-  'floor-grant':  { icon: '▶', label: '발언 시작',  color: '#4caf50' },
-  'floor-release':{ icon: '■', label: '발언 종료',  color: 'var(--muted-foreground)' },
-  config_change:  { icon: '⚙', label: '설정 변경',  color: '#9c27b0' },
-  member_invite:  { icon: '→', label: '초대',      color: '#00bcd4' },
+// icon 은 Lucide 컴포넌트 참조다 — 옛 텍스트 글리프(● ■ ✚ ✖ ▶ ⚙ →)를 뜻이 같은
+// 아이콘으로 1:1 옮긴 것이고, 의미를 재해석하지는 않았다(시안이 이 화면을 다루지 않는다).
+export const EVENT_ICONS: Record<string, { icon: LucideIcon; label: string; color: string }> = {
+  session_start:  { icon: Circle,     label: '세션 시작',  color: '#4caf50' },
+  session_end:    { icon: Square,     label: '세션 종료',  color: '#f44336' },
+  member_join:    { icon: Plus,       label: '입장',      color: '#2196f3' },
+  member_leave:   { icon: X,          label: '퇴장',      color: '#ff9800' },
+  'floor-grant':  { icon: Play,       label: '발언 시작',  color: '#4caf50' },
+  'floor-release':{ icon: Square,     label: '발언 종료',  color: 'var(--muted-foreground)' },
+  config_change:  { icon: Settings,   label: '설정 변경',  color: '#9c27b0' },
+  member_invite:  { icon: ArrowRight, label: '초대',      color: '#00bcd4' },
 }
 
 export function getEventDisplay(type: string) {
-  return EVENT_ICONS[type] || { icon: '•', label: type, color: 'var(--muted-foreground)' }
+  return EVENT_ICONS[type] || { icon: Dot, label: type, color: 'var(--muted-foreground)' }
 }
 
 // floor.jsonl op → 표시 스타일 (TS 24.380). CMP 가 기록하는 8종 전부를 다룬다 —
@@ -853,7 +856,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
             return (
               <div key={`e${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', fontSize: 12, borderTop: border, borderLeft: '4px solid transparent' }}>
                 <span className="ts" style={{ minWidth: 70, color: 'var(--muted-foreground)' }}>{fmtShortTime(ev.ts)}</span>
-                <span style={{ minWidth: 30, textAlign: 'center', color: disp.color, fontSize: 14 }}>{disp.icon}</span>
+                <span style={{ minWidth: 30, display: 'inline-flex', justifyContent: 'center', color: disp.color }}><disp.icon size={13} /></span>
                 <span style={{ color: 'var(--foreground)' }}>
                   {ev.member && <><Person id={ev.member} names={names} style={{ fontWeight: 500 }} />{' '}</>}
                   {disp.label}
@@ -949,7 +952,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
           onClick={() => recId && audio?.play(recId, turn.seq, slot)}
           title={turn.playable ? (turn.multi ? '이 화자만 재생 (동시 발언은 타임바의 “동시 N” 이 믹스)' : '재생/정지') : '녹취중'}
         >
-          {isPrep ? '…' : isPlaying ? '❚❚' : '▶'}
+          {isPrep ? '…' : isPlaying ? <Pause size={13} /> : <Play size={13} />}
         </button>
       ) : (
         <span style={{ minWidth: 30, textAlign: 'center', color: st.color }}>◆</span>
@@ -1223,7 +1226,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
                           fontSize: 9.5, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap',
                           cursor: can ? 'pointer' : 'default', textDecoration: on ? 'underline' : undefined,
                         }}>
-                        {can ? (on ? '❚❚ ' : '▶ ') : ''}동시 {b.n}
+                        {can ? (on ? <Pause size={11} /> : <Play size={11} />) : null} 동시 {b.n}
                       </span>
                     )
                   })}

@@ -1,3 +1,4 @@
+import { RotateCcw, Zap } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Modal from '../Modal'
 import { useToast } from '../Toast'
@@ -295,7 +296,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                 <>
                   <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12,
                                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><RotateCcw size={12} /> 재기동 필요 · <Zap size={12} /> 즉시 적용</span>
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
                   </div>
                   {asMember && ha && (
@@ -449,7 +450,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
         <span style={{ color: 'var(--primary)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b style={{ color: 'var(--primary)' }}>변경 사항 ({changed.size})</b>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
-          🔁 재기동 {restartKeys.length} · ⚡ 즉시 {hotKeys.length}
+          <RotateCcw size={12} /> 재기동 {restartKeys.length} · <Zap size={12} /> 즉시 {hotKeys.length}
         </span>
         <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
                 style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
@@ -478,7 +479,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                     <td style={{ padding: '4px 6px' }}>
                       <span title={k}>{f?.label ?? k}</span>
                       <span style={{ marginLeft: 4, fontSize: 10, color: restart ? 'var(--destructive)' : 'var(--cims-success)' }}>
-                        {restart ? '🔁' : '⚡'}
+                        {restart ? <RotateCcw size={12} /> : <Zap size={12} />}
                       </span>
                     </td>
                     <td style={{ padding: '4px 6px', color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>
@@ -717,7 +718,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
       }}>
         <span>{field.label}</span>
         <span style={badgeStyle} title={needsRestart ? '재기동 후 반영' : '저장 즉시 반영'}>
-          {needsRestart ? '🔁 재기동' : '⚡ 즉시'}
+          {needsRestart ? <><RotateCcw size={12} /> 재기동</> : <><Zap size={12} /> 즉시</>}
         </span>
         {field.required && <span style={{ color: '#e74c3c', marginLeft: 4 }}>*</span>}
         {src === 'injected' && !isChanged && (
@@ -752,7 +753,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
           <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>{field.help}</div>
         )}
         {!needsRestart && field.reload_hint && (
-          <div style={{ fontSize: 11, color: 'var(--cims-success)', marginTop: 3 }}>⚡ {field.reload_hint}</div>
+          <div style={{ fontSize: 11, color: 'var(--cims-success)', marginTop: 3, display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Zap size={11} /> {field.reload_hint}</div>
         )}
       </div>
     </>

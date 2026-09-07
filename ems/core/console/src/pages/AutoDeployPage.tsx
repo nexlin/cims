@@ -3,6 +3,7 @@
 //
 // 독립 페이지다(시스템/인프라의 탭이 아님): 좌측 서버 트리를 쓰지 않고, 실행이 수 분
 // 걸리며 run 이력·재개·롤백이 영속 화면을 필요로 한다.
+import { Play, RotateCw, Square, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { useAdminCapable } from '../hooks/useAdminCapable'
@@ -301,7 +302,7 @@ export default function AutoDeployPage() {
           <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy || !ready}
                   onClick={doPlan}>계획 확인 (dry-run)</button>
           <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy || !ready || !plan}
-                  onClick={doApply} title={!plan ? '먼저 [계획 확인]' : ''}>▶ 배포 실행</button>
+                  onClick={doApply} title={!plan ? '먼저 [계획 확인]' : ''}><Play size={13} /> 배포 실행</button>
           {busy && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{busy}…</span>}
         </div>
 
@@ -605,13 +606,13 @@ function RunView({ run, onAction, busy, canEdit }: {
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{done}/{total}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {running && <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy}
-                              onClick={() => onAction('abort')}>■ 중단</button>}
+                              onClick={() => onAction('abort')}><Square size={13} /> 중단</button>}
           {!running && run.status !== 'succeeded' &&
             <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy}
-                    onClick={() => onAction('resume')}>↻ 재개</button>}
+                    onClick={() => onAction('resume')}><RotateCw size={13} /> 재개</button>}
           {!running && (run.created || []).length > 0 &&
             <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy}
-                    onClick={() => onAction('rollback')}>⤺ 롤백</button>}
+                    onClick={() => onAction('rollback')}><Undo2 size={13} /> 롤백</button>}
         </div>
       </div>
 

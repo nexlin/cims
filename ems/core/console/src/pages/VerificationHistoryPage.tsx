@@ -1,3 +1,4 @@
+import { ChevronDown, RotateCw } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 
 import {
@@ -263,7 +264,7 @@ function DetailModal({ run, onClose, onDelete }: {
                   <tr key={p.id}>
                     <td style={td}>{p.idx}</td>
                     <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, fontWeight: p.is_group ? 700 : 400 }}>
-                      {p.is_group ? '▼ ' : ''}{p.id}
+                      {p.is_group ? <ChevronDown size={12} style={{ verticalAlign: '-2px', marginRight: 3 }} /> : null}{p.id}
                     </td>
                     <td style={td}>S{p.stage}</td>
                     <td style={td}>{p.name}</td>
@@ -588,7 +589,7 @@ export default function VerificationHistoryPage() {
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           총 {total} 회차
         </span>
-        <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}>↻ 새로고침</button>
+        <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}><RotateCw size={13} /> 새로고침</button>
       </header>
 
       {/* 통계 패널 */}

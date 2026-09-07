@@ -17,6 +17,7 @@ import { GRID_ROWS } from '@core/widgets/gridLayout'
 import { makeSharedByKey } from '@core/widgets/sharedFetch'
 import { usePageParam, todayIso } from '@core/widgets/pageParams'
 import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
+import { RotateCw } from 'lucide-react'
 
 interface ReclaimItem {
   ts: string; node: string; session_id: string; sesid: string
@@ -119,7 +120,7 @@ function FilterBlock() {
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
       <input type="date" className="form-input" value={date || todayIso()} style={{ width: 150 }}
              onChange={e => setDate(e.target.value)} />
-      <button className="btn btn--sm btn--ghost" title="다시 조회" onClick={reload}>↻</button>
+      <button className="btn btn--sm btn--ghost" title="다시 조회" onClick={reload}><RotateCw size={14} /></button>
       <InfoDot label="누수 회수란?">
         CMP sweeper 가 회수한 <b>고아 relay</b> 목록입니다. 정상 운영에서는 <b>0건</b>이 기대값이며,
         항목이 나타나면 CSP 비정상 종료(crash) 또는 teardown 누락으로 누수된 relay 를

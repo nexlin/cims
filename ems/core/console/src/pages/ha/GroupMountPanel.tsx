@@ -11,6 +11,7 @@
 //  없으면 그 자리가 ✕ 로 드러난다(오프라인이라 빠진 멤버·나중에 편입된 멤버).
 //  버튼은 **작업**이다: 전 멤버에 추가 / 없는 멤버에만 적용 / 전 멤버에서 제거.
 // ──────────────────────────────────────────────────────────────
+import { RotateCw } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentMount } from '../../api/deployment'
 import type { GroupMount, MountOp } from '../../api/ha_groups'
@@ -43,8 +44,8 @@ function StateDot({ state, name, online }: { state: MemberState; name: string; o
     missing:  { mark: '✕', color: 'var(--destructive)',
                 // 오프라인 멤버는 fan-out 대상에서 빠진다 — 사유를 여기서 알려야 재적용을
                 // 무한 반복하지 않는다.
-                title: online ? `${name}: 미적용 — [↻ 재적용] 필요`
-                              : `${name}: 오프라인이라 적용되지 않음 — 노드 복구 후 [↻ 재적용]` },
+                title: online ? `${name}: 미적용 — [재적용] 필요`
+                              : `${name}: 오프라인이라 적용되지 않음 — 노드 복구 후 [재적용]` },
   }[state]
   return (
     <span title={view.title} style={{ color: view.color, fontSize: 12, marginRight: 8 }}>
@@ -146,7 +147,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
           <button onClick={reapplyAll} style={btnSmall()}
                   disabled={applying || declared.length === 0}
                   title="선언된 마운트를 전 멤버에 다시 적용 — 오프라인이었거나 나중에 편입된 멤버 복구">
-            ↻ 재적용
+            <RotateCw size={13} /> 재적용
           </button>
         </div>
       </div>

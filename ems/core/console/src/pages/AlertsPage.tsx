@@ -10,6 +10,7 @@
 //   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
+import { RotateCw } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
@@ -207,7 +208,7 @@ export function AlarmHistoryFilter() {
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
-      <button className="btn btn--ghost btn--sm" onClick={reload}>↻</button>
+      <button className="btn btn--ghost btn--sm" onClick={reload} title="새로고침"><RotateCw size={14} /></button>
     </div>
   )
 }
@@ -490,7 +491,7 @@ export function EventHistoryFilter() {
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
-      <button className="btn btn--ghost btn--sm" onClick={reload}>↻</button>
+      <button className="btn btn--ghost btn--sm" onClick={reload} title="새로고침"><RotateCw size={14} /></button>
     </div>
   )
 }

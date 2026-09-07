@@ -4,6 +4,7 @@
 // 드래그 중엔 placeholder ghost 로 착지 지점을 스냅해 보여주고, pointerup 에 gridLayout(moveItem/applyBox)
 // 으로 커밋 → 겹침은 아래로 밀리고 빈칸은 위로 당겨진다(compaction). 배치 상태는 부모(EditableLayout) draft 소유.
 
+import { Lock, LockOpen, Settings } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import WidgetApiBadge from '../components/WidgetApiBadge'
@@ -131,7 +132,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
   const dragRef = useRef<DragState | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
-  const [cfgOpen, setCfgOpen] = useState<number | null>(null)   // [⚙] 설정 패널이 열린 카드 index
+  const [cfgOpen, setCfgOpen] = useState<number | null>(null)   // [설정] 패널이 열린 카드 index
 
   const measure = () => {
     const el = canvasRef.current
@@ -306,7 +307,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
                                position: 'relative', zIndex: 7,
                                color: p.locked ? 'var(--primary)' : undefined }}
                       onPointerDown={e => e.stopPropagation()}
-                      onClick={() => onChange(setLockedAt(widgets, i, !p.locked))}>{p.locked ? '🔒' : '🔓'}</button>
+                      onClick={() => onChange(setLockedAt(widgets, i, !p.locked))}>{p.locked ? <Lock size={12} /> : <LockOpen size={12} />}</button>
               {/* 카드(여러 블록을 담은 것)면 **바로 카드 안 편집으로 들어간다** — 중간에 패널을 한 번
                   더 거치게 하지 않는다. 그 밖의 위젯은 배치 설정 패널을 연다.
                   할 수 있는 일이 없으면 비활성 — "의미 없는 톱니바퀴"를 남기지 않는다.
@@ -320,7 +321,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
                       onClick={() => {
                         if (def?.cardLayout && onEditInside) { setCfgOpen(null); onEditInside(i); return }
                         setCfgOpen(o => (o === i ? null : i))
-                      }}>⚙</button>
+                      }}><Settings size={12} /></button>
               <button className="btn btn--sm" title="제거"
                       style={{ color: 'var(--destructive)', position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}

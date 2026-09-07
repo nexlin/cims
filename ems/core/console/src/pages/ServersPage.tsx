@@ -1,4 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Hourglass, Lock, Pencil, Play, RotateCw, Square, Stethoscope, Undo2, X } from 'lucide-react'
+import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   deploymentApi,
@@ -433,7 +434,7 @@ export default function ServersPage() {
                       marginBottom: -2, cursor: 'pointer',
                     }}
                     title={locked ? '조회 가능 — 변경은 admin 권한 필요 (관리자 인증)' : ''}>
-              {t.label}{locked && <span style={{ marginLeft: 5, fontSize: 11 }}>🔒</span>}
+              {t.label}{locked && <Lock size={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}
             </button>
           )
         })}
@@ -649,7 +650,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                    background: isSelected ? 'var(--cims-brand-soft)' : 'var(--muted)',
                  }}>
               <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
-                    style={{ width: 14, color: 'var(--muted-foreground)' }}>{isOpen ? '▼' : '▶'}</span>
+                    style={{ width: 14, color: 'var(--muted-foreground)' }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
               <span style={{
                 background: modeColor, color: '#fff', fontSize: 10,
                 padding: '1px 5px', borderRadius: 3,
@@ -1042,12 +1043,12 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                  style={{ flex: 1 }} />
           <button className="btn btn--sm btn--primary" onClick={applyMeta} disabled={!metaDirty}
                   title="이름/auth_pass/note 변경을 backend 에 적용 (즉시 keepalived 반영)">
-            ▶ 적용
+            <Play size={13} /> 적용
           </button>
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-        {/* 절체 조건 — 그룹 단위 설정. 자체 [▶ 적용] 으로 그 영역만 backend push. AS 만. */}
+        {/* 절체 조건 — 그룹 단위 설정. 자체 [적용] 으로 그 영역만 backend push. AS 만. */}
         {group.mode === 'active_standby' && (
           <div style={{ marginBottom: 20 }}>
             <FailoverSection
@@ -1078,7 +1079,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
             {group.mode === 'active_standby' && (
               <button className="btn btn--sm btn--primary" onClick={applyMembers} disabled={!masterChanged}
                       title="Master 변경을 backend 에 적용 (priority swap + keepalived 즉시 반영)">
-                ▶ 적용
+                <Play size={13} /> 적용
               </button>
             )}
           </div>
@@ -1184,7 +1185,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                     disabled={(!vipManual && availableSlots.length === 0) || bindingEditMode !== null}
                     title={(!vipManual && availableSlots.length === 0)
                       ? '먼저 멤버 서버의 [네트워크] 탭에서 IP 의 용도를 입력하세요 (또는 [수동 입력])'
-                      : '새 VIP 행 추가 (편집 모드 — 저장 후 [▶ 적용] 로 backend 반영)'}>
+                      : '새 VIP 행 추가 (편집 모드 — 저장 후 [적용] 로 backend 반영)'}>
               + VIP 추가
             </button>
             {/* 값 변경 없이 keepalived 만 다시 렌더 — 노드가 재설치·복구된 뒤 VIP 설정을
@@ -1192,16 +1193,16 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
             <button className="btn btn--sm" onClick={reapplyVip}
                     disabled={vipDirty || bindingEditMode !== null}
                     title={vipDirty
-                      ? '먼저 [▶ 적용] 으로 변경을 저장하세요'
+                      ? '먼저 [적용] 으로 변경을 저장하세요'
                       : '저장된 VIP 설정을 전 멤버 keepalived 에 다시 내려보냄 (값 변경 없음)'}>
-              ↻ 재적용
+              <RotateCw size={13} /> 재적용
             </button>
             <button className="btn btn--sm btn--primary" onClick={applyVipBindings}
                     disabled={!vipDirty || bindingEditMode !== null}
                     title={bindingEditMode !== null
                       ? '편집 중인 행을 먼저 [저장] 또는 [×] 로 닫으세요'
                       : 'VIP 변경을 backend 에 적용 (즉시 keepalived 반영)'}>
-              ▶ 적용
+              <Play size={13} /> 적용
             </button>
           </div>
         </div>
@@ -1241,7 +1242,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                       <td>
                         <button className="btn btn--sm" style={{ fontSize: 10, padding: '1px 5px' }}
                                 disabled={bindingEditMode !== null}
-                                onClick={() => setBindingEditMode(b.bid)}>✎ 수정</button>
+                                onClick={() => setBindingEditMode(b.bid)}><Pencil size={12} /> 수정</button>
                         <button className="btn btn--sm btn--danger"
                                 style={{ fontSize: 10, padding: '1px 5px', marginLeft: 4 }}
                                 disabled={bindingEditMode !== null}
@@ -1396,7 +1397,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
       <div style={{ padding: '8px 12px', background: 'var(--muted)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
-        <span onClick={onToggle} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
+        <span onClick={onToggle} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <span onClick={onToggle} style={{ cursor: 'pointer' }}>절체 조건 (A/S 전용)</span>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
           감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · {value.preempt === 'preempt' ? '자동복귀' : '복귀없음'}
@@ -1406,7 +1407,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                 onClick={(e) => { e.stopPropagation(); onApply() }}
                 disabled={!dirty}
                 title="절체 조건 변경을 backend 에 적용 (즉시 keepalived 반영)">
-          ▶ 적용
+          <Play size={13} /> 적용
         </button>
       </div>
       {open && (
@@ -1526,7 +1527,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
           )}
 
           <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
-            오른쪽 위 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
+            오른쪽 위 [적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
           </div>
         </div>
       )}
@@ -1613,7 +1614,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
       <div style={{ padding: '8px 12px', background: 'var(--muted)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="모듈별 운영 설정 (앱 설정과 별개) — 각 노드 modules/<mod>/service.json 으로 반영">
-        <span onClick={() => setOpen(v => !v)} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
+        <span onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <span onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer' }}>모듈 운영 명세 (감시 · 절체 모드)</span>
         <InfoDot label="모듈 운영 명세란?">
           이 설정은 앱 설정(config.json)과 별개 파일(service.json)로 각 노드에 저장되며 agent 가
@@ -1627,7 +1628,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
         <button className="btn btn--sm btn--primary" style={{ marginLeft: 'auto' }}
                 onClick={save} disabled={!dirty || saving}
                 title="모듈 운영 명세 변경을 각 멤버 노드에 반영 (service.json + keepalived 재렌더)">
-          ▶ 적용
+          <Play size={13} /> 적용
         </button>
       </div>
       {open && (
@@ -1761,7 +1762,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
               (identifier_model.md). 그래서 별도 확인·경고 없이 바로 고친다. */}
           <button className="btn btn--sm btn--ghost" style={{ padding: '0 6px' }}
                   title="서버 이름 변경 (표시용 — 시스템은 #id 로 동작)"
-                  onClick={() => onRename(a)}>✎</button>
+                  onClick={() => onRename(a)}><Pencil size={12} /></button>
           <span className="tag" style={{
             background: sc.bar, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
           }}>{a.status}</span>
@@ -1778,11 +1779,11 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
                 <button className="btn btn--sm" onClick={() => onMetrics(a)}>메트릭</button>
                 <button className="btn btn--sm" onClick={() => onHealthCheck(a)}
                   disabled={a.status !== 'online'} title="keepalived + 모듈 + VIP 실시간 점검 (sync REST)">
-                  🩺 점검
+                  <Stethoscope size={13} /> 점검
                 </button>
                 <button className="btn btn--sm" onClick={() => onRestart(a)}
                   disabled={a.status !== 'online'} title="agent 프로세스 self-restart (execv)">
-                  ↻ 재시작
+                  <RotateCw size={13} /> 재시작
                 </button>
                 <button className="btn btn--sm" onClick={() => onUpgrade(a)}
                   disabled={a.status !== 'online'} title="agent 바이너리를 최신 버전으로 교체">
@@ -1978,7 +1979,7 @@ function InspectorSection({ title, expanded, onToggle, children }: {
              background: 'var(--muted)', userSelect: 'none',
              borderBottom: expanded ? '1px solid var(--border)' : 'none',
            }}>
-        <span style={{ width: 14, color: 'var(--muted-foreground)', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ width: 14, color: 'var(--muted-foreground)' }}>{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
       </div>
       {expanded && (
@@ -2062,7 +2063,8 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
     setRowBusy(kind)
     try { await fn() } finally { setRowBusy(null) }
   }
-  const rowLbl = (k: RowAction, text: string) => (rowBusy === k ? '⏳ 진행 중' : text)
+  const rowLbl = (k: RowAction, text: ReactNode): ReactNode =>
+    (rowBusy === k ? <><Hourglass size={12} /> 진행 중</> : text)
   const rowTip = (t: string) => (rowBusy ? `${rowBusy} 진행 중 — 완료까지 기다리세요` : t)
   // 상태 배지·색은 실측 우선(depEffectiveStatus) — [패키지 제어] 탭과 동일 기준.
   // 죽어 있으면 마지막 job 결과가 running 이어도 stopped 로 보인다(두 탭 일치).
@@ -2119,11 +2121,11 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
               ? `이전 버전으로 롤백 (v${d.prev_package_version || '?'} · ${d.prev_install_path})`
               : '롤백 대상 없음 (이전 버전 설치 이력 없음)'}
             onClick={() => runRow('rollback', () => onRollback(d))}>
-            {rowLbl('rollback', '⤺ 롤백')}</button>
+            {rowLbl('rollback', <><Undo2 size={12} /> 롤백</>)}</button>
           <button className="btn btn--sm btn--danger" disabled={!!rowBusy}
             title={rowTip('delete')}
             onClick={() => runRow('remove', () => onRemove(d))}>
-            {rowLbl('remove', '✕')}</button>
+            {rowLbl('remove', <X size={12} />)}</button>
         </div>
       </td>
     </tr>
@@ -2206,11 +2208,11 @@ function ProcessControlButtons({ dep: d, agent, onJob }: {
   return (
     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
       <button className="btn btn--sm" disabled={!canStart} title={pendingTip || 'start'}
-        onClick={() => onJob(d, 'start')}>▶ 시작</button>
+        onClick={() => onJob(d, 'start')}><Play size={12} /> 시작</button>
       <button className="btn btn--sm" disabled={!canOps} title={pendingTip || 'restart'}
-        onClick={() => onJob(d, 'restart')}>↻ 재시작</button>
+        onClick={() => onJob(d, 'restart')}><RotateCw size={12} /> 재시작</button>
       <button className="btn btn--sm" disabled={!canOps} title={pendingTip || 'stop'}
-        onClick={() => onJob(d, 'stop')}>■ 정지</button>
+        onClick={() => onJob(d, 'stop')}><Square size={12} /> 정지</button>
     </div>
   )
 }
@@ -2359,7 +2361,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
         <button className="btn btn--sm btn--primary" disabled={!!busy}
                 onClick={() => batch('start')}
                 title="그룹 서비스 시작 — 서비스 의도를 running 으로 두고 무장(VIP 활성). 기준 멤버가 Active 로 기동.">
-          ▶ 일괄 시작
+          <Play size={13} /> 일괄 시작
         </button>
         <button className="btn btn--sm" disabled={!!busy}
                 onClick={() => batch('restart')}
@@ -2369,7 +2371,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
         <button className="btn btn--sm btn--danger" disabled={!!busy}
                 onClick={() => batch('stop')}
                 title="그룹 서비스 중지 — 의도를 stopped 로 두고 비무장(VIP 내려감) + 전 모듈 정지.">
-          ■ 일괄 중지
+          <Square size={13} /> 일괄 중지
         </button>
         {isAS && (
           <button className="btn btn--sm" disabled={!!busy || group.active_agent_id == null}
@@ -2686,7 +2688,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
             </div>
             <button className="btn btn--sm" onClick={regenerate} disabled={regenerating}
                     style={{ marginLeft: 'auto' }}>
-              {regenerating ? '재발급 중...' : '↻ 재발급'}
+              {regenerating ? '재발급 중...' : <><RotateCw size={13} /> 재발급</>}
             </button>
           </div>
           <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
@@ -3191,7 +3193,7 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
           <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 10, lineHeight: 1.7 }}>
             · 파일만 설치되고 <b>자동으로 시작하지 않습니다</b> — 확인 후 [패키지 제어] 에서 시작하세요.<br />
             · 설정은 이관됩니다(collection + 배포 설정). 새 항목은 기본값.<br />
-            · 구 버전(v{d.package_version})은 보존되어 곧바로 <b>⤺ 롤백</b> 할 수 있습니다.
+            · 구 버전(v{d.package_version})은 보존되어 곧바로 <b>롤백</b> 할 수 있습니다.
           </div>
         </>
       )}

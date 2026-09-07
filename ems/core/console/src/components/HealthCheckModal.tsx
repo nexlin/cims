@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { deploymentApi, type Agent, type AgentHealthCheck } from '../api/deployment'
 import Modal from './Modal'
+import { RotateCw } from 'lucide-react'
 
 // 단일 agent 의 on-demand 점검 결과 패널 (모달 wrapper 없음 — 재사용 단위).
 // agent sync REST (/health-check) 를 csc admin proxy 로 호출.
@@ -39,7 +40,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
         )}
         {data?.ts && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>ts: {data.ts}</span>}
         <button className="btn btn--sm btn--outline" onClick={() => void refresh()}
-                style={{ marginLeft: 'auto' }}>↻ 새로고침</button>
+                style={{ marginLeft: 'auto' }}><RotateCw size={14} /> 새로고침</button>
       </div>
       {loading && <div className="empty">점검 중...</div>}
       {err && <div style={{ color: '#e74c3c' }}>※ {err}</div>}

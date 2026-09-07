@@ -1,3 +1,4 @@
+import { Play, RotateCw, Square } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { servicesApi, parseServiceStatus, type ServiceName, type ServiceAction } from '../api/services'
@@ -372,14 +373,14 @@ export default function ServicesPage() {
             {activeJob?.kind === 'release' ? '진행 중…'
               : activeJob?.kind === 'build' ? '빌드 중…'
               : activeJob?.kind === 'pkg' ? '패키징 중…'
-              : '▶ 빌드 & 패키징'}
+              : <><Play size={13} /> 빌드 & 패키징</>}
           </button>
           <button className="btn btn--danger" disabled={!!activeJob} onClick={() => { void cleanPackages() }}
                   title="패키지 산출물 (tarball 들 + manifest.json) 삭제. 빌드 결과는 유지.">
             🗑 정리
           </button>
           <button className="btn btn--outline" onClick={() => { void load(); void loadPackages(); void loadManifest() }}>
-            ↻ 새로고침
+            <RotateCw size={13} /> 새로고침
           </button>
         </div>
       </div>
@@ -473,13 +474,13 @@ export default function ServicesPage() {
                           onClick={() => toggleRunning(card.key, running, !!card.critical)}
                           title={running ? '종료' : '기동'}
                         >
-                          {running ? '■' : '▶'}
+                          {running ? <Square size={12} /> : <Play size={12} />}
                         </button>
                         <button className="btn btn--sm btn--outline"
                           disabled={disabled || !running}
                           onClick={() => act(card.key, 'restart', !!card.critical)}
                           title="재기동">
-                          ↻
+                          <RotateCw size={12} />
                         </button>
                       </div>
                     </div>
@@ -555,7 +556,7 @@ export default function ServicesPage() {
                 ? (jobStatus.stdout_tail || '(no output yet)').replace(/\x1b\[[0-9;]*m/g, '')
                 : showModule && lastModule
                 ? (lastModule.output || '(no output)').replace(/\x1b\[[0-9;]*m/g, '').replace(/\[[0-9;]*m/g, '')
-                : '$ ⚙ 전체 빌드 / 패키지화 / 모듈 시작·정지·재시작 시 출력이 여기에 표시됩니다.\n'
+                : '$ 전체 빌드 / 패키지화 / 모듈 시작·정지·재시작 시 출력이 여기에 표시됩니다.\n'
               return (
                 <>
                   <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', flex: '0 0 auto' }}>

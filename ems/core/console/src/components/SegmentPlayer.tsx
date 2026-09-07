@@ -1,3 +1,4 @@
+import { Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { recordingsApi, type RecordingSegment } from '../api/recordings'
 
@@ -408,7 +409,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                     <input type="checkbox" checked={isChecked}
                       onChange={() => toggleCheck(seg.seq)} />
                   </td>
-                  <td>{isActive && isPlaying ? '▶' : seg.seq}</td>
+                  <td>{isActive && isPlaying ? <Play size={11} /> : seg.seq}</td>
                   {callType === 'ptt' && <td>{segSpeakers(seg)}</td>}
                   <td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</td>
                   <td className="ts">{fmtMs(seg.duration_ms)}</td>

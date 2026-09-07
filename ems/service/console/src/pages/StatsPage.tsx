@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { statsApi, type MessagesResponse, type ServiceStatsResponse,
          type CallsResponse, type CallCell } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
+import { RotateCw } from 'lucide-react'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
@@ -207,7 +208,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       {/* 재조회 중에도 기존 데이터 유지 — 전체가 '로딩 중' 으로 갈리는 레이아웃 점프 방지 */}
       {loading && !msgData && !svcData && <div className="empty">로딩 중...</div>}
       {loading && (msgData || svcData) && (
-        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', padding: '2px 4px' }}>↻ 갱신 중…</div>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', padding: '2px 4px' }}><RotateCw size={12} style={{ verticalAlign: '-2px' }} /> 갱신 중…</div>
       )}
 
       {/* 메시지 통계 */}

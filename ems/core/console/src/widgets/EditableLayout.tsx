@@ -3,6 +3,7 @@
 // 편집 진입 시 legacy(flow) 레이아웃은 grid 로 1회 migrate(flowToGrid). 좁은 화면에선 편집 비활성.
 // 영속: OAM /console/layouts/<id> (PUT 저장 / DELETE seed 리셋). 없으면 seed.
 
+import { Pencil } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -283,7 +284,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
     <div className="layout-edit-headerbar">
       {!editing ? (
         <button className="btn btn--sm layout-edit-fab" onClick={beginEdit}
-                title="이 페이지를 위젯으로 편집">✎ 편집</button>
+                title="이 페이지를 위젯으로 편집"><Pencil size={13} /> 편집</button>
       ) : (
         <>
           <span className="layout-edit-hint">
@@ -368,7 +369,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
         {!editing ? (
           layout.widgets.length === 0 ? (
             <div className="empty" style={{ padding: 40, textAlign: 'center' }}>
-              아직 위젯이 없습니다{isAdmin ? ' — 상단 [✎ 편집]으로 위젯을 배치하세요.' : '.'}
+              아직 위젯이 없습니다{isAdmin ? ' — 상단 [편집]으로 위젯을 배치하세요.' : '.'}
             </div>
           ) : <GridRenderer layout={layout} />
         ) : draft && (

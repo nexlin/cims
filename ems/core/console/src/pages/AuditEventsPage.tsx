@@ -9,6 +9,7 @@ import { useToast } from '../components/Toast'
 import { Pager } from '../components/ListControls'
 import { usePageParam } from '../widgets/pageParams'
 import { eventTypeLabel, fmtTime, downloadCsv } from '../utils/alarmLabels'
+import { RotateCw } from 'lucide-react'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -111,7 +112,7 @@ export function AuditEventsSection() {
                value={q} onChange={e => setQ(e.target.value)} />
         <button className="btn btn--ghost btn--sm" onClick={exportCsv} style={{ marginLeft: 'auto' }}
                 disabled={filtered.length === 0}>CSV</button>
-        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
+        <button className="btn btn--ghost btn--sm" onClick={load} title="새로고침"><RotateCw size={14} /></button>
       </div>
 
       <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

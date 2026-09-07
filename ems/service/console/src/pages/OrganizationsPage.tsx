@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import IconBtn from '@core/components/IconBtn'
 import { orgApi, type Organization, type OrgInput } from '@core/api/organizations'
 import { useToast } from '@core/components/Toast'
@@ -184,7 +184,7 @@ export default function OrganizationsPage() {
             선택 삭제 ({selected.size}건)
           </button>
         )}
-        <button className="btn btn--ghost btn--sm" onClick={load}>↻</button>
+        <button className="btn btn--ghost btn--sm" onClick={load} title="새로고침"><RotateCw size={14} /></button>
       </div>
 
       {/* 테이블 */}
@@ -236,7 +236,7 @@ export default function OrganizationsPage() {
                             style={{ width: 18, textAlign: 'center', cursor: hasChildren ? 'pointer' : 'default', userSelect: 'none', fontSize: 11 }}
                             onClick={() => { if (hasChildren) toggleExpand(n.id) }}
                           >
-                            {hasChildren ? (isExpanded ? '▼' : '▶') : '●'}
+                            {hasChildren ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : '●'}
                           </span>
                           <span style={{ fontWeight: 500 }}>{n.name}</span>
                         </div>

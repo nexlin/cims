@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react'
 
 // ── 공통 데이터 테이블 ────────────────────────────────────────
 //  구성(조직/사용자/번호/PTT그룹) 4페이지의 중복 테이블 로직을 흡수하는 단일 컴포넌트.
@@ -124,7 +125,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 onClick={() => toggleSort(c)}>
                 {c.header}
                 {c.sortable && sortKey === c.key && (
-                  <span style={{ marginLeft: 4, fontSize: 10 }}>{sortDir === 'asc' ? '▲' : sortDir === 'desc' ? '▼' : ''}</span>
+                  <span style={{ marginLeft: 4, display: 'inline-flex', verticalAlign: '-2px' }}>{sortDir === 'asc' ? <ChevronUp size={12} /> : sortDir === 'desc' ? <ChevronDown size={12} /> : null}</span>
                 )}
               </th>
             ))}
@@ -178,9 +179,9 @@ export function DataTable<T>(props: DataTableProps<T>) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12, color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)' }}>
           <span>{sorted.length}건</span>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button className="btn btn--ghost btn--sm" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))}>◀</button>
+            <button className="btn btn--ghost btn--sm" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))} title="이전 페이지"><ChevronLeft size={14} /></button>
             <span>{safePage + 1} / {totalPages}</span>
-            <button className="btn btn--ghost btn--sm" disabled={safePage >= totalPages - 1} onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))}>▶</button>
+            <button className="btn btn--ghost btn--sm" disabled={safePage >= totalPages - 1} onClick={() => setPage(Math.min(totalPages - 1, safePage + 1))} title="다음 페이지"><ChevronRight size={14} /></button>
           </span>
         </div>
       )}

@@ -10,6 +10,7 @@ import { useToast } from '../components/Toast'
 import { useAlarms, refreshAlarms, severityOf, type ActiveAlarm } from '../widgets/useAlarms'
 import { alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_LABEL } from '../utils/alarmLabels'
 import { usePageParam } from '../widgets/pageParams'
+import { RotateCw } from 'lucide-react'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -125,7 +126,7 @@ export function ActiveAlarmList() {
         <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
           {error ? '갱신 실패 — 표시가 최신이 아닐 수 있음' : lastUpdated ? `갱신 ${fmtTime(new Date(lastUpdated).toISOString())} · 라이브` : ''}
         </span>
-        <button className="btn btn--ghost btn--sm" onClick={refreshAlarms}>↻</button>
+        <button className="btn btn--ghost btn--sm" onClick={refreshAlarms} title="새로고침"><RotateCw size={14} /></button>
       </div>
 
       <div className="panel">

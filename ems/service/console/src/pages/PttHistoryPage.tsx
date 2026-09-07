@@ -8,6 +8,7 @@
  * "이 그룹의 최근 활동" 은 여기가 아니라 **PTT 그룹 › 활동** 탭에서 본다
  * (PttGroupsWorkbenchPage). 이력 페이지가 그룹 목록을 다시 그릴 이유가 없다.
  */
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import {
   pttApi, type PttSessionRow, type PttGroupSummary, type PttSessionKind,
@@ -416,7 +417,7 @@ export default function PttHistoryPage() {
             </select>
             <button className="btn btn--sm btn--ghost" title={order === 'desc' ? '내림차순' : '오름차순'}
                     onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
-              {order === 'desc' ? '▼' : '▲'}
+              {order === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
             </button>
             <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-foreground)' }}>
               {loading ? '조회 중…' : `${total}건`}

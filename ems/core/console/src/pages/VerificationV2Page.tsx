@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight, Eraser, Play, Square } from 'lucide-react'
 import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
 
 import { verifyApi, type VerifyStagesOverview, type ItemsProgress, type VerifyEnvResponse } from '../api/verification'
@@ -361,7 +362,7 @@ function GlobalHeader({
           transition: 'background 0.2s',
         }}
       >
-        {running ? '⏹ 전체검증 중단' : '▶ 전체검증'}
+        {running ? <><Square size={13} /> 전체검증 중단</> : <><Play size={13} /> 전체검증</>}
       </button>
 
       {/* 데이터 초기화 (prep-reset) — 검증 회차에서 분리된 사전 cleanup */}
@@ -380,7 +381,7 @@ function GlobalHeader({
           transition: 'background 0.2s',
         }}
       >
-        {prepResetRunning ? '⏹ 초기화 중단' : '🧹 데이터 초기화'}
+        {prepResetRunning ? <><Square size={13} /> 초기화 중단</> : <><Eraser size={13} /> 데이터 초기화</>}
       </button>
 
       {/* 재개 지점 dropdown — Run 옆 */}
@@ -494,7 +495,7 @@ function StageRow({
         onClick={onToggle}
       >
         <span className="v2-no-print" style={{ fontSize: 14, color: 'var(--muted-foreground)' }}>
-          {expanded ? '▼' : '▶'}
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </span>
         <div style={{
           width: 28, height: 28, borderRadius: 14,
@@ -541,7 +542,7 @@ function StageRow({
             opacity: (anyRunning && !isThisRunning) ? 0.5 : 1,
           }}
         >
-          {isThisRunning ? '⏹ 중단' : '▶ 검증'}
+          {isThisRunning ? <><Square size={12} /> 중단</> : <><Play size={12} /> 검증</>}
         </button>
       </div>
 
@@ -614,7 +615,7 @@ function StageRow({
                             onClick={() => toggleGroup(it.id)}
                             style={{ cursor: 'pointer', marginRight: 4, color: 'var(--muted-foreground)' }}
                           >
-                            {groupOpen ? '▼' : '▶'}
+                            {groupOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                           </span>
                         )}
                         <code style={{ fontSize: 11, fontWeight: 600 }}>{it.id}</code>
@@ -1117,8 +1118,8 @@ export default function VerificationV2Page() {
       }}>
         <b>ℹ 안내</b>
         <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
-          <li>전체검증 ▶ — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>
-          <li>Stage 단독 ▶ — 해당 stage 의 부모/평면 항목만 (그룹은 자식 자동 포함)</li>
+          <li>전체검증 — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>
+          <li>Stage 단독 — 해당 stage 의 부모/평면 항목만 (그룹은 자식 자동 포함)</li>
           <li>1.5초 폴링으로 진행 상태 갱신. 완료 시 회차 #ID 가 위에 표시되고 <a href="/release/verify-history">이력 페이지</a>에 자동 기록됨</li>
           <li>S5 22 step 모두 native Python 포팅 완료 — 자식 단독 실행 가능 (예: <code>S5-CSC-DEPLOY-INSTALL</code> 만 선택)</li>
           <li>S6-ENTRY-CHECK 가 immutability gate 검사 — S5-MODULES-RUN-START 가 기록한 <code>.deployed-manifest.json</code> ↔ <code>packages/manifest.json</code> SHA-256 매칭</li>

@@ -16,6 +16,7 @@
 //  데이터가 새 템플릿에 얹히지 않게 한다. 정본: oam_base_service_split.md §14.6.
 //
 //  서버 개별(scope=system) 설정은 여기 없음 — 각 서버 선택 → [패키지 설정] 탭.
+import { RotateCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -431,7 +432,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
         })}
         <button className="btn btn--sm" style={{ marginLeft: 'auto', marginBottom: 6 }}
                 onClick={() => void load()} disabled={loading}>
-          {loading ? '로딩...' : '↻ 새로고침'}
+          {loading ? '로딩...' : <><RotateCw size={13} /> 새로고침</>}
         </button>
       </div>
 
