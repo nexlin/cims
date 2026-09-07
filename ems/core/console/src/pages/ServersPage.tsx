@@ -457,46 +457,15 @@ export default function ServersPage() {
     } catch (e) { show((e as Error).message, 'err') }
   }
 
+  // ContextBar 가 인스펙터 밖(탭 위)으로 나가면서 [재설치]→설치안내 펼침 연결이 끊긴다.
+  // 값이 오를 때마다 인스펙터가 섹션을 펼치고 token 재발급을 건다.
+  const [reinstallSignal, setReinstallSignal] = useState(0)
+
   if (loading) return <div className="empty">로딩 중...</div>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
       {/* 페이지 탭 — 좌측 선택(서버/그룹) 공유, 우측 내용 전환 */}
-      {/* 4탭 — 정본 = Figma Sec/Tabs (458:8459). 높이 31 · 탭 사이 20 · 활성은 primary 밑줄.
-          구 코드는 밑줄색이 `#1976d2` 하드코딩이었다(토큰과 다른 파랑). */}
-      <div className="flex items-center gap-5 border-b-2 border-border" role="tablist">
-        {PAGE_TABS.map(t => {
-          const active = pageTab === t.key
-          const locked = t.adminGated && !canEdit
-          return (
-            <button key={t.key} onClick={() => setPageTab(t.key)}
-                    role="tab" aria-selected={active}
-                    className={`-mb-0.5 flex h-[31px] items-center border-b-2 text-md transition-colors ${
-                      active ? 'border-primary font-semibold text-primary'
-                             : 'border-transparent text-muted-foreground hover:text-foreground'}`}
-                    title={locked ? '조회 가능 — 변경은 admin 권한 필요 (관리자 인증)' : ''}>
-              {t.label}{locked && <Lock size={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}
-            </button>
-          )
-        })}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
-          {!hasRole(user, 'admin') && (
-            canEdit && elevationActive() ? (
-              <span style={{ fontSize: 12, color: 'var(--cims-success)' }}>
-                🔓 admin 승격 중
-                <button className="btn btn--sm btn--outline" style={{ marginLeft: 6 }}
-                        onClick={() => clearElevatedToken()}>해제</button>
-              </span>
-            ) : (
-              <button className="btn btn--sm" onClick={() => setElevateOpen(true)}
-                      title="admin 패스워드로 30분 승격 — 시스템 구성/패키지 설치 변경 허용">
-                🔐 관리자 인증
-              </button>
-            )
-          )}
-        </div>
-      </div>
-
       {/* 좌측 트리 + 우측 Inspector */}
       <div style={{ flex: 1, display: 'flex', gap: 12, overflow: 'hidden' }}>
         {/* 좌측 트리 */}
@@ -540,7 +509,55 @@ export default function ServersPage() {
             </div>
           )}
         </div>
-        {/* 우측 Inspector */}
+        {/* 우측 열 — 시안 RightColumn: ContextBar(60) → Tabs(31) → 본문.
+            ContextBar 를 탭 **위**에 두어야 어느 탭에 있든 대상이 계속 보인다
+            (decisions.md §3 — 웹은 1탭에서만 보였다). */}
+        <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-hidden">
+          {selectedAgent && (
+            <div className="shrink-0 overflow-hidden rounded-md border border-border bg-card">
+              <ServerContextBar a={selectedAgent}
+                onApprove={approveAgent} onRevoke={revokeAgent} onRemove={removeAgent}
+                onRename={renameAgent} onUpgrade={upgradeAgent} onRestart={restartAgent}
+                onRollbackAgent={rollbackAgent} onMetrics={setMetricsFor}
+                onHealthCheck={setHealthCheckFor}
+                onClickReinstall={() => setReinstallSignal(v => v + 1)} />
+            </div>
+          )}
+        {/* 4탭 — 정본 = Figma Sec/Tabs (458:8459). 높이 31 · 탭 사이 20 · 활성은 primary 밑줄.
+            구 코드는 밑줄색이 `#1976d2` 하드코딩이었다(토큰과 다른 파랑). */}
+        <div className="flex items-center gap-5 border-b-2 border-border" role="tablist">
+          {PAGE_TABS.map(t => {
+            const active = pageTab === t.key
+            const locked = t.adminGated && !canEdit
+            return (
+              <button key={t.key} onClick={() => setPageTab(t.key)}
+                      role="tab" aria-selected={active}
+                      className={`-mb-0.5 flex h-[31px] items-center border-b-2 text-md transition-colors ${
+                        active ? 'border-primary font-semibold text-primary'
+                               : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+                      title={locked ? '조회 가능 — 변경은 admin 권한 필요 (관리자 인증)' : ''}>
+                {t.label}{locked && <Lock size={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}
+              </button>
+            )
+          })}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
+            {!hasRole(user, 'admin') && (
+              canEdit && elevationActive() ? (
+                <span style={{ fontSize: 12, color: 'var(--cims-success)' }}>
+                  🔓 admin 승격 중
+                  <button className="btn btn--sm btn--outline" style={{ marginLeft: 6 }}
+                          onClick={() => clearElevatedToken()}>해제</button>
+                </span>
+              ) : (
+                <button className="btn btn--sm" onClick={() => setElevateOpen(true)}
+                        title="admin 패스워드로 30분 승격 — 시스템 구성/패키지 설치 변경 허용">
+                  🔐 관리자 인증
+                </button>
+              )
+            )}
+          </div>
+        </div>
+        {/* 본문 */}
         <div style={{
           flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
           border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
@@ -554,20 +571,11 @@ export default function ServersPage() {
             ) : (
               // infra/install: 조회는 operator+, 변이는 admin/승격 — fieldset 일괄 잠금
               <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
-                <ServerInspector agent={selectedAgent} mode={pageTab}
+                <ServerInspector agent={selectedAgent} mode={pageTab} reinstallSignal={reinstallSignal}
                   deployments={depsByAgent.get(selectedAgent.id) || []}
                   packages={packages}
                   vipIps={vipIps}
                   mgmtVip={mgmtVip}
-                  onApprove={approveAgent}
-                  onRevoke={revokeAgent}
-                  onRemove={removeAgent}
-                  onRename={renameAgent}
-                  onUpgrade={upgradeAgent}
-                  onRestart={restartAgent}
-                  onRollbackAgent={rollbackAgent}
-                  onMetrics={setMetricsFor}
-                  onHealthCheck={setHealthCheckFor}
                   onAddDeploy={() => setDeployModal({ agent: selectedAgent })}
                   onJob={queueJob}
                   onUpgradeDep={upgradeDeployment}
@@ -621,6 +629,7 @@ export default function ServersPage() {
               왼쪽 트리에서 서버 또는 HA 그룹을 선택하세요
             </div>
           )}
+        </div>
         </div>
       </div>
 
@@ -1747,8 +1756,113 @@ function ModuleSpecSection({ group, deployments, onReload }: {
 
 type InspectorTab = 'install' | 'info' | 'network' | 'modules'
 
-function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVip,
-                          onApprove, onRevoke, onRemove, onRename, onUpgrade, onRestart, onRollbackAgent, onMetrics, onHealthCheck,
+/**
+ * ServerContextBar — 탭 위 지속 컨텍스트 (Scope=Server).
+ * 정본 = Figma Sec/ContextBar 21:2. **4탭 전부에 유지된다** — 어느 탭에 있든 지금 무엇을
+ * 보고 있는지와 그 대상의 액션이 같은 자리에 있어야 한다(decisions.md §3).
+ *
+ *   ● 이름 ✎ (상태) #id · vX ···· [메트릭] [점검] [더보기 ▾]
+ *
+ * 구 헤더는 액션 8개를 한 줄에 늘어놓고 [삭제]를 빨간 solid 로 상시 노출했다(decisions.md §4).
+ * 자주 쓰고 안전한 둘만 밖에 두고 나머지는 드롭다운으로 넣는다. 파괴적 액션은 **행 단위라
+ * outline** — destructive solid 는 그룹/전체 단위에만 쓴다(DESIGN-RULES §2).
+ */
+function ServerContextBar({ a, onApprove, onRevoke, onRemove, onRename, onUpgrade, onRestart,
+                            onRollbackAgent, onMetrics, onHealthCheck, onClickReinstall }: {
+  a: Agent
+  onApprove: (a: Agent) => void
+  onRevoke: (a: Agent) => void
+  onRemove: (a: Agent) => void
+  onRename: (a: Agent) => void
+  onUpgrade: (a: Agent) => void
+  onRestart: (a: Agent) => void
+  onRollbackAgent: (a: Agent) => void
+  onMetrics: (a: Agent) => void
+  onHealthCheck: (a: Agent) => void
+  onClickReinstall: () => void
+}) {
+  return (
+    <div className="flex h-[60px] shrink-0 items-center gap-2 border-b border-border px-3.5">
+      <StatusDot tone={statusTone(a.status)} className="[&>span:last-child]:hidden" />
+      <b className="text-lg">{agentDisplayName(a.name)}</b>
+      {agentDisplayName(a.name) !== a.name && (
+        <span className="text-xs text-muted-foreground">{a.name}</span>
+      )}
+      {/* 이름은 표시 라벨이다 — 시스템은 #id 로 동작하므로 바꿔도 파급이 없다
+          (identifier_model.md). 그래서 별도 확인·경고 없이 바로 고친다. */}
+      <button className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="서버 이름 변경 (표시용 — 시스템은 #id 로 동작)"
+              onClick={() => onRename(a)}><Pencil size={14} /></button>
+      <Badge variant={statusBadge(a.status)}>{a.status}</Badge>
+      <span className="font-mono text-xs text-muted-foreground">
+        #{a.id}{a.agent_version ? ` · v${a.agent_version}` : ''}
+      </span>
+
+      <div className="ml-auto flex items-center gap-1.5">
+        {a.status === 'pending' && (
+          <button className="btn btn--sm btn--primary" onClick={() => onApprove(a)}>승인</button>
+        )}
+        {(a.status === 'online' || a.status === 'offline') && (
+          <>
+            <button className="btn btn--sm" onClick={() => onMetrics(a)}>메트릭</button>
+            <button className="btn btn--sm" onClick={() => onHealthCheck(a)}
+              disabled={a.status !== 'online'} title="keepalived + 모듈 + VIP 실시간 점검 (sync REST)">
+              <Stethoscope size={13} /> 점검
+            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger className="btn btn--sm" title="그 밖의 서버 액션">
+                더보기 <ChevronDown size={13} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRestart(a)}
+                  title="agent 프로세스 self-restart (execv)">
+                  <RotateCw size={13} /> 재시작
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onUpgrade(a)}
+                  title="agent 바이너리를 최신 버전으로 교체">
+                  <ArrowUp size={13} /> 업그레이드
+                </DropdownMenuItem>
+                {/* 롤백은 이전 버전이 보존된 경우에만 나타난다 (screens/server-scope.md) */}
+                {(a.agent_versions || []).filter(v => v && v !== a.agent_version).length > 0 && (
+                  <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRollbackAgent(a)}
+                    title="agent 를 직전(또는 선택) 버전으로 롤백 (current flip + execv)">
+                    <ArrowDown size={13} /> 롤백
+                  </DropdownMenuItem>
+                )}
+                {a.status !== 'online' && (
+                  <DropdownMenuItem onSelect={onClickReinstall}
+                    title="물리 서버 교체 / 신규 install — 새 enrollment_token 발급 + 설치 안내 펼침">
+                    <RefreshCw size={13} /> 재설치
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => onRevoke(a)}>폐기</DropdownMenuItem>
+                {/* AS 그룹 멤버는 단독 삭제 불가 — 비활성 + **사유 병기**(DESIGN-RULES §2·§3) */}
+                <DropdownMenuItem className="text-destructive focus:text-destructive"
+                  disabled={a.ha_group?.mode === 'active_standby'}
+                  onSelect={() => onRemove(a)}>
+                  <Trash2 size={13} /> 삭제
+                  {a.ha_group?.mode === 'active_standby' && (
+                    <span className="ml-auto text-xs text-[var(--cims-text-disabled)]">그룹 삭제로만 가능</span>
+                  )}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
+        {a.status !== 'online' && a.status !== 'offline' && a.status !== 'pending' && (
+          <button className="btn btn--sm btn--outline" onClick={() => onRemove(a)}
+                  disabled={a.ha_group?.mode === 'active_standby'}
+                  title={a.ha_group?.mode === 'active_standby'
+                    ? 'AS 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제로만 가능'
+                    : '서버 삭제 (관련 deployment 도 같이 제거)'}>삭제</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVip, reinstallSignal,
                           onAddDeploy, onJob, onUpgradeDep, onRollback, onRemoveDep }: {
   agent: Agent
   // infra=시스템/서버 구성 (설치안내/정보/네트워크), install=패키지 설치 (모듈 파일 배치),
@@ -1759,15 +1873,8 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
   vipIps?: Set<string>
   /** 관리평면(oam 호스팅) 그룹의 VIP — OAM 접속 주소 권장값 */
   mgmtVip?: string | null
-  onApprove: (a: Agent) => void
-  onRevoke: (a: Agent) => void
-  onRemove: (a: Agent) => void
-  onRename: (a: Agent) => void
-  onUpgrade: (a: Agent) => void
-  onRestart: (a: Agent) => void
-  onRollbackAgent: (a: Agent) => void
-  onMetrics: (a: Agent) => void
-  onHealthCheck: (a: Agent) => void
+  /** ContextBar 의 [재설치] 신호 — 값이 오르면 설치 안내를 펼치고 token 재발급을 건다 */
+  reinstallSignal: number
   onAddDeploy: () => void
   onJob: (d: Deployment, jt: JobType) => void
   onUpgradeDep: (d: Deployment) => void
@@ -1784,12 +1891,14 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
     if (hasPendingInstall) init.add('install')
     return init
   })
-  // 헤더 [🔄 재설치] 클릭 시 InstallSection 자동 펼침 + 즉시 token 재발급.
+  // ContextBar 의 [재설치] — 이제 바가 탭 위로 올라가 인스펙터 밖에 있으므로 시그널로 잇는다.
+  // 값이 오르면 설치 안내 섹션을 펼치고 token 재발급을 건다.
   const [autoRegenSignal, setAutoRegenSignal] = useState(0)
-  function onClickReinstall() {
+  useEffect(() => {
+    if (!reinstallSignal) return
     setOpenSections(prev => new Set(prev).add('install'))
-    setAutoRegenSignal(s => s + 1)
-  }
+    setAutoRegenSignal(v => v + 1)
+  }, [reinstallSignal])
   const toggleSection = (s: InspectorTab) => {
     setOpenSections(prev => {
       const next = new Set(prev)
@@ -1800,90 +1909,6 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
 
   return (
     <>
-      {/* ContextBar (Scope=Server) — 정본 = Figma Sec/ContextBar 21:2.
-          `● 이름 ✎ (상태) #id · vX ···· [메트릭] [점검] [더보기 ▾]`
-          구 코드는 액션 7개를 한 줄에 늘어놓고 [삭제]를 빨간 solid 로 상시 노출했다
-          (decisions.md §4). 자주 쓰고 안전한 둘만 밖에, 나머지는 드롭다운으로 넣는다.
-          파괴적 액션은 **행 단위라 outline**, destructive solid 는 그룹/전체 단위에만
-          쓴다(DESIGN-RULES §2). */}
-      <div className="flex h-[60px] shrink-0 items-center gap-2 border-b border-border px-3.5">
-        <StatusDot tone={statusTone(a.status)} className="[&>span:last-child]:hidden" />
-        <b className="text-lg">{agentDisplayName(a.name)}</b>
-        {agentDisplayName(a.name) !== a.name && (
-          <span className="text-xs text-muted-foreground">{a.name}</span>
-        )}
-        {/* 이름은 표시 라벨이다 — 시스템은 #id 로 동작하므로 바꿔도 파급이 없다
-            (identifier_model.md). 그래서 별도 확인·경고 없이 바로 고친다. */}
-        <button className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                title="서버 이름 변경 (표시용 — 시스템은 #id 로 동작)"
-                onClick={() => onRename(a)}><Pencil size={14} /></button>
-        <Badge variant={statusBadge(a.status)}>{a.status}</Badge>
-        <span className="font-mono text-xs text-muted-foreground">
-          #{a.id}{a.agent_version ? ` · v${a.agent_version}` : ''}
-        </span>
-
-        <div className="ml-auto flex items-center gap-1.5">
-          {a.status === 'pending' && (
-            <button className="btn btn--sm btn--primary" onClick={() => onApprove(a)}>승인</button>
-          )}
-          {(a.status === 'online' || a.status === 'offline') && (
-            <>
-              <button className="btn btn--sm" onClick={() => onMetrics(a)}>메트릭</button>
-              <button className="btn btn--sm" onClick={() => onHealthCheck(a)}
-                disabled={a.status !== 'online'} title="keepalived + 모듈 + VIP 실시간 점검 (sync REST)">
-                <Stethoscope size={13} /> 점검
-              </button>
-              <DropdownMenu>
-                <DropdownMenuTrigger className="btn btn--sm" title="그 밖의 서버 액션">
-                  더보기 <ChevronDown size={13} />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRestart(a)}
-                    title="agent 프로세스 self-restart (execv)">
-                    <RotateCw size={13} /> 재시작
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onUpgrade(a)}
-                    title="agent 바이너리를 최신 버전으로 교체">
-                    <ArrowUp size={13} /> 업그레이드
-                  </DropdownMenuItem>
-                  {/* 롤백은 이전 버전이 보존된 경우에만 나타난다 (screens/server-scope.md) */}
-                  {(a.agent_versions || []).filter(v => v && v !== a.agent_version).length > 0 && (
-                    <DropdownMenuItem disabled={a.status !== 'online'} onSelect={() => onRollbackAgent(a)}
-                      title="agent 를 직전(또는 선택) 버전으로 롤백 (current flip + execv)">
-                      <ArrowDown size={13} /> 롤백
-                    </DropdownMenuItem>
-                  )}
-                  {a.status !== 'online' && (
-                    <DropdownMenuItem onSelect={onClickReinstall}
-                      title="물리 서버 교체 / 신규 install — 새 enrollment_token 발급 + 설치 안내 펼침">
-                      <RefreshCw size={13} /> 재설치
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onSelect={() => onRevoke(a)}>폐기</DropdownMenuItem>
-                  {/* AS 그룹 멤버는 단독 삭제 불가 — 비활성 + **사유 병기**(DESIGN-RULES §2·§3) */}
-                  <DropdownMenuItem className="text-destructive focus:text-destructive"
-                    disabled={a.ha_group?.mode === 'active_standby'}
-                    onSelect={() => onRemove(a)}>
-                    <Trash2 size={13} /> 삭제
-                    {a.ha_group?.mode === 'active_standby' && (
-                      <span className="ml-auto text-xs text-[var(--cims-text-disabled)]">그룹 삭제로만 가능</span>
-                    )}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          )}
-          {a.status !== 'online' && a.status !== 'offline' && a.status !== 'pending' && (
-            <button className="btn btn--sm btn--outline" onClick={() => onRemove(a)}
-                    disabled={a.ha_group?.mode === 'active_standby'}
-                    title={a.ha_group?.mode === 'active_standby'
-                      ? 'AS 그룹의 멤버는 단독 삭제 불가 — 그룹 삭제로만 가능'
-                      : '서버 삭제 (관련 deployment 도 같이 제거)'}>삭제</button>
-          )}
-        </div>
-      </div>
-
       {/* 섹션 stack — 페이지 탭에 따라: infra=구성(설치안내/정보/네트워크), install=모듈 */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         {mode === 'infra' && (
