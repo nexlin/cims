@@ -17,6 +17,9 @@ namespace DispatchDesktop.Services;
 public sealed class HistoryClient : IDisposable
 {
     public const int DefaultIntervalMs = 2500;
+    /// <summary>CSC 연결 실패 시 폴링 백오프 상한.</summary>
+    public const int MaxBackoffMs = 30_000;
+    private int _unreachable;
     public const int PageLimit = 200;
 
     private readonly CscClient _csc;
@@ -70,7 +73,9 @@ public sealed class HistoryClient : IDisposable
                     catch (OperationCanceledException) { return; }
                     catch (Exception ex) { _log.Error($"history {k}: poll failed", ex); }
                 }
-                try { await Task.Delay(intervalMs, ct); } catch (OperationCanceledException) { return; }
+                // CSC 에 닿지 않으면(재배포·망 단절) 지수 백오프 — 최대 MaxBackoffMs. 닿으면 원래 주기로.
+                int delay = _unreachable > 0 ? Math.Min(intervalMs << Math.Min(_unreachable, 6), MaxBackoffMs) : intervalMs;
+                try { await Task.Delay(delay, ct); } catch (OperationCanceledException) { return; }
             }
         }, ct);
     }
@@ -91,9 +96,11 @@ public sealed class HistoryClient : IDisposable
         if (!r.Ok)
         {
             if (r.Code is 404 or 501 or 403) { _log.Warn($"history {kind}: {r.Code} — polling off"); Available = false; Stop(); }
+            else if (r.Code < 0) { if (_unreachable++ == 0) _log.Warn($"history: CSC unreachable ({r.Reason}) — backing off"); }
             else _log.Warn($"history {kind}: {r}");
             return;
         }
+        if (_unreachable > 0) { _log.Info($"history: CSC reachable again after {_unreachable} failed polls"); _unreachable = 0; }
         if (r.Value.NotModified) return;
         var (items, next) = Parse(kind, r.Value.Body);
         _cursor[kind] = (next.Length > 0 ? next : since, r.Value.ETag);

@@ -23,7 +23,8 @@ public sealed partial class PttOngoingRow : ObservableObject
     public int Participants => Group?.ConnectedCount ?? Session?.AdhocMembers.Count ?? 0;
     public string ParticipantsText => Participants > 0 ? $"{Participants}명" : "미상";
     public string Speaker => Session?.Speaker ?? "";
-    public TimeSpan Elapsed => Session?.Elapsed ?? (Group?.RosterAt is DateTime t ? DateTime.Now - t : TimeSpan.Zero);
+    /// <summary>참여/청취 세션 길이, 없으면 로스터로 관측한 세션 길이. 세션 없는 "대기" 행은 비움.</summary>
+    public TimeSpan? Elapsed => Session?.Elapsed ?? (Group?.SessionSince is DateTime t ? DateTime.Now - t : null);
     public bool IsEmergency => Session?.IsEmergency == true;
     public bool HasSession => Session is not null || Group?.HasSession == true;
     public bool IsJoined => Session is not null && !Session.Info.ListenOnly;

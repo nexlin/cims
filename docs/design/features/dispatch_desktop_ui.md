@@ -173,7 +173,7 @@
 
 - **진행 중 행**(범위 안 그룹 = 멤버 그룹 + `pttListen` 대상): 그룹명 · 배지(멤버/청취 범위/임시) · 참가자 수 · 발언자 · 경과 · 긴급 배지 · 조작 —
   멤버 그룹 [채널](① 카드로 포커스·미참여면 `joinGroupCall`), 청취 그룹 **[청취]**(`joinGroupCall(listenOnly)` → 감청 창 §5), 이미 듣고
-  있으면 [청취 중 · 창]. 세션 없는 청취 그룹은 "대기" + [청취] 비활성.
+  있으면 [청취 중 · 창]. 세션 없는 청취 그룹은 "대기" + [청취] 비활성(경과 비움). 참여/청취하지 않는 그룹의 경과는 로스터로 세션을 관측한 시점부터.
 - **상태 소스**: RFC 4575 conference 구독(`subscribeConference` → `onRoster`) — 멤버 그룹은 현행, **청취 범위 그룹은 서버 인가 확장이
   전제**(§13, dispatch_center.md §10). 발언자는 참여/청취 중인 세션만(floor 이벤트).
 - **최근 행**(이벤트 종류): 발언(누가·몇 초 — `onFloor` Granted→Idle) · 긴급/임박 개시·해제 · 세션 시작/종료(참가·길이) · 멤버 합류/이탈(로스터 diff) ·
@@ -427,6 +427,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   ([mcdata_messaging.md §4.3](mcdata_messaging.md)).
   - 요청: `GET /provisioning/history?kind=call|ptt|message&since=<cursor>&limit=200`(CSC 4430, PKCE Bearer, `If-None-Match` → 304). kind 별로 커서·ETag 독립,
     2.5 초 주기. 로그인 직후 `kind=call&limit=1` 탐침 — 404/501 이면 서버 미구현으로 조용히 꺼지고, 403 이면 범위 밖으로 꺼진다(재시도 없음).
+    CSC 에 닿지 않으면(재배포·망 단절) 주기를 지수 백오프(최대 30 초)로 늘리고 경고는 단절·복구 시 한 번씩만 남긴다 — 복구되면 커서 그대로 이어 받는다.
   - 응답(앱이 읽는 것 — 서버 계약 [android_ue_provisioning.md §3-2](android_ue_provisioning.md), 필드 추가는 무시): `{ "items": [ { "id", "time"(ISO 8601+offset),
     "kind", "event", "from", "to", "group"(URI), "duration"(초), "emergency", "text" } ], "next": "<다음 커서>" }` + 응답 헤더 `ETag`(If-None-Match→304).
     `id` 가 중복 제거 키, `items` 는 `time` 오름차순. `event` = call.answered/missed·ptt.session.start/end·message.sds(②)/sms(④) — 앱이 이름표로

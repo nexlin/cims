@@ -161,6 +161,8 @@ public sealed partial class GroupInfo : ObservableObject
     [ObservableProperty] private string _etag = "";
     [ObservableProperty] private IReadOnlyList<RosterEntry> _roster = Array.Empty<RosterEntry>();
     [ObservableProperty] private DateTime? _rosterAt;
+    /// <summary>로스터에 접속 참가자가 생긴 시각(세션 관측 시작) — 없으면 null. ② 진행 중 행의 경과.</summary>
+    [ObservableProperty] private DateTime? _sessionSince;
 
     public GroupInfo(string id, string uri, string name, int memberCount)
     {
@@ -175,5 +177,7 @@ public sealed partial class GroupInfo : ObservableObject
     {
         OnPropertyChanged(nameof(ConnectedCount));
         OnPropertyChanged(nameof(HasSession));
+        if (HasSession) SessionSince ??= DateTime.Now;
+        else SessionSince = null;
     }
 }
