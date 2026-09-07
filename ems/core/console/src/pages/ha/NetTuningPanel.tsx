@@ -71,12 +71,16 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
 
   return (
     <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px', background: 'var(--muted)' }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
-        {title}
-        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 'normal' }}>
-          (sysctl 은 /etc/sysctl.d 영속 · RPS 는 적용+부팅 재적용 · 이 서버 {cores}코어)
-        </span>
-      </div>
+      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
+          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+      {title && (
+        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
+          {title}
+          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 'normal' }}>
+            (sysctl 은 /etc/sysctl.d 영속 · RPS 는 적용+부팅 재적용 · 이 서버 {cores}코어)
+          </span>
+        </div>
+      )}
 
       {/* RPS */}
       <div style={{ fontSize: 12, fontWeight: 'bold', margin: '6px 0 4px' }}>

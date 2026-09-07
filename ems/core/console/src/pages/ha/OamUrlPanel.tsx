@@ -40,17 +40,21 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 4, padding: 12 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-        {title}
-        <InfoDot label="Agent→OAM 보고 주소란?">
-          이 서버의 agent 가 heartbeat·job 결과를 보내는 주소입니다. 관리평면이 이중화면
-          <b> VIP</b> 여야 합니다 — 노드 IP 로 두면 절체 후 이 agent 가 OAM 과 단절되고,
-          콘솔에서는 이 서버가 offline 으로 보입니다.
-          <br /><br />
-          적용하면 agent 가 재기동되어 새 주소로 붙습니다(수 초). 새로 설치되는 agent 가 받는
-          초기 주소는 별도로 <b>oam 설정 &gt; Agent→OAM URL</b> 이 정합니다.
-        </InfoDot>
-      </div>
+      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
+          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+      {title && (
+        <div style={{ fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {title}
+          <InfoDot label="Agent→OAM 보고 주소란?">
+            이 서버의 agent 가 heartbeat·job 결과를 보내는 주소입니다. 관리평면이 이중화면
+            <b> VIP</b> 여야 합니다 — 노드 IP 로 두면 절체 후 이 agent 가 OAM 과 단절되고,
+            콘솔에서는 이 서버가 offline 으로 보입니다.
+            <br /><br />
+            적용하면 agent 가 재기동되어 새 주소로 붙습니다(수 초). 새로 설치되는 agent 가 받는
+            초기 주소는 별도로 <b>oam 설정 &gt; Agent→OAM URL</b> 이 정합니다.
+          </InfoDot>
+        </div>
+      )}
       <div style={{ fontSize: 12, marginBottom: 8 }}>
         현재 보고 주소:{' '}
         {cur ? (

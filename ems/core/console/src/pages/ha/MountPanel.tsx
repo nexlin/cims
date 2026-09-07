@@ -47,12 +47,16 @@ export function MountPanel({ title, mounts, applying, onApply }: {
   return (
     <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
                   background: 'var(--muted)' }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
-        {title}
-        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
-          (콘솔 추가 시 /etc/fstab 에 기록 — 재부팅에도 유지. 네트워크 FS 는 _netdev,nofail 자동)
-        </span>
-      </div>
+      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
+          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+      {title && (
+        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
+          {title}
+          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
+            (콘솔 추가 시 /etc/fstab 에 기록 — 재부팅에도 유지. 네트워크 FS 는 _netdev,nofail 자동)
+          </span>
+        </div>
+      )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>

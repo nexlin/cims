@@ -2058,6 +2058,37 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
   )
 }
 
+/**
+ * SubSection — Level 2 접힘 섹션 (Figma Sec/CollapsibleSectionHeader 19:37).
+ * Level 1(InspectorSection)은 굵은 라벨·굵은 화살표, Level 2 는 중간 굵기·얇은 화살표다.
+ * **중첩은 2단까지** (DESIGN-RULES §2). 제목 옆 괄호 수는 그 섹션이 다루는 행 수,
+ * 힌트는 "무엇을 바꿀 수 있는가" 를 한 줄로 알린다.
+ */
+function SubSection({ title, count, hint, defaultOpen = true, children }: {
+  title: string
+  count?: number
+  hint?: string
+  defaultOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <button onClick={() => setOpen(o => !o)}
+              className="flex h-8 w-full select-none items-center gap-2 text-left">
+        <span className="w-3.5 shrink-0 text-muted-foreground">
+          {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        </span>
+        <span className="text-md font-medium">
+          {title}{count !== undefined && ` (${count})`}
+        </span>
+        {hint && <span className="truncate text-xs text-muted-foreground">{hint}</span>}
+      </button>
+      {open && <div className="pb-3 pl-[22px]">{children}</div>}
+    </div>
+  )
+}
+
 function InspectorSection({ title, expanded, onToggle, children }: {
   title: string
   expanded: boolean
@@ -2658,9 +2689,16 @@ function NetworkTab({ agent: a, vipIps, mgmtVip }: {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div className="flex flex-col">
+    {/* Level 2 접힘 섹션 5개 (Figma S1 49:1369) — IP/Routing · 라우팅 · 마운트 ·
+        OAM 접속 주소 · 네트워크 튜닝. 제목에서 서버명을 뺐다: ContextBar 가 바로 위에서
+        대상을 말하고 있어 매 섹션마다 반복할 이유가 없다.
+        (IP/Routing 과 라우팅은 ServiceIpPanel 이 한 컴포넌트로 렌더한다 — 시안처럼 둘로
+         쪼개려면 그 컴포넌트를 갈라야 해서 별도 단계로 둔다) */}
+    <SubSection title="IP / Routing" count={(a.service_ip_rows || []).length || (a.interfaces || []).length}
+                hint="cims-managed 만 변경 가능 — 외부 IP / mgmt NIC 은 보호">
     <ServiceIpPanel
-      title={`${a.name} — IP / Routing`}
+      title=""
       interfaces={a.interfaces || []}
       storedRows={(a.service_ip_rows || []).map(r => ({ ...r }))}
       storedRoutes={a.routes || []}
@@ -2670,26 +2708,35 @@ function NetworkTab({ agent: a, vipIps, mgmtVip }: {
       onUpdateSlot={onUpdateSlot}
       vipIps={vipIps}
     />
+    </SubSection>
+    <SubSection title="마운트" count={(a.mounts || []).length}
+                hint="콘솔에서 추가하면 /etc/fstab 에 기록되어 재부팅에도 유지 · 네트워크 FS 는 _netdev,nofail 자동">
     <MountPanel
-      title={`${a.name} — 마운트`}
+      title=""
       mounts={a.mounts || []}
       applying={applying}
       onApply={onApplyMounts}
     />
+    </SubSection>
+    <SubSection title="OAM 접속 주소"
+                hint="agent 가 heartbeat·job 결과를 보내는 주소 — 관리평면이 이중화면 VIP 여야 한다">
     <OamUrlPanel
-      title={`${a.name} — OAM 접속 주소 (agent → OAM)`}
+      title=""
       current={a.oam_url}
       vipCandidate={mgmtVip}
       applying={applying}
       onApply={onApplyOamUrl}
       onApplyAll={onApplyOamUrlAll}
     />
+    </SubSection>
+    <SubSection title="네트워크 튜닝" hint="RPS / sysctl — 적용 후 부팅 시 재적용">
     <NetTuningPanel
-      title={`${a.name} — 네트워크 튜닝 (RPS / sysctl)`}
+      title=""
       agent={a}
       applying={applying}
       onApply={onApplyNetTuning}
     />
+    </SubSection>
     </div>
   )
 }
@@ -2794,31 +2841,51 @@ function InstallSection({ agent: a, autoRegenSignal }: {
   )
 }
 
+/**
+ * 정보 — **2열 그리드 12필드** (Figma S1 infoGrid 49:1477).
+ * 열 393 · 열 사이 36 · 라벨 118 · 값 130 부터. 세로로 12줄을 늘어놓으면 아래 네트워크
+ * 섹션이 한참 밀려 한 화면에 안 들어온다.
+ *
+ * IP · 버전 · 시각은 mono (DESIGN-RULES §1-5). 빈 값은 `—` + muted (§1-4).
+ */
 function InfoTab({ agent: a }: { agent: Agent }) {
+  const left: [string, string, boolean?][] = [
+    ['이름', a.name],
+    ['호스트', a.hostname || '—', true],
+    ['IP', a.ip_address || '—', true],
+    ['OS', a.os_info || '—'],
+    ['CPU 코어', a.cpu_cores ? `${a.cpu_cores}` : '—'],
+    ['메모리', a.memory_mb ? `${Math.round(a.memory_mb / 1024)} GB` : '—'],
+  ]
+  const right: [string, string, boolean?][] = [
+    ['디스크', a.disk_gb ? `${a.disk_gb} GB` : '—'],
+    ['Agent 버전', a.agent_version || '—', true],
+    ['등록 시각', a.enrolled_at || '—', true],
+    ['승인 시각', a.approved_at || '—', true],
+    ['마지막 heartbeat', a.last_heartbeat ? `${a.last_heartbeat} (${fmtRelTime(a.last_heartbeat)})` : '—', true],
+    ['메모', a.note || '—'],
+  ]
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 8, columnGap: 12, fontSize: 13 }}>
-      <Field label="이름" value={a.name} />
-      <Field label="호스트" value={a.hostname || '—'} />
-      <Field label="IP" value={a.ip_address || '—'} />
-      <Field label="OS" value={a.os_info || '—'} />
-      <Field label="CPU 코어" value={a.cpu_cores ? `${a.cpu_cores}` : '—'} />
-      <Field label="메모리" value={a.memory_mb ? `${Math.round(a.memory_mb / 1024)} GB` : '—'} />
-      <Field label="디스크" value={a.disk_gb ? `${a.disk_gb} GB` : '—'} />
-      <Field label="Agent 버전" value={a.agent_version || '—'} />
-      <Field label="등록 시각" value={a.enrolled_at || '—'} />
-      <Field label="승인 시각" value={a.approved_at || '—'} />
-      <Field label="마지막 heartbeat" value={`${a.last_heartbeat || '—'} (${fmtRelTime(a.last_heartbeat)})`} />
-      <Field label="메모" value={a.note || '—'} />
+    <div className="grid grid-cols-1 gap-x-9 xl:grid-cols-2">
+      {[left, right].map((col, i) => (
+        <div key={i} className="flex flex-col">
+          {col.map(([label, value, mono]) => (
+            <Field key={label} label={label} value={value} mono={mono} />
+          ))}
+        </div>
+      ))}
     </div>
   )
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  const empty = value === '—'
   return (
-    <>
-      <span style={{ color: 'var(--muted-foreground)' }}>{label}</span>
-      <span>{value}</span>
-    </>
+    <div className="flex min-h-8 items-baseline gap-3 py-1">
+      <span className="w-[118px] shrink-0 text-md text-muted-foreground">{label}</span>
+      <span className={`min-w-0 break-all text-md ${mono ? 'font-mono' : ''} ${
+        empty ? 'text-muted-foreground' : ''}`}>{value}</span>
+    </div>
   )
 }
 

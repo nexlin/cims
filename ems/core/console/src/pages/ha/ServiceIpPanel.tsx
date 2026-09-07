@@ -129,12 +129,16 @@ export function ServiceIpPanel({ title, interfaces, storedRows, storedRoutes, sl
       borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
       background: 'var(--muted)',
     }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
-        {title}
-        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
-          (cims-managed 만 변경 가능 — 외부 IP / mgmt NIC 은 보호)
-        </span>
-      </div>
+      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
+          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+      {title && (
+        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
+          {title}
+          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
+            (cims-managed 만 변경 가능 — 외부 IP / mgmt NIC 은 보호)
+          </span>
+        </div>
+      )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
