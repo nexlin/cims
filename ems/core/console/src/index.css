@@ -228,20 +228,6 @@ body {
 /* ── App shell ─────────────────────────────────────────────── */
 .app { display: flex; flex-direction: column; min-height: 100vh; }
 
-.app-header {
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
-  padding: 0 24px;
-  display: flex;
-  align-items: center;
-  gap: 32px;
-  height: 54px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  box-shadow: var(--cims-elevation-sm);
-}
-
 .app-logo { display: flex; align-items: center; gap: 8px; }
 .app-logo-icon { font-size: 22px; }
 .app-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -.3px; color: var(--primary); }
@@ -1225,13 +1211,7 @@ body {
 /* AppBar 는 Tailwind 로 옮겼다(components/Header.tsx) — 여기 남는 것은 **그리드 배치**뿐이다.
    클래스 이름 `app-header` 는 지우지 않는다: 이 그리드와 인쇄 시 숨김 규칙
    (VerificationV2Page·VerificationHistoryPage 의 @media print)이 이 이름을 쓴다. */
-.app-header {
-  grid-area: header;
-  /* 위쪽 .app-header 정의(height:54px / position:sticky / box-shadow)를 명시적으로 덮는다. */
-  height: auto;
-  position: static;
-  box-shadow: none;
-}
+.app-header { grid-area: header; }
 .app-header-toggle {
   background: none; border: none; color: var(--cims-neutral); cursor: pointer;
   padding: 7px; display: flex; align-items: center; justify-content: center;
