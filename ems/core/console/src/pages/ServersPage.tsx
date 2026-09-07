@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Square, Stethoscope, Trash2, Undo2, X } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Square, Stethoscope, Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -2044,14 +2044,12 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
             </InspectorSection>
           </>
         )}
+        {/* 시안 S2(91:1325)는 이 탭을 **접힘 섹션이 아니라 제목 줄**로 연다 —
+            탭이 이미 스코프를 갈랐으므로 한 겹 더 접을 이유가 없다. */}
         {mode === 'install' && (
-          <InspectorSection title={`모듈 (${deployments.length})`}
-                            expanded={openSections.has('modules')}
-                            onToggle={() => toggleSection('modules')}>
-            <ModulesTab agent={a} deployments={deployments} packages={packages} packagesAvailable={packages.length > 0}
-              onAddDeploy={onAddDeploy}
-              onJob={onJob} onUpgrade={onUpgradeDep} onRollback={onRollback} onRemoveDep={onRemoveDep} />
-          </InspectorSection>
+          <ModulesTab agent={a} deployments={deployments} packages={packages} packagesAvailable={packages.length > 0}
+            onAddDeploy={onAddDeploy}
+            onJob={onJob} onUpgrade={onUpgradeDep} onRollback={onRollback} onRemoveDep={onRemoveDep} />
         )}
         {mode === 'control' && (
           <InspectorSection title={`모듈 제어 (${deployments.length})`}
@@ -2244,49 +2242,102 @@ function ModulesTab({ agent: a, deployments, packages, packagesAvailable,
   onRollback: (d: Deployment) => void
   onRemoveDep: (d: Deployment) => void
 }) {
-  const pkgDesc = new Map(packages.map(p => [p.name, p.description]))
+  const pkgById = new Map(packages.map(p => [p.id, p]))
   return (
-    <>
+    <div className="px-4 pt-3.5">
+      <TitleRow title={`모듈 (${deployments.length})`}
+                hint="설치·버전 관점 — 시작·정지는 «패키지 제어» 탭" />
       {deployments.length === 0 ? (
-        <div className="empty">배포된 모듈 없음</div>
+        // 시안에 이 화면의 빈 상태 문구가 없다 — 현행 웹 문구를 그대로 쓴다(지어내지 않는다).
+        <EmptyState className="mt-2.5" title="배포된 모듈 없음" />
       ) : (
-        <table className="data-table">
+        // 컬럼 폭은 Figma S2(91:1771) 실측. `빌드 · git` 은 시안이 설명 칸에서 떼어낸
+        // 별도 컬럼이다 — 웹은 설명 뒤에 원문이 붙어 행 높이가 제각각이었다 (decisions.md §5).
+        <DataTable className="mt-2.5">
           <thead>
             <tr>
-              <th style={{ width: 10 }}></th>
-              <th>이름</th>
-              <th>설명</th>
-              <th>모듈 · 버전</th>
-              <th>상태</th>
-              <th style={{ width: 300 }}>작업</th>
+              <Th width={186}>모듈</Th>
+              <Th width={96}>버전</Th>
+              <Th width={176}>빌드 · git</Th>
+              <Th width={84}>상태</Th>
+              <Th width={280} align="right">작업</Th>
             </tr>
           </thead>
           <tbody>
             {deployments.map(d => (
               <DeploymentRow key={d.id} dep={d} agent={a} packages={packages}
-                desc={pkgDesc.get(d.package_name || '') ?? null}
+                pkg={pkgById.get(d.package_id) ?? null}
                 onJob={onJob} onUpgrade={onUpgrade} onRollback={onRollback}
                 onRemove={onRemoveDep} />
             ))}
           </tbody>
-        </table>
+        </DataTable>
       )}
-      <div style={{ marginTop: 12, textAlign: 'right' }}>
-        <button className="btn btn--primary btn--sm"
-          disabled={a.status !== 'online' || !packagesAvailable}
-          title={!packagesAvailable ? '패키지 먼저 업로드 필요' : ''}
-          onClick={onAddDeploy}>＋ 모듈 추가</button>
+      {/* 시안은 [+ 모듈 추가] 를 표 아래 왼쪽 Secondary 로 둔다 (185:3125) */}
+      <Button variant="outline" className="mt-2.5"
+        disabled={a.status !== 'online' || !packagesAvailable}
+        onClick={onAddDeploy}>+ 모듈 추가</Button>
+      {(a.status !== 'online' || !packagesAvailable) && (
+        // 비활성 사유는 눈에 보이게 (contracts.md §Button)
+        <div className="mt-1 text-xs text-muted-foreground">
+          {a.status !== 'online'
+            ? '[+ 모듈 추가] 는 서버가 online 일 때 열립니다.'
+            : '[+ 모듈 추가] 는 릴리스에 패키지를 업로드한 뒤 열립니다.'}
+        </div>
+      )}
+      <div className="mt-2.5 text-xs text-muted-foreground">
+        롤백은 이전 버전이 보존된 모듈에서만 활성화됩니다. 긴 설명은 모듈명 아래 한 줄 요약하고
+        전체 설명은 툴팁으로 제공합니다.
       </div>
-    </>
+    </div>
   )
+}
+
+/**
+ * 탭 본문 제목 줄 — 접히지 않는 섹션 머리. 정본 = Figma S2 `titleRow` (91:1749) ·
+ * S4 도 같은 모양이다. 접히는 섹션은 `SubSection`(CollapsibleSectionHeader) 쪽이다.
+ */
+function TitleRow({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="flex h-5 items-center gap-2">
+      <span className="text-md font-semibold">{title}</span>
+      {hint && <span className="truncate text-xs text-muted-foreground">{hint}</span>}
+    </div>
+  )
+}
+
+/**
+ * 패키지 설명에서 백엔드가 붙인 `| build: … | git: … | changelog: …` 꼬리를 뗀다.
+ * 조립 지점은 `oam/src/handlers/agents.py` 의 `desc_lines` 세 곳 — 구조화된 값은
+ * `meta.build_date`/`git_sha`/`git_branch` 에 그대로 있으므로 표는 그쪽을 쓰고,
+ * 설명 칸에는 한 줄 요약만 남긴다 (decisions.md §5).
+ */
+function pkgSummary(desc: string | null | undefined): string {
+  return (desc || '').split(/\s*\|\s*(?:build|git|changelog)\s*:/)[0].trim()
+}
+
+/** meta 가 없는 레거시 패키지를 위한 fallback — 설명 꼬리에서 build/git 을 되읽는다. */
+function pkgBuildGit(pkg: SipPackage | null): { build: string | null; git: string | null } {
+  const m = pkg?.meta
+  if (m?.build_date || m?.git_sha) {
+    return {
+      build: m.build_date || null,
+      git: m.git_sha ? m.git_sha + (m.git_branch ? ` (${m.git_branch})` : '') : null,
+    }
+  }
+  const d = pkg?.description || ''
+  const b = d.match(/\|\s*build\s*:\s*([^|]+)/)
+  const g = d.match(/\|\s*git\s*:\s*([^|]+)/)
+  return { build: b ? b[1].trim() : null, git: g ? g[1].trim() : null }
 }
 
 // [패키지 설치] 탭 모듈 행 — 파일 배치 작업만 (설치/재설치/업그레이드/롤백/삭제).
 // 프로세스 start/stop/restart 는 [패키지 제어] 탭, 설정은 [패키지 설정] 탭.
-function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRollback, onRemove }: {
+function DeploymentRow({ dep: d, agent, packages, pkg, onJob, onUpgrade, onRollback, onRemove }: {
   dep: Deployment; agent: Agent
   packages: SipPackage[]
-  desc: string | null
+  /** 이 배포가 쓰는 패키지 레코드 — 설명·빌드/git 의 출처 */
+  pkg: SipPackage | null
   onJob: (d: Deployment, jt: JobType) => void | Promise<void>
   onUpgrade: (d: Deployment) => void
   onRollback: (d: Deployment) => void | Promise<void>
@@ -2310,7 +2361,6 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
   // 상태 배지·색은 실측 우선(depEffectiveStatus) — [패키지 제어] 탭과 동일 기준.
   // 죽어 있으면 마지막 job 결과가 running 이어도 stopped 로 보인다(두 탭 일치).
   const shown = depEffectiveStatus(d)
-  const sc = depStatusColor(shown)
   const online = agent.status === 'online'
   // pending = 생성만 됨 (파일 없음), stopped = 설치됐지만 실행 안됨
   const notInstalled = d.status === 'pending'
@@ -2325,52 +2375,70 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
   const canUpgrade = online && !notInstalled && !isRunning && upCands.length > 0
   const histTip = (d.install_history || [])
     .map(h => `v${h.version || '?'} ${h.at} ${h.install_path}`).join('\n')
+  const summary = pkgSummary(pkg?.description)
+  const bg = pkgBuildGit(pkg)
+  // 시안에 프로세스 이름 컬럼이 없다. 대개 모듈명과 같지만 다를 때가 있어 툴팁으로 남긴다.
+  const procNote = d.process_name && d.process_name !== d.package_name
+    ? `\n프로세스: ${d.process_name}` : ''
   return (
     <tr>
-      <td style={{ padding: 0 }}>
-        <div style={{ width: 4, background: sc, height: 32 }} />
-      </td>
-      <td><b>{d.process_name || '—'}</b></td>
-      <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
-        {desc || '—'}
-      </td>
-      <td style={{ fontSize: 12 }}
-          title={`설치 경로: ${d.install_path || '—'}${histTip ? `\n\n설치 이력:\n${histTip}` : ''}`}>
-        {d.package_name} <span style={{ color: 'var(--muted-foreground)' }}>v{d.package_version}</span>
-      </td>
-      <td>
-        <span className="tag" style={{
-          background: sc, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-        }}>{shown}</span>
-      </td>
-      <td>
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          <button className="btn btn--sm" disabled={!online || !!rowBusy}
+      <Td>
+        <div className="min-w-0"
+             title={`${pkg?.description || summary || d.package_name || ''}`
+                    + `\n설치 경로: ${d.install_path || '—'}${procNote}`
+                    + `${histTip ? `\n\n설치 이력:\n${histTip}` : ''}`}>
+          <div className="truncate">{d.package_name || '—'}</div>
+          {/* 긴 설명은 한 줄 요약 + 툴팁 (decisions.md §5) */}
+          <div className="truncate text-xs font-normal text-muted-foreground">
+            {summary || '—'}
+          </div>
+        </div>
+      </Td>
+      <Td mono>v{d.package_version || '?'}</Td>
+      <Td className="text-muted-foreground">
+        <div className="font-mono text-xs leading-[1.4]">{bg.build || '—'}</div>
+        <div className="font-mono text-xs leading-[1.4]">{bg.git || '—'}</div>
+      </Td>
+      <Td><Badge variant={depBadge(shown)}>{shown}</Badge></Td>
+      <Td>
+        <div className="flex items-center justify-end gap-1.5">
+          <Button variant="outline" disabled={!online || !!rowBusy}
             title={rowTip('install (파일 배치 + 설정 적용)')}
             onClick={() => runRow('install', () => onJob(d, 'install'))}>
             {rowLbl('install', notInstalled ? '설치' : '재설치')}
-          </button>
-          <button className="btn btn--sm" disabled={!canUpgrade || !!rowBusy}
+          </Button>
+          <Button variant="outline" disabled={!canUpgrade || !!rowBusy}
             title={rowBusy ? rowTip('') : !online ? 'agent 오프라인'
               : notInstalled ? '아직 설치 전 — [설치] 를 먼저 하세요'
               : isRunning ? '실행 중에는 업그레이드할 수 없습니다 — [패키지 제어] 에서 정지 후 진행하세요'
               : upCands.length === 0 ? `${d.package_name} 의 다른 버전 패키지가 없음 (릴리스에 업로드 필요)`
               : `버전을 골라 업그레이드 (등록됨: ${upCands.map(p => 'v' + p.version).join(', ')})`}
-            onClick={() => onUpgrade(d)}>↑ 업그레이드</button>
-          <button className="btn btn--sm" disabled={!canRollback || !!rowBusy}
+            onClick={() => onUpgrade(d)}>업그레이드</Button>
+          {/* 롤백은 이전 버전이 보존된 모듈에서만 활성 — 시안도 대개 비활성 상태로 그렸다.
+              Ghost 인 것은 계약이 「되돌리기」를 Ghost 로 못박았기 때문이다. */}
+          <Button variant="ghost" disabled={!canRollback || !!rowBusy}
             title={rowBusy ? rowTip('') : canRollback
               ? `이전 버전으로 롤백 (v${d.prev_package_version || '?'} · ${d.prev_install_path})`
               : '롤백 대상 없음 (이전 버전 설치 이력 없음)'}
             onClick={() => runRow('rollback', () => onRollback(d))}>
-            {rowLbl('rollback', <><Undo2 size={12} /> 롤백</>)}</button>
-          <button className="btn btn--sm btn--danger" disabled={!!rowBusy}
-            title={rowTip('delete')}
+            {rowLbl('rollback', '롤백')}</Button>
+          <Button variant="destructive" disabled={!!rowBusy}
+            title={rowTip('이 서버에서 모듈 삭제')}
             onClick={() => runRow('remove', () => onRemove(d))}>
-            {rowLbl('remove', <X size={12} />)}</button>
+            {rowLbl('remove', <><Trash2 /> 삭제</>)}</Button>
         </div>
-      </td>
+      </Td>
     </tr>
   )
+}
+
+/** 모듈 상태 → Badge 배리언트. 시안 S2·S4 는 이 칸을 Badge 로 그렸다 (StatusDot 아님). */
+function depBadge(st: string) {
+  if (st === 'running') return 'successSoft' as const
+  if (st === 'stopped') return 'neutralSoft' as const
+  if (st === 'pending' || st === 'deploying') return 'infoSoft' as const
+  if (st === 'removed') return 'neutralSoft' as const
+  return 'dangerSoft' as const
 }
 
 // ── [패키지 제어] 탭 — 서버 선택: 모듈별 프로세스 start/stop/restart ──
