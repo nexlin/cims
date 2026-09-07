@@ -80,8 +80,10 @@ const config: Config = {
         '4xl': ['30px', { lineHeight: '1.25' }],
       },
       fontFamily: {
+        // 실제 등록 이름 — npm `pretendard` / `@fontsource-variable/jetbrains-mono` 가
+        // 각각 'Pretendard Variable' / 'JetBrains Mono Variable' 로 @font-face 를 건다.
         sans: ['"Pretendard Variable"', 'Pretendard', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        mono: ['"JetBrains Mono Variable"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       boxShadow: {
         sm: 'var(--cims-elevation-sm)',

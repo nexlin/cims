@@ -177,6 +177,13 @@
   color-scheme: dark;
 }
 
+/* mono 엘리먼트 기본값. 유틸리티 `.font-mono` 는 Tailwind 가 같은 스택으로 낸다
+   (tailwind.config.ts fontFamily.mono) — 두 곳의 이름이 어긋나면 안 된다.
+   IP · CIDR · 경로 · 버전 · 마스크에 붙이는 일은 페이지별로 T3 에서 한다 (DESIGN-RULES §1-5) */
+code, kbd, samp, pre {
+  font-family: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 body {
   background: var(--background);
   min-height: 100vh;
