@@ -1209,7 +1209,7 @@ body {
 
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
-  --header-h: 64px;   /* 위젯 편집 컨트롤 수용 위해 확대 (구 52px) */
+  --header-h: 58px;   /* Figma AppBar 실측 (457:5430). 위젯 편집 컨트롤도 이 높이에 들어간다 */
   --sidebar-w: 224px;
   /* ── 설계 캔버스 (관제 화면 기준 해상도) ────────────────────────────────
      화면은 1920×1080 에서 스크롤 없이 한눈에 들어와야 한다(console_platform §3.0).
@@ -1333,7 +1333,9 @@ body {
 /* 라우트 본문 래퍼 — 위젯 캔버스가 "남은 높이 전부"를 definite 하게 받도록 flex 사슬을 이어준다.
    그리드 행이 `1fr` 이라 캔버스에 확정 높이가 없으면 트랙이 내용 높이로 쪼그라든다. */
 .app-content-body {
-  padding: var(--main-pad, 24px); flex: 1; min-height: 0;
+  /* breadcrumb(PageHeaderRow)가 위에 붙으므로 본문 위 여백은 시안 실측 14px.
+     좌우는 breadcrumb 와 같은 20px 로 맞춘다 (Figma S1: Main 안 x=20, Content y=56). */
+  padding: 14px 20px 20px; flex: 1; min-height: 0;
   display: flex; flex-direction: column;
 }
 .app-content-body > .layout-host { flex: 1; min-height: 0; }
