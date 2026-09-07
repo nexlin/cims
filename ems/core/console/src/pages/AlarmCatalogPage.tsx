@@ -35,7 +35,7 @@ export function AlarmCatalogTable() {
       <div className="panel" style={{ padding: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>알람 카탈로그 ({filtered.length})</div>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
             정의 코드 사전 — OAM 평가 규칙 + 모듈 자기보고 등록분
           </span>
           <input className="form-input" style={{ marginLeft: 'auto', width: 240 }}
@@ -44,7 +44,7 @@ export function AlarmCatalogTable() {
         {!loaded ? (
           <div className="empty">로딩 중…</div>
         ) : error ? (
-          <div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div>
+          <div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div>
         ) : filtered.length === 0 ? (
           <div className="empty">항목 없음</div>
         ) : (
@@ -71,7 +71,7 @@ export function AlarmCatalogTable() {
                     <td style={{ fontSize: 12 }}>{c.event_type || '—'}</td>
                     <td style={{ fontSize: 12 }}>{c.effect || '—'}</td>
                     <td style={{ fontSize: 12 }}>{c.recommended_action || '—'}</td>
-                    <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.origin}</td>
+                    <td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{c.origin}</td>
                   </tr>
                 )
               })}
@@ -89,7 +89,7 @@ export function AlarmRulesTable() {
   useEffect(() => {
     alertsApi.rules().then(setRules).catch(e => setErr((e as Error).message))
   }, [])
-  if (err) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>규칙 조회 실패: {err}</div></div>
+  if (err) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>규칙 조회 실패: {err}</div></div>
   if (!rules) return <div className="panel"><div className="empty">로딩 중…</div></div>
   if (rules.rules.length === 0) return <div className="panel"><div className="empty">등록된 평가 규칙 없음</div></div>
   return (
@@ -97,7 +97,7 @@ export function AlarmRulesTable() {
           <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 13, borderBottom: '1px solid var(--border)',
                         display: 'flex', alignItems: 'center', gap: 8 }}>
             활성 평가 규칙 ({rules.rules.length})
-            <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted-foreground)' }}>
               점검 주기 {rules.sweep_sec}초 · {rules.editable ? '편집 가능' : '읽기 전용 (oam.json 설정 기반)'}
             </span>
           </div>
@@ -122,12 +122,12 @@ export function AlarmRulesTable() {
                   <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.target || r.scope || '-'}</td>
                   <td>
                     {r.metric}
-                    {r.mo_instance && <code style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>{r.mo_instance}</code>}
+                    {r.mo_instance && <code style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>{r.mo_instance}</code>}
                   </td>
                   <td style={{ fontFamily: 'monospace', fontSize: 12 }}>
                     {r.condition}
                     {r.threshold != null && (
-                      <span style={{ marginLeft: 6, color: 'var(--text-muted)', fontFamily: 'inherit' }}>
+                      <span style={{ marginLeft: 6, color: 'var(--muted-foreground)', fontFamily: 'inherit' }}>
                         (threshold {r.threshold}{r.unit || ''})
                       </span>
                     )}

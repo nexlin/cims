@@ -108,11 +108,11 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
     return data
   }, [data, shape, seriesControlled, busSeries])
 
-  const body = catError ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ 소스 카탈로그: {catError}</div>
+  const body = catError ? <div style={{ color: 'var(--destructive)', fontSize: 13 }}>※ 소스 카탈로그: {catError}</div>
     : catLoading && sources.length === 0 ? <div className="empty">소스 카탈로그 로딩 중...</div>
     : !src ? <div className="empty">소스를 선택하세요</div>
     : loading && !data ? <div className="empty">로딩 중...</div>
-    : err ? <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ {err}</div>
+    : err ? <div style={{ color: 'var(--destructive)', fontSize: 13 }}>※ {err}</div>
     : shown ? <Renderer data={shown as never} />
     : <div className="empty">데이터 없음</div>
 
@@ -131,7 +131,7 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
         </span>
         {src?.needsControls !== false && (controlled ? (
           // 페이지 컨트롤이 조건을 소유 — 값만 표기(중복 컨트롤 제거).
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
             {from} ~ {to} · {GRAN_LABELS[gran] ?? gran}
           </span>
         ) : (
@@ -140,7 +140,7 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
             <input className="form-input" type="datetime-local" value={from.replace(' ', 'T').slice(0, 16)}
                    onChange={e => setOwnRange(r => ({ ...r, from: e.target.value.replace('T', ' ') }))}
                    style={{ width: 176, fontSize: 12 }} />
-            <span style={{ color: 'var(--text-muted)' }}>~</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>~</span>
             <input className="form-input" type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
                    onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}
                    style={{ width: 176, fontSize: 12 }} />
@@ -202,7 +202,7 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
 
   const active = sel.split(',').map(x => x.trim()).filter(Boolean)
 
-  if (err) return <div style={{ color: 'var(--danger)', fontSize: 13 }}>※ {err}</div>
+  if (err) return <div style={{ color: 'var(--destructive)', fontSize: 13 }}>※ {err}</div>
   if (!data) return <div className="empty">{catLoading ? '소스 카탈로그 로딩 중...' : '로딩 중...'}</div>
 
   const totals = (k: string) => data.buckets.reduce((a, b) => a + (b.values[k] || 0), 0)
@@ -231,14 +231,14 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
       <button type="button" onClick={() => setSel('')} title={`${allLabel} — 모든 계열 표시`}
               style={{
                 flex: '1 1 130px', textAlign: 'left', cursor: 'pointer', font: 'inherit',
-                background: 'var(--surface)', padding: '12px 14px', borderRadius: 'var(--radius)',
+                background: 'var(--card)', padding: '12px 14px', borderRadius: 'var(--radius)',
                 border: `1px solid ${allOn ? 'var(--primary)' : 'var(--border)'}`,
                 borderLeft: `4px solid ${allOn ? 'var(--primary)' : 'var(--border)'}`,
                 opacity: allOn ? 1 : 0.5,
               }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{allLabel}</div>
-        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginTop: 3 }}>
-          {grand}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>건</span>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{allLabel}</div>
+        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--foreground)', marginTop: 3 }}>
+          {grand}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>건</span>
         </div>
       </button>
       {!single && shownSeries.map(sp => {
@@ -248,17 +248,17 @@ function SeriesSelectBody({ config }: { config?: Record<string, unknown> }) {
                   title={on ? `${sp.label} 숨기기` : `${sp.label} 표시`}
                   style={{
                     flex: '1 1 130px', textAlign: 'left', cursor: 'pointer', font: 'inherit',
-                    background: 'var(--surface)', padding: '12px 14px', borderRadius: 'var(--radius)',
+                    background: 'var(--card)', padding: '12px 14px', borderRadius: 'var(--radius)',
                     border: `1px solid ${on ? sp.color : 'var(--border)'}`,
                     borderLeft: `4px solid ${on ? sp.color : 'var(--border)'}`,
                     opacity: on ? 1 : 0.5,
                   }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted-foreground)' }}>
               <span style={{ width: 9, height: 9, borderRadius: 2, background: on ? sp.color : 'var(--border)' }} />
               {sp.label}
             </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginTop: 3 }}>
-              {totals(sp.key)}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>건</span>
+            <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--foreground)', marginTop: 3 }}>
+              {totals(sp.key)}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>건</span>
             </div>
           </button>
         )

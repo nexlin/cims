@@ -54,21 +54,21 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
       <div style={{ fontSize: 12, marginBottom: 8 }}>
         현재 보고 주소:{' '}
         {cur ? (
-          <code style={{ color: mismatch || loopback ? 'var(--danger)' : 'var(--success)', fontWeight: 600 }}>
+          <code style={{ color: mismatch || loopback ? 'var(--destructive)' : 'var(--cims-success)', fontWeight: 600 }}>
             {cur}
           </code>
         ) : (
-          <span style={{ color: 'var(--text-muted)' }}>
+          <span style={{ color: 'var(--muted-foreground)' }}>
             보고 없음 (heartbeat 대기 또는 구 버전 agent)
           </span>
         )}
         {loopback && (
-          <span style={{ color: 'var(--danger)', marginLeft: 6 }}>
+          <span style={{ color: 'var(--destructive)', marginLeft: 6 }}>
             — loopback 은 이 노드 자신의 OAM 을 가리킵니다(절체 시 끊김)
           </span>
         )}
         {!loopback && mismatch && (
-          <span style={{ color: 'var(--danger)', marginLeft: 6 }}>— VIP 가 아닙니다</span>
+          <span style={{ color: 'var(--destructive)', marginLeft: 6 }}>— VIP 가 아닙니다</span>
         )}
       </div>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -102,7 +102,7 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
         )}
       </div>
       {!valid && draft.trim() !== '' && (
-        <div style={{ color: 'var(--danger)', fontSize: 11, marginTop: 6 }}>
+        <div style={{ color: 'var(--destructive)', fontSize: 11, marginTop: 6 }}>
           http(s)://호스트[:포트] 형식이어야 합니다.
         </div>
       )}

@@ -39,7 +39,7 @@ export default function AlarmIndicator() {
   useAlarmToasts()
 
   const top = active[0] ? severityOf(active[0]) : ''
-  const dotColor = error ? 'var(--danger)' : (SEV_COLOR[top] || 'var(--text-muted)')
+  const dotColor = error ? 'var(--destructive)' : (SEV_COLOR[top] || 'var(--muted-foreground)')
 
   const ack = async (alarmId?: string) => {
     if (!alarmId) return
@@ -84,16 +84,16 @@ export default function AlarmIndicator() {
                     {(a.occurrences || 1) > 1 && (
                       <span className="badge badge--gray">×{a.occurrences}</span>
                     )}
-                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{a.ts}</span>
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>{a.ts}</span>
                   </div>
                   <div style={{ marginTop: 3 }}>{a.message}</div>
                   <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>
                       {a.source?.mo_instance}
                     </span>
                     <span style={{ marginLeft: 'auto' }} />
                     {a.acked
-                      ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>✓ {a.ackUser || '승인'}</span>
+                      ? <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>✓ {a.ackUser || '승인'}</span>
                       : <button className="btn btn--ghost btn--sm" onClick={() => ack(a.alarm_id)}>승인</button>}
                     <button className="btn btn--ghost btn--sm"
                             onClick={() => { setOpen(false); navigate('/alerts/active') }}>이동</button>
@@ -109,7 +109,7 @@ export default function AlarmIndicator() {
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span className="badge badge--gray">{ev.kind}</span>
                   <span style={{ fontSize: 12 }}>{ev.type}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>{ev.ts}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>{ev.ts}</span>
                 </div>
                 <div style={{ marginTop: 3, fontSize: 12 }}>{ev.message}</div>
               </div>

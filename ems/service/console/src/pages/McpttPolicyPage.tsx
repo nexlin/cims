@@ -70,7 +70,7 @@ export default function McpttPolicyPage() {
     }
   }
 
-  if (!form) return <div style={{ padding: 16, color: 'var(--text-muted)' }}>불러오는 중…</div>
+  if (!form) return <div style={{ padding: 16, color: 'var(--muted-foreground)' }}>불러오는 중…</div>
 
   return (
     <div style={{ padding: 16, maxWidth: 860, display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -84,8 +84,8 @@ export default function McpttPolicyPage() {
             여기서 끈 기능은 프로파일이 허용해도 열리지 않습니다.
           </InfoDot>
         </h2>
-        <div style={{ color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.6 }}>
-          {cfg && !cfg.exists && <span style={{ color: 'var(--warning)' }}>DB 행이 없어 기본값을 표시합니다(저장하면 생성됩니다). </span>}
+        <div style={{ color: 'var(--muted-foreground)', fontSize: 13, lineHeight: 1.6 }}>
+          {cfg && !cfg.exists && <span style={{ color: 'var(--cims-warning)' }}>DB 행이 없어 기본값을 표시합니다(저장하면 생성됩니다). </span>}
           {cfg?.update_time && <span>최근 변경 {new Date(cfg.update_time).toLocaleString()}</span>}
         </div>
       </div>
@@ -100,9 +100,9 @@ export default function McpttPolicyPage() {
               onChange={e => setForm({ ...form, [f.key]: e.target.checked })} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
               <span style={{ fontWeight: 600 }}>{f.label}
-                <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>{f.tag}</code>
+                <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>{f.tag}</code>
               </span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{f.desc}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{f.desc}</span>
             </span>
           </label>
         ))}
@@ -118,10 +118,10 @@ export default function McpttPolicyPage() {
               onChange={e => setForm({ ...form, [f.key]: Number(e.target.value) })} />
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
               <span style={{ fontWeight: 600 }}>{f.label}
-                <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>{f.tag}</code>
-                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>({f.min}~{f.max})</span>
+                <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>{f.tag}</code>
+                <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>({f.min}~{f.max})</span>
               </span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{f.desc}</span>
+              <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{f.desc}</span>
             </span>
           </div>
         ))}
@@ -134,10 +134,10 @@ export default function McpttPolicyPage() {
         <button className="btn btn--sm btn--ghost" disabled={!dirty || saving} onClick={() => cfg && setForm(cfg)}>
           되돌리기
         </button>
-        {!canEdit && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>변경 권한이 없습니다(manager 이상).</span>}
+        {!canEdit && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>변경 권한이 없습니다(manager 이상).</span>}
       </div>
 
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', lineHeight: 1.6 }}>
         저장하면 XCAP <code>service-config</code> 문서가 즉시 새 값·새 ETag 로 바뀌고, 서버가 cms
         구독 중인 전 단말에 변경을 push 해 곧바로 재조회·반영됩니다. 구독이 없는 단말은 채널 목록
         갱신·재로그인 계기에 반영됩니다.

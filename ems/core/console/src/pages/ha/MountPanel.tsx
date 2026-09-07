@@ -46,17 +46,17 @@ export function MountPanel({ title, mounts, applying, onApply }: {
 
   return (
     <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
-                  background: 'var(--bg-soft)' }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: 8 }}>
+                  background: 'var(--muted)' }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
         {title}
-        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)', fontWeight: 'normal' }}>
+        <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
           (콘솔 추가 시 /etc/fstab 에 기록 — 재부팅에도 유지. 네트워크 FS 는 _netdev,nofail 자동)
         </span>
       </div>
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>마운트 위치(target)</th>
             <th style={{ padding: '4px 8px', textAlign: 'left' }}>소스(source)</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>유형</th>
@@ -67,7 +67,7 @@ export function MountPanel({ title, mounts, applying, onApply }: {
         </thead>
         <tbody>
           {mounts.length === 0 && !addOpen && (
-            <tr><td colSpan={6} style={{ padding: '8px', color: 'var(--text-muted)' }}>
+            <tr><td colSpan={6} style={{ padding: '8px', color: 'var(--muted-foreground)' }}>
               (마운트 없음 — 아래 [＋ 마운트 추가])
             </td></tr>
           )}
@@ -76,11 +76,11 @@ export function MountPanel({ title, mounts, applying, onApply }: {
               <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{m.target}</td>
               <td style={{ padding: '4px 8px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{m.source}</td>
               <td style={{ padding: '4px 8px' }}>{m.fstype}</td>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>{m.options || '-'}</td>
+              <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>{m.options || '-'}</td>
               <td style={{ padding: '4px 8px', fontSize: 11 }}>
                 {m.mounted
-                  ? <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>● mounted</span>
-                  : <span style={{ color: 'var(--danger)' }}>○ unmounted</span>}
+                  ? <span style={{ color: 'var(--cims-success)', fontWeight: 'bold' }}>● mounted</span>
+                  : <span style={{ color: 'var(--destructive)' }}>○ unmounted</span>}
               </td>
               <td style={{ padding: '4px 8px' }}>
                 <button onClick={() => deleteMount(m)} style={btnDanger()} disabled={applying}>삭제</button>
@@ -88,7 +88,7 @@ export function MountPanel({ title, mounts, applying, onApply }: {
             </tr>
           ))}
           {addOpen ? (
-            <tr style={{ background: 'var(--warn-soft)' }}>
+            <tr style={{ background: 'var(--cims-warning-soft)' }}>
               <td style={{ padding: '4px 8px' }}>
                 <ImeSafeInput value={target} onCommit={setTarget} placeholder={MOUNT_DEFAULTS.target}
                               style={{ width: '95%', padding: '2px 6px', fontSize: 12,

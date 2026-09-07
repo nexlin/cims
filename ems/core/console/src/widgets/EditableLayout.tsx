@@ -306,7 +306,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
             ))}
           </select>
           <button className="btn btn--sm" onClick={addWidget} disabled={!addId}>추가</button>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}
                 title="카드 사이 간격(px)">간격</span>
           <input type="range" min={0} max={40} step={2} value={draft?.gap ?? GRID_GAP}
                  onChange={e => { const g = parseInt(e.target.value); applyDraft(d => ({ ...d, gap: g })) }}
@@ -314,7 +314,7 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
           {/* 세로 예산 — 캔버스가 화면 한 장이라 남은 행이 곧 배치 여력이다. */}
           <span className="layout-edit-budget"
                 title={`화면 한 장 = ${GRID_ROWS}행. 위젯을 키우면 잠기지 않은 위젯이 그만큼 줄어든다.`}
-                style={{ color: freeRows === 0 ? 'var(--danger)' : undefined }}>
+                style={{ color: freeRows === 0 ? 'var(--destructive)' : undefined }}>
             남은 세로 {freeRows}/{GRID_ROWS}행
           </span>
           <button className="btn btn--sm" onClick={undo} disabled={undoStack.length === 0}

@@ -161,7 +161,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
               </tr>
               {isExpanded && (
                 <tr className="row--expanded">
-                  <td colSpan={colCount} style={{ padding: 0, background: 'var(--bg-soft)', boxShadow: 'inset 0 4px 6px -5px rgba(0,0,0,0.35)' }}>
+                  <td colSpan={colCount} style={{ padding: 0, background: 'var(--muted)', boxShadow: 'inset 0 4px 6px -5px rgba(0,0,0,0.35)' }}>
                     {renderExpanded!(r)}
                   </td>
                 </tr>
@@ -175,7 +175,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
       </div>
 
       {pageSize > 0 && sorted.length > pageSize && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 12, color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)' }}>
           <span>{sorted.length}건</span>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
             <button className="btn btn--ghost btn--sm" disabled={safePage === 0} onClick={() => setPage(Math.max(0, safePage - 1))}>◀</button>

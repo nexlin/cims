@@ -18,7 +18,7 @@ import { Sparkline } from './shared'
 // 묶음(StatCardsRow)에서는 grid 자식이라 flex 속성이 무시돼 같은 모양이 된다.
 const CARD_BOX: CSSProperties = {
   flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
-  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
   padding: '10px 12px', textAlign: 'center', boxSizing: 'border-box',
 }
 
@@ -28,12 +28,12 @@ export function StatCard({ label, value, sub, unit, series, hint }: {
 }) {
   return (
     <div style={{ ...CARD_BOX, justifyContent: 'center' }} title={hint}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.15 }}>
         {value}
-        {unit && <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 3 }}>{unit}</span>}
+        {unit && <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 3 }}>{unit}</span>}
       </div>
-      {sub && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 1 }}>{sub}</div>}
       {series && <Sparkline data={series} height={16} />}
     </div>
   )
@@ -81,8 +81,8 @@ export const HEALTH_METRICS: MetricDef[] = [
 function CardSkeleton({ label }: { label: string }) {
   return (
     <div style={{ ...CARD_BOX, justifyContent: 'center' }}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
-      <div style={{ height: 20, background: 'var(--surface-2)', borderRadius: 4, opacity: 0.6 }} />
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 6 }}>{label}</div>
+      <div style={{ height: 20, background: 'var(--secondary)', borderRadius: 4, opacity: 0.6 }} />
     </div>
   )
 }

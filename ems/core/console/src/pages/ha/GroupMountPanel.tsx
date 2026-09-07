@@ -38,9 +38,9 @@ function memberState(m: MountMember, target: string): MemberState {
 
 function StateDot({ state, name, online }: { state: MemberState; name: string; online: boolean }) {
   const view = {
-    mounted:  { mark: '●', color: 'var(--success)', title: `${name}: 마운트됨` },
+    mounted:  { mark: '●', color: 'var(--cims-success)', title: `${name}: 마운트됨` },
     declared: { mark: '◐', color: '#e67e22', title: `${name}: fstab 에는 있으나 지금 마운트 안 됨` },
-    missing:  { mark: '✕', color: 'var(--danger)',
+    missing:  { mark: '✕', color: 'var(--destructive)',
                 // 오프라인 멤버는 fan-out 대상에서 빠진다 — 사유를 여기서 알려야 재적용을
                 // 무한 반복하지 않는다.
                 title: online ? `${name}: 미적용 — [↻ 재적용] 필요`
@@ -130,18 +130,18 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
 
   return (
     <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
-                  background: 'var(--bg-soft)' }}>
+                  background: 'var(--muted)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)' }}>
           마운트 (그룹 공통)
         </div>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
           멤버 {members.length}대에 같은 경로로 한 번에 적용 — /etc/fstab 영속.
           노드별 예외는 좌측 트리에서 서버 선택 &gt; [네트워크] 탭.
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           {laggingCount > 0 && (
-            <span style={{ fontSize: 11, color: 'var(--danger)' }}>미적용 {laggingCount}건</span>
+            <span style={{ fontSize: 11, color: 'var(--destructive)' }}>미적용 {laggingCount}건</span>
           )}
           <button onClick={reapplyAll} style={btnSmall()}
                   disabled={applying || declared.length === 0}
@@ -153,7 +153,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>마운트 위치(target)</th>
             <th style={{ padding: '4px 8px', textAlign: 'left' }}>소스(source)</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>유형</th>
@@ -164,21 +164,21 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
         </thead>
         <tbody>
           {rows.length === 0 && !addOpen && (
-            <tr><td colSpan={6} style={{ padding: 8, color: 'var(--text-muted)' }}>
+            <tr><td colSpan={6} style={{ padding: 8, color: 'var(--muted-foreground)' }}>
               (그룹 공통 마운트 없음 — 아래 [＋ 마운트 추가])
             </td></tr>
           )}
           {rows.map(m => (
             <tr key={m.target}
-                style={lagging(m.target).length ? { background: 'var(--warn-soft)' } : undefined}>
+                style={lagging(m.target).length ? { background: 'var(--cims-warning-soft)' } : undefined}>
               <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{m.target}</td>
               <td style={{ padding: '4px 8px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{m.source}</td>
               <td style={{ padding: '4px 8px' }}>{m.fstype}</td>
               <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11,
-                           color: 'var(--text-muted)' }}>{m.options || '-'}</td>
+                           color: 'var(--muted-foreground)' }}>{m.options || '-'}</td>
               <td style={{ padding: '4px 8px' }}>
                 {members.length === 0
-                  ? <span style={{ color: 'var(--text-muted)' }}>(멤버 없음)</span>
+                  ? <span style={{ color: 'var(--muted-foreground)' }}>(멤버 없음)</span>
                   : members.map(mem => (
                       <StateDot key={mem.id} name={mem.name} online={mem.online}
                                 state={memberState(mem, m.target)} />
@@ -196,7 +196,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
             </tr>
           ))}
           {addOpen ? (
-            <tr style={{ background: 'var(--warn-soft)' }}>
+            <tr style={{ background: 'var(--cims-warning-soft)' }}>
               <td style={{ padding: '4px 8px' }}>
                 <ImeSafeInput value={target} onCommit={setTarget} placeholder={MOUNT_DEFAULTS.target}
                               style={{ width: '95%', padding: '2px 6px', fontSize: 12,

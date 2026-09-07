@@ -30,7 +30,7 @@ const ICON = 14
 
 // 펼침 표시 caret (열림/닫힘)
 function Caret({ open }: { open: boolean }) {
-  return <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
+  return <span style={{ color: 'var(--muted-foreground)', display: 'inline-flex' }}>
     {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
   </span>
 }
@@ -244,7 +244,7 @@ export default function ProvisioningWorkbenchPage() {
             <button key={t.k} onClick={() => setTab(t.k)}
               style={{
                 padding: '12px 14px', border: 'none', background: 'none', cursor: 'pointer', fontSize: 13,
-                fontWeight: tab === t.k ? 700 : 500, color: tab === t.k ? 'var(--primary)' : 'var(--text-muted)',
+                fontWeight: tab === t.k ? 700 : 500, color: tab === t.k ? 'var(--primary)' : 'var(--muted-foreground)',
                 borderBottom: tab === t.k ? '2px solid var(--primary)' : '2px solid transparent', marginBottom: -1,
               }}>
               {t.label} <span className="badge badge--gray" style={{ fontSize: 10, marginLeft: 2 }}>{t.count}</span>
@@ -274,7 +274,7 @@ export default function ProvisioningWorkbenchPage() {
 
         {/* 추가 폼 블록 (테이블 위) */}
         {tab === 'users' && addUserOpen && (
-          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', padding: '10px 16px' }}>
+          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--muted)', padding: '10px 16px' }}>
             <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 사용자</div>
             <UserBasicForm mode="add" orgOpts={orgOpts}
               defaultOrg={orgScope ? (orgScope.split('/').pop() || '') : ''}
@@ -283,7 +283,7 @@ export default function ProvisioningWorkbenchPage() {
           </div>
         )}
         {(tab === 'volte' || tab === 'ptt') && addNumSvc && (
-          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', padding: '10px 16px' }}>
+          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--muted)', padding: '10px 16px' }}>
             <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 {addNumSvc === 'call' ? 'VoLTE' : 'PTT'} 번호</div>
             <NumberAddForm svc={addNumSvc} catalog={catalog} userIndex={userIndex} orgScope={orgScope} orgPathOf={orgPathOf}
               onAdded={() => { setAddNumSvc(null); load() }} onCancel={() => setAddNumSvc(null)} />
@@ -327,7 +327,7 @@ export default function ProvisioningWorkbenchPage() {
 function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 160px', minWidth: 120 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
       {children}
     </label>
   )
@@ -416,14 +416,14 @@ function UserDetail({ user, catalog, orgOpts, canWrite, initialEdit, highlight, 
 
       {/* 번호 */}
       <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-        <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>번호</div>
+        <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6 }}>번호</div>
         <NumbersTable user={user} catalog={catalog} canWrite={canWrite} highlight={highlight} onReload={onReload} />
       </div>
 
       {/* MCPTT 프로파일 — SOS 대상 결정(TS 24.484 entry-info)·사용자 단위 개시 인가 */}
       {user.ptt_subscriptions.length > 0 && (
         <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-          <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>MCPTT 프로파일 (SOS 대상·개시 인가)</div>
+          <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6 }}>MCPTT 프로파일 (SOS 대상·개시 인가)</div>
           {user.ptt_subscriptions.map(s => (
             <PttProfileRow key={s.id} pid={user.id} msisdn={s.id} canWrite={canWrite} />
           ))}
@@ -895,11 +895,11 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
             {busy && <span className="ts">처리 중...</span>}
           </div>
           {result && (
-            <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16, fontSize: 13 }}>
+            <div style={{ background: 'var(--card)', borderRadius: 8, padding: 16, fontSize: 13 }}>
               <div style={{ fontWeight: 600, marginBottom: 8 }}>결과</div>
               <div>사용자 <strong>{result.created_users}</strong> · VoLTE <strong>{result.created_voip}</strong> · PTT <strong>{result.created_ptt}</strong></div>
               {result.errors.length > 0 && (
-                <div style={{ marginTop: 8, color: 'var(--danger)', fontSize: 12 }}>
+                <div style={{ marginTop: 8, color: 'var(--destructive)', fontSize: 12 }}>
                   {result.errors.map((er, i) => <div key={i}>[{er.sheet}] 행 {er.row}: {er.error}</div>)}
                 </div>
               )}

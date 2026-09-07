@@ -108,7 +108,7 @@ function DetailItem({ label, value }: { label: string; value?: string | null }) 
   if (!value) return null
   return (
     <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-      <span style={{ color: 'var(--text-muted)', minWidth: 90, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: 'var(--muted-foreground)', minWidth: 90, flexShrink: 0 }}>{label}</span>
       <span>{value}</span>
     </div>
   )
@@ -203,7 +203,7 @@ export function AlarmHistoryFilter() {
         실시간 감시
       </label>
       {f.live && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
@@ -237,9 +237,9 @@ export function AlarmsSection() {
   return (
       <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
-          알람 이력 ({rows.length}건{openCount > 0 && <span style={{ color: 'var(--danger)' }}> · 미해소 {openCount}</span>})
+          알람 이력 ({rows.length}건{openCount > 0 && <span style={{ color: 'var(--destructive)' }}> · 미해소 {openCount}</span>})
           {events.length >= FETCH_LIMIT && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
+            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
             </span>
           )}
@@ -275,13 +275,13 @@ export function AlarmsSection() {
                   return [
                     <tr key={key} onClick={() => setExpanded(open ? null : key)}
                         style={{ cursor: 'pointer',
-                                 background: open ? 'var(--hover)' : isOpen ? 'rgba(220, 53, 69, 0.08)' : undefined }}>
+                                 background: open ? 'var(--accent)' : isOpen ? 'rgba(220, 53, 69, 0.08)' : undefined }}>
                       <td>
                         <span className={`badge ${sevBadgeClass(sev)}`}>{sev}</span>
                         {lastChange && (
                           <span title={`severity 변경 ${r.changes!.length}회 — 상세는 행 클릭`}
                                 style={{ marginLeft: 4, fontSize: 11,
-                                         color: lastChange.trend === 'moreSevere' ? 'var(--danger)' : 'var(--text-muted)' }}>
+                                         color: lastChange.trend === 'moreSevere' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
                             {lastChange.trend === 'moreSevere' ? '↑' : '↓'}{r.changes!.length}
                           </span>
                         )}
@@ -290,27 +290,27 @@ export function AlarmsSection() {
                       <td>{alarmTypeLabel(r.type)}</td>
                       <td><code style={{ fontSize: 11 }} title={r.source?.mo_instance || ''}>
                         {r.source?.mo_label || r.source?.mo_instance || '-'}</code></td>
-                      <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{r.source?.detected_by || '-'}</td>
+                      <td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{r.source?.detected_by || '-'}</td>
                       <td>
                         {r.message}
-                        {isOpen && <span style={{ marginLeft: 8, color: 'var(--danger)', fontSize: 11, fontWeight: 600 }}>OPEN</span>}
+                        {isOpen && <span style={{ marginLeft: 8, color: 'var(--destructive)', fontSize: 11, fontWeight: 600 }}>OPEN</span>}
                         {(r.occurrences ?? 1) > 1 && (
-                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--text-muted)',
+                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
                                          border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}
                                 title={`해제 없이 ${r.occurrences}회 재통지 — 최근 ${r.last_open_ts ? fmtTime(r.last_open_ts) : ''}`}>
                             ×{r.occurrences}
                           </span>
                         )}
                         {(r.comments?.length ?? 0) > 0 && (
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>💬{r.comments!.length}</span>
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>💬{r.comments!.length}</span>
                         )}
                         {r.ack_state === 'acknowledged' && (
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--success)' }}>✓</span>
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--cims-success)' }}>✓</span>
                         )}
                       </td>
                       <td className="ts">
                         {r.preWindow
-                          ? <span style={{ color: 'var(--text-muted)' }}>창 이전</span>
+                          ? <span style={{ color: 'var(--muted-foreground)' }}>창 이전</span>
                           : fmtTime(r.ts)}
                       </td>
                       <td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : '—'}</td>
@@ -318,7 +318,7 @@ export function AlarmsSection() {
                     </tr>,
                     open && (
                       <tr key={`${key}-detail`}>
-                        <td colSpan={9} style={{ padding: 0, background: 'var(--hover)' }}>
+                        <td colSpan={9} style={{ padding: 0, background: 'var(--accent)' }}>
                           <AlarmHistoryDetail r={r} isOpen={isOpen} onAck={ackAlarm} onComment={commentAlarm} />
                         </td>
                       </tr>
@@ -360,12 +360,12 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
       {r.preWindow && <DetailItem label="비고" value="발생 시각이 조회 기간 밖 — 해소 기록만 표시" />}
       {(r.changes?.length ?? 0) > 0 && (
         <div style={{ fontSize: 12 }}>
-          <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>severity 변경 이력</div>
+          <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>severity 변경 이력</div>
           {r.changes!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
               <span className="ts">{fmtTime(c.ts)}</span> — {c.from} → {c.to}
               {c.trend && (
-                <span style={{ marginLeft: 6, color: c.trend === 'moreSevere' ? 'var(--danger)' : 'var(--text-muted)' }}>
+                <span style={{ marginLeft: 6, color: c.trend === 'moreSevere' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
                   ({c.trend === 'moreSevere' ? '승격' : '완화'})
                 </span>
               )}
@@ -378,10 +378,10 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
       )}
       {(r.comments?.length ?? 0) > 0 && (
         <div style={{ fontSize: 12 }}>
-          <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>코멘트</div>
+          <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>코멘트</div>
           {r.comments!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
-              <span style={{ color: 'var(--text-muted)' }}>{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
+              <span style={{ color: 'var(--muted-foreground)' }}>{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
             </div>
           ))}
         </div>
@@ -486,7 +486,7 @@ export function EventHistoryFilter() {
         실시간 감시
       </label>
       {f.live && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
           {updatedAt ? `갱신 ${fmtTime(new Date(updatedAt).toISOString())}` : '대기 중'}
         </span>
       )}
@@ -507,7 +507,7 @@ export function EventsSection() {
         <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
           이벤트 이력 ({filtered.length}건 · {groups.length}묶음)
           {events.length >= FETCH_LIMIT && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
+            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
             </span>
           )}
@@ -538,7 +538,7 @@ export function EventsSection() {
                   const ev = g.first
                   return [
                     <tr key={key} onClick={() => n > 1 && setExpanded(open ? null : key)}
-                        style={{ cursor: n > 1 ? 'pointer' : undefined, background: open ? 'var(--hover)' : undefined }}>
+                        style={{ cursor: n > 1 ? 'pointer' : undefined, background: open ? 'var(--accent)' : undefined }}>
                       <td className="ts">
                         {n > 1
                           ? <>{fmtTime(g.last.ts)} ~ {fmtTime(ev.ts)}</>
@@ -555,7 +555,7 @@ export function EventsSection() {
                       <td title={ev.source?.detected_by}>
                         {ev.message}
                         {n > 1 && (
-                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--text-muted)',
+                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
                                          border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}
                                 title="연속 반복 — 클릭해 개별 통지 열람">
                             ×{n}
@@ -565,20 +565,20 @@ export function EventsSection() {
                     </tr>,
                     open && (
                       <tr key={`${key}-detail`}>
-                        <td colSpan={6} style={{ padding: 0, background: 'var(--hover)' }}>
+                        <td colSpan={6} style={{ padding: 0, background: 'var(--accent)' }}>
                           <div style={{ padding: '8px 16px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {g.items.slice(0, 100).map((e2, i2) => (
                               <div key={i2} style={{ fontSize: 12, padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
                                 <span className="ts">{fmtTime(e2.ts)}</span> — {e2.message}
                                 {e2.params && Object.keys(e2.params).length > 0 && (
-                                  <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                                  <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>
                                     {JSON.stringify(e2.params)}
                                   </code>
                                 )}
                               </div>
                             ))}
                             {n > 100 && (
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>… 외 {n - 100}건 (CSV 로 전체 내보내기)</div>
+                              <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>… 외 {n - 100}건 (CSV 로 전체 내보내기)</div>
                             )}
                           </div>
                         </td>

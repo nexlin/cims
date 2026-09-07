@@ -115,13 +115,13 @@ export default function SubscriberPicker({
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-          background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6,
           marginTop: 2, maxHeight: 240, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
         }}>
           {all.length === 0 ? (
-            <div style={{ padding: 10, fontSize: 12, color: 'var(--text-muted)' }}>불러오는 중...</div>
+            <div style={{ padding: 10, fontSize: 12, color: 'var(--muted-foreground)' }}>불러오는 중...</div>
           ) : matches.length === 0 ? (
-            <div style={{ padding: 10, fontSize: 12, color: 'var(--text-muted)' }}>일치하는 가입자 없음</div>
+            <div style={{ padding: 10, fontSize: 12, color: 'var(--muted-foreground)' }}>일치하는 가입자 없음</div>
           ) : matches.map((it, i) => (
             <div key={it.value + ':' + it.userId}
               onMouseDown={e => { e.preventDefault(); choose(it) }}
@@ -131,7 +131,7 @@ export default function SubscriberPicker({
                 background: i === activeIdx ? 'rgba(74,144,217,0.12)' : undefined,
               }}>
               <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.label}</span>
-              <span className="ts" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+              <span className="ts" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
                 {it.sub}{it.orgCode ? ` · ${it.orgCode}` : ''}
               </span>
             </div>

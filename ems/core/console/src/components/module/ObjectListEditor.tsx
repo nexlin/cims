@@ -44,7 +44,7 @@ export function ObjectListEditor({ field, value, onChange, renderCell, ensureOne
   return (
     <div style={{ border: '1px dashed var(--border)', borderRadius: 4, padding: 6 }}>
       {display.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>항목 없음</div>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 4 }}>항목 없음</div>
       ) : (
         <table style={{ width: '100%', fontSize: 12 }}>
           <thead>

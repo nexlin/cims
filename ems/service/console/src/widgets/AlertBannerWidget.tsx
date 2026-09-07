@@ -12,18 +12,18 @@ function AlertBannerWidget() {
   if (severe.length === 0) return null
   return (
     <div style={{
-      background: 'color-mix(in srgb, var(--danger) 8%, var(--surface))',
-      border: '1px solid color-mix(in srgb, var(--danger) 35%, var(--border))',
+      background: 'color-mix(in srgb, var(--destructive) 8%, var(--card))',
+      border: '1px solid color-mix(in srgb, var(--destructive) 35%, var(--border))',
       borderRadius: 'var(--radius)', padding: 12,
     }}>
-      <div style={{ fontWeight: 600, color: 'var(--danger)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
+      <div style={{ fontWeight: 600, color: 'var(--destructive)', marginBottom: 4, display: 'flex', alignItems: 'center' }}>
         알람 ({severe.length})
-        <a href="/alerts/history" style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--danger)' }}>이력 보기 →</a>
+        <a href="/alerts/history" style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500, color: 'var(--destructive)' }}>이력 보기 →</a>
       </div>
       {severe.map((a, i) => (
         <div key={`${a.alarm_id || a.type}-${i}`} style={{ fontSize: 13 }}>
           {a.message}
-          {a.acked && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>✓ {a.ackUser || '승인'}</span>}
+          {a.acked && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>✓ {a.ackUser || '승인'}</span>}
         </div>
       ))}
     </div>

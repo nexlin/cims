@@ -22,7 +22,7 @@ const SEVERE = new Set(['critical', 'major'])   // 배너 흡수 — 강조 대�
 
 function Dot({ sev, size = 9 }: { sev: string; size?: number }) {
   return <span style={{ width: size, height: size, borderRadius: '50%',
-                        background: SEV_COLOR[sev] || 'var(--text-muted)', display: 'inline-block', flex: 'none' }} />
+                        background: SEV_COLOR[sev] || 'var(--muted-foreground)', display: 'inline-block', flex: 'none' }} />
 }
 
 function ActiveAlarmsWidget() {
@@ -52,18 +52,18 @@ function ActiveAlarmsWidget() {
   return (
     <div className="panel">
       {/* 헤더 — 총 건수 + 폴링 실패 표기 + 이력/카탈로그 이동 */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)',
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--muted)',
                     display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontWeight: 600, fontSize: 14 }}>활성 알람 ({active.length})</span>
         {error && (
           <span title="알람 조회 실패 — 표시가 최신이 아닐 수 있음 (표시 없음 ≠ 정상)"
-                style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>⚠ 조회 실패</span>
+                style={{ fontSize: 12, color: 'var(--destructive)', fontWeight: 600 }}>⚠ 조회 실패</span>
         )}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 12 }}>
           <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/active') }}
              style={{ fontSize: 12, fontWeight: 500 }}>활성 전체 →</a>
           <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/catalog') }}
-             style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>카탈로그</a>
+             style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted-foreground)' }}>카탈로그</a>
         </span>
       </div>
 
@@ -80,12 +80,12 @@ function ActiveAlarmsWidget() {
                       display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer',
                       padding: '6px 12px', borderRadius: 'var(--radius)',
                       border: `1px solid ${sel ? SEV_COLOR[sev] : 'var(--border)'}`,
-                      background: sel ? `color-mix(in srgb, ${SEV_COLOR[sev]} 12%, var(--surface))` : 'var(--surface)',
+                      background: sel ? `color-mix(in srgb, ${SEV_COLOR[sev]} 12%, var(--card))` : 'var(--card)',
                       opacity: n === 0 && !sel ? 0.5 : 1,
                     }}>
               <Dot sev={sev} />
               <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 14 }}>{n}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '.3px' }}>{SEV_LABEL[sev]}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-foreground)', letterSpacing: '.3px' }}>{SEV_LABEL[sev]}</span>
             </button>
           )
         })}
@@ -99,7 +99,7 @@ function ActiveAlarmsWidget() {
       {!loaded ? (
         <div className="empty">로딩 중…</div>
       ) : active.length === 0 ? (
-        <div className="empty" style={{ color: 'var(--success)' }}>
+        <div className="empty" style={{ color: 'var(--cims-success)' }}>
           ✓ 활성 알람 없음{error ? ' (단, 마지막 조회 실패 — 최신이 아닐 수 있음)' : ''}
         </div>
       ) : rows.length === 0 ? (
@@ -135,11 +135,11 @@ function ActiveAlarmsWidget() {
                         {(a.occurrences || 1) > 1 && <span className="badge badge--gray">×{a.occurrences}</span>}
                       </span>
                     </td>
-                    <td><code style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.source?.mo_instance || '-'}</code></td>
+                    <td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{a.source?.mo_instance || '-'}</code></td>
                     <td>{a.message}</td>
                     <td>
                       {a.acked
-                        ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>✓ {a.ackUser || '승인'}</span>
+                        ? <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>✓ {a.ackUser || '승인'}</span>
                         : <button className="btn btn--ghost btn--sm" onClick={() => ack(a.alarm_id)}>승인</button>}
                     </td>
                   </tr>

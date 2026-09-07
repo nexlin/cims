@@ -10,9 +10,9 @@ import { InfoDot } from '@core/components/InfoDot'
 import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
-  external_ip:  { label: '외부 IP',     color: 'var(--warning)' },
-  scanner_ua:   { label: '스캐너 도구',  color: 'var(--danger)' },
-  fraud_number: { label: '사기 번호',    color: 'var(--danger)' },
+  external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
+  scanner_ua:   { label: '스캐너 도구',  color: 'var(--destructive)' },
+  fraud_number: { label: '사기 번호',    color: 'var(--destructive)' },
   auth_failed:  { label: '인증 실패',    color: '#9333ea' },
 }
 const SEV: Record<string, { label: string; bg: string }> = {
@@ -31,7 +31,7 @@ export function AbnFilter() {
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
       <input type="date" className="form-input" value={s.date} style={{ width: 150 }}
              onChange={e => abnormal.setDate(e.target.value)} />
-      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>범위</span>
+      <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>범위</span>
       <span style={{ display: 'flex', gap: 2 }}>
         {RANGE.map(d => (
           <button key={d} className={`btn btn--sm ${s.days === d ? 'btn--primary' : 'btn--ghost'}`}
@@ -48,7 +48,7 @@ export function AbnFilter() {
       </InfoDot>
       {/* 조치가 필요한 신호는 접지 않는다 — 설명과 달리 매번 봐야 한다. */}
       {critical > 0 && (
-        <span style={{ color: 'var(--danger)', fontWeight: 700, fontSize: 12 }}>
+        <span style={{ color: 'var(--destructive)', fontWeight: 700, fontSize: 12 }}>
           ⚠ 외부에서 인증 성공(2xx)한 세션 있음 — 즉시 점검
         </span>
       )}
@@ -105,7 +105,7 @@ export function AbnTopIps() {
             <span key={ip} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 24,
                                     padding: '3px 10px', borderRadius: 14, background: 'rgba(220,38,38,0.08)',
                                     fontSize: 12, fontFamily: 'monospace' }}>
-              {ip}<b style={{ color: 'var(--danger)' }}>{n}</b>
+              {ip}<b style={{ color: 'var(--destructive)' }}>{n}</b>
             </span>
           ))}
         </div>
@@ -146,19 +146,19 @@ export function AbnTable() {
                       <td><span className="badge" style={{ background: sev.bg, color: '#fff', fontSize: 10 }}>{sev.label}</span></td>
                       <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</td>
                       <td style={{ fontSize: 11, fontFamily: 'monospace' }}>
-                        <span style={{ color: 'var(--text-muted)' }}>{x.caller || '?'}</span>
+                        <span style={{ color: 'var(--muted-foreground)' }}>{x.caller || '?'}</span>
                         <span style={{ margin: '0 4px' }}>→</span>
                         <span>{x.callee || '?'}</span>
                       </td>
                       <td style={{ fontSize: 11 }}>{x.ua || '-'}</td>
                       <td style={{ fontSize: 12, textAlign: 'right', fontWeight: x.attempts > 5 ? 700 : 400 }}>{x.attempts}</td>
-                      <td style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      <td style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
                         {x.methods.join(',') || '-'}{x.statuses.length > 0 && <span> / {x.statuses.join(',')}</span>}
                       </td>
                       <td>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                           {x.reasons.map(r => {
-                            const rl = REASON_LABEL[r] || { label: r, color: 'var(--text-muted)' }
+                            const rl = REASON_LABEL[r] || { label: r, color: 'var(--muted-foreground)' }
                             return <span key={r} className="badge" style={{ fontSize: 9, color: rl.color, border: `1px solid ${rl.color}`, background: 'transparent' }}>{rl.label}</span>
                           })}
                         </div>
@@ -174,7 +174,7 @@ export function AbnTable() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
                           padding: '8px 0', flex: 'none', borderTop: '1px solid var(--border)' }}>
               <button className="btn btn--sm" disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}>← 이전</button>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
                 {s.page * s.pageSize + 1}–{Math.min((s.page + 1) * s.pageSize, sessions.length)} / {sessions.length}건
                 (페이지 {s.page + 1}/{pageCount})
               </span>
@@ -196,15 +196,15 @@ export function AbnTable() {
 function KpiCard({ label, value, unit, tone }: {
   label: string; value: number | string; unit?: string; tone?: 'ok' | 'warn'
 }) {
-  const color = tone === 'warn' ? 'var(--danger)' : tone === 'ok' ? 'var(--success)' : 'var(--text)'
+  const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
   return (
     <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>
       <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
                     justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{label}</div>
         <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>
           {value}
-          {unit && <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{unit}</span>}
+          {unit && <span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{unit}</span>}
         </div>
       </div>
     </div>

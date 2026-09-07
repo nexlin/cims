@@ -25,7 +25,7 @@ function AlarmDetail({ a, onAck, onComment }: {
   const [text, setText] = useState('')
   const item = (label: string, value?: string | null) => value ? (
     <div style={{ display: 'flex', gap: 8, fontSize: 12 }}>
-      <span style={{ color: 'var(--text-muted)', minWidth: 90, flexShrink: 0 }}>{label}</span>
+      <span style={{ color: 'var(--muted-foreground)', minWidth: 90, flexShrink: 0 }}>{label}</span>
       <span>{value}</span>
     </div>
   ) : null
@@ -41,10 +41,10 @@ function AlarmDetail({ a, onAck, onComment }: {
       {a.acked && item('승인', `${a.ackUser || ''}`)}
       {(a.comments?.length ?? 0) > 0 && (
         <div style={{ fontSize: 12 }}>
-          <div style={{ color: 'var(--text-muted)', marginBottom: 2 }}>코멘트</div>
+          <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>코멘트</div>
           {a.comments!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
-              <span style={{ color: 'var(--text-muted)' }}>{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
+              <span style={{ color: 'var(--muted-foreground)' }}>{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
             </div>
           ))}
         </div>
@@ -75,12 +75,12 @@ export function AlarmSeverityTile({ sev }: { sev: string }) {
       title={`${SEVERITY_LABEL[sev] || sev} ${n}건${on ? ' — 필터 해제' : n ? ' — 이 심각도만 보기' : ''}`}
       style={{
         flex: '1 1 auto', minHeight: 0, minWidth: 0, textAlign: 'left', cursor: 'pointer',
-        background: 'var(--surface)', borderRadius: 'var(--radius)', padding: '12px 16px',
+        background: 'var(--card)', borderRadius: 'var(--radius)', padding: '12px 16px',
         border: on ? '1px solid var(--primary)' : '1px solid var(--border)',
       }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{SEVERITY_LABEL[sev] || sev}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{SEVERITY_LABEL[sev] || sev}</div>
       <div style={{ fontSize: 24, fontWeight: 700,
-                    color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--danger)' : 'var(--text)' }}>
+                    color: n > 0 && (sev === 'critical' || sev === 'major') ? 'var(--destructive)' : 'var(--foreground)' }}>
         {n}
       </div>
     </button>
@@ -122,7 +122,7 @@ export function ActiveAlarmList() {
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <input className="search-input" style={{ width: 260 }} placeholder="코드/소스/메시지 검색"
                value={q} onChange={e => setQ(e.target.value)} />
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--danger)' : 'var(--text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
           {error ? '갱신 실패 — 표시가 최신이 아닐 수 있음' : lastUpdated ? `갱신 ${fmtTime(new Date(lastUpdated).toISOString())} · 라이브` : ''}
         </span>
         <button className="btn btn--ghost btn--sm" onClick={refreshAlarms}>↻</button>
@@ -156,7 +156,7 @@ export function ActiveAlarmList() {
                 const open = expanded === key
                 return [
                   <tr key={key} onClick={() => setExpanded(open ? null : key)}
-                      style={{ cursor: 'pointer', background: open ? 'var(--hover)' : undefined }}>
+                      style={{ cursor: 'pointer', background: open ? 'var(--accent)' : undefined }}>
                     <td><span className={`badge ${sevBadgeClass(severityOf(a))}`}>{severityOf(a)}</span></td>
                     <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code || '-'}</td>
                     <td>{alarmTypeLabel(a.type)}</td>
@@ -165,26 +165,26 @@ export function ActiveAlarmList() {
                     <td>
                       {a.message}
                       {(a.occurrences ?? 1) > 1 && (
-                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--text-muted)',
+                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
                                        border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}>
                           ×{a.occurrences}
                         </span>
                       )}
                       {(a.comments?.length ?? 0) > 0 && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)' }}>💬{a.comments!.length}</span>
+                        <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>💬{a.comments!.length}</span>
                       )}
                     </td>
                     <td className="ts">{fmtTime(a.ts)}</td>
                     <td>{elapsedSince(a.ts)}</td>
                     <td>
                       {a.acked
-                        ? <span style={{ fontSize: 11, color: 'var(--success)' }}>✓ {a.ackUser || '승인'}</span>
-                        : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>미승인</span>}
+                        ? <span style={{ fontSize: 11, color: 'var(--cims-success)' }}>✓ {a.ackUser || '승인'}</span>
+                        : <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>미승인</span>}
                     </td>
                   </tr>,
                   open && (
                     <tr key={`${key}-detail`}>
-                      <td colSpan={8} style={{ padding: 0, background: 'var(--hover)' }}>
+                      <td colSpan={8} style={{ padding: 0, background: 'var(--accent)' }}>
                         <AlarmDetail a={a} onAck={ack} onComment={comment} />
                       </td>
                     </tr>

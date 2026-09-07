@@ -81,26 +81,26 @@ export const EVENT_ICONS: Record<string, { icon: string; label: string; color: s
   member_join:    { icon: '✚', label: '입장',      color: '#2196f3' },
   member_leave:   { icon: '✖', label: '퇴장',      color: '#ff9800' },
   'floor-grant':  { icon: '▶', label: '발언 시작',  color: '#4caf50' },
-  'floor-release':{ icon: '■', label: '발언 종료',  color: 'var(--text-muted)' },
+  'floor-release':{ icon: '■', label: '발언 종료',  color: 'var(--muted-foreground)' },
   config_change:  { icon: '⚙', label: '설정 변경',  color: '#9c27b0' },
   member_invite:  { icon: '→', label: '초대',      color: '#00bcd4' },
 }
 
 export function getEventDisplay(type: string) {
-  return EVENT_ICONS[type] || { icon: '•', label: type, color: 'var(--text-muted)' }
+  return EVENT_ICONS[type] || { icon: '•', label: type, color: 'var(--muted-foreground)' }
 }
 
 // floor.jsonl op → 표시 스타일 (TS 24.380). CMP 가 기록하는 8종 전부를 다룬다 —
 // GRANT/RELEASE/IDLE/REVOKE/REVOKE_END/QUEUE/QUEUE_CANCEL/DENY.
 export const FLOOR_OPS: Record<string, { label: string; color: string }> = {
-  GRANT:        { label: '발언권 부여', color: 'var(--success)' },
-  RELEASE:      { label: '발언 종료',  color: 'var(--text-muted)' },
-  IDLE:         { label: '유휴',      color: 'var(--text-muted)' },
-  REVOKE:       { label: '회수 통지',  color: 'var(--warning)' },
-  REVOKE_END:   { label: '회수 확정',  color: 'var(--danger)' },
+  GRANT:        { label: '발언권 부여', color: 'var(--cims-success)' },
+  RELEASE:      { label: '발언 종료',  color: 'var(--muted-foreground)' },
+  IDLE:         { label: '유휴',      color: 'var(--muted-foreground)' },
+  REVOKE:       { label: '회수 통지',  color: 'var(--cims-warning)' },
+  REVOKE_END:   { label: '회수 확정',  color: 'var(--destructive)' },
   QUEUE:        { label: '대기열 등록', color: '#0891b2' },
-  QUEUE_CANCEL: { label: '대기 취소',  color: 'var(--text-muted)' },
-  DENY:         { label: '거절',      color: 'var(--danger)' },
+  QUEUE_CANCEL: { label: '대기 취소',  color: 'var(--muted-foreground)' },
+  DENY:         { label: '거절',      color: 'var(--destructive)' },
 }
 
 // DENY reason(CMP) → 한국어. 규격상 거절 사유가 이력에서 읽혀야 한다.
@@ -129,7 +129,7 @@ export function Person({ id, names, style, className }: {
   return <span className={className} style={style} title={names.tipOf(id)}>{names.nameOf(id)}</span>
 }
 
-export const thStyle: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }
+export const thStyle: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--muted-foreground)', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }
 export const tdStyle: CSSProperties = { padding: '6px 10px', whiteSpace: 'nowrap' }
 export const RANGE_OPTIONS = [5, 10, 20, 30]
 // 세션키 파싱 — 'S{yyyymmddHHMMSSuuuuuu}_{n}'(세션 디렉터리) 또는 'YYYYMMDDHH'(구 녹취).
@@ -256,8 +256,8 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
   return (
     <div style={{ marginBottom: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>일별 활동</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>색 진할수록 많음 · 클릭→해당 일 시간대 보기</span>
+        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>일별 활동</span>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 클릭→해당 일 시간대 보기</span>
         <span style={{ marginLeft: 'auto' }}>
           <button className={`btn btn--sm ${metric === 'turns' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('turns')}>발언 턴</button>
           <button className={`btn btn--sm ${metric === 'speakers' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('speakers')}>화자수</button>
@@ -273,17 +273,17 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
               title={`${fmtDayShort(d.day)}(${dayWeekday(d.day)}) · 발언 턴 ${d.turns} · 화자 ${d.speakers} · ${fmtSpeechMs(d.ms)}${d.active ? ' · 진행중' : ''}`}
               style={{
                 height: 48, borderRadius: 4,
-                background: d.hasData ? `color-mix(in srgb, var(--primary) ${Math.round((ratio || 0.12) * 100)}%, var(--surface))` : 'var(--surface-2)',
+                background: d.hasData ? `color-mix(in srgb, var(--primary) ${Math.round((ratio || 0.12) * 100)}%, var(--card))` : 'var(--secondary)',
                 border: isSel ? '2px solid var(--primary)' : '1px solid var(--border)',
                 cursor: 'pointer', opacity: d.hasData ? 1 : 0.65,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--text-muted)', position: 'relative', overflow: 'hidden',
+                fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--muted-foreground)', position: 'relative', overflow: 'hidden',
               }}>
               <span style={{ fontSize: 11, fontWeight: 700 }}>{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 9, opacity: 0.85 }}>{fmtDayShort(d.day)}</span>
-              {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--success)',
+              {d.active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
                 // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
-                boxShadow: '0 0 0 1px var(--surface)' }} />}
+                boxShadow: '0 0 0 1px var(--card)' }} />}
             </div>
           )
         })}
@@ -316,8 +316,8 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
   return (
     <div style={{ marginBottom: 4 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>시간대별 활동</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>색 진할수록 많음 · 숫자=값 · 클릭→펼치기</span>
+        <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>시간대별 활동</span>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 숫자=값 · 클릭→펼치기</span>
         <span style={{ marginLeft: 'auto' }}>
           <button className={`btn btn--sm ${metric === 'turns' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('turns')}>발언 턴</button>
           <button className={`btn btn--sm ${metric === 'speakers' ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setMetric('speakers')}>화자수</button>
@@ -342,19 +342,19 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
                 : `${String(h).padStart(2, '0')}시 · 활동 없음`}
               style={{
                 height: 34, borderRadius: 4,
-                background: sess ? `color-mix(in srgb, var(--primary) ${Math.round((ratio || 0.12) * 100)}%, var(--surface))` : 'var(--surface-2)',
+                background: sess ? `color-mix(in srgb, var(--primary) ${Math.round((ratio || 0.12) * 100)}%, var(--card))` : 'var(--secondary)',
                 border: isSel ? '2px solid var(--primary)' : '1px solid var(--border)',
                 cursor: sess ? 'pointer' : 'default', opacity: sess ? 1 : 0.5,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--text-muted)', position: 'relative',
+                fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--muted-foreground)', position: 'relative',
               }}>
               <span style={{ fontSize: 11, fontWeight: 600 }}>{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 8, opacity: 0.8 }}>
                 {String(h).padStart(2, '0')}{list && list.length > 1 ? ` ·${list.length}` : ''}
               </span>
-              {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--success)',
+              {active && <span style={{ position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: '50%', background: 'var(--cims-success)',
                 // 셀 배경이 밝든 어둡든 읽히도록 표면색 링을 두른다
-                boxShadow: '0 0 0 1px var(--surface)' }} />}
+                boxShadow: '0 0 0 1px var(--card)' }} />}
             </div>
           )
         })}
@@ -386,10 +386,10 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         style={{
           cursor: 'pointer',
           borderTop: '1px solid var(--border)',
-          background: isOpen ? 'var(--hover)' : 'transparent',
+          background: isOpen ? 'var(--accent)' : 'transparent',
         }}
       >
-        <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
+        <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? '▾' : '▸'}</td>
         <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtWindow(sess.dir)}</td>
         <td style={tdStyle} className="ts">
           {fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)}
@@ -400,14 +400,14 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {sess.turn_count ?? sess.segment_count ?? 0}
           {sess.turn_count != null && sess.segment_count != null && sess.turn_count !== sess.segment_count && (
-            <span style={{ color: 'var(--text-muted)', fontSize: 11 }}> / {sess.segment_count}세그</span>
+            <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}> / {sess.segment_count}세그</span>
           )}
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.speaker_count ?? 0}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {maxCon > 1
             ? <span className="badge badge--blue" style={{ fontSize: 10 }}>{maxCon}명</span>
-            : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+            : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(sess.total_speech_ms)}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
@@ -417,7 +417,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={9} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={9} style={{ padding: 0, background: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '12px 16px' }}>
               {!detail || detail.loading ? (
                 <div className="empty" style={{ padding: 12 }}>상세 로딩 중...</div>
@@ -510,7 +510,7 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
           같은 수치를 두 번 그리면 정작 봐야 할 발언·이벤트가 아래로 밀린다. */}
       <div style={{
         display: 'flex', gap: 18, flexWrap: 'wrap', padding: '9px 12px',
-        background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
+        background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6,
       }}>
         <Metric k="발언 턴" v={String(sess.turn_count ?? allTurns.length)} s="건" />
         <Metric k="녹취 세그먼트" v={String(sess.segment_count ?? detail.segments.length)} s="개" />
@@ -541,7 +541,7 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
           <div key={seg.seq} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>통화 녹취</span>
-              <span className="ts" style={{ color: 'var(--text-muted)' }}>
+              <span className="ts" style={{ color: 'var(--muted-foreground)' }}>
                 {fmtShortTime(seg.start_time)} ~ {fmtShortTime(seg.end_time)} · {fmtSpeechMs(seg.duration_ms)}
               </span>
             </div>
@@ -651,7 +651,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
       cursor: 'pointer', userSelect: 'none',
     } as CSSProperties,
   })
-  const chev = (on: boolean) => <span style={{ color: 'var(--text-muted)' }}>{on ? '▸ ' : '▾ '}</span>
+  const chev = (on: boolean) => <span style={{ color: 'var(--muted-foreground)' }}>{on ? '▸ ' : '▾ '}</span>
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -659,13 +659,13 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
       <div style={{ ...secStyle('part'), display: 'flex', flexDirection: 'column', padding: fold.part ? '8px 14px' : '8px 14px 0' }}>
         <div {...foldHeaderProps('part')}>
           <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.part)}참여자</span>
-          <span className="ts" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{parts.length}명</span>
+          <span className="ts" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{parts.length}명</span>
         </div>
         {!fold.part && <div style={{ minHeight: 0, overflowY: 'auto', paddingBottom: 8 }}>
           {parts.length === 0 ? (
-            <div className="ts" style={{ color: 'var(--text-muted)' }}>참여자 기록이 없습니다</div>
+            <div className="ts" style={{ color: 'var(--muted-foreground)' }}>참여자 기록이 없습니다</div>
           ) : (
-            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
               {parts.map((p, i) => (
                 <div key={p.id} style={{
                   display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', fontSize: 12,
@@ -674,19 +674,19 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
                   {/* 색점 = 타임바 레인 색. 발언 없는 참가자는 무채색 */}
                   <span style={{
                     width: 8, height: 8, borderRadius: 2, flex: '0 0 auto',
-                    background: speakerOrder.includes(p.id) ? spkColor(speakerOrder, p.id) : 'var(--surface-2)',
+                    background: speakerOrder.includes(p.id) ? spkColor(speakerOrder, p.id) : 'var(--secondary)',
                     border: speakerOrder.includes(p.id) ? undefined : '1px solid var(--border)',
                   }} />
                   <Person id={p.id} names={names}
                           style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} />
                   {p.role === 'initiator' && <span className="badge badge--gray" style={{ fontSize: 9 }}>개시자</span>}
                   {(p.join || p.leave) && (
-                    <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                    <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
                       {fmtShortTime(p.join)} ~ {p.leave ? fmtShortTime(p.leave) : (live ? '참여중' : '--')}
                     </span>
                   )}
-                  <span className="ts" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    턴 <b style={{ color: 'var(--text)' }}>{p.n}</b> · 발화 <b style={{ color: 'var(--text)' }}>{fmtSpeechMs(p.ms)}</b>
+                  <span className="ts" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
+                    턴 <b style={{ color: 'var(--foreground)' }}>{p.n}</b> · 발화 <b style={{ color: 'var(--foreground)' }}>{fmtSpeechMs(p.ms)}</b>
                   </span>
                 </div>
               ))}
@@ -705,7 +705,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
             {!fold.talk && <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {detail.segments.filter(s => s.status !== 'recording').map(seg => (
                 <div key={seg.seq} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                  <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
                     {fmtShortTime(seg.start_time)} ~ {fmtShortTime(seg.end_time)} · {fmtSpeechMs(seg.duration_ms)}
                   </span>
                   {recId && (
@@ -723,7 +723,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
             <div {...foldHeaderProps('talk')}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.talk)}발언권 타임라인</span>
             </div>
-            {!fold.talk && <div className="ts" style={{ color: 'var(--text-muted)' }}>발언 녹취가 없습니다</div>}
+            {!fold.talk && <div className="ts" style={{ color: 'var(--muted-foreground)' }}>발언 녹취가 없습니다</div>}
           </>
         ) : (
           <LaneTimebar turns={turns} speakerOrder={speakerOrder} recId={recId} audio={audio} names={names}
@@ -749,9 +749,9 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
 export function Metric({ k, v, s, hint }: { k: string; v: string; s: string; hint?: string }) {
   return (
     <div title={hint}>
-      <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600 }}>{k}</div>
+      <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-foreground)', fontWeight: 600 }}>{k}</div>
       <div className="ts" style={{ fontSize: 15, fontWeight: 700, marginTop: 1 }}>
-        {v}{s && <small style={{ fontSize: 11, fontWeight: 500, color: 'var(--text-muted)', marginLeft: 3 }}>{s}</small>}
+        {v}{s && <small style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted-foreground)', marginLeft: 3 }}>{s}</small>}
       </div>
     </div>
   )
@@ -794,7 +794,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
   const counts = { floor: floor.length, event: events.length }
   const shown = timeline.filter(it => layers[it.kind])
   const chips: Array<{ key: 'floor' | 'event'; label: string; color: string }> = [
-    { key: 'floor', label: '발언권', color: 'var(--success)' },
+    { key: 'floor', label: '발언권', color: 'var(--cims-success)' },
     { key: 'event', label: '멤버', color: '#9333ea' },
   ]
 
@@ -804,7 +804,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
         <span onClick={onToggle}
               style={{ fontWeight: 600, fontSize: 13, ...(onToggle ? { cursor: 'pointer', userSelect: 'none' as const } : {}) }}
               title={onToggle ? (collapsed ? '펼치기' : '접기') : undefined}>
-          {onToggle && <span style={{ color: 'var(--text-muted)' }}>{collapsed ? '▸ ' : '▾ '}</span>}이벤트 타임라인
+          {onToggle && <span style={{ color: 'var(--muted-foreground)' }}>{collapsed ? '▸ ' : '▾ '}</span>}이벤트 타임라인
         </span>
         <span className="ts" style={{ fontSize: 11 }}>발언권 중재 · 입퇴장</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -817,7 +817,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
                 padding: '2px 8px', fontSize: 11,
                 border: `1px solid ${layers[c.key] ? c.color : 'var(--border)'}`,
                 background: layers[c.key] ? c.color : 'transparent',
-                color: layers[c.key] ? '#fff' : 'var(--text-muted)',
+                color: layers[c.key] ? '#fff' : 'var(--muted-foreground)',
               }}
             >
               {c.label} {counts[c.key]}
@@ -827,12 +827,12 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
       </div>
 
       {!collapsed && (shown.length === 0 ? (
-        <div className="ts" style={{ color: 'var(--text-muted)' }}>표시할 항목이 없습니다</div>
+        <div className="ts" style={{ color: 'var(--muted-foreground)' }}>표시할 항목이 없습니다</div>
       ) : (
         <div style={{
           // fill 구획에서는 내용만큼 서고, 구획이 줄면 목록만 스크롤 (헤더는 밀리지 않는다)
           ...(fill ? { flex: '0 1 auto' as const, minHeight: 0, overflowY: 'auto' as const } : { maxHeight, overflowY: maxHeight ? 'auto' as const : undefined }),
-          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
         }}>
           {shown.map((it, i) => {
             const border = i > 0 ? '1px solid var(--border)' : undefined
@@ -852,9 +852,9 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
             const disp = getEventDisplay(ev.type)
             return (
               <div key={`e${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', fontSize: 12, borderTop: border, borderLeft: '4px solid transparent' }}>
-                <span className="ts" style={{ minWidth: 70, color: 'var(--text-muted)' }}>{fmtShortTime(ev.ts)}</span>
+                <span className="ts" style={{ minWidth: 70, color: 'var(--muted-foreground)' }}>{fmtShortTime(ev.ts)}</span>
                 <span style={{ minWidth: 30, textAlign: 'center', color: disp.color, fontSize: 14 }}>{disp.icon}</span>
-                <span style={{ color: 'var(--text)' }}>
+                <span style={{ color: 'var(--foreground)' }}>
                   {ev.member && <><Person id={ev.member} names={names} style={{ fontWeight: 500 }} />{' '}</>}
                   {disp.label}
                   {ev.type === 'member_join' && ev.role === 'initiator' &&
@@ -882,8 +882,8 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
   recId?: string | null
   audio?: InlineAudio
 }) {
-  const st = FLOOR_OPS[f.op] || { label: f.op, color: 'var(--text-muted)' }
-  const uColor = f.user ? spkColor(speakerOrder, f.user) : 'var(--text-muted)'
+  const st = FLOOR_OPS[f.op] || { label: f.op, color: 'var(--muted-foreground)' }
+  const uColor = f.user ? spkColor(speakerOrder, f.user) : 'var(--muted-foreground)'
   // 사유·부가정보에 실린 번호도 사람으로 읽는다 (점유자·회수 대상·선점 상대).
   const who = (msisdn: string | undefined) => (msisdn ? names.nameOf(msisdn) : '')
   const extras: string[] = []
@@ -935,10 +935,10 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
     <div title={rowTip || undefined}
          style={{
            display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', fontSize: 12,
-           borderTop: border, color: 'var(--text-muted)',
+           borderTop: border, color: 'var(--muted-foreground)',
            // 발언(=재생 가능)인 행만 화자 색 띠로 세운다 — 목록에서 눈으로 바로 걸린다.
            borderLeft: `4px solid ${turn ? uColor : 'transparent'}`,
-           background: isPlaying ? 'var(--hover)' : undefined,
+           background: isPlaying ? 'var(--accent)' : undefined,
          }}>
       <span className="ts" style={{ minWidth: 70 }}>{fmtShortTime(f.ts)}</span>
       {turn ? (
@@ -960,7 +960,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
         : <span style={{ color: uColor }}>-</span>}
       {role && <span className="badge badge--gray" style={{ fontSize: 9 }}>{role}</span>}
       {f.prio != null && f.prio >= 0 && <span className="ts">prio {f.prio}</span>}
-      {f.preempt && <span className="ts" style={{ color: 'var(--warning)' }}>← 선점 {who(f.preempted_from)}</span>}
+      {f.preempt && <span className="ts" style={{ color: 'var(--cims-warning)' }}>← 선점 {who(f.preempted_from)}</span>}
       {f.tier && f.tier !== 'normal' && <span className="badge badge--red" style={{ fontSize: 9 }}>{f.tier}</span>}
       {extras.length > 0 && <span className="ts" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
       {turn?.hasVideo && <span className="badge badge--blue" style={{ fontSize: 9 }}>영상</span>}
@@ -1146,11 +1146,11 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         <span onClick={onToggle}
               style={{ fontWeight: 600, fontSize: 13, ...(onToggle ? { cursor: 'pointer', userSelect: 'none' as const } : {}) }}
               title={onToggle ? (collapsed ? '펼치기' : '접기') : undefined}>
-          {onToggle && <span style={{ color: 'var(--text-muted)' }}>{collapsed ? '▸ ' : '▾ '}</span>}발언권 타임라인
+          {onToggle && <span style={{ color: 'var(--muted-foreground)' }}>{collapsed ? '▸ ' : '▾ '}</span>}발언권 타임라인
         </span>
-        <span className="ts" style={{ color: 'var(--text-muted)' }}>{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
+        <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
         {maxCon > 1 && (
-          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>· 최대 동시 발언 {maxCon}명</span>
+          <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>· 최대 동시 발언 {maxCon}명</span>
         )}
         {!collapsed && zoomed && (
           <span className="ts" style={{ fontSize: 11, color: 'var(--primary)' }}>
@@ -1162,7 +1162,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
             <button className="btn btn--sm btn--ghost" disabled={!zoomed} onClick={() => panBy(-0.5)} title="왼쪽으로 이동 (반 화면)">‹</button>
             <button className="btn btn--sm btn--ghost" disabled={!zoomed} onClick={() => panBy(0.5)} title="오른쪽으로 이동 (반 화면)">›</button>
             <button className="btn btn--sm btn--ghost" disabled={zoom <= ZOOM_MIN} onClick={() => zoomBy(0.5)} title="축소 — 시간폭 넓히기">−</button>
-            <span className="ts" style={{ fontSize: 11, minWidth: 32, textAlign: 'center', color: 'var(--text-muted)' }}>
+            <span className="ts" style={{ fontSize: 11, minWidth: 32, textAlign: 'center', color: 'var(--muted-foreground)' }}>
               {zoom < 10 ? Number(zoom.toFixed(1)) : Math.round(zoom)}×
             </span>
             <button className="btn btn--sm btn--ghost" disabled={zoom >= ZOOM_MAX} onClick={() => zoomBy(2)} title="확대 — 시간폭 좁히기">+</button>
@@ -1171,7 +1171,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         )}
       </div>
       {!collapsed && <div style={{
-        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
+        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
         padding: '8px 10px 4px',
         // fill 구획에서는 레인이 많을 때 박스 안에서만 세로 스크롤 — 헤더는 밀리지 않는다.
         // 내용이 적으면 박스도 내용만큼만 선다 (구획이 내용 크기 기반이라 grow 하지 않는다)
@@ -1279,7 +1279,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
                   {ticks.map(t => (
                     <span key={t} className="ts" style={{
                       position: 'absolute', left: `${pct(t)}%`, transform: 'translateX(-50%)',
-                      fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+                      fontSize: 10, color: 'var(--muted-foreground)', whiteSpace: 'nowrap',
                     }}>
                       {fmtClock(t)}
                     </span>
@@ -1296,7 +1296,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
               title={zoomed ? '보이는 구간 — 클릭·드래그로 이동' : undefined}
               style={{
                 height: 6, marginTop: 2, borderRadius: 3, position: 'relative',
-                background: 'var(--surface-2)', cursor: zoomed ? 'pointer' : 'default',
+                background: 'var(--secondary)', cursor: zoomed ? 'pointer' : 'default',
               }}
             >
               <div style={{

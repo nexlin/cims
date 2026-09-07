@@ -10,7 +10,7 @@ import { usePageParam } from '../widgets/pageParams'
 export function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
   return (
     <>
-      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>기간:</span>
+      <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>기간:</span>
       {[1, 7, 30, 90].map(d => (
         <button key={d}
           className={`btn btn--sm ${days === d ? 'btn--primary' : 'btn--ghost'}`}
@@ -37,7 +37,7 @@ export function Pager({ page, count, pageSize, onPage, unit = '건' }: {
   const to = Math.min(count, (cur + 1) * pageSize)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', fontSize: 12,
-                  color: 'var(--text-muted)', borderTop: '1px solid var(--border)', flex: 'none' }}>
+                  color: 'var(--muted-foreground)', borderTop: '1px solid var(--border)', flex: 'none' }}>
       <span>{from}–{to} / {count}{unit}</span>
       <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
         <button className="btn btn--ghost btn--sm" disabled={cur === 0} onClick={() => onPage(0)}>«</button>

@@ -21,10 +21,10 @@ export function MyLayoutHeader() {
   const s = useMyLayout(show)
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <span className="badge" style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--surface-2)' }}>
+      <span className="badge" style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--secondary)' }}>
         {s.source === 'override' ? '개인 구성' : '프로파일 기본'}
       </span>
-      {s.dirty && <span style={{ color: 'var(--warning)', fontSize: 12 }}>● 저장되지 않은 변경</span>}
+      {s.dirty && <span style={{ color: 'var(--cims-warning)', fontSize: 12 }}>● 저장되지 않은 변경</span>}
       <InfoDot label="내 대시보드 구성이란?">
         구성은 서버(계정별)에 저장되어 기기·세션을 넘어 따라갑니다. 위젯 가용성은 서비스 설치/상태에
         따릅니다 — 모든 위젯 API 는 서버에서 권한을 재확인합니다.
@@ -57,7 +57,7 @@ export function MyLayoutProfile() {
         </select>
         <button className="btn btn--sm" onClick={() => myLayout.applyProfile(s.baseProfile)}
                 title="선택한 프로파일의 기본 위젯 세트로 교체">이 프로파일 적용</button>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           설치된 서비스: {s.installed.length ? s.installed.join(', ') : '없음'}
         </span>
       </div>
@@ -123,15 +123,15 @@ export function MyLayoutWidgets() {
               }}>
                 <span style={{ fontWeight: 500 }}>{w?.title ?? id}</span>
                 {w && <span className="badge" style={{ fontSize: 11 }}>{AREA_LABEL[w.area]}</span>}
-                {w?.requires_service && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{w.requires_service}</span>}
-                {note && <span style={{ fontSize: 11, color: 'var(--warning)' }}>⚠ {note}</span>}
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({id})</span>
+                {w?.requires_service && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{w.requires_service}</span>}
+                {note && <span style={{ fontSize: 11, color: 'var(--cims-warning)' }}>⚠ {note}</span>}
+                <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>({id})</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                   <button className="btn btn--sm" onClick={() => myLayout.move(i, -1)} disabled={i === 0} title="위로">↑</button>
                   <button className="btn btn--sm" onClick={() => myLayout.move(i, 1)}
                           disabled={i === s.dashboard.length - 1} title="아래로">↓</button>
                   <button className="btn btn--sm" onClick={() => myLayout.remove(i)} title="제거"
-                          style={{ color: 'var(--danger)' }}>✕</button>
+                          style={{ color: 'var(--destructive)' }}>✕</button>
                 </span>
               </li>
             )

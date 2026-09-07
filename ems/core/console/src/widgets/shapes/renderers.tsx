@@ -44,7 +44,7 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
       {buckets.map((b, i) => (
         <div key={i} style={{ flex: 1, minWidth: 0, height: '100%',
                               display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>
+          <div style={{ flex: 'none', fontSize: 10, color: 'var(--muted-foreground)', marginBottom: 2 }}>
             {b.value > 0 && i % every === 0 ? b.value : ''}
           </div>
           {/* 막대 영역 — 남은 높이 전부. 막대는 그 안에서 값 비율만큼 차지한다. */}
@@ -55,7 +55,7 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
                           background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
           </div>
           {/* 라벨은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다). */}
-          <div style={{ flex: 'none', fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+          <div style={{ flex: 'none', fontSize: 10, color: 'var(--muted-foreground)', marginTop: 2 }}>
             {i % every === 0 ? labels[i] : ''}
           </div>
         </div>
@@ -106,7 +106,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
         ))}
       </div>
       {overlap.length > 0 && (
-        <div style={{ flex: 'none', fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+        <div style={{ flex: 'none', fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 8 }}>
           ※ {overlap.map(sp => sp.label).join(' · ')} 은(는) 다른 계열을 포함합니다 — 함께 쌓으면 합계가 중복됩니다.
         </div>
       )}
@@ -139,7 +139,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
                 )}
               </div>
               <div style={{ flex: 'none', fontSize: 10, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden',
-                            color: on ? 'var(--text)' : 'var(--text-muted)',
+                            color: on ? 'var(--foreground)' : 'var(--muted-foreground)',
                             fontWeight: on ? 600 : 400 }}>
                 {i % every === 0 || on ? labels[i] : ''}
               </div>
@@ -151,10 +151,10 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
         <div style={{
           position: 'absolute', left: Math.min(hover.x + 12, (wrap.current?.clientWidth ?? 0) - 190),
           top: Math.max(hover.y - 12, 0), zIndex: 30, pointerEvents: 'none', width: 178,
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-lg)', padding: '8px 10px', fontSize: 12,
+          background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)', boxShadow: 'var(--cims-elevation-lg)', padding: '8px 10px', fontSize: 12,
         }}>
-          <div style={{ color: 'var(--text-muted)', marginBottom: 5 }}>{hover.bucket}</div>
+          <div style={{ color: 'var(--muted-foreground)', marginBottom: 5 }}>{hover.bucket}</div>
           {series.map(sp => {
             const v = hoveredBucket.values[sp.key] || 0
             const cur = sp.key === hover.key
@@ -171,8 +171,8 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
           })}
           {series.length > 1 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, paddingTop: 5,
-                          borderTop: '1px solid var(--border)', color: 'var(--text-muted)' }}>
-              <span>합계</span><span style={{ fontWeight: 700, color: 'var(--text)' }}>{hover.total}{unit || ''}</span>
+                          borderTop: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
+              <span>합계</span><span style={{ fontWeight: 700, color: 'var(--foreground)' }}>{hover.total}{unit || ''}</span>
             </div>
           )}
         </div>
@@ -185,11 +185,11 @@ export function KpiCards({ data }: { data: KpiData }) {
   return (
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
       {data.items.map((k, i) => (
-        <div key={i} style={{ flex: '1 1 120px', background: 'var(--surface)', border: '1px solid var(--border)',
+        <div key={i} style={{ flex: '1 1 120px', background: 'var(--card)', border: '1px solid var(--border)',
                               borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{k.label}</div>
+          <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{k.label}</div>
           <div style={{ fontSize: 24, fontWeight: 700 }}>
-            {k.value}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{k.unit}</span>
+            {k.value}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{k.unit}</span>
           </div>
         </div>
       ))}
@@ -204,9 +204,9 @@ export function StatValue({ data }: { data: KpiData }) {
   return (
     <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column',
                   justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{k.label}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{k.label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1 }}>
-        {k.value}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{k.unit}</span>
+        {k.value}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{k.unit}</span>
       </div>
     </div>
   )
@@ -236,7 +236,7 @@ export function DistributionBars({ data }: { data: DistributionData }) {
         return (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <div style={{ width: 90, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label || 'unknown'}</div>
-            <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 4, height: 18, display: 'flex', overflow: 'hidden' }}>
+            <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: 4, height: 18, display: 'flex', overflow: 'hidden' }}>
               {seg ? series!.map(sp => {
                 const v = it.parts?.[sp.key] || 0
                 if (v <= 0) return null
@@ -253,7 +253,7 @@ export function DistributionBars({ data }: { data: DistributionData }) {
               )}
             </div>
             <div style={{ width: 78, fontSize: 12, textAlign: 'right',
-                          color: on ? 'var(--text)' : 'var(--text-muted)', fontWeight: on ? 600 : 400 }}>
+                          color: on ? 'var(--foreground)' : 'var(--muted-foreground)', fontWeight: on ? 600 : 400 }}>
               {on && hover ? `${hover.key}: ${it.parts?.[hover.key] ?? 0}` : `${it.value} (${pct}%)`}
             </div>
           </div>
@@ -298,14 +298,14 @@ export function MatrixTable({ data }: { data: MatrixData }) {
   }
   const numTd = (v: number, bg?: string): CSSProperties => ({
     textAlign: 'right', fontVariantNumeric: 'tabular-nums',
-    color: v ? 'var(--text)' : 'var(--text-muted)', opacity: v ? 1 : 0.45,
+    color: v ? 'var(--foreground)' : 'var(--muted-foreground)', opacity: v ? 1 : 0.45,
     fontWeight: v ? 600 : 400, background: bg, whiteSpace: 'nowrap',
   })
   const stickyL: CSSProperties = {
-    position: 'sticky', left: 0, background: 'var(--surface)', zIndex: 1, whiteSpace: 'nowrap',
+    position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1, whiteSpace: 'nowrap',
   }
   const stickyR: CSSProperties = {
-    position: 'sticky', right: 0, background: 'var(--surface)', zIndex: 1,
+    position: 'sticky', right: 0, background: 'var(--card)', zIndex: 1,
   }
 
   if (data.rows.length === 0 || data.columns.length === 0) {
@@ -353,7 +353,7 @@ export function MatrixTable({ data }: { data: MatrixData }) {
       {/* 각주 — 비율 열은 이름만으로 분자·분모를 알 수 없다. 표를 보는 자리에서 바로 읽히게
           표 바로 아래 둔다(별도 도움말로 빼면 아무도 찾아가지 않는다). */}
       {data.notes?.length ? (
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--muted-foreground)', lineHeight: 1.7 }}>
           {data.notes.map(n => <div key={n}>{n}</div>)}
         </div>
       ) : null}

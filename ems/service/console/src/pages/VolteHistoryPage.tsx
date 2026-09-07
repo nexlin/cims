@@ -31,7 +31,7 @@ const CALLER_C = '#2563eb', CALLEE_C = '#16a34a'
 const ACTOR_LABEL: Record<string, string> = { ue: 'UE', ue_o: 'UEᴼ', ue_t: 'UEᵀ', cwrtc: 'CWRTC', csc: 'CSC', csp: 'CSP', cmp: 'CMP' }
 const actorLbl = (a: string) => ACTOR_LABEL[a] || (a ? a.toUpperCase() : '—')
 const PROTO_COLOR: Record<string, string> = { SIP: '#2563eb', JSON: '#d97706', CSC: '#9333ea', RTP: '#16a34a', INT: '#0891b2', MCPTT: '#db2777' }
-const protoColor = (p: string) => PROTO_COLOR[p] || 'var(--text-muted)'
+const protoColor = (p: string) => PROTO_COLOR[p] || 'var(--muted-foreground)'
 const nodeOf = (m: FlowMessage) => (m.nodeId || m.node || m.iface || '').replace(/_\d+$/, '')
 
 function callState(s: string) {
@@ -69,11 +69,11 @@ function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>
               transform: on ? 'translateY(-2px)' : undefined,
               fontWeight: on ? 700 : undefined,
               background: on && c.v === 0 ? 'color-mix(in srgb, var(--primary) 10%, transparent)'
-                : c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--surface))` : 'var(--surface-2)',
-              color: ratio > 0.55 ? '#fff' : 'var(--text)',
+                : c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--card))` : 'var(--secondary)',
+              color: ratio > 0.55 ? '#fff' : 'var(--foreground)',
             }}>
             <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, height: 16 }}>{c.v > 0 ? c.v : ' '}</div>
-            <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, color: ratio > 0.55 ? 'rgba(255,255,255,.8)' : 'var(--text-muted)' }}>{c.h}</div>
+            <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, color: ratio > 0.55 ? 'rgba(255,255,255,.8)' : 'var(--muted-foreground)' }}>{c.h}</div>
           </div>
         )
       })}
@@ -194,7 +194,7 @@ export default function VolteHistoryPage() {
   const totalPages = Math.max(1, Math.ceil(total / ps))
   const dayTotal = useMemo(() => Object.values(hours).reduce((a, b) => a + b, 0), [hours])
   const selNode = orgs.find(o => o.code === selOrg)
-  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }
+  const thS: CSSProperties = { padding: '7px 10px', fontWeight: 600, color: 'var(--muted-foreground)', textAlign: 'left', whiteSpace: 'nowrap', position: 'sticky', top: 0, background: 'var(--card)', zIndex: 1 }
 
   return (
     <div className="panel" style={{ padding: 10 }}>
@@ -204,13 +204,13 @@ export default function VolteHistoryPage() {
         <input className="search-input" placeholder="가입자 이름/번호 검색" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 240 }} />
         {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+        <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
           {selNode ? `부서: ${selNode.name}` : '전체'}{q ? `  &  검색: "${q}"` : ''}{selHour ? `  &  ${selHour}시` : ''}
         </span>
-        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted-foreground)', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />자동갱신
         </label>
-        <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <label style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           표시{' '}
           <select className="form-input" value={ps} onChange={e => { setPs(Number(e.target.value)); setPage(0) }}
             style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}>
@@ -243,7 +243,7 @@ export default function VolteHistoryPage() {
           <div style={{ flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>시간대별 호 분포</span>
-              <span className="ts" style={{ color: 'var(--text-muted)' }}>{fDate} · 총 {dayTotal}건</span>
+              <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{fDate} · 총 {dayTotal}건</span>
               <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--primary)',
                 background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 35%, transparent)',
                 borderRadius: 10, padding: '1px 10px' }}>
@@ -272,9 +272,9 @@ export default function VolteHistoryPage() {
               </thead>
               <tbody>
                 {loading
-                  ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>로딩 중...</td></tr>
+                  ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>로딩 중...</td></tr>
                   : logs.length === 0
-                    ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>이력 없음</td></tr>
+                    ? <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 24 }}>이력 없음</td></tr>
                     : logs.map(l => {
                       const isOpen = expandedCall === callKey(l)
                       const st = callState(l.state)
@@ -297,7 +297,7 @@ export default function VolteHistoryPage() {
 
           {/* 페이지네이션 (항상 표시) */}
           <div className="toolbar" style={{ justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', flexShrink: 0, paddingTop: 6 }}>
-            <span className="ts" style={{ color: 'var(--text-muted)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
+            <span className="ts" style={{ color: 'var(--muted-foreground)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
             <button className="btn btn--sm btn--ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</button>
             <button className="btn btn--sm btn--ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</button>
           </div>
@@ -307,7 +307,7 @@ export default function VolteHistoryPage() {
       {recPlayer && (
         <div className="modal-overlay" onClick={() => setRecPlayer(null)}
           style={{ background: 'rgba(15,23,42,0.32)', backdropFilter: 'blur(2px)' }}>
-          <div className="modal-box" style={{ maxWidth: 1100, width: '92vw', background: 'var(--surface, rgba(255,255,255,0.97))', boxShadow: '0 12px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+          <div className="modal-box" style={{ maxWidth: 1100, width: '92vw', background: 'var(--card, rgba(255,255,255,0.97))', boxShadow: '0 12px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
             <SegmentPlayer segments={recPlayer.segments} recordingId={recPlayer.id} callType={recPlayer.callType} caller={recPlayer.caller} callee={recPlayer.callee} onClose={() => setRecPlayer(null)} />
           </div>
         </div>
@@ -335,12 +335,12 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
 }) {
   return (
     <>
-      <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--hover)' : 'transparent' }}>
-        <td style={{ ...tdS, textAlign: 'center', color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</td>
+      <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--accent)' : 'transparent' }}>
+        <td style={{ ...tdS, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? '▾' : '▸'}</td>
         <td style={tdS}><span className={`badge ${l.call_type === 'volte_video' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</span></td>
         <td style={tdS}>
           <span style={{ fontWeight: 600, color: CALLER_C }}>{l.initiator}</span>
-          <span style={{ color: 'var(--text-muted)' }}> → </span>
+          <span style={{ color: 'var(--muted-foreground)' }}> → </span>
           <span style={{ fontWeight: 600, color: CALLEE_C }}>{l.callee || '—'}</span>
         </td>
         <td style={{ ...tdS, textAlign: 'center' }}><span className={`badge ${st.cls}`}>{st.label}</span></td>
@@ -352,12 +352,12 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
         <td style={{ ...tdS, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
           {l.has_recording
             ? <button className="btn btn--sm btn--outline" onClick={onOpenRec}>&#9654; 녹취</button>
-            : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+            : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
         </td>
       </tr>
       {isOpen && (
         <tr>
-          <td colSpan={10} style={{ padding: 0, background: 'var(--bg-soft)', borderTop: '1px solid var(--border)' }}>
+          <td colSpan={10} style={{ padding: 0, background: 'var(--muted)', borderTop: '1px solid var(--border)' }}>
             <div style={{ padding: '10px 14px' }}>
               <CallDetailPanel l={l} flow={flow} onOpenDiagram={onOpenDiagram} />
             </div>
@@ -405,7 +405,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
   }
 
   const dS: CSSProperties = { padding: '3px 8px', whiteSpace: 'nowrap', fontSize: 12 }
-  const hS: CSSProperties = { padding: '4px 8px', fontWeight: 600, color: 'var(--text-muted)', textAlign: 'left', fontSize: 11 }
+  const hS: CSSProperties = { padding: '4px 8px', fontWeight: 600, color: 'var(--muted-foreground)', textAlign: 'left', fontSize: 11 }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -414,7 +414,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
         {/* 좌 */}
         <div style={{ flex: '1 1 460px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {/* 시퀀스 다이어그램 */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', borderBottom: '1px solid var(--border)' }}>
               <span style={{ fontWeight: 600, fontSize: 12 }}>시퀀스 다이어그램</span>
               {/* 노드별 표시 토글(뱃지) — CSP/CMP(/CSC). 끄면 해당 노드 메시지 숨김. */}
@@ -422,7 +422,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                 <span style={{ display: 'inline-flex', gap: 4, marginLeft: 4 }}>
                   {availNodes.map(n => {
                     const on = !offNodes.has(n)
-                    const color = NODE_COLOR[n] || 'var(--text-muted)'
+                    const color = NODE_COLOR[n] || 'var(--muted-foreground)'
                     return (
                       <button key={n} onClick={() => toggleNode(n)} title={`${NODE_LABEL[n] || n.toUpperCase()} 메시지 표시/숨김`}
                         style={{ fontSize: 10, fontWeight: 700, padding: '1px 7px', borderRadius: 10, cursor: 'pointer',
@@ -438,21 +438,21 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
             <div style={{ maxHeight: 230, overflow: 'auto', padding: 6 }}>
               {flow?.loading ? <div className="empty" style={{ padding: 8 }}>로딩 중...</div>
                 : msgs.length > 0 ? <SequenceDiagram messages={msgs} selectedIdx={selIdx} onSelect={select} />
-                  : <div className="ts" style={{ color: 'var(--text-muted)', padding: 6 }}>메시지 없음</div>}
+                  : <div className="ts" style={{ color: 'var(--muted-foreground)', padding: 6 }}>메시지 없음</div>}
             </div>
           </div>
           {/* 메시지 이력 */}
-          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
             <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
-              메시지 이력 {msgs.length > 0 && <span className="ts" style={{ color: 'var(--text-muted)' }}>{msgs.length}건</span>}
+              메시지 이력 {msgs.length > 0 && <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{msgs.length}건</span>}
             </div>
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {flow?.loading ? <div className="empty" style={{ padding: 8 }}>로딩 중...</div>
-                : msgs.length === 0 ? <div className="ts" style={{ color: 'var(--text-muted)', padding: 8 }}>메시지 없음</div>
+                : msgs.length === 0 ? <div className="ts" style={{ color: 'var(--muted-foreground)', padding: 8 }}>메시지 없음</div>
                   : (
                     <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
-                        <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0 }}>
+                        <tr style={{ background: 'var(--secondary)', position: 'sticky', top: 0 }}>
                           <th style={{ ...hS, width: 28, textAlign: 'right' }}>#</th>
                           <th style={hS}>시간</th>
                           <th style={hS}>From→To</th>
@@ -468,15 +468,15 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                           const sel = selIdx === i
                           return (
                             <tr key={i} onClick={() => select(i)}
-                              style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--hover)' : undefined }}>
-                              <td style={{ ...dS, textAlign: 'right', color: 'var(--text-muted)' }}>{i + 1}</td>
+                              style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--accent)' : undefined }}>
+                              <td style={{ ...dS, textAlign: 'right', color: 'var(--muted-foreground)' }}>{i + 1}</td>
                               <td style={dS} className="ts">{fmtClock(m.ts)}</td>
-                              <td style={dS}>{actorLbl(m.from)}<span style={{ color: 'var(--text-muted)' }}>→</span>{actorLbl(m.to)}</td>
-                              <td style={{ ...dS, color: 'var(--text-muted)', fontSize: 10 }}>{(m.nodeId || m.node || '').toUpperCase()}</td>
+                              <td style={dS}>{actorLbl(m.from)}<span style={{ color: 'var(--muted-foreground)' }}>→</span>{actorLbl(m.to)}</td>
+                              <td style={{ ...dS, color: 'var(--muted-foreground)', fontSize: 10 }}>{(m.nodeId || m.node || '').toUpperCase()}</td>
                               <td style={dS}>{(() => {
                                 const d = inferDir(m)
                                 return d ? <span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: d === 'TX' ? '#2563eb' : '#16a34a', borderRadius: 3, padding: '1px 5px' }}>{d}</span>
-                                  : <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                  : <span style={{ color: 'var(--muted-foreground)' }}>—</span>
                               })()}</td>
                               <td style={dS}><span style={{ fontSize: 9, fontWeight: 700, color: '#fff', background: protoColor(proto), borderRadius: 3, padding: '1px 5px' }}>{proto}</span></td>
                               <td style={{ ...dS, fontWeight: 600, color: protoColor(proto) }}>{m.label || ''}</td>
@@ -491,7 +491,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
         </div>
 
         {/* 우: 메시지 상세 */}
-        <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
             메시지 상세 {selIdx != null && msgs[selIdx] && <span className="ts" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
           </div>

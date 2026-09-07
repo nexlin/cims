@@ -21,9 +21,9 @@ function elapsedSec(iso: string | null, now: number, fallback = 0): number {
   return Math.max(0, Math.floor((now - t) / 1000))
 }
 function poolColor(pct: number): string {
-  if (pct >= 80) return 'var(--danger)'
-  if (pct >= 60) return 'var(--warning)'
-  return 'var(--success)'
+  if (pct >= 80) return 'var(--destructive)'
+  if (pct >= 60) return 'var(--cims-warning)'
+  return 'var(--cims-success)'
 }
 
 export function useNowTick(periodMs = 1000): number {
@@ -66,7 +66,7 @@ export function usePins(key: string): { pins: Set<string>; toggle: (id: string) 
 }
 
 function OnlineDot({ on }: { on: boolean }) {
-  return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: on ? 'var(--success)' : 'var(--text-muted)', marginRight: 6 }} />
+  return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: on ? 'var(--cims-success)' : 'var(--muted-foreground)', marginRight: 6 }} />
 }
 function PinBtn({ on, onClick }: { on: boolean; onClick: (e: React.MouseEvent) => void }) {
   return <button className="btn btn--sm btn--ghost" title={on ? '고정 해제' : '고정'} onClick={onClick} style={{ padding: '0 6px', opacity: on ? 1 : 0.35 }}>📌</button>
@@ -76,7 +76,7 @@ function Gauge({ label, pool }: { label: string; pool: Pool }) {
   const pct = total > 0 ? Math.round((used / total) * 100) : 0
   return (
     <div style={{ minWidth: 220, flex: 1 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, color: 'var(--text-muted)', marginBottom: 3 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 3 }}>
         {/* 라벨이 길면 줄이고(수치가 밀려 겹치지 않게) 전체 문구는 툴팁으로 */}
         <span title={label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
         <span style={{ whiteSpace: 'nowrap' }}>{used} / {total} ({pct}%)</span>
@@ -90,9 +90,9 @@ function Gauge({ label, pool }: { label: string; pool: Pool }) {
 function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minWidth: 80 }}>
-      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+      <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{label}</span>
       <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>{value}</span>
-      {sub && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sub}</span>}
+      {sub && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{sub}</span>}
     </div>
   )
 }
@@ -132,11 +132,11 @@ export function PttKpiCard() {
         {live && <Gauge label="PTT 그룹 풀(동시 그룹·floor)" pool={live.capacity.ptt_rtp} />}
       </div>
       {live && live.capacity.nodes.length > 1 && (
-        <div style={{ borderTop: '1px dashed var(--border)', marginTop: 10, paddingTop: 8, display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={{ borderTop: '1px dashed var(--border)', marginTop: 10, paddingTop: 8, display: 'flex', flexWrap: 'wrap', gap: 18, fontSize: 12, color: 'var(--muted-foreground)' }}>
           <span>미디어 노드 분산:</span>
           {live.capacity.nodes.map(n => (
             <span key={n.host}>
-              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: n.up ? 'var(--success)' : 'var(--danger)', marginRight: 4 }} />
+              <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: n.up ? 'var(--cims-success)' : 'var(--destructive)', marginRight: 4 }} />
               {n.host} · VoLTE {n.volte_rtp.used}/{n.volte_rtp.total} · PTT {n.ptt_rtp.used}/{n.ptt_rtp.total} · 그룹 {n.groups}
             </span>
           ))}
@@ -165,7 +165,7 @@ function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendP
   const max = Math.max(1, ...points.map(p => p[metric]))
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-      <span style={{ width: AXIS_W, fontSize: 12, color: 'var(--text-muted)', textAlign: 'right', flexShrink: 0 }}>{label}</span>
+      <span style={{ width: AXIS_W, fontSize: 12, color: 'var(--muted-foreground)', textAlign: 'right', flexShrink: 0 }}>{label}</span>
       <div style={{ display: 'flex', gap: 1, flex: 1 }}>
         {points.map((p, i) => {
           const v = p[metric]
@@ -176,7 +176,7 @@ function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendP
                 flex: 1, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 10, lineHeight: 1, borderRadius: 2,
                 background: v > 0 ? `rgba(${rgb},${ratio.toFixed(3)})` : 'var(--border)',
-                color: ratio > 0.55 ? '#fff' : 'var(--text)',
+                color: ratio > 0.55 ? '#fff' : 'var(--foreground)',
               }}>
               {v > 0 ? v : ''}
             </div>
@@ -208,14 +208,14 @@ function TrendAxis({ points }: { points: TrendPoint[] }) {
           const pct = (i + 0.5) / n * 100
           const isFirst = i === 0, isLast = i === n - 1
           const style: CSSProperties = {
-            position: 'absolute', top: 0, fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+            position: 'absolute', top: 0, fontSize: 10, color: 'var(--muted-foreground)', whiteSpace: 'nowrap',
           }
           if (isFirst) style.left = 0
           else if (isLast) style.right = 0
           else { style.left = `${pct}%`; style.transform = 'translateX(-50%)' }
           return (
             <span key={i} style={style}>
-              {showDate && <span style={{ color: 'var(--text)', fontWeight: 600, marginRight: 3 }}>{md(t)}</span>}
+              {showDate && <span style={{ color: 'var(--foreground)', fontWeight: 600, marginRight: 3 }}>{md(t)}</span>}
               {hm(t)}
             </span>
           )
@@ -238,11 +238,11 @@ export function TrendCard() {
     <div className="panel" style={{ padding: '10px 14px' }}>
       <div className="toolbar" style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>사용량 추세</span>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 4 }}>최근</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 4 }}>최근</span>
         {TREND_WINS.map(w => (
           <button key={w.k} className={`btn btn--sm ${win === w.k ? 'btn--primary' : 'btn--ghost'}`} onClick={() => setWin(w.k)}>{w.label}</button>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
           {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · ${points.length}구간 (${bucketLabel(data?.bucket_sec ?? 0)})` : ''}
         </span>
       </div>
@@ -261,15 +261,15 @@ export function AnomalyCard() {
   const live = useServiceLive()
   const anomalies: Anomaly[] = live?.anomalies ?? []
   return (
-    <div className="panel" style={{ padding: '10px 14px', borderLeft: `3px solid ${anomalies.length ? 'var(--danger)' : 'var(--success)'}` }}>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: anomalies.length ? 6 : 0, color: anomalies.length ? 'var(--danger)' : 'var(--success)' }}>
+    <div className="panel" style={{ padding: '10px 14px', borderLeft: `3px solid ${anomalies.length ? 'var(--destructive)' : 'var(--cims-success)'}` }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: anomalies.length ? 6 : 0, color: anomalies.length ? 'var(--destructive)' : 'var(--cims-success)' }}>
         {anomalies.length ? `⚠ 이상 징후 (${anomalies.length})` : '✓ 이상 징후 없음'}
       </div>
       {anomalies.map((a, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3 }}>
           <span className="badge badge--red">{a.kind === 'volte' ? 'VoLTE' : 'PTT'}</span>
           <span>{a.detail}</span>
-          <span style={{ color: 'var(--text-muted)' }}>{a.label}</span>
+          <span style={{ color: 'var(--muted-foreground)' }}>{a.label}</span>
         </div>
       ))}
     </div>
@@ -297,7 +297,7 @@ export function VolteCallsCard() {
               <tr key={c.call_id} style={pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
                 <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></td>
                 <td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <span title={c.anomalies.map(a => a.detail).join(', ')}> ⚠</span>}</td>
-                <td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--text-muted)' }}>→</span> {c.callee || '-'}</td>
+                <td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--muted-foreground)' }}>→</span> {c.callee || '-'}</td>
                 <td>{c.video ? '영상' : '음성'}</td>
                 <td className="ts">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</td>
                 <td className="ts">{c.media_node || '-'}</td>
@@ -328,12 +328,12 @@ function MemberDrill({ group }: { group: string }) {
   const pages = Math.max(1, Math.ceil(data.total / MEMBER_LIMIT))
   return (
     <div style={{ padding: '6px 4px' }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>
         멤버 {data.total}명 · 현재 참여 {data.active_count}명 · {page}/{pages} 페이지
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
         {data.members.map(m => (
-          <span key={m.msisdn} style={{ fontSize: 12, minWidth: 200, color: m.active ? 'var(--text)' : 'var(--text-muted)' }}>
+          <span key={m.msisdn} style={{ fontSize: 12, minWidth: 200, color: m.active ? 'var(--foreground)' : 'var(--muted-foreground)' }}>
             {m.talking ? '🎤 ' : m.active ? '🟢 ' : '· '}{m.name || m.msisdn}
             {m.role !== 'participant' && m.role !== 'member' && <span className="ts"> ({m.role})</span>}
           </span>
@@ -371,7 +371,7 @@ export function PttGroupsCard() {
               <Fragment key={g.group_id}>
                 <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(isOpen ? null : g.group_id)}>
                   <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></td>
-                  <td><span style={{ color: 'var(--text-muted)' }}>{isOpen ? '▾' : '▸'}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
+                  <td><span style={{ color: 'var(--muted-foreground)' }}>{isOpen ? '▾' : '▸'}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
                   <td><span className="badge">{typeLabel(g.type)}</span></td>
                   <td className="ts">{g.active_members} / {g.total_members}</td>
                   <td>{g.floor_holder ? <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {g.floor_holder}</span> : <span className="ts">(없음)</span>}{warn && <span title={g.anomalies.map(a => a.detail).join(', ')}> ⚠</span>}</td>
@@ -381,9 +381,9 @@ export function PttGroupsCard() {
                 </tr>
                 {isOpen && (
                   <tr>
-                    <td colSpan={8} style={{ background: 'var(--hover)' }}>
+                    <td colSpan={8} style={{ background: 'var(--accent)' }}>
                       <MemberDrill group={g.group_id} />
-                      {g.floor_held_sec !== undefined && <span style={{ margin: '0 8px', color: 'var(--danger)', fontSize: 12 }}>⚠ floor {fmtDur(g.floor_held_sec)} 점유</span>}
+                      {g.floor_held_sec !== undefined && <span style={{ margin: '0 8px', color: 'var(--destructive)', fontSize: 12 }}>⚠ floor {fmtDur(g.floor_held_sec)} 점유</span>}
                     </td>
                   </tr>
                 )}
@@ -503,7 +503,7 @@ export function OrgStatsCard() {
     <div className="panel" style={{ padding: 10 }}>
       {dbDegraded && (
         <div style={{ marginBottom: 8, padding: '6px 10px', borderRadius: 4, fontSize: 12,
-          background: 'var(--warn-soft)', color: 'var(--warning)', border: '1px solid var(--border)' }}>
+          background: 'var(--cims-warning-soft)', color: 'var(--cims-warning)', border: '1px solid var(--border)' }}>
           DB 조회 실패 — 구성원/등록 수는 표시되지 않습니다 (활성 세션·발언자는 정상). 상세는 OAM 로그 참조.
         </div>
       )}
@@ -511,10 +511,10 @@ export function OrgStatsCard() {
         <input className="search-input" placeholder="가입자 이름/번호 검색 (전체)" value={searchInput}
           onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 280 }} />
         {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+        <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>
           {selNode ? `부서: ${selNode.name} (${selNode.members}명)` : ''}{selNode && q ? '  &  ' : ''}{q ? `검색: "${q}"` : ''}
         </span>
-        <label style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+        <label style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
           표시{' '}
           <select className="form-input" value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1) }}
             style={{ width: 'auto', padding: '2px 6px', display: 'inline-block' }}>
@@ -545,7 +545,7 @@ export function OrgStatsCard() {
           </div>
           {roster && roster.subscribers.length > 0 && (
             <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
+              <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}명 · {page}/{totalPages}</span>
               <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
               <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
             </div>
@@ -627,7 +627,7 @@ export function SubscriberLookup() {
             </table>
             {totalPages > 1 && (
               <div className="toolbar" style={{ justifyContent: 'flex-end', borderTop: '1px solid var(--border)' }}>
-                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>총 {total.toLocaleString()}건 · {page}/{totalPages}</span>
+                <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>총 {total.toLocaleString()}건 · {page}/{totalPages}</span>
                 <button className="btn btn--sm btn--ghost" disabled={page <= 1} onClick={() => setPage(p => Math.max(1, p - 1))}>이전</button>
                 <button className="btn btn--sm btn--ghost" disabled={page >= totalPages} onClick={() => setPage(p => Math.min(totalPages, p + 1))}>다음</button>
               </div>
@@ -657,7 +657,7 @@ export function ServiceDetailTabs() {
         {tb('org', '부서별')}
         {tb('volte', 'VoLTE 호', v?.active)}
         {tb('ptt', 'PTT 그룹', p?.recent_active)}
-        <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
+        <span style={{ marginLeft: 'auto', color: 'var(--muted-foreground)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
       </div>
       {tab === 'events' && <EventFeedCard />}
       {tab === 'org' && <OrgStatsCard />}

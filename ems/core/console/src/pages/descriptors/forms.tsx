@@ -13,18 +13,18 @@ import type { DataSourceSpec } from '../../widgets/shapes/dataSourceSpec'
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12 }}>
-      <span style={{ color: 'var(--text-muted)' }}>{label}{hint && <i style={{ marginLeft: 6, opacity: 0.7 }}>{hint}</i>}</span>
+      <span style={{ color: 'var(--muted-foreground)' }}>{label}{hint && <i style={{ marginLeft: 6, opacity: 0.7 }}>{hint}</i>}</span>
       {children}
     </label>
   )
 }
 const inp: React.CSSProperties = { fontSize: 13 }
 const rowCard: React.CSSProperties = {
-  border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10, marginBottom: 8, background: 'var(--bg-soft)',
+  border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10, marginBottom: 8, background: 'var(--muted)',
 }
 function Btn({ onClick, children, danger, disabled }: { onClick: () => void; children: React.ReactNode; danger?: boolean; disabled?: boolean }) {
   return <button type="button" className="btn btn--sm btn--outline" disabled={disabled}
-    style={danger ? { color: 'var(--danger)' } : undefined} onClick={onClick}>{children}</button>
+    style={danger ? { color: 'var(--destructive)' } : undefined} onClick={onClick}>{children}</button>
 }
 
 const SHAPES = ['time-bar', 'kpi', 'distribution', 'table'] as const
@@ -74,7 +74,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
           <input className="form-input" style={inp} value={label}
                  onChange={e => setLabel(e.target.value)} placeholder="My Service" />
         </Field>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
           모듈 · 알람 규칙 · 데이터 소스는 각 위젯에서 항목별로 추가/편집합니다.
         </div>
       </div>
@@ -306,14 +306,14 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
           <Field label="endpoint" hint="(REST 경로)"><input className="form-input" style={{ ...inp, width: 300 }} value={endpoint}
             onChange={e => setEndpoint(e.target.value)} placeholder="/stats/messages/sip" /></Field>
           <div style={{ display: 'flex', gap: 10, paddingBottom: 6, fontSize: 12 }}>
-            <span style={{ color: 'var(--text-muted)' }}>query:</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>query:</span>
             <label style={{ display: 'flex', gap: 4 }}><input type="checkbox" checked={qDate} onChange={e => setQDate(e.target.checked)} />date</label>
             <label style={{ display: 'flex', gap: 4 }}><input type="checkbox" checked={qGran} onChange={e => setQGran(e.target.checked)} />granularity</label>
           </div>
         </div>
 
         <div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>지원 shape (선택한 것만 매핑 입력)</div>
+          <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>지원 shape (선택한 것만 매핑 입력)</div>
           <div style={{ display: 'flex', gap: 14, fontSize: 13 }}>
             {SHAPES.map(s => (
               <label key={s} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

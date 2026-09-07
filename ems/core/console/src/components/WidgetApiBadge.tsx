@@ -88,15 +88,15 @@ function CopyBlock({ label, text, mono, pre }: {
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
         <button className="btn btn--ghost btn--sm" onClick={copy}>{copied ? '복사됨' : '복사'}</button>
       </div>
       {pre ? (
-        <pre style={{ margin: 0, padding: '8px 10px', background: 'var(--bg)',
+        <pre style={{ margin: 0, padding: '8px 10px', background: 'var(--background)',
                       border: '1px solid var(--border)', borderRadius: 4, fontSize: 11.5,
                       overflowX: 'auto', whiteSpace: 'pre' }}>{text}</pre>
       ) : (
-        <code style={{ display: 'block', padding: '6px 10px', background: 'var(--bg)',
+        <code style={{ display: 'block', padding: '6px 10px', background: 'var(--background)',
                        border: '1px solid var(--border)', borderRadius: 4,
                        fontSize: mono ? 12.5 : 12, wordBreak: 'break-all' }}>{text}</code>
       )}
@@ -107,7 +107,7 @@ function CopyBlock({ label, text, mono, pre }: {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted-foreground)',
                     letterSpacing: '0.04em', marginBottom: 6 }}>{title}</div>
       {children}
     </div>
@@ -134,7 +134,7 @@ function ApiRow({ a }: { a: ApiDoc }) {
         </button>
       </div>
       {a.summary && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>{a.summary}</div>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>{a.summary}</div>
       )}
 
       {open && (
@@ -160,7 +160,7 @@ function ApiRow({ a }: { a: ApiDoc }) {
                 </tbody>
               </table>
             ) : (
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>파라미터 없음</div>
+              <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>파라미터 없음</div>
             )}
           </Section>
 
@@ -218,7 +218,7 @@ function ApiRow({ a }: { a: ApiDoc }) {
                 {typeof a.auth !== 'string' && (a.auth as ApiDocAuth).token_from && (
                   <> · 토큰 발급: <code>{(a.auth as ApiDocAuth).token_from}</code></>
                 )}</li>}
-              <li style={{ color: 'var(--text-muted)' }}><b>id</b> — <code>{a.id}</code></li>
+              <li style={{ color: 'var(--muted-foreground)' }}><b>id</b> — <code>{a.id}</code></li>
             </ul>
           </Section>
         </div>
@@ -294,7 +294,7 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
               <button className="modal-close" onClick={() => setOpen(false)}>✕</button>
             </div>
             <div className="modal-body" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
                 {docs.length}건. 각 API 를 구현한 모듈이 선언한 정보이며, 모듈이 설치·가용할 때만 표시됩니다.
                 예시는 합성 데이터입니다.
               </div>

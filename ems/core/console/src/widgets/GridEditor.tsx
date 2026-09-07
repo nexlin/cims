@@ -79,7 +79,7 @@ function WidgetConfigPanel({ placement, def, onConfig, onClose }: {
         )
       })}
       {fields.length === 0 && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>이 위젯은 배치 설정 항목이 없습니다.</div>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>이 위젯은 배치 설정 항목이 없습니다.</div>
       )}
       <button className="btn btn--sm" onClick={onClose} style={{ alignSelf: 'flex-end' }}>닫기</button>
     </div>
@@ -322,7 +322,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
                         setCfgOpen(o => (o === i ? null : i))
                       }}>⚙</button>
               <button className="btn btn--sm" title="제거"
-                      style={{ color: 'var(--danger)', position: 'relative', zIndex: 7 }}
+                      style={{ color: 'var(--destructive)', position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}
                       onClick={() => { setCfgOpen(null); onChange(removeAt(widgets, i)) }}>✕</button>
               </>}
@@ -340,7 +340,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               {editingInside && inside ? (
                 <GridEditor nested widgets={inside.layout} gap={gap} onChange={inside.onChange} />
               ) : Comp ? <Comp config={p.config} />
-                    : <div style={{ color: 'var(--danger)', fontSize: 12, padding: 8 }}>알 수 없는 위젯: {p.widgetId}</div>}
+                    : <div style={{ color: 'var(--destructive)', fontSize: 12, padding: 8 }}>알 수 없는 위젯: {p.widgetId}</div>}
             </div>
             {!p.locked && !inside && RESIZE_HANDLES.map(rh => (
               <div key={rh.dir} className={rh.cls} title="크기 조절"
@@ -357,7 +357,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
       )}
 
       {widgets.length === 0 && (
-        <div style={{ gridColumn: '1 / span 12', color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
+        <div style={{ gridColumn: '1 / span 12', color: 'var(--muted-foreground)', fontSize: 13, padding: 20, textAlign: 'center' }}>
           {nested ? '블록이 없습니다' : '위젯이 없습니다'} — 상단 [+ 위젯 추가]로 배치하세요.
         </div>
       )}

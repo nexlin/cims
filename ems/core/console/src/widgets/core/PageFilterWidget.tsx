@@ -58,7 +58,7 @@ function PageFilterWidget({ config }: WidgetProps) {
         <input className="form-input" type="datetime-local" value={toInput(from)}
                onChange={e => applyRange(fromInput(e.target.value), to)}
                style={{ width: 190, fontSize: 12 }} />
-        <span style={{ color: 'var(--text-muted)' }}>~</span>
+        <span style={{ color: 'var(--muted-foreground)' }}>~</span>
         <input className="form-input" type="datetime-local" value={toInput(to)}
                onChange={e => applyRange(from, fromInput(e.target.value))}
                style={{ width: 190, fontSize: 12 }} />

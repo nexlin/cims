@@ -220,7 +220,7 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
   return (
     <div ref={containerRef} style={{ flex: '1 1 50%', overflow: 'auto', minWidth: 0, borderRight: '1px solid var(--border)' }}>
       {/* 노드 헤더 (sticky) */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--surface)', borderBottom: '1px solid #e0e2ea' }}>
+      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--card)', borderBottom: '1px solid #e0e2ea' }}>
         <svg width={svgWidth} height={HEAD_H} style={{ fontFamily: 'monospace', fontSize: 12, display: 'block' }}>
           {actors.map(a => {
             const x = actorX(a, actors, colW)
@@ -402,11 +402,11 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
       height: '100%',
       border: '1px solid #e0e2ea',
       borderRadius: 6,
-      background: 'var(--surface)',
+      background: 'var(--card)',
     }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'monospace' }}>
         <thead>
-          <tr style={{ position: 'sticky', top: 0, background: 'var(--bg-soft)', zIndex: 1 }}>
+          <tr style={{ position: 'sticky', top: 0, background: 'var(--muted)', zIndex: 1 }}>
             <th style={thStyle}>#</th>
             <th style={thStyle}>시간</th>
             <th style={thStyle}>From→To</th>
@@ -425,7 +425,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                 onClick={() => onSelect(i)}
                 style={{
                   cursor: 'pointer',
-                  background: isSelected ? 'var(--primary-soft)' : 'transparent',
+                  background: isSelected ? 'var(--cims-brand-soft)' : 'transparent',
                 }}
               >
                 <td style={tdStyle}>{i + 1}</td>
@@ -433,7 +433,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                 <td style={{ ...tdStyle, color: '#1a1d2e' }}>
                   {actorLabel(msg.from)}<span style={{ color: '#7a8fa8' }}>{'\u2192'}</span>{actorLabel(msg.to)}
                 </td>
-                <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 10 }}>
+                <td style={{ ...tdStyle, color: 'var(--muted-foreground)', fontSize: 10 }}>
                   {/* \uae30\ub85d \uc8fc\uccb4 \ud504\ub85c\uc138\uc2a4\uba85+ID (flow \ud30c\uc77c \uc18c\uc720\uc790, \uc608: CSP_01) \u2014 nodeId \uc5c6\uc73c\uba74(\uad6c \uc751\ub2f5) node \ub85c \ud3f4\ubc31 */}
                   {(msg.nodeId || msg.node || '').toUpperCase()}
                 </td>
@@ -444,7 +444,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                       <span style={{ display: 'inline-block', padding: '1px 5px', borderRadius: 3,
                         fontSize: 9, fontWeight: 700, color: '#fff',
                         background: d === 'TX' ? '#2563eb' : '#16a34a' }}>{d}</span>
-                    ) : <span style={{ color: 'var(--text-muted)' }}>\u2014</span>
+                    ) : <span style={{ color: 'var(--muted-foreground)' }}>\u2014</span>
                   })()}
                 </td>
                 <td style={tdStyle}>
@@ -461,7 +461,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                   </span>
                 </td>
                 <td style={{ ...tdStyle, fontWeight: 600, color: msgColor(msg) }}>
-                  {msgLabel(msg as ColoredMsg)}{msg.detail ? <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({msg.detail})</span> : ''}
+                  {msgLabel(msg as ColoredMsg)}{msg.detail ? <span style={{ fontWeight: 400, color: 'var(--muted-foreground)' }}>({msg.detail})</span> : ''}
                 </td>
               </tr>
             )
@@ -475,7 +475,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
 const thStyle: React.CSSProperties = {
   textAlign: 'left',
   padding: '6px 8px',
-  color: 'var(--text-muted)',
+  color: 'var(--muted-foreground)',
   fontWeight: 600,
   borderBottom: '1px solid #e0e2ea',
   whiteSpace: 'nowrap',
@@ -604,7 +604,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
       {/* 노드 필터 */}
       {Object.keys(allNodes).length > 0 && (
         <div style={{ display: 'flex', gap: 12, padding: '6px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, alignItems: 'center' }}>
-          <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>노드:</span>
+          <span style={{ color: 'var(--muted-foreground)', fontWeight: 500 }}>노드:</span>
           {Object.keys(allNodes).map(node => (
             <label key={node} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
               <input type="checkbox" checked={enabledNodes.has(node)}
@@ -614,12 +614,12 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                   return next
                 })} />
               {(node || '').toUpperCase()}
-              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({allNodes[node]?.length || 0})</span>
+              <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>({allNodes[node]?.length || 0})</span>
             </label>
           ))}
 
           {/* 색상 범례 — 응답은 요청과 같은 색(점선 화살표), 실패(4xx+)만 빨강 */}
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 10, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap', alignItems: 'center' }}>
             {[
               ['등록', '#4b8cda'], ['구독/알림', '#8e5ad8'], ['호 제어', '#0d9488'],
               ['실패응답', '#d64545'],
@@ -639,7 +639,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
       )}
 
       {loading && <div className="empty">로딩 중…</div>}
-      {error   && <div className="empty" style={{ color: 'var(--danger)' }}>오류: {error}</div>}
+      {error   && <div className="empty" style={{ color: 'var(--destructive)' }}>오류: {error}</div>}
 
       {!loading && !error && messages.length === 0 && (
         <div className="empty">메시지 기록이 없습니다.</div>
@@ -663,7 +663,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
               <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '1px solid #e0e2ea', minHeight: 0 }}>
                 {selected ? (
                   <>
-                    <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
+                    <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
                       <span className="badge" style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</span>
                       <span style={{ fontWeight: 600, fontSize: 12 }}>{selected.label}</span>
                       <span className="ts">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
@@ -671,7 +671,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                     </div>
                     <pre style={{
                       flex: 1, margin: 0, padding: 12, overflow: 'auto',
-                      background: 'var(--surface)', fontSize: 12, lineHeight: 1.5,
+                      background: 'var(--card)', fontSize: 12, lineHeight: 1.5,
                       color: '#1a1d2e', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
                       minHeight: 0,
                     }}>

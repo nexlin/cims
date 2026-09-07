@@ -10,7 +10,7 @@ function HealthDotsWidget() {
     return (
       <div style={{ display: 'flex', gap: 12, opacity: 0.5 }}>
         {['CSP', 'CMP', 'DB'].map(n => (
-          <span key={n} style={{ fontSize: 12, color: 'var(--text-muted)' }}>{n} …</span>
+          <span key={n} style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{n} …</span>
         ))}
       </div>
     )
@@ -23,10 +23,10 @@ function HealthDotsWidget() {
         { name: 'CMP', status: h.cmp },
         { name: 'DB', status: h.db },
       ].map(s => (
-        <div key={s.name} style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div key={s.name} style={{ flex: 1, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <StatusDot status={s.status} />
           <span style={{ fontWeight: 600 }}>{s.name}</span>
-          <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--text-muted)' }}>
+          <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--muted-foreground)' }}>
             {s.status === 'up' ? '정상' : '연결 끊김'}
           </span>
         </div>

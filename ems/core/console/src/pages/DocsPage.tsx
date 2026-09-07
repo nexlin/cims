@@ -56,7 +56,7 @@ export default function DocsPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: 4, padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--muted)', flexShrink: 0, flexWrap: 'wrap', alignItems: 'center' }}>
         {DOCS.map(d => (
           <button key={d.id}
             onClick={() => setActive(d.id)}
@@ -64,7 +64,7 @@ export default function DocsPage() {
               padding: '4px 12px', borderRadius: 4, border: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: active === d.id ? 600 : 400,
               background: active === d.id ? '#2563eb' : 'transparent',
-              color: active === d.id ? '#fff' : 'var(--text)',
+              color: active === d.id ? '#fff' : 'var(--foreground)',
             }}>
             {d.title}
           </button>
@@ -72,7 +72,7 @@ export default function DocsPage() {
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4, alignItems: 'center' }}>
           {DOCS.map(d => (
             <a key={d.id} href={d.file} download
-              style={{ fontSize: 10, color: 'var(--text-muted)', textDecoration: 'none', padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>
+              style={{ fontSize: 10, color: 'var(--muted-foreground)', textDecoration: 'none', padding: '3px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>
               {d.title}.md
             </a>
           ))}
@@ -83,7 +83,7 @@ export default function DocsPage() {
         </div>
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 24px' }}>
-        {loading ? <div style={{ color: 'var(--text-muted)' }}>로딩 중...</div> :
+        {loading ? <div style={{ color: 'var(--muted-foreground)' }}>로딩 중...</div> :
           <div className="docs-content"
             dangerouslySetInnerHTML={{ __html: renderMd(content) }}
           />

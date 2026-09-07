@@ -240,10 +240,10 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   return (
     <div>
       {collection.description && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
           {collection.description}
           {collection.reload_hint && (
-            <span style={{ marginLeft: 8, color: 'var(--success)' }}>⚡ {collection.reload_hint}</span>
+            <span style={{ marginLeft: 8, color: 'var(--cims-success)' }}>⚡ {collection.reload_hint}</span>
           )}
         </div>
       )}
@@ -251,9 +251,9 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {/* T2 drift 배너 — ha_group 멤버 정합 불일치 */}
       {drift.detected && (
         <div style={{
-          background: 'var(--warn-soft)', border: '1px solid var(--border)',
+          background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
           borderRadius: 4, padding: '8px 12px', marginBottom: 10,
-          fontSize: 12, color: 'var(--warning)',
+          fontSize: 12, color: 'var(--cims-warning)',
         }}>
           ⚠️ HA 그룹 멤버 간 정합 불일치 — 양 멤버의 jsonl 이 다릅니다.
           {drift.peers.length > 0 && (
@@ -266,7 +266,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       )}
       {!drift.detected && drift.peers.length > 1 && (
         <div style={{
-          fontSize: 11, color: 'var(--success)', marginBottom: 8,
+          fontSize: 11, color: 'var(--cims-success)', marginBottom: 8,
         }}>
           ✓ HA 그룹 멤버 정합 (mode={drift.mode || '?'}, {drift.peers.length} 멤버)
         </div>
@@ -275,7 +275,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {/* tag filter chip */}
       {allTags.length > 0 && (
         <div style={{ marginBottom: 8, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>태그 필터:</span>
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>태그 필터:</span>
           <button
             className={`btn btn--sm ${tagFilter === '' ? 'btn--primary' : 'btn--outline'}`}
             onClick={() => setTagFilter('')}>전체</button>
@@ -297,7 +297,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         </thead>
         <tbody>
           {visibleIdx.length === 0 ? (
-            <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>
+            <tr><td colSpan={summaryFields.length + 1} style={{ textAlign: 'center', color: 'var(--muted-foreground)', padding: 20 }}>
               {records.length === 0 ? '행 없음 — "＋ 추가" 로 생성' : '태그 필터 결과 없음'}
             </td></tr>
           ) : (
@@ -319,7 +319,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {editingIdx !== null && records[editingIdx] && (
         <div style={{
           marginTop: 10, padding: 12, border: '1px solid var(--border)', borderRadius: 6,
-          background: 'var(--bg-soft)',
+          background: 'var(--muted)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
             <b style={{ fontSize: 13 }}>행 #{editingIdx + 1} 편집</b>
@@ -402,7 +402,7 @@ function AccessServiceSecurityHints({ record, localNodes }: { record: Record_; l
     <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4,
                   borderTop: '1px solid var(--border)', paddingTop: 8 }}>
       {lines.map((l, i) => (
-        <div key={i} style={{ fontSize: 11.5, color: l.ok ? 'var(--text-muted)' : 'var(--warning)' }}>
+        <div key={i} style={{ fontSize: 11.5, color: l.ok ? 'var(--muted-foreground)' : 'var(--cims-warning)' }}>
           {l.ok ? '✓' : '⚠'} {l.text}
         </div>
       ))}
@@ -418,7 +418,7 @@ function RowDisplay({ row, summaryFields, active, onEdit, onRemove }: {
   onRemove: () => void
 }) {
   return (
-    <tr style={{ background: active ? 'var(--primary-soft)' : undefined }}>
+    <tr style={{ background: active ? 'var(--cims-brand-soft)' : undefined }}>
       {summaryFields.map(f => (
         <td key={f.key} style={{ fontSize: 12 }}>
           {formatValue(row[f.key], f)}
@@ -448,7 +448,7 @@ function CheckboxList({ options, value, onChange, emptyText }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 120, overflowY: 'auto',
                   border: '1px solid var(--border)', borderRadius: 4, padding: 4 }}>
       {options.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{emptyText || '(항목 없음)'}</div>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{emptyText || '(항목 없음)'}</div>
       ) : options.map(o => (
         <label key={o} style={{ fontSize: 12 }}>
           <input type="checkbox" checked={selected.has(o)}
@@ -491,7 +491,7 @@ function FieldEditor({ field, value, refOpts, onChange }: {
       <div>
         {renderInput(field, value, onChange, refOpts)}
         {field.help && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{field.help}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>{field.help}</div>
         )}
       </div>
     </>

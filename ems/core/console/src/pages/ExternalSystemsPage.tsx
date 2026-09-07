@@ -63,7 +63,7 @@ function EditModal({ initial, onClose, onSaved }: {
     finally { setSaving(false) }
   }
 
-  const lbl = { fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 } as const
+  const lbl = { fontSize: 12, color: 'var(--muted-foreground)', display: 'block', marginBottom: 4 } as const
   const row = { marginBottom: 12 } as const
 
   return (
@@ -113,7 +113,7 @@ function EditModal({ initial, onClose, onSaved }: {
           <input type="number" value={f.probe?.timeout ?? 2} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), timeout: parseFloat(e.target.value) || 2 } }))}
                  placeholder="timeout" style={{ width: 70 }} title="timeout(s)" />
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>tcp 만 구현 — http/icmp 는 미확인 처리.</div>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 2 }}>tcp 만 구현 — http/icmp 는 미확인 처리.</div>
       </div>
       <div style={row}>
         <label style={lbl}>설명</label>
@@ -165,12 +165,12 @@ export default function ExternalSystemsPage() {
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 15 }}>외부 시스템 ({items.length})</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>외부 DB·모니터링·스토리지 등 등록 — 대시보드 시스템 형상에 표시.</div>
+          <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>외부 DB·모니터링·스토리지 등 등록 — 대시보드 시스템 형상에 표시.</div>
         </div>
         <button className="btn btn--primary" style={{ marginLeft: 'auto' }} onClick={() => setEditing('new')}>+ 외부 시스템 추가</button>
       </div>
-      {loading ? <div style={{ padding: 20, color: 'var(--text-muted)' }}>불러오는 중…</div>
-        : items.length === 0 ? <div style={{ padding: 20, color: 'var(--text-muted)' }}>등록된 외부 시스템이 없습니다.</div>
+      {loading ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>불러오는 중…</div>
+        : items.length === 0 ? <div style={{ padding: 20, color: 'var(--muted-foreground)' }}>등록된 외부 시스템이 없습니다.</div>
         : (
         <table className="data-table" style={{ fontSize: 13 }}>
           <thead><tr>
@@ -179,11 +179,11 @@ export default function ExternalSystemsPage() {
           <tbody>
             {items.map(s => (
               <tr key={s.id}>
-                <td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                <td><b>{s.name}</b>{s.description && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.description}</div>}</td>
+                <td>{(s.probe?.mode ?? 'none') !== 'none' ? <StatusDot st={status.get(s.id)} /> : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}</td>
+                <td><b>{s.name}</b>{s.description && <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{s.description}</div>}</td>
                 <td><span style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>{TYPE_LABEL[s.type]}</span></td>
                 <td>{(s.endpoints || []).map((e, i) => <code key={i} style={{ fontSize: 11, marginRight: 6 }}>{e.host}:{e.port}</code>)}</td>
-                <td>{(s.tags || []).map(t => <span key={t} style={{ fontSize: 10, padding: '1px 5px', background: 'var(--surface-2)', borderRadius: 8, marginRight: 3 }}>{t}</span>)}</td>
+                <td>{(s.tags || []).map(t => <span key={t} style={{ fontSize: 10, padding: '1px 5px', background: 'var(--secondary)', borderRadius: 8, marginRight: 3 }}>{t}</span>)}</td>
                 <td>{s.enabled ? '✓' : '—'}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {(s.probe?.mode ?? 'none') !== 'none' &&

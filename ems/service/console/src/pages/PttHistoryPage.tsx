@@ -346,7 +346,7 @@ export default function PttHistoryPage() {
           <>
             <input type="date" className="form-input" value={fromDate} style={{ width: 150 }}
                    max={toDate} onChange={e => setFrom(e.target.value)} aria-label="시작 날짜" />
-            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>~</span>
+            <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>~</span>
             <input type="date" className="form-input" value={toDate} style={{ width: 150 }}
                    min={fromDate} max={todayStr()} onChange={e => setTo(e.target.value)} aria-label="종료 날짜" />
           </>
@@ -356,7 +356,7 @@ export default function PttHistoryPage() {
                value={searchInput} onChange={e => setSearchInput(e.target.value)} />
         {q && <button className="btn btn--sm btn--ghost" onClick={() => setSearchInput('')}>검색 해제</button>}
         <button className="btn btn--primary btn--sm" onClick={load}>새로고침</button>
-        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}>
+        <label style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--muted-foreground)', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />
           자동갱신
         </label>
@@ -364,7 +364,7 @@ export default function PttHistoryPage() {
 
       {/* ── 툴바 2: 종류 · 그룹 · 사람 ── */}
       <div className="toolbar" style={{ borderTop: 'none' }}>
-        <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>종류</span>
+        <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>종류</span>
         {KINDS.map(k => (
           <button key={k.id} className={`btn btn--sm ${kinds.has(k.id) ? 'btn--primary' : 'btn--outline'}`}
                   onClick={() => setKinds(prev => {
@@ -387,17 +387,17 @@ export default function PttHistoryPage() {
           <button className="btn btn--sm btn--primary" onClick={() => setHour('')}>{hour}시 ✕</button>
         )}
 
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
           {loading ? '조회 중…' : <>
-            <b style={{ color: 'var(--text)' }}>{total}</b>건
-            {liveRows.length > 0 && <> · 진행중 <b style={{ color: 'var(--success)' }}>{liveRows.length}</b></>}
+            <b style={{ color: 'var(--foreground)' }}>{total}</b>건
+            {liveRows.length > 0 && <> · 진행중 <b style={{ color: 'var(--cims-success)' }}>{liveRows.length}</b></>}
             {' · 발화 합 '}{fmtSpeechMs(speechSum)}
           </>}
         </span>
       </div>
 
       {/* ── 시간대 밴드 — 목록 위 전체 폭 (필터이자 그날의 분포) ── */}
-      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
+      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
         <HourHeatmap hours={hours} sel={hour} onPick={h => { setHour(prev => (prev === h ? '' : h)); setPage(0) }} />
       </div>
 
@@ -409,7 +409,7 @@ export default function PttHistoryPage() {
         }}>
           {/* 목록 머리 — 표 헤더가 없어진 자리의 정렬 컨트롤 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderBottom: '1px solid var(--border)' }}>
-            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>정렬</span>
+            <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>정렬</span>
             <select className="form-input" style={{ width: 96, padding: '2px 6px', fontSize: 12 }}
                     value={sort} onChange={e => { setSort(e.target.value as SortKey); setPage(0) }}>
               {(Object.keys(SORT_LABEL) as SortKey[]).map(k => <option key={k} value={k}>{SORT_LABEL[k]}</option>)}
@@ -418,7 +418,7 @@ export default function PttHistoryPage() {
                     onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
               {order === 'desc' ? '▼' : '▲'}
             </button>
-            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-muted)' }}>
+            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-foreground)' }}>
               {loading ? '조회 중…' : `${total}건`}
             </span>
           </div>
@@ -438,7 +438,7 @@ export default function PttHistoryPage() {
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderTop: '1px solid var(--border)', fontSize: 12, color: 'var(--muted-foreground)' }}>
             <button className="btn btn--sm btn--ghost" disabled={page <= 0} onClick={() => setPage(p => p - 1)}>‹</button>
             <span>{page + 1} / {pages}</span>
             <button className="btn btn--sm btn--ghost" disabled={page + 1 >= pages} onClick={() => setPage(p => p + 1)}>›</button>
@@ -458,7 +458,7 @@ export default function PttHistoryPage() {
             style={{
               flex: '0 0 5px', cursor: 'col-resize', background: 'var(--border)',
               // 잡기 쉬우라고 실제 폭보다 넓게 — 가운데 1px 만 선으로 보인다
-              backgroundClip: 'content-box', borderLeft: '2px solid var(--bg)', borderRight: '2px solid var(--bg)',
+              backgroundClip: 'content-box', borderLeft: '2px solid var(--background)', borderRight: '2px solid var(--background)',
             }}
           />
         )}
@@ -472,7 +472,7 @@ export default function PttHistoryPage() {
               onClose={() => setOpen(null)}
             />
           : wide && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12.5 }}>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', fontSize: 12.5 }}>
               왼쪽에서 세션을 고르면 발언·이벤트가 여기 나옵니다
             </div>
           )}
@@ -507,9 +507,9 @@ function SectionLabel({ label, n, live }: { label: string; n: number; live?: boo
     <div style={{
       display: 'flex', alignItems: 'center', gap: 5, padding: '4px 2px 1px',
       fontSize: 10.5, fontWeight: 700, letterSpacing: '.08em',
-      textTransform: 'uppercase', color: 'var(--text-muted)',
+      textTransform: 'uppercase', color: 'var(--muted-foreground)',
     }}>
-      {live && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />}
+      {live && <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--cims-success)' }} />}
       {label}
       <span style={{ fontWeight: 600, letterSpacing: 0, textTransform: 'none', opacity: .75 }}>{n}</span>
     </div>
@@ -538,7 +538,7 @@ function SessionCard({ r, sel, names, onSelect }: {
     <div onClick={onSelect} style={{
       cursor: 'pointer', padding: '7px 9px', borderRadius: 8,
       border: `1px solid ${sel ? 'var(--primary)' : 'var(--border)'}`,
-      background: sel ? 'var(--primary-soft)' : 'var(--surface)',
+      background: sel ? 'var(--cims-brand-soft)' : 'var(--card)',
       display: 'flex', flexDirection: 'column', gap: 4,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
@@ -557,10 +557,10 @@ function SessionCard({ r, sel, names, onSelect }: {
         {r.kind === 'group' && r.mcptt_group_id && <> · {r.mcptt_group_id}</>}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-muted)' }}>
-        <span>턴 <b style={{ color: 'var(--text)' }}>{r.turn_count ?? r.segment_count ?? 0}</b></span>
-        <span>화자 <b style={{ color: 'var(--text)' }}>{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
-        <span>발화 <b style={{ color: 'var(--text)' }}>{fmtSpeechMs(r.total_speech_ms)}</b></span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--muted-foreground)' }}>
+        <span>턴 <b style={{ color: 'var(--foreground)' }}>{r.turn_count ?? r.segment_count ?? 0}</b></span>
+        <span>화자 <b style={{ color: 'var(--foreground)' }}>{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
+        <span>발화 <b style={{ color: 'var(--foreground)' }}>{fmtSpeechMs(r.total_speech_ms)}</b></span>
         {maxCon > 1 && <span className="badge badge--blue" style={{ fontSize: 9 }}>동시 {maxCon}</span>}
         {r.initiator && <span style={{ marginLeft: 'auto' }}>개시 <Person id={r.initiator} names={names} /></span>}
       </div>
@@ -592,11 +592,11 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
     <section
       onClick={e => e.stopPropagation()}
       style={{
-        background: 'var(--bg-soft)', display: 'flex', flexDirection: 'column', minHeight: 0,
+        background: 'var(--muted)', display: 'flex', flexDirection: 'column', minHeight: 0,
         ...(overlay
           ? {
               position: 'absolute', top: 0, right: 0, bottom: 0, width: `min(${PANE_W}px, 100%)`,
-              zIndex: 21, boxShadow: 'var(--shadow-lg)', borderLeft: '1px solid var(--border)',
+              zIndex: 21, boxShadow: 'var(--cims-elevation-lg)', borderLeft: '1px solid var(--border)',
             }
           : { flex: 1 }),
       }}
@@ -605,7 +605,7 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
           선택 여부와 무관하게 고정하기 위해서다 (좁은 화면에선 카드가 가려지기도 한다). */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
-        borderBottom: '1px solid var(--border)', background: 'var(--surface)',
+        borderBottom: '1px solid var(--border)', background: 'var(--card)',
       }}>
         <span className={`badge ${KIND_BADGE[r.kind] || 'badge--gray'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
         {duplex && <span className="badge badge--blue">전이중</span>}
@@ -660,7 +660,7 @@ function HourHeatmap({ hours, sel, onPick }: {
   const max = Math.max(1, ...cells.map(c => c.v))
   return (
     <div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 5 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginBottom: 5 }}>
         시간대별 세션 <span style={{ opacity: .75 }}>· 색 진할수록 많음 · 클릭 → 그 시간대만</span>
       </div>
       <div style={{ display: 'flex', gap: 2 }}>
@@ -673,8 +673,8 @@ function HourHeatmap({ hours, sel, onPick }: {
                    flex: 1, cursor: c.v > 0 ? 'pointer' : 'default', textAlign: 'center',
                    borderRadius: 4, padding: on ? '2px 0' : '3px 0',
                    border: on ? '2px solid var(--primary)' : '1px solid var(--border)',
-                   background: c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--surface))` : 'var(--bg-soft)',
-                   color: ratio > 0.55 ? '#fff' : 'var(--text)',
+                   background: c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--card))` : 'var(--muted)',
+                   color: ratio > 0.55 ? '#fff' : 'var(--foreground)',
                  }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.3, height: 16, fontVariantNumeric: 'tabular-nums' }}>
                 {c.v > 0 ? c.v : ' '}
@@ -708,8 +708,8 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
       {open && (
         <div style={{
           position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 240, maxHeight: 320,
-          overflowY: 'auto', padding: 6, background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 8, boxShadow: 'var(--shadow-lg)',
+          overflowY: 'auto', padding: 6, background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
         }}>
           {opts.length === 0 && <div className="empty" style={{ padding: 12, fontSize: 12 }}>녹취가 있는 그룹이 없습니다</div>}
           {opts.map(([key, s]) => (
@@ -720,7 +720,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
                 onChange(n)
               }} />
               <span>{s.name || s.mcptt_group_id || key}</span>
-              <span className="ts" style={{ color: 'var(--text-muted)' }}>{s.mcptt_group_id}</span>
+              <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{s.mcptt_group_id}</span>
             </label>
           ))}
           {selected.size > 0 && (
@@ -760,8 +760,8 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
       {open && !value && (
         <div style={{
           position: 'absolute', zIndex: 30, top: 'calc(100% + 4px)', left: 0, minWidth: 230, maxHeight: 320,
-          overflowY: 'auto', padding: 6, background: 'var(--surface)', border: '1px solid var(--border)',
-          borderRadius: 8, boxShadow: 'var(--shadow-lg)',
+          overflowY: 'auto', padding: 6, background: 'var(--card)', border: '1px solid var(--border)',
+          borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
         }}>
           <div style={{ padding: '2px 4px 6px' }}>
             <input className="form-input" autoFocus placeholder="이름·번호로 찾기 (Enter=번호 직접)"
@@ -773,7 +773,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
             <div key={p} onClick={() => onChange(p)} title={names.tipOf(p)}
                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
               <span>{names.nameOf(p)}</span>
-              {names.person(p) && <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 11 }}>{p}</span>}
+              {names.person(p) && <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{p}</span>}
             </div>
           ))}
           {shown.length === 0 && <div className="empty" style={{ padding: 10, fontSize: 12 }}>표시할 참여자가 없습니다</div>}

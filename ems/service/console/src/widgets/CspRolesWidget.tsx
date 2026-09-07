@@ -27,7 +27,7 @@ function CspRolesWidget() {
         </span>
       </div>
       {data.csp.timeouts && (
-        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--muted-foreground)' }}>
           <span>등록 만료: {data.csp.timeouts.user_timeout}초</span>
           <span>Stale Call: {data.csp.timeouts.stale_call_timeout}초</span>
           <span>OPTIONS 주기: {data.csp.timeouts.send_options_period || '비활성'}초</span>

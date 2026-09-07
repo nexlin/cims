@@ -426,8 +426,8 @@ export default function ServersPage() {
             <button key={t.key} onClick={() => setPageTab(t.key)}
                     style={{
                       padding: '9px 20px', fontSize: 13.5, fontWeight: active ? 700 : 400,
-                      background: active ? 'var(--surface)' : 'transparent',
-                      color: active ? 'var(--primary)' : 'var(--text-muted)',
+                      background: active ? 'var(--card)' : 'transparent',
+                      color: active ? 'var(--primary)' : 'var(--muted-foreground)',
                       border: 'none',
                       borderBottom: active ? '2px solid #1976d2' : '2px solid transparent',
                       marginBottom: -2, cursor: 'pointer',
@@ -440,7 +440,7 @@ export default function ServersPage() {
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 4 }}>
           {!hasRole(user, 'admin') && (
             canEdit && elevationActive() ? (
-              <span style={{ fontSize: 12, color: 'var(--success)' }}>
+              <span style={{ fontSize: 12, color: 'var(--cims-success)' }}>
                 🔓 admin 승격 중
                 <button className="btn btn--sm btn--outline" style={{ marginLeft: 6 }}
                         onClick={() => clearElevatedToken()}>해제</button>
@@ -460,7 +460,7 @@ export default function ServersPage() {
         {/* 좌측 트리 */}
         <div style={{
           flex: '0 0 320px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
         }}>
           <div style={{ flex: 1, overflow: 'auto' }}>
             <ServerTree
@@ -489,7 +489,7 @@ export default function ServersPage() {
         {/* 우측 Inspector */}
         <div style={{
           flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
         }}>
           {selectedAgent ? (
             pageTab === 'config' ? (
@@ -646,26 +646,26 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                  style={{
                    display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
                    borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                   background: isSelected ? 'var(--primary-soft)' : 'var(--bg-soft)',
+                   background: isSelected ? 'var(--cims-brand-soft)' : 'var(--muted)',
                  }}>
               <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
-                    style={{ width: 14, color: 'var(--text-muted)' }}>{isOpen ? '▼' : '▶'}</span>
+                    style={{ width: 14, color: 'var(--muted-foreground)' }}>{isOpen ? '▼' : '▶'}</span>
               <span style={{
                 background: modeColor, color: '#fff', fontSize: 10,
                 padding: '1px 5px', borderRadius: 3,
               }}>{modeChip}</span>
               <b style={{ flex: 1 }}>{g.name}</b>
               {g.vip && (
-                <span style={{ fontSize: 10, color: 'var(--text-muted)' }} title={`VIP ${g.vip}/${g.vip_mask}`}>
+                <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }} title={`VIP ${g.vip}/${g.vip_mask}`}>
                   VIP {g.vip}
                 </span>
               )}
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{members.length}</span>
+              <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{members.length}</span>
               {canAddMember && (
                 <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
                         title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
                         style={{
-                          border: '1px solid var(--border)', background: 'var(--surface)', color: '#3498db',
+                          border: '1px solid var(--border)', background: 'var(--card)', color: '#3498db',
                           fontSize: 11, padding: '0 6px', borderRadius: 3, cursor: 'pointer',
                           fontWeight: 600,
                         }}>+</button>
@@ -693,7 +693,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                style={{
                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 10px',
                  borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                 background: isSelected ? 'var(--primary-soft)' : 'var(--bg-soft)',
+                 background: isSelected ? 'var(--cims-brand-soft)' : 'var(--muted)',
                }}>
             <span style={{ width: 14 }} />  {/* expand 자리 비움 — group 정렬 맞춤 */}
             <span style={{
@@ -701,10 +701,10 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
               padding: '1px 5px', borderRadius: 3,
             }}>SA</span>
             <b style={{ flex: 1 }}>{agentDisplayName(a.name)}</b>
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{a.ip_address || '—'}</span>
+            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{a.ip_address || '—'}</span>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar,
                             display: 'inline-block', marginLeft: 4 }} />
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
               {(depsByAgent.get(a.id) || []).length}m
             </span>
           </div>
@@ -730,7 +730,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
            display: 'flex', alignItems: 'center', gap: 6,
            padding: '6px 10px', paddingLeft: indent ? 32 : 10,
            borderBottom: '1px solid var(--border)', cursor: 'pointer',
-           background: active ? 'var(--primary-soft)' : undefined,
+           background: active ? 'var(--cims-brand-soft)' : undefined,
          }}>
       <span style={{ width: 8, height: 8, borderRadius: '50%', background: sc.bar }} />
       <span style={{ flex: 1, fontWeight: active ? 600 : 400 }}>{agentDisplayName(a.name)}</span>
@@ -741,12 +741,12 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
                 background: role === 'master' ? '#3498db' : '#95a5a6', color: '#fff',
               }}>{role === 'master' ? 'M' : 'B'}</span>
       )}
-      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{depCount}m</span>
+      <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{depCount}m</span>
       {onRemove && (
         <button onClick={e => { e.stopPropagation(); onRemove() }}
                 title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"
                 style={{
-                  border: '1px solid #f5b8b8', background: 'var(--surface)', color: '#e74c3c',
+                  border: '1px solid #f5b8b8', background: 'var(--card)', color: '#e74c3c',
                   fontSize: 10, padding: '0 5px', borderRadius: 3, cursor: 'pointer',
                   fontWeight: 600,
                 }}>×</button>
@@ -1014,7 +1014,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                 }}>{group.mode === 'active_standby' ? 'AS' : 'AA'}</span>
           <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
                  style={{ flex: 1, minWidth: 180 }} />
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>#{group.id} · vrid {group.vrid}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>#{group.id} · vrid {group.vrid}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             <button className="btn btn--sm" onClick={onOpenConfig}
                     title="멤버별 설정값 나란히 비교 (읽기 전용) — 편집은 각 멤버 서버의 패키지 설정 탭">
@@ -1029,7 +1029,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, fontSize: 12 }}>
           {group.mode === 'active_standby' && (
             <>
-              <label style={{ color: 'var(--text-muted)' }}>auth_pass:</label>
+              <label style={{ color: 'var(--muted-foreground)' }}>auth_pass:</label>
               <input type="password" className="form-input" value={editAuthPass}
                      onChange={e => setEditAuthPass(e.target.value)}
                      maxLength={8}
@@ -1037,7 +1037,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                      title="VRRP 인증 (active_standby 만 사용, 최대 8글자)" />
             </>
           )}
-          <label style={{ color: 'var(--text-muted)' }}>note:</label>
+          <label style={{ color: 'var(--muted-foreground)' }}>note:</label>
           <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
                  style={{ flex: 1 }} />
           <button className="btn btn--sm btn--primary" onClick={applyMeta} disabled={!metaDirty}
@@ -1065,7 +1065,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
             여기는 표시 + AS 의 Master 선택만 담당. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 8 }}>
             추가/삭제는 좌측 트리에서
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
@@ -1132,25 +1132,25 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                           const o = vipObs[a.id]
                           if (o === 'active') return (
                             <span title="VIP 실제 보유 — Active (실측)"
-                                  style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>● Active</span>)
+                                  style={{ fontSize: 11, color: 'var(--cims-success)', fontWeight: 600 }}>● Active</span>)
                           if (o === 'standby') return (
                             <span title="VIP 미보유 — Standby (실측)"
-                                  style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
+                                  style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>○ Standby</span>)
                           if (o === 'fail') return (
                             <span title="점검 실패 — offline 또는 health-check 오류"
-                                  style={{ fontSize: 11, color: 'var(--danger)' }}>✕</span>)
+                                  style={{ fontSize: 11, color: 'var(--destructive)' }}>✕</span>)
                           if (vipChecking) return (
-                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>…</span>)
+                            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>…</span>)
                           const hb = group.members.find(gm => gm.agent_id === a.id)?.vip_observed
                           if (hb === true) return (
                             <span title="VIP 실제 보유 — Active (heartbeat 관측, ≤30s 지연)"
-                                  style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>● Active</span>)
+                                  style={{ fontSize: 11, color: 'var(--cims-success)', fontWeight: 600 }}>● Active</span>)
                           if (hb === false) return (
                             <span title="VIP 미보유 — Standby (heartbeat 관측, ≤30s 지연)"
-                                  style={{ fontSize: 11, color: 'var(--text-muted)' }}>○ Standby</span>)
+                                  style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>○ Standby</span>)
                           return (
                             <span title="판정 불가 (heartbeat stale·VIP 미설정) — [🔄 실측] 으로 확인"
-                                  style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>)
+                                  style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>—</span>)
                         })()}
                       </td>
                     </>
@@ -1159,8 +1159,8 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                     <span style={{ background: sc.bar, color: '#fff', fontSize: 10,
                                     padding: '1px 6px', borderRadius: 3 }}>{a.status}</span>
                   </td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.ip_address || '—'}</td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.agent_version || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{a.ip_address || '—'}</td>
+                  <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{a.agent_version || '—'}</td>
                 </tr>
               )
             })}
@@ -1173,7 +1173,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
             {/* 수동 입력 — 용도(slot) 자동 매핑으로 표현 안 되는 구성(멤버 IP 와 다른 서브넷,
                 멤버별 전용 iface)을 위해 IP·iface 를 직접 지정한다. */}
-            <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex',
+            <label style={{ fontSize: 11, color: 'var(--muted-foreground)', display: 'flex',
                             alignItems: 'center', gap: 4, cursor: 'pointer' }}
                    title="용도 자동 매핑 대신 IP·멤버 iface 직접 입력 (다른 서브넷·전용 NIC 구성)">
               <input type="checkbox" checked={vipManual}
@@ -1206,7 +1206,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
           </div>
         </div>
         {editBindings.length === 0 ? (
-          <div className="empty" style={{ padding: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <div className="empty" style={{ padding: 12, fontSize: 12, color: 'var(--muted-foreground)' }}>
             VIP 없음 — all_active 그룹은 비워둬도 됨 (keepalived 안 깔림). active_standby 는 1개 이상 권장.
             {availableSlots.length === 0 && (
               <div style={{ marginTop: 6, color: '#e67e22' }}>
@@ -1236,7 +1236,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                       <td><b>{b.slot || '(미지정)'}</b></td>
                       <td style={{ fontFamily: 'monospace' }}>{b.ip || '—'}</td>
                       <td>{b.mask || 24}</td>
-                      <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{ifaceStr}</td>
+                      <td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{ifaceStr}</td>
                       <td><VipHolderCell holders={vipHolders(b.ip)} /></td>
                       <td>
                         <button className="btn btn--sm" style={{ fontSize: 10, padding: '1px 5px' }}
@@ -1253,7 +1253,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                 // edit mode — 수동 입력이면 IP/mask/멤버 iface 를 직접 지정, 아니면 용도 기반 자동 매핑.
                 const manualOk = !!b.ip.trim()
                 return (
-                  <tr key={b.bid} style={{ background: 'var(--warn-soft)' }}>
+                  <tr key={b.bid} style={{ background: 'var(--cims-warning-soft)' }}>
                     <td>
                       <select className="form-input" value={b.slot}
                               onChange={e => changeBindingSlot(b.bid, e.target.value)}
@@ -1270,7 +1270,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                                style={{ width: 130, fontSize: 11, padding: 2, fontFamily: 'monospace' }} />
                       ) : info?.prefix ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                          <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{info.prefix}</span>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{info.prefix}</span>
                           <input className="form-input" value={host}
                                  onChange={e => changeBindingHost(b.bid, e.target.value)}
                                  placeholder="host"
@@ -1292,7 +1292,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
                                style={{ width: 55, fontSize: 11, padding: 2 }} />
                       ) : (b.mask || 24)}
                     </td>
-                    <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    <td style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
                       {vipManual ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           {memberAgents.map(m => (
@@ -1330,7 +1330,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
             </tbody>
           </table>
         )}
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 8 }}>
           VIP 의 네트워크/마스크 는 멤버의 용도(service IP) 에서 자동 매핑 — host (마지막 옥텟) 만 입력.
           다른 서브넷·전용 NIC 구성은 [수동 입력] 으로 IP·iface 직접 지정.
         </div>
@@ -1360,17 +1360,17 @@ function GroupInspector({ group, agents, onSelectMember, onReload, onOpenConfig,
 // VIP 보유 멤버 셀 — heartbeat 관측(≤30s 지연). 정확히 1명이 정상, 0명은 이동 중/미적용,
 // 2명 이상은 split-brain 의심이라 색으로 구분한다.
 function VipHolderCell({ holders, editing }: { holders: string[]; editing?: boolean }) {
-  if (editing) return <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
+  if (editing) return <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>—</span>
   if (holders.length === 1) {
     return <span title="이 VIP 를 실제로 보유 (heartbeat 관측)"
-                 style={{ fontSize: 11, color: 'var(--success)', fontWeight: 600 }}>● {holders[0]}</span>
+                 style={{ fontSize: 11, color: 'var(--cims-success)', fontWeight: 600 }}>● {holders[0]}</span>
   }
   if (holders.length === 0) {
     return <span title="어느 멤버도 이 VIP 를 갖고 있지 않음 — 미적용이거나 이동 중"
                  style={{ fontSize: 11, color: '#e67e22' }}>○ 미할당</span>
   }
   return <span title={`동시 보유: ${holders.join(', ')} — split-brain 의심`}
-               style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 600 }}>⚠ {holders.length}곳 보유</span>
+               style={{ fontSize: 11, color: 'var(--destructive)', fontWeight: 600 }}>⚠ {holders.length}곳 보유</span>
 }
 
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
@@ -1393,12 +1393,12 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
     set('restart_limit', { ...rl, [k]: v })
   return (
     <div style={{ marginTop: 0, border: '1px solid var(--border)', borderRadius: 4 }}>
-      <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
+      <div style={{ padding: '8px 12px', background: 'var(--muted)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
         <span onClick={onToggle} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
         <span onClick={onToggle} style={{ cursor: 'pointer' }}>절체 조건 (A/S 전용)</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 400, cursor: 'pointer' }} onClick={onToggle}>
           감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · {value.preempt === 'preempt' ? '자동복귀' : '복귀없음'}
         </span>
         <button className="btn btn--sm btn--primary"
@@ -1412,7 +1412,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
       {open && (
         <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 150, color: 'var(--text-muted)' }}
+            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
                    title="VRRP 광고 주기 (초). Master 가 Backup 에게 살아있음을 알리는 주기. 짧을수록 절체가 빨라지지만 네트워크 트래픽 증가.">
               감시 주기 (초)
             </label>
@@ -1420,11 +1420,11 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                    value={value.advert_int}
                    onChange={e => set('advert_int', Number(e.target.value) || 1)}
                    className="form-input" style={{ width: 80 }} />
-            <span style={{ color: 'var(--text-muted)' }}>기본 1초 · 범위 0.5~5초</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>기본 1초 · 범위 0.5~5초</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--text-muted)' }}
+            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
                    title="cims-health 가 모듈 상태(포트 listen + 선택적 프로세스)를 점검하는 주기">
               점검 주기 (초)
             </label>
@@ -1432,19 +1432,19 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                    value={value.health.interval}
                    onChange={e => setHealth('interval', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 70 }} />
-            <label style={{ color: 'var(--text-muted)', marginLeft: 12 }}
+            <label style={{ color: 'var(--muted-foreground)', marginLeft: 12 }}
                    title="연속 실패 N회 → 장애로 판정. 절체까지의 시간 = 점검주기 × 장애판정.">장애 판정 (회)</label>
             <input type="number" min={1} max={60}
                    value={value.health.fall}
                    onChange={e => setHealth('fall', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 60 }} />
-            <label style={{ color: 'var(--text-muted)', marginLeft: 12 }}
+            <label style={{ color: 'var(--muted-foreground)', marginLeft: 12 }}
                    title="연속 성공 N회 → 정상 복귀로 판정">복귀 판정 (회)</label>
             <input type="number" min={1} max={60}
                    value={value.health.rise}
                    onChange={e => setHealth('rise', Number(e.target.value) || 2)}
                    className="form-input" style={{ width: 60 }} />
-            <label style={{ color: 'var(--text-muted)', marginLeft: 12 }}
+            <label style={{ color: 'var(--muted-foreground)', marginLeft: 12 }}
                    title="단일 점검 명령의 최대 실행 시간 (초과 시 실패)">제한 시간 (초)</label>
             <input type="number" min={1} max={60}
                    value={value.health.timeout}
@@ -1453,16 +1453,16 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 150, color: 'var(--text-muted)' }}>NIC 링크 감시</label>
+            <label style={{ width: 150, color: 'var(--muted-foreground)' }}>NIC 링크 감시</label>
             <input type="checkbox" checked={value.track_interface}
                    onChange={e => set('track_interface', e.target.checked)} />
-            <span style={{ color: 'var(--text-muted)' }}>
+            <span style={{ color: 'var(--muted-foreground)' }}>
               서비스 NIC 의 링크 다운을 즉시 감지 (점검 주기 기다리지 않고 바로 절체)
             </span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--text-muted)' }}
+            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
                    title="MASTER 승격 후 이 시간 동안 헬스 실패를 유예 — cold 모듈 기동 시간 흡수 (승격 직후 재장애 방지)">
               승격 유예 (초)
             </label>
@@ -1470,11 +1470,11 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                    value={value.health.grace_sec ?? 30}
                    onChange={e => setHealth('grace_sec', Number(e.target.value) || 0)}
                    className="form-input" style={{ width: 80 }} />
-            <span style={{ color: 'var(--text-muted)' }}>기본 30초 (0=유예 없음)</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>기본 30초 (0=유예 없음)</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--text-muted)' }}
+            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
                    title={
                      '모듈 장애 시 watchdog 이 로컬 재기동을 먼저 시도하고, 윈도우 내 연속 N회 실패하면 ' +
                      '그 노드를 포기하고 절체(VIP 이양)한다. 일시적 crash 1회로 절체하지 않도록 하는 방어선.\n' +
@@ -1482,21 +1482,21 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
                    }>
               재기동 임계
             </label>
-            <span style={{ color: 'var(--text-muted)' }}>연속</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>연속</span>
             <input type="number" min={1} max={20}
                    value={rl.max_fails}
                    onChange={e => setRestart('max_fails', Number(e.target.value) || 3)}
                    className="form-input" style={{ width: 60 }} />
-            <span style={{ color: 'var(--text-muted)' }}>회 실패 (윈도우</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>회 실패 (윈도우</span>
             <input type="number" min={10} max={3600}
                    value={rl.window_sec}
                    onChange={e => setRestart('window_sec', Number(e.target.value) || 300)}
                    className="form-input" style={{ width: 80 }} />
-            <span style={{ color: 'var(--text-muted)' }}>초) → 절체. 기본 3회/300초</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>초) → 절체. 기본 3회/300초</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--text-muted)' }}
+            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
                    title={
                      '복귀 없음: 절체 후 옛 Master 가 살아 돌아와도 Backup 으로 머무름 — 추가 절체 없음(운영 안정).\n' +
                      '자동 복귀: 옛 Master 의 priority 가 더 높으면 자동으로 Master 권한을 되찾음 — priority 의도 유지되나 복구 시점에 한 번 더 절체 발생.'
@@ -1509,7 +1509,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
             </select>
             {value.preempt === 'preempt' && (
               <>
-                <label style={{ color: 'var(--text-muted)', marginLeft: 8 }}
+                <label style={{ color: 'var(--muted-foreground)', marginLeft: 8 }}
                        title="옛 Master 가 살아 돌아온 뒤, 권한을 되찾기 전에 N초간 안정화 대기">복귀 지연 (초)</label>
                 <input type="number" min={0} max={300}
                        value={value.preempt_delay}
@@ -1525,7 +1525,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty, onApply }: {
             </div>
           )}
 
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
             오른쪽 위 [▶ 적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
           </div>
         </div>
@@ -1610,7 +1610,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
   if (modules.length === 0) return null
   return (
     <div style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 4 }}>
-      <div style={{ padding: '8px 12px', background: 'var(--bg-soft)',
+      <div style={{ padding: '8px 12px', background: 'var(--muted)',
                     display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
            title="모듈별 운영 설정 (앱 설정과 별개) — 각 노드 modules/<mod>/service.json 으로 반영">
         <span onClick={() => setOpen(v => !v)} style={{ fontSize: 11, cursor: 'pointer' }}>{open ? '▼' : '▶'}</span>
@@ -1620,7 +1620,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
           감시·절체 판정에 사용합니다. 안전 등급 shared_writer/unknown 은 절체 후 자동 복귀(래치 해제)를
           하지 않고 운영자 확인을 요구합니다.
         </InfoDot>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400, cursor: 'pointer' }}
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 400, cursor: 'pointer' }}
               onClick={() => setOpen(v => !v)}>
           {modules.join(', ')}
         </span>
@@ -1755,7 +1755,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
           }} />
           <b style={{ fontSize: 16 }}>{agentDisplayName(a.name)}</b>
           {agentDisplayName(a.name) !== a.name && (
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.name}</span>
+            <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{a.name}</span>
           )}
           {/* 이름은 표시 라벨이다 — 시스템은 #id 로 동작하므로 바꿔도 파급이 없다
               (identifier_model.md). 그래서 별도 확인·경고 없이 바로 고친다. */}
@@ -1765,8 +1765,8 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
           <span className="tag" style={{
             background: sc.bar, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
           }}>{a.status}</span>
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>#{a.id}</span>
-          {a.agent_version && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>· v{a.agent_version}</span>}
+          <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>#{a.id}</span>
+          {a.agent_version && <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>· v{a.agent_version}</span>}
 
           {/* 서버 전용 액션 */}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -1880,15 +1880,15 @@ function AgentConfigTab({ agent, deployments, onDone }: {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div style={{ display: 'flex', gap: 2, padding: '10px 16px 0', borderBottom: '1px solid var(--border)',
-                    background: 'var(--bg-soft)' }}>
+                    background: 'var(--muted)' }}>
         {deps.map(d => {
           const active = d.id === selDep
           return (
             <button key={d.id} onClick={() => setSelDep(d.id)}
                     style={{
                       padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
-                      background: active ? 'var(--surface)' : 'transparent',
-                      color: active ? 'var(--primary)' : 'var(--text-muted)',
+                      background: active ? 'var(--card)' : 'transparent',
+                      color: active ? 'var(--primary)' : 'var(--muted-foreground)',
                       border: '1px solid var(--border)', borderBottom: 'none',
                       borderRadius: '6px 6px 0 0', cursor: 'pointer',
                     }}>
@@ -1940,7 +1940,7 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
                   </span>
                 </td>
                 <td>
-                  {deps.length === 0 ? <span style={{ color: 'var(--text-muted)' }}>—</span> :
+                  {deps.length === 0 ? <span style={{ color: 'var(--muted-foreground)' }}>—</span> :
                     deps.map(d => {
                       // 실측 우선 — [패키지 제어] 탭과 같은 상태로 보이게(설치·제어 일치)
                       const shown = depEffectiveStatus(d)
@@ -1975,10 +1975,10 @@ function InspectorSection({ title, expanded, onToggle, children }: {
            style={{
              display: 'flex', alignItems: 'center', gap: 8,
              padding: '10px 16px', cursor: 'pointer',
-             background: 'var(--bg-soft)', userSelect: 'none',
+             background: 'var(--muted)', userSelect: 'none',
              borderBottom: expanded ? '1px solid var(--border)' : 'none',
            }}>
-        <span style={{ width: 14, color: 'var(--text-muted)', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
+        <span style={{ width: 14, color: 'var(--muted-foreground)', fontSize: 12 }}>{expanded ? '▼' : '▶'}</span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{title}</span>
       </div>
       {expanded && (
@@ -2088,12 +2088,12 @@ function DeploymentRow({ dep: d, agent, packages, desc, onJob, onUpgrade, onRoll
         <div style={{ width: 4, background: sc, height: 32 }} />
       </td>
       <td><b>{d.process_name || '—'}</b></td>
-      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+      <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
         {desc || '—'}
       </td>
       <td style={{ fontSize: 12 }}
           title={`설치 경로: ${d.install_path || '—'}${histTip ? `\n\n설치 이력:\n${histTip}` : ''}`}>
-        {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
+        {d.package_name} <span style={{ color: 'var(--muted-foreground)' }}>v{d.package_version}</span>
       </td>
       <td>
         <span className="tag" style={{
@@ -2160,11 +2160,11 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
               <div style={{ width: 4, background: depStatusColor(depEffectiveStatus(d)), height: 32 }} />
             </td>
             <td><b>{d.process_name || '—'}</b></td>
-            <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
               {pkgDesc.get(d.package_name || '') ?? '—'}
             </td>
             <td style={{ fontSize: 12 }}>
-              {d.package_name} <span style={{ color: 'var(--text-muted)' }}>v{d.package_version}</span>
+              {d.package_name} <span style={{ color: 'var(--muted-foreground)' }}>v{d.package_version}</span>
             </td>
             <td>
               <DepStatusCell dep={d} />
@@ -2347,13 +2347,13 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
   return (
     <div style={{ padding: 20, overflow: 'auto' }}>
       <h4 style={{ marginTop: 0 }}>멤버별 프로세스 제어 — {group.name}</h4>
-      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+      <p style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
         그룹 멤버 전체의 모듈 프로세스 상태를 한눈에 보고 시작/재시작/정지합니다.
         설치/재설치/롤백은 [패키지 설치] 탭에서 수행합니다.
       </p>
       {/* 그룹 일괄 제어 바 — 서비스 의도 전환(무장/비무장) + 수동 절체 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
-                    padding: '10px 12px', marginBottom: 12, background: 'var(--bg-soft)',
+                    padding: '10px 12px', marginBottom: 12, background: 'var(--muted)',
                     border: '1px solid var(--border)', borderRadius: 4 }}>
         <span style={{ fontSize: 12, fontWeight: 600 }}>그룹 일괄 제어</span>
         <button className="btn btn--sm btn--primary" disabled={!!busy}
@@ -2415,11 +2415,11 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
       {group.failover_op && (
         <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
                       border: '1px solid ' + (group.failover_op.error ? 'var(--border)' : '#90caf9'),
-                      background: group.failover_op.error ? 'var(--danger-soft)' : 'var(--primary-soft)' }}>
+                      background: group.failover_op.error ? 'var(--cims-danger-soft)' : 'var(--cims-brand-soft)' }}>
           <b>계획 절체 진행</b> — 상태 <code>{group.failover_op.state}</code>
           {` (${agentDisplayName(agents.find(a => a.id === group.failover_op!.source_agent_id)?.name || '?')}`}
           {` → ${agentDisplayName(agents.find(a => a.id === group.failover_op!.target_agent_id)?.name || '?')})`}
-          {group.failover_op.note && <span style={{ color: 'var(--text-muted)' }}> · {group.failover_op.note}</span>}
+          {group.failover_op.note && <span style={{ color: 'var(--muted-foreground)' }}> · {group.failover_op.note}</span>}
           {group.failover_op.error && <span style={{ color: '#c62828' }}> · 오류: {group.failover_op.error}</span>}
         </div>
       )}
@@ -2449,7 +2449,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
               return (
                 <tr key={m.agent_id}>
                   {serverCells}
-                  <td colSpan={3} style={{ color: 'var(--text-muted)' }}>배포된 모듈 없음</td>
+                  <td colSpan={3} style={{ color: 'var(--muted-foreground)' }}>배포된 모듈 없음</td>
                 </tr>
               )
             }
@@ -2471,7 +2471,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
                 ) : null}
                 <td style={{ fontSize: 12 }}>
                   <b>{d.process_name || d.package_name}</b>{' '}
-                  <span style={{ color: 'var(--text-muted)' }}>{d.package_name} v{d.package_version}</span>
+                  <span style={{ color: 'var(--muted-foreground)' }}>{d.package_name} v{d.package_version}</span>
                 </td>
                 <td>
                   <DepStatusCell dep={d} />
@@ -2659,7 +2659,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
 
   return (
     <div>
-      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>
+      <div style={{ fontSize: 13, color: 'var(--muted-foreground)', marginBottom: 8 }}>
         대상 서버에서 다음 명령 실행 (ssh 1회) — systemd --user + linger 자동 (die 시 자동 재기동).
       </div>
       {loading && <div className="empty" style={{ padding: 8 }}>불러오는 중...</div>}
@@ -2677,7 +2677,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
               onClick={copy} disabled={expired}>{copied ? '✓' : '📋'} 복사</button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-            <div style={{ fontSize: 12, color: expired ? '#e74c3c' : 'var(--text)' }}>
+            <div style={{ fontSize: 12, color: expired ? '#e74c3c' : 'var(--foreground)' }}>
               {expiresAt
                 ? expired
                   ? <>⚠ token 만료됨 ({expiresAt}) — 재발급 필요</>
@@ -2689,7 +2689,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
               {regenerating ? '재발급 중...' : '↻ 재발급'}
             </button>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
             실행 후 <code>./init.sh</code> 로 sudoers + enrollment + systemd unit 일괄 설정 (sudo 비번 1회).
           </div>
         </>
@@ -2720,7 +2720,7 @@ function InfoTab({ agent: a }: { agent: Agent }) {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <>
-      <span style={{ color: 'var(--text-muted)' }}>{label}</span>
+      <span style={{ color: 'var(--muted-foreground)' }}>{label}</span>
       <span>{value}</span>
     </>
   )
@@ -2768,7 +2768,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
           <input type="checkbox" checked={mountOn} disabled={busy}
                  onChange={e => setMountOn(e.target.checked)} />
           {' '}공유 스토리지 마운트를 함께 적용
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
             {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
           </span>
         </label>
@@ -2790,7 +2790,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
               ))}
             </select>
             <label style={{ gridColumn: '1 / -1', fontSize: 11,
-                            color: mntValid ? 'var(--text-muted)' : 'var(--danger)' }}>
+                            color: mntValid ? 'var(--muted-foreground)' : 'var(--destructive)' }}>
               {mntValid
                 ? <>{fromGroup && <>기본값은 <b>이 그룹의 마운트 선언</b>입니다. </>}
                    등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
@@ -2800,7 +2800,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
             </label>
           </>
         ) : (
-          <label style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--warning)' }}>
+          <label style={{ gridColumn: '1 / -1', fontSize: 11, color: 'var(--cims-warning)' }}>
             이 서버는 <b>마운트 없이</b> 등록됩니다 — 공유 store·서비스 로그를 쓰는 모듈이라면
             나중에 [마운트 관리]에서 직접 추가해야 합니다.
           </label>
@@ -2845,13 +2845,13 @@ function PendingMemberModal({ info, onClose }: {
       {/* 직전 단계에서 확정한 마운트를 되짚어 보여준다 — 설치 명령을 돌리기 전에
           "이 서버는 마운트가 되는가" 가 화면에 남아 있어야 한다. */}
       {info.appliedMounts?.length ? (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10, lineHeight: 1.6 }}>
           등록 직후 자동 마운트: {info.appliedMounts.map(m =>
             <code key={m.target}>{m.source} → {m.target} ({m.fstype})</code>)
             .reduce((a, b) => <>{a}, {b}</>)}
         </div>
       ) : (
-        <div style={{ fontSize: 12, color: 'var(--warning)', marginBottom: 10, lineHeight: 1.6 }}>
+        <div style={{ fontSize: 12, color: 'var(--cims-warning)', marginBottom: 10, lineHeight: 1.6 }}>
           이 서버는 <b>마운트 없이</b> 등록됩니다 — 필요하면 [마운트 관리]에서 추가하세요.
         </div>
       )}
@@ -2864,7 +2864,7 @@ function PendingMemberModal({ info, onClose }: {
           style={{ position: 'absolute', top: 8, right: 8 }}
           onClick={copy}>{copied ? '✓' : '📋'} 복사</button>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
         token: <code>{info.enrollment_token}</code>
       </div>
       <div className="modal-footer" style={{ marginTop: 16 }}>
@@ -3030,7 +3030,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
             <input type="checkbox" checked={mountOn} disabled={creating}
                    onChange={e => setMountOn(e.target.checked)} />
             {' '}공유 스토리지 마운트를 함께 적용
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
               {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
             </span>
           </label>
@@ -3052,7 +3052,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
                   <option key={f} value={f}>{f}</option>
                 ))}
               </select>
-              <label style={{ gridColumn: '1 / -1', fontSize: 11, color: mntValid ? 'var(--text-muted)' : 'var(--danger)' }}>
+              <label style={{ gridColumn: '1 / -1', fontSize: 11, color: mntValid ? 'var(--muted-foreground)' : 'var(--destructive)' }}>
                 {mntValid
                   ? <>등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
                      defaults+_netdev,nofail) 로 마운트하고 콘솔 [마운트 관리]에 표시됩니다.
@@ -3061,7 +3061,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
               </label>
             </>
           )}
-          <label style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+          <label style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>
             선택: <b>{modeLabel}</b>
             {mode === 'active_standby' && memberSel.every(v => v === 0) &&
               <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
@@ -3097,7 +3097,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
                   style={{ position: 'absolute', top: 8, right: 8 }}
                   onClick={() => copyCmd(i)}>{copiedIdx === i ? '✓' : '📋'} 복사</button>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>
                 token: <code>{r.enrollment_token}</code>
               </div>
             </div>
@@ -3168,7 +3168,7 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
   return (
     <Modal title={`${d.package_name} 업그레이드`} onClose={onClose} width={520}>
       <div style={{ fontSize: 13, marginBottom: 12 }}>
-        <div style={{ color: 'var(--text-muted)' }}>
+        <div style={{ color: 'var(--muted-foreground)' }}>
           {d.process_name} · 현재 <b>v{d.package_version}</b>
         </div>
       </div>
@@ -3188,7 +3188,7 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
               </option>
             ))}
           </select>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.7 }}>
+          <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 10, lineHeight: 1.7 }}>
             · 파일만 설치되고 <b>자동으로 시작하지 않습니다</b> — 확인 후 [패키지 제어] 에서 시작하세요.<br />
             · 설정은 이관됩니다(collection + 배포 설정). 새 항목은 기본값.<br />
             · 구 버전(v{d.package_version})은 보존되어 곧바로 <b>⤺ 롤백</b> 할 수 있습니다.
@@ -3299,8 +3299,8 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
   return (
     <Modal title={`${agent.name} — 모듈 추가`} onClose={onClose} width={600}>
       {agent.ha_group && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8,
-                      padding: '6px 10px', background: 'var(--primary-soft)', border: '1px solid #d0e3ff',
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 8,
+                      padding: '6px 10px', background: 'var(--cims-brand-soft)', border: '1px solid #d0e3ff',
                       borderRadius: 4 }}>
           이 agent 는 HA 그룹 <b>{agent.ha_group.name}</b> (mode={agent.ha_group.mode}, role={agent.ha_group.role}) 소속 —
           {' '}<b>{agent.ha_group.mode}</b> 가능 모듈 + standalone 모듈만 install 가능
@@ -3349,7 +3349,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
             <label>4. 설명</label>
             <div style={{
               border: '1px solid var(--border)', borderRadius: 4, padding: 8,
-              fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap', minHeight: 36,
+              fontSize: 13, color: 'var(--foreground)', whiteSpace: 'pre-wrap', minHeight: 36,
             }}>
               {selectedPkg.description
                 ? selectedPkg.description
@@ -3361,13 +3361,13 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         <label>메모</label>
         <input className="form-input" value={note} onChange={e => setNote(e.target.value)} />
       </div>
-      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+      <div style={{ marginTop: 12, fontSize: 12, color: 'var(--muted-foreground)' }}>
         ℹ 추가 후 <b>pending</b> 상태로 생성됩니다. 설정을 확인한 뒤
         <b>설치</b> → <b>Start</b> 순으로 진행하세요.
       </div>
       {selectedMismatch && (
         <div style={{ marginTop: 8, fontSize: 12, color: '#c00',
-                      padding: '6px 10px', background: 'var(--danger-soft)', border: '1px solid #ffcaca',
+                      padding: '6px 10px', background: 'var(--cims-danger-soft)', border: '1px solid #ffcaca',
                       borderRadius: 4 }}>
           ⚠ {selectedMismatch} — install 시 backend 400 reject
         </div>

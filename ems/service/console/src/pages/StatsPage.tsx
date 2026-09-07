@@ -30,7 +30,7 @@ function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
   if (data.length === 0 || vals.every(v => v === 0)) {
     return (
       <div style={{ height: maxH, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: 'var(--text-muted)', fontSize: 13, background: 'var(--surface-2)',
+                    color: 'var(--muted-foreground)', fontSize: 13, background: 'var(--secondary)',
                     borderRadius: 6 }}>
         해당 기간 데이터 없음
       </div>
@@ -44,9 +44,9 @@ function BarChart({ data, labelKey, valueKey, maxH = 160 }: {
         const h = Math.max(v / max * (maxH - 20), 2)
         return (
           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>{v > 0 ? v : ''}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginBottom: 2 }}>{v > 0 ? v : ''}</div>
             <div style={{ width: '100%', maxWidth: 32, height: h, background: 'var(--primary)', borderRadius: '2px 2px 0 0' }} />
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{String(d[labelKey])}</div>
+            <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 2 }}>{String(d[labelKey])}</div>
           </div>
         )
       })}
@@ -60,10 +60,10 @@ function KpiCard({ label, value, unit, sub }: {
   label: string; value: string | number; unit?: string; sub?: string
 }) {
   return (
-    <div style={{ flex: '1 1 140px', minWidth: 140, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700 }}>{value}<span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>{unit}</span></div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>}
+    <div style={{ flex: '1 1 140px', minWidth: 140, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 700 }}>{value}<span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>{unit}</span></div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>{sub}</div>}
     </div>
   )
 }
@@ -111,7 +111,7 @@ function CallKpis({ cell, source, kind }: {
         {kind === 'volte' && <KpiCard label="평균 접속지연" value={cell.avg_pdd_ms} unit="ms" />}
       </div>
       {(scan || cell.open > 0 || cell.late_dropped > 0) && (
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
           {scan && <span>집계 없는 구간 — 원본에서 즉석 계산했습니다. </span>}
           {cell.open > 0 && <span>진행 중 {cell.open}건(종료 후 값이 갱신됩니다). </span>}
           {cell.late_dropped > 0 && <span>보존기간 초과로 되짚지 못한 호 {cell.late_dropped}건. </span>}
@@ -207,7 +207,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
       {/* 재조회 중에도 기존 데이터 유지 — 전체가 '로딩 중' 으로 갈리는 레이아웃 점프 방지 */}
       {loading && !msgData && !svcData && <div className="empty">로딩 중...</div>}
       {loading && (msgData || svcData) && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '2px 4px' }}>↻ 갱신 중…</div>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', padding: '2px 4px' }}>↻ 갱신 중…</div>
       )}
 
       {/* 메시지 통계 */}
@@ -245,10 +245,10 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
                 return (
                   <div key={reason} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                     <div style={{ width: 80, fontSize: 13 }}>{reason || 'unknown'}</div>
-                    <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 4, height: 18 }}>
+                    <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: 4, height: 18 }}>
                       <div style={{ width: `${pct}%`, background: 'var(--primary)', borderRadius: 4, height: 18, minWidth: pct > 0 ? 4 : 0 }} />
                     </div>
-                    <div style={{ width: 60, fontSize: 12, textAlign: 'right', color: 'var(--text-muted)' }}>{cnt}건 ({pct}%)</div>
+                    <div style={{ width: 60, fontSize: 12, textAlign: 'right', color: 'var(--muted-foreground)' }}>{cnt}건 ({pct}%)</div>
                   </div>
                 )
               })}
@@ -276,10 +276,10 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
               {Object.entries(svcData.ptt.by_group).sort((a, b) => b[1] - a[1]).map(([gid, cnt]) => (
                 <div key={gid} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <div style={{ width: 80, fontSize: 13 }}>그룹 {gid}</div>
-                  <div style={{ flex: 1, background: 'var(--surface-2)', borderRadius: 4, height: 18 }}>
+                  <div style={{ flex: 1, background: 'var(--secondary)', borderRadius: 4, height: 18 }}>
                     <div style={{ width: `${Math.round(cnt / svcData.ptt!.total_calls * 100)}%`, background: 'var(--primary)', borderRadius: 4, height: 18, minWidth: 4 }} />
                   </div>
-                  <div style={{ width: 50, fontSize: 12, textAlign: 'right', color: 'var(--text-muted)' }}>{cnt}건</div>
+                  <div style={{ width: 50, fontSize: 12, textAlign: 'right', color: 'var(--muted-foreground)' }}>{cnt}건</div>
                 </div>
               ))}
             </div>

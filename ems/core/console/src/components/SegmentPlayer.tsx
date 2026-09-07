@@ -225,7 +225,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
   }
 
   if (playable.length === 0) {
-    return <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>재생 가능한 세그먼트가 없습니다</div>
+    return <div style={{ padding: 24, textAlign: 'center', color: 'var(--muted-foreground)' }}>재생 가능한 세그먼트가 없습니다</div>
   }
 
   const totalDuration = selectedSegs.reduce((sum, s) => sum + s.duration_ms, 0)
@@ -242,7 +242,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           <div style={{ fontWeight: 700, fontSize: compact ? 13 : 16 }}>
             {callType === 'ptt' ? 'PTT 녹취' : '통화 녹취'}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, display: compact ? 'none' : 'block' }}>
+          <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 2, display: compact ? 'none' : 'block' }}>
             {callType === 'ptt'
               ? `그룹: ${caller || ''}`
               : `${caller || ''} \u2192 ${callee || ''}`}
@@ -252,14 +252,14 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           {onMaximize && (
             <button onClick={onMaximize}
               style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer',
-                color: 'var(--text-muted)', padding: '2px 6px', lineHeight: 1 }}
+                color: 'var(--muted-foreground)', padding: '2px 6px', lineHeight: 1 }}
               title="최대화">⛶</button>
           )}
           {onClose && (
             <button onClick={onClose}
               style={{
                 background: 'none', border: 'none', fontSize: 20, cursor: 'pointer',
-                color: 'var(--text-muted)', padding: '4px 8px', lineHeight: 1,
+                color: 'var(--muted-foreground)', padding: '4px 8px', lineHeight: 1,
               }}
               title="닫기">X</button>
           )}
@@ -322,7 +322,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
             marginTop: 8, padding: '8px 12px', borderRadius: 6,
-            background: 'var(--surface-2)', fontSize: 13,
+            background: 'var(--secondary)', fontSize: 13,
           }}>
             <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</span>
             <span>녹취를 변환하고 있습니다… 완료되면 자동으로 재생됩니다.</span>
@@ -332,7 +332,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10,
             marginTop: 8, padding: '8px 12px', borderRadius: 6,
-            background: 'rgba(220,38,38,0.08)', color: 'var(--danger)', fontSize: 13,
+            background: 'rgba(220,38,38,0.08)', color: 'var(--destructive)', fontSize: 13,
           }}>
             <span>⚠️ 재생 준비 실패: {prepError}</span>
             <button className="btn btn--sm" onClick={() => { if (current) loadSegment(current, true) }}>다시 시도</button>
@@ -345,13 +345,13 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: '4px 20px', fontSize: 13,
-          background: 'var(--surface-2)', margin: '0 20px', borderRadius: 4,
+          background: 'var(--secondary)', margin: '0 20px', borderRadius: 4,
         }}>
           <span style={{ fontFamily: 'monospace' }}>{wallTime}</span>
           <span style={{ fontWeight: 600 }}>
             {callType === 'ptt' ? `화자: ${speakerInfo}` : speakerInfo}
           </span>
-          <span style={{ color: 'var(--text-muted)' }}>
+          <span style={{ color: 'var(--muted-foreground)' }}>
             {currentIdx + 1} / {selectedSegs.length}
           </span>
         </div>
@@ -366,7 +366,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           disabled={selectedSegs.length === 0}>
           선택 재생 ({selectedSegs.length}건 / {fmtMs(totalDuration)})
         </button>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           전체 {playable.length}건
         </span>
       </div>
@@ -397,7 +397,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   ref={isActive ? activeRowRef : undefined}
                   style={{
                     cursor: 'pointer',
-                    background: isActive ? 'var(--primary-soft)' : undefined,
+                    background: isActive ? 'var(--cims-brand-soft)' : undefined,
                     boxShadow: isActive ? 'inset 3px 0 0 var(--primary)' : undefined,
                     fontWeight: isActive ? 600 : undefined,
                     opacity: isChecked ? 1 : 0.45,

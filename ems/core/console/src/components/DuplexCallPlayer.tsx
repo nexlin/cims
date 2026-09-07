@@ -114,7 +114,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 8, padding: '13px 14px',
-      background: 'var(--bg-soft)', display: 'flex', flexDirection: 'column', gap: 11,
+      background: 'var(--muted)', display: 'flex', flexDirection: 'column', gap: 11,
     }}>
       {/* ── transport ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -130,7 +130,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         >
           {prep ? '…' : playing ? '❚❚' : '▶'}
         </button>
-        <span className="ts" style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 38 }}>
+        <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(pos)}
         </span>
         <div
@@ -144,10 +144,10 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
           <div style={{
             position: 'absolute', left: `${ratio * 100}%`, top: '50%', width: 12, height: 12,
             margin: '-6px 0 0 -6px', borderRadius: '50%', background: 'var(--primary)',
-            boxShadow: '0 0 0 3px var(--surface)',
+            boxShadow: '0 0 0 3px var(--card)',
           }} />
         </div>
-        <span className="ts" style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 38 }}>
+        <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(totalMs)}
         </span>
         <select
@@ -164,7 +164,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         </select>
       </div>
 
-      {err && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{err}</div>}
+      {err && <div style={{ fontSize: 11, color: 'var(--destructive)' }}>{err}</div>}
 
       {/* ── 화자별 파형 레인 ── */}
       {audioTracks.map(t => {
@@ -178,7 +178,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
             <div title={spk} style={{ flex: '0 0 128px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flex: '0 0 auto' }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name(spk)}</span>
-              <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 10 }}>슬롯 {t.slot}</span>
+              <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 10 }}>슬롯 {t.slot}</span>
             </div>
             <div
               onClick={e => {

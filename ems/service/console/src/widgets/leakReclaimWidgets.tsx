@@ -51,17 +51,17 @@ const CARD: CSSProperties = {
 function CountCard({ label, value, tone, loading, error }: {
   label: string; value: number; tone?: 'ok' | 'warn'; loading?: boolean; error?: string
 }) {
-  const color = tone === 'warn' ? 'var(--danger)' : tone === 'ok' ? 'var(--success)' : 'var(--text)'
+  const color = tone === 'warn' ? 'var(--destructive)' : tone === 'ok' ? 'var(--cims-success)' : 'var(--foreground)'
   return (
     <div className="panel" style={{ padding: 10, display: 'flex', flexDirection: 'column' }}>
       <div style={CARD}>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>
           {label}{loading && ' ·'}
         </div>
         {error
-          ? <div style={{ fontSize: 12, color: 'var(--danger)' }}>조회 실패</div>
+          ? <div style={{ fontSize: 12, color: 'var(--destructive)' }}>조회 실패</div>
           : <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1, color }}>{value}<span
-              style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>건</span></div>}
+              style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 2 }}>건</span></div>}
       </div>
     </div>
   )
@@ -90,8 +90,8 @@ function ByNodeBlock() {
   const rows = Object.entries(data?.by_node ?? {}).sort((a, b) => b[1] - a[1])
   return (
     <div className="panel" style={{ padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, flex: 'none' }}>
-        노드별 회수{loading && ' · 갱신 중…'}{error && <span style={{ color: 'var(--danger)' }}> · 조회 실패</span>}
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6, flex: 'none' }}>
+        노드별 회수{loading && ' · 갱신 중…'}{error && <span style={{ color: 'var(--destructive)' }}> · 조회 실패</span>}
       </div>
       {rows.length === 0 ? <div className="empty" style={{ fontSize: 12 }}>회수 없음</div> : (
         <div className="scroll-fill">
@@ -125,8 +125,8 @@ function FilterBlock() {
         항목이 나타나면 CSP 비정상 종료(crash) 또는 teardown 누락으로 누수된 relay 를
         안전망이 회수한 것입니다.
       </InfoDot>
-      {loading && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>갱신 중…</span>}
-      {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>조회 실패</span>}
+      {loading && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>갱신 중…</span>}
+      {error && <span style={{ fontSize: 12, color: 'var(--destructive)' }}>조회 실패</span>}
       <span className="ts" style={{ marginLeft: 'auto' }}>총 {n}건 회수</span>
     </div>
   )
@@ -140,8 +140,8 @@ function ListBlock() {
       <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, flex: 'none',
                     borderBottom: '1px solid var(--border)' }}>
         회수 세션 ({items.length}건)
-        {loading && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}> · 갱신 중…</span>}
-        {error && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}> · 조회 실패</span>}
+        {loading && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--muted-foreground)' }}> · 갱신 중…</span>}
+        {error && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}> · 조회 실패</span>}
       </div>
       <div className="scroll-fill">
         <table className="data-table">
@@ -162,10 +162,10 @@ function ListBlock() {
                 <td style={{ fontSize: 12 }}>{it.ts}</td>
                 <td style={{ fontSize: 12 }}>{it.node}</td>
                 <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{it.session_id}</td>
-                <td style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)' }}>{it.sesid}</td>
+                <td style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{it.sesid}</td>
                 <td style={{ fontSize: 12 }}>{it.service}</td>
                 <td style={{ fontSize: 12 }}>
-                  <span style={{ color: it.reason === 'hold_timeout' ? 'var(--danger)' : 'var(--text)' }}>
+                  <span style={{ color: it.reason === 'hold_timeout' ? 'var(--destructive)' : 'var(--foreground)' }}>
                     {REASON_LABEL[it.reason] || it.reason}
                   </span>
                 </td>

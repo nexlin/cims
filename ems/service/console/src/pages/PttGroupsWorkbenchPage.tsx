@@ -24,7 +24,7 @@ const MAX_TALKERS_LIMIT = 8
 
 
 function Caret({ open }: { open: boolean }) {
-  return <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>
+  return <span style={{ color: 'var(--muted-foreground)', display: 'inline-flex' }}>
     {open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
   </span>
 }
@@ -103,7 +103,7 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'priority', header: '우선', width: 56, align: 'center', sortable: true, sortValue: g => g.priority ?? 5, render: g => g.priority ?? 5 },
     { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
       const fp = g.floor_policy || 'single'
-      if (fp === 'single') return <span className="ts" style={{ color: 'var(--text-muted)' }} title="한 명씩 발언">단일</span>
+      if (fp === 'single') return <span className="ts" style={{ color: 'var(--muted-foreground)' }} title="한 명씩 발언">단일</span>
       if (fp === 'dual') return <span className="badge badge--yellow" style={{ fontSize: 9 }} title="평시 1명, 긴급·임박자만 끼어들기">긴급</span>
       return <span className="badge badge--blue" style={{ fontSize: 9 }} title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</span>
     } },
@@ -142,7 +142,7 @@ export default function PttGroupsWorkbenchPage() {
 
         {/* 신규 그룹 추가 (테이블 위 블록) */}
         {adding && (
-          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)', padding: '12px 16px' }}>
+          <div style={{ borderBottom: '1px solid var(--border)', background: 'var(--muted)', padding: '12px 16px' }}>
             <div style={{ fontWeight: 600, fontSize: 12, color: 'var(--primary)', marginBottom: 8 }}>새 PTT 그룹</div>
             <GroupDrawer mode="add" orgs={orgs} me={me} canGroupCreate={canGroupCreate}
               pttIndex={pttIndex} userIndex={userIndex} pttName={pttName} orgScope={orgScope} orgPathOf={orgPathOf}
@@ -274,9 +274,9 @@ function GroupDrawer(p: GroupDrawerProps) {
               <button key={t.id} role="tab" aria-selected={on} onClick={() => setTab(t.id)}
                       style={{
                         padding: '8px 16px', border: 'none', cursor: 'pointer', fontSize: 13,
-                        background: on ? 'var(--surface)' : 'none',
+                        background: on ? 'var(--card)' : 'none',
                         fontWeight: on ? 700 : 500,
-                        color: on ? 'var(--primary)' : 'var(--text-muted)',
+                        color: on ? 'var(--primary)' : 'var(--muted-foreground)',
                         borderBottom: on ? '2px solid var(--primary)' : '2px solid transparent',
                         marginBottom: -2,
                       }}>
@@ -285,7 +285,7 @@ function GroupDrawer(p: GroupDrawerProps) {
             )
           })}
           {tab === 'activity' && (
-            <span style={{ marginLeft: 10, alignSelf: 'center', paddingBottom: 2, fontSize: 11.5, color: 'var(--text-muted)' }}>
+            <span style={{ marginLeft: 10, alignSelf: 'center', paddingBottom: 2, fontSize: 11.5, color: 'var(--muted-foreground)' }}>
               이 그룹의 세션만 — 전체 세션은 <b>서비스 › 이력 › PTT 이력</b>
             </span>
           )}
@@ -362,8 +362,8 @@ function GroupDrawer(p: GroupDrawerProps) {
             <button className="btn btn--sm btn--primary" onClick={save}>저장</button>
             <button className="btn btn--sm btn--ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</button>
           </div>
-          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--text-muted)' }}>타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
-          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--text-muted)' }}>동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
+          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
+          <div style={{ flexBasis: '100%', fontSize: 11, color: 'var(--muted-foreground)' }}>동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
         </FieldRow>
       ) : existing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
@@ -392,7 +392,7 @@ function GroupDrawer(p: GroupDrawerProps) {
 
 // 멤버/후보 공용 우선순위 칩
 function PriChip({ n }: { n: number }) {
-  return <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--bg-soft)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 7px' }}>P{n}</span>
+  return <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)', background: 'var(--muted)', border: '1px solid var(--border)', borderRadius: 999, padding: '1px 7px' }}>P{n}</span>
 }
 
 // ── 멤버 행 (좌측 패널) — 선택 + 우선순위/역할 인라인 편집 ──
@@ -418,7 +418,7 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
           {name || '—'}
           {!editing && m.role === 'chair' && <Crown size={11} style={{ marginLeft: 4, verticalAlign: '-1px', color: '#d9a400' }} />}
         </span>
-        <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 11 }}>{m.user_id}</span>
+        <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
       </span>
       {editing ? (
         <>
@@ -498,7 +498,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
 
   const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
   const countChip = (n: number, tone?: 'primary') => <span className={`badge ${tone === 'primary' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{n}</span>
-  const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--surface)' }
+  const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
 
   return (
     <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
@@ -508,14 +508,14 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           <div style={panelHead}>
             등록된 멤버 {countChip(members.length, 'primary')}
             {canManage && members.length > 0 && (
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 'auto', fontWeight: 400, color: 'var(--text-muted)' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginLeft: 'auto', fontWeight: 400, color: 'var(--muted-foreground)' }}>
                 <input type="checkbox" checked={allMemSel} onChange={toggleAllMem} /> 전체
               </label>
             )}
           </div>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {members.length === 0
-              ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
               : members.map(m => (
                 <MemberRow key={m.user_id} m={m} name={pttName.get(m.user_id)} selected={selMembers.has(m.user_id)}
                   canManage={canManage} onToggle={toggleMem} onSave={onSaveMember} onRemove={uid => doRemove([uid])} />
@@ -541,7 +541,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
         <div style={{ ...panel, flex: 1.3 }}>
           <div style={panelHead}>
             가입자 추가 {countChip(candidates.length)}
-            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 400, color: 'var(--text-muted)' }}>
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>P
                 <input className="form-input" type="number" value={bulkPri} title="추가 시 적용할 우선순위" onChange={e => setBulkPri(Number(e.target.value))} style={{ width: 46 }} /></label>
               <select className="form-input" value={bulkRole} title="추가 시 적용할 역할" onChange={e => setBulkRole(e.target.value as 'chair' | 'participant')} style={{ width: 116 }}>
@@ -559,7 +559,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
                 <input className="search-input" autoFocus placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 11, color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', fontSize: 11, color: 'var(--muted-foreground)', borderBottom: '1px solid var(--border)' }}>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                   <input type="checkbox" checked={allCandPicked} onChange={toggleAllCand} disabled={candidates.length === 0} /> 전체 선택
                 </label>
@@ -567,7 +567,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                 {candidates.length === 0
-                  ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--text-muted)' }}>{pttIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
+                  ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{pttIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
                   : candidates.map(c => (
                     <div key={c.value} onDoubleClick={() => canManage && doAdd([c.value])}
                       style={{
@@ -579,7 +579,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
                       <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
                       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                         <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.userName}</span>
-                        <span className="ts" style={{ color: 'var(--text-muted)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
+                        <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                       </span>
                     </div>
                   ))}
@@ -588,7 +588,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           </div>
         </div>
       </div>
-      {canManage && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>가입자 더블클릭 = 바로 추가 · 체크 후 <ArrowLeft size={10} style={{ verticalAlign: '-1px' }} /> 추가 = 일괄 추가(우측 P·역할 적용)</div>}
+      {canManage && <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>가입자 더블클릭 = 바로 추가 · 체크 후 <ArrowLeft size={10} style={{ verticalAlign: '-1px' }} /> 추가 = 일괄 추가(우측 P·역할 적용)</div>}
     </div>
   )
 }
@@ -597,7 +597,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
 function Field({ label, children, w }: { label: string; children: React.ReactNode; w?: number | string }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 2, width: w, flex: w ? undefined : '1 1 150px', minWidth: 110 }}>
-      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
       {children}
     </label>
   )

@@ -115,7 +115,7 @@ export default function PackagesPage() {
       {/* ── 좌측: 모듈 목록 ── */}
       <div style={{
         width: 280, flex: '0 0 auto', display: 'flex', flexDirection: 'column',
-        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)', overflow: 'hidden',
+        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', overflow: 'hidden',
       }}>
         <div style={{ padding: 10, borderBottom: '1px solid var(--border)', display: 'flex', gap: 6 }}>
           <input className="form-input" placeholder="모듈 검색..."
@@ -144,7 +144,7 @@ export default function PackagesPage() {
       {/* ── 우측: 선택 모듈 상세 ── */}
       <div style={{
         flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden',
-        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--surface)',
+        border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
       }}>
         {!selectedModule ? (
           <div className="empty" style={{ padding: 40 }}>
@@ -173,18 +173,18 @@ function ModuleRow({ mod, active, onClick }: {
     <button onClick={onClick}
       style={{
         display: 'block', width: '100%', textAlign: 'left',
-        padding: '10px 12px', border: 'none', background: active ? 'var(--primary-soft)' : 'transparent',
+        padding: '10px 12px', border: 'none', background: active ? 'var(--cims-brand-soft)' : 'transparent',
         borderLeft: `3px solid ${active ? '#3498db' : 'transparent'}`,
         cursor: 'pointer', borderBottom: '1px solid var(--border)',
       }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
         <b style={{ fontSize: 14 }}>{mod.name}</b>
         <span style={{
-          marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)',
-          background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 10,
+          marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)',
+          background: 'var(--secondary)', padding: '1px 6px', borderRadius: 10,
         }}>{mod.versions.length}</span>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>
         최신 v{mod.latest.version} · {fmtRelTime(mod.lastUploadedAt)}
       </div>
     </button>
@@ -219,13 +219,13 @@ function ModuleDetail({ mod, depCountByPkgId, deployments, onDelete }: {
       <div style={{ padding: 16, borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <h3 style={{ margin: 0 }}>{mod.name}</h3>
-          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>({mod.versions.length}개 버전)</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', fontSize: 12 }}>
+          <span style={{ color: 'var(--muted-foreground)', fontSize: 13 }}>({mod.versions.length}개 버전)</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--muted-foreground)', fontSize: 12 }}>
             총 {fmtSize(mod.totalSize)}
           </span>
         </div>
         {mod.latest.description && (
-          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+          <div style={{ marginTop: 6, fontSize: 12, color: 'var(--muted-foreground)' }}>
             {mod.latest.description}
           </div>
         )}
@@ -266,14 +266,14 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 6, marginBottom: 8,
-      background: isLatest ? 'var(--bg-soft)' : 'var(--surface)',
+      background: isLatest ? 'var(--muted)' : 'var(--card)',
     }}>
       <div onClick={onToggle}
         style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
           cursor: 'pointer', userSelect: 'none',
         }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{expanded ? '▾' : '▸'}</span>
+        <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{expanded ? '▾' : '▸'}</span>
         <b style={{ fontSize: 14 }}>v{p.version}</b>
         {isLatest && (
           <span className="tag" style={{
@@ -281,32 +281,32 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
             padding: '1px 6px', borderRadius: 3,
           }}>최신</span>
         )}
-        <span style={{ color: 'var(--text-muted)', fontSize: 12, marginLeft: 8 }}>
+        <span style={{ color: 'var(--muted-foreground)', fontSize: 12, marginLeft: 8 }}>
           {fmtRelTime(p.uploaded_at)}
         </span>
-        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
+        <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>· {fmtSize(p.file_size)}</span>
         {depCount > 0 && (
           <span style={{
             marginLeft: 'auto', fontSize: 11, color: 'var(--primary)',
-            background: 'var(--primary-soft)', padding: '2px 8px', borderRadius: 10,
+            background: 'var(--cims-brand-soft)', padding: '2px 8px', borderRadius: 10,
           }}>배포 {depCount}곳</span>
         )}
       </div>
 
       {expanded && (
-        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
+        <div style={{ borderTop: '1px solid var(--border)', padding: '10px 14px', fontSize: 12, color: 'var(--muted-foreground)' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 4, columnGap: 10 }}>
-            <span style={{ color: 'var(--text-muted)' }}>파일</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>파일</span>
             <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{p.file_path}</code>
-            <span style={{ color: 'var(--text-muted)' }}>SHA256</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>SHA256</span>
             <code style={{ fontSize: 11 }}>{p.sha256.substring(0, 32)}…</code>
-            <span style={{ color: 'var(--text-muted)' }}>업로드</span>
+            <span style={{ color: 'var(--muted-foreground)' }}>업로드</span>
             <span>
               {p.uploaded_at || '—'}
-              {p.uploaded_by && <span style={{ color: 'var(--text-muted)' }}> · {p.uploaded_by}</span>}
+              {p.uploaded_by && <span style={{ color: 'var(--muted-foreground)' }}> · {p.uploaded_by}</span>}
             </span>
             {p.description && <>
-              <span style={{ color: 'var(--text-muted)' }}>설명</span>
+              <span style={{ color: 'var(--muted-foreground)' }}>설명</span>
               <span>{p.description}</span>
             </>}
           </div>
@@ -358,12 +358,12 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
                     <td>
                       {d.agent_name ? agentDisplayName(d.agent_name) : `#${d.agent_id}`}
                       {d.agent_name && agentDisplayName(d.agent_name) !== d.agent_name && (
-                        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>({d.agent_name})</span>
+                        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 6 }}>({d.agent_name})</span>
                       )}
                     </td>
                     <td>{d.process_name || '—'}</td>
                     <td>{depEffectiveStatus(d)}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{d.deployed_at || '—'}</td>
+                    <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{d.deployed_at || '—'}</td>
                   </tr>
                 ))}
               </tbody>

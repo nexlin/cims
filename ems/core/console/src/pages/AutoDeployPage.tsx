@@ -28,8 +28,8 @@ const STEP_ICON: Record<string, string> = {
   done: '✓', skipped: '–', failed: '✗', running: '⋯', pending: '·', aborted: '⊘',
 }
 const STEP_COLOR: Record<string, string> = {
-  done: '#27ae60', skipped: 'var(--text-muted)', failed: '#e74c3c',
-  running: '#1976d2', pending: 'var(--text-muted)', aborted: '#e67e22',
+  done: '#27ae60', skipped: 'var(--muted-foreground)', failed: '#e74c3c',
+  running: '#1976d2', pending: 'var(--muted-foreground)', aborted: '#e67e22',
 }
 
 export default function AutoDeployPage() {
@@ -280,7 +280,7 @@ export default function AutoDeployPage() {
                 <span style={{ color: i.level === 'error' ? '#e74c3c' : '#f39c12', fontWeight: 700 }}>
                   {i.level === 'error' ? 'ERROR' : 'WARN'}
                 </span>
-                <code style={{ color: 'var(--text-muted)' }}>{i.path}</code>
+                <code style={{ color: 'var(--muted-foreground)' }}>{i.path}</code>
                 <span>{i.message}</span>
               </div>
             ))}
@@ -302,7 +302,7 @@ export default function AutoDeployPage() {
                   onClick={doPlan}>계획 확인 (dry-run)</button>
           <button className="btn btn--sm btn--primary" disabled={!canEdit || !!busy || !ready || !plan}
                   onClick={doApply} title={!plan ? '먼저 [계획 확인]' : ''}>▶ 배포 실행</button>
-          {busy && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{busy}…</span>}
+          {busy && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{busy}…</span>}
         </div>
 
         {preflight && (
@@ -314,7 +314,7 @@ export default function AutoDeployPage() {
                   <td>{r.server}</td><td>{r.host}</td><td>{r.auth_mode}</td>
                   <td>{r.os || '-'}</td><td>{r.login_user || '-'}</td>
                   <td>{r.sudo_ok ? '✓' : '✗'}</td>
-                  <td style={{ color: r.ok ? 'var(--success)' : '#e74c3c' }}>
+                  <td style={{ color: r.ok ? 'var(--cims-success)' : '#e74c3c' }}>
                     {r.ok ? 'OK' : `${r.error_code || ''} ${r.error || ''}`}
                   </td>
                 </tr>
@@ -337,12 +337,12 @@ export default function AutoDeployPage() {
               {runs.map(r => (
                 <tr key={r.id}>
                   <td>{r.id}</td><td>{r.blueprint}</td>
-                  <td style={{ color: r.status === 'succeeded' ? 'var(--success)'
-                             : r.status === 'failed' ? '#e74c3c' : 'var(--text-muted)' }}>
+                  <td style={{ color: r.status === 'succeeded' ? 'var(--cims-success)'
+                             : r.status === 'failed' ? '#e74c3c' : 'var(--muted-foreground)' }}>
                     {r.status}</td>
                   <td>{r.progress.done}/{r.progress.total}
                       {r.progress.failed > 0 && ` (실패 ${r.progress.failed})`}</td>
-                  <td style={{ color: 'var(--text-muted)' }}>{r.created_at}</td>
+                  <td style={{ color: 'var(--muted-foreground)' }}>{r.created_at}</td>
                   <td><button className="btn btn--sm btn--outline"
                               onClick={() => provisionApi.getRun(r.id).then(setRun)}>열기</button></td>
                 </tr>
@@ -358,7 +358,7 @@ export default function AutoDeployPage() {
 // ── 하위 컴포넌트 ─────────────────────────────────────────────
 
 const SEC: React.CSSProperties = {
-  border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--surface)',
+  border: '1px solid var(--border)', borderRadius: 6, padding: 12, background: 'var(--card)',
 }
 const H3: React.CSSProperties = { fontSize: 13.5, fontWeight: 700, margin: '0 0 8px' }
 
@@ -371,7 +371,7 @@ function Seg({ value, onChange, options }:
                 style={{
                   padding: '3px 12px', fontSize: 12, border: 'none', cursor: 'pointer',
                   background: value === o.v ? '#1976d2' : 'transparent',
-                  color: value === o.v ? '#fff' : 'var(--text-muted)',
+                  color: value === o.v ? '#fff' : 'var(--muted-foreground)',
                 }}>{o.l}</button>
       ))}
     </div>
@@ -388,7 +388,7 @@ function DocPicker({ label, hint, items, value, onChange, onUpload, disabled }: 
   return (
     <div style={{ minWidth: 320, flex: 1 }}>
       <div style={{ fontSize: 12.5, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 5 }}>{hint}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginBottom: 5 }}>{hint}</div>
       <div style={{ display: 'flex', gap: 6 }}>
         <select value={value ?? ''} disabled={disabled}
                 onChange={e => onChange(e.target.value ? Number(e.target.value) : null)}
@@ -415,8 +415,8 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
   return (
     <div style={{ display: 'flex', border: '1px solid var(--border)', borderRadius: 4,
                   fontFamily: 'monospace', fontSize: 12.5, maxHeight: 420 }}>
-      <div style={{ padding: '8px 6px', textAlign: 'right', color: 'var(--text-muted)',
-                    background: 'var(--bg)', userSelect: 'none', overflow: 'hidden',
+      <div style={{ padding: '8px 6px', textAlign: 'right', color: 'var(--muted-foreground)',
+                    background: 'var(--background)', userSelect: 'none', overflow: 'hidden',
                     borderRight: '1px solid var(--border)', minWidth: 42 }}>
         {Array.from({ length: lines }, (_, i) => <div key={i} style={{ lineHeight: '18px' }}>{i + 1}</div>)}
       </div>
@@ -425,7 +425,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
                 style={{ flex: 1, border: 'none', outline: 'none', resize: 'vertical',
                          padding: 8, minHeight: 260, lineHeight: '18px',
                          fontFamily: 'monospace', fontSize: 12.5,
-                         background: 'transparent', color: 'var(--text)' }} />
+                         background: 'transparent', color: 'var(--foreground)' }} />
       {issues.length > 0 && (
         <div style={{ flex: '0 0 220px', padding: 8, borderLeft: '1px solid var(--border)',
                       overflow: 'auto', fontSize: 11.5 }}>
@@ -433,7 +433,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
             <div key={n} style={{ marginBottom: 6,
                                   color: i.level === 'error' ? '#e74c3c' : '#f39c12' }}>
               {i.path.replace(/^[a-z]+:/, '')}<br />
-              <span style={{ color: 'var(--text-muted)' }}>{i.message}</span>
+              <span style={{ color: 'var(--muted-foreground)' }}>{i.message}</span>
             </div>
           ))}
         </div>
@@ -459,8 +459,8 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
   const errFor = (p: string) => issues.find(i => i.path.includes(p))
   return (
     <div style={{ fontSize: 12.5 }}>
-      <div style={{ marginBottom: 8, color: 'var(--text-muted)' }}>
-        <b style={{ color: 'var(--text)' }}>{String(doc.name || '')}</b>
+      <div style={{ marginBottom: 8, color: 'var(--muted-foreground)' }}>
+        <b style={{ color: 'var(--foreground)' }}>{String(doc.name || '')}</b>
         {doc.description ? ` — ${doc.description}` : ''}
         {order.length > 0 && <> · 기동 순서: {order.join(' → ')}</>}
       </div>
@@ -468,10 +468,10 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
         <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 4,
                               padding: 10, marginBottom: 8 }}>
           <div style={{ fontWeight: 700 }}>
-            {s.name} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· {s.mode}</span>
+            {s.name} <span style={{ fontWeight: 400, color: 'var(--muted-foreground)' }}>· {s.mode}</span>
             {errFor(`systems[${i}]`) && <span style={{ color: '#e74c3c', marginLeft: 8 }}>⚠</span>}
           </div>
-          <div style={{ color: 'var(--text-muted)', margin: '4px 0' }}>
+          <div style={{ color: 'var(--muted-foreground)', margin: '4px 0' }}>
             멤버: {(s.members || []).map(m => m.server + (m.role ? `(${m.role})` : '')).join(', ') || '-'}
             {(s.vips || []).length > 0 &&
               <> · VIP: {(s.vips || []).map(v => `${v.ip}/${v.prefix}@${v.interface}`).join(', ')}</>}
@@ -521,7 +521,7 @@ function InventoryForm({ view, onChange, disabled, issues }: {
             return (
               <tr key={i} style={bad ? { background: 'rgba(231,76,60,.08)' } : undefined}>
                 <td>{s.name}
-                  {pre && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  {pre && <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
                     agent 기설치 — SSH 안 함</div>}
                 </td>
                 <td><input value={s.host || ''} disabled={disabled} style={{ width: 130 }}
@@ -550,7 +550,7 @@ function InventoryForm({ view, onChange, disabled, issues }: {
           })}
         </tbody>
       </table>
-      <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 6 }}>
+      <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginTop: 6 }}>
         비밀번호 칸을 비워 두면 저장된 값이 유지됩니다. 서버 추가·삭제는 [원문 보기]에서 하세요.
       </div>
     </div>
@@ -567,12 +567,12 @@ function PlanView({ phases }: { phases: PlanPhase[] }) {
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>
             {ph.key} · {ph.title}
             {ph.serial && <span style={{ marginLeft: 6, fontSize: 11, color: '#e67e22' }}>순차</span>}
-            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--text-muted)' }}>
+            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
               {PHASE_HINT[ph.key] || ''}
             </span>
           </div>
           {ph.error && <div style={{ color: '#e74c3c', fontSize: 12 }}>{ph.error}</div>}
-          <div style={{ paddingLeft: 14, fontSize: 12, color: 'var(--text-muted)' }}>
+          <div style={{ paddingLeft: 14, fontSize: 12, color: 'var(--muted-foreground)' }}>
             {ph.steps.map((s, i) => (
               <div key={i}>· {s.target} — {String(s.action || '')}</div>
             ))}
@@ -598,11 +598,11 @@ function RunView({ run, onAction, busy, canEdit }: {
           run #{run.id} — {run.blueprint}
           <span style={{
             marginLeft: 10, fontWeight: 400,
-            color: run.status === 'succeeded' ? 'var(--success)'
+            color: run.status === 'succeeded' ? 'var(--cims-success)'
                  : run.status === 'failed' ? '#e74c3c' : '#1976d2',
           }}>{run.status}{running && ' ⋯'}</span>
         </h3>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{done}/{total}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{done}/{total}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {running && <button className="btn btn--sm btn--outline" disabled={!canEdit || !!busy}
                               onClick={() => onAction('abort')}>■ 중단</button>}
@@ -628,7 +628,7 @@ function RunView({ run, onAction, busy, canEdit }: {
         <div key={ph.key} style={{ marginBottom: 6 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>
             {ph.key} · {ph.title}
-            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--text-muted)' }}>{ph.status}</span>
+            <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>{ph.status}</span>
           </div>
           <div style={{ paddingLeft: 12 }}>
             {ph.steps.map((s, i) => (
@@ -637,10 +637,10 @@ function RunView({ run, onAction, busy, canEdit }: {
                   {STEP_ICON[s.status] || '·'}
                 </span>
                 <span style={{ display: 'inline-block', minWidth: 150 }}>{s.target}</span>
-                <span style={{ color: s.status === 'failed' ? '#e74c3c' : 'var(--text-muted)' }}>
+                <span style={{ color: s.status === 'failed' ? '#e74c3c' : 'var(--muted-foreground)' }}>
                   {s.detail || s.error || ''}
                 </span>
-                {s.elapsed_sec ? <span style={{ color: 'var(--text-muted)' }}> ({s.elapsed_sec}s)</span> : null}
+                {s.elapsed_sec ? <span style={{ color: 'var(--muted-foreground)' }}> ({s.elapsed_sec}s)</span> : null}
               </div>
             ))}
           </div>

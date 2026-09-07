@@ -37,7 +37,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
           <span style={{ background: verdictColor, color: '#fff', padding: '4px 10px',
                          borderRadius: 4, fontWeight: 600 }}>{verdictLabel}</span>
         )}
-        {data?.ts && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>ts: {data.ts}</span>}
+        {data?.ts && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>ts: {data.ts}</span>}
         <button className="btn btn--sm btn--outline" onClick={() => void refresh()}
                 style={{ marginLeft: 'auto' }}>↻ 새로고침</button>
       </div>
@@ -47,7 +47,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* issues */}
           {data.issues.length > 0 && (
-            <div style={{ background: 'var(--warn-soft)', border: '1px solid #ffeaa7',
+            <div style={{ background: 'var(--cims-warning-soft)', border: '1px solid #ffeaa7',
                           padding: 10, borderRadius: 4, fontSize: 13 }}>
               <b>⚠ 발견된 이슈:</b>
               <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
@@ -59,21 +59,21 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
           {data.ha && (
             <div>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>HA (keepalived)</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>
                 {data.ha.keepalived_installed
                   ? (data.ha.keepalived_active
                       ? <>✓ <code>keepalived</code> active</>
                       : <span style={{ color: '#e74c3c' }}>✗ keepalived installed but inactive</span>)
-                  : <span style={{ color: 'var(--text-muted)' }}>(keepalived 미설치)</span>}
+                  : <span style={{ color: 'var(--muted-foreground)' }}>(keepalived 미설치)</span>}
               </div>
               {data.ha.vips.length > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>
                   VIP: {data.ha.vips.map(v => `${v.iface}:${v.ip}/${v.mask}`).join(', ')}
                 </div>
               )}
               {data.ha.journal_tail && data.ha.journal_tail.length > 0 && (
                 <details style={{ marginTop: 6 }}>
-                  <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--muted-foreground)' }}>
                     journal tail ({data.ha.journal_tail.length} lines)
                   </summary>
                   <pre style={{ background: '#0d1117', color: '#c9d1d9', padding: 8,
@@ -97,8 +97,8 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
                     <tr key={m.name}>
                       <td><b>{m.name}</b></td>
                       <td>{m.running
-                        ? <span style={{ color: 'var(--success)' }}>✓</span>
-                        : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                        ? <span style={{ color: 'var(--cims-success)' }}>✓</span>
+                        : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}</td>
                       <td>{m.pid ?? '—'}</td>
                       <td>{m.cpu_pct ?? '—'}</td>
                       <td>{m.mem_mb ?? '—'}</td>
@@ -113,7 +113,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
           {data.metrics && (
             <div>
               <div style={{ fontWeight: 600, marginBottom: 4 }}>시스템 메트릭</div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <div style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>
                 MEM: {data.metrics.mem_pct ?? '—'}% &nbsp;·&nbsp;
                 Disk: {data.metrics.disk_pct ?? '—'}% &nbsp;·&nbsp;
                 Load: {data.metrics.load_avg ?? '—'}
@@ -139,7 +139,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
             </div>
           )}
           {data.agent_version && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
               agent v{data.agent_version} · {data.hostname}
             </div>
           )}

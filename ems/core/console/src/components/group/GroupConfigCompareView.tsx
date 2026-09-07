@@ -383,8 +383,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   }, [template, syncKeys, driftKeys])
 
   const stateStyle: Record<CellState, React.CSSProperties> = {
-    ok:         { background: 'var(--success-soft)' },
-    drift:      { background: 'var(--warn-soft)' },
+    ok:         { background: 'var(--cims-success-soft)' },
+    drift:      { background: 'var(--cims-warning-soft)' },
     individual: {},
   }
 
@@ -400,7 +400,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 패키지 탭 (이름 단위 — 버전 혼재도 한 화면) */}
       <div style={{ flex: '0 0 auto', display: 'flex', gap: 2, padding: '10px 16px 0',
-                    borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
+                    borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
         {groupPkgNames.map(name => {
           const active = name === effectivePkgName
           const vers = [...new Set(deployments
@@ -411,8 +411,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             <button key={name} onClick={() => setSelectedPkgName(name)}
                     style={{
                       padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
-                      background: active ? 'var(--surface)' : 'transparent',
-                      color: active ? 'var(--primary)' : 'var(--text-muted)',
+                      background: active ? 'var(--card)' : 'transparent',
+                      color: active ? 'var(--primary)' : 'var(--muted-foreground)',
                       border: '1px solid var(--border)', borderBottom: 'none',
                       borderRadius: '6px 6px 0 0', cursor: 'pointer',
                     }}>
@@ -422,7 +422,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
               </span>
               {on !== null && (
                 <span style={{ marginLeft: 5, fontSize: 10,
-                               color: on ? 'var(--success)' : '#e67e22' }}>
+                               color: on ? 'var(--cims-success)' : '#e67e22' }}>
                   {on ? '⬤동기화' : '○수동'}
                 </span>
               )}
@@ -440,11 +440,11 @@ export function GroupConfigCompareView({ group, members: liveMembers,
         <div style={{ flex: '0 0 auto', padding: '10px 16px', fontSize: 12,
                       display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
                       borderBottom: '1px solid var(--border)',
-                      background: autoSyncOn ? 'var(--success-soft)' : 'var(--warn-soft)' }}>
+                      background: autoSyncOn ? 'var(--cims-success-soft)' : 'var(--cims-warning-soft)' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6,
                           cursor: toggling ? 'wait' : 'pointer', userSelect: 'none',
                           fontWeight: 700,
-                          color: autoSyncOn ? 'var(--success)' : '#e67e22' }}
+                          color: autoSyncOn ? 'var(--cims-success)' : '#e67e22' }}
                  title={autoSyncOn
                    ? 'ON — ACTIVE 기준으로 STANDBY 공통 설정을 자동 교정 (이벤트+주기). 업데이트 작업 전 OFF 로 전환하세요.'
                    : 'OFF — 자동 교정 정지. 멤버별로 독립 편집 (업그레이드 창). 작업 완료 후 ON 으로.'}>
@@ -456,7 +456,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             ACTIVE:&nbsp;
             {activeMember
               ? <b style={{ color: '#e67e22' }}>● {activeMember.name}</b>
-              : <span style={{ color: 'var(--text-muted)' }}>판정 불가 (heartbeat 관측 대기)</span>}
+              : <span style={{ color: 'var(--muted-foreground)' }}>판정 불가 (heartbeat 관측 대기)</span>}
           </span>
           {mixedVersions && (
             <span style={{ color: '#e67e22' }}>
@@ -472,7 +472,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             </span>
           )}
           {syncView?.status === 'unknown' && (
-            <span style={{ color: 'var(--text-muted)' }}>
+            <span style={{ color: 'var(--muted-foreground)' }}>
               정합 판정 보류 — {SYNC_REASON[syncView.reason || ''] || syncView.reason}
             </span>
           )}
@@ -481,7 +481,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
 
       {/* 내부 뷰 탭 */}
       <div style={{ flex: '0 0 auto', display: 'flex', gap: 0, padding: '0 16px',
-                    borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)' }}>
+                    borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
         {isAS && (
           <ViewBtn active={view === 'edit'} onClick={() => setView('edit')}>
             공통 설정 ({svcSections.reduce((n, s) => n + s.fields.length, 0)})
@@ -507,19 +507,19 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           !configView ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
             <>
               {autoSyncOn ? (
-                <div style={{ padding: 10, background: 'var(--primary-soft)', border: '1px solid var(--border)',
+                <div style={{ padding: 10, background: 'var(--cims-brand-soft)', border: '1px solid var(--border)',
                               borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
                   🔗 저장하면 그룹 멤버 <b>전체({deployedMembers.map(m => m.name).join(', ')})</b>에
                   적용됩니다. 표시값 기준: <b>{baseMemberName}</b>
                   {activeMember && baseAgentId === activeAid ? ' (ACTIVE)' : ''}
                   {mixedVersions && (
-                    <div style={{ marginTop: 6, color: 'var(--danger)' }}>
+                    <div style={{ marginTop: 6, color: 'var(--destructive)' }}>
                       ⚠ 버전 혼재 중에는 그룹 일괄 저장이 차단됩니다 — 스위치 OFF 후 멤버별로 편집하세요.
                     </div>
                   )}
                 </div>
               ) : (
-                <div style={{ padding: 10, background: 'var(--warn-soft)', border: '1px solid var(--border)',
+                <div style={{ padding: 10, background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
                               borderRadius: 4, fontSize: 12, marginBottom: 12,
                               display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <span>○ 동기화 OFF — <b>편집할 멤버:</b></span>
@@ -529,12 +529,12 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                       <input type="radio" name="off-target" checked={baseAgentId === m.id}
                              onChange={() => setOffTarget(m.id)} />
                       {m.name}
-                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
                         v{depByAgent.get(m.id)?.package_version || '?'}
                       </span>
                     </label>
                   ))}
-                  <span style={{ color: 'var(--text-muted)' }}>저장은 선택한 멤버에만 적용됩니다.</span>
+                  <span style={{ color: 'var(--muted-foreground)' }}>저장은 선택한 멤버에만 적용됩니다.</span>
                 </div>
               )}
               {svcSections.map(sec => (
@@ -567,7 +567,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             if (!coll || !baseDep || !editorSource) return <div className="empty">collection 을 찾을 수 없음</div>
             return (
               <>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+                <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
                   편집 대상: <b>{baseMemberName}</b>
                   {autoSyncOn
                     ? ' — 저장 시 그룹 멤버 전체로 즉시 전파됩니다.'
@@ -587,37 +587,37 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             <>
               <div style={{ fontSize: 12, marginBottom: 12, display: 'flex', gap: 12,
                             alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--success)' }}>🔗 공통 일치 {summary.ok}</span>
-                <span style={{ color: summary.drift ? '#e67e22' : 'var(--text-muted)',
+                <span style={{ color: 'var(--cims-success)' }}>🔗 공통 일치 {summary.ok}</span>
+                <span style={{ color: summary.drift ? '#e67e22' : 'var(--muted-foreground)',
                                fontWeight: summary.drift ? 700 : 400 }}>
                   ⚠ 드리프트 {summary.drift}
                 </span>
-                <span style={{ color: 'var(--text-muted)' }}>개별 {summary.individual}</span>
+                <span style={{ color: 'var(--muted-foreground)' }}>개별 {summary.individual}</span>
                 {!isAS && (
-                  <span style={{ color: 'var(--text-muted)' }}>
+                  <span style={{ color: 'var(--muted-foreground)' }}>
                     · AA 그룹 — 동기화 없음, 편집은 각 서버의 [패키지 설정] 탭
                   </span>
                 )}
               </div>
               {undeployedMembers.length > 0 && (
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12 }}>
                   미배포 멤버: {undeployedMembers.map(m => m.name).join(', ')}
                 </div>
               )}
               {template.sections.map(sec => (
                 <div key={sec.key} style={{ border: '1px solid var(--border)', borderRadius: 6,
-                                            marginBottom: 12, background: 'var(--surface)', overflow: 'hidden' }}>
-                  <div style={{ padding: '10px 14px', background: 'var(--bg-soft)',
+                                            marginBottom: 12, background: 'var(--card)', overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', background: 'var(--muted)',
                                 borderBottom: '1px solid var(--border)',
                                 display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <b>{sec.title}</b>
                     {sec.description && (
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>— {sec.description}</span>
+                      <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>— {sec.description}</span>
                     )}
                   </div>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ color: 'var(--text-muted)' }}>
+                      <tr style={{ color: 'var(--muted-foreground)' }}>
                         <th style={{ textAlign: 'left', padding: '6px 14px', width: 240 }}>필드</th>
                         <th style={{ width: 70, textAlign: 'center' }}>구분</th>
                         {deployedMembers.map(m => (
@@ -626,7 +626,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                               title={`${m.name} 의 설정 편집으로 이동`}
                               onClick={() => onSelectMember(m.id, effectivePkgName)}>
                             {m.name}{activeAid === m.id ? ' ●' : ''}
-                            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
                               {' '}v{depByAgent.get(m.id)?.package_version || '?'}
                             </span> ↗
                           </th>
@@ -645,8 +645,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                               {syncKeys.has(f.key)
                                 ? (st === 'drift'
                                     ? <span title="공통이어야 하는데 멤버 간 값 상이" style={{ color: '#e67e22' }}>⚠</span>
-                                    : <span title="그룹 공통 — 멤버 간 값 동일" style={{ color: 'var(--success)' }}>🔗</span>)
-                                : <span title="서버별 고유값 — 동기화 대상 아님" style={{ fontSize: 10, color: 'var(--text-muted)' }}>개별</span>}
+                                    : <span title="그룹 공통 — 멤버 간 값 동일" style={{ color: 'var(--cims-success)' }}>🔗</span>)
+                                : <span title="서버별 고유값 — 동기화 대상 아님" style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>개별</span>}
                             </td>
                             {deployedMembers.map(m => {
                               const cell = memberValue(m.id, f)
@@ -655,7 +655,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                                 <td key={m.id}
                                     style={{ padding: '6px 10px', fontFamily: 'monospace',
                                              cursor: 'pointer',
-                                             color: muted ? 'var(--text-muted)' : undefined,
+                                             color: muted ? 'var(--muted-foreground)' : undefined,
                                              fontStyle: muted ? 'italic' : undefined }}
                                     title={SRC_HINT[cell.src]}
                                     onClick={() => onSelectMember(m.id, effectivePkgName)}>
@@ -690,7 +690,7 @@ function ViewBtn({ active, children, onClick }: {
     <button onClick={onClick}
       style={{
         padding: '8px 16px', border: 'none',
-        background: active ? 'var(--surface)' : 'transparent',
+        background: active ? 'var(--card)' : 'transparent',
         borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
         fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13,
       }}>

@@ -123,23 +123,23 @@ function RunListRow({ run, onClick }: { run: RunHistoryItem; onClick: () => void
       </td>
       <td style={td}>{fmtDate(run.started_at)}</td>
       <td style={td}>{scopeLabel(run.scope)}</td>
-      <td style={{ ...td, color: VERDICT_COLOR[run.verdict] || 'var(--text)', fontWeight: 600 }}>
+      <td style={{ ...td, color: VERDICT_COLOR[run.verdict] || 'var(--foreground)', fontWeight: 600 }}>
         {run.verdict}
       </td>
-      <td style={{ ...td, fontSize: 12, color: 'var(--text-muted)' }}>
+      <td style={{ ...td, fontSize: 12, color: 'var(--muted-foreground)' }}>
         {(t.pass ?? 0)} / {(t.fail ?? 0)} / {(t.skip ?? 0)}
         {t.blocked ? ` / ${t.blocked}` : ''}
-        <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>(P/F/S)</span>
+        <span style={{ color: 'var(--muted-foreground)', marginLeft: 6 }}>(P/F/S)</span>
       </td>
       <td style={td}>{fmtDuration(run.elapsed_ms)}</td>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
+      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
         {run.git_branch && <span>{run.git_branch}@</span>}
         <span>{run.git_sha || '-'}</span>
       </td>
-      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
+      <td style={{ ...td, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
         {run.pkg_manifest_hash ? run.pkg_manifest_hash.slice(0, 10) + '…' : '-'}
       </td>
-      <td style={{ ...td, fontSize: 11, color: 'var(--text-muted)' }}>{run.trigger}</td>
+      <td style={{ ...td, fontSize: 11, color: 'var(--muted-foreground)' }}>{run.trigger}</td>
     </tr>
   )
 }
@@ -174,7 +174,7 @@ function DetailModal({ run, onClose, onDelete }: {
             <div style={{ fontSize: 18, fontWeight: 700 }} title={`run_id=${run.id}`}>
               회차 {fmtRunIdShort(run.id)}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+            <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>
               {fmtDate(run.started_at)} ~ {fmtDate(run.finished_at)} ({fmtDuration(run.elapsed_ms)})
             </div>
           </div>
@@ -267,20 +267,20 @@ function DetailModal({ run, onClose, onDelete }: {
                     </td>
                     <td style={td}>S{p.stage}</td>
                     <td style={td}>{p.name}</td>
-                    <td style={{ ...td, color: STATUS_COLOR[p.status] || 'var(--text)', fontWeight: 600 }}>
+                    <td style={{ ...td, color: STATUS_COLOR[p.status] || 'var(--foreground)', fontWeight: 600 }}>
                       {p.status}
                     </td>
                     <td style={td}>{fmtDuration(p.elapsed_ms)}</td>
                   </tr>
                   {(grouped.childrenByParent[p.id] || []).map(c => (
-                    <tr key={c.id} style={{ background: 'var(--bg-soft)' }}>
+                    <tr key={c.id} style={{ background: 'var(--muted)' }}>
                       <td style={td}>{c.idx}</td>
-                      <td style={{ ...td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 11, color: 'var(--text-muted)' }}>
+                      <td style={{ ...td, paddingLeft: 32, fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>
                         └ {c.id}
                       </td>
                       <td style={td}>S{c.stage}</td>
                       <td style={td}>{c.name}</td>
-                      <td style={{ ...td, color: STATUS_COLOR[c.status] || 'var(--text)' }}>
+                      <td style={{ ...td, color: STATUS_COLOR[c.status] || 'var(--foreground)' }}>
                         {c.status}
                       </td>
                       <td style={td}>{fmtDuration(c.elapsed_ms)}</td>
@@ -299,16 +299,16 @@ function DetailModal({ run, onClose, onDelete }: {
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>{label}</div>
       <div style={{ fontSize: 13, color: '#111827', marginTop: 2 }}>{value}</div>
     </div>
   )
 }
 
-function Total({ label, value, color = 'var(--text)' }: { label: string; value: number | string; color?: string }) {
+function Total({ label, value, color = 'var(--foreground)' }: { label: string; value: number | string; color?: string }) {
   return (
     <div style={totalCell}>
-      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   )
@@ -329,7 +329,7 @@ function StatsPanel({
   err: string | null
 }) {
   const card = useMemo<React.CSSProperties>(() => ({
-    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
+    background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6,
     padding: 12, fontSize: 12,
   }), [])
   return (
@@ -345,12 +345,12 @@ function StatsPanel({
             <option key={d} value={d}>{d}일</option>
           ))}
         </select>
-        {err && <span style={{ color: 'var(--danger)', fontSize: 11 }}>⚠ {err}</span>}
+        {err && <span style={{ color: 'var(--destructive)', fontSize: 11 }}>⚠ {err}</span>}
       </div>
       {stats === null ? (
-        <div style={{ ...card, color: 'var(--text-muted)' }}>로딩 중…</div>
+        <div style={{ ...card, color: 'var(--muted-foreground)' }}>로딩 중…</div>
       ) : stats.overall.runs === 0 ? (
-        <div style={{ ...card, color: 'var(--text-muted)' }}>해당 기간 회차 없음</div>
+        <div style={{ ...card, color: 'var(--muted-foreground)' }}>해당 기간 회차 없음</div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
           {/* overall */}
@@ -359,10 +359,10 @@ function StatsPanel({
             <KpiGrid items={[
               { label: '전체 회차', value: `${stats.overall.runs}회` },
               { label: '성공률', value: `${stats.overall.success_rate}%`,
-                color: stats.overall.success_rate >= 80 ? 'var(--success)'
-                       : stats.overall.success_rate >= 50 ? 'var(--warning)' : '#dc2626' },
-              { label: 'PASS', value: `${stats.overall.pass}회`, color: 'var(--success)' },
-              { label: 'FAIL', value: `${stats.overall.fail}회`, color: 'var(--danger)' },
+                color: stats.overall.success_rate >= 80 ? 'var(--cims-success)'
+                       : stats.overall.success_rate >= 50 ? 'var(--cims-warning)' : '#dc2626' },
+              { label: 'PASS', value: `${stats.overall.pass}회`, color: 'var(--cims-success)' },
+              { label: 'FAIL', value: `${stats.overall.fail}회`, color: 'var(--destructive)' },
               { label: '평균 소요', value: fmtMsShort(stats.overall.avg_elapsed_ms) },
               { label: 'p95 소요', value: fmtMsShort(stats.overall.p95_elapsed_ms) },
             ]} />
@@ -388,8 +388,8 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
       {items.map(it => (
         <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
-          <span style={{ color: 'var(--text-muted)' }}>{it.label}</span>
-          <span style={{ fontWeight: 600, color: it.color || 'var(--text)' }}>{it.value}</span>
+          <span style={{ color: 'var(--muted-foreground)' }}>{it.label}</span>
+          <span style={{ fontWeight: 600, color: it.color || 'var(--foreground)' }}>{it.value}</span>
         </div>
       ))}
     </div>
@@ -397,7 +397,7 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
 }
 
 function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
-  if (rows.length === 0) return <div style={{ color: 'var(--text-muted)' }}>없음</div>
+  if (rows.length === 0) return <div style={{ color: 'var(--muted-foreground)' }}>없음</div>
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
       <thead>
@@ -415,8 +415,8 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{r.runs}</td>
             <td style={{
               padding: '3px 6px', textAlign: 'right', fontWeight: 600,
-              color: r.success_rate >= 80 ? 'var(--success)'
-                     : r.success_rate >= 50 ? 'var(--warning)' : '#dc2626',
+              color: r.success_rate >= 80 ? 'var(--cims-success)'
+                     : r.success_rate >= 50 ? 'var(--cims-warning)' : '#dc2626',
             }}>{r.success_rate}%</td>
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{fmtMsShort(r.avg_elapsed_ms)}</td>
           </tr>
@@ -428,7 +428,7 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
 
 /** 회차별 verdict + elapsed 시계열 — inline SVG sparkline (라이브러리 의존 X). */
 function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
-  if (timeline.length === 0) return <div style={{ color: 'var(--text-muted)' }}>데이터 없음</div>
+  if (timeline.length === 0) return <div style={{ color: 'var(--muted-foreground)' }}>데이터 없음</div>
   const W = 380
   const H = 70
   const PAD_X = 4
@@ -585,7 +585,7 @@ export default function VerificationHistoryPage() {
       `}</style>
       <header style={{ marginBottom: 16, display: 'flex', alignItems: 'baseline', gap: 16 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700 }}>검증 이력</h1>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           총 {total} 회차
         </span>
         <button onClick={() => { load(); loadStats() }} style={{ ...btnSecondary, marginLeft: 'auto' }}>↻ 새로고침</button>
@@ -615,12 +615,12 @@ export default function VerificationHistoryPage() {
           </select>
         </label>
         {error && (
-          <span style={{ color: 'var(--danger)', fontSize: 12, marginLeft: 12 }}>{error}</span>
+          <span style={{ color: 'var(--destructive)', fontSize: 12, marginLeft: 12 }}>{error}</span>
         )}
       </div>
 
       {/* list 표 */}
-      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, overflow: 'auto' }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, overflow: 'auto' }}>
         <table style={tableStyle}>
           <thead>
             <tr>
@@ -637,9 +637,9 @@ export default function VerificationHistoryPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>로딩 중…</td></tr>
+              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--muted-foreground)' }}>로딩 중…</td></tr>
             ) : runs.length === 0 ? (
-              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>회차 없음</td></tr>
+              <tr><td colSpan={9} style={{ ...td, textAlign: 'center', padding: 20, color: 'var(--muted-foreground)' }}>회차 없음</td></tr>
             ) : (
               runs.map(r => (
                 <RunListRow key={r.id} run={r} onClick={() => openDetail(r.id)} />
@@ -654,7 +654,7 @@ export default function VerificationHistoryPage() {
         <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
           <button style={btnSecondary} disabled={offset === 0}
                   onClick={() => setOffset(Math.max(0, offset - limit))}>← 이전</button>
-          <span style={{ fontSize: 13, color: 'var(--text)' }}>
+          <span style={{ fontSize: 13, color: 'var(--foreground)' }}>
             {curPage} / {totalPages}
           </span>
           <button style={btnSecondary} disabled={offset + limit >= total}
@@ -677,8 +677,8 @@ const tableStyle: React.CSSProperties = {
 }
 const th: React.CSSProperties = {
   padding: '8px 12px', borderBottom: '1px solid var(--border)',
-  textAlign: 'left', background: 'var(--bg-soft)',
-  fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase',
+  textAlign: 'left', background: 'var(--muted)',
+  fontSize: 11, color: 'var(--muted-foreground)', textTransform: 'uppercase',
   position: 'sticky', top: 0, zIndex: 1,
 }
 const td: React.CSSProperties = {
@@ -686,11 +686,11 @@ const td: React.CSSProperties = {
 }
 const filterLabel: React.CSSProperties = {
   display: 'inline-flex', alignItems: 'center', gap: 6,
-  fontSize: 13, color: 'var(--text)',
+  fontSize: 13, color: 'var(--foreground)',
 }
 const selectStyle: React.CSSProperties = {
   padding: '4px 8px', border: '1px solid var(--border)', borderRadius: 4,
-  background: 'var(--surface)', fontSize: 13,
+  background: 'var(--card)', fontSize: 13,
 }
 const btnPrimary: React.CSSProperties = {
   padding: '6px 14px', border: 'none', borderRadius: 4,
@@ -698,7 +698,7 @@ const btnPrimary: React.CSSProperties = {
 }
 const btnSecondary: React.CSSProperties = {
   padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 4,
-  background: 'var(--surface)', color: 'var(--text)', fontSize: 13, cursor: 'pointer',
+  background: 'var(--card)', color: 'var(--foreground)', fontSize: 13, cursor: 'pointer',
 }
 const btnDanger: React.CSSProperties = {
   padding: '6px 14px', border: 'none', borderRadius: 4,
@@ -710,7 +710,7 @@ const modalBackdrop: React.CSSProperties = {
   zIndex: 1000,
 }
 const modal: React.CSSProperties = {
-  background: 'var(--surface)', borderRadius: 8, width: '90vw', maxWidth: 1100,
+  background: 'var(--card)', borderRadius: 8, width: '90vw', maxWidth: 1100,
   maxHeight: '90vh', overflow: 'auto',
   display: 'flex', flexDirection: 'column',
 }
@@ -720,7 +720,7 @@ const modalHeader: React.CSSProperties = {
 }
 const totalsBox: React.CSSProperties = {
   display: 'flex', gap: 16, padding: 12,
-  background: 'var(--bg-soft)', borderRadius: 6, border: '1px solid var(--border)',
+  background: 'var(--muted)', borderRadius: 6, border: '1px solid var(--border)',
 }
 const totalCell: React.CSSProperties = {
   textAlign: 'center', minWidth: 80,

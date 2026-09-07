@@ -47,7 +47,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: 2, fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+            <div style={{ display: 'flex', gap: 2, fontSize: 9, color: 'var(--muted-foreground)', marginTop: 2 }}>
               {data.buckets.map(b => <div key={b.hour} style={{ flex: 1, textAlign: 'center' }}>{b.hour}</div>)}
             </div>
           </div>

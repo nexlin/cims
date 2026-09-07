@@ -36,13 +36,13 @@ function RecentEventsWidget() {
   return (
     <div className="panel">
       {/* 헤더 — 총 건수(24h) + 이력 이동 */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-soft)',
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--muted)',
                     display: 'flex', alignItems: 'center', gap: 10 }}>
         <span style={{ fontWeight: 600, fontSize: 14 }}>최근 이벤트 ({recentEvents.length})</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>최근 24시간 · 정상 동작 통지</span>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>최근 24시간 · 정상 동작 통지</span>
         {error && (
           <span title="조회 실패 — 표시가 최신이 아닐 수 있음"
-                style={{ fontSize: 12, color: 'var(--danger)', fontWeight: 600 }}>⚠ 조회 실패</span>
+                style={{ fontSize: 12, color: 'var(--destructive)', fontWeight: 600 }}>⚠ 조회 실패</span>
         )}
         <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/history') }}
            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500 }}>이력 →</a>
@@ -62,11 +62,11 @@ function RecentEventsWidget() {
                       display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
                       padding: '6px 12px', borderRadius: 'var(--radius)',
                       border: `1px solid ${sel ? 'var(--primary)' : 'var(--border)'}`,
-                      background: sel ? 'var(--primary-soft)' : 'var(--surface)',
+                      background: sel ? 'var(--cims-brand-soft)' : 'var(--card)',
                       opacity: n === 0 && !sel ? 0.5 : 1,
                     }}>
               <span style={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums', minWidth: 14 }}>{n}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '.3px' }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-foreground)', letterSpacing: '.3px' }}>
                 {label} <span style={{ opacity: .7 }}>{KIND_ABBR[kind] || ''}</span>
               </span>
             </button>
@@ -104,7 +104,7 @@ function RecentEventsWidget() {
                   <tr key={`${e.code || e.type}-${e.ts}-${i}`}>
                     <td><span className={`badge ${KIND_BADGE[kind] || 'badge--gray'}`}>{KIND_LABEL[kind] || kind}</span></td>
                     <td><code style={{ fontSize: 11 }}>{e.code || e.type}</code></td>
-                    <td><code style={{ fontSize: 11, color: 'var(--text-muted)' }}>{e.source?.mo_instance || '-'}</code></td>
+                    <td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{e.source?.mo_instance || '-'}</code></td>
                     <td>{e.message}</td>
                     <td className="ts">{e.ts}</td>
                   </tr>

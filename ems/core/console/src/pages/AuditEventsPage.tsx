@@ -117,11 +117,11 @@ export function AuditEventsSection() {
       <div className="panel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '10px 16px', fontWeight: 600, fontSize: 14, borderBottom: '1px solid var(--border)', flex: 'none' }}>
           감사 이력 ({filtered.length}건)
-          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
+          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--muted-foreground)' }}>
             합법감청(E-AUD-016) 시작·종료·거절 — 열람은 운영 관리자 이상
           </span>
           {events.length >= FETCH_LIMIT && (
-            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
+            <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
               레코드 {FETCH_LIMIT}건 상한 도달 — 기간을 좁혀야 전체가 보입니다
             </span>
           )}
@@ -157,7 +157,7 @@ export function AuditEventsSection() {
                   return (
                     <tr key={`${ev.ts}-${pageStart + i}`}>
                       <td className="ts">{fmtTime(ev.ts)}</td>
-                      <td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--text-muted)' }}>{ev.code || ''}</div></td>
+                      <td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted-foreground)' }}>{ev.code || ''}</div></td>
                       <td>{p.phase
                         ? <span className={`badge ${PHASE_BADGE[p.phase] || 'badge--gray'}`}>{PHASE_LABEL[p.phase] || p.phase}</span>
                         : '-'}</td>

@@ -46,8 +46,8 @@ function Header({ title, count, action, loading, error }: {
       <span style={{ fontWeight: 600, fontSize: 14 }}>
         {title}{count != null && ` (${count})`}
       </span>
-      {loading && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· 갱신 중…</span>}
-      {error && <span style={{ fontSize: 11, color: 'var(--danger)' }}>· 조회 실패</span>}
+      {loading && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>· 갱신 중…</span>}
+      {error && <span style={{ fontSize: 11, color: 'var(--destructive)' }}>· 조회 실패</span>}
       {action && <span style={{ marginLeft: 'auto' }}>{action}</span>}
     </div>
   )
@@ -69,7 +69,7 @@ function RowActions({ onEdit, onRemove }: { onEdit: () => void; onRemove: () => 
   return (
     <td style={{ display: 'flex', gap: 4 }}>
       <button className="btn btn--sm btn--outline" onClick={onEdit}>수정</button>
-      <button className="btn btn--sm btn--outline" style={{ color: 'var(--danger)' }}
+      <button className="btn btn--sm btn--outline" style={{ color: 'var(--destructive)' }}
               onClick={onRemove}>삭제</button>
     </td>
   )
@@ -83,7 +83,7 @@ function ServicePicker() {
   const [adding, setAdding] = useState(false)
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>서비스</span>
+      <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>서비스</span>
       <select className="form-input" style={{ width: 200, fontSize: 13 }}
               value={svc?.id ?? ''} onChange={e => setSvcId(e.target.value)}>
         {list.length === 0 && <option value="">{loading ? '로딩 중…' : '(등록된 서비스 없음)'}</option>}
@@ -114,15 +114,15 @@ function ServiceHeaderBlock() {
   return (
     <div className="panel" style={{ padding: 0, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        {!svc ? <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+        {!svc ? <span style={{ color: 'var(--muted-foreground)', fontSize: 13 }}>
           {loading ? '로딩 중…' : error ? '조회 실패' : '서비스를 선택하세요'}</span> : (
           <>
             <span style={{ fontWeight: 600 }}>{svc.label || svc.id}</span>
-            <code style={{ fontSize: 11, color: 'var(--text-muted)' }}>{svc.id}</code>
+            <code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{svc.id}</code>
             <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               <button className="btn btn--sm btn--outline" title="고급 — 전체 JSON 직접 편집"
                       onClick={() => setJson(JSON.stringify(svc, null, 2))}>JSON</button>
-              <button className="btn btn--sm btn--outline" style={{ color: 'var(--danger)' }}
+              <button className="btn btn--sm btn--outline" style={{ color: 'var(--destructive)' }}
                       onClick={remove}>삭제</button>
             </span>
           </>
@@ -155,13 +155,13 @@ function JsonEditor({ initial, title, onClose, onSaved }: {
   }
   return (
     <Modal title={title} onClose={onClose} width={640}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 8 }}>
         modules[].name/port/proto/controllable · alert_rules[].type/severity/check/threshold · data_sources[].id/label/shapes/endpoint/map
       </div>
       <textarea value={text} onChange={e => setText(e.target.value)} spellCheck={false}
         style={{ width: '100%', height: 360, fontFamily: 'Consolas, monospace', fontSize: 12,
                  padding: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                 background: 'var(--bg-soft)', color: 'var(--text)', resize: 'vertical' }} />
+                 background: 'var(--muted)', color: 'var(--foreground)', resize: 'vertical' }} />
       <div className="modal-footer">
         <button className="btn btn--outline" onClick={onClose} disabled={saving}>취소</button>
         <button className="btn btn--primary" onClick={save} disabled={saving}>저장</button>

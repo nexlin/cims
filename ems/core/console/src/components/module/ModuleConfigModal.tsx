@@ -277,7 +277,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
             <div style={{
               flex: '0 0 auto',
               display: 'flex', gap: 0, borderBottom: '1px solid var(--border)',
-              padding: '0 20px', flexWrap: 'wrap', background: 'var(--bg-soft)',
+              padding: '0 20px', flexWrap: 'wrap', background: 'var(--muted)',
             }}>
               <TabBtn active={tab === 'scalar'} onClick={() => setTab('scalar')}>
                 {asMember ? '서버 개별 설정' : '설정'} ({visibleSections.reduce((n, s) => n + s.fields.length, 0)})
@@ -293,13 +293,13 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
             <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
               {tab === 'scalar' ? (
                 <>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12,
+                  <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12,
                                 display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span>🔁 재기동 필요 · ⚡ 즉시 적용</span>
                     {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
                   </div>
                   {asMember && ha && (
-                    <div style={{ padding: 10, background: 'var(--primary-soft)', border: '1px solid var(--border)',
+                    <div style={{ padding: 10, background: 'var(--cims-brand-soft)', border: '1px solid var(--border)',
                                   borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
                       이 화면은 <b>이 서버 고유 설정</b>(bind IP·노드 식별자 등)만 다룹니다.
                       그룹 공통 설정 {svcFieldCount}개 필드와 공통 컬렉션은
@@ -328,14 +328,14 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                   ))}
                   {isPending ? (
                     <div style={{
-                      marginTop: 12, padding: 10, background: 'var(--primary-soft)',
+                      marginTop: 12, padding: 10, background: 'var(--cims-brand-soft)',
                       border: '1px solid var(--border)', borderRadius: 4, fontSize: 12,
                     }}>
                       ℹ 아직 <b>설치 전</b>입니다 — 저장한 값은 [패키지 설치] 탭에서 <b>설치</b> 실행 시 반영됩니다.
                     </div>
                   ) : restartRequired && (
                     <div style={{
-                      marginTop: 12, padding: 10, background: 'var(--warn-soft)',
+                      marginTop: 12, padding: 10, background: 'var(--cims-warning-soft)',
                       border: '1px solid var(--border)', borderRadius: 4, fontSize: 12,
                     }}>
                       ⚠ 변경된 항목 중 <b>재기동이 필요한</b> 항목이 있습니다. 저장 후
@@ -400,7 +400,7 @@ function TabBtn({ active, children, onClick }: {
     <button onClick={onClick}
       style={{
         padding: '8px 16px', border: 'none',
-        background: active ? 'var(--surface)' : 'transparent',
+        background: active ? 'var(--card)' : 'transparent',
         borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
         fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13,
       }}>
@@ -437,23 +437,23 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
-      background: 'var(--bg-soft)',
+      background: 'var(--muted)',
     }}>
       <div onClick={() => setCollapsed(c => !c)}
         style={{
           padding: '8px 14px', cursor: 'pointer', userSelect: 'none',
           display: 'flex', alignItems: 'center', gap: 8,
-          background: 'var(--primary-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
+          background: 'var(--cims-brand-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
           borderRadius: '6px 6px 0 0',
         }}>
         <span style={{ color: 'var(--primary)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b style={{ color: 'var(--primary)' }}>변경 사항 ({changed.size})</b>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
           🔁 재기동 {restartKeys.length} · ⚡ 즉시 {hotKeys.length}
         </span>
         <button onClick={(e) => { e.stopPropagation(); onResetAll() }}
                 style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px',
-                         background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
+                         background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
           전체 초기화
         </button>
       </div>
@@ -461,7 +461,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
         <div style={{ padding: 8, maxHeight: 240, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ color: 'var(--text-muted)' }}>
+              <tr style={{ color: 'var(--muted-foreground)' }}>
                 <th style={{ textAlign: 'left', padding: '4px 6px', width: 220 }}>필드</th>
                 <th style={{ textAlign: 'left', padding: '4px 6px' }}>옛 값</th>
                 <th style={{ width: 30, textAlign: 'center' }}>→</th>
@@ -477,11 +477,11 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                   <tr key={k} style={{ borderTop: '1px solid var(--border)' }}>
                     <td style={{ padding: '4px 6px' }}>
                       <span title={k}>{f?.label ?? k}</span>
-                      <span style={{ marginLeft: 4, fontSize: 10, color: restart ? 'var(--danger)' : 'var(--success)' }}>
+                      <span style={{ marginLeft: 4, fontSize: 10, color: restart ? 'var(--destructive)' : 'var(--cims-success)' }}>
                         {restart ? '🔁' : '⚡'}
                       </span>
                     </td>
-                    <td style={{ padding: '4px 6px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                    <td style={{ padding: '4px 6px', color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>
                       {display(initial[k])}
                     </td>
                     <td style={{ textAlign: 'center', color: 'var(--primary)' }}>→</td>
@@ -491,7 +491,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                     <td style={{ textAlign: 'center' }}>
                       <button onClick={() => onReset(k)}
                               title="이 필드만 초기화"
-                              style={{ fontSize: 11, padding: '1px 6px', background: 'var(--surface)',
+                              style={{ fontSize: 11, padding: '1px 6px', background: 'var(--card)',
                                        border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
                         ↺
                       </button>
@@ -557,17 +557,17 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   return (
     <div style={{
       border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
-      background: 'var(--surface)',
-      ...(section.hidden ? { borderStyle: 'dashed', background: 'var(--warn-soft)' } : {}),
+      background: 'var(--card)',
+      ...(section.hidden ? { borderStyle: 'dashed', background: 'var(--cims-warning-soft)' } : {}),
     }}>
       <div onClick={() => setCollapsed(c => !c)}
         style={{
           padding: '10px 14px', cursor: 'pointer', userSelect: 'none',
           display: 'flex', alignItems: 'baseline', gap: 8,
           borderBottom: collapsed ? 'none' : '1px solid var(--border)',
-          background: section.hidden ? 'var(--warn-soft)' : 'var(--bg-soft)',
+          background: section.hidden ? 'var(--cims-warning-soft)' : 'var(--muted)',
         }}>
-        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
+        <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
         <b>{section.title}</b>
         {section.hidden && (
           <span style={{
@@ -576,7 +576,7 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
           }}>인프라</span>
         )}
         {section.description && (
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>— {section.description}</span>
+          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>— {section.description}</span>
         )}
       </div>
       {!collapsed && (
@@ -585,13 +585,13 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
             <div key={b.key} style={{ marginBottom: idx === nonEmptyBuckets.length - 1 ? 0 : 14 }}>
               {b.title && (
                 <div style={{
-                  fontSize: 12, fontWeight: 600, color: 'var(--text-muted)',
+                  fontSize: 12, fontWeight: 600, color: 'var(--muted-foreground)',
                   borderBottom: '1px solid var(--border)', paddingBottom: 4, marginBottom: 8,
                   display: 'flex', alignItems: 'baseline', gap: 6,
                 }}>
                   <span>{b.title}</span>
                   {b.description && (
-                    <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>— {b.description}</span>
+                    <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--muted-foreground)' }}>— {b.description}</span>
                   )}
                 </div>
               )}
@@ -661,7 +661,7 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   return (
     <div style={{
       marginTop: 12, padding: '8px 10px', borderRadius: 4, fontSize: 12, lineHeight: 1.6,
-      background: 'var(--warn-soft)', border: '1px solid var(--border)',
+      background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
     }}>
       <b>경로를 바꾸려면 이관을 쓰세요.</b> 저장은 경로만 바꾸고 <b>데이터를 옮기지
       않습니다</b> — 새 경로에 빈 store 가 생기거나, 마운트가 없으면 OAM 이 기동을
@@ -675,13 +675,13 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
             {busy ? '이관 요청 중…' : `⇢ ${mp || '(마운트 지점)'} 으로 이관`}
           </button>
           {dirty && (
-            <span style={{ color: 'var(--warning)' }}>
+            <span style={{ color: 'var(--cims-warning)' }}>
               편집한 값이 있습니다 — 저장 대신 이 버튼을 쓰세요.
             </span>
           )}
         </div>
       ) : (
-        <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
+        <div style={{ marginTop: 6, color: 'var(--muted-foreground)' }}>
           이관은 HA 그룹 멤버에서만 실행할 수 있습니다 (이관 대상 노드 선정이 그룹 기준).
           단일 노드는 부트스트랩 재설치 또는 그룹 편성 후 실행하세요.
         </div>
@@ -704,8 +704,8 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
   const badgeStyle: React.CSSProperties = {
     display: 'inline-block', fontSize: 10, padding: '1px 5px',
     borderRadius: 3, marginLeft: 6, fontWeight: 500,
-    background: needsRestart ? 'var(--danger-soft)' : 'var(--success-soft)',
-    color:      needsRestart ? 'var(--danger)' : 'var(--success)',
+    background: needsRestart ? 'var(--cims-danger-soft)' : 'var(--cims-success-soft)',
+    color:      needsRestart ? 'var(--destructive)' : 'var(--cims-success)',
     border: '1px solid var(--border)',
     whiteSpace: 'nowrap',
   }
@@ -723,7 +723,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
         {src === 'injected' && !isChanged && (
           <span style={{
             display: 'inline-block', fontSize: 10, padding: '1px 5px', borderRadius: 3,
-            marginLeft: 6, fontWeight: 500, background: 'var(--primary-soft)', color: 'var(--primary)',
+            marginLeft: 6, fontWeight: 500, background: 'var(--cims-brand-soft)', color: 'var(--primary)',
             border: '1px solid var(--border)', whiteSpace: 'nowrap',
           }} title={'배포 시 OAM 이 채운 값입니다 — 이 서버 설정에 저장된 값이 아닙니다. '
                   + '노드에는 이 값이 들어갑니다. 일부 키(시크릿·관리망 대역)는 저장하더라도 '
@@ -741,7 +741,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
           {isChanged && (
             <button onClick={onReset}
                     title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}
-                    style={{ fontSize: 12, padding: '2px 8px', background: 'var(--surface)',
+                    style={{ fontSize: 12, padding: '2px 8px', background: 'var(--card)',
                              border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
                              flexShrink: 0 }}>
               ↺
@@ -749,10 +749,10 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
           )}
         </div>
         {field.help && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{field.help}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>{field.help}</div>
         )}
         {!needsRestart && field.reload_hint && (
-          <div style={{ fontSize: 11, color: 'var(--success)', marginTop: 3 }}>⚡ {field.reload_hint}</div>
+          <div style={{ fontSize: 11, color: 'var(--cims-success)', marginTop: 3 }}>⚡ {field.reload_hint}</div>
         )}
       </div>
     </>

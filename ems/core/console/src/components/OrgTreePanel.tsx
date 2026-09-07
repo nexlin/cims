@@ -94,7 +94,7 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: Or
             </div>
           )
         })}
-        {flat.length === 0 && <div style={{ padding: 12, fontSize: 12, color: 'var(--text-muted)' }}>조직 없음</div>}
+        {flat.length === 0 && <div style={{ padding: 12, fontSize: 12, color: 'var(--muted-foreground)' }}>조직 없음</div>}
       </div>
     </div>
   )

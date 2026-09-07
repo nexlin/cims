@@ -141,7 +141,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
         )}
       </div>
 
-      <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+      <div style={{ marginTop: 10, fontSize: 12, color: 'var(--muted-foreground)' }}>
         ℹ 각 파일 내부의 <code>meta.json</code> 으로 이름/버전/설명/빌드정보 자동 추출.
         동일 (모듈명, 버전) 이 이미 있으면 자동으로 덮어씁니다.
       </div>
@@ -208,7 +208,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       <td>
         {(row.state === 'uploading' || row.state === 'done') && (
           <>
-            <div style={{ width: 240, height: 8, background: 'var(--bg-soft)', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{ width: 240, height: 8, background: 'var(--muted)', borderRadius: 4, overflow: 'hidden' }}>
               <div style={bar(row.state === 'done' ? '#2ecc71' : '#3498db')} />
             </div>
             <span className="text-muted" style={{ fontSize: 11 }}>
@@ -228,7 +228,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
           background: sb.bg, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
         }}>{sb.label}</span>
         {row.msg && row.state === 'done' && (
-          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.msg}</div>
+          <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{row.msg}</div>
         )}
       </td>
       <td>

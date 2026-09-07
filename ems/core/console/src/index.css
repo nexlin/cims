@@ -2,26 +2,72 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* ── Design tokens — light ── */
-  --bg:          #f4f6fb;
-  --bg-soft:     #f8fafc;
-  --surface:     #ffffff;
-  --surface-2:   #eef1f7;
-  --hover:       #f2f6fe;
-  --border:      #e5e8f1;
-  --text:        #161a2b;
-  --text-muted:  #64748b;
-  --primary:     #4f46e5;
-  --primary-h:   #4338ca;
-  --primary-soft:#eef2ff;
-  --danger:      #dc2626;
-  --danger-h:    #b91c1c;
-  --success:     #16a34a;
-  --warning:     #d97706;
-  --dev-accent:  #7c3aed;
-  --warn-soft:   #fff8e1;
-  --danger-soft: #fff1f2;
-  --success-soft:#ecfdf5;
+  /* ── Design tokens — light.  정본 = Figma `01 Design style sheet` (8:2)
+     이름 체계는 shadcn 표준 + `--cims-*` 도메인 두 층이다.
+     매핑·근거: docs/design/console_design_system.md §5 ── */
+
+  /* 1) shadcn 표준 */
+  --background: #f4f6fb;
+  --foreground: #161a2b;
+  --card: #ffffff;
+  --card-foreground: #161a2b;
+  --popover: #ffffff;
+  --popover-foreground: #161a2b;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #eef1f7;
+  --secondary-foreground: #475569;
+  --muted: #f8fafc;
+  --muted-foreground: #64748b;
+  --accent: #f2f6fe;
+  --accent-foreground: #161a2b;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #e5e8f1;
+  --input: #e5e8f1;
+  --ring: #4f46e5;
+  --radius: 8px;                      /* = 0.5rem (radius/md) */
+
+  /* shadcn sidebar 블록 — hover 와 선택 배경이 --sidebar-accent 하나로 합쳐진다.
+     선택은 배경이 아니라 --sidebar-primary 텍스트로 구분한다 (shell.md). */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #51607a;
+  --sidebar-primary: #4f46e5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f5fb;
+  --sidebar-accent-foreground: #161a2b;
+  --sidebar-border: #e9ecf3;
+  --sidebar-ring: #4f46e5;
+
+  /* 2) CIMS 도메인 — shadcn 에 없는 의미색 */
+  --cims-brand-hover: #4338ca;
+  --cims-brand-soft: #eef2ff;
+  --cims-brand-on-soft: #4338ca;
+  --cims-success: #16a34a;
+  --cims-success-soft: #f0fdf4;
+  --cims-success-on-soft: #15803d;
+  --cims-warning: #d97706;
+  --cims-warning-soft: #fffbeb;
+  --cims-warning-on-soft: #b45309;
+  --cims-danger-hover: #b91c1c;
+  --cims-danger-soft: #fef2f2;
+  --cims-danger-on-soft: #b91c1c;
+  --cims-info: #2563eb;
+  --cims-info-soft: #eff6ff;
+  --cims-info-on-soft: #1d4ed8;
+  --cims-neutral: #64748b;
+  --cims-neutral-soft: #eef1f7;
+  --cims-neutral-on-soft: #475569;
+  --cims-surface-raised: #eef1f7;
+  --cims-surface-header: #ffffff;
+  --cims-border-strong: #cbd5e1;      /* 표 외곽선 */
+  --cims-text-header: #1e293b;
+  --cims-text-disabled: #94a3b8;      /* 비활성 라벨·아이콘 (불투명도 대신 이 토큰) */
+  --cims-focus-ring: 0 0 0 3px rgb(79 70 229 / 0.35);
+  --cims-elevation-sm: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.07);
+  --cims-elevation-lg: 0 10px 30px rgb(16 24 40 / 0.13);
+
+  /* 3) 시안이 다루지 않아 그대로 두는 것 (§5.1-C) */
 
   /* 차트 계열 색 — 한 차트에 여러 계열을 쌓을 때 쓴다. 서로 **색상(hue)이 뚜렷이 다른** 5색이라
      명도만 다른 쌍보다 구분이 쉽다. 순서는 소스의 계열 선언 순서를 따른다.
@@ -35,78 +81,94 @@
   --chart-5:     #ec4899;
   --chart-muted: #94a3b8;
 
-  --radius:      8px;
-  --radius-lg:   14px;
-  --shadow:      0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.07);
-  --shadow-lg:   0 10px 30px rgba(16,24,40,.13);
-
-  /* 셸(헤더/사이드바) — 테마 적응형. 라이트 = 깨끗한 화이트 + 인디고 강조 */
-  --header-bg:        #ffffff;
-  --header-fg:        #1e2433;
-  --header-muted:     #64748b;
-  --sidebar-bg:       #ffffff;
-  --sidebar-fg:       #51607a;
-  --sidebar-fg-active: var(--primary);
-  --sidebar-active-bg: var(--primary-soft);
-  --sidebar-hover:    #f1f5fb;
-  --shell-border:     #e9ecf3;
+  --dev-accent:  #7c3aed;             /* 개발자 모드 — 시안에 개념 없음 */
+  --radius-lg:   14px;                /* Figma radius/lg (globals.css 누락분, §5.2) */
 
   color-scheme: light;
   font-family: 'Pretendard Variable', 'Pretendard', 'Inter', -apple-system,
     BlinkMacSystemFont, 'Segoe UI', system-ui, 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   font-size: 14px;
   letter-spacing: -0.01em;
-  color: var(--text);
+  color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 :root[data-theme="dark"] {
-  --bg:          #0b0f17;
-  --bg-soft:     #111827;
-  --surface:     #151c2b;
-  --surface-2:   #1d2636;
-  --hover:       #1b2435;
-  --border:      #2a3346;
-  --text:        #e6e9f1;
-  --text-muted:  #93a1b8;
-  --primary:     #6366f1;
-  --primary-h:   #818cf8;
-  --primary-soft:rgba(99,102,241,.16);
-  --danger:      #f04848;
-  --danger-h:    #f87171;
-  --success:     #22c55e;
-  --warning:     #fbbf24;
-  --dev-accent:  #a78bfa;
-  --warn-soft:   rgba(234,179,8,.13);
-  --danger-soft: rgba(240,68,68,.14);
-  --success-soft:rgba(34,197,94,.14);
+  /* 정본 = Figma `01 Design style sheet · Dark` (13:2) */
+  --background: #0b0f17;
+  --foreground: #e6e9f1;
+  --card: #151c2b;
+  --card-foreground: #e6e9f1;
+  --popover: #151c2b;
+  --popover-foreground: #e6e9f1;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #1d2636;
+  --secondary-foreground: #93a1b8;
+  --muted: #111827;
+  --muted-foreground: #93a1b8;
+  --accent: #1b2435;
+  --accent-foreground: #e6e9f1;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #2a3346;
+  --input: #2a3346;
+  --ring: #6366f1;
 
-  /* 차트 계열 색(다크) — 같은 색상 순서, 어두운 배경에 뜨도록 밝기를 올린 값 */
+  --sidebar: #0d1422;
+  --sidebar-foreground: #93a1b8;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1b2435;
+  --sidebar-accent-foreground: #e6e9f1;
+  --sidebar-border: #222b3b;
+  --sidebar-ring: #6366f1;
+
+  --cims-brand-hover: #818cf8;
+  --cims-brand-soft: #22284b;
+  --cims-brand-on-soft: #a5b4fc;
+  --cims-success: #22c55e;
+  --cims-success-soft: #173733;
+  --cims-success-on-soft: #4ade80;
+  --cims-warning: #f59e0b;
+  --cims-warning-soft: #393126;
+  --cims-warning-on-soft: #fcd34d;
+  --cims-danger-hover: #f87171;
+  --cims-danger-soft: #382222;
+  --cims-danger-on-soft: #fca5a5;
+  --cims-info: #3b82f6;
+  --cims-info-soft: #1b2c4c;
+  --cims-info-on-soft: #93c5fd;
+  --cims-neutral: #93a1b8;
+  --cims-neutral-soft: #1d2636;
+  --cims-neutral-on-soft: #93a1b8;
+  --cims-surface-raised: #1d2636;
+  --cims-surface-header: #0d1422;
+  --cims-border-strong: #334155;
+  --cims-text-header: #e6e9f1;
+  --cims-text-disabled: #6b7794;
+  --cims-focus-ring: 0 0 0 3px rgb(99 102 241 / 0.35);
+
+  /* elevation — 시안 다크 프레임은 라이트 값을 그대로 쓴다(오버라이드 없음).
+     어두운 배경에서 rgb(16 24 40 / 0.04) 는 보이지 않아 현행 다크 그림자를 유지한다. */
+  --cims-elevation-sm: 0 1px 2px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.4);
+  --cims-elevation-lg: 0 10px 30px rgba(0,0,0,.55);
+
+  /* 시안이 다루지 않아 그대로 두는 것 (§5.1-C) */
   --chart-1:     #38bdf8;
   --chart-2:     #fbbf24;
   --chart-3:     #a78bfa;
   --chart-4:     #2dd4bf;
   --chart-5:     #f472b6;
   --chart-muted: #94a3b8;
+  --dev-accent:  #a78bfa;
 
-  --shadow:      0 1px 2px rgba(0,0,0,.35), 0 1px 3px rgba(0,0,0,.4);
-  --shadow-lg:   0 10px 30px rgba(0,0,0,.55);
-
-  --header-bg:        #0d1422;
-  --header-fg:        #e6e9f1;
-  --header-muted:     #93a1b8;
-  --sidebar-bg:       #0d1422;
-  --sidebar-fg:       #94a3b8;
-  --sidebar-fg-active: #a5b4fc;
-  --sidebar-active-bg: rgba(99,102,241,.18);
-  --sidebar-hover:    rgba(255,255,255,.06);
-  --shell-border:     #222b3b;
   color-scheme: dark;
 }
 
 body {
-  background: var(--bg);
+  background: var(--background);
   min-height: 100vh;
   transition: background-color .2s ease, color .2s ease;
 }
@@ -124,7 +186,7 @@ body {
   background: var(--border); border-radius: 999px;
   border: 2px solid transparent; background-clip: padding-box;
 }
-*::-webkit-scrollbar-thumb:hover { background: var(--text-muted); background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--muted-foreground); background-clip: padding-box; }
 
 /* 스크롤바가 레이아웃을 밀면 안 되는 자리 — 바가 생기며 박스가 커지는 것을 막는다.
    (예: 발언권 타임라인 트랙. 위치·이동은 자체 위치 막대가 맡는다) */
@@ -135,22 +197,22 @@ body {
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 /* dark 모드 잔여 보정 (하드코딩 light 패치) */
-:root[data-theme="dark"] .form-input:disabled { background: var(--surface-2); }
-:root[data-theme="dark"] .badge--gray { background: var(--surface-2); color: var(--text-muted); }
-/* 나머지 badge 변형도 다크 토큰으로 — 라이트용 파스텔 배경(var(--primary-soft) 등)이 그대로 남으면
+:root[data-theme="dark"] .form-input:disabled { background: var(--secondary); }
+:root[data-theme="dark"] .badge--gray { background: var(--secondary); color: var(--muted-foreground); }
+/* 나머지 badge 변형도 다크 토큰으로 — 라이트용 파스텔 배경(var(--cims-brand-soft) 등)이 그대로 남으면
    어두운 화면에 흰 알약이 떠 보인다. soft 배경은 반투명이라 어느 표면 위에서도 겉돌지 않는다. */
-:root[data-theme="dark"] .badge--blue   { background: var(--primary-soft); color: #a5b4fc; }
-:root[data-theme="dark"] .badge--green  { background: var(--success-soft); color: #6ee7a8; }
-:root[data-theme="dark"] .badge--yellow { background: var(--warn-soft);    color: #fcd34d; }
-:root[data-theme="dark"] .badge--red    { background: var(--danger-soft);  color: #fca5a5; }
+:root[data-theme="dark"] .badge--blue   { background: var(--cims-brand-soft); color: #a5b4fc; }
+:root[data-theme="dark"] .badge--green  { background: var(--cims-success-soft); color: #6ee7a8; }
+:root[data-theme="dark"] .badge--yellow { background: var(--cims-warning-soft);    color: #fcd34d; }
+:root[data-theme="dark"] .badge--red    { background: var(--cims-danger-soft);  color: #fca5a5; }
 :root[data-theme="dark"] .docs-content code,
-:root[data-theme="dark"] .docs-content tr:first-child td { background: var(--surface-2); }
+:root[data-theme="dark"] .docs-content tr:first-child td { background: var(--secondary); }
 
 /* ── App shell ─────────────────────────────────────────────── */
 .app { display: flex; flex-direction: column; min-height: 100vh; }
 
 .app-header {
-  background: var(--surface);
+  background: var(--card);
   border-bottom: 1px solid var(--border);
   padding: 0 24px;
   display: flex;
@@ -160,7 +222,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 10;
-  box-shadow: var(--shadow);
+  box-shadow: var(--cims-elevation-sm);
 }
 
 .app-logo { display: flex; align-items: center; gap: 8px; }
@@ -175,12 +237,12 @@ body {
   border-radius: var(--radius);
   cursor: pointer;
   font-size: 14px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   font-weight: 500;
   transition: background .15s, color .15s;
 }
-.tab-btn:hover { background: var(--bg); color: var(--text); }
-.tab-btn--active { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.tab-btn:hover { background: var(--background); color: var(--foreground); }
+.tab-btn--active { background: var(--cims-brand-soft); color: var(--primary); font-weight: 600; }
 
 .app-main { flex: 1; padding: var(--main-pad, 24px); }
 
@@ -195,10 +257,10 @@ body {
 }
 
 .panel {
-  background: var(--surface);
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--cims-elevation-sm);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -263,10 +325,10 @@ body {
 .panel-header {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-soft);
+  background: var(--muted);
 }
 .panel-title { font-weight: 600; }
-.panel-title small { font-weight: 400; color: var(--text-muted); font-size: 12px; }
+.panel-title small { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
 
 /* ── Toolbar ───────────────────────────────────────────────── */
 .toolbar {
@@ -275,7 +337,7 @@ body {
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-soft);
+  background: var(--muted);
 }
 
 .search-input {
@@ -285,9 +347,9 @@ body {
   border-radius: var(--radius);
   font-size: 13px;
   outline: none;
-  background: var(--surface);
+  background: var(--card);
   /* 글자색도 명시 — 비워 두면 브라우저 기본에 맡겨져 테마 전환 시 배경과 어긋난다(.btn 과 같은 함정). */
-  color: var(--text);
+  color: var(--foreground);
 }
 .search-input:focus { border-color: var(--primary); }
 
@@ -304,18 +366,18 @@ body {
   /* 배경·글자를 반드시 명시한다 — 비워 두면 **브라우저 기본 버튼 색**이 나오고, 다크에서는
      color-scheme:dark 탓에 회색 버튼이 되어 얹은 글자(--danger 등)와 대비가 무너진다.
      변형(--primary/--danger/--outline/--ghost)은 아래에서 각자 덮어쓴다. */
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--secondary);
+  color: var(--foreground);
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn--primary  { background: var(--primary);  color: #fff; }
-.btn--primary:hover:not(:disabled) { background: var(--primary-h); }
-.btn--danger   { background: var(--danger);   color: #fff; }
-.btn--danger:hover:not(:disabled)  { background: var(--danger-h); }
-.btn--outline  { border-color: var(--border); background: var(--surface); }
-.btn--outline:hover { background: var(--bg); }
+.btn--primary:hover:not(:disabled) { background: var(--cims-brand-hover); }
+.btn--danger   { background: var(--destructive);   color: #fff; }
+.btn--danger:hover:not(:disabled)  { background: var(--cims-danger-hover); }
+.btn--outline  { border-color: var(--border); background: var(--card); }
+.btn--outline:hover { background: var(--background); }
 .btn--ghost    { background: transparent; }
-.btn--ghost:hover  { background: var(--bg); }
+.btn--ghost:hover  { background: var(--background); }
 .btn--sm { padding: 3px 10px; font-size: 12px; }
 
 .link-btn {
@@ -342,9 +404,9 @@ body {
   font-size: 13px;
 }
 .data-table th {
-  background: var(--bg-soft);
+  background: var(--muted);
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .3px;
@@ -352,10 +414,10 @@ body {
   top: 0;
   z-index: 2;
 }
-.data-table tbody tr:hover { background: var(--hover); }
-.data-table tbody tr.row--selected { background: var(--primary-soft); }
-.empty-cell { text-align: center; color: var(--text-muted); padding: 32px !important; }
-.ts { color: var(--text-muted); font-size: 12px; }
+.data-table tbody tr:hover { background: var(--accent); }
+.data-table tbody tr.row--selected { background: var(--cims-brand-soft); }
+.empty-cell { text-align: center; color: var(--muted-foreground); padding: 32px !important; }
+.ts { color: var(--muted-foreground); font-size: 12px; }
 
 .actions { display: flex; gap: 6px; }
 
@@ -367,11 +429,11 @@ body {
   font-size: 11px;
   font-weight: 600;
 }
-.badge--red  { background: var(--danger-soft); color: var(--danger-h); }
-.badge--gray { background: var(--surface-2); color: var(--text-muted); }
-.badge--blue  { background: var(--primary-soft); color: var(--primary); }
-.badge--green { background: var(--success-soft); color: var(--success); }
-.badge--yellow { background: var(--warn-soft); color: var(--warning); }
+.badge--red  { background: var(--cims-danger-soft); color: var(--cims-danger-hover); }
+.badge--gray { background: var(--secondary); color: var(--muted-foreground); }
+.badge--blue  { background: var(--cims-brand-soft); color: var(--primary); }
+.badge--green { background: var(--cims-success-soft); color: var(--cims-success); }
+.badge--yellow { background: var(--cims-warning-soft); color: var(--cims-warning); }
 
 /* ── Detail tab bar ────────────────────────────────────────── */
 .tab-bar {
@@ -388,7 +450,7 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .4px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   margin-bottom: 8px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
@@ -398,7 +460,7 @@ body {
 /* 빈 상태 안내("활성 알람 없음" 등) — 남은 영역 전체의 중앙에 둔다.
    부모가 flex 컬럼이면 남은 공간을 채우고 그 안에서 중앙, 아니면 예전처럼 자연 높이. */
 .empty {
-  padding: 32px; text-align: center; color: var(--text-muted);
+  padding: 32px; text-align: center; color: var(--muted-foreground);
   flex: 1 1 auto; min-height: 0;
   display: flex; align-items: center; justify-content: center;
 }
@@ -410,7 +472,7 @@ body {
   gap: 8px;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-  background: var(--bg-soft);
+  background: var(--muted);
 }
 
 /* ── Forms ─────────────────────────────────────────────────── */
@@ -420,7 +482,7 @@ body {
   gap: 10px 16px;
   align-items: center;
 }
-.form-grid label { font-size: 13px; color: var(--text-muted); font-weight: 500; }
+.form-grid label { font-size: 13px; color: var(--muted-foreground); font-weight: 500; }
 
 .form-input {
   width: 100%;
@@ -429,11 +491,11 @@ body {
   border-radius: var(--radius);
   font-size: 13px;
   outline: none;
-  background: var(--surface);
+  background: var(--card);
 }
 .form-input:focus { border-color: var(--primary); }
 .form-input--sm { width: 90px; flex-shrink: 0; }
-.form-input:disabled { background: var(--surface-2); color: var(--text-muted); }
+.form-input:disabled { background: var(--secondary); color: var(--muted-foreground); }
 
 /* toggle */
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
@@ -457,7 +519,7 @@ body {
 }
 .toggle input:checked ~ .toggle-track { background: var(--primary); }
 .toggle input:checked ~ .toggle-track::after { transform: translateX(18px); }
-.toggle-label { font-size: 13px; color: var(--text-muted); }
+.toggle-label { font-size: 13px; color: var(--muted-foreground); }
 
 /* ── Modal ─────────────────────────────────────────────────── */
 .modal-overlay {
@@ -467,7 +529,7 @@ body {
   z-index: 100;
 }
 .modal-box {
-  background: var(--surface);
+  background: var(--card);
   border-radius: 10px;
   width: 480px;
   max-width: calc(100vw - 40px);
@@ -488,10 +550,10 @@ body {
 .modal-title { font-weight: 600; font-size: 15px; }
 .modal-close {
   background: none; border: none; cursor: pointer;
-  color: var(--text-muted); font-size: 18px; line-height: 1;
+  color: var(--muted-foreground); font-size: 18px; line-height: 1;
   padding: 2px 6px; border-radius: 4px;
 }
-.modal-close:hover { background: var(--bg); }
+.modal-close:hover { background: var(--background); }
 .modal-body { padding: 20px; flex: 1; }
 .modal-footer {
   display: flex;
@@ -508,14 +570,14 @@ body {
   right:  0;
   bottom: 0;
   z-index: 100;
-  background: var(--bg);
+  background: var(--background);
   display: flex;
   flex-direction: column;
   box-shadow: 0 0 0 1px var(--border);
 }
 .modal-fullscreen > .modal-header {
   flex: 0 0 auto;
-  background: var(--surface);
+  background: var(--card);
 }
 .modal-fullscreen > .modal-body-area {
   flex: 1;
@@ -526,7 +588,7 @@ body {
   padding: 12px 20px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--card);
 }
 
 /* ── Detail list ───────────────────────────────────────────── */
@@ -535,7 +597,7 @@ body {
   grid-template-columns: 90px 1fr;
   gap: 8px 16px;
 }
-.detail-list dt { font-weight: 600; color: var(--text-muted); font-size: 12px; }
+.detail-list dt { font-weight: 600; color: var(--muted-foreground); font-size: 12px; }
 .detail-list dd { font-size: 13px; word-break: break-all; }
 
 .confirm-text { line-height: 1.7; }
@@ -559,14 +621,14 @@ body {
 }
 
 .sub-chip--call {
-  background: var(--primary-soft);
+  background: var(--cims-brand-soft);
   border-color: var(--border);
   color: var(--primary);
 }
 .sub-chip--ptt {
-  background: var(--success-soft);
+  background: var(--cims-success-soft);
   border-color: var(--border);
-  color: var(--success);
+  color: var(--cims-success);
 }
 
 .sub-chip-label {
@@ -604,12 +666,12 @@ body {
   align-items: center;
   justify-content: center;
   font-size: 13px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   line-height: 1;
   padding: 0;
   flex-shrink: 0;
 }
-.sub-chip-add:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.sub-chip-add:hover { border-color: var(--primary); color: var(--primary); background: var(--cims-brand-soft); }
 
 /* ── Toast ─────────────────────────────────────────────────── */
 .toast-stack {
@@ -630,10 +692,10 @@ body {
   animation: slide-in .2s ease;
 }
 .toast--ok  { background: #166534; color: #fff; }
-.toast--err { background: var(--danger); color: #fff; }
+.toast--err { background: var(--destructive); color: #fff; }
 /* 알람 전이 토스트 — critical/major open·승격만, 수동 닫기 (alarm_pipeline.md §8.2) */
 .toast--alarm {
-  background: var(--danger);
+  background: var(--destructive);
   color: #fff;
   display: flex;
   align-items: center;
@@ -658,13 +720,13 @@ body {
   gap: 6px;
   padding: 3px 10px;
   border-radius: 12px;
-  border: 1px solid var(--shell-border);
+  border: 1px solid var(--sidebar-border);
   background: transparent;
-  color: var(--header-fg);
+  color: var(--cims-text-header);
   font-size: 12px;
   cursor: pointer;
 }
-.alarm-indicator:hover { background: var(--sidebar-hover); }
+.alarm-indicator:hover { background: var(--sidebar-accent); }
 .alarm-indicator .dot {
   width: 8px;
   height: 8px;
@@ -678,9 +740,9 @@ body {
   bottom: 0;
   width: 380px;
   max-width: 90vw;
-  background: var(--surface);
+  background: var(--card);
   border-left: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--cims-elevation-lg);
   z-index: 150;
   display: flex;
   flex-direction: column;
@@ -702,15 +764,15 @@ body {
   display: flex; align-items: center; gap: 8px;
   margin-left: auto;
 }
-.app-user-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.app-user-name { font-size: 13px; font-weight: 600; color: var(--foreground); }
 
 /* ── Auth wrap ─────────────────────────────────────────────── */
 .auth-wrap {
   display: flex; align-items: center; justify-content: center;
-  min-height: 100vh; background: var(--bg);
+  min-height: 100vh; background: var(--background);
 }
 .auth-card {
-  background: var(--surface);
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 40px 36px;
@@ -724,21 +786,21 @@ body {
 }
 .auth-title {
   font-size: 17px; font-weight: 700; text-align: center;
-  color: var(--text);
+  color: var(--foreground);
 }
 .auth-form {
   width: 100%; display: flex; flex-direction: column; gap: 10px;
 }
 .auth-form .btn { width: 100%; padding: 10px; font-size: 14px; }
-.auth-error { color: var(--danger); font-size: 12px; text-align: center; }
-.auth-ok    { color: var(--success);        font-size: 12px; text-align: center; }
+.auth-error { color: var(--destructive); font-size: 12px; text-align: center; }
+.auth-ok    { color: var(--cims-success);        font-size: 12px; text-align: center; }
 .auth-switch {
   color: var(--primary); font-size: 12px; text-align: center;
   background: none; border: none; cursor: pointer; text-decoration: underline;
 }
 .auth-loading {
   display: flex; align-items: center; justify-content: center;
-  height: 100vh; font-size: 16px; color: var(--text-muted);
+  height: 100vh; font-size: 16px; color: var(--muted-foreground);
 }
 
 /* ── Softphone page ─────────────────────────────────────────── */
@@ -750,7 +812,7 @@ body {
 }
 
 .sp-panel {
-  background: var(--surface);
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
@@ -758,7 +820,7 @@ body {
   flex-direction: column;
   width: 320px;
   flex-shrink: 0;
-  box-shadow: var(--shadow);
+  box-shadow: var(--cims-elevation-sm);
 }
 
 /* Header */
@@ -767,7 +829,7 @@ body {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: var(--bg-soft);
+  background: var(--muted);
   border-bottom: 1px solid var(--border);
   min-height: 44px;
 }
@@ -778,14 +840,14 @@ body {
   border-radius: 999px;
   flex-shrink: 0;
 }
-.sp-badge--call { background: var(--primary-soft); color: var(--primary); }
-.sp-badge--ptt  { background: var(--success-soft); color: var(--success); }
+.sp-badge--call { background: var(--cims-brand-soft); color: var(--primary); }
+.sp-badge--ptt  { background: var(--cims-success-soft); color: var(--cims-success); }
 
 .sp-number {
   flex: 1;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -804,16 +866,16 @@ body {
 }
 .sp-state {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   white-space: nowrap;
 }
 
 /* Error */
 .sp-error {
-  color: var(--danger);
+  color: var(--destructive);
   font-size: 12px;
   padding: 8px 14px;
-  background: var(--danger-soft);
+  background: var(--cims-danger-soft);
   border-bottom: 1px solid var(--border);
 }
 
@@ -823,9 +885,9 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .4px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   padding: 8px 14px 4px;
-  background: var(--bg-soft);
+  background: var(--muted);
   border-top: 1px solid var(--border);
 }
 
@@ -843,19 +905,19 @@ body {
   border-bottom: 1px solid var(--border);
   transition: background .1s;
 }
-.sp-contact:hover { background: var(--bg-soft); }
+.sp-contact:hover { background: var(--muted); }
 .sp-contact-name { font-size: 13px; font-weight: 500; flex: 1; }
-.sp-contact-num  { font-size: 11px; color: var(--text-muted); }
+.sp-contact-num  { font-size: 11px; color: var(--muted-foreground); }
 .sp-contact-btn  {
   background: none; border: none; cursor: pointer;
   font-size: 15px; padding: 2px 4px; border-radius: 4px;
 }
-.sp-contact-btn:hover { background: var(--primary-soft); }
+.sp-contact-btn:hover { background: var(--cims-brand-soft); }
 
 .sp-empty-hint {
   padding: 16px 14px;
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   text-align: center;
 }
 
@@ -895,8 +957,8 @@ body {
 /* Incoming call */
 .sp-incoming {
   padding: 16px;
-  border-left: 4px solid var(--danger);
-  background: var(--danger-soft);
+  border-left: 4px solid var(--destructive);
+  background: var(--cims-danger-soft);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -914,7 +976,7 @@ body {
   align-items: center;
   gap: 8px;
 }
-.sp-active-state { font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+.sp-active-state { font-size: 12px; color: var(--muted-foreground); font-weight: 600; text-transform: uppercase; }
 .sp-active-peer  { font-size: 18px; font-weight: 700; }
 
 /* PTT groups */
@@ -931,9 +993,9 @@ body {
   border-bottom: 1px solid var(--border);
   transition: background .1s;
 }
-.sp-group:hover { background: var(--bg-soft); }
-.sp-group--active { background: var(--success-soft); }
-.sp-group--active:hover { background: color-mix(in srgb, var(--success) 22%, transparent); }
+.sp-group:hover { background: var(--muted); }
+.sp-group--active { background: var(--cims-success-soft); }
+.sp-group--active:hover { background: color-mix(in srgb, var(--cims-success) 22%, transparent); }
 .sp-group-dot {
   width: 10px; height: 10px;
   border-radius: 50%;
@@ -948,16 +1010,16 @@ body {
   min-width: 0;
 }
 .sp-group-name    { font-size: 13px; font-weight: 500; }
-.sp-group-id      { font-size: 11px; color: var(--text-muted); }
-.sp-group-speaker { font-size: 11px; color: var(--success); font-weight: 600; }
-.sp-group-state   { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.sp-group-id      { font-size: 11px; color: var(--muted-foreground); }
+.sp-group-speaker { font-size: 11px; color: var(--cims-success); font-weight: 600; }
+.sp-group-state   { font-size: 11px; color: var(--muted-foreground); flex-shrink: 0; }
 
 /* Group join/leave button inside row */
 .sp-join-btn { font-size: 11px; padding: 2px 8px; flex-shrink: 0; margin-left: 4px; }
 
 /* Member list (active group, expanded below group row) */
 .sp-members {
-  background: var(--bg-soft);
+  background: var(--muted);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
@@ -970,9 +1032,9 @@ body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: .3px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--secondary);
 }
 .sp-mh-pri    { text-align: center; }
 .sp-mh-status { text-align: right; }
@@ -986,13 +1048,13 @@ body {
   transition: background .1s;
 }
 .sp-member:last-child { border-bottom: none; }
-.sp-member--speaker { background: var(--success-soft); }
+.sp-member--speaker { background: var(--cims-success-soft); }
 .sp-member--me      { }
 
 .sp-m-pri {
   font-size: 12px;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   text-align: center;
 }
 .sp-m-info {
@@ -1008,11 +1070,11 @@ body {
   align-items: center;
   gap: 4px;
 }
-.sp-m-id { font-size: 10px; color: var(--text-muted); }
+.sp-m-id { font-size: 10px; color: var(--muted-foreground); }
 .sp-me-tag {
   font-size: 9px;
   font-weight: 700;
-  background: var(--primary-soft);
+  background: var(--cims-brand-soft);
   color: var(--primary);
   padding: 1px 4px;
   border-radius: 999px;
@@ -1025,7 +1087,7 @@ body {
 .sp-speaker-badge {
   font-size: 10px;
   font-weight: 700;
-  color: var(--success);
+  color: var(--cims-success);
 }
 .sp-conn-dot {
   width: 8px; height: 8px;
@@ -1047,24 +1109,24 @@ body {
   padding: 14px;
   border-radius: var(--radius);
   border: 2px solid var(--border);
-  background: var(--surface-2);
+  background: var(--secondary);
   font-size: 15px;
   font-weight: 700;
   cursor: pointer;
   user-select: none;
   transition: background .1s, border-color .1s, transform .05s;
 }
-.sp-push-btn:hover { border-color: var(--primary); background: var(--primary-soft); }
+.sp-push-btn:hover { border-color: var(--primary); background: var(--cims-brand-soft); }
 .sp-push-btn--on {
-  background: var(--danger-soft);
-  border-color: var(--danger);
-  color: var(--danger);
+  background: var(--cims-danger-soft);
+  border-color: var(--destructive);
+  color: var(--destructive);
   transform: scale(0.98);
   box-shadow: 0 0 0 4px rgba(220,38,38,.12);
 }
 .sp-ptt-waiting {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
 }
 
 /* PTT push button (shared) */
@@ -1072,7 +1134,7 @@ body {
   width: 130px; height: 130px;
   border-radius: 50%;
   border: 4px solid var(--border);
-  background: var(--surface-2);
+  background: var(--secondary);
   font-size: 13px; font-weight: 700;
   cursor: pointer; user-select: none;
   transition: background .1s, border-color .1s, transform .1s;
@@ -1081,7 +1143,7 @@ body {
 }
 .phone-ptt-btn:hover { border-color: var(--primary); }
 .phone-ptt-btn--active {
-  background: var(--danger-soft); border-color: var(--danger);
+  background: var(--cims-danger-soft); border-color: var(--destructive);
   transform: scale(0.95);
   box-shadow: 0 0 0 8px rgba(220,38,38,.15);
 }
@@ -1090,32 +1152,32 @@ body {
 .phone-key {
   padding: 10px; font-size: 16px; font-weight: 600;
   border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--surface); cursor: pointer;
+  background: var(--card); cursor: pointer;
   transition: background .1s;
 }
-.phone-key:hover  { background: var(--bg); }
-.phone-key:active { background: var(--primary-soft); }
+.phone-key:hover  { background: var(--background); }
+.phone-key:active { background: var(--cims-brand-soft); }
 
 /* ── Docs viewer ─────────────────────────────────────────── */
-.docs-content { font-size: 14px; line-height: 1.7; color: var(--text); max-width: 900px; }
+.docs-content { font-size: 14px; line-height: 1.7; color: var(--foreground); max-width: 900px; }
 .docs-content .md-pre {
-  background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px;
+  background: var(--secondary); border: 1px solid var(--border); border-radius: 6px;
   padding: 12px 14px; overflow-x: auto; line-height: 1.35; font-size: 12px;
 }
-.docs-content .md-pre code { background: none; padding: 0; color: var(--text); }
+.docs-content .md-pre code { background: none; padding: 0; color: var(--foreground); }
 .docs-content .md-table { border-collapse: collapse; margin: 8px 0; }
 .docs-content .md-table td { border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
 .docs-content h1 { font-size: 22px; font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--primary); }
 .docs-content h2 { font-size: 18px; font-weight: 700; margin: 20px 0 8px; color: var(--primary); }
 .docs-content h3 { font-size: 15px; font-weight: 600; margin: 16px 0 6px; }
-.docs-content code { background: var(--surface-2); padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
+.docs-content code { background: var(--secondary); padding: 1px 5px; border-radius: 3px; font-size: 13px; font-family: 'Consolas', monospace; }
 .docs-content pre { background: #1e1e2e; color: #cdd6f4; padding: 14px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
 .docs-content pre code { background: none; color: inherit; padding: 0; font-size: 12px; }
 .docs-content li { margin-left: 20px; list-style: disc; }
 .docs-content td { padding: 4px 10px; border: 1px solid var(--border); font-size: 13px; }
-.docs-content tr:first-child td { font-weight: 600; background: var(--surface-2); }
+.docs-content tr:first-child td { font-weight: 600; background: var(--secondary); }
 .docs-content strong { font-weight: 600; }
-.docs-content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
+.docs-content blockquote { border-left: 3px solid var(--primary); padding-left: 12px; color: var(--muted-foreground); margin: 8px 0; }
 
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
@@ -1147,8 +1209,8 @@ body {
   grid-area: header;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 16px;
-  background: var(--header-bg); color: var(--header-fg);
-  border-bottom: 1px solid var(--shell-border);
+  background: var(--cims-surface-header); color: var(--cims-text-header);
+  border-bottom: 1px solid var(--sidebar-border);
   /* 이전 .app-header 정의(height:54px / position:sticky)를 명시적으로 덮음. */
   height: auto;
   position: static;
@@ -1157,18 +1219,18 @@ body {
 }
 .app-header-left { display: flex; align-items: center; gap: 10px; }
 .app-header-toggle {
-  background: none; border: none; color: var(--header-muted); cursor: pointer;
+  background: none; border: none; color: var(--cims-neutral); cursor: pointer;
   padding: 7px; display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius); transition: background .15s, color .15s;
 }
-.app-header-toggle:hover { color: var(--header-fg); background: var(--sidebar-hover); }
+.app-header-toggle:hover { color: var(--cims-text-header); background: var(--sidebar-accent); }
 .app-header-logo {
   display: flex; align-items: center; gap: 9px;
   font-size: 16px; font-weight: 700; letter-spacing: -0.02em;
 }
 .app-header-logo svg { color: var(--primary); }
 .app-header-logo-text {
-  background: linear-gradient(90deg, var(--primary), var(--primary-h));
+  background: linear-gradient(90deg, var(--primary), var(--cims-brand-hover));
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent;
 }
@@ -1184,28 +1246,28 @@ body {
   flex-wrap: nowrap; min-width: 0; white-space: nowrap;
 }
 .layout-edit-headerbar .form-input { min-width: 0; }
-.app-header-user-name { font-size: 13px; font-weight: 600; color: var(--header-fg); }
-.app-header .btn--ghost { color: var(--header-muted); }
-.app-header .btn--ghost:hover { color: var(--header-fg); background: var(--sidebar-hover); }
+.app-header-user-name { font-size: 13px; font-weight: 600; color: var(--cims-text-header); }
+.app-header .btn--ghost { color: var(--cims-neutral); }
+.app-header .btn--ghost:hover { color: var(--cims-text-header); background: var(--sidebar-accent); }
 
 /* ── Sidebar ────────────────────────────────────── */
 .sidebar {
   grid-area: sidebar;
-  background: var(--sidebar-bg); border-right: 1px solid var(--shell-border);
+  background: var(--sidebar); border-right: 1px solid var(--sidebar-border);
   display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
 }
 .sidebar-nav { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar-item {
   display: flex; align-items: center; gap: 11px;
   width: 100%; text-align: left; padding: 9px 12px;
-  background: none; border: none; color: var(--sidebar-fg); cursor: pointer;
+  background: none; border: none; color: var(--sidebar-foreground); cursor: pointer;
   font-size: 13px; font-weight: 500; border-radius: var(--radius);
   transition: background .15s, color .15s;
   white-space: nowrap; overflow: hidden;
 }
-.sidebar-item:hover { color: var(--sidebar-fg-active); background: var(--sidebar-hover); }
+.sidebar-item:hover { color: var(--sidebar-primary); background: var(--sidebar-accent); }
 .sidebar-item--active {
-  color: var(--sidebar-fg-active); background: var(--sidebar-active-bg); font-weight: 600;
+  color: var(--sidebar-primary); background: var(--sidebar-accent); font-weight: 600;
 }
 .sidebar-item-icon { flex-shrink: 0; opacity: .9; }
 .sidebar-item-label { flex: 1; }
@@ -1217,7 +1279,7 @@ body {
 .sidebar-area + .sidebar-area { margin-top: 10px; }
 .sidebar-area-label {
   padding: 6px 12px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--header-muted); opacity: .7;
+  text-transform: uppercase; color: var(--cims-neutral); opacity: .7;
 }
 .sidebar-group { display: flex; flex-direction: column; }
 .sidebar-group-head .sidebar-chevron { flex-shrink: 0; opacity: .55; }
@@ -1225,19 +1287,19 @@ body {
 .sidebar-subitem {
   display: block; width: 100%; text-align: left;
   padding: 7px 12px 7px 43px; /* 아이콘 폭만큼 들여쓰기 */
-  background: none; border: none; color: var(--sidebar-fg); cursor: pointer;
+  background: none; border: none; color: var(--sidebar-foreground); cursor: pointer;
   font-size: 12.5px; font-weight: 500; border-radius: var(--radius);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   transition: background .15s, color .15s; opacity: .85;
 }
-.sidebar-subitem:hover { color: var(--sidebar-fg-active); background: var(--sidebar-hover); opacity: 1; }
+.sidebar-subitem:hover { color: var(--sidebar-primary); background: var(--sidebar-accent); opacity: 1; }
 .sidebar-subitem--active {
-  color: var(--sidebar-fg-active); background: var(--sidebar-active-bg); font-weight: 600; opacity: 1;
+  color: var(--sidebar-primary); background: var(--sidebar-accent); font-weight: 600; opacity: 1;
 }
 
 /* 사이드바 하단 — 메뉴 접기/펼치기 토글 */
-.sidebar-footer { padding: 8px; border-top: 1px solid var(--shell-border); }
-.sidebar-footer .sidebar-toggle { color: var(--header-muted); }
+.sidebar-footer { padding: 8px; border-top: 1px solid var(--sidebar-border); }
+.sidebar-footer .sidebar-toggle { color: var(--cims-neutral); }
 .sidebar--collapsed .sidebar-footer { padding: 8px 6px; }
 
 /* ── Content + SubTabs ──────────────────────────── */
@@ -1253,14 +1315,14 @@ body {
 }
 .subtabs {
   display: flex; gap: 0; padding: 0 16px;
-  border-bottom: 1px solid var(--border); background: var(--bg-soft);
+  border-bottom: 1px solid var(--border); background: var(--muted);
 }
 .subtabs-item {
-  padding: 10px 16px; font-size: 13px; color: var(--text-muted);
+  padding: 10px 16px; font-size: 13px; color: var(--muted-foreground);
   text-decoration: none; border-bottom: 2px solid transparent;
   transition: all 0.15s;
 }
-.subtabs-item:hover { color: var(--text); }
+.subtabs-item:hover { color: var(--foreground); }
 .subtabs-item--active {
   color: var(--primary); border-bottom-color: var(--primary); font-weight: 600;
 }
@@ -1279,8 +1341,8 @@ body {
 /* 캔버스는 남은 높이를 받되 **설계 캔버스보다 작아지지는 않는다**(.grid-canvas 의 min-height).
    여기서 min-height:0 을 주면 그 하한이 무력화돼 트랙(1fr)이 내용 높이로 쪼그라든다. */
 .layout-host > .grid-canvas { flex: 1; }
-.layout-edit-budget { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.icon-btn--danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.layout-edit-budget { font-size: 11px; color: var(--muted-foreground); white-space: nowrap; }
+.icon-btn--danger:hover { background: color-mix(in srgb, var(--destructive) 12%, transparent); }
 .layout-edit-fab { opacity: 0.85; }
 .layout-edit-fab:hover { opacity: 1; }
 .layout-edit-hint { font-size: 12px; color: var(--primary); font-weight: 600; white-space: nowrap; }
@@ -1299,7 +1361,7 @@ body {
 .grid-widget {
   position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   container-type: inline-size;        /* 카드 폭에 따라 헤더 요소를 접기 위한 컨테이너 쿼리 기준 */
-  border: 1px dashed var(--primary); border-radius: var(--radius); background: var(--surface);
+  border: 1px dashed var(--primary); border-radius: var(--radius); background: var(--card);
 }
 .grid-drag-handle {
   /* 카드 위에 **겹쳐** 뜬다 — 제목줄이 본문을 밀면 편집 화면이 실제 화면과 달라진다.
@@ -1309,7 +1371,7 @@ body {
   min-width: 0;                       /* 자식(제목/id)이 줄어들 수 있게 — 없으면 버튼이 카드 밖으로 밀린다 */
   cursor: grab; touch-action: none; user-select: none;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-2) 88%, transparent);
+  background: color-mix(in srgb, var(--secondary) 88%, transparent);
   opacity: 0.5; transition: opacity 0.12s;
 }
 .grid-widget:hover > .grid-drag-handle,
@@ -1318,7 +1380,7 @@ body {
 .grid-widget-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .grid-widget-id {
   flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  color: var(--text-muted); font-size: 11px;
+  color: var(--muted-foreground); font-size: 11px;
 }
 /* 한 칸짜리 카드(분해된 지표 카드 등)에서는 id·크기배지를 접어 제목과 버튼에 자리를 준다. */
 @container (max-width: 300px) {
@@ -1333,13 +1395,13 @@ body {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   margin-bottom: 10px; padding: 8px 12px; font-size: 12px;
   border: 1px solid var(--primary); border-radius: var(--radius);
-  background: var(--bg-soft);
+  background: var(--muted);
 }
 
 /* 배치 단위 표시 이름(placement.title) — 위젯이 자체 제목을 안 그리는 경우(단일 지표 카드 등)와
    같은 위젯을 여러 벌 놓고 구분해야 할 때 렌더러가 얹는 캡션. */
 .widget-caption {
-  flex: none; font-size: 11.5px; font-weight: 600; color: var(--text-muted);
+  flex: none; font-size: 11.5px; font-weight: 600; color: var(--muted-foreground);
   padding: 0 2px 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -1349,25 +1411,25 @@ body {
 .grid-config-panel {
   position: absolute; top: 26px; left: 0; z-index: 31; min-width: 240px; max-width: 340px;
   display: flex; flex-direction: column; gap: 6px;
-  padding: 8px; font-size: 11px; background: var(--surface);
-  border: 1px solid var(--primary); border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  padding: 8px; font-size: 11px; background: var(--card);
+  border: 1px solid var(--primary); border-radius: var(--radius); box-shadow: var(--cims-elevation-lg);
 }
 .grid-config-row { display: flex; align-items: center; gap: 6px; }
-.grid-config-row > span { flex: none; width: 64px; color: var(--text-muted); }
+.grid-config-row > span { flex: none; width: 64px; color: var(--muted-foreground); }
 .grid-config-row > .form-input { flex: 1; min-width: 0; font-size: 11px; padding: 2px 6px; }
 
 .grid-size-badge {
-  font-size: 10px; color: var(--text-muted);
+  font-size: 10px; color: var(--muted-foreground);
   border: 1px solid var(--border); border-radius: 4px; padding: 0 4px;
 }
-.grid-widget--dragging { z-index: 20; box-shadow: var(--shadow-lg); opacity: 0.95; }
+.grid-widget--dragging { z-index: 20; box-shadow: var(--cims-elevation-lg); opacity: 0.95; }
 .grid-widget--dragging .grid-drag-handle { cursor: grabbing; }
 
 /* [API] 배지 — 개발자 모드에서 위젯이 쓰는 API 를 연다. 편집 카드 헤더는 인라인,
    보기 모드는 위젯 우상단 오버레이(평소 흐리게, hover 시 또렷하게 — 내용 가림 최소화). */
 .widget-api-badge {
   font-size: 10px; line-height: 1.6; white-space: nowrap; cursor: pointer;
-  color: var(--dev-accent); background: var(--surface);
+  color: var(--dev-accent); background: var(--card);
   border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
 }
 .widget-api-badge:hover { border-color: var(--dev-accent); }
@@ -1418,7 +1480,7 @@ body {
    [↺ 기본][저장][완료] 를 누를 수 없다. 편집 중에만 생기는 도구 띠라서 뷰에는 영향이 없다. */
 .grid-widget--inside > .grid-drag-handle {
   position: static; opacity: 1; cursor: default;
-  background: var(--primary-soft); color: var(--text);
+  background: var(--cims-brand-soft); color: var(--foreground);
 }
 /* 중첩 편집기는 조작해야 하므로 본문의 미리보기 잠금을 푼다 */
 .grid-widget--inside > .grid-widget-body { pointer-events: auto; opacity: 1; }
@@ -1443,15 +1505,15 @@ body {
 .info-dot-wrap { position: relative; display: inline-flex; }
 .info-dot {
   border: none; background: none; cursor: pointer; padding: 0 2px; line-height: 1;
-  font-size: 14px; color: var(--text-muted);
+  font-size: 14px; color: var(--muted-foreground);
 }
 .info-dot:hover, .info-dot--open { color: var(--primary); }
 .info-pop {
   position: absolute; top: calc(100% + 8px); left: -6px; z-index: 40;
   width: max-content; max-width: 340px;
-  background: var(--surface); color: var(--text);
+  background: var(--card); color: var(--foreground);
   border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: var(--shadow-lg); padding: 10px 12px;
+  box-shadow: var(--cims-elevation-lg); padding: 10px 12px;
   font-size: 12px; font-weight: 400; line-height: 1.55; text-align: left; white-space: normal;
 }
 /* 말풍선 꼬리 — 테두리 삼각형 위에 배경 삼각형을 겹쳐 선이 이어져 보이게 한다. */
@@ -1460,4 +1522,4 @@ body {
   border: 6px solid transparent;
 }
 .info-pop::before { border-bottom-color: var(--border); }
-.info-pop::after  { border-bottom-color: var(--surface); margin-bottom: -1px; }
+.info-pop::after  { border-bottom-color: var(--card); margin-bottom: -1px; }

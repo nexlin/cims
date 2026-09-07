@@ -43,7 +43,7 @@ interface Sys { key: string; name: string; mode: 'AS' | 'AA' | 'SA'; vip?: strin
 function chipTint(rank: number, running: boolean): string {
   if (rank >= 3) return 'rgba(231,76,60,0.12)'
   if (rank >= 1) return 'rgba(245,158,11,0.13)'
-  return running ? 'rgba(34,197,94,0.10)' : 'var(--surface-2)'
+  return running ? 'rgba(34,197,94,0.10)' : 'var(--secondary)'
 }
 
 function ModuleChip({ host, module, running, sevByMo }: { host: string; module: string; running: boolean; sevByMo: Map<string, number> }) {
@@ -75,7 +75,7 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
   return (
     <div onClick={onClick} title="클릭: 서버 Inspector"
          style={{ border: '1px solid var(--border)', borderTop: `3px solid ${col}`, borderRadius: 8,
-                  background: 'var(--surface)', cursor: 'pointer', overflow: 'hidden', boxShadow: 'var(--shadow)' }}>
+                  background: 'var(--card)', cursor: 'pointer', overflow: 'hidden', boxShadow: 'var(--cims-elevation-sm)' }}>
       {/* 헤더: 상태점 + 호스트 + [A/S 상태]·[M/B 설정] 단축 배지(hover=풀워드) + 버전 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 6px' }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block', flexShrink: 0 }} />
@@ -85,8 +85,8 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
           : <span style={{ display: 'inline-flex', gap: 3, flexShrink: 0 }}>
               {/* 상태 A/S — 채움 배지 */}
               <span title={n.active ? 'Active (현재 서비스 중)' : 'Standby (대기)'}
-                    style={{ ...STATE_BADGE, background: n.active ? C_GREEN : 'var(--surface-2)',
-                             color: n.active ? '#fff' : 'var(--text-muted)',
+                    style={{ ...STATE_BADGE, background: n.active ? C_GREEN : 'var(--secondary)',
+                             color: n.active ? '#fff' : 'var(--muted-foreground)',
                              border: n.active ? 'none' : '1px solid var(--border)' }}>
                 {n.active ? 'A' : 'S'}</span>
               {/* 설정 M/B — 외곽 배지 (AS 만) */}
@@ -97,13 +97,13 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
               {n.role && ((n.role === 'master') !== !!n.active) &&
                 <span title="절체됨 — 설정 선호 노드와 현재 Active 가 다름" style={{ color: C_AMBER, fontSize: 11, fontWeight: 700 }}>⚠</span>}
             </span>}
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{n.version ? `v${n.version}` : ''}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--muted-foreground)', flexShrink: 0 }}>{n.version ? `v${n.version}` : ''}</span>
       </div>
       {/* 모듈 칩 */}
       <div style={{ borderTop: '1px solid var(--border)', padding: '6px 10px 8px', display: 'flex', flexWrap: 'wrap', gap: 5,
-                    background: 'var(--bg-soft)' }}>
+                    background: 'var(--muted)' }}>
         {n.modules.length === 0
-          ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>(설치된 모듈 없음)</span>
+          ? <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>(설치된 모듈 없음)</span>
           : n.modules.map(m => <ModuleChip key={m.name} host={n.host} module={m.name}
                                            running={n.online && m.running} sevByMo={sevByMo} />)}
       </div>
@@ -124,12 +124,12 @@ function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: P
   return (
     <div onClick={onClick} title="클릭: 외부 시스템 관리"
          style={{ border: `2px dashed ${col}`, borderRadius: 8, padding: '8px 10px', minWidth: 150,
-                  background: 'var(--surface)', cursor: 'pointer' }}>
+                  background: 'var(--card)', cursor: 'pointer' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block' }} />
         <b style={{ fontSize: 13 }}>{sys.name}</b>
         <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, color: '#fff', background: '#8e44ad' }}>외부</span>
-        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
           {EXT_TYPE_LABEL[sys.type] || sys.type}</span>
       </div>
       <div style={{ marginTop: 4 }}>
@@ -140,7 +140,7 @@ function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: P
         ))}
       </div>
       {hasProbe && st === 'up' && status?.latency_ms != null &&
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{status.latency_ms}ms</div>}
+        <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 2 }}>{status.latency_ms}ms</div>}
     </div>
   )
 }
@@ -258,14 +258,14 @@ function SystemTopologyWidget() {
           const cols = gridCols(s.nodes.length)
           return (
             <div key={s.key} style={{ border: `1px solid var(--border)`, borderLeft: `4px solid ${dot}`,
-                                      borderRadius: 8, padding: '10px 14px', background: 'var(--bg-soft)' }}>
+                                      borderRadius: 8, padding: '10px 14px', background: 'var(--muted)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ width: 10, height: 10, borderRadius: '50%', background: dot, display: 'inline-block' }} />
                 <b style={{ fontSize: 13 }}>{s.name}</b>
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: mb.c }}>{mb.t}</span>
                 {s.mode === 'AS' && s.nodes.length > 1 &&
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>⇄ VRRP</span>}
-                {s.vip && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
+                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>⇄ VRRP</span>}
+                {s.vip && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
                   ◆ VIP <code style={{ fontSize: 11 }}>{s.vip}</code>{s.vipSlot ? ` /${s.vipSlot}` : ''}</span>}
               </div>
               {/* 노드 — 수에 따라 균형 그리드 (2→2열, 4→2x2 ...). */}
@@ -281,7 +281,7 @@ function SystemTopologyWidget() {
         {/* 외부 시스템 — 점선 테두리로 내부 노드와 구분. */}
         {ext.length > 0 && (
           <div style={{ border: `1px dashed var(--border)`, borderLeft: `4px dashed #8e44ad`,
-                        borderRadius: 8, padding: '10px 14px', background: 'var(--bg-soft)' }}>
+                        borderRadius: 8, padding: '10px 14px', background: 'var(--muted)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: '#8e44ad' }}>외부 시스템</span>
               <b style={{ fontSize: 13 }}>External</b>
@@ -296,7 +296,7 @@ function SystemTopologyWidget() {
         )}
       </div>
       {/* 상태 범례 */}
-      <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 11, color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
         {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['설치됨·미기동', C_GRAY], ['외부', '#8e44ad']].map(([t, c]) => (
           <span key={t as string} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: c as string, display: 'inline-block' }} />{t}

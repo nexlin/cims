@@ -162,7 +162,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
     finally { setSaving(false) }
   }
 
-  const muted = { fontSize: 11, color: 'var(--text-muted)' } as const
+  const muted = { fontSize: 11, color: 'var(--muted-foreground)' } as const
   return (
     <Modal title="메뉴 편집" onClose={onClose} width={760}>
       {/* 영역(그룹핑) */}
@@ -200,7 +200,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
         {rows.map((r, i) => (
           <div key={r.key} style={{
             borderBottom: '1px solid var(--border)', padding: '6px 8px',
-            background: 'var(--bg-soft)', opacity: r.hidden ? 0.55 : 1,
+            background: 'var(--muted)', opacity: r.hidden ? 0.55 : 1,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 2 }}>

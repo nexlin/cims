@@ -70,8 +70,8 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
   const inputStyle = { width: 140, padding: '2px 6px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 3, fontFamily: 'monospace' }
 
   return (
-    <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px', background: 'var(--bg-soft)' }}>
-      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: 8 }}>
+    <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px', background: 'var(--muted)' }}>
+      <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
         {title}
         <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 'normal' }}>
           (sysctl 은 /etc/sysctl.d 영속 · RPS 는 적용+부팅 재적용 · 이 서버 {cores}코어)
@@ -80,11 +80,11 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
 
       {/* RPS */}
       <div style={{ fontSize: 12, fontWeight: 'bold', margin: '6px 0 4px' }}>
-        RPS — RX softirq 코어 분산 <span style={{ fontWeight: 'normal', color: 'var(--text-muted)' }}>(16진 비트마스크, 권장 전체코어=<code>{recMask}</code>, <code>0</code>=비활성)</span>
+        RPS — RX softirq 코어 분산 <span style={{ fontWeight: 'normal', color: 'var(--muted-foreground)' }}>(16진 비트마스크, 권장 전체코어=<code>{recMask}</code>, <code>0</code>=비활성)</span>
       </div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 120 }}>인터페이스</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 180 }}>rps_cpus 마스크</th>
             <th style={{ padding: '4px 8px', textAlign: 'left' }}>현재 저장값</th>
@@ -92,7 +92,7 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
         </thead>
         <tbody>
           {ifaces.length === 0 && (
-            <tr><td colSpan={3} style={{ padding: 8, color: 'var(--text-muted)' }}>(인터페이스 정보 없음 — heartbeat 대기)</td></tr>
+            <tr><td colSpan={3} style={{ padding: 8, color: 'var(--muted-foreground)' }}>(인터페이스 정보 없음 — heartbeat 대기)</td></tr>
           )}
           {ifaces.map(name => {
             const cur = stored?.rps?.find(r => r.iface === name)?.cpus
@@ -105,7 +105,7 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
                   <button onClick={() => setRps(p => ({ ...p, [name]: recMask }))}
                           style={{ ...btnSmall(), marginLeft: 4 }} disabled={applying}>전체코어</button>
                 </td>
-                <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>{cur ?? '-'}</td>
+                <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{cur ?? '-'}</td>
               </tr>
             )
           })}
@@ -116,7 +116,7 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
       <div style={{ fontSize: 12, fontWeight: 'bold', margin: '6px 0 4px' }}>sysctl (net.core.*)</div>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead>
-          <tr style={{ background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 180 }}>키</th>
             <th style={{ padding: '4px 8px', textAlign: 'left', width: 160 }}>값</th>
             <th style={{ padding: '4px 8px', textAlign: 'left' }}>설명</th>
@@ -130,7 +130,7 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
                 <ImeSafeInput value={sysctl[f.key] ?? ''} onCommit={v => setSysctl(p => ({ ...p, [f.key]: v }))}
                               placeholder={String(f.def)} style={inputStyle} />
               </td>
-              <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--text-muted)' }}>{f.hint}</td>
+              <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--muted-foreground)' }}>{f.hint}</td>
             </tr>
           ))}
         </tbody>

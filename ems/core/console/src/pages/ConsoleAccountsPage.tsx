@@ -76,7 +76,7 @@ export default function ConsoleAccountsPage() {
     <div style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>콘솔 계정</h2>
-        <span className="ts" style={{ color: 'var(--text-muted)' }}>
+        <span className="ts" style={{ color: 'var(--muted-foreground)' }}>
           OAM 로그인 계정 (가입자와 분리). 내장 admin 계정은 oam.json 으로 관리되어 표시되지 않습니다.
         </span>
         {!adding && !editId && (
@@ -88,7 +88,7 @@ export default function ConsoleAccountsPage() {
 
       {(adding || editId) && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap',
-                      padding: 12, background: 'var(--surface-2, #f6f7f9)', borderRadius: 8, marginBottom: 12 }}>
+                      padding: 12, background: 'var(--secondary, #f6f7f9)', borderRadius: 8, marginBottom: 12 }}>
           <Field label="아이디 *" w={150}>
             <input className="form-input" value={form.login_id} disabled={!!editId} autoFocus={!editId}
                    onChange={e => setForm({ ...form, login_id: e.target.value })} />
@@ -159,7 +159,7 @@ export default function ConsoleAccountsPage() {
 function Field({ label, w, children }: { label: string; w?: number; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: w }}>
-      <span className="ts" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</span>
+      <span className="ts" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
       {children}
     </label>
   )

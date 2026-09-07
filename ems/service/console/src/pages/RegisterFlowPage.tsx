@@ -41,7 +41,7 @@ export default function RegisterFlowPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* ── 툴바 ── */}
       <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--foreground)', whiteSpace: 'nowrap' }}>
           메세지 이력
         </span>
 
@@ -52,7 +52,7 @@ export default function RegisterFlowPage() {
         {pageState === 'form' && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>사용자 ID</label>
+              <label style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>사용자 ID</label>
               <input
                 value={user}
                 onChange={e => setUser(e.target.value)}
@@ -62,7 +62,7 @@ export default function RegisterFlowPage() {
               />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <label style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>날짜</label>
+              <label style={{ fontSize: 12, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>날짜</label>
               <input
                 type="date"
                 value={date}
@@ -81,13 +81,13 @@ export default function RegisterFlowPage() {
         )}
 
         {pageState === 'flow' && flow && (
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
             {flow.user} / {flow.date}
           </span>
         )}
 
         {error && (
-          <span style={{ fontSize: 12, color: 'var(--danger)', marginLeft: 4 }}>{error}</span>
+          <span style={{ fontSize: 12, color: 'var(--destructive)', marginLeft: 4 }}>{error}</span>
         )}
       </div>
 
@@ -96,7 +96,7 @@ export default function RegisterFlowPage() {
         <div className="empty" style={{ flex: 1 }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 14, marginBottom: 8 }}>사용자 ID를 입력하고 조회하세요</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
               해당 날짜에 이 사용자가 주고받은 모든 메시지 흐름이 표시됩니다
               (REGISTER · SUBSCRIBE · PUBLISH · INVITE/BYE 호 처리 · NOTIFY 등)
             </div>

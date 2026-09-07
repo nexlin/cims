@@ -27,13 +27,13 @@ const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신�
 // 요약 타일 — 값 하나짜리 위젯의 몸통. 칸을 채우고 값은 세로 중앙(지표 카드 공통 규칙).
 function Tile({ label, value, accent }: { label: string; value: ReactNode; accent?: boolean }) {
   return (
-    <div style={{ flex: 1, minWidth: 110, minHeight: 0, background: 'var(--surface)',
+    <div style={{ flex: 1, minWidth: 110, minHeight: 0, background: 'var(--card)',
                   border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10,
                   display: 'flex', flexDirection: 'column',
                   justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1,
-                    color: accent ? 'var(--danger)' : 'var(--text)' }}>{value}</div>
+                    color: accent ? 'var(--destructive)' : 'var(--foreground)' }}>{value}</div>
     </div>
   )
 }
@@ -52,7 +52,7 @@ function ShareBar({ n, max, color = 'var(--primary)' }: { n: number; max: number
 }
 
 function DailyBars({ data, height = 48 }: { data: { date: string; opens: number }[]; height?: number }) {
-  if (data.length === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</div>
+  if (data.length === 0) return <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>—</div>
   const max = Math.max(1, ...data.map(d => d.opens))
   return (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: height + 14 }}>
@@ -68,11 +68,11 @@ function DailyBars({ data, height = 48 }: { data: { date: string; opens: number 
             <div style={{
               width: '100%',
               height: h,
-              background: d.opens > 0 ? 'var(--danger)' : 'var(--border)',
+              background: d.opens > 0 ? 'var(--destructive)' : 'var(--border)',
               borderRadius: 2,
               opacity: d.opens > 0 ? 0.85 : 0.4,
             }} />
-            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2, whiteSpace: 'nowrap',
+            <div style={{ fontSize: 9, color: 'var(--muted-foreground)', marginTop: 2, whiteSpace: 'nowrap',
                           overflow: 'visible', visibility: showLabel ? 'visible' : 'hidden' }}>
               {mmdd}
             </div>
@@ -88,19 +88,19 @@ function SeverityDist({ bySev }: { bySev: Record<string, number> }) {
   const order = Object.keys(SEV_RANK).sort((a, b) => SEV_RANK[b] - SEV_RANK[a])
   const entries = order.filter(s => (bySev[s] || 0) > 0).map(s => [s, bySev[s]] as const)
   const total = entries.reduce((a, [, n]) => a + n, 0)
-  if (total === 0) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</div>
+  if (total === 0) return <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>—</div>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', height: 10, borderRadius: 5, overflow: 'hidden' }}>
         {entries.map(([s, n]) => (
           <div key={s} title={`${s}: ${n}건`}
-               style={{ width: `${(n / total) * 100}%`, background: SEV_COLOR[s] || 'var(--text-muted)' }} />
+               style={{ width: `${(n / total) * 100}%`, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />
         ))}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--text-muted)' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', fontSize: 11, color: 'var(--muted-foreground)' }}>
         {entries.map(([s, n]) => (
           <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: SEV_COLOR[s] || 'var(--text-muted)' }} />
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: SEV_COLOR[s] || 'var(--muted-foreground)' }} />
             {s} {n}
           </span>
         ))}
@@ -164,11 +164,11 @@ function Block({ title, loading, error, children, pad = true }: {
   return (
     <div className="panel" style={{ padding: pad ? '10px 16px' : 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {title && (
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6, flex: 'none',
+        <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 6, flex: 'none',
                       padding: pad ? 0 : '10px 16px 6px' }}>
           {title}
           {loading && <span style={{ marginLeft: 6 }}>· 갱신 중…</span>}
-          {error && <span style={{ marginLeft: 6, color: 'var(--danger)' }}>· 조회 실패</span>}
+          {error && <span style={{ marginLeft: 6, color: 'var(--destructive)' }}>· 조회 실패</span>}
         </div>
       )}
       {children}
@@ -254,7 +254,7 @@ export function AlarmByCodeBlock() {
   return (
     <>
       {loading && byCode.length === 0 ? <div className="panel"><div className="empty">로딩 중…</div></div>
-        : error ? <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div> : (
+        : error ? <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div> : (
             <TablePanel title={<>코드별 분석 ({byCode.length}종)</>}
                         action={<button className="btn btn--ghost btn--sm" onClick={exportCsv}
                                         disabled={byCode.length === 0}>CSV</button>}>
@@ -289,7 +289,7 @@ export function AlarmByCodeBlock() {
                         <td>
                           {s.currently_open
                             ? <span className="badge badge--red">OPEN</span>
-                            : <span style={{ color: 'var(--text-muted)' }}>정상</span>}
+                            : <span style={{ color: 'var(--muted-foreground)' }}>정상</span>}
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           {s.avg_duration_sec != null ? formatSec(Math.round(s.avg_duration_sec)) : '-'}
@@ -323,7 +323,7 @@ export function AlarmByTypeBlock() {
   }, [stats])
   const maxTypeOpens = Math.max(1, ...byType.map(t => t.opens))
   if (loading && byType.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div>
+  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
   return (
             <TablePanel title={<>유형(클래스)별 분석 ({byType.length}종)</>}>
               {byType.length === 0 ? <div className="empty">기간 내 알람 없음</div> : (
@@ -342,12 +342,12 @@ export function AlarmByTypeBlock() {
                     {byType.map(t => (
                       <tr key={t.type}>
                         <td>{alarmTypeLabel(t.type)}
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{t.type}</span>
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
                         </td>
                         <td style={{ textAlign: 'right' }}>{t.codes.size || '-'}</td>
                         <td><ShareBar n={t.opens} max={maxTypeOpens} /></td>
                         <td style={{ textAlign: 'right' }}>{t.resolved}</td>
-                        <td style={{ textAlign: 'right', color: t.open > 0 ? 'var(--danger)' : undefined }}>{t.open}</td>
+                        <td style={{ textAlign: 'right', color: t.open > 0 ? 'var(--destructive)' : undefined }}>{t.open}</td>
                         <td className="ts">{t.last ? fmtTime(t.last) : '-'}</td>
                       </tr>
                     ))}
@@ -418,7 +418,7 @@ export function EventTotalTile({ tile }: { tile: AnalysisTile }) {
     <Tile label={tile.label} value={truncated ? (
       <>
         {n}
-        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--danger)' }}>
+        <div style={{ fontSize: 11, fontWeight: 400, color: 'var(--destructive)' }}>
           최신 {FETCH_LIMIT}건만 집계 (기간을 좁히세요)
         </div>
       </>
@@ -444,7 +444,7 @@ export function EventByTypeBlock() {
       byType.map(t => [EVENT_KIND_LABEL[t.kind || ''] || t.kind || '', t.code || '', t.type, t.count, t.last]))
   }
   if (loading && byType.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div>
+  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
   return (
             <TablePanel title={<>유형별 발생 ({byType.length}종)</>}
                         action={<button className="btn btn--ghost btn--sm" onClick={exportCsv}
@@ -470,7 +470,7 @@ export function EventByTypeBlock() {
                         </td>
                         <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.code || '-'}</td>
                         <td>{eventTypeLabel(t.type)}
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{t.type}</span>
+                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
                         </td>
                         <td><ShareBar n={t.count} max={maxTypeCount} /></td>
                         <td className="ts">{t.last ? fmtTime(t.last) : '-'}</td>
@@ -487,7 +487,7 @@ export function EventBySourceBlock() {
   const { bySource, loading, error } = useEventAggs()
   const maxSrcCount = Math.max(1, ...bySource.map(t => t.count))
   if (loading && bySource.length === 0) return <div className="panel"><div className="empty">로딩 중…</div></div>
-  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--danger)' }}>조회 실패: {error}</div></div>
+  if (error) return <div className="panel"><div className="empty" style={{ color: 'var(--destructive)' }}>조회 실패: {error}</div></div>
   return (
             <TablePanel title={<>소스별 발생 ({bySource.length}곳)</>}>
               {bySource.length === 0 ? <div className="empty">기간 내 이벤트 없음</div> : (

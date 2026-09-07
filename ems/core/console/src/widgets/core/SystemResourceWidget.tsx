@@ -41,7 +41,7 @@ function metricVal(m: AgentMetric | null, k: MetricKey): number | null {
 // area 추이 차트 (pct 면 0~100 고정 스케일, rate 면 자동 스케일).
 function Area({ data, color, pct }: { data: number[]; color: string; pct: boolean }) {
   const h = 40, w = 160, pad = 3
-  if (data.length < 2) return <div style={{ height: h, fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>데이터 수집 중…</div>
+  if (data.length < 2) return <div style={{ height: h, fontSize: 10, color: 'var(--muted-foreground)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>데이터 수집 중…</div>
   const max = pct ? 100 : Math.max(...data, 1)
   const min = 0, range = max - min || 1
   const step = (w - pad * 2) / (data.length - 1)
@@ -101,7 +101,7 @@ function SystemResourceWidget() {
         {stale && <span title="갱신 일시 실패 — 직전 값" style={{ fontSize: 11, color: C_AMBER }}>⚠ 갱신 지연</span>}
         <span style={{ display: 'inline-flex', gap: 10, fontSize: 12, fontWeight: 400 }}>
           {ALL_METRICS.map(m => (
-            <label key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <label key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', color: 'var(--muted-foreground)' }}>
               <input type="checkbox" checked={sel.has(m.k)} onChange={() => toggle(m.k)} />{m.label}
             </label>
           ))}
@@ -111,16 +111,16 @@ function SystemResourceWidget() {
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ padding: '20px 4px', fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
+        <div style={{ padding: '20px 4px', fontSize: 13, color: 'var(--muted-foreground)', textAlign: 'center' }}>
           {loaded ? '표시할 서버가 없습니다.' : '불러오는 중…'}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: `minmax(150px, 1fr) repeat(${cols.length}, 1fr)`,
                       gap: 0, alignItems: 'stretch' }}>
           {/* 헤더 */}
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, padding: '0 4px 6px' }}>서버</div>
+          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 600, padding: '0 4px 6px' }}>서버</div>
           {cols.map(c => (
-            <div key={c.k} style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', fontWeight: 600, padding: '0 4px 6px' }}>
+            <div key={c.k} style={{ fontSize: 11, color: 'var(--muted-foreground)', textAlign: 'center', fontWeight: 600, padding: '0 4px 6px' }}>
               {c.label} <span style={{ fontWeight: 400, opacity: 0.7 }}>{c.pct ? '%' : 'rate'}</span>
             </div>
           ))}
@@ -150,7 +150,7 @@ function SystemResourceWidget() {
                     <div key={c.k} style={{ opacity: s.online ? 1 : 0.5, padding: '8px 6px 6px', position: 'relative',
                                             background: tint, ...rowBd }}>
                       <div style={{ position: 'absolute', top: 5, right: 6, fontSize: 12, fontWeight: 700,
-                                    color: hot ? C_RED : color, background: 'var(--surface)',
+                                    color: hot ? C_RED : color, background: 'var(--card)',
                                     padding: '0 4px', borderRadius: 4, lineHeight: 1.4 }}>{fmt(v, c.pct)}</div>
                       <Area data={seriesOf(s, c.k)} color={color} pct={c.pct} />
                     </div>

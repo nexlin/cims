@@ -45,10 +45,10 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1200,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }} onClick={onClose}>
-      <div style={{ background: 'var(--surface)', borderRadius: 6, width: 380, padding: 24 }}
+      <div style={{ background: 'var(--card)', borderRadius: 6, width: 380, padding: 24 }}
            onClick={e => e.stopPropagation()}>
         <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🔐 관리자 인증 (승격)</h3>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 14px' }}>
+        <p style={{ fontSize: 12, color: 'var(--muted-foreground)', margin: '0 0 14px' }}>
           시스템/서버 구성·패키지 설치 변경은 admin 권한이 필요합니다.
           admin 계정으로 인증하면 <b>30분간</b> 이 브라우저 탭에서 변경이 허용됩니다.
         </p>

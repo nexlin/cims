@@ -146,12 +146,12 @@ export default function PttGroupActivity({ storeKey }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>최근</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)', fontWeight: 600 }}>최근</span>
         {RANGE_OPTIONS.map(d => (
           <button key={d} className={`btn btn--sm ${rangeDays === d ? 'btn--primary' : 'btn--ghost'}`}
                   onClick={() => setRangeDays(d)}>{d}일</button>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
           {loading ? '조회 중…' : `세션 ${sessions.length}건`}
         </span>
       </div>
@@ -169,7 +169,7 @@ export default function PttGroupActivity({ storeKey }: {
               <div style={{ overflowX: 'auto' }}>
                 <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: 'var(--bg-soft)', textAlign: 'left' }}>
+                    <tr style={{ background: 'var(--muted)', textAlign: 'left' }}>
                       <th style={{ ...thStyle, width: 24, cursor: 'default' }}></th>
                       <th style={{ ...thStyle, cursor: 'default' }}>세션</th>
                       <th style={{ ...thStyle, cursor: 'default' }}>시각</th>
@@ -201,7 +201,7 @@ export default function PttGroupActivity({ storeKey }: {
               </div>
             </div>
           )}
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>
             선택 일자 {day.slice(4, 6)}/{day.slice(6, 8)} · {daySessions.length}세션
             {daySessions.length > 0 && ` · ${new Set(daySessions.map(s => hourOf(s.dir))).size}개 시간대`}
           </div>

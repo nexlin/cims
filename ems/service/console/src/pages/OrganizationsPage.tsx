@@ -379,11 +379,11 @@ export default function OrganizationsPage() {
                 {importLoading && <span className="ts">처리 중...</span>}
               </div>
               {importResult && (
-                <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 16 }}>
+                <div style={{ background: 'var(--card)', borderRadius: 8, padding: 16 }}>
                   <div style={{ fontWeight: 600, marginBottom: 8 }}>결과</div>
                   <div style={{ fontSize: 14 }}>생성: <strong>{importResult.created}</strong>건, 수정: <strong>{importResult.updated}</strong>건</div>
                   {importResult.errors.length > 0 && (
-                    <div style={{ marginTop: 8, color: 'var(--danger)', fontSize: 12 }}>
+                    <div style={{ marginTop: 8, color: 'var(--destructive)', fontSize: 12 }}>
                       {importResult.errors.map((e, i) => <div key={i}>행 {e.row}: {e.error}</div>)}
                     </div>
                   )}

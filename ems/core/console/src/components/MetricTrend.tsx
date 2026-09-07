@@ -9,7 +9,7 @@ export default function MetricTrend({ label, values, unit = '%', color, warn, wi
   const cur = nums.length ? nums[nums.length - 1] : null
   const peak = nums.length ? Math.max(...nums) : null
   const overWarn = warn != null && cur != null && cur >= warn
-  let body: React.ReactNode = <div style={{ height: h, color: 'var(--text-muted)', fontSize: 11, display: 'flex', alignItems: 'center' }}>데이터 부족</div>
+  let body: React.ReactNode = <div style={{ height: h, color: 'var(--muted-foreground)', fontSize: 11, display: 'flex', alignItems: 'center' }}>데이터 부족</div>
   if (nums.length >= 2) {
     const max = Math.max(...nums, warn ?? 0, 1)
     const min = Math.min(...nums, 0)
@@ -33,14 +33,14 @@ export default function MetricTrend({ label, values, unit = '%', color, warn, wi
     )
   }
   return (
-    <div style={{ flex: 1, background: 'var(--surface)', border: '1px solid var(--border)',
+    <div style={{ flex: 1, background: 'var(--card)', border: '1px solid var(--border)',
                   borderRadius: 4, padding: '8px 10px', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</span>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{label}</span>
         <span style={{ fontSize: 16, fontWeight: 700, color: overWarn ? '#e74c3c' : 'inherit' }}>
           {cur != null ? `${cur}${unit}` : '—'}
         </span>
-        {peak != null && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)' }}>peak {peak}{unit}</span>}
+        {peak != null && <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--muted-foreground)' }}>peak {peak}{unit}</span>}
       </div>
       {body}
     </div>

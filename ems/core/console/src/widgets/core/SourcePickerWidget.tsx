@@ -36,7 +36,7 @@ function SourcePickerWidget({ config }: WidgetProps) {
                 onClick={() => setSrc(s.id)}>{s.label}</button>
       ))}
       {cands.length === 0 && (
-        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+        <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           {loading ? '소스 로딩…' : '(후보 소스 없음)'}
         </span>
       )}
