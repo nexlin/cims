@@ -1210,7 +1210,7 @@ body {
 /* ── Layout (Header + Sidebar + Content) ──────── */
 .app-layout {
   --header-h: 58px;   /* Figma AppBar 실측 (457:5430). 위젯 편집 컨트롤도 이 높이에 들어간다 */
-  --sidebar-w: 224px;
+  --sidebar-w: 232px;   /* Figma Sec/Sidebar 실측 (457:5484) */
   /* ── 설계 캔버스 (관제 화면 기준 해상도) ────────────────────────────────
      화면은 1920×1080 에서 스크롤 없이 한눈에 들어와야 한다(console_platform §3.0).
      위젯 그리드가 차지하는 실제 박스 = 그 해상도에서 셸 크롬을 뺀 크기이고, 그리드는 이 박스를
@@ -1219,7 +1219,7 @@ body {
      게 아니다. 창이 이보다 작으면 재배열하지 않고 그대로 두고 스크롤이 생긴다. */
   --design-w: 1920px;
   --design-h: 1080px;
-  --sidebar-w-full: 224px;
+  --sidebar-w-full: 232px;
   --main-pad: 24px;
   --canvas-w: calc(var(--design-w) - var(--sidebar-w-full) - var(--main-pad) * 2);
   --canvas-h: calc(var(--design-h) - var(--header-h) - var(--main-pad) * 2);
@@ -1255,56 +1255,10 @@ body {
 .layout-edit-headerbar .form-input { min-width: 0; }
 
 /* ── Sidebar ────────────────────────────────────── */
-.sidebar {
-  grid-area: sidebar;
-  background: var(--sidebar); border-right: 1px solid var(--sidebar-border);
-  display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
-}
-.sidebar-nav { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-.sidebar-item {
-  display: flex; align-items: center; gap: 11px;
-  width: 100%; text-align: left; padding: 9px 12px;
-  background: none; border: none; color: var(--sidebar-foreground); cursor: pointer;
-  font-size: 13px; font-weight: 500; border-radius: var(--radius);
-  transition: background .15s, color .15s;
-  white-space: nowrap; overflow: hidden;
-}
-.sidebar-item:hover { color: var(--sidebar-primary); background: var(--sidebar-accent); }
-.sidebar-item--active {
-  color: var(--sidebar-primary); background: var(--sidebar-accent); font-weight: 600;
-}
-.sidebar-item-icon { flex-shrink: 0; opacity: .9; }
-.sidebar-item-label { flex: 1; }
-.sidebar--collapsed .sidebar-nav { padding: 8px 6px; }
-.sidebar--collapsed .sidebar-item { justify-content: center; padding: 10px 0; }
-
-/* ── 2-레벨 펼침형 nav (영역 → 그룹 → 하위항목) ── */
-.sidebar-area { display: flex; flex-direction: column; gap: 2px; }
-.sidebar-area + .sidebar-area { margin-top: 10px; }
-.sidebar-area-label {
-  padding: 6px 12px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
-  text-transform: uppercase; color: var(--cims-neutral); opacity: .7;
-}
-.sidebar-group { display: flex; flex-direction: column; }
-.sidebar-group-head .sidebar-chevron { flex-shrink: 0; opacity: .55; }
-.sidebar-sub { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 3px; }
-.sidebar-subitem {
-  display: block; width: 100%; text-align: left;
-  padding: 7px 12px 7px 43px; /* 아이콘 폭만큼 들여쓰기 */
-  background: none; border: none; color: var(--sidebar-foreground); cursor: pointer;
-  font-size: 12.5px; font-weight: 500; border-radius: var(--radius);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  transition: background .15s, color .15s; opacity: .85;
-}
-.sidebar-subitem:hover { color: var(--sidebar-primary); background: var(--sidebar-accent); opacity: 1; }
-.sidebar-subitem--active {
-  color: var(--sidebar-primary); background: var(--sidebar-accent); font-weight: 600; opacity: 1;
-}
-
-/* 사이드바 하단 — 메뉴 접기/펼치기 토글 */
-.sidebar-footer { padding: 8px; border-top: 1px solid var(--sidebar-border); }
-.sidebar-footer .sidebar-toggle { color: var(--cims-neutral); }
-.sidebar--collapsed .sidebar-footer { padding: 8px 6px; }
+/* 시각 속성은 Tailwind 로 옮겼다(components/Sidebar.tsx) — 여기 남는 것은 **그리드 배치**뿐이다.
+   클래스 이름 `sidebar` / `sidebar--collapsed` 는 지우지 않는다: 이 그리드와 인쇄 시 숨김
+   규칙(VerificationV2Page·VerificationHistoryPage 의 @media print)이 이 이름을 쓴다. */
+.sidebar { grid-area: sidebar; }
 
 /* ── Content + SubTabs ──────────────────────────── */
 .app-content {
