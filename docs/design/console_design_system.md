@@ -384,6 +384,41 @@ muted 글자는 `text-muted-foreground` 가 맞다) · `table`(5곳 — 전부 `
 클래스가 겹치는 것만이 아니라 **같은 CSS 속성을 건드리는 경우**만 잡아 준다. 지울 수 없는
 레거시 규칙(예: `grid-area`, 인쇄용 숨김)은 그 속성만 남기고 나머지를 걷는다.
 
+### 8.2 preflight 를 끈 대가 — 직접 넣어야 하는 것들
+
+`corePlugins.preflight: false` 는 Tailwind 의 전역 reset 을 통째로 끈다. 그래서 **유틸리티가
+동작하려면 preflight 가 깔아 주던 토대를 직접 넣어야 한다.** 전부 T1-1 에서 실제로 겪은 것이고,
+`index.css` 의 `@layer base` 에 들어 있다. **T4 에서 preflight 를 켜면 이 블록을 걷는다.**
+
+| 없으면 | 증상 |
+|---|---|
+| `*,::before,::after { border-style: solid; border-width: 0 }` | `border-b` 를 줘도 **선이 안 그려진다** — 유틸리티는 width 만 설정하고 style 은 preflight 에 의존한다 |
+| `button{ background-color: transparent }` 등 폼 리셋 | 클래스 없는 `<button>` 이 **브라우저 기본 크롬**(배경 `#efefef` · Arial 13.3px)을 쓴다 |
+
+**간격 스케일은 px 로 고정한다.** 기본 스케일은 rem 기반인데 이 앱의 `:root` 는 `font-size: 14px`
+(시안 본문 크기)이라 `p-5` 가 20px 이 아니라 **17.5px** 이 된다 — Figma 실측값과 전부 어긋난다.
+`tailwind.config.ts` 의 `theme.spacing` 을 `n × 4px` 로 두어 루트 크기와 무관하게 했다.
+width·height·gap·inset 이 모두 이 스케일을 쓴다.
+
+### 8.3 화면 확인 — 빌드 통과는 증거가 아니다
+
+T1-1 에서 **빌드도 통과하고 클래스도 생성됐는데 화면에는 하나도 안 먹는** 상태가 나왔다.
+원인이 셋이었고 전부 브라우저를 봐야만 보였다:
+
+1. **dev 서버가 `postcss.config.js` 를 못 읽고 있었다** — Vite 는 PostCSS 설정을 **기동 시점에**
+   읽는다. 설정을 추가·수정하면 **`cims.sh tb restart console`** 로 재기동해야 한다
+2. 레거시 CSS 가 Tailwind 를 덮고 있었다 (§8 의 덮임 검사)
+3. preflight 를 끈 대가 (§8.2)
+
+→ 컴포넌트를 옮길 때마다 **스크린샷으로 확인한다.** `~/.cims-scratch/shot.mjs`
+(Playwright, 레포 루트 `node_modules` 에 설치):
+
+```
+CIMS_USER=admin CIMS_PASS=1234 node ~/.cims-scratch/shot.mjs /deploy/servers out.png
+CLIP=0,0,1440,60 …          # 영역만 잘라 Figma 프레임과 대조
+node ~/.cims-scratch/probe.mjs   # 계산된 스타일·콘솔 에러 확인
+```
+
 **T0a·T0b 는 화면이 안 변하는 게 성공 판정**이고, T0c 부터 화면이 변한다 — 단계마다 판정 기준을
 하나만 두어 회귀 원인을 가릴 수 있게 나눴다.
 

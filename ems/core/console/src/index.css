@@ -8,6 +8,31 @@
 @tailwind components;
 @tailwind utilities;
 
+/* preflight 를 껐기 때문에 **직접 넣어야 하는 최소 한 줄** — Tailwind 의 `border-*` 유틸리티는
+   width 만 설정하고 style 은 preflight 의 전역 `border-style: solid` 에 의존한다. 없으면
+   `border-b` 를 줘도 style 이 none 이라 선이 안 그려진다(T1-1 AppBar 에서 실제로 났다).
+   width 0 을 함께 깔아야 style 만 켜진 요소에 선이 생기지 않는다. */
+@layer base {
+  *, ::before, ::after { border-style: solid; border-width: 0; }
+
+  /* preflight 의 폼 요소 리셋 — 이것도 직접 넣어야 한다. 없으면 클래스 없는 <button> 이
+     브라우저 기본 크롬(배경 #efefef · Arial 13.3px)을 쓴다. 레거시 `.btn`·인라인 style 은
+     배경·테두리를 직접 주므로 영향이 없고, 폰트만 Pretendard 로 바로잡힌다. */
+  button, [type='button'], [type='reset'], [type='submit'] {
+    -webkit-appearance: button;
+    background-color: transparent;
+    background-image: none;
+  }
+  button, input, optgroup, select, textarea {
+    font-family: inherit;
+    font-size: 100%;
+    font-weight: inherit;
+    line-height: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+  }
+}
+
 /* ── Reset & base ──────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

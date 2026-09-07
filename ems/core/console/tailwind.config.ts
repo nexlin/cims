@@ -32,6 +32,18 @@ const config: Config = {
   // 해당 페이지를 T3 에서 옮기면 레거시 이름이 사라지므로 이 blocklist 도 걷는다.
   blocklist: ['text-muted', 'table'],
   theme: {
+    // 간격 스케일을 **px 로 고정**한다. 기본 스케일은 rem 기반인데 이 앱의 `:root` 는
+    // font-size:14px 이라(시안 본문 크기) `p-5` 가 20px 이 아니라 17.5px 이 된다 —
+    // Figma 실측값(20·16·8·6…)과 전부 어긋난다. n × 4px 로 두면 루트 크기와 무관해진다.
+    // width/height/gap/inset 이 모두 이 스케일을 쓴다.
+    spacing: {
+      px: '1px', 0: '0px', 0.5: '2px', 1: '4px', 1.5: '6px', 2: '8px', 2.5: '10px',
+      3: '12px', 3.5: '14px', 4: '16px', 5: '20px', 6: '24px', 7: '28px', 8: '32px',
+      9: '36px', 10: '40px', 11: '44px', 12: '48px', 14: '56px', 16: '64px', 20: '80px',
+      24: '96px', 28: '112px', 32: '128px', 36: '144px', 40: '160px', 44: '176px',
+      48: '192px', 52: '208px', 56: '224px', 60: '240px', 64: '256px', 72: '288px',
+      80: '320px', 96: '384px',
+    },
     extend: {
       colors: {
         background: 'var(--background)',
@@ -90,8 +102,6 @@ const config: Config = {
         lg: 'var(--cims-elevation-lg)',
         focus: 'var(--cims-focus-ring)',
       },
-      // Figma Spacing 컬렉션 (2·4·6·8·10·12·14) 중 기본 스케일에 없는 것
-      spacing: { '2.5': '10px', '3.5': '14px' },
     },
   },
   plugins: [require('tailwindcss-animate')],

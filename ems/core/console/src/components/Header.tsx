@@ -42,7 +42,8 @@ function Freshness() {
   const { error, loaded, lastUpdated } = useAlarms()
   if (!loaded && !error) return <StatusDot tone="neutral" label="연결 중" />
   if (error) return <StatusDot tone="danger" label="갱신 실패" />
-  const t = lastUpdated ? new Date(lastUpdated).toLocaleTimeString('ko-KR', { hour12: false }) : '—'
+  // 시안 표기는 `갱신 14:27:41` — ko-KR 로케일은 "13시 30분 4초" 를 내므로 직접 24시각으로 낸다.
+  const t = lastUpdated ? new Date(lastUpdated).toTimeString().slice(0, 8) : '—'
   return <StatusDot tone="success" label={`갱신 ${t}`} />
 }
 
@@ -56,25 +57,32 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
   }
   return (
     // `app-header` 는 남긴다 — 그리드 배치(grid-area)와 인쇄 시 숨김 규칙이 이 이름을 쓴다.
-    <header className="app-header flex h-[58px] items-center gap-3 border-b border-sidebar-border bg-[var(--cims-surface-header)] px-5">
-      <div className="flex items-center gap-2 text-lg font-bold tracking-tight">
+    // 치수는 Figma AppBar(457:5430) 실측: 높이 58 · 좌우 여백 20 · 로고→환경 16 ·
+    // 환경 안 8 · 유틸리티 사이 6. 구간마다 달라 한 gap 으로 묶지 않는다.
+    <header className="app-header flex h-[58px] items-center border-b border-sidebar-border bg-[var(--cims-surface-header)] px-5">
+      <div className="flex items-center gap-2 text-lg font-semibold tracking-tight text-[var(--cims-text-header)]">
         <Radio size={20} className="text-primary" />
-        <span className="app-header-logo-text">CIMS</span>
+        CIMS
       </div>
 
       {/* 접속 환경 클러스터 (시안 envCluster) — 칩 · 호스트 · 갱신 시각.
           환경은 개발자 모드 스위치가 곧 축이다: 켜져 있으면 개발, 꺼져 있으면 운영.
           브라우저 로컬(localStorage) 화면 모드라 서버 속성이 아니라 "지금 내가 보는 모드" 다. */}
-      {devMode
-        ? <Badge className="bg-[var(--dev-accent)] text-white">개발</Badge>
-        : <Badge variant="brandSoft">운영</Badge>}
-      <span className="font-mono text-xs text-muted-foreground">{window.location.host}</span>
-      <span className="text-xs text-muted-foreground">·</span>
-      <Freshness />
+      <div className="ml-4 flex items-center gap-2">
+        {devMode
+          ? <Badge className="bg-[var(--dev-accent)] text-white">개발</Badge>
+          : <Badge variant="brandSoft">운영</Badge>}
+        <span className="font-mono text-xs text-muted-foreground">{window.location.host}</span>
+        <span className="text-xs text-muted-foreground">·</span>
+        <Freshness />
+      </div>
 
       {/* 페이지 위젯 편집 컨트롤 슬롯 — EditableLayout 이 portal 로 렌더.
-          남은 공간을 먹어 우측 유틸리티를 밀어낸다(시안의 spacer 역할 겸함). */}
-      <div id="layout-edit-slot" className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden" />
+          시안의 spacer 자리를 겸해 남은 공간을 먹고 우측 유틸리티를 밀어낸다. */}
+      <div id="layout-edit-slot" className="flex min-w-0 flex-1 items-center justify-end gap-1.5 overflow-hidden px-4" />
+
+      {/* 유틸리티 — 알람 · 설정 · 계정 (시안 utilities, 사이 6px) */}
+      <div className="flex items-center gap-1.5">
 
       {/* 알람 — 벨 + 카운트. 드로어·전이 토스트는 AlarmIndicator 가 계속 담당한다 */}
       <AlarmIndicator />
@@ -121,6 +129,7 @@ export default function Header({ userName, userRole, onLogout, onChangePw }: Hea
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      </div>
     </header>
   )
 }
