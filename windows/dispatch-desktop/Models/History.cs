@@ -8,5 +8,6 @@ public enum HistoryKind { Call, Ptt, Message }
 /// Id = 서버가 매긴 항목 식별자(중복 제거 키). Event = 서버 이벤트 이름(call.answered·ptt.talk·message.sds …) — 앱은 알려진 값만
 /// ActivityKind 로 옮기고 나머지는 Note 로 표시한다. From/To/Group 는 tel:/sip: URI 또는 E.164, Text 는 메시지 본문(kind=message).
 /// </summary>
+/// RecordingId = 녹취 식별자(세션 디렉터리 상대 경로 — `/provisioning/recordings/{id}` 의 키, 없으면 ""), HasRecording = 녹취 파일 존재.
 public sealed record HistoryEntry(string Id, DateTime Time, HistoryKind Kind, string Event, string From, string To, string Group,
-                                  int DurationSec, bool Emergency, string Text);
+                                  int DurationSec, bool Emergency, string Text, string RecordingId = "", bool HasRecording = false);

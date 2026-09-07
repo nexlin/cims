@@ -194,6 +194,18 @@ public partial class MainWindow : Window
         await _vm.Session.DeleteGroupAsync(g);
     }
 
+    // ── 관리 창(§4.5) — 비모달 하나. 열려 있으면 활성화 ──
+    private ManagementWindow? _management;
+    private void Management_Click(object sender, RoutedEventArgs e)
+    {
+        DropItem_Click(sender, e);
+        if (_management is { IsLoaded: true }) { if (_management.WindowState == WindowState.Minimized) _management.WindowState = WindowState.Normal; _management.Activate(); return; }
+        if (_vm.Session.Management is null) { _vm.Notify.Warn("로그인 뒤에 열 수 있습니다"); return; }
+        _management = new ManagementWindow(new ManagementViewModel(_vm.Session)) { Owner = this };
+        _management.Closed += (_, _) => _management = null;
+        _management.Show();
+    }
+
     // ── 설정·종료 ──
     private void OpenSettings()
     {
@@ -231,6 +243,7 @@ public partial class MainWindow : Window
     {
         PersistWindow();
         foreach (var w in _monitors.Values.ToList()) w.CloseFromSession();
+        _management?.Close(); _management = null;
         _exitConfirmed = false;
         Hide();
     }

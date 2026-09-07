@@ -72,7 +72,14 @@ public partial class App : Application
         _log.Info($"start {CimsUe.Engine.Version}");
         _started = true;
         // --ui-preview: 로그인·엔진 없이 메인 화면만(화면 배치·바인딩 점검용 개발 스위치). 프로파일이 없으므로 소프트폰 모드 표시.
-        if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase)) { ShowMain(); return; }
+        if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase))
+        {
+            ShowMain();
+            // --ui-preview-management: 관리 창(§4.5)도 함께 — 서버 없이 XAML 자원·바인딩 점검(목록은 "로그인 전" 오류로 비어 있다).
+            if (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase))
+                new Shell.ManagementWindow(new ViewModels.ManagementViewModel(_session!)) { Owner = _main }.Show();
+            return;
+        }
         _ = RunLoginAsync();
     }
 

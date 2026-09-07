@@ -6,7 +6,8 @@
 //
 // 응답 기대치(앱이 읽는 것 — 서버 확정 대기):
 //   { "items": [ { "id": "...", "time": "2026-09-06T10:00:00+09:00", "kind": "call|ptt|message", "event": "call.answered|call.missed|...",
-//                  "from": "tel:+82...", "to": "tel:+82...", "group": "tel:g003", "duration": 42, "emergency": false, "text": "..." } ],
+//                  "from": "tel:+82...", "to": "tel:+82...", "group": "tel:g003", "duration": 42, "emergency": false, "text": "...",
+//                  "recordingId": "ptt/24/2026/09/07/10/S…_1", "hasRecording": true } ],
 //     "next": "<since 커서 — 다음 폴링에 그대로>", "etag": "..." }
 using System.Text.Json;
 using CimsUe;
@@ -131,7 +132,8 @@ public sealed class HistoryClient : IDisposable
             var k = Str(it, "kind") switch { "call" => HistoryKind.Call, "ptt" => HistoryKind.Ptt, "message" => HistoryKind.Message, _ => kind };
             items.Add(new HistoryEntry(id, t.ToLocalTime(), k, Str(it, "event"), Str(it, "from"), Str(it, "to"), Str(it, "group"),
                                        it.TryGetProperty("duration", out var d) && d.TryGetInt32(out int ds) ? ds : 0,
-                                       it.TryGetProperty("emergency", out var em) && em.ValueKind == JsonValueKind.True, Str(it, "text")));
+                                       it.TryGetProperty("emergency", out var em) && em.ValueKind == JsonValueKind.True, Str(it, "text"),
+                                       Str(it, "recordingId"), it.TryGetProperty("hasRecording", out var hr) && hr.ValueKind == JsonValueKind.True));
         }
         items.Sort((a, b) => a.Time.CompareTo(b.Time));
         return (items, next);

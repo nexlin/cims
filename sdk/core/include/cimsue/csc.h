@@ -61,6 +61,8 @@ struct DispatchProfile {
     std::string monitorScope = "none";    // none|own|listed|all
     std::string pttListen = "none";
     std::string listenVisibility = "hidden";
+    std::string directoryAdmin = "none";  // 관제 앱 조직/구성원/번호·PTT 그룹 관리 범위 none|own|all (dispatch_center.md §3.4)
+    std::string orgCode;                  // 관제 그룹 소속 조직 코드 — own 의 루트("" = 없음)
     std::vector<DispatchMember> members;
     std::vector<DispatchTarget> pttTargets;
 };
@@ -78,6 +80,8 @@ struct Profile {
 /** GMS 목록 항목. isOwner = 토큰 주체가 authorized user(편집·삭제 가능). */
 struct GroupSummary { std::string uri, displayName, etag; int memberCount = -1; bool isOwner = false; };
 struct XcapDoc { std::string body, etag; bool notModified = false; };
+/** 임의 HTTP 요청 산출(request) — status 는 HTTP 상태(0 = 전송 실패), body 는 바이트 그대로(이진 가능). */
+struct HttpResult { int status = 0; std::string contentType, etag, body; };
 
 /** 그룹 문서 멤버(list/entry). role = chair | participant (mcpttgi:participant-type). */
 struct GroupMember { std::string uri, name; std::string role = "participant"; int priority = 5; };
@@ -120,6 +124,13 @@ public:
     /** XCAP GET(GMS 그룹 문서·CMS user-profile/service-config) — ifNoneMatch 로 304 캐시. */
     Result xcapGet(const std::string& accessToken, const std::string& path, const std::string& accept,
                    const std::string& ifNoneMatch, XcapDoc& out);
+    /** 코어가 모델링하지 않은 CSC 엔드포인트용 범용 요청(Bearer) — 관제 관리 API(/provisioning/directory/*)·녹취
+     *  (/provisioning/recordings/*, 이진 응답)·이력 창 조회 등. method = GET|POST|PUT|DELETE, body 는 contentType 과 함께
+     *  바이트 그대로 보낸다(비면 본문 없음). ifMatch/ifNoneMatch 는 비면 생략. 2xx·304 = success(out.status 로 구분),
+     *  그 밖의 HTTP 상태 = fail(code=status, reason=본문 앞부분)이되 out 은 채워진다(앱이 오류 JSON 을 읽는다). 전송 실패 = -1. */
+    Result request(const std::string& accessToken, const std::string& method, const std::string& path,
+                   const std::string& contentType, const std::string& body, const std::string& accept,
+                   const std::string& ifMatch, const std::string& ifNoneMatch, HttpResult& out);
     Result getUserProfile(const std::string& accessToken, const std::string& userUri, const std::string& etag, XcapDoc& out) {
         return xcapGet(accessToken, "/org.3gpp.mcptt.user-profile/users/" + enc(userUri) + "/user-profile",
                        "application/vnd.3gpp.mcptt-user-profile+xml", etag, out);

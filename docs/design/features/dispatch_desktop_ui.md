@@ -48,6 +48,7 @@
 | 문자(SMS·LMS) | 내선·가입자 | ③ SMS·LMS | `sendRequest(MESSAGE, text/plain)`·`onMessage` |
 | 긴급 상황 인지 | emergency/imminent/alert | 전역 배너 + ①②행 배지 | `CallInfo.mcptt.emergency/imminentPeril`, `onMessage(alert-ind)` |
 | 장치·핫키·배치 | 설정 | 상단 바 → 설정 창 / 🔒 프리셋 | `audioDevices`·`setAudioDevices`·`addPlaybackRoute`·`setCallRoute` |
+| 조직/구성원/VoLTE·PTT 번호 관리 · PTT 그룹 관리 · 세션 이력 조회·녹취 재생 | 상단 바 ⚙ → 관리 창 | §4.5 관리 창(세 탭) | `CscClient.request`(앱 `ManagementClient` — `/provisioning/directory/*`·`/provisioning/history?until=`·`/provisioning/recordings/*`) |
 
 ## 3. 화면 구성
 
@@ -244,6 +245,20 @@ terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받�
   문자(SMS 요약) · 청취 시작/종료(관제사 자신). 필터 [전체|대표번호|부재], 검색. 정렬: 링잉 → 진행 시작 역순 → 최근 시각 역순.
 - 로컬 링 버퍼·CSV 내보내기(②와 동일). 서버 정본은 통화 기록·녹취 이력. 범위 안 타인의 끝난 통화·SMS 는 서버 통합 이력 폴링(§13)이 최근 행에 합친다.
 
+### 4.5 관리 창 (⚙ → 관리…)
+
+비모달 창 하나(`ManagementWindow`, 1180×760, 앱당 하나 — 열려 있으면 활성화, 로그아웃 시 닫힘). 탭 셋:
+
+| 탭 | 활성 조건 | 내용 | 서버 계약 |
+|---|---|---|---|
+| **조직 · 구성원 · 번호** | `dispatch.directoryAdmin` = `own`\|`all`(관제 그룹 **관리 범위** — 콘솔 `구성 > 관제 그룹 > 관리 범위`, manager 부여) | 왼쪽 **조직 트리**(범위 안, 선택 = 하위 포함 필터, [새 조직]/[편집]/[삭제]) · 가운데 **구성원 목록**(이름·직함·소속 경로·VoLTE/PTT 번호·자격 배지, 검색) · 오른쪽 **편집 폼** — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) + **VoLTE 번호 / PTT 번호** 카드(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취). 저장 뒤 한 벌 재조회 + 전화번호부 동기화 | [android_ue_provisioning.md §3-3](android_ue_provisioning.md) — 범위 밖 403·번호 충돌 409 등은 서버 판정, 앱은 사전(`ResponseText.Area.Management`) 문구 |
+| **PTT 그룹** | 항상(관리 범위가 없으면 GMS 목록의 내 소유 그룹만) | 관리 범위 안 PTT 그룹 전부(`GET /provisioning/directory/groups` — 멤버가 아니어도) · 검색 · [새 그룹]/행 [편집]/[삭제] → 종전 `GroupEditWindow`(GMS XCAP PUT/DELETE — 관리 범위 안이면 소유자가 아니어도 서버가 허용). §4.1 주소록 [그룹] 탭의 생성·편집·삭제는 그대로 둔다(멤버 그룹의 빠른 경로) | [mcptt_api.md §2](../../api/mcptt_api.md) |
+| **세션 이력 · 녹취** | 관제 그룹 소속(범위는 서버 `monitor_scope`/`ptt_listen`) | 종류 [통화(VoLTE)\|PTT 세션] · 날짜(하루 단위 창 조회 — 서버 스캔 48 시간 버킷 상한) · 검색 → 행(시각·상대/그룹·응답/부재·길이·긴급/녹취 배지, 최근이 위). 녹취 행 선택 → 오른쪽 **녹취 패널**: 세그먼트 목록(순번·발언자·길이·상태) → [▶ 재생](MP4/AAC 를 받아 `MediaElement` 로 — 202 변환 중이면 0.7→1.5초 간격 최대 120초 대기 문구) · [정지] · [다시 변환](failed 표식 제거). 재생은 로컬 내역 ④ 에 "녹취 재생" 행, 서버 감사 `E-AUD-016 tap_mode=recording`. 임시 파일 `%TEMP%\CIMS\dispatch-desktop\rec`(창 닫을 때 6시간 지난 것 정리) | [android_ue_provisioning.md §3-2/§3-4](android_ue_provisioning.md) |
+
+- 관리 탭이 잠긴 상태의 안내: "조직/구성원·PTT 그룹 관리는 관제 그룹의 관리 범위(콘솔 구성 > 관제 그룹 > 관리 범위)가 있어야 합니다."
+- 앱은 범위 enum 을 해석하지 않는다 — 서버가 걸러 준 조직·구성원만 보이고, 쓰기 판정도 서버가 한다.
+- 개발 스위치 `--ui-preview --ui-preview-management` = 로그인 없이 관리 창까지(XAML 점검, 목록은 "로그인 전").
+
 ## 5. 감청 창 (팝업)
 
 듣기만 하는 세션 하나 = 창 하나. 주 창과 별개의 비모달 `Window`(기본 440×260, 크기 조절·이동 가능, 두 번째 모니터에 두는 것이 기본 사용례).
@@ -364,6 +379,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 코드비하인드: 배치 잠금(CanMove/CanFloat)·프리셋(XmlLayoutSerializer → layout.json)·감청 창 관리·앱 포커스 핫키·트레이 최소화·종료 확인
   Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 본문, 위치 기억, 닫기 = 종료(확인), 세션 종료 → 3초 후 자동 닫힘
   Shell/LoginWindow · SettingsWindow · PromptWindow
+  Shell/ManagementWindow.xaml    관리 창(§4.5) — TabControl 세 탭, PasswordBox 3개(SIP/로그인 비밀번호)·확인 대화상자·GroupEditWindow 열기·MediaElement 재생만 코드비하인드
   ViewModels/
     MainViewModel               패널 VM 조립 · 패널 간 연동(발신 필드 채움·스레드 따라가기·[채널] 포커스) · 전역 핫키 → 동작 · 감청 창 열기/닫기 요청
     DeskViewModel               Profile·dispatch·등록 상태·오디오 요약·감청 중 N 칩·배치 잠금/프리셋 (상단 바)
@@ -376,13 +392,16 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     SmsMessagesViewModel        ③ 오른쪽 아래 — text/plain MESSAGE 스레드 · token 상관 · 외부망 비활성
     CallActivityViewModel       ④ — 세션 행(dialog 쌍 결합) + 최근 기록
     MonitorWindowViewModel      감청 창 하나(join 호 또는 listenOnly 그룹콜) · MediaSource 미터
+    ManagementViewModel         관리 창 조립(§4.5) — DirectoryAdminViewModel(조직 트리·구성원·편집 폼) · GroupAdminViewModel(범위 안 그룹 목록·GroupEditViewModel 재사용) ·
+                                SessionHistoryViewModel(하루 창 조회·녹취 세그먼트·재생 상태)
     LoginViewModel · SettingsViewModel
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
            listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem·GroupInfo·DialogRow·Message/MessageThread·ActivityRow·Contact
   Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용) ·
             Notifications(토스트·배너) · SettingsStore(json) · LayoutStore(프리셋) · MessageStore(SQLite: mcdata/sms) · ActivityLog(링 버퍼·CSV) ·
             HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) · DirectoryService(그룹원·PTT 사용자·연락처 CSV) ·
-            ResponseText(§9 사전) · AppLog(%APPDATA% logs, 7일)
+            ResponseText(§9 사전 + Area.Management/Recording 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·
+            ManagementClient(관리 평면 — CscClient.Request 위 얇은 클라이언트: directory admin CRUD·그룹 목록·이력 창 조회·녹취 메타/오디오 202 재시도)
   Views/    PttChannelsPanel · PttOriginateView · MessagesView(MCData/SMS 공용) · PttActivityPanel · CallDeskPanel · CallOriginateView · CallActivityPanel
   Themes/   Light/Dark(같은 키) · Styles(패널·카드·버튼·배지·칩·미터)  Converters/  표시 규약 변환기
 ```
@@ -417,11 +436,14 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   (프로비저닝 `ptt.allowCreateGroup`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
   앱: PTT 주소록 [그룹] 탭 [새 그룹]·행 [편집]·[삭제] → `GroupEditWindow` → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
   (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
-- **조직 구성 관리는 OAM 콘솔 몫** — 조직 트리(`organizations` 계층)·가입자 소속·관제 그룹 편성은 콘솔 `관리 > 조직/가입자/관제 그룹` 에서 편집하고
-  앱은 `/provisioning/directory`·`dispatch` 블록으로 결과만 받는다(콘솔 화면 과제, [../console_platform.md](../console_platform.md)).
+- **조직·구성원·번호 관리 = 관리 창(§4.5)** — 관제 그룹 `directory_admin` 범위 안에서 앱이 직접 편집하고(`/provisioning/directory/*`), 관제 그룹 편성
+  (멤버·대표번호·감청/청취/관리 범위)은 여전히 콘솔 `구성 > 관제 그룹` 몫이다. 남은 것: 조직 트리 드래그 이동, 구성원 일괄 가져오기(CSV — 콘솔 import 와 같은 형식),
+  회선 여러 개인 구성원(앱은 종류당 첫 번호만 관리).
 - **청취 범위 그룹의 conference 이벤트 구독**은 서버가 인가한다([dispatch_center.md §5.6](dispatch_center.md), TS 24.379 §10.1.3.4.1) — `pttTargets[]`
   그룹 구독은 200(② 진행 중 행의 "진행/참가자 수" 소스), 범위 밖·자격 없음은 **403 + `Warning: 138`**(앱은 `Area.PttListen` 403 문구로 흡수, 재시도
   루프 금지), 브로드캐스트 그룹은 480 + Warning 105.
+- **녹취 재생 후속**: 파형(`/peaks`)·단독 발언자 트랙(`slot`) 선택·VoLTE 두 화자 분리 재생·영상 세그먼트(F3) — 서버는 이미 내며 앱 UI 만 남았다.
+  OAM 녹취 API 자체는 콘솔 realm 인증이 없어(handlers/recording.py) CSC 프록시가 유일한 가입자 게이트다 — OAM 쪽 인증 정비는 서버 과제.
 - **서버 통합 이력 조회(메시지 모니터링 포함) — 앱 `Services/HistoryClient`**: 관제 범위 안에서 **끝난** 통화·PTT 세션·메시지를 수초 지연으로 ②④ 최근 행에
   합친다. 진행 중 상태는 dialog/conference 구독이 정본이라 폴링이 live 를 대체하지 않는다. 메시지 모니터링은 **실시간 사본 없이 이력 조회만**으로 결정
   ([mcdata_messaging.md §4.3](mcdata_messaging.md)).

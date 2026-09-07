@@ -22,7 +22,8 @@ public class CscTests
           "account": { "msisdn": "+82500000001", "imsi": "4503382500000001", "mcpttId": "tel:+82500000001",
                        "authScheme": "aka", "aka": { "k": "00112233", "opc": "44556677", "amf": "8000" } } }
       ],
-      "dispatch": { "groupId": "dg-1", "groupName": "관제1", "pilotId": "+8215001000", "monitorScope": "all", "pttListen": "listed", "listenVisibility": "hidden" }
+      "dispatch": { "groupId": "dg-1", "groupName": "관제1", "pilotId": "+8215001000", "monitorScope": "all", "pttListen": "listed", "listenVisibility": "hidden",
+                    "directoryAdmin": "own", "orgCode": "DIV1" }
     }
     """;
 
@@ -47,6 +48,9 @@ public class CscTests
         Assert.Equal("dg-1", p.Dispatch.GroupId);
         Assert.Equal("all", p.Dispatch.MonitorScope);
         Assert.Equal("hidden", p.Dispatch.ListenVisibility);
+        Assert.Equal("own", p.Dispatch.DirectoryAdmin);
+        Assert.Equal("DIV1", p.Dispatch.OrgCode);
+        Assert.True(p.Dispatch.CanAdminDirectory);
 
         var a = v.ToAccountConfig();
         Assert.Equal("45033821300000001@ims.example.org", a.DigestUsername());

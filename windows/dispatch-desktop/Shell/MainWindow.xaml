@@ -80,6 +80,7 @@
                                 <Border Style="{StaticResource DropPanel}">
                                     <StackPanel>
                                         <Button Style="{StaticResource DropItem}" Content="설정…" Click="DropItem_Click" Command="{Binding OpenSettingsCommand}" />
+                                        <Button Style="{StaticResource DropItem}" Content="관리 — 조직·구성원·PTT 그룹·이력/녹취…" Click="Management_Click" ToolTip="조직/구성원/번호·PTT 그룹 관리(관리 범위 필요), 세션 이력 조회·녹취 재생" />
                                         <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,4" />
                                         <Button Style="{StaticResource DropItem}" Content="로그아웃" Click="DropItem_Click" Command="{Binding LogoutCommand}" />
                                         <Button Style="{StaticResource DropItem}" Content="종료" Click="DropItem_Click" Command="{Binding ExitCommand}" />

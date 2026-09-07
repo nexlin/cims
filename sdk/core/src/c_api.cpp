@@ -383,6 +383,8 @@ struct ProfileHolder {
         out.dispatch.monitor_scope = C(d.monitorScope);
         out.dispatch.ptt_listen = C(d.pttListen);
         out.dispatch.listen_visibility = C(d.listenVisibility);
+        out.dispatch.directory_admin = C(d.directoryAdmin);
+        out.dispatch.org_code = C(d.orgCode);
         members.clear(); targets.clear();
         for (const auto& m : d.members) members.push_back({C(m.userId), C(m.name), C(m.volteAor), C(m.pttId), C(m.extension), C(m.groupId)});
         for (const auto& t : d.pttTargets) targets.push_back({C(t.id), C(t.uri), C(t.name)});
@@ -494,6 +496,8 @@ struct cimsue_csc {
     XcapDoc                    doc;
     cimsue_xcap_doc_t          docC{};
     GroupDocHolder             group;
+    HttpResult                 http;
+    cimsue_http_result_t       httpC{};
 };
 
 namespace {
@@ -511,6 +515,14 @@ void fillDoc(cimsue_csc_t* c) {
     c->docC.body = C(c->doc.body);
     c->docC.etag = C(c->doc.etag);
     c->docC.not_modified = B(c->doc.notModified);
+}
+
+void fillHttp(cimsue_csc_t* c) {
+    c->httpC.status = c->http.status;
+    c->httpC.content_type = C(c->http.contentType);
+    c->httpC.etag = C(c->http.etag);
+    c->httpC.body = reinterpret_cast<const uint8_t*>(c->http.body.data());
+    c->httpC.body_len = (int32_t)c->http.body.size();
 }
 
 }  // namespace
@@ -963,6 +975,20 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_xcap_get(cimsue_csc_t* c, const char* acc
     return st;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const char* access_token, const char* method,
+                                               const char* path, const char* content_type, const uint8_t* body,
+                                               int32_t body_len, const char* accept, const char* if_match,
+                                               const char* if_none_match, cimsue_http_result_t* out) {
+    if (!c) return -1;
+    c->http = HttpResult();
+    std::string b = (body && body_len > 0) ? std::string(reinterpret_cast<const char*>(body), (size_t)body_len) : std::string();
+    cimsue_status_t st = ret(c->cli->request(S(access_token), S(method), S(path), S(content_type), b, S(accept),
+                                             S(if_match), S(if_none_match), c->http));
+    fillHttp(c);
+    if (out) *out = c->httpC;
+    return st;
+}
+
 cimsue_status_t CIMSUE_CALL cimsue_csc_get_user_profile(cimsue_csc_t* c, const char* access_token,
                                                         const char* user_uri, const char* etag,
                                                         cimsue_xcap_doc_t* out) {
@@ -1047,6 +1073,7 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_PROFILE:           return (int32_t)sizeof(cimsue_profile_t);
     case CIMSUE_STRUCT_GROUP_SUMMARY:     return (int32_t)sizeof(cimsue_group_summary_t);
     case CIMSUE_STRUCT_XCAP_DOC:          return (int32_t)sizeof(cimsue_xcap_doc_t);
+    case CIMSUE_STRUCT_HTTP_RESULT:       return (int32_t)sizeof(cimsue_http_result_t);
     case CIMSUE_STRUCT_DISPATCH_MEMBER:   return (int32_t)sizeof(cimsue_dispatch_member_t);
     case CIMSUE_STRUCT_DISPATCH_TARGET:   return (int32_t)sizeof(cimsue_dispatch_target_t);
     case CIMSUE_STRUCT_GROUP_MEMBER:      return (int32_t)sizeof(cimsue_group_member_t);

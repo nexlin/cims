@@ -57,7 +57,7 @@
                 <CheckBox Content="참여 전 affiliation 필요" IsChecked="{Binding RequireAffiliation}" Margin="0,0,0,4" />
                 <CheckBox Content="미디어 암호화" IsChecked="{Binding Encryption}" Margin="0,0,0,4" />
                 <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" TextWrapping="Wrap"
-                           Text="저장하면 GMS 그룹 문서로 서버에 올라가고(XCAP PUT), 멤버 단말에는 문서 변경 통지가 갑니다. 편집·삭제는 내가 만든 그룹만 됩니다." />
+                           Text="저장하면 GMS 그룹 문서로 서버에 올라가고(XCAP PUT), 멤버 단말에는 문서 변경 통지가 갑니다. 편집·삭제는 내가 만든 그룹(또는 관제 그룹 관리 범위 안 그룹)만 됩니다." />
             </StackPanel>
             <!-- 멤버 -->
             <Grid Grid.Column="1">
