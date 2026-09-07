@@ -227,6 +227,28 @@ export default function ServersPage() {
     return byGroup
   }, [agents])
 
+  // 트리 검색 (시안 TreePanel) — 이름·호스트·IP 부분일치. 그룹은 이름이 맞거나 멤버가
+  // 하나라도 맞으면 남는다. 빈 질의면 원본을 그대로 넘겨 불필요한 재생성을 피한다.
+  const [treeQuery, setTreeQuery] = useState('')
+  const q = treeQuery.trim().toLowerCase()
+  const hitAgent = (a: Agent) =>
+    [a.name, a.hostname, a.ip_address].some(v => (v ?? '').toLowerCase().includes(q))
+  const shownGroups = useMemo(() => !q ? haGroups
+    : haGroups.filter(g => g.name.toLowerCase().includes(q)
+        || (groupedAgents.get(g.id) || []).some(hitAgent)), [haGroups, groupedAgents, q])
+  const shownAgents = useMemo(() => {
+    if (!q) return groupedAgents
+    const m = new Map<number, Agent[]>()
+    for (const [gid, list] of groupedAgents) {
+      const g = haGroups.find(x => x.id === gid)
+      // 그룹 이름이 맞으면 멤버를 전부 보여 준다 — 그래야 그룹을 찾은 의미가 있다
+      const keep = g && g.name.toLowerCase().includes(q) ? list : list.filter(hitAgent)
+      if (keep.length) m.set(gid, keep)
+    }
+    return m
+  }, [groupedAgents, haGroups, q])
+  const serverCount = agents.length
+
   const toggleGroupExpand = (gid: number) => {
     setExpandedGroups(prev => {
       const next = new Set(prev)
@@ -419,20 +441,18 @@ export default function ServersPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
       {/* 페이지 탭 — 좌측 선택(서버/그룹) 공유, 우측 내용 전환 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2, borderBottom: '2px solid var(--border)' }}>
+      {/* 4탭 — 정본 = Figma Sec/Tabs (458:8459). 높이 31 · 탭 사이 20 · 활성은 primary 밑줄.
+          구 코드는 밑줄색이 `#1976d2` 하드코딩이었다(토큰과 다른 파랑). */}
+      <div className="flex items-center gap-5 border-b-2 border-border" role="tablist">
         {PAGE_TABS.map(t => {
           const active = pageTab === t.key
           const locked = t.adminGated && !canEdit
           return (
             <button key={t.key} onClick={() => setPageTab(t.key)}
-                    style={{
-                      padding: '9px 20px', fontSize: 13.5, fontWeight: active ? 700 : 400,
-                      background: active ? 'var(--card)' : 'transparent',
-                      color: active ? 'var(--primary)' : 'var(--muted-foreground)',
-                      border: 'none',
-                      borderBottom: active ? '2px solid #1976d2' : '2px solid transparent',
-                      marginBottom: -2, cursor: 'pointer',
-                    }}
+                    role="tab" aria-selected={active}
+                    className={`-mb-0.5 flex h-[31px] items-center border-b-2 text-md transition-colors ${
+                      active ? 'border-primary font-semibold text-primary'
+                             : 'border-transparent text-muted-foreground hover:text-foreground'}`}
                     title={locked ? '조회 가능 — 변경은 admin 권한 필요 (관리자 인증)' : ''}>
               {t.label}{locked && <Lock size={11} style={{ marginLeft: 5, verticalAlign: '-1px' }} />}
             </button>
@@ -459,14 +479,26 @@ export default function ServersPage() {
       {/* 좌측 트리 + 우측 Inspector */}
       <div style={{ flex: 1, display: 'flex', gap: 12, overflow: 'hidden' }}>
         {/* 좌측 트리 */}
-        <div style={{
-          flex: '0 0 320px', overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)',
-        }}>
-          <div style={{ flex: 1, overflow: 'auto' }}>
+        {/* 좌측 TreePanel — 정본 = Figma Sec/TreePanel (458:6714).
+            폭 300 · 안쪽 여백 10 · 헤더 30 · 검색 34 · 트리 항목 32(간격 2) · 하단 버튼 36 */}
+        <div className="flex w-[300px] shrink-0 flex-col overflow-hidden rounded-md border border-border bg-card">
+          <div className="flex h-[30px] shrink-0 items-baseline gap-2 px-3.5 pt-3">
+            <span className="text-base font-semibold">시스템</span>
+            <span className="text-xs text-muted-foreground">
+              시스템 {haGroups.length} · 서버 {serverCount}
+            </span>
+          </div>
+          <div className="shrink-0 px-2.5 pt-1">
+            <input value={treeQuery} onChange={e => setTreeQuery(e.target.value)}
+                   placeholder="서버 이름·IP 검색"
+                   aria-label="서버 이름·IP 검색"
+                   className="h-[34px] w-full rounded-md border border-input bg-card px-2.5 text-md
+                              placeholder:text-muted-foreground focus-visible:shadow-focus focus-visible:outline-none" />
+          </div>
+          <div className="flex-1 overflow-auto px-2.5 pt-2.5">
             <ServerTree
-              haGroups={haGroups}
-              groupedAgents={groupedAgents}
+              haGroups={shownGroups}
+              groupedAgents={shownAgents}
               depsByAgent={depsByAgent}
               expanded={expandedGroups}
               onToggleExpand={toggleGroupExpand}
@@ -477,8 +509,8 @@ export default function ServersPage() {
           </div>
           {/* 시스템 추가 — 시스템 목록 바로 아래. 구성 작업이므로 [시스템/서버 구성] 탭에서만 노출 */}
           {pageTab === 'infra' && (
-            <div style={{ flex: '0 0 auto', padding: 10, borderTop: '1px solid var(--border)' }}>
-              <button className="btn btn--primary btn--sm" style={{ width: '100%' }}
+            <div className="shrink-0 p-2.5">
+              <button className="btn btn--primary" style={{ width: '100%', height: 36 }}
                       onClick={() => setSystemModalOpen(true)}
                       disabled={!canEdit}
                       title={canEdit ? 'AS 이중화 (서버 2 자동) / AA 다중화 / SA 단일 서버' : 'admin 권한 필요 (관리자 인증)'}>
