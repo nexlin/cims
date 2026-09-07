@@ -1093,27 +1093,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
   return (
     <>
       {/* 정체성(AS 배지·이름·#id·vrid)과 액션은 탭 위 GroupContextBar 로 올라갔다.
-          여기는 저장 흐름(metaDirty → [적용])에 묶인 편집 필드만 남긴다. */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', fontSize: 12 }}>
-          <label style={{ color: 'var(--muted-foreground)' }}>이름:</label>
-          <input className="form-input" value={editName} onChange={e => setEditName(e.target.value)}
-                 style={{ width: 200 }} />
-          {group.mode === 'active_standby' && (
-            <>
-              <label style={{ color: 'var(--muted-foreground)' }}>auth_pass:</label>
-              <input type="password" className="form-input" value={editAuthPass}
-                     onChange={e => setEditAuthPass(e.target.value)}
-                     maxLength={8}
-                     style={{ width: 140 }}
-                     title="VRRP 인증 (active_standby 만 사용, 최대 8글자)" />
-            </>
-          )}
-          <label style={{ color: 'var(--muted-foreground)' }}>note:</label>
-          <input className="form-input" value={editNote} onChange={e => setEditNote(e.target.value)}
-                 style={{ flex: 1 }} />
-        </div>
-      </div>
+          여기는 저장 흐름에 묶인 편집 필드만 — 저장은 하단 StickySaveBar. */}
       <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
         {/* 이 화면의 변경 범위를 먼저 알린다 (Figma G1 42:428 상단 SectionMessage).
             표시값 기준 노드도 함께 — 멤버마다 값이 다를 수 있는데 화면은 하나다. */}
@@ -1126,6 +1106,29 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
             표시값 기준은 {activeMemberLabel} 입니다. 개별 서버만 바꾸려면 좌측 트리에서 해당 서버를 선택하세요.
           </div>
         </Alert>
+        {/* 그룹 설정 — 세로 라벨 3필드 + 필드별 도움말 (Figma G1 42:428).
+            구 화면은 `이름:[ ] auth_pass:[ ] note:[ ]` 한 줄이라 무엇이 필수인지도,
+            auth_pass 가 무엇인지도 알 수 없었다. */}
+        <SubSection title="그룹 설정" hint="VRRP 인증·메모 · 저장 시 전 멤버 반영">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <FormField label="그룹 이름" required help="트리와 대시보드에 표시되는 이름">
+              <input className="form-input w-full" value={editName}
+                     onChange={e => setEditName(e.target.value)} />
+            </FormField>
+            {group.mode === 'active_standby' && (
+              <FormField label="auth_pass" required
+                         help="VRRP 인증 비밀번호 — 멤버 간 동일해야 합니다 (최대 8글자)">
+                <input type="password" className="form-input w-full" maxLength={8}
+                       value={editAuthPass} onChange={e => setEditAuthPass(e.target.value)} />
+              </FormField>
+            )}
+            <FormField label="note" help="운영 메모 (선택)">
+              <input className="form-input w-full" value={editNote}
+                     onChange={e => setEditNote(e.target.value)} />
+            </FormField>
+          </div>
+        </SubSection>
+
         {/* 절체 조건 — 그룹 단위 설정. 자체 [적용] 으로 그 영역만 backend push. AS 만. */}
         {group.mode === 'active_standby' && (
           <div style={{ marginBottom: 20 }}>
@@ -1495,124 +1498,87 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
         )}
       </div>
       {open && (
-        <div style={{ padding: 12, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
-                   title="VRRP 광고 주기 (초). Master 가 Backup 에게 살아있음을 알리는 주기. 짧을수록 절체가 빨라지지만 네트워크 트래픽 증가.">
-              감시 주기 (초)
-            </label>
-            <input type="number" min={0.5} max={5} step={0.5}
-                   value={value.advert_int}
-                   onChange={e => set('advert_int', Number(e.target.value) || 1)}
-                   className="form-input" style={{ width: 80 }} />
-            <span style={{ color: 'var(--muted-foreground)' }}>기본 1초 · 범위 0.5~5초</span>
-          </div>
+        /* 9필드 3열 그리드 (Figma G1 42:428). 구 화면은 한 줄에 여러 필드를 이어 붙여
+           `연속 [3] 회 실패 (윈도우 [300] 초) → 절체` 처럼 문장 속에 입력이 박혀 있었다 —
+           라벨과 값의 대응이 흐리고 도움말 자리도 없다. */
+        <div className="p-3">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-3">
+            <FormField label="감시 주기 (초)" help="기본 1초 · 범위 0.5~5초">
+              <input type="number" min={0.5} max={5} step={0.5} className="form-input w-full"
+                     value={value.advert_int}
+                     onChange={e => set('advert_int', Number(e.target.value) || 1)} />
+            </FormField>
+            <FormField label="점검 주기 (초)" help="health check 실행 간격">
+              <input type="number" min={1} max={60} className="form-input w-full"
+                     value={value.health.interval}
+                     onChange={e => setHealth('interval', Number(e.target.value) || 2)} />
+            </FormField>
+            <FormField label="제한 시간 (초)" help="health check 응답 대기 한도">
+              <input type="number" min={1} max={60} className="form-input w-full"
+                     value={value.health.timeout}
+                     onChange={e => setHealth('timeout', Number(e.target.value) || 3)} />
+            </FormField>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
-                   title="cims-health 가 모듈 상태(포트 listen + 선택적 프로세스)를 점검하는 주기">
-              점검 주기 (초)
-            </label>
-            <input type="number" min={1} max={60}
-                   value={value.health.interval}
-                   onChange={e => setHealth('interval', Number(e.target.value) || 2)}
-                   className="form-input" style={{ width: 70 }} />
-            <label style={{ color: 'var(--muted-foreground)', marginLeft: 12 }}
-                   title="연속 실패 N회 → 장애로 판정. 절체까지의 시간 = 점검주기 × 장애판정.">장애 판정 (회)</label>
-            <input type="number" min={1} max={60}
-                   value={value.health.fall}
-                   onChange={e => setHealth('fall', Number(e.target.value) || 2)}
-                   className="form-input" style={{ width: 60 }} />
-            <label style={{ color: 'var(--muted-foreground)', marginLeft: 12 }}
-                   title="연속 성공 N회 → 정상 복귀로 판정">복귀 판정 (회)</label>
-            <input type="number" min={1} max={60}
-                   value={value.health.rise}
-                   onChange={e => setHealth('rise', Number(e.target.value) || 2)}
-                   className="form-input" style={{ width: 60 }} />
-            <label style={{ color: 'var(--muted-foreground)', marginLeft: 12 }}
-                   title="단일 점검 명령의 최대 실행 시간 (초과 시 실패)">제한 시간 (초)</label>
-            <input type="number" min={1} max={60}
-                   value={value.health.timeout}
-                   onChange={e => setHealth('timeout', Number(e.target.value) || 3)}
-                   className="form-input" style={{ width: 60 }} />
-          </div>
+            <FormField label="장애 판정 (회)" help="연속 실패 N회 → 절체. 절체까지 ≈ 점검주기 × 이 값">
+              <input type="number" min={1} max={60} className="form-input w-full"
+                     value={value.health.fall}
+                     onChange={e => setHealth('fall', Number(e.target.value) || 2)} />
+            </FormField>
+            <FormField label="복귀 판정 (회)" help="연속 성공 N회 → 정상">
+              <input type="number" min={1} max={60} className="form-input w-full"
+                     value={value.health.rise}
+                     onChange={e => setHealth('rise', Number(e.target.value) || 2)} />
+            </FormField>
+            <FormField label="승격 유예 (초)" help="기본 30초 (0 = 유예 없음) — 승격 직후 cold 모듈 기동 시간 흡수">
+              <input type="number" min={0} max={600} className="form-input w-full"
+                     value={value.health.grace_sec ?? 30}
+                     onChange={e => setHealth('grace_sec', Number(e.target.value) || 0)} />
+            </FormField>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ width: 150, color: 'var(--muted-foreground)' }}>NIC 링크 감시</label>
-            <input type="checkbox" checked={value.track_interface}
-                   onChange={e => set('track_interface', e.target.checked)} />
-            <span style={{ color: 'var(--muted-foreground)' }}>
-              서비스 NIC 의 링크 다운을 즉시 감지 (점검 주기 기다리지 않고 바로 절체)
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
-                   title="MASTER 승격 후 이 시간 동안 헬스 실패를 유예 — cold 모듈 기동 시간 흡수 (승격 직후 재장애 방지)">
-              승격 유예 (초)
-            </label>
-            <input type="number" min={0} max={600}
-                   value={value.health.grace_sec ?? 30}
-                   onChange={e => setHealth('grace_sec', Number(e.target.value) || 0)}
-                   className="form-input" style={{ width: 80 }} />
-            <span style={{ color: 'var(--muted-foreground)' }}>기본 30초 (0=유예 없음)</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
-                   title={
-                     '모듈 장애 시 watchdog 이 로컬 재기동을 먼저 시도하고, 윈도우 내 연속 N회 실패하면 ' +
-                     '그 노드를 포기하고 절체(VIP 이양)한다. 일시적 crash 1회로 절체하지 않도록 하는 방어선.\n' +
-                     '값이 클수록 flap 은 줄지만 진짜 장애의 절체가 늦어진다 (절체 지연 ≈ N × 재기동 backoff).'
-                   }>
-              재기동 임계
-            </label>
-            <span style={{ color: 'var(--muted-foreground)' }}>연속</span>
-            <input type="number" min={1} max={20}
-                   value={rl.max_fails}
-                   onChange={e => setRestart('max_fails', Number(e.target.value) || 3)}
-                   className="form-input" style={{ width: 60 }} />
-            <span style={{ color: 'var(--muted-foreground)' }}>회 실패 (윈도우</span>
-            <input type="number" min={10} max={3600}
-                   value={rl.window_sec}
-                   onChange={e => setRestart('window_sec', Number(e.target.value) || 300)}
-                   className="form-input" style={{ width: 80 }} />
-            <span style={{ color: 'var(--muted-foreground)' }}>초) → 절체. 기본 3회/300초</span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <label style={{ width: 150, color: 'var(--muted-foreground)' }}
-                   title={
-                     '복귀 없음: 절체 후 옛 Master 가 살아 돌아와도 Backup 으로 머무름 — 추가 절체 없음(운영 안정).\n' +
-                     '자동 복귀: 옛 Master 의 priority 가 더 높으면 자동으로 Master 권한을 되찾음 — priority 의도 유지되나 복구 시점에 한 번 더 절체 발생.'
-                   }>권한 복귀 정책</label>
-            <select value={value.preempt}
-                    onChange={e => set('preempt', e.target.value as 'preempt' | 'nopreempt')}
-                    className="form-input" style={{ width: 200 }}>
-              <option value="nopreempt">복귀 없음 (운영 안정)</option>
-              <option value="preempt">자동 복귀 (priority 우선)</option>
-            </select>
+            <FormField label="재기동 임계 (회)" help="윈도우 내 연속 실패 횟수 — 넘으면 로컬 재기동을 포기하고 절체">
+              <input type="number" min={1} max={20} className="form-input w-full"
+                     value={rl.max_fails}
+                     onChange={e => setRestart('max_fails', Number(e.target.value) || 3)} />
+            </FormField>
+            <FormField label="판정 윈도우 (초)" help="기본 300초">
+              <input type="number" min={10} max={3600} className="form-input w-full"
+                     value={rl.window_sec}
+                     onChange={e => setRestart('window_sec', Number(e.target.value) || 300)} />
+            </FormField>
+            <FormField label="권한 복귀 정책" help="자동 복귀 선택 시 복구 노드가 MASTER 를 회수한다">
+              <select className="form-input w-full" value={value.preempt}
+                      onChange={e => set('preempt', e.target.value as 'preempt' | 'nopreempt')}>
+                <option value="nopreempt">복귀 없음 (운영 안정)</option>
+                <option value="preempt">자동 복귀 (priority 우선)</option>
+              </select>
+            </FormField>
             {value.preempt === 'preempt' && (
-              <>
-                <label style={{ color: 'var(--muted-foreground)', marginLeft: 8 }}
-                       title="옛 Master 가 살아 돌아온 뒤, 권한을 되찾기 전에 N초간 안정화 대기">복귀 지연 (초)</label>
-                <input type="number" min={0} max={300}
+              <FormField label="복귀 지연 (초)" help="옛 MASTER 가 돌아온 뒤 권한 회수 전 안정화 대기">
+                <input type="number" min={0} max={300} className="form-input w-full"
                        value={value.preempt_delay}
-                       onChange={e => set('preempt_delay', Number(e.target.value) || 0)}
-                       className="form-input" style={{ width: 70 }} />
-              </>
+                       onChange={e => set('preempt_delay', Number(e.target.value) || 0)} />
+              </FormField>
             )}
           </div>
+
           {value.preempt === 'preempt' && (
-            <div style={{ paddingLeft: 150, fontSize: 11, color: '#e67e22' }}>
-              ⚠ 자동 복귀 모드는 옛 Master 가 살아 돌아올 때 한 번 더 절체가 발생합니다 (서비스 추가 단절).
-              priority 가 의미 있는 비대칭 환경 (사양 차이, 주/부 사이트) 에서만 권장.
-            </div>
+            <Alert variant="warning" className="mt-4">
+              자동 복귀 모드는 옛 MASTER 가 살아 돌아올 때 **한 번 더 절체**가 발생합니다(서비스 추가 단절).
+              priority 가 의미 있는 비대칭 환경(사양 차이, 주/부 사이트)에서만 권장합니다.
+            </Alert>
           )}
 
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
-            오른쪽 위 [적용] 을 누르면 멤버 서버의 keepalived 설정이 재생성되어 즉시 반영됩니다.
-          </div>
+          {/* 체크박스 — 시안은 라벨 + 설명 한 줄 (Figma G1) */}
+          <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-3">
+            <input type="checkbox" className="mt-0.5" checked={value.track_interface}
+                   onChange={e => set('track_interface', e.target.checked)} />
+            <span>
+              <span className="text-md font-medium">서비스 NIC 링크 감시</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                링크 다운을 즉시 감지해 점검 주기를 기다리지 않고 바로 절체합니다
+              </span>
+            </span>
+          </label>
         </div>
       )}
     </div>
@@ -2123,6 +2089,34 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
  * **중첩은 2단까지** (DESIGN-RULES §2). 제목 옆 괄호 수는 그 섹션이 다루는 행 수,
  * 힌트는 "무엇을 바꿀 수 있는가" 를 한 줄로 알린다.
  */
+/**
+ * FormField — 라벨 · 필수 표시 · 입력 · 도움말을 묶는 래퍼.
+ * 정본 = Figma `02 Components` Sec/TextInput (Field) 17:58 — "라벨·필수·도움말·에러가 한
+ * 컴포넌트에 포함" 이 그 컴포넌트의 존재 이유다. 인라인 `라벨: [입력]` 은 필수 여부도
+ * 의미도 못 전한다.
+ */
+function FormField({ label, required, help, error, children }: {
+  label: string
+  required?: boolean
+  help?: string
+  error?: string
+  children: React.ReactNode
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-sm font-medium">
+        {label}{required && <span className="ml-0.5 text-destructive">*</span>}
+      </span>
+      {children}
+      {(error || help) && (
+        <span className={`text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>
+          {error || help}
+        </span>
+      )}
+    </label>
+  )
+}
+
 function SubSection({ title, count, hint, defaultOpen = true, children }: {
   title: string
   count?: number
