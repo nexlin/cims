@@ -320,6 +320,9 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
    ptt=PSP 대표/VIP 주소로 채운다.
    (표준 `access_services` 는 CSP 컬렉션이라 CSC 가 직접 못 읽으므로, 시그널링 매핑은 CSC 설정으로 둔다.
    **따라서 CSP/PSP 의 `local_nodes` bind_port 를 바꾸면 이 값도 같이 맞춰야 한다** — 두 값은 의도적 중복이다.)
+   `name` = 그 종류의 CSP `access_services.name`(= 가입 회선 `service_ref`). 관제 앱 관리 API
+   `GET /provisioning/directory/admin` 의 `services.<kind>[].name` 후보가 여기서 나오므로 CSP 의 실제 이름과
+   같아야 한다(패키지 기본 `volte`/`ptt` — csp/pkg.json. configure `--volte-service/--ptt-service`).
 
    설정 소유자는 `csc/config/config_template.json` 의 `provisioning` 섹션(`scope: service`)이다:
    - 콘솔 `관리 > 시스템 > 시스템/인프라` → 서버 선택 → **[패키지 설정] > csc > [설정]** 탭의

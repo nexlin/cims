@@ -142,6 +142,15 @@
           "help": "관제 데스크 dispatch.members[].extension = 가입 번호(E.164) 끝자리 N 자리. 망 주소가 아닌 관제 앱 표시 라벨(dispatch_center.md §8.4). 0 = 전체 digits."
         },
         {
+          "key": "Provisioning.Services.volte.name",
+          "label": "VoLTE 접속서비스 이름",
+          "type": "string",
+          "default": "volte",
+          "deploy_value": "@VOLTE_SERVICE@",
+          "restart": true,
+          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 관제 앱 관리 API(/provisioning/directory/admin services.volte[].name)가 번호 개설 폼의 후보로 내려준다. CSP 의 실제 접속서비스 이름과 일치해야 한다(csc 는 CSP 를 조회하지 않는다 — domain·media_srtp 와 같은 운영 규약). 패키지 기본 = csp/pkg.json 의 volte."
+        },
+        {
           "key": "Provisioning.Services.volte.host",
           "label": "VoLTE SIP 주소 (CSP)",
           "type": "string",
@@ -212,6 +221,15 @@
           "default": "off",
           "restart": true,
           "help": "단말 프로파일 mediaSecurity 로 내리는 미디어 SRTP(SDES) 정책. CSP access_services.media_srtp 와 일치해야 한다(csc 는 CSP 를 조회하지 않는다). docs/design/features/media_security.md §7.2"
+        },
+        {
+          "key": "Provisioning.Services.ptt.name",
+          "label": "PTT 접속서비스 이름",
+          "type": "string",
+          "default": "ptt",
+          "deploy_value": "@PTT_SERVICE@",
+          "restart": true,
+          "help": "CSP access_services.name — 이 종류의 가입 회선이 참조하는 service_ref. 관제 앱 관리 API(/provisioning/directory/admin services.ptt[].name)가 번호 개설 폼의 후보로 내려준다. CSP 의 실제 접속서비스 이름과 일치해야 한다(csc 는 CSP 를 조회하지 않는다 — domain·media_srtp 와 같은 운영 규약). 패키지 기본 = csp/pkg.json 의 ptt."
         },
         {
           "key": "Provisioning.Services.ptt.host",

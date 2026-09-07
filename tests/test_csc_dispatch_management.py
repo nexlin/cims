@@ -445,5 +445,31 @@ class GmsAdminGateTests(unittest.TestCase):
         self.assertFalse(m._admin_manages_group({}, None))
 
 
+class ServiceCatalogTests(unittest.TestCase):
+    """접속서비스 후보(`services.<kind>[].name`) — CSC 는 CSP access_services 컬렉션을 못 읽으므로(관리 store 가
+    다르다) csc.json Provisioning.Services.<kind> 가 정본. `name` 이 service_ref 후보가 된다(없으면 kind)."""
+
+    def setUp(self):
+        import services.file_store as fs
+        self._fs_load_all = fs.load_all
+        fs.load_all = lambda d: []          # 미러 비어 있음(개발 서버·CSC 표준 배포 공통)
+
+    def tearDown(self):
+        import services.file_store as fs
+        fs.load_all = self._fs_load_all
+
+    def test_fallback_uses_configured_name(self):
+        cfg = {"Provisioning": {"Services": {
+            "volte": {"name": "volte", "domain": "ims.example"},
+            "ptt": {"name": "mcptt", "domain": "ptt.example"}}}}
+        out = dd._services(cfg)
+        self.assertEqual(out["volte"], [{"name": "volte", "domain": "ims.example"}])
+        self.assertEqual(out["ptt"], [{"name": "mcptt", "domain": "ptt.example"}])
+
+    def test_fallback_without_name_uses_kind(self):
+        cfg = {"Provisioning": {"Services": {"ptt": {"domain": "ptt.example"}}}}
+        self.assertEqual(dd._services(cfg)["ptt"], [{"name": "ptt", "domain": "ptt.example"}])
+
+
 if __name__ == "__main__":
     unittest.main()

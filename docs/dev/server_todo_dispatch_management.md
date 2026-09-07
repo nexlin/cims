@@ -27,7 +27,7 @@ S1-UNIT-CSC(`verify/lib/items/stage1/unit_csc.py`)에 `tests/test_csc_dispatch_m
 3. **CSC 배포·재기동**(csc 0.2.108) — MCPTT 서버(4430)에 라우트 4+1 개가 추가된다(`/provisioning/directory/{admin,orgs,members,groups}`, `/provisioning/recordings`). OAM 게이트웨이 라우트 변경 없음(4430 은 단말 직결).
 4. **관제 그룹 설정**(콘솔 `구성 > 관제 그룹`, manager): 시험 그룹 `dg-dispatch01` 의 **관리 범위** = `소속 조직 하위`(조직 `TEAM01` 지정) 또는 `전체 조직`. 관리 범위 `own` 은 `org_id` 가 없으면 범위가 비어 관리 불가 — 조직을 먼저 지정한다.
 5. **콘솔 빌드 확인**: `ems/core/console` 에서 `tsc -b && vite build` — `directory_admin` 필드·`DirectoryAdmin` 타입 추가분. 이 PC 는 node 가 없어 타입 검사를 못 돌렸다(수정 범위는 필드 하나·셀렉트 하나).
-6. **접속서비스 목록**: 앱의 번호 개설 폼은 `access_services` 런타임 스토어(없으면 csc.json `Provisioning.Services`)에서 `service_ref` 후보를 받는다 — 개발 서버에 VoLTE/PTT 서비스 이름이 실제 CSP 서비스와 같은지 확인(H(A1) realm 결박 재료).
+6. **접속서비스 이름**: 앱의 번호 개설 폼은 `GET /provisioning/directory/admin` 의 `services.<kind>[].name` 을 `service_ref` 후보로 받는다. CSC 는 CSP 의 `access_services` 컬렉션을 읽지 못하므로(관리 store 가 다르다 — android_ue_provisioning.md §3-2) 이 이름은 csc.json `Provisioning.Services.<kind>.name` 이 정본이다. 개발 서버는 PTT 접속서비스가 `mcptt` 라 configure `--ptt-service mcptt`(.cims `configure.ptt_service`)로 맞춘다 — 안 맞으면 앱이 개설한 회선의 service_ref 가 CSP 에 없어 REGISTER 403.
 7. **실기 시험 항목**(앱 관리 창): ① 조직 생성/이동/삭제(범위 밖 403·not_empty 409) ② 구성원 생성(VoLTE+PTT 회선 동시)·회선 번호 변경(비밀번호 없이 400)·회선 삭제·자격 토글 → 단말 재등록 확인 ③ PTT 그룹 탭에서 비소유 그룹 편집/삭제 ④ 이력 창 조회(전날 포함)·녹취 행 재생(첫 재생 202 → 변환 대기 → 재생, `failed` 는 [다시 변환]) ⑤ 감사 이벤트(E-AUD-006 config_change · E-AUD-016 tap_mode=recording) 콘솔 `장애 > 감사 이력` 확인.
 
 ## 3. 남은 서버 과제 (이번 변경 밖)
@@ -41,4 +41,5 @@ S1-UNIT-CSC(`verify/lib/items/stage1/unit_csc.py`)에 `tests/test_csc_dispatch_m
 | T5 | 회선 여러 개인 구성원 — 관리 API 는 종류당 첫 회선만 노출/편집 | `_members_in_scope` 첫 행 | 필요하면 `volte[]`/`ptt[]` 배열로 계약 확장(앱 폼도) |
 | T6 | 관제 그룹 편성 자체(멤버·대표번호·감청/청취/관리 범위)는 여전히 콘솔 전용 | 설계상 승인 사항(manager) | 유지. 앱에서 필요해지면 별도 인가 축으로 검토 |
 | T7 | `directory_admin` 을 CSP 도 알아야 하는가 | CSP 는 관제 그룹 속성을 인메모리 맵으로 든다(§3.3) — 관리 범위는 CSC 만 판정하므로 **불필요**. `DISPATCH_GROUP_CHANGED` 재적재 시 모르는 컬럼은 무시됨 | 없음(확인만) |
+| T9 | **CSC 가 `access_services` 미러를 못 본다** — OAM helper(`services/access_services.py`)는 미러 `modules/csp/runtime/collections/access_services/` 를 "CSC 의 유일한 경로" 로 적지만, CSC 의 `ha_lookup.collection_dir` 은 자기 runtime(`modules/csc/runtime/collections/csp/…`)을 보므로 표준 배포에서도 항상 빈 목록 → csc.json 폴백 | `_service_realm`(admin.py)·`_services`(dispatch_directory.py) 둘 다 폴백으로만 동작 중. 이름은 `Provisioning.Services.<kind>.name` 으로 메웠다(§2-6) | 미러를 CSC 가 실제로 읽게 하거나(경로 계약 정정), 아니면 helper 주석·runtime_store_v2 문서를 "CSC 는 csc.json 규약" 으로 정정. 둘 중 하나로 문서·코드를 일치시킨다 |
 | T8 | Android 관제 태블릿·SDK Kotlin 파사드에 `CscClient.request`·`DispatchProfile.directoryAdmin/orgCode` 반영 | SWIG `cimsue.i` 는 `csc.h` 를 포함하지 않는다 | Android 관리 화면 착수 시 |
