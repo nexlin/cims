@@ -1,3 +1,13 @@
+/* ── Tailwind (T0b) ─────────────────────────────────────────────
+   preflight 는 tailwind.config.ts 에서 꺼 두었다 — 아래 자체 reset 과 동시에 켜면
+   버튼·표 높이가 어긋난다. 자체 reset 을 걷어내는 T4 에서 켠다.
+   지시문을 파일 맨 앞에 두어 **기존 CSS 가 뒤에 와서 이긴다** — 이행 중 충돌 시
+   현행 화면이 유지되는 쪽. 페이지를 옮길 때 그 페이지의 옛 CSS 를 함께 지운다.
+   (docs/design/console_design_system.md §8 T0b) */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* ── Reset & base ──────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

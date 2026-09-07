@@ -362,14 +362,20 @@ Figma MCP 커넥터(`claude.ai Figma`)가 붙어 있으면 **링크를 사람에
 ④화면은 `screens/` 순서대로·셸 먼저)는 **시스템/인프라 화면만** 대상이다. 아래 T0a~T4 는 그 순서를
 **전 라우트로 확장한 우리 계획**이다 — 핸드오프의 지시가 아니다.
 
+**이행 중 충돌 차단 (T0b~T3)** — 레거시 클래스명이 Tailwind 유틸리티와 겹치면 Tailwind 가 조용히
+스타일을 얹는다. `tailwind.config.ts` 의 `blocklist` 로 막아 두었다: `text-muted`(6곳 — 우리 CSS 에
+정의가 없는 무동작 클래스인데 Tailwind 로는 `color: var(--muted)` = 흰 배경에 흰 글씨가 된다.
+muted 글자는 `text-muted-foreground` 가 맞다) · `table`(5곳 — 전부 `<table>` 이라 무해하지만 의도한
+적용이 아니다). 해당 페이지를 T3 에서 옮기면 걷는다. **페이지를 옮길 때마다 이 충돌 감사를 다시 돌린다.**
+
 **T0a·T0b 는 화면이 안 변하는 게 성공 판정**이고, T0c 부터 화면이 변한다 — 단계마다 판정 기준을
 하나만 두어 회귀 원인을 가릴 수 있게 나눴다.
 
 | 단계 | 내용 | 완료 판정 |
 |---|---|---|
-| **T0a 토큰 개명** | `index.css` 의 토큰 블록을 시안 `globals.css` 로 교체하고 §5.1 매핑대로 `var(--...)` 1,601곳 일괄 치환. C 갈래 16개는 `--cims-*` 로 이름만 정리해 보존 **라이트** — 5개 색만 미세 변화, 나머지 픽셀 동일. **다크** — 10개 변화, 그중 soft 계열 5개는 투명→불투명이라 **눈에 띄는 의도된 변화**다(§5.1-B) |
-| **T0b Tailwind 도입** | Tailwind·Radix·shadcn 설치, `tailwind.config.ts` 이식, Pretendard·JetBrains Mono 로드, content 스캔에 `ems/service/console/src` 포함. **preflight 는 끈 채로 시작** — `index.css` 의 reset(1~148줄)과 충돌한다 | 기존 화면 회귀 0 |
-| **T0c 아이콘 교체** | 텍스트 글리프 `↻ ▶ ■ ▼ ⏹ ❚❚ ✎ ●` 를 Lucide 로. 소스 87곳 중 **주석 7곳은 대상 아님**, JSX 직접 41곳은 단순 치환, **문자열 상수 4곳은 구조 변경**(`icon: '■'` → 컴포넌트 참조 — `pttSession.tsx` `EVENT_ICONS` 등), 나머지는 케이스별 | **화면은 변하고 기능은 안 변한다** — 눈으로 확인. 글리프 잔존 0건(주석 제외) |
+| **T0a 토큰 개명** | `index.css` 의 라이트/다크 토큰 블록을 Figma `01`(`8:2`/`13:2`) 기준으로 다시 쓰고 §5.1 매핑대로 `var(--...)` 를 일괄 치환(실측 **1,158곳 · 76파일**). C 갈래는 이름·값 그대로. 테마 스위치(`data-theme`)는 안 건드린다 | **라이트** — 5개 색만 변화(+`rgba()`→`rgb()` 표기 2건), 나머지 값 동일. **다크** — 10개 변화, soft 계열 4종이 투명→불투명이라 **눈에 띄는 의도된 변화**(§5.1-B). 실측 라이트 31/38·다크 26/36 동일 |
+| **T0b Tailwind 도입** | Tailwind **v3** + Radix + shadcn 설치, `tailwind.config.ts` 이식 — content 에 `../../service/console/src` 포함, `darkMode` 를 `.dark` 가 아니라 우리 스위치 `[data-theme="dark"]` 에 결선, **preflight off**. `@tailwind` 지시문은 `index.css` **맨 앞** — 기존 CSS 가 뒤에 와서 이긴다(이행 중 충돌 시 현행 유지). shadcn 20종을 `src/components/ui/` 에 생성 | 기존 화면 회귀 0 — **JS 번들 불변**(컴포넌트 미임포트라 트리셰이킹) · 유틸리티↔레거시 클래스 충돌 0 |
+| **T0c 폰트·아이콘** | **Pretendard Variable · JetBrains Mono 로드** — 지금은 `font-family` 에 이름만 있고 실제 로드가 없어 시스템 폰트로 떨어진다. 온프레미스 콘솔이라 CDN 이 아니라 자체 호스팅. + 텍스트 글리프 `↻ ▶ ■ ▼ ⏹ ❚❚ ✎ ●` 를 Lucide 로. 소스 87곳 중 **주석 7곳은 대상 아님**, JSX 직접 41곳은 단순 치환, **문자열 상수 4곳은 구조 변경**(`icon: '■'` → 컴포넌트 참조 — `pttSession.tsx` `EVENT_ICONS` 등), 나머지는 케이스별 | **화면은 변하고 기능은 안 변한다** — 눈으로 확인. 글리프 잔존 0건(주석 제외) |
 | **T1 공통 셸** | AppBar · Sidebar · TreePanel · Tabs + **breadcrumb 줄 신설** (`screens/shell.md`). 메뉴 항목의 그룹 소속은 그대로 둔다 | 전 라우트 셸 회귀 확인 · 위젯 편집 `✎` 슬롯 유지(§7-2) |
 | **T2 시스템/인프라** | `/deploy/servers` — `screens/` 스펙이 있는 유일한 본문 화면. S1~S4 · G1~G4 · A1~A4 · SA · 모달 · 빈 상태. 구조 변경(§1 목록)까지 반영 | 스펙 대조 |
 | **T3 나머지 30 라우트** | 화면 구조·문구 유지, 인라인 `style` → `className` 교체 + **네이티브 `confirm()` 51곳을 시안 Dialog 로 교체**(§7-7 — 대상·문구는 그대로, 껍데기만) | `index.css` 참조 소거 · `window.confirm` 0건 |

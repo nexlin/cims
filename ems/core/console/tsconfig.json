@@ -3,5 +3,15 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
-  ]
+  ],
+  // 실제 컴파일은 references 가 한다. 아래 paths 는 solution tsconfig 만 읽는 도구
+  // (shadcn CLI 등)가 @core/@svc 별칭을 풀 수 있게 노출하는 것이다 —
+  // 정본은 tsconfig.app.json 이고 여기와 항상 같아야 한다.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@core/*": ["src/*"],
+      "@svc/*": ["../../service/console/src/*"]
+    }
+  }
 }
