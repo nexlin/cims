@@ -7,6 +7,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
 import { StatusDot, type StatusTone } from '../components/custom/status-dot'
+import { Button } from '../components/ui/button'
+import { DataTable, Th, Td, orDash } from '../components/custom/data-table'
+import { Radio } from '../components/custom/radio'
 import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
@@ -1143,104 +1146,102 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
         )}
 
         {/* 멤버 — 추가/삭제는 좌측 트리에서 일괄 처리 (트리의 [+] / [×]).
-            여기는 표시 + AS 의 Master 선택만 담당. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <div style={{ fontWeight: 600 }}>멤버 ({memberAgents.length})</div>
-          <span style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 8 }}>
-            추가/삭제는 좌측 트리에서
-          </span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            {group.mode === 'active_standby' && (
-              <button className="btn btn--sm" onClick={checkVipHolders} disabled={vipChecking}
-                      title="멤버별 health-check 로 실제 VIP 보유(Active) 상태를 관측 (sync REST — 수 초 소요)">
-                {vipChecking ? '점검 중…' : '🔄 실측'}
-              </button>
-            )}
-          </div>
-        </div>
-        <table className="data-table" style={{ margin: 0, fontSize: 13 }}>
-          <thead>
-            <tr><th>이름</th>
+            여기는 표시 + AS 의 Master 선택만 담당.
+            AA 는 절체가 없어 역할·MASTER·상태 3컬럼과 [실측] 이 빠진다 (aa-group.md 대조표). */}
+        <SubSection title="멤버" count={memberAgents.length}
+                    hint={group.mode === 'active_standby'
+                      ? '추가·삭제는 좌측 트리에서 · MASTER 는 하나만 지정'
+                      : '추가·삭제는 좌측 트리에서'}>
+          {/* 컬럼 폭은 Figma G1 멤버 표(43:624) 실측 그대로 — 헤더가 세로로 쪼개지지 않는
+              최소폭이다. Agent 는 우측 정렬(TableHeaderCell Align Right). */}
+          <DataTable>
+            <thead>
+              <tr>
+                <Th width={150}>이름</Th>
                 {group.mode === 'active_standby' && (
                   <>
-                    <th style={{ width: 60 }} title="Master 선택 — 절체 시 우선순위가 가장 높은 노드. 1명만 선택 가능.">Master</th>
-                    <th style={{ width: 50 }} title="설정상 역할 (Master/Backup). priority 의 결과 — Master 선택 결과.">설정</th>
-                    <th style={{ width: 50 }} title="현재 실제 상태 (Active/Standby). VIP 를 실제로 보유 중인지. 절체 직후엔 설정과 다를 수 있음.">상태</th>
+                    <Th width={64} title="설정상 역할 (Master/Backup) — Master 선택의 결과(priority).">역할</Th>
+                    <Th width={84} title="Master 선택 — 절체 시 우선순위가 가장 높은 노드. 1명만 선택 가능.">MASTER</Th>
+                    <Th width={116} title="현재 실제 상태 (Active/Standby). VIP 를 실제로 보유 중인지. 절체 직후엔 설정과 다를 수 있음.">상태</Th>
                   </>
                 )}
-                <th>접속</th><th>IP</th><th>v</th></tr>
-          </thead>
-          <tbody>
-            {memberAgents.map(m => {
-              const a = m.agent
-              const colCount = group.mode === 'active_standby' ? 7 : 4
-              if (!a) return (
-                <tr key={m.agent_id}><td colSpan={colCount}>(agent #{m.agent_id} not found)</td></tr>
-              )
-              const sc = agentStatusColor(a.status)
-              const isMasterSel = editMasterAid === a.id
-              return (
-                <tr key={a.id}>
-                  <td onClick={() => onSelectMember(a.id)} style={{ cursor: 'pointer' }}>
-                    <b>{agentDisplayName(a.name)}</b>
-                  </td>
-                  {group.mode === 'active_standby' && (
-                    <>
-                      <td style={{ textAlign: 'center' }}>
-                        <input type="radio" name={`master-${group.id}`}
-                               checked={isMasterSel}
-                               onChange={() => setEditMasterAid(a.id)}
-                               title="이 멤버를 Master 로 설정 (priority 100, 나머지 90)" />
-                      </td>
-                      <td>
-                        <span title={isMasterSel ? 'Master — 절체 우선순위 100' : 'Backup — 절체 우선순위 90'}
-                              style={{
-                                background: isMasterSel ? '#3498db' : '#95a5a6',
-                                color: '#fff', fontSize: 10, padding: '1px 6px',
-                                borderRadius: 3, fontWeight: 600,
-                              }}>{isMasterSel ? 'M' : 'B'}</span>
-                      </td>
-                      <td>
-                        {/* A/S = 실제 VIP 보유. 기본은 heartbeat 관측(≤30s 지연, R4) —
-                            [🔄 실측] 은 sync health-check 로 즉시 재확인 (관측 override). */}
-                        {(() => {
-                          const o = vipObs[a.id]
-                          if (o === 'active') return (
-                            <span title="VIP 실제 보유 — Active (실측)"
-                                  style={{ fontSize: 11, color: 'var(--cims-success)', fontWeight: 600 }}>● Active</span>)
-                          if (o === 'standby') return (
-                            <span title="VIP 미보유 — Standby (실측)"
-                                  style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>○ Standby</span>)
-                          if (o === 'fail') return (
-                            <span title="점검 실패 — offline 또는 health-check 오류"
-                                  style={{ fontSize: 11, color: 'var(--destructive)' }}>✕</span>)
-                          if (vipChecking) return (
-                            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>…</span>)
-                          const hb = group.members.find(gm => gm.agent_id === a.id)?.vip_observed
-                          if (hb === true) return (
-                            <span title="VIP 실제 보유 — Active (heartbeat 관측, ≤30s 지연)"
-                                  style={{ fontSize: 11, color: 'var(--cims-success)', fontWeight: 600 }}>● Active</span>)
-                          if (hb === false) return (
-                            <span title="VIP 미보유 — Standby (heartbeat 관측, ≤30s 지연)"
-                                  style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>○ Standby</span>)
-                          return (
-                            <span title="판정 불가 (heartbeat stale·VIP 미설정) — [🔄 실측] 으로 확인"
-                                  style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>—</span>)
-                        })()}
-                      </td>
-                    </>
-                  )}
-                  <td>
-                    <span style={{ background: sc.bar, color: '#fff', fontSize: 10,
-                                    padding: '1px 6px', borderRadius: 3 }}>{a.status}</span>
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{a.ip_address || '—'}</td>
-                  <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{a.agent_version || '—'}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                <Th width={88}>접속</Th>
+                <Th width={168}>IP</Th>
+                <Th width={152} align="right">Agent</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {memberAgents.map(m => {
+                const a = m.agent
+                const colCount = group.mode === 'active_standby' ? 7 : 4
+                if (!a) return (
+                  <tr key={m.agent_id}><Td colSpan={colCount}>(agent #{m.agent_id} not found)</Td></tr>
+                )
+                const isMasterSel = editMasterAid === a.id
+                return (
+                  <tr key={a.id}>
+                    <Td onClick={() => onSelectMember(a.id)} className="cursor-pointer">
+                      {agentDisplayName(a.name)}
+                    </Td>
+                    {group.mode === 'active_standby' && (
+                      <>
+                        <Td>
+                          <Badge variant={isMasterSel ? 'brandSoft' : 'neutralSoft'}
+                                 title={isMasterSel ? 'Master — 절체 우선순위 100' : 'Backup — 절체 우선순위 90'}>
+                            {isMasterSel ? 'M' : 'B'}
+                          </Badge>
+                        </Td>
+                        <Td>
+                          <Radio name={`master-${group.id}`} checked={isMasterSel}
+                                 onChange={() => setEditMasterAid(a.id)}
+                                 title="이 멤버를 Master 로 설정 (priority 100, 나머지 90)" />
+                        </Td>
+                        <Td>
+                          {/* A/S = 실제 VIP 보유. 기본은 heartbeat 관측(≤30s 지연, R4) —
+                              [실측 새로고침] 은 sync health-check 로 즉시 재확인 (관측 override). */}
+                          {(() => {
+                            const o = vipObs[a.id]
+                            if (o === 'active') return (
+                              <StatusDot tone="success" label="Active" title="VIP 실제 보유 — Active (실측)" />)
+                            if (o === 'standby') return (
+                              <StatusDot tone="neutral" label="Standby" title="VIP 미보유 — Standby (실측)" />)
+                            if (o === 'fail') return (
+                              <StatusDot tone="danger" label="점검 실패" title="offline 또는 health-check 오류" />)
+                            if (vipChecking) return (
+                              <span className="text-sm text-muted-foreground">점검 중…</span>)
+                            const hb = group.members.find(gm => gm.agent_id === a.id)?.vip_observed
+                            if (hb === true) return (
+                              <StatusDot tone="success" label="Active"
+                                         title="VIP 실제 보유 — Active (heartbeat 관측, ≤30s 지연)" />)
+                            if (hb === false) return (
+                              <StatusDot tone="neutral" label="Standby"
+                                         title="VIP 미보유 — Standby (heartbeat 관측, ≤30s 지연)" />)
+                            return (
+                              <span className="text-muted-foreground"
+                                    title="판정 불가 (heartbeat stale·VIP 미설정) — [실측 새로고침] 으로 확인">—</span>)
+                          })()}
+                        </Td>
+                      </>
+                    )}
+                    <Td><Badge variant={statusBadge(a.status)}>{a.status}</Badge></Td>
+                    <Td mono>{orDash(a.ip_address)}</Td>
+                    <Td mono align="right" className="text-muted-foreground">
+                      {orDash(a.agent_version)}
+                    </Td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </DataTable>
+          {/* 시안은 [실측 새로고침] 을 표 아래 Secondary sm 으로 둔다 (43:705).
+              구 화면은 섹션 헤더 우측의 `🔄 실측` 이었다 — 아이콘 글리프도 함께 걷었다. */}
+          {group.mode === 'active_standby' && (
+            <Button className="mt-2" onClick={checkVipHolders} disabled={vipChecking}
+                    title="멤버별 health-check 로 실제 VIP 보유(Active) 상태를 관측 (sync REST — 수 초 소요)">
+              {vipChecking ? '점검 중…' : '실측 새로고침'}
+            </Button>
+          )}
+        </SubSection>
 
         {/* VIP Bindings */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 8 }}>

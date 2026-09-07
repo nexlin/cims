@@ -35,15 +35,16 @@ export function toneForStatus(status: string): StatusTone {
   }
 }
 
-export function StatusDot({ status, label, tone, className }: {
+export function StatusDot({ status, label, tone, className, title }: {
   status?: string
   label?: string
   tone?: StatusTone
   className?: string
+  title?: string
 }) {
   const t = tone ?? toneForStatus(status ?? '')
   return (
-    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap', className)}>
+    <span title={title} className={cn('inline-flex items-center gap-1.5 whitespace-nowrap', className)}>
       <span className={cn('size-1.5 shrink-0 rounded-full', TONE[t])} aria-hidden />
       <span className="text-sm text-muted-foreground">{label ?? status}</span>
     </span>
