@@ -13,7 +13,10 @@
                                           access token scope 문자열/client_id/mcdata_id·리소스 서버 검사 3모드·
                                           issuer 유도(mcx_identity_scope.md)
   · tests/test_csc_user_profile.py        MCPTT user-profile 문서(TS 24.484 §8.3.2) — OnNetwork MCPTTGroupInfo(소속 그룹·소유 표시)·
-                                          ImplicitAffiliations·PrivateCallList(동료)·긴급 요소 부재/폴백·common-policy ruleset·ETag"""
+                                          ImplicitAffiliations·PrivateCallList(동료)·긴급 요소 부재/폴백·common-policy ruleset·ETag
+  · tests/test_csc_dispatch_management.py 관제 앱 관리 평면 — directory_admin 범위(admin_scope/in_scope)·
+                                          /provisioning/directory 게이트·이력 until/recordingId·녹취 프록시 게이트·
+                                          GMS 관리 범위 확장(dispatch_center.md §3.4·§5.7b)"""
 from __future__ import annotations
 
 import os
@@ -28,7 +31,8 @@ _NAME = ("CSC unit test — 관제 그룹 RBAC·가입 realm·GMS 그룹 CRUD·�
          "tests.test_csc_gms_group_crud tests.test_csc_provisioning_dispatch)")
 _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
-            "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile"]
+            "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile",
+            "tests.test_csc_dispatch_management"]
 
 
 @verify_item(

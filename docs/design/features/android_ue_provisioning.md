@@ -99,6 +99,7 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   "dispatch": {                                          // 관제 데스크 소속일 때만 (없으면 키 자체 생략)
     "groupId": "dg-dispatch01", "groupName": "관제 1조", "pilotId": "+821310001000",
     "monitorScope": "own", "pttListen": "listed", "listenVisibility": "hidden",
+    "directoryAdmin": "own", "orgCode": "TEAM01",
     "members": [
       { "userId": 5020, "name": "관제1석", "volteAor": "tel:+821310001001",
         "pttId": "tel:+82510001001", "extension": "1001", "groupId": "dg-dispatch01" },
@@ -153,6 +154,9 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   (`dispatch_group_members`) 소속일 때만 실린다(미소속·테이블 미적용 DB 는 키 생략, `null` 없음).
   - `groupId/groupName/pilotId/monitorScope/pttListen/listenVisibility`: 소속 그룹의 속성 그대로
     (`monitor_scope` `none|own|listed|all`, `ptt_listen` `none|listed|all`, `listen_visibility` `hidden|visible`).
+  - `directoryAdmin`(`none|own|all`)·`orgCode`: 관제 앱의 조직/구성원/번호·PTT 그룹 **관리 범위**(§3-3,
+    [dispatch_center.md §3.4](dispatch_center.md)) — `own` 의 루트가 `orgCode`(그룹 `org_id` 의 코드, 없으면 `""`).
+    컬럼 미적용 DB·구 서버는 `none`/`""`. 앱은 `none` 이면 관리 탭을 잠근다.
   - `members[]`: **dialog 감시(RFC 4235) 대상** = 서버가 `monitorScope` 를 CSP `CanWatch` 와 같은 규칙으로 해석한
     VoLTE 가입자 목록 — 자기 관제 그룹원은 범위와 무관하게 항상(같은 픽업 그룹), `listed` 는 대상 그룹원 추가,
     `all` 은 전 VoLTE 가입자. 항목 = `userId`(`users.id`) · `name` · `volteAor`(`tel:+E.164`) · `pttId`(첫 PTT 가입
@@ -214,12 +218,14 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
 RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②PTT 내역·④통화 내역 패널과 메시지
 모니터링이 같은 계약 하나로 최근 이력을 커서로 받는다([dispatch_center.md §5.6](dispatch_center.md)).
 
-요청: `GET /provisioning/history?kind=call|ptt|message&since=<ISO8601|epoch>&limit=<n>` +
+요청: `GET /provisioning/history?kind=call|ptt|message&since=<ISO8601|epoch>&until=<ISO8601|epoch>&limit=<n>` +
 `Authorization: Bearer <provisioning access token>`(PKCE, `/provisioning/me` 와 같은 토큰).
 
 - `kind`(필수): `call`(VoLTE) · `ptt`(PTT 그룹 세션) · `message`(SDS — 그룹 + 1:1). 미지 값 400.
 - `since`(선택): 이 시각 **이후**(strict)만. 생략 시 최근 1시간. 이전 응답의 `nextSince` 를 그대로 넣어
   폴링한다(관제 앱 2~3초 주기). 스캔은 최대 48 시간 버킷으로 유계.
+- `until`(선택): 이 시각 **이하**만 — 있으면 [since, until] **창 조회**(관제 앱 관리 창 이력 탭 — 하루 단위로 나눠
+  묻는다), 없으면 지금까지(폴링). 버킷 상한은 그대로.
 - `limit`(선택, 기본 200, 최대 1000): 가장 최근 N 개.
 
 응답 `200`(단말 `HistoryClient` 계약 — 필드 추가는 무시, 필수 `id`·`time` 없으면 스킵):
@@ -228,7 +234,8 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
   "items": [
     { "id": "<call_id>", "time": "2026-09-06T19:05:12+09:00", "kind": "call",
       "event": "call.answered", "from": "+82…", "to": "+82…", "group": "",
-      "duration": 30, "emergency": false, "text": "" }
+      "duration": 30, "emergency": false, "text": "",
+      "recordingId": "volte/2026/09/06/19/010/01000000001/<call_id>.d", "hasRecording": true }
   ],
   "next": "2026-09-06T19:05:12"
 }
@@ -239,6 +246,9 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 - `event` 이름표(앱 switch 와 1:1): call = `call.answered`(응답됨)/`call.missed`(무응답) · ptt = `ptt.session.start`(진행 중)/
   `ptt.session.end`(종료) · message = `message.sds`(그룹 SDS → ② 패널)/`message.sms`(1:1 → ④ 패널). `group`·`duration`·`text`
   는 종류에 따라 채워진다(call `group=""`·`duration`=통화초, ptt `group=tel:<gid>`·`duration`=세션초, message `text`=본문).
+- `recordingId`(종료분 call·ptt): 녹취 식별자 = 세션 디렉터리의 `ServiceLogging.Dir` 상대 경로(OAM `/api/v1/recordings/{id}`
+  와 같은 키, `/` 구분 — 세그먼트별 percent-encoding). live 항목·message 는 `""`. `hasRecording` = `segments.jsonl` 존재.
+  재생은 §3-4.
 - 응답 헤더 `ETag`. 단말이 `If-None-Match` 로 같은 값을 보내면 **304**(본문 없음, 폴링 대역 절약). 변경 없는 304 는
   감사하지 않는다 — 실제 열람(새 항목/최초)만 `E-AUD-016` 로 남긴다.
 
@@ -252,6 +262,45 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
 > 백엔드는 CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT(콘솔 `flow_logger` 가 읽는 것과 같은
 > 파일)를 관제 그룹 범위로만 걸러 주는 얇은 구독자 뷰다 — 콘솔 이력 API(oam-svc)를 재구현하지 않는다.
 > 1:1 SDS/SMS 는 CSP `Setup.McData.StoreOneToOneSds` 를 켜야 보관된다([mcdata_messaging.md §4.3](mcdata_messaging.md)).
+
+## 3-3. Contract — `/provisioning/directory/{admin,orgs,members,groups}` (관제 앱 관리 평면)
+
+관제사(가입자)가 관제 앱에서 조직 트리·구성원·VoLTE/PTT 번호·PTT 그룹을 관리한다. 같은 PKCE provisioning 토큰.
+인가 = 관제 그룹 `directory_admin`(§3 `dispatch.directoryAdmin`, [dispatch_center.md §3.4](dispatch_center.md)) —
+없으면 전부 `403 {"error":"no_directory_admin"}`, 범위 밖 조직·구성원은 `403 {"error":"out_of_scope"}`.
+서버 구현 `csc/src/handlers/dispatch_directory.py`(콘솔 관리 API 와 같은 쓰기 코드 호출).
+
+| 메서드·경로 | 본문 / 응답 |
+|---|---|
+| `GET /provisioning/directory/admin` | 관리 화면 한 벌 `{ "scope": {groupId, directoryAdmin, orgCode}, "services": {"volte":[{name,domain}], "ptt":[…]}, "orgs": [{code,name,parent,sort}](범위 안), "members": [{userId, name, loginId, org, title, "volte": {msisdn,imsi,serviceRef,sipTransport,authScheme}\|null, "ptt": {…, "profile": {allowCreateGroup, allowAmbientListening, allowEmergencyCall, allowEmergencyAlert, allowAdhocCall, allowEmergencyPrivateCall}}\|null}] }` + `ETag`/`If-None-Match` 304 |
+| `POST /provisioning/directory/orgs` | `{code, name, parent, sort}` → `201 {code, id}`. `parent` 는 범위 안 코드(`own` 은 필수 — 루트 신설 불가). `409 code_exists`·`400 unknown_parent` |
+| `PUT /provisioning/directory/orgs/{code}` | `{name?, parent?, sort?}` → `200 {code}`. 범위 루트 이동 불가(403)·`400 cyclic_parent` |
+| `DELETE /provisioning/directory/orgs/{code}` | `200 {code}`. 하위 조직·구성원이 남아 있으면 `409 not_empty`, 범위 루트 삭제 불가(403) |
+| `POST /provisioning/directory/members` | `{name, org, title?, loginId?, password?, volte?: {msisdn, imsi?, serviceRef?, sipTransport?, password}, ptt?: {…}}` → `201 {userId}`. `imsi` 비면 번호 숫자(USIM 없는 관제 소프트폰 규약), 회선은 `password` 필수(H(A1)). 회선 개설 실패는 그 코드 + `{userId, kind}` |
+| `PUT /provisioning/directory/members/{userId}` | `{name?, org?, title?, loginId?, password?}` → `200 {id}` |
+| `DELETE /provisioning/directory/members/{userId}` | `200 {id}` — 회선 함께 삭제(USER_CHANGED). 자기 자신 `409 self_delete` |
+| `PUT /provisioning/directory/members/{userId}/volte\|ptt` | `{msisdn, imsi?, serviceRef?, sipTransport?, password?}` — 같은 번호면 갱신(`200`), 다른 번호면 종전 회선 삭제 + 개설(`201`, `password` 필수). 타인 번호 `409 number_exists`, `pickup_group` 파생 충돌 `409 derived_from_dispatch_group` |
+| `DELETE /provisioning/directory/members/{userId}/volte\|ptt` | `200 {userId, kind, deleted[]}` |
+| `PUT /provisioning/directory/members/{userId}/ptt/profile` | `{allowCreateGroup?, allowAmbientListening?, allowEmergencyCall?, …}`(없는 키는 현재값 유지) → `200 {msisdn, profile}` |
+| `GET /provisioning/directory/groups` | `{ "scope": {directoryAdmin, orgCode}, "groups": [{id, uri, name, memberCount, isOwner, orgCode, sessionType, etag}] }` — 범위 안(또는 내 소유) PTT 그룹. 문서 GET/PUT/DELETE 는 GMS XCAP 그대로([mcptt_api.md §2](../../api/mcptt_api.md) — 관리 범위 안이면 소유자가 아니어도 허용) |
+
+오류 본문은 `{"error": "<token>", "detail"?: …}`. 앱 문구 사전 = `ResponseText.ForManagementError`. 컬럼 미적용 DB 는
+`403 no_directory_admin`(관리 기능 비활성). 감사 = `E-AUD-006 config_change`.
+
+## 3-4. Contract — `GET /provisioning/recordings/{id}…` (관제 앱 녹취 재생)
+
+`id` = §3-2 항목의 `recordingId`. 같은 토큰. CSC 는 관제 범위(§3-2 와 같은 집합)를 판정한 뒤 oam-svc 녹취 API
+(`/api/v1/recordings/…`, [recording.md](recording.md))로 **프록시**한다 — 응답 본문·상태는 그대로.
+
+| 경로 | 응답 |
+|---|---|
+| `GET /provisioning/recordings/{id}` | 세션 메타 + `segments[]`(`seq, type, speaker_id, speaker_ids[], start_time, end_time, duration_ms, has_video, status, talker_count, tracks[]`) |
+| `GET /provisioning/recordings/{id}/segments/{seq}/audio?slot=<K>&retry=1` | `200 audio/mp4`(AAC 16k mono — 믹스, `slot` 은 단독 트랙) · `202 {status: transcoding\|recording}`(앱은 0.7초→1.5초 간격으로 최대 120초 재시도) · `500 {status: failed, reason}`(`retry=1` 로 표식 제거 후 재변환) · `404` |
+| `GET /provisioning/recordings/{id}/segments/{seq}/peaks?slot=` | `{seq, slot, buckets, peaks[]}` |
+
+오류: `401` · `403 no_monitor_scope`(관제 미소속) · `403 out_of_scope` · `400 invalid_recording_id`(경로 이탈) · `404 not_found` ·
+`502 oam_unreachable` · `503 service_log_unavailable`. 오디오 200 마다 감사 `E-AUD-016`(`tap_mode=recording`).
+서버 설정 csc.json `Recording.OamUrl`(비면 `https://{Fm.OamIp}:4419`) · `Recording.VerifyTls`(기본 false).
 
 ## 4. 서버측 구현 (CSC)
 

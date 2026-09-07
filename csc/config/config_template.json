@@ -800,6 +800,32 @@
       "scope": "service"
     },
     {
+      "key": "recording",
+      "title": "녹취 재생 프록시 (관제 앱)",
+      "description": "관제 앱의 녹취 조회·재생(/provisioning/recordings)은 CSC 가 관제 범위를 판정한 뒤 oam-svc 녹취 API(/api/v1/recordings)로 프록시한다 — dispatch_center.md §5.6a.",
+      "fields": [
+        {
+          "key": "Recording.OamUrl",
+          "label": "OAM 게이트웨이 URL",
+          "type": "string",
+          "default": "",
+          "deploy_value": "https://@OAM_IP@:4419",
+          "restart": true,
+          "help": "oam-svc 녹취 API 를 프록시하는 base OAM 게이트웨이 주소. 비우면 https://{Fm.OamIp}:4419. 관리평면 이중화 환경에서는 VIP."
+        },
+        {
+          "key": "Recording.VerifyTls",
+          "label": "OAM 인증서 검증",
+          "type": "bool",
+          "default": "false",
+          "restart": true,
+          "advanced": true,
+          "help": "OAM 게이트웨이 TLS 인증서를 검증할지 — 사내 자가서명이면 끔."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "fm",
       "title": "FM 자기보고 (알람/이벤트 push)",
       "description": "모듈 내부 알람/이벤트를 OAM FM ingest 로 push — alarm_self_reporting.md. 카탈로그는 config/fm_catalog.json (기동 시 FM_REGISTER 로 등록).",

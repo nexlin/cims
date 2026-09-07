@@ -53,7 +53,7 @@ class _FakeCursor:
             if VOLTE.get(vid) == user_id and gid == self.group["id"]:
                 g = self.group
                 return (g["id"], g["name"], g.get("pilot_id") or "", g["monitor_scope"], g["ptt_listen"],
-                        g["listen_visibility"])
+                        g["listen_visibility"], g.get("directory_admin") or "none", g.get("org_code") or "")
         return None
 
     def _member_rows(self, where: str, gid: str):
@@ -76,7 +76,9 @@ class _FakeCursor:
         self._rows = []
         if "dispatch_group" in q and not self.dispatch_tables:
             raise RuntimeError("(1146, \"Table 'cims.dispatch_group_members' doesn't exist\")")
-        if q.startswith("SELECT user_id FROM volte_subscriptions WHERE id="):
+        if q.startswith("SHOW COLUMNS FROM dispatch_groups LIKE 'directory_admin'"):
+            self._rows = [("directory_admin",)]          # 컬럼 적용 DB (migrate_dispatch_directory_admin.sql)
+        elif q.startswith("SELECT user_id FROM volte_subscriptions WHERE id="):
             uid = VOLTE.get(args[0])
             self._rows = [(uid,)] if uid is not None else []
         elif q.startswith("SELECT user_id FROM ptt_subscriptions WHERE id="):

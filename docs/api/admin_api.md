@@ -943,7 +943,7 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 | 메서드·경로 | 권한 | 설명 |
 |---|---|---|
 | `GET /api/v1/dispatch-groups[?org_id=]` | monitor+ | 목록(멤버·대상 포함). 테이블 미적용 DB 는 `{groups:[], schema:"not_migrated"}` |
-| `POST /api/v1/dispatch-groups` | operator+ (`monitor_scope`/`ptt_listen`≠none 은 manager) | 생성 — `{id?, name, pilot_id?, service_ref?(pilot 시 필수), alert_mode?, no_answer_sec?, busy_members?, overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, org_id?, members?[{user_id, alert_order}]}` → 201 `{id}` |
+| `POST /api/v1/dispatch-groups` | operator+ (`monitor_scope`/`ptt_listen`/`directory_admin`≠none 은 manager) | 생성 — `{id?, name, pilot_id?, service_ref?(pilot 시 필수), alert_mode?, no_answer_sec?, busy_members?, overflow_target?, monitor_scope?, ptt_listen?, listen_visibility?, directory_admin?(none\|own\|all — 관제 앱 조직/구성원/번호·PTT 그룹 관리 범위, own=org_id 하위; 컬럼 미적용 DB 는 400 `schema_not_migrated`), org_id?, members?[{user_id, alert_order}]}` → 201 `{id}` |
 | `GET|PUT|DELETE /api/v1/dispatch-groups/{id}` | monitor+ / operator+ / operator+ | 단건·부분 갱신·삭제(멤버와 같은 person 의 파생 회선 `pickup_group` 재계산 — 남는 멤버십 없으면 NULL) |
 | `GET|POST /api/v1/dispatch-groups/{id}/members` | monitor+ / operator+ (감청·청취 그룹은 manager) | 멤버 목록 / 추가·이동 `{user_id, alert_order?}` → 201 |
 | `DELETE /api/v1/dispatch-groups/{id}/members/{user_id}` | operator+ | 멤버 제거(같은 person 의 파생 회선 포함 `pickup_group` 재계산 → NULL) |
@@ -958,7 +958,7 @@ CSP 에는 `DISPATCH_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. �
 ```json
 { "id": "dg-7f3a91c2", "name": "관제 1반", "pilot_id": "7000", "service_ref": "volte",
   "alert_mode": "parallel", "no_answer_sec": 30, "busy_members": "skip", "overflow_target": null,
-  "monitor_scope": "own", "ptt_listen": "none", "listen_visibility": "hidden", "org_id": 1,
+  "monitor_scope": "own", "ptt_listen": "none", "listen_visibility": "hidden", "directory_admin": "none", "org_id": 1,
   "members": [{ "user_id": "+821300000004", "alert_order": 0 }], "monitor_targets": [], "ptt_targets": [] }
 ```
 

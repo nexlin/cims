@@ -3,8 +3,10 @@
 dispatch_center.md §5.6/§8.4 · dispatch_desktop_ui.md §11(② PTT 내역 · ④ 일반통화 내역) ·
 android_ue_provisioning.md §3-2 · mcdata_messaging.md §4.1.
 
-`GET /provisioning/history?kind=call|ptt|message&since=&limit=`(mcptt.handle_provisioning_history)의
-데이터 계층. 진행 중(live) 상태는 표준 구독(RFC 4235 dialog · RFC 4575 conference)이 담당하고 —
+`GET /provisioning/history?kind=call|ptt|message&since=&until=&limit=`(mcptt.handle_provisioning_history)의
+데이터 계층. `until` 이 있으면 [since, until] 창 조회(관제 앱 이력 화면 — 하루 단위 페이지), 없으면 폴링 커서.
+종료분 항목에는 녹취 식별자(`recordingId` = 세션 디렉터리의 ServiceLogDir 상대 경로, OAM `/api/v1/recordings/{id}` 와
+같은 키)와 `hasRecording`(segments.jsonl 존재)을 싣는다 — 재생은 `/provisioning/recordings/{id}`(dispatch_recordings.py). 진행 중(live) 상태는 표준 구독(RFC 4235 dialog · RFC 4575 conference)이 담당하고 —
 이 API 는 그 구독을 대체하지 않는다 — 여기서는 **관제 범위 안의 지난 이력**만 커서(`since`)로 준다.
 
 백엔드 = CSP/CSC 가 공유 NAS(`ServiceLogging.Dir`)에 남기는 파일 SoT (flow_logger.py 가 콘솔용으로
@@ -130,12 +132,29 @@ def _read_jsonl(path: str):
 
 # ── kind=call ──────────────────────────────────────────────────────────────
 
-def _call_row(cj: dict) -> Optional[dict]:
+def _rec_info(sl_dir: str, path: Optional[str]) -> Tuple[str, bool]:
+    """(recordingId, hasRecording) — path = call.json/session.json 경로. 세션 디렉터리의 sl_dir 상대 경로('/' 구분)가
+    녹취 식별자(OAM handlers/recording.py `id` 와 같은 키). segments.jsonl(또는 recordings/segments.jsonl) 이 있으면 녹취 있음."""
+    if not path or not sl_dir:
+        return "", False
+    d = os.path.dirname(path)
+    try:
+        rel = os.path.relpath(d, sl_dir).replace(os.sep, '/')
+    except ValueError:
+        return "", False
+    if rel.startswith('..'):
+        return "", False
+    has = os.path.isfile(os.path.join(d, 'segments.jsonl')) or os.path.isfile(os.path.join(d, 'recordings', 'segments.jsonl'))
+    return rel, has
+
+
+def _call_row(cj: dict, sl_dir: str = "", path: Optional[str] = None) -> Optional[dict]:
     if not isinstance(cj, dict) or not cj.get('call_id'):
         return None
     ts = cj.get('end_time') or cj.get('invite_time') or cj.get('start_time')
+    rec_id, has_rec = _rec_info(sl_dir, path)
     return {
-        "kind": "call", "ts": ts, "id": cj.get('call_id'),
+        "kind": "call", "ts": ts, "id": cj.get('call_id'), "recordingId": rec_id, "hasRecording": has_rec,
         "initiator": cj.get('initiator', ''), "callee": cj.get('callee', ''),
         "state": cj.get('state', ''), "inviteTime": cj.get('invite_time'),
         "answerTime": cj.get('answer_time'), "endTime": cj.get('end_time'),
@@ -169,7 +188,7 @@ def scan_calls(sl_dir: str, members: set, since_dt: datetime, until_dt: datetime
             for fp in _glob.glob(pat, recursive=True):
                 cj = _read_json(fp)
                 if cj and (cj.get('call_type') in (None, '', 'volte')) and _call_in_scope(cj, members):
-                    r = _call_row(cj)
+                    r = _call_row(cj, sl_dir, fp)
                     if r and r["id"] not in seen:
                         seen.add(r["id"]); rows.append(r)
     return rows
@@ -177,7 +196,7 @@ def scan_calls(sl_dir: str, members: set, since_dt: datetime, until_dt: datetime
 
 # ── kind=ptt ────────────────────────────────────────────────────────────────
 
-def _ptt_row(sj: dict) -> Optional[dict]:
+def _ptt_row(sj: dict, sl_dir: str = "", path: Optional[str] = None) -> Optional[dict]:
     gid = sj.get('mcptt_group_id') or sj.get('group_id')
     if not isinstance(sj, dict) or not gid:
         return None
@@ -185,8 +204,9 @@ def _ptt_row(sj: dict) -> Optional[dict]:
     start = sj.get('start_time') or sj.get('started_at')
     ses = sj.get('sesid') or sj.get('session_id')
     ts = sj.get('end_time') or start or sj.get('updated_at')
+    rec_id, has_rec = _rec_info(sl_dir, path)
     return {
-        "kind": "ptt", "ts": ts, "id": ses or sj.get('call_id') or gid,
+        "kind": "ptt", "ts": ts, "id": ses or sj.get('call_id') or gid, "recordingId": rec_id, "hasRecording": has_rec,
         "groupId": gid, "groupName": sj.get('name', ''),
         "initiator": sj.get('initiator', '') or sj.get('subscriber_id', ''),
         "callId": sj.get('call_id'), "state": sj.get('state', ''),
@@ -210,7 +230,7 @@ def scan_ptt(sl_dir: str, group_ids: set, since_dt: datetime, until_dt: datetime
         for fp in _glob.glob(os.path.join(sl_dir, "ptt", "*", y, m, d, h, "**", "session.json"), recursive=True):
             sj = _read_json(fp)
             if sj and (sj.get('mcptt_group_id') or sj.get('group_id')) in group_ids:
-                r = _ptt_row(sj)
+                r = _ptt_row(sj, sl_dir, fp)
                 if r and r["id"] not in seen:
                     seen.add(r["id"]); rows.append(r)
     return rows
@@ -304,17 +324,21 @@ def format_item(row: dict) -> dict:
         "id": row.get("id", ""), "time": _local_iso(row.get("ts")), "kind": k, "event": _event_of(row),
         "from": frm or "", "to": to or "", "group": group_uri,
         "duration": duration, "emergency": bool(row.get("emergency", False)), "text": row.get("text", "") or "",
+        "recordingId": row.get("recordingId", "") or "", "hasRecording": bool(row.get("hasRecording", False)),
     }
 
 
 # ── 통합 조회 ────────────────────────────────────────────────────────────────
 
 def query(sl_dir: str, kind: str, scope: dict, since_dt: Optional[datetime],
-          limit: int) -> Tuple[List[dict], str]:
-    """(items, next_since) — items 는 ts 오름차순 최근 limit 개(> since). next_since = 마지막 항목 ts
-    (다음 폴링에 그대로 넣으면 그 이후만 받는다). scope = {'members': set, 'ptt_groups': set}."""
+          limit: int, until_dt: Optional[datetime] = None) -> Tuple[List[dict], str]:
+    """(items, next_since) — items 는 ts 오름차순 최근 limit 개(> since, ≤ until). next_since = 마지막 항목 ts
+    (다음 폴링에 그대로 넣으면 그 이후만 받는다). scope = {'members': set, 'ptt_groups': set}.
+    until_dt 가 있으면 창 조회(이력 화면) — 스캔 버킷 상한(_MAX_BUCKETS)은 그대로라 앱은 하루 단위로 나눠 묻는다."""
     limit = max(1, min(int(limit or _DEFAULT_LIMIT), _MAX_LIMIT))
-    until_dt = datetime.now()
+    now = datetime.now()
+    if until_dt is None or until_dt > now:
+        until_dt = now
     if since_dt is None:
         since_dt = until_dt - timedelta(hours=1)         # 커서 없으면 최근 1시간
     if not sl_dir or not os.path.isdir(sl_dir):
@@ -335,7 +359,7 @@ def query(sl_dir: str, kind: str, scope: dict, since_dt: Optional[datetime],
     dated = []
     for r in rows:
         dt = parse_ts(r.get("ts"))
-        if dt is not None and dt > since_dt:
+        if dt is not None and dt > since_dt and dt <= until_dt:
             dated.append((dt, r))
     dated.sort(key=lambda x: x[0])
     if len(dated) > limit:

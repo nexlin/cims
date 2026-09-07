@@ -107,6 +107,10 @@ if __name__ == '__main__':
     from handlers.admin          import CIMS_ADMIN_HANDLER_LIST
     from handlers.org            import CIMS_ORG_HANDLER_LIST
     from handlers.dispatch       import CIMS_DISPATCH_HANDLER_LIST   # 관제 그룹 (dispatch_center.md §8.2)
+    # 관제 앱(가입자 PKCE 토큰) 주체 관리 평면 — MCPTT 서버(4430)에 붙는다: 조직/구성원/번호·PTT 그룹 관리(dispatch_center.md §3.4),
+    #   녹취 조회·재생(범위 게이트 + oam-svc 프록시, §5.6a).
+    from handlers.dispatch_directory  import CSC_DIRECTORY_ADMIN_HANDLER_LIST
+    from handlers.dispatch_recordings import CSC_RECORDINGS_HANDLER_LIST
     # 자기 API 문서 — 분리 배포에서 OAM 이 import 로 읽을 수 없으므로 직접 서비스한다.
     from handlers.api_docs       import CSC_API_DOCS_HANDLER_LIST
     # AuC — IMS AKA 인증 벡터 발급자 (sip_access_security.md §8.2). 내부 AV API 는 admin 서버(4421)에
@@ -342,6 +346,10 @@ if __name__ == '__main__':
             ssl_certfile=ssl_certfile,
         )
         mcptt_server.add_dynamic_rules(CSC_HANDLER_LIST)
+        mcptt_server.add_dynamic_rules([
+            (path, handler, cims_kwargs)
+            for path, handler, _ in (CSC_DIRECTORY_ADMIN_HANDLER_LIST + CSC_RECORDINGS_HANDLER_LIST)
+        ])
         # MCData FD 콘텐츠 서버 — 파일 업로드/다운로드 (mcdata_messaging.md, 토큰 인증 동일)
         from services import mcdata_fd
         mcdata_fd.init(config)

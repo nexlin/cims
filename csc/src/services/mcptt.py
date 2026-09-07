@@ -2122,6 +2122,28 @@ _NS = {
 }
 
 
+def _admin_manages_group(payload: dict, group: Optional[dict]) -> bool:
+    """관리 범위(dispatch_groups.directory_admin)로 그룹을 관리할 수 있는가 — 소유자가 아니어도 그룹 org_code 가 범위 안이면
+    GET/PUT/DELETE 허용(신규 생성은 allow_create_group 없이도). handlers/dispatch_directory.admin_scope 와 같은 판정."""
+    conn = _db_connect()
+    if conn is None:
+        return False
+    try:
+        from handlers import dispatch_directory as _dd
+        with conn:
+            with conn.cursor() as cur:
+                _msisdn, uid = _dd.caller_identity(cur, payload)
+                scope = _dd.admin_scope(cur, uid)
+                if not scope:
+                    return False
+                if group is None:
+                    return True
+                return _dd.in_scope(scope, (group.get('org_code') or ''))
+    except Exception as e:
+        logger.log_warning(f"[GMS] admin scope check failed: {e}")
+        return False
+
+
 def _token_user_id(payload: dict) -> Optional[int]:
     """토큰 sub(=login_id) → users.id. LOGIN_ACCOUNTS 는 admin API 변경 후 refresh_login_accounts 로 최신."""
     acct = LOGIN_ACCOUNTS.get((payload or {}).get('sub') or '')
@@ -2420,7 +2442,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
         if args.method == 'GET':
             # 인가 (item 2): 멤버(또는 authorized_user)만 그룹 문서 열람 (TS 24.481).
             grp = GROUPS.get(group_uri)
-            if grp and not _is_group_member(grp, requester):
+            if grp and not _is_group_member(grp, requester) and not _admin_manages_group(token_payload, grp):
                 logger.log_error(f"[GMS] Forbidden: '{requester}' not a member of group '{group_uri}'")
                 return HandlerResult(status=403, body="Forbidden: not a member of this group")
             xml, etag = get_group_xml(group_uri)
@@ -2444,14 +2466,16 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 err = validate_new_gms_group_id(gid, dom)
                 if err:
                     return _json_result(400, {'error': 'invalid_group_id', 'detail': err})
-                if not get_user_profile(_requester_ptt_id(token_payload)).get('allow_create_group'):
+                if not get_user_profile(_requester_ptt_id(token_payload)).get('allow_create_group') \
+                        and not _admin_manages_group(token_payload, None):
                     logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' lacks allow_create_group")
                     return _json_result(403, {'error': 'group_creation_not_allowed'})
                 if my_uid is None:
                     return _json_result(403, {'error': 'group_creation_not_allowed', 'detail': 'token subject has no users.id'})
             else:
                 owner = existing.get('authorized_user_id')
-                if my_uid is None or owner != my_uid:
+                # 소유자 또는 관리 범위(directory_admin) 안의 그룹 — 관리자는 소유권을 뺏지 않는다(authorized_user 유지).
+                if (my_uid is None or owner != my_uid) and not _admin_manages_group(token_payload, existing):
                     logger.log_error(f"[GMS] PUT {gid} denied: '{requester}' is not the owner (owner={owner})")
                     # 타인 소유 = 409(클라이언트 명명 id 충돌 — 다른 id 로 다시), 소유자 없음(콘솔 생성) = 403.
                     if owner is not None and my_uid is not None:
@@ -2494,7 +2518,8 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
             if existing is None:
                 return _json_result(404, {'error': 'not_found'})
             my_uid = _token_user_id(token_payload)
-            if my_uid is None or existing.get('authorized_user_id') != my_uid:
+            if (my_uid is None or existing.get('authorized_user_id') != my_uid) \
+                    and not _admin_manages_group(token_payload, existing):
                 logger.log_error(f"[GMS] DELETE {gid} denied: '{requester}' is not the owner")
                 return _json_result(403, {'error': 'not_group_owner'})
             if not _DB_CONFIG:
@@ -2858,6 +2883,21 @@ def _content_etag_json(obj) -> str:
     return '"' + hashlib.sha256(canon.encode('utf-8')).hexdigest()[:32] + '"'
 
 
+_HAS_DIR_ADMIN_COL = None
+
+
+def _has_directory_admin_column(cur) -> bool:
+    """dispatch_groups.directory_admin(sql/migrate_dispatch_directory_admin.sql) — 미적용 DB 는 'none'."""
+    global _HAS_DIR_ADMIN_COL
+    if _HAS_DIR_ADMIN_COL is None:
+        try:
+            cur.execute("SHOW COLUMNS FROM dispatch_groups LIKE 'directory_admin'")
+            _HAS_DIR_ADMIN_COL = cur.fetchone() is not None
+        except Exception:
+            _HAS_DIR_ADMIN_COL = False
+    return _HAS_DIR_ADMIN_COL
+
+
 def dispatch_discovery(cur, user_id) -> Optional[dict]:
     """관제 데스크 블록 = 소속 관제 그룹 속성 + **서버가 범위 enum 을 해석한 대상 목록**.
 
@@ -2870,9 +2910,11 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     - etag         블록 내용 파생 — 앱은 재조회 결과의 대상 변경을 값 비교로 안다.
     앱은 enum 을 해석하지 않는다. 범위 판정 규칙은 CSP(게이트)와 여기(목록) 두 곳에만 있고 같아야 한다.
     관제 그룹 미소속이면 None. 테이블 미적용 DB 는 예외 — 호출자가 블록을 생략한다."""
+    da_col = ", g.directory_admin" if _has_directory_admin_column(cur) else ", 'none'"
     cur.execute("SELECT g.id, g.name, COALESCE(g.pilot_id,''), g.monitor_scope, g.ptt_listen, "
-                "g.listen_visibility FROM dispatch_group_members m "
+                f"g.listen_visibility{da_col}, COALESCE(o.code,'') FROM dispatch_group_members m "
                 "JOIN dispatch_groups g ON g.id=m.group_id "
+                "LEFT JOIN organizations o ON o.id=g.org_id "
                 "JOIN volte_subscriptions s ON s.id=m.user_id WHERE s.user_id=%s LIMIT 1", (user_id,))
     dg = cur.fetchone()
     if not dg:
@@ -2880,6 +2922,8 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     gid = dg[0]
     scope = dg[3] or "none"
     ptt_listen = dg[4] or "none"
+    directory_admin = dg[6] or "none"
+    org_code = dg[7] or ""
     # members — 범위별로 WHERE 만 다르고 투영·정렬은 하나.
     member_sql = ("SELECT u.id, u.name, s.id, COALESCE(m.group_id,''), "
                   "(SELECT MIN(p.id) FROM ptt_subscriptions p WHERE p.user_id=u.id) "
@@ -2908,8 +2952,11 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
     else:
         rows = []
     targets = [{"id": mid, "uri": _group_uri(mid), "name": name or ""} for mid, name in rows]
+    # directoryAdmin — 관제 앱의 조직/구성원/번호·PTT 그룹 관리 범위(none|own|all, own = orgCode 하위). 쓰기 API 는
+    #   handlers/dispatch_directory.py 가 같은 규칙으로 게이트한다(dispatch_center.md §3.4).
     block = {"groupId": gid, "groupName": dg[1] or "", "pilotId": dg[2] or "",
              "monitorScope": scope, "pttListen": ptt_listen, "listenVisibility": dg[5] or "hidden",
+             "directoryAdmin": directory_admin, "orgCode": org_code,
              "members": members, "pttTargets": targets}
     block["etag"] = _content_etag_json(block)
     return block
@@ -3087,6 +3134,7 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
                              media_type="application/json")
     from services import dispatch_history as _dh
     since_dt = _dh.parse_ts(_q('since'))
+    until_dt = _dh.parse_ts(_q('until'))                 # 창 조회(이력 화면) — 없으면 폴링 커서(now 까지)
     try:
         limit = int(_q('limit', 200))
     except (TypeError, ValueError):
@@ -3122,9 +3170,9 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
     if not scope:
         return HandlerResult(status=403, body={"error": "no_monitor_scope"}, media_type="application/json")
 
-    items, next_since = _dh.query(_SERVICE_LOG_DIR, kind, scope, since_dt, limit)
+    items, next_since = _dh.query(_SERVICE_LOG_DIR, kind, scope, since_dt, limit, until_dt)
     # 앱(HistoryClient) 와이어 계약 — dispatch_desktop_ui.md §13 / android_ue_provisioning.md §3-2.
-    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text} + 최상위 next + 응답 ETag/304.
+    #   items[]{id,time,kind,event,from,to,group,duration,emergency,text,recordingId,hasRecording} + 최상위 next + 응답 ETag/304.
     wire = [_dh.format_item(r) for r in items]
     body = {"items": wire, "next": next_since}
     etag = _content_etag_json(body)
