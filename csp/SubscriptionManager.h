@@ -36,6 +36,15 @@ public:
     ~CSubscriptionManager();
 
     /**
+     * @brief 재기동을 넘어 단조 증가하는 NOTIFY CSeq 시드 (RFC 3261 §12.2.2).
+     *   상태 없는 in-dialog 갱신(재기동 후 옛 dialog 의 SUBSCRIBE)을 수용할 때 쓴다 — 구독자 dialog 는 이전
+     *   인스턴스가 보낸 NOTIFY CSeq 를 기억하므로 1부터 다시 세면 후속 NOTIFY 가 전부 500(Invalid CSeq, 하위
+     *   CSeq)으로 거절돼 로스터·xcap-diff 통지가 영구 stale 된다. 2026-01-01 UTC 경과 초 ×8 — 구독 하나에
+     *   초당 8건 미만이면 어떤 이전 CSeq 보다 크고, int 범위에서 약 8.5년 유효.
+     */
+    static int RebootSafeNotifySeq();
+
+    /**
      * @brief Add or Update a subscription
      */
     void AddSubscription( const std::string &strResourceUri, const SubscriptionInfo &info );

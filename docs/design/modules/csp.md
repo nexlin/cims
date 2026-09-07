@@ -677,6 +677,14 @@ SIP SUBSCRIBE/NOTIFY 다이얼로그 상태 관리.
 떨어져 엉뚱한 `Event: xcap-diff` NOTIFY 가 나가고 구독자 스택이 481 로 구독을 죽인다. 갱신은
 Call-ID 로 기존 구독의 event/resource 를 승계한다(reg/gms/cms 공통).
 
+**재기동 후 상태 없는 갱신(옛 dialog 의 SUBSCRIBE) 은 수용한다** — RFC 3261 §12.2.2 의 "crash 를 넘어 dialog 를
+유지하는 UAS" 경로. 구독 상태는 메모리라 재기동으로 소실되므로, To tag 가 있는데 Call-ID 가 미지인 SUBSCRIBE 는
+(1) 자원을 To URI(초기 Request-URI 보존값)에서 복원해 event 를 재유도하고, (2) 요청의 To tag 를 그대로 승계하며,
+(3) **NOTIFY CSeq 를 재부팅을 넘어 단조 증가하는 시드**(`CSubscriptionManager::RebootSafeNotifySeq` = 2026-01-01
+UTC 경과 초 ×8)로 시작한다. (3) 이 §12.2.2 의 수용 조건이다 — 구독자 dialog 는 이전 인스턴스가 보낸 NOTIFY CSeq 를
+기억하므로 1부터 세면 후속 NOTIFY 가 전부 500(하위 CSeq)으로 거절되고, 단말은 갱신이 200 이라 새로 구독하지도
+않아 로스터·xcap-diff 통지가 영구 stale 된다. 로그 `SUBSCRIBE stateless refresh accepted — NOTIFY CSeq seeded N`.
+
 **SubscriptionInfo:**
 
 ```cpp

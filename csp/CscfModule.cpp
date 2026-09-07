@@ -1220,7 +1220,14 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     info.strResourceId = strReqUriUser;  // 자원 기준 조회용 (conference = 그룹 ID)
     info.iExpires = ( iExpires > 0 ) ? iExpires : 3600;
     info.tStartTime = time( NULL );
-    info.iNotifySeq = 1;
+    // 상태 없는 in-dialog 갱신(재기동 후 옛 dialog 승계 — 위 To tag 승계 분기)은 RFC 3261 §12.2.2 의 수용 조건대로
+    //   NOTIFY CSeq 도 재부팅을 넘어 단조 증가해야 한다. 1부터 세면 구독자 dialog 가 이전 인스턴스의 CSeq 보다
+    //   작다고 보고 후속 NOTIFY 를 전부 500 으로 거절한다(09-07 실측 — 재기동 뒤 단말 4대 로스터 통지 전부 유실).
+    const bool bStatelessRefresh = !bRefresh && !strReqToTag.empty();
+    info.iNotifySeq = bStatelessRefresh ? CSubscriptionManager::RebootSafeNotifySeq() : 1;
+    if ( bStatelessRefresh )
+        CLog::Print( LOG_INFO, "SUBSCRIBE stateless refresh accepted — NOTIFY CSeq seeded %d (user=%s event=%s)",
+                     info.iNotifySeq, strFromId.c_str(), strEventType.c_str() );
     // NOTIFY 송신 시 SUBSCRIBE 수신 listener 의 IP/Port 를 Via/Contact 자기 주소로 사용
     info.iInboundListenerId = GetCurrentInboundListenerId();
 
