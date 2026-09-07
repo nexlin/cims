@@ -5,5 +5,5 @@
   "expires_at": 1771908397,
   "user_id": "tel:+2001",
   "client_id": "MCPTT_UE",
-  "scope": "openid 3gpp:mcptt:ptt_server"
+  "scope": "openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service"
 }

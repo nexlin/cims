@@ -419,26 +419,39 @@
           "key": "IdMs.Issuer",
           "label": "Issuer",
           "type": "string",
-          "default": "idms.ptt.mnc001.mcc001.3gppnetwork.org",
-          "deploy_value": "idms.@PTT_DOMAIN@",
+          "default": "",
           "restart": true,
-          "help": "JWT iss 클레임. 보통 idms.<PTT_DOMAIN>."
+          "help": "JWT iss 클레임(TS 33.180 B.2.1.2). 비우면 McpttServer.PublicUrl(URL 형) → 없으면 idms.<PTT 도메인> (Provisioning.Services.ptt.domain) 으로 유도. discovery(/.well-known/openid-configuration) issuer 와 같은 값."
         },
         {
           "key": "IdMs.Domain",
           "label": "PTT 도메인",
           "type": "string",
-          "default": "ptt.mnc001.mcc001.3gppnetwork.org",
-          "deploy_value": "@PTT_DOMAIN@",
-          "restart": true
+          "default": "",
+          "restart": true,
+          "help": "IdMS/KMS 신원 도메인(KMS UserUri 의 @도메인). 비우면 Provisioning.Services.ptt.domain 으로 유도."
         },
         {
           "key": "IdMs.KmsUri",
           "label": "KMS URI",
           "type": "string",
-          "default": "kms.ptt.mnc001.mcc001.3gppnetwork.org",
-          "deploy_value": "kms.@PTT_DOMAIN@",
-          "restart": true
+          "default": "",
+          "restart": true,
+          "help": "KMS URI. 비우면 kms.<IdMs.Domain> 으로 유도."
+        },
+        {
+          "key": "IdMs.ScopeEnforcement",
+          "label": "리소스 서버 scope 검사",
+          "type": "enum",
+          "options": [
+            "off",
+            "log",
+            "enforce"
+          ],
+          "default": "enforce",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "GMS/CMS/KMS/MCData FD 가 토큰의 3gpp:mc:* scope 를 검사하는 방식(TS 33.180 B.10). enforce=부족 시 403 insufficient_scope(최종 상태) / log=판정만 '[IdMS][scope] would-deny' 로그로 남기고 통과(이행 관찰 창) / off=검사 없음(비상). 구 scope 3gpp:mcptt:ptt_server 는 별칭으로 전체 확장되므로 구 단말도 enforce 를 통과한다."
         },
         {
           "key": "IdMs.KmsClientReqUrl",

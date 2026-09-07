@@ -33,7 +33,7 @@
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 브로드캐스트 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
-| S2 | access_token 표준 클레임(`sub`/`iss`/`iat`) + nonce | CSC | TS 33.180 / OIDC | ✅ 정합 |
+| S2 | access_token 클레임(`sub`/`iss`/`iat`/`client_id`/`scope` 문자열 + `mcptt_id`/`mcdata_id`) + nonce, scope 카탈로그 `3gpp:mc:*`(B.4.2.2) 요청∩카탈로그 발급, 리소스 서버 scope 검사(B.10, `IdMs.ScopeEnforcement`) — 구 `3gpp:mcptt:ptt_server` 전환기 별칭 | CSC | TS 33.180 Annex B | ✅ 정합 — 정본 [mcx_identity_scope.md](mcx_identity_scope.md) |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
 | S4 | service-config (전역 정책 SoT + 문서 산출) | CSC | TS 24.484 §10.3 | ✅ 정합 |
 | S5 | KMS 가입자별 키 프로비저닝 | CSC | TS 33.180 §F | ⚠ 구조적 정합(참 ECCSI/SAKKE 후속) |
@@ -382,7 +382,9 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 ### IdMS (TS 33.180 / OIDC)
 - **S1 디스커버리**: `GET /.well-known/openid-configuration`(`handle_openid_config`) — issuer/authorization·
   token·introspection endpoint·`code_challenge_methods_supported=[S256]`·grant types·claims 광고.
-- **S2a access_token 클레임**: `sub`(=user)/`iss`/`iat`/`exp`/`aud`/`scope`(`create_tokens`).
+- **S2a access_token 클레임**: `sub`(=login_id)/`iss`/`iat`/`exp`/`aud`/`client_id`/`scope`(공백 구분 문자열)/
+  `mcptt_id`/`mcdata_id`(`create_tokens`). scope = 요청 ∩ 카탈로그(`grant_scope`, B.4.2.2 `3gpp:mc:*`), 리소스 서버 검사
+  `require_scope`(B.10). 상세·별칭·롤아웃 = [mcx_identity_scope.md](mcx_identity_scope.md).
 - **S2b nonce**: authreq `nonce` 저장(`handle_auth_req`) → id_token `nonce` 클레임 반영(OIDC Core §3.1.2.1).
 - **인증 요청 두 말투 병행**(`handle_auth_req` 한 핸들러 안 분기 — 검증·인증·코드 발급은 공유, 응답 표현만 다름):
   - *자체 단말 간이형*: `GET /idms/authreq?user_name&user_password&…` → `200 JSON {code,state,Location}`.

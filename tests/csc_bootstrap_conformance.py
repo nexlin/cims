@@ -43,6 +43,10 @@ CTX.check_hostname = False
 CTX.verify_mode = ssl.CERT_NONE   # 사설 CA — 시험 스크립트는 미검증 (단말은 CA 동봉 검증)
 
 g_pass, g_fail = 0, 0
+# TS 33.180 B.4.2.2 — CIMS 가 발급하는 MC 서비스 scope 8종 (서버 SCOPE_MC_SERVICES 와 정합)
+MC8 = ['3gpp:mc:ptt_service', '3gpp:mc:ptt_group_management_service', '3gpp:mc:ptt_config_management_service',
+       '3gpp:mc:ptt_key_management_service', '3gpp:mc:data_service', '3gpp:mc:data_group_management_service',
+       '3gpp:mc:data_config_management_service', '3gpp:mc:data_key_management_service']
 
 
 def check(cond, msg):
@@ -61,7 +65,7 @@ def http_get(url, headers=None):
         with urllib.request.urlopen(req, timeout=10, context=CTX) as r:
             return r.status, r.read().decode(), dict((k.lower(), v) for k, v in r.headers.items())
     except urllib.error.HTTPError as e:
-        return e.code, (e.read() or b'').decode(), {}
+        return e.code, (e.read() or b'').decode(), dict((k.lower(), v) for k, v in (e.headers or {}).items())
     except Exception as e:
         return 0, str(e), {}
 
@@ -129,8 +133,17 @@ def main():
     ap.add_argument('--password', default='1234')
     ap.add_argument('--other-user', default='tel:+82500000001',
                     help='Step 7 남의 문서 403 확인용 (본인과 다른 실존 가입자)')
+    ap.add_argument('--enforcement', choices=['enforce', 'log', 'off'], default='enforce',
+                    help='대상 CSC 의 IdMs.ScopeEnforcement (Step 3c 의 기대 응답을 정한다)')
     args = ap.parse_args()
     base_req = f"https://{args.host}:{args.port}"
+
+    def jwt_payload(token):
+        try:
+            pl = token.split('.')[1]
+            return json.loads(base64.urlsafe_b64decode(pl + '=' * (-len(pl) % 4)))
+        except Exception:
+            return {}
 
     # ── Step 1: 익명 ue-init-config (로그인 전 — 토큰 없음, XUI=인스턴스 UUID) ──
     print("Step 1  ue-init-config (익명)")
@@ -187,6 +200,18 @@ def main():
         pass
     check(bool(mcptt_id), f"토큰 mcptt_id ({mcptt_id})")
     bearer = {'Authorization': f'Bearer {access}'}
+    # scope 계약 (TS 33.180 B.2.2.2 / RFC 6749 §5.1): 구 별칭 요청 → MC 서비스 8종 확장 + 구 문자열 병기
+    resp_scope = (tok.get('scope') or '').split()
+    check(all(x in resp_scope for x in MC8) and '3gpp:mcptt:ptt_server' in resp_scope,
+          "토큰 응답 scope = 구 별칭 확장(3gpp:mc:* 8종) + 구 문자열 병기")
+    pl3 = jwt_payload(access)
+    check(isinstance(pl3.get('scope'), str) and pl3.get('scope', '').split() == resp_scope,
+          "access token scope claim = 공백 구분 문자열, 응답 scope 와 동일")
+    check(pl3.get('client_id') == 'MCPTT_UE', "access token client_id claim (B.2.2.2)")
+    check(pl3.get('mcdata_id') == mcptt_id, "access token mcdata_id claim = mcptt_id (B.2.2.3, 단일 MC service ID)")
+    id_pl = jwt_payload(tok.get('id_token', ''))
+    check(id_pl.get('mcdata_id') == mcptt_id and id_pl.get('mcptt_id') == mcptt_id, "id_token mcptt_id/mcdata_id (B.2.1.3)")
+    refresh_3 = tok.get('refresh_token', '')
 
     # ── Step 3b: 규격 흐름 (TS 24.482 §6.3.1 / OIDC Core §3.1.2) — 자격 없는 GET → 폼 → POST → 302 ──
     print("Step 3b IdMS 규격 흐름 (GET 폼 → POST form → 302 → tokenreq form-urlencoded)")
@@ -236,6 +261,68 @@ def main():
                                          'code_verifier': verifier_b, 'client_id': 'MCPTT_UE',
                                          'redirect_uri': redirect_b}, parse_json=True)
     check(st == 400, f"code 재사용 → 400 (1회성) (got {st})")
+
+    # ── Step 3c: scope 카탈로그 · 리소스 서버 검사 · discovery (TS 33.180 B.4.2.2 / B.10 / OIDC Discovery) ──
+    print(f"Step 3c scope 카탈로그·리소스 서버 검사 (기대 모드: {args.enforcement})")
+
+    def simple_login(scope):
+        v = base64.urlsafe_b64encode(os.urandom(32)).rstrip(b'=').decode()
+        c = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=').decode()
+        qq = urllib.parse.urlencode({'user_name': args.login, 'user_password': args.password,
+                                     'client_id': 'MCPTT_UE', 'redirect_uri': 'http://localhost/cb',
+                                     'code_challenge': c, 'code_challenge_method': 'S256', 'scope': scope})
+        s1, b1, _ = http_get(f"{auth_ep}?{qq}")
+        cd = ''
+        try:
+            cd = json.loads(b1).get('code', '')
+        except Exception:
+            pass
+        s2, t2 = http_post_json(token_ep, {'code': cd, 'code_verifier': v, 'client_id': 'MCPTT_UE',
+                                           'redirect_uri': 'http://localhost/cb', 'grant_type': 'authorization_code'})
+        return (t2 if s2 == 200 else {})
+
+    # (1) 신 이름 요청 + 미지 scope(MCVideo) → 미지 제외, 응답 scope 로 허가분 통지
+    tok_c = simple_login('openid 3gpp:mc:ptt_service 3gpp:mc:video_service')
+    check((tok_c.get('scope') or '').split() == ['openid', '3gpp:mc:ptt_service'],
+          f"요청 ∩ 카탈로그: video 제외, 허가분 통지 (got '{tok_c.get('scope')}')")
+    # (2) ptt_service 만 가진 토큰으로 GMS → enforce: 403 insufficient_scope + WWW-Authenticate(필요 scope 명시)
+    xui_c = urllib.parse.quote(mcptt_id, safe='')
+    st, body_c, hdr_c = http_get(f"{gms_root}/org.openmobilealliance.groups/users/{xui_c}",
+                                 {'Authorization': f"Bearer {tok_c.get('access_token', '')}"})
+    www = hdr_c.get('www-authenticate', '')
+    if args.enforcement == 'enforce':
+        check(st == 403 and 'insufficient_scope' in www and 'group_management_service' in www,
+              f"scope 부족 → 403 + WWW-Authenticate error=insufficient_scope, 필요 scope 명시 (got {st}: {www[:90]})")
+    else:
+        check(st == 200, f"{args.enforcement} 모드 — scope 부족해도 통과 (got {st})")
+    # (3) 충분한 scope → 200 (별칭 토큰은 Step 6 에서 확인)
+    tok_d = simple_login('openid 3gpp:mc:ptt_group_management_service')
+    st, _, _ = http_get(f"{gms_root}/org.openmobilealliance.groups/users/{xui_c}",
+                        {'Authorization': f"Bearer {tok_d.get('access_token', '')}"})
+    check(st == 200, f"ptt_group_management_service 토큰으로 GMS 200 (got {st})")
+    # (4) refresh 축소 — 구 별칭 grant 의 refresh 로 data_service 만 요청 → 그 하나로 좁혀지고 refresh 는 broad 유지
+    st, tok_r = http_post_json(token_ep, {'grant_type': 'refresh_token', 'refresh_token': refresh_3,
+                                          'client_id': 'MCPTT_UE', 'scope': '3gpp:mc:data_service'})
+    check(st == 200 and (tok_r.get('scope') or '') == '3gpp:mc:data_service',
+          f"refresh scope 축소(별칭 grant ∩ 요청) → data_service 만 (got {st} '{tok_r.get('scope')}')")
+    st, tok_r2 = http_post_json(token_ep, {'grant_type': 'refresh_token', 'refresh_token': tok_r.get('refresh_token', ''),
+                                           'client_id': 'MCPTT_UE'})
+    check(st == 200 and all(x in (tok_r2.get('scope') or '').split() for x in MC8),
+          f"회전된 refresh 는 원 grant(broad) 보존 → scope 없는 refresh 로 8종 복원 (got {st})")
+    # (5) discovery
+    st, body_o, _ = http_get(f"{base_req}/.well-known/openid-configuration")
+    try:
+        oc = json.loads(body_o)
+    except Exception:
+        oc = {}
+    sup = oc.get('scopes_supported') or []
+    check(st == 200 and all(x in sup for x in MC8) and '3gpp:mcptt:ptt_server' in sup,
+          "discovery scopes_supported = 3gpp:mc:* 8종 + 구 별칭")
+    cl = oc.get('claims_supported') or []
+    check(all(x in cl for x in ('client_id', 'mcptt_id', 'mcdata_id', 'scope')), "discovery claims_supported 에 client_id·mcdata_id")
+    iss = str(oc.get('issuer') or '')
+    check(iss and (iss.endswith(domain) or iss.startswith('https://')) and iss == pl3.get('iss'),
+          f"issuer = 부트스트랩 domain 정합(FQDN) 또는 URL 형, 토큰 iss 와 동일 ({iss})")
 
     # ── Step 4: user-profile — XUI 를 외부 단말식 sip:완전형(@도메인)으로 ──
     print("Step 4  user-profile (XUI=sip:완전형 — 신원 표기 관용)")

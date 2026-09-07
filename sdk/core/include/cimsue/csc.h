@@ -19,7 +19,8 @@ struct CscEndpoint {
     int port = 4430;
     std::string clientId = "MCPTT_UE";
     std::string redirectUri = "https://localhost/callback";
-    std::string scope = "openid cims:provisioning 3gpp:mcptt:ptt_server";
+    // cims:provisioning=부트스트랩(/provisioning/me), 3gpp:mc:*=MC 서비스 8종(TS 33.180 B.4.2.2 — 서버 카탈로그와 정합)
+    std::string scope = "openid cims:provisioning 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service";
     std::string caPem;                    // 신뢰 앵커(비면 시스템 기본)
     bool verifyServer = true;
     std::string baseUrl() const { return "https://" + host + ":" + std::to_string(port); }

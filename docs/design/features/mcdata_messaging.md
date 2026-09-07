@@ -135,7 +135,9 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 ```
 
 - **콘텐츠 서버 = CSC MCPTT 서버(4430) 동봉** (`csc/src/services/mcdata_fd.py`) — 단말이 이미
-  쓰는 포트·Bearer 토큰(IdMS) 그대로. 업로드 시 서버가 게이트: 토큰 401 / 그룹 `allow_fd` 403 /
+  쓰는 포트·Bearer 토큰(IdMS) 그대로 — 토큰 scope `3gpp:mc:data_service` 검사(TS 33.180 B.10, `IdMs.ScopeEnforcement`),
+  업로더 신원 = 토큰 `mcdata_id`(= `mcptt_id`, 단일 MC service ID — [mcx_identity_scope.md](mcx_identity_scope.md) §1).
+  업로드 시 서버가 게이트: 토큰 401 / scope 부족 403 `insufficient_scope` / 그룹 `allow_fd` 403 /
   업로더 멤버십 403 / `McDataFd.MaxBytes`(기본 50MB) 413.
 - 저장: `{McDataFd.Dir | {ServiceLogging.Dir}/mcdata_fd}/{YYYY}/{MM}/{DD}/{id}.bin` +
   `index/{id}.json`(메타). 다운로드는 `GET /mcdata/fd/{id}` FileResponse 스트리밍.

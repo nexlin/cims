@@ -154,6 +154,7 @@ docs/       설계·API·사용자 매뉴얼 문서 (아래 참조)
 - [mcptt_standard_conformance.md](docs/design/features/mcptt_standard_conformance.md) — MCPTT 서버(CSC/CSP/CMP) 3GPP TS 규격 정합 보완 사항(단말 interop 전제) + §0-R 미반영 로드맵
 - [mcptt_csp_cmp_roadmap_contract.md](docs/design/features/mcptt_csp_cmp_roadmap_contract.md) — 로드맵 기능(private call·dual/multi-talker·pre-established 등) CSP↔CMP 연동 메시지 규격, Call Control/Media Plane 2파트 분담 계약
 - [mcdata_messaging.md](docs/design/features/mcdata_messaging.md) — MCData 그룹 메시징(SDS) — TS 24.282 그룹 SDS·TS 24.481 그룹별 게이트·disposition
+- [mcx_identity_scope.md](docs/design/features/mcx_identity_scope.md) — MCX 신원·토큰·scope 모델 — 단일 MC service ID(`mcdata_id`=`mcptt_id`, TS 23.280 §10.1.4.1), IdMS 토큰 claim(TS 33.180 Annex B: `client_id`·`scope` 문자열·`mcptt_id`/`mcdata_id`), scope 카탈로그 `3gpp:mc:*` 8종 요청∩카탈로그 발급·구 `3gpp:mcptt:ptt_server` 전환기 별칭(전체 확장·병기), 리소스 서버(GMS/CMS/KMS/MCData FD) scope 검사 `IdMs.ScopeEnforcement` enforce|log|off + RFC 6750 응답, issuer 유도(`IdMs.Issuer` > `McpttServer.PublicUrl` > `idms.<PTT 도메인>`). 향후 = CSP REGISTER 토큰 검증(TS 24.379 §7.3)·MCData XCAP 문서(TS 24.484 §10)
 - [ue_nat_traversal.md](docs/design/features/ue_nat_traversal.md) — 단말 NAT traversal (시그널링·미디어 leg 포트·목적지 latch·정책)
 - [registration_binding_set.md](docs/design/features/registration_binding_set.md) — 등록 바인딩 집합 (AoR 당 도달 경로 여러 개, flow 생존 판정으로 선택 — transport 혼합 운용의 토대. 정리 정책 3계기)
 - [sip_tls_signaling.md](docs/design/features/sip_tls_signaling.md) — SIP 시그널링 transport (UDP/TCP/TLS **단말 선택** 지원. transport 별 도달 모델 = 목적지 주소 vs 연결 열쇠, 접속점 개설 실패 격리·A-PRC-012, 인증서 운영=상용 게이트)

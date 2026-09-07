@@ -49,7 +49,7 @@ def save_token_config(token_data: Dict):
         "expires_at": int(time.time()) + token_data.get("expires_in", 3600),
         "user_id": "tel:+2001",
         "client_id": "MCPTT_UE",
-        "scope": "openid 3gpp:mcptt:ptt_server"
+        "scope": "openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service"
     }
     
     with open(CONFIG_FILE, 'w') as f:
@@ -89,7 +89,7 @@ async def full_authentication(session, base_url):
         "user_password": "123456",
         "redirect_uri": "http://client/cb",
         "state": "mystate",
-        "scope": "openid 3gpp:mcptt:ptt_server",
+        "scope": "openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service",
         "code_challenge": code_challenge,
         "code_challenge_method": "S256"
     }, allow_redirects=False) as resp:

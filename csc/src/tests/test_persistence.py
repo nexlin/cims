@@ -16,7 +16,7 @@ async def test_create_group():
 
     async with aiohttp.ClientSession(connector=connector) as session:
         # 1. Login
-        async with session.get(f"{base_url}/idms/authreq", params={"client_id":"MCPTT_UE", "user_name":"tel:+1000", "user_password":"1234", "response_type":"code", "scope":"openid 3gpp:mcptt:ptt_server", "redirect_uri":"http://client/cb", "state":"mystate"}, allow_redirects=False) as resp:
+        async with session.get(f"{base_url}/idms/authreq", params={"client_id":"MCPTT_UE", "user_name":"tel:+1000", "user_password":"1234", "response_type":"code", "scope":"openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service", "redirect_uri":"http://client/cb", "state":"mystate"}, allow_redirects=False) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 code = data.get('code')
@@ -54,7 +54,7 @@ async def test_check_group():
 
     async with aiohttp.ClientSession(connector=connector) as session:
         # 1. Login (Need token again)
-        async with session.get(f"{base_url}/idms/authreq", params={"client_id":"MCPTT_UE", "user_name":"tel:+1000", "user_password":"1234", "response_type":"code", "scope":"openid 3gpp:mcptt:ptt_server", "redirect_uri":"http://client/cb", "state":"mystate"}, allow_redirects=False) as resp:
+        async with session.get(f"{base_url}/idms/authreq", params={"client_id":"MCPTT_UE", "user_name":"tel:+1000", "user_password":"1234", "response_type":"code", "scope":"openid 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service", "redirect_uri":"http://client/cb", "state":"mystate"}, allow_redirects=False) as resp:
            # Simply assume success for brevity or same logic
             if resp.status == 200:
                 data = await resp.json()

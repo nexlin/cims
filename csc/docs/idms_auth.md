@@ -98,7 +98,7 @@ GET /idms/authreq?
     user_password=1234&
     redirect_uri=http://client/cb&
     state=mystate&
-    scope=openid 3gpp:mcptt:ptt_server&
+    scope=openid 3gpp:mc:ptt_service 3gpp:mc:ptt_group_management_service&
     code_challenge=oEtOOSr02_j5pNl4MTNM...&
     code_challenge_method=S256
 ```
@@ -652,7 +652,7 @@ REFRESH_TOKEN_TTL = 60
 | `expires_at` | 만료 시간 | `1770709065` | Unix timestamp |
 | `user_id` | 사용자 ID | `"tel:+2001"` | 토큰 소유자 |
 | `client_id` | 클라이언트 ID | `"MCPTT_UE"` | 발급받은 클라이언트 |
-| `scope` | 권한 범위 | `"openid 3gpp:mcptt:ptt_server"` | 공백으로 구분 |
+| `scope` | 권한 범위 | `"openid 3gpp:mc:ptt_service …"` | 공백으로 구분. TS 33.180 B.4.2.2 `3gpp:mc:*` 카탈로그 ∩ 요청. 구 `3gpp:mcptt:ptt_server` 는 전환기 별칭(전체 확장) — 정본 [docs/design/features/mcx_identity_scope.md](../../docs/design/features/mcx_identity_scope.md) |
 
 **용도**: 테스트 시 토큰 재사용 (빠른 테스트)  
 **관리**: 만료 시 자동 갱신, 수동 삭제로 전체 재인증
@@ -993,7 +993,7 @@ python3 cleanup_idms.py
 #### 1-1. 인증 요청
 
 ```http
-GET /idms/authreq?client_id=MCPTT_UE&user_name=tel:+2001&user_password=1234&redirect_uri=http://client/cb&state=mystate&scope=openid%203gpp:mcptt:ptt_server&code_challenge=oEtOOSr02_j5pNl4MTNM...&code_challenge_method=S256
+GET /idms/authreq?client_id=MCPTT_UE&user_name=tel:+2001&user_password=1234&redirect_uri=http://client/cb&state=mystate&scope=openid%203gpp:mc:ptt_service&code_challenge=oEtOOSr02_j5pNl4MTNM...&code_challenge_method=S256
 ```
 
 **응답**:

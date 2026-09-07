@@ -28,14 +28,39 @@ SECRET_KEY = _secrets.token_urlsafe(32)
 #   ⚠ 본 파생은 가입자별 **구조적 프로비저닝**(UserDecryptKey/SSK/PVT 가 사용자마다 다름)을 제공하나,
 #   참값 ECCSI/SAKKE(RFC 6507/6508)는 pairing 암호 라이브러리가 필요한 후속 과제다(E2E 암호화 도입 시).
 KMS_MASTER_SECRET = _secrets.token_bytes(32)
-# IdMS scope 분리 — 평면별 토큰 용도 구분(TS 33.180 / 본 프로젝트 프로비저닝).
-#   CIMS 앱 로그인은 두 scope 를 함께 grant 받고, AccountManager 가 refresh 로 용도별 토큰을 좁혀 발급.
-SCOPE_PROVISIONING = "cims:provisioning"      # 디바이스 부트스트랩(/provisioning/me)
-SCOPE_MCPTT        = "3gpp:mcptt:ptt_server"  # MCPTT 서비스 평면(XCAP/KMS/affiliation)
+# ── IdMS scope 카탈로그 (TS 33.180 Annex B.4.2.2 — MC 서비스별 authorization scope) ──
+#   토큰 scope = 요청 ∩ 카탈로그 (RFC 6749 §3.3: 모르는 값은 제외하고 토큰 응답 `scope` 로 허가분을 알림).
+#   리소스 서버는 자기 scope 를 검사한다(B.10 — `require_scope`, IdMs.ScopeEnforcement).
+#   MCVideo 는 미지원이라 카탈로그 밖(요청되면 제외). CIMS 앱은 로그인 시 전부 grant 받고 AccountManager 가
+#   refresh 로 용도별(provisioning / MC 서비스) 토큰을 좁혀 발급받는다.
+SCOPE_OPENID       = "openid"
+SCOPE_PROVISIONING = "cims:provisioning"      # 자체 — 디바이스 부트스트랩(/provisioning/*)
+SCOPE_PTT_SERVICE  = "3gpp:mc:ptt_service"
+SCOPE_DATA_SERVICE = "3gpp:mc:data_service"
+SCOPE_PTT_GMS      = "3gpp:mc:ptt_group_management_service"
+SCOPE_PTT_CMS      = "3gpp:mc:ptt_config_management_service"
+SCOPE_PTT_KMS      = "3gpp:mc:ptt_key_management_service"
+SCOPE_DATA_GMS     = "3gpp:mc:data_group_management_service"
+SCOPE_DATA_CMS     = "3gpp:mc:data_config_management_service"
+SCOPE_DATA_KMS     = "3gpp:mc:data_key_management_service"
+SCOPE_MC_SERVICES  = (SCOPE_PTT_SERVICE, SCOPE_PTT_GMS, SCOPE_PTT_CMS, SCOPE_PTT_KMS,
+                      SCOPE_DATA_SERVICE, SCOPE_DATA_GMS, SCOPE_DATA_CMS, SCOPE_DATA_KMS)
+SCOPE_CATALOG      = frozenset((SCOPE_OPENID, SCOPE_PROVISIONING) + SCOPE_MC_SERVICES)
+# 전환기 별칭 — 구 단일 scope(TS 33.179 표기)는 MC 서비스 scope 8개 전체로 확장한다(종전에 그 하나가 열어 주던
+#   범위와 동일). 토큰에는 확장분과 함께 구 문자열도 실린다(요청 scope 를 문자열 대조하는 단말 호환).
+#   별칭 제거 = 우리 앱·협력업체가 신 이름으로 옮긴 뒤 별도 결정 (mcx_identity_scope.md §5).
+SCOPE_LEGACY_MCPTT = "3gpp:mcptt:ptt_server"
+SCOPE_ALIASES      = {SCOPE_LEGACY_MCPTT: SCOPE_MC_SERVICES}
+# 리소스 서버 scope 검사 모드 (IdMs.ScopeEnforcement): off=검사 없음 / log=would-deny 로그만 / enforce=403.
+SCOPE_ENFORCEMENT  = "enforce"
 
-IDMS_ISSUER = "idms.mcptt.com"
-KMS_URI = "kms.mcptt.com"
-IDMS_DOMAIN = "mcptt.com"
+# IdMS 신원 값 — 설정이 비면 apply_config 가 PTT 도메인(Provisioning.Services.ptt.domain)에서 유도한다.
+#   Issuer = IdMs.Issuer > McpttServer.PublicUrl(URL 형, TS 33.180 B.2.1.2) > idms.<Domain>
+#   Domain = IdMs.Domain > PTT 도메인 > 코드 기본값 / KmsUri = IdMs.KmsUri > kms.<Domain>
+_IDMS_DOMAIN_DEFAULT = "mcptt.com"
+IDMS_ISSUER = "idms." + _IDMS_DOMAIN_DEFAULT
+KMS_URI = "kms." + _IDMS_DOMAIN_DEFAULT
+IDMS_DOMAIN = _IDMS_DOMAIN_DEFAULT
 KMS_CLIENT_REQ_URL = "http://localhost:4421/keymanagement/identity/v1/init"
 USERS = {}            # tel:+msisdn → {password,...} (XCAP/profile 키 = MCPTT ID)
 # 사용자 MCPTT 프로파일 (ptt_user_profile) — ptt_subscriptions.id(MSISDN) → {allow_*, emergency_group_*}.
@@ -198,6 +223,17 @@ def _users_has_title(cur) -> bool:
     return cur.fetchone()['cnt'] > 0
 
 
+def resolve_idms_identity(idms_config: dict, ptt_domain: str, public_url: str):
+    """IdMS 신원 3종 (issuer, domain, kms_uri) 유도 — 설정 명시값 > 유도값.
+    Issuer: IdMs.Issuer > McpttServer.PublicUrl(URL 형, TS 33.180 B.2.1.2 "IdM 서버의 URL") > idms.<domain>
+    Domain: IdMs.Domain > Provisioning.Services.ptt.domain > 코드 기본값 / KmsUri: IdMs.KmsUri > kms.<domain>"""
+    idms_config = idms_config or {}
+    domain = str(idms_config.get('Domain') or ptt_domain or _IDMS_DOMAIN_DEFAULT).strip()
+    issuer = str(idms_config.get('Issuer') or public_url or f"idms.{domain}").strip()
+    kms_uri = str(idms_config.get('KmsUri') or f"kms.{domain}").strip()
+    return issuer, domain, kms_uri
+
+
 def apply_config(config):
     """설정 스칼라 값만 모듈 전역에 재적용 — 가입자/그룹 데이터 로드는 하지 않는다.
 
@@ -218,12 +254,6 @@ def apply_config(config):
     else:
         logger.log_error("[IdMS] IdMs.JwtSecret 미설정 — 임의 시크릿 사용(재기동 시 토큰 무효화). "
                          "운영은 IdMs.JwtSecret 설정 권장.")
-    if idms_config.get('Issuer'):
-        IDMS_ISSUER = idms_config['Issuer']
-    if idms_config.get('KmsUri'):
-        KMS_URI = idms_config['KmsUri']
-    if idms_config.get('Domain'):
-        IDMS_DOMAIN = idms_config['Domain']
     if idms_config.get('KmsClientReqUrl'):
         KMS_CLIENT_REQ_URL = idms_config['KmsClientReqUrl']
     if idms_config.get('AuthCodeTtl'):
@@ -232,6 +262,12 @@ def apply_config(config):
         ACCESS_TOKEN_TTL = int(idms_config['AccessTokenTtl'])
     if idms_config.get('RefreshTokenTtl'):
         REFRESH_TOKEN_TTL = int(idms_config['RefreshTokenTtl'])
+    global SCOPE_ENFORCEMENT
+    _enf = str(idms_config.get('ScopeEnforcement') or 'enforce').strip().lower()
+    if _enf not in ('off', 'log', 'enforce'):
+        logger.log_error(f"[IdMS] IdMs.ScopeEnforcement='{_enf}' 미지 값 — enforce 로 동작")
+        _enf = 'enforce'
+    SCOPE_ENFORCEMENT = _enf
 
     # 규격 로그인 폼 입력칸 이름 · redirect_uri 허용 목록 (둘 다 리로드 가능 — 다음 요청부터)
     global IDMS_FORM_LOGIN_FIELD, IDMS_FORM_PASSWORD_FIELD, IDMS_REDIRECT_URI_ALLOW
@@ -279,6 +315,13 @@ def apply_config(config):
         _pub = 'https://' + _pub
     _MCPTT_PUBLIC_URL = _pub
     logger.log_info(f"MCPTT public base URL: {_MCPTT_PUBLIC_URL or '(요청 Host 유도)'}")
+
+    # IdMS 신원 값 유도 — 비면 PTT 도메인에서 파생(단일 정본). 템플릿 기본값이 비어 있어 배포 overlay 에
+    #   실리지 않으므로, 운영자가 콘솔에 명시할 때만 그 값을 쓴다.
+    _ptt_domain = str(((PROVISIONING.get('Services') or {}).get('ptt') or {}).get('domain') or '').strip()
+    IDMS_ISSUER, IDMS_DOMAIN, KMS_URI = resolve_idms_identity(idms_config, _ptt_domain, _MCPTT_PUBLIC_URL)
+    logger.log_info(f"IdMS identity: issuer={IDMS_ISSUER} domain={IDMS_DOMAIN} kms={KMS_URI} "
+                    f"scope_enforcement={SCOPE_ENFORCEMENT}")
 
     global GROUP_DIR
     if group_path:
@@ -988,14 +1031,21 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str = "S256") -
 # refresh_scope= 회전된 refresh_token 에 보존할 scope. None 이면 scope 와 동일.
 #   scope 분리 refresh 시 access 만 좁히고 refresh 는 원 grant(broad) 유지 → 다음 다른-용도 refresh 가능.
 def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_scope=None, mcptt_id=None):
+    """토큰 3종 발급. `scope` 는 이미 허가 계산(grant_scope / refresh 축소)을 거친 공백 구분 문자열.
+
+    claim 은 TS 33.180 Annex B: ID token = iss/sub/aud/exp/iat + mcptt_id/mcdata_id(+nonce),
+    access token = exp/scope(공백 구분 문자열)/client_id + mcptt_id/mcdata_id (iss/sub/aud/iat 는 RFC 7519 추가분).
+    단일 MC service ID 구성(TS 23.280 §10.1.4.1)이라 mcdata_id = mcptt_id 값."""
     now = int(time.time())
     # sub = CIMS 로그인 ID(인증 신원). mcptt_id = 규격 MCPTT 서비스 신원(분리). 미지정 시 subject 로 폴백.
     sub = subject
     mcptt = mcptt_id or subject
+    scope = " ".join(scope.split()) if isinstance(scope, str) else " ".join(scope or [])
 
     # ID Token (OIDC) — nonce 가 있으면 반영(S2b: CSRF/replay 방지, OIDC Core §3.1.2.1)
     id_token_payload = {
         "mcptt_id": mcptt,
+        "mcdata_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": client_id or "mcptt_client",
@@ -1006,15 +1056,17 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
         id_token_payload["nonce"] = nonce
     id_token = jwt.encode(id_token_payload, SECRET_KEY, algorithm="HS256")
 
-    # Access Token — S2a: OIDC 표준 클레임(sub/iss/iat) 보강. sub=login_id, mcptt_id=MCPTT 신원.
+    # Access Token — sub=login_id, mcptt_id/mcdata_id=MC 서비스 신원, client_id=요청 클라이언트(B.2.2.2).
     access_token_payload = {
         "mcptt_id": mcptt,
+        "mcdata_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": "mcptt_client",
+        "client_id": client_id or "mcptt_client",
         "iat": now,
         "exp": now + ACCESS_TOKEN_TTL,
-        "scope": scope.split() if scope else []
+        "scope": scope
     }
     access_token = jwt.encode(access_token_payload, SECRET_KEY, algorithm="HS256")
 
@@ -1041,6 +1093,81 @@ def validate_access_token(token):
     except Exception as e:
         logger.log_error(f"Token validation error: {e}")
         return None
+
+
+# ── scope 계산 ──
+def expand_scopes(scope) -> list:
+    """scope(공백 구분 문자열 또는 목록) → 별칭 확장·중복 제거 목록(입력 순서 유지, 별칭 원문도 남김).
+    카탈로그 여과는 하지 않는다 — 발급은 grant_scope, 검사는 token_scopes 가 쓴다."""
+    items = scope.split() if isinstance(scope, str) else list(scope or [])
+    out: list = []
+    for s in items:
+        for v in (s,) + tuple(SCOPE_ALIASES.get(s, ())):
+            if v not in out:
+                out.append(v)
+    return out
+
+
+def grant_scope(requested):
+    """허가 scope 계산 — 요청 ∩ (카탈로그 ∪ 별칭). 반환 (허가 공백 구분 문자열, 제외된 요청 항목 목록).
+    별칭은 확장 집합과 원문을 함께 허가한다. 모르는 값(MCVideo 등)은 제외 — 토큰 응답 `scope` 로 알린다."""
+    items = requested.split() if isinstance(requested, str) else list(requested or [])
+    granted: list = []
+    dropped: list = []
+    for s in items:
+        if s in SCOPE_CATALOG or s in SCOPE_ALIASES:
+            for v in expand_scopes([s]):
+                if v not in granted:
+                    granted.append(v)
+        else:
+            dropped.append(s)
+    return " ".join(granted), dropped
+
+
+def token_scopes(payload: dict) -> set:
+    """토큰의 유효 scope 집합 — 문자열/배열 양식 모두 수용(이행 전 발급 토큰은 배열), 별칭은 검사 시점에도 확장."""
+    return set(expand_scopes((payload or {}).get('scope') or []))
+
+
+def _bearer_challenge(error: str = '', scope: str = '') -> dict:
+    """RFC 6750 §3 `WWW-Authenticate: Bearer` 헤더."""
+    v = f'Bearer realm="{IDMS_DOMAIN}"'
+    if error:
+        v += f', error="{error}"'
+    if scope:
+        v += f', scope="{scope}"'
+    return {"WWW-Authenticate": v}
+
+
+def unauthorized(args) -> HandlerResult:
+    """401 — 토큰 부재는 Bearer 챌린지만, 토큰이 있었으면 error=invalid_token (RFC 6750 §3.1)."""
+    had = bool(args.headers.get('authorization') or args.headers.get('Authorization'))
+    return HandlerResult(status=401, body={"error": "invalid_token" if had else "unauthorized"},
+                         media_type="application/json",
+                         headers=_bearer_challenge('invalid_token' if had else ''))
+
+
+def require_scope(args, payload: dict, endpoint: str, *accepted: str) -> Optional[HandlerResult]:
+    """리소스 서버 scope 검사(TS 33.180 B.10) — `accepted` 중 하나가 토큰에 있어야 통과(None).
+
+    IdMs.ScopeEnforcement: off=검사 없음 / log=판정만 계산해 `would-deny` 한 줄 로그 후 통과(라이브 관찰 창) /
+    enforce=403 insufficient_scope + WWW-Authenticate 에 필요한 scope 명시(RFC 6750 §3.1). 로그 한 줄에
+    엔드포인트·신원·client_id·보유·요구를 모두 담아 grep 한 번으로 구 클라이언트를 찾을 수 있게 한다."""
+    if SCOPE_ENFORCEMENT == 'off':
+        return None
+    have = token_scopes(payload)
+    if any(s in have for s in accepted):
+        return None
+    line = (f"[IdMS][scope] would-deny endpoint={endpoint} method={args.method} "
+            f"mcptt_id={(payload or {}).get('mcptt_id')} client_id={(payload or {}).get('client_id')} "
+            f"granted={' '.join(sorted(have)) or '(none)'} required={'|'.join(accepted)}")
+    if SCOPE_ENFORCEMENT != 'enforce':
+        logger.log_warning(line)
+        return None
+    logger.log_error(line.replace('would-deny', 'deny', 1))
+    return HandlerResult(status=403, body={"error": "insufficient_scope", "required": list(accepted)},
+                         media_type="application/json",
+                         headers=_bearer_challenge('insufficient_scope', ' '.join(accepted)))
 
 # --- XML Generators ---
 def _content_etag(content: str) -> str:
@@ -1803,8 +1930,11 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         # 7. 성공 - 토큰 발급 (sub=login_id, mcptt_id=서비스 신원 분리. nonce 반영)
         login_id = auth_data.get("login_id") or auth_data.get("user_id")
         mcptt_id = auth_data.get("mcptt_id", login_id)
-        scope = auth_data.get("scope", "")
         nonce = auth_data.get("nonce", "")
+        # 허가 scope = 요청 ∩ 카탈로그(별칭 확장). 제외분은 로그 + 응답 `scope` 로 실제 허가분을 알린다(RFC 6749 §5.1).
+        scope, dropped = grant_scope(auth_data.get("scope", ""))
+        if dropped:
+            logger.log_info(f"[IdMS] scope not granted (unknown): {' '.join(dropped)} login_id={login_id}")
 
         id_token, access_token, refresh_token = create_tokens(
             login_id, scope, client_id, nonce=nonce, mcptt_id=mcptt_id)
@@ -1812,13 +1942,14 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         # auth-code 삭제 (1회성)
         storage.delete_auth_code(code)
         
-        logger.log_info(f"Token issued for login_id={login_id} mcptt_id={mcptt_id}")
+        logger.log_info(f"Token issued for login_id={login_id} mcptt_id={mcptt_id} scope={scope}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
             "refresh_token": refresh_token,
             "id_token": id_token,
             "token_type": "Bearer",
-            "expires_in": 3600
+            "expires_in": ACCESS_TOKEN_TTL,
+            "scope": scope,
         }, media_type="application/json")
     
     # ==================== refresh_token ====================
@@ -1857,14 +1988,16 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         granted_scope = token_data.get("scope", "") or ""
 
         # scope 분리: refresh 요청이 scope 를 명시하면 원 grant 의 subset 으로 좁혀 발급한다.
-        #   (AccountManager 가 authTokenType 별로 provisioning / mcptt 토큰을 따로 받기 위함.)
+        #   (AccountManager 가 authTokenType 별로 provisioning / MC 서비스 토큰을 따로 받기 위함.)
+        #   양쪽을 별칭 확장한 뒤 교집합 — 이행 전 발급된 refresh(구 scope 문자열 저장)도 재로그인 없이 이어진다.
+        granted_full = expand_scopes(granted_scope)
         requested_scope = (data.get('scope') or "").strip()
         if requested_scope:
-            granted_set = set(granted_scope.split())
-            req = [s for s in requested_scope.split() if s in granted_set]
-            scope = " ".join(req) if req else granted_scope   # 교집합 없으면 원 scope 유지
+            _gs = set(granted_full)
+            req = [s for s in expand_scopes(requested_scope) if s in _gs]
+            scope = " ".join(req) if req else " ".join(granted_full)   # 교집합 없으면 원 scope 유지
         else:
-            scope = granted_scope
+            scope = " ".join(granted_full)
 
         # 새 토큰 발급 — access 는 좁힌 scope, refresh 는 원 grant(broad) 보존(다음 다른-용도 refresh 가능).
         id_token, access_token, new_refresh_token = create_tokens(
@@ -1873,13 +2006,14 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         # 기존 토큰 회수
         storage.revoke_refresh_token(refresh_token, rotated_to=new_refresh_token)
         
-        logger.log_info(f"Refresh token rotated for user: {login_id}")
+        logger.log_info(f"Refresh token rotated for user: {login_id} scope={scope}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
             "refresh_token": new_refresh_token,
             "id_token": id_token,
             "token_type": "Bearer",
-            "expires_in": 3600
+            "expires_in": ACCESS_TOKEN_TTL,
+            "scope": scope,
         }, media_type="application/json")
     
     return HandlerResult(status=400, body={"error": "unsupported_grant_type"}, media_type="application/json")
@@ -2121,9 +2255,10 @@ def _json_result(status: int, body: dict, headers=None) -> HandlerResult:
 # GMS: List groups for a user
 # GET /org.openmobilealliance.groups/users/{user_uri}
 async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    # scope 검사는 진입점 handle_group_management 가 수행(여기는 그 위임 대상 — 중복 로그 방지).
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
 
     from urllib.parse import unquote
     path = args.full_path
@@ -2158,7 +2293,11 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    # GMS scope — 그룹 문서가 MCPTT/MCData 공용이라 둘 중 하나면 통과 (TS 33.180 B.4.2.2).
+    deny = require_scope(args, token_payload, 'GMS', SCOPE_PTT_GMS, SCOPE_DATA_GMS)
+    if deny:
+        return deny
 
     path = args.full_path
     parts = [p for p in path.split('/') if p]
@@ -2317,7 +2456,10 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # (로깅은 pi_http post_hook 에서 자동 처리)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
+    if deny:
+        return deny
         
     path = args.full_path
     try:
@@ -2353,7 +2495,10 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
     # (로깅은 pi_http post_hook 에서 자동 처리)
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
+    if deny:
+        return deny
         
     path = args.full_path
     try:
@@ -2384,7 +2529,10 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
 async def handle_kms_init(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_DATA_KMS)
+    if deny:
+        return deny
         
     user_uri = token_payload.get('mcptt_id')
     logger.log_info(f"[KMS] Init: {user_uri}")
@@ -2395,7 +2543,10 @@ async def handle_kms_init(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 async def handle_kms_keyprov(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
-        return HandlerResult(status=401, body="Missing or Invalid Token")
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_DATA_KMS)
+    if deny:
+        return deny
         
     user_uri = token_payload.get('mcptt_id')
     logger.log_info(f"[KMS] Key Provision: {user_uri}")
@@ -2424,14 +2575,18 @@ async def handle_token_introspect(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
     payload = validate_access_token(token)
     if payload:
-        scope = payload.get("scope", [])
+        # scope 는 RFC 7662 대로 공백 구분 문자열. 이행 전 발급(배열) 토큰도 같은 형으로 돌려준다.
         return HandlerResult(status=200, body={
             "active": True,
+            "sub": payload.get("sub"),
+            "iss": payload.get("iss"),
+            "client_id": payload.get("client_id"),
             "mcptt_id": payload.get("mcptt_id"),
+            "mcdata_id": payload.get("mcdata_id") or payload.get("mcptt_id"),
             "aud": payload.get("aud"),
             "exp": payload.get("exp"),
             "iat": payload.get("iat"),
-            "scope": " ".join(scope) if isinstance(scope, list) else scope
+            "scope": " ".join(expand_scopes(payload.get("scope") or [])),
         }, media_type="application/json")
     else:
         return HandlerResult(status=200, body={"active": False}, media_type="application/json")
@@ -2450,10 +2605,12 @@ async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
-        "scopes_supported": ["openid", "3gpp:mcptt:ptt_server"],
+        # 신 이름(TS 33.180 B.4.2.2) + 전환기 별칭(구 단말). MCVideo 미지원.
+        "scopes_supported": [SCOPE_OPENID, SCOPE_PROVISIONING, *SCOPE_MC_SERVICES, SCOPE_LEGACY_MCPTT],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["HS256"],
-        "claims_supported": ["sub", "iss", "iat", "exp", "aud", "mcptt_id", "nonce", "scope"],
+        "claims_supported": ["sub", "iss", "iat", "exp", "aud", "nonce", "scope", "client_id",
+                             "mcptt_id", "mcdata_id"],
     }
     return HandlerResult(status=200, body=doc, media_type="application/json")
 
@@ -2676,7 +2833,7 @@ def dispatch_discovery(cur, user_id) -> Optional[dict]:
 async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
-        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+        return unauthorized(args)
     # scope 분리: provisioning 토큰만 허용(빈 scope=레거시 허용). mcptt 전용 토큰은 거부 → 평면 혼용 방지.
     _sc = token.get('scope') or []
     if isinstance(_sc, str):
@@ -2684,7 +2841,8 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
     if _sc and SCOPE_PROVISIONING not in _sc:
         return HandlerResult(status=403,
                              body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
-                             media_type="application/json")
+                             media_type="application/json",
+                             headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
     msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
     # 시그널링(CSP/PSP) host 폴백 = 요청 Host (올인원 전제). CSC 자기 주소는 공개 URL 정본에서.
     host_ip = (args.headers.get('host') or args.headers.get('Host') or '').split(':')[0]
@@ -2822,13 +2980,14 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
     **범위 안의 지난 이력**만 커서로 준다. 범위 밖·관제 미소속은 403. 열람은 감사(E-AUD-016 tap_mode=history)."""
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
-        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+        return unauthorized(args)
     _sc = token.get('scope') or []
     if isinstance(_sc, str):
         _sc = _sc.split()
     if _sc and SCOPE_PROVISIONING not in _sc:
         return HandlerResult(status=403, body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
-                             media_type="application/json")
+                             media_type="application/json",
+                             headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
     qp = getattr(args, 'query_params', None) or {}
 
     def _q(name, default=None):
@@ -2919,14 +3078,15 @@ async def handle_provisioning_directory(args: HandlerArgs, kwargs: dict) -> Hand
     """
     token = extract_token(args.headers.get('authorization') or args.headers.get('Authorization'))
     if not token:
-        return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json")
+        return unauthorized(args)
     _sc = token.get('scope') or []
     if isinstance(_sc, str):
         _sc = _sc.split()
     if _sc and SCOPE_PROVISIONING not in _sc:
         return HandlerResult(status=403,
                              body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
-                             media_type="application/json")
+                             media_type="application/json",
+                             headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
     if not _DB_CONFIG:
         return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
 

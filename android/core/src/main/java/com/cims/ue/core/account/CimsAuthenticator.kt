@@ -65,7 +65,7 @@ class CimsAuthenticator(private val context: Context) : AbstractAccountAuthentic
     }
 
     override fun getAuthTokenLabel(authTokenType: String): String = when (authTokenType) {
-        CimsAccounts.TOKEN_MCPTT -> "MCPTT 서비스 (TS 33.180)"
+        CimsAccounts.TOKEN_MCPTT -> "MC 서비스 (TS 33.180)"
         else -> "CIMS 프로비저닝"
     }
 

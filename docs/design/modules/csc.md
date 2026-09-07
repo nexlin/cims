@@ -448,18 +448,26 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
 `redirect_uri` 허용목록은 `IdMs.RedirectUriAllow`(비면 전부 허용 — 상용 전 등록·활성). 규격 대비는
 [mcptt_standard_conformance.md §3](../features/mcptt_standard_conformance.md).
 
-**토큰 구조 (JWT):**
+**토큰 구조 (JWT, HS256)** — claim·scope 카탈로그·리소스 서버 검사 규칙의 정본은
+[mcx_identity_scope.md](../features/mcx_identity_scope.md). access token 예:
 
 ```json
 {
-  "sub": "+82571900001",
-  "iss": "cims-idms",
-  "aud": "mcptt-client",
-  "exp": 1713024000,
-  "mcptt_id": "sip:+82571900001@ptt.csp",
-  "org_id": "org_001"
+  "sub": "test003",
+  "iss": "idms.ptt.mnc033.mcc450.3gppnetwork.org",
+  "aud": "mcptt_client",
+  "client_id": "MCPTT_UE",
+  "mcptt_id": "tel:+82500000003",
+  "mcdata_id": "tel:+82500000003",
+  "iat": 1788494195,
+  "exp": 1788497795,
+  "scope": "openid cims:provisioning 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service …"
 }
 ```
+
+`scope` = 요청 ∩ 카탈로그(TS 33.180 B.4.2.2 `3gpp:mc:*` 8종 + `openid` + 자체 `cims:provisioning`), 공백 구분 문자열.
+구 `3gpp:mcptt:ptt_server` 는 전환기 별칭(8종 전체 확장·병기). GMS/CMS/KMS/MCData FD 는 `IdMs.ScopeEnforcement`
+(`enforce|log|off`)에 따라 자기 scope 를 검사한다. `iss`/`IdMs.Domain`/`KmsUri` 는 비우면 PTT 도메인에서 유도.
 
 **토큰 저장 (영속성 규칙):**
 

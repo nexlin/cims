@@ -57,7 +57,8 @@ class _Base(unittest.TestCase):
         m.delete_group_file = lambda *a, **k: None
         m.LOGIN_ACCOUNTS[OWNER_LOGIN] = {"user_id": OWNER_UID, "mcptt_id": f"tel:{OWNER_PTT}", "password": "", "name": "관제1석"}
         m.LOGIN_ACCOUNTS[OTHER_LOGIN] = {"user_id": OTHER_UID, "mcptt_id": f"tel:{OTHER_PTT}", "password": "", "name": "관제2석"}
-        self.token = {"sub": OWNER_LOGIN, "mcptt_id": f"tel:{OWNER_PTT}"}
+        # 실토큰처럼 GMS scope 를 싣는다(TS 33.180 B.10 — handle_group_management 가 require_scope 로 검사).
+        self.token = {"sub": OWNER_LOGIN, "mcptt_id": f"tel:{OWNER_PTT}", "scope": m.SCOPE_PTT_GMS}
         m.extract_token = lambda hdr: self.token if hdr else None
 
     def tearDown(self):
