@@ -49,6 +49,7 @@ def cfg(**over):
     base = {
         'IdMs': {'Domain': 'ptt.cims.example.kr', 'JwtSecret': 'unit'},
         'Provisioning': {'Services': {'ptt': {'domain': 'ptt.cims.example.kr'}}},
+        'UeInitConfig': {'Hplmn': {'Plmn': '45033'}},   # 도메인이 PLMN 표기가 아니라 명시 (dev_test_domain_realm.md)
         'McpttServer': {'Port': 4430},
         'CimsRuntimeDir': _TMP,
     }
@@ -94,7 +95,7 @@ def main():
     xml0, etag0 = mcptt.get_ue_init_config_xml(base)
     minidom.parseString(xml0.encode())
     check('<T132>6</T132>' in xml0 and '<name>CIMS</name>' in xml0, "기본값 문서(T132=6, name=CIMS)")
-    check('PLMN="45033"' in xml0, "PLMN 도메인 유도 45033")
+    check('PLMN="45033"' in xml0, "PLMN 설정값 45033")
     check('<MCPTT-Service-Details>' in xml0 and 'sip:mcptt_psi@ptt.cims.example.kr' in xml0,
           "anyExt MCPTT-Service-Details 기본 on + Server-URI 유도")
     check('<MCData-Service-Details>' not in xml0, "MCData-Service-Details 기본 off")

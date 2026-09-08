@@ -72,7 +72,7 @@ m=application 54018 UDP MCPTT      ← floor 포트 54018 (유효! 0 아님)
 c=IN IP4 121.161.164.45
 a=floorid:0 mstrm:audio
 a=fmtp:MCPTT mc_queueing;mc_priority=3
-a=mcptt-floor-request-uri:sip:g001@ptt.mnc033.mcc450.3gppnetwork.org
+a=mcptt-floor-request-uri:sip:g001@ptt.cims.example.kr
 ```
 
 → offer 는 **2개 m= 라인, 둘 다 유효 포트**로 well-formed. **CSP 측 SDP 결함 없음.**

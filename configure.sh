@@ -32,7 +32,7 @@ source "$SCRIPT_DIR/scripts/lib/common.sh" || {
 # 본 스크립트 대화형 모드의 저장분 — 재실행/verify 자동 호출 간 멱등성 보장.
 _INIT_CFG="${SRC_DIR:-$SCRIPT_DIR}/.cims/server.local.json"
 _CFG_SAVED_KEYS="csp_ip psp_ip isp_ip cmp_ip pmp_ip imp_ip cmdp_ip cwrtc_ip csc_host \
-db_host db_user volte_domain ptt_domain volte_service ptt_service country_code \
+db_host db_user volte_domain ptt_domain volte_service ptt_service country_code plmn \
 msg_log_dir service_log_dir record_dir"
 eval "$(cims_local_cfg_eval "$_INIT_CFG" $_CFG_SAVED_KEYS)"
 
@@ -56,6 +56,7 @@ PTT_DOMAIN="${_init_ptt_domain:-}"
 VOLTE_SERVICE="${_init_volte_service:-}"   # CSP access_services.name (= 가입 service_ref) — csc Provisioning.Services.volte.name
 PTT_SERVICE="${_init_ptt_service:-}"       # 〃 PTT
 COUNTRY_CODE="${_init_country_code:-}"
+PLMN="${_init_plmn:-}"                      # HPLMN MCC+MNC — csc UeInitConfig.Hplmn.Plmn (ue-init-config)
 IDMS_JWT_SECRET=""
 CIMS_JWT_SECRET=""
 MSG_LOG_DIR="${_init_msg_log_dir:-}"
@@ -98,10 +99,11 @@ ${BOLD}데이터베이스:${NC}
 
 ${BOLD}도메인:${NC}
   --volte-domain DOM  VoLTE SIP 도메인 / 인증 Realm (기본: volte.cims.example.kr)
-  --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 ims→ptt 치환)
+  --ptt-domain   DOM  PTT 그룹 통화 SIP 도메인 (기본: volte-domain의 volte→ptt 치환)
   --volte-service N   VoLTE 접속서비스 이름 = CSP access_services.name = 가입 service_ref (기본: volte)
   --ptt-service   N   PTT 접속서비스 이름 (기본: ptt) — csc.json Provisioning.Services.<kind>.name 으로 기록
   --country-code CC   홈 국가코드(E.164 digits, 단말 번호 로컬 표기용. 기본: 82)
+  --plmn         PLMN HPLMN MCC+MNC — csc.json UeInitConfig.Hplmn.Plmn (ue-init-config, 기본: 45033)
 
 ${BOLD}로그/녹취:${NC}
   --msg-log-dir      DIR  메시지 통계 로그 디렉터리 (기본: DIST_DIR/ext_mnt/msg_log)
@@ -146,6 +148,7 @@ while [[ $# -gt 0 ]]; do
         --volte-service) VOLTE_SERVICE="$2"; shift 2 ;;
         --ptt-service)   PTT_SERVICE="$2";   shift 2 ;;
         --country-code) COUNTRY_CODE="$2";  shift 2 ;;
+        --plmn)         PLMN="$2";          shift 2 ;;
         --msg-log-dir)      MSG_LOG_DIR="$2";       shift 2 ;;
         --service-log-dir)  SERVICE_LOG_DIR="$2";   shift 2 ;;
         --record-dir)       RECORD_DIR="$2";        shift 2 ;;
@@ -212,11 +215,12 @@ if [[ $INTERACTIVE == "yes" ]]; then
     ask VOLTE_DOMAIN "VOLTE_DOMAIN (SIP 도메인/인증 Realm)" \
         "${VOLTE_DOMAIN:-volte.cims.example.kr}"
     _volte_eff="${VOLTE_DOMAIN:-volte.cims.example.kr}"
-    ask PTT_DOMAIN "PTT_DOMAIN (기본=ims→ptt 치환)" \
+    ask PTT_DOMAIN "PTT_DOMAIN (기본=volte→ptt 치환)" \
         "${PTT_DOMAIN:-$(echo "$_volte_eff" | sed 's/^volte\./ptt./')}"
     ask VOLTE_SERVICE "VOLTE_SERVICE (CSP 접속서비스 name = 가입 service_ref)" "${VOLTE_SERVICE:-volte}"
     ask PTT_SERVICE   "PTT_SERVICE   (CSP 접속서비스 name = 가입 service_ref)" "${PTT_SERVICE:-ptt}"
     ask COUNTRY_CODE "COUNTRY_CODE (홈 국가코드, E.164 digits)" "${COUNTRY_CODE:-82}"
+    ask PLMN "PLMN (HPLMN MCC+MNC, ue-init-config)" "${PLMN:-45033}"
 
     read -rp "  로그/녹취 디렉터리 변경? [y/N]: " _yn
     if [[ $_yn =~ ^[yY] ]]; then
@@ -253,7 +257,7 @@ _raw_cwrtc_ip="$CWRTC_IP"; _raw_csc_host="$CSC_HOST"
 _raw_db_host="$DB_HOST"; _raw_db_user="$DB_USER"
 _raw_volte_domain="$VOLTE_DOMAIN"; _raw_ptt_domain="$PTT_DOMAIN"
 _raw_volte_service="$VOLTE_SERVICE"; _raw_ptt_service="$PTT_SERVICE"
-_raw_country_code="$COUNTRY_CODE"
+_raw_country_code="$COUNTRY_CODE"; _raw_plmn="$PLMN"
 _raw_msg_log_dir="$MSG_LOG_DIR"; _raw_service_log_dir="$SERVICE_LOG_DIR"
 _raw_record_dir="$RECORD_DIR"
 
@@ -278,6 +282,8 @@ PTT_DOMAIN="${PTT_DOMAIN:-$(echo "$VOLTE_DOMAIN" | sed 's/^volte\./ptt./')}"
 VOLTE_SERVICE="${VOLTE_SERVICE:-volte}"
 PTT_SERVICE="${PTT_SERVICE:-ptt}"
 COUNTRY_CODE="${COUNTRY_CODE:-82}"
+# HPLMN PLMN — 도메인이 3GPP 표기(ptt.mncXXX.mccYYY…)가 아니라 유도할 수 없으므로 명시 (IMSI 접두 45033 규약과 일치)
+PLMN="${PLMN:-45033}"
 
 # 로그/녹취 디렉터리 기본값
 SERVICE_LOG_DIR="${SERVICE_LOG_DIR:-$DIST_DIR/ext_mnt/service_log}"
@@ -319,6 +325,7 @@ echo "  PTT_DOMAIN   = $PTT_DOMAIN"
 echo "  VOLTE_SERVICE = $VOLTE_SERVICE"
 echo "  PTT_SERVICE   = $PTT_SERVICE"
 echo "  COUNTRY_CODE = +$COUNTRY_CODE"
+echo "  PLMN         = $PLMN"
 echo "  MSG_LOG_DIR     = $MSG_LOG_DIR"
 echo "  SERVICE_LOG_DIR = $SERVICE_LOG_DIR"
 echo "  RECORD_DIR      = $RECORD_DIR"
@@ -345,7 +352,7 @@ if [[ $INTERACTIVE == "yes" ]]; then
     RAW_db_host="$_raw_db_host" RAW_db_user="$_raw_db_user" \
     RAW_volte_domain="$_raw_volte_domain" RAW_ptt_domain="$_raw_ptt_domain" \
     RAW_volte_service="$_raw_volte_service" RAW_ptt_service="$_raw_ptt_service" \
-    RAW_country_code="$_raw_country_code" \
+    RAW_country_code="$_raw_country_code" RAW_plmn="$_raw_plmn" \
     RAW_msg_log_dir="$_raw_msg_log_dir" RAW_service_log_dir="$_raw_service_log_dir" \
     RAW_record_dir="$_raw_record_dir" \
     KEYS="$_CFG_SAVED_KEYS" python3 - <<'PY'
@@ -386,6 +393,7 @@ apply_template() {
         -e "s|@DB_PASSWORD@|${DB_PASSWORD}|g" \
         -e "s|@VOLTE_DOMAIN@|${VOLTE_DOMAIN}|g" \
         -e "s|@PTT_DOMAIN@|${PTT_DOMAIN}|g" \
+        -e "s|@PLMN@|${PLMN}|g" \
         -e "s|@VOLTE_SERVICE@|${VOLTE_SERVICE}|g" \
         -e "s|@PTT_SERVICE@|${PTT_SERVICE}|g" \
         -e "s|@IDMS_JWT_SECRET@|${IDMS_JWT_SECRET}|g" \
@@ -413,7 +421,7 @@ apply_config_template() {
     CMDP_IP="$CMDP_IP" SYSTEM_ID="${SYSTEM_ID:-cmdp_01}" \
     CWRTC_IP="$CWRTC_IP" CSC_HOST="$CSC_HOST" CSC_IP="$CSC_IP" OAM_IP="$OAM_IP" \
     DB_HOST="$DB_HOST" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" \
+    VOLTE_DOMAIN="$VOLTE_DOMAIN" PTT_DOMAIN="$PTT_DOMAIN" COUNTRY_CODE="$COUNTRY_CODE" PLMN="$PLMN" \
     VOLTE_SERVICE="$VOLTE_SERVICE" PTT_SERVICE="$PTT_SERVICE" \
     IDMS_JWT_SECRET="$IDMS_JWT_SECRET" CIMS_JWT_SECRET="$CIMS_JWT_SECRET" \
     INTERNAL_TOKEN="$INTERNAL_TOKEN" AUC_KEK="$AUC_KEK" \

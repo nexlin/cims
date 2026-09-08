@@ -27,7 +27,8 @@
 | CSC IdMS 신원 | `IdMs.Domain`, `IdMs.Issuer`, `IdMs.KmsUri` | 비움(유도) | 비우면 PTT 도메인에서 유도: Domain=`ptt.cims.example.kr`, Issuer=`McpttServer.PublicUrl` 또는 `idms.ptt.cims.example.kr`, KMS=`kms.<Domain>`. 도메인 변경 시 발급된 토큰의 `iss` 가 바뀌어 단말 재로그인 |
 | CSC MCPTT 식별자 | (파생) | — | `mcptt_id`/`mcdata_id` = `sip:<msisdn>@<ptt domain>`, 그룹 PSI = `sip:<mcptt_group_id>@<ptt domain>`. DB 에는 bare 값만 저장되고 도메인은 응답 시 붙는다 |
 | CSP `Setup.Sip.AuthRealm` | — | 쓰지 않음 | 접속서비스 `auth_realm` 이 정본. 전역 키는 legacy |
-| configure.sh (dev) | `--volte-domain`, `--ptt-domain` (`.cims/server.local.json` `configure.volte_domain/ptt_domain`) | 표의 값 | csc.json 렌더 + 시험 스크립트용 `tests/test_env.json`. 현재 코드 기본값은 `ims.mnc033.mcc450.3gppnetwork.org` — **dev 서버는 반드시 옵션으로 지정** |
+| configure.sh (dev) | `--volte-domain`, `--ptt-domain`, `--plmn` (`.cims/server.local.json` `configure.volte_domain/ptt_domain/plmn`) | 표의 값, PLMN `45033` | csc.json 렌더(`@VOLTE_DOMAIN@`/`@PTT_DOMAIN@`/`@PLMN@`). 기본값이 표의 값이라 옵션 생략 가능 |
+| CSC ue-init-config HPLMN | `UeInitConfig.Hplmn.Plmn` | `45033` | 도메인이 3GPP 표기(`ptt.mncXXX.mccYYY…`)가 아니라 PLMN 을 유도할 수 없으므로 명시한다(비우면 명목값 `00101`). IMSI 접두 `45033`(MCC 450 + MNC 33) 규약과 같은 값. dev 는 configure `--plmn`, 배포본은 배포 설정 |
 | 배포 블루프린트 | `deployment/*/scenarios/*.yaml` `access_services[].domain/auth_realm`, 가입자 `domain` | 표의 값 | dev-single-host `smoke.yaml`, prod-multi-host `volte-ptt.yaml` |
 
 ## 2. 단말·시뮬레이터 적용 지점

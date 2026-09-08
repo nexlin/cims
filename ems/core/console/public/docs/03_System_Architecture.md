@@ -1047,7 +1047,7 @@ a=sendrecv
   "user": "+82571900001",
   "password": "123456",
   "domain": "csp",
-  "auth_id": "4503382571900001@ptt.mnc033.mcc450.3gppnetwork.org"
+  "auth_id": "4503382571900001@ptt.cims.example.kr"
 }
 ```
 > `auth_id`는 SIP IMPI (3GPP 형식). 미입력 시 user와 동일하게 사용.
