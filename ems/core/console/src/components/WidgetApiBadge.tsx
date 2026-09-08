@@ -96,9 +96,7 @@ function CopyBlock({ label, text, mono, pre }: {
         <Button variant="ghost" onClick={copy}>{copied ? '복사됨' : '복사'}</Button>
       </div>
       {pre ? (
-        <pre style={{ margin: 0, padding: '8px 10px', background: 'var(--background)',
-                      border: '1px solid var(--border)', borderRadius: 4, fontSize: 11.5,
-                      overflowX: 'auto', whiteSpace: 'pre' }}>{text}</pre>
+        <pre className="m-0 py-2 px-2.5 bg-background border border-border rounded-[4px] text-[11.5px] overflow-x-auto whitespace-pre">{text}</pre>
       ) : (
         <code style={{ display: 'block', padding: '6px 10px', background: 'var(--background)',
                        border: '1px solid var(--border)', borderRadius: 4,
@@ -126,10 +124,10 @@ function ApiRow({ a }: { a: ApiDoc }) {
   const notes = a.notes || []
 
   return (
-    <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 0' }}>
+    <div className="border-b border-border py-2.5 px-0">
       <div className="flex items-center gap-2 flex-wrap">
         <Badge className="min-w-[54px] text-center" variant={METHOD_COLOR[a.method.toUpperCase()] || 'neutralSoft'}>{a.method.toUpperCase()}</Badge>
-        <code style={{ fontSize: 12.5, wordBreak: 'break-all' }}>{a.path}</code>
+        <code className="text-[12.5px] break-all">{a.path}</code>
         {a.module && <Badge variant="neutralSoft"  title="이 API 를 제공하는 모듈">{a.module}</Badge>}
         <span className="flex-1"/>
         <Button variant="ghost" onClick={() => setOpen(o => !o)}>
@@ -206,7 +204,7 @@ function ApiRow({ a }: { a: ApiDoc }) {
                       <Td><b>{e.status}</b></Td>
                       <Td>{e.when || ''}</Td>
                       <Td>{e.body !== undefined
-                        ? <code style={{ fontSize: 11.5 }}>{JSON.stringify(e.body)}</code> : '—'}</Td>
+                        ? <code className="text-[11.5px]">{JSON.stringify(e.body)}</code> : '—'}</Td>
                     </tr>
                   ))}
                 </tbody>

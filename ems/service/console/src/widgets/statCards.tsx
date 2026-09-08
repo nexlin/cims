@@ -29,7 +29,7 @@ export function StatCard({ label, value, sub, unit, series, hint }: {
   return (
     <div style={{ ...CARD_BOX, justifyContent: 'center' }} title={hint}>
       <div className="text-xs text-muted-foreground mb-0.5">{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.15 }}>
+      <div className="text-2xl font-bold leading-[1.15]">
         {value}
         {unit && <span className="text-xs text-muted-foreground ml-[3px]">{unit}</span>}
       </div>

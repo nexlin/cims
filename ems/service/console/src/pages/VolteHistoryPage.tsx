@@ -81,7 +81,7 @@ function HourHeatmap({ hours, selHour, onPick }: { hours: Record<string, number>
                 : c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--card))` : 'var(--secondary)',
  color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
             }}>
-            <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.3, height: 16 }}>{c.v > 0 ? c.v : ' '}</div>
+            <div className="text-sm font-semibold leading-[1.3] h-[16px]">{c.v > 0 ? c.v : ' '}</div>
             <div style={{ fontSize: 9, lineHeight: 1.3, height: 12, color: ratio > 0.55 ? 'rgba(255,255,255,.8)' : 'var(--muted-foreground)' }}>{c.h}</div>
           </div>
         )
@@ -231,7 +231,7 @@ export default function VolteHistoryPage() {
 
       <div className="flex gap-2.5 items-start">
         {/* 좌: 부서 트리 */}
-        <div style={{ flex: '0 0 220px', minHeight: 0, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
+        <div className="flex-[0_0_220px] min-h-0 overflow-auto border-r border-border pr-1.5">
           <div onClick={() => setSelOrg('')}
  style={{ cursor: 'pointer', padding: '4px 6px', borderRadius: 4, fontSize: 13, fontWeight: 700,
  background: selOrg === '' ? 'rgba(80,120,255,.12)' : undefined }}>
@@ -417,7 +417,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
       {/* 좌(다이어그램/메시지) 우(상세) — 녹취는 행의 녹취 컬럼 버튼으로 */}
       <div className="flex gap-3 items-stretch flex-wrap">
         {/* 좌 */}
-        <div style={{ flex: '1 1 460px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="flex-[1_1_460px] min-w-[320px] flex flex-col gap-2">
           {/* 시퀀스 다이어그램 */}
           <div className="border border-border rounded-sm bg-card">
             <div className="flex items-center gap-2 py-[5px] px-2.5 border-b border-border">
@@ -496,14 +496,14 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
         </div>
 
         {/* 우: 메시지 상세 */}
-        <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', display: 'flex', flexDirection: 'column' }}>
+        <div className="flex-[1_1_340px] min-w-[280px] border border-border rounded-sm bg-card flex flex-col">
           <div className="py-[5px] px-2.5 border-b border-border font-semibold text-sm">
             메시지 상세 {selIdx != null && msgs[selIdx] && <span className="text-sm text-muted-foreground" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
           </div>
           <div className="flex-1 overflow-auto min-h-[200px] max-h-[508px]">
             {selIdx == null ? <EmptyState title="왼쪽에서 메시지를 선택하세요" className="p-[16px] text-[12px]" />
               : bodyLoading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[16px]">본문 로딩 중...</div>
-                : <pre style={{ margin: 0, padding: 10, fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-all', fontFamily: 'monospace' }}>{formatMsgBody(body)}</pre>}
+                : <pre className="m-0 p-2.5 text-xs leading-[1.5] whitespace-pre-wrap break-all font-mono">{formatMsgBody(body)}</pre>}
           </div>
         </div>
       </div>

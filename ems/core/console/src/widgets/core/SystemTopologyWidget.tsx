@@ -80,7 +80,7 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
          style={{ border: '1px solid var(--border)', borderTop: `3px solid ${col}`, borderRadius: 8,
                   background: 'var(--card)', cursor: 'pointer', overflow: 'hidden', boxShadow: 'var(--cims-elevation-sm)' }}>
       {/* 헤더: 상태점 + 호스트 + [A/S 상태]·[M/B 설정] 단축 배지(hover=풀워드) + 버전 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 10px 6px' }}>
+      <div className="flex items-center gap-[5px] pt-[7px] px-2.5 pb-1.5">
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block', flexShrink: 0 }} />
         <b className="text-md overflow-hidden text-ellipsis whitespace-nowrap">{n.host}</b>
         {!n.online
@@ -104,8 +104,7 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
         <span className="ml-auto text-[10px] text-muted-foreground shrink-0">{n.version ? `v${n.version}` : ''}</span>
       </div>
       {/* 모듈 칩 */}
-      <div style={{ borderTop: '1px solid var(--border)', padding: '6px 10px 8px', display: 'flex', flexWrap: 'wrap', gap: 5,
-                    background: 'var(--muted)' }}>
+      <div className="border-t border-border pt-1.5 px-2.5 pb-2 flex flex-wrap gap-[5px] bg-muted">
         {n.modules.length === 0
           ? <span className="text-xs text-muted-foreground">(설치된 모듈 없음)</span>
           : n.modules.map(m => <ModuleChip key={m.name} host={n.host} module={m.name}

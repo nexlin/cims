@@ -668,7 +668,7 @@ export default function ServersPage() {
               // 그룹 = 모듈 운영 명세(감시·절체 모드) + 멤버별 앱 설정 비교/동기화.
               // 앱 설정 편집은 멤버 서버 선택 → 패키지 설정 탭 (항상 그 서버에만 저장).
               <div className="flex flex-col h-full">
-                <div style={{ padding: '12px 12px 0' }}>
+                <div className="pt-3 px-3 pb-0">
                   <ModuleSpecSection group={selectedGroup} deployments={deployments} onReload={load} />
                 </div>
                 <div className="flex-1 min-h-0">
@@ -801,13 +801,8 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
               )}
               <span className="text-xs text-muted-foreground">{members.length}</span>
               {canAddMember && (
-                <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
- title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
- style={{
- border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--cims-info)',
- fontSize: 11, padding: '0 6px', borderRadius: 3, cursor: 'pointer',
- fontWeight: 600,
-                        }}>+</button>
+                <button className="border border-border bg-card text-info text-xs py-0 px-1.5 rounded-[3px] cursor-pointer font-semibold" onClick={e => { e.stopPropagation(); onAddMember(g) }}
+ title="새 멤버 자동 생성 (이름 자동, install_command 발급)">+</button>
               )}
             </div>
             {isOpen && members.map(a => (
@@ -879,13 +874,8 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
       )}
       <span className="text-[10px] text-muted-foreground">{depCount}m</span>
       {onRemove && (
-        <button onClick={e => { e.stopPropagation(); onRemove() }}
- title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"
- style={{
- border: '1px solid var(--destructive)', background: 'var(--card)', color: 'var(--destructive)',
- fontSize: 10, padding: '0 5px', borderRadius: 3, cursor: 'pointer',
- fontWeight: 600,
-                }}><X size={11} /></button>
+        <button className="border border-destructive bg-card text-destructive text-[10px] py-0 px-[5px] rounded-[3px] cursor-pointer font-semibold" onClick={e => { e.stopPropagation(); onRemove() }}
+ title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"><X size={11} /></button>
       )}
     </div>
   )
@@ -3176,8 +3166,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
  borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
  opacity: expired ? 0.5 : 1,
             }}>{data.install_command}</pre>
-            <Button
- style={{ position: 'absolute', top: 8, right: 8 }}
+            <Button className="absolute t-[8px] r-[8px]"
  onClick={copy} disabled={expired}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
           </div>
           <div className="flex items-center gap-3 mt-2">
@@ -3382,8 +3371,7 @@ function PendingMemberModal({ info, onClose }: {
       )}
       <div className="relative">
         <pre className="bg-muted text-foreground p-3 pr-[88px] rounded-[4px] text-sm whitespace-pre-wrap m-0">{info.install_command}</pre>
-        <Button
- style={{ position: 'absolute', top: 8, right: 8 }}
+        <Button className="absolute t-[8px] r-[8px]"
  onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</Button>
       </div>
       <div className="text-xs text-muted-foreground mt-1.5">

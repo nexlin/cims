@@ -246,13 +246,12 @@ export default function ProvisioningWorkbenchPage() {
   return (
     <div className="flex gap-4 items-stretch flex-1 min-h-0">
       {/* 좌: 조직 트리 (공유 스코프) */}
-      <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
-        style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />
+      <OrgTreePanel className="flex-[0_0_200px] w-[200px] max-w-[200px]" fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}/>
 
       {/* 중: 패널 = 탭 헤더 + 툴바 + 테이블 */}
       <div className="panel flex-1 min-w-0">
         {/* 탭 헤더 */}
-        <div className="panel-header" style={{ display: 'flex', gap: 2, padding: '0 8px', alignItems: 'stretch' }}>
+        <div className="panel-header flex gap-0.5 py-0 px-2 items-stretch">
           {TABS.map(t => (
             <button key={t.k} onClick={() => setTab(t.k)}
               style={{
@@ -495,7 +494,7 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
 
   if (editing && form) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
+      <div className="flex items-center gap-2.5 flex-wrap text-sm py-1 px-0">
         <strong>{msisdn}</strong>
         <label className="text-sm text-muted-foreground">SOS 대상
           <Select value={toSel(form.emergency_group_mode)} onValueChange={(v: string) => setForm({ ...form, emergency_group_mode: fromSel(v) as McpttProfile['emergency_group_mode'] })}>
@@ -552,7 +551,7 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
 
   const noDedicated = prof.emergency_group_mode === 'DedicatedGroup' && !prof.emergency_group_id
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
+    <div className="flex items-center gap-2.5 flex-wrap text-sm py-1 px-0">
       <strong>{msisdn}</strong>
       <Badge className="text-[9px]" variant="brandSoft">{MODE_LABEL[prof.emergency_group_mode]}</Badge>
       {prof.emergency_group_mode === 'DedicatedGroup' && (

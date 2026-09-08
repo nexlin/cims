@@ -120,9 +120,9 @@ function SystemResourceWidget() {
         <div style={{ display: 'grid', gridTemplateColumns: `minmax(150px, 1fr) repeat(${cols.length}, 1fr)`,
                       gap: 0, alignItems: 'stretch' }}>
           {/* 헤더 */}
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 600, padding: '0 4px 6px' }}>서버</div>
+          <div className="text-xs text-muted-foreground font-semibold pt-0 px-1 pb-1.5">서버</div>
           {cols.map(c => (
-            <div key={c.k} style={{ fontSize: 11, color: 'var(--muted-foreground)', textAlign: 'center', fontWeight: 600, padding: '0 4px 6px' }}>
+            <div className="text-xs text-muted-foreground text-center font-semibold pt-0 px-1 pb-1.5" key={c.k}>
               {c.label} <span style={{ fontWeight: 400, opacity: 0.7 }}>{c.pct ? '%' : 'rate'}</span>
             </div>
           ))}

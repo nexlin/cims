@@ -77,9 +77,7 @@ function SystemCardsWidget() {
           const healthy = s.total > 0 && s.online === s.total
           const dot = healthy ? 'var(--cims-success)' : s.online > 0 ? 'var(--cims-warning)' : 'var(--destructive)'
           return (
-            <div key={s.key} onClick={onOpen}
-                 style={{ background: 'var(--card)', border: '1px solid var(--border)',
-                          borderRadius: 'var(--radius)', padding: '12px 14px', cursor: 'pointer' }}
+            <div className="bg-card border border-border rounded-md py-3 px-3.5 cursor-pointer" key={s.key} onClick={onOpen}
                  title={`${s.name} — ${MODE_TIP[s.mode]}\n온라인 ${s.online}/${s.total}`}>
               <div className="flex items-center gap-1.5 mb-2">
                 <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot }} />

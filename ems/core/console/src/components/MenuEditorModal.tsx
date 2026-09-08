@@ -200,7 +200,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
           <Plus size={13} /> 메뉴 그룹 추가
         </Button>
       </div>
-      <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+      <div className="max-h-[420px] overflow-y-auto border border-border rounded-md">
         {rows.map((r, i) => (
           <div key={r.key} style={{
             borderBottom: '1px solid var(--border)', padding: '6px 8px',
@@ -208,9 +208,9 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
           }}>
             <div className="flex items-center gap-1.5">
               <span className="inline-flex flex-col gap-0.5">
-                <Button style={{ padding: '0 4px', lineHeight: 1 }}
+                <Button className="py-0 px-1 leading-none"
                   disabled={i === 0} onClick={() => move(i, -1)}><ChevronUp size={13} /></Button>
-                <Button style={{ padding: '0 4px', lineHeight: 1 }}
+                <Button className="py-0 px-1 leading-none"
                   disabled={i === rows.length - 1} onClick={() => move(i, 1)}><ChevronDown size={13} /></Button>
               </span>
               {r.locked
@@ -240,7 +240,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
             {r.custom && (
-              <div style={{ margin: '6px 0 2px 34px' }}>
+              <div className="mt-1.5 mr-0 mb-0.5 ml-[34px]">
                 {r.pages.map((p, pi) => (
                   <div className="flex items-center gap-1.5 mb-1" key={p.slug}>
                     <Input className="w-[210px]" value={p.title}

@@ -117,7 +117,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
         <thead>
           <tr>
             {selectable && (
-              <Th style={{ width: 36, position: 'sticky', top: 0, zIndex: 2 }}>
+              <Th className="w-[36px] sticky t-0 z-[2]">
                 <input type="checkbox" checked={!!allOnPageSelected} onChange={toggleSelectAll} />
               </Th>
             )}

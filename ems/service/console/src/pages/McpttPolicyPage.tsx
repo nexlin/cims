@@ -77,7 +77,7 @@ export default function McpttPolicyPage() {
   return (
     <div className="p-4 max-w-[860px] flex flex-col gap-4">
       <div>
-        <h2 style={{ margin: '0 0 4px', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <h2 className="mt-0 mx-0 mb-1 flex items-center gap-1.5">
           MCPTT 정책
           {/* 화면의 뜻은 한 번 읽으면 되는 설명이라 ⓘ 로 접는다 — 상태(아래)는 매번 봐야 하므로 남긴다. */}
           <InfoDot label="MCPTT 정책이란?">

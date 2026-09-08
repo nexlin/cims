@@ -65,7 +65,7 @@ function KpiCard({ label, value, unit, sub }: {
  label: string; value: string | number; unit?: string; sub?: string
 }) {
  return (
-    <div style={{ flex: '1 1 140px', minWidth: 140, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
+    <div className="flex-[1_1_140px] min-w-[140px] bg-card border border-border rounded-md py-3.5 px-4 text-center">
       <div className="text-sm text-muted-foreground mb-1">{label}</div>
       <div className="text-3xl font-bold">{value}<span className="text-sm text-muted-foreground ml-0.5">{unit}</span></div>
       {sub && <div className="text-xs text-muted-foreground mt-1">{sub}</div>}
@@ -186,7 +186,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           <ToggleGroupItem value="messages">메시지 통계</ToggleGroupItem>
         </ToggleGroup>
 
-        <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
+        <div className="w-[1px] h-[24px] bg-border my-0 mx-2"/>
 
         {/* 시간 단위 */}
         <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
@@ -196,7 +196,7 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
           ))}
         </ToggleGroup>
 
-        <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
+        <div className="w-[1px] h-[24px] bg-border my-0 mx-2"/>
 
         <Input className="w-[150px]" type="date" value={date}
  onChange={e => setDate(e.target.value)}/>

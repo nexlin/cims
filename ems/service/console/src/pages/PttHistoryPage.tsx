@@ -374,7 +374,7 @@ export default function PttHistoryPage() {
 
       {/* ── 툴바 2: 종류 · 그룹 · 사람 ── */}
       <div className="toolbar border-t-0">
-        <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>종류</span>
+        <span className="text-[11.5px] text-muted-foreground">종류</span>
         <ToggleGroup type="multiple" value={[...kinds]} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string[]) => { if (v.length) setKinds(new Set(v as PttSessionKind[])) }}>
           {KINDS.map(k => (
@@ -415,7 +415,7 @@ export default function PttHistoryPage() {
         }}>
           {/* 목록 머리 — 표 헤더가 없어진 자리의 정렬 컨트롤 */}
           <div className="flex items-center gap-1.5 py-1.5 px-2.5 border-b border-border">
-            <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>정렬</span>
+            <span className="text-[11.5px] text-muted-foreground">정렬</span>
             <Select value={toSel(sort)} onValueChange={(v: string) => { setSort(fromSel(v) as SortKey); setPage(0) }}>
               <SelectTrigger className="w-[96px] py-0.5 px-1.5 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -426,7 +426,7 @@ export default function PttHistoryPage() {
  onClick={() => setOrder(o => (o === 'desc' ? 'asc' : 'desc'))}>
               {order === 'desc' ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
             </Button>
-            <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--muted-foreground)' }}>
+            <span className="ml-auto text-[11.5px] text-muted-foreground">
               {loading ? '조회 중…' : `${total}건`}
             </span>
           </div>
@@ -482,7 +482,7 @@ export default function PttHistoryPage() {
  onClose={() => setOpen(null)}
             />
           : wide && (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', fontSize: 12.5 }}>
+            <div className="flex-1 flex items-center justify-center text-muted-foreground text-[12.5px]">
               왼쪽에서 세션을 고르면 발언·이벤트가 여기 나옵니다
             </div>
           )}
@@ -553,12 +553,12 @@ function SessionCard({ r, sel, names, onSelect }: {
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         {/* 상태는 카드마다 명시 — 구역 라벨은 스크롤하면 시야에서 사라진다 */}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
-        <span style={{ fontWeight: 600, fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span className="font-semibold text-[12.5px] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
           <Target r={r} names={names} />
         </span>
       </div>
 
-      <div className="text-sm text-muted-foreground" style={{ fontSize: 11.5 }}>
+      <div className="text-muted-foreground text-[11.5px]">
         {fmtShortTime(r.start_time)} ~ {live ? '진행중' : fmtShortTime(r.end_time)}
         {dur != null && <> · {fmtDur(dur)}</>}
         {r.kind === 'group' && r.mcptt_group_id && <> · {r.mcptt_group_id}</>}
@@ -614,7 +614,7 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
         <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
-        <span style={{ fontWeight: 600, fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span className="font-semibold text-[12.5px] min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
           <Target r={r} names={names} />
         </span>
         {r.floor_control === 'on' && r.floor_policy && (
@@ -664,7 +664,7 @@ function HourHeatmap({ hours, sel, onPick }: {
  const max = Math.max(1, ...cells.map(c => c.v))
  return (
     <div>
-      <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)', marginBottom: 5 }}>
+      <div className="text-[11.5px] text-muted-foreground mb-[5px]">
         시간대별 세션 <span className="opacity-75">· 색 진할수록 많음 · 클릭 → 그 시간대만</span>
       </div>
       <div className="flex gap-0.5">
@@ -717,7 +717,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
         }}>
           {opts.length === 0 && <EmptyState title="녹취가 있는 그룹이 없습니다" className="p-[12px] text-[12px]" />}
           {opts.map(([key, s]) => (
-            <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
+            <label className="flex items-center gap-[7px] py-[5px] px-2 rounded-sm text-[12.5px] cursor-pointer" key={key}>
               <input type="checkbox" checked={selected.has(key)} onChange={() => {
  const n = new Set(selected)
  if (n.has(key)) n.delete(key); else n.add(key)
@@ -767,15 +767,14 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
  overflowY: 'auto', padding: 6, background: 'var(--card)', border: '1px solid var(--border)',
  borderRadius: 8, boxShadow: 'var(--cims-elevation-lg)',
         }}>
-          <div style={{ padding: '2px 4px 6px' }}>
+          <div className="pt-0.5 px-1 pb-1.5">
             <Input autoFocus placeholder="이름·번호로 찾기 (Enter=번호 직접)"
  value={input} onChange={e => setInput(e.target.value)}
  onKeyDown={e => { if (e.key === 'Enter' && input.trim()) onChange(input.trim()) }} />
           </div>
           {/* 현재 목록에 등장한 참여자 — 발언하지 않은 참가자도 포함된다 */}
           {shown.slice(0, 40).map(p => (
-            <div key={p} onClick={() => onChange(p)} title={names.tipOf(p)}
- style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
+            <div className="flex items-center gap-1.5 py-[5px] px-2 rounded-sm text-[12.5px] cursor-pointer" key={p} onClick={() => onChange(p)} title={names.tipOf(p)}>
               <span>{names.nameOf(p)}</span>
               {names.person(p) && <span className="text-muted-foreground text-xs">{p}</span>}
             </div>

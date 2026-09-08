@@ -405,7 +405,7 @@ export default function ServicesPage() {
       </div>
 
       <div className="flex gap-4 items-stretch flex-1 min-h-[320px]">
-        <div style={{ flex: '3 1 0', minWidth: 0, overflow: 'auto' }}>
+        <div className="flex-[3_1_0] min-w-0 overflow-auto">
       {loading ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div>
       ) : (
@@ -519,10 +519,7 @@ export default function ServicesPage() {
         </div>
       )}
         </div>
-        <div style={{
-          flex: '2 1 0', minWidth: 0,
-          display: 'flex', flexDirection: 'column',
-        }}>
+        <div className="flex-[2_1_0] min-w-0 flex flex-col">
           <div className="p-3 rounded-[4px] bg-muted text-foreground font-mono text-sm flex flex-col min-h-0 flex-1 overflow-hidden">
             {(() => {
               // activeJob 진행 중이면 항상 job, 그 외엔 마지막 갱신 출처

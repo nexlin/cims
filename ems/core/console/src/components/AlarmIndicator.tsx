@@ -79,7 +79,7 @@ export default function AlarmIndicator() {
       </button>
       {open && (
         <div className="alarm-drawer">
-          <div className="tab-bar" style={{ padding: '8px 14px 0' }}>
+          <div className="tab-bar pt-2 px-3.5 pb-0">
             <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setTab(v as typeof tab)}>
               <ToggleGroupItem value="alarms">활성 알람 ({active.length})</ToggleGroupItem>

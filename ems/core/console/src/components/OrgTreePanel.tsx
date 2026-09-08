@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { orgApi, type Organization } from '../api/organizations'
 import { ChevronDown, ChevronRight, Dot } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { cn } from '@core/lib/utils'
 
 interface TreeNode extends Organization {
   children: TreeNode[]
@@ -41,11 +42,13 @@ interface OrgTreePanelProps {
   selectedPath: string | null
   onSelect: (codePath: string | null, name: string) => void
   style?: React.CSSProperties
+  /** 호출부가 폭을 정한다 — 화면마다 좌측 트리 폭이 다르다. */
+  className?: string
   /** true = 부모 flex 높이를 가득 채움(워크벤치). false(기본) = maxHeight 500 박스. */
   fill?: boolean
 }
 
-export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: OrgTreePanelProps) {
+export default function OrgTreePanel({ selectedPath, onSelect, style, className, fill }: OrgTreePanelProps) {
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
 
@@ -67,7 +70,10 @@ export default function OrgTreePanel({ selectedPath, onSelect, style, fill }: Or
   }
 
   return (
-    <div className="panel" style={{ minWidth: 150, maxWidth: 180, width: 150, ...(fill ? { height: '100%' } : {}), ...style }}>
+    // 기본 폭은 **클래스로** 둔다 — 인라인 style 에 두면 호출부가 className 으로 넘기는 폭이
+    // 항상 진다(twMerge 는 클래스끼리만 판정한다). 실제로 200px 지정이 150px 로 죽었다.
+    <div className={cn('panel min-w-[150px] w-[150px] max-w-[180px]', fill && 'h-full', className)}
+         style={style}>
       <div className="panel-header flex justify-between items-center">
         <span className="panel-title">조직</span>
         <Button className="text-xs" variant="ghost"

@@ -225,7 +225,7 @@ function DetailModal({ run, onClose, onDelete }: {
             </span>
           } />
           <Field label="Report path" value={
-            <span style={{ fontFamily: 'monospace', fontSize: 11, wordBreak: 'break-all' }}>
+            <span className="font-mono text-xs break-all">
               {run.report_path || '-'}
             </span>
           } />
@@ -237,7 +237,7 @@ function DetailModal({ run, onClose, onDelete }: {
         </div>
 
         {/* totals 박스 */}
-        <div style={{ padding: '0 20px 12px' }}>
+        <div className="pt-0 px-5 pb-3">
           <div style={totalsBox}>
             <Total label="총" value={run.totals?.total ?? '-'} />
             <Total label="PASS" value={run.totals?.pass ?? 0} color="var(--cims-success)" />
@@ -250,8 +250,8 @@ function DetailModal({ run, onClose, onDelete }: {
         </div>
 
         {/* 항목별 표 */}
-        <div style={{ padding: '0 20px 20px', overflow: 'auto' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, margin: '8px 0 6px' }}>항목별 결과</h3>
+        <div className="pt-0 px-5 pb-5 overflow-auto">
+          <h3 className="text-base font-semibold mt-2 mx-0 mb-1.5">항목별 결과</h3>
           <table style={tableStyle}>
             <thead>
               <tr>
@@ -305,7 +305,7 @@ function DetailModal({ run, onClose, onDelete }: {
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>{label}</div>
+      <div className="text-xs text-muted-foreground uppercase">{label}</div>
       <div className="text-md text-foreground mt-0.5">{value}</div>
     </div>
   )
@@ -393,7 +393,7 @@ function KpiGrid({ items }: { items: { label: string; value: string; color?: str
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
       {items.map(it => (
-        <div key={it.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}>
+        <div className="flex justify-between py-0.5 px-0" key={it.label}>
           <span className="text-muted-foreground">{it.label}</span>
           <span style={{ fontWeight: 600, color: it.color || 'var(--foreground)' }}>{it.value}</span>
         </div>

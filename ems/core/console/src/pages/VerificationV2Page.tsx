@@ -199,12 +199,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
   stages: Stage[]; onSelect: (n: number) => void; resumeStage: number; disabled: boolean
 }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 0,
-      background: 'var(--card)',
-      border: '1px solid var(--border)',
-      borderRadius: 8, padding: '24px 16px 16px', marginBottom: 12,
-    }}>
+    <div className="flex items-center gap-0 bg-card border border-border rounded-md pt-6 px-4 pb-4 mb-3">
       {stages.map((st, i) => {
         const status = stageStatus(st.items)
         const { done, total } = stageProgress(st.items)
@@ -287,12 +282,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                     fontSize: 26, color: isBlocked ? 'var(--foreground)' : color, letterSpacing: 0.5,
                     textDecoration: isBlocked ? 'line-through' : 'none',
                   }}>{st.id}</div>
-                  <div style={{
-                    fontSize: 12, color: 'var(--foreground)',
-                    marginTop: 4, padding: '0 6px',
-                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    maxWidth: '100%', fontWeight: 600,
-                  }}>
+                  <div className="text-sm text-foreground mt-1 py-0 px-1.5 whitespace-nowrap overflow-hidden text-ellipsis max-w-full font-semibold">
                     {st.title}
                   </div>
                   <div className="text-xs text-muted-foreground mt-[3px] font-medium">
@@ -1093,7 +1083,7 @@ export default function VerificationV2Page() {
         fontSize: 11, color: 'var(--muted-foreground)',
       }}>
         <b>ℹ 안내</b>
-        <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
+        <ul className="my-1.5 mx-0 pl-5">
           <li>전체검증 — Stepper 의 재개 지점부터 시작 (S1=처음이면 <code>pipeline-full</code> preset)</li>
           <li>Stage 단독 — 해당 stage 의 부모/평면 항목만 (그룹은 자식 자동 포함)</li>
           <li>1.5초 폴링으로 진행 상태 갱신. 완료 시 회차 #ID 가 위에 표시되고 <a href="/release/verify-history">이력 페이지</a>에 자동 기록됨</li>

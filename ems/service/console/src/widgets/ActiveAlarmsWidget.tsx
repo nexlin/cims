@@ -92,8 +92,7 @@ function ActiveAlarmsWidget() {
           )
         })}
         {filter && (
-          <Button variant="ghost" onClick={() => setFilter(null)}
-                  style={{ marginLeft: 'auto', alignSelf: 'center' }}>전체 보기</Button>
+          <Button className="ml-auto self-center" variant="ghost" onClick={() => setFilter(null)}>전체 보기</Button>
         )}
       </div>
 

@@ -100,7 +100,7 @@ function Kpi({ label, value, sub }: { label: string; value: React.ReactNode; sub
  return (
     <div className="flex flex-col min-w-[80px]">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>{value}</span>
+      <span className="text-2xl font-bold leading-[1.2]">{value}</span>
       {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
     </div>
   )
@@ -114,7 +114,7 @@ export function VolteKpiCard() {
  return (
     <div className="panel p-3.5">
       <div className="flex flex-wrap gap-[22px] items-center">
-        <Badge variant="brandSoft" style={{ alignSelf: 'flex-start' }}>VoLTE</Badge>
+        <Badge className="self-start" variant="brandSoft">VoLTE</Badge>
         <Kpi label="통화 중" value={v?.active ?? '-'} />
         <Kpi label="호출 중" value={v?.ringing ?? '-'} />
         <Kpi label="평균 통화" value={v ? fmtDur(v.avg_duration_sec) : '-'} />
@@ -132,7 +132,7 @@ export function PttKpiCard() {
  return (
     <div className="panel p-3.5">
       <div className="flex flex-wrap gap-[22px] items-center">
-        <Badge variant="successSoft" style={{ alignSelf: 'flex-start' }}>PTT</Badge>
+        <Badge className="self-start" variant="successSoft">PTT</Badge>
         <Kpi label="발언 중" value={p?.talking ?? '-'} sub="그룹" />
         <Kpi label="최근 5분 발언" value={p?.recent_active ?? '-'} sub="그룹" />
         <Kpi label="전체 그룹" value={p?.total_groups ?? '-'} />
@@ -554,7 +554,7 @@ export function OrgStatsCard() {
       </div>
       <div className="flex gap-2.5 items-start">
         {/* 부서 트리 */}
-        <div style={{ flex: '0 0 230px', maxHeight: 520, overflow: 'auto', borderRight: '1px solid var(--border)', paddingRight: 6 }}>
+        <div className="flex-[0_0_230px] max-h-[520px] overflow-auto border-r border-border pr-1.5">
           {orgs.length === 0 ? <Loading /> : orgs.map(o => (
             <div key={o.code} onClick={() => { setSel(o.code); setPage(1) }}
  style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
@@ -710,12 +710,12 @@ export default function ServiceStatusPage() {
  return (
     <div>
       <div className="flex gap-2.5 flex-wrap mb-3.5">
-        <div style={{ flex: '1 1 460px' }}><VolteKpiCard /></div>
-        <div style={{ flex: '1 1 460px' }}><PttKpiCard /></div>
+        <div className="flex-[1_1_460px]"><VolteKpiCard /></div>
+        <div className="flex-[1_1_460px]"><PttKpiCard /></div>
       </div>
       <div className="flex gap-2.5 flex-wrap mb-3.5">
-        <div style={{ flex: '1 1 460px' }}><TrendCard /></div>
-        <div style={{ flex: '1 1 460px' }}><AnomalyCard /></div>
+        <div className="flex-[1_1_460px]"><TrendCard /></div>
+        <div className="flex-[1_1_460px]"><AnomalyCard /></div>
       </div>
       <ServiceDetailTabs />
     </div>

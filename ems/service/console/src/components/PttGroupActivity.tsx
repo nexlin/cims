@@ -205,7 +205,7 @@ export default function PttGroupActivity({ storeKey }: {
               </div>
             </div>
           )}
-          <div style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>
+          <div className="text-[11.5px] text-muted-foreground">
             선택 일자 {day.slice(4, 6)}/{day.slice(6, 8)} · {daySessions.length}세션
             {daySessions.length > 0 && ` · ${new Set(daySessions.map(s => hourOf(s.dir))).size}개 시간대`}
           </div>

@@ -131,8 +131,7 @@ export default function PttGroupsWorkbenchPage() {
   return (
     <div className="flex gap-4 items-stretch flex-1 min-h-0">
       {/* 좌: 조직 트리 (공유 스코프) */}
-      <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
-        style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />
+      <OrgTreePanel className="flex-[0_0_200px] w-[200px] max-w-[200px]" fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}/>
 
       {/* 중: 패널 = 툴바 + 테이블 */}
       <div className="panel flex-1 min-w-0">
@@ -275,8 +274,7 @@ function GroupDrawer(p: GroupDrawerProps) {
     <div className="flex flex-col gap-2.5 text-md">
       {/* ── 탭 (콘솔 표준 밑줄 탭) ── */}
       {existing && (
-        <div role="tablist" aria-label="그룹 상세"
-             style={{ display: 'flex', alignItems: 'stretch', gap: 2, borderBottom: '2px solid var(--border)' }}>
+        <div className="flex items-stretch gap-0.5 border-b-2 border-border" role="tablist" aria-label="그룹 상세">
           {TABS.map(t => {
             const on = tab === t.id
             return (
@@ -294,7 +292,7 @@ function GroupDrawer(p: GroupDrawerProps) {
             )
           })}
           {tab === 'activity' && (
-            <span style={{ marginLeft: 10, alignSelf: 'center', paddingBottom: 2, fontSize: 11.5, color: 'var(--muted-foreground)' }}>
+            <span className="ml-2.5 self-center pb-0.5 text-[11.5px] text-muted-foreground">
               이 그룹의 세션만 — 전체 세션은 <b>서비스 › 이력 › PTT 이력</b>
             </span>
           )}
@@ -363,7 +361,7 @@ function GroupDrawer(p: GroupDrawerProps) {
               </SelectContent>
             </Select>
           </Field>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', alignSelf: 'center', flexWrap: 'wrap' }}>
+          <div className="flex gap-3 items-center self-center flex-wrap">
             <label className="flex items-center gap-1"><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
             <label className="flex items-center gap-1"><input type="checkbox" checked={form.video_enabled || false} onChange={e => setForm({ ...form, video_enabled: e.target.checked })} />영상</label>
             <label className="flex items-center gap-1" title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트"><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급콜</label>
@@ -544,7 +542,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
 
         {/* ── 중앙: 이동 버튼 ── */}
         {canManage && (
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, alignSelf: 'center' }}>
+          <div className="flex flex-col justify-center gap-2.5 self-center">
             <Button className="inline-flex items-center gap-1 whitespace-nowrap" variant="default" disabled={busy || picked.size === 0} title="선택 가입자 추가"
               onClick={() => doAdd(Array.from(picked))}>
               <ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}
@@ -574,8 +572,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           </div>
           <div className="flex flex-1 min-h-0">
             {/* 조직 트리 */}
-            <OrgTreePanel fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}
-              style={{ flex: '0 0 150px', width: 150, maxWidth: 150, border: 'none', borderRight: '1px solid var(--border)', borderRadius: 0 }} />
+            <OrgTreePanel className="flex-[0_0_150px] w-[150px] max-w-[150px] border-0 border-r border-border rounded-none" fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}/>
             {/* 후보 리스트 */}
             <div className="flex-1 min-w-0 flex flex-col">
               <div className="flex items-center gap-1.5 py-1.5 px-2 border-b border-border">

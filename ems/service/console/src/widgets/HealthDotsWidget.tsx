@@ -23,7 +23,7 @@ function HealthDotsWidget() {
         { name: 'CMP', status: h.cmp },
         { name: 'DB', status: h.db },
       ].map(s => (
-        <div key={s.name} style={{ flex: 1, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="flex-1 bg-card border border-border rounded-md py-3 px-4 flex items-center gap-2" key={s.name}>
           <StatusDot status={s.status} />
           <span className="font-semibold">{s.name}</span>
           <span className="ml-auto text-md text-muted-foreground">

@@ -525,10 +525,10 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
         <Metric k="화자" v={String(sess.speaker_count ?? speakerOrder.length)} s="명" />
         {/* 세션 당시 floor 축 (시간버킷 session.json) — 그룹 최신 스냅샷과 다를 수 있다 */}
         {sess.floor_control === 'off' ? (
-          <Badge variant="successSoft" style={{ alignSelf: 'center', marginLeft: 'auto' }}
+          <Badge className="self-center ml-auto" variant="successSoft"
  title="floor 중재 없음 — 양측 상시 송신(통화형)">전이중 · 통화</Badge>
         ) : sess.floor_control === 'on' ? (
-          <span style={{ alignSelf: 'center', marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+          <span className="self-center ml-auto inline-flex gap-1.5">
             <Badge variant="warningSoft" title="floor 중재 있음 — 발언권 기반(무전형)">반이중 · 무전</Badge>
             {sess.floor_policy && (
               <Badge variant="neutralSoft" title="세션 당시 동시 발언 정책 (TS 24.380)">
@@ -1153,7 +1153,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         </span>
         <span className="text-sm text-muted-foreground">{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
         {maxCon > 1 && (
-          <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>· 최대 동시 발언 {maxCon}명</span>
+          <span className="text-[11.5px] text-muted-foreground">· 최대 동시 발언 {maxCon}명</span>
         )}
         {!collapsed && zoomed && (
           <span className="text-xs text-primary">

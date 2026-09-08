@@ -221,9 +221,9 @@ function FlowDiagram({ actors, messages, selIdx, onSelect }: FlowDiagramProps) {
   const svgWidth = containerW > 0 ? Math.max(containerW, MARGIN_L * 2 + (actors.length - 1) * colW) : MARGIN_L * 2 + (actors.length - 1) * colW
 
   return (
-    <div ref={containerRef} style={{ flex: '1 1 50%', overflow: 'auto', minWidth: 0, borderRight: '1px solid var(--border)' }}>
+    <div className="flex-[1_1_50%] overflow-auto min-w-0 border-r border-border" ref={containerRef}>
       {/* 노드 헤더 (sticky) */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
+      <div className="sticky t-0 z-[10] bg-card border-b border-border">
         <svg className="font-mono text-sm block" width={svgWidth} height={HEAD_H}>
           {actors.map(a => {
             const x = actorX(a, actors, colW)
@@ -396,16 +396,10 @@ interface MessageListProps {
 
 function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
   return (
-    <div style={{
-      overflowY: 'auto',
-      height: '100%',
-      border: '1px solid var(--border)',
-      borderRadius: 6,
-      background: 'var(--card)',
-    }}>
+    <div className="overflow-y-auto h-full border border-border rounded-sm bg-card">
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: 'monospace' }}>
         <thead>
-          <tr style={{ position: 'sticky', top: 0, background: 'var(--muted)', zIndex: 1 }}>
+          <tr className="sticky t-0 bg-muted z-[1]">
             <th style={thStyle}>#</th>
             <th style={thStyle}>시간</th>
             <th style={thStyle}>From→To</th>
@@ -430,7 +424,7 @@ function MessageList({ messages, selectedIdx, onSelect }: MessageListProps) {
                 <td style={tdStyle}>{i + 1}</td>
                 <td style={tdStyle}>{msg.ts.slice(0, 12)}</td>
                 <td style={{ ...tdStyle, color: 'var(--foreground)' }}>
-                  {actorLabel(msg.from)}<span style={{ color: 'var(--muted-foreground)' }}>{'\u2192'}</span>{actorLabel(msg.to)}
+                  {actorLabel(msg.from)}<span className="text-muted-foreground">{'\u2192'}</span>{actorLabel(msg.to)}
                 </td>
                 <td style={{ ...tdStyle, color: 'var(--muted-foreground)', fontSize: 10 }}>
                   {/* \uae30\ub85d \uc8fc\uccb4 \ud504\ub85c\uc138\uc2a4\uba85+ID (flow \ud30c\uc77c \uc18c\uc720\uc790, \uc608: CSP_01) \u2014 nodeId \uc5c6\uc73c\uba74(\uad6c \uc751\ub2f5) node \ub85c \ud3f4\ubc31 */}
@@ -653,13 +647,13 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
             <FlowDiagram actors={ACTORS} messages={normalizedMsgs} selIdx={selIdx} onSelect={handleSelect} />
 
             {/* ── 우측: 메시지 목록(상단) + 상세(하단) 분할 ── */}
-            <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', minWidth: 0, padding: '0 12px', overflow: 'hidden' }}>
+            <div className="flex-[1_1_50%] flex flex-col min-w-0 py-0 px-3 overflow-hidden">
               {/* 메시지 목록 (상단 50%) */}
-              <div style={{ flex: '1 1 50%', overflow: 'auto', minHeight: 0 }}>
+              <div className="flex-[1_1_50%] overflow-auto min-h-0">
                 <MessageList messages={messages} selectedIdx={selIdx} onSelect={handleSelect} />
               </div>
               {/* 메시지 상세 (하단 50%) */}
-              <div style={{ flex: '1 1 50%', display: 'flex', flexDirection: 'column', overflow: 'hidden', borderTop: '1px solid var(--border)', minHeight: 0 }}>
+              <div className="flex-[1_1_50%] flex flex-col overflow-hidden border-t border-border min-h-0">
                 {selected ? (
                   <>
                     <div className="flex-none py-2 px-3 flex gap-2 items-center border-b border-border bg-muted">
@@ -668,17 +662,12 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                       <span className="text-sm text-muted-foreground">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
                       <span className="text-sm text-muted-foreground ml-auto">{selected.ts}</span>
                     </div>
-                    <pre style={{
-                      flex: 1, margin: 0, padding: 12, overflow: 'auto',
-                      background: 'var(--card)', fontSize: 12, lineHeight: 1.5,
-                      color: 'var(--foreground)', whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-                      minHeight: 0,
-                    }}>
+                    <pre className="flex-1 m-0 p-3 overflow-auto bg-card text-sm leading-[1.5] text-foreground whitespace-pre-wrap break-all min-h-0">
                       {bodyLoading ? '...' : (formatMsgBody(bodyText) || '(body 없음)')}
                     </pre>
                   </>
                 ) : (
-                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', fontSize: 13 }}>
+                  <div className="flex-1 flex items-center justify-center text-muted-foreground text-md">
                     메시지를 선택하세요
                   </div>
                 )}

@@ -134,8 +134,7 @@ export default function DispatchGroupsPage() {
 
   return (
     <div className="flex gap-4 items-stretch flex-1 min-h-0">
-      <OrgTreePanel fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}
-        style={{ flex: '0 0 200px', width: 200, maxWidth: 200 }} />
+      <OrgTreePanel className="flex-[0_0_200px] w-[200px] max-w-[200px]" fill selectedPath={orgScope} onSelect={(p, n) => { setOrgScope(p); setOrgName(n) }}/>
 
       <div className="panel flex-1 min-w-0">
         <div className="toolbar">
@@ -380,7 +379,7 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
   useEffect(() => { setSel(new Set(value)) }, [value])
   const dirty = sel.size !== value.length || value.some(v => !sel.has(v))
   return (
-    <div style={{ flex: '1 1 280px', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 10px', background: 'var(--card)' }}>
+    <div className="flex-[1_1_280px] border border-border rounded-[10px] py-2 px-2.5 bg-card">
       <div className="flex items-center gap-1.5 text-sm font-semibold mb-1.5">
         {icon} {title} <Badge className="text-[10px]" variant="neutralSoft">{sel.size}</Badge>
         {canEdit && dirty && <Button className="ml-auto" variant="default" onClick={() => onSave(Array.from(sel))}>저장</Button>}
@@ -457,7 +456,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
         </div>
 
         {canManage && (
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 10, alignSelf: 'center' }}>
+          <div className="flex flex-col justify-center gap-2.5 self-center">
             <Button className="inline-flex items-center gap-1 whitespace-nowrap" variant="default" disabled={busy || picked.size === 0} onClick={() => doAdd(Array.from(picked))}><ArrowLeft size={14} /> 추가{picked.size ? ` ${picked.size}` : ''}</Button>
             <Button className="inline-flex items-center gap-1 whitespace-nowrap" disabled={busy || selMembers.size === 0} onClick={() => doRemove(Array.from(selMembers))}>제거{selMembers.size ? ` ${selMembers.size}` : ''} <ArrowRight size={14} /></Button>
           </div>
@@ -466,8 +465,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
         <div style={{ ...panel, flex: 1.3 }}>
           <div style={panelHead}>VoLTE 가입자 <Badge className="text-[10px]" variant="neutralSoft">{candidates.length}</Badge></div>
           <div className="flex flex-1 min-h-0">
-            <OrgTreePanel fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}
-              style={{ flex: '0 0 150px', width: 150, maxWidth: 150, border: 'none', borderRight: '1px solid var(--border)', borderRadius: 0 }} />
+            <OrgTreePanel className="flex-[0_0_150px] w-[150px] max-w-[150px] border-0 border-r border-border rounded-none" fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}/>
             <div className="flex-1 min-w-0 flex flex-col">
               <div className="flex items-center gap-1.5 py-1.5 px-2 border-b border-border">
                 <Input className="flex-1 text-sm" placeholder={`${treeName} 내 검색`} value={q} onChange={e => setQ(e.target.value)}/>

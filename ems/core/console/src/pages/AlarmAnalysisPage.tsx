@@ -32,10 +32,7 @@ const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신�
 // 요약 타일 — 값 하나짜리 위젯의 몸통. 칸을 채우고 값은 세로 중앙(지표 카드 공통 규칙).
 function Tile({ label, value, accent }: { label: string; value: ReactNode; accent?: boolean }) {
   return (
-    <div style={{ flex: 1, minWidth: 110, minHeight: 0, background: 'var(--card)',
-                  border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 10,
-                  display: 'flex', flexDirection: 'column',
-                  justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+    <div className="flex-1 min-w-[110px] min-h-0 bg-card border border-border rounded-md p-2.5 flex flex-col justify-center items-center text-center">
       <div className="text-sm text-muted-foreground mb-1">{label}</div>
       <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1,
                     color: accent ? 'var(--destructive)' : 'var(--foreground)' }}>{value}</div>

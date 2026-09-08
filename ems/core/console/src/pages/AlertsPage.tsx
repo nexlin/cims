@@ -178,7 +178,7 @@ export function AlarmHistoryFilter() {
     <div className="toolbar flex-wrap gap-2">
       {/* 기간과 필터는 **한 줄 한 블록** — 조회 조건이 두 덩어리로 갈려 보이지 않게. */}
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
-      <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
+      <span className="w-[1px] self-stretch my-0 mx-1 bg-border"/>
       <Select value={toSel(f.sev)} onValueChange={(v: string) => alertsFilter.setAlarm({ sev: fromSel(v) })}>
         <SelectTrigger className="w-[108px]"><SelectValue /></SelectTrigger>
         <SelectContent>
@@ -309,8 +309,7 @@ export function AlarmsSection() {
                         {r.message}
                         {isOpen && <span className="ml-2 text-destructive text-xs font-semibold">OPEN</span>}
                         {(r.occurrences ?? 1) > 1 && (
-                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
-                                         border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}
+                          <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground border border-border rounded-[3px] py-0 px-[3px]"
                                 title={`해제 없이 ${r.occurrences}회 재통지 — 최근 ${r.last_open_ts ? fmtTime(r.last_open_ts) : ''}`}>
                             ×{r.occurrences}
                           </span>
@@ -359,7 +358,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
 }) {
   const [text, setText] = useState('')
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 16px 12px' }}>
+    <div className="flex flex-col gap-1.5 pt-2.5 px-4 pb-3">
       <DetailItem label="alarm_id" value={r.alarm_id} />
       <DetailItem label="eventType" value={r.event_type} />
       <DetailItem label="probableCause" value={r.probable_cause} />
@@ -377,7 +376,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
         <div className="text-sm">
           <div className="text-muted-foreground mb-0.5">severity 변경 이력</div>
           {r.changes!.map((c, i) => (
-            <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
+            <div className="pt-0.5 pr-0 pb-0.5 pl-2 border-l-2 border-border" key={i}>
               <span className="text-sm text-muted-foreground">{fmtTime(c.ts)}</span> — {c.from} → {c.to}
               {c.trend && (
                 <span style={{ marginLeft: 6, color: c.trend === 'moreSevere' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
@@ -395,7 +394,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
         <div className="text-sm">
           <div className="text-muted-foreground mb-0.5">코멘트</div>
           {r.comments!.map((c, i) => (
-            <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
+            <div className="pt-0.5 pr-0 pb-0.5 pl-2 border-l-2 border-border" key={i}>
               <span className="text-muted-foreground">{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
             </div>
           ))}
@@ -477,7 +476,7 @@ export function EventHistoryFilter() {
   return (
     <div className="toolbar flex-wrap gap-2">
       <DaysButtons days={days} onChange={d => setDays(String(d))} />
-      <span style={{ width: 1, alignSelf: 'stretch', margin: '0 4px', background: 'var(--border)' }} />
+      <span className="w-[1px] self-stretch my-0 mx-1 bg-border"/>
       <Select value={toSel(f.kind)} onValueChange={(v: string) => alertsFilter.setEvent({ kind: fromSel(v) })}>
         <SelectTrigger className="w-[116px]"><SelectValue /></SelectTrigger>
         <SelectContent>
@@ -574,8 +573,7 @@ export function EventsSection() {
                       <Td title={ev.source?.detected_by}>
                         {ev.message}
                         {n > 1 && (
-                          <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
-                                         border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}
+                          <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground border border-border rounded-[3px] py-0 px-[3px]"
                                 title="연속 반복 — 클릭해 개별 통지 열람">
                             ×{n}
                           </span>
@@ -585,9 +583,9 @@ export function EventsSection() {
                     open && (
                       <tr key={`${key}-detail`}>
                         <Td className="p-0 bg-accent" colSpan={6}>
-                          <div style={{ padding: '8px 16px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <div className="pt-2 px-4 pb-2.5 flex flex-col gap-0.5">
                             {g.items.slice(0, 100).map((e2, i2) => (
-                              <div key={i2} style={{ fontSize: 12, padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
+                              <div className="text-sm pt-0.5 pr-0 pb-0.5 pl-2 border-l-2 border-border" key={i2}>
                                 <span className="text-sm text-muted-foreground">{fmtTime(e2.ts)}</span> — {e2.message}
                                 {e2.params && Object.keys(e2.params).length > 0 && (
                                   <code className="ml-2 text-xs text-muted-foreground">

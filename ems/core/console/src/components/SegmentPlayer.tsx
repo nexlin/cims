@@ -335,11 +335,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
 
       {/* 음성 재생 시 정보 바 */}
       {!isVideo && wallTime && (
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '4px 20px', fontSize: 13,
-          background: 'var(--secondary)', margin: '0 20px', borderRadius: 4,
-        }}>
+        <div className="flex justify-between items-center py-1 px-5 text-md bg-secondary my-0 mx-5 rounded-[4px]">
           <span className="font-mono">{wallTime}</span>
           <span className="font-semibold">
             {callType === 'ptt' ? `화자: ${speakerInfo}` : speakerInfo}

@@ -52,7 +52,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
            onClick={e => e.stopPropagation()}>
         <h3 className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold">
           <ShieldCheck size={16} /> 관리자 인증 (승격)</h3>
-        <p style={{ fontSize: 12, color: 'var(--muted-foreground)', margin: '0 0 14px' }}>
+        <p className="text-sm text-muted-foreground mt-0 mx-0 mb-3.5">
           시스템/서버 구성·패키지 설치 변경은 admin 권한이 필요합니다.
           admin 계정으로 인증하면 <b>30분간</b> 이 브라우저 탭에서 변경이 허용됩니다.
         </p>

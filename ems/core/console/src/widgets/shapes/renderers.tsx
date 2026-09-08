@@ -42,7 +42,7 @@ export function TimeBarChart({ data }: { data: TimeBarData }) {
   // 라벨·값은 몇 칸 걸러 하나만 — 막대는 다 보이되 글자만 솎는다(겹쳐 뭉개지는 것보다 낫다).
   const every = Math.ceil(buckets.length / 24)
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: 2, padding: '0 4px' }}>
+    <div className="flex-1 min-h-0 flex items-end gap-0.5 py-0 px-1">
       {buckets.map((b, i) => (
         <div className="flex-1 min-w-0 h-full flex flex-col items-center" key={i}>
           <div className="flex-none text-[10px] text-muted-foreground mb-0.5">
@@ -109,7 +109,7 @@ export function SeriesBarChart({ data }: { data: SeriesBarData }) {
           ※ {overlap.map(sp => sp.label).join(' · ')} 은(는) 다른 계열을 포함합니다 — 함께 쌓으면 합계가 중복됩니다.
         </div>
       )}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'flex-end', gap: 2, padding: '0 4px' }}>
+      <div className="flex-1 min-h-0 flex items-end gap-0.5 py-0 px-1">
         {buckets.map((b, i) => {
           const total = sum(b)
           const on = hover?.bucket === String(b.label)
@@ -179,8 +179,7 @@ export function KpiCards({ data }: { data: KpiData }) {
   return (
     <div className="flex gap-3 flex-wrap">
       {data.items.map((k, i) => (
-        <div key={i} style={{ flex: '1 1 120px', background: 'var(--card)', border: '1px solid var(--border)',
-                              borderRadius: 'var(--radius)', padding: '14px 16px', textAlign: 'center' }}>
+        <div className="flex-[1_1_120px] bg-card border border-border rounded-md py-3.5 px-4 text-center" key={i}>
           <div className="text-sm text-muted-foreground mb-1">{k.label}</div>
           <div className="text-3xl font-bold">
             {k.value}<span className="text-sm text-muted-foreground ml-0.5">{k.unit}</span>
@@ -198,7 +197,7 @@ export function StatValue({ data }: { data: KpiData }) {
   return (
     <div className="flex-auto min-h-0 flex flex-col justify-center items-center text-center">
       <div className="text-sm text-muted-foreground mb-1">{k.label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.1 }}>
+      <div className="text-3xl font-bold leading-[1.1]">
         {k.value}<span className="text-sm text-muted-foreground ml-0.5">{k.unit}</span>
       </div>
     </div>

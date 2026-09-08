@@ -71,7 +71,7 @@ function PageFilterWidget({ config }: WidgetProps) {
 
         {showGran && (
           <>
-            <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+            <div className="w-[1px] h-[20px] bg-border my-0 mx-1"/>
             <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
  onValueChange={(v: string) => v && setGran(v)}>
               {Object.entries(GRAN_LABELS).map(([g, label]) => {

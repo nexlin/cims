@@ -155,7 +155,7 @@ export function AbnTable() {
                       <Td className="text-sm font-mono">{x.peer_ip || '-'}</Td>
                       <Td className="text-xs font-mono">
                         <span className="text-muted-foreground">{x.caller || '?'}</span>
-                        <span style={{ margin: '0 4px' }}>→</span>
+                        <span className="my-0 mx-1">→</span>
                         <span>{x.callee || '?'}</span>
                       </Td>
                       <Td className="text-xs">{x.ua || '-'}</Td>
@@ -179,8 +179,7 @@ export function AbnTable() {
             </DataTable>
           </div>
           {sessions.length > s.pageSize && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
- padding: '8px 0', flex: 'none', borderTop: '1px solid var(--border)' }}>
+            <div className="flex items-center justify-center gap-2.5 py-2 px-0 flex-none border-t border-border">
               <Button disabled={s.page === 0} onClick={() => abnormal.setPage(s.page - 1)}>← 이전</Button>
               <span className="text-sm text-muted-foreground">
                 {s.page * s.pageSize + 1}–{Math.min((s.page + 1) * s.pageSize, sessions.length)} / {sessions.length}건

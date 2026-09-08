@@ -285,7 +285,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         <div className="border-t border-border py-2.5 px-3.5 text-sm text-muted-foreground">
           <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', rowGap: 4, columnGap: 10 }}>
             <span className="text-muted-foreground">파일</span>
-            <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{p.file_path}</code>
+            <code className="text-xs break-all">{p.file_path}</code>
             <span className="text-muted-foreground">SHA256</span>
             <code className="text-xs">{p.sha256.substring(0, 32)}…</code>
             <span className="text-muted-foreground">업로드</span>

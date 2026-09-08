@@ -36,7 +36,7 @@ function AlarmDetail({ a, onAck, onComment }: {
     </div>
   ) : null
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 16px 12px' }}>
+    <div className="flex flex-col gap-1.5 pt-2.5 px-4 pb-3">
       {item('alarm_id', a.alarm_id)}
       {item('eventType', a.event_type)}
       {item('probableCause', a.probable_cause)}
@@ -49,7 +49,7 @@ function AlarmDetail({ a, onAck, onComment }: {
         <div className="text-sm">
           <div className="text-muted-foreground mb-0.5">코멘트</div>
           {a.comments!.map((c, i) => (
-            <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
+            <div className="pt-0.5 pr-0 pb-0.5 pl-2 border-l-2 border-border" key={i}>
               <span className="text-muted-foreground">{c.user || ''} {fmtTime(c.ts)}</span> — {c.text}
             </div>
           ))}
@@ -171,8 +171,7 @@ export function ActiveAlarmList() {
                     <Td>
                       {a.message}
                       {(a.occurrences ?? 1) > 1 && (
-                        <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: 'var(--muted-foreground)',
-                                       border: '1px solid var(--border)', borderRadius: 3, padding: '0 3px' }}>
+                        <span className="ml-1.5 text-[10px] font-semibold text-muted-foreground border border-border rounded-[3px] py-0 px-[3px]">
                           ×{a.occurrences}
                         </span>
                       )}

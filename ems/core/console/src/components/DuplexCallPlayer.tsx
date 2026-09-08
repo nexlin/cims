@@ -165,7 +165,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         return (
           <div className="flex items-center gap-2" key={t.slot}>
             {/* 표시는 이름(labelOf), 번호는 hover — 이력 화면 공통 규약 */}
-            <div title={spk} style={{ flex: '0 0 128px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+            <div className="flex-[0_0_128px] text-[11.5px] flex items-center gap-[5px] min-w-0" title={spk}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flex: '0 0 auto' }} />
               <span className="overflow-hidden text-ellipsis whitespace-nowrap">{name(spk)}</span>
               <span className="text-muted-foreground text-[10px]">슬롯 {t.slot}</span>
@@ -176,7 +176,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
                 seekTo((e.clientX - r.left) / r.width)
               }}>
               {arr.length === 0 ? (
-                <div style={{ width: '100%', height: 1, background: 'var(--border)', alignSelf: 'center' }} />
+                <div className="w-full h-[1px] bg-border self-center"/>
               ) : arr.map((v, i) => (
                 <span key={i} style={{
                   flex: 1, minWidth: 0, height: `${Math.max(3, (v / 255) * 100)}%`,
