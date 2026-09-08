@@ -253,20 +253,19 @@ body {
 .scroll-nobar::-webkit-scrollbar { width: 0; height: 0; }
 
 /* 포커스 링 */
-:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
-
-/* dark 모드 잔여 보정 (하드코딩 light 패치) */
-:root[data-theme="dark"] .form-input:disabled { background: var(--secondary); }:root[data-theme="dark"] .docs-content code,
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }:root[data-theme="dark"] .docs-content code,
 :root[data-theme="dark"] .docs-content tr:first-child td { background: var(--secondary); }.app-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -.3px; color: var(--primary); }
 
 .tab-nav { display: flex; gap: 4px; }
 /* ── Page / panel layout ───────────────────────────────────── */
 .page { display: flex; flex-direction: column; gap: 16px; }
+/* `.panel` 은 **2D 격자 레이아웃의 훅**이기도 해서 이름을 남긴다(`.widget-fixed > .panel` 등).
+   시각 속성은 시트 2 계약에 맞춘다 — 도안 표면에 그림자가 없다(T2 실측, `/deploy/servers`).
+   `--cims-elevation-sm` 토큰 자체는 떠 있는 것(드롭다운·모달)이 쓴다. */
 .panel {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--cims-elevation-sm);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -341,37 +340,7 @@ body {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--muted);
-}
-/* ── Buttons ───────────────────────────────────────────────── */
-.btn {
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  white-space: nowrap;
-  transition: background .15s, opacity .15s;
-  /* 배경·글자를 반드시 명시한다 — 비워 두면 **브라우저 기본 버튼 색**이 나오고, 다크에서는
-     color-scheme:dark 탓에 회색 버튼이 되어 얹은 글자(--danger 등)와 대비가 무너진다.
-     변형(--primary/--danger/--outline/--ghost)은 아래에서 각자 덮어쓴다. */
-  background: var(--secondary);
-  color: var(--foreground);
-}
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn--primary  { background: var(--primary);  color: #fff; }
-.btn--primary:hover:not(:disabled) { background: var(--cims-brand-hover); }.btn--sm { padding: 3px 10px; font-size: 12px; }
-
-.link-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--primary);
-  font-size: 13px;
-  text-decoration: underline;
-  padding: 0;
-}
-.data-table {
+}.data-table {
   width: 100%;
   border-collapse: collapse;
 }
@@ -426,18 +395,6 @@ body {
   align-items: center;
 }
 .form-grid label { font-size: 13px; color: var(--muted-foreground); font-weight: 500; }
-
-.form-input {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 13px;
-  outline: none;
-  background: var(--card);
-}
-.form-input:focus { border-color: var(--primary); }.form-input:disabled { background: var(--secondary); color: var(--muted-foreground); }
-
 /* toggle */
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .toggle input { display: none; }.toggle input:checked ~ .toggle-track { background: var(--primary); }

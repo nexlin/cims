@@ -20,6 +20,7 @@ import { useServiceLive } from '../pages/ServiceStatusPage'
 import { StatCard } from './statCards'
 import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
+import { Button } from '@core/components/ui/button'
 
 const API = ['stats.service.live']
 const pct = (used: number, total: number) => (total > 0 ? Math.round((used / total) * 100) : 0)
@@ -75,10 +76,10 @@ function HeadBlock({ badge, badgeClass }: { badge: string; badgeClass: BadgeTone
   return (
     <div className="flex-1 min-h-0 flex items-center gap-2">
       <Badge variant={badgeClass} >{badge}</Badge>
-      <button className="link-btn ml-auto inline-flex items-center gap-1 text-sm" title="서비스 현황으로 이동"
+      <Button variant="link" className="ml-auto" title="서비스 현황으로 이동"
               onClick={() => navigate('/service/status')}>
         서비스 현황 <ArrowRight size={14} />
-      </button>
+      </Button>
     </div>
   )
 }

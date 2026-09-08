@@ -729,7 +729,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
           ))}
           {selected.size > 0 && (
             <div className="py-1 px-2">
-              <button className="link-btn text-sm" onClick={() => onChange(new Set())}>전체 해제</button>
+              <Button variant="link" onClick={() => onChange(new Set())}>전체 해제</Button>
             </div>
           )}
         </div>

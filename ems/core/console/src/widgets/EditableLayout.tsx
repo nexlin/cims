@@ -21,6 +21,11 @@ import { PageParamsProvider, isPlacementVisible, usePageParams } from './pagePar
 import { collapseMerges, expandSplits } from './legacyLayout'
 import { resolveCardLayout } from './CardLayout'
 import type { PageLayout, WidgetPlacement } from './types'
+import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { EmptyState } from '@core/components/custom/empty-state'
 
 // 편집 표면 — **화면에 보이는 것과 같은 배치만** 편집한다. 탭으로 갈아끼우는 위젯들은 같은 자리를
 // 쓰므로, 다른 탭의 배치를 함께 늘어놓으면 편집 화면이 실제와 달라진다. 숨은 배치는 좌표를 그대로
@@ -286,8 +291,8 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
   const editControls = (
     <div className="layout-edit-headerbar">
       {!editing ? (
-        <button className="btn btn--sm layout-edit-fab" onClick={beginEdit}
-                title="이 페이지를 위젯으로 편집"><Pencil size={13} /> 편집</button>
+        <Button variant="default" className="layout-edit-fab" onClick={beginEdit}
+                title="이 페이지를 위젯으로 편집"><Pencil size={13} /> 편집</Button>
       ) : (
         <>
           <span className="layout-edit-hint">
@@ -295,21 +300,24 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
               ? `카드 안 편집: ${insideAt?.title || insideDef?.title || insideAt?.widgetId}`
               : '편집 중'}
           </span>
-          <input className="form-input" value={addQuery} onChange={e => setAddQuery(e.target.value)}
-                 placeholder="위젯 검색" style={{ width: 96, fontSize: 12 }}
+          <Input value={addQuery} onChange={e => setAddQuery(e.target.value)}
+                 placeholder="위젯 검색" className="w-24 text-sm"
                  title="제목/id 부분일치로 아래 목록을 좁힌다" />
-          <select className="form-input" value={addId} onChange={e => setAddId(e.target.value)}
-                  style={{ width: 180, fontSize: 12 }}>
-            <option value="">+ 위젯 추가…</option>
-            {widgetsByCategory(addQuery).map(g => (
-              <optgroup key={g.category} label={g.label}>
-                {g.widgets.map(w => (
-                  <option key={w.id} value={w.id}>{w.title} ({w.serviceId || 'core'})</option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <button className="btn btn--sm" onClick={addWidget} disabled={!addId}>추가</button>
+          <Select value={toSel(addId)} onValueChange={(v: string) => setAddId(fromSel(v))}>
+            <SelectTrigger className="w-[180px] text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>+ 위젯 추가…</SelectItem>
+              {widgetsByCategory(addQuery).map(g => (
+                <SelectGroup key={g.category}>
+                  <SelectLabel>{g.label}</SelectLabel>
+                  {g.widgets.map(w => (
+                    <SelectItem key={w.id} value={w.id}>{w.title} ({w.serviceId || 'core'})</SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={addWidget} disabled={!addId}>추가</Button>
           <span style={{ fontSize: 11, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}
                 title="카드 사이 간격(px)">간격</span>
           <input type="range" min={0} max={40} step={2} value={draft?.gap ?? GRID_GAP}
@@ -321,16 +329,16 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
                 style={{ color: freeRows === 0 ? 'var(--destructive)' : undefined }}>
             남은 세로 {freeRows}/{GRID_ROWS}행
           </span>
-          <button className="btn btn--sm" onClick={undo} disabled={undoStack.length === 0}
+          <Button onClick={undo} disabled={undoStack.length === 0}
                   title={undoStack.length ? `마지막 변경 취소 (${undoStack.length}단계 남음)`
-                                          : '되돌릴 변경 없음'}><Undo2 size={13} /> 되돌리기</button>
-          <button className={`btn btn--sm ${preview ? 'btn--primary' : ''}`}
+                                          : '되돌릴 변경 없음'}><Undo2 size={13} /> 되돌리기</Button>
+          <Button variant={preview ? 'default' : 'outline'}
                   title="저장 후 모습 보기 — 제목줄·핸들을 감춘다(조작 잠김)"
-                  onClick={() => setPreview(p => !p)}><Eye size={13} /> 미리보기</button>
-          <button className="btn btn--sm btn--primary" onClick={saveLayout} disabled={saving}>저장</button>
-          <button className="btn btn--sm" onClick={cancelEdit} disabled={saving}>취소</button>
-          <button className="btn btn--sm" onClick={resetLayout} disabled={saving}
-                  title="저장본 삭제 → 기본값 복귀">초기화</button>
+                  onClick={() => setPreview(p => !p)}><Eye size={13} /> 미리보기</Button>
+          <Button variant="default" onClick={saveLayout} disabled={saving}>저장</Button>
+          <Button onClick={cancelEdit} disabled={saving}>취소</Button>
+          <Button onClick={resetLayout} disabled={saving}
+                  title="저장본 삭제 → 기본값 복귀">초기화</Button>
         </>
       )}
     </div>
@@ -364,16 +372,15 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
         {staleSeed && (
           <div className="seed-update-banner">
             <span>이 페이지의 <b>기본 위젯 배치가 갱신</b>되었습니다 (저장된 배치가 이전 구성을 유지 중).</span>
-            <button className="btn btn--sm btn--primary" onClick={applySeed} disabled={saving}>기본값 적용</button>
-            <button className="btn btn--sm" onClick={keepLayout} disabled={saving}>이 배치 유지</button>
+            <Button variant="default" onClick={applySeed} disabled={saving}>기본값 적용</Button>
+            <Button onClick={keepLayout} disabled={saving}>이 배치 유지</Button>
           </div>
         )}
 
         {!editing ? (
           layout.widgets.length === 0 ? (
-            <div className="empty" style={{ padding: 40, textAlign: 'center' }}>
-              아직 위젯이 없습니다{isAdmin ? ' — 상단 [편집]으로 위젯을 배치하세요.' : '.'}
-            </div>
+            <EmptyState className="p-10"
+                        title={`아직 위젯이 없습니다${isAdmin ? ' — 상단 [편집]으로 위젯을 배치하세요.' : '.'}`} />
           ) : <GridRenderer layout={layout} />
         ) : draft && (
           // 카드 안 편집도 **이 표면 위에서** 한다 — 그 카드는 자기 자리에 그대로 있고 본문만

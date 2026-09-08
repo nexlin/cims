@@ -15,6 +15,12 @@ import {
   gridBox, moveItem, applyBox, removeAt, setConfigAt, setLockedAt,
   clampX, clampY, clampW, clampH, type GridBox, type MinRowsFn,
 } from './gridLayout'
+import { Button } from '@core/components/ui/button'
+import { Input } from '@core/components/ui/input'
+import { Checkbox } from '@core/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { cn } from '@core/lib/utils'
 
 // 위젯별 최소 행 — 선언(WidgetDef.minSize.h)이 있으면 그것, 없으면 공통 하한.
 // 자리를 뺏길 때 여기까지만 줄어든다(gridLayout.fitBudget).
@@ -59,16 +65,19 @@ function WidgetConfigPanel({ placement, def, onConfig, onClose }: {
           <label key={f.key} className="grid-config-row">
             <span>{f.label}</span>
             {f.type === 'select' ? (
-              <select className="form-input" value={String(val(f) ?? '')}
-                      onChange={e => onConfig({ [f.key]: e.target.value || undefined })}>
-                <option value="">(기본값)</option>
-                {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <Select value={toSel(String(val(f) ?? ''))}
+                      onValueChange={(v: string) => onConfig({ [f.key]: fromSel(v) || undefined })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>(기본값)</SelectItem>
+                  {options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
             ) : f.type === 'bool' ? (
-              <input type="checkbox" checked={!!val(f)}
-                     onChange={e => onConfig({ [f.key]: e.target.checked || undefined })} />
+              <Checkbox checked={!!val(f)}
+                        onCheckedChange={c => onConfig({ [f.key]: c === true || undefined })} />
             ) : (
-              <input className="form-input" type={f.type === 'number' ? 'number' : 'text'}
+              <Input type={f.type === 'number' ? 'number' : 'text'}
                      value={String(val(f) ?? '')} placeholder={f.placeholder}
                      onChange={e => {
                        const raw = e.target.value
@@ -82,7 +91,7 @@ function WidgetConfigPanel({ placement, def, onConfig, onClose }: {
       {fields.length === 0 && (
         <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>이 위젯은 배치 설정 항목이 없습니다.</div>
       )}
-      <button className="btn btn--sm" onClick={onClose} style={{ alignSelf: 'flex-end' }}>닫기</button>
+      <Button onClick={onClose} className="self-end">닫기</Button>
     </div>
   )
 }
@@ -285,47 +294,44 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               {editingInside && inside && (
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}>
-                  <button className="btn btn--sm" title="마지막 변경 한 수만 취소"
-                          onClick={inside.onUndo} disabled={inside.saving || !inside.canUndo}><Undo2 size={13} /> 되돌리기</button>
-                  <button className="btn btn--sm" title="이 카드의 기본 배치로 초기화"
-                          onClick={inside.onReset} disabled={inside.saving}>초기화</button>
-                  <button className="btn btn--sm btn--primary" title="레이아웃을 저장하고 편집을 끝낸다"
-                          onClick={inside.onSave} disabled={inside.saving}>저장</button>
-                  <button className="btn btn--sm" title="이 카드에서 한 편집만 버리고 화면 배치로 돌아간다"
-                          onClick={inside.onCancel} disabled={inside.saving}>취소</button>
-                  <button className="btn btn--sm" title="카드 편집을 끝내고 화면 배치로 돌아간다"
-                          onClick={inside.onExit} disabled={inside.saving}>완료</button>
+                  <Button title="마지막 변경 한 수만 취소"
+                          onClick={inside.onUndo} disabled={inside.saving || !inside.canUndo}><Undo2 size={13} /> 되돌리기</Button>
+                  <Button title="이 카드의 기본 배치로 초기화"
+                          onClick={inside.onReset} disabled={inside.saving}>초기화</Button>
+                  <Button variant="default" title="레이아웃을 저장하고 편집을 끝낸다"
+                          onClick={inside.onSave} disabled={inside.saving}>저장</Button>
+                  <Button title="이 카드에서 한 편집만 버리고 화면 배치로 돌아간다"
+                          onClick={inside.onCancel} disabled={inside.saving}>취소</Button>
+                  <Button title="카드 편집을 끝내고 화면 배치로 돌아간다"
+                          onClick={inside.onExit} disabled={inside.saving}>완료</Button>
                 </span>
               )}
               {/* 잠금 — 캔버스가 고정 예산이라 다른 위젯을 키우면 누군가는 줄어든다.
                   잠긴 카드는 그 대상에서 빠지고 자리도 고정된다. */}
               {!editingInside && <>
-              <button className="btn btn--sm"
+              <Button size="iconSm"
+                      className={cn('relative z-[7]', !(onEditInside && def?.cardLayout) && 'ml-auto',
+                                    p.locked && 'text-primary')}
                       title={p.locked ? '잠금 해제 — 다른 위젯을 키울 때 이 카드가 줄어들 수 있음'
                                       : '잠금 — 위치·크기 고정(다른 위젯을 키워도 안 줄어듦)'}
-                      style={{ ...(onEditInside && def?.cardLayout ? {} : { marginLeft: 'auto' }),
-                               position: 'relative', zIndex: 7,
-                               color: p.locked ? 'var(--primary)' : undefined }}
                       onPointerDown={e => e.stopPropagation()}
-                      onClick={() => onChange(setLockedAt(widgets, i, !p.locked))}>{p.locked ? <Lock size={12} /> : <LockOpen size={12} />}</button>
+                      onClick={() => onChange(setLockedAt(widgets, i, !p.locked))}>{p.locked ? <Lock size={12} /> : <LockOpen size={12} />}</Button>
               {/* 카드(여러 블록을 담은 것)면 **바로 카드 안 편집으로 들어간다** — 중간에 패널을 한 번
                   더 거치게 하지 않는다. 그 밖의 위젯은 배치 설정 패널을 연다.
                   할 수 있는 일이 없으면 비활성 — "의미 없는 톱니바퀴"를 남기지 않는다.
                   (카드 위젯은 configFields 를 선언하지 않는다 — 선언하면 이 경로로 가려진다.) */}
-              <button className="btn btn--sm"
+              <Button size="iconSm" className="relative z-[7]"
                       title={def?.cardLayout ? '카드 안 블록 배치 편집'
                              : hasCfg ? '이 배치의 설정' : '설정 항목 없음'}
                       disabled={!hasCfg || dimmed}
-                      style={{ position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}
                       onClick={() => {
                         if (def?.cardLayout && onEditInside) { setCfgOpen(null); onEditInside(i); return }
                         setCfgOpen(o => (o === i ? null : i))
-                      }}><Settings size={12} /></button>
-              <button className="btn btn--sm" title="제거"
-                      style={{ color: 'var(--destructive)', position: 'relative', zIndex: 7 }}
+                      }}><Settings size={12} /></Button>
+              <Button size="iconSm" title="제거" className="relative z-[7] text-destructive"
                       onPointerDown={e => e.stopPropagation()}
-                      onClick={() => { setCfgOpen(null); onChange(removeAt(widgets, i)) }} aria-label="위젯 삭제"><X size={13} /></button>
+                      onClick={() => { setCfgOpen(null); onChange(removeAt(widgets, i)) }} aria-label="위젯 삭제"><X size={13} /></Button>
               </>}
             </div>
             {cfgOpen === i && (
