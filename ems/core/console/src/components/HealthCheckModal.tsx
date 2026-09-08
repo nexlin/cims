@@ -67,7 +67,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
                 {data.ha.keepalived_installed
                   ? (data.ha.keepalived_active
                       ? <span className="inline-flex items-center gap-1.5">
-                          <Check size={13} className="text-[var(--cims-success)]" />
+                          <Check size={13} className="text-success" />
                           <code className="font-mono">keepalived</code> active
                         </span>
                       : <span className="inline-flex items-center gap-1.5 text-destructive">
@@ -115,7 +115,7 @@ function HealthCheckPanel({ agent }: { agent: Agent }) {
                     <tr key={m.name}>
                       <Td>{m.name}</Td>
                       <Td>{m.running
-                        ? <Check size={14} className="text-[var(--cims-success)]" aria-label="실행 중" />
+                        ? <Check size={14} className="text-success" aria-label="실행 중" />
                         : <span className="text-muted-foreground">—</span>}</Td>
                       <Td mono>{orDash(m.pid)}</Td>
                       <Td mono>{orDash(m.cpu_pct)}</Td>

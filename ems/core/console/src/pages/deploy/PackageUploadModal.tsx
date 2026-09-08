@@ -141,7 +141,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
         <input className="hidden" id="pkg-files" type="file" accept=".tar.gz,.tgz" multiple
           onChange={e => { addFiles(e.target.files); e.target.value = '' }}/>
         {rows.length > 0 && (
-          <span className="text-muted text-sm">
+          <span className="text-muted-foreground text-sm">
             총 {rows.length} · 대기 {stats.pending} · 완료 {stats.done} · 실패 {stats.failed}
           </span>
         )}
@@ -217,7 +217,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
             <div className="w-[240px] h-[8px] bg-muted rounded-[4px] overflow-hidden">
               <div style={bar(row.state === 'done' ? 'var(--cims-success)' : 'var(--cims-info)')} />
             </div>
-            <span className="text-muted text-xs">
+            <span className="text-muted-foreground text-xs">
               {row.pct}% · {fmtSize(row.loaded)}/{fmtSize(row.file.size)}
               {row.speedBps > 0 && row.state === 'uploading' && (
                 <> · {fmtSpeed(row.speedBps)} · ETA {fmtEta(eta)}</>

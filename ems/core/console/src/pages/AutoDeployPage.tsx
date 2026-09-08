@@ -18,6 +18,7 @@ import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { EmptyState } from '@core/components/custom/empty-state'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 type Doc = 'blueprint' | 'inventory'
 type View = 'form' | 'raw'
@@ -327,22 +328,22 @@ export default function AutoDeployPage() {
         </div>
 
         {preflight && (
-          <table className="table mt-2.5 text-[12.5px]">
-            <thead><tr><th>서버</th><th>host</th><th>인증</th><th>OS</th><th>계정</th><th>sudo</th><th>결과</th></tr></thead>
+          <DataTable sticky className="mt-2.5 text-[12.5px]">
+            <thead><tr><Th>서버</Th><Th>host</Th><Th>인증</Th><Th>OS</Th><Th>계정</Th><Th>sudo</Th><Th>결과</Th></tr></thead>
             <tbody>
               {preflight.map(r => (
                 <tr key={r.server}>
-                  <td>{r.server}</td><td>{r.host}</td><td>{r.auth_mode}</td>
-                  <td>{r.os || '-'}</td><td>{r.login_user || '-'}</td>
-                  <td>{r.sudo_ok ? <Check size={13} className="text-[var(--cims-success)]" />
-                             : <X size={13} className="text-destructive" />}</td>
-                  <td style={{ color: r.ok ? 'var(--cims-success)' : 'var(--destructive)' }}>
+                  <Td>{r.server}</Td><Td>{r.host}</Td><Td>{r.auth_mode}</Td>
+                  <Td>{r.os || '-'}</Td><Td>{r.login_user || '-'}</Td>
+                  <Td>{r.sudo_ok ? <Check size={13} className="text-success" />
+                             : <X size={13} className="text-destructive" />}</Td>
+                  <Td style={{ color: r.ok ? 'var(--cims-success)' : 'var(--destructive)' }}>
                     {r.ok ? 'OK' : `${r.error_code || ''} ${r.error || ''}`}
-                  </td>
+                  </Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         )}
       </section>
 
@@ -353,24 +354,24 @@ export default function AutoDeployPage() {
       {runs.length > 0 && !run && (
         <section style={SEC}>
           <h3 style={H3}>최근 배포</h3>
-          <table className="table text-[12.5px]">
-            <thead><tr><th>#</th><th>블루프린트</th><th>상태</th><th>진행</th><th>시각</th><th /></tr></thead>
+          <DataTable sticky className="text-[12.5px]">
+            <thead><tr><Th>#</Th><Th>블루프린트</Th><Th>상태</Th><Th>진행</Th><Th>시각</Th><Th /></tr></thead>
             <tbody>
               {runs.map(r => (
                 <tr key={r.id}>
-                  <td>{r.id}</td><td>{r.blueprint}</td>
-                  <td style={{ color: r.status === 'succeeded' ? 'var(--cims-success)'
+                  <Td>{r.id}</Td><Td>{r.blueprint}</Td>
+                  <Td style={{ color: r.status === 'succeeded' ? 'var(--cims-success)'
                              : r.status === 'failed' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
-                    {r.status}</td>
-                  <td>{r.progress.done}/{r.progress.total}
-                      {r.progress.failed > 0 && ` (실패 ${r.progress.failed})`}</td>
-                  <td className="text-muted-foreground">{r.created_at}</td>
-                  <td><Button
-                              onClick={() => provisionApi.getRun(r.id).then(setRun)}>열기</Button></td>
+                    {r.status}</Td>
+                  <Td>{r.progress.done}/{r.progress.total}
+                      {r.progress.failed > 0 && ` (실패 ${r.progress.failed})`}</Td>
+                  <Td className="text-muted-foreground">{r.created_at}</Td>
+                  <Td><Button
+                              onClick={() => provisionApi.getRun(r.id).then(setRun)}>열기</Button></Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </section>
       )}
     </div>
@@ -495,20 +496,20 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
             {(s.vips || []).length > 0 &&
               <> · VIP: {(s.vips || []).map(v => `${v.ip}/${v.prefix}@${v.interface}`).join(', ')}</>}
           </div>
-          <table className="table text-sm">
-            <thead><tr><th>패키지</th><th>버전</th><th>프로세스</th><th>설정</th><th>컬렉션</th><th>기동</th></tr></thead>
+          <DataTable sticky className="text-sm">
+            <thead><tr><Th>패키지</Th><Th>버전</Th><Th>프로세스</Th><Th>설정</Th><Th>컬렉션</Th><Th>기동</Th></tr></thead>
             <tbody>
               {(s.modules || []).map((m, j) => (
                 <tr key={j}>
-                  <td>{m.package}</td><td>{m.version}</td><td>{m.process_name || '-'}</td>
-                  <td>{Object.keys(m.config || {}).length + Object.keys(m.per_server || {}).length} 항목</td>
-                  <td>{Object.entries(m.collections || {})
-                        .map(([k, v]) => `${k}(${(v as unknown[]).length})`).join(', ') || '-'}</td>
-                  <td>{m.start === false ? '수동' : '자동'}</td>
+                  <Td>{m.package}</Td><Td>{m.version}</Td><Td>{m.process_name || '-'}</Td>
+                  <Td>{Object.keys(m.config || {}).length + Object.keys(m.per_server || {}).length} 항목</Td>
+                  <Td>{Object.entries(m.collections || {})
+                        .map(([k, v]) => `${k}(${(v as unknown[]).length})`).join(', ') || '-'}</Td>
+                  <Td>{m.start === false ? '수동' : '자동'}</Td>
                 </tr>
               ))}
             </tbody>
-          </table>
+          </DataTable>
         </div>
       ))}
     </div>
@@ -526,10 +527,10 @@ function InventoryForm({ view, onChange, disabled, issues }: {
   }
   return (
     <div>
-      <table className="table text-[12.5px]">
+      <DataTable sticky className="text-[12.5px]">
         <thead>
-          <tr><th>서버 논리명</th><th>host</th><th>SSH 계정</th><th>포트</th>
-              <th>SSH 비밀번호</th><th>sudo</th><th>sudo 비밀번호</th></tr>
+          <tr><Th>서버 논리명</Th><Th>host</Th><Th>SSH 계정</Th><Th>포트</Th>
+              <Th>SSH 비밀번호</Th><Th>sudo</Th><Th>sudo 비밀번호</Th></tr>
         </thead>
         <tbody>
           {view.servers.map((s, i) => {
@@ -539,21 +540,21 @@ function InventoryForm({ view, onChange, disabled, issues }: {
             const lock = disabled || pre
             return (
               <tr key={i} style={bad ? { background: 'rgba(231,76,60,.08)' } : undefined}>
-                <td>{s.name}
+                <Td>{s.name}
                   {pre && <div className="text-xs text-muted-foreground">
                     agent 기설치 — SSH 안 함</div>}
-                </td>
-                <td><input className="w-[130px]" value={s.host || ''} disabled={disabled}
-                           onChange={e => set(i, { host: e.target.value })}/></td>
-                <td><input className="w-[90px]" value={s.ssh?.user || ''} disabled={lock}
-                           onChange={e => set(i, { ssh: { ...s.ssh, user: e.target.value } })}/></td>
-                <td><input className="w-[64px]" type="number" value={s.ssh?.port ?? 22} disabled={lock}
-                           onChange={e => set(i, { ssh: { ...s.ssh, port: Number(e.target.value) } })}/></td>
-                <td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
+                </Td>
+                <Td><input className="w-[130px]" value={s.host || ''} disabled={disabled}
+                           onChange={e => set(i, { host: e.target.value })}/></Td>
+                <Td><input className="w-[90px]" value={s.ssh?.user || ''} disabled={lock}
+                           onChange={e => set(i, { ssh: { ...s.ssh, user: e.target.value } })}/></Td>
+                <Td><input className="w-[64px]" type="number" value={s.ssh?.port ?? 22} disabled={lock}
+                           onChange={e => set(i, { ssh: { ...s.ssh, port: Number(e.target.value) } })}/></Td>
+                <Td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
                            disabled={lock}
                            value={s.ssh?.password === '••••' ? '' : (s.ssh?.password || '')}
-                           onChange={e => set(i, { ssh: { ...s.ssh, password: e.target.value } })}/></td>
-                <td>
+                           onChange={e => set(i, { ssh: { ...s.ssh, password: e.target.value } })}/></Td>
+                <Td>
                   <Select value={toSel(s.sudo?.method || 'password')} onValueChange={(v: string) => set(i, { sudo: { ...s.sudo, method: fromSel(v) } })} disabled={lock}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -561,16 +562,16 @@ function InventoryForm({ view, onChange, disabled, issues }: {
                       <SelectItem value="nopasswd">nopasswd</SelectItem>
                     </SelectContent>
                   </Select>
-                </td>
-                <td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
+                </Td>
+                <Td><input className="w-[110px]" type="password" placeholder={pre ? '—' : '변경 안 함'}
                            disabled={lock}
                            value={s.sudo?.password === '••••' ? '' : (s.sudo?.password || '')}
-                           onChange={e => set(i, { sudo: { ...s.sudo, password: e.target.value } })}/></td>
+                           onChange={e => set(i, { sudo: { ...s.sudo, password: e.target.value } })}/></Td>
               </tr>
             )
           })}
         </tbody>
-      </table>
+      </DataTable>
       <div className="text-[11.5px] text-muted-foreground mt-1.5">
         비밀번호 칸을 비워 두면 저장된 값이 유지됩니다. 서버 추가·삭제는 [원문 보기]에서 하세요.
       </div>

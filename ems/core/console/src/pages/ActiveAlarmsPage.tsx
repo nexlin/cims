@@ -184,7 +184,7 @@ export function ActiveAlarmList() {
                     <Td>{elapsedSince(a.ts)}</Td>
                     <Td>
                       {a.acked
-                        ? <span className="inline-flex items-center gap-1 text-xs text-[var(--cims-success)]">
+                        ? <span className="inline-flex items-center gap-1 text-xs text-success">
                       <Check size={12} /> {a.ackUser || '승인'}</span>
                         : <span className="text-muted-foreground text-sm">미승인</span>}
                     </Td>

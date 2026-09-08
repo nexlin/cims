@@ -14,6 +14,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
+import { DataTable, Th, Td } from '@core/components/custom/data-table'
 
 type Form = { login_id: string; name: string; role: ConsoleRole; email: string; password: string }
 const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', password: '' }
@@ -131,36 +132,36 @@ export default function ConsoleAccountsPage() {
         </div>
       )}
 
-      <table className="table w-full">
+      <DataTable sticky>
         <thead>
           <tr>
-            <th className="text-left">아이디</th>
-            <th className="text-left">이름</th>
-            <th className="text-left">권한</th>
-            <th className="text-left">이메일</th>
-            <th className="text-left">수정시각</th>
-            <th className="w-[120px]"></th>
+            <Th className="text-left">아이디</Th>
+            <Th className="text-left">이름</Th>
+            <Th className="text-left">권한</Th>
+            <Th className="text-left">이메일</Th>
+            <Th className="text-left">수정시각</Th>
+            <Th className="w-[120px]"></Th>
           </tr>
         </thead>
         <tbody>
-          {loading && <tr><td colSpan={6} className="text-sm text-muted-foreground">불러오는 중…</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={6} className="text-sm text-muted-foreground">계정 없음</td></tr>}
+          {loading && <tr><Td colSpan={6} className="text-sm text-muted-foreground">불러오는 중…</Td></tr>}
+          {!loading && rows.length === 0 && <tr><Td colSpan={6} className="text-sm text-muted-foreground">계정 없음</Td></tr>}
           {rows.map(a => (
             <tr key={a.login_id}>
-              <td><strong>{a.login_id}</strong></td>
-              <td>{a.name}</td>
-              <td><Badge >{ROLE_LABELS[a.role]}</Badge></td>
-              <td className="text-sm text-muted-foreground">{a.email || '—'}</td>
-              <td className="text-sm text-muted-foreground">{a.update_time || '—'}</td>
-              <td className="text-right whitespace-nowrap">
+              <Td><strong>{a.login_id}</strong></Td>
+              <Td>{a.name}</Td>
+              <Td><Badge >{ROLE_LABELS[a.role]}</Badge></Td>
+              <Td className="text-sm text-muted-foreground">{a.email || '—'}</Td>
+              <Td className="text-sm text-muted-foreground">{a.update_time || '—'}</Td>
+              <Td className="text-right whitespace-nowrap">
                 <IconBtn title="편집" onClick={() => startEdit(a)}><Pencil size={14} /></IconBtn>
                 <IconBtn title="비밀번호 재설정" onClick={() => resetPassword(a)}><KeyRound size={14} /></IconBtn>
                 <IconBtn title="삭제" tone="danger" onClick={() => remove(a)}><Trash2 size={14} /></IconBtn>
-              </td>
+              </Td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </DataTable>
     </div>
   )
 }

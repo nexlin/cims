@@ -198,7 +198,7 @@ export default function ExternalSystemsPage() {
                 <Td><span className="text-xs py-px px-1.5 border border-border rounded-[3px]">{TYPE_LABEL[s.type]}</span></Td>
                 <Td>{(s.endpoints || []).map((e, i) => <code className="text-xs mr-1.5" key={i}>{e.host}:{e.port}</code>)}</Td>
                 <Td>{(s.tags || []).map(t => <span className="text-[10px] py-px px-[5px] bg-secondary rounded-md mr-[3px]" key={t}>{t}</span>)}</Td>
-                <Td>{s.enabled ? <Check size={13} className="text-[var(--cims-success)]" /> : '—'}</Td>
+                <Td>{s.enabled ? <Check size={13} className="text-success" /> : '—'}</Td>
                 <Td className="whitespace-nowrap">
                   {(s.probe?.mode ?? 'none') !== 'none' &&
                     <Button className="text-sm mr-1" size="default" onClick={() => probeNow(s)}>점검</Button>}

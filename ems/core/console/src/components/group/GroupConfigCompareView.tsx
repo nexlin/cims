@@ -579,7 +579,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
  !configView ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[20px]">로딩 중...</div> : (
             <>
               <div className="text-sm mb-3 flex gap-3 items-center flex-wrap">
-                <span className="inline-flex items-center gap-1 text-[var(--cims-success)]">
+                <span className="inline-flex items-center gap-1 text-success">
                   <Link2 size={13} /> 공통 일치 {summary.ok}
                 </span>
                 {/* 0건에 경고색을 쓰지 않는다 (DESIGN-RULES §1-7) */}
@@ -644,7 +644,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                                 ? (st === 'drift'
                                     ? <AlertTriangle size={13} className="inline text-warning-on"
  aria-label="드리프트" />
-                                    : <Link2 size={13} className="inline text-[var(--cims-success)]"
+                                    : <Link2 size={13} className="inline text-success"
  aria-label="그룹 공통" />)
                                 : <span className="text-[10px] text-muted-foreground" title="서버별 고유값 — 동기화 대상 아님">개별</span>}
                             </td>

@@ -520,6 +520,25 @@ T3 에서 함께 정리한다.
   정규식이다. 바꾸면 모듈 상태 표시가 통째로 깨진다
 - `GroupConfigCompareView.tsx` 의 `'●●●'` — 비밀번호 마스크 문자열
 
+### 8.4 죽은 CSS 를 걷는 기준
+
+T4-1 에서 `index.css` **1,502 → 812줄**(147규칙)로 줄였다. 기준은 하나 —
+**소스가 그 클래스 이름을 한 번도 쓰지 않는 규칙만** 지운다. 판정은 두 콘솔 트리의
+`.ts`/`.tsx` 전체에서 낱말 경계 검색으로 하고, 다음은 손대지 않는다:
+- 요소 선택자가 섞인 규칙 · `:root`/다크 블록 · `@layer`/`@media` 안쪽
+- **위젯 편집·2D 그리드 계열**(`.grid-canvas` `.card-canvas` `.widget-*` `.panel` `.toolbar`
+  `.scroll-fill` `.empty`) — `EditableLayout`/`GridEditor`/`CardLayout` 이 아직 쓴다(CLAUDE.md)
+
+지운 것의 대부분은 T3 에서 옮긴 것들(`.btn--*` `.badge--*` `.modal-*` `.tab-btn*`
+`.search-input` `.empty-cell` `.actions` `.table-wrap` `.toggle-track` …)과, 콘솔에
+남아 있던 **소프트폰(`sp-*` `phone-*`) 스타일 60여 규칙**이다. 소프트폰은 `cims-phone/`
+에 자기 `index.css` 가 따로 있어 콘솔 쪽은 옛 복사본이었다.
+
+**정의가 없는 클래스도 함께 잡았다** — `text-muted` 6곳은 CSS 에 정의가 없어 muted 색이
+아예 안 먹고 있었고(`text-muted-foreground` 로 정정), `<table className="table">` 5곳은
+`data-table` 이 아니라 T3-6 이 놓쳐 **브라우저 기본 표**로 그려지고 있었다(껍데기로 이행).
+둘이 사라져 `tailwind.config.ts` 의 `blocklist` 도 필요 없어졌다.
+
 ## 9. 남은 항목
 
 **미결은 없다.** 착수를 막는 결정 사항이 남아 있지 않다.

@@ -350,7 +350,7 @@ function MemberDrill({ group }: { group: string }) {
         {data.members.map(m => (
           <span key={m.msisdn} style={{ fontSize: 12, minWidth: 200, color: m.active ? 'var(--foreground)' : 'var(--muted-foreground)' }}>
             {m.talking ? <Mic size={12} className="inline align-[-2px] text-primary" />
-                        : m.active ? <Dot size={13} className="inline align-[-2px] text-[var(--cims-success)]" />
+                        : m.active ? <Dot size={13} className="inline align-[-2px] text-success" />
                         : <Dot size={13} className="inline align-[-2px] text-muted-foreground" />}
                       {' '}{m.name || m.msisdn}
             {m.role !== 'participant' && m.role !== 'member' && <span className="text-sm text-muted-foreground"> ({m.role})</span>}

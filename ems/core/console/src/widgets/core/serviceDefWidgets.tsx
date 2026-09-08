@@ -222,7 +222,7 @@ function ModulesBlock() {
                   <Td><b>{m.name}</b></Td>
                   <Td>{m.port ?? '—'}</Td>
                   <Td>{m.proto ?? '—'}</Td>
-                  <Td>{m.controllable ? <Check size={13} className="text-[var(--cims-success)]" /> : ''}</Td>
+                  <Td>{m.controllable ? <Check size={13} className="text-success" /> : ''}</Td>
                   {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                 </tr>
               ))}

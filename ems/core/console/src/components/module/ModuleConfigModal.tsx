@@ -721,7 +721,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onC
       }
  help={
  !needsRestart && field.reload_hint
-          ? <span className="inline-flex items-center gap-1 text-[var(--cims-success)]">
+          ? <span className="inline-flex items-center gap-1 text-success">
               <Zap size={11} /> {field.reload_hint}
             </span>
           : field.help

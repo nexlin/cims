@@ -623,7 +623,7 @@ export default function ServersPage() {
           <div className="ml-auto flex items-center gap-2 pb-1">
             {!hasRole(user, 'admin') && (
  canEdit && elevationActive() ? (
-                <span className="flex items-center gap-1.5 text-sm text-[var(--cims-success)]">
+                <span className="flex items-center gap-1.5 text-sm text-success">
                   <LockOpen size={13} /> admin 승격 중
                   <Button variant="outline" onClick={() => clearElevatedToken()}>해제</Button>
                 </span>
@@ -3353,7 +3353,7 @@ function PendingMemberModal({ info, onClose }: {
   }
  return (
     <Modal title={`${info.groupName} — 새 멤버 추가됨`} onClose={onClose} width={640}>
-      <div className="mb-2.5 text-[var(--cims-success)]">
+      <div className="mb-2.5 text-success">
         <Check size={13} className="inline align-[-2px]" /> <b>{info.serverName}</b> 그룹 멤버로 등록됨. 다음 명령을 대상 서버에서 실행:
       </div>
       {/* 직전 단계에서 확정한 마운트를 되짚어 보여준다 — 설치 명령을 돌리기 전에
@@ -3876,7 +3876,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
             <div className="border border-border rounded-[4px] p-2 text-md text-foreground whitespace-pre-wrap min-h-[36px]">
               {selectedPkg.description
                 ? selectedPkg.description
-                : <span className="text-muted text-sm">(패키지에 설명 없음)</span>}
+                : <span className="text-muted-foreground text-sm">(패키지에 설명 없음)</span>}
             </div>
           </>
         )}

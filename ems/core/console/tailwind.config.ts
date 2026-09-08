@@ -22,15 +22,6 @@ const config: Config = {
     '../../service/console/src/**/*.{ts,tsx}',
   ],
   corePlugins: { preflight: false },
-  // 이행 중 충돌 차단 — 아래 이름은 **우리 레거시 클래스**인데 Tailwind 유틸리티와 겹친다.
-  // 그대로 두면 Tailwind 가 조용히 스타일을 얹는다:
-  //   text-muted (6곳) → color: var(--muted) = #f8fafc. 흰 배경에 흰 글씨가 된다.
-  //                      우리 CSS 에 정의가 없어 지금은 무동작인 클래스다.
-  //                      muted 글자는 Tailwind 에서 `text-muted-foreground` 가 맞다.
-  //   table      (5곳) → display: table. 전부 <table> 엘리먼트라 지금은 무해하지만
-  //                      의도한 적용이 아니므로 함께 막는다.
-  // 해당 페이지를 T3 에서 옮기면 레거시 이름이 사라지므로 이 blocklist 도 걷는다.
-  blocklist: ['text-muted', 'table'],
   theme: {
     // 간격 스케일을 **px 로 고정**한다. 기본 스케일은 rem 기반인데 이 앱의 `:root` 는
     // font-size:14px 이라(시안 본문 크기) `p-5` 가 20px 이 아니라 17.5px 이 된다 —

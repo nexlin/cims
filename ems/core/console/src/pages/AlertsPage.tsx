@@ -319,7 +319,7 @@ export function AlarmsSection() {
                         <MessageSquare size={11} />{r.comments!.length}</span>
                         )}
                         {r.ack_state === 'acknowledged' && (
-                          <Check size={12} className="ml-1.5 inline text-[var(--cims-success)]" aria-label="승인됨" />
+                          <Check size={12} className="ml-1.5 inline text-success" aria-label="승인됨" />
                         )}
                       </Td>
                       <Td className="text-sm text-muted-foreground">

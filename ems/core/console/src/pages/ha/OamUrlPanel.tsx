@@ -61,7 +61,7 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
         현재 보고 주소:{' '}
         {cur ? (
           <code className={`font-mono font-semibold ${
-            mismatch || loopback ? 'text-destructive' : 'text-[var(--cims-success)]'}`}>
+            mismatch || loopback ? 'text-destructive' : 'text-success'}`}>
             {cur}
           </code>
         ) : (

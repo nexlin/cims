@@ -256,51 +256,12 @@ body {
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
 /* dark 모드 잔여 보정 (하드코딩 light 패치) */
-:root[data-theme="dark"] .form-input:disabled { background: var(--secondary); }
-:root[data-theme="dark"] .badge--gray { background: var(--secondary); color: var(--muted-foreground); }
-/* 나머지 badge 변형도 다크 토큰으로 — 라이트용 파스텔 배경(var(--cims-brand-soft) 등)이 그대로 남으면
-   어두운 화면에 흰 알약이 떠 보인다. soft 배경은 반투명이라 어느 표면 위에서도 겉돌지 않는다. */
-:root[data-theme="dark"] .badge--blue   { background: var(--cims-brand-soft); color: #a5b4fc; }
-:root[data-theme="dark"] .badge--green  { background: var(--cims-success-soft); color: #6ee7a8; }
-:root[data-theme="dark"] .badge--yellow { background: var(--cims-warning-soft);    color: #fcd34d; }
-:root[data-theme="dark"] .badge--red    { background: var(--cims-danger-soft);  color: #fca5a5; }
-:root[data-theme="dark"] .docs-content code,
-:root[data-theme="dark"] .docs-content tr:first-child td { background: var(--secondary); }
-
-/* ── App shell ─────────────────────────────────────────────── */
-.app { display: flex; flex-direction: column; min-height: 100vh; }
-
-.app-logo { display: flex; align-items: center; gap: 8px; }
-.app-logo-icon { font-size: 22px; }
-.app-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -.3px; color: var(--primary); }
+:root[data-theme="dark"] .form-input:disabled { background: var(--secondary); }:root[data-theme="dark"] .docs-content code,
+:root[data-theme="dark"] .docs-content tr:first-child td { background: var(--secondary); }.app-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -.3px; color: var(--primary); }
 
 .tab-nav { display: flex; gap: 4px; }
-.tab-btn {
-  padding: 6px 18px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--muted-foreground);
-  font-weight: 500;
-  transition: background .15s, color .15s;
-}
-.tab-btn:hover { background: var(--background); color: var(--foreground); }
-.tab-btn--active { background: var(--cims-brand-soft); color: var(--primary); font-weight: 600; }
-
-.app-main { flex: 1; padding: var(--main-pad, 24px); }
-
 /* ── Page / panel layout ───────────────────────────────────── */
 .page { display: flex; flex-direction: column; gap: 16px; }
-
-.groups-layout {
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 20px;
-  flex: 1;
-}
-
 .panel {
   background: var(--card);
   border: 1px solid var(--border);
@@ -312,9 +273,6 @@ body {
   gap: 0;
   flex: 1;
 }
-
-.panel--members { flex: 0 0 380px; min-height: 400px; }
-
 /* 위젯 높이 고정(h 지정) — 래퍼가 flex(height 고정), 내부 패널이 그 높이를 채우고 넘치면 스크롤. */
 .widget-fixed > .panel { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .widget-fixed > * { width: 100%; }
@@ -384,20 +342,6 @@ body {
   border-bottom: 1px solid var(--border);
   background: var(--muted);
 }
-
-.search-input {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 13px;
-  outline: none;
-  background: var(--card);
-  /* 글자색도 명시 — 비워 두면 브라우저 기본에 맡겨져 테마 전환 시 배경과 어긋난다(.btn 과 같은 함정). */
-  color: var(--foreground);
-}
-.search-input:focus { border-color: var(--primary); }
-
 /* ── Buttons ───────────────────────────────────────────────── */
 .btn {
   padding: 6px 14px;
@@ -416,14 +360,7 @@ body {
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn--primary  { background: var(--primary);  color: #fff; }
-.btn--primary:hover:not(:disabled) { background: var(--cims-brand-hover); }
-.btn--danger   { background: var(--destructive);   color: #fff; }
-.btn--danger:hover:not(:disabled)  { background: var(--cims-danger-hover); }
-.btn--outline  { border-color: var(--border); background: var(--card); }
-.btn--outline:hover { background: var(--background); }
-.btn--ghost    { background: transparent; }
-.btn--ghost:hover  { background: var(--background); }
-.btn--sm { padding: 3px 10px; font-size: 12px; }
+.btn--primary:hover:not(:disabled) { background: var(--cims-brand-hover); }.btn--sm { padding: 3px 10px; font-size: 12px; }
 
 .link-btn {
   background: none;
@@ -434,10 +371,6 @@ body {
   text-decoration: underline;
   padding: 0;
 }
-
-/* ── Table ─────────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; flex: 1; }
-
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -460,12 +393,7 @@ body {
   z-index: 2;
 }
 .data-table tbody tr:hover { background: var(--accent); }
-.data-table tbody tr.row--selected { background: var(--cims-brand-soft); }
-.empty-cell { text-align: center; color: var(--muted-foreground); padding: 32px !important; }
-.ts { color: var(--muted-foreground); font-size: 12px; }
-
-.actions { display: flex; gap: 6px; }
-
+.data-table tbody tr.row--selected { background: var(--cims-brand-soft); }.ts { color: var(--muted-foreground); font-size: 12px; }
 /* ── Badges ────────────────────────────────────────────────── */
 .badge {
   display: inline-block;
@@ -474,12 +402,6 @@ body {
   font-size: 11px;
   font-weight: 600;
 }
-.badge--red  { background: var(--cims-danger-soft); color: var(--cims-danger-hover); }
-.badge--gray { background: var(--secondary); color: var(--muted-foreground); }
-.badge--blue  { background: var(--cims-brand-soft); color: var(--primary); }
-.badge--green { background: var(--cims-success-soft); color: var(--cims-success); }
-.badge--yellow { background: var(--cims-warning-soft); color: var(--cims-warning); }
-
 /* ── Detail tab bar ────────────────────────────────────────── */
 .tab-bar {
   display: flex;
@@ -488,19 +410,6 @@ body {
   margin-bottom: 16px;
 }
 .tab-bar .tab-btn { border-radius: var(--radius) var(--radius) 0 0; }
-
-/* ── Form section title ────────────────────────────────────── */
-.form-section-title {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .4px;
-  color: var(--muted-foreground);
-  margin-bottom: 8px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-}
-
 /* ── Empty state ───────────────────────────────────────────── */
 /* 빈 상태 안내("활성 알람 없음" 등) — 남은 영역 전체의 중앙에 둔다.
    부모가 flex 컬럼이면 남은 공간을 채우고 그 안에서 중앙, 아니면 예전처럼 자연 높이. */
@@ -509,17 +418,6 @@ body {
   flex: 1 1 auto; min-height: 0;
   display: flex; align-items: center; justify-content: center;
 }
-.members-hint { font-size: 13px; }
-
-/* ── Member add row ────────────────────────────────────────── */
-.member-add-row {
-  display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--muted);
-}
-
 /* ── Forms ─────────────────────────────────────────────────── */
 .form-grid {
   display: grid;
@@ -538,186 +436,20 @@ body {
   outline: none;
   background: var(--card);
 }
-.form-input:focus { border-color: var(--primary); }
-.form-input--sm { width: 90px; flex-shrink: 0; }
-.form-input:disabled { background: var(--secondary); color: var(--muted-foreground); }
+.form-input:focus { border-color: var(--primary); }.form-input:disabled { background: var(--secondary); color: var(--muted-foreground); }
 
 /* toggle */
 .toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.toggle input { display: none; }
-.toggle-track {
-  width: 40px; height: 22px;
-  background: var(--border);
-  border-radius: 999px;
-  position: relative;
-  transition: background .2s;
-}
-.toggle-track::after {
-  content: '';
-  position: absolute;
-  top: 3px; left: 3px;
-  width: 16px; height: 16px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform .2s;
-  box-shadow: 0 1px 3px rgba(0,0,0,.2);
-}
-.toggle input:checked ~ .toggle-track { background: var(--primary); }
+.toggle input { display: none; }.toggle input:checked ~ .toggle-track { background: var(--primary); }
 .toggle input:checked ~ .toggle-track::after { transform: translateX(18px); }
-.toggle-label { font-size: 13px; color: var(--muted-foreground); }
-
 /* ── Modal ─────────────────────────────────────────────────── */
 .modal-overlay {
   position: fixed; inset: 0;
   background: rgba(0,0,0,.4);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
-}
-.modal-box {
-  background: var(--card);
-  border-radius: 10px;
-  width: 480px;
-  max-width: calc(100vw - 40px);
-  max-height: calc(100vh - 80px);
-  overflow: auto;
-  box-shadow: 0 8px 32px rgba(0,0,0,.18);
-  display: flex;
-  flex-direction: column;
-}
-.modal-box--wide { width: 620px; }
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.modal-title { font-weight: 600; font-size: 15px; }
-.modal-close {
-  background: none; border: none; cursor: pointer;
-  color: var(--muted-foreground); font-size: 18px; line-height: 1;
-  padding: 2px 6px; border-radius: 4px;
-}
-.modal-close:hover { background: var(--background); }
-.modal-body { padding: 20px; flex: 1; }
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding-top: 20px;
-}
-
-/* ── Fullscreen modal — content 영역만 덮음 (헤더/사이드바 제외) ─ */
-.modal-fullscreen {
-  position: fixed;
-  top:    var(--header-h, 48px);
-  left:   var(--sidebar-w, 220px);
-  right:  0;
-  bottom: 0;
-  z-index: 100;
-  background: var(--background);
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 0 0 1px var(--border);
-}
-.modal-fullscreen > .modal-header {
-  flex: 0 0 auto;
-  background: var(--card);
-}
-.modal-fullscreen > .modal-body-area {
-  flex: 1;
-  overflow: hidden;
-}
-/* fullscreen 내부 footer: 화면 하단에 고정된 바로 표시 */
-.modal-fullscreen .modal-footer {
-  padding: 12px 20px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-  background: var(--card);
-}
-
-/* ── Detail list ───────────────────────────────────────────── */
-.detail-list {
-  display: grid;
-  grid-template-columns: 90px 1fr;
-  gap: 8px 16px;
-}
-.detail-list dt { font-weight: 600; color: var(--muted-foreground); font-size: 12px; }
+}.detail-list dt { font-weight: 600; color: var(--muted-foreground); font-size: 12px; }
 .detail-list dd { font-size: 13px; word-break: break-all; }
-
-.confirm-text { line-height: 1.7; }
-
-/* ── Subscription chips (inline number management) ────────── */
-.sub-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  align-items: center;
-}
-
-.sub-chip {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-  overflow: hidden;
-  border: 1px solid transparent;
-}
-
-.sub-chip--call {
-  background: var(--cims-brand-soft);
-  border-color: var(--border);
-  color: var(--primary);
-}
-.sub-chip--ptt {
-  background: var(--cims-success-soft);
-  border-color: var(--border);
-  color: var(--cims-success);
-}
-
-.sub-chip-label {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 6px 2px 8px;
-  font-size: 11px;
-  font-weight: 500;
-  color: inherit;
-  line-height: 1.4;
-}
-.sub-chip-label:hover { text-decoration: underline; }
-
-.sub-chip-del {
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 2px 6px 2px 2px;
-  font-size: 13px;
-  line-height: 1;
-  color: inherit;
-  opacity: 0.5;
-}
-.sub-chip-del:hover { opacity: 1; }
-
-.sub-chip-add {
-  background: none;
-  border: 1px dashed var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  color: var(--muted-foreground);
-  line-height: 1;
-  padding: 0;
-  flex-shrink: 0;
-}
-.sub-chip-add:hover { border-color: var(--primary); color: var(--primary); background: var(--cims-brand-soft); }
-
 /* ── Toast ─────────────────────────────────────────────────── */
 .toast-stack {
   position: fixed;
@@ -735,19 +467,7 @@ body {
   font-weight: 500;
   box-shadow: 0 4px 12px rgba(0,0,0,.15);
   animation: slide-in .2s ease;
-}
-.toast--ok  { background: #166534; color: #fff; }
-.toast--err { background: var(--destructive); color: #fff; }
-/* 알람 전이 토스트 — critical/major open·승격만, 수동 닫기 (alarm_pipeline.md §8.2) */
-.toast--alarm {
-  background: var(--destructive);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: 420px;
-}
-.toast-close {
+}.toast-close {
   background: none;
   border: none;
   color: inherit;
@@ -756,23 +476,7 @@ body {
   font-size: 12px;
   padding: 0 2px;
 }
-.toast-close:hover { opacity: 1; }
-
-/* ── 헤더 알람 인디케이터·드로어 (alarm_pipeline.md §8.2) ───────── */
-.alarm-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--sidebar-border);
-  background: transparent;
-  color: var(--cims-text-header);
-  font-size: 12px;
-  cursor: pointer;
-}
-.alarm-indicator:hover { background: var(--sidebar-accent); }
-.alarm-indicator .dot {
+.toast-close:hover { opacity: 1; }.alarm-indicator .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
@@ -803,14 +507,6 @@ body {
   from { transform: translateX(40px); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
 }
-
-/* ── App header user area ──────────────────────────────────── */
-.app-user {
-  display: flex; align-items: center; gap: 8px;
-  margin-left: auto;
-}
-.app-user-name { font-size: 13px; font-weight: 600; color: var(--foreground); }
-
 /* ── Auth wrap ─────────────────────────────────────────────── */
 .auth-wrap {
   display: flex; align-items: center; justify-content: center;
@@ -847,362 +543,6 @@ body {
   display: flex; align-items: center; justify-content: center;
   height: 100vh; font-size: 16px; color: var(--muted-foreground);
 }
-
-/* ── Softphone page ─────────────────────────────────────────── */
-.sp-page {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.sp-panel {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  width: 320px;
-  flex-shrink: 0;
-  box-shadow: var(--cims-elevation-sm);
-}
-
-/* Header */
-.sp-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  background: var(--muted);
-  border-bottom: 1px solid var(--border);
-  min-height: 44px;
-}
-.sp-badge {
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-.sp-badge--call { background: var(--cims-brand-soft); color: var(--primary); }
-.sp-badge--ptt  { background: var(--cims-success-soft); color: var(--cims-success); }
-
-.sp-number {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-conn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-}
-.sp-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  transition: background .3s;
-}
-.sp-state {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  white-space: nowrap;
-}
-
-/* Error */
-.sp-error {
-  color: var(--destructive);
-  font-size: 12px;
-  padding: 8px 14px;
-  background: var(--cims-danger-soft);
-  border-bottom: 1px solid var(--border);
-}
-
-/* Section title */
-.sp-section {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .4px;
-  color: var(--muted-foreground);
-  padding: 8px 14px 4px;
-  background: var(--muted);
-  border-top: 1px solid var(--border);
-}
-
-/* Contacts */
-.sp-contacts {
-  overflow-y: auto;
-  max-height: 180px;
-  flex-shrink: 0;
-}
-.sp-contact {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  transition: background .1s;
-}
-.sp-contact:hover { background: var(--muted); }
-.sp-contact-name { font-size: 13px; font-weight: 500; flex: 1; }
-.sp-contact-num  { font-size: 11px; color: var(--muted-foreground); }
-.sp-contact-btn  {
-  background: none; border: none; cursor: pointer;
-  font-size: 15px; padding: 2px 4px; border-radius: 4px;
-}
-.sp-contact-btn:hover { background: var(--cims-brand-soft); }
-
-.sp-empty-hint {
-  padding: 16px 14px;
-  font-size: 12px;
-  color: var(--muted-foreground);
-  text-align: center;
-}
-
-/* Dialpad */
-.sp-dialpad {
-  padding: 10px 14px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.sp-dial-row {
-  display: flex;
-  gap: 6px;
-}
-.sp-dial-input {
-  flex: 1;
-  font-size: 16px;
-  text-align: center;
-  letter-spacing: 1px;
-}
-.sp-del {
-  flex: 0 0 36px;
-  font-size: 16px;
-  padding: 0;
-}
-.sp-keypad {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-}
-.sp-call-btn {
-  width: 100%;
-  padding: 9px;
-  font-size: 14px;
-}
-
-/* Incoming call */
-.sp-incoming {
-  padding: 16px;
-  border-left: 4px solid var(--destructive);
-  background: var(--cims-danger-soft);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-.sp-incoming-from { font-size: 18px; font-weight: 700; }
-.sp-incoming-btns { display: flex; gap: 12px; }
-
-/* Active call */
-.sp-active {
-  padding: 20px 16px;
-  border-left: 4px solid var(--primary);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-.sp-active-state { font-size: 12px; color: var(--muted-foreground); font-weight: 600; text-transform: uppercase; }
-.sp-active-peer  { font-size: 18px; font-weight: 700; }
-
-/* PTT groups */
-.sp-groups {
-  overflow-y: auto;
-  max-height: 220px;
-  flex-shrink: 0;
-}
-.sp-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  transition: background .1s;
-}
-.sp-group:hover { background: var(--muted); }
-.sp-group--active { background: var(--cims-success-soft); }
-.sp-group--active:hover { background: color-mix(in srgb, var(--cims-success) 22%, transparent); }
-.sp-group-dot {
-  width: 10px; height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  transition: background .3s;
-}
-.sp-group-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.sp-group-name    { font-size: 13px; font-weight: 500; }
-.sp-group-id      { font-size: 11px; color: var(--muted-foreground); }
-.sp-group-speaker { font-size: 11px; color: var(--cims-success); font-weight: 600; }
-.sp-group-state   { font-size: 11px; color: var(--muted-foreground); flex-shrink: 0; }
-
-/* Group join/leave button inside row */
-.sp-join-btn { font-size: 11px; padding: 2px 8px; flex-shrink: 0; margin-left: 4px; }
-
-/* Member list (active group, expanded below group row) */
-.sp-members {
-  background: var(--muted);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.sp-members-head {
-  display: grid;
-  grid-template-columns: 36px 1fr 60px;
-  padding: 4px 14px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .3px;
-  color: var(--muted-foreground);
-  border-bottom: 1px solid var(--border);
-  background: var(--secondary);
-}
-.sp-mh-pri    { text-align: center; }
-.sp-mh-status { text-align: right; }
-
-.sp-member {
-  display: grid;
-  grid-template-columns: 36px 1fr 60px;
-  align-items: center;
-  padding: 7px 14px;
-  border-bottom: 1px solid var(--border);
-  transition: background .1s;
-}
-.sp-member:last-child { border-bottom: none; }
-.sp-member--speaker { background: var(--cims-success-soft); }
-.sp-member--me      { }
-
-.sp-m-pri {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted-foreground);
-  text-align: center;
-}
-.sp-m-info {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-.sp-m-name {
-  font-size: 12px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.sp-m-id { font-size: 10px; color: var(--muted-foreground); }
-.sp-me-tag {
-  font-size: 9px;
-  font-weight: 700;
-  background: var(--cims-brand-soft);
-  color: var(--primary);
-  padding: 1px 4px;
-  border-radius: 999px;
-}
-.sp-m-status {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-}
-.sp-speaker-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--cims-success);
-}
-.sp-conn-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  transition: background .3s;
-}
-
-/* PTT footer with PUSH toggle */
-.sp-ptt-footer {
-  padding: 14px 16px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 64px;
-}
-.sp-push-btn {
-  width: 100%;
-  padding: 14px;
-  border-radius: var(--radius);
-  border: 2px solid var(--border);
-  background: var(--secondary);
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  user-select: none;
-  transition: background .1s, border-color .1s, transform .05s;
-}
-.sp-push-btn:hover { border-color: var(--primary); background: var(--cims-brand-soft); }
-.sp-push-btn--on {
-  background: var(--cims-danger-soft);
-  border-color: var(--destructive);
-  color: var(--destructive);
-  transform: scale(0.98);
-  box-shadow: 0 0 0 4px rgba(220,38,38,.12);
-}
-.sp-ptt-waiting {
-  font-size: 12px;
-  color: var(--muted-foreground);
-}
-
-/* PTT push button (shared) */
-.phone-ptt-btn {
-  width: 130px; height: 130px;
-  border-radius: 50%;
-  border: 4px solid var(--border);
-  background: var(--secondary);
-  font-size: 13px; font-weight: 700;
-  cursor: pointer; user-select: none;
-  transition: background .1s, border-color .1s, transform .1s;
-  display: flex; align-items: center; justify-content: center;
-  text-align: center;
-}
-.phone-ptt-btn:hover { border-color: var(--primary); }
-.phone-ptt-btn--active {
-  background: var(--cims-danger-soft); border-color: var(--destructive);
-  transform: scale(0.95);
-  box-shadow: 0 0 0 8px rgba(220,38,38,.15);
-}
-
-/* Dial keys (shared) */
-.phone-key {
-  padding: 10px; font-size: 16px; font-weight: 600;
-  border: 1px solid var(--border); border-radius: var(--radius);
-  background: var(--card); cursor: pointer;
-  transition: background .1s;
-}
-.phone-key:hover  { background: var(--background); }
-.phone-key:active { background: var(--cims-brand-soft); }
-
 /* ── Docs viewer ─────────────────────────────────────────── */
 .docs-content { font-size: 14px; line-height: 1.7; color: var(--foreground); max-width: 900px; }
 .docs-content .md-pre {
@@ -1253,19 +593,7 @@ body {
 /* AppBar 는 Tailwind 로 옮겼다(components/Header.tsx) — 여기 남는 것은 **그리드 배치**뿐이다.
    클래스 이름 `app-header` 는 지우지 않는다: 이 그리드와 인쇄 시 숨김 규칙
    (VerificationV2Page·VerificationHistoryPage 의 @media print)이 이 이름을 쓴다. */
-.app-header { grid-area: header; }
-.app-header-toggle {
-  background: none; border: none; color: var(--cims-neutral); cursor: pointer;
-  padding: 7px; display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius); transition: background .15s, color .15s;
-}
-.app-header-toggle:hover { color: var(--cims-text-header); background: var(--sidebar-accent); }
-.app-header-logo-text {
-  background: linear-gradient(90deg, var(--primary), var(--cims-brand-hover));
-  -webkit-background-clip: text; background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.layout-edit-headerbar {
+.app-header { grid-area: header; }.layout-edit-headerbar {
   display: flex; align-items: center; gap: 6px;
   flex-wrap: nowrap; min-width: 0; white-space: nowrap;
 }
@@ -1283,25 +611,7 @@ body {
   /* 설계 캔버스보다 창이 작을 때만 스크롤이 생긴다 — 가로도 함께(재배열 안 함). */
   overflow: auto; padding: 0; position: relative;
   display: flex; flex-direction: column;
-}
-.app-content-header {
-  padding: 12px 24px; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; font-size: 16px; font-weight: 600;
-}
-.subtabs {
-  display: flex; gap: 0; padding: 0 16px;
-  border-bottom: 1px solid var(--border); background: var(--muted);
-}
-.subtabs-item {
-  padding: 10px 16px; font-size: 13px; color: var(--muted-foreground);
-  text-decoration: none; border-bottom: 2px solid transparent;
-  transition: all 0.15s;
-}
-.subtabs-item:hover { color: var(--foreground); }
-.subtabs-item--active {
-  color: var(--primary); border-bottom-color: var(--primary); font-weight: 600;
-}
-/* 라우트 본문 래퍼 — 위젯 캔버스가 "남은 높이 전부"를 definite 하게 받도록 flex 사슬을 이어준다.
+}/* 라우트 본문 래퍼 — 위젯 캔버스가 "남은 높이 전부"를 definite 하게 받도록 flex 사슬을 이어준다.
    그리드 행이 `1fr` 이라 캔버스에 확정 높이가 없으면 트랙이 내용 높이로 쪼그라든다. */
 .app-content-body {
   /* breadcrumb(PageHeaderRow)가 위에 붙으므로 본문 위 여백은 시안 실측 14px.

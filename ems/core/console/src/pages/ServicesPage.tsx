@@ -361,7 +361,7 @@ export default function ServicesPage() {
     <div>
       <div className="mb-4 flex gap-3 items-center flex-wrap">
         <h3 className="m-0">패키징</h3>
-        <span className="text-muted text-md">
+        <span className="text-muted-foreground text-md">
           빌드 → 시험 실행 → 패키징 → 다운로드. 신규 패키지 등록/편집은{' '}
           <Link to="/deploy/packages">배포 &gt; 패키지</Link> 에서.
         </span>
@@ -373,7 +373,7 @@ export default function ServicesPage() {
               {manifestSha ? `manifest=${manifestSha}…` : ''}
             </Badge>
           ) : (
-            <span className="text-muted text-sm">패키지 미생성</span>
+            <span className="text-muted-foreground text-sm">패키지 미생성</span>
           )}
           {/* 빌드 + 패키징 통합 — 입력 버전을 -v 로 전달 (pkg.json 갱신) + tarball 산출 */}
           <input className="w-[110px] text-md py-1 px-2 border border-border rounded-[4px]"
@@ -590,7 +590,7 @@ export default function ServicesPage() {
                     onChange={e => setEditText(e.target.value)}
                     spellCheck={false}/>
                   {editError && <div className="auth-error mt-2">{editError}</div>}
-                  <div className="text-muted text-sm mt-2">
+                  <div className="text-muted-foreground text-sm mt-2">
                     최상위 object. `sections[]`, `collections[]` 스키마. 저장 시 재배포되는 deployment 가 새 템플릿으로 overlay 됩니다.
                   </div>
                 </>
