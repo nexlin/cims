@@ -280,6 +280,16 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   }, [formValues, formInitial])
  dirtyRef.current = changed.size > 0
 
+  // 저장바 문구의 「재기동 필요 항목 포함」 — 바뀐 필드 중 재기동이 필요한 것이 있을 때만 적는다
+  // (도안 G3-1 은 그 상태를 그렸다). `restart !== false` 가 기본 재기동이다.
+ const restartNeeded = useMemo(() => {
+ if (!template || changed.size === 0) return false
+ for (const sec of template.sections)
+ for (const f of sec.fields)
+ if (changed.has(f.key) && f.restart !== false) return true
+ return false
+  }, [template, changed])
+
  async function saveForm() {
  if (!baseDep || changed.size === 0) return
  setSaving(true)
@@ -483,7 +493,11 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             <ToggleGroupItem key={c.key} value={c.key}>{c.title}</ToggleGroupItem>
           ))}
           <ToggleGroupItem value="compare">
-            멤버 비교 {summary.drift > 0 && <>({summary.drift})</>}
+            {/* 도안은 드리프트 수 앞에 경고 아이콘을 붙인다 (G3-1 `멤버 비교 (⚠1)`).
+                0건이면 아이콘도 숫자도 그리지 않는다 — 0건에 경고색 금지(§3-7). */}
+            멤버 비교 {summary.drift > 0 && (
+              <>(<AlertTriangle size={11} className="mx-0.5 inline align-[-1px] text-warning-on" />{summary.drift})</>
+            )}
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
@@ -685,9 +699,10 @@ export function GroupConfigCompareView({ group, members: liveMembers,
         <StickySaveBar
  badge={changed.size > 0
             ? <Badge variant="warningSoft">변경 {changed.size}건</Badge>
-            : <Badge variant="neutralSoft">변경 없음</Badge>}
+            : <Badge variant="neutralSoft">변경 0건</Badge>}
  note={autoSyncOn
-            ? `저장하면 그룹 멤버 전체(${deployedMembers.map(m => m.name).join(', ')})에 적용됩니다`
+            ? `저장하면 멤버 ${deployedMembers.length}대의 ${effectivePkgName} 설정이 재생성되어 적용됩니다`
+              + (restartNeeded ? ' · 재기동 필요 항목 포함' : '')
             : `동기화 OFF — ${baseMemberName} 에만 저장됩니다`}
  saveLabel={autoSyncOn ? '저장 — 전 멤버 적용' : `저장 — ${baseMemberName} 에만`}
  disabled={changed.size === 0 || (autoSyncOn && mixedVersions)}

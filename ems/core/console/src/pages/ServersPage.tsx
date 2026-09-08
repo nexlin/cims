@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, Plus, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, Plus, RefreshCw, RotateCw, ShieldCheck, Stethoscope, Trash2, X } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -18,8 +18,7 @@ import { Radio } from '../components/custom/radio'
 import { Checkbox } from '../components/ui/checkbox'
 import {
  deploymentApi,
- type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
-} from '../api/deployment'
+ type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning, type ConfigScope } from '../api/deployment'
 import { haGroupsApi, type HaGroup, type VipBinding, type MountOp,
  type FailoverOptions, FAILOVER_DEFAULTS,
  type ModuleSpec, MODULE_SPEC_DEFAULT, type SafetyClass } from '../api/ha_groups'
@@ -78,13 +77,14 @@ function statusBadge(st: string) {
 }
 
 // `counts` 는 탭 라벨 뒤 카운트 칩의 출처다 (Figma `Sec/Tabs (신규)` 458:9160 · G1 458:8626).
-// 시안은 `패키지 설치 3 · 패키지 설정 9 · 패키지 제어 3` — 설치·제어는 모듈 수이고,
-// 설정의 9 는 그 스코프의 **설정 필드 수**다(INDEX.md: 서버 4 · SA 13 · 그룹 공통 9).
-// 필드 스코프 분리는 아직 안 했으므로 설정 탭 카운트는 그 단계에서 붙인다.
-const PAGE_TABS: Array<{ key: PageTab; label: string; adminGated: boolean; counts?: 'modules' }> = [
+// 시안은 `패키지 설치 3 · 패키지 설정 9 · 패키지 제어 3` — 그 탭에서 다루는 **큰 항목의 수**다.
+// 설치·제어는 모듈, 설정은 설정 필드. 둘 다 **스코프마다 따로 센다** — 서버를 고르면 그 서버
+// 것이고 그룹을 고르면 그룹 것이다(같은 모듈이라도 서버 스코프 필드와 그룹 스코프 필드가 다르다).
+const PAGE_TABS: Array<{ key: PageTab; label: string; adminGated: boolean
+                         counts?: 'modules' | 'configModules' }> = [
   { key: 'infra', label: '시스템/서버 구성', adminGated: true },
   { key: 'install', label: '패키지 설치', adminGated: true, counts: 'modules' },
-  { key: 'config', label: '패키지 설정', adminGated: false },
+  { key: 'config', label: '패키지 설정', adminGated: false, counts: 'configModules' },
   { key: 'control', label: '패키지 제어', adminGated: true, counts: 'modules' },
 ]
 
@@ -233,6 +233,36 @@ export default function ServersPage() {
       }
  return names.size
   }, [selection, haGroups, depsByAgent])
+
+  // [패키지 설정] 탭 카운트 — 그 탭에서 다루는 **큰 항목 = 설정할 모듈 수**.
+  // 스코프마다 따로 센다: 서버는 그 서버에 깔린 모듈 중 **서버 스코프 설정이 있는 것**,
+  // 그룹은 멤버 전체의 모듈 종류 중 **그룹 공통 설정이 있는 것**(같은 모듈이 두 멤버에 있어도 1).
+  //
+  // 도안의 `패키지 설정 9` 는 정의가 아니라 **예시 숫자**다 — S3(서버 개별 설정 4필드)와
+  // G1·G3-1·G3-3(oam-svc 는 16필드)이 전부 똑같이 9 로 그려져 있어 화면 내용과 무관하다.
+  // 모듈 칩의 `oam 9 · oam-svc 6 · csc 4` 도 실제 템플릿(4/9/13)과 다르다(§9).
+  const configModuleCount = useMemo(() => {
+    const pkgById = new Map(packages.map(p => [p.id, p]))
+    const hasFields = (pkgId: number, scope: ConfigScope) => {
+      const t = pkgById.get(pkgId)?.config_template
+      if (!t) return false
+      return t.sections.some(sec => sectionForScope(sec, scope) !== null)
+    }
+    if (selection?.kind === 'agent') {
+      return (depsByAgent.get(selection.id) || [])
+        .filter(d => d.status !== 'removed' && hasFields(d.package_id, 'system')).length
+    }
+    const g = selection?.kind === 'group' ? haGroups.find(x => x.id === selection.id) : null
+    if (!g) return 0
+    const seen = new Map<string, number>()
+    for (const m2 of g.members)
+      for (const d of depsByAgent.get(m2.agent_id) || []) {
+        if (d.status !== 'removed' && d.package_name && !seen.has(d.package_name)) {
+          seen.set(d.package_name, d.package_id)
+        }
+      }
+    return [...seen.values()].filter(id => hasFields(id, 'service')).length
+  }, [selection, haGroups, depsByAgent, packages])
 
   // 전역 VIP IP 집합 — 모든 HA group vip_bindings 의 IP. keepalived 가 관리하는 부동 IP 라
   // ServiceIpPanel 에서 망/용도 편집 불가, 'VIP' 표시만 (서버 고정 IP 아님).
@@ -619,6 +649,7 @@ export default function ServersPage() {
  title={locked ? '조회 가능 — 변경은 admin 권한 필요 (관리자 인증)' : ''}>
                 {t.label}
                 {t.counts === 'modules' && <TabCount n={moduleCount} />}
+                {t.counts === 'configModules' && <TabCount n={configModuleCount} />}
                 {locked && <Lock size={11} className="ml-1.5" />}
               </button>
             )
@@ -957,12 +988,15 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
  const vipDirty      = JSON.stringify(editBindings) !== JSON.stringify(group.vip_bindings || [])
  const masterChanged = editMasterAid !== initialMaster
 
-  // 화면이 보여 주는 값의 기준 노드 — 멤버마다 실제 값이 다를 수 있는데 화면은 하나다.
-  // 지정 MASTER(priority 최대)를 기준으로 삼는다.
- const activeMemberLabel = (() => {
- const top = [...memberAgents].sort((x, y) => (y.priority ?? 0) - (x.priority ?? 0))[0]
- const nm = top?.agent ? agentDisplayName(top.agent.name) : null
- return nm ? `MASTER 노드 ${nm}` : '지정 MASTER 노드'
+  // 화면이 보여 주는 값의 기준 노드 — 도안·글스펙 모두 「ACTIVE 노드」로 적는다
+  // (as-group.md G1 Info Alert). 실제로 VIP 를 들고 있는 노드가 관측되면 그 노드를 말하고,
+  // 관측이 없으면 아는 것만 말한다 — 관측 없이 ACTIVE 라고 적으면 거짓이 된다.
+  const activeMemberLabel = (() => {
+    const obs = memberAgents.find(m => m.vip_observed === true)
+    if (obs?.agent) return `ACTIVE 노드 ${agentDisplayName(obs.agent.name)}`
+    const top = [...memberAgents].sort((x, y) => (y.priority ?? 0) - (x.priority ?? 0))[0]
+    const nm = top?.agent ? agentDisplayName(top.agent.name) : null
+    return nm ? `지정 MASTER 노드 ${nm}` : '지정 MASTER 노드'
   })()
 
   // 저장 전에 **무엇이 바뀌는지** 보여준다 — 배지 숫자와 tooltip 이 같은 목록을 쓴다.
@@ -1492,7 +1526,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                 따라잡게 하는 통로. update 는 값이 바뀌어야 job 이 나간다. */}
             <Button variant="ghost" onClick={reapplyVip}
  disabled={vipDirty || bindingEditMode !== null}>
-              재적용
+              <RotateCw size={13} /> 재적용
             </Button>
           </div>
           {/* 비활성 사유는 툴팁이 아니라 눈에 보이게 (contracts.md §Button) */}
@@ -1983,7 +2017,7 @@ function GroupContextBar({ group, memberCount, onOpenConfig, onDeleteSystem }: {
       <div className="ml-auto flex items-center gap-1.5">
         <Button onClick={onOpenConfig}
  title="멤버별 설정값 나란히 비교 (읽기 전용) — 편집은 각 멤버 서버의 패키지 설정 탭">
-          <Search size={13} /> 설정 비교
+          설정 비교
         </Button>
         <Button variant="destructive" onClick={() => onDeleteSystem(group)}
  title="HA 그룹 + 모든 멤버 일괄 삭제">
@@ -2203,11 +2237,13 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
  const ag = agents.find(a => a.id === m.agent_id)
  const deps = depsByAgent.get(m.agent_id) || []
  return (
+              // 도안(G2 184:2870)은 서버명·상태를 **첫 모듈 줄과 같은 줄**에 둔다 — 모듈이 여러 줄인
+              // 행에서 가운데 정렬하면 어느 모듈이 어느 서버인지 눈으로 잇기 어렵다.
               <tr key={m.agent_id} className="cursor-pointer"
  onClick={() => onSelectMember(m.agent_id)}>
-                <Td>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</Td>
-                <Td><StatusDot status={ag?.status || 'offline'} /></Td>
-                <Td>
+                <Td className="py-2.5 align-top">{agentDisplayName(ag?.name || `#${m.agent_id}`)}</Td>
+                <Td className="py-2.5 align-top"><StatusDot status={ag?.status || 'offline'} /></Td>
+                <Td className="py-2.5 align-top">
                   {deps.length === 0
                     ? <span className="text-muted-foreground">배포된 모듈 없음</span>
                     : (

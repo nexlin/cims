@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertTriangle } from 'lucide-react'
 import { Badge } from '@core/components/ui/badge'
 import { Button } from '@core/components/ui/button'
 import { Switch } from '@core/components/ui/switch'
@@ -52,9 +52,10 @@ export function SyncStatusRow({ syncOn, onToggle, toggling, activeNode, drift, e
       )}
       {extra}
       <div className="flex-1" />
+      {/* 도안(459:7396)의 `새로고침` 은 아이콘 없이 글자만이다. */}
       {onRefresh && (
         <Button variant="ghost" onClick={onRefresh} disabled={refreshing}>
-          <RefreshCw /> 새로고침
+          새로고침
         </Button>
       )}
     </div>
