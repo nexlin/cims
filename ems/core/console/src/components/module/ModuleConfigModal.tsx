@@ -306,7 +306,7 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                   {scalarTitle} ({scalarCount})
                 </span>
               ) : (
-                <ToggleGroup type="single" value={tab} className="shrink-0 justify-start"
+                <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
                              onValueChange={(v: string) => v && setTab(v)}>
                   <ToggleGroupItem value="scalar">{scalarTitle} ({scalarCount})</ToggleGroupItem>
                   {visibleCollections.map(c => (
@@ -524,7 +524,7 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
 }
 
 export function SectionBlock({ section, values, initial, changed, onChange, onReset, footer,
-                               srcOf }: {
+                               srcOf, markerOf }: {
   section: {
     key: string; title: string; description?: string
     fields: ConfigTemplateField[]
@@ -540,6 +540,8 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   footer?: React.ReactNode
   /** 값의 출처 — `injected`(배포 시 자동 채움)를 배지로 드러낸다. 없으면 배지 없음. */
   srcOf?: (key: string) => ConfigValueSrc | undefined
+  /** 마커 자리에 덧붙일 배지 — 그룹 화면의 `드리프트` 처럼 화면마다 다른 표식 (시안 G3-1 209:3255). */
+  markerOf?: (key: string) => React.ReactNode
 }) {
   // 접힘 상태는 SubSection 이 갖는다 — `hidden` 섹션(인프라)만 기본 접힘.
   // 모든 필드 노출 (고급/숨김 구분 제거).
@@ -593,6 +595,7 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
                 initialValue={initial[f.key]}
                 isChanged={changed.has(f.key)}
                 src={srcOf?.(f.key)}
+                markerExtra={markerOf?.(f.key)}
                 onChange={v => onChange(f.key, v)}
                 onReset={() => onReset(f.key)} />
             ))}
@@ -684,13 +687,15 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
  * 필드 옆에서 알린다(contracts.md §TextInput/Select). 시안 실측 색은 `neutralSoft` 하나다
  * (구 화면은 재기동을 빨강으로 칠해 전 필드가 경고처럼 보였다).
  */
-function FieldRow({ field, value, initialValue, isChanged, src, onChange, onReset }: {
+function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onChange, onReset }: {
   field: ConfigTemplateField
   value: FieldValue
   initialValue: FieldValue
   isChanged: boolean
   /** 값의 출처. `injected` = 운영자가 입력한 값이 아니라 배포 시 OAM 이 채운 값. */
   src?: ConfigValueSrc
+  /** 마커 자리에 세로로 덧붙는 배지 (그룹 화면의 `드리프트`) */
+  markerExtra?: React.ReactNode
   onChange: (v: FieldValue) => void
   onReset: () => void
 }) {
@@ -729,10 +734,14 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
           </Button>
         : undefined}
       marker={
-        <Badge variant="neutralSoft"
-               title={needsRestart ? '저장 후 재기동해야 반영됩니다' : '저장 즉시 반영됩니다'}>
-          {needsRestart ? '재기동' : '즉시'}
-        </Badge>
+        // 시안은 마커를 세로로 쌓는다 (209:3255 — `재기동` 위, `드리프트` 아래)
+        <span className="flex flex-col items-start gap-1">
+          <Badge variant="neutralSoft"
+                 title={needsRestart ? '저장 후 재기동해야 반영됩니다' : '저장 즉시 반영됩니다'}>
+            {needsRestart ? '재기동' : '즉시'}
+          </Badge>
+          {markerExtra}
+        </span>
       }>
       {renderInput(field, value, onChange)}
     </FormField>

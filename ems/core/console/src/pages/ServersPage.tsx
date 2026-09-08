@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -14,6 +14,7 @@ import { SubSection } from '../components/custom/collapsible-section'
 import { FormField } from '../components/custom/form-field'
 import { StickySaveBar } from '../components/custom/sticky-save-bar'
 import { Radio } from '../components/custom/radio'
+import { Checkbox } from '../components/ui/checkbox'
 import {
   deploymentApi,
   type Agent, type SipPackage, type Deployment, type JobType, type AgentMetric, type AgentNetTuning,
@@ -31,7 +32,6 @@ import type { GroupMount } from '../api/ha_groups'
 import { splitPrefixHost } from './ha/helpers'
 import { ApiError } from '../api/client'
 import { useToast } from '../components/Toast'
-import { InfoDot } from '../components/InfoDot'
 import Modal from '../components/Modal'
 import { agentStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
 import ModuleConfigModal, { sectionForScope } from '../components/module/ModuleConfigModal'
@@ -1701,7 +1701,7 @@ function ModuleSpecSection({ group, deployments, onReload }: {
   onReload: () => Promise<void> | void
 }) {
   const { show } = useToast()
-  const [open, setOpen] = useState(false)
+  // 접힘 상태는 SubSection 이 갖는다 (기본 접힘).
   const [saving, setSaving] = useState(false)
   const modules = useMemo(() => {
     const ids = new Set(group.members.map(m => m.agent_id))
@@ -1744,79 +1744,81 @@ function ModuleSpecSection({ group, deployments, onReload }: {
 
   if (modules.length === 0) return null
   return (
-    <div style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 4 }}>
-      <div style={{ padding: '8px 12px', background: 'var(--muted)',
-                    display: 'flex', alignItems: 'center', gap: 8, fontWeight: 600, fontSize: 13 }}
-           title="모듈별 운영 설정 (앱 설정과 별개) — 각 노드 modules/<mod>/service.json 으로 반영">
-        <span onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-        <span onClick={() => setOpen(v => !v)} style={{ cursor: 'pointer' }}>모듈 운영 명세 (감시 · 절체 모드)</span>
-        <InfoDot label="모듈 운영 명세란?">
-          이 설정은 앱 설정(config.json)과 별개 파일(service.json)로 각 노드에 저장되며 agent 가
-          감시·절체 판정에 사용합니다. 안전 등급 shared_writer/unknown 은 절체 후 자동 복귀(래치 해제)를
-          하지 않고 운영자 확인을 요구합니다.
-        </InfoDot>
-        <span style={{ fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 400, cursor: 'pointer' }}
-              onClick={() => setOpen(v => !v)}>
-          {modules.join(', ')}
-        </span>
-        <button className="btn btn--sm btn--primary" style={{ marginLeft: 'auto' }}
-                onClick={save} disabled={!dirty || saving}
-                title="모듈 운영 명세 변경을 각 멤버 노드에 반영 (service.json + keepalived 재렌더)">
-          <Play size={13} /> 적용
-        </button>
-      </div>
-      {open && (
-        <div style={{ padding: 12, fontSize: 12, overflowX: 'auto' }}>
-          <table className="data-table" style={{ minWidth: 560 }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>모듈</th>
-                <th title="프로세스 감시(watchdog) — 죽으면 자동 재기동. 끄면 재기동 안 함(장애 시 즉시 절체 판정).">프로세스 감시</th>
-                <th title="Cold(기본): standby 정지 + 승격 시 기동 / Hot: 양쪽 상시 기동(VIP-only). AS 만 적용.">절체 모드</th>
-                <th title="이 모듈 실패가 절체 사유가 되는지. 끄면 이 모듈이 죽어도 절체하지 않음(부가 모듈).">절체 관여</th>
-                <th title="안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동 확인 필요). VIP 없이 DB/파일에 쓰는 모듈은 fencing/lease 전제.">안전 등급</th>
-              </tr>
-            </thead>
-            <tbody>
-              {modules.map(m => {
-                const sp = specs[m] || MODULE_SPEC_DEFAULT
-                return (
-                  <tr key={m}>
-                    <td><b>{m}</b></td>
-                    <td style={{ textAlign: 'center' }}>
-                      <input type="checkbox" checked={sp.supervision.watchdog}
-                             onChange={e => setSup(m, e.target.checked)} />
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <select value={sp.ha.failover_mode}
-                              onChange={e => setMode(m, e.target.value as 'cold' | 'hot')}
-                              className="form-input" style={{ fontSize: 11, height: 22 }}
-                              disabled={group.mode !== 'active_standby'}>
-                        <option value="cold">Cold</option>
-                        <option value="hot">Hot</option>
-                      </select>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <input type="checkbox" checked={sp.ha.failover_relevant}
-                             onChange={e => setRelevant(m, e.target.checked)} />
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <select value={sp.safety?.class ?? 'unknown'}
-                              onChange={e => setSafety(m, e.target.value as SafetyClass)}
-                              className="form-input" style={{ fontSize: 11, height: 22 }}>
-                        <option value="stateless">stateless</option>
-                        <option value="read_only">read_only</option>
-                        <option value="shared_writer">shared_writer</option>
-                        <option value="unknown">unknown</option>
-                      </select>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+    // 시안 G3-1(164:2765~164:2819): 접힘 머리 + 표 + 안내문 + **표 아래** [운영 명세 적용].
+    // 구 화면은 머리 우측에 [▶ 적용] 이 있어 접힌 상태에서도 노출됐다 — 계약상 접힌 섹션에
+    // 저장/적용 버튼을 두지 않는다.
+    <div className="mb-4">
+      <SubSection
+        title="모듈 운영 명세 (감시 · 절체 모드)" defaultOpen={false}
+        hint="config.json 과 별개 파일(service.json)로 각 노드에 저장 · agent 가 감시·절체 판정에 사용">
+        <DataTable>
+          <thead>
+            <tr>
+              <Th width={140}>모듈</Th>
+              <Th width={120} title="프로세스 감시(watchdog) — 죽으면 자동 재기동. 끄면 재기동 안 함(장애 시 즉시 절체 판정).">프로세스 감시</Th>
+              <Th width={150} title="Cold(기본): standby 정지 + 승격 시 기동 / Hot: 양쪽 상시 기동(VIP-only). AS 만 적용.">절체 모드</Th>
+              <Th width={110} title="이 모듈 실패가 절체 사유가 되는지. 끄면 이 모듈이 죽어도 절체하지 않음(부가 모듈).">절체 관여</Th>
+              <Th width={302} title="안전 등급 — shared_writer/unknown 은 자동 래치 해제 금지(수동 확인 필요). VIP 없이 DB/파일에 쓰는 모듈은 fencing/lease 전제.">안전 등급</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {modules.map(m => {
+              const sp = specs[m] || MODULE_SPEC_DEFAULT
+              return (
+                <tr key={m}>
+                  <Td>{m}</Td>
+                  <Td>
+                    <Checkbox checked={sp.supervision.watchdog}
+                              onCheckedChange={v => setSup(m, v === true)} />
+                  </Td>
+                  <Td>
+                    {/* `.form-input` 이 width:100% 라 클래스로는 못 좁힌다 — 감싸서 폭을 준다 */}
+                    <span className="inline-block w-[110px]">
+                    <select value={sp.ha.failover_mode}
+                            onChange={e => setMode(m, e.target.value as 'cold' | 'hot')}
+                            className="form-input"
+                            disabled={group.mode !== 'active_standby'}>
+                      <option value="cold">cold</option>
+                      <option value="hot">hot</option>
+                    </select>
+                    </span>
+                  </Td>
+                  <Td>
+                    <Checkbox checked={sp.ha.failover_relevant}
+                              onCheckedChange={v => setRelevant(m, v === true)} />
+                  </Td>
+                  <Td>
+                    <span className="inline-block w-[150px]">
+                    <select value={sp.safety?.class ?? 'unknown'}
+                            onChange={e => setSafety(m, e.target.value as SafetyClass)}
+                            className="form-input">
+                      <option value="stateless">stateless</option>
+                      <option value="read_only">read_only</option>
+                      <option value="shared_writer">shared_writer</option>
+                      <option value="unknown">unknown</option>
+                    </select>
+                    </span>
+                  </Td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </DataTable>
+        <div className="mt-2.5 text-xs text-muted-foreground">
+          안전 등급 shared_writer / unknown 은 절체 후 자동 복귀(래치 해제)를 하지 않고 운영자
+          확인을 요구합니다. 절체 모드 cold / hot · 안전 등급 stateless / read_only /
+          shared_writer / unknown.
         </div>
-      )}
+        <Button variant="outline" className="mt-2.5" onClick={save} disabled={!dirty || saving}
+                title="모듈 운영 명세 변경을 각 멤버 노드에 반영 (service.json + keepalived 재렌더)">
+          {saving ? '적용 중…' : '운영 명세 적용'}
+        </Button>
+        {!dirty && (
+          <div className="mt-1 text-xs text-muted-foreground">
+            [운영 명세 적용] 은 값을 바꾸면 열립니다.
+          </div>
+        )}
+      </SubSection>
     </div>
   )
 }

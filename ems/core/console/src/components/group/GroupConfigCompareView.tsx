@@ -16,7 +16,7 @@
 //  데이터가 새 템플릿에 얹히지 않게 한다. 정본: oam_base_service_split.md §14.6.
 //
 //  서버 개별(scope=system) 설정은 여기 없음 — 각 서버 선택 → [패키지 설정] 탭.
-import { RotateCw } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, Link2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -27,6 +27,13 @@ import {
 import { haGroupsApi, type HaGroup, type GroupPkgSync,
          type GroupPkgSyncMember } from '../../api/ha_groups'
 import ModuleConfigEditor from '../module/ModuleConfigEditor'
+import { StatusDot } from '../custom/status-dot'
+import { Radio } from '../custom/radio'
+import { StickySaveBar } from '../custom/sticky-save-bar'
+import { Alert } from '../ui/alert'
+import { Badge } from '../ui/badge'
+import { SyncStatusRow } from '../custom/sync-status-row'
+import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 import {
   SectionBlock, StoreMigrateFooter, defaultValue, serviceScopeKeys, fieldValueEq, type FieldValue,
 } from '../module/ModuleConfigModal'
@@ -398,10 +405,10 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   const baseMemberName = deployedMembers.find(m => m.id === baseAgentId)?.name
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* 패키지 탭 (이름 단위 — 버전 혼재도 한 화면) */}
-      <div style={{ flex: '0 0 auto', display: 'flex', gap: 2, padding: '10px 16px 0',
-                    borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
+    <div className="flex h-full flex-col">
+      {/* 모듈 칩 — 정본 Figma G3-1 `ModuleTabs`(262:4697). S3 와 같은 모양이고, 꼬리가
+          설정 개수 대신 **동기화 상태 StatusDot** 이다(그룹 화면의 관심사). */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pb-2 pt-5">
         {groupPkgNames.map(name => {
           const active = name === effectivePkgName
           const vers = [...new Set(deployments
@@ -410,92 +417,70 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           const on = isAS ? (switchOverride[name] ?? group.auto_sync?.[name] ?? true) : null
           return (
             <button key={name} onClick={() => setSelectedPkgName(name)}
-                    style={{
-                      padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
-                      background: active ? 'var(--card)' : 'transparent',
-                      color: active ? 'var(--primary)' : 'var(--muted-foreground)',
-                      border: '1px solid var(--border)', borderBottom: 'none',
-                      borderRadius: '6px 6px 0 0', cursor: 'pointer',
-                    }}>
-              {name} <span style={{ fontSize: 10,
-                                    color: vers.length > 1 ? '#e67e22' : undefined }}>
+                    aria-pressed={active}
+                    className={`flex h-8 items-center gap-2 rounded-md border px-3 text-md transition-colors ${
+                      active
+                        ? 'border-primary bg-brandsoft font-semibold text-brandsoft-on'
+                        : 'border-border bg-background text-foreground hover:bg-accent'}`}>
+              {name}
+              <span className={`font-mono text-sm font-normal ${
+                vers.length > 1 ? 'text-warning-on' : 'text-muted-foreground'}`}
+                    title={vers.length > 1 ? '멤버 간 버전 혼재' : undefined}>
                 v{vers.join(' / v')}
               </span>
               {on !== null && (
-                <span style={{ marginLeft: 5, fontSize: 10,
-                               color: on ? 'var(--cims-success)' : '#e67e22' }}>
-                  {on ? '⬤동기화' : '○수동'}
-                </span>
+                <StatusDot tone={on ? 'success' : 'warning'} label={on ? '동기화' : '수동'} />
               )}
             </button>
           )
         })}
-        <button className="btn btn--sm" style={{ marginLeft: 'auto', marginBottom: 6 }}
-                onClick={() => void load()} disabled={loading}>
-          {loading ? '로딩...' : <><RotateCw size={13} /> 새로고침</>}
-        </button>
       </div>
 
-      {/* AS: 동기화 스위치 + ACTIVE 상태줄 */}
+      {/* AS: 동기화 상태 줄 (459:7511). 구 화면은 초록/노랑 전폭 띠였는데 상시 켜져 있어
+          경고로 읽히지 않았다 — 시안은 배지 + 상태 한 줄이고 **드리프트 0건이면 아무 색도
+          쓰지 않는다.** */}
       {isAS && (
-        <div style={{ flex: '0 0 auto', padding: '10px 16px', fontSize: 12,
-                      display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
-                      borderBottom: '1px solid var(--border)',
-                      background: autoSyncOn ? 'var(--cims-success-soft)' : 'var(--cims-warning-soft)' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6,
-                          cursor: toggling ? 'wait' : 'pointer', userSelect: 'none',
-                          fontWeight: 700,
-                          color: autoSyncOn ? 'var(--cims-success)' : '#e67e22' }}
-                 title={autoSyncOn
-                   ? 'ON — ACTIVE 기준으로 STANDBY 공통 설정을 자동 교정 (이벤트+주기). 업데이트 작업 전 OFF 로 전환하세요.'
-                   : 'OFF — 자동 교정 정지. 멤버별로 독립 편집 (업그레이드 창). 작업 완료 후 ON 으로.'}>
-            <input type="checkbox" checked={autoSyncOn} disabled={toggling}
-                   onChange={() => void toggleSwitch()} />
-            동기화 {autoSyncOn ? 'ON' : 'OFF'}
-          </label>
-          <span>
-            ACTIVE:&nbsp;
-            {activeMember
-              ? <b style={{ color: '#e67e22' }}>● {activeMember.name}</b>
-              : <span style={{ color: 'var(--muted-foreground)' }}>판정 불가 (heartbeat 관측 대기)</span>}
-          </span>
-          {mixedVersions && (
-            <span style={{ color: '#e67e22' }}>
-              ⚠ 버전 혼재 (v{memberVersions.join(' / v')})
-            </span>
-          )}
-          {/* 정합 상태 — 서버 판정(GET .../packages/{pkg}/sync)을 그대로 표시.
-              화면이 자체 계산하면 자동 교정이 실제로 할 일과 어긋난다. */}
-          {syncView?.status === 'out_of_sync' && (
-            <span style={{ color: '#e67e22' }}>
-              ⚠ 드리프트 {summary.drift}건 —{' '}
-              {syncView.auto_sync ? '자동 교정 대기 중' : '동기화 OFF — 자동 교정 안 함'}
-            </span>
-          )}
-          {syncView?.status === 'unknown' && (
-            <span style={{ color: 'var(--muted-foreground)' }}>
-              정합 판정 보류 — {SYNC_REASON[syncView.reason || ''] || syncView.reason}
-            </span>
-          )}
+        <div className="shrink-0 px-4 pb-2">
+          <SyncStatusRow
+            syncOn={autoSyncOn} toggling={toggling} onToggle={() => void toggleSwitch()}
+            activeNode={activeMember?.name ?? null}
+            drift={syncView?.status === 'out_of_sync'
+              ? `드리프트 ${summary.drift}건 — ${syncView.auto_sync ? '자동 교정 대기 중' : '동기화 OFF — 자동 교정 안 함'}`
+              : undefined}
+            extra={
+              <>
+                {mixedVersions && (
+                  <span className="text-xs text-warning-on">
+                    버전 혼재 (v{memberVersions.join(' / v')})
+                  </span>
+                )}
+                {syncView?.status === 'unknown' && (
+                  <span className="text-xs text-muted-foreground">
+                    정합 판정 보류 — {SYNC_REASON[syncView.reason || ''] || syncView.reason}
+                  </span>
+                )}
+              </>
+            }
+            onRefresh={() => void load()} refreshing={loading} />
         </div>
       )}
 
-      {/* 내부 뷰 탭 */}
-      <div style={{ flex: '0 0 auto', display: 'flex', gap: 0, padding: '0 16px',
-                    borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
-        {isAS && (
-          <ViewBtn active={view === 'edit'} onClick={() => setView('edit')}>
-            공통 설정 ({svcSections.reduce((n, s) => n + s.fields.length, 0)})
-          </ViewBtn>
-        )}
-        {isAS && svcCollections.map(c => (
-          <ViewBtn key={c.key} active={view === c.key} onClick={() => setView(c.key)}>
-            {c.title}
-          </ViewBtn>
-        ))}
-        <ViewBtn active={view === 'compare'} onClick={() => setView('compare')}>
-          멤버 비교 {summary.drift > 0 ? `(⚠${summary.drift})` : ''}
-        </ViewBtn>
+      {/* 뷰 세그먼트 (160:3188) — 구 화면의 파일 탭을 SegmentedItem 으로 */}
+      <div className="shrink-0 px-4 pb-3">
+        <ToggleGroup type="single" value={view} className="w-fit justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setView(v)}>
+          {isAS && (
+            <ToggleGroupItem value="edit">
+              공통 설정 ({svcSections.reduce((n, sec) => n + sec.fields.length, 0)})
+            </ToggleGroupItem>
+          )}
+          {isAS && svcCollections.map(c => (
+            <ToggleGroupItem key={c.key} value={c.key}>{c.title}</ToggleGroupItem>
+          ))}
+          <ToggleGroupItem value="compare">
+            멤버 비교 {summary.drift > 0 ? `(⚠${summary.drift})` : ''}
+          </ToggleGroupItem>
+        </ToggleGroup>
       </div>
 
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
@@ -507,41 +492,51 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           /* ── 공통 설정 편집 ── */
           !configView ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
             <>
+              {/* 적용 범위 안내 (Figma G3-1 161:3105). 구 화면은 `🔗` 글리프 + 직접 칠한 상자였다. */}
               {autoSyncOn ? (
-                <div style={{ padding: 10, background: 'var(--cims-brand-soft)', border: '1px solid var(--border)',
-                              borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
-                  🔗 저장하면 그룹 멤버 <b>전체({deployedMembers.map(m => m.name).join(', ')})</b>에
-                  적용됩니다. 표시값 기준: <b>{baseMemberName}</b>
-                  {activeMember && baseAgentId === activeAid ? ' (ACTIVE)' : ''}
+                <Alert variant={mixedVersions ? 'warning' : 'info'} className="mb-3">
+                  <div className="font-medium">
+                    저장하면 그룹 멤버 전체({deployedMembers.map(m => m.name).join(', ')})에 적용됩니다
+                  </div>
+                  <div className="mt-0.5 text-xs opacity-90">
+                    표시값 기준: {baseMemberName}
+                    {activeMember && baseAgentId === activeAid ? ' (ACTIVE)' : ''} ·
+                    멤버 간 차이는 「멤버 비교」 에서 확인하세요.
+                  </div>
                   {mixedVersions && (
-                    <div style={{ marginTop: 6, color: 'var(--destructive)' }}>
-                      ⚠ 버전 혼재 중에는 그룹 일괄 저장이 차단됩니다 — 스위치 OFF 후 멤버별로 편집하세요.
+                    <div className="mt-1.5 text-xs font-medium">
+                      버전 혼재 중에는 그룹 일괄 저장이 차단됩니다 — 스위치 OFF 후 멤버별로 편집하세요.
                     </div>
                   )}
-                </div>
+                </Alert>
               ) : (
-                <div style={{ padding: 10, background: 'var(--cims-warning-soft)', border: '1px solid var(--border)',
-                              borderRadius: 4, fontSize: 12, marginBottom: 12,
-                              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span>○ 동기화 OFF — <b>편집할 멤버:</b></span>
-                  {deployedMembers.map(m => (
-                    <label key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 4,
-                                               cursor: 'pointer', userSelect: 'none' }}>
-                      <input type="radio" name="off-target" checked={baseAgentId === m.id}
-                             onChange={() => setOffTarget(m.id)} />
-                      {m.name}
-                      <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
-                        v{depByAgent.get(m.id)?.package_version || '?'}
-                      </span>
-                    </label>
-                  ))}
-                  <span style={{ color: 'var(--muted-foreground)' }}>저장은 선택한 멤버에만 적용됩니다.</span>
-                </div>
+                // 동기화 OFF 는 시안에 없는 상태다 — 기존 구성을 유지하되 껍데기만 시안 부품으로.
+                <Alert variant="warning" className="mb-3">
+                  <div className="font-medium">동기화 OFF — 저장은 선택한 멤버에만 적용됩니다</div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-3">
+                    <span className="text-xs">편집할 멤버:</span>
+                    {deployedMembers.map(m => (
+                      <label key={m.id} className="flex cursor-pointer select-none items-center gap-1.5 text-xs">
+                        <Radio name="off-target" checked={baseAgentId === m.id}
+                               onChange={() => setOffTarget(m.id)} />
+                        {m.name}
+                        <span className="font-mono text-muted-foreground">
+                          v{depByAgent.get(m.id)?.package_version || '?'}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </Alert>
               )}
               {svcSections.map(sec => (
                 <SectionBlock key={`${baseAgentId}:${sec.key}`} section={sec}
                   values={formValues} initial={formInitial} changed={changed}
                   srcOf={(k) => (baseAgentId == null ? undefined : memberValues.get(baseAgentId)?.[k]?.src)}
+                  markerOf={(k) => (driftKeys.has(k)
+                    ? <Badge variant="warningSoft" title="멤버 간 값이 다릅니다 — 「멤버 비교」 에서 확인">
+                        드리프트
+                      </Badge>
+                    : undefined)}
                   onChange={(k, v) => setFormValues(p => ({ ...p, [k]: v }))}
                   onReset={(k) => setFormValues(p => ({ ...p, [k]: formInitial[k] }))}
                   footer={sec.key === 'store'
@@ -551,14 +546,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                         onDone={load} />
                     : undefined} />
               ))}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-                <button className="btn btn--primary" onClick={() => void saveForm()}
-                        disabled={saving || changed.size === 0 || (autoSyncOn && mixedVersions)}>
-                  {saving ? '저장 중...'
-                    : autoSyncOn ? `저장 — 전 멤버 적용 (${changed.size} 변경)`
-                                 : `저장 — ${baseMemberName} 에만 (${changed.size} 변경)`}
-                </button>
-              </div>
+
             </>
           )
         ) : view !== 'compare' && isAS ? (
@@ -588,10 +576,14 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             <>
               <div style={{ fontSize: 12, marginBottom: 12, display: 'flex', gap: 12,
                             alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ color: 'var(--cims-success)' }}>🔗 공통 일치 {summary.ok}</span>
-                <span style={{ color: summary.drift ? '#e67e22' : 'var(--muted-foreground)',
-                               fontWeight: summary.drift ? 700 : 400 }}>
-                  ⚠ 드리프트 {summary.drift}
+                <span className="inline-flex items-center gap-1 text-[var(--cims-success)]">
+                  <Link2 size={13} /> 공통 일치 {summary.ok}
+                </span>
+                {/* 0건에 경고색을 쓰지 않는다 (DESIGN-RULES §1-7) */}
+                <span className={summary.drift
+                  ? 'inline-flex items-center gap-1 font-semibold text-warning-on'
+                  : 'inline-flex items-center gap-1 text-muted-foreground'}>
+                  <AlertTriangle size={13} /> 드리프트 {summary.drift}
                 </span>
                 <span style={{ color: 'var(--muted-foreground)' }}>개별 {summary.individual}</span>
                 {!isAS && (
@@ -626,10 +618,16 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                                                   cursor: 'pointer', color: 'var(--primary)' }}
                               title={`${m.name} 의 설정 편집으로 이동`}
                               onClick={() => onSelectMember(m.id, effectivePkgName)}>
-                            {m.name}{activeAid === m.id ? ' ●' : ''}
-                            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
-                              {' '}v{depByAgent.get(m.id)?.package_version || '?'}
-                            </span> ↗
+                            <span className="inline-flex items-center gap-1">
+                              {m.name}
+                              {activeAid === m.id && (
+                                <span className="size-1.5 rounded-full bg-success" title="ACTIVE" />
+                              )}
+                              <span className="font-mono text-xs font-normal text-muted-foreground">
+                                v{depByAgent.get(m.id)?.package_version || '?'}
+                              </span>
+                              <ArrowUpRight size={13} />
+                            </span>
                           </th>
                         ))}
                       </tr>
@@ -645,8 +643,10 @@ export function GroupConfigCompareView({ group, members: liveMembers,
                             <td style={{ textAlign: 'center' }}>
                               {syncKeys.has(f.key)
                                 ? (st === 'drift'
-                                    ? <span title="공통이어야 하는데 멤버 간 값 상이" style={{ color: '#e67e22' }}>⚠</span>
-                                    : <span title="그룹 공통 — 멤버 간 값 동일" style={{ color: 'var(--cims-success)' }}>🔗</span>)
+                                    ? <AlertTriangle size={13} className="inline text-warning-on"
+                                        aria-label="드리프트" />
+                                    : <Link2 size={13} className="inline text-[var(--cims-success)]"
+                                        aria-label="그룹 공통" />)
                                 : <span title="서버별 고유값 — 동기화 대상 아님" style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>개별</span>}
                             </td>
                             {deployedMembers.map(m => {
@@ -680,24 +680,25 @@ export function GroupConfigCompareView({ group, members: liveMembers,
           )
         )}
       </div>
+      {/* 저장바 — 시안 G3-1(459:7310). 구 화면은 폼 안 우측 하단 버튼이라 긴 폼에서는
+          스크롤을 끝까지 내려야 보였다. */}
+      {isAS && view === 'edit' && template && (
+        <StickySaveBar
+          badge={changed.size > 0
+            ? <Badge variant="warningSoft">변경 {changed.size}건</Badge>
+            : <Badge variant="neutralSoft">변경 없음</Badge>}
+          note={autoSyncOn
+            ? `저장하면 그룹 멤버 전체(${deployedMembers.map(m => m.name).join(', ')})에 적용됩니다`
+            : `동기화 OFF — ${baseMemberName} 에만 저장됩니다`}
+          saveLabel={autoSyncOn ? '저장 — 전 멤버 적용' : `저장 — ${baseMemberName} 에만`}
+          disabled={changed.size === 0 || (autoSyncOn && mixedVersions)}
+          saving={saving}
+          onRevert={() => setFormValues({ ...formInitial })}
+          onSave={() => void saveForm()} />
+      )}
     </div>
   )
 }
 
-function ViewBtn({ active, children, onClick }: {
-  active: boolean; children: React.ReactNode; onClick: () => void
-}) {
-  return (
-    <button onClick={onClick}
-      style={{
-        padding: '8px 16px', border: 'none',
-        background: active ? 'var(--card)' : 'transparent',
-        borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
-        fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13,
-      }}>
-      {children}
-    </button>
-  )
-}
 
 export default GroupConfigCompareView

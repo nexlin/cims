@@ -494,7 +494,15 @@ T3 에서 함께 정리한다.
   흐름이 생긴다. 시안에 규정이 없어 우리가 정해야 한다
 
 - **`stopped` 의 톤** — §7-16. 시안 네 장은 Danger 인데 `DESIGN-RULES` §2 는 「고정」이라며
-  Neutral 이라고 적었다. 그림을 따랐지만 "고정" 이라고 못박은 표와 어긋나므로 회신이 필요하다
+  Neutral 이라고 적었다. **그림을 따르기로 사용자가 확정**했다. 다만 회신 때 같이 물을 것:
+  **AS 그룹 standby 는 상시 빨강으로 보인다.** cold standby 모듈은 마스터가 아닌 노드에서
+  기동을 억제하는 것이 정상 동작이라(`ha_service_model.md` · agent `_cold_standby_module`)
+  멤버 절반이 늘 `stopped` 다. 시안 G4 도 standby(Control-02)를 전부 빨갛게 그렸으니 의도로
+  보이지만, 색이 "사고" 가 아니라 "안 돌고 있음" 을 뜻한다는 합의가 필요하다
+  (사고 판정은 알람 A-PRC 계열이 따로 한다).
+  **의도(`status`) 대 실측(`live_state`)으로 가르는 안은 쓸 수 없다** — cold standby 가
+  `status=running` + `live=down` 으로 정상 동작하고, keepalived notify 경로는 job 을
+  남기지 않아 `status` 가 의도를 대표하지 못한다
 
 - **「패키지 설정」의 숫자 두 곳** — 탭 카운트와 모듈 칩 카운트의 정의가 시안에서 갈린다.
   탭은 `Sec/Tabs (신규)`(458:9160)가 `hasCount` 로 켜고 G1 그림(458:8626)이
