@@ -243,14 +243,14 @@ shadcn 매핑은 `components/MAPPING.md` — 18종은 `npx shadcn@latest add` �
 
 | 갈래 | 변수 | 비고 |
 |---|---|---|
-| 차트 계열색 6 | `--chart-1`~`--chart-5` · `--chart-muted` | 계열색은 "무엇인가"라서 상태색(success/warning/danger)을 쓰지 않는다는 우리 규칙이 붙어 있다 |
+| 차트 계열색 13 | `--chart-1`~`--chart-12` · `--chart-muted` | 계열색은 "무엇인가"라서 상태색(success/warning/danger)을 쓰지 않는다는 우리 규칙이 붙어 있다. **위젯 차트는 앞 5색을 순환**하고(`seriesColor`), 발언자 색처럼 계열이 많은 목록이 6~12 를 쓴다 — 12색은 그 때문에 늘렸다 |
 | 레이아웃 치수 8 | `--sidebar-w` · `--sidebar-w-full` · `--header-h` · `--main-pad` · `--canvas-w/h` · `--design-w/h` | 위젯 격자·셸 치수. 시안은 색 토큰만 다룬다 |
 | 기타 2 | `--dev-accent`(개발자 모드) · `--radius-lg` 를 쓰는 곳 | 시안에 개발자 모드 개념이 없다 |
 
 **D. 시안에만 있는 신규 20여 개** — 순증이라 매핑 불필요.
 `--ring` · `--input` · `--popover*` · 각 색의 `*-foreground` 짝 · `--cims-focus-ring` ·
 `--cims-info-*` · `--cims-neutral-*` · `--cims-text-disabled` · `--cims-border-strong` ·
-`--cims-surface-raised` · `--sidebar-primary*` · `--sidebar-ring`.
+`--cims-surface-raised` · `--sidebar-primary*` · `--sidebar-ring` · `--cims-on-solid`(§7-18).
 §3 의 절대 규칙(포커스 링 필수 · 0건은 Neutral · 비활성은 불투명도 대신 토큰)을 지키려면 필요한 것들이다.
 
 ### 5.2 Figma 원본에만 있는 것 — 핸드오프 누락
@@ -359,6 +359,7 @@ Figma MCP 커넥터(`claude.ai Figma`)가 붙어 있으면 **링크를 사람에
 | 15 | 멤버 표 `접속` 셀 — G1 그림(43:674)은 **Badge**(`online` 아웃라인), A1 그림(189:3238)은 **StatusDot** | 두 그림이 갈린다 | **StatusDot** 으로 통일. `DESIGN-RULES` §2 가 "값·분류는 Badge, **살아있는 상태(running/stopped/online)는 StatusDot**" 이라고 명시한다 — 그림끼리 어긋날 때는 글로 된 규칙이 결정한다. ContextBar 는 그림대로 **점 + Badge 둘 다**다(21:68) | 글 규칙이 결정 |
 | 16 | `DESIGN-RULES` §2 톤 매핑(고정) — **Neutral = stopped** | **시안 네 장이 전부 `stopped` 을 Danger 로 그렸다** — S2(91:1809)·S4(92:2051) 는 `dangerSoft` 배지(`#b91c1c`/`#fef2f2`), G2(184:2897)·G4 는 빨강 StatusDot(`#dc2626`) | **모듈 프로세스 상태는 Danger** 로 간다(그림). 그 표는 **노드/에이전트** 톤 맵으로 두고 — 노드가 `stopped` 인 경우는 없다 — 모듈이 죽어 있는 것은 서비스 영향이라 색이 달라야 한다. 「고정」이라고 적힌 표와 어긋나므로 **디자이너 확인 대상**(§9) | 그림이 정본 + 도메인 |
 | 17 | 같은 값의 모양이 화면마다 다르다 — 모듈 상태가 서버 화면(S2·S4)은 **Badge**, 그룹 화면(G2·G4)은 **StatusDot** | 네 그림이 스코프별로는 서로 일치한다(서버 2장 Badge · 그룹 2장 StatusDot) | **각 화면 그림 그대로** 간다 — 스코프마다 밀도가 달라 내린 선택으로 본다. 톤만 두 모양에서 같게 맞춘다. #15(멤버 표 `접속`)와 다른 판정인 이유: 거기서는 **같은 표의 같은 컬럼**이 두 가지로 그려져 그림끼리 모순이었다 | 그림이 정본 |
+| 18 | 핸드오프 Badge Solid 6종이 글자색을 `text-white` 로 적는다 — 유틸리티 클래스라 인라인 `style` 에서 못 쓴다 | 채도 있는 솔리드 채움 위 글자는 라이트·다크 **양쪽 다 흰색**이어야 한다(핸드오프가 두 테마 모두 `text-white`). `--*-foreground` 짝은 solid 상태색(`--cims-info` 등)에는 없다 | 값이 같은 토큰 `--cims-on-solid: #ffffff` 를 두 테마에 넣고 인라인 `style` 은 이것을 쓴다. 클래스를 쓸 수 있는 자리는 `text-white` 그대로 — 값이 같아 갈라지지 않는다 | 시안 침묵(수단), 값은 그림대로 |
 | 7 | `modals.md` "미작성 — 확인 대화상자 · 웹에 있는지 **미확인**" | **있다. 51곳** — 전부 브라우저 네이티브 `window.confirm()` (20개 파일, `ServersPage` 18) | 껍데기는 **시안 Dialog(Tone=Danger)로 교체** — §1 ①층(방식)이다. 네이티브는 토큰·Lucide·포커스 링·`destructive` 가 전부 안 먹어 §3 을 만족할 수 없다. **어느 액션에 붙일지와 문구는 현행 유지** | ①층(껍데기) + 시안 침묵(대상·문구) |
 
 `decisions.md` 의 나머지 항목(§1 헤더 재정리 · §3 ContextBar 4탭 유지 · §4 더보기 묶기 ·
@@ -512,6 +513,14 @@ T3 에서 함께 정리한다.
   정확히 일치)이고 oam-svc·csc 는 6·4 와 전혀 다르다 — 그림의 숫자가 예시값이다.
   그래서 칩은 **이 화면에 실제로 나오는 필드 수**(스코프 필터 결과)로 구현했다. 디자이너 확인이
   오면 탭 카운트도 같은 정의로 붙인다 — 틀린 수를 띄우지 않으려고 미룬 것이다
+
+- **일부러 남긴 hex 다섯 갈래** — §3-1 은 hex 금지지만 아래는 **테마 토큰을 쓰면 틀린다.**
+  ① `FlowPage.tsx`(54개)·`VolteHistoryPage.tsx` 의 시퀀스 다이어그램 팔레트 — 계열 색인데
+  `--chart-*` 12색으로도 모자라고 선 종류·화살표까지 색으로 구분한다. **다음 단계로 미룬 것**이고,
+  옮길 때는 팔레트를 먼저 토큰으로 정의한다. ② `VerificationPrintReport.tsx`(35개)와
+  두 검증 페이지의 `@media print` 블록 — 흰 종이에 찍으므로 다크 토큰이 상속되면 흐려진다.
+  ③ `SegmentPlayer` 의 영상 무대 `#000` — 테마 표면이 아니라 레터박스다.
+  나머지 전 라우트는 토큰만 쓴다
 
 - **디자이너에게 회신할 것** — `modals.md` 가 "확인 대화상자 문구는 확인 후 작성" 으로 열어둔 자리에
   현행 **55곳**의 대상 액션과 문구를 넘기면 시안이 완성된다 (§7-7). 껍데기는 이미 시안 Dialog

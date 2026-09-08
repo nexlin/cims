@@ -14,7 +14,7 @@ const ALL_METRICS: { k: MetricKey; label: string; pct: boolean }[] = [
   { k: 'net', label: '네트워크', pct: false },
 ]
 const WARN = 85
-const C_RED = '#e74c3c', C_AMBER = '#f59e0b', C_GREEN = '#22c55e', C_PRIMARY = 'var(--primary)'
+const C_RED = 'var(--destructive)', C_AMBER = 'var(--cims-warning)', C_GREEN = 'var(--cims-success)', C_PRIMARY = 'var(--primary)'
 
 interface Srv { id: number; host: string; online: boolean; items: AgentMetric[] }
 

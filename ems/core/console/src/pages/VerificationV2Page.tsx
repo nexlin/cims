@@ -142,12 +142,12 @@ function statusLabel(s: ItemStatus): string {
 }
 
 function statusColor(s: ItemStatus): string {
-  if (s === 'PASS')    return '#16a34a'
-  if (s === 'FAIL')    return '#dc2626'
-  if (s === 'RUNNING') return '#3b82f6'
-  if (s === 'BLOCKED') return '#a16207'
-  if (s === 'SKIP')    return '#6b7280'
-  return '#6b7280'   // 대기 — 흰 글자를 얹으므로 연한 회색(#9ca3af)은 못 쓴다
+  if (s === 'PASS')    return 'var(--cims-success)'
+  if (s === 'FAIL')    return 'var(--destructive)'
+  if (s === 'RUNNING') return 'var(--cims-info)'
+  if (s === 'BLOCKED') return 'var(--cims-warning-on-soft)'
+  if (s === 'SKIP')    return 'var(--muted-foreground)'
+  return 'var(--muted-foreground)'   // 대기 — 흰 글자를 얹으므로 연한 회색(#9ca3af)은 못 쓴다
 }
 
 function fmtMs(ms: number): string {
@@ -215,10 +215,10 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
         const pct = total > 0 ? (done / total) * 100 : 0
         // PASS/FAIL/BLOCKED 는 100% (테두리 가득), RUNNING 은 진행률, PENDING 은 0%
         const ringPct = (status === 'PASS' || status === 'FAIL' || status === 'BLOCKED') ? 100 : pct
-        const ringColor = status === 'PENDING' ? '#e5e7eb' : color
+        const ringColor = status === 'PENDING' ? 'var(--border)' : color
         const ringBg = ringPct >= 100
           ? ringColor
-          : `conic-gradient(${ringColor} 0deg ${ringPct * 3.6}deg, #e5e7eb ${ringPct * 3.6}deg 360deg)`
+          : `conic-gradient(${ringColor} 0deg ${ringPct * 3.6}deg, var(--border) ${ringPct * 3.6}deg 360deg)`
 
         return (
           <Fragment key={st.id}>
@@ -243,7 +243,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
               {isResume && (
                 <div style={{
                   position: 'absolute', top: -18, left: '50%', transform: 'translateX(-50%)',
-                  background: '#3b82f6', color: '#fff',
+                  background: 'var(--cims-info)', color: 'var(--cims-on-solid)',
                   fontSize: 10, fontWeight: 700,
                   padding: '2px 8px', borderRadius: 10,
                   whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
@@ -255,9 +255,9 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
               {/* 외곽 ring (진행률 / 상태 색) — BLOCKED 면 점선 경계 + 회색 톤 */}
               <div style={{
                 width: 120, height: 120, borderRadius: 60,
-                background: isBlocked ? '#6b7280' : ringBg,
+                background: isBlocked ? 'var(--muted-foreground)' : ringBg,
                 padding: 6,
-                boxShadow: isResume ? `0 0 0 4px #3b82f633` : 'none',
+                boxShadow: isResume ? `0 0 0 4px var(--cims-info)33` : 'none',
                 transition: 'all 0.2s',
                 position: 'relative',
               }}>
@@ -265,7 +265,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                   <div style={{
                     position: 'absolute', top: 4, right: 4,
                     width: 28, height: 28, borderRadius: 14,
-                    background: '#a16207', color: '#fff',
+                    background: 'var(--cims-warning-on-soft)', color: 'var(--cims-on-solid)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 14, fontWeight: 700,
                     boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
@@ -359,8 +359,8 @@ function GlobalHeader({
         style={{
           minWidth: 160, height: 36,
           padding: '0 16px',
-          background: running ? '#dc2626' : '#3b82f6',
-          color: '#fff', border: 'none', borderRadius: 6,
+          background: running ? 'var(--destructive)' : 'var(--cims-info)',
+          color: 'var(--cims-on-solid)', border: 'none', borderRadius: 6,
           fontSize: 13, fontWeight: 700,
           cursor: prepResetRunning ? 'not-allowed' : 'pointer',
           opacity: prepResetRunning ? 0.5 : 1,
@@ -378,8 +378,8 @@ function GlobalHeader({
         style={{
           minWidth: 140, height: 36,
           padding: '0 14px',
-          background: prepResetRunning ? 'var(--destructive)' : '#b45309',   // 흰 글자 대비 4.6
-          color: '#fff', border: 'none', borderRadius: 6,
+          background: prepResetRunning ? 'var(--destructive)' : 'var(--cims-warning-on-soft)',   // 흰 글자 대비 4.6
+          color: 'var(--cims-on-solid)', border: 'none', borderRadius: 6,
           fontSize: 12, fontWeight: 600,
           cursor: anyOtherRunning ? 'not-allowed' : 'pointer',
           opacity: anyOtherRunning ? 0.5 : 1,
@@ -401,7 +401,7 @@ function GlobalHeader({
           disabled={running}
           style={{
             padding: '6px 8px', borderRadius: 4,
-            border: '1px solid #93c5fd',
+            border: '1px solid var(--cims-info-soft)',
             background: 'var(--cims-brand-soft)', color: 'var(--primary)',
             fontSize: 12, fontWeight: 600,
             cursor: running ? 'not-allowed' : 'pointer',
@@ -441,7 +441,7 @@ function GlobalHeader({
 
       <div style={{
         padding: '4px 10px',
-        background: statusColor(overallStatus as ItemStatus), color: '#fff',
+        background: statusColor(overallStatus as ItemStatus), color: 'var(--cims-on-solid)',
         borderRadius: 4, fontSize: 11, fontWeight: 600,
       }}>
         전체: {statusIcon(overallStatus as ItemStatus)} {statusLabel(overallStatus as ItemStatus)}
@@ -481,14 +481,14 @@ function StageRow({
   return (
     <div className="stage-card" style={{
       border: isResume
-        ? '2px solid #3b82f6'
+        ? '2px solid var(--cims-info)'
         : isBlocked
-          ? '1px dashed #a16207'
+          ? '1px dashed var(--cims-warning-on-soft)'
           : '1px solid var(--border)',
       borderRadius: 8, marginBottom: 8,
       // BLOCKED 면 옅은 amber tint 배경 (차단된 stage 가 한눈에)
       background: isBlocked ? 'var(--cims-warning-soft)' : 'var(--card)',
-      boxShadow: isResume ? '0 0 0 3px #3b82f622' : 'none',
+      boxShadow: isResume ? '0 0 0 3px var(--cims-info)22' : 'none',
       transition: 'all 0.2s',
     }}>
       {/* Stage 헤더 */}
@@ -505,7 +505,7 @@ function StageRow({
         </span>
         <div style={{
           width: 28, height: 28, borderRadius: 14,
-          background: color, color: '#fff',
+          background: color, color: 'var(--cims-on-solid)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 13, fontWeight: 700,
         }}>
@@ -521,7 +521,7 @@ function StageRow({
               <span style={{
                 marginLeft: 8, fontSize: 10, fontWeight: 700,
                 padding: '1px 6px', borderRadius: 3,
-                background: '#a16207', color: '#fff', letterSpacing: 0.3,
+                background: 'var(--cims-warning-on-soft)', color: 'var(--cims-on-solid)', letterSpacing: 0.3,
               }}>
                 선행 FAIL 로 자동 차단
               </span>
@@ -541,8 +541,8 @@ function StageRow({
             minWidth: 110, height: 28,
             padding: '0 12px', fontSize: 12, fontWeight: 600,
             background: isThisRunning ? 'var(--destructive)' : 'var(--card)',
-            color: isThisRunning ? '#fff' : 'var(--foreground)',
-            border: `1px solid ${isThisRunning ? '#dc2626' : 'var(--border)'}`,
+            color: isThisRunning ? 'var(--cims-on-solid)' : 'var(--foreground)',
+            border: `1px solid ${isThisRunning ? 'var(--destructive)' : 'var(--border)'}`,
             borderRadius: 4,
             cursor: (anyRunning && !isThisRunning) ? 'not-allowed' : 'pointer',
             opacity: (anyRunning && !isThisRunning) ? 0.5 : 1,
@@ -642,7 +642,7 @@ function StageRow({
                           <div style={{ flex: 1, height: 6, background: 'var(--secondary)', borderRadius: 3, overflow: 'hidden' }}>
                             <div style={{
                               width: `${itPct}%`, height: '100%',
-                              background: itDone ? statusColor(itStatus) : '#3b82f6',
+                              background: itDone ? statusColor(itStatus) : 'var(--cims-info)',
                               transition: 'width 0.3s',
                             }} />
                           </div>
@@ -695,7 +695,7 @@ function StageRow({
                               <div style={{ flex: 1, height: 4, background: 'var(--secondary)', borderRadius: 2, overflow: 'hidden' }}>
                                 <div style={{
                                   width: `${cPct}%`, height: '100%',
-                                  background: cDone ? statusColor(c.status) : '#3b82f6',
+                                  background: cDone ? statusColor(c.status) : 'var(--cims-info)',
                                 }} />
                               </div>
                               <span style={{ minWidth: 26, textAlign: 'right', fontSize: 9 }}>{cPct}%</span>
@@ -1049,7 +1049,7 @@ export default function VerificationV2Page() {
             display: 'flex', alignItems: 'center', gap: 8,
             padding: '8px 12px', marginBottom: 10,
             background: 'var(--cims-warning-soft)', border: '1px solid var(--cims-warning-soft)',
-            borderRadius: 6, fontSize: 12, color: '#92400e',
+            borderRadius: 6, fontSize: 12, color: 'var(--cims-warning-on-soft)',
           }}
         >
           <Ban size={16} />

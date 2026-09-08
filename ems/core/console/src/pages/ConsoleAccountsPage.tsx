@@ -91,7 +91,7 @@ export default function ConsoleAccountsPage() {
 
       {(adding || editId) && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap',
-                      padding: 12, background: 'var(--secondary, #f6f7f9)', borderRadius: 8, marginBottom: 12 }}>
+                      padding: 12, background: 'var(--secondary)', borderRadius: 8, marginBottom: 12 }}>
           <Field label="아이디 *" w={150}>
             <input className="form-input" value={form.login_id} disabled={!!editId} autoFocus={!editId}
                    onChange={e => setForm({ ...form, login_id: e.target.value })} />

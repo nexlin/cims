@@ -15,7 +15,7 @@ export const SEV_RANK: Record<string, number> = {
   critical: 5, major: 4, minor: 3, warning: 2, indeterminate: 1,
 }
 export const SEV_COLOR: Record<string, string> = {
-  critical: '#e74c3c', major: '#e67e22', minor: '#f39c12', warning: '#eab308', indeterminate: '#3498db',
+  critical: 'var(--destructive)', major: 'var(--cims-warning)', minor: 'var(--cims-warning)', warning: 'var(--cims-warning)', indeterminate: 'var(--cims-info)',
 }
 
 export interface ActiveAlarm extends AlertEvent {

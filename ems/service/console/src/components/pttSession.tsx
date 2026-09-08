@@ -79,14 +79,14 @@ export function dayWeekday(d: string): string {
 // icon 은 Lucide 컴포넌트 참조다 — 옛 텍스트 글리프(● ■ ✚ ✖ ▶ ⚙ →)를 뜻이 같은
 // 아이콘으로 1:1 옮긴 것이고, 의미를 재해석하지는 않았다(시안이 이 화면을 다루지 않는다).
 export const EVENT_ICONS: Record<string, { icon: LucideIcon; label: string; color: string }> = {
-  session_start:  { icon: Circle,     label: '세션 시작',  color: '#4caf50' },
-  session_end:    { icon: Square,     label: '세션 종료',  color: '#f44336' },
-  member_join:    { icon: Plus,       label: '입장',      color: '#2196f3' },
-  member_leave:   { icon: X,          label: '퇴장',      color: '#ff9800' },
-  'floor-grant':  { icon: Play,       label: '발언 시작',  color: '#4caf50' },
+  session_start:  { icon: Circle,     label: '세션 시작',  color: 'var(--cims-success)' },
+  session_end:    { icon: Square,     label: '세션 종료',  color: 'var(--destructive)' },
+  member_join:    { icon: Plus,       label: '입장',      color: 'var(--cims-info)' },
+  member_leave:   { icon: X,          label: '퇴장',      color: 'var(--cims-warning)' },
+  'floor-grant':  { icon: Play,       label: '발언 시작',  color: 'var(--cims-success)' },
   'floor-release':{ icon: Square,     label: '발언 종료',  color: 'var(--muted-foreground)' },
-  config_change:  { icon: Settings,   label: '설정 변경',  color: '#9c27b0' },
-  member_invite:  { icon: ArrowRight, label: '초대',      color: '#00bcd4' },
+  config_change:  { icon: Settings,   label: '설정 변경',  color: 'var(--primary)' },
+  member_invite:  { icon: ArrowRight, label: '초대',      color: 'var(--cims-info)' },
 }
 
 export function getEventDisplay(type: string) {
@@ -101,7 +101,7 @@ export const FLOOR_OPS: Record<string, { label: string; color: string }> = {
   IDLE:         { label: '유휴',      color: 'var(--muted-foreground)' },
   REVOKE:       { label: '회수 통지',  color: 'var(--cims-warning)' },
   REVOKE_END:   { label: '회수 확정',  color: 'var(--destructive)' },
-  QUEUE:        { label: '대기열 등록', color: '#0891b2' },
+  QUEUE:        { label: '대기열 등록', color: 'var(--cims-info)' },
   QUEUE_CANCEL: { label: '대기 취소',  color: 'var(--muted-foreground)' },
   DENY:         { label: '거절',      color: 'var(--destructive)' },
 }
@@ -114,7 +114,7 @@ export const DENY_REASON: Record<string, string> = {
 }
 
 // 발언자 색 팔레트 (히트맵 막대/타임바/발언자 헤더 공통)
-export const SPK_COLORS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#ca8a04', '#db2777', '#4f46e5', '#059669', '#e11d48', '#0d9488']
+export const SPK_COLORS = Array.from({ length: 12 }, (_, i) => `var(--chart-${i + 1})`)
 export function spkColor(order: string[], id: string) {
   const i = order.indexOf(id)
   return SPK_COLORS[(i < 0 ? 0 : i) % SPK_COLORS.length]
@@ -280,7 +280,7 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
                 border: isSel ? '2px solid var(--primary)' : '1px solid var(--border)',
                 cursor: 'pointer', opacity: d.hasData ? 1 : 0.65,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--muted-foreground)', position: 'relative', overflow: 'hidden',
+                fontSize: 10, color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--muted-foreground)', position: 'relative', overflow: 'hidden',
               }}>
               <span style={{ fontSize: 11, fontWeight: 700 }}>{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 9, opacity: 0.85 }}>{fmtDayShort(d.day)}</span>
@@ -349,7 +349,7 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
                 border: isSel ? '2px solid var(--primary)' : '1px solid var(--border)',
                 cursor: sess ? 'pointer' : 'default', opacity: sess ? 1 : 0.5,
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                fontSize: 10, color: ratio > 0.55 ? '#fff' : 'var(--muted-foreground)', position: 'relative',
+                fontSize: 10, color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--muted-foreground)', position: 'relative',
               }}>
               <span style={{ fontSize: 11, fontWeight: 600 }}>{v > 0 ? v : ''}</span>
               <span style={{ fontSize: 8, opacity: 0.8 }}>
@@ -415,7 +415,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(sess.total_speech_ms)}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
           <button className="btn btn--sm btn--outline" style={{ marginRight: 4 }} disabled={flowLoading} onClick={onFlow}>Flow</button>
-          <button className="btn btn--sm btn--outline" onClick={onPlayAll}>&#9654; 전체</button>
+          <button className="btn btn--sm btn--outline" onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</button>
         </td>
       </tr>
       {isOpen && (
@@ -799,7 +799,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
   const shown = timeline.filter(it => layers[it.kind])
   const chips: Array<{ key: 'floor' | 'event'; label: string; color: string }> = [
     { key: 'floor', label: '발언권', color: 'var(--cims-success)' },
-    { key: 'event', label: '멤버', color: '#9333ea' },
+    { key: 'event', label: '멤버', color: 'var(--chart-3)' },
   ]
 
   return (
@@ -822,7 +822,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
                 padding: '2px 8px', fontSize: 11,
                 border: `1px solid ${layers[c.key] ? c.color : 'var(--border)'}`,
                 background: layers[c.key] ? c.color : 'transparent',
-                color: layers[c.key] ? '#fff' : 'var(--muted-foreground)',
+                color: layers[c.key] ? 'var(--cims-on-solid)' : 'var(--muted-foreground)',
               }}
             >
               {c.label} {counts[c.key]}

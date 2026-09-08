@@ -494,7 +494,7 @@ function FieldEditor({ field, value, refOpts, onChange }: {
     <>
       <label style={{ fontSize: 13, paddingTop: 6 }}>
         {field.label}
-        {field.required && <span style={{ color: '#e74c3c', marginLeft: 4 }}>*</span>}
+        {field.required && <span style={{ color: 'var(--destructive)', marginLeft: 4 }}>*</span>}
       </label>
       <div>
         {renderInput(field, value, onChange, refOpts)}

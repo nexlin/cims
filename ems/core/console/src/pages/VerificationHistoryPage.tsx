@@ -62,19 +62,19 @@ const STAGE_LABEL: Record<number, string> = {
 }
 
 const VERDICT_COLOR: Record<string, string> = {
-  PASS: '#16a34a',
-  FAIL: '#dc2626',
-  UNKNOWN: '#6b7280',
+  PASS: 'var(--cims-success)',
+  FAIL: 'var(--destructive)',
+  UNKNOWN: 'var(--muted-foreground)',
 }
 
 const STATUS_COLOR: Record<VerifyStatus, string> = {
-  PASS:    '#16a34a',
-  FAIL:    '#dc2626',
-  SKIP:    '#9ca3af',
-  BLOCKED: '#eab308',
-  RUNNING: '#2563eb',
-  PENDING: '#6b7280',
-  UNKNOWN: '#6b7280',
+  PASS:    'var(--cims-success)',
+  FAIL:    'var(--destructive)',
+  SKIP:    'var(--muted-foreground)',
+  BLOCKED: 'var(--cims-warning)',
+  RUNNING: 'var(--cims-info)',
+  PENDING: 'var(--muted-foreground)',
+  UNKNOWN: 'var(--muted-foreground)',
 }
 
 function fmtDate(iso: string | null): string {
@@ -238,11 +238,11 @@ function DetailModal({ run, onClose, onDelete }: {
         <div style={{ padding: '0 20px 12px' }}>
           <div style={totalsBox}>
             <Total label="총" value={run.totals?.total ?? '-'} />
-            <Total label="PASS" value={run.totals?.pass ?? 0} color="#16a34a" />
-            <Total label="FAIL" value={run.totals?.fail ?? 0} color="#dc2626" />
-            <Total label="SKIP" value={run.totals?.skip ?? 0} color="#9ca3af" />
+            <Total label="PASS" value={run.totals?.pass ?? 0} color="var(--cims-success)" />
+            <Total label="FAIL" value={run.totals?.fail ?? 0} color="var(--destructive)" />
+            <Total label="SKIP" value={run.totals?.skip ?? 0} color="var(--muted-foreground)" />
             {(run.totals?.blocked ?? 0) > 0 && (
-              <Total label="BLOCKED" value={run.totals?.blocked ?? 0} color="#eab308" />
+              <Total label="BLOCKED" value={run.totals?.blocked ?? 0} color="var(--cims-warning)" />
             )}
           </div>
         </div>
@@ -304,7 +304,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <div style={{ fontSize: 11, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>{label}</div>
-      <div style={{ fontSize: 13, color: '#111827', marginTop: 2 }}>{value}</div>
+      <div style={{ fontSize: 13, color: 'var(--foreground)', marginTop: 2 }}>{value}</div>
     </div>
   )
 }
@@ -365,7 +365,7 @@ function StatsPanel({
               { label: '전체 회차', value: `${stats.overall.runs}회` },
               { label: '성공률', value: `${stats.overall.success_rate}%`,
                 color: stats.overall.success_rate >= 80 ? 'var(--cims-success)'
-                       : stats.overall.success_rate >= 50 ? 'var(--cims-warning)' : '#dc2626' },
+                       : stats.overall.success_rate >= 50 ? 'var(--cims-warning)' : 'var(--destructive)' },
               { label: 'PASS', value: `${stats.overall.pass}회`, color: 'var(--cims-success)' },
               { label: 'FAIL', value: `${stats.overall.fail}회`, color: 'var(--destructive)' },
               { label: '평균 소요', value: fmtMsShort(stats.overall.avg_elapsed_ms) },
@@ -421,7 +421,7 @@ function ScopeTable({ rows }: { rows: RunsStatsResponse['by_scope'] }) {
             <td style={{
               padding: '3px 6px', textAlign: 'right', fontWeight: 600,
               color: r.success_rate >= 80 ? 'var(--cims-success)'
-                     : r.success_rate >= 50 ? 'var(--cims-warning)' : '#dc2626',
+                     : r.success_rate >= 50 ? 'var(--cims-warning)' : 'var(--destructive)',
             }}>{r.success_rate}%</td>
             <td style={{ padding: '3px 6px', textAlign: 'right' }}>{fmtMsShort(r.avg_elapsed_ms)}</td>
           </tr>
@@ -444,11 +444,11 @@ function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
     <svg width={W} height={H + 18} style={{ display: 'block' }}>
       {/* 좌표축: 하단선 */}
       <line x1={PAD_X} y1={H - PAD_Y} x2={W - PAD_X} y2={H - PAD_Y}
-            stroke="#e5e7eb" strokeWidth={1} />
+            stroke="var(--border)" strokeWidth={1} />
       {timeline.map((t, i) => {
         const x = PAD_X + stepX * i
         const y = H - PAD_Y - ((t.elapsed_ms / maxElapsed) * (H - PAD_Y * 2))
-        const color = VERDICT_COLOR[t.verdict] || '#6b7280'
+        const color = VERDICT_COLOR[t.verdict] || 'var(--muted-foreground)'
         return (
           <g key={t.id}>
             <line x1={x} y1={H - PAD_Y} x2={x} y2={y}
@@ -460,10 +460,10 @@ function Sparkline({ timeline }: { timeline: RunsStatsResponse['timeline'] }) {
         )
       })}
       {/* 범례 */}
-      <text x={PAD_X} y={H + 12} fontSize={9} fill="#6b7280">
+      <text x={PAD_X} y={H + 12} fontSize={9} fill="var(--muted-foreground)">
         {timeline[0]?.started_at?.slice(0, 10) ?? ''}
       </text>
-      <text x={W - PAD_X} y={H + 12} fontSize={9} fill="#6b7280" textAnchor="end">
+      <text x={W - PAD_X} y={H + 12} fontSize={9} fill="var(--muted-foreground)" textAnchor="end">
         {timeline[timeline.length - 1]?.started_at?.slice(0, 10) ?? ''}
       </text>
     </svg>
@@ -699,7 +699,7 @@ const selectStyle: React.CSSProperties = {
 }
 const btnPrimary: React.CSSProperties = {
   padding: '6px 14px', border: 'none', borderRadius: 4,
-  background: '#2563eb', color: '#fff', fontSize: 13, cursor: 'pointer',
+  background: 'var(--cims-info)', color: 'var(--cims-on-solid)', fontSize: 13, cursor: 'pointer',
 }
 const btnSecondary: React.CSSProperties = {
   padding: '6px 14px', border: '1px solid var(--border)', borderRadius: 4,
@@ -707,7 +707,7 @@ const btnSecondary: React.CSSProperties = {
 }
 const btnDanger: React.CSSProperties = {
   padding: '6px 14px', border: 'none', borderRadius: 4,
-  background: '#dc2626', color: '#fff', fontSize: 13, cursor: 'pointer',
+  background: 'var(--destructive)', color: 'var(--cims-on-solid)', fontSize: 13, cursor: 'pointer',
 }
 const modalBackdrop: React.CSSProperties = {
   position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',

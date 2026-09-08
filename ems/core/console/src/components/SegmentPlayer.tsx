@@ -276,6 +276,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             height: compact ? 220 : 640,
             maxWidth: '100%',
             overflow: 'hidden', borderRadius: 6,
+            // 영상 무대는 테마 표면이 아니라 레터박스다 — 밝은 테마에서도 검정이어야 화면 경계가 보인다.
             background: '#000',
             flexShrink: 0,
           }}>
@@ -297,7 +298,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
               <div style={{
                 position: 'absolute', top: 8, left: 8, right: 8,
                 display: 'flex', justifyContent: 'space-between',
-                background: 'rgba(0,0,0,0.55)', color: '#fff',
+                background: 'rgba(0,0,0,0.55)', color: 'var(--cims-on-solid)',
                 padding: '3px 10px', borderRadius: 4, fontSize: 12,
                 pointerEvents: 'none', overflow: 'hidden',
               }}>

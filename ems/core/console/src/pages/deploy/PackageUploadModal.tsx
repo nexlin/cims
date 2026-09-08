@@ -193,12 +193,12 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
   const remain = row.file.size - row.loaded
   const eta = row.speedBps > 0 ? remain / row.speedBps : 0
   const stateBadge: Record<UploadRow['state'], { bg: string; label: string }> = {
-    pending:   { bg: '#bbb',    label: '대기' },
-    uploading: { bg: '#3498db', label: '업로드' },
-    done:      { bg: '#2ecc71', label: '완료' },
-    failed:    { bg: '#e74c3c', label: '실패' },
-    aborted:   { bg: '#95a5a6', label: '취소' },
-    skipped:   { bg: '#7f8c8d', label: '건너뜀' },
+    pending:   { bg: 'var(--muted-foreground)', label: '대기' },
+    uploading: { bg: 'var(--cims-info)', label: '업로드' },
+    done:      { bg: 'var(--cims-success)', label: '완료' },
+    failed:    { bg: 'var(--destructive)', label: '실패' },
+    aborted:   { bg: 'var(--muted-foreground)', label: '취소' },
+    skipped:   { bg: 'var(--muted-foreground)', label: '건너뜀' },
   }
   const sb = stateBadge[row.state]
 
@@ -210,7 +210,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
         {(row.state === 'uploading' || row.state === 'done') && (
           <>
             <div style={{ width: 240, height: 8, background: 'var(--muted)', borderRadius: 4, overflow: 'hidden' }}>
-              <div style={bar(row.state === 'done' ? '#2ecc71' : '#3498db')} />
+              <div style={bar(row.state === 'done' ? 'var(--cims-success)' : 'var(--cims-info)')} />
             </div>
             <span className="text-muted" style={{ fontSize: 11 }}>
               {row.pct}% · {fmtSize(row.loaded)}/{fmtSize(row.file.size)}
@@ -221,12 +221,12 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
           </>
         )}
         {row.state === 'failed' && (
-          <span style={{ color: '#e74c3c', fontSize: 12 }}>{row.msg}</span>
+          <span style={{ color: 'var(--destructive)', fontSize: 12 }}>{row.msg}</span>
         )}
       </td>
       <td>
         <span className="tag" style={{
-          background: sb.bg, color: '#fff', fontSize: 10, padding: '1px 6px', borderRadius: 3,
+          background: sb.bg, color: 'var(--cims-on-solid)', fontSize: 10, padding: '1px 6px', borderRadius: 3,
         }}>{sb.label}</span>
         {row.msg && row.state === 'done' && (
           <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{row.msg}</div>

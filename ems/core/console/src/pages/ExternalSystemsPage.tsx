@@ -19,7 +19,7 @@ const PROBE_MODES: ProbeMode[] = ['none', 'tcp', 'http', 'icmp']
 
 function StatusDot({ st }: { st?: ProbeResult }) {
   const s = st?.status
-  const c = s === 'up' ? '#22c55e' : s === 'down' ? '#e74c3c' : '#9aa5b4'
+  const c = s === 'up' ? 'var(--cims-success)' : s === 'down' ? 'var(--destructive)' : 'var(--muted-foreground)'
   const label = s === 'up' ? `정상${st?.latency_ms != null ? ` ${st.latency_ms}ms` : ''}`
     : s === 'down' ? '응답없음' : '미확인'
   return <span title={label}><span style={{ display: 'inline-block', width: 9, height: 9,

@@ -364,7 +364,7 @@ export default function ServicesPage() {
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           {manifest ? (
-            <span className="tag" style={{ background: '#34495e', color: '#fff', fontSize: 11 }}
+            <span className="tag" style={{ background: 'var(--cims-neutral)', color: 'var(--cims-on-solid)', fontSize: 11 }}
                   title={`manifest_sha=${manifest._self_sha256 || '-'}\ngit=${manifestGit}\nts=${manifestTs}`}>
               {manifestGit ? `git=${manifestGit} ` : ''}
               {manifestSha ? `manifest=${manifestSha}…` : ''}
@@ -435,8 +435,8 @@ export default function ServicesPage() {
                   <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 14 }}>
                     {card.key}
                   </span>
-                  {card.critical && <span className="tag" style={{ background: '#b45309', color: '#fff' }}>critical</span>}
-                  {!card.hasProcess && <span className="tag" style={{ background: '#3498db', color: '#fff' }}>원격</span>}
+                  {card.critical && <span className="tag" style={{ background: 'var(--cims-warning-on-soft)', color: 'var(--cims-on-solid)' }}>critical</span>}
+                  {!card.hasProcess && <span className="tag" style={{ background: 'var(--cims-info)', color: 'var(--cims-on-solid)' }}>원격</span>}
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
                     {card.label}
                   </span>
@@ -464,7 +464,7 @@ export default function ServicesPage() {
                         title="모듈 설정 편집">설정</button>
                     )}
                     {needsRestart[card.key] && (
-                      <span className="tag" style={{ background: '#e74c3c', color: '#fff' }}
+                      <span className="tag" style={{ background: 'var(--destructive)', color: 'var(--cims-on-solid)' }}
                             title="설정 변경 후 재시작 필요">!</span>
                     )}
                     {versions.length === 0 && (
@@ -478,7 +478,7 @@ export default function ServicesPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
                       <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>² 실행</span>
                       <span className="tag" style={{
-                        background: running ? '#15803d' : '#6b7280', color: '#fff',   // 흰 글자를 받으므로 고정 진한 색
+                        background: running ? 'var(--cims-success-on-soft)' : 'var(--muted-foreground)', color: 'var(--cims-on-solid)',   // 흰 글자를 받으므로 고정 진한 색
                         minWidth: 40, textAlign: 'center',
                       }}>
                         {running ? 'on' : 'off'}
@@ -539,7 +539,7 @@ export default function ServicesPage() {
         }}>
           <div style={{
             padding: 12, borderRadius: 4,
-            background: '#1f2937', color: '#e5e7eb', fontFamily: 'monospace', fontSize: 12,
+            background: 'var(--muted)', color: 'var(--foreground)', fontFamily: 'monospace', fontSize: 12,
             display: 'flex', flexDirection: 'column',
             minHeight: 0, flex: 1, overflow: 'hidden',
           }}>
@@ -548,12 +548,12 @@ export default function ServicesPage() {
               const showJob = !!activeJob || (terminalSource === 'job' && jobStatus)
               const showModule = !showJob && terminalSource === 'module' && lastModule
               const tagBg =
-                activeJob ? '#3b82f6'
-                : showJob && jobStatus?.verdict === 'PASS' ? '#16a34a'
-                : showJob && jobStatus?.verdict === 'FAIL' ? '#dc2626'
-                : showModule && lastModule?.verdict === 'PASS' ? '#16a34a'
-                : showModule && lastModule?.verdict === 'FAIL' ? '#dc2626'
-                : '#475569'
+                activeJob ? 'var(--cims-info)'
+                : showJob && jobStatus?.verdict === 'PASS' ? 'var(--cims-success)'
+                : showJob && jobStatus?.verdict === 'FAIL' ? 'var(--destructive)'
+                : showModule && lastModule?.verdict === 'PASS' ? 'var(--cims-success)'
+                : showModule && lastModule?.verdict === 'FAIL' ? 'var(--destructive)'
+                : 'var(--cims-neutral-on-soft)'
               const tagText = showJob && jobStatus
                 ? (jobStatus.kind === 'release' ? '빌드 & 패키징'
                    : jobStatus.kind === 'build' ? '빌드'
@@ -580,7 +580,7 @@ export default function ServicesPage() {
                 <>
                   <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', flex: '0 0 auto' }}>
                     <span>
-                      <span className="tag" style={{ background: tagBg, color: '#fff', marginRight: 8 }}>
+                      <span className="tag" style={{ background: tagBg, color: 'var(--cims-on-solid)', marginRight: 8 }}>
                         {tagText}
                       </span>
                       {meta && <span>{meta}</span>}
@@ -590,7 +590,7 @@ export default function ServicesPage() {
                   <pre style={{
                     margin: 0, flex: 1, minHeight: 0,
                     overflow: 'auto', whiteSpace: 'pre-wrap',
-                    background: '#0d1117', padding: 8, borderRadius: 4,
+                    background: 'var(--muted)', padding: 8, borderRadius: 4,
                   }}>
                     {content}
                   </pre>
@@ -617,7 +617,7 @@ export default function ServicesPage() {
                     style={{
                       width: '100%', height: '100%', minHeight: 400,
                       fontFamily: 'monospace', fontSize: 12, lineHeight: 1.5,
-                      background: '#0d1117', color: '#c9d1d9',
+                      background: 'var(--muted)', color: 'var(--foreground)',
                     }}
                     value={editText}
                     onChange={e => setEditText(e.target.value)}
@@ -630,7 +630,7 @@ export default function ServicesPage() {
                 </>
               ) : templateModal.pkg.config_template ? (
                 <pre style={{
-                  background: '#0d1117', color: '#c9d1d9', padding: 12, borderRadius: 4,
+                  background: 'var(--muted)', color: 'var(--foreground)', padding: 12, borderRadius: 4,
                   fontSize: 12, overflow: 'auto', margin: 0,
                 }}>
                   {JSON.stringify(templateModal.pkg.config_template, null, 2)}

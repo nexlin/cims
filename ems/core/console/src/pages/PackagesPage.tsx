@@ -179,7 +179,7 @@ function ModuleRow({ mod, active, onClick }: {
       style={{
         display: 'block', width: '100%', textAlign: 'left',
         padding: '10px 12px', border: 'none', background: active ? 'var(--cims-brand-soft)' : 'transparent',
-        borderLeft: `3px solid ${active ? '#3498db' : 'transparent'}`,
+        borderLeft: `3px solid ${active ? 'var(--cims-info)' : 'transparent'}`,
         cursor: 'pointer', borderBottom: '1px solid var(--border)',
       }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -283,7 +283,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
         <b style={{ fontSize: 14 }}>v{p.version}</b>
         {isLatest && (
           <span className="tag" style={{
-            background: '#15803d', color: '#fff', fontSize: 10,   // 흰 글자 대비 4.5 — 테마 토큰은 다크에서 밝아져 못 쓴다
+            background: 'var(--cims-success-on-soft)', color: 'var(--cims-on-solid)', fontSize: 10,   // 흰 글자 대비 4.5 — 테마 토큰은 다크에서 밝아져 못 쓴다
             padding: '1px 6px', borderRadius: 3,
           }}>최신</span>
         )}

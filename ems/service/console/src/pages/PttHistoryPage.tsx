@@ -8,7 +8,7 @@
  * "이 그룹의 최근 활동" 은 여기가 아니라 **PTT 그룹 › 활동** 탭에서 본다
  * (PttGroupsWorkbenchPage). 이력 페이지가 그룹 목록을 다시 그릴 이유가 없다.
  */
-import { ChevronDown, ChevronUp, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, Play, X } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import {
   pttApi, type PttSessionRow, type PttGroupSummary, type PttSessionKind,
@@ -623,7 +623,7 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
         )}
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flex: '0 0 auto' }}>
           <button className="btn btn--sm btn--outline" disabled={flowLoading} onClick={onFlow}>Flow</button>
-          <button className="btn btn--sm btn--outline" onClick={onPlayAll}>&#9654; 전체</button>
+          <button className="btn btn--sm btn--outline" onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</button>
           <button className="btn btn--sm btn--ghost" onClick={onClose} title="닫기 (Esc)"><X size={14} /></button>
         </span>
       </div>
@@ -675,7 +675,7 @@ function HourHeatmap({ hours, sel, onPick }: {
                    borderRadius: 4, padding: on ? '2px 0' : '3px 0',
                    border: on ? '2px solid var(--primary)' : '1px solid var(--border)',
                    background: c.v > 0 ? `color-mix(in srgb, var(--primary) ${Math.round(ratio * 100)}%, var(--card))` : 'var(--muted)',
-                   color: ratio > 0.55 ? '#fff' : 'var(--foreground)',
+                   color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
                  }}>
               <div style={{ fontSize: 11.5, fontWeight: 600, lineHeight: 1.3, height: 16, fontVariantNumeric: 'tabular-nums' }}>
                 {c.v > 0 ? c.v : ' '}

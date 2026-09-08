@@ -63,8 +63,8 @@ export default function DocsPage() {
             style={{
               padding: '4px 12px', borderRadius: 4, border: 'none', cursor: 'pointer',
               fontSize: 12, fontWeight: active === d.id ? 600 : 400,
-              background: active === d.id ? '#2563eb' : 'transparent',
-              color: active === d.id ? '#fff' : 'var(--foreground)',
+              background: active === d.id ? 'var(--cims-info)' : 'transparent',
+              color: active === d.id ? 'var(--cims-on-solid)' : 'var(--foreground)',
             }}>
             {d.title}
           </button>
@@ -77,7 +77,7 @@ export default function DocsPage() {
             </a>
           ))}
           <a href="/docs/CIMS_Technical_Document.pptx" download
-            style={{ fontSize: 11, color: 'var(--primary)', textDecoration: 'none', padding: '4px 8px', border: '1px solid #2563eb', borderRadius: 4, fontWeight: 600 }}>
+            style={{ fontSize: 11, color: 'var(--primary)', textDecoration: 'none', padding: '4px 8px', border: '1px solid var(--cims-info)', borderRadius: 4, fontWeight: 600 }}>
             PPT
           </a>
         </div>

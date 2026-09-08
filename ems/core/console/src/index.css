@@ -90,6 +90,7 @@
   --cims-info: #2563eb;
   --cims-info-soft: #eff6ff;
   --cims-info-on-soft: #1d4ed8;
+  --cims-on-solid: #ffffff;           /* 채도 있는 솔리드 채움 위의 글자 (핸드오프의 `bg-* text-white`) */
   --cims-neutral: #64748b;
   --cims-neutral-soft: #eef1f7;
   --cims-neutral-on-soft: #475569;
@@ -108,12 +109,20 @@
      명도만 다른 쌍보다 구분이 쉽다. 순서는 소스의 계열 선언 순서를 따른다.
      --chart-muted 는 '미분류'처럼 값이 아니라 **빈자리**를 뜻하는 계열용(소스가 직접 지정).
      상태색(success/warning/danger)을 계열에 쓰지 않는다 — 계열은 "무엇인가"이지 "좋다/나쁘다"가
-     아니라서, 섞으면 초록 막대가 정상을 뜻하는 것처럼 읽힌다. */
+     아니라서, 섞으면 초록 막대가 정상을 뜻하는 것처럼 읽힌다.
+     위젯 차트는 앞 5색을 순환하고(`seriesColor`), 발언자처럼 계열이 많은 목록이 6~12 를 쓴다. */
   --chart-1:     #0ea5e9;
   --chart-2:     #f59e0b;
   --chart-3:     #7c3aed;
   --chart-4:     #14b8a6;
   --chart-5:     #ec4899;
+  --chart-6:     #4f46e5;
+  --chart-7:     #65a30d;
+  --chart-8:     #ea580c;
+  --chart-9:     #0891b2;
+  --chart-10:    #e11d48;
+  --chart-11:    #059669;
+  --chart-12:    #c026d3;
   --chart-muted: #94a3b8;
 
   --dev-accent:  #7c3aed;             /* 개발자 모드 — 시안에 개념 없음 */
@@ -175,6 +184,7 @@
   --cims-info: #3b82f6;
   --cims-info-soft: #1b2c4c;
   --cims-info-on-soft: #93c5fd;
+  --cims-on-solid: #ffffff;
   --cims-neutral: #93a1b8;
   --cims-neutral-soft: #1d2636;
   --cims-neutral-on-soft: #93a1b8;
@@ -196,6 +206,13 @@
   --chart-3:     #a78bfa;
   --chart-4:     #2dd4bf;
   --chart-5:     #f472b6;
+  --chart-6:     #818cf8;
+  --chart-7:     #a3e635;
+  --chart-8:     #fb923c;
+  --chart-9:     #22d3ee;
+  --chart-10:    #fb7185;
+  --chart-11:    #34d399;
+  --chart-12:    #e879f9;
   --chart-muted: #94a3b8;
   --dev-accent:  #a78bfa;
 

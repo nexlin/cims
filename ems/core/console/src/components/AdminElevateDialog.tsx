@@ -62,7 +62,7 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
                  onKeyDown={e => { if (e.key === 'Enter') void submit() }}
                  autoFocus />
         </div>
-        {error && <div style={{ color: '#e74c3c', fontSize: 12, marginTop: 8 }}>{error}</div>}
+        {error && <div style={{ color: 'var(--destructive)', fontSize: 12, marginTop: 8 }}>{error}</div>}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button className="btn btn--outline" onClick={onClose} disabled={working}>취소</button>
           <button className="btn btn--primary" onClick={() => void submit()} disabled={working}>

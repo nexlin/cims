@@ -289,12 +289,12 @@ export default function AutoDeployPage() {
 
       {/* ── 지적 목록 ── */}
       {issues.length > 0 && (
-        <section style={{ ...SEC, borderColor: errCount ? '#e74c3c' : '#f39c12' }}>
+        <section style={{ ...SEC, borderColor: errCount ? 'var(--destructive)' : 'var(--cims-warning)' }}>
           <h3 style={H3}>검증 결과 — 오류 {errCount} · 경고 {issues.length - errCount}</h3>
           <div style={{ maxHeight: 180, overflow: 'auto', fontSize: 12.5 }}>
             {issues.map((i, n) => (
               <div key={n} style={{ padding: '3px 0', display: 'flex', gap: 8 }}>
-                <span style={{ color: i.level === 'error' ? '#e74c3c' : '#f39c12', fontWeight: 700 }}>
+                <span style={{ color: i.level === 'error' ? 'var(--destructive)' : 'var(--cims-warning)', fontWeight: 700 }}>
                   {i.level === 'error' ? 'ERROR' : 'WARN'}
                 </span>
                 <code style={{ color: 'var(--muted-foreground)' }}>{i.path}</code>
@@ -332,7 +332,7 @@ export default function AutoDeployPage() {
                   <td>{r.os || '-'}</td><td>{r.login_user || '-'}</td>
                   <td>{r.sudo_ok ? <Check size={13} className="text-[var(--cims-success)]" />
                              : <X size={13} className="text-destructive" />}</td>
-                  <td style={{ color: r.ok ? 'var(--cims-success)' : '#e74c3c' }}>
+                  <td style={{ color: r.ok ? 'var(--cims-success)' : 'var(--destructive)' }}>
                     {r.ok ? 'OK' : `${r.error_code || ''} ${r.error || ''}`}
                   </td>
                 </tr>
@@ -356,7 +356,7 @@ export default function AutoDeployPage() {
                 <tr key={r.id}>
                   <td>{r.id}</td><td>{r.blueprint}</td>
                   <td style={{ color: r.status === 'succeeded' ? 'var(--cims-success)'
-                             : r.status === 'failed' ? '#e74c3c' : 'var(--muted-foreground)' }}>
+                             : r.status === 'failed' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
                     {r.status}</td>
                   <td>{r.progress.done}/{r.progress.total}
                       {r.progress.failed > 0 && ` (실패 ${r.progress.failed})`}</td>
@@ -388,8 +388,8 @@ function Seg({ value, onChange, options }:
         <button key={o.v} onClick={() => onChange(o.v)}
                 style={{
                   padding: '3px 12px', fontSize: 12, border: 'none', cursor: 'pointer',
-                  background: value === o.v ? '#1976d2' : 'transparent',
-                  color: value === o.v ? '#fff' : 'var(--muted-foreground)',
+                  background: value === o.v ? 'var(--cims-info)' : 'transparent',
+                  color: value === o.v ? 'var(--cims-on-solid)' : 'var(--muted-foreground)',
                 }}>{o.l}</button>
       ))}
     </div>
@@ -449,7 +449,7 @@ function RawEditor({ value, onChange, issues, disabled, placeholder }: {
                       overflow: 'auto', fontSize: 11.5 }}>
           {issues.map((i, n) => (
             <div key={n} style={{ marginBottom: 6,
-                                  color: i.level === 'error' ? '#e74c3c' : '#f39c12' }}>
+                                  color: i.level === 'error' ? 'var(--destructive)' : 'var(--cims-warning)' }}>
               {i.path.replace(/^[a-z]+:/, '')}<br />
               <span style={{ color: 'var(--muted-foreground)' }}>{i.message}</span>
             </div>
@@ -584,12 +584,12 @@ function PlanView({ phases }: { phases: PlanPhase[] }) {
         <div key={ph.key} style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>
             {ph.key} · {ph.title}
-            {ph.serial && <span style={{ marginLeft: 6, fontSize: 11, color: '#e67e22' }}>순차</span>}
+            {ph.serial && <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--cims-warning)' }}>순차</span>}
             <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--muted-foreground)' }}>
               {PHASE_HINT[ph.key] || ''}
             </span>
           </div>
-          {ph.error && <div style={{ color: '#e74c3c', fontSize: 12 }}>{ph.error}</div>}
+          {ph.error && <div style={{ color: 'var(--destructive)', fontSize: 12 }}>{ph.error}</div>}
           <div style={{ paddingLeft: 14, fontSize: 12, color: 'var(--muted-foreground)' }}>
             {ph.steps.map((s, i) => (
               <div key={i}>· {s.target} — {String(s.action || '')}</div>
@@ -617,7 +617,7 @@ function RunView({ run, onAction, busy, canEdit }: {
           <span style={{
             marginLeft: 10, fontWeight: 400,
             color: run.status === 'succeeded' ? 'var(--cims-success)'
-                 : run.status === 'failed' ? '#e74c3c' : '#1976d2',
+                 : run.status === 'failed' ? 'var(--destructive)' : 'var(--cims-info)',
           }}>{run.status}{running && ' ⋯'}</span>
         </h3>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{done}/{total}</span>
@@ -633,12 +633,12 @@ function RunView({ run, onAction, busy, canEdit }: {
         </div>
       </div>
 
-      {run.error && <div style={{ color: '#e74c3c', fontSize: 12.5, marginBottom: 8 }}>{run.error}</div>}
+      {run.error && <div style={{ color: 'var(--destructive)', fontSize: 12.5, marginBottom: 8 }}>{run.error}</div>}
       {run.rollback && (
         <div style={{ fontSize: 12, marginBottom: 8 }}>
           롤백: 되돌림 {run.rollback.undone.length}건
           {run.rollback.failed.length > 0 &&
-            <span style={{ color: '#e74c3c' }}> · 실패 {run.rollback.failed.join(' ; ')}</span>}
+            <span style={{ color: 'var(--destructive)' }}> · 실패 {run.rollback.failed.join(' ; ')}</span>}
         </div>
       )}
 
@@ -655,7 +655,7 @@ function RunView({ run, onAction, busy, canEdit }: {
                   {STEP_ICON[s.status] || '·'}
                 </span>
                 <span style={{ display: 'inline-block', minWidth: 150 }}>{s.target}</span>
-                <span style={{ color: s.status === 'failed' ? '#e74c3c' : 'var(--muted-foreground)' }}>
+                <span style={{ color: s.status === 'failed' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
                   {s.detail || s.error || ''}
                 </span>
                 {s.elapsed_sec ? <span style={{ color: 'var(--muted-foreground)' }}> ({s.elapsed_sec}s)</span> : null}

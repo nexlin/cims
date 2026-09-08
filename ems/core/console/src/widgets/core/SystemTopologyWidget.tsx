@@ -16,7 +16,9 @@ const EXT_TYPE_LABEL: Record<string, string> = {
   db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
 }
 
-const C_RED = '#e74c3c', C_AMBER = '#f59e0b', C_GREEN = '#22c55e', C_GRAY = '#9aa5b4', C_BLUE = '#3498db'
+const C_RED = 'var(--destructive)', C_AMBER = 'var(--cims-warning)', C_GREEN = 'var(--cims-success)', C_GRAY = 'var(--muted-foreground)', C_BLUE = 'var(--cims-info)'
+// 외부 시스템은 상태가 아니라 **구분**이라 계열 팔레트를 쓴다 (index.css --chart-* 주석).
+const C_EXT = 'var(--chart-3)'
 // EMS 관례 — 단일문자 상태/설정 배지 (A/S, M/B). hover 시 title 로 풀워드.
 const STATE_BADGE = {
   fontSize: 9, fontWeight: 700, minWidth: 15, height: 15, lineHeight: '15px',
@@ -29,7 +31,7 @@ function sevColor(rank: number, up = true): string {
   return up ? C_GREEN : C_GRAY
 }
 const MODE_BADGE: Record<string, { t: string; c: string }> = {
-  AS: { t: 'AS', c: '#3498db' }, AA: { t: 'AA', c: '#27ae60' }, SA: { t: 'SA', c: '#95a5a6' },
+  AS: { t: 'AS', c: 'var(--cims-info)' }, AA: { t: 'AA', c: 'var(--cims-success)' }, SA: { t: 'SA', c: 'var(--muted-foreground)' },
 }
 
 // 활성 알람 → mo_instance별 최고 등급 맵 — 전역 store 의 activeSevByMo 사용
@@ -87,7 +89,7 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
               {/* 상태 A/S — 채움 배지 */}
               <span title={n.active ? 'Active (현재 서비스 중)' : 'Standby (대기)'}
                     style={{ ...STATE_BADGE, background: n.active ? C_GREEN : 'var(--secondary)',
-                             color: n.active ? '#fff' : 'var(--muted-foreground)',
+                             color: n.active ? 'var(--cims-on-solid)' : 'var(--muted-foreground)',
                              border: n.active ? 'none' : '1px solid var(--border)' }}>
                 {n.active ? 'A' : 'S'}</span>
               {/* 설정 M/B — 외곽 배지 (AS 만) */}
@@ -130,7 +132,7 @@ function ExternalBox({ sys, status, onClick }: { sys: ExternalSystem; status?: P
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: col, display: 'inline-block' }} />
         <b style={{ fontSize: 13 }}>{sys.name}</b>
-        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, color: '#fff', background: '#8e44ad' }}>외부</span>
+        <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, color: 'var(--card)', background: 'var(--cims-info)' }}>외부</span>
         <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, border: '1px solid var(--border)', color: 'var(--muted-foreground)' }}>
           {EXT_TYPE_LABEL[sys.type] || sys.type}</span>
       </div>
@@ -264,7 +266,7 @@ function SystemTopologyWidget() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ width: 10, height: 10, borderRadius: '50%', background: dot, display: 'inline-block' }} />
                 <b style={{ fontSize: 13 }}>{s.name}</b>
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: mb.c }}>{mb.t}</span>
+                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: 'var(--cims-on-solid)', background: mb.c }}>{mb.t}</span>
                 {s.mode === 'AS' && s.nodes.length > 1 &&
                   <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
               <ArrowLeftRight size={11} /> VRRP</span>}
@@ -283,10 +285,10 @@ function SystemTopologyWidget() {
         })}
         {/* 외부 시스템 — 점선 테두리로 내부 노드와 구분. */}
         {ext.length > 0 && (
-          <div style={{ border: `1px dashed var(--border)`, borderLeft: `4px dashed #8e44ad`,
+          <div style={{ border: `1px dashed var(--border)`, borderLeft: `4px dashed ${C_EXT}`,
                         borderRadius: 8, padding: '10px 14px', background: 'var(--muted)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: '#8e44ad' }}>외부 시스템</span>
+              <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: 'var(--cims-on-solid)', background: C_EXT }}>외부 시스템</span>
               <b style={{ fontSize: 13 }}>External</b>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: `repeat(${gridCols(ext.length)}, minmax(150px, 1fr))`, gap: 10 }}>
@@ -300,7 +302,7 @@ function SystemTopologyWidget() {
       </div>
       {/* 상태 범례 */}
       <div style={{ display: 'flex', gap: 14, marginTop: 10, fontSize: 11, color: 'var(--muted-foreground)', flexWrap: 'wrap' }}>
-        {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['설치됨·미기동', C_GRAY], ['외부', '#8e44ad']].map(([t, c]) => (
+        {[['정상', C_GREEN], ['경고', C_AMBER], ['장애/오프라인', C_RED], ['설치됨·미기동', C_GRAY], ['외부', C_EXT]].map(([t, c]) => (
           <span key={t as string} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: c as string, display: 'inline-block' }} />{t}
           </span>

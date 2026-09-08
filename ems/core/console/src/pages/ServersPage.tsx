@@ -782,7 +782,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
         const isOpen = expanded.has(g.id)
         const isSelected = selection?.kind === 'group' && selection.id === g.id
         const modeChip = g.mode === 'active_standby' ? 'AS' : 'AA'
-        const modeColor = g.mode === 'active_standby' ? '#3498db' : '#27ae60'
+        const modeColor = g.mode === 'active_standby' ? 'var(--cims-info)' : 'var(--cims-success)'
         const canAddMember = g.mode === 'all_active'  // AS 는 master/backup 2 fixed
         return (
           <div key={g.id}>
@@ -795,7 +795,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
               <span onClick={e => { e.stopPropagation(); onToggleExpand(g.id) }}
                     style={{ width: 14, color: 'var(--muted-foreground)' }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
               <span style={{
-                background: modeColor, color: '#fff', fontSize: 10,
+                background: modeColor, color: 'var(--cims-on-solid)', fontSize: 10,
                 padding: '1px 5px', borderRadius: 3,
               }}>{modeChip}</span>
               <b style={{ flex: 1 }}>{g.name}</b>
@@ -809,7 +809,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                 <button onClick={e => { e.stopPropagation(); onAddMember(g) }}
                         title="새 멤버 자동 생성 (이름 자동, install_command 발급)"
                         style={{
-                          border: '1px solid var(--border)', background: 'var(--card)', color: '#3498db',
+                          border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--cims-info)',
                           fontSize: 11, padding: '0 6px', borderRadius: 3, cursor: 'pointer',
                           fontWeight: 600,
                         }}>+</button>
@@ -841,7 +841,7 @@ function ServerTree({ haGroups, groupedAgents, depsByAgent, expanded,
                }}>
             <span style={{ width: 14 }} />  {/* expand 자리 비움 — group 정렬 맞춤 */}
             <span style={{
-              background: '#6b7280', color: '#fff', fontSize: 10,
+              background: 'var(--muted-foreground)', color: 'var(--cims-on-solid)', fontSize: 10,
               padding: '1px 5px', borderRadius: 3,
             }}>SA</span>
             <b style={{ flex: 1 }}>{agentDisplayName(a.name)}</b>
@@ -882,7 +882,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
         <span title={role === 'master' ? 'Master — priority 100 (절체 우선순위)' : 'Backup — priority 90'}
               style={{
                 fontSize: 10, padding: '1px 5px', borderRadius: 3, fontWeight: 600,
-                background: role === 'master' ? '#3498db' : '#95a5a6', color: '#fff',
+                background: role === 'master' ? 'var(--cims-info)' : 'var(--muted-foreground)', color: 'var(--cims-on-solid)',
               }}>{role === 'master' ? 'M' : 'B'}</span>
       )}
       <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{depCount}m</span>
@@ -890,7 +890,7 @@ function ServerTreeRow({ agent: a, depCount, role, active, indent, onClick, onRe
         <button onClick={e => { e.stopPropagation(); onRemove() }}
                 title="그룹에서 멤버 제거 (agent 자체는 standalone 으로 유지)"
                 style={{
-                  border: '1px solid #f5b8b8', background: 'var(--card)', color: '#e74c3c',
+                  border: '1px solid var(--destructive)', background: 'var(--card)', color: 'var(--destructive)',
                   fontSize: 10, padding: '0 5px', borderRadius: 3, cursor: 'pointer',
                   fontWeight: 600,
                 }}>×</button>
@@ -2859,7 +2859,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
         return (
           <div role="alert" style={{
             marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
-            background: '#7f1d1d', color: '#fff', lineHeight: 1.6,
+            background: 'var(--destructive)', color: 'var(--destructive-foreground)', lineHeight: 1.6,
           }}>
             <b>절체 래치 — 승격 불가: {latched.map(a => agentDisplayName(a.name)).join(', ')}</b>
             <div style={{ marginTop: 4 }}>
@@ -2881,13 +2881,13 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
           올린다. 값 확인·변경은 [시스템/서버 구성] > 서버 > OAM 접속 주소. */}
       {group.failover_op && (
         <div style={{ marginBottom: 12, padding: '8px 12px', borderRadius: 4, fontSize: 12,
-                      border: '1px solid ' + (group.failover_op.error ? 'var(--border)' : '#90caf9'),
+                      border: '1px solid ' + (group.failover_op.error ? 'var(--border)' : 'var(--cims-info-soft)'),
                       background: group.failover_op.error ? 'var(--cims-danger-soft)' : 'var(--cims-brand-soft)' }}>
           <b>계획 절체 진행</b> — 상태 <code>{group.failover_op.state}</code>
           {` (${agentDisplayName(agents.find(a => a.id === group.failover_op!.source_agent_id)?.name || '?')}`}
           {` → ${agentDisplayName(agents.find(a => a.id === group.failover_op!.target_agent_id)?.name || '?')})`}
           {group.failover_op.note && <span style={{ color: 'var(--muted-foreground)' }}> · {group.failover_op.note}</span>}
-          {group.failover_op.error && <span style={{ color: '#c62828' }}> · 오류: {group.failover_op.error}</span>}
+          {group.failover_op.error && <span style={{ color: 'var(--destructive)' }}> · 오류: {group.failover_op.error}</span>}
         </div>
       )}
       {/* 컬럼 폭은 Figma G4(185:2874) 실측. **행 = 멤버 하나**이고 모듈은 셀 안에서 쌓인다 —
@@ -3176,12 +3176,12 @@ function InstallSection({ agent: a, autoRegenSignal }: {
         대상 서버에서 다음 명령 실행 (ssh 1회) — systemd --user + linger 자동 (die 시 자동 재기동).
       </div>
       {loading && <div className="empty" style={{ padding: 8 }}>불러오는 중...</div>}
-      {err && <div style={{ color: '#e74c3c', marginBottom: 8 }}>※ {err}</div>}
+      {err && <div style={{ color: 'var(--destructive)', marginBottom: 8 }}>※ {err}</div>}
       {data && (
         <>
           <div style={{ position: 'relative' }}>
             <pre style={{
-              background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
+              background: 'var(--muted)', color: 'var(--foreground)', padding: 12, paddingRight: 88,
               borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
               opacity: expired ? 0.5 : 1,
             }}>{data.install_command}</pre>
@@ -3190,7 +3190,7 @@ function InstallSection({ agent: a, autoRegenSignal }: {
               onClick={copy} disabled={expired}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
-            <div style={{ fontSize: 12, color: expired ? '#e74c3c' : 'var(--foreground)' }}>
+            <div style={{ fontSize: 12, color: expired ? 'var(--destructive)' : 'var(--foreground)' }}>
               {expiresAt
                 ? expired
                   ? <><AlertTriangle size={12} className="inline align-[-2px]" /> token 만료됨 ({expiresAt}) — 재발급 필요</>
@@ -3390,7 +3390,7 @@ function PendingMemberModal({ info, onClose }: {
       )}
       <div style={{ position: 'relative' }}>
         <pre style={{
-          background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
+          background: 'var(--muted)', color: 'var(--foreground)', padding: 12, paddingRight: 88,
           borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
         }}>{info.install_command}</pre>
         <button className="btn btn--sm btn--outline"
@@ -3840,7 +3840,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
     <Modal title={`${agent.name} — 모듈 추가`} onClose={onClose} width={600}>
       {agent.ha_group && (
         <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 8,
-                      padding: '6px 10px', background: 'var(--cims-brand-soft)', border: '1px solid #d0e3ff',
+                      padding: '6px 10px', background: 'var(--cims-brand-soft)', border: '1px solid var(--cims-info-soft)',
                       borderRadius: 4 }}>
           이 agent 는 HA 그룹 <b>{agent.ha_group.name}</b> (mode={agent.ha_group.mode}, role={agent.ha_group.role}) 소속 —
           {' '}<b>{agent.ha_group.mode}</b> 가능 모듈 + standalone 모듈만 install 가능
@@ -3906,8 +3906,8 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         <b>설치</b> → <b>Start</b> 순으로 진행하세요.
       </div>
       {selectedMismatch && (
-        <div style={{ marginTop: 8, fontSize: 12, color: '#c00',
-                      padding: '6px 10px', background: 'var(--cims-danger-soft)', border: '1px solid #ffcaca',
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--destructive)',
+                      padding: '6px 10px', background: 'var(--cims-danger-soft)', border: '1px solid var(--cims-danger-soft)',
                       borderRadius: 4 }}>
           <AlertTriangle size={13} className="inline align-[-2px]" /> {selectedMismatch} — install 시 backend 400 reject
         </div>

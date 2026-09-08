@@ -43,7 +43,7 @@ export default function ReadOnlyBanner() {
   if (st?.config_rolled_back) {
     return (
       <div role="alert" style={{
-        background: '#7c2d12', color: '#fff', padding: '8px 16px',
+        background: 'var(--cims-warning-on-soft)', color: 'var(--card)', padding: '8px 16px',
         fontSize: 13, lineHeight: 1.5, display: 'flex', gap: 12, alignItems: 'baseline',
       }}>
         <strong style={{ whiteSpace: 'nowrap' }}>설정 되돌림</strong>
@@ -64,7 +64,7 @@ export default function ReadOnlyBanner() {
 
   return (
     <div role="alert" style={{
-      background: '#7f1d1d', color: '#fff', padding: '8px 16px',
+      background: 'var(--destructive)', color: 'var(--destructive-foreground)', padding: '8px 16px',
       fontSize: 13, lineHeight: 1.5, display: 'flex', gap: 12, alignItems: 'baseline',
     }}>
       <strong style={{ whiteSpace: 'nowrap' }}>읽기 전용</strong>

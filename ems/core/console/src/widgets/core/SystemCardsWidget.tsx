@@ -15,7 +15,7 @@ interface SystemCard {
   total: number
 }
 
-const MODE_COLOR: Record<SystemCard['mode'], string> = { AS: '#3498db', AA: '#27ae60', SA: '#95a5a6' }
+const MODE_COLOR: Record<SystemCard['mode'], string> = { AS: 'var(--cims-info)', AA: 'var(--cims-success)', SA: 'var(--muted-foreground)' }
 const MODE_TIP: Record<SystemCard['mode'], string> = {
   AS: 'Active/Standby — VRRP 이중화 (1 active + standby)',
   AA: 'All-Active — 전 멤버 동시 활성',
@@ -75,7 +75,7 @@ function SystemCardsWidget() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         {systems.map(s => {
           const healthy = s.total > 0 && s.online === s.total
-          const dot = healthy ? 'var(--cims-success)' : s.online > 0 ? '#f59e0b' : 'var(--destructive)'
+          const dot = healthy ? 'var(--cims-success)' : s.online > 0 ? 'var(--cims-warning)' : 'var(--destructive)'
           return (
             <div key={s.key} onClick={onOpen}
                  style={{ background: 'var(--card)', border: '1px solid var(--border)',
@@ -84,7 +84,7 @@ function SystemCardsWidget() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                 <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: dot }} />
                 <span style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-                <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: '#fff',
+                <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, color: 'var(--cims-on-solid)',
                                background: MODE_COLOR[s.mode], padding: '1px 6px', borderRadius: 3 }}>{s.mode}</span>
               </div>
               <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>

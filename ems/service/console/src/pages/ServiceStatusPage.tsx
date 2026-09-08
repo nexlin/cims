@@ -178,7 +178,7 @@ function HeatRow({ label, points, metric, rgb }: { label: string; points: TrendP
                 flex: 1, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 fontSize: 10, lineHeight: 1, borderRadius: 2,
                 background: v > 0 ? `rgba(${rgb},${ratio.toFixed(3)})` : 'var(--border)',
-                color: ratio > 0.55 ? '#fff' : 'var(--foreground)',
+                color: ratio > 0.55 ? 'var(--cims-on-solid)' : 'var(--foreground)',
               }}>
               {v > 0 ? v : ''}
             </div>

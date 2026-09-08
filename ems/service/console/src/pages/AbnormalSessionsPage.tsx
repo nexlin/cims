@@ -14,12 +14,12 @@ const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
   scanner_ua:   { label: '스캐너 도구',  color: 'var(--destructive)' },
   fraud_number: { label: '사기 번호',    color: 'var(--destructive)' },
-  auth_failed:  { label: '인증 실패',    color: '#9333ea' },
+  auth_failed:  { label: '인증 실패',    color: 'var(--primary)' },
 }
 const SEV: Record<string, { label: string; bg: string }> = {
-  critical: { label: '치명', bg: '#dc2626' },
-  major:    { label: '높음', bg: '#ea580c' },
-  minor:    { label: '낮음', bg: '#6b7280' },
+  critical: { label: '치명', bg: 'var(--destructive)' },
+  major:    { label: '높음', bg: 'var(--cims-warning)' },
+  minor:    { label: '낮음', bg: 'var(--muted-foreground)' },
 }
 const RANGE = [1, 3, 7]
 
@@ -144,7 +144,7 @@ export function AbnTable() {
                   return (
                     <tr key={i}>
                       <td style={{ fontSize: 11 }} className="ts">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</td>
-                      <td><span className="badge" style={{ background: sev.bg, color: '#fff', fontSize: 10 }}>{sev.label}</span></td>
+                      <td><span className="badge" style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</span></td>
                       <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</td>
                       <td style={{ fontSize: 11, fontFamily: 'monospace' }}>
                         <span style={{ color: 'var(--muted-foreground)' }}>{x.caller || '?'}</span>
