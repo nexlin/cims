@@ -25,7 +25,9 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _instance = new SingleInstance(AppPaths.InstanceName);
+        // --ui-preview(개발 스위치)는 실제 앱과 다른 인스턴스 이름 — 실행 중인 관제 앱 옆에서 화면 점검용으로 띄울 수 있게.
+        bool preview = e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase);
+        _instance = new SingleInstance(preview ? AppPaths.InstanceName + ".preview" : AppPaths.InstanceName);
         if (!_instance.IsFirst) { Shutdown(0); return; }
         _instance.ActivationRequested += (_, _) => _main?.ActivateFromSecondInstance();
 
@@ -75,9 +77,35 @@ public partial class App : Application
         if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase))
         {
             ShowMain();
-            // --ui-preview-management: 관리 창(§4.5)도 함께 — 서버 없이 XAML 자원·바인딩 점검(목록은 "로그인 전" 오류로 비어 있다).
-            if (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase))
-                new Shell.ManagementWindow(new ViewModels.ManagementViewModel(_session!)) { Owner = _main }.Show();
+            // --ui-preview-screen=history|groups|admin: 관제 외 화면(§3.4)으로 열어 서버 없이 XAML 자원·바인딩 점검(목록은 "로그인 전" 오류로 비어 있다).
+            // 관리 화면은 관리 범위 검사를 건너뛴다(프로파일이 없다). 구 스위치 --ui-preview-management = admin.
+            string? screenArg = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-screen=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1]
+                                ?? (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase) ? "admin" : null);
+            if (screenArg is not null && _mainVm is not null)
+                _mainVm.Screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
+            // --ui-preview-shot=<png>: 주 창을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
+            if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
+            {
+                var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+                t.Tick += (_, _) =>
+                {
+                    t.Stop();
+                    try
+                    {
+                        var w = _main; int pw = (int)Math.Ceiling(w.ActualWidth), ph = (int)Math.Ceiling(w.ActualHeight);
+                        var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                        rtb.Render(w);
+                        var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        enc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+                        using var fs = System.IO.File.Create(shot);
+                        enc.Save(fs);
+                        _log?.Info($"preview shot {pw}x{ph} → {shot}");
+                    }
+                    catch (Exception ex) { _log?.Error("preview shot", ex); }
+                    Shutdown(0);
+                };
+                t.Start();
+            }
             return;
         }
         _ = RunLoginAsync();

@@ -5,10 +5,11 @@
         xmlns:v="clr-namespace:DispatchDesktop.Views"
         xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
         xmlns:svc="clr-namespace:DispatchDesktop.Services"
+        xmlns:m="clr-namespace:DispatchDesktop.Models"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:MainViewModel}"
         Style="{StaticResource Window.Base}" Title="CIMS 관제조작반" Width="1920" Height="1080" MinWidth="1200" MinHeight="700" WindowStartupLocation="CenterScreen">
-    <!-- 주 창 (§3.1): 상단 바 · 배너 레이어 · 도킹 호스트(패널 8개 = 열마다 [발신 | 채널/운영] / [메시지 | 내역]) · 토스트 레이어 -->
+    <!-- 주 창 (§3.1·§3.4): 상단 바(최상위 메뉴 4개) · 배너 레이어(어느 화면에서나) · 도킹 호스트(관제 캔버스 = 패널 8개) 위에 관제 외 화면 레이어 · 토스트 레이어 -->
     <Grid>
         <DockPanel>
             <!-- 상단 바 -->
@@ -80,7 +81,6 @@
                                 <Border Style="{StaticResource DropPanel}">
                                     <StackPanel>
                                         <Button Style="{StaticResource DropItem}" Content="설정…" Click="DropItem_Click" Command="{Binding OpenSettingsCommand}" />
-                                        <Button Style="{StaticResource DropItem}" Content="관리 — 조직·구성원·PTT 그룹·이력/녹취…" Click="Management_Click" ToolTip="조직/구성원/번호·PTT 그룹 관리(관리 범위 필요), 세션 이력 조회·녹취 재생" />
                                         <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,4" />
                                         <Button Style="{StaticResource DropItem}" Content="로그아웃" Click="DropItem_Click" Command="{Binding LogoutCommand}" />
                                         <Button Style="{StaticResource DropItem}" Content="종료" Click="DropItem_Click" Command="{Binding ExitCommand}" />
@@ -89,28 +89,66 @@
                             </Popup>
                         </Grid>
                     </StackPanel>
-                    <!-- 왼쪽: 신원·등록 점등 -->
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="CIMS 관제" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,14,0" />
-                        <TextBlock VerticalAlignment="Center" Margin="0,0,14,0">
-                            <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
-                            <Run Text="{Binding Extension, Mode=OneWay}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
-                            <Run Text="{Binding PttNumber, Mode=OneWay}" ToolTip="{Binding PttNumberFull}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
-                            <Run Text="{Binding GroupName, Mode=OneWay}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
-                            <Run Text="{Binding Pilot, Mode=OneWay}" />
-                        </TextBlock>
-                        <Border Style="{StaticResource Pill}" ToolTip="{Binding PttTip}" Visibility="{Binding HasPtt, Converter={StaticResource BoolToVis}}">
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse Style="{StaticResource Dot}" Fill="{Binding PttState, Converter={StaticResource RegBrush}}" />
-                                <TextBlock Text="PTT" FontSize="12" />
-                            </StackPanel>
-                        </Border>
-                        <Border Style="{StaticResource Pill}" ToolTip="{Binding VolteTip}" Visibility="{Binding HasVolte, Converter={StaticResource BoolToVis}}">
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse Style="{StaticResource Dot}" Fill="{Binding VolteState, Converter={StaticResource RegBrush}}" />
-                                <TextBlock Text="VoLTE" FontSize="12" />
-                            </StackPanel>
-                        </Border>
+                    <!-- 왼쪽: 로고 · 최상위 메뉴(§3.4) · 신원(이름·내선, 나머지는 툴팁) · 등록 점등 -->
+                    <StackPanel Orientation="Horizontal" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                        <TextBlock Text="CIMS 관제" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" Margin="0,0,10,0" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
+                            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" IsChecked="{Binding Screen, Converter={StaticResource Eq}, ConverterParameter=Dispatch, Mode=OneWay}"
+                                         Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.Dispatch}" ToolTip="관제 캔버스 — 채널·대기열·내 통화 (F1)">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="관제" /><Border Style="{StaticResource NavKey}"><TextBlock Text="F1" /></Border></StackPanel>
+                            </RadioButton>
+                            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" IsChecked="{Binding Screen, Converter={StaticResource Eq}, ConverterParameter=History, Mode=OneWay}"
+                                         Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.History}" ToolTip="끝난 통화·PTT 세션의 날짜별 조회·녹취 재생 (F2)">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="이력" /><Border Style="{StaticResource NavKey}"><TextBlock Text="F2" /></Border></StackPanel>
+                            </RadioButton>
+                            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" IsChecked="{Binding Screen, Converter={StaticResource Eq}, ConverterParameter=PttGroups, Mode=OneWay}"
+                                         Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.PttGroups}" ToolTip="관리 범위 안 PTT 그룹 목록·생성·편집·삭제 (F3)">
+                                <StackPanel Orientation="Horizontal"><TextBlock Text="PTT 그룹" /><Border Style="{StaticResource NavKey}"><TextBlock Text="F3" /></Border></StackPanel>
+                            </RadioButton>
+                            <RadioButton Style="{StaticResource NavItem}" GroupName="Nav" IsChecked="{Binding Screen, Converter={StaticResource Eq}, ConverterParameter=Admin, Mode=OneWay}"
+                                         Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.Admin}" IsEnabled="{Binding CanManage}">
+                                <RadioButton.ToolTip>
+                                    <TextBlock>
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="조직 · 구성원 · VoLTE/PTT 번호 관리 (F4)" />
+                                                <Style.Triggers><DataTrigger Binding="{Binding CanManage}" Value="False"><Setter Property="Text" Value="{Binding ManageHint}" /></DataTrigger></Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </RadioButton.ToolTip>
+                                <Grid>
+                                    <StackPanel Orientation="Horizontal"><TextBlock Text="관리" /><Border Style="{StaticResource NavKey}"><TextBlock Text="F4" /></Border></StackPanel>
+                                    <!-- 점 배지 = 편집 폼 열림(저장 안 함) -->
+                                    <Ellipse Width="7" Height="7" Fill="{DynamicResource Brush.Ring}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-8,-9,0"
+                                             Visibility="{Binding AdminEditing, Converter={StaticResource BoolToVis}}" ToolTip="저장하지 않은 편집 폼이 열려 있습니다" />
+                                </Grid>
+                            </RadioButton>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" DataContext="{Binding Desk}">
+                            <TextBlock VerticalAlignment="Center" Margin="0,0,14,0" Visibility="{Binding DisplayName, Converter={StaticResource StrToVis}}">
+                                <TextBlock.ToolTip>
+                                    <TextBlock>
+                                        <Run Text="{Binding PttNumberFull, Mode=OneWay}" /><LineBreak />
+                                        <Run Text="{Binding GroupName, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding Pilot, Mode=OneWay}" />
+                                    </TextBlock>
+                                </TextBlock.ToolTip>
+                                <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" />
+                                <Run Text="{Binding Extension, Mode=OneWay}" />
+                            </TextBlock>
+                            <Border Style="{StaticResource Pill}" ToolTip="{Binding PttTip}" Visibility="{Binding HasPtt, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Style="{StaticResource Dot}" Fill="{Binding PttState, Converter={StaticResource RegBrush}}" />
+                                    <TextBlock Text="PTT" FontSize="12" />
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Pill}" ToolTip="{Binding VolteTip}" Visibility="{Binding HasVolte, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Style="{StaticResource Dot}" Fill="{Binding VolteState, Converter={StaticResource RegBrush}}" />
+                                    <TextBlock Text="VoLTE" FontSize="12" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -141,6 +179,8 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <!-- 본문: 도킹 호스트(관제 캔버스, 항상 마운트 — 배치·float 창이 살아 있다) + 그 위에 겹치는 관제 외 화면 레이어(§3.4) -->
+            <Grid>
             <!-- 도킹 호스트 — 패널 8개. 열 = PTT / 일반통화, 행 = [발신 | 채널·운영] / [메시지 | 내역] -->
             <ad:DockingManager x:Name="Dock" AllowMixedOrientation="True" Margin="6">
                 <ad:LayoutRoot>
@@ -200,6 +240,12 @@
                     </ad:LayoutPanel>
                 </ad:LayoutRoot>
             </ad:DockingManager>
+            <!-- 관제 외 화면 — 요약 띠(§3.5) + 화면 호스트. 도킹 호스트는 뒤에 그대로 있다(가시성만 바뀐다) -->
+            <DockPanel Background="{DynamicResource Brush.Bg}" Visibility="{Binding IsDispatch, Converter={StaticResource NotToVis}}">
+                <v:DispatchStripView DockPanel.Dock="Top" />
+                <v:ScreenView x:Name="ScreenHost" Screen="{Binding Screen}" />
+            </DockPanel>
+            </Grid>
         </DockPanel>
         <!-- 토스트 레이어 (우하단) -->
         <ItemsControl ItemsSource="{Binding Notify.Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,18,18" Width="380">

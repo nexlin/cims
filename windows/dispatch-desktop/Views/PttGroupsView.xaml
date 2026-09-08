@@ -1,0 +1,45 @@
+<UserControl x:Class="DispatchDesktop.Views.PttGroupsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:GroupAdminViewModel}">
+    <!-- [PTT 그룹] 화면 본문(§4.7) — 관리 범위 안 그룹 전부(멤버가 아니어도). 생성·편집·삭제는 종전 GroupEditWindow(GMS XCAP) -->
+    <DockPanel Margin="10">
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Style="{StaticResource Btn.Sm}" Content="↻" ToolTip="목록 새로고침" Command="{Binding RefreshCommand}" Margin="0,0,6,0" />
+                <Button Style="{StaticResource Btn.Sm.Pri}" Content="새 그룹" Command="{Binding NewGroupCommand}" Visibility="{Binding CanCreate, Converter={StaticResource BoolToVis}}" />
+            </StackPanel>
+            <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="220" Height="26" Margin="0,0,8,0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="그룹 이름·id 검색" />
+            <TextBlock Style="{StaticResource Hint}" Text="주소록 [그룹] 탭의 생성·편집은 멤버 그룹의 빠른 경로로 그대로 둔다" VerticalAlignment="Center" />
+            <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" Margin="12,0,0,0"
+                       Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
+        </DockPanel>
+        <Border Style="{StaticResource Sub}">
+            <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Groups}" SelectedItem="{Binding Selected}" MouseDoubleClick="Groups_DoubleClick" IsEnabled="{Binding Busy, Converter={StaticResource Not}}">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:GroupAdminRow}">
+                        <Border Style="{StaticResource LogRow}">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource Btn.Xs}" Content="편집" Command="{Binding DataContext.EditGroupCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
+                                    <Button Style="{StaticResource Btn.Xs.Danger}" Content="삭제" Command="{Binding DataContext.DeleteGroupCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" />
+                                </StackPanel>
+                                <StackPanel VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Name}" FontWeight="Medium" />
+                                        <TextBlock Style="{StaticResource Muted}" Text="{Binding Meta}" FontSize="12" Margin="8,0,0,0" />
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource MonoMuted}" FontSize="11">
+                                        <Run Text="{Binding Id, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding OrgPath, Mode=OneWay}" />
+                                    </TextBlock>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+    </DockPanel>
+</UserControl>

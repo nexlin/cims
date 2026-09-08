@@ -89,6 +89,15 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
 
     private HistoryKind Kind => KindIndex == 1 ? HistoryKind.Ptt : HistoryKind.Call;
 
+    /// <summary>날짜 창 이동 — -1 전날 · +1 다음 날 · 0 오늘(§4.6). 값이 바뀌면 OnDateChanged 가 조회한다.</summary>
+    [RelayCommand] private void ShiftDate(string delta)
+    {
+        int d = int.TryParse(delta, out var n) ? n : 0;
+        var next = d == 0 ? DateTime.Today : Date.Date.AddDays(d);
+        if (next > DateTime.Today) next = DateTime.Today;
+        if (next != Date.Date) Date = next;
+    }
+
     [RelayCommand] public async Task QueryAsync()
     {
         var m = _s.Management; if (m is null) { Error = "로그인 전"; return; }

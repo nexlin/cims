@@ -48,6 +48,9 @@ public sealed partial class CallActivityViewModel : ObservableObject
 
     public event EventHandler<SessionItem>? WindowRequested;
     public event EventHandler<string>? SmsRequested;
+    /// <summary>머리 [이력에서 보기] — 끝난 통화의 날짜 창 조회는 [이력] 화면(§4.6).</summary>
+    public event EventHandler? HistoryRequested;
+    [RelayCommand] private void OpenHistory() => HistoryRequested?.Invoke(this, EventArgs.Empty);
 
     public CallActivityViewModel(DispatchSession s)
     {

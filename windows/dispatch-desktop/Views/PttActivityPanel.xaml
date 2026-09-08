@@ -13,6 +13,7 @@
                     <TextBlock Style="{StaticResource H2}" Text="② PTT 내역" Margin="6,0,10,0" />
                     <TextBlock Style="{StaticResource Muted}" Text="실시간" VerticalAlignment="Center" />
                     <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="CSV" Command="{Binding ExportCommand}" Margin="6,0,0,0" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="이력에서 보기" Command="{Binding OpenHistoryCommand}" Margin="6,0,0,0" ToolTip="끝난 PTT 세션의 날짜별 조회·녹취 — [이력] 화면(F2)" />
                     <TextBox DockPanel.Dock="Right" Style="{StaticResource Field}" Width="140" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="검색" />
                     <Border Style="{StaticResource SegGroup}" HorizontalAlignment="Right" Margin="0,0,8,0">
                         <StackPanel Orientation="Horizontal">

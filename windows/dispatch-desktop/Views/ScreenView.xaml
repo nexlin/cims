@@ -1,0 +1,49 @@
+<UserControl x:Class="DispatchDesktop.Views.ScreenView" x:Name="Root"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="clr-namespace:DispatchDesktop.Views"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:MainViewModel}">
+    <!-- 관제 외 화면 호스트(§3.4) — 화면 머리(제목·힌트·[별창으로]) + 본문. 주 창(도킹 호스트 위 레이어)과 별창(ScreenWindow)이 같은 컨트롤을 쓴다.
+         본문은 화면별 VM 을 DataTemplate 으로 그린다. 주 창 쪽은 그 화면이 별창에 나가 있으면 자리표시자만 -->
+    <UserControl.Resources>
+        <DataTemplate DataType="{x:Type vm:SessionHistoryViewModel}"><v:HistoryView /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:GroupAdminViewModel}"><v:PttGroupsView /></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DirectoryAdminViewModel}"><v:DirectoryAdminView /></DataTemplate>
+    </UserControl.Resources>
+    <DockPanel Background="{DynamicResource Brush.Bg}">
+        <!-- 화면 머리 -->
+        <Border DockPanel.Dock="Top" Height="44" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="14,0">
+            <DockPanel VerticalAlignment="Center">
+                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Content="↗ 별창으로" ToolTip="이 화면을 별창으로 떼어 두 번째 모니터에 둔다 — 닫으면 주 창으로 돌아온다"
+                        Command="{Binding PopOutScreenCommand}" CommandParameter="{Binding Screen, ElementName=Root}"
+                        Visibility="{Binding IsFloating, ElementName=Root, Converter={StaticResource NotToVis}}" />
+                <TextBlock Text="{Binding Title, ElementName=Root}" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <!-- 화면별 힌트 -->
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Screen, ElementName=Root, Converter={StaticResource EqToVis}, ConverterParameter=History}">
+                    <TextBlock Style="{StaticResource Hint}">
+                        <Run Text="끝난 세션 · 관제 그룹 " /><Run Text="{Binding Desk.GroupName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" 범위(서버 게이트) · 진행 중·오늘은 관제 ②④ 가 정본 · 하루 단위 조회" />
+                    </TextBlock>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Screen, ElementName=Root, Converter={StaticResource EqToVis}, ConverterParameter=PttGroups}">
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding GroupsScreen.Hint}" />
+                    <TextBlock Style="{StaticResource Hint}" Text=" · GMS XCAP (TS 24.481)" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Screen, ElementName=Root, Converter={StaticResource EqToVis}, ConverterParameter=Admin}">
+                    <Border Style="{StaticResource Badge.Pilot}" Visibility="{Binding AdminScreen.IsEditing, Converter={StaticResource BoolToVis}}"><TextBlock Text="편집 중 — 저장하지 않음" /></Border>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding AdminScreen.ScopeText}" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        <Grid>
+            <!-- 본문 -->
+            <ContentControl Content="{Binding Body, ElementName=Root}" Visibility="{Binding ShowPlaceholder, ElementName=Root, Converter={StaticResource NotToVis}}" />
+            <!-- 별창에 나가 있음 -->
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding ShowPlaceholder, ElementName=Root, Converter={StaticResource BoolToVis}}">
+                <TextBlock Style="{StaticResource Muted}" Text="이 화면은 별창에 열려 있습니다." FontSize="14" HorizontalAlignment="Center" />
+                <Button Style="{StaticResource Btn}" Content="별창 앞으로" Margin="0,10,0,0" HorizontalAlignment="Center" Click="ActivateFloating_Click" />
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+</UserControl>

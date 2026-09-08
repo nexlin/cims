@@ -285,6 +285,51 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
+    <!-- 상단 바 최상위 메뉴(§3.4) — 로고 옆 [관제][이력][PTT 그룹][관리]. 선택 = Primary 글자 + 아래 2px 밑줄, 비활성(관리 범위 없음) = 흐린 글자 + 툴팁 -->
+    <Style x:Key="NavItem" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="Height" Value="55" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}" BorderThickness="0,2,0,2" BorderBrush="Transparent">
+                        <ContentPresenter VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="FontWeight" Value="SemiBold" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                            <Setter TargetName="Bd" Property="BorderThickness" Value="0,2,0,2" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.BorderStrong}" />
+                            <Setter Property="Cursor" Value="No" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 메뉴 항목 옆 핫키 칩(F1~F4) -->
+    <Style x:Key="NavKey" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface2}" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="5,1" />
+        <Setter Property="Margin" Value="6,0,0,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="TextElement.FontSize" Value="10.5" />
+        <Setter Property="TextElement.FontFamily" Value="{DynamicResource Font.Mono}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Wire}" />
+    </Style>
+
     <!-- 상단 바 드롭다운(메뉴 대신 팝업 — 시스템 메뉴 색을 못 바꾸므로) -->
     <Style x:Key="DropButton" TargetType="ToggleButton">
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />

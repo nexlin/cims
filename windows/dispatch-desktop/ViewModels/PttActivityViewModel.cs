@@ -57,6 +57,9 @@ public sealed partial class PttActivityViewModel : ObservableObject
 
     public event EventHandler<string>? ChannelRequested;
     public event EventHandler<SessionItem>? WindowRequested;
+    /// <summary>머리 [이력에서 보기] — 끝난 세션의 날짜 창 조회는 [이력] 화면(§4.6).</summary>
+    public event EventHandler? HistoryRequested;
+    [RelayCommand] private void OpenHistory() => HistoryRequested?.Invoke(this, EventArgs.Empty);
 
     public PttActivityViewModel(DispatchSession s)
     {

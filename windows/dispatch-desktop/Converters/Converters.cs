@@ -88,7 +88,7 @@ public sealed class EqualsConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c) => string.Equals(value?.ToString(), p?.ToString(), StringComparison.Ordinal);
     public object ConvertBack(object? value, Type t, object? p, CultureInfo c) =>
-        value is true ? (t.IsEnum && p is string s ? Enum.Parse(t, s) : p!) : Binding.DoNothing;
+        value is true ? (t.IsEnum && p is string s ? Enum.Parse(t, s) : t == typeof(int) && p is string i ? int.Parse(i) : p!) : Binding.DoNothing;
 }
 
 public sealed class EqualsToVisibilityConverter : IValueConverter

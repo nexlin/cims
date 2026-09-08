@@ -16,6 +16,9 @@
   [발신 | 채널/운영], 아래 행 [메시지 | 내역] 의 2×2 로, 왼쪽(발신·메시지) : 오른쪽(채널·운영·내역) 기본 폭 = 1 : 2 (§3.1 의 ①~④ 구획 번호는 이 여덟 패널의
   묶음 이름으로 계속 쓴다: ① = PTT 발신+채널+메시지, ② = PTT 내역, ③ = 일반통화 발신+운영+메시지, ④ = 일반통화 내역). 관제 그룹원(2~4명,
   최대 10)의 통화 상태는 격자 보드가 아니라 일반통화 패널 첫 줄의 **상태 띠**다.
+- **상단 바는 최상위 메뉴 넷이다 — [관제 F1] · [이력 F2] · [PTT 그룹 F3] · [관리 F4].** 관제 캔버스(§3.1)가 [관제] 화면이고 나머지 셋은 별창이 아니라
+  **같은 창의 화면 전환**이다(§3.4). 도킹 배치·감청 창은 유지되고, 착신·긴급 배너와 감청 칩은 어느 화면에서나 보이며, 관제 밖 화면 위에는 **관제 요약 띠**(§3.5)가
+  상시 붙어 선택 채널·발언 상태·대기열·내 통화를 놓치지 않는다. PTT 핫키는 관제 밖에서도 선택 채널에 동작한다.
 - **패널은 도킹 패널이다.** 머리를 끌어 위치를 바꾸고, 경계를 끌어 크기를 바꾸고, 별창으로 떼어 두 번째 모니터에 둔다. 기본 배치가
   이 문서의 캔버스이고, 배치는 프리셋으로 저장·잠금한다(§3.3).
 - **화면 한 장, 스크롤 없음.** 콘솔 관제 캔버스([../console_platform.md](../console_platform.md) §3.0)와 같은 규율 — 목록이 넘치면
@@ -48,7 +51,9 @@
 | 문자(SMS·LMS) | 내선·가입자 | ③ SMS·LMS | `sendRequest(MESSAGE, text/plain)`·`onMessage` |
 | 긴급 상황 인지 | emergency/imminent/alert | 전역 배너 + ①②행 배지 | `CallInfo.mcptt.emergency/imminentPeril`, `onMessage(alert-ind)` |
 | 장치·핫키·배치 | 설정 | 상단 바 → 설정 창 / 🔒 프리셋 | `audioDevices`·`setAudioDevices`·`addPlaybackRoute`·`setCallRoute` |
-| 조직/구성원/VoLTE·PTT 번호 관리 · PTT 그룹 관리 · 세션 이력 조회·녹취 재생 | 상단 바 ⚙ → 관리 창 | §4.5 관리 창(세 탭) | `CscClient.request`(앱 `ManagementClient` — `/provisioning/directory/*`·`/provisioning/history?until=`·`/provisioning/recordings/*`) |
+| 세션 이력 조회·녹취 재생 | 상단 바 [이력] F2 · ②④ 머리 [이력에서 보기] | §4.6 이력 화면 | `CscClient.request`(앱 `ManagementClient` — `/provisioning/history?until=`·`/provisioning/recordings/*`) |
+| PTT 그룹 관리(범위 안 전부) | 상단 바 [PTT 그룹] F3 | §4.7 PTT 그룹 화면 | `/provisioning/directory/groups` + GMS XCAP(`CscClient.putGroup/deleteGroup`) |
+| 조직/구성원/VoLTE·PTT 번호 관리 | 상단 바 [관리] F4 (관리 범위 있을 때) | §4.5 관리 화면 | `ManagementClient` — `/provisioning/directory/*` |
 
 ## 3. 화면 구성
 
@@ -98,7 +103,7 @@
 
 | 요소 | 내용 |
 |---|---|
-| 상단 바 | 데스크 신원(`Profile.displayName`·내선(volte msisdn)·PTT 번호(`effectiveMcpttId`)·`dispatch.groupName(groupId)`·`pilotId`), 계정 등록 점등 2개(PTT/VoLTE — `RegState` 색: 회색 미등록·노랑 등록중·녹색 등록·빨강 실패, 툴팁에 코드·사유), **감청 중 N 칩**(보라 — 열린 감청 창 목록, 클릭 → 창 복원, §5), **배치 🔒/🔓 + 프리셋 ▾**(§3.3), 오디오 요약(헤드셋/스피커 장치명, 클릭 → 설정), PTT 핫키 표시, 시각, 설정 ⚙ |
+| 상단 바 | 왼쪽부터 로고 · **최상위 메뉴 [관제 F1] [이력 F2] [PTT 그룹 F3] [관리 F4]**(§3.4 — 선택 = Primary 글자 + 아래 밑줄, 키 칩 병기. [관리]는 관리 범위가 없으면 숨기지 않고 **비활성 + 툴팁**("조직/구성원·번호 관리는 관제 그룹의 관리 범위(콘솔 구성 > 관제 그룹 > 관리 범위)가 있어야 합니다"), 편집 폼이 열려 있으면 주황 점 배지) · 데스크 신원은 **이름·내선만**(PTT 번호(`effectiveMcpttId`)·`dispatch.groupName(groupId)`·`pilotId` 는 툴팁) · 계정 등록 점등 2개(PTT/VoLTE — `RegState` 색: 회색 미등록·노랑 등록중·녹색 등록·빨강 실패, 툴팁에 코드·사유). 오른쪽: **감청 중 N 칩**(보라 — 열린 감청 창 목록, 클릭 → 창 복원, §5), **배치 🔒/🔓 + 프리셋 ▾**(§3.3), 오디오 요약(헤드셋/스피커 장치명, 클릭 → 설정), PTT 핫키 표시, 시각, 설정 ⚙(설정·로그아웃·종료) — 56px 한 줄을 유지하고 좌측 세로 레일은 두지 않는다(두 열 951px 예산 보존) |
 | 착신 배너 | 상단 바 아래 슬라이드 — "대표번호 7000 착신 · 010-9876-5432 · [응답 F9] [거절]". 대표번호 착신(`calledParty`=pilot) 주황, 내선 직접 착신 파랑, PTT 사설콜 착신 청록. 여러 착신은 스택(최신 위). 응답 핫키는 최상단 호 |
 | 긴급 배너 | 빨강(emergency) / 주황(imminent peril) / 자주(alert) 풀폭 — 그룹명·개시자·경과, [채널로 이동]. ①카드·②행 배지와 동기. 취소(`emergency-ind=false` re-INVITE / `alert-ind=false`) 수신 시 해제 |
 | 토스트 | 명령 실패의 사유(§9 사전) — 우하단, 6초, 오류는 수동 닫기. 원문 코드는 ▸상세 |
@@ -118,6 +123,46 @@
 - 최소 크기: 운영 패널 폭 560, 내역 패널 높이 200, 운영 패널 안 오른쪽 열 320. 창 크기가 1920×1080 보다 작으면 재배열하지 않고 그대로
   (작은 화면은 OS 배율이 fit 역할).
 - 구현: WPF `Grid`+`GridSplitter` 로 기본 4분할, 도킹 이동·별창·프리셋은 AvalonDock(Xceed, MS-PL) 류 도킹 라이브러리 — 앱 층 결정(§11).
+
+### 3.4 최상위 메뉴 — 화면 전환
+
+| 메뉴 | 키 | 화면 | 활성 조건 |
+|---|---|---|---|
+| **관제** | F1 | §3.1 도킹 캔버스(패널 8개) | 항상 |
+| **이력** | F2 | §4.6 — 끝난 통화·PTT 세션의 날짜 창 조회 + 녹취 재생 | 로그인 뒤(범위는 서버 `monitor_scope`/`ptt_listen`) |
+| **PTT 그룹** | F3 | §4.7 — 관리 범위 안 그룹 목록·생성/편집/삭제 | 항상(관리 범위가 없으면 GMS 목록의 내 소유 그룹만) |
+| **관리** | F4 | §4.5 — 조직·구성원·VoLTE/PTT 번호 | `dispatch.directoryAdmin` = `own`\|`all`. 없으면 비활성 + 툴팁 |
+
+- **같은 창의 레이어 전환.** 도킹 호스트(관제 캔버스)는 항상 마운트돼 있고(배치·float 창·스플리터가 살아 있다) 관제 외 화면은 그 위에 겹치는 레이어다 —
+  가시성만 바뀐다. 배너 레이어·토스트·감청 칩은 상단 바 아래 공통이라 어느 화면에서나 보인다. 감청 창(§5)은 별창이라 영향이 없다.
+- **화면 VM 은 앱 수명 동안 하나, 서버 자료는 로그인 뒤 처음 관제 밖 화면을 열 때 한 번 적재**(이후는 화면 안 [새로고침]·저장 후 재조회). 착신 응답으로 관제에
+  다녀와도 편집 중이던 폼은 그대로다. 저장하지 않은 폼은 [관리] 메뉴의 점 배지와 화면 머리의 "편집 중" 배지로만 알리고 **전환을 막지 않는다**.
+- **자동 복귀 규칙.** 세션을 **만드는** 조작 — 배너 [응답]·당겨받기·발신·사설콜·애드혹, 전역 핫키 응답 포함 — 은 관제로 돌아온다(보류·전달·종료 버튼이 거기 있다).
+  착신(링잉)·멤버 채널 합류·감청/청취 창은 배너·칩만 띄우고 화면을 바꾸지 않는다. 긴급 배너의 [채널로 이동]은 관제로 복귀 + 해당 카드 포커스. 로그아웃·재로그인은 관제로.
+- **↗ 별창으로.** 패널의 ↗ 를 화면에도 확장 — 관제 외 화면을 별창(`ScreenWindow`, 1180×760)으로 떼어 두 번째 모니터에 둔다. 별창에도 관제 요약 띠가 붙는다. 떼어낸 동안
+  주 창 쪽은 자리표시자("이 화면은 별창에 열려 있습니다 · [별창 앞으로]")만 보이고(같은 VM 을 두 뷰가 동시에 붙지 않게 — 녹취 재생·비밀번호 상자), 별창을 닫으면 주 창
+  화면으로 돌아온다. 로그아웃 시 별창은 닫힌다.
+- **②④ → 이력.** 실시간 내역 패널 머리의 [이력에서 보기]는 종류(PTT/통화)를 맞춰 [이력]으로 넘어간다 — 오늘·진행 중은 ②④ 가 정본, 끝난 세션의 날짜 조회는 이력.
+- 개발 스위치: `--ui-preview --ui-preview-screen=history|groups|admin` = 로그인 없이 해당 화면(관리 화면은 범위 검사 생략, 목록은 "로그인 전"), `--ui-preview-shot=<png>` = 주 창을
+  WPF 로 렌더해 PNG 저장 후 종료(화면 잠금·원격 세션에서도 XAML 점검). `--ui-preview` 는 실제 앱과 다른 단일 인스턴스 이름을 써 실행 중인 관제 앱 옆에서 띄울 수 있다.
+
+### 3.5 관제 요약 띠
+
+관제 밖 화면([이력]·[PTT 그룹]·[관리], 별창 포함) 상단 32px 에 상시. 다른 VM 의 투영이라 상태를 갖지 않고 1초 틱·선택 변경 때 갱신한다.
+
+```
+│ 선택 채널 순찰1 ⚠긴급 Ctrl+1 │ 발언 김순경 ▬▬▬ 00:08  [PTT] │ 대표번호 대기열 1 │ 내 통화 통화 1 · 보류 1 │ 감청 창 1 │            [관제로 F1] │
+```
+
+| 요소 | 내용 |
+|---|---|
+| 선택 채널 | ① 선택 카드 이름 + 긴급 배지 + 채널 선택 키(`Ctrl+n`). 채널이 없으면 "채널 없음" |
+| 발언 상태 | **내 발언 중**(녹색) / **요청 중·대기열 n번째**(주황) / **발언 <이름>** + 레벨 미터 + 경과 / 대기 |
+| [PTT] | 누르는 동안 `floorRequest`, 떼거나 벗어나면 `floorRelease` — ① 카드 PTT 버튼과 같은 색 규약(대기·요청 주황·발언 중 녹색). **관제 밖에서 눌린 PTT 핫키의 결과가 여기 보인다** |
+| 대표번호 대기열 | ③ 대기열 건수(0 이상이면 주황) |
+| 내 통화 | 착신 n · 통화 n · 보류 n (없으면 "없음") |
+| 감청 창 | 열린 감청·청취 창 수(보라) |
+| [관제로 F1] | 관제 캔버스로 |
 
 ## 4. 패널 상세
 
@@ -245,19 +290,35 @@ terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받�
   문자(SMS 요약) · 청취 시작/종료(관제사 자신). 필터 [전체|대표번호|부재], 검색. 정렬: 링잉 → 진행 시작 역순 → 최근 시각 역순.
 - 로컬 링 버퍼·CSV 내보내기(②와 동일). 서버 정본은 통화 기록·녹취 이력. 범위 안 타인의 끝난 통화·SMS 는 서버 통합 이력 폴링(§13)이 최근 행에 합친다.
 
-### 4.5 관리 창 (⚙ → 관리…)
+### 4.5 관리 화면 ([관리] F4)
 
-비모달 창 하나(`ManagementWindow`, 1180×760, 앱당 하나 — 열려 있으면 활성화, 로그아웃 시 닫힘). 탭 셋:
+조직·구성원·VoLTE/PTT 번호. 활성 조건 = `dispatch.directoryAdmin` = `own`\|`all`(관제 그룹 **관리 범위** — 콘솔 `구성 > 관제 그룹 > 관리 범위`, manager 부여).
+왼쪽 **서브내비**(200px — "조직 · 구성원 · 번호" 한 항목 + 후속 항목 자리 "CSV 가져오기(예정)", 아래에 범위 안내) | 본문 = 왼쪽 **조직 트리**(범위 안, 선택 = 하위 포함 필터,
+[새 조직]/[편집]/[삭제]) · 가운데 **구성원 목록**(이름·직함·소속 경로·VoLTE/PTT 번호·자격 배지, 검색) · 오른쪽 **편집 폼** — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) +
+**VoLTE 번호 / PTT 번호** 카드(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취).
+저장 뒤 한 벌 재조회 + 전화번호부 동기화. 서버 계약 [android_ue_provisioning.md §3-3](android_ue_provisioning.md) — 범위 밖 403·번호 충돌 409 등은 서버 판정, 앱은
+사전(`ResponseText.Area.Management`) 문구.
 
-| 탭 | 활성 조건 | 내용 | 서버 계약 |
-|---|---|---|---|
-| **조직 · 구성원 · 번호** | `dispatch.directoryAdmin` = `own`\|`all`(관제 그룹 **관리 범위** — 콘솔 `구성 > 관제 그룹 > 관리 범위`, manager 부여) | 왼쪽 **조직 트리**(범위 안, 선택 = 하위 포함 필터, [새 조직]/[편집]/[삭제]) · 가운데 **구성원 목록**(이름·직함·소속 경로·VoLTE/PTT 번호·자격 배지, 검색) · 오른쪽 **편집 폼** — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) + **VoLTE 번호 / PTT 번호** 카드(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취). 저장 뒤 한 벌 재조회 + 전화번호부 동기화 | [android_ue_provisioning.md §3-3](android_ue_provisioning.md) — 범위 밖 403·번호 충돌 409 등은 서버 판정, 앱은 사전(`ResponseText.Area.Management`) 문구 |
-| **PTT 그룹** | 항상(관리 범위가 없으면 GMS 목록의 내 소유 그룹만) | 관리 범위 안 PTT 그룹 전부(`GET /provisioning/directory/groups` — 멤버가 아니어도) · 검색 · [새 그룹]/행 [편집]/[삭제] → 종전 `GroupEditWindow`(GMS XCAP PUT/DELETE — 관리 범위 안이면 소유자가 아니어도 서버가 허용). §4.1 주소록 [그룹] 탭의 생성·편집·삭제는 그대로 둔다(멤버 그룹의 빠른 경로) | [mcptt_api.md §2](../../api/mcptt_api.md) |
-| **세션 이력 · 녹취** | 관제 그룹 소속(범위는 서버 `monitor_scope`/`ptt_listen`) | 종류 [통화(VoLTE)\|PTT 세션] · 날짜(하루 단위 창 조회 — 서버 스캔 48 시간 버킷 상한) · 검색 → 행(시각·상대/그룹·응답/부재·길이·긴급/녹취 배지, 최근이 위). 녹취 행 선택 → 오른쪽 **녹취 패널**: 세그먼트 목록(순번·발언자·길이·상태) → [▶ 재생](MP4/AAC 를 받아 `MediaElement` 로 — 202 변환 중이면 0.7→1.5초 간격 최대 120초 대기 문구) · [정지] · [다시 변환](failed 표식 제거). 재생은 로컬 내역 ④ 에 "녹취 재생" 행, 서버 감사 `E-AUD-016 tap_mode=recording`. 임시 파일 `%TEMP%\CIMS\dispatch-desktop\rec`(창 닫을 때 6시간 지난 것 정리) | [android_ue_provisioning.md §3-2/§3-4](android_ue_provisioning.md) |
-
-- 관리 탭이 잠긴 상태의 안내: "조직/구성원·PTT 그룹 관리는 관제 그룹의 관리 범위(콘솔 구성 > 관제 그룹 > 관리 범위)가 있어야 합니다."
 - 앱은 범위 enum 을 해석하지 않는다 — 서버가 걸러 준 조직·구성원만 보이고, 쓰기 판정도 서버가 한다.
-- 개발 스위치 `--ui-preview --ui-preview-management` = 로그인 없이 관리 창까지(XAML 점검, 목록은 "로그인 전").
+- 폼이 열려 있는 동안(`IsEditing`) [관리] 메뉴에 점 배지, 화면 머리에 "편집 중 — 저장하지 않음". 관제로 다녀와도 폼은 유지된다(§3.4).
+
+### 4.6 이력 화면 ([이력] F2)
+
+끝난 통화·PTT 세션의 **날짜 창 조회 + 녹취 재생**. 활성 = 관제 그룹 소속(범위는 서버 `monitor_scope`/`ptt_listen`). 진행 중·오늘의 실시간 흐름은 관제 ②④ 가 정본이고
+②④ 머리의 [이력에서 보기]가 종류를 맞춰 이곳으로 넘어온다.
+
+- 도구줄: 종류 세그먼트 [통화(VoLTE) | PTT 세션] · 날짜 [◀] DatePicker [▶] [오늘](하루 단위 창 조회 — 서버 스캔 48 시간 버킷 상한, 미래로는 못 간다) · 검색 · 요약 · [조회].
+  종류·날짜가 바뀌면 자동 조회.
+- 행: 시각·종류·상대/그룹·응답/부재·길이·긴급/녹취 배지(최근이 위). 녹취 행 선택 → 오른쪽 **녹취 패널**: 세그먼트 목록(순번·발언자·길이·상태) → [▶ 재생](MP4/AAC 를 받아
+  `MediaElement` 로 — 202 변환 중이면 0.7→1.5초 간격 최대 120초 대기 문구) · [정지] · [다시 변환](failed 표식 제거). 재생은 로컬 내역 ④ 에 "녹취 재생" 행, 서버 감사
+  `E-AUD-016 tap_mode=recording`. 임시 파일 `%TEMP%\CIMS\dispatch-desktop\rec`(화면을 떠날 때 6시간 지난 것 정리). 화면을 떠나거나 별창으로 옮기면 재생은 멈춘다.
+- 서버 계약 [android_ue_provisioning.md §3-2/§3-4](android_ue_provisioning.md).
+
+### 4.7 PTT 그룹 화면 ([PTT 그룹] F3)
+
+관리 범위 안 PTT 그룹 전부(`GET /provisioning/directory/groups` — 멤버가 아니어도) · 검색 · [새 그룹]/행 [편집]/[삭제] → 종전 `GroupEditWindow`(GMS XCAP PUT/DELETE — 관리
+범위 안이면 소유자가 아니어도 서버가 허용). 관리 범위가 없으면 GMS 목록의 내 소유 그룹만 보인다. §4.1 주소록 [그룹] 탭의 생성·편집·삭제는 그대로 둔다(멤버 그룹의 빠른 경로).
+서버 계약 [mcptt_api.md §2](../../api/mcptt_api.md).
 
 ## 5. 감청 창 (팝업)
 
@@ -327,10 +388,13 @@ terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받�
 | 보류/재개 | `F11` | 활성 통화 토글 | 앱 포커스 시 |
 | 음소거 | `F12` | 활성 통화·전이중 사설콜 `setMuted` 토글 | 앱 포커스 시 |
 | 채널 선택 | `Ctrl+1..9` | ① 카드 n 선택 | 앱 포커스 시 |
+| 화면 전환 | `F1`~`F4`(고정) | [관제]·[이력]·[PTT 그룹]·[관리](§3.4) — 설정 핫키가 같은 키를 쓰면 설정 쪽이 우선 | 앱 포커스 시 |
 
 - 설정에서 재배치, 충돌(`RegisterHotKey` 실패)은 빨강 표시. 해석되지 않는 문자열(`HotKey.TryParse` 실패)은 행에 "형식 오류"를 띄우고 [저장·적용]을 막는다
   (조용히 등록만 빠지는 일이 없게). 게임패드/풋스위치는 HID 키 매핑으로 같은 경로.
 - PTT 키 hold 중 포커스가 바뀌어도 release 를 놓치지 않도록 key-up 폴링 20ms + 안전장치(Granted 후 `TalkLimit` 는 코어가 자동 Release).
+- **입력란 규칙**: 텍스트/비밀번호 상자에 포커스가 있을 때 앱 포커스 핫키는 **글자를 넣는 키(수식키 없는 비-F키)만 양보**한다. 관리 화면은 입력 폼투성이라 여기서 전부
+  버리면 전역 등록 실패(충돌) 폴백 PTT 와 화면 전환이 죽는다. PTT 키는 `Ctrl+Space` 처럼 글자를 넣지 않는 조합이 기본이다.
 
 ## 9. 응답 코드 → 화면 문구 (사전)
 
@@ -371,17 +435,23 @@ terminated = 부재 1건(내 leg 가 응답 없이 끝난 것은 동료가 받�
 
 ```
 windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-windows, CommunityToolkit.Mvvm · Dirkster.AvalonDock · Microsoft.Data.Sqlite
-  App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·네트워크 복귀 재등록. `--ui-preview` = 로그인 없이 메인(개발)
-  Shell/MainWindow.xaml         상단 바(드롭다운은 Popup — 시스템 메뉴는 테마 색을 못 입힌다) · 배너 레이어 · AvalonDock 도킹 호스트(패널 8개 LayoutAnchorable,
-                                ContentId pttcall/ptt/pttmsg/pttlog · callorig/call/sms/calllog, 열마다 [발신 | 채널·운영] / [메시지 | 내역]) · 토스트 레이어
+  App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·네트워크 복귀 재등록. 개발 스위치 `--ui-preview`(로그인 없이 메인,
+                                별도 인스턴스 이름) · `--ui-preview-screen=history|groups|admin` · `--ui-preview-shot=<png>`(§3.4)
+  Shell/MainWindow.xaml         상단 바(최상위 메뉴 4개 = `NavItem` RadioButton + `NavKey` 키 칩, 드롭다운은 Popup — 시스템 메뉴는 테마 색을 못 입힌다) · 배너 레이어 ·
+                                본문 Grid = AvalonDock 도킹 호스트(패널 8개 LayoutAnchorable, ContentId pttcall/ptt/pttmsg/pttlog · callorig/call/sms/calllog, 열마다
+                                [발신 | 채널·운영] / [메시지 | 내역] — 항상 마운트) 위에 관제 외 화면 레이어(`DispatchStripView` + `ScreenView`, `IsDispatch` 로 가시성) · 토스트 레이어
   Themes/Controls.xaml          기본 컨트롤(ScrollBar·ComboBox·CheckBox·RadioButton·TabControl·ToolTip·TextBox)의 테마 템플릿 — Light/Dark 브러시로만 그린다.
                                 도킹 크롬은 AvalonDock VS2013 Light/Dark 테마를 앱 테마와 함께 전환
-                                코드비하인드: 배치 잠금(CanMove/CanFloat)·프리셋(XmlLayoutSerializer → layout.json)·감청 창 관리·앱 포커스 핫키·트레이 최소화·종료 확인
+                                코드비하인드: 배치 잠금(CanMove/CanFloat)·프리셋(XmlLayoutSerializer → layout.json)·감청 창 관리·화면 별창 관리(화면당 하나)·앱 포커스 핫키(F1~F4 포함,
+                                입력란 규칙 §8)·트레이 최소화·종료 확인
   Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 본문, 위치 기억, 닫기 = 종료(확인), 세션 종료 → 3초 후 자동 닫힘
   Shell/LoginWindow · SettingsWindow · PromptWindow
-  Shell/ManagementWindow.xaml    관리 창(§4.5) — TabControl 세 탭, PasswordBox 3개(SIP/로그인 비밀번호)·확인 대화상자·GroupEditWindow 열기·MediaElement 재생만 코드비하인드
+  Shell/ScreenWindow.xaml       화면 별창(§3.4) — 요약 띠 + `ScreenView(IsFloating)` 하나, 닫히면 `MainViewModel.OnScreenWindowClosed`
   ViewModels/
-    MainViewModel               패널 VM 조립 · 패널 간 연동(발신 필드 채움·스레드 따라가기·[채널] 포커스) · 전역 핫키 → 동작 · 감청 창 열기/닫기 요청
+    MainViewModel               패널 VM 조립 · 패널 간 연동(발신 필드 채움·스레드 따라가기·[채널] 포커스) · 전역 핫키 → 동작 · 감청 창 열기/닫기 요청 ·
+                                최상위 메뉴(`Screen`·`ShowScreen`·`PopOutScreen`·`PoppedOut`, 화면 VM 셋 = HistoryScreen/GroupsScreen/AdminScreen 을 앱 수명 동안 하나씩 소유,
+                                로그인 뒤 첫 진입 때 `LoadScreensAsync`) · 자동 복귀 규칙(`ReturnIfSessionStarted`) · ②④ [이력에서 보기]
+    DispatchSummaryViewModel    관제 요약 띠(§3.5) — PttChannels 선택 카드·CallDesk 대기열·세션 통화·Desk 감청 창 수의 투영
     DeskViewModel               Profile·dispatch·등록 상태·오디오 요약·감청 중 N 칩·배치 잠금/프리셋 (상단 바)
     PttChannelsViewModel        ① 왼쪽 — ChannelCard(멤버/사설콜/애드혹) · FloorState · 선택 채널(애드혹 우선 자동 선택) · 카드/타일 모드
     PttOriginateViewModel       ① 오른쪽 위 — 사설콜/애드혹 모드 · PTT 주소록(사용자/그룹) · 애드혹 선택 칩
@@ -392,8 +462,9 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     SmsMessagesViewModel        ③ 오른쪽 아래 — text/plain MESSAGE 스레드 · token 상관 · 외부망 비활성
     CallActivityViewModel       ④ — 세션 행(dialog 쌍 결합) + 최근 기록
     MonitorWindowViewModel      감청 창 하나(join 호 또는 listenOnly 그룹콜) · MediaSource 미터
-    ManagementViewModel         관리 창 조립(§4.5) — DirectoryAdminViewModel(조직 트리·구성원·편집 폼) · GroupAdminViewModel(범위 안 그룹 목록·GroupEditViewModel 재사용) ·
-                                SessionHistoryViewModel(하루 창 조회·녹취 세그먼트·재생 상태)
+    DirectoryAdminViewModel     [관리] 화면(§4.5) — 조직 트리·구성원·편집 폼, `IsEditing`(메뉴 점 배지)
+    GroupAdminViewModel         [PTT 그룹] 화면(§4.7) — 범위 안 그룹 목록·GroupEditViewModel 재사용
+    SessionHistoryViewModel     [이력] 화면(§4.6) — 하루 창 조회(`ShiftDate`)·녹취 세그먼트·재생 상태
     LoginViewModel · SettingsViewModel
   Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(창) · isMcptt&&privateCall→사설콜(①) · groupId adhoc-→애드혹(①) · isMcptt→멤버 채널(①) ·
            listenOnly&&joinedDialog→VoLTE 감청(창) · 그 외 VoLTE 통화(③). SessionItem·GroupInfo·DialogRow·Message/MessageThread·ActivityRow·Contact
@@ -402,7 +473,9 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
             HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) · DirectoryService(그룹원·PTT 사용자·연락처 CSV) ·
             ResponseText(§9 사전 + Area.Management/Recording 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·
             ManagementClient(관리 평면 — CscClient.Request 위 얇은 클라이언트: directory admin CRUD·그룹 목록·이력 창 조회·녹취 메타/오디오 202 재시도)
-  Views/    PttChannelsPanel · PttOriginateView · MessagesView(MCData/SMS 공용) · PttActivityPanel · CallDeskPanel · CallOriginateView · CallActivityPanel
+  Views/    PttChannelsPanel · PttOriginateView · MessagesView(MCData/SMS 공용) · PttActivityPanel · CallDeskPanel · CallOriginateView · CallActivityPanel ·
+            DispatchStripView(요약 띠 — PTT 누름/뗌만 코드비하인드) · ScreenView(화면 호스트 — 머리·[별창으로]·자리표시자, 화면 VM 타입별 DataTemplate) ·
+            HistoryView(MediaElement — Loaded~Unloaded 사이에만 재생 이벤트 구독) · PttGroupsView · DirectoryAdminView(서브내비 + 3열, PasswordBox 3개·확인 대화상자는 소유 창 기준)
   Themes/   Light/Dark(같은 키) · Styles(패널·카드·버튼·배지·칩·미터)  Converters/  표시 규약 변환기
 ```
 
@@ -420,12 +493,11 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 ## 12. Android 태블릿 밀도
 
-같은 네 패널을 가로 태블릿(1280×800)에 **탭 2개**로: [PTT](① 위 · ② 아래) / [일반통화](③ 위 · ④ 아래). 감청 창은 전면 시트(bottom sheet), 착신·긴급
-배너와 PTT 하드키(UNIWA 측면 키)는 공통, 카드 모드는 "타일". 상세는 `android/dispatch-tablet` 구현 시 이 절을 확장한다.
+최상위 메뉴 넷(§3.4)은 **하단 내비**로, [관제] 안에서 같은 네 패널을 가로 태블릿(1280×800)에 **탭 2개**로: [PTT](① 위 · ② 아래) / [일반통화](③ 위 · ④ 아래).
+관제 요약 띠(§3.5)는 관제 밖 화면 상단에 같이 붙는다. 감청 창은 전면 시트(bottom sheet), 착신·긴급 배너와 PTT 하드키(UNIWA 측면 키)는 공통, 카드 모드는 "타일".
+상세는 `android/dispatch-tablet` 구현 시 이 절을 확장한다.
 
 ## 13. 미해결 / 향후 과제
-
-- **최상위 메뉴 구조로 재설계(다음 작업)** — 지금은 관리 기능(§4.5)이 ⚙ 설정 드롭다운 아래 항목 하나로 숨어 있다. 상단 바를 **[관제] · [PTT 그룹] · [이력 조회] · [관리(조직/구성원/번호)]** 네 메뉴(주 화면 전환)로 바꾸는 안을 검토한다 — 관제 캔버스(§3)는 [관제] 화면 그대로, 나머지 셋은 별창이 아니라 같은 창의 화면 전환(도킹 배치·감청 창은 유지). 착신·긴급 배너와 감청 칩은 어느 화면에서도 보여야 하고, PTT 핫키는 [관제] 밖에서도 선택 채널에 동작해야 한다. §3.2 상단 바·§4.5·§11 구조를 이 설계로 다시 쓴다.
 
 - **주소록 소스 = 서버 회사 전화번호부** `GET /provisioning/directory?service=volte|ptt`([android_ue_provisioning.md](android_ue_provisioning.md) §3-1 — 조직 트리 +
   가입자, ETag/304, Android 연락처 탭과 같은 소스·동선: 조직 범위 선택 + 조직별 섹션 + 검색 + 홈 국가 로컬 표기). 앱은 `directory-cache.json` 에 캐시한다.
@@ -438,9 +510,10 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   (프로비저닝 `ptt.allowCreateGroup`), 편집·삭제 = 본인 소유(`authorized_user_id`) 그룹만 — 서버 구현 요청은 위 요청서 §1.
   앱: PTT 주소록 [그룹] 탭 [새 그룹]·행 [편집]·[삭제] → `GroupEditWindow` → `CscClient.PutGroup/DeleteGroup` → `RefreshGroupsAsync`
   (GMS 목록 재조회 + 신규 그룹 affiliation·conference 구독, 삭제 그룹 해제).
-- **조직·구성원·번호 관리 = 관리 창(§4.5)** — 관제 그룹 `directory_admin` 범위 안에서 앱이 직접 편집하고(`/provisioning/directory/*`), 관제 그룹 편성
-  (멤버·대표번호·감청/청취/관리 범위)은 여전히 콘솔 `구성 > 관제 그룹` 몫이다. 남은 것: 조직 트리 드래그 이동, 구성원 일괄 가져오기(CSV — 콘솔 import 와 같은 형식),
-  회선 여러 개인 구성원(앱은 종류당 첫 번호만 관리).
+- **조직·구성원·번호 관리 = 관리 화면(§4.5)** — 관제 그룹 `directory_admin` 범위 안에서 앱이 직접 편집하고(`/provisioning/directory/*`), 관제 그룹 편성
+  (멤버·대표번호·감청/청취/관리 범위)은 여전히 콘솔 `구성 > 관제 그룹` 몫이다. 남은 것: 조직 트리 드래그 이동, 구성원 일괄 가져오기(CSV — 콘솔 import 와 같은 형식,
+  관리 화면 서브내비의 "예정" 자리), 회선 여러 개인 구성원(앱은 종류당 첫 번호만 관리).
+- **별창 화면의 위치 기억** — 화면 별창(§3.4)은 아직 위치·크기를 프리셋에 넣지 않는다(감청 창처럼 `layout.json` 에 기억할 것).
 - **청취 범위 그룹의 conference 이벤트 구독**은 서버가 인가한다([dispatch_center.md §5.6](dispatch_center.md), TS 24.379 §10.1.3.4.1) — `pttTargets[]`
   그룹 구독은 200(② 진행 중 행의 "진행/참가자 수" 소스), 범위 밖·자격 없음은 **403 + `Warning: 138`**(앱은 `Area.PttListen` 403 문구로 흡수, 재시도
   루프 금지), 브로드캐스트 그룹은 480 + Warning 105.

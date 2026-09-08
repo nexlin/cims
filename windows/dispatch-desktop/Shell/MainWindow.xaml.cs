@@ -1,4 +1,5 @@
-// 주 창 — 도킹 배치 잠금·프리셋(AvalonDock 직렬화)·감청 창 관리(§5)·앱 포커스 핫키(§8)·트레이 최소화·종료 확인(§6).
+// 주 창 — 도킹 배치 잠금·프리셋(AvalonDock 직렬화)·감청 창 관리(§5)·앱 포커스 핫키(§8, 화면 전환 F1~F4 포함)·화면 별창 관리(§3.4)·
+// 트레이 최소화·종료 확인(§6).
 using System.ComponentModel;
 using System.IO;
 using System.Windows;
@@ -16,6 +17,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _vm;
     private readonly LayoutStore _layout;
     private readonly Dictionary<int, MonitorWindow> _monitors = new();
+    private readonly Dictionary<AppScreen, ScreenWindow> _screens = new();
     private bool _exitConfirmed;
 
     public MainWindow(MainViewModel vm, LayoutStore layout)
@@ -31,7 +33,9 @@ public partial class MainWindow : Window
         vm.Desk.PresetApplyRequested += (_, name) => ApplyPreset(name);
         vm.Desk.PresetSaveRequested += (_, name) => SavePreset(name);
         vm.Desk.SettingsRequested += (_, _) => OpenSettings();
-        vm.GroupEditRequested += (_, g) => { var w = new GroupEditWindow(g) { Owner = this }; w.ShowDialog(); };
+        vm.GroupEditRequested += (_, g) => { var w = new GroupEditWindow(g) { Owner = _screens.TryGetValue(AppScreen.PttGroups, out var sw) && sw.IsActive ? sw : this }; w.ShowDialog(); };
+        vm.ScreenPopOutRequested += (_, s) => OpenScreenWindow(s);
+        ScreenHost.ActivateFloatingRequested += (_, s) => { if (_screens.TryGetValue(s, out var w)) w.BringToFront(); };
         vm.GroupDeleteRequested += (_, g) => DeleteGroup(g);
         vm.Desk.LogoutRequested += (_, _) => { if (ConfirmLeave("로그아웃")) { _exitConfirmed = true; ((App)Application.Current).Logout(); } };
         vm.Desk.ExitRequested += (_, _) => { if (ConfirmLeave("종료")) { _exitConfirmed = true; ((App)Application.Current).ExitApp(); } };
@@ -152,10 +156,11 @@ public partial class MainWindow : Window
         w.Show();                                     // 포커스를 훔치지 않는다(ShowActivated=false)
     }
 
-    // ── 앱 포커스 핫키 (§8): 보류/음소거·Ctrl+1..9 ──
+    // ── 앱 포커스 핫키 (§8): 보류/음소거·Ctrl+1..9·화면 전환 F1~F4 ──
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.FocusedElement is System.Windows.Controls.TextBox) return;
+        // 입력란에 포커스가 있으면 "글자를 넣는 키"만 양보한다 — 관리 화면은 입력 폼투성이라 여기서 다 버리면 폴백 PTT·화면 전환이 죽는다
+        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.PasswordBox && IsTypingKey(e)) return;
         var map = _vm.Session.Settings.Current.HotKeys;
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key >= Key.D1 && e.Key <= Key.D9) { _vm.SelectChannel(e.Key - Key.D0); e.Handled = true; return; }
         foreach (var name in HotKeyMap.LocalNames)
@@ -163,6 +168,17 @@ public partial class MainWindow : Window
         // 전역 핫키 등록에 실패한 키(충돌)는 앱 포커스에서라도 동작
         foreach (var name in _vm.HotKeys.Conflicts)
             if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e) && !e.IsRepeat) { _vm.OnHotKey(name, true); e.Handled = true; return; }
+        // 화면 전환 F1~F4 — 설정 핫키가 같은 키를 쓰면 위에서 먼저 잡힌다
+        if (Keyboard.Modifiers == ModifierKeys.None && AppScreens.OfFunctionKey(e.Key) is { } screen && !e.IsRepeat)
+        { _vm.ShowScreenCommand.Execute(screen); e.Handled = true; }
+    }
+
+    /// <summary>입력란이 소비할 키인가 — 수식키(Ctrl/Alt/Win) 없는, F키가 아닌 키.</summary>
+    private static bool IsTypingKey(KeyEventArgs e)
+    {
+        if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) != 0) return false;
+        var k = e.Key == Key.System ? e.SystemKey : e.Key;
+        return k is < Key.F1 or > Key.F24;
     }
 
     private void OnKeyUp(object sender, KeyEventArgs e)
@@ -194,16 +210,14 @@ public partial class MainWindow : Window
         await _vm.Session.DeleteGroupAsync(g);
     }
 
-    // ── 관리 창(§4.5) — 비모달 하나. 열려 있으면 활성화 ──
-    private ManagementWindow? _management;
-    private void Management_Click(object sender, RoutedEventArgs e)
+    // ── 화면 별창(§3.4) — 화면당 하나. 닫히면 주 창 화면으로 돌아온다 ──
+    private void OpenScreenWindow(AppScreen s)
     {
-        DropItem_Click(sender, e);
-        if (_management is { IsLoaded: true }) { if (_management.WindowState == WindowState.Minimized) _management.WindowState = WindowState.Normal; _management.Activate(); return; }
-        if (_vm.Session.Management is null) { _vm.Notify.Warn("로그인 뒤에 열 수 있습니다"); return; }
-        _management = new ManagementWindow(new ManagementViewModel(_vm.Session)) { Owner = this };
-        _management.Closed += (_, _) => _management = null;
-        _management.Show();
+        if (_screens.TryGetValue(s, out var existing)) { existing.BringToFront(); return; }
+        var w = new ScreenWindow(_vm, s) { Owner = this };
+        w.Closed += (_, _) => _screens.Remove(s);
+        _screens[s] = w;
+        w.Show();
     }
 
     // ── 설정·종료 ──
@@ -243,7 +257,7 @@ public partial class MainWindow : Window
     {
         PersistWindow();
         foreach (var w in _monitors.Values.ToList()) w.CloseFromSession();
-        _management?.Close(); _management = null;
+        foreach (var w in _screens.Values.ToList()) w.Close();
         _exitConfirmed = false;
         Hide();
     }

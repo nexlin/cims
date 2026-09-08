@@ -99,12 +99,16 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
     public bool HasVolte => _origVolte.Length > 0;
     public bool HasPtt => _origPtt.Length > 0;
     public bool HasError => Error.Length > 0;
+    /// <summary>편집 폼이 열려 있다 — [관리] 메뉴의 점 배지(§3.4). 화면을 오가도 폼은 유지된다.</summary>
+    public bool IsEditing => OrgEditing || MemberEditing;
 
     /// <summary>확인 대화상자 — 창이 붙인다(제목, 본문) → 예/아니오.</summary>
     public Func<string, string, bool>? Confirm { get; set; }
 
     partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
     partial void OnOrgIsNewChanged(bool value) => OnPropertyChanged(nameof(OrgFormTitle));
+    partial void OnOrgEditingChanged(bool value) => OnPropertyChanged(nameof(IsEditing));
+    partial void OnMemberEditingChanged(bool value) => OnPropertyChanged(nameof(IsEditing));
     partial void OnOrgCodeChanged(string value) => OnPropertyChanged(nameof(OrgFormTitle));
     partial void OnMemberIsNewChanged(bool value) => OnPropertyChanged(nameof(MemberFormTitle));
     partial void OnEditNameChanged(string value) => OnPropertyChanged(nameof(MemberFormTitle));

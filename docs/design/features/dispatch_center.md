@@ -462,7 +462,7 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
   로 게이트 — 범위 한정 보관은 멤버십 변동 시 이력 결손이라 채택 안 함, [mcdata_messaging.md §4.3](mcdata_messaging.md)).
 - **감사**: 열람 자체가 당사자 모르게 이력을 여는 동작이라 `E-AUD-016 call_monitored`(`tap_mode=history`,
   `hist_kind`·`count` 포함)로 남기고 열람은 §5.7 과 같은 manager 게이트를 받는다.
-- **창 조회**: 같은 API 에 `until` 을 주면 [since, until] 창(관제 앱 관리 창의 이력 탭 — 하루 단위 페이지)이고,
+- **창 조회**: 같은 API 에 `until` 을 주면 [since, until] 창(관제 앱 [이력] 화면 — 하루 단위 페이지)이고,
   없으면 폴링 커서다. 종료분 항목에는 녹취 식별자 `recordingId`(세션 디렉터리의 `ServiceLogging.Dir` 상대 경로 — OAM
   `/api/v1/recordings/{id}` 와 같은 키)와 `hasRecording` 이 실린다.
 
