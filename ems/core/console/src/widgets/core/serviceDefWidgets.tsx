@@ -176,7 +176,7 @@ function JsonEditor({ initial, title, onClose, onSaved }: {
         style={{ width: '100%', height: 360, fontFamily: 'Consolas, monospace', fontSize: 12,
                  padding: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius)',
                  background: 'var(--muted)', color: 'var(--foreground)', resize: 'vertical' }} />
-      <div className="modal-footer">
+      <div className="flex justify-end gap-2.5 pt-5">
         <Button size="default" onClick={onClose} disabled={saving}>취소</Button>
         <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>

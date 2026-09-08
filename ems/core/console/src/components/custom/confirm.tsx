@@ -54,14 +54,14 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
       <Dialog open={opts !== null} onOpenChange={open => { if (!open) settle(false) }}>
         {/* 치수는 Figma Modal(392:108) 실측: 머리 아래 구분선 · 좌우 20 · 버튼 사이 8 */}
         {opts && (
-          <DialogContent className="max-w-[560px] gap-0 p-0" onEscapeKeyDown={() => settle(false)}>
-            <DialogHeader className="border-b border-border px-5 py-4">
-              <DialogTitle className="text-base">{opts.title}</DialogTitle>
+          <DialogContent onEscapeKeyDown={() => settle(false)}>
+            <DialogHeader>
+              <DialogTitle>{opts.title}</DialogTitle>
             </DialogHeader>
             <DialogDescription asChild>
               <div className="px-5 py-4 text-md text-muted-foreground">{opts.body}</div>
             </DialogDescription>
-            <DialogFooter className="px-5 pb-4 sm:space-x-2">
+            <DialogFooter>
               <Button variant="outline" onClick={() => settle(false)}>
                 {opts.cancelLabel ?? '취소'}
               </Button>

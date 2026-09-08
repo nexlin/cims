@@ -263,7 +263,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      <div className="modal-footer" style={{ marginTop: 14 }}>
+      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 14 }}>
         <Button size="default" onClick={resetDefault} disabled={saving}
                 style={{ marginRight: 'auto' }}>기본값으로</Button>
         <Button size="default" onClick={onClose} disabled={saving}>취소</Button>

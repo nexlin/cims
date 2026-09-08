@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable as TableFrame, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import Modal from '@core/components/Modal'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -920,13 +921,8 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
     finally { setBusy(false); e.target.value = '' }
   }
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-title">사용자·번호 Excel 가져오기</span>
-          <button className="modal-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
-        </div>
-        <div className="modal-body">
+    <Modal title="사용자·번호 Excel 가져오기" onClose={onClose}>
+        <div>
           <p style={{ marginBottom: 12 }}>사용자 + VoLTE/PTT 번호를 한 Excel(.xlsx)로 일괄 등록합니다.</p>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
             <Button asChild variant="default" size="default">
@@ -958,8 +954,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
             </div>
           )}
         </div>
-        <div className="modal-footer"><Button variant="ghost" size="default" onClick={onClose}>닫기</Button></div>
-      </div>
-    </div>
+        <div className="flex justify-end gap-2.5 pt-5"><Button variant="ghost" size="default" onClick={onClose}>닫기</Button></div>
+    </Modal>
   )
 }

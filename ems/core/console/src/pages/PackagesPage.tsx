@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deploymentApi, type SipPackage, type Deployment } from '../api/deployment'
@@ -11,6 +11,7 @@ import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
+import Modal from '@core/components/Modal'
 
 interface ModuleGroup {
  name: string
@@ -337,13 +338,8 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
  onClose: () => void
 }) {
  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" style={{ width: 640 }} onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-title">{pkg.name} v{pkg.version} — 배포된 서버</span>
-          <button className="modal-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
-        </div>
-        <div className="modal-body">
+    <Modal title={`${pkg.name} v${pkg.version} — 배포된 서버`} onClose={onClose} width={640}>
+        <div>
           {deployments.length === 0 ? (
             <EmptyState title="배포된 곳 없음" />
           ) : (
@@ -374,10 +370,9 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
             </DataTable>
           )}
         </div>
-        <div className="modal-footer" style={{ marginTop: 16 }}>
+        <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
           <Button size="default" onClick={onClose}>닫기</Button>
         </div>
-      </div>
-    </div>
+    </Modal>
   )
 }

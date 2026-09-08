@@ -175,7 +175,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
         </DataTable>
       )}
 
-      <div className="modal-footer" style={{ marginTop: 16 }}>
+      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
         <Button size="default" onClick={closeModal}>닫기</Button>
         <Button variant="default" size="default" disabled={busy || stats.pending === 0}
           onClick={uploadAll}>

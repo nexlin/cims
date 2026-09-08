@@ -1,6 +1,6 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import React, { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, ChevronRight, Dot, Pencil, Plus, RotateCw, Trash2, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Dot, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import IconBtn from '@core/components/IconBtn'
 import { orgApi, type Organization, type OrgInput } from '@core/api/organizations'
 import { useToast } from '@core/components/Toast'
@@ -9,6 +9,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import Modal from '@core/components/Modal'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {
@@ -375,14 +376,8 @@ export default function OrganizationsPage() {
 
       {/* Excel Import 모달 */}
       {importOpen && (
-        <div className="modal-overlay" onClick={() => { setImportOpen(false); setImportResult(null) }}>
-          <div className="modal-box" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">조직 Excel 가져오기</span>
-              <button className="modal-close" aria-label="닫기"
-              onClick={() => { setImportOpen(false); setImportResult(null) }}><X size={16} /></button>
-            </div>
-            <div className="modal-body">
+        <Modal title="조직 Excel 가져오기" onClose={() => { setImportOpen(false); setImportResult(null) }}>
+            <div>
               <p style={{ marginBottom: 12 }}>조직 계층을 Excel(.xlsx)로 일괄 등록합니다.</p>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
                 <Button asChild variant="default" size="default">
@@ -406,11 +401,10 @@ export default function OrganizationsPage() {
                 </div>
               )}
             </div>
-            <div className="modal-footer">
+            <div className="flex justify-end gap-2.5 pt-5">
               <Button variant="ghost" size="default" onClick={() => { setImportOpen(false); setImportResult(null) }}>닫기</Button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   )

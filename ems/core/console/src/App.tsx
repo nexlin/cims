@@ -1,4 +1,4 @@
-import { KeyRound, X } from 'lucide-react'
+import { KeyRound } from 'lucide-react'
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
@@ -27,6 +27,7 @@ import './index.css'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { EmptyState } from '@core/components/custom/empty-state'
+import Modal from '@core/components/Modal'
 
 const SIDEBAR_COLLAPSED_KEY = 'cims_sidebar_collapsed'
 
@@ -223,14 +224,9 @@ function Shell() {
      </MenuProvider>
 
       {showChgPw && (
-        <div className="modal-overlay" onClick={() => setShowChgPw(false)}>
-          <div className="modal-box" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title inline-flex items-center gap-1.5"><KeyRound size={16} /> 비밀번호 변경</span>
-              <button className="modal-close" onClick={() => setShowChgPw(false)} aria-label="닫기"><X size={16} /></button>
-            </div>
+        <Modal title={<span className="inline-flex items-center gap-1.5"><KeyRound size={16} /> 비밀번호 변경</span>}
+               onClose={() => setShowChgPw(false)}>
             <form onSubmit={handleChangePassword}>
-              <div className="modal-body">
                 <div className="form-grid">
                   <label>현재 비밀번호</label>
                   <Input  type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
@@ -241,14 +237,12 @@ function Shell() {
                 </div>
                 {chgError && <div className="auth-error" style={{ marginTop: 12 }}>{chgError}</div>}
                 {chgOk && <div className="auth-ok" style={{ marginTop: 12 }}>{chgOk}</div>}
-              </div>
-              <div className="modal-footer">
+              <div className="flex justify-end gap-2.5 pt-5">
                 <Button size="default" type="button" onClick={() => setShowChgPw(false)}>취소</Button>
                 <Button variant="default" size="default" type="submit">변경</Button>
               </div>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
       </ConfirmProvider>
     </ToastProvider>

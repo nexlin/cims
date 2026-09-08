@@ -83,7 +83,7 @@ export function ServiceForm({ initial, onClose, onSaved }: {
           모듈 · 알람 규칙 · 데이터 소스는 각 위젯에서 항목별로 추가/편집합니다.
         </div>
       </div>
-      <div className="modal-footer">
+      <div className="flex justify-end gap-2.5 pt-5">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
         <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
@@ -142,7 +142,7 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
           <input type="checkbox" checked={!!m.controllable} onChange={e => up({ controllable: e.target.checked })} />제어
         </label>
       </div>
-      <div className="modal-footer">
+      <div className="flex justify-end gap-2.5 pt-5">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
         <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
@@ -243,7 +243,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
                   onChange={e => up({ recommended_action: e.target.value })} /></Field>
               </div>
       </div>
-      <div className="modal-footer">
+      <div className="flex justify-end gap-2.5 pt-5">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
         <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>
@@ -398,7 +398,7 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
           </div>
         )}
       </div>
-      <div className="modal-footer">
+      <div className="flex justify-end gap-2.5 pt-5">
         <Btn onClick={onClose} disabled={saving}>취소</Btn>
         <Button variant="default" size="default" onClick={save} disabled={saving}>저장</Button>
       </div>

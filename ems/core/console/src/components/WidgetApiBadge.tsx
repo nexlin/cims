@@ -8,9 +8,7 @@
 // 보기 모드: 위젯 래퍼 우상단 오버레이. 편집 모드: 위젯 카드 헤더에 인라인.
 // 상세는 요청/응답/오류/비고 4개 섹션이고, 경로·curl·예시는 **내용을 먼저 보여주고** 옆의 [복사]로 담는다.
 
-import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
 import { loadApiDocs, type ApiDoc, type ApiDocAuth } from '../api/apiDocs'
@@ -19,6 +17,7 @@ import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
+import Modal from '@core/components/Modal'
 
 const METHOD_COLOR: Record<string, BadgeTone> = {
   GET: 'successSoft', POST: 'brandSoft', PUT: 'warningSoft', DELETE: 'dangerSoft',
@@ -282,32 +281,19 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
           모달을 그 자리에 렌더하면 카드에 갇힌다(클리핑·스태킹). 또한 React 이벤트는 **DOM 이 아니라
           컴포넌트 트리**를 타고 버블링하므로, portal 뒤에도 pointer 이벤트를 여기서 끊어야 드래그
           핸들이 반응하지 않는다 (안 끊으면 모달 클릭이 위젯 이동으로 먹혀 닫기 버튼조차 안 눌린다). */}
-      {open && createPortal(
-        <div className="modal-overlay"
-             onClick={() => setOpen(false)}
-             onPointerDown={e => e.stopPropagation()}
-             onPointerUp={e => e.stopPropagation()}
-             onPointerMove={e => e.stopPropagation()}>
-          {/* 크기 고정 — API 항목 수·상세 펼침과 무관하게 항상 같은 창. .modal-box 는 flex 컬럼 +
-              max-height 라 기본값은 내용만큼 늘어난다. height 를 못박고 overflow 를 본문으로 넘긴다. */}
-          <div className="modal-box modal-box--wide" onClick={e => e.stopPropagation()}
-               style={{ width: 'min(940px, 96vw)',
-                        height: 'min(76vh, calc(100vh - 80px))',
-                        overflow: 'hidden' }}>
-            <div className="modal-header">
-              <span className="modal-title">{'</>'} {title || '위젯'} — 사용 API</span>
-              <button className="modal-close" onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></button>
-            </div>
-            <div className="modal-body" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      {open && (
+        /* 크기 고정 — API 항목 수·상세 펼침과 무관하게 항상 같은 창. */
+        <Modal title={`${'</>'} ${title || '위젯'} — 사용 API`} onClose={() => setOpen(false)}
+               width="min(940px, 96vw)">
+            <div>
               <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>
                 {docs.length}건. 각 API 를 구현한 모듈이 선언한 정보이며, 모듈이 설치·가용할 때만 표시됩니다.
                 예시는 합성 데이터입니다.
               </div>
               {docs.map(a => <ApiRow key={a.id} a={a} />)}
             </div>
-          </div>
-        </div>,
-        document.body)}
+        </Modal>
+      )}
     </>
   )
 }

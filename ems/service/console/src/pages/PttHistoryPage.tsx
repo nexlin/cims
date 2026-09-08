@@ -32,6 +32,7 @@ import { fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
+import Modal from '@core/components/Modal'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -490,13 +491,10 @@ export default function PttHistoryPage() {
       {audio.node}
 
       {player && (
-        <div className="modal-overlay" onClick={() => setPlayer(null)}>
-          <div className="modal-box" style={{ width: 800, maxWidth: 'calc(100vw - 40px)' }} onClick={e => e.stopPropagation()}>
-            {player.title && <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{player.title}</div>}
-            <SegmentPlayer segments={player.segments} recordingId={player.id} callType="ptt"
- onClose={() => setPlayer(null)} />
-          </div>
-        </div>
+        <Modal title={player.title || '녹취 재생'} onClose={() => setPlayer(null)} width={800}>
+          <SegmentPlayer segments={player.segments} recordingId={player.id} callType="ptt"
+                         onClose={() => setPlayer(null)} />
+        </Modal>
       )}
 
       {flow && (

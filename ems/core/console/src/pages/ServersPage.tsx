@@ -3346,7 +3346,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
           </label>
         )}
       </div>
-      <div className="modal-footer" style={{ marginTop: 16 }}>
+      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
         <Button size="default" onClick={onClose} disabled={busy}>취소</Button>
         <Button variant="default" size="default" disabled={busy || !name.trim() || (mountOn && !mntValid)}
  onClick={async () => {
@@ -3407,7 +3407,7 @@ function PendingMemberModal({ info, onClose }: {
       <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
  token: <code>{info.enrollment_token}</code>
       </div>
-      <div className="modal-footer" style={{ marginTop: 16 }}>
+      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
         <Button variant="default" size="default" onClick={onClose}>닫기</Button>
       </div>
     </Modal>
@@ -3931,7 +3931,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
           <AlertTriangle size={13} className="inline align-[-2px]" /> {selectedMismatch} — install 시 backend 400 reject
         </div>
       )}
-      <div className="modal-footer" style={{ marginTop: 16 }}>
+      <div className="flex justify-end gap-2.5 pt-5" style={{ marginTop: 16 }}>
         <Button size="default" onClick={onClose}>취소</Button>
         <Button variant="default" size="default" onClick={create}
  disabled={!!selectedMismatch}>추가</Button>

@@ -23,6 +23,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { DataTable, Th } from '@core/components/custom/data-table'
 import { EmptyState } from '@core/components/custom/empty-state'
+import Modal from '@core/components/Modal'
 
 export default function PttGroupActivity({ storeKey }: {
   /** 녹취 저장 키 = ptt_groups.id (surrogate). mcptt_group_id 가 바뀌어도 불변이라
@@ -216,13 +217,10 @@ export default function PttGroupActivity({ storeKey }: {
       {audio.node}
 
       {player && (
-        <div className="modal-overlay" onClick={() => setPlayer(null)}>
-          <div className="modal-box" style={{ width: 800, maxWidth: 'calc(100vw - 40px)' }} onClick={e => e.stopPropagation()}>
-            {player.title && <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>{player.title}</div>}
-            <SegmentPlayer segments={player.segments} recordingId={player.id} callType="ptt"
- onClose={() => setPlayer(null)} />
-          </div>
-        </div>
+        <Modal title={player.title || '녹취 재생'} onClose={() => setPlayer(null)} width={800}>
+          <SegmentPlayer segments={player.segments} recordingId={player.id} callType="ptt"
+                         onClose={() => setPlayer(null)} />
+        </Modal>
       )}
 
       {flow && (

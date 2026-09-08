@@ -37,14 +37,19 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
  ref={ref}
  className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        // 정본 = Figma `02 Components` Sec/Modal (392:108) — 헤더 51(구분선) · 본문 여백 20 ·
+        // 푸터 우측 정렬(간격 8). 라운드 8(`--radius`) · 채움 `--surface` · 그림자 `Elevation/lg`.
+        // shadcn 기본(`p-6 gap-4 rounded-lg bg-background`)은 세 영역을 한 상자로 봐서 어긋난다 —
+        // 여백은 헤더·본문·푸터가 각자 갖는다.
+        "fixed left-[50%] top-[50%] z-50 flex max-h-[calc(100vh-80px)] w-full max-w-[560px] translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden rounded-md border border-border bg-card shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
  className
       )}
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
+      <DialogPrimitive.Close aria-label="닫기"
+        className="absolute right-5 top-[17px] rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:shadow-focus">
+        <X className="size-4" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
@@ -58,7 +63,7 @@ const DialogHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
  className={cn(
-      "flex flex-col space-y-1.5 text-center sm:text-left",
+      "flex shrink-0 flex-row items-center justify-between border-b border-border px-5 py-4 pr-12",
  className
     )}
     {...props}
@@ -72,7 +77,7 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
  className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+      "flex shrink-0 flex-row justify-end gap-2 px-5 pb-4",
  className
     )}
     {...props}
@@ -87,7 +92,7 @@ const DialogTitle = React.forwardRef<
   <DialogPrimitive.Title
  ref={ref}
  className={cn(
-      "text-lg font-semibold leading-none tracking-tight",
+      "text-md font-medium leading-none",
  className
     )}
     {...props}

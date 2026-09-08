@@ -635,7 +635,7 @@ export default function ServicesPage() {
                 <EmptyState title="이 패키지에 config_template 이 포함되어 있지 않습니다. 편집 버튼으로 생성할 수 있습니다." />
               )}
             </div>
-            <div className="modal-footer" style={{ flex: '0 0 auto' }}>
+            <div className="flex justify-end gap-2.5 pt-5" style={{ flex: '0 0 auto' }}>
               {editing ? (
                 <>
                   <Button size="default" onClick={() => { setEditing(false); setEditError('') }} disabled={saving}>취소</Button>

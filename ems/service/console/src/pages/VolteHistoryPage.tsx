@@ -14,6 +14,7 @@ import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
+import Modal from '@core/components/Modal'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -314,12 +315,9 @@ export default function VolteHistoryPage() {
       </div>
 
       {recPlayer && (
-        <div className="modal-overlay" onClick={() => setRecPlayer(null)}
- style={{ background: 'rgba(15,23,42,0.32)', backdropFilter: 'blur(2px)' }}>
-          <div className="modal-box" style={{ maxWidth: 1100, width: '92vw', background: 'var(--card, rgba(255,255,255,0.97))', boxShadow: '0 12px 48px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
-            <SegmentPlayer segments={recPlayer.segments} recordingId={recPlayer.id} callType={recPlayer.callType} caller={recPlayer.caller} callee={recPlayer.callee} onClose={() => setRecPlayer(null)} />
-          </div>
-        </div>
+        <Modal title="녹취 재생" onClose={() => setRecPlayer(null)} width="min(1100px, 92vw)">
+          <SegmentPlayer segments={recPlayer.segments} recordingId={recPlayer.id} callType={recPlayer.callType} caller={recPlayer.caller} callee={recPlayer.callee} onClose={() => setRecPlayer(null)} />
+        </Modal>
       )}
 
       {flow && <FlowPage callId={flow.callId} date={flow.date} callType={flow.callType} onClose={() => setFlow(null)} />}
