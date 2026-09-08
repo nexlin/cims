@@ -1,3 +1,4 @@
+import { useConfirm } from '../components/custom/confirm'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deploymentApi, type SipPackage, type Deployment } from '../api/deployment'
 import { useToast } from '../components/Toast'
@@ -15,6 +16,7 @@ interface ModuleGroup {
 
 export default function PackagesPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [packages, setPackages] = useState<SipPackage[]>([])
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [loading, setLoading] = useState(true)
@@ -97,9 +99,11 @@ export default function PackagesPage() {
   async function removePackage(p: SipPackage) {
     const refs = depCountByPkgId.get(p.id) || 0
     if (refs > 0) {
-      if (!confirm(`${p.name} v${p.version} 은 ${refs}곳에 배포되어 있습니다. 계속 삭제할까요?`)) return
+      if (!await confirm({ title: '패키지 삭제', tone: 'danger', confirmLabel: '삭제',
+        body: `${p.name} v${p.version} 은 ${refs}곳에 배포되어 있습니다. 계속 삭제할까요?` })) return
     } else {
-      if (!confirm(`${p.name} v${p.version} 을 삭제할까요?`)) return
+      if (!await confirm({ title: '패키지 삭제', tone: 'danger', confirmLabel: '삭제',
+        body: `${p.name} v${p.version} 을 삭제할까요?` })) return
     }
     try {
       await deploymentApi.deletePackage(p.id)

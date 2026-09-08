@@ -6,6 +6,7 @@ import {
 } from '../../api/deployment'
 import StringListInput from './StringListInput'
 import { ObjectListEditor } from './ObjectListEditor'
+import { useConfirm } from '../custom/confirm'
 
 type Record_ = Record<string, unknown>
 
@@ -44,6 +45,7 @@ interface DriftInfo {
 
 function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [records, setRecords]   = useState<Record_[]>([])
   const [original, setOriginal] = useState<Record_[]>([])
   const [loading, setLoading]   = useState(true)
@@ -192,9 +194,13 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         .filter(r => String(r['media_srtp'] || '').toLowerCase() === 'required'
           && !accessServiceNodes(r, localNodes).some(n => String(n['protocol'] || '').toUpperCase() === 'TLS'))
         .map(r => String(r['name'] || '?'))
-      if (bad.length && !confirm(
-        `media_srtp=required 인데 TLS 접속점이 없는 서비스: ${bad.join(', ')}\n` +
-        'TLS 접속점이 없으면 어떤 단말도 SRTP 를 켤 수 없습니다 (CSP ERROR 로그). 그래도 저장할까요?')) return
+      if (bad.length && !await confirm({
+        title: 'TLS 접속점 없음', tone: 'danger', confirmLabel: '저장', body: <>
+          media_srtp=required 인데 TLS 접속점이 없는 서비스: {bad.join(', ')}
+          <div className="mt-1">
+            TLS 접속점이 없으면 어떤 단말도 SRTP 를 켤 수 없습니다 (CSP ERROR 로그). 그래도 저장할까요?
+          </div>
+        </> })) return
     }
     setSaving(true)
     try {

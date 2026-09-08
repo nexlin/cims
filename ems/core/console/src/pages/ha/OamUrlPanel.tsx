@@ -19,6 +19,7 @@ import { useState } from 'react'
 import { InfoDot } from '../../components/InfoDot'
 import { ImeSafeInput } from './ImeSafeInput'
 import { Button } from '../../components/ui/button'
+import { useConfirm } from '../../components/custom/confirm'
 
 export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, onApplyAll }: {
   title: string
@@ -31,6 +32,7 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
   /** 전 agent 에 같은 주소 적용 — 같은 설정의 대량 편집 */
   onApplyAll?: (url: string) => void | Promise<void>
 }) {
+  const confirm = useConfirm()
   const cur = (current || '').trim()
   const suggested = vipCandidate ? `https://${vipCandidate}:4419` : ''
   const [draft, setDraft] = useState(cur || suggested)
@@ -92,14 +94,18 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
         </Button>
         {onApplyAll && (
           <Button variant="outline" disabled={!!applying || !valid}
-                  onClick={() => {
-                    if (!window.confirm(
-                        `전 agent 의 OAM 접속 주소를 아래로 바꿉니다.\n\n  ${norm}\n\n` +
-                        `각 agent 가 그 주소로 /health 도달을 확인한 뒤에만 적용합니다 — ` +
-                        `도달 불가면 주소를 바꾸지 않고 실패로 남습니다(fleet 단절 방지).\n\n` +
-                        `진행할까요?`)) return
+                  onClick={() => void (async () => {
+                    if (!await confirm({ title: 'OAM 주소 전체 적용', confirmLabel: '전체 적용', body: <>
+                      전 agent 의 OAM 접속 주소를 아래로 바꿉니다.
+                      <div className="mt-1 font-mono text-xs">{norm}</div>
+                      <div className="mt-2">
+                        각 agent 가 그 주소로 /health 도달을 확인한 뒤에만 적용합니다 —
+                        도달 불가면 주소를 바꾸지 않고 실패로 남습니다(fleet 단절 방지).
+                      </div>
+                      <div className="mt-2">진행할까요?</div>
+                    </> })) return
                     onApplyAll(norm)
-                  }}
+                  })()}
                   title="같은 주소를 전 agent 에 일괄 적용 (CSP/CMP 등 모든 노드 포함)">
             전체 적용
           </Button>

@@ -1,3 +1,4 @@
+import { useConfirm } from '@core/components/custom/confirm'
 import React, { useState, useEffect, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
 import IconBtn from '@core/components/IconBtn'
@@ -44,6 +45,7 @@ function flattenTree(nodes: TreeNode[], expanded: Set<number>): TreeNode[] {
 // ── 메인 ────────────────────────────────────────────────────
 export default function OrganizationsPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [orgs, setOrgs] = useState<Organization[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
@@ -135,7 +137,8 @@ export default function OrganizationsPage() {
 
   // ── 삭제 ──
   async function handleDelete(id: number) {
-    if (!confirm('조직을 삭제합니다. 하위 조직은 상위로 이동됩니다.')) return
+    if (!await confirm({ title: '조직 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: '조직을 삭제합니다. 하위 조직은 상위로 이동됩니다.' })) return
     try {
       await orgApi.delete(id)
       show('삭제 완료', 'ok')
@@ -145,7 +148,8 @@ export default function OrganizationsPage() {
 
   async function handleBatchDelete() {
     if (selected.size === 0) return
-    if (!confirm(`${selected.size}개 조직을 삭제합니다.`)) return
+    if (!await confirm({ title: '조직 일괄 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `${selected.size}개 조직을 삭제합니다.` })) return
     try {
       const r = await orgApi.batchDelete(Array.from(selected))
       show(`${r.deleted}건 삭제`, 'ok')

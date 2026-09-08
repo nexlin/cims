@@ -1,5 +1,6 @@
 // 콘솔 계정 관리 — OAM 로그인 계정(file_store 도메인 console_accounts) CRUD.
 // DB users(가입자 person)와 분리. 내장 admin(oam.json)은 여기 표시되지 않음(부트스트랩 전용).
+import { useConfirm } from '../components/custom/confirm'
 import { useCallback, useEffect, useState } from 'react'
 import { Pencil, Trash2, KeyRound, Plus } from 'lucide-react'
 import { useToast } from '../components/Toast'
@@ -14,6 +15,7 @@ const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', passw
 
 export default function ConsoleAccountsPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [rows, setRows] = useState<ConsoleAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -67,7 +69,8 @@ export default function ConsoleAccountsPage() {
   }
 
   async function remove(a: ConsoleAccount) {
-    if (!window.confirm(`콘솔 계정 '${a.login_id}' 을(를) 삭제할까요?`)) return
+    if (!await confirm({ title: '콘솔 계정 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `콘솔 계정 '${a.login_id}' 을(를) 삭제할까요?` })) return
     try { await consoleAccountsApi.delete(a.login_id); show('삭제 완료', 'ok'); load() }
     catch (e) { show(String(e), 'err') }
   }

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } fr
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { MenuProvider } from './contexts/MenuContext'
 import { ToastProvider } from './components/Toast'
+import { ConfirmProvider } from './components/custom/confirm'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import ReadOnlyBanner from './components/ReadOnlyBanner'
@@ -173,6 +174,7 @@ function Shell() {
 
   return (
     <ToastProvider>
+      <ConfirmProvider>
      <MenuProvider>
       <div className={`app-layout ${collapsed ? 'app-layout--collapsed' : ''}`}>
         <Header
@@ -245,6 +247,7 @@ function Shell() {
           </div>
         </div>
       )}
+      </ConfirmProvider>
     </ToastProvider>
   )
 }

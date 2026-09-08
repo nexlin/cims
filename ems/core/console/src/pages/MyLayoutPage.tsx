@@ -7,6 +7,7 @@
 // **화면 = 카드 하나**(`core.my-layout`)이고 안의 세 블록(상태·프로파일·위젯 목록)은 각각 위젯이라
 // 운영자가 카드 안에서 재배치할 수 있다(console_platform §3.0.1). 세 블록이 같은 편집 초안을
 // 봐야 하므로 상태는 모듈 store(`myLayoutStore.ts`)로 끌어올렸다.
+import { useConfirm } from '../components/custom/confirm'
 import { useMemo } from 'react'
 import { useToast } from '../components/Toast'
 import { InfoDot } from '../components/InfoDot'
@@ -18,6 +19,7 @@ const AREA_LABEL: Record<WidgetArea, string> = { ops: '운용', admin: '관리' 
 // ── 상태 · 저장 조작 ────────────────────────────────────────────────────────
 export function MyLayoutHeader() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const s = useMyLayout(show)
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -35,7 +37,10 @@ export function MyLayoutHeader() {
         <button className="btn btn--sm" onClick={() => void myLayout.load(show)}
                 disabled={s.saving}>되돌리기</button>
         <button className="btn btn--sm" disabled={s.saving} title="개인 구성 삭제 → 프로파일 기본"
-                onClick={() => { if (confirm('개인 구성을 삭제하고 프로파일 기본값으로 되돌릴까요?')) void myLayout.reset(show) }}>
+                onClick={() => void (async () => {
+                  if (await confirm({ title: '개인 구성 초기화', tone: 'danger', confirmLabel: '초기화',
+                    body: '개인 구성을 삭제하고 프로파일 기본값으로 되돌릴까요?' })) myLayout.reset(show)
+                })()}>
           초기화
         </button>
       </span>

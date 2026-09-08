@@ -1,5 +1,6 @@
 // 외부 시스템 관리 — 외부 DB / 모니터링 / 스토리지 / 인증 등 등록. 대시보드 시스템 형상에 표시.
 // file_store 컬렉션(OAM /api/v1/external-systems) 기반 CRUD + TCP 라이브니스 probe.
+import { useConfirm } from '../components/custom/confirm'
 import { useState, useEffect, useCallback } from 'react'
 import Modal from '../components/Modal'
 import { useToast } from '../components/Toast'
@@ -133,6 +134,7 @@ function EditModal({ initial, onClose, onSaved }: {
 
 export default function ExternalSystemsPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [items, setItems] = useState<ExternalSystem[]>([])
   const [status, setStatus] = useState<Map<number, ProbeResult>>(new Map())
   const [loading, setLoading] = useState(true)
@@ -151,7 +153,8 @@ export default function ExternalSystemsPage() {
   useEffect(() => { load() }, [load])
 
   const remove = async (s: ExternalSystem) => {
-    if (!window.confirm(`'${s.name}' 외부 시스템을 삭제할까요?`)) return
+    if (!await confirm({ title: '외부 시스템 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `'${s.name}' 외부 시스템을 삭제할까요?` })) return
     try { await externalSystemsApi.delete(s.id); show('삭제됨', 'ok'); load() }
     catch (e) { show((e as Error).message, 'err') }
   }

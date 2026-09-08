@@ -13,6 +13,7 @@
 // **배치 단위는 화면 전체가 카드 하나**(`core.service-defs`)다 — 고른 서비스가 곧 아래 세 컬렉션의
 // 의미라, 선택을 떼거나 컬렉션 하나만 떼어 놓으면 무엇에 대한 목록인지 알 수 없다. 카드 안 구성은
 // SERVICE_DEF_CARD_ROWS 선언이 정본이고, 블록은 아래 위젯들을 id 로 그대로 쓴다(CardLayout).
+import { useConfirm } from '../../components/custom/confirm'
 import { useState } from 'react'
 import { makeCardWidget } from '../CardLayout'
 import { GRID_ROWS } from '../gridLayout'
@@ -100,13 +101,17 @@ function ServicePicker() {
 // ── 서비스 (이름 + JSON/삭제) ─────────────────────────────────────────────
 function ServiceHeaderBlock() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { svc, loading, error, reload } = useSelectedService()
   const [, setSvcId] = usePageParam('svc')
   const [json, setJson] = useState<string | null>(null)
 
   const remove = async () => {
     if (!svc) return
-    if (!confirm(`서비스 정의 '${svc.id}' 를 삭제할까요?\n(코어가 이 서비스의 모듈/알람 규칙을 더 이상 인식하지 않습니다)`)) return
+    if (!await confirm({ title: '서비스 정의 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      서비스 정의 '{svc.id}' 를 삭제할까요?
+      <div className="mt-1">(코어가 이 서비스의 모듈/알람 규칙을 더 이상 인식하지 않습니다)</div>
+    </> })) return
     try { await serviceDescriptorsApi.remove(svc.id); show('삭제됨', 'ok'); setSvcId(''); reload() }
     catch (e) { show((e as Error).message, 'err') }
   }
@@ -173,6 +178,7 @@ function JsonEditor({ initial, title, onClose, onSaved }: {
 // ── 모듈 ─────────────────────────────────────────────────────────────────
 function ModulesBlock() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { svc, loading, error, reload } = useSelectedService()
   const [edit, setEdit] = useState<{ index: number | null } | null>(null)
   const [editMode, setEditMode] = useState(false)
@@ -180,7 +186,8 @@ function ModulesBlock() {
 
   const remove = async (i: number) => {
     if (!svc) return
-    if (!confirm(`모듈 '${mods[i]?.name}' 를 삭제할까요?`)) return
+    if (!await confirm({ title: '모듈 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `모듈 '${mods[i]?.name}' 를 삭제할까요?` })) return
     try {
       await serviceDescriptorsApi.put(svc.id, { ...svc, modules: mods.filter((_, k) => k !== i) })
       show('삭제됨', 'ok'); reload()
@@ -225,6 +232,7 @@ function ModulesBlock() {
 // ── 알람 규칙 ────────────────────────────────────────────────────────────
 function AlertRulesBlock() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { svc, loading, error, reload } = useSelectedService()
   const [edit, setEdit] = useState<{ index: number | null } | null>(null)
   const [editMode, setEditMode] = useState(false)
@@ -232,7 +240,8 @@ function AlertRulesBlock() {
 
   const remove = async (i: number) => {
     if (!svc) return
-    if (!confirm(`알람 규칙 '${rules[i]?.code || rules[i]?.type}' 를 삭제할까요?`)) return
+    if (!await confirm({ title: '알람 규칙 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `알람 규칙 '${rules[i]?.code || rules[i]?.type}' 를 삭제할까요?` })) return
     try {
       await serviceDescriptorsApi.put(svc.id, { ...svc, alert_rules: rules.filter((_, k) => k !== i) })
       show('삭제됨', 'ok'); reload()
@@ -284,6 +293,7 @@ function AlertRulesBlock() {
 // ── 데이터 소스 (shape 위젯이 고르는 소스 카탈로그) ──────────────────────
 function DataSourcesBlock() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { svc, loading, error, reload } = useSelectedService()
   const [edit, setEdit] = useState<{ index: number | null } | null>(null)
   const [editMode, setEditMode] = useState(false)
@@ -291,7 +301,8 @@ function DataSourcesBlock() {
 
   const remove = async (i: number) => {
     if (!svc) return
-    if (!confirm(`데이터 소스 '${sources[i]?.id}' 를 삭제할까요?`)) return
+    if (!await confirm({ title: '데이터 소스 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `데이터 소스 '${sources[i]?.id}' 를 삭제할까요?` })) return
     try {
       await serviceDescriptorsApi.put(svc.id, { ...svc, data_sources: sources.filter((_, k) => k !== i) })
       show('삭제됨', 'ok'); reload()

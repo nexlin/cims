@@ -3,6 +3,7 @@
 //
 // 독립 페이지다(시스템/인프라의 탭이 아님): 좌측 서버 트리를 쓰지 않고, 실행이 수 분
 // 걸리며 run 이력·재개·롤백이 영속 화면을 필요로 한다.
+import { useConfirm } from '../components/custom/confirm'
 import { Play, RotateCw, Square, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
@@ -35,6 +36,7 @@ const STEP_COLOR: Record<string, string> = {
 
 export default function AutoDeployPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const canEdit = useAdminCapable()   // admin 세션 또는 admin 승격(sudo) 활성
 
   const [blueprints, setBlueprints]   = useState<BlueprintSummary[]>([])
@@ -138,8 +140,10 @@ export default function AutoDeployPage() {
 
   async function saveForm() {
     if (doc !== 'inventory' || invId == null || !invView) return
-    if (!confirm('구성 뷰로 저장하면 원본 YAML 의 주석이 제거됩니다.\n계속할까요?\n\n' +
-                 '(주석을 유지하려면 [원문 보기]에서 직접 편집하세요)')) return
+    if (!await confirm({ title: '구성 뷰로 저장', confirmLabel: '저장', body: <>
+      구성 뷰로 저장하면 원본 YAML 의 주석이 제거됩니다. 계속할까요?
+      <div className="mt-2">(주석을 유지하려면 [원문 보기]에서 직접 편집하세요)</div>
+    </> })) return
     setBusy('저장 중')
     try {
       const r = await provisionApi.saveInventory(invId, { doc: invView })
@@ -180,8 +184,11 @@ export default function AutoDeployPage() {
   async function doApply() {
     if (bpId == null || invId == null) return
     const total = (plan || []).reduce((n, p) => n + p.steps.length, 0)
-    if (!confirm(`배포를 실행합니다.\n\n대상 서버에 agent 를 설치하고 모듈을 배치·기동합니다.\n` +
-                 `총 ${total} 단계.\n\n계속할까요?`)) return
+    if (!await confirm({ title: '배포 실행', confirmLabel: '실행', body: <>
+      배포를 실행합니다.
+      <div className="mt-2">대상 서버에 agent 를 설치하고 모듈을 배치·기동합니다. 총 {total} 단계.</div>
+      <div className="mt-2">계속할까요?</div>
+    </> })) return
     setBusy('실행 시작')
     try {
       const r = await provisionApi.startRun(bpId, invId)
@@ -193,8 +200,11 @@ export default function AutoDeployPage() {
   async function runAction(kind: 'resume' | 'abort' | 'rollback') {
     if (!run) return
     if (kind === 'rollback' &&
-        !confirm('이 run 이 생성한 그룹·배포를 역순으로 제거합니다.\n' +
-                 '(설치된 agent 는 제거되지 않습니다)\n\n계속할까요?')) return
+        !await confirm({ title: '배포 롤백', tone: 'danger', confirmLabel: '롤백', body: <>
+          이 run 이 생성한 그룹·배포를 역순으로 제거합니다.
+          <div className="mt-1">(설치된 agent 는 제거되지 않습니다)</div>
+          <div className="mt-2">계속할까요?</div>
+        </> })) return
     setBusy(kind)
     try {
       if (kind === 'resume') await provisionApi.resumeRun(run.id)

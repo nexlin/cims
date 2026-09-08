@@ -11,6 +11,7 @@ import { MOUNT_DEFAULTS } from './helpers'
 import { Button } from '../../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 import { StatusDot } from '../../components/custom/status-dot'
+import { useConfirm } from '../../components/custom/confirm'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
 
@@ -23,6 +24,7 @@ export function MountPanel({ title, mounts, applying, onApply }: {
     label: string,
   ) => void
 }) {
+  const confirm = useConfirm()
   const [addOpen, setAddOpen] = useState(false)
   const [fstype, setFstype]   = useState('nfs')
   const [source, setSource]   = useState('')
@@ -42,8 +44,11 @@ export function MountPanel({ title, mounts, applying, onApply }: {
             `mount += ${s} → ${t}`)
     setAddOpen(false)
   }
-  const deleteMount = (m: AgentMount) => {
-    if (!confirm(`${m.target} 마운트를 제거할까요?\n(agent 가 umount + /etc/fstab 의 cims-managed 항목 삭제)`)) return
+  const deleteMount = async (m: AgentMount) => {
+    if (!await confirm({ title: '마운트 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      {m.target} 마운트를 제거할까요?
+      <div className="mt-1">(agent 가 umount + /etc/fstab 의 cims-managed 항목 삭제)</div>
+    </> })) return
     onApply([{ op: 'del', target: m.target }], `mount -= ${m.target}`)
   }
 
@@ -89,7 +94,7 @@ export function MountPanel({ title, mounts, applying, onApply }: {
                            label={m.mounted ? 'mounted' : 'unmounted'} />
               </Td>
               <Td>
-                <Button variant="destructive" onClick={() => deleteMount(m)} disabled={applying}>
+                <Button variant="destructive" onClick={() => void deleteMount(m)} disabled={applying}>
                   <Trash2 /> 삭제
                 </Button>
               </Td>

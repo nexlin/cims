@@ -1,3 +1,4 @@
+import { useConfirm } from '../components/custom/confirm'
 import { ChevronDown, ChevronRight, Eraser, Play, Square } from 'lucide-react'
 import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
 
@@ -722,6 +723,7 @@ function StageRow({
 // ─────────────────────────────────────────────────────────────
 
 export default function VerificationV2Page() {
+  const confirm = useConfirm()
   const [stages, setStages] = useState<Stage[]>(STAGES_FALLBACK)
   const [loading, setLoading] = useState(true)
   const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set())
@@ -865,8 +867,8 @@ export default function VerificationV2Page() {
       setError('검증 진행 중에는 데이터 초기화 불가')
       return
     }
-    if (!window.confirm('데이터 초기화 — dev/배포본 dist/, 로그, DB 일부 wipe '
-                        + '(가입자/그룹은 보존). 진행하시겠습니까?')) return
+    if (!await confirm({ title: '데이터 초기화', tone: 'danger', confirmLabel: '초기화',
+      body: '데이터 초기화 — dev/배포본 dist/, 로그, DB 일부 wipe (가입자/그룹은 보존). 진행하시겠습니까?' })) return
     setError(null)
     try {
       const res = await verifyApi.runArbitrary({

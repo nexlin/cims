@@ -1,3 +1,4 @@
+import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { Pencil, Trash2, ChevronRight, ChevronDown, ArrowLeft, ArrowRight, Radio, Headphones } from 'lucide-react'
@@ -38,6 +39,7 @@ function Caret({ open }: { open: boolean }) {
 
 export default function DispatchGroupsPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { user: me } = useAuth()
   const canWrite = hasRole(me, 'operator')
 
@@ -90,7 +92,10 @@ export default function DispatchGroupsPage() {
   function toggleOpen(id: string) { setAdding(false); setOpenId(cur => cur === id ? null : id) }
 
   async function deleteGroup(g: DispatchGroup) {
-    if (!confirm(`관제 그룹 "${g.name}" (${g.id}) 삭제?\n멤버 ${g.members.length}명의 픽업 그룹이 해제됩니다.`)) return
+    if (!await confirm({ title: '관제 그룹 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      관제 그룹 "{g.name}" ({g.id}) 삭제?
+      <div className="mt-1">멤버 {g.members.length}명의 픽업 그룹이 해제됩니다.</div>
+    </> })) return
     try { await dispatchApi.delete(g.id); show('삭제', 'ok'); if (openId === g.id) setOpenId(null); load() }
     catch (e: unknown) { show(String(e), 'err') }
   }

@@ -1,3 +1,4 @@
+import { useConfirm } from '../components/custom/confirm'
 import { ChevronDown, RotateCw } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 
@@ -153,6 +154,7 @@ function DetailModal({ run, onClose, onDelete }: {
   onClose: () => void
   onDelete: (id: number) => void
 }) {
+  const confirm = useConfirm()
   // 부모/자식 트리로 그룹핑
   const grouped = useMemo(() => {
     const parents: RunDetailItem[] = []
@@ -183,11 +185,12 @@ function DetailModal({ run, onClose, onDelete }: {
             <button style={btnSecondary} onClick={() => window.print()} title="이 회차를 PDF 보고서로 인쇄">
               📄 PDF 인쇄
             </button>
-            <button style={{ ...btnDanger, marginLeft: 8 }} onClick={() => {
-              if (confirm(`회차 ${fmtRunIdShort(run.id)} 를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) {
+            <button style={{ ...btnDanger, marginLeft: 8 }} onClick={() => void (async () => {
+              if (await confirm({ title: '회차 삭제', tone: 'danger', confirmLabel: '삭제',
+                body: `회차 ${fmtRunIdShort(run.id)} 를 삭제할까요? 이 작업은 되돌릴 수 없습니다.` })) {
                 onDelete(run.id)
               }
-            }}>삭제</button>
+            })()}>삭제</button>
             <button style={{ ...btnPrimary, marginLeft: 8 }} onClick={onClose}>닫기</button>
           </div>
         </header>

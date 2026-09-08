@@ -1,3 +1,4 @@
+import { useConfirm } from '../components/custom/confirm'
 import { Play, RotateCw, Square } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
@@ -34,6 +35,7 @@ const cardPackages = (c: BuildCard): string[] => c.packageVariants ?? [c.key]
 
 export default function ServicesPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [states, setStates] = useState<Record<string, SvcState>>({})
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<Record<string, boolean>>({})
@@ -169,7 +171,12 @@ export default function ServicesPage() {
       show(`잘못된 버전 형식: ${v}`, 'err')
       return
     }
-    if (!confirm(`빌드 & 패키징을 시작합니다 (cmake + make + npm + tarball 12종).\n5~15분 소요될 수 있습니다.${v ? `\n버전: ${v} — 모든 컴포넌트의 pkg.json 에 반영됩니다.` : ''}\n계속할까요?`)) {
+    if (!await confirm({ title: '빌드 & 패키징', confirmLabel: '시작', body: <>
+      빌드 &amp; 패키징을 시작합니다 (cmake + make + npm + tarball 12종).
+      <div className="mt-1">5~15분 소요될 수 있습니다.</div>
+      {v && <div className="mt-1">버전: {v} — 모든 컴포넌트의 pkg.json 에 반영됩니다.</div>}
+      <div className="mt-2">계속할까요?</div>
+    </> })) {
       return
     }
     try {
@@ -187,7 +194,11 @@ export default function ServicesPage() {
       show('진행 중인 작업이 있습니다. 끝난 후 정리하세요.', 'err')
       return
     }
-    if (!confirm('패키지 산출물 (tarball 들 + manifest.json) 을 삭제합니다.\n빌드 결과는 유지됩니다 (다음 패키징 시 재사용).\n계속할까요?')) {
+    if (!await confirm({ title: '패키지 산출물 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      패키지 산출물 (tarball 들 + manifest.json) 을 삭제합니다.
+      <div className="mt-1">빌드 결과는 유지됩니다 (다음 패키징 시 재사용).</div>
+      <div className="mt-2">계속할까요?</div>
+    </> })) {
       return
     }
     try {
@@ -239,14 +250,22 @@ export default function ServicesPage() {
   async function act(name: ServiceName, action: ServiceAction, critical: boolean, skipConfirm = false) {
     if (!skipConfirm) {
       if (critical && action !== 'start') {
-        const ok = confirm(
-          action === 'stop'
-            ? `⚠️ CSC 를 중지하면 Console UI 가 즉시 끊깁니다. 계속할까요?`
-            : `⚠️ CSC 재시작 중 Console UI 일시 단절됩니다. 계속할까요?`
-        )
+        const ok = await confirm({
+          title: action === 'stop' ? 'CSC 중지' : 'CSC 재시작',
+          tone: 'danger',
+          confirmLabel: action === 'stop' ? '중지' : '재시작',
+          body: action === 'stop'
+            ? 'CSC 를 중지하면 Console UI 가 즉시 끊깁니다. 계속할까요?'
+            : 'CSC 재시작 중 Console UI 일시 단절됩니다. 계속할까요?',
+        })
         if (!ok) return
       } else if (action === 'stop' || action === 'restart') {
-        const ok = confirm(`${name} 서비스를 ${action === 'stop' ? '중지' : '재시작'}할까요?`)
+        const ok = await confirm({
+          title: action === 'stop' ? '서비스 중지' : '서비스 재시작',
+          tone: action === 'stop' ? 'danger' : 'default',
+          confirmLabel: action === 'stop' ? '중지' : '재시작',
+          body: `${name} 서비스를 ${action === 'stop' ? '중지' : '재시작'}할까요?`,
+        })
         if (!ok) return
       }
     }

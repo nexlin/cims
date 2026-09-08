@@ -13,6 +13,7 @@ import { EmptyState } from '../components/custom/empty-state'
 import { SubSection } from '../components/custom/collapsible-section'
 import { FormField } from '../components/custom/form-field'
 import { StickySaveBar } from '../components/custom/sticky-save-bar'
+import { useConfirm } from '../components/custom/confirm'
 import { Radio } from '../components/custom/radio'
 import { Checkbox } from '../components/ui/checkbox'
 import {
@@ -100,6 +101,8 @@ const LOCK_FIELDSET_STYLE: React.CSSProperties = {
 
 export default function ServersPage() {
   const { show } = useToast()
+  // 네이티브 window.confirm 대신 시안 Dialog — 아래 호출부는 `await confirm({…})` 다.
+  const confirm = useConfirm()
   const [searchParams] = useSearchParams()
   const initialSelection = ((): Selection => {
     const ag = searchParams.get('agent')
@@ -320,7 +323,8 @@ export default function ServersPage() {
     catch (e) { show((e as Error).message, 'err') }
   }
   async function revokeAgent(a: Agent) {
-    if (!confirm(`${a.name} 세션을 폐기할까요?`)) return
+    if (!await confirm({ title: '세션 폐기', tone: 'danger', confirmLabel: '폐기',
+      body: `${agentDisplayName(a.name)} 세션을 폐기할까요?` })) return
     try { await deploymentApi.revokeAgent(a.id); show(`${a.name} 폐기`, 'ok'); await load() }
     catch (e) { show((e as Error).message, 'err') }
   }
@@ -339,12 +343,16 @@ export default function ServersPage() {
     } catch (e) { show((e as Error).message, 'err') }
   }
   async function removeAgent(a: Agent) {
-    if (!confirm(`Agent "${a.name}" 을 삭제할까요? 관련 deployment 도 같이 제거됨`)) return
+    if (!await confirm({ title: '서버 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `Agent "${agentDisplayName(a.name)}" 을 삭제할까요? 관련 deployment 도 같이 제거됨` })) return
     try { await deploymentApi.deleteAgent(a.id); show('삭제됨', 'ok'); await load() }
     catch (e) { show((e as Error).message, 'err') }
   }
   async function upgradeAgent(a: Agent) {
-    if (!confirm(`${a.name} 의 agent 바이너리를 최신 버전으로 업그레이드할까요?\n(agent 가 재기동됩니다)`)) return
+    if (!await confirm({ title: 'agent 업그레이드', confirmLabel: '업그레이드', body: <>
+      {agentDisplayName(a.name)} 의 agent 바이너리를 최신 버전으로 업그레이드할까요?
+      <div className="mt-1">(agent 가 재기동됩니다)</div>
+    </> })) return
     try {
       const r = await deploymentApi.upgradeAgent(a.id)
       show(`업그레이드 job 큐잉 (#${r.job_id})`, 'ok')
@@ -352,7 +360,10 @@ export default function ServersPage() {
     } catch (e) { show((e as Error).message, 'err') }
   }
   async function restartAgent(a: Agent) {
-    if (!confirm(`${a.name} 의 agent 프로세스를 재시작할까요?\n(현재 binary 그대로 self-exec — 약 수 초 끊김)`)) return
+    if (!await confirm({ title: 'agent 재시작', confirmLabel: '재시작', body: <>
+      {agentDisplayName(a.name)} 의 agent 프로세스를 재시작할까요?
+      <div className="mt-1">(현재 binary 그대로 self-exec — 약 수 초 끊김)</div>
+    </> })) return
     try {
       const r = await deploymentApi.restartAgent(a.id)
       show(`재시작 job 큐잉 (#${r.job_id})`, 'ok')
@@ -370,7 +381,8 @@ export default function ServersPage() {
       const pick = prompt(`롤백할 agent 버전을 입력하세요 (현재 v${a.agent_version}).\n설치됨: ${others.join(', ')}`, others[0])
       if (!pick) return
       target = pick.trim()
-    } else if (!confirm(`${a.name} 의 agent 를 v${target} 로 롤백할까요? (현재 v${a.agent_version} — self-exec 재기동)`)) {
+    } else if (!await confirm({ title: 'agent 롤백', confirmLabel: '롤백',
+      body: `${agentDisplayName(a.name)} 의 agent 를 v${target} 로 롤백할까요? (현재 v${a.agent_version} — self-exec 재기동)` })) {
       return
     }
     try {
@@ -388,7 +400,10 @@ export default function ServersPage() {
     }
     const desc = destructiveDesc[jt as JobType]
     if (desc) {
-      if (!confirm(`${d.package_name} 모듈에 [${jt}] 진행할까요?\n  ${desc}`)) return
+      if (!await confirm({ title: `모듈 ${jt}`, confirmLabel: '진행', body: <>
+        {d.package_name} 모듈에 [{jt}] 진행할까요?
+        <div className="mt-1">{desc}</div>
+      </> })) return
     }
     try {
       const r = await deploymentApi.queueJob(d.id, jt)
@@ -400,7 +415,10 @@ export default function ServersPage() {
         (e.data?.error === 'leader_lease_precondition' ||
          e.data?.error === 'upgrade_order_active_first')
       if (guard) {
-        if (!confirm(`${(e as Error).message}\n\n그래도 강행할까요? (안전 가드 우회)`)) {
+        if (!await confirm({ title: '안전 가드 우회', tone: 'danger', confirmLabel: '강행', body: <>
+          {(e as Error).message}
+          <div className="mt-2">그래도 강행할까요? (안전 가드 우회)</div>
+        </> })) {
           show('취소됨 — 안전 가드 유지', 'err'); return
         }
         try {
@@ -425,10 +443,14 @@ export default function ServersPage() {
     const target = d.prev_install_path
     const targetVer = d.prev_package_version
     if (!target) { show('롤백 대상 없음 (이전 버전 설치 이력 없음)', 'err'); return }
-    if (!confirm(`${d.package_name} 모듈을 이전 버전으로 롤백할까요?\n\n` +
-                 `  현재: v${d.package_version} (${d.install_path})\n` +
-                 `  대상: v${targetVer || '?'} (${target})\n\n` +
-                 `collection 재동기 후 재기동됩니다 (단기 다운타임)`)) return
+    if (!await confirm({ title: '모듈 롤백', confirmLabel: '롤백', body: <>
+      {d.package_name} 모듈을 이전 버전으로 롤백할까요?
+      <div className="mt-2 font-mono text-xs">
+        <div>현재: v{d.package_version} ({d.install_path})</div>
+        <div>대상: v{targetVer || '?'} ({target})</div>
+      </div>
+      <div className="mt-2">collection 재동기 후 재기동됩니다 (단기 다운타임)</div>
+    </> })) return
     try {
       const r = await deploymentApi.rollbackDeployment(d.id)
       show(`롤백 큐 등록 (restart #${r.restart_job_id} → ${r.install_path})`, 'ok')
@@ -436,13 +458,21 @@ export default function ServersPage() {
     } catch (e) { show((e as Error).message, 'err') }
   }
   async function removeDeployment(d: Deployment) {
-    if (!confirm(`Deployment #${d.id} (${d.package_name}) 을 제거할까요?`)) return
+    if (!await confirm({ title: '모듈 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `Deployment #${d.id} (${d.package_name}) 을 제거할까요?` })) return
     try { await deploymentApi.deleteDeployment(d.id); show('삭제됨', 'ok'); await load() }
     catch (e) { show((e as Error).message, 'err') }
   }
   async function deleteSystem(g: HaGroup) {
     const memberNames = g.members.map(m => m.agent_name || `#${m.agent_id}`).join(', ')
-    if (!confirm(`시스템 "${g.name}" 을 삭제합니다.\n\n  · HA 그룹 (mode=${g.mode}, vrid=${g.vrid}) 제거\n  · 멤버 ${g.members.length} 개 삭제: ${memberNames || '(없음)'}\n\n계속할까요?`)) return
+    if (!await confirm({ title: '시스템 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      시스템 "{g.name}" 을 삭제합니다.
+      <ul className="mt-2 list-disc pl-5">
+        <li>HA 그룹 (mode={g.mode}, vrid={g.vrid}) 제거</li>
+        <li>멤버 {g.members.length} 개 삭제: {memberNames || '(없음)'}</li>
+      </ul>
+      <div className="mt-2">계속할까요?</div>
+    </> })) return
     try {
       // 1) 모든 멤버 agent 삭제 (관련 deployment 도 cascade)
       for (const m of g.members) {
@@ -484,8 +514,10 @@ export default function ServersPage() {
   }
   async function removeMemberFromGroup(g: HaGroup, a: Agent) {
     // AA 만 호출 — AS 는 row 에 [×] 없음 (lifecycle 표준: AS 멤버 단독 삭제 차단).
-    if (!confirm(`멤버 [${agentDisplayName(a.name)}] 를 그룹 [${g.name}] 에서 제거할까요?\n\n` +
-                 `agent 자체는 삭제되지 않고 standalone (SA) 으로 트리에 남습니다.`)) return
+    if (!await confirm({ title: '멤버 제거', tone: 'danger', confirmLabel: '제거', body: <>
+      멤버 [{agentDisplayName(a.name)}] 를 그룹 [{g.name}] 에서 제거할까요?
+      <div className="mt-2">agent 자체는 삭제되지 않고 standalone (SA) 으로 트리에 남습니다.</div>
+    </> })) return
     try {
       await haGroupsApi.removeMember(g.id, a.id)
       show(`${a.name} 그룹에서 제거됨`, 'ok')
@@ -878,6 +910,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
   onReload: () => Promise<void>
 }) {
   const { show } = useToast()
+  const confirm = useConfirm()
   // AA(all_active)는 절체 개념이 없어 auth_pass·절체 조건·역할/MASTER/상태 컬럼이 전부 빠진다
   // (`cims-design-handoff/screens/aa-group.md` 대조표).
   const isAS = group.mode === 'active_standby'
@@ -1050,11 +1083,15 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
   function updateBinding(bid: number, patch: Partial<VipBinding>) {
     setEditBindings(editBindings.map(b => b.bid === bid ? { ...b, ...patch } : b))
   }
-  function removeBinding(bid: number) {
+  async function removeBinding(bid: number) {
     const b = editBindings.find(x => x.bid === bid)
     if (!b) return
     const desc = `${b.slot || '(slot 미지정)'} — ${b.ip || '(IP 미입력)'}${b.mask ? `/${b.mask}` : ''}`
-    if (!confirm(`VIP binding 을 제거할까요?\n  ${desc}\n\n저장하기 전 까지는 적용되지 않습니다.`)) return
+    if (!await confirm({ title: 'VIP 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      VIP binding 을 제거할까요?
+      <div className="mt-1 font-mono text-xs">{desc}</div>
+      <div className="mt-2">저장하기 전 까지는 적용되지 않습니다.</div>
+    </> })) return
     setEditBindings(editBindings.filter(x => x.bid !== bid))
     if (bindingEditMode === bid) setBindingEditMode(null)
   }
@@ -1366,7 +1403,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                             {/* 행 단위 삭제인데 Danger 다 — 시안이 그렇게 그렸다 (44:696).
                                 contracts.md 는 행 단위를 Secondary 로 적었지만 그림이 정본이다. */}
                             <Button variant="destructive" disabled={bindingEditMode !== null}
-                                    onClick={() => removeBinding(b.bid)}>
+                                    onClick={() => void removeBinding(b.bid)}>
                               <Trash2 /> 삭제
                             </Button>
                           </div>
@@ -1442,7 +1479,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                           <Button variant="default"
                                   disabled={vipManual ? !manualOk : (!b.slot || !host || !info?.prefix)}
                                   onClick={() => setBindingEditMode(null)}>저장</Button>
-                          <Button variant="destructive" onClick={() => removeBinding(b.bid)}>
+                          <Button variant="destructive" onClick={() => void removeBinding(b.bid)}>
                             <Trash2 /> 삭제
                           </Button>
                         </div>
@@ -2612,6 +2649,7 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
   onReload: () => Promise<void> | void
 }) {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [busy, setBusy] = useState<string | null>(null)
   const isAS = group.mode === 'active_standby'
   const activeName = group.active_agent_id != null
@@ -2620,8 +2658,11 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
 
   async function batch(action: 'start' | 'stop' | 'restart') {
     const label = action === 'start' ? '일괄 시작' : action === 'stop' ? '일괄 중지' : '일괄 재시작'
-    if (action === 'stop' && !window.confirm(
-        `[${group.name}] 그룹의 서비스를 전부 중지합니다.\nVIP(가상 IP)도 내려가 서비스가 완전히 중단됩니다. 계속할까요?`))
+    if (action === 'stop' && !await confirm({
+        title: '그룹 일괄 중지', tone: 'danger', confirmLabel: '일괄 중지', body: <>
+          [{group.name}] 그룹의 서비스를 전부 중지합니다.
+          <div className="mt-1">VIP(가상 IP)도 내려가 서비스가 완전히 중단됩니다. 계속할까요?</div>
+        </> }))
       return
     setBusy(action)
     try {
@@ -2636,9 +2677,11 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
   }
 
   async function doFailover(force = false) {
-    if (!force && !window.confirm(
-        `[${group.name}] 수동 절체 — 현재 Active(${activeName || '?'}) 에서 Standby 로 서비스를 넘깁니다.\n` +
-        `절체 중 수 초의 순단이 발생할 수 있습니다. 계속할까요?`))
+    if (!force && !await confirm({
+        title: '수동 절체', confirmLabel: '절체', body: <>
+          [{group.name}] 수동 절체 — 현재 Active({activeName || '?'}) 에서 Standby 로 서비스를 넘깁니다.
+          <div className="mt-1">절체 중 수 초의 순단이 발생할 수 있습니다. 계속할까요?</div>
+        </> }))
       return
     setBusy('failover')
     try {
@@ -2651,11 +2694,15 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
       // 막다른 골목으로 두지 않고 전환을 권하거나 강행을 선택하게 한다.
       if (e instanceof ApiError && e.data?.error === 'agents_not_on_vip') {
         const list = (e.data.agents as Array<{ name: string; oam_url: string }> | undefined) || []
-        const lines = list.slice(0, 6).map(a => `  · ${a.name} → ${a.oam_url}`).join('\n')
-        if (window.confirm(
-            `${(e as Error).message}\n\n${lines}\n\n` +
-            `지금 전 agent 의 OAM 주소를 VIP 로 바꿀까요? (취소 = 아무것도 하지 않음)\n` +
-            `개별 서버만 바꾸려면 [시스템/서버 구성] > 서버 > OAM 접속 주소 를 쓰세요.`)) {
+        const lines = list.slice(0, 6).map(a => `${a.name} → ${a.oam_url}`)
+        if (await confirm({ title: 'OAM 주소 전환', confirmLabel: '전환', body: <>
+            {(e as Error).message}
+            <ul className="mt-2 list-disc pl-5 font-mono text-xs">
+              {lines.map(l => <li key={l}>{l}</li>)}
+            </ul>
+            <div className="mt-2">지금 전 agent 의 OAM 주소를 VIP 로 바꿀까요? (취소 = 아무것도 하지 않음)</div>
+            <div className="mt-1">개별 서버만 바꾸려면 [시스템/서버 구성] &gt; 서버 &gt; OAM 접속 주소 를 쓰세요.</div>
+          </> })) {
           setBusy(null)
           await doRetargetOamUrl()
           return
@@ -2680,10 +2727,15 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
     const vip = ((admin || binds[0])?.ip || group.vip || '').trim()
     if (!vip) { show('이 그룹에 VIP 가 없습니다', 'err'); return }
     const url = `https://${vip}:4419`
-    if (!window.confirm(
-        `전 agent 의 OAM 접속 주소를 아래로 전환합니다.\n\n  ${url}\n\n` +
-        `각 agent 가 그 주소로 /health 도달을 확인한 뒤에만 적용합니다 — 도달 불가면 ` +
-        `주소를 바꾸지 않고 실패로 남습니다(fleet 단절 방지).\n\n진행할까요?`)) return
+    if (!await confirm({ title: 'OAM 주소 전환', confirmLabel: '전환', body: <>
+      전 agent 의 OAM 접속 주소를 아래로 전환합니다.
+      <div className="mt-1 font-mono text-xs">{url}</div>
+      <div className="mt-2">
+        각 agent 가 그 주소로 /health 도달을 확인한 뒤에만 적용합니다 — 도달 불가면
+        주소를 바꾸지 않고 실패로 남습니다(fleet 단절 방지).
+      </div>
+      <div className="mt-2">진행할까요?</div>
+    </> })) return
     setBusy('retarget')
     try {
       const r = await deploymentApi.retargetOamUrl(url)
@@ -2699,9 +2751,20 @@ function GroupControlMatrix({ group, agents, depsByAgent, onJob, onSelectMember,
   // 노드 유지보수(EXCLUDE_NODE) — 지정 멤버를 승격 대상에서 제외(on)/복귀(off).
   async function doMaintenance(agentId: number, on: boolean) {
     const nm = agentDisplayName(agents.find(a => a.id === agentId)?.name || `#${agentId}`)
-    if (!window.confirm(on
-        ? `[${nm}] 를 유지보수(EXCLUDE_NODE)로 전환합니다.\n이 노드는 승격 대상에서 제외되고 모듈이 정지됩니다. 상대 노드가 죽어도 이 노드로 절체되지 않습니다(다운 감수). 계속할까요?`
-        : `[${nm}] 유지보수를 해제합니다.\nrole 기반으로 모듈이 재기동되어 standby 로 재합류합니다. 계속할까요?`))
+    if (!await confirm({
+        title: on ? '유지보수 진입' : '유지보수 해제',
+        tone: on ? 'danger' : 'default',
+        confirmLabel: on ? '점검' : '복귀',
+        body: on ? <>
+          [{nm}] 를 유지보수(EXCLUDE_NODE)로 전환합니다.
+          <div className="mt-1">
+            이 노드는 승격 대상에서 제외되고 모듈이 정지됩니다. 상대 노드가 죽어도 이 노드로
+            절체되지 않습니다(다운 감수). 계속할까요?
+          </div>
+        </> : <>
+          [{nm}] 유지보수를 해제합니다.
+          <div className="mt-1">role 기반으로 모듈이 재기동되어 standby 로 재합류합니다. 계속할까요?</div>
+        </> }))
       return
     setBusy(`maint:${agentId}`)
     try {
@@ -3602,6 +3665,7 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
   onDone: () => Promise<void> | void
 }) {
   const { show } = useToast()
+  const confirm = useConfirm()
   // 후보 = 같은 모듈의 다른 버전. 정렬은 [모듈 추가] 와 같은 규칙(최근 업로드순) —
   // 제품 전반의 '최신' 정의와 일치시킨다(semver 비교가 아니다).
   const cands = useMemo(() => packages
@@ -3628,7 +3692,10 @@ function DeploymentUpgradeModal({ dep: d, packages, onClose, onDone }: {
       // 관리평면 순서(standby 먼저)는 운영자가 사정을 알고 뒤집을 수 있는 **권고**다.
       // 반면 '실행 중'(module_running)은 우회 수단을 주지 않는다 — 정지가 언제나 가능하다.
       if (e instanceof ApiError && e.status === 409 && e.data?.error === 'upgrade_order_active_first') {
-        if (confirm(`${(e as Error).message}\n\n그래도 강행할까요? (순서 가드 우회)`)) {
+        if (await confirm({ title: '순서 가드 우회', tone: 'danger', confirmLabel: '강행', body: <>
+          {(e as Error).message}
+          <div className="mt-2">그래도 강행할까요? (순서 가드 우회)</div>
+        </> })) {
           setBusy(false); return run(true)
         }
         show('취소됨 — 안전한 순서 유지', 'err')

@@ -22,6 +22,7 @@ import { Button } from '../../components/ui/button'
 import { SubSection } from '../../components/custom/collapsible-section'
 import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 import { StatusDot } from '../../components/custom/status-dot'
+import { useConfirm } from '../../components/custom/confirm'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
 
@@ -68,6 +69,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
   applying?: boolean
   onApply: (ops: MountOp[], label: string) => void
 }) {
+  const confirm = useConfirm()
   const [addOpen, setAddOpen] = useState(false)
   const [fstype, setFstype]   = useState('nfs')
   const [source, setSource]   = useState('')
@@ -88,11 +90,12 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
             `그룹 마운트 += ${s} → ${t}`)
     setAddOpen(false)
   }
-  const removeMount = (m: GroupMount) => {
-    if (!confirm(
-      `${m.target} 마운트를 **전 멤버**에서 제거할까요?\n\n` +
-      `각 노드가 umount + /etc/fstab 의 cims-managed 항목을 삭제합니다.\n` +
-      `대상: ${members.map(x => x.name).join(', ') || '(멤버 없음)'}`)) return
+  const removeMount = async (m: GroupMount) => {
+    if (!await confirm({ title: '그룹 마운트 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      {m.target} 마운트를 <b>전 멤버</b>에서 제거할까요?
+      <div className="mt-2">각 노드가 umount + /etc/fstab 의 cims-managed 항목을 삭제합니다.</div>
+      <div className="mt-1">대상: {members.map(x => x.name).join(', ') || '(멤버 없음)'}</div>
+    </> })) return
     onApply([{ op: 'del', target: m.target }], `그룹 마운트 -= ${m.target}`)
   }
   // 선언 전체를 다시 내린다 — 오프라인이었거나 나중에 편입된 멤버를 따라잡게 하는 통로.
@@ -194,7 +197,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
                     </Button>
                   )}
                   {/* 시안은 여기를 Ghost 로 그렸다 (187:2943) — VIP 행의 Danger 삭제와 다르다. */}
-                  <Button variant="ghost" onClick={() => removeMount(m)} disabled={applying}>삭제</Button>
+                  <Button variant="ghost" onClick={() => void removeMount(m)} disabled={applying}>삭제</Button>
                 </div>
               </Td>
             </tr>

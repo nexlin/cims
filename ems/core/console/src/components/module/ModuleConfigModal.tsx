@@ -17,6 +17,7 @@ import { Button } from '../ui/button'
 import { FormField } from '../custom/form-field'
 import { SubSection } from '../custom/collapsible-section'
 import { StickySaveBar } from '../custom/sticky-save-bar'
+import { useConfirm } from '../custom/confirm'
 import { Alert } from '../ui/alert'
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 
@@ -628,15 +629,19 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   onDone?: () => void | Promise<void>
 }) {
   const { show } = useToast()
+  const confirm = useConfirm()
   const [busy, setBusy] = useState(false)
   const mp = mountPoint.trim().replace(/\/+$/, '')
 
   async function migrate() {
     if (!groupId) return
-    if (!window.confirm(
-        `관리 데이터를 이 경로로 이관합니다.\n\n  ${mp}/runtime\n\n` +
-        `OAM 이 정지 → 복사 → 재기동되므로 콘솔이 30초 내외 끊깁니다.\n` +
-        `대상에 이전 데이터가 있으면 .stale-<시각> 으로 보관하고 덮어씁니다.\n\n진행할까요?`)) return
+    if (!await confirm({ title: '관리 store 이관', tone: 'danger', confirmLabel: '이관', body: <>
+      관리 데이터를 이 경로로 이관합니다.
+      <div className="mt-1 font-mono text-xs">{mp}/runtime</div>
+      <div className="mt-2">OAM 이 정지 → 복사 → 재기동되므로 콘솔이 30초 내외 끊깁니다.</div>
+      <div className="mt-1">대상에 이전 데이터가 있으면 .stale-&lt;시각&gt; 으로 보관하고 덮어씁니다.</div>
+      <div className="mt-2">진행할까요?</div>
+    </> })) return
     setBusy(true)
     try {
       const r = await haGroupsApi.migrateSharedStore(groupId, mp)

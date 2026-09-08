@@ -1,3 +1,4 @@
+import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
@@ -74,6 +75,7 @@ type OrgOpt = { code: string; label: string }
 
 export default function ProvisioningWorkbenchPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { user: me } = useAuth()
   const canWrite = canWriteConfig(me)
 
@@ -152,17 +154,21 @@ export default function ProvisioningWorkbenchPage() {
   // ── 삭제 ──
   async function batchDeleteUsers() {
     const ids = Array.from(selected).map(Number)
-    if (!ids.length || !confirm(`${ids.length}명을 삭제합니다. 연결된 번호도 삭제됩니다.`)) return
+    if (!ids.length) return
+    if (!await confirm({ title: '가입자 일괄 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `${ids.length}명을 삭제합니다. 연결된 번호도 삭제됩니다.` })) return
     try { await usersApi.batchDelete(ids); show('삭제 완료', 'ok'); setSelected(new Set()); load() }
     catch (e: unknown) { show(String(e), 'err') }
   }
   async function deleteUser(u: UserSummary) {
-    if (!confirm(`${u.name} 삭제? 연결된 번호도 삭제됩니다.`)) return
+    if (!await confirm({ title: '가입자 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `${u.name} 삭제? 연결된 번호도 삭제됩니다.` })) return
     try { await usersApi.delete(u.id); show('삭제', 'ok'); if (exp?.userId === u.id) setExp(null); load() }
     catch (e: unknown) { show(String(e), 'err') }
   }
   async function deleteNumber(r: NumberRow) {
-    if (!confirm(`${r.msisdn} 삭제?`)) return
+    if (!await confirm({ title: '번호 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `${r.msisdn} 삭제?` })) return
     try { await usersApi.deleteSub(r.user.id, r.svc, r.msisdn); show('삭제', 'ok'); load() }
     catch (e: unknown) { show(String(e), 'err') }
   }
@@ -638,6 +644,7 @@ function TransportFixedAka() {
 // ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+PTT 통합) ──
 function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: UserSummary; catalog: ServiceCat[]; canWrite: boolean; highlight?: string; onReload: () => void }) {
   const { show } = useToast()
+  const confirm = useConfirm()
   const rows: Array<{ svc: 'call' | 'ptt'; sub: Subscription }> = [
     ...user.call_subscriptions.map(s => ({ svc: 'call' as const, sub: s })),
     ...user.ptt_subscriptions.map(s => ({ svc: 'ptt' as const, sub: s })),
@@ -672,7 +679,8 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
     catch (e: unknown) { show(String(e), 'err') }
   }
   async function del(r: { svc: 'call' | 'ptt'; sub: Subscription }) {
-    if (!confirm(`${r.sub.id} 삭제?`)) return
+    if (!await confirm({ title: '가입 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `${r.sub.id} 삭제?` })) return
     try { await usersApi.deleteSub(user.id, r.svc, r.sub.id); show('삭제', 'ok'); onReload() }
     catch (e: unknown) { show(String(e), 'err') }
   }

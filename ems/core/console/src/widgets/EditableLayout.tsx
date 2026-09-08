@@ -3,6 +3,7 @@
 // 편집 진입 시 legacy(flow) 레이아웃은 grid 로 1회 migrate(flowToGrid). 좁은 화면에선 편집 비활성.
 // 영속: OAM /console/layouts/<id> (PUT 저장 / DELETE seed 리셋). 없으면 seed.
 
+import { useConfirm } from '../components/custom/confirm'
 import { Pencil } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
@@ -102,6 +103,7 @@ function _readDismissed(id: string): number {
 export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: PageLayout }) {
   const { user } = useAuth()
   const { show } = useToast()
+  const confirm = useConfirm()
   const isAdmin = hasRole(user, 'admin')   // developer(admin 동급) 포함
   const isDesktop = useIsDesktop()          // 편집(드래그/리사이즈)은 데스크톱 전용 — 뷰는 좁은 화면도 단일열 동작
   const [layout, setLayout] = useState<PageLayout>(() => normalize(_readCache(layoutId) || seed))
@@ -214,7 +216,8 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
     finally { setSaving(false) }
   }
   const resetLayout = async () => {
-    if (!confirm('저장된 레이아웃을 삭제하고 기본값(seed)으로 되돌릴까요?')) return
+    if (!await confirm({ title: '레이아웃 초기화', tone: 'danger', confirmLabel: '초기화',
+      body: '저장된 레이아웃을 삭제하고 기본값(seed)으로 되돌릴까요?' })) return
     setSaving(true)
     try {
       await consoleApi.deleteLayout(layoutId)

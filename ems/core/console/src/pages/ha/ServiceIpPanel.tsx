@@ -7,6 +7,7 @@ import { ImeSafeInput } from './ImeSafeInput'
 import { Badge } from '../../components/ui/badge'
 import { Button } from '../../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
+import { useConfirm } from '../../components/custom/confirm'
 
 // ServiceIpPanel — 인터페이스별 cims-managed IP 추가/삭제 + specific route 관리.
 // 모델: 각 IP 가 row (iface, ip 단위). agent 가 보고한 interfaces.managed=true 인 IP 만
@@ -55,6 +56,7 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
   const slotHints = slots.map(s => s.name).join(' / ')
 
   const addableIfaces = ifaceOrder.filter(n => !mgmtIfaces.has(n))               // mgmt 는 추가 불가 (자기 단절 방지)
+  const confirm = useConfirm()
   const [addOpen, setAddOpen] = useState(false)
   const [addIface, setAddIface] = useState('')
   const [addIp, setAddIp] = useState('')
@@ -75,8 +77,11 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
     )
     setAddOpen(false)
   }
-  const deleteIp = (iface: string, ip: string, mask: number) => {
-    if (!confirm(`${iface} 에서 ${ip}/${mask} 를 제거할까요?\n(agent 가 ip addr del 호출)`)) return
+  const deleteIp = async (iface: string, ip: string, mask: number) => {
+    if (!await confirm({ title: 'IP 삭제', tone: 'danger', confirmLabel: '삭제', body: <>
+      {iface} 에서 {ip}/{mask} 를 제거할까요?
+      <div className="mt-1">(agent 가 ip addr del 호출)</div>
+    </> })) return
     onApply(
       { service_ip_rows: [{ op: 'del', iface, ip, mask }] },
       `${iface} -= ${ip}/${mask}`,
@@ -102,8 +107,9 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
     )
     setRouteAddOpen(false)
   }
-  const deleteRoute = (r: AgentRoute) => {
-    if (!confirm(`route ${r.dst} via ${r.via} dev ${r.dev} 를 제거할까요?`)) return
+  const deleteRoute = async (r: AgentRoute) => {
+    if (!await confirm({ title: '라우팅 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `route ${r.dst} via ${r.via} dev ${r.dev} 를 제거할까요?` })) return
     onApply(
       { routes: [{ op: 'del', dst: r.dst, via: r.via, dev: r.dev }] },
       `route -= ${r.dst} via ${r.via} dev ${r.dev}`,
@@ -214,7 +220,7 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                       <Td align="right">
                         {managed && !isMgmtIp && !isVip
                           ? <Button variant="destructive" disabled={applying}
-                                    onClick={() => deleteIp(iface, ni.ip, ni.mask)}>
+                                    onClick={() => void deleteIp(iface, ni.ip, ni.mask)}>
                               <Trash2 /> 삭제
                             </Button>
                           : <span className="text-muted-foreground">—</span>}
@@ -352,7 +358,7 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                         <Button variant="ghost" onClick={() => beginEditRoute(r)} disabled={applying}>
                           <Pencil /> 수정
                         </Button>
-                        <Button variant="destructive" onClick={() => deleteRoute(r)} disabled={applying}>
+                        <Button variant="destructive" onClick={() => void deleteRoute(r)} disabled={applying}>
                           <Trash2 /> 삭제
                         </Button>
                       </div>

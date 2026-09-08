@@ -1,3 +1,4 @@
+import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown, ArrowLeft, ArrowRight, Crown } from 'lucide-react'
@@ -31,6 +32,7 @@ function Caret({ open }: { open: boolean }) {
 
 export default function PttGroupsWorkbenchPage() {
   const { show } = useToast()
+  const confirm = useConfirm()
   const { user: me } = useAuth()
   const canGroupCreate = canCreateGroup(me)
 
@@ -84,7 +86,8 @@ export default function PttGroupsWorkbenchPage() {
   }
 
   async function deleteGroup(id: string) {
-    if (!confirm(`그룹 ${id} 삭제?`)) return
+    if (!await confirm({ title: 'PTT 그룹 삭제', tone: 'danger', confirmLabel: '삭제',
+      body: `그룹 ${id} 삭제?` })) return
     try { await groupsApi.delete(id); show('삭제', 'ok'); load(); if (openId === id) setOpenId(null) }
     catch (e: unknown) { show(String(e), 'err') }
   }
