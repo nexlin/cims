@@ -231,7 +231,9 @@ Enter(수락) 또는 직접 입력으로 진행합니다:
 - 편의 래퍼: `./cims.sh configure [동일 옵션]`
 
 > 도메인 주의: cspsim/단말의 Digest username 은 `imsi@domain` 이라 도메인이 정확해야 인증됩니다.
-> VoLTE=`ims.mnc033.mcc450.3gppnetwork.org`, PTT=`ptt.mnc033...`.
+> 개발·시험 환경의 도메인/realm 정본과 서버·단말·검증 도구별 적용 지점은
+> [dev/dev_test_domain_realm.md](dev/dev_test_domain_realm.md) 를 본다
+> (VoLTE=`volte.cims.example.kr`, PTT=`ptt.cims.example.kr`. 현재 .48 은 아직 `ims.mnc033.mcc450.3gppnetwork.org` 계열로 동작).
 
 ---
 
