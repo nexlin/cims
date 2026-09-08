@@ -716,10 +716,16 @@ struct SubscriptionInfo {
 };
 ```
 
-**부여 Expires** = min(요청 Expires, `SUBSCRIBE_MAX_EXPIRES_SEC`=3600) — RFC 6665 §4.2.1.1 대로 notifier 가 짧게 부여하고 2xx 의
-`Expires` 가 부여값이다(요청 없음 = 3600). 제휴 PUBLISH 도 같은 상한. Expires 헤더는 RFC 3261 §20.19 의 32bit 무부호
-delta-seconds 로 파싱한다(psip `ParseDeltaSeconds` — `4294967295` 같은 "무한" 요청이 int 오버플로로 -1→0 이 되어 **해지로
-오판**되던 결함 방지. 이 경우 200 OK `Expires: 0` 만 나가고 구독·초기 NOTIFY 가 생기지 않았다 — 외부 MCX SDK 실측).
+**Expires 해석 (RFC 3261 §20.19 delta-seconds)** — psip 파서는 Expires 를 규격 타입(32bit 무부호)으로 보존하고
+"없음/유효/무효" 를 구분해 돌려준다(`GetExpires`/`GetRegisterExpires` → `E_SIP_EXPIRES_ABSENT|VALID|INVALID`). 해석은
+핸들러 몫이다. **부여 Expires** = min(요청, `SUBSCRIBE_MAX_EXPIRES_SEC`=3600) — RFC 6665 §4.2.1.1 대로 notifier 가 짧게
+부여하고 2xx 의 `Expires` 가 부여값이다. 요청에 없으면 기본값 3600(`SUBSCRIBE_DEFAULT_EXPIRES_SEC`), `0` 은 해지,
+형식 오류(비숫자·2^32 초과)는 **400 Bad Request**(RFC 3261 §21.4.1). 제휴 PUBLISH 도 같은 규칙(RFC 3903 §4.1).
+REGISTER 는 `GetRegisterExpires` 로 Contact `;expires` 를 Expires 헤더보다 우선해 읽고(§10.2.1.1), 둘 다 없으면
+`REGISTER_DEFAULT_EXPIRES_SEC`=3600(§10.2.4 — 없음은 해제가 아니다), 요청값은 그대로 수락하되 내부 표현(int 초)의
+범위로만 자른다(운영 상한은 별도 정책). 종전의 int + `-1`(미지정) 표지 구조는 `4294967295` 같은 값이 -1 로 넘쳐
+미지정과 겹치고 0(해지)으로 접혀 구독·제휴·등록이 조용히 해지되던 결함이 있었다(외부 MCX SDK 실측). 회귀 시험
+`tests/psip_expires_test.cpp`.
 
 **구독 종료 사유:**
 
