@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Check, Copy, Hourglass, Lock, LockOpen, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
 import { Badge } from '../components/ui/badge'
@@ -3453,28 +3453,30 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
                   :                             'Standalone (서버 1)'
 
   return (
-    <Modal title="시스템 추가" onClose={onClose} width={640}>
+    // 시안 M3(460:7421) — 세로 폼(라벨 위·헬프 아래), 마운트 블록은 구분선 아래 조건부.
+    <Modal title="시스템 추가" onClose={onClose} width={660}>
       {!results ? (
-        <div className="form-grid">
-          <label>이름 *</label>
-          <input className="form-input" value={name} placeholder="예: Control-Server"
-            onChange={e => setName(e.target.value)} disabled={creating} />
-          <label>유형 *</label>
-          <select className="form-input" value={mode} onChange={e => setMode(e.target.value as SystemMode)}
-                  disabled={creating}>
-            <option value="active_standby">AS — Active/Standby (master + backup 2서버 자동)</option>
-            <option value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</option>
-            <option value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</option>
-          </select>
+        <div className="flex flex-col gap-3.5">
+          <FormField label="이름" required help="트리와 대시보드에 표시되는 이름 (예: Control-Server)">
+            <input className="form-input" value={name} placeholder="예: Control-Server"
+              onChange={e => setName(e.target.value)} disabled={creating} />
+          </FormField>
+          <FormField label="유형" required>
+            <select className="form-input" value={mode} onChange={e => setMode(e.target.value as SystemMode)}
+                    disabled={creating}>
+              <option value="active_standby">AS — Active/Standby (master + backup 2서버 자동)</option>
+              <option value="all_active">AA — All Active (다중화, 그룹만 생성 + 이후 멤버 추가)</option>
+              <option value="standalone">Standalone — 단일 서버 (HA 그룹 없음)</option>
+            </select>
+          </FormField>
           {mode === 'active_standby' && (
             <>
-              <label>auth_pass *</label>
-              <input className="form-input" value={authPass} type="password"
-                onChange={e => setAuthPass(e.target.value)} disabled={creating}
-                placeholder="최대 8글자 — VRRP 인증" maxLength={8} />
+              <FormField label="auth_pass" required help="VRRP 인증 비밀번호 — 멤버 간 동일 (최대 8글자)">
+                <input className="form-input" value={authPass} type="password"
+                  onChange={e => setAuthPass(e.target.value)} disabled={creating} maxLength={8} />
+              </FormField>
               {[0, 1].map(i => (
-                <Fragment key={i}>
-                  <label>멤버 {i + 1} ({i === 0 ? 'master' : 'backup'})</label>
+                <FormField key={i} label={`멤버 ${i + 1} (${i === 0 ? 'master' : 'backup'})`}>
                   <select className="form-input" value={memberSel[i]} disabled={creating}
                     onChange={e => setMemberSel(prev => {
                       const next: [number, number] = [...prev] as [number, number]
@@ -3488,7 +3490,7 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
                       </option>
                     ))}
                   </select>
-                </Fragment>
+                </FormField>
               ))}
             </>
           )}
@@ -3496,94 +3498,95 @@ function SystemCreateModal({ onClose, onDone, onCreated, saAgents, mountSuggesti
               그 노드는 공유 store 를 못 써 승격 부적격이 된다(실측: 계획 절체가 원본을
               내려놓은 뒤에야 드러나 관리평면이 끊겼다). 기본값은 이 설치가 이미 쓰는 마운트. */}
           {showMount && (
-          <label style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 4 }}>
-            <input type="checkbox" checked={mountOn} disabled={creating}
-                   onChange={e => setMountOn(e.target.checked)} />
-            {' '}공유 스토리지 마운트를 함께 적용
-            <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
-              {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)
-            </span>
-          </label>
+            <label className="mt-1 flex cursor-pointer select-none items-start gap-2 border-t border-border pt-3.5">
+              <Checkbox checked={mountOn} disabled={creating}
+                        onCheckedChange={v => setMountOn(v === true)} className="mt-0.5" />
+              <span className="text-md">
+                공유 스토리지 마운트를 함께 적용
+                <span className="text-xs text-muted-foreground">
+                  {' '}— 서버 등록 직후 자동으로 붙입니다 (fstab 영속)
+                </span>
+              </span>
+            </label>
           )}
           {showMount && mountOn && (
             <>
-              <label>원본 *</label>
-              <input className="form-input" value={mnt.source} disabled={creating}
-                placeholder="예: nas.example:/export/cims"
-                onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
-              <label>붙일 위치 *</label>
-              <input className="form-input" value={mnt.target} disabled={creating}
-                placeholder="/mnt/cims"
-                onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
-              <label>파일시스템 *</label>
-              <select className="form-input" value={mnt.fstype} disabled={creating}
-                onChange={e => setMnt(m => ({ ...m, fstype: e.target.value }))}>
-                {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
-                  <option key={f} value={f}>{f}</option>
-                ))}
-              </select>
-              <label style={{ gridColumn: '1 / -1', fontSize: 11, color: mntValid ? 'var(--muted-foreground)' : 'var(--destructive)' }}>
-                {mntValid
-                  ? <>등록 직후 <code>{mnt.source}</code> → <code>{mnt.target}</code> ({mnt.fstype},
-                     defaults+_netdev,nofail) 로 마운트하고 콘솔 [마운트 관리]에 표시됩니다.
-                     마운트가 실패해도 서버 등록은 유지됩니다.</>
-                  : <>원본과 붙일 위치(절대경로)를 입력하세요 — 비우면 마운트를 적용하지 않습니다.</>}
-              </label>
+              <FormField label="원본" required>
+                <input className="form-input font-mono" value={mnt.source} disabled={creating}
+                  placeholder="예: nas.example:/export/cims"
+                  onChange={e => setMnt(m => ({ ...m, source: e.target.value }))} />
+              </FormField>
+              <FormField label="붙일 위치" required>
+                <input className="form-input font-mono" value={mnt.target} disabled={creating}
+                  placeholder="/mnt/cims"
+                  onChange={e => setMnt(m => ({ ...m, target: e.target.value }))} />
+              </FormField>
+              <FormField label="파일시스템" required
+                         help={mntValid
+                           ? `등록 직후 ${mnt.source} → ${mnt.target} (${mnt.fstype}, defaults,_netdev,nofail) 로 마운트하고 콘솔 [마운트 관리]에 표시됩니다. 마운트가 실패해도 서버 등록은 유지됩니다.`
+                           : undefined}
+                         error={mntValid ? undefined
+                           : '원본과 붙일 위치(절대경로)를 입력하세요 — 비우면 마운트를 적용하지 않습니다.'}>
+                <select className="form-input" value={mnt.fstype} disabled={creating}
+                  onChange={e => setMnt(m => ({ ...m, fstype: e.target.value }))}>
+                  {['nfs4', 'nfs', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs'].map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </FormField>
             </>
           )}
-          <label style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--muted-foreground)', marginTop: 4 }}>
+          {/* 선택 요약 — 시안은 회색 박스 한 줄로 두고, 고른 값에 따라 실시간으로 바뀐다 */}
+          <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
             선택: <b>{modeLabel}</b>
             {mode === 'active_standby' && memberSel.every(v => v === 0) &&
-              <> · 멤버 이름: <code>{name || '<이름>'}-01</code> (master), <code>{name || '<이름>'}-02</code> (backup)</>}
+              <> · 멤버 이름: <code className="font-mono">{name || '<이름>'}-01</code> (master),{' '}
+                 <code className="font-mono">{name || '<이름>'}-02</code> (backup)</>}
             {mode === 'active_standby' && memberSel.some(v => v > 0) &&
               <> · 기존 서버는 install-command 없이 즉시 편입되고 HA 설정이 자동 재적용됩니다</>}
             {mode === 'all_active' &&
               <> · 서버는 생성되지 않습니다 — 그룹 생성 후 <b>[+ 멤버 추가]</b> 로 한 대씩
                  추가하고, <b>마운트는 그 단계에서</b> 선택합니다</>}
-          </label>
+          </div>
         </div>
       ) : results.length === 0 ? (
-        <div style={{ color: '#2ecc71' }}>
+        <Alert variant="success">
           {mode === 'active_standby'
-            ? <>✓ 기존 서버들로 A/S 시스템 구성 완료 — 트리에서 그룹을 선택해 VIP 를 설정하세요.</>
-            : <>✓ AA 그룹 생성됨. 좌측 트리에서 그룹 선택 후 [+ 멤버 추가] 로 서버를 추가하세요.</>}
-        </div>
+            ? '기존 서버들로 A/S 시스템 구성 완료 — 트리에서 그룹을 선택해 VIP 를 설정하세요.'
+            : 'AA 그룹 생성됨. 좌측 트리에서 그룹 선택 후 [+ 멤버 추가] 로 서버를 추가하세요.'}
+        </Alert>
       ) : (
         <div>
-          <div style={{ color: '#2ecc71', marginBottom: 10 }}>
-            ✓ {results.length} 서버 등록됨. 각 서버에서 다음 명령 실행:
-          </div>
+          <Alert variant="success" className="mb-2.5">
+            {results.length} 서버 등록됨. 각 서버에서 다음 명령 실행:
+          </Alert>
           {results.map((r, i) => (
-            <div key={i} style={{ marginBottom: 12 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
-                ⓘ {r.name}
+            <div key={i} className="mb-3">
+              <div className="mb-1 text-md font-semibold">{r.name}</div>
+              <div className="relative">
+                <pre className="m-0 whitespace-pre-wrap rounded-sm border border-border bg-muted
+                                p-3 pr-24 font-mono text-sm">{r.install_command}</pre>
+                <Button variant="outline" className="absolute right-2 top-2" onClick={() => copyCmd(i)}>
+                  {copiedIdx === i ? <Check /> : <Copy />} 복사
+                </Button>
               </div>
-              <div style={{ position: 'relative' }}>
-                <pre style={{
-                  background: '#0d1117', color: '#c9d1d9', padding: 12, paddingRight: 88,
-                  borderRadius: 4, fontSize: 12, whiteSpace: 'pre-wrap', margin: 0,
-                }}>{r.install_command}</pre>
-                <button className="btn btn--sm btn--outline"
-                  style={{ position: 'absolute', top: 8, right: 8 }}
-                  onClick={() => copyCmd(i)}>{copiedIdx === i ? '✓' : '📋'} 복사</button>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 4 }}>
-                token: <code>{r.enrollment_token}</code>
+              <div className="mt-1 text-xs text-muted-foreground">
+                token: <code className="font-mono">{r.enrollment_token}</code>
               </div>
             </div>
           ))}
         </div>
       )}
-      <div className="modal-footer" style={{ marginTop: 16 }}>
+      <div className="mt-4 flex justify-end gap-1.5">
         {!results ? (
           <>
-            <button className="btn btn--outline" onClick={onClose} disabled={creating}>취소</button>
-            <button className="btn btn--primary" onClick={create} disabled={creating || !name.trim()}>
-              {creating ? '생성 중...' : '생성'}
-            </button>
+            <Button variant="outline" onClick={onClose} disabled={creating}>취소</Button>
+            <Button variant="default" onClick={create} disabled={creating || !name.trim()}>
+              {creating ? '생성 중…' : '생성'}
+            </Button>
           </>
         ) : (
-          <button className="btn btn--primary" onClick={onClose}>닫기</button>
+          <Button variant="default" onClick={onClose}>닫기</Button>
         )}
       </div>
     </Modal>
@@ -3863,37 +3866,51 @@ function MetricsModal({ agent, onClose }: { agent: Agent; onClose: () => void })
   // sparkline 은 시간순(오래된→최신). API 정렬에 의존하지 않도록 ts 로 재정렬.
   const chrono = [...metrics].sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
   return (
-    <Modal title={`${agent.name} — 메트릭 (최근 ${metrics.length}건)`}
-           onClose={onClose} width={760}>
+    // 시안 M1(193:3205) — 카드 3장 + 표 + 하단 안내문. **푸터 버튼이 없다**(머리의 ✕ 로 닫는다).
+    <Modal title={`${agentDisplayName(agent.name)} — 메트릭 (최근 ${metrics.length}건)`}
+           onClose={onClose} width={1000}>
       {chrono.length >= 2 && (
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-          <MetricTrend label="CPU" values={chrono.map(m => m.cpu_pct)} color="#3498db" warn={85} />
-          <MetricTrend label="MEM" values={chrono.map(m => m.mem_pct)} color="#27ae60" warn={90} />
-          <MetricTrend label="Disk" values={chrono.map(m => m.disk_pct)} color="#9b59b6" warn={90} />
+        <div className="mb-4 flex gap-2.5">
+          <MetricTrend label="CPU" values={chrono.map(m => m.cpu_pct)}
+                       color="var(--cims-info)" warn={85} />
+          <MetricTrend label="MEM" values={chrono.map(m => m.mem_pct)}
+                       color="var(--cims-success)" warn={90} />
+          <MetricTrend label="Disk" values={chrono.map(m => m.disk_pct)}
+                       color="var(--primary)" warn={90} />
         </div>
       )}
-      <table className="data-table">
+      <DataTable>
         <thead>
-          <tr><th>시각</th><th>CPU%</th><th>MEM%</th><th>Disk%</th><th>Load</th><th>CIMS 프로세스</th></tr>
+          <tr>
+            <Th width={230}>시각</Th>
+            <Th width={110}>CPU%</Th>
+            <Th width={110}>MEM%</Th>
+            <Th width={110}>DISK%</Th>
+            <Th width={200}>LOAD</Th>
+            <Th>CIMS 프로세스</Th>
+          </tr>
         </thead>
         <tbody>
+          {metrics.length === 0 && (
+            <tr><Td colSpan={6} className="text-muted-foreground">메트릭 없음 — heartbeat 대기</Td></tr>
+          )}
           {metrics.map(m => (
             <tr key={m.ts}>
-              <td style={{ fontSize: 12 }}>{m.ts}</td>
-              <td>{m.cpu_pct ?? '—'}</td>
-              <td>{m.mem_pct ?? '—'}</td>
-              <td>{m.disk_pct ?? '—'}</td>
-              <td style={{ fontSize: 12 }}>{m.load_avg}</td>
-              <td style={{ fontSize: 12 }}>
+              <Td mono>{m.ts}</Td>
+              <Td>{orDash(m.cpu_pct)}</Td>
+              <Td>{orDash(m.mem_pct)}</Td>
+              <Td>{orDash(m.disk_pct)}</Td>
+              <Td mono>{orDash(m.load_avg)}</Td>
+              <Td mono className="text-muted-foreground">
                 {m.processes.length === 0 ? '—'
                   : m.processes.map(p => `${p.name}(${p.pid})`).join(', ')}
-              </td>
+              </Td>
             </tr>
           ))}
         </tbody>
-      </table>
-      <div className="modal-footer" style={{ marginTop: 16 }}>
-        <button className="btn btn--outline" onClick={onClose}>닫기</button>
+      </DataTable>
+      <div className="mt-2.5 text-xs text-muted-foreground">
+        세로 스크롤 · 최근 {metrics.length}건 · 상단 카드의 붉은 점선은 임계치
       </div>
     </Modal>
   )
