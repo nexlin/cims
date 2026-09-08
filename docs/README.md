@@ -70,6 +70,7 @@ docs/
 - 런타임 설정 템플릿: `csp/config/config_template.json`, `cmp/config/config_template.json`, `csc/config/config_template.json`
 - 검증 절차 SoT: `VERIFICATION_PROCESS.md` (실행 가이드는 `VERIFICATION_MANUAL.md`)
 - 개발·시험 환경 SIP 도메인/realm 규약과 적용 지점: `dev/dev_test_domain_realm.md`
+- 테스트베드(.48) 단말 대면 TLS 인증서 — Service CA 발급 절차(단말 로그인 실패 원인·.45 에서 이어 할 절차): `dev/testbed_48_ue_tls_cert.md`
 - 콘솔 메뉴 구조:
   - `대시보드` / `가입자관리` / `서비스` / `통계`
   - `패키징` (`/release/...`) — 검증 실행 / 검증 이력 / 빌드 & 패키징
