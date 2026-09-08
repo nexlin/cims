@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Square, Stethoscope, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Hourglass, Lock, LockOpen, Pencil, Play, RefreshCw, RotateCw, Search, ShieldCheck, Square, Stethoscope, Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -11,6 +11,8 @@ import { Button } from '../components/ui/button'
 import { DataTable, Th, Td, orDash } from '../components/custom/data-table'
 import { EmptyState } from '../components/custom/empty-state'
 import { SubSection } from '../components/custom/collapsible-section'
+import { FormField } from '../components/custom/form-field'
+import { StickySaveBar } from '../components/custom/sticky-save-bar'
 import { Radio } from '../components/custom/radio'
 import {
   deploymentApi,
@@ -32,7 +34,7 @@ import { useToast } from '../components/Toast'
 import { InfoDot } from '../components/InfoDot'
 import Modal from '../components/Modal'
 import { agentStatusColor, depStatusColor, depEffectiveStatus, fmtRelTime } from './deploy/deployHelpers'
-import ModuleConfigModal from '../components/module/ModuleConfigModal'
+import ModuleConfigModal, { sectionForScope } from '../components/module/ModuleConfigModal'
 import { GroupConfigCompareView } from '../components/group/GroupConfigCompareView'
 import HealthCheckModal from '../components/HealthCheckModal'
 import MetricTrend from '../components/MetricTrend'
@@ -609,9 +611,13 @@ export default function ServersPage() {
           {selectedAgent ? (
             pageTab === 'config' ? (
               <AgentConfigTab key={`${selectedAgent.id}:${pkgsReady}`}
-                agent={selectedAgent}
                 deployments={depsByAgent.get(selectedAgent.id) || []}
-                onDone={load} />
+                packages={packages}
+                onDone={load}
+                onOpenGroupConfig={gid => {
+                  setSelection({ kind: 'group', id: gid })
+                  setPageTab('config')
+                }} />
             ) : (
               // infra/install: 조회는 operator+, 변이는 admin/승격 — fieldset 일괄 잠금
               <fieldset disabled={!canEdit} style={LOCK_FIELDSET_STYLE}>
@@ -1509,26 +1515,17 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
       {/* StickySaveBar — 하단 통합 저장 (Figma G1 42:428).
           구 화면은 그룹 설정·절체 조건·멤버·VIP 마다 [적용] 이 따로 있어 keepalived 가
           영역 수만큼 재렌더됐다. 이제 **바뀐 필드만** 한 번에 보낸다(정본 문서 §7-10). */}
-      <div className="flex shrink-0 items-center gap-3 border-t border-border bg-card px-4 py-2.5">
-        {changes.length > 0
+      <StickySaveBar
+        badge={changes.length > 0
           ? <Badge variant="warningSoft" title={changes.join(' · ')}>변경 {changes.length}건 · 전 멤버 적용</Badge>
-          : <span className="text-xs text-muted-foreground">변경 없음</span>}
-        <span className="truncate text-xs text-muted-foreground">
-          {changes.length > 0
-            ? changes.join(' · ')
-            : '그룹 설정 · 절체 조건 · 멤버 · VIP 를 한 번에 저장 — keepalived 재생성'}
-        </span>
-        <div className="ml-auto flex items-center gap-1.5">
-          <button className="btn btn--sm" onClick={revertAll} disabled={changes.length === 0}
-                  title="저장하지 않은 변경을 되돌린다">
-            <ArrowLeft size={13} /> 되돌리기
-          </button>
-          <button className="btn btn--sm btn--primary" onClick={saveAll} disabled={changes.length === 0}
-                  title="바뀐 필드만 보낸다 — 안 만진 값은 backend 가 손대지 않는다">
-            <Check size={13} /> 저장 — 전 멤버 적용
-          </button>
-        </div>
-      </div>
+          : <span className="shrink-0 text-xs text-muted-foreground">변경 없음</span>}
+        note={changes.length > 0
+          ? changes.join(' · ')
+          : '그룹 설정 · 절체 조건 · 멤버 · VIP 를 한 번에 저장 — keepalived 재생성'}
+        saveLabel="저장 — 전 멤버 적용"
+        disabled={changes.length === 0}
+        onRevert={revertAll}
+        onSave={saveAll} />
     </>
   )
 }
@@ -2064,10 +2061,12 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
 }
 
 // ── [패키지 설정] 탭 — 서버 선택: 모듈별 탭 + 설정 패널 (다이얼로그의 페이지화) ──
-function AgentConfigTab({ agent, deployments, onDone }: {
-  agent: Agent
+function AgentConfigTab({ deployments, packages, onDone, onOpenGroupConfig }: {
   deployments: Deployment[]
+  packages: SipPackage[]
   onDone: () => Promise<void> | void
+  /** 시안 S3 의 [그룹 공통 설정 편집 →] — 그룹을 선택하고 같은 탭을 연다 */
+  onOpenGroupConfig: (groupId: number) => void
 }) {
   // 폴링 identity churn 차단 — mount 시 스냅샷 (모듈 전환은 key 리마운트)
   // pending(설치 전) 도 포함 — DB/notify/시크릿을 설치 전에 미리 지정(overlay 저장→설치 시 반영).
@@ -2077,35 +2076,61 @@ function AgentConfigTab({ agent, deployments, onDone }: {
   const source = useMemo(
     () => dep ? ({ type: 'deployment' as const, deployment: dep }) : null,
     [dep])
+  // 칩의 설정 개수 — **이 화면에 나오는 필드 수**(서버 스코프 = system). 패키지에 딸려 온
+  // config_template 로 그 자리에서 센다 (모듈마다 config view 를 부르지 않는다).
+  const pkgById = useMemo(() => new Map(packages.map(p => [p.id, p])), [packages])
+  const countFor = (d: Deployment) => {
+    const t = pkgById.get(d.package_id)?.config_template
+    if (!t) return null
+    let n = 0
+    for (const sec of t.sections) {
+      const only = sectionForScope(sec, 'system')
+      if (only) n += only.fields.length
+    }
+    return n
+  }
   if (deps.length === 0) {
-    return <div className="empty" style={{ padding: 40 }}>
-      {agent.name} 에 설치된 모듈 없음 — [패키지 설치] 탭에서 모듈을 먼저 배포하세요
-    </div>
+    return (
+      <div className="p-4">
+        <EmptyState title="설치된 모듈 없음"
+                    description="[패키지 설치] 탭에서 모듈을 먼저 배포하세요." />
+      </div>
+    )
   }
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', gap: 2, padding: '10px 16px 0', borderBottom: '1px solid var(--border)',
-                    background: 'var(--muted)' }}>
+    <div className="flex h-full flex-col">
+      {/* 모듈 칩 — 정본 Figma S3 `ModuleTabs`(266:4697): 높이 32 · 사이 6 ·
+          이름 + 버전(mono) + 설정 개수 칩. 구 화면은 파일 탭 모양이었다. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pb-2 pt-5">
         {deps.map(d => {
           const active = d.id === selDep
+          const n = countFor(d)
           return (
             <button key={d.id} onClick={() => setSelDep(d.id)}
-                    style={{
-                      padding: '8px 18px', fontSize: 13, fontWeight: active ? 700 : 400,
-                      background: active ? 'var(--card)' : 'transparent',
-                      color: active ? 'var(--primary)' : 'var(--muted-foreground)',
-                      border: '1px solid var(--border)', borderBottom: 'none',
-                      borderRadius: '6px 6px 0 0', cursor: 'pointer',
-                    }}>
-              {d.package_name} <span style={{ fontSize: 10 }}>v{d.package_version}</span>
+                    aria-pressed={active}
+                    className={`flex h-8 items-center gap-2 rounded-md border px-3 text-md transition-colors ${
+                      active
+                        ? 'border-primary bg-brandsoft font-semibold text-brandsoft-on'
+                        : 'border-border bg-background text-foreground hover:bg-accent'}`}>
+              {d.package_name}
+              <span className="font-mono text-sm font-normal text-muted-foreground">
+                v{d.package_version}
+              </span>
+              {n !== null && (
+                <span className={`inline-flex h-4 min-w-5 items-center justify-center rounded-full px-1 text-xs ${
+                  active ? 'bg-primary text-primary-foreground' : 'bg-neutral-soft text-neutral-on'}`}>
+                  {n}
+                </span>
+              )}
             </button>
           )
         })}
       </div>
-      <div style={{ flex: 1, overflow: 'hidden' }}>
+      <div className="min-h-0 flex-1">
         {source && (
           <ModuleConfigModal key={selDep} inline source={source}
-            onClose={() => { /* inline */ }} onDone={onDone} />
+            onClose={() => { /* inline */ }} onDone={onDone}
+            onOpenGroupConfig={onOpenGroupConfig} />
         )}
       </div>
     </div>
@@ -2180,29 +2205,6 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
  * 컴포넌트에 포함" 이 그 컴포넌트의 존재 이유다. 인라인 `라벨: [입력]` 은 필수 여부도
  * 의미도 못 전한다.
  */
-function FormField({ label, required, help, error, children }: {
-  label: string
-  required?: boolean
-  help?: string
-  error?: string
-  children: React.ReactNode
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-sm font-medium">
-        {label}{required && <span className="ml-0.5 text-destructive">*</span>}
-      </span>
-      {children}
-      {(error || help) && (
-        <span className={`text-xs ${error ? 'text-destructive' : 'text-muted-foreground'}`}>
-          {error || help}
-        </span>
-      )}
-    </label>
-  )
-}
-
-
 function InspectorSection({ title, expanded, onToggle, children }: {
   title: string
   expanded: boolean

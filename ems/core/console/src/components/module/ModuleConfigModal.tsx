@@ -1,4 +1,4 @@
-import { RotateCcw, Zap } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronRight, RotateCcw, Zap } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Modal from '../Modal'
 import { useToast } from '../Toast'
@@ -12,6 +12,13 @@ import ModuleConfigEditor, { type ModuleConfigEditorSource } from './ModuleConfi
 import StringListInput from './StringListInput'
 import { ObjectListEditor } from './ObjectListEditor'
 import { haGroupsApi } from '../../api/ha_groups'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { FormField } from '../custom/form-field'
+import { SubSection } from '../custom/collapsible-section'
+import { StickySaveBar } from '../custom/sticky-save-bar'
+import { Alert } from '../ui/alert'
+import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -25,6 +32,8 @@ interface Props {
   source: ModuleConfigSource
   onClose: () => void
   onDone?: () => void | Promise<void>
+  /** 그룹 공통 설정으로 가는 통로 — 시안 S3 의 [그룹 공통 설정 편집 →] (159:3166) */
+  onOpenGroupConfig?: (groupId: number) => void
   // true 면 Modal 오버레이 없이 패널만 렌더 (시스템/인프라 [패키지 설정] 탭의 페이지 임베드).
   inline?: boolean
 }
@@ -40,7 +49,8 @@ interface Props {
  *  - module 모드:     Phase 1 로컬. PUT → build/dist/config.json (scalar) /
  *                     build/dist/{name}/config/*.jsonl (collection) + 로컬 PID SIGUSR1.
  */
-export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline }: Props) {
+export default function ModuleConfigModal({ source: sourceProp, onClose, onDone, inline,
+                                           onOpenGroupConfig }: Props) {
   // 부모(ServersPage 등)가 주기 폴링으로 재렌더하며 source 객체를 매번 새로 만들면
   // fetch/editor 의 useEffect 가 재실행돼 편집값이 서버 값으로 덮어써진다 —
   // mount 시점 스냅샷으로 identity 고정 (모듈 전환은 caller 가 key 로 리마운트).
@@ -89,6 +99,11 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
     () => (template?.collections || []).filter(
       c => !asMember || (c.scope ?? 'service') === 'system'),
     [template, asMember])
+  // 제목·개수 — 그룹 멤버면 「서버 개별 설정」, 아니면 「설정」 (시안 S3 / SA3)
+  const scalarTitle = asMember ? '서버 개별 설정' : '설정'
+  const modName = source.type === 'deployment'
+    ? (source.deployment.package_name || '모듈') : source.name
+  const scalarCount = visibleSections.reduce((n, sec) => n + sec.fields.length, 0)
 
   // source 분기 fetch
   const fetchConfig = useCallback(async () => {
@@ -200,6 +215,12 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
     return s
   }, [values, initial])
 
+  // 이 화면 필드 중 재기동이 필요한 것이 있는가 — 변경 0건일 때 저장바가 쓰는 값.
+  // (변경이 있으면 아래 restartRequired 가 **바뀐 것만** 보고 판정한다.)
+  const scopeNeedsRestart = useMemo(
+    () => visibleSections.some(sec => sec.fields.some(f => f.restart !== false)),
+    [visibleSections])
+
   // 변경된 필드 중 restart:true 포함 여부
   const restartRequired = useMemo(() => {
     if (!template) return false
@@ -210,6 +231,8 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
     }
     return false
   }, [template, changed])
+  // 저장바 표시용 — 변경이 있으면 바뀐 것만, 없으면 이 화면 성격을 알린다.
+  const barRestart = changed.size > 0 ? restartRequired : scopeNeedsRestart
 
   // 저장 전 validation — required + range. 이 화면에 보이는 필드만 검사
   // (AS 멤버는 공통 필드가 숨겨져 있어 사용자가 고칠 수 없으므로 대상 제외).
@@ -274,39 +297,51 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
           </div>
         ) : (
           <>
-            {/* 탭 (sticky top) — AS 그룹 멤버는 서버 개별(system) 설정·컬렉션만 */}
-            <div style={{
-              flex: '0 0 auto',
-              display: 'flex', gap: 0, borderBottom: '1px solid var(--border)',
-              padding: '0 20px', flexWrap: 'wrap', background: 'var(--muted)',
-            }}>
-              <TabBtn active={tab === 'scalar'} onClick={() => setTab('scalar')}>
-                {asMember ? '서버 개별 설정' : '설정'} ({visibleSections.reduce((n, s) => n + s.fields.length, 0)})
-              </TabBtn>
-              {visibleCollections.map(c => (
-                <TabBtn key={c.key} active={tab === c.key} onClick={() => setTab(c.key)}>
-                  {c.title}
-                </TabBtn>
-              ))}
+            {/* linkRow — 정본 Figma S3 `linkRow`(159:3164): 제목 + 범례 + 우측
+                [그룹 공통 설정 편집 →]. 컬렉션이 있는 모듈은 제목 자리에 세그먼트를 둔다
+                (시안 G3 의 `공통 설정 | 멤버 비교` 와 같은 자리·같은 모양). */}
+            <div className="flex shrink-0 items-center gap-2 px-4 pb-2.5 pt-3.5">
+              {visibleCollections.length === 0 ? (
+                <span className="shrink-0 text-md font-semibold">
+                  {scalarTitle} ({scalarCount})
+                </span>
+              ) : (
+                <ToggleGroup type="single" value={tab} className="shrink-0 justify-start"
+                             onValueChange={(v: string) => v && setTab(v)}>
+                  <ToggleGroupItem value="scalar">{scalarTitle} ({scalarCount})</ToggleGroupItem>
+                  {visibleCollections.map(c => (
+                    <ToggleGroupItem key={c.key} value={c.key}>{c.title}</ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              )}
+              <span className="truncate text-xs text-muted-foreground">
+                재기동 = 저장 후 재기동 시 반영 · 즉시 = 저장 즉시 반영
+                {appliedAt && ` · 마지막 적용: ${appliedAt}`}
+              </span>
+              {asMember && ha && onOpenGroupConfig && (
+                <Button variant="ghost" className="ml-auto shrink-0"
+                        onClick={() => onOpenGroupConfig(ha.group_id)}
+                        title={`그룹 ${ha.group_name} 의 [패키지 설정] 으로 이동`}>
+                  그룹 공통 설정 편집 <ArrowRight />
+                </Button>
+              )}
             </div>
 
             {/* 스크롤 영역 */}
-            <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+            <div className="min-h-0 flex-1 overflow-auto px-4 pb-4">
               {tab === 'scalar' ? (
                 <>
-                  <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 12,
-                                display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><RotateCcw size={12} /> 재기동 필요 · <Zap size={12} /> 즉시 적용</span>
-                    {appliedAt && <span>· 마지막 적용: {appliedAt}</span>}
-                  </div>
                   {asMember && ha && (
-                    <div style={{ padding: 10, background: 'var(--cims-brand-soft)', border: '1px solid var(--border)',
-                                  borderRadius: 4, fontSize: 12, marginBottom: 12 }}>
-                      이 화면은 <b>이 서버 고유 설정</b>(bind IP·노드 식별자 등)만 다룹니다.
-                      그룹 공통 설정 {svcFieldCount}개 필드와 공통 컬렉션은
-                      좌측 트리에서 그룹 <b>{ha.group_name}</b> 선택 → [패키지 설정] 에서
-                      편집합니다 (동기화 스위치 포함).
-                    </div>
+                    <Alert variant="info" className="mb-3">
+                      <div className="font-medium">
+                        이 화면은 이 서버 고유 설정(bind IP · 노드 식별자 등)만 다룹니다
+                      </div>
+                      <div className="mt-0.5 text-xs opacity-90">
+                        그룹 공통 설정 {svcFieldCount}개 필드와 공통 컬렉션은 좌측 트리에서
+                        그룹 <b>{ha.group_name}</b> 선택 → [패키지 설정] 에서 편집합니다
+                        (동기화 스위치 포함).
+                      </div>
+                    </Alert>
                   )}
                   {changed.size > 0 && (
                     <ChangeSummaryPanel template={template} values={values} initial={initial}
@@ -327,21 +362,11 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
                             onDone={onDone} />
                         : undefined} />
                   ))}
-                  {isPending ? (
-                    <div style={{
-                      marginTop: 12, padding: 10, background: 'var(--cims-brand-soft)',
-                      border: '1px solid var(--border)', borderRadius: 4, fontSize: 12,
-                    }}>
-                      ℹ 아직 <b>설치 전</b>입니다 — 저장한 값은 [패키지 설치] 탭에서 <b>설치</b> 실행 시 반영됩니다.
-                    </div>
-                  ) : restartRequired && (
-                    <div style={{
-                      marginTop: 12, padding: 10, background: 'var(--cims-warning-soft)',
-                      border: '1px solid var(--border)', borderRadius: 4, fontSize: 12,
-                    }}>
-                      ⚠ 변경된 항목 중 <b>재기동이 필요한</b> 항목이 있습니다. 저장 후
-                      <b> Restart</b> 버튼으로 프로세스를 재기동해야 반영됩니다.
-                    </div>
+                  {isPending && (
+                    <Alert variant="info" className="mt-3">
+                      아직 <b>설치 전</b>입니다 — 저장한 값은 [패키지 설치] 탭에서
+                      <b> 설치</b> 실행 시 반영됩니다.
+                    </Alert>
                   )}
                 </>
               ) : (
@@ -354,27 +379,33 @@ export default function ModuleConfigModal({ source: sourceProp, onClose, onDone,
             </div>
           </>
         )}
-
-        {/* sticky footer */}
-        <div className="modal-footer" style={{ flex: '0 0 auto', marginTop: 0 }}>
-          {!inline && <button className="btn btn--outline" onClick={onClose}>닫기</button>}
-          {template && tab === 'scalar' && (
-            <>
-              <button className="btn btn--primary" onClick={() => void save()}
-                disabled={saving || changed.size === 0}>
-                {saving ? '저장 중...' : `저장 (${changed.size} 변경)`}
-              </button>
-              {source.type === 'deployment' && restartRequired && !isPending && (
-                <button className="btn btn--primary" onClick={() => void save({ restartAfter: true })}
-                  disabled={saving || changed.size === 0}
-                  style={{ background: '#b45309', borderColor: '#b45309' }}
-                  title="저장 직후 restart job 자동 큐잉">
-                  저장 + 재기동
-                </button>
-              )}
-            </>
-          )}
-        </div>
+        {/* 저장바 — 시안 S3 는 StickySaveBar 하나다 (459:7238).
+            배지 자리에 「무엇을 더 해야 반영되는가」를 둔다: 재기동이 필요한 변경이 섞이면
+            `재기동`, 아니면 `즉시`. 저장 후 재기동은 별도 버튼이 아니라 저장의 옵션이다. */}
+        {template && tab === 'scalar' && (
+          <StickySaveBar
+            badge={<Badge variant="neutralSoft">{barRestart ? '재기동' : '즉시'}</Badge>}
+            note={isPending
+              ? '아직 설치 전 — 저장한 값은 [패키지 설치] 탭의 설치 실행 시 반영됩니다'
+              : barRestart
+                ? `저장 후 ${modName} 을 재기동하면 새 설정이 적용됩니다`
+                : '저장 즉시 반영됩니다'}
+            saveLabel={`저장 (${changed.size} 변경)`}
+            disabled={changed.size === 0}
+            saving={saving}
+            extra={!inline
+              ? <Button variant="outline" onClick={onClose}>닫기</Button>
+              : undefined}
+            onRevert={() => setValues({ ...initial })}
+            onSave={() => void save({
+              restartAfter: source.type === 'deployment' && restartRequired && !isPending,
+            })} />
+        )}
+        {!inline && !(template && tab === 'scalar') && (
+          <div className="flex shrink-0 justify-end border-t border-border bg-card px-4 py-2.5">
+            <Button variant="outline" onClick={onClose}>닫기</Button>
+          </div>
+        )}
       </div>
   )
   if (inline) return body
@@ -392,22 +423,6 @@ export function sectionForScope(sec: ConfigTemplateSection, scope: ConfigScope):
   const fields = sec.fields.filter(f => effectiveScope(f, sec.scope) === scope)
   if (fields.length === 0) return null
   return { ...sec, fields }
-}
-
-function TabBtn({ active, children, onClick }: {
-  active: boolean; children: React.ReactNode; onClick: () => void
-}) {
-  return (
-    <button onClick={onClick}
-      style={{
-        padding: '8px 16px', border: 'none',
-        background: active ? 'var(--card)' : 'transparent',
-        borderBottom: `2px solid ${active ? '#3498db' : 'transparent'}`,
-        fontWeight: active ? 600 : 400, cursor: 'pointer', fontSize: 13,
-      }}>
-      {children}
-    </button>
-  )
 }
 
 function ChangeSummaryPanel({ template, values, initial, changed, onReset, onResetAll }: {
@@ -447,7 +462,9 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
           background: 'var(--cims-brand-soft)', borderBottom: collapsed ? 'none' : '1px solid var(--border)',
           borderRadius: '6px 6px 0 0',
         }}>
-        <span style={{ color: 'var(--primary)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
+        <span className="text-primary">
+          {collapsed ? <ChevronRight size={11} /> : <ChevronDown size={11} />}
+        </span>
         <b style={{ color: 'var(--primary)' }}>변경 사항 ({changed.size})</b>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
           <RotateCcw size={12} /> 재기동 {restartKeys.length} · <Zap size={12} /> 즉시 {hotKeys.length}
@@ -490,12 +507,10 @@ function ChangeSummaryPanel({ template, values, initial, changed, onReset, onRes
                       {display(values[k])}
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <button onClick={() => onReset(k)}
-                              title="이 필드만 초기화"
-                              style={{ fontSize: 11, padding: '1px 6px', background: 'var(--card)',
-                                       border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer' }}>
-                        ↺
-                      </button>
+                      <Button variant="ghost" size="iconSm" onClick={() => onReset(k)}
+                              title="이 필드만 초기화">
+                        <RotateCcw />
+                      </Button>
                     </td>
                   </tr>
                 )
@@ -526,9 +541,7 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   /** 값의 출처 — `injected`(배포 시 자동 채움)를 배지로 드러낸다. 없으면 배지 없음. */
   srcOf?: (key: string) => ConfigValueSrc | undefined
 }) {
-  // 인프라 section 은 기본 접힘 (헤더 클릭으로 펼침) — 모든 필드는 노출.
-  const [collapsed, setCollapsed] = useState(!!section.hidden)
-
+  // 접힘 상태는 SubSection 이 갖는다 — `hidden` 섹션(인프라)만 기본 접힘.
   // 모든 필드 노출 (고급/숨김 구분 제거).
   const visibleFields = section.fields
 
@@ -555,68 +568,39 @@ export function SectionBlock({ section, values, initial, changed, onChange, onRe
   }
   const nonEmptyBuckets = buckets.filter(b => b.fields.length > 0)
 
+  // 시안(Figma S3 93:2208·169:2826)은 섹션을 카드로 감싸지 않는다 — 접힘 머리 + 들여쓴 본문뿐.
+  // `Infrastructure` 처럼 `hidden` 인 섹션은 기본 접힘으로 열고, 「내부 전용」임을 힌트로 알린다.
+  const hint = [section.hidden ? '내부 전용' : '', section.description || '']
+    .filter(Boolean).join(' · ')
   return (
-    <div style={{
-      border: '1px solid var(--border)', borderRadius: 6, marginBottom: 12,
-      background: 'var(--card)',
-      ...(section.hidden ? { borderStyle: 'dashed', background: 'var(--cims-warning-soft)' } : {}),
-    }}>
-      <div onClick={() => setCollapsed(c => !c)}
-        style={{
-          padding: '10px 14px', cursor: 'pointer', userSelect: 'none',
-          display: 'flex', alignItems: 'baseline', gap: 8,
-          borderBottom: collapsed ? 'none' : '1px solid var(--border)',
-          background: section.hidden ? 'var(--cims-warning-soft)' : 'var(--muted)',
-        }}>
-        <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{collapsed ? '▸' : '▾'}</span>
-        <b>{section.title}</b>
-        {section.hidden && (
-          <span style={{
-            fontSize: 10, padding: '1px 6px', borderRadius: 3,
-            background: '#6b7280', color: '#fff',
-          }}>인프라</span>
-        )}
-        {section.description && (
-          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>— {section.description}</span>
-        )}
-      </div>
-      {!collapsed && (
-        <div style={{ padding: 12 }}>
-          {nonEmptyBuckets.map((b, idx) => (
-            <div key={b.key} style={{ marginBottom: idx === nonEmptyBuckets.length - 1 ? 0 : 14 }}>
-              {b.title && (
-                <div style={{
-                  fontSize: 12, fontWeight: 600, color: 'var(--muted-foreground)',
-                  borderBottom: '1px solid var(--border)', paddingBottom: 4, marginBottom: 8,
-                  display: 'flex', alignItems: 'baseline', gap: 6,
-                }}>
-                  <span>{b.title}</span>
-                  {b.description && (
-                    <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--muted-foreground)' }}>— {b.description}</span>
-                  )}
-                </div>
+    <SubSection title={section.title} hint={hint || undefined} defaultOpen={!section.hidden}>
+      {nonEmptyBuckets.map((b, idx) => (
+        <div key={b.key} className={idx === nonEmptyBuckets.length - 1 ? undefined : 'mb-4'}>
+          {b.title && (
+            // sub-group 머리 — 시안 `subgroup`(169:2832). 중첩 2단 계약 안에 있으므로
+            // 또 하나의 접힘 섹션이 아니라 라벨 한 줄이다.
+            <div className="mb-2 flex items-baseline gap-1.5 text-sm font-semibold text-muted-foreground">
+              <span>{b.title}</span>
+              {b.description && (
+                <span className="text-xs font-normal">— {b.description}</span>
               )}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '200px 1fr', rowGap: 10, columnGap: 10,
-                alignItems: 'start',
-              }}>
-                {b.fields.map(f => (
-                  <FieldRow key={f.key} field={f}
-                    value={values[f.key]}
-                    initialValue={initial[f.key]}
-                    isChanged={changed.has(f.key)}
-                    src={srcOf?.(f.key)}
-                    onChange={v => onChange(f.key, v)}
-                    onReset={() => onReset(f.key)} />
-                ))}
-              </div>
             </div>
-          ))}
-          {footer}
+          )}
+          <div className="flex flex-col gap-3.5">
+            {b.fields.map(f => (
+              <FieldRow key={f.key} field={f}
+                value={values[f.key]}
+                initialValue={initial[f.key]}
+                isChanged={changed.has(f.key)}
+                src={srcOf?.(f.key)}
+                onChange={v => onChange(f.key, v)}
+                onReset={() => onReset(f.key)} />
+            ))}
+          </div>
         </div>
-      )}
-    </div>
+      ))}
+      {footer}
+    </SubSection>
   )
 }
 
@@ -691,6 +675,15 @@ export function StoreMigrateFooter({ groupId, mountPoint, dirty, onDone }: {
   )
 }
 
+/**
+ * 필드 한 칸 — 정본 = Figma S3 `field`(93:2218): 세로 배치(라벨·입력·헬프)에
+ * **입력 오른쪽으로 마커 배지**가 붙는다. 구 화면은 200px 라벨 컬럼 + 값 컬럼이라
+ * 라벨이 길면 줄바꿈되고 헬프텍스트가 값 밑으로 흘렀다.
+ *
+ * 마커(`재기동`/`즉시`)는 **필드마다 반드시 하나** — 저장 후 무엇을 더 해야 반영되는지를
+ * 필드 옆에서 알린다(contracts.md §TextInput/Select). 시안 실측 색은 `neutralSoft` 하나다
+ * (구 화면은 재기동을 빨강으로 칠해 전 필드가 경고처럼 보였다).
+ */
 function FieldRow({ field, value, initialValue, isChanged, src, onChange, onReset }: {
   field: ConfigTemplateField
   value: FieldValue
@@ -702,61 +695,47 @@ function FieldRow({ field, value, initialValue, isChanged, src, onChange, onRese
   onReset: () => void
 }) {
   const needsRestart = field.restart !== false
-  const badgeStyle: React.CSSProperties = {
-    display: 'inline-block', fontSize: 10, padding: '1px 5px',
-    borderRadius: 3, marginLeft: 6, fontWeight: 500,
-    background: needsRestart ? 'var(--cims-danger-soft)' : 'var(--cims-success-soft)',
-    color:      needsRestart ? 'var(--destructive)' : 'var(--cims-success)',
-    border: '1px solid var(--border)',
-    whiteSpace: 'nowrap',
-  }
   return (
-    <>
-      <label style={{
-        paddingTop: 6, fontSize: 13,
-        color: isChanged ? 'var(--primary)' : undefined,
-      }}>
-        <span>{field.label}</span>
-        <span style={badgeStyle} title={needsRestart ? '재기동 후 반영' : '저장 즉시 반영'}>
-          {needsRestart ? <><RotateCcw size={12} /> 재기동</> : <><Zap size={12} /> 즉시</>}
-        </span>
-        {field.required && <span style={{ color: '#e74c3c', marginLeft: 4 }}>*</span>}
-        {src === 'injected' && !isChanged && (
-          <span style={{
-            display: 'inline-block', fontSize: 10, padding: '1px 5px', borderRadius: 3,
-            marginLeft: 6, fontWeight: 500, background: 'var(--cims-brand-soft)', color: 'var(--primary)',
-            border: '1px solid var(--border)', whiteSpace: 'nowrap',
-          }} title={'배포 시 OAM 이 채운 값입니다 — 이 서버 설정에 저장된 값이 아닙니다. '
-                  + '노드에는 이 값이 들어갑니다. 일부 키(시크릿·관리망 대역)는 저장하더라도 '
-                  + '배포 시 OAM 값으로 다시 채워집니다.'}>
-            자동 채움
-          </span>
-        )}
-        {isChanged && <span style={{ marginLeft: 6, color: 'var(--primary)', fontSize: 11 }}>●</span>}
-      </label>
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <div style={{ flex: 1 }}>
-            {renderInput(field, value, onChange)}
-          </div>
-          {isChanged && (
-            <button onClick={onReset}
-                    title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}
-                    style={{ fontSize: 12, padding: '2px 8px', background: 'var(--card)',
-                             border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
-                             flexShrink: 0 }}>
-              ↺
-            </button>
+    <FormField
+      changed={isChanged}
+      required={field.required}
+      label={
+        <>
+          {field.label}
+          {/* 자동 채움·변경 표식은 시안에 없지만 지우지 않는다 — 값의 출처와 미저장 변경은
+              화면에서만 알 수 있는 사실이다 (정본 문서 §1 「시안의 침묵은 삭제 지시가 아님」). */}
+          {src === 'injected' && !isChanged && (
+            <Badge variant="brandSoft" className="ml-1.5 align-[1px]"
+                   title={'배포 시 OAM 이 채운 값입니다 — 이 서버 설정에 저장된 값이 아닙니다. '
+                        + '노드에는 이 값이 들어갑니다. 일부 키(시크릿·관리망 대역)는 저장하더라도 '
+                        + '배포 시 OAM 값으로 다시 채워집니다.'}>
+              자동 채움
+            </Badge>
           )}
-        </div>
-        {field.help && (
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 3 }}>{field.help}</div>
-        )}
-        {!needsRestart && field.reload_hint && (
-          <div style={{ fontSize: 11, color: 'var(--cims-success)', marginTop: 3, display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Zap size={11} /> {field.reload_hint}</div>
-        )}
-      </div>
-    </>
+          {isChanged && <span className="ml-1.5 text-primary" title="저장하지 않은 변경">●</span>}
+        </>
+      }
+      help={
+        !needsRestart && field.reload_hint
+          ? <span className="inline-flex items-center gap-1 text-[var(--cims-success)]">
+              <Zap size={11} /> {field.reload_hint}
+            </span>
+          : field.help
+      }
+      aside={isChanged
+        ? <Button variant="ghost" size="iconSm" onClick={onReset}
+                  title={`초기값으로 되돌림: ${initialValue === null || initialValue === '' ? '(빈 값)' : String(initialValue)}`}>
+            <RotateCcw />
+          </Button>
+        : undefined}
+      marker={
+        <Badge variant="neutralSoft"
+               title={needsRestart ? '저장 후 재기동해야 반영됩니다' : '저장 즉시 반영됩니다'}>
+          {needsRestart ? '재기동' : '즉시'}
+        </Badge>
+      }>
+      {renderInput(field, value, onChange)}
+    </FormField>
   )
 }
 
