@@ -17,6 +17,8 @@
 | .48 CSC 4430 인증서 | `CIMS-OAM-CA` 발급 leaf `CN=media01` (SAN `media01, 127.0.0.1, 121.161.164.48, 10.0.2.48, 192.168.0.82`). 배포 시 agent `ensure_node_cert`(`agent/lib/cert.sh`) 가 관리평면 그룹 CA 로 자동 발급해 `build/dist/mgmt-server/csc/runtime/cert/` 에 넣은 것 → 발급자가 달라 **단말이 거절** |
 | .48 CSP 15061 인증서 | 패키지 동봉 자가서명 `CN=csp` (`cert/csp.pem`) → TLS 접속 단말은 역시 거절. 현재 프로비저닝 transport 가 UDP 라 등록에는 영향 없음 |
 | .48 에 Service CA | **없다** — 파일시스템 전체 대조 결과 Service CA 발급 인증서·CA 키 모두 부재 |
+| Windows 관제조작반 | .45·.48 **모두 로그인 가능** — 로그인 창 "서버 인증서 검증" 체크를 꺼 둔 상태(`%APPDATA%` settings.json `CscVerifyServer=false`). 꺼지면 SDK `OpenSslTransport` 가 `SSL_VERIFY_PEER` 를 걸지 않아 어떤 인증서든 수락한다. 켜 두고 `TlsCaPemPath` 가 비면 OpenSSL 시스템 신뢰 경로만 보므로 사설 CA 인 .45 도 실패한다. 시험용 예외이며, 운영은 검증 켬 + `TlsCaPemPath`=Service CA PEM |
+| Android 앱 | 검증 스위치가 **없다** — `CimsTls` 가 APK 동봉 Service CA 한 장으로 항상 검증(호스트명 검사 포함, trust-all 경로 제거됨). 설계가 의도한 동작이라 .45 만 통과 |
 
 즉 도메인/realm 전환([dev_test_domain_realm.md](dev_test_domain_realm.md))과는 무관하며, SIP 를 UDP 로
 바꿔도 풀리지 않는다(막힌 채널은 HTTPS 4430 이고 앱 `baseUrl` 은 `https://` 고정, CSC 는 `runtime/cert` 가
