@@ -1176,8 +1176,21 @@ class PttController(
         val groupId = bareId(inc.remote)
         if (groupId.isBlank()) { releasePendingFloor(inc.id); return }
         val pre = takePendingFloor(inc.id)
+        // 이미 세션이 있는데 **다른 callId** 의 새 leg 이 오면 = 옛 leg 이 대체된 것(재설치 후 서버가
+        //   세션 타이머로 살려 둔 다이얼로그를 새 앱 인스턴스가 착신으로 받는 경합). 옛 call 을 끊고
+        //   새 callId 로 세션을 재동기해 answer 한다 — 방치하면 세션 callId 가 stale 이 되어 orphan 이 된다.
+        val existing = synchronized(lock) { sessionMap[groupId] }
+        if (existing != null) {
+            if (existing.callId == inc.id) { pre?.let { runCatching { it.close() } }; return }  // 같은 호 재통지
+            if (existing.callId >= 0) sip.hangup(existing.callId)
+            synchronized(lock) { existing.callId = inc.id }
+            sip.answerGroupCall(inc.id, floorSdp(existing))
+            pre?.let { runCatching { it.close() } }
+            publish()
+            return
+        }
         val s = synchronized(lock) {
-            if (sessionMap.containsKey(groupId)) {               // 이미 참여 중
+            if (sessionMap.containsKey(groupId)) {               // 경합 재확인
                 pre?.let { runCatching { it.close() } }
                 return
             }
@@ -1206,9 +1219,23 @@ class PttController(
     /** 그룹별 나가기. */
     fun leaveGroup(groupId: String) {
         channelStore?.remove(groupId)                 // 명시적 이탈 = 재조인 의도 해제
-        val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: return }
-        if (callId >= 0) sip.hangup(callId) else {
-            synchronized(lock) { sessionMap.remove(groupId)?.close() }
+        // orphan leg 회수 — 앱 세션이 추적하는 callId 와 무관하게, 그룹으로 살아 있는 서버 leg 을
+        //   모두 BYE 한다(재설치 후 서버가 세션 타이머로 살려 둔 옛 leg 을 pjsip 이 자동 응답으로
+        //   유지 중인 경우, 세션맵이 비어 있거나 callId 가 stale 이라 종전엔 나가기가 무효였다).
+        //   제휴는 유지 — 새 그룹콜이 오면 다시 초대받는다.
+        sip.hangupGroupLegs(groupId)
+        val callId = synchronized(lock) { sessionMap[groupId]?.callId ?: -1 }
+        if (callId >= 0) {
+            sip.hangup(callId)   // teardown → onCallEnded 가 세션/로스터 정리
+        } else {
+            synchronized(lock) {
+                sessionMap.remove(groupId)?.close()
+                // 미참여 채널의 접속 인원은 "나 외의" 참여자 — 나가는 즉시 본인을 지워 stale(1) 박제 방지.
+                rosterMap[groupId]?.let { m ->
+                    rosterMap[groupId] = m.toMutableMap().apply { remove(bareId(mcpttId)) }.toMap()
+                }
+            }
+            publishRosters()
             invalidateRosterConfirm(groupId)
             syncRosterSubs()   // 편성 채널이면 구독 유지 (인원수 표시 계속)
             publish()
