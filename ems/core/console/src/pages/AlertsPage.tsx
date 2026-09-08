@@ -27,6 +27,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -289,7 +290,7 @@ export function AlarmsSection() {
                         style={{ cursor: 'pointer',
                                  background: open ? 'var(--accent)' : isOpen ? 'rgba(220, 53, 69, 0.08)' : undefined }}>
                       <Td>
-                        <span className={`badge ${sevBadgeClass(sev)}`}>{sev}</span>
+                        <Badge variant={sevBadgeClass(sev)} >{sev}</Badge>
                         {lastChange && (
                           <span title={`severity 변경 ${r.changes!.length}회 — 상세는 행 클릭`}
                                 style={{ marginLeft: 4, fontSize: 11,
@@ -562,9 +563,9 @@ export function EventsSection() {
                           : fmtTime(ev.ts)}
                       </Td>
                       <Td>
-                        <span className={`badge ${ev.kind === 'audit' ? 'badge--gray' : 'badge--blue'}`}>
+                        <Badge variant={ev.kind === 'audit' ? 'neutralSoft' : 'brandSoft'} >
                           {EVENT_KIND_LABEL[ev.kind || ''] || ev.kind || '-'}
-                        </span>
+                        </Badge>
                       </Td>
                       <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{ev.code || '-'}</Td>
                       <Td>{eventTypeLabel(ev.type)}</Td>

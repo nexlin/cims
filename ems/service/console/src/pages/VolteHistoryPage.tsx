@@ -11,6 +11,8 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
+import type { BadgeTone } from '@core/components/ui/badge'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -39,11 +41,11 @@ const PROTO_COLOR: Record<string, string> = { SIP: '#2563eb', JSON: '#d97706', C
 const protoColor = (p: string) => PROTO_COLOR[p] || 'var(--muted-foreground)'
 const nodeOf = (m: FlowMessage) => (m.nodeId || m.node || m.iface || '').replace(/_\d+$/, '')
 
-function callState(s: string) {
-  return s === 'ended' ? { label: '종료', cls: 'badge--gray' }
-    : s === 'active' ? { label: '통화중', cls: 'badge--green' }
-    : s === 'ringing' ? { label: '호출중', cls: 'badge--blue' }
-    : { label: s || '—', cls: 'badge--gray' }
+function callState(s: string): { label: string; cls: BadgeTone } {
+  return s === 'ended' ? { label: '종료', cls: 'neutralSoft' as const }
+    : s === 'active' ? { label: '통화중', cls: 'successSoft' as const }
+    : s === 'ringing' ? { label: '호출중', cls: 'brandSoft' as const }
+    : { label: s || '—', cls: 'neutralSoft' as const }
 }
 
 interface CallFlowState { messages: FlowMessage[]; loading: boolean; loaded: boolean }
@@ -331,7 +333,7 @@ export default function VolteHistoryPage() {
 function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec }: {
   l: CallLog
   isOpen: boolean
-  st: { label: string; cls: string }
+  st: { label: string; cls: BadgeTone }
   dur: number | null
   flow: CallFlowState | undefined
   onToggle: () => void
@@ -343,13 +345,13 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
       <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--accent)' : 'transparent' }}>
         <Td align="center" className="whitespace-nowrap text-muted-foreground">
                   {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</Td>
-        <Td className="whitespace-nowrap"><span className={`badge ${l.call_type === 'volte_video' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</span></Td>
+        <Td className="whitespace-nowrap"><Badge variant={l.call_type === 'volte_video' ? 'brandSoft' : 'neutralSoft'}  style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</Badge></Td>
         <Td className="whitespace-nowrap">
           <span style={{ fontWeight: 600, color: CALLER_C }}>{l.initiator}</span>
           <span style={{ color: 'var(--muted-foreground)' }}> → </span>
           <span style={{ fontWeight: 600, color: CALLEE_C }}>{l.callee || '—'}</span>
         </Td>
-        <Td align="center" className="whitespace-nowrap"><span className={`badge ${st.cls}`}>{st.label}</span></Td>
+        <Td align="center" className="whitespace-nowrap"><Badge variant={st.cls} >{st.label}</Badge></Td>
         <Td className="whitespace-nowrap ts">{fmtClock(l.invite_time)}</Td>
         <Td className="whitespace-nowrap ts">{fmtClock(l.answer_time)}</Td>
         <Td className="whitespace-nowrap ts">{fmtClock(l.end_time)}</Td>

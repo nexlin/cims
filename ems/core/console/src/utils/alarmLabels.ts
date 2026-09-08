@@ -3,6 +3,8 @@
 //   심각도 배지/서열은 X.733 perceived severity 6단계.
 
 // ── 알람 조건 클래스 (25종, alarm_catalog.md §4) ─────────────────────────────
+import type { BadgeTone } from '@core/components/ui/badge'
+
 export const ALARM_TYPE_LABEL: Record<string, string> = {
   // COM
   connection_lost: '연결 끊김',
@@ -107,15 +109,15 @@ export const SEVERITY_LABEL: Record<string, string> = {
   critical: 'Critical', major: 'Major', minor: 'Minor', warning: 'Warning', indeterminate: 'Indeterminate',
 }
 
-export function sevBadgeClass(sev?: string): string {
+export function sevBadgeClass(sev?: string): BadgeTone {
   switch (sev) {
-    case 'critical': return 'badge--red'
-    case 'major': return 'badge--red'
-    case 'minor': return 'badge--yellow'
-    case 'warning': return 'badge--yellow'
-    case 'indeterminate': return 'badge--blue'
-    case 'cleared': return 'badge--gray'
-    default: return 'badge--blue'
+    case 'critical': return 'dangerSoft'
+    case 'major': return 'dangerSoft'
+    case 'minor': return 'warningSoft'
+    case 'warning': return 'warningSoft'
+    case 'indeterminate': return 'brandSoft'
+    case 'cleared': return 'neutralSoft'
+    default: return 'brandSoft'
   }
 }
 

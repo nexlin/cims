@@ -17,6 +17,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { Badge } from '@core/components/ui/badge'
 
 // ── 관제 그룹 (dispatch_center.md §3) ─────────────────────────
 //  관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위. id 가 곧 가입자 pickup_group 값이라
@@ -108,8 +109,8 @@ export default function DispatchGroupsPage() {
     { key: 'exp', header: '', width: 26, render: g => <Caret open={openId === g.id} /> },
     { key: 'name', header: '그룹명', sortable: true, render: g => (
       <span><span style={{ fontWeight: 600 }}>{g.name}</span>
-        {g.monitor_scope !== 'none' && <span className="badge badge--red" style={{ fontSize: 9, marginLeft: 4 }} title={`감청 범위: ${SCOPE_LABEL[g.monitor_scope]}`}>감청</span>}
-        {g.ptt_listen !== 'none' && <span className="badge badge--yellow" style={{ fontSize: 9, marginLeft: 2 }} title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</span>}
+        {g.monitor_scope !== 'none' && <Badge variant="dangerSoft"  style={{ fontSize: 9, marginLeft: 4 }} title={`감청 범위: ${SCOPE_LABEL[g.monitor_scope]}`}>감청</Badge>}
+        {g.ptt_listen !== 'none' && <Badge variant="warningSoft"  style={{ fontSize: 9, marginLeft: 2 }} title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</Badge>}
       </span>
     ) },
     { key: 'id', header: 'ID', width: 120, sortable: true, render: g => <span className="ts">{g.id}</span> },
@@ -381,7 +382,7 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
   return (
     <div style={{ flex: '1 1 280px', border: '1px solid var(--border)', borderRadius: 10, padding: '8px 10px', background: 'var(--card)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
-        {icon} {title} <span className="badge badge--gray" style={{ fontSize: 10 }}>{sel.size}</span>
+        {icon} {title} <Badge variant="neutralSoft"  style={{ fontSize: 10 }}>{sel.size}</Badge>
         {canEdit && dirty && <Button variant="default" style={{ marginLeft: 'auto' }} onClick={() => onSave(Array.from(sel))}>저장</Button>}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
@@ -434,7 +435,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
       {lockedReason && <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginBottom: 6 }}>{lockedReason}</div>}
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 10, height: 320 }}>
         <div style={{ ...panel, flex: 1 }}>
-          <div style={panelHead}>멤버 <span className="badge badge--blue" style={{ fontSize: 10 }}>{members.length}</span>
+          <div style={panelHead}>멤버 <Badge variant="brandSoft"  style={{ fontSize: 10 }}>{members.length}</Badge>
             <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--muted-foreground)', fontSize: 11 }}>순서 = 순차 호출·포크 상한 절삭 순</span></div>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {members.length === 0
@@ -465,7 +466,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
         )}
 
         <div style={{ ...panel, flex: 1.3 }}>
-          <div style={panelHead}>VoLTE 가입자 <span className="badge badge--gray" style={{ fontSize: 10 }}>{candidates.length}</span></div>
+          <div style={panelHead}>VoLTE 가입자 <Badge variant="neutralSoft"  style={{ fontSize: 10 }}>{candidates.length}</Badge></div>
           <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
             <OrgTreePanel fill selectedPath={treeScope} onSelect={(pth, n) => { setTreeScope(pth); setTreeName(n) }}
               style={{ flex: '0 0 150px', width: 150, maxWidth: 150, border: 'none', borderRight: '1px solid var(--border)', borderRadius: 0 }} />
@@ -487,7 +488,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                           <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.userName}</span>
                           <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                         </span>
-                        {other && other !== selfId && <span className="badge badge--yellow" style={{ fontSize: 9 }} title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</span>}
+                        {other && other !== selfId && <Badge variant="warningSoft"  style={{ fontSize: 9 }} title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</Badge>}
                       </div>
                     )
                   })}

@@ -34,6 +34,9 @@ const badgeVariants = cva(
   }
 )
 
+/** 배지 톤 — 상태를 배지로 옮기는 헬퍼(`sevBadgeClass` 등)의 반환 타입. */
+export type BadgeTone = NonNullable<VariantProps<typeof badgeVariants>['variant']>
+
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {}

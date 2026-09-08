@@ -15,6 +15,8 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
+import type { BadgeTone } from '@core/components/ui/badge'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000
@@ -33,7 +35,7 @@ interface MonitoredParams {
 }
 
 const PHASE_LABEL: Record<string, string> = { started: '시작', ended: '종료', denied: '거절' }
-const PHASE_BADGE: Record<string, string> = { started: 'badge--blue', ended: 'badge--gray', denied: 'badge--red' }
+const PHASE_BADGE: Record<string, BadgeTone> = { started: 'brandSoft', ended: 'neutralSoft', denied: 'dangerSoft' }
 const TAP_LABEL: Record<string, string> = { both: '통화 양방향', a: '통화 발신측', b: '통화 착신측', ptt_listen: 'PTT 그룹콜 청취' }
 
 function fmtDur(ms?: number): string {
@@ -171,7 +173,7 @@ export function AuditEventsSection() {
                       <Td className="ts">{fmtTime(ev.ts)}</Td>
                       <Td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted-foreground)' }}>{ev.code || ''}</div></Td>
                       <Td>{p.phase
-                        ? <span className={`badge ${PHASE_BADGE[p.phase] || 'badge--gray'}`}>{PHASE_LABEL[p.phase] || p.phase}</span>
+                        ? <Badge variant={PHASE_BADGE[p.phase] || 'neutralSoft'} >{PHASE_LABEL[p.phase] || p.phase}</Badge>
                         : '-'}</Td>
                       <Td><code style={{ fontSize: 11 }}>{p.monitor || '-'}</code></Td>
                       <Td><code style={{ fontSize: 11 }}>{p.group || '-'}</code></Td>

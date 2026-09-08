@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { recordingsApi, type RecordingSegment } from '../api/recordings'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 interface SegmentPlayerProps {
   segments: RecordingSegment[]
@@ -328,7 +329,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             marginTop: 8, padding: '8px 12px', borderRadius: 6,
             background: 'var(--secondary)', fontSize: 13,
           }}>
-            <span className="badge badge--blue" style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</span>
+            <Badge variant="brandSoft"  style={{ fontSize: 10, animation: 'pulse 1.5s infinite' }}>변환중</Badge>
             <span>녹취를 변환하고 있습니다… 완료되면 자동으로 재생됩니다.</span>
           </div>
         )}
@@ -418,15 +419,15 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   <Td className="ts">{fmtMs(seg.duration_ms)}</Td>
                   <Td>
                     {preparingSeq === seg.seq
-                      ? <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</span>
+                      ? <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</Badge>
                       : seg.status === 'ready'
-                      ? <span className="badge badge--green" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>완료</span>
+                      ? <Badge variant="successSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}>완료</Badge>
                       : seg.status === 'raw'
-                      ? <span className="badge badge--gray" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>미변환</span>
+                      ? <Badge variant="neutralSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}>미변환</Badge>
                       : seg.status === 'transcoding'
-                      ? <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>변환중</span>
-                      : <span className="badge badge--red" style={{ fontSize: 10, whiteSpace: 'nowrap' }}
-                          title={seg.status_reason || '변환 실패 — 클릭 시 재시도'}>재생불가</span>}
+                      ? <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}>변환중</Badge>
+                      : <Badge variant="dangerSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap' }}
+                          title={seg.status_reason || '변환 실패 — 클릭 시 재시도'}>재생불가</Badge>}
                   </Td>
                 </tr>
               )
@@ -440,7 +441,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                 <Td className="ts">{fmtTimeRange(seg.start_time, null)}</Td>
                 <Td>-</Td>
                 <Td>
-                  <span className="badge badge--blue" style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>녹취중</span>
+                  <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>녹취중</Badge>
                 </Td>
               </tr>
             ))}

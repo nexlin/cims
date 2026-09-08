@@ -18,6 +18,7 @@ import { myLayout, useMyLayout } from './myLayoutStore'
 import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { Badge } from '@core/components/ui/badge'
 
 const AREA_LABEL: Record<WidgetArea, string> = { ops: '운용', admin: '관리' }
 
@@ -28,9 +29,9 @@ export function MyLayoutHeader() {
   const s = useMyLayout(show)
   return (
     <div className="toolbar" style={{ flexWrap: 'wrap', gap: 8 }}>
-      <span className="badge" style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--secondary)' }}>
+      <Badge  style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--secondary)' }}>
         {s.source === 'override' ? '개인 구성' : '프로파일 기본'}
-      </span>
+      </Badge>
       {s.dirty && <StatusDot tone="warning" label="저장되지 않은 변경" />}
       <InfoDot label="내 대시보드 구성이란?">
         구성은 서버(계정별)에 저장되어 기기·세션을 넘어 따라갑니다. 위젯 가용성은 서비스 설치/상태에
@@ -137,7 +138,7 @@ export function MyLayoutWidgets() {
                 opacity: w && !w.available ? 0.7 : 1,
               }}>
                 <span style={{ fontWeight: 500 }}>{w?.title ?? id}</span>
-                {w && <span className="badge" style={{ fontSize: 11 }}>{AREA_LABEL[w.area]}</span>}
+                {w && <Badge  style={{ fontSize: 11 }}>{AREA_LABEL[w.area]}</Badge>}
                 {w?.requires_service && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{w.requires_service}</span>}
                 {note && <span className="inline-flex items-center gap-1 text-xs text-warning-on">
         <AlertTriangle size={12} /> {note}</span>}

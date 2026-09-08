@@ -22,6 +22,7 @@ import {
 } from '../utils/alarmLabels'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 const FETCH_LIMIT = 5000   // 이벤트 탭 서버 상한 — 초과 시 최신순 절단(표기)
 
@@ -283,14 +284,14 @@ export function AlarmByCodeBlock() {
                         <Td><code style={{ fontSize: 11 }}>{s.mo_instance || '-'}</code></Td>
                         <Td>
                           {s.perceived_severity
-                            ? <span className={`badge ${sevBadgeClass(s.perceived_severity)}`}>{s.perceived_severity}</span>
+                            ? <Badge variant={sevBadgeClass(s.perceived_severity)} >{s.perceived_severity}</Badge>
                             : '-'}
                         </Td>
                         <Td><ShareBar n={s.opens} max={maxCodeOpens} /></Td>
                         <Td style={{ textAlign: 'right' }}>{s.resolved}</Td>
                         <Td>
                           {s.currently_open
-                            ? <span className="badge badge--red">OPEN</span>
+                            ? <Badge variant="dangerSoft" >OPEN</Badge>
                             : <span style={{ color: 'var(--muted-foreground)' }}>정상</span>}
                         </Td>
                         <Td style={{ textAlign: 'right' }}>
@@ -466,9 +467,9 @@ export function EventByTypeBlock() {
                     {byType.map(t => (
                       <tr key={t.key}>
                         <Td>
-                          <span className={`badge ${t.kind === 'audit' ? 'badge--gray' : 'badge--blue'}`}>
+                          <Badge variant={t.kind === 'audit' ? 'neutralSoft' : 'brandSoft'} >
                             {EVENT_KIND_LABEL[t.kind || ''] || t.kind || '-'}
-                          </span>
+                          </Badge>
                         </Td>
                         <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{t.code || '-'}</Td>
                         <Td>{eventTypeLabel(t.type)}

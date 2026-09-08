@@ -10,6 +10,7 @@ import { alertsApi, type AlarmCatalogItem, type AlertRulesResponse } from '../ap
 import { alarmTypeLabel, sevBadgeClass, severityOf } from '../utils/alarmLabels'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 // ── 알람 코드 사전 (검색 + 표) ──────────────────────────────────────────
 export function AlarmCatalogTable() {
@@ -69,7 +70,7 @@ export function AlarmCatalogTable() {
                   <tr key={c.code} title={c.probable_cause ? `probableCause: ${c.probable_cause}` : undefined}>
                     <Td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.code}</Td>
                     <Td title={c.type}>{alarmTypeLabel(c.type)}</Td>
-                    <Td>{sev ? <span className={`badge ${sevBadgeClass(sev)}`}>{sev}</span> : '—'}</Td>
+                    <Td>{sev ? <Badge variant={sevBadgeClass(sev)} >{sev}</Badge> : '—'}</Td>
                     <Td style={{ fontSize: 12 }}>{c.event_type || '—'}</Td>
                     <Td style={{ fontSize: 12 }}>{c.effect || '—'}</Td>
                     <Td style={{ fontSize: 12 }}>{c.recommended_action || '—'}</Td>
@@ -118,7 +119,7 @@ export function AlarmRulesTable() {
               {rules.rules.map((r, i) => (
                 <tr key={`${r.code}-${r.target || r.mo_instance || r.scope}-${i}`}
                     title={[r.effect && `영향: ${r.effect}`, r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
-                  <Td><span className={`badge ${sevBadgeClass(severityOf(r))}`}>{severityOf(r)}</span></Td>
+                  <Td><Badge variant={sevBadgeClass(severityOf(r))} >{severityOf(r)}</Badge></Td>
                   <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '-'}</Td>
                   <Td>{alarmTypeLabel(r.type)}</Td>
                   <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.target || r.scope || '-'}</Td>

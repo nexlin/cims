@@ -29,6 +29,8 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { Badge } from '@core/components/ui/badge'
+import type { BadgeTone } from '@core/components/ui/badge'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -39,8 +41,8 @@ const KINDS: Array<{ id: PttSessionKind; label: string }> = [
   { id: 'adhoc', label: '임시' },
 ]
 const ALL_KINDS = KINDS.map(k => k.id)
-const KIND_BADGE: Record<string, string> = {
-  group: 'badge--blue', private: 'badge--gray', adhoc: 'badge--yellow', unknown: 'badge--gray',
+const KIND_BADGE: Record<string, BadgeTone> = {
+  group: 'brandSoft', private: 'neutralSoft', adhoc: 'warningSoft', unknown: 'neutralSoft',
 }
 const KIND_LABEL: Record<string, string> = {
   group: '그룹', private: '1:1', adhoc: '임시', unknown: '미상',
@@ -548,10 +550,10 @@ function SessionCard({ r, sel, names, onSelect }: {
       display: 'flex', flexDirection: 'column', gap: 4,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-        <span className={`badge ${KIND_BADGE[r.kind] || 'badge--gray'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
-        {duplex && <span className="badge badge--blue">전이중</span>}
+        <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
+        {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         {/* 상태는 카드마다 명시 — 구역 라벨은 스크롤하면 시야에서 사라진다 */}
-        <span className={`badge ${live ? 'badge--green' : 'badge--gray'}`}>{live ? '진행중' : '종료'}</span>
+        <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
         <span style={{ fontWeight: 600, fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <Target r={r} names={names} />
         </span>
@@ -567,7 +569,7 @@ function SessionCard({ r, sel, names, onSelect }: {
         <span>턴 <b style={{ color: 'var(--foreground)' }}>{r.turn_count ?? r.segment_count ?? 0}</b></span>
         <span>화자 <b style={{ color: 'var(--foreground)' }}>{r.speaker_count ?? ((r.people || []).length || 0)}</b></span>
         <span>발화 <b style={{ color: 'var(--foreground)' }}>{fmtSpeechMs(r.total_speech_ms)}</b></span>
-        {maxCon > 1 && <span className="badge badge--blue" style={{ fontSize: 9 }}>동시 {maxCon}</span>}
+        {maxCon > 1 && <Badge variant="brandSoft"  style={{ fontSize: 9 }}>동시 {maxCon}</Badge>}
         {r.initiator && <span style={{ marginLeft: 'auto' }}>개시 <Person id={r.initiator} names={names} /></span>}
       </div>
     </div>
@@ -613,18 +615,18 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
         display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px',
         borderBottom: '1px solid var(--border)', background: 'var(--card)',
       }}>
-        <span className={`badge ${KIND_BADGE[r.kind] || 'badge--gray'}`}>{KIND_LABEL[r.kind] || r.kind}</span>
-        {duplex && <span className="badge badge--blue">전이중</span>}
-        <span className={`badge ${live ? 'badge--green' : 'badge--gray'}`}>{live ? '진행중' : '종료'}</span>
+        <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
+        {duplex && <Badge variant="brandSoft" >전이중</Badge>}
+        <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
         <span style={{ fontWeight: 600, fontSize: 12.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <Target r={r} names={names} />
         </span>
         {r.floor_control === 'on' && r.floor_policy && (
-          <span className="badge badge--gray" style={{ fontSize: 9, flex: '0 0 auto' }}
+          <Badge variant="neutralSoft"  style={{ fontSize: 9, flex: '0 0 auto' }}
                 title="세션 당시 동시 발언 정책 (TS 24.380)">
             {r.floor_policy === 'multi' ? `multi · 최대 ${r.max_talkers || '?'}명`
               : r.floor_policy === 'dual' ? 'dual · 2명' : 'single'}
-          </span>
+          </Badge>
         )}
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flex: '0 0 auto' }}>
           <Button disabled={flowLoading} onClick={onFlow}>Flow</Button>

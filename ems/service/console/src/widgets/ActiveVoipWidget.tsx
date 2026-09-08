@@ -6,6 +6,7 @@ import type { WidgetDef } from '@core/widgets/types'
 import FlowPage from '@core/pages/FlowPage'
 import { fmtTime } from './shared'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 function ActiveVoipWidget() {
   const navigate = useNavigate()
@@ -32,7 +33,7 @@ function ActiveVoipWidget() {
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
               <Td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></Td>
               <Td><a href="#" onClick={e => gotoSubscriber(e, c.callee)}>{c.callee}</a></Td>
-              <Td><span className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`}>{c.state}</span></Td>
+              <Td><Badge variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} >{c.state}</Badge></Td>
               <Td className="ts">{fmtTime(c.invite_time)}</Td>
             </tr>
           ))}

@@ -11,12 +11,14 @@ import type { EventRecord } from '@core/api/alerts'
 import type { WidgetDef } from '@core/widgets/types'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
+import type { BadgeTone } from '@core/components/ui/badge'
 
 // kind = 이벤트 스트림의 1차 축 (표준화 §3.6 — DOMAIN 약어 STC/AUD). 고정 순서.
 const KIND_ORDER = ['stateChange', 'audit'] as const
 const KIND_LABEL: Record<string, string> = { stateChange: '상태변경', audit: '감사' }
 const KIND_ABBR: Record<string, string> = { stateChange: 'STC', audit: 'AUD' }
-const KIND_BADGE: Record<string, string> = { stateChange: 'badge--blue', audit: 'badge--yellow' }
+const KIND_BADGE: Record<string, BadgeTone> = { stateChange: 'brandSoft', audit: 'warningSoft' }
 
 function kindOf(e: EventRecord): string { return e.kind || 'stateChange' }
 
@@ -106,7 +108,7 @@ function RecentEventsWidget() {
                 const kind = kindOf(e)
                 return (
                   <tr key={`${e.code || e.type}-${e.ts}-${i}`}>
-                    <Td><span className={`badge ${KIND_BADGE[kind] || 'badge--gray'}`}>{KIND_LABEL[kind] || kind}</span></Td>
+                    <Td><Badge variant={KIND_BADGE[kind] || 'neutralSoft'} >{KIND_LABEL[kind] || kind}</Badge></Td>
                     <Td><code style={{ fontSize: 11 }}>{e.code || e.type}</code></Td>
                     <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{e.source?.mo_instance || '-'}</code></Td>
                     <Td>{e.message}</Td>

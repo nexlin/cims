@@ -30,6 +30,7 @@ import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 // 목록은 조건이 없어 키가 하나 — 위젯이 몇 개든 조회는 1회.
 const useDescriptorsRaw = makeSharedByKey(() => serviceDescriptorsApi.list())
@@ -271,15 +272,15 @@ function AlertRulesBlock() {
             <tbody>
               {rules.map((r, i) => {
                 const sev = r.perceived_severity || r.severity || 'warning'
-                const cls = sev === 'critical' || sev === 'major' ? 'badge--red'
-                  : sev === 'indeterminate' ? 'badge--blue' : 'badge--yellow'
+                const cls = sev === 'critical' || sev === 'major' ? 'dangerSoft'
+                  : sev === 'indeterminate' ? 'brandSoft' : 'warningSoft'
                 return (
                   <tr key={`${r.code}-${r.mo_instance || r.target || i}`}
                       title={[r.effect && `영향: ${r.effect}`,
                               r.recommended_action && `조치: ${r.recommended_action}`].filter(Boolean).join('\n')}>
                     <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{r.code || '—'}</Td>
                     <Td>{r.type}</Td>
-                    <Td><span className={`badge ${cls}`}>{sev}</span></Td>
+                    <Td><Badge variant={cls} >{sev}</Badge></Td>
                     <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>
                       {r.mo_instance || (r.target ? `(관측 신원)/${r.target}` : '—')}</Td>
                     {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}

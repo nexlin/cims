@@ -16,6 +16,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { Badge } from '@core/components/ui/badge'
 
 // ── PTT 그룹 워크벤치 ─────────────────────────────────────────
 //  좌: 조직트리(공유 스코프) | 그룹 DataTable | 행 확장: 속성 편집 + 멤버(다중선택 추가).
@@ -100,9 +101,9 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'exp', header: '', width: 26, render: g => <Caret open={openId === g.id} /> },
     { key: 'name', header: '그룹명', sortable: true, render: g => (
       <span><span style={{ fontWeight: 600 }}>{g.name}</span>
-        {g.encryption && <span className="badge badge--green" style={{ fontSize: 9, marginLeft: 4 }}>암호</span>}
-        {g.emergency_call && <span className="badge badge--red" style={{ fontSize: 9, marginLeft: 2 }}>긴급</span>}
-        {g.video_enabled && <span className="badge badge--blue" style={{ fontSize: 9, marginLeft: 2 }}>영상</span>}
+        {g.encryption && <Badge variant="successSoft"  style={{ fontSize: 9, marginLeft: 4 }}>암호</Badge>}
+        {g.emergency_call && <Badge variant="dangerSoft"  style={{ fontSize: 9, marginLeft: 2 }}>긴급</Badge>}
+        {g.video_enabled && <Badge variant="brandSoft"  style={{ fontSize: 9, marginLeft: 2 }}>영상</Badge>}
       </span>
     ) },
     { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="ts">{g.id}</span> },
@@ -111,8 +112,8 @@ export default function PttGroupsWorkbenchPage() {
     { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
       const fp = g.floor_policy || 'single'
       if (fp === 'single') return <span className="ts" style={{ color: 'var(--muted-foreground)' }} title="한 명씩 발언">단일</span>
-      if (fp === 'dual') return <span className="badge badge--yellow" style={{ fontSize: 9 }} title="평시 1명, 긴급·임박자만 끼어들기">긴급</span>
-      return <span className="badge badge--blue" style={{ fontSize: 9 }} title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</span>
+      if (fp === 'dual') return <Badge variant="warningSoft"  style={{ fontSize: 9 }} title="평시 1명, 긴급·임박자만 끼어들기">긴급</Badge>
+      return <Badge variant="brandSoft"  style={{ fontSize: 9 }} title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</Badge>
     } },
     { key: 'owner', header: '소유자', width: 110, render: g => <span className="ts">{g.authorized_user_name || g.authorized_user || '—'}</span> },
     { key: 'org', header: '조직', width: 130, render: g => <span className="ts">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
@@ -346,7 +347,7 @@ function GroupDrawer(p: GroupDrawerProps) {
           {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
             {form.authorized_user_id != null
               ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span className="badge badge--blue" style={{ fontSize: 11 }}>{ownerName || `user#${form.authorized_user_id}`}</span>
+                  <Badge variant="brandSoft"  style={{ fontSize: 11 }}>{ownerName || `user#${form.authorized_user_id}`}</Badge>
                   <Button variant="ghost" onClick={() => { setForm({ ...form, authorized_user_id: null }); setOwnerName('') }}>변경</Button>
                 </div>
               : <SubscriberPicker kind="user" index={p.userIndex} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
@@ -515,7 +516,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
   }
 
   const panelHead: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600 }
-  const countChip = (n: number, tone?: 'primary') => <span className={`badge ${tone === 'primary' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{n}</span>
+  const countChip = (n: number, tone?: 'primary') => <Badge variant={tone === 'primary' ? 'brandSoft' : 'neutralSoft'}  style={{ fontSize: 10 }}>{n}</Badge>
   const panel: React.CSSProperties = { display: 'flex', flexDirection: 'column', minWidth: 0, border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', background: 'var(--card)' }
 
   return (

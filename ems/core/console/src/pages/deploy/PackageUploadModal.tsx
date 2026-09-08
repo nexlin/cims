@@ -7,6 +7,7 @@ import { deploymentApi } from '../../api/deployment'
 import { fmtSize, fmtSpeed, fmtEta } from './deployHelpers'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge, type BadgeTone } from '@core/components/ui/badge'
 
 interface UploadRow {
   id: string
@@ -196,13 +197,13 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
   })
   const remain = row.file.size - row.loaded
   const eta = row.speedBps > 0 ? remain / row.speedBps : 0
-  const stateBadge: Record<UploadRow['state'], { bg: string; label: string }> = {
-    pending:   { bg: 'var(--muted-foreground)', label: '대기' },
-    uploading: { bg: 'var(--cims-info)', label: '업로드' },
-    done:      { bg: 'var(--cims-success)', label: '완료' },
-    failed:    { bg: 'var(--destructive)', label: '실패' },
-    aborted:   { bg: 'var(--muted-foreground)', label: '취소' },
-    skipped:   { bg: 'var(--muted-foreground)', label: '건너뜀' },
+  const stateBadge: Record<UploadRow['state'], { tone: BadgeTone; label: string }> = {
+    pending:   { tone: 'neutralSolid', label: '대기' },
+    uploading: { tone: 'infoSolid',    label: '업로드' },
+    done:      { tone: 'successSolid', label: '완료' },
+    failed:    { tone: 'dangerSolid',  label: '실패' },
+    aborted:   { tone: 'neutralSolid', label: '취소' },
+    skipped:   { tone: 'neutralSolid', label: '건너뜀' },
   }
   const sb = stateBadge[row.state]
 
@@ -229,9 +230,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
         )}
       </Td>
       <Td>
-        <span className="tag" style={{
-          background: sb.bg, color: 'var(--cims-on-solid)', fontSize: 10, padding: '1px 6px', borderRadius: 3,
-        }}>{sb.label}</span>
+        <Badge variant={sb.tone}>{sb.label}</Badge>
         {row.msg && row.state === 'done' && (
           <div style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{row.msg}</div>
         )}

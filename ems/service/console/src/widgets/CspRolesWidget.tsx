@@ -1,6 +1,7 @@
 // CIMS 위젯 — CSP 모듈 역할 + 녹취 + 타이머 설정.
 import { useSharedHealth } from '@core/widgets/useSharedHealth'
 import type { WidgetDef } from '@core/widgets/types'
+import { Badge } from '@core/components/ui/badge'
 
 function CspRolesWidget() {
   const { data } = useSharedHealth()
@@ -18,13 +19,13 @@ function CspRolesWidget() {
       <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>CSP 모듈 역할</div>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         {Object.entries(data.csp.roles).map(([k, v]) => (
-          <span key={k} className={`badge ${v ? 'badge--green' : 'badge--gray'}`}>
+          <Badge variant={v ? 'successSoft' : 'neutralSoft'} key={k} >
             {k}: {v ? 'ON' : 'OFF'}
-          </span>
+          </Badge>
         ))}
-        <span style={{ marginLeft: 'auto' }} className={`badge ${data.record_enable ? 'badge--blue' : 'badge--gray'}`}>
+        <Badge variant={data.record_enable ? 'brandSoft' : 'neutralSoft'} style={{ marginLeft: 'auto' }} >
           녹취: {data.record_enable ? 'ON' : 'OFF'}
-        </span>
+        </Badge>
       </div>
       {data.csp.timeouts && (
         <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12, color: 'var(--muted-foreground)' }}>

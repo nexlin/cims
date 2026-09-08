@@ -13,6 +13,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { Badge } from '@core/components/ui/badge'
 
 type Form = { login_id: string; name: string; role: ConsoleRole; email: string; password: string }
 const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', password: '' }
@@ -149,7 +150,7 @@ export default function ConsoleAccountsPage() {
             <tr key={a.login_id}>
               <td><strong>{a.login_id}</strong></td>
               <td>{a.name}</td>
-              <td><span className="badge">{ROLE_LABELS[a.role]}</span></td>
+              <td><Badge >{ROLE_LABELS[a.role]}</Badge></td>
               <td className="ts">{a.email || '—'}</td>
               <td className="ts">{a.update_time || '—'}</td>
               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>

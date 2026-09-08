@@ -14,6 +14,7 @@ import { Check, MessageSquare, RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -161,7 +162,7 @@ export function ActiveAlarmList() {
                 return [
                   <tr key={key} onClick={() => setExpanded(open ? null : key)}
                       style={{ cursor: 'pointer', background: open ? 'var(--accent)' : undefined }}>
-                    <Td><span className={`badge ${sevBadgeClass(severityOf(a))}`}>{severityOf(a)}</span></Td>
+                    <Td><Badge variant={sevBadgeClass(severityOf(a))} >{severityOf(a)}</Badge></Td>
                     <Td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code || '-'}</Td>
                     <Td>{alarmTypeLabel(a.type)}</Td>
                     <Td><code style={{ fontSize: 11 }} title={a.source?.mo_instance || ''}>

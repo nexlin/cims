@@ -12,6 +12,7 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 export function fmtDur(sec: number): string {
@@ -112,7 +113,7 @@ export function VolteKpiCard() {
   return (
     <div className="panel" style={{ padding: 14 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22, alignItems: 'center' }}>
-        <span className="badge badge--blue" style={{ alignSelf: 'flex-start' }}>VoLTE</span>
+        <Badge variant="brandSoft"  style={{ alignSelf: 'flex-start' }}>VoLTE</Badge>
         <Kpi label="통화 중" value={v?.active ?? '-'} />
         <Kpi label="호출 중" value={v?.ringing ?? '-'} />
         <Kpi label="평균 통화" value={v ? fmtDur(v.avg_duration_sec) : '-'} />
@@ -130,7 +131,7 @@ export function PttKpiCard() {
   return (
     <div className="panel" style={{ padding: 14 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 22, alignItems: 'center' }}>
-        <span className="badge badge--green" style={{ alignSelf: 'flex-start' }}>PTT</span>
+        <Badge variant="successSoft"  style={{ alignSelf: 'flex-start' }}>PTT</Badge>
         <Kpi label="발언 중" value={p?.talking ?? '-'} sub="그룹" />
         <Kpi label="최근 5분 발언" value={p?.recent_active ?? '-'} sub="그룹" />
         <Kpi label="전체 그룹" value={p?.total_groups ?? '-'} />
@@ -279,7 +280,7 @@ export function AnomalyCard() {
       </div>
       {anomalies.map((a, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3 }}>
-          <span className="badge badge--red">{a.kind === 'volte' ? 'VoLTE' : 'PTT'}</span>
+          <Badge variant="dangerSoft" >{a.kind === 'volte' ? 'VoLTE' : 'PTT'}</Badge>
           <span>{a.detail}</span>
           <span style={{ color: 'var(--muted-foreground)' }}>{a.label}</span>
         </div>
@@ -308,7 +309,7 @@ export function VolteCallsCard() {
             return (
               <tr key={c.call_id} style={pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
                 <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></Td>
-                <Td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
+                <Td><Badge variant={ring ? 'brandSoft' : 'successSoft'} >{ring ? '호출 중' : '통화 중'}</Badge>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
                     aria-label={c.anomalies.map(a => a.detail).join(', ')} />}</Td>
                 <Td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--muted-foreground)' }}>→</span> {c.callee || '-'}</Td>
                 <Td>{c.video ? '영상' : '음성'}</Td>
@@ -389,7 +390,7 @@ export function PttGroupsCard() {
                   <Td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></Td>
                   <Td><span className="text-muted-foreground">
                     {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></Td>
-                  <Td><span className="badge">{typeLabel(g.type)}</span></Td>
+                  <Td><Badge >{typeLabel(g.type)}</Badge></Td>
                   <Td className="ts">{g.active_members} / {g.total_members}</Td>
                   <Td>{g.floor_holder
                   ? <span className="inline-flex items-center gap-1 font-semibold text-primary">
@@ -446,7 +447,7 @@ export function EventFeedCard() {
           {events.map((e, i) => (
             <tr key={i}>
               <Td className="ts">{new Date(e.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</Td>
-              <Td><span className={`badge ${e.kind === 'volte' ? 'badge--blue' : 'badge--green'}`}>{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</span></Td>
+              <Td><Badge variant={e.kind === 'volte' ? 'brandSoft' : 'successSoft'} >{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</Badge></Td>
               <Td>{EV_ICON[e.type] ?? <Dot size={12} className="inline align-[-2px]" />} {e.detail}</Td>
             </tr>
           ))}
@@ -470,13 +471,13 @@ function SubscriberRows({ subs }: { subs: Subscriber[] }) {
             <Td className="ts">{s.volte?.msisdn || '-'}</Td>
             <Td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
             <Td>{s.volte?.calls && s.volte.calls.length > 0
-              ? s.volte.calls.map((c, i) => <span key={i} className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화' : '호출'} {c.role === 'caller' ? '→' : '←'} {c.peer}</span>)
+              ? s.volte.calls.map((c, i) => <Badge variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} key={i} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화' : '호출'} {c.role === 'caller' ? '→' : '←'} {c.peer}</Badge>)
               : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</Td>
             <Td className="ts">{s.ptt?.msisdn || '-'}</Td>
             <Td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
             <Td>{s.ptt?.groups && s.ptt.groups.length > 0
-              ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>
-                        <Mic size={11} className="inline align-[-1px]" /> {g.group_id}</span>)
+              ? s.ptt.groups.map((g, i) => <Badge variant="successSoft" key={i} style={{ marginRight: 4 }}>
+                        <Mic size={11} className="inline align-[-1px]" /> {g.group_id}</Badge>)
               : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</Td>
           </tr>
         ))}
@@ -560,10 +561,10 @@ export function OrgStatsCard() {
                 background: sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
                 fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
               {o.name} <span className="ts">({o.members})</span>
-              {o.active_volte > 0 && <span className="badge badge--blue" style={{ marginLeft: 4 }}>
-                    <Phone size={11} className="inline align-[-1px]" />{o.active_volte}</span>}
-              {o.ptt_talking > 0 && <span className="badge badge--green" style={{ marginLeft: 4 }}>
-                    <Mic size={11} className="inline align-[-1px]" />{o.ptt_talking}</span>}
+              {o.active_volte > 0 && <Badge variant="brandSoft"  style={{ marginLeft: 4 }}>
+                    <Phone size={11} className="inline align-[-1px]" />{o.active_volte}</Badge>}
+              {o.ptt_talking > 0 && <Badge variant="successSoft"  style={{ marginLeft: 4 }}>
+                    <Mic size={11} className="inline align-[-1px]" />{o.ptt_talking}</Badge>}
             </div>
           ))}
         </div>
@@ -648,12 +649,12 @@ export function SubscriberLookup() {
                     <Td className="ts">{s.volte?.msisdn || '-'}</Td>
                     <Td>{s.volte ? <><OnlineDot on={s.volte.online} />{s.volte.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
                     <Td>{s.volte?.calls && s.volte.calls.length > 0
-                      ? s.volte.calls.map((c, i) => <span key={i} className={`badge ${c.state === 'active' ? 'badge--green' : 'badge--blue'}`} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화 중' : '호출 중'} {c.role === 'caller' ? '→' : '←'} {c.peer}</span>)
+                      ? s.volte.calls.map((c, i) => <Badge variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} key={i} style={{ marginRight: 4 }}>{c.state === 'active' ? '통화 중' : '호출 중'} {c.role === 'caller' ? '→' : '←'} {c.peer}</Badge>)
                       : <span className="ts">{s.volte?.online ? '대기' : '-'}</span>}</Td>
                     <Td className="ts">{s.ptt?.msisdn || '-'}</Td>
                     <Td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</Td>
                     <Td>{s.ptt?.groups && s.ptt.groups.length > 0
-                      ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>참여 그룹 {g.group_id} ({g.active_members}/{g.total_members})</span>)
+                      ? s.ptt.groups.map((g, i) => <Badge variant="successSoft" key={i} style={{ marginRight: 4 }}>참여 그룹 {g.group_id} ({g.active_members}/{g.total_members})</Badge>)
                       : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</Td>
                   </tr>
                 ))}

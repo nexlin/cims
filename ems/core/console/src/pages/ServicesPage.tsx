@@ -9,6 +9,7 @@ import { useToast } from '../components/Toast'
 import Modal from '../components/Modal'
 import ModuleConfigModal from '../components/module/ModuleConfigModal'
 import { Button } from '@core/components/ui/button'
+import { Badge, type BadgeTone } from '@core/components/ui/badge'
 
 type SvcState = { running: boolean; pid?: number }
 
@@ -365,11 +366,11 @@ export default function ServicesPage() {
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           {manifest ? (
-            <span className="tag" style={{ background: 'var(--cims-neutral)', color: 'var(--cims-on-solid)', fontSize: 11 }}
+            <Badge variant="neutralSolid"
                   title={`manifest_sha=${manifest._self_sha256 || '-'}\ngit=${manifestGit}\nts=${manifestTs}`}>
               {manifestGit ? `git=${manifestGit} ` : ''}
               {manifestSha ? `manifest=${manifestSha}…` : ''}
-            </span>
+            </Badge>
           ) : (
             <span className="text-muted" style={{ fontSize: 12 }}>패키지 미생성</span>
           )}
@@ -436,8 +437,8 @@ export default function ServicesPage() {
                   <span style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 14 }}>
                     {card.key}
                   </span>
-                  {card.critical && <span className="tag" style={{ background: 'var(--cims-warning-on-soft)', color: 'var(--cims-on-solid)' }}>critical</span>}
-                  {!card.hasProcess && <span className="tag" style={{ background: 'var(--cims-info)', color: 'var(--cims-on-solid)' }}>원격</span>}
+                  {card.critical && <Badge variant="warningSolid">critical</Badge>}
+                  {!card.hasProcess && <Badge variant="infoSolid">원격</Badge>}
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
                     {card.label}
                   </span>
@@ -465,8 +466,7 @@ export default function ServicesPage() {
                         title="모듈 설정 편집">설정</Button>
                     )}
                     {needsRestart[card.key] && (
-                      <span className="tag" style={{ background: 'var(--destructive)', color: 'var(--cims-on-solid)' }}
-                            title="설정 변경 후 재시작 필요">!</span>
+                      <Badge variant="dangerSolid" title="설정 변경 후 재시작 필요">!</Badge>
                     )}
                     {versions.length === 0 && (
                       <Link to="/deploy/packages" style={{ fontSize: 11, color: 'var(--muted-foreground)', marginLeft: 'auto' }}
@@ -478,12 +478,9 @@ export default function ServicesPage() {
                   {card.hasProcess ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, minWidth: 0 }}>
                       <span style={{ color: 'var(--muted-foreground)', fontWeight: 500, minWidth: 50 }}>² 실행</span>
-                      <span className="tag" style={{
-                        background: running ? 'var(--cims-success-on-soft)' : 'var(--muted-foreground)', color: 'var(--cims-on-solid)',   // 흰 글자를 받으므로 고정 진한 색
-                        minWidth: 40, textAlign: 'center',
-                      }}>
+                      <Badge variant={running ? 'successSolid' : 'neutralSolid'} className="min-w-10 justify-center">
                         {running ? 'on' : 'off'}
-                      </span>
+                      </Badge>
                       <span style={{ color: 'var(--muted-foreground)', fontFamily: 'monospace', fontSize: 11 }}>
                         {running ? `pid=${s?.pid ?? '?'}` : '—'}
                       </span>
@@ -547,13 +544,13 @@ export default function ServicesPage() {
               // activeJob 진행 중이면 항상 job, 그 외엔 마지막 갱신 출처
               const showJob = !!activeJob || (terminalSource === 'job' && jobStatus)
               const showModule = !showJob && terminalSource === 'module' && lastModule
-              const tagBg =
-                activeJob ? 'var(--cims-info)'
-                : showJob && jobStatus?.verdict === 'PASS' ? 'var(--cims-success)'
-                : showJob && jobStatus?.verdict === 'FAIL' ? 'var(--destructive)'
-                : showModule && lastModule?.verdict === 'PASS' ? 'var(--cims-success)'
-                : showModule && lastModule?.verdict === 'FAIL' ? 'var(--destructive)'
-                : 'var(--cims-neutral-on-soft)'
+              const tagTone: BadgeTone =
+                activeJob ? 'infoSolid'
+                : showJob && jobStatus?.verdict === 'PASS' ? 'successSolid'
+                : showJob && jobStatus?.verdict === 'FAIL' ? 'dangerSolid'
+                : showModule && lastModule?.verdict === 'PASS' ? 'successSolid'
+                : showModule && lastModule?.verdict === 'FAIL' ? 'dangerSolid'
+                : 'neutralSolid'
               const tagText = showJob && jobStatus
                 ? (jobStatus.kind === 'release' ? '빌드 & 패키징'
                    : jobStatus.kind === 'build' ? '빌드'
@@ -580,9 +577,7 @@ export default function ServicesPage() {
                 <>
                   <div style={{ marginBottom: 6, display: 'flex', justifyContent: 'space-between', flex: '0 0 auto' }}>
                     <span>
-                      <span className="tag" style={{ background: tagBg, color: 'var(--cims-on-solid)', marginRight: 8 }}>
-                        {tagText}
-                      </span>
+                      <Badge variant={tagTone} className="mr-2">{tagText}</Badge>
                       {meta && <span>{meta}</span>}
                     </span>
                     {right && <span>{right}</span>}

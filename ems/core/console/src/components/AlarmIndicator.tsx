@@ -14,10 +14,11 @@ import { useToast } from './Toast'
 import { Badge } from './ui/badge'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import type { BadgeTone } from '@core/components/ui/badge'
 
-const SEV_BADGE: Record<string, string> = {
-  critical: 'badge--red', major: 'badge--red', minor: 'badge--yellow',
-  warning: 'badge--yellow', indeterminate: 'badge--blue',
+const SEV_BADGE: Record<string, BadgeTone> = {
+  critical: 'dangerSoft', major: 'dangerSoft', minor: 'warningSoft',
+  warning: 'warningSoft', indeterminate: 'brandSoft',
 }
 
 // 전이 토스트 배선 — 셸에 1개만 렌더 (AlarmIndicator 내부에서 함께 처리).
@@ -95,10 +96,10 @@ export default function AlarmIndicator() {
               return (
                 <div key={a.alarm_id || a.type} className="alarm-drawer-row">
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span className={`badge ${SEV_BADGE[sev] || 'badge--gray'}`}>{sev}</span>
+                    <Badge variant={SEV_BADGE[sev] || 'neutralSoft'} >{sev}</Badge>
                     <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.code}</span>
                     {(a.occurrences || 1) > 1 && (
-                      <span className="badge badge--gray">×{a.occurrences}</span>
+                      <Badge variant="neutralSoft" >×{a.occurrences}</Badge>
                     )}
                     <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>{a.ts}</span>
                   </div>
@@ -124,7 +125,7 @@ export default function AlarmIndicator() {
             {tab === 'events' && recentEvents.map((ev, i) => (
               <div key={i} className="alarm-drawer-row">
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <span className="badge badge--gray">{ev.kind}</span>
+                  <Badge variant="neutralSoft" >{ev.kind}</Badge>
                   <span style={{ fontSize: 12 }}>{ev.type}</span>
                   <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>{ev.ts}</span>
                 </div>

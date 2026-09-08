@@ -18,6 +18,8 @@ import { makeCardWidget } from '@core/widgets/CardLayout'
 import type { WidgetDef, WidgetPlacement } from '@core/widgets/types'
 import { useServiceLive } from '../pages/ServiceStatusPage'
 import { StatCard } from './statCards'
+import { Badge } from '@core/components/ui/badge'
+import type { BadgeTone } from '@core/components/ui/badge'
 
 const API = ['stats.service.live']
 const pct = (used: number, total: number) => (total > 0 ? Math.round((used / total) * 100) : 0)
@@ -68,11 +70,11 @@ function TileBlock({ tile }: { tile: SummaryTile }) {
 }
 
 // 머리줄 — 대상 배지 + 상세(서비스 현황)로 가는 길.
-function HeadBlock({ badge, badgeClass }: { badge: string; badgeClass: string }) {
+function HeadBlock({ badge, badgeClass }: { badge: string; badgeClass: BadgeTone }) {
   const navigate = useNavigate()
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span className={`badge ${badgeClass}`}>{badge}</span>
+      <Badge variant={badgeClass} >{badge}</Badge>
       <button className="link-btn" title="서비스 현황으로 이동"
               onClick={() => navigate('/service/status')}
               style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
@@ -87,7 +89,7 @@ const tileWidget = (prefix: string, t: SummaryTile): WidgetDef => ({
   id: `${prefix}.${t.key}`, title: t.title, category: 'metric', apis: API,
   component: () => <TileBlock tile={t} />, defaultSize: { w: 2, h: 6 }, minSize: { h: 4 },
 })
-const headWidget = (prefix: string, title: string, badge: string, badgeClass: string): WidgetDef => ({
+const headWidget = (prefix: string, title: string, badge: string, badgeClass: BadgeTone): WidgetDef => ({
   id: `${prefix}.head`, title, category: 'control', apis: API,
   component: () => <HeadBlock badge={badge} badgeClass={badgeClass} />,
   defaultSize: { w: 6, h: 3 }, minSize: { h: 2 },
@@ -112,8 +114,8 @@ export const pttSummaryWidget: WidgetDef = makeCardWidget({
 })
 
 export const DASHBOARD_CARD_WIDGETS: WidgetDef[] = [
-  volteSummaryWidget, headWidget(VOLTE, 'VoLTE 요약 — 머리줄', 'VoLTE', 'badge--blue'),
+  volteSummaryWidget, headWidget(VOLTE, 'VoLTE 요약 — 머리줄', 'VoLTE', 'brandSoft'),
   ...VOLTE_TILES.map(t => tileWidget(VOLTE, t)),
-  pttSummaryWidget, headWidget(PTT, 'PTT 요약 — 머리줄', 'PTT', 'badge--green'),
+  pttSummaryWidget, headWidget(PTT, 'PTT 요약 — 머리줄', 'PTT', 'successSoft'),
   ...PTT_TILES.map(t => tileWidget(PTT, t)),
 ]

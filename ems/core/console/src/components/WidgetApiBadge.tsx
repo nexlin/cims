@@ -17,9 +17,11 @@ import { loadApiDocs, type ApiDoc, type ApiDocAuth } from '../api/apiDocs'
 import { useDataSourceCatalogPassive } from '../widgets/shapes/sourceRegistry'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
+import type { BadgeTone } from '@core/components/ui/badge'
 
-const METHOD_COLOR: Record<string, string> = {
-  GET: 'badge--green', POST: 'badge--blue', PUT: 'badge--yellow', DELETE: 'badge--red',
+const METHOD_COLOR: Record<string, BadgeTone> = {
+  GET: 'successSoft', POST: 'brandSoft', PUT: 'warningSoft', DELETE: 'dangerSoft',
 }
 
 // navigator.clipboard 는 secure context 전용 — HTTP dev 환경은 execCommand fallback.
@@ -127,10 +129,10 @@ function ApiRow({ a }: { a: ApiDoc }) {
   return (
     <div style={{ borderBottom: '1px solid var(--border)', padding: '10px 0' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span className={`badge ${METHOD_COLOR[a.method.toUpperCase()] || 'badge--gray'}`}
-              style={{ minWidth: 54, textAlign: 'center' }}>{a.method.toUpperCase()}</span>
+        <Badge variant={METHOD_COLOR[a.method.toUpperCase()] || 'neutralSoft'}
+              style={{ minWidth: 54, textAlign: 'center' }}>{a.method.toUpperCase()}</Badge>
         <code style={{ fontSize: 12.5, wordBreak: 'break-all' }}>{a.path}</code>
-        {a.module && <span className="badge badge--gray" title="이 API 를 제공하는 모듈">{a.module}</span>}
+        {a.module && <Badge variant="neutralSoft"  title="이 API 를 제공하는 모듈">{a.module}</Badge>}
         <span style={{ flex: 1 }} />
         <Button variant="ghost" onClick={() => setOpen(o => !o)}>
           {open ? '접기' : '상세'}

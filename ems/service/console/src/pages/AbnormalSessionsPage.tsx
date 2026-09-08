@@ -14,6 +14,7 @@ import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
@@ -149,7 +150,7 @@ export function AbnTable() {
                   return (
                     <tr key={i}>
                       <Td style={{ fontSize: 11 }} className="ts">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
-                      <Td><span className="badge" style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</span></Td>
+                      <Td><Badge  style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</Badge></Td>
                       <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</Td>
                       <Td style={{ fontSize: 11, fontFamily: 'monospace' }}>
                         <span style={{ color: 'var(--muted-foreground)' }}>{x.caller || '?'}</span>
@@ -165,7 +166,7 @@ export function AbnTable() {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
                           {x.reasons.map(r => {
                             const rl = REASON_LABEL[r] || { label: r, color: 'var(--muted-foreground)' }
-                            return <span key={r} className="badge" style={{ fontSize: 9, color: rl.color, border: `1px solid ${rl.color}`, background: 'transparent' }}>{rl.label}</span>
+                            return <Badge key={r} style={{ fontSize: 9, color: rl.color, border: `1px solid ${rl.color}`, background: 'transparent' }}>{rl.label}</Badge>
                           })}
                         </div>
                       </Td>

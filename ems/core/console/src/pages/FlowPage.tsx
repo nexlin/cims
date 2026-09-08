@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { flowApi, formatMsgBody, type FlowMessage } from '../api/flow'
 import Modal from '../components/Modal'
+import { Badge } from '@core/components/ui/badge'
 
 /** ts "HH:MM:SS.uuuuuu" 에서 hour 추출 */
 function hourFromTs(ts: string): string | undefined {
@@ -664,7 +665,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                 {selected ? (
                   <>
                     <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
-                      <span className="badge" style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</span>
+                      <Badge  style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</Badge>
                       <span style={{ fontWeight: 600, fontSize: 12 }}>{selected.label}</span>
                       <span className="ts">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
                       <span className="ts" style={{ marginLeft: 'auto' }}>{selected.ts}</span>

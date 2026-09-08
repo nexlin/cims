@@ -6,6 +6,7 @@ import type { WidgetDef } from '@core/widgets/types'
 import FlowPage from '@core/pages/FlowPage'
 import { fmtTime } from './shared'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 function ActivePttWidget() {
   const navigate = useNavigate()
@@ -32,7 +33,7 @@ function ActivePttWidget() {
               title="행 클릭: 메시지 플로우 / 번호 클릭: 가입자 상세">
               <Td>{c.group_id}</Td>
               <Td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></Td>
-              <Td><span className="badge badge--green">{c.state}</span></Td>
+              <Td><Badge variant="successSoft" >{c.state}</Badge></Td>
               <Td className="ts">{fmtTime(c.invite_time)}</Td>
             </tr>
           ))}

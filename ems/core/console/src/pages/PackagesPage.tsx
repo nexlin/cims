@@ -9,6 +9,7 @@ import { agentDisplayName } from '../components/agentDisplay'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 interface ModuleGroup {
   name: string
@@ -285,10 +286,7 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
                     {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <b style={{ fontSize: 14 }}>v{p.version}</b>
         {isLatest && (
-          <span className="tag" style={{
-            background: 'var(--cims-success-on-soft)', color: 'var(--cims-on-solid)', fontSize: 10,   // 흰 글자 대비 4.5 — 테마 토큰은 다크에서 밝아져 못 쓴다
-            padding: '1px 6px', borderRadius: 3,
-          }}>최신</span>
+          <Badge variant="successSolid">최신</Badge>
         )}
         <span style={{ color: 'var(--muted-foreground)', fontSize: 12, marginLeft: 8 }}>
           {fmtRelTime(p.uploaded_at)}

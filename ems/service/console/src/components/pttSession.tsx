@@ -17,6 +17,7 @@ import { samePlay, type InlineAudio } from '@core/components/useInlineAudio'
 import { useDirectory, type Directory } from '@core/components/useDirectory'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
+import { Badge } from '@core/components/ui/badge'
 
 
 export function fmtShortTime(iso: string | null | undefined) {
@@ -402,7 +403,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
           {fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)}
         </td>
         <td style={{ ...tdStyle, textAlign: 'center' }}>
-          <span className={`badge ${sess.state === 'active' ? 'badge--green' : 'badge--gray'}`}>{sess.state === 'active' ? '진행중' : '종료'}</span>
+          <Badge variant={sess.state === 'active' ? 'successSoft' : 'neutralSoft'} >{sess.state === 'active' ? '진행중' : '종료'}</Badge>
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {sess.turn_count ?? sess.segment_count ?? 0}
@@ -413,7 +414,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
         <td style={{ ...tdStyle, textAlign: 'right' }}>{sess.speaker_count ?? 0}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }}>
           {maxCon > 1
-            ? <span className="badge badge--blue" style={{ fontSize: 10 }}>{maxCon}명</span>
+            ? <Badge variant="brandSoft"  style={{ fontSize: 10 }}>{maxCon}명</Badge>
             : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
         </td>
         <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(sess.total_speech_ms)}</td>
@@ -527,16 +528,16 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
         <Metric k="화자" v={String(sess.speaker_count ?? speakerOrder.length)} s="명" />
         {/* 세션 당시 floor 축 (시간버킷 session.json) — 그룹 최신 스냅샷과 다를 수 있다 */}
         {sess.floor_control === 'off' ? (
-          <span className="badge badge--green" style={{ alignSelf: 'center', marginLeft: 'auto' }}
-                title="floor 중재 없음 — 양측 상시 송신(통화형)">전이중 · 통화</span>
+          <Badge variant="successSoft"  style={{ alignSelf: 'center', marginLeft: 'auto' }}
+                title="floor 중재 없음 — 양측 상시 송신(통화형)">전이중 · 통화</Badge>
         ) : sess.floor_control === 'on' ? (
           <span style={{ alignSelf: 'center', marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-            <span className="badge badge--yellow" title="floor 중재 있음 — 발언권 기반(무전형)">반이중 · 무전</span>
+            <Badge variant="warningSoft"  title="floor 중재 있음 — 발언권 기반(무전형)">반이중 · 무전</Badge>
             {sess.floor_policy && (
-              <span className="badge badge--gray" title="세션 당시 동시 발언 정책 (TS 24.380)">
+              <Badge variant="neutralSoft"  title="세션 당시 동시 발언 정책 (TS 24.380)">
                 {sess.floor_policy === 'multi' ? `multi · 최대 ${sess.max_talkers || '?'}명`
                   : sess.floor_policy === 'dual' ? 'dual · 최대 2명' : 'single'}
-              </span>
+              </Badge>
             )}
           </span>
         ) : null}
@@ -687,7 +688,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
                   }} />
                   <Person id={p.id} names={names}
                           style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} />
-                  {p.role === 'initiator' && <span className="badge badge--gray" style={{ fontSize: 9 }}>개시자</span>}
+                  {p.role === 'initiator' && <Badge variant="neutralSoft"  style={{ fontSize: 9 }}>개시자</Badge>}
                   {(p.join || p.leave) && (
                     <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
                       {fmtShortTime(p.join)} ~ {p.leave ? fmtShortTime(p.leave) : (live ? '참여중' : '--')}
@@ -866,7 +867,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
                   {ev.member && <><Person id={ev.member} names={names} style={{ fontWeight: 500 }} />{' '}</>}
                   {disp.label}
                   {ev.type === 'member_join' && ev.role === 'initiator' &&
-                    <span className="badge badge--gray" style={{ fontSize: 9, marginLeft: 6 }}>개시자</span>}
+                    <Badge variant="neutralSoft"  style={{ fontSize: 9, marginLeft: 6 }}>개시자</Badge>}
                   {ev.duration != null && <span className="ts"> ({fmtDur(ev.duration)})</span>}
                 </span>
               </div>
@@ -965,13 +966,13 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
       {f.user
         ? <Person id={f.user} names={names} style={{ color: uColor, fontWeight: 600 }} />
         : <span style={{ color: uColor }}>-</span>}
-      {role && <span className="badge badge--gray" style={{ fontSize: 9 }}>{role}</span>}
+      {role && <Badge variant="neutralSoft"  style={{ fontSize: 9 }}>{role}</Badge>}
       {f.prio != null && f.prio >= 0 && <span className="ts">prio {f.prio}</span>}
       {f.preempt && <span className="ts" style={{ color: 'var(--cims-warning)' }}><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
-      {f.tier && f.tier !== 'normal' && <span className="badge badge--red" style={{ fontSize: 9 }}>{f.tier}</span>}
+      {f.tier && f.tier !== 'normal' && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>{f.tier}</Badge>}
       {extras.length > 0 && <span className="ts" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
-      {turn?.hasVideo && <span className="badge badge--blue" style={{ fontSize: 9 }}>영상</span>}
-      {turn && !turn.playable && <span className="badge badge--blue" style={{ fontSize: 9 }}>녹취중</span>}
+      {turn?.hasVideo && <Badge variant="brandSoft"  style={{ fontSize: 9 }}>영상</Badge>}
+      {turn && !turn.playable && <Badge variant="brandSoft"  style={{ fontSize: 9 }}>녹취중</Badge>}
       {turn && <span className="ts" style={{ marginLeft: 'auto', fontSize: 11 }}>{fmtMmss(turn.durMs)}</span>}
       <span className="ts" style={{ marginLeft: turn ? undefined : 'auto', fontSize: 10, opacity: .7 }}>{f.op}</span>
     </div>

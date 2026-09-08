@@ -14,6 +14,7 @@ import { useToast } from '@core/components/Toast'
 import type { WidgetDef } from '@core/widgets/types'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 // 요약 타일에 항상 노출하는 상위 4단계(고정 순서). indeterminate/cleared 는 건수 있을 때만.
 const TILE_ORDER = ['critical', 'major', 'minor', 'warning'] as const
@@ -136,7 +137,7 @@ function ActiveAlarmsWidget() {
                     <Td>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                         <code style={{ fontSize: 11 }}>{a.code || a.type}</code>
-                        {(a.occurrences || 1) > 1 && <span className="badge badge--gray">×{a.occurrences}</span>}
+                        {(a.occurrences || 1) > 1 && <Badge variant="neutralSoft" >×{a.occurrences}</Badge>}
                       </span>
                     </Td>
                     <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{a.source?.mo_instance || '-'}</code></Td>

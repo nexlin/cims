@@ -16,6 +16,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable as TableFrame, Th, Td } from '@core/components/custom/data-table'
+import { Badge } from '@core/components/ui/badge'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -193,7 +194,7 @@ export default function ProvisioningWorkbenchPage() {
       ]
       if (all.length === 0) return <span className="ts">—</span>
       return <span style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-        {all.map(n => <span key={`${n.svc}:${n.id}`} className={`badge ${n.svc === 'call' ? 'badge--blue' : 'badge--green'}`} style={{ fontSize: 10 }} title={n.svc === 'call' ? 'VoLTE' : 'McPTT'}>{n.id}</span>)}
+        {all.map(n => <Badge variant={n.svc === 'call' ? 'brandSoft' : 'successSoft'} key={`${n.svc}:${n.id}`} style={{ fontSize: 10 }} title={n.svc === 'call' ? 'VoLTE' : 'McPTT'}>{n.id}</Badge>)}
       </span>
     } },
     { key: 'act', header: '', width: 84, align: 'right', render: u => canWrite ? (
@@ -219,7 +220,7 @@ export default function ProvisioningWorkbenchPage() {
   ]
   const volteCols: Column<NumberRow>[] = [
     ...numberBaseCols,
-    { key: 'dnd', header: 'DND', width: 70, align: 'center', render: r => <span className={`badge ${r.sub.dnd ? 'badge--red' : 'badge--gray'}`} style={{ fontSize: 10 }}>{r.sub.dnd ? 'ON' : 'OFF'}</span> },
+    { key: 'dnd', header: 'DND', width: 70, align: 'center', render: r => <Badge variant={r.sub.dnd ? 'dangerSoft' : 'neutralSoft'}  style={{ fontSize: 10 }}>{r.sub.dnd ? 'ON' : 'OFF'}</Badge> },
     { key: 'fwd', header: '착신전환', width: 120, render: r => <span className="ts">{r.sub.forward_id || '—'}</span> },
     numberActCol,
   ]
@@ -258,7 +259,7 @@ export default function ProvisioningWorkbenchPage() {
                 fontWeight: tab === t.k ? 700 : 500, color: tab === t.k ? 'var(--primary)' : 'var(--muted-foreground)',
                 borderBottom: tab === t.k ? '2px solid var(--primary)' : '2px solid transparent', marginBottom: -1,
               }}>
-              {t.label} <span className="badge badge--gray" style={{ fontSize: 10, marginLeft: 2 }}>{t.count}</span>
+              {t.label} <Badge variant="neutralSoft"  style={{ fontSize: 10, marginLeft: 2 }}>{t.count}</Badge>
             </button>
           ))}
         </div>
@@ -552,20 +553,20 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
       <strong>{msisdn}</strong>
-      <span className="badge badge--blue" style={{ fontSize: 9 }}>{MODE_LABEL[prof.emergency_group_mode]}</span>
+      <Badge variant="brandSoft"  style={{ fontSize: 9 }}>{MODE_LABEL[prof.emergency_group_mode]}</Badge>
       {prof.emergency_group_mode === 'DedicatedGroup' && (
         noDedicated
-          ? <span className="badge badge--red" style={{ fontSize: 9 }}>긴급그룹 미지정 — SOS 불발</span>
+          ? <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>긴급그룹 미지정 — SOS 불발</Badge>
           : <span className="ts">긴급그룹 <b>{prof.emergency_group_id}</b></span>
       )}
-      {!prof.allow_emergency_call && <span className="badge badge--red" style={{ fontSize: 9 }}>긴급콜 차단</span>}
-      {!prof.allow_emergency_alert && <span className="badge badge--red" style={{ fontSize: 9 }}>경보 차단</span>}
-      {!prof.allow_adhoc_call && <span className="badge badge--red" style={{ fontSize: 9 }}>애드혹 차단</span>}
-      {!prof.allow_emergency_private_call && <span className="badge badge--red" style={{ fontSize: 9 }}>긴급 사설콜 차단</span>}
+      {!prof.allow_emergency_call && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>긴급콜 차단</Badge>}
+      {!prof.allow_emergency_alert && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>경보 차단</Badge>}
+      {!prof.allow_adhoc_call && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>애드혹 차단</Badge>}
+      {!prof.allow_emergency_private_call && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>긴급 사설콜 차단</Badge>}
       {prof.allow_emergency_private_call && prof.private_emergency_mode === 'UsePreConfigured' && (
         prof.emergency_private_recipient
           ? <span className="ts">사설수신자 <b>{prof.emergency_private_recipient}</b></span>
-          : <span className="badge badge--red" style={{ fontSize: 9 }}>사설수신자 미지정 — 긴급 사설콜 불발</span>
+          : <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>사설수신자 미지정 — 긴급 사설콜 불발</Badge>
       )}
       {!prof.exists && <span className="ts">(기본값)</span>}
       {canWrite && (
@@ -601,7 +602,7 @@ function buildServiceCatalog(users: UserSummary[]): ServiceCat[] {
 
 // VoLTE/PTT 유형 배지
 function SvcBadge({ svc }: { svc: 'call' | 'ptt' }) {
-  return <span className={`badge ${svc === 'call' ? 'badge--blue' : 'badge--green'}`} style={{ fontSize: 9 }}>{svc === 'call' ? 'VoLTE' : 'McPTT'}</span>
+  return <Badge variant={svc === 'call' ? 'brandSoft' : 'successSoft'}  style={{ fontSize: 9 }}>{svc === 'call' ? 'VoLTE' : 'McPTT'}</Badge>
 }
 
 interface AddNum { id: string; imsi: string; svcCat: string; passwd: string; sip_transport: SipTransport | ''; auth_scheme: AuthScheme; k: string; opc: string; dnd: boolean; forward_id: string; pickup_group: string }
@@ -619,8 +620,8 @@ function AuthSelect({ value, onChange }: { value: AuthScheme | undefined; onChan
 }
 function AuthBadge({ sub }: { sub: Subscription }) {
   if (sub.auth_scheme !== 'aka') return <span className="ts">Digest</span>
-  return <span className={`badge ${sub.aka_provisioned ? 'badge--green' : 'badge--red'}`} style={{ fontSize: 9 }}
-    title={sub.aka_provisioned ? 'IMS AKA — K/OPc 보관됨, 보호 채널(TLS/IPsec) 강제' : 'IMS AKA — K/OPc 미보관(등록 불가)'}>AKA{sub.aka_provisioned ? '' : <AlertTriangle size={10} className="ml-0.5 inline align-[-1px]" />}</span>
+  return <Badge variant={sub.aka_provisioned ? 'successSoft' : 'dangerSoft'}  style={{ fontSize: 9 }}
+    title={sub.aka_provisioned ? 'IMS AKA — K/OPc 보관됨, 보호 채널(TLS/IPsec) 강제' : 'IMS AKA — K/OPc 미보관(등록 불가)'}>AKA{sub.aka_provisioned ? '' : <AlertTriangle size={10} className="ml-0.5 inline align-[-1px]" />}</Badge>
 }
 // K/OPc 입력 — 편집 시 비우면 보관 키 유지(aka_provisioned 일 때). 둘 다 hex32.
 function AkaKeyInputs({ k, opc, keep, onChange }: { k: string; opc: string; keep?: boolean; onChange: (k: string, opc: string) => void }) {
@@ -653,13 +654,13 @@ function TransportSelect({ value, onChange }: { value: SipTransport | '' | null 
 function TransportBadge({ v, aka }: { v?: SipTransport | null; aka?: boolean }) {
   if (aka) return <TransportFixedAka />
   if (!v) return <span className="ts">자유</span>
-  return <span className={`badge ${v === 'TLS' ? 'badge--red' : 'badge--blue'}`} style={{ fontSize: 9 }} title={v === 'TLS' ? '서버 집행 — 비-TLS 채널 요청 403' : '프로비저닝 힌트'}>{v}</span>
+  return <Badge variant={v === 'TLS' ? 'dangerSoft' : 'brandSoft'}  style={{ fontSize: 9 }} title={v === 'TLS' ? '서버 집행 — 비-TLS 채널 요청 403' : '프로비저닝 힌트'}>{v}</Badge>
 }
 // AKA 가입자는 채널 정책(sip_transport) 값과 무관하게 보호 채널이 강제된다(requiresTls = TLS ∨ aka,
 //   sip_access_security.md §8.2) — 선택이 무의미하므로 고정 표시한다. 프로비저닝도 목록을 TLS 로 좁힌다.
 function TransportFixedAka() {
-  return <span className="badge badge--red" style={{ fontSize: 9 }}
-    title="AKA — 보호 채널(TLS) 강제. sip_transport 값과 무관하게 비-TLS 요청은 403이며, 단말 프로비저닝 목록도 TLS 하나로 좁혀진다. 접속서비스에 TLS 접속점(tls_port)이 없으면 등록 불가">TLS (AKA 강제)</span>
+  return <Badge variant="dangerSoft"  style={{ fontSize: 9 }}
+    title="AKA — 보호 채널(TLS) 강제. sip_transport 값과 무관하게 비-TLS 요청은 403이며, 단말 프로비저닝 목록도 TLS 하나로 좁혀진다. 접속서비스에 TLS 접속점(tls_port)이 없으면 등록 불가">TLS (AKA 강제)</Badge>
 }
 
 // ── 단일 번호 테이블 (사용자 상세 내부, VoLTE+PTT 통합) ──
@@ -764,10 +765,10 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                   <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
                   {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
                 </> : <AuthBadge sub={r.sub} />}</Td>
-                <Td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <span className="badge badge--red" style={{ fontSize: 9 }}>ON</span> : <span className="ts">—</span>)}</Td>
+                <Td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>ON</Badge> : <span className="ts">—</span>)}</Td>
                 <Td>{!isCall ? <span className="ts">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</Td>
                 <Td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
-                    ? <span className="badge badge--blue" style={{ fontSize: 10 }} title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</span>
+                    ? <Badge variant="brandSoft"  style={{ fontSize: 10 }} title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</Badge>
                     : <Input  placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 관제 그룹(대표번호·감청)은 관리 › 관제 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
                   : <span className="ts" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
                 <Td className="actions">
@@ -866,7 +867,7 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
         <Field label="가입자 *" w={280}>
           {pick
             ? <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="badge badge--blue" style={{ fontSize: 11 }}>{pick.label}</span>
+                <Badge variant="brandSoft"  style={{ fontSize: 11 }}>{pick.label}</Badge>
                 <Button variant="ghost" onClick={() => setPick(null)}>변경</Button>
               </div>
             : <SubscriberPicker kind="user" index={userIndex} orgScope={orgScope} orgPathOf={orgPathOf}
