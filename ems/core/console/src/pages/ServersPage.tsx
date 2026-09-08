@@ -940,7 +940,6 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
  const [editFailover, setEditFailover] = useState<FailoverOptions>(
     { ...FAILOVER_DEFAULTS, ...(group.failover_options || {}),
  health: { ...FAILOVER_DEFAULTS.health, ...(group.failover_options?.health || {}) } })
- const [failoverOpen, setFailoverOpen] = useState(false)
   // Master 멤버 1명 선택 — AS 만 의미. 현재 priority 가 가장 큰 멤버를 default 로.
  const initialMaster = (() => {
  if (group.members.length === 0) return null
@@ -1215,7 +1214,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
         {/* 그룹 설정 — 세로 라벨 3필드 + 필드별 도움말 (Figma G1 42:428).
             구 화면은 `이름:[ ] auth_pass:[ ] note:[ ]` 한 줄이라 무엇이 필수인지도,
  auth_pass 가 무엇인지도 알 수 없었다. */}
-        <SubSection title="그룹 설정"
+        <SubSection level={1} title="그룹 설정"
  hint={isAS ? 'VRRP 인증·메모 · 저장 시 전 멤버 반영'
                                : '메모 · 저장 시 전 멤버 반영 (AA 는 VRRP 인증 없음)'}>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -1240,20 +1239,14 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
         {/* 절체 조건 — 그룹 단위 설정. AS 만 (AA 는 절체 개념이 없다). */}
         {isAS && (
           <div className="mb-5">
-            <FailoverSection
- value={editFailover}
- onChange={setEditFailover}
- open={failoverOpen}
- onToggle={() => setFailoverOpen(v => !v)}
- dirty={failoverDirty}
-            />
+            <FailoverSection value={editFailover} onChange={setEditFailover} dirty={failoverDirty} />
           </div>
         )}
 
         {/* 멤버 — 추가/삭제는 좌측 트리에서 일괄 처리 (트리의 [+] / [×]).
             여기는 표시 + AS 의 Master 선택만 담당.
             AA 는 절체가 없어 역할·MASTER·상태 3컬럼과 [실측] 이 빠진다 (aa-group.md 대조표). */}
-        <SubSection title="멤버" count={memberAgents.length}
+        <SubSection level={1} title="멤버" count={memberAgents.length}
  hint={isAS
                       ? '추가·삭제는 좌측 트리에서 · MASTER 는 하나만 지정'
                       : '추가·삭제는 좌측 트리에서'}>
@@ -1355,7 +1348,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
             용도 100 · VIP 190 · MASK 64 · 멤버 IFACE 180 · 보유 140 · 액션 148.
             액션 줄(수동 입력·+ VIP 추가·재적용)은 시안대로 **표 아래**로 내렸다 (191:3198) —
             구 화면은 섹션 헤더 우측이었다. 0건이면 ES-1 (empty-states.md). */}
-        <SubSection title="VIP Bindings" count={editBindings.length}
+        <SubSection level={1} title="VIP Bindings" count={editBindings.length}
  hint="네트워크·마스크는 멤버의 service IP 에서 자동 매핑 — host 옥텟만 입력">
           {editBindings.length === 0 ? (
             <>
@@ -1526,7 +1519,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
                 따라잡게 하는 통로. update 는 값이 바뀌어야 job 이 나간다. */}
             <Button variant="ghost" onClick={reapplyVip}
  disabled={vipDirty || bindingEditMode !== null}>
-              <RotateCw size={13} /> 재적용
+              재적용
             </Button>
           </div>
           {/* 비활성 사유는 툴팁이 아니라 눈에 보이게 (contracts.md §Button) */}
@@ -1572,7 +1565,7 @@ function GroupInspector({ group, agents, onSelectMember, onReload }: {
       <StickySaveBar
  badge={changes.length > 0
           ? <Badge variant="warningSoft" title={changes.join(' · ')}>변경 {changes.length}건 · 전 멤버 적용</Badge>
-          : <span className="shrink-0 text-xs text-muted-foreground">변경 없음</span>}
+          : <Badge variant="neutralSoft">변경 0건</Badge>}
  note={changes.length > 0
           ? changes.join(' · ')
           : '그룹 설정 · 절체 조건 · 멤버 · VIP 를 한 번에 저장 — keepalived 재생성'}
@@ -1605,11 +1598,9 @@ function VipHolderCell({ holders, editing }: { holders: string[]; editing?: bool
 // AS 절체 조건 (그룹/시스템 스코프) — keepalived advert_int / vrrp_script health /
 // preempt / track_interface / restart_limit. 모듈별 값(프로세스 감시·절체 모드)은
 // 패키지 설정의 모듈 운영 명세(ModuleSpecSection)로 이관됨.
-function FailoverSection({ value, onChange, open, onToggle, dirty }: {
+function FailoverSection({ value, onChange, dirty }: {
  value: FailoverOptions
  onChange: (v: FailoverOptions) => void
- open: boolean
- onToggle: () => void
   /** 저장은 하단 StickySaveBar 가 한다 — 여기서는 변경 표시만 */
  dirty: boolean
 }) {
@@ -1621,24 +1612,14 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
  const setRestart = (k: 'max_fails' | 'window_sec', v: number) =>
  set('restart_limit', { ...rl, [k]: v })
  return (
-    <div className="mt-0 border border-border rounded-[4px]">
-      <div className="py-2 px-3 bg-muted flex items-center gap-2 font-semibold text-md"
- title="A/S (active_standby) 시스템에만 적용 — VRRP 절체 동작 세부 조건">
-        <span onClick={onToggle} style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}>{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-        <span className="cursor-pointer" onClick={onToggle}>절체 조건 (A/S 전용)</span>
-        <span className="text-xs text-muted-foreground font-normal cursor-pointer" onClick={onToggle}>
-          감시주기 {value.advert_int}s · 장애판정 {value.health.fall}회 · 자동 복귀 {value.preempt === 'preempt' ? '있음' : '없음'}
-        </span>
-        {/* 저장은 하단 StickySaveBar 가 한다 — 여기서는 변경 여부만 알린다 */}
-        {dirty && (
-          <Badge variant="warningSoft" className="ml-auto">변경됨</Badge>
-        )}
-      </div>
-      {open && (
-        /* 9필드 3열 그리드 (Figma G1 42:428). 구 화면은 한 줄에 여러 필드를 이어 붙여
+    <SubSection level={1} title="절체 조건 (A/S 전용)"
+                hint={`감시주기 ${value.advert_int}s · 장애판정 ${value.health.fall}회 · `
+                      + `자동 복귀 ${value.preempt === 'preempt' ? '있음' : '없음'}`}
+                right={dirty ? <Badge variant="warningSoft">변경됨</Badge> : undefined}>
+      {/* 9필드 3열 그리드 (Figma G1 42:428). 구 화면은 한 줄에 여러 필드를 이어 붙여
            `연속 [3] 회 실패 (윈도우 [300] 초) → 절체` 처럼 문장 속에 입력이 박혀 있었다 —
-           라벨과 값의 대응이 흐리고 도움말 자리도 없다. */
-        <div className="p-3">
+           라벨과 값의 대응이 흐리고 도움말 자리도 없다. */}
+      <div>
           <div className="grid grid-cols-1 gap-x-6 gap-y-4 lg:grid-cols-3">
             <FormField label="감시 주기 (초)" help="기본 1초 · 범위 0.5~5초">
               <Input type="number" min={0.5} max={5} step={0.5}
@@ -1717,9 +1698,8 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
               </span>
             </span>
           </label>
-        </div>
-      )}
-    </div>
+      </div>
+    </SubSection>
   )
 }
 
@@ -2290,23 +2270,19 @@ function InspectorSection({ title, expanded, onToggle, children }: {
  onToggle: () => void
  children: React.ReactNode
 }) {
+  // 머리 모양은 `SubSection level={1}` 과 같다 — 도안(S1 49:1369 · G1 42:428)의 큰 구획 머리는
+  // 전부 같은 `CollapsibleSectionHeader` Level 1 이다. 구 화면은 여기만 회색 띠였다.
+  // 열림 상태를 바깥이 들고 있어(여러 섹션 동시 제어) SubSection 을 그대로 쓰지는 못한다.
  return (
-    <div className="border-b border-border">
-      <div onClick={onToggle}
- style={{
- display: 'flex', alignItems: 'center', gap: 8,
- padding: '10px 16px', cursor: 'pointer',
- background: 'var(--muted)', userSelect: 'none',
- borderBottom: expanded ? '1px solid var(--border)' : 'none',
-           }}>
-        <span className="w-[14px] text-muted-foreground">{expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
-        <span className="font-semibold text-base">{title}</span>
-      </div>
-      {expanded && (
-        <div className="p-4">
-          {children}
-        </div>
-      )}
+    <div className="px-4">
+      <button onClick={onToggle}
+              className="flex h-9 w-full select-none items-center gap-2 border-b border-border text-left">
+        <span className="w-4 shrink-0 text-foreground">
+          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+        <span className="text-md font-semibold">{title}</span>
+      </button>
+      {expanded && <div className="pb-4 pt-3.5">{children}</div>}
     </div>
   )
 }

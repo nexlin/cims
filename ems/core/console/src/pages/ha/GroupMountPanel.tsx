@@ -150,6 +150,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
     // 계약상 접힌 섹션에 액션 버튼을 노출하지 않으므로 [재적용] 은 표 아래 액션 줄로 내렸고,
     // 접힌 상태에서도 봐야 하는 `미적용 n건` 만 헤더 우측에 남긴다 (ES-5).
     <SubSection
+      level={1}
       title="마운트 (그룹 공통)"
       hint={`멤버 ${members.length}대에 같은 경로로 한 번에 적용 — /etc/fstab 영속`
             + ` · 노드별 예외는 서버 선택 › 네트워크`}
