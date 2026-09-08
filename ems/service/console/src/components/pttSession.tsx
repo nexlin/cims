@@ -399,7 +399,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
       >
         <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
         <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtWindow(sess.dir)}</td>
-        <td style={tdStyle} className="ts">
+        <td style={tdStyle} className="text-sm text-muted-foreground">
           {fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)}
         </td>
         <td style={{ ...tdStyle, textAlign: 'center' }}>
@@ -417,7 +417,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
             ? <Badge variant="brandSoft" style={{ fontSize: 10 }}>{maxCon}명</Badge>
             : <span style={{ color: 'var(--muted-foreground)' }}>—</span>}
         </td>
-        <td style={{ ...tdStyle, textAlign: 'right' }} className="ts">{fmtSpeechMs(sess.total_speech_ms)}</td>
+        <td style={{ ...tdStyle, textAlign: 'right' }} className="text-sm text-muted-foreground">{fmtSpeechMs(sess.total_speech_ms)}</td>
         <td style={{ ...tdStyle, textAlign: 'right' }} onClick={e => e.stopPropagation()}>
           <Button style={{ marginRight: 4 }} disabled={flowLoading} onClick={onFlow}>Flow</Button>
           <Button onClick={onPlayAll}><Play size={11} className="mr-1 inline align-[-1px]" />전체</Button>
@@ -549,7 +549,7 @@ export function SessionDetail({ detail, sess, recId, isDuplex, audio, layout = '
           <div key={seg.seq} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>통화 녹취</span>
-              <span className="ts" style={{ color: 'var(--muted-foreground)' }}>
+              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>
                 {fmtShortTime(seg.start_time)} ~ {fmtShortTime(seg.end_time)} · {fmtSpeechMs(seg.duration_ms)}
               </span>
             </div>
@@ -668,11 +668,11 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
       <div style={{ ...secStyle('part'), display: 'flex', flexDirection: 'column', padding: fold.part ? '8px 14px' : '8px 14px 0' }}>
         <div {...foldHeaderProps('part')}>
           <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.part)}참여자</span>
-          <span className="ts" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{parts.length}명</span>
+          <span className="text-sm text-muted-foreground" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{parts.length}명</span>
         </div>
         {!fold.part && <div style={{ minHeight: 0, overflowY: 'auto', paddingBottom: 8 }}>
           {parts.length === 0 ? (
-            <div className="ts" style={{ color: 'var(--muted-foreground)' }}>참여자 기록이 없습니다</div>
+            <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>참여자 기록이 없습니다</div>
           ) : (
             <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
               {parts.map((p, i) => (
@@ -690,11 +690,11 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
  style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} />
                   {p.role === 'initiator' && <Badge variant="neutralSoft" style={{ fontSize: 9 }}>개시자</Badge>}
                   {(p.join || p.leave) && (
-                    <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
+                    <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
                       {fmtShortTime(p.join)} ~ {p.leave ? fmtShortTime(p.leave) : (live ? '참여중' : '--')}
                     </span>
                   )}
-                  <span className="ts" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
+                  <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
                     턴 <b style={{ color: 'var(--foreground)' }}>{p.n}</b> · 발화 <b style={{ color: 'var(--foreground)' }}>{fmtSpeechMs(p.ms)}</b>
                   </span>
                 </div>
@@ -714,7 +714,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
             {!fold.talk && <div style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {detail.segments.filter(s => s.status !== 'recording').map(seg => (
                 <div key={seg.seq} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
+                  <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
                     {fmtShortTime(seg.start_time)} ~ {fmtShortTime(seg.end_time)} · {fmtSpeechMs(seg.duration_ms)}
                   </span>
                   {recId && (
@@ -732,7 +732,7 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
             <div {...foldHeaderProps('talk')}>
               <span style={{ fontWeight: 600, fontSize: 13 }}>{chev(fold.talk)}발언권 타임라인</span>
             </div>
-            {!fold.talk && <div className="ts" style={{ color: 'var(--muted-foreground)' }}>발언 녹취가 없습니다</div>}
+            {!fold.talk && <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>발언 녹취가 없습니다</div>}
           </>
         ) : (
           <LaneTimebar turns={turns} speakerOrder={speakerOrder} recId={recId} audio={audio} names={names}
@@ -759,7 +759,7 @@ export function Metric({ k, v, s, hint }: { k: string; v: string; s: string; hin
  return (
     <div title={hint}>
       <div style={{ fontSize: 10.5, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--muted-foreground)', fontWeight: 600 }}>{k}</div>
-      <div className="ts" style={{ fontSize: 15, fontWeight: 700, marginTop: 1 }}>
+      <div className="text-sm text-muted-foreground" style={{ fontSize: 15, fontWeight: 700, marginTop: 1 }}>
         {v}{s && <small style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted-foreground)', marginLeft: 3 }}>{s}</small>}
       </div>
     </div>
@@ -816,7 +816,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
           {onToggle && <span className="mr-1 inline-flex text-muted-foreground">
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>}이벤트 타임라인
         </span>
-        <span className="ts" style={{ fontSize: 11 }}>발언권 중재 · 입퇴장</span>
+        <span className="text-sm text-muted-foreground" style={{ fontSize: 11 }}>발언권 중재 · 입퇴장</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
           {chips.map(c => (
             <Button
@@ -836,7 +836,7 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
       </div>
 
       {!collapsed && (shown.length === 0 ? (
-        <div className="ts" style={{ color: 'var(--muted-foreground)' }}>표시할 항목이 없습니다</div>
+        <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>표시할 항목이 없습니다</div>
       ) : (
         <div style={{
           // fill 구획에서는 내용만큼 서고, 구획이 줄면 목록만 스크롤 (헤더는 밀리지 않는다)
@@ -861,14 +861,14 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
  const disp = getEventDisplay(ev.type)
  return (
               <div key={`e${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 10px', fontSize: 12, borderTop: border, borderLeft: '4px solid transparent' }}>
-                <span className="ts" style={{ minWidth: 70, color: 'var(--muted-foreground)' }}>{fmtShortTime(ev.ts)}</span>
+                <span className="text-sm text-muted-foreground" style={{ minWidth: 70, color: 'var(--muted-foreground)' }}>{fmtShortTime(ev.ts)}</span>
                 <span style={{ minWidth: 30, display: 'inline-flex', justifyContent: 'center', color: disp.color }}><disp.icon size={13} /></span>
                 <span style={{ color: 'var(--foreground)' }}>
                   {ev.member && <><Person id={ev.member} names={names} style={{ fontWeight: 500 }} />{' '}</>}
                   {disp.label}
                   {ev.type === 'member_join' && ev.role === 'initiator' &&
                     <Badge variant="neutralSoft" style={{ fontSize: 9, marginLeft: 6 }}>개시자</Badge>}
-                  {ev.duration != null && <span className="ts"> ({fmtDur(ev.duration)})</span>}
+                  {ev.duration != null && <span className="text-sm text-muted-foreground"> ({fmtDur(ev.duration)})</span>}
                 </span>
               </div>
             )
@@ -949,7 +949,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
  borderLeft: `4px solid ${turn ? uColor : 'transparent'}`,
  background: isPlaying ? 'var(--accent)' : undefined,
          }}>
-      <span className="ts" style={{ minWidth: 70 }}>{fmtShortTime(f.ts)}</span>
+      <span className="text-sm text-muted-foreground" style={{ minWidth: 70 }}>{fmtShortTime(f.ts)}</span>
       {turn ? (
         <Button variant={isPlaying ? 'default' : 'outline'}
  disabled={!recId || !turn.playable}
@@ -967,14 +967,14 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
         ? <Person id={f.user} names={names} style={{ color: uColor, fontWeight: 600 }} />
         : <span style={{ color: uColor }}>-</span>}
       {role && <Badge variant="neutralSoft" style={{ fontSize: 9 }}>{role}</Badge>}
-      {f.prio != null && f.prio >= 0 && <span className="ts">prio {f.prio}</span>}
-      {f.preempt && <span className="ts" style={{ color: 'var(--cims-warning)' }}><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
+      {f.prio != null && f.prio >= 0 && <span className="text-sm text-muted-foreground">prio {f.prio}</span>}
+      {f.preempt && <span className="text-sm text-muted-foreground" style={{ color: 'var(--cims-warning)' }}><ArrowLeft size={11} /> 선점 {who(f.preempted_from)}</span>}
       {f.tier && f.tier !== 'normal' && <Badge variant="dangerSoft" style={{ fontSize: 9 }}>{f.tier}</Badge>}
-      {extras.length > 0 && <span className="ts" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
+      {extras.length > 0 && <span className="text-sm text-muted-foreground" style={{ fontSize: 11 }}>{extras.join(' · ')}</span>}
       {turn?.hasVideo && <Badge variant="brandSoft" style={{ fontSize: 9 }}>영상</Badge>}
       {turn && !turn.playable && <Badge variant="brandSoft" style={{ fontSize: 9 }}>녹취중</Badge>}
-      {turn && <span className="ts" style={{ marginLeft: 'auto', fontSize: 11 }}>{fmtMmss(turn.durMs)}</span>}
-      <span className="ts" style={{ marginLeft: turn ? undefined : 'auto', fontSize: 10, opacity: .7 }}>{f.op}</span>
+      {turn && <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto', fontSize: 11 }}>{fmtMmss(turn.durMs)}</span>}
+      <span className="text-sm text-muted-foreground" style={{ marginLeft: turn ? undefined : 'auto', fontSize: 10, opacity: .7 }}>{f.op}</span>
     </div>
   )
 }
@@ -1157,12 +1157,12 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
           {onToggle && <span className="mr-1 inline-flex text-muted-foreground">
         {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>}발언권 타임라인
         </span>
-        <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
+        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
         {maxCon > 1 && (
           <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>· 최대 동시 발언 {maxCon}명</span>
         )}
         {!collapsed && zoomed && (
-          <span className="ts" style={{ fontSize: 11, color: 'var(--primary)' }}>
+          <span className="text-sm text-muted-foreground" style={{ fontSize: 11, color: 'var(--primary)' }}>
             · 보이는 구간 {fmtClock(vFrom)} ~ {fmtClock(vTo)}
           </span>
         )}
@@ -1171,7 +1171,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
             <Button variant="ghost" disabled={!zoomed} onClick={() => panBy(-0.5)} title="왼쪽으로 이동 (반 화면)">‹</Button>
             <Button variant="ghost" disabled={!zoomed} onClick={() => panBy(0.5)} title="오른쪽으로 이동 (반 화면)">›</Button>
             <Button variant="ghost" disabled={zoom <= ZOOM_MIN} onClick={() => zoomBy(0.5)} title="축소 — 시간폭 넓히기">−</Button>
-            <span className="ts" style={{ fontSize: 11, minWidth: 32, textAlign: 'center', color: 'var(--muted-foreground)' }}>
+            <span className="text-sm text-muted-foreground" style={{ fontSize: 11, minWidth: 32, textAlign: 'center', color: 'var(--muted-foreground)' }}>
               {zoom < 10 ? Number(zoom.toFixed(1)) : Math.round(zoom)}×
             </span>
             <Button variant="ghost" disabled={zoom >= ZOOM_MAX} onClick={() => zoomBy(2)} title="확대 — 시간폭 좁히기">+</Button>
@@ -1286,7 +1286,7 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
                 {/* 시각 눈금 — 보이는 구간에만 (배율이 오르면 간격도 촘촘해진다) */}
                 <div style={{ position: 'relative', height: 18, marginTop: 3 }}>
                   {ticks.map(t => (
-                    <span key={t} className="ts" style={{
+                    <span key={t} className="text-sm text-muted-foreground" style={{
  position: 'absolute', left: `${pct(t)}%`, transform: 'translateX(-50%)',
  fontSize: 10, color: 'var(--muted-foreground)', whiteSpace: 'nowrap',
                     }}>

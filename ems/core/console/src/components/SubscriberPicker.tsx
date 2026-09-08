@@ -131,7 +131,7 @@ export default function SubscriberPicker({
                 background: i === activeIdx ? 'rgba(74,144,217,0.12)' : undefined,
               }}>
               <span style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{it.label}</span>
-              <span className="ts" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
+              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', whiteSpace: 'nowrap' }}>
                 {it.sub}{it.orgCode ? ` · ${it.orgCode}` : ''}
               </span>
             </div>

@@ -171,7 +171,7 @@ export function AuditEventsSection() {
                   const targets = [p.target_a, p.target_b].filter(Boolean).join(' / ')
                   return (
                     <tr key={`${ev.ts}-${pageStart + i}`}>
-                      <Td className="ts">{fmtTime(ev.ts)}</Td>
+                      <Td className="text-sm text-muted-foreground">{fmtTime(ev.ts)}</Td>
                       <Td>{eventTypeLabel(ev.type)}<div style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--muted-foreground)' }}>{ev.code || ''}</div></Td>
                       <Td>{p.phase
                         ? <Badge variant={PHASE_BADGE[p.phase] || 'neutralSoft'} >{PHASE_LABEL[p.phase] || p.phase}</Badge>

@@ -132,7 +132,7 @@ function FilterBlock() {
       </InfoDot>
       {loading && <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>갱신 중…</span>}
       {error && <span style={{ fontSize: 12, color: 'var(--destructive)' }}>조회 실패</span>}
-      <span className="ts" style={{ marginLeft: 'auto' }}>총 {n}건 회수</span>
+      <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>총 {n}건 회수</span>
     </div>
   )
 }

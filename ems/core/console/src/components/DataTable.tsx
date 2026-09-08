@@ -112,7 +112,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
-      <div className="table-wrap" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
+      <div className="flex-1 overflow-x-auto" style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
       <TableFrame sticky>
         <thead>
           <tr>

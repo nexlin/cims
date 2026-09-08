@@ -109,7 +109,7 @@ function ActiveAlarmsWidget() {
       ) : rows.length === 0 ? (
         <EmptyState title="해당 심각도의 활성 알람 없음" />
       ) : (
-        <div className="table-wrap">
+        <div className="flex-1 overflow-x-auto">
           <DataTable sticky>
             <thead>
               <tr>

@@ -113,21 +113,21 @@ export default function DispatchGroupsPage() {
         {g.ptt_listen !== 'none' && <Badge variant="warningSoft"  style={{ fontSize: 9, marginLeft: 2 }} title={`PTT 청취: ${PTT_LABEL[g.ptt_listen]}`}>PTT청취</Badge>}
       </span>
     ) },
-    { key: 'id', header: 'ID', width: 120, sortable: true, render: g => <span className="ts">{g.id}</span> },
+    { key: 'id', header: 'ID', width: 120, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
     { key: 'pilot', header: '대표번호', width: 110, sortable: true, sortValue: g => g.pilot_id || '', render: g => g.pilot_id
-      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Radio size={12} style={{ color: 'var(--primary)' }} /><span className="ts">{g.pilot_id}</span></span>
-      : <span className="ts" style={{ color: 'var(--muted-foreground)' }}>—</span> },
-    { key: 'alert', header: '호출', width: 90, render: g => <span className="ts">{g.pilot_id ? (g.alert_mode === 'parallel' ? `병렬 ${g.no_answer_sec}s` : `순차 ${g.no_answer_sec}s`) : '—'}</span> },
-    { key: 'overflow', header: '넘김', width: 110, render: g => <span className="ts">{g.overflow_target || '—'}</span> },
-    { key: 'scope', header: '감청', width: 90, render: g => <span className="ts">{SCOPE_LABEL[g.monitor_scope]}</span> },
-    { key: 'org', header: '조직', width: 130, render: g => <span className="ts">{orgs.find(o => o.id === g.org_id)?.name || '—'}</span> },
-    { key: 'members', header: '멤버', width: 60, align: 'center', render: g => <span className="ts">{g.members.length}명</span> },
+      ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Radio size={12} style={{ color: 'var(--primary)' }} /><span className="text-sm text-muted-foreground">{g.pilot_id}</span></span>
+      : <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>—</span> },
+    { key: 'alert', header: '호출', width: 90, render: g => <span className="text-sm text-muted-foreground">{g.pilot_id ? (g.alert_mode === 'parallel' ? `병렬 ${g.no_answer_sec}s` : `순차 ${g.no_answer_sec}s`) : '—'}</span> },
+    { key: 'overflow', header: '넘김', width: 110, render: g => <span className="text-sm text-muted-foreground">{g.overflow_target || '—'}</span> },
+    { key: 'scope', header: '감청', width: 90, render: g => <span className="text-sm text-muted-foreground">{SCOPE_LABEL[g.monitor_scope]}</span> },
+    { key: 'org', header: '조직', width: 130, render: g => <span className="text-sm text-muted-foreground">{orgs.find(o => o.id === g.org_id)?.name || '—'}</span> },
+    { key: 'members', header: '멤버', width: 60, align: 'center', render: g => <span className="text-sm text-muted-foreground">{g.members.length}명</span> },
     { key: 'act', header: '', width: 84, align: 'right', render: g => canWrite ? (
-      <span className="actions" onClick={e => e.stopPropagation()}>
+      <span className="flex gap-1.5" onClick={e => e.stopPropagation()}>
         <IconBtn title="편집" onClick={() => toggleOpen(g.id)}><Pencil size={ICON} /></IconBtn>
         <IconBtn title="삭제" tone="danger" onClick={() => deleteGroup(g)}><Trash2 size={ICON} /></IconBtn>
       </span>
-    ) : <span className="ts">—</span> },
+    ) : <span className="text-sm text-muted-foreground">—</span> },
   ]
 
   const openGroup = openId ? groups.find(g => g.id === openId) : undefined
@@ -338,11 +338,11 @@ function GroupDrawer(p: DrawerProps) {
         </FieldRow>
       ) : existing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
-          <span className="ts">ID {existing.id}</span>
-          <span className="ts">대표번호 {existing.pilot_id ? `${existing.pilot_id} (${existing.service_ref || '—'}, ${existing.alert_mode === 'parallel' ? '병렬' : '순차'} ${existing.no_answer_sec}s, 통화중 ${existing.busy_members === 'skip' ? '제외' : '호출'})` : '없음'}</span>
-          <span className="ts">넘김 {existing.overflow_target || '—'}</span>
-          <span className="ts">감청 {SCOPE_LABEL[existing.monitor_scope]}</span>
-          <span className="ts">PTT 청취 {PTT_LABEL[existing.ptt_listen]}{existing.ptt_listen !== 'none' ? ` (${existing.listen_visibility === 'hidden' ? '은닉' : '투명'})` : ''}</span>
+          <span className="text-sm text-muted-foreground">ID {existing.id}</span>
+          <span className="text-sm text-muted-foreground">대표번호 {existing.pilot_id ? `${existing.pilot_id} (${existing.service_ref || '—'}, ${existing.alert_mode === 'parallel' ? '병렬' : '순차'} ${existing.no_answer_sec}s, 통화중 ${existing.busy_members === 'skip' ? '제외' : '호출'})` : '없음'}</span>
+          <span className="text-sm text-muted-foreground">넘김 {existing.overflow_target || '—'}</span>
+          <span className="text-sm text-muted-foreground">감청 {SCOPE_LABEL[existing.monitor_scope]}</span>
+          <span className="text-sm text-muted-foreground">PTT 청취 {PTT_LABEL[existing.ptt_listen]}{existing.ptt_listen !== 'none' ? ` (${existing.listen_visibility === 'hidden' ? '은닉' : '투명'})` : ''}</span>
           {p.canWrite && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>속성 편집</Button>}
         </div>
       )}
@@ -386,7 +386,7 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
         {canEdit && dirty && <Button variant="default" style={{ marginLeft: 'auto' }} onClick={() => onSave(Array.from(sel))}>저장</Button>}
       </div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 12, maxHeight: 120, overflowY: 'auto' }}>
-        {options.length === 0 && <span className="ts" style={{ color: 'var(--muted-foreground)' }}>선택 가능한 그룹 없음</span>}
+        {options.length === 0 && <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>선택 가능한 그룹 없음</span>}
         {options.map(o => (
           <label key={o.value} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <input type="checkbox" disabled={!canEdit} checked={sel.has(o.value)}
@@ -439,14 +439,14 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
             <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--muted-foreground)', fontSize: 11 }}>순서 = 순차 호출·포크 상한 절삭 순</span></div>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {members.length === 0
-              ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
               : members.map(m => (
                 <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12,
                   borderLeft: selMembers.has(m.user_id) ? '3px solid var(--primary)' : '3px solid transparent' }}>
                   {canManage && <input type="checkbox" checked={selMembers.has(m.user_id)} onChange={() => toggle(setSelMembers, m.user_id)} />}
                   <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                     <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nameOf.get(m.user_id) || '—'}</span>
-                    <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
+                    <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
                   </span>
                   <Input  type="number" title="alert_order" disabled={!canManage} value={m.alert_order} style={{ width: 54 }}
                     onChange={e => onSaveOrder(m.user_id, Number(e.target.value))} />
@@ -476,7 +476,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                 {candidates.length === 0
-                  ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{callIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
+                  ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{callIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
                   : candidates.map(c => {
                     const other = groupOfUser.get(c.value)
                     return (
@@ -486,7 +486,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                         <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
                         <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                           <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.userName}</span>
-                          <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
+                          <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                         </span>
                         {other && other !== selfId && <Badge variant="warningSoft"  style={{ fontSize: 9 }} title="다른 관제 그룹 소속 — 추가하면 이동(가입자당 그룹 하나)">{other}</Badge>}
                       </div>

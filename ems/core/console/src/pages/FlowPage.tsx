@@ -669,8 +669,8 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
                     <div style={{ flex: '0 0 auto', padding: '8px 12px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--border)', background: 'var(--muted)' }}>
                       <Badge  style={{ backgroundColor: protoColor(selected.proto), color: '#fff' }}>{selected.proto}</Badge>
                       <span style={{ fontWeight: 600, fontSize: 12 }}>{selected.label}</span>
-                      <span className="ts">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
-                      <span className="ts" style={{ marginLeft: 'auto' }}>{selected.ts}</span>
+                      <span className="text-sm text-muted-foreground">{actorLabel(selected.from)} {'\u2192'} {actorLabel(selected.to)}</span>
+                      <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>{selected.ts}</span>
                     </div>
                     <pre style={{
                       flex: 1, margin: 0, padding: 12, overflow: 'auto',

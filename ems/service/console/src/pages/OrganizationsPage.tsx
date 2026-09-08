@@ -198,7 +198,7 @@ export default function OrganizationsPage() {
 
       {/* 테이블 */}
       {loading ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div> : (
-        <div className="table-wrap">
+        <div className="flex-1 overflow-x-auto">
           <DataTable sticky>
             <thead>
               <tr>
@@ -260,7 +260,7 @@ export default function OrganizationsPage() {
                         <Input  value={editForm.code} disabled
                           style={{ width: '100%', opacity: 0.6 }} />
                       ) : (
-                        <span className="ts">{n.code}</span>
+                        <span className="text-sm text-muted-foreground">{n.code}</span>
                       )}
                     </Td>
 
@@ -275,7 +275,7 @@ export default function OrganizationsPage() {
                           </SelectContent>
                         </Select>
                       ) : (
-                        <span className="ts">{orgs.find(o => o.id === n.parent_id)?.name || '—'}</span>
+                        <span className="text-sm text-muted-foreground">{orgs.find(o => o.id === n.parent_id)?.name || '—'}</span>
                       )}
                     </Td>
 
@@ -286,12 +286,12 @@ export default function OrganizationsPage() {
                           onChange={e => setEditForm({ ...editForm, sort_order: Number(e.target.value) })}
                           style={{ width: '100%' }} />
                       ) : (
-                        <span className="ts">{n.sort_order}</span>
+                        <span className="text-sm text-muted-foreground">{n.sort_order}</span>
                       )}
                     </Td>
 
                     {/* 작업 */}
-                    <Td className="actions">
+                    <Td className="flex gap-1.5">
                       {isEditing ? (
                         <>
                           <Button variant="default" onClick={saveEdit}>저장</Button>
@@ -320,10 +320,10 @@ export default function OrganizationsPage() {
                       </Td>
                       <Td><Input  placeholder="코드 *" value={addForm.code}
                         onChange={e => setAddForm({ ...addForm, code: e.target.value })} style={{ width: '100%' }} /></Td>
-                      <Td><span className="ts">{n.name}</span></Td>
+                      <Td><span className="text-sm text-muted-foreground">{n.name}</span></Td>
                       <Td><Input  type="number" value={addForm.sort_order}
                         onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></Td>
-                      <Td className="actions">
+                      <Td className="flex gap-1.5">
                         <Button variant="default" onClick={saveAdd}>저장</Button>
                         <Button variant="ghost" onClick={cancelAdd}>취소</Button>
                       </Td>
@@ -353,7 +353,7 @@ export default function OrganizationsPage() {
                   </Td>
                   <Td><Input  type="number" value={addForm.sort_order}
                     onChange={e => setAddForm({ ...addForm, sort_order: Number(e.target.value) })} style={{ width: '100%' }} /></Td>
-                  <Td className="actions">
+                  <Td className="flex gap-1.5">
                     <Button variant="default" onClick={saveAdd}>저장</Button>
                     <Button variant="ghost" onClick={cancelAdd}>취소</Button>
                   </Td>
@@ -392,7 +392,7 @@ export default function OrganizationsPage() {
                   </label>
                 </Button>
                 <Button asChild size="default"><a href={orgApi.templateUrl} download>템플릿 다운로드</a></Button>
-                {importLoading && <span className="ts">처리 중...</span>}
+                {importLoading && <span className="text-sm text-muted-foreground">처리 중...</span>}
               </div>
               {importResult && (
                 <div style={{ background: 'var(--card)', borderRadius: 8, padding: 16 }}>

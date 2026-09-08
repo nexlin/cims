@@ -34,7 +34,7 @@ export default function StatsMessagesPage({ iface }: { iface: string }) {
       <div className="toolbar">
         <Input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ width: 150 }} />
         <Button variant="default" onClick={load}>조회</Button>
-        {data && <span className="ts" style={{ marginLeft: 'auto' }}>총 {data.total}건</span>}
+        {data && <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>총 {data.total}건</span>}
       </div>
 
       {loading ? <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-muted-foreground">로딩 중...</div> : data && (

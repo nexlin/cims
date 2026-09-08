@@ -183,45 +183,45 @@ export default function ProvisioningWorkbenchPage() {
   const userCols: Column<UserSummary>[] = [
     { key: 'exp', header: '', width: 26, render: u => <Caret open={exp?.key === u.id} /> },
     { key: 'name', header: '이름', sortable: true, width: 130, render: u => <span style={{ fontWeight: 500 }}>{u.name}</span> },
-    { key: 'title', header: '직함', sortable: true, width: 90, sortValue: u => u.title || '', render: u => <span className="ts">{u.title || '—'}</span> },
-    { key: 'login_id', header: '로그인ID', sortable: true, width: 110, sortValue: u => u.login_id || '', render: u => <span className="ts" title="단말 로그인 ID">{u.login_id || '—'}</span> },
-    { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="ts" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
-    { key: 'details', header: '설명', render: u => <span className="ts">{u.details || '—'}</span> },
+    { key: 'title', header: '직함', sortable: true, width: 90, sortValue: u => u.title || '', render: u => <span className="text-sm text-muted-foreground">{u.title || '—'}</span> },
+    { key: 'login_id', header: '로그인ID', sortable: true, width: 110, sortValue: u => u.login_id || '', render: u => <span className="text-sm text-muted-foreground" title="단말 로그인 ID">{u.login_id || '—'}</span> },
+    { key: 'org', header: '조직', width: 220, sortValue: u => buildOrgPath(orgs, u.org_id), render: u => <span className="text-sm text-muted-foreground" title={buildOrgPath(orgs, u.org_id)}>{buildOrgPath(orgs, u.org_id)}</span> },
+    { key: 'details', header: '설명', render: u => <span className="text-sm text-muted-foreground">{u.details || '—'}</span> },
     { key: 'nums', header: '번호', width: 220, render: u => {
       const all = [
         ...u.call_subscriptions.map(s => ({ svc: 'call' as const, id: s.id })),
         ...u.ptt_subscriptions.map(s => ({ svc: 'ptt' as const, id: s.id })),
       ]
-      if (all.length === 0) return <span className="ts">—</span>
+      if (all.length === 0) return <span className="text-sm text-muted-foreground">—</span>
       return <span style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
         {all.map(n => <Badge variant={n.svc === 'call' ? 'brandSoft' : 'successSoft'} key={`${n.svc}:${n.id}`} style={{ fontSize: 10 }} title={n.svc === 'call' ? 'VoLTE' : 'McPTT'}>{n.id}</Badge>)}
       </span>
     } },
     { key: 'act', header: '', width: 84, align: 'right', render: u => canWrite ? (
-      <span className="actions" onClick={e => e.stopPropagation()}>
+      <span className="flex gap-1.5" onClick={e => e.stopPropagation()}>
         <IconBtn title="편집" onClick={() => openEdit(u.id, u.id)}><Pencil size={ICON} /></IconBtn>
         <IconBtn title="삭제" tone="danger" onClick={() => deleteUser(u)}><Trash2 size={ICON} /></IconBtn>
       </span>
-    ) : <span className="ts">—</span> },
+    ) : <span className="text-sm text-muted-foreground">—</span> },
   ]
 
   const numberActCol: Column<NumberRow> = { key: 'act', header: '', width: 64, align: 'right', render: r => canWrite ? (
-    <span className="actions" onClick={e => e.stopPropagation()}>
+    <span className="flex gap-1.5" onClick={e => e.stopPropagation()}>
       <IconBtn title="삭제" tone="danger" onClick={() => deleteNumber(r)}><Trash2 size={ICON} /></IconBtn>
     </span>
-  ) : <span className="ts">—</span> }
+  ) : <span className="text-sm text-muted-foreground">—</span> }
   const numberBaseCols: Column<NumberRow>[] = [
     { key: 'exp', header: '', width: 26, render: r => <Caret open={exp?.key === r.msisdn} /> },
     { key: 'msisdn', header: 'MSISDN', sortable: true, render: r => <span style={{ fontWeight: 600 }}>{r.msisdn}</span> },
-    { key: 'imsi', header: 'IMSI', width: 150, sortable: true, sortValue: r => r.sub.imsi || '', render: r => <span className="ts">{r.sub.imsi || '—'}</span> },
-    { key: 'svc_ref', header: '서비스', width: 90, render: r => <span className="ts">{r.sub.service_ref || '—'}</span> },
+    { key: 'imsi', header: 'IMSI', width: 150, sortable: true, sortValue: r => r.sub.imsi || '', render: r => <span className="text-sm text-muted-foreground">{r.sub.imsi || '—'}</span> },
+    { key: 'svc_ref', header: '서비스', width: 90, render: r => <span className="text-sm text-muted-foreground">{r.sub.service_ref || '—'}</span> },
     { key: 'user', header: '가입자', sortable: true, sortValue: r => r.user.name, render: r => r.user.name },
-    { key: 'org', header: '조직', width: 130, render: r => <span className="ts">{orgs.find(o => o.code === r.user.org_id)?.name || r.user.org_id || '—'}</span> },
+    { key: 'org', header: '조직', width: 130, render: r => <span className="text-sm text-muted-foreground">{orgs.find(o => o.code === r.user.org_id)?.name || r.user.org_id || '—'}</span> },
   ]
   const volteCols: Column<NumberRow>[] = [
     ...numberBaseCols,
     { key: 'dnd', header: 'DND', width: 70, align: 'center', render: r => <Badge variant={r.sub.dnd ? 'dangerSoft' : 'neutralSoft'}  style={{ fontSize: 10 }}>{r.sub.dnd ? 'ON' : 'OFF'}</Badge> },
-    { key: 'fwd', header: '착신전환', width: 120, render: r => <span className="ts">{r.sub.forward_id || '—'}</span> },
+    { key: 'fwd', header: '착신전환', width: 120, render: r => <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span> },
     numberActCol,
   ]
   const pttCols: Column<NumberRow>[] = [...numberBaseCols, numberActCol]
@@ -423,9 +423,9 @@ function UserDetail({ user, catalog, orgOpts, canWrite, initialEdit, highlight, 
           onCancel={() => setEditing(false)} />
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
-          <span><b style={{ fontSize: 13 }}>{user.name}</b>{user.title && <span className="ts" style={{ marginLeft: 6 }}>{user.title}</span>}</span>
-          <span className="ts">조직 {orgPath}</span>
-          {user.details && <span className="ts">{user.details}</span>}
+          <span><b style={{ fontSize: 13 }}>{user.name}</b>{user.title && <span className="text-sm text-muted-foreground" style={{ marginLeft: 6 }}>{user.title}</span>}</span>
+          <span className="text-sm text-muted-foreground">조직 {orgPath}</span>
+          {user.details && <span className="text-sm text-muted-foreground">{user.details}</span>}
           {canWrite && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>기본정보 편집</Button>}
         </div>
       )}
@@ -490,13 +490,13 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
     catch (e: unknown) { show(String(e), 'err') }
   }
 
-  if (!prof) return <div className="ts" style={{ fontSize: 12 }}>{msisdn} — 프로파일 조회 실패(서버 구버전?)</div>
+  if (!prof) return <div className="text-sm text-muted-foreground" style={{ fontSize: 12 }}>{msisdn} — 프로파일 조회 실패(서버 구버전?)</div>
 
   if (editing && form) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 12, padding: '4px 0' }}>
         <strong>{msisdn}</strong>
-        <label className="ts">SOS 대상
+        <label className="text-sm text-muted-foreground">SOS 대상
           <Select value={toSel(form.emergency_group_mode)} onValueChange={(v: string) => setForm({ ...form, emergency_group_mode: fromSel(v) as McpttProfile['emergency_group_mode'] })}>
             <SelectTrigger style={{ marginLeft: 4 }}><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -506,7 +506,7 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
           </Select>
         </label>
         {form.emergency_group_mode === 'DedicatedGroup' && (
-          <label className="ts">긴급그룹
+          <label className="text-sm text-muted-foreground">긴급그룹
             <Select value={toSel(form.emergency_group_id || '')} onValueChange={(v: string) => setForm({ ...form, emergency_group_id: fromSel(v) || null })}>
               <SelectTrigger style={{ marginLeft: 4 }}><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -516,16 +516,16 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
             </Select>
           </label>
         )}
-        <label className="ts"><input type="checkbox" checked={form.allow_emergency_call}
+        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_emergency_call}
           onChange={e => setForm({ ...form, allow_emergency_call: e.target.checked })} /> 긴급콜</label>
-        <label className="ts"><input type="checkbox" checked={form.allow_emergency_alert}
+        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_emergency_alert}
           onChange={e => setForm({ ...form, allow_emergency_alert: e.target.checked })} /> 긴급경보</label>
-        <label className="ts"><input type="checkbox" checked={form.allow_adhoc_call}
+        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_adhoc_call}
           onChange={e => setForm({ ...form, allow_adhoc_call: e.target.checked })} /> 애드혹</label>
-        <label className="ts"><input type="checkbox" checked={form.allow_emergency_private_call}
+        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_emergency_private_call}
           onChange={e => setForm({ ...form, allow_emergency_private_call: e.target.checked })} /> 긴급 사설콜</label>
         {form.allow_emergency_private_call && (
-          <label className="ts">사설 대상
+          <label className="text-sm text-muted-foreground">사설 대상
             <Select value={toSel(form.private_emergency_mode)} onValueChange={(v: string) => setForm({ ...form, private_emergency_mode: fromSel(v) as McpttProfile['private_emergency_mode'] })}>
               <SelectTrigger style={{ marginLeft: 4 }}><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -536,7 +536,7 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
           </label>
         )}
         {form.allow_emergency_private_call && form.private_emergency_mode === 'UsePreConfigured' && (
-          <label className="ts">수신자
+          <label className="text-sm text-muted-foreground">수신자
             <Input  style={{ marginLeft: 4, width: 140 }} placeholder="+82500000001"
               title="지정 수신자의 PTT 번호 — 저장 시 서버가 존재검증(미존재 400)"
               value={form.emergency_private_recipient || ''}
@@ -557,7 +557,7 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
       {prof.emergency_group_mode === 'DedicatedGroup' && (
         noDedicated
           ? <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>긴급그룹 미지정 — SOS 불발</Badge>
-          : <span className="ts">긴급그룹 <b>{prof.emergency_group_id}</b></span>
+          : <span className="text-sm text-muted-foreground">긴급그룹 <b>{prof.emergency_group_id}</b></span>
       )}
       {!prof.allow_emergency_call && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>긴급콜 차단</Badge>}
       {!prof.allow_emergency_alert && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>경보 차단</Badge>}
@@ -565,10 +565,10 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
       {!prof.allow_emergency_private_call && <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>긴급 사설콜 차단</Badge>}
       {prof.allow_emergency_private_call && prof.private_emergency_mode === 'UsePreConfigured' && (
         prof.emergency_private_recipient
-          ? <span className="ts">사설수신자 <b>{prof.emergency_private_recipient}</b></span>
+          ? <span className="text-sm text-muted-foreground">사설수신자 <b>{prof.emergency_private_recipient}</b></span>
           : <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>사설수신자 미지정 — 긴급 사설콜 불발</Badge>
       )}
-      {!prof.exists && <span className="ts">(기본값)</span>}
+      {!prof.exists && <span className="text-sm text-muted-foreground">(기본값)</span>}
       {canWrite && (
         <IconBtn title="편집" onClick={() => { setForm({
           allow_emergency_call: prof.allow_emergency_call,
@@ -619,7 +619,7 @@ function AuthSelect({ value, onChange }: { value: AuthScheme | undefined; onChan
  </Select>
 }
 function AuthBadge({ sub }: { sub: Subscription }) {
-  if (sub.auth_scheme !== 'aka') return <span className="ts">Digest</span>
+  if (sub.auth_scheme !== 'aka') return <span className="text-sm text-muted-foreground">Digest</span>
   return <Badge variant={sub.aka_provisioned ? 'successSoft' : 'dangerSoft'}  style={{ fontSize: 9 }}
     title={sub.aka_provisioned ? 'IMS AKA — K/OPc 보관됨, 보호 채널(TLS/IPsec) 강제' : 'IMS AKA — K/OPc 미보관(등록 불가)'}>AKA{sub.aka_provisioned ? '' : <AlertTriangle size={10} className="ml-0.5 inline align-[-1px]" />}</Badge>
 }
@@ -653,7 +653,7 @@ function TransportSelect({ value, onChange }: { value: SipTransport | '' | null 
 }
 function TransportBadge({ v, aka }: { v?: SipTransport | null; aka?: boolean }) {
   if (aka) return <TransportFixedAka />
-  if (!v) return <span className="ts">자유</span>
+  if (!v) return <span className="text-sm text-muted-foreground">자유</span>
   return <Badge variant={v === 'TLS' ? 'dangerSoft' : 'brandSoft'}  style={{ fontSize: 9 }} title={v === 'TLS' ? '서버 집행 — 비-TLS 채널 요청 403' : '프로비저닝 힌트'}>{v}</Badge>
 }
 // AKA 가입자는 채널 정책(sip_transport) 값과 무관하게 보호 채널이 강제된다(requiresTls = TLS ∨ aka,
@@ -725,7 +725,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
 
   return (
     <div>
-      <div className="table-wrap">
+      <div className="flex-1 overflow-x-auto">
       <TableFrame sticky className="[&_td]:text-sm">
         <thead>
           <tr>
@@ -758,21 +758,21 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
  </Select>
                   : <SvcBadge svc={r.svc} />}</Td>
                 <Td><strong>{r.sub.id}</strong></Td>
-                <Td>{ed ? <Input  type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="ts">••••</span>}</Td>
-                <Td>{ed ? <Input  placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="ts">{r.sub.imsi || '—'}</span>}</Td>
+                <Td>{ed ? <Input  type="password" placeholder="변경 시 입력" value={editForm.passwd || ''} onChange={e => setEditForm({ ...editForm, passwd: e.target.value })} /> : <span className="text-sm text-muted-foreground">••••</span>}</Td>
+                <Td>{ed ? <Input  placeholder="SIM IMSI" value={editForm.imsi || ''} onChange={e => setEditForm({ ...editForm, imsi: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.imsi || '—'}</span>}</Td>
                 <Td>{ed ? (editForm.auth_scheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={editForm.sip_transport} onChange={v => setEditForm({ ...editForm, sip_transport: v || null })} />) : <TransportBadge v={r.sub.sip_transport} aka={r.sub.auth_scheme === 'aka'} />}</Td>
                 <Td>{ed ? <>
                   <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
                   {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
                 </> : <AuthBadge sub={r.sub} />}</Td>
-                <Td style={{ textAlign: 'center' }}>{!isCall ? <span className="ts">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>ON</Badge> : <span className="ts">—</span>)}</Td>
-                <Td>{!isCall ? <span className="ts">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="ts">{r.sub.forward_id || '—'}</span>}</Td>
+                <Td style={{ textAlign: 'center' }}>{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <Badge variant="dangerSoft"  style={{ fontSize: 9 }}>ON</Badge> : <span className="text-sm text-muted-foreground">—</span>)}</Td>
+                <Td>{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span>}</Td>
                 <Td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
                     ? <Badge variant="brandSoft"  style={{ fontSize: 10 }} title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</Badge>
                     : <Input  placeholder="예: control-room-1" title="자유 문자열 픽업 그룹 — 관제 그룹(대표번호·감청)은 관리 › 관제 그룹" value={editForm.pickup_group || ''} onChange={e => setEditForm({ ...editForm, pickup_group: e.target.value })} />)
-                  : <span className="ts" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
-                <Td className="actions">
-                  {!canWrite ? <span className="ts">—</span> : ed ? <>
+                  : <span className="text-sm text-muted-foreground" title={(r.sub.pickup_group || '').startsWith('dg-') ? '관제 그룹 (파생)' : undefined}>{r.sub.pickup_group || '—'}</span>}</Td>
+                <Td className="flex gap-1.5">
+                  {!canWrite ? <span className="text-sm text-muted-foreground">—</span> : ed ? <>
                     <IconBtn title="저장" tone="primary" onClick={() => saveEdit(r)}><Check size={ICON} /></IconBtn>
                     <IconBtn title="취소" onClick={() => setEditKey(null)}><X size={ICON} /></IconBtn>
                   </> : <>
@@ -799,10 +799,10 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 <AuthSelect value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
                 {addForm.auth_scheme === 'aka' && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
               </Td>
-              <Td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="ts">—</span>}</Td>
-              <Td>{addIsCall ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="ts">—</span>}</Td>
+              <Td style={{ textAlign: 'center' }}>{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
+              <Td>{addIsCall ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
               <Td><Input  placeholder="픽업그룹" value={addForm.pickup_group} onChange={e => setAddForm({ ...addForm, pickup_group: e.target.value })} /></Td>
-              <Td className="actions">
+              <Td className="flex gap-1.5">
                 <Button variant="default" onClick={add}>추가</Button>
                 <Button variant="ghost" onClick={() => { setAdding(false); setAddForm(newAdd()) }}>취소</Button>
               </Td>
@@ -933,7 +933,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
               <label className="cursor-pointer">파일 선택<input type="file" accept=".xlsx" onChange={onFile} style={{ display: 'none' }} /></label>
             </Button>
             <Button asChild size="default"><a href={usersApi.templateUrl} download>템플릿 다운로드</a></Button>
-            {busy && <span className="ts">처리 중...</span>}
+            {busy && <span className="text-sm text-muted-foreground">처리 중...</span>}
           </div>
           {result && (
             <div style={{ background: 'var(--card)', borderRadius: 8, padding: 16, fontSize: 13 }}>
@@ -946,8 +946,8 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
               )}
               {(result.credentials?.length ?? 0) > 0 && (
                 <div style={{ marginTop: 10, fontSize: 12 }}>
-                  <div style={{ fontWeight: 600, marginBottom: 4 }}>생성된 비밀번호 <span className="ts" style={{ fontWeight: 400 }}>— 서버는 H(A1) 만 저장하므로 지금 기록하지 않으면 복구할 수 없습니다</span></div>
-                  <div className="table-wrap" style={{ maxHeight: 220, overflow: 'auto' }}>
+                  <div style={{ fontWeight: 600, marginBottom: 4 }}>생성된 비밀번호 <span className="text-sm text-muted-foreground" style={{ fontWeight: 400 }}>— 서버는 H(A1) 만 저장하므로 지금 기록하지 않으면 복구할 수 없습니다</span></div>
+                  <div className="flex-1 overflow-x-auto" style={{ maxHeight: 220, overflow: 'auto' }}>
                     <TableFrame sticky className="[&_td]:text-sm">
                       <thead><tr><Th>시트</Th><Th>행</Th><Th>MSISDN</Th><Th>비밀번호</Th></tr></thead>
                       <tbody>{result.credentials!.map((c, i) => <tr key={i}><Td>{c.sheet}</Td><Td>{c.row}</Td><Td>{c.msisdn}</Td><Td><code>{c.password}</code></Td></tr>)}</tbody>

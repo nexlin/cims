@@ -299,7 +299,7 @@ export function AlarmByCodeBlock() {
                         <Td style={{ textAlign: 'right' }}>
                           {s.avg_duration_sec != null ? formatSec(Math.round(s.avg_duration_sec)) : '-'}
                         </Td>
-                        <Td className="ts">{s.last_ts ? fmtTime(s.last_ts) : '-'}</Td>
+                        <Td className="text-sm text-muted-foreground">{s.last_ts ? fmtTime(s.last_ts) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -353,7 +353,7 @@ export function AlarmByTypeBlock() {
                         <Td><ShareBar n={t.opens} max={maxTypeOpens} /></Td>
                         <Td style={{ textAlign: 'right' }}>{t.resolved}</Td>
                         <Td style={{ textAlign: 'right', color: t.open > 0 ? 'var(--destructive)' : undefined }}>{t.open}</Td>
-                        <Td className="ts">{t.last ? fmtTime(t.last) : '-'}</Td>
+                        <Td className="text-sm text-muted-foreground">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -478,7 +478,7 @@ export function EventByTypeBlock() {
                           <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)', fontFamily: 'monospace' }}>{t.type}</span>
                         </Td>
                         <Td><ShareBar n={t.count} max={maxTypeCount} /></Td>
-                        <Td className="ts">{t.last ? fmtTime(t.last) : '-'}</Td>
+                        <Td className="text-sm text-muted-foreground">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>
@@ -509,7 +509,7 @@ export function EventBySourceBlock() {
                       <tr key={t.source}>
                         <Td><code style={{ fontSize: 11 }}>{t.source}</code></Td>
                         <Td><ShareBar n={t.count} max={maxSrcCount} /></Td>
-                        <Td className="ts">{t.last ? fmtTime(t.last) : '-'}</Td>
+                        <Td className="text-sm text-muted-foreground">{t.last ? fmtTime(t.last) : '-'}</Td>
                       </tr>
                     ))}
                   </tbody>

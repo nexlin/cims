@@ -106,24 +106,24 @@ export default function PttGroupsWorkbenchPage() {
         {g.video_enabled && <Badge variant="brandSoft"  style={{ fontSize: 9, marginLeft: 2 }}>영상</Badge>}
       </span>
     ) },
-    { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="ts">{g.id}</span> },
-    { key: 'type', header: '타입', width: 90, render: g => <span className="ts">{g.group_type || 'prearranged'}</span> },
+    { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
+    { key: 'type', header: '타입', width: 90, render: g => <span className="text-sm text-muted-foreground">{g.group_type || 'prearranged'}</span> },
     { key: 'priority', header: '우선', width: 56, align: 'center', sortable: true, sortValue: g => g.priority ?? 5, render: g => g.priority ?? 5 },
     { key: 'floor', header: '동시발언', width: 78, align: 'center', render: g => {
       const fp = g.floor_policy || 'single'
-      if (fp === 'single') return <span className="ts" style={{ color: 'var(--muted-foreground)' }} title="한 명씩 발언">단일</span>
+      if (fp === 'single') return <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }} title="한 명씩 발언">단일</span>
       if (fp === 'dual') return <Badge variant="warningSoft"  style={{ fontSize: 9 }} title="평시 1명, 긴급·임박자만 끼어들기">긴급</Badge>
       return <Badge variant="brandSoft"  style={{ fontSize: 9 }} title={`정원 ${g.max_talkers ?? 2}명까지 동시 발언`}>{g.max_talkers ?? 2}명</Badge>
     } },
-    { key: 'owner', header: '소유자', width: 110, render: g => <span className="ts">{g.authorized_user_name || g.authorized_user || '—'}</span> },
-    { key: 'org', header: '조직', width: 130, render: g => <span className="ts">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
-    { key: 'members', header: '멤버', width: 64, align: 'center', render: g => <span className="ts">{g.members?.length ?? 0}명</span> },
+    { key: 'owner', header: '소유자', width: 110, render: g => <span className="text-sm text-muted-foreground">{g.authorized_user_name || g.authorized_user || '—'}</span> },
+    { key: 'org', header: '조직', width: 130, render: g => <span className="text-sm text-muted-foreground">{orgs.find(o => o.code === g.org_code)?.name || g.org_code || '—'}</span> },
+    { key: 'members', header: '멤버', width: 64, align: 'center', render: g => <span className="text-sm text-muted-foreground">{g.members?.length ?? 0}명</span> },
     { key: 'act', header: '', width: 84, align: 'right', render: g => canManageGroup(me, g.authorized_user_id) ? (
-      <span className="actions" onClick={e => e.stopPropagation()}>
+      <span className="flex gap-1.5" onClick={e => e.stopPropagation()}>
         <IconBtn title="편집" onClick={() => toggleOpen(g.id)}><Pencil size={ICON} /></IconBtn>
         <IconBtn title="삭제" tone="danger" onClick={() => deleteGroup(g.id)}><Trash2 size={ICON} /></IconBtn>
       </span>
-    ) : <span className="ts">—</span> },
+    ) : <span className="text-sm text-muted-foreground">—</span> },
   ]
 
   const openGroup = openId ? groups.find(g => g.id === openId) : undefined
@@ -383,13 +383,13 @@ function GroupDrawer(p: GroupDrawerProps) {
         </FieldRow>
       ) : existing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
-          <span className="ts">ID {existing.id}</span>
-          <span className="ts">타입 {existing.group_type || 'prearranged'}</span>
-          <span className="ts">우선순위 {existing.priority ?? 5}</span>
-          <span className="ts">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일(한 명씩)'
+          <span className="text-sm text-muted-foreground">ID {existing.id}</span>
+          <span className="text-sm text-muted-foreground">타입 {existing.group_type || 'prearranged'}</span>
+          <span className="text-sm text-muted-foreground">우선순위 {existing.priority ?? 5}</span>
+          <span className="text-sm text-muted-foreground">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일(한 명씩)'
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
-          <span className="ts">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
-          <span className="ts">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
+          <span className="text-sm text-muted-foreground">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
+          <span className="text-sm text-muted-foreground">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
           {canManage && <Button style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>그룹 속성 편집</Button>}
         </div>
       )}
@@ -434,7 +434,7 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
           {name || '—'}
           {!editing && m.role === 'chair' && <Crown size={11} style={{ marginLeft: 4, verticalAlign: '-1px', color: 'var(--cims-warning)' }} />}
         </span>
-        <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
+        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{m.user_id}</span>
       </span>
       {editing ? (
         <>
@@ -534,7 +534,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
           </div>
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {members.length === 0
-              ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
+              ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>멤버 없음<br />우측에서 가입자를 선택해 <ArrowLeft size={11} style={{ verticalAlign: '-1px' }} /> 추가</div>
               : members.map(m => (
                 <MemberRow key={m.user_id} m={m} name={pttName.get(m.user_id)} selected={selMembers.has(m.user_id)}
                   canManage={canManage} onToggle={toggleMem} onSave={onSaveMember} onRemove={uid => doRemove([uid])} />
@@ -589,7 +589,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
               </div>
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                 {candidates.length === 0
-                  ? <div className="ts" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{pttIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
+                  ? <div className="text-sm text-muted-foreground" style={{ padding: 14, fontSize: 12, textAlign: 'center', color: 'var(--muted-foreground)' }}>{pttIndex.length ? `${treeName}에 추가할 가입자 없음` : '불러오는 중...'}</div>
                   : candidates.map(c => (
                     <div key={c.value} onDoubleClick={() => canManage && doAdd([c.value])}
                       style={{
@@ -601,7 +601,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
                       <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
                       <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
                         <span style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.userName}</span>
-                        <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
+                        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>
                       </span>
                     </div>
                   ))}

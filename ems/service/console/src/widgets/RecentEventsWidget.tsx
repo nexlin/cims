@@ -93,7 +93,7 @@ function RecentEventsWidget() {
       ) : rows.length === 0 ? (
         <EmptyState title="해당 종류의 이벤트 없음" />
       ) : (
-        <div className="table-wrap">
+        <div className="flex-1 overflow-x-auto">
           <DataTable sticky>
             <thead>
               <tr>
@@ -113,7 +113,7 @@ function RecentEventsWidget() {
                     <Td><code style={{ fontSize: 11 }}>{e.code || e.type}</code></Td>
                     <Td><code style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{e.source?.mo_instance || '-'}</code></Td>
                     <Td>{e.message}</Td>
-                    <Td className="ts">{e.ts}</Td>
+                    <Td className="text-sm text-muted-foreground">{e.ts}</Td>
                   </tr>
                 )
               })}

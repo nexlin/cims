@@ -84,7 +84,7 @@ export default function ConsoleAccountsPage() {
     <div style={{ padding: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>콘솔 계정</h2>
-        <span className="ts" style={{ color: 'var(--muted-foreground)' }}>
+        <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>
           OAM 로그인 계정 (가입자와 분리). 내장 admin 계정은 oam.json 으로 관리되어 표시되지 않습니다.
         </span>
         {!adding && !editId && (
@@ -144,15 +144,15 @@ export default function ConsoleAccountsPage() {
           </tr>
         </thead>
         <tbody>
-          {loading && <tr><td colSpan={6} className="ts">불러오는 중…</td></tr>}
-          {!loading && rows.length === 0 && <tr><td colSpan={6} className="ts">계정 없음</td></tr>}
+          {loading && <tr><td colSpan={6} className="text-sm text-muted-foreground">불러오는 중…</td></tr>}
+          {!loading && rows.length === 0 && <tr><td colSpan={6} className="text-sm text-muted-foreground">계정 없음</td></tr>}
           {rows.map(a => (
             <tr key={a.login_id}>
               <td><strong>{a.login_id}</strong></td>
               <td>{a.name}</td>
               <td><Badge >{ROLE_LABELS[a.role]}</Badge></td>
-              <td className="ts">{a.email || '—'}</td>
-              <td className="ts">{a.update_time || '—'}</td>
+              <td className="text-sm text-muted-foreground">{a.email || '—'}</td>
+              <td className="text-sm text-muted-foreground">{a.update_time || '—'}</td>
               <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                 <IconBtn title="편집" onClick={() => startEdit(a)}><Pencil size={14} /></IconBtn>
                 <IconBtn title="비밀번호 재설정" onClick={() => resetPassword(a)}><KeyRound size={14} /></IconBtn>
@@ -169,7 +169,7 @@ export default function ConsoleAccountsPage() {
 function Field({ label, w, children }: { label: string; w?: number; children: React.ReactNode }) {
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 3, width: w }}>
-      <span className="ts" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
+      <span className="text-sm text-muted-foreground" style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{label}</span>
       {children}
     </label>
   )

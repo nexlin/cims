@@ -181,7 +181,7 @@ export function ActiveAlarmList() {
                       <MessageSquare size={11} />{a.comments!.length}</span>
                       )}
                     </Td>
-                    <Td className="ts">{fmtTime(a.ts)}</Td>
+                    <Td className="text-sm text-muted-foreground">{fmtTime(a.ts)}</Td>
                     <Td>{elapsedSince(a.ts)}</Td>
                     <Td>
                       {a.acked

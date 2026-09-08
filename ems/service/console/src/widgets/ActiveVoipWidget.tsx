@@ -35,7 +35,7 @@ function ActiveVoipWidget() {
               <Td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></Td>
               <Td><a href="#" onClick={e => gotoSubscriber(e, c.callee)}>{c.callee}</a></Td>
               <Td><Badge variant={c.state === 'active' ? 'successSoft' : 'brandSoft'} >{c.state}</Badge></Td>
-              <Td className="ts">{fmtTime(c.invite_time)}</Td>
+              <Td className="text-sm text-muted-foreground">{fmtTime(c.invite_time)}</Td>
             </tr>
           ))}
         </tbody>

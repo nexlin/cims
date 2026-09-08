@@ -241,7 +241,7 @@ export default function VolteHistoryPage() {
  style={{ cursor: 'pointer', padding: '4px 6px', paddingLeft: 6 + o.depth * 16, borderRadius: 4, fontSize: 13,
  background: selOrg === o.code ? 'rgba(80,120,255,.12)' : undefined,
  fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
-              {o.name} <span className="ts">({o.members})</span>
+              {o.name} <span className="text-sm text-muted-foreground">({o.members})</span>
             </div>
           ))}
         </div>
@@ -252,7 +252,7 @@ export default function VolteHistoryPage() {
           <div style={{ flexShrink: 0 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 4 }}>
               <span style={{ fontSize: 12, fontWeight: 600 }}>시간대별 호 분포</span>
-              <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{fDate} · 총 {dayTotal}건</span>
+              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{fDate} · 총 {dayTotal}건</span>
               <span style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 700, color: 'var(--primary)',
  background: 'color-mix(in srgb, var(--primary) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--primary) 35%, transparent)',
  borderRadius: 10, padding: '1px 10px' }}>
@@ -306,7 +306,7 @@ export default function VolteHistoryPage() {
 
           {/* 페이지네이션 (항상 표시) */}
           <div className="toolbar" style={{ justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', flexShrink: 0, paddingTop: 6 }}>
-            <span className="ts" style={{ color: 'var(--muted-foreground)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
+            <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>총 {total.toLocaleString()}건 · {page + 1}/{totalPages}</span>
             <Button variant="ghost" disabled={page === 0} onClick={() => { setPage(page - 1); load(page - 1) }}>이전</Button>
             <Button variant="ghost" disabled={page >= totalPages - 1} onClick={() => { setPage(page + 1); load(page + 1) }}>다음</Button>
           </div>
@@ -353,11 +353,11 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
           <span style={{ fontWeight: 600, color: CALLEE_C }}>{l.callee || '—'}</span>
         </Td>
         <Td align="center" className="whitespace-nowrap"><Badge variant={st.cls} >{st.label}</Badge></Td>
-        <Td className="whitespace-nowrap ts">{fmtClock(l.invite_time)}</Td>
-        <Td className="whitespace-nowrap ts">{fmtClock(l.answer_time)}</Td>
-        <Td className="whitespace-nowrap ts">{fmtClock(l.end_time)}</Td>
-        <Td align="right" className="whitespace-nowrap ts">{fmtDur(dur)}</Td>
-        <Td className="whitespace-nowrap ts">{l.end_reason_ko || l.end_reason || '—'}</Td>
+        <Td className="whitespace-nowrap text-sm text-muted-foreground">{fmtClock(l.invite_time)}</Td>
+        <Td className="whitespace-nowrap text-sm text-muted-foreground">{fmtClock(l.answer_time)}</Td>
+        <Td className="whitespace-nowrap text-sm text-muted-foreground">{fmtClock(l.end_time)}</Td>
+        <Td align="right" className="whitespace-nowrap text-sm text-muted-foreground">{fmtDur(dur)}</Td>
+        <Td className="whitespace-nowrap text-sm text-muted-foreground">{l.end_reason_ko || l.end_reason || '—'}</Td>
         <Td align="center" className="whitespace-nowrap" onClick={e => e.stopPropagation()}>
           {l.has_recording
             ? <Button onClick={onOpenRec}>&#9654; 녹취</Button>
@@ -445,17 +445,17 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
             <div style={{ maxHeight: 230, overflow: 'auto', padding: 6 }}>
               {flow?.loading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[8px]">로딩 중...</div>
                 : msgs.length > 0 ? <SequenceDiagram messages={msgs} selectedIdx={selIdx} onSelect={select} />
-                  : <div className="ts" style={{ color: 'var(--muted-foreground)', padding: 6 }}>메시지 없음</div>}
+                  : <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', padding: 6 }}>메시지 없음</div>}
             </div>
           </div>
           {/* 메시지 이력 */}
           <div style={{ border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)' }}>
             <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
-              메시지 이력 {msgs.length > 0 && <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{msgs.length}건</span>}
+              메시지 이력 {msgs.length > 0 && <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{msgs.length}건</span>}
             </div>
             <div style={{ maxHeight: 260, overflowY: 'auto' }}>
               {flow?.loading ? <div className="flex min-h-0 flex-1 items-center justify-center text-center text-muted-foreground p-[8px]">로딩 중...</div>
-                : msgs.length === 0 ? <div className="ts" style={{ color: 'var(--muted-foreground)', padding: 8 }}>메시지 없음</div>
+                : msgs.length === 0 ? <div className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', padding: 8 }}>메시지 없음</div>
                   : (
                     <DataTable sticky>
                       <thead>
@@ -477,7 +477,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                             <tr key={i} onClick={() => select(i)}
  style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: sel ? 'var(--accent)' : undefined }}>
                               <Td align="right" className="whitespace-nowrap text-sm text-muted-foreground">{i + 1}</Td>
-                              <Td className="whitespace-nowrap text-sm ts">{fmtClock(m.ts)}</Td>
+                              <Td className="whitespace-nowrap text-sm text-muted-foreground">{fmtClock(m.ts)}</Td>
                               <Td className="whitespace-nowrap text-sm">{actorLbl(m.from)}<span style={{ color: 'var(--muted-foreground)' }}>→</span>{actorLbl(m.to)}</Td>
                               <Td className="whitespace-nowrap text-[10px] text-muted-foreground">{(m.nodeId || m.node || '').toUpperCase()}</Td>
                               <Td className="whitespace-nowrap text-sm">{(() => {
@@ -500,7 +500,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
         {/* 우: 메시지 상세 */}
         <div style={{ flex: '1 1 340px', minWidth: 280, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--card)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 12 }}>
-            메시지 상세 {selIdx != null && msgs[selIdx] && <span className="ts" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
+            메시지 상세 {selIdx != null && msgs[selIdx] && <span className="text-sm text-muted-foreground" style={{ color: protoColor(msgs[selIdx].proto || 'SIP') }}>· {msgs[selIdx].label}</span>}
           </div>
           <div style={{ flex: 1, overflow: 'auto', minHeight: 200, maxHeight: 508 }}>
             {selIdx == null ? <EmptyState title="왼쪽에서 메시지를 선택하세요" className="p-[16px] text-[12px]" />

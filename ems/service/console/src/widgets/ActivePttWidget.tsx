@@ -35,7 +35,7 @@ function ActivePttWidget() {
               <Td>{c.group_id}</Td>
               <Td><a href="#" onClick={e => gotoSubscriber(e, c.initiator)}>{c.initiator}</a></Td>
               <Td><Badge variant="successSoft" >{c.state}</Badge></Td>
-              <Td className="ts">{fmtTime(c.invite_time)}</Td>
+              <Td className="text-sm text-muted-foreground">{fmtTime(c.invite_time)}</Td>
             </tr>
           ))}
         </tbody>

@@ -323,12 +323,12 @@ export function AlarmsSection() {
                           <Check size={12} className="ml-1.5 inline text-[var(--cims-success)]" aria-label="승인됨" />
                         )}
                       </Td>
-                      <Td className="ts">
+                      <Td className="text-sm text-muted-foreground">
                         {r.preWindow
                           ? <span style={{ color: 'var(--muted-foreground)' }}>창 이전</span>
                           : fmtTime(r.ts)}
                       </Td>
-                      <Td className="ts">{r.resolved_at ? fmtTime(r.resolved_at) : '—'}</Td>
+                      <Td className="text-sm text-muted-foreground">{r.resolved_at ? fmtTime(r.resolved_at) : '—'}</Td>
                       <Td>{r.duration || (isOpen ? '진행 중' : '-')}</Td>
                     </tr>,
                     open && (
@@ -378,7 +378,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
           <div style={{ color: 'var(--muted-foreground)', marginBottom: 2 }}>severity 변경 이력</div>
           {r.changes!.map((c, i) => (
             <div key={i} style={{ padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
-              <span className="ts">{fmtTime(c.ts)}</span> — {c.from} → {c.to}
+              <span className="text-sm text-muted-foreground">{fmtTime(c.ts)}</span> — {c.from} → {c.to}
               {c.trend && (
                 <span style={{ marginLeft: 6, color: c.trend === 'moreSevere' ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
                   ({c.trend === 'moreSevere' ? '승격' : '완화'})
@@ -558,7 +558,7 @@ export function EventsSection() {
                   return [
                     <tr key={key} onClick={() => n > 1 && setExpanded(open ? null : key)}
                         style={{ cursor: n > 1 ? 'pointer' : undefined, background: open ? 'var(--accent)' : undefined }}>
-                      <Td className="ts">
+                      <Td className="text-sm text-muted-foreground">
                         {n > 1
                           ? <>{fmtTime(g.last.ts)} ~ {fmtTime(ev.ts)}</>
                           : fmtTime(ev.ts)}
@@ -588,7 +588,7 @@ export function EventsSection() {
                           <div style={{ padding: '8px 16px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                             {g.items.slice(0, 100).map((e2, i2) => (
                               <div key={i2} style={{ fontSize: 12, padding: '2px 0 2px 8px', borderLeft: '2px solid var(--border)' }}>
-                                <span className="ts">{fmtTime(e2.ts)}</span> — {e2.message}
+                                <span className="text-sm text-muted-foreground">{fmtTime(e2.ts)}</span> — {e2.message}
                                 {e2.params && Object.keys(e2.params).length > 0 && (
                                   <code style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)' }}>
                                     {JSON.stringify(e2.params)}

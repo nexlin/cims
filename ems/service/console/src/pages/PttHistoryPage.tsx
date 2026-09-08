@@ -560,7 +560,7 @@ function SessionCard({ r, sel, names, onSelect }: {
         </span>
       </div>
 
-      <div className="ts" style={{ fontSize: 11.5 }}>
+      <div className="text-sm text-muted-foreground" style={{ fontSize: 11.5 }}>
         {fmtShortTime(r.start_time)} ~ {live ? '진행중' : fmtShortTime(r.end_time)}
         {dur != null && <> · {fmtDur(dur)}</>}
         {r.kind === 'group' && r.mcptt_group_id && <> · {r.mcptt_group_id}</>}
@@ -729,7 +729,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
  onChange(n)
               }} />
               <span>{s.name || s.mcptt_group_id || key}</span>
-              <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{s.mcptt_group_id}</span>
+              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)' }}>{s.mcptt_group_id}</span>
             </label>
           ))}
           {selected.size > 0 && (
@@ -782,7 +782,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
             <div key={p} onClick={() => onChange(p)} title={names.tipOf(p)}
  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 8px', borderRadius: 6, fontSize: 12.5, cursor: 'pointer' }}>
               <span>{names.nameOf(p)}</span>
-              {names.person(p) && <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{p}</span>}
+              {names.person(p) && <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{p}</span>}
             </div>
           ))}
           {shown.length === 0 && <EmptyState title="표시할 참여자가 없습니다" className="p-[10px] text-[12px]" />}

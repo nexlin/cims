@@ -60,7 +60,7 @@ export function AbnFilter() {
           <AlertTriangle size={13} className="inline align-[-2px]" /> 외부에서 인증 성공(2xx)한 세션 있음 — 즉시 점검
         </span>
       )}
-      {s.data && <span className="ts" style={{ marginLeft: 'auto' }}>총 {s.data.total}건 탐지</span>}
+      {s.data && <span className="text-sm text-muted-foreground" style={{ marginLeft: 'auto' }}>총 {s.data.total}건 탐지</span>}
     </div>
   )
 }
@@ -150,7 +150,7 @@ export function AbnTable() {
  const sev = SEV[x.severity] || SEV.minor
  return (
                     <tr key={i}>
-                      <Td style={{ fontSize: 11 }} className="ts">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
+                      <Td style={{ fontSize: 11 }} className="text-sm text-muted-foreground">{s.days > 1 ? `${x.date.slice(5)} ` : ''}{(x.last_ts || '').slice(0, 8)}</Td>
                       <Td><Badge style={{ background: sev.bg, color: 'var(--cims-on-solid)', fontSize: 10 }}>{sev.label}</Badge></Td>
                       <Td style={{ fontSize: 12, fontFamily: 'monospace' }}>{x.peer_ip || '-'}</Td>
                       <Td style={{ fontSize: 11, fontFamily: 'monospace' }}>

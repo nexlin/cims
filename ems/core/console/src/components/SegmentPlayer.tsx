@@ -415,8 +415,8 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   </Td>
                   <Td>{isActive && isPlaying ? <Play size={11} /> : seg.seq}</Td>
                   {callType === 'ptt' && <Td>{segSpeakers(seg)}</Td>}
-                  <Td className="ts">{fmtTimeRange(seg.start_time, seg.end_time)}</Td>
-                  <Td className="ts">{fmtMs(seg.duration_ms)}</Td>
+                  <Td className="text-sm text-muted-foreground">{fmtTimeRange(seg.start_time, seg.end_time)}</Td>
+                  <Td className="text-sm text-muted-foreground">{fmtMs(seg.duration_ms)}</Td>
                   <Td>
                     {preparingSeq === seg.seq
                       ? <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>변환중</Badge>
@@ -438,7 +438,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                 <Td><input type="checkbox" disabled /></Td>
                 <Td>{seg.seq}</Td>
                 {callType === 'ptt' && <Td>{segSpeakers(seg)}</Td>}
-                <Td className="ts">{fmtTimeRange(seg.start_time, null)}</Td>
+                <Td className="text-sm text-muted-foreground">{fmtTimeRange(seg.start_time, null)}</Td>
                 <Td>-</Td>
                 <Td>
                   <Badge variant="brandSoft"  style={{ fontSize: 10, whiteSpace: 'nowrap', animation: 'pulse 1.5s infinite' }}>녹취중</Badge>

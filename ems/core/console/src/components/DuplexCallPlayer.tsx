@@ -133,7 +133,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
         >
           {prep ? '…' : playing ? <Pause size={13} /> : <Play size={13} />}
         </Button>
-        <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
+        <span className="text-sm text-muted-foreground" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(pos)}
         </span>
         <div
@@ -150,7 +150,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
             boxShadow: '0 0 0 3px var(--card)',
           }} />
         </div>
-        <span className="ts" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
+        <span className="text-sm text-muted-foreground" style={{ fontSize: 12, color: 'var(--muted-foreground)', minWidth: 38 }}>
           {fmtMs(totalMs)}
         </span>
         <Select value={toSel(sel)} onValueChange={(v: string) => setSel(fromSel(v))}>
@@ -178,7 +178,7 @@ export default function DuplexCallPlayer({ recordingId, segment, colorOf, labelO
             <div title={spk} style={{ flex: '0 0 128px', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: color, flex: '0 0 auto' }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name(spk)}</span>
-              <span className="ts" style={{ color: 'var(--muted-foreground)', fontSize: 10 }}>슬롯 {t.slot}</span>
+              <span className="text-sm text-muted-foreground" style={{ color: 'var(--muted-foreground)', fontSize: 10 }}>슬롯 {t.slot}</span>
             </div>
             <div
               onClick={e => {
