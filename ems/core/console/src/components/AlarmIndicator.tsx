@@ -13,6 +13,7 @@ import { onAlarmTransition, refreshAlarms, severityOf, useAlarms } from '../widg
 import { useToast } from './Toast'
 import { Badge } from './ui/badge'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 const SEV_BADGE: Record<string, string> = {
   critical: 'badge--red', major: 'badge--red', minor: 'badge--yellow',
@@ -77,10 +78,11 @@ export default function AlarmIndicator() {
       {open && (
         <div className="alarm-drawer">
           <div className="tab-bar" style={{ padding: '8px 14px 0' }}>
-            <button className={`tab-btn ${tab === 'alarms' ? 'tab-btn--active' : ''}`}
-                    onClick={() => setTab('alarms')}>활성 알람 ({active.length})</button>
-            <button className={`tab-btn ${tab === 'events' ? 'tab-btn--active' : ''}`}
-                    onClick={() => setTab('events')}>최근 이벤트 ({recentEvents.length})</button>
+            <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                         onValueChange={(v: string) => v && setTab(v as typeof tab)}>
+              <ToggleGroupItem value="alarms">활성 알람 ({active.length})</ToggleGroupItem>
+              <ToggleGroupItem value="events">최근 이벤트 ({recentEvents.length})</ToggleGroupItem>
+            </ToggleGroup>
             <Button variant="ghost" style={{ marginLeft: 'auto' }}
                     onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></Button>
           </div>

@@ -11,6 +11,7 @@ import type { WidgetDef, WidgetProps } from '../types'
 import { usePageControl, usePageParam } from '../pageParams'
 import { useDataSourceCatalog, sourcesForShape } from '../shapes/sourceRegistry'
 import type { ShapeKind } from '../shapes/types'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 // 'a, b , c' → ['a','b','c'] (빈 항목 제거). 편집기 [⚙] 에서 한 줄로 편집할 수 있게 문자열로 받는다.
 function idList(v: unknown): string[] {
@@ -31,10 +32,12 @@ function SourcePickerWidget({ config }: WidgetProps) {
   const active = cands.some(s => s.id === src) ? src : (cands[0]?.id ?? '')
   return (
     <div className="tab-nav">
-      {cands.map(s => (
-        <button key={s.id} className={`tab-btn ${active === s.id ? 'tab-btn--active' : ''}`}
-                onClick={() => setSrc(s.id)}>{s.label}</button>
-      ))}
+      <ToggleGroup type="single" value={active} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                   onValueChange={(v: string) => v && setSrc(v)}>
+        {cands.map(s => (
+          <ToggleGroupItem key={s.id} value={s.id}>{s.label}</ToggleGroupItem>
+        ))}
+      </ToggleGroup>
       {cands.length === 0 && (
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
           {loading ? '소스 로딩…' : '(후보 소스 없음)'}

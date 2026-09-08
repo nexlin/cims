@@ -13,6 +13,7 @@ import {
   usePageControl, usePageParam, useSetPageParams,
 } from '../pageParams'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 // 'YYYY-MM-DD HH:MM' ↔ datetime-local('YYYY-MM-DDTHH:MM')
 const toInput = (v: string) => (v || '').replace(' ', 'T').slice(0, 16)
@@ -72,16 +73,17 @@ function PageFilterWidget({ config }: WidgetProps) {
         {showGran && (
           <>
             <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
-            {Object.entries(GRAN_LABELS).map(([g, label]) => {
-              const fits = granFits(from, to, g)
-              const lim = GRAN_MAX_DAYS[g]
-              return (
-                <Button variant={gran === g ? 'default' : 'ghost'} key={g}
-                        disabled={!fits}
-                        title={fits ? undefined : `${label} 단위는 ${lim}일까지 볼 수 있습니다`}
-                        onClick={() => setGran(g)}>{label}</Button>
-              )
-            })}
+            <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                         onValueChange={(v: string) => v && setGran(v)}>
+              {Object.entries(GRAN_LABELS).map(([g, label]) => {
+                const fits = granFits(from, to, g)
+                const lim = GRAN_MAX_DAYS[g]
+                return (
+                  <ToggleGroupItem key={g} value={g} disabled={!fits}
+                                   title={fits ? undefined : `${label} 단위는 ${lim}일까지 볼 수 있습니다`}>{label}</ToggleGroupItem>
+                )
+              })}
+            </ToggleGroup>
           </>
         )}
       </div>

@@ -20,7 +20,7 @@ import {
   recIdOf, dateOf, detailKey, dayOf, hourOf, thStyle,
   type DayAgg, type DetailState,
 } from '@svc/components/pttSession'
-import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 export default function PttGroupActivity({ storeKey }: {
   /** 녹취 저장 키 = ptt_groups.id (surrogate). mcptt_group_id 가 바뀌어도 불변이라
@@ -148,10 +148,12 @@ export default function PttGroupActivity({ storeKey }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)', fontWeight: 600 }}>최근</span>
-        {RANGE_OPTIONS.map(d => (
-          <Button variant={rangeDays === d ? 'default' : 'ghost'} key={d}
-                  onClick={() => setRangeDays(d)}>{d}일</Button>
-        ))}
+        <ToggleGroup type="single" value={String(rangeDays)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setRangeDays(Number(v))}>
+          {RANGE_OPTIONS.map(d => (
+            <ToggleGroupItem key={d} value={String(d)}>{d}일</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
           {loading ? '조회 중…' : `세션 ${sessions.length}건`}
         </span>

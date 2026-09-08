@@ -8,7 +8,7 @@
  * "이 그룹의 최근 활동" 은 여기가 아니라 **PTT 그룹 › 활동** 탭에서 본다
  * (PttGroupsWorkbenchPage). 이력 페이지가 그룹 목록을 다시 그릴 이유가 없다.
  */
-import { ChevronDown, ChevronUp, Play, X } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Play, X } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import {
   pttApi, type PttSessionRow, type PttGroupSummary, type PttSessionKind,
@@ -25,6 +25,7 @@ import {
   type DetailState,
 } from '@svc/components/pttSession'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -332,18 +333,18 @@ export default function PttHistoryPage() {
       {/* ── 툴바 1: 기간 · 검색 ── */}
       <div className="toolbar">
         <Button variant="ghost" disabled={range !== 'day'}
-                onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날">‹</Button>
+                onClick={() => setDate(d => shiftDay(d, -1))} title="이전 날"><ChevronLeft size={13} /></Button>
         <input type="date" className="form-input" value={date} style={{ width: 150 }}
                onChange={e => setDate(e.target.value)} aria-label="조회 날짜" />
         <Button variant="ghost" disabled={range !== 'day' || date >= todayStr()}
-                onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날">›</Button>
+                onClick={() => setDate(d => shiftDay(d, 1))} title="다음 날"><ChevronRight size={13} /></Button>
         {/* 기간 프리셋 — P2 의 days/from·to 를 화면에서 쓰는 자리 */}
-        {RANGES.map(r => (
-          <Button variant={range === r.id ? 'default' : 'outline'} key={r.id}
-                  onClick={() => { setRange(r.id); if (r.id === 'day') setDate(todayStr()) }}>
-            {r.label}
-          </Button>
-        ))}
+        <ToggleGroup type="single" value={range} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => { if (v) { setRange(v as typeof range); if (v === 'day') setDate(todayStr()) } }}>
+          {RANGES.map(r => (
+            <ToggleGroupItem key={r.id} value={r.id}>{r.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         {range === 'custom' && (
           <>
             <input type="date" className="form-input" value={fromDate} style={{ width: 150 }}
@@ -367,16 +368,12 @@ export default function PttHistoryPage() {
       {/* ── 툴바 2: 종류 · 그룹 · 사람 ── */}
       <div className="toolbar" style={{ borderTop: 'none' }}>
         <span style={{ fontSize: 11.5, color: 'var(--muted-foreground)' }}>종류</span>
-        {KINDS.map(k => (
-          <Button variant={kinds.has(k.id) ? 'default' : 'outline'} key={k.id}
-                  onClick={() => setKinds(prev => {
-                    const n = new Set(prev)
-                    if (n.has(k.id)) { if (n.size > 1) n.delete(k.id) } else n.add(k.id)
-                    return n
-                  })}>
-            {k.label}
-          </Button>
-        ))}
+        <ToggleGroup type="multiple" value={[...kinds]} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string[]) => { if (v.length) setKinds(new Set(v as PttSessionKind[])) }}>
+          {KINDS.map(k => (
+            <ToggleGroupItem key={k.id} value={k.id}>{k.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         <div style={{ width: 1, height: 20, background: 'var(--border)' }} />
 
         <GroupFilter summaries={summaries} selected={groupKeys} open={dd === 'group'}

@@ -8,17 +8,18 @@
 import { usePageParam } from '../widgets/pageParams'
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 export function DaysButtons({ days, onChange }: { days: number; onChange: (d: number) => void }) {
   return (
     <>
       <span style={{ fontSize: 13, color: 'var(--muted-foreground)' }}>기간:</span>
-      {[1, 7, 30, 90].map(d => (
-        <Button variant={days === d ? 'default' : 'ghost'} key={d}
-          onClick={() => onChange(d)}>
-          {d === 1 ? '오늘' : `${d}일`}
-        </Button>
-      ))}
+      <ToggleGroup type="single" value={String(days)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                   onValueChange={(v: string) => v && onChange(Number(v))}>
+        {[1, 7, 30, 90].map(d => (
+          <ToggleGroupItem key={d} value={String(d)}>{d === 1 ? '오늘' : `${d}일`}</ToggleGroupItem>
+        ))}
+      </ToggleGroup>
     </>
   )
 }
@@ -56,12 +57,11 @@ export function AlarmEventTabs() {
   const [tab, setTab] = usePageParam('atab')
   const cur = tab || 'alarms'
   return (
-    <div className="tab-nav">
-      <button className={`tab-btn ${cur === 'alarms' ? 'tab-btn--active' : ''}`}
-              onClick={() => setTab('alarms')}>알람</button>
-      <button className={`tab-btn ${cur === 'events' ? 'tab-btn--active' : ''}`}
-              onClick={() => setTab('events')}>이벤트</button>
-    </div>
+    <ToggleGroup type="single" value={cur} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                 onValueChange={(v: string) => v && setTab(v)}>
+      <ToggleGroupItem value="alarms">알람</ToggleGroupItem>
+      <ToggleGroupItem value="events">이벤트</ToggleGroupItem>
+    </ToggleGroup>
   )
 }
 

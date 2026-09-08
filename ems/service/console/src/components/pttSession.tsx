@@ -16,6 +16,7 @@ import DuplexCallPlayer from '@core/components/DuplexCallPlayer'
 import { samePlay, type InlineAudio } from '@core/components/useInlineAudio'
 import { useDirectory, type Directory } from '@core/components/useDirectory'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 
 export function fmtShortTime(iso: string | null | undefined) {
@@ -262,10 +263,11 @@ export function DayHeatmap({ days, selectedDay, onPick }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>일별 활동</span>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 클릭→해당 일 시간대 보기</span>
-        <span style={{ marginLeft: 'auto' }}>
-          <Button variant={metric === 'turns' ? 'default' : 'ghost'} onClick={() => setMetric('turns')}>발언 턴</Button>
-          <Button variant={metric === 'speakers' ? 'default' : 'ghost'} onClick={() => setMetric('speakers')}>화자수</Button>
-        </span>
+        <ToggleGroup type="single" value={metric} className="ml-auto shrink-0 rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setMetric(v as typeof metric)}>
+          <ToggleGroupItem value="turns">발언 턴</ToggleGroupItem>
+          <ToggleGroupItem value="speakers">화자수</ToggleGroupItem>
+        </ToggleGroup>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`, gap: 3 }}>
         {days.map(d => {
@@ -322,10 +324,11 @@ export function ActivityHeatmap({ sessions, selectedDir, onPick }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--muted-foreground)' }}>시간대별 활동</span>
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>색 진할수록 많음 · 숫자=값 · 클릭→펼치기</span>
-        <span style={{ marginLeft: 'auto' }}>
-          <Button variant={metric === 'turns' ? 'default' : 'ghost'} onClick={() => setMetric('turns')}>발언 턴</Button>
-          <Button variant={metric === 'speakers' ? 'default' : 'ghost'} onClick={() => setMetric('speakers')}>화자수</Button>
-        </span>
+        <ToggleGroup type="single" value={metric} className="ml-auto shrink-0 rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setMetric(v as typeof metric)}>
+          <ToggleGroupItem value="turns">발언 턴</ToggleGroupItem>
+          <ToggleGroupItem value="speakers">화자수</ToggleGroupItem>
+        </ToggleGroup>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(24, 1fr)', gap: 3 }}>
         {Array.from({ length: 24 }, (_, h) => {

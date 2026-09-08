@@ -8,6 +8,7 @@ import StringListInput from './StringListInput'
 import { ObjectListEditor } from './ObjectListEditor'
 import { useConfirm } from '../custom/confirm'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 type Record_ = Record<string, unknown>
 
@@ -284,12 +285,13 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
       {allTags.length > 0 && (
         <div style={{ marginBottom: 8, display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>태그 필터:</span>
-          <Button variant={tagFilter === '' ? 'default' : 'outline'}
-            onClick={() => setTagFilter('')}>전체</Button>
-          {allTags.map(t => (
-            <Button variant={tagFilter === t ? 'default' : 'outline'} key={t}
-              onClick={() => setTagFilter(t)}>{t}</Button>
-          ))}
+          <ToggleGroup type="single" value={tagFilter || '*'} className="shrink-0 flex-wrap justify-start rounded-md bg-muted p-[3px]"
+                       onValueChange={(v: string) => v && setTagFilter(v === '*' ? '' : v)}>
+            <ToggleGroupItem value="*">전체</ToggleGroupItem>
+            {allTags.map(t => (
+              <ToggleGroupItem key={t} value={t}>{t}</ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         </div>
       )}
 

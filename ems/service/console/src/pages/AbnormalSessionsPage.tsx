@@ -10,6 +10,7 @@ import { useToast } from '@core/components/Toast'
 import { InfoDot } from '@core/components/InfoDot'
 import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 const REASON_LABEL: Record<string, { label: string; color: string }> = {
   external_ip:  { label: '외부 IP',     color: 'var(--cims-warning)' },
@@ -34,12 +35,12 @@ export function AbnFilter() {
       <input type="date" className="form-input" value={s.date} style={{ width: 150 }}
              onChange={e => abnormal.setDate(e.target.value)} />
       <span style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>범위</span>
-      <span style={{ display: 'flex', gap: 2 }}>
+      <ToggleGroup type="single" value={String(s.days)} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                   onValueChange={(v: string) => v && abnormal.setDays(Number(v))}>
         {RANGE.map(d => (
-          <Button variant={s.days === d ? 'default' : 'ghost'} key={d}
-                  onClick={() => abnormal.setDays(d)}>{d}일</Button>
+          <ToggleGroupItem key={d} value={String(d)}>{d}일</ToggleGroupItem>
         ))}
-      </span>
+      </ToggleGroup>
       <Button variant="default" onClick={() => void abnormal.load(show)}>조회</Button>
       {/* 화면의 뜻은 한 번 읽으면 되는 설명이라 ⓘ 로 접는다. */}
       <InfoDot label="비정상 세션이란?">

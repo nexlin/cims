@@ -3,7 +3,7 @@ import { statsApi, type MessagesResponse, type ServiceStatsResponse,
          type CallsResponse, type CallCell } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
 import { RotateCw } from 'lucide-react'
-import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 type SubTab = 'messages' | 'service'
 type Granularity = '1m' | '5m' | '10m' | '1h' | '1d' | '1w' | '1M' | '1y'
@@ -177,20 +177,21 @@ export default function StatsPage({ initialSvcType }: { initialSvcType?: SvcType
 
       {/* 서브탭 + 필터 */}
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>
-        <button className={`tab-btn${subTab === 'service' ? ' tab-btn--active' : ''}`}
-          onClick={() => setSubTab('service')}>서비스 통계</button>
-        <button className={`tab-btn${subTab === 'messages' ? ' tab-btn--active' : ''}`}
-          onClick={() => setSubTab('messages')}>메시지 통계</button>
+        <ToggleGroup type="single" value={subTab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setSubTab(v as typeof subTab)}>
+          <ToggleGroupItem value="service">서비스 통계</ToggleGroupItem>
+          <ToggleGroupItem value="messages">메시지 통계</ToggleGroupItem>
+        </ToggleGroup>
 
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
 
         {/* 시간 단위 */}
-        {(Object.entries(GRAN_LABELS) as [Granularity, string][]).map(([g, label]) => (
-          <Button variant={gran === g ? 'default' : 'ghost'} key={g}
-            onClick={() => setGran(g)}>
-            {label}
-          </Button>
-        ))}
+        <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setGran(v as Granularity)}>
+          {(Object.entries(GRAN_LABELS) as [Granularity, string][]).map(([g, label]) => (
+            <ToggleGroupItem key={g} value={g}>{label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
 
         <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 8px' }} />
 

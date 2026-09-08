@@ -8,6 +8,7 @@ import {
 } from '@core/api/stats'
 import { useToast } from '@core/components/Toast'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 // ── 공통 유틸 ─────────────────────────────────────────────
 export function fmtDur(sec: number): string {
@@ -242,9 +243,12 @@ export function TrendCard() {
       <div className="toolbar" style={{ marginBottom: 8 }}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>사용량 추세</span>
         <span style={{ fontSize: 12, color: 'var(--muted-foreground)', marginLeft: 4 }}>최근</span>
-        {TREND_WINS.map(w => (
-          <Button variant={win === w.k ? 'default' : 'ghost'} key={w.k} onClick={() => setWin(w.k)}>{w.label}</Button>
-        ))}
+        <ToggleGroup type="single" value={win} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => v && setWin(v)}>
+          {TREND_WINS.map(w => (
+            <ToggleGroupItem key={w.k} value={w.k}>{w.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
           {points.length ? `${clockOf(points[0].t)} ~ ${clockOf(points[points.length - 1].t)} · ${points.length}구간 (${bucketLabel(data?.bucket_sec ?? 0)})` : ''}
         </span>
@@ -613,14 +617,17 @@ export function SubscriberLookup() {
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / LOOKUP_LIMIT))
   const tabBtn = (s: 'active' | 'online' | 'all', label: string, n: number) => (
-    <Button variant={status === s ? 'default' : 'ghost'} onClick={() => { setStatus(s); setPage(1) }}>{label} ({n})</Button>
+    <ToggleGroupItem key={s} value={s}>{label} ({n})</ToggleGroupItem>
   )
   return (
     <div>
       <div className="toolbar">
-        {tabBtn('active', '이용 중', counts.active)}
-        {tabBtn('online', '접속 중', counts.online)}
-        {tabBtn('all', '전체', counts.all)}
+        <ToggleGroup type="single" value={status} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v: string) => { if (v) { setStatus(v as typeof status); setPage(1) } }}>
+          {tabBtn('active', '이용 중', counts.active)}
+          {tabBtn('online', '접속 중', counts.online)}
+          {tabBtn('all', '전체', counts.all)}
+        </ToggleGroup>
         <input className="search-input" placeholder="이름/번호 검색" value={searchInput} onChange={e => setSearchInput(e.target.value)} style={{ maxWidth: 200 }} />
       </div>
       {loading ? <Loading />
@@ -668,17 +675,20 @@ export function ServiceDetailTabs() {
   const v = live?.volte.kpi
   const p = live?.ptt.kpi
   const tb = (t: typeof tab, label: string, n?: number) => (
-    <Button variant={tab === t ? 'default' : 'ghost'} onClick={() => setTab(t)}>
+    <ToggleGroupItem key={t} value={t}>
       {label}{n !== undefined && n !== null ? ` (${n})` : ''}
-    </Button>
+    </ToggleGroupItem>
   )
   return (
     <div className="widget-stack">
       <div className="toolbar" style={{ flexWrap: 'wrap' }}>
-        {tb('events', '라이브 이벤트')}
-        {tb('org', '부서별')}
-        {tb('volte', 'VoLTE 호', v?.active)}
-        {tb('ptt', 'PTT 그룹', p?.recent_active)}
+        <ToggleGroup type="single" value={tab} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                     onValueChange={(v2: string) => v2 && setTab(v2 as typeof tab)}>
+          {tb('events', '라이브 이벤트')}
+          {tb('org', '부서별')}
+          {tb('volte', 'VoLTE 호', v?.active)}
+          {tb('ptt', 'PTT 그룹', p?.recent_active)}
+        </ToggleGroup>
         <span style={{ marginLeft: 'auto', color: 'var(--muted-foreground)', fontSize: 12 }}>5초 자동 갱신{live?.ts ? ` · ${new Date(live.ts).toLocaleTimeString('ko-KR')}` : ''}</span>
       </div>
       {tab === 'events' && <EventFeedCard />}

@@ -12,6 +12,7 @@ import { GRAN_LABELS, defaultRange, granFits, useHasPageControl, usePageParam, u
 import { TimeBarChart, SeriesBarChart, StatValue, DistributionBars, KvTable, MatrixTable } from './renderers'
 import { RotateCw } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 const RENDERERS = {
   'time-bar': TimeBarChart, 'series-bar': SeriesBarChart,
@@ -146,11 +147,12 @@ function ShapeWidgetBody({ shape, config }: { shape: WidgetShape; config?: Recor
             <input className="form-input" type="datetime-local" value={to.replace(' ', 'T').slice(0, 16)}
                    onChange={e => setOwnRange(r => ({ ...r, to: e.target.value.replace('T', ' ') }))}
                    style={{ width: 176, fontSize: 12 }} />
-            {Object.entries(GRAN_LABELS).map(([g, lb]) => (
-              <Button variant={gran === g ? 'default' : 'ghost'} key={g}
-                      disabled={!granFits(from, to, g)}
-                      onClick={() => setOwnGran(g)}>{lb}</Button>
-            ))}
+            <ToggleGroup type="single" value={gran} className="shrink-0 justify-start rounded-md bg-muted p-[3px]"
+                         onValueChange={(v: string) => v && setOwnGran(v)}>
+              {Object.entries(GRAN_LABELS).map(([g, lb]) => (
+                <ToggleGroupItem key={g} value={g} disabled={!granFits(from, to, g)}>{lb}</ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           </>
         ))}
         <Button style={{ marginLeft: 'auto' }} onClick={() => void load()} title="다시 조회"><RotateCw size={14} /></Button>
