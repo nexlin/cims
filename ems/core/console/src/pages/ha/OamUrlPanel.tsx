@@ -18,6 +18,7 @@
 import { useState } from 'react'
 import { InfoDot } from '../../components/InfoDot'
 import { ImeSafeInput } from './ImeSafeInput'
+import { Button } from '../../components/ui/button'
 
 export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, onApplyAll }: {
   title: string
@@ -39,11 +40,10 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
   const loopback = /^https?:\/\/(127\.|localhost)/i.test(cur)
 
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 4, padding: 12 }}>
-      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
-          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+    // 상위 SubSection 이 제목·힌트를 그린다 — 여기서 또 테두리 상자를 두르지 않는다.
+    <div>
       {title && (
-        <div style={{ fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="mb-2 flex items-center gap-1.5 font-semibold">
           {title}
           <InfoDot label="Agent→OAM 보고 주소란?">
             이 서버의 agent 가 heartbeat·job 결과를 보내는 주소입니다. 관리평면이 이중화면
@@ -55,43 +55,43 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
           </InfoDot>
         </div>
       )}
-      <div style={{ fontSize: 12, marginBottom: 8 }}>
+      <div className="mb-2 text-xs">
         현재 보고 주소:{' '}
         {cur ? (
-          <code style={{ color: mismatch || loopback ? 'var(--destructive)' : 'var(--cims-success)', fontWeight: 600 }}>
+          <code className={`font-mono font-semibold ${
+            mismatch || loopback ? 'text-destructive' : 'text-[var(--cims-success)]'}`}>
             {cur}
           </code>
         ) : (
-          <span style={{ color: 'var(--muted-foreground)' }}>
-            보고 없음 (heartbeat 대기 또는 구 버전 agent)
-          </span>
+          <span className="text-muted-foreground">보고 없음 (heartbeat 대기 또는 구 버전 agent)</span>
         )}
         {loopback && (
-          <span style={{ color: 'var(--destructive)', marginLeft: 6 }}>
+          <span className="ml-1.5 text-destructive">
             — loopback 은 이 노드 자신의 OAM 을 가리킵니다(절체 시 끊김)
           </span>
         )}
         {!loopback && mismatch && (
-          <span style={{ color: 'var(--destructive)', marginLeft: 6 }}>— VIP 가 아닙니다</span>
+          <span className="ml-1.5 text-destructive">— VIP 가 아닙니다</span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-        <ImeSafeInput value={draft} onCommit={setDraft}
-                      placeholder={suggested || 'https://<OAM 또는 VIP>:4419'}
-                      style={{ width: 300, fontSize: 12, padding: '3px 6px',
-                               fontFamily: 'monospace' }} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="inline-block w-[300px]">
+          <ImeSafeInput value={draft} onCommit={setDraft}
+                        placeholder={suggested || 'https://<OAM 또는 VIP>:4419'}
+                        className="form-input font-mono" />
+        </span>
         {suggested && draft.trim() !== suggested && (
-          <button className="btn btn--sm" onClick={() => setDraft(suggested)}
-                  title="이 서버가 속한 관리평면 그룹의 VIP">VIP 채우기</button>
+          <Button variant="ghost" onClick={() => setDraft(suggested)}
+                  title="이 서버가 속한 관리평면 그룹의 VIP">VIP 채우기</Button>
         )}
-        <button className="btn btn--sm btn--primary"
+        <Button variant="outline"
                 disabled={!!applying || !valid || norm === cur}
                 onClick={() => onApply(norm)}
                 title="이 서버 agent 만 변경 — agent 가 새 주소로 /health 도달 확인 후 적용">
           이 서버 적용
-        </button>
+        </Button>
         {onApplyAll && (
-          <button className="btn btn--sm" disabled={!!applying || !valid}
+          <Button variant="outline" disabled={!!applying || !valid}
                   onClick={() => {
                     if (!window.confirm(
                         `전 agent 의 OAM 접속 주소를 아래로 바꿉니다.\n\n  ${norm}\n\n` +
@@ -102,14 +102,18 @@ export function OamUrlPanel({ title, current, vipCandidate, applying, onApply, o
                   }}
                   title="같은 주소를 전 agent 에 일괄 적용 (CSP/CMP 등 모든 노드 포함)">
             전체 적용
-          </button>
+          </Button>
         )}
       </div>
       {!valid && draft.trim() !== '' && (
-        <div style={{ color: 'var(--destructive)', fontSize: 11, marginTop: 6 }}>
+        <div className="mt-1.5 text-xs text-destructive">
           http(s)://호스트[:포트] 형식이어야 합니다.
         </div>
       )}
+      <div className="mt-2 text-xs text-muted-foreground">
+        적용하면 agent 가 재기동되어 새 주소로 붙습니다(수 초). 새로 설치되는 agent 가 받는
+        초기 주소는 oam 설정 &gt; Agent→OAM URL 이 정합니다.
+      </div>
     </div>
   )
 }

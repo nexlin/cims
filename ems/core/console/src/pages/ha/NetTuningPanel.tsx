@@ -7,7 +7,8 @@
 import { useState } from 'react'
 import type { Agent, AgentNetTuning } from '../../api/deployment'
 import { ImeSafeInput } from './ImeSafeInput'
-import { btnSmall } from './styles'
+import { Button } from '../../components/ui/button'
+import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 
 const SYSCTL_FIELDS: Array<{ key: string; label: string; def: number; hint: string }> = [
   { key: 'net.core.netdev_max_backlog', label: 'netdev_max_backlog', def: 5000,     hint: 'RX backlog 큐 길이 (커널기본 1000) — softirq 적체 시 드롭 방지' },
@@ -67,84 +68,91 @@ export function NetTuningPanel({ title, agent, applying, onApply }: {
             `net-tuning: sysctl ${Object.keys(sysctlOut).length} / rps ${rpsOut.length}`)
   }
 
-  const inputStyle = { width: 140, padding: '2px 6px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 3, fontFamily: 'monospace' }
-
   return (
-    <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px', background: 'var(--muted)' }}>
-      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
-          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+    // 상위 SubSection 이 제목·힌트·들여쓰기를 그린다 — 회색 패널을 또 두르지 않는다.
+    <div>
       {title && (
-        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
+        <div className="mb-2 text-sm font-semibold text-muted-foreground">
           {title}
-          <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 'normal' }}>
+          <span className="ml-2 text-xs font-normal">
             (sysctl 은 /etc/sysctl.d 영속 · RPS 는 적용+부팅 재적용 · 이 서버 {cores}코어)
           </span>
         </div>
       )}
 
       {/* RPS */}
-      <div style={{ fontSize: 12, fontWeight: 'bold', margin: '6px 0 4px' }}>
-        RPS — RX softirq 코어 분산 <span style={{ fontWeight: 'normal', color: 'var(--muted-foreground)' }}>(16진 비트마스크, 권장 전체코어=<code>{recMask}</code>, <code>0</code>=비활성)</span>
+      <div className="mb-1 mt-1.5 text-sm font-semibold">
+        RPS — RX softirq 코어 분산{' '}
+        <span className="font-normal text-muted-foreground">
+          (16진 비트마스크, 권장 전체코어=<code className="font-mono">{recMask}</code>,{' '}
+          <code className="font-mono">0</code>=비활성)
+        </span>
       </div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
+      <DataTable className="mb-3">
         <thead>
-          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 120 }}>인터페이스</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 180 }}>rps_cpus 마스크</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>현재 저장값</th>
+          <tr>
+            <Th width={120}>인터페이스</Th>
+            <Th width={260}>rps_cpus 마스크</Th>
+            <Th>현재 저장값</Th>
           </tr>
         </thead>
         <tbody>
           {ifaces.length === 0 && (
-            <tr><td colSpan={3} style={{ padding: 8, color: 'var(--muted-foreground)' }}>(인터페이스 정보 없음 — heartbeat 대기)</td></tr>
+            <tr><Td colSpan={3} className="text-muted-foreground">
+              인터페이스 정보 없음 — heartbeat 대기
+            </Td></tr>
           )}
           {ifaces.map(name => {
             const cur = stored?.rps?.find(r => r.iface === name)?.cpus
             return (
               <tr key={name}>
-                <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{name}</td>
-                <td style={{ padding: '4px 8px' }}>
-                  <ImeSafeInput value={rps[name] ?? ''} onCommit={v => setRps(p => ({ ...p, [name]: v }))}
-                                placeholder={recMask} style={inputStyle} />
-                  <button onClick={() => setRps(p => ({ ...p, [name]: recMask }))}
-                          style={{ ...btnSmall(), marginLeft: 4 }} disabled={applying}>전체코어</button>
-                </td>
-                <td style={{ padding: '4px 8px', fontFamily: 'monospace', color: 'var(--muted-foreground)' }}>{cur ?? '-'}</td>
+                <Td mono>{name}</Td>
+                <Td>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-block w-[140px]">
+                      <ImeSafeInput value={rps[name] ?? ''} onCommit={v => setRps(p => ({ ...p, [name]: v }))}
+                                    placeholder={recMask} className="form-input font-mono" />
+                    </span>
+                    <Button variant="ghost" disabled={applying}
+                            onClick={() => setRps(p => ({ ...p, [name]: recMask }))}>전체코어</Button>
+                  </div>
+                </Td>
+                <Td mono className="text-muted-foreground">{orDash(cur)}</Td>
               </tr>
             )
           })}
         </tbody>
-      </table>
+      </DataTable>
 
       {/* sysctl */}
-      <div style={{ fontSize: 12, fontWeight: 'bold', margin: '6px 0 4px' }}>sysctl (net.core.*)</div>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+      <div className="mb-1 mt-1.5 text-sm font-semibold">sysctl (net.core.*)</div>
+      <DataTable>
         <thead>
-          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 180 }}>키</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 160 }}>값</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>설명</th>
+          <tr>
+            <Th width={180}>키</Th>
+            <Th width={160}>값</Th>
+            <Th>설명</Th>
           </tr>
         </thead>
         <tbody>
           {SYSCTL_FIELDS.map(f => (
             <tr key={f.key}>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{f.label}</td>
-              <td style={{ padding: '4px 8px' }}>
-                <ImeSafeInput value={sysctl[f.key] ?? ''} onCommit={v => setSysctl(p => ({ ...p, [f.key]: v }))}
-                              placeholder={String(f.def)} style={inputStyle} />
-              </td>
-              <td style={{ padding: '4px 8px', fontSize: 11, color: 'var(--muted-foreground)' }}>{f.hint}</td>
+              <Td mono>{f.label}</Td>
+              <Td>
+                <span className="inline-block w-[140px]">
+                  <ImeSafeInput value={sysctl[f.key] ?? ''} onCommit={v => setSysctl(p => ({ ...p, [f.key]: v }))}
+                                placeholder={String(f.def)} className="form-input font-mono" />
+                </span>
+              </Td>
+              <Td className="text-xs font-normal text-muted-foreground">{f.hint}</Td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </DataTable>
 
-      <div style={{ marginTop: 10 }}>
-        <button onClick={apply} style={btnSmall()} disabled={applying}>
-          {applying ? '적용 중…' : '＋ 네트워크 튜닝 적용'}
-        </button>
-      </div>
+      <Button variant="outline" className="mt-2.5" onClick={apply} disabled={applying}>
+        {applying ? '적용 중…' : '네트워크 튜닝 적용'}
+      </Button>
     </div>
   )
 }

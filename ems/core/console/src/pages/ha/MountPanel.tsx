@@ -3,11 +3,14 @@
 //  콘솔에서 추가하면 agent 가 fstab 에 기록 → 재부팅 시 OS 가 자동 마운트.
 //  네트워크 FS(nfs/cifs)는 agent(cims-priv)가 _netdev,nofail 강제(부팅 hang/실패 차단 방지).
 // ──────────────────────────────────────────────────────────────
+import { Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentMount } from '../../api/deployment'
 import { ImeSafeInput } from './ImeSafeInput'
 import { MOUNT_DEFAULTS } from './helpers'
-import { btnSmall, btnDanger } from './styles'
+import { Button } from '../../components/ui/button'
+import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
+import { StatusDot } from '../../components/custom/status-dot'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
 
@@ -45,94 +48,89 @@ export function MountPanel({ title, mounts, applying, onApply }: {
   }
 
   return (
-    <div style={{ borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
-                  background: 'var(--muted)' }}>
-      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
-          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+    // 상위 SubSection 이 제목·힌트·들여쓰기를 그린다 — 여기서 또 회색 패널을 두르지 않는다
+    // (시안 S1 은 섹션 본문에 표만 있다).
+    <div>
+      {/* 다른 화면에서 단독으로 쓸 때만 자체 제목을 낸다 */}
       {title && (
-        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
+        <div className="mb-2 text-sm font-semibold text-muted-foreground">
           {title}
-          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
+          <span className="ml-2 text-xs font-normal">
             (콘솔 추가 시 /etc/fstab 에 기록 — 재부팅에도 유지. 네트워크 FS 는 _netdev,nofail 자동)
           </span>
         </div>
       )}
-
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+      {/* 컬럼 폭은 Figma S1 실측 (그룹 공통 마운트 표와 같은 축) */}
+      <DataTable>
         <thead>
-          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>마운트 위치(target)</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>소스(source)</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>유형</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>옵션</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>상태</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 70 }}>액션</th>
+          <tr>
+            <Th width={150}>마운트 위치(target)</Th>
+            <Th width={275}>소스(source)</Th>
+            <Th width={60}>유형</Th>
+            <Th width={150}>옵션</Th>
+            <Th width={90}>상태</Th>
+            <Th width={72}>액션</Th>
           </tr>
         </thead>
         <tbody>
           {mounts.length === 0 && !addOpen && (
-            <tr><td colSpan={6} style={{ padding: '8px', color: 'var(--muted-foreground)' }}>
-              (마운트 없음 — 아래 [＋ 마운트 추가])
-            </td></tr>
+            <tr><Td colSpan={6} className="text-muted-foreground">
+              마운트 없음 — 아래 [+ 마운트 추가]
+            </Td></tr>
           )}
           {mounts.map((m) => (
             <tr key={m.target}>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{m.target}</td>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace', wordBreak: 'break-all' }}>{m.source}</td>
-              <td style={{ padding: '4px 8px' }}>{m.fstype}</td>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: 11, color: 'var(--muted-foreground)' }}>{m.options || '-'}</td>
-              <td style={{ padding: '4px 8px', fontSize: 11 }}>
-                {m.mounted
-                  ? <span style={{ color: 'var(--cims-success)', fontWeight: 'bold' }}>● mounted</span>
-                  : <span style={{ color: 'var(--destructive)' }}>○ unmounted</span>}
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <button onClick={() => deleteMount(m)} style={btnDanger()} disabled={applying}>삭제</button>
-              </td>
+              <Td mono>{m.target}</Td>
+              <Td mono className="break-all">{orDash(m.source)}</Td>
+              <Td>{orDash(m.fstype)}</Td>
+              <Td mono className="text-muted-foreground">{orDash(m.options)}</Td>
+              <Td>
+                <StatusDot tone={m.mounted ? 'success' : 'danger'}
+                           label={m.mounted ? 'mounted' : 'unmounted'} />
+              </Td>
+              <Td>
+                <Button variant="destructive" onClick={() => deleteMount(m)} disabled={applying}>
+                  <Trash2 /> 삭제
+                </Button>
+              </Td>
             </tr>
           ))}
-          {addOpen ? (
-            <tr style={{ background: 'var(--cims-warning-soft)' }}>
-              <td style={{ padding: '4px 8px' }}>
+          {addOpen && (
+            <tr className="bg-warning-soft">
+              <Td>
                 <ImeSafeInput value={target} onCommit={setTarget} placeholder={MOUNT_DEFAULTS.target}
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
+                              className="form-input font-mono" />
+              </Td>
+              <Td>
                 <ImeSafeInput value={source} onCommit={setSource} placeholder={MOUNT_DEFAULTS.source}
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <select value={fstype} onChange={e => setFstype(e.target.value)}
-                        style={{ width: '95%', padding: '2px 4px', fontSize: 12,
-                                 border: '1px solid #e67e22', borderRadius: 3 }}>
+                              className="form-input font-mono" />
+              </Td>
+              <Td>
+                <select value={fstype} onChange={e => setFstype(e.target.value)} className="form-input">
                   {FSTYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-              </td>
-              <td style={{ padding: '4px 8px' }}>
+              </Td>
+              <Td>
                 <ImeSafeInput value={options} onCommit={setOptions} placeholder="defaults"
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid var(--border)', borderRadius: 3 }} />
-              </td>
-              <td colSpan={2} style={{ padding: '4px 8px' }}>
+                              className="form-input font-mono" />
+              </Td>
+              <Td colSpan={2}>
                 {/* 빈칸이어도 활성 — 그대로 누르면 위 placeholder 값이 그대로 적용된다. */}
-                <button onClick={commitAdd} style={btnSmall()} disabled={applying}
-                        title={(!source.trim() || !target.trim())
-                          ? `빈칸은 기본값으로 적용 — ${MOUNT_DEFAULTS.source} → ${MOUNT_DEFAULTS.target}`
-                          : '이 서버에 마운트 추가'}>추가</button>
-                <button onClick={() => setAddOpen(false)} style={btnSmall()}>취소</button>
-              </td>
-            </tr>
-          ) : (
-            <tr>
-              <td colSpan={6} style={{ padding: '4px 8px' }}>
-                <button onClick={beginAdd} style={btnSmall()} disabled={applying}>＋ 마운트 추가</button>
-              </td>
+                <div className="flex items-center gap-1.5">
+                  <Button variant="default" onClick={commitAdd} disabled={applying}
+                          title={(!source.trim() || !target.trim())
+                            ? `빈칸은 기본값으로 적용 — ${MOUNT_DEFAULTS.source} → ${MOUNT_DEFAULTS.target}`
+                            : '이 서버에 마운트 추가'}>추가</Button>
+                  <Button variant="ghost" onClick={() => setAddOpen(false)}>취소</Button>
+                </div>
+              </Td>
             </tr>
           )}
         </tbody>
-      </table>
+      </DataTable>
+      <Button variant="outline" className="mt-2.5" onClick={beginAdd} disabled={applying || addOpen}>
+        + 마운트 추가
+      </Button>
     </div>
   )
 }

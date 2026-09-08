@@ -1,10 +1,12 @@
 import { Alert } from '@core/components/ui/alert'
-import { Lock, Star } from 'lucide-react'
+import { Lock, Pencil, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import type { AgentRoute } from '../../api/deployment'
 import type { NetIface, ServiceIpRow, IpSlot } from './types'
 import { ImeSafeInput } from './ImeSafeInput'
-import { btnSmall, btnDanger } from './styles'
+import { Badge } from '../../components/ui/badge'
+import { Button } from '../../components/ui/button'
+import { DataTable, Th, Td, orDash } from '../../components/custom/data-table'
 
 // ServiceIpPanel — 인터페이스별 cims-managed IP 추가/삭제 + specific route 관리.
 // 모델: 각 IP 가 row (iface, ip 단위). agent 가 보고한 interfaces.managed=true 인 IP 만
@@ -129,16 +131,12 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
   }
 
   return (
-    <div style={{
-      borderLeft: '3px solid var(--border)', borderRadius: 4, padding: '10px 12px',
-      background: 'var(--muted)',
-    }}>
-      {/* 제목·힌트는 상위 SubSection 이 그린다 — title 을 비우면 이 헤더는 안 낸다.
-          (다른 화면에서 단독으로 쓸 때는 title 을 주면 그대로 동작) */}
+    // 상위 SubSection 이 제목·힌트·들여쓰기를 그린다 — 회색 패널을 또 두르지 않는다.
+    <div>
       {title && (
-        <div style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)', marginBottom: 8 }}>
+        <div className="mb-2 text-sm font-semibold text-muted-foreground">
           {title}
-          <span style={{ marginLeft: 8, fontSize: 11, color: 'var(--muted-foreground)', fontWeight: 'normal' }}>
+          <span className="ml-2 text-xs font-normal">
             (cims-managed 만 변경 가능 — 외부 IP / mgmt NIC 은 보호)
           </span>
         </div>
@@ -146,24 +144,30 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
 
       {section !== 'routes' && (<>
       {/* 시안은 이 안내를 표 **위** SectionMessage 로 둔다 (Figma S1 49:1519) */}
-      <Alert variant="info" className="mb-2">
+      <Alert variant="info" className="mb-2.5">
         {slots.length > 0
-          ? <>참고 — 설치된 패키지의 권장 용도: <code>{slotHints}</code> (자유 입력 가능)</>
-          : <>인프라 단계 — NIC 이름이 곧 용도 라벨로 사용됩니다.</>}
+          ? <>참고 — 설치된 패키지의 권장 용도: <code className="font-mono">{slotHints}</code> (자유 입력 가능)</>
+          : <>
+              <div className="font-medium">인프라 단계에서는 NIC 이름이 곧 용도 라벨로 사용됩니다</div>
+              <div className="mt-0.5 text-xs opacity-90">
+                슬롯을 비워두면 해당 인터페이스는 라벨 없이 등록됩니다.
+              </div>
+            </>}
       </Alert>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+      {/* 컬럼 폭은 Figma S1 실측 */}
+      <DataTable>
         <thead>
-          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>인터페이스</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 170 }}>IP / mask</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 150 }}>용도(slot)</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>소유</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>액션</th>
+          <tr>
+            <Th width={140}>인터페이스</Th>
+            <Th width={190}>IP / mask</Th>
+            <Th width={170}>용도 (slot)</Th>
+            <Th width={110}>소유</Th>
+            <Th width={160} align="right">액션</Th>
           </tr>
         </thead>
         <tbody>
           {ifaceOrder.length === 0 && (
-            <tr><td colSpan={5} style={{ padding: '8px', color: 'var(--muted-foreground)' }}>(인터페이스 없음 — agent 보고 대기)</td></tr>
+            <tr><Td colSpan={5} className="text-muted-foreground">인터페이스 없음 — agent 보고 대기</Td></tr>
           )}
           {ifaceOrder.flatMap((iface) => {
             const isMgmt = mgmtIfaces.has(iface)
@@ -175,133 +179,120 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
                   const isMgmtIp = isMgmt && ni.mgmt
                   const isVip = !!vipIps?.has(ni.ip)
                   return (
-                    <tr key={`${iface}-${ni.ip}-${ipIdx}`}
-                        style={isMgmtIp ? { background: 'var(--secondary)' } : undefined}>
-                      <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
-                        {ipIdx === 0 && <b>{iface}</b>}
+                    <tr key={`${iface}-${ni.ip}-${ipIdx}`}>
+                      <Td mono>
+                        {ipIdx === 0 && iface}
                         {ipIdx === 0 && isMgmt && (
-                          <span title="agent ↔ CSC 통신 NIC — 변경 시 단절 위험으로 잠금"
-                                style={{ marginLeft: 6, fontSize: 10, color: 'var(--muted-foreground)', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Lock size={10} /> mgmt</span>
+                          <span className="ml-1.5 inline-flex items-center gap-1 text-xs text-muted-foreground"
+                                title="agent ↔ CSC 통신 NIC — 변경 시 단절 위험으로 잠금">
+                            <Lock size={11} /> mgmt
+                          </span>
                         )}
-                      </td>
-                      <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>
-                        {ni.ip}/{ni.mask}
-                      </td>
-                      <td style={{ padding: '4px 8px' }}>
+                      </Td>
+                      <Td mono>{ni.ip}/{ni.mask}</Td>
+                      <Td>
                         {/* 용도(slot) — NIC 의 단일 분류 키. VIP→NIC 매핑도 이 값으로 결정.
                             VIP 는 HA 그룹 바인딩에서 결정 → 읽기전용. mgmt 는 IP 값은 잠금이나
                             용도(slot)는 입력 가능 (mgmt NIC 도 운용자가 분류 라벨 지정). */}
                         {isVip ? (
-                          <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{slot || '—'}</span>
+                          <span className="text-muted-foreground">{slot || '—'}</span>
                         ) : (
-                          <ImeSafeInput value={slot}
+                          <ImeSafeInput value={slot} placeholder="(용도)" className="form-input"
                                         onCommit={(v) => {
                                           if (v !== slot) onUpdateSlot(iface, ni.ip, ni.mask, v)
-                                        }}
-                                        placeholder="(용도)"
-                                        style={{ width: '95%', padding: '2px 6px', fontSize: 11,
-                                                 border: '1px solid var(--border)', borderRadius: 3 }} />
+                                        }} />
                         )}
-                      </td>
-                      <td style={{ padding: '4px 8px', fontSize: 11 }}>
-                        {isMgmtIp ? <span style={{ color: 'var(--muted-foreground)' }}>mgmt</span>
-                          : isVip ? <span style={{ color: '#8e44ad', fontWeight: 'bold' }}>🔗 VIP</span>
-                          : managed ? <span style={{ color: 'var(--cims-success)' }}>● cims</span>
-                          : <span style={{ color: 'var(--muted-foreground)' }}>○ 외부</span>}
-                      </td>
-                      <td style={{ padding: '4px 8px' }}>
-                        {managed && !isMgmtIp && !isVip && (
-                          <button onClick={() => deleteIp(iface, ni.ip, ni.mask)}
-                                  style={btnDanger()} disabled={applying}>
-                            삭제
-                          </button>
-                        )}
-                      </td>
+                      </Td>
+                      <Td>
+                        {/* 소유 배지 톤은 시안 실측: mgmt=neutral · 외부=info · VIP=brand.
+                            cims-managed 는 우리 것이 정상 동작이라 success. */}
+                        {isMgmtIp ? <Badge variant="neutralSoft">mgmt</Badge>
+                          : isVip ? <Badge variant="brandSoft">VIP</Badge>
+                          : managed ? <Badge variant="successSoft">cims</Badge>
+                          : <Badge variant="infoSoft">외부</Badge>}
+                      </Td>
+                      <Td align="right">
+                        {managed && !isMgmtIp && !isVip
+                          ? <Button variant="destructive" disabled={applying}
+                                    onClick={() => deleteIp(iface, ni.ip, ni.mask)}>
+                              <Trash2 /> 삭제
+                            </Button>
+                          : <span className="text-muted-foreground">—</span>}
+                      </Td>
                     </tr>
                   )
                 })
               : [(
                   <tr key={`${iface}-empty`}>
-                    <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}><b>{iface}</b></td>
-                    <td colSpan={3} style={{ padding: '4px 8px', color: 'var(--muted-foreground)', fontSize: 11 }}>
-                      (IP 미할당)
-                    </td>
-                    <td style={{ padding: '4px 8px' }}></td>
+                    <Td mono>{iface}</Td>
+                    <Td colSpan={4} className="text-muted-foreground">IP 미할당</Td>
                   </tr>
                 )]
             return ifaceRows
           })}
-          {addOpen ? (
-            <tr style={{ background: 'var(--cims-warning-soft)' }}>
-              <td style={{ padding: '4px 8px' }}>
-                <select value={addIface} onChange={e => setAddIface(e.target.value)}
-                        style={{ width: '95%', padding: '2px 4px', fontSize: 12,
-                                 border: '1px solid #e67e22', borderRadius: 3 }}>
+          {addOpen && (
+            <tr className="bg-warning-soft">
+              <Td>
+                <select value={addIface} onChange={e => setAddIface(e.target.value)} className="form-input">
                   {addableIfaces.length === 0 && <option value="">(없음)</option>}
                   {addableIfaces.map(name => <option key={name} value={name}>{name}</option>)}
                 </select>
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <input value={addIp}
-                       placeholder="10.0.3.45"
-                       onChange={e => setAddIp(e.target.value)}
-                       style={{ width: 110, padding: '2px 6px', fontSize: 12,
-                                border: '1px solid #e67e22', borderRadius: 3 }} />
-                <span> / </span>
-                <input type="number" value={addMask}
-                       onChange={e => setAddMask(parseInt(e.target.value) || 24)}
-                       style={{ width: 40, padding: '2px 6px', fontSize: 12,
-                                border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <ImeSafeInput value={addSlot}
-                              onCommit={setAddSlot}
-                              placeholder="(용도)"
-                              style={{ width: '95%', padding: '2px 6px', fontSize: 12,
-                                       border: '1px solid var(--border)', borderRadius: 3 }} />
-              </td>
-              <td colSpan={2} style={{ padding: '4px 8px' }}>
-                <button onClick={commitAdd} style={btnSmall()}
-                        disabled={!addIface || !addIp || !addMask || applying}>
-                  추가
-                </button>
-                <button onClick={cancelAdd} style={btnSmall()}>취소</button>
-              </td>
+              </Td>
+              <Td>
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block w-[120px]">
+                    <input value={addIp} placeholder="10.0.3.45" className="form-input font-mono"
+                           onChange={e => setAddIp(e.target.value)} />
+                  </span>
+                  <span className="text-muted-foreground">/</span>
+                  <span className="inline-block w-[56px]">
+                    <input type="number" value={addMask} className="form-input font-mono"
+                           onChange={e => setAddMask(parseInt(e.target.value) || 24)} />
+                  </span>
+                </div>
+              </Td>
+              <Td>
+                <ImeSafeInput value={addSlot} onCommit={setAddSlot} placeholder="(용도)"
+                              className="form-input" />
+              </Td>
+              <Td colSpan={2} align="right">
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button variant="default" onClick={commitAdd}
+                          disabled={!addIface || !addIp || !addMask || applying}>추가</Button>
+                  <Button variant="ghost" onClick={cancelAdd}>취소</Button>
+                </div>
+              </Td>
             </tr>
-          ) : (
-            addableIfaces.length > 0 && (
-              <tr>
-                <td colSpan={5} style={{ padding: '4px 8px' }}>
-                  <button onClick={beginAdd} style={btnSmall()} disabled={applying}>
-                    + IP 추가
-                  </button>
-                </td>
-              </tr>
-            )
           )}
         </tbody>
-      </table>
+      </DataTable>
+      {addableIfaces.length > 0 && (
+        <Button variant="outline" className="mt-2.5" onClick={beginAdd} disabled={applying || addOpen}>
+          + IP 추가
+        </Button>
+      )}
       </>)}
 
       {section !== 'ip' && (<>
       {section === 'both' && (
-        <div style={{ marginTop: 16, fontSize: 12, fontWeight: 'bold', color: 'var(--muted-foreground)' }}>
-          라우팅 (subnet 자동(kernel) 외 모두 변경 가능 — default gateway 포함)
+        <div className="mb-2 mt-4 text-sm font-semibold text-muted-foreground">
+          라우팅{' '}
+          <span className="font-normal">(subnet 자동(kernel) 외 모두 변경 가능 — default gateway 포함)</span>
         </div>
       )}
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+      <DataTable>
         <thead>
-          <tr style={{ background: 'var(--secondary)', color: 'var(--muted-foreground)' }}>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 200 }}>dest CIDR</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 140 }}>gateway</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 90 }}>dev</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left', width: 100 }}>소유</th>
-            <th style={{ padding: '4px 8px', textAlign: 'left' }}>액션</th>
+          <tr>
+            <Th width={200}>dest CIDR</Th>
+            <Th width={180}>gateway</Th>
+            <Th width={110}>dev</Th>
+            <Th width={120}>소유</Th>
+            <Th width={160} align="right">액션</Th>
           </tr>
         </thead>
         <tbody>
           {storedRoutes.length === 0 && !routeAddOpen && (
-            <tr><td colSpan={5} style={{ padding: '8px', color: 'var(--muted-foreground)' }}>(라우팅 없음)</td></tr>
+            <tr><Td colSpan={5} className="text-muted-foreground">라우팅 없음</Td></tr>
           )}
           {[...storedRoutes].sort((a, b) => {
             const ga = a.is_default ? 0 : a.kernel_auto ? 1 : 2
@@ -313,110 +304,100 @@ export function ServiceIpPanel({ title, section = 'both', interfaces, storedRows
             const isDefault = !!r.is_default
             const kernelAuto = !!r.kernel_auto
             const rowKey = `route-${r.dst}-${r.via}-${r.dev}`
-            const ownerChip = kernelAuto  ? <span style={{ color: 'var(--muted-foreground)', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Lock size={11} /> kernel</span>
-                            : isDefault   ? <span style={{ color: '#3498db', display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: '-2px' }}><Star size={11} /> default</span>
-                            : managed     ? <span style={{ color: 'var(--cims-success)' }}>● cims</span>
-                            :               <span style={{ color: 'var(--muted-foreground)' }}>○ 외부</span>
+            // kernel 은 배지가 아니라 자물쇠 + 흐린 글자다 (시안 실측) — 잠긴 사실이지 분류가 아니다.
+            const ownerChip = kernelAuto
+              ? <span className="inline-flex items-center gap-1 text-muted-foreground"><Lock size={11} /> kernel</span>
+              : isDefault ? <Badge variant="brandSoft">default</Badge>
+              : managed   ? <Badge variant="successSoft">cims</Badge>
+              :             <Badge variant="infoSoft">외부</Badge>
             const canEdit = !kernelAuto
             const isEditing = routeEditKey === r.dst
             if (isEditing) {
               return (
-                <tr key={rowKey} style={{ background: 'var(--cims-warning-soft)' }}>
-                  <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.dst}</td>
-                  <td style={{ padding: '4px 8px' }}>
-                    <input value={routeEditVia}
-                           onChange={e => setRouteEditVia(e.target.value)}
-                           style={{ width: 120, padding: '2px 6px', fontSize: 12,
-                                    border: '1px solid #e67e22', borderRadius: 3 }} />
-                  </td>
-                  <td style={{ padding: '4px 8px' }}>
+                <tr key={rowKey} className="bg-warning-soft">
+                  <Td mono>{r.dst}</Td>
+                  <Td>
+                    <span className="inline-block w-[140px]">
+                      <input value={routeEditVia} className="form-input font-mono"
+                             onChange={e => setRouteEditVia(e.target.value)} />
+                    </span>
+                  </Td>
+                  <Td>
                     <select value={routeEditDev} onChange={e => setRouteEditDev(e.target.value)}
-                            style={{ width: 80, padding: '2px 6px', fontSize: 12,
-                                     border: '1px solid #e67e22', borderRadius: 3 }}>
+                            className="form-input">
                       {routableIfaces.map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
-                  </td>
-                  <td style={{ padding: '4px 8px', fontSize: 11 }}>{ownerChip}</td>
-                  <td style={{ padding: '4px 8px' }}>
-                    <button onClick={() => commitEditRoute(r)} style={btnSmall()}
-                            disabled={!routeEditVia || !routeEditDev || applying ||
-                                      (routeEditVia === r.via && routeEditDev === r.dev)}>
-                      저장
-                    </button>
-                    <button onClick={cancelEditRoute} style={btnSmall()}>취소</button>
-                  </td>
+                  </Td>
+                  <Td>{ownerChip}</Td>
+                  <Td align="right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <Button variant="default" onClick={() => commitEditRoute(r)}
+                              disabled={!routeEditVia || !routeEditDev || applying ||
+                                        (routeEditVia === r.via && routeEditDev === r.dev)}>저장</Button>
+                      <Button variant="ghost" onClick={cancelEditRoute}>취소</Button>
+                    </div>
+                  </Td>
                 </tr>
               )
             }
-            const bg = kernelAuto ? 'var(--secondary)' : undefined
             return (
-              <tr key={rowKey} style={bg ? { background: bg } : undefined}>
-                <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.dst}</td>
-                <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.via || '—'}</td>
-                <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{r.dev || '—'}</td>
-                <td style={{ padding: '4px 8px', fontSize: 11 }}>{ownerChip}</td>
-                <td style={{ padding: '4px 8px' }}>
-                  {canEdit && (
-                    <>
-                      <button onClick={() => beginEditRoute(r)} style={btnSmall()} disabled={applying}>
-                        수정
-                      </button>
-                      <button onClick={() => deleteRoute(r)} style={btnDanger()} disabled={applying}>
-                        삭제
-                      </button>
-                    </>
-                  )}
-                </td>
+              <tr key={rowKey}>
+                <Td mono>{r.dst}</Td>
+                <Td mono>{orDash(r.via)}</Td>
+                <Td mono>{orDash(r.dev)}</Td>
+                <Td>{ownerChip}</Td>
+                <Td align="right">
+                  {canEdit
+                    ? <div className="flex items-center justify-end gap-1.5">
+                        <Button variant="ghost" onClick={() => beginEditRoute(r)} disabled={applying}>
+                          <Pencil /> 수정
+                        </Button>
+                        <Button variant="destructive" onClick={() => deleteRoute(r)} disabled={applying}>
+                          <Trash2 /> 삭제
+                        </Button>
+                      </div>
+                    : <span className="text-muted-foreground">—</span>}
+                </Td>
               </tr>
             )
           })}
           {routeAddOpen && (
-            <tr style={{ background: 'var(--cims-warning-soft)' }}>
-              <td style={{ padding: '4px 8px' }}>
-                <input value={routeDst}
-                       placeholder="192.168.100.0/24"
-                       onChange={e => setRouteDst(e.target.value)}
-                       style={{ width: 180, padding: '2px 6px', fontSize: 12,
-                                border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <input value={routeVia}
-                       placeholder="10.0.3.1"
-                       onChange={e => setRouteVia(e.target.value)}
-                       style={{ width: 120, padding: '2px 6px', fontSize: 12,
-                                border: '1px solid #e67e22', borderRadius: 3 }} />
-              </td>
-              <td style={{ padding: '4px 8px' }}>
-                <select value={routeDev} onChange={e => setRouteDev(e.target.value)}
-                        style={{ width: 80, padding: '2px 6px', fontSize: 12,
-                                 border: '1px solid #e67e22', borderRadius: 3 }}>
+            <tr className="bg-warning-soft">
+              <Td>
+                <input value={routeDst} placeholder="192.168.100.0/24" className="form-input font-mono"
+                       onChange={e => setRouteDst(e.target.value)} />
+              </Td>
+              <Td>
+                <input value={routeVia} placeholder="10.0.3.1" className="form-input font-mono"
+                       onChange={e => setRouteVia(e.target.value)} />
+              </Td>
+              <Td>
+                <select value={routeDev} onChange={e => setRouteDev(e.target.value)} className="form-input">
                   {routableIfaces.map(d => <option key={d} value={d}>{d}</option>)}
                   {routableIfaces.length === 0 && <option value="">(없음)</option>}
                 </select>
-              </td>
-              <td colSpan={2} style={{ padding: '4px 8px' }}>
-                <button onClick={commitAddRoute} style={btnSmall()}
-                        disabled={!routeDst || !routeVia || !routeDev || applying}>
-                  추가
-                </button>
-                <button onClick={cancelAddRoute} style={btnSmall()}>취소</button>
-              </td>
-            </tr>
-          )}
-          {!routeAddOpen && (
-            <tr>
-              <td colSpan={5} style={{ padding: '4px 8px' }}>
-                <button onClick={beginAddRoute} style={btnSmall()}
-                        disabled={applying || routableIfaces.length === 0}
-                        title={routableIfaces.length === 0 ? 'mgmt 외 NIC 없음' : 'route 추가 (default GW 포함)'}>
-                  + 라우팅 추가
-                </button>
-              </td>
+              </Td>
+              <Td colSpan={2} align="right">
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button variant="default" onClick={commitAddRoute}
+                          disabled={!routeDst || !routeVia || !routeDev || applying}>추가</Button>
+                  <Button variant="ghost" onClick={cancelAddRoute}>취소</Button>
+                </div>
+              </Td>
             </tr>
           )}
         </tbody>
-      </table>
-
+      </DataTable>
+      <Button variant="outline" className="mt-2.5" onClick={beginAddRoute}
+              disabled={applying || routableIfaces.length === 0 || routeAddOpen}
+              title={routableIfaces.length === 0 ? 'mgmt 외 NIC 없음' : 'route 추가 (default GW 포함)'}>
+        + 라우팅 추가
+      </Button>
+      {routableIfaces.length === 0 && (
+        <div className="mt-1 text-xs text-muted-foreground">
+          [+ 라우팅 추가] 는 mgmt 외 NIC 이 있어야 열립니다.
+        </div>
+      )}
       </>)}
     </div>
   )

@@ -31,6 +31,7 @@ import { StatusDot } from '../custom/status-dot'
 import { Radio } from '../custom/radio'
 import { StickySaveBar } from '../custom/sticky-save-bar'
 import { Alert } from '../ui/alert'
+import { EmptyState } from '../custom/empty-state'
 import { Badge } from '../ui/badge'
 import { SyncStatusRow } from '../custom/sync-status-row'
 import { ToggleGroup, ToggleGroupItem } from '../ui/toggle-group'
@@ -397,9 +398,13 @@ export function GroupConfigCompareView({ group, members: liveMembers,
   }
 
   if (groupPkgNames.length === 0) {
-    return <div className="empty" style={{ padding: 40 }}>
-      그룹 멤버에 배포된 모듈 없음 — [패키지 설치] 탭에서 모듈을 먼저 배포하세요
-    </div>
+    // ES-2 — 탭 본문 전체가 이 한 장으로 대체된다. 모듈 칩·세그먼트·저장바 모두 내지 않는다.
+    return (
+      <div className="p-4">
+        <EmptyState title="그룹 멤버에 배포된 모듈 없음"
+                    description="[패키지 설치] 탭에서 모듈을 먼저 배포하세요." />
+      </div>
+    )
   }
 
   const baseMemberName = deployedMembers.find(m => m.id === baseAgentId)?.name
@@ -485,9 +490,8 @@ export function GroupConfigCompareView({ group, members: liveMembers,
 
       <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
         {!template ? (
-          <div className="empty" style={{ padding: 20 }}>
-            이 패키지에는 config_template 이 없습니다 — 설정 항목 없음
-          </div>
+          // A3 안내 그대로 (aa-group.md) — 모듈에 템플릿이 없으면 설정할 것이 없다
+          <EmptyState title="이 패키지에는 config_template 이 없습니다 — 설정 항목 없음" />
         ) : view === 'edit' && isAS ? (
           /* ── 공통 설정 편집 ── */
           !configView ? <div className="empty" style={{ padding: 20 }}>로딩 중...</div> : (
