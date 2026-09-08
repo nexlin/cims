@@ -34,6 +34,8 @@ public sealed partial class MainViewModel : ObservableObject
     public ObservableCollection<AppScreen> PoppedOut { get; } = new();
     /// <summary>[별창으로] — 창 관리는 MainWindow.</summary>
     public event EventHandler<AppScreen>? ScreenPopOutRequested;
+    /// <summary>[관제로 F1] — 별창에서 눌렀으면 주 창을 앞으로 가져와야 관제 캔버스가 보인다. 창 활성화는 MainWindow.</summary>
+    public event EventHandler? DispatchActivateRequested;
     private bool _screensLoaded;
 
     /// <summary>감청 창 열기/활성화 요청 — 창 관리는 MainWindow.</summary>
@@ -137,7 +139,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (s == AppScreen.Admin && !CanManage) { Notify.Warn("관리 범위 없음", ManageHint); return; }
         Screen = s;
     }
-    [RelayCommand] private void ReturnToDispatch() => Screen = AppScreen.Dispatch;
+    [RelayCommand] private void ReturnToDispatch() { Screen = AppScreen.Dispatch; DispatchActivateRequested?.Invoke(this, EventArgs.Empty); }
 
     /// <summary>②④ 머리의 [이력에서 보기] — 종류를 맞춰 [이력] 로.</summary>
     public void ShowHistory(string kind)

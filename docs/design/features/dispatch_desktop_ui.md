@@ -141,7 +141,8 @@
   착신(링잉)·멤버 채널 합류·감청/청취 창은 배너·칩만 띄우고 화면을 바꾸지 않는다. 긴급 배너의 [채널로 이동]은 관제로 복귀 + 해당 카드 포커스. 로그아웃·재로그인은 관제로.
 - **↗ 별창으로.** 패널의 ↗ 를 화면에도 확장 — 관제 외 화면을 별창(`ScreenWindow`, 1180×760)으로 떼어 두 번째 모니터에 둔다. 별창에도 관제 요약 띠가 붙는다. 떼어낸 동안
   주 창 쪽은 자리표시자("이 화면은 별창에 열려 있습니다 · [별창 앞으로]")만 보이고(같은 VM 을 두 뷰가 동시에 붙지 않게 — 녹취 재생·비밀번호 상자), 별창을 닫으면 주 창
-  화면으로 돌아온다. 로그아웃 시 별창은 닫힌다.
+  화면으로 돌아온다. 로그아웃 시 별창은 닫힌다. **앱 포커스 핫키(§8)는 별창에서도 주 창과 같은 규칙**으로 동작한다(별창이 주 창의 키 처리로 넘긴다) — 별창에서
+  F1~F4 를 누르면 대상 화면이 별창이면 그 별창을, 아니면 주 창을 앞으로 가져와 결과가 보이게 하고, 별창의 [관제로 F1] 도 주 창을 앞으로 가져온다.
 - **②④ → 이력.** 실시간 내역 패널 머리의 [이력에서 보기]는 종류(PTT/통화)를 맞춰 [이력]으로 넘어간다 — 오늘·진행 중은 ②④ 가 정본, 끝난 세션의 날짜 조회는 이력.
 - 개발 스위치: `--ui-preview --ui-preview-screen=history|groups|admin` = 로그인 없이 해당 화면(관리 화면은 범위 검사 생략, 목록은 "로그인 전"), `--ui-preview-shot=<png>` = 주 창을
   WPF 로 렌더해 PNG 저장 후 종료(화면 잠금·원격 세션에서도 XAML 점검). `--ui-preview` 는 실제 앱과 다른 단일 인스턴스 이름을 써 실행 중인 관제 앱 옆에서 띄울 수 있다.
@@ -446,7 +447,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 입력란 규칙 §8)·트레이 최소화·종료 확인
   Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 본문, 위치 기억, 닫기 = 종료(확인), 세션 종료 → 3초 후 자동 닫힘
   Shell/LoginWindow · SettingsWindow · PromptWindow
-  Shell/ScreenWindow.xaml       화면 별창(§3.4) — 요약 띠 + `ScreenView(IsFloating)` 하나, 닫히면 `MainViewModel.OnScreenWindowClosed`
+  Shell/ScreenWindow.xaml       화면 별창(§3.4) — 요약 띠 + `ScreenView(IsFloating)` 하나, 닫히면 `MainViewModel.OnScreenWindowClosed`, 키는 `MainWindow.RouteKeyDown/Up` 으로
   ViewModels/
     MainViewModel               패널 VM 조립 · 패널 간 연동(발신 필드 채움·스레드 따라가기·[채널] 포커스) · 전역 핫키 → 동작 · 감청 창 열기/닫기 요청 ·
                                 최상위 메뉴(`Screen`·`ShowScreen`·`PopOutScreen`·`PoppedOut`, 화면 VM 셋 = HistoryScreen/GroupsScreen/AdminScreen 을 앱 수명 동안 하나씩 소유,

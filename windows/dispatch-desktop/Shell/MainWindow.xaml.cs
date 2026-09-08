@@ -35,6 +35,7 @@ public partial class MainWindow : Window
         vm.Desk.SettingsRequested += (_, _) => OpenSettings();
         vm.GroupEditRequested += (_, g) => { var w = new GroupEditWindow(g) { Owner = _screens.TryGetValue(AppScreen.PttGroups, out var sw) && sw.IsActive ? sw : this }; w.ShowDialog(); };
         vm.ScreenPopOutRequested += (_, s) => OpenScreenWindow(s);
+        vm.DispatchActivateRequested += (_, _) => { if (!IsActive) Activate(); };
         ScreenHost.ActivateFloatingRequested += (_, s) => { if (_screens.TryGetValue(s, out var w)) w.BringToFront(); };
         vm.GroupDeleteRequested += (_, g) => DeleteGroup(g);
         vm.Desk.LogoutRequested += (_, _) => { if (ConfirmLeave("로그아웃")) { _exitConfirmed = true; ((App)Application.Current).Logout(); } };
@@ -157,6 +158,10 @@ public partial class MainWindow : Window
     }
 
     // ── 앱 포커스 핫키 (§8): 보류/음소거·Ctrl+1..9·화면 전환 F1~F4 ──
+    // 화면 별창(ScreenWindow)도 같은 규칙으로 여기 라우팅한다 — 핫키는 창이 아니라 앱의 것이다.
+    internal void RouteKeyDown(KeyEventArgs e) => OnKeyDown(this, e);
+    internal void RouteKeyUp(KeyEventArgs e) => OnKeyUp(this, e);
+
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
         // 입력란에 포커스가 있으면 "글자를 넣는 키"만 양보한다 — 관리 화면은 입력 폼투성이라 여기서 다 버리면 폴백 PTT·화면 전환이 죽는다
@@ -170,7 +175,12 @@ public partial class MainWindow : Window
             if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e) && !e.IsRepeat) { _vm.OnHotKey(name, true); e.Handled = true; return; }
         // 화면 전환 F1~F4 — 설정 핫키가 같은 키를 쓰면 위에서 먼저 잡힌다
         if (Keyboard.Modifiers == ModifierKeys.None && AppScreens.OfFunctionKey(e.Key) is { } screen && !e.IsRepeat)
-        { _vm.ShowScreenCommand.Execute(screen); e.Handled = true; }
+        {
+            _vm.ShowScreenCommand.Execute(screen); e.Handled = true;
+            // 별창에서 눌렀을 때 결과가 보이게 — 그 화면이 별창이면 그 별창을, 아니면 주 창을 앞으로
+            if (_screens.TryGetValue(screen, out var sw)) sw.BringToFront();
+            else if (!IsActive) Activate();
+        }
     }
 
     /// <summary>입력란이 소비할 키인가 — 수식키(Ctrl/Alt/Win) 없는, F키가 아닌 키.</summary>
