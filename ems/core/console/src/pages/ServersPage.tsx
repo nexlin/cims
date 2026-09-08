@@ -2049,11 +2049,7 @@ function ServerInspector({ agent: a, mode, deployments, packages, vipIps, mgmtVi
             onJob={onJob} onUpgrade={onUpgradeDep} onRollback={onRollback} onRemoveDep={onRemoveDep} />
         )}
         {mode === 'control' && (
-          <InspectorSection title={`모듈 제어 (${deployments.length})`}
-                            expanded={openSections.has('modules')}
-                            onToggle={() => toggleSection('modules')}>
-            <ControlTab agent={a} deployments={deployments} packages={packages} onJob={onJob} />
-          </InspectorSection>
+          <ControlTab agent={a} deployments={deployments} packages={packages} onJob={onJob} />
         )}
       </div>
     </>
@@ -2144,67 +2140,91 @@ function GroupInstallOverview({ group, agents, depsByAgent, onSelectMember }: {
   depsByAgent: Map<number, Deployment[]>
   onSelectMember: (aid: number) => void
 }) {
+  const memberNames = group.members
+    .map(m => agentDisplayName(agents.find(a => a.id === m.agent_id)?.name || `#${m.agent_id}`))
+  // 드리프트 판정 — 모듈별로 멤버 간 버전이 갈리면 **기준과 다른 쪽**에 배지를 단다.
+  // 기준은 G1 안내와 같은 축이다: ACTIVE 노드, 없으면 첫 멤버.
+  const baseAid = group.active_agent_id ?? group.members[0]?.agent_id ?? null
+  const baseVer = new Map<string, string>()
+  for (const d of (baseAid != null ? depsByAgent.get(baseAid) || [] : [])) {
+    if (d.package_name && d.package_version) baseVer.set(d.package_name, d.package_version)
+  }
+  const drifted = (d: Deployment) => {
+    const b = d.package_name ? baseVer.get(d.package_name) : undefined
+    return !!b && !!d.package_version && b !== d.package_version
+  }
   return (
-    <div style={{ padding: 20, overflow: 'auto' }}>
-      <h4 style={{ marginTop: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
-        멤버별 패키지 배포 현황 — {group.name}
-        <InfoDot label="여기서 무엇을 하나?">
-          설치/업그레이드/롤백 등 작업은 좌측 트리(또는 아래 멤버 클릭)에서 서버를 선택해 수행합니다.
-        </InfoDot>
-      </h4>
-      <table className="data-table">
+    <div className="overflow-auto px-4 pt-3.5">
+      <TitleRow title="멤버별 패키지 배포 현황"
+                hint="그룹 멤버에 배포된 모듈과 버전을 한눈에 확인" />
+      {/* 이 화면이 **조회 전용**임을 먼저 알린다 (Figma G2 184:2864) — 작업 지점이 다른 화면이라
+          여기서 버튼을 찾다 헤매는 자리였다. */}
+      <Alert variant="info" className="mt-2.5">
+        <div className="font-medium">설치 · 재설치 · 롤백은 서버 스코프에서 수행합니다</div>
+        <div className="mt-0.5 text-xs opacity-90">
+          좌측 트리에서 멤버({memberNames.join(' / ') || '없음'})를 선택한 뒤 [패키지 설치] 탭에서
+          작업하세요. 이 화면은 조회 전용입니다.
+        </div>
+      </Alert>
+      {/* 컬럼 폭은 Figma G2(184:2870) 실측 */}
+      <DataTable className="mt-5">
         <thead>
-          <tr><th>서버</th><th>상태</th><th>배포 모듈</th></tr>
+          <tr>
+            <Th width={180}>서버</Th>
+            <Th width={130}>서버 상태</Th>
+            <Th width={512}>배포 모듈</Th>
+          </tr>
         </thead>
         <tbody>
           {group.members.map(m => {
             const ag = agents.find(a => a.id === m.agent_id)
             const deps = depsByAgent.get(m.agent_id) || []
             return (
-              <tr key={m.agent_id} style={{ cursor: 'pointer' }}
+              <tr key={m.agent_id} className="cursor-pointer"
                   onClick={() => onSelectMember(m.agent_id)}>
-                <td><b>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</b></td>
-                <td>
-                  <span style={{ color: agentStatusColor(ag?.status || 'offline').bar, fontSize: 12 }}>
-                    ● {ag?.status || '—'}
-                  </span>
-                </td>
-                <td>
-                  {deps.length === 0 ? <span style={{ color: 'var(--muted-foreground)' }}>—</span> :
-                    deps.map(d => {
-                      // 실측 우선 — [패키지 제어] 탭과 같은 상태로 보이게(설치·제어 일치)
-                      const shown = depEffectiveStatus(d)
-                      return (
-                      <span key={d.id} className="tag" style={{
-                        background: depStatusColor(shown), color: '#fff',
-                        fontSize: 11, padding: '2px 8px', borderRadius: 3, marginRight: 6,
-                      }}>
-                        {d.package_name} v{d.package_version} · {shown}
-                      </span>
-                      )
-                    })}
-                </td>
+                <Td>{agentDisplayName(ag?.name || `#${m.agent_id}`)}</Td>
+                <Td><StatusDot status={ag?.status || 'offline'} /></Td>
+                <Td>
+                  {deps.length === 0
+                    ? <span className="text-muted-foreground">배포된 모듈 없음</span>
+                    : (
+                      <div className="flex flex-col gap-1">
+                        {deps.map(d => (
+                          <span key={d.id} className="flex flex-wrap items-center gap-2">
+                            <span>{d.package_name}</span>
+                            <span className={`font-mono text-sm ${
+                              drifted(d) ? 'text-destructive' : 'text-muted-foreground'}`}>
+                              v{d.package_version}
+                            </span>
+                            {/* 설치·제어 탭과 같은 실측 우선 상태 */}
+                            <StatusDot tone={depTone(depEffectiveStatus(d))}
+                                       label={depEffectiveStatus(d)} />
+                            {drifted(d) && (
+                              <Badge variant="warningSoft"
+                                     title={`기준(${agentDisplayName(agents.find(a => a.id === baseAid)?.name || '')}) `
+                                          + `= v${baseVer.get(d.package_name || '')}`}>
+                                드리프트
+                              </Badge>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                </Td>
               </tr>
             )
           })}
         </tbody>
-      </table>
+      </DataTable>
+      <div className="mt-2.5 text-xs text-muted-foreground">
+        버전이 어긋난 항목은 드리프트로 표시됩니다. 교정하려면 해당 멤버를 선택해
+        [패키지 설치] 에서 재설치하세요.
+      </div>
     </div>
   )
 }
 
-/**
- * SubSection — Level 2 접힘 섹션 (Figma Sec/CollapsibleSectionHeader 19:37).
- * Level 1(InspectorSection)은 굵은 라벨·굵은 화살표, Level 2 는 중간 굵기·얇은 화살표다.
- * **중첩은 2단까지** (DESIGN-RULES §2). 제목 옆 괄호 수는 그 섹션이 다루는 행 수,
- * 힌트는 "무엇을 바꿀 수 있는가" 를 한 줄로 알린다.
- */
-/**
- * FormField — 라벨 · 필수 표시 · 입력 · 도움말을 묶는 래퍼.
- * 정본 = Figma `02 Components` Sec/TextInput (Field) 17:58 — "라벨·필수·도움말·에러가 한
- * 컴포넌트에 포함" 이 그 컴포넌트의 존재 이유다. 인라인 `라벨: [입력]` 은 필수 여부도
- * 의미도 못 전한다.
- */
+/** Level 1 섹션 머리 — Level 2 는 `custom/collapsible-section` 의 `SubSection`. */
 function InspectorSection({ title, expanded, onToggle, children }: {
   title: string
   expanded: boolean
@@ -2434,13 +2454,26 @@ function DeploymentRow({ dep: d, agent, packages, pkg, onJob, onUpgrade, onRollb
   )
 }
 
-/** 모듈 상태 → Badge 배리언트. 시안 S2·S4 는 이 칸을 Badge 로 그렸다 (StatusDot 아님). */
+/**
+ * 모듈 상태의 톤. **`stopped` 은 Danger 다** — 시안 네 장(S2 91:1809 · S4 92:2051 ·
+ * G2 184:2897 · G4)이 전부 그렇게 그렸다(실측 `#b91c1c`/`#dc2626`). `DESIGN-RULES` §2 의
+ * 「Neutral = stopped」와 어긋나는데, 그 표는 **노드/에이전트** 상태의 톤 맵이고 모듈
+ * 프로세스가 죽어 있는 것은 서비스 영향이라 그림 쪽이 맞다고 봤다 (정본 문서 §7-16).
+ *
+ * 모양은 화면마다 다르다 — 서버 화면(S2·S4)은 Badge, 그룹 화면(G2·G4)은 StatusDot 이다.
+ * 각 화면 그림 그대로 간다. 톤만 두 모양에서 같게 맞춘다.
+ */
 function depBadge(st: string) {
   if (st === 'running') return 'successSoft' as const
-  if (st === 'stopped') return 'neutralSoft' as const
   if (st === 'pending' || st === 'deploying') return 'infoSoft' as const
   if (st === 'removed') return 'neutralSoft' as const
-  return 'dangerSoft' as const
+  return 'dangerSoft' as const   // stopped · failed
+}
+function depTone(st: string): StatusTone {
+  if (st === 'running') return 'success'
+  if (st === 'pending' || st === 'deploying') return 'info'
+  if (st === 'removed') return 'neutral'
+  return 'danger'                // stopped · failed
 }
 
 // ── [패키지 제어] 탭 — 서버 선택: 모듈별 프로세스 start/stop/restart ──
@@ -2450,43 +2483,71 @@ function ControlTab({ agent: a, deployments, packages, onJob }: {
   packages: SipPackage[]
   onJob: (d: Deployment, jt: JobType) => void
 }) {
-  const pkgDesc = new Map(packages.map(p => [p.name, p.description]))
-  if (deployments.length === 0) {
-    return <div className="empty">배포된 모듈 없음 — [패키지 설치] 탭에서 모듈을 먼저 배포하세요</div>
-  }
+  const pkgById = new Map(packages.map(p => [p.id, p]))
   return (
-    <table className="data-table">
-      <thead>
-        <tr>
-          <th style={{ width: 10 }}></th>
-          <th>이름</th>
-          <th>설명</th>
-          <th>모듈 · 버전</th>
-          <th>상태</th>
-          <th style={{ width: 220 }}>제어</th>
-        </tr>
-      </thead>
-      <tbody>
-        {deployments.map(d => (
-          <tr key={d.id}>
-            <td style={{ padding: 0 }}>
-              <div style={{ width: 4, background: depStatusColor(depEffectiveStatus(d)), height: 32 }} />
-            </td>
-            <td><b>{d.process_name || '—'}</b></td>
-            <td style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>
-              {pkgDesc.get(d.package_name || '') ?? '—'}
-            </td>
-            <td style={{ fontSize: 12 }}>
-              {d.package_name} <span style={{ color: 'var(--muted-foreground)' }}>v{d.package_version}</span>
-            </td>
-            <td>
-              <DepStatusCell dep={d} />
-            </td>
-            <td><ProcessControlButtons dep={d} agent={a} onJob={onJob} /></td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="px-4 pt-3.5">
+      {/* 제어 대상이 「서버」가 아니라 「서버의 모듈」임을 먼저 못박는다 (Figma S4 92:1995) —
+          ContextBar 의 [더보기 › 재시작] 과 대상이 달라 헷갈리는 자리다. */}
+      <Alert variant="info">
+        <div className="font-medium">
+          여기서 제어하는 대상은 {agentDisplayName(a.name)} 의 모듈입니다
+        </div>
+        <div className="mt-0.5 text-xs opacity-90">
+          서버 자체를 재시작하려면 위 ContextBar 의 «더보기 › 재시작» 을 사용하세요 — 대상이 다릅니다.
+        </div>
+      </Alert>
+      <div className="mt-5">
+        <TitleRow title={`모듈 제어 (${deployments.length})`}
+                  hint="런타임 관점 — 버전·재설치는 «패키지 설치» 탭" />
+      </div>
+      {deployments.length === 0 ? (
+        <EmptyState className="mt-2.5" title="배포된 모듈 없음"
+                    description="[패키지 설치] 탭에서 모듈을 먼저 배포하세요." />
+      ) : (
+        // 컬럼 폭은 Figma S4(92:2021) 실측. 설치 탭과 달리 빌드·git 이 없다 — 런타임 관점이다.
+        <DataTable className="mt-2.5">
+          <thead>
+            <tr>
+              <Th width={190}>모듈</Th>
+              <Th width={110}>버전</Th>
+              <Th width={120}>모듈 상태</Th>
+              <Th width={402} align="right">제어</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {deployments.map(d => {
+              const pkg = pkgById.get(d.package_id) ?? null
+              const summary = pkgSummary(pkg?.description)
+              const shown = depEffectiveStatus(d)
+              return (
+                <tr key={d.id}>
+                  <Td>
+                    <div className="min-w-0" title={pkg?.description || summary || ''}>
+                      <div className="truncate">{d.package_name || '—'}</div>
+                      <div className="truncate text-xs font-normal text-muted-foreground">
+                        {summary || '—'}
+                      </div>
+                    </div>
+                  </Td>
+                  <Td mono>v{d.package_version || '?'}</Td>
+                  <Td><Badge variant={depBadge(shown)}>{shown}</Badge></Td>
+                  <Td>
+                    <div className="flex items-center justify-end">
+                      <ProcessControlButtons dep={d} agent={a} onJob={onJob} />
+                    </div>
+                  </Td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </DataTable>
+      )}
+      {/* 비활성 사유를 눈에 보이게 (contracts.md §Button) — 시안 note(92:2170) 그대로 */}
+      <div className="mt-2.5 text-xs text-muted-foreground">
+        현재 상태에서 불가능한 동작은 비활성 처리합니다 — running 이면 «시작», stopped 이면
+        «재시작·정지». 오클릭으로 서비스를 건드리는 일을 줄입니다.
+      </div>
+    </div>
   )
 }
 
@@ -2507,23 +2568,43 @@ function DepStatusCell({ dep: d }: { dep: Deployment }) {
 
 // 프로세스 제어 버튼 3종 — ControlTab(서버)·GroupControlMatrix(그룹) 공용.
 // pending(미설치) 은 전부 비활성 — 설치는 [패키지 설치] 탭.
+/**
+ * 프로세스 제어 3버튼. 정본 = Figma S4(92:2054) — 아이콘 없이 글자만, 우측 정렬.
+ *
+ * **현재 상태에서 불가능한 동작은 비활성이다** (시안 note 92:2170): running 이면 `시작`,
+ * stopped 이면 `재시작`·`정지`. 구 화면은 셋 다 상시 활성이라 오클릭이 곧 서비스 조작이었다.
+ * 판정 기준은 배지와 같은 **실측 우선 상태**(`depEffectiveStatus`) — 배지는 stopped 인데
+ * 시작이 잠겨 있으면 화면이 스스로 모순되기 때문이다.
+ *
+ * stopped 일 때 `시작` 이 Primary 인 것도 시안 그대로다 — 그 상태에서 할 일이 하나뿐이다.
+ */
 function ProcessControlButtons({ dep: d, agent, onJob }: {
   dep: Deployment; agent?: Agent
   onJob: (d: Deployment, jt: JobType) => void
 }) {
   const online = agent?.status === 'online'
   const notInstalled = d.status === 'pending'
-  const canStart = online && !notInstalled && (d.status === 'stopped' || d.status === 'running')
-  const canOps   = online && !notInstalled && (d.status === 'running' || d.status === 'stopped')
-  const pendingTip = notInstalled ? '설치 필요 — [패키지 설치] 탭에서 먼저 설치' : ''
+  const shown = depEffectiveStatus(d)
+  // 바깥 게이트는 그대로 — 오프라인·미설치·failed 등에서는 셋 다 잠근다.
+  const controllable = online && !notInstalled && (shown === 'running' || shown === 'stopped')
+  const isRunning = shown === 'running'
+  const tip = (act: string) =>
+    notInstalled ? '설치 필요 — [패키지 설치] 탭에서 먼저 설치'
+    : !online ? 'agent 오프라인'
+    : !controllable ? `${shown} 상태에서는 제어할 수 없습니다`
+    : act
   return (
-    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-      <button className="btn btn--sm" disabled={!canStart} title={pendingTip || 'start'}
-        onClick={() => onJob(d, 'start')}><Play size={12} /> 시작</button>
-      <button className="btn btn--sm" disabled={!canOps} title={pendingTip || 'restart'}
-        onClick={() => onJob(d, 'restart')}><RotateCw size={12} /> 재시작</button>
-      <button className="btn btn--sm" disabled={!canOps} title={pendingTip || 'stop'}
-        onClick={() => onJob(d, 'stop')}><Square size={12} /> 정지</button>
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Button variant={controllable && !isRunning ? 'default' : 'outline'}
+        disabled={!controllable || isRunning}
+        title={isRunning ? '이미 running 입니다' : tip('프로세스 시작')}
+        onClick={() => onJob(d, 'start')}>시작</Button>
+      <Button disabled={!controllable || !isRunning}
+        title={!isRunning && controllable ? 'stopped 상태에서는 [시작] 을 쓰세요' : tip('프로세스 재시작')}
+        onClick={() => onJob(d, 'restart')}>재시작</Button>
+      <Button disabled={!controllable || !isRunning}
+        title={!isRunning && controllable ? '이미 stopped 입니다' : tip('프로세스 정지')}
+        onClick={() => onJob(d, 'stop')}>정지</Button>
     </div>
   )
 }
