@@ -1,5 +1,5 @@
 import { useConfirm } from '../components/custom/confirm'
-import { ChevronDown, RotateCw } from 'lucide-react'
+import { AlertTriangle, ChevronDown, FileText, RotateCw } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 
 import {
@@ -183,7 +183,7 @@ function DetailModal({ run, onClose, onDelete }: {
           </div>
           <div>
             <button style={btnSecondary} onClick={() => window.print()} title="이 회차를 PDF 보고서로 인쇄">
-              📄 PDF 인쇄
+              <FileText size={13} className="inline align-[-2px]" /> PDF 인쇄
             </button>
             <button style={{ ...btnDanger, marginLeft: 8 }} onClick={() => void (async () => {
               if (await confirm({ title: '회차 삭제', tone: 'danger', confirmLabel: '삭제',
@@ -349,7 +349,8 @@ function StatsPanel({
             <option key={d} value={d}>{d}일</option>
           ))}
         </select>
-        {err && <span style={{ color: 'var(--destructive)', fontSize: 11 }}>⚠ {err}</span>}
+        {err && <span className="inline-flex items-center gap-1 text-xs text-destructive">
+        <AlertTriangle size={12} /> {err}</span>}
       </div>
       {stats === null ? (
         <div style={{ ...card, color: 'var(--muted-foreground)' }}>로딩 중…</div>

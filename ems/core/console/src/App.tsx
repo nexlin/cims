@@ -1,3 +1,4 @@
+import { KeyRound, X } from 'lucide-react'
 import { useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
@@ -223,8 +224,8 @@ function Shell() {
         <div className="modal-overlay" onClick={() => setShowChgPw(false)}>
           <div className="modal-box" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span className="modal-title">🔑 비밀번호 변경</span>
-              <button className="modal-close" onClick={() => setShowChgPw(false)}>✕</button>
+              <span className="modal-title inline-flex items-center gap-1.5"><KeyRound size={16} /> 비밀번호 변경</span>
+              <button className="modal-close" onClick={() => setShowChgPw(false)} aria-label="닫기"><X size={16} /></button>
             </div>
             <form onSubmit={handleChangePassword}>
               <div className="modal-body">

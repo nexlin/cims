@@ -5,7 +5,7 @@
 //   - 드로어: 활성 알람 목록(승인/이동) + 최근 이벤트 탭. 어느 라우트에서든 상주.
 //   - 토스트: critical/major open·moreSevere 승격만 수동 닫기 토스트 — minor 이하/close 는
 //     배지 갱신만, 이벤트는 토스트 없음 (§8.2 소음 통제).
-import { Bell } from 'lucide-react'
+import { Bell, Check, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { alertsApi } from '../api/alerts'
@@ -81,7 +81,7 @@ export default function AlarmIndicator() {
             <button className={`tab-btn ${tab === 'events' ? 'tab-btn--active' : ''}`}
                     onClick={() => setTab('events')}>최근 이벤트 ({recentEvents.length})</button>
             <button className="btn btn--ghost btn--sm" style={{ marginLeft: 'auto' }}
-                    onClick={() => setOpen(false)}>✕</button>
+                    onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></button>
           </div>
           <div className="alarm-drawer-body">
             {tab === 'alarms' && active.length === 0 && (
@@ -106,7 +106,8 @@ export default function AlarmIndicator() {
                     </span>
                     <span style={{ marginLeft: 'auto' }} />
                     {a.acked
-                      ? <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>✓ {a.ackUser || '승인'}</span>
+                      ? <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                        <Check size={12} /> {a.ackUser || '승인'}</span>
                       : <button className="btn btn--ghost btn--sm" onClick={() => ack(a.alarm_id)}>승인</button>}
                     <button className="btn btn--ghost btn--sm"
                             onClick={() => { setOpen(false); navigate('/alerts/active') }}>이동</button>

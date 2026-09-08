@@ -1,5 +1,5 @@
 import { useConfirm } from '../components/custom/confirm'
-import { ChevronDown, ChevronRight, Eraser, Play, Square } from 'lucide-react'
+import { AlertTriangle, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, Eraser, FileText, Flag, Hourglass, Package, Pause, Play, SkipForward, Square } from 'lucide-react'
 import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
 
 import { verifyApi, type VerifyStagesOverview, type ItemsProgress, type VerifyEnvResponse } from '../api/verification'
@@ -119,13 +119,17 @@ function GroupCheckbox({ checked, indeterminate, disabled, onChange }: {
   return <input ref={ref} type="checkbox" checked={checked} disabled={disabled} onChange={onChange} />
 }
 
-function statusIcon(s: ItemStatus): string {
-  if (s === 'PASS')    return '✅'
-  if (s === 'FAIL')    return '❌'
-  if (s === 'SKIP')    return '⏭'
-  if (s === 'RUNNING') return '⏳'
-  if (s === 'BLOCKED') return '🚫'
-  return '⏸'
+/**
+ * 상태 아이콘 — Lucide 고정 (이모지·텍스트 글리프 금지, DESIGN-RULES §0).
+ * 색은 `statusColor` 가 따로 준다 — 아이콘은 모양만 담당한다.
+ */
+function statusIcon(s: ItemStatus) {
+  if (s === 'PASS')    return <CircleCheck size={13} className="inline align-[-2px]" />
+  if (s === 'FAIL')    return <CircleX size={13} className="inline align-[-2px]" />
+  if (s === 'SKIP')    return <SkipForward size={13} className="inline align-[-2px]" />
+  if (s === 'RUNNING') return <Hourglass size={13} className="inline align-[-2px]" />
+  if (s === 'BLOCKED') return <Ban size={13} className="inline align-[-2px]" />
+  return <Pause size={13} className="inline align-[-2px]" />
 }
 
 function statusLabel(s: ItemStatus): string {
@@ -245,7 +249,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                   whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
                   zIndex: 1,
                 }}>
-                  🚩 재개 지점
+                  <Flag size={13} className="inline align-[-2px]" /> 재개 지점
                 </div>
               )}
               {/* 외곽 ring (진행률 / 상태 색) — BLOCKED 면 점선 경계 + 회색 톤 */}
@@ -267,7 +271,7 @@ function Stepper({ stages, onSelect, resumeStage, disabled }: {
                     boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
                     zIndex: 2,
                   }} title="선행 stage FAIL 로 차단됨">
-                    🚫
+                    <Ban size={16} />
                   </div>
                 )}
                 {/* 내부 흰 원 — BLOCKED 면 회색 배경 */}
@@ -390,7 +394,7 @@ function GlobalHeader({
         display: 'flex', alignItems: 'center', gap: 6,
         fontSize: 12, color: 'var(--muted-foreground)',
       }}>
-        🚩 재개 지점:
+        <Flag size={13} className="inline align-[-2px]" /> 재개 지점:
         <select
           value={resumeStage}
           onChange={e => setResumeStage(Number(e.target.value))}
@@ -415,9 +419,10 @@ function GlobalHeader({
         padding: '6px 12px', background: 'var(--muted)',
         borderRadius: 6, fontSize: 12,
       }}>
-        <span style={{ color: 'var(--muted-foreground)' }}>📦 마지막 패키지:</span>
+        <span className="inline-flex items-center gap-1 text-muted-foreground">
+                  <Package size={13} /> 마지막 패키지:</span>
         <code style={{ fontSize: 11, fontWeight: 600 }}>cims-2026.04.29-a3f2b1c</code>
-        <span style={{ color: statusColor('PASS') }}>(S4 ✅)</span>
+        <span style={{ color: statusColor('PASS') }}>(S4 <CircleCheck size={12} className="inline align-[-2px]" />)</span>
       </div>
 
       <button
@@ -431,7 +436,7 @@ function GlobalHeader({
           cursor: 'pointer',
         }}
       >
-        📄 보고서 출력
+        <FileText size={13} className="inline align-[-2px]" /> 보고서 출력
       </button>
 
       <div style={{
@@ -504,7 +509,7 @@ function StageRow({
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 13, fontWeight: 700,
         }}>
-          {isBlocked ? '🚫' : stage.num}
+          {isBlocked ? <Ban size={13} /> : stage.num}
         </div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: 14, fontWeight: 600 }}>
@@ -1024,7 +1029,7 @@ export default function VerificationV2Page() {
         )}
         {error && (
           <span style={{ fontSize: 12, color: 'var(--destructive)', maxWidth: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            ⚠ {error}
+            <AlertTriangle size={13} className="inline align-[-2px]" /> {error}
           </span>
         )}
         {lastRunId !== null && (
@@ -1047,7 +1052,7 @@ export default function VerificationV2Page() {
             borderRadius: 6, fontSize: 12, color: '#92400e',
           }}
         >
-          <span style={{ fontSize: 16 }}>🚫</span>
+          <Ban size={16} />
           <span>
             <b>Stage Gate 발동</b> — Stage <b>S{stageGate.first_failed}</b> 의 FAIL 로
             후속 단계{' '}

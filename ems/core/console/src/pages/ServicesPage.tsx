@@ -1,5 +1,5 @@
 import { useConfirm } from '../components/custom/confirm'
-import { Play, RotateCw, Square } from 'lucide-react'
+import { Play, RotateCw, Square, Trash2 } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { servicesApi, parseServiceStatus, type ServiceName, type ServiceAction } from '../api/services'
@@ -396,7 +396,7 @@ export default function ServicesPage() {
           </button>
           <button className="btn btn--danger" disabled={!!activeJob} onClick={() => { void cleanPackages() }}
                   title="패키지 산출물 (tarball 들 + manifest.json) 삭제. 빌드 결과는 유지.">
-            🗑 정리
+            <Trash2 size={13} className="inline align-[-2px]" /> 정리
           </button>
           <button className="btn btn--outline" onClick={() => { void load(); void loadPackages(); void loadManifest() }}>
             <RotateCw size={13} /> 새로고침
@@ -518,7 +518,7 @@ export default function ServicesPage() {
                     {variantTars.map(({ v, tar }) => (
                       <button key={v} className="btn btn--sm btn--outline"
                         disabled={!tar}
-                        title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 ▣ 패키징`}
+                        title={tar ? `${tar.name} (${fmtSize(tar.size)})` : `${v} tarball 없음 — 먼저 [패키징]`}
                         onClick={() => { void downloadTarball(v) }}
                         style={{ fontSize: 11, padding: '2px 6px',
                                  fontFamily: 'monospace' }}>

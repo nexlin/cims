@@ -4,7 +4,7 @@
 // 드래그 중엔 placeholder ghost 로 착지 지점을 스냅해 보여주고, pointerup 에 gridLayout(moveItem/applyBox)
 // 으로 커밋 → 겹침은 아래로 밀리고 빈칸은 위로 당겨진다(compaction). 배치 상태는 부모(EditableLayout) draft 소유.
 
-import { Lock, LockOpen, Settings } from 'lucide-react'
+import { Lock, LockOpen, Settings, Undo2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
 import WidgetApiBadge from '../components/WidgetApiBadge'
@@ -286,7 +286,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4, position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}>
                   <button className="btn btn--sm" title="마지막 변경 한 수만 취소"
-                          onClick={inside.onUndo} disabled={inside.saving || !inside.canUndo}>↶ 되돌리기</button>
+                          onClick={inside.onUndo} disabled={inside.saving || !inside.canUndo}><Undo2 size={13} /> 되돌리기</button>
                   <button className="btn btn--sm" title="이 카드의 기본 배치로 초기화"
                           onClick={inside.onReset} disabled={inside.saving}>초기화</button>
                   <button className="btn btn--sm btn--primary" title="레이아웃을 저장하고 편집을 끝낸다"
@@ -325,7 +325,7 @@ export function GridEditor({ widgets, gap = GRID_GAP, preview = false, nested = 
               <button className="btn btn--sm" title="제거"
                       style={{ color: 'var(--destructive)', position: 'relative', zIndex: 7 }}
                       onPointerDown={e => e.stopPropagation()}
-                      onClick={() => { setCfgOpen(null); onChange(removeAt(widgets, i)) }}>✕</button>
+                      onClick={() => { setCfgOpen(null); onChange(removeAt(widgets, i)) }} aria-label="위젯 삭제"><X size={13} /></button>
               </>}
             </div>
             {cfgOpen === i && (

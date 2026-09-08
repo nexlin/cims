@@ -1,3 +1,4 @@
+import { FolderOpen, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import Modal from '../../components/Modal'
 import { useToast } from '../../components/Toast'
@@ -129,7 +130,7 @@ export default function PackageUploadModal({ onClose, onDone }: {
     <Modal title="패키지 업로드" onClose={closeModal} width={760}>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
         <label htmlFor="pkg-files" className="btn btn--outline" style={{ cursor: 'pointer' }}>
-          📁 파일 선택 (여러 개 가능)
+          <FolderOpen size={13} className="inline align-[-2px]" /> 파일 선택 (여러 개 가능)
         </label>
         <input id="pkg-files" type="file" accept=".tar.gz,.tgz" multiple
           style={{ display: 'none' }}
@@ -233,7 +234,7 @@ function UploadProgressRow({ row, onAbort, onRemove, onRetry }: {
       </td>
       <td>
         {row.state === 'uploading' && (
-          <button className="btn btn--sm btn--outline" onClick={onAbort}>✕ 취소</button>
+          <button className="btn btn--sm btn--outline" onClick={onAbort}><X size={12} /> 취소</button>
         )}
         {row.state === 'failed' && (
           <button className="btn btn--sm" onClick={onRetry}>재시도</button>

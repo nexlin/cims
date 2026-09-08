@@ -10,7 +10,7 @@ import { useToast } from '../components/Toast'
 import { useAlarms, refreshAlarms, severityOf, type ActiveAlarm } from '../widgets/useAlarms'
 import { alarmTypeLabel, sevBadgeClass, fmtTime, formatSec, SEVERITY_LABEL } from '../utils/alarmLabels'
 import { usePageParam } from '../widgets/pageParams'
-import { RotateCw } from 'lucide-react'
+import { Check, MessageSquare, RotateCw } from 'lucide-react'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -172,14 +172,16 @@ export function ActiveAlarmList() {
                         </span>
                       )}
                       {(a.comments?.length ?? 0) > 0 && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>💬{a.comments!.length}</span>
+                        <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+                      <MessageSquare size={11} />{a.comments!.length}</span>
                       )}
                     </td>
                     <td className="ts">{fmtTime(a.ts)}</td>
                     <td>{elapsedSince(a.ts)}</td>
                     <td>
                       {a.acked
-                        ? <span style={{ fontSize: 11, color: 'var(--cims-success)' }}>✓ {a.ackUser || '승인'}</span>
+                        ? <span className="inline-flex items-center gap-1 text-xs text-[var(--cims-success)]">
+                      <Check size={12} /> {a.ackUser || '승인'}</span>
                         : <span style={{ color: 'var(--muted-foreground)', fontSize: 12 }}>미승인</span>}
                     </td>
                   </tr>,

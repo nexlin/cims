@@ -1,3 +1,4 @@
+import { KeyRound, Radio } from 'lucide-react'
 import { useState } from 'react'
 import { authApi } from '../api/auth'
 import { useAuth } from '../contexts/AuthContext'
@@ -66,7 +67,7 @@ export default function LoginPage() {
     return (
       <div className="auth-wrap">
         <div className="auth-card">
-          <div className="auth-logo">🔑 비밀번호 변경</div>
+          <div className="auth-logo"><KeyRound size={18} /> 비밀번호 변경</div>
           <form onSubmit={handleChangePassword} className="auth-form">
             <input className="form-input" type="password" placeholder="현재 비밀번호"
               value={oldPw} onChange={e => setOldPw(e.target.value)} />
@@ -95,7 +96,7 @@ export default function LoginPage() {
     <div className="auth-wrap">
       <div className="auth-card">
         <div className="auth-logo">
-          <span style={{ fontSize: 32 }}>📡</span>
+          <Radio size={32} className="text-primary" />
           <span className="app-logo-text" style={{ fontSize: 22 }}>CIMS</span>
         </div>
 

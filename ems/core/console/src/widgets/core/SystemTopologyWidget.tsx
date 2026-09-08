@@ -2,6 +2,7 @@
 // 구성을 그리고, 각 서버/모듈 상태색을 **활성 알람 등급**으로 구동(offline/critical/major 🔴,
 // minor/warning 🟡, 정상 🟢, 설치만 되고 미기동 ⚪).
 // 서비스 무지(범용 인프라). 형상 폴링 15s, 알람은 전역 store 구독. 비관리자/오류 시 빈.
+import { AlertTriangle, ArrowLeftRight, Diamond } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { haGroupsApi, type HaGroup } from '../../api/ha_groups'
@@ -95,7 +96,8 @@ function NodeBox({ n, sevByMo, onClick }: { n: Node; sevByMo: Map<string, number
                 {n.role === 'master' ? 'M' : 'B'}</span>}
               {/* 절체 드리프트 — 설정 선호 ≠ 현재 Active */}
               {n.role && ((n.role === 'master') !== !!n.active) &&
-                <span title="절체됨 — 설정 선호 노드와 현재 Active 가 다름" style={{ color: C_AMBER, fontSize: 11, fontWeight: 700 }}>⚠</span>}
+                <AlertTriangle size={12} style={{ color: C_AMBER }}
+              aria-label="절체됨 — 설정 선호 노드와 현재 Active 가 다름" />}
             </span>}
         <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--muted-foreground)', flexShrink: 0 }}>{n.version ? `v${n.version}` : ''}</span>
       </div>
@@ -264,9 +266,10 @@ function SystemTopologyWidget() {
                 <b style={{ fontSize: 13 }}>{s.name}</b>
                 <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, color: '#fff', background: mb.c }}>{mb.t}</span>
                 {s.mode === 'AS' && s.nodes.length > 1 &&
-                  <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>⇄ VRRP</span>}
+                  <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+              <ArrowLeftRight size={11} /> VRRP</span>}
                 {s.vip && <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--muted-foreground)' }}>
-                  ◆ VIP <code style={{ fontSize: 11 }}>{s.vip}</code>{s.vipSlot ? ` /${s.vipSlot}` : ''}</span>}
+                  <Diamond size={10} className="inline align-[-1px]" /> VIP <code style={{ fontSize: 11 }}>{s.vip}</code>{s.vipSlot ? ` /${s.vipSlot}` : ''}</span>}
               </div>
               {/* 노드 — 수에 따라 균형 그리드 (2→2열, 4→2x2 ...). */}
               <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, minmax(150px, 1fr))`, gap: 10 }}>

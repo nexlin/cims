@@ -13,6 +13,7 @@
 // **배치 단위는 화면 전체가 카드 하나**(`core.service-defs`)다 — 고른 서비스가 곧 아래 세 컬렉션의
 // 의미라, 선택을 떼거나 컬렉션 하나만 떼어 놓으면 무엇에 대한 목록인지 알 수 없다. 카드 안 구성은
 // SERVICE_DEF_CARD_ROWS 선언이 정본이고, 블록은 아래 위젯들을 id 로 그대로 쓴다(CardLayout).
+import { Check } from 'lucide-react'
 import { useConfirm } from '../../components/custom/confirm'
 import { useState } from 'react'
 import { makeCardWidget } from '../CardLayout'
@@ -214,7 +215,7 @@ function ModulesBlock() {
                   <td><b>{m.name}</b></td>
                   <td>{m.port ?? '—'}</td>
                   <td>{m.proto ?? '—'}</td>
-                  <td>{m.controllable ? '●' : ''}</td>
+                  <td>{m.controllable ? <Check size={13} className="text-[var(--cims-success)]" /> : ''}</td>
                   {editMode && <RowActions onEdit={() => setEdit({ index: i })} onRemove={() => remove(i)} />}
                 </tr>
               ))}

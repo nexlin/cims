@@ -8,6 +8,7 @@
 // 보기 모드: 위젯 래퍼 우상단 오버레이. 편집 모드: 위젯 카드 헤더에 인라인.
 // 상세는 요청/응답/오류/비고 4개 섹션이고, 경로·curl·예시는 **내용을 먼저 보여주고** 옆의 [복사]로 담는다.
 
+import { X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Code2 } from 'lucide-react'
@@ -291,7 +292,7 @@ export default function WidgetApiBadge({ ids, title, overlay, sourceIds }: {
                         overflow: 'hidden' }}>
             <div className="modal-header">
               <span className="modal-title">{'</>'} {title || '위젯'} — 사용 API</span>
-              <button className="modal-close" onClick={() => setOpen(false)}>✕</button>
+              <button className="modal-close" onClick={() => setOpen(false)} aria-label="닫기"><X size={16} /></button>
             </div>
             <div className="modal-body" style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
               <div style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 10 }}>

@@ -1,7 +1,7 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
-import { Pencil, Trash2, ChevronRight, ChevronDown, ArrowLeft, ArrowRight, Radio, Headphones } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, Headphones, Pencil, Radio, Trash2, X } from 'lucide-react'
 import { dispatchApi, type DispatchGroup, type DispatchGroupInput, type DispatchMember,
   type MonitorScope, type PttListen } from '@core/api/dispatch'
 import { usersApi, type UserSummary } from '@core/api/users'
@@ -137,7 +137,8 @@ export default function DispatchGroupsPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="그룹명·ID·대표번호 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}>✕</button>}
+          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}
+        aria-label="검색어 지우기"><X size={13} /></button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {canWrite && !notMigrated && (
               <button className="btn btn--primary btn--sm" onClick={() => { setOpenId(null); setAdding(a => !a) }}>＋ 관제 그룹</button>

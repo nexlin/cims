@@ -1,5 +1,6 @@
 // 코어 위젯 — 시스템 리소스(차트). 서버별 CPU/메모리/디스크/네트워크 추이를 area 차트로.
 // 지표는 체크박스로 모두 또는 선택한 것만 동시 표시. agent metric(2s 수집, tail-read) 사용.
+import { AlertTriangle } from 'lucide-react'
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deploymentApi, type Agent, type AgentMetric } from '../../api/deployment'
@@ -98,7 +99,9 @@ function SystemResourceWidget() {
     <div className="panel" style={{ padding: 16 }}>
       <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         시스템 리소스 ({rows.length})
-        {stale && <span title="갱신 일시 실패 — 직전 값" style={{ fontSize: 11, color: C_AMBER }}>⚠ 갱신 지연</span>}
+        {stale && <span title="갱신 일시 실패 — 직전 값"
+        className="inline-flex items-center gap-1 text-xs" style={{ color: C_AMBER }}>
+        <AlertTriangle size={11} /> 갱신 지연</span>}
         <span style={{ display: 'inline-flex', gap: 10, fontSize: 12, fontWeight: 400 }}>
           {ALL_METRICS.map(m => (
             <label key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', color: 'var(--muted-foreground)' }}>

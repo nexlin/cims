@@ -10,7 +10,7 @@
 //   목록은 화면 내 고정 높이 + 페이지 내비게이션(Pager)으로 넘긴다 — 페이지 스크롤 누적 없음.
 //   필터는 전부 클라이언트에서 건다 — 서버 type 필터는 type 필드가 없는 ack/comment
 //   레코드를 떨어뜨려 승인·코멘트 표시가 소실되기 때문(전 레코드 수신 후 행 단위 필터).
-import { RotateCw } from 'lucide-react'
+import { Check, MessageSquare, RotateCw } from 'lucide-react'
 import { useState, useCallback, useMemo } from 'react'
 import { alertsApi, eventsApi, type AlertEvent, type EventRecord } from '../api/alerts'
 import { useToast } from '../components/Toast'
@@ -303,10 +303,11 @@ export function AlarmsSection() {
                           </span>
                         )}
                         {(r.comments?.length ?? 0) > 0 && (
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--muted-foreground)' }}>💬{r.comments!.length}</span>
+                          <span className="ml-1.5 inline-flex items-center gap-0.5 text-xs text-muted-foreground">
+                        <MessageSquare size={11} />{r.comments!.length}</span>
                         )}
                         {r.ack_state === 'acknowledged' && (
-                          <span style={{ marginLeft: 6, fontSize: 11, color: 'var(--cims-success)' }}>✓</span>
+                          <Check size={12} className="ml-1.5 inline text-[var(--cims-success)]" aria-label="승인됨" />
                         )}
                       </td>
                       <td className="ts">

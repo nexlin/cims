@@ -5,7 +5,7 @@
  * (평면 목록에서 오든, 그룹 활동에서 오든) 표현도 한 벌이어야 한다.
  */
 
-import { ArrowRight, Circle, Dot, Pause, Play, Plus, Settings, Square, X, type LucideIcon } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronRight, Circle, Diamond, Dot, Pause, Play, Plus, Settings, Square, X, type LucideIcon } from 'lucide-react'
 import {
   useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback,
   type CSSProperties,
@@ -392,7 +392,7 @@ export function SessionRow({ sess, isOpen, detail, storeKey, isDuplex, audio, fl
           background: isOpen ? 'var(--accent)' : 'transparent',
         }}
       >
-        <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? '▾' : '▸'}</td>
+        <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
         <td style={{ ...tdStyle, fontWeight: 600 }}>{fmtWindow(sess.dir)}</td>
         <td style={tdStyle} className="ts">
           {fmtShortTime(sess.start_time)} ~ {sess.state === 'active' ? 'active' : fmtShortTime(sess.end_time)}
@@ -654,7 +654,8 @@ function PanelDetail({ detail, recId, isDuplex, audio, names, turns, speakerOrde
       cursor: 'pointer', userSelect: 'none',
     } as CSSProperties,
   })
-  const chev = (on: boolean) => <span style={{ color: 'var(--muted-foreground)' }}>{on ? '▸ ' : '▾ '}</span>
+  const chev = (on: boolean) => <span className="mr-1 inline-flex text-muted-foreground">
+  {on ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -807,7 +808,8 @@ export function EventTimeline({ floor, events, participants, turns, speakerOrder
         <span onClick={onToggle}
               style={{ fontWeight: 600, fontSize: 13, ...(onToggle ? { cursor: 'pointer', userSelect: 'none' as const } : {}) }}
               title={onToggle ? (collapsed ? '펼치기' : '접기') : undefined}>
-          {onToggle && <span style={{ color: 'var(--muted-foreground)' }}>{collapsed ? '▸ ' : '▾ '}</span>}이벤트 타임라인
+          {onToggle && <span className="mr-1 inline-flex text-muted-foreground">
+        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>}이벤트 타임라인
         </span>
         <span className="ts" style={{ fontSize: 11 }}>발언권 중재 · 입퇴장</span>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
@@ -955,7 +957,7 @@ export function FloorRow({ f, speakerOrder, names, border, role, turn, recId, au
           {isPrep ? '…' : isPlaying ? <Pause size={13} /> : <Play size={13} />}
         </button>
       ) : (
-        <span style={{ minWidth: 30, textAlign: 'center', color: st.color }}>◆</span>
+        <span style={{ minWidth: 30, textAlign: 'center', color: st.color }}><Diamond size={11} /></span>
       )}
       <span style={{ color: st.color, fontWeight: 600, minWidth: 76 }}>{st.label}</span>
       {f.user
@@ -1149,7 +1151,8 @@ function LaneTimebar({ turns, speakerOrder, recId, audio, names, fill, collapsed
         <span onClick={onToggle}
               style={{ fontWeight: 600, fontSize: 13, ...(onToggle ? { cursor: 'pointer', userSelect: 'none' as const } : {}) }}
               title={onToggle ? (collapsed ? '펼치기' : '접기') : undefined}>
-          {onToggle && <span style={{ color: 'var(--muted-foreground)' }}>{collapsed ? '▸ ' : '▾ '}</span>}발언권 타임라인
+          {onToggle && <span className="mr-1 inline-flex text-muted-foreground">
+        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}</span>}발언권 타임라인
         </span>
         <span className="ts" style={{ color: 'var(--muted-foreground)' }}>{fmtClock(spanStart)} ~ {fmtClock(spanEnd)} · {fmtSpeechMs(span)}</span>
         {maxCon > 1 && (

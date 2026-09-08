@@ -4,7 +4,7 @@
 // 영속: OAM /console/layouts/<id> (PUT 저장 / DELETE seed 리셋). 없으면 seed.
 
 import { useConfirm } from '../components/custom/confirm'
-import { Pencil } from 'lucide-react'
+import { Eye, Pencil, Undo2 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useAuth } from '../contexts/AuthContext'
@@ -323,10 +323,10 @@ export function EditableLayout({ layoutId, seed }: { layoutId: string; seed: Pag
           </span>
           <button className="btn btn--sm" onClick={undo} disabled={undoStack.length === 0}
                   title={undoStack.length ? `마지막 변경 취소 (${undoStack.length}단계 남음)`
-                                          : '되돌릴 변경 없음'}>↶ 되돌리기</button>
+                                          : '되돌릴 변경 없음'}><Undo2 size={13} /> 되돌리기</button>
           <button className={`btn btn--sm ${preview ? 'btn--primary' : ''}`}
                   title="저장 후 모습 보기 — 제목줄·핸들을 감춘다(조작 잠김)"
-                  onClick={() => setPreview(p => !p)}>👁 미리보기</button>
+                  onClick={() => setPreview(p => !p)}><Eye size={13} /> 미리보기</button>
           <button className="btn btn--sm btn--primary" onClick={saveLayout} disabled={saving}>저장</button>
           <button className="btn btn--sm" onClick={cancelEdit} disabled={saving}>취소</button>
           <button className="btn btn--sm" onClick={resetLayout} disabled={saving}

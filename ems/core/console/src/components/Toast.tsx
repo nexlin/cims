@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { createContext, useContext, useState, type ReactNode, useCallback } from 'react'
 
 interface ToastMsg {
@@ -38,7 +39,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             {m.text}
             {m.sticky && (
               <button className="toast-close" aria-label="닫기"
-                      onClick={e => { e.stopPropagation(); dismiss(m.id) }}>✕</button>
+                      onClick={e => { e.stopPropagation(); dismiss(m.id) }}><X size={14} /></button>
             )}
           </div>
         ))}

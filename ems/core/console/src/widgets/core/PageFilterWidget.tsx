@@ -6,6 +6,7 @@
 // 모호했다(그 달인지, 최근 30일인지). 시작~끝을 먼저 정하고 그 안을 단위로 쪼갠다.
 // 단위마다 최대 구간이 있고(GRAN_MAX_DAYS ≈ 800버킷) 넘는 단위는 누를 수 없다 —
 // 프리셋으로 구간을 바꿀 때는 감당 가능한 가장 세밀한 단위로 자동 승격한다.
+import { RotateCcw } from 'lucide-react'
 import type { WidgetDef, WidgetProps } from '../types'
 import {
   GRAN_LABELS, GRAN_MAX_DAYS, bestGran, defaultRange, fmtDt, granFits,
@@ -65,7 +66,7 @@ function PageFilterWidget({ config }: WidgetProps) {
         {PRESETS.map(p => (
           <button key={p.key} className="btn btn--sm" onClick={() => applyPreset(p.days)}>{p.label}</button>
         ))}
-        <button className="btn btn--sm btn--ghost" title="오늘 00:00 ~ 지금" onClick={reset}>↺</button>
+        <button className="btn btn--sm btn--ghost" title="오늘 00:00 ~ 지금" onClick={reset} aria-label="기간 초기화"><RotateCcw size={13} /></button>
 
         {showGran && (
           <>

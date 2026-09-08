@@ -1,6 +1,6 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import React, { useState, useEffect, useCallback } from 'react'
-import { ChevronDown, ChevronRight, Pencil, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Dot, Pencil, Plus, RotateCw, Trash2, X } from 'lucide-react'
 import IconBtn from '@core/components/IconBtn'
 import { orgApi, type Organization, type OrgInput } from '@core/api/organizations'
 import { useToast } from '@core/components/Toast'
@@ -240,7 +240,9 @@ export default function OrganizationsPage() {
                             style={{ width: 18, textAlign: 'center', cursor: hasChildren ? 'pointer' : 'default', userSelect: 'none', fontSize: 11 }}
                             onClick={() => { if (hasChildren) toggleExpand(n.id) }}
                           >
-                            {hasChildren ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : '●'}
+                            {hasChildren
+              ? (isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />)
+              : <Dot size={12} className="text-muted-foreground" />}
                           </span>
                           <span style={{ fontWeight: 500 }}>{n.name}</span>
                         </div>
@@ -370,7 +372,8 @@ export default function OrganizationsPage() {
           <div className="modal-box" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <span className="modal-title">조직 Excel 가져오기</span>
-              <button className="modal-close" onClick={() => { setImportOpen(false); setImportResult(null) }}>✕</button>
+              <button className="modal-close" aria-label="닫기"
+              onClick={() => { setImportOpen(false); setImportResult(null) }}><X size={16} /></button>
             </div>
             <div className="modal-body">
               <p style={{ marginBottom: 12 }}>조직 계층을 Excel(.xlsx)로 일괄 등록합니다.</p>

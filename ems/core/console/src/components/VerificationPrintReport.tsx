@@ -7,6 +7,8 @@
 //   window.print() 시 v2-report 클래스가 .v2-report 인쇄 스타일에 의해 노출.
 // ─────────────────────────────────────────────────────────────
 
+import { Ban, CircleCheck, CircleX, Hourglass, Pause, SkipForward } from 'lucide-react'
+
 export type ItemStatus = 'PENDING' | 'RUNNING' | 'PASS' | 'FAIL' | 'SKIP' | 'BLOCKED'
 
 export interface ReportItem {
@@ -50,13 +52,17 @@ function fmtRunIdShort(id: number): string {
 }
 
 // 표시 helper
-export function statusIcon(s: ItemStatus): string {
-  if (s === 'PASS')    return '✅'
-  if (s === 'FAIL')    return '❌'
-  if (s === 'SKIP')    return '⏭'
-  if (s === 'RUNNING') return '⏳'
-  if (s === 'BLOCKED') return '🚫'
-  return '⏸'
+/**
+ * 상태 아이콘 — Lucide 고정 (이모지·텍스트 글리프 금지, DESIGN-RULES §0).
+ * 색은 `statusColor` 가 따로 준다 — 아이콘은 모양만 담당한다.
+ */
+export function statusIcon(s: ItemStatus) {
+  if (s === 'PASS')    return <CircleCheck size={13} className="inline align-[-2px]" />
+  if (s === 'FAIL')    return <CircleX size={13} className="inline align-[-2px]" />
+  if (s === 'SKIP')    return <SkipForward size={13} className="inline align-[-2px]" />
+  if (s === 'RUNNING') return <Hourglass size={13} className="inline align-[-2px]" />
+  if (s === 'BLOCKED') return <Ban size={13} className="inline align-[-2px]" />
+  return <Pause size={13} className="inline align-[-2px]" />
 }
 
 export function statusLabel(s: ItemStatus): string {
@@ -138,7 +144,7 @@ export function VerificationPrintReport({
   const pendCount  = flatItems.filter(({ it }) => it.status === 'PENDING').length
   const totalElapsed = flatItems.reduce((s, { it }) => s + it.elapsedMs, 0)
 
-  const cell = (text: string | number, opts: React.CSSProperties = {}) => (
+  const cell = (text: React.ReactNode, opts: React.CSSProperties = {}) => (
     <td style={{ padding: '5px 8px', borderBottom: '1px solid #e5e7eb', ...opts }}>{text}</td>
   )
   const headCell = (text: string, opts: React.CSSProperties = {}) => (
@@ -195,11 +201,11 @@ export function VerificationPrintReport({
                 <div><b>전체 항목:</b> {totalItems}건</div>
                 <div><b>총 소요시간:</b> {fmtMs(totalElapsed)}</div>
                 <div><b>완료율:</b> {totalItems > 0 ? Math.round((passCount + failCount + skipCount) / totalItems * 100) : 0}%</div>
-                <div style={{ color: statusColor('PASS') }}><b>✅ 성공:</b> {passCount}건</div>
-                <div style={{ color: statusColor('FAIL') }}><b>❌ 실패:</b> {failCount}건</div>
-                <div style={{ color: statusColor('SKIP') }}><b>⏭ 건너뜀:</b> {skipCount}건</div>
-                <div style={{ color: statusColor('BLOCKED') }}><b>🚫 차단:</b> {blockCount}건</div>
-                <div style={{ color: statusColor('PENDING') }}><b>⏸ 대기:</b> {pendCount}건</div>
+                <div style={{ color: statusColor('PASS') }}><b><CircleCheck size={13} className="inline align-[-2px]" /> 성공:</b> {passCount}건</div>
+                <div style={{ color: statusColor('FAIL') }}><b><CircleX size={13} className="inline align-[-2px]" /> 실패:</b> {failCount}건</div>
+                <div style={{ color: statusColor('SKIP') }}><b><SkipForward size={13} className="inline align-[-2px]" /> 건너뜀:</b> {skipCount}건</div>
+                <div style={{ color: statusColor('BLOCKED') }}><b><Ban size={13} className="inline align-[-2px]" /> 차단:</b> {blockCount}건</div>
+                <div style={{ color: statusColor('PENDING') }}><b><Pause size={13} className="inline align-[-2px]" /> 대기:</b> {pendCount}건</div>
               </div>
             </td>
           </tr>
@@ -228,7 +234,7 @@ export function VerificationPrintReport({
                 {cell(st.id, { fontWeight: 700 })}
                 {cell(st.title, { fontWeight: 600 })}
                 {cell(st.desc, { color: '#4b5563', fontSize: 10 })}
-                {cell(`${statusIcon(s)} ${statusLabel(s)}`, { textAlign: 'center', color: statusColor(s), fontWeight: 700 })}
+                {cell(<>{statusIcon(s)} {statusLabel(s)}</>, { textAlign: 'center', color: statusColor(s), fontWeight: 700 })}
                 {cell(`${done} / ${total}`, { textAlign: 'right' })}
                 {cell(fmtMs(elapsed), { textAlign: 'right' })}
               </tr>
@@ -291,7 +297,7 @@ export function VerificationPrintReport({
               {cell(st.id, { fontWeight: 600 })}
               {cell(it.id, { fontFamily: 'monospace', fontSize: 9, paddingLeft: it.parent ? 24 : 8 })}
               {cell(it.name, { fontSize: 10 })}
-              {cell(`${statusIcon(it.status)} ${statusLabel(it.status)}`, {
+              {cell(<>{statusIcon(it.status)} {statusLabel(it.status)}</>, {
                 textAlign: 'center', color: statusColor(it.status), fontWeight: 600,
               })}
               {cell(fmtMs(it.elapsedMs), { textAlign: 'right', color: '#6b7280' })}
@@ -378,7 +384,7 @@ export function VerificationPrintReport({
                             {cell(c.id.split('.').pop() || c.id, { fontFamily: 'monospace', fontSize: 9, padding: '3px 6px', paddingLeft: 14 })}
                             {cell(c.name, { fontSize: 10, padding: '3px 6px' })}
                             {cell(c.desc || '—', { fontSize: 9, color: '#6b7280', padding: '3px 6px' })}
-                            {cell(`${statusIcon(c.status)} ${statusLabel(c.status)}`, {
+                            {cell(<>{statusIcon(c.status)} {statusLabel(c.status)}</>, {
                               textAlign: 'center', color: statusColor(c.status), fontWeight: 600, fontSize: 9, padding: '3px 6px',
                             })}
                             {cell(fmtMs(c.elapsedMs), { textAlign: 'right', fontSize: 9, color: '#6b7280', padding: '3px 6px' })}

@@ -1,4 +1,4 @@
-import { Play } from 'lucide-react'
+import { AlertTriangle, Maximize2, Play } from 'lucide-react'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { recordingsApi, type RecordingSegment } from '../api/recordings'
 
@@ -254,7 +254,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             <button onClick={onMaximize}
               style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer',
                 color: 'var(--muted-foreground)', padding: '2px 6px', lineHeight: 1 }}
-              title="최대화">⛶</button>
+              title="최대화"><Maximize2 size={13} /></button>
           )}
           {onClose && (
             <button onClick={onClose}
@@ -335,7 +335,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             marginTop: 8, padding: '8px 12px', borderRadius: 6,
             background: 'rgba(220,38,38,0.08)', color: 'var(--destructive)', fontSize: 13,
           }}>
-            <span>⚠️ 재생 준비 실패: {prepError}</span>
+            <span className="inline-flex items-center gap-1"><AlertTriangle size={13} /> 재생 준비 실패: {prepError}</span>
             <button className="btn btn--sm" onClick={() => { if (current) loadSegment(current, true) }}>다시 시도</button>
           </div>
         )}

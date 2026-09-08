@@ -1,4 +1,4 @@
-import { RotateCw, Zap } from 'lucide-react'
+import { AlertTriangle, Check, RotateCw, Zap } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useToast } from '../Toast'
 import {
@@ -262,7 +262,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
           borderRadius: 4, padding: '8px 12px', marginBottom: 10,
           fontSize: 12, color: 'var(--cims-warning)',
         }}>
-          ⚠️ HA 그룹 멤버 간 정합 불일치 — 양 멤버의 jsonl 이 다릅니다.
+          <AlertTriangle size={13} className="inline align-[-2px]" /> HA 그룹 멤버 간 정합 불일치 — 양 멤버의 jsonl 이 다릅니다.
           {drift.peers.length > 0 && (
             <span style={{ marginLeft: 8 }}>
               ({drift.peers.map(p => `dep#${p.deployment_id}: ${p.count ?? 'err'}건 (${p.hash.slice(0, 6) || '–'})`).join(' / ')})
@@ -275,7 +275,7 @@ function ModuleConfigEditorInner({ source, collection, onSaved }: Props) {
         <div style={{
           fontSize: 11, color: 'var(--cims-success)', marginBottom: 8,
         }}>
-          ✓ HA 그룹 멤버 정합 (mode={drift.mode || '?'}, {drift.peers.length} 멤버)
+          <Check size={13} className="inline align-[-2px]" /> HA 그룹 멤버 정합 (mode={drift.mode || '?'}, {drift.peers.length} 멤버)
         </div>
       )}
 
@@ -410,7 +410,8 @@ function AccessServiceSecurityHints({ record, localNodes }: { record: Record_; l
                   borderTop: '1px solid var(--border)', paddingTop: 8 }}>
       {lines.map((l, i) => (
         <div key={i} style={{ fontSize: 11.5, color: l.ok ? 'var(--muted-foreground)' : 'var(--cims-warning)' }}>
-          {l.ok ? '✓' : '⚠'} {l.text}
+          {l.ok ? <Check size={12} className="inline align-[-2px]" />
+                       : <AlertTriangle size={12} className="inline align-[-2px]" />} {l.text}
         </div>
       ))}
     </div>
@@ -470,9 +471,9 @@ function CheckboxList({ options, value, onChange, emptyText }: {
   )
 }
 
-function formatValue(v: unknown, f: ConfigTemplateField): string {
+function formatValue(v: unknown, f: ConfigTemplateField): React.ReactNode {
   if (v === undefined || v === null || v === '') return '—'
-  if (f.type === 'bool') return v ? '✓' : ''
+  if (f.type === 'bool') return v ? <Check size={13} className="inline align-[-2px]" /> : ''
   if (f.type === 'password') return '••••'
   if (f.type === 'string_list' || f.type === 'ref_list') {
     return Array.isArray(v) ? (v.length ? v.join(', ') : '—') : String(v)

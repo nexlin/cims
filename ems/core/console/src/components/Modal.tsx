@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { type ReactNode, useEffect } from 'react'
 
 interface Props {
@@ -23,7 +24,7 @@ export default function Modal({ title, onClose, children, wide, fullscreen, widt
       <div className="modal-fullscreen">
         <div className="modal-header">
           <span className="modal-title">{title}</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
         </div>
         <div className="modal-body-area">{children}</div>
       </div>
@@ -39,7 +40,7 @@ export default function Modal({ title, onClose, children, wide, fullscreen, widt
       >
         <div className="modal-header">
           <span className="modal-title">{title}</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
         </div>
         <div className="modal-body">{children}</div>
       </div>

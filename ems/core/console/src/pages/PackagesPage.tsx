@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { deploymentApi, type SipPackage, type Deployment } from '../api/deployment'
@@ -277,7 +278,8 @@ function VersionRow({ pkg: p, isLatest, expanded, onToggle,
           display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
           cursor: 'pointer', userSelect: 'none',
         }}>
-        <span style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>{expanded ? '▾' : '▸'}</span>
+        <span className="text-muted-foreground">
+                    {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <b style={{ fontSize: 14 }}>v{p.version}</b>
         {isLatest && (
           <span className="tag" style={{
@@ -341,7 +343,7 @@ function DeploymentsForPackageModal({ pkg, deployments, onClose }: {
       <div className="modal-box" style={{ width: 640 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">{pkg.name} v{pkg.version} — 배포된 서버</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
         </div>
         <div className="modal-body">
           {deployments.length === 0 ? (

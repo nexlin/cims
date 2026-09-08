@@ -1,7 +1,7 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
-import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Pencil, Trash2, X } from 'lucide-react'
 import { usersApi, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { orgApi, type Organization } from '@core/api/organizations'
@@ -263,7 +263,8 @@ export default function ProvisioningWorkbenchPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="이름·번호·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}>✕</button>}
+          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}
+        aria-label="검색어 지우기"><X size={13} /></button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {tab === 'users' && canWrite && <>
               <button className="btn btn--outline btn--sm" onClick={() => setImportOpen(true)}>Excel 가져오기</button>
@@ -602,7 +603,7 @@ function AuthSelect({ value, onChange }: { value: AuthScheme | undefined; onChan
 function AuthBadge({ sub }: { sub: Subscription }) {
   if (sub.auth_scheme !== 'aka') return <span className="ts">Digest</span>
   return <span className={`badge ${sub.aka_provisioned ? 'badge--green' : 'badge--red'}`} style={{ fontSize: 9 }}
-    title={sub.aka_provisioned ? 'IMS AKA — K/OPc 보관됨, 보호 채널(TLS/IPsec) 강제' : 'IMS AKA — K/OPc 미보관(등록 불가)'}>AKA{sub.aka_provisioned ? '' : ' ⚠'}</span>
+    title={sub.aka_provisioned ? 'IMS AKA — K/OPc 보관됨, 보호 채널(TLS/IPsec) 강제' : 'IMS AKA — K/OPc 미보관(등록 불가)'}>AKA{sub.aka_provisioned ? '' : <AlertTriangle size={10} className="ml-0.5 inline align-[-1px]" />}</span>
 }
 // K/OPc 입력 — 편집 시 비우면 보관 키 유지(aka_provisioned 일 때). 둘 다 hex32.
 function AkaKeyInputs({ k, opc, keep, onChange }: { k: string; opc: string; keep?: boolean; onChange: (k: string, opc: string) => void }) {
@@ -893,7 +894,7 @@ function ImportModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
       <div className="modal-box" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">사용자·번호 Excel 가져오기</span>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose} aria-label="닫기"><X size={16} /></button>
         </div>
         <div className="modal-body">
           <p style={{ marginBottom: 12 }}>사용자 + VoLTE/PTT 번호를 한 Excel(.xlsx)로 일괄 등록합니다.</p>

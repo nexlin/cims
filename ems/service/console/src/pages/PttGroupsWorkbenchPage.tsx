@@ -1,7 +1,7 @@
 import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
-import { Pencil, Trash2, Check, X, ChevronRight, ChevronDown, ArrowLeft, ArrowRight, Crown } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Crown, Pencil, Trash2, X } from 'lucide-react'
 import { groupsApi, type Group, type GroupInput, type Member } from '@core/api/groups'
 import { usersApi, type UserSummary } from '@core/api/users'
 import { orgApi, type Organization } from '@core/api/organizations'
@@ -135,7 +135,8 @@ export default function PttGroupsWorkbenchPage() {
           <span style={{ fontWeight: 600, fontSize: 13 }}>{orgName}</span>
           <input className="search-input" placeholder="그룹명·ID 검색" value={search}
             onChange={e => setSearch(e.target.value)} style={{ maxWidth: 220 }} />
-          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}>✕</button>}
+          {search && <button className="btn btn--ghost btn--sm" onClick={() => setSearch('')}
+        aria-label="검색어 지우기"><X size={13} /></button>}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {canGroupCreate && (
               <button className="btn btn--primary btn--sm" onClick={() => { setOpenId(null); setAdding(a => !a) }}>＋ 그룹</button>
@@ -224,7 +225,7 @@ function GroupDrawer(p: GroupDrawerProps) {
     dual: '평시 한 명만 발언하고, 긴급·임박 등급 사용자만 기존 발언자를 끊지 않고 끼어든다 '
         + '(TS 24.380 dual floor). 일반 요청에는 두 번째 자리를 주지 않는다 — 대기열로도 채우지 않는다',
     multi: `정원(최대 ${MAX_TALKERS_LIMIT}명)까지는 선착순으로 동시 발언하고, 정원이 차면 `
-        + '우선순위·긴급도로 선점하거나 대기열로 간다. ⚠️ 단말이 동시 수신(SSRC 분리 재생)을 지원해야 실제로 겹쳐 들린다',
+        + '우선순위·긴급도로 선점하거나 대기열로 간다. 주의 — 단말이 동시 수신(SSRC 분리 재생)을 지원해야 실제로 겹쳐 들린다',
   }
 
   async function save() {

@@ -483,7 +483,7 @@ export function GroupConfigCompareView({ group, members: liveMembers,
             <ToggleGroupItem key={c.key} value={c.key}>{c.title}</ToggleGroupItem>
           ))}
           <ToggleGroupItem value="compare">
-            멤버 비교 {summary.drift > 0 ? `(⚠${summary.drift})` : ''}
+            멤버 비교 {summary.drift > 0 && <>({summary.drift})</>}
           </ToggleGroupItem>
         </ToggleGroup>
       </div>

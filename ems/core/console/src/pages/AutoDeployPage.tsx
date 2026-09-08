@@ -3,8 +3,9 @@
 //
 // 독립 페이지다(시스템/인프라의 탭이 아님): 좌측 서버 트리를 쓰지 않고, 실행이 수 분
 // 걸리며 run 이력·재개·롤백이 영속 화면을 필요로 한다.
+import type React from 'react'
 import { useConfirm } from '../components/custom/confirm'
-import { Play, RotateCw, Square, Undo2 } from 'lucide-react'
+import { AlertTriangle, Ban, Check, Dot, Hourglass, Minus, Play, RotateCw, Square, Undo2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useToast } from '../components/Toast'
 import { useAdminCapable } from '../hooks/useAdminCapable'
@@ -26,12 +27,17 @@ const PHASE_HINT: Record<string, string> = {
   VERIFY:   '헬스체크 + VIP 보유 확인',
 }
 
-const STEP_ICON: Record<string, string> = {
-  done: '✓', skipped: '–', failed: '✗', running: '⋯', pending: '·', aborted: '⊘',
+const STEP_ICON: Record<string, React.ReactNode> = {
+  done: <Check size={13} className="inline align-[-2px]" />,
+  skipped: <Minus size={13} className="inline align-[-2px]" />,
+  failed: <X size={13} className="inline align-[-2px]" />,
+  running: <Hourglass size={13} className="inline align-[-2px]" />,
+  pending: <Dot size={13} className="inline align-[-2px]" />,
+  aborted: <Ban size={13} className="inline align-[-2px]" />,
 }
 const STEP_COLOR: Record<string, string> = {
-  done: '#27ae60', skipped: 'var(--muted-foreground)', failed: '#e74c3c',
-  running: '#1976d2', pending: 'var(--muted-foreground)', aborted: '#e67e22',
+  done: 'var(--cims-success)', skipped: 'var(--muted-foreground)', failed: 'var(--destructive)',
+  running: 'var(--primary)', pending: 'var(--muted-foreground)', aborted: 'var(--cims-warning)',
 }
 
 export default function AutoDeployPage() {
@@ -324,7 +330,8 @@ export default function AutoDeployPage() {
                 <tr key={r.server}>
                   <td>{r.server}</td><td>{r.host}</td><td>{r.auth_mode}</td>
                   <td>{r.os || '-'}</td><td>{r.login_user || '-'}</td>
-                  <td>{r.sudo_ok ? '✓' : '✗'}</td>
+                  <td>{r.sudo_ok ? <Check size={13} className="text-[var(--cims-success)]" />
+                             : <X size={13} className="text-destructive" />}</td>
                   <td style={{ color: r.ok ? 'var(--cims-success)' : '#e74c3c' }}>
                     {r.ok ? 'OK' : `${r.error_code || ''} ${r.error || ''}`}
                   </td>
@@ -480,7 +487,7 @@ function BlueprintForm({ doc, issues }: { doc: Record<string, unknown> | null; i
                               padding: 10, marginBottom: 8 }}>
           <div style={{ fontWeight: 700 }}>
             {s.name} <span style={{ fontWeight: 400, color: 'var(--muted-foreground)' }}>· {s.mode}</span>
-            {errFor(`systems[${i}]`) && <span style={{ color: '#e74c3c', marginLeft: 8 }}>⚠</span>}
+            {errFor(`systems[${i}]`) && <AlertTriangle size={13} className="ml-2 inline text-destructive" />}
           </div>
           <div style={{ color: 'var(--muted-foreground)', margin: '4px 0' }}>
             멤버: {(s.members || []).map(m => m.server + (m.role ? `(${m.role})` : '')).join(', ') || '-'}

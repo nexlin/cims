@@ -7,6 +7,8 @@
 // **화면 = 카드 하나**(`core.my-layout`)이고 안의 세 블록(상태·프로파일·위젯 목록)은 각각 위젯이라
 // 운영자가 카드 안에서 재배치할 수 있다(console_platform §3.0.1). 세 블록이 같은 편집 초안을
 // 봐야 하므로 상태는 모듈 store(`myLayoutStore.ts`)로 끌어올렸다.
+import { StatusDot } from '../components/custom/status-dot'
+import { AlertTriangle, X } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useMemo } from 'react'
 import { useToast } from '../components/Toast'
@@ -26,7 +28,7 @@ export function MyLayoutHeader() {
       <span className="badge" style={{ background: s.source === 'override' ? 'var(--primary)' : 'var(--secondary)' }}>
         {s.source === 'override' ? '개인 구성' : '프로파일 기본'}
       </span>
-      {s.dirty && <span style={{ color: 'var(--cims-warning)', fontSize: 12 }}>● 저장되지 않은 변경</span>}
+      {s.dirty && <StatusDot tone="warning" label="저장되지 않은 변경" />}
       <InfoDot label="내 대시보드 구성이란?">
         구성은 서버(계정별)에 저장되어 기기·세션을 넘어 따라갑니다. 위젯 가용성은 서비스 설치/상태에
         따릅니다 — 모든 위젯 API 는 서버에서 권한을 재확인합니다.
@@ -129,14 +131,15 @@ export function MyLayoutWidgets() {
                 <span style={{ fontWeight: 500 }}>{w?.title ?? id}</span>
                 {w && <span className="badge" style={{ fontSize: 11 }}>{AREA_LABEL[w.area]}</span>}
                 {w?.requires_service && <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>{w.requires_service}</span>}
-                {note && <span style={{ fontSize: 11, color: 'var(--cims-warning)' }}>⚠ {note}</span>}
+                {note && <span className="inline-flex items-center gap-1 text-xs text-warning-on">
+        <AlertTriangle size={12} /> {note}</span>}
                 <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>({id})</span>
                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                   <button className="btn btn--sm" onClick={() => myLayout.move(i, -1)} disabled={i === 0} title="위로">↑</button>
                   <button className="btn btn--sm" onClick={() => myLayout.move(i, 1)}
                           disabled={i === s.dashboard.length - 1} title="아래로">↓</button>
                   <button className="btn btn--sm" onClick={() => myLayout.remove(i)} title="제거"
-                          style={{ color: 'var(--destructive)' }}>✕</button>
+                          style={{ color: 'var(--destructive)' }} aria-label="삭제"><X size={13} /></button>
                 </span>
               </li>
             )

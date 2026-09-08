@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronRight, Maximize2 } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { callsApi, type CallLog } from '@core/api/calls'
 import { statsApi, type OrgStat } from '@core/api/stats'
@@ -336,7 +337,8 @@ function CallRow({ l, isOpen, st, dur, flow, onToggle, onOpenDiagram, onOpenRec 
   return (
     <>
       <tr onClick={onToggle} style={{ cursor: 'pointer', borderTop: '1px solid var(--border)', background: isOpen ? 'var(--accent)' : 'transparent' }}>
-        <td style={{ ...tdS, textAlign: 'center', color: 'var(--muted-foreground)' }}>{isOpen ? '▾' : '▸'}</td>
+        <td style={{ ...tdS, textAlign: 'center', color: 'var(--muted-foreground)' }}>
+                  {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</td>
         <td style={tdS}><span className={`badge ${l.call_type === 'volte_video' ? 'badge--blue' : 'badge--gray'}`} style={{ fontSize: 10 }}>{l.call_type === 'volte_video' ? '영상' : '음성'}</span></td>
         <td style={tdS}>
           <span style={{ fontWeight: 600, color: CALLER_C }}>{l.initiator}</span>
@@ -433,7 +435,7 @@ function CallDetailPanel({ l, flow, onOpenDiagram }: {
                   })}
                 </span>
               )}
-              <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11 }} onClick={onOpenDiagram}>⛶ 최대화</button>
+              <button className="btn btn--sm btn--outline" style={{ marginLeft: 'auto', padding: '1px 8px', fontSize: 11 }} onClick={onOpenDiagram}><Maximize2 size={11} /> 최대화</button>
             </div>
             <div style={{ maxHeight: 230, overflow: 'auto', padding: 6 }}>
               {flow?.loading ? <div className="empty" style={{ padding: 8 }}>로딩 중...</div>

@@ -1,5 +1,6 @@
 // 서비스 정의 / 데이터 소스 폼 입력 화면 — JSON 직접 편집 대신 구조화 폼.
 // 복잡한 map 매핑은 "고급(JSON)" 토글로 fallback 제공.
+import { X } from 'lucide-react'
 import { useState } from 'react'
 import Modal from '../../components/Modal'
 import { useToast } from '../../components/Toast'
@@ -347,7 +348,7 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
                 <Field label="단위"><input className="form-input" style={{ ...inp, width: 50 }} value={k.unit ?? ''} onChange={e => upKpi(i, { unit: e.target.value })} /></Field>
                 <Field label="format"><select className="form-input" style={{ ...inp, width: 90 }} value={k.format ?? ''} onChange={e => upKpi(i, { format: e.target.value || undefined })}>
                   <option value="">—</option><option value="duration">duration</option></select></Field>
-                <span style={{ paddingBottom: 4 }}><Btn danger onClick={() => setKpiItems(it => it.filter((_, x) => x !== i))}>✕</Btn></span>
+                <span style={{ paddingBottom: 4 }}><Btn danger onClick={() => setKpiItems(it => it.filter((_, x) => x !== i))}><X size={12} /></Btn></span>
               </div>
             ))}
           </div>

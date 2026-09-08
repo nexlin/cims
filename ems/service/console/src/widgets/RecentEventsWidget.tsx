@@ -3,6 +3,7 @@
 //   상단 kind 요약 타일(STC/AUD) + 아래 이벤트 목록(코드 E-* · 소스 MO · 메시지 · 시각).
 //   데이터는 전역 알람 store 구독 1원화(alarm_pipeline.md §8.2 — recentEvents, 개별 fetch 없음).
 //   타일 클릭 = 해당 kind 로 목록 필터. 이벤트는 토스트/배너 대상이 아니다(§8.2 소음 통제).
+import { AlertTriangle } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAlarms } from '@core/widgets/useAlarms'
@@ -42,7 +43,8 @@ function RecentEventsWidget() {
         <span style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>최근 24시간 · 정상 동작 통지</span>
         {error && (
           <span title="조회 실패 — 표시가 최신이 아닐 수 있음"
-                style={{ fontSize: 12, color: 'var(--destructive)', fontWeight: 600 }}>⚠ 조회 실패</span>
+                className="inline-flex items-center gap-1 text-sm font-semibold text-destructive">
+            <AlertTriangle size={13} /> 조회 실패</span>
         )}
         <a href="#" onClick={e => { e.preventDefault(); navigate('/alerts/history') }}
            style={{ marginLeft: 'auto', fontSize: 12, fontWeight: 500 }}>이력 →</a>

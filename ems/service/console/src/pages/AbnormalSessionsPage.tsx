@@ -5,6 +5,7 @@
 // **화면 = 카드 하나**(`cims.abnormal-sessions`)이고 안의 네 블록(조회 조건 · 지표 · 발신 IP 상위 ·
 // 세션 표)은 각각 위젯이라 카드 안 편집으로 재배치할 수 있다(console_platform §3.0.1).
 // 네 블록이 같은 조회 조건·결과를 봐야 하므로 상태는 모듈 store(`abnormalStore.ts`)에 둔다.
+import { AlertTriangle } from 'lucide-react'
 import { useToast } from '@core/components/Toast'
 import { InfoDot } from '@core/components/InfoDot'
 import { abnDerived, abnormal, useAbnormal } from './abnormalStore'
@@ -49,7 +50,7 @@ export function AbnFilter() {
       {/* 조치가 필요한 신호는 접지 않는다 — 설명과 달리 매번 봐야 한다. */}
       {critical > 0 && (
         <span style={{ color: 'var(--destructive)', fontWeight: 700, fontSize: 12 }}>
-          ⚠ 외부에서 인증 성공(2xx)한 세션 있음 — 즉시 점검
+          <AlertTriangle size={13} className="inline align-[-2px]" /> 외부에서 인증 성공(2xx)한 세션 있음 — 즉시 점검
         </span>
       )}
       {s.data && <span className="ts" style={{ marginLeft: 'auto' }}>총 {s.data.total}건 탐지</span>}

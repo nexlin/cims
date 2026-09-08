@@ -1,3 +1,4 @@
+import { AlertTriangle, Ban, Check, ChevronDown, ChevronRight, Dot, Mic, MicOff, Phone, PhoneOff, Pin, UserMinus, UserPlus } from 'lucide-react'
 import { useState, useEffect, useCallback, useReducer, Fragment, type CSSProperties } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
@@ -69,7 +70,8 @@ function OnlineDot({ on }: { on: boolean }) {
   return <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: on ? 'var(--cims-success)' : 'var(--muted-foreground)', marginRight: 6 }} />
 }
 function PinBtn({ on, onClick }: { on: boolean; onClick: (e: React.MouseEvent) => void }) {
-  return <button className="btn btn--sm btn--ghost" title={on ? '고정 해제' : '고정'} onClick={onClick} style={{ padding: '0 6px', opacity: on ? 1 : 0.35 }}>📌</button>
+  return <button className="btn btn--sm btn--ghost" title={on ? '고정 해제' : '고정'} onClick={onClick} style={{ padding: '0 6px', opacity: on ? 1 : 0.35 }} aria-label={on ? '고정 해제' : '고정'}>
+    <Pin size={13} /></button>
 }
 function Gauge({ label, pool }: { label: string; pool: Pool }) {
   const total = pool.total || 0, used = pool.used || 0
@@ -263,7 +265,9 @@ export function AnomalyCard() {
   return (
     <div className="panel" style={{ padding: '10px 14px', borderLeft: `3px solid ${anomalies.length ? 'var(--destructive)' : 'var(--cims-success)'}` }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: anomalies.length ? 6 : 0, color: anomalies.length ? 'var(--destructive)' : 'var(--cims-success)' }}>
-        {anomalies.length ? `⚠ 이상 징후 (${anomalies.length})` : '✓ 이상 징후 없음'}
+        {anomalies.length
+          ? <><AlertTriangle size={13} className="inline align-[-2px]" /> 이상 징후 ({anomalies.length})</>
+          : <><Check size={13} className="inline align-[-2px]" /> 이상 징후 없음</>}
       </div>
       {anomalies.map((a, i) => (
         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 3 }}>
@@ -296,13 +300,14 @@ export function VolteCallsCard() {
             return (
               <tr key={c.call_id} style={pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : undefined}>
                 <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(c.call_id) }} /></td>
-                <td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <span title={c.anomalies.map(a => a.detail).join(', ')}> ⚠</span>}</td>
+                <td><span className={`badge ${ring ? 'badge--blue' : 'badge--green'}`}>{ring ? '호출 중' : '통화 중'}</span>{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
+                    aria-label={c.anomalies.map(a => a.detail).join(', ')} />}</td>
                 <td><b>{c.caller || '-'}</b> <span style={{ color: 'var(--muted-foreground)' }}>→</span> {c.callee || '-'}</td>
                 <td>{c.video ? '영상' : '음성'}</td>
                 <td className="ts">{fmtDur(elapsedSec(c.invite_time, now, c.duration_sec))}</td>
                 <td className="ts">{c.media_node || '-'}</td>
                 <td className="ts" title={c.call_id} style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.call_id}</td>
-                <td><button className="btn btn--sm btn--ghost" onClick={() => navigate('/service/history/volte')}>이력 ▸</button></td>
+                <td><button className="btn btn--sm btn--ghost" onClick={() => navigate('/service/history/volte')}>이력 <ChevronRight size={12} /></button></td>
               </tr>
             )
           })}
@@ -334,7 +339,10 @@ function MemberDrill({ group }: { group: string }) {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
         {data.members.map(m => (
           <span key={m.msisdn} style={{ fontSize: 12, minWidth: 200, color: m.active ? 'var(--foreground)' : 'var(--muted-foreground)' }}>
-            {m.talking ? '🎤 ' : m.active ? '🟢 ' : '· '}{m.name || m.msisdn}
+            {m.talking ? <Mic size={12} className="inline align-[-2px] text-primary" />
+                        : m.active ? <Dot size={13} className="inline align-[-2px] text-[var(--cims-success)]" />
+                        : <Dot size={13} className="inline align-[-2px] text-muted-foreground" />}
+                      {' '}{m.name || m.msisdn}
             {m.role !== 'participant' && m.role !== 'member' && <span className="ts"> ({m.role})</span>}
           </span>
         ))}
@@ -371,19 +379,24 @@ export function PttGroupsCard() {
               <Fragment key={g.group_id}>
                 <tr style={{ cursor: 'pointer', ...(pinned ? { background: 'rgba(80,120,255,.08)' } : warn ? { background: 'rgba(220,50,50,.06)' } : {}) }} onClick={() => setOpen(isOpen ? null : g.group_id)}>
                   <td><PinBtn on={pinned} onClick={e => { e.stopPropagation(); toggle(g.group_id) }} /></td>
-                  <td><span style={{ color: 'var(--muted-foreground)' }}>{isOpen ? '▾' : '▸'}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
+                  <td><span className="text-muted-foreground">
+                    {isOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span> <b>{g.name}</b> <span className="ts">{g.group_id !== g.name ? `(${g.group_id})` : ''}</span></td>
                   <td><span className="badge">{typeLabel(g.type)}</span></td>
                   <td className="ts">{g.active_members} / {g.total_members}</td>
-                  <td>{g.floor_holder ? <span style={{ color: 'var(--primary)', fontWeight: 600 }}>🎤 {g.floor_holder}</span> : <span className="ts">(없음)</span>}{warn && <span title={g.anomalies.map(a => a.detail).join(', ')}> ⚠</span>}</td>
+                  <td>{g.floor_holder
+                  ? <span className="inline-flex items-center gap-1 font-semibold text-primary">
+                      <Mic size={12} /> {g.floor_holder}</span> : <span className="ts">(없음)</span>}{warn && <AlertTriangle size={12} className="ml-1 inline text-destructive"
+                    aria-label={g.anomalies.map(a => a.detail).join(', ')} />}</td>
                   <td className="ts">{g.last_floor ? new Date(g.last_floor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}</td>
                   <td className="ts">{g.floor_count ?? 0}</td>
-                  <td><button className="btn btn--sm btn--ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 ▸</button></td>
+                  <td><button className="btn btn--sm btn--ghost" onClick={e => { e.stopPropagation(); navigate('/service/history/ptt') }}>이력 <ChevronRight size={12} /></button></td>
                 </tr>
                 {isOpen && (
                   <tr>
                     <td colSpan={8} style={{ background: 'var(--accent)' }}>
                       <MemberDrill group={g.group_id} />
-                      {g.floor_held_sec !== undefined && <span style={{ margin: '0 8px', color: 'var(--destructive)', fontSize: 12 }}>⚠ floor {fmtDur(g.floor_held_sec)} 점유</span>}
+                      {g.floor_held_sec !== undefined && <span className="mx-2 inline-flex items-center gap-1 text-sm text-destructive">
+                    <AlertTriangle size={12} /> floor {fmtDur(g.floor_held_sec)} 점유</span>}
                     </td>
                   </tr>
                 )}
@@ -397,9 +410,14 @@ export function PttGroupsCard() {
 }
 
 // ── 위젯: 라이브 이벤트 ───────────────────────────────────
-const EV_ICON: Record<string, string> = {
-  call_start: '📞', call_end: '📵', floor_grant: '🎤', floor_release: '🔇',
-  floor_reject: '⛔', member_join: '➕', member_leave: '➖',
+const EV_ICON: Record<string, React.ReactNode> = {
+  call_start:    <Phone size={12} className="inline align-[-2px]" />,
+  call_end:      <PhoneOff size={12} className="inline align-[-2px]" />,
+  floor_grant:   <Mic size={12} className="inline align-[-2px]" />,
+  floor_release: <MicOff size={12} className="inline align-[-2px]" />,
+  floor_reject:  <Ban size={12} className="inline align-[-2px]" />,
+  member_join:   <UserPlus size={12} className="inline align-[-2px]" />,
+  member_leave:  <UserMinus size={12} className="inline align-[-2px]" />,
 }
 export function EventFeedCard() {
   const { show } = useToast()
@@ -421,7 +439,7 @@ export function EventFeedCard() {
             <tr key={i}>
               <td className="ts">{new Date(e.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</td>
               <td><span className={`badge ${e.kind === 'volte' ? 'badge--blue' : 'badge--green'}`}>{e.kind === 'volte' ? 'VoLTE' : 'PTT'}</span></td>
-              <td>{EV_ICON[e.type] || '•'} {e.detail}</td>
+              <td>{EV_ICON[e.type] ?? <Dot size={12} className="inline align-[-2px]" />} {e.detail}</td>
             </tr>
           ))}
         </tbody>
@@ -449,7 +467,8 @@ function SubscriberRows({ subs }: { subs: Subscriber[] }) {
             <td className="ts">{s.ptt?.msisdn || '-'}</td>
             <td>{s.ptt ? <><OnlineDot on={s.ptt.online} />{s.ptt.online ? '접속' : '미접속'}</> : <span className="ts">-</span>}</td>
             <td>{s.ptt?.groups && s.ptt.groups.length > 0
-              ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>🎤 {g.group_id}</span>)
+              ? s.ptt.groups.map((g, i) => <span key={i} className="badge badge--green" style={{ marginRight: 4 }}>
+                        <Mic size={11} className="inline align-[-1px]" /> {g.group_id}</span>)
               : <span className="ts">{s.ptt?.online ? '대기' : '-'}</span>}</td>
           </tr>
         ))}
@@ -531,8 +550,10 @@ export function OrgStatsCard() {
                 background: sel === o.code ? 'rgba(80,120,255,.12)' : undefined,
                 fontWeight: o.depth === 0 ? 700 : o.depth === 1 ? 600 : 400 }}>
               {o.name} <span className="ts">({o.members})</span>
-              {o.active_volte > 0 && <span className="badge badge--blue" style={{ marginLeft: 4 }}>📞{o.active_volte}</span>}
-              {o.ptt_talking > 0 && <span className="badge badge--green" style={{ marginLeft: 4 }}>🎤{o.ptt_talking}</span>}
+              {o.active_volte > 0 && <span className="badge badge--blue" style={{ marginLeft: 4 }}>
+                    <Phone size={11} className="inline align-[-1px]" />{o.active_volte}</span>}
+              {o.ptt_talking > 0 && <span className="badge badge--green" style={{ marginLeft: 4 }}>
+                    <Mic size={11} className="inline align-[-1px]" />{o.ptt_talking}</span>}
             </div>
           ))}
         </div>

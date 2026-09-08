@@ -8,7 +8,7 @@
  * "이 그룹의 최근 활동" 은 여기가 아니라 **PTT 그룹 › 활동** 탭에서 본다
  * (PttGroupsWorkbenchPage). 이력 페이지가 그룹 목록을 다시 그릴 이유가 없다.
  */
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, X } from 'lucide-react'
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import {
   pttApi, type PttSessionRow, type PttGroupSummary, type PttSessionKind,
@@ -385,7 +385,7 @@ export default function PttHistoryPage() {
                       onToggleMenu={() => setDd(v => (v === 'person' ? null : 'person'))}
                       onChange={v => { setPerson(v); setDd(null) }} />
         {hour && (
-          <button className="btn btn--sm btn--primary" onClick={() => setHour('')}>{hour}시 ✕</button>
+          <button className="btn btn--sm btn--primary" onClick={() => setHour('')}>{hour}시 <X size={12} /></button>
         )}
 
         <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted-foreground)' }}>
@@ -624,7 +624,7 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, flex: '0 0 auto' }}>
           <button className="btn btn--sm btn--outline" disabled={flowLoading} onClick={onFlow}>Flow</button>
           <button className="btn btn--sm btn--outline" onClick={onPlayAll}>&#9654; 전체</button>
-          <button className="btn btn--sm btn--ghost" onClick={onClose} title="닫기 (Esc)">✕</button>
+          <button className="btn btn--sm btn--ghost" onClick={onClose} title="닫기 (Esc)"><X size={14} /></button>
         </span>
       </div>
 
@@ -704,7 +704,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
   return (
     <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
       <button className={`btn btn--sm ${selected.size ? 'btn--primary' : 'btn--outline'}`} onClick={onToggleMenu}>
-        {selected.size ? `그룹 ${selected.size} ▾` : '그룹 ▾'}
+        {selected.size ? `그룹 ${selected.size}` : '그룹'} <ChevronDown size={12} />
       </button>
       {open && (
         <div style={{
@@ -756,7 +756,7 @@ function PersonFilter({ value, candidates, names, open, onToggleMenu, onChange }
       <button className={`btn btn--sm ${value ? 'btn--primary' : 'btn--outline'}`}
               title={value ? names.tipOf(value) : undefined}
               onClick={() => (value ? onChange('') : onToggleMenu())}>
-        {value ? `사람 ${names.nameOf(value)} ✕` : '사람 ▾'}
+        {value ? <>사람 {names.nameOf(value)} <X size={12} /></> : <>사람 <ChevronDown size={12} /></>}
       </button>
       {open && !value && (
         <div style={{

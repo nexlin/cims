@@ -1,5 +1,6 @@
 // 외부 시스템 관리 — 외부 DB / 모니터링 / 스토리지 / 인증 등 등록. 대시보드 시스템 형상에 표시.
 // file_store 컬렉션(OAM /api/v1/external-systems) 기반 CRUD + TCP 라이브니스 probe.
+import { Check, X } from 'lucide-react'
 import { useConfirm } from '../components/custom/confirm'
 import { useState, useEffect, useCallback } from 'react'
 import Modal from '../components/Modal'
@@ -96,7 +97,8 @@ function EditModal({ initial, onClose, onSaved }: {
             <input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" style={{ flex: 2 }} />
             <input type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port" style={{ flex: 1 }} />
             <input value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)" style={{ flex: 1 }} />
-            <button className="btn btn--outline" onClick={() => rmEp(i)} disabled={f.endpoints.length <= 1}>✕</button>
+            <button className="btn btn--outline" onClick={() => rmEp(i)} aria-label="엔드포인트 삭제"
+                    disabled={f.endpoints.length <= 1}><X size={13} /></button>
           </div>
         ))}
         <button className="btn btn--outline" onClick={addEp} style={{ fontSize: 12 }}>+ 엔드포인트</button>
@@ -187,7 +189,7 @@ export default function ExternalSystemsPage() {
                 <td><span style={{ fontSize: 11, padding: '1px 6px', border: '1px solid var(--border)', borderRadius: 3 }}>{TYPE_LABEL[s.type]}</span></td>
                 <td>{(s.endpoints || []).map((e, i) => <code key={i} style={{ fontSize: 11, marginRight: 6 }}>{e.host}:{e.port}</code>)}</td>
                 <td>{(s.tags || []).map(t => <span key={t} style={{ fontSize: 10, padding: '1px 5px', background: 'var(--secondary)', borderRadius: 8, marginRight: 3 }}>{t}</span>)}</td>
-                <td>{s.enabled ? '✓' : '—'}</td>
+                <td>{s.enabled ? <Check size={13} className="text-[var(--cims-success)]" /> : '—'}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   {(s.probe?.mode ?? 'none') !== 'none' &&
                     <button className="btn btn--outline" style={{ fontSize: 12, marginRight: 4 }} onClick={() => probeNow(s)}>점검</button>}

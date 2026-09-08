@@ -6,6 +6,7 @@
  * 승격 토큰은 메모리에만 보관(새로고침 시 소멸), 활성 동안 API 가 admin JWT 사용.
  * 백엔드(OAM _console_rbac)가 최종 게이트이므로 UI 우회는 403.
  */
+import { ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { authApi } from '../api/auth'
 import { setElevatedToken } from '../api/client'
@@ -47,7 +48,8 @@ export default function AdminElevateDialog({ onClose, onElevated }: {
     }} onClick={onClose}>
       <div style={{ background: 'var(--card)', borderRadius: 6, width: 380, padding: 24 }}
            onClick={e => e.stopPropagation()}>
-        <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🔐 관리자 인증 (승격)</h3>
+        <h3 className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold">
+          <ShieldCheck size={16} /> 관리자 인증 (승격)</h3>
         <p style={{ fontSize: 12, color: 'var(--muted-foreground)', margin: '0 0 14px' }}>
           시스템/서버 구성·패키지 설치 변경은 admin 권한이 필요합니다.
           admin 계정으로 인증하면 <b>30분간</b> 이 브라우저 탭에서 변경이 허용됩니다.

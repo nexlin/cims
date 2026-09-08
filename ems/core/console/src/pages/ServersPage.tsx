@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowRight, ArrowUp, ChevronDown, ChevronRight, Check, Copy, Hourglass, Lock, LockOpen, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Hourglass, Lock, LockOpen, Pencil, RefreshCw, RotateCw, Search, ShieldCheck, Stethoscope, Trash2 } from 'lucide-react'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Alert } from '../components/ui/alert'
@@ -3187,13 +3187,13 @@ function InstallSection({ agent: a, autoRegenSignal }: {
             }}>{data.install_command}</pre>
             <button className="btn btn--sm btn--outline"
               style={{ position: 'absolute', top: 8, right: 8 }}
-              onClick={copy} disabled={expired}>{copied ? '✓' : '📋'} 복사</button>
+              onClick={copy} disabled={expired}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</button>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
             <div style={{ fontSize: 12, color: expired ? '#e74c3c' : 'var(--foreground)' }}>
               {expiresAt
                 ? expired
-                  ? <>⚠ token 만료됨 ({expiresAt}) — 재발급 필요</>
+                  ? <><AlertTriangle size={12} className="inline align-[-2px]" /> token 만료됨 ({expiresAt}) — 재발급 필요</>
                   : <>token 만료까지 약 <b>{minsLeft}분</b> (만료 시각: {expiresAt})</>
                 : <>token 만료 시각 미상</>}
             </div>
@@ -3372,8 +3372,8 @@ function PendingMemberModal({ info, onClose }: {
   }
   return (
     <Modal title={`${info.groupName} — 새 멤버 추가됨`} onClose={onClose} width={640}>
-      <div style={{ color: '#2ecc71', marginBottom: 10 }}>
-        ✓ <b>{info.serverName}</b> 그룹 멤버로 등록됨. 다음 명령을 대상 서버에서 실행:
+      <div className="mb-2.5 text-[var(--cims-success)]">
+        <Check size={13} className="inline align-[-2px]" /> <b>{info.serverName}</b> 그룹 멤버로 등록됨. 다음 명령을 대상 서버에서 실행:
       </div>
       {/* 직전 단계에서 확정한 마운트를 되짚어 보여준다 — 설치 명령을 돌리기 전에
           "이 서버는 마운트가 되는가" 가 화면에 남아 있어야 한다. */}
@@ -3395,7 +3395,7 @@ function PendingMemberModal({ info, onClose }: {
         }}>{info.install_command}</pre>
         <button className="btn btn--sm btn--outline"
           style={{ position: 'absolute', top: 8, right: 8 }}
-          onClick={copy}>{copied ? '✓' : '📋'} 복사</button>
+          onClick={copy}>{copied ? <Check size={12} /> : <Copy size={12} />} 복사</button>
       </div>
       <div style={{ fontSize: 11, color: 'var(--muted-foreground)', marginTop: 6 }}>
         token: <code>{info.enrollment_token}</code>
@@ -3909,7 +3909,7 @@ function DeploymentCreateModal({ agent, packages, onClose, onDone }: {
         <div style={{ marginTop: 8, fontSize: 12, color: '#c00',
                       padding: '6px 10px', background: 'var(--cims-danger-soft)', border: '1px solid #ffcaca',
                       borderRadius: 4 }}>
-          ⚠ {selectedMismatch} — install 시 backend 400 reject
+          <AlertTriangle size={13} className="inline align-[-2px]" /> {selectedMismatch} — install 시 backend 400 reject
         </div>
       )}
       <div className="modal-footer" style={{ marginTop: 16 }}>

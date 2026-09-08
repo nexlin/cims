@@ -1,4 +1,4 @@
-import { ArrowRight, ChevronDown, ChevronRight, RotateCcw, Zap } from 'lucide-react'
+import { ArrowRight, ChevronDown, ChevronRight, Dot, RotateCcw, Zap } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Modal from '../Modal'
 import { useToast } from '../Toast'
@@ -722,7 +722,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onC
               자동 채움
             </Badge>
           )}
-          {isChanged && <span className="ml-1.5 text-primary" title="저장하지 않은 변경">●</span>}
+          {isChanged && <Dot size={14} className="ml-0.5 inline text-primary" aria-label="저장하지 않은 변경" />}
         </>
       }
       help={
