@@ -5,6 +5,7 @@ import { Plus, X } from 'lucide-react'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 type Item = Record<string, unknown>
 
@@ -112,7 +113,7 @@ function strToItem(s: string, itemFields: ConfigTemplateField[]): Item | null {
 // 내장 최소 셀 렌더러 — 참조가 필요 없는 스칼라 item 필드용(ip/port 등).
 function defaultCell(f: ConfigTemplateField, v: unknown, on: (nv: unknown) => void): ReactNode {
   if (f.type === 'bool') {
-    return <input type="checkbox" checked={!!v} onChange={e => on(e.target.checked)} />
+    return <Checkbox  checked={!!v} onCheckedChange={(c) => on((c === true))} />
   }
   if (f.type === 'enum') {
     return (

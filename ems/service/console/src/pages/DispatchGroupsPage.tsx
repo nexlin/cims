@@ -18,6 +18,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 관제 그룹 (dispatch_center.md §3) ─────────────────────────
 //  관제 그룹 = 픽업 그룹 + (선택) 대표번호 + (선택) 감청 범위. id 가 곧 가입자 pickup_group 값이라
@@ -388,8 +389,7 @@ function TargetPicker({ title, icon, options, value, canEdit, onSave }: {
         {options.length === 0 && <span className="text-sm text-muted-foreground">선택 가능한 그룹 없음</span>}
         {options.map(o => (
           <label className="inline-flex items-center gap-1" key={o.value}>
-            <input type="checkbox" disabled={!canEdit} checked={sel.has(o.value)}
-              onChange={() => setSel(s => { const n = new Set(s); if (n.has(o.value)) n.delete(o.value); else n.add(o.value); return n })} />
+            <Checkbox  disabled={!canEdit} checked={sel.has(o.value)} onCheckedChange={() => setSel(s => { const n = new Set(s); if (n.has(o.value)) n.delete(o.value); else n.add(o.value); return n })} />
             {o.label}
           </label>
         ))}
@@ -442,7 +442,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
               : members.map(m => (
                 <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12,
                   borderLeft: selMembers.has(m.user_id) ? '3px solid var(--primary)' : '3px solid transparent' }}>
-                  {canManage && <input type="checkbox" checked={selMembers.has(m.user_id)} onChange={() => toggle(setSelMembers, m.user_id)} />}
+                  {canManage && <Checkbox  checked={selMembers.has(m.user_id)} onCheckedChange={() => toggle(setSelMembers, m.user_id)} />}
                   <span className="flex flex-col min-w-0 flex-1">
                     <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{nameOf.get(m.user_id) || '—'}</span>
                     <span className="text-muted-foreground text-xs">{m.user_id}</span>
@@ -479,7 +479,7 @@ function MemberTransfer({ members, memberIds, callIndex, nameOf, groupOfUser, se
                       <div key={c.value} onDoubleClick={() => canManage && doAdd([c.value])} onClick={() => canManage && toggle(setPicked, c.value)}
                         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 12, cursor: 'pointer',
                           borderLeft: picked.has(c.value) ? '3px solid var(--primary)' : '3px solid transparent' }}>
-                        <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
+                        <Checkbox checked={picked.has(c.value)} tabIndex={-1} className="pointer-events-none" />
                         <span className="flex flex-col min-w-0 flex-1">
                           <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{c.userName}</span>
                           <span className="text-muted-foreground text-xs">{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>

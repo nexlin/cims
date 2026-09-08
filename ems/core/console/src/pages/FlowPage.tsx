@@ -4,6 +4,7 @@ import Modal from '../components/Modal'
 import { Badge } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
 import { Alert } from '@core/components/ui/alert'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 /** ts "HH:MM:SS.uuuuuu" 에서 hour 추출 */
 function hourFromTs(ts: string): string | undefined {
@@ -600,8 +601,7 @@ export default function FlowPage({ callId, date, callType, onClose, prefetchedNo
           <span className="text-muted-foreground font-medium">노드:</span>
           {Object.keys(allNodes).map(node => (
             <label className="flex items-center gap-1 cursor-pointer" key={node}>
-              <input type="checkbox" checked={enabledNodes.has(node)}
-                onChange={() => setEnabledNodes(prev => {
+              <Checkbox  checked={enabledNodes.has(node)} onCheckedChange={() => setEnabledNodes(prev => {
                   const next = new Set(prev)
                   if (next.has(node)) next.delete(node); else next.add(node)
                   return next

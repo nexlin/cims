@@ -4,6 +4,7 @@ import { recordingsApi, type RecordingSegment } from '../api/recordings'
 import { Button } from '@core/components/ui/button'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 interface SegmentPlayerProps {
   segments: RecordingSegment[]
@@ -363,9 +364,8 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
           <thead>
             <tr>
               <Th className="w-[32px]">
-                <input type="checkbox"
-                  checked={checked.size === playable.length}
-                  onChange={toggleAll} />
+                <Checkbox
+                  checked={checked.size === playable.length} onCheckedChange={toggleAll} />
               </Th>
               <Th className="w-[32px]">#</Th>
               {callType === 'ptt' && <Th>화자</Th>}
@@ -391,8 +391,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
                   onClick={() => handleSegClick(seg)}
                 >
                   <Td onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={isChecked}
-                      onChange={() => toggleCheck(seg.seq)} />
+                    <Checkbox  checked={isChecked} onCheckedChange={() => toggleCheck(seg.seq)} />
                   </Td>
                   <Td>{isActive && isPlaying ? <Play size={11} /> : seg.seq}</Td>
                   {callType === 'ptt' && <Td>{segSpeakers(seg)}</Td>}
@@ -416,7 +415,7 @@ export default function SegmentPlayer({ segments, recordingId, callType, caller,
             {/* 녹취 중 세그먼트 */}
             {segments.filter(s => s.status === 'recording').map(seg => (
               <tr key={`rec_${seg.seq}`} style={{ opacity: 0.4 }}>
-                <Td><input type="checkbox" disabled /></Td>
+                <Td><Checkbox disabled /></Td>
                 <Td>{seg.seq}</Td>
                 {callType === 'ptt' && <Td>{segSpeakers(seg)}</Td>}
                 <Td className="text-sm text-muted-foreground">{fmtTimeRange(seg.start_time, null)}</Td>

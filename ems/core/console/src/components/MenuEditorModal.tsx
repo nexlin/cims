@@ -19,6 +19,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 interface SectionRow {
   key: string
@@ -226,8 +227,7 @@ export function MenuEditorModal({ onClose }: { onClose: () => void }) {
                 </SelectContent>
               </Select>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: r.locked ? 0.4 : 1 }}>
-                <input type="checkbox" checked={r.hidden} disabled={r.locked}
-                  onChange={() => patchRow(i, { hidden: !r.hidden })} /> 숨김
+                <Checkbox  checked={r.hidden} disabled={r.locked} onCheckedChange={() => patchRow(i, { hidden: !r.hidden })} /> 숨김
               </label>
               {r.custom ? (
                 <>

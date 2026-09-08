@@ -6,6 +6,7 @@ import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── MCPTT 정책 (TS 24.484 service-config) ────────────────────────────────────
 //  시스템 전역 1건. 단말이 XCAP 으로 이 문서를 받아 **시스템 정책 게이트**로 쓰고, 사용자별 인가
@@ -95,9 +96,8 @@ export default function McpttPolicyPage() {
       <section className="flex flex-col gap-2">
         {TOGGLES.map(f => (
           <label className="flex items-start gap-2.5 py-2.5 px-3 border border-border rounded-sm" key={String(f.key)} title={f.tag}>
-            <input className="mt-[3px]" type="checkbox" disabled={!canEdit}
-              checked={!!form[f.key]}
-              onChange={e => setForm({ ...form, [f.key]: e.target.checked })}/>
+            <Checkbox className="mt-[3px]" disabled={!canEdit}
+              checked={!!form[f.key]} onCheckedChange={(c) => setForm({ ...form, [f.key]: (c === true) })} />
             <span className="flex flex-col gap-0.5 min-w-0">
               <span className="font-semibold">{f.label}
                 <code className="ml-2 text-xs text-muted-foreground">{f.tag}</code>

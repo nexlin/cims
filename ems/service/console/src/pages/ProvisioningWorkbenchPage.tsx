@@ -18,6 +18,7 @@ import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable as TableFrame, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import Modal from '@core/components/Modal'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 사용자 프로비저닝 워크벤치 (사용자 = 가입, 번호 등록이 가입 행위) ──────────
 //  좌: 조직트리(공유 스코프) | 상단 탭: 사용자/VoLTE 번호/PTT 번호.
@@ -516,14 +517,10 @@ function PttProfileRow({ pid, msisdn, canWrite }: { pid: number; msisdn: string;
             </Select>
           </label>
         )}
-        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_emergency_call}
-          onChange={e => setForm({ ...form, allow_emergency_call: e.target.checked })} /> 긴급콜</label>
-        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_emergency_alert}
-          onChange={e => setForm({ ...form, allow_emergency_alert: e.target.checked })} /> 긴급경보</label>
-        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_adhoc_call}
-          onChange={e => setForm({ ...form, allow_adhoc_call: e.target.checked })} /> 애드혹</label>
-        <label className="text-sm text-muted-foreground"><input type="checkbox" checked={form.allow_emergency_private_call}
-          onChange={e => setForm({ ...form, allow_emergency_private_call: e.target.checked })} /> 긴급 사설콜</label>
+        <label className="text-sm text-muted-foreground"><Checkbox  checked={form.allow_emergency_call} onCheckedChange={(c) => setForm({ ...form, allow_emergency_call: (c === true) })} /> 긴급콜</label>
+        <label className="text-sm text-muted-foreground"><Checkbox  checked={form.allow_emergency_alert} onCheckedChange={(c) => setForm({ ...form, allow_emergency_alert: (c === true) })} /> 긴급경보</label>
+        <label className="text-sm text-muted-foreground"><Checkbox  checked={form.allow_adhoc_call} onCheckedChange={(c) => setForm({ ...form, allow_adhoc_call: (c === true) })} /> 애드혹</label>
+        <label className="text-sm text-muted-foreground"><Checkbox  checked={form.allow_emergency_private_call} onCheckedChange={(c) => setForm({ ...form, allow_emergency_private_call: (c === true) })} /> 긴급 사설콜</label>
         {form.allow_emergency_private_call && (
           <label className="text-sm text-muted-foreground">사설 대상
             <Select value={toSel(form.private_emergency_mode)} onValueChange={(v: string) => setForm({ ...form, private_emergency_mode: fromSel(v) as McpttProfile['private_emergency_mode'] })}>
@@ -765,7 +762,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                   <AuthSelect value={editForm.auth_scheme} onChange={v => setEditForm({ ...editForm, auth_scheme: v })} />
                   {editForm.auth_scheme === 'aka' && <AkaKeyInputs k={editForm.k || ''} opc={editForm.opc || ''} keep={!!r.sub.aka_provisioned} onChange={(k, opc) => setEditForm({ ...editForm, k, opc })} />}
                 </> : <AuthBadge sub={r.sub} />}</Td>
-                <Td className="text-center">{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <input type="checkbox" checked={editForm.dnd || false} onChange={e => setEditForm({ ...editForm, dnd: e.target.checked })} /> : (r.sub.dnd ? <Badge className="text-[9px]" variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span>)}</Td>
+                <Td className="text-center">{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Checkbox  checked={editForm.dnd || false} onCheckedChange={(c) => setEditForm({ ...editForm, dnd: (c === true) })} /> : (r.sub.dnd ? <Badge className="text-[9px]" variant="dangerSoft">ON</Badge> : <span className="text-sm text-muted-foreground">—</span>)}</Td>
                 <Td>{!isCall ? <span className="text-sm text-muted-foreground">—</span> : ed ? <Input  placeholder="대상" value={editForm.forward_id || ''} onChange={e => setEditForm({ ...editForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">{r.sub.forward_id || '—'}</span>}</Td>
                 <Td>{ed ? ((r.sub.pickup_group || '').startsWith('dg-')
                     ? <Badge className="text-[10px]" variant="brandSoft" title="관제 그룹 멤버십에서 파생 — 관리 › 관제 그룹에서 변경">{r.sub.pickup_group}</Badge>
@@ -799,7 +796,7 @@ function NumbersTable({ user, catalog, canWrite, highlight, onReload }: { user: 
                 <AuthSelect value={addForm.auth_scheme} onChange={v => setAddForm({ ...addForm, auth_scheme: v })} />
                 {addForm.auth_scheme === 'aka' && <AkaKeyInputs k={addForm.k} opc={addForm.opc} onChange={(k, opc) => setAddForm({ ...addForm, k, opc })} />}
               </Td>
-              <Td className="text-center">{addIsCall ? <input type="checkbox" checked={addForm.dnd} onChange={e => setAddForm({ ...addForm, dnd: e.target.checked })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
+              <Td className="text-center">{addIsCall ? <Checkbox  checked={addForm.dnd} onCheckedChange={(c) => setAddForm({ ...addForm, dnd: (c === true) })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
               <Td>{addIsCall ? <Input  placeholder="대상" value={addForm.forward_id} onChange={e => setAddForm({ ...addForm, forward_id: e.target.value })} /> : <span className="text-sm text-muted-foreground">—</span>}</Td>
               <Td><Input  placeholder="픽업그룹" value={addForm.pickup_group} onChange={e => setAddForm({ ...addForm, pickup_group: e.target.value })} /></Td>
               <Td className="flex gap-1.5">
@@ -890,7 +887,7 @@ function NumberAddForm({ svc, catalog, userIndex, orgScope, orgPathOf, onAdded, 
         <Field label="채널" w={110}>{authScheme === 'aka' ? <TransportFixedAka /> : <TransportSelect value={sipTransport} onChange={setSipTransport} />}</Field>
         <Field label="인증" w={100}><AuthSelect value={authScheme} onChange={setAuthScheme} /></Field>
         {authScheme === 'aka' && <Field label="K / OPc *" w={300}><AkaKeyInputs k={akaK} opc={akaOpc} onChange={(k, opc) => { setAkaK(k); setAkaOpc(opc) }} /></Field>}
-        {isCall && <Field label="DND" w={56}><input className="mt-1.5" type="checkbox" checked={dnd} onChange={e => setDnd(e.target.checked)}/></Field>}
+        {isCall && <Field label="DND" w={56}><Checkbox className="mt-1.5" checked={dnd} onCheckedChange={(c) => setDnd((c === true))} /></Field>}
         {isCall && <Field label="착신전환" w={130}><Input  placeholder="대상" value={forwardId} onChange={e => setForwardId(e.target.value)} /></Field>}
         <Field label="픽업그룹" w={130}><Input  placeholder="빈 값=조직 폴백" title="당겨받기 그룹 — 같은 값끼리 픽업 가능. 반영은 다음 등록 갱신부터" value={pickupGroup} onChange={e => setPickupGroup(e.target.value)} /></Field>
         <div className="flex gap-1.5 items-center">

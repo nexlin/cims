@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import Modal from '@core/components/Modal'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 트리 빌더 ───────────────────────────────────────────────
 interface TreeNode extends Organization {
@@ -204,9 +205,8 @@ export default function OrganizationsPage() {
             <thead>
               <tr>
                 <Th className="w-[36px]">
-                  <input type="checkbox"
-                    checked={flat.length > 0 && flat.every(n => selected.has(n.id))}
-                    onChange={() => {
+                  <Checkbox
+                    checked={flat.length > 0 && flat.every(n => selected.has(n.id))} onCheckedChange={() => {
                       if (flat.every(n => selected.has(n.id))) setSelected(new Set())
                       else setSelected(new Set(flat.map(n => n.id)))
                     }} />
@@ -231,7 +231,7 @@ export default function OrganizationsPage() {
                   <React.Fragment key={n.id}>
                   <tr style={selected.has(n.id) ? { background: 'rgba(74,144,217,0.08)' } : undefined}>
                     <Td onClick={e => e.stopPropagation()}>
-                      <input type="checkbox" checked={selected.has(n.id)} onChange={() => toggleSelect(n.id)} />
+                      <Checkbox  checked={selected.has(n.id)} onCheckedChange={() => toggleSelect(n.id)} />
                     </Td>
 
                     {/* 조직명 (트리 인덴트) */}

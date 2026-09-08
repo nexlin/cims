@@ -14,6 +14,8 @@ import { Button } from '@core/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Checkbox } from '@core/components/ui/checkbox'
+import { Input } from '@core/components/ui/input'
 
 const TYPE_LABEL: Record<ExternalSystemType, string> = {
   db: 'DB', monitoring: '모니터링', storage: '스토리지', auth: '인증', other: '기타',
@@ -76,7 +78,7 @@ function EditModal({ initial, onClose, onSaved }: {
     <Modal title={initial ? `외부 시스템 수정 — ${initial.name}` : '외부 시스템 등록'} onClose={onClose} width={560}>
       <div style={row}>
         <label style={lbl}>이름</label>
-        <input className="w-full" value={f.name} onChange={e => setF(s => ({ ...s, name: e.target.value }))}
+        <Input className="w-full" value={f.name} onChange={e => setF(s => ({ ...s, name: e.target.value }))}
                 placeholder="예: 외부 가입자 DB"/>
       </div>
       <div style={{ ...row, display: 'flex', gap: 12 }}>
@@ -91,8 +93,7 @@ function EditModal({ initial, onClose, onSaved }: {
         </div>
         <div className="flex-1 flex items-end">
           <label className="text-md">
-            <input type="checkbox" checked={f.enabled ?? true}
-                   onChange={e => setF(s => ({ ...s, enabled: e.target.checked }))} /> 활성(형상 표시)
+            <Checkbox  checked={f.enabled ?? true} onCheckedChange={(c) => setF(s => ({ ...s, enabled: (c === true) }))} /> 활성(형상 표시)
           </label>
         </div>
       </div>
@@ -100,9 +101,9 @@ function EditModal({ initial, onClose, onSaved }: {
         <label style={lbl}>엔드포인트</label>
         {f.endpoints.map((e, i) => (
           <div className="flex gap-1.5 mb-1" key={i}>
-            <input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" style={{ flex: 2 }} />
-            <input className="flex-1" type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port"/>
-            <input className="flex-1" value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)"/>
+            <Input value={e.host} onChange={ev => setEp(i, { host: ev.target.value })} placeholder="host/IP" style={{ flex: 2 }} />
+            <Input className="flex-1" type="number" value={e.port || ''} onChange={ev => setEp(i, { port: parseInt(ev.target.value) || 0 })} placeholder="port"/>
+            <Input className="flex-1" value={e.label || ''} onChange={ev => setEp(i, { label: ev.target.value })} placeholder="label(선택)"/>
             <Button size="default" onClick={() => rmEp(i)} aria-label="엔드포인트 삭제"
                     disabled={f.endpoints.length <= 1}><X size={13} /></Button>
           </div>
@@ -118,22 +119,22 @@ function EditModal({ initial, onClose, onSaved }: {
               {PROBE_MODES.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
             </SelectContent>
           </Select>
-          <input value={f.probe?.host || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), host: e.target.value } }))}
+          <Input value={f.probe?.host || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), host: e.target.value } }))}
                  placeholder="host(미지정=ep1)" style={{ flex: 2 }} />
-          <input className="flex-1" type="number" value={f.probe?.port || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), port: parseInt(e.target.value) || undefined } }))}
+          <Input className="flex-1" type="number" value={f.probe?.port || ''} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), port: parseInt(e.target.value) || undefined } }))}
                  placeholder="port"/>
-          <input className="w-[70px]" type="number" value={f.probe?.timeout ?? 2} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), timeout: parseFloat(e.target.value) || 2 } }))}
+          <Input className="w-[70px]" type="number" value={f.probe?.timeout ?? 2} onChange={e => setF(s => ({ ...s, probe: { ...(s.probe || { mode: 'tcp' }), timeout: parseFloat(e.target.value) || 2 } }))}
                  placeholder="timeout" title="timeout(s)"/>
         </div>
         <div className="text-xs text-muted-foreground mt-0.5">tcp 만 구현 — http/icmp 는 미확인 처리.</div>
       </div>
       <div style={row}>
         <label style={lbl}>설명</label>
-        <input className="w-full" value={f.description || ''} onChange={e => setF(s => ({ ...s, description: e.target.value }))}/>
+        <Input className="w-full" value={f.description || ''} onChange={e => setF(s => ({ ...s, description: e.target.value }))}/>
       </div>
       <div style={row}>
         <label style={lbl}>태그 (쉼표 구분)</label>
-        <input className="w-full" value={tagText} onChange={e => setTagText(e.target.value)} placeholder="prod, db"/>
+        <Input className="w-full" value={tagText} onChange={e => setTagText(e.target.value)} placeholder="prod, db"/>
       </div>
       <div className="flex justify-end gap-2 mt-2">
         <Button size="default" onClick={onClose}>취소</Button>

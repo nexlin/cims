@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deploymentApi, type Agent, type AgentMetric } from '../../api/deployment'
 import type { WidgetDef } from '../types'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 type MetricKey = 'cpu' | 'mem' | 'disk' | 'net'
 const ALL_METRICS: { k: MetricKey; label: string; pct: boolean }[] = [
@@ -105,7 +106,7 @@ function SystemResourceWidget() {
         <span className="inline-flex gap-2.5 text-sm font-normal">
           {ALL_METRICS.map(m => (
             <label className="inline-flex items-center gap-[3px] cursor-pointer text-muted-foreground" key={m.k}>
-              <input type="checkbox" checked={sel.has(m.k)} onChange={() => toggle(m.k)} />{m.label}
+              <Checkbox  checked={sel.has(m.k)} onCheckedChange={() => toggle(m.k)} />{m.label}
             </label>
           ))}
         </span>

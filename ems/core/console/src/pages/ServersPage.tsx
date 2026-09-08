@@ -48,6 +48,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { usePrompt } from '@core/components/custom/prompt'
 
 type Selection =
   | { kind: 'agent'; id: number }
@@ -103,6 +104,7 @@ const LOCK_FIELDSET_STYLE: React.CSSProperties = {
 
 export default function ServersPage() {
  const { show } = useToast()
+  const prompt = usePrompt()
   // 네이티브 window.confirm 대신 시안 Dialog — 아래 호출부는 `await confirm({…})` 다.
  const confirm = useConfirm()
  const [searchParams] = useSearchParams()
@@ -334,7 +336,8 @@ export default function ServersPage() {
   //   개명에 딸린 보상 동작이 없다 (identifier_model.md). 노드 로컬의 state.json·systemd
   //   `--name` 은 설치 시점 값이라 옛 이름으로 남지만 인증·보고는 토큰과 id 로 하므로 무해.
  async function renameAgent(a: Agent) {
- const next = prompt(`서버 이름을 입력하세요 (#${a.id})`, a.name || '')
+ const next = await prompt({ title: '서버 이름 변경', body: `서버 이름을 입력하세요 (#${a.id})`,
+                             defaultValue: a.name || '' })
  if (next === null) return
  const nm = next.trim()
  if (!nm || nm === a.name) return
@@ -380,7 +383,8 @@ export default function ServersPage() {
     }
  let target = others[0]
  if (others.length > 1) {
- const pick = prompt(`롤백할 agent 버전을 입력하세요 (현재 v${a.agent_version}).\n설치됨: ${others.join(', ')}`, others[0])
+ const pick = await prompt({ title: 'agent 롤백', defaultValue: others[0],
+                             body: <>롤백할 agent 버전을 입력하세요 (현재 v{a.agent_version}).<br />설치됨: {others.join(', ')}</> })
  if (!pick) return
  target = pick.trim()
     } else if (!await confirm({ title: 'agent 롤백', confirmLabel: '롤백',
@@ -549,10 +553,10 @@ export default function ServersPage() {
             </span>
           </div>
           <div className="shrink-0 px-2.5 pt-1">
-            <input value={treeQuery} onChange={e => setTreeQuery(e.target.value)}
- placeholder="서버 이름·IP 검색"
- aria-label="서버 이름·IP 검색"
- className="h-[34px] w-full rounded-md border border-input bg-card px-2.5 text-md placeholder:text-muted-foreground focus-visible:shadow-focus focus-visible:outline-none" />
+            {/* 높이 34 는 도안 실측값이다(TreePanel 458:6714) — 계약 기본 33 을 덮는다. */}
+            <Input value={treeQuery} onChange={e => setTreeQuery(e.target.value)}
+                   placeholder="서버 이름·IP 검색" aria-label="서버 이름·IP 검색"
+                   className="h-[34px]" />
           </div>
           <div className="flex-1 overflow-auto px-2.5 pt-2.5">
             <ServerTree
@@ -1671,8 +1675,7 @@ function FailoverSection({ value, onChange, open, onToggle, dirty }: {
 
           {/* 체크박스 — 시안은 라벨 + 설명 한 줄 (Figma G1) */}
           <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-md border border-border p-3">
-            <input type="checkbox" className="mt-0.5" checked={value.track_interface}
- onChange={e => set('track_interface', e.target.checked)} />
+            <Checkbox  className="mt-0.5" checked={value.track_interface} onCheckedChange={(c) => set('track_interface', (c === true))} />
             <span>
               <span className="text-md font-medium">서비스 NIC 링크 감시</span>
               <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -3277,8 +3280,7 @@ function AddMemberModal({ group, serverName, mountSuggestion, onClose, onSubmit 
  onChange={e => setName(e.target.value)} />
         <label style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)',
  paddingTop: 10, marginTop: 4 }}>
-          <input type="checkbox" checked={mountOn} disabled={busy}
- onChange={e => setMountOn(e.target.checked)} />
+          <Checkbox  checked={mountOn} disabled={busy} onCheckedChange={(c) => setMountOn((c === true))} />
           {' '}공유 스토리지 마운트를 함께 적용
           <span className="text-xs text-muted-foreground">
             {' '}— 서버 등록 직후 자동으로 붙습니다 (fstab 영속)

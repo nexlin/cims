@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react'
 import { Button } from '@core/components/ui/button'
 import { DataTable as TableFrame, Th, Td } from '@core/components/custom/data-table'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 공통 데이터 테이블 ────────────────────────────────────────
 //  구성(조직/사용자/번호/PTT그룹) 4페이지의 중복 테이블 로직을 흡수하는 단일 컴포넌트.
@@ -118,7 +119,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
           <tr>
             {selectable && (
               <Th className="w-[36px] sticky t-0 z-[2]">
-                <input type="checkbox" checked={!!allOnPageSelected} onChange={toggleSelectAll} />
+                <Checkbox  checked={!!allOnPageSelected} onCheckedChange={toggleSelectAll} />
               </Th>
             )}
             {columns.map(c => (
@@ -153,7 +154,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
                 }}>
                 {selectable && (
                   <Td onClick={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={!!isSel} onChange={() => toggleSelectOne(k)} />
+                    <Checkbox  checked={!!isSel} onCheckedChange={() => toggleSelectOne(k)} />
                   </Td>
                 )}
                 {columns.map(c => (

@@ -25,6 +25,7 @@ import { StatusDot } from '../../components/custom/status-dot'
 import { useConfirm } from '../../components/custom/confirm'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
+import { useToast } from '@core/components/Toast'
 
 const FSTYPES = ['nfs', 'nfs4', 'cifs', 'ext4', 'ext3', 'xfs', 'btrfs']
 
@@ -72,6 +73,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
   onApply: (ops: MountOp[], label: string) => void
 }) {
   const confirm = useConfirm()
+  const { show } = useToast()
   const [addOpen, setAddOpen] = useState(false)
   const [fstype, setFstype]   = useState('nfs')
   const [source, setSource]   = useState('')
@@ -135,7 +137,7 @@ export function GroupMountPanel({ declared, members, applying, onApply }: {
     const miss = lagging(m.target)
     if (!miss.length) return
     if (!m.source || !m.fstype) {
-      alert(`${m.target}: 멤버 보고에 source/유형이 없어 적용할 수 없습니다.`); return
+      show(`${m.target}: 멤버 보고에 source/유형이 없어 적용할 수 없습니다.`, 'err'); return
     }
     onApply([{ op: 'add', target: m.target, source: m.source,
                fstype: m.fstype, options: m.options || 'defaults' }],

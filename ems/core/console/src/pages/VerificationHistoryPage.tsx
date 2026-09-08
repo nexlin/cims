@@ -14,6 +14,7 @@ import {
 } from '../components/VerificationPrintReport'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { useToast } from '@core/components/Toast'
 
 const STAGE_DESC: Record<number, string> = {
   1: 'lint / format / unit test',
@@ -481,6 +482,7 @@ function fmtMsShort(ms: number): string {
 
 
 export default function VerificationHistoryPage() {
+  const { show } = useToast()
   const [runs, setRuns] = useState<RunHistoryItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -531,7 +533,7 @@ export default function VerificationHistoryPage() {
       const d = await verifyApi.getRun(id)
       setDetail(d)
     } catch (e: unknown) {
-      alert('회차 조회 실패: ' + (e instanceof Error ? e.message : String(e)))
+      show('회차 조회 실패: ' + (e instanceof Error ? e.message : String(e)), 'err')
     }
   }, [])
 
@@ -541,7 +543,7 @@ export default function VerificationHistoryPage() {
       setDetail(null)
       load()
     } catch (e: unknown) {
-      alert('삭제 실패: ' + (e instanceof Error ? e.message : String(e)))
+      show('삭제 실패: ' + (e instanceof Error ? e.message : String(e)), 'err')
     }
   }, [load])
 

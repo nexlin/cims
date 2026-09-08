@@ -13,6 +13,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 type Record_ = Record<string, unknown>
 
@@ -454,10 +455,9 @@ function CheckboxList({ options, value, onChange, emptyText }: {
         <div className="text-xs text-muted-foreground">{emptyText || '(항목 없음)'}</div>
       ) : options.map(o => (
         <label className="text-sm" key={o}>
-          <input type="checkbox" checked={selected.has(o)}
- onChange={e => {
+          <Checkbox  checked={selected.has(o)} onCheckedChange={(c) => {
  const next = new Set(selected)
- if (e.target.checked) next.add(o); else next.delete(o)
+ if ((c === true)) next.add(o); else next.delete(o)
  onChange(Array.from(next))
             }} /> {o}
         </label>
@@ -504,7 +504,7 @@ function FieldEditor({ field, value, refOpts, onChange }: {
 function renderInput(f: ConfigTemplateField, value: unknown, onChange: (v: unknown) => void,
  refOpts: RefOptions = {}) {
  if (f.type === 'bool') {
- return <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} />
+ return <Checkbox  checked={!!value} onCheckedChange={(c) => onChange((c === true))} />
   }
  if (f.type === 'enum') {
  return (

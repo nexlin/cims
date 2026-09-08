@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
+import { usePrompt } from '@core/components/custom/prompt'
 
 type Form = { login_id: string; name: string; role: ConsoleRole; email: string; password: string }
 const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', password: '' }
@@ -22,6 +23,7 @@ const EMPTY: Form = { login_id: '', name: '', role: 'operator', email: '', passw
 export default function ConsoleAccountsPage() {
   const { show } = useToast()
   const confirm = useConfirm()
+  const prompt = usePrompt()
   const [rows, setRows] = useState<ConsoleAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
@@ -67,7 +69,8 @@ export default function ConsoleAccountsPage() {
   }
 
   async function resetPassword(a: ConsoleAccount) {
-    const pw = window.prompt(`'${a.login_id}' 새 비밀번호 (4자 이상)`)
+    const pw = await prompt({ title: '비밀번호 변경', type: 'password',
+                              body: `'${a.login_id}' 새 비밀번호 (4자 이상)` })
     if (pw == null) return
     if (pw.length < 4) { show('비밀번호는 4자 이상', 'err'); return }
     try { await consoleAccountsApi.setPassword(a.login_id, pw); show('비밀번호 변경', 'ok') }

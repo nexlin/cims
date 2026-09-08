@@ -1,10 +1,11 @@
 import { useConfirm } from '../components/custom/confirm'
 import { AlertTriangle, Ban, ChevronDown, ChevronRight, CircleCheck, CircleX, Eraser, FileText, Flag, Hourglass, Package, Pause, Play, SkipForward, Square } from 'lucide-react'
-import { useState, useEffect, useRef, Fragment, useCallback } from 'react'
+import { useState, useEffect, Fragment, useCallback } from 'react'
 
 import { verifyApi, type VerifyStagesOverview, type ItemsProgress, type VerifyEnvResponse } from '../api/verification'
 import { VerificationPrintReport } from '../components/VerificationPrintReport'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ─────────────────────────────────────────────────────────────
 // 검증 — 6단계 (S1~S6) + 그룹핑
@@ -113,11 +114,9 @@ const STAGES_FALLBACK: Stage[] = []
 function GroupCheckbox({ checked, indeterminate, disabled, onChange }: {
   checked: boolean; indeterminate: boolean; disabled: boolean; onChange: () => void
 }) {
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = !checked && indeterminate
-  }, [checked, indeterminate])
-  return <input ref={ref} type="checkbox" checked={checked} disabled={disabled} onChange={onChange} />
+  // 3상태는 Radix 가 정식으로 받는다 — `indeterminate` 를 ref 로 DOM 에 꽂던 코드가 필요 없다.
+  return <Checkbox checked={checked ? true : (indeterminate ? 'indeterminate' : false)}
+                   disabled={disabled} onCheckedChange={onChange} />
 }
 
 /**
@@ -571,12 +570,9 @@ function StageRow({
                             onChange={() => toggleItemSelect(it.id)}
                           />
                         ) : (
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={checked}
-                            onChange={() => toggleItemSelect(it.id)}
-                            disabled={anyRunning}
-                          />
+                            disabled={anyRunning} onCheckedChange={() => toggleItemSelect(it.id)} />
                         )}
                       </td>
                       <td className="py-1.5 px-2 text-muted-foreground">{idx + 1}</td>
@@ -634,12 +630,9 @@ function StageRow({
                         }}
                         title={cBlocked ? '선행 stage FAIL 로 차단됨' : undefined}>
                           <td className="py-1 px-2 text-center">
-                            <input
-                              type="checkbox"
+                            <Checkbox
                               checked={cChecked}
-                              onChange={() => toggleItemSelect(c.id)}
-                              disabled={anyRunning}
-                            />
+                              disabled={anyRunning} onCheckedChange={() => toggleItemSelect(c.id)} />
                           </td>
                           <td className="py-1 px-2 text-muted-foreground text-[10px]">
                             {idx + 1}.{ci + 1}

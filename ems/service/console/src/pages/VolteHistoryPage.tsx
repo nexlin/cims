@@ -15,6 +15,7 @@ import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
 import Modal from '@core/components/Modal'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 function fmtDur(s: number | null) { if (!s || s <= 0) return '—'; const m = Math.floor(s / 60); return m > 0 ? `${m}분 ${s % 60}초` : `${s}초` }
 function fmtClock(iso: string | null | undefined) {
@@ -216,7 +217,7 @@ export default function VolteHistoryPage() {
           {selNode ? `부서: ${selNode.name}` : '전체'}{q ? `  &  검색: "${q}"` : ''}{selHour ? `  &  ${selHour}시` : ''}
         </span>
         <label className="ml-auto flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
-          <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />자동갱신
+          <Checkbox  checked={autoRefresh} onCheckedChange={(c) => setAR((c === true))} />자동갱신
         </label>
         <label className="text-sm text-muted-foreground">
           표시{' '}

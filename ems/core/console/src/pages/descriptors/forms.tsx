@@ -13,6 +13,7 @@ import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 공용 입력 조각 ──────────────────────────────────────────────
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -139,7 +140,7 @@ export function ModuleForm({ svc, index, onClose, onSaved }: {
   </SelectContent>
 </Select></Field>
         <label className="text-sm flex items-center gap-1 pb-1.5">
-          <input type="checkbox" checked={!!m.controllable} onChange={e => up({ controllable: e.target.checked })} />제어
+          <Checkbox  checked={!!m.controllable} onCheckedChange={(c) => up({ controllable: (c === true) })} />제어
         </label>
       </div>
       <div className="flex justify-end gap-2.5 pt-5">
@@ -330,8 +331,8 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
             onChange={e => setEndpoint(e.target.value)} placeholder="/stats/messages/sip" /></Field>
           <div className="flex gap-2.5 pb-1.5 text-sm">
             <span className="text-muted-foreground">query:</span>
-            <label className="flex gap-1"><input type="checkbox" checked={qDate} onChange={e => setQDate(e.target.checked)} />date</label>
-            <label className="flex gap-1"><input type="checkbox" checked={qGran} onChange={e => setQGran(e.target.checked)} />granularity</label>
+            <label className="flex gap-1"><Checkbox  checked={qDate} onCheckedChange={(c) => setQDate((c === true))} />date</label>
+            <label className="flex gap-1"><Checkbox  checked={qGran} onCheckedChange={(c) => setQGran((c === true))} />granularity</label>
           </div>
         </div>
 
@@ -340,7 +341,7 @@ export function DataSourceForm({ svc, index, onClose, onSaved }: {
           <div className="flex gap-3.5 text-md">
             {SHAPES.map(s => (
               <label className="flex gap-1 items-center" key={s}>
-                <input type="checkbox" checked={shapes.has(s)} onChange={() => toggleShape(s)} />{SHAPE_LABEL[s]}
+                <Checkbox  checked={shapes.has(s)} onCheckedChange={() => toggleShape(s)} />{SHAPE_LABEL[s]}
               </label>
             ))}
           </div>

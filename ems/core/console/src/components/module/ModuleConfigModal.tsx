@@ -24,6 +24,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { fromSel, toSel } from '@core/components/custom/select-value'
 import { EmptyState } from '@core/components/custom/empty-state'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 export type FieldValue = string | number | boolean | null | string[]
 // 'scalar' = 필드(sections) 탭, 나머지 문자열 = collection.key
@@ -750,8 +751,7 @@ function FieldRow({ field, value, initialValue, isChanged, src, markerExtra, onC
 function renderInput(f: ConfigTemplateField, value: FieldValue, onChange: (v: FieldValue) => void) {
  if (f.type === 'bool') {
  return (
-      <input type="checkbox" checked={!!value}
- onChange={e => onChange(e.target.checked)} />
+      <Checkbox  checked={!!value} onCheckedChange={(c) => onChange((c === true))} />
     )
   }
  if (f.type === 'enum') {

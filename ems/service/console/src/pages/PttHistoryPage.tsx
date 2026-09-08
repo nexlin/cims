@@ -33,6 +33,7 @@ import { Badge } from '@core/components/ui/badge'
 import type { BadgeTone } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
 import Modal from '@core/components/Modal'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── 종류 ────────────────────────────────────────────────────────
 // group = TS 24.481 그룹 문서를 갖는 편성 엔티티, private = 1:1 (TS 24.379 §11.1),
@@ -367,7 +368,7 @@ export default function PttHistoryPage() {
         {q && <Button variant="ghost" onClick={() => setSearchInput('')}>검색 해제</Button>}
         <Button variant="default" onClick={load}>새로고침</Button>
         <label className="ml-auto flex items-center gap-1 text-sm text-muted-foreground cursor-pointer">
-          <input type="checkbox" checked={autoRefresh} onChange={e => setAR(e.target.checked)} />
+          <Checkbox  checked={autoRefresh} onCheckedChange={(c) => setAR((c === true))} />
           자동갱신
         </label>
       </div>
@@ -718,7 +719,7 @@ function GroupFilter({ summaries, selected, open, onToggleMenu, onChange }: {
           {opts.length === 0 && <EmptyState title="녹취가 있는 그룹이 없습니다" className="p-[12px] text-[12px]" />}
           {opts.map(([key, s]) => (
             <label className="flex items-center gap-[7px] py-[5px] px-2 rounded-sm text-[12.5px] cursor-pointer" key={key}>
-              <input type="checkbox" checked={selected.has(key)} onChange={() => {
+              <Checkbox  checked={selected.has(key)} onCheckedChange={() => {
  const n = new Set(selected)
  if (n.has(key)) n.delete(key); else n.add(key)
  onChange(n)

@@ -17,6 +17,7 @@ import { Input } from '@core/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@core/components/ui/select'
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 // ── PTT 그룹 워크벤치 ─────────────────────────────────────────
 //  좌: 조직트리(공유 스코프) | 그룹 DataTable | 행 확장: 속성 편집 + 멤버(다중선택 추가).
@@ -362,13 +363,13 @@ function GroupDrawer(p: GroupDrawerProps) {
             </Select>
           </Field>
           <div className="flex gap-3 items-center self-center flex-wrap">
-            <label className="flex items-center gap-1"><input type="checkbox" checked={form.encryption || false} onChange={e => setForm({ ...form, encryption: e.target.checked })} />암호</label>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={form.video_enabled || false} onChange={e => setForm({ ...form, video_enabled: e.target.checked })} />영상</label>
-            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트"><input type="checkbox" checked={form.emergency_call || false} onChange={e => setForm({ ...form, emergency_call: e.target.checked })} />긴급콜</label>
-            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-alert — 위험 통지(위치·신원) 전파 허용, 통화와 무관하게 동작"><input type="checkbox" checked={form.emergency_alert ?? true} onChange={e => setForm({ ...form, emergency_alert: e.target.checked })} />긴급경보</label>
-            <label className="flex items-center gap-1" title="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 CSP 가 403 (관제사 청취 범위는 별도)"><input type="checkbox" checked={form.allow_conference_state ?? true} onChange={e => setForm({ ...form, allow_conference_state: e.target.checked })} />참가자 정보 구독</label>
-            <label className="flex items-center gap-1" title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)"><input type="checkbox" checked={form.allow_sds ?? true} onChange={e => setForm({ ...form, allow_sds: e.target.checked })} />메시징</label>
-            <label className="flex items-center gap-1" title="mcdata-allow-file-distribution (그룹 파일전송)"><input type="checkbox" checked={form.allow_fd || false} onChange={e => setForm({ ...form, allow_fd: e.target.checked })} />파일전송</label>
+            <label className="flex items-center gap-1"><Checkbox  checked={form.encryption || false} onCheckedChange={(c) => setForm({ ...form, encryption: (c === true) })} />암호</label>
+            <label className="flex items-center gap-1"><Checkbox  checked={form.video_enabled || false} onCheckedChange={(c) => setForm({ ...form, video_enabled: (c === true) })} />영상</label>
+            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트"><Checkbox  checked={form.emergency_call || false} onCheckedChange={(c) => setForm({ ...form, emergency_call: (c === true) })} />긴급콜</label>
+            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-alert — 위험 통지(위치·신원) 전파 허용, 통화와 무관하게 동작"><Checkbox  checked={form.emergency_alert ?? true} onCheckedChange={(c) => setForm({ ...form, emergency_alert: (c === true) })} />긴급경보</label>
+            <label className="flex items-center gap-1" title="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 CSP 가 403 (관제사 청취 범위는 별도)"><Checkbox  checked={form.allow_conference_state ?? true} onCheckedChange={(c) => setForm({ ...form, allow_conference_state: (c === true) })} />참가자 정보 구독</label>
+            <label className="flex items-center gap-1" title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)"><Checkbox  checked={form.allow_sds ?? true} onCheckedChange={(c) => setForm({ ...form, allow_sds: (c === true) })} />메시징</label>
+            <label className="flex items-center gap-1" title="mcdata-allow-file-distribution (그룹 파일전송)"><Checkbox  checked={form.allow_fd || false} onCheckedChange={(c) => setForm({ ...form, allow_fd: (c === true) })} />파일전송</label>
           </div>
           <Field label="메시지 최대(byte)" w={110}><Input  type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
           <Field label="자동수신 최대(byte)" w={120}><Input  type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
@@ -426,7 +427,7 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
       borderLeft: selected ? '3px solid var(--primary)' : '3px solid transparent',
       background: editing ? 'rgba(74,144,217,0.08)' : selected ? 'rgba(74,144,217,0.06)' : undefined,
     }}>
-      {canManage && <input type="checkbox" checked={selected} onChange={() => onToggle(m.user_id)} />}
+      {canManage && <Checkbox  checked={selected} onCheckedChange={() => onToggle(m.user_id)} />}
       <span className="flex flex-col min-w-0 flex-1">
         <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
           {name || '—'}
@@ -526,7 +527,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
             등록된 멤버 {countChip(members.length, 'primary')}
             {canManage && members.length > 0 && (
               <label className="inline-flex items-center gap-1 ml-auto font-normal text-muted-foreground">
-                <input type="checkbox" checked={allMemSel} onChange={toggleAllMem} /> 전체
+                <Checkbox  checked={allMemSel} onCheckedChange={toggleAllMem} /> 전체
               </label>
             )}
           </div>
@@ -580,7 +581,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
               </div>
               <div className="flex items-center gap-1.5 py-1 px-2 text-xs text-muted-foreground border-b border-border">
                 <label className="inline-flex items-center gap-1">
-                  <input type="checkbox" checked={allCandPicked} onChange={toggleAllCand} disabled={candidates.length === 0} /> 전체 선택
+                  <Checkbox  checked={allCandPicked} disabled={candidates.length === 0} onCheckedChange={toggleAllCand} /> 전체 선택
                 </label>
                 <span className="ml-auto text-primary font-semibold">선택 {picked.size}</span>
               </div>
@@ -595,7 +596,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
                         background: picked.has(c.value) ? 'rgba(74,144,217,0.06)' : undefined,
                       }}
                       onClick={() => canManage && toggleCand(c.value)}>
-                      <input type="checkbox" checked={picked.has(c.value)} readOnly tabIndex={-1} />
+                      <Checkbox checked={picked.has(c.value)} tabIndex={-1} className="pointer-events-none" />
                       <span className="flex flex-col min-w-0 flex-1">
                         <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">{c.userName}</span>
                         <span className="text-muted-foreground text-xs">{c.value}{c.orgCode ? ` · ${c.orgCode}` : ''}</span>

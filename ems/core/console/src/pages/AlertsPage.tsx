@@ -29,6 +29,7 @@ import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
+import { Checkbox } from '@core/components/ui/checkbox'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -203,8 +204,7 @@ export function AlarmHistoryFilter() {
       <Input className="flex-1 w-[170px]" placeholder="소스/메시지 검색"
              value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })}/>
       <label className="flex items-center gap-1 text-md whitespace-nowrap">
-        <input type="checkbox" checked={f.showResolved}
-               onChange={e => alertsFilter.setAlarm({ showResolved: e.target.checked })} />
+        <Checkbox  checked={f.showResolved} onCheckedChange={(c) => alertsFilter.setAlarm({ showResolved: (c === true) })} />
         해소 포함
       </label>
       <Button variant="ghost" onClick={exportCsv} disabled={rows.length === 0}>CSV</Button>
@@ -212,8 +212,7 @@ export function AlarmHistoryFilter() {
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
       <label className="flex items-center gap-1 text-md whitespace-nowrap"
              title={`켜면 ${HISTORY_POLL_MS / 1000}초마다 자동 조회`}>
-        <input type="checkbox" checked={f.live}
-               onChange={e => alertsFilter.setAlarm({ live: e.target.checked })} />
+        <Checkbox  checked={f.live} onCheckedChange={(c) => alertsFilter.setAlarm({ live: (c === true) })} />
         실시간 감시
       </label>
       {f.live && (
@@ -499,8 +498,7 @@ export function EventHistoryFilter() {
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
       <label className="flex items-center gap-1 text-md whitespace-nowrap"
              title={`켜면 ${HISTORY_POLL_MS / 1000}초마다 자동 조회`}>
-        <input type="checkbox" checked={f.live}
-               onChange={e => alertsFilter.setEvent({ live: e.target.checked })} />
+        <Checkbox  checked={f.live} onCheckedChange={(c) => alertsFilter.setEvent({ live: (c === true) })} />
         실시간 감시
       </label>
       {f.live && (
